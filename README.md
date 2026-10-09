@@ -238,7 +238,7 @@ model tests — for each supported covariance type.
 | Probit | statsmodels `Probit` | R `glm` + `sandwich`, `marginaleffects` | 1e-8 / 1e-6 |
 | Tobit<sup>2</sup> | R `AER::tobit` | R `censReg` | 1e-8 / 1e-8 |
 | IV (2SLS) | linearmodels `IV2SLS` | R `ivreg` + `sandwich`/`lmtest` | 1e-8 / 1e-8 (HAC: 1e-2) |
-| IV (GMM) | linearmodels `IVGMM` | none (`ivreg` has no GMM) | 1e-8 / none |
+| IV (GMM) | linearmodels `IVGMM` | R `momentfit` | 1e-8 / 1e-8 |
 | FE<sup>1</sup> | linearmodels `PanelOLS`, R `fixest` | R `fixest`, R `plm` | 1e-8 / 1e-8 |
 | RE<sup>1</sup> | linearmodels `RandomEffects`, R `plm` | R `plm`, statsmodels `OLS` | 1e-8 / 1e-8 (unbalanced panels: 5e-3 to 5e-2) |
 
@@ -265,9 +265,10 @@ different R packages are used.
   Swamy–Arora variance components slightly differently on unbalanced
   panels. The full list of tolerances and the reasons are on the
   verification page.
-- **Single-reference cases.** Some methods have only one reference. For
-  example, IV (GMM) is checked against linearmodels only, because `ivreg`
-  has no GMM. These cases are listed on the verification page.
+- **Single-reference cases.** Some statistics have only one reference. For
+  example, IV (2SLS) with HC2/HC3 standard errors is checked against `ivreg`
+  only, because linearmodels has no equivalent. These cases are listed on the
+  verification page.
 - **Reproducible and continuous.** Reference values are generated once from
   pinned package versions and stored in the repository, and the comparisons
   run in CI on every pull request on Python 3.12, 3.13 and 3.14. The Rust

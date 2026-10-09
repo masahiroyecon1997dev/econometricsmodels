@@ -325,7 +325,7 @@ common.rs`）:
 ## 4. テスト
 
 - **Python主リファレンス**: `linearmodels`（`IV2SLS`＝2SLS、`IVGMM`＝GMM）。
-- **Rクロスチェック**: `ivreg`（2SLSのみ、GMMは非対応）。`classical`/`hc0`〜`hc3`/
+- **Rクロスチェック（2SLS）**: `ivreg`。`classical`/`hc0`〜`hc3`/
   `cluster`/`hac`の`vcov`を`coeftest()`経由でそのまま使える。`summary(model,
   diagnostics=TRUE)`は`vcov.`に行列を渡すと常にclassical（iid）vcovにフォールバックする
   仕様のため、`weak_instrument_f_statistics`/`overid_statistic`（設計自体が常にclassical）
@@ -334,9 +334,34 @@ common.rs`）:
   全cov_typeでクロスチェックする（`benchmark/iv/references/run_ivreg.R`参照）。ただしclusterの
   p値のみ、`ivreg`のWald検定がF分布の分母自由度にクラスター数を反映しないため一致せず、統計量のみ
   比較する。
-- **GMMのRクロスチェックは例外的に省略する**（`ivreg`が対応していないため）。
-  「Python主リファレンス＋Rクロスチェック」の2系統検証の例外であることをテスト実装時に
-  明記する（RE のハウスマン検定と同型の例外規定）。
+- **Rクロスチェック（GMM）**: `ivreg`はGMM非対応のため、R `momentfit`（1.0、`gmm`パッケージの
+  後継）を使う（`benchmark/iv/references/run_momentfit.R`、フィクスチャ
+  `iv_gmm_crosscheck.json`、テスト`tests/iv/test_iv_gmm_crosscheck.py`）。`gmm`パッケージは
+  1段階目の重みが単位行列で固定され、linearmodels・本実装の`(Z'Z)⁻¹`と揃えられないため
+  採用しない。`iv_gmm.json`（linearmodels）と同じ構成（10合成シナリオ×classical重み×
+  cov_type、baselineの他の重み・重みと共分散の組み合わせ、複数内生変数、Wooldridge `card`）を、
+  係数・標準誤差・z値・p値・信頼区間・`n_obs`/`df_resid`・ロバストWald・Hansen Jで照合する。
+  **対象外**: hc2/hc3（linearmodels・momentfitとも非対応で、GMMのHC2/HC3は外部参照なし）、
+  反復GMM・1段階GMM（フィクスチャがclassical重みのみで、反復しても2SLSと同じ結果になる。
+  収束判定も実装ごとに異なる）、弱操作変数F・R²（2SLSのivregクロスチェックと重複、
+  momentfitは出さない）。
+  - **momentfitを揃えるための設定と、揃えないと一致しない原因**（`run_momentfit.R`のヘッダ
+    コメントが実装の正本。実測で確定し、全ケース相対誤差1e-10以下で一致）:
+
+    | 現象 | 原因 | Rスクリプトでの対処 |
+    |---|---|---|
+    | HAC・クラスター重みで係数が合わない（HACで約1e-2） | momentfit 1.0のバグ。`evalWeights`はHAC・クラスターで`chol(pivot=TRUE)`の因子を保持し、`quadra`が`attr(w, "pivot")`でピボットを取ろうとするが、実際の属性は`w@w`側に付いているためピボットが失われる（qr型のiid・MDSは`w@w$pivot`を使うため影響しない） | 2SLS → `S = vcov(model, θ̂_2SLS)` → `gmmFit(model, weights = solve(S), type = "onestep")`と重み行列を明示的に渡す |
+    | 頑健な重みで係数が約1e-6ずれる | 既定の`initW = "ident"`（1段階目が単位行列）、`centeredVcov = TRUE`（モーメントを中心化） | `initW = "tsls"`、`centeredVcov = FALSE` |
+    | Hansen Jが約0.2%ずれる | `specTest`の既定は最終推定値の残差で重みを作り直す。linearmodels・本実装は推定に使った重みを使う | `specTest(fit, wObj = <推定時の重み>)` |
+    | HAC重みのカーネルが合わない | momentfitの`bw`はBartlettの分母で`bw = ラグ数 + 1`。既定は`prewhite = 1`、QSカーネル、`adjust = TRUE`（Sを`n/(n-q)`倍。係数は不変だがJが変わる） | `kernel = "Bartlett"`、`bw = lag + 1`、`prewhite = FALSE`、`adjust = FALSE` |
+    | classical共分散の標準誤差が約0.3%ずれる | momentfitの`iid`は`σ̂² = sd(e)²`（中心化して`n-1`で割る）、本実装・linearmodelsは中心化した残差二乗和を`n-k`で割る（`debiased=True`） | 一般サンドイッチ（`sandwich = TRUE`、meatを`iid`モデルで計算）の標準誤差に`√((n-1)/(n-k))`を掛ける |
+    | cluster共分散の標準誤差が約5.6%ずれる | linearmodelsの補正は`G/(G-1)·(n-1)/(n-k)`（Stata流）、momentfitは`G/(G-1)`のみ | `cadjust = TRUE`に加え`√((n-1)/(n-k))`を掛ける |
+    | hc1・hac共分散 | 差なし | hc1は`df.adj = TRUE`、hacは`adjust = FALSE`（同じ帯域幅） |
+
+    補正係数はスクリプト内のスカラー手計算で、独立検証として効くのは重み行列・ブレッド・
+    ミート行列本体（momentfitの計算）。z値・p値・信頼区間・ロバストWaldは係数・標準誤差・
+    共分散行列からの計算（momentfitがネイティブに出す統計量ではない）。
+  - 許容誤差は`tests/_tolerances.py`の`iv_gmm_crosscheck`（rtol 1e-8、atol 1e-8）。
 - **許容誤差**: 相対誤差1e-8＋絶対誤差フロア1e-10（`tests/_tolerances.py`の`iv_reference`）を
   基本。`classical`/`hc0`〜`hc1`/`cluster`/`hac`は
   `linearmodels`と(`cov_type`, `debiased`)の対応（`classical`↔(`unadjusted`,
@@ -350,11 +375,13 @@ common.rs`）:
 - **実データセット**: Wooldridge `card`（Card 1995、大学近接操作変数`nearc2`/`nearc4`に
   よる教育の収益率推定`lwage ~ CARD_X_EXOG + educ`）。`test_iv_reference.py`
   （linearmodels）・`test_iv_crosscheck.py`（ivreg）の両方で全`cov_type`をクロス
-  チェックする。GMMは実データセットでのRクロスチェックも対象外。
+  チェックする。GMMも同じ`card`で、`test_iv_gmm_reference.py`（linearmodels、classical重み×
+  全cov_type＋robust/hac重み×classical共分散）・`test_iv_gmm_crosscheck.py`（momentfit）の
+  両方を照合する（`card`にはクラスター列が無いためcluster重み・cluster共分散は含めない）。
 - テストファイル: `tests/iv/test_iv_api.py`（成功パスの構造・API・オプション反映）/
   `test_iv_validation.py`（`ValidationError`/`ComputationError`パス）/
   `test_iv_reference.py`（linearmodels、2SLS）/ `test_iv_gmm_reference.py`（linearmodels、
-  GMM）/ `test_iv_crosscheck.py`（R ivreg、2SLSのみ）。
+  GMM）/ `test_iv_crosscheck.py`（R ivreg、2SLS）/ `test_iv_gmm_crosscheck.py`（R momentfit、GMM）。
 
 ## 5. 未実装・未対応
 

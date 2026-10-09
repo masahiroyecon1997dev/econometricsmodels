@@ -16,7 +16,7 @@ $ARGUMENTS
 ## 手順
 
 1. **リファレンス実装の選定**
-   - 対象手法に応じて、主リファレンス（**statsmodels** / **linearmodels**）と、独立クロスチェック用の**Rパッケージ**（fixest, plm, AER, ivreg等）を選定する。pyfixestは精度検証には使わない（`.claude/rules/testing-policy.md`「リファレンス実装」参照）。
+   - 対象手法に応じて、主リファレンス（**statsmodels** / **linearmodels**）と、独立クロスチェック用の**Rパッケージ**（fixest, plm, AER, ivreg, momentfit等）を選定する。pyfixestは精度検証には使わない（`.claude/rules/testing-policy.md`「リファレンス実装」参照）。
    - 選定理由をユーザーに提示する。
 
 2. **ベンチマーク値の作成**

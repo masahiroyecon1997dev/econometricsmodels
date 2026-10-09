@@ -976,7 +976,7 @@ def check_perfect_multicollinearity_raises_computation_error(
     いう`solver`依存の別経路で特異性を検出しており、過去に`bfgs`だけ検出漏れした
     実バグの回帰ガードだった。その後`engine`内の検出経路は`fit()`冒頭の列ピボットQR
     ランクチェック（`solver`非依存の単一経路、`SingularDesignMatrix`）に一本化された
-    が、**`engine_pybind`側のsolver文字列パース（`"bfgs"`/`"lbfgs"` → `EngineMethod`）
+    が、**`engine_pybind`側のsolver文字列パース（`"bfgs"`/`"lbfgs"` → `EngineSolverType`）
     と配線はsolver固有のまま**なので、「非既定solverの文字列 × 特異入力 ×
     `ComputationError`」を踏むAPI境界テストは引き続き必要（testing-completeness-
     reviewer指摘）。インラインの極小データはCSVフィクスチャ版へ統合した

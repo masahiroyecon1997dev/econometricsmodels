@@ -107,7 +107,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   ±∞へ発散するLogit/Probitのみ`Enabled`にする。Tobitは`Disabled`（分離が`σ→0`退化として現れ
   標準化パラメータノルムが閾値を超えないため。[`tobit-spec.md`](./tobit-spec.md)3.2節参照）。
 - **`bfgs`/`lbfgs`のline searchの評価回数バジェット（実装済み）**: `MoreThuenteLineSearch`
-  （argmin組み込み）は、`bfgs`の自前実装（`FaerBfgs`）・`lbfgs`（argmin組み込み`LBFGS`）いずれの
+  （argmin組み込み）は、`bfgs`の自前実装（`FaerBfgs`）・`lbfgs`の自前実装（`FaerLbfgs`）いずれの
   経路でも内側`Executor`に反復上限が設定されておらず（argmin既定`u64::MAX`）、ステップ幅の上限
   （`stpmax`）も未設定（既定`f64::INFINITY`）。探索方向・勾配が退化しline search内部の収束判定が
   一度も発火しない入力に嵌ると、この内側ループは理論上終了しない（devビルドで80分超のCPU時間を
@@ -115,7 +115,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   `run_solver`は`problem`を`BudgetedProblem`（`common.rs`）でラップし、目的関数・勾配の評価回数に
   総枠（`(max_iter + 1) * 2000`。`+1`は`Executor::init()`の初回評価分の枠を
   `max_iter=0`でも確保するため）を設ける。枠を使い切ると`MleError::EvaluationBudgetExceeded { budget }`
-  を返す。argmin組み込み`LBFGS`のソースを変更せずに`bfgs`/`lbfgs`両方を保護できるのは、
+  を返す。argminのソースを変更せずに`bfgs`/`lbfgs`両方を保護できるのは、
   `MoreThuenteLineSearch`が呼び出し元によらず必ず`Problem<O>`経由で`cost`/`gradient`を呼ぶため
   （詳細は`common.rs`の`BudgetedProblem`docコメント参照）。
 - 収束判定`tol`の既定値`1e-6`は、通常データでは高精度（statsmodelsとの相対誤差最大1e-7程度）に
@@ -131,7 +131,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   `newton`は上記の通り総和勾配に対する絶対閾値のまま（既定`1e-6`）だが、`bfgs`/`lbfgs`は
   「観測あたり平均勾配」基準`‖∇ℓ(θ)‖ / n < tol`（既定`1e-8`）を使う。実装上は`run_solver`
   （`nonlinear/common.rs`）が`tol * n_obs`を実効的な絶対閾値としてソルバーへ渡す形で、
-  `FaerBfgs`/組み込み`LBFGS`自体は正規化を知らない。`n_obs`は各モデルの`fit()`が観測数
+  `FaerBfgs`/`FaerLbfgs`自体は正規化を知らない。`n_obs`は各モデルの`fit()`が観測数
   （`y.nrows()`）をそのまま渡す。statsmodels（scipy）が対数尤度・スコア・Hessianを観測数`n`で
   割ってから最適化する設計（`statsmodels.base.model.LikelihoodModel.fit`の`f=-loglike/nobs`等）に
   倣ったもの。`newton`は2次収束のため`tol`の絶対閾値のままでも大標本での追加反復はごく僅かで

@@ -14,6 +14,7 @@ IV は主リファレンス数値照合のみ 2SLS/GMM で
 ファイルが分かれ、api/validation は 2SLS と共通）:
     - 主リファレンス（linearmodels `IVGMM`）との厳密な数値一致: このファイル
     - `estimator="2sls"`の同種テスト: `test_iv_reference.py`
+    - 独立実装（R `momentfit`）とのクロスチェック: `test_iv_gmm_crosscheck.py`
     - GMM固有の構造・API・オプション反映（`gmm_weight_type`×`cov_type`の独立性の構造
       確認、収束等）: `test_iv_api.py`
     - `ValidationError`/`ComputationError` パス（GMM 固有含む）: `test_iv_validation.py`
@@ -50,13 +51,22 @@ import pytest
 from _assertions import assert_close, assert_dict_close
 from _assertions import rename_intercept as _rename
 from _constants import DATA_DIR
-from _helpers import ROW_TIME, hac_time_for, with_cluster_groups, with_row_time
+from _helpers import (
+    ROW_TIME,
+    hac_time_for,
+    load_wooldridge_dataset,
+    with_cluster_groups,
+    with_row_time,
+)
 from _tolerances import TOLERANCES
 from econometricsmodels import IV, IVOptions
 
 from benchmark.common import imbalanced_cluster_groups
+from benchmark.iv.fixtures.generate_iv_fixtures import CARD_X_EXOG
 from benchmark.iv.fixtures.generate_iv_gmm_fixtures import (
+    CARD_OTHER_WEIGHT_TYPES,
     COV_TYPES,
+    CROSS_WEIGHT_COV_COMBINATIONS,
 )
 from benchmark.iv.fixtures.generate_iv_gmm_fixtures import (
     NUMERIC_SCENARIOS as SCENARIOS,
@@ -392,4 +402,80 @@ def test_other_weight_types_match_linearmodels(fixtures, gmm_weight_type):
         res,
         fixtures["baseline"][gmm_weight_type]["classical"],
         f"baseline/{gmm_weight_type}/classical",
+    )
+
+
+@pytest.mark.parametrize(
+    ("gmm_weight_type", "cov_type"), CROSS_WEIGHT_COV_COMBINATIONS
+)
+def test_cross_weight_cov_matches_linearmodels(
+    fixtures, gmm_weight_type, cov_type
+):
+    """`gmm_weight_type`と`cov_type`が両方とも非既定かつ異なる組み合わせ
+    （cluster重み×hac共分散、hac重み×cluster共分散）。実装は重みと共分散の型が
+    一致する場合の特別分岐を持たず常に一般形のサンドイッチを使うため構造上の
+    リスクは低いが、`hac`×`hac`の1点だけを裏付けにしないよう複数点で照合する。
+    """
+    df = with_cluster_groups(pl.read_csv(DATA_DIR / "iv_baseline.csv"), 10)
+    options = IVOptions(
+        estimator="gmm",
+        gmm_weight_type=gmm_weight_type,
+        cov_type=cov_type,
+        cluster="cluster_group",
+        **hac_time_for(gmm_weight_type, cov_type),
+    )
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1"],
+        instruments=["z1", "z2"],
+        options=options,
+    ).fit()
+
+    _check_result(
+        res,
+        fixtures["baseline"][gmm_weight_type][cov_type],
+        f"baseline/{gmm_weight_type}/{cov_type}",
+    )
+
+
+def _fit_card(gmm_weight_type: str, cov_type: str):
+    options = IVOptions(
+        estimator="gmm",
+        gmm_weight_type=gmm_weight_type,
+        cov_type=cov_type,
+        **hac_time_for(gmm_weight_type, cov_type),
+    )
+    return IV(
+        with_row_time(load_wooldridge_dataset("card")),
+        y="lwage",
+        x_exog=CARD_X_EXOG,
+        x_endog=["educ"],
+        instruments=["nearc2", "nearc4"],
+        options=options,
+    ).fit()
+
+
+@pytest.mark.parametrize("cov_type", COV_TYPES)
+def test_card_matches_linearmodels(fixtures, cov_type):
+    """実データセット（Wooldridge card、`test_iv_reference.py`の同名テストと同じ
+    変数構成）。`gmm_weight_type="classical"`で全`cov_type`を照合する。
+    """
+    _check_result(
+        _fit_card("classical", cov_type),
+        fixtures["card"]["classical"][cov_type],
+        f"card/classical/{cov_type}",
+    )
+
+
+@pytest.mark.parametrize("gmm_weight_type", CARD_OTHER_WEIGHT_TYPES)
+def test_card_other_weight_types_match_linearmodels(fixtures, gmm_weight_type):
+    """実データセット（Wooldridge card）で、非classicalの`gmm_weight_type`
+    （robust/hac）を`cov_type="classical"`固定で照合する。
+    """
+    _check_result(
+        _fit_card(gmm_weight_type, "classical"),
+        fixtures["card"][gmm_weight_type]["classical"],
+        f"card/{gmm_weight_type}/classical",
     )

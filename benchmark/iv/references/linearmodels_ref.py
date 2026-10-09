@@ -382,6 +382,8 @@ def run_gmm(
     hac_lags: int | None = None,
     iter_limit: int = 2,
     confidence_level: float = 0.95,
+    dataset_source: str = "synthetic",
+    y_col: str = "y",
 ) -> dict:
     """`linearmodels.iv.IVGMM`でGMMのベンチマーク値を生成する（`run()`のGMM版）。
 
@@ -444,16 +446,19 @@ def run_gmm(
     from linearmodels.iv import IVGMM
     from scipy import stats as scipy_stats
 
-    # GMMのフィクスチャは合成データセットのみ（`generate_iv_gmm_fixtures.py`参照。
-    # 2SLSの`run()`と違いWooldridge実データケースは持たない）。
-    df, true_beta = _load_iv_dataset("synthetic", dataset)
+    # `dataset_source="wooldridge"`（実データ、`y_col`で被説明変数を指定）は2SLSの
+    # `run()`と同じ扱い。
+    df, true_beta = _load_iv_dataset(dataset_source, dataset)
     pdf = df.to_pandas()
     n = len(pdf)
 
     exog_part = " + ".join(x_exog_cols)
     endog_part = " + ".join(x_endog_cols)
     instr_part = " + ".join(instrument_cols)
-    formula = f"y ~ 1{' + ' + exog_part if exog_part else ''} + [{endog_part} ~ {instr_part}]"
+    formula = (
+        f"{y_col} ~ 1{' + ' + exog_part if exog_part else ''} + "
+        f"[{endog_part} ~ {instr_part}]"
+    )
 
     lm_weight_type = _WEIGHT_TYPE_MAP[weight_type]
     weight_config: dict = {}

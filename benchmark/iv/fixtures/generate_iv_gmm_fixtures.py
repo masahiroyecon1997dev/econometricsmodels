@@ -19,6 +19,11 @@ GMM固有の`weight_type`軸（`cov_type`とは独立、`iv-spec.md`1.2節）が
     - 他のweight_type（robust/cluster/hac）は、`weight_type`と`cov_type`が
       独立な軸であることの確認が目的のため、baselineシナリオ×cov_type=classical
       のみで動作確認する。
+    - baselineでは、重みと共分散の型が両方非既定かつ異なる組み合わせ
+      （cluster重み×hac共分散、hac重み×cluster共分散）も持つ。
+    - Wooldridge card（実データ）は、classical重み×全cov_type（classical/hc0/
+      hc1/hac）と、robust/hac重み×cov_type=classicalを持つ（クラスター列が無いため
+      cluster重み・cluster共分散は含めない）。
 
 このスクリプト自体は`benchmark/`側に置く。生成される`iv_gmm.json`は
 `tests/fixtures/benchmarks/`に置く（両者を分ける理由は
@@ -44,6 +49,7 @@ from benchmark.common import (
     imbalanced_cluster_groups,
     run_fixture_cli,
 )
+from benchmark.iv.fixtures.generate_iv_fixtures import CARD_X_EXOG
 from benchmark.iv.references.linearmodels_ref import run_gmm
 
 # `generate_iv_fixtures.py`のNUMERIC_SCENARIOSと同一（2SLSと同じ合成データセットを
@@ -75,6 +81,17 @@ X_EXOG_BY_SCENARIO = {
 COV_TYPES = ["classical", "hc0", "hc1", "hac"]
 # `weight_type`と`cov_type`が独立な軸であることの確認用（baselineのみ）。
 OTHER_WEIGHT_TYPES = ["robust", "cluster", "hac"]
+# `weight_type`と`cov_type`が両方とも非既定かつ異なる組み合わせ（baselineのみ）。
+# `[weight_type][cov_type]`の位置に格納する。型が一致する`hac`×`hac`は
+# `hac_weight_hac_cov`で別途持つ。実装は常に一般形のサンドイッチ
+# `B⁻¹(X'ZWΩ̂WZ'X)B⁻¹`で重みと共分散の型が一致する場合の特別分岐を持たないため、
+# 構造上のリスクは低いが、1点だけの裏付けにならないよう複数点を持つ。
+CROSS_WEIGHT_COV_COMBINATIONS = [("cluster", "hac"), ("hac", "cluster")]
+# 実データ（Wooldridge card）の重み×共分散。cardにはクラスター列が無い
+# （2SLSの`iv.json`の`card`がclusterを持たないのと同じ）ため、cluster重み・
+# cluster共分散は含めない。classical重みは全cov_type、他の重みはclassical
+# 共分散のみ（合成データのbaselineと同じ絞り方）。
+CARD_OTHER_WEIGHT_TYPES = ["robust", "hac"]
 # 1-step（iter_limit=1）・iterated GMM（3以上、固定回数モード）の成功パス確認用
 # （既定値2以外）。
 GMM_ITERATIONS_SCENARIOS = [1, 3]
@@ -132,6 +149,38 @@ def build_fixtures() -> dict:
                             cov_type="classical",
                         )
                     }
+
+            for weight_type, cov_type in CROSS_WEIGHT_COV_COMBINATIONS:
+                fixtures[scenario][weight_type][cov_type] = _run_cluster_case(
+                    "baseline", weight_type=weight_type, cov_type=cov_type
+                )
+
+    # 実データセット（Wooldridge card、2SLSの`iv.json`の`card`と同じ変数構成）。
+    fixtures["card"] = {"classical": {}}
+    for cov_type in COV_TYPES:
+        fixtures["card"]["classical"][cov_type] = run_gmm(
+            dataset="card",
+            x_exog_cols=CARD_X_EXOG,
+            x_endog_cols=["educ"],
+            instrument_cols=["nearc2", "nearc4"],
+            weight_type="classical",
+            cov_type=cov_type,
+            dataset_source="wooldridge",
+            y_col="lwage",
+        )
+    for weight_type in CARD_OTHER_WEIGHT_TYPES:
+        fixtures["card"][weight_type] = {
+            "classical": run_gmm(
+                dataset="card",
+                x_exog_cols=CARD_X_EXOG,
+                x_endog_cols=["educ"],
+                instrument_cols=["nearc2", "nearc4"],
+                weight_type=weight_type,
+                cov_type="classical",
+                dataset_source="wooldridge",
+                y_col="lwage",
+            )
+        }
 
     # 複数内生変数（k_endog>=2）。2SLSのiv.jsonと同じ構成。weight_type=
     # 'classical'固定でcov_typeのみ変える（上記と同じ検証範囲の絞り方）。
@@ -205,6 +254,11 @@ def build_fixtures() -> dict:
             "generate_iv_fixtures.pyの同名注記参照）。"
             "hac_weight_hac_cov（weight_type='hac'×cov_type='hac'）・gmm_type"
             "（1/3、既定値2以外の成功パス）も追加。"
+            "baselineには重みと共分散の型が両方非既定かつ異なる組み合わせ"
+            "（cluster重み×hac共分散、hac重み×cluster共分散）も持つ。"
+            "cardはWooldridge実データ（2SLSの`iv.json`の`card`と同じ変数構成）で、"
+            "classical重みは全cov_type（classical/hc0/hc1/hac）、robust/hac重みは"
+            "cov_type=classicalのみ（クラスター列が無いためclusterは含めない）。"
         ),
     }
     return fixtures

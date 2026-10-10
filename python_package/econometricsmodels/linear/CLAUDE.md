@@ -14,6 +14,7 @@
   `predict()`/`residuals`/`coef_table()`は変更しない、フラグで戻り値の型を変える設計は不採用、
   `ols-spec.md`「augment()」参照）。実装はRust側（`engine_pybind`、列名衝突を`ValidationError`
   として送出しやすいため）。Python側は`self._raw.augment(new_data)`を素通しするだけ。
+- **`white_test(statistic="lm" | "f")`は事後診断として実装する**（`fit()`では計算しない。`ols-spec.md`「white_test()」・`docs/spec/inference-conventions.md`6章）。結果は検定共通の`DiagnosticResult`を継承した`WhiteTestResult`（`econometricsmodels.diagnostics`）で、Rust側の`WhiteTestOutput`を詰め替えるだけ（計算・バリデーションはRust側）。補助回帰は常に定数を含み`aux_terms[0]`は常に`"const"`、重複・定数の項は`dropped_terms`。`WLS`・IVへの展開は未対応（WLSは残差の意味が変わるため別途）。
 - `OLSOptions`（`WLSOptions`も同様）は独自クラスとして再定義せず、`_lib`からそのまま再輸出する。
 - `params`/`std_errors`/`test_stats`/`p_values`は係数名→値の`dict[str, float]`（O(1)取り出し用）。行指向で欲しい場合は`coef_table()`（`list[dict]`、REST APIレスポンスにそのまま使える形）を使う。DataFrameには変換しない（`augment()`を除く。上記参照）。
 - `residuals`はそのまま`list[float]`を素通しする（polars Seriesへの変換等はしない）。

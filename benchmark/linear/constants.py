@@ -31,3 +31,51 @@ PREDICT_NEW_DATA: dict[str, list] = {
     "x2": [0.5, -0.5, 2.0, -1.5, 0.0],
     "x3": [0, 1, 2, 0, 1],
 }
+
+# White検定（`OLSResults.white_test()`）のベンチマーク対象。主リファレンス
+# （statsmodels、`generate_ols_white_fixtures.py`）とクロスチェック（R、
+# `generate_ols_white_crosscheck_fixtures.py`）の両フィクスチャ生成と、テストが
+# 同じケース定義を参照する。
+#
+# 合成データ: `NUMERIC_SCENARIOS`のうち補助回帰が成立するもの＋説明変数1個の
+# `baseline_k1`（交差項が空になる最小ケース）。`baseline_df1`（n=5）は補助回帰の列数
+# （定数込み10列）に対して観測数が足りず`ValidationError`になるため含めない（エラーパス
+# として`test_ols_white.py`で確認する）。`scale_variance`・`perfect_multicollinearity`は
+# 元の`fit()`が`ComputationError`になるため対象外。
+WHITE_SYNTHETIC_SCENARIOS = [
+    "baseline",
+    "baseline_k1",
+    "small_n",
+    "high_variance",
+    "heteroskedastic",
+    "autocorrelated",
+    "moderate_multicollinearity",
+    "high_condition_number",
+    "scale_variance_mild",
+    "many_regressors",
+    "outlier_regressor",
+]
+
+# Wooldridge実データ: ケース名 -> (データセット名, 回帰式)。`wage1_dummies`は
+# ダミー変数（female, married）を含み、補助回帰でダミーの二乗が元のダミーと
+# 同一の列になる（重複列を除きランクに基づく自由度を使う挙動の実データでの確認）。
+# `wage1_polynomial`は利用者が二乗列（expersq・tenursq）をモデルに入れたケースで、補助回帰の
+# `exper^2`・`tenure^2`がそれらと重複する（多項式回帰という最も典型的な使い方）。
+# `wage1_region`は排他的な地域ダミー（northcen・south・west）で、ダミー同士の積が全て0に
+# なる（定数列として除かれる）。
+WHITE_WOOLDRIDGE_CASES: dict[str, tuple[str, str]] = {
+    "wage1": ("wage1", "lwage ~ educ + exper + tenure"),
+    "gpa2": ("gpa2", "colgpa ~ sat + hsperc + tothrs"),
+    "wage1_dummies": (
+        "wage1",
+        "lwage ~ educ + exper + tenure + female + married",
+    ),
+    "wage1_polynomial": (
+        "wage1",
+        "lwage ~ educ + exper + expersq + tenure + tenursq",
+    ),
+    "wage1_region": (
+        "wage1",
+        "lwage ~ educ + exper + northcen + south + west",
+    ),
+}

@@ -19,6 +19,7 @@ import polars as pl
 
 from .. import _lib
 from .._lib import OLSOptions
+from ..diagnostics import WhiteTestResult
 
 __all__ = ["OLS", "OLSOptions", "OLSResults"]
 
@@ -330,3 +331,56 @@ class OLSResults:
                 explicit `new_data` still works normally in that case).
         """
         return self._raw.augment(new_data)
+
+    def white_test(
+        self, statistic: Literal["lm", "f"] = "lm"
+    ) -> WhiteTestResult:
+        """White test for heteroskedasticity.
+
+        Regresses the squared residuals on the independent variables,
+        their squares and their pairwise products, and tests that all
+        slopes are zero. The auxiliary regression always includes a
+        constant, even when the model was fitted with
+        `include_intercept=False`. Terms that are constant or numerically
+        identical to an earlier term (for example the square of a 0/1
+        dummy) are dropped, and the degrees of freedom count the terms
+        that remain; `WhiteTestResult.aux_terms` and `dropped_terms`
+        report them. The test assumes homoskedastic errors under the
+        null and does not depend on `cov_type`.
+
+        This is a post-estimation diagnostic: it is never computed by
+        `fit()`. It re-reads the independent variables from the data
+        passed to `fit()`.
+
+        Args:
+            statistic: `"lm"` (default) for the LM version
+                `n * R²` (chi-squared distribution), or `"f"` for the
+                F version of the same auxiliary regression.
+
+        Returns:
+            The test result, a `WhiteTestResult`: `distribution` is
+            `"chi2"` and `df_denom` is `None` for the LM version, `"f"`
+            and an integer for the F version. It also lists the terms of
+            the auxiliary regression (`aux_terms`, always starting with
+            the constant) and the dropped ones (`dropped_terms`).
+
+        Raises:
+            ValidationError: `statistic` is not `"lm"` or `"f"`; there are
+                too few observations for the auxiliary regression; or
+                this result has no retained training data (currently only
+                the `OLSResults` returned by `IVResult.first_stage()`).
+            ComputationError: The auxiliary design matrix is still
+                singular after dropping terms, or the auxiliary
+                regression's R² is undefined (for example the squared
+                residuals are constant).
+        """
+        raw = self._raw.white_test(statistic)
+        return WhiteTestResult(
+            statistic=raw.statistic,
+            p_value=raw.p_value,
+            df=raw.df,
+            df_denom=raw.df_denom,
+            distribution=raw.distribution,
+            aux_terms=raw.aux_terms,
+            dropped_terms=raw.dropped_terms,
+        )

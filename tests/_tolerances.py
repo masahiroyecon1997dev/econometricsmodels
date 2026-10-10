@@ -55,6 +55,24 @@ TOLERANCES: dict[str, dict[str, float]] = {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_REFERENCE_FLOOR,
     },
+    # White検定（`OLSResults.white_test()`）。statsmodelsの`het_white`との比較。
+    # 補助回帰の`R²`から決まる閉形式のため機械精度一致（実測最大相対誤差1.5e-12、
+    # p値を含む）。p値は絶対誤差フロアを使わず相対誤差だけで比較する（`atol_p_value=0`）:
+    # フィクスチャには1e-20〜1e-39の裾のp値（heteroskedastic・gpa2）があり、
+    # フロアがあると`sf`を`1 - cdf`に変えて裾が0に潰れても通ってしまうため。
+    # 統計量（LM・F）は絶対誤差フロアを併用する。
+    "ols_white_reference": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_REFERENCE_FLOOR,
+        "atol_p_value": 0.0,
+    },
+    # 独立実装（R `lmtest::bptest`＋同じ補助回帰のlm）。同じく閉形式で機械精度一致
+    # （実測最大相対誤差1.1e-12）。p値は上と同じ理由で相対誤差のみ（`atol_p_value=0`）。
+    "ols_white_crosscheck": {
+        "rtol_strict": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_CROSSCHECK_FLOOR,
+        "atol_p_value": 0.0,
+    },
     "wls_reference": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_REFERENCE_FLOOR,

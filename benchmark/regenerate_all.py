@@ -42,6 +42,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 # `Rscript` 必須（Tobit は主・交差検証とも R、以降の *_crosscheck も R）。
 _FIXTURE_MODULES = [
     "benchmark.linear.fixtures.generate_ols_fixtures",
+    "benchmark.linear.fixtures.generate_ols_white_fixtures",
     "benchmark.linear.fixtures.generate_wls_fixtures",
     "benchmark.nonlinear.fixtures.generate_logit_fixtures",
     "benchmark.nonlinear.fixtures.generate_probit_fixtures",
@@ -53,6 +54,7 @@ _FIXTURE_MODULES = [
     # 両方 Rscript 必須。
     "benchmark.nonlinear.fixtures.generate_tobit_fixtures",
     "benchmark.linear.fixtures.generate_ols_crosscheck_fixtures",
+    "benchmark.linear.fixtures.generate_ols_white_crosscheck_fixtures",
     "benchmark.linear.fixtures.generate_wls_crosscheck_fixtures",
     "benchmark.nonlinear.fixtures.generate_logit_crosscheck_fixtures",
     "benchmark.nonlinear.fixtures.generate_probit_crosscheck_fixtures",

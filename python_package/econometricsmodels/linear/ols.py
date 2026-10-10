@@ -272,9 +272,7 @@ class OLSResults:
             )
         ]
 
-    def predict(
-        self, new_data: pl.DataFrame | None = None
-    ) -> list[dict[str, float]]:
+    def predict(self, new_data: pl.DataFrame | None = None) -> list[float]:
         """Predicted values.
 
         Unified into a single method rather than a separate
@@ -291,23 +289,22 @@ class OLSResults:
                 values for the training data used in `fit()`.
 
         Returns:
-            Row-oriented predictions, one dict per observation. Each
-            dict currently has a single key, `"predicted"`.
+            Predicted values, one per observation, in row order (like
+            `residuals`).
 
         Raises:
             ValidationError: `new_data` is missing a required `x`
                 column, or a column contains missing/NaN/infinite
                 values.
         """
-        raw = self._raw.predict(new_data)
-        return [{"predicted": value} for value in raw]
+        return self._raw.predict(new_data)
 
     def augment(self, new_data: pl.DataFrame | None = None) -> pl.DataFrame:
         """Source data with the predicted values appended as a column.
 
         Same `new_data` semantics as `predict()`, but returns a polars
         DataFrame (the training data, or `new_data` when given, plus a
-        new `"predicted"` column) instead of a row-oriented list. This
+        new `"predicted"` column) instead of a plain list. This
         is the one exception to the project's policy of not returning
         DataFrames (`docs/spec/ols-spec.md`, "augment()"): it exists
         specifically to attach predictions back to their source rows.

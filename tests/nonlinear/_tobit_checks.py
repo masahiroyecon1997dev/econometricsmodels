@@ -168,7 +168,7 @@ def _check_predict_head(
     res, ref_predict: dict, label: str, *, rtol: float, atol: float
 ) -> None:
     for target in MARGEFF_TARGETS:
-        ours = [row["predicted"] for row in res.predict(target=target)]
+        ours = res.predict(target=target)
         ref_vals = ref_predict[target]
         assert len(ref_vals) <= len(ours), f"{label}/predict/{target}/length"
         for i, ref_v in enumerate(ref_vals):
@@ -198,10 +198,7 @@ def _check_predict_new_data(
     """
     new_data = pl.DataFrame(ref_new_x)
     for target in MARGEFF_TARGETS:
-        ours = [
-            row["predicted"]
-            for row in res.predict(target=target, new_data=new_data)
-        ]
+        ours = res.predict(target=target, new_data=new_data)
         ref_vals = ref_predict[target]
         assert len(ours) == len(ref_vals), (
             f"{label}/predict_new_data/{target}/length"

@@ -326,7 +326,7 @@ class TobitResults:
         self,
         new_data: pl.DataFrame | None = None,
         target: str = "expected_observed",
-    ) -> list[dict[str, float]]:
+    ) -> list[float]:
         """Predicted values for `target`, on the training data or `new_data`.
 
         Args:
@@ -349,8 +349,8 @@ class TobitResults:
                 training data or new data.
 
         Returns:
-            Row-oriented predictions, one dict per observation. Each
-            dict has a single key, `"predicted"`.
+            Predicted values of `target`, one per observation, in
+            row order.
 
         Raises:
             ValidationError: `target` is not one of the three known
@@ -358,8 +358,7 @@ class TobitResults:
                 column, or a column contains missing/NaN/infinite
                 values. A subclass of `ValueError`.
         """
-        raw = self._raw.predict(new_data, target)
-        return [{"predicted": p} for p in raw]
+        return self._raw.predict(new_data, target)
 
     def augment(
         self,
@@ -370,10 +369,9 @@ class TobitResults:
 
         Same `target`/`new_data` semantics as `predict()`, but returns
         a polars DataFrame (the training data, or `new_data` when
-        given, plus a new predicted-value column) instead of a
-        row-oriented list. See `OLSResults.augment()` for the
-        project's general policy on this DataFrame-returning
-        exception.
+        given, plus a new predicted-value column) instead of a plain
+        list. See `OLSResults.augment()` for the project's general
+        policy on this DataFrame-returning exception.
 
         Like Logit/Probit's fixed `"predicted_probability"` column, the
         appended column here has a `predicted_` prefix and is named `"predicted_{target}"`, using

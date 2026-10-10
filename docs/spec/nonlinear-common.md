@@ -295,7 +295,7 @@ MLEベースの非線形モデルは漸近理論が正規分布に基づいて�
   再利用する（再最適化不要）。Return形式は`coef_table`と同じ行指向
   （`effect`/`std_err`/`test_stat`/`p_value`/`conf_lower`/`conf_upper`。`effect`以外は`coef_table`と同名）。「見る/見ない」を切り替える
   フラグは設けない（可変なのは`at`のみ）。
-- `predict()`: 予測確率（Logit/Probit）。
+- `predict()`: 予測確率（Logit/Probit）。観測順の`list[float]`。
 - `pred_table()`: 分類の的中表（閾値依存のため、コアのReturnには含めない。Logit/Probit
   のみ）。
 

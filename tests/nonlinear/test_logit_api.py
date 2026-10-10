@@ -164,16 +164,12 @@ def test_nonrobust_is_rejected(binary_dataset, cov_type):
 # ── predict() ────────────────────────────────────────────────────
 
 
-def test_predict_returns_row_oriented_probabilities(binary_dataset):
-    _checks.check_predict_returns_row_oriented_probabilities(
-        binary_dataset, Logit
-    )
+def test_predict_returns_probabilities(binary_dataset):
+    _checks.check_predict_returns_probabilities(binary_dataset, Logit)
 
 
-def test_predict_new_data_returns_row_oriented_probabilities(binary_dataset):
-    _checks.check_predict_new_data_returns_row_oriented_probabilities(
-        binary_dataset, Logit
-    )
+def test_predict_new_data_returns_probabilities(binary_dataset):
+    _checks.check_predict_new_data_returns_probabilities(binary_dataset, Logit)
 
 
 def test_predict_with_include_intercept_false_and_x_named_const():

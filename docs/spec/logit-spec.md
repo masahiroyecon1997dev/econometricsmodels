@@ -235,11 +235,11 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   する（`predicted`側のみ`threshold`依存）。これはstatsmodelsの`BinaryResults.pred_table(threshold)`
   の実際の実装（`histogram2d`が常に`[0, 0.5, 1]`でクロス集計する）に合わせた仕様。
 - `threshold`自体の値域は検証しない（範囲外でも自明な分類結果になるだけで破綻しないため）。
-- **OLSの`predict()`との意味の違い**: `predict()`が返す`"probability"`は確率（`[0, 1]`の連続値）
-  であり、OLSの`predict()`が返す`"predicted"`（`y`自体の点予測）とは意味が異なる。0/1の分類結果が
-  欲しい場合は`predict()`の出力に自前でしきい値を適用するか、学習データに限り`pred_table()`を使う。
-  これはstatsmodelsの`predict()`と同じ標準的な慣習であり、キー名を`"predicted"`に統一する変更は
-  行わない（結論済み）。
+- **戻り値とOLSの`predict()`との意味の違い**: `predict()`は観測順の`list[float]`（OLS/WLS/Tobitと
+  同じ形）で、各値は確率（`[0, 1]`の連続値）。OLSの`predict()`が返す`y`自体の点予測とは意味が
+  異なる。0/1の分類結果が欲しい場合は`predict()`の出力に自前でしきい値を適用するか、学習データに限り
+  `pred_table()`を使う。これはstatsmodelsの`predict()`と同じ標準的な慣習であり、docstringの
+  注記で明示する。
 - **`augment(new_data=None)`は`predict()`と同じ`new_data`意味論**で、ソースデータ（学習データまたは
   `new_data`）に予測確率の列（`"predicted_probability"`）を1列付加したpolars DataFrameを返す（OLSの
   `augment()`と同型）。列名衝突（ソースデータに既に`"predicted_probability"`列が

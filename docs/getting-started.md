@@ -72,10 +72,10 @@ fitted = result.predict()
 new_data = pl.DataFrame({"x1": [6.0, 7.0]})
 predicted = result.predict(new_data)
 
-print(predicted)  # [{"predicted": ...}, {"predicted": ...}]
+print(predicted)  # [..., ...] (a plain list of floats)
 ```
 
-`OLSResults.augment()` takes the same `new_data` argument, but instead returns the source data (the training data, or `new_data` when given) with the predicted values appended as a `"predicted"` column — a polars DataFrame rather than a row-oriented list. This is the one exception to the library's general policy of not returning DataFrames.
+`OLSResults.augment()` takes the same `new_data` argument, but instead returns the source data (the training data, or `new_data` when given) with the predicted values appended as a `"predicted"` column — a polars DataFrame rather than a plain list. This is the one exception to the library's general policy of not returning DataFrames.
 
 ```python
 augmented = result.augment(new_data)
@@ -127,22 +127,22 @@ print(result.pseudo_r_squared)
 
 ### Predicted values and classification table
 
-`LogitResults.predict()` returns predicted probabilities (not a 0/1 class prediction, unlike `OLSResults.predict()`'s `"predicted"` — this is the standard statsmodels convention). With no arguments, it returns fitted probabilities for the training data; passing `new_data` returns out-of-sample predictions for new data instead (same `new_data` semantics as `OLSResults.predict()`). `pred_table()` returns a 2x2 classification (confusion) table for a given probability threshold (default 0.5), for the training data only.
+`LogitResults.predict()` returns predicted probabilities (not a 0/1 class prediction, unlike `OLSResults.predict()`, which returns a point prediction of `y` — this is the standard statsmodels convention). With no arguments, it returns fitted probabilities for the training data; passing `new_data` returns out-of-sample predictions for new data instead (same `new_data` semantics as `OLSResults.predict()`). `pred_table()` returns a 2x2 classification (confusion) table for a given probability threshold (default 0.5), for the training data only.
 
 ```python
 predicted = result.predict()
-print(predicted)  # [{"probability": ...}, ...]
+print(predicted)  # [0.83, 0.12, ...] (a plain list of probabilities)
 
 new_data = pl.DataFrame({"x1": [1.0, 2.0]})
 predicted = result.predict(new_data)
-print(predicted)  # [{"probability": ...}, {"probability": ...}]
+print(predicted)  # [..., ...]
 
 table = result.pred_table()
 for row in table:
     print(row["actual"], row["predicted_0"], row["predicted_1"])
 ```
 
-`LogitResults.augment()` takes the same `new_data` argument as `predict()`, but returns a polars DataFrame (the source data plus a new `"predicted_probability"` column) instead of a row-oriented list, mirroring `OLSResults.augment()`.
+`LogitResults.augment()` takes the same `new_data` argument as `predict()`, but returns a polars DataFrame (the source data plus a new `"predicted_probability"` column) instead of a plain list, mirroring `OLSResults.augment()`.
 
 ```python
 augmented = result.augment(new_data)
@@ -219,7 +219,7 @@ print(result.wald_statistic, result.wald_p_value)
 for row in result.marginal_effects(target="expected_observed"):
     print(row["param"], row["effect"], row["std_err"])
 
-# predict() returns a list of {"predicted": ...} dicts
+# predict() returns a plain list of floats
 fitted = result.predict(target="expected_observed")
 
 # new_data (out-of-sample) works the same way as OLS/Logit/Probit
@@ -227,7 +227,7 @@ new_data = pl.DataFrame({"x1": [1.0, 2.0]})
 predicted = result.predict(new_data, target="expected_observed")
 ```
 
-`augment()` takes the same `target`/`new_data` arguments as `predict()`, but returns a polars DataFrame instead of a row-oriented list. Like Logit/Probit's `"predicted_probability"` column, the appended column has a `predicted_` prefix; here it is named `"predicted_{target}"` (e.g. `"predicted_expected_observed"`), since `predict()`'s meaning depends on `target` — this also lets you call `augment()` once per `target` on the same DataFrame without a column name collision.
+`augment()` takes the same `target`/`new_data` arguments as `predict()`, but returns a polars DataFrame instead of a plain list. Like Logit/Probit's `"predicted_probability"` column, the appended column has a `predicted_` prefix; here it is named `"predicted_{target}"` (e.g. `"predicted_expected_observed"`), since `predict()`'s meaning depends on `target` — this also lets you call `augment()` once per `target` on the same DataFrame without a column name collision.
 
 ```python
 augmented = result.augment(target="expected_observed")

@@ -30,7 +30,7 @@
 | `"expected_observed"` (default) | `E[y\|x]`, the censoring-adjusted conditional mean (McDonald–Moffitt) |
 | `"prob_uncensored"` | `P(uncensored\|x)` |
 
-`marginal_effects()` computes `dy/dx` with delta-method standard errors, evaluated at `"overall"` (average marginal effects, the default), `"mean"`, or `"median"`; the constant term is excluded. `predict()` returns row-oriented fitted values for the training data (in-sample only). See [Getting Started](../getting-started.md#tobit-censored-regression) for an example.
+`marginal_effects()` computes `dy/dx` with delta-method standard errors, evaluated at `"overall"` (average marginal effects, the default), `"mean"`, or `"median"`; the constant term is excluded. `predict()` returns a plain list of predicted values, for the training data or for `new_data` when given. See [Getting Started](../getting-started.md#tobit-censored-regression) for an example.
 
 ## Censoring fit check
 

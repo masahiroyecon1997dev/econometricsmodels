@@ -168,7 +168,7 @@ def test_predict_none_matches_frozen_statsmodels(fixtures, scenario):
     x_cols = [c for c in df.columns if c not in ("y", "weight")]
     res = OLS(with_row_time(df), y="y", x=x_cols, options=OLSOptions()).fit()
 
-    predicted = [row["predicted"] for row in res.predict()]
+    predicted = res.predict()
     ref = fixtures[scenario]["predict"]["fitted"]
 
     assert len(predicted) == len(ref)
@@ -196,7 +196,7 @@ def test_predict_new_data_matches_frozen_statsmodels(fixtures):
             "x2": PREDICT_NEW_DATA["x2"],
         }
     )
-    predicted = [row["predicted"] for row in res.predict(new_data)]
+    predicted = res.predict(new_data)
     ref = fixtures["baseline"]["predict"]["predicted"]
 
     assert len(predicted) == len(ref)

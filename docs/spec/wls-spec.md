@@ -124,7 +124,7 @@ $$
 
 ### 3.5 `predict()`
 
-`WLSResults.predict(new_data: pl.DataFrame | None = None) -> list[dict[str, float]]`。
+`WLSResults.predict(new_data: pl.DataFrame | None = None) -> list[float]`。
 OLSの`predict()`（`ols-spec.md`「predict()」）と完全に同じ設計・シグネチャを適用する。
 
 - **重みは予測値の計算に一切関与しない**。「学習データに対する重み付き予測値」という概念自体が
@@ -140,7 +140,7 @@ OLSの`predict()`（`ols-spec.md`「predict()」）と完全に同じ設計・�
   純粋関数、係数と設計行列だけから予測値を計算し重みの概念を持たない）をそのまま再利用する
   （`WlsEstimator`が内部で`OlsEstimator`をラップする設計のため、この関数はWLS/OLSのどちらで
   推定した係数にも同じように使える）。
-- 戻り値のキー名は`"predicted"`（OLSと統一）。
+- 戻り値は観測順の`list[float]`（OLSと統一）。
 
 ### 3.6 `augment()`
 

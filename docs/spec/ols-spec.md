@@ -163,21 +163,20 @@ $$
 
 ### 3.4 `predict()`
 
-- `OLSResults.predict(new_data: pl.DataFrame | None = None) -> list[dict[str, float]]`
+- `OLSResults.predict(new_data: pl.DataFrame | None = None) -> list[float]`
   （`OLS`側ではなく`OLSResults`側。`OLS`はfit前の設定を保持するだけのステートレスな値のため）。
 - `new_data=None`（デフォルト）: 学習データに対する予測値`ŷ = Xβ̂`を返す（`fit()`時に計算し
   内部に保持。独立したプロパティとしては公開せず`predict()`経由のみ）。
 - `new_data`指定時: 新規データに対する予測値（out-of-sample）。`x`と同じ列名を持つ列を含む必要が
   ある（列名でマッチング、列順不問）。`include_intercept=True`でfitした場合、定数項の列は
   `new_data`に含めない（自動付加される）。
-- 戻り値は行指向`list[dict[str, float]]`で統一（点予測のみの現段階では1キーのみだが、将来
-  信頼区間・予測区間を追加する場合にキーを追加できる形にするため）。キー名は`"predicted"`
-  （学習データ・新規データいずれの場合も同じキー。当初`"fitted"`固定だったが、
-  new_data指定時（out-of-sample）に対して統計学の慣習上不正確という指摘を受け、
-  `"predicted"`に統一した。統計学の慣習では学習データに対する予測を
-  「fitted values」、新規データに対する予測を「predicted values」と呼び分けるが、
-  本APIは`new_data`の有無で戻り値の型・構造を変えない設計方針のため、キー名も
-  呼び分けず`"predicted"`で統一する）。
+- 戻り値は観測順の`list[float]`（`residuals`と同じ形）。学習データ・新規データのどちらでも
+  同じ型で返す（統計学の慣習では学習データへの予測を「fitted values」、新規データへの予測を
+  「predicted values」と呼び分けるが、本APIは`new_data`の有無で戻り値の型・構造を変えない
+  設計方針のため呼び分けない）。点予測だけを返すので単一キーの`dict`にする意味がなく、
+  1要素ごとに`dict`を作るコストも避けられる。将来、信頼区間・予測区間を足す場合は
+  `predict()`にキーを足さず（引数で戻り値の型が変わるのを避けるため）、別メソッドとして追加する
+  （statsmodelsの`get_prediction()`と同じ分け方）。
 - **Logitとの命名整合**: `LogitEstimator::predict()`（学習データの予測確率のみを返す設計、
   statsmodelsの`results.predict(exog=None)`と同型）が先に実装・マージ済みだったため、OLS側を
   この命名（`fitted_values`プロパティを作らず`predict(new_data=None)`に一本化）に揃えた。
@@ -283,6 +282,6 @@ faerのグローバル並列度は`engine::parallelism::ensure_serial()`で常�
 
 ## 4. 未実装・未対応
 
-- `predict()`の信頼区間・予測区間（点予測のみ対応）
+- `predict()`の信頼区間・予測区間（点予測のみ対応。追加する場合は別メソッド、3.4節参照）
 - HACの完全なデータ依存バンド幅自動選択（Newey & West 1994）: 参照実装がなく数値照合手段がないため見送り
 - `SingularMatrix`のエラーメッセージを状況に応じて分岐させる（優先度低）

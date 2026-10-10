@@ -295,9 +295,7 @@ class WLSResults:
             )
         ]
 
-    def predict(
-        self, new_data: pl.DataFrame | None = None
-    ) -> list[dict[str, float]]:
+    def predict(self, new_data: pl.DataFrame | None = None) -> list[float]:
         """Predicted values.
 
         Same design as `OLSResults.predict()`: unified into a single
@@ -318,16 +316,15 @@ class WLSResults:
                 same original (unweighted) scale as `residuals`.
 
         Returns:
-            Row-oriented predictions, one dict per observation. Each
-            dict currently has a single key, `"predicted"`.
+            Predicted values, one per observation, in row order (like
+            `residuals`).
 
         Raises:
             ValidationError: `new_data` is missing a required `x`
                 column, or a column contains missing/NaN/infinite
                 values.
         """
-        raw = self._raw.predict(new_data)
-        return [{"predicted": value} for value in raw]
+        return self._raw.predict(new_data)
 
     def augment(self, new_data: pl.DataFrame | None = None) -> pl.DataFrame:
         """Source data with the predicted values appended as a column.

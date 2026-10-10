@@ -243,7 +243,7 @@ Tobit固有の差分:
   （`target_w_and_s`と同じ`boundary_terms`を再利用、左/右/両側いずれでも単一の式）。`new_data`が
   `None`（既定）なら学習データ、指定すれば新規データ（out-of-sample）に対する予測値を返す
   （`x`列名マッチング・`include_intercept`時の定数項自動付加はOLS/Logit/Probitの`predict(new_data)`
-  と同じ規約）。engine側の`predict_new_data`は`nonlinear::common::predict_new_data`に
+  と同じ規約）。戻り値は観測順の`list[float]`（OLS/WLS/Logit/Probitと同じ形）。engine側の`predict_new_data`は`nonlinear::common::predict_new_data`に
   `predicted_value`（`target`・`sigma`・打ち切り境界を閉じ込めたクロージャ）を`link`として渡す
   だけの薄いラッパー。`censoring_fit_check()`のout-of-sample対応は引き続き未対応（4章）。
 - **`augment(target="expected_observed", new_data=None)`は`predict()`と同じ`target`/`new_data`

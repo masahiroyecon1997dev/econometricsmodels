@@ -198,19 +198,19 @@ def test_wald_statistic_and_p_value_are_present(censored_dataset):
 @pytest.mark.parametrize(
     "target", ["expected_latent", "expected_observed", "prob_uncensored"]
 )
-def test_predict_returns_row_oriented_predictions(censored_dataset, target):
+def test_predict_returns_list_of_floats(censored_dataset, target):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
     predicted = res.predict(target=target)
 
+    assert isinstance(predicted, list)
     assert len(predicted) == censored_dataset.height
-    for row in predicted:
-        assert set(row.keys()) == {"predicted"}
+    assert all(isinstance(value, float) for value in predicted)
 
 
 def test_predict_prob_uncensored_is_a_probability(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
-    for row in res.predict(target="prob_uncensored"):
-        assert 0.0 <= row["predicted"] <= 1.0
+    for prob in res.predict(target="prob_uncensored"):
+        assert 0.0 <= prob <= 1.0
 
 
 def test_predict_unknown_target_raises(censored_dataset):
@@ -225,20 +225,18 @@ def test_predict_unknown_target_raises(censored_dataset):
 @pytest.mark.parametrize(
     "target", ["expected_latent", "expected_observed", "prob_uncensored"]
 )
-def test_predict_new_data_returns_row_oriented_predictions(
-    censored_dataset, target
-):
+def test_predict_new_data_returns_list_of_floats(censored_dataset, target):
     """`predict(new_data=...)`（out-of-sample）が学習データと構造の
-    異なる新規データに対しても同じ行指向の形状を返すこと。
+    異なる新規データに対しても同じ形状（`float`のリスト）を返すこと。
     """
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
     new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
 
     predicted = res.predict(target=target, new_data=new_data)
 
+    assert isinstance(predicted, list)
     assert len(predicted) == 2
-    for row in predicted:
-        assert set(row.keys()) == {"predicted"}
+    assert all(isinstance(value, float) for value in predicted)
 
 
 def test_predict_missing_column_raises(censored_dataset):
@@ -309,7 +307,7 @@ def test_augment_none_returns_training_data_with_predicted_column(
     for col in censored_dataset.columns:
         assert augmented[col].to_list() == censored_dataset[col].to_list()
 
-    expected = [row["predicted"] for row in res.predict(target=target)]
+    expected = res.predict(target=target)
     assert augmented[column_name].to_list() == expected
 
 
@@ -325,10 +323,7 @@ def test_augment_new_data_returns_new_data_with_predicted_column(
     assert augmented.height == 2
     assert augmented.columns == ["x1", "x2", "predicted_expected_observed"]
 
-    expected = [
-        row["predicted"]
-        for row in res.predict(target="expected_observed", new_data=new_data)
-    ]
+    expected = res.predict(target="expected_observed", new_data=new_data)
     assert augmented["predicted_expected_observed"].to_list() == expected
 
 
@@ -343,7 +338,7 @@ def test_augment_without_intercept_matches_predict(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"], options=options).fit()
 
     augmented_none = res.augment()
-    expected_none = [row["predicted"] for row in res.predict()]
+    expected_none = res.predict()
     assert (
         augmented_none["predicted_expected_observed"].to_list()
         == expected_none
@@ -351,7 +346,7 @@ def test_augment_without_intercept_matches_predict(censored_dataset):
 
     new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
     augmented_new = res.augment(new_data=new_data)
-    expected_new = [row["predicted"] for row in res.predict(new_data=new_data)]
+    expected_new = res.predict(new_data=new_data)
     assert (
         augmented_new["predicted_expected_observed"].to_list() == expected_new
     )

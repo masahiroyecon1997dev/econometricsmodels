@@ -298,8 +298,8 @@ def test_predict_none_matches_statsmodels_fitted_values(dataset):
     predicted = res.predict()
 
     assert len(predicted) == len(dataset)
-    for i, (row, expected) in enumerate(zip(predicted, sm_res.fittedvalues)):
-        _assert_close(row["predicted"], expected, f"predicted/{i}")
+    for i, (value, expected) in enumerate(zip(predicted, sm_res.fittedvalues)):
+        _assert_close(value, expected, f"predicted/{i}")
 
 
 def test_predict_new_data_matches_statsmodels(dataset):
@@ -325,8 +325,8 @@ def test_predict_new_data_matches_statsmodels(dataset):
     expected = sm_res.predict(sm_new_x)
 
     assert len(predicted) == 3
-    for i, (row, exp) in enumerate(zip(predicted, expected)):
-        _assert_close(row["predicted"], exp, f"predicted/{i}")
+    for i, (value, exp) in enumerate(zip(predicted, expected)):
+        _assert_close(value, exp, f"predicted/{i}")
 
 
 def test_predict_new_data_without_intercept_matches_statsmodels():
@@ -346,8 +346,8 @@ def test_predict_new_data_without_intercept_matches_statsmodels():
     predicted = res.predict(new_data)
     expected = sm_res.predict(new_x1.reshape(-1, 1))
 
-    for i, (row, exp) in enumerate(zip(predicted, expected)):
-        _assert_close(row["predicted"], exp, f"predicted/{i}")
+    for i, (value, exp) in enumerate(zip(predicted, expected)):
+        _assert_close(value, exp, f"predicted/{i}")
 
 
 def test_predict_with_include_intercept_false_and_x_named_const():
@@ -376,11 +376,11 @@ def test_predict_with_include_intercept_false_and_x_named_const():
 
     coef_const = res.params["const"]
     coef_x2 = res.params["x2"]
-    for i, (row, (c, x2)) in enumerate(
+    for i, (value, (c, x2)) in enumerate(
         zip(predicted, [(100.0, 10.0), (200.0, 20.0)])
     ):
         expected = coef_const * c + coef_x2 * x2
-        _assert_close(row["predicted"], expected, f"predicted/{i}")
+        _assert_close(value, expected, f"predicted/{i}")
 
 
 def test_predict_new_data_structure(dataset):
@@ -391,9 +391,7 @@ def test_predict_new_data_structure(dataset):
 
     assert isinstance(predicted, list)
     assert len(predicted) == 2
-    for row in predicted:
-        assert set(row.keys()) == {"predicted"}
-        assert isinstance(row["predicted"], float)
+    assert all(isinstance(value, float) for value in predicted)
 
 
 # ── augment() ────────────────────────────────────────────────────
@@ -413,7 +411,7 @@ def test_augment_none_returns_training_data_with_predicted_column(dataset):
     for col in dataset.columns:
         assert augmented[col].to_list() == dataset[col].to_list()
 
-    expected = [row["predicted"] for row in res.predict()]
+    expected = res.predict()
     assert augmented["predicted"].to_list() == expected
 
 
@@ -432,7 +430,7 @@ def test_augment_new_data_returns_new_data_with_predicted_column(dataset):
     assert augmented["x1"].to_list() == new_data["x1"].to_list()
     assert augmented["x2"].to_list() == new_data["x2"].to_list()
 
-    expected = [row["predicted"] for row in res.predict(new_data)]
+    expected = res.predict(new_data)
     assert augmented["predicted"].to_list() == expected
 
 
@@ -467,12 +465,12 @@ def test_augment_without_intercept_matches_predict():
     res = OLS(df, y="y", x=["x1"], options=options).fit()
 
     augmented_none = res.augment()
-    expected_none = [row["predicted"] for row in res.predict()]
+    expected_none = res.predict()
     assert augmented_none["predicted"].to_list() == expected_none
 
     new_data = pl.DataFrame({"x1": [10.0, 20.0]})
     augmented_new = res.augment(new_data)
-    expected_new = [row["predicted"] for row in res.predict(new_data)]
+    expected_new = res.predict(new_data)
     assert augmented_new["predicted"].to_list() == expected_new
 
 

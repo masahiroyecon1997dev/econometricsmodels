@@ -145,14 +145,14 @@ def test_weight_one_matches_ols_predict(dataset):
     ols_res = OLS(df, y="y", x=["x1", "x2"]).fit()
     wls_res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
 
-    for wls_row, ols_row in zip(wls_res.predict(), ols_res.predict()):
-        assert abs(wls_row["predicted"] - ols_row["predicted"]) < 1e-9
+    for wls_val, ols_val in zip(wls_res.predict(), ols_res.predict()):
+        assert abs(wls_val - ols_val) < 1e-9
 
     new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
-    for wls_row, ols_row in zip(
+    for wls_val, ols_val in zip(
         wls_res.predict(new_data), ols_res.predict(new_data)
     ):
-        assert wls_row["predicted"] == ols_row["predicted"]
+        assert wls_val == ols_val
 
 
 # ── 成功パス・結果型 ──────────────────────────────────────────────
@@ -422,8 +422,8 @@ def test_predict_none_matches_statsmodels_fitted_values(dataset):
     predicted = res.predict()
 
     assert len(predicted) == len(df)
-    for i, (row, expected) in enumerate(zip(predicted, sm_res.fittedvalues)):
-        _assert_close(row["predicted"], expected, f"predicted/{i}")
+    for i, (value, expected) in enumerate(zip(predicted, sm_res.fittedvalues)):
+        _assert_close(value, expected, f"predicted/{i}")
 
 
 def test_predict_new_data_matches_statsmodels(dataset):
@@ -452,20 +452,19 @@ def test_predict_new_data_matches_statsmodels(dataset):
     expected = sm_res.predict(sm_new_x)
 
     assert len(predicted) == 3
-    for i, (row, exp) in enumerate(zip(predicted, expected)):
-        _assert_close(row["predicted"], exp, f"predicted/{i}")
+    for i, (value, exp) in enumerate(zip(predicted, expected)):
+        _assert_close(value, exp, f"predicted/{i}")
 
 
-def test_predict_returns_predicted_key_only(dataset):
-    """`predict()`の各行が`"predicted"`という1つのキーのみを持つこと
-    （`"fitted"`固定は統計学的に不正確なため`"predicted"`に統一）。
-    """
+def test_predict_returns_list_of_floats(dataset):
+    """`predict()`が観測値ごとの`float`のリストを返すこと（`residuals`と同じ形）。"""
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
 
-    for row in res.predict():
-        assert set(row.keys()) == {"predicted"}
-        assert isinstance(row["predicted"], float)
+    predicted = res.predict()
+    assert isinstance(predicted, list)
+    assert len(predicted) == df.height
+    assert all(isinstance(value, float) for value in predicted)
 
 
 # ── augment() ────────────────────────────────────────────────────
@@ -486,7 +485,7 @@ def test_augment_none_returns_training_data_with_predicted_column(dataset):
     for col in df.columns:
         assert augmented[col].to_list() == df[col].to_list()
 
-    expected = [row["predicted"] for row in res.predict()]
+    expected = res.predict()
     assert augmented["predicted"].to_list() == expected
 
 
@@ -504,7 +503,7 @@ def test_augment_new_data_returns_new_data_with_predicted_column(dataset):
     assert augmented.height == 2
     assert augmented.columns == ["x1", "x2", "predicted"]
 
-    expected = [row["predicted"] for row in res.predict(new_data)]
+    expected = res.predict(new_data)
     assert augmented["predicted"].to_list() == expected
 
 
@@ -544,12 +543,12 @@ def test_augment_without_intercept_matches_predict():
     res = WLS(df, y="y", x=["x1"], weight="weight", options=options).fit()
 
     augmented_none = res.augment()
-    expected_none = [row["predicted"] for row in res.predict()]
+    expected_none = res.predict()
     assert augmented_none["predicted"].to_list() == expected_none
 
     new_data = pl.DataFrame({"x1": [10.0, 20.0]})
     augmented_new = res.augment(new_data)
-    expected_new = [row["predicted"] for row in res.predict(new_data)]
+    expected_new = res.predict(new_data)
     assert augmented_new["predicted"].to_list() == expected_new
 
 

@@ -302,31 +302,31 @@ def check_nonrobust_is_rejected(dataset, estimator_cls, options_cls, cov_type):
 # ── test_<solver>_api.py: predict() ─────────────────────────────────
 
 
-def check_predict_returns_row_oriented_probabilities(dataset, estimator_cls):
+def check_predict_returns_probabilities(dataset, estimator_cls):
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
     predicted = res.predict()
 
+    assert isinstance(predicted, list)
     assert len(predicted) == dataset.height
-    for row in predicted:
-        assert set(row.keys()) == {"probability"}
-        assert 0.0 <= row["probability"] <= 1.0
+    for prob in predicted:
+        assert isinstance(prob, float)
+        assert 0.0 <= prob <= 1.0
 
 
-def check_predict_new_data_returns_row_oriented_probabilities(
-    dataset, estimator_cls
-):
+def check_predict_new_data_returns_probabilities(dataset, estimator_cls):
     """`predict(new_data)`（out-of-sample）が学習データと構造の
-    異なる新規データに対しても同じ行指向の形状を返すこと。
+    異なる新規データに対しても同じ形状（確率の`list[float]`）を返すこと。
     """
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
     new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
 
     predicted = res.predict(new_data)
 
+    assert isinstance(predicted, list)
     assert len(predicted) == 2
-    for row in predicted:
-        assert set(row.keys()) == {"probability"}
-        assert 0.0 <= row["probability"] <= 1.0
+    for prob in predicted:
+        assert isinstance(prob, float)
+        assert 0.0 <= prob <= 1.0
 
 
 # ── test_<solver>_api.py: augment() ─────────────────────────────────
@@ -349,7 +349,7 @@ def check_augment_none_returns_training_data_with_probability_column(
     for col in dataset.columns:
         assert augmented[col].to_list() == dataset[col].to_list()
 
-    expected = [row["probability"] for row in res.predict()]
+    expected = res.predict()
     assert augmented["predicted_probability"].to_list() == expected
 
 
@@ -368,7 +368,7 @@ def check_augment_new_data_returns_new_data_with_probability_column(
     assert augmented.height == 2
     assert augmented.columns == ["x1", "x2", "predicted_probability"]
 
-    expected = [row["probability"] for row in res.predict(new_data)]
+    expected = res.predict(new_data)
     assert augmented["predicted_probability"].to_list() == expected
 
 
@@ -391,12 +391,12 @@ def check_augment_without_intercept_matches_predict(
     res = estimator_cls(df, y="y", x=["x1"], options=options).fit()
 
     augmented_none = res.augment()
-    expected_none = [row["probability"] for row in res.predict()]
+    expected_none = res.predict()
     assert augmented_none["predicted_probability"].to_list() == expected_none
 
     new_data = pl.DataFrame({"x1": [10.0, 20.0]})
     augmented_new = res.augment(new_data)
-    expected_new = [row["probability"] for row in res.predict(new_data)]
+    expected_new = res.predict(new_data)
     assert augmented_new["predicted_probability"].to_list() == expected_new
 
 
@@ -1422,8 +1422,8 @@ def check_predict_new_data_matches_statsmodels(
     expected = sm_fitted.predict(sm_new_x)
 
     assert len(predicted) == 2
-    for i, (row, exp) in enumerate(zip(predicted, expected)):
-        config.assert_close(row["probability"], exp, f"predict_new_data/{i}")
+    for i, (prob, exp) in enumerate(zip(predicted, expected)):
+        config.assert_close(prob, exp, f"predict_new_data/{i}")
 
 
 def check_predict_new_data_without_intercept_matches_statsmodels(
@@ -1447,10 +1447,8 @@ def check_predict_new_data_without_intercept_matches_statsmodels(
     expected = sm_fitted.predict([[v] for v in new_x1])
 
     assert len(predicted) == 3
-    for i, (row, exp) in enumerate(zip(predicted, expected)):
-        config.assert_close(
-            row["probability"], exp, f"predict_new_data_no_intercept/{i}"
-        )
+    for i, (prob, exp) in enumerate(zip(predicted, expected)):
+        config.assert_close(prob, exp, f"predict_new_data_no_intercept/{i}")
 
 
 def check_predict_with_include_intercept_false_and_x_named_const(
@@ -1487,12 +1485,12 @@ def check_predict_with_include_intercept_false_and_x_named_const(
 
     coef_const = res.params["const"]
     coef_x2 = res.params["x2"]
-    for i, (row, (c, x2)) in enumerate(
+    for i, (prob, (c, x2)) in enumerate(
         zip(predicted, [(100.0, 10.0), (200.0, 20.0)])
     ):
         z = coef_const * c + coef_x2 * x2
         expected = link(z)
-        assert abs(row["probability"] - expected) < 1e-9, f"probability/{i}"
+        assert abs(prob - expected) < 1e-9, f"probability/{i}"
 
 
 def check_cluster_unused_by_cov_type_raises(

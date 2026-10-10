@@ -9,9 +9,9 @@
 - **`params`/`std_errors`/`test_stats`/`p_values`/`conf_int`は`"sigma"`（誤差項の標準偏差）を含む**: `engine_pybind`の`TobitResult`が`param_names`の末尾に`"sigma"`を付加して`(k+1)`長に統一しているため（`engine_pybind/src/nonlinear/tobit.rs`の`TobitResult`docコメント参照）、Python側もそのまま`dict(zip(param_names, ...))`すれば`"sigma"`が自然に含まれる。`coef_table()`も`"sigma"`の行を含む（R`summary.tobit`の`Log(scale)`行に相当）。`sigma: float`プロパティ（`params["sigma"]`と同値）も利便のため追加した。
 - **`log_likelihood_null`/`lr_statistic`/`lr_p_value`/`pseudo_r_squared`は提供しない**。代わりに`wald_statistic`/`wald_p_value`（モデル全体の有意性検定）を提供する（`docs/spec/nonlinear-common.md`5章）。
 - **`pred_table()`の代わりに`censoring_fit_check()`**: `y`が連続変数のため分類の的中表は意味を持たない（`docs/spec/tobit-spec.md`3.6節）。返り値は`pred_table()`と同じ行指向`list[dict]`慣習に合わせ、`category`（`"lower"`/`"uncensored"`/`"upper"`のうち該当するもの）・`observed_rate`・`model_implied_rate`をキーに持つ（実装時の判断、`pred_table()`の`[{"actual":..., "predicted_0":...}]`という先例と同じ理由）。
-- **`predict()`/`marginal_effects()`に`target`引数**（`"expected_latent"`/`"expected_observed"`/`"prob_uncensored"`、既定`"expected_observed"`）を追加。`predict()`の返り値の行は単一キー`"predicted"`（Logitの`"probability"`に相当する汎用キー、複数の予測対象があるため対象非依存の名前にした）。
+- **`predict()`/`marginal_effects()`に`target`引数**（`"expected_latent"`/`"expected_observed"`/`"prob_uncensored"`、既定`"expected_observed"`）を追加。`predict()`の返り値は観測順の`list[float]`（OLS/WLS/Logit/Probitと同じ形）。
 - **`predict()`はout-of-sample（`new_data`引数）対応済み**: `target`と`new_data`は独立したキーワード引数（`predict(target="expected_observed", new_data=None)`）。`target`の3種はどちらの経路でも同じように使える。`censoring_fit_check()`のout-of-sample対応は別途トラッキング（引き続き未対応）。
-- **`augment(target="expected_observed", new_data=None)`も実装済み**: `predict()`と同じ`target`/`new_data`。追加する列名はLogit/Probitの固定`"probability"`とは異なり`"predicted_{target}"`（例: `"predicted_expected_observed"`）。理由: `target`ごとに`predict()`の意味が変わるため、固定名だと同じDataFrameに複数の`target`を積み上げようとした2回目の`augment()`が列名衝突で失敗する（ユーザー提案・確認済み、`engine_pybind/src/nonlinear/CLAUDE.md`参照）。
+- **`augment(target="expected_observed", new_data=None)`も実装済み**: `predict()`と同じ`target`/`new_data`。追加する列名はLogit/Probitの固定`"predicted_probability"`とは異なり`"predicted_{target}"`（例: `"predicted_expected_observed"`）。理由: `target`ごとに`predict()`の意味が変わるため、固定名だと同じDataFrameに複数の`target`を積み上げようとした2回目の`augment()`が列名衝突で失敗する（ユーザー提案・確認済み、`engine_pybind/src/nonlinear/CLAUDE.md`参照）。
 - **打ち切り境界（`lower`/`upper`）関連の追加バリデーション**: `TobitOptions.lower`/`upper`が両方`None`（`InvalidCensoringBounds`）、`y`が境界外（`YOutOfCensoringBounds`）、非打ち切り観測が1件も無い（`NoUncensoredObservations`）はいずれも`engine`層で検証され`ValidationError`になる。`x`に`"sigma"`という列名がある場合も`ValidationError`（`"sigma"`合成パラメータ名との衝突、`engine_pybind`の`validate_no_sigma_collision`）。
 - **完全な多重共線性の検出経路**: Logit/Probit/Tobitとも、`fit()`冒頭の列ピボットQRランクチェック（`checked_design_matrix_qr`）が`solver`（newton/bfgs/lbfgs）に関わらず常に最初に実行され、`ComputationError`（`SingularDesignMatrix`）を一貫して検出する（旧来は`solver`ごとに検出経路が分かれ、bfgsだけ検出漏れした実バグがあった。詳細は`engine/src/nonlinear/CLAUDE.md`冒頭のエントリ）。そのため`solver`ごとの検出経路の違いをparametrizeする必要はないが、`engine_pybind`側のsolver文字列パースと配線はsolver固有のため、非既定solverの文字列 × 特異入力 ×`ComputationError`を踏むAPI境界テストは引き続き必要。
 
@@ -21,9 +21,9 @@
 
 - `summary()`は実装しない（structured onlyの出力方針、`linear/CLAUDE.md`のOLSと同じ）。
 - `LogitOptions`/`ProbitOptions`は`_lib`からそのまま再輸出する（独自クラスとして再定義しない、`OLSOptions`と同じ方針）。
-- **`predict()`はLogit/Probit両方でout-of-sample（`new_data`引数）対応済み**: `OLS.predict(new_data=None)`と同じシグネチャ・同じ`None`セマンティクス。戻り値のキーは引き続き`"probability"`（`OLSResult.predict()`の`"predicted"`とは意味が異なるため、キー名は統一しない方針。再検討済み、変更なしと結論）。`pred_table()`のout-of-sample対応は別途トラッキング（引き続き未対応）。
-- **OLSからの類推による誤解対策（2026-09-13対応済み）**: `predict()`が確率を返しOLSのような点予測ではないことを、`logit.py`/`probit.py`の`predict()`docstring（Note節）・`docs/spec/logit-spec.md`3.6節・`docs/getting-started.md`に明記した。キー名の統一は行わない（上記の通り）。
-- **`augment(new_data=None)`はLogit/Probit両方に拡張済み（2026-09-13）**: `OLSResults.augment()`と同型（`predict()`と同じ`new_data`意味論、ソースデータに予測確率の列を1列付加したpolars DataFrameを返す）。列名は固定`"predicted_probability"`（`predict()`の戻り値キー`"probability"`とは異なり、`predicted_`接頭辞でOLS/WLS/Tobitと揃えた）。`LogitResult`/`ProbitResult`は`fit()`時の元DataFrameを`training_data: DataFrame`として保持する（`engine_pybind/src/nonlinear/CLAUDE.md`参照）。
+- **`predict()`はLogit/Probit両方でout-of-sample（`new_data`引数）対応済み**: `OLS.predict(new_data=None)`と同じシグネチャ・同じ`None`セマンティクス。戻り値は観測順の確率の`list[float]`（OLS/WLSの`predict()`と同じ形だが、値の意味は`y`の点予測ではなく確率で異なる。意味の違いはdocstring・specで明示する）。`pred_table()`のout-of-sample対応は別途トラッキング（引き続き未対応）。
+- **OLSからの類推による誤解対策（2026-09-13対応済み）**: `predict()`が確率を返しOLSのような点予測ではないことを、`logit.py`/`probit.py`の`predict()`docstring（Note節）・`docs/spec/logit-spec.md`3.6節・`docs/getting-started.md`に明記した。
+- **`augment(new_data=None)`はLogit/Probit両方に拡張済み（2026-09-13）**: `OLSResults.augment()`と同型（`predict()`と同じ`new_data`意味論、ソースデータに予測確率の列を1列付加したpolars DataFrameを返す）。列名は固定`"predicted_probability"`（`predicted_`接頭辞でOLS/WLS/Tobitと揃えた）。`LogitResult`/`ProbitResult`は`fit()`時の元DataFrameを`training_data: DataFrame`として保持する（`engine_pybind/src/nonlinear/CLAUDE.md`参照）。
 
 ## 実装パターン
 

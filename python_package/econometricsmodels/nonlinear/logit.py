@@ -280,15 +280,13 @@ class LogitResults:
             )
         ]
 
-    def predict(
-        self, new_data: pl.DataFrame | None = None
-    ) -> list[dict[str, float]]:
+    def predict(self, new_data: pl.DataFrame | None = None) -> list[float]:
         """Predicted probabilities `p_i = Λ(x_i'β̂)`.
 
         Note:
             Returns a probability in `[0, 1]`, not a 0/1 class
-            prediction — unlike `OLSResults.predict()`, whose
-            `"predicted"` key is a point prediction of `y` itself.
+            prediction — unlike `OLSResults.predict()`, which
+            returns a point prediction of `y` itself.
             This is the standard statsmodels convention. To get a
             classification, apply a threshold to this output
             yourself, or use `pred_table()` (training data only).
@@ -304,15 +302,15 @@ class LogitResults:
                 `fit()`.
 
         Returns:
-            Row-oriented predictions, one dict per observation. Each
-            dict currently has a single key, `"probability"`.
+            Predicted probabilities, one per observation, in row
+            order.
 
         Raises:
             ValidationError: `new_data` is missing a required `x`
                 column, or a column contains missing/NaN/infinite
                 values.
         """
-        return [{"probability": p} for p in self._raw.predict(new_data)]
+        return self._raw.predict(new_data)
 
     def augment(self, new_data: pl.DataFrame | None = None) -> pl.DataFrame:
         """Source data with the predicted probabilities appended as a
@@ -320,7 +318,7 @@ class LogitResults:
 
         Same `new_data` semantics as `predict()`, but returns a polars
         DataFrame (the training data, or `new_data` when given, plus a
-        new `"predicted_probability"` column) instead of a row-oriented list.
+        new `"predicted_probability"` column) instead of a plain list.
         See `OLSResults.augment()` for the project's general policy on
         this DataFrame-returning exception.
 

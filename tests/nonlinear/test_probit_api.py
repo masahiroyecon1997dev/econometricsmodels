@@ -159,14 +159,12 @@ def test_nonrobust_is_rejected(binary_dataset, cov_type):
 # ── predict() ────────────────────────────────────────────────────
 
 
-def test_predict_returns_row_oriented_probabilities(binary_dataset):
-    _checks.check_predict_returns_row_oriented_probabilities(
-        binary_dataset, Probit
-    )
+def test_predict_returns_probabilities(binary_dataset):
+    _checks.check_predict_returns_probabilities(binary_dataset, Probit)
 
 
-def test_predict_new_data_returns_row_oriented_probabilities(binary_dataset):
-    _checks.check_predict_new_data_returns_row_oriented_probabilities(
+def test_predict_new_data_returns_probabilities(binary_dataset):
+    _checks.check_predict_new_data_returns_probabilities(
         binary_dataset, Probit
     )
 

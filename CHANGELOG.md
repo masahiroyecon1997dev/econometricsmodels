@@ -5,6 +5,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking**: OLS / WLS / Logit / Probit / Tobit: `predict()` now returns a plain `list[float]` (one value per observation, like `residuals`) instead of a list of single-key dicts (`{"predicted": ...}` / `{"probability": ...}`). Intervals, if added later, will be a separate method rather than extra keys. Migration: replace `[row["predicted"] for row in res.predict()]` with `res.predict()`. `augment()` is unchanged
+
 ## [0.8.0] - 2026-10-04
 
 Input-validation and API-consistency release. No new estimation method is added: accepted input types and option values are now checked strictly, names are unified across methods, and FE / RE inference follows fixest / plm conventions. Many changes are breaking (permitted during the `0.x.x` pre-release period).

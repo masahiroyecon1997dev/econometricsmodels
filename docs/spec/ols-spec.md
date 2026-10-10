@@ -260,6 +260,8 @@ $$
   yのスカラー倍で係数（切片含む）も同じ倍率でスケールする、xの列順序を入れ替えても係数名で
   対応付ければ値は変わらない、HC0の標準誤差は常にHC1以下。いずれも意図的なバグ注入により
   実際に検出できることを確認済み。
+- `white_test()`（3.9節）は診断検定1つで1ファイルにまとめた`test_ols_white.py`に置く（上記4分割と同じ区分を
+  1ファイル内に持つ）。
 - 上記4ファイルの役割分担（リファレンス実装との数値照合）とは別に、`test_ols_api.py`末尾に
   クラスターロバストSEの統計的健全性チェックを1本持つ
   （`test_cluster_std_error_exceeds_classical_under_true_intra_cluster_correlation`）。
@@ -280,8 +282,69 @@ faerのグローバル並列度は`engine::parallelism::ensure_serial()`で常�
 している（tall-skinnyな設計行列では暗黙の全コア並列化が高速化せず、多コア機・負荷下で
 不安定になったため。`engine/src/linear/CLAUDE.md`「faerのグローバル並列度」）。
 
+### 3.9 `white_test()`（事後診断）
+
+- `OLSResults.white_test(statistic: Literal["lm", "f"] = "lm") -> WhiteTestResult`。事後診断なので
+  `fit()`では計算せず、利用者が選んで呼ぶ（`docs/spec/inference-conventions.md`6章）。結果型は検定共通の
+  frozen dataclass `DiagnosticResult`（`statistic`/`p_value`/`df`/`df_denom`/`distribution`、`to_dict()`）
+  を継承した`WhiteTestResult`（追加フィールド`aux_terms`/`dropped_terms`）。`distribution`は
+  `Literal["chi2", "f"]`の文字列（`stat_dist`と同じ流儀）。
+- **定義**: 残差の二乗を、説明変数・その二乗・説明変数同士の交差項に回帰する補助回帰を行い、
+  LM版は`LM = n·R²`（帰無分布`χ²(q)`）、F版は古典的なF検定（`F(q, n-q-1)`）。`q`は補助回帰の
+  定数以外の列数。LM/F版は戻り値を分けず`statistic`引数で選ぶ（型を単純にするため）。
+  `cov_type`には依存しない（古典的な等分散を仮定する検定）。
+- **補助回帰は常に定数を含める**（元のモデルが`include_intercept=False`でも同じ）。`aux_terms`の
+  先頭は常に補助回帰の定数`"const"`。元のモデルに定数が無くても補助回帰の定数があることを結果で
+  読めるようにするため。元のモデルが`include_intercept=False`で`x`に`"const"`という名前の列を
+  持つ場合は`"const"`が2つ現れるが、先頭が補助回帰の定数である（位置で区別できる）。
+- **項と除外ルール**: 項は`x`の各列・各列の二乗・列の組の積の順（ラベルは`"x1"`/`"x1^2"`/`"x1:x2"`）。
+  定数列（全て0を含む）と、先に採用した項と数値的に同一の列（相対許容誤差1e-12。ダミーの二乗
+  `d*d == d`、排他的ダミー同士の積が全て0になる場合等）を除き、除いた項を`dropped_terms`に返す。
+  定数の説明変数（`include_intercept=False`のモデルに入れた定数列）を含む項は、その定数倍の別の項
+  なので値の比較を待たず全て除く。**`df`は除外後の項の数（ランクに基づく）**。`fit()`は完全な
+  多重共線性を`ComputationError`で弾くが、補助回帰の重複はテスト自身の構成（`d² = d`）から機械的に
+  生じ利用者のモデル指定の誤りではないため、ここでは除いて続行する（何を使ったかは結果で見える）。
+  ラベルは出力専用で、式としてパースしない・引数に受け付けない（formula方式を採らない方針
+  〔CLAUDE.md 2章〕は入力の設計の話）。
+- **数値の扱い**: 補助回帰の各列は標準化してから回帰する。定数ありの`R²`は列の平行移動・スケールで
+  変わらないが、生の値のままだと平均が標準偏差より桁違いに大きい変数（賃金・人口等）の二乗項が
+  元の列とほぼ共線になり、`fit()`の特異性判定・条件数チェックで誤って失敗するため（実測: 平均5e3、
+  SD1e3の列で失敗）。`R²`が非有限、または1以上ならF統計量が定義できず`ComputationError`
+  （`f64::max`はNaNを無視して0.0を返すため、丸める前に非有限を判定する）。
+- **エラー**: `statistic`が不正・観測数が補助回帰の列数（定数込み）以下
+  （`LeastSquaresError::InsufficientObservationsForAuxRegression`、`CommonError::
+  InsufficientObservations`は元のモデルの`k`を指すためメッセージを分けた）・`training_data`が
+  無い結果（`IVResults.first_stage()`由来）は`ValidationError`。全ての`x`が定数、補助回帰が除外後も
+  特異（既知の制限: 全カテゴリのダミーを`include_intercept=False`で入れると補助回帰の定数と
+  共線になる）、または補助回帰が推定できない場合は`ComputationError`（メッセージに
+  `White test`と補助回帰であることを含め、元のモデルの共線性と取り違えないようにする）。
+- **実装**: engineの`linear::diagnostics::white_test`（`x`の列・列名・残差を受け取り、補助回帰に
+  `OlsEstimator::fit`〔`CovType::Classical`〕を再利用）。`OLSResult`は`OlsEstimator`を保持しないため
+  `engine_pybind`が`training_data`と`param_names`から`x`を再抽出して渡す（`predict_for`と同じ経路、
+  `augment()`と同様`training_data`が無ければ`ValidationError`）。LM/Fの両方をengineが計算し、
+  `statistic`の選択は`engine_pybind`。p値は`statrs`の`sf`（`1 - cdf`は裾で潰れるため使わない）。
+- **リファレンスとの関係**: statsmodels `het_white`は補助回帰の項の重複を除かないが、補助回帰を`OLS`で
+  当てはめ自由度をランク（`df_model = rank - k_constant`）で数えるため、ダミーの二乗のような重複列
+  があっても本実装と一致する（`SingularMatrixWarning`は出る）。Rは`lmtest::bptest(studentize = TRUE)`
+  （Koenker版、`n·R²`）。F版はRに専用関数が無いため同じ補助回帰の`lm`から計算する。いずれも
+  `lm`のエイリアス処理でランクに基づく自由度になる。
+- **テスト**: `tests/linear/test_ols_white.py`の1ファイルにまとめる（構造・エラーパス・statsmodels凍結
+  フィクスチャ`ols_white.json`・Rクロスチェック`ols_white_crosscheck.json`）。合成データの
+  `WHITE_SYNTHETIC_SCENARIOS`（`baseline_df1`〔n=5で補助回帰に足りない〕・`scale_variance`・
+  `perfect_multicollinearity`〔元の`fit()`が失敗〕を除く、説明変数1個の`baseline_k1`を含む）、
+  baselineの`include_intercept=False`、Wooldridge実データ（`wage1`・`gpa2`・ダミーを含む
+  `wage1_dummies`・二乗列を含む`wage1_polynomial`・排他的ダミーの`wage1_region`）を、statsmodels・R
+  の両方と照合する。観測数の境界（`n = k`で拒否、`n = k + 1`で成功し`df_denom = 1`）と、重複除外後の
+  列数での境界判定も確認する。許容誤差は`ols_white_reference`/`ols_white_crosscheck`（`rtol=1e-8`、
+  実測最大相対誤差約2e-12）。p値は絶対誤差フロアを使わず相対誤差のみで比較する（裾の1e-39級の
+  p値が`sf`ではなく`1 - cdf`で0に潰れる回帰を検出するため）。engine側は`diagnostics.rs`の`mod tests`（statsmodels値との照合、ダミー・定数・スケール・
+  NaN残差・共線等）。
+
 ## 4. 未実装・未対応
 
+- 診断検定のうち、Breusch-Godfrey・Breusch-Pagan（別メソッドとして順次追加。時間順が必要な検定は
+  時間列を必須引数とする、`docs/spec/inference-conventions.md`6章）
+- `white_test()`のWLS・IV（`first_stage()`以外）への展開（WLSは残差が重み付きかどうかで意味が変わるため別途検討）
 - `predict()`の信頼区間・予測区間（点予測のみ対応。追加する場合は別メソッド、3.4節参照）
 - HACの完全なデータ依存バンド幅自動選択（Newey & West 1994）: 参照実装がなく数値照合手段がないため見送り
 - `SingularMatrix`のエラーメッセージを状況に応じて分岐させる（優先度低）

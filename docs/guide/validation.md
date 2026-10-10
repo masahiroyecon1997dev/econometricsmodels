@@ -86,6 +86,7 @@ A wrong argument *type*, as opposed to a wrong value, raises the built-in `TypeE
 | Method | Situation |
 |---|---|
 | WLS | A weight is zero, negative, null or NaN. The weight column is missing. |
+| OLS (`white_test()`) | `statistic` is not `"lm"` or `"f"`. Too few observations for the auxiliary regression, which has far more columns than the model (all squares and products of the regressors). The result has no retained training data (the `OLSResults` returned by `IVResults.first_stage()`). |
 | Logit, Probit | `y` is not coded exactly 0 or 1. `max_iter` is not an integer from 1 to 10,000, or `tol` is not a positive finite number. |
 | Tobit | `max_iter` is not an integer from 1 to 10,000, or `tol` is not a positive finite number. Both censoring bounds are `None`, or the lower bound is not below the upper bound. `y` lies outside the bounds. There is no uncensored observation. `x` contains a column named `"sigma"`. |
 | IV | Fewer instruments than endogenous regressors (the order condition). `x_endog` or `instruments` is empty. GMM options are set for an estimator that does not use them, or are out of range (`gmm_max_iter` outside 3 to 10,000, or `gmm_tol` not a positive finite number). With `gmm_weight_type="cluster"`, there are too few clusters for the weight matrix. |
@@ -104,6 +105,7 @@ A wrong argument *type*, as opposed to a wrong value, raises the built-in `TypeE
 | Suspected separation | Logit, Probit | The gradient is near zero but the coefficients are implausibly large, which is the signature of a (quasi-)complete separation of the outcome. |
 | Non-convergence | IV (GMM) | The iterated GMM did not converge. |
 | Degenerate variance components | RE | For example, no remaining idiosyncratic variance in noise-free data. |
+| Singular auxiliary regression | OLS (`white_test()`) | Every regressor is constant, or the auxiliary design stays linearly dependent after constant and duplicate terms are dropped (for example a full set of dummies in a model fitted with `include_intercept=False`), or the auxiliary R² is undefined. The message says `White test`, so it is not confused with the model's own collinearity. |
 
 How the cause is reported can depend on the estimator and on the solver. For instance, completely separated data in a binary-choice model may surface as suspected separation, as non-convergence or as a singular Hessian.
 

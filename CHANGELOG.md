@@ -5,6 +5,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- OLS: `OLSResults.white_test(statistic="lm" | "f")`, the White test for heteroskedasticity, returning a `WhiteTestResult` (`statistic`, `p_value`, `df`, `df_denom`, `distribution`, the terms of the auxiliary regression in `aux_terms` and the dropped ones in `dropped_terms`, and `to_dict()`). The auxiliary regression always includes a constant, drops constant and duplicate terms (such as the square of a dummy) and counts the degrees of freedom from the rank. Verified against statsmodels `het_white` and R `lmtest::bptest`
+- `DiagnosticResult` and `WhiteTestResult` (also exported at the top level), the shared result type of post-estimation diagnostic tests
+
 ### Changed
 
 - **Breaking**: OLS / WLS / Logit / Probit / Tobit: `predict()` now returns a plain `list[float]` (one value per observation, like `residuals`) instead of a list of single-key dicts (`{"predicted": ...}` / `{"probability": ...}`). Intervals, if added later, will be a separate method rather than extra keys. Migration: replace `[row["predicted"] for row in res.predict()]` with `res.predict()`. `augment()` is unchanged

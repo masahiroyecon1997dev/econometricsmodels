@@ -30,7 +30,7 @@
   - 推定オプションは **オブジェクト（設定用クラス／構造体）渡し**
   - 理由: スクリプト・プログラムからの呼び出しやすさ（型補完、バリデーション、動的組み立て）を優先するため。
 - 計算コアはRustで実装し高速化。Python側はPyO3バインディングとして薄く保つ。
-- **検定・診断の公開形**: 推定量そのものの妥当性・識別に属する検定（Sargan/J・Hausman・全体F/Wald/LR等）は`fit()`時に計算してプロパティで公開し、推定後の事後診断（White・Breusch-Godfrey等、利用者の選択が入るもの）は検定ごとの独立メソッドとして公開する（事後診断は`fit()`で自動計算しない）。事後診断メソッドの返り値は検定共通のfrozen dataclass（`statistic`/`p_value`/`df`/`distribution`＋`to_dict()`。型名・置き場所・`distribution`の型は最初の検定の実装時に決める）で、ドット記法で読めJSON化は`to_dict()`で行う。キーが利用者の列名で決まる結果（`params`等）と、表形式の`coef_table()`/`marginal_effects()`は`dict`・`list[dict]`のまま、`predict()`は`list[float]`。詳細は`docs/spec/inference-conventions.md`6章。
+- **検定・診断の公開形**: 推定量そのものの妥当性・識別に属する検定（Sargan/J・Hausman・全体F/Wald/LR等）は`fit()`時に計算してプロパティで公開し、推定後の事後診断（White・Breusch-Godfrey等、利用者の選択が入るもの）は検定ごとの独立メソッドとして公開する（事後診断は`fit()`で自動計算しない）。事後診断メソッドの返り値は検定共通のfrozen dataclass（`DiagnosticResult`: `statistic`/`p_value`/`df`/`df_denom`/`distribution`＋`to_dict()`。検定固有の項目は継承型に足す。例: `OLSResults.white_test()`の`WhiteTestResult`）で、ドット記法で読めJSON化は`to_dict()`で行う。キーが利用者の列名で決まる結果（`params`等）と、表形式の`coef_table()`/`marginal_effects()`は`dict`・`list[dict]`のまま、`predict()`は`list[float]`。詳細は`docs/spec/inference-conventions.md`6章。
 
 これらの変更が必要と思われる場合も、まず提案として提示し、ユーザーの明示的な承認を得てから実装すること。
 

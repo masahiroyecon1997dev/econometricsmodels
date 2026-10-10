@@ -82,6 +82,22 @@ augmented = result.augment(new_data)
 print(augmented)  # original `new_data` columns, plus a "predicted" column
 ```
 
+## Diagnostics: White test for heteroskedasticity
+
+`OLSResults.white_test()` is a post-estimation diagnostic: it is never computed by `fit()`, and you call it when you want it. It regresses the squared residuals on the independent variables, their squares and their pairwise products. `statistic="lm"` (default) returns the LM version `n * R²` (chi-squared); `statistic="f"` returns the F version of the same auxiliary regression.
+
+```python
+white = result.white_test()
+print(white.statistic, white.p_value, white.df)  # attribute access
+print(white.aux_terms)  # ["const", "x1", "x2", "x1^2", "x2^2", "x1:x2"]
+print(white.dropped_terms)  # terms left out, e.g. ["d^2"] for a 0/1 dummy d
+
+white.to_dict()  # a JSON-ready dict
+white_f = result.white_test("f")
+```
+
+The auxiliary regression always includes a constant, even when the model was fitted with `include_intercept=False`, so the first element of `aux_terms` is always `"const"`. Terms that are constant or numerically identical to an earlier term (the square of a 0/1 dummy equals the dummy itself) are dropped, and the degrees of freedom count the terms that remain. The term labels only describe what was used; they are not a formula and are never parsed. The test does not depend on `cov_type`.
+
 ## WLS (Weighted Least Squares)
 
 `WLS` is `OLS` with an added `weight` argument (the column name of the weight column). Weights are treated as analytic weights proportional to the inverse of the variance, and do not need to be normalized. Values less than or equal to 0 raise a `ValidationError`.

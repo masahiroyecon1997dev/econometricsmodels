@@ -9,3 +9,7 @@
 ::: econometricsmodels.OLSOptions
 
 ::: econometricsmodels.OLSResults
+
+::: econometricsmodels.DiagnosticResult
+
+::: econometricsmodels.WhiteTestResult

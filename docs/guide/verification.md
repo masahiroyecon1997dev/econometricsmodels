@@ -15,6 +15,7 @@ Every estimator is compared numerically against established reference implementa
 | Method | Primary reference | Independent cross-check |
 |---|---|---|
 | OLS | statsmodels `OLS` | R `lm` + `sandwich` / `lmtest` |
+| OLS White test (`white_test()`) | statsmodels `het_white` | R `lmtest::bptest` (Koenker's studentized version) and `lm` for the F version |
 | WLS | statsmodels `WLS` | R `lm(weights=)` + `sandwich` / `lmtest` |
 | Logit | statsmodels `Logit` | R `glm` + `sandwich`, `marginaleffects` |
 | Probit | statsmodels `Probit` | R `glm` + `sandwich`, `marginaleffects` (observed-information covariance, see below) |
@@ -33,6 +34,7 @@ pyfixest is not used for accuracy checks. Its HC2/HC3 standard errors apply the 
 | Method | Statistics |
 |---|---|
 | OLS, WLS | coefficients, standard errors, t statistics, p-values, confidence intervals, R², adjusted R², F statistic and p-value, log-likelihood, AIC, BIC, predictions |
+| OLS White test | LM and F statistics with their p-values, and the degrees of freedom of the auxiliary regression (cross-check) |
 | Logit, Probit | coefficients, standard errors, z statistics, p-values, confidence intervals, log-likelihood, null log-likelihood, likelihood-ratio statistic and p-value, McFadden R², AIC, BIC, marginal effects with standard errors, z statistics, p-values and confidence intervals |
 | Tobit | coefficients and σ with their standard errors, z statistics, p-values and confidence intervals, log-likelihood, AIC, BIC, Wald statistic and p-value, marginal effects, predictions |
 | IV | coefficients, standard errors, test statistics, p-values, confidence intervals, R², robust Wald statistic, weak-instrument F, Wu-Hausman (2SLS), Sargan (2SLS) or Hansen J (GMM) |
@@ -51,6 +53,7 @@ For the FE and RE cross-checks (coefficient and F-statistic p-values) the absolu
 | Method | rtol | atol | Notes |
 |---|---|---|---|
 | OLS, WLS, IV (2SLS and GMM), FE, RE | `1e-8` | `1e-10` | Closed-form estimators. Measured agreement is about `1e-14` (RE: `1e-9` to `1e-14`). |
+| OLS White test | `1e-8` | `1e-10` (statistics only) | Closed form from the auxiliary regression's R². Measured agreement is about `2e-12`. p-values are compared by relative error only (no absolute floor), because some are as small as `1e-39` and a floor would hide a tail that collapsed to `0`. |
 | Logit, Probit | `1e-8` | `1e-9` | Iterative optimization leaves a little more noise near zero. `bfgs` / `lbfgs` solvers use `1e-3` (measured at most about `8e-5`), since a different optimization path stops at a slightly different point. |
 | Tobit | `1e-8` | `1e-9` | Real-data confidence intervals use `3e-8`; `bfgs` / `lbfgs` solvers use `2e-7`. |
 
@@ -60,6 +63,7 @@ For the FE and RE cross-checks (coefficient and F-statistic p-values) the absolu
 |---|---|---|
 | OLS | `1e-8` (classical, HC0–HC3, cluster; measured about `1e-14`) | HAC `1e-2` (measured about 0.4 %): R's Newey–West small-sample, pre-whitening and adjustment conventions differ. p-values use an absolute tolerance of `1e-6`. |
 | WLS | `1e-8` | HAC `5e-2` (measured at most about 4.3 %). p-values use an absolute tolerance of `1e-6`. |
+| OLS White test | `1e-8` (measured about `2e-12`) | Statistics use an absolute floor of `1e-8`; p-values are compared by relative error only, for the same reason as above. The degrees of freedom are compared exactly. |
 | Logit | `1e-6` (measured up to about `6e-8`, including marginal effects with their standard errors, z statistics and confidence intervals, and the cluster cases; the absolute floor is `1e-12`, so small values are compared relatively too) | Both sides are iterative optimizers. p-values use an absolute tolerance of `1e-7`. |
 | Probit | `1e-6` (measured up to about `1.4e-7`, including marginal effects with their standard errors and z statistics, and the cluster cases; the absolute floor is `1e-12`) | Confidence intervals, including those of marginal effects, `1e-5` (measured up to `3.9e-6`, because a bound close to zero amplifies a tiny absolute error). p-values use an absolute tolerance of `1e-7`. |
 | Tobit | `1e-8` (measured about `2e-9`) | `5e-8` for HC0 / HC1 on a badly conditioned design; `1e-4` for standard errors on the real-data example, limited by `censReg`'s convergence. The strict comparison on that data is against `AER::tobit`. |
@@ -127,7 +131,7 @@ All synthetic datasets are generated once, frozen as CSV files in the repository
 
 | Method | Dataset |
 |---|---|
-| OLS | `wage1`, `gpa2` |
+| OLS | `wage1`, `gpa2` (the White test also uses `wage1` with the dummies `female` and `married`, with the squared terms `expersq` and `tenursq`, and with the mutually exclusive region dummies `northcen`, `south` and `west`, so that terms of its auxiliary regression are duplicated or constant) |
 | WLS | `401ksubs` |
 | Logit, Probit, Tobit | `mroz` |
 | IV | `card` |

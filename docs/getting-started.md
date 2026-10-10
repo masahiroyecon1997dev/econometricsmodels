@@ -98,6 +98,19 @@ white_f = result.white_test("f")
 
 The auxiliary regression always includes a constant, even when the model was fitted with `include_intercept=False`, so the first element of `aux_terms` is always `"const"`. Terms that are constant or numerically identical to an earlier term (the square of a 0/1 dummy equals the dummy itself) are dropped, and the degrees of freedom count the terms that remain. The term labels only describe what was used; they are not a formula and are never parsed. The test does not depend on `cov_type`.
 
+### Diagnostics: Breusch-Godfrey test for serial correlation
+
+`OLSResults.breusch_godfrey_test(time, nlags, statistic="lm")` tests for serial correlation of the errors by regressing the residuals on the regressors and their own lags. It is a post-estimation diagnostic, never computed by `fit()`. `time` is the column that gives the time order and `nlags` the number of lags; both are required, because the row order is never assumed to be the time order and there is no natural default lag.
+
+```python
+bg = result.breusch_godfrey_test("year", 2)  # LM version (chi-squared)
+print(bg.statistic, bg.p_value, bg.df, bg.nlags)
+bg_f = result.breusch_godfrey_test("year", 2, "f")  # F version
+bg.to_dict()  # a JSON-ready dict
+```
+
+The rows may be in any order: they are sorted by `time` before the lags are taken. Only the order of the `time` values is used (gaps between periods are not checked), and the values must be distinct. Lags before the first observation are filled with zero. The test is meaningless for cross-sectional data.
+
 ## WLS (Weighted Least Squares)
 
 `WLS` is `OLS` with an added `weight` argument (the column name of the weight column). Weights are treated as analytic weights proportional to the inverse of the variance, and do not need to be normalized. Values less than or equal to 0 raise a `ValidationError`.

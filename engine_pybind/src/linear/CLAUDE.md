@@ -23,6 +23,12 @@
 engineが計算し、`statistic`引数（`WhiteStatistic`、大文字小文字を区別しない）で`WhiteTestOutput`の
 フィールドを選ぶだけ。計算ロジックは持たない。
 
+`breusch_godfrey_test(time, nlags, statistic)`も同じ配線（`x`と残差に加え、時間列を
+`extract_time_order_ranks`で順位にして`engine`へ渡す。`hac_time`と同じく同値・欠損値・NaNは
+`ValidationError`）。引数は型検査を厳密にするため`&Bound<PyAny>`で受け、`extract_strict_text`/
+`extract_strict_int`（`bool`・`float`は`TypeError`）を通す。`nlags`は`i64`のまま`engine`に渡し、
+`nlags < 1`の検査と巨大値の飽和は`engine`側（`InvalidNlags`・観測数不足）。
+
 ## DataFrameを構築して返す（`augment()`）
 
 `predict()`までは全メソッドが`Vec<f64>`等のフラットな値を返すだけだったが、`augment()`は

@@ -13,3 +13,5 @@
 ::: econometricsmodels.DiagnosticResult
 
 ::: econometricsmodels.WhiteTestResult
+
+::: econometricsmodels.BreuschGodfreyTestResult

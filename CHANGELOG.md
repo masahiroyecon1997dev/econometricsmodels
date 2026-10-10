@@ -8,7 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - OLS: `OLSResults.white_test(statistic="lm" | "f")`, the White test for heteroskedasticity, returning a `WhiteTestResult` (`statistic`, `p_value`, `df`, `df_denom`, `distribution`, the terms of the auxiliary regression in `aux_terms` and the dropped ones in `dropped_terms`, and `to_dict()`). The auxiliary regression always includes a constant, drops constant and duplicate terms (such as the square of a dummy) and counts the degrees of freedom from the rank. Verified against statsmodels `het_white` and R `lmtest::bptest`
-- `DiagnosticResult` and `WhiteTestResult` (also exported at the top level), the shared result type of post-estimation diagnostic tests
+- OLS: `OLSResults.breusch_godfrey_test(time, nlags, statistic="lm" | "f")`, the Breusch-Godfrey test for serial correlation, returning a `BreuschGodfreyTestResult` (`statistic`, `p_value`, `df`, `df_denom`, `distribution`, `nlags`, `to_dict()`). `time` (the column giving the time order) and `nlags` are required; lags before the first observation are zero (as in R `bgtest` and statsmodels), and a model without an intercept gets no constant in the auxiliary regression (R and Greene; statsmodels differs there). Verified against statsmodels `acorr_breusch_godfrey` and R `lmtest::bgtest`
+- `DiagnosticResult`, `WhiteTestResult` and `BreuschGodfreyTestResult` (also exported at the top level), the result types of post-estimation diagnostic tests
 
 ### Changed
 

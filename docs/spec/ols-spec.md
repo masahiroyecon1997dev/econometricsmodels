@@ -260,8 +260,8 @@ $$
   yのスカラー倍で係数（切片含む）も同じ倍率でスケールする、xの列順序を入れ替えても係数名で
   対応付ければ値は変わらない、HC0の標準誤差は常にHC1以下。いずれも意図的なバグ注入により
   実際に検出できることを確認済み。
-- `white_test()`（3.9節）は診断検定1つで1ファイルにまとめた`test_ols_white.py`に置く（上記4分割と同じ区分を
-  1ファイル内に持つ）。
+- `white_test()`（3.9節）・`breusch_godfrey_test()`（3.10節）は、診断検定1つで1ファイルにまとめた
+  `test_ols_white.py`・`test_ols_breusch_godfrey.py`に置く（上記4分割と同じ区分を1ファイル内に持つ）。
 - 上記4ファイルの役割分担（リファレンス実装との数値照合）とは別に、`test_ols_api.py`末尾に
   クラスターロバストSEの統計的健全性チェックを1本持つ
   （`test_cluster_std_error_exceeds_classical_under_true_intra_cluster_correlation`）。
@@ -340,11 +340,62 @@ faerのグローバル並列度は`engine::parallelism::ensure_serial()`で常�
   p値が`sf`ではなく`1 - cdf`で0に潰れる回帰を検出するため）。engine側は`diagnostics.rs`の`mod tests`（statsmodels値との照合、ダミー・定数・スケール・
   NaN残差・共線等）。
 
+### 3.10 `breusch_godfrey_test()`（事後診断）
+
+- `OLSResults.breusch_godfrey_test(time: str, nlags: int, statistic: Literal["lm", "f"] = "lm")
+  -> BreuschGodfreyTestResult`。事後診断なので`fit()`では計算しない（`docs/spec/inference-conventions.md`
+  6章）。結果型は`DiagnosticResult`を継承した`BreuschGodfreyTestResult`（追加フィールド`nlags`。
+  `df`と同じ値だがラグ次数を直接読めるよう別に持つ）。
+- **`time`と`nlags`は必須引数**。行順を時間順とみなす暗黙の既定は置かない（`hac_time`と同じ理由。
+  横断面データでは順序に意味が無く、この検定自体が意味を持たない。パッケージは警告を出さない）。
+  `nlags`も、statsmodelsの既定`min(10, n//5)`・Rの`order = 1`のどちらも恣意的な値のため既定を置かない。
+  `nlags`は`int`（`bool`・`float`は`TypeError`）、1以上（未満は`ValidationError`）。
+- **定義**（Greene・R `lmtest::bgtest`と同じ）: 残差`û`を、元のモデルの説明変数`X`と`û`自身の1〜`nlags`次の
+  ラグ（時間列の昇順に並べた残差の遅れ）に回帰する補助回帰を行う。LM版は`LM = n·R²`（`χ²(nlags)`）、
+  F版は`F = ((Σû² - SSR_u)/m)/(SSR_u/(n - k - m))`（`F(m, n - k - m)`、`m = nlags`、`k`は元のモデルの
+  係数の数）。`û`は`X`と直交するOLS残差なので、補助回帰の残差二乗和`SSR_u`だけから
+  `LM = n·(1 - SSR_u/Σû²)`と書ける。`cov_type`には依存しない。
+- **サンプル前期間のラグは0で埋める**（statsmodels・R `bgtest`の既定・Stataと同じ）。補助回帰の観測数は
+  常に`n`。観測を落とす版（R `fill = NA`）は対応する主リファレンスが無いため提供しない。
+- **補助回帰は元のモデルの`X`をそのまま使い、`include_intercept=False`でも定数を足さない**（R・Greeneの定義）。
+  statsmodelsは切片なしのモデル（`k_constant == 0`）でだけ補助回帰に定数を足すため定義が異なり、
+  このケースはRのみで照合する（切片ありはstatsmodels・Rの両方）。
+- **時間順**: `time`はデータ（`fit()`に渡したDataFrame）の列名。値の昇順が時間順で、`hac_time`と同じ
+  `extract_time_order_ranks`で順位にする（整数・浮動小数・`Decimal`・`Date`・`Datetime`、同値・欠損値・
+  NaN・無限大は`ValidationError`）。**値の間隔（欠番）は見ず、並べた順にラグを取る**。
+- **数値の扱い**: 補助回帰は`OlsEstimator::fit`を使わず、列ノルムでスケールした列ピボットQRで
+  `SSR_u`を直接求める（必要なのは`SSR_u`だけ）。Whiteと違い列を標準化（中心化）しないのは、切片なしの
+  モデルを元の`X`のまま扱うため中心化すると列空間が変わるから（`SSR_u`は列の正のスケールでは変わらない）。
+  完全適合（`SSR_u`が`k_aux·ε·Σû²`以下）はFの分母が0になるため`ComputationError`。
+- **エラー**: `statistic`不正・`nlags < 1`・観測数が補助回帰の列数`k + nlags`以下
+  （`InsufficientObservationsForAuxRegression`）・`time`列の不備・`training_data`が無い結果は
+  `ValidationError`、型違い（`time`/`statistic`が`str`でない・`nlags`が`int`でない）は`TypeError`。
+  補助回帰が特異（ラグが`X`と共線）・残差が全て0・完全適合・非有限は`ComputationError`
+  （メッセージに`Breusch-Godfrey test`を含め、元のモデルの共線性と取り違えないようにする）。
+  残差が全て0・完全適合は元の`fit()`が先に`ComputationError`にするためPython経由では
+  到達しにくく、Rustの単体テストで担保する。
+- **実装**: engineの`linear::diagnostics::breusch_godfrey_test`（説明変数の列・`has_intercept`・残差・
+  時間の順位・`nlags`）。`engine_pybind`が`training_data`から`x`と時間列を再抽出して渡す
+  （`white_test()`と同じ経路、`training_data`が無ければ`ValidationError`）。LM/Fの両方をengineが
+  計算し、`statistic`の選択は`engine_pybind`。
+- **リファレンス**: 切片ありはstatsmodels `acorr_breusch_godfrey`（主）とR `bgtest`（`type = "Chisq"/"F"`、
+  `fill = 0`）、切片なしはR `bgtest`のみ。
+- **テスト**: `tests/linear/test_ols_breusch_godfrey.py`の1ファイル（構造・エラーパス・statsmodels凍結
+  フィクスチャ`ols_breusch_godfrey.json`・Rクロスチェック`ols_breusch_godfrey_crosscheck.json`）。
+  合成データ（`BG_SYNTHETIC_SCENARIOS`、行番号を時間列にする）×`nlags = 1, 4`、切片なし（baseline・
+  autocorrelated、Rのみ）、Wooldridge実データ`phillips`（`inf ~ unem`、行を無作為に並べ替えて`year`を
+  時間列として渡す）を照合する。許容誤差は`ols_breusch_godfrey_reference`/`_crosscheck`（`rtol=1e-8`、
+  実測最大相対誤差約6e-12、p値は相対誤差のみ）。観測数の境界（`n = k + nlags`で拒否、
+  `n = k + nlags + 1`で成功し`df_denom = 1`）、時間列による並べ替え、時間列のdtype、`cov_type`非依存も確認する。
+- **既知の制限**: 補助回帰は`n × (k + nlags)`の行列を作る。`nlags`の上限は設けていない
+  （観測数`n`を超えない範囲では`n`に近い値も受け付けるため、`n`が大きく`nlags`も巨大だとメモリを
+  大量に使う）。
+
 ## 4. 未実装・未対応
 
-- 診断検定のうち、Breusch-Godfrey・Breusch-Pagan（別メソッドとして順次追加。時間順が必要な検定は
+- 診断検定のうち、Breusch-Pagan（別メソッドとして順次追加。時間順が必要な検定は
   時間列を必須引数とする、`docs/spec/inference-conventions.md`6章）
-- `white_test()`のWLS・IV（`first_stage()`以外）への展開（WLSは残差が重み付きかどうかで意味が変わるため別途検討）
+- `white_test()`・`breusch_godfrey_test()`のWLS・IV（`first_stage()`以外）への展開（WLSは残差が重み付きかどうかで意味が変わるため別途検討）
 - `predict()`の信頼区間・予測区間（点予測のみ対応。追加する場合は別メソッド、3.4節参照）
 - HACの完全なデータ依存バンド幅自動選択（Newey & West 1994）: 参照実装がなく数値照合手段がないため見送り
 - `SingularMatrix`のエラーメッセージを状況に応じて分岐させる（優先度低）

@@ -106,6 +106,7 @@ A wrong argument *type*, as opposed to a wrong value, raises the built-in `TypeE
 | Suspected separation | Logit, Probit | The gradient is near zero but the coefficients are implausibly large, which is the signature of a (quasi-)complete separation of the outcome. |
 | Non-convergence | IV (GMM) | The iterated GMM did not converge. |
 | Degenerate variance components | RE | For example, no remaining idiosyncratic variance in noise-free data. |
+| Auxiliary matrix too large | OLS (`breusch_godfrey_test()`) | The auxiliary regression matrix (`n` rows by the number of regressors plus `nlags` columns) cannot be allocated, which happens only when `nlags` is close to `n` and `n` is large. Use a smaller `nlags`. |
 | Singular auxiliary regression | OLS (`white_test()`, `breusch_godfrey_test()`) | Every regressor is constant, or the auxiliary design stays linearly dependent after constant and duplicate terms are dropped (for example a full set of dummies in a model fitted with `include_intercept=False`), or the auxiliary R² is undefined. For `breusch_godfrey_test()` it also covers residuals that are all zero or fitted exactly by the auxiliary regression. The message names the test (`White test` or `Breusch-Godfrey test`), so it is not confused with the model's own collinearity. |
 
 How the cause is reported can depend on the estimator and on the solver. For instance, completely separated data in a binary-choice model may surface as suspected separation, as non-convergence or as a singular Hessian.

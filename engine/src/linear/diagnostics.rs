@@ -255,7 +255,8 @@ pub fn breusch_godfrey_test(
         .into());
     }
 
-    let aux = Mat::from_fn(n, k_aux, |t, j| {
+    let mut aux = allocate_aux_matrix(n, k_aux)?;
+    aux.resize_with(n, k_aux, |t, j| {
         if has_intercept && j == 0 {
             1.0
         } else if j < k {
@@ -266,7 +267,7 @@ pub fn breusch_godfrey_test(
             if t >= lag { sorted_resid[t - lag] } else { 0.0 }
         }
     });
-    let aux = scale_columns_by_norm(aux)?;
+    scale_columns_by_norm(&mut aux)?;
 
     crate::parallelism::ensure_serial();
     let qr = aux.col_piv_qr();
@@ -316,12 +317,40 @@ pub fn breusch_godfrey_test(
     })
 }
 
+/// 補助回帰の行列`n × k_aux`を、確保に失敗しても異常終了せずエラーにして確保する（中身は
+/// 未初期化ではなく、呼び出し側が`resize_with`で埋める空の行列を返す）。
+///
+/// `nlags`が`n`に近いと行列が`n × n`に近づき、`n`が大きいと確保できずプロセスが異常終了
+/// しうる。`nlags`に割合や固定値の上限を置くと統計的に正当化できないため、サイズの計算
+/// （オーバーフロー）と確保の失敗だけを`ComputationFailed`にする。QR分解は同サイズの
+/// 複製を内部で確保する（失敗を検知できない）ため、その分もここで確保できるか試す。
+///
+/// # Errors
+/// 要素数がオーバーフローする、または確保できない: `CommonError::ComputationFailed`
+fn allocate_aux_matrix(n: usize, k_aux: usize) -> Result<Mat<f64>, LeastSquaresError> {
+    let too_large = || {
+        LeastSquaresError::from(CommonError::ComputationFailed(format!(
+            "Breusch-Godfrey test: cannot allocate the auxiliary regression matrix \
+             ({n} rows x {k_aux} columns); use a smaller nlags"
+        )))
+    };
+    let cells = n.checked_mul(k_aux).ok_or_else(too_large)?;
+    let mut matrix = Mat::<f64>::new();
+    matrix.try_reserve(n, k_aux).map_err(|_| too_large())?;
+    // QR分解が内部で確保する同サイズの複製を、確保できるか先に試す（すぐ解放する）。
+    Vec::<f64>::new()
+        .try_reserve_exact(cells)
+        .map_err(|_| too_large())?;
+    Ok(matrix)
+}
+
 /// 各列をユークリッドノルムで割る（列のスケール差による誤った特異判定を避ける）。ノルムが
 /// 0または非有限の列（全て0の列等）はそのまま残し、後段のランク判定で特異として扱う。
+/// 追加の確保を避けるためその場で書き換える。
 ///
 /// # Errors
 /// 行列に非有限の値が含まれる: `CommonError::ComputationFailed`
-fn scale_columns_by_norm(matrix: Mat<f64>) -> Result<Mat<f64>, LeastSquaresError> {
+fn scale_columns_by_norm(matrix: &mut Mat<f64>) -> Result<(), LeastSquaresError> {
     let (n, k) = (matrix.nrows(), matrix.ncols());
     // 最大絶対値で先に割ってからノルムを取る（要素が1e154超・1e-162未満でも二乗和が
     // オーバーフロー・アンダーフローしないように）。
@@ -345,13 +374,14 @@ fn scale_columns_by_norm(matrix: Mat<f64>) -> Result<Mat<f64>, LeastSquaresError
         )
         .into());
     }
-    Ok(Mat::from_fn(n, k, |t, j| {
-        if norms[j] > 0.0 {
-            *matrix.get(t, j) / norms[j]
-        } else {
-            *matrix.get(t, j)
+    for (j, &norm) in norms.iter().enumerate() {
+        if norm > 0.0 {
+            for t in 0..n {
+                *matrix.get_mut(t, j) /= norm;
+            }
         }
-    }))
+    }
+    Ok(())
 }
 
 /// 補助回帰の候補項（`x`・二乗・交差項、この順）を作り、定数列と、先に採用した項と
@@ -818,14 +848,14 @@ mod tests {
 
     #[test]
     fn scale_columns_by_norm_does_not_overflow_for_huge_or_underflow_for_tiny_entries() {
-        let huge = Mat::from_fn(2, 1, |t, _| if t == 0 { 3.0e200 } else { 4.0e200 });
-        let scaled = scale_columns_by_norm(huge).unwrap();
-        assert!((scaled.get(0, 0) - 0.6).abs() < 1e-12);
-        assert!((scaled.get(1, 0) - 0.8).abs() < 1e-12);
+        let mut huge = Mat::from_fn(2, 1, |t, _| if t == 0 { 3.0e200 } else { 4.0e200 });
+        scale_columns_by_norm(&mut huge).unwrap();
+        assert!((huge.get(0, 0) - 0.6).abs() < 1e-12);
+        assert!((huge.get(1, 0) - 0.8).abs() < 1e-12);
 
-        let tiny = Mat::from_fn(2, 1, |t, _| if t == 0 { 3.0e-200 } else { 4.0e-200 });
-        let scaled = scale_columns_by_norm(tiny).unwrap();
-        assert!((scaled.get(0, 0) - 0.6).abs() < 1e-12);
+        let mut tiny = Mat::from_fn(2, 1, |t, _| if t == 0 { 3.0e-200 } else { 4.0e-200 });
+        scale_columns_by_norm(&mut tiny).unwrap();
+        assert!((tiny.get(0, 0) - 0.6).abs() < 1e-12);
     }
 
     #[test]
@@ -907,14 +937,39 @@ mod tests {
 
     #[test]
     fn scale_columns_by_norm_keeps_zero_columns_and_rejects_non_finite_values() {
-        let m = Mat::from_fn(3, 2, |t, j| if j == 0 { (t + 1) as f64 * 2.0 } else { 0.0 });
-        let scaled = scale_columns_by_norm(m).unwrap();
+        let mut scaled = Mat::from_fn(3, 2, |t, j| if j == 0 { (t + 1) as f64 * 2.0 } else { 0.0 });
+        scale_columns_by_norm(&mut scaled).unwrap();
         let norm: f64 = (0..3).map(|t| scaled.get(t, 0).powi(2)).sum::<f64>().sqrt();
         assert!((norm - 1.0).abs() < 1e-12);
         assert_eq!(*scaled.get(1, 1), 0.0);
 
-        let bad = Mat::from_fn(2, 1, |t, _| if t == 0 { f64::INFINITY } else { 1.0 });
-        assert!(scale_columns_by_norm(bad).is_err());
+        let mut bad = Mat::from_fn(2, 1, |t, _| if t == 0 { f64::INFINITY } else { 1.0 });
+        assert!(scale_columns_by_norm(&mut bad).is_err());
+    }
+
+    #[test]
+    fn allocate_aux_matrix_returns_computation_error_instead_of_aborting() {
+        // 要素数のオーバーフロー。
+        let err = allocate_aux_matrix(usize::MAX / 2, 4).unwrap_err();
+        assert!(matches!(
+            err,
+            LeastSquaresError::Common(CommonError::ComputationFailed(ref m))
+                if m.contains("cannot allocate") && m.contains("smaller nlags")
+        ));
+        // オーバーフローしないが、アドレス空間を超えて確保できないサイズ（2^55バイト）。
+        let err = allocate_aux_matrix(1 << 40, 1 << 12).unwrap_err();
+        assert!(matches!(
+            err,
+            LeastSquaresError::Common(CommonError::ComputationFailed(_))
+        ));
+    }
+
+    #[test]
+    fn allocate_aux_matrix_succeeds_for_a_small_matrix() {
+        let mut m = allocate_aux_matrix(5, 3).unwrap();
+        m.resize_with(5, 3, |t, j| (t * 3 + j) as f64);
+        assert_eq!((m.nrows(), m.ncols()), (5, 3));
+        assert_eq!(*m.get(4, 2), 14.0);
     }
 
     #[test]

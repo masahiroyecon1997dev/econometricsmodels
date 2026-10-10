@@ -839,16 +839,16 @@ fn resolve_hac_lags(lags: Option<i64>, n: usize) -> Result<usize, LeastSquaresEr
 
 /// `CovType::Hac`の`time_order`から、時系列の昇順に並べたときの行インデックス列を求める。
 ///
-/// `partial_cmp().unwrap()`について: `time_order`の値はNaN/無限大を含まないことが
-/// `engine_pybind::column_extraction`側で既に保証されている前提（本関数は`engine`の
-/// 責務境界の内側であり、クリーンな値しか受け取らない。モジュール冒頭のdocコメント参照）。
-/// 同様に、値が互いに異なる（`engine_pybind`が昇順の位置＝順位に変換済みで、同値は
+/// 比較は`total_cmp`（全順序）を使うためNaNがあってもパニックしない（NaNは最後に並ぶ）。
+/// `time_order`の値はNaN/無限大を含まないことが`engine_pybind::column_extraction`側で
+/// 既に保証されている前提（本関数は`engine`の責務境界の内側であり、クリーンな値しか
+/// 受け取らない。モジュール冒頭のdocコメント参照）。同様に、値が互いに異なる（`engine_pybind`が昇順の位置＝順位に変換済みで、同値は
 /// `ValidationError`として弾かれている）ことも前提にする。この関数自身は同値を検出せず、
 /// 同値があれば安定ソートにより行順で並べるだけ。
-fn time_ordering(time_order: &[f64], n: usize) -> Vec<usize> {
+pub(crate) fn time_ordering(time_order: &[f64], n: usize) -> Vec<usize> {
     debug_assert_eq!(time_order.len(), n);
     let mut order: Vec<usize> = (0..n).collect();
-    order.sort_by(|&a, &b| time_order[a].partial_cmp(&time_order[b]).unwrap());
+    order.sort_by(|&a, &b| time_order[a].total_cmp(&time_order[b]));
     order
 }
 
@@ -974,7 +974,7 @@ fn cluster_cov_params(
 /// 絶対閾値ではなく相対閾値を使う（`.claude/rules/rust-style.md`「線形代数」参照）。
 /// `R`は列ピボットにより対角成分が絶対値の降順になるため、最大値
 /// （`|R[0,0]|`、通常は最初の対角成分）を基準に相対的な小ささを判定する。
-fn ensure_full_rank(
+pub(crate) fn ensure_full_rank(
     qr: &faer::linalg::solvers::ColPivQr<f64>,
     k: usize,
 ) -> Result<(), LeastSquaresError> {

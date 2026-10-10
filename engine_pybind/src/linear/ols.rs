@@ -11,7 +11,7 @@
 //! 公開API（`OLSOptions`/`OLSResult`）のdocコメントと、`ValidationError`のメッセージ文字列は英語。
 //! それ以外（このファイルの説明・非公開関数のdocコメント等）は日本語のまま。
 
-use engine::linear::diagnostics::white_test;
+use engine::linear::diagnostics::{breusch_godfrey_test, white_test};
 use engine::linear::ols::{OlsEstimator, OlsInput};
 use polars::prelude::{Column, DataFrame};
 use pyo3::prelude::*;
@@ -19,11 +19,13 @@ use pyo3_polars::PyDataFrame;
 
 use super::common::{least_squares_error_to_pyerr, mat_to_vec, parse_cov_type};
 use crate::column_extraction::{
-    extract_dataframe, extract_f64_column, extract_f64_columns, x_column_names,
+    extract_dataframe, extract_f64_column, extract_f64_columns, extract_time_order_ranks,
+    x_column_names,
 };
 use crate::errors::ValidationError;
 use crate::option_values::{
-    extract_strict_float, extract_strict_opt_column, extract_strict_opt_int, extract_strict_text,
+    extract_strict_float, extract_strict_int, extract_strict_opt_column, extract_strict_opt_int,
+    extract_strict_text,
 };
 use crate::validation::{validate_common_roles, validate_no_existing_column};
 
@@ -182,25 +184,51 @@ pub struct WhiteTestOutput {
     pub dropped_terms: Vec<String>,
 }
 
-/// `white_test`の`statistic`引数で選ぶ検定統計量の版。
+/// 診断検定（`white_test`・`breusch_godfrey_test`）の`statistic`引数で選ぶ検定統計量の版。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum WhiteStatistic {
+enum StatisticVersion {
     Lm,
     F,
 }
 
-/// `white_test`の`statistic`引数（`"lm"`/`"f"`、大文字小文字を区別しない）をパースする。
+/// 診断検定の`statistic`引数（`"lm"`/`"f"`、大文字小文字を区別しない）をパースする。
 ///
 /// # Errors
 /// `statistic`が`"lm"`でも`"f"`でもない: `ValidationError`
-fn parse_white_statistic(statistic: &str) -> PyResult<WhiteStatistic> {
+fn parse_statistic_version(statistic: &str) -> PyResult<StatisticVersion> {
     match statistic.to_lowercase().as_str() {
-        "lm" => Ok(WhiteStatistic::Lm),
-        "f" => Ok(WhiteStatistic::F),
+        "lm" => Ok(StatisticVersion::Lm),
+        "f" => Ok(StatisticVersion::F),
         _ => Err(ValidationError::new_err(format!(
             "unknown statistic: '{statistic}'. Expected 'lm' or 'f'"
         ))),
     }
+}
+
+/// Raw result of `OLSResult.breusch_godfrey_test()`; the Python package wraps it in its
+/// `BreuschGodfreyTestResult` dataclass.
+///
+/// `statistic`/`p_value`/`df`/`df_denom`/`distribution` describe the selected version
+/// (`"lm"` or `"f"`); `nlags` is the number of residual lags used.
+#[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
+#[derive(Debug, Clone)]
+pub struct BreuschGodfreyTestOutput {
+    #[pyo3(get)]
+    pub statistic: f64,
+    #[pyo3(get)]
+    pub p_value: f64,
+    /// Degrees of freedom of the LM test (chi-squared), or the numerator degrees of
+    /// freedom of the F test. Equal to `nlags`.
+    #[pyo3(get)]
+    pub df: usize,
+    /// Denominator degrees of freedom of the F test (`None` for the LM version).
+    #[pyo3(get)]
+    pub df_denom: Option<usize>,
+    /// `"chi2"` for the LM version, `"f"` for the F version.
+    #[pyo3(get)]
+    pub distribution: String,
+    #[pyo3(get)]
+    pub nlags: usize,
 }
 
 /// Estimation results for OLS.
@@ -422,7 +450,7 @@ impl OLSResult {
     ///   is undefined: `ComputationError`.
     #[pyo3(signature = (statistic="lm"))]
     fn white_test(&self, statistic: &str) -> PyResult<WhiteTestOutput> {
-        let version = parse_white_statistic(statistic)?;
+        let version = parse_statistic_version(statistic)?;
         let df = self.training_data.as_ref().ok_or_else(|| {
             ValidationError::new_err(
                 "white_test() requires the original training data, which is not retained \
@@ -436,7 +464,7 @@ impl OLSResult {
             .map_err(least_squares_error_to_pyerr)?;
 
         Ok(match version {
-            WhiteStatistic::F => WhiteTestOutput {
+            StatisticVersion::F => WhiteTestOutput {
                 statistic: result.f_statistic,
                 p_value: result.f_p_value,
                 df: result.df,
@@ -445,7 +473,7 @@ impl OLSResult {
                 aux_terms: result.aux_terms,
                 dropped_terms: result.dropped_terms,
             },
-            WhiteStatistic::Lm => WhiteTestOutput {
+            StatisticVersion::Lm => WhiteTestOutput {
                 statistic: result.lm_statistic,
                 p_value: result.lm_p_value,
                 df: result.df,
@@ -453,6 +481,84 @@ impl OLSResult {
                 distribution: "chi2".to_string(),
                 aux_terms: result.aux_terms,
                 dropped_terms: result.dropped_terms,
+            },
+        })
+    }
+
+    /// Breusch-Godfrey test for serial correlation of the errors.
+    ///
+    /// Regresses the residuals on the model's independent variables and their own lags
+    /// 1 to `nlags` (in the order given by the `time` column; lags before the first
+    /// observation are 0), and tests that the lag coefficients are zero. The auxiliary
+    /// regression uses the model's regressors as they are: no constant is added to a
+    /// model fitted with `include_intercept=False`. Returns the LM version
+    /// (`statistic="lm"`, `n * R^2`, chi-squared) or the F version (`statistic="f"`).
+    /// The test does not depend on `cov_type`.
+    ///
+    /// `time` names a column of the data passed to `fit()`; the row order is never
+    /// assumed to be the time order. The values only give the order (no gaps are
+    /// checked): lags are taken in that order.
+    ///
+    /// # Errors
+    /// - `time` or `statistic` is not a `str`, or `nlags` is not an `int` (`bool` and `float`
+    ///   included): `TypeError`.
+    /// - `statistic` is not `"lm"` or `"f"`, `nlags < 1`, or too few observations for the
+    ///   auxiliary regression (`n <= k + nlags`): `ValidationError`.
+    /// - `time` does not exist, has an unsupported dtype, or contains missing values, NaN,
+    ///   infinity or duplicates: `ValidationError`.
+    /// - This result has no cached training data (currently only `IVResult.first_stage()`
+    ///   results): `ValidationError`.
+    /// - The auxiliary design matrix is singular, or the residuals are all zero / fitted
+    ///   exactly by the auxiliary regression: `ComputationError`.
+    #[pyo3(signature = (time, nlags, statistic=None))]
+    fn breusch_godfrey_test(
+        &self,
+        time: &Bound<'_, PyAny>,
+        nlags: &Bound<'_, PyAny>,
+        statistic: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<BreuschGodfreyTestOutput> {
+        let time = extract_strict_text(time, "time")?;
+        let nlags = extract_strict_int(nlags, "nlags")?;
+        let statistic = match statistic {
+            Some(value) => extract_strict_text(value, "statistic")?,
+            None => "lm".to_string(),
+        };
+        let version = parse_statistic_version(&statistic)?;
+        let df = self.training_data.as_ref().ok_or_else(|| {
+            ValidationError::new_err(
+                "breusch_godfrey_test() requires the original training data, which is not \
+                 retained for this result",
+            )
+        })?;
+
+        let x_names = x_column_names(&self.param_names, self.has_intercept, 0);
+        let x_columns = extract_f64_columns(df, x_names)?;
+        let time_order = extract_time_order_ranks(df, &time)?;
+        let result = breusch_godfrey_test(
+            &x_columns,
+            self.has_intercept,
+            &self.residuals,
+            &time_order,
+            nlags,
+        )
+        .map_err(least_squares_error_to_pyerr)?;
+
+        Ok(match version {
+            StatisticVersion::F => BreuschGodfreyTestOutput {
+                statistic: result.f_statistic,
+                p_value: result.f_p_value,
+                df: result.df,
+                df_denom: Some(result.f_df_denom),
+                distribution: "f".to_string(),
+                nlags: result.df,
+            },
+            StatisticVersion::Lm => BreuschGodfreyTestOutput {
+                statistic: result.lm_statistic,
+                p_value: result.lm_p_value,
+                df: result.df,
+                df_denom: None,
+                distribution: "chi2".to_string(),
+                nlags: result.df,
             },
         })
     }
@@ -571,16 +677,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_white_statistic_accepts_lm_and_f_case_insensitively() {
-        assert_eq!(parse_white_statistic("lm").unwrap(), WhiteStatistic::Lm);
-        assert_eq!(parse_white_statistic("LM").unwrap(), WhiteStatistic::Lm);
-        assert_eq!(parse_white_statistic("f").unwrap(), WhiteStatistic::F);
-        assert_eq!(parse_white_statistic("F").unwrap(), WhiteStatistic::F);
+    fn parse_statistic_version_accepts_lm_and_f_case_insensitively() {
+        assert_eq!(parse_statistic_version("lm").unwrap(), StatisticVersion::Lm);
+        assert_eq!(parse_statistic_version("LM").unwrap(), StatisticVersion::Lm);
+        assert_eq!(parse_statistic_version("f").unwrap(), StatisticVersion::F);
+        assert_eq!(parse_statistic_version("F").unwrap(), StatisticVersion::F);
     }
 
     #[test]
-    fn parse_white_statistic_rejects_unknown_value() {
-        assert!(parse_white_statistic("chi2").is_err());
-        assert!(parse_white_statistic("").is_err());
+    fn parse_statistic_version_rejects_unknown_value() {
+        assert!(parse_statistic_version("chi2").is_err());
+        assert!(parse_statistic_version("").is_err());
     }
 }

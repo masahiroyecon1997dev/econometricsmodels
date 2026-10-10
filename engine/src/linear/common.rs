@@ -54,6 +54,10 @@ pub enum LeastSquaresError {
     #[error("design matrix is singular (perfect multicollinearity detected)")]
     SingularMatrix,
 
+    /// Breusch-Godfrey検定のラグ次数`nlags`が1未満。
+    #[error("nlags must be a positive integer: got {nlags}")]
+    InvalidNlags { nlags: i64 },
+
     /// 事後診断検定（White検定等）の補助回帰に対して観測数が足りない。補助回帰の列数`k`
     /// （定数を含む）は元のモデルの説明変数の数から決まり、元のモデルの`n > k`より大きく
     /// なりうるため、`CommonError::InsufficientObservations`とは別のメッセージにする。

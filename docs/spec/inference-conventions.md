@@ -40,3 +40,15 @@
 
 - RE内蔵のHausman検定は回帰ベース（補助回帰）版で、Wald検定の共分散をRE本体の`cov_type`に連動させる（既定のclusterならrobust Hausman、比較は常に1-way）。補助回帰の小標本補正は`OlsEstimator`（Stata・R型）でRE本体（linearmodels型）と混在する。`plm::phtest(method = "aux", vcov = ...)`と一致を確認済み（`re-spec.md`3.7節）。
 - IVのWu-Hausman検定は`cov_type`に対応させる。ただし`hac`のみ`linearmodels`の`wooldridge_regression`と一致せず原因未特定のため`None`にする（`iv-spec.md`3.6節）。
+
+## 6. 検定・診断の公開形（プロパティかメソッドか）
+
+新しい検定・診断統計量を足すときの置き場所の規則（ユーザー決定済み）。既存の公開形はこの規則の帰結であり、場当たりに決めたものではない。
+
+- **推定量そのものの妥当性・識別に属する検定は、`fit()`時に計算してプロパティで公開する。** 自由パラメータを持たず（`fit()`のオプションだけで決まり）、推定量を選ぶ・使う時点で必ず目にする検定が対象。例: IVのSargan/Hansen J・Wu-Hausman・弱操作変数F（Cragg-Donald/Kleibergen-Paapも同区分）、REのHausman、全体F/Wald/LR。
+- **推定後の事後診断は、検定ごとの独立したメソッドとして公開する。** 検定のバリエーション、ラグ次数、時間順の指定、補助回帰の設計など利用者の選択が入るもの。例: White、Breusch-Godfrey、Breusch-Pagan、今後のRESET/Jarque-Bera。
+- **事後診断を`fit()`で自動計算しない。** 「検定してから頑健SEを選ぶ」手順を誘発するため。頑健SEは`cov_type`で最初から選ぶ設計と整合しない。
+- **検定ごとにメソッドを分ける。** 引数が検定ごとに異なり（例: BGは`time`・`nlags`、Whiteは引数なし）、検定ごとのメソッドなら型補完とバリデーションがそのまま効くため（`y`を`str`単独にするのと同じ、呼び出しやすさ優先の理由）。全検定を束ねる`diagnostics()`は**当面作らない**（一覧性が必要になった時点で薄い集約メソッドとして足す余地は残す。確定した不採用ではない）。
+- **公開形の揃え方**: プロパティは`<name>_statistic`/`_p_value`/`_df`の三つ組。事後診断メソッドは、同じ意味のフィールド（`statistic`/`p_value`/`df`/`distribution`）を持つ検定共通のfrozen dataclassを返し、`to_dict()`でJSON向けの`dict`にできる。理由: `fit_result.params`のように結果は属性（ドット記法）で読むのが基本で、診断だけ添字アクセスだとAPIが不揃いになる。レポートへの埋め込み（`f"{res.p_value:.3f}"`）でも読みやすい。JSON化は`dataclasses.asdict`相当で足りる。検定固有の追加項目は継承した型に足す。型名・置き場所・`distribution`の型（文字列かenumか）は、最初の事後診断の実装時に決める。一方、キーが利用者の列名で決まる結果（`params`/`std_errors`/`test_stats`/`p_values`/`conf_int`）と、表形式で`pl.DataFrame`/`json.dumps`にそのまま渡す`coef_table()`/`marginal_effects()`（`list[dict]`）は`dict`のまま、`predict()`は`list[float]`（`residuals`と同じ形）とする。
+- **メソッドが`X`等を必要とするとき**: `OLSResult`は`X`を保持せず、`augment()`と同様に`training_data`と`param_names`から再抽出する。`training_data`が無い結果（IVの`first_stage()`が返す`OLSResults`）では`ValidationError`にする。
+- **時間順が必要な検定（Breusch-Godfrey等）は時間列を必須引数とし、行順を時間順とみなす暗黙の既定を置かない**（`hac_time`と同じ理由、`ols-spec.md`の`hac_time`の項）。パッケージは警告を出さない方針のため、横断面データへの誤適用はこの必須引数で防ぐ。

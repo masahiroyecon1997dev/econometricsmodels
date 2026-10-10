@@ -35,7 +35,10 @@ pub(crate) fn least_squares_error_to_pyerr(err: LeastSquaresError) -> PyErr {
         LeastSquaresError::Common(common) => common_error_to_pyerr(common),
         LeastSquaresError::WeightDimensionMismatch { .. }
         | LeastSquaresError::NonPositiveWeight { .. }
-        | LeastSquaresError::InvalidHacLags { .. } => ValidationError::new_err(err.to_string()),
+        | LeastSquaresError::InvalidHacLags { .. }
+        | LeastSquaresError::InsufficientObservationsForAuxRegression { .. } => {
+            ValidationError::new_err(err.to_string())
+        }
         LeastSquaresError::SingularMatrix => ComputationError::new_err(err.to_string()),
     }
 }

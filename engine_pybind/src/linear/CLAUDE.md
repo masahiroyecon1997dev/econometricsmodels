@@ -13,6 +13,16 @@
 - pyo3 0.28以降、`Clone`実装`#[pyclass]`の`FromPyObject`自動導出はopt-in。Python側インスタンスを引数で受け取るオプション型（`OLSOptions`等）には`#[pyclass(from_py_object)]`を明示する。
 - `DataFrame::new`は`(height: usize, columns: Vec<Column>)`という2引数シグネチャ（`Vec<Column>`のみを渡す旧APIではない）。列を追加するには`polars::prelude::Column::new(name.into(), values)`で構築し、既存の`DataFrame`には`.with_column(column)`（`PolarsResult<&mut Self>`）で付加する（`OLSResult::augment()`/`WLSResult::augment()`で使う）。
 
+## `white_test()`（事後診断）の配線
+
+`OLSResult`は`OlsEstimator`を保持しないため、`white_test()`は`predict_for`と同じ経路（`x_column_names` →
+`extract_f64_columns`）で`training_data`と`param_names`から`x`を再抽出し、保持している`residuals`と
+合わせて`engine::linear::diagnostics::white_test`に渡す。`training_data`が`None`（`IVResult.first_stage()`
+由来）なら`augment(new_data=None)`と同じく`ValidationError`。`has_intercept`は`param_names[0] == "const"`で
+推定せず保持フィールドを使う（`include_intercept=false`で`x`に`"const"`列がありうるため）。LM/Fの両方を
+engineが計算し、`statistic`引数（`WhiteStatistic`、大文字小文字を区別しない）で`WhiteTestOutput`の
+フィールドを選ぶだけ。計算ロジックは持たない。
+
 ## DataFrameを構築して返す（`augment()`）
 
 `predict()`までは全メソッドが`Vec<f64>`等のフラットな値を返すだけだったが、`augment()`は

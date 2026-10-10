@@ -53,6 +53,16 @@ pub enum LeastSquaresError {
     /// 設計行列が特異（完全な多重共線性等）。
     #[error("design matrix is singular (perfect multicollinearity detected)")]
     SingularMatrix,
+
+    /// 事後診断検定（White検定等）の補助回帰に対して観測数が足りない。補助回帰の列数`k`
+    /// （定数を含む）は元のモデルの説明変数の数から決まり、元のモデルの`n > k`より大きく
+    /// なりうるため、`CommonError::InsufficientObservations`とは別のメッセージにする。
+    #[error(
+        "insufficient observations for the auxiliary regression of the diagnostic test: \
+         n={n} must be greater than the number of auxiliary regressors including the \
+         intercept (k={k})"
+    )]
+    InsufficientObservationsForAuxRegression { n: usize, k: usize },
 }
 
 /// テスト用の`time_order`: 行順をそのまま時系列順とする`[0.0, 1.0, ..., n-1]`。

@@ -11,6 +11,7 @@
 //! 公開API（`OLSOptions`/`OLSResult`）のdocコメントと、`ValidationError`のメッセージ文字列は英語。
 //! それ以外（このファイルの説明・非公開関数のdocコメント等）は日本語のまま。
 
+use engine::linear::diagnostics::white_test;
 use engine::linear::ols::{OlsEstimator, OlsInput};
 use polars::prelude::{Column, DataFrame};
 use pyo3::prelude::*;
@@ -148,6 +149,57 @@ impl OLSOptions {
             self.hac_lags,
             self.hac_time
         )
+    }
+}
+
+/// Raw result of `OLSResult.white_test()`; the Python package wraps it in its
+/// `WhiteTestResult` dataclass.
+///
+/// `statistic`/`p_value`/`df`/`df_denom`/`distribution` describe the selected version
+/// (`"lm"` or `"f"`). `aux_terms` lists the auxiliary-regression terms actually used (the
+/// first entry is always the auxiliary regression's constant, `"const"`), `dropped_terms`
+/// the terms removed because they were constant or numerically identical to an earlier term.
+#[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
+#[derive(Debug, Clone)]
+pub struct WhiteTestOutput {
+    #[pyo3(get)]
+    pub statistic: f64,
+    #[pyo3(get)]
+    pub p_value: f64,
+    /// Degrees of freedom of the LM test (chi-squared), or the numerator degrees of
+    /// freedom of the F test.
+    #[pyo3(get)]
+    pub df: usize,
+    /// Denominator degrees of freedom of the F test (`None` for the LM version).
+    #[pyo3(get)]
+    pub df_denom: Option<usize>,
+    /// `"chi2"` for the LM version, `"f"` for the F version.
+    #[pyo3(get)]
+    pub distribution: String,
+    #[pyo3(get)]
+    pub aux_terms: Vec<String>,
+    #[pyo3(get)]
+    pub dropped_terms: Vec<String>,
+}
+
+/// `white_test`の`statistic`引数で選ぶ検定統計量の版。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WhiteStatistic {
+    Lm,
+    F,
+}
+
+/// `white_test`の`statistic`引数（`"lm"`/`"f"`、大文字小文字を区別しない）をパースする。
+///
+/// # Errors
+/// `statistic`が`"lm"`でも`"f"`でもない: `ValidationError`
+fn parse_white_statistic(statistic: &str) -> PyResult<WhiteStatistic> {
+    match statistic.to_lowercase().as_str() {
+        "lm" => Ok(WhiteStatistic::Lm),
+        "f" => Ok(WhiteStatistic::F),
+        _ => Err(ValidationError::new_err(format!(
+            "unknown statistic: '{statistic}'. Expected 'lm' or 'f'"
+        ))),
     }
 }
 
@@ -350,6 +402,60 @@ impl OLSResult {
             .expect("predicted.len() matches source.height() by construction");
         Ok(PyDataFrame(source))
     }
+
+    /// White test for heteroskedasticity.
+    ///
+    /// Regresses the squared residuals on the independent variables, their squares and
+    /// their pairwise products (always with a constant, even when the model was fitted
+    /// with `include_intercept=False`) and returns either the LM version
+    /// (`statistic="lm"`, `n * R^2`, chi-squared) or the F version (`statistic="f"`).
+    /// Terms that are constant or numerically identical to an earlier term (for example
+    /// the square of a 0/1 dummy) are dropped, and the degrees of freedom count the terms
+    /// that remain. The test does not depend on `cov_type`.
+    ///
+    /// # Errors
+    /// - `statistic` is not `"lm"` or `"f"`: `ValidationError`.
+    /// - This result has no cached training data (currently only `IVResult.first_stage()`
+    ///   results): `ValidationError`.
+    /// - Too few observations for the auxiliary regression: `ValidationError`.
+    /// - The auxiliary design matrix is still singular after dropping, or its R-squared
+    ///   is undefined: `ComputationError`.
+    #[pyo3(signature = (statistic="lm"))]
+    fn white_test(&self, statistic: &str) -> PyResult<WhiteTestOutput> {
+        let version = parse_white_statistic(statistic)?;
+        let df = self.training_data.as_ref().ok_or_else(|| {
+            ValidationError::new_err(
+                "white_test() requires the original training data, which is not retained \
+                 for this result",
+            )
+        })?;
+
+        let x_names = x_column_names(&self.param_names, self.has_intercept, 0);
+        let x_columns = extract_f64_columns(df, x_names)?;
+        let result = white_test(&x_columns, x_names, &self.residuals)
+            .map_err(least_squares_error_to_pyerr)?;
+
+        Ok(match version {
+            WhiteStatistic::F => WhiteTestOutput {
+                statistic: result.f_statistic,
+                p_value: result.f_p_value,
+                df: result.df,
+                df_denom: Some(result.f_df_denom),
+                distribution: "f".to_string(),
+                aux_terms: result.aux_terms,
+                dropped_terms: result.dropped_terms,
+            },
+            WhiteStatistic::Lm => WhiteTestOutput {
+                statistic: result.lm_statistic,
+                p_value: result.lm_p_value,
+                df: result.df,
+                df_denom: None,
+                distribution: "chi2".to_string(),
+                aux_terms: result.aux_terms,
+                dropped_terms: result.dropped_terms,
+            },
+        })
+    }
 }
 
 /// Pythonから渡された `data` / `y` / `x` / `options` を検証し、
@@ -457,5 +563,24 @@ pub(crate) fn ols_estimator_to_result(
         // もう一つの呼び出し元`iv::common::first_stage()`は単一のソースDataFrameを
         // 持たないため`None`のまま（`OLSResult`のdocコメント参照）。
         training_data: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_white_statistic_accepts_lm_and_f_case_insensitively() {
+        assert_eq!(parse_white_statistic("lm").unwrap(), WhiteStatistic::Lm);
+        assert_eq!(parse_white_statistic("LM").unwrap(), WhiteStatistic::Lm);
+        assert_eq!(parse_white_statistic("f").unwrap(), WhiteStatistic::F);
+        assert_eq!(parse_white_statistic("F").unwrap(), WhiteStatistic::F);
+    }
+
+    #[test]
+    fn parse_white_statistic_rejects_unknown_value() {
+        assert!(parse_white_statistic("chi2").is_err());
+        assert!(parse_white_statistic("").is_err());
     }
 }

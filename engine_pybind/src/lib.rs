@@ -12,7 +12,7 @@ use pyo3::prelude::*;
 use column_extraction::{extract_column_list, extract_column_name, extract_dataframe};
 use errors::{ComputationError, ValidationError};
 use iv::common::{IVOptions, IVResult};
-use linear::ols::{OLSOptions, OLSResult};
+use linear::ols::{OLSOptions, OLSResult, WhiteTestOutput};
 use linear::wls::{WLSOptions, WLSResult};
 use nonlinear::common::MarginalEffectsResult;
 use nonlinear::logit::{LogitOptions, LogitResult};
@@ -263,6 +263,7 @@ fn _lib(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(fit_ols, m)?)?;
     m.add_class::<OLSOptions>()?;
     m.add_class::<OLSResult>()?;
+    m.add_class::<WhiteTestOutput>()?;
     m.add_function(wrap_pyfunction!(fit_wls, m)?)?;
     m.add_class::<WLSOptions>()?;
     m.add_class::<WLSResult>()?;

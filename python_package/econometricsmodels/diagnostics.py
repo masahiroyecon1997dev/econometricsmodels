@@ -12,7 +12,11 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, Literal
 
-__all__ = ["DiagnosticResult", "WhiteTestResult"]
+__all__ = [
+    "BreuschGodfreyTestResult",
+    "DiagnosticResult",
+    "WhiteTestResult",
+]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -75,3 +79,18 @@ class WhiteTestResult(DiagnosticResult):
 
     aux_terms: list[str]
     dropped_terms: list[str]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BreuschGodfreyTestResult(DiagnosticResult):
+    """Result of `OLSResults.breusch_godfrey_test()`.
+
+    `df` always equals `nlags` (the chi-squared degrees of freedom for the
+    LM test, the numerator degrees of freedom for the F test). `nlags` is
+    kept as a separate field so the lag order reads directly.
+
+    Attributes:
+        nlags: Number of lags of the residuals in the auxiliary regression.
+    """
+
+    nlags: int

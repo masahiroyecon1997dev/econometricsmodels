@@ -19,7 +19,7 @@ import polars as pl
 
 from .. import _lib
 from .._lib import OLSOptions
-from ..diagnostics import WhiteTestResult
+from ..diagnostics import BreuschGodfreyTestResult, WhiteTestResult
 
 __all__ = ["OLS", "OLSOptions", "OLSResults"]
 
@@ -383,4 +383,74 @@ class OLSResults:
             distribution=raw.distribution,
             aux_terms=raw.aux_terms,
             dropped_terms=raw.dropped_terms,
+        )
+
+    def breusch_godfrey_test(
+        self,
+        time: str,
+        nlags: int,
+        statistic: Literal["lm", "f"] = "lm",
+    ) -> BreuschGodfreyTestResult:
+        """Breusch-Godfrey test for serial correlation of the errors.
+
+        Regresses the residuals on the model's independent variables and
+        on their own lags 1 to `nlags`, and tests that the lag
+        coefficients are all zero. The lags are taken in the order of the
+        `time` column, and the lags before the first observation are
+        filled with zero (the convention of R's `lmtest::bgtest`,
+        statsmodels and Stata). The auxiliary regression uses the model's
+        regressors as they are: no constant is added to a model fitted
+        with `include_intercept=False` (the definition of R and Greene;
+        statsmodels adds one in that case, so its value differs). The test
+        does not depend on `cov_type`.
+
+        This is a post-estimation diagnostic: it is never computed by
+        `fit()`. It re-reads the independent variables and the `time`
+        column from the data passed to `fit()`.
+
+        The row order is never assumed to be the time order, so there is
+        no default for `time`. Only the order of the `time` values is
+        used: gaps between periods are not checked, and the lags follow
+        the sorted order. A cross-sectional data set has no meaningful
+        order, and the test is not meaningful for it.
+
+        Args:
+            time: Name of a column of the data passed to `fit()` that
+                gives the time order (integers, floats, `Decimal`,
+                `Date` or `Datetime`; the values must be distinct, as for
+                `OLSOptions.hac_time`).
+            nlags: Number of lags of the residuals, at least 1. There is
+                no default: pick the order that suits your data.
+            statistic: `"lm"` (default) for the LM version `n * R^2`
+                (chi-squared distribution), or `"f"` for the F version
+                (case-insensitive).
+
+        Returns:
+            The test result, a `BreuschGodfreyTestResult`: `distribution`
+            is `"chi2"` and `df_denom` is `None` for the LM version, `"f"`
+            and an integer for the F version.
+
+        Raises:
+            TypeError: `time` or `statistic` is not a `str`, or `nlags`
+                is not an `int` (a `bool` or `float` is rejected). A
+                builtin exception, not a `ValidationError`.
+            ValidationError: `statistic` is not `"lm"` or `"f"`;
+                `nlags < 1`; there are too few observations for the
+                auxiliary regression (`n <= k + nlags`); `time` does not
+                exist, has an unsupported dtype, or contains missing,
+                non-finite or duplicate values; or this result has no
+                retained training data (currently only the `OLSResults`
+                returned by `IVResult.first_stage()`).
+            ComputationError: The auxiliary design matrix is singular, or
+                the residuals are all zero or fitted exactly by the
+                auxiliary regression.
+        """
+        raw = self._raw.breusch_godfrey_test(time, nlags, statistic)
+        return BreuschGodfreyTestResult(
+            statistic=raw.statistic,
+            p_value=raw.p_value,
+            df=raw.df,
+            df_denom=raw.df_denom,
+            distribution=raw.distribution,
+            nlags=raw.nlags,
         )

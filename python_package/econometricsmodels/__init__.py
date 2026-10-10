@@ -9,7 +9,11 @@ around the native extension (`econometricsmodels._lib`) built by
 from __future__ import annotations
 
 from ._lib import ComputationError, ValidationError
-from .diagnostics import DiagnosticResult, WhiteTestResult
+from .diagnostics import (
+    BreuschGodfreyTestResult,
+    DiagnosticResult,
+    WhiteTestResult,
+)
 from .iv.iv import IV, IVOptions, IVResults
 from .linear.ols import OLS, OLSOptions, OLSResults
 from .linear.wls import WLS, WLSOptions, WLSResults
@@ -25,6 +29,7 @@ __all__ = [
     "OLS",
     "RE",
     "WLS",
+    "BreuschGodfreyTestResult",
     "ComputationError",
     "DiagnosticResult",
     "FEOptions",

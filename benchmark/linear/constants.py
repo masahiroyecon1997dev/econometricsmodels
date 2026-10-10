@@ -79,3 +79,40 @@ WHITE_WOOLDRIDGE_CASES: dict[str, tuple[str, str]] = {
         "lwage ~ educ + exper + northcen + south + west",
     ),
 }
+
+# Breusch-Godfrey検定（`OLSResults.breusch_godfrey_test()`）のベンチマーク対象。主リファレンス
+# （statsmodels、`generate_ols_breusch_godfrey_fixtures.py`）とクロスチェック（R、
+# `generate_ols_breusch_godfrey_crosscheck_fixtures.py`）の両フィクスチャ生成と、テストが
+# 同じケース定義を参照する。
+#
+# 合成データには時間列が無いため、行順を時間順として扱う（テスト側は`with_row_time`で時間列を足す）。
+# シナリオはWhite検定と同じ（`baseline_df1`はn=5でラグ付き補助回帰に足りない）。
+BG_SYNTHETIC_SCENARIOS = WHITE_SYNTHETIC_SCENARIOS
+BG_NLAGS = [1, 4]
+# 観測数の境界（`n = k + nlags + 1`、F検定の`df_denom = 1`）の成功パス。`small_n`（n=20、
+# k=4）で`nlags=15`が境界になる。ラグ次数が観測数に迫る場合の0埋めと自由度の数え方を、
+# statsmodels・Rの両方と照合する。
+BG_NLAGS_BOUNDARY = {"small_n": 15}
+
+
+def bg_nlags(scenario: str) -> list[int]:
+    """シナリオごとのラグ次数のリスト（共通の`BG_NLAGS`＋境界ケースがあればそれ）。"""
+    return [
+        *BG_NLAGS,
+        *(
+            [BG_NLAGS_BOUNDARY[scenario]]
+            if scenario in BG_NLAGS_BOUNDARY
+            else []
+        ),
+    ]
+
+
+# 切片なしのモデル。statsmodelsは切片なしのモデルでだけ補助回帰に定数を足すため定義が
+# 異なり（R・Greeneは足さない）、Rのみで照合する。
+BG_NO_INTERCEPT_SCENARIOS = ["baseline", "autocorrelated"]
+
+# Wooldridge実データ（時系列）: ケース名 -> (データセット名, 回帰式, 時間列)。
+# `phillips`は1948〜2003年の失業率とインフレ率で、自己相関のある実データ。
+BG_WOOLDRIDGE_CASES: dict[str, tuple[str, str, str]] = {
+    "phillips": ("phillips", "inf ~ unem", "year"),
+}

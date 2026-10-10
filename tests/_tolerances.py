@@ -73,6 +73,23 @@ TOLERANCES: dict[str, dict[str, float]] = {
         "atol": ATOL_CROSSCHECK_FLOOR,
         "atol_p_value": 0.0,
     },
+    # Breusch-Godfrey検定（`OLSResults.breusch_godfrey_test()`）。statsmodelsの
+    # `acorr_breusch_godfrey`（切片あり）との比較。補助回帰の残差二乗和から決まる閉形式の
+    # ため機械精度一致（実測最大相対誤差4.5e-12、p値を含む）。p値は絶対誤差フロアを使わず
+    # 相対誤差のみで比較する（フィクスチャには1e-108級の裾のp値があり、フロアがあると
+    # `sf`を`1 - cdf`に変えて裾が0に潰れても通ってしまうため。White検定と同じ理由）。
+    "ols_breusch_godfrey_reference": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_REFERENCE_FLOOR,
+        "atol_p_value": 0.0,
+    },
+    # 独立実装（R `lmtest::bgtest`、`fill = 0`）。切片なしのモデル（statsmodelsと定義が
+    # 異なる）もここで照合する。実測最大相対誤差6.2e-12。
+    "ols_breusch_godfrey_crosscheck": {
+        "rtol_strict": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_CROSSCHECK_FLOOR,
+        "atol_p_value": 0.0,
+    },
     "wls_reference": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_REFERENCE_FLOOR,

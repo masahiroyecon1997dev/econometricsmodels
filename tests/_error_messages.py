@@ -227,7 +227,9 @@ UNKNOWN_COV_TYPE_LINEAR = (
 
 # White検定（engine/src/linear/common.rs・engine/src/linear/diagnostics.rs・
 # engine_pybind/src/linear/ols.rs）。
-UNKNOWN_WHITE_STATISTIC = "unknown statistic: '{other}'. Expected 'lm' or 'f'"
+UNKNOWN_DIAGNOSTIC_STATISTIC = (
+    "unknown statistic: '{other}'. Expected 'lm' or 'f'"
+)
 INSUFFICIENT_OBSERVATIONS_AUX_REGRESSION = (
     "insufficient observations for the auxiliary regression of the diagnostic "
     "test: n={n} must be greater than the number of auxiliary regressors "
@@ -240,6 +242,13 @@ WHITE_NO_TRAINING_DATA = (
 # 補助回帰が除外後も特異・推定不能など、`fit()`は通ったがWhite検定の補助回帰で
 # 失敗した場合のメッセージの先頭（原因の文言は状況で変わるため先頭のみ固定）。
 WHITE_AUX_REGRESSION_PREFIX = "computation failed: White test:"
+
+# Breusch-Godfrey検定。
+INVALID_NLAGS = "nlags must be a positive integer: got {nlags}"
+BG_NO_TRAINING_DATA = (
+    "breusch_godfrey_test() requires the original training data, which is "
+    "not retained for this result"
+)
 
 # ── nonlinear系統固有（Logit/Probit/Tobit） ─────────────────────────────
 

@@ -347,7 +347,7 @@ def test_non_string_statistic_raises_type_error(baseline):
 def test_unknown_statistic_raises_validation_error(baseline):
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_WHITE_STATISTIC, other="chi2"),
+        match=escaped(msgs.UNKNOWN_DIAGNOSTIC_STATISTIC, other="chi2"),
     ):
         baseline.fit().white_test("chi2")
 

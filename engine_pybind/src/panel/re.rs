@@ -200,9 +200,9 @@ impl REOptions {
 /// The Hausman test (`hausman_statistic` / `hausman_p_value` / `hausman_df`) is computed
 /// automatically inside `fit()` and included directly here (unlike FE's
 /// `fixed_effects()`, RE has no separate diagnostic method; see `panel-common.md`
-/// section 2.4). All three are `None` when the internal FE comparison fails (singleton
-/// entities, zero-variance regressors after demeaning, etc.) or when the comparison is
-/// otherwise not well-defined — RE's own result is still returned normally in that case.
+/// section 2.4). All three are `None` only when there is no time-varying regressor to
+/// compare (every regressor is time-invariant). If the comparison cannot be computed,
+/// `fit()` fails instead.
 // `REResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`OLSResult`/`FEResult`と同じ理由）。
 //
@@ -283,16 +283,18 @@ pub struct REResult {
     /// Regression-based Hausman test statistic (chi-squared version, Wald test that the
     /// within-transformed regressors are jointly zero in the auxiliary regression;
     /// `docs/spec/re-spec.md` section 3.7). The Wald test's covariance follows
-    /// `cov_type`. Always non-negative. `None` only when there are no slope
-    /// coefficients to compare; if the auxiliary regression cannot be computed
+    /// `cov_type`. Always non-negative. `None` only when there are no
+    /// time-varying slope coefficients to compare (a time-invariant regressor is left out of
+    /// the comparison); if the auxiliary regression cannot be computed
     /// (e.g. too few clusters or periods for the robust covariance) `fit()` fails.
     #[pyo3(get)]
     pub hausman_statistic: Option<f64>,
     /// p-value of `hausman_statistic` (upper-tail chi-squared probability).
     #[pyo3(get)]
     pub hausman_p_value: Option<f64>,
-    /// Degrees of freedom of the Hausman test (number of compared slope coefficients,
-    /// i.e. `df_model - 1`).
+    /// Degrees of freedom of the Hausman test (number of compared slope coefficients:
+    /// the time-varying regressors, which is `df_model - 1` when no regressor is
+    /// time-invariant).
     #[pyo3(get)]
     pub hausman_df: Option<usize>,
 }
@@ -442,7 +444,7 @@ pub(crate) fn build_re_input(
 /// - `build_re_input`が返すエラー（列抽出・y/x/entity/dk_timeの重複・`cov_type`文字列の
 ///   検証等）は`ValidationError`
 /// - `ReEstimator::fit`が返す`engine::panel::common::PanelError`（Swamy-Arora分散成分
-///   推定の失敗——内部FE推定のsingleton検出・分散ゼロ・自由度不足、between回帰の失敗——、
+///   推定の失敗——内部FE推定のsingleton検出・自由度不足、between回帰の失敗——、
 ///   準偏差変換済みデータへの委譲失敗、クラスター数不足、HAC関連のバリデーション等）は
 ///   `panel_error_to_pyerr`で変換
 pub(crate) fn fit(

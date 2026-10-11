@@ -50,7 +50,9 @@ class RE:
             specified) time/cluster columns.
         y: Column name of the dependent variable.
         x: List of column names of the independent variables. Must
-            contain at least one column name.
+            contain at least one column name. A time-invariant
+            regressor (constant over time within every entity) is
+            allowed, unlike in FE.
         entity: Column name of the entity (individual/panel unit)
             identifier.
         options: Estimation options. Defaults to `REOptions()`
@@ -143,15 +145,18 @@ class REResults:
     (the default `"cluster"` gives the cluster-robust Hausman test;
     `"classical"` gives the classical version). The auxiliary
     regression uses OLS-style small-sample corrections, which differ
-    from the RE standard errors'. All three are `None` only when
-    there are no slope coefficients to compare. If the auxiliary
+    from the RE standard errors'. A time-invariant regressor (constant
+    over time within every entity) is allowed in RE: it is left out
+    of the internal one-way FE regression and of the within-transformed
+    regressors in the auxiliary regression, so `hausman_df` is the
+    number of time-varying regressors. All three are `None` only when
+    there are no time-varying regressors to compare. If the auxiliary
     regression cannot be computed (rank-deficient design, or a
     structurally singular robust covariance such as too few clusters or
     periods for the auxiliary slopes), `fit()` raises
     `ValidationError`/`ComputationError`. A failure in RE's
     own internal one-way FE call (used to estimate σ_ε²) makes `fit()`
-    itself raise instead (e.g. a singleton entity, or a regressor with
-    zero variance after the one-way within-transformation); see
+    itself raise instead (e.g. a singleton entity); see
     `RE.fit()`'s docstring.
 
     Args:
@@ -322,7 +327,7 @@ class REResults:
     def hausman_statistic(self) -> float | None:
         """Regression-based Hausman test statistic (chi-squared
         version, `k × F` of the Wald test that the `k` within-transformed
-        slope regressors are jointly zero in the auxiliary regression of
+        time-varying slope regressors are jointly zero in the auxiliary regression of
         the quasi-demeaned `y` on the quasi-demeaned regressors and the
         within-transformed regressors). Always non-negative. The
         comparison is always against one-way FE. The Wald test's
@@ -346,7 +351,8 @@ class REResults:
     @property
     def hausman_df(self) -> int | None:
         """Degrees of freedom of the Hausman test (number of compared
-        slope coefficients, i.e. `df_model - 1`). `None` under the same
+        slope coefficients: the time-varying regressors, which is
+        `df_model - 1` when no regressor is time-invariant). `None` under the same
         conditions as `hausman_statistic`."""
         return self._raw.hausman_df
 

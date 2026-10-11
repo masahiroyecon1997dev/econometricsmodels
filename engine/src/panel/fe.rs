@@ -519,11 +519,18 @@ impl FeInput {
     /// 再利用し作り直さない。`ReInput::from_columns`が同じ次元検証を済ませているため
     /// 検証は不要で、`entity`とコードの対応も`ReInput`が保証する（別々の引数で受けて
     /// 食い違う余地を作らない）。
-    pub(crate) fn from_re_input(input: &ReInput) -> Self {
+    ///
+    /// `columns`は`input.x()`のうちFEに渡す列の添字（昇順）。REは時間不変の列を許容するため、
+    /// 内部のFE推定にはwithin変換後の分散がある列だけを渡す（`time_varying_regressor_indices`）。
+    /// FEは分散ゼロの列を拒否するため、全列を渡すと時間不変の列でREごと失敗する。
+    pub(crate) fn from_re_input(input: &ReInput, columns: &[usize]) -> Self {
         Self {
             y: input.y().to_vec(),
-            x: input.x().to_vec(),
-            x_names: input.x_names().to_vec(),
+            x: columns.iter().map(|&j| input.x()[j].clone()).collect(),
+            x_names: columns
+                .iter()
+                .map(|&j| input.x_names()[j].clone())
+                .collect(),
             time: None,
             dep_var_name: input.dep_var_name().to_string(),
             entity_codes: input.entity_codes().clone(),
@@ -1618,6 +1625,25 @@ pub fn validate_no_zero_variance_regressors(
     Ok(())
 }
 
+/// `x`の各列のうち、1-way within変換（`entity`でθ=1のquasi-demean）後に分散がある列
+/// （時間変化のある列）の添字を昇順で返す。分散ゼロの判定は
+/// `validate_no_zero_variance_regressors`と同じ`column_is_zero_variance`（相対閾値）を使うため、
+/// ここで時間変化ありと判定された列は、そのままFEに渡しても分散ゼロで拒否されない。
+///
+/// REが時間不変の列を許容するために使う（`re-spec.md`5章）。FEの`fit()`は分散ゼロの列を
+/// 拒否する設計のままで、この関数は拒否の代わりに「FEに渡す列を選ぶ」ために同じ判定を使う。
+pub(crate) fn time_varying_regressor_indices(x: &[Vec<f64>], entity: &GroupCodes) -> Vec<usize> {
+    let theta = vec![1.0; entity.n_groups()];
+    x.iter()
+        .enumerate()
+        .filter(|(_, original)| {
+            let transformed = quasi_demean_column(original, entity, &theta);
+            !column_is_zero_variance(original, &transformed)
+        })
+        .map(|(j, _)| j)
+        .collect()
+}
+
 /// `transformed`（within変換後の1列）の分散が、`original`（変換前の同じ列）のスケールに
 /// 対して無視できるほど小さいかを判定する。
 ///
@@ -2371,6 +2397,99 @@ mod tests {
             PanelError::ZeroVarianceAfterDemeaning {
                 column: "female".to_string(),
             }
+        );
+    }
+
+    #[test]
+    fn time_varying_regressor_indices_returns_only_columns_with_within_variation() {
+        // 先頭・末尾が時間不変（エンティティ内で一定）、中央が時間変化。列順を保ち、
+        // 時間変化のある列の添字だけを昇順で返す。
+        let entity = strings(&["a", "a", "b", "b", "b"]);
+        let input = FeInput::from_columns(
+            &[1.0, 2.0, 3.0, 4.0, 5.0],
+            &[
+                vec![7.0, 7.0, -2.0, -2.0, -2.0],
+                vec![1.0, 3.0, 2.0, 5.0, 9.0],
+                vec![0.5, 0.5, 0.5, 0.5, 0.5],
+            ],
+            strings(&["z1", "x", "z2"]),
+            &entity,
+            None,
+            "y".into(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            time_varying_regressor_indices(input.x(), input.entity_codes()),
+            vec![1]
+        );
+    }
+
+    #[test]
+    fn time_varying_regressor_indices_agrees_with_zero_variance_validation() {
+        // 返した添字の列だけを集めた入力は`validate_no_zero_variance_regressors`を通り、
+        // 返さなかった列だけを集めた入力は同じ検証で拒否される（FEに渡せる列の選別が
+        // FE自身の判定とずれない）。
+        let entity = strings(&["a", "a", "b", "b", "b", "c", "c"]);
+        let columns = vec![
+            vec![2.0, 2.0, 5.0, 5.0, 5.0, -1.0, -1.0],
+            vec![1.0, 4.0, 2.0, 2.5, 9.0, 3.0, 8.0],
+            vec![1e6, 1e6, 1e6, 1e6, 1e6, 1e6, 1e6],
+        ];
+        let names = strings(&["z", "x", "big"]);
+        let y = [1.0; 7];
+        let full =
+            FeInput::from_columns(&y, &columns, names.clone(), &entity, None, "y".into()).unwrap();
+        let keep = time_varying_regressor_indices(full.x(), full.entity_codes());
+        assert_eq!(keep, vec![1]);
+
+        let kept_input = FeInput::from_columns(
+            &y,
+            &[columns[1].clone()],
+            vec![names[1].clone()],
+            &entity,
+            None,
+            "y".into(),
+        )
+        .unwrap();
+        let (_, x_kept) = within_transform_one_way(&kept_input);
+        assert_eq!(
+            validate_no_zero_variance_regressors(&kept_input, &x_kept),
+            Ok(())
+        );
+
+        let dropped_input = FeInput::from_columns(
+            &y,
+            &[columns[0].clone(), columns[2].clone()],
+            vec![names[0].clone(), names[2].clone()],
+            &entity,
+            None,
+            "y".into(),
+        )
+        .unwrap();
+        let (_, x_dropped) = within_transform_one_way(&dropped_input);
+        assert!(validate_no_zero_variance_regressors(&dropped_input, &x_dropped).is_err());
+    }
+
+    #[test]
+    fn time_varying_regressor_indices_is_empty_for_no_regressors_and_all_for_varying_columns() {
+        let entity = strings(&["a", "a", "b", "b"]);
+        let none =
+            FeInput::from_columns(&[1.0; 4], &[], vec![], &entity, None, "y".into()).unwrap();
+        assert!(time_varying_regressor_indices(none.x(), none.entity_codes()).is_empty());
+
+        let all = FeInput::from_columns(
+            &[1.0; 4],
+            &[vec![1.0, 2.0, 3.0, 5.0], vec![9.0, 1.0, 2.0, 8.0]],
+            strings(&["x1", "x2"]),
+            &entity,
+            None,
+            "y".into(),
+        )
+        .unwrap();
+        assert_eq!(
+            time_varying_regressor_indices(all.x(), all.entity_codes()),
+            vec![0, 1]
         );
     }
 

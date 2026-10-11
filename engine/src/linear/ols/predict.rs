@@ -1,4 +1,4 @@
-use crate::design_matrix::design_matrix_element;
+use crate::shared::design_matrix::design_matrix_element;
 
 /// 学習済み係数`params`を使って、新規データ（`new_x_columns`）に対する予測値を計算する
 /// （`predict(new_data)`のPython APIが`new_data`指定時に呼ぶ経路、`docs/spec/ols-spec.md`「predict()」）。

@@ -191,8 +191,6 @@
 use faer::Mat;
 use statrs::distribution::{ChiSquared, ContinuousCDF, StudentsT};
 
-use crate::error::CommonError;
-use crate::inference;
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use crate::panel::common::{
@@ -203,8 +201,10 @@ use crate::panel::common::{
 };
 use crate::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput};
 use crate::shared::covariance::leverages;
+use crate::shared::error::CommonError;
+use crate::shared::inference;
+use crate::shared::validation::validate_cluster_count_covers_slopes;
 use crate::shared::wald::wald_f_test;
-use crate::validation::validate_cluster_count_covers_slopes;
 
 /// REの被説明変数・説明変数・パネル識別子を保持する入力データ。
 ///
@@ -580,11 +580,11 @@ pub(crate) fn swamy_arora_variance_components(
     input: &ReInput,
     confidence_level: f64,
 ) -> Result<(f64, f64, FeEstimator, EntityMeans), PanelError> {
-    // faerのグローバル並列度をPar::Seqに固定する（`crate::parallelism`。
+    // faerのグローバル並列度をPar::Seqに固定する（`crate::shared::parallelism`。
     // 委譲先の`FeEstimator::fit`/`OlsEstimator::fit`自身も呼ぶが、`cargo test -p engine`で
     // この関数を直接叩く経路との統一のためここでも呼ぶ、`engine/src/panel/CLAUDE.md`
     // 「faerのグローバル並列度」参照）。
-    crate::parallelism::ensure_serial();
+    crate::shared::parallelism::ensure_serial();
 
     // σ_ε²: 内部1-way FE推定のwithin回帰残差を再利用する（`re-spec.md`3.2節）。
     let fe_input = FeInput::from_re_input(input);
@@ -1037,11 +1037,11 @@ impl ReEstimator {
         cov_type: ReCovType,
         confidence_level: f64,
     ) -> Result<Self, PanelError> {
-        // faerのグローバル並列度をPar::Seqに固定する（`crate::parallelism`。
+        // faerのグローバル並列度をPar::Seqに固定する（`crate::shared::parallelism`。
         // 委譲先の`FeEstimator::fit`/`OlsEstimator::fit`自身も呼ぶが、`cargo test -p engine`
         // で`ReEstimator::fit`を直接叩く経路との統一のためここでも呼ぶ、
         // `engine/src/panel/CLAUDE.md`「faerのグローバル並列度」参照）。
-        crate::parallelism::ensure_serial();
+        crate::shared::parallelism::ensure_serial();
 
         let (sigma2_eps, sigma2_u, fe_for_sigma2_eps, entity_means) =
             swamy_arora_variance_components(&input, confidence_level)?;
@@ -2437,7 +2437,7 @@ mod tests {
         // `SSR_between=0`・classical分散`σ²=0`・全係数の`std_error=0`になる。切片の
         // 係数自体も0のため、t統計量が`0/0=NaN`になり、`StudentsT::cdf(NaN)`が
         // `statrs`の`beta_reg`内部で不正な引数として扱われパニックしていた（当時は
-        // `crate::inference::compute_inference_stat`がNaN/無限大のt統計量をガードして
+        // `crate::shared::inference::compute_inference_stat`がNaN/無限大のt統計量をガードして
         // いなかった、このテスト実装当時のスコープ外の既存バグだった。**その後の別の
         // 修正で解消済み**——NaN t統計量はガードされpanicしない。修正後の同型データでの
         // 実際の挙動確認・回帰ガードは`swamy_arora_variance_components_does_not_panic_when_
@@ -2540,7 +2540,7 @@ mod tests {
 
     #[test]
     fn re_estimator_fit_pins_faer_global_parallelism_to_seq() {
-        // `fit()`冒頭の`crate::parallelism::ensure_serial()`がfaerの
+        // `fit()`冒頭の`crate::shared::parallelism::ensure_serial()`がfaerの
         // グローバル並列度を`Par::Seq`へ引き戻すことの回帰ガード
         // （`fe_estimator_fit_pins_faer_global_parallelism_to_seq`と同型、
         // `engine/src/panel/CLAUDE.md`「faerのグローバル並列度」参照）。

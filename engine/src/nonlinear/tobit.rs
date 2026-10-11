@@ -106,9 +106,6 @@
 //! 詳細な導入経緯は
 //! `regularized_newton_step`のdocコメント参照（ユーザー確認済み）。
 
-use crate::error::CommonError;
-use crate::inference;
-use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 use crate::nonlinear::common::{
     CovType, MarginalEffects, MarginalEffectsAt, MleError, MleFitOptions, SandwichVariant,
     SeparationNormCheck, U_CLAMP, checked_design_matrix_qr, clamped_pdf_cdf, cluster_cov_params,
@@ -116,6 +113,9 @@ use crate::nonlinear::common::{
     predict_new_data, run_solver, sandwich_cov_params, validate_cluster_cov_type,
     validate_confidence_level, validate_mle_options, validate_sufficient_observations,
 };
+use crate::shared::error::CommonError;
+use crate::shared::inference;
+use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::prelude::{Solve, SolveLstsq};
 use faer::{Mat, Side};
@@ -1360,8 +1360,8 @@ impl TobitEstimator {
             confidence_level,
         } = options;
 
-        // faer のグローバル並列度を Par::Seq に固定する（`crate::parallelism`）。
-        crate::parallelism::ensure_serial();
+        // faer のグローバル並列度を Par::Seq に固定する（`crate::shared::parallelism`）。
+        crate::shared::parallelism::ensure_serial();
 
         validate_mle_options(confidence_level, max_iter, tol)?;
 

@@ -7,7 +7,7 @@ use faer::Mat;
 use faer::prelude::SolveLstsq;
 
 use super::covariance::xtx_inverse;
-use crate::linear_algebra::{RankDeficient, checked_col_piv_qr};
+use super::linear_algebra::{RankDeficient, checked_col_piv_qr};
 
 /// [`least_squares`]の結果。
 #[derive(Debug)]

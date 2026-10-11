@@ -8,7 +8,7 @@
 //! 置き場所という位置づけに素直に合致する（`two_sls.rs`/`gmm.rs`のような手法ごとの
 //! ファイル分割はしない）。
 //!
-//! `IvError`の`Common`バリアント（`engine::error::CommonError`）は`crate::errors::
+//! `IvError`の`Common`バリアント（`engine::shared::error::CommonError`）は`crate::errors::
 //! common_error_to_pyerr`に委譲する（系統ごとに同じ判定ロジックを重複させない）。
 //!
 //! ## 実装の経緯（要点のみ、詳細は各コミット・`engine/src/iv/CLAUDE.md`参照）

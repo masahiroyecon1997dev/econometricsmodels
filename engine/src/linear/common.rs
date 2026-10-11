@@ -14,12 +14,12 @@
 //!
 //! `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/
 //! `MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`は、nonlinear系統の
-//! `MleError`と文言まで完全に重複していたため`engine::error::CommonError`に切り出し、
+//! `MleError`と文言まで完全に重複していたため`engine::shared::error::CommonError`に切り出し、
 //! `Common`バリアント経由で保持する。
 
 use thiserror::Error;
 
-use crate::error::CommonError;
+use crate::shared::error::CommonError;
 
 /// OLS/WLSの計算過程で発生しうるエラー。
 ///
@@ -78,12 +78,12 @@ pub(crate) fn row_time_order(n: usize) -> Vec<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::CommonError;
+    use crate::shared::error::CommonError;
 
     #[test]
     fn least_squares_error_messages_are_human_readable() {
         // 6種の共通バリアント（DimensionMismatch等）のメッセージ検証は
-        // `engine::error`側のテストに集約済み。ここではOLS/WLS固有の
+        // `engine::shared::error`側のテストに集約済み。ここではOLS/WLS固有の
         // バリアントに加え、`Common`が`CommonError`のDisplayをtransparentに転送する
         // ことだけを確認する。
         assert_eq!(

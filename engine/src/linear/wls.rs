@@ -63,8 +63,8 @@ impl WlsEstimator {
         cov_type: CovType,
         confidence_level: f64,
     ) -> Result<Self, LeastSquaresError> {
-        // faer のグローバル並列度を Par::Seq に固定する（`crate::parallelism`）。
-        crate::parallelism::ensure_serial();
+        // faer のグローバル並列度を Par::Seq に固定する（`crate::shared::parallelism`）。
+        crate::shared::parallelism::ensure_serial();
 
         let input = OlsInput::from_columns_weighted(
             y,
@@ -412,7 +412,7 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            LeastSquaresError::Common(crate::error::CommonError::NoRegressors { n: 5 })
+            LeastSquaresError::Common(crate::shared::error::CommonError::NoRegressors { n: 5 })
         );
     }
 

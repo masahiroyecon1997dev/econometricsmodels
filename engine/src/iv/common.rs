@@ -11,7 +11,7 @@
 //! （`docs/spec/iv-spec.md`3.8節）。
 //!
 //! `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/
-//! `MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`は`engine::error::
+//! `MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`は`engine::shared::error::
 //! CommonError`に切り出し済みのため、ここでは含めない。
 //!
 //! 現時点ではIV固有バリアントとして識別に関わる`InsufficientInstruments`のみ定義する
@@ -38,10 +38,10 @@
 use faer::Mat;
 use thiserror::Error;
 
-use crate::error::CommonError;
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
-use crate::validation::{
+use crate::shared::error::CommonError;
+use crate::shared::validation::{
     MAX_ITER_LIMIT, validate_cluster_count_covers_slopes, validate_cluster_groups,
 };
 

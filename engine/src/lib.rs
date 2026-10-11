@@ -1,16 +1,10 @@
 //! `engine`: econometricsmodels の計算コア（純粋Rust、PyO3非依存）。
 //!
-//! 各推定手法は本クレート配下にモジュールとして追加していく想定
-//! （例: `ols`, `fe`, ...）。
+//! 系統別のモジュール（`linear`/`nonlinear`/`iv`/`panel`）と、系統をまたいで共有する
+//! `shared`で構成する。
 
-pub mod design_matrix;
-pub mod error;
-pub mod inference;
 pub mod iv;
 pub mod linear;
-pub mod linear_algebra;
 pub mod nonlinear;
 pub mod panel;
-pub mod parallelism;
 pub mod shared;
-pub mod validation;

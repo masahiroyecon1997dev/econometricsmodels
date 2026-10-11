@@ -58,18 +58,18 @@
 //! サンドイッチ計算側では検証しない。`x_endog=[]`の退化ケースでは第一段階ループが
 //! 一度も回らないため、この検証が範囲外エラーを検知する唯一の経路になる）。
 
-use crate::error::CommonError;
-use crate::inference;
 use crate::iv::common::{
     IvError, IvInput, compute_first_stage, mat_column_to_vec, mat_to_columns,
     validate_structural_cluster_count, without_baked_in_intercept,
 };
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
-use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 use crate::shared::cluster::group_indices;
 use crate::shared::covariance::time_ordering;
-use crate::validation::validate_cluster_groups;
+use crate::shared::error::CommonError;
+use crate::shared::inference;
+use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
+use crate::shared::validation::validate_cluster_groups;
 use faer::linalg::matmul::matmul;
 use faer::prelude::Solve;
 use faer::{Accum, Mat, Par, Side};
@@ -176,8 +176,8 @@ impl TwoSlsEstimator {
     /// 識別可能性の検証をここで行う理由は`IvInput`の構造体docコメント参照
     /// （`OlsEstimator::fit`が`n<=k`を検証するのと同じ層分け、ユーザー確認済み）。
     pub fn fit(input: IvInput, cov_type: CovType, confidence_level: f64) -> Result<Self, IvError> {
-        // faer のグローバル並列度を Par::Seq に固定する（`crate::parallelism`）。
-        crate::parallelism::ensure_serial();
+        // faer のグローバル並列度を Par::Seq に固定する（`crate::shared::parallelism`）。
+        crate::shared::parallelism::ensure_serial();
 
         if input.k_instruments() < input.k_endog() {
             return Err(IvError::InsufficientInstruments {
@@ -900,8 +900,8 @@ fn wald_f_test(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::CommonError;
     use crate::linear::common::row_time_order;
+    use crate::shared::error::CommonError;
 
     /// 丁度識別（`len(instruments) == len(x_endog)`）の閉形式解と数値照合するテストデータ。
     ///
@@ -941,7 +941,7 @@ mod tests {
 
     #[test]
     fn fit_pins_faer_global_parallelism_to_seq() {
-        // `fit()` 冒頭の `crate::parallelism::ensure_serial()` が faer の
+        // `fit()` 冒頭の `crate::shared::parallelism::ensure_serial()` が faer の
         // グローバル並列度を `Par::Seq` へ引き戻すことの回帰ガード（iv 系統代表）。
         // 別テストが `Seq` にしている可能性があるため、まず `Rayon` に戻してから通す。
         // 設計行列は極小なので一時的な `Rayon` 設定は病理を招かない。

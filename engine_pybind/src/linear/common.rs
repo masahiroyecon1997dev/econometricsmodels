@@ -9,7 +9,7 @@
 //! 含む`linear`系統共通のエラー型であることを名前に反映するため、`engine`側で
 //! `engine::linear::common::LeastSquaresError`に改名・移動した。
 //!
-//! `LeastSquaresError`の`Common`バリアント（`engine::error::CommonError`、nonlinear系統の
+//! `LeastSquaresError`の`Common`バリアント（`engine::shared::error::CommonError`、nonlinear系統の
 //! `MleError`と共有する6種のバリデーションエラー）は`crate::errors::common_error_to_pyerr`
 //! に委譲する（系統ごとに同じ判定ロジックを重複させない）。
 
@@ -57,7 +57,7 @@ pub(crate) fn least_squares_error_is_computation_error(err: &LeastSquaresError) 
     matches!(
         err,
         LeastSquaresError::SingularMatrix
-            | LeastSquaresError::Common(engine::error::CommonError::ComputationFailed(_))
+            | LeastSquaresError::Common(engine::shared::error::CommonError::ComputationFailed(_))
     )
 }
 

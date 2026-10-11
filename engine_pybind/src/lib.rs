@@ -260,7 +260,7 @@ fn _lib(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // 固定する。各 `Estimator::fit()` 冒頭でも呼ぶが（`cargo test`
     // との経路統一のため）、ここで一度呼んでおくことで将来 `fit()` 以外の Python
     // 入口が増えても確実に適用される。
-    engine::parallelism::ensure_serial();
+    engine::shared::parallelism::ensure_serial();
 
     m.add_function(wrap_pyfunction!(fit_ols, m)?)?;
     m.add_class::<OLSOptions>()?;

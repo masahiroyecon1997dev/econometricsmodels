@@ -99,7 +99,7 @@
 //! `FeEstimator::fit`は`OlsEstimator`を経由せず、以下をFE自身で計算する:
 //! - **標準誤差・t値・p値・信頼区間**: `cov_type`ごとに`FeEstimator`自身が独自に
 //!   計算し直す（下記「cov_type対応」節参照）。t値・p値・信頼区間の計算自体は
-//!   t分布（自由度は`cov_type`によらず常に`df_resid`、3.3節）で`crate::inference`の
+//!   t分布（自由度は`cov_type`によらず常に`df_resid`、3.3節）で`crate::shared::inference`の
 //!   共有ヘルパーを使う（OLS自身と同じロジック）。
 //! - **AIC/BIC**: `log_likelihood`自体は`SSR/n`のみに依存し`df_resid`非依存の式
 //!   （`gaussian_goodness_of_fit`の`log_likelihood`）のためそのまま再利用できるが、
@@ -379,8 +379,6 @@ use std::collections::BTreeMap;
 use faer::Mat;
 use statrs::distribution::StudentsT;
 
-use crate::error::CommonError;
-use crate::inference;
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::OlsInput;
 use crate::panel::common::{
@@ -391,10 +389,12 @@ use crate::panel::common::{
 };
 use crate::panel::re::ReInput;
 use crate::shared::covariance::leverages;
+use crate::shared::error::CommonError;
 use crate::shared::goodness_of_fit::gaussian_goodness_of_fit;
+use crate::shared::inference;
 use crate::shared::least_squares::{LeastSquaresFit, least_squares};
+use crate::shared::validation::validate_cluster_count_covers_slopes;
 use crate::shared::wald::wald_f_test;
-use crate::validation::validate_cluster_count_covers_slopes;
 
 /// FEの被説明変数・説明変数・パネル識別子を保持する入力データ。
 ///
@@ -768,10 +768,10 @@ impl FeEstimator {
         cov_type: FeCovType,
         confidence_level: f64,
     ) -> Result<Self, PanelError> {
-        // faerのグローバル並列度をPar::Seqに固定する（`crate::parallelism`。
+        // faerのグローバル並列度をPar::Seqに固定する（`crate::shared::parallelism`。
         // `cargo test -p engine`でFeEstimator::fitを直接叩く経路でも担保するためここで呼ぶ、`engine/src/panel/CLAUDE.md`「faerの
         // グローバル並列度」参照）。
-        crate::parallelism::ensure_serial();
+        crate::shared::parallelism::ensure_serial();
 
         let (y, x) = match effects {
             FeEffects::OneWay => {
@@ -4400,7 +4400,7 @@ mod tests {
 
     #[test]
     fn fe_estimator_fit_pins_faer_global_parallelism_to_seq() {
-        // `fit()`冒頭の`crate::parallelism::ensure_serial()`がfaerのグローバル
+        // `fit()`冒頭の`crate::shared::parallelism::ensure_serial()`がfaerのグローバル
         // 並列度を`Par::Seq`へ引き戻すことの回帰ガード（panel系統代表、
         // `engine/src/panel/CLAUDE.md`「faerのグローバル並列度」参照）。
         faer::set_global_parallelism(faer::Par::rayon(0));

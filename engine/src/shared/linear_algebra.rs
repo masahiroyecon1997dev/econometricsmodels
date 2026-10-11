@@ -1,7 +1,7 @@
 //! 系統（`linear`/`nonlinear`等）をまたいで共有する、統計手法に依存しない純粋な
 //! 線形代数ユーティリティ（`.claude/rules/rust-style.md`「全手法で共有するロジック」参照）。
 
-use crate::error::CommonError;
+use super::error::CommonError;
 use faer::linalg::solvers::ColPivQr;
 use faer::{Mat, Side};
 

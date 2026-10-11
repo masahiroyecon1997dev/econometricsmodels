@@ -8,13 +8,13 @@
 use faer::Mat;
 
 use super::cov_type::CovType;
-use crate::error::CommonError;
 use crate::linear::common::LeastSquaresError;
 use crate::shared::covariance::{
     HcVariant, classical_cov_params, cluster_cov_params, hac_cov_params, hc_cov_params,
     time_ordering,
 };
-use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
+use crate::shared::error::CommonError;
+use crate::shared::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 
 /// [`compute_cov_params`]の結果。
 pub(super) struct CovParams {

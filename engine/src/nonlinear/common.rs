@@ -13,7 +13,7 @@
 //!
 //! `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/
 //! `MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`は、linear系統の
-//! `LeastSquaresError`と文言まで完全に重複していたため`engine::error::CommonError`に
+//! `LeastSquaresError`と文言まで完全に重複していたため`engine::shared::error::CommonError`に
 //! 切り出し、`Common`バリアント経由で保持する。
 
 use argmin::core::TerminationStatus;
@@ -29,13 +29,13 @@ use std::cell::Cell;
 use std::collections::VecDeque;
 use thiserror::Error;
 
-use crate::design_matrix::design_matrix_element;
-use crate::error::CommonError;
-use crate::inference;
-use crate::linear_algebra::{checked_col_piv_qr, ensure_well_conditioned_symmetric_matrix};
 use crate::shared::covariance::{cluster_correction, cluster_meat, sandwich};
-use crate::validation::MAX_ITER_LIMIT;
-use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
+use crate::shared::design_matrix::design_matrix_element;
+use crate::shared::error::CommonError;
+use crate::shared::inference;
+use crate::shared::linear_algebra::{checked_col_piv_qr, ensure_well_conditioned_symmetric_matrix};
+use crate::shared::validation::MAX_ITER_LIMIT;
+use crate::shared::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 
 /// Logit/Probit/Tobitの計算過程で発生しうるエラー。
 ///
@@ -947,7 +947,7 @@ pub fn predict_from_link(x: &Mat<f64>, params: &[f64], link: impl Fn(f64) -> f64
 /// `"const"`を除いたもの）と同じ本数・同じ順序である必要がある。`has_intercept`が
 /// `true`の場合、定数項の列はここで自動的に先頭に付加するため`new_x_columns`に
 /// 含めない（`LogitInput::from_columns`/`ProbitInput::from_columns`の切片列自動追加と
-/// 一致させるため、`crate::design_matrix::design_matrix_element`を共有する）。
+/// 一致させるため、`crate::shared::design_matrix::design_matrix_element`を共有する）。
 ///
 /// # パニックについて
 /// `new_x_columns.len()`が`params.len() - usize::from(has_intercept)`と一致しない場合は
@@ -2875,7 +2875,7 @@ pub fn destandardize_cov_params(cov_std: &Mat<f64>, scale: &ColumnScale) -> Mat<
 /// サンドイッチ型・クラスターロバストの計算でも同じ戻り値をそのまま両側から掛ければよく、
 /// 追加の符号反転は不要（`sandwich_cov_params`・`cluster_cov_params`参照）。
 ///
-/// **Cholesky分解の前に固有値ベースの悪条件検出を行う**（`crate::linear_algebra::
+/// **Cholesky分解の前に固有値ベースの悪条件検出を行う**（`crate::shared::linear_algebra::
 /// ensure_well_conditioned_symmetric_matrix`、OLSの`wald_f_test`と共有する
 /// ユーティリティ）。非ピボットCholesky（`Llt`）のL因子対角成分は、構造的な
 /// 特異性（完全な多重共線性等）を確実には検出できない（OLSで実測確認済み）。
@@ -4868,7 +4868,7 @@ mod tests {
     #[test]
     fn mle_error_messages_are_human_readable() {
         // 6種の共通バリアント（DimensionMismatch等）のメッセージ検証は
-        // `engine::error`側のテストに集約済み。ここではnonlinear固有の
+        // `engine::shared::error`側のテストに集約済み。ここではnonlinear固有の
         // バリアントに加え、`Common`が`CommonError`のDisplayをtransparentに転送する
         // ことだけを確認する。
         assert_eq!(

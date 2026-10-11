@@ -12,7 +12,7 @@ use faer::prelude::Solve;
 use faer::{Accum, Mat, Par, Side};
 
 use super::cluster::group_indices;
-use crate::linear_algebra::RankDeficient;
+use crate::shared::linear_algebra::RankDeficient;
 
 /// `(X'X)⁻¹`を求める。classical・HC0-3・HAC・クラスターのいずれの標準誤差でも必要になる。
 ///

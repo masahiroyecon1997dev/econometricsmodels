@@ -5,7 +5,7 @@
 //! `PanelError`を共有する（`docs/spec/panel-common.md`4.4節）。
 //!
 //! `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/
-//! `MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`は`engine::error::
+//! `MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`は`engine::shared::error::
 //! CommonError`に切り出し済みのため、ここでは`Common`バリアント経由で保持する。
 //!
 //! FE/RE固有バリアントは、`docs/spec/fe-spec.md`（FE固有論点）・`docs/spec/re-spec.md`
@@ -65,8 +65,8 @@ use std::fmt;
 use faer::Mat;
 use thiserror::Error;
 
-use crate::error::CommonError;
 use crate::linear::common::LeastSquaresError;
+use crate::shared::error::CommonError;
 
 /// パネルデータの2つの次元。エラーメッセージ・バリデーションで「どちらの次元の
 /// 問題か」を区別するために使う。

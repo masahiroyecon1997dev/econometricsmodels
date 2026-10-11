@@ -63,8 +63,6 @@
 //! 悪条件パラメータ点にて確認済み）。`linear_predictor_and_residual`が返す`zᵢ`は
 //! `λᵢ`と同じクランプ済み`u`から再構成した値であり、この非対称性を避けている。
 
-use crate::error::CommonError;
-use crate::inference;
 use crate::nonlinear::common::{
     CovType, FittedModelForMarginalEffects, GoodnessOfFit, MarginalEffects, MarginalEffectsAt,
     MleError, MleFitOptions, SandwichVariant, SeparationNormCheck, U_CLAMP, clamped_pdf_cdf,
@@ -74,6 +72,8 @@ use crate::nonlinear::common::{
     predict_from_link, predict_new_data, run_solver, sandwich_cov_params, standardize_columns,
     validate_fit_preconditions,
 };
+use crate::shared::error::CommonError;
+use crate::shared::inference;
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::Mat;
 use statrs::distribution::{Continuous, ContinuousCDF, Normal};
@@ -553,8 +553,8 @@ impl ProbitEstimator {
             confidence_level,
         } = options;
 
-        // faer のグローバル並列度を Par::Seq に固定する（`crate::parallelism`）。
-        crate::parallelism::ensure_serial();
+        // faer のグローバル並列度を Par::Seq に固定する（`crate::shared::parallelism`）。
+        crate::shared::parallelism::ensure_serial();
 
         let n = input.nobs();
         let k = input.k();

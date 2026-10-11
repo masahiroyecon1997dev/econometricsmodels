@@ -18,7 +18,7 @@
 //!     ...  # データの統計的な性質に起因するケース（特異行列等）
 //! ```
 
-use engine::error::CommonError;
+use engine::shared::error::CommonError;
 use pyo3::PyErr;
 use pyo3::create_exception;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
@@ -27,7 +27,7 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 create_exception!(econometricsmodels, ValidationError, PyValueError);
 create_exception!(econometricsmodels, ComputationError, PyRuntimeError);
 
-/// `engine::error::CommonError`をPython例外に変換する。
+/// `engine::shared::error::CommonError`をPython例外に変換する。
 ///
 /// `engine::linear::common::LeastSquaresError`・`engine::nonlinear::common::MleError`
 /// 等、`CommonError`を`#[error(transparent)] Common(#[from] CommonError)`で包む

@@ -1,13 +1,13 @@
 //! 系統をまたいで共有する入力バリデーションロジック。
 //!
-//! `engine::error::CommonError`はエラー**型**の定義のみに責務を絞っているため
+//! `engine::shared::error::CommonError`はエラー**型**の定義のみに責務を絞っているため
 //! （`error.rs`冒頭のdocコメント参照）、モデル固有の計算に依存しない純粋な検証
-//! **関数**はこちらに置く（`engine::linear_algebra`が数値計算ユーティリティを
+//! **関数**はこちらに置く（`engine::shared::linear_algebra`が数値計算ユーティリティを
 //! 集約しているのと同じ考え方で、こちらは入力検証ユーティリティを集約する）。
 
 use std::collections::HashSet;
 
-use crate::error::CommonError;
+use super::error::CommonError;
 
 /// 反復回数の上限（`max_iter`・`gmm_max_iter`）。既定値（35・100）の約100倍で、これを超える
 /// 指定は、収束しない問題で実質的に終わらない計算になる（反復中は中断できない）ため
@@ -22,7 +22,7 @@ pub const MAX_ITER_LIMIT: i64 = 10_000;
 ///
 /// OLS（`engine::linear::ols`）とnonlinear（`engine::nonlinear::common`）の両方で
 /// 同一のロジック・エラーメッセージが必要だったため共有化した
-/// （`ensure_well_conditioned_symmetric_matrix`を`engine::linear_algebra`に
+/// （`ensure_well_conditioned_symmetric_matrix`を`engine::shared::linear_algebra`に
 /// 共有化したのと同じ理由：モデル固有の計算に一切依存しない純粋な検証ロジックのため）。
 ///
 /// `groups.len() != n`は呼び出し側（`engine_pybind`）の実装バグでしか起こり得ない内部契約

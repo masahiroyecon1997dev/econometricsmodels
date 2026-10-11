@@ -4,13 +4,13 @@ use statrs::distribution::StudentsT;
 use super::cov_params::{CovParams, compute_cov_params, validate_cluster_count};
 use super::cov_type::CovType;
 use super::input::OlsInput;
-use crate::error::CommonError;
-use crate::inference;
 use crate::linear::common::LeastSquaresError;
+use crate::shared::error::CommonError;
 use crate::shared::goodness_of_fit::{GaussianGoodnessOfFit, gaussian_goodness_of_fit};
+use crate::shared::inference;
 use crate::shared::least_squares::{LeastSquaresFit, least_squares, residual_sum_of_squares};
+use crate::shared::validation::validate_has_regressors;
 use crate::shared::wald::wald_f_test;
-use crate::validation::validate_has_regressors;
 
 /// OLSの推定結果。
 ///
@@ -120,8 +120,8 @@ impl OlsEstimator {
     ) -> Result<Self, LeastSquaresError> {
         validate_has_regressors(input.nobs(), input.k())?;
 
-        // faer のグローバル並列度を Par::Seq に固定する（`crate::parallelism`）。
-        crate::parallelism::ensure_serial();
+        // faer のグローバル並列度を Par::Seq に固定する（`crate::shared::parallelism`）。
+        crate::shared::parallelism::ensure_serial();
 
         if !(confidence_level > 0.0 && confidence_level < 1.0) {
             return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
@@ -507,7 +507,7 @@ mod tests {
 
     #[test]
     fn fit_pins_faer_global_parallelism_to_seq() {
-        // `fit()` 冒頭の `crate::parallelism::ensure_serial()` が faer の
+        // `fit()` 冒頭の `crate::shared::parallelism::ensure_serial()` が faer の
         // グローバル並列度を `Par::Seq` へ引き戻すことの回帰ガード（linear 系統代表）。
         // 別テストが既に `Seq` にしている可能性があるため、まず `Rayon` に戻してから
         // `fit()` を通す。ここで扱う設計行列は極小なので、この一時的な `Rayon` 設定が

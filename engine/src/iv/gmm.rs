@@ -158,7 +158,7 @@
 //! - `hac`: 上記の通り`hac_moment_covariance`をそのまま再利用。
 //!
 //! **検定分布はz（標準正規）**（`docs/spec/iv-spec.md`3.2節で確定済み、2-step efficient GMMの
-//! 漸近正規性が根拠）。`engine::inference`の分布非依存関数（`critical_value`/
+//! 漸近正規性が根拠）。`engine::shared::inference`の分布非依存関数（`critical_value`/
 //! `compute_inference_stat`）を`statrs::distribution::Normal`で使う（`two_sls.rs`が
 //! `StudentsT`で使うのと同じ関数で、分布に依存しない設計方針に沿っている）。
 //!
@@ -201,15 +201,15 @@ use faer::prelude::Solve;
 use faer::{Accum, Mat, Par, Side};
 use statrs::distribution::{ChiSquared, ContinuousCDF, Normal};
 
-use crate::error::CommonError;
-use crate::inference;
 use crate::iv::common::{IvError, IvInput, mat_to_columns, validate_structural_cluster_count};
 use crate::linear::ols::CovType;
-use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 use crate::shared::cluster::group_indices;
 use crate::shared::covariance::time_ordering;
-use crate::validation::MAX_ITER_LIMIT;
-use crate::validation::validate_cluster_groups;
+use crate::shared::error::CommonError;
+use crate::shared::inference;
+use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
+use crate::shared::validation::MAX_ITER_LIMIT;
+use crate::shared::validation::validate_cluster_groups;
 
 /// GMMの点推定に使う重み行列の種別（`docs/spec/iv-spec.md`1.2節）。
 ///
@@ -349,8 +349,8 @@ impl GmmEstimator {
         cov_type: CovType,
         confidence_level: f64,
     ) -> Result<Self, IvError> {
-        // faer のグローバル並列度を Par::Seq に固定する（`crate::parallelism`）。
-        crate::parallelism::ensure_serial();
+        // faer のグローバル並列度を Par::Seq に固定する（`crate::shared::parallelism`）。
+        crate::shared::parallelism::ensure_serial();
 
         if !(confidence_level > 0.0 && confidence_level < 1.0) {
             return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
@@ -1207,9 +1207,9 @@ fn gmm_wald_chi2_test(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::CommonError;
     use crate::linear::common::row_time_order;
     use crate::linear::ols::CovType as OlsCovType;
+    use crate::shared::error::CommonError;
 
     /// 2SLSと同じデータ（`x_exog`に実変数を含む、過剰識別）で、`WeightType::Classical`の
     /// GMM点推定が`TwoSlsEstimator`の点推定と厳密に一致することを確認する（モジュール冒頭の

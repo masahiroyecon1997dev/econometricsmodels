@@ -5,8 +5,8 @@ use faer::Side;
 use faer::prelude::Solve;
 use statrs::distribution::{ContinuousCDF, FisherSnedecor};
 
-use crate::error::CommonError;
-use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
+use crate::shared::error::CommonError;
+use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 
 /// 傾き係数（切片を除く`df_model`個の係数）が全てゼロという帰無仮説のロバストWald検定を行い、
 /// F統計量とそのp値を返す。
@@ -31,7 +31,7 @@ use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 /// なるため`rank(Ŝ) ≤ g - 1`であり、傾き係数の数`q ≥ g`なら`Σ`が構造的に特異になる。
 /// `g`・`q`は入力だけから判定できるため、行列計算を待たず事前検証する方針にした。
 ///
-/// この関数の`ensure_well_conditioned_symmetric_matrix`（`crate::linear_algebra`、
+/// この関数の`ensure_well_conditioned_symmetric_matrix`（`crate::shared::linear_algebra`、
 /// 固有値分解ベースの相対閾値判定。系統をまたいで共有する純粋な線形代数ユーティリティ、
 /// `.claude/rules/rust-style.md`「全手法で共有するロジック」参照）は、事前検証をすり抜ける
 /// ケース——`g > q`だが傾き係数間の悪条件（極端なスケール差・準多重共線性等）で

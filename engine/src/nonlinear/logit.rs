@@ -29,8 +29,6 @@
 //! 共通行列演算向け）は符号反転しない生のスコア`sᵢ=(yᵢ-pᵢ)xᵢ`を返す
 //! （`nonlinear/common.rs`の`SolverOutput.hessian`と同じく対数尤度そのものの符号）。
 
-use crate::error::CommonError;
-use crate::inference;
 use crate::nonlinear::common::{
     CovType, FittedModelForMarginalEffects, GoodnessOfFit, MarginalEffects, MarginalEffectsAt,
     MleError, MleFitOptions, SandwichVariant, SeparationNormCheck, cluster_cov_params,
@@ -40,6 +38,8 @@ use crate::nonlinear::common::{
     predict_from_link, predict_new_data, run_solver, sandwich_cov_params, standardize_columns,
     validate_fit_preconditions,
 };
+use crate::shared::error::CommonError;
+use crate::shared::inference;
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::Mat;
 use statrs::distribution::Normal;
@@ -491,8 +491,8 @@ impl LogitEstimator {
             confidence_level,
         } = options;
 
-        // faer のグローバル並列度を Par::Seq に固定する（`crate::parallelism`）。
-        crate::parallelism::ensure_serial();
+        // faer のグローバル並列度を Par::Seq に固定する（`crate::shared::parallelism`）。
+        crate::shared::parallelism::ensure_serial();
 
         let n = input.nobs();
         let k = input.k();
@@ -1144,7 +1144,7 @@ mod tests {
 
     #[test]
     fn fit_pins_faer_global_parallelism_to_seq() {
-        // `fit()` 冒頭の `crate::parallelism::ensure_serial()` が faer の
+        // `fit()` 冒頭の `crate::shared::parallelism::ensure_serial()` が faer の
         // グローバル並列度を `Par::Seq` へ引き戻すことの回帰ガード（nonlinear 系統代表）。
         // 別テストが `Seq` にしている可能性があるため、まず `Rayon` に戻してから通す。
         // 設計行列は極小なので一時的な `Rayon` 設定は病理を招かない。

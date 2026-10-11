@@ -3,7 +3,7 @@
 //! `.claude/rules/rust-style.md`「ファイル・ディレクトリ構成」: 系統内で共有するロジックは
 //! `<系統>/common.rs`に置く（`engine_pybind/src/linear/common.rs`と同じ位置づけ）。
 //!
-//! `MleError`の`Common`バリアント（`engine::error::CommonError`、`linear`系統の
+//! `MleError`の`Common`バリアント（`engine::shared::error::CommonError`、`linear`系統の
 //! `LeastSquaresError`と共有する6種のバリデーションエラー）は`crate::errors::
 //! common_error_to_pyerr`に委譲する（系統ごとに同じ判定ロジックを重複させない）。
 

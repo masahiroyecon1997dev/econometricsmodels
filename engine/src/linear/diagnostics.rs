@@ -18,9 +18,9 @@ use statrs::distribution::{ChiSquared, ContinuousCDF, FisherSnedecor};
 
 use super::common::LeastSquaresError;
 use super::ols::{CovType, OlsEstimator, OlsInput};
-use crate::error::CommonError;
-use crate::linear_algebra::checked_col_piv_qr;
 use crate::shared::covariance::time_ordering;
+use crate::shared::error::CommonError;
+use crate::shared::linear_algebra::checked_col_piv_qr;
 
 /// 補助回帰の2列を「数値的に同一」、1列を「定数」とみなす相対許容誤差。
 ///
@@ -333,7 +333,7 @@ pub fn breusch_godfrey_test(
     });
     scale_columns_by_norm(&mut aux)?;
 
-    crate::parallelism::ensure_serial();
+    crate::shared::parallelism::ensure_serial();
     let qr = checked_col_piv_qr(&aux)
         .map_err(|_| aux_fit_error("Breusch-Godfrey test", LeastSquaresError::SingularMatrix))?;
     let params = qr.solve_lstsq(Mat::from_fn(n, 1, |t, _| sorted_resid[t]));

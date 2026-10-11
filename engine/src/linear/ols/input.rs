@@ -1,8 +1,8 @@
 use faer::Mat;
 
-use crate::design_matrix::design_matrix_element;
-use crate::error::CommonError;
 use crate::linear::common::LeastSquaresError;
+use crate::shared::design_matrix::design_matrix_element;
+use crate::shared::error::CommonError;
 
 /// OLSの被説明変数・設計行列を保持する入力データ。
 ///

@@ -496,7 +496,7 @@ impl LogitEstimator {
 
         let n = input.nobs();
         let k = input.k();
-        validate_fit_preconditions(
+        let cluster_codes = validate_fit_preconditions(
             confidence_level,
             max_iter,
             tol,
@@ -588,16 +588,16 @@ impl LogitEstimator {
                     SandwichVariant::Hc1,
                 )?
             }
-            CovType::Cluster { groups } => {
+            CovType::Cluster { .. } => {
                 let problem = problem_for_scores
                     .as_ref()
                     .expect("problem_for_scores must be Some for CovType::Cluster");
                 // `groups`のNone・クラスター数不足の検証はfit()冒頭で完了済み
                 // （MissingClusterColumn/InsufficientClustersを最適化前に早期に返す
                 // ため）。ここでの`expect`はその契約を明記する防御的な扱い。
-                let groups = groups
+                let groups = cluster_codes
                     .as_ref()
-                    .expect("groups is validated as Some at the top of fit()");
+                    .expect("cluster codes are built by validate_fit_preconditions for Cluster");
                 cluster_cov_params(&hessian_std, &problem.scores(&output.params), n, k, groups)?
             }
         };
@@ -1591,7 +1591,14 @@ mod tests {
         let hessian_std = Mat::from_fn(k, k, |i, j| -cost_hessian_std[i][j]);
 
         let expected_cluster = destandardize_cov_params(
-            &cluster_cov_params(&hessian_std, &scores_std, n, k, &groups).unwrap(),
+            &cluster_cov_params(
+                &hessian_std,
+                &scores_std,
+                n,
+                k,
+                &crate::shared::group_codes::GroupCodes::from_ids(&groups),
+            )
+            .unwrap(),
             &scale,
         );
 
@@ -1685,7 +1692,14 @@ mod tests {
         let hessian_std = Mat::from_fn(k, k, |i, j| -cost_hessian_std[i][j]);
 
         let expected_cluster = destandardize_cov_params(
-            &cluster_cov_params(&hessian_std, &scores_std, n, k, &groups).unwrap(),
+            &cluster_cov_params(
+                &hessian_std,
+                &scores_std,
+                n,
+                k,
+                &crate::shared::group_codes::GroupCodes::from_ids(&groups),
+            )
+            .unwrap(),
             &scale,
         );
 

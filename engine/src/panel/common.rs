@@ -58,8 +58,6 @@
 //! コードを書く過程で随時追加する（`LeastSquaresError`・`IvError`のdocコメントと同じ
 //! 「土台を用意し、必要になった時点で足す」方針）。
 
-use std::cmp::Ordering;
-use std::collections::HashMap;
 use std::fmt;
 
 use faer::Mat;
@@ -67,6 +65,7 @@ use thiserror::Error;
 
 use crate::linear::common::LeastSquaresError;
 use crate::shared::error::CommonError;
+use crate::shared::group_codes::GroupCodes;
 
 /// パネルデータの2つの次元。エラーメッセージ・バリデーションで「どちらの次元の
 /// 問題か」を区別するために使う。
@@ -367,137 +366,6 @@ pub enum PanelError {
     },
 }
 
-/// パネル識別子（entity・time・クラスター列等、同一性だけが意味を持つ`String`列）を、
-/// 整数コードに一度だけ変換したもの。
-///
-/// within変換・準偏差変換・グループ平均・クラスター/DKの集計は、行ごとに「どのグループか」を
-/// 引く処理を列ごと・統計量ごとに繰り返す。`String`をキーにしたハッシュ表・`BTreeMap`で毎回
-/// 引き直すと、大標本（n=1,000,000・エンティティ166,666）では1列あたり約0.2秒かかり、FE/REの
-/// 計算時間の大半を占めていた（QR分解よりはるかに重い）。`FeInput`/`ReInput`の構築時に一度だけ
-/// コード化して保持し、以降はコードで配列を直接引く（1列あたり数ms）。
-///
-/// **コードの順序は、`from_ids`ではキーの辞書順（`String`の`Ord`、旧実装の
-/// `BTreeMap<&str, _>`の反復順と同じ）にする**。グループ間の加算順（クラスターの
-/// `Σ_g S_g S_g'`等）・between回帰の行順を旧実装と同じに保ち、結果をビット単位で
-/// 変えないため。時点だけは、DKの時系列順序が値の順序で決まる必要があるため、
-/// `TimeKeys`が`from_ids_ordered`で値の順序のコードを振る（`TimeKeys`のdoc参照）。
-/// グループ内の行は観測順に積む（`group_indices`の安定な計数ソート）。
-///
-/// `engine`クレート内部専用（`FeInput`/`ReInput`の公開APIは引き続き`String`列で受け取る）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct GroupCodes {
-    /// 各行のグループコード（長さ`n`、値は`0..n_groups`）。
-    codes: Vec<usize>,
-    /// グループごとの観測数（長さ`n_groups`、コード順）。
-    counts: Vec<usize>,
-    /// グループのキー（長さ`n_groups`、コード順）。
-    keys: Vec<String>,
-}
-
-impl GroupCodes {
-    /// `ids`を辞書順の整数コードに変換する。ハッシュは`ids`全体に1回、ソートはユニークな
-    /// キー（`n_groups`個）にだけ行う。
-    pub(crate) fn from_ids(ids: &[String]) -> Self {
-        Self::from_ids_ordered(ids, |_, _| Ordering::Equal)
-    }
-
-    /// `ids`を整数コードに変換する。コードの順序は`compare_rows`（各キーが最初に現れた行の
-    /// インデックス2つを比べる）で決め、同順位は`String`の辞書順で決める。`from_ids`は
-    /// `compare_rows`が常に`Equal`の場合（辞書順のみ）にあたる。
-    ///
-    /// 同じキーの行は同じ順序づけの値を持つこと（`TimeKeys`の各コンストラクタが保証する）。
-    /// 異なるキーが同順位になるのは、値としては等しい別表記（浮動小数点の`0.0`と`-0.0`等）
-    /// だけで、その2つの順序はキーの辞書順で行の並びに依らず決まる。
-    pub(crate) fn from_ids_ordered(
-        ids: &[String],
-        compare_rows: impl Fn(usize, usize) -> Ordering,
-    ) -> Self {
-        // 1. 出現順の仮コード（ハッシュ1回/行）。キーごとに最初に現れた行も控える。
-        let mut first_seen: HashMap<&str, usize> = HashMap::new();
-        let mut unique: Vec<&str> = Vec::new();
-        let mut first_row: Vec<usize> = Vec::new();
-        let mut codes: Vec<usize> = ids
-            .iter()
-            .enumerate()
-            .map(|(row, id)| {
-                *first_seen.entry(id.as_str()).or_insert_with(|| {
-                    unique.push(id.as_str());
-                    first_row.push(row);
-                    unique.len() - 1
-                })
-            })
-            .collect();
-
-        // 2. ユニークなキーだけを並べ、仮コード→順序づけコードの対応を作る。
-        let mut order: Vec<usize> = (0..unique.len()).collect();
-        order.sort_unstable_by(|&a, &b| {
-            compare_rows(first_row[a], first_row[b]).then_with(|| unique[a].cmp(unique[b]))
-        });
-        let mut rank = vec![0; unique.len()];
-        for (r, &provisional_code) in order.iter().enumerate() {
-            rank[provisional_code] = r;
-        }
-
-        // 仮コードをその場で順序づけコードに置き換える（別の`Vec`を確保しない）。
-        for c in &mut codes {
-            *c = rank[*c];
-        }
-        let mut counts = vec![0; unique.len()];
-        for &c in &codes {
-            counts[c] += 1;
-        }
-        let keys = order.iter().map(|&c| unique[c].to_string()).collect();
-        Self {
-            codes,
-            counts,
-            keys,
-        }
-    }
-
-    /// 各行のグループコード（長さ`n`）。
-    pub(crate) fn codes(&self) -> &[usize] {
-        &self.codes
-    }
-
-    /// グループごとの観測数（コード順）。
-    pub(crate) fn counts(&self) -> &[usize] {
-        &self.counts
-    }
-
-    /// グループのキー（コード順）。
-    pub(crate) fn keys(&self) -> &[String] {
-        &self.keys
-    }
-
-    /// ユニークなグループ数。
-    pub(crate) fn n_groups(&self) -> usize {
-        self.counts.len()
-    }
-
-    /// 行数`n`。
-    pub(crate) fn nobs(&self) -> usize {
-        self.codes.len()
-    }
-
-    /// グループごとの行インデックス（コード順、グループ内は観測順）。旧実装の
-    /// `String`キーの`BTreeMap`でまとめたもの（キー順＝辞書順、グループ内は観測順）と同じ
-    /// 順序・同じ中身を、計数ソートで`O(n)`で作る。
-    pub(crate) fn group_indices(&self) -> GroupIndices {
-        let mut offsets = Vec::with_capacity(self.counts.len() + 1);
-        offsets.push(0);
-        for &count in &self.counts {
-            offsets.push(offsets[offsets.len() - 1] + count);
-        }
-        let mut next = offsets[..self.counts.len()].to_vec();
-        let mut indices = vec![0; self.codes.len()];
-        for (i, &c) in self.codes.iter().enumerate() {
-            indices[next[c]] = i;
-            next[c] += 1;
-        }
-        GroupIndices { offsets, indices }
-    }
-}
-
 /// 時点列のラベルと、その時間順を表すコード。FE/REが時点の順序を使う
 /// 計算（Driscoll-Kraay型HAC・2-way FEの`fixed_effects()`の基準時点とキー順）に渡す。
 ///
@@ -582,40 +450,6 @@ fn check_key_lengths(ids: &[String], values: usize) -> Result<(), PanelError> {
         });
     }
     Ok(())
-}
-
-/// `validate_cluster_groups`（OLS等と共有、`String`列を受ける）と同じ検証をコードで行う
-/// （クラスター数`G`を返し、`G < 2`なら`CommonError::InsufficientClusters`）。FE/REの
-/// クラスター列は`GroupCodes`にしてあるため、文字列を数え直さない。
-pub(crate) fn validate_cluster_group_codes(
-    groups: &GroupCodes,
-    n: usize,
-) -> Result<usize, CommonError> {
-    debug_assert_eq!(
-        groups.nobs(),
-        n,
-        "groups length must match nobs (engine_pybind contract)"
-    );
-    let g = groups.n_groups();
-    if g < 2 {
-        return Err(CommonError::InsufficientClusters { g });
-    }
-    Ok(g)
-}
-
-/// `GroupCodes::group_indices`の結果（CSR形式: グループ`g`の行は
-/// `indices[offsets[g]..offsets[g+1]]`）。グループごとに`Vec`を確保しないため、グループ数が
-/// 多い（エンティティ166,666等）ときも確保は2回で済む。
-pub(crate) struct GroupIndices {
-    offsets: Vec<usize>,
-    indices: Vec<usize>,
-}
-
-impl GroupIndices {
-    /// グループごとの行インデックスをコード順に返す。
-    pub(crate) fn iter(&self) -> impl Iterator<Item = &[usize]> {
-        self.offsets.windows(2).map(|w| &self.indices[w[0]..w[1]])
-    }
 }
 
 /// `(X̃'X̃)⁻¹`を求める（`X̃`はFE/REそれぞれの変換後の設計行列）。HC1〜HC3・Clusterいずれの
@@ -934,20 +768,7 @@ pub(crate) fn quasi_demean_column(col: &[f64], entity: &GroupCodes, theta: &[f64
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use super::*;
-
-    /// `ids`の値ごとに観測インデックスをまとめる（`BTreeMap`のキー＝`ids`の辞書順）。
-    /// `GroupCodes`導入前の実装で、`GroupCodes`のコード順・グループ内の観測順が
-    /// これと一致することを確かめるテストのオラクルとしてだけ残している。
-    fn group_indices_by_key(ids: &[String]) -> BTreeMap<&str, Vec<usize>> {
-        let mut indices: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
-        for (i, id) in ids.iter().enumerate() {
-            indices.entry(id.as_str()).or_default().push(i);
-        }
-        indices
-    }
 
     #[test]
     fn panel_dimension_displays_lowercase_name() {
@@ -1237,28 +1058,6 @@ mod tests {
         );
     }
 
-    // ── GroupCodes ─────────────────────────────────────────────────────────
-
-    #[test]
-    fn group_codes_assigns_codes_in_key_order_not_appearance_order() {
-        // 出現順は "b", "a", "c" だが、コードは辞書順（旧`BTreeMap`の反復順）に振る。
-        let codes = entities(&["b", "a", "b", "c", "a", "b"]);
-        assert_eq!(codes.keys(), ["a", "b", "c"]);
-        assert_eq!(codes.codes(), [1, 0, 1, 2, 0, 1]);
-        assert_eq!(codes.counts(), [2, 3, 1]);
-        assert_eq!(codes.n_groups(), 3);
-        assert_eq!(codes.nobs(), 6);
-    }
-
-    #[test]
-    fn group_codes_uses_string_byte_order_like_btreemap() {
-        // 数値文字列も`String`の辞書順（"10" < "9"）。DKの時系列順序の規約と同じ。
-        let ids: Vec<String> = ["9", "10", "2"].iter().map(|s| s.to_string()).collect();
-        let codes = GroupCodes::from_ids(&ids);
-        let btree_order: Vec<&str> = group_indices_by_key(&ids).keys().copied().collect();
-        assert_eq!(codes.keys(), btree_order.as_slice());
-    }
-
     // ── TimeKeys ───────────────────────────────────────────────────────────
 
     fn labels(values: &[&str]) -> Vec<String> {
@@ -1330,90 +1129,6 @@ mod tests {
         let keys = TimeKeys::by_integer(vec![], &[]).unwrap();
         assert!(keys.is_empty());
         assert!(keys.periods().is_empty());
-    }
-
-    mod group_codes_proptests {
-        use proptest::collection;
-        use proptest::prelude::*;
-
-        use super::*;
-
-        /// ASCII・数値文字列（`"10" < "9"`の辞書順）・マルチバイト（UTF-8のバイト順と
-        /// コードポイント順が一致する）・空文字列を混ぜたラベル。
-        fn label() -> impl Strategy<Value = String> {
-            prop_oneof![
-                "[a-cA-C]{1,3}",
-                (0u32..120).prop_map(|n| n.to_string()),
-                prop::sample::select(vec![
-                    "東京", "大阪", "京都", "é", "e", "z", "Z", "", "😀", "ab"
-                ])
-                .prop_map(String::from),
-            ]
-        }
-
-        proptest! {
-            #![proptest_config(ProptestConfig::with_cases(256))]
-
-            /// `GroupCodes`が、旧実装（`String`キーの`BTreeMap`）と同じキー順・同じ観測数・
-            /// 同じグループ内の観測順になる。コードは各行のキーに対応する。
-            #[test]
-            fn group_codes_agree_with_btreemap_grouping(
-                ids in collection::vec(label(), 1..80),
-            ) {
-                let codes = GroupCodes::from_ids(&ids);
-                let oracle = group_indices_by_key(&ids);
-
-                let oracle_keys: Vec<&str> = oracle.keys().copied().collect();
-                prop_assert_eq!(codes.keys(), oracle_keys.as_slice());
-                prop_assert_eq!(codes.nobs(), ids.len());
-                prop_assert_eq!(codes.n_groups(), oracle.len());
-                for (i, id) in ids.iter().enumerate() {
-                    prop_assert_eq!(&codes.keys()[codes.codes()[i]], id);
-                }
-                let expected_counts: Vec<usize> = oracle.values().map(Vec::len).collect();
-                prop_assert_eq!(codes.counts(), expected_counts.as_slice());
-                let actual: Vec<Vec<usize>> =
-                    codes.group_indices().iter().map(<[usize]>::to_vec).collect();
-                let expected: Vec<Vec<usize>> = oracle.into_values().collect();
-                prop_assert_eq!(actual, expected);
-            }
-        }
-    }
-
-    #[test]
-    fn group_indices_matches_group_indices_by_key() {
-        // コード順・グループ内の観測順とも旧実装の`group_indices_by_key`と同じ。
-        let ids: Vec<String> = ["b", "a", "b", "c", "a", "b"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        let expected: Vec<Vec<usize>> = group_indices_by_key(&ids).into_values().collect();
-        let actual: Vec<Vec<usize>> = GroupCodes::from_ids(&ids)
-            .group_indices()
-            .iter()
-            .map(<[usize]>::to_vec)
-            .collect();
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn group_codes_handles_empty_input() {
-        let codes = GroupCodes::from_ids(&[]);
-        assert_eq!(codes.n_groups(), 0);
-        assert_eq!(codes.nobs(), 0);
-        assert_eq!(codes.group_indices().iter().count(), 0);
-    }
-
-    #[test]
-    fn validate_cluster_group_codes_rejects_single_cluster() {
-        assert_eq!(
-            validate_cluster_group_codes(&entities(&["a", "a"]), 2),
-            Err(CommonError::InsufficientClusters { g: 1 })
-        );
-        assert_eq!(
-            validate_cluster_group_codes(&entities(&["a", "b"]), 2),
-            Ok(2)
-        );
     }
 
     // ── quasi_demean_column ────────────────────────────────────────────────

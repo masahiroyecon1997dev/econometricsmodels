@@ -194,16 +194,17 @@ use statrs::distribution::{ChiSquared, ContinuousCDF, StudentsT};
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use crate::panel::common::{
-    GroupCodes, PanelDimension, PanelError, PanelHcVariant, TimeKeys, panel_classical_cov_params,
+    PanelDimension, PanelError, PanelHcVariant, TimeKeys, panel_classical_cov_params,
     panel_cluster_cov_params, panel_driscoll_kraay_cov_params, panel_hc_cov_params,
-    quasi_demean_column, resolve_dk_bandwidth, validate_cluster_group_codes,
-    validate_dk_periods_cover_tested_coefficients, xtx_inverse,
+    quasi_demean_column, resolve_dk_bandwidth, validate_dk_periods_cover_tested_coefficients,
+    xtx_inverse,
 };
 use crate::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput};
 use crate::shared::covariance::leverages;
 use crate::shared::error::CommonError;
+use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference;
-use crate::shared::validation::validate_cluster_count_covers_slopes;
+use crate::shared::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 use crate::shared::wald::wald_f_test;
 
 /// REの被説明変数・説明変数・パネル識別子を保持する入力データ。
@@ -784,7 +785,7 @@ fn re_hausman_test(
             // `OlsEstimator::fit`の`cov_type=Cluster`と同じ事前検証（`G >= 2`・`G > q`、`q`は
             // 補助回帰の傾き係数の数）を、同じ順序（QR分解より前）で行う。
             let n = aux_input.nobs();
-            let g = validate_cluster_group_codes(cluster_codes, n)
+            let g = validate_cluster_groups(cluster_codes, n)
                 .map_err(|e| to_err(LeastSquaresError::Common(e)))?;
             validate_cluster_count_covers_slopes(
                 g,
@@ -1143,7 +1144,7 @@ impl ReEstimator {
                 )
             }
             ReCovType::Cluster { .. } => {
-                let n_groups = validate_cluster_group_codes(cluster_codes, n)?;
+                let n_groups = validate_cluster_groups(cluster_codes, n)?;
                 // `q`（傾き係数の数、切片を除く）は`df_model - 1`（`ols::fit`の
                 // `k - k_constant`と同じ規約、`estimator()`のdocコメント参照）。
                 validate_cluster_count_covers_slopes(n_groups, df_model - 1)?;

@@ -5,9 +5,8 @@
 //! **関数**はこちらに置く（`engine::shared::linear_algebra`が数値計算ユーティリティを
 //! 集約しているのと同じ考え方で、こちらは入力検証ユーティリティを集約する）。
 
-use std::collections::HashSet;
-
 use super::error::CommonError;
+use super::group_codes::GroupCodes;
 
 /// 反復回数の上限（`max_iter`・`gmm_max_iter`）。既定値（35・100）の約100倍で、これを超える
 /// 指定は、収束しない問題で実質的に終わらない計算になる（反復中は中断できない）ため
@@ -20,21 +19,23 @@ pub const MAX_ITER_LIMIT: i64 = 10_000;
 /// `G`を返す。`G`はOLSではt検定・信頼区間・F検定の自由度（`G-1`）の算出に再利用する
 /// （nonlinear系統はz検定のため`G`自体は使わないが、検証結果として返す型は揃える）。
 ///
-/// OLS（`engine::linear::ols`）とnonlinear（`engine::nonlinear::common`）の両方で
-/// 同一のロジック・エラーメッセージが必要だったため共有化した
+/// `groups`は各`fit()`の冒頭で一度だけ作った整数コード（`GroupCodes`）で、ユニーク数は
+/// コード化の時点で分かっているため、`String`を数え直さない（以前は`HashSet<&String>`で
+/// 呼び出しごとに全行をハッシュしており、n=1,000,000・G=100,000で1回約0.17秒だった）。
+/// OLS・nonlinear・IV・panelで同一のロジック・エラーメッセージが必要だったため共有化した
 /// （`ensure_well_conditioned_symmetric_matrix`を`engine::shared::linear_algebra`に
 /// 共有化したのと同じ理由：モデル固有の計算に一切依存しない純粋な検証ロジックのため）。
 ///
-/// `groups.len() != n`は呼び出し側（`engine_pybind`）の実装バグでしか起こり得ない内部契約
+/// `groups.nobs() != n`は呼び出し側（`engine_pybind`）の実装バグでしか起こり得ない内部契約
 /// であり、実データに起因する`CommonError::InsufficientClusters`とは区別して
 /// `debug_assert_eq!`で検証する。
-pub fn validate_cluster_groups(groups: &[String], n: usize) -> Result<usize, CommonError> {
+pub fn validate_cluster_groups(groups: &GroupCodes, n: usize) -> Result<usize, CommonError> {
     debug_assert_eq!(
-        groups.len(),
+        groups.nobs(),
         n,
         "groups length must match nobs (engine_pybind contract)"
     );
-    let g = groups.iter().collect::<HashSet<_>>().len();
+    let g = groups.n_groups();
     if g < 2 {
         return Err(CommonError::InsufficientClusters { g });
     }
@@ -110,22 +111,23 @@ mod tests {
         );
     }
 
+    fn codes(ids: &[&str]) -> GroupCodes {
+        let ids: Vec<String> = ids.iter().map(|s| s.to_string()).collect();
+        GroupCodes::from_ids(&ids)
+    }
+
     #[test]
     fn validate_cluster_groups_returns_distinct_group_count_when_at_least_two() {
-        let groups = vec![
-            "a".to_string(),
-            "a".to_string(),
-            "b".to_string(),
-            "c".to_string(),
-        ];
-        assert_eq!(validate_cluster_groups(&groups, 4), Ok(3));
+        assert_eq!(
+            validate_cluster_groups(&codes(&["a", "a", "b", "c"]), 4),
+            Ok(3)
+        );
     }
 
     #[test]
     fn validate_cluster_groups_returns_insufficient_clusters_error_when_only_one_group() {
-        let groups = vec!["a".to_string(), "a".to_string(), "a".to_string()];
         assert_eq!(
-            validate_cluster_groups(&groups, 3),
+            validate_cluster_groups(&codes(&["a", "a", "a"]), 3),
             Err(CommonError::InsufficientClusters { g: 1 })
         );
     }

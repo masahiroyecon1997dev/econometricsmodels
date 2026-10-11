@@ -32,6 +32,7 @@ use thiserror::Error;
 use crate::shared::covariance::{cluster_correction, cluster_meat, sandwich};
 use crate::shared::design_matrix::design_matrix_element;
 use crate::shared::error::CommonError;
+use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference;
 use crate::shared::linear_algebra::{checked_col_piv_qr, ensure_well_conditioned_symmetric_matrix};
 use crate::shared::validation::MAX_ITER_LIMIT;
@@ -350,21 +351,27 @@ pub fn validate_sufficient_observations(n: usize, k: usize) -> Result<(), MleErr
 /// `rank(Ŝ) ≤ g - 1`のため`g <= n_slopes`だと`n_slopes×n_slopes`部分行列が構造的に
 /// 特異）を検証する（`Cluster`以外は無検証）。`n`と型が同じ`usize`の
 /// `n_slopes`を並べているが、`n`は`validate_cluster_groups`内の`debug_assert_eq!
-/// (groups.len(), n)`で、`n_slopes`は`g <= n_slopes`の比較結果で、取り違えれば
+/// (groups.nobs(), n)`で、`n_slopes`は`g <= n_slopes`の比較結果で、取り違えれば
 /// いずれもテスト/デバッグビルドで早期に露見する（`validate_fit_preconditions`が
 /// 多数の同型引数を持つため`has_intercept: bool`を受け取るのとは対照的に、こちらは
 /// 引数が3つで`cov_type`が異なる型のため`usize`のまま受け取る）。
-pub fn validate_cluster_cov_type(
+///
+/// 検証のために作ったグループキーの整数コードを返す（`Cluster`以外は`None`）。呼び出し側は
+/// これを`cluster_cov_params`にそのまま渡し、検証と集計で`String`列を別々に走査し直さない
+/// （`GroupCodes`のdoc参照）。
+pub(crate) fn validate_cluster_cov_type(
     cov_type: &CovType,
     n: usize,
     n_slopes: usize,
-) -> Result<(), MleError> {
-    if let CovType::Cluster { groups } = cov_type {
-        let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
-        let g = validate_cluster_groups(groups, n)?;
-        validate_cluster_count_covers_slopes(g, n_slopes)?;
-    }
-    Ok(())
+) -> Result<Option<GroupCodes>, MleError> {
+    let CovType::Cluster { groups } = cov_type else {
+        return Ok(None);
+    };
+    let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
+    let codes = GroupCodes::from_ids(groups);
+    let g = validate_cluster_groups(&codes, n)?;
+    validate_cluster_count_covers_slopes(g, n_slopes)?;
+    Ok(Some(codes))
 }
 
 /// `fit()`冒頭で行う推定オプション（`MleFitOptions`由来のスカラー値）の検証。
@@ -412,7 +419,7 @@ pub fn validate_mle_options(
 /// コンパイルが通ってしまうため（レビュー指摘）、傾き係数の数は`usize`ではなく
 /// `has_intercept: bool`で受け取り、この関数内で`k - usize::from(has_intercept)`と
 /// して算出する（`k`との取り違えを型で防ぐ）。
-pub fn validate_fit_preconditions(
+pub(crate) fn validate_fit_preconditions(
     confidence_level: f64,
     max_iter: i64,
     tol: f64,
@@ -420,15 +427,14 @@ pub fn validate_fit_preconditions(
     k: usize,
     has_intercept: bool,
     cov_type: &CovType,
-) -> Result<(), MleError> {
+) -> Result<Option<GroupCodes>, MleError> {
     validate_mle_options(confidence_level, max_iter, tol)?;
     validate_binary_y(y)?;
 
     let n = y.nrows();
     validate_has_regressors(n, k)?;
     validate_sufficient_observations(n, k)?;
-    validate_cluster_cov_type(cov_type, n, k - usize::from(has_intercept))?;
-    Ok(())
+    validate_cluster_cov_type(cov_type, n, k - usize::from(has_intercept))
 }
 
 /// 切片のみモデルの対数尤度 `ℓ_null = n1*ln(ȳ) + n0*ln(1-ȳ)`（`ȳ=n1/n`の閉じた形の
@@ -2968,16 +2974,16 @@ pub fn sandwich_cov_params(
 /// `groups`が2種類以上の値を持つこと（クラスター数`G>=2`）の検証（`CommonError::
 /// InsufficientClusters`）、および未指定時の`CommonError::MissingClusterColumn`は
 /// モデルごとの`fit()`実装側の責務（OLSの`validate_cluster_groups`と同じ役割分担）。
-/// `groups.len() != n`もモデル側の内部契約（`debug_assert_eq!`で検証）。
-pub fn cluster_cov_params(
+/// `groups.nobs() != n`もモデル側の内部契約（`debug_assert_eq!`で検証）。
+pub(crate) fn cluster_cov_params(
     hessian: &Mat<f64>,
     scores: &Mat<f64>,
     n: usize,
     k: usize,
-    groups: &[String],
+    groups: &GroupCodes,
 ) -> Result<Mat<f64>, MleError> {
     debug_assert_eq!(
-        groups.len(),
+        groups.nobs(),
         n,
         "groups length must match nobs (caller contract)"
     );
@@ -5038,12 +5044,7 @@ mod tests {
         // correction = G/(G-1) * (n-1)/(n-k) = 2/1 * 3/2 = 3
         // H⁻¹S_hatH⁻¹ = [[2,2],[2,2]] (observed_information_cov_paramsの対角0.5,0.2で挟む)
         // Σ = 3 * [[2,2],[2,2]] = [[6,6],[6,6]]
-        let groups = vec![
-            "a".to_string(),
-            "b".to_string(),
-            "a".to_string(),
-            "b".to_string(),
-        ];
+        let groups = cov_test_groups();
         let cov =
             cluster_cov_params(&cov_test_hessian(), &cov_test_scores(), 4, 2, &groups).unwrap();
         assert!((*cov.get(0, 0) - 6.0).abs() < 1e-9, "{:?}", cov);
@@ -5052,15 +5053,16 @@ mod tests {
         assert!((*cov.get(1, 0) - 6.0).abs() < 1e-9, "{:?}", cov);
     }
 
+    /// `cov_test_scores`と同じ4行に対応する、a/bが交互のクラスターのコード。
+    fn cov_test_groups() -> GroupCodes {
+        let ids: Vec<String> = ["a", "b", "a", "b"].iter().map(|s| s.to_string()).collect();
+        GroupCodes::from_ids(&ids)
+    }
+
     #[test]
     fn cluster_cov_params_returns_singular_hessian_error_for_zero_hessian() {
         let zero_hessian = Mat::<f64>::zeros(2, 2);
-        let groups = vec![
-            "a".to_string(),
-            "b".to_string(),
-            "a".to_string(),
-            "b".to_string(),
-        ];
+        let groups = cov_test_groups();
         let result = cluster_cov_params(&zero_hessian, &cov_test_scores(), 4, 2, &groups);
         assert!(
             matches!(result, Err(MleError::SingularHessian)),
@@ -5219,7 +5221,7 @@ mod tests {
         let y = Mat::from_fn(4, 1, |i, _| [0.0, 1.0, 0.0, 1.0][i]);
         assert_eq!(
             validate_fit_preconditions(0.95, 100, 1e-8, &y, 2, true, &CovType::Classical),
-            Ok(())
+            Ok(None)
         );
     }
 

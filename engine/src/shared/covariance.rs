@@ -11,7 +11,7 @@ use faer::linalg::matmul::matmul;
 use faer::prelude::Solve;
 use faer::{Accum, Mat, Par, Side};
 
-use super::cluster::group_indices;
+use super::group_codes::GroupCodes;
 use crate::shared::linear_algebra::RankDeficient;
 
 /// `(X'X)⁻¹`を求める。classical・HC0-3・HAC・クラスターのいずれの標準誤差でも必要になる。
@@ -209,17 +209,20 @@ pub(crate) fn hac_cov_params(
 ///
 /// `S_g = Σ_{i∈g} s_i`（クラスター内のスコアの合計。クラスター内の観測を先に合計してから
 /// 外積を取ることで、クラスター内の相関を許容する）。`score(i, a)`は`i`行目の`a`列目の
-/// スコア。グループの反復順序は[`group_indices`]（辞書順）で決定的。
+/// スコア。グループの反復順序は`groups`のコード順（キーの辞書順）、グループ内の行は観測順で、
+/// どちらも決定的（`HashMap`は反復順序がプロセスごとのハッシュシードに依存し、グループ間の
+/// 加算順・浮動小数点の丸め誤差が実行のたびに変わりうるため使わない。`GroupCodes`は
+/// `BTreeMap<&str, _>`と同じ順序）。
 pub(crate) fn cluster_meat(
-    groups: &[String],
+    groups: &GroupCodes,
     k: usize,
     score: impl Fn(usize, usize) -> f64,
 ) -> (Mat<f64>, usize) {
-    let indices = group_indices(groups);
-    let n_groups = indices.len();
+    let indices = groups.group_indices();
+    let n_groups = groups.n_groups();
 
     let mut s_hat = Mat::<f64>::zeros(k, k);
-    for rows in indices.values() {
+    for rows in indices.iter() {
         let mut s_g = vec![0.0_f64; k];
         for &i in rows {
             for (a, s_g_a) in s_g.iter_mut().enumerate() {
@@ -250,7 +253,7 @@ pub(crate) fn cluster_cov_params(
     x: &Mat<f64>,
     residuals: &Mat<f64>,
     xtx_inv: &Mat<f64>,
-    groups: &[String],
+    groups: &GroupCodes,
 ) -> Mat<f64> {
     let n = x.nrows();
     let k = x.ncols();
@@ -388,10 +391,15 @@ mod tests {
         assert!((*reversed.get(0, 0) - 22.0).abs() < 1e-12);
     }
 
+    fn codes(ids: &[&str]) -> GroupCodes {
+        let ids: Vec<String> = ids.iter().map(|s| s.to_string()).collect();
+        GroupCodes::from_ids(&ids)
+    }
+
     #[test]
     fn cluster_meat_sums_scores_within_clusters_before_taking_outer_products() {
         // クラスター a = {行0, 行2}、b = {行1}。スコア s = [1, 2, 3] → S_a = 4、S_b = 2。
-        let groups = vec!["a".to_string(), "b".to_string(), "a".to_string()];
+        let groups = codes(&["a", "b", "a"]);
         let s = [1.0, 2.0, 3.0];
 
         let (meat, n_groups) = cluster_meat(&groups, 1, |i, _| s[i]);
@@ -403,7 +411,7 @@ mod tests {
     #[test]
     fn cluster_meat_with_one_observation_per_cluster_equals_the_hc0_outer_product() {
         let (x, residuals, _) = single_regressor_case();
-        let groups: Vec<String> = (0..3).map(|i| format!("g{i}")).collect();
+        let groups = codes(&["g0", "g1", "g2"]);
 
         let (meat, n_groups) =
             cluster_meat(&groups, 1, |i, a| (*residuals.get(i, 0)) * (*x.get(i, a)));
@@ -425,7 +433,7 @@ mod tests {
     #[test]
     fn cluster_cov_params_applies_the_correction_to_the_sandwich() {
         let (x, residuals, xtx_inv) = single_regressor_case();
-        let groups = vec!["a".to_string(), "b".to_string(), "a".to_string()];
+        let groups = codes(&["a", "b", "a"]);
 
         let cov = cluster_cov_params(&x, &residuals, &xtx_inv, &groups);
 

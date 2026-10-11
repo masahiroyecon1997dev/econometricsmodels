@@ -59,14 +59,14 @@
 //! 一度も回らないため、この検証が範囲外エラーを検知する唯一の経路になる）。
 
 use crate::iv::common::{
-    IvError, IvInput, compute_first_stage, mat_column_to_vec, mat_to_columns,
-    validate_structural_cluster_count, without_baked_in_intercept,
+    IvError, IvInput, compute_first_stage_with_codes, mat_column_to_vec, mat_to_columns,
+    structural_cluster_codes, without_baked_in_intercept,
 };
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
-use crate::shared::cluster::group_indices;
 use crate::shared::covariance::time_ordering;
 use crate::shared::error::CommonError;
+use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference;
 use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 use crate::shared::validation::validate_cluster_groups;
@@ -193,7 +193,7 @@ impl TwoSlsEstimator {
         // 第一段階固有の傾き係数の数で判定され`FirstStageFailed`にラップされて`q`の値も
         // 構造方程式のものと食い違うため、`fit()`冒頭で構造方程式の`q`を使って明示的に
         // 弾き、`IvError::Common`として一貫させる（`compute_first_stage`より前）。
-        validate_structural_cluster_count(&input, &cov_type)?;
+        let cluster_codes = structural_cluster_codes(&input, &cov_type)?;
 
         // `x_exog`は`second_stage_columns`（第二段階）・`structural_columns`
         // （サンドイッチSE計算）でも同じ内容を使うため、`Mat`からの変換を一度だけ行い
@@ -221,8 +221,12 @@ impl TwoSlsEstimator {
         // 2SLS/GMM間で共有するロジック（`common::compute_first_stage`、`iv/CLAUDE.md`
         // 「2SLSとGMMの独立実装方針」参照——GMM自体は第一段階回帰を必要としないが、
         // `engine_pybind`が`estimator="gmm"`でも同じ診断情報を独立に提供するために使う）。
-        let (first_stage, weak_instrument_f_statistics) =
-            compute_first_stage(&input, &cov_type, confidence_level)?;
+        let (first_stage, weak_instrument_f_statistics) = compute_first_stage_with_codes(
+            &input,
+            &cov_type,
+            cluster_codes.as_ref(),
+            confidence_level,
+        )?;
         let x_endog_hat_columns: Vec<Vec<f64>> = first_stage
             .iter()
             .map(|(_, estimator)| {
@@ -307,8 +311,10 @@ impl TwoSlsEstimator {
                     df_resid,
                 )
             }
-            CovType::Cluster { groups } => {
-                let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
+            CovType::Cluster { .. } => {
+                let groups = cluster_codes
+                    .as_ref()
+                    .ok_or(CommonError::MissingClusterColumn)?;
                 // クラスター数 `g <= q`（構造方程式の傾き係数の数）は`fit()`冒頭で
                 // 既に`InsufficientClustersForInference`として弾いている。
                 let n_groups = validate_cluster_groups(groups, n)?;
@@ -420,8 +426,12 @@ impl TwoSlsEstimator {
                     input.has_intercept(),
                     input.dep_var_name().to_string(),
                 )?;
-                let hausman_estimator =
-                    OlsEstimator::fit(hausman_input, cov_type.clone(), confidence_level)?;
+                let hausman_estimator = OlsEstimator::fit_with_cluster_codes(
+                    hausman_input,
+                    cov_type.clone(),
+                    cluster_codes.as_ref(),
+                    confidence_level,
+                )?;
                 let (stat, p_value) = hausman_estimator.wald_test_last_columns(input.k_endog())?;
                 Ok((
                     stat,
@@ -819,8 +829,8 @@ fn hac_cov_params(
 }
 
 /// クラスターロバストな係数分散共分散行列: `(X̂'X̂)⁻¹Ŝ(X̂'X̂)⁻¹ * correction`（k×k）。数式・
-/// 実装方針は`shared/covariance.rs`の`cluster_cov_params`と同型（`BTreeMap`を使う理由も同じ、
-/// `engine/src/linear/CLAUDE.md`「踏んだ罠」参照）。設計行列に`X̂`、残差に構造残差`e`を
+/// 実装方針は`shared/covariance.rs`の`cluster_cov_params`と同型（グループの反復順を`GroupCodes`の
+/// コード順（辞書順）で決定的にする理由も同じ、`engine/src/linear/CLAUDE.md`「踏んだ罠」参照）。設計行列に`X̂`、残差に構造残差`e`を
 /// 使う点のみがOLSとの違い。`groups`が`G>=2`であることは`validate_cluster_groups`
 /// （呼び出し元）で検証済みの前提。
 fn cluster_cov_params(
@@ -829,13 +839,13 @@ fn cluster_cov_params(
     xtx_inv: &Mat<f64>,
     n: usize,
     k: usize,
-    groups: &[String],
+    groups: &GroupCodes,
 ) -> Mat<f64> {
-    let indices_by_group = group_indices(groups);
-    let n_groups = indices_by_group.len();
+    let indices_by_group = groups.group_indices();
+    let n_groups = groups.n_groups();
 
     let mut s_hat = Mat::<f64>::zeros(k, k);
-    for indices in indices_by_group.values() {
+    for indices in indices_by_group.iter() {
         let mut s_g = vec![0.0_f64; k];
         for &i in indices {
             let e = *residuals.get(i, 0);

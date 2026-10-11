@@ -41,6 +41,7 @@ use thiserror::Error;
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use crate::shared::error::CommonError;
+use crate::shared::group_codes::GroupCodes;
 use crate::shared::validation::{
     MAX_ITER_LIMIT, validate_cluster_count_covers_slopes, validate_cluster_groups,
 };
@@ -439,17 +440,28 @@ pub fn validate_structural_cluster_count(
     input: &IvInput,
     cov_type: &CovType,
 ) -> Result<(), IvError> {
-    if let CovType::Cluster {
-        groups: Some(groups),
-    } = cov_type
-    {
-        let g = validate_cluster_groups(groups, input.nobs())?;
-        validate_cluster_count_covers_slopes(
-            g,
-            input.k_exog() + input.k_endog() - usize::from(input.has_intercept()),
-        )?;
-    }
-    Ok(())
+    structural_cluster_codes(input, cov_type).map(|_| ())
+}
+
+/// [`validate_structural_cluster_count`]と同じ検証を行い、検証のために作ったグループキーの
+/// 整数コードを返す（`cov_type=Cluster`で`groups`が指定されているときだけ`Some`）。
+///
+/// `TwoSlsEstimator::fit`/`GmmEstimator::fit`は、このコードを自分の共分散計算・第一段階回帰
+/// （[`compute_first_stage_with_codes`]）・Wu-Hausman拡張回帰に使い回し、同じクラスター列を
+/// 検証・集計のたびにハッシュし直さない（`GroupCodes`のdoc参照）。
+pub(crate) fn structural_cluster_codes(
+    input: &IvInput,
+    cov_type: &CovType,
+) -> Result<Option<GroupCodes>, IvError> {
+    let Some(codes) = cov_type.cluster_codes() else {
+        return Ok(None);
+    };
+    let g = validate_cluster_groups(&codes, input.nobs())?;
+    validate_cluster_count_covers_slopes(
+        g,
+        input.k_exog() + input.k_endog() - usize::from(input.has_intercept()),
+    )?;
+    Ok(Some(codes))
 }
 
 /// [`compute_first_stage`]の戻り値: 内生変数ごとの第一段階回帰（`x_endog_names`と同じ順序）、
@@ -477,6 +489,19 @@ pub type FirstStageResult = (Vec<(String, OlsEstimator)>, Vec<(String, f64)>);
 pub fn compute_first_stage(
     input: &IvInput,
     cov_type: &CovType,
+    confidence_level: f64,
+) -> Result<FirstStageResult, IvError> {
+    let cluster_codes = cov_type.cluster_codes();
+    compute_first_stage_with_codes(input, cov_type, cluster_codes.as_ref(), confidence_level)
+}
+
+/// [`compute_first_stage`]と同じだが、`cov_type=Cluster`のグループキーを整数コード化済みの
+/// `cluster_codes`（`cov_type.cluster_codes()`と同じ内容）で受け取る。内生変数ごとの第一段階
+/// 回帰が同じコードを共有するため、クラスター列のコード化は内生変数の数によらず1回で済む。
+pub(crate) fn compute_first_stage_with_codes(
+    input: &IvInput,
+    cov_type: &CovType,
+    cluster_codes: Option<&GroupCodes>,
     confidence_level: f64,
 ) -> Result<FirstStageResult, IvError> {
     let x_exog_columns = mat_to_columns(input.x_exog());
@@ -509,13 +534,16 @@ pub fn compute_first_stage(
             endog_name: endog_name.clone(),
             source,
         })?;
-        let estimator =
-            OlsEstimator::fit(ols_input, cov_type.clone(), confidence_level).map_err(|source| {
-                IvError::FirstStageFailed {
-                    endog_name: endog_name.clone(),
-                    source,
-                }
-            })?;
+        let estimator = OlsEstimator::fit_with_cluster_codes(
+            ols_input,
+            cov_type.clone(),
+            cluster_codes,
+            confidence_level,
+        )
+        .map_err(|source| IvError::FirstStageFailed {
+            endog_name: endog_name.clone(),
+            source,
+        })?;
         first_stage.push((endog_name.clone(), estimator));
     }
 

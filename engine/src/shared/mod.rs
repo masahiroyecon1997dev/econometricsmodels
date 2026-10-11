@@ -10,10 +10,10 @@
 pub mod error;
 pub mod parallelism;
 
-pub(crate) mod cluster;
 pub(crate) mod covariance;
 pub(crate) mod design_matrix;
 pub(crate) mod goodness_of_fit;
+pub(crate) mod group_codes;
 pub(crate) mod inference;
 pub(crate) mod least_squares;
 pub(crate) mod linear_algebra;

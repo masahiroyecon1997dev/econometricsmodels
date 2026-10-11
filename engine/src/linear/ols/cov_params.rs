@@ -14,6 +14,7 @@ use crate::shared::covariance::{
     time_ordering,
 };
 use crate::shared::error::CommonError;
+use crate::shared::group_codes::GroupCodes;
 use crate::shared::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 
 /// [`compute_cov_params`]の結果。
@@ -37,14 +38,11 @@ pub(super) struct CovParams {
 /// （nonlinear/IVと同じく`fit()`冒頭で検証する方針に揃える）。`groups=None`は
 /// [`compute_cov_params`]の`CovType::Cluster`アームで`MissingClusterColumn`として扱う。
 pub(super) fn validate_cluster_count(
-    cov_type: &CovType,
+    cluster_codes: Option<&GroupCodes>,
     n: usize,
     n_slopes: usize,
 ) -> Result<(), LeastSquaresError> {
-    if let CovType::Cluster {
-        groups: Some(groups),
-    } = cov_type
-    {
+    if let Some(groups) = cluster_codes {
         let g = validate_cluster_groups(groups, n)?;
         validate_cluster_count_covers_slopes(g, n_slopes)?;
     }
@@ -53,9 +51,12 @@ pub(super) fn validate_cluster_count(
 
 /// `cov_type`に応じた係数分散共分散行列と推論の自由度を求める。
 ///
-/// `sigma2`は`SSR/df_resid`（classicalでのみ使う）、`df_resid`は`n - k`。
+/// `sigma2`は`SSR/df_resid`（classicalでのみ使う）、`df_resid`は`n - k`。`cluster_codes`は
+/// `cov_type=Cluster`のグループキーのコード（`CovType::cluster_codes`。`fit()`冒頭で作り、
+/// `validate_cluster_count`と共有する）。
 pub(super) fn compute_cov_params(
     cov_type: &CovType,
+    cluster_codes: Option<&GroupCodes>,
     x: &Mat<f64>,
     residuals: &Mat<f64>,
     xtx_inv: &Mat<f64>,
@@ -92,11 +93,11 @@ pub(super) fn compute_cov_params(
                 df_resid,
             )
         }
-        CovType::Cluster { groups } => {
-            let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
+        CovType::Cluster { .. } => {
+            let groups = cluster_codes.ok_or(CommonError::MissingClusterColumn)?;
             // クラスター数`g >= 2`・`g > q`（傾き係数の数）は`validate_cluster_count`で
             // 検証済み。ここでは`n_groups - 1`（検定の自由度）に再利用するため
-            // 再度ユニーク数を数えるだけ。
+            // コードのユニーク数を引くだけ。
             let n_groups = validate_cluster_groups(groups, n)?;
             let cov = cluster_cov_params(x, residuals, xtx_inv, groups);
             (cov, n_groups - 1)

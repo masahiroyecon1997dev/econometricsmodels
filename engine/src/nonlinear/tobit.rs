@@ -1368,7 +1368,8 @@ impl TobitEstimator {
         let n = input.nobs();
         let k = input.k();
         validate_sufficient_observations(n, k + 1)?;
-        validate_cluster_cov_type(&cov_type, n, k - usize::from(input.has_intercept()))?;
+        let cluster_codes =
+            validate_cluster_cov_type(&cov_type, n, k - usize::from(input.has_intercept()))?;
         validate_has_uncensored_observations(input.y(), input.lower(), input.upper())?;
 
         // `x`（切片ありなら列を平均センタリング＋スケーリング、切片なしはスケーリング
@@ -1450,16 +1451,16 @@ impl TobitEstimator {
                     SandwichVariant::Hc1,
                 )?
             }
-            CovType::Cluster { groups } => {
+            CovType::Cluster { .. } => {
                 let problem = problem_for_scores
                     .as_ref()
                     .expect("problem_for_scores must be Some for CovType::Cluster");
                 // `groups`のNone・クラスター数不足の検証はfit()冒頭の
-                // `validate_cluster_cov_type`で完了済み。ここでの`expect`はその契約を
-                // 明記する防御的な扱い（`LogitEstimator::fit`と同じ）。
-                let groups = groups
+                // `validate_cluster_cov_type`で完了済み（そのとき作ったコードを使う）。
+                // ここでの`expect`はその契約を明記する防御的な扱い（`LogitEstimator::fit`と同じ）。
+                let groups = cluster_codes
                     .as_ref()
-                    .expect("groups is validated as Some at the top of fit()");
+                    .expect("cluster codes are built by validate_cluster_cov_type for Cluster");
                 cluster_cov_params(
                     &hessian_std,
                     &problem.scores(&output.params),
@@ -3873,7 +3874,14 @@ mod tests {
         let groups_for_expected = groups.clone();
         let expected_cluster =
             expected_cov_params(&censored_regression_input(), &classical, |h, s| {
-                cluster_cov_params(h, s, n, k_plus_1, &groups_for_expected).unwrap()
+                cluster_cov_params(
+                    h,
+                    s,
+                    n,
+                    k_plus_1,
+                    &crate::shared::group_codes::GroupCodes::from_ids(&groups_for_expected),
+                )
+                .unwrap()
             });
 
         let estimator = TobitEstimator::fit(
@@ -3930,7 +3938,14 @@ mod tests {
         let groups_for_expected = groups.clone();
         let expected_cluster =
             expected_cov_params(&censored_regression_input(), &classical, |h, s| {
-                cluster_cov_params(h, s, n, k_plus_1, &groups_for_expected).unwrap()
+                cluster_cov_params(
+                    h,
+                    s,
+                    n,
+                    k_plus_1,
+                    &crate::shared::group_codes::GroupCodes::from_ids(&groups_for_expected),
+                )
+                .unwrap()
             });
 
         let estimator = TobitEstimator::fit(

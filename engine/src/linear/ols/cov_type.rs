@@ -1,3 +1,5 @@
+use crate::shared::group_codes::GroupCodes;
+
 /// 標準誤差の種別。文字列パース（Python文字列 → この型への変換）は`engine_pybind`側の
 /// 責務（PyO3境界の関心事のため）。ここでは`OlsEstimator::fit`が計算方法を分岐するための
 /// 純粋な列挙型のみを定義する。
@@ -35,4 +37,20 @@ pub enum CovType {
         /// 事前に弾かない）。
         groups: Option<Vec<String>>,
     },
+}
+
+impl CovType {
+    /// `Cluster`のグループキーを整数コードに変換する（それ以外、または`groups=None`は`None`）。
+    ///
+    /// クラスターロバスト分散は`String`のままだと、検証・集計のたびに全行をハッシュ/比較し直す
+    /// ことになる。各`fit()`が冒頭でこれを1回だけ呼び、得たコードを検証と集計の両方に使う
+    /// （`GroupCodes`のdoc参照）。
+    pub(crate) fn cluster_codes(&self) -> Option<GroupCodes> {
+        match self {
+            CovType::Cluster {
+                groups: Some(groups),
+            } => Some(GroupCodes::from_ids(groups)),
+            _ => None,
+        }
+    }
 }

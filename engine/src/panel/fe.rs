@@ -382,18 +382,18 @@ use statrs::distribution::StudentsT;
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::OlsInput;
 use crate::panel::common::{
-    GroupCodes, PanelDimension, PanelError, PanelHcVariant, TimeKeys, panel_classical_cov_params,
+    PanelDimension, PanelError, PanelHcVariant, TimeKeys, panel_classical_cov_params,
     panel_cluster_cov_params, panel_driscoll_kraay_cov_params, panel_hc_cov_params,
-    quasi_demean_column, resolve_dk_bandwidth, validate_cluster_group_codes,
-    validate_dk_periods_cover_tested_coefficients,
+    quasi_demean_column, resolve_dk_bandwidth, validate_dk_periods_cover_tested_coefficients,
 };
 use crate::panel::re::ReInput;
 use crate::shared::covariance::leverages;
 use crate::shared::error::CommonError;
 use crate::shared::goodness_of_fit::gaussian_goodness_of_fit;
+use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference;
 use crate::shared::least_squares::{LeastSquaresFit, least_squares};
-use crate::shared::validation::validate_cluster_count_covers_slopes;
+use crate::shared::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 use crate::shared::wald::wald_f_test;
 
 /// FEの被説明変数・説明変数・パネル識別子を保持する入力データ。
@@ -910,7 +910,7 @@ impl FeEstimator {
                 // ここでコード化する。
                 let explicit_codes = groups.as_deref().map(GroupCodes::from_ids);
                 let group_codes = explicit_codes.as_ref().unwrap_or(input.entity_codes());
-                let n_groups = validate_cluster_group_codes(group_codes, n)?;
+                let n_groups = validate_cluster_groups(group_codes, n)?;
                 validate_cluster_count_covers_slopes(n_groups, k)?;
                 // 直前の`G > k`により、ここで`G=2`なら`k`は高々1。
                 if k >= 1

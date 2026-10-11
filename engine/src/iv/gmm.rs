@@ -201,11 +201,11 @@ use faer::prelude::Solve;
 use faer::{Accum, Mat, Par, Side};
 use statrs::distribution::{ChiSquared, ContinuousCDF, Normal};
 
-use crate::iv::common::{IvError, IvInput, mat_to_columns, validate_structural_cluster_count};
+use crate::iv::common::{IvError, IvInput, mat_to_columns, structural_cluster_codes};
 use crate::linear::ols::CovType;
-use crate::shared::cluster::group_indices;
 use crate::shared::covariance::time_ordering;
 use crate::shared::error::CommonError;
+use crate::shared::group_codes::{GroupCodes, GroupIndices};
 use crate::shared::inference;
 use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 use crate::shared::validation::MAX_ITER_LIMIT;
@@ -396,7 +396,7 @@ impl GmmEstimator {
         // `g`・`q`は入力だけから判定できるため、点推定・SE計算より前に弾く。
         // `weight_type=Cluster`の重み行列`S`（l×l）の`G`と`l`の関係は別軸のため
         // `validate_weight_type`側で検証する。
-        validate_structural_cluster_count(&input, &cov_type)?;
+        let cov_cluster_codes = structural_cluster_codes(&input, &cov_type)?;
 
         // 1段階GMMは`weight_type`を持たない（点推定・Hansen Jとも`(Z'Z)⁻¹`のみで計算する）
         // ため検証もしない。2段階・反復では点推定に使う重みの妥当性を検証する。
@@ -405,9 +405,17 @@ impl GmmEstimator {
             GmmType::TwoStep { weight } | GmmType::Iterated { weight, .. } => Some(weight),
         };
         let l_instruments = input.k_exog() + input.instruments().ncols();
-        if let Some(weight_type) = weight_type {
-            validate_weight_type(weight_type, n, k, l_instruments)?;
-        }
+        // `weight_type=Cluster`のグループキーの整数コード（`validate_weight_type`が検証のために
+        // 作る）。`cov_type=Cluster`のコード（上の`cov_cluster_codes`）とは、同じ列を指して
+        // いても別々の`Vec<String>`から作るため別のコードになる。
+        let weight_cluster_codes = match weight_type {
+            Some(weight_type) => validate_weight_type(weight_type, n, k, l_instruments)?,
+            None => None,
+        };
+        // グループごとの行インデックスは反復中不変のため、ループの外で一度だけ作る
+        // （反復GMMで`cluster_moment_covariance`が反復のたびに集計し直さない）。
+        let weight_group_indices: Option<GroupIndices> =
+            weight_cluster_codes.as_ref().map(GroupCodes::group_indices);
 
         let x_exog_columns = mat_to_columns(input.x_exog());
 
@@ -490,9 +498,11 @@ impl GmmEstimator {
                         Mat::from_fn(l, l, |i, j| sigma2 * (*ztz.get(i, j)))
                     }
                     WeightType::Robust => robust_moment_covariance(&z, &residuals, n, l),
-                    WeightType::Cluster { groups } => {
-                        let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
-                        cluster_moment_covariance(&z, &residuals, n, l, groups)
+                    WeightType::Cluster { .. } => {
+                        let indices = weight_group_indices
+                            .as_ref()
+                            .ok_or(CommonError::MissingClusterColumn)?;
+                        cluster_moment_covariance(&z, &residuals, l, indices)
                     }
                     WeightType::Hac { .. } => {
                         // `hac_precomputed`は`weight_type=Hac`のとき（このアームに入る
@@ -611,11 +621,12 @@ impl GmmEstimator {
                 // 補正が無く使い回せないのと対照的）。
                 hac_moment_covariance(&z, &residuals, n, l, lags, &order)
             }
-            CovType::Cluster { groups } => {
-                let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
-                // クラスター数 `g <= df_model`（構造方程式の傾き係数の数）は`fit()`冒頭で
-                // 既に`InsufficientClustersForInference`として弾いている。
-                validate_cluster_groups(groups, n)?;
+            CovType::Cluster { .. } => {
+                // クラスター数 `g >= 2`・`g > df_model`（構造方程式の傾き係数の数）は`fit()`冒頭
+                // （`structural_cluster_codes`）で検証済み。
+                let groups = cov_cluster_codes
+                    .as_ref()
+                    .ok_or(CommonError::MissingClusterColumn)?;
                 gmm_cluster_omega(&z, &residuals, n, k, l, groups)
             }
         };
@@ -876,27 +887,32 @@ fn gmm_coefficients_converged(prev: &Mat<f64>, next: &Mat<f64>, rtol: f64) -> bo
 /// `Cluster`の`S`（l×l）は`rank(S) ≤ G`で、丁度識別（`l == k`）では`Z'ê = 0`により
 /// `rank(S) ≤ G-1`となる。よって過剰識別は`G < l`、丁度識別は`G <= l`で構造的に特異に
 /// なるため`IvError::InsufficientClustersForWeightMatrix`で弾く。
+///
+/// `Cluster`のとき、検証のために作ったグループキーの整数コードを返す（それ以外は`None`）。
+/// 呼び出し元は、このコードから集計用の行インデックスを一度だけ作って反復に使い回す。
 fn validate_weight_type(
     weight_type: &WeightType,
     n: usize,
     k: usize,
     l: usize,
-) -> Result<(), IvError> {
+) -> Result<Option<GroupCodes>, IvError> {
     match weight_type {
         WeightType::Classical | WeightType::Robust => {}
         WeightType::Cluster { groups } => {
             let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
-            let g = validate_cluster_groups(groups, n)?;
+            let codes = GroupCodes::from_ids(groups);
+            let g = validate_cluster_groups(&codes, n)?;
             let exactly_identified = l == k;
             if g < l || (exactly_identified && g == l) {
                 return Err(IvError::InsufficientClustersForWeightMatrix { g, l });
             }
+            return Ok(Some(codes));
         }
         WeightType::Hac { lags, .. } => {
             resolve_hac_lags(*lags, n)?;
         }
     }
-    Ok(())
+    Ok(None)
 }
 
 /// 重み行列`W=S⁻¹`によるGMMの点推定 `β̂(W) = (X'ZWZ'X)⁻¹X'ZWZ'y` を求める。
@@ -941,21 +957,19 @@ fn robust_moment_covariance(z: &Mat<f64>, residuals: &Mat<f64>, n: usize, l: usi
 
 /// クラスター頑健なモーメント分散共分散行列: `Σ_g (Σ_{i∈g} êᵢzᵢ)(Σ_{i∈g} êᵢzᵢ)'`（l×l）。
 /// `two_sls.rs`の`cluster_cov_params`と同型だが小標本補正は無し（モジュール冒頭の
-/// docコメント参照）。`BTreeMap`を使う理由も`two_sls.rs`と同じ
-/// （`engine/src/linear/CLAUDE.md`「踏んだ罠」参照、`HashMap`はグループの反復順序が
-/// 実行のたびに変わりうる）。`groups`が`G>=2`であることは`validate_cluster_groups`
+/// docコメント参照）。グループの反復順は`GroupCodes`のコード順（キーの辞書順）で、`two_sls.rs`と
+/// 同じ（`engine/src/linear/CLAUDE.md`「踏んだ罠」参照、`HashMap`はグループの反復順序が
+/// 実行のたびに変わりうる）。`indices_by_group`は反復GMMで毎回作り直さないよう、
+/// 呼び出し元がループの外で一度だけ作る。`groups`が`G>=2`であることは`validate_cluster_groups`
 /// （呼び出し元）で検証済みの前提。
 fn cluster_moment_covariance(
     z: &Mat<f64>,
     residuals: &Mat<f64>,
-    n: usize,
     l: usize,
-    groups: &[String],
+    indices_by_group: &GroupIndices,
 ) -> Mat<f64> {
-    let indices_by_group = group_indices(groups.iter().take(n));
-
     let mut s = Mat::<f64>::zeros(l, l);
-    for indices in indices_by_group.values() {
+    for indices in indices_by_group.iter() {
         let mut s_g = vec![0.0_f64; l];
         for &i in indices {
             let e = *residuals.get(i, 0);
@@ -1138,13 +1152,13 @@ fn gmm_cluster_omega(
     n: usize,
     k: usize,
     l: usize,
-    groups: &[String],
+    groups: &GroupCodes,
 ) -> Mat<f64> {
-    let indices_by_group = group_indices(groups.iter().take(n));
-    let n_groups = indices_by_group.len();
+    let indices_by_group = groups.group_indices();
+    let n_groups = groups.n_groups();
 
     let mut s_hat = Mat::<f64>::zeros(l, l);
-    for indices in indices_by_group.values() {
+    for indices in indices_by_group.iter() {
         let mut s_g = vec![0.0_f64; l];
         for &i in indices {
             let e = *residuals.get(i, 0);

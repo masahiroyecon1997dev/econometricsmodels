@@ -32,7 +32,7 @@ use thiserror::Error;
 use crate::design_matrix::design_matrix_element;
 use crate::error::CommonError;
 use crate::inference;
-use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
+use crate::linear_algebra::{checked_col_piv_qr, ensure_well_conditioned_symmetric_matrix};
 use crate::validation::MAX_ITER_LIMIT;
 use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 
@@ -1563,8 +1563,8 @@ where
 /// argmin組み込みの`Newton`ソルバーは`H: ArgminInv<H>`（Hessianの逆行列）を要求するが、
 /// `argmin-math`の`vec`機能（`Vec<Vec<f64>>`向け）には`ArgminInv`の実装が存在しない
 /// （faer/nalgebra/ndarrayの行列型にしか実装されていない）ため使えない。Newton法は独自の
-/// `Solver`実装とし、ステップの求解はfaer（列ピボットQR、OLSの`ensure_full_rank`と同じ
-/// 特異性検出パターン）で行う（`docs/spec/nonlinear-common.md`1.2節参照）。
+/// `Solver`実装とし、ステップの求解はfaer（列ピボットQR、`linear_algebra::checked_col_piv_qr`の
+/// 特異性検出）で行う（`docs/spec/nonlinear-common.md`1.2節参照）。
 struct FaerNewton {
     tol: f64,
     /// `regularized_newton_step`が[`RegularizedStep::NoProgress`]または
@@ -1979,26 +1979,14 @@ fn cost_hessian_is_positive_definite(hessian: &[Vec<f64>]) -> bool {
 }
 
 /// Newtonステップ`Δθ = H⁻¹g`を求める。`H`は対称とは限らない（収束点から離れた場所では
-/// 正定値でないこともある、Probit等）ため、列ピボットQR（OLSの`ensure_full_rank`と同じ
+/// 正定値でないこともある、Probit等）ため、列ピボットQR（`linear_algebra::checked_col_piv_qr`の
 /// 相対閾値での特異性検出）を使う。
 fn newton_step(hessian: &[Vec<f64>], grad: &[f64]) -> Result<Vec<f64>, MleError> {
     let k = grad.len();
     let h = Mat::from_fn(k, k, |i, j| hessian[i][j]);
     let g = Mat::from_fn(k, 1, |i, _| grad[i]);
 
-    let qr = h.col_piv_qr();
-    let r = qr.thin_R();
-    let max_abs_diag = (0..k).map(|i| (*r.get(i, i)).abs()).fold(0.0_f64, f64::max);
-    let threshold = (k as f64) * f64::EPSILON * max_abs_diag;
-    for i in 0..k {
-        let diag = (*r.get(i, i)).abs();
-        // NaNを明示的にチェックする（`diag <= threshold`だとNaNとの比較は常にfalseになり
-        // すり抜けてしまう）。全ゼロ行列のcol_piv_qrは列選択時の0除算によりRの対角がNaNに
-        // なりうるため（faer 0.24.4で実機確認済み）、この形にしている。
-        if diag.is_nan() || diag <= threshold {
-            return Err(MleError::SingularHessian);
-        }
-    }
+    let qr = checked_col_piv_qr(&h).map_err(|_| MleError::SingularHessian)?;
 
     let step = qr.solve_lstsq(&g);
     Ok((0..k).map(|i| *step.get(i, 0)).collect())
@@ -2700,12 +2688,10 @@ fn two_loop_recursion(
 /// 取り出せるようにするため）。
 ///
 /// `x`は標準化済み（Logit/Probitの`ols_based_initial_params`）でも生スケール
-/// （`tobit::ols_initial_params`）でもよい。特異性判定は`R`の対角成分に対する相対閾値
-/// `k·ε·max|R_ii|`（`.claude/rules/rust-style.md`「線形代数」、`linear::ols`の
-/// `ensure_full_rank`・`newton_step`と同一式）で、列ごとの一様スケーリングに対して
-/// 不変なため、標準化の有無で判定結果は変わらない。全ゼロ列を含む設計行列では
-/// `col_piv_qr`が`R`の対角にNaNを生成しうるため、NaNも明示的に弾く（`newton_step`と
-/// 同じ罠、`engine/src/linear/CLAUDE.md`「相対閾値との比較だけではNaNをすり抜ける」参照）。
+/// （`tobit::ols_initial_params`）でもよい。特異性判定は`linear_algebra::checked_col_piv_qr`
+/// （OLS・`newton_step`と共通。`R`の対角成分に対する相対閾値`k·ε·max|R_ii|`とNaNの明示チェック、
+/// `.claude/rules/rust-style.md`「線形代数」）で、列ごとの一様スケーリングに対して
+/// 不変なため、標準化の有無で判定結果は変わらない。
 ///
 /// Logit/Probit（`ols_based_initial_params`）とTobit（`tobit::ols_initial_params`）が
 /// `fit()`冒頭で共有する。Newton法が一度も反復していない段階での検出のため、エラーは
@@ -2718,18 +2704,7 @@ fn two_loop_recursion(
 pub fn checked_design_matrix_qr(
     x: &Mat<f64>,
 ) -> Result<faer::linalg::solvers::ColPivQr<f64>, MleError> {
-    let k = x.ncols();
-    let qr = x.col_piv_qr();
-    let r = qr.thin_R();
-    let max_abs_diag = (0..k).map(|i| (*r.get(i, i)).abs()).fold(0.0_f64, f64::max);
-    let threshold = (k as f64) * f64::EPSILON * max_abs_diag;
-    for i in 0..k {
-        let diag = (*r.get(i, i)).abs();
-        if diag.is_nan() || diag <= threshold {
-            return Err(MleError::SingularDesignMatrix);
-        }
-    }
-    Ok(qr)
+    checked_col_piv_qr(x).map_err(|_| MleError::SingularDesignMatrix)
 }
 
 /// 標準化空間での線形確率モデル（LPM）最小二乗解を、リンク関数のIRLS 1ステップ相当の

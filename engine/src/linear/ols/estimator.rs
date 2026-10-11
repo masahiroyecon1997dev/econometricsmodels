@@ -7,6 +7,7 @@ use super::input::OlsInput;
 use crate::error::CommonError;
 use crate::inference;
 use crate::linear::common::LeastSquaresError;
+use crate::linear_algebra::checked_col_piv_qr;
 use crate::shared::covariance::{
     HcVariant, classical_cov_params, cluster_cov_params, hac_cov_params, hc_cov_params,
     time_ordering, xtx_inverse,
@@ -138,7 +139,7 @@ impl OlsEstimator {
     /// `k=0`になりえない呼び出し方をしており（RE/IVは常に切片または操作変数由来の列を
     /// 最低1列持つ、`engine/src/linear/CLAUDE.md`「k=0の扱い」参照）、`fit`（ゲート付き）を
     /// そのまま使う。`k=0`でも`col_piv_qr`・`wald_f_test`が安全に動作することは
-    /// `ensure_full_rank`のNaN明示チェック・`df_model==0`分岐により保証済み（同ドキュメント
+    /// `checked_col_piv_qr`のNaN明示チェック・`df_model==0`分岐により保証済み（同ドキュメント
     /// 参照）。
     ///
     /// # Errors
@@ -176,8 +177,7 @@ impl OlsEstimator {
             validate_cluster_count_covers_slopes(g, k - usize::from(input.has_intercept()))?;
         }
 
-        let qr = input.x().col_piv_qr();
-        ensure_full_rank(&qr, k)?;
+        let qr = checked_col_piv_qr(input.x()).map_err(|_| LeastSquaresError::SingularMatrix)?;
 
         let params = qr.solve_lstsq(input.y());
         let residuals = input.y() - input.x() * &params;
@@ -477,33 +477,6 @@ fn resolve_hac_lags(lags: Option<i64>, n: usize) -> Result<usize, LeastSquaresEr
     }
 }
 
-/// 列ピボットQRの`R`の対角成分から設計行列のランク落ちを検出する。
-///
-/// 絶対閾値ではなく相対閾値を使う（`.claude/rules/rust-style.md`「線形代数」参照）。
-/// `R`は列ピボットにより対角成分が絶対値の降順になるため、最大値
-/// （`|R[0,0]|`、通常は最初の対角成分）を基準に相対的な小ささを判定する。
-pub(crate) fn ensure_full_rank(
-    qr: &faer::linalg::solvers::ColPivQr<f64>,
-    k: usize,
-) -> Result<(), LeastSquaresError> {
-    let r = qr.thin_R();
-    let max_abs_diag = (0..k).map(|i| (*r.get(i, i)).abs()).fold(0.0_f64, f64::max);
-    let threshold = (k as f64) * f64::EPSILON * max_abs_diag;
-
-    for i in 0..k {
-        let diag = (*r.get(i, i)).abs();
-        // NaNを明示的にチェックする（`diag <= threshold`だとNaNとの比較は常にfalseになり
-        // すり抜けてしまう）。全ゼロ設計行列（`include_intercept=false`かつ全説明変数列が
-        // ゼロ）のcol_piv_qrは列選択時の0除算によりRの対角がNaNになりうるため
-        // （faer 0.24.4で実機確認済み。`nonlinear::common::newton_step`と
-        // 同じ修正パターン）。
-        if diag.is_nan() || diag <= threshold {
-            return Err(LeastSquaresError::SingularMatrix);
-        }
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -608,25 +581,6 @@ mod tests {
         .unwrap();
 
         let result = OlsEstimator::fit(input, CovType::Classical, 0.95);
-
-        assert_eq!(result.unwrap_err(), LeastSquaresError::SingularMatrix);
-    }
-
-    #[test]
-    fn ensure_full_rank_detects_nan_diagonal_from_all_zero_matrix() {
-        // 全ゼロ行列のcol_piv_qrは列選択時の0除算によりRの対角成分がNaNになりうる
-        // （faer 0.24.4で実機確認済み）。`diag <= threshold`のみだとNaNとの比較は
-        // 常にfalseになりすり抜けてしまうため、`diag.is_nan()`の明示チェックが
-        // 必要。`OlsEstimator::fit`経由だと、この後段の`xtx_inverse`
-        // （全ゼロのX'Xは非正定値でCholesky分解が失敗する）が偶然同じ
-        // `SingularMatrix`を返し検出漏れを覆い隠してしまうため、`ensure_full_rank`
-        // を直接呼び出して検証する。
-        let zeros = Mat::<f64>::zeros(4, 2);
-        let qr = zeros.col_piv_qr();
-        let diag = (*qr.thin_R().get(0, 0)).abs();
-        assert!(diag.is_nan(), "precondition: expected R diagonal to be NaN");
-
-        let result = ensure_full_rank(&qr, 2);
 
         assert_eq!(result.unwrap_err(), LeastSquaresError::SingularMatrix);
     }

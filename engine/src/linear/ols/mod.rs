@@ -17,6 +17,3 @@ pub use cov_type::CovType;
 pub use estimator::OlsEstimator;
 pub use input::OlsInput;
 pub use predict::predict_new_data;
-
-// 列ピボットQRの特異性判定。`linear::diagnostics`（Breusch-Godfrey検定）が使う。
-pub(crate) use estimator::ensure_full_rank;

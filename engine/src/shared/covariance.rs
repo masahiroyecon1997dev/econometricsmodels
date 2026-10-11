@@ -11,7 +11,7 @@ use faer::linalg::matmul::matmul;
 use faer::prelude::Solve;
 use faer::{Accum, Mat, Par, Side};
 
-use super::group_codes::{GroupCodes, GroupIndices};
+use super::group_codes::GroupCodes;
 use crate::shared::linear_algebra::RankDeficient;
 
 /// `(X'X)⁻¹`を求める。classical・HC0-3・HAC・クラスターのいずれの標準誤差でも必要になる。
@@ -209,42 +209,40 @@ pub(crate) fn hac_cov_params(
 ///
 /// `S_g = Σ_{i∈g} s_i`（クラスター内のスコアの合計。クラスター内の観測を先に合計してから
 /// 外積を取ることで、クラスター内の相関を許容する）。`score(i, a)`は`i`行目の`a`列目の
-/// スコア。グループの反復順序は`groups`のコード順（キーの辞書順）、グループ内の行は観測順で、
-/// どちらも決定的（`HashMap`は反復順序がプロセスごとのハッシュシードに依存し、グループ間の
-/// 加算順・浮動小数点の丸め誤差が実行のたびに変わりうるため使わない。`GroupCodes`は
-/// `BTreeMap<&str, _>`と同じ順序）。
+/// スコア。
+///
+/// 実装は行を観測順に1回走査し、`G×k`のバッファへクラスターのコードで足し込む。1つの
+/// `(g, a)`の合計は常に「そのクラスターの行を観測順に足す」ため、行の並びによらず浮動小数点の
+/// 結果が決まる（クラスターごとに行を集めて足す実装とビット単位で同じ）。外積`S_g S_g'`の加算は
+/// `groups`のコード順（キーの辞書順）で、`BTreeMap<&str, _>`の反復順と同じ（`HashMap`は
+/// 反復順序がプロセスごとのハッシュシードに依存し、グループ間の加算順・丸め誤差が実行のたびに
+/// 変わりうるため使わない）。行インデックスを作らず`x`・残差を連続して読むため、クラスターの行が
+/// 行列内に散らばっている（ランダムな並びの）データでも遅くならない。
 pub(crate) fn cluster_meat(
     groups: &GroupCodes,
     k: usize,
     score: impl Fn(usize, usize) -> f64,
 ) -> (Mat<f64>, usize) {
-    let s_hat = cluster_meat_by_indices(&groups.group_indices(), k, score);
-    (s_hat, groups.n_groups())
-}
-
-/// `cluster_meat`の、行インデックス（`GroupCodes::group_indices`）を呼び出し側が持つ版。
-/// 同じクラスターで`meat`を繰り返し計算する場合（反復GMM等）に、行インデックスの作り直しを
-/// 避けるために使う。グループの反復順・加算順は`cluster_meat`と同じ。
-pub(crate) fn cluster_meat_by_indices(
-    indices: &GroupIndices,
-    k: usize,
-    score: impl Fn(usize, usize) -> f64,
-) -> Mat<f64> {
-    let mut s_hat = Mat::<f64>::zeros(k, k);
-    for rows in indices.iter() {
-        let mut s_g = vec![0.0_f64; k];
-        for &i in rows {
-            for (a, s_g_a) in s_g.iter_mut().enumerate() {
-                *s_g_a += score(i, a);
-            }
+    let n_groups = groups.n_groups();
+    let mut sums = vec![0.0_f64; n_groups * k];
+    for (i, &code) in groups.codes().iter().enumerate() {
+        let s_g = &mut sums[code * k..(code + 1) * k];
+        for (a, s_g_a) in s_g.iter_mut().enumerate() {
+            *s_g_a += score(i, a);
         }
+    }
+
+    let mut s_hat = Mat::<f64>::zeros(k, k);
+    // `k = 0`では`sums`が空で、`chunks_exact(0)`のpanicを避けるため`k.max(1)`にする
+    // （空なのでチャンクは0個）。
+    for s_g in sums.chunks_exact(k.max(1)) {
         for a in 0..k {
             for b in 0..k {
                 *s_hat.get_mut(a, b) += s_g[a] * s_g[b];
             }
         }
     }
-    s_hat
+    (s_hat, n_groups)
 }
 
 /// クラスターロバストの小標本補正 `G/(G-1) * (n-1)/(n-k)`（Stata方式。常に適用する。
@@ -418,25 +416,20 @@ mod tests {
     }
 
     #[test]
-    fn cluster_meat_by_indices_is_bit_identical_to_cluster_meat() {
-        // 行インデックスを呼び出し側が持つ版（反復GMM用）は、同じ`GroupCodes`から作った
-        // `group_indices()`を渡せば`cluster_meat`と同じ値になる。スコアは2列で、列ごとに
-        // 異なる値にして列の取り違えを検出する。
-        let groups = codes(&["b", "a", "c", "a", "b", "c", "a"]);
-        let score = |i: usize, a: usize| (i as f64 + 1.0).sqrt() * if a == 0 { 1.0 } else { -0.7 };
+    fn cluster_meat_handles_zero_columns_and_a_single_row_per_cluster() {
+        // 列数0（スコアが無い）でもパニックせず0×0の行列とクラスター数を返す。
+        let groups = codes(&["a", "b", "a"]);
+        let (meat, n_groups) = cluster_meat(&groups, 0, |_, _| unreachable!());
+        assert_eq!((meat.nrows(), meat.ncols(), n_groups), (0, 0, 2));
 
-        let (expected, n_groups) = cluster_meat(&groups, 2, score);
-        let actual = cluster_meat_by_indices(&groups.group_indices(), 2, score);
-
+        // クラスターが全て1行（G = n）なら、行ごとのスコアの外積の和になる。
+        let singles = codes(&["x", "y", "z"]);
+        let (meat, n_groups) = cluster_meat(&singles, 2, |i, a| (i + 1) as f64 * (a + 1) as f64);
         assert_eq!(n_groups, 3);
-        for a in 0..2 {
-            for b in 0..2 {
-                assert_eq!(actual.get(a, b).to_bits(), expected.get(a, b).to_bits());
-            }
-        }
-        // 対称行列で、列0と列1のスコアが逆符号のため非対角は負になる。
-        assert!(*actual.get(0, 1) < 0.0);
-        assert_eq!(actual.get(0, 1).to_bits(), actual.get(1, 0).to_bits());
+        // s_i = (i+1)·[1, 2] → Σ (i+1)² · [[1, 2], [2, 4]] = 14 · [[1, 2], [2, 4]]
+        assert_eq!(*meat.get(0, 0), 14.0);
+        assert_eq!(*meat.get(0, 1), 28.0);
+        assert_eq!(*meat.get(1, 1), 56.0);
     }
 
     #[test]
@@ -506,42 +499,61 @@ mod tests {
 
     #[test]
     fn cluster_meat_is_bit_identical_to_the_string_keyed_btreemap_implementation() {
-        // 数値文字列のラベル（"10" < "9" の辞書順）と非整列の出現順で、加算順の違いが
-        // あれば丸め誤差として表れるようにする。
+        // 数値文字列のラベル（"10" < "9" の辞書順）で、加算順の違いがあれば丸め誤差として表れる
+        // ようにする。クラスター数（1、少数、多数、全行が別クラスター）・列数・行の並び
+        // （ランダム／クラスターごとに整列）を変えて確かめる。
         let n = 400;
-        let k = 3;
-        let mut state = 0x2545_F491_4F6C_DD1D_u64;
-        let mut next = || {
-            state ^= state << 13;
-            state ^= state >> 7;
-            state ^= state << 17;
-            state
-        };
-        let labels: Vec<String> = (0..n).map(|_| (next() % 37).to_string()).collect();
-        let scores: Vec<[f64; 3]> = (0..n)
-            .map(|_| {
-                let mut row = [0.0; 3];
-                for v in &mut row {
-                    *v = (next() >> 11) as f64 / (1u64 << 53) as f64 * 1e3 - 5e2;
+        // (ラベルの種類数, 列数, ラベルを整列するか)。種類数 n は全行が別クラスター（G = n）。
+        for (n_labels, k, sorted) in [
+            (37, 3, false),
+            (1, 3, false),
+            (5, 1, false),
+            (150, 8, false),
+            (n, 3, false),
+            (37, 3, true),
+            (n, 2, true),
+        ] {
+            let mut state = 0x2545_F491_4F6C_DD1D_u64;
+            let mut next = || {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                state
+            };
+            let mut ids: Vec<usize> = (0..n).map(|_| next() as usize % n_labels).collect();
+            if sorted {
+                ids.sort_unstable();
+            }
+            let labels: Vec<String> = ids.iter().map(|id| id.to_string()).collect();
+            let scores: Vec<Vec<f64>> = (0..n)
+                .map(|_| {
+                    (0..k)
+                        .map(|_| (next() >> 11) as f64 / (1u64 << 53) as f64 * 1e3 - 5e2)
+                        .collect()
+                })
+                .collect();
+            let score = |i: usize, a: usize| scores[i][a];
+
+            let (expected, expected_groups) = btree_cluster_meat(&labels, k, score);
+            let (actual, actual_groups) = cluster_meat(&GroupCodes::from_labels(&labels), k, score);
+            let (actual_keyless, _) =
+                cluster_meat(&GroupCodes::from_labels_without_keys(&labels), k, score);
+
+            let case = format!("labels={n_labels} k={k} sorted={sorted}");
+            assert_eq!(actual_groups, expected_groups, "{case}");
+            for a in 0..k {
+                for b in 0..k {
+                    assert_eq!(
+                        actual.get(a, b).to_bits(),
+                        expected.get(a, b).to_bits(),
+                        "{case}"
+                    );
+                    assert_eq!(
+                        actual_keyless.get(a, b).to_bits(),
+                        expected.get(a, b).to_bits(),
+                        "{case}"
+                    );
                 }
-                row
-            })
-            .collect();
-        let score = |i: usize, a: usize| scores[i][a];
-
-        let (expected, expected_groups) = btree_cluster_meat(&labels, k, score);
-        let (actual, actual_groups) = cluster_meat(&GroupCodes::from_labels(&labels), k, score);
-        let (actual_keyless, _) =
-            cluster_meat(&GroupCodes::from_labels_without_keys(&labels), k, score);
-
-        assert_eq!(actual_groups, expected_groups);
-        for a in 0..k {
-            for b in 0..k {
-                assert_eq!(actual.get(a, b).to_bits(), expected.get(a, b).to_bits());
-                assert_eq!(
-                    actual_keyless.get(a, b).to_bits(),
-                    expected.get(a, b).to_bits()
-                );
             }
         }
     }

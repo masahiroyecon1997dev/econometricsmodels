@@ -206,11 +206,9 @@ use statrs::distribution::{ChiSquared, ContinuousCDF, Normal};
 
 use crate::iv::common::{IvError, IvInput, mat_to_columns, validate_structural_cluster_count};
 use crate::linear::ols::CovType;
-use crate::shared::covariance::{
-    cluster_correction, cluster_meat, cluster_meat_by_indices, time_ordering,
-};
+use crate::shared::covariance::{cluster_correction, cluster_meat, time_ordering};
 use crate::shared::error::CommonError;
-use crate::shared::group_codes::{GroupCodes, GroupIndices};
+use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference;
 use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 use crate::shared::validation::MAX_ITER_LIMIT;
@@ -417,10 +415,6 @@ impl GmmEstimator {
             Some(weight_type) => validate_weight_type(weight_type, n, k, l_instruments)?,
             None => None,
         };
-        // グループごとの行インデックスは反復中不変のため、ループの外で一度だけ作る
-        // （反復GMMで`cluster_moment_covariance`が反復のたびに集計し直さない）。
-        let weight_group_indices: Option<GroupIndices> =
-            weight_cluster_codes.map(GroupCodes::group_indices);
 
         let x_exog_columns = mat_to_columns(input.x_exog());
 
@@ -504,10 +498,9 @@ impl GmmEstimator {
                     }
                     WeightType::Robust => robust_moment_covariance(&z, &residuals, n, l),
                     WeightType::Cluster { .. } => {
-                        let indices = weight_group_indices
-                            .as_ref()
-                            .ok_or(CommonError::MissingClusterColumn)?;
-                        cluster_moment_covariance(&z, &residuals, l, indices)
+                        let groups =
+                            weight_cluster_codes.ok_or(CommonError::MissingClusterColumn)?;
+                        cluster_moment_covariance(&z, &residuals, l, groups)
                     }
                     WeightType::Hac { .. } => {
                         // `hac_precomputed`は`weight_type=Hac`のとき（このアームに入る
@@ -892,7 +885,7 @@ fn gmm_coefficients_converged(prev: &Mat<f64>, next: &Mat<f64>, rtol: f64) -> bo
 /// なるため`IvError::InsufficientClustersForWeightMatrix`で弾く。
 ///
 /// `Cluster`のとき、検証したグループ（整数コード）を返す（それ以外は`None`）。
-/// 呼び出し元は、このコードから集計用の行インデックスを一度だけ作って反復に使い回す。
+/// 呼び出し元は、このコードを反復の間そのまま借りて`cluster_moment_covariance`に渡す。
 fn validate_weight_type(
     weight_type: &WeightType,
     n: usize,
@@ -958,21 +951,18 @@ fn robust_moment_covariance(z: &Mat<f64>, residuals: &Mat<f64>, n: usize, l: usi
 }
 
 /// クラスター頑健なモーメント分散共分散行列: `Σ_g (Σ_{i∈g} êᵢzᵢ)(Σ_{i∈g} êᵢzᵢ)'`（l×l）。
-/// `shared::covariance::cluster_meat_by_indices`で`êᵢzᵢ`を集計するだけで小標本補正は無し
+/// `shared::covariance::cluster_meat`で`êᵢzᵢ`を集計するだけで小標本補正は無し
 /// （モジュール冒頭のdocコメント参照）。グループの反復順は`GroupCodes`のコード順
-/// （キーの辞書順）で、`cluster_meat_by_indices`と同じ（`engine/src/linear/CLAUDE.md`
-/// 「踏んだ罠」参照、`HashMap`はグループの反復順序が実行のたびに変わりうる）。`indices_by_group`は反復GMMで毎回作り直さないよう、
-/// 呼び出し元がループの外で一度だけ作る。`groups`が`G>=2`であることは`validate_cluster_groups`
-/// （呼び出し元）で検証済みの前提。
+/// （キーの辞書順）で、`cluster_meat`と同じ（`engine/src/linear/CLAUDE.md`
+/// 「踏んだ罠」参照、`HashMap`はグループの反復順序が実行のたびに変わりうる）。`groups`が
+/// `G>=2`であることは`validate_cluster_groups`（呼び出し元）で検証済みの前提。
 fn cluster_moment_covariance(
     z: &Mat<f64>,
     residuals: &Mat<f64>,
     l: usize,
-    indices_by_group: &GroupIndices,
+    groups: &GroupCodes,
 ) -> Mat<f64> {
-    cluster_meat_by_indices(indices_by_group, l, |i, a| {
-        (*residuals.get(i, 0)) * (*z.get(i, a))
-    })
+    cluster_meat(groups, l, |i, a| (*residuals.get(i, 0)) * (*z.get(i, a))).0
 }
 
 /// `weight_type=Hac`の`lags`（`Option<i64>`）を実際に使うラグ数（`usize`）に解決する
@@ -3354,7 +3344,7 @@ mod tests {
     }
 
     /// 旧実装（`String`ラベルの`BTreeMap`で集計）をそのまま残したoracleと、
-    /// `cluster_moment_covariance`（コード化した行インデックスで集計）がビット単位で一致する。
+    /// `cluster_moment_covariance`（コードで行を1回走査して集計）がビット単位で一致する。
     #[test]
     fn cluster_moment_covariance_is_bit_identical_to_the_string_keyed_btreemap_implementation() {
         let n = 300;
@@ -3394,7 +3384,7 @@ mod tests {
         }
 
         let codes = GroupCodes::from_labels_without_keys(&labels);
-        let actual = cluster_moment_covariance(&z, &residuals, l, &codes.group_indices());
+        let actual = cluster_moment_covariance(&z, &residuals, l, &codes);
         for a in 0..l {
             for b in 0..l {
                 assert_eq!(actual.get(a, b).to_bits(), expected.get(a, b).to_bits());
@@ -3999,7 +3989,7 @@ mod tests {
         );
     }
 
-    /// `OneStep`は`weight_type`を持たないため（`weight_cluster_codes`・`weight_group_indices`は
+    /// `OneStep`は`weight_type`を持たないため（`weight_cluster_codes`は
     /// `None`）、`cov_type=Cluster`のグループは`validate_structural_cluster_count`だけで検証
     /// され、`cov_type`から借りたコードで集計される。この経路が、点推定は`cov_type`に依らず、
     /// 標準誤差はクラスター割り当てだけに依存し（ラベルの付け替えで変わらない）、

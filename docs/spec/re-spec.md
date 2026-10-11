@@ -102,9 +102,11 @@ Python `linearmodels.RandomEffects`の実装（Swamy-Arora）に準拠する。R
   `df_resid() = n - k_tv - n_entities`になる（`plm`と同じ。`linearmodels`は時間不変の列も
   自由度に数えるため`σ_ε²`が食い違う）。全説明変数が時間不変でも成立する（FEは説明変数0個を
   受け付ける）。分散がゼロかどうかの判定はFEの分散ゼロ検出と同じ相対閾値。
-- **σ_u²（individual variance）**: between回帰（エンティティ平均に対する`OlsEstimator::
-  fit(include_intercept=true)`）のSSR、調和平均`t_bar = n_entities / Σ(1/T_i)`を使う標準式
-  `max(0, ssr/df_resid - σ_ε²/t_bar)`。
+- **σ_u²（individual variance）**: between回帰（エンティティ平均`[1, x̄ᵢ.]`への最小二乗）のSSR、
+  調和平均`t_bar = n_entities / Σ(1/T_i)`を使う標準式`max(0, ssr/df_resid - σ_ε²/t_bar)`。
+  `df_resid = n_entities - K_b - 1`。平均が個体間で一定の列（バランスパネルで時点間でのみ変わる
+  列等）は切片と共線になるため、between回帰から落とし`K_b`にも数えない（`plm`と同じ。最終回帰には
+  全列が残る。2-wayの規則と同じ、3.1.1節）。
 - **`k`規約についての実装上の注記**: `linearmodels`ソースの式は`nvar`（切片を含む列数）
   表記だが、このプロジェクトの`k`規約（傾き係数のみ、切片を含まない）では、内部1-way FE
   推定が返す`df_resid()`（σ_ε²用）とbetween回帰が返す`nobs()-k()`（σ_u²用）をそのまま
@@ -284,7 +286,11 @@ FEの`r_squared_between`/`r_squared_overall`をそのまま流用できず、RE�
   （`k × F`、χ²版、`plm`と一致させるため）、p値は
   `χ²_k.sf(stat)`、`hausman_df = k`。`k`は傾き係数のうち時間変化のある列の数`k_tv`で、
   `X*`は全傾き、`X̃`は時間変化のある列だけ（時間不変の列のwithin変換後は全ゼロ列で、比較に
-  寄与しない）。統計量は構造的に非負で、二次形式版の
+  寄与しない）。さらに、**`X̃`の列のうち識別できない列は検定対象から外す**: バランスパネルで時点間で
+  のみ変わる列（年トレンド等）は個体平均が個体間で一定になり、`x*_j = x̃_j + 定数`で未変換の定数項と
+  共線になるため、その係数は識別できない（`x*_j - x̃_j`が全観測で一定かで判定する）。外した分だけ
+  `hausman_df`は小さくなり、検定できる列が残らなければ`None`。時点間でのみ変わる列が無い入力の結果は
+  変わらない（`plm`の`phtest(method = "aux")`はこの入力で添字エラーになる）。統計量は構造的に非負で、二次形式版の
   `abs()`や非正定値の問題が生じない。バランスパネルでは共通σ²を使った古典的ハウスマン
   検定と数値的に一致する。
 - **定数項の扱い**: `plm`は`reX`から定数列を除き補助回帰に未変換の`1`を足す。バランス
@@ -504,7 +510,8 @@ FEの`WithinRegressionFailed`と同じく内側の`LeastSquaresError`の分類�
     - **最終回帰・`df_model`・F統計量・`cov_type`・between/overall R²**: 全列を使い、変更なし。
       `r_squared_within`は時間変化のある列の係数だけを使う（時間不変の列のwithin変換後の値は0）。
     - **ハウスマン検定**: `y*`を`[1, X*（全傾き）, X̃（時間変化のある列のみ）]`に回帰し、`X̃`の係数だけを
-      Wald検定する。`hausman_df = k_tv`で、`k_tv = 0`なら`None`。事前検証（クラスター数・DKの時点数）は
+      Wald検定する。`hausman_df = k_tv`（3.7節の識別できない列を外した場合はその分減る）で、
+      検定できる列が無ければ`None`。事前検証（クラスター数・DKの時点数）は
       検定対象の係数の数`k_tv`と補助回帰の説明変数の数のどちらを使うかを整理して直す。`plm`の
       `phtest(method = "aux")`は、時間不変変数があると係数を位置で選ぶため`X̃`ではなく`X*`の係数を検定
       してしまい（`reX`と`feX`の列数が等しい前提）、参照として使えない。この場合の参照値は、
@@ -513,8 +520,9 @@ FEの`WithinRegressionFailed`と同じく内側の`LeastSquaresError`の分類�
       一致する。時間不変変数を含むシナリオだけ`linearmodels`は使えず、「Python主リファレンス＋Rクロス
       チェック」の例外になる）。
     - 切片と共線な定数列・時間不変変数同士の共線など、設計行列が特異になる入力は特異性検出
-      （`ComputationError`）に任せる。1-wayでは、between回帰（σ_u²の推定）が最終回帰より先に
-      特異性を検出する（時間不変の列はエンティティ平均でもそのまま変動するため）。
+      （`ComputationError`）に任せる。切片と共線な定数列は、between回帰（σ_u²の推定）では平均が一定の列として
+      落ちるため、最終回帰（準偏差変換後）の特異性（`QuasiDemeanedRegressionFailed`）で検出される。
+      定数ではない時間不変変数同士の共線はbetween回帰の特異性（`BetweenRegressionFailed`）で検出される。
   - **`REResult`に`n_periods`を追加する**（実装済み。FEと同じ定義: `time`を指定した2-wayのときだけ
     ユニークな時点数、1-wayは`None`で、`dk_time`だけの指定でも`None`）。`fe-spec.md`2章・
     `panel-common.md`2.1節の記述も直した。

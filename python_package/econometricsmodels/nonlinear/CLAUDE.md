@@ -25,6 +25,10 @@
 - **OLSからの類推による誤解対策（2026-09-13対応済み）**: `predict()`が確率を返しOLSのような点予測ではないことを、`logit.py`/`probit.py`の`predict()`docstring（Note節）・`docs/spec/logit-spec.md`3.6節・`docs/getting-started.md`に明記した。
 - **`augment(new_data=None)`はLogit/Probit両方に拡張済み（2026-09-13）**: `OLSResults.augment()`と同型（`predict()`と同じ`new_data`意味論、ソースデータに予測確率の列を1列付加したpolars DataFrameを返す）。列名は固定`"predicted_probability"`（`predicted_`接頭辞でOLS/WLS/Tobitと揃えた）。`LogitResult`/`ProbitResult`は`fit()`時の元DataFrameを`training_data: DataFrame`として保持する（`engine_pybind/src/nonlinear/CLAUDE.md`参照）。
 
+## Resultsに属性を足すとき
+
+`LogitResults`/`ProbitResults`/`TobitResults`の公開属性の集合は`tests/nonlinear/test_mle_result_consistency.py`が固定している（共通＋手法固有、ラッパーと`_raw`の両方）。共通の属性は3クラス全てに足し、そのテストの集合も更新する。
+
 ## 実装パターン
 
 - `Logit`/`LogitResults`（`Probit`/`ProbitResults`も同様）は`OLS`/`OLSResults`と同型（`data`/`y`/`x`/`options`を保持するだけのコンストラクタ、`fit()`呼び出し時に初めて`_lib.fit_logit`/`_lib.fit_probit`を呼ぶ。コンストラクタでは検証しない）。

@@ -69,6 +69,14 @@ Logit/Probit/Tobit（最尤推定ベースの非線形モデル）が共有す�
   2回目以降は標準の`alpha=1.0`に戻す。secant条件`yᵀs>0`を満たさない場合はrank-2更新を
   スキップする（閾値は絶対値`f64::EPSILON`固定、相対閾値は実測で反復回数・実行時間が
   かえって悪化したため不採用）。
+  **初期逆Hessian**: warm start点（Logit/Probit）で`H`を1回評価し、正定値なら`H⁻¹`を
+  初期逆Hessianにする（このとき1回目のself-scalingは行わず、初期ステップ幅も`1.0`）。
+  上の`min(1,1/‖g₀‖)`は1回目のステップ長を初期点によらず`‖s₀‖=1`にするため、最適点に近い
+  warm startでは過大になり、最初のsecantペアが遠い領域の曲率を拾って反復が増える
+  （実測: Logit n=100,000で8→13反復、line searchの評価回数は変わらない）。`H⁻¹`の初期化で
+  同条件が13→6反復になる。`H`が正定値でない場合（Tobit等、尤度が大域凹でない手法）は
+  `H⁻¹`が降下方向を作らないため、従来の単位行列＋self-scalingに戻す。nullモデルの
+  `w·X'X`で`H`を代用する案は、Hessian評価が不要になる反面、反復数が改善せず不採用。
 - **L-BFGS**: 同じ理由（`s`/`y`履歴・初期`γ`を注入する公開APIが無い）で自前実装
   （`two_loop_recursion`、Nocedal & Wright Algorithm 7.4）。line search内側`Executor`に
   明示的な`max_iters`（`LINE_SEARCH_MAX_ITERS=100`）を設定し、到達時は`ComputationFailed`

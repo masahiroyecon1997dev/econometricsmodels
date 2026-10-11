@@ -1899,10 +1899,12 @@ mod tests {
                 );
                 for i in 0..k {
                     for j in 0..k {
+                        // 相対許容: 4観測・近分離のためcovの成分は`O(10²)`と大きく、絶対許容
+                        // `1e-4`は相対`1e-7`に当たりbfgsの収束点の僅かな差で落ちる。
+                        let expected = *newton.cov_params().get(i, j);
                         assert!(
-                            (*estimator.cov_params().get(i, j) - *newton.cov_params().get(i, j))
-                                .abs()
-                                < 1e-4,
+                            (*estimator.cov_params().get(i, j) - expected).abs()
+                                < 1e-4 * (1.0 + expected.abs()),
                             "cov_type={:?}, solver={:?}, ({i},{j}): actual={}, newton={}",
                             cov_type,
                             solver,

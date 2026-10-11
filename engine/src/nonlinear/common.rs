@@ -1363,6 +1363,7 @@ where
                 linesearch: wolfe_line_search()?,
                 tol: tol * n_obs as f64,
                 stalled_at_optimum: false,
+                h0_from_hessian: false,
             };
             let result = Executor::new(problem, optimizer)
                 .configure(|state| state.param(initial_params).max_iters(max_iter))
@@ -2003,6 +2004,35 @@ fn newton_step(hessian: &[Vec<f64>], grad: &[f64]) -> Result<Vec<f64>, MleError>
     Ok((0..k).map(|i| *step.get(i, 0)).collect())
 }
 
+/// コスト関数のHessian`H`が正定値かつ可逆なとき、その逆行列`H⁻¹`（対称化済み）を返す。
+/// そうでない（正定値でない・特異・非有限値を含む）場合は`None`。
+///
+/// `FaerBfgs::init`が初期逆Hessian近似に使う。`H`が正定値でない場合の`H⁻¹`は降下方向を
+/// 作らない（line searchが`Search direction must be a descent direction`で失敗する）ため、
+/// 呼び出し側は`None`のとき従来の初期化（単位行列＋self-scaling）へ戻す。
+fn inverse_if_positive_definite(hessian: &[Vec<f64>]) -> Option<Vec<Vec<f64>>> {
+    if !cost_hessian_is_positive_definite(hessian) {
+        return None;
+    }
+    let k = hessian.len();
+    let mut inv = vec![vec![0.0; k]; k];
+    for j in 0..k {
+        let mut unit = vec![0.0; k];
+        unit[j] = 1.0;
+        let column = newton_step(hessian, &unit).ok()?;
+        for (i, value) in column.into_iter().enumerate() {
+            inv[i][j] = value;
+        }
+    }
+    let symmetrized: Vec<Vec<f64>> = (0..k)
+        .map(|i| (0..k).map(|j| 0.5 * (inv[i][j] + inv[j][i])).collect())
+        .collect();
+    symmetrized
+        .iter()
+        .all(|row| row.iter().all(|v| v.is_finite()))
+        .then_some(symmetrized)
+}
+
 /// argmin組み込みのBFGS（`argmin::solver::quasinewton::BFGS`）は、外側反復をまたぐ
 /// line searchの初期ステップ幅・逆Hessianの初期スケールを実行中に調整する手段を
 /// 公開していない（`linesearch`フィールドはprivateで、`initial_step_length`は
@@ -2030,6 +2060,20 @@ fn newton_step(hessian: &[Vec<f64>], grad: &[f64]) -> Result<Vec<f64>, MleError>
 /// （固定値のまま反復間で使い回すと、スケール補正済みの反復まで不必要に小さい
 /// ステップから始めることになり逆効果になりうるため）。
 ///
+/// **warm startとの相互作用（初期逆Hessianを初期点の厳密Hessianの逆行列にする）**:
+/// Logit/Probitはwarm start（`ols_based_initial_params`）で最適点の近くから始まるが、
+/// 上記の`min(1,1/‖g₀‖)`は1回目のステップ長を初期点の位置によらず常に`‖s₀‖=1`
+/// （標準化パラメータ空間）にする。ゼロ初期値（最適点まで距離およそ1）には適切だが、
+/// warm startでは過大で、最初のsecantペアが最適点から遠い領域の曲率を拾うため`γ`が
+/// 真の逆曲率から外れ、超1次収束に入るまでの反復が増える（実測: 反復数が
+/// Logit n=100,000で8→13、Probit n=1,000,000で8→10。line searchの評価回数は
+/// 変わらず原因ではない）。初期点で`H`を1回評価して`H⁻¹`を初期逆Hessianにすると、
+/// 1回目のステップはほぼNewtonステップになりこの問題が消える（同条件で13→6、10→7）。
+/// `H`が正定値でない場合（Tobitのように尤度が大域凹でない手法）は`H⁻¹`が降下方向を
+/// 作らないため、従来の単位行列＋self-scalingに戻す（[`inverse_if_positive_definite`]）。
+/// `H`を「nullモデルの`w·X'X`」で代用する案は、Hessianの評価が不要になる反面、反復数が
+/// 改善せず（Logit n=1,000,000では悪化）不採用。
+///
 /// **`SolverType::Lbfgs`は当初対象外だったが、現在は解消済み**: 導入当初は
 /// argmin 0.11.0の組み込みLBFGS実装が`s`/`y`履歴・初期`γ`を外部から注入する公開APIを
 /// 持たず（privateフィールド、対応するビルダーメソッド無し）、同じ手法を適用できな
@@ -2048,6 +2092,10 @@ struct FaerBfgs {
     /// 示すフラグ。`terminate`で収束として扱う（[`QUASI_NEWTON_STALL_GRAD_FACTOR`]の
     /// docコメント参照、`FaerNewton::stalled_at_optimum`と同じ位置づけ）。
     stalled_at_optimum: bool,
+    /// `init`で初期逆Hessianをwarm start点の厳密Hessianの逆行列にしたか。`true`のとき
+    /// 1回目の反復のself-scaling（`bfgs_updated_inv_hessian`の`is_first_iter`）は行わない
+    /// （既にスケール・形状とも曲率に合っているため。再スケールすると情報を捨てる）。
+    h0_from_hessian: bool,
 }
 
 type BfgsState = IterState<Vec<f64>, Vec<f64>, (), Vec<Vec<f64>>, (), f64>;
@@ -2055,7 +2103,8 @@ type BfgsState = IterState<Vec<f64>, Vec<f64>, (), Vec<Vec<f64>>, (), f64>;
 impl<O> Solver<O, BfgsState> for FaerBfgs
 where
     O: CostFunction<Param = Vec<f64>, Output = f64>
-        + Gradient<Param = Vec<f64>, Gradient = Vec<f64>>,
+        + Gradient<Param = Vec<f64>, Gradient = Vec<f64>>
+        + Hessian<Param = Vec<f64>, Hessian = Vec<Vec<f64>>>,
 {
     /// `argmin::core::Solver`トレイトの必須メソッド（`FaerNewton::name`と同じ理由で
     /// 未カバーでも振る舞いの正しさに影響しない）。
@@ -2075,10 +2124,20 @@ where
         })?;
         let grad = problem.gradient(&param)?;
 
-        // 1回目の反復専用のline search初期ステップ幅（`FaerBfgs`のdocコメント参照）。
-        // `g0_norm`が実質ゼロ（既に停留点付近）なら`1.0/g0_norm`は`f64::INFINITY`に
-        // なり`min(1.0)`で1.0（＝標準値）に収まるため、この場合は特別扱い不要で
-        // 自然に既定動作へ落ちる。
+        // 初期点（warm start）の厳密Hessianが正定値なら、その逆行列を初期逆Hessianにする
+        // （`FaerBfgs`のdocコメント「warm startとの相互作用」参照）。1回目のステップは
+        // ほぼNewtonステップになるため、初期ステップ幅は標準の`1.0`のままでよい。
+        if let Some(inv_hessian) = inverse_if_positive_definite(&problem.hessian(&param)?) {
+            self.h0_from_hessian = true;
+            let state = state.param(param).gradient(grad).inv_hessian(inv_hessian);
+            return Ok((state, None));
+        }
+
+        // 初期点のHessianが正定値でない（Tobit等、尤度が大域凹でない手法のwarm start点）
+        // 場合の従来の初期化。1回目の反復専用のline search初期ステップ幅（`FaerBfgs`の
+        // docコメント参照）。`g0_norm`が実質ゼロ（既に停留点付近）なら`1.0/g0_norm`は
+        // `f64::INFINITY`になり`min(1.0)`で1.0（＝標準値）に収まるため、この場合は特別扱い
+        // 不要で自然に既定動作へ落ちる。
         let alpha0 = (1.0 / l2_norm(&grad)).min(1.0);
         if alpha0.is_finite() && alpha0 > 0.0 {
             self.linesearch.initial_step_length(alpha0)?;
@@ -2171,6 +2230,8 @@ where
         if is_first_iter {
             self.linesearch.initial_step_length(1.0)?;
         }
+        // 初期逆Hessianを厳密Hessianの逆行列にした場合は、1回目もself-scalingしない。
+        let apply_self_scaling = is_first_iter && !self.h0_from_hessian;
 
         let sk: Vec<f64> = xk1.iter().zip(param.iter()).map(|(a, b)| a - b).collect();
         let yk: Vec<f64> = grad
@@ -2185,7 +2246,8 @@ where
             !line_search_step_satisfies_wolfe(cur_cost, &prev_grad, next_cost, &grad, &sk)
                 && is_near_convergence_target(&grad, self.tol);
 
-        let updated_inv_hessian = bfgs_updated_inv_hessian(inv_hessian, &sk, &yk, is_first_iter);
+        let updated_inv_hessian =
+            bfgs_updated_inv_hessian(inv_hessian, &sk, &yk, apply_self_scaling);
 
         Ok((
             state
@@ -3463,6 +3525,93 @@ mod tests {
     }
 
     #[test]
+    fn inverse_if_positive_definite_returns_symmetric_inverse_for_positive_definite_hessian() {
+        // [[4,1],[1,3]]の逆行列は(1/11)·[[3,-1],[-1,4]]。
+        let inv = inverse_if_positive_definite(&[vec![4.0, 1.0], vec![1.0, 3.0]]).unwrap();
+        let expected = [[3.0 / 11.0, -1.0 / 11.0], [-1.0 / 11.0, 4.0 / 11.0]];
+        for i in 0..2 {
+            for j in 0..2 {
+                assert!((inv[i][j] - expected[i][j]).abs() < 1e-12, "{inv:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn inverse_if_positive_definite_returns_none_for_indefinite_or_singular_hessian() {
+        // 不定符号（固有値 +3, -1）: 逆行列は降下方向を作らないため弾く。
+        assert!(inverse_if_positive_definite(&[vec![1.0, 2.0], vec![2.0, 1.0]]).is_none());
+        // 特異（ランク1）。
+        assert!(inverse_if_positive_definite(&[vec![1.0, 1.0], vec![1.0, 1.0]]).is_none());
+        // 非有限値を含む。
+        assert!(inverse_if_positive_definite(&[vec![f64::NAN, 0.0], vec![0.0, 1.0]]).is_none());
+    }
+
+    /// 初期点のHessianが正定値なら初期逆Hessianが厳密になり、二次関数は初期スケールの
+    /// 大きな食い違い（初期点`(1000,-1000)`）があっても1〜2反復で収束する
+    /// （単位行列からの出発では、rank-2更新がHessianを学習するのに`k`反復以上要る）。
+    #[test]
+    fn run_solver_bfgs_uses_exact_inverse_hessian_at_initial_point_when_positive_definite() {
+        let output = run_solver(
+            quadratic_problem(),
+            SolverType::Bfgs,
+            vec![1000.0, -1000.0],
+            100,
+            1e-9,
+            1,
+            true,
+            SeparationNormCheck::Enabled,
+        )
+        .unwrap();
+
+        assert!(output.converged);
+        assert!(output.n_iter <= 2, "n_iter={}", output.n_iter);
+    }
+
+    /// 初期点のHessianが正定値でない（`f(x)=x⁴/4-x²/2`は`|x|<1/√3`で`f''<0`）場合は
+    /// 従来の初期化（単位行列＋self-scaling）に戻り、`H⁻¹`が降下方向を作らず
+    /// line searchが失敗する、という事態を避けて極小点`x=1`へ収束する。
+    #[test]
+    fn run_solver_bfgs_falls_back_when_hessian_at_initial_point_is_indefinite() {
+        struct Quartic;
+        impl CostFunction for Quartic {
+            type Param = Vec<f64>;
+            type Output = f64;
+            fn cost(&self, p: &Self::Param) -> Result<Self::Output, OptimizerError> {
+                Ok(p[0].powi(4) / 4.0 - p[0].powi(2) / 2.0)
+            }
+        }
+        impl Gradient for Quartic {
+            type Param = Vec<f64>;
+            type Gradient = Vec<f64>;
+            fn gradient(&self, p: &Self::Param) -> Result<Self::Gradient, OptimizerError> {
+                Ok(vec![p[0].powi(3) - p[0]])
+            }
+        }
+        impl Hessian for Quartic {
+            type Param = Vec<f64>;
+            type Hessian = Vec<Vec<f64>>;
+            fn hessian(&self, p: &Self::Param) -> Result<Self::Hessian, OptimizerError> {
+                Ok(vec![vec![3.0 * p[0].powi(2) - 1.0]])
+            }
+        }
+
+        let output = run_solver(
+            Quartic,
+            SolverType::Bfgs,
+            vec![0.1],
+            100,
+            1e-9,
+            1,
+            true,
+            SeparationNormCheck::Disabled,
+        )
+        .unwrap();
+
+        assert!(output.converged);
+        assert!((output.params[0] - 1.0).abs() < 1e-6, "{:?}", output.params);
+    }
+
+    #[test]
     fn bfgs_updated_inv_hessian_applies_self_scaling_gamma_on_first_iteration() {
         // yᵀs=1・yᵀy=2 → γ=0.5。1回目の反復では`inv_hessian`（ここでは意図的に
         // γIとは異なる値にしている）を使わず、`scaled_identity(0.5, 2)`を
@@ -3724,6 +3873,7 @@ mod tests {
             linesearch: linesearch(),
             tol: 1e-2,
             stalled_at_optimum: false,
+            h0_from_hessian: false,
         };
         let result = Executor::new(NoisyCostFloorProblem::new(), bfgs)
             .configure(|state| state.param(vec![0.0, 0.0]).max_iters(100))
@@ -3789,13 +3939,14 @@ mod tests {
         );
     }
 
+    // `max_iter=0`: 初期逆Hessianが厳密なため、二次関数は`max_iter=1`でも1反復で収束する。
     #[test]
     fn run_solver_returns_non_convergence_error_when_max_iter_is_too_small() {
         let result = run_solver(
             quadratic_problem(),
             SolverType::Bfgs,
             vec![1000.0, -1000.0],
-            1,
+            0,
             1e-12,
             1,
             true,
@@ -3805,13 +3956,14 @@ mod tests {
         assert!(matches!(result, Err(MleError::NonConvergence { .. })));
     }
 
+    // `max_iter=0`: 初期逆Hessianが厳密なため、二次関数は`max_iter=1`でも1反復で収束する。
     #[test]
     fn run_solver_returns_result_without_raising_when_raise_on_non_convergence_is_false() {
         let output = run_solver(
             quadratic_problem(),
             SolverType::Bfgs,
             vec![1000.0, -1000.0],
-            1,
+            0,
             1e-12,
             1,
             false,

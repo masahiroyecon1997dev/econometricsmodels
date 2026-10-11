@@ -196,16 +196,28 @@ fn role_contains(value: &RoleValue, col: &str) -> bool {
     }
 }
 
+/// 目的語側のロールの言い回し。単一列ロール（`Single`）は「specified as {name}」、
+/// 複数列ロール（`Multi`）は「included in {name}」。
+fn role_phrase(name: &str, value: &RoleValue) -> String {
+    match value {
+        RoleValue::Single(_) => format!("specified as {name}"),
+        RoleValue::Multi(_) => format!("included in {name}"),
+    }
+}
+
 /// 重複が見つかったロールのペアからエラーメッセージを組み立てる。
 ///
-/// 単一列ロール（`Single`）は常に「specified as」、複数列ロール（`Multi`）は常に
-/// 「is also included in」の主語として振る舞う（`(i, j)`のどちらが単一列ロールかに
+/// メッセージは「the column '{col}' specified as {主語} is also {目的語の言い回し}」
+/// の形で、主語は常に「specified as」固定、目的語の言い回しは`role_phrase`により
+/// 単一列ロールなら「specified as」、複数列ロールなら「included in」になる。
+///
+/// 主語には単一列ロール（`Single`）を優先する（`(i, j)`のどちらが単一列ロールかに
 /// 関わらず、単一列ロールの方をメッセージの主語にする）。これは旧実装（単一列ロールのみ、
 /// `x`という1つの複数列ロールと必ず対で使われていた）のメッセージ文言をそのまま踏襲する
 /// ための特別扱いで、`y`/`weight`のような単一列ロールの既存の挙動を変えないために
-/// 必要。両方とも複数列ロール（例: IVの`instruments`と
-/// `x_exog`）の場合のみ、リスト内で後に置かれた方（`i`側、`name_i`）を主語にする
-/// （新規のケースのため文言の踏襲対象が無い）。
+/// 必要。それ以外（単一列ロール同士、または両方とも複数列ロール。例: IVの`instruments`と
+/// `x_exog`）では、リスト内で後に置かれた方（`i`側、`name_i`）を主語にする
+/// （複数列ロール同士は新規のケースのため文言の踏襲対象が無い）。
 fn duplicate_role_message(
     name_i: &str,
     value_i: &RoleValue,
@@ -213,20 +225,14 @@ fn duplicate_role_message(
     value_j: &RoleValue,
     col: &str,
 ) -> String {
-    match (value_i, value_j) {
-        (RoleValue::Single(_), RoleValue::Multi(_)) => {
-            format!("the column '{col}' specified as {name_i} is also included in {name_j}")
-        }
-        (RoleValue::Multi(_), RoleValue::Single(_)) => {
-            format!("the column '{col}' specified as {name_j} is also included in {name_i}")
-        }
-        (_, RoleValue::Single(_)) => {
-            format!("the column '{col}' specified as {name_i} is also specified as {name_j}")
-        }
-        (_, RoleValue::Multi(_)) => {
-            format!("the column '{col}' specified as {name_i} is also included in {name_j}")
-        }
-    }
+    let (subject, object_name, object_value) = match (value_i, value_j) {
+        (RoleValue::Multi(_), RoleValue::Single(_)) => (name_j, name_i, value_i),
+        _ => (name_i, name_j, value_j),
+    };
+    format!(
+        "the column '{col}' specified as {subject} is also {}",
+        role_phrase(object_name, object_value)
+    )
 }
 
 /// モード（`cov_type`・`estimator`・`gmm_type`等）で使われないオプションが明示指定された

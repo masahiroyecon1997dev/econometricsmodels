@@ -2,11 +2,11 @@
 //!
 //! クラスターロバスト分散・FE/REのwithin変換等、「行がどのグループに属するか」を引く処理は
 //! `String`をキーにしたハッシュ表・`BTreeMap`で毎回引き直すと遅い（`GroupCodes`のdoc参照）。
-//! 一度だけ整数コードに変換し、以降はコードで配列を直接引く。クラスター列は呼び出し側
-//! （`engine_pybind`）が`CovType::Cluster`等に渡す時点でコード化し、パネルのentity/timeは
-//! 入力の構築時にコード化する。コードの順序は
-//! `BTreeMap<&str, _>`の反復順（キーの辞書順）と同じで、グループ間の加算順（`Σ_g S_g S_g'`）が
-//! 変わらないため、結果はビット単位で同じになる。
+//! 一度だけ整数コードに変換し、以降はコードで配列を直接引く。クラスター列・パネルのentity/timeは
+//! 呼び出し側（`engine_pybind`）が、行ごとの`String`を作らずにコード化して`CovType::Cluster`・
+//! `FeInput`/`ReInput`・`TimeKeys`に渡す（ラベルの`String`列から作る簡便版は、構築時に同じ
+//! コードに変換する）。コードの順序は`BTreeMap<&str, _>`の反復順（キーの辞書順）と同じで、
+//! グループ間の加算順（`Σ_g S_g S_g'`）が変わらないため、結果はビット単位で同じになる。
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -27,14 +27,17 @@ use crate::shared::error::CommonError;
 /// `BTreeMap<&str, _>`の反復順と同じ）にする**。グループ間の加算順（クラスターの
 /// `Σ_g S_g S_g'`等）・between回帰の行順を旧実装と同じに保ち、結果をビット単位で
 /// 変えないため。時点だけは、DKの時系列順序が値の順序で決まる必要があるため、
-/// `TimeKeys`が`from_labels_ordered`で値の順序のコードを振る（`TimeKeys`のdoc参照）。
+/// `TimeKeys`が`from_labels_ordered`/`from_factorized_ordered`で値の順序のコードを振る
+/// （`TimeKeys`のdoc参照）。
 /// グループ内の行は観測順に積む（`group_indices`の安定な計数ソート）。
 ///
 /// クラスター列は`CovType::Cluster { groups }`・`WeightType::Cluster { groups }`・
 /// `FeCovType::Cluster`/`ReCovType::Cluster`が`Option<GroupCodes>`で受け取る（同じ型で揃える）。
 /// 構築は[`Self::from_labels`]/[`Self::from_labels_without_keys`]（ラベルの`String`列から）と
-/// [`Self::from_factorized_without_keys`]（呼び出し側が行ごとの`String`を作らずに振った仮コード
-/// から。`engine_pybind`のクラスター列はこちら）が公開で、コードの参照・集計用の読み出し口は`engine`内部専用（`pub(crate)`）。パネルの
+/// [`Self::from_factorized`]/[`Self::from_factorized_without_keys`]（呼び出し側が行ごとの
+/// `String`を作らずに振った仮コードから。`engine_pybind`はこちら）が公開で、コードの参照・
+/// 集計用の読み出し口は`engine`内部専用（`pub(crate)`）。
+///
 /// パネルの`FeInput`/`ReInput`のentity（`from_group_codes`、キー付き）と`TimeKeys`
 /// （`*_factorized`）も、同じ型のコードで受け取る。ラベルの`String`列から作る簡便版
 /// （`from_columns`/`from_columns_ordered`・`TimeKeys::lexicographic`等）は、内部でこの型に
@@ -45,9 +48,11 @@ use crate::shared::error::CommonError;
 ///   クラスター数の検証（`validate_cluster_groups`）で`CommonError::ClusterDimensionMismatch`
 ///   にする（集計には進まない）。
 /// - **キーの有無は構築方法で決まる。** `from_labels_without_keys`・
-///   `from_factorized_without_keys`で作ったコードは`keys()`を呼べない（panicする）。`CovType::Cluster`等のクラスター用の`groups`はキー無しで渡されうるので、
-///   クラスターの検証・集計は`keys()`を使わない。`keys()`が要る処理（パネルのentity/time、
-///   固定効果のキー）は、`from_labels`/`from_labels_ordered`で作った自前のコードだけに使う。
+///   `from_factorized_without_keys`で作ったコードは`keys()`を呼べない（panicする）。
+///   `CovType::Cluster`等のクラスター用の`groups`はキー無しで渡されうるので、クラスターの
+///   検証・集計は`keys()`を使わない。`keys()`が要る処理（パネルのentity/time、固定効果のキー）は、
+///   キー付きのコンストラクタ（`from_labels`/`from_labels_ordered`/`from_factorized`/
+///   `from_factorized_ordered`）で作ったコードだけに使う。
 /// - **等価性（`==`）は`codes`と`counts`だけで判定し、キーの有無・内容は見ない。** キーは
 ///   メタ情報で、同じ行ごとの割り当てなら`from_labels`と`from_labels_without_keys`のコードは
 ///   等しい（`CovType`等の`PartialEq`もこれを引き継ぐ）。
@@ -138,7 +143,8 @@ impl GroupCodes {
     /// `Equal`にすること（併合は並べ替え後に隣り合うことを使う）。
     ///
     /// # Errors
-    /// `from_factorized_without_keys`と同じ。
+    /// `from_factorized_without_keys`と同じ。加えて、同じラベルの仮コード同士を`Equal`にしない
+    /// 比較関数で、併合されずにキーが重複した場合も`Err`にする。
     pub(crate) fn from_factorized_ordered(
         codes: Vec<usize>,
         labels: &[&str],
@@ -170,7 +176,21 @@ impl GroupCodes {
                 "group code {unused} is never used by any row"
             )));
         }
-        Ok(Self::finish(codes, labels, compare_provisional, with_keys))
+        let result = Self::finish(codes, labels, compare_provisional, with_keys);
+        // 同じラベルの仮グループは併合されるはずだが、`compare_provisional`が同じラベルの仮コードに
+        // `Equal`を返さないと、並べ替え後に隣り合わず重複したキーが残る（呼び出し側の契約違反）。
+        // キーの重複は固定効果のキー衝突などに化けるため、黙って受け入れずにここで弾く。
+        if let Some(keys) = &result.keys {
+            let mut seen: std::collections::HashSet<&str> =
+                std::collections::HashSet::with_capacity(keys.len());
+            if let Some(duplicate) = keys.iter().find(|k| !seen.insert(k.as_str())) {
+                return Err(CommonError::ComputationFailed(format!(
+                    "group label '{duplicate}' appears in more than one group; provisional \
+                     groups with the same label must compare as equal"
+                )));
+            }
+        }
+        Ok(result)
     }
 
     /// キー（`keys()`）を持つか。キー無しのコード（`*_without_keys`で作ったもの）では`false`。

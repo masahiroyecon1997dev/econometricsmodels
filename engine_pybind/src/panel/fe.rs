@@ -823,7 +823,7 @@ mod tests {
 
     #[test]
     fn build_fe_input_hac_uses_dk_time_independently_of_time_when_both_set() {
-        // 2-way（`time`指定あり）でもDKの時点列は`dk_time`だけから決まり、`FeInput.time()`
+        // 2-way（`time`指定あり）でもDKの時点列は`dk_time`だけから決まり、`FeInput.time_keys()`
         // （固定効果の時間次元）とは独立であることを確認する（モジュールdoc参照）。
         let df = df!(
             "y" => [1.0, 2.0, 3.0, 4.0],

@@ -140,7 +140,7 @@ FEの1段階目（データ抽出・pyclass定義）と同じ段階（`REOptions
 
 ## engine側の変更（`FeCovType::Dk`の拡張に伴うもの）
 
-`FEOptions.dk_time`（HAC専用の時点列を`time`とは独立に指定したい）を受けるため、`engine::panel::fe::FeCovType::Dk`は`{ bandwidth: Option<i64>, time: TimeKeys }`（`time`は必須。当初の`Option`から、`input.time()`への暗黙のフォールバックを廃止して必須にした）。`FeInput`自体は変更していない。詳細な設計判断・導出は`engine/src/panel/fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」・`engine/src/panel/CLAUDE.md`参照。
+`FEOptions.dk_time`（HAC専用の時点列を`time`とは独立に指定したい）を受けるため、`engine::panel::fe::FeCovType::Dk`は`{ bandwidth: Option<i64>, time: TimeKeys }`（`time`は必須。当初の`Option`から、`input.time_keys()`への暗黙のフォールバックを廃止して必須にした）。`FeInput`自体は変更していない。詳細な設計判断・導出は`engine/src/panel/fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」・`engine/src/panel/CLAUDE.md`参照。
 
 ## `FEResult`のスコープ（実装完結時点）
 

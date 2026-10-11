@@ -1551,6 +1551,58 @@ mod tests {
         ));
     }
 
+    /// エラーの優先順位: 次元の食い違い（`y`↔各`x`列、`entity`の行数、`time`の行数）が先で、
+    /// `entity`がキー無しであることの拒否は最後。
+    #[test]
+    fn from_group_codes_reports_dimension_mismatches_before_missing_entity_keys() {
+        let y = [1.0, 2.0, 3.0, 4.0];
+        let x = vec![vec![1.0, 2.0, 3.0, 5.0]];
+        let keyless = |labels: &[&str]| GroupCodes::from_labels_without_keys(&strings(labels));
+
+        // `time`の行数の食い違い（`entity`は正しい長さでキー付き）。
+        assert!(matches!(
+            ReInput::from_group_codes(
+                &y,
+                &x,
+                vec!["x1".to_string()],
+                GroupCodes::from_labels(&strings(&["a", "a", "b", "b"])),
+                Some(TimeKeys::lexicographic(strings(&["1", "2"]))),
+                "y".to_string()
+            ),
+            Err(PanelError::IdentifierDimensionMismatch {
+                dimension: PanelDimension::Time,
+                ..
+            })
+        ));
+        // キー無しで、かつ`entity`の行数も食い違う: 行数のエラーが先。
+        assert!(matches!(
+            ReInput::from_group_codes(
+                &y,
+                &x,
+                vec!["x1".to_string()],
+                keyless(&["a", "b"]),
+                None,
+                "y".to_string()
+            ),
+            Err(PanelError::IdentifierDimensionMismatch {
+                dimension: PanelDimension::Entity,
+                ..
+            })
+        ));
+        // `x`の列の行数の食い違いは、`entity`の検証より先。
+        assert!(matches!(
+            ReInput::from_group_codes(
+                &y,
+                &[vec![1.0, 2.0]],
+                vec!["x1".to_string()],
+                keyless(&["a", "b"]),
+                None,
+                "y".to_string()
+            ),
+            Err(PanelError::Common(CommonError::DimensionMismatch { .. }))
+        ));
+    }
+
     #[test]
     fn from_columns_builds_input_with_time() {
         let y = [1.0, 2.0, 3.0, 4.0];

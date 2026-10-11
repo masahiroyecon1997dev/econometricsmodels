@@ -319,11 +319,11 @@
 //!   として常に明示的に受け取る（必須。1-way/2-wayのどちらでも同じ）。
 //! - `Cluster`と異なり`fe_cluster_k_correction`のネスト判定は行わない——DKは常に
 //!   `K = df_model`（上記スケールの導出参照）。
-//! - **`FeCovType::Dk.time`は必須で、`FeInput.time()`にはフォールバックしない**: 当初は
-//!   `Option<TimeKeys>`で、`None`なら2-way FEの`FeInput.time()`を暗黙に借用していたが、
+//! - **`FeCovType::Dk.time`は必須で、`FeInput.time_keys()`にはフォールバックしない**: 当初は
+//!   `Option<TimeKeys>`で、`None`なら2-way FEの`FeInput.time_keys()`を暗黙に借用していたが、
 //!   どの列がDKの時点かを呼び出し側が明示しない設計は、意図と違う列が選ばれても気づけない
 //!   ため廃止した（`engine_pybind`の`FEOptions.dk_time`が`cov_type="dk"`で必須）。
-//!   `FeInput.time()`は2-way FEの固定効果の時間次元専用で、DK HACの時系列順序とは独立
+//!   `FeInput.time_keys()`は2-way FEの固定効果の時間次元専用で、DK HACの時系列順序とは独立
 //!   （2-wayで`time`と別の時間粒度のDKを使うこともできる）。
 //!
 //! ## 固定効果自体（α_i）の復元（`fixed_effects()`、`fe-spec.md`3.5節）
@@ -1921,6 +1921,58 @@ mod tests {
                 dimension: PanelDimension::Entity,
                 ..
             })
+        ));
+    }
+
+    /// エラーの優先順位: 次元の食い違い（`y`↔各`x`列、`entity`の行数、`time`の行数）が先で、
+    /// `entity`がキー無しであることの拒否は最後。
+    #[test]
+    fn from_group_codes_reports_dimension_mismatches_before_missing_entity_keys() {
+        let y = [1.0, 2.0, 3.0, 4.0];
+        let x = vec![vec![1.0, 2.0, 3.0, 5.0]];
+        let keyless = |labels: &[&str]| GroupCodes::from_labels_without_keys(&strings(labels));
+
+        // `time`の行数の食い違い（`entity`は正しい長さでキー付き）。
+        assert!(matches!(
+            FeInput::from_group_codes(
+                &y,
+                &x,
+                vec!["x1".to_string()],
+                GroupCodes::from_labels(&strings(&["a", "a", "b", "b"])),
+                Some(TimeKeys::lexicographic(strings(&["1", "2"]))),
+                "y".to_string()
+            ),
+            Err(PanelError::IdentifierDimensionMismatch {
+                dimension: PanelDimension::Time,
+                ..
+            })
+        ));
+        // キー無しで、かつ`entity`の行数も食い違う: 行数のエラーが先。
+        assert!(matches!(
+            FeInput::from_group_codes(
+                &y,
+                &x,
+                vec!["x1".to_string()],
+                keyless(&["a", "b"]),
+                None,
+                "y".to_string()
+            ),
+            Err(PanelError::IdentifierDimensionMismatch {
+                dimension: PanelDimension::Entity,
+                ..
+            })
+        ));
+        // `x`の列の行数の食い違いは、`entity`の検証より先。
+        assert!(matches!(
+            FeInput::from_group_codes(
+                &y,
+                &[vec![1.0, 2.0]],
+                vec!["x1".to_string()],
+                keyless(&["a", "b"]),
+                None,
+                "y".to_string()
+            ),
+            Err(PanelError::Common(CommonError::DimensionMismatch { .. }))
         ));
     }
 
@@ -3678,7 +3730,7 @@ mod tests {
 
     #[test]
     fn fe_estimator_fit_one_way_hac_uses_explicit_time_override_without_fe_input_time() {
-        // `FeCovType::Dk.time`（明示指定）は`FeInput.time()`を経由せずに
+        // `FeCovType::Dk.time`（明示指定）は`FeInput.time_keys()`を経由せずに
         // DK HACを成立させられる（`engine_pybind`の`FEOptions.dk_time`が1-way FE + DK HAC
         // の組み合わせをこの経路で配線する想定）。`FeInput::from_columns`には`time=None`を
         // 渡し、`fe_estimator_fit_one_way_hac_matches_fixest_default_bandwidth`と
@@ -3705,9 +3757,9 @@ mod tests {
 
     #[test]
     fn fe_estimator_fit_one_way_hac_ignores_fe_input_time() {
-        // `FeInput.time()`にも`time`があっても、DKの時点列は`FeCovType::Dk.time`だけから
-        // 決まる（`FeInput.time()`は2-wayの固定効果の時間次元専用、モジュールdoc
-        // 「Driscoll-Kraay型パネルHAC対応」参照）ことを確認する。`FeInput.time()`にわざと
+        // `FeInput.time_keys()`にも`time`があっても、DKの時点列は`FeCovType::Dk.time`だけから
+        // 決まる（`FeInput.time_keys()`は2-wayの固定効果の時間次元専用、モジュールdoc
+        // 「Driscoll-Kraay型パネルHAC対応」参照）ことを確認する。`FeInput.time_keys()`にわざと
         // 全観測が同一のダミー時点列を渡し、それが無視されて`FeCovType::Dk.time`の方の結果と
         // 一致することを確認する。
         let (entity, time, x, y) = fixest_reference_input();

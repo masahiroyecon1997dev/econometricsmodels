@@ -212,9 +212,9 @@ polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）�
    （fixestの`ssc()`は時点数`t_periods`をクラスターの`G`と同じ役割で使う。`K`は
    fixestの既定`K.fixef="full"`——DKにはクラスター変数という概念が無くネスト判定
    自体が発生しないため——により常に`K=df_model`）。
-6. **`FeCovType::Dk.time`は必須で、`FeInput.time()`にはフォールバックしない**: 当初は
+6. **`FeCovType::Dk.time`は必須で、`FeInput.time_keys()`にはフォールバックしない**: 当初は
    `Option`で、`None`なら2-wayの`time`を暗黙に借用していたが、どの列がDKの時点かを利用者が
-   明示しない設計は、意図と違う列が選ばれても気づけないため廃止した。`FeInput.time()`は
+   明示しない設計は、意図と違う列が選ばれても気づけないため廃止した。`FeInput.time_keys()`は
    2-wayの固定効果の時間次元専用で、DKの時点列とは独立。
 7. **`bandwidth == t_periods - 1`ではfixestと一致しない（fixest側の実装誤り、本実装は
    標準のBartlettカーネルを維持）**: `bandwidth`が許容範囲`[0, t_periods)`の上限ちょうど

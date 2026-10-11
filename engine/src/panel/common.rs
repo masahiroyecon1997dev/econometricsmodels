@@ -380,11 +380,22 @@ pub enum PanelError {
 ///
 /// 構築は、行ごとのラベルから作る`lexicographic`/`by_integer`/`by_float`と、呼び出し側が
 /// 行ごとの`String`を作らずに振った仮コードから作る`*_factorized`の2系統。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct TimeKeys {
     /// 各行の時点コード（時間順、キー付き）。
     codes: GroupCodes,
 }
+
+impl PartialEq for TimeKeys {
+    /// 時間順のコードと、ユニークな時点のラベル（時間順）の両方を比べる。`GroupCodes`の`==`は
+    /// キーを見ないが、時点ではラベルが`fixed_effects()`のキーと`dk_time`の指定の同一性を決める
+    /// ため、コードが同じでもラベルが違う時点列を等しいとみなさない。
+    fn eq(&self, other: &Self) -> bool {
+        self.codes == other.codes && self.periods() == other.periods()
+    }
+}
+
+impl Eq for TimeKeys {}
 
 impl TimeKeys {
     /// ラベルの辞書順を時間順とみなす（ISO 8601の日付・ゼロ埋めした年月等、辞書順が時間順と
@@ -1175,6 +1186,115 @@ mod tests {
             TimeKeys::lexicographic_factorized(vec![0, 2], &["a", "b"]),
             Err(PanelError::Common(CommonError::ComputationFailed(_)))
         ));
+    }
+
+    #[test]
+    fn time_keys_factorized_merges_provisional_groups_with_the_same_label_and_value() {
+        // 仮グループ0と1は同じラベル"a"・同じ値1（併合される）。2は"b"・値2。
+        let merged =
+            TimeKeys::by_integer_factorized(vec![0, 1, 2, 1], &["a", "a", "b"], &[1, 1, 2])
+                .unwrap();
+        let expected = TimeKeys::by_integer(labels(&["a", "a", "b", "a"]), &[1, 1, 2, 1]).unwrap();
+        assert_eq!(merged, expected);
+        assert_eq!(merged.periods(), ["a", "b"]);
+    }
+
+    #[test]
+    fn time_keys_factorized_rejects_same_label_with_different_values() {
+        // 同じラベル"a"なのに値が違い、値の順序で"b"を挟むと隣り合わない。併合されずキーが
+        // 重複するため、黙って受け入れずに`Err`にする（呼び出し側の契約違反）。
+        assert!(matches!(
+            TimeKeys::by_integer_factorized(vec![0, 1, 2], &["a", "b", "a"], &[1, 2, 3]),
+            Err(PanelError::Common(CommonError::ComputationFailed(_)))
+        ));
+        assert!(matches!(
+            TimeKeys::by_float_factorized(vec![0, 1, 2], &["a", "b", "a"], &[1.0, 2.0, 3.0]),
+            Err(PanelError::Common(CommonError::ComputationFailed(_)))
+        ));
+    }
+
+    #[test]
+    fn time_keys_equality_compares_period_labels_not_only_codes() {
+        // コード（時間順）は同じ`[0, 1, 0, 1]`でも、時点のラベルが違えば等しくない。
+        let coarse = TimeKeys::lexicographic(labels(&["1", "2", "1", "2"]));
+        let fine = TimeKeys::lexicographic(labels(&["q1", "q2", "q1", "q2"]));
+        assert_ne!(coarse, fine);
+        assert_eq!(
+            coarse,
+            TimeKeys::lexicographic(labels(&["1", "2", "1", "2"]))
+        );
+    }
+
+    mod time_keys_proptests {
+        use proptest::collection;
+        use proptest::prelude::*;
+
+        use super::*;
+
+        /// 行ごとの値`values`について、仮コードを出現順と逆の順序で振り、`split`なら同じ値を
+        /// 行の偶奇で2つの仮グループに割る。仮グループごとのラベルと代表値も返す。
+        fn factorize_reversed<V: Copy + PartialEq>(
+            values: &[V],
+            label: impl Fn(V) -> String,
+            split: bool,
+        ) -> (Vec<usize>, Vec<String>, Vec<V>) {
+            let key = |row: usize| (values[row], if split { row % 2 } else { 0 });
+            let mut unique: Vec<(V, usize)> = Vec::new();
+            for row in (0..values.len()).rev() {
+                if !unique.contains(&key(row)) {
+                    unique.push(key(row));
+                }
+            }
+            let codes = (0..values.len())
+                .map(|row| unique.iter().position(|k| *k == key(row)).unwrap())
+                .collect();
+            let labels = unique.iter().map(|(v, _)| label(*v)).collect();
+            let group_values = unique.iter().map(|(v, _)| *v).collect();
+            (codes, labels, group_values)
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(256))]
+
+            /// 整数の時点（`"10"`と`"9"`のように辞書順と値の順序が食い違う値を含む）で、
+            /// `by_integer_factorized`は`by_integer`と同じ`TimeKeys`（コードとラベル）になる。
+            #[test]
+            fn by_integer_factorized_agrees_with_by_integer(
+                values in collection::vec(-5i128..120, 1..60),
+                split in any::<bool>(),
+            ) {
+                let ids: Vec<String> = values.iter().map(|v| v.to_string()).collect();
+                let (codes, group_labels, group_values) =
+                    factorize_reversed(&values, |v| v.to_string(), split);
+                let refs: Vec<&str> = group_labels.iter().map(String::as_str).collect();
+
+                let actual = TimeKeys::by_integer_factorized(codes, &refs, &group_values).unwrap();
+                let expected = TimeKeys::by_integer(ids, &values).unwrap();
+                prop_assert_eq!(actual, expected);
+            }
+
+            /// 浮動小数の時点（`0.0`と`-0.0`は別の時点）で、`by_float_factorized`は`by_float`と
+            /// 同じ`TimeKeys`になる。
+            #[test]
+            fn by_float_factorized_agrees_with_by_float(
+                picks in collection::vec(0usize..7, 1..60),
+                split in any::<bool>(),
+            ) {
+                let pool = [0.0_f64, -0.0, 1.5, -2.25, 10.0, 9.0, 1e-3];
+                let values: Vec<f64> = picks.iter().map(|&i| pool[i]).collect();
+                // `f64`は`PartialEq`で`0.0 == -0.0`なので、ビット列で別の値として分解する。
+                let bits: Vec<u64> = values.iter().map(|v| v.to_bits()).collect();
+                let ids: Vec<String> = values.iter().map(|v| format!("{v:?}")).collect();
+                let (codes, group_labels, group_bits) =
+                    factorize_reversed(&bits, |b| format!("{:?}", f64::from_bits(b)), split);
+                let group_values: Vec<f64> = group_bits.iter().map(|&b| f64::from_bits(b)).collect();
+                let refs: Vec<&str> = group_labels.iter().map(String::as_str).collect();
+
+                let actual = TimeKeys::by_float_factorized(codes, &refs, &group_values).unwrap();
+                let expected = TimeKeys::by_float(ids, &values).unwrap();
+                prop_assert_eq!(actual, expected);
+            }
+        }
     }
 
     #[test]

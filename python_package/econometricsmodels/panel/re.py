@@ -3,8 +3,8 @@
 A thin wrapper around `econometricsmodels._lib.fit_re` (the Rust
 implementation, `engine`/`engine_pybind`). Validation and estimation
 logic live entirely on the Rust side; this module only provides the
-Python-facing API shape for polars DataFrames — `entity`/`time` as bare
-column-name arguments, `x` as a list, an options object for estimation
+Python-facing API shape for polars DataFrames — `entity` as a bare
+column-name argument (`time` goes in `REOptions`), `x` as a list, an options object for estimation
 settings (CLAUDE.md section 2, `.claude/rules/python-style.md`
 "設計方針との整合性", `docs/spec/panel-common.md` section 1).
 
@@ -156,10 +156,13 @@ class REResults:
     over time within every entity) is allowed in RE: it is left out
     of the internal one-way FE regression and of the within-transformed
     regressors in the auxiliary regression, so `hausman_df` is the
-    number of time-varying regressors. So is the within-transformed
-    copy of a regressor that varies only over time on a balanced panel
-    (a year trend): its coefficient is not identified, so it is not
-    tested and `hausman_df` is smaller by one for each. All three are
+    number of time-varying regressors. A regressor that varies only
+    over time, with the same entity mean for every entity (a year trend
+    on a balanced panel), stays in the model and in the internal
+    one-way FE regression, but its within-transformed copy in the
+    auxiliary regression is collinear with the constant, so that
+    coefficient is not identified and is left out of the tested set:
+    `hausman_df` is smaller by one for each such regressor. All three are
     `None` only when there are no regressors to compare, or for two-way
     effects, where the test is not available yet. If the auxiliary
     regression cannot be computed (rank-deficient design, or a
@@ -362,9 +365,11 @@ class REResults:
         version). The auxiliary regression uses OLS-style small-sample
         corrections, unlike the RE standard errors.
         For unbalanced panels the auxiliary regression's constant is
-        left untransformed, as in `plm::phtest`. `None` if the
-        auxiliary regression is unavailable (see the class
-        docstring)."""
+        left untransformed, as in `plm::phtest`. `None` when no
+        regressor can be tested (every regressor is time-invariant or
+        not identified) and for two-way effects (not available yet); see
+        the class docstring. If the auxiliary regression cannot be
+        computed, `fit()` raises instead."""
         return self._raw.hausman_statistic
 
     @property

@@ -81,7 +81,7 @@ dead_code扱いの間も呼び出しグラフ経由で到達可能だった）�
   `params`/`residuals`/`df_resid`/`df_model`/`std_errors`/`test_stats`/`p_values`/
   `conf_lower`/`conf_upper`が期待値と完全一致することを確認済み。加えて`x=[]`・未知の
   `cov_type`・`cov_type="hc0"`・singletonエンティティ・`cov_type="cluster"`
-  （`cluster`指定）・`cov_type="dk"`で`dk_time`未指定（FEは`ValidationError`、REは`DkRequiresTime`）の各エラー
+  （`cluster`指定）・`cov_type="dk"`で`dk_time`未指定（FE・REとも`ValidationError`）の各エラー
   経路が`ValidationError`として正しく変換されることも確認済み。`fit`自体はFEと同じ理由
   （`PyDataFrame`がGILを要求）で`#[cfg(test)] mod tests`から直接呼べないため、専用の
   Rustユニットテストは追加していない。

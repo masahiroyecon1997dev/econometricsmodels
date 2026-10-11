@@ -15,9 +15,9 @@
 //!   1章）
 //! - `InsufficientDegreesOfFreedom`: パネル自由度調整（`fe-spec.md`3.2節）
 //! - `SingletonGroup`: 観測数1のグループ（`fe-spec.md`1章）
-//! - `UnbalancedPanelForTwoWay`: 2-way FEのバランスパネル必須（`fe-spec.md`1章）
+//! - `UnbalancedPanelForTwoWay`: 2-way FE・REのバランスパネル必須（`fe-spec.md`1章）
 //! - `ZeroVarianceAfterDemeaning`: within変換後に分散ゼロの説明変数（`fe-spec.md`1章）
-//! - `TwoWayRequiresTime`: 2-way FE指定時の`time`必須（`panel-common.md`1.1節）
+//! - `TwoWayRequiresTime`: 2-way FE・RE指定時の`time`必須（`panel-common.md`1.1節）
 //! - `InvalidDkBandwidth`: `FeCovType::Dk`の明示的な`bandwidth`が`[0, t)`の範囲外
 //!   （`t`はユニークな時点数。`LeastSquaresError::InvalidHacLags`と同型だが
 //!   上限が観測数`n`ではなく時点数`t`）
@@ -206,7 +206,7 @@ pub enum PanelError {
     /// 「条件付き必須」パターン（`panel-common.md`1.1節。`OLSOptions.cluster`が
     /// `cov_type="cluster"`のときだけ必須になるのと同型）。未指定時のバリデーション
     /// エラーとしてここで担保する。
-    #[error("two-way fixed effects requires the `time` option to be set")]
+    #[error("two-way estimation (fixed or random effects) requires the `time` option to be set")]
     TwoWayRequiresTime,
 
     /// `FeCovType::Dk`の明示的な`bandwidth`が`[0, t)`の範囲外（`t`はユニークな時点数）。
@@ -1112,7 +1112,7 @@ mod tests {
         );
         assert_eq!(
             PanelError::TwoWayRequiresTime.to_string(),
-            "two-way fixed effects requires the `time` option to be set"
+            "two-way estimation (fixed or random effects) requires the `time` option to be set"
         );
         assert_eq!(
             PanelError::WithinRegressionFailed {

@@ -9,15 +9,9 @@
 //! 同じ理由（`quasi_demean_column`が`&[f64]`の列単位で動く設計のため）で`faer::Mat`は
 //! 組み立てない（`docs/spec/re-spec.md`3.2節）。
 //!
-//! `time`フィールドの扱いは`FeInput`をそのまま踏襲する（`panel-common.md`1章）が、
-//! RE自身の準偏差変換（`re-spec.md`3.2節）は
-//! **entity方向のみ**
-//! （2-way REはv1スコープ外）で`time`を使わない。`ReInput`が`time`を保持する理由は、
-//! `RE.fit()`が内部でFE推定を実行してハウスマン検定の比較対象を得る際
-//! （2.4節）、「`entity`/`time`/`x`はRE呼び出し時と同一の指定を使う」ため——つまり
-//! `ReInput`から`FeInput`相当のデータを組み立て直す際に、`time`を`ReInput`が
-//! 既に保持していれば再抽出が不要になる（`REOptions.dk_time`、1.1節）。この内部FE呼び出し
-//! ロジック自体は、`ReInput`自体の実装スコープ外（`ReEstimator`側で扱う）。
+//! `time`フィールドの扱いは`FeInput`をそのまま踏襲する（`panel-common.md`1章）: 2-way RE
+//! （`ReEffects::TwoWay`）の時間次元で、1-way（`ReEffects::OneWay`）では使わない。
+//! Driscoll-Kraay HACの時点列は`time`ではなく`ReCovType::Dk.time`で別に渡す。
 //!
 //! ## Swamy-Arora分散成分推定（`swamy_arora_variance_components`、`re-spec.md`3.1節）
 //!
@@ -47,7 +41,7 @@
 //!
 //! `θ_i = 1 - sqrt(σ_ε² / (T_i・σ_u² + σ_ε²))`（`compute_theta`、`re-spec.md`3.2節の式そのまま）を
 //! エンティティごとに計算し、`quasi_demean_column`（`common.rs`）を`y`・
-//! 各`x`列に適用する。REはentity方向のみ（2-way REはv1スコープ外、`re-spec.md`3.2節）のため
+//! 各`x`列に適用する（1-way。2-wayは3つの重みの`quasi_demean_transform_two_way`）。1-wayは
 //! 不均衡パネルも無条件でサポートする——`T_i`（エンティティごとの観測数）を直接使う
 //! この式は教科書レベルで不均衡対応済みで、FEの2-wayのような反復アルゴリズムは
 //! 不要（`re-spec.md`3.2節）。`sigma2_eps`/`sigma2_u`は`swamy_arora_variance_components`の戻り値を
@@ -163,8 +157,12 @@
 //!
 //! - **比較は常に1-way**: `X̃`はRE本体と同じ個体効果構造の1-way FE
 //!   （`swamy_arora_variance_components`が返す`FeEstimator`）のwithin変換から得る。
-//!   `input.time_keys()`の有無は結果に影響しない（`time`はDriscoll-Kraay HACの時系列順序専用）。
-//!   2-wayのハウスマン検定は2-way REの実装時に改めて検討する。
+//!   `input.time_keys()`の有無は結果に影響しない。2-way RE（`ReEffects::TwoWay`）のハウスマン検定は
+//!   未実装で`None`（1-wayの検定を流用しない、`re-spec.md`5章）。
+//! - **識別できない`X̃`の列は検定対象から外す**: バランスパネルで時点間でのみ変わる列は
+//!   `x*_j - x̃_j`が全観測で一定になり、未変換の定数項と共線になる（`re_hausman_test`）。判定は
+//!   列ごとで、複数列の線形結合による共線は検出しない（その場合は補助回帰が特異になり
+//!   `PanelError::HausmanTestFailed`）。
 //! - **`cov_type`連動**: 補助回帰のWald検定の共分散はRE本体の`cov_type`に対応させる
 //!   （既定の`cluster`ならcluster-robust版のロバストHausman検定、`classical`なら
 //!   帰無仮説のもとでREが完全に効率的という前提の古典版）。専用オプションは設けない。
@@ -683,8 +681,9 @@ fn two_way_variance_components(
 
     let entity_mean_stats = entity_means(input.y(), input.x(), entity);
     let time_means = entity_means(input.y(), input.x(), time);
-    let (ssr_entity, df_entity) = between_ssr_and_df(&entity_mean_stats)?;
-    let (ssr_time, df_time) = between_ssr_and_df(&time_means)?;
+    let x_scales = column_max_abs(input.x());
+    let (ssr_entity, df_entity) = between_ssr_and_df(&entity_mean_stats, &x_scales)?;
+    let (ssr_time, df_time) = between_ssr_and_df(&time_means, &x_scales)?;
     let n_periods = time.n_groups() as f64;
     let n_entities = entity.n_groups() as f64;
     let sigma2_u = (ssr_entity / df_entity as f64 - sigma2_eps / n_periods).max(0.0);
@@ -711,10 +710,11 @@ fn two_way_variance_components(
 ///
 /// # Errors
 /// 単位数が`K_b + 1`以下、または落とした後の設計行列が特異なら`PanelError::BetweenRegressionFailed`。
-fn between_ssr_and_df(means: &EntityMeans) -> Result<(f64, usize), PanelError> {
+fn between_ssr_and_df(means: &EntityMeans, x_scales: &[f64]) -> Result<(f64, usize), PanelError> {
     let n_units = means.y.len();
+    let max_terms = means.t.iter().fold(0.0_f64, |acc, &t| acc.max(t));
     let kept: Vec<usize> = (0..means.x.len())
-        .filter(|&j| !between_column_is_constant(&means.x[j]))
+        .filter(|&j| !between_column_is_constant(&means.x[j], x_scales[j], max_terms))
         .collect();
     let n_params = kept.len() + 1;
     if n_units <= n_params {
@@ -735,13 +735,25 @@ fn between_ssr_and_df(means: &EntityMeans) -> Result<(f64, usize), PanelError> {
     Ok((residual_sum_of_squares(&fit.residuals), n_units - n_params))
 }
 
+/// 各説明変数の元の列（単位平均ではなく観測値）の最大絶対値。between回帰の一定判定
+/// （`between_column_is_constant`）のスケールに使う。
+fn column_max_abs(x: &[Vec<f64>]) -> Vec<f64> {
+    x.iter()
+        .map(|col| col.iter().fold(0.0_f64, |acc, v| acc.max(v.abs())))
+        .collect()
+}
+
 /// 単位平均の1列が単位間で一定（切片と共線）か。
-fn between_column_is_constant(column: &[f64]) -> bool {
+///
+/// 平均の丸め誤差は、1つの平均に足し合わせた項数（`max_terms`、最大の単位の観測数）と元の列の
+/// スケール（`raw_scale = max|x|`）に比例する（`column_is_zero_variance`（`fe.rs`）と同じ発想の
+/// 相対閾値）。平均の列自身のスケールや単位数を基準にすると、中心化・標準化した列（平均が
+/// 丸め誤差程度）や、単位数が多く項数が少ない時点平均の回帰で一定の列を見逃す。
+fn between_column_is_constant(column: &[f64], raw_scale: f64, max_terms: f64) -> bool {
     let n = column.len() as f64;
     let mean = column.iter().sum::<f64>() / n;
     let std_dev = (column.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n).sqrt();
-    let scale = column.iter().fold(0.0_f64, |acc, v| acc.max(v.abs()));
-    std_dev <= n * f64::EPSILON * scale
+    std_dev <= max_terms * f64::EPSILON * raw_scale
 }
 
 /// 1-wayのSwamy-Arora分散成分（`swamy_arora_variance_components`のdoc参照）。
@@ -773,7 +785,7 @@ fn one_way_variance_components(
     // （`between_ssr_and_df`、`plm`と同じ）。
     let means = entity_means(input.y(), input.x(), input.entity_codes());
     let n_entities = means.y.len();
-    let (ssr_between, df_resid_between) = between_ssr_and_df(&means)?;
+    let (ssr_between, df_resid_between) = between_ssr_and_df(&means, &column_max_abs(input.x()))?;
 
     let t_bar = n_entities as f64 / means.t.iter().map(|t_i| 1.0 / t_i).sum::<f64>();
     let sigma2_u = (ssr_between / df_resid_between as f64 - sigma2_eps / t_bar).max(0.0);
@@ -1097,11 +1109,9 @@ fn re_hausman_test(
 
 /// REの標準誤差計算方式（3.1節）。`FeCovType`と同じ「小さな固定選択肢の
 /// 公開enum」パターン（`docs/spec/panel-common.md`4.3節）だが、REは
-/// `extra_df`が常に`0`（`linearmodels.RandomEffects.fit()`のソースで確認済み）・
-/// v1がentity方向のみ（2-way REはスコープ外、`re-spec.md`5章）のためFEより単純。`FeCovType::Dk`の
-/// ような`time`オーバーライドフィールドは持たない（RE自身が2-way構造を持たないため、
-/// FEが2-way FEとDKの時間粒度を分離するために追加したオーバーライドの必要性が無い。
-/// HAC計算には`ReInput::time()`をそのまま使う）。
+/// `extra_df`が常に`0`（`linearmodels.RandomEffects.fit()`のソースで確認済み）のため
+/// FEより単純。`Dk`の時点列`time`は`FeCovType::Dk`と同じく必須で、2-wayの`ReInput.time`とは
+/// 独立（借用しない）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReCovType {
     /// 等分散前提（`σ̂² (X̃'X̃)⁻¹`、`σ̂² = SSR/df_resid`）。
@@ -1192,15 +1202,15 @@ pub struct ReEstimator {
     /// パネル固有R²（2.3節）。変換前の元データへの適合度（中心化TSS、
     /// 切片`β0`込みの当てはめ）。`df_model==1`なら`0.0`。
     r_squared_overall: f64,
-    /// ハウスマン検定統計量（`re-spec.md`3.7節）。内部FE推定の失敗・比較対象の傾き係数が
-    /// 0個・`Var(β_FE)-Var(β_RE)`の数値的特異性のいずれかに該当する場合は`None`
-    /// （モジュールdoc「ハウスマン検定」参照。RE本体の推定結果自体は`None`でも
-    /// 正常に返る）。
+    /// ハウスマン検定統計量（`re-spec.md`3.7節）。検定できる傾き係数が無い（時間変化のある列が
+    /// 0個、または残りがすべて識別できない列）場合と、2-way REでは`None`
+    /// （モジュールdoc「ハウスマン検定」参照。RE本体の推定結果自体は`None`でも正常に返る）。
+    /// 補助回帰の失敗は`None`ではなく`fit()`のエラーになる。
     hausman_statistic: Option<f64>,
     /// `hausman_statistic()`のp値（自由度`hausman_df()`のカイ二乗分布の上側確率）。
     hausman_p_value: Option<f64>,
-    /// ハウスマン検定の自由度（比較したスロープ係数の数、常にREの切片を除いた
-    /// `df_model - 1`と一致する）。
+    /// ハウスマン検定の自由度（検定したスロープ係数の数。時間不変の列と、識別できない列
+    /// （バランスパネルで時点間でのみ変わる列）の分だけ`df_model - 1`より小さい）。
     hausman_df: Option<usize>,
 }
 
@@ -1258,7 +1268,7 @@ impl ReEstimator {
     /// - **HAC（Driscoll-Kraay）**: **【fixestの`vcov="DK"`に変更】**
     ///   `linearmodels`の`cov_type="kernel"`から、FEと同じfixest型の補正
     ///   （`K=df_model`・`G`相当は`t_periods`）に変更した。時系列順序は
-    ///   `input.time_keys()`を使う（`None`なら`PanelError::DkRequiresTime`）。
+    ///   `ReCovType::Dk.time`を使う。
     ///
     /// **t値・p値・信頼区間の自由度（`df_inference`）は`cov_type=Cluster`のとき
     /// `G-1`、`Dk`のとき`t_periods-1`に切り替える**（fixestの`ssc()`既定
@@ -1275,8 +1285,8 @@ impl ReEstimator {
     /// - `cov_type=Cluster`でクラスター数が不足する場合は`CommonError::
     ///   InsufficientClusters`/`InsufficientClustersForInference`（`PanelError::
     ///   Common`経由）。
-    /// - `cov_type=Dk`で`time`が未指定の場合は`PanelError::DkRequiresTime`、時点数が2未満なら
-    ///   `PanelError::InsufficientDkPeriods`、`bandwidth`が不正な場合は
+    /// - `cov_type=Dk`で`Dk.time`の長さが`n`と食い違う場合は`PanelError::IdentifierDimensionMismatch`、
+    ///   時点数が2未満なら`PanelError::InsufficientDkPeriods`、`bandwidth`が不正な場合は
     ///   `PanelError::InvalidDkBandwidth`、時点数がハウスマン検定の対象数`k`以下なら
     ///   `PanelError::InsufficientDkPeriodsForInference`。
     /// - ハウスマン検定の補助回帰・Wald検定が失敗した場合は`PanelError::HausmanTestFailed`。
@@ -3013,6 +3023,349 @@ mod tests {
             fit(build(&|_| true, false)).unwrap_err(),
             PanelError::TwoWayRequiresTime
         );
+    }
+
+    /// 6×4データの行の部分集合（`rows`）から`ReInput`を作る。`names`は`x1`・`xi`・`xt`・`xt2`
+    /// （`xt`の2乗、これも時点間でのみ変わる列）。
+    fn subset_input(rows: &[usize], names: &[&str], with_time: bool) -> ReInput {
+        let c = two_way_columns();
+        let pick = |v: &[f64]| rows.iter().map(|&r| v[r]).collect::<Vec<f64>>();
+        let columns: Vec<Vec<f64>> = names
+            .iter()
+            .map(|n| match *n {
+                "x1" => pick(&c.x1),
+                "xi" => pick(&c.xi),
+                "xt" => pick(&c.xt),
+                "xt2" => pick(&c.xt.iter().map(|v| v * v).collect::<Vec<f64>>()),
+                other => panic!("unknown column {other}"),
+            })
+            .collect();
+        let entity: Vec<String> = rows.iter().map(|&r| c.entity[r].clone()).collect();
+        let period: Vec<String> = rows.iter().map(|&r| c.time[r].clone()).collect();
+        ReInput::from_columns(
+            &pick(&c.y),
+            &columns,
+            names.iter().map(|n| n.to_string()).collect(),
+            &entity,
+            with_time.then_some(period.as_slice()),
+            "y".into(),
+        )
+        .unwrap()
+    }
+
+    fn all_cov_types(time: &[String]) -> Vec<(&'static str, ReCovType)> {
+        vec![
+            ("classical", ReCovType::Classical),
+            ("hc1", ReCovType::Hc1),
+            ("hc2", ReCovType::Hc2),
+            ("hc3", ReCovType::Hc3),
+            ("cluster", ReCovType::Cluster { groups: None }),
+            (
+                "dk",
+                ReCovType::Dk {
+                    bandwidth: Some(1),
+                    time: TimeKeys::lexicographic(time.to_vec()),
+                },
+            ),
+        ]
+    }
+
+    #[test]
+    fn between_column_is_constant_follows_the_raw_scale_and_the_number_of_terms() {
+        // 平均が丸め誤差程度に揺れる（元の列は一定）場合、元の列のスケールと項数が基準なら一定と判定する。
+        let noise = [1.2e-17, -3.4e-17, 0.0, 2.2e-17];
+        assert!(between_column_is_constant(&noise, 1.0, 5.0));
+        // 平均の列自身のスケール（~1e-17）を基準にすると見逃す。
+        assert!(!between_column_is_constant(&noise, 3.4e-17, 1.0));
+        // 本物の変動（元のスケールの1e-3）は一定とみなさない。
+        let varying = [1.0, 1.001, 0.999, 1.0];
+        assert!(!between_column_is_constant(&varying, 1.0, 5.0));
+        // 完全に一定。
+        assert!(between_column_is_constant(&[0.3; 7], 0.3, 1.0));
+    }
+
+    #[test]
+    fn hausman_within_column_is_aliased_only_when_the_difference_is_constant() {
+        let within = [-1.0, 1.0, -2.0, 2.0];
+        // x* = x̃ + 定数: 識別できない。
+        let aliased: Vec<f64> = within.iter().map(|v| v + 0.37).collect();
+        assert!(hausman_within_column_is_aliased(&aliased, &within));
+        // 差が個体ごとに違う（θ・平均が個体間で異なる）: 識別できる。
+        let identified = [-1.0 + 0.3, 1.0 + 0.3, -2.0 + 0.9, 2.0 + 0.9];
+        assert!(!hausman_within_column_is_aliased(&identified, &within));
+    }
+
+    #[test]
+    fn one_way_time_only_column_detection_does_not_depend_on_row_order_or_centering() {
+        // 並べ替えと標準化（平均0・個体平均が丸め誤差になる列）をしても、時点間でのみ変わる列が
+        // 一定と判定され、結果は元のデータと一致する。
+        let c = two_way_columns();
+        let mean = c.xt.iter().take(4).sum::<f64>() / 4.0;
+        let sd = (c.xt.iter().take(4).map(|v| (v - mean).powi(2)).sum::<f64>() / 3.0).sqrt();
+        let standardized: Vec<f64> = c.xt.iter().map(|v| (v - mean) / sd).collect();
+        // 行を決定的に並べ替える（エンティティ・時点が混ざる順）。
+        let order: Vec<usize> = (0..24).map(|i| (i * 7) % 24).collect();
+        let pick = |v: &[f64]| order.iter().map(|&r| v[r]).collect::<Vec<f64>>();
+        let entity: Vec<String> = order.iter().map(|&r| c.entity[r].clone()).collect();
+        let build = |xt: &[f64], shuffled: bool| {
+            let (y, x1, xt, entity) = if shuffled {
+                (pick(&c.y), pick(&c.x1), pick(xt), entity.clone())
+            } else {
+                (c.y.clone(), c.x1.clone(), xt.to_vec(), c.entity.clone())
+            };
+            ReInput::from_columns(
+                &y,
+                &[x1, xt],
+                strings(&["x1", "xt"]),
+                &entity,
+                None,
+                "y".into(),
+            )
+            .unwrap()
+        };
+
+        let base =
+            swamy_arora_variance_components(&build(&standardized, false), ReEffects::OneWay, 0.95)
+                .unwrap();
+        let shuffled =
+            swamy_arora_variance_components(&build(&standardized, true), ReEffects::OneWay, 0.95)
+                .unwrap();
+        assert_close(shuffled.sigma2_u, base.sigma2_u, 1e-9, "sigma2_u");
+        assert_close(shuffled.sigma2_eps, base.sigma2_eps, 1e-9, "sigma2_eps");
+        // 標準化しても元の列と同じ分散成分（平均・スケールの変更は列空間を変えない）。
+        let raw =
+            swamy_arora_variance_components(&build(&c.xt, false), ReEffects::OneWay, 0.95).unwrap();
+        assert_close(raw.sigma2_u, base.sigma2_u, 1e-9, "sigma2_u raw");
+    }
+
+    #[test]
+    fn one_way_unbalanced_panel_keeps_time_only_column_in_between_regression() {
+        // 1行欠けて不均衡になると個体平均が一定でなくなり、`xt`はbetween回帰に残る
+        // （`K_b = 2`、自由度`6 - 3 = 3`。バランスなら`xt`が落ちて自由度は`6 - 2 = 4`）。
+        let rows: Vec<usize> = (0..24).filter(|&r| r != 5).collect();
+        let unbalanced = subset_input(&rows, &["x1", "xt"], false);
+        let balanced = subset_input(&(0..24).collect::<Vec<_>>(), &["x1", "xt"], false);
+        let df = |input: &ReInput| {
+            let means = entity_means(input.y(), input.x(), input.entity_codes());
+            between_ssr_and_df(&means, &column_max_abs(input.x()))
+                .unwrap()
+                .1
+        };
+        assert_eq!(df(&balanced), 4);
+        assert_eq!(df(&unbalanced), 3);
+
+        // ハウスマン検定でも`x̃t`が識別できる（θが個体ごとに異なる）ため両方検定する。
+        let re =
+            ReEstimator::fit(unbalanced, ReEffects::OneWay, ReCovType::Classical, 0.95).unwrap();
+        assert_eq!(re.hausman_df(), Some(2));
+    }
+
+    #[test]
+    fn one_way_with_several_time_only_columns_tests_only_the_identified_ones() {
+        // `xt`と`xt2`（どちらも時点間でのみ変わる）と、個体間でのみ変わる`xi`、両方で変わる`x1`。
+        // 検定されるのは`x1`だけ。列の順序を入れ替えても係数・統計量は同じ。
+        let all: Vec<usize> = (0..24).collect();
+        let fit = |names: &[&str]| {
+            ReEstimator::fit(
+                subset_input(&all, names, false),
+                ReEffects::OneWay,
+                ReCovType::Classical,
+                0.95,
+            )
+            .unwrap()
+        };
+        let a = fit(&["x1", "xi", "xt", "xt2"]);
+        let b = fit(&["xt2", "xt", "xi", "x1"]);
+        assert_eq!(a.hausman_df(), Some(1));
+        assert_eq!(b.hausman_df(), Some(1));
+        assert_close(
+            a.hausman_statistic().unwrap(),
+            b.hausman_statistic().unwrap(),
+            1e-9,
+            "hausman",
+        );
+        assert_close(
+            a.r_squared_within(),
+            b.r_squared_within(),
+            1e-9,
+            "r2 within",
+        );
+        // `x1`の係数は列の順序によらない（`a`は2番目、`b`は5番目＝最後）。
+        assert_close(
+            *a.estimator().params().get(1, 0),
+            *b.estimator().params().get(4, 0),
+            1e-9,
+            "x1",
+        );
+    }
+
+    #[test]
+    fn one_way_time_only_column_works_with_every_cov_type() {
+        // 新規則は`cov_type`ごとに別の補助回帰の分岐（OLS委譲・クラスター・DK）を通る。
+        let c = two_way_columns();
+        for (label, cov_type) in all_cov_types(&c.time) {
+            let input = subset_input(&(0..24).collect::<Vec<_>>(), &["x1", "xt"], false);
+            let re = ReEstimator::fit(input, ReEffects::OneWay, cov_type, 0.95)
+                .unwrap_or_else(|e| panic!("{label}: {e}"));
+            assert_eq!(re.hausman_df(), Some(1), "{label}");
+            let stat = re.hausman_statistic().unwrap();
+            assert!(stat.is_finite() && stat >= 0.0, "{label}: {stat}");
+            for j in 0..3 {
+                let se = *re.std_errors().get(j, 0);
+                assert!(se.is_finite() && se > 0.0, "{label}: se[{j}]={se}");
+            }
+        }
+    }
+
+    #[test]
+    fn one_way_between_regression_counts_only_columns_that_still_vary() {
+        // 3エンティティ×3時点。`x1 + xt`は`K_b = 1`（`xt`は落ちる）で`n_entities = 3 > 2`のため成功し、
+        // 2エンティティなら`n_entities <= K_b + 1`で失敗する。落とさない旧実装は
+        // `n_entities <= k + 1 = 3`で失敗していた。
+        let build = |n_entities: usize| {
+            let rows: Vec<usize> = (0..n_entities * 4).collect();
+            // 4時点のうち先頭3時点だけ使う（`r % 4 < 3`）。
+            let rows: Vec<usize> = rows.into_iter().filter(|r| r % 4 < 3).collect();
+            subset_input(&rows, &["x1", "xt"], false)
+        };
+        assert!(swamy_arora_variance_components(&build(3), ReEffects::OneWay, 0.95).is_ok());
+        assert!(matches!(
+            swamy_arora_variance_components(&build(2), ReEffects::OneWay, 0.95),
+            Err(PanelError::BetweenRegressionFailed { .. })
+        ));
+    }
+
+    #[test]
+    fn two_way_fit_accepts_regressors_that_vary_in_only_one_dimension() {
+        // 時間変化のある列が0個（内部の2-way FEの説明変数が0個）でも、一次元でしか変わらない列だけで推定できる。
+        let all: Vec<usize> = (0..24).collect();
+        for names in [vec!["xi", "xt"], vec!["xt"], vec!["xi"]] {
+            let re = ReEstimator::fit(
+                subset_input(&all, &names, true),
+                ReEffects::TwoWay,
+                ReCovType::Classical,
+                0.95,
+            )
+            .unwrap_or_else(|e| panic!("{names:?}: {e}"));
+            assert_eq!(re.n_periods(), Some(4));
+            assert_eq!(re.hausman_statistic(), None);
+            for j in 0..=names.len() {
+                assert!(re.estimator().params().get(j, 0).is_finite(), "{names:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn two_way_fit_reports_computation_errors_by_the_stage_that_fails() {
+        let c = two_way_columns();
+        // 切片と共線な定数列: between回帰では落ち、最終回帰が特異になる。
+        let constant = ReInput::from_columns(
+            &c.y,
+            &[c.x1.clone(), vec![2.0; 24]],
+            strings(&["x1", "c"]),
+            &c.entity,
+            Some(&c.time),
+            "y".into(),
+        )
+        .unwrap();
+        assert!(matches!(
+            ReEstimator::fit(constant, ReEffects::TwoWay, ReCovType::Classical, 0.95),
+            Err(PanelError::QuasiDemeanedRegressionFailed { .. })
+        ));
+        // 定数ではない列同士の完全共線（`xi`と`2·xi`）は、between回帰（個体平均の回帰）が特異になる。
+        let doubled: Vec<f64> = c.xi.iter().map(|v| 2.0 * v).collect();
+        let collinear = ReInput::from_columns(
+            &c.y,
+            &[c.x1.clone(), c.xi.clone(), doubled],
+            strings(&["x1", "xi", "xi_twice"]),
+            &c.entity,
+            Some(&c.time),
+            "y".into(),
+        )
+        .unwrap();
+        assert!(matches!(
+            ReEstimator::fit(collinear, ReEffects::TwoWay, ReCovType::Classical, 0.95),
+            Err(PanelError::BetweenRegressionFailed {
+                source: LeastSquaresError::SingularMatrix
+            })
+        ));
+    }
+
+    #[test]
+    fn two_way_between_and_fe_degrees_of_freedom_boundaries() {
+        let fit = |rows: &[usize], names: &[&str]| {
+            ReEstimator::fit(
+                subset_input(rows, names, true),
+                ReEffects::TwoWay,
+                ReCovType::Classical,
+                0.95,
+            )
+        };
+        // 6エンティティ×2時点: 時点側のbetween回帰は`T = 2 <= K_b + 1 = 2`で失敗する。
+        let two_periods: Vec<usize> = (0..24).filter(|r| r % 4 < 2).collect();
+        assert!(matches!(
+            fit(&two_periods, &["x1"]),
+            Err(PanelError::BetweenRegressionFailed { .. })
+        ));
+        // 2エンティティ×2時点: 内部の2-way FEの自由度が足りない（`n = 4 <= k + N + T - 1 = 4`）。
+        let tiny: Vec<usize> = (0..24).filter(|&r| r / 4 < 2 && r % 4 < 2).collect();
+        assert!(matches!(
+            fit(&tiny, &["x1"]),
+            Err(PanelError::InsufficientDegreesOfFreedom { .. })
+        ));
+        // 3エンティティ×3時点（`df_resid = 3`）は最小規模で成功する。
+        let small: Vec<usize> = (0..24).filter(|&r| r / 4 < 3 && r % 4 < 3).collect();
+        let re = fit(&small, &["x1"]).unwrap();
+        assert_eq!(re.df_resid(), 9 - 2);
+    }
+
+    #[test]
+    fn two_way_driscoll_kraay_without_lags_equals_clustering_by_time() {
+        // `dk_bandwidth = 0`はラグ項が無く、時点でのクラスターと同じ共分散になる
+        // （`K = df_model`、自由度`T - 1`も同じ）。entityと別に指定した時点列で確認する。
+        let c = two_way_columns();
+        let all: Vec<usize> = (0..24).collect();
+        let dk = ReEstimator::fit(
+            subset_input(&all, &["x1", "xi", "xt"], true),
+            ReEffects::TwoWay,
+            ReCovType::Dk {
+                bandwidth: Some(0),
+                time: TimeKeys::lexicographic(c.time.clone()),
+            },
+            0.95,
+        )
+        .unwrap();
+        let cluster = ReEstimator::fit(
+            subset_input(&all, &["x1", "xi", "xt"], true),
+            ReEffects::TwoWay,
+            ReCovType::Cluster {
+                groups: Some(GroupCodes::from_labels_without_keys(&c.time)),
+            },
+            0.95,
+        )
+        .unwrap();
+        for j in 0..4 {
+            assert_close(
+                *dk.std_errors().get(j, 0),
+                *cluster.std_errors().get(j, 0),
+                1e-10,
+                "se",
+            );
+        }
+        // 他の`cov_type`も2-wayで実行でき、標準誤差は正の有限値になる。
+        for (label, cov_type) in all_cov_types(&c.time) {
+            let re = ReEstimator::fit(
+                subset_input(&all, &["x1", "xi", "xt"], true),
+                ReEffects::TwoWay,
+                cov_type,
+                0.95,
+            )
+            .unwrap_or_else(|e| panic!("{label}: {e}"));
+            for j in 0..4 {
+                let se = *re.std_errors().get(j, 0);
+                assert!(se.is_finite() && se > 0.0, "{label}: se[{j}]={se}");
+            }
+        }
     }
 
     #[test]

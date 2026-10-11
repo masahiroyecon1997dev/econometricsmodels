@@ -101,12 +101,16 @@ pub struct REOptions {
     /// when `None` (default), one-way (entity only). It only defines the random-effects
     /// structure: it is never used as the Driscoll-Kraay time periods (set `dk_time` for
     /// that). The Hausman test and the panel R² are not available for two-way yet
-    /// (`hausman_*` are `None` and `r_squared_*` are `NaN`). The periods are ordered by the
-    /// values of the column: numerically for integers and floats, chronologically for `Date`
-    /// and `Datetime`, in the order of the categories for `Enum`, and alphabetically for
-    /// strings and `Categorical`.
+    /// (`hausman_*` are `None` and `r_squared_*` are `NaN`). The results do not depend on
+    /// the order of the periods.
     #[pyo3(get)]
     pub time: Option<String>,
+
+    /// Column name to use as the cluster group key when `cov_type="cluster"`. When
+    /// `None`, the `entity` argument's column is used automatically. Specifying it with
+    /// any other `cov_type` raises `ValidationError`.
+    #[pyo3(get)]
+    pub cluster: Option<String>,
 
     /// Column name that defines the time periods of the Driscoll-Kraay HAC when
     /// `cov_type="dk"` (required there, as in `FEOptions.dk_time`). Specifying it with any other
@@ -118,12 +122,6 @@ pub struct REOptions {
     /// strings and `Categorical`.
     #[pyo3(get)]
     pub dk_time: Option<String>,
-
-    /// Column name to use as the cluster group key when `cov_type="cluster"`. When
-    /// `None`, the `entity` argument's column is used automatically. Specifying it with
-    /// any other `cov_type` raises `ValidationError`.
-    #[pyo3(get)]
-    pub cluster: Option<String>,
 
     /// Bandwidth for Driscoll-Kraay HAC when `cov_type="dk"`. When `None`, computed
     /// automatically via `floor(4*(t/100)^(2/9))` (`t` = number of unique time periods).
@@ -139,16 +137,16 @@ impl REOptions {
         cov_type = "cluster".to_string(),
         confidence_level = 0.95,
         time = None,
-        dk_time = None,
         cluster = None,
+        dk_time = None,
         dk_bandwidth = None,
     ))]
     fn new(
         #[pyo3(from_py_with = crate::shared::option_values::cov_type_arg)] cov_type: String,
         #[pyo3(from_py_with = crate::shared::option_values::confidence_level_arg)] confidence_level: f64,
         #[pyo3(from_py_with = crate::shared::option_values::time_arg)] time: Option<String>,
-        #[pyo3(from_py_with = crate::shared::option_values::dk_time_arg)] dk_time: Option<String>,
         #[pyo3(from_py_with = crate::shared::option_values::cluster_arg)] cluster: Option<String>,
+        #[pyo3(from_py_with = crate::shared::option_values::dk_time_arg)] dk_time: Option<String>,
         #[pyo3(from_py_with = crate::shared::option_values::dk_bandwidth_arg)] dk_bandwidth: Option<
             i64,
         >,
@@ -157,8 +155,8 @@ impl REOptions {
             cov_type,
             confidence_level,
             time,
-            dk_time,
             cluster,
+            dk_time,
             dk_bandwidth,
         }
     }
@@ -201,13 +199,13 @@ impl REOptions {
 
     fn __repr__(&self) -> String {
         format!(
-            "REOptions(cov_type={}, confidence_level={}, time={}, dk_time={}, cluster={}, \
+            "REOptions(cov_type={}, confidence_level={}, time={}, cluster={}, dk_time={}, \
              dk_bandwidth={})",
             self.cov_type.py_repr(),
             self.confidence_level.py_repr(),
             self.time.py_repr(),
-            self.dk_time.py_repr(),
             self.cluster.py_repr(),
+            self.dk_time.py_repr(),
             self.dk_bandwidth.py_repr()
         )
     }
@@ -223,9 +221,11 @@ impl REOptions {
 /// The Hausman test (`hausman_statistic` / `hausman_p_value` / `hausman_df`) is computed
 /// automatically inside `fit()` and included directly here (unlike FE's
 /// `fixed_effects()`, RE has no separate diagnostic method; see `panel-common.md`
-/// section 2.4). All three are `None` only when there is no time-varying regressor to
-/// compare (every regressor is time-invariant). If the comparison cannot be computed,
-/// `fit()` fails instead.
+/// section 2.4). All three are `None` when there is no regressor left to test (every
+/// regressor is time-invariant, or varies only over time on a balanced panel) and for
+/// two-way effects, where the test is not available yet. If the comparison cannot be
+/// computed, `fit()` fails instead. For two-way effects `r_squared_within`,
+/// `r_squared_between` and `r_squared_overall` are `NaN` for the same reason.
 // `REResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`OLSResult`/`FEResult`と同じ理由）。
 //
@@ -302,27 +302,31 @@ pub struct REResult {
     pub aic: f64,
     #[pyo3(get)]
     pub bic: f64,
+    /// Within R² (`NaN` for two-way effects, not available yet).
     #[pyo3(get)]
     pub r_squared_within: f64,
+    /// Between R² (`NaN` for two-way effects, not available yet).
     #[pyo3(get)]
     pub r_squared_between: f64,
+    /// Overall R² (`NaN` for two-way effects, not available yet).
     #[pyo3(get)]
     pub r_squared_overall: f64,
     /// Regression-based Hausman test statistic (chi-squared version, Wald test that the
     /// within-transformed regressors are jointly zero in the auxiliary regression;
     /// `docs/spec/re-spec.md` section 3.7). The Wald test's covariance follows
-    /// `cov_type`. Always non-negative. `None` only when there are no
-    /// time-varying slope coefficients to compare (a time-invariant regressor is left out of
-    /// the comparison); if the auxiliary regression cannot be computed
-    /// (e.g. too few clusters or periods for the robust covariance) `fit()` fails.
+    /// `cov_type`. Always non-negative. `None` when no slope coefficient can be tested
+    /// (a time-invariant regressor, or one that varies only over time on a balanced panel,
+    /// is left out of the comparison) and for two-way effects (not available yet); if the
+    /// auxiliary regression cannot be computed (e.g. too few clusters or periods for the
+    /// robust covariance) `fit()` fails.
     #[pyo3(get)]
     pub hausman_statistic: Option<f64>,
     /// p-value of `hausman_statistic` (upper-tail chi-squared probability).
     #[pyo3(get)]
     pub hausman_p_value: Option<f64>,
-    /// Degrees of freedom of the Hausman test (number of compared slope coefficients:
-    /// the time-varying regressors, which is `df_model - 1` when no regressor is
-    /// time-invariant).
+    /// Degrees of freedom of the Hausman test (number of tested slope coefficients: the
+    /// time-varying regressors that can be tested, which is `df_model - 1` when no regressor
+    /// is time-invariant or varies only over time).
     #[pyo3(get)]
     pub hausman_df: Option<usize>,
 }

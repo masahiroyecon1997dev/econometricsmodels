@@ -184,7 +184,9 @@ def run_re_plm_r(
         extra.append(cluster_col)
     raw = run_r(_PLM_R_SCRIPT, csv_path, formula, cov_type, extra_args=extra)
     return normalize_names(
-        raw, stat_key="test_stats", scalar_keys=_PLM_SCALAR_KEYS
+        raw,
+        stat_key="test_stats",
+        scalar_keys=(*_PLM_SCALAR_KEYS, "sigma2_eps", "sigma2_u"),
     )
 
 

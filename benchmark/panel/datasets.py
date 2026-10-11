@@ -56,6 +56,7 @@ SCENARIOS = [
     "unbalanced_two_way",
     "zero_variance_regressor",
     "time_invariant_unbalanced",
+    "time_invariant_multi_unbalanced",
 ]
 
 # baseline系シナリオの既定パネル規模（entities=40, periods=6, n=240）。
@@ -120,6 +121,27 @@ def _require_min_k(scenario: str, k: int, minimum: int) -> None:
     """シナリオが要求する`k`（説明変数の数）の下限を満たさなければ`ValueError`。"""
     if k < minimum:
         raise ValueError(f"{scenario} requires k >= {minimum}")
+
+
+# "time_invariant_multi_unbalanced"の規模。エンティティ数30・最大10時点・説明変数3本。
+_MULTI_INVARIANT_N_ENTITIES = 30
+_MULTI_INVARIANT_N_PERIODS = 10
+_MULTI_INVARIANT_K = 3
+# エンティティごとの観測数`T_i`（順に繰り返し割り当てる）。2〜10に偏らせる。
+_MULTI_INVARIANT_COUNTS = [2, 2, 3, 5, 7, 10]
+
+
+def _thin_to_skewed_counts(
+    df: pl.DataFrame, rng: np.random.Generator, counts: list[int]
+) -> pl.DataFrame:
+    """エンティティi番目の観測数が`counts[i % len(counts)]`になるよう、
+    そのエンティティの行をランダムに間引く（元の行順は保つ）。"""
+    parts = []
+    for i, (_, group) in enumerate(df.group_by("entity", maintain_order=True)):
+        keep = min(counts[i % len(counts)], group.height)
+        idx = np.sort(rng.choice(group.height, size=keep, replace=False))
+        parts.append(group[idx.tolist()])
+    return pl.concat(parts)
 
 
 def _entity_time_ids(
@@ -260,7 +282,8 @@ def generate_fe_dataset(
     Returns:
         (df, true_beta)のタプル。dfは列 entity, time, y, x1..xk を持つ
         polars DataFrame（"zero_variance_regressor"・
-        "time_invariant_unbalanced"はx_invariantも追加）。
+        "time_invariant_unbalanced"はx_invariantも、
+        "time_invariant_multi_unbalanced"はz1・z2を追加）。
 
     Raises:
         ValueError: 未知のscenarioの場合。
@@ -275,6 +298,12 @@ def generate_fe_dataset(
         n_entities, n_periods = _DK_N_ENTITIES, _DK_N_PERIODS
     elif scenario == "many_regressors":
         k = _MANY_REGRESSORS_K
+    elif scenario == "time_invariant_multi_unbalanced":
+        n_entities, n_periods = (
+            _MULTI_INVARIANT_N_ENTITIES,
+            _MULTI_INVARIANT_N_PERIODS,
+        )
+        k = _MULTI_INVARIANT_K
 
     if beta is None:
         if scenario == "many_regressors":
@@ -359,6 +388,24 @@ def generate_fe_dataset(
             pl.int_range(pl.len()).over("time") == 0
         )
         df = df.filter(keep)
+    elif scenario == "time_invariant_multi_unbalanced":
+        # 時間変化のある列x1..x3に加え、エンティティ内で一定の列を2本足す
+        # （z1: 連続、z2: 0/1ダミー）。観測数`T_i`を2〜10に偏らせた不均衡パネル
+        # （RE: 時間不変の説明変数の複数列・`k_tv`と`k`の添字対応・σ_u²の差が
+        # 増幅される極端な不均衡の検証用、FEには使えない）。
+        z1 = dict(zip(entity_ids, rng.normal(size=n_entities)))
+        z2 = dict(
+            zip(entity_ids, rng.integers(0, 2, size=n_entities).astype(float))
+        )
+        df = df.with_columns(
+            pl.col("entity")
+            .replace_strict(z1, return_dtype=pl.Float64)
+            .alias("z1"),
+            pl.col("entity")
+            .replace_strict(z2, return_dtype=pl.Float64)
+            .alias("z2"),
+        )
+        df = _thin_to_skewed_counts(df, rng, _MULTI_INVARIANT_COUNTS)
     elif scenario in ("zero_variance_regressor", "time_invariant_unbalanced"):
         # エンティティ内で時間不変な列を追加する（within変換後に分散ゼロ）。
         # FEは`fe-spec.md`1章のValidationErrorで拒否する（エラーパス専用）が、

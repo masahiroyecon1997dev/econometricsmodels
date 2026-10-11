@@ -196,6 +196,11 @@ result <- list(
     SIMPLIFY = FALSE
   ),
   f_statistic = unname(wald_f$statistic),
-  f_p_value = unname(f_p_value_val)
+  f_p_value = unname(f_p_value_val),
+  # plmの分散成分（Swamy-Arora）。不均衡パネルでは本実装とσ_u²の定義が異なる
+  # ため、この値を手計算のGLSに与えてplmと一致することを確認するために出力する
+  # （テスト`test_re_time_invariant.py`）。
+  sigma2_eps = unname(ercomp(model)$sigma2["idios"]),
+  sigma2_u = unname(ercomp(model)$sigma2["id"])
 )
 cat(toJSON(result, auto_unbox = TRUE, digits = NA))

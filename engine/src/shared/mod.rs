@@ -4,18 +4,18 @@
 //! 使うかでは分けない（利用側は手法の追加で変わるため）。各系統の`common.rs`（系統内で共有する
 //! ロジック）とは別。
 //!
-//! クレート直下から移した6モジュールは従来どおり`pub`（可視性は変えていない）。後から足した
-//! 計算部品はengine内部だけで使うため`pub(crate)`。
+//! `engine_pybind`から使うモジュール（`error`・`parallelism`）のみ`pub`、engine内部だけで使うものは
+//! `pub(crate)`。
 
-pub mod design_matrix;
 pub mod error;
-pub mod inference;
-pub mod linear_algebra;
 pub mod parallelism;
-pub mod validation;
 
 pub(crate) mod cluster;
 pub(crate) mod covariance;
+pub(crate) mod design_matrix;
 pub(crate) mod goodness_of_fit;
+pub(crate) mod inference;
 pub(crate) mod least_squares;
+pub(crate) mod linear_algebra;
+pub(crate) mod validation;
 pub(crate) mod wald;

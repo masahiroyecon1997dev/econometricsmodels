@@ -115,11 +115,33 @@ _COV_TYPE_MAP: dict[str, tuple[str, bool]] = {
 }
 
 
+def _linearmodels_formula(
+    y_col: str,
+    x_exog_cols: list[str],
+    x_endog_cols: list[str],
+    instrument_cols: list[str],
+    include_intercept: bool,
+) -> str:
+    """`linearmodels`のIV式を組み立てる。`linearmodels`は定数項を自動では足さず、
+    式に`1`を明示したときだけ含める（`include_intercept=False`では`1`を書かない）。
+    """
+    exog_part = " + ".join(x_exog_cols)
+    endog_part = " + ".join(x_endog_cols)
+    instr_part = " + ".join(instrument_cols)
+    intercept_part = "1" if include_intercept else ""
+    exog_terms = " + ".join(
+        term for term in (intercept_part, exog_part) if term
+    )
+    prefix = f"{exog_terms} + " if exog_terms else ""
+    return f"{y_col} ~ {prefix}[{endog_part} ~ {instr_part}]"
+
+
 def _nested_f_test(
     pdf,
     y_col: str,
     x_exog_cols: list[str],
     instrument_cols: list[str],
+    include_intercept: bool = True,
 ) -> float:
     """古典的（等分散前提、`cov_type`に依存しない）nested F検定によるpartial
     F統計量を、`statsmodels.OLS`で独立計算する（`engine::iv::two_sls::
@@ -127,31 +149,40 @@ def _nested_f_test(
     `first_stage.diagnostics`の`f.stat`は`debiased`次第でn/(n-k)分母の慣習が
     異なるため、それとは別に本実装と同じ定義の値も用意する。両方をフィクスチャに
     含める、ユーザー確認済み）。
+
+    `include_intercept=False`では制限なし・制限モデルとも定数項を足さない
+    （第一段階も切片なしで推定するため）。
     """
     import statsmodels.api as sm
 
     n = len(pdf)
     y = pdf[y_col].to_numpy()
 
+    def _design(cols: list[str]):
+        x = pdf[cols].to_numpy()
+        return sm.add_constant(x) if include_intercept else x
+
     x_u_cols = x_exog_cols + instrument_cols
-    x_u = sm.add_constant(pdf[x_u_cols].to_numpy()) if x_u_cols else None
-    if x_u is None:
+    if not x_u_cols:
         raise ValueError("instrument_cols must be non-empty")
+    x_u = _design(x_u_cols)
     res_u = sm.OLS(y, x_u).fit()
 
     if x_exog_cols:
-        x_r = sm.add_constant(pdf[x_exog_cols].to_numpy())
-        res_r = sm.OLS(y, x_r).fit()
-        ssr_r = res_r.ssr
-    else:
-        # x_exog_cols=[]でも、本実装は常にinclude_intercept=trueのため制限
-        # モデルは「切片のみ」（回帰変数0個ではない）。SSR_rは中心化した
-        # 二乗和を使う必要がある（`engine::iv::two_sls::partial_f_statistic`の
+        ssr_r = sm.OLS(y, _design(x_exog_cols)).fit().ssr
+    elif include_intercept:
+        # x_exog_cols=[]でも定数項があれば制限モデルは「切片のみ」（回帰変数0個
+        # ではない）。SSR_rは中心化した二乗和を使う必要がある
+        # （`engine::iv::two_sls::partial_f_statistic`の
         # 「x_exog=[]かつinclude_intercept=falseの退化ケース」注記が示す通り、
         # 非中心化二乗和は切片も無い場合専用。df1境界シナリオ追加で判明:
         # 非中心化版は本実装（classical weak_instrument_f_statistics）と
         # 一致しなかった（実測11.607 vs 本実装2.696、中心化版は2.696で一致）。
         ssr_r = float(((y - y.mean()) ** 2).sum())
+    else:
+        # 切片も`x_exog`も無い退化ケース: 制限モデルの回帰変数が0個なので
+        # SSR_rは非中心化の二乗和そのもの。
+        ssr_r = float((y**2).sum())
 
     q = len(instrument_cols)
     df_u = n - x_u.shape[1]
@@ -164,6 +195,7 @@ def _weak_instrument_diagnostics(
     x_exog_cols: list[str],
     x_endog_cols: list[str],
     instrument_cols: list[str],
+    include_intercept: bool = True,
 ) -> dict:
     """弱操作変数診断（部分F統計量）を2種類計算する。`method`（2SLS/GMM）に
     依存しない共通ロジック（`engine::iv::common::compute_first_stage`が
@@ -185,7 +217,9 @@ def _weak_instrument_diagnostics(
             col: float(diag.loc[col, "f.stat"]) for col in x_endog_cols
         },
         "weak_instrument_f_independent": {
-            col: _nested_f_test(pdf, col, x_exog_cols, instrument_cols)
+            col: _nested_f_test(
+                pdf, col, x_exog_cols, instrument_cols, include_intercept
+            )
             for col in x_endog_cols
         },
     }
@@ -202,6 +236,7 @@ def run(
     confidence_level: float = 0.95,
     dataset_source: str = "synthetic",
     y_col: str = "y",
+    include_intercept: bool = True,
 ) -> dict:
     from linearmodels.iv import IV2SLS
     from scipy import stats as scipy_stats
@@ -210,12 +245,8 @@ def run(
     pdf = df.to_pandas()
     n = len(pdf)
 
-    exog_part = " + ".join(x_exog_cols)
-    endog_part = " + ".join(x_endog_cols)
-    instr_part = " + ".join(instrument_cols)
-    formula = (
-        f"{y_col} ~ 1{' + ' + exog_part if exog_part else ''} + "
-        f"[{endog_part} ~ {instr_part}]"
+    formula = _linearmodels_formula(
+        y_col, x_exog_cols, x_endog_cols, instrument_cols, include_intercept
     )
 
     lm_cov_type, debiased = _COV_TYPE_MAP[cov_type]
@@ -255,7 +286,8 @@ def run(
         k: [coef[k] - t_crit * se[k], coef[k] + t_crit * se[k]] for k in coef
     }
 
-    q = len(coef) - 1  # 定数項を除く傾き係数の数（本実装のdf_model）
+    # 定数項を除く傾き係数の数（本実装のdf_model）。切片なしでは全係数が傾き。
+    q = len(coef) - (1 if include_intercept else 0)
     raw_f = float(res.f_statistic.stat)
     f_statistic = raw_f if debiased else raw_f / q
     f_p_value = float(1 - scipy_stats.f.cdf(f_statistic, q, df_resid))
@@ -336,7 +368,12 @@ def run(
         # 意味の異なる比較になってしまうため）。
         result.update(
             _weak_instrument_diagnostics(
-                pdf, formula, x_exog_cols, x_endog_cols, instrument_cols
+                pdf,
+                formula,
+                x_exog_cols,
+                x_endog_cols,
+                instrument_cols,
+                include_intercept,
             )
         )
 
@@ -354,6 +391,7 @@ def run(
         "debiased": debiased,
         "confidence_level": confidence_level,
         "formula": formula,
+        "include_intercept": include_intercept,
         "hac_lag": hac_lag_used,
     }
     return result
@@ -384,6 +422,7 @@ def run_gmm(
     confidence_level: float = 0.95,
     dataset_source: str = "synthetic",
     y_col: str = "y",
+    include_intercept: bool = True,
 ) -> dict:
     """`linearmodels.iv.IVGMM`でGMMのベンチマーク値を生成する（`run()`のGMM版）。
 
@@ -437,6 +476,15 @@ def run_gmm(
     実測確認済み（本実装の`fit_computes_hansen_j_statistic_matching_two_sls_
     sargan_when_weight_type_is_classical`と同じ不変条件）。
 
+    ## 切片なし（`include_intercept=False`）のHansen J
+
+    `gmm_weight_type="classical"`のHansen Jは、linearmodelsが重み行列を作る際に
+    残差を常に中心化する（`HomoskedasticWeightMatrix`）ため、定数項が無く
+    `mean(e) != 0`のとき、本実装（`σ̂²₀ = e'e/n`、非中心化）・momentfit・
+    2SLSのSarganとは一致しない（baselineで0.311対0.190）。定数項があれば
+    `mean(e) = 0`で一致する。このためフィクスチャの`hansen_j_*`は切片なしの
+    classical重み・過剰識別では本実装の比較対象にしない（momentfitと比較する）。
+
     ## Wu-Hausman検定
 
     GMMには存在しない（`gmm.rs`参照）ため、このフィクスチャには含めない
@@ -452,12 +500,8 @@ def run_gmm(
     pdf = df.to_pandas()
     n = len(pdf)
 
-    exog_part = " + ".join(x_exog_cols)
-    endog_part = " + ".join(x_endog_cols)
-    instr_part = " + ".join(instrument_cols)
-    formula = (
-        f"{y_col} ~ 1{' + ' + exog_part if exog_part else ''} + "
-        f"[{endog_part} ~ {instr_part}]"
+    formula = _linearmodels_formula(
+        y_col, x_exog_cols, x_endog_cols, instrument_cols, include_intercept
     )
 
     lm_weight_type = _WEIGHT_TYPE_MAP[weight_type]
@@ -510,6 +554,7 @@ def run_gmm(
     # ロバストWald検定（カイ二乗形式、qで割らない）を`res.cov`から独自に計算し直す
     # （本関数のdocコメント参照）。
     param_names = list(res.params.index)
+    # 切片なし（`include_intercept=False`）では`Intercept`が無く全係数が傾き。
     slope_idx = [i for i, nm in enumerate(param_names) if nm != "Intercept"]
     beta_slopes = res.params.to_numpy()[slope_idx]
     cov_slopes = res.cov.to_numpy()[np.ix_(slope_idx, slope_idx)]
@@ -544,7 +589,12 @@ def run_gmm(
     if x_endog_cols:
         result.update(
             _weak_instrument_diagnostics(
-                pdf, formula, x_exog_cols, x_endog_cols, instrument_cols
+                pdf,
+                formula,
+                x_exog_cols,
+                x_endog_cols,
+                instrument_cols,
+                include_intercept,
             )
         )
 
@@ -565,6 +615,7 @@ def run_gmm(
         "iter_limit": iter_limit,
         "confidence_level": confidence_level,
         "formula": formula,
+        "include_intercept": include_intercept,
         "hac_lag": cov_hac_lag_used,
         "weight_hac_lag": weight_hac_lag_used,
     }
@@ -584,6 +635,11 @@ if __name__ == "__main__":
     parser.add_argument("--hac-lags", type=int, default=None)
     parser.add_argument("--gmm-iterations", type=int, default=2)
     parser.add_argument("--confidence-level", type=float, default=0.95)
+    parser.add_argument(
+        "--no-intercept",
+        action="store_true",
+        help="`include_intercept=False`相当（式に定数項`1`を含めない）",
+    )
     args = parser.parse_args()
 
     if args.method == "gmm":
@@ -598,6 +654,7 @@ if __name__ == "__main__":
             args.hac_lags,
             args.iter_limit,
             args.confidence_level,
+            include_intercept=not args.no_intercept,
         )
     else:
         output = run(
@@ -609,5 +666,6 @@ if __name__ == "__main__":
             args.cluster,
             args.hac_lags,
             args.confidence_level,
+            include_intercept=not args.no_intercept,
         )
     print(json.dumps(output, indent=2))

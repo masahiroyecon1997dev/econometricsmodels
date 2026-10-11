@@ -75,6 +75,39 @@ COV_TYPES = ["classical", "hc0", "hc1", "hac"]
 CARD_X_EXOG = ["exper", "expersq", "black", "smsa", "south"]
 
 
+# include_intercept=False（切片なし）のシナリオ。キーが`fixtures["no_intercept"]`
+# 直下のシナリオ名。generate_iv_gmm_fixtures.py・クロスチェック側
+# （generate_iv_crosscheck_fixtures.py等）もここをimportして単一の定義元にする。
+# x_exog_emptyは`x_exog=[]`かつ切片なしで、弱操作変数診断の制限モデルが
+# 回帰変数0個になる退化ケース（`engine/src/iv/CLAUDE.md`参照）。
+NO_INTERCEPT_SCENARIOS: dict[str, dict] = {
+    "baseline": {
+        "dataset": "baseline",
+        "x_exog": ["x1"],
+        "x_endog": ["endog1"],
+        "instruments": ["z1", "z2"],
+    },
+    "just_identified": {
+        "dataset": "just_identified",
+        "x_exog": ["x1"],
+        "x_endog": ["endog1"],
+        "instruments": ["z1"],
+    },
+    "x_exog_empty": {
+        "dataset": "baseline",
+        "x_exog": [],
+        "x_endog": ["endog1"],
+        "instruments": ["z1", "z2"],
+    },
+    "multi_endog": {
+        "dataset": "baseline_multi_endog",
+        "x_exog": ["x1"],
+        "x_endog": ["endog1", "endog2"],
+        "instruments": ["z1", "z2", "z3"],
+    },
+}
+
+
 def build_fixtures() -> dict:
     fixtures: dict = {}
 
@@ -147,6 +180,22 @@ def build_fixtures() -> dict:
             cov_type=cov_type,
         )
 
+    # include_intercept=False（切片なし）。fixtures["no_intercept"][シナリオ][cov_type]。
+    fixtures["no_intercept"] = {
+        name: {
+            cov_type: run(
+                dataset=spec["dataset"],
+                x_exog_cols=spec["x_exog"],
+                x_endog_cols=spec["x_endog"],
+                instrument_cols=spec["instruments"],
+                cov_type=cov_type,
+                include_intercept=False,
+            )
+            for cov_type in COV_TYPES
+        }
+        for name, spec in NO_INTERCEPT_SCENARIOS.items()
+    }
+
     fixtures["_meta"] = {
         "method": "2sls",
         "generated_at": datetime.now(UTC).isoformat(),
@@ -191,6 +240,11 @@ def build_fixtures() -> dict:
             "instruments=['z1']）は境界値・悪条件シナリオの一環"
             "（testing-policy.md「テスト用データセット」）。cluster cov_typeは"
             "n=3では意味のあるクラスタ数を確保できないため対象外。"
+            "no_intercept（`include_intercept=False`、式に定数項`1`を含めない）は"
+            "baseline・just_identified・x_exog_empty（`x_exog=[]`かつ切片なし、"
+            "弱操作変数診断の制限モデルが回帰変数0個の退化ケース）・multi_endogの"
+            "4シナリオ×classical/hc0/hc1/hac。r_squared/adj_r_squaredは切片なしの"
+            "非中心化の定義、f_statistic/f_p_valueは全係数が傾きとして検定される。"
         ),
     }
     return fixtures

@@ -56,6 +56,7 @@ from benchmark.common import (
     run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
+from benchmark.iv.fixtures.generate_iv_fixtures import NO_INTERCEPT_SCENARIOS
 from benchmark.iv.references.r import run_ivreg_r
 
 # generate_iv_fixtures.pyのCARD_X_EXOGと同じ（Wooldridge card実データ）。
@@ -84,6 +85,14 @@ X_EXOG_BY_SCENARIO = {
     "scale_variance_mild": ["x1", "x2"],
 }
 COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac", "cluster"]
+# 切片なし（no_intercept）で持つcov_type（linearmodelsのiv.jsonと同じ4種）。
+NO_INTERCEPT_COV_TYPES = ["classical", "hc0", "hc1", "hac"]
+# ivregが切片なしでfitできないシナリオ。回帰変数が1列だけ（`x_exog=[]`かつ
+# 切片なし）だと`ivreg.fit`が`coef(auxreg)`を行列として扱えず
+# "incorrect number of dimensions"で失敗する（ivreg 0.6.8で実測、切片ありの
+# `y ~ endog1 | z1 + z2`は通る）。この退化ケースはlinearmodelsのfixtureと
+# `first_stage()`の直接比較テストで検証する。
+IVREG_UNSUPPORTED_NO_INTERCEPT = {"x_exog_empty"}
 
 
 def _ivreg_formula(
@@ -91,10 +100,16 @@ def _ivreg_formula(
     x_endog_cols: list[str],
     instrument_cols: list[str],
     y_col: str = "y",
+    include_intercept: bool = True,
 ) -> str:
+    """`ivreg`の式。`include_intercept=False`は両辺に`0 +`を付けて切片を除く
+    （`ivreg`は`|`の左右それぞれに切片の有無を持つため、片側だけだと
+    第一段階と構造式の定義が食い違う）。
+    """
+    prefix = "" if include_intercept else "0 + "
     lhs = " + ".join(x_exog_cols + x_endog_cols)
     instruments = " + ".join(x_exog_cols + instrument_cols)
-    return f"{y_col} ~ {lhs} | {instruments}"
+    return f"{y_col} ~ {prefix}{lhs} | {prefix}{instruments}"
 
 
 def build_synthetic_fixtures(tmpdir: Path) -> dict:
@@ -176,6 +191,45 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             entry = run_ivreg_r(df1_csv, df1_formula, cov_type)
         fixtures["df1"][cov_type] = entry
 
+    fixtures["no_intercept"] = build_no_intercept_fixtures()
+    return fixtures
+
+
+def build_no_intercept_fixtures() -> dict:
+    """include_intercept=False（切片なし）。`generate_iv_fixtures.py`の
+    `NO_INTERCEPT_SCENARIOS`と同じシナリオ。cov_typeはlinearmodelsと同じ
+    classical/hc0/hc1/hac（hc2/hc3・clusterは含めない）。
+
+    - `IVREG_UNSUPPORTED_NO_INTERCEPT`のシナリオはivregが失敗するため含めない。
+    - `sargan_statistic`/`sargan_p_value`はnullにする。ivregのSarganは補助回帰の
+      残差平方和を残差の**中心化**TSS（`sum((r - mean(r))^2)`）で割る式で、
+      Zに定数項が入っている前提のため、切片なしでは統計量が負になりうる
+      （実測: baselineで-317、linearmodelsは0.19）。他の統計量（係数・SE・
+      R²・Wald F・Wu-Hausman・弱操作変数F）は一致を確認済み。
+    """
+    fixtures: dict = {}
+    for name, spec in NO_INTERCEPT_SCENARIOS.items():
+        if name in IVREG_UNSUPPORTED_NO_INTERCEPT:
+            continue
+        csv_path = DATA_DIR / f"iv_{spec['dataset']}.csv"
+        df, _ = load_frozen_dataset("iv", spec["dataset"])
+        formula = _ivreg_formula(
+            spec["x_exog"],
+            spec["x_endog"],
+            spec["instruments"],
+            include_intercept=False,
+        )
+        fixtures[name] = {}
+        for cov_type in NO_INTERCEPT_COV_TYPES:
+            if cov_type == "hac":
+                lag = hac_auto_lag(df.height)
+                entry = run_ivreg_r(csv_path, formula, cov_type, hac_lag=lag)
+                entry["hac_lag"] = lag
+            else:
+                entry = run_ivreg_r(csv_path, formula, cov_type)
+            entry["sargan_statistic"] = None
+            entry["sargan_p_value"] = None
+            fixtures[name][cov_type] = entry
     return fixtures
 
 
@@ -318,6 +372,12 @@ def build_fixtures() -> dict:
             "instruments=['z1']）は境界値・悪条件シナリオの一環。"
             "cluster cov_typeはn=3では意味のあるクラスタ数を確保できないため"
             "対象外。"
+            "no_intercept（`include_intercept=False`、式の両辺に`0 +`）は"
+            "baseline・just_identified・multi_endogのclassical/hc0/hc1/hac。"
+            "x_exog_empty（`x_exog=[]`かつ切片なし）はivregが"
+            "`incorrect number of dimensions`で失敗するため含めない。"
+            "no_interceptのsargan_statistic/sargan_p_valueはivregが残差の中心化TSSを"
+            "使う式で切片なしだと負になりうるためnull。"
             "wooldridge.card（Wooldridge実データ、Card 1995、`generate_iv_fixtures.py`"
             "のCARD_X_EXOGと同じ構成）はcluster cov_typeを除く4種のみ（対応する"
             "自然なカテゴリ列が無いため）。"

@@ -59,6 +59,7 @@ from benchmark.iv.fixtures.generate_iv_crosscheck_fixtures import (
     CARD_X_EXOG,
     _ivreg_formula,
 )
+from benchmark.iv.fixtures.generate_iv_fixtures import NO_INTERCEPT_SCENARIOS
 from benchmark.iv.fixtures.generate_iv_gmm_fixtures import (
     CARD_OTHER_WEIGHT_TYPES,
     COV_TYPES,
@@ -185,6 +186,33 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             for cov_type in COV_TYPES
         }
     }
+    fixtures["no_intercept"] = build_no_intercept_fixtures()
+    return fixtures
+
+
+def build_no_intercept_fixtures() -> dict:
+    """include_intercept=False（切片なし）。`generate_iv_fixtures.py`の
+    `NO_INTERCEPT_SCENARIOS`と同じシナリオを、classical重み×cov_type
+    （classical/hc0/hc1/hac）で持つ（`generate_iv_gmm_fixtures.py`と同じ構成）。
+    """
+    fixtures: dict = {}
+    for name, spec in NO_INTERCEPT_SCENARIOS.items():
+        csv_path = DATA_DIR / f"iv_{spec['dataset']}.csv"
+        df, _ = load_frozen_dataset("iv", spec["dataset"])
+        formula = _ivreg_formula(
+            spec["x_exog"],
+            spec["x_endog"],
+            spec["instruments"],
+            include_intercept=False,
+        )
+        fixtures[name] = {
+            "classical": {
+                cov_type: _run(
+                    csv_path, formula, df.height, "classical", cov_type
+                )
+                for cov_type in COV_TYPES
+            }
+        }
     return fixtures
 
 
@@ -261,6 +289,11 @@ def build_fixtures() -> dict:
             "test_stats/p_values/conf_intはz分布。hac_lagはhacが重みまたは共分散に"
             "含まれるエントリのみ（重みと共分散で共用）。just_identifiedシナリオは"
             "hansen_j_statistic/hansen_j_p_valueがnull（丁度識別）。"
+            "no_intercept（`include_intercept=False`、式の両辺に`0 +`）は"
+            "baseline・just_identified・x_exog_empty・multi_endogのclassical重み×"
+            "classical/hc0/hc1/hac。momentfitは切片なしだと`tsls()`・`initW='tsls'`が"
+            "2SLSと一致しないため、重みを明示して推定する"
+            "（`run_momentfit.R`ヘッダコメント8.参照）。"
             "wooldridge.cardはcluster重み・cluster共分散を含まない"
             "（クラスター列が無いため）。"
         ),

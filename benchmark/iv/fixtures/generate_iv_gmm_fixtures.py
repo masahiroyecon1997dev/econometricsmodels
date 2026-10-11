@@ -49,7 +49,10 @@ from benchmark.common import (
     imbalanced_cluster_groups,
     run_fixture_cli,
 )
-from benchmark.iv.fixtures.generate_iv_fixtures import CARD_X_EXOG
+from benchmark.iv.fixtures.generate_iv_fixtures import (
+    CARD_X_EXOG,
+    NO_INTERCEPT_SCENARIOS,
+)
 from benchmark.iv.references.linearmodels_ref import run_gmm
 
 # `generate_iv_fixtures.py`のNUMERIC_SCENARIOSと同一（2SLSと同じ合成データセットを
@@ -195,6 +198,27 @@ def build_fixtures() -> dict:
             cov_type=cov_type,
         )
 
+    # include_intercept=False（切片なし）。2SLSのiv.jsonと同じシナリオ
+    # （NO_INTERCEPT_SCENARIOS）をweight_type='classical'固定で、cov_type別に持つ。
+    # fixtures["no_intercept"][シナリオ]["classical"][cov_type]。
+    fixtures["no_intercept"] = {
+        name: {
+            "classical": {
+                cov_type: run_gmm(
+                    dataset=spec["dataset"],
+                    x_exog_cols=spec["x_exog"],
+                    x_endog_cols=spec["x_endog"],
+                    instrument_cols=spec["instruments"],
+                    weight_type="classical",
+                    cov_type=cov_type,
+                    include_intercept=False,
+                )
+                for cov_type in COV_TYPES
+            }
+        }
+        for name, spec in NO_INTERCEPT_SCENARIOS.items()
+    }
+
     # weight_type='hac' × cov_type='hac'の組み合わせ（実務上最も典型的な
     # 「HACカーネル重み＋HAC標準誤差」の組み合わせ経路。上記OTHER_WEIGHT_TYPESループは
     # cov_type='classical'固定のためこの組み合わせを通らない）。
@@ -259,6 +283,14 @@ def build_fixtures() -> dict:
             "cardはWooldridge実データ（2SLSの`iv.json`の`card`と同じ変数構成）で、"
             "classical重みは全cov_type（classical/hc0/hc1/hac）、robust/hac重みは"
             "cov_type=classicalのみ（クラスター列が無いためclusterは含めない）。"
+            "no_intercept（`include_intercept=False`）は2SLSのiv.jsonと同じ4シナリオ"
+            "（baseline・just_identified・x_exog_empty・multi_endog）を"
+            "weight_type='classical'固定でclassical/hc0/hc1/hac。"
+            "切片なしの過剰識別ではlinearmodelsが残差を中心化して重みを作る"
+            "ため、hansen_j_statistic/hansen_j_p_valueは本実装（非中心化"
+            "σ̂²₀=e'e/n）と一致しない（baselineで0.311対0.190）。比較対象は"
+            "momentfitのクロスチェック側とし、このフィクスチャのhansen_j_*は"
+            "切片なしでは比較に使わない（`run_gmm()`のdocコメント参照）。"
         ),
     }
     return fixtures

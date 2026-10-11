@@ -61,6 +61,14 @@
 # 7. 比較しない統計量: 弱操作変数F・R²（2SLSのivregクロスチェックと重複するため）、
 #    hc2/hc3（linearmodels・momentfitとも対応なし）、反復GMM（フィクスチャは
 #    classical重みのみで反復しても2SLSと同じ結果になる。収束判定も実装ごとに異なる）。
+#
+# 8. 切片なし（`0 +`）の扱い: momentfitの`tsls()`と`initW = "tsls"`は切片なしだと
+#    本来の2SLS（重み(Z'Z/n)^-1）と一致しない（実測: 過剰識別で係数が約7%ずれる。
+#    丁度識別は一致）。切片ありでは一致するため原因は未特定。このため切片なしでは、
+#    2SLSを重み(Z'Z/n)^-1を明示した1段階推定で得て、classical重みも
+#    S = mean(e0^2) * Z'Z/n（定数項ありで`evalWeights`が使うのと同じ非中心化の分散）を
+#    明示的に渡す。robust・cluster・hac重みは、2SLS係数を正しく得た上で
+#    `vcov(model, 2SLS係数)`から重みを作る（定数項ありのHAC・クラスターと同じ手順）。
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 6) {
@@ -116,14 +124,32 @@ model <- make_model(weight_kind)
 dims <- modelDims(model)
 k <- dims$k
 n_moments <- dims$q
-theta_tsls <- coef(tsls(model))
+# 切片なし（式に`0 +`）かどうか。ヘッダコメント8.参照。
+has_intercept <- attr(terms(g_formula), "intercept") == 1
+if (has_intercept) {
+  theta_tsls <- coef(tsls(model))
+} else {
+  # 切片なしでは`tsls()`と`initW = "tsls"`が本来の2SLS（重み(Z'Z/n)^-1）と
+  # 一致しない値を返すため、重みを明示した1段階推定で2SLSを得る。
+  z_mat <- model.matrix(x_formula, df)
+  theta_tsls <- coef(gmmFit(model, weights = solve(crossprod(z_mat) / n), type = "onestep"))
+}
 
-# 推定とHansen J用の重み（ヘッダコメント1.・2.・4.参照）。
-if (weight_kind %in% c("iid", "MDS")) {
+# 推定とHansen J用の重み（ヘッダコメント1.・2.・4.・8.参照）。
+if (weight_kind == "iid" && !has_intercept) {
+  # S = sigma2_0 * Z'Z/n（sigma2_0 = mean(e0^2)、定数項ありのとき`evalWeights(..., "optimal")`が
+  # 実際に使うのと同じ非中心化の分散。momentfitのiid共分散`vcov()`は中心化・n-1の分散
+  # を使うため、ここでは使わない）。
+  y_vec <- model.response(model.frame(g_formula, df))
+  e0 <- as.numeric(y_vec - model.matrix(g_formula, df) %*% theta_tsls)
+  w_mat <- solve(mean(e0^2) * crossprod(z_mat) / n)
+  fit <- gmmFit(model, weights = w_mat, type = "onestep")
+  w_obj <- evalWeights(model, w = w_mat)
+} else if (weight_kind %in% c("iid", "MDS") && has_intercept) {
   fit <- gmmFit(model, type = "twostep", initW = "tsls")
   w_obj <- evalWeights(model, theta_tsls, "optimal")
 } else {
-  s_mat <- vcov(model, theta_tsls)[, ]
+  s_mat <- vcov(model, theta_tsls)[, , drop = FALSE]
   w_mat <- solve(s_mat)
   fit <- gmmFit(model, weights = w_mat, type = "onestep")
   w_obj <- evalWeights(model, w = w_mat)
@@ -153,7 +179,8 @@ if (cov_type == "classical") {
 } else {
   stop(paste("unknown cov_type:", cov_type))
 }
-vc <- unclass(vc)[, ]
+# drop = FALSE: 係数が1個（x_exog=[]かつ切片なし）でも行列のまま扱う。
+vc <- unclass(vc)[, , drop = FALSE]
 ses <- sqrt(diag(vc))
 
 # z分布（ヘッダコメント6.参照）。

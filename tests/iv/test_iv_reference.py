@@ -48,7 +48,7 @@ Note:
     - 第一段階回帰の結果（`first_stage()`）はここでは比較しない（IV固有の
       配線＝どの列を・どの切片設定で回帰に渡すかは、同じ入力の`OLS`との直接比較で
       `test_iv_first_stage.py`が検証する）。
-    - `include_intercept=False`（切片なし）は`iv.json`の`no_intercept`
+    - `include_intercept=False`（切片なし）は`iv.json`の`synthetic.no_intercept`
       （`NO_INTERCEPT_SCENARIOS`の4シナリオ×classical/hc0/hc1/hac）と比較する
       （`test_no_intercept_matches_linearmodels`）。
 
@@ -214,7 +214,7 @@ def test_matches_linearmodels(fixtures, scenario, cov_type):
 def test_cluster_matches_linearmodels(fixtures):
     """クラスターロバストSE。`generate_iv_fixtures.py`と同じ疑似グループ
     （行番号%10）を再現する。統計的な意味はなく、実装の動作確認用のため
-    `baseline`シナリオのみ（`coef`/`se`のみが記録されている）。
+    `baseline`シナリオのみ（`params`/`std_errors`のみが記録されている）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
     df = with_cluster_groups(df, 10)

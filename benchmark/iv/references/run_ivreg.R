@@ -113,11 +113,11 @@ if (cov_type == "classical") {
 }
 vc <- vcov_fn(model)
 
-coef_se <- extract_coef_se(model, vc, df_inference)
-coefs <- coef_se$coefs
-ses <- coef_se$ses
-test_stats <- coef_se$test_stats
-p_values <- coef_se$p_values
+inference <- extract_params_std_errors(model, vc, df_inference)
+coefs <- inference$coefs
+ses <- inference$ses
+test_stats <- inference$test_stats
+p_values <- inference$p_values
 
 # 信頼区間（既定confidence_level=0.95固定、../../linear/references/run_lm_crosscheck.Rと同じ
 # 手計算方式。baseのconfint(model)はclassicalのvcovしか使わないため使えない）。

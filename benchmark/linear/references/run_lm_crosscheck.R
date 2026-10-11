@@ -115,11 +115,11 @@ if (cov_type == "classical") {
   stop(paste("unknown cov_type:", cov_type))
 }
 
-coef_se <- extract_coef_se(model, vc, df_inference)
-coefs <- coef_se$coefs
-ses <- coef_se$ses
-test_stats <- coef_se$test_stats
-p_values <- coef_se$p_values
+inference <- extract_params_std_errors(model, vc, df_inference)
+coefs <- inference$coefs
+ses <- inference$ses
+test_stats <- inference$test_stats
+p_values <- inference$p_values
 
 # 信頼区間（既定confidence_level=0.95、"--confidence-level="フラグで変更可）。
 # 本実装・statsmodelsのcov_typeによらずt分布を使う方針と揃え、上で計算した

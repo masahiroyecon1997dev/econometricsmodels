@@ -92,7 +92,7 @@ OTHER_WEIGHT_TYPES = ["robust", "cluster", "hac"]
 # 構造上のリスクは低いが、1点だけの裏付けにならないよう複数点を持つ。
 CROSS_WEIGHT_COV_COMBINATIONS = [("cluster", "hac"), ("hac", "cluster")]
 # 実データ（Wooldridge card）の重み×共分散。cardにはクラスター列が無い
-# （2SLSの`iv.json`の`card`がclusterを持たないのと同じ）ため、cluster重み・
+# （2SLSの`iv.json`の`wooldridge.card`がclusterを持たないのと同じ）ため、cluster重み・
 # cluster共分散は含めない。classical重みは全cov_type、他の重みはclassical
 # 共分散のみ（合成データのbaselineと同じ絞り方）。
 CARD_OTHER_WEIGHT_TYPES = ["robust", "hac"]
@@ -159,7 +159,7 @@ def build_fixtures() -> dict:
                     "baseline", weight_type=weight_type, cov_type=cov_type
                 )
 
-    # 実データセット（Wooldridge card、2SLSの`iv.json`の`card`と同じ変数構成）。
+    # 実データセット（Wooldridge card、2SLSの`iv.json`の`wooldridge.card`と同じ変数構成）。
     fixtures["card"] = {"classical": {}}
     for cov_type in COV_TYPES:
         fixtures["card"]["classical"][cov_type] = run_gmm(
@@ -326,7 +326,7 @@ def build_fixtures() -> dict:
             "（1/3、既定値2以外の成功パス）も追加。"
             "baselineには重みと共分散の型が両方非既定かつ異なる組み合わせ"
             "（cluster重み×hac共分散、hac重み×cluster共分散）も持つ。"
-            "cardはWooldridge実データ（2SLSの`iv.json`の`card`と同じ変数構成）で、"
+            "cardはWooldridge実データ（2SLSの`iv.json`の`wooldridge.card`と同じ変数構成）で、"
             "classical重みは全cov_type（classical/hc0/hc1/hac）、robust/hac重みは"
             "cov_type=classicalのみ（クラスター列が無いためclusterは含めない）。"
             "no_intercept（`include_intercept=False`）は2SLSのiv.jsonと同じ4シナリオ"

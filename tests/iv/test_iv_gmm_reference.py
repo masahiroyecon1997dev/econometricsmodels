@@ -32,7 +32,7 @@ Note:
       （`GmmEstimator`はWu-Hausman検定を実装しないため、`IVResults.
       wu_hausman_statistic`は`estimator="gmm"`で常に`None`。`test_iv_api.py`の
       `test_wu_hausman_is_none_for_gmm`で構造確認済み）。
-    - `include_intercept=False`（切片なし）は`iv_gmm.json`の`no_intercept`
+    - `include_intercept=False`（切片なし）は`iv_gmm.json`の`synthetic.no_intercept`
       （`NO_INTERCEPT_SCENARIOS`の4シナリオ、`gmm_weight_type="classical"`固定×
       classical/hc0/hc1/hac）と比較する（`test_no_intercept_matches_linearmodels`）。
       **過剰識別のHansen Jだけは比較しない**: linearmodelsは`gmm_weight_type=

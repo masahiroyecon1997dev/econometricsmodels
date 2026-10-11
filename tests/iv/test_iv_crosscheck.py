@@ -328,7 +328,7 @@ def test_synthetic_matches_r(crosscheck, scenario, cov_type):
 def test_cluster_matches_r(crosscheck):
     """クラスターロバストSE。`generate_iv_crosscheck_fixtures.py`と同じ疑似
     グループ（行番号%10）を再現する。統計的な意味はなく、実装の動作確認用のため
-    `baseline`シナリオのみ（`coef`/`se`/`r_squared`等が記録されている）。
+    `baseline`シナリオのみ（`params`/`std_errors`/`r_squared`等が記録されている）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
     df = with_cluster_groups(df, 10)

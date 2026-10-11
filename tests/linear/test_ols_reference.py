@@ -217,8 +217,8 @@ def test_predict_new_data_matches_frozen_statsmodels(fixtures):
 def test_cluster_matches_statsmodels(fixtures):
     """クラスターロバストSE。`generate_ols_fixtures.py`と同じ疑似グループ
     （行番号%10）を再現する。統計的な意味はなく、実装の動作確認用のため
-    `baseline`シナリオのみ。coef/seだけでなくt値・p値・信頼区間・適合度統計量
-    まで`_check_result`で検証する（従来coef/seのみだった非対称の解消）。
+    `baseline`シナリオのみ。params/std_errorsだけでなくt値・p値・信頼区間・適合度統計量
+    まで`_check_result`で検証する（従来params/std_errorsのみだった非対称の解消）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df = with_cluster_groups(df, 10)
@@ -235,7 +235,7 @@ def test_cluster_imbalanced_matches_statsmodels(fixtures):
 
     均等サイズの疑似グループ（行番号%10）だけでは見逃す、実務で起こりやすい
     グループサイズの偏りを持つケース（`testing-policy.md`「テスト用データセット」3.）。
-    coef/seに加えt値・p値・信頼区間・適合度統計量も検証する。
+    params/std_errorsに加えt値・p値・信頼区間・適合度統計量も検証する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     groups = imbalanced_cluster_groups(df.height)
@@ -259,7 +259,7 @@ def test_cluster_g2_matches_statsmodels(fixtures):
     `rank(Ŝ)≤G-1`のためロバストWald検定のq×q部分行列が構造的に特異になり、
     `fit()`冒頭のバリデーションが`ValidationError`で弾く（成功パスにならない。
     `test_ols_validation.py::test_cluster_count_at_most_slopes_raises_`
-    `validation_error`参照）。coef/seに加えt値・p値・信頼区間・
+    `validation_error`参照）。params/std_errorsに加えt値・p値・信頼区間・
     適合度統計量も検証する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline_k1.csv")
@@ -446,7 +446,7 @@ def test_wooldridge_wage1_region_cluster_matches_statsmodels(
     基準カテゴリnortheast、4グループ・不均衡サイズ）でのクラスターロバストSE。
     疑似グループ（行番号%N）ではなく実データに由来するグループ構造での検証
     （`test_ols_crosscheck.py::test_wooldridge_wage1_region_cluster_matches_r`
-    と同じ発想、こちらはstatsmodels側）。coef/seに加えt値・p値・信頼区間・
+    と同じ発想、こちらはstatsmodels側）。params/std_errorsに加えt値・p値・信頼区間・
     適合度統計量も検証する。
     """
     df = load_wooldridge("wage1")

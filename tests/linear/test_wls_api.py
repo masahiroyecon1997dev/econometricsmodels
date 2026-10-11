@@ -65,7 +65,7 @@ _assert_close = partial(
 def test_weight_one_matches_ols(dataset, option_kwargs):
     """重み=1のときWLSの結果がOLSの結果と完全一致すること。
 
-    coef/se/t/p/CI/F統計量/n_obsは、WLSがOLSソルバーを`sqrt(weight)`変換した
+    params/std_errors/test_stats/p_values/conf_int/F統計量/n_obsは、WLSがOLSソルバーを`sqrt(weight)`変換した
     データにそのまま適用する実装であるため（weight=1なら変換が恒等写像になる）
     厳密な`==`で一致する。r_squared・log_likelihood（→aic/bic）・残差は、
     WLS側で元スケールのy・weightsから独立に計算し直す実装のため、加算順序

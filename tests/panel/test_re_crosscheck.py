@@ -121,7 +121,7 @@ RTOL_HAUSMAN_ILL_CONDITIONED = TOLERANCES["re_crosscheck"][
 ATOL_HAUSMAN_P_VALUE = TOLERANCES["re_crosscheck"]["atol_hausman_p_value"]
 
 # plm/linearmodelsの分散成分（σ_u²）推定の差でθが変わり、ハウスマン統計量への
-# 増幅がcoef/seよりさらに大きくなる唯一のシナリオ（モジュールdoc「許容誤差に
+# 増幅がparams/std_errorsよりさらに大きくなる唯一のシナリオ（モジュールdoc「許容誤差に
 # ついて」参照）。
 _UNBALANCED_HAUSMAN_SCENARIO = "unbalanced"
 _ILL_CONDITIONED_HAUSMAN_SCENARIO = "high_condition_number"

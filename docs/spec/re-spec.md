@@ -86,7 +86,12 @@ Python `linearmodels.RandomEffects`の実装（Swamy-Arora）に準拠する。R
 （下記「plmとの既知の実装差」）。
 
 - **σ_ε²（idiosyncratic variance）**: 内部1-way FE推定（`FeEstimator::fit(OneWay,
-  Classical)`）のwithin回帰残差平方和／`FeEstimator::df_resid()`。
+  Classical)`）のwithin回帰残差平方和／`FeEstimator::df_resid()`。内部FE推定に渡す説明変数は
+  within変換後に分散がある列（時間変化のある列、`k_tv`個）だけで、時間不変の列は渡さない
+  （FEは分散ゼロの列を拒否するため。REは時間不変の説明変数を許容する、5章）。そのため
+  `df_resid() = n - k_tv - n_entities`になる（`plm`と同じ。`linearmodels`は時間不変の列も
+  自由度に数えるため`σ_ε²`が食い違う）。全説明変数が時間不変でも成立する（FEは説明変数0個を
+  受け付ける）。分散がゼロかどうかの判定はFEの分散ゼロ検出と同じ相対閾値。
 - **σ_u²（individual variance）**: between回帰（エンティティ平均に対する`OlsEstimator::
   fit(include_intercept=true)`）のSSR、調和平均`t_bar = n_entities / Σ(1/T_i)`を使う標準式
   `max(0, ssr/df_resid - σ_ε²/t_bar)`。
@@ -239,7 +244,9 @@ FEの`r_squared_between`/`r_squared_overall`をそのまま流用できず、RE�
   `X*`・within変換済みの`X̃`にpooled OLSで回帰し、`X̃`の係数`k`個が同時に
   ゼロというWald検定を行う（共分散はRE本体の`cov_type`に連動、下記）。統計量はWald統計量
   （`k × F`、χ²版、`plm`と一致させるため）、p値は
-  `χ²_k.sf(stat)`、`hausman_df = k`（傾き係数の数）。統計量は構造的に非負で、二次形式版の
+  `χ²_k.sf(stat)`、`hausman_df = k`。`k`は傾き係数のうち時間変化のある列の数`k_tv`で、
+  `X*`は全傾き、`X̃`は時間変化のある列だけ（時間不変の列のwithin変換後は全ゼロ列で、比較に
+  寄与しない）。統計量は構造的に非負で、二次形式版の
   `abs()`や非正定値の問題が生じない。バランスパネルでは共通σ²を使った古典的ハウスマン
   検定と数値的に一致する。
 - **定数項の扱い**: `plm`は`reX`から定数列を除き補助回帰に未変換の`1`を足す。バランス
@@ -280,17 +287,19 @@ FEの`r_squared_between`/`r_squared_overall`をそのまま流用できず、RE�
   - DKは時点数`T`→∞の漸近論に基づくため、`T`が短いと検定サイズが歪みうる。
   - `cluster`（既定）ではクラスター数`G`が補助回帰の傾き係数の数`2k`を超える必要がある
     （RE本体は`G > k`で足りるため、RE本体が成功してもfitが失敗しうる）。
-- **`None`になるのは比較対象の傾き係数が0個の場合のみ**（`x=[]`は拒否されるため通常発生
-  しない）。補助回帰のランク落ち・Wald検定の特異性など、計算自体が成立しない場合は
+- **`None`になるのは比較対象の傾き係数が0個の場合のみ**（時間変化のある列が無いとき。
+  説明変数がすべて時間不変の場合に発生する。`x=[]`は拒否される）。補助回帰のランク落ち・Wald検定の特異性など、計算自体が成立しない場合は
   `hausman_*`を`None`にせず`RE.fit()`が失敗する（設計行列の多重共線性でエラーにするのと
   同じ方針）。ロバスト共分散が構造的に特異になる場合が典型で、`cluster`ではクラスター数`G`が
-  補助回帰の傾き係数の数`2k`以下（`ValidationError`、OLSの`InsufficientClustersForInference`と
+  補助回帰の傾き係数の数（`X*`の全傾きと`X̃`の和、時間不変の列が無ければ`2k`）以下
+  （`ValidationError`、OLSの`InsufficientClustersForInference`と
   同じ事前検証）、`dk`では時点数`T`が検定対象の`k`個以下（`T <= k`、`ValidationError`。
   DK共分散のrankは`T-1`以下のため。FEのF検定と同じ事前検証
   `PanelError::InsufficientDkPeriodsForInference`）。RE本体は成功する入力でも、`cov_type="cluster"`（既定）で
   `G <= 2k`の場合はfitが失敗するため、`cov_type="classical"`等を指定するか
-  クラスター数を増やす。時間不変変数・singleton entity等による内部1-way FE推定の失敗は、
-  分散成分（σ_ε²）推定が先に失敗するため`RE.fit()`自体が失敗する。
+  クラスター数を増やす。singleton entity等による内部1-way FE推定の失敗は、
+  分散成分（σ_ε²）推定が先に失敗するため`RE.fit()`自体が失敗する（時間不変変数は
+  内部FE推定に渡さないので失敗の原因にならない）。
 - **旧実装（削除済み）**: `Var(β_FE)-Var(β_RE)`の二次形式に`abs()`を適用する版は、
   非正定値の問題を隠す（負の二次形式が「大きな正の統計量」に化ける）ため置き換えた。
 
@@ -445,9 +454,8 @@ FEの`WithinRegressionFailed`と同じく内側の`LeastSquaresError`の分類�
     コメントとドキュメントへ明記する）。
   - **時間不変変数（および片方の次元でしか変動しない説明変数）は許容する**。REは個体効果・時点効果が
     説明変数と無相関という前提を置くため、時間不変変数や、時点間でのみ（個体間でのみ）変わる変数の
-    係数も識別できる（時点効果と共線になるのはFEの話）。現行の1-way REはこれらを`ValidationError`で
-    拒否している（σ_ε²を内部のFE推定から求めるため）が、2-wayは最初から許容する前提で設計し、
-    1-wayは2-wayより先に同じ方針へ変える（2-wayの実装で拒否から許容へ作り直さないため）。
+    係数も識別できる（時点効果と共線になるのはFEの話）。1-way REは実装済み（3.1・3.7節）で、
+    2-wayは同じ方針を引き継ぐ（片方の次元でしか変動しない変数も許容する）。
     - **分散成分（σ_ε²）**: 内部のFE推定には、within変換後の分散がある列（時間変化のある列、以下
       `k_tv`個）だけを渡す。FEは説明変数0個も受け付けるため、全列が時間不変でも成立する。
       `σ_ε² = SSR_within / FeEstimator::df_resid()`の式は変わらず、自由度は実際に推定したwithin係数の
@@ -463,8 +471,9 @@ FEの`WithinRegressionFailed`と同じく内側の`LeastSquaresError`の分類�
     - **参照実装**: 分散成分・係数・`cov_type`は`plm`が基準（時間変化のある変数だけなら`linearmodels`と
       一致する。時間不変変数を含むシナリオだけ`linearmodels`は使えず、「Python主リファレンス＋Rクロス
       チェック」の例外になる）。
-    - 切片と共線な定数列・時間不変変数同士の共線など、設計行列が特異になる入力は最終回帰の特異性検出
-      （`ComputationError`）に任せる。
+    - 切片と共線な定数列・時間不変変数同士の共線など、設計行列が特異になる入力は特異性検出
+      （`ComputationError`）に任せる。1-wayでは、between回帰（σ_u²の推定）が最終回帰より先に
+      特異性を検出する（時間不変の列はエンティティ平均でもそのまま変動するため）。
   - **`REResult`に`n_periods`を追加する**（FEと同じ定義: `time`を指定した2-wayのときだけユニークな
     時点数、1-wayは`None`で、`dk_time`だけの指定でも`None`）。2-way RE実装時に、`fe-spec.md`2章の
     「REには追加しない」という記述と、`panel-common.md`2.1節の表の`n_periods`（FEのみ）を直す。

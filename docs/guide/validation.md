@@ -93,14 +93,14 @@ A wrong argument *type*, as opposed to a wrong value, raises the built-in `TypeE
 | Tobit | `max_iter` is not an integer from 1 to 10,000, or `tol` is not a positive finite number. Both censoring bounds are `None`, or the lower bound is not below the upper bound. `y` lies outside the bounds. There is no uncensored observation. `x` contains a column named `"sigma"`. |
 | IV | Fewer instruments than endogenous regressors (the order condition). `x_endog` or `instruments` is empty. GMM options are set for an estimator that does not use them, or are out of range (`gmm_max_iter` outside 3 to 10,000, or `gmm_tol` not a positive finite number). With `gmm_weight_type="cluster"`, there are too few clusters for the weight matrix. |
 | FE | A singleton entity, or in a two-way model a singleton time period. A two-way model on an unbalanced panel, or without `time`. A regressor with no within-variation (constant over time within every entity). Too few degrees of freedom. |
-| RE | A singleton entity. A regressor with no within-variation (constant over time within every entity), so a time-invariant regressor is rejected, unlike `plm`. With `cov_type="cluster"`, too few clusters for the Hausman auxiliary regression. |
+| RE | A singleton entity. With `cov_type="cluster"`, too few clusters for the Hausman auxiliary regression. A time-invariant regressor is allowed, unlike in FE. |
 | FE, RE | `cov_type="dk"` without `dk_time` (FE does not borrow `time` for it), with an invalid `dk_bandwidth`, with too few time periods for the number of coefficients tested, or with a degenerate two-period structure. |
 
 ## When `ComputationError` is raised
 
 | Cause | Where | What it means |
 |---|---|---|
-| Perfect multicollinearity | All methods | The design matrix is singular, for example one regressor is a multiple of another, or a constant column is combined with an intercept. In IV the first stage fails, and in FE and RE the within transformation leaves a singular design. |
+| Perfect multicollinearity | All methods | The design matrix is singular, for example one regressor is a multiple of another, or a constant column is combined with an intercept. In IV the first stage fails, and in FE and RE the within transformation leaves a singular design. In RE, a time-invariant regressor that is constant across entities (collinear with the intercept) or collinear with another time-invariant regressor also gives a singular design. |
 | Near-singular matrices | All methods | A matrix needed for the covariance or a joint test is numerically singular, typically because regressors are on extremely different scales (for example `1e6` and `1e-3`) or because of an almost perfect linear dependence. Rescale the variables. |
 | Non-convergence | Logit, Probit, Tobit | The optimizer did not converge within `max_iter`. |
 | Singular Hessian or OPG matrix | Logit, Probit, Tobit | The information matrix cannot be inverted. |

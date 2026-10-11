@@ -388,6 +388,24 @@ pub fn extract_f64_columns(df: &DataFrame, names: &[String]) -> PyResult<Vec<Vec
         .collect()
 }
 
+/// `param_names`から`x`列名を取り出し（`x_column_names`）、`df`からその列をまとめて抽出する
+/// （`extract_f64_columns`）。結果オブジェクトが保持する`param_names`から学習データ・新規データの
+/// `x`列を再抽出する`predict()`/`augment()`/事後診断の共通の手順を、1つにまとめたもの。
+///
+/// # Errors
+/// `extract_f64_columns`と同じ。
+pub fn extract_model_x_columns(
+    df: &DataFrame,
+    param_names: &[String],
+    has_intercept: bool,
+    exclude_trailing: usize,
+) -> PyResult<Vec<Vec<f64>>> {
+    extract_f64_columns(
+        df,
+        x_column_names(param_names, has_intercept, exclude_trailing),
+    )
+}
+
 /// キー列（グループの同一性や時点を表す列）の使われ方。許可するdtypeが異なる。
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum KeyRole {
@@ -1592,6 +1610,22 @@ mod tests {
 
         let columns = extract_f64_columns(&df, &["b".to_string(), "a".to_string()]).unwrap();
         assert_eq!(columns, vec![vec![10.0, 20.0], vec![1.0, 2.0]]);
+    }
+
+    #[test]
+    fn extract_model_x_columns_skips_const_and_trailing_names() {
+        let df = df!("a" => [1.0, 2.0], "b" => [3.0, 4.0]).unwrap();
+        let param_names = ["const", "b", "a", "sigma"].map(String::from);
+        let columns = extract_model_x_columns(&df, &param_names, true, 1).unwrap();
+        assert_eq!(columns, vec![vec![3.0, 4.0], vec![1.0, 2.0]]);
+    }
+
+    #[test]
+    fn extract_model_x_columns_keeps_all_names_without_intercept() {
+        let df = df!("a" => [1.0, 2.0]).unwrap();
+        let param_names = ["a".to_string()];
+        let columns = extract_model_x_columns(&df, &param_names, false, 0).unwrap();
+        assert_eq!(columns, vec![vec![1.0, 2.0]]);
     }
 
     #[test]

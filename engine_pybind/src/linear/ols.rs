@@ -15,14 +15,15 @@ use engine::linear::diagnostics::{
     AuxRegressionTest, breusch_godfrey_test, breusch_pagan_test, white_test,
 };
 use engine::linear::ols::{OlsEstimator, OlsInput};
-use polars::prelude::{Column, DataFrame};
+use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
 use super::common::{least_squares_error_to_pyerr, mat_to_vec, parse_cov_type};
+use crate::shared::augment::append_predicted_column;
 use crate::shared::column_extraction::{
     extract_column_list, extract_dataframe, extract_f64_column, extract_f64_columns,
-    extract_time_order_ranks, x_column_names,
+    extract_model_x_columns, extract_time_order_ranks, x_column_names,
 };
 use crate::shared::errors::ValidationError;
 use crate::shared::option_repr::PyRepr;
@@ -31,8 +32,7 @@ use crate::shared::option_values::{
     extract_strict_text,
 };
 use crate::shared::validation::{
-    validate_common_roles, validate_no_duplicate_within_role, validate_no_existing_column,
-    validate_x_non_empty,
+    validate_common_roles, validate_no_duplicate_within_role, validate_x_non_empty,
 };
 
 /// Estimation options for OLS.
@@ -406,8 +406,7 @@ impl OLSResult {
     /// （`x`列の抽出→`predict_new_data`呼び出し）。
     fn predict_for(&self, df: &DataFrame) -> PyResult<Vec<f64>> {
         let has_intercept = self.has_intercept;
-        let x_names = x_column_names(&self.param_names, has_intercept, 0);
-        let x_columns = extract_f64_columns(df, x_names)?;
+        let x_columns = extract_model_x_columns(df, &self.param_names, has_intercept, 0)?;
 
         Ok(engine::linear::ols::predict_new_data(
             &self.params,
@@ -458,7 +457,7 @@ impl OLSResult {
     ///   only possible for `IVResult.first_stage()` results): `ValidationError`.
     #[pyo3(signature = (new_data=None))]
     fn augment(&self, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<PyDataFrame> {
-        let (mut source, predicted) = match new_data {
+        let (source, predicted) = match new_data {
             Some(new_data) => {
                 let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
                 let predicted = self.predict_for(&df)?;
@@ -475,19 +474,7 @@ impl OLSResult {
             }
         };
 
-        validate_no_existing_column(&source, "predicted")?;
-
-        // `with_column`の唯一の失敗条件（`ShapeMismatch`、追加する列の長さが
-        // DataFrameの高さと食い違う場合）はここでは理論上到達不能。
-        // `new_data`指定時: `predicted`は`predict_for`が`source`自身から抽出した
-        // `x_columns`と同じ観測数`n`から計算するため、`predicted.len() == source.height()`。
-        // `None`時: `fitted_values`と`training_data`はどちらも同じ`fit()`呼び出しで
-        // 同じ`n`から作られたペア（`ols_estimator_to_result`／この関数の
-        // `training_data = Some(df)`代入）であり、以降どちらも独立に変更されない。
-        source
-            .with_column(Column::new("predicted".into(), predicted))
-            .expect("predicted.len() matches source.height() by construction");
-        Ok(PyDataFrame(source))
+        append_predicted_column(source, "predicted", predicted)
     }
 
     /// White test for heteroskedasticity.
@@ -645,8 +632,7 @@ impl OLSResult {
             )
         })?;
 
-        let x_names = x_column_names(&self.param_names, self.has_intercept, 0);
-        let x_columns = extract_f64_columns(df, x_names)?;
+        let x_columns = extract_model_x_columns(df, &self.param_names, self.has_intercept, 0)?;
         let time_order = extract_time_order_ranks(df, &time)?;
         let result = breusch_godfrey_test(
             &x_columns,

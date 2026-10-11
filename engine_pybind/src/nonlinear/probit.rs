@@ -23,7 +23,7 @@ use engine::nonlinear::common::{
     CovType as EngineCovType, MleFitOptions, SolverType as EngineSolverType,
 };
 use engine::nonlinear::probit::{ProbitEstimator, ProbitInput};
-use polars::prelude::{Column, DataFrame};
+use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
@@ -31,14 +31,15 @@ use super::common::{
     MarginalEffectsResult, mat_to_nested_vec, mle_error_to_pyerr, parse_cov_type,
     parse_marginal_effects_at, parse_solver_type, resolve_mle_tol_default,
 };
+use crate::shared::augment::append_predicted_column;
 use crate::shared::column_extraction::{
-    extract_dataframe, extract_f64_column, extract_f64_columns, x_column_names,
+    extract_dataframe, extract_f64_column, extract_f64_columns, extract_model_x_columns,
 };
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
     extract_strict_float, extract_strict_int, extract_strict_opt_column, extract_strict_text,
 };
-use crate::shared::validation::{validate_common_roles, validate_no_existing_column};
+use crate::shared::validation::validate_common_roles;
 
 /// Estimation options for Probit.
 ///
@@ -306,8 +307,7 @@ impl ProbitResult {
     /// （`x`列の抽出→`predict_new_data`呼び出し）。
     fn predict_for(&self, df: &DataFrame) -> PyResult<Vec<f64>> {
         let has_intercept = self.estimator.input().has_intercept();
-        let x_names = x_column_names(&self.param_names, has_intercept, 0);
-        let x_columns = extract_f64_columns(df, x_names)?;
+        let x_columns = extract_model_x_columns(df, &self.param_names, has_intercept, 0)?;
 
         Ok(self.estimator.predict_new_data(&x_columns))
     }
@@ -346,7 +346,7 @@ impl ProbitResult {
     ///   `ValidationError` (would otherwise silently overwrite it).
     #[pyo3(signature = (new_data=None))]
     fn augment(&self, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<PyDataFrame> {
-        let (mut source, probability) = match new_data {
+        let (source, probability) = match new_data {
             Some(new_data) => {
                 let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
                 let probability = self.predict_for(&df)?;
@@ -355,14 +355,7 @@ impl ProbitResult {
             None => (self.training_data.clone(), self.estimator.predict()),
         };
 
-        validate_no_existing_column(&source, "predicted_probability")?;
-
-        // `with_column`の唯一の失敗条件（`ShapeMismatch`）はここでは理論上到達不能
-        // （`LogitResult::augment()`と同じ理由）。
-        source
-            .with_column(Column::new("predicted_probability".into(), probability))
-            .expect("probability.len() matches source.height() by construction");
-        Ok(PyDataFrame(source))
+        append_predicted_column(source, "predicted_probability", probability)
     }
 
     /// 2x2 classification table as `[[row0], [row1]]`, where row/column index 0 is the

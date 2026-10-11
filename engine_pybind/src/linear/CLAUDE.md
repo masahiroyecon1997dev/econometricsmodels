@@ -43,8 +43,9 @@ engineが計算し、`statistic`引数（`StatisticVersion`、大文字小文字
 `WLSResult`はこの経路がなく常に`DataFrame`）として保持し、`new_data=None`時にそれへ予測値の列を
 付加して返す設計にした。polarsの列は内部で参照カウント方式のため、`DataFrame`を`clone()`しても
 実際のデータはコピーされない（Arrowゼロコピー方針、CLAUDE.md 2章と整合）。列名衝突
-（ソースデータに既に`"predicted"`列がある場合）は`validation.rs`の
-`validate_no_existing_column`で`ValidationError`にする（黙って上書きしない）。詳細な設計判断は
+（ソースデータに既に`"predicted"`列がある場合）は`shared/augment.rs`の
+`append_predicted_column`（OLS/WLS/Logit/Probit/Tobit共通。内部で`validate_no_existing_column`を呼ぶ）で
+`ValidationError`にする（黙って上書きしない）。詳細な設計判断は
 `docs/spec/ols-spec.md`「augment()」参照。
 
 ## バリデーションの責務分担（`engine`と重複させない）

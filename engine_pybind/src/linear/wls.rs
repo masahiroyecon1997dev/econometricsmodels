@@ -16,21 +16,20 @@
 //! 説明・非公開関数のdocコメント等）は日本語のまま。
 
 use engine::linear::wls::WlsEstimator;
-use polars::prelude::{Column, DataFrame};
+use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
 use super::common::{least_squares_error_to_pyerr, mat_to_vec, parse_cov_type};
+use crate::shared::augment::append_predicted_column;
 use crate::shared::column_extraction::{
-    extract_dataframe, extract_f64_column, extract_f64_columns, x_column_names,
+    extract_dataframe, extract_f64_column, extract_f64_columns, extract_model_x_columns,
 };
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
     extract_strict_float, extract_strict_opt_column, extract_strict_opt_int, extract_strict_text,
 };
-use crate::shared::validation::{
-    RoleValue, validate_common_roles, validate_no_duplicate_roles, validate_no_existing_column,
-};
+use crate::shared::validation::{RoleValue, validate_common_roles, validate_no_duplicate_roles};
 
 /// Estimation options for WLS.
 ///
@@ -276,8 +275,7 @@ impl WLSResult {
     /// （`x`列の抽出→`predict_new_data`呼び出し、`OLSResult`と同じ設計）。
     fn predict_for(&self, df: &DataFrame) -> PyResult<Vec<f64>> {
         let has_intercept = self.has_intercept;
-        let x_names = x_column_names(&self.param_names, has_intercept, 0);
-        let x_columns = extract_f64_columns(df, x_names)?;
+        let x_columns = extract_model_x_columns(df, &self.param_names, has_intercept, 0)?;
 
         Ok(engine::linear::ols::predict_new_data(
             &self.params,
@@ -329,7 +327,7 @@ impl WLSResult {
     ///   `ValidationError` (would otherwise silently overwrite it).
     #[pyo3(signature = (new_data=None))]
     fn augment(&self, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<PyDataFrame> {
-        let (mut source, predicted) = match new_data {
+        let (source, predicted) = match new_data {
             Some(new_data) => {
                 let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
                 let predicted = self.predict_for(&df)?;
@@ -338,16 +336,7 @@ impl WLSResult {
             None => (self.training_data.clone(), self.fitted_values.clone()),
         };
 
-        validate_no_existing_column(&source, "predicted")?;
-
-        // `with_column`の唯一の失敗条件（`ShapeMismatch`）はここでは理論上到達不能
-        // （`OLSResult::augment()`と同じ理由: `new_data`指定時は`source`自身から
-        // 抽出した列と同じ観測数から`predicted`を計算し、`None`時は`fitted_values`と
-        // `training_data`が同じ`fit()`呼び出しの同じ`n`に由来するペアのため）。
-        source
-            .with_column(Column::new("predicted".into(), predicted))
-            .expect("predicted.len() matches source.height() by construction");
-        Ok(PyDataFrame(source))
+        append_predicted_column(source, "predicted", predicted)
     }
 }
 

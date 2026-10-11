@@ -31,7 +31,7 @@ use engine::nonlinear::common::{
 use engine::nonlinear::tobit::{
     CensoringFitCategory, CensoringFitCheck, MarginalEffectsTarget, TobitEstimator, TobitInput,
 };
-use polars::prelude::{Column, DataFrame};
+use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
@@ -39,8 +39,9 @@ use super::common::{
     MarginalEffectsResult, mle_error_to_pyerr, parse_cov_type, parse_marginal_effects_at,
     parse_solver_type, resolve_mle_tol_default,
 };
+use crate::shared::augment::append_predicted_column;
 use crate::shared::column_extraction::{
-    extract_dataframe, extract_f64_column, extract_f64_columns, x_column_names,
+    extract_dataframe, extract_f64_column, extract_f64_columns, extract_model_x_columns,
 };
 use crate::shared::errors::ValidationError;
 use crate::shared::option_repr::PyRepr;
@@ -48,7 +49,7 @@ use crate::shared::option_values::{
     extract_strict_float, extract_strict_int, extract_strict_opt_column, extract_strict_opt_float,
     extract_strict_text,
 };
-use crate::shared::validation::{validate_common_roles, validate_no_existing_column};
+use crate::shared::validation::validate_common_roles;
 
 /// Estimation options for Tobit.
 ///
@@ -354,8 +355,7 @@ impl TobitResult {
     /// 除いた部分（モジュールdocコメント参照）。
     fn predict_for(&self, target: MarginalEffectsTarget, df: &DataFrame) -> PyResult<Vec<f64>> {
         let has_intercept = self.estimator.input().has_intercept();
-        let x_names = x_column_names(&self.param_names, has_intercept, 1);
-        let x_columns = extract_f64_columns(df, x_names)?;
+        let x_columns = extract_model_x_columns(df, &self.param_names, has_intercept, 1)?;
 
         Ok(self.estimator.predict_new_data(target, &x_columns))
     }
@@ -416,7 +416,7 @@ impl TobitResult {
         let target_lower = target.to_lowercase();
         let target_enum = parse_marginal_effects_target(&target_lower)?;
 
-        let (mut source, predicted) = match new_data {
+        let (source, predicted) = match new_data {
             Some(new_data) => {
                 let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
                 let predicted = self.predict_for(target_enum, &df)?;
@@ -429,14 +429,7 @@ impl TobitResult {
         };
 
         let column_name = format!("predicted_{target_lower}");
-        validate_no_existing_column(&source, &column_name)?;
-
-        // `with_column`の唯一の失敗条件（`ShapeMismatch`）はここでは理論上到達不能
-        // （`LogitResult::augment()`と同じ理由）。
-        source
-            .with_column(Column::new(column_name.into(), predicted))
-            .expect("predicted.len() matches source.height() by construction");
-        Ok(PyDataFrame(source))
+        append_predicted_column(source, &column_name, predicted)
     }
 
     /// Marginal effects (`dy/dx`) with delta-method standard errors.

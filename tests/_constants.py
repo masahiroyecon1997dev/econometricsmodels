@@ -7,6 +7,7 @@
 - `DATA_DIR`: 固定済み合成データセットCSV（`tests/fixtures/benchmarks/data/`）
   の置き場所（旧`_helpers.py`）。
 - `MROZ_X`: Wooldridge mrozデータセットの説明変数リスト（旧`_helpers.py`）。
+- `APPLE_X`/`APPLE_CLUSTER`: Wooldridge appleデータセットの説明変数・クラスター列。
 - `MARGEFF_AT`: `marginal_effects(at=...)`で検証する`at`の全パターン
   （旧`_assertions.py`、`check_margeff`が使う）。
 """
@@ -18,5 +19,10 @@ from pathlib import Path
 DATA_DIR = Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "data"
 
 MROZ_X = ["nwifeinc", "educ", "exper", "expersq", "age", "kidslt6", "kidsge6"]
+
+# Wooldridge appleデータセット（`ecolbs > 0`を2値`y`にしたLogit/Probit、州でクラスター）の
+# 説明変数・クラスター列（`benchmark/common/constants.py`と同じ値）。
+APPLE_X = ["ecoprc", "regprc", "faminc", "hhsize", "educ", "age", "reglbs"]
+APPLE_CLUSTER = "state"
 
 MARGEFF_AT = ["overall", "mean", "median"]

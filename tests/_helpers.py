@@ -271,3 +271,62 @@ def wooldridge_loader() -> Callable[[str], pl.DataFrame]:
 def load_wooldridge_dataset(name: str) -> pl.DataFrame:
     """指定したWooldridgeデータセット1件をpolars DataFrameとしてロードする。"""
     return wooldridge_loader()(name)
+
+
+def load_apple_adoption_dataset() -> pl.DataFrame:
+    """Wooldridge `apple`に`ecolbs > 0`の2値`y`を足したDataFrameをロードする。
+
+    `wooldridge_loader`と同じ理由でCSVとして固定せず都度ロードする。
+    """
+    pytest.importorskip("wooldridge")
+    from benchmark.common.load_wooldridge import load_apple_adoption
+
+    return load_apple_adoption()
+
+
+def heavily_censored_tobit_dataset() -> pl.DataFrame:
+    """打ち切りが重い（60観測中51観測＝85%が0で左打ち切り）Tobit用の合成データ。
+
+    外部の乱数に依存しない線形合同法で作る。Rust側
+    （`engine/src/nonlinear/tobit.rs`の`heavily_censored_input`）と同じ手順・同じ値で、
+    `solver="lbfgs"`・`max_iter=1`の打ち切り点で`SingularHessian`になる挙動を
+    両側で同じ入力に対して固定するために使う。潜在変数は
+    `y* = -1.8 + x1 + 0.5*x2 + e`（`x1`・`x2`・`e`は12個の一様乱数の和-6で近似した
+    正規乱数）。`g`は4グループのクラスター列。
+    """
+    mask = (1 << 64) - 1
+    state = 167
+
+    def unit() -> float:
+        nonlocal state
+        state = (state * 6364136223846793005 + 1442695040888963407) & mask
+        return (state >> 11) / float(1 << 53)
+
+    def normal() -> float:
+        return sum(unit() for _ in range(12)) - 6.0
+
+    n = 60
+    x1 = [normal() for _ in range(n)]
+    x2 = [normal() for _ in range(n)]
+    e = [normal() for _ in range(n)]
+    y = [max(-1.8 + a + 0.5 * b + d, 0.0) for a, b, d in zip(x1, x2, e)]
+    # Rust側（`heavily_censored_input`）と同じ値になっていることの確認。
+    assert sum(v == 0.0 for v in y) == 51
+    return pl.DataFrame(
+        {"y": y, "x1": x1, "x2": x2, "g": [str(i % 4) for i in range(n)]}
+    )
+
+
+def single_overlap_binary_dataset(overlap: float) -> pl.DataFrame:
+    """完全分離データに`y=1`の観測を1つ足して、分離を壊す（または壊しかける）データ。
+
+    `x`は`±0.01〜±1.00`の0.01刻み（`x>0`なら`y=1`の完全分離）で、`y=1`の観測を1つ
+    `x=-0.01-overlap`に足す。`y=0`で最も`x=0`に近い観測（`x=-0.01`）より左に`y=1`が
+    1つあるため、`overlap>0`ならちょうど1観測が分離を壊し、有限のMLEが存在する。
+    Rust側（`engine/src/nonlinear/separation.rs`の`single_overlap_data`）と同じデータ。
+    説明変数は`x1`1列（`include_intercept=True`）。
+    """
+    grid = [0.01 * i for i in range(1, 101)]
+    x = [-g for g in grid] + grid + [-0.01 - overlap]
+    y = [0.0] * 100 + [1.0] * 101
+    return pl.DataFrame({"y": y, "x1": x})

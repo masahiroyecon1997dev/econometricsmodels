@@ -34,6 +34,17 @@ def load(dataset_name: str) -> pl.DataFrame:
     return pl.from_pandas(pandas_df)
 
 
+def load_apple_adoption() -> pl.DataFrame:
+    """Wooldridge `apple`に、`ecolbs > 0`の2値`y`（0.0/1.0）を足して返す。
+
+    Logit/Probitの多クラスター実データケース用（州`state`でG=49）。Wooldridgeデータは
+    CSVとして固定しないため、`y`はロードの都度ここで導出する。
+    """
+    return load("apple").with_columns(
+        (pl.col("ecolbs") > 0).cast(pl.Float64).alias("y")
+    )
+
+
 if __name__ == "__main__":
     import sys
 

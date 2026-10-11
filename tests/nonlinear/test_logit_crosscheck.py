@@ -30,8 +30,12 @@ from pathlib import Path
 import polars as pl
 import pytest
 from _assertions import check_margeff
-from _constants import DATA_DIR, MROZ_X
-from _helpers import load_wooldridge_dataset, with_cluster_groups
+from _constants import APPLE_CLUSTER, APPLE_X, DATA_DIR, MROZ_X
+from _helpers import (
+    load_apple_adoption_dataset,
+    load_wooldridge_dataset,
+    with_cluster_groups,
+)
 from _tolerances import TOLERANCES
 from econometricsmodels import Logit, LogitOptions
 
@@ -166,6 +170,16 @@ def test_cluster_imbalanced_matches_r_glm(fixtures):
 
     ref = fixtures["synthetic"]["baseline"]["cluster_imbalanced"]["r"]
     _check_result(res, ref, "cluster_imbalanced")
+
+
+def test_apple_cluster_matches_r_glm(fixtures):
+    """多クラスターの実データ（Wooldridge apple、`ecolbs > 0`、州でG=49）。"""
+    df = load_apple_adoption_dataset()
+    options = LogitOptions(cov_type="cluster", cluster=APPLE_CLUSTER)
+    res = Logit(df, y="y", x=APPLE_X, options=options).fit()
+
+    ref = fixtures["wooldridge"]["apple"]["cluster"]["r"]
+    _check_result(res, ref, "apple/cluster")
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)

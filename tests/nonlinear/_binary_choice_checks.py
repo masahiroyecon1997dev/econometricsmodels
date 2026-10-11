@@ -25,7 +25,7 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import _error_messages as msgs
@@ -34,12 +34,14 @@ import polars as pl
 import pytest
 from _assertions import assert_close, assert_dict_close, check_margeff
 from _assertions import rename_intercept as _rename
-from _constants import DATA_DIR, MROZ_X
+from _constants import APPLE_CLUSTER, APPLE_X, DATA_DIR, MROZ_X
 from _error_messages import escaped
 from _helpers import (
+    load_apple_adoption_dataset,
     load_wooldridge_dataset,
     multi_dummy_separation_dataset,
     separated_dataset,
+    single_overlap_binary_dataset,
     small_sample_separation_dataset,
     strongly_collinear_binary_dataset,
     with_cluster_groups,
@@ -1133,6 +1135,58 @@ def check_multiple_dummy_separation_raises_computation_error(
     assert res.converged is False
 
 
+# 1観測だけが分離を壊すデータで、分離判定の境界の両側。実測した境界はこのデータで重なり
+# 1e-5〜3e-5の間（標準化後の幾何に依存し、データごとに変わる）。境界そのものではなく、
+# 明らかに両側にある値を固定する（`docs/spec/logit-spec.md`3.2節）。
+OVERLAP_ABOVE_BOUNDARY = [1e-3, 1e-4]
+OVERLAP_BELOW_BOUNDARY = [1e-7, 1e-9, 1e-12]
+
+
+def check_single_overlap_above_boundary_is_not_flagged_as_separation(
+    estimator_cls, options_cls, solver, overlap, min_slope
+):
+    """1観測だけが分離を壊し、重なりが十分大きければ分離とみなさない。有限のMLEが存在する
+    ので推定は収束し、係数は大きいが有限、標準誤差も有限になる。`min_slope`は`x1`の係数の
+    下限（実測: Logitは重なり`1e-3`で約307・`1e-4`で約531、Probitは約179・約280）。"""
+    df = single_overlap_binary_dataset(overlap)
+    res = estimator_cls(
+        df,
+        y="y",
+        x=["x1"],
+        options=options_cls(solver=solver, max_iter=200),
+    ).fit()
+    assert res.converged is True
+    assert math.isfinite(res.params["x1"])
+    assert res.params["x1"] > min_slope
+    for name, se in res.std_errors.items():
+        assert math.isfinite(se), f"std_errors[{name}]={se} is not finite"
+
+
+def check_single_overlap_below_boundary_is_flagged_as_separation(
+    estimator_cls, options_cls, solver, overlap
+):
+    """重なりが小さすぎて`1e-6`未満のマージンしか持たないとき、分離として扱う
+    （`ComputationError`）。`raise_on_non_convergence=False`なら`converged=False`の
+    結果を返す。"""
+    df = single_overlap_binary_dataset(overlap)
+    with pytest.raises(ComputationError, match="separated"):
+        estimator_cls(
+            df,
+            y="y",
+            x=["x1"],
+            options=options_cls(solver=solver, max_iter=200),
+        ).fit()
+    res = estimator_cls(
+        df,
+        y="y",
+        x=["x1"],
+        options=options_cls(
+            solver=solver, max_iter=200, raise_on_non_convergence=False
+        ),
+    ).fit()
+    assert res.converged is False
+
+
 def check_separation_without_intercept_raises_computation_error(
     estimator_cls, options_cls
 ):
@@ -1218,6 +1272,7 @@ class BinaryChoiceReferenceConfig:
     rtol: float
     atol: float
     rtol_solver: float
+    rtol_solver_vs_newton: float
     near_separation_tol: float
 
     def load_fixtures(self) -> dict:
@@ -1323,41 +1378,117 @@ def check_matches_statsmodels(
     )
 
 
-def check_cluster_matches_statsmodels(
-    config: BinaryChoiceReferenceConfig, fixtures
-) -> None:
-    """クラスターロバストSE（baselineシナリオ、行番号%10の疑似グループ）。"""
+def _baseline_cluster_fit(
+    config: BinaryChoiceReferenceConfig, kind: str, **option_kwargs
+):
     df = pl.read_csv(config.dataset_path("baseline"))
-    df = with_cluster_groups(df, 10)
-    options = config.options_cls(cov_type="cluster", cluster="cluster_group")
-    res = config.estimator_cls(
+    if kind == "cluster":
+        df = with_cluster_groups(df, 10)
+    else:
+        df = df.with_columns(
+            pl.Series("cluster_group", imbalanced_cluster_groups(df.height))
+        )
+    options = config.options_cls(
+        cov_type="cluster", cluster="cluster_group", **option_kwargs
+    )
+    return config.estimator_cls(
         df, y="y", x=["x1", "x2", "x3"], options=options
     ).fit()
 
-    ref = fixtures["baseline"]["cluster"]
-    config.assert_dict_close(res.params, ref["coef"], "cluster/coef")
-    config.assert_dict_close(res.std_errors, ref["se"], "cluster/se")
+
+def check_cluster_matches_statsmodels(
+    config: BinaryChoiceReferenceConfig, fixtures
+) -> None:
+    """クラスターロバストSE（baselineシナリオ、行番号%10の疑似グループ）。
+    係数・標準誤差に加え、z値・p値・信頼区間・適合度統計量・限界効果まで全統計量を比べる。"""
+    res = _baseline_cluster_fit(config, "cluster")
+    check_result(config, res, fixtures["baseline"]["cluster"], "cluster")
 
 
 def check_cluster_imbalanced_matches_statsmodels(
     config: BinaryChoiceReferenceConfig, fixtures
 ) -> None:
-    """不均衡クラスタ（サイズ[2, 3, 5, 10, 30, 50]のタイル）。"""
-    df = pl.read_csv(config.dataset_path("baseline"))
-    groups = imbalanced_cluster_groups(df.height)
-    df = df.with_columns(pl.Series("cluster_group", groups))
-    options = config.options_cls(cov_type="cluster", cluster="cluster_group")
-    res = config.estimator_cls(
-        df, y="y", x=["x1", "x2", "x3"], options=options
+    """不均衡クラスタ（サイズ[2, 3, 5, 10, 30, 50]のタイル）。全統計量を比べる。"""
+    res = _baseline_cluster_fit(config, "cluster_imbalanced")
+    check_result(
+        config,
+        res,
+        fixtures["baseline"]["cluster_imbalanced"],
+        "cluster_imbalanced",
+    )
+
+
+def _apple_cluster_fit(config: BinaryChoiceReferenceConfig, **option_kwargs):
+    options = config.options_cls(
+        cov_type="cluster", cluster=APPLE_CLUSTER, **option_kwargs
+    )
+    return config.estimator_cls(
+        load_apple_adoption_dataset(), y="y", x=APPLE_X, options=options
     ).fit()
 
-    ref = fixtures["baseline"]["cluster_imbalanced"]
-    config.assert_dict_close(
-        res.params, ref["coef"], "cluster_imbalanced/coef"
-    )
-    config.assert_dict_close(
-        res.std_errors, ref["se"], "cluster_imbalanced/se"
-    )
+
+def check_apple_cluster_matches_statsmodels(
+    config: BinaryChoiceReferenceConfig, fixtures
+) -> None:
+    """多クラスターの実データ（Wooldridge apple、`ecolbs > 0`の2値`y`、州でG=49、
+    グループサイズ1〜66）。mrozの`city`（G=2）はG<=qのため成功パスを持てず、実データの
+    クラスターロバストSEはここで全統計量を照合する。"""
+    res = _apple_cluster_fit(config)
+    check_result(config, res, fixtures["apple"]["cluster"], "apple/cluster")
+
+
+# `solver="bfgs"/"lbfgs"`と掛け合わせる代表ケース。newtonは全シナリオ×cov_typeを
+# 掛け合わせて照合済みのため、solverの違いが効きやすい点（最も悪条件の
+# near_separation、cov_typeごとに別経路のopg/hc0、クラスター）に絞る。
+SOLVER_COMBINATION_CASES = [
+    "near_separation/classical",
+    "near_separation/opg",
+    "near_separation/hc0",
+    "cluster",
+    "cluster_imbalanced",
+    "apple_cluster",
+]
+
+# appleはlbfgsが既定のmax_iter=35では収束しない（実測で約95〜96回要する）ため、
+# solverの組み合わせテストでは上限を十分大きくする。
+_APPLE_MAX_ITER = 200
+
+
+def check_solver_combination_matches_newton_reference(
+    config: BinaryChoiceReferenceConfig, fixtures, case: str, solver: str
+) -> None:
+    """`solver="bfgs"/"lbfgs"`を、near_separation・cluster・appleと掛け合わせた
+    組み合わせで、statsmodelsのnewtonで生成した同じシナリオ・cov_typeの全統計量と比べる。
+
+    参照にstatsmodels自身のbfgs/lbfgsを使わないのは、その収束許容が緩く
+    near_separationで本実装と~1e-3差が出る（statsmodels側の誤差）ため。newtonは
+    機械精度で収束するので、収束先（MLE）が同じかを`rtol_solver_vs_newton`で厳密に
+    確認できる。
+    """
+    tight = replace(config, rtol=config.rtol_solver_vs_newton)
+    label = f"{case}/{solver}"
+    if case.startswith("near_separation/"):
+        cov_type = case.split("/")[1]
+        df = pl.read_csv(config.dataset_path("near_separation"))
+        options = config.options_cls(
+            cov_type=cov_type, solver=solver, tol=config.near_separation_tol
+        )
+        res = config.estimator_cls(
+            df,
+            y="y",
+            x=[c for c in df.columns if c != "y"],
+            options=options,
+        ).fit()
+        ref = fixtures["near_separation"][cov_type]
+    elif case == "apple_cluster":
+        res = _apple_cluster_fit(
+            config, solver=solver, max_iter=_APPLE_MAX_ITER
+        )
+        ref = fixtures["apple"]["cluster"]
+    else:
+        res = _baseline_cluster_fit(config, case, solver=solver)
+        ref = fixtures["baseline"][case]
+    check_result(tight, res, ref, label)
 
 
 def check_mroz_cluster_cov_type_raises_validation_error(

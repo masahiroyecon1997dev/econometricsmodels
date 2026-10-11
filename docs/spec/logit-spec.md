@@ -136,6 +136,19 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
     「成功」は0。`k=10/20/30`（`n=2000`、完全分離と少数ラベル反転）225件で正解と全件一致、LP失敗0。
     3つのダミーが同時に準完全分離するデータは3 solverとも200/200件で検出。`tol`が`1e-8`〜`1e-3`でも
     結果は変わらない。
+  - **境界の実測（1観測だけが分離を壊すデータ）**: 完全分離データ（`x`が`±0.01〜±1.00`、
+    `n=201`）に`y=1`の観測を1つ、分離を壊す側へ`overlap`だけずらして足し、`overlap`を変えて
+    判定を測った（`tests/_helpers.py`の`single_overlap_binary_dataset`）。`overlap=1e-4`以上は
+    分離とみなさず収束する（係数は`x1`で500前後と大きいが有限のMLE、`1e-3`で約300、`1e-4`で約530）。
+    `overlap=1e-5`以下は分離として`ComputationError`（`raise_on_non_convergence=false`なら
+    `converged=false`、係数は760〜990に達している）。境界はこのデータで`overlap`が`1e-5`〜`3e-5`
+    の間にあり、標準化後の行の幾何とマージン閾値`1e-6`で決まるためデータごとに変わる。このため
+    境界そのものは固定せず、明らかに両側にある値（`overlap=1e-3,1e-4`は分離とみなさない、
+    `1e-7,1e-9,1e-12`は分離とみなす）を、Rust（`separation.rs`の
+    `single_overlapping_observation_is_flagged_only_when_the_overlap_is_tiny`）とPython
+    （Logit/Probit × `newton`/`bfgs`/`lbfgs`）で固定している。有限のMLEが存在するのに分離と
+    扱われる領域（`overlap≲1e-5`、係数が1000近くまで大きくなる）が存在するが、そこでは係数・
+    標準誤差が数値的に意味を持たないため、「分離として止める」側に倒す設計。
   - **性能**: 分離検査は`n=1,000,000`・`k=6`（切片込み）で約68ms（Newtonの`fit()`約620msの約11%）、
     `n=100,000`で約4ms（約8%）。行列を数パス走査するだけでメモリ帯域が律速。LPが走る準完全分離
     データでも`fit()`全体は2〜3秒。
@@ -326,7 +339,22 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   `near_separation`（準完全分離、係数を大きくしてp≈0/1が支配的になる状況）・`complete_separation`・
   `quasi_complete_separation`を追加した11シナリオ（数値比較8、`ComputationError`確認のみ3:
   `complete_separation`・`quasi_complete_separation`・`perfect_multicollinearity`）。
-  実データは`mroz`（Wooldridge、労働参加モデル）。
+  実データは`mroz`（Wooldridge、労働参加モデル）と、多クラスターの`apple`（Wooldridge、
+  `y = ecolbs > 0`、州で`G=49`・グループサイズ1〜66、説明変数は`ecoprc`・`regprc`・`faminc`・`hhsize`・
+  `educ`・`age`・`reglbs`）。`apple`は`mroz`の`city`（`G=2`）が`G<=q`で成功パスを持てないため、
+  実データのクラスターロバストSEの数値照合を担う（statsmodelsとRの両方で全統計量。
+  Wooldridgeデータは固定CSVにしないため、`y`はロードの都度導出する）。
+  `bfgs`/`lbfgs`は`apple`で既定の`max_iter=35`では収束せず約95〜96反復を要する（`newton`は4〜5、
+  `bfgs`は8〜11）ため、`solver`の組み合わせテストでは`max_iter=200`にする。
+- **`solver`の組み合わせ**: `newton`は全シナリオ×`cov_type`で数値照合する。`bfgs`/`lbfgs`は
+  baseline×classicalに加え、代表的な組み合わせ（`near_separation`×classical/opg/hc0、cluster・
+  cluster_imbalanced、`apple`のcluster）を、statsmodelsの`newton`で生成した同じシナリオ・
+  `cov_type`の全統計量に対して`rtol=2e-5`で照合する（`tests/_tolerances.py`の
+  `logit_reference.rtol_solver_vs_newton`、実測最大~3.6e-6）。statsmodels自身の`bfgs`/`lbfgs`を
+  参照にしないのは、`near_separation`で収束許容が緩く本実装とLogitで最大~7e-3（Probitは~8e-4）乖離する
+  （statsmodels側の誤差）ため。
+- **クラスターのstatsmodels照合は全統計量**（baselineの均等・不均衡疑似グループとも、係数・SE・
+  z値・p値・信頼区間・適合度統計量・限界効果）。
 - クラスターロバストSEの境界ケース（クラスター数G=2ちょうど）は、OLSの`wald_f_test`と異なり
   Logitの`cluster_cov_params`がq×q部分行列の反転を要求しないため、説明変数の数を絞る必要がない。
 
@@ -339,8 +367,10 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 - **分離検出の既知の限界**: (1)`bfgs`/`lbfgs`は分離データで分離検出に至る前にソルバー自身が
   `NonConvergence`や`SingularHessian`で失敗することがある（いずれも`ComputationError`で、無警告の
   「成功」にはならない）。(2)LPが数値的に完了しない異常（実測のデータでは発生していない）は
-  `ComputationFailed`または`converged=false`になる。(3)判定は`1e-6`未満のマージンしか持たない
-  「ほぼ分離」を分離と見なさない（有限のMLEは存在するので推定は進み、標準誤差が大きくなる）。
+  `ComputationFailed`または`converged=false`になる。(3)判定は単位長にそろえた行の余弦で、`1e-6`程度の許容を持って「全制約を満たす非自明な方向」の有無を
+  見る。そのため重なりが十分小さい「ほぼ分離」は有限のMLEが存在しても分離と扱われ、境界は重なりの
+  大きさ（1観測だけが分離を壊すデータで`1e-5`前後、3.2節の実測）と標準化後の行の幾何で決まる。
+  境界の外側（重なりが大きい）では分離とみなさず推定が進み、標準誤差が大きくなる。
   (4)制約を作業集合に足す上限（2000本）を超える病的な入力は数値的な異常として扱う。
 - **完全分離でNonConvergenceになるシナリオ（`complete_separation`）・準完全分離（`quasi_complete_separation`）**:
   `benchmark/nonlinear/datasets.py`にシナリオとして追加済み（`perfect_multicollinearity`と同型、

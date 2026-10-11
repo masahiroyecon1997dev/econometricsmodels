@@ -143,15 +143,24 @@ TOLERANCES: dict[str, dict[str, float]] = {
     # rtol_solver: solver="bfgs"/"lbfgs"がnewtonと異なる最適化経路で収束するため、
     # 収束後の係数・標準誤差が既定のRTOLより1桁以上大きくばらつく（実測最大相対誤差
     # ~7.7e-5）。実測値に対し約13倍のマージンを持たせた。
+    # rtol_solver_vs_newton: solver="bfgs"/"lbfgs"の組み合わせ（near_separation・cluster・
+    # apple）を、statsmodelsのnewtonで生成した同じシナリオ・cov_typeの全統計量と比べる
+    # 許容誤差。statsmodels自身のbfgs/lbfgsは収束許容が緩く、near_separationでは本実装と
+    # 最大~7e-3（Logit。Probitは~8e-4）差が出る（statsmodels側の誤差）ため、newtonを参照にして締めた。実測最大相対誤差
+    # ~3.6e-6（Probit near_separation/opg/lbfgs、p値。係数・SEは~2e-6以下）。
+    # bfgs/lbfgsはline searchで止まる反復解法でOS・BLAS差の揺れがあり得るため、
+    # 実測の約5.5倍（2e-5）のマージンを置く。
     "logit_reference": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": 1e-9,
         "rtol_solver": 1e-3,
+        "rtol_solver_vs_newton": 2e-5,
     },
     "probit_reference": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": 1e-9,
         "rtol_solver": 1e-3,
+        "rtol_solver_vs_newton": 2e-5,
     },
     # Tobit の主リファレンスは R `AER::tobit`（`survival::survreg` エンジン）。
     # survreg は (β, log σ) を独自の Newton-Raphson で最適化するが、本実装との
@@ -186,6 +195,19 @@ TOLERANCES: dict[str, dict[str, float]] = {
         # ズレと考えられる（詳細は`engine/src/nonlinear/CLAUDE.md`「FaerLbfgs」
         # セクション参照）。
         "rtol_solver": 2e-7,
+        # solver="bfgs"/"lbfgs"を打ち切り重い・区間打ち切りシナリオ、opg/hc0/hc1、
+        # クラスターと掛け合わせた組み合わせ（`_tobit_checks.SOLVER_COMBINATION_CASES`）。
+        # 実測最大相対誤差5e-7（heavy_censoring/lbfgs、値の小さい予測値）。反復解法の
+        # OS・BLAS差の揺れに備え約4倍（2e-6）のマージンを置く。
+        "rtol_solver_combination": 2e-6,
+        # 実データmroz（hours生スケール）× solver="bfgs"/"lbfgs"。tolを1e-10まで締めても
+        # bfgs/lbfgsはline searchの停滞で打ち切られ、newtonとの差が縮まない（実測最大
+        # 相対誤差1e-4、lbfgs×hc0の標準誤差系。classicalは2e-6〜1e-5）。生スケールの
+        # yと大きなスケール差の説明変数が絡む精度の下限。点推定（係数・σ・対数尤度・
+        # 予測値・限界効果の点推定）は実測最大1e-6、推論（SE・z・p値・信頼区間・Wald・
+        # 限界効果のSE系）は実測最大1e-4で、それぞれ約3倍のマージンを置く。
+        "rtol_mroz_solver_point": 3e-6,
+        "rtol_mroz_solver_inference": 3e-4,
     },
     # Tobit の交差検証は R `censReg`（`maxLik` エンジン）。survreg とは最適化実装が
     # 完全に独立（`nonlinear-common.md` 8章）。censReg 側の maxLik 収束を
@@ -210,6 +232,11 @@ TOLERANCES: dict[str, dict[str, float]] = {
         # crosscheckの実測は変わっていないため1e-7のまま、tobit_referenceのみ
         # 2e-7に緩めた）。
         "rtol_solver": 1e-7,
+        # solver×打ち切り重い・区間打ち切り・opg/hc0/hc1・クラスターの組み合わせ
+        # （`tobit_reference`の同名エントリ参照）。実測最大相対誤差5e-7の約4倍。
+        # mroz×solverはcensRegがmrozでsurvregと~1e-4乖離し見分けられないため
+        # 掛け合わせない。
+        "rtol_solver_combination": 2e-6,
     },
     # --- 独立実装（R）とのクロスチェック ---
     # classical/HC0-3/clusterは機械精度一致（実測1e-14程度）のためRTOL_STRICTを
@@ -312,6 +339,15 @@ TOLERANCES: dict[str, dict[str, float]] = {
         # 収まらずatolが必要になる実測最大絶対誤差~1.8e-8（係数・限界効果とも
         # mroz/opg/kidsge6）の約5.7倍のマージンとして1e-7を置く。
         "atol_p_value": 1e-7,
+        # apple（実データ、州でG=49）のみ。Rのglm(probit)は係数が~1.2e-7ずれ、
+        # 観測情報行列の手計算で増幅されて SE・z値・信頼区間・限界効果が実測最大
+        # 相対誤差~2.1e-6、p値が絶対~2.5e-7ずれる（statsmodelsのnewtonと本実装は
+        # ~1e-9で一致するためR側の精度限界）。係数自体は~1.2e-7で基本のrtol=1e-6のまま、
+        # SE・z値・信頼区間・限界効果に`rtol_apple`を適用する。相対誤差に約2.4倍、
+        # p値に約4倍のマージンを置く。Logitのappleは基本のrtol=1e-6・atol_p_value=1e-7で通る
+        # （実測~1.6e-9）。
+        "rtol_apple": 5e-6,
+        "atol_p_value_apple": 1e-6,
     },
     # FEのRクロスチェックはfixest。classical/hc1/hc2/hc3/cluster/dkとも、fixestの
     # `ssc()`既定に本実装の小標本補正・推論の自由度を合わせてあるため、1-way/

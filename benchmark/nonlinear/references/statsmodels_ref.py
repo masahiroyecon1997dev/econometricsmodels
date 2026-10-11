@@ -57,22 +57,24 @@ get_robustcov_results`は`HC1`指定時に`getattr(self, "cov_HC1", None)`でモ
         --cov-type hc0
 
 `--cluster`にはデータセットに既にある列名を指定する。合成データにはグループ列が
-無いため、クラスターのフィクスチャは`fixtures/generate_logit_fixtures.py`/
-`generate_probit_fixtures.py`の`_run_cluster_case`が担う。mrozの`city`はG=2で
-本実装が`InsufficientClustersForInference`として弾くため、クラスターの
-フィクスチャにしていない。
+無いため、疑似グループは`run(groups=...)`で渡す（`fixtures/generate_logit_fixtures.py`/
+`generate_probit_fixtures.py`が使う）。mrozの`city`はG=2で本実装が
+`InsufficientClustersForInference`として弾くため、クラスターのフィクスチャにしていない。
+多クラスターの実データは`--dataset apple`（`ecolbs > 0`の2値`y`、州でG=49）を使う。
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 import numpy as np
 
 from benchmark.common import load_frozen_dataset as _load_synthetic
 from benchmark.common.load_wooldridge import load as _load_wooldridge
+from benchmark.common.load_wooldridge import load_apple_adoption
 from benchmark.common.reference.normalize import normalize_names
 
 MARGEFF_AT = ["overall", "mean", "median"]
@@ -105,7 +107,13 @@ def run(
     confidence_level: float = 0.95,
     model: str = "logit",
     method: str = "newton",
+    groups: Sequence | None = None,
 ) -> dict:
+    """1ケース分のstatsmodels結果を返す。
+
+    `groups`は合成データにグループ列が無いときの疑似グループラベル（データ行数と同じ長さ）。
+    渡すと列`_group`として付与し、`cluster`が未指定ならそれでクラスターする。
+    """
     import statsmodels.formula.api as smf
 
     if model not in _SMF_MODEL_FN:
@@ -118,11 +126,20 @@ def run(
     if dataset_source == "synthetic":
         df, true_beta = _load_synthetic(model, dataset)
         pandas_df = df.to_pandas()
+        if groups is not None:
+            pandas_df["_group"] = list(groups)
+            cluster = cluster or "_group"
         if formula is None:
             x_cols = [c for c in df.columns if c != "y"]
             formula = "y ~ " + " + ".join(x_cols)
     elif dataset_source == "wooldridge":
-        pandas_df = _load_wooldridge(dataset).to_pandas()
+        # appleは`ecolbs > 0`の2値`y`を導出してから使う（Wooldridgeの生データには無い）。
+        frame = (
+            load_apple_adoption()
+            if dataset == "apple"
+            else _load_wooldridge(dataset)
+        )
+        pandas_df = frame.to_pandas()
         if formula is None:
             raise ValueError(
                 "wooldridgeデータセットの場合は--formulaの指定が必須です"

@@ -445,6 +445,36 @@ mod tests {
         assert!(!is_separated(&design(&[&d, &x]), &response(&y)));
     }
 
+    /// 完全分離データ（`x`が`±0.01〜±1.00`の0.01刻み、`x>0`なら`y=1`）に、`y=1`の観測を1つ
+    /// `x=-0.01-overlap`に足す。`y=0`で最も`x=0`に近い観測（`x=-0.01`）より左に`y=1`が
+    /// 1つあるため、`overlap>0`ならちょうど1観測が分離を壊す（有限のMLEが存在する）。
+    fn single_overlap_data(overlap: f64) -> (Mat<f64>, Mat<f64>) {
+        let grid: Vec<f64> = (1..=100).map(|i| 0.01 * f64::from(i)).collect();
+        let mut x: Vec<f64> = grid.iter().map(|g| -g).collect();
+        x.extend(grid.iter().copied());
+        x.push(-0.01 - overlap);
+        let mut y = vec![0.0; 100];
+        y.extend(vec![1.0; 101]);
+        (design(&[&x]), response(&y))
+    }
+
+    /// 1観測だけが分離を壊す境界の両側。重なりが大きければ分離とみなさず（有限のMLEが
+    /// 存在し推定が進む）、`1e-6`未満のマージンしか持たないほど小さければ分離とみなす
+    /// （`SEPARATION_MARGIN_THRESHOLD`）。実測した境界はこのデータで重なり`1e-5`〜`3e-5`の間
+    /// （標準化後の幾何に依存するためデータごとに変わる）。境界そのものではなく、
+    /// 明らかに両側にある値を固定する。
+    #[test]
+    fn single_overlapping_observation_is_flagged_only_when_the_overlap_is_tiny() {
+        for overlap in [1e-1, 1e-2, 1e-3, 1e-4] {
+            let (x, y) = single_overlap_data(overlap);
+            assert!(!is_separated(&x, &y), "overlap={overlap}");
+        }
+        for overlap in [1e-7, 1e-9, 1e-12] {
+            let (x, y) = single_overlap_data(overlap);
+            assert!(is_separated(&x, &y), "overlap={overlap}");
+        }
+    }
+
     /// 分離方向が複数ある（錐の次元が2以上）準完全分離。d0・d2が1なら必ず`y=1`、d1が1なら
     /// 必ず`y=0`。かつては情報行列の最小固有ベクトルを使う事前スクリーニングが、錐の外を向いて
     /// 取りこぼすことがあった（lbfgsで実測）。常にLPで確かめるのでこの構成でも検出できる。

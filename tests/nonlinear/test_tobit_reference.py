@@ -92,6 +92,39 @@ def test_method_matches_aer_tobit(fixtures, solver):
     _checks.check_result(res, ref, f"solver/{solver}", **_method_tolerances())
 
 
+def _combination_tolerances(scenario: str) -> dict:
+    if scenario == "mroz":
+        rtol_point = _TOL["rtol_mroz_solver_point"]
+        rtol_inference = _TOL["rtol_mroz_solver_inference"]
+    else:
+        rtol_point = rtol_inference = _TOL["rtol_solver_combination"]
+    return {
+        "rtol_point": rtol_point,
+        "rtol_inference": rtol_inference,
+        "rtol_conf_int": rtol_inference,
+        "atol": _TOL["atol"],
+    }
+
+
+@pytest.mark.parametrize("solver", _checks.METHODS)
+@pytest.mark.parametrize(
+    ("scenario", "cov_key"),
+    _checks.SOLVER_COMBINATION_CASES
+    + _checks.SOLVER_COMBINATION_CASES_REAL_DATA,
+)
+def test_solver_combination_matches_aer_tobit(
+    fixtures, scenario, cov_key, solver
+):
+    ref = fixtures[scenario][cov_key]
+    res = _checks.build_fit(scenario, cov_key, ref, solver=solver)
+    _checks.check_result(
+        res,
+        ref,
+        f"{scenario}/{cov_key}/{solver}",
+        **_combination_tolerances(scenario),
+    )
+
+
 @pytest.mark.parametrize("cov_type", _checks.COV_TYPES)
 def test_no_intercept_matches_aer_tobit(fixtures, cov_type):
     ref = fixtures["no_intercept"][cov_type]

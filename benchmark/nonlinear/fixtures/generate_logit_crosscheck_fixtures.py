@@ -32,6 +32,8 @@ from pathlib import Path
 import polars as pl
 
 from benchmark.common import (
+    APPLE_CLUSTER,
+    APPLE_FORMULA,
     BENCHMARKS_DIR,
     MROZ_FORMULA,
     imbalanced_cluster_groups,
@@ -39,6 +41,7 @@ from benchmark.common import (
     run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
+from benchmark.common.load_wooldridge import load_apple_adoption
 from benchmark.nonlinear.references.r import run_glm_r
 
 NUMERIC_SCENARIOS = [
@@ -130,12 +133,30 @@ def build_wooldridge_fixtures(tmpdir: Path) -> dict:
     return fixtures
 
 
+def build_apple_fixtures(tmpdir: Path) -> dict:
+    """多クラスターの実データ（apple、`ecolbs > 0`、州でG=49）。"""
+    csv_path = _write_csv(load_apple_adoption(), tmpdir, "apple")
+    return {
+        "cluster": {
+            "r": run_glm_r(
+                csv_path,
+                APPLE_FORMULA,
+                "cluster",
+                cluster=APPLE_CLUSTER,
+            )
+        }
+    }
+
+
 def build_fixtures() -> dict:
     with tempfile.TemporaryDirectory() as tmp:
         tmpdir = Path(tmp)
         fixtures = {
             "synthetic": build_synthetic_fixtures(tmpdir),
-            "wooldridge": {"mroz": build_wooldridge_fixtures(tmpdir)},
+            "wooldridge": {
+                "mroz": build_wooldridge_fixtures(tmpdir),
+                "apple": build_apple_fixtures(tmpdir),
+            },
         }
 
     r_version = subprocess.run(
@@ -179,6 +200,7 @@ def build_fixtures() -> dict:
             "clusterは合成データ（baselineシナリオ、均等疑似グループ・不均衡"
             "グループ）を含む。G<=q（傾き係数の数）のケース（旧cluster_g2・mroz/city）は"
             "ValidationErrorになるため成功パスフィクスチャを持たない。"
+            "実データのクラスターはapple（`ecolbs > 0`、州でG=49）が担う。"
             "パラメータ名は全ソースで切片を'const'に正規化済み。"
         ),
     }

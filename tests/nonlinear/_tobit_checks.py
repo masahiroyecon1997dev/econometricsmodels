@@ -47,6 +47,24 @@ MARGEFF_AT = ["overall", "mean", "median"]
 CLUSTER_COV_KEYS = ["cluster", "cluster_imbalanced", "cluster_g2"]
 METHODS = ["bfgs", "lbfgs"]
 
+# `solver="bfgs"/"lbfgs"` と掛け合わせる代表ケース `(シナリオ, cov_key)`。リファレンス
+# （survreg / censReg）は solver 非依存で、newton 用の全シナリオ × cov_type フィクスチャを
+# そのまま使う（solver 別フィクスチャは不要）。最も打ち切りが重い・区間打ち切りの
+# シナリオ、cov_type ごとに別経路の opg / hc0 / hc1、クラスター（均等・不均衡）、
+# 実データ（mroz）に絞る。
+SOLVER_COMBINATION_CASES = [
+    ("heavy_censoring", "classical"),
+    ("heavy_censoring", "opg"),
+    ("heavy_censoring", "hc0"),
+    ("interval_censoring", "hc1"),
+    (BASELINE_SCENARIO, "cluster"),
+    (BASELINE_SCENARIO, "cluster_imbalanced"),
+]
+# 実データ（mroz、hours 生スケール）は主リファレンスのみで掛け合わせる。交差検証の
+# censReg は mroz で survreg と ~1e-4 乖離する（`tobit_crosscheck.rtol_mroz`）ため、
+# solver 差を見分けられない。
+SOLVER_COMBINATION_CASES_REAL_DATA = [("mroz", "classical"), ("mroz", "hc0")]
+
 # フィクスチャの cluster cov_type キー → 疑似グループ列の作り方。
 # `_tobit_fixtures.py` の `build()` / `_cluster_case()` と対応させる。
 _CLUSTER_GROUP_BUILDERS = {
@@ -66,8 +84,9 @@ def _load_dataset(scenario: str) -> tuple[pl.DataFrame, str]:
     return pl.read_csv(DATA_DIR / f"tobit_{scenario}.csv"), "y"
 
 
-def build_fit(scenario: str, cov_key: str, ref: dict):
-    """`(scenario, cov_key)` のケースを engine で推定する。
+def build_fit(scenario: str, cov_key: str, ref: dict, **extra_options):
+    """`(scenario, cov_key)` のケースを engine で推定する（`extra_options` は
+    `TobitOptions` へそのまま足す。solver の組み合わせケースが `solver=` を渡す）。
 
     `cov_key` が `cluster*` のときはフィクスチャ生成側と同じ疑似グループ列を付けて
     `cov_type="cluster"` で推定する。それ以外は `cov_key` をそのまま `cov_type` に使う。
@@ -84,6 +103,7 @@ def build_fit(scenario: str, cov_key: str, ref: dict):
     else:
         opts["cov_type"] = cov_key
 
+    opts.update(extra_options)
     return Tobit(df, y=y, x=ref["x_cols"], options=TobitOptions(**opts)).fit()
 
 

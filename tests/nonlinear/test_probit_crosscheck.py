@@ -41,8 +41,12 @@ from pathlib import Path
 import polars as pl
 import pytest
 from _assertions import check_margeff
-from _constants import DATA_DIR, MROZ_X
-from _helpers import load_wooldridge_dataset, with_cluster_groups
+from _constants import APPLE_CLUSTER, APPLE_X, DATA_DIR, MROZ_X
+from _helpers import (
+    load_apple_adoption_dataset,
+    load_wooldridge_dataset,
+    with_cluster_groups,
+)
 from _tolerances import TOLERANCES
 from econometricsmodels import Probit, ProbitOptions
 
@@ -69,6 +73,14 @@ RTOL_CONF_INT = TOLERANCES["probit_crosscheck"]["rtol_conf_int"]
 # p値は標準正規分布CDFの裾で係数・zのわずかな数値差が増幅されるため、係数・SE本体
 # より緩いATOLを置く（rtolで収まらない実測最大絶対誤差~1.8e-8、mroz/opg/kidsge6）。
 ATOL_P_VALUE = TOLERANCES["probit_crosscheck"]["atol_p_value"]
+
+# apple（実データ、州クラスター）のみ、Rのglm(probit)の精度限界で係数が~1.2e-7ずれ、
+# 観測情報行列の手計算（`run_glm_crosscheck.R`）で増幅されるため、SE・z値・信頼区間・
+# 限界効果が~2e-6、p値が絶対~2.5e-7ずれる。statsmodelsのnewtonと本実装は~1e-9で
+# 一致する（`probit.json`のapple/cluster）ため、R側の精度限界として個別の許容誤差を使う
+# （`tests/_tolerances.py`の`probit_crosscheck`参照）。
+RTOL_APPLE = TOLERANCES["probit_crosscheck"]["rtol_apple"]
+ATOL_P_VALUE_APPLE = TOLERANCES["probit_crosscheck"]["atol_p_value_apple"]
 
 COV_TYPES = ["classical", "opg", "hc0", "hc1"]
 
@@ -109,14 +121,29 @@ def _assert_dict_close(
         )
 
 
-def _check_result(res, ref: dict, label: str) -> None:
-    _assert_dict_close(res.params, ref["coef"], f"{label}/coef")
-    _assert_dict_close(res.std_errors, ref["se"], f"{label}/se")
+def _check_result(
+    res,
+    ref: dict,
+    label: str,
+    *,
+    rtol: float = RTOL,
+    rtol_conf_int: float = RTOL_CONF_INT,
+    atol_p_value: float = ATOL_P_VALUE,
+    rtol_coef: float = RTOL,
+) -> None:
     _assert_dict_close(
-        res.test_stats, ref["test_stats"], f"{label}/test_stats"
+        res.params, ref["coef"], f"{label}/coef", rtol=rtol_coef
+    )
+    _assert_dict_close(res.std_errors, ref["se"], f"{label}/se", rtol=rtol)
+    _assert_dict_close(
+        res.test_stats, ref["test_stats"], f"{label}/test_stats", rtol=rtol
     )
     _assert_dict_close(
-        res.p_values, ref["p_values"], f"{label}/p_values", atol=ATOL_P_VALUE
+        res.p_values,
+        ref["p_values"],
+        f"{label}/p_values",
+        atol=atol_p_value,
+        rtol=rtol,
     )
     for name, (ref_lower, ref_upper) in ref["conf_int"].items():
         our_lower, our_upper = res.conf_int[name]
@@ -124,13 +151,13 @@ def _check_result(res, ref: dict, label: str) -> None:
             our_lower,
             ref_lower,
             f"{label}/conf_lower/{name}",
-            rtol=RTOL_CONF_INT,
+            rtol=rtol_conf_int,
         )
         _assert_close(
             our_upper,
             ref_upper,
             f"{label}/conf_upper/{name}",
-            rtol=RTOL_CONF_INT,
+            rtol=rtol_conf_int,
         )
     for field in (
         "log_likelihood",
@@ -141,16 +168,18 @@ def _check_result(res, ref: dict, label: str) -> None:
         "lr_p_value",
         "pseudo_r_squared",
     ):
-        _assert_close(getattr(res, field), ref[field], f"{label}/{field}")
+        _assert_close(
+            getattr(res, field), ref[field], f"{label}/{field}", rtol=rtol
+        )
     if "margeff" in ref:
         check_margeff(
             res,
             ref["margeff"],
             label,
-            rtol=RTOL,
+            rtol=rtol,
             atol=ATOL,
-            rtol_conf_int=RTOL_CONF_INT,
-            atol_p_value=ATOL_P_VALUE,
+            rtol_conf_int=rtol_conf_int,
+            atol_p_value=atol_p_value,
         )
 
 
@@ -187,6 +216,24 @@ def test_cluster_imbalanced_matches_r_glm(fixtures):
 
     ref = fixtures["synthetic"]["baseline"]["cluster_imbalanced"]["r"]
     _check_result(res, ref, "cluster_imbalanced")
+
+
+def test_apple_cluster_matches_r_glm(fixtures):
+    """多クラスターの実データ（Wooldridge apple、`ecolbs > 0`、州でG=49）。"""
+    df = load_apple_adoption_dataset()
+    options = ProbitOptions(cov_type="cluster", cluster=APPLE_CLUSTER)
+    res = Probit(df, y="y", x=APPLE_X, options=options).fit()
+
+    ref = fixtures["wooldridge"]["apple"]["cluster"]["r"]
+    _check_result(
+        res,
+        ref,
+        "apple/cluster",
+        rtol=RTOL_APPLE,
+        rtol_coef=RTOL,
+        rtol_conf_int=RTOL_APPLE,
+        atol_p_value=ATOL_P_VALUE_APPLE,
+    )
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)

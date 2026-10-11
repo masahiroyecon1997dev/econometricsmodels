@@ -74,6 +74,9 @@ CONFIG = _checks.BinaryChoiceReferenceConfig(
     # solver="bfgs"/"lbfgs"はnewtonと異なる最適化経路で収束するため、既定の
     # RTOLより緩めた許容誤差を使う（tests/_tolerances.py参照）。
     rtol_solver=TOLERANCES["logit_reference"]["rtol_solver"],
+    rtol_solver_vs_newton=TOLERANCES["logit_reference"][
+        "rtol_solver_vs_newton"
+    ],
     near_separation_tol=1e-8,
 )
 
@@ -103,6 +106,18 @@ def test_cluster_imbalanced_matches_statsmodels(fixtures):
 @pytest.mark.parametrize("solver", ["bfgs", "lbfgs"])
 def test_solver_matches_statsmodels(fixtures, solver):
     _checks.check_solver_matches_statsmodels(CONFIG, fixtures, solver)
+
+
+@pytest.mark.parametrize("solver", ["bfgs", "lbfgs"])
+@pytest.mark.parametrize("case", _checks.SOLVER_COMBINATION_CASES)
+def test_solver_combination_matches_statsmodels_newton(fixtures, case, solver):
+    _checks.check_solver_combination_matches_newton_reference(
+        CONFIG, fixtures, case, solver
+    )
+
+
+def test_apple_cluster_matches_statsmodels(fixtures):
+    _checks.check_apple_cluster_matches_statsmodels(CONFIG, fixtures)
 
 
 @pytest.mark.parametrize("cov_type", CONFIG.cov_types)

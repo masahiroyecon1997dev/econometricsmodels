@@ -94,6 +94,33 @@ def test_method_matches_censreg(fixtures, solver):
     _checks.check_result(res, ref, f"solver/{solver}", **_method_tolerances())
 
 
+def _combination_tolerances() -> dict:
+    rtol = _TOL["rtol_solver_combination"]
+    return {
+        "rtol_point": rtol,
+        "rtol_inference": rtol,
+        "rtol_conf_int": rtol,
+        "atol": _TOL["atol"],
+    }
+
+
+@pytest.mark.parametrize("solver", _checks.METHODS)
+@pytest.mark.parametrize(
+    ("scenario", "cov_key"), _checks.SOLVER_COMBINATION_CASES
+)
+def test_solver_combination_matches_censreg(
+    fixtures, scenario, cov_key, solver
+):
+    ref = fixtures[scenario][cov_key]
+    res = _checks.build_fit(scenario, cov_key, ref, solver=solver)
+    _checks.check_result(
+        res,
+        ref,
+        f"{scenario}/{cov_key}/{solver}",
+        **_combination_tolerances(),
+    )
+
+
 @pytest.mark.parametrize("cov_type", _checks.COV_TYPES)
 def test_no_intercept_matches_censreg(fixtures, cov_type):
     ref = fixtures["no_intercept"][cov_type]

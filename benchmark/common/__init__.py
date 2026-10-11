@@ -17,6 +17,9 @@ re-export する（サブモジュール構成が変わっても利用側の imp
 from __future__ import annotations
 
 from benchmark.common.constants import (
+    APPLE_CLUSTER,
+    APPLE_FORMULA,
+    APPLE_X,
     MROZ_FORMULA,
     SYNTHETIC_FORMULA,
     TOBIT_MROZ_FORMULA,
@@ -46,6 +49,9 @@ from benchmark.common.driver import run_fixture_cli
 from benchmark.common.reference.extract import extract_coef_se
 
 __all__ = [
+    "APPLE_CLUSTER",
+    "APPLE_FORMULA",
+    "APPLE_X",
     "BENCHMARKS_DIR",
     "DATA_DIR",
     "MROZ_FORMULA",

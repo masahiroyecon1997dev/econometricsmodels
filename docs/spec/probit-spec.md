@@ -117,7 +117,12 @@ in-sample限定のまま。`augment(new_data=None)`もLogitと完全に同一の
   （`tests/_tolerances.py`の`probit_crosscheck`）。Wooldridge実データ（`mroz`）の
   クラスターロバストSE（`cluster="city"`、G=2）は`G<=q`でクラスターロバスト共分散が退化し
   `ValidationError`になるため成功パスのフィクスチャを持たず、許容誤差も設けない
-  （`test_probit_validation.py`でエラーを確認）。
+  （`test_probit_validation.py`でエラーを確認）。実データのクラスターロバストSEは、Logitと同じ
+  `apple`（州、`G=49`）が担う。Rクロスチェックの`apple`のみ、Rの`glm(probit)`が係数を~1.2e-7ずらし
+  観測情報行列の手計算で増幅されるため、SE・z値・信頼区間・限界効果が~2.1e-6・p値が絶対~2.5e-7
+  乖離する（statsmodelsの`newton`と本実装は~1e-9で一致）。このケースだけ個別の許容誤差
+  （`probit_crosscheck.rtol_apple=5e-6`・`atol_p_value_apple=1e-6`）を使う。`solver`の組み合わせは
+  Logitと同じ方針（[`logit-spec.md`](./logit-spec.md)3.8節。`probit_reference.rtol_solver_vs_newton=2e-5`）。
 - **`cov_type="hc1"`/`"opg"`の既知の欠落はLogitと同様**（statsmodelsのdiscrete modelでの非対応、
   対処もRを主リファレンスにする点まで同じ、[`logit-spec.md`](./logit-spec.md)3.8節参照）。
 - **Rの`glm()`既定共分散が非正準リンクで「期待情報行列」を返す問題（重要）**: Rの`glm()`の

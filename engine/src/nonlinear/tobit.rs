@@ -3614,6 +3614,118 @@ mod tests {
         assert!(!estimator.converged());
     }
 
+    /// 打ち切りが重い（60観測中51観測＝85%が0で左打ち切り）合成データ。外部の乱数に依存しない
+    /// 線形合同法で作る（`tests/_helpers.py`の`heavily_censored_tobit_dataset`と同じ手順・
+    /// 同じ値。Python側の同名テストと同じ入力で挙動を固定する）。潜在変数は
+    /// `y* = -1.8 + x1 + 0.5·x2 + e`（`x1`・`x2`・`e`は12個の一様乱数の和−6で近似した正規乱数）。
+    fn heavily_censored_input() -> TobitInput {
+        let mut state: u64 = 167;
+        let mut unit = move || {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((state >> 11) as f64) / ((1u64 << 53) as f64)
+        };
+        let mut normal = move || (0..12).map(|_| unit()).sum::<f64>() - 6.0;
+        let n = 60;
+        // 引数の評価順（`x1`→`x2`→`e`）がPython側と同じになるよう、1つのクロージャを
+        // 3回続けて回す。
+        let x1: Vec<f64> = (0..n).map(|_| normal()).collect();
+        let x2: Vec<f64> = (0..n).map(|_| normal()).collect();
+        let e: Vec<f64> = (0..n).map(|_| normal()).collect();
+        let y: Vec<f64> = (0..n)
+            .map(|i| (-1.8 + x1[i] + 0.5 * x2[i] + e[i]).max(0.0))
+            .collect();
+        assert_eq!(y.iter().filter(|&&v| v == 0.0).count(), 51);
+        TobitInput::from_columns(
+            &y,
+            &[x1, x2],
+            vec!["x1".to_string(), "x2".to_string()],
+            true,
+            "y".to_string(),
+            Some(0.0),
+            None,
+        )
+        .unwrap()
+    }
+
+    fn heavily_censored_groups() -> Vec<String> {
+        (0..60).map(|i| (i % 4).to_string()).collect()
+    }
+
+    fn truncated_fit_options(solver: SolverType, cov_type: CovType) -> MleFitOptions {
+        MleFitOptions {
+            solver,
+            max_iter: 1,
+            tol: 1e-12,
+            raise_on_non_convergence: false,
+            cov_type,
+            confidence_level: 0.95,
+        }
+    }
+
+    fn all_cov_types_for_heavily_censored_input() -> Vec<CovType> {
+        let groups = heavily_censored_groups();
+        vec![
+            CovType::Classical,
+            CovType::Opg,
+            CovType::Hc0,
+            CovType::Hc1,
+            CovType::Cluster {
+                groups: Some(GroupCodes::from_labels_without_keys(&groups)),
+            },
+        ]
+    }
+
+    /// `max_iter=1`・`raise_on_non_convergence=false`で打ち切ったとき、`Lbfgs`の1手目は
+    /// 勾配方向に進み、重く打ち切られたデータでは`(β, log σ)`尤度が凹でない領域
+    /// （費用関数のHessianが負の固有値を持つ）に着地することがある。Hessianの逆行列を使う
+    /// `Classical`/`Hc0`/`Hc1`/`Cluster`はそこで`SingularHessian`を返す（`neg_hessian_inverse`が
+    /// 不定なHessianを弾く。負の分散を返さないための設計で、`raise_on_non_convergence`とは
+    /// 独立）。このデータでの打ち切り点の費用関数Hessianの最小固有値は約-0.6
+    /// （数値微分で確認。`Newton`・`Bfgs`の打ち切り点は全て正で最小約76）。Hessianを使わない`Opg`は成功し、未収束の結果を返す。
+    #[test]
+    fn fit_with_lbfgs_returns_singular_hessian_at_truncated_point_in_non_concave_region() {
+        for cov_type in all_cov_types_for_heavily_censored_input() {
+            let result = TobitEstimator::fit(
+                heavily_censored_input(),
+                truncated_fit_options(SolverType::Lbfgs, cov_type.clone()),
+            );
+            match cov_type {
+                CovType::Opg => {
+                    let estimator = result.expect("opg does not invert the Hessian");
+                    assert!(!estimator.converged());
+                }
+                _ => assert!(
+                    matches!(result, Err(MleError::SingularHessian)),
+                    "cov_type={cov_type:?}, result={result:?}"
+                ),
+            }
+        }
+    }
+
+    /// 同じデータ・同じ`max_iter=1`でも、`Newton`（LM減衰付きで凹な領域に留まる）と`Bfgs`
+    /// （初期点のHessianが正定値ならその厳密な逆行列から出発するため1手目がNewtonステップと
+    /// 一致する）は、全`cov_type`で未収束の結果を返す。`Lbfgs`だけが上のテストの
+    /// `SingularHessian`になることを対比として固定する。
+    #[test]
+    fn fit_with_newton_and_bfgs_returns_unconverged_result_for_every_cov_type_at_truncated_point() {
+        for solver in [SolverType::Newton, SolverType::Bfgs] {
+            for cov_type in all_cov_types_for_heavily_censored_input() {
+                let result = TobitEstimator::fit(
+                    heavily_censored_input(),
+                    truncated_fit_options(solver, cov_type.clone()),
+                );
+                let estimator = result
+                    .unwrap_or_else(|e| panic!("solver={solver:?}, cov_type={cov_type:?}: {e:?}"));
+                assert!(
+                    !estimator.converged(),
+                    "solver={solver:?}, cov_type={cov_type:?}"
+                );
+            }
+        }
+    }
+
     /// OPG/HC0/HC1/クラスターSEの独立再計算検証・組み合わせテストで共通に使う多変量
     /// データセット（切片+説明変数2つ+`s`で`k+1=4`次元、実際の左打ち切りを含む）。
     /// `censored_regression_input`（説明変数1つ）を拡張したもの。情報行列の等式が

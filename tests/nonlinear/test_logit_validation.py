@@ -238,6 +238,26 @@ def test_multiple_dummy_separation_raises_computation_error(solver):
     )
 
 
+@pytest.mark.parametrize("overlap", _checks.OVERLAP_ABOVE_BOUNDARY)
+@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
+def test_single_overlap_above_boundary_is_not_flagged_as_separation(
+    solver, overlap
+):
+    _checks.check_single_overlap_above_boundary_is_not_flagged_as_separation(
+        Logit, LogitOptions, solver, overlap, min_slope=250.0
+    )
+
+
+@pytest.mark.parametrize("overlap", _checks.OVERLAP_BELOW_BOUNDARY)
+@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
+def test_single_overlap_below_boundary_is_flagged_as_separation(
+    solver, overlap
+):
+    _checks.check_single_overlap_below_boundary_is_flagged_as_separation(
+        Logit, LogitOptions, solver, overlap
+    )
+
+
 def test_separation_without_intercept_raises_computation_error():
     _checks.check_separation_without_intercept_raises_computation_error(
         Logit, LogitOptions

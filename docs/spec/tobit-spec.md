@@ -151,6 +151,20 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
     反復継続し、`max_iter`到達で`NonConvergence`。勾配の評価誤差の床が本当に`tol`を上回る
     ほど大きな標本向けの安全網で、上記の再現データでは現状発火しない。真の特異性（完全な
     多重共線性等、`λ=0`のHessianが可逆でない）は従来どおり`SingularHessian`。
+  - **未収束の打ち切り点でのSingularHessian（`raise_on_non_convergence=false`）**: `fit`は
+    未収束でも最終（打ち切り）点のHessianから`cov_params`を計算する。`(β, log σ)`尤度は凹でない
+    領域を持つため、打ち切り点がそこに着地するとHessianの逆行列を使う`cov_type`
+    （classical/hc0/hc1/cluster）は`SingularHessian`（`ComputationError`）を返す。負の分散を
+    返さないための設計で、`raise_on_non_convergence`とは独立。Hessianを使わない`opg`は成功する。
+    solverで結果が分かれる: `newton`はLM減衰で凹な領域に留まり、`bfgs`は初期点のHessianが
+    正定値ならその厳密な逆行列から出発して1手目が`newton`と一致するが、`lbfgs`は勾配方向の
+    1手目で凹でない領域に入りうる。実測（`max_iter=1`、打ち切り率85%・n=60の合成データ）では
+    `lbfgs`の打ち切り点の費用関数Hessianの最小固有値が約-0.6、`newton`/`bfgs`は全て正（最小約76）。
+    `max_iter`を増やすとこの失敗は出なくなる（n=200・打ち切り率84.5%の合成60データで、`max_iter=1`は
+    8件が`SingularHessian`、`max_iter=2〜10`は全件が未収束の結果を返した）。
+    Rust（`tobit.rs`の`fit_with_lbfgs_returns_singular_hessian_at_truncated_point_in_non_concave_region`）
+    とPython（`test_tobit.py`の`test_lbfgs_truncated_point_in_non_concave_region_raises_singular_hessian`）
+    で同じ入力に対して固定している。
   - **`bfgs`/`lbfgs`は`tol`を観測数`n`で正規化した基準を使う（実装済み）**:
     `newton`は絶対閾値のまま（既定`tol=1e-6`、Tobitでも反復回数は`n`によらずほぼ一定でこの
     影響をほぼ無償で吸収する）だが、`bfgs`/`lbfgs`は観測あたり平均勾配基準（既定`tol=1e-8`）を
@@ -316,6 +330,13 @@ Tobit固有の差分:
 - **実データ**: Wooldridge `mroz`の`hours`（生スケール、左打ち切り約43%、Example 17.2）。非クラスターの
   4 cov_type で数値照合する。`TOBIT_MROZ_FORMULA`は RHS 7変数で`G=2 <= q=7`のためクラスターケース
   （`city`列）は`InsufficientClustersForInference`（`ValidationError`）になり成功パスを持たない。
+- **`solver`の組み合わせ**: リファレンス（`survreg`/`censReg`）は`solver`非依存のため、`bfgs`/`lbfgs`は
+  newton用の全シナリオ×`cov_type`フィクスチャをそのまま使い、代表的な組み合わせ（`heavy_censoring`×
+  classical/opg/hc0、`interval_censoring`×hc1、cluster・cluster_imbalanced）を全統計量で照合する
+  （`rtol_solver_combination=2e-6`、実測最大~5e-7）。主リファレンスのみ`mroz`×classical/hc0も照合する
+  （点推定`rtol_mroz_solver_point=3e-6`・実測最大~1e-6、推論`rtol_mroz_solver_inference=3e-4`・実測最大~1e-4）。`tol`を1e-10まで締めても`bfgs`/`lbfgs`はline searchの
+  停滞で打ち切られ`newton`との差が縮まない（`lbfgs`×hc0のSE系が最大）ため、許容誤差で受ける。
+  交差検証は`censReg`が`mroz`で`survreg`と~1e-4乖離するため`mroz`×`solver`を掛け合わせない。
 - **フィクスチャ**（`tobit.json` / `tobit_crosscheck.json`）は`run_tobit_crosscheck.R`の`engine`
   引数（`survreg` / `censReg`）違いで構造が完全に同一のため、pytest本体は`_tobit_checks.py`に
   集約している。

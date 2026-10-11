@@ -33,7 +33,19 @@ use std::collections::HashMap;
 /// 構築は[`Self::from_labels`]/[`Self::from_labels_without_keys`]（ラベルの`String`列から）が
 /// 公開で、コードの参照・集計用の読み出し口は`engine`内部専用（`pub(crate)`）。パネルの
 /// `FeInput`/`ReInput`のentityと`TimeKeys`は、現状は`String`列で受け取り構築時にコード化する。
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// # 公開型としての約束事
+/// - **コードの行数は、渡す先のデータの行数`n`と一致させる。** 食い違うコードは、各`fit()`が
+///   クラスター数の検証（`validate_cluster_groups`）で`CommonError::ClusterDimensionMismatch`
+///   にする（集計には進まない）。
+/// - **キーの有無は構築方法で決まる。** `from_labels_without_keys`で作ったコードは`keys()`を
+///   呼べない（panicする）。`CovType::Cluster`等のクラスター用の`groups`はキー無しで渡されうるので、
+///   クラスターの検証・集計は`keys()`を使わない。`keys()`が要る処理（パネルのentity/time、
+///   固定効果のキー）は、`from_labels`/`from_labels_ordered`で作った自前のコードだけに使う。
+/// - **等価性（`==`）は`codes`と`counts`だけで判定し、キーの有無・内容は見ない。** キーは
+///   メタ情報で、同じ行ごとの割り当てなら`from_labels`と`from_labels_without_keys`のコードは
+///   等しい（`CovType`等の`PartialEq`もこれを引き継ぐ）。
+#[derive(Debug, Clone)]
 pub struct GroupCodes {
     /// 各行のグループコード（長さ`n`、値は`0..n_groups`）。
     codes: Vec<usize>,
@@ -45,6 +57,16 @@ pub struct GroupCodes {
     keys: Option<Vec<String>>,
 }
 
+impl PartialEq for GroupCodes {
+    /// `codes`と`counts`だけを比べる（キーの有無・内容は見ない。型のdoc参照）。`counts`は
+    /// `codes`から決まるが、同時に比べて不整合なコードを等しいとみなさない。
+    fn eq(&self, other: &Self) -> bool {
+        self.codes == other.codes && self.counts == other.counts
+    }
+}
+
+impl Eq for GroupCodes {}
+
 impl GroupCodes {
     /// 各行のラベル`labels`を辞書順の整数コードに変換する。ハッシュは`labels`全体に1回、
     /// ソートはユニークなキー（`n_groups`個）にだけ行う。
@@ -55,7 +77,7 @@ impl GroupCodes {
     /// [`Self::from_labels`]と同じコード・観測数・グループ内の行順で、グループのキー（`keys`）だけ
     /// 作らない。クラスターロバスト分散のように、検証（クラスター数）と集計（行インデックス）に
     /// コードと観測数しか使わない呼び出し向け（グループ数が多いときの`String`の確保を省く）。
-    /// [`Self::keys`]は呼べない。
+    /// `keys()`は呼べない（`engine`内部の読み出し口で、キー無しのコードに呼ぶとpanicする）。
     pub fn from_labels_without_keys(labels: &[String]) -> Self {
         Self::build(labels, |_, _| Ordering::Equal, false)
     }
@@ -136,6 +158,8 @@ impl GroupCodes {
     /// # Panics
     /// [`Self::from_labels_without_keys`]で作ったコードでは呼べない（キーを作っていない）。
     /// どのコンストラクタを使うかは呼び出し側が決める内部契約で、入力データには依らない。
+    /// クラスター用の`groups`は外部から渡されるためキー無しのことがある。クラスターの検証・
+    /// 集計ではこのメソッドを呼ばないこと（型のdoc参照）。
     pub(crate) fn keys(&self) -> &[String] {
         self.keys
             .as_deref()
@@ -226,6 +250,20 @@ mod tests {
             c.group_indices().iter().map(<[usize]>::to_vec).collect()
         };
         assert_eq!(rows(&keyless), rows(&keyed));
+    }
+
+    #[test]
+    fn group_codes_equality_ignores_keys_but_not_codes() {
+        let ids: Vec<String> = ["b", "a", "b", "c"].iter().map(|s| s.to_string()).collect();
+        let keyed = GroupCodes::from_labels(&ids);
+        let keyless = GroupCodes::from_labels_without_keys(&ids);
+        assert_eq!(keyed, keyless);
+        assert_eq!(keyless, keyed);
+
+        // 同じグループ数・観測数でも、行ごとの割り当てが違えば等しくない。
+        let other: Vec<String> = ["a", "a", "b", "c"].iter().map(|s| s.to_string()).collect();
+        assert_ne!(keyed, GroupCodes::from_labels(&other));
+        assert_ne!(keyless, GroupCodes::from_labels_without_keys(&other));
     }
 
     #[test]

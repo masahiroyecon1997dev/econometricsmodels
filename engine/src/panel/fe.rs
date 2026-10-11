@@ -651,7 +651,8 @@ pub enum FeCovType {
     /// Hc2よりさらに保守的なレバレッジ補正。
     Hc3,
     /// クラスターロバスト。`groups`が`None`なら`entity`引数の列を自動的に使う
-    /// （3.2節、`cluster`省略時のデフォルト挙動）。
+    /// （3.2節、`cluster`省略時のデフォルト挙動）。`Some`のコードの行数が`n`と食い違うと
+    /// `CommonError::ClusterDimensionMismatch`（`GroupCodes`のdoc参照）。
     Cluster { groups: Option<GroupCodes> },
     /// Driscoll-Kraay型パネルHAC（3.1節）。`bandwidth`が`None`なら
     /// `floor(4*(t/100)^(2/9))`（`t`はユニークな時点数）で自動計算する（モジュールdoc

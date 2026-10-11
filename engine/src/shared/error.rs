@@ -56,6 +56,13 @@ pub enum CommonError {
     #[error("cov_type='cluster' requires cluster identifiers to be provided")]
     MissingClusterColumn,
 
+    /// `cov_type="cluster"`のクラスターのグループ（整数コード）の行数が、データの行数`n`と
+    /// 一致しない。`engine_pybind`は同じ`DataFrame`から作るため起こらないが、`GroupCodes`を
+    /// 公開しているので、呼び出し側が別の長さのコードを渡しても誤った標準誤差を返さず
+    /// ここで弾く。
+    #[error("cluster identifiers have {groups_rows} rows but the data has {n} rows")]
+    ClusterDimensionMismatch { groups_rows: usize, n: usize },
+
     /// `cov_type="cluster"`のときのクラスター数が2未満。
     #[error("cov_type='cluster' requires at least 2 clusters, got {g}")]
     InsufficientClusters { g: usize },
@@ -111,6 +118,14 @@ mod tests {
             }
             .to_string(),
             "confidence_level must be in the range (0, 1): 1.5"
+        );
+        assert_eq!(
+            CommonError::ClusterDimensionMismatch {
+                groups_rows: 2,
+                n: 5
+            }
+            .to_string(),
+            "cluster identifiers have 2 rows but the data has 5 rows"
         );
         assert_eq!(
             CommonError::MissingClusterColumn.to_string(),

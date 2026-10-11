@@ -42,6 +42,7 @@ pub(crate) fn common_error_to_pyerr(err: CommonError) -> PyErr {
         | CommonError::NoRegressors { .. }
         | CommonError::InvalidConfidenceLevel { .. }
         | CommonError::MissingClusterColumn
+        | CommonError::ClusterDimensionMismatch { .. }
         | CommonError::InsufficientClusters { .. }
         | CommonError::InsufficientClustersForInference { .. } => {
             ValidationError::new_err(err.to_string())

@@ -716,27 +716,34 @@ mod tests {
         ));
     }
 
+    /// コードの行数が`n`と食い違う入力は、短くても長くても`Err`にする（releaseビルドでも）。
+    /// 短い場合に先頭の行だけで集計した標準誤差を静かに返さないことの確認を含む。
     #[test]
-    #[should_panic]
-    fn fit_panics_when_cluster_groups_length_does_not_match_nobs() {
-        // groups.len() != nはengine_pybind側の実装バグでしか起こり得ない内部契約違反のため、
-        // Errではなくdebug_assert!でパニックする（from_columns_panics_on_mismatched_names_arity
-        // と同じ性質）。
-        let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
-        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
-        let input = OlsInput::from_columns(
-            &y,
-            &x_columns,
-            vec!["x1".to_string()],
-            true,
-            "y".to_string(),
-        )
-        .unwrap();
+    fn fit_returns_cluster_dimension_mismatch_when_groups_length_differs_from_nobs() {
+        for groups_rows in [2usize, 7] {
+            let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
+            let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
+            let input = OlsInput::from_columns(
+                &y,
+                &x_columns,
+                vec!["x1".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap();
 
-        let groups = vec!["a".to_string(), "b".to_string()]; // n=5のはずが長さ2
-        let cov_type = CovType::Cluster {
-            groups: Some(GroupCodes::from_labels_without_keys(&groups)),
-        };
-        let _ = OlsEstimator::fit(input, cov_type, 0.95);
+            let labels: Vec<String> = (0..groups_rows).map(|i| format!("g{}", i % 3)).collect();
+            let cov_type = CovType::Cluster {
+                groups: Some(GroupCodes::from_labels_without_keys(&labels)),
+            };
+            assert_eq!(
+                OlsEstimator::fit(input, cov_type, 0.95).unwrap_err(),
+                LeastSquaresError::Common(CommonError::ClusterDimensionMismatch {
+                    groups_rows,
+                    n: 5
+                }),
+                "groups_rows={groups_rows}"
+            );
+        }
     }
 }

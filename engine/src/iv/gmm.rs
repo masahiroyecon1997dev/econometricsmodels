@@ -221,7 +221,8 @@ pub enum WeightType {
     Classical,
     /// 不均一分散頑健。
     Robust,
-    /// クラスター頑健。`groups`が`None`の場合は`CommonError::MissingClusterColumn`。
+    /// クラスター頑健。`groups`が`None`の場合は`CommonError::MissingClusterColumn`、コードの
+    /// 行数が`n`と食い違う場合は`CommonError::ClusterDimensionMismatch`。
     Cluster { groups: Option<GroupCodes> },
     /// Newey-West（Bartlettカーネル）によるHAC型。`lags=None`なら`two_sls.rs`と同じ
     /// 経験則で自動計算する。`time_order`は`IvInput`の行と対応する長さnの配列で、この値の昇順を
@@ -4021,6 +4022,65 @@ mod tests {
             "got {}, expected {}",
             estimator.wald_p_value(),
             expected_p
+        );
+    }
+
+    /// `OneStep`は`weight_type`を持たないため（`weight_cluster_codes`・`weight_group_indices`は
+    /// `None`）、`cov_type=Cluster`のグループは`validate_structural_cluster_count`だけで検証
+    /// され、`cov_type`から借りたコードで集計される。この経路が、点推定は`cov_type`に依らず、
+    /// 標準誤差はクラスター割り当てだけに依存し（ラベルの付け替えで変わらない）、
+    /// 欠落・長さ不一致のコードは`Err`になることを確認する。
+    #[test]
+    fn fit_with_one_step_gmm_uses_the_cov_type_cluster_groups_only() {
+        let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
+        let n = y.len();
+        let groups = labelled_groups(n, 5, "c");
+        let fit = |cov_type: CovType| {
+            let input = IvInput::from_columns(
+                &y,
+                &[],
+                vec![],
+                std::slice::from_ref(&x_endog),
+                vec!["endog1".to_string()],
+                &[z1.clone(), z2.clone()],
+                vec!["z1".to_string(), "z2".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap();
+            GmmEstimator::fit(input, GmmType::OneStep, true, cov_type, 0.95)
+        };
+        let cluster = |labels: &[String]| CovType::Cluster {
+            groups: Some(GroupCodes::from_labels_without_keys(labels)),
+        };
+
+        let classical = fit(CovType::Classical).unwrap();
+        let clustered = fit(cluster(&groups)).unwrap();
+        let relabelled_groups: Vec<String> = groups.iter().map(|g| format!("z{g}")).collect();
+        let relabelled = fit(cluster(&relabelled_groups)).unwrap();
+
+        for j in 0..clustered.params().nrows() {
+            // 点推定は`cov_type`に依存しない。
+            assert_eq!(
+                clustered.params().get(j, 0).to_bits(),
+                classical.params().get(j, 0).to_bits()
+            );
+            let se = *clustered.std_errors().get(j, 0);
+            assert_ne!(se.to_bits(), classical.std_errors().get(j, 0).to_bits());
+            // ラベルの付け替え（コードの順序は同じ）では標準誤差は変わらない。
+            assert!((se - *relabelled.std_errors().get(j, 0)).abs() < 1e-10 * se);
+        }
+
+        assert_eq!(
+            fit(CovType::Cluster { groups: None }).unwrap_err(),
+            IvError::Common(CommonError::MissingClusterColumn)
+        );
+        assert_eq!(
+            fit(cluster(&groups[..n - 1])).unwrap_err(),
+            IvError::Common(CommonError::ClusterDimensionMismatch {
+                groups_rows: n - 1,
+                n
+            })
         );
     }
 

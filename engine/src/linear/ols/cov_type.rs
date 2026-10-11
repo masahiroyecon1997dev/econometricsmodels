@@ -30,7 +30,8 @@ pub enum CovType {
     /// 無効化するオプションは設けない。`docs/spec/ols-spec.md`
     /// 「標準誤差」のクラスター参照）。
     Cluster {
-        /// クラスターのグループ（整数コード化済み）。`OlsInput`の行と対応する長さnの列。
+        /// クラスターのグループ（整数コード化済み）。`OlsInput`の行と対応する長さnの列で、
+        /// 行数が`n`と食い違うと`CommonError::ClusterDimensionMismatch`（`GroupCodes`のdoc参照）。
         /// `None`の場合、`OlsEstimator::fit`は`CommonError::MissingClusterColumn`を返す
         /// （`hac_lags: Option<i64>`と同じ設計パターンで、値の妥当性検証を`engine`内で
         /// 行うため`Option`にしている。`engine_pybind`側で`cluster`未指定を

@@ -707,6 +707,26 @@ mod tests {
         assert_eq!(keys, vec!["1.0", "2.0", "1.0"]);
     }
 
+    #[test]
+    fn extract_cluster_groups_codes_labels_in_string_order_and_propagates_errors() {
+        // 整数IDも文字列表現の辞書順（"10" < "9"）でコード化する（旧`BTreeMap<&str, _>`の反復順）。
+        let df = df!("k" => [9_i64, 10, 9, 2]).unwrap();
+
+        let groups = extract_cluster_groups(&df, "k").unwrap();
+
+        // 文字列の辞書順は "10" < "2" < "9"。順序が同じ別ラベル（a < b < c）で作ったコードと等しい。
+        let by_string_order = ["c", "a", "c", "b"].map(String::from);
+        assert_eq!(
+            groups,
+            GroupCodes::from_labels_without_keys(&by_string_order)
+        );
+
+        // 欠損値・存在しない列は`extract_group_key_column`と同じく`Err`。
+        let with_null = df!("k" => [Some(1_i64), None]).unwrap();
+        assert!(extract_cluster_groups(&with_null, "k").is_err());
+        assert!(extract_cluster_groups(&df, "missing").is_err());
+    }
+
     fn frame_of(series: Series) -> DataFrame {
         DataFrame::new(series.len(), vec![series.into()]).unwrap()
     }

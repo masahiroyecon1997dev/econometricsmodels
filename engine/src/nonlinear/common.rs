@@ -350,9 +350,9 @@ pub fn validate_sufficient_observations(n: usize, k: usize) -> Result<(), MleErr
 /// `n_slopes`（= `k - k_constant`）より多いこと（`validate_cluster_count_covers_slopes`、
 /// `rank(Ŝ) ≤ g - 1`のため`g <= n_slopes`だと`n_slopes×n_slopes`部分行列が構造的に
 /// 特異）を検証する（`Cluster`以外は無検証）。`n`と型が同じ`usize`の
-/// `n_slopes`を並べているが、`n`は`validate_cluster_groups`内の`debug_assert_eq!
-/// (groups.nobs(), n)`で、`n_slopes`は`g <= n_slopes`の比較結果で、取り違えれば
-/// いずれもテスト/デバッグビルドで早期に露見する（`validate_fit_preconditions`が
+/// `n_slopes`を並べているが、`n`は`validate_cluster_groups`内の
+/// `groups.nobs() != n`の判定（`ClusterDimensionMismatch`）で、`n_slopes`は
+/// `g <= n_slopes`の比較結果で、取り違えればいずれもテストで早期に露見する（`validate_fit_preconditions`が
 /// 多数の同型引数を持つため`has_intercept: bool`を受け取るのとは対照的に、こちらは
 /// 引数が3つで`cov_type`が異なる型のため`usize`のまま受け取る）。
 ///
@@ -556,7 +556,8 @@ pub enum CovType {
     /// クラスターロバスト（`"cluster"`）: `Σ = correction * H⁻¹(Σ_g S_gS_g')H⁻¹`
     /// （`docs/spec/nonlinear-common.md`3章参照）。
     Cluster {
-        /// クラスターのグループ（整数コード化済み）。モデルの入力データの行と対応する長さnの列。
+        /// クラスターのグループ（整数コード化済み）。モデルの入力データの行と対応する長さnの列で、
+        /// 行数が`n`と食い違うと`CommonError::ClusterDimensionMismatch`（`GroupCodes`のdoc参照）。
         /// `None`の場合、モデルの`fit()`は`CommonError::MissingClusterColumn`を返す。
         groups: Option<GroupCodes>,
     },
@@ -2970,7 +2971,8 @@ pub fn sandwich_cov_params(
 /// `groups`が2種類以上の値を持つこと（クラスター数`G>=2`）の検証（`CommonError::
 /// InsufficientClusters`）、および未指定時の`CommonError::MissingClusterColumn`は
 /// モデルごとの`fit()`実装側の責務（OLSの`validate_cluster_groups`と同じ役割分担）。
-/// `groups.nobs() != n`もモデル側の内部契約（`debug_assert_eq!`で検証）。
+/// `groups.nobs() != n`もモデル側の`validate_cluster_groups`で検証済みであることが前提
+/// （この関数の`debug_assert_eq!`は、検証を通さずに呼ぶ誤用を開発時に検出するためのもの）。
 pub(crate) fn cluster_cov_params(
     hessian: &Mat<f64>,
     scores: &Mat<f64>,

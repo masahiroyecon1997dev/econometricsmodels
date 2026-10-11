@@ -19,22 +19,25 @@ pub const MAX_ITER_LIMIT: i64 = 10_000;
 /// `G`を返す。`G`はOLSではt検定・信頼区間・F検定の自由度（`G-1`）の算出に再利用する
 /// （nonlinear系統はz検定のため`G`自体は使わないが、検証結果として返す型は揃える）。
 ///
-/// `groups`は各`fit()`の冒頭で一度だけ作った整数コード（`GroupCodes`）で、ユニーク数は
+/// `groups`は呼び出し側が一度だけ作った整数コード（`GroupCodes`）で、ユニーク数は
 /// コード化の時点で分かっているため、`String`を数え直さない（以前は`HashSet<&String>`で
 /// 呼び出しごとに全行をハッシュしており、n=1,000,000・G=100,000で1回約0.17秒だった）。
 /// OLS・nonlinear・IV・panelで同一のロジック・エラーメッセージが必要だったため共有化した
 /// （`ensure_well_conditioned_symmetric_matrix`を`engine::shared::linear_algebra`に
 /// 共有化したのと同じ理由：モデル固有の計算に一切依存しない純粋な検証ロジックのため）。
 ///
-/// `groups.nobs() != n`は呼び出し側（`engine_pybind`）の実装バグでしか起こり得ない内部契約
-/// であり、実データに起因する`CommonError::InsufficientClusters`とは区別して
-/// `debug_assert_eq!`で検証する。
+/// `groups.nobs() != n`（コードの行数がデータの行数と食い違う）は`CommonError::
+/// ClusterDimensionMismatch`で弾く。`GroupCodes`は公開型で、呼び出し側が任意の長さの
+/// コードを渡せる。この検証が無いと、長すぎると範囲外参照でpanicし、短すぎると先頭の
+/// 行だけで集計した標準誤差を静かに返してしまう（`n`は補正係数に使う）。判定はO(1)。
+/// この関数を通らない集計経路は無い（全手法の`fit()`がクラスター数の検証としてこれを呼ぶ）。
 pub(crate) fn validate_cluster_groups(groups: &GroupCodes, n: usize) -> Result<usize, CommonError> {
-    debug_assert_eq!(
-        groups.nobs(),
-        n,
-        "groups length must match nobs (engine_pybind contract)"
-    );
+    if groups.nobs() != n {
+        return Err(CommonError::ClusterDimensionMismatch {
+            groups_rows: groups.nobs(),
+            n,
+        });
+    }
     let g = groups.n_groups();
     if g < 2 {
         return Err(CommonError::InsufficientClusters { g });
@@ -122,6 +125,17 @@ mod tests {
             validate_cluster_groups(&codes(&["a", "a", "b", "c"]), 4),
             Ok(3)
         );
+    }
+
+    #[test]
+    fn validate_cluster_groups_rejects_groups_whose_length_differs_from_n() {
+        // 長すぎても短すぎても、集計に進む前に`Err`にする（releaseビルドでも）。
+        for n in [3, 5] {
+            assert_eq!(
+                validate_cluster_groups(&codes(&["a", "b", "c", "a"]), n),
+                Err(CommonError::ClusterDimensionMismatch { groups_rows: 4, n })
+            );
+        }
     }
 
     #[test]

@@ -700,11 +700,13 @@ fn two_way_variance_components(
     })
 }
 
-/// 2-wayのbetween回帰（個体平均または時点平均の`[1, x̄]`への最小二乗）の残差平方和と
-/// 残差自由度`n_units - K_b - 1`。
+/// between回帰（個体平均または時点平均の`[1, x̄]`への最小二乗）の残差平方和と
+/// 残差自由度`n_units - K_b - 1`。1-way・2-wayで共有する。
 ///
-/// 平均が単位間でほぼ一定の列は切片と共線になるため落とし、`K_b`にも数えない（`plm`と同じ、
-/// `two_way_variance_components`のdoc参照）。一定かどうかの判定は`column_is_zero_variance`
+/// 平均が単位間でほぼ一定の列（バランスパネルで個体平均が一定になる、時点間でのみ変わる列等）は
+/// 切片と共線になるため落とし、`K_b`にも数えない（`plm`と同じ、`two_way_variance_components`のdoc参照）。
+/// 最終回帰には全列が残る。切片そのもの（全観測で一定の列）と共線な列は、ここでは落ちるが
+/// 最終回帰の特異性（`QuasiDemeanedRegressionFailed`）で検出される。一定かどうかの判定は`column_is_zero_variance`
 /// （`fe.rs`）と同じ発想の相対閾値（平均の標準偏差が`n_units·ε·max|x̄|`以下）。
 ///
 /// # Errors
@@ -766,36 +768,12 @@ fn one_way_variance_components(
         .sum();
     let sigma2_eps = ssr_within / fe.df_resid() as f64;
 
-    // σ_u²: between回帰（エンティティ平均、切片あり）。
+    // σ_u²: between回帰（エンティティ平均、切片あり）。平均が単位間で一定の列（バランスパネルで
+    // 時点間でのみ変わる列等）は切片と共線になるため、2-wayと同じく落として`K_b`にも数えない
+    // （`between_ssr_and_df`、`plm`と同じ）。
     let means = entity_means(input.y(), input.x(), input.entity_codes());
     let n_entities = means.y.len();
-
-    // `OlsInput::from_columns`が返しうる`LeastSquaresError::Common(DimensionMismatch)`は
-    // ここでは理論上到達不能: `entity_means`は`y_means`・各`x_means`列を同じ
-    // `groups.values()`（エンティティのユニークID集合）から1対1で生成するため、
-    // 常に同じ長さ（`groups.len()`）になる（`FeEstimator::fit`の同種のコメントと
-    // 同じ判断）。この`map_err`が実際に到達しうるのは`OlsEstimator::fit`側の失敗
-    // （`n_entities<=k`等、`PanelError::BetweenRegressionFailed`のdocコメント参照）
-    // のみで、こちらは次の行の`map_err`で別途捕捉している。
-    let between_input = OlsInput::from_columns(
-        &means.y,
-        &means.x,
-        input.x_names().to_vec(),
-        true,
-        input.dep_var_name().to_string(),
-    )
-    .map_err(|source| PanelError::BetweenRegressionFailed { source })?;
-    let between = OlsEstimator::fit(between_input, CovType::Classical, confidence_level)
-        .map_err(|source| PanelError::BetweenRegressionFailed { source })?;
-
-    let between_residuals = between.residuals();
-    let ssr_between: f64 = (0..between_residuals.nrows())
-        .map(|i| {
-            let r = *between_residuals.get(i, 0);
-            r * r
-        })
-        .sum();
-    let df_resid_between = between.input().nobs() - between.input().k();
+    let (ssr_between, df_resid_between) = between_ssr_and_df(&means)?;
 
     let t_bar = n_entities as f64 / means.t.iter().map(|t_i| 1.0 / t_i).sum::<f64>();
     let sigma2_u = (ssr_between / df_resid_between as f64 - sigma2_eps / t_bar).max(0.0);
@@ -907,6 +885,20 @@ pub(crate) fn quasi_demean_transform_two_way(
     Ok((y, x))
 }
 
+/// ハウスマン補助回帰で`x̃_j`が識別できない列か（`x*_j - x̃_j`が全観測で一定か）。
+///
+/// `x*_j`は準偏差変換済み、`x̃_j`はwithin変換済みの同じ列。一定かどうかは差の標準偏差が
+/// `n·ε·max|x*_j|`以下かで判定する（相対閾値。差そのものを基準にすると丸め誤差の大きさと
+/// 比べられないため元の列のスケールを使う）。
+fn hausman_within_column_is_aliased(x_star: &[f64], x_within: &[f64]) -> bool {
+    let n = x_star.len() as f64;
+    let diff: Vec<f64> = x_star.iter().zip(x_within).map(|(a, b)| a - b).collect();
+    let mean = diff.iter().sum::<f64>() / n;
+    let std_dev = (diff.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n).sqrt();
+    let scale = x_star.iter().fold(0.0_f64, |acc, v| acc.max(v.abs()));
+    std_dev <= n * f64::EPSILON * scale
+}
+
 /// ハウスマン補助回帰を`OlsEstimator`のcov_type（Classical/Hc1〜Hc3）で当てはめ、`X̃`の
 /// 末尾`k`列が同時にゼロというロバストWald検定のF統計量を返す。
 fn hausman_aux_wald_f(
@@ -941,13 +933,20 @@ fn hausman_aux_wald_f(
 /// ため、変換し直すのとビット単位で同じ値になる（同じ変換を二度計算しないため再利用する）。`y_star`/`x_star`はRE本体の
 /// 回帰に渡した準偏差変換済みの`y`と傾き`X`（変換済み定数列は含まない）そのもの。
 ///
-/// 比較対象の傾き係数が0個なら`Ok(None)`（検定対象が無い）。補助回帰・Wald検定の失敗
+/// **識別できない`X̃`の列は検定対象から外す**: バランスパネルで時点間でのみ変わる列（年トレンド等）は
+/// 個体平均が個体間で一定になり、`x*_j = x̃_j + 定数`で未変換の定数項と共線になる（`plm`の
+/// `phtest(method = "aux")`はこの入力で添字エラーになる）。その列の係数δは識別できないため
+/// （`hausman_within_column_is_aliased`）、残りの列だけで検定し`hausman_df`もその分小さくなる。
+/// 時点間でのみ変わる列が無ければ結果は変わらない。
+///
+/// 比較対象の傾き係数が0個、または検定できる列が残らないなら`Ok(None)`（検定対象が無い）。補助回帰・Wald検定の失敗
 /// （ランク落ち・クラスター数不足・共分散部分行列のほぼ特異性等）は、計算自体が成立しない
 /// ため`PanelError::HausmanTestFailed`として伝播し`fit()`全体を失敗させる（設計行列の
 /// 多重共線性と同じ方針。モジュールdoc「`None`になるのは…」の項参照）。
 #[allow(clippy::too_many_arguments)]
 fn re_hausman_test(
     fe: &FeEstimator,
+    time_varying: &[usize],
     y_star: &[f64],
     x_star: &[Vec<f64>],
     x_star_names: &[String],
@@ -959,25 +958,46 @@ fn re_hausman_test(
     let to_err = |source| PanelError::HausmanTestFailed { source };
     // 検定対象は時間変化のある列の`X̃`だけ（`fe`の説明変数）。時間不変の列は`x_star`には
     // 含まれるが、within変換後に全ゼロ列になるため`X̃`には入れない（`re-spec.md`5章）。
-    let k = fe.input().x().len();
-    if k == 0 {
+    let k_tv = fe.input().x().len();
+    if k_tv == 0 {
         return Ok(None);
     }
 
     // `X̃`は内部FE推定が`OlsEstimator`へ委譲したwithin変換済み設計行列（切片なし、
     // `fe.within_input().x()`）から取り出す。`within_transform_one_way(fe.input())`で
     // 変換し直すのとビット単位で同じ値（関数docコメント参照）。
-    debug_assert_within_reuse_contract(fe, k);
+    debug_assert_within_reuse_contract(fe, k_tv);
+    debug_assert_eq!(time_varying.len(), k_tv);
     let x_within_mat = fe.within_input().x();
-    debug_assert_eq!(x_within_mat.ncols(), k);
+    debug_assert_eq!(x_within_mat.ncols(), k_tv);
+
+    // `x̃_j`が補助回帰で識別できない列（`x*_j - x̃_j`が全観測で一定で、未変換の定数項と
+    // 共線になる。バランスパネルで時点間でのみ変わる列等）は検定対象から外す。
+    // `x*_j - x̃_j = (1-θ_i)·x̄_ij`なので、個体平均`x̄_ij`が個体間で等しいバランスパネルで起きる。
+    let tested: Vec<usize> = (0..k_tv)
+        .filter(|&m| {
+            !hausman_within_column_is_aliased(
+                &x_star[time_varying[m]],
+                x_within_mat.col_as_slice(m),
+            )
+        })
+        .collect();
+    let k = tested.len();
+    if k == 0 {
+        return Ok(None);
+    }
+
     let mut columns = x_star.to_vec();
-    columns.extend((0..k).map(|j| x_within_mat.col_as_slice(j).to_vec()));
+    columns.extend(
+        tested
+            .iter()
+            .map(|&m| x_within_mat.col_as_slice(m).to_vec()),
+    );
     let mut names = x_star_names.to_vec();
     names.extend(
-        fe.input()
-            .x_names()
+        tested
             .iter()
-            .map(|name| format!("{name}_within")),
+            .map(|&m| format!("{}_within", fe.input().x_names()[m])),
     );
 
     let aux_input = OlsInput::from_columns(y_star, &columns, names, true, dep_var_name.to_string())
@@ -1530,6 +1550,7 @@ impl ReEstimator {
         let hausman_result = match effects {
             ReEffects::OneWay => re_hausman_test(
                 &fe_for_sigma2_eps,
+                &time_varying,
                 &y,
                 &x_all[1..],
                 &param_names[1..],
@@ -2059,26 +2080,13 @@ mod tests {
 
     #[test]
     fn swamy_arora_variance_components_does_not_panic_when_entity_means_are_all_zero() {
-        // 本ファイル冒頭「踏んだ罠」の直接再現データ: 全エンティティの
-        // `ȳ_i.`が完全に一致し、かつその共通値がちょうど0。between回帰は「切片=0・傾き=0」
-        // という完全な当てはめ（`SSR_between=0`）になり、`classical_cov_params`のσ²=0から
-        // 切片・傾き**両方**の`std_error`が0になる（`re_estimator_fit_r_squared_between_
-        // returns_zero_when_entity_means_are_equal`が使う「エンティティ平均を非ゼロに
-        // シフトする」回避策は切片の係数を非ゼロにするだけで、傾き係数は依然coef=0・se=0
-        // のまま——後述の通りこちらは偶然F検定の特異性チェックに先に弾かれるため表面化
-        // しない）。修正前は`compute_inference_stat`が`stat=0.0/0.0=NaN`を計算し、続く
-        // `StudentsT::cdf(NaN)`が`statrs`内部でパニックしていた（`shared/inference.rs`の
+        // 全エンティティの`ȳ_i.`が完全に一致し、かつその共通値がちょうど0のデータ。between回帰は
+        // 「切片=0・傾き=0」という完全な当てはめ（`SSR_between=0`）になる。between回帰が
+        // 係数の標準誤差・t統計量を計算していた頃は、切片・傾きの標準誤差が0で
+        // `stat=0.0/0.0=NaN`となり`StudentsT::cdf(NaN)`がパニックしていた（`shared/inference.rs`の
         // `compute_inference_stat_returns_nan_p_value_without_panicking_when_coef_and_se_are_both_zero`
-        // で直接固定した修正）。
-        //
-        // 修正後はパニックせず`Err`を返す（`Ok`にはならない）: `cov_params`がσ²=0で
-        // 全体ゼロ行列になるため、NaN t統計量のガード通過後に到達する`wald_f_test`の
-        // `ensure_well_conditioned_symmetric_matrix`（傾き係数の共分散部分行列が
-        // ゼロ行列で正定値でない）が`CommonError::ComputationFailed`を返し、
-        // `BetweenRegressionFailed`として伝播する。`swamy_arora_variance_components`は
-        // between回帰のF統計量自体を使わないが、`OlsEstimator::fit`は常にF検定を
-        // 計算するため呼び出し元の用途に関わらずこの経路を通る。ここでの主眼は
-        // 「パニックしないこと」であり、その結果がOk/Errのどちらかは二次的な確認。
+        // で別途固定）。現在のbetween回帰は残差平方和しか使わないため推論統計量を計算せず、
+        // `σ_u² = max(0, 0 - σ_ε²/t_bar) = 0`で成功する。
         let entity = strings(&["a", "a", "b", "b", "c", "c"]);
         let x = vec![1.0, 3.0, 2.0, 6.0, 1.0, 4.0];
         let y = [1.0, -1.0, 2.0, -2.0, 3.0, -3.0];
@@ -2086,12 +2094,9 @@ mod tests {
             ReInput::from_columns(&y, &[x], vec!["x".to_string()], &entity, None, "y".into())
                 .unwrap();
 
-        let result = swamy_arora_variance_components(&input, ReEffects::OneWay, 0.95);
+        let vc = swamy_arora_variance_components(&input, ReEffects::OneWay, 0.95).unwrap();
 
-        assert!(matches!(
-            result,
-            Err(PanelError::BetweenRegressionFailed { .. })
-        ));
+        assert_eq!(vc.sigma2_u, 0.0);
     }
 
     #[test]
@@ -2585,8 +2590,9 @@ mod tests {
 
     #[test]
     fn re_estimator_fit_rejects_time_invariant_regressor_collinear_with_intercept() {
-        // 全エンティティで同じ値の列（切片と共線）は、between回帰の設計行列が特異になり
-        // 計算エラーになる（時間不変の列を許容しても、識別できない入力は通さない）。
+        // 全エンティティで同じ値の列は切片と共線になる。between回帰ではこの列を落とすため
+        // そこでは失敗せず、変換後の最終回帰の設計行列が特異になって計算エラーになる
+        // （時間不変の列を許容しても、識別できない入力は通さない）。
         let TimeInvariantColumns { y, x1, entity, .. } = time_invariant_columns();
         let input = ReInput::from_columns(
             &y,
@@ -2600,8 +2606,137 @@ mod tests {
 
         assert!(matches!(
             ReEstimator::fit(input, ReEffects::OneWay, ReCovType::Classical, 0.95),
+            Err(PanelError::QuasiDemeanedRegressionFailed { .. })
+        ));
+    }
+
+    #[test]
+    fn re_estimator_fit_rejects_proportional_time_invariant_regressors() {
+        // 定数ではない時間不変の列同士が比例していれば、between回帰が特異になる。
+        let TimeInvariantColumns { y, x1, entity, .. } = time_invariant_columns();
+        let z: Vec<f64> = (0..24).map(|r| (r / 4) as f64).collect();
+        let z2: Vec<f64> = z.iter().map(|v| 2.0 * v).collect();
+        let input = ReInput::from_columns(
+            &y,
+            &[x1, z, z2],
+            strings(&["x1", "z", "z2"]),
+            &entity,
+            None,
+            "y".into(),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            ReEstimator::fit(input, ReEffects::OneWay, ReCovType::Classical, 0.95),
             Err(PanelError::BetweenRegressionFailed { .. })
         ));
+    }
+
+    #[test]
+    fn one_way_balanced_panel_drops_time_only_column_from_between_regression_like_plm() {
+        // plm: `plm(y ~ x1 + xt, model = "random", effect = "individual")`。`xt`は時点間でのみ
+        // 変わる列で、バランスパネルでは個体平均が全個体で一致し切片と共線になる。between回帰から
+        // 落とし`K_b`にも数えない（plmと同じ）。最終回帰には`xt`も残り、係数が推定される。
+        let c = two_way_columns();
+        let input = ReInput::from_columns(
+            &c.y,
+            &[c.x1.clone(), c.xt.clone()],
+            strings(&["x1", "xt"]),
+            &c.entity,
+            None,
+            "y".into(),
+        )
+        .unwrap();
+
+        let vc = swamy_arora_variance_components(&input, ReEffects::OneWay, 0.95).unwrap();
+        assert_close(vc.sigma2_eps, 5.558_492_530_031_27, 1e-9, "sigma2_eps");
+        assert_close(vc.sigma2_u, 2.781_216_088_364_69, 1e-9, "sigma2_u");
+
+        let re = ReEstimator::fit(input, ReEffects::OneWay, ReCovType::Classical, 0.95).unwrap();
+        let params = [
+            0.117_907_102_600_895,
+            0.400_160_538_463_792,
+            -1.029_152_589_790_345,
+        ];
+        let std_errors = [
+            0.905_185_788_075_077,
+            0.851_443_915_446_071,
+            0.510_706_679_841_924,
+        ];
+        for j in 0..3 {
+            assert_close(*re.estimator().params().get(j, 0), params[j], 1e-9, "param");
+            assert_close(*re.std_errors().get(j, 0), std_errors[j], 1e-9, "std_err");
+        }
+        assert_eq!(re.df_resid(), 21);
+        // ハウスマン検定は`xt`の`x̃t`が定数項と共線で識別できないため外し、`x1`だけを検定する
+        // （補助回帰`y* ~ 1 + x1* + xt* + x̃1`のWald統計量をnumpyで独立に計算した値）。
+        assert_eq!(re.hausman_df(), Some(1));
+        assert_close(
+            re.hausman_statistic().unwrap(),
+            0.293_444_752_111_572_3,
+            1e-9,
+            "hausman",
+        );
+    }
+
+    #[test]
+    fn one_way_balanced_panel_keeps_entity_only_column_in_between_regression() {
+        // plm: `y ~ x1 + xi + xt`。`xi`（個体間でのみ変わる列）は個体平均でも変動するため
+        // between回帰に残り、`xt`だけが落ちる。
+        let c = two_way_columns();
+        let input = ReInput::from_columns(
+            &c.y,
+            &[c.x1.clone(), c.xi.clone(), c.xt.clone()],
+            strings(&["x1", "xi", "xt"]),
+            &c.entity,
+            None,
+            "y".into(),
+        )
+        .unwrap();
+
+        let vc = swamy_arora_variance_components(&input, ReEffects::OneWay, 0.95).unwrap();
+        assert_close(vc.sigma2_u, 1.808_007_274_071_92, 1e-9, "sigma2_u");
+
+        let re = ReEstimator::fit(input, ReEffects::OneWay, ReCovType::Classical, 0.95).unwrap();
+        let params = [
+            0.139_211_658_956_512_4,
+            0.455_007_744_295_883_3,
+            -0.053_752_290_510_623_2,
+            -1.036_241_827_179_690_7,
+        ];
+        for (j, expected) in params.iter().enumerate() {
+            assert_close(*re.estimator().params().get(j, 0), *expected, 1e-9, "param");
+        }
+        assert_eq!(re.df_resid(), 20);
+        assert_eq!(re.hausman_df(), Some(1));
+        assert_close(
+            re.hausman_statistic().unwrap(),
+            2.587_055_364_739_007,
+            1e-9,
+            "hausman",
+        );
+    }
+
+    #[test]
+    fn hausman_is_none_when_every_time_varying_regressor_varies_only_over_time() {
+        // 時間変化のある列が`xt`（時点間でのみ変わる列）だけなら、`x̃t`は識別できず、
+        // 検定できる列が残らないため`hausman_*`は`None`（`fit()`自体は成功する）。
+        let c = two_way_columns();
+        let input = ReInput::from_columns(
+            &c.y,
+            std::slice::from_ref(&c.xt),
+            strings(&["xt"]),
+            &c.entity,
+            None,
+            "y".into(),
+        )
+        .unwrap();
+
+        let re = ReEstimator::fit(input, ReEffects::OneWay, ReCovType::Classical, 0.95).unwrap();
+
+        assert_eq!(re.hausman_statistic(), None);
+        assert_eq!(re.hausman_p_value(), None);
+        assert_eq!(re.hausman_df(), None);
     }
 
     // ── 2-way RE ───────────────────────────────────────────────────────────
@@ -4202,13 +4337,16 @@ mod tests {
             FeInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
                 .unwrap();
         let fe = FeEstimator::fit(fe_input, FeEffects::OneWay, FeCovType::Classical, 0.95).unwrap();
-        let (_, x_within) = within_transform_one_way(fe.input());
+        // `x*`に同じ列を2回入れて、補助回帰の設計行列を（`x̃`の識別可否とは無関係に）
+        // 完全共線にする。
+        let x_star = vec![fe.input().x()[0].clone(), fe.input().x()[0].clone()];
 
         let result = re_hausman_test(
             &fe,
+            &[0],
             &y,
-            &x_within,
-            &["x1_star".to_string()],
+            &x_star,
+            &["x1_star".to_string(), "x1_star2".to_string()],
             "y",
             &ReCovType::Classical,
             &GroupCodes::from_labels(&entity),

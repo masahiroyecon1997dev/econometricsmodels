@@ -592,7 +592,7 @@ pub fn column_medians(x: &Mat<f64>) -> Vec<f64> {
         .collect()
 }
 
-/// `marginal_effects`の結果。`coef_table`と同じ行指向で、python_package層の行キーは
+/// `marginal_effects`の結果。`params_table`と同じ行指向で、python_package層の行キーは
 /// `param_name`/`effect`/`std_error`/`test_stat`/`p_value`/`conf_lower`/`conf_upper`
 /// （`docs/spec/nonlinear-common.md`6章）。定数項（切片）は行から除外する
 /// （切片の限界効果は経済学的に意味を持たない、statsmodelsの`get_margeff()`と同じ扱い）。
@@ -622,7 +622,7 @@ impl MarginalEffects {
     /// クレート内の他モジュールから`MarginalEffects`を組み立てるためのコンストラクタ。
     /// フィールドはprivateのため（`.claude/rules/rust-style.md`「推定量構造体の設計」）、
     /// `marginal_effects_from_w_s`を経由しないモデル（Tobit。
-    /// `w`/`s`自体の計算式は独自実装だが、出力構造体の形は`coef_table`と同じ行指向で
+    /// `w`/`s`自体の計算式は独自実装だが、出力構造体の形は`params_table`と同じ行指向で
     /// Logit/Probitと共通、`docs/spec/nonlinear-common.md`6章）が、独自に計算したデルタ法の
     /// 結果からこの構造体を構築するために必要。
     pub(crate) fn from_parts(

@@ -214,7 +214,7 @@ impl LogitOptions {
 /// Estimation results for Logit.
 ///
 /// Structured data only (no `summary()`); see `docs/spec/nonlinear-common.md`
-/// section 5. Row-oriented table construction (e.g. a `coef_table`) is left to
+/// section 5. Row-oriented table construction (e.g. a `params_table`) is left to
 /// `python_package`. All array-valued fields (`params`, `std_errors`, etc.) share the
 /// same order as `param_names`.
 ///

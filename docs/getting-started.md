@@ -51,10 +51,10 @@ See the [API Reference](api/ols.md) for the full list of available options.
 
 ## Retrieving results
 
-`OLSResults` exposes coefficients, standard errors, etc. as dictionaries keyed by coefficient name (`str`). If you need a row-oriented listing — e.g. for a REST API response — use `coef_table()`.
+`OLSResults` exposes coefficients, standard errors, etc. as dictionaries keyed by coefficient name (`str`). If you need a row-oriented listing — e.g. for a REST API response — use `params_table()`.
 
 ```python
-for row in result.coef_table():
+for row in result.params_table():
     print(row["param_name"], row["param"], row["std_error"], row["p_value"])
 ```
 

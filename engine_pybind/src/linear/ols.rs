@@ -293,7 +293,7 @@ pub struct BreuschGodfreyTestOutput {
 /// Estimation results for OLS.
 ///
 /// Structured data only (no `summary()`); see `docs/spec/ols-spec.md`
-/// ("結果構造体"). Row-oriented table construction (e.g. a `coef_table`) is left to
+/// ("結果構造体"). Row-oriented table construction (e.g. a `params_table`) is left to
 /// `python_package`. All array-valued fields (`params`, `std_errors`, etc.) share the
 /// same order as `param_names`.
 // `OLSResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として

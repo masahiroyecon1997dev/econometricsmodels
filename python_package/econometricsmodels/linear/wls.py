@@ -29,8 +29,8 @@ from .. import _lib
 from .._lib import WLSOptions
 from .._results_utils import (
     by_param,
-    coef_table_rows,
     conf_int_by_param,
+    params_table_rows,
 )
 
 __all__ = ["WLS", "WLSOptions", "WLSResults"]
@@ -107,7 +107,7 @@ class WLSResults:
 
     Array-valued properties (`params`, `std_errors`, etc.) are exposed
     as dictionaries keyed by coefficient name (for O(1) lookup of a
-    single parameter). Use `coef_table()` for a row-oriented listing
+    single parameter). Use `params_table()` for a row-oriented listing
     (same shape as `OLSResults`; see
     `docs/spec/ols-spec.md`, "結果構造体").
 
@@ -258,7 +258,7 @@ class WLSResults:
         """Bayesian Information Criterion (BIC)."""
         return self._raw.bic
 
-    def coef_table(self) -> list[dict[str, float | str]]:
+    def params_table(self) -> list[dict[str, float | str]]:
         """Row-oriented summary table of the coefficients.
 
         Shaped to be usable almost as-is in a REST API response (see
@@ -272,7 +272,7 @@ class WLSResults:
             `param_name`, `param`, `std_error`, `test_stat`, `p_value`,
             `conf_lower`, `conf_upper`.
         """
-        return coef_table_rows(self._raw)
+        return params_table_rows(self._raw)
 
     def predict(self, new_data: pl.DataFrame | None = None) -> list[float]:
         """Predicted values.

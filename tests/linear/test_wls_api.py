@@ -111,13 +111,13 @@ def test_weight_one_matches_ols(dataset, option_kwargs):
         assert abs(wls_r - ols_r) < 1e-9
 
 
-def test_weight_one_matches_ols_coef_table(dataset):
-    """coef_table()の内容もOLSと一致すること（辞書系プロパティ以外の確認）。"""
+def test_weight_one_matches_ols_params_table(dataset):
+    """params_table()の内容もOLSと一致すること（辞書系プロパティ以外の確認）。"""
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
 
-    ols_table = OLS(df, y="y", x=["x1", "x2"]).fit().coef_table()
+    ols_table = OLS(df, y="y", x=["x1", "x2"]).fit().params_table()
     wls_table = (
-        WLS(df, y="y", x=["x1", "x2"], weight="weight").fit().coef_table()
+        WLS(df, y="y", x=["x1", "x2"], weight="weight").fit().params_table()
     )
 
     assert [row["param_name"] for row in wls_table] == [
@@ -193,10 +193,10 @@ def test_result_is_wls_results_type(dataset):
 # ── API構造 ──────────────────────────────────────────────────────
 
 
-def test_coef_table_structure(dataset):
+def test_params_table_structure(dataset):
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
-    table = res.coef_table()
+    table = res.params_table()
 
     assert isinstance(table, list)
     assert len(table) == 3  # const, x1, x2

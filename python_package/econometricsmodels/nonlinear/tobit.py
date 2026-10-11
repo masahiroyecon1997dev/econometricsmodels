@@ -34,9 +34,9 @@ from .. import _lib
 from .._lib import TobitOptions
 from .._results_utils import (
     by_param,
-    coef_table_rows,
     conf_int_by_param,
     marginal_effect_rows,
+    params_table_rows,
 )
 
 __all__ = ["Tobit", "TobitOptions", "TobitResults"]
@@ -112,7 +112,7 @@ class TobitResults:
     coefficients, since `_lib.TobitResult` reports `sigma` alongside
     `beta` in a unified `(k+1)`-length representation (see
     `engine_pybind/src/nonlinear/tobit.rs`, `TobitResult`). Use
-    `coef_table()` for a row-oriented listing
+    `params_table()` for a row-oriented listing
     (`docs/spec/nonlinear-common.md` section 5).
 
     `marginal_effects()`, `predict()`, and `censoring_fit_check()` are
@@ -287,11 +287,11 @@ class TobitResults:
         `TobitOptions.upper`). `None` means no censoring from above."""
         return self._raw.upper
 
-    def coef_table(self) -> list[dict[str, float | str]]:
+    def params_table(self) -> list[dict[str, float | str]]:
         """Row-oriented summary table of the coefficients.
 
         Shaped to be usable almost as-is in a REST API response. Same
-        shape as `LogitResults.coef_table()`. Includes a row for
+        shape as `LogitResults.params_table()`. Includes a row for
         `"sigma"` in addition to the regression coefficients (see
         `params`).
 
@@ -300,7 +300,7 @@ class TobitResults:
             `"sigma"`). Keys are `param_name`, `param`, `std_error`, `test_stat`,
             `p_value`, `conf_lower`, `conf_upper`.
         """
-        return coef_table_rows(self._raw)
+        return params_table_rows(self._raw)
 
     def predict(
         self,

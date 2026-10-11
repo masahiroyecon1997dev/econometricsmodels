@@ -15,9 +15,9 @@ from typing import Protocol
 
 __all__ = [
     "by_param",
-    "coef_table_rows",
     "conf_int_by_param",
     "marginal_effect_rows",
+    "params_table_rows",
 ]
 
 
@@ -87,7 +87,7 @@ def conf_int_by_param(
     }
 
 
-def coef_table_rows(raw: _CoefTableColumns) -> list[dict[str, float | str]]:
+def params_table_rows(raw: _CoefTableColumns) -> list[dict[str, float | str]]:
     """Build the row-oriented coefficient table.
 
     Args:
@@ -124,7 +124,7 @@ def marginal_effect_rows(
 ) -> list[dict[str, float | str]]:
     """Build the row-oriented marginal effects table.
 
-    Same layout as `coef_table_rows`, with `effect` in place of `param`.
+    Same layout as `params_table_rows`, with `effect` in place of `param`.
 
     Args:
         raw: A `_lib` marginal effects object.

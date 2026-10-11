@@ -21,7 +21,7 @@
   explicit arguments and an options object, not a formula string. Results
   come back as Python objects (`.params`, `.std_errors`, `.p_values`,
   `.conf_int`), not formatted text, so they are easy to build, inspect, and
-  feed into other code. Coefficient tables (`coef_table()`) are plain lists
+  feed into other code. Coefficient tables (`params_table()`) are plain lists
   of dicts that can be passed straight to polars or `json.dumps`.
 - **Explicit validation** — Invalid input is rejected rather than silently
   dropped or repaired. Missing values, perfectly collinear columns,
@@ -125,14 +125,14 @@ print(clustered.std_errors)
 
 Results expose their values as ordinary Python data structures, including
 dictionaries for parameter values and row-oriented data from
-`coef_table()`. The output below is for the last model in the Quickstart
+`params_table()`. The output below is for the last model in the Quickstart
 (Probit), rounded:
 
 ```python
 result.params
 # {"const": 0.32, "x1": 1.04, "x2": -0.87}
 
-result.coef_table()
+result.params_table()
 # [
 #     {"param_name": "const", "param": 0.32, "std_error": 0.07,
 #      "test_stat": 4.46, "p_value": 8e-06,
@@ -148,7 +148,7 @@ Each key of a row is the singular of the matching result attribute
 are the two ends of `conf_int`). The rows of `marginal_effects()` use the same keys,
 with `effect` in place of `param`.
 
-There is no formatted text to parse. `coef_table()` is shaped so it can
+There is no formatted text to parse. `params_table()` is shaped so it can
 be passed directly into a Polars DataFrame, a JSON API response, or an
 automated reporting workflow:
 
@@ -157,9 +157,9 @@ import json
 
 import polars as pl
 
-pl.DataFrame(result.coef_table())
+pl.DataFrame(result.params_table())
 
-json.dumps(result.coef_table())
+json.dumps(result.params_table())
 ```
 
 ## Input Validation

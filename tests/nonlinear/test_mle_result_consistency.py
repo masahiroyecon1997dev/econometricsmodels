@@ -57,7 +57,7 @@ COMMON_VALUES = {
 COMMON_METHODS = {"predict", "augment", "marginal_effects"}
 # ラッパーだけが持つ（`_raw`の`conf_lower`/`conf_upper`から組み立てる）もの
 WRAPPER_ONLY_VALUES = {"conf_int"}
-WRAPPER_ONLY_METHODS = {"coef_table"}
+WRAPPER_ONLY_METHODS = {"params_table"}
 RAW_ONLY_VALUES = {"conf_lower", "conf_upper"}
 
 # 手法固有。Tobitに`log_likelihood_null`/`lr_*`/`pseudo_r_squared`が無く`wald_*`が
@@ -233,7 +233,7 @@ def test_per_parameter_attributes_have_one_entry_per_parameter(
     for attr in ("conf_lower", "conf_upper", "params", "std_errors"):
         assert len(getattr(raw, attr)) == n_params, attr
     assert set(result.conf_int) == set(raw.param_names)
-    assert [row["param_name"] for row in result.coef_table()] == list(
+    assert [row["param_name"] for row in result.params_table()] == list(
         raw.param_names
     )
 

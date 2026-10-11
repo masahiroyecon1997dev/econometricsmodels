@@ -131,9 +131,9 @@ def test_param_names_order(iv_dataset):
     assert res.param_names == ["const", "x1", "endog1"]
 
 
-def test_coef_table_structure(iv_dataset):
+def test_params_table_structure(iv_dataset):
     res = our_fit(iv_dataset)
-    table = res.coef_table()
+    table = res.params_table()
 
     assert isinstance(table, list)
     assert len(table) == 3  # const, x1, endog1

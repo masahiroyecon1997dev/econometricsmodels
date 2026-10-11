@@ -69,9 +69,9 @@ def check_default_options_use_classical_and_converge(dataset, estimator_cls):
 # ── test_<solver>_api.py: API構造 ───────────────────────────────────
 
 
-def check_coef_table_structure(dataset, estimator_cls):
+def check_params_table_structure(dataset, estimator_cls):
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
-    table = res.coef_table()
+    table = res.params_table()
 
     assert isinstance(table, list)
     assert len(table) == 3  # const, x1, x2

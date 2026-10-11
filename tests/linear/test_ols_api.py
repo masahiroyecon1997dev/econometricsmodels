@@ -119,9 +119,9 @@ def test_residuals_sum_near_zero(dataset):
 # ── API構造 ──────────────────────────────────────────────────────
 
 
-def test_coef_table_structure(dataset):
+def test_params_table_structure(dataset):
     res = our_fit(dataset)
-    table = res.coef_table()
+    table = res.params_table()
 
     assert isinstance(table, list)
     assert len(table) == 3  # const, x1, x2

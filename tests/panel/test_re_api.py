@@ -71,9 +71,9 @@ def test_param_names_start_with_const(fe_dataset):
     assert res.param_names == ["const", "x1", "x2"]
 
 
-def test_coef_table_structure(fe_dataset):
+def test_params_table_structure(fe_dataset):
     res = our_fit_re(fe_dataset)
-    table = res.coef_table()
+    table = res.params_table()
 
     assert isinstance(table, list)
     assert len(table) == 3  # const, x1, x2

@@ -28,8 +28,8 @@ from .. import _lib
 from .._lib import IVOptions
 from .._results_utils import (
     by_param,
-    coef_table_rows,
     conf_int_by_param,
+    params_table_rows,
 )
 from ..linear.ols import OLSResults
 
@@ -129,7 +129,7 @@ class IVResults:
 
     Array-valued properties (`params`, `std_errors`, etc.) are exposed
     as dictionaries keyed by coefficient name (for O(1) lookup of a
-    single parameter). Use `coef_table()` for a row-oriented listing.
+    single parameter). Use `params_table()` for a row-oriented listing.
 
     `first_stage()` (per-endogenous-variable first-stage regression
     results) is provided as a separate method rather than a field on
@@ -427,11 +427,11 @@ class IVResults:
         """
         return self._raw.wu_hausman_p_value
 
-    def coef_table(self) -> list[dict[str, float | str]]:
+    def params_table(self) -> list[dict[str, float | str]]:
         """Row-oriented summary table of the coefficients.
 
         Shaped to be usable almost as-is in a REST API response (same
-        policy as `OLSResults.coef_table()`). Returned as `list[dict]`
+        policy as `OLSResults.params_table()`). Returned as `list[dict]`
         rather than a polars DataFrame, per the project's policy of
         not using DataFrames for the coefficient table itself.
 
@@ -440,7 +440,7 @@ class IVResults:
             `param_name`, `param`, `std_error`, `test_stat`, `p_value`,
             `conf_lower`, `conf_upper`.
         """
-        return coef_table_rows(self._raw)
+        return params_table_rows(self._raw)
 
     def first_stage(self) -> dict[str, OLSResults]:
         """Per-endogenous-variable first-stage regression results.

@@ -41,8 +41,8 @@ def test_default_options_use_classical_and_converge(binary_dataset):
 # ── API構造 ──────────────────────────────────────────────────────
 
 
-def test_coef_table_structure(binary_dataset):
-    _checks.check_coef_table_structure(binary_dataset, Probit)
+def test_params_table_structure(binary_dataset):
+    _checks.check_params_table_structure(binary_dataset, Probit)
 
 
 def test_conf_int_structure(binary_dataset):

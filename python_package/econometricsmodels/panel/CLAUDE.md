@@ -13,7 +13,7 @@
 ## 実装パターン
 
 - `FE`/`FEResults`・`RE`/`REResults`はいずれも`IV`/`IVResults`と同型（`data`/`y`/`x`/`entity`/`options`を保持するだけのコンストラクタ、`fit()`呼び出し時に初めて`_lib.fit_fe`/`_lib.fit_re`を呼ぶ。コンストラクタでは検証しない）。
-- `params`/`std_errors`/`test_stats`/`p_values`は係数名→値の`dict[str, float]`（O(1)取り出し用）。行指向で欲しい場合は`coef_table()`（`OLSResults.coef_table()`と同じキー: `param_name`/`param`/`std_error`/`test_stat`/`p_value`/`conf_lower`/`conf_upper`。FE/REともOLS同様t検定のためIVの`stats`/`stat`のような汎用命名は不要）。
+- `params`/`std_errors`/`test_stats`/`p_values`は係数名→値の`dict[str, float]`（O(1)取り出し用）。行指向で欲しい場合は`params_table()`（`OLSResults.params_table()`と同じキー: `param_name`/`param`/`std_error`/`test_stat`/`p_value`/`conf_lower`/`conf_upper`。FE/REともOLS同様t検定のためIVの`stats`/`stat`のような汎用命名は不要）。
 - `fixed_effects()`（FE限定）はIVの`first_stage()`と同じ「追加結果は別メソッド」方針（`docs/spec/fe-spec.md`3.5節）。ただし`first_stage()`と異なり結果の型変換は不要（`_lib.FEResult.fixed_effects()`が返す`dict`をそのまま素通しする）。
 - **REにはFEの`fixed_effects()`に相当する追加メソッドが無い**: ハウスマン検定（`hausman_statistic`/`hausman_p_value`/`hausman_df`）は`fit()`内で自動計算済みの値をそのまま`REResults`のプロパティとして公開するだけで済む（`panel-common.md`2.4節「RE: ハウスマン検定は`fit()`内で自動計算」）。3つとも`float | None`/`int | None`型（傾き係数が0個の場合のみ`None`。補助回帰・ロバスト共分散の計算失敗は`fit()`が`ValidationError`/`ComputationError`で失敗する）。比較は常に1-wayで、補助回帰のWald検定の共分散はRE本体の`cov_type`に連動する。`REOptions.dk_time`（`cov_type="dk"`専用・必須）はDKの時点列にのみ使う。
 - **2-way RE（`REOptions.time`、バランスパネル）**: `REResults.n_periods`（2-wayのみ、1-wayは`None`）を持つ。2-wayのハウスマン検定・パネルR²は未実装で、`hausman_*`は`None`・`r_squared_*`は`NaN`を返す暫定の扱い（docstringに明記、`re-spec.md`2章。未実装のまま単独でリリースしない）。`time`と`dk_time`は別物で、`cov_type="dk"`では`dk_time`が必須（`time`は借用されない）。

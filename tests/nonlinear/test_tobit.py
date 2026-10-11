@@ -2,7 +2,7 @@
 
 主リファレンス（R survival::survreg / AER::tobit）との厳密な数値比較は別途
 実施する（`test_logit_reference.py`/`test_logit_crosscheck.py`と同じ役割分担）。
-ここでは`fit()`の成功パス・`coef_table()`/`predict()`/
+ここでは`fit()`の成功パス・`params_table()`/`predict()`/
 `censoring_fit_check()`/`marginal_effects()`の構造・`ValidationError`/
 `ComputationError`パスのみを検証する（`test_logit_api.py`/
 `test_logit_validation.py`のTobit版）。
@@ -167,9 +167,9 @@ def test_dep_var_name(censored_dataset):
     assert res.dep_var_name == "y"
 
 
-def test_coef_table_structure(censored_dataset):
+def test_params_table_structure(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
-    table = res.coef_table()
+    table = res.params_table()
 
     assert isinstance(table, list)
     assert len(table) == 4  # const, x1, x2, sigma

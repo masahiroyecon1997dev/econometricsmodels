@@ -51,12 +51,12 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols/`・`engi
   `engine/src/linear/CLAUDE.md`参照。IVのWu-Hausman検定用に追加するまでは
   `fit()`内のローカル変数として使い切っていた）が、`engine_pybind`側に公開する`OLSResult`
   には引き続き含めない。
-- `summary()`（テキスト整形）・DataFrame版の`coef_table()`/`conf_int()`は作らない
+- `summary()`（テキスト整形）・DataFrame版の`params_table()`/`conf_int()`は作らない
   （プログラムから呼び出して使う設計方針上、テキスト表示・対話的操作を前提に
   しないため）。
 - python_package層（`OLSResults`）:
   - `params`/`std_errors`/`test_stats`/`p_values`/`conf_int`: 係数名→値の`dict`（O(1)取り出し用）。
-  - `coef_table()`: 行指向`list[dict]`（REST APIレスポンスにそのまま使える形）。行のキーは対応する属性名の単数形:
+  - `params_table()`: 行指向`list[dict]`（REST APIレスポンスにそのまま使える形）。行のキーは対応する属性名の単数形:
     `param_name`（`param_names`）・`param`（`params`）・`std_error`（`std_errors`）・`test_stat`（`test_stats`）・
     `p_value`（`p_values`）。`conf_lower`/`conf_upper`は`conf_int`の下限・上限。Tobitの`sigma`の行も同じキーで、
     値が係数でなくても`param`で正確に表せる。`marginal_effects()`の行は`param`の代わりに`effect`を持つ。
@@ -197,7 +197,7 @@ $$
   指定時は`new_data`）に予測値の列（`"predicted"`）を1列付加したpolars DataFrameを返す点のみ異なる。
 - **プロジェクト全体の「DataFrameは返さない」方針（2章）の唯一の例外**。予測値と元データの行対応を
   分かりやすくしたいというユーザー要望（R `broom::augment()`が先行事例）に応えるため。既存の
-  `predict()`/`residuals`/`coef_table()`は変更せず、この用途専用の新規メソッドとして追加した
+  `predict()`/`residuals`/`params_table()`は変更せず、この用途専用の新規メソッドとして追加した
   （フラグで戻り値の型を変える設計はboolean trapのため不採用）。
 - **スコープは予測列のみ**（残差列の同時付加は見送り、必要になれば別issueで拡張検討）。
 - **実装層は`engine_pybind`**（`python_package`側で`predict()`の結果を`with_columns()`するだけでも

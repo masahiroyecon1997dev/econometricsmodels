@@ -3719,6 +3719,67 @@ mod tests {
                     (a, b) => prop_assert!(false, "hausman presence differs: {a:?} vs {b:?}"),
                 }
             }
+
+            /// エンティティ内で一定の列`z`（時間不変）を足しても、内部FEの`σ_ε²`は変わらない
+            /// （within変動のある列だけがσ_ε²を決める）。`time_varying`は元の列を指したまま。
+            #[test]
+            fn time_invariant_column_leaves_sigma2_eps_unchanged(case in re_case_strategy()) {
+                let entity = entity_labels(&case.entity_idx);
+                let base = swamy_arora_variance_components(
+                    &re_input(&case.y, &case.x, &entity),
+                    0.95,
+                );
+                prop_assume!(base.is_ok());
+                let base = base.unwrap();
+
+                let z: Vec<f64> = case
+                    .entity_idx
+                    .iter()
+                    .map(|&i| ((i * 37) % 11) as f64 - 5.0)
+                    .collect();
+                let mut x = vec![z];
+                x.extend(case.x.iter().cloned());
+                let with_z = swamy_arora_variance_components(&re_input(&case.y, &x, &entity), 0.95);
+                prop_assume!(with_z.is_ok());
+                let with_z = with_z.unwrap();
+
+                prop_assert_eq!(with_z.sigma2_eps, base.sigma2_eps);
+                let shifted: Vec<usize> = base.time_varying.iter().map(|j| j + 1).collect();
+                prop_assert_eq!(with_z.time_varying, shifted);
+            }
+
+            /// 時間不変列`z`に定数`c`を足しても、`z`と他の列の係数は変わらず、
+            /// 切片だけが`-β_z·c`動く（定数は切片に吸収される）。
+            #[test]
+            fn shifting_time_invariant_column_only_moves_the_intercept(
+                case in re_case_strategy(),
+                c in -5.0f64..5.0,
+            ) {
+                let entity = entity_labels(&case.entity_idx);
+                let z: Vec<f64> = case
+                    .entity_idx
+                    .iter()
+                    .map(|&i| ((i * 37) % 11) as f64 - 5.0)
+                    .collect();
+                let build = |z: Vec<f64>| {
+                    let mut x = vec![z];
+                    x.extend(case.x.iter().cloned());
+                    ReEstimator::fit(re_input(&case.y, &x, &entity), ReCovType::Classical, 0.95)
+                };
+                let base = build(z.clone());
+                prop_assume!(base.is_ok());
+                let shifted = build(z.iter().map(|v| v + c).collect());
+                prop_assume!(shifted.is_ok());
+                let (base, shifted) = (base.unwrap(), shifted.unwrap());
+                let (p0, se0) = params_and_se(&base);
+                let (p1, se1) = params_and_se(&shifted);
+
+                assert_approx_eq(p1[0], p0[0] - p0[1] * c, "const");
+                for j in 1..p0.len() {
+                    assert_approx_eq(p1[j], p0[j], &format!("param[{j}]"));
+                    assert_approx_eq(se1[j], se0[j], &format!("se[{j}]"));
+                }
+            }
         }
     }
 }

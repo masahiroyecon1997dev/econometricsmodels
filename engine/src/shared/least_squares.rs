@@ -115,8 +115,9 @@ mod tests {
 
     #[test]
     fn least_squares_rejects_all_zero_design_matrix() {
-        // 全ゼロ行列のcol_piv_qrは`R`の対角にNaNを生じうる。NaNのままQRの解に進まず
-        // ランク落ちとして弾かれること（`checked_col_piv_qr`のNaN明示チェック）。
+        // 全ゼロ行列はランク落ちとして弾かれる。NaN明示チェック単体の検証は
+        // `checked_col_piv_qr_detects_nan_diagonal_from_all_zero_matrix`が担う（ここでは
+        // 後段の`xtx_inverse`の失敗でも`RankDeficient`になるため区別できない）。
         let x = Mat::<f64>::zeros(4, 2);
         let y = column(&[1.0, 2.0, 3.0, 4.0]);
 

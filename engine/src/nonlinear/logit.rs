@@ -3043,7 +3043,7 @@ mod tests {
         }
     }
 
-    /// property-basedテスト。`ols.rs`の`mod proptests`と同型の設計だが、Logitは
+    /// property-basedテスト。`ols/estimator.rs`の`mod proptests`と同型の設計だが、Logitは
     /// MLEベースのため不変条件が異なる（`testing-policy.md`「property-basedテスト」参照）。
     /// OLSの`coefficients_scale_linearly_with_y`（yに関する線形性）に相当する不変条件は
     /// 無い（yは0/1のためスケール自体に意味が無い）代わりに、MLEの一次条件
@@ -3144,7 +3144,7 @@ mod tests {
             ]
         }
 
-        /// `ols.rs`側の同名ヘルパー（`RTOL=1e-6`）より緩い`1e-4`を使う理由: OLSの
+        /// `ols/estimator.rs`側の同名ヘルパー（`RTOL=1e-6`）より緩い`1e-4`を使う理由: OLSの
         /// 列順序不変性は閉形式解（col_piv_qr）の数値誤差のみが要因だが、Logitは
         /// 反復最適化（Newton/BFGS/L-BFGS）を経るため、列順序の違いで収束経路
         /// （標準化空間での列スケールが変わる）が変わり、`tol`ちょうどで停止する

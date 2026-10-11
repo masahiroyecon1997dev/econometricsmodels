@@ -33,10 +33,10 @@
 //! - `WithinRegressionFailed`: within変換済みデータの最小二乗推定委譲の失敗
 //!   （`panel-common.md`4.3節）
 //! - `FTestFailed`: F統計量（`fe.rs`モジュールdoc「自由度調整」のF統計量節、REは
-//!   `re.rs`モジュールdoc「F統計量」）のWald検定（`crate::linear::ols::wald_f_test`）が
+//!   `re.rs`モジュールdoc「F統計量」）のWald検定（`crate::shared::wald::wald_f_test`）が
 //!   失敗した場合。`WithinRegressionFailed`と
 //!   意味が異なる（`OlsEstimator::fit`自体は既に成功した後の、F検定固有の共分散部分行列の
-//!   ほぼ特異性というbackstopのみ、`ols.rs`の`wald_f_test`docコメント参照）ため別バリアントに
+//!   ほぼ特異性というbackstopのみ、`shared/wald.rs`の`wald_f_test`docコメント参照）ため別バリアントに
 //!   分離した（`IvError::FirstStageFailed`が`WithinRegressionFailed`と同じ`LeastSquaresError`
 //!   ラップでも変換箇所ごとに専用バリアントにする判断と同じ）。
 //! - `BetweenRegressionFailed`: RE（Swamy-Arora分散成分推定、`re-spec.md`3.1節）の
@@ -312,7 +312,7 @@ pub enum PanelError {
         source: LeastSquaresError,
     },
 
-    /// F統計量のWald検定（`crate::linear::ols::wald_f_test`への委譲）が
+    /// F統計量のWald検定（`crate::shared::wald::wald_f_test`への委譲）が
     /// 失敗した。`WithinRegressionFailed`とは別バリアント（理由はモジュールdoc参照）。
     ///
     /// 実際に発生しうるのは`LeastSquaresError::Common(CommonError::ComputationFailed)`
@@ -619,7 +619,7 @@ impl GroupIndices {
 }
 
 /// `(X̃'X̃)⁻¹`を求める（`X̃`はFE/REそれぞれの変換後の設計行列）。HC1〜HC3・Clusterいずれの
-/// 計算でも共通して必要になる。`ols::xtx_inverse`と同じ発想だが、`OlsEstimator`が
+/// 計算でも共通して必要になる。`shared::covariance::xtx_inverse`と同じ発想だが、`OlsEstimator`が
 /// 保持する`cov_params`はprivateで再利用できないため独立に計算し直す。
 ///
 /// `X̃'X̃`が対称正定値であることは、`OlsEstimator::fit`が同じ`x`で既に成功している
@@ -637,7 +637,7 @@ pub(crate) fn xtx_inverse(x: &Mat<f64>, k: usize) -> Result<Mat<f64>, PanelError
     })
 }
 
-/// 行ごとのレバレッジ `h_ii = x̃_i (X̃'X̃)⁻¹ x̃_i'`（`ols::hc_cov_params`のレバレッジ計算と
+/// 行ごとのレバレッジ `h_ii = x̃_i (X̃'X̃)⁻¹ x̃_i'`（`shared::covariance::hc_cov_params`のレバレッジ計算と
 /// 同じ式）。FEでは`leverage_full`（`fe.rs`）の材料（`h_within`）として使う。REでは
 /// 変換済み設計行列に省略された固定効果ダミーが無いため、この値自体がそのままHC2/HC3の
 /// レバレッジになる（モジュールdoc参照）。
@@ -659,7 +659,7 @@ pub(crate) fn panel_classical_cov_params(
     Mat::from_fn(k, k, |i, j| sigma2 * (*xtx_inv.get(i, j)))
 }
 
-/// `panel_hc_cov_params`内部でのみ使うHCの種類（`ols::HcVariant`と同型だがHC0を含まない、
+/// `panel_hc_cov_params`内部でのみ使うHCの種類（`shared::covariance::HcVariant`と同型だがHC0を含まない、
 /// FE/REともにHC0はスコープ外、`fe.rs`モジュールdoc「`cov_type`対応」参照）。
 pub(crate) enum PanelHcVariant {
     Hc1,
@@ -667,14 +667,14 @@ pub(crate) enum PanelHcVariant {
     Hc3,
 }
 
-/// HC1〜HC3の係数分散共分散行列（k×k）。`ols::hc_cov_params`と同型の構造だが、
+/// HC1〜HC3の係数分散共分散行列（k×k）。`shared::covariance::hc_cov_params`と同型の構造だが、
 /// 小標本補正がFE/RE用に異なる（`fe.rs`モジュールdoc「`cov_type`対応」参照）:
 /// - HC1: `w_i = n/df_resid`
 /// - HC2/HC3: `w_i`はレバレッジ`h`ベース（FEは`leverage_full`、REは`leverage_within`を渡す）
 ///
 /// `h`の`expect`（`Hc2`/`Hc3`分岐）は、呼び出し元の`fit()`が`variant=Hc2|Hc3`のときは
 /// 必ず`Some(&h)`を渡す構造になっており、`variant`と`h`の組み合わせに呼び出し側のバグ
-/// 以外で不整合が生じることはない（`ols::hc_cov_params`の同型の
+/// 以外で不整合が生じることはない（`shared::covariance::hc_cov_params`の同型の
 /// `.expect("Hc2はleverage計算済み")`と同じ「型で表現しきれない呼び出し規約」の防御）。
 pub(crate) fn panel_hc_cov_params(
     x: &Mat<f64>,
@@ -708,11 +708,11 @@ pub(crate) fn panel_hc_cov_params(
     xtx_inv * &psi_hat * xtx_inv
 }
 
-/// クラスターロバスト係数分散共分散行列（k×k）。`ols::cluster_cov_params`と同じ
+/// クラスターロバスト係数分散共分散行列（k×k）。`shared::covariance::cluster_cov_params`と同じ
 /// Stata流`(G/(G-1))×((n-1)/(n-K))`小標本補正を使う（fixest（R）・Stataの`xtreg`/
 /// `reghdfe`との数値一致のため、linearmodels方式`n/(n-extra_df-k)`から
 /// 変更した。`fe.rs`モジュールdoc「`cov_type`対応」参照）。`G`はこの関数が
-/// `groups`から数える（`ols::cluster_cov_params`と同じ）。`K`（`(n-1)/(n-K)`の分母）は
+/// `groups`から数える（`shared::covariance::cluster_cov_params`と同じ）。`K`（`(n-1)/(n-K)`の分母）は
 /// 呼び出し側が決める`k_correction`引数で渡す——FEは固定効果ダミーとクラスター変数の
 /// ネスト関係で決まるfixest固有のK計算（`fe.rs`の`fe_cluster_k_correction`）、REは
 /// 単純に`df_model`（FEのような固定効果ダミーのネスト補正が不要、モジュールdoc参照）。

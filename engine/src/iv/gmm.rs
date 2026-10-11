@@ -375,7 +375,7 @@ impl GmmEstimator {
         let n = input.nobs();
         // 観測数`n`が`k`（構造方程式の係数の数）以下だと、後段のサンドイッチSE計算
         // （`df_resid=n-k`による除算、HC1補正`n/(n-k)`等）がNaN/Infinityを静かに生成しうる
-        // （`ols.rs`のn<=k検証と同じ理由）。`OlsEstimator::fit`/`TwoSlsEstimator::fit`と
+        // （`ols/estimator.rs`のn<=k検証と同じ理由）。`OlsEstimator::fit`/`TwoSlsEstimator::fit`と
         // 同じ`CommonError::InsufficientObservations`で早期に弾く。
         //
         // `l`（全操作変数の数）については、`hc0`〜`hc3`/`cluster`の小標本補正が`l`ではなく
@@ -392,7 +392,7 @@ impl GmmEstimator {
 
         // `cov_type=Cluster`でクラスター数`g`が構造方程式の傾き係数の数`q`
         // （`k - k_constant`）以下だと、ロバストWald（χ²）検定の`q×q`部分行列が構造的に
-        // 特異になる（`rank(Ŝ) ≤ g - 1`、`two_sls.rs`/`ols.rs`と同型）。
+        // 特異になる（`rank(Ŝ) ≤ g - 1`、`two_sls.rs`/`ols/estimator.rs`と同型）。
         // `g`・`q`は入力だけから判定できるため、点推定・SE計算より前に弾く。
         // `weight_type=Cluster`の重み行列`S`（l×l）の`G`と`l`の関係は別軸のため
         // `validate_weight_type`側で検証する。
@@ -952,10 +952,10 @@ fn cluster_moment_covariance(
     l: usize,
     groups: &[String],
 ) -> Mat<f64> {
-    let group_indices = group_indices(groups.iter().take(n));
+    let indices_by_group = group_indices(groups.iter().take(n));
 
     let mut s = Mat::<f64>::zeros(l, l);
-    for indices in group_indices.values() {
+    for indices in indices_by_group.values() {
         let mut s_g = vec![0.0_f64; l];
         for &i in indices {
             let e = *residuals.get(i, 0);
@@ -1140,11 +1140,11 @@ fn gmm_cluster_omega(
     l: usize,
     groups: &[String],
 ) -> Mat<f64> {
-    let group_indices = group_indices(groups.iter().take(n));
-    let n_groups = group_indices.len();
+    let indices_by_group = group_indices(groups.iter().take(n));
+    let n_groups = indices_by_group.len();
 
     let mut s_hat = Mat::<f64>::zeros(l, l);
-    for indices in group_indices.values() {
+    for indices in indices_by_group.values() {
         let mut s_g = vec![0.0_f64; l];
         for &i in indices {
             let e = *residuals.get(i, 0);

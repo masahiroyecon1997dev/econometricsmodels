@@ -26,7 +26,7 @@
 //! 4つのロールを持つため単一の`x`ではなく3つの設計行列を個別に保持する
 //! （`docs/spec/iv-spec.md`1章）。
 //!
-//! **配置場所の判断**: 既存の`OlsInput`/`WlsEstimator`の前例は、`OlsInput`をols.rsに
+//! **配置場所の判断**: 既存の`OlsInput`/`WlsEstimator`の前例は、`OlsInput`をols/input.rsに
 //! 定義したまま`WlsEstimator`（wls.rs）が`super::ols::OlsInput`をそのままimportして使う
 //! （`linear/common.rs`へは移動しない）というものだった。これはWLSがOLSに「乗る」非対称な
 //! 依存関係（`WlsEstimator::fit`が内部で`OlsEstimator::fit`を呼ぶ）だったため、依存の
@@ -627,7 +627,7 @@ fn partial_f_statistic(
 }
 
 /// `two_sls.rs`/`gmm.rs`の`mod proptests`が共有する、property-basedテスト用のケース生成器と
-/// 補助関数。`ols.rs`の`mod proptests`は手法ごとに生成器を持つが、IVは2SLSとGMMで同一の
+/// 補助関数。`ols/estimator.rs`の`mod proptests`は手法ごとに生成器を持つが、IVは2SLSとGMMで同一の
 /// データ構造（内生変数・操作変数・構造誤差）を要するため、ここに一本化して二重定義を避ける。
 #[cfg(test)]
 pub(crate) mod proptest_support {
@@ -776,7 +776,7 @@ pub(crate) mod proptest_support {
         }
     }
 
-    /// 相対誤差ベース＋絶対誤差フロア（`ols.rs`の`assert_approx_eq`と同じ`RTOL=1e-6`）。
+    /// 相対誤差ベース＋絶対誤差フロア（`ols/estimator.rs`の`assert_approx_eq`と同じ`RTOL=1e-6`）。
     pub(crate) fn assert_approx_eq(actual: f64, expected: f64, msg: &str) {
         let tol = 1e-6 * expected.abs().max(1.0);
         let diff = (actual - expected).abs();

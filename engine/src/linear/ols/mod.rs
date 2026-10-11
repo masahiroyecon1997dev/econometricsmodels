@@ -1,5 +1,6 @@
 //! OLSの入力データ（被説明変数・設計行列）の型定義と、推定本体（`OlsEstimator`）。
-//! 推定本体は各種共分散行列（classical/HC0-3/HAC/cluster）・Wald検定・予測までを持つ。
+//! 推定本体は最小二乗・共分散行列（classical/HC0-3/HAC/cluster）・Wald検定・適合度の部品
+//! （`crate::shared`）を呼んで推論結果を組み立てる。予測は`predict_new_data`。
 //!
 //! `engine`はpolars/PyO3を一切知らない（`.claude/rules/rust-style.md`「責務分離」参照）。
 //! `engine_pybind`はpolars DataFrameから列ごとに`Vec<f64>`を抽出するところまでを担い

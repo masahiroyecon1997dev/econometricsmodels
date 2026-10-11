@@ -15,7 +15,7 @@
 //!
 //! そこで engine 側では faer のグローバル並列度を [`Par::Seq`] に固定し、並列化が
 //! 実測で有効な箇所だけ `Par::Rayon(_)` を対象の faer API へ**明示的に渡して opt-in**
-//! する方針にする（HAC 共分散の行列積が `ols.rs` で既に `Par::Seq` を明示している
+//! する方針にする（HAC 共分散の行列積が `shared/covariance.rs` で既に `Par::Seq` を明示している
 //! のと同じ姿勢。`.claude/rules/rust-style.md`「パフォーマンス」節参照）。グローバル設定を
 //! 並列化のために引き上げるコードは今後も入れない前提（入れると下の [`ensure_serial`] の
 //! 不変条件が崩れる）。

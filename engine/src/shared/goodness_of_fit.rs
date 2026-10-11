@@ -21,6 +21,8 @@ pub(crate) struct GaussianGoodnessOfFit {
 /// - 調整済みR²は切片の有無で自由度の分子を変える（`n - k_constant`）。
 /// - 対数尤度は最尤推定量`σ̂² = SSR/n`ベース（classical標準誤差の`SSR/(n-k)`とは異なる）。
 /// - AIC/BICの罰則項の乗数は`k`。FE等で乗数を差し替えたいときは`log_likelihood`だけ使う。
+///
+/// 前提: `n > k`（`n - k`は`usize`の減算）。呼び出し側が観測数の検証を済ませていること。
 pub(crate) fn gaussian_goodness_of_fit(
     y: &Mat<f64>,
     ssr: f64,

@@ -48,7 +48,7 @@
 //! 観測数1のグループ（singleton）を明示的に検出し`PanelError::SingletonGroup`を返す
 //! （`fe-spec.md`1章）。自動除外はしない。**下流の特異行列エラーとして偶発的に検出される形には
 //! しない**——singletonのエンティティ/時点はwithin変換後にその行が全列ゼロになり
-//! `OlsEstimator::fit`側で特異行列として（間接的に、かつ原因の分かりにくいエラー
+//! 最小二乗側で特異行列として（間接的に、かつ原因の分かりにくいエラー
 //! メッセージで）検出されうるが、`fe-spec.md`1章はこれを避け、within変換の**前**に生の
 //! `entity`/`time`列から直接カウントして専用のバリデーションエラーにすることを要求する。
 //! - **1-way**: entityのみ検出（`validate_no_singleton_groups_one_way`）。
@@ -57,28 +57,30 @@
 //! - 複数のsingletonグループが存在する場合は、観測順で最初に現れるグループのみを
 //!   報告する（`validate_no_zero_variance_regressors`の「最初の1件を報告」方針と統一）。
 //!
-//! ## `OlsEstimator`への委譲（`FeEstimator`、4.3節）
+//! ## within変換後の最小二乗（`FeEstimator`、4.3節）
 //!
-//! FEは**まず`OlsEstimator`への委譲を試す**（within変換したデータを`OlsEstimator::fit`に
-//! 渡す、`WlsEstimator`と同型のパターン。`docs/spec/panel-common.md`4.3節）。
-//! `FeEstimator::fit`は「singleton検出→within変換（2-wayはバランスパネル検証も内包）→
-//! 分散ゼロ検出→`OlsEstimator::fit`」の順にパイプラインを実行する。
+//! FEはwithin変換したデータに最小二乗をあてはめる（Frisch-Waugh-Lovell定理により、
+//! within変換後の最小二乗点推定はFE推定量`β̂`と数学的に一致する。`docs/spec/panel-common.md`
+//! 4.3節）。`FeEstimator::fit`は「singleton検出→within変換（2-wayはバランスパネル検証も内包）→
+//! 自由度検証→分散ゼロ検出→`confidence_level`検証→`shared::least_squares::least_squares`→
+//! `cov_type`別の共分散計算→自由度調整後の統計量の再計算」の順にパイプラインを実行する。
 //!
-//! **`FeEstimator::fit`はwithin推定量`β̂`の委譲に加えて、自由度調整（`fe-spec.md`3.2節）・
-//! `cov_type`対応（3.1節・3.2節）・パネル固有R²（2.3節）まで
-//! 実装している**。within変換後のOLS推定量`β̂`はwithin推定量として数学的に正しい値になる
-//! （自由度・`cov_type`に依存しない）ため、委譲だけで正しく求まる（4.3節。WLSがR²等を
-//! 素のOLS計算のままでは使わなかったのと同じ教訓が、以下の再計算箇所に表れている）。
+//! 当初は`OlsEstimator::fit`（`CovType::Classical`固定）に委譲していたが、FEが使うのは
+//! `β̂`・残差・`(X̃'X̃)⁻¹`・適合度だけで、標準誤差・F検定は`cov_type`ごとにFE自身が計算し直す
+//! （`OlsEstimator`の推論結果は使わない）ため、最小二乗の部品を直接呼ぶ形に置き換えた。
+//! `x=[]`（固定効果のみのモデル）だとwithin変換後の設計行列も0列（`k=0`）になるが、
+//! `least_squares`は0列も受理する。
 //!
-//! `FeEstimator::fit`は`OlsInput::from_columns`を`include_intercept=false`で呼ぶ
-//! （within変換で全体平均も含めて差し引かれているため、変換後データに切片は不要——
-//! `OlsEstimator::fit`が変換後の残差平均をゼロと仮定する通常のOLSと同じ考え方）。
-//! `OlsEstimator::fit`自体は常に`CovType::Classical`で呼ぶ（`β̂`・残差の取得のみが目的で、
-//! `cov_type`ごとの標準誤差は`FeEstimator`が独自に計算し直すため、委譲先のcov_type選択は
-//! 結果に影響しない。詳細は「cov_type対応」節参照）。
+//! `FeEstimator::fit`は`OlsInput::from_columns`を`include_intercept=false`で作る
+//! （within変換で全体平均も含めて差し引かれているため、変換後データに切片は不要）。
+//! within R²・対数尤度は`shared::goodness_of_fit::gaussian_goodness_of_fit`
+//! （`has_intercept=false`、非中心化TSS）で求める。
 //!
-//! `OlsInput::from_columns`/`OlsEstimator::fit`が返す`LeastSquaresError`は
-//! `PanelError::WithinRegressionFailed { source }`に包む（`common.rs`のdocコメント参照）。
+//! `confidence_level`が`(0, 1)`の範囲外、および設計行列の特異性（`least_squares`の
+//! `RankDeficient`）は`PanelError::WithinRegressionFailed { source }`（`LeastSquaresError`の
+//! `InvalidConfidenceLevel`・`SingularMatrix`）に包む（`common.rs`のdocコメント参照）。
+//! 観測数不足（`n <= df_model`）は先に`InsufficientDegreesOfFreedom`で弾くため、最小二乗側の
+//! `n <= k`検査には到達しない。
 //!
 //! `FeEffects`（`OneWay`/`TwoWay`）で1-way/2-wayを切り替える。将来`FEOptions`
 //! が導入されたら、その一部（またはそのままのフィールド型）として
@@ -92,15 +94,15 @@
 //! 補正する、`fe-spec.md`3.2節）。`df_resid = n - df_model`。`n <= df_model`なら
 //! `PanelError::InsufficientDegreesOfFreedom`。
 //!
-//! **`OlsEstimator`自身のt検定・調整済みR²・AIC/BICは`df_resid_ols = n - k`（`k`のみ、
-//! `neffects`を知らない）を前提に計算されているため誤り**（WLSの教訓と同型）。
-//! `FeEstimator::fit`は以下を委譲後に再計算し、上書きする:
+//! **素の最小二乗（`OlsEstimator`）のt検定・調整済みR²・AIC/BICは`df_resid_ols = n - k`
+//! （`k`のみ、`neffects`を知らない）を前提にしているためFEには使えない**（WLSの教訓と同型）。
+//! `FeEstimator::fit`は`OlsEstimator`を経由せず、以下をFE自身で計算する:
 //! - **標準誤差・t値・p値・信頼区間**: `cov_type`ごとに`FeEstimator`自身が独自に
 //!   計算し直す（下記「cov_type対応」節参照）。t値・p値・信頼区間の計算自体は
 //!   t分布（自由度は`cov_type`によらず常に`df_resid`、3.3節）で`crate::inference`の
 //!   共有ヘルパーを使う（OLS自身と同じロジック）。
 //! - **AIC/BIC**: `log_likelihood`自体は`SSR/n`のみに依存し`df_resid`非依存の式
-//!   （`OlsEstimator::log_likelihood()`のformulaと同一）のためそのまま再利用できるが、
+//!   （`gaussian_goodness_of_fit`の`log_likelihood`）のためそのまま再利用できるが、
 //!   ペナルティ項の乗数は`k`ではなく`df_model`（固定効果の実効パラメータ数を含む）を使う:
 //!   `aic = -2*log_likelihood + 2*df_model`、`bic = -2*log_likelihood + ln(n)*df_model`。
 //! - **F統計量**（`f_statistic`/`f_p_value`）: 当初は検定統計量（t検定）に限定してスコープ
@@ -108,10 +110,9 @@
 //!   （`panel-common.md`2.1節がOLS同様
 //!   `f_statistic`/`f_p_value`を含める前提だった）の実装時に、engine側に対応する
 //!   panel自由度調整版が存在しないことが判明し、ユーザー確認の上で本節に前倒しで
-//!   実装した。**`OlsEstimator`自身の`estimator().f_statistic()`/`f_p_value()`は
-//!   引き続き`df_resid_ols = n - k`・`CovType::Classical`ベースのままで誤り**
-//!   （`FeEstimator`自身の`f_statistic()`/`f_p_value()`を使うこと、`estimator()`の
-//!   docコメント参照）。
+//!   実装した。`FeEstimator`は`OlsEstimator`を保持しないため、F統計量は
+//!   `FeEstimator`自身の`f_statistic()`/`f_p_value()`だけ（`df_resid_ols = n - k`・
+//!   `CovType::Classical`ベースの値は存在しない）。
 //!   - **定義**: 「切片を除く全傾き係数が同時にゼロ」というOLSの`f_statistic`と同じ
 //!     帰無仮説を、FEの傾き係数`k`個（FEは`within`変換で切片が消えているため
 //!     `k_constant=0`、`OlsInput::from_columns`を`include_intercept=false`で呼ぶのと
@@ -121,19 +122,22 @@
 //!     モデル全体のF検定であり定義が異なるため、クロスチェックには使わない——後述
 //!     「検証」参照）。
 //!   - **実装**: `cov_type`別に計算し直した`cov_params`（`std_errors`等と同じ、この節の
-//!     直前で計算済み）と`estimator.params()`を使い、`crate::linear::ols::wald_f_test`
-//!     （OLS本体の`fit()`・`wald_test_last_columns`が使う既存のWald F検定を`pub(crate)`化
-//!     して再利用、サンドイッチ計算を複製しない。`.claude/rules/rust-style.md`
+//!     直前で計算済み）と`params()`（`β̂`）を使い、`crate::shared::wald::wald_f_test`
+//!     （OLS本体の`fit()`・`wald_test_last_columns`・REと共有するWald F検定を再利用、
+//!     サンドイッチ計算を複製しない。`.claude/rules/rust-style.md`
 //!     「全手法で共有するロジック」・`engine/src/linear/CLAUDE.md`の`wald_test_last_columns`
 //!     再利用方針と同じ判断）で`(k_constant=0, df_model=k, df_inference)`を渡す。
 //!     分母自由度`df_inference`は`cov_type=Cluster`のとき`G-1`、`Dk`のとき
 //!     `t_periods-1`、それ以外は`df_resid`（**OLS自身のCluster特有の
 //!     `n_groups-1`切替と同じパターンに揃えた**、上記「`cov_type`対応」節参照）。
 //!     `k=0`（説明変数無し）はOLSと同じくNaNを返す。
-//!   - **エラー**: `wald_f_test`の失敗（共分散部分行列が数値的にほぼ特異）は
-//!     `PanelError::FTestFailed { source }`として伝播する（`WithinRegressionFailed`とは
-//!     意味が異なる——`OlsEstimator::fit`自体は既に成功した後の、F検定固有の計算失敗
-//!     のため別バリアントにする、`common.rs`のdocコメント参照）。rankの上界から入力だけで
+//!   - **エラー**: `wald_f_test`の失敗（共分散部分行列が数値的にほぼ特異。`CommonError`を
+//!     `LeastSquaresError`に包む）は`PanelError::FTestFailed { source }`として伝播する
+//!     （`WithinRegressionFailed`とは意味が異なる——最小二乗自体は既に成功した後の、
+//!     F検定固有の計算失敗のため別バリアントにする、`common.rs`のdocコメント参照）。
+//!     以前は委譲先の`OlsEstimator::fit`が（`Classical`で）同種のF検定を内部で無条件に
+//!     計算していたため、完全適合・極端なスケール差の入力は`WithinRegressionFailed`として
+//!     先に失敗していたが、現在はFE自身のF検定の失敗として`FTestFailed`になる。rankの上界から入力だけで
 //!     構造的な特異性が判定できる入力（Clusterの`G <= k`、Dkの`t_periods <= k`）は
 //!     共分散計算の前に`InsufficientClustersForInference`/
 //!     `PanelError::InsufficientDkPeriodsForInference`で弾く。2グループ（Clusterの`G=2`・
@@ -145,7 +149,7 @@
 //!   - **検証**: 主リファレンス`linearmodels`の`PanelOLS.fit().f_statistic`
 //!     （`cov_type="unadjusted"`）と数値比較する。`k=1`（`fixest_reference_input`を使う
 //!     既存テスト）では「1自由度のF検定は両側t検定と代数的に等価」
-//!     （`OlsEstimator`の同名の性質、`ols.rs`の
+//!     （`OlsEstimator`の同名の性質、`ols/estimator.rs`の
 //!     `wald_test_last_columns_matches_squared_t_statistic_for_single_column`参照）が
 //!     成り立つため、既に検証済みの`test_stats`/`p_values`から`f_statistic = test_stat²`・
 //!     `f_p_value = p_value`という追加の恒等式チェックで足りる。`k=2`の真の同時検定
@@ -168,14 +172,13 @@
 //!
 //! **2.3節の「OLSの`r_squared`をそのまま流用しない」の解釈**: この一文は「単一の曖昧な
 //! フィールドを残さず明示的な3フィールドのみにする」というフィールド構成についての
-//! 要求であり、`r_squared_within`の**値**として`OlsEstimator::r_squared()`をそのまま
+//! 要求であり、`r_squared_within`の**値**として最小二乗の`R²`（切片なし、非中心化TSS）をそのまま
 //! 採用すること自体は妨げない（後述の通りこの値は数学的に「within R²」の定義そのもの
 //! と一致するため、独立に再計算する意味が無い）。
 //!
 //! - **`r_squared_within`は「実際に使ったFE構造でdemeanした残差」を採用**（1-wayは
-//!   entityのみ、2-wayはentity+timeの両方）——`estimator().r_squared()`をそのまま使う
-//!   （`OlsInput::from_columns`が`include_intercept=false`で呼ばれるため`OlsEstimator`
-//!   自身が非中心化TSSを使う分岐を通り、within変換後の`y`の平均が厳密にゼロになる性質
+//!   entityのみ、2-wayはentity+timeの両方）——`gaussian_goodness_of_fit(.., has_intercept=false).r_squared`で求める
+//!   （切片なしのため非中心化TSSを使う分岐を通り、within変換後の`y`の平均が厳密にゼロになる性質
 //!   （`Σ_i(y_i - ȳ_{e(i)}.) = 0`が任意の不均衡パネルで成り立つ）と合わせて、この値が
 //!   まさに「within R²」の定義と一致する）。**`linearmodels`自身の`rsquared_within`は
 //!   常にentityのみのdemeanで固定**（2-wayモデルでも時間効果を含めない）という別定義
@@ -189,7 +192,7 @@
 //!   `has_constant=False`分岐（非中心化TSS、切片による中心化を行わない）が常に適用される:
 //!   - `r_squared_overall`: 固定効果の切片項を一切含めない——**元の`y`・`x`に、推定した
 //!     傾き係数`β̂`だけを当てはめた残差**で計算する（`SSR = Σ_i(y_i - x_i'β̂)²`、
-//!     `TSS = Σ_i y_i²`）。within推定の残差（`estimator().residuals()`、FWL定理により
+//!     `TSS = Σ_i y_i²`）。within推定の残差（`FeEstimator::residuals()`、FWL定理により
 //!     固定効果込みの残差と一致）とは別物であることに注意（固定効果の説明力を無視した、
 //!     意図的に「弱い」R²）。
 //!   - `r_squared_between`: エンティティ平均`ȳ_i.`・`x̄_i.`に同じ`β̂`を当てはめた残差
@@ -207,9 +210,9 @@
 //!
 //! ## `cov_type`対応（`FeCovType`、3.1節・3.2節）
 //!
-//! **`OlsEstimator`の既存cov_type計算（`classical_cov_params`/`hc_cov_params`/
-//! `cluster_cov_params`）はそのまま流用できない**。`engine::linear::ols`の関数は`private`で
-//! 呼び出せないという理由だけでなく、以下の3点でFEに必要な計算式そのものが異なるため
+//! **`shared::covariance`の既存cov_type計算（`classical_cov_params`/`hc_cov_params`/
+//! `cluster_cov_params`）はそのまま流用できない**。以下の3点でFEに必要な計算式そのものが
+//! 異なるため
 //! （linearmodels・fixestのソースコード確認・実地数値検証済み、ユーザー承認済み、
 //! 2026-09-12）:
 //!
@@ -231,7 +234,7 @@
 //!      entity効果とtime効果の重複分`-1/n`を補正）で計算できる
 //!      （`leverage_full`関数doc参照。fixestの`vcov="HC2"`/`"HC3"`と数値一致を
 //!      1-way・2-way双方で確認済み）。
-//! 3. **Clusterも独自に計算し直す**（`OlsEstimator`の`cluster_cov_params`は使わない）:
+//! 3. **Clusterも独自に計算し直す**（`shared::covariance::cluster_cov_params`は使わない）:
 //!    **【linearmodels方式からfixest方式へ変更】** 当初はlinearmodels
 //!    （旧FE主リファレンス）に合わせ`(G/(G-1))`補正を掛けず`n/(n-extra_df-k)`のみを
 //!    使っていたが、fixest（R）・Stata（`xtreg`/`reghdfe`）の利用者が期待する値と
@@ -260,7 +263,7 @@
 //! **t値・p値・信頼区間・F検定の自由度（`df_inference`）は`cov_type=Cluster`のとき
 //! `G-1`、`Dk`のとき`t_periods-1`に切り替える**（fixestの`ssc()`既定`t.df="min"`、
 //! 。OLS自身が`cov_type=Cluster`のときだけ`n_groups-1`に切り替える
-//! （`ols.rs`の`df_inference`）のと同じパターンをClassical/HC1-3以外の全cov_typeに
+//! （`ols/estimator.rs`の`df_inference`）のと同じパターンをClassical/HC1-3以外の全cov_typeに
 //! 広げたもの）。`df_resid`自体（σ̂²・調整済みR²・AIC/BIC）は`cov_type`によらず
 //! 常に元のパネル自由度調整済みの値のまま。
 //!
@@ -327,7 +330,7 @@
 //!
 //! `fe-spec.md`3.5節どおり別メソッド（`fit()`の戻り値本体には含めない、IVの`first_stage()`と同じ
 //! 「追加結果は別メソッド」方針）。`FeEstimator`は`fit()`時点で`input`（変換前の元の
-//! `y`/`x`/`entity`/`time`）と`estimator().params()`（β̂）を既に保持しているため、
+//! `y`/`x`/`entity`/`time`）と`params()`（β̂）を既に保持しているため、
 //! `fixed_effects()`は追加のフィールドを持たず呼び出し時に計算し直す（IVの`first_stage`
 //! と異なり、固定効果自体の値は主推定`β̂`の計算に必要ないため、常に計算しておく理由が無い）。
 //!
@@ -388,7 +391,7 @@ use crate::panel::common::{
 };
 use crate::panel::re::ReInput;
 use crate::shared::goodness_of_fit::gaussian_goodness_of_fit;
-use crate::shared::least_squares::{LeastSquaresFit, least_squares, residual_sum_of_squares};
+use crate::shared::least_squares::{LeastSquaresFit, least_squares};
 use crate::shared::wald::wald_f_test;
 use crate::validation::validate_cluster_count_covers_slopes;
 
@@ -600,7 +603,7 @@ impl FeInput {
 }
 
 /// FEの固定効果の方向（1-way/2-way）を指定する。`FeEstimator::fit`が受け取る
-/// （モジュールdoc「`OlsEstimator`への委譲」参照。将来`FEOptions`に
+/// （モジュールdoc「within変換後の最小二乗」参照。将来`FEOptions`に
 /// 統合される想定の暫定的なパラメータ）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeEffects {
@@ -664,9 +667,9 @@ pub enum FeCovType {
     },
 }
 
-/// FEの推定結果。`within`変換したデータを`OlsEstimator::fit`に委譲し、`cov_type`
+/// FEの推定結果。`within`変換したデータに最小二乗をあてはめ、`cov_type`
 /// ・自由度調整を反映した標準誤差等を計算し直す
-/// （モジュールdoc「`OlsEstimator`への委譲」「自由度調整」「`cov_type`対応」参照）。
+/// （モジュールdoc「within変換後の最小二乗」「自由度調整」「`cov_type`対応」参照）。
 ///
 /// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」）。
 #[derive(Debug)]
@@ -715,7 +718,7 @@ pub struct FeEstimator {
     r_squared_overall: f64,
     aic: f64,
     bic: f64,
-    /// 傾き係数`k`個の同時Wald F検定（`estimator().f_statistic()`とは異なりFE用に
+    /// 傾き係数`k`個の同時Wald F検定（素の最小二乗の`f_statistic`とは異なりFE用に
     /// panel自由度調整済み・`cov_type`反映済み、モジュールdoc「自由度調整」のF統計量節
     /// 参照）。`k=0`ならNaN。
     f_statistic: f64,
@@ -723,8 +726,8 @@ pub struct FeEstimator {
 }
 
 impl FeEstimator {
-    /// `input`を`effects`が指定する方向でwithin変換した上で`OlsEstimator::fit`に委譲し、
-    /// FEを推定する。パネル自由度調整（`fe-spec.md`3.2節）・`cov_type`対応
+    /// `input`を`effects`が指定する方向でwithin変換した上で最小二乗をあてはめ
+    /// （`shared::least_squares::least_squares`）、FEを推定する。パネル自由度調整（`fe-spec.md`3.2節）・`cov_type`対応
     /// （3.1節・3.2節）を反映した標準誤差・t値・p値・信頼区間・AIC/BIC、
     /// パネル固有R²（2.3節）を計算し直す（モジュールdoc「自由度調整」
     /// 「`cov_type`対応」「パネル固有R²」参照）。
@@ -733,9 +736,8 @@ impl FeEstimator {
     /// （`validate_no_singleton_groups_one_way`/`validate_no_singleton_groups_two_way`）
     /// → within変換（`within_transform_one_way`/`within_transform_two_way`、
     /// 2-wayはバランスパネル検証を内包）→ 自由度検証 → 分散ゼロ検出
-    /// （`validate_no_zero_variance_regressors`）→ `OlsEstimator::fit`への委譲
-    /// （`include_intercept=false`・`cov_type=CovType::Classical`固定。理由はモジュールdoc
-    /// 参照）→ `cov_type`別の共分散行列の計算 → 自由度調整後の統計量の再計算。
+    /// （`validate_no_zero_variance_regressors`）→ `confidence_level`検証 → 最小二乗
+    /// （切片なし。理由はモジュールdoc参照）→ `cov_type`別の共分散行列の計算 → 自由度調整後の統計量の再計算。
     ///
     /// # Errors
     /// - `effects=TwoWay`で`input.time()`が`None`の場合は`PanelError::TwoWayRequiresTime`
@@ -756,7 +758,7 @@ impl FeEstimator {
     ///   全時点でも）が2時点に1観測ずつなら`PanelError::DegenerateDkTwoPeriods`
     /// - `cov_type=Cluster`でクラスター数が2で全エンティティ（2-wayでは全時点でも）が
     ///   2クラスターに1観測ずつなら`PanelError::DegenerateClusterTwoGroups`
-    /// - 委譲先の`OlsEstimator::fit`が失敗した場合（観測数不足・特異行列等）は
+    /// - `confidence_level`が`(0, 1)`の範囲外、または設計行列が特異な場合は
     ///   `PanelError::WithinRegressionFailed`
     /// - F検定の共分散部分行列が数値的にほぼ特異な場合は`PanelError::FTestFailed`
     pub fn fit(
@@ -766,8 +768,7 @@ impl FeEstimator {
         confidence_level: f64,
     ) -> Result<Self, PanelError> {
         // faerのグローバル並列度をPar::Seqに固定する（`crate::parallelism`。
-        // 委譲先のOlsEstimator::fit自身も呼ぶが、`cargo test -p engine`でFeEstimator::fitを
-        // 直接叩く経路との統一のためここでも呼ぶ、`engine/src/panel/CLAUDE.md`「faerの
+        // `cargo test -p engine`でFeEstimator::fitを直接叩く経路でも担保するためここで呼ぶ、`engine/src/panel/CLAUDE.md`「faerの
         // グローバル並列度」参照）。
         crate::parallelism::ensure_serial();
 
@@ -860,8 +861,7 @@ impl FeEstimator {
         // `df_inference`はt検定・信頼区間・F検定に使う自由度。`cov_type=Cluster`のとき
         // `G-1`、`Dk`のとき`t_periods-1`に切り替える（fixestの`ssc()`既定`t.df="min"`。
         // それ以外（Classical/HC1-3）は引き続き`df_resid`のまま
-        // （`ols::fit_allowing_no_regressors`の`df_inference`と同じ切り替えパターン、
-        // ）。標準誤差のスケール計算に使う`K`（`fe_cluster_k_correction`）とは
+        // （`OlsEstimator::fit`の`df_inference`と同じ切り替えパターン）。標準誤差のスケール計算に使う`K`（`fe_cluster_k_correction`）とは
         // 別軸の値であることに注意。
         let mut dk_bandwidth_used = None;
         let (cov_params, df_inference) = match &cov_type {
@@ -1009,12 +1009,7 @@ impl FeEstimator {
         // （`has_intercept=false`、非中心化TSS）がそのままこの定義と一致する。
         // between/overallはlinearmodelsの`_rsquared`と完全一致させるため、変換前の元の
         // `y`/`x`から独立に計算し直す。
-        let fit_stats = gaussian_goodness_of_fit(
-            within_input.y(),
-            residual_sum_of_squares(&residual_mat),
-            k,
-            false,
-        );
+        let fit_stats = gaussian_goodness_of_fit(within_input.y(), ssr, k, false);
         let r_squared_within = fit_stats.r_squared;
         let r_squared_between =
             fe_r_squared_between(input.y(), input.x(), &params, input.entity_codes());
@@ -1028,7 +1023,7 @@ impl FeEstimator {
 
         // F統計量（モジュールdoc「自由度調整」のF統計量節）: 傾き係数`k`個の
         // 同時Wald検定。FEの`cov_params`（`cov_type`別、上で計算済み）・`df_inference`
-        // （`cov_type=Cluster`/`Dk`のときだけ`df_resid`から切り替わる、`ols::wald_f_test`の
+        // （`cov_type=Cluster`/`Dk`のときだけ`df_resid`から切り替わる、`shared::wald::wald_f_test`の
         // `df_inference`引数と同じ扱い）を使う。`k_constant=0`（FEに切片は無い、上記
         // `OlsInput::from_columns`呼び出しと同じ理由）。
         let (f_statistic, f_p_value) = if k == 0 {
@@ -1135,7 +1130,7 @@ impl FeEstimator {
         self.n_periods
     }
 
-    /// `cov_type`別に計算し直した標準誤差（`(k, 1)`、`estimator().params()`と対応）。
+    /// `cov_type`別に計算し直した標準誤差（`(k, 1)`、`params()`と対応）。
     pub fn std_errors(&self) -> &Mat<f64> {
         &self.std_errors
     }
@@ -1470,7 +1465,7 @@ fn fe_r_squared_between(y: &[f64], x: &[Vec<f64>], params: &Mat<f64>, entity: &G
 /// `PanelOLS._rsquared`のoverall式と完全一致させる（モジュールdoc「パネル固有R²」参照）。
 ///
 /// `y`/`x`は**within変換前の元の列**を渡すこと。within推定の残差
-/// （`estimator().residuals()`、FWL定理により固定効果込みの残差と一致）とは異なり、
+/// （`residuals()`、FWL定理により固定効果込みの残差と一致）とは異なり、
 /// ここでは`β̂`だけを元の`y`/`x`に当てはめた残差（固定効果の切片項を含めない）を使う。
 ///
 /// `TSS <= 0`なら`linearmodels`と同じく`0.0`を返す。
@@ -1670,7 +1665,7 @@ pub fn validate_no_zero_variance_regressors(
 /// 大きさ）が残る。`transformed`自身の最大絶対値をスケールに使うと、この残差自身を基準に
 /// 残差を判定する自己参照になり閾値が機能しないため、変換前の値を基準にする。
 ///
-/// 閾値の乗数`n`（観測数）は、`ols::xtx_inverse`の特異性判定
+/// 閾値の乗数`n`（観測数）は、`shared::covariance::xtx_inverse`の特異性判定
 /// （`(k as f64) * f64::EPSILON * max_abs_diag`、分解に関わる次元数を乗数にする）と同じ
 /// 発想: グループ平均の集約（`quasi_demean_column`、観測数`n`項の和）→差分の丸め誤差の
 /// 蓄積が観測数に比例しうることを踏まえた選択。2-wayは「entityでdemean→timeでdemean」の
@@ -2463,7 +2458,7 @@ mod tests {
         // （N=2,T=2のn=4だとdf_model=1+3=4となりn<=df_modelで弾かれてしまう）。
         // 2-way within変換後、x1_out ≈ 2 * y_out がほぼ成り立つため、切片なしOLSの
         // スロープは0.5にほぼ一致するはず。x1はy*2からごくわずかに擾乱を入れる
-        // （厳密にx1=2*yだと残差が全行ゼロになり、`OlsEstimator::fit`のF検定
+        // （厳密にx1=2*yだと残差が全行ゼロになり、F検定
         // （`wald_f_test`）が分散ゼロによる特異行列で`ComputationFailed`を返してしまう
         // 退化ケースを踏むため。既存の`WlsEstimator`のテストコメント
         // `fit_without_intercept_uses_uncentered_r_squared_and_omits_const`と同じ理由）。
@@ -2650,7 +2645,7 @@ mod tests {
 
     #[test]
     fn fe_estimator_fit_propagates_invalid_confidence_level_error() {
-        // 委譲先の`OlsEstimator::fit`が検証する`confidence_level`の範囲チェック
+        // `confidence_level`の範囲チェック
         // （`(0, 1)`の範囲外）が、`PanelError::WithinRegressionFailed`として正しく
         // 伝播することを確認する（`iv::two_sls`の同型テストに倣う）。
         let entity = strings(&["a", "a", "b", "b"]);
@@ -2674,11 +2669,10 @@ mod tests {
 
     #[test]
     fn fe_estimator_fit_wraps_ols_failure_as_within_regression_failed() {
-        // 自由度検証（`n <= df_model`）が`OlsEstimator::fit`自身の`n <= k`
-        // チェックより常に厳しい（`df_model = k + neffects > k`）ため、`OlsEstimator::fit`
-        // 側の観測数不足はこの経路では発生しえなくなった（`fe_estimator_fit_propagates_
-        // insufficient_degrees_of_freedom_error`が先に弾く）。そのため、ここでは
-        // `OlsEstimator::fit`固有の別の失敗——完全な多重共線性（`LeastSquaresError::
+        // 自由度検証（`n <= df_model`）が最小二乗側の`n <= k`相当の条件より常に厳しい
+        // （`df_model = k + neffects > k`）ため、最小二乗側の観測数不足はこの経路では
+        // 発生しえない（`fe_estimator_fit_propagates_insufficient_degrees_of_freedom_error`が
+        // 先に弾く）。そのため、ここでは最小二乗固有の別の失敗——完全な多重共線性（`LeastSquaresError::
         // SingularMatrix`）——を踏ませる: x2はx1のちょうど2倍で、within変換
         // （線形変換）後も比例関係`x2_demeaned = 2 * x1_demeaned`が保たれ完全共線になる。
         // n=6（3エンティティ、singletonではない）・k=2でdf_model=2+3=5、n=6>5と
@@ -2708,7 +2702,7 @@ mod tests {
     #[test]
     fn fe_estimator_fit_propagates_insufficient_degrees_of_freedom_error() {
         // n=4・n_entities=2・k=2でdf_model=k+n_entities=4となり、n<=df_modelのため
-        // `OlsEstimator::fit`へ委譲する前に`PanelError::InsufficientDegreesOfFreedom`で
+        // 最小二乗へ進む前に`PanelError::InsufficientDegreesOfFreedom`で
         // 弾かれることを確認する。
         let entity = strings(&["a", "a", "b", "b"]);
         let y = [1.0, 2.0, 3.0, 4.0];
@@ -2889,20 +2883,47 @@ mod tests {
         assert!((fe.f_p_value() - 0.029_859_178_280_428_5).abs() < 1e-9);
     }
 
-    // `PanelError::FTestFailed`（`wald_f_test`の`ensure_well_conditioned_symmetric_matrix`
-    // backstopがFE独自の`cov_params`に対して発火する経路）は、意図的にテストを追加して
-    // いない。OLSの`fit_returns_computation_failed_for_extreme_scale_difference_in_f_test`
-    // と同型の「説明変数間の極端なスケール差」構成を試したが、`FeEstimator::fit`が委譲する
-    // `OlsEstimator::fit`自身が（`CovType::Classical`で）同じ設計行列に対する同種の
-    // F検定を内部で無条件に計算しており、そちらが先に`WithinRegressionFailed`として
-    // 失敗してしまい`FTestFailed`（FEが`cov_type`別に計算し直した後段の`wald_f_test`
-    // 呼び出し）まで到達しなかった（実地確認済み）。`cov_type=Classical`である限り
-    // 両者はほぼ同じ行列を検定するため構造的に避けられない。`FTestFailed`を単独で
-    // 再現するには、委譲先の内部検定は素通りしつつFE独自の頑健共分散（HC/Cluster/HAC）
-    // だけがほぼ特異になる病的なデータが要るが、確実な構成方法が見つからなかったため、
-    // このbackstop自体は`wald_f_test`側のOLSテストで既に検証済み（同じ関数を再利用して
-    // いるため実装自体の正しさはそちらで担保される）という理由で、この一分岐（FE経由の
-    // 到達）だけのテストは見送る。
+    #[test]
+    fn fe_estimator_fit_returns_f_test_failed_for_extreme_scale_difference() {
+        // x1は1e6オーダー、x2は1e-3オーダーとスケールが極端に異なる（x3は通常スケール）。
+        // within変換後も3列は線形従属ではないため設計行列自体はフルランク
+        // （`WithinRegressionFailed`にはならない）だが、傾き係数の同時共分散部分行列の条件数が
+        // スケール比の2乗（≈1e18）相当となり倍精度の限界を超えるため、FE自身のF検定
+        // （`wald_f_test`の`ensure_well_conditioned_symmetric_matrix`）が`FTestFailed`を返す。
+        // 以前は委譲先の`OlsEstimator::fit`が同種のF検定を先に計算して
+        // `WithinRegressionFailed`として失敗していたため、この経路は再現できなかった。
+        let n = 20;
+        let entity: Vec<String> = (0..n).map(|i| format!("e{}", i % 5)).collect();
+        let x1: Vec<f64> = (0..n).map(|i| 1e6 * (((i * 7) % 11) as f64)).collect();
+        let x2: Vec<f64> = (0..n)
+            .map(|i| 1e-3 * (((i * 5) % 13) as f64).powi(2))
+            .collect();
+        let x3: Vec<f64> = (0..n).map(|i| ((i * 3) % 7) as f64).collect();
+        let y: Vec<f64> = (0..n)
+            .map(|i| {
+                let noise = if i % 2 == 0 { 0.1 } else { -0.1 };
+                2.0 * x1[i] + 3.0 * x2[i] + 0.5 * x3[i] + noise
+            })
+            .collect();
+        let input = FeInput::from_columns(
+            &y,
+            &[x1, x2, x3],
+            vec!["x1".to_string(), "x2".to_string(), "x3".to_string()],
+            &entity,
+            None,
+            "y".into(),
+        )
+        .unwrap();
+
+        let result = FeEstimator::fit(input, FeEffects::OneWay, FeCovType::Classical, 0.95);
+
+        assert!(matches!(
+            result.unwrap_err(),
+            PanelError::FTestFailed {
+                source: LeastSquaresError::Common(CommonError::ComputationFailed(_))
+            }
+        ));
+    }
 
     // ── パネル固有R² ─────────────────────────────────────────────────────
 
@@ -4605,7 +4626,7 @@ mod tests {
         }
 
         /// 固定効果推定の数値誤差（within変換・QR）を考慮し、固定フィクスチャ比較より緩めた
-        /// 相対誤差（`ols.rs`のproptestと同じ方針）。
+        /// 相対誤差（`ols/estimator.rs`のproptestと同じ方針）。
         fn assert_approx_eq(actual: f64, expected: f64, msg: &str) {
             let tol = 1e-6 * expected.abs().max(1.0);
             assert!(

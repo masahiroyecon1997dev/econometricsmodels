@@ -77,10 +77,9 @@ pub fn validate_cluster_count_covers_slopes(g: usize, q: usize) -> Result<(), Co
 /// エラーメッセージが同一のため共有化した（`validate_cluster_groups`と同じ理由：
 /// モデル固有の計算に一切依存しない純粋な検証ロジックのため）。
 ///
-/// `OlsEstimator::fit`（公開のゲート付きエントリ）から呼ぶ想定。`FeEstimator::fit`が
-/// 内部委譲する`OlsEstimator::fit_allowing_no_regressors`（固定効果のみモデル、
-/// `x=[]`でk=0になりうる正当なケース）はこの関数を経由しない
-/// （`engine/src/linear/CLAUDE.md`「k=0の扱い」参照）。
+/// `OlsEstimator::fit`から呼ぶ想定。`FeEstimator::fit`が直接呼ぶ
+/// `shared::least_squares::least_squares`（固定効果のみモデル、`x=[]`でk=0になりうる
+/// 正当なケース）はこの関数を経由しない（`engine/src/linear/CLAUDE.md`「k=0の扱い」参照）。
 ///
 /// `n`はエラーメッセージ（`CommonError::NoRegressors { n }`）用。呼び出し側は
 /// `InsufficientObservations`と同じ引数順（`n`→`k`）で渡す。

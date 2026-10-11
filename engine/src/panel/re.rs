@@ -3078,7 +3078,7 @@ mod tests {
             ReInput::from_columns(y, x, names, entity, None, "y".to_string()).unwrap()
         }
 
-        /// 固定フィクスチャ比較より緩めた相対誤差（`ols.rs`/`fe.rs`のproptestと同じ方針）。
+        /// 固定フィクスチャ比較より緩めた相対誤差（`ols/estimator.rs`/`fe.rs`のproptestと同じ方針）。
         fn assert_approx_eq(actual: f64, expected: f64, msg: &str) {
             let tol = 1e-6 * expected.abs().max(1.0);
             assert!(

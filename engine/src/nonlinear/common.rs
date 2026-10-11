@@ -631,8 +631,8 @@ pub fn column_means(x: &Mat<f64>) -> Vec<f64> {
 ///
 /// `partial_cmp().unwrap()`について: `x`の値はNaN/無限大を含まないことが
 /// `engine_pybind::column_extraction`側で既に保証されている前提（`engine`の責務境界の
-/// 内側であり、クリーンな値しか受け取らない。OLSの`time_ordering`と同じ扱い、
-/// `engine/src/linear/ols.rs`参照）。
+/// 内側であり、クリーンな値しか受け取らない。OLSの`time_ordering`（`shared/covariance.rs`）と
+/// 同じ扱い）。
 pub fn column_medians(x: &Mat<f64>) -> Vec<f64> {
     let n = x.nrows();
     let k = x.ncols();

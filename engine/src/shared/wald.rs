@@ -107,4 +107,53 @@ mod tests {
         assert!((f3 - 1400.0 / 3.0).abs() < 1e-9);
         assert!((p3 / 1.590_465_020_438_98e-41 - 1.0).abs() < 1e-8);
     }
+
+    #[test]
+    fn wald_f_test_skips_the_constant_and_uses_only_the_slope_block() {
+        // params=[切片100, 3, 4]、傾きの共分散は diag(1, 4)。切片の分散（1e6）は無関係。
+        // wald = 3²/1 + 4²/4 = 13、F = 13/2 = 6.5。
+        let params = Mat::from_fn(3, 1, |i, _| [100.0, 3.0, 4.0][i]);
+        let cov = Mat::from_fn(3, 3, |i, j| match (i, j) {
+            (0, 0) => 1e6,
+            (1, 1) => 1.0,
+            (2, 2) => 4.0,
+            _ => 0.0,
+        });
+
+        let (f, p) = wald_f_test(&params, &cov, 1, 2, 10).unwrap();
+
+        assert!((f - 6.5).abs() < 1e-12);
+        let expected_p = FisherSnedecor::new(2.0, 10.0).unwrap().sf(6.5);
+        assert!((p - expected_p).abs() < 1e-15);
+    }
+
+    #[test]
+    fn wald_f_test_accounts_for_off_diagonal_covariance() {
+        // β=(1, 1)、Σ=[[2, 1], [1, 2]] → Σ⁻¹ = (1/3)[[2, -1], [-1, 2]]、
+        // β'Σ⁻¹β = (1/3)(2 - 1 - 1 + 2) = 2/3、F = (2/3)/2 = 1/3。
+        let params = Mat::from_fn(2, 1, |_, _| 1.0);
+        let cov = Mat::from_fn(2, 2, |i, j| if i == j { 2.0 } else { 1.0 });
+
+        let (f, _) = wald_f_test(&params, &cov, 0, 2, 30).unwrap();
+
+        assert!((f - 1.0 / 3.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn wald_f_test_rejects_a_near_singular_covariance_submatrix() {
+        // 対角のスケール比が1e18（倍精度の限界超え）。非ピボットCholeskyでは検出できず、
+        // 固有値ベースの判定（`ensure_well_conditioned_symmetric_matrix`）で弾く。
+        let params = Mat::from_fn(2, 1, |_, _| 1.0);
+        let ill = Mat::from_fn(2, 2, |i, j| if i == j { [1e12, 1e-6][i] } else { 0.0 });
+        assert!(matches!(
+            wald_f_test(&params, &ill, 0, 2, 30),
+            Err(CommonError::ComputationFailed(_))
+        ));
+
+        let zero = Mat::<f64>::zeros(2, 2);
+        assert!(matches!(
+            wald_f_test(&params, &zero, 0, 2, 30),
+            Err(CommonError::ComputationFailed(_))
+        ));
+    }
 }

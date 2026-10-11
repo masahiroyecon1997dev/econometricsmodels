@@ -5,7 +5,7 @@
 //! 推定方式名「MLE」で命名されているのと同じ考え方。`.claude/rules/rust-style.md`
 //! 「ファイル・ディレクトリ構成」参照）。
 //!
-//! 元々`OlsError`という名前でOLS単体のエラー型として`linear/ols.rs`に定義されていたが、
+//! 元々`OlsError`という名前でOLS単体のエラー型として`linear/ols`（当時は1ファイル）に定義されていたが、
 //! WLSが同じ型をそのまま再利用する設計（`OlsInput::from_columns_weighted`・
 //! `OlsEstimator::fit`を無変更で流用する、`docs/spec/wls-spec.md`「sqrt(w)変換」）に
 //! なり、WLS固有のバリアント（`WeightDimensionMismatch`/`NonPositiveWeight`）も混在する

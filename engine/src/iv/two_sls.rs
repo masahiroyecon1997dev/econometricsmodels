@@ -188,7 +188,7 @@ impl TwoSlsEstimator {
 
         // `cov_type=Cluster`でクラスター数`g`が構造方程式の傾き係数の数`q`
         // （`k - k_constant`）以下だと、ロバストWald/F検定の`q×q`部分行列が構造的に
-        // 特異になる（`rank(Ŝ) ≤ g - 1`。`ols.rs`の同型チェックを参照）。
+        // 特異になる（`rank(Ŝ) ≤ g - 1`。`ols/estimator.rs`の同型チェックを参照）。
         // 第一段階・第二段階回帰の`OlsEstimator::fit`内でも同じ検証が走るが、そちらは
         // 第一段階固有の傾き係数の数で判定され`FirstStageFailed`にラップされて`q`の値も
         // 構造方程式のものと食い違うため、`fit()`冒頭で構造方程式の`q`を使って明示的に
@@ -275,7 +275,7 @@ impl TwoSlsEstimator {
         let xtx_inv = xtx_inverse(x_hat, k)?;
 
         // `df_inference`はt検定・信頼区間・F検定に使う自由度。`cov_type=Cluster`のときだけ
-        // `G-1`に切り替える（OLSと同じ慣行、`ols.rs`の`fit()`docコメント参照）。
+        // `G-1`に切り替える（OLSと同じ慣行、`ols/estimator.rs`の`fit()`docコメント参照）。
         let mut hac_lags_used = None;
         let (cov_params, df_inference) = match &cov_type {
             CovType::Classical => {
@@ -677,7 +677,7 @@ impl TwoSlsEstimator {
 ///
 /// `X̂`（第二段階の設計行列）は`second_stage`の内部委譲フィット（`OlsEstimator::fit`）が
 /// 既に`col_piv_qr`で特異性を検証済みのため、理論上ここで`LltError`は発生しないはずだが、
-/// 浮動小数点演算の丸めにより境界的なケースで失敗しうる（`ols.rs`の`xtx_inverse`と同じ
+/// 浮動小数点演算の丸めにより境界的なケースで失敗しうる（`shared/covariance.rs`の`xtx_inverse`と同じ
 /// 防御的な扱い）。
 fn xtx_inverse(x: &Mat<f64>, k: usize) -> Result<Mat<f64>, IvError> {
     let xtx = x.transpose() * x;
@@ -695,7 +695,7 @@ fn classical_cov_params(sigma2: f64, xtx_inv: &Mat<f64>, k: usize) -> Mat<f64> {
     Mat::from_fn(k, k, |i, j| sigma2 * (*xtx_inv.get(i, j)))
 }
 
-/// `hc_cov_params`の内部でのみ使う、HCの種類（`ols.rs`の`HcVariant`と同じ位置づけ）。
+/// `hc_cov_params`の内部でのみ使う、HCの種類（`shared/covariance.rs`の`HcVariant`と同じ位置づけ）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HcVariant {
     Hc0,
@@ -705,7 +705,7 @@ enum HcVariant {
 }
 
 /// HC0〜HC3ロバストな係数分散共分散行列: `(X̂'X̂)⁻¹Ψ̂(X̂'X̂)⁻¹`（k×k）。`Ψ̂`は構造残差
-/// （`residuals`引数、`e = y - Xβ̂`）を使って計算する。数式・実装方針は`ols.rs`の
+/// （`residuals`引数、`e = y - Xβ̂`）を使って計算する。数式・実装方針は`ols/estimator.rs`の
 /// `hc_cov_params`と同型（モジュール冒頭のdocコメント「独立実装」参照。設計行列に`X̂`、
 /// 残差に構造残差`e`を使う点のみがOLSとの違い）。
 fn hc_cov_params(
@@ -752,7 +752,7 @@ fn hc_cov_params(
 }
 
 /// `CovType::Hac`の`lags`（`Option<i64>`）を実際に使うラグ数（`usize`）に解決する
-/// （`ols.rs`の`resolve_hac_lags`と同じ経験則。数式・境界条件は同一だがエラー型が
+/// （`ols/estimator.rs`の`resolve_hac_lags`と同じ経験則。数式・境界条件は同一だがエラー型が
 /// `IvError`のため独立実装、モジュール冒頭のdocコメント参照）。
 fn resolve_hac_lags(lags: Option<i64>, n: usize) -> Result<usize, IvError> {
     match lags {
@@ -767,7 +767,7 @@ fn resolve_hac_lags(lags: Option<i64>, n: usize) -> Result<usize, IvError> {
 }
 
 /// Newey-West HACの係数分散共分散行列: `(X̂'X̂)⁻¹Ŝ(X̂'X̂)⁻¹`（k×k）。数式・実装方針は
-/// `ols.rs`の`hac_cov_params`と同型（`Par::Seq`を明示指定する理由も同じ、
+/// `shared/covariance.rs`の`hac_cov_params`と同型（`Par::Seq`を明示指定する理由も同じ、
 /// `.claude/rules/rust-style.md`「パフォーマンス」参照）。設計行列に`X̂`、残差に構造残差
 /// `e`を使う点のみがOLSとの違い。
 fn hac_cov_params(
@@ -819,7 +819,7 @@ fn hac_cov_params(
 }
 
 /// クラスターロバストな係数分散共分散行列: `(X̂'X̂)⁻¹Ŝ(X̂'X̂)⁻¹ * correction`（k×k）。数式・
-/// 実装方針は`ols.rs`の`cluster_cov_params`と同型（`BTreeMap`を使う理由も同じ、
+/// 実装方針は`shared/covariance.rs`の`cluster_cov_params`と同型（`BTreeMap`を使う理由も同じ、
 /// `engine/src/linear/CLAUDE.md`「踏んだ罠」参照）。設計行列に`X̂`、残差に構造残差`e`を
 /// 使う点のみがOLSとの違い。`groups`が`G>=2`であることは`validate_cluster_groups`
 /// （呼び出し元）で検証済みの前提。
@@ -831,11 +831,11 @@ fn cluster_cov_params(
     k: usize,
     groups: &[String],
 ) -> Mat<f64> {
-    let group_indices = group_indices(groups);
-    let n_groups = group_indices.len();
+    let indices_by_group = group_indices(groups);
+    let n_groups = indices_by_group.len();
 
     let mut s_hat = Mat::<f64>::zeros(k, k);
-    for indices in group_indices.values() {
+    for indices in indices_by_group.values() {
         let mut s_g = vec![0.0_f64; k];
         for &i in indices {
             let e = *residuals.get(i, 0);
@@ -857,7 +857,7 @@ fn cluster_cov_params(
 }
 
 /// 傾き係数（切片を除く`df_model`個の係数）が全てゼロという帰無仮説のロバストWald検定を行い、
-/// F統計量とそのp値を返す。数式・実装方針は`ols.rs`の`wald_f_test`と同型（`cov_type=
+/// F統計量とそのp値を返す。数式・実装方針は`shared/wald.rs`の`wald_f_test`と同型（`cov_type=
 /// Classical`のとき代数的に古典的F検定と一致することも同じ、`ensure_well_conditioned_
 /// symmetric_matrix`による事前の条件数チェックが必要な理由も同じ）。
 fn wald_f_test(
@@ -1029,7 +1029,7 @@ mod tests {
     }
 
     /// 説明変数が定数項のみ（傾き係数が無い、`df_model=0`）の退化モデルでは、F検定の
-    /// 対象が存在しないため`wald_statistic`/`wald_p_value`は`NaN`になる（`ols.rs`の
+    /// 対象が存在しないため`wald_statistic`/`wald_p_value`は`NaN`になる（`ols/estimator.rs`の
     /// 同名の分岐と同じ0除算回避の扱い、モジュール冒頭のdocコメント参照）。
     #[test]
     fn fit_sets_f_statistic_and_f_p_value_to_nan_for_const_only_model() {
@@ -1769,7 +1769,7 @@ mod tests {
 
     /// `cov_type=Hac{lags: Some(0), ..}`は自己相関項（`l=1..=lags`のループ）が空になり、
     /// `l=0`項（HC0のΨ̂と同形）のみが残るため、HC0と数値的に一致するはず
-    /// （`ols.rs`の`fit_hac_with_zero_lags_matches_hc0`と同じ内部整合性テスト）。
+    /// （`ols/estimator.rs`の`fit_hac_with_zero_lags_matches_hc0`と同じ内部整合性テスト）。
     #[test]
     fn fit_hac_with_zero_lags_matches_hc0() {
         let hac_estimator = TwoSlsEstimator::fit(
@@ -1878,7 +1878,7 @@ mod tests {
     }
 
     /// `time_order`を指定した場合、行順がシャッフルされていても時系列順に並べ替えてから
-    /// ラグ付き自己共分散を計算することを確認する（`ols.rs`の
+    /// ラグ付き自己共分散を計算することを確認する（`ols/estimator.rs`の
     /// `fit_computes_hac_std_errors_respecting_time_order`と同じ検証方針）。データは
     /// `nontrivial_x_exog_columns()`と同一の内容を、時系列順の逆転を含む順序でシャッフル
     /// して与える。
@@ -2560,7 +2560,7 @@ mod tests {
     /// （`y ~ const + x1 + x_endog + 第一段階残差`、`nontrivial_x_exog_columns()`を使う）の
     /// オラクルと数値一致することを確認する。`cov_type=Classical`なので、単一の追加列
     /// （`k_endog=1`）に対するWald F検定は`t²`（該当係数のt統計量の2乗）と代数的に一致する
-    /// （`ols.rs`の`wald_test_last_columns_matches_squared_t_statistic_for_single_column`と
+    /// （`ols/estimator.rs`の`wald_test_last_columns_matches_squared_t_statistic_for_single_column`と
     /// 同じ恒等式）。
     #[test]
     fn fit_computes_wu_hausman_statistic_matching_manual_augmented_regression() {
@@ -2701,7 +2701,7 @@ mod tests {
 
         // 末尾2列（v_hat1, v_hat2の係数）に対するジョイントWald検定を手計算する
         // （`F = (β_slopes' Σ⁻¹ β_slopes) / q`、`Σ`は該当2列に対応する`cov_params`の
-        // 2×2部分行列。`ols.rs`の`wald_f_test`と同じ式を、SUTとは独立に計算する）。
+        // 2×2部分行列。`shared/wald.rs`の`wald_f_test`と同じ式を、SUTとは独立に計算する）。
         let q = 2;
         let beta_slopes = Mat::from_fn(q, 1, |i, _| *beta_aug.get(i + 4, 0));
         let cov_slopes = Mat::from_fn(q, q, |i, j| sigma2 * (*xtx_inv.get(i + 4, j + 4)));
@@ -2812,7 +2812,7 @@ mod tests {
             "endogenous_stat={endogenous_stat}, exogenous_stat={exogenous_stat}"
         );
     }
-    /// property-basedテスト。`ols.rs`の`mod proptests`と同型の設計（配置・許容誤差`RTOL=1e-6`・
+    /// property-basedテスト。`ols/estimator.rs`の`mod proptests`と同型の設計（配置・許容誤差`RTOL=1e-6`・
     /// `prop_assume!`によるフルランク安全弁）だが、IV固有の不変条件（操作変数の張る空間のみへの
     /// 依存・丁度識別の閉形式解）を検証する。ケース生成は`common::proptest_support`。
     mod proptests {

@@ -96,13 +96,13 @@ FEの1段階目（データ抽出・pyclass定義）と同じ段階（`REOptions
 （`ReInput`/`ReEstimator`/`ReCovType`）はハウスマン検定の実装時点で既に完成済みだった
 ため、本対応は`engine_pybind`層のみのスコープ。
 
-- **`REOptions.dk_time`（`FEOptions.dk_time`と同名・同じ意味）**: DKの時点列は`dk_time`で
-  受け取る（`cov_type="dk"`では必須、未指定は`PanelError::DkRequiresTime`）。`time`という
-  名前のオプションは持たない——RE自身は2-way構造を持たない（v1はentity方向のみ）ため、FEの
-  `time`（2-way固定効果の時間次元）に相当するものが無く、`time`と呼ぶと誤解を招くため。
-  将来2-way REを実装するときはFEと同じ意味の`time`を改めて導入する。`dk_time`は
-  `ReInput::time()`に渡る（ハウスマン検定は常に1-way比較で`dk_time`に依存しない、
-  `docs/spec/re-spec.md`3.7節）。`cov_type`が`"dk"`以外で`dk_time`を指定すると
+- **`REOptions.time`と`REOptions.dk_time`（FEと同じ規約）**: `time`は2-way REの時間次元
+  （`Some`なら`ReEffects::TwoWay`、`ReInput.time`に渡る）、`dk_time`はDKの時点列で`cov_type="dk"`では
+  必須（未指定は`ValidationError`、`time`は借用しない）。`dk_time`は`parse_re_cov_type`が
+  `ReCovType::Dk { time }`に渡し、`ReInput`には渡さない。`build_re_input`は
+  `(ReInput, ReEffects, ReCovType, String)`を返す。`REResult.n_periods`は
+  `ReEstimator::n_periods()`をそのまま渡す。2-wayでは`hausman_*`が`None`・`r_squared_*`が`NaN`
+  （未実装の暫定値、`docs/spec/re-spec.md`2章）。`cov_type`が`"dk"`以外で`dk_time`を指定すると
   `parse_re_cov_type`が`reject_unused_option`で`ValidationError`にする（`cluster`/
   `dk_bandwidth`と同じ規則）。詳細は`panel/re.rs`モジュールdoc参照。
 - **`x`の空リストを許容しない（ユーザー確認済み、2026-09-20）**: REで`x=[]`は「分散成分

@@ -13,9 +13,9 @@ Swamy-Arora分散成分推定の具体式、固定効果の復元等）は[`fe-s
 - `y: str`、`x: list[str]`はOLSと同じ。
 - `entity: str`（エンティティID列名）は**独立の必須引数**とする。FE/REいずれもパネル構造が
   無ければモデルとして成立しないため、`y`/`x`と同格に扱う。
-- `time`（時点ID列名）は必須ではないため`Options`内に置く（`FEOptions.time`、
-  `str | None`、デフォルト`None`）。REは2-way構造を持たないため`time`オプション自体が無く、
-  DKの時点列は`REOptions.dk_time`で受け取る（下記）。
+- `time`（時点ID列名）は必須ではないため`Options`内に置く（`FEOptions.time`・`REOptions.time`、
+  `str | None`、デフォルト`None`）。どちらも2-way（entity + time）の指定で、`None`なら1-way。
+  DKの時点列は別フィールド`dk_time`で受け取る（下記）。
   - FEの2-way（entity + time FE）を指定する場合は`time`が実質的に必須になるが、これは
     `OLSOptions.cluster`が`cov_type="cluster"`のときのみ必須になるのと同じ「条件付き必須」
     パターンであり、`Options`に置くという判断自体は変えない。未指定時のバリデーションエラーで
@@ -32,14 +32,12 @@ Swamy-Arora分散成分推定の具体式、固定効果の復元等）は[`fe-s
     使われ、「2-way FEの固定効果構造に使う時点粒度」と「DK HACカーネルに使う時系列粒度」が
     異なるケースにも対応する。engine側は`FeCovType::Dk { bandwidth, time: TimeKeys }`
     （`time`は必須）として実装（`engine/src/panel/fe.rs`モジュールdoc「Driscoll-Kraay型
-    パネルHAC対応」参照）。**REは同名・同じ意味の`REOptions.dk_time`を持つ**（`time`という名前の
-    オプションは持たない。REは2-way構造を持たず、FEの`time`に相当するものが無いため。将来
-    2-way REを実装するときは、FEと同じ意味の`time`を改めて導入する）。
+    パネルHAC対応」参照）。**REも同名・同じ意味の`REOptions.time`・`REOptions.dk_time`を持ち、
+    同じ規約に従う**（`ReInput.time`が2-wayの時間次元、DKの時点列は`ReCovType::Dk { time }`で別に渡す）。
 - **`time`を`Options`に置く理由（トップレベル引数に昇格しない）**:
-  - `time`の意味がFEとREで異なる。FEでは2-way固定効果の構造指定だが、REでは`cov_type="dk"`の
-    時系列順序専用でRE自身の変換・ハウスマン検定には使わない。「パネル構造を定義する列名」という
-    共通の役割を持たないため、トップレベル引数にするとREでは意味の異なる（または`cov_type`次第で
-    無効になる）引数になる。
+  - `time`は条件付き必須（2-wayを指定するときだけ要る）で、1-wayでは不要な引数になる。
+    トップレベル引数にすると1-wayの呼び出しでも毎回渡す必要が出る（`None`を許すなら`Options`と
+    同じ）。FE・REとも2-way構造の指定という同じ役割だが、`entity`と違い無くてもモデルが成立する。
   - `cluster`/`dk_time`（OLS/IVでは`hac_time`）等の補助列も、列名を取るが`Options`に置く既存規則と
     整合する。
   - 将来の高次元FE（3つ以上のFE次元）では、必須の`entity`以外の次元は`Options`側に並べる想定で、
@@ -80,7 +78,7 @@ OLS（`OLSResult`、`engine_pybind/src/linear/ols.rs:137-191`）の項目を土�
 | `n_obs` | Logit由来の表記 | OLS/WLSも`n_obs`に統一済み |
 | `df_resid` / `df_model` | Logit由来、パネル向けに新規追加 | OLSには無いが、FEは自由度調整が`n - n_entities - k`という非自明な式になるため明示的に返す価値が高い |
 | `n_entities` | 新規追加（FE/RE限定） | パネルユニット数。pyfixest/plmの前例に倣う |
-| `n_periods` | 新規追加（FEのみ） | 2-way FEの時点数（1-wayは`None`）。`fe-spec.md`2章参照 |
+| `n_periods` | 新規追加（FE・RE） | 2-wayの時点数（1-wayは`None`、`dk_time`だけの指定でも`None`）。`fe-spec.md`2章・`re-spec.md`2章参照 |
 | `cov_type` | OLS共通 | サポート対象は3.1節 |
 | `f_statistic` / `f_p_value` | OLS共通 | そのまま踏襲（ただしengine側の実装はOLSの単純な流用ではない。傾き係数`k`個の同時Wald検定をFE/RE独自の`cov_type`別`cov_params`・パネル自由度調整済み`df_resid`で行う） |
 | `log_likelihood` / `aic` / `bic` | OLS共通 | FE/REは最小二乗族で正規性下の尤度が定義できるため含める |

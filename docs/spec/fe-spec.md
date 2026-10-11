@@ -77,7 +77,7 @@ FE固有の内容のみを記載する。
   計算のために既に求めている`time`のユニーク数をそのまま保持して公開する（二重計算しない）。
   2-wayのみ`Some`、1-way（`dk_time`のみ指定した場合を含む）は`None`。2-wayはバランスパネル
   必須のため、ユニーク時点数と各entityの観測数は一致する（将来2-wayの不均衡パネルに対応する
-  場合は定義を再検討する）。REには追加しない（REの`time`は2-way構造ではないため）。
+  場合は定義を再検討する）。REの`n_periods`も同じ定義（2-way REのときだけ`Some`、`re-spec.md`2章）。
 - **`estimator()`（内部委譲した`OlsEstimator`）とFE自身のgetterの使い分け**: `params`/
   `param_names`/`residuals`/`dep_var_name`/`n_obs`/`log_likelihood`は`estimator()`から、
   `std_errors`/`test_stats`/`p_values`/`conf_lower`/`conf_upper`/`df_model`/`df_resid`/

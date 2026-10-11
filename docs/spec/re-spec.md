@@ -21,22 +21,26 @@ RE固有の内容のみを記載する。FEとの共有範囲は[`fe-spec.md`](.
   |---|---|---|---|
   | `cov_type` | `str` | `"cluster"` | `"classical"` / `"hc1"`〜`"hc3"` / `"cluster"` / `"dk"`（大小無視）。`"hc0"`は非対応 |
   | `confidence_level` | `float` | `0.95` | |
-  | `dk_time` | `str \| None` | `None` | `cov_type="dk"`時のDK時点列（`FEOptions.dk_time`と同名・同じ意味。`"dk"`では必須）。RE自身の準偏差変換・ハウスマン検定には使わない。`"dk"`以外で指定すると`ValidationError` |
+  | `time` | `str \| None` | `None` | 2-way RE（entity + time）の時間次元（`FEOptions.time`と同じ意味）。`None`なら1-way。バランスパネルのみ（不均衡は`ValidationError`）。DKの時点列には使わない（`dk_time`が別に必須） |
+  | `dk_time` | `str \| None` | `None` | `cov_type="dk"`時のDK時点列（`FEOptions.dk_time`と同名・同じ意味。`"dk"`では必須で、`time`は借用されない）。RE自身の準偏差変換には使わない。`"dk"`以外で指定すると`ValidationError` |
   | `cluster` | `str \| None` | `None` | `cov_type="cluster"`時のグループキー列名。省略時は`entity`をそのまま使う。他の`cov_type`で指定すると`ValidationError` |
   | `dk_bandwidth` | `int \| None` | `None` | DK HACのバンド幅。省略時は自動計算。`cov_type="dk"`以外で指定すると`ValidationError` |
 
-- **`FEOptions.dk_time`と同名・同じ意味の`dk_time`を持つ。`time`という名前のオプションは
-  持たない**: REは2-way構造自体を持たず、FEの`time`（2-way固定効果の時間次元）に相当する
-  ものが無いため、`time`と呼ぶと誤解を招く。DKの時点列は`REOptions.dk_time`の1フィールドで
-  受け取る（ハウスマン検定は常に1-way比較で`dk_time`に依存しない、3.7節）。将来2-way REを
-  実装するときは、FEと同じ意味の`time`を改めて導入する。
+- **`time`と`dk_time`は別物（`FEOptions`と同じ規約、`panel-common.md`1.1節）**: `time`は2-way REの
+  時間次元で、`dk_time`はDriscoll-Kraay HAC（`cov_type="dk"`）専用の時点列。`cov_type="dk"`では
+  `dk_time`が必須で、2-wayの`time`を借用しない（意図と違う列が選ばれても気づけないため）。
+  2-wayでも`dk_time`は`time`と別の時間粒度を指定できる。エンジンでは`ReInput.time`が2-wayの時間
+  次元、DKの時点列は`ReCovType::Dk { time }`（必須の`TimeKeys`）で別に渡す（FEの
+  `FeCovType::Dk.time`と同じ）。`time`は`y`・`entity`・`x`と重複できない。
 - **`x`は空リストを許容しない**: `x=[]`は「説明変数を一切投入しない、分散成分（σ_ε²・
   σ_u²、ICC）のみを推定するnullモデル」として単独で意味を持つ標準的なユースケース
   （マルチレベルモデルの"null model"）だが、他手法（FE・OLS/WLS/Logit/Probit/IV）
   との一貫性を優先し`validate_x_non_empty`で拒否する。nullモデル・ICC推定のサポート自体は
   別途検討中（5章参照）。
-- **REはentity方向のみ（2-way REはv1スコープ外）**なので、FEの1-wayと同じ扱いで不均衡パネル
-  も無条件でサポートする。
+- **1-way REは不均衡パネルを無条件でサポートする**（FEの1-wayと同じ扱い）。**2-way RE
+  （`time`指定）はバランスパネルのみ**で、不均衡パネルは`ValidationError`（`validate_balanced_panel`を
+  FEの2-wayと共有。不均衡の2-way REは別問題、5章）。検証の順序はFEの2-wayと同じで、singleton検出
+  （entity・time）→バランスパネルの検証。
 - **singletonエンティティの扱いがlinearmodelsより厳格**: REのσ_ε²推定は内部で1-way FE推定を
   呼び出しその残差分散を再利用する設計（3.4節）のため、`FeInput`と同じsingleton検証を
   継承し`T_i=1`のエンティティを含むデータは`PanelError::SingletonGroup`で失敗する。一方
@@ -53,11 +57,17 @@ RE固有の内容のみを記載する。FEとの共有範囲は[`fe-spec.md`](.
 
 `REResult`（`#[pyclass]`）が公開する項目: `params` / `std_errors` / `test_stats`（**t検定**） /
 `p_values` / `conf_lower` / `conf_upper` / `param_names`（`param_names[0]`は常に`"const"`） /
-`residuals` / `dep_var_name` / `n_obs` / `df_resid` / `df_model` / `n_entities` / `cov_type` / `dk_bandwidth_used` /
+`residuals` / `dep_var_name` / `n_obs` / `df_resid` / `df_model` / `n_entities` / `n_periods`（2-wayのみ、1-wayは`None`） / `cov_type` / `dk_bandwidth_used` /
 `f_statistic` / `f_p_value` / `log_likelihood` / `aic` / `bic` / `r_squared_within` /
 `r_squared_between` / `r_squared_overall` / `hausman_statistic` / `hausman_p_value` /
 `hausman_df`。
 
+- **`n_periods`**: `time`を指定した2-wayのときだけユニークな時点数（FEと同じ定義、`fe-spec.md`
+  「結果構造体」参照）。1-wayは`None`で、`dk_time`だけの指定でも`None`。2-wayはバランスパネル
+  必須のため各エンティティの観測数と一致する。
+- **2-wayの`hausman_*`・`r_squared_*`は暫定値**: 2-wayのハウスマン検定とパネル固有R²は未実装で、
+  `time`を指定すると`hausman_*`は`None`、`r_squared_*`は`NaN`になる（1-wayの値を流用すると
+  意味の違う値が黙って出るため。実装後に外す暫定の扱いで、未実装のまま単独でリリースしない）。
 - **`dk_bandwidth_used`**: `cov_type="dk"`のとき実際に使われたバンド幅（FEと同じ意味、`fe-spec.md`
   「結果構造体」参照）。`dk`以外は`None`。ハウスマン検定の補助回帰が内部で解決するバンド幅は
   本体と同じ値だが、この項目はRE本体の`fit()`で解決した値を報告する。
@@ -113,6 +123,26 @@ Python `linearmodels.RandomEffects`の実装（Swamy-Arora）に準拠する。R
 - linearmodelsが提供する`small_sample`補正（不均衡パネル向けのtraceベースの追加調整、
   デフォルト`False`）はv1では実装しない（linearmodelsのデフォルト挙動に合わせる）。
 
+### 3.1.1 2-wayの分散成分（Swamy-Arora、バランスパネル）
+
+`time`を指定した2-wayでは、`plm::ercomp(effect = "twoways", method = "swar")`のバランスパネルの
+式と同じ、3つの独立な式で3つの成分を決める（数値照合済み。不均衡は対象外）。`N`はエンティティ数、
+`T`は時点数、`n = NT`。
+
+- **σ_ε²**: 内部の2-way FE推定（`FeEstimator::fit(TwoWay, Classical)`、説明変数は2-way within変換後に
+  分散のある列`k_tv`個だけ）の残差平方和／`FeEstimator::df_resid()`（`n - N - T + 1 - k_tv`）。
+- **σ_u²**: entity平均へのbetween回帰（`[1, x̄ᵢ.]`）の残差平方和を`N - K_b - 1`で割った値から
+  `σ_ε²/T`を引く（`max(0, ·)`）。
+- **σ_λ²**: time平均へのbetween回帰（`[1, x̄.ₜ]`）の残差平方和を`T - K_b - 1`で割った値から
+  `σ_ε²/N`を引く（`max(0, ·)`）。
+- **between回帰から落とす列**: 平均が単位間で一定の列（entity平均の回帰では時点間でのみ変わる列、
+  time平均の回帰では個体間でのみ変わる列）は切片と共線になるため、その回帰から除き`K_b`にも数えない
+  （`plm`と同じ）。一定かどうかは平均の標準偏差が`単位数·ε·max|x̄|`以下かで判定する。残った設計行列が
+  特異なら`BetweenRegressionFailed`（`ComputationError`）。
+- **θ**: 3つの重み`θ₁ = 1 - σ_ε/σ₁`・`θ₂ = 1 - σ_ε/σ₂`・`θ₃ = θ₁ + θ₂ - 1 + σ_ε/σ₄`
+  （`σ₁² = σ_ε² + Tσ_u²`・`σ₂² = σ_ε² + Nσ_λ²`・`σ₄² = σ_ε² + Tσ_u² + Nσ_λ²`）。`θ₃ ≠ θ₁θ₂`で、
+  `σ_u² = 0`または`σ_λ² = 0`なら`θ₃ = 0`。`plm`の`ercomp`のθ（id・time・total）と機械精度で一致する。
+
 ### 3.2 θ（準偏差変換の重み）
 
 `θ_i = 1 - sqrt(σ_ε² / (T_i・σ_u² + σ_ε²))`（Baltagiの教科書通りの式、`compute_theta`が
@@ -126,6 +156,14 @@ Python `linearmodels.RandomEffects`の実装（Swamy-Arora）に準拠する。R
 ソースで、`exog`に含まれる定数列自体も他の説明変数と同じ`quasi_demean`処理を受けている
 ことを確認済み）。単純に`include_intercept=true`を使うと変換されない生の`1.0`列になって
 しまうため、この手動追加が必要。
+
+**2-wayのGLS変換**は`y - θ₁ȳᵢ. - θ₂ȳ.ₜ + θ₃ȳ..`で、`y`・各`x`列と切片復元用の定数列（変換後は
+`1 - θ₁ - θ₂ + θ₃`倍）に適用してから`OlsEstimator::fit(include_intercept=false)`に渡す。
+`quasi_demean_column`は1つのグルーピングしか扱えず、FEの2-wayのように「entityでquasi-demean→
+その結果をtimeでquasi-demean」の2段階適用（θ₁・θ₂のみ使う）では`θ₃ ≠ θ₁θ₂`のためGLS変換に
+ならない。そこで3つの平均を同時に引く`quasi_demean_two_way`（`panel/common.rs`、バランスパネル前提）を
+用意した。θ=(1,1,1)で2-way within変換、θ=(θ₁,0,0)・(0,θ₂,0)で1-wayのRE（entity方向・time方向）、
+θ=(0,0,0)で変換なし（pooled OLS）になる。
 
 ### 3.3 `df_resid`/`df_model`
 
@@ -171,7 +209,7 @@ FE実装時（`panel::fe`）のcov_type計算関数（`design_matrix_from_column
   `linearmodels`と僅かに異なる（点推定自体が僅かに違う）ため、Classical/HC1/Cluster/HAC
   ほどの精度ではなくクロスチェック水準で検証する（4章参照）。
 - `ReCovType::Cluster`の`q`（傾き係数の数、切片を除く）は`df_model - 1`。`ReCovType::Dk`は
-  `time`オーバーライドフィールドを持たない（RE自身が2-way構造を持たないため）。
+  `time`（必須の`TimeKeys`、`REOptions.dk_time`由来）を持つ。2-wayの`time`（`ReInput`）とは独立で借用しない。
 - **【linearmodels方式からfixest（R）・Stata型に変更】**: `Cluster`は当初
   `linearmodels`/`plm`に合わせStata流`(G/(G-1))×((n-1)/(n-k))`補正を使わずに独自計算して
   いたが、fixest・Stataの`xtreg,re vce(cluster)`利用者が期待する値と一致しないため変更した。
@@ -254,8 +292,8 @@ FEの`r_squared_between`/`r_squared_overall`をそのまま流用できず、RE�
   値が異なる。本実装は`plm`に合わせる。
 - **比較は常に1-way**（個体効果のみ、RE本体と同じ構造）。`X̃`はRE本体が分散成分推定に
   使う1-way FEのwithin変換から得る。`REOptions.dk_time`（`cov_type="dk"`専用）の有無は
-  結果に影響しない（`dk_time`は`cov_type="dk"`の時点列にのみ使う）。2-wayのハウスマン検定は2-way REの実装時に
-  改めて検討する。
+  結果に影響しない（`dk_time`は`cov_type="dk"`の時点列にのみ使う）。**`time`を指定した2-wayでは
+  未実装で、`hausman_*`は`None`**（設計は5章。1-wayの検定を流用しない）。
 - **`cov_type`連動**: 補助回帰のWald検定の共分散はRE本体の`cov_type`に対応させる
   （専用オプションは設けない）。既定の`cov_type="cluster"`ではcluster-robust版（Wooldridgeの
   robust Hausman検定）になり、`cov_type="classical"`では帰無仮説のもとでREが完全に効率的
@@ -356,7 +394,9 @@ FEの`WithinRegressionFailed`と同じく内側の`LeastSquaresError`の分類�
 - **nullモデル・ICC推定のサポート**（`x=[]`、検討中）: 分散成分のみを推定する
   マルチレベルモデルの標準的なユースケースだが、v1は他手法との一貫性を優先し`x`の空リストを
   拒否している。
-- **2-way RE**（v1スコープ外。実装は別issueで行う。以下は設計検討で確定した方針）:
+- **2-way RE**（バランスパネルの本体は実装済み: `time`オプション・Swamy-Arora分散成分・3つのθの
+  GLS変換・F統計量・`cov_type`・`n_periods`。**未実装**: ハウスマン検定とパネル固有R²（暫定値は2章）、
+  分散成分の公開、`variance_method`、不均衡パネル。以下は設計検討で確定した方針）:
   - **対象はバランスパネルのみ**。不均衡パネルは、FEの2-wayと同じく`ValidationError`で拒否する
     （`validate_balanced_panel`相当の検証を共有する）。アンバランスパネルの2-way REは教科書レベルの
     閉形式が無く、Wansbeek and Kapteyn (1989)の推定量が候補になる別問題として切り分ける。
@@ -402,7 +442,7 @@ FEの`WithinRegressionFailed`と同じく内側の`LeastSquaresError`の分類�
     2段階適用（θ₁・θ₂のみ使う）をそのまま流用すると、θ₃が合わずGLS変換にならない。現行の
     `quasi_demean_column`（1つの`GroupCodes`とそのθ配列を取る）は、3つの重みを扱える変換を
     新設する形で拡張する。
-  - **`time`オプションを導入する**。FEの`FEOptions.time`と同じ意味（2-wayの時間次元）で
+  - **`time`オプションを導入する**（実装済み）。FEの`FEOptions.time`と同じ意味（2-wayの時間次元）で
     `REOptions.time`を新設する。`dk_time`（DK HACの時点列）は引き続き別フィールドとして残し、
     2-wayの`time`をDKの時点に借用しない（FEと同じ規約、`panel-common.md`1.1節）。
   - **参照実装は`plm`のみ**（`model = "random"`・`effect = "twoways"`）。`linearmodels`は2-way REを
@@ -454,8 +494,9 @@ FEの`WithinRegressionFailed`と同じく内側の`LeastSquaresError`の分類�
     コメントとドキュメントへ明記する）。
   - **時間不変変数（および片方の次元でしか変動しない説明変数）は許容する**。REは個体効果・時点効果が
     説明変数と無相関という前提を置くため、時間不変変数や、時点間でのみ（個体間でのみ）変わる変数の
-    係数も識別できる（時点効果と共線になるのはFEの話）。1-way REは実装済み（3.1・3.7節）で、
-    2-wayは同じ方針を引き継ぐ（片方の次元でしか変動しない変数も許容する）。
+    係数も識別できる（時点効果と共線になるのはFEの話）。1-way・2-wayとも実装済み（3.1・3.1.1・3.7節）で、
+    2-wayは片方の次元でしか変動しない変数も許容する（内部の2-way FE推定には2-way within変換後に
+    分散のある列だけを渡し、between回帰からは平均が単位間で一定の列を落とす）。
     - **分散成分（σ_ε²）**: 内部のFE推定には、within変換後の分散がある列（時間変化のある列、以下
       `k_tv`個）だけを渡す。FEは説明変数0個も受け付けるため、全列が時間不変でも成立する。
       `σ_ε² = SSR_within / FeEstimator::df_resid()`の式は変わらず、自由度は実際に推定したwithin係数の
@@ -474,9 +515,9 @@ FEの`WithinRegressionFailed`と同じく内側の`LeastSquaresError`の分類�
     - 切片と共線な定数列・時間不変変数同士の共線など、設計行列が特異になる入力は特異性検出
       （`ComputationError`）に任せる。1-wayでは、between回帰（σ_u²の推定）が最終回帰より先に
       特異性を検出する（時間不変の列はエンティティ平均でもそのまま変動するため）。
-  - **`REResult`に`n_periods`を追加する**（FEと同じ定義: `time`を指定した2-wayのときだけユニークな
-    時点数、1-wayは`None`で、`dk_time`だけの指定でも`None`）。2-way RE実装時に、`fe-spec.md`2章の
-    「REには追加しない」という記述と、`panel-common.md`2.1節の表の`n_periods`（FEのみ）を直す。
+  - **`REResult`に`n_periods`を追加する**（実装済み。FEと同じ定義: `time`を指定した2-wayのときだけ
+    ユニークな時点数、1-wayは`None`で、`dk_time`だけの指定でも`None`）。`fe-spec.md`2章・
+    `panel-common.md`2.1節の記述も直した。
   - **分散成分を結果として公開する**（σ_ε²・σ_u²・θ。2-wayではσ_λ²と3つの重みも）。現行の`REResult`は
     公開していない。時期は2-way RE実装時とし、フィールド名・θの返し方（1-wayは個体ごと、2-wayは3つの
     重み）はそのときに決める。

@@ -93,8 +93,8 @@ A wrong argument *type*, as opposed to a wrong value, raises the built-in `TypeE
 | Tobit | `max_iter` is not an integer from 1 to 10,000, or `tol` is not a positive finite number. Both censoring bounds are `None`, or the lower bound is not below the upper bound. `y` lies outside the bounds. There is no uncensored observation. `x` contains a column named `"sigma"`. |
 | IV | Fewer instruments than endogenous regressors (the order condition). `x_endog` or `instruments` is empty. GMM options are set for an estimator that does not use them, or are out of range (`gmm_max_iter` outside 3 to 10,000, or `gmm_tol` not a positive finite number). With `gmm_weight_type="cluster"`, there are too few clusters for the weight matrix. |
 | FE | A singleton entity, or in a two-way model a singleton time period. A two-way model on an unbalanced panel, or without `time`. A regressor with no within-variation (constant over time within every entity). Too few degrees of freedom. |
-| RE | A singleton entity. With `cov_type="cluster"`, too few clusters for the Hausman auxiliary regression. A time-invariant regressor is allowed, unlike in FE. |
-| FE, RE | `cov_type="dk"` without `dk_time` (FE does not borrow `time` for it), with an invalid `dk_bandwidth`, with too few time periods for the number of coefficients tested, or with a degenerate two-period structure. |
+| RE | A singleton entity, or in a two-way model (`time` set) a singleton time period. A two-way model on an unbalanced panel. With `cov_type="cluster"`, too few clusters for the Hausman auxiliary regression (one-way). A time-invariant regressor is allowed, unlike in FE. |
+| FE, RE | `cov_type="dk"` without `dk_time` (neither borrows `time` for it), with an invalid `dk_bandwidth`, with too few time periods for the number of coefficients tested, or with a degenerate two-period structure. |
 
 ## When `ComputationError` is raised
 
@@ -124,7 +124,7 @@ The absence of an error says nothing about the following. They are your responsi
 - **Instrument validity and strength.** In IV only the order condition (at least as many instruments as endogenous regressors) is checked up front. The rank condition is not, so irrelevant instruments may surface later as a singular first stage. The weak-instrument F statistic is reported without a verdict, and the over-identification test is `None` when the model is just identified.
 - **Stationarity, outliers and influential observations.**
 - **Near-separation.** Data that are close to, but not at, separation have a finite estimate, so they estimate without an error, although the standard errors can be very large. Only exact separation is an error.
-- **Panel structure beyond what the estimator needs.** A one-way FE model does not complain about unbalanced panels or about repeated (entity, time) pairs. Only the two-way model requires a balanced panel.
+- **Panel structure beyond what the estimator needs.** A one-way FE model does not complain about unbalanced panels or about repeated (entity, time) pairs. Only the two-way models (FE, and RE with `time`) require a balanced panel.
 - **Numeric precision.** Numeric columns are converted to 64-bit floating point without a warning, so integers beyond 2^53 and decimals with many digits can lose precision. See [Accepted data](accepted-data.md#how-values-are-converted).
 
 ## Where to look next

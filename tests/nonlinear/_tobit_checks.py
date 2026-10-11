@@ -162,7 +162,7 @@ def _check_margeff(
     for target in MARGEFF_TARGETS:
         for at in MARGEFF_AT:
             rows = {
-                row["param"]: row
+                row["param_name"]: row
                 for row in res.marginal_effects(at=at, target=target)
             }
             for name, ref_stats in ref_margeff[target][at].items():
@@ -176,7 +176,7 @@ def _check_margeff(
                     atol=atol,
                 )
                 for key in (
-                    "std_err",
+                    "std_error",
                     "test_stat",
                     "p_value",
                     "conf_lower",

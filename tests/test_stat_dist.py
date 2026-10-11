@@ -360,9 +360,13 @@ def test_confidence_interval_uses_stat_df_critical_value(
     assert res.stat_df == expected_df
     crit = sps.t.ppf(0.5 + confidence_level / 2.0, res.stat_df)
     for row in res.coef_table():
-        half = crit * row["std_err"]
-        assert row["conf_lower"] == pytest.approx(row["coef"] - half, rel=1e-8)
-        assert row["conf_upper"] == pytest.approx(row["coef"] + half, rel=1e-8)
+        half = crit * row["std_error"]
+        assert row["conf_lower"] == pytest.approx(
+            row["param"] - half, rel=1e-8
+        )
+        assert row["conf_upper"] == pytest.approx(
+            row["param"] + half, rel=1e-8
+        )
 
 
 # --- 不均衡パネル・不均衡クラスター --------------------------------------------

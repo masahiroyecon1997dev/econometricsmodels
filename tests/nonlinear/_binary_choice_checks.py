@@ -76,9 +76,9 @@ def check_coef_table_structure(dataset, estimator_cls):
     assert isinstance(table, list)
     assert len(table) == 3  # const, x1, x2
     expected_keys = {
+        "param_name",
         "param",
-        "coef",
-        "std_err",
+        "std_error",
         "test_stat",
         "p_value",
         "conf_lower",
@@ -86,7 +86,7 @@ def check_coef_table_structure(dataset, estimator_cls):
     }
     for row in table:
         assert expected_keys <= set(row.keys())
-    assert [row["param"] for row in table] == ["const", "x1", "x2"]
+    assert [row["param_name"] for row in table] == ["const", "x1", "x2"]
 
 
 def check_conf_int_structure(dataset, estimator_cls):
@@ -442,11 +442,11 @@ def check_marginal_effects_default_excludes_intercept(dataset, estimator_cls):
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
     effects = res.marginal_effects()
 
-    assert [row["param"] for row in effects] == ["x1", "x2"]
+    assert [row["param_name"] for row in effects] == ["x1", "x2"]
     expected_keys = {
-        "param",
+        "param_name",
         "effect",
-        "std_err",
+        "std_error",
         "test_stat",
         "p_value",
         "conf_lower",

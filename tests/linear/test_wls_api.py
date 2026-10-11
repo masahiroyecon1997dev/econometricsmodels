@@ -120,12 +120,12 @@ def test_weight_one_matches_ols_coef_table(dataset):
         WLS(df, y="y", x=["x1", "x2"], weight="weight").fit().coef_table()
     )
 
-    assert [row["param"] for row in wls_table] == [
-        row["param"] for row in ols_table
+    assert [row["param_name"] for row in wls_table] == [
+        row["param_name"] for row in ols_table
     ]
     for wls_row, ols_row in zip(wls_table, ols_table):
-        assert wls_row["coef"] == ols_row["coef"]
-        assert wls_row["std_err"] == ols_row["std_err"]
+        assert wls_row["param"] == ols_row["param"]
+        assert wls_row["std_error"] == ols_row["std_error"]
 
 
 def test_weight_one_matches_ols_predict(dataset):
@@ -201,9 +201,9 @@ def test_coef_table_structure(dataset):
     assert isinstance(table, list)
     assert len(table) == 3  # const, x1, x2
     expected_keys = {
+        "param_name",
         "param",
-        "coef",
-        "std_err",
+        "std_error",
         "test_stat",
         "p_value",
         "conf_lower",
@@ -211,7 +211,7 @@ def test_coef_table_structure(dataset):
     }
     for row in table:
         assert expected_keys <= set(row.keys())
-    assert [row["param"] for row in table] == ["const", "x1", "x2"]
+    assert [row["param_name"] for row in table] == ["const", "x1", "x2"]
 
 
 def test_conf_int_structure(dataset):

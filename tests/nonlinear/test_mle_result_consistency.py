@@ -233,7 +233,7 @@ def test_per_parameter_attributes_have_one_entry_per_parameter(
     for attr in ("conf_lower", "conf_upper", "params", "std_errors"):
         assert len(getattr(raw, attr)) == n_params, attr
     assert set(result.conf_int) == set(raw.param_names)
-    assert [row["param"] for row in result.coef_table()] == list(
+    assert [row["param_name"] for row in result.coef_table()] == list(
         raw.param_names
     )
 

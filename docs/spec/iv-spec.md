@@ -134,7 +134,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 - 弱操作変数診断・過剰識別検定・Wu-Hausman検定はいずれも`fit()`の結果本体に含める
   （別メソッド化しない）。
 - `summary()`は実装しない。python_package層（`IVResults`）の`coef_table()`は行指向
-  `list[dict]`で、キーは`param`/`coef`/`std_err`/`test_stat`/`p_value`/`conf_lower`/`conf_upper`。
+  `list[dict]`で、キーは`param_name`/`param`/`std_error`/`test_stat`/`p_value`/`conf_lower`/`conf_upper`。
 
 ## 3. 内部実装の計算仕様
 

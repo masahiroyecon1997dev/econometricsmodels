@@ -58,8 +58,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   （statsmodels準拠の仕様上の挙動）。`df_model==0`のとき`lr_p_value`はNaN。
 - `summary()`（テキスト整形）は作らない（OLSと同じ理由、`ols-spec.md`参照）。
 - python_package層（`LogitResults`）: `params`/`std_errors`/`test_stats`/`p_values`/`conf_int`は
-  係数名→値の`dict`。`coef_table()`は行指向`list[dict]`（キーは`param`/`coef`/`std_err`/`test_stat`
-  （`test_stat`ではない）/`p_value`/`conf_lower`/`conf_upper`）。
+  係数名→値の`dict`。`coef_table()`は行指向`list[dict]`（キーは`param_name`/`param`/`std_error`/`test_stat`/`p_value`/`conf_lower`/`conf_upper`）。
 
 ## 3. 内部実装の計算仕様
 
@@ -319,7 +318,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 
 - 許容誤差: statsmodels主リファレンス（`test_logit_reference.py`）は`RTOL=1e-8`。Rクロスチェック
   （`test_logit_crosscheck.py`、反復最適化同士の比較のため機械精度一致は期待できない）は
-  `RTOL=1e-6`（係数・SE・信頼区間・限界効果の全統計量（`effect`/`std_err`/`test_stat`/`conf_lower`/`conf_upper`）・cluster 2ケースの全統計量で共通、実測最大~6e-8。`ATOL=1e-12`で
+  `RTOL=1e-6`（係数・SE・信頼区間・限界効果の全統計量（`effect`/`std_error`/`test_stat`/`conf_lower`/`conf_upper`）・cluster 2ケースの全統計量で共通、実測最大~6e-8。`ATOL=1e-12`で
   `|ref|`が小さい項目も純粋な相対誤差で比較する）を基本とし、
   p値（標準正規分布CDFの裾での増幅）のみ`ATOL=1e-7`を設定している。R側の参照値は
   `glm()`の収束判定を`epsilon=1e-14`に厳しくし（既定の1e-8だと`sandwich::estfun()`が1反復前の

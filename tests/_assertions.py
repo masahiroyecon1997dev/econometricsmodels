@@ -90,7 +90,9 @@ def check_margeff(
     rtol_ci = rtol if rtol_conf_int is None else rtol_conf_int
     atol_p = atol if atol_p_value is None else atol_p_value
     for at in MARGEFF_AT:
-        effects = {row["param"]: row for row in res.marginal_effects(at=at)}
+        effects = {
+            row["param_name"]: row for row in res.marginal_effects(at=at)
+        }
         for name, ref_stats in ref_margeff[at].items():
             row = effects[rename(name)]
             assert_close(
@@ -101,9 +103,9 @@ def check_margeff(
                 atol=atol,
             )
             assert_close(
-                row["std_err"],
-                ref_stats["std_err"],
-                f"{label}/{at}/{name}/std_err",
+                row["std_error"],
+                ref_stats["std_error"],
+                f"{label}/{at}/{name}/std_error",
                 rtol=rtol,
                 atol=atol,
             )

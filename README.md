@@ -134,13 +134,18 @@ result.params
 
 result.coef_table()
 # [
-#     {"param": "const", "coef": 0.32, "std_err": 0.07,
+#     {"param_name": "const", "param": 0.32, "std_error": 0.07,
 #      "test_stat": 4.46, "p_value": 8e-06,
 #      "conf_lower": 0.18, "conf_upper": 0.46},
-#     {"param": "x1", "coef": 1.04, "std_err": 0.09, ...},
-#     {"param": "x2", "coef": -0.87, "std_err": 0.09, ...},
+#     {"param_name": "x1", "param": 1.04, "std_error": 0.09, ...},
+#     {"param_name": "x2", "param": -0.87, "std_error": 0.09, ...},
 # ]
 ```
+
+Each key of a row is the singular of the matching result attribute
+(`param_name` / `param_names`, `param` / `params`, `std_error` / `std_errors`,
+`test_stat` / `test_stats`, `p_value` / `p_values`; `conf_lower` and `conf_upper`
+are the two ends of `conf_int`).
 
 There is no formatted text to parse. `coef_table()` is shaped so it can
 be passed directly into a Polars DataFrame, a JSON API response, or an

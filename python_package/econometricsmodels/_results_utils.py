@@ -94,20 +94,20 @@ def coef_table_rows(raw: _CoefTableColumns) -> list[dict[str, float | str]]:
         raw: A `_lib` result object exposing the coefficient columns.
 
     Returns:
-        One dictionary per coefficient with keys `param`, `coef`,
-        `std_err`, `test_stat`, `p_value`, `conf_lower`, `conf_upper`.
+        One dictionary per parameter with keys `param_name`, `param`,
+        `std_error`, `test_stat`, `p_value`, `conf_lower`, `conf_upper`.
     """
     return [
         {
-            "param": name,
-            "coef": coef,
-            "std_err": se,
+            "param_name": name,
+            "param": param,
+            "std_error": se,
             "test_stat": test_stat,
             "p_value": p,
             "conf_lower": lower,
             "conf_upper": upper,
         }
-        for name, coef, se, test_stat, p, lower, upper in zip(
+        for name, param, se, test_stat, p, lower, upper in zip(
             raw.param_names,
             raw.params,
             raw.std_errors,
@@ -124,20 +124,20 @@ def marginal_effect_rows(
 ) -> list[dict[str, float | str]]:
     """Build the row-oriented marginal effects table.
 
-    Same layout as `coef_table_rows`, with `effect` in place of `coef`.
+    Same layout as `coef_table_rows`, with `effect` in place of `param`.
 
     Args:
         raw: A `_lib` marginal effects object.
 
     Returns:
-        One dictionary per regressor with keys `param`, `effect`,
-        `std_err`, `test_stat`, `p_value`, `conf_lower`, `conf_upper`.
+        One dictionary per regressor with keys `param_name`, `effect`,
+        `std_error`, `test_stat`, `p_value`, `conf_lower`, `conf_upper`.
     """
     return [
         {
-            "param": name,
+            "param_name": name,
             "effect": effect,
-            "std_err": se,
+            "std_error": se,
             "test_stat": test_stat,
             "p_value": p,
             "conf_lower": lower,

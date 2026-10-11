@@ -269,7 +269,7 @@ class WLSResults:
 
         Returns:
             A list of dictionaries, one per coefficient. Keys are
-            `param`, `coef`, `std_err`, `test_stat`, `p_value`,
+            `param_name`, `param`, `std_error`, `test_stat`, `p_value`,
             `conf_lower`, `conf_upper`.
         """
         return coef_table_rows(self._raw)

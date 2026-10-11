@@ -56,7 +56,10 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols/`・`engi
   しないため）。
 - python_package層（`OLSResults`）:
   - `params`/`std_errors`/`test_stats`/`p_values`/`conf_int`: 係数名→値の`dict`（O(1)取り出し用）。
-  - `coef_table()`: 行指向`list[dict]`（REST APIレスポンスにそのまま使える形）。
+  - `coef_table()`: 行指向`list[dict]`（REST APIレスポンスにそのまま使える形）。行のキーは対応する属性名の単数形:
+    `param_name`（`param_names`）・`param`（`params`）・`std_error`（`std_errors`）・`test_stat`（`test_stats`）・
+    `p_value`（`p_values`）。`conf_lower`/`conf_upper`は`conf_int`の下限・上限。Tobitの`sigma`の行も同じキーで、
+    値が係数でなくても`param`で正確に表せる。`marginal_effects()`の行は`param`の代わりに`effect`を持つ。
   - `residuals`: `list[float]`をそのまま素通し。
 
 ## 3. 内部実装の計算仕様

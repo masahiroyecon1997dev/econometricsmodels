@@ -286,7 +286,7 @@ margeff_at <- function(target, at) {
     se_j <- sqrt(as.numeric(t(jac) %*% v %*% jac))
     zj <- dydx[j] / se_j
     out[[names(beta)[j]]] <- list(
-      effect = dydx[j], std_err = se_j, test_stat = zj,
+      effect = dydx[j], std_error = se_j, test_stat = zj,
       p_value = 2 * pnorm(-abs(zj)),
       conf_lower = dydx[j] - z_crit * se_j,
       conf_upper = dydx[j] + z_crit * se_j

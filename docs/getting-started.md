@@ -55,7 +55,7 @@ See the [API Reference](api/ols.md) for the full list of available options.
 
 ```python
 for row in result.coef_table():
-    print(row["param"], row["coef"], row["std_err"], row["p_value"])
+    print(row["param_name"], row["param"], row["std_error"], row["p_value"])
 ```
 
 ## Predicted values
@@ -201,7 +201,7 @@ print(
 
 ```python
 for row in result.marginal_effects():
-    print(row["param"], row["effect"], row["std_err"], row["p_value"])
+    print(row["param_name"], row["effect"], row["std_error"], row["p_value"])
 
 # Marginal effects evaluated at the mean of the explanatory variables
 mean_effects = result.marginal_effects(at="mean")
@@ -261,7 +261,7 @@ print(result.wald_statistic, result.wald_p_value)
 
 ```python
 for row in result.marginal_effects(target="expected_observed"):
-    print(row["param"], row["effect"], row["std_err"])
+    print(row["param_name"], row["effect"], row["std_error"])
 
 # predict() returns a plain list of floats
 fitted = result.predict(target="expected_observed")

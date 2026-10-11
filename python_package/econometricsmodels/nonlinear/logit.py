@@ -258,7 +258,7 @@ class LogitResults:
 
         Returns:
             A list of dictionaries, one per coefficient. Keys are
-            `param`, `coef`, `std_err`, `test_stat`, `p_value`,
+            `param_name`, `param`, `std_error`, `test_stat`, `p_value`,
             `conf_lower`, `conf_upper`.
         """
         return coef_table_rows(self._raw)
@@ -366,8 +366,8 @@ class LogitResults:
 
         Returns:
             A list of dictionaries, one per explanatory variable
-            (excluding the intercept). Keys are `param`, `effect`,
-            `std_err`, `test_stat`, `p_value`, `conf_lower`, `conf_upper` (see
+            (excluding the intercept). Keys are `param_name`, `effect`,
+            `std_error`, `test_stat`, `p_value`, `conf_lower`, `conf_upper` (see
             `docs/spec/nonlinear-common.md` section 6). `test_stat` is
             always a z-statistic (normal distribution). `effect` is
             the marginal effect estimate (corresponds to `dy/dx` in

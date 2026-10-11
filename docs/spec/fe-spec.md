@@ -92,7 +92,7 @@ FE固有の内容のみを記載する。
   `#[derive(Clone)]`は外している）。
 - `summary()`は実装しない（structured-data-only出力方針）。
 - python_package層（`FEResults`）: `params`/`std_errors`/`test_stats`/`p_values`/`conf_int`は
-  係数名→値の`dict`。`coef_table()`は行指向`list[dict]`（キーは`param`/`coef`/`std_err`/
+  係数名→値の`dict`。`coef_table()`は行指向`list[dict]`（キーは`param_name`/`param`/`std_error`/
   `test_stat`/`p_value`/`conf_lower`/`conf_upper`、OLSと同じ）。
 
 ## 3. 内部実装の計算仕様

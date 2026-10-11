@@ -138,9 +138,9 @@ def test_coef_table_structure(iv_dataset):
     assert isinstance(table, list)
     assert len(table) == 3  # const, x1, endog1
     expected_keys = {
+        "param_name",
         "param",
-        "coef",
-        "std_err",
+        "std_error",
         "test_stat",
         "p_value",
         "conf_lower",
@@ -148,7 +148,7 @@ def test_coef_table_structure(iv_dataset):
     }
     for row in table:
         assert expected_keys <= set(row.keys())
-    assert [row["param"] for row in table] == ["const", "x1", "endog1"]
+    assert [row["param_name"] for row in table] == ["const", "x1", "endog1"]
 
 
 def test_conf_int_structure(iv_dataset):

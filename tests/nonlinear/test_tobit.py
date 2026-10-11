@@ -174,9 +174,9 @@ def test_coef_table_structure(censored_dataset):
     assert isinstance(table, list)
     assert len(table) == 4  # const, x1, x2, sigma
     expected_keys = {
+        "param_name",
         "param",
-        "coef",
-        "std_err",
+        "std_error",
         "test_stat",
         "p_value",
         "conf_lower",
@@ -184,7 +184,12 @@ def test_coef_table_structure(censored_dataset):
     }
     for row in table:
         assert expected_keys <= set(row.keys())
-    assert [row["param"] for row in table] == ["const", "x1", "x2", "sigma"]
+    assert [row["param_name"] for row in table] == [
+        "const",
+        "x1",
+        "x2",
+        "sigma",
+    ]
 
 
 def test_wald_statistic_and_p_value_are_present(censored_dataset):
@@ -445,11 +450,11 @@ def test_marginal_effects_default_excludes_intercept(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
     effects = res.marginal_effects()
 
-    assert [row["param"] for row in effects] == ["x1", "x2"]
+    assert [row["param_name"] for row in effects] == ["x1", "x2"]
     expected_keys = {
-        "param",
+        "param_name",
         "effect",
-        "std_err",
+        "std_error",
         "test_stat",
         "p_value",
         "conf_lower",
@@ -465,7 +470,7 @@ def test_marginal_effects_default_excludes_intercept(censored_dataset):
 def test_marginal_effects_accepts_all_targets(censored_dataset, target):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
     effects = res.marginal_effects(target=target)
-    assert [row["param"] for row in effects] == ["x1", "x2"]
+    assert [row["param_name"] for row in effects] == ["x1", "x2"]
 
 
 def test_marginal_effects_mean_and_median_differ_from_overall(

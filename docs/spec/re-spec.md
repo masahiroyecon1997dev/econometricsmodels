@@ -85,7 +85,7 @@ RE固有の内容のみを記載する。FEとの共有範囲は[`fe-spec.md`](.
   `fixed_effects()`のような別メソッド化は不要）。`REResult`に`estimator`のような非公開
   フィールドも無く、`#[derive(Clone)]`を問題なく維持できる。
 - `summary()`は実装しない。python_package層（`REResults`）の`coef_table()`はFEと同じキー
-  構成（`param`/`coef`/`std_err`/`test_stat`/`p_value`/`conf_lower`/`conf_upper`）。
+  構成（`param_name`/`param`/`std_error`/`test_stat`/`p_value`/`conf_lower`/`conf_upper`）。
 
 ## 3. 内部実装の計算仕様
 

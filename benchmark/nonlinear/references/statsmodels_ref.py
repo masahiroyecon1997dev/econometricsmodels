@@ -85,7 +85,7 @@ def _margeff_frame(fit_result, at: str) -> dict:
     return {
         str(name): {
             "effect": float(row.iloc[0]),
-            "std_err": float(row.iloc[1]),
+            "std_error": float(row.iloc[1]),
             "test_stat": float(row.iloc[2]),
             "p_value": float(row.iloc[3]),
             "conf_lower": float(row.iloc[4]),

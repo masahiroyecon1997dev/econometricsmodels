@@ -310,7 +310,7 @@ TOLERANCES: dict[str, dict[str, float]] = {
     # atolは`ATOL_LOGIT_PROBIT_CROSSCHECK`（1e-12）で、`|ref|`が小さい項目も
     # 純粋な相対誤差で比較する。以下の実測最大相対誤差は、atolを無視した全項目の値。
     # Logit: 係数~4e-10、SE~3.6e-8、z~3.1e-8、conf_int~6.1e-8（cluster含む）、
-    # 限界効果effect~1.5e-9・std_err~2.9e-8・z~3.3e-8・conf_int~6.1e-8。cluster
+    # 限界効果effect~1.5e-9・std_error~2.9e-8・z~3.3e-8・conf_int~6.1e-8。cluster
     # （均等・不均衡）の全統計量・限界効果も同水準。基本rtol=1e-6は最大値（conf_int）の
     # 約16倍のマージン。
     "logit_crosscheck": {
@@ -324,7 +324,7 @@ TOLERANCES: dict[str, dict[str, float]] = {
     },
     # Logitと同じ生成方針。実測最大相対誤差は係数~4.9e-8、SE~1.2e-7
     # （mroz/hc0/nwifeinc）、z~1.35e-7（mroz/opg/nwifeinc）、限界効果effect~5e-8・
-    # std_err~1.2e-7・z~1.4e-7。cluster（均等・不均衡）の全統計量・限界効果も同水準
+    # std_error~1.2e-7・z~1.4e-7。cluster（均等・不均衡）の全統計量・限界効果も同水準
     # （SE~6.8e-8）。基本rtol=1e-6は最大値の約7倍のマージン。
     "probit_crosscheck": {
         "rtol": 1e-6,

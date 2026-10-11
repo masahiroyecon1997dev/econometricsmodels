@@ -194,17 +194,17 @@ def _assert_first_stage_matches_ols(
                 atol=ATOL,
             )
         table_ours, table_direct = ours.coef_table(), direct.coef_table()
-        assert [row["param"] for row in table_ours] == [
-            row["param"] for row in table_direct
+        assert [row["param_name"] for row in table_ours] == [
+            row["param_name"] for row in table_direct
         ], f"{label}/coef_table/param"
         for row_ours, row_direct in zip(table_ours, table_direct, strict=True):
             for key, value in row_direct.items():
-                if key == "param":
+                if key == "param_name":
                     continue
                 assert_close(
                     row_ours[key],
                     value,
-                    f"{label}/coef_table/{row_direct['param']}/{key}",
+                    f"{label}/coef_table/{row_direct['param_name']}/{key}",
                     rtol=RTOL,
                     atol=ATOL,
                 )

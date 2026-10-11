@@ -195,7 +195,7 @@ def test_matches_r_glm(fixtures, scenario, cov_type):
     options = ProbitOptions(cov_type=cov_type, **kwargs)
     res = Probit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
-    ref = fixtures["synthetic"][scenario][cov_type]["r"]
+    ref = fixtures["synthetic"][scenario][cov_type]
     _check_result(res, ref, f"{scenario}/{cov_type}")
 
 
@@ -205,7 +205,7 @@ def test_cluster_matches_r_glm(fixtures):
     options = ProbitOptions(cov_type="cluster", cluster="cluster_group")
     res = Probit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
-    ref = fixtures["synthetic"]["baseline"]["cluster"]["r"]
+    ref = fixtures["synthetic"]["baseline"]["cluster"]
     _check_result(res, ref, "cluster")
 
 
@@ -216,7 +216,7 @@ def test_cluster_imbalanced_matches_r_glm(fixtures):
     options = ProbitOptions(cov_type="cluster", cluster="cluster_group")
     res = Probit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
-    ref = fixtures["synthetic"]["baseline"]["cluster_imbalanced"]["r"]
+    ref = fixtures["synthetic"]["baseline"]["cluster_imbalanced"]
     _check_result(res, ref, "cluster_imbalanced")
 
 
@@ -226,7 +226,7 @@ def test_apple_cluster_matches_r_glm(fixtures):
     options = ProbitOptions(cov_type="cluster", cluster=APPLE_CLUSTER)
     res = Probit(df, y="y", x=APPLE_X, options=options).fit()
 
-    ref = fixtures["wooldridge"]["apple"]["cluster"]["r"]
+    ref = fixtures["wooldridge"]["apple"]["cluster"]
     _check_result(
         res,
         ref,
@@ -244,5 +244,5 @@ def test_mroz_matches_r_glm(fixtures, cov_type):
     options = ProbitOptions(cov_type=cov_type)
     res = Probit(df, y="inlf", x=MROZ_X, options=options).fit()
 
-    ref = fixtures["wooldridge"]["mroz"][cov_type]["r"]
+    ref = fixtures["wooldridge"]["mroz"][cov_type]
     _check_result(res, ref, f"mroz/{cov_type}")

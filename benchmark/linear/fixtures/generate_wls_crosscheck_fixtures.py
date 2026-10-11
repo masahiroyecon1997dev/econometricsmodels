@@ -107,10 +107,9 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
 
         fixtures[scenario] = {}
         for cov_type in R_COV_TYPES:
-            entry: dict = {}
             if cov_type == "hac":
                 lag = hac_auto_lag(n)
-                entry["r"] = run_lm_r(
+                entry = run_lm_r(
                     csv_path,
                     formula,
                     cov_type,
@@ -119,7 +118,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
                 )
                 entry["hac_lag"] = lag
             else:
-                entry["r"] = run_lm_r(
+                entry = run_lm_r(
                     csv_path, formula, cov_type, weight_col=WEIGHT_COLUMN_NAME
                 )
 
@@ -154,14 +153,12 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             # 列名の重複が許容されることの数値的な確認が目的で、cov_type間の
             # 挙動差を検証する趣旨ではないためclassicalのみ
             # （generate_wls_fixtures.pyと同じ方針）。
-            fixtures[scenario]["weight_in_x"] = {
-                "r": run_lm_r(
-                    csv_path,
-                    "y ~ x1 + x2 + x3 + weight",
-                    "classical",
-                    weight_col=WEIGHT_COLUMN_NAME,
-                )
-            }
+            fixtures[scenario]["weight_in_x"] = run_lm_r(
+                csv_path,
+                "y ~ x1 + x2 + x3 + weight",
+                "classical",
+                weight_col=WEIGHT_COLUMN_NAME,
+            )
 
             # include_intercept=False（切片なし）。R側はformula自体に"- 1"を
             # 付けるだけで表現できる。全cov_type（R_COV_TYPES + cluster）と
@@ -169,10 +166,9 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             formula_no_intercept = f"{formula} - 1"
             fixtures[scenario]["no_intercept"] = {}
             for cov_type in R_COV_TYPES:
-                entry = {}
                 if cov_type == "hac":
                     lag = hac_auto_lag(n)
-                    entry["r"] = run_lm_r(
+                    entry = run_lm_r(
                         csv_path,
                         formula_no_intercept,
                         cov_type,
@@ -181,7 +177,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
                     )
                     entry["hac_lag"] = lag
                 else:
-                    entry["r"] = run_lm_r(
+                    entry = run_lm_r(
                         csv_path,
                         formula_no_intercept,
                         cov_type,
@@ -199,10 +195,9 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             # （R_COV_TYPES + cluster）と組み合わせて確認する（OLS側の横展開）。
             fixtures[scenario]["confidence_level"] = {}
             for cov_type in R_COV_TYPES:
-                entry = {}
                 if cov_type == "hac":
                     lag = hac_auto_lag(n)
-                    entry["r"] = run_lm_r(
+                    entry = run_lm_r(
                         csv_path,
                         formula,
                         cov_type,
@@ -212,7 +207,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
                     )
                     entry["hac_lag"] = lag
                 else:
-                    entry["r"] = run_lm_r(
+                    entry = run_lm_r(
                         csv_path,
                         formula,
                         cov_type,
@@ -267,16 +262,14 @@ def _run_cluster_case(
     grouped = df.with_columns(pl.Series("cluster_group", cluster_group))
     tmp_path = csv_path.with_name(csv_path.stem + suffix + ".csv")
     grouped.write_csv(tmp_path)
-    return {
-        "r": run_lm_r(
-            tmp_path,
-            formula,
-            "cluster",
-            cluster="cluster_group",
-            weight_col=WEIGHT_COLUMN_NAME,
-            confidence_level=confidence_level,
-        )
-    }
+    return run_lm_r(
+        tmp_path,
+        formula,
+        "cluster",
+        cluster="cluster_group",
+        weight_col=WEIGHT_COLUMN_NAME,
+        confidence_level=confidence_level,
+    )
 
 
 # HACは時系列順の無いクロスセクションデータのため対象外（generate_wls_fixtures.py
@@ -298,23 +291,19 @@ def build_401ksubs_fixture(tmpdir: Path) -> dict:
     csv_path = _write_csv(df, tmpdir, "401ksubs")
 
     fixtures = {
-        cov_type: {
-            "r": run_lm_r(csv_path, formula, cov_type, weight_col="inv_inc")
-        }
+        cov_type: run_lm_r(csv_path, formula, cov_type, weight_col="inv_inc")
         for cov_type in WOOLDRIDGE_COV_TYPES
     }
 
     df_clustered = _add_age_bin(df)
     csv_path_clustered = _write_csv(df_clustered, tmpdir, "401ksubs_cluster")
-    fixtures["cluster"] = {
-        "r": run_lm_r(
-            csv_path_clustered,
-            formula,
-            "cluster",
-            cluster="age_bin",
-            weight_col="inv_inc",
-        )
-    }
+    fixtures["cluster"] = run_lm_r(
+        csv_path_clustered,
+        formula,
+        "cluster",
+        cluster="age_bin",
+        weight_col="inv_inc",
+    )
     return fixtures
 
 

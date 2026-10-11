@@ -75,9 +75,9 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
         for cov_type in R_COV_TYPES:
             if cov_type == "cluster":
                 continue
-            fixtures[scenario][cov_type] = {
-                "r": run_glm_r(csv_path, formula, cov_type, link="probit")
-            }
+            fixtures[scenario][cov_type] = run_glm_r(
+                csv_path, formula, cov_type, link="probit"
+            )
 
     baseline_df, _ = load_frozen_dataset("probit", "baseline")
     n = baseline_df.height
@@ -114,15 +114,13 @@ def _run_cluster_case(
     grouped = df.with_columns(pl.Series("cluster_group", cluster_group))
     tmp_path = csv_path.with_name(csv_path.stem + suffix + ".csv")
     grouped.write_csv(tmp_path)
-    return {
-        "r": run_glm_r(
-            tmp_path,
-            formula,
-            "cluster",
-            cluster="cluster_group",
-            link="probit",
-        )
-    }
+    return run_glm_r(
+        tmp_path,
+        formula,
+        "cluster",
+        cluster="cluster_group",
+        link="probit",
+    )
 
 
 def build_wooldridge_fixtures(tmpdir: Path) -> dict:
@@ -133,9 +131,9 @@ def build_wooldridge_fixtures(tmpdir: Path) -> dict:
     for cov_type in R_COV_TYPES:
         if cov_type == "cluster":
             continue
-        fixtures[cov_type] = {
-            "r": run_glm_r(csv_path, MROZ_FORMULA, cov_type, link="probit")
-        }
+        fixtures[cov_type] = run_glm_r(
+            csv_path, MROZ_FORMULA, cov_type, link="probit"
+        )
     # NOTE: mrozの`city`（G=2）クラスターロバストSEの成功パスフィクスチャは
     # 削除した（`G=2 <= q=7`で ValidationError。Logitと同じ）。
     return fixtures
@@ -145,15 +143,13 @@ def build_apple_fixtures(tmpdir: Path) -> dict:
     """多クラスターの実データ（apple、`ecolbs > 0`、州でG=49）。"""
     csv_path = _write_csv(load_apple_adoption(), tmpdir, "apple")
     return {
-        "cluster": {
-            "r": run_glm_r(
-                csv_path,
-                APPLE_FORMULA,
-                "cluster",
-                cluster=APPLE_CLUSTER,
-                link="probit",
-            )
-        }
+        "cluster": run_glm_r(
+            csv_path,
+            APPLE_FORMULA,
+            "cluster",
+            cluster=APPLE_CLUSTER,
+            link="probit",
+        )
     }
 
 

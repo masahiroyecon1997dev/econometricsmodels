@@ -75,9 +75,9 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
         for cov_type in R_COV_TYPES:
             if cov_type == "cluster":
                 continue
-            fixtures[scenario][cov_type] = {
-                "r": run_glm_r(csv_path, formula, cov_type)
-            }
+            fixtures[scenario][cov_type] = run_glm_r(
+                csv_path, formula, cov_type
+            )
 
     baseline_df, _ = load_frozen_dataset("logit", "baseline")
     n = baseline_df.height
@@ -114,9 +114,7 @@ def _run_cluster_case(
     grouped = df.with_columns(pl.Series("cluster_group", cluster_group))
     tmp_path = csv_path.with_name(csv_path.stem + suffix + ".csv")
     grouped.write_csv(tmp_path)
-    return {
-        "r": run_glm_r(tmp_path, formula, "cluster", cluster="cluster_group")
-    }
+    return run_glm_r(tmp_path, formula, "cluster", cluster="cluster_group")
 
 
 def build_wooldridge_fixtures(tmpdir: Path) -> dict:
@@ -127,7 +125,7 @@ def build_wooldridge_fixtures(tmpdir: Path) -> dict:
     for cov_type in R_COV_TYPES:
         if cov_type == "cluster":
             continue
-        fixtures[cov_type] = {"r": run_glm_r(csv_path, MROZ_FORMULA, cov_type)}
+        fixtures[cov_type] = run_glm_r(csv_path, MROZ_FORMULA, cov_type)
     # NOTE: mrozの`city`（G=2）クラスターロバストSEの成功パスフィクスチャは
     # 削除した（MROZ_X は7変数で`G=2 <= q=7`のため ValidationError）。
     return fixtures
@@ -137,14 +135,12 @@ def build_apple_fixtures(tmpdir: Path) -> dict:
     """多クラスターの実データ（apple、`ecolbs > 0`、州でG=49）。"""
     csv_path = _write_csv(load_apple_adoption(), tmpdir, "apple")
     return {
-        "cluster": {
-            "r": run_glm_r(
-                csv_path,
-                APPLE_FORMULA,
-                "cluster",
-                cluster=APPLE_CLUSTER,
-            )
-        }
+        "cluster": run_glm_r(
+            csv_path,
+            APPLE_FORMULA,
+            "cluster",
+            cluster=APPLE_CLUSTER,
+        )
     }
 
 

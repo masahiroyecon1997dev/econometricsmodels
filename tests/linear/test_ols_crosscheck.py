@@ -166,7 +166,7 @@ def test_synthetic_matches_r(crosscheck, scenario, cov_type):
     options = OLSOptions(cov_type=cov_type)
     res = OLS(with_row_time(df), y="y", x=x_cols, options=options).fit()
 
-    ref = crosscheck["synthetic"][scenario][cov_type]["r"]
+    ref = crosscheck["synthetic"][scenario][cov_type]
     label = f"{scenario}/{cov_type}/R"
     _assert_close(res.params, ref["params"], f"{label} params")
     _assert_close(res.std_errors, ref["std_errors"], f"{label} std_errors")
@@ -226,7 +226,7 @@ def test_cluster_matches_r(crosscheck):
         with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
     ).fit()
 
-    ref = crosscheck["synthetic"]["baseline"]["cluster"]["r"]
+    ref = crosscheck["synthetic"]["baseline"]["cluster"]
     _assert_close(res.params, ref["params"], "cluster/R params")
     _assert_close(res.std_errors, ref["std_errors"], "cluster/R std_errors")
     _assert_fit_stats_close(res, ref, "cluster/R", rtol=RTOL_STRICT)
@@ -246,7 +246,7 @@ def test_cluster_imbalanced_matches_r(crosscheck):
         with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
     ).fit()
 
-    ref = crosscheck["synthetic"]["baseline"]["cluster_imbalanced"]["r"]
+    ref = crosscheck["synthetic"]["baseline"]["cluster_imbalanced"]
     _assert_close(res.params, ref["params"], "cluster_imbalanced/R params")
     _assert_close(
         res.std_errors, ref["std_errors"], "cluster_imbalanced/R std_errors"
@@ -268,7 +268,7 @@ def test_cluster_g2_matches_r(crosscheck):
     options = OLSOptions(cov_type="cluster", cluster="cluster_group")
     res = OLS(with_row_time(df), y="y", x=["x1"], options=options).fit()
 
-    ref = crosscheck["synthetic"]["baseline"]["cluster_g2"]["r"]
+    ref = crosscheck["synthetic"]["baseline"]["cluster_g2"]
     _assert_close(res.params, ref["params"], "cluster_g2/R params")
     _assert_close(res.std_errors, ref["std_errors"], "cluster_g2/R std_errors")
     _assert_fit_stats_close(res, ref, "cluster_g2/R", rtol=RTOL_STRICT)
@@ -292,7 +292,7 @@ def test_cluster_ill_conditioned_matches_r(crosscheck, scenario):
         with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
     ).fit()
 
-    ref = crosscheck["synthetic"][scenario]["cluster"]["r"]
+    ref = crosscheck["synthetic"][scenario]["cluster"]
     label = f"{scenario}/cluster/R"
     _assert_close(res.params, ref["params"], f"{label} params")
     _assert_close(res.std_errors, ref["std_errors"], f"{label} std_errors")
@@ -313,7 +313,7 @@ def test_hac_matches_r(crosscheck):
         with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
     ).fit()
 
-    ref = entry["r"]
+    ref = entry
     # 係数（coef）・AIC・BIC・対数尤度はcov_typeに依存しない通常のOLS推定値の
     # ため厳密比較のまま。HACで乖離しうるのは標準誤差（se）とF統計量・F検定p値
     # （cov_typeごとのロバストWald検定のため、標準誤差と同じ慣習差が乗る）。
@@ -358,7 +358,7 @@ def test_no_intercept_matches_r(crosscheck, cov_type):
         with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
     ).fit()
 
-    ref = crosscheck["synthetic"]["baseline"]["no_intercept"][cov_type]["r"]
+    ref = crosscheck["synthetic"]["baseline"]["no_intercept"][cov_type]
     label = f"no_intercept/{cov_type}/R"
     assert res.param_names == ["x1", "x2", "x3"]
     _assert_close(res.params, ref["params"], f"{label} params")
@@ -382,7 +382,7 @@ def test_no_intercept_hac_matches_r(crosscheck):
         with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
     ).fit()
 
-    ref = entry["r"]
+    ref = entry
     label = "no_intercept/hac/R"
     assert res.param_names == ["x1", "x2", "x3"]
     _assert_close(res.params, ref["params"], f"{label} params")
@@ -411,9 +411,7 @@ def test_confidence_level_matches_r(crosscheck, cov_type):
         with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
     ).fit()
 
-    ref = crosscheck["synthetic"]["baseline"]["confidence_level"][cov_type][
-        "r"
-    ]
+    ref = crosscheck["synthetic"]["baseline"]["confidence_level"][cov_type]
     label = f"confidence_level/{cov_type}/R"
     _assert_close(res.params, ref["params"], f"{label} params")
     _assert_close(res.std_errors, ref["std_errors"], f"{label} std_errors")
@@ -436,7 +434,7 @@ def test_confidence_level_hac_matches_r(crosscheck):
         with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
     ).fit()
 
-    ref = entry["r"]
+    ref = entry
     label = "confidence_level/hac/R"
     _assert_close(res.params, ref["params"], f"{label} params")
     _assert_close(
@@ -469,7 +467,7 @@ def test_wooldridge_matches_r(
     options = OLSOptions(cov_type=cov_type)
     res = OLS(with_row_time(df), y=y, x=x, options=options).fit()
 
-    ref = crosscheck["wooldridge"][dataset_name][cov_type]["r"]
+    ref = crosscheck["wooldridge"][dataset_name][cov_type]
     label = f"{dataset_name}/{cov_type}/R"
     _assert_close(res.params, ref["params"], f"{label} params")
     _assert_close(res.std_errors, ref["std_errors"], f"{label} std_errors")
@@ -504,7 +502,7 @@ def test_wooldridge_wage1_region_cluster_matches_r(
         options=options,
     ).fit()
 
-    ref = crosscheck["wooldridge"]["wage1"]["cluster"]["r"]
+    ref = crosscheck["wooldridge"]["wage1"]["cluster"]
     label = "wage1/cluster(region)/R"
     _assert_close(res.params, ref["params"], f"{label} params")
     _assert_close(res.std_errors, ref["std_errors"], f"{label} std_errors")

@@ -29,7 +29,7 @@ use pyo3_polars::PyDataFrame;
 
 use super::common::{
     MarginalEffectsResult, mat_to_nested_vec, mle_error_to_pyerr, parse_cov_type,
-    parse_marginal_effects_at, parse_solver_type,
+    parse_marginal_effects_at, parse_solver_type, resolve_mle_tol_default,
 };
 use crate::shared::column_extraction::{
     extract_dataframe, extract_f64_column, extract_f64_columns, x_column_names,
@@ -143,13 +143,8 @@ impl ProbitOptions {
         #[pyo3(from_py_with = crate::shared::option_values::tol_arg)] tol: Option<f64>,
         raise_on_non_convergence: bool,
     ) -> Self {
-        // `tol`の既定値のsolver依存分岐は`LogitOptions::new`と同じ理由
-        // （`tol`フィールドのdocコメント参照）。
-        let tol = tol.unwrap_or(if solver.eq_ignore_ascii_case("newton") {
-            1e-6
-        } else {
-            1e-8
-        });
+        // `tol`の既定値はsolver依存（`tol`フィールドのdocコメント・`resolve_mle_tol_default`参照）。
+        let tol = resolve_mle_tol_default(&solver, tol);
         Self {
             cov_type,
             include_intercept,

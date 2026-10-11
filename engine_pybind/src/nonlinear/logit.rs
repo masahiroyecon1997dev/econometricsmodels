@@ -29,7 +29,7 @@ use pyo3_polars::PyDataFrame;
 
 use super::common::{
     MarginalEffectsResult, mat_to_nested_vec, mle_error_to_pyerr, parse_cov_type,
-    parse_marginal_effects_at, parse_solver_type,
+    parse_marginal_effects_at, parse_solver_type, resolve_mle_tol_default,
 };
 use crate::shared::column_extraction::{
     extract_dataframe, extract_f64_column, extract_f64_columns, x_column_names,
@@ -143,16 +143,8 @@ impl LogitOptions {
         #[pyo3(from_py_with = crate::shared::option_values::tol_arg)] tol: Option<f64>,
         raise_on_non_convergence: bool,
     ) -> Self {
-        // `tol`の既定値は`solver`依存（`tol`フィールドのdocコメント参照）。`newton`は
-        // 絶対閾値`1e-6`、`bfgs`/`lbfgs`は観測数正規化後の`1e-8`。共有の単一既定値
-        // では、Newtonの既定値を締めると大標本で無視できない速度低下（実測:
-        // n=1,000,000で0.98s→3.15s）が起きる一方、bfgs/lbfgsの既定値を緩めると小標本の
-        // 精度検証テスト（RTOL=1e-8）を壊すため、solver別に分岐する（ユーザー確認済み）。
-        let tol = tol.unwrap_or(if solver.eq_ignore_ascii_case("newton") {
-            1e-6
-        } else {
-            1e-8
-        });
+        // `tol`の既定値はsolver依存（`tol`フィールドのdocコメント・`resolve_mle_tol_default`参照）。
+        let tol = resolve_mle_tol_default(&solver, tol);
         Self {
             cov_type,
             include_intercept,

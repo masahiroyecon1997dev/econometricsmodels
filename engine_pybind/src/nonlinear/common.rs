@@ -154,9 +154,38 @@ pub(crate) fn parse_marginal_effects_at(at_lower: &str) -> PyResult<MarginalEffe
     }
 }
 
+/// `LogitOptions`/`ProbitOptions`/`TobitOptions`のコンストラクタで`tol=None`のときの既定値を
+/// `solver`から解決する。`newton`は絶対閾値`1e-6`、`bfgs`/`lbfgs`は観測数正規化後の`1e-8`。
+/// 共有の単一既定値では、Newtonの既定値を締めると大標本で無視できない速度低下（実測:
+/// n=1,000,000で0.98s→3.15s）が起きる一方、bfgs/lbfgsの既定値を緩めると小標本の
+/// 精度検証テスト（RTOL=1e-8）を壊すため、solver別に分岐する（ユーザー確認済み）。
+/// `tol`が明示されていればそのまま返す。`solver`は大文字小文字を区別せず、未知の値は
+/// ここでは検証せず（`fit()`時の`parse_solver_type`が`ValidationError`にする）`1e-8`側になる。
+pub(crate) fn resolve_mle_tol_default(solver: &str, tol: Option<f64>) -> f64 {
+    tol.unwrap_or(if solver.eq_ignore_ascii_case("newton") {
+        1e-6
+    } else {
+        1e-8
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolve_mle_tol_default_uses_solver_dependent_default_when_tol_is_none() {
+        assert_eq!(resolve_mle_tol_default("newton", None), 1e-6);
+        assert_eq!(resolve_mle_tol_default("NEWTON", None), 1e-6);
+        assert_eq!(resolve_mle_tol_default("bfgs", None), 1e-8);
+        assert_eq!(resolve_mle_tol_default("lbfgs", None), 1e-8);
+    }
+
+    #[test]
+    fn resolve_mle_tol_default_returns_explicit_tol_unchanged() {
+        assert_eq!(resolve_mle_tol_default("newton", Some(1e-3)), 1e-3);
+        assert_eq!(resolve_mle_tol_default("bfgs", Some(1e-3)), 1e-3);
+    }
 
     #[test]
     fn mat_to_nested_vec_preserves_row_major_order() {

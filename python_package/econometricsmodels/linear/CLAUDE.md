@@ -24,4 +24,5 @@
 ## 実装パターン
 
 - `OLS`/`WLS`クラスは`data`/`y`/`x`（+`weight`）/`options`のコンストラクタ引数を保持するだけで、`fit()`呼び出し時に初めて`_lib.fit_ols`/`_lib.fit_wls`を呼ぶ（コンストラクタでは検証しない）。
+- 係数名→値の`dict`化・`conf_int`・`coef_table()`の行組み立ては`econometricsmodels/_results_utils.py`のヘルパー（`by_param`/`conf_int_by_param`/`coef_table_rows`/`marginal_effect_rows`）に集約している（全手法のResultsで共通）。プロパティ本体・docstringは各クラスに残し、基底クラス化はしない（手法ごとにdocstringやメンバーが分岐するため）。
 - `OLSResults`/`WLSResults`は`_lib`の結果オブジェクト（`_lib.OLSResult`等）を`_raw`として保持する薄いラッパー。新しいプロパティを追加する際も、Rust側`#[pyclass(get_all)]`のフィールドをそのまま`dict`化する以上のロジックをPython側に持ち込まない。

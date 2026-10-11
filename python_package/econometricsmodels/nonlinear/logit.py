@@ -24,6 +24,12 @@ import polars as pl
 
 from .. import _lib
 from .._lib import LogitOptions
+from .._results_utils import (
+    by_param,
+    coef_table_rows,
+    conf_int_by_param,
+    marginal_effect_rows,
+)
 
 __all__ = ["Logit", "LogitOptions", "LogitResults"]
 
@@ -123,12 +129,12 @@ class LogitResults:
     @property
     def params(self) -> dict[str, float]:
         """Coefficient name to coefficient value."""
-        return dict(zip(self._raw.param_names, self._raw.params))
+        return by_param(self._raw.param_names, self._raw.params)
 
     @property
     def std_errors(self) -> dict[str, float]:
         """Coefficient name to standard error."""
-        return dict(zip(self._raw.param_names, self._raw.std_errors))
+        return by_param(self._raw.param_names, self._raw.std_errors)
 
     @property
     def test_stats(self) -> dict[str, float]:
@@ -137,7 +143,7 @@ class LogitResults:
         Logit uses a z-test (standard normal), not a t-test (see
         `docs/spec/nonlinear-common.md` section 4).
         """
-        return dict(zip(self._raw.param_names, self._raw.test_stats))
+        return by_param(self._raw.param_names, self._raw.test_stats)
 
     @property
     def stat_dist(self) -> Literal["t", "normal"]:
@@ -156,19 +162,12 @@ class LogitResults:
     @property
     def p_values(self) -> dict[str, float]:
         """Coefficient name to two-sided p-value."""
-        return dict(zip(self._raw.param_names, self._raw.p_values))
+        return by_param(self._raw.param_names, self._raw.p_values)
 
     @property
     def conf_int(self) -> dict[str, tuple[float, float]]:
         """Coefficient name to confidence interval `(lower, upper)`."""
-        return {
-            name: (lower, upper)
-            for name, lower, upper in zip(
-                self._raw.param_names,
-                self._raw.conf_lower,
-                self._raw.conf_upper,
-            )
-        }
+        return conf_int_by_param(self._raw)
 
     @property
     def log_likelihood(self) -> float:
@@ -259,26 +258,7 @@ class LogitResults:
             `param`, `coef`, `std_err`, `test_stat`, `p_value`,
             `conf_lower`, `conf_upper`.
         """
-        return [
-            {
-                "param": name,
-                "coef": coef,
-                "std_err": se,
-                "test_stat": z,
-                "p_value": p,
-                "conf_lower": lower,
-                "conf_upper": upper,
-            }
-            for name, coef, se, z, p, lower, upper in zip(
-                self._raw.param_names,
-                self._raw.params,
-                self._raw.std_errors,
-                self._raw.test_stats,
-                self._raw.p_values,
-                self._raw.conf_lower,
-                self._raw.conf_upper,
-            )
-        ]
+        return coef_table_rows(self._raw)
 
     def predict(self, new_data: pl.DataFrame | None = None) -> list[float]:
         """Predicted probabilities `p_i = Λ(x_i'β̂)`.
@@ -396,23 +376,4 @@ class LogitResults:
                 subclass of `ValueError`.
         """
         raw = self._raw.marginal_effects(at, confidence_level)
-        return [
-            {
-                "param": name,
-                "effect": effect,
-                "std_err": se,
-                "test_stat": z,
-                "p_value": p,
-                "conf_lower": lower,
-                "conf_upper": upper,
-            }
-            for name, effect, se, z, p, lower, upper in zip(
-                raw.param_names,
-                raw.effect,
-                raw.std_errors,
-                raw.test_stats,
-                raw.p_values,
-                raw.conf_lower,
-                raw.conf_upper,
-            )
-        ]
+        return marginal_effect_rows(raw)

@@ -26,6 +26,11 @@ import polars as pl
 
 from .. import _lib
 from .._lib import IVOptions
+from .._results_utils import (
+    by_param,
+    coef_table_rows,
+    conf_int_by_param,
+)
 from ..linear.ols import OLSResults
 
 __all__ = ["IV", "IVOptions", "IVResults"]
@@ -151,12 +156,12 @@ class IVResults:
     @property
     def params(self) -> dict[str, float]:
         """Coefficient name to coefficient value."""
-        return dict(zip(self._raw.param_names, self._raw.params))
+        return by_param(self._raw.param_names, self._raw.params)
 
     @property
     def std_errors(self) -> dict[str, float]:
         """Coefficient name to standard error."""
-        return dict(zip(self._raw.param_names, self._raw.std_errors))
+        return by_param(self._raw.param_names, self._raw.std_errors)
 
     @property
     def test_stats(self) -> dict[str, float]:
@@ -165,7 +170,7 @@ class IVResults:
         t-statistic for `estimator="2sls"`, z-statistic for
         `estimator="gmm"`; `stat_dist` tells which.
         """
-        return dict(zip(self._raw.param_names, self._raw.test_stats))
+        return by_param(self._raw.param_names, self._raw.test_stats)
 
     @property
     def stat_dist(self) -> Literal["t", "normal"]:
@@ -184,19 +189,12 @@ class IVResults:
     @property
     def p_values(self) -> dict[str, float]:
         """Coefficient name to two-sided p-value."""
-        return dict(zip(self._raw.param_names, self._raw.p_values))
+        return by_param(self._raw.param_names, self._raw.p_values)
 
     @property
     def conf_int(self) -> dict[str, tuple[float, float]]:
         """Coefficient name to confidence interval `(lower, upper)`."""
-        return {
-            name: (lower, upper)
-            for name, lower, upper in zip(
-                self._raw.param_names,
-                self._raw.conf_lower,
-                self._raw.conf_upper,
-            )
-        }
+        return conf_int_by_param(self._raw)
 
     @property
     def residuals(self) -> list[float]:
@@ -442,26 +440,7 @@ class IVResults:
             `param`, `coef`, `std_err`, `test_stat`, `p_value`,
             `conf_lower`, `conf_upper`.
         """
-        return [
-            {
-                "param": name,
-                "coef": coef,
-                "std_err": se,
-                "test_stat": test_stat,
-                "p_value": p,
-                "conf_lower": lower,
-                "conf_upper": upper,
-            }
-            for name, coef, se, test_stat, p, lower, upper in zip(
-                self._raw.param_names,
-                self._raw.params,
-                self._raw.std_errors,
-                self._raw.test_stats,
-                self._raw.p_values,
-                self._raw.conf_lower,
-                self._raw.conf_upper,
-            )
-        ]
+        return coef_table_rows(self._raw)
 
     def first_stage(self) -> dict[str, OLSResults]:
         """Per-endogenous-variable first-stage regression results.

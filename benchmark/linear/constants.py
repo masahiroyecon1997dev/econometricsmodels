@@ -116,3 +116,82 @@ BG_NO_INTERCEPT_SCENARIOS = ["baseline", "autocorrelated"]
 BG_WOOLDRIDGE_CASES: dict[str, tuple[str, str, str]] = {
     "phillips": ("phillips", "inf ~ unem", "year"),
 }
+
+# Breusch-Pagan検定（`OLSResults.breusch_pagan_test()`）のベンチマーク対象。主リファレンス
+# （statsmodels、`generate_ols_breusch_pagan_fixtures.py`）とクロスチェック（R、
+# `generate_ols_breusch_pagan_crosscheck_fixtures.py`）の両フィクスチャ生成と、テストが
+# 同じケース定義を参照する。
+#
+# ケースのキー: `scenario`（合成データのシナリオ）または`dataset`+`formula`
+# （Wooldridge）、`x`（モデルの説明変数。省略すると`y`・`weight`以外の全列）、
+# `variables`（不均一分散の変数`Z`。省略するとモデルの`x`）、`include_intercept`
+# （既定True）、`extra_columns`（定数列`one`・`x1`の複製`x1_copy`・`x1`の絶対値`abs_x1`を足す）、
+# `reference_variables`（statsmodelsに渡す`Z`。省略すると`variables`。statsmodelsの
+# `het_breuschpagan`はLMのp値の自由度を列数-1で数え、列のランクを見ないため、定数・重複列を
+# 含むケースでは除いた後の列を渡す。定数・重複列を落とす挙動そのものはRと照合する）。
+#
+# 合成データ: 既定（`Z`＝モデルのx）は`NUMERIC_SCENARIOS`のうち補助回帰が成立するもの
+# （White検定と同じ。`baseline_df1`はn=5で`q=3`のため`n = q + 2`、`df_denom = 1`の成功パスに
+# なる〔White検定では補助回帰の列数が足りず対象外〕）。`baseline`は`Z`をモデルの一部・
+# モデル外の列にしたケース、切片なし、定数列・重複列を含むケースも持つ。`heteroskedastic`は
+# 誤差分散が`|x1|`に比例して増え`x1`には対称なため、`Z`をモデルのxにすると棄却されない。
+# `Z = |x1|`のケースで検定が実際に棄却する経路（裾のp値）を確認する。
+BP_SYNTHETIC_CASES: dict[str, dict] = {
+    **{
+        scenario: {"scenario": scenario}
+        for scenario in WHITE_SYNTHETIC_SCENARIOS
+    },
+    "baseline_df1": {"scenario": "baseline_df1"},
+    "heteroskedastic_abs_x1": {
+        "scenario": "heteroskedastic",
+        "extra_columns": True,
+        "variables": ["abs_x1"],
+    },
+    "heteroskedastic_no_intercept": {
+        "scenario": "heteroskedastic",
+        "include_intercept": False,
+    },
+    "baseline_subset": {"scenario": "baseline", "variables": ["x1"]},
+    "baseline_outside_model": {
+        "scenario": "baseline",
+        "x": ["x1"],
+        "variables": ["x2", "x3"],
+    },
+    "baseline_no_intercept": {
+        "scenario": "baseline",
+        "include_intercept": False,
+    },
+    "baseline_no_intercept_outside_model": {
+        "scenario": "baseline",
+        "x": ["x1"],
+        "variables": ["x2", "x3"],
+        "include_intercept": False,
+    },
+    "baseline_constant_and_duplicate": {
+        "scenario": "baseline",
+        "extra_columns": True,
+        "variables": ["one", "x1", "x2", "x1_copy"],
+        "reference_variables": ["x1", "x2"],
+    },
+}
+
+# Wooldridge実データ。`hprice1`・`hprice1_log`は教科書（Wooldridge, Introductory
+# Econometrics, 例8.4）の住宅価格モデルで、価格の水準では不均一分散が強く（LM≈14.09）、
+# 対数にすると弱まる（LM≈4.22）。`wage1_outside_model`はモデルに入れていない列（`tenure`・
+# `female`）を`Z`にするケース。
+BP_WOOLDRIDGE_CASES: dict[str, dict] = {
+    "hprice1": {
+        "dataset": "hprice1",
+        "formula": "price ~ lotsize + sqrft + bdrms",
+    },
+    "hprice1_log": {
+        "dataset": "hprice1",
+        "formula": "lprice ~ llotsize + lsqrft + bdrms",
+    },
+    "wage1": {"dataset": "wage1", "formula": "lwage ~ educ + exper + tenure"},
+    "wage1_outside_model": {
+        "dataset": "wage1",
+        "formula": "lwage ~ educ + exper",
+        "variables": ["tenure", "female"],
+    },
+}

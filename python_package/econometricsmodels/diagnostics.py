@@ -14,6 +14,7 @@ from typing import Any, Literal
 
 __all__ = [
     "BreuschGodfreyTestResult",
+    "BreuschPaganTestResult",
     "DiagnosticResult",
     "WhiteTestResult",
 ]
@@ -75,6 +76,35 @@ class WhiteTestResult(DiagnosticResult):
         dropped_terms: Terms left out because they were constant or
             numerically identical to an earlier term (for example the
             square of a 0/1 dummy, which equals the dummy itself).
+    """
+
+    aux_terms: list[str]
+    dropped_terms: list[str]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BreuschPaganTestResult(DiagnosticResult):
+    """Result of `OLSResults.breusch_pagan_test()`.
+
+    The auxiliary regression always includes a constant, whether or not
+    the model was fitted with `include_intercept`. The first element of
+    `aux_terms` is therefore always that constant, `"const"`, and for the
+    LM test `df == len(aux_terms) - 1`.
+
+    The other terms are the names of the columns that were used, as given.
+    A column named `"const"` is ambiguous with the constant (the first
+    element is still the constant).
+
+    Attributes are read-only, but `aux_terms` and `dropped_terms` are plain
+    lists: do not modify them in place, and note that the instance is
+    therefore not hashable. `to_dict()` returns copies.
+
+    Attributes:
+        aux_terms: Terms of the auxiliary regression that was run: the
+            constant, then the variables that were used, without the
+            dropped ones.
+        dropped_terms: Variables left out because they were constant or
+            numerically identical to an earlier variable.
     """
 
     aux_terms: list[str]

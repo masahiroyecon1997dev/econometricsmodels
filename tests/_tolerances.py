@@ -73,6 +73,22 @@ TOLERANCES: dict[str, dict[str, float]] = {
         "atol": ATOL_CROSSCHECK_FLOOR,
         "atol_p_value": 0.0,
     },
+    # Breusch-Pagan検定（`OLSResults.breusch_pagan_test()`）。statsmodelsの
+    # `het_breuschpagan(robust=True)`との比較。補助回帰の`R²`から決まる閉形式のため機械精度
+    # 一致（本実装とフィクスチャの実測最大相対誤差1.5e-12、p値）。p値は絶対誤差フロアを使わず
+    # 相対誤差のみで比較する（White検定と同じ理由）。
+    "ols_breusch_pagan_reference": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_REFERENCE_FLOOR,
+        "atol_p_value": 0.0,
+    },
+    # 独立実装（R `lmtest::bptest`＋同じ補助回帰のlm）。定数列・重複列を含む`Z`もここで
+    # （Rに落とさせて）照合する。
+    "ols_breusch_pagan_crosscheck": {
+        "rtol_strict": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_CROSSCHECK_FLOOR,
+        "atol_p_value": 0.0,
+    },
     # Breusch-Godfrey検定（`OLSResults.breusch_godfrey_test()`）。statsmodelsの
     # `acorr_breusch_godfrey`（切片あり）との比較。補助回帰の残差二乗和から決まる閉形式の
     # ため機械精度一致（実測最大相対誤差4.5e-12、p値を含む）。p値は絶対誤差フロアを使わず

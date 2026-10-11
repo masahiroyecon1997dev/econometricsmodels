@@ -210,3 +210,40 @@ if __name__ == "__main__":
 
     scenario_arg = sys.argv[1] if len(sys.argv) > 1 else "baseline"
     preview_dataset(scenario_arg, generate_linear_dataset)
+
+
+def with_bp_extra_columns(df: pl.DataFrame) -> pl.DataFrame:
+    """Breusch-Pagan検定のベンチマーク用の列を足す: 定数列`one`、`x1`の複製`x1_copy`、
+    `x1`の絶対値`abs_x1`。
+
+    `one`・`x1_copy`は、補助回帰の変数に定数列・重複列が入ったときそれらを落として自由度を
+    ランクで数える挙動（`baseline_constant_and_duplicate`）の確認用。`abs_x1`は
+    `heteroskedastic`シナリオの誤差分散が`|x1|`に比例して増える（`x1`の符号に対して対称
+    なので`x1`そのものでは検出できない）ため、検定が実際に棄却する経路
+    （`heteroskedastic_abs_x1`）の確認用。ジェネレータとテストが同じ列を作るためここに置く。
+    """
+    return df.with_columns(
+        pl.lit(1.0).alias("one"),
+        pl.col("x1").alias("x1_copy"),
+        pl.col("x1").abs().alias("abs_x1"),
+    )
+
+
+def resolve_bp_case(
+    case: dict, df: pl.DataFrame
+) -> tuple[pl.DataFrame, list[str], list[str] | None]:
+    """Breusch-Pagan検定のケース定義から、データ・モデルの`x`・`Z`を決める。
+
+    Args:
+        case: `benchmark.linear.constants`の`BP_*_CASES`の1ケース。
+        df: ケースのデータ（`extra_columns`を足す前）。
+
+    Returns:
+        `(データ, モデルの説明変数, Z)`。`Z`が`None`のときはモデルの説明変数を使う。
+    """
+    x_cols = case.get("x") or [
+        c for c in df.columns if c not in ("y", "weight")
+    ]
+    if case.get("extra_columns"):
+        df = with_bp_extra_columns(df)
+    return df, x_cols, case.get("variables")

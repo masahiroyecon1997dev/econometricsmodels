@@ -43,6 +43,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FIXTURE_MODULES = [
     "benchmark.linear.fixtures.generate_ols_fixtures",
     "benchmark.linear.fixtures.generate_ols_white_fixtures",
+    "benchmark.linear.fixtures.generate_ols_breusch_pagan_fixtures",
     "benchmark.linear.fixtures.generate_ols_breusch_godfrey_fixtures",
     "benchmark.linear.fixtures.generate_wls_fixtures",
     "benchmark.nonlinear.fixtures.generate_logit_fixtures",
@@ -56,6 +57,7 @@ _FIXTURE_MODULES = [
     "benchmark.nonlinear.fixtures.generate_tobit_fixtures",
     "benchmark.linear.fixtures.generate_ols_crosscheck_fixtures",
     "benchmark.linear.fixtures.generate_ols_white_crosscheck_fixtures",
+    "benchmark.linear.fixtures.generate_ols_breusch_pagan_crosscheck_fixtures",
     "benchmark.linear.fixtures.generate_ols_breusch_godfrey_crosscheck_fixtures",
     "benchmark.linear.fixtures.generate_wls_crosscheck_fixtures",
     "benchmark.nonlinear.fixtures.generate_logit_crosscheck_fixtures",

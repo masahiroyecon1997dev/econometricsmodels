@@ -1,0 +1,651 @@
+{
+  "synthetic": {
+    "baseline": {
+      "lm": 5.217110161732041,
+      "lm_p_value": 0.1565723237717845,
+      "f": 1.7433145549724127,
+      "f_p_value": 0.1571983369474091,
+      "df": 3,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_breuschpagan",
+        "robust": true,
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-11T00:16:04.187085+00:00",
+        "y": "y",
+        "x": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "variables": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "include_intercept": true
+      }
+    },
+    "baseline_k1": {
+      "lm": 2.3544773403315067,
+      "lm_p_value": 0.12492374846500931,
+      "f": 2.356154455521903,
+      "f_p_value": 0.12542451943008845,
+      "df": 1,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_breuschpagan",
+        "robust": true,
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-11T00:16:04.191834+00:00",
+        "y": "y",
+        "x": [
+          "x1"
+        ],
+        "variables": [
+          "x1"
+        ],
+        "include_intercept": true
+      }
+    },
+    "small_n": {
+      "lm": 4.422197718524115,
+      "lm_p_value": 0.21933594836866577,
+      "f": 1.5140168088306716,
+      "f_p_value": 0.2490670969244126,
+      "df": 3,
+      "n_obs": 20,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_breuschpagan",
+        "robust": true,
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-11T00:16:04.195498+00:00",
+        "y": "y",
+        "x": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "variables": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "include_intercept": true
+      }
+    },
+    "high_variance": {
+      "lm": 5.217110161732041,
+      "lm_p_value": 0.1565723237717845,
+      "f": 1.743314554972418,
+      "f_p_value": 0.15719833694740792,
+      "df": 3,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_breuschpagan",
+        "robust": true,
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-11T00:16:04.201427+00:00",
+        "y": "y",
+        "x": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "variables": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "include_intercept": true
+      }
+    },
+    "heteroskedastic": {
+      "lm": 4.903655056282819,
+      "lm_p_value": 0.17898947058361714,
+      "f": 1.6375350863562919,
+      "f_p_value": 0.17977477761936164,
+      "df": 3,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_breuschpagan",
+        "robust": true,
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-11T00:16:04.206690+00:00",
+        "y": "y",
+        "x": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "variables": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "include_intercept": true
+      }
+    },
+    "autocorrelated": {
+      "lm": 3.1027310568217947,
+      "lm_p_value": 0.3760556766990983,
+      "f": 1.0323761069410626,
+      "f_p_value": 0.3778652349256744,
+      "df": 3,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_breuschpagan",
+        "robust": true,
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-11T00:16:04.212133+00:00",
+        "y": "y",
+        "x": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "variables": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "include_intercept": true
+      }
+    },
+    "moderate_multicollinearity": {
+      "lm": 5.217110161732041,
+      "lm_p_value": 0.1565723237717845,
+      "f": 1.7433145549724114,
+      "f_p_value": 0.1571983369474093,
+      "df": 3,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_breuschpagan",
+        "robust": true,
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-11T00:16:04.217920+00:00",
+        "y": "y",
+        "x": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "variables": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "include_intercept": true
+      }
+    },
+    "high_condition_number": {
+      "lm": 5.217110161732097,
+      "lm_p_value": 0.156572323771781,
+      "f": 1.7433145549724314,
+      "f_p_value": 0.15719833694740534,
+      "df": 3,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_breuschpagan",
+        "robust": true,
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-11T00:16:04.223584+00:00",
+        "y": "y",
+        "x": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "variables": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "include_intercept": true
+      }
+    },
+    "scale_variance_mild": {
+      "lm": 5.217110161731931,
+      "lm_p_value": 0.15657232377179162,
+      "f": 1.7433145549723787,
+      "f_p_value": 0.1571983369474159,
+      "df": 3,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_breuschpagan",
+        "robust": true,
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-11T00:16:04.230491+00:00",
+        "y": "y",
+        "x": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "variables": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "include_intercept": true
+      }
+    },
+    "many_regressors": {
+      "lm": 17.636567079525378,
+      "lm_p_value": 0.6113356308925961,
+      "f": 0.8756795244557268,
+      "f_p_value": 0.6188625002278909,
+      "df": 20,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_breuschpagan",
+        "robust": true,
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-11T00:16:04.250171+00:00",
+        "y": "y",
+        "x": [
+          "x1",
+          "x2",
+          "x3",
+          "x4",
+          "x5",
+          "x6",
+          "x7",
+          "x8",
+          "x9",
+          "x10",
+          "x11",
+          "x12",
+          "x13",
+          "x14",
+          "x15",
+          "x16",
+          "x17",
+          "x18",
+          "x19",
+          "x20"
+        ],
+        "variables": [
+          "x1",
+          "x2",
+          "x3",
+          "x4",
+          "x5",
+          "x6",
+          "x7",
+          "x8",
+          "x9",
+          "x10",
+          "x11",
+          "x12",
+          "x13",
+          "x14",
+          "x15",
+          "x16",
+          "x17",
+          "x18",
+          "x19",
+          "x20"
+        ],
+        "include_intercept": true
+      }
+    },
+    "outlier_regressor": {
+      "lm": 1.372308340302053,
+      "lm_p_value": 0.7120384525317691,
+      "f": 0.4550254950904762,
+      "f_p_value": 0.7138593362965133,
+      "df": 3,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_breuschpagan",
+        "robust": true,
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-11T00:16:04.257007+00:00",
+        "y": "y",
+        "x": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "variables": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "include_intercept": true
+      }
+    },
+    "baseline_df1": {
+      "lm": 4.125621375720571,
+      "lm_p_value": 0.24821489835305152,
+      "f": 1.572782187320157,
+      "f_p_value": 0.516491632754377,
+      "df": 3,
+      "n_obs": 5,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_breuschpagan",
+        "robust": true,
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-11T00:16:04.260295+00:00",
+        "y": "y",
+        "x": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "variables": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "include_intercept": true
+      }
+    },
+    "heteroskedastic_abs_x1": {
+      "lm": 104.08778459506834,
+      "lm_p_value": 1.9354783355101828e-24,
+      "f": 130.9272983035581,
+      "f_p_value": 4.459071489068788e-27,
+      "df": 1,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_breuschpagan",
+        "robust": true,
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-11T00:16:04.268279+00:00",
+        "y": "y",
+        "x": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "variables": [
+          "abs_x1"
+        ],
+        "include_intercept": true
+      }
+    },
+    "heteroskedastic_no_intercept": {
+      "lm": 4.328369506981955,
+      "lm_p_value": 0.22811980794919573,
+      "f": 1.443745646237393,
+      "f_p_value": 0.22922736995486254,
+      "df": 3,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_breuschpagan",
+        "robust": true,
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-11T00:16:04.275928+00:00",
+        "y": "y",
+        "x": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "variables": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "include_intercept": false
+      }
+    },
+    "baseline_subset": {
+      "lm": 2.240567171391039,
+      "lm_p_value": 0.13443166259448003,
+      "f": 2.241650037673814,
+      "f_p_value": 0.1349710756450499,
+      "df": 1,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_breuschpagan",
+        "robust": true,
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-11T00:16:04.282725+00:00",
+        "y": "y",
+        "x": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "variables": [
+          "x1"
+        ],
+        "include_intercept": true
+      }
+    },
+    "baseline_outside_model": {
+      "lm": 2.3768998060277324,
+      "lm_p_value": 0.304693202211702,
+      "f": 1.1869617820548357,
+      "f_p_value": 0.306010454814131,
+      "df": 2,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_breuschpagan",
+        "robust": true,
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-11T00:16:04.288687+00:00",
+        "y": "y",
+        "x": [
+          "x1"
+        ],
+        "variables": [
+          "x2",
+          "x3"
+        ],
+        "include_intercept": true
+      }
+    },
+    "baseline_no_intercept": {
+      "lm": 2.379784144362407,
+      "lm_p_value": 0.4974088916769027,
+      "f": 0.7906785790941384,
+      "f_p_value": 0.4994756142744893,
+      "df": 3,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_breuschpagan",
+        "robust": true,
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-11T00:16:04.296516+00:00",
+        "y": "y",
+        "x": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "variables": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "include_intercept": false
+      }
+    },
+    "baseline_no_intercept_outside_model": {
+      "lm": 161.6347552423132,
+      "lm_p_value": 7.970009833606647e-36,
+      "f": 118.70674456083408,
+      "f_p_value": 7.2162622451268e-43,
+      "df": 2,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_breuschpagan",
+        "robust": true,
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-11T00:16:04.301981+00:00",
+        "y": "y",
+        "x": [
+          "x1"
+        ],
+        "variables": [
+          "x2",
+          "x3"
+        ],
+        "include_intercept": false
+      }
+    },
+    "baseline_constant_and_duplicate": {
+      "lm": 3.591320493138317,
+      "lm_p_value": 0.1660178034680093,
+      "f": 1.797799231535268,
+      "f_p_value": 0.16673871971170512,
+      "df": 2,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_breuschpagan",
+        "robust": true,
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-11T00:16:04.310121+00:00",
+        "y": "y",
+        "x": [
+          "x1",
+          "x2",
+          "x3"
+        ],
+        "variables": [
+          "x1",
+          "x2"
+        ],
+        "include_intercept": true
+      }
+    }
+  },
+  "wooldridge": {
+    "hprice1": {
+      "lm": 14.092385504350242,
+      "lm_p_value": 0.0027820595556890867,
+      "f": 5.338919363241418,
+      "f_p_value": 0.002047744420936068,
+      "df": 3,
+      "n_obs": 88,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_breuschpagan",
+        "robust": true,
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-11T00:16:04.319178+00:00",
+        "y": "price",
+        "x": [
+          "lotsize",
+          "sqrft",
+          "bdrms"
+        ],
+        "variables": [
+          "lotsize",
+          "sqrft",
+          "bdrms"
+        ],
+        "include_intercept": true
+      }
+    },
+    "hprice1_log": {
+      "lm": 4.223248117304391,
+      "lm_p_value": 0.2383445905811842,
+      "f": 1.4115007400871553,
+      "f_p_value": 0.2451454173524524,
+      "df": 3,
+      "n_obs": 88,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_breuschpagan",
+        "robust": true,
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-11T00:16:04.325497+00:00",
+        "y": "lprice",
+        "x": [
+          "llotsize",
+          "lsqrft",
+          "bdrms"
+        ],
+        "variables": [
+          "llotsize",
+          "lsqrft",
+          "bdrms"
+        ],
+        "include_intercept": true
+      }
+    },
+    "wage1": {
+      "lm": 10.761205855317458,
+      "lm_p_value": 0.013089754002949181,
+      "f": 3.634139820417786,
+      "f_p_value": 0.01285541706275208,
+      "df": 3,
+      "n_obs": 526,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_breuschpagan",
+        "robust": true,
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-11T00:16:04.335437+00:00",
+        "y": "lwage",
+        "x": [
+          "educ",
+          "exper",
+          "tenure"
+        ],
+        "variables": [
+          "educ",
+          "exper",
+          "tenure"
+        ],
+        "include_intercept": true
+      }
+    },
+    "wage1_outside_model": {
+      "lm": 14.454422147620761,
+      "lm_p_value": 0.0007265443186825246,
+      "f": 7.389041280489004,
+      "f_p_value": 0.0006846701956276554,
+      "df": 2,
+      "n_obs": 526,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_breuschpagan",
+        "robust": true,
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-11T00:16:04.344092+00:00",
+        "y": "lwage",
+        "x": [
+          "educ",
+          "exper"
+        ],
+        "variables": [
+          "tenure",
+          "female"
+        ],
+        "include_intercept": true
+      }
+    }
+  },
+  "_meta": {
+    "method": "ols_breusch_pagan",
+    "generated_at": "2026-10-11T00:16:04.344119+00:00",
+    "primary_reference": "statsmodels.stats.diagnostic.het_breuschpagan(robust=True)",
+    "statsmodels_version": "0.15.0",
+    "note": "補助回帰には常に定数を含める（exog_hetに定数列を足して渡す）。baseline_constant_and_duplicateは定数列・重複列を含むZだが、het_breuschpagan（LMのp値の自由度を列数-1で数える）には除いた後の列を渡す。定数・重複列を落とす挙動そのものはRと照合する。"
+  }
+}

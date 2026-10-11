@@ -243,6 +243,20 @@ WHITE_NO_TRAINING_DATA = (
 # 失敗した場合のメッセージの先頭（原因の文言は状況で変わるため先頭のみ固定）。
 WHITE_AUX_REGRESSION_PREFIX = "computation failed: White test:"
 
+# Breusch-Pagan検定。`variables`の型の誤りは`TypeError`（`extract_column_list`）。
+BP_NO_TRAINING_DATA = (
+    "breusch_pagan_test() requires the original training data, which is not "
+    "retained for this result"
+)
+BP_AUX_REGRESSION_PREFIX = "computation failed: Breusch-Pagan test:"
+VARIABLES_NOT_A_LIST = (
+    "'variables' must be a list of column names (e.g. variables=[\"x1\"]), "
+    "got {type_name}"
+)
+VARIABLES_ELEMENT_NOT_STR = (
+    "'variables[{index}]' must be a str column name, got {type_name}"
+)
+
 # Breusch-Godfrey検定。
 INVALID_NLAGS = "nlags must be a positive integer: got {nlags}"
 BG_NO_TRAINING_DATA = (

@@ -11,6 +11,7 @@ from __future__ import annotations
 from ._lib import ComputationError, ValidationError
 from .diagnostics import (
     BreuschGodfreyTestResult,
+    BreuschPaganTestResult,
     DiagnosticResult,
     WhiteTestResult,
 )
@@ -30,6 +31,7 @@ __all__ = [
     "RE",
     "WLS",
     "BreuschGodfreyTestResult",
+    "BreuschPaganTestResult",
     "ComputationError",
     "DiagnosticResult",
     "FEOptions",

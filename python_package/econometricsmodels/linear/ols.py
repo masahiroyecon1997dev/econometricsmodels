@@ -19,7 +19,11 @@ import polars as pl
 
 from .. import _lib
 from .._lib import OLSOptions
-from ..diagnostics import BreuschGodfreyTestResult, WhiteTestResult
+from ..diagnostics import (
+    BreuschGodfreyTestResult,
+    BreuschPaganTestResult,
+    WhiteTestResult,
+)
 
 __all__ = ["OLS", "OLSOptions", "OLSResults"]
 
@@ -376,6 +380,75 @@ class OLSResults:
         """
         raw = self._raw.white_test(statistic)
         return WhiteTestResult(
+            statistic=raw.statistic,
+            p_value=raw.p_value,
+            df=raw.df,
+            df_denom=raw.df_denom,
+            distribution=raw.distribution,
+            aux_terms=raw.aux_terms,
+            dropped_terms=raw.dropped_terms,
+        )
+
+    def breusch_pagan_test(
+        self,
+        variables: list[str] | None = None,
+        statistic: Literal["lm", "f"] = "lm",
+    ) -> BreuschPaganTestResult:
+        """Breusch-Pagan test for heteroskedasticity.
+
+        Regresses the squared residuals on a constant and the columns
+        named in `variables`, and tests that all slopes are zero. This is
+        Koenker's studentized version (`n * R²` of the auxiliary
+        regression), which does not assume normal errors; it is the
+        version of R's `lmtest::bptest()` (default) and of statsmodels'
+        `het_breuschpagan()` (`robust=True`, default). The auxiliary
+        regression always includes a constant, even when the model was
+        fitted with `include_intercept=False`. Variables that are constant
+        or numerically identical to an earlier one (for example a copy of
+        a dummy) are dropped, and the degrees of freedom count the
+        variables that remain; `BreuschPaganTestResult.aux_terms` and
+        `dropped_terms` report them. The test does not depend on
+        `cov_type`.
+
+        This is a post-estimation diagnostic: it is never computed by
+        `fit()`. It re-reads the variables from the data passed to
+        `fit()`.
+
+        Args:
+            variables: List of column names of the data passed to `fit()`
+                that may drive the error variance. They need not be the
+                model's independent variables: any numeric column can be
+                used, including one that is not in the model. Defaults to
+                the model's independent variables.
+            statistic: `"lm"` (default) for the LM version `n * R²`
+                (chi-squared distribution), or `"f"` for the F version
+                of the same auxiliary regression (case-insensitive).
+
+        Returns:
+            The test result, a `BreuschPaganTestResult`: `distribution`
+            is `"chi2"` and `df_denom` is `None` for the LM version, `"f"`
+            and an integer for the F version. It also lists the terms of
+            the auxiliary regression (`aux_terms`, always starting with
+            the constant) and the dropped ones (`dropped_terms`).
+
+        Raises:
+            TypeError: `variables` is not a `list` of `str`, or
+                `statistic` is not a `str`. A builtin exception, not a
+                `ValidationError`.
+            ValidationError: `statistic` is not `"lm"` or `"f"`;
+                `variables` is empty or names a column more than once; a
+                column does not exist, has an unsupported dtype or
+                contains missing values, NaN or infinity; there are too
+                few observations for the auxiliary regression; or this
+                result has no retained training data (currently only the
+                `OLSResults` returned by `IVResult.first_stage()`).
+            ComputationError: Every variable is constant, the auxiliary
+                design matrix is still singular after dropping variables,
+                or the auxiliary regression's R² is undefined (for
+                example the squared residuals are constant).
+        """
+        raw = self._raw.breusch_pagan_test(variables, statistic)
+        return BreuschPaganTestResult(
             statistic=raw.statistic,
             p_value=raw.p_value,
             df=raw.df,

@@ -1,11 +1,14 @@
-//! OLSの事後診断検定（推定後に利用者が選んで呼ぶ検定）。現在はWhite検定とBreusch-Godfrey検定。
+//! OLSの事後診断検定（推定後に利用者が選んで呼ぶ検定）。現在はWhite検定・Breusch-Pagan検定・
+//! Breusch-Godfrey検定。
 //!
 //! 事後診断は`fit()`では計算せず、検定ごとの独立した関数として提供する
 //! （`docs/spec/inference-conventions.md`6章）。入力は推定済みの残差と説明変数の列で、
 //! `OlsEstimator`自体は要らない（`engine_pybind`の`OLSResult`も`OlsEstimator`を保持せず、
 //! `training_data`から説明変数を再抽出して渡す）。
 //!
-//! - White検定: 補助回帰に`OlsEstimator::fit`（`CovType::Classical`）を再利用する。
+//! - White検定・Breusch-Pagan検定: 残差の二乗を補助回帰する検定で、補助回帰に
+//!   `OlsEstimator::fit`（`CovType::Classical`）を再利用する。違いは補助回帰の説明変数だけで、
+//!   以降の処理（項の除外・標準化・統計量・p値）は共有する。
 //! - Breusch-Godfrey検定: `R²`と残差二乗和だけが要るため`fit`は使わず、列ノルムでスケールした
 //!   列ピボットQRで補助回帰の残差二乗和を直接求める。
 
@@ -28,7 +31,7 @@ const AUX_COLUMN_REL_TOL: f64 = 1e-12;
 /// 引数を埋めるだけ）。
 const AUX_CONFIDENCE_LEVEL: f64 = 0.95;
 
-/// White検定の結果。
+/// 残差の二乗を補助回帰する検定（White検定・Breusch-Pagan検定）の結果。
 ///
 /// LM版（`LM = n·R²`、帰無分布は`χ²(lm_df)`）とF版（補助回帰の全傾きがゼロという
 /// 古典的なF検定、`F(lm_df, f_df_denom)`）の両方を持つ。どちらを使うかの選択は呼び出し側
@@ -36,10 +39,10 @@ const AUX_CONFIDENCE_LEVEL: f64 = 0.95;
 ///
 /// `aux_terms`は補助回帰に実際に使った項（定数`"const"`が先頭に必ず入る。補助回帰は
 /// 元のモデルが定数を持つかに関わらず常に定数を含むため）、`dropped_terms`は重複・定数のため
-/// 除いた項。項の表記は`"x1"`・`"x1^2"`・`"x1:x2"`で、結果を人が読むための出力専用ラベル
-/// （式としてパースしない）。
+/// 除いた項。項の表記は結果を人が読むための出力専用ラベル（式としてパースしない）で、
+/// White検定では`"x1"`・`"x1^2"`・`"x1:x2"`、Breusch-Pagan検定では列名そのまま。
 #[derive(Debug, Clone, PartialEq)]
-pub struct WhiteTest {
+pub struct AuxRegressionTest {
     pub lm_statistic: f64,
     pub lm_p_value: f64,
     pub f_statistic: f64,
@@ -51,6 +54,12 @@ pub struct WhiteTest {
     pub aux_terms: Vec<String>,
     pub dropped_terms: Vec<String>,
 }
+
+/// White検定の結果（[`AuxRegressionTest`]）。
+pub type WhiteTest = AuxRegressionTest;
+
+/// Breusch-Pagan検定の結果（[`AuxRegressionTest`]）。
+pub type BreuschPaganTest = AuxRegressionTest;
 
 /// White検定（不均一分散の検定）。残差の二乗を、`x`・`x`の二乗・`x`同士の交差項に回帰する
 /// 補助回帰を行い、`LM = n·R²`（`χ²(q)`）とF版を計算する。
@@ -88,9 +97,49 @@ pub fn white_test(
     residuals: &[f64],
 ) -> Result<WhiteTest, LeastSquaresError> {
     debug_assert_eq!(x_columns.len(), x_names.len());
+    check_column_lengths(x_columns, residuals.len())?;
 
-    let n = residuals.len();
-    for column in x_columns {
+    let (kept, dropped_terms) = build_white_aux_terms(x_columns, x_names);
+    squared_residual_aux_test("White test", kept, dropped_terms, residuals)
+}
+
+/// Breusch-Pagan検定（不均一分散の検定、Koenkerの標準化版）。残差の二乗を、利用者が選んだ
+/// 変数`z`（と定数）に回帰する補助回帰を行い、`LM = n·R²`（`χ²(q)`）とF版を計算する。
+///
+/// 元のBreusch-Pagan（1979）の`ESS/2`版は誤差の正規性を仮定するため扱わない（`n·R²`版は
+/// 正規性を仮定せず、R `bptest(studentize=TRUE)`・statsmodels `het_breuschpagan(robust=True)`
+/// と同じ）。`z_columns`は定数列を含まない必要はない（定数列・数値的に同一の列は
+/// [`white_test`]と同じ規則で除き、残った列数が自由度`q`になる）。補助回帰には常に定数を含める
+/// （元のモデルが`include_intercept=false`でも同じ）。`z`はモデルの説明変数に限らず、任意の
+/// 列でよい。
+///
+/// # Errors
+/// [`white_test`]と同じ（「説明変数」を`z`と読み替える。メッセージの接頭辞は
+/// `Breusch-Pagan test`）。
+///
+/// # パニックについて
+/// `z_names.len() != z_columns.len()`は`engine_pybind`の実装バグでしか起こらない内部契約
+/// なので`debug_assert!`でパニックさせる。
+pub fn breusch_pagan_test(
+    z_columns: &[Vec<f64>],
+    z_names: &[String],
+    residuals: &[f64],
+) -> Result<BreuschPaganTest, LeastSquaresError> {
+    debug_assert_eq!(z_columns.len(), z_names.len());
+    check_column_lengths(z_columns, residuals.len())?;
+
+    let candidates = z_names
+        .iter()
+        .cloned()
+        .zip(z_columns.iter().cloned())
+        .collect();
+    let (kept, dropped_terms) = select_aux_terms(candidates, |_| false);
+    squared_residual_aux_test("Breusch-Pagan test", kept, dropped_terms, residuals)
+}
+
+/// いずれかの列の長さが`n`と一致しない場合に`DimensionMismatch`を返す。
+fn check_column_lengths(columns: &[Vec<f64>], n: usize) -> Result<(), LeastSquaresError> {
+    for column in columns {
         if column.len() != n {
             return Err(CommonError::DimensionMismatch {
                 y_rows: n,
@@ -99,15 +148,28 @@ pub fn white_test(
             .into());
         }
     }
+    Ok(())
+}
 
-    let (kept, dropped_terms) = build_white_aux_terms(x_columns, x_names);
+/// 残差の二乗を、採用済みの補助回帰の項（`kept`、定数は含まない）と定数に回帰して
+/// LM・F統計量とp値を計算する（White検定・Breusch-Pagan検定の共通部分）。`test`は
+/// エラーメッセージの接頭辞に使う検定名。
+///
+/// 補助回帰の各列は標準化してから回帰する（`R²`は変わらず、列のスケールや平均の大きさによる
+/// 誤った失敗を避けるため）。
+fn squared_residual_aux_test(
+    test: &str,
+    kept: Vec<(String, Vec<f64>)>,
+    dropped_terms: Vec<String>,
+    residuals: &[f64],
+) -> Result<AuxRegressionTest, LeastSquaresError> {
+    let n = residuals.len();
     let q = kept.len();
     if q == 0 {
-        return Err(CommonError::ComputationFailed(
-            "White test: no non-constant auxiliary regressors remain (all independent \
-             variables are constant)"
-                .to_string(),
-        )
+        return Err(CommonError::ComputationFailed(format!(
+            "{test}: no non-constant auxiliary regressors remain (all of the variables are \
+             constant)"
+        ))
         .into());
     }
     if n <= q + 1 {
@@ -120,7 +182,7 @@ pub fn white_test(
     // なり、`fit`の特異性判定・条件数チェックで誤って失敗するため、各列を標準化して渡す。
     let aux_columns = aux_columns
         .iter()
-        .map(|column| standardize(column))
+        .map(|column| standardize(column, test))
         .collect::<Result<Vec<_>, _>>()?;
     let squared_residuals: Vec<f64> = residuals.iter().map(|u| u * u).collect();
     let input = OlsInput::from_columns(
@@ -131,9 +193,9 @@ pub fn white_test(
         "resid^2".to_string(),
     )?;
     let estimator = OlsEstimator::fit(input, CovType::Classical, AUX_CONFIDENCE_LEVEL)
-        .map_err(|e| aux_fit_error("White test", e))?;
+        .map_err(|e| aux_fit_error(test, e))?;
 
-    let r_squared = validate_aux_r_squared(estimator.r_squared())?;
+    let r_squared = validate_aux_r_squared(estimator.r_squared(), test)?;
 
     let n_f = n as f64;
     let q_f = q as f64;
@@ -156,7 +218,7 @@ pub fn white_test(
     aux_terms.push("const".to_string());
     aux_terms.extend(aux_names);
 
-    Ok(WhiteTest {
+    Ok(AuxRegressionTest {
         lm_statistic,
         lm_p_value,
         f_statistic,
@@ -425,14 +487,22 @@ fn build_white_aux_terms(
             .zip(&constant_vars)
             .any(|(var, &is_const)| is_const && term_uses_variable(name, var))
     };
+    select_aux_terms(candidates, involves_constant_var)
+}
 
+/// 補助回帰の候補項から、定数列（全て0を含む）、`involves_constant`が真の項、先に採用した
+/// 項と数値的に同一の列を除く。`(採用した項, 除いた項の名前)`を返す。
+fn select_aux_terms(
+    candidates: Vec<(String, Vec<f64>)>,
+    involves_constant: impl Fn(&str) -> bool,
+) -> (Vec<(String, Vec<f64>)>, Vec<String>) {
     // 各列の最大絶対値（スケール）。同一判定を相対許容誤差で行うために一度だけ計算する。
     let mut kept: Vec<(String, Vec<f64>)> = Vec::new();
     let mut kept_scales: Vec<f64> = Vec::new();
     let mut dropped: Vec<String> = Vec::new();
     for (name, column) in candidates {
         let scale = max_abs(&column);
-        if is_constant(&column, scale) || involves_constant_var(&name) {
+        if is_constant(&column, scale) || involves_constant(&name) {
             dropped.push(name);
             continue;
         }
@@ -472,17 +542,16 @@ fn term_uses_variable(label: &str, var: &str) -> bool {
 /// # Errors
 /// 標準偏差が0または非有限（二乗項のオーバーフロー等）で標準化できない:
 /// `CommonError::ComputationFailed`
-fn standardize(column: &[f64]) -> Result<Vec<f64>, LeastSquaresError> {
+fn standardize(column: &[f64], test: &str) -> Result<Vec<f64>, LeastSquaresError> {
     let n = column.len() as f64;
     let mean = column.iter().sum::<f64>() / n;
     let variance = column.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n;
     let sd = variance.sqrt();
     if !(sd.is_finite() && sd > 0.0) {
-        return Err(CommonError::ComputationFailed(
-            "White test: an auxiliary regressor has zero or non-finite variance after \
-             squaring (the values may be too large or too close to constant)"
-                .to_string(),
-        )
+        return Err(CommonError::ComputationFailed(format!(
+            "{test}: an auxiliary regressor has zero or non-finite variance (the values may \
+             be too large or too close to constant)"
+        ))
         .into());
     }
     Ok(column.iter().map(|v| (v - mean) / sd).collect())
@@ -496,10 +565,10 @@ fn standardize(column: &[f64]) -> Result<Vec<f64>, LeastSquaresError> {
 ///
 /// # Errors
 /// `raw`が非有限または`>= 1.0`: `CommonError::ComputationFailed`
-fn validate_aux_r_squared(raw: f64) -> Result<f64, LeastSquaresError> {
+fn validate_aux_r_squared(raw: f64, test: &str) -> Result<f64, LeastSquaresError> {
     if !raw.is_finite() || raw >= 1.0 {
         return Err(CommonError::ComputationFailed(format!(
-            "White test: auxiliary regression R-squared is {raw}, so the test statistic is \
+            "{test}: auxiliary regression R-squared is {raw}, so the test statistic is \
              undefined"
         ))
         .into());
@@ -990,6 +1059,176 @@ mod tests {
     }
 
     #[test]
+    fn breusch_pagan_matches_statsmodels_for_the_model_regressors() {
+        // statsmodelsの`het_breuschpagan(robust=True)`（`exog_het`は定数＋`z`）。
+        let result =
+            breusch_pagan_test(&cols(&[&X1, &X2]), &names(&["x1", "x2"]), &RESID_A).unwrap();
+
+        assert_close(result.lm_statistic, 9.791524511701063, "lm");
+        assert_close(result.lm_p_value, 0.007478206743958307, "lm_p");
+        assert_close(result.f_statistic, 11.279528376813682, "f");
+        assert_close(result.f_p_value, 0.0017527347358498452, "f_p");
+        assert_eq!(result.df, 2);
+        assert_eq!(result.f_df_denom, 12);
+        assert_eq!(result.aux_terms, names(&["const", "x1", "x2"]));
+        assert!(result.dropped_terms.is_empty());
+
+        let with_dummy =
+            breusch_pagan_test(&cols(&[&X1, &D]), &names(&["x1", "d"]), &RESID_B).unwrap();
+        assert_close(with_dummy.lm_statistic, 9.394149048449083, "lm_d");
+        assert_close(with_dummy.lm_p_value, 0.009121924073057876, "lm_p_d");
+        assert_close(with_dummy.f_statistic, 10.054654463315794, "f_d");
+        assert_close(with_dummy.f_p_value, 0.0027245935549812376, "f_p_d");
+    }
+
+    #[test]
+    fn breusch_pagan_accepts_variables_that_are_not_model_regressors() {
+        // `z`はモデルの説明変数に限らない。1変数のときは`df = 1`。
+        let result = breusch_pagan_test(&cols(&[&X2]), &names(&["x2"]), &RESID_A).unwrap();
+
+        assert_close(result.lm_statistic, 0.05617588636961934, "lm");
+        assert_close(result.lm_p_value, 0.8126455198130225, "lm_p");
+        assert_close(result.f_statistic, 0.04886878467332563, "f");
+        assert_close(result.f_p_value, 0.8284777578739884, "f_p");
+        assert_eq!(result.df, 1);
+        assert_eq!(result.f_df_denom, 13);
+    }
+
+    #[test]
+    fn breusch_pagan_uses_a_constant_for_no_intercept_residuals() {
+        // 元のモデルが定数なし（残差の和が0とは限らない）でも補助回帰は定数を含む。
+        let result =
+            breusch_pagan_test(&cols(&[&X1, &X2]), &names(&["x1", "x2"]), &RESID_C).unwrap();
+
+        assert_close(result.lm_statistic, 6.806345878682998, "lm");
+        assert_close(result.lm_p_value, 0.033267546415010646, "lm_p");
+        assert_close(result.f_statistic, 4.984110223282637, "f");
+        assert_close(result.f_p_value, 0.026565513096981214, "f_p");
+        assert_eq!(result.aux_terms[0], "const");
+    }
+
+    #[test]
+    fn breusch_pagan_df_equals_aux_terms_minus_constant() {
+        let result =
+            breusch_pagan_test(&cols(&[&X1, &X2]), &names(&["x1", "x2"]), &RESID_A).unwrap();
+        assert_eq!(result.df, result.aux_terms.len() - 1);
+    }
+
+    #[test]
+    fn breusch_pagan_drops_constant_and_duplicate_variables_and_uses_rank_based_df() {
+        // `one`は定数、`d_copy`は`d`と同一の列。どちらも除き、自由度は残った列数の2。
+        let ones = [1.0_f64; 15];
+        let result = breusch_pagan_test(
+            &cols(&[&ones, &X1, &D, &D]),
+            &names(&["one", "x1", "d", "d_copy"]),
+            &RESID_B,
+        )
+        .unwrap();
+
+        assert_eq!(result.dropped_terms, names(&["one", "d_copy"]));
+        assert_eq!(result.aux_terms, names(&["const", "x1", "d"]));
+        assert_eq!(result.df, 2);
+        assert_close(result.lm_statistic, 9.394149048449083, "lm");
+        assert_close(result.f_statistic, 10.054654463315794, "f");
+    }
+
+    #[test]
+    fn breusch_pagan_fails_when_every_variable_is_constant_or_none_is_given() {
+        let ones = [1.0_f64; 15];
+        for (z, z_names) in [(cols(&[&ones]), names(&["one"])), (Vec::new(), Vec::new())] {
+            match breusch_pagan_test(&z, &z_names, &RESID_A).unwrap_err() {
+                LeastSquaresError::Common(CommonError::ComputationFailed(message)) => {
+                    assert!(message.starts_with("Breusch-Pagan test:"), "{message}");
+                }
+                other => panic!("unexpected error: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn breusch_pagan_rejects_mismatched_column_length() {
+        let short = [0.1_f64, 0.2, 0.3];
+        let err = breusch_pagan_test(&cols(&[&short]), &names(&["z"]), &RESID_A).unwrap_err();
+        assert_eq!(
+            err,
+            LeastSquaresError::Common(CommonError::DimensionMismatch {
+                y_rows: 15,
+                x_rows: 3
+            })
+        );
+    }
+
+    #[test]
+    fn breusch_pagan_checks_the_sample_size_against_the_variables_that_remain() {
+        // 補助回帰は定数込み`q + 1`列。`n <= q + 1`は弾き、`n = q + 2`なら通る。
+        let z = cols(&[&X1[..3], &X2[..3]]);
+        let z_names = names(&["x1", "x2"]);
+        assert_eq!(
+            breusch_pagan_test(&z, &z_names, &RESID_A[..3]).unwrap_err(),
+            LeastSquaresError::InsufficientObservationsForAuxRegression { n: 3, k: 3 }
+        );
+
+        let z = cols(&[&X1[..4], &X2[..4]]);
+        let result = breusch_pagan_test(&z, &z_names, &RESID_A[..4]).unwrap();
+        assert_eq!(result.f_df_denom, 1);
+    }
+
+    #[test]
+    fn breusch_pagan_reports_a_singular_auxiliary_regression_with_its_context() {
+        // `2 * x1`は`x1`と同一の列ではないため除かれず、補助回帰が特異になる。
+        let doubled: Vec<f64> = X1.iter().map(|v| 2.0 * v).collect();
+        let err = breusch_pagan_test(
+            &cols(&[&X1, &doubled]),
+            &names(&["x1", "x1_doubled"]),
+            &RESID_A,
+        )
+        .unwrap_err();
+        match err {
+            LeastSquaresError::Common(CommonError::ComputationFailed(message)) => {
+                assert!(message.starts_with("Breusch-Pagan test:"), "{message}");
+                assert!(message.contains("auxiliary regression"), "{message}");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn breusch_pagan_fails_for_constant_squared_residuals_and_non_finite_residuals() {
+        // 残差の二乗が定数（`±1`）だと`R²`が定義できない。
+        let signs: Vec<f64> = (0..15)
+            .map(|i| if i % 2 == 0 { 1.0 } else { -1.0 })
+            .collect();
+        assert!(matches!(
+            breusch_pagan_test(&cols(&[&X1]), &names(&["x1"]), &signs).unwrap_err(),
+            LeastSquaresError::Common(CommonError::ComputationFailed(_))
+        ));
+
+        let mut resid = RESID_A;
+        resid[3] = f64::NAN;
+        assert!(breusch_pagan_test(&cols(&[&X1]), &names(&["x1"]), &resid).is_err());
+    }
+
+    #[test]
+    fn breusch_pagan_does_not_depend_on_the_scale_location_or_order_of_the_variables() {
+        let base = breusch_pagan_test(&cols(&[&X1, &X2]), &names(&["x1", "x2"]), &RESID_A).unwrap();
+
+        // 平行移動・スケール変更（年のように平均が大きい変数、単位違い）。
+        let shifted: Vec<f64> = X1.iter().map(|v| 2000.0 + 1e-3 * v).collect();
+        let scaled: Vec<f64> = X2.iter().map(|v| 1e6 * v).collect();
+        let rescaled =
+            breusch_pagan_test(&cols(&[&shifted, &scaled]), &names(&["x1", "x2"]), &RESID_A)
+                .unwrap();
+        assert_close(rescaled.lm_statistic, base.lm_statistic, "lm_scale");
+        assert_close(rescaled.f_statistic, base.f_statistic, "f_scale");
+
+        // 変数の並べ替え。
+        let swapped =
+            breusch_pagan_test(&cols(&[&X2, &X1]), &names(&["x2", "x1"]), &RESID_A).unwrap();
+        assert_close(swapped.lm_statistic, base.lm_statistic, "lm_order");
+        assert_close(swapped.f_p_value, base.f_p_value, "f_p_order");
+    }
+
+    #[test]
     fn white_df_equals_aux_terms_minus_constant() {
         let result = white_test(&cols(&[&X1, &X2]), &names(&["x1", "x2"]), &RESID_A).unwrap();
         assert_eq!(result.aux_terms[0], "const");
@@ -1209,21 +1448,21 @@ mod tests {
         for raw in [1.0, 1.5, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
             assert!(
                 matches!(
-                    validate_aux_r_squared(raw),
+                    validate_aux_r_squared(raw, "White test"),
                     Err(LeastSquaresError::Common(CommonError::ComputationFailed(_)))
                 ),
                 "raw={raw}"
             );
         }
-        assert_eq!(validate_aux_r_squared(0.25).unwrap(), 0.25);
-        assert_eq!(validate_aux_r_squared(-1e-17).unwrap(), 0.0);
+        assert_eq!(validate_aux_r_squared(0.25, "White test").unwrap(), 0.25);
+        assert_eq!(validate_aux_r_squared(-1e-17, "White test").unwrap(), 0.0);
     }
 
     #[test]
     fn standardize_rejects_zero_and_non_finite_variance() {
-        assert!(standardize(&[2.0, 2.0, 2.0]).is_err());
-        assert!(standardize(&[1.0, f64::INFINITY, 3.0]).is_err());
-        let z = standardize(&[1.0, 2.0, 3.0]).unwrap();
+        assert!(standardize(&[2.0, 2.0, 2.0], "White test").is_err());
+        assert!(standardize(&[1.0, f64::INFINITY, 3.0], "White test").is_err());
+        let z = standardize(&[1.0, 2.0, 3.0], "White test").unwrap();
         assert!((z.iter().sum::<f64>()).abs() < 1e-12);
         assert!((z.iter().map(|v| v * v).sum::<f64>() / 3.0 - 1.0).abs() < 1e-12);
     }

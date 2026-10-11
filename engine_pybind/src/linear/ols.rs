@@ -11,7 +11,9 @@
 //! 公開API（`OLSOptions`/`OLSResult`）のdocコメントと、`ValidationError`のメッセージ文字列は英語。
 //! それ以外（このファイルの説明・非公開関数のdocコメント等）は日本語のまま。
 
-use engine::linear::diagnostics::{breusch_godfrey_test, white_test};
+use engine::linear::diagnostics::{
+    AuxRegressionTest, breusch_godfrey_test, breusch_pagan_test, white_test,
+};
 use engine::linear::ols::{OlsEstimator, OlsInput};
 use polars::prelude::{Column, DataFrame};
 use pyo3::prelude::*;
@@ -19,15 +21,18 @@ use pyo3_polars::PyDataFrame;
 
 use super::common::{least_squares_error_to_pyerr, mat_to_vec, parse_cov_type};
 use crate::column_extraction::{
-    extract_dataframe, extract_f64_column, extract_f64_columns, extract_time_order_ranks,
-    x_column_names,
+    extract_column_list, extract_dataframe, extract_f64_column, extract_f64_columns,
+    extract_time_order_ranks, x_column_names,
 };
 use crate::errors::ValidationError;
 use crate::option_values::{
     extract_strict_float, extract_strict_int, extract_strict_opt_column, extract_strict_opt_int,
     extract_strict_text,
 };
-use crate::validation::{validate_common_roles, validate_no_existing_column};
+use crate::validation::{
+    validate_common_roles, validate_no_duplicate_within_role, validate_no_existing_column,
+    validate_x_non_empty,
+};
 
 /// Estimation options for OLS.
 ///
@@ -184,7 +189,38 @@ pub struct WhiteTestOutput {
     pub dropped_terms: Vec<String>,
 }
 
-/// 診断検定（`white_test`・`breusch_godfrey_test`）の`statistic`引数で選ぶ検定統計量の版。
+/// Raw result of `OLSResult.breusch_pagan_test()`; the Python package wraps it in its
+/// `BreuschPaganTestResult` dataclass.
+///
+/// `statistic`/`p_value`/`df`/`df_denom`/`distribution` describe the selected version
+/// (`"lm"` or `"f"`). `aux_terms` lists the auxiliary-regression terms actually used (the
+/// first entry is always the auxiliary regression's constant, `"const"`), `dropped_terms`
+/// the variables removed because they were constant or numerically identical to an earlier
+/// one.
+#[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
+#[derive(Debug, Clone)]
+pub struct BreuschPaganTestOutput {
+    #[pyo3(get)]
+    pub statistic: f64,
+    #[pyo3(get)]
+    pub p_value: f64,
+    /// Degrees of freedom of the LM test (chi-squared), or the numerator degrees of
+    /// freedom of the F test.
+    #[pyo3(get)]
+    pub df: usize,
+    /// Denominator degrees of freedom of the F test (`None` for the LM version).
+    #[pyo3(get)]
+    pub df_denom: Option<usize>,
+    /// `"chi2"` for the LM version, `"f"` for the F version.
+    #[pyo3(get)]
+    pub distribution: String,
+    #[pyo3(get)]
+    pub aux_terms: Vec<String>,
+    #[pyo3(get)]
+    pub dropped_terms: Vec<String>,
+}
+
+/// 診断検定（`white_test`・`breusch_pagan_test`・`breusch_godfrey_test`）の`statistic`引数で選ぶ検定統計量の版。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StatisticVersion {
     Lm,
@@ -202,6 +238,28 @@ fn parse_statistic_version(statistic: &str) -> PyResult<StatisticVersion> {
         _ => Err(ValidationError::new_err(format!(
             "unknown statistic: '{statistic}'. Expected 'lm' or 'f'"
         ))),
+    }
+}
+
+/// 選んだ版（LM/F）の統計量・p値・分母自由度・分布名を取り出す（White検定・Breusch-Pagan検定
+/// の結果の詰め替えで共通）。
+fn select_statistic(
+    result: &AuxRegressionTest,
+    version: StatisticVersion,
+) -> (f64, f64, Option<usize>, String) {
+    match version {
+        StatisticVersion::F => (
+            result.f_statistic,
+            result.f_p_value,
+            Some(result.f_df_denom),
+            "f".to_string(),
+        ),
+        StatisticVersion::Lm => (
+            result.lm_statistic,
+            result.lm_p_value,
+            None,
+            "chi2".to_string(),
+        ),
     }
 }
 
@@ -463,25 +521,80 @@ impl OLSResult {
         let result = white_test(&x_columns, x_names, &self.residuals)
             .map_err(least_squares_error_to_pyerr)?;
 
-        Ok(match version {
-            StatisticVersion::F => WhiteTestOutput {
-                statistic: result.f_statistic,
-                p_value: result.f_p_value,
-                df: result.df,
-                df_denom: Some(result.f_df_denom),
-                distribution: "f".to_string(),
-                aux_terms: result.aux_terms,
-                dropped_terms: result.dropped_terms,
-            },
-            StatisticVersion::Lm => WhiteTestOutput {
-                statistic: result.lm_statistic,
-                p_value: result.lm_p_value,
-                df: result.df,
-                df_denom: None,
-                distribution: "chi2".to_string(),
-                aux_terms: result.aux_terms,
-                dropped_terms: result.dropped_terms,
-            },
+        let (statistic, p_value, df_denom, distribution) = select_statistic(&result, version);
+        Ok(WhiteTestOutput {
+            statistic,
+            p_value,
+            df: result.df,
+            df_denom,
+            distribution,
+            aux_terms: result.aux_terms,
+            dropped_terms: result.dropped_terms,
+        })
+    }
+
+    /// Breusch-Pagan test for heteroskedasticity (Koenker's studentized version).
+    ///
+    /// Regresses the squared residuals on a constant and the columns named in `variables`
+    /// (always with a constant, even when the model was fitted with `include_intercept=False`)
+    /// and returns either the LM version (`statistic="lm"`, `n * R^2`, chi-squared) or the
+    /// F version (`statistic="f"`). It does not assume normal errors.
+    ///
+    /// `variables` is a list of column names of the data passed to `fit()`. It need not be
+    /// the model's independent variables: any numeric column may be used, including one
+    /// that is not in the model. When it is `None`, the independent variables of the model
+    /// are used. Variables that are constant or numerically identical to an earlier one
+    /// (for example a copy of a dummy) are dropped, and the degrees of freedom count the
+    /// variables that remain. The test does not depend on `cov_type`.
+    ///
+    /// # Errors
+    /// - `variables` is not a `list` of `str`: `TypeError`. `statistic` is not a `str`:
+    ///   `TypeError`.
+    /// - `statistic` is not `"lm"` or `"f"`, `variables` is empty or names a column twice, a
+    ///   column does not exist, has an unsupported dtype or contains missing values, NaN or
+    ///   infinity, or too few observations for the auxiliary regression: `ValidationError`.
+    /// - This result has no cached training data (currently only `IVResult.first_stage()`
+    ///   results): `ValidationError`.
+    /// - Every variable is constant, the auxiliary design matrix is still singular after
+    ///   dropping, or its R-squared is undefined: `ComputationError`.
+    #[pyo3(signature = (variables=None, statistic="lm"))]
+    fn breusch_pagan_test(
+        &self,
+        variables: Option<&Bound<'_, PyAny>>,
+        statistic: &str,
+    ) -> PyResult<BreuschPaganTestOutput> {
+        let version = parse_statistic_version(statistic)?;
+        let variables = variables
+            .map(|ob| extract_column_list(ob, "variables"))
+            .transpose()?;
+        let df = self.training_data.as_ref().ok_or_else(|| {
+            ValidationError::new_err(
+                "breusch_pagan_test() requires the original training data, which is not \
+                 retained for this result",
+            )
+        })?;
+
+        let z_names = match variables.as_deref() {
+            Some(names) => {
+                validate_x_non_empty("variables", names)?;
+                validate_no_duplicate_within_role("variables", names)?;
+                names
+            }
+            None => x_column_names(&self.param_names, self.has_intercept, 0),
+        };
+        let z_columns = extract_f64_columns(df, z_names)?;
+        let result = breusch_pagan_test(&z_columns, z_names, &self.residuals)
+            .map_err(least_squares_error_to_pyerr)?;
+
+        let (statistic, p_value, df_denom, distribution) = select_statistic(&result, version);
+        Ok(BreuschPaganTestOutput {
+            statistic,
+            p_value,
+            df: result.df,
+            df_denom,
+            distribution,
+            aux_terms: result.aux_terms,
+            dropped_terms: result.dropped_terms,
         })
     }
 
@@ -688,5 +801,27 @@ mod tests {
     fn parse_statistic_version_rejects_unknown_value() {
         assert!(parse_statistic_version("chi2").is_err());
         assert!(parse_statistic_version("").is_err());
+    }
+
+    #[test]
+    fn select_statistic_picks_the_requested_version() {
+        let result = AuxRegressionTest {
+            lm_statistic: 1.0,
+            lm_p_value: 0.1,
+            f_statistic: 2.0,
+            f_p_value: 0.2,
+            df: 3,
+            f_df_denom: 11,
+            aux_terms: vec!["const".to_string()],
+            dropped_terms: Vec::new(),
+        };
+        assert_eq!(
+            select_statistic(&result, StatisticVersion::Lm),
+            (1.0, 0.1, None, "chi2".to_string())
+        );
+        assert_eq!(
+            select_statistic(&result, StatisticVersion::F),
+            (2.0, 0.2, Some(11), "f".to_string())
+        );
     }
 }

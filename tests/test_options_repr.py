@@ -61,6 +61,7 @@ NON_DEFAULT_KWARGS: dict[type, dict[str, Any]] = {
     REOptions: {
         "cov_type": "dk",
         "confidence_level": 0.9,
+        "time": "t",
         "cluster": "g",
         "dk_time": "t",
         "dk_bandwidth": 2,

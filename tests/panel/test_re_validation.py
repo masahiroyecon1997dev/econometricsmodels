@@ -203,7 +203,7 @@ def test_missing_entity_column_raises(fe_dataset):
 
 
 def test_missing_dk_time_column_raises(fe_dataset):
-    options = REOptions(dk_time="nonexistent")
+    options = REOptions(cov_type="dk", dk_time="nonexistent")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="nonexistent"),
@@ -257,8 +257,9 @@ def test_numeric_column_non_finite_values_raise(bad_col, value, display):
         RE(df, y="y", x=["x1"], entity="entity").fit()
 
 
+@pytest.mark.parametrize("option", ["time", "dk_time"])
 @pytest.mark.parametrize("bad_col", ["entity", "time"])
-def test_group_key_column_null_values_raise(bad_col):
+def test_group_key_column_null_values_raise(bad_col, option):
     values: dict[str, list[float | str | None]] = {
         "y": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
         "x1": [0.5, 1.5, 2.5, 3.5, 4.5, 5.5],
@@ -267,7 +268,11 @@ def test_group_key_column_null_values_raise(bad_col):
     }
     values[bad_col][1] = None
     df = pl.DataFrame(values)
-    options = REOptions(dk_time="time")
+    options = (
+        REOptions(time="time")
+        if option == "time"
+        else REOptions(cov_type="dk", dk_time="time")
+    )
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.GROUP_KEY_COLUMN_HAS_MISSING_VALUES, name=bad_col),

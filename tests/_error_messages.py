@@ -372,9 +372,9 @@ SINGLETON_GROUP = (
 
 # `PanelError::UnbalancedPanelForTwoWay`（6.4節）。
 UNBALANCED_PANEL_FOR_TWO_WAY = (
-    "two-way fixed effects requires a balanced panel: got n_obs={n_obs} "
-    "for n_entities={n_entities} x n_periods={n_periods} (expected "
-    "{expected} observations)"
+    "two-way estimation (fixed or random effects) requires a balanced "
+    "panel: got n_obs={n_obs} for n_entities={n_entities} x "
+    "n_periods={n_periods} (expected {expected} observations)"
 )
 
 # `PanelError::ZeroVarianceAfterDemeaning`（6.7節）。
@@ -389,9 +389,11 @@ TWO_WAY_REQUIRES_TIME = (
     "two-way fixed effects requires the `time` option to be set"
 )
 
-# RE: `PanelError::DkRequiresTime`（`cov_type="dk"`で`dk_time`が未指定）。
+# RE: `cov_type="dk"`で`dk_time`が未指定（`time`は借用されない。1-way・2-wayとも）。
 DK_REQUIRES_TIME = (
-    "Driscoll-Kraay panel HAC requires the `dk_time` option to be set"
+    "cov_type='dk' requires the `dk_time` option: the column that defines the "
+    "time periods of the Driscoll-Kraay estimator (it is not taken from "
+    "`time`, which only sets the two-way random effects)"
 )
 # FE: `cov_type="dk"`で`dk_time`が未指定（`time`は借用されない。1-way・2-wayとも）。
 FE_DK_REQUIRES_DK_TIME = (

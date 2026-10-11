@@ -643,6 +643,7 @@ STRING_FIELDS = [
     (FEOptions, "cluster", "column", True),
     (FEOptions, "dk_time", "column", True),
     (REOptions, "cov_type", "text", False),
+    (REOptions, "time", "column", True),
     (REOptions, "dk_time", "column", True),
     (REOptions, "cluster", "column", True),
 ]

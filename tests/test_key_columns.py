@@ -78,6 +78,9 @@ TIME_FITS = {
         d, "y", ["x1"], "entity", FEOptions(cov_type="dk", dk_time="t")
     ).fit(),
     "RE.time": lambda d: RE(
+        d, "y", ["x1"], "entity", REOptions(time="t")
+    ).fit(),
+    "RE.dk_time": lambda d: RE(
         d, "y", ["x1"], "entity", REOptions(cov_type="dk", dk_time="t")
     ).fit(),
 }

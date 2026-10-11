@@ -442,4 +442,76 @@ mod tests {
         let expected = cluster_correction(2, 3, 1) * inv * 53.0 * inv;
         assert!((*cov.get(0, 0) - expected).abs() < 1e-12 * expected);
     }
+
+    /// 旧実装（`String`ラベルの`BTreeMap`で集計）をそのまま残した独立なoracle。
+    /// `GroupCodes`のコード順（辞書順）・グループ内の観測順が、旧実装とビット単位で同じ
+    /// 加算順になることを固定する。
+    fn btree_cluster_meat(
+        labels: &[String],
+        k: usize,
+        score: impl Fn(usize, usize) -> f64,
+    ) -> (Mat<f64>, usize) {
+        let mut indices: std::collections::BTreeMap<&str, Vec<usize>> =
+            std::collections::BTreeMap::new();
+        for (i, label) in labels.iter().enumerate() {
+            indices.entry(label.as_str()).or_default().push(i);
+        }
+        let mut s_hat = Mat::<f64>::zeros(k, k);
+        for rows in indices.values() {
+            let mut s_g = vec![0.0_f64; k];
+            for &i in rows {
+                for (a, s_g_a) in s_g.iter_mut().enumerate() {
+                    *s_g_a += score(i, a);
+                }
+            }
+            for a in 0..k {
+                for b in 0..k {
+                    *s_hat.get_mut(a, b) += s_g[a] * s_g[b];
+                }
+            }
+        }
+        (s_hat, indices.len())
+    }
+
+    #[test]
+    fn cluster_meat_is_bit_identical_to_the_string_keyed_btreemap_implementation() {
+        // 数値文字列のラベル（"10" < "9" の辞書順）と非整列の出現順で、加算順の違いが
+        // あれば丸め誤差として表れるようにする。
+        let n = 400;
+        let k = 3;
+        let mut state = 0x2545_F491_4F6C_DD1D_u64;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let labels: Vec<String> = (0..n).map(|_| (next() % 37).to_string()).collect();
+        let scores: Vec<[f64; 3]> = (0..n)
+            .map(|_| {
+                let mut row = [0.0; 3];
+                for v in &mut row {
+                    *v = (next() >> 11) as f64 / (1u64 << 53) as f64 * 1e3 - 5e2;
+                }
+                row
+            })
+            .collect();
+        let score = |i: usize, a: usize| scores[i][a];
+
+        let (expected, expected_groups) = btree_cluster_meat(&labels, k, score);
+        let (actual, actual_groups) = cluster_meat(&GroupCodes::from_ids(&labels), k, score);
+        let (actual_keyless, _) =
+            cluster_meat(&GroupCodes::from_ids_without_keys(&labels), k, score);
+
+        assert_eq!(actual_groups, expected_groups);
+        for a in 0..k {
+            for b in 0..k {
+                assert_eq!(actual.get(a, b).to_bits(), expected.get(a, b).to_bits());
+                assert_eq!(
+                    actual_keyless.get(a, b).to_bits(),
+                    expected.get(a, b).to_bits()
+                );
+            }
+        }
+    }
 }

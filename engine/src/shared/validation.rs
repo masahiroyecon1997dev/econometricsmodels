@@ -29,7 +29,7 @@ pub const MAX_ITER_LIMIT: i64 = 10_000;
 /// `groups.nobs() != n`は呼び出し側（`engine_pybind`）の実装バグでしか起こり得ない内部契約
 /// であり、実データに起因する`CommonError::InsufficientClusters`とは区別して
 /// `debug_assert_eq!`で検証する。
-pub fn validate_cluster_groups(groups: &GroupCodes, n: usize) -> Result<usize, CommonError> {
+pub(crate) fn validate_cluster_groups(groups: &GroupCodes, n: usize) -> Result<usize, CommonError> {
     debug_assert_eq!(
         groups.nobs(),
         n,

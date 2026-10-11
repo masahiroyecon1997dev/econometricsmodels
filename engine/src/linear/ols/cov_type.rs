@@ -49,8 +49,43 @@ impl CovType {
         match self {
             CovType::Cluster {
                 groups: Some(groups),
-            } => Some(GroupCodes::from_ids(groups)),
+            } => Some(GroupCodes::from_ids_without_keys(groups)),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cluster_codes_returns_codes_for_cluster_with_groups() {
+        let groups: Vec<String> = ["b", "a", "b", "c"].iter().map(|s| s.to_string()).collect();
+        let codes = CovType::Cluster {
+            groups: Some(groups),
+        }
+        .cluster_codes()
+        .expect("Cluster with groups must produce codes");
+
+        assert_eq!(codes.nobs(), 4);
+        assert_eq!(codes.n_groups(), 3);
+        // コードはキーの辞書順（旧`BTreeMap`の反復順）: a=0, b=1, c=2。
+        assert_eq!(codes.codes(), [1, 0, 1, 2]);
+    }
+
+    #[test]
+    fn cluster_codes_is_none_without_groups_or_for_other_cov_types() {
+        assert!(CovType::Cluster { groups: None }.cluster_codes().is_none());
+        assert!(CovType::Classical.cluster_codes().is_none());
+        assert!(CovType::Hc1.cluster_codes().is_none());
+        assert!(
+            CovType::Hac {
+                lags: Some(1),
+                time_order: vec![0.0, 1.0]
+            }
+            .cluster_codes()
+            .is_none()
+        );
     }
 }

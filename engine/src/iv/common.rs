@@ -1218,4 +1218,39 @@ mod tests {
         let m: Mat<f64> = Mat::from_fn(3, 0, |_, _| 0.0);
         assert_eq!(mat_to_columns(&m), Vec::<Vec<f64>>::new());
     }
+
+    #[test]
+    fn structural_cluster_codes_returns_the_validated_codes_for_cluster() {
+        let input = structural_cluster_test_input(true);
+        let codes = structural_cluster_codes(&input, &cluster_cov(3))
+            .unwrap()
+            .expect("Cluster with groups must produce codes");
+
+        assert_eq!(codes.nobs(), 6);
+        assert_eq!(codes.n_groups(), 3);
+    }
+
+    #[test]
+    fn structural_cluster_codes_is_none_without_groups_or_for_other_cov_types() {
+        let input = structural_cluster_test_input(true);
+        assert!(
+            structural_cluster_codes(&input, &CovType::Classical)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            structural_cluster_codes(&input, &CovType::Cluster { groups: None })
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn structural_cluster_codes_rejects_the_same_inputs_as_the_public_wrapper() {
+        let input = structural_cluster_test_input(true);
+        assert_eq!(
+            structural_cluster_codes(&input, &cluster_cov(2)).unwrap_err(),
+            validate_structural_cluster_count(&input, &cluster_cov(2)).unwrap_err()
+        );
+    }
 }

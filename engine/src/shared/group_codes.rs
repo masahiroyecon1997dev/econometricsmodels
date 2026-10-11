@@ -34,15 +34,25 @@ pub(crate) struct GroupCodes {
     codes: Vec<usize>,
     /// グループごとの観測数（長さ`n_groups`、コード順）。
     counts: Vec<usize>,
-    /// グループのキー（長さ`n_groups`、コード順）。
-    keys: Vec<String>,
+    /// グループのキー（長さ`n_groups`、コード順）。`from_ids_without_keys`で作ったコードは
+    /// `None`（クラスターの検証・集計はコードと観測数だけを使い、キーの`String`を
+    /// `n_groups`個確保する無駄を省く）。
+    keys: Option<Vec<String>>,
 }
 
 impl GroupCodes {
     /// `ids`を辞書順の整数コードに変換する。ハッシュは`ids`全体に1回、ソートはユニークな
     /// キー（`n_groups`個）にだけ行う。
     pub(crate) fn from_ids(ids: &[String]) -> Self {
-        Self::from_ids_ordered(ids, |_, _| Ordering::Equal)
+        Self::build(ids, |_, _| Ordering::Equal, true)
+    }
+
+    /// [`Self::from_ids`]と同じコード・観測数・グループ内の行順で、グループのキー（`keys`）だけ
+    /// 作らない。クラスターロバスト分散のように、検証（クラスター数）と集計（行インデックス）に
+    /// コードと観測数しか使わない呼び出し向け（グループ数が多いときの`String`の確保を省く）。
+    /// [`Self::keys`]は呼べない。
+    pub(crate) fn from_ids_without_keys(ids: &[String]) -> Self {
+        Self::build(ids, |_, _| Ordering::Equal, false)
     }
 
     /// `ids`を整数コードに変換する。コードの順序は`compare_rows`（各キーが最初に現れた行の
@@ -55,6 +65,14 @@ impl GroupCodes {
     pub(crate) fn from_ids_ordered(
         ids: &[String],
         compare_rows: impl Fn(usize, usize) -> Ordering,
+    ) -> Self {
+        Self::build(ids, compare_rows, true)
+    }
+
+    fn build(
+        ids: &[String],
+        compare_rows: impl Fn(usize, usize) -> Ordering,
+        with_keys: bool,
     ) -> Self {
         // 1. 出現順の仮コード（ハッシュ1回/行）。キーごとに最初に現れた行も控える。
         let mut first_seen: HashMap<&str, usize> = HashMap::new();
@@ -90,7 +108,7 @@ impl GroupCodes {
         for &c in &codes {
             counts[c] += 1;
         }
-        let keys = order.iter().map(|&c| unique[c].to_string()).collect();
+        let keys = with_keys.then(|| order.iter().map(|&c| unique[c].to_string()).collect());
         Self {
             codes,
             counts,
@@ -109,8 +127,14 @@ impl GroupCodes {
     }
 
     /// グループのキー（コード順）。
+    ///
+    /// # Panics
+    /// [`Self::from_ids_without_keys`]で作ったコードでは呼べない（キーを作っていない）。
+    /// どのコンストラクタを使うかは呼び出し側が決める内部契約で、入力データには依らない。
     pub(crate) fn keys(&self) -> &[String] {
-        &self.keys
+        self.keys
+            .as_deref()
+            .expect("keys are not built for codes made by from_ids_without_keys")
     }
 
     /// ユニークなグループ数。
@@ -178,6 +202,32 @@ mod tests {
     fn entities(ids: &[&str]) -> GroupCodes {
         let ids: Vec<String> = ids.iter().map(|s| s.to_string()).collect();
         GroupCodes::from_ids(&ids)
+    }
+
+    #[test]
+    fn group_codes_without_keys_has_the_same_codes_counts_and_row_order_as_keyed() {
+        let ids: Vec<String> = ["b", "10", "a", "9", "b", "10", "a", "a"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let keyed = GroupCodes::from_ids(&ids);
+        let keyless = GroupCodes::from_ids_without_keys(&ids);
+
+        assert_eq!(keyless.codes(), keyed.codes());
+        assert_eq!(keyless.counts(), keyed.counts());
+        assert_eq!(keyless.n_groups(), keyed.n_groups());
+        assert_eq!(keyless.nobs(), keyed.nobs());
+        let rows = |c: &GroupCodes| -> Vec<Vec<usize>> {
+            c.group_indices().iter().map(<[usize]>::to_vec).collect()
+        };
+        assert_eq!(rows(&keyless), rows(&keyed));
+    }
+
+    #[test]
+    #[should_panic(expected = "keys are not built")]
+    fn group_codes_without_keys_panics_when_keys_are_requested() {
+        let ids = vec!["a".to_string(), "b".to_string()];
+        let _ = GroupCodes::from_ids_without_keys(&ids).keys();
     }
 
     #[test]

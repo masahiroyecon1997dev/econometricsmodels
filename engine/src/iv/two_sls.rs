@@ -829,10 +829,10 @@ fn hac_cov_params(
 }
 
 /// クラスターロバストな係数分散共分散行列: `(X̂'X̂)⁻¹Ŝ(X̂'X̂)⁻¹ * correction`（k×k）。数式・
-/// 実装方針は`shared/covariance.rs`の`cluster_cov_params`と同型（グループの反復順を`GroupCodes`の
-/// コード順（辞書順）で決定的にする理由も同じ、`engine/src/linear/CLAUDE.md`「踏んだ罠」参照）。設計行列に`X̂`、残差に構造残差`e`を
-/// 使う点のみがOLSとの違い。`groups`が`G>=2`であることは`validate_cluster_groups`
-/// （呼び出し元）で検証済みの前提。
+/// 実装方針は`shared/covariance.rs`の`cluster_cov_params`と同型（グループの反復順を
+/// `GroupCodes`のコード順（辞書順）で決定的にする理由も同じ、`engine/src/linear/CLAUDE.md`
+/// 「踏んだ罠」参照）。設計行列に`X̂`、残差に構造残差`e`を使う点のみがOLSとの違い。
+/// `groups`が`G>=2`であることは`validate_cluster_groups`（呼び出し元）で検証済みの前提。
 fn cluster_cov_params(
     x: &Mat<f64>,
     residuals: &Mat<f64>,

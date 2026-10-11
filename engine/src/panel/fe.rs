@@ -1767,7 +1767,7 @@ fn two_group_split_is_degenerate(effects: FeEffects, input: &FeInput, groups: &G
 /// 1水準でも3観測以上・同じグループに2観測・1観測があれば`false`。
 ///
 /// `levels.nobs() == groups.nobs()`は呼び出し側の契約（`FeInput`のコードと、
-/// `validate_cluster_group_codes`済みのクラスター列のコード、または`fit()`のDkアームで
+/// `validate_cluster_groups`済みのクラスター列のコード、または`fit()`のDkアームで
 /// 長さを検証済みのDK時点列のコード）。
 fn every_level_splits_once_across_two_groups(levels: &GroupCodes, groups: &GroupCodes) -> bool {
     debug_assert_eq!(

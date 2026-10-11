@@ -368,7 +368,7 @@ pub(crate) fn validate_cluster_cov_type(
         return Ok(None);
     };
     let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
-    let codes = GroupCodes::from_ids(groups);
+    let codes = GroupCodes::from_ids_without_keys(groups);
     let g = validate_cluster_groups(&codes, n)?;
     validate_cluster_count_covers_slopes(g, n_slopes)?;
     Ok(Some(codes))
@@ -5704,5 +5704,52 @@ mod tests {
         let new_x_columns = vec![vec![10.0, 20.0]]; // 1列しかない
 
         let _ = predict_new_data(&params, true, &new_x_columns, |z| z);
+    }
+
+    #[test]
+    fn validate_cluster_cov_type_returns_codes_for_valid_cluster_and_none_otherwise() {
+        let groups: Vec<String> = ["a", "b", "c", "a", "b", "c"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let codes = validate_cluster_cov_type(
+            &CovType::Cluster {
+                groups: Some(groups),
+            },
+            6,
+            1,
+        )
+        .unwrap()
+        .expect("Cluster with groups must produce codes");
+        assert_eq!(codes.nobs(), 6);
+        assert_eq!(codes.n_groups(), 3);
+
+        assert_eq!(
+            validate_cluster_cov_type(&CovType::Classical, 6, 1),
+            Ok(None)
+        );
+    }
+
+    #[test]
+    fn validate_fit_preconditions_returns_cluster_codes_for_valid_cluster() {
+        let y = Mat::from_fn(6, 1, |i, _| [0.0, 1.0, 0.0, 1.0, 1.0, 0.0][i]);
+        let groups: Vec<String> = ["a", "b", "c", "a", "b", "c"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let codes = validate_fit_preconditions(
+            0.95,
+            100,
+            1e-8,
+            &y,
+            2,
+            true,
+            &CovType::Cluster {
+                groups: Some(groups),
+            },
+        )
+        .unwrap()
+        .expect("Cluster with groups must produce codes");
+        assert_eq!(codes.n_groups(), 3);
     }
 }

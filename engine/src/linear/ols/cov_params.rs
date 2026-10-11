@@ -742,4 +742,89 @@ mod tests {
         };
         let _ = OlsEstimator::fit(input, cov_type, 0.95);
     }
+
+    fn cluster_contract_fixture() -> (Vec<f64>, Vec<Vec<f64>>, Vec<String>) {
+        let y = vec![2.0, 4.0, 5.0, 4.0, 5.0, 3.0, 6.0, 1.0, 7.0, 2.5];
+        let x_columns = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]];
+        let groups: Vec<String> = (0..10).map(|i| format!("g{}", i % 4)).collect();
+        (y, x_columns, groups)
+    }
+
+    fn cluster_contract_input(y: &[f64], x_columns: &[Vec<f64>]) -> OlsInput {
+        OlsInput::from_columns(y, x_columns, vec!["x1".to_string()], true, "y".to_string()).unwrap()
+    }
+
+    /// `fit`は冒頭で`cov_type.cluster_codes()`を作って`fit_with_cluster_codes`に渡すだけなので、
+    /// 同じコードを直接渡した結果とビット単位で一致する（IVの第一段階・Wu-Hausmanが使う
+    /// 内部入口が、公開の`fit`と同じ計算をすることの確認）。
+    #[test]
+    fn fit_with_cluster_codes_matches_fit_bitwise_for_cluster() {
+        let (y, x_columns, groups) = cluster_contract_fixture();
+        let cov_type = CovType::Cluster {
+            groups: Some(groups),
+        };
+
+        let via_fit = OlsEstimator::fit(
+            cluster_contract_input(&y, &x_columns),
+            cov_type.clone(),
+            0.95,
+        )
+        .unwrap();
+        let codes = cov_type.cluster_codes();
+        let via_codes = OlsEstimator::fit_with_cluster_codes(
+            cluster_contract_input(&y, &x_columns),
+            cov_type,
+            codes.as_ref(),
+            0.95,
+        )
+        .unwrap();
+
+        for j in 0..via_fit.params().nrows() {
+            for (a, b) in [
+                (via_fit.params(), via_codes.params()),
+                (via_fit.std_errors(), via_codes.std_errors()),
+                (via_fit.p_values(), via_codes.p_values()),
+            ] {
+                assert_eq!(a.get(j, 0).to_bits(), b.get(j, 0).to_bits());
+            }
+        }
+        assert_eq!(
+            via_fit.f_statistic().to_bits(),
+            via_codes.f_statistic().to_bits()
+        );
+        assert_eq!(via_fit.df_inference(), via_codes.df_inference());
+    }
+
+    /// `cluster_codes`と`cov_type`の食い違い（内部契約違反）はdebugビルドで検出する。
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "cluster_codes must be Some exactly when")]
+    fn fit_with_cluster_codes_panics_when_codes_are_given_for_a_non_cluster_cov_type() {
+        let (y, x_columns, groups) = cluster_contract_fixture();
+        let codes = CovType::Cluster {
+            groups: Some(groups),
+        }
+        .cluster_codes();
+        let _ = OlsEstimator::fit_with_cluster_codes(
+            cluster_contract_input(&y, &x_columns),
+            CovType::Classical,
+            codes.as_ref(),
+            0.95,
+        );
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "cluster_codes must be Some exactly when")]
+    fn fit_with_cluster_codes_panics_when_codes_are_missing_for_cluster_with_groups() {
+        let (y, x_columns, groups) = cluster_contract_fixture();
+        let _ = OlsEstimator::fit_with_cluster_codes(
+            cluster_contract_input(&y, &x_columns),
+            CovType::Cluster {
+                groups: Some(groups),
+            },
+            None,
+            0.95,
+        );
+    }
 }

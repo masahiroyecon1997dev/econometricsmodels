@@ -900,7 +900,7 @@ fn validate_weight_type(
         WeightType::Classical | WeightType::Robust => {}
         WeightType::Cluster { groups } => {
             let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
-            let codes = GroupCodes::from_ids(groups);
+            let codes = GroupCodes::from_ids_without_keys(groups);
             let g = validate_cluster_groups(&codes, n)?;
             let exactly_identified = l == k;
             if g < l || (exactly_identified && g == l) {
@@ -3286,6 +3286,153 @@ mod tests {
     /// `cov_type=Cluster`のSEを、小標本補正`(G/(G-1))((n-1)/(n-k))`込みの手計算
     /// サンドイッチ公式と数値照合する（`fit_computes_cluster_weighted_estimate_matching_
     /// manual_formula`と同じグループ構成、4グループ）。
+    fn labelled_groups(n: usize, modulus: usize, prefix: &str) -> Vec<String> {
+        (0..n).map(|i| format!("{prefix}{}", i % modulus)).collect()
+    }
+
+    #[test]
+    fn validate_weight_type_returns_codes_only_for_cluster() {
+        let n = 16;
+        let codes = validate_weight_type(
+            &WeightType::Cluster {
+                groups: Some(labelled_groups(n, 4, "a")),
+            },
+            n,
+            2,
+            3,
+        )
+        .unwrap()
+        .expect("Cluster weight must produce codes");
+        assert_eq!(codes.nobs(), n);
+        assert_eq!(codes.n_groups(), 4);
+
+        for weight in [WeightType::Classical, WeightType::Robust] {
+            assert!(validate_weight_type(&weight, n, 2, 3).unwrap().is_none());
+        }
+    }
+
+    /// `cov_type`と`weight_type`が同じ`fit()`で別々のグルーピングを使うとき、それぞれが
+    /// 自分のコードで計算される（片方のコードをもう片方に流用していない）ことの確認。
+    /// 点推定は`cov_type`に依存しないので`cov_type=Classical`のときとビット一致し、標準誤差は
+    /// 分割を入れ替えると変わる。ラベルだけ付け替えた同じ分割では（ラベルの辞書順が変わり
+    /// 加算順が変わるため丸め誤差の範囲で）一致する。
+    #[test]
+    fn fit_uses_separate_codes_for_cov_type_and_weight_type_clusters() {
+        let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
+        let n = y.len();
+        let weight_groups = labelled_groups(n, 4, "a");
+        let cov_groups = labelled_groups(n, 5, "b");
+        let fit = |weight: &[String], cov: Option<&[String]>| {
+            let input = IvInput::from_columns(
+                &y,
+                &[],
+                vec![],
+                std::slice::from_ref(&x_endog),
+                vec!["endog1".to_string()],
+                &[z1.clone(), z2.clone()],
+                vec!["z1".to_string(), "z2".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap();
+            GmmEstimator::fit(
+                input,
+                GmmType::TwoStep {
+                    weight: WeightType::Cluster {
+                        groups: Some(weight.to_vec()),
+                    },
+                },
+                true,
+                match cov {
+                    Some(groups) => CovType::Cluster {
+                        groups: Some(groups.to_vec()),
+                    },
+                    None => CovType::Classical,
+                },
+                0.95,
+            )
+            .unwrap()
+        };
+
+        let mixed = fit(&weight_groups, Some(&cov_groups));
+        let classical_cov = fit(&weight_groups, None);
+        let swapped = fit(&cov_groups, Some(&weight_groups));
+        let same = fit(&weight_groups, Some(&weight_groups));
+        let relabelled: Vec<String> = cov_groups.iter().map(|g| format!("z{g}")).collect();
+        let mixed_relabelled = fit(&weight_groups, Some(&relabelled));
+
+        for j in 0..mixed.params().nrows() {
+            assert_eq!(
+                mixed.params().get(j, 0).to_bits(),
+                classical_cov.params().get(j, 0).to_bits()
+            );
+            let se = *mixed.std_errors().get(j, 0);
+            assert!(
+                (se - *mixed_relabelled.std_errors().get(j, 0)).abs() < 1e-10 * se,
+                "relabelling the cov_type clusters must not change the standard error"
+            );
+            assert_ne!(
+                se.to_bits(),
+                same.std_errors().get(j, 0).to_bits(),
+                "cov_type clusters must not be replaced by the weight_type clusters"
+            );
+            assert_ne!(
+                se.to_bits(),
+                swapped.std_errors().get(j, 0).to_bits(),
+                "swapping the two groupings must change the standard error"
+            );
+        }
+    }
+
+    /// 旧実装（`String`ラベルの`BTreeMap`で集計）をそのまま残したoracleと、
+    /// `cluster_moment_covariance`（コード化した行インデックスで集計）がビット単位で一致する。
+    #[test]
+    fn cluster_moment_covariance_is_bit_identical_to_the_string_keyed_btreemap_implementation() {
+        let n = 300;
+        let l = 4;
+        let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let labels: Vec<String> = (0..n)
+            .map(|_| ((next() * 29.0) as usize).to_string())
+            .collect();
+        let z = Mat::from_fn(n, l, |_, _| next() * 20.0 - 10.0);
+        let residuals = Mat::from_fn(n, 1, |_, _| next() * 4.0 - 2.0);
+
+        let mut by_label: std::collections::BTreeMap<&str, Vec<usize>> =
+            std::collections::BTreeMap::new();
+        for (i, label) in labels.iter().enumerate() {
+            by_label.entry(label.as_str()).or_default().push(i);
+        }
+        let mut expected = Mat::<f64>::zeros(l, l);
+        for rows in by_label.values() {
+            let mut s_g = vec![0.0_f64; l];
+            for &i in rows {
+                let e = *residuals.get(i, 0);
+                for (a, s_g_a) in s_g.iter_mut().enumerate() {
+                    *s_g_a += e * (*z.get(i, a));
+                }
+            }
+            for a in 0..l {
+                for b in 0..l {
+                    *expected.get_mut(a, b) += s_g[a] * s_g[b];
+                }
+            }
+        }
+
+        let codes = GroupCodes::from_ids_without_keys(&labels);
+        let actual = cluster_moment_covariance(&z, &residuals, l, &codes.group_indices());
+        for a in 0..l {
+            for b in 0..l {
+                assert_eq!(actual.get(a, b).to_bits(), expected.get(a, b).to_bits());
+            }
+        }
+    }
+
     #[test]
     fn fit_computes_cluster_std_errors_matching_manual_sandwich_formula() {
         let (y, x_endog, z1, z2) = heteroskedastic_test_columns();

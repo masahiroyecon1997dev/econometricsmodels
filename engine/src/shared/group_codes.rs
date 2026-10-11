@@ -35,7 +35,10 @@ use crate::shared::error::CommonError;
 /// 構築は[`Self::from_labels`]/[`Self::from_labels_without_keys`]（ラベルの`String`列から）と
 /// [`Self::from_factorized_without_keys`]（呼び出し側が行ごとの`String`を作らずに振った仮コード
 /// から。`engine_pybind`のクラスター列はこちら）が公開で、コードの参照・集計用の読み出し口は`engine`内部専用（`pub(crate)`）。パネルの
-/// `FeInput`/`ReInput`のentityと`TimeKeys`は、現状は`String`列で受け取り構築時にコード化する。
+/// パネルの`FeInput`/`ReInput`のentity（`from_group_codes`、キー付き）と`TimeKeys`
+/// （`*_factorized`）も、同じ型のコードで受け取る。ラベルの`String`列から作る簡便版
+/// （`from_columns`/`from_columns_ordered`・`TimeKeys::lexicographic`等）は、内部でこの型に
+/// 変換して渡す。
 ///
 /// # 公開型としての約束事
 /// - **コードの行数は、渡す先のデータの行数`n`と一致させる。** 食い違うコードは、各`fit()`が
@@ -117,6 +120,39 @@ impl GroupCodes {
         codes: Vec<usize>,
         labels: &[&str],
     ) -> Result<Self, CommonError> {
+        Self::from_factorized_with(codes, labels, |_, _| Ordering::Equal, false)
+    }
+
+    /// [`Self::from_factorized_without_keys`]と同じだが、グループのキー（`keys()`）も作る。
+    /// パネルのentityのように、固定効果のキーとしてラベルが要る列向け。
+    ///
+    /// # Errors
+    /// `from_factorized_without_keys`と同じ。
+    pub fn from_factorized(codes: Vec<usize>, labels: &[&str]) -> Result<Self, CommonError> {
+        Self::from_factorized_with(codes, labels, |_, _| Ordering::Equal, true)
+    }
+
+    /// [`Self::from_factorized`]で、コードの順序を`compare_provisional`（2つの仮コードを比べる。
+    /// 同順位は`labels`の辞書順）で決める版。`TimeKeys`のように、時点の順序が値の順序で
+    /// 決まる列向け（`from_labels_ordered`の仮コード版）。同じ`labels`の仮コード同士は
+    /// `Equal`にすること（併合は並べ替え後に隣り合うことを使う）。
+    ///
+    /// # Errors
+    /// `from_factorized_without_keys`と同じ。
+    pub(crate) fn from_factorized_ordered(
+        codes: Vec<usize>,
+        labels: &[&str],
+        compare_provisional: impl Fn(usize, usize) -> Ordering,
+    ) -> Result<Self, CommonError> {
+        Self::from_factorized_with(codes, labels, compare_provisional, true)
+    }
+
+    fn from_factorized_with(
+        codes: Vec<usize>,
+        labels: &[&str],
+        compare_provisional: impl Fn(usize, usize) -> Ordering,
+        with_keys: bool,
+    ) -> Result<Self, CommonError> {
         let mut used = vec![false; labels.len()];
         for &c in &codes {
             match used.get_mut(c) {
@@ -134,7 +170,12 @@ impl GroupCodes {
                 "group code {unused} is never used by any row"
             )));
         }
-        Ok(Self::finish(codes, labels, |_, _| Ordering::Equal, false))
+        Ok(Self::finish(codes, labels, compare_provisional, with_keys))
+    }
+
+    /// キー（`keys()`）を持つか。キー無しのコード（`*_without_keys`で作ったもの）では`false`。
+    pub fn has_keys(&self) -> bool {
+        self.keys.is_some()
     }
 
     fn build(
@@ -445,6 +486,26 @@ mod tests {
             .collect();
         assert_eq!(codes, GroupCodes::from_labels_without_keys(&ids));
         assert_eq!(codes.n_groups(), 2);
+    }
+
+    #[test]
+    fn from_factorized_builds_keys_and_matches_from_labels() {
+        // 仮コードは出現順でなくてよい（"b"=0, "a"=1, "c"=2）。
+        let ids: Vec<String> = ["a", "b", "a", "c", "b"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let factorized =
+            GroupCodes::from_factorized(vec![1, 0, 1, 2, 0], &["b", "a", "c"]).unwrap();
+        let from_labels = GroupCodes::from_labels(&ids);
+        assert!(factorized.has_keys());
+        assert_eq!(factorized, from_labels);
+        assert_eq!(factorized.keys(), from_labels.keys());
+        assert!(
+            !GroupCodes::from_factorized_without_keys(vec![0], &["a"])
+                .unwrap()
+                .has_keys()
+        );
     }
 
     #[test]

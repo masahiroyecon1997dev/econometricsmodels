@@ -372,15 +372,17 @@ pub enum PanelError {
 /// 時点の順序は**ラベルの文字列ではなく列の値の順序**で決める（整数・浮動小数点は数値順、
 /// 日付・日時は時系列順、`Enum`はカテゴリ定義順）。文字列の辞書順では`1, 10, 11, 2, ...`の
 /// ように並んで時点の対応がずれ、DKの標準誤差が黙って変わる。値の順序をどう取るかは
-/// `engine_pybind`が列のdtypeから決め、コンストラクタで渡す。ラベル自体（`String`）は
+/// `engine_pybind`が列のdtypeから決め、コンストラクタで渡す。ラベル（`String`）は
 /// 同一性の判定と`fixed_effects()`のキーに使う。
 ///
-/// ユニークな時点は1つのコードに対応し、コードは0から時点の昇順に振る。
+/// ユニークな時点は1つのコードに対応し、コードは0から時点の昇順に振る。行ごとのラベルの
+/// `String`列は持たない（コードと、ユニークな時点のラベルだけ）。
+///
+/// 構築は、行ごとのラベルから作る`lexicographic`/`by_integer`/`by_float`と、呼び出し側が
+/// 行ごとの`String`を作らずに振った仮コードから作る`*_factorized`の2系統。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TimeKeys {
-    /// 各行の時点ラベル（長さ`n`）。
-    ids: Vec<String>,
-    /// `ids`のコード（時間順）。
+    /// 各行の時点コード（時間順、キー付き）。
     codes: GroupCodes,
 }
 
@@ -388,8 +390,9 @@ impl TimeKeys {
     /// ラベルの辞書順を時間順とみなす（ISO 8601の日付・ゼロ埋めした年月等、辞書順が時間順と
     /// 一致するラベル向け）。`FeInput::from_columns`/`ReInput::from_columns`はこの順序を使う。
     pub fn lexicographic(ids: Vec<String>) -> Self {
-        let codes = GroupCodes::from_labels(&ids);
-        Self { ids, codes }
+        Self {
+            codes: GroupCodes::from_labels(&ids),
+        }
     }
 
     /// 各行の整数値`values`の昇順を時間順にする（整数列・日付・日時・`Enum`の物理順序）。
@@ -398,9 +401,9 @@ impl TimeKeys {
     /// `values`の長さが`ids`と一致しない場合は`PanelError::IdentifierDimensionMismatch`
     /// （`engine_pybind`が同じ列から作る限り起こり得ない契約違反に対する防御）。
     pub fn by_integer(ids: Vec<String>, values: &[i128]) -> Result<Self, PanelError> {
-        check_key_lengths(&ids, values.len())?;
+        check_key_lengths(ids.len(), values.len())?;
         let codes = GroupCodes::from_labels_ordered(&ids, |a, b| values[a].cmp(&values[b]));
-        Ok(Self { ids, codes })
+        Ok(Self { codes })
     }
 
     /// 各行の浮動小数点値`values`の昇順（`f64::total_cmp`）を時間順にする。有限値であること
@@ -409,14 +412,57 @@ impl TimeKeys {
     /// # Errors
     /// `values`の長さが`ids`と一致しない場合は`PanelError::IdentifierDimensionMismatch`。
     pub fn by_float(ids: Vec<String>, values: &[f64]) -> Result<Self, PanelError> {
-        check_key_lengths(&ids, values.len())?;
+        check_key_lengths(ids.len(), values.len())?;
         let codes = GroupCodes::from_labels_ordered(&ids, |a, b| values[a].total_cmp(&values[b]));
-        Ok(Self { ids, codes })
+        Ok(Self { codes })
     }
 
-    /// 各行の時点ラベル（長さ`n`）。
-    pub fn ids(&self) -> &[String] {
-        &self.ids
+    /// [`Self::lexicographic`]の仮コード版。各行の仮コード`codes`（値は`0..labels.len()`）と、
+    /// 仮グループごとの時点ラベル`labels`から作る（`GroupCodes::from_factorized`と同じ
+    /// 規則で、同じラベルの仮グループは1つにまとめる）。
+    ///
+    /// # Errors
+    /// 仮コードが範囲外、または使われていない仮コードがある場合（`PanelError::Common`）。
+    pub fn lexicographic_factorized(
+        codes: Vec<usize>,
+        labels: &[&str],
+    ) -> Result<Self, PanelError> {
+        Ok(Self {
+            codes: GroupCodes::from_factorized(codes, labels)?,
+        })
+    }
+
+    /// [`Self::by_integer`]の仮コード版。`group_values[g]`は仮グループ`g`の整数値。
+    ///
+    /// # Errors
+    /// `group_values`の長さが`labels`と一致しない場合は`PanelError::IdentifierDimensionMismatch`。
+    /// そのほか`lexicographic_factorized`と同じ。
+    pub fn by_integer_factorized(
+        codes: Vec<usize>,
+        labels: &[&str],
+        group_values: &[i128],
+    ) -> Result<Self, PanelError> {
+        check_key_lengths(labels.len(), group_values.len())?;
+        let codes = GroupCodes::from_factorized_ordered(codes, labels, |a, b| {
+            group_values[a].cmp(&group_values[b])
+        })?;
+        Ok(Self { codes })
+    }
+
+    /// [`Self::by_float`]の仮コード版。`group_values[g]`は仮グループ`g`の浮動小数点値。
+    ///
+    /// # Errors
+    /// `by_integer_factorized`と同じ。
+    pub fn by_float_factorized(
+        codes: Vec<usize>,
+        labels: &[&str],
+        group_values: &[f64],
+    ) -> Result<Self, PanelError> {
+        check_key_lengths(labels.len(), group_values.len())?;
+        let codes = GroupCodes::from_factorized_ordered(codes, labels, |a, b| {
+            group_values[a].total_cmp(&group_values[b])
+        })?;
+        Ok(Self { codes })
     }
 
     /// 時点ラベルのコード（時間順）。
@@ -426,12 +472,12 @@ impl TimeKeys {
 
     /// 行数`n`。
     pub fn len(&self) -> usize {
-        self.ids.len()
+        self.codes.nobs()
     }
 
     /// 行数が0か。
     pub fn is_empty(&self) -> bool {
-        self.ids.is_empty()
+        self.codes.nobs() == 0
     }
 
     /// ユニークな時点のラベルを時間順に並べたもの。
@@ -441,13 +487,27 @@ impl TimeKeys {
 }
 
 /// `TimeKeys`のコンストラクタが、ラベルと順序づけの値の長さを検証する。
-fn check_key_lengths(ids: &[String], values: usize) -> Result<(), PanelError> {
-    if ids.len() != values {
+fn check_key_lengths(labels: usize, values: usize) -> Result<(), PanelError> {
+    if labels != values {
         return Err(PanelError::IdentifierDimensionMismatch {
             dimension: PanelDimension::Time,
-            y_rows: ids.len(),
+            y_rows: labels,
             other_rows: values,
         });
+    }
+    Ok(())
+}
+
+/// パネル入力のentityのコードがキー（`keys()`）を持つことを確かめる。固定効果のキーに使うため、
+/// キー無しのコード（`GroupCodes::from_*_without_keys`）は受け付けない。
+pub(crate) fn require_entity_keys(entity: &GroupCodes) -> Result<(), PanelError> {
+    if !entity.has_keys() {
+        return Err(CommonError::ComputationFailed(
+            "entity codes must carry keys (build them with GroupCodes::from_labels or \
+             GroupCodes::from_factorized)"
+                .to_string(),
+        )
+        .into());
     }
     Ok(())
 }
@@ -1065,12 +1125,64 @@ mod tests {
     }
 
     #[test]
+    fn time_keys_factorized_constructors_match_the_label_constructors() {
+        // 仮コードは出現順の`[0,1,2,0]`（`"9"=0, "10"=1, "2"=2`）。
+        let codes = vec![0, 1, 2, 0];
+        let group_labels = ["9", "10", "2"];
+
+        let by_label =
+            TimeKeys::by_integer(labels(&["9", "10", "2", "9"]), &[9, 10, 2, 9]).unwrap();
+        let factorized =
+            TimeKeys::by_integer_factorized(codes.clone(), &group_labels, &[9, 10, 2]).unwrap();
+        assert_eq!(factorized, by_label);
+        assert_eq!(factorized.periods(), by_label.periods());
+        assert_eq!(factorized.len(), 4);
+
+        let lexicographic = TimeKeys::lexicographic(labels(&["9", "10", "2", "9"]));
+        assert_eq!(
+            TimeKeys::lexicographic_factorized(codes.clone(), &group_labels).unwrap(),
+            lexicographic
+        );
+
+        // `-0.0`と`0.0`は別の時点（ラベルが異なる）で、`total_cmp`の順に並ぶ。
+        let by_float = TimeKeys::by_float(
+            labels(&["0.0", "-0.0", "1.0", "0.0"]),
+            &[0.0, -0.0, 1.0, 0.0],
+        )
+        .unwrap();
+        let float_factorized = TimeKeys::by_float_factorized(
+            vec![0, 1, 2, 0],
+            &["0.0", "-0.0", "1.0"],
+            &[0.0, -0.0, 1.0],
+        )
+        .unwrap();
+        assert_eq!(float_factorized, by_float);
+        assert_eq!(float_factorized.periods(), ["-0.0", "0.0", "1.0"]);
+    }
+
+    #[test]
+    fn time_keys_factorized_constructors_reject_inconsistent_inputs() {
+        // 順序づけの値の数が仮グループ数と合わない。
+        assert!(matches!(
+            TimeKeys::by_integer_factorized(vec![0, 1], &["a", "b"], &[1]),
+            Err(PanelError::IdentifierDimensionMismatch {
+                dimension: PanelDimension::Time,
+                ..
+            })
+        ));
+        // 範囲外・未使用の仮コード。
+        assert!(matches!(
+            TimeKeys::lexicographic_factorized(vec![0, 2], &["a", "b"]),
+            Err(PanelError::Common(CommonError::ComputationFailed(_)))
+        ));
+    }
+
+    #[test]
     fn time_keys_by_integer_orders_periods_numerically_not_lexicographically() {
         // 辞書順なら "10" < "2" < "9"。値の順序では 2 < 9 < 10。
         let keys = TimeKeys::by_integer(labels(&["9", "10", "2", "9"]), &[9, 10, 2, 9]).unwrap();
         assert_eq!(keys.periods(), ["2", "9", "10"]);
         assert_eq!(keys.codes().codes(), [1, 2, 0, 1]);
-        assert_eq!(keys.ids(), ["9", "10", "2", "9"]);
         assert_eq!(keys.len(), 4);
     }
 

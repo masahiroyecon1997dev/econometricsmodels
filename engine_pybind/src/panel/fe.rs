@@ -79,7 +79,7 @@ use pyo3_polars::PyDataFrame;
 use super::common::{panel_error_to_pyerr, validate_dk_time_role};
 use crate::linear::common::mat_to_vec;
 use crate::shared::column_extraction::{
-    extract_cluster_groups, extract_f64_column, extract_f64_columns, extract_group_key_column,
+    extract_cluster_groups, extract_entity_groups, extract_f64_column, extract_f64_columns,
     extract_time_keys,
 };
 use crate::shared::errors::ValidationError;
@@ -489,7 +489,7 @@ pub(crate) fn build_fe_input(
 
     let x_slices = extract_f64_columns(df, &x)?;
 
-    let entity_slice = extract_group_key_column(df, &entity)?;
+    let entity_groups = extract_entity_groups(df, &entity)?;
 
     // ── `time`列の抽出（2-way FEを指定した場合のみ）───────────────────────
     let time_keys: Option<TimeKeys> = options
@@ -506,7 +506,7 @@ pub(crate) fn build_fe_input(
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ）─────────────
     let (cov_type, cov_type_lower) = parse_fe_cov_type(df, options)?;
 
-    let input = FeInput::from_columns_ordered(&y_slice, &x_slices, x, &entity_slice, time_keys, y)
+    let input = FeInput::from_group_codes(&y_slice, &x_slices, x, entity_groups, time_keys, y)
         .map_err(panel_error_to_pyerr)?;
 
     Ok((input, effects, cov_type, cov_type_lower))
@@ -616,7 +616,7 @@ mod tests {
 
         assert_eq!(input.nobs(), 6);
         assert_eq!(input.x_names(), &["x1".to_string()]);
-        assert_eq!(input.time(), None);
+        assert_eq!(input.time_keys(), None);
         assert_eq!(effects, FeEffects::OneWay);
         assert_eq!(
             cov_type,
@@ -642,8 +642,11 @@ mod tests {
         .unwrap();
 
         assert_eq!(effects, FeEffects::TwoWay);
-        let expected_time = ["1", "2", "1", "2", "1", "2"].map(str::to_string);
-        assert_eq!(input.time(), Some(expected_time.as_slice()));
+        let Some(time_keys) = input.time_keys() else {
+            panic!("time keys must be set");
+        };
+        assert_eq!(time_keys.len(), 6);
+        assert_eq!(time_keys.periods(), ["1", "2"]);
     }
 
     #[test]
@@ -804,7 +807,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(effects, FeEffects::OneWay);
-        assert_eq!(input.time(), None); // dk_timeはFeInput.timeには渡らない
+        assert_eq!(input.time_keys(), None); // dk_timeはFeInput.timeには渡らない
         assert_eq!(
             cov_type,
             FeCovType::Dk {
@@ -845,8 +848,11 @@ mod tests {
         .unwrap();
 
         assert_eq!(effects, FeEffects::TwoWay);
-        let expected_time = ["1", "2", "1", "2"].map(str::to_string);
-        assert_eq!(input.time(), Some(expected_time.as_slice()));
+        let Some(time_keys) = input.time_keys() else {
+            panic!("time keys must be set");
+        };
+        assert_eq!(time_keys.len(), 4);
+        assert_eq!(time_keys.periods(), ["1", "2"]);
         assert_eq!(
             cov_type,
             FeCovType::Dk {

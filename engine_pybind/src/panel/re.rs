@@ -62,7 +62,7 @@ use pyo3_polars::PyDataFrame;
 use super::common::{panel_error_to_pyerr, validate_dk_time_role};
 use crate::linear::common::mat_to_vec;
 use crate::shared::column_extraction::{
-    extract_cluster_groups, extract_f64_column, extract_f64_columns, extract_group_key_column,
+    extract_cluster_groups, extract_entity_groups, extract_f64_column, extract_f64_columns,
     extract_time_keys,
 };
 use crate::shared::errors::ValidationError;
@@ -400,7 +400,7 @@ pub(crate) fn build_re_input(
 
     let x_slices = extract_f64_columns(df, &x)?;
 
-    let entity_slice = extract_group_key_column(df, &entity)?;
+    let entity_groups = extract_entity_groups(df, &entity)?;
 
     // ── `dk_time`列の抽出（DK HAC用、モジュールdoc参照）──────────────────
     let time_keys: Option<TimeKeys> = options
@@ -412,7 +412,7 @@ pub(crate) fn build_re_input(
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ）─────────────
     let (cov_type, cov_type_lower) = parse_re_cov_type(df, options)?;
 
-    let input = ReInput::from_columns_ordered(&y_slice, &x_slices, x, &entity_slice, time_keys, y)
+    let input = ReInput::from_group_codes(&y_slice, &x_slices, x, entity_groups, time_keys, y)
         .map_err(panel_error_to_pyerr)?;
 
     Ok((input, cov_type, cov_type_lower))
@@ -530,7 +530,7 @@ mod tests {
 
         assert_eq!(input.nobs(), 6);
         assert_eq!(input.x_names(), &["x1".to_string()]);
-        assert_eq!(input.time(), None);
+        assert_eq!(input.time_keys(), None);
         assert_eq!(
             cov_type,
             ReCovType::Cluster { groups: None },
@@ -556,8 +556,11 @@ mod tests {
         )
         .unwrap();
 
-        let expected_time = ["1", "2", "1", "2", "1", "2"].map(str::to_string);
-        assert_eq!(input.time(), Some(expected_time.as_slice()));
+        let Some(time_keys) = input.time_keys() else {
+            panic!("time keys must be set");
+        };
+        assert_eq!(time_keys.len(), 6);
+        assert_eq!(time_keys.periods(), ["1", "2"]);
     }
 
     #[test]

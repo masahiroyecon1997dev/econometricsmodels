@@ -453,6 +453,10 @@ fn check_key_dtype(name: &str, dtype: &DataType, role: KeyRole) -> PyResult<()> 
 /// `df`から`name`列を、同一性だけが意味を持つグループキー（`entity`・`cluster`）として
 /// 文字列のVecで取り出す。
 ///
+/// 行ごとに`String`を作る旧経路で、本番のコードは[`extract_cluster_groups`]・
+/// [`extract_entity_groups`]（行ごとの`String`を作らない）を使う。ここは、それらが旧経路と同じ
+/// コードになることを確かめるテストの比較対象（オラクル）としてだけ残している。
+///
 /// クラスター変数は整数IDとは限らない（州名・産業コード・企業ID等の文字列/
 /// カテゴリカル変数であることが多い）ため、値そのものではなく「グループの
 /// 同一性が判定できればよい」という前提でUtf8として扱う。
@@ -462,8 +466,57 @@ fn check_key_dtype(name: &str, dtype: &DataType, role: KeyRole) -> PyResult<()> 
 /// - キーとして使えないdtype（`List`・`Struct`・`Time`・`Duration`・`Decimal`等）
 /// - 欠損値を含む
 /// - 浮動小数の列にNaN・無限大を含む（数値列と同じく自動では扱わない）
+#[cfg(test)]
 pub fn extract_group_key_column(df: &DataFrame, name: &str) -> PyResult<Vec<String>> {
     extract_key_column(df, name, KeyRole::Identity)
+}
+
+/// 検査済みのキー列を、値そのもので分解した結果。
+struct FactorizedKey {
+    /// 各行の仮コード（出現順、値は`0..n_groups`）。
+    codes: Vec<usize>,
+    /// 仮グループごとの代表値（最初に現れた行の値、元のdtype）。
+    representatives: Series,
+}
+
+/// 検査済みのキー列`column`を、値そのもの（文字列・整数の内部表現・浮動小数のビット列）で
+/// ハッシュして仮コードに分解する。行ごとの`String`は作らない。
+fn factorize_checked_key(name: &str, column: &Column) -> PyResult<FactorizedKey> {
+    let (codes, first_rows) = factorize_key_column(name, column)?;
+    let first_rows: Vec<IdxSize> = first_rows.iter().map(|&row| row as IdxSize).collect();
+    let representatives = column
+        .as_materialized_series()
+        .take(&IdxCa::from_vec("first_rows".into(), first_rows))
+        .map_err(|e| ValidationError::new_err(format!("failed to convert column '{name}': {e}")))?;
+    Ok(FactorizedKey {
+        codes,
+        representatives,
+    })
+}
+
+/// 仮グループごとの代表値を文字列にして`build`に渡す。辞書順・同じ文字列のまとめ方は
+/// `engine`の`GroupCodes`が持つ規則で、ここでは文字列表現を作るだけ。
+fn with_group_labels<T>(
+    name: &str,
+    representatives: &Series,
+    build: impl FnOnce(&[&str]) -> PyResult<T>,
+) -> PyResult<T> {
+    let strings = cast_series_to_string(name, representatives)?;
+    let ca = strings
+        .str()
+        .map_err(|e| ValidationError::new_err(format!("failed to convert column '{name}': {e}")))?;
+    // キャストは非strictで、文字列にできない値はnullになりうる。panicせず`Err`にする。
+    let labels: Vec<&str> = ca
+        .iter()
+        .map(|v| {
+            v.ok_or_else(|| {
+                ValidationError::new_err(format!(
+                    "column '{name}' could not be interpreted as a group key"
+                ))
+            })
+        })
+        .collect::<PyResult<_>>()?;
+    build(&labels)
 }
 
 /// `df`から`name`列を、クラスター列（`cluster`）として整数コード化した`GroupCodes`で取り出す。
@@ -478,48 +531,36 @@ pub fn extract_group_key_column(df: &DataFrame, name: &str) -> PyResult<Vec<Stri
 /// # Errors
 /// [`extract_group_key_column`]と同じ。
 pub fn extract_cluster_groups(df: &DataFrame, name: &str) -> PyResult<GroupCodes> {
-    let series = checked_key_column(df, name, KeyRole::Identity)?;
-    let (codes, first_rows) = factorize_key_column(name, series)?;
-
-    // 仮グループごとの代表行の値を文字列にして、辞書順の規則を`engine`に委ねる。
-    let first_rows: Vec<IdxSize> = first_rows.iter().map(|&row| row as IdxSize).collect();
-    let uniques = series
-        .as_materialized_series()
-        .take(&IdxCa::from_vec("first_rows".into(), first_rows))
-        .map_err(|e| ValidationError::new_err(format!("failed to convert column '{name}': {e}")))?;
-    let uniques = cast_key_column_to_string(name, &uniques.into())?;
-    let ca = uniques
-        .str()
-        .map_err(|e| ValidationError::new_err(format!("failed to convert column '{name}': {e}")))?;
-    // キャストは非strictで、文字列にできない値はnullになりうる。panicせず`Err`にする。
-    let labels: Vec<&str> = ca
-        .iter()
-        .map(|v| {
-            v.ok_or_else(|| {
-                ValidationError::new_err(format!(
-                    "column '{name}' could not be interpreted as a group key"
-                ))
-            })
-        })
-        .collect::<PyResult<_>>()?;
-
-    GroupCodes::from_factorized_without_keys(codes, &labels).map_err(common_error_to_pyerr)
+    let column = checked_key_column(df, name, KeyRole::Identity)?;
+    let FactorizedKey {
+        codes,
+        representatives,
+    } = factorize_checked_key(name, column)?;
+    with_group_labels(name, &representatives, |labels| {
+        GroupCodes::from_factorized_without_keys(codes, labels).map_err(common_error_to_pyerr)
+    })
 }
 
-/// `df`から`name`列を、時点を表すキー（FE/REの`time`・`dk_time`）の文字列のVecで取り出す。
-///
-/// [`extract_group_key_column`]と同じく文字列表現で扱い、許可するdtypeが異なる
-/// （`Boolean`を除き`Datetime`を許可する）。時点の**順序**は含まない。順序が要る
-/// 呼び出しは[`extract_time_keys`]を使う。
+/// `df`から`name`列を、パネルのエンティティ列（`entity`）として整数コード化した`GroupCodes`で
+/// 取り出す。[`extract_cluster_groups`]と同じ分解で、グループのキー（ラベル）も作る
+/// （`fixed_effects()`のキーに使う）。
 ///
 /// # Errors
-/// [`extract_group_key_column`]と同じ（許可するdtypeだけが異なる）。
-fn extract_time_key_column(df: &DataFrame, name: &str) -> PyResult<Vec<String>> {
-    extract_key_column(df, name, KeyRole::Time)
+/// [`extract_group_key_column`]と同じ。
+pub fn extract_entity_groups(df: &DataFrame, name: &str) -> PyResult<GroupCodes> {
+    let column = checked_key_column(df, name, KeyRole::Identity)?;
+    let FactorizedKey {
+        codes,
+        representatives,
+    } = factorize_checked_key(name, column)?;
+    with_group_labels(name, &representatives, |labels| {
+        GroupCodes::from_factorized(codes, labels).map_err(common_error_to_pyerr)
+    })
 }
 
 /// `df`から`name`列を、時点を表すキー（FE/REの`time`・`dk_time`）として、ラベルと
-/// **値の順序**を持つ`TimeKeys`で取り出す。
+/// **値の順序**を持つ`TimeKeys`で取り出す。行ごとの`String`は作らない
+/// （[`extract_cluster_groups`]と同じ分解）。
 ///
 /// ラベルは文字列表現（同一性の判定と`fixed_effects()`のキーに使う）。時点の順序は列の
 /// dtypeの値の順序で決める。文字列表現の辞書順は`1, 10, 11, 2, ...`のように時間順と
@@ -535,47 +576,49 @@ fn extract_time_key_column(df: &DataFrame, name: &str) -> PyResult<Vec<String>> 
 /// # Errors
 /// [`extract_group_key_column`]と同じ（許可するdtypeだけが異なる）。
 pub fn extract_time_keys(df: &DataFrame, name: &str) -> PyResult<TimeKeys> {
-    let ids = extract_time_key_column(df, name)?;
-    // `extract_time_key_column`が列の存在を確認済み。
-    let series = df.column(name).map_err(|_| {
-        ValidationError::new_err(format!("column '{name}' does not exist in the data"))
-    })?;
-    let dtype = series.dtype();
+    let column = checked_key_column(df, name, KeyRole::Time)?;
+    let FactorizedKey {
+        codes,
+        representatives,
+    } = factorize_checked_key(name, column)?;
+    let dtype = representatives.dtype().clone();
 
-    if dtype.is_float() {
-        let as_f64 = series
-            .cast(&DataType::Float64)
-            .map_err(|e| time_order_error(name, e))?;
-        let values: Vec<f64> = as_f64
-            .f64()
-            .map_err(|e| time_order_error(name, e))?
-            .iter()
-            .map(|v| v.expect("null_countチェック済み"))
-            .collect();
-        TimeKeys::by_float(ids, &values).map_err(panel_error_to_pyerr)
-    } else if dtype.is_integer()
-        || matches!(
-            dtype,
-            DataType::Date | DataType::Datetime(..) | DataType::Enum(..)
-        )
-    {
-        // 整数は値そのもの、`Date`は日数、`Datetime`は時間単位ごとの経過時間、`Enum`は
-        // カテゴリの定義順の添字が内部表現の整数になっており、その大小がそのまま時間順になる。
-        let as_i128 = series
-            .to_physical_repr()
-            .cast(&DataType::Int128)
-            .map_err(|e| time_order_error(name, e))?;
-        let values: Vec<i128> = as_i128
-            .i128()
-            .map_err(|e| time_order_error(name, e))?
-            .iter()
-            .map(|v| v.expect("null_countチェック済み"))
-            .collect();
-        TimeKeys::by_integer(ids, &values).map_err(panel_error_to_pyerr)
-    } else {
-        // 文字列・`Categorical`（順序を持たない型）はラベルの辞書順。
-        Ok(TimeKeys::lexicographic(ids))
-    }
+    with_group_labels(name, &representatives, |labels| {
+        if dtype.is_float() {
+            let as_f64 = representatives
+                .cast(&DataType::Float64)
+                .map_err(|e| time_order_error(name, e))?;
+            let values: Vec<f64> = as_f64
+                .f64()
+                .map_err(|e| time_order_error(name, e))?
+                .iter()
+                .map(|v| v.expect("null_countチェック済み"))
+                .collect();
+            TimeKeys::by_float_factorized(codes, labels, &values).map_err(panel_error_to_pyerr)
+        } else if dtype.is_integer()
+            || matches!(
+                dtype,
+                DataType::Date | DataType::Datetime(..) | DataType::Enum(..)
+            )
+        {
+            // 整数は値そのもの、`Date`は日数、`Datetime`は時間単位ごとの経過時間、`Enum`は
+            // カテゴリの定義順の添字が内部表現の整数になっており、その大小がそのまま時間順になる。
+            let as_i128 = representatives
+                .to_physical_repr()
+                .cast(&DataType::Int128)
+                .map_err(|e| time_order_error(name, e))?;
+            let values: Vec<i128> = as_i128
+                .i128()
+                .map_err(|e| time_order_error(name, e))?
+                .iter()
+                .map(|v| v.expect("null_countチェック済み"))
+                .collect();
+            TimeKeys::by_integer_factorized(codes, labels, &values).map_err(panel_error_to_pyerr)
+        } else {
+            // 文字列・`Categorical`（順序を持たない型）はラベルの辞書順。
+            TimeKeys::lexicographic_factorized(codes, labels).map_err(panel_error_to_pyerr)
+        }
+    })
 }
 
 fn time_order_error(name: &str, err: PolarsError) -> PyErr {
@@ -607,17 +650,20 @@ fn checked_key_column<'a>(df: &'a DataFrame, name: &str, role: KeyRole) -> PyRes
 }
 
 /// キー列をUtf8にキャストする（元の型が数値・カテゴリカルでもよい。文字列表現で比較する）。
+#[cfg(test)]
 fn cast_key_column_to_string(name: &str, series: &Column) -> PyResult<Series> {
-    series
-        .as_materialized_series()
-        .cast(&DataType::String)
-        .map_err(|e| {
-            ValidationError::new_err(format!(
-                "column '{name}' could not be interpreted as a group key: {e}"
-            ))
-        })
+    cast_series_to_string(name, series.as_materialized_series())
 }
 
+fn cast_series_to_string(name: &str, series: &Series) -> PyResult<Series> {
+    series.cast(&DataType::String).map_err(|e| {
+        ValidationError::new_err(format!(
+            "column '{name}' could not be interpreted as a group key: {e}"
+        ))
+    })
+}
+
+#[cfg(test)]
 fn extract_key_column(df: &DataFrame, name: &str, role: KeyRole) -> PyResult<Vec<String>> {
     let series = checked_key_column(df, name, role)?;
     let series = cast_key_column_to_string(name, series)?;
@@ -793,7 +839,7 @@ mod tests {
             let df = df!("k" => [1.0, bad, 2.0]).unwrap();
 
             assert!(extract_group_key_column(&df, "k").is_err(), "{bad}");
-            assert!(extract_time_key_column(&df, "k").is_err(), "{bad}");
+            assert!(extract_time_keys(&df, "k").is_err(), "{bad}");
         }
     }
 
@@ -906,6 +952,130 @@ mod tests {
             panic!("{label}: extract_cluster_groups failed");
         };
         assert_eq!(actual, expected, "{label}");
+
+        // エンティティ列用（キー付き）も、旧経路の`from_labels`と同じコード・同じキーになる。
+        let expected_keyed = GroupCodes::from_labels(&labels);
+        let Ok(actual_keyed) = extract_entity_groups(&df, "k") else {
+            panic!("{label}: extract_entity_groups failed");
+        };
+        assert_eq!(actual_keyed, expected_keyed, "{label}");
+        // キー（ユニークなラベル）は`FeInput::entity_labels`経由で確認する（`GroupCodes::keys`は
+        // `engine`内部専用）。
+        let y = vec![0.0; labels.len()];
+        let labels_of = |codes: GroupCodes| {
+            let Ok(input) = engine::panel::fe::FeInput::from_group_codes(
+                &y,
+                &[],
+                vec![],
+                codes,
+                None,
+                "y".into(),
+            ) else {
+                panic!("{label}: from_group_codes failed");
+            };
+            input.entity_labels().to_vec()
+        };
+        assert_eq!(
+            labels_of(actual_keyed),
+            labels_of(expected_keyed),
+            "{label}"
+        );
+    }
+
+    /// 行ごとの`String`を経由する旧経路の`extract_time_keys`（比較対象のオラクル）。
+    fn extract_time_keys_via_row_strings(df: &DataFrame, name: &str) -> PyResult<TimeKeys> {
+        let ids = extract_key_column(df, name, KeyRole::Time)?;
+        let series = df.column(name).unwrap();
+        let dtype = series.dtype();
+        if dtype.is_float() {
+            let as_f64 = series.cast(&DataType::Float64).unwrap();
+            let values: Vec<f64> = as_f64.f64().unwrap().iter().map(|v| v.unwrap()).collect();
+            Ok(TimeKeys::by_float(ids, &values).unwrap())
+        } else if dtype.is_integer()
+            || matches!(
+                dtype,
+                DataType::Date | DataType::Datetime(..) | DataType::Enum(..)
+            )
+        {
+            let as_i128 = series.to_physical_repr().cast(&DataType::Int128).unwrap();
+            let values: Vec<i128> = as_i128.i128().unwrap().iter().map(|v| v.unwrap()).collect();
+            Ok(TimeKeys::by_integer(ids, &values).unwrap())
+        } else {
+            Ok(TimeKeys::lexicographic(ids))
+        }
+    }
+
+    /// 時点列も、行ごとの`String`を経由する旧経路と同じ`TimeKeys`（コードと時点のラベル）になる。
+    #[test]
+    fn extract_time_keys_agrees_with_the_row_string_path_for_every_time_dtype() {
+        let ints: [i64; 8] = [10, 9, 2, 10, -3, 100, 9, 2];
+        let enum_dtype = {
+            let categories = FrozenCategories::new(["z", "10", "9", "a"]).unwrap();
+            DataType::Enum(categories.clone(), categories.mapping().clone())
+        };
+        let mut cases: Vec<(String, Series)> = vec![
+            ("Int64".into(), Series::new("k".into(), ints)),
+            (
+                "Int8".into(),
+                Series::new("k".into(), ints).cast(&DataType::Int8).unwrap(),
+            ),
+            (
+                "UInt16".into(),
+                Series::new("k".into(), ints.map(|v| v.unsigned_abs()))
+                    .cast(&DataType::UInt16)
+                    .unwrap(),
+            ),
+            (
+                "Float64".into(),
+                Series::new("k".into(), [1.5, -0.0, 0.0, 10.0, 2.5, 1.5, 9.0, 0.0]),
+            ),
+            (
+                "String".into(),
+                Series::new("k".into(), ["b", "10", "a", "9", "b", "", "10", "é"]),
+            ),
+            (
+                "Date".into(),
+                Series::new("k".into(), ints.map(|v| v as i32))
+                    .cast(&DataType::Date)
+                    .unwrap(),
+            ),
+            (
+                "Enum".into(),
+                Series::new("k".into(), ["10", "z", "a", "10", "9", "z", "a", "9"])
+                    .cast(&enum_dtype)
+                    .unwrap(),
+            ),
+            (
+                "Categorical".into(),
+                Series::new("k".into(), ["b", "10", "a", "9", "b", "c", "10", "a"])
+                    .cast(&DataType::from_categories(Categories::global()))
+                    .unwrap(),
+            ),
+        ];
+        for unit in [
+            TimeUnit::Milliseconds,
+            TimeUnit::Microseconds,
+            TimeUnit::Nanoseconds,
+        ] {
+            cases.push((
+                format!("Datetime({unit:?})"),
+                Series::new("k".into(), ints)
+                    .cast(&DataType::Datetime(unit, None))
+                    .unwrap(),
+            ));
+        }
+        for (label, series) in cases {
+            let df = frame_of(series);
+            let Ok(expected) = extract_time_keys_via_row_strings(&df, "k") else {
+                panic!("{label}: row string path failed");
+            };
+            let Ok(actual) = extract_time_keys(&df, "k") else {
+                panic!("{label}: extract_time_keys failed");
+            };
+            assert_eq!(actual, expected, "{label}");
+            assert_eq!(actual.periods(), expected.periods(), "{label}");
+            assert_eq!(actual.len(), expected.len(), "{label}");
+        }
     }
 
     /// 値の範囲・書式・チャンクに関する境界のdtype別ケース: `Enum`、`Float16`、`i64`の範囲外の

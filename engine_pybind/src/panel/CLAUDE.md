@@ -147,3 +147,7 @@ FEの1段階目（データ抽出・pyclass定義）と同じ段階（`REOptions
 `panel-common.md`2章のフィールドをすべて含む（`f_statistic`/`f_p_value`を含む——これはフィールド設計時にengine側が未対応と判明し前倒しで実装した、`engine/src/panel/CLAUDE.md`参照）。`fixed_effects()`メソッド（上記「`fixed_effects()`の実装」参照）も実装済みで、IV/Logit/Probitと同じ3段階の実装フェーズはこれで完結した。
 
 `n_entities`は`FeInput::n_entities()`（`FeEstimator::input()`経由）から取得する。当初はengine側にgetterが無く`engine_pybind`が`entity`列を`HashSet`で数え直していたが、エンティティの整数コード化に伴いengine側にgetterを追加して数え直しをやめた。
+
+## entity・time・クラスター列は行ごとの`String`を作らずにコード化する
+
+`build_fe_input`/`build_re_input`は、entityを`extract_entity_groups`、`time`/`dk_time`を`extract_time_keys`、クラスター列を`extract_cluster_groups`（いずれも`shared/column_extraction.rs`）で取り出す。列の値そのもの（文字列・整数の内部表現・浮動小数のビット列）でハッシュして仮コードを振り、ユニークな値ごとにだけ文字列表現を作って`engine`（`GroupCodes::from_factorized*`・`TimeKeys::*_factorized`）に渡す。辞書順・同じ文字列になる値のまとめ方・時点の値の順序づけは`engine`の規則で、`engine_pybind`は値の等しさの判定と、時点の順序づけに使う代表値（整数・浮動小数）の取り出しだけを担う。旧経路（行ごとに`String`を作る`extract_group_key_column`等）は、同じコードになることを確かめるテストのオラクルとして`#[cfg(test)]`で残している。

@@ -152,7 +152,7 @@
 //!
 //! - **比較は常に1-way**: `X̃`はRE本体と同じ個体効果構造の1-way FE
 //!   （`swamy_arora_variance_components`が返す`FeEstimator`）のwithin変換から得る。
-//!   `input.time()`の有無は結果に影響しない（`time`はDriscoll-Kraay HACの時系列順序専用）。
+//!   `input.time_keys()`の有無は結果に影響しない（`time`はDriscoll-Kraay HACの時系列順序専用）。
 //!   2-wayのハウスマン検定は2-way REの実装時に改めて検討する。
 //! - **`cov_type`連動**: 補助回帰のWald検定の共分散はRE本体の`cov_type`に対応させる
 //!   （既定の`cluster`ならcluster-robust版のロバストHausman検定、`classical`なら
@@ -196,8 +196,8 @@ use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use crate::panel::common::{
     PanelDimension, PanelError, PanelHcVariant, TimeKeys, panel_classical_cov_params,
     panel_cluster_cov_params, panel_driscoll_kraay_cov_params, panel_hc_cov_params,
-    quasi_demean_column, resolve_dk_bandwidth, validate_dk_periods_cover_tested_coefficients,
-    xtx_inverse,
+    quasi_demean_column, require_entity_keys, resolve_dk_bandwidth,
+    validate_dk_periods_cover_tested_coefficients, xtx_inverse,
 };
 use crate::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput};
 use crate::shared::covariance::leverages;
@@ -220,9 +220,7 @@ pub struct ReInput {
     x: Vec<Vec<f64>>,
     /// 説明変数名。`x`の列と対応する。
     x_names: Vec<String>,
-    /// 各行のエンティティID（長さ`n`）。
-    entity: Vec<String>,
-    /// 各行の時点ラベルと、その時間順のコード（長さ`n`）。RE自身の準偏差変換では使わない
+    /// 各行の時点コード（時間順、長さ`n`）。RE自身の準偏差変換では使わない
     /// （モジュールdoc参照）が、DKの時系列順序と内部FE呼び出し（ハウスマン検定用）に使う。
     time: Option<TimeKeys>,
     /// 被説明変数名。
@@ -285,6 +283,33 @@ impl ReInput {
         time: Option<TimeKeys>,
         dep_var_name: String,
     ) -> Result<Self, PanelError> {
+        Self::from_group_codes(
+            y,
+            x_columns,
+            x_names,
+            GroupCodes::from_labels(entity),
+            time,
+            dep_var_name,
+        )
+    }
+
+    /// `from_columns_ordered`の`entity`を、コード化済みの`GroupCodes`で受け取る版
+    /// （`FeInput::from_group_codes`と同じ。`engine_pybind`が使う）。
+    ///
+    /// # Errors
+    /// `from_columns`と同じ。加えて、`entity`がキー無しのコードの場合は`PanelError::Common`
+    /// （`CommonError::ComputationFailed`、呼び出し側の実装誤り）。
+    ///
+    /// # パニックについて
+    /// `from_columns`と同じ。
+    pub fn from_group_codes(
+        y: &[f64],
+        x_columns: &[Vec<f64>],
+        x_names: Vec<String>,
+        entity: GroupCodes,
+        time: Option<TimeKeys>,
+        dep_var_name: String,
+    ) -> Result<Self, PanelError> {
         debug_assert_eq!(
             x_columns.len(),
             x_names.len(),
@@ -301,11 +326,11 @@ impl ReInput {
             }
         }
 
-        if entity.len() != y.len() {
+        if entity.nobs() != y.len() {
             return Err(PanelError::IdentifierDimensionMismatch {
                 dimension: PanelDimension::Entity,
                 y_rows: y.len(),
-                other_rows: entity.len(),
+                other_rows: entity.nobs(),
             });
         }
 
@@ -318,15 +343,15 @@ impl ReInput {
                 other_rows: time.len(),
             });
         }
+        require_entity_keys(&entity)?;
 
         Ok(Self {
             y: y.to_vec(),
             x: x_columns.to_vec(),
             x_names,
-            entity: entity.to_vec(),
             time,
             dep_var_name,
-            entity_codes: GroupCodes::from_labels(entity),
+            entity_codes: entity,
         })
     }
 
@@ -360,14 +385,14 @@ impl ReInput {
         &self.x_names
     }
 
-    /// 各行のエンティティID（長さ`n`）。
-    pub fn entity(&self) -> &[String] {
-        &self.entity
+    /// ユニークなエンティティのラベル（コード順＝辞書順）。
+    pub fn entity_labels(&self) -> &[String] {
+        self.entity_codes.keys()
     }
 
-    /// 各行の時点ID（長さ`n`）。未指定なら`None`。
-    pub fn time(&self) -> Option<&[String]> {
-        self.time.as_ref().map(TimeKeys::ids)
+    /// 時点のラベルと時間順のコード。未指定なら`None`。
+    pub fn time_keys(&self) -> Option<&TimeKeys> {
+        self.time.as_ref()
     }
 
     /// 被説明変数名。
@@ -424,7 +449,7 @@ fn entity_means(y: &[f64], x: &[Vec<f64>], entity: &GroupCodes) -> EntityMeans {
 /// この前提が崩れた場合に、ビット単位で同値という再利用の根拠が黙って壊れないようにする。
 fn debug_assert_within_reuse_contract(fe: &FeEstimator) {
     debug_assert_eq!(fe.effects(), FeEffects::OneWay);
-    debug_assert!(fe.input().time().is_none());
+    debug_assert!(fe.input().time_keys().is_none());
     debug_assert!(!fe.within_input().has_intercept());
     debug_assert_eq!(fe.within_input().k(), fe.input().x().len());
 }
@@ -1005,11 +1030,11 @@ impl ReEstimator {
     ///   単純に`df_model`（変換済み定数列を含む設計行列の全列数）をそのまま渡せば
     ///   よい——`OlsEstimator`自身の`cluster_cov_params`と数式的に同一になる
     ///   （`plm::vcovHC(type="sss")`と同じ式であることを確認済み）。`groups`が`None`
-    ///   なら`input.entity()`を使う。
+    ///   なら`input`のエンティティ列（`ReInput`が構築時にコード化したもの）を使う。
     /// - **HAC（Driscoll-Kraay）**: **【fixestの`vcov="DK"`に変更】**
     ///   `linearmodels`の`cov_type="kernel"`から、FEと同じfixest型の補正
     ///   （`K=df_model`・`G`相当は`t_periods`）に変更した。時系列順序は
-    ///   `input.time()`を使う（`None`なら`PanelError::DkRequiresTime`）。
+    ///   `input.time_keys()`を使う（`None`なら`PanelError::DkRequiresTime`）。
     ///
     /// **t値・p値・信頼区間の自由度（`df_inference`）は`cov_type=Cluster`のとき
     /// `G-1`、`Dk`のとき`t_periods-1`に切り替える**（fixestの`ssc()`既定
@@ -1461,11 +1486,69 @@ mod tests {
         assert_eq!(input.y(), &y);
         assert_eq!(input.x(), &[x1]);
         assert_eq!(input.x_names(), &["x1".to_string()]);
-        assert_eq!(input.entity(), entity.as_slice());
-        assert_eq!(input.time(), None);
+        // ユニークなラベルを辞書順（コード順）に並べたもの。
+        assert_eq!(input.entity_labels(), ["a", "b"]);
+        assert_eq!(input.time_keys(), None);
         assert_eq!(input.dep_var_name(), "y");
         assert_eq!(input.nobs(), 4);
         assert_eq!(input.n_entities(), 2);
+    }
+
+    #[test]
+    fn from_group_codes_matches_from_columns_and_requires_entity_keys() {
+        let y = [1.0, 2.0, 3.0, 4.0];
+        let x = vec![vec![1.0, 2.0, 3.0, 5.0]];
+        let entity = strings(&["a", "a", "b", "b"]);
+
+        let from_strings = ReInput::from_columns(
+            &y,
+            &x,
+            vec!["x1".to_string()],
+            &entity,
+            None,
+            "y".to_string(),
+        )
+        .unwrap();
+        let from_codes = ReInput::from_group_codes(
+            &y,
+            &x,
+            vec!["x1".to_string()],
+            GroupCodes::from_factorized(vec![1, 1, 0, 0], &["b", "a"]).unwrap(),
+            None,
+            "y".to_string(),
+        )
+        .unwrap();
+        assert_eq!(from_codes.entity_labels(), from_strings.entity_labels());
+        assert_eq!(from_codes.n_entities(), 2);
+
+        // キー無しのコードは固定効果のキーが作れないため受け付けない。
+        let keyless = GroupCodes::from_labels_without_keys(&entity);
+        assert!(matches!(
+            ReInput::from_group_codes(
+                &y,
+                &x,
+                vec!["x1".to_string()],
+                keyless,
+                None,
+                "y".to_string()
+            ),
+            Err(PanelError::Common(CommonError::ComputationFailed(_)))
+        ));
+        // 行数の食い違いは従来どおり`IdentifierDimensionMismatch`。
+        assert!(matches!(
+            ReInput::from_group_codes(
+                &y,
+                &x,
+                vec!["x1".to_string()],
+                GroupCodes::from_labels(&strings(&["a", "b"])),
+                None,
+                "y".to_string()
+            ),
+            Err(PanelError::IdentifierDimensionMismatch {
+                dimension: PanelDimension::Entity,
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -1484,7 +1567,12 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(input.time(), Some(time.as_slice()));
+        // 時点は`lexicographic`（ラベルの辞書順）。行数と、ユニークなラベルの時間順を確認する。
+        let Some(time_keys) = input.time_keys() else {
+            panic!("time keys must be set");
+        };
+        assert_eq!(time_keys.len(), 4);
+        assert_eq!(time_keys.periods(), ["2020", "2021"]);
     }
 
     #[test]
@@ -1568,7 +1656,7 @@ mod tests {
             ReInput::from_columns(&[], &[], vec![], &[], Some(&[]), "y".to_string()).unwrap();
 
         assert_eq!(input.nobs(), 0);
-        assert_eq!(input.time(), Some([].as_slice()));
+        assert_eq!(input.time_keys().map(TimeKeys::len), Some(0));
     }
 
     #[test]
@@ -2679,11 +2767,11 @@ mod tests {
         let re =
             ReEstimator::fit(hausman_two_slope_input(None), ReCovType::Classical, 0.95).unwrap();
         let input = re.input();
-        let fe_input = FeInput::from_columns(
+        let fe_input = FeInput::from_group_codes(
             input.y(),
             input.x(),
             input.x_names().to_vec(),
-            input.entity(),
+            input.entity_codes().clone(),
             None,
             "y".into(),
         )
@@ -2709,7 +2797,7 @@ mod tests {
         let input = re.input();
         let (sigma2_eps, sigma2_u, ..) = swamy_arora_variance_components(input, 0.95).unwrap();
         let (_, y_star, x_star) = quasi_demean_transform(input, sigma2_eps, sigma2_u);
-        let entity = GroupCodes::from_labels(input.entity());
+        let entity = input.entity_codes().clone();
         let x_within = quasi_demean_column(&input.x()[0], &entity, &vec![1.0; entity.n_groups()]);
 
         let aux_input = OlsInput::from_columns(
@@ -2752,7 +2840,7 @@ mod tests {
     fn manual_hausman_aux(input: &ReInput, cov_type: CovType) -> OlsEstimator {
         let (sigma2_eps, sigma2_u, ..) = swamy_arora_variance_components(input, 0.95).unwrap();
         let (_, y_star, x_star) = quasi_demean_transform(input, sigma2_eps, sigma2_u);
-        let entity = GroupCodes::from_labels(input.entity());
+        let entity = input.entity_codes().clone();
         let theta = vec![1.0; entity.n_groups()];
         let mut columns = x_star;
         for col in input.x() {

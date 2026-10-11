@@ -384,7 +384,8 @@ use crate::linear::ols::OlsInput;
 use crate::panel::common::{
     PanelDimension, PanelError, PanelHcVariant, TimeKeys, panel_classical_cov_params,
     panel_cluster_cov_params, panel_driscoll_kraay_cov_params, panel_hc_cov_params,
-    quasi_demean_column, resolve_dk_bandwidth, validate_dk_periods_cover_tested_coefficients,
+    quasi_demean_column, require_entity_keys, resolve_dk_bandwidth,
+    validate_dk_periods_cover_tested_coefficients,
 };
 use crate::panel::re::ReInput;
 use crate::shared::covariance::leverages;
@@ -409,15 +410,13 @@ pub struct FeInput {
     x: Vec<Vec<f64>>,
     /// 説明変数名。`x`の列と対応する。
     x_names: Vec<String>,
-    /// 各行のエンティティID（長さ`n`）。
-    entity: Vec<String>,
-    /// 各行の時点ラベルと、その時間順のコード（長さ`n`）。2-way FE（entity + time FE）を
+    /// 各行の時点コード（時間順、長さ`n`）。2-way FE（entity + time FE）を
     /// 指定しない場合は`None`（`panel-common.md`1.1節: `time`は`FEOptions`内の条件付き
     /// 必須オプション）。
     time: Option<TimeKeys>,
     /// 被説明変数名。
     dep_var_name: String,
-    /// `entity`の整数コード（構築時に一度だけ作る、`GroupCodes`のdocコメント参照）。
+    /// `entity`の整数コード（キー付き。構築時に一度だけ作る、`GroupCodes`のdocコメント参照）。
     entity_codes: GroupCodes,
 }
 
@@ -426,8 +425,8 @@ fn validate_input_dimensions(
     y: &[f64],
     x_columns: &[Vec<f64>],
     x_names: &[String],
-    entity: &[String],
-    time: Option<&[String]>,
+    entity_len: usize,
+    time_len: Option<usize>,
 ) -> Result<(), PanelError> {
     debug_assert_eq!(
         x_columns.len(),
@@ -445,21 +444,21 @@ fn validate_input_dimensions(
         }
     }
 
-    if entity.len() != y.len() {
+    if entity_len != y.len() {
         return Err(PanelError::IdentifierDimensionMismatch {
             dimension: PanelDimension::Entity,
             y_rows: y.len(),
-            other_rows: entity.len(),
+            other_rows: entity_len,
         });
     }
 
-    if let Some(time) = time
-        && time.len() != y.len()
+    if let Some(time_len) = time_len
+        && time_len != y.len()
     {
         return Err(PanelError::IdentifierDimensionMismatch {
             dimension: PanelDimension::Time,
             y_rows: y.len(),
-            other_rows: time.len(),
+            other_rows: time_len,
         });
     }
     Ok(())
@@ -516,22 +515,50 @@ impl FeInput {
         time: Option<TimeKeys>,
         dep_var_name: String,
     ) -> Result<Self, PanelError> {
+        Self::from_group_codes(
+            y,
+            x_columns,
+            x_names,
+            GroupCodes::from_labels(entity),
+            time,
+            dep_var_name,
+        )
+    }
+
+    /// `from_columns_ordered`の`entity`を、コード化済みの`GroupCodes`で受け取る版。
+    /// `engine_pybind`は、行ごとの`String`を作らずに`GroupCodes::from_factorized`で作ったコードを
+    /// 渡す。`from_columns`/`from_columns_ordered`は、この関数にラベルから作ったコードを渡す
+    /// 簡便版。
+    ///
+    /// `entity`はキー付き（`from_labels`/`from_factorized`）であること。固定効果のキーに使う。
+    ///
+    /// # Errors
+    /// `from_columns`と同じ。加えて、`entity`がキー無しのコードの場合は`PanelError::Common`
+    /// （`CommonError::ComputationFailed`、呼び出し側の実装誤り）。
+    pub fn from_group_codes(
+        y: &[f64],
+        x_columns: &[Vec<f64>],
+        x_names: Vec<String>,
+        entity: GroupCodes,
+        time: Option<TimeKeys>,
+        dep_var_name: String,
+    ) -> Result<Self, PanelError> {
         validate_input_dimensions(
             y,
             x_columns,
             &x_names,
-            entity,
-            time.as_ref().map(TimeKeys::ids),
+            entity.nobs(),
+            time.as_ref().map(TimeKeys::len),
         )?;
+        require_entity_keys(&entity)?;
 
         Ok(Self {
             y: y.to_vec(),
             x: x_columns.to_vec(),
             x_names,
-            entity: entity.to_vec(),
             time,
             dep_var_name,
-            entity_codes: GroupCodes::from_labels(entity),
+            entity_codes: entity,
         })
     }
 
@@ -545,7 +572,6 @@ impl FeInput {
             y: input.y().to_vec(),
             x: input.x().to_vec(),
             x_names: input.x_names().to_vec(),
-            entity: input.entity().to_vec(),
             time: None,
             dep_var_name: input.dep_var_name().to_string(),
             entity_codes: input.entity_codes().clone(),
@@ -582,14 +608,14 @@ impl FeInput {
         &self.x_names
     }
 
-    /// 各行のエンティティID（長さ`n`）。
-    pub fn entity(&self) -> &[String] {
-        &self.entity
+    /// ユニークなエンティティのラベル（コード順＝辞書順）。
+    pub fn entity_labels(&self) -> &[String] {
+        self.entity_codes.keys()
     }
 
-    /// 各行の時点ID（長さ`n`）。1-way FEでは`None`。
-    pub fn time(&self) -> Option<&[String]> {
-        self.time.as_ref().map(TimeKeys::ids)
+    /// 時点のラベルと時間順のコード。1-way FEでは`None`。
+    pub fn time_keys(&self) -> Option<&TimeKeys> {
+        self.time.as_ref()
     }
 
     /// 被説明変数名。
@@ -659,8 +685,8 @@ pub enum FeCovType {
     /// 「Driscoll-Kraay型パネルHAC対応」参照）。
     ///
     /// `time`: DK計算の時点ラベルと時間順のコード（必須）。2-way FEの固定効果の時間次元
-    /// （`input.time()`）とは独立で、DKカーネルを適用する時間粒度を呼び出し側が明示する
-    /// （`engine_pybind`の`FEOptions.dk_time`が配線される）。`input.time()`へのフォール
+    /// （`input.time_keys()`）とは独立で、DKカーネルを適用する時間粒度を呼び出し側が明示する
+    /// （`engine_pybind`の`FEOptions.dk_time`が配線される）。`input.time_keys()`へのフォール
     /// バックはしない——どの列が時点かを暗黙に借用すると、意図と違う列が選ばれても気づけない
     /// ため。
     Dk {
@@ -742,7 +768,7 @@ impl FeEstimator {
     /// （切片なし。理由はモジュールdoc参照）→ `cov_type`別の共分散行列の計算 → 自由度調整後の統計量の再計算。
     ///
     /// # Errors
-    /// - `effects=TwoWay`で`input.time()`が`None`の場合は`PanelError::TwoWayRequiresTime`
+    /// - `effects=TwoWay`で`input.time_keys()`が`None`の場合は`PanelError::TwoWayRequiresTime`
     /// - singletonグループが見つかった場合は`PanelError::SingletonGroup`
     /// - `effects=TwoWay`でバランスパネルでない場合は`PanelError::UnbalancedPanelForTwoWay`
     /// - パネル自由度調整後の残差自由度（`df_resid`）が正にならない場合は
@@ -944,15 +970,14 @@ impl FeEstimator {
                 bandwidth,
                 time: dk_time,
             } => {
-                let time: &[String] = dk_time.ids();
                 // `FeInput::from_columns`は`entity`・`y`等との長さを検証済みだが、`dk_time`
                 // （公開APIの`FeCovType::Dk.time`）は未検証のため、ここで検証する。長さが
                 // 合わないと下の退化判定が`zip`で黙って切り詰められ、DK計算は範囲外アクセスになる。
-                if time.len() != n {
+                if dk_time.len() != n {
                     return Err(PanelError::IdentifierDimensionMismatch {
                         dimension: PanelDimension::Time,
                         y_rows: n,
-                        other_rows: time.len(),
+                        other_rows: dk_time.len(),
                     });
                 }
                 let time_codes = dk_time.codes();
@@ -1540,7 +1565,7 @@ pub fn within_transform_one_way(input: &FeInput) -> (Vec<f64>, Vec<Vec<f64>>) {
 /// 戻り値は`(y_transformed, x_transformed)`（元の列順を保持）。
 ///
 /// # Errors
-/// - `input.time()`が`None`の場合は`PanelError::TwoWayRequiresTime`
+/// - `input.time_keys()`が`None`の場合は`PanelError::TwoWayRequiresTime`
 /// - バランスパネルでない場合は`PanelError::UnbalancedPanelForTwoWay`
 pub fn within_transform_two_way(input: &FeInput) -> Result<(Vec<f64>, Vec<Vec<f64>>), PanelError> {
     let time_codes = input.time_codes().ok_or(PanelError::TwoWayRequiresTime)?;
@@ -1586,7 +1611,7 @@ pub fn validate_no_singleton_groups_one_way(input: &FeInput) -> Result<(), Panel
 /// 恣意的な優先順位）。
 ///
 /// # Errors
-/// - `input.time()`が`None`の場合は`PanelError::TwoWayRequiresTime`
+/// - `input.time_keys()`が`None`の場合は`PanelError::TwoWayRequiresTime`
 /// - entityまたはtimeに観測数1のグループが見つかった場合は`PanelError::SingletonGroup`
 ///   （該当する`dimension`を含む）
 pub fn validate_no_singleton_groups_two_way(input: &FeInput) -> Result<(), PanelError> {
@@ -1834,11 +1859,69 @@ mod tests {
         assert_eq!(input.y(), &y);
         assert_eq!(input.x(), &[x1]);
         assert_eq!(input.x_names(), &["x1".to_string()]);
-        assert_eq!(input.entity(), entity.as_slice());
-        assert_eq!(input.time(), None);
+        // ユニークなラベルを辞書順（コード順）に並べたもの。
+        assert_eq!(input.entity_labels(), ["a", "b"]);
+        assert_eq!(input.time_keys(), None);
         assert_eq!(input.dep_var_name(), "y");
         assert_eq!(input.nobs(), 4);
         assert_eq!(input.n_entities(), 2);
+    }
+
+    #[test]
+    fn from_group_codes_matches_from_columns_and_requires_entity_keys() {
+        let y = [1.0, 2.0, 3.0, 4.0];
+        let x = vec![vec![1.0, 2.0, 3.0, 5.0]];
+        let entity = strings(&["a", "a", "b", "b"]);
+
+        let from_strings = FeInput::from_columns(
+            &y,
+            &x,
+            vec!["x1".to_string()],
+            &entity,
+            None,
+            "y".to_string(),
+        )
+        .unwrap();
+        let from_codes = FeInput::from_group_codes(
+            &y,
+            &x,
+            vec!["x1".to_string()],
+            GroupCodes::from_factorized(vec![1, 1, 0, 0], &["b", "a"]).unwrap(),
+            None,
+            "y".to_string(),
+        )
+        .unwrap();
+        assert_eq!(from_codes.entity_labels(), from_strings.entity_labels());
+        assert_eq!(from_codes.n_entities(), 2);
+
+        // キー無しのコードは固定効果のキーが作れないため受け付けない。
+        let keyless = GroupCodes::from_labels_without_keys(&entity);
+        assert!(matches!(
+            FeInput::from_group_codes(
+                &y,
+                &x,
+                vec!["x1".to_string()],
+                keyless,
+                None,
+                "y".to_string()
+            ),
+            Err(PanelError::Common(CommonError::ComputationFailed(_)))
+        ));
+        // 行数の食い違いは従来どおり`IdentifierDimensionMismatch`。
+        assert!(matches!(
+            FeInput::from_group_codes(
+                &y,
+                &x,
+                vec!["x1".to_string()],
+                GroupCodes::from_labels(&strings(&["a", "b"])),
+                None,
+                "y".to_string()
+            ),
+            Err(PanelError::IdentifierDimensionMismatch {
+                dimension: PanelDimension::Entity,
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -1857,7 +1940,12 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(input.time(), Some(time.as_slice()));
+        // 時点は`lexicographic`（ラベルの辞書順）。行数と、ユニークなラベルの時間順を確認する。
+        let Some(time_keys) = input.time_keys() else {
+            panic!("time keys must be set");
+        };
+        assert_eq!(time_keys.len(), 4);
+        assert_eq!(time_keys.periods(), ["2020", "2021"]);
     }
 
     #[test]
@@ -1942,7 +2030,7 @@ mod tests {
             FeInput::from_columns(&[], &[], vec![], &[], Some(&[]), "y".to_string()).unwrap();
 
         assert_eq!(input.nobs(), 0);
-        assert_eq!(input.time(), Some([].as_slice()));
+        assert_eq!(input.time_keys().map(TimeKeys::len), Some(0));
     }
 
     #[test]
@@ -4051,10 +4139,10 @@ mod tests {
 
     /// `input`が持つ時点（ラベルの辞書順）を、DKの時点列としてそのまま渡す。
     fn dk_time_from(input: &FeInput) -> TimeKeys {
-        let Some(time) = input.time() else {
+        let Some(time) = input.time_keys() else {
             panic!("test input must have a time column");
         };
-        TimeKeys::lexicographic(time.to_vec())
+        time.clone()
     }
 
     fn dk_bandwidth_zero(input: &FeInput) -> FeCovType {

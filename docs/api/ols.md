@@ -14,4 +14,6 @@
 
 ::: econometricsmodels.WhiteTestResult
 
+::: econometricsmodels.BreuschPaganTestResult
+
 ::: econometricsmodels.BreuschGodfreyTestResult

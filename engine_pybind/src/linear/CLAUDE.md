@@ -20,14 +20,20 @@
 合わせて`engine::linear::diagnostics::white_test`に渡す。`training_data`が`None`（`IVResult.first_stage()`
 由来）なら`augment(new_data=None)`と同じく`ValidationError`。`has_intercept`は`param_names[0] == "const"`で
 推定せず保持フィールドを使う（`include_intercept=false`で`x`に`"const"`列がありうるため）。LM/Fの両方を
-engineが計算し、`statistic`引数（`WhiteStatistic`、大文字小文字を区別しない）で`WhiteTestOutput`の
-フィールドを選ぶだけ。計算ロジックは持たない。
+engineが計算し、`statistic`引数（`StatisticVersion`、大文字小文字を区別しない）で`WhiteTestOutput`の
+フィールドを選ぶだけ（`select_statistic`はWhite・BPで共通）。計算ロジックは持たない。
 
 `breusch_godfrey_test(time, nlags, statistic)`も同じ配線（`x`と残差に加え、時間列を
 `extract_time_order_ranks`で順位にして`engine`へ渡す。`hac_time`と同じく同値・欠損値・NaNは
 `ValidationError`）。引数は型検査を厳密にするため`&Bound<PyAny>`で受け、`extract_strict_text`/
 `extract_strict_int`（`bool`・`float`は`TypeError`）を通す。`nlags`は`i64`のまま`engine`に渡し、
 `nlags < 1`の検査と巨大値の飽和は`engine`側（`InvalidNlags`・観測数不足）。
+`breusch_pagan_test(variables, statistic)`も同じ配線で、`variables`は`Option<&Bound<PyAny>>`として
+`extract_column_list`（`list`以外・`str`以外の要素は`TypeError`）で受け、`None`なら
+`x_column_names`でモデルの`x`を使う。空リスト・重複は`validate_x_non_empty`/
+`validate_no_duplicate_within_role`（ロール名`variables`）で`ValidationError`。モデルの`x`や`y`との
+重複は検査しない（モデル外の列・`y`列も`Z`にできる仕様）。`training_data`の有無は`variables`の
+型検査より後（型の誤りは学習データが無い結果でも`TypeError`）。
 
 ## DataFrameを構築して返す（`augment()`）
 

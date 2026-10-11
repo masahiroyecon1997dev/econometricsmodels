@@ -23,6 +23,7 @@
 - **`f64::max`/`f64::min`はNaNを無視する**（`f64::NAN.max(0.0) == 0.0`）。`R²`を`max(0.0)`で下側だけ丸めるときは、丸める前に`is_finite()`を判定する。順序を入れ替えると非有限の`R²`が統計量0.0として静かに返る（`white_rejects_non_finite_residuals_instead_of_masking_nan`で固定）。
 - **補助回帰の重複判定で、定数の説明変数（`include_intercept=false`に入れた定数列`c`）を含む項は値の比較を待たず除く**: `c*x_k`は`c != 1`だと`x_k`と数値的に同一にならず、重複判定だけでは見逃してランク落ちになる（`white_drops_terms_that_involve_a_constant_other_than_one`）。
 
+- **Breusch-Pagan検定（`diagnostics.rs`）はWhite検定と補助回帰以降を共有する**: `white_test`・`breusch_pagan_test`は補助回帰の候補項を作って`select_aux_terms`（定数・同一列の除外）→`squared_residual_aux_test`（標準化・`OlsEstimator::fit`・`R²`検証・LM/F・p値）に渡す。違いは候補項だけ（White: `x`・二乗・交差項、BP: 利用者が選んだ`z`そのもの。BPには「定数の変数を含む項」の除外は要らないので`|_| false`）。結果型は共通の`AuxRegressionTest`（`WhiteTest`・`BreuschPaganTest`は別名）。エラーメッセージの接頭辞は検定名を引数にして使い分ける。元のBreusch-Pagan（`ESS/2`、正規性を仮定）は扱わずKoenker版（`n·R²`）のみ。
 - **Breusch-Godfrey検定（`diagnostics.rs`）は`OlsEstimator::fit`を使わず、列ノルムでスケールした列ピボットQRで補助回帰の残差二乗和だけを求める**: 必要なのは`SSR_u`だけで、`fit`の共分散・F検定は不要。White検定と違い列を標準化（中心化）しないのは、補助回帰が元のモデルの`X`をそのまま使う定義（R `bgtest`・Greene。切片なしのモデルでは定数を足さない）で、切片なしのモデルは中心化すると列空間が変わるため。`SSR_u`は列の正のスケールでは変わらないので列ノルムのスケールだけで足りる。Fの分子が`Σû² - SSR_u`と書けるのは`û`が`X`と直交するOLS残差のとき限定（WLS等の非直交な残差を渡すと過大になる）。サンプル前期間のラグは0埋め（statsmodels・R `bgtest`の既定。statsmodelsは切片なしのモデルでだけ補助回帰に定数を足すため定義が異なる）。完全適合の判定は丸めで厳密な0にならないため`SSR_u <= k_aux·ε·Σû²`の相対判定にする。補助回帰の行列は`allocate_aux_matrix`で`try_reserve`してから埋め（サイズのオーバーフローと確保失敗を`ComputationFailed`にする。QRの内部複製分も試し確保する）、列のスケールはその場で書き換えて複製を増やさない。`nlags`に割合・固定値の上限を置かないのは統計的に正当化できないため（上限は`n > k + nlags`のみ）。
 
 ## 全手法共通ルールの再掲（見落とし防止）

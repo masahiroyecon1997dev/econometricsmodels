@@ -394,11 +394,58 @@ faerのグローバル並列度は`engine::parallelism::ensure_serial()`で常�
   異常終了させず`ComputationError`（`nlags`を小さくするよう促す）にする。ただしLinuxのメモリの
   オーバーコミットにより、確保には成功しても実際に使うと終了させられる場合は検知できない。
 
+### 3.11 `breusch_pagan_test()`（事後診断）
+
+- `OLSResults.breusch_pagan_test(variables: list[str] | None = None, statistic: Literal["lm", "f"] = "lm")
+  -> BreuschPaganTestResult`。`fit()`では計算しない事後診断（`docs/spec/inference-conventions.md`
+  6章）。結果型は`DiagnosticResult`を継承した`BreuschPaganTestResult`（追加フィールドは
+  `WhiteTestResult`と同じ`aux_terms`・`dropped_terms`）。`cov_type`には依存しない。
+- **定義**: Koenkerの標準化版（`LM = n·R²`、`R²`は`û²`を定数と`variables`の列に回帰した補助回帰の
+  決定係数、帰無分布`χ²(q)`）。F版は補助回帰の全傾きがゼロという古典的なF検定`F(q, n - q - 1)`。
+  `q`は除外後の`variables`の列数。元のBreusch-Pagan（1979）の`ESS/2`版は誤差の正規性を仮定するため
+  扱わない（R `bptest(studentize = TRUE)`・statsmodels `het_breuschpagan(robust = True)`の既定と同じ版）。
+  後から`studentize`引数を足す場合は後方互換に追加できる。
+- **`variables`**: 不均一分散の原因と疑う変数の列名のリスト（`x`と同じくlist渡し、式は使わない）。
+  既定（`None`）はモデルの説明変数。**モデルに入っていない列や`y`列も指定できる**（拒否しない。
+  BP検定の本質は`Z`を利用者が選ぶことで、R `varformula`・statsmodels `exog_het`も同じ）。型・検査は`x`と
+  同じ（`list`以外・`str`以外の要素は`TypeError`、空リスト・同じ列名の重複・存在しない列・数値として
+  使えないdtype・欠損値/NaN/無限大は`ValidationError`）。ただし`"const"`という列名は拒否しない
+  （`aux_terms`の先頭の定数と紛れるが位置で区別できる）。
+- **補助回帰は常に定数を含める**（`include_intercept=False`でも同じ）。`aux_terms`の先頭は常に`"const"`、
+  項のラベルは列名そのまま。White検定と同じ除外ルール: 定数列と、先に指定した列と数値的に同一の列
+  （相対許容誤差1e-12）を除いて`dropped_terms`に返し、**`df`は除外後の列数（ランクに基づく）**。
+  除くのは定数と完全に同一な列だけで、`2 * x1`のような同一ではない共線列は除かず`ComputationError`
+  （全カテゴリのダミーと定数の組み合わせも同様。`white_test()`と同じ制限）。補助回帰の各列は標準化して
+  から回帰する（`R²`は変わらず、平均の大きい変数でも失敗しない）。
+- **エラー**: `statistic`が不正・観測数が補助回帰の列数（定数込み`q + 1`）以下・`training_data`が無い結果
+  （`IVResults.first_stage()`由来）は`ValidationError`。全ての`variables`が定数、補助回帰が除外後も特異、
+  または`R²`が定義できない（残差の二乗が定数等）場合は`ComputationError`（メッセージに
+  `Breusch-Pagan test`と補助回帰であることを含める）。
+- **実装**: engineの`linear::diagnostics::breusch_pagan_test`（`z`の列・列名・残差を受け取る）。
+  `white_test`と補助回帰以降の処理（項の除外・標準化・統計量・p値、`squared_residual_aux_test`）を共有し、
+  違いは補助回帰の説明変数（`x`・二乗・交差項か、`variables`そのものか）だけ。`engine_pybind`が
+  `training_data`から`variables`（既定は`param_names`から取り出した`x`）の列を再抽出して渡す。
+  p値は`statrs`の`sf`。
+- **リファレンスとの関係**: 主リファレンスはstatsmodels `het_breuschpagan(robust=True)`。`exog_het`に
+  定数が無いと補助回帰に定数を入れないため、常に定数列を足して渡す。**LMのp値の自由度を列数-1で数え
+  列のランクを見ない**ため、定数列・重複列を含む`Z`は除いた後の列を渡す（`reference_variables`）。
+  定数・重複を落とす挙動そのものはR `lmtest::bptest(studentize = TRUE)`（自由度は補助回帰の
+  ランク-1）にそのまま渡して照合する。F版はRに専用関数が無いため同じ補助回帰の`lm`から計算する。
+- **テスト**: `tests/linear/test_ols_breusch_pagan.py`の1ファイルにまとめる（構造・エラーパス・
+  statsmodels凍結フィクスチャ`ols_breusch_pagan.json`・Rクロスチェック`ols_breusch_pagan_crosscheck.json`）。
+  合成データの`BP_SYNTHETIC_CASES`（`Z`＝モデルのxで`WHITE_SYNTHETIC_SCENARIOS`、`baseline`の`Z`をモデルの
+  一部・モデル外の列にしたケース、切片なし、定数列・重複列を含むケース、`baseline_df1`〔n=5で`df_denom = 1`の成功パス。White検定では列数不足〕、誤差分散が`|x1|`に比例する`heteroskedastic`で`Z = |x1|`にして実際に棄却する裾のp値の経路）と、Wooldridge実データ
+  （`hprice1`・`hprice1_log`〔教科書の例8.4の公表値とも照合〕・`wage1`・モデル外の列を`Z`にした
+  `wage1_outside_model`）を、statsmodels・Rの両方と照合する。観測数の境界（`n = q + 1`で拒否、
+  `n = q + 2`で成功し`df_denom = 1`）も確認する。許容誤差は`ols_breusch_pagan_reference`/
+  `ols_breusch_pagan_crosscheck`（`rtol=1e-8`、実測最大相対誤差約2e-12）。p値は相対誤差のみで比較する。
+
 ## 4. 未実装・未対応
 
-- 診断検定のうち、Breusch-Pagan（別メソッドとして順次追加。時間順が必要な検定は
+- 診断検定のうち、RESET・Jarque-Bera等（別メソッドとして順次追加。時間順が必要な検定は
   時間列を必須引数とする、`docs/spec/inference-conventions.md`6章）
-- `white_test()`・`breusch_godfrey_test()`のWLS・IV（`first_stage()`以外）への展開（WLSは残差が重み付きかどうかで意味が変わるため別途検討）
+- `breusch_pagan_test()`の元のBreusch-Pagan（1979）の`ESS/2`版（正規性を仮定する版）。必要になれば`studentize`引数で後方互換に追加できる
+- `white_test()`・`breusch_pagan_test()`・`breusch_godfrey_test()`のWLS・IV（`first_stage()`以外）への展開（WLSは残差が重み付きかどうかで意味が変わるため別途検討）
 - `predict()`の信頼区間・予測区間（点予測のみ対応。追加する場合は別メソッド、3.4節参照）
 - HACの完全なデータ依存バンド幅自動選択（Newey & West 1994）: 参照実装がなく数値照合手段がないため見送り
 - `SingularMatrix`のエラーメッセージを状況に応じて分岐させる（優先度低）

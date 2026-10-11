@@ -98,6 +98,21 @@ white_f = result.white_test("f")
 
 The auxiliary regression always includes a constant, even when the model was fitted with `include_intercept=False`, so the first element of `aux_terms` is always `"const"`. Terms that are constant or numerically identical to an earlier term (the square of a 0/1 dummy equals the dummy itself) are dropped, and the degrees of freedom count the terms that remain. The term labels only describe what was used; they are not a formula and are never parsed. The test does not depend on `cov_type`.
 
+### Diagnostics: Breusch-Pagan test for heteroskedasticity
+
+`OLSResults.breusch_pagan_test(variables=None, statistic="lm")` is another post-estimation test for heteroskedasticity, never computed by `fit()`. It regresses the squared residuals on a constant and the columns you name in `variables`; with no `variables` it uses the model's regressors. Unlike the White test you choose which variables may drive the error variance, and they need not be in the model.
+
+```python
+bp = result.breusch_pagan_test()  # the model's regressors
+print(bp.statistic, bp.p_value, bp.df)
+print(bp.aux_terms)  # ["const", "x1", "x2"]
+
+bp_size = result.breusch_pagan_test(["firm_size"])  # any numeric column
+bp_f = result.breusch_pagan_test(["x1"], "f")  # F version
+```
+
+This is the studentized (Koenker) version, which does not assume normal errors. The auxiliary regression always includes a constant, constant or duplicate columns are dropped (`dropped_terms` shows them), and the test does not depend on `cov_type`.
+
 ### Diagnostics: Breusch-Godfrey test for serial correlation
 
 `OLSResults.breusch_godfrey_test(time, nlags, statistic="lm")` tests for serial correlation of the errors by regressing the residuals on the regressors and their own lags. It is a post-estimation diagnostic, never computed by `fit()`. `time` is the column that gives the time order and `nlags` the number of lags; both are required, because the row order is never assumed to be the time order and there is no natural default lag.

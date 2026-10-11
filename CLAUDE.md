@@ -53,7 +53,7 @@ econometricsmodels/
 │       └── shared/                                 # 複数の系統が共有するコード。error.rs・inference.rs・linear_algebra.rs・parallelism.rs・validation.rs・design_matrix.rs、計算部品（共分散・Wald検定・最小二乗・適合度・クラスターのグループ化）。各系統の common.rs とは別
 │
 ├── engine_pybind/                # PyO3の薄いバインディング層
-│   └── src/lib.rs                # #[pymodule] を定義し engine の関数を呼ぶ
+│   └── src/                      # lib.rs（#[pymodule] を定義し engine の関数を呼ぶ）、系統別ディレクトリ、shared/（列抽出・入力検証・オプション値・例外クラス）
 │
 ├── python_package/econometricsmodels/
 │   ├── __init__.py               # engine_pybindからのインポート、Polarsラッパー
@@ -165,7 +165,7 @@ econometricsmodels/
 - **公開ページ（mkdocs nav掲載・英語）の運用ルール**: 検証と性能は、手法が増えたら公開ページにも反映する。
   - `docs/guide/verification.md`: 手法×リファレンス（主・独立クロスチェック）・比較する統計量・許容誤差（`tests/_tolerances.py`が正）・実データ・単一リファレンスの例外。新手法のテスト作成（`/test-new`）の完了条件に含める。
   - `docs/guide/performance.md`（概要・既知の課題・計測条件は手書き、先頭のサマリー表は生成ブロック）と`docs/guide/performance-results.md`（全表、全体が生成物）: **数値は`benchmark_performance.yml`のCI計測値を正とする**（devcontainerの単発計測は使わない）。リリース準備時（`/release`）にリリースブランチで手動実行し、artifactから`python -m performance.render_docs_results`で再生成する。`README.md`「Performance」節の表・例にも同じ数値を丸めて転記しているため、再生成のたびに合わせて更新する（手順は`/release`）。手法を足すときは`benchmark_performance.yml`のmatrixに加えれば、次回の再生成で自動的にページへ現れる。
-  - `docs/guide/accepted-data.md`: 受け付ける入力（polarsの`DataFrame`のみ）・列の役割ごとに許可するdtype・値の変換と精度・引数の型（`TypeError`との分担）。許可するdtypeの表は`engine_pybind/src/column_extraction.rs`のdtype検査が正で、検査を変更したらこの表を同時に更新する（許可・拒否の方針を各手法specに複製しない）。
+  - `docs/guide/accepted-data.md`: 受け付ける入力（polarsの`DataFrame`のみ）・列の役割ごとに許可するdtype・値の変換と精度・引数の型（`TypeError`との分担）。許可するdtypeの表は`engine_pybind/src/shared/column_extraction.rs`のdtype検査が正で、検査を変更したらこの表を同時に更新する（許可・拒否の方針を各手法specに複製しない）。
   - `docs/guide/validation.md`: バリデーションの設計思想（欠損値を自動除外しない理由等）と、`ValidationError`/`ComputationError`が出る状況の分類。手法固有のチェック（新しい列引数・オプションの検証、手法固有の`ComputationError`）を追加したら、該当する分類表に1行足す。欠損値・共線列等の共通方針は各手法specに複製せず、このページを参照する。
   - 検証・性能の結果表は日本語ノートや`docs/spec/`に重複させない（公開ページが正本）。
 

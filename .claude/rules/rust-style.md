@@ -23,9 +23,9 @@ paths:
   - 系統名・手法の割り当ては上記を初期案とし、実装時に見直してよい（例: Phase2の"Logit"とPhase6の"Logit"は別系統ディレクトリに属するため衝突しない）
 - **手法＝最初は1ファイル**（例: `linear/wls.rs`）。ファイルが肥大化したら`ols/`のようにディレクトリに昇格し、責務ごとに分割する（`linear/ols/`は`mod.rs`（`pub use`の再エクスポートのみ）・`cov_type.rs`・`cov_params.rs`・`input.rs`・`estimator.rs`・`predict.rs`）。型とその`impl`は同じファイルに置き（「型だけ」「関数だけ」で分けない）、`mod tests`も対象コードと同じファイルに置く。公開パスは`mod.rs`の再エクスポートで保ち、呼び出し側を変えない。全手法に最初から複数ファイルを強制しない。
 - **系統内で共有するロジック**は`<系統>/common.rs`に置く。
-- **全手法で共有するロジック**（DataFrameからの列抽出等、統計手法に依存しない処理）は系統ディレクトリの外、クレート直下（例: `column_extraction.rs`）に置く。
+- **全手法で共有するロジック**（DataFrameからの列抽出等、統計手法に依存しない処理）は系統ディレクトリの外、`shared/`（例: `engine_pybind/src/shared/column_extraction.rs`）に置く。
 - **複数の系統が使う計算部品**（共分散行列のmeat/sandwich・Wald検定・最小二乗・適合度統計量・クラスターのグループ化）は`engine/src/shared/`に置く。各系統は他系統の内部ではなく`shared/`に依存する。`shared/`は**何をするコードか**（線形代数・共分散・推論等）で分け、どの系統が使うかでは分けない（利用側は手法の追加で変わり、利用者別にするとファイルの移動が繰り返し起きるため）。系統の`common.rs`（系統内で共有するロジック・エラー型）とは別物で、`shared/`の関数は特定系統のエラー型を返さない（`CommonError`か、`linear_algebra::RankDeficient`のような系統非依存の型を返し、呼び出し側が自系統のエラーへ`map_err`する）。`error.rs`（`CommonError`）・`inference.rs`・`linear_algebra.rs`・`parallelism.rs`・`validation.rs`・`design_matrix.rs`も`shared/`に置く（engineのクレート直下に残るのは`lib.rs`と`shared/`・系統ディレクトリだけ。`engine_pybind`側のクレート直下の共有モジュールは別扱いで、このレイアウトを適用していない）。`shared/mod.rs`では、`engine_pybind`から名前で参照するモジュール（`error`・`parallelism`）のみ`pub mod`、それ以外は`pub(crate) mod`にする。直下への再エクスポート（`pub use shared::error;`等）は置かない。
-- `engine`と`engine_pybind`で同じ系統名・ディレクトリ構成を揃える（`engine/src/linear/ols/` ⇔ `engine_pybind/src/linear/ols.rs`のように対応させる。手法の中のファイル分割はengine側だけでよい）。
+- `engine`と`engine_pybind`で同じ系統名・ディレクトリ構成を揃える（`engine/src/linear/ols/` ⇔ `engine_pybind/src/linear/ols.rs`のように対応させる。手法の中のファイル分割はengine側だけでよい）。共有コードも同じく、両クレートとも`shared/`に置く（`engine/src/shared/` ⇔ `engine_pybind/src/shared/`。中身は別で、engine_pybind側は列抽出・入力検証・オプション値・例外クラス）。
 
 ## 言語方針
 
@@ -60,7 +60,7 @@ Issue番号・内部管理ドキュメント（`docs/planning/specs/`配下の�
 - polars DataFrameの受け取りには**pyo3-polars**（`PyDataFrame`）を使う。
 - **既知のリスク**: `pyo3-polars`の単体リポジトリ（`pola-rs/pyo3-polars`）は2025年7月にアーカイブ済みで、本体`pola-rs/polars`リポジトリに統合されている。crates.io版`pyo3-polars`とpolars本体リポジトリ内のバージョンにズレがあり、`pyo3`自体のバージョンとの組み合わせでビルドが失敗する事例が報告されている（2026年1月時点）。現在は`engine_pybind/Cargo.toml`で`pyo3-polars = "=0.28.0"`（`pyo3 = "=0.29.2"`・`polars = "=0.55.2"`と組み合わせ）に固定して`cargo build`が通ることを確認済み（詳細は同ファイルのコメント参照）。バージョンを上げる際は同様の確認を行うこと。詰まる場合は、`pyo3-polars`を経由せずpolars本体のArrow C Data Interface相当の機能を薄く自前で使う代替案を検討する。
 - `engine`はpolars/PyO3を一切知らない設計を維持する（責務分離の原則通り）。`polars DataFrame → faer::Mat<f64>`の変換は2段階に分かれる。
-  1. `engine_pybind`: polars DataFrameから列ごとに`Vec<f64>`へ抽出する（`column_extraction::extract_f64_column`）。
+  1. `engine_pybind`: polars DataFrameから列ごとに`Vec<f64>`へ抽出する（`shared::column_extraction::extract_f64_column`）。
   2. `engine`: 抽出済みの列（`&[f64]`/`&[Vec<f64>]`）から`faer::Mat`を組み立てる（例: `engine::linear::ols::OlsInput::from_columns`）。切片列の自動追加等、設計行列の組み立てに関わるロジックはここに置く（「計算ロジックをengine_pybindに書かない」原則、`docs/spec/ols-spec.md`参照）。
 - 変換時、列ごとに`Vec<f64>`へ抽出してから`faer::Mat`に詰め直す（2回のコピーが発生する）。より少ないコピー（polarsの`&[f64]`を直接借用してengine側で詰める等）も技術的には可能だが、`engine`の関数シグネチャにライフタイムが入り込み「pure Rustロジック、polars非依存」の独立性が損なわれるため、**採用しない**。このプロジェクトの想定データ規模では、この2回のコピーのコストはQR分解本体（O(n×k²)）に対して無視できるレベルであるため。
 - 欠損値（null）は`.rechunk()` + `null_count()`チェックで検出し、常にエラーとする（`testing-policy.md`・`docs/spec/ols-spec.md`の欠損値方針を参照）。サンプルの自動除外は行わない。
@@ -75,7 +75,7 @@ Issue番号・内部管理ドキュメント（`docs/planning/specs/`配下の�
   - `ValidationError`: 入力・パラメータが不正（次元不一致、欠損値、観測数不足、クラスター数不足、`confidence_level`の範囲外等）。Python側の`ValueError`も継承させ、素の`except ValueError`でも捕まえられるようにする。
   - `ComputationError`: 計算過程で発覚した問題（特異行列等）。Python側の`RuntimeError`を継承させる。
   - メモリ不足等は専用の例外クラスを設けない（Rust/Pythonのメモリ確保失敗は通常このレイヤーで綺麗に変換できるものではないため）。
-- **系統をまたいで同じ意味・同じメッセージのバリアントが複数の系統のエラー型に重複する場合は`engine::shared::error::CommonError`に切り出す**（`DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/`MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`がOLS/WLSとnonlinearで重複していたことから導入）。各系統のエラー型（`LeastSquaresError`/`MleError`等）はthiserrorの`#[error(transparent)] Common(#[from] CommonError)`バリアントでこれを包む。`?`演算子は`#[from]`により自動変換されるため、`CommonError`のバリアントを直接構築する箇所（`return Err(...)`等`?`を経由しない箇所）でのみ`.into()`を明示する。系統固有の追加バリアント（`SingularHessian`等）や、将来「意味は同じだが系統固有の追加フィールドが要る」ケースは`CommonError`に含めず、各系統のエラー型に直接定義してよい（`CommonError`を使うかどうかは系統ごとに選べる）。`engine_pybind`側の変換は`engine_pybind/src/errors.rs`の`common_error_to_pyerr`に集約し、各系統の`*_error_to_pyerr`関数はこれに委譲する。
+- **系統をまたいで同じ意味・同じメッセージのバリアントが複数の系統のエラー型に重複する場合は`engine::shared::error::CommonError`に切り出す**（`DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/`MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`がOLS/WLSとnonlinearで重複していたことから導入）。各系統のエラー型（`LeastSquaresError`/`MleError`等）はthiserrorの`#[error(transparent)] Common(#[from] CommonError)`バリアントでこれを包む。`?`演算子は`#[from]`により自動変換されるため、`CommonError`のバリアントを直接構築する箇所（`return Err(...)`等`?`を経由しない箇所）でのみ`.into()`を明示する。系統固有の追加バリアント（`SingularHessian`等）や、将来「意味は同じだが系統固有の追加フィールドが要る」ケースは`CommonError`に含めず、各系統のエラー型に直接定義してよい（`CommonError`を使うかどうかは系統ごとに選べる）。`engine_pybind`側の変換は`engine_pybind/src/shared/errors.rs`の`common_error_to_pyerr`に集約し、各系統の`*_error_to_pyerr`関数はこれに委譲する。
 
 ## Lint / フォーマット
 

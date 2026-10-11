@@ -14,7 +14,7 @@ Probit対応は当初「python_packageラッパー実装のみ」というスコ
 
 ## バリデーションの責務分担
 
-`x`が空・yやweight等ロール間の重複・x内重複・`include_intercept=true`時の`"const"`列衝突は`engine_pybind/src/validation.rs`に集約済み（`engine_pybind/src/linear/CLAUDE.md`参照。新しい手法でも独自実装せずこれを使う）。抽出した列同士の行数不一致チェックは理論上到達不能と判明し削除済み（同ファイル参照）。Logit/Probit/Tobit固有の追加バリデーションは`cov_type`/`solver`（`nonlinear/common.rs`の`parse_cov_type`/`parse_method`、元はLogit/Probit/Tobit 3ファイルへのバイト単位の完全複製だったがここに集約した）・`at`（`marginal_effects`用、同ファイルの`parse_marginal_effects_at`）の文字列パースのみ（いずれも`ValidationError`）。
+`x`が空・yやweight等ロール間の重複・x内重複・`include_intercept=true`時の`"const"`列衝突は`engine_pybind/src/shared/validation.rs`に集約済み（`engine_pybind/src/linear/CLAUDE.md`参照。新しい手法でも独自実装せずこれを使う）。抽出した列同士の行数不一致チェックは理論上到達不能と判明し削除済み（同ファイル参照）。Logit/Probit/Tobit固有の追加バリデーションは`cov_type`/`solver`（`nonlinear/common.rs`の`parse_cov_type`/`parse_method`、元はLogit/Probit/Tobit 3ファイルへのバイト単位の完全複製だったがここに集約した）・`at`（`marginal_effects`用、同ファイルの`parse_marginal_effects_at`）の文字列パースのみ（いずれも`ValidationError`）。
 
 ## `LogitOptions`/`ProbitOptions`/`TobitOptions`のフィールド重複は意図的
 
@@ -24,7 +24,7 @@ Probit対応は当初「python_packageラッパー実装のみ」というスコ
 
 ## エラー変換
 
-`engine::nonlinear::common::MleError` → `PyErr`は`mle_error_to_pyerr`（`nonlinear/common.rs`）。`MleError::Common`は`crate::errors::common_error_to_pyerr`に委譲する（`linear`系統の`LeastSquaresError`と同じ`CommonError`を共有、`.claude/rules/rust-style.md`参照）。
+`engine::nonlinear::common::MleError` → `PyErr`は`mle_error_to_pyerr`（`nonlinear/common.rs`）。`MleError::Common`は`crate::shared::errors::common_error_to_pyerr`に委譲する（`linear`系統の`LeastSquaresError`と同じ`CommonError`を共有、`.claude/rules/rust-style.md`参照）。
 
 ## `LogitResult`/`ProbitResult`/`TobitResult`の設計: `estimator`フィールド
 

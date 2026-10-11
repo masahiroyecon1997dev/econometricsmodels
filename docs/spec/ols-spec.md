@@ -210,7 +210,7 @@ $$
 
 - Arrowゼロコピーは Python→Rust境界（`pyo3-polars`の`PyDataFrame`）の受け渡しを指す。
   polars DataFrame→`faer::Mat<f64>`は2段階: `engine_pybind`が列ごとに`Vec<f64>`へ抽出
-  （`column_extraction::extract_f64_column`）→`engine`（`OlsInput::from_columns`）が
+  （`shared::column_extraction::extract_f64_column`）→`engine`（`OlsInput::from_columns`）が
   `faer::Mat`を組み立てる。この2回のコピー自体は許容する（QR分解本体のコストに対して無視できる）。
 - `engine`はpolars/PyO3を知らない。列名が要る検証（`y`/`x`重複、`"const"`衝突、`x`空リスト）は
   `engine_pybind`側の責務。`confidence_level`範囲・`cluster`未指定は`engine`側が検知するため

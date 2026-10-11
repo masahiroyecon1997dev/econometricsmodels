@@ -5,7 +5,7 @@
 メッセージの正確な文字列をPythonのフォーマット文字列としてここに集約する。
 
 Rust側のメッセージ文言が正本であり（`engine/src/shared/error.rs`・
-`engine_pybind/src/column_extraction.rs`・`engine_pybind/src/validation.rs`等）、
+`engine_pybind/src/shared/column_extraction.rs`・`engine_pybind/src/shared/validation.rs`等）、
 このファイルはそのコピー。Rust側で文言を変更した場合はこのファイルも同時に
 更新すること（複数系統でメッセージが文字通り重複しているため直書きではなく共通化した）。
 
@@ -41,7 +41,7 @@ def fully_qualified_type_name(obj: object) -> str:
     """pyo3の`PyType::fully_qualified_name()`と同じ規則で型名を組み立てる。
 
     `NOT_A_POLARS_DATAFRAME`の`{type_name}`はRust側でこの関数
-    （`engine_pybind/src/column_extraction.rs`の`extract_dataframe`）を
+    （`engine_pybind/src/shared/column_extraction.rs`の`extract_dataframe`）を
     使って組み立てているため、テスト側も同じ規則（`__module__`が
     `"builtins"`/`"__main__"`のときは`__qualname__`のみ、それ以外は
     `f"{{__module__}}.{{__qualname__}}"`）で期待値を作る。pandasの
@@ -70,7 +70,7 @@ def rust_option_f64_debug(value: float | None) -> str:
 # ── column_extraction.rs（全系統共通） ──────────────────────────────
 #
 # extract_dataframe: `data`/`new_data`にpolars以外のDataFrame（pandas等）が
-# 渡された場合に使う（engine_pybind/src/column_extraction.rs）。
+# 渡された場合に使う（engine_pybind/src/shared/column_extraction.rs）。
 # `param_name`は呼び出し側で"data"（fit系）または"new_data"（predict/augment）
 # を渡す。`type_name`はPythonオブジェクトの完全修飾クラス名
 # （`type(obj).__module__ + "." + type(obj).__qualname__`相当）。
@@ -180,7 +180,7 @@ EXISTING_COLUMN_COLLISION = (
     "it, which is not allowed"
 )
 
-# `validate_no_duplicate_roles`のメッセージ（engine_pybind/src/validation.rs
+# `validate_no_duplicate_roles`のメッセージ（engine_pybind/src/shared/validation.rs
 # `duplicate_role_message`）。単一列ロール（y/weight）と複数列ロール（x/x_exog/
 # x_endog/instruments）の組み合わせによって主語が変わるため3パターンに分ける
 # （同ファイルのdocコメント「呼び出し側の契約」参照）。
@@ -330,7 +330,7 @@ UNKNOWN_GMM_TYPE = (
     "or 'iterated'"
 )
 # 選んだモードで使われないオプションが明示指定された場合の共通文言
-# （`engine_pybind/src/validation.rs`の`reject_unused_option`）。
+# （`engine_pybind/src/shared/validation.rs`の`reject_unused_option`）。
 UNUSED_OPTION = (
     "{option} is only used with {condition}, so it would be silently "
     "ignored; set {condition} or remove {option}"

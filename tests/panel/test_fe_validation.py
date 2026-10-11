@@ -45,7 +45,7 @@ COV_TYPES = ["classical", "hc1", "hc2", "hc3", "cluster"]
 #
 # `roles = [("y", Single), ("entity", Single), ("time", Single)?, ("x", Multi)]`
 # の並びに沿って、後方のロールほど先に検証される総当たり
-# （`engine_pybind/src/validation.rs::find_duplicate_role_message`）。
+# （`engine_pybind/src/shared/validation.rs::find_duplicate_role_message`）。
 # 単一列ロール同士（y/entity/time）はSingle-vs-Singleで`later_role`/
 # `earlier_role`、単一列ロールが`x`に含まれる場合は常に単一列ロール側が
 # 主語になる（`duplicate_role_message`のdocコメント「呼び出し側の契約」）。

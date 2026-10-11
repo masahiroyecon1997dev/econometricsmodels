@@ -196,7 +196,7 @@ def test_hausman_computed_with_singleton_time():
     ],
 )
 def test_cov_type_is_case_insensitive(fe_dataset, cov_type, expected_label):
-    """`dk`は`dk_time`が無いと`DkRequiresTime`になるため`dk_time="time"`を渡す
+    """`dk`は`dk_time`が無いと`ValidationError`になるため`dk_time="time"`を渡す
     （`test_re_validation.py::test_dk_requires_dk_time_raises`と対照）。
     """
     kwargs = {"dk_time": "time"} if expected_label == "dk" else {}
@@ -215,7 +215,7 @@ def test_confidence_level_affects_conf_int_width(fe_dataset):
         assert (wide_hi - wide_lo) > (narrow_hi - narrow_lo)
 
 
-def test_time_option_does_not_affect_coefficients(fe_dataset):
+def test_dk_time_option_does_not_affect_coefficients(fe_dataset):
     """`REOptions.dk_time`は`cov_type="dk"`のHAC時点列にのみ使われ、係数・
     ハウスマン検定・`df_model`には影響しない（`engine/src/panel/CLAUDE.md`
     「RE」節参照。FEの`time`が`df_model`を変えるのとは対照的）。

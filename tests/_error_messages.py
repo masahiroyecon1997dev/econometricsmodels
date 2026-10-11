@@ -385,9 +385,7 @@ ZERO_VARIANCE_AFTER_DEMEANING = (
 )
 
 # `PanelError::TwoWayRequiresTime`。
-TWO_WAY_REQUIRES_TIME = (
-    "two-way fixed effects requires the `time` option to be set"
-)
+TWO_WAY_REQUIRES_TIME = "two-way estimation (fixed or random effects) requires the `time` option to be set"
 
 # RE: `cov_type="dk"`で`dk_time`が未指定（`time`は借用されない。1-way・2-wayとも）。
 DK_REQUIRES_TIME = (

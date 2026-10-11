@@ -602,7 +602,8 @@ def test_wagepan_hausman_matches_plm(reference, cov_type):
 )
 def test_collinear_time_invariant_regressor_raises_computation_error(z):
     """定数列（切片と共線）・時間不変変数同士の共線・同じエンティティ平均の複製は、
-    設計行列が特異になるため`ComputationError`（検出はbetween回帰）。
+    設計行列が特異になるため`ComputationError`（定数列は変換後の最終回帰、
+    定数ではない列同士の共線はbetween回帰が検出する）。
     """
     df = _frame(BALANCED).with_columns(z.alias("z"))
     with pytest.raises(ComputationError):

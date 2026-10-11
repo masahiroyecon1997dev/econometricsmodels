@@ -15,10 +15,17 @@ from __future__ import annotations
 import math
 
 import _error_messages as msgs
+import numpy as np
 import polars as pl
 import pytest
+import statsmodels.api as sm
 from _error_messages import escaped
-from econometricsmodels import RE, REOptions, ValidationError
+from econometricsmodels import (
+    RE,
+    ComputationError,
+    REOptions,
+    ValidationError,
+)
 
 _Y = [
     2.973, 0.102, -4.005, -1.69, 4.512, 2.697, 1.044, 0.361, 0.457, -1.063,
@@ -139,6 +146,157 @@ def test_one_way_accepts_time_only_regressor_like_plm(panel):
     )
     assert res.df_resid == 21
     assert res.hausman_df == 1
+
+
+# plm（`ercomp`）の準偏差変換の重み。`y ~ x1 + xt`（1-way）と`y ~ x1 + xi + xt`
+# （2-way: id, time, total）。
+THETA_ONE_WAY_X1_XT = 0.422786083747045
+THETA_TWO_WAY = (0.764301210325029, 0.791153185965249, 0.713712012990144)
+
+
+def _group_mean(df: pl.DataFrame, col: str, by: str) -> np.ndarray:
+    return df.select(pl.col(col).mean().over(by)).to_series().to_numpy()
+
+
+def _transformed_design(df, x, thetas, two_way):
+    """plmの重みで準偏差変換した`y`と設計行列（切片は`1 - θ…`倍）。"""
+
+    def transform(col):
+        v = df[col].to_numpy()
+        if not two_way:
+            return v - thetas * _group_mean(df, col, "entity")
+        t1, t2, t3 = thetas
+        return (
+            v
+            - t1 * _group_mean(df, col, "entity")
+            - t2 * _group_mean(df, col, "time")
+            + t3 * df[col].mean()
+        )
+
+    y = transform("y")
+    const = (
+        np.full(df.height, 1 - thetas)
+        if not two_way
+        else np.full(df.height, 1 - thetas[0] - thetas[1] + thetas[2])
+    )
+    design = np.column_stack([const] + [transform(c) for c in x])
+    return y, design
+
+
+@pytest.mark.parametrize(
+    ("cov_type", "sm_kwargs"),
+    [
+        ("classical", {}),
+        ("hc1", {"cov_type": "HC1"}),
+        ("hc2", {"cov_type": "HC2"}),
+        ("hc3", {"cov_type": "HC3"}),
+    ],
+)
+@pytest.mark.parametrize(
+    ("two_way", "x", "thetas"),
+    [
+        (False, ("x1", "xt"), THETA_ONE_WAY_X1_XT),
+        (True, ("x1", "xi", "xt"), THETA_TWO_WAY),
+    ],
+)
+def test_standard_errors_match_ols_on_the_plm_transformed_data(
+    panel, two_way, x, thetas, cov_type, sm_kwargs
+):
+    """plmの重みで変換した`y`・`x`を切片込みの回帰（statsmodels）に当てはめた
+    係数・標準誤差・t値・p値が一致する。1-wayの時点間のみ変わる列（`xt`）と
+    2-wayの一次元でしか変わらない列を含む。HC2・HC3は素のレバレッジ。"""
+    options = REOptions(cov_type=cov_type, time="time" if two_way else None)
+    res = _fit(panel, options, x=x)
+
+    y, design = _transformed_design(panel, x, thetas, two_way)
+    ref = sm.OLS(y, design).fit(use_t=True, **sm_kwargs)
+    names = res.param_names
+    assert [res.params[n] for n in names] == pytest.approx(
+        list(ref.params), rel=1e-6
+    )
+    assert [res.std_errors[n] for n in names] == pytest.approx(
+        list(ref.bse), rel=1e-6
+    )
+    assert [res.test_stats[n] for n in names] == pytest.approx(
+        list(ref.tvalues), rel=1e-6
+    )
+    assert [res.p_values[n] for n in names] == pytest.approx(
+        list(ref.pvalues), rel=1e-5
+    )
+
+
+@pytest.mark.parametrize(
+    ("two_way", "x", "thetas"),
+    [
+        (False, ("x1", "xt"), THETA_ONE_WAY_X1_XT),
+        (True, ("x1", "xi", "xt"), THETA_TWO_WAY),
+    ],
+)
+def test_cluster_standard_errors_match_ols_on_the_plm_transformed_data(
+    panel, two_way, x, thetas
+):
+    """クラスター標準誤差（既定のentityクラスター）も変換後の回帰と一致する。"""
+    res = _fit(
+        panel,
+        REOptions(cov_type="cluster", time="time" if two_way else None),
+        x=x,
+    )
+    y, design = _transformed_design(panel, x, thetas, two_way)
+    groups = panel["entity"].to_numpy()
+    ref = sm.OLS(y, design).fit(
+        cov_type="cluster",
+        cov_kwds={"groups": groups, "use_correction": True},
+    )
+    assert [res.std_errors[n] for n in res.param_names] == pytest.approx(
+        list(ref.bse), rel=1e-6
+    )
+
+
+def test_two_way_driscoll_kraay_without_lags_equals_time_clusters(panel):
+    """`dk_bandwidth=0`のDriscoll-Kraayは、`dk_time`でクラスタリングした
+    cluster（`cluster="time"`）と同じ標準誤差になる。"""
+    dk = _fit(
+        panel,
+        REOptions(cov_type="dk", time="time", dk_time="time", dk_bandwidth=0),
+    )
+    clustered = _fit(
+        panel, REOptions(cov_type="cluster", time="time", cluster="time")
+    )
+    assert list(dk.std_errors.values()) == pytest.approx(
+        list(clustered.std_errors.values()), rel=1e-10
+    )
+
+
+@pytest.mark.parametrize("cov_type", ["hc1", "hc2", "hc3", "cluster", "dk"])
+def test_two_way_runs_with_every_cov_type(panel, cov_type):
+    kwargs = {"dk_time": "time"} if cov_type == "dk" else {}
+    res = _fit(panel, REOptions(cov_type=cov_type, time="time", **kwargs))
+    assert all(math.isfinite(v) and v > 0 for v in res.std_errors.values())
+
+
+@pytest.mark.parametrize("x", [("xi", "xt"), ("xt",), ("xi",)])
+def test_two_way_accepts_regressors_that_vary_in_only_one_dimension(panel, x):
+    """時間変化のある列が無くても（内部の2-way FEが説明変数0個でも）推定できる。"""
+    res = _fit(panel, REOptions(time="time"), x=x)
+    assert res.n_periods == 4
+    assert all(math.isfinite(v) for v in res.params.values())
+
+
+def test_two_way_constant_column_raises_computation_error(panel):
+    """切片と共線な定数列は、between回帰では落ちて最終回帰が特異になる。"""
+    df = panel.with_columns(c=pl.lit(2.0))
+    with pytest.raises(ComputationError):
+        _fit(df, REOptions(time="time"), x=("x1", "c"))
+
+
+def test_one_way_time_only_column_on_unbalanced_panel_is_tested(panel):
+    """1行欠けた不均衡パネルでは、時点間でのみ変わる列も個体平均が一定でなく、
+    ハウスマン検定の対象に残る（バランスなら`hausman_df == 1`）。"""
+    unbalanced = panel.with_row_index().filter(pl.col("index") != 5)
+    balanced = _fit(panel, REOptions(cov_type="classical"), x=("x1", "xt"))
+    res = _fit(unbalanced, REOptions(cov_type="classical"), x=("x1", "xt"))
+    assert balanced.hausman_df == 1
+    assert res.hausman_df == 2
 
 
 def test_dk_time_is_independent_of_time(panel):

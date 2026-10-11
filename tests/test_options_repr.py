@@ -156,3 +156,18 @@ def test_repr_lists_fields_in_signature_order(cls: type) -> None:
     # `\b`で`time=`が`hac_time=`の途中に一致しないようにする
     positions = [re.search(rf"\b{name}=", text).start() for name in names]
     assert positions == sorted(positions)
+
+
+def test_re_options_positional_order_matches_fe_options():
+    """`REOptions`の位置引数の順は`FEOptions`と同じ（`time`の次が`cluster`、`dk_time`）。"""
+    re_options = REOptions("cluster", 0.9, "t", "g", "d", 2)
+    fe_options = FEOptions("cluster", 0.9, "t", "g", "d", 2)
+    for name in (
+        "cov_type",
+        "confidence_level",
+        "time",
+        "cluster",
+        "dk_time",
+        "dk_bandwidth",
+    ):
+        assert getattr(re_options, name) == getattr(fe_options, name)

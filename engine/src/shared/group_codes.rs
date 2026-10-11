@@ -11,6 +11,8 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
+use crate::shared::error::CommonError;
+
 /// グループ識別子（クラスター列・パネルのentity/time列等、同一性だけが意味を持つ`String`列）を、
 /// 整数コードに一度だけ変換したもの。
 ///
@@ -30,16 +32,17 @@ use std::collections::HashMap;
 ///
 /// クラスター列は`CovType::Cluster { groups }`・`WeightType::Cluster { groups }`・
 /// `FeCovType::Cluster`/`ReCovType::Cluster`が`Option<GroupCodes>`で受け取る（同じ型で揃える）。
-/// 構築は[`Self::from_labels`]/[`Self::from_labels_without_keys`]（ラベルの`String`列から）が
-/// 公開で、コードの参照・集計用の読み出し口は`engine`内部専用（`pub(crate)`）。パネルの
+/// 構築は[`Self::from_labels`]/[`Self::from_labels_without_keys`]（ラベルの`String`列から）と
+/// [`Self::from_factorized_without_keys`]（呼び出し側が行ごとの`String`を作らずに振った仮コード
+/// から。`engine_pybind`のクラスター列はこちら）が公開で、コードの参照・集計用の読み出し口は`engine`内部専用（`pub(crate)`）。パネルの
 /// `FeInput`/`ReInput`のentityと`TimeKeys`は、現状は`String`列で受け取り構築時にコード化する。
 ///
 /// # 公開型としての約束事
 /// - **コードの行数は、渡す先のデータの行数`n`と一致させる。** 食い違うコードは、各`fit()`が
 ///   クラスター数の検証（`validate_cluster_groups`）で`CommonError::ClusterDimensionMismatch`
 ///   にする（集計には進まない）。
-/// - **キーの有無は構築方法で決まる。** `from_labels_without_keys`で作ったコードは`keys()`を
-///   呼べない（panicする）。`CovType::Cluster`等のクラスター用の`groups`はキー無しで渡されうるので、
+/// - **キーの有無は構築方法で決まる。** `from_labels_without_keys`・
+///   `from_factorized_without_keys`で作ったコードは`keys()`を呼べない（panicする）。`CovType::Cluster`等のクラスター用の`groups`はキー無しで渡されうるので、
 ///   クラスターの検証・集計は`keys()`を使わない。`keys()`が要る処理（パネルのentity/time、
 ///   固定効果のキー）は、`from_labels`/`from_labels_ordered`で作った自前のコードだけに使う。
 /// - **等価性（`==`）は`codes`と`counts`だけで判定し、キーの有無・内容は見ない。** キーは
@@ -51,7 +54,8 @@ pub struct GroupCodes {
     codes: Vec<usize>,
     /// グループごとの観測数（長さ`n_groups`、コード順）。
     counts: Vec<usize>,
-    /// グループのキー（長さ`n_groups`、コード順）。`from_labels_without_keys`で作ったコードは
+    /// グループのキー（長さ`n_groups`、コード順）。`from_labels_without_keys`・
+    /// `from_factorized_without_keys`で作ったコードは
     /// `None`（クラスターの検証・集計はコードと観測数だけを使い、キーの`String`を
     /// `n_groups`個確保する無駄を省く）。
     keys: Option<Vec<String>>,
@@ -96,6 +100,43 @@ impl GroupCodes {
         Self::build(ids, compare_rows, true)
     }
 
+    /// 各行がどの「仮グループ」に属するか（`codes`、値は`0..labels.len()`）と、仮グループごとの
+    /// ラベルの文字列表現（`labels`）から、[`Self::from_labels_without_keys`]と同じコードを作る。
+    /// 行ごとの`String`を作らずにコード化したい呼び出し側（`engine_pybind`が整数列を
+    /// そのままハッシュして仮コードを振る場合等）向け。
+    ///
+    /// 仮コードの振り方は呼び出し側の自由（出現順でなくてよい）。コードの順序はここで`labels`の
+    /// 辞書順（`from_labels`と同じ規則。順序の規則はこの型だけが持つ）に振り直し、同じ文字列に
+    /// なる仮グループは1つのグループにまとめる（ラベルの文字列表現が値の同一性と一対一でない
+    /// 型でも、`from_labels`と同じグルーピングになる）。
+    ///
+    /// # Errors
+    /// `codes`に`labels.len()`以上の値がある、または使われていない仮コードがある場合
+    /// （呼び出し側の実装誤り。`CommonError::ComputationFailed`）。
+    pub fn from_factorized_without_keys(
+        codes: Vec<usize>,
+        labels: &[&str],
+    ) -> Result<Self, CommonError> {
+        let mut used = vec![false; labels.len()];
+        for &c in &codes {
+            match used.get_mut(c) {
+                Some(slot) => *slot = true,
+                None => {
+                    return Err(CommonError::ComputationFailed(format!(
+                        "group code {c} is out of range for {} labels",
+                        labels.len()
+                    )));
+                }
+            }
+        }
+        if let Some(unused) = used.iter().position(|&u| !u) {
+            return Err(CommonError::ComputationFailed(format!(
+                "group code {unused} is never used by any row"
+            )));
+        }
+        Ok(Self::finish(codes, labels, |_, _| Ordering::Equal, false))
+    }
+
     fn build(
         ids: &[String],
         compare_rows: impl Fn(usize, usize) -> Ordering,
@@ -105,7 +146,7 @@ impl GroupCodes {
         let mut first_seen: HashMap<&str, usize> = HashMap::new();
         let mut unique: Vec<&str> = Vec::new();
         let mut first_row: Vec<usize> = Vec::new();
-        let mut codes: Vec<usize> = ids
+        let codes: Vec<usize> = ids
             .iter()
             .enumerate()
             .map(|(row, id)| {
@@ -117,25 +158,51 @@ impl GroupCodes {
             })
             .collect();
 
+        Self::finish(
+            codes,
+            &unique,
+            |a, b| compare_rows(first_row[a], first_row[b]),
+            with_keys,
+        )
+    }
+
+    /// 仮コード（`codes`、値は`0..labels.len()`で全て使われている）を、`compare_provisional`
+    /// （2つの仮コードを比べる。同順位は`labels`の辞書順）で決めた順序のコードに置き換える。
+    /// 同じ`labels`を持つ仮コードは1つのグループにまとめる（並べ替え後に隣り合うことを使う。
+    /// `compare_provisional`が、同じラベルの仮コード同士を`Equal`にすること。`build`はラベルが
+    /// 一意なので併合は起きず、`from_factorized_without_keys`は常に`Equal`を渡す）。
+    fn finish(
+        mut codes: Vec<usize>,
+        labels: &[&str],
+        compare_provisional: impl Fn(usize, usize) -> Ordering,
+        with_keys: bool,
+    ) -> Self {
         // 2. ユニークなキーだけを並べ、仮コード→順序づけコードの対応を作る。
-        let mut order: Vec<usize> = (0..unique.len()).collect();
+        let mut order: Vec<usize> = (0..labels.len()).collect();
         order.sort_unstable_by(|&a, &b| {
-            compare_rows(first_row[a], first_row[b]).then_with(|| unique[a].cmp(unique[b]))
+            compare_provisional(a, b).then_with(|| labels[a].cmp(labels[b]))
         });
-        let mut rank = vec![0; unique.len()];
-        for (r, &provisional_code) in order.iter().enumerate() {
-            rank[provisional_code] = r;
+        let mut rank = vec![0; labels.len()];
+        let mut keys: Vec<&str> = Vec::new();
+        for (pos, &provisional_code) in order.iter().enumerate() {
+            // 同じラベルは並べ替え後に隣り合うので、直前と同じなら同じグループ。
+            if pos > 0 && labels[order[pos - 1]] == labels[provisional_code] {
+                rank[provisional_code] = keys.len() - 1;
+            } else {
+                rank[provisional_code] = keys.len();
+                keys.push(labels[provisional_code]);
+            }
         }
 
         // 仮コードをその場で順序づけコードに置き換える（別の`Vec`を確保しない）。
         for c in &mut codes {
             *c = rank[*c];
         }
-        let mut counts = vec![0; unique.len()];
+        let mut counts = vec![0; keys.len()];
         for &c in &codes {
             counts[c] += 1;
         }
-        let keys = with_keys.then(|| order.iter().map(|&c| unique[c].to_string()).collect());
+        let keys = with_keys.then(|| keys.iter().map(|k| k.to_string()).collect());
         Self {
             codes,
             counts,
@@ -156,14 +223,15 @@ impl GroupCodes {
     /// グループのキー（コード順）。
     ///
     /// # Panics
-    /// [`Self::from_labels_without_keys`]で作ったコードでは呼べない（キーを作っていない）。
+    /// [`Self::from_labels_without_keys`]・[`Self::from_factorized_without_keys`]で作ったコードでは
+    /// 呼べない（キーを作っていない）。
     /// どのコンストラクタを使うかは呼び出し側が決める内部契約で、入力データには依らない。
     /// クラスター用の`groups`は外部から渡されるためキー無しのことがある。クラスターの検証・
     /// 集計ではこのメソッドを呼ばないこと（型のdoc参照）。
     pub(crate) fn keys(&self) -> &[String] {
         self.keys
             .as_deref()
-            .expect("keys are not built for codes made by from_labels_without_keys")
+            .expect("keys are not built for codes made by a *_without_keys constructor")
     }
 
     /// ユニークなグループ数。
@@ -338,7 +406,59 @@ mod tests {
                 let expected: Vec<Vec<usize>> = oracle.into_values().collect();
                 prop_assert_eq!(actual, expected);
             }
+
+            /// 仮コードを出現順と逆の順序で振っても、同じラベルを2つの仮グループに割っても
+            /// （`split`）、`from_factorized_without_keys`は`from_labels_without_keys`と同じコードになる。
+            #[test]
+            fn factorized_codes_agree_with_from_labels(
+                ids in collection::vec(label(), 1..80),
+                split in any::<bool>(),
+            ) {
+                // 仮グループのキーは`(ラベル, 行の偶奇)`（`split=false`なら偶奇は常に0）。
+                let provisional_key = |row: usize| (ids[row].as_str(), if split { row % 2 } else { 0 });
+                let mut unique: Vec<(&str, usize)> = Vec::new();
+                for row in (0..ids.len()).rev() {
+                    let key = provisional_key(row);
+                    if !unique.contains(&key) {
+                        unique.push(key);
+                    }
+                }
+                let codes: Vec<usize> = (0..ids.len())
+                    .map(|row| unique.iter().position(|k| *k == provisional_key(row)).unwrap())
+                    .collect();
+                let labels: Vec<&str> = unique.iter().map(|(label, _)| *label).collect();
+
+                let actual = GroupCodes::from_factorized_without_keys(codes, &labels).unwrap();
+                prop_assert_eq!(actual, GroupCodes::from_labels_without_keys(&ids));
+            }
         }
+    }
+
+    #[test]
+    fn from_factorized_merges_provisional_groups_with_the_same_label() {
+        // 仮コード0と2が同じラベル"b"（文字列表現が値の同一性と一対一でない型の想定）。
+        let codes = GroupCodes::from_factorized_without_keys(vec![0, 1, 2, 1, 0], &["b", "a", "b"])
+            .unwrap();
+        let ids: Vec<String> = ["b", "a", "b", "a", "b"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(codes, GroupCodes::from_labels_without_keys(&ids));
+        assert_eq!(codes.n_groups(), 2);
+    }
+
+    #[test]
+    fn from_factorized_rejects_out_of_range_and_unused_codes() {
+        assert!(matches!(
+            GroupCodes::from_factorized_without_keys(vec![0, 2], &["a", "b"]),
+            Err(CommonError::ComputationFailed(_))
+        ));
+        assert!(matches!(
+            GroupCodes::from_factorized_without_keys(vec![0, 0], &["a", "b"]),
+            Err(CommonError::ComputationFailed(_))
+        ));
+        let empty = GroupCodes::from_factorized_without_keys(vec![], &[]).unwrap();
+        assert_eq!(empty.nobs(), 0);
     }
 
     #[test]

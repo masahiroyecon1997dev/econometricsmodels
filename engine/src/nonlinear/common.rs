@@ -1550,7 +1550,8 @@ const NEWTON_STALL_GRAD_RATIO: f64 = 0.9;
 /// 受理した結果で、真の床ではなかった。[`FaerNewton::stalled_at_optimum`]のdocコメント参照。）
 ///
 /// この「初期の勾配ノルムは`1e2`〜`1e6`」という前提は、`run_solver`の呼び出し元
-/// （Logit/Probitの`standardize_columns`、Tobitの`TobitScaling`）が**設計行列を標準化した
+/// （Logit/Probitの`standardize_columns`、Tobitの`TobitScaling`。どちらも`ColumnScale`で
+/// `x`を標準化する）が**設計行列を標準化した
 /// 空間で最適化する**ことに依存している。非標準化スケール（`x`が極端に大きい等）で
 /// `run_solver`を呼ぶ手法を将来追加する場合、この定数の妥当性は再検証が必要
 /// （rust-reviewer指摘。より根本的にはNewton減少量`√(gᵀH⁻¹g)`のようなスケール不変な
@@ -2717,6 +2718,49 @@ pub struct ColumnScale {
 }
 
 impl ColumnScale {
+    /// `x`の各列の平均・標準偏差から標準化スケールを求める（切片列は除外、標準偏差0の列は
+    /// `std`を`1.0`のままにする）。`has_intercept`のときのみ平均を保持する。
+    /// `has_intercept`のときは列0が切片列であることを前提にする（設計行列の規約）。
+    /// 設計行列を実際に標準化するのは`standardize`（Tobitのように、`x`以外（`y`等）の
+    /// スケールも同時に決めたい呼び出し側が、スケールの計算と行列への適用を分けて呼べるようにしている）。
+    pub fn fit(x: &Mat<f64>, has_intercept: bool) -> Self {
+        let n = x.nrows();
+        let k = x.ncols();
+        let start = usize::from(has_intercept);
+
+        let mut stds = vec![1.0; k];
+        let mut means = vec![0.0; k];
+        for j in start..k {
+            let mean: f64 = (0..n).map(|i| *x.get(i, j)).sum::<f64>() / n as f64;
+            let var: f64 = (0..n).map(|i| (*x.get(i, j) - mean).powi(2)).sum::<f64>() / n as f64;
+            let sd = var.sqrt();
+            if sd > 0.0 {
+                stds[j] = sd;
+            }
+            if has_intercept {
+                means[j] = mean;
+            }
+        }
+        Self {
+            stds,
+            means,
+            has_intercept,
+        }
+    }
+
+    /// 設計行列`x`を標準化する: `x̃ᵢⱼ = (xᵢⱼ - x̄ⱼ)/stdⱼ`（切片なしでは`x̄ⱼ=0`、切片列は無変換）。
+    /// `fit`で求めたのと同じ`x`（または同じ列構成の設計行列）に適用する。
+    pub fn standardize(&self, x: &Mat<f64>) -> Mat<f64> {
+        debug_assert_eq!(
+            x.ncols(),
+            self.stds.len(),
+            "`fit`と同じ列構成の設計行列を渡す"
+        );
+        Mat::from_fn(x.nrows(), x.ncols(), |i, j| {
+            (*x.get(i, j) - self.means[j]) / self.stds[j]
+        })
+    }
+
     /// 列ごとの標準偏差（`standardize_columns`のdocコメント参照）。分離検出
     /// （`nonlinear::separation`）が、標準化後の行列を複製せず元の`x`から行を都度計算するために使う。
     ///
@@ -2748,7 +2792,7 @@ impl ColumnScale {
     /// 標準化空間のパラメータから元のスケールのパラメータへの線形変換の行列`J`
     /// （`θ = Jθ̃`、`k×k`）。`J = diag(1/stds)`で、切片ありのときのみ第0行の
     /// 傾き成分に`J[0][m] = -x̄ₘ/stdₘ`が入る（`destandardize_params`の式の係数）。
-    fn param_jacobian(&self) -> Mat<f64> {
+    pub fn param_jacobian(&self) -> Mat<f64> {
         let k = self.stds.len();
         Mat::from_fn(k, k, |i, m| {
             if i == m {
@@ -2763,36 +2807,12 @@ impl ColumnScale {
 }
 
 /// 設計行列`x`の各列を標準化する（切片列は除外）。切片ありのときは平均も引く
-/// （`ColumnScale`のdocコメント参照）。
+/// （`ColumnScale`のdocコメント参照）。`ColumnScale::fit`と`ColumnScale::standardize`の合成。
 /// 収束後は`destandardize_params`で元のスケールのパラメータへ逆変換する。
 pub fn standardize_columns(x: &Mat<f64>, has_intercept: bool) -> (Mat<f64>, ColumnScale) {
-    let n = x.nrows();
-    let k = x.ncols();
-    let start = usize::from(has_intercept);
-
-    let mut stds = vec![1.0; k];
-    let mut means = vec![0.0; k];
-    for j in start..k {
-        let mean: f64 = (0..n).map(|i| *x.get(i, j)).sum::<f64>() / n as f64;
-        let var: f64 = (0..n).map(|i| (*x.get(i, j) - mean).powi(2)).sum::<f64>() / n as f64;
-        let sd = var.sqrt();
-        if sd > 0.0 {
-            stds[j] = sd;
-        }
-        if has_intercept {
-            means[j] = mean;
-        }
-    }
-
-    let x_std = Mat::from_fn(n, k, |i, j| (*x.get(i, j) - means[j]) / stds[j]);
-    (
-        x_std,
-        ColumnScale {
-            stds,
-            means,
-            has_intercept,
-        },
-    )
+    let scale = ColumnScale::fit(x, has_intercept);
+    let x_std = scale.standardize(x);
+    (x_std, scale)
 }
 
 /// `standardize_columns`で標準化した空間で最適化した`params_std`を、元のスケールの
@@ -4852,6 +4872,43 @@ mod tests {
         for i in 0..4 {
             assert_eq!(*x_std_no_intercept.get(i, 2), 0.1);
         }
+    }
+
+    #[test]
+    fn column_scale_fit_then_standardize_applies_the_fitted_mean_and_std_to_other_rows() {
+        // `fit`で求めた平均・標準偏差を、`fit`に使っていない別の行へ適用できる。
+        let x_fit = Mat::from_fn(4, 3, |i, j| match j {
+            0 => 1.0,
+            1 => [10.0, 20.0, 30.0, 40.0][i],
+            _ => 5.0,
+        });
+        let x_new = Mat::from_fn(2, 3, |i, j| match j {
+            0 => 1.0,
+            1 => [25.0, 100.0][i],
+            _ => 5.0,
+        });
+
+        let scale = ColumnScale::fit(&x_fit, true);
+        assert_eq!(scale.means, vec![0.0, 25.0, 5.0]);
+        // 切片列と標準偏差0の列（定数列）は`std=1.0`。
+        assert_eq!(scale.stds[0], 1.0);
+        assert_eq!(scale.stds[2], 1.0);
+        let sd1 = 125.0_f64.sqrt();
+        assert_eq!(scale.stds[1], sd1);
+
+        let std_new = scale.standardize(&x_new);
+        assert_eq!(*std_new.get(0, 0), 1.0);
+        assert_eq!(*std_new.get(0, 1), 0.0);
+        assert_eq!(*std_new.get(1, 1), 75.0 / sd1);
+        assert_eq!(*std_new.get(0, 2), 0.0);
+
+        // 切片なしでは`means`が全0（平均を引かない）。
+        let scale_no_intercept = ColumnScale::fit(&x_fit, false);
+        assert!(scale_no_intercept.means.iter().all(|m| *m == 0.0));
+        assert_eq!(
+            *scale_no_intercept.standardize(&x_new).get(1, 1),
+            100.0 / sd1
+        );
     }
 
     #[test]

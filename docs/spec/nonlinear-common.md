@@ -196,8 +196,8 @@ statsmodels（`ConvergenceWarning`を出しつつ結果は必ず返す＝常に�
   スコア`s_std=Jᵀs_orig`が同じ連鎖律に従うため同じ式で戻せる。
 - 分離検出（1.4節・`separation.rs`）は標準偏差で割るだけの行を使い続ける（切片込みの
   再パラメータ化は分離の有無を変えず、LPの閾値の較正もその行に対するもの）。
-- Tobitは同じ方式を`y`のスケーリングとあわせて`TobitScaling`で局所実装している
-  （`tobit-spec.md`3.2節）。
+- Tobitは`x`側をこの`ColumnScale`に委ね、`TobitScaling`が`y`のスケーリングと`logσ`の扱いを
+  加える（`tobit-spec.md`3.2節）。
 
 ### 1.4 設計行列のランクチェック・初期値
 

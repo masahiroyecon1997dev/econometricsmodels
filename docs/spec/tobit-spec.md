@@ -112,18 +112,21 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   あったため。`ols_initial_params`のQRベースの階数検定が`solver`に関わらず最初に走るため、完全な
   多重共線性は最適化前に`SingularDesignMatrix`（`ComputationError`）で検出される
   （`solver`をparametrizeする必要が無い）。
-- **`TobitScaling`（`tobit.rs`局所の標準化。共有`standardize_columns`は未使用）**: Logit/Probitが
-  使う`common.rs`の`standardize_columns`は`x`列を分散1へスケーリングするだけで`y`をスケーリング
+- **`TobitScaling`（`tobit.rs`の標準化。`x`側は共有の`ColumnScale`、`y`のスケーリングと`logσ`の扱いがTobit固有）**: Logit/Probitが
+  使う`common.rs`の`standardize_columns`は`x`列だけを標準化し`y`をスケーリング
   しないため、`y`のスケールが大きいデータ（例: Wooldridge mroz `hours`、`σ̂≈1122`）で健全なMLE解
   でも標準化係数のノルムが大きくなり、勾配ノルム基準の収束判定や（当時あった標準化パラメータの
-  ノルムによる）分離ヒューリスティックが不安定になる。対策として`y`のスケーリングと`x`の平均センタリングを行う`TobitScaling`を新設した:
+  ノルムによる）分離ヒューリスティックが不安定になる。対策として`y`のスケーリングと`x`の平均センタリングを行う`TobitScaling`を新設した
+  （`x`側の平均センタリングは後にLogit/Probitにも広げ、`ColumnScale`として共通化した。
+  [`nonlinear-common.md`](./nonlinear-common.md)1.3節）:
   - `y`・打ち切り境界を`y_scale = 2^round(log2(母集団std(y)))`（**2の冪に丸める**）で一律
     スケーリング。2の冪での除算は倍精度で仮数部不変＝厳密なので、程よいスケールの`y`
     （`std ∈ [1/√2, √2)`）では`y_scale=1`の完全恒等変換になり、反復軌道がスケーリング前と厳密に
     相似に保たれる（生のstdで割ると丸め誤差だけで打ち切り率の高い悪条件データが`SingularHessian`
     に倒れることを実測確認したため丸める）。
   - `x`列は切片ありのとき`(x-x̄)/std`とセンタリング、切片なしのとき`x/std`のみ（吸収先の切片が
-    無いと逆変換が壊れるため）。
+    無いと逆変換が壊れるため）。この部分は`ColumnScale`（`fit`/`standardize`/`param_jacobian`、
+    `destandardize_params`）が行い、`y_scale`が2の冪なので`c`を掛けても丸め誤差が出ない。
   - 逆変換: `βⱼ = c·β̃ⱼ/stdⱼ`（`j≥1`）、`β₀ = c·β̃₀ - Σ_{j≥1} x̄ⱼ·βⱼ`、`σ = c·exp(s̃)`。
     `cov_params`は`Cov(β,σ) = J·Cov(β̃,s̃)·Jᵀ`（`J`は上記線形部分の微分に`∂σ/∂s̃=σ`のデルタ法を
     末尾行へ折り込んだもの、`TobitScaling::param_jacobian`）。

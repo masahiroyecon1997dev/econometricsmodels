@@ -196,12 +196,13 @@ use crate::inference;
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use crate::panel::common::{
-    GroupCodes, PanelDimension, PanelError, PanelHcVariant, TimeKeys, leverage_within,
-    panel_classical_cov_params, panel_cluster_cov_params, panel_driscoll_kraay_cov_params,
-    panel_hc_cov_params, quasi_demean_column, resolve_dk_bandwidth, validate_cluster_group_codes,
+    GroupCodes, PanelDimension, PanelError, PanelHcVariant, TimeKeys, panel_classical_cov_params,
+    panel_cluster_cov_params, panel_driscoll_kraay_cov_params, panel_hc_cov_params,
+    quasi_demean_column, resolve_dk_bandwidth, validate_cluster_group_codes,
     validate_dk_periods_cover_tested_coefficients, xtx_inverse,
 };
 use crate::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput};
+use crate::shared::covariance::leverages;
 use crate::shared::wald::wald_f_test;
 use crate::validation::validate_cluster_count_covers_slopes;
 
@@ -795,7 +796,7 @@ fn re_hausman_test(
                 .map_err(to_err)?;
             let k_aux = aux.input().k();
             let x_mat = aux.input().x();
-            let xtx_inv = xtx_inverse(x_mat, k_aux)?;
+            let xtx_inv = xtx_inverse(x_mat)?;
             let residuals: Vec<f64> = (0..n).map(|i| *aux.residuals().get(i, 0)).collect();
             // 小標本補正`G/(G-1)·(n-1)/(n-K)`は`K=k_aux`（`OlsEstimator`のクラスター共分散と
             // 同式）、検定の自由度は`G-1`。
@@ -823,7 +824,7 @@ fn re_hausman_test(
             let t_periods = time.n_groups();
             let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
             let x_mat = aux.input().x();
-            let xtx_inv = xtx_inverse(x_mat, k_aux)?;
+            let xtx_inv = xtx_inverse(x_mat)?;
             let residuals: Vec<f64> = (0..n).map(|i| *aux.residuals().get(i, 0)).collect();
             // fixestのDKは`K.fixef="full"`が既定（RE本体の`fit()`のDk分岐と同じ、
             // `k_correction=k_aux`）。Wald検定の分母自由度も`t_periods-1`に揃える
@@ -974,13 +975,13 @@ impl ReEstimator {
     /// `entity_nested_within_cluster`の条件分岐が一切不要）。REの変換済み設計行列
     /// （`x_all`、切片も含めて全パラメータが実際に列として含まれる）には「省略された
     /// 固定効果ダミー」が無いため、HC2/HC3のレバレッジも`panel::fe`の`leverage_full`
-    /// （LSDV相当の欠落ダミー補正）ではなく`leverage_within`（＝素の
+    /// （LSDV相当の欠落ダミー補正）ではなく`shared::covariance::leverages`（＝素の
     /// `h_ii = x_i(X'X)⁻¹x_i'`、REの実際の設計行列に対して直接計算するだけで良い）で
     /// 足りる。これにより、`panel::common`の`panel_classical_cov_params`/
     /// `panel_hc_cov_params`/`panel_cluster_cov_params`/`panel_driscoll_kraay_cov_params`
     /// （元はFE専用実装だったが、この事実が判明したことで数式自体はFE/RE間で
     /// 完全に共有できることが分かり、`common.rs`へ移設した）を`extra_df=0`・
-    /// `leverage_within`で呼ぶだけで実装できる。
+    /// `shared::covariance::leverages`で呼ぶだけで実装できる。
     ///
     /// - **Classical/HC1**: `linearmodels`（`cov_type="unadjusted"`/`"robust"`）と
     ///   数値完全一致を実地検証済み。
@@ -1088,7 +1089,7 @@ impl ReEstimator {
         // （`FeEstimator::fit`と同型だが、REは`design_matrix_from_columns`で組み立て
         // 直す必要が無い——`x_all`は既に`Mat`化済み）。
         let x_mat = estimator.input().x();
-        let xtx_inv = xtx_inverse(x_mat, df_model)?;
+        let xtx_inv = xtx_inverse(x_mat)?;
         let residuals: Vec<f64> = (0..n).map(|i| *estimator.residuals().get(i, 0)).collect();
         let ssr: f64 = residuals.iter().map(|r| r * r).sum();
 
@@ -1127,10 +1128,10 @@ impl ReEstimator {
             ),
             ReCovType::Hc2 | ReCovType::Hc3 => {
                 // REの変換済み設計行列には省略された固定効果ダミーが無いため、FEの
-                // `leverage_full`（LSDV相当の欠落ダミー補正）は不要——`leverage_within`
+                // `leverage_full`（LSDV相当の欠落ダミー補正）は不要——`shared::covariance::leverages`
                 // （素のレバレッジ）がそのままHC2/HC3のレバレッジになる（`fit()`のdoc
                 // コメント「`cov_type`対応」参照）。
-                let h = leverage_within(x_mat, &xtx_inv, n, df_model);
+                let h = leverages(x_mat, &xtx_inv);
                 let variant = if matches!(cov_type, ReCovType::Hc2) {
                     PanelHcVariant::Hc2
                 } else {
@@ -2865,7 +2866,7 @@ mod tests {
         let x_mat = aux.input().x();
         let n = aux.input().nobs();
         let k_aux = aux.input().k();
-        let xtx_inv = xtx_inverse(x_mat, k_aux).unwrap();
+        let xtx_inv = xtx_inverse(x_mat).unwrap();
         let residuals: Vec<f64> = (0..n).map(|i| *aux.residuals().get(i, 0)).collect();
         let time_codes = GroupCodes::from_ids(&time);
         let cov =

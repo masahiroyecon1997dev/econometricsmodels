@@ -625,8 +625,7 @@ impl GroupIndices {
 /// `X̃'X̃`が対称正定値であることは、`OlsEstimator::fit`が同じ`x`で既に成功している
 /// （＝特異ではないと確認済み）ことから理論上保証されるが、`OlsEstimator`と同じく
 /// 浮動小数点演算の境界的なケースに備えて`Result`化する。
-pub(crate) fn xtx_inverse(x: &Mat<f64>, k: usize) -> Result<Mat<f64>, PanelError> {
-    debug_assert_eq!(x.ncols(), k, "k must equal the number of columns of x");
+pub(crate) fn xtx_inverse(x: &Mat<f64>) -> Result<Mat<f64>, PanelError> {
     crate::shared::covariance::xtx_inverse(x).map_err(|_| {
         CommonError::ComputationFailed(
             "failed to invert the transformed design matrix's Gram matrix for panel cov_type \
@@ -635,17 +634,6 @@ pub(crate) fn xtx_inverse(x: &Mat<f64>, k: usize) -> Result<Mat<f64>, PanelError
         )
         .into()
     })
-}
-
-/// 行ごとのレバレッジ `h_ii = x̃_i (X̃'X̃)⁻¹ x̃_i'`（`shared::covariance::hc_cov_params`のレバレッジ計算と
-/// 同じ式）。FEでは`leverage_full`（`fe.rs`）の材料（`h_within`）として使う。REでは
-/// 変換済み設計行列に省略された固定効果ダミーが無いため、この値自体がそのままHC2/HC3の
-/// レバレッジになる（モジュールdoc参照）。
-pub(crate) fn leverage_within(x: &Mat<f64>, xtx_inv: &Mat<f64>, n: usize, k: usize) -> Vec<f64> {
-    let xh = x * xtx_inv;
-    (0..n)
-        .map(|i| (0..k).map(|j| (*xh.get(i, j)) * (*x.get(i, j))).sum())
-        .collect()
 }
 
 /// classical: `σ̂² (X̃'X̃)⁻¹`（`σ̂² = SSR/df_resid`）。
@@ -670,7 +658,7 @@ pub(crate) enum PanelHcVariant {
 /// HC1〜HC3の係数分散共分散行列（k×k）。`shared::covariance::hc_cov_params`と同型の構造だが、
 /// 小標本補正がFE/RE用に異なる（`fe.rs`モジュールdoc「`cov_type`対応」参照）:
 /// - HC1: `w_i = n/df_resid`
-/// - HC2/HC3: `w_i`はレバレッジ`h`ベース（FEは`leverage_full`、REは`leverage_within`を渡す）
+/// - HC2/HC3: `w_i`はレバレッジ`h`ベース（FEは`leverage_full`、REは`shared::covariance::leverages`の素のレバレッジを渡す）
 ///
 /// `h`の`expect`（`Hc2`/`Hc3`分岐）は、呼び出し元の`fit()`が`variant=Hc2|Hc3`のときは
 /// 必ず`Some(&h)`を渡す構造になっており、`variant`と`h`の組み合わせに呼び出し側のバグ

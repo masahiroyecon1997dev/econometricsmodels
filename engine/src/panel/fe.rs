@@ -384,12 +384,13 @@ use crate::inference;
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::OlsInput;
 use crate::panel::common::{
-    GroupCodes, PanelDimension, PanelError, PanelHcVariant, TimeKeys, leverage_within,
-    panel_classical_cov_params, panel_cluster_cov_params, panel_driscoll_kraay_cov_params,
-    panel_hc_cov_params, quasi_demean_column, resolve_dk_bandwidth, validate_cluster_group_codes,
+    GroupCodes, PanelDimension, PanelError, PanelHcVariant, TimeKeys, panel_classical_cov_params,
+    panel_cluster_cov_params, panel_driscoll_kraay_cov_params, panel_hc_cov_params,
+    quasi_demean_column, resolve_dk_bandwidth, validate_cluster_group_codes,
     validate_dk_periods_cover_tested_coefficients,
 };
 use crate::panel::re::ReInput;
+use crate::shared::covariance::leverages;
 use crate::shared::goodness_of_fit::gaussian_goodness_of_fit;
 use crate::shared::least_squares::{LeastSquaresFit, least_squares};
 use crate::shared::wald::wald_f_test;
@@ -881,7 +882,7 @@ impl FeEstimator {
                 df_resid,
             ),
             FeCovType::Hc2 | FeCovType::Hc3 => {
-                let h_within = leverage_within(x_mat, &xtx_inv, n, k);
+                let h_within = leverages(x_mat, &xtx_inv);
                 let time_for_leverage = match effects {
                     FeEffects::OneWay => None,
                     FeEffects::TwoWay => input.time_codes(),

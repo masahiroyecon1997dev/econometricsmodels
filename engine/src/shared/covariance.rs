@@ -50,7 +50,7 @@ pub(crate) enum HcVariant {
 /// 行ごとのレバレッジ `h_ii = x_i'(X'X)⁻¹x_i`。
 ///
 /// `(X (X'X)⁻¹ X')_ii`をn×nの行列を作らずに行ごとの内積で求める。
-fn leverages(x: &Mat<f64>, xtx_inv: &Mat<f64>) -> Vec<f64> {
+pub(crate) fn leverages(x: &Mat<f64>, xtx_inv: &Mat<f64>) -> Vec<f64> {
     let xh = x * xtx_inv; // (n, k)
     (0..x.nrows())
         .map(|i| {
@@ -298,6 +298,22 @@ mod tests {
 
         let identity = &(x.transpose() * &x) * &inv;
         assert_matrix_close(&identity, &Mat::<f64>::identity(2, 2), 1e-12);
+    }
+
+    #[test]
+    fn leverages_match_the_simple_regression_closed_form() {
+        // 単回帰（切片＋1変数）では h_i = 1/n + (x_i - x̄)² / Sxx。x̄=2, Sxx=10, n=4。
+        let x = matrix(&[&[1.0, 0.0], &[1.0, 1.0], &[1.0, 3.0], &[1.0, 4.0]]);
+        let h = leverages(&x, &xtx_inverse(&x).unwrap());
+
+        let expected = [0.65, 0.35, 0.35, 0.65];
+        for (a, e) in h.iter().zip(expected) {
+            assert!((a - e).abs() < 1e-12, "{a} vs {e}");
+        }
+        assert!(
+            (h.iter().sum::<f64>() - 2.0).abs() < 1e-12,
+            "trace of the hat matrix is k"
+        );
     }
 
     #[test]

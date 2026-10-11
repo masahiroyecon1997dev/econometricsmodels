@@ -18,9 +18,6 @@
 //! - `UnbalancedPanelForTwoWay`: 2-way FEのバランスパネル必須（`fe-spec.md`1章）
 //! - `ZeroVarianceAfterDemeaning`: within変換後に分散ゼロの説明変数（`fe-spec.md`1章）
 //! - `TwoWayRequiresTime`: 2-way FE指定時の`time`必須（`panel-common.md`1.1節）
-//! - `DkRequiresTime`: REでDriscoll-Kraay型パネルHAC（`ReCovType::Dk`）を指定したのに時点列
-//!   （`REOptions.dk_time`由来の`ReInput::time()`）が無い（`panel-common.md`3.1節。FEは
-//!   `FeCovType::Dk.time`が型で必須のため発生しない）
 //! - `InvalidDkBandwidth`: `FeCovType::Dk`の明示的な`bandwidth`が`[0, t)`の範囲外
 //!   （`t`はユニークな時点数。`LeastSquaresError::InvalidHacLags`と同型だが
 //!   上限が観測数`n`ではなく時点数`t`）
@@ -181,8 +178,9 @@ pub enum PanelError {
     /// ペアの一意性・全組合せの充足まで確認する必要がある。`expected`はカウント上の
     /// 期待値（`n_entities * n_periods`）でメッセージ用。
     #[error(
-        "two-way fixed effects requires a balanced panel: got n_obs={n_obs} for \
-         n_entities={n_entities} x n_periods={n_periods} (expected {expected} observations)"
+        "two-way estimation (fixed or random effects) requires a balanced panel: got \
+         n_obs={n_obs} for n_entities={n_entities} x n_periods={n_periods} \
+         (expected {expected} observations)"
     )]
     UnbalancedPanelForTwoWay {
         n_obs: usize,
@@ -210,15 +208,6 @@ pub enum PanelError {
     /// エラーとしてここで担保する。
     #[error("two-way fixed effects requires the `time` option to be set")]
     TwoWayRequiresTime,
-
-    /// REでDriscoll-Kraay型パネルHAC（`ReCovType::Dk`、3.1節）を指定したのに、時点列
-    /// （`ReInput::time()`、`REOptions.dk_time`由来）が指定されていない。
-    ///
-    /// DKは時点ごとにクロスセクション和を取ってからHACカーネルを適用するため時点列が必須
-    /// （`TwoWayRequiresTime`と同型の「条件付き必須」パターン）。FEの`FeCovType::Dk`は型で
-    /// 時点列（`time: TimeKeys`）を必須にしているため、このエラーはREでのみ発生する。
-    #[error("Driscoll-Kraay panel HAC requires the `dk_time` option to be set")]
-    DkRequiresTime,
 
     /// `FeCovType::Dk`の明示的な`bandwidth`が`[0, t)`の範囲外（`t`はユニークな時点数）。
     ///
@@ -871,6 +860,76 @@ pub(crate) fn quasi_demean_column(col: &[f64], entity: &GroupCodes, theta: &[f64
         .collect()
 }
 
+/// 2-way REのGLS変換の3つの重み（`re-spec.md`5章）。
+///
+/// バランスパネルでは全観測で共通の値で、変換は`y - θ₁ȳᵢ. - θ₂ȳ.ₜ + θ₃ȳ..`。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct TwoWayTheta {
+    /// entity平均`ȳᵢ.`にかかる重み`θ₁`。
+    pub(crate) entity: f64,
+    /// time平均`ȳ.ₜ`にかかる重み`θ₂`。
+    pub(crate) time: f64,
+    /// 総平均`ȳ..`にかかる重み`θ₃`（`θ₁`と`θ₂`の積ではなく、`θ₁ + θ₂ - 1 + σ_ε/σ₄`）。
+    pub(crate) total: f64,
+}
+
+/// 2-way RE（バランスパネル）のGLS変換`col - θ₁ȳᵢ. - θ₂ȳ.ₜ + θ₃ȳ..`を1列に適用する。
+///
+/// `quasi_demean_column`は1つのグルーピングしか扱えず、FEの2-wayのように「entityで
+/// quasi-demean→その結果をtimeでquasi-demean」の2段階適用（θ₁・θ₂だけを使う）では
+/// `θ₃`が合わずGLS変換にならない（`θ₃ ≠ θ₁θ₂`）ため、3つの平均を同時に引く専用の関数を
+/// 用意した。θ=1・1・1なら2-way within変換（二重デミーニング）になる。
+///
+/// 平均はバランスパネルを前提に`GroupCodes::counts()`で割る（総平均は`n`で割る）。
+/// バランスパネルであることの検証は呼び出し側の責務（`validate_balanced_panel`）。
+///
+/// # Panics
+/// `entity`・`time`の観測数が`col.len()`と一致しない場合（`quasi_demean_column`と同じ内部契約）。
+pub(crate) fn quasi_demean_two_way(
+    col: &[f64],
+    entity: &GroupCodes,
+    time: &GroupCodes,
+    theta: TwoWayTheta,
+) -> Vec<f64> {
+    assert_eq!(
+        entity.nobs(),
+        col.len(),
+        "entity length must match column length (ReInput contract)"
+    );
+    assert_eq!(
+        time.nobs(),
+        col.len(),
+        "time length must match column length (ReInput contract)"
+    );
+
+    let mut entity_sums = vec![0.0_f64; entity.n_groups()];
+    let mut time_sums = vec![0.0_f64; time.n_groups()];
+    let mut total = 0.0_f64;
+    for ((value, &e), &t) in col.iter().zip(entity.codes()).zip(time.codes()) {
+        entity_sums[e] += *value;
+        time_sums[t] += *value;
+        total += *value;
+    }
+    let grand_mean = total / col.len() as f64;
+    let entity_shift: Vec<f64> = entity_sums
+        .iter()
+        .zip(entity.counts())
+        .map(|(sum, &count)| theta.entity * (sum / count as f64))
+        .collect();
+    let time_shift: Vec<f64> = time_sums
+        .iter()
+        .zip(time.counts())
+        .map(|(sum, &count)| theta.time * (sum / count as f64))
+        .collect();
+    let grand_shift = theta.total * grand_mean;
+
+    col.iter()
+        .zip(entity.codes())
+        .zip(time.codes())
+        .map(|((value, &e), &t)| value - entity_shift[e] - time_shift[t] + grand_shift)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1040,8 +1099,8 @@ mod tests {
                 expected: 40,
             }
             .to_string(),
-            "two-way fixed effects requires a balanced panel: got n_obs=39 for \
-             n_entities=10 x n_periods=4 (expected 40 observations)"
+            "two-way estimation (fixed or random effects) requires a balanced panel: got \
+             n_obs=39 for n_entities=10 x n_periods=4 (expected 40 observations)"
         );
         assert_eq!(
             PanelError::ZeroVarianceAfterDemeaning {

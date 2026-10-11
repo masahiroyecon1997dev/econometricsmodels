@@ -389,7 +389,7 @@ use crate::panel::common::{
     quasi_demean_column, resolve_dk_bandwidth, validate_dk_periods_cover_tested_coefficients,
     validate_panel_input,
 };
-use crate::panel::re::ReInput;
+use crate::panel::re::{ReEffects, ReInput};
 use crate::shared::covariance::leverages;
 use crate::shared::error::CommonError;
 use crate::shared::goodness_of_fit::gaussian_goodness_of_fit;
@@ -514,8 +514,8 @@ impl FeInput {
         })
     }
 
-    /// REの分散成分推定（`swamy_arora_variance_components`）用の1-way FE入力（`time`なし）を、
-    /// `ReInput`の`y`・`x`・`entity`から作る。`ReInput`が既に持つエンティティコードを
+    /// REの分散成分推定（`swamy_arora_variance_components`）用のFE入力を、
+    /// `ReInput`の`y`・`x`・`entity`（2-wayなら`time`も）から作る。`ReInput`が既に持つエンティティコードを
     /// 再利用し作り直さない。`ReInput::from_columns`が同じ次元検証を済ませているため
     /// 検証は不要で、`entity`とコードの対応も`ReInput`が保証する（別々の引数で受けて
     /// 食い違う余地を作らない）。
@@ -523,7 +523,10 @@ impl FeInput {
     /// `columns`は`input.x()`のうちFEに渡す列の添字（昇順）。REは時間不変の列を許容するため、
     /// 内部のFE推定にはwithin変換後の分散がある列だけを渡す（`time_varying_regressor_indices`）。
     /// FEは分散ゼロの列を拒否するため、全列を渡すと時間不変の列でREごと失敗する。
-    pub(crate) fn from_re_input(input: &ReInput, columns: &[usize]) -> Self {
+    ///
+    /// `effects`が`TwoWay`のときだけ`ReInput`の`time`（2-wayの時間次元）を引き継ぐ
+    /// （1-wayでは`time`があっても使わない）。
+    pub(crate) fn from_re_input(input: &ReInput, columns: &[usize], effects: ReEffects) -> Self {
         Self {
             y: input.y().to_vec(),
             x: columns.iter().map(|&j| input.x()[j].clone()).collect(),
@@ -531,7 +534,10 @@ impl FeInput {
                 .iter()
                 .map(|&j| input.x_names()[j].clone())
                 .collect(),
-            time: None,
+            time: match effects {
+                ReEffects::OneWay => None,
+                ReEffects::TwoWay => input.time_keys().cloned(),
+            },
             dep_var_name: input.dep_var_name().to_string(),
             entity_codes: input.entity_codes().clone(),
         }
@@ -1570,7 +1576,10 @@ pub fn validate_no_singleton_groups_two_way(input: &FeInput) -> Result<(), Panel
 /// 複数のsingletonグループが存在する場合は、観測順で最初に現れるグループのみを報告する
 /// （`validate_no_zero_variance_regressors`の「最初の1件を報告」方針と統一）。観測数は
 /// `FeInput`の構築時に作ったコード（`GroupCodes::counts`）をそのまま使う。
-fn reject_singleton_group(dimension: PanelDimension, ids: &GroupCodes) -> Result<(), PanelError> {
+pub(crate) fn reject_singleton_group(
+    dimension: PanelDimension,
+    ids: &GroupCodes,
+) -> Result<(), PanelError> {
     // 観測順で最初に現れたsingletonを報告する（旧実装の`String`版と同じ選び方）。
     for &c in ids.codes() {
         if ids.counts()[c] == 1 {
@@ -1623,6 +1632,32 @@ pub fn validate_no_zero_variance_regressors(
         }
     }
     Ok(())
+}
+
+/// 2-way within変換後に分散がある列の添字を昇順で返す（`time_varying_regressor_indices`の
+/// 2-way版）。2-wayのwithin変換は「entityでquasi-demean→timeでquasi-demean」の2段階
+/// （`within_transform_two_way`）で、バランスパネルで閉形式の二重デミーニングと一致する。
+/// 時点間でのみ（個体間でのみ）変わる列は2-way within変換後に全ゼロ列になり、時間不変の列と
+/// 同じく「分散ゼロ」と判定される。
+///
+/// **バランスパネルであることの検証はしない**（呼び出し側が`validate_balanced_panel`で
+/// 済ませている前提。不均衡だと2段階適用は二重デミーニングと一致しない）。
+pub(crate) fn two_way_time_varying_regressor_indices(
+    x: &[Vec<f64>],
+    entity: &GroupCodes,
+    time: &GroupCodes,
+) -> Vec<usize> {
+    let entity_theta = vec![1.0; entity.n_groups()];
+    let time_theta = vec![1.0; time.n_groups()];
+    x.iter()
+        .enumerate()
+        .filter(|(_, original)| {
+            let by_entity = quasi_demean_column(original, entity, &entity_theta);
+            let transformed = quasi_demean_column(&by_entity, time, &time_theta);
+            !column_is_zero_variance(original, &transformed)
+        })
+        .map(|(j, _)| j)
+        .collect()
 }
 
 /// `x`の各列のうち、1-way within変換（`entity`でθ=1のquasi-demean）後に分散がある列
@@ -1699,7 +1734,10 @@ fn column_is_zero_variance(original: &[f64], transformed: &[f64]) -> bool {
 ///
 /// `entity.nobs() == time.nobs()`は`FeInput::from_columns`が既に保証している契約
 /// （呼び出し側は常に同じ`FeInput`からこの2つを渡す）。
-fn validate_balanced_panel(entity: &GroupCodes, time: &GroupCodes) -> Result<(), PanelError> {
+pub(crate) fn validate_balanced_panel(
+    entity: &GroupCodes,
+    time: &GroupCodes,
+) -> Result<(), PanelError> {
     debug_assert_eq!(
         entity.nobs(),
         time.nobs(),

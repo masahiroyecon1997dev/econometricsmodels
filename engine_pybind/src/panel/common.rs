@@ -44,7 +44,7 @@ pub(crate) fn validate_dk_time_role(y: &str, entity: &str, dk_time: Option<&str>
 /// - `Common`: `common_error_to_pyerr`へ委譲。
 /// - FE/RE固有のバリデーションエラー（`IdentifierDimensionMismatch`・
 ///   `InsufficientDegreesOfFreedom`・`SingletonGroup`・`UnbalancedPanelForTwoWay`・
-///   `ZeroVarianceAfterDemeaning`・`TwoWayRequiresTime`・`DkRequiresTime`・
+///   `ZeroVarianceAfterDemeaning`・`TwoWayRequiresTime`・
 ///   `InvalidDkBandwidth`・`InsufficientDkPeriods`・`InsufficientDkPeriodsForInference`）は
 ///   いずれも入力・オプションの不正なので`ValidationError`（`InsufficientDkPeriods`・
 ///   `InsufficientDkPeriodsForInference`は追加。`InvalidDkBandwidth`と同じ「DKのバンド幅・
@@ -80,7 +80,6 @@ pub(crate) fn panel_error_to_pyerr(err: PanelError) -> PyErr {
         | PanelError::UnbalancedPanelForTwoWay { .. }
         | PanelError::ZeroVarianceAfterDemeaning { .. }
         | PanelError::TwoWayRequiresTime
-        | PanelError::DkRequiresTime
         | PanelError::InvalidDkBandwidth { .. }
         | PanelError::InsufficientDkPeriods { .. }
         | PanelError::InsufficientDkPeriodsForInference { .. }

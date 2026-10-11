@@ -40,9 +40,12 @@ __all__ = ["RE", "REOptions", "REResults"]
 class RE:
     """Random effects (Swamy-Arora GLS) panel regression estimator.
 
-    Unlike FE, RE has an intercept and supports entity-direction random
-    effects only (`docs/spec/panel-common.md` section
-    7.6, two-way RE is out of scope for v1).
+    Unlike FE, RE has an intercept. By default it estimates one-way
+    (entity) random effects. Setting `REOptions.time` requests two-way
+    (entity + time) random effects, which requires a balanced panel
+    (`ValidationError` otherwise). For two-way effects the Hausman test
+    and the panel R² (within / between / overall) are not available
+    yet: `hausman_*` are `None` and `r_squared_*` are `NaN`.
 
     Args:
         data: A polars DataFrame containing the dependent variable,
@@ -99,8 +102,9 @@ class RE:
                 builtin exception, not a `ValidationError`.
             ValidationError: The input or options are invalid (`x` is
                 empty, a column is missing, contains missing values or
-                NaN/infinity, `y`/`x`/`entity` overlap, `dk_time` equal to
-                `y` or `entity`,
+                NaN/infinity, `y`/`x`/`entity`/`time` overlap, `dk_time`
+                equal to `y` or `entity`, a two-way model (`time` set) on
+                an unbalanced panel or with a singleton time period,
                 insufficient observations, `confidence_level` out of
                 range, an unknown `cov_type` (or `cov_type="hc0"`,
                 unsupported for RE), `dk_time` specified with a
@@ -153,7 +157,8 @@ class REResults:
     of the internal one-way FE regression and of the within-transformed
     regressors in the auxiliary regression, so `hausman_df` is the
     number of time-varying regressors. All three are `None` only when
-    there are no time-varying regressors to compare. If the auxiliary
+    there are no time-varying regressors to compare, or for two-way
+    effects, where the test is not available yet. If the auxiliary
     regression cannot be computed (rank-deficient design, or a
     structurally singular robust covariance such as too few clusters or
     periods for the auxiliary slopes), `fit()` raises
@@ -253,6 +258,14 @@ class REResults:
         return self._raw.n_entities
 
     @property
+    def n_periods(self) -> int | None:
+        """Number of unique time periods (two-way effects only; `None`
+        for one-way, also when only `REOptions.dk_time` is given).
+        Two-way requires a balanced panel, so this equals the number of
+        observations per entity."""
+        return self._raw.n_periods
+
+    @property
     def cov_type(self) -> str:
         """Standard error type actually used (normalized to lowercase)."""
         return self._raw.cov_type
@@ -316,17 +329,20 @@ class REResults:
         unrelated to RE's own Swamy-Arora quasi-demeaning). Only the
         coefficients of time-varying regressors enter the fitted
         values (a time-invariant regressor is zero after demeaning),
-        so it is `0.0` when every regressor is time-invariant."""
+        so it is `0.0` when every regressor is time-invariant. `NaN`
+        for two-way effects (not available yet)."""
         return self._raw.r_squared_within
 
     @property
     def r_squared_between(self) -> float:
-        """Between R² (based on entity-mean variables)."""
+        """Between R² (based on entity-mean variables). `NaN` for
+        two-way effects (not available yet)."""
         return self._raw.r_squared_between
 
     @property
     def r_squared_overall(self) -> float:
-        """Overall R² (based on the untransformed variables)."""
+        """Overall R² (based on the untransformed variables). `NaN` for
+        two-way effects (not available yet)."""
         return self._raw.r_squared_overall
 
     @property

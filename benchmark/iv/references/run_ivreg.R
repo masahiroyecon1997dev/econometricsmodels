@@ -198,8 +198,8 @@ if (is.null(diag_table_wu)) {
 }
 
 result <- list(
-  coef = as.list(coefs),
-  se = as.list(ses),
+  params = as.list(coefs),
+  std_errors = as.list(ses),
   test_stats = as.list(test_stats),
   p_values = as.list(p_values),
   conf_int = mapply(

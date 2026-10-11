@@ -124,8 +124,10 @@ def _check_result(
     """
     assert res.stat_df == expected_df, label
     assert (res.f_df_num, res.f_df_denom) == (n_slopes, expected_df), label
-    _assert_dict_close(res.params, ref["coef"], f"{label}/coef")
-    _assert_dict_close(res.std_errors, ref["se"], f"{label}/se")
+    _assert_dict_close(res.params, ref["params"], f"{label}/params")
+    _assert_dict_close(
+        res.std_errors, ref["std_errors"], f"{label}/std_errors"
+    )
     _assert_dict_close(
         res.test_stats, ref["test_stats"], f"{label}/test_stats"
     )

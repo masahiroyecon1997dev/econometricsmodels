@@ -120,8 +120,10 @@ _assert_dict_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
 def _check_result(
     res, ref: dict, label: str, *, check_overid: bool = True
 ) -> None:
-    _assert_dict_close(res.params, ref["coef"], f"{label}/coef")
-    _assert_dict_close(res.std_errors, ref["se"], f"{label}/se")
+    _assert_dict_close(res.params, ref["params"], f"{label}/params")
+    _assert_dict_close(
+        res.std_errors, ref["std_errors"], f"{label}/std_errors"
+    )
     _assert_dict_close(
         res.test_stats, ref["test_stats"], f"{label}/test_stats"
     )
@@ -240,8 +242,8 @@ def test_cluster_matches_linearmodels(fixtures):
     ).fit()
 
     ref = fixtures["baseline"]["classical"]["cluster"]
-    _assert_dict_close(res.params, ref["coef"], "cluster/coef")
-    _assert_dict_close(res.std_errors, ref["se"], "cluster/se")
+    _assert_dict_close(res.params, ref["params"], "cluster/params")
+    _assert_dict_close(res.std_errors, ref["std_errors"], "cluster/std_errors")
 
 
 def test_cluster_imbalanced_matches_linearmodels(fixtures):
@@ -267,8 +269,10 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
     ).fit()
 
     ref = fixtures["baseline"]["classical"]["cluster_imbalanced"]
-    _assert_dict_close(res.params, ref["coef"], "cluster_imbalanced/coef")
-    _assert_dict_close(res.std_errors, ref["se"], "cluster_imbalanced/se")
+    _assert_dict_close(res.params, ref["params"], "cluster_imbalanced/params")
+    _assert_dict_close(
+        res.std_errors, ref["std_errors"], "cluster_imbalanced/std_errors"
+    )
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)

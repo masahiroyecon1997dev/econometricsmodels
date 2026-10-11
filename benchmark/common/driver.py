@@ -5,7 +5,7 @@
 `MethodBenchmarkSpec` / `build_fixture_json`（メインループのデータ駆動化）は
 見送った——OLS〜IV/IV-GMM の6手法すべて軽量な共有ヘルパー（本関数・
 `benchmark.linear.references.r.run_lm_r`・`benchmark.common.reference.r` の
-`run_r`/`normalize_names`・`extract_coef_se`）で移行でき、dataclass Spec 層を
+`run_r`/`normalize_names`・`extract_params_std_errors`）で移行でき、dataclass Spec 層を
 足す必要が生じなかったため（rule of three 未達）。
 """
 

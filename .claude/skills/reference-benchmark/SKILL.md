@@ -30,7 +30,7 @@ allowed-tools: Read, Write, Bash(python3:*), Bash(Rscript:*), Bash(pytest:*)
   - `dgp_constants.py`: 3系統のDGPで共通の誤差項・スケール倍率の定数。
   - `constants.py`: `SYNTHETIC_FORMULA`・`MROZ_FORMULA`・`WEIGHT_COLUMN_NAME`。
   - `driver.py`: `run_fixture_cli`（11個の`generate_*_fixtures.py`で一字一句同じだった`__main__`＝引数パース→`build_fixtures()`→JSON書き出し）。
-  - `reference/extract.py`: `extract_coef_se`（`model.params`/`model.bse`→`{"coef":..., "se":...}`）。
+  - `reference/extract.py`: `extract_params_std_errors`（`model.params`/`model.bse`→`{"params":..., "std_errors":...}`）。
   - `reference/r.py`: `run_r`（`Rscript`をsubprocess起動）・`normalize_names`（R出力のパラメータ名正規化・キー順固定）。5系統の`_run_r`/`_normalize_names`コピーの共通化。
   - `load_wooldridge.py`: Wooldridgeデータセットをpolars DataFrameとして読む（`pip install wooldridge`が必要）。
   - `_common.R`: `coeftest()`からの係数・標準誤差抽出とロバストWald F検定（`linear/references/run_lm_crosscheck.R`と`iv/references/run_ivreg.R`で同一だった後処理）。各`.R`が`commandArgs()`の`--file=`から自ディレクトリを特定して`source()`する。
@@ -45,7 +45,7 @@ allowed-tools: Read, Write, Bash(python3:*), Bash(Rscript:*), Bash(pytest:*)
   - `statsmodels_ref.py`（`linear`/`nonlinear`、statsmodelsが主リファレンスの系統）: 主リファレンス。1回呼べば1ケース分の結果を返す。`linear`は`--weight-col`指定でWLS（`smf.wls`）にも対応、`nonlinear`は`--model logit`/`--model probit`で切り替える。**ライブラリ名（`statsmodels`）と同名にすると`sys.path`経由で衝突するため`_ref`サフィックス付き**（旧`run_statsmodels_benchmark.py`同名衝突バグの再発防止）。
   - `linearmodels_ref.py`（`iv`、主リファレンスがlinearmodelsのため）: 2SLSは`run()`、GMMは`run_gmm()`（同ファイル）。
   - `r.py`（各系統）: `common/reference/r.py`の`run_r`/`normalize_names`を呼ぶ薄い系統別ラッパー（`run_lm_r`/`run_glm_r`/`run_ivreg_r`/`run_momentfit_r`）。
-- `benchmark/<系統>/fixtures/generate_<手法名>_fixtures.py`（(c) フィクスチャドライバ層）: 対象手法の全シナリオ×全オプション＋特殊ケースを回し、`tests/fixtures/benchmarks/<手法名>.json`へ書き出す。生成スクリプト（`benchmark/`側）と生成物（`tests/`側）を分けている（`testing-policy.md`「ベンチマーク値のフィクスチャ化」参照）。`__main__`は`run_fixture_cli`、`coef`/`se`抽出は`extract_coef_se`、Rクロスチェック呼び出しは`references/r.py`の薄いラッパー経由で共通化。`linear/fixtures/generate_ols_fixtures.py`（statsmodels主リファレンス）・`generate_ols_crosscheck_fixtures.py`（Rクロスチェック）が実装例。手法ごとに別ファイル（`generate_logit_fixtures.py`/`generate_probit_fixtures.py`等）。
+- `benchmark/<系統>/fixtures/generate_<手法名>_fixtures.py`（(c) フィクスチャドライバ層）: 対象手法の全シナリオ×全オプション＋特殊ケースを回し、`tests/fixtures/benchmarks/<手法名>.json`へ書き出す。生成スクリプト（`benchmark/`側）と生成物（`tests/`側）を分けている（`testing-policy.md`「ベンチマーク値のフィクスチャ化」参照）。`__main__`は`run_fixture_cli`、`params`/`std_errors`抽出は`extract_params_std_errors`、Rクロスチェック呼び出しは`references/r.py`の薄いラッパー経由で共通化。`linear/fixtures/generate_ols_fixtures.py`（statsmodels主リファレンス）・`generate_ols_crosscheck_fixtures.py`（Rクロスチェック）が実装例。手法ごとに別ファイル（`generate_logit_fixtures.py`/`generate_probit_fixtures.py`等）。
 - Rスクリプトはパッケージ単位で1ファイルに分けている（旧`run_r_benchmark.R`の単一ディスパッチャから分割）。cov_type→vcov分岐自体（lmはHC0-3・weight対応、ivregはHC0-1のみ対応等の差分がある）は共通化していない。
   - `benchmark/linear/references/run_lm_crosscheck.R`: base R `lm` + sandwich/lmtestによるOLS/WLS標準誤差クロスチェック（classical/HC0-3/cluster/HAC対応、`weights`引数でWLSにも対応）。動作検証済み、正式なクロスチェックとして使用中。
   - `benchmark/linear/references/run_lm_predict_crosscheck.R`: `predict()`のクロスチェック用。

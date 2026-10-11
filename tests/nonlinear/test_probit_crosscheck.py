@@ -132,9 +132,11 @@ def _check_result(
     rtol_coef: float = RTOL,
 ) -> None:
     _assert_dict_close(
-        res.params, ref["coef"], f"{label}/coef", rtol=rtol_coef
+        res.params, ref["params"], f"{label}/params", rtol=rtol_coef
     )
-    _assert_dict_close(res.std_errors, ref["se"], f"{label}/se", rtol=rtol)
+    _assert_dict_close(
+        res.std_errors, ref["std_errors"], f"{label}/std_errors", rtol=rtol
+    )
     _assert_dict_close(
         res.test_stats, ref["test_stats"], f"{label}/test_stats", rtol=rtol
     )

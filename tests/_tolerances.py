@@ -369,7 +369,7 @@ TOLERANCES: dict[str, dict[str, float]] = {
     # `benchmark/panel/references/run_plm_fe_benchmark.R`・
     # `benchmark/panel/fixtures/generate_fe_plm_crosscheck_fixtures.py`参照）。
     # fixestと同じ小標本補正・自由度を別実装から再現するため、バランス・不均衡
-    # パネルとも機械精度で一致する。実測最大相対誤差: coef 7.5e-13・se 3.8e-13・
+    # パネルとも機械精度で一致する。実測最大相対誤差: params 7.5e-13・std_errors 3.8e-13・
     # p値 1.5e-11・F統計量 5.3e-11（high_condition_number/cluster）・F p値 9.2e-10
     # （many_regressors/cluster、p値が裾のため統計量の丸め誤差が増幅される）。
     # `rtol_p_value`はF p値の実測に余裕を載せた値（`fe_crosscheck`と同じ値）。
@@ -382,7 +382,7 @@ TOLERANCES: dict[str, dict[str, float]] = {
     # REのcluster（t検定の自由度`G-1`）のstatsmodelsクロスチェック。plmの準偏差変換
     # 済みデータにstatsmodelsのOLS（cluster、use_t=True）を当てるため、バランス
     # パネルでは本実装と機械精度で一致する（`benchmark/panel/references/
-    # statsmodels_ref.py`参照）。実測最大相対誤差: coef 2.4e-13・se 4.1e-13・
+    # statsmodels_ref.py`参照）。実測最大相対誤差: params 2.4e-13・std_errors 4.1e-13・
     # p値 6.0e-12。p値は絶対誤差の下限なしの相対誤差のみで比較する。
     # `rtol_p_value`はF p値の裾での増幅に備え`fe_crosscheck`と揃えた値。
     "re_statsmodels_cluster": {
@@ -396,7 +396,7 @@ TOLERANCES: dict[str, dict[str, float]] = {
     # `benchmark/panel/fixtures/generate_re_crosscheck_fixtures.py`参照）。
     # plmの変量効果分散成分推定（Swamy-Arora）がlinearmodelsと僅かに異なる
     # 実装のため、点推定自体が不均衡パネルで乖離する（実測最大相対誤差:
-    # coef 0.18%・se 0.71%・test_stats 0.67%・p_values 0.56%・conf_int 1.05%、
+    # params 0.18%・std_errors 0.71%・test_stats 0.67%・p_values 0.56%・conf_int 1.05%、
     # baseline/wagepan等のバランスパネルでは機械精度で一致）。FEのfixest
     # クロスチェック（機械精度一致）とは精度の前提が異なるため、実測値に
     # マージンを載せた緩いRTOLを使う。
@@ -429,7 +429,7 @@ TOLERANCES: dict[str, dict[str, float]] = {
         # se・t・p値・信頼区間（実測最大相対誤差）: cluster 2.9e-3（conf_int）・
         # hc2/hc3 1.1e-2（conf_int）・dk 3.7e-2（conf_int、se 0.9%がt分布の
         # 自由度`T-1=5`の裾でp値・信頼区間に増幅される）。
-        # classical・hc1（実測最大相対誤差: se 0.71%・conf_int 1.06%）も同水準。
+        # classical・hc1（実測最大相対誤差: std_errors 0.71%・conf_int 1.06%）も同水準。
         "rtol_unbalanced": {
             "classical": 2e-2,
             "hc1": 2e-2,

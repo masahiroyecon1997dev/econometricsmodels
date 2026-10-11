@@ -370,7 +370,7 @@ common.rs`）:
   `linearmodels`と(`cov_type`, `debiased`)の対応（`classical`↔(`unadjusted`,
   `debiased=True`)、`hc0`↔(`robust`, `debiased=False`)、`hc1`↔(`robust`,
   `debiased=True`)、`cluster`↔(`clustered`, `debiased=True`)、`hac`↔(`kernel`(bartlett),
-  `debiased=False`)）で`coef`/`se`が実質機械精度（実測1e-10以下）で一致する。`hc2`/
+  `debiased=False`)）で`params`/`std_errors`が実質機械精度（実測1e-10以下）で一致する。`hc2`/
   `hc3`は`linearmodels`では検証できない（`linearmodels.iv.covariance`にhc2/hc3相当が
   無い）ため、R `ivreg`+`sandwich::vcovHC(type="HC2"/"HC3")`で検証する。`f_p_value`は
   浮動小数点アンダーフローに近い極小値（1e-9〜1e-12オーダー）のケースで相対誤差比較が

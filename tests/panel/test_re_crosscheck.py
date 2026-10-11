@@ -196,9 +196,11 @@ def _check_result(
     coef_rtol = rtol if coef_rtol is None else coef_rtol
     f_rtol = rtol if f_rtol is None else f_rtol
     _assert_dict_close(
-        res.params, ref["coef"], f"{label}/coef", rtol=coef_rtol
+        res.params, ref["params"], f"{label}/params", rtol=coef_rtol
     )
-    _assert_dict_close(res.std_errors, ref["se"], f"{label}/se", rtol=rtol)
+    _assert_dict_close(
+        res.std_errors, ref["std_errors"], f"{label}/std_errors", rtol=rtol
+    )
     _assert_dict_close(
         res.test_stats, ref["test_stats"], f"{label}/test_stats", rtol=rtol
     )

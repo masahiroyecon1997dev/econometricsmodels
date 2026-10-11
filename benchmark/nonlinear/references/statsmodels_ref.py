@@ -167,8 +167,8 @@ def run(
         conf_high = params + z_crit * se
 
         raw: dict = {
-            "coef": dict(zip(param_names, params.tolist())),
-            "se": dict(zip(param_names, se.tolist())),
+            "params": dict(zip(param_names, params.tolist())),
+            "std_errors": dict(zip(param_names, se.tolist())),
             "test_stats": dict(zip(param_names, z.tolist())),
             "p_values": dict(zip(param_names, p_values.tolist())),
             "conf_int": {
@@ -194,10 +194,12 @@ def run(
 
         ci = fitted.conf_int(alpha=alpha)
         raw = {
-            "coef": {
+            "params": {
                 str(k): float(v) for k, v in fitted.params.to_dict().items()
             },
-            "se": {str(k): float(v) for k, v in fitted.bse.to_dict().items()},
+            "std_errors": {
+                str(k): float(v) for k, v in fitted.bse.to_dict().items()
+            },
             "test_stats": {
                 str(k): float(v) for k, v in fitted.tvalues.to_dict().items()
             },

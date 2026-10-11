@@ -259,8 +259,8 @@ margeff <- list(
 )
 
 result <- list(
-  coef = as.list(coefs),
-  se = as.list(ses),
+  params = as.list(coefs),
+  std_errors = as.list(ses),
   test_stats = as.list(zs),
   p_values = as.list(pvalues),
   conf_low = as.list(conf_low),

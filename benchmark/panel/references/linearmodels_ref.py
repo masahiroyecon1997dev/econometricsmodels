@@ -316,8 +316,8 @@ def run(
     }
 
     result: dict = {
-        "coef": coef,
-        "se": se,
+        "params": coef,
+        "std_errors": se,
         "test_stats": test_stats,
         "p_values": p_values,
         "conf_int": conf_int,
@@ -430,8 +430,8 @@ def run_re(
     }
 
     result: dict = {
-        "coef": coef,
-        "se": se,
+        "params": coef,
+        "std_errors": se,
         "test_stats": test_stats,
         "p_values": p_values,
         "conf_int": conf_int,

@@ -10,7 +10,7 @@ re-export する（サブモジュール構成が変わっても利用側の imp
   `correlated_design_matrix` / `apply_perfect_multicollinearity` /
   `hac_auto_lag` / `validate_choice` / `preview_dataset`（DGPまわり）。
 - `dgp_constants`: 誤差項・スケール倍率の数値定数（直接 import する）。
-- `reference.extract`: `extract_coef_se`（fit結果からの統計量抽出）。
+- `reference.extract`: `extract_params_std_errors`（fit結果からの統計量抽出）。
 - `load_wooldridge`: Wooldridgeデータローダ（直接 import する）。
 """
 
@@ -46,7 +46,7 @@ from benchmark.common.dgp import (
     validate_choice,
 )
 from benchmark.common.driver import run_fixture_cli
-from benchmark.common.reference.extract import extract_coef_se
+from benchmark.common.reference.extract import extract_params_std_errors
 
 __all__ = [
     "APPLE_CLUSTER",
@@ -64,7 +64,7 @@ __all__ = [
     "WEIGHT_COLUMN_NAME",
     "apply_perfect_multicollinearity",
     "correlated_design_matrix",
-    "extract_coef_se",
+    "extract_params_std_errors",
     "freeze_scenarios",
     "hac_auto_lag",
     "imbalanced_cluster_groups",

@@ -113,7 +113,9 @@ def test_fe_dk_matches_fixest_for_any_labels_in_time_order(
     res = _fit_fe(df, "label", two_way=two_way)
 
     ref = reference["two_way" if two_way else "one_way"]["dk"]
-    _assert_close(res.std_errors, ref["se"], f"{relabeling}/se")
+    _assert_close(
+        res.std_errors, ref["std_errors"], f"{relabeling}/std_errors"
+    )
     _assert_close(res.test_stats, ref["test_stats"], f"{relabeling}/t")
     _assert_close(res.p_values, ref["p_values"], f"{relabeling}/p")
 

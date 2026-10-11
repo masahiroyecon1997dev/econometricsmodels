@@ -122,8 +122,10 @@ _assert_dict_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
 
 
 def _check_result(res, ref: dict, label: str) -> None:
-    _assert_dict_close(res.params, ref["coef"], f"{label}/coef")
-    _assert_dict_close(res.std_errors, ref["se"], f"{label}/se")
+    _assert_dict_close(res.params, ref["params"], f"{label}/params")
+    _assert_dict_close(
+        res.std_errors, ref["std_errors"], f"{label}/std_errors"
+    )
     _assert_dict_close(
         res.test_stats, ref["test_stats"], f"{label}/test_stats"
     )
@@ -223,8 +225,8 @@ def test_cluster_matches_linearmodels(fixtures):
     ).fit()
 
     ref = fixtures["baseline"]["cluster"]
-    _assert_dict_close(res.params, ref["coef"], "cluster/coef")
-    _assert_dict_close(res.std_errors, ref["se"], "cluster/se")
+    _assert_dict_close(res.params, ref["params"], "cluster/params")
+    _assert_dict_close(res.std_errors, ref["std_errors"], "cluster/std_errors")
 
 
 def test_cluster_imbalanced_matches_linearmodels(fixtures):
@@ -247,8 +249,10 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
     ).fit()
 
     ref = fixtures["baseline"]["cluster_imbalanced"]
-    _assert_dict_close(res.params, ref["coef"], "cluster_imbalanced/coef")
-    _assert_dict_close(res.std_errors, ref["se"], "cluster_imbalanced/se")
+    _assert_dict_close(res.params, ref["params"], "cluster_imbalanced/params")
+    _assert_dict_close(
+        res.std_errors, ref["std_errors"], "cluster_imbalanced/std_errors"
+    )
 
 
 def test_cluster_g2_matches_linearmodels(fixtures):
@@ -271,8 +275,10 @@ def test_cluster_g2_matches_linearmodels(fixtures):
     ).fit()
 
     ref = fixtures["baseline"]["cluster_g2"]
-    _assert_dict_close(res.params, ref["coef"], "cluster_g2/coef")
-    _assert_dict_close(res.std_errors, ref["se"], "cluster_g2/se")
+    _assert_dict_close(res.params, ref["params"], "cluster_g2/params")
+    _assert_dict_close(
+        res.std_errors, ref["std_errors"], "cluster_g2/std_errors"
+    )
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)
@@ -393,8 +399,12 @@ def test_no_intercept_cluster_matches_linearmodels(fixtures):
 
     assert "const" not in res.param_names
     ref = fixtures["no_intercept"]["baseline"]["cluster"]
-    _assert_dict_close(res.params, ref["coef"], "no_intercept/cluster/coef")
-    _assert_dict_close(res.std_errors, ref["se"], "no_intercept/cluster/se")
+    _assert_dict_close(
+        res.params, ref["params"], "no_intercept/cluster/params"
+    )
+    _assert_dict_close(
+        res.std_errors, ref["std_errors"], "no_intercept/cluster/std_errors"
+    )
 
 
 # 完全な多重共線性・極端なスケール差（`ComputationError` パス）は

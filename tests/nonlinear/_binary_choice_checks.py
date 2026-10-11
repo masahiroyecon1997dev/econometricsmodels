@@ -1303,8 +1303,10 @@ class BinaryChoiceReferenceConfig:
 def check_result(
     config: BinaryChoiceReferenceConfig, res, ref: dict, label: str
 ) -> None:
-    config.assert_dict_close(res.params, ref["coef"], f"{label}/coef")
-    config.assert_dict_close(res.std_errors, ref["se"], f"{label}/se")
+    config.assert_dict_close(res.params, ref["params"], f"{label}/params")
+    config.assert_dict_close(
+        res.std_errors, ref["std_errors"], f"{label}/std_errors"
+    )
     config.assert_dict_close(
         res.test_stats, ref["test_stats"], f"{label}/test_stats"
     )
@@ -1531,8 +1533,12 @@ def check_solver_matches_statsmodels(
 
     ref = fixtures["solver"][solver]
     label = f"solver/{solver}"
-    config.assert_dict_close_method(res.params, ref["coef"], f"{label}/coef")
-    config.assert_dict_close_method(res.std_errors, ref["se"], f"{label}/se")
+    config.assert_dict_close_method(
+        res.params, ref["params"], f"{label}/params"
+    )
+    config.assert_dict_close_method(
+        res.std_errors, ref["std_errors"], f"{label}/std_errors"
+    )
     assert res.converged == ref["converged"], f"{label}/converged"
 
 

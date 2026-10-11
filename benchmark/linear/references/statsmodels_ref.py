@@ -34,7 +34,7 @@ from datetime import UTC, datetime
 
 import polars as pl
 
-from benchmark.common import extract_coef_se, load_frozen_dataset
+from benchmark.common import extract_params_std_errors, load_frozen_dataset
 from benchmark.common.load_wooldridge import load as _load_wooldridge
 from benchmark.common.reference.normalize import normalize_names
 from benchmark.linear.constants import HAC_MAXLAGS
@@ -49,7 +49,7 @@ def extract_full_fit_stats(model, confidence_level: float = 0.95) -> dict:
     （t値・p値・信頼区間・ロバストWald F検定）・適合度統計量まで含めたフルの
     辞書を取り出す。`run()`本体と、クラスター専用フィクスチャ生成
     （`generate_ols_fixtures.py`の`_run_cluster_case`等）の双方で共有する
-    （従来クラスター側は`coef`/`se`のみでt値・p値・信頼区間が未検証だった非対称の
+    （従来クラスター側は`params`/`std_errors`のみでt値・p値・信頼区間が未検証だった非対称の
     解消）。
 
     Args:
@@ -61,7 +61,7 @@ def extract_full_fit_stats(model, confidence_level: float = 0.95) -> dict:
         confidence_level: 信頼区間の信頼水準。
 
     Returns:
-        `coef`/`se`/`test_stats`/`p_values`/`conf_int`/`r_squared`/
+        `params`/`std_errors`/`test_stats`/`p_values`/`conf_int`/`r_squared`/
         `adj_r_squared`/`f_statistic`/`f_p_value`/`aic`/`bic`/
         `log_likelihood`/`nobs`/`df_resid`を含む辞書（パラメータ名の
         "Intercept"→"const"正規化済み）。
@@ -70,7 +70,7 @@ def extract_full_fit_stats(model, confidence_level: float = 0.95) -> dict:
     ci = model.conf_int(alpha=alpha)
 
     raw: dict = {
-        **extract_coef_se(model),
+        **extract_params_std_errors(model),
         "test_stats": {
             str(k): float(v) for k, v in model.tvalues.to_dict().items()
         },

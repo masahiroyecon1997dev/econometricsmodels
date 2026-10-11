@@ -25,11 +25,11 @@ def normalize_names(
     """リファレンス実装の出力パラメータ名を本実装の`param_names`規則
     （切片="const"）へ揃える。
 
-    出力キーの順序は`coef, se, <stat_key>, p_values, conf_int,
+    出力キーの順序は`params, std_errors, <stat_key>, p_values, conf_int,
     <scalar_keysの順>, (margeff)`で固定（既存フィクスチャと同じ並び）。
 
     Args:
-        raw: `coef`/`se`/`<stat_key>`/`p_values`（いずれもパラメータ名
+        raw: `params`/`std_errors`/`<stat_key>`/`p_values`（いずれもパラメータ名
             キーのdict）と、`conf_int`（`conf_from_low_high=False`時）
             または`conf_low`/`conf_high`（`conf_from_low_high=True`時）を
             持つdict。
@@ -54,8 +54,8 @@ def normalize_names(
         return {fix(k): v for k, v in mapping.items()}
 
     result: dict = {
-        "coef": fixed(raw["coef"]),
-        "se": fixed(raw["se"]),
+        "params": fixed(raw["params"]),
+        "std_errors": fixed(raw["std_errors"]),
         stat_key: fixed(raw[stat_key]),
         "p_values": fixed(raw["p_values"]),
     }

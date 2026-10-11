@@ -34,7 +34,7 @@ def run_re_cluster(
             する。`transformed["source_row"]`で準偏差変換済みの行に対応づける。
 
     Returns:
-        `coef`/`se`/`test_stats`/`p_values`/`conf_int`（本実装の名前規約、
+        `params`/`std_errors`/`test_stats`/`p_values`/`conf_int`（本実装の名前規約、
         切片は`"const"`）と、statsmodelsが決めた推論の自由度
         `df_resid_inference`（`G-1`）、傾き係数の同時F検定
         （`f_statistic`/`f_p_value`/`f_df_denom`）。
@@ -66,8 +66,8 @@ def run_re_cluster(
         restriction[i, names.index(n)] = 1.0
     f_test = res.f_test(restriction)
     return {
-        "coef": {n: float(res.params[n]) for n in names},
-        "se": {n: float(res.bse[n]) for n in names},
+        "params": {n: float(res.params[n]) for n in names},
+        "std_errors": {n: float(res.bse[n]) for n in names},
         "test_stats": {n: float(res.tvalues[n]) for n in names},
         "p_values": {n: float(res.pvalues[n]) for n in names},
         "conf_int": {

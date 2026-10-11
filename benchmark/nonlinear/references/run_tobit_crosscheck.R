@@ -502,8 +502,8 @@ stopifnot(isTRUE(all.equal(
 )))
 
 result <- list(
-  coef = as.list(est),
-  se = as.list(se),
+  params = as.list(est),
+  std_errors = as.list(se),
   test_stats = as.list(z),
   p_values = as.list(pval),
   conf_low = as.list(conf_low),

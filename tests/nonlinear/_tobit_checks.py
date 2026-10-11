@@ -275,8 +275,8 @@ def check_result(
     """
     assert_dict_close(
         res.params,
-        ref["coef"],
-        f"{label}/coef",
+        ref["params"],
+        f"{label}/params",
         rtol=rtol_point,
         atol=atol,
     )
@@ -301,8 +301,8 @@ def check_result(
 
     assert_dict_close(
         res.std_errors,
-        ref["se"],
-        f"{label}/se",
+        ref["std_errors"],
+        f"{label}/std_errors",
         rtol=rtol_inference,
         atol=atol,
     )

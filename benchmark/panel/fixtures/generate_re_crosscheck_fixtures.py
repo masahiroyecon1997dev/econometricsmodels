@@ -324,7 +324,7 @@ def build_fixtures() -> dict:
             "で比較すること（tests/_tolerances.pyのre_crosscheck参照）。t検定"
             "（test_stats/p_values/conf_int）はplmの既定であるz検定（漸近正規"
             "近似）ではなく、本実装と同じt分布（hc2/hc3はdf_resid、clusterはG-1、"
-            "dkはT-1）の式でcoef/seから計算し直している"
+            "dkはT-1）の式でparams/std_errorsから計算し直している"
             "（run_plm_benchmark.Rのコメント参照）。"
             "classical/hc1もplmで計算する（linearmodelsでも検証済みだが独立実装でも"
             "全統計量を検証）。f_statistic/f_p_valueは全cov_typeでplm::pwaldtest"

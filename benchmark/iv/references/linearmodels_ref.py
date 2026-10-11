@@ -13,7 +13,7 @@ benchmarks/data/`に固定済みのCSVを読む（`benchmark/iv/freeze.py`参照
 
 `engine::iv::two_sls`の`cov_type`と`linearmodels.iv.IV2SLS.fit()`の
 `cov_type`/`debiased`の対応は、`baseline`シナリオで実際に`econometricsmodels.IV`と
-突き合わせて実測確認した（`coef`/`se`が相対誤差1e-10程度以下で一致）。
+突き合わせて実測確認した（`params`/`std_errors`が相対誤差1e-10程度以下で一致）。
 
 | engine cov_type | linearmodels cov_type | debiased |
 |---|---|---|
@@ -44,7 +44,7 @@ t(df_resid)分布/F分布（`f_statistic`はqで割る）を使う仕様（`line
 results.IVResults.pvalues`/`f_statistic`のdocstring参照、実装ソースで確認済み）。
 本実装の2SLSは`cov_type`によらず常にt分布・F分布で報告する設計（`iv-spec.md`
 3.2節）のため、`hc0`/`hac`（`debiased=False`）と突き合わせる際は`linearmodels`が
-返す`coef`/`se`のみ使い、t統計量・p値・信頼区間・F統計量は本関数側で
+返す`params`/`std_errors`のみ使い、t統計量・p値・信頼区間・F統計量は本関数側で
 t(df_resid)・F(q, df_resid)分布を使って独自に計算し直す（`debiased`の値に
 関係なく一貫した比較ができるようにするため。`run()`本体のコメント参照）。
 
@@ -268,8 +268,8 @@ def run(
     # 本実装はcov_typeによらず常にt分布（df=df_resid）で推論統計量を報告する
     # （iv-spec.md 3.2節）。`linearmodels`は`debiased=False`のとき正規分布・
     # F統計量は生のカイ二乗形式（qで割らない）を返す仕様のため（`IVResults.pvalues`/
-    # `f_statistic`のdocstring参照、モジュールdocstringの表は`coef`/`se`のみに
-    # ついての対応関係）、coef/seは`linearmodels`の値をそのまま使いつつ、
+    # `f_statistic`のdocstring参照、モジュールdocstringの表は`params`/`std_errors`のみに
+    # ついての対応関係）、params/std_errorsは`linearmodels`の値をそのまま使いつつ、
     # t統計量・p値・信頼区間・F統計量はdf_resid・t分布を使って本実装と同じ規則で
     # 独自に計算し直す（`debiased`の値によらず一貫した比較ができるようにするため）。
     coef = {_fix_name(k): float(v) for k, v in res.params.to_dict().items()}
@@ -335,8 +335,8 @@ def run(
         )
 
     result: dict = {
-        "coef": coef,
-        "se": se,
+        "params": coef,
+        "std_errors": se,
         "test_stats": test_stats,
         "p_values": p_values,
         "conf_int": conf_int,
@@ -436,7 +436,7 @@ def run_gmm(
 
     `run()`のモジュールdocコメントの表（`_COV_TYPE_MAP`）がGMMでもそのまま
     使えることを実測確認済み（`baseline`シナリオ、`weight_type="classical"`で
-    `coef`/`se`が相対誤差1e-10程度以下で一致）。`hc2`/`hc3`が対象外な理由も
+    `params`/`std_errors`が相対誤差1e-10程度以下で一致）。`hc2`/`hc3`が対象外な理由も
     `run()`と同じ（`IVGMMCovariance`が対応する`score_cov_estimator`を持たない）。
 
     ## `iter_limit`と`iter_limit`/`tol`の対応関係
@@ -455,13 +455,13 @@ def run_gmm(
     検定統計量を報告する設計（`iv-spec.md`3.2節、`gmm.rs`のモジュールdoc
     コメント参照）。`linearmodels`の`tstats`/`pvalues`は`run()`と同じく
     `debiased`で分布が切り替わる（`OLSResults.pvalues`のdocstring参照）ため、
-    `coef`/`se`のみ使って本関数側でz分布から独自に計算し直す。
+    `params`/`std_errors`のみ使って本関数側でz分布から独自に計算し直す。
 
     `f_statistic`も同様に`debiased`と連動してF分布形式に切り替わる
     （`_CommonIVResults.f_statistic`のdocstring「Despite name, always
     implemented using a quadratic-form test... If debiased is True, divides
     statistic by number of parameters tested and uses an F-distribution」
-    参照）ため、そのまま使うと`coef`/`se`に必要な`debiased`（cov_typeとの対応
+    参照）ため、そのまま使うと`params`/`std_errors`に必要な`debiased`（cov_typeとの対応
     表通り）と検定統計量に必要な`debiased=False`相当（カイ二乗形式）が両立
     できない。`res.cov`（係数の分散共分散行列）から傾き係数の部分行列を
     切り出し、カイ二乗形式のWald統計量を直接計算し直す（本実装の
@@ -563,8 +563,8 @@ def run_gmm(
     f_p_value = float(1 - scipy_stats.chi2.cdf(f_statistic, q))
 
     result: dict = {
-        "coef": coef,
-        "se": se,
+        "params": coef,
+        "std_errors": se,
         "test_stats": test_stats,
         "p_values": p_values,
         "conf_int": conf_int,

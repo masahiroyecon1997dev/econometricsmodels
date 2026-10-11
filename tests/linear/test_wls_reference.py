@@ -91,8 +91,10 @@ _assert_dict_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
 
 
 def _check_result(res, ref: dict, label: str) -> None:
-    _assert_dict_close(res.params, ref["coef"], f"{label}/coef")
-    _assert_dict_close(res.std_errors, ref["se"], f"{label}/se")
+    _assert_dict_close(res.params, ref["params"], f"{label}/params")
+    _assert_dict_close(
+        res.std_errors, ref["std_errors"], f"{label}/std_errors"
+    )
     _assert_dict_close(
         res.test_stats, ref["test_stats"], f"{label}/test_stats"
     )

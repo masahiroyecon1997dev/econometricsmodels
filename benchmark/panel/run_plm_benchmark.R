@@ -42,11 +42,11 @@
 #
 # `summary(model, vcov=...)`はz値・正規分布p値を返す（plmの`RandomEffects`は
 # 漸近正規近似の検定を既定にしている、実測確認済み）。本実装は常にt分布で
-# 報告する（panel-common.md 3.3節）ため、t統計量・p値・信頼区間はcoef/seから
+# 報告する（panel-common.md 3.3節）ため、t統計量・p値・信頼区間はparams/std_errorsから
 # 本実装と同じt分布の式で計算し直す。自由度は`cov_type`で切り替わり、
 # hc2/hc3は`df_resid`、clusterは`G-1`、dkは`T-1`（fixestの`ssc()`既定
 # `t.df="min"`に合わせた本実装の規約）。
-# **本体はcoef/se（vcovHC/vcovSCCの生の値）であり、t検定への変換は両実装共通の
+# **本体はparams/std_errors（vcovHC/vcovSCCの生の値）であり、t検定への変換は両実装共通の
 # 標準的な式（バグを覆い隠す余地が薄い）のため、この手計算自体が独立性を大きく
 # 損なうものではないと判断した**（AIC/BIC計算での前例（run_lm_crosscheck.R等）と
 # 同型の対応）。ただしclusterの`G-1`・dkの`T-1`という自由度の選択自体は本実装と
@@ -185,8 +185,8 @@ f_p_value_val <- pf(wald_f$statistic, f_df_num, t_df, lower.tail = FALSE)
 
 library(jsonlite)
 result <- list(
-  coef = as.list(coefs),
-  se = as.list(ses),
+  params = as.list(coefs),
+  std_errors = as.list(ses),
   test_stats = as.list(test_stats),
   p_values = as.list(p_values),
   conf_int = mapply(

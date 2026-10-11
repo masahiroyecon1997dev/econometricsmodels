@@ -194,10 +194,10 @@ use statrs::distribution::{ChiSquared, ContinuousCDF, StudentsT};
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use crate::panel::common::{
-    PanelDimension, PanelError, PanelHcVariant, TimeKeys, panel_classical_cov_params,
-    panel_cluster_cov_params, panel_driscoll_kraay_cov_params, panel_hc_cov_params,
-    quasi_demean_column, require_entity_keys, resolve_dk_bandwidth,
-    validate_dk_periods_cover_tested_coefficients, xtx_inverse,
+    PanelError, PanelHcVariant, TimeKeys, panel_classical_cov_params, panel_cluster_cov_params,
+    panel_driscoll_kraay_cov_params, panel_hc_cov_params, quasi_demean_column,
+    resolve_dk_bandwidth, validate_dk_periods_cover_tested_coefficients, validate_panel_input,
+    xtx_inverse,
 };
 use crate::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput};
 use crate::shared::covariance::leverages;
@@ -234,6 +234,7 @@ impl ReInput {
     /// から`ReInput`を組み立てる。`FeInput::from_columns`と同一の次元検証を行う。
     ///
     /// # Errors
+    /// 検査の順序は`validate_panel_input`（`panel/common.rs`、FE/REで共通）が正本。
     /// - いずれかの`x_columns`の長さが`y`と一致しない場合は
     ///   `PanelError::Common(CommonError::DimensionMismatch)`
     /// - `entity`の長さが`y`と一致しない場合は
@@ -310,40 +311,7 @@ impl ReInput {
         time: Option<TimeKeys>,
         dep_var_name: String,
     ) -> Result<Self, PanelError> {
-        debug_assert_eq!(
-            x_columns.len(),
-            x_names.len(),
-            "x_columns and x_names must have the same length"
-        );
-
-        for col in x_columns {
-            if col.len() != y.len() {
-                return Err(CommonError::DimensionMismatch {
-                    y_rows: y.len(),
-                    x_rows: col.len(),
-                }
-                .into());
-            }
-        }
-
-        if entity.nobs() != y.len() {
-            return Err(PanelError::IdentifierDimensionMismatch {
-                dimension: PanelDimension::Entity,
-                y_rows: y.len(),
-                other_rows: entity.nobs(),
-            });
-        }
-
-        if let Some(time) = &time
-            && time.len() != y.len()
-        {
-            return Err(PanelError::IdentifierDimensionMismatch {
-                dimension: PanelDimension::Time,
-                y_rows: y.len(),
-                other_rows: time.len(),
-            });
-        }
-        require_entity_keys(&entity)?;
+        validate_panel_input(y, x_columns, &x_names, &entity, time.as_ref())?;
 
         Ok(Self {
             y: y.to_vec(),
@@ -1461,6 +1429,7 @@ impl ReEstimator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::panel::common::PanelDimension;
     use crate::panel::fe::within_transform_one_way;
 
     fn strings(values: &[&str]) -> Vec<String> {

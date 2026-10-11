@@ -509,9 +509,61 @@ fn check_key_lengths(labels: usize, values: usize) -> Result<(), PanelError> {
     Ok(())
 }
 
+/// `FeInput::from_group_codes`/`ReInput::from_group_codes`の入力検証（FE/REで共通）。
+/// 検査の順序は、各`x_columns`の行数（`y`との不一致は`CommonError::DimensionMismatch`）、
+/// `entity`の長さ、`time`の長さ（以上2つは`PanelError::IdentifierDimensionMismatch`）、
+/// `entity`がキーを持つか（`require_entity_keys`）。
+///
+/// # パニックについて
+/// `x_names.len() != x_columns.len()`の場合は`debug_assert!`でパニックする（呼び出し側
+/// `engine_pybind`の実装バグでしか起こり得ない内部契約であり、実データに起因する
+/// `ValidationError`とは性質が異なる。`OlsInput::from_columns`と同じ理由）。
+pub(crate) fn validate_panel_input(
+    y: &[f64],
+    x_columns: &[Vec<f64>],
+    x_names: &[String],
+    entity: &GroupCodes,
+    time: Option<&TimeKeys>,
+) -> Result<(), PanelError> {
+    debug_assert_eq!(
+        x_columns.len(),
+        x_names.len(),
+        "x_columns and x_names must have the same length"
+    );
+
+    for col in x_columns {
+        if col.len() != y.len() {
+            return Err(CommonError::DimensionMismatch {
+                y_rows: y.len(),
+                x_rows: col.len(),
+            }
+            .into());
+        }
+    }
+
+    if entity.nobs() != y.len() {
+        return Err(PanelError::IdentifierDimensionMismatch {
+            dimension: PanelDimension::Entity,
+            y_rows: y.len(),
+            other_rows: entity.nobs(),
+        });
+    }
+
+    if let Some(time) = time
+        && time.len() != y.len()
+    {
+        return Err(PanelError::IdentifierDimensionMismatch {
+            dimension: PanelDimension::Time,
+            y_rows: y.len(),
+            other_rows: time.len(),
+        });
+    }
+    require_entity_keys(entity)
+}
+
 /// パネル入力のentityのコードがキー（`keys()`）を持つことを確かめる。固定効果のキーに使うため、
 /// キー無しのコード（`GroupCodes::from_*_without_keys`）は受け付けない。
-pub(crate) fn require_entity_keys(entity: &GroupCodes) -> Result<(), PanelError> {
+fn require_entity_keys(entity: &GroupCodes) -> Result<(), PanelError> {
     if !entity.has_keys() {
         return Err(CommonError::ComputationFailed(
             "entity codes must carry keys (build them with GroupCodes::from_labels or \
@@ -840,6 +892,74 @@ pub(crate) fn quasi_demean_column(col: &[f64], entity: &GroupCodes, theta: &[f64
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn validate_panel_input_reports_the_first_failing_check_in_order() {
+        let y = [1.0, 2.0, 3.0];
+        let names = labels(&["x"]);
+        let entity = GroupCodes::from_labels(&labels(&["a", "a", "b"]));
+        let time = TimeKeys::lexicographic(labels(&["1", "2", "1"]));
+        assert_eq!(
+            validate_panel_input(&y, &[vec![1.0, 2.0, 3.0]], &names, &entity, Some(&time)),
+            Ok(())
+        );
+
+        // x列 → entityの長さ → timeの長さ → entityのキー、の順。すべて同時に崩れていれば
+        // x列の不一致が先に返る。
+        let short_entity = GroupCodes::from_labels(&labels(&["a", "b"]));
+        let short_time = TimeKeys::lexicographic(labels(&["1"]));
+        let keyless = GroupCodes::from_labels_without_keys(&labels(&["a", "a"]));
+        assert_eq!(
+            validate_panel_input(&y, &[vec![1.0]], &names, &keyless, Some(&short_time)),
+            Err(CommonError::DimensionMismatch {
+                y_rows: 3,
+                x_rows: 1
+            }
+            .into())
+        );
+        assert_eq!(
+            validate_panel_input(
+                &y,
+                &[vec![1.0; 3]],
+                &names,
+                &short_entity,
+                Some(&short_time)
+            ),
+            Err(PanelError::IdentifierDimensionMismatch {
+                dimension: PanelDimension::Entity,
+                y_rows: 3,
+                other_rows: 2
+            })
+        );
+        assert_eq!(
+            validate_panel_input(&y, &[vec![1.0; 3]], &names, &entity, Some(&short_time)),
+            Err(PanelError::IdentifierDimensionMismatch {
+                dimension: PanelDimension::Time,
+                y_rows: 3,
+                other_rows: 1
+            })
+        );
+        // キー無しのentityでtimeの長さも合っていなければ、キー検査は最後なのでtimeの不一致が先。
+        let keyless_full = GroupCodes::from_labels_without_keys(&labels(&["a", "a", "b"]));
+        assert_eq!(
+            validate_panel_input(
+                &y,
+                &[vec![1.0; 3]],
+                &names,
+                &keyless_full,
+                Some(&short_time)
+            ),
+            Err(PanelError::IdentifierDimensionMismatch {
+                dimension: PanelDimension::Time,
+                y_rows: 3,
+                other_rows: 1
+            })
+        );
+        assert!(matches!(
+            validate_panel_input(&y, &[vec![1.0; 3]], &names, &keyless_full, None),
+            Err(PanelError::Common(CommonError::ComputationFailed(_)))
+        ));
+    }
 
     #[test]
     fn panel_dimension_displays_lowercase_name() {

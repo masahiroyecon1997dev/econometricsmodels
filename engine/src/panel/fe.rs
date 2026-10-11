@@ -384,8 +384,8 @@ use crate::linear::ols::OlsInput;
 use crate::panel::common::{
     PanelDimension, PanelError, PanelHcVariant, TimeKeys, panel_classical_cov_params,
     panel_cluster_cov_params, panel_driscoll_kraay_cov_params, panel_hc_cov_params,
-    quasi_demean_column, require_entity_keys, resolve_dk_bandwidth,
-    validate_dk_periods_cover_tested_coefficients,
+    quasi_demean_column, resolve_dk_bandwidth, validate_dk_periods_cover_tested_coefficients,
+    validate_panel_input,
 };
 use crate::panel::re::ReInput;
 use crate::shared::covariance::leverages;
@@ -420,55 +420,12 @@ pub struct FeInput {
     entity_codes: GroupCodes,
 }
 
-/// `FeInput::from_columns`の次元検証（エラー条件は`from_columns`のdocコメント参照）。
-fn validate_input_dimensions(
-    y: &[f64],
-    x_columns: &[Vec<f64>],
-    x_names: &[String],
-    entity_len: usize,
-    time_len: Option<usize>,
-) -> Result<(), PanelError> {
-    debug_assert_eq!(
-        x_columns.len(),
-        x_names.len(),
-        "x_columns and x_names must have the same length"
-    );
-
-    for col in x_columns {
-        if col.len() != y.len() {
-            return Err(CommonError::DimensionMismatch {
-                y_rows: y.len(),
-                x_rows: col.len(),
-            }
-            .into());
-        }
-    }
-
-    if entity_len != y.len() {
-        return Err(PanelError::IdentifierDimensionMismatch {
-            dimension: PanelDimension::Entity,
-            y_rows: y.len(),
-            other_rows: entity_len,
-        });
-    }
-
-    if let Some(time_len) = time_len
-        && time_len != y.len()
-    {
-        return Err(PanelError::IdentifierDimensionMismatch {
-            dimension: PanelDimension::Time,
-            y_rows: y.len(),
-            other_rows: time_len,
-        });
-    }
-    Ok(())
-}
-
 impl FeInput {
     /// 列ごとの`Vec<f64>`/`Vec<String>`（`engine_pybind`がpolars DataFrameから抽出済み）
     /// から`FeInput`を組み立てる。
     ///
     /// # Errors
+    /// 検査の順序は`validate_panel_input`（`panel/common.rs`、FE/REで共通）が正本。
     /// - いずれかの`x_columns`の長さが`y`と一致しない場合は
     ///   `PanelError::Common(CommonError::DimensionMismatch)`
     /// - `entity`の長さが`y`と一致しない場合は
@@ -543,14 +500,7 @@ impl FeInput {
         time: Option<TimeKeys>,
         dep_var_name: String,
     ) -> Result<Self, PanelError> {
-        validate_input_dimensions(
-            y,
-            x_columns,
-            &x_names,
-            entity.nobs(),
-            time.as_ref().map(TimeKeys::len),
-        )?;
-        require_entity_keys(&entity)?;
+        validate_panel_input(y, x_columns, &x_names, &entity, time.as_ref())?;
 
         Ok(Self {
             y: y.to_vec(),
@@ -760,7 +710,8 @@ impl FeEstimator {
     /// パネル固有R²（2.3節）を計算し直す（モジュールdoc「自由度調整」
     /// 「`cov_type`対応」「パネル固有R²」参照）。
     ///
-    /// パイプライン: singleton検出
+    /// パイプライン: 2-wayの時点コードの解決（`two_way_time`。2-wayで`time`が無ければ
+    /// `PanelError::TwoWayRequiresTime`。以降の検証より先に評価する）→ singleton検出
     /// （`validate_no_singleton_groups_one_way`/`validate_no_singleton_groups_two_way`）
     /// → within変換（`within_transform_one_way`/`within_transform_two_way`、
     /// 2-wayはバランスパネル検証を内包）→ 自由度検証 → 分散ゼロ検出
@@ -800,6 +751,11 @@ impl FeEstimator {
         // グローバル並列度」参照）。
         crate::shared::parallelism::ensure_serial();
 
+        // 2-wayの時点コード（1-wayは`None`）。`time`が無いのに2-wayを指定した入力はここで
+        // 弾き、以降は`Some`かどうかだけで1-way/2-wayを分岐する（`effects`と`input.time`の
+        // 食い違いを後段で`expect`せずに済む）。
+        let two_way_time = two_way_time(effects, &input)?;
+
         let (y, x) = match effects {
             FeEffects::OneWay => {
                 validate_no_singleton_groups_one_way(&input)?;
@@ -813,18 +769,7 @@ impl FeEstimator {
 
         let n = input.nobs();
         let n_entities = input.entity_codes().n_groups();
-        let n_periods = match effects {
-            FeEffects::OneWay => None,
-            FeEffects::TwoWay => Some(
-                input
-                    .time_codes()
-                    .expect(
-                        "2-way already validated `time` is present \
-                         (validate_no_singleton_groups_two_way/within_transform_two_way)",
-                    )
-                    .n_groups(),
-            ),
-        };
+        let n_periods = two_way_time.map(GroupCodes::n_groups);
         let k = input.x_names().len();
         // `neffects`: entityダミー・timeダミーの実効パラメータ数（`fe-spec.md`3.2節）。2-wayは両者の
         // 間に定数項ぶんの重複が1つ生じるため`+1`補正（`n_entities + n_periods - 1`）。
@@ -910,11 +855,7 @@ impl FeEstimator {
             ),
             FeCovType::Hc2 | FeCovType::Hc3 => {
                 let h_within = leverages(x_mat, &xtx_inv);
-                let time_for_leverage = match effects {
-                    FeEffects::OneWay => None,
-                    FeEffects::TwoWay => input.time_codes(),
-                };
-                let h_full = leverage_full(&h_within, input.entity_codes(), time_for_leverage, n);
+                let h_full = leverage_full(&h_within, input.entity_codes(), two_way_time, n);
                 let variant = if matches!(cov_type, FeCovType::Hc2) {
                     PanelHcVariant::Hc2
                 } else {
@@ -941,16 +882,18 @@ impl FeEstimator {
                 // 直前の`G > k`により、ここで`G=2`なら`k`は高々1。
                 if k >= 1
                     && n_groups == 2
-                    && two_group_split_is_degenerate(effects, &input, group_codes)
+                    && two_group_split_is_degenerate(
+                        input.entity_codes(),
+                        two_way_time,
+                        group_codes,
+                    )
                 {
                     return Err(PanelError::DegenerateClusterTwoGroups);
                 }
                 let k_correction = fe_cluster_k_correction(
-                    effects,
                     input.entity_codes(),
-                    input.time_codes(),
+                    two_way_time,
                     n_entities,
-                    n_periods,
                     df_model,
                     k,
                     group_codes,
@@ -988,7 +931,7 @@ impl FeEstimator {
                 // 直前の`t_periods > k`により、ここで`t_periods=2`なら`k`は高々1。
                 if k >= 1
                     && t_periods == 2
-                    && two_group_split_is_degenerate(effects, &input, time_codes)
+                    && two_group_split_is_degenerate(input.entity_codes(), two_way_time, time_codes)
                 {
                     return Err(PanelError::DegenerateDkTwoPeriods);
                 }
@@ -1253,8 +1196,7 @@ impl FeEstimator {
             ),
             FeEffects::TwoWay => {
                 let time = self.input.time_codes().expect(
-                    "2-way already validated `time` is present \
-                     (validate_no_singleton_groups_two_way/within_transform_two_way)",
+                    "2-way already validated `time` is present (`fit` resolves `two_way_time`)",
                 );
                 let entity_means = group_residual_means(y, x, params, self.input.entity_codes());
                 let time_means = group_residual_means(y, x, params, time);
@@ -1382,40 +1324,27 @@ fn fixef_dimension_nested_within_cluster(dim: &GroupCodes, cluster: &GroupCodes)
 /// 具体例（実地検証済み）: 1-way FE（`n_entities=20`）・`cluster=entity`（既定）・
 /// `k=2`なら`df_model=22`・`nested_size_sum=20`・`count_nested=m=1`で`K=22-20+1=3`
 /// （`k+1=3`と一致、フロアはno-op）。
-#[allow(clippy::too_many_arguments)]
+///
+/// `two_way_time`は2-wayの時点コード（1-wayは`None`）。FE次元は1-wayがentityのみ、
+/// 2-wayがentityとtime（水準数は`time.n_groups()`）。
 fn fe_cluster_k_correction(
-    effects: FeEffects,
     entity: &GroupCodes,
-    time: Option<&GroupCodes>,
+    two_way_time: Option<&GroupCodes>,
     n_entities: usize,
-    n_periods: Option<usize>,
     df_model: usize,
     k: usize,
     cluster: &GroupCodes,
 ) -> usize {
-    let dims: Vec<(bool, usize)> = match effects {
-        FeEffects::OneWay => {
-            vec![(
-                fixef_dimension_nested_within_cluster(entity, cluster),
-                n_entities,
-            )]
-        }
-        FeEffects::TwoWay => {
-            let time =
-                time.expect("2-way FE always has `time` (validated by within_transform_two_way)");
-            let n_periods = n_periods.expect("2-way FE always has `n_periods`");
-            vec![
-                (
-                    fixef_dimension_nested_within_cluster(entity, cluster),
-                    n_entities,
-                ),
-                (
-                    fixef_dimension_nested_within_cluster(time, cluster),
-                    n_periods,
-                ),
-            ]
-        }
-    };
+    let mut dims = vec![(
+        fixef_dimension_nested_within_cluster(entity, cluster),
+        n_entities,
+    )];
+    if let Some(time) = two_way_time {
+        dims.push((
+            fixef_dimension_nested_within_cluster(time, cluster),
+            time.n_groups(),
+        ));
+    }
     let m = dims.len();
     let count_nested = dims.iter().filter(|(nested, _)| *nested).count();
     let nested_size_sum: usize = dims
@@ -1564,6 +1493,9 @@ pub fn within_transform_one_way(input: &FeInput) -> (Vec<f64>, Vec<Vec<f64>>) {
 ///
 /// 戻り値は`(y_transformed, x_transformed)`（元の列順を保持）。
 ///
+/// `FeEstimator::fit`経由では`two_way_time`が`time`の無い入力を先に弾くため、ここの
+/// `time`の存在チェックは単体利用時の防御（到達しない二重チェックだが意図的に残している）。
+///
 /// # Errors
 /// - `input.time_keys()`が`None`の場合は`PanelError::TwoWayRequiresTime`
 /// - バランスパネルでない場合は`PanelError::UnbalancedPanelForTwoWay`
@@ -1609,6 +1541,9 @@ pub fn validate_no_singleton_groups_one_way(input: &FeInput) -> Result<(), Panel
 /// その後、entityを先にチェックしてからtimeをチェックする（両方に該当するsingletonが
 /// あった場合はentity側を先に報告する。`FeInput`のフィールド順（entity→time）に合わせた
 /// 恣意的な優先順位）。
+///
+/// `FeEstimator::fit`経由では`two_way_time`が`time`の無い入力を先に弾くため、ここの
+/// `time`の存在チェックは単体利用時の防御（到達しない二重チェックだが意図的に残している）。
 ///
 /// # Errors
 /// - `input.time_keys()`が`None`の場合は`PanelError::TwoWayRequiresTime`
@@ -1767,6 +1702,19 @@ fn validate_balanced_panel(entity: &GroupCodes, time: &GroupCodes) -> Result<(),
     Ok(())
 }
 
+/// 2-wayの時点コードを返す（1-wayは`None`）。2-wayなのに`input`に`time`が無ければ
+/// `PanelError::TwoWayRequiresTime`。`FeEstimator::fit`が最初に呼び、以降の
+/// cov_type別の計算は`effects`ではなくこの`Option`で1-way/2-wayを区別する。
+fn two_way_time(effects: FeEffects, input: &FeInput) -> Result<Option<&GroupCodes>, PanelError> {
+    match effects {
+        FeEffects::OneWay => Ok(None),
+        FeEffects::TwoWay => input
+            .time_codes()
+            .map(Some)
+            .ok_or(PanelError::TwoWayRequiresTime),
+    }
+}
+
 /// ユニーク数2の`groups`（Clusterのクラスター列・Dkの時点列）について、within変換後の
 /// グループスコアが恒等的にゼロになるか（`PanelError::DegenerateDkTwoPeriods`/
 /// `DegenerateClusterTwoGroups`の判定）。
@@ -1777,14 +1725,15 @@ fn validate_balanced_panel(entity: &GroupCodes, time: &GroupCodes) -> Result<(),
 /// 正規方程式でスコアの和はゼロのため、両方ゼロになる。entity方向（2時点のパネルを
 /// timeでクラスタリング等）だけでなく、2-wayではtime方向（エンティティ2つのパネルを
 /// entityでクラスタリング——Clusterの既定——等）も同じ構造になる。
-fn two_group_split_is_degenerate(effects: FeEffects, input: &FeInput, groups: &GroupCodes) -> bool {
-    if every_level_splits_once_across_two_groups(input.entity_codes(), groups) {
-        return true;
-    }
-    match (effects, input.time_codes()) {
-        (FeEffects::TwoWay, Some(time)) => every_level_splits_once_across_two_groups(time, groups),
-        _ => false,
-    }
+///
+/// `two_way_time`は2-wayの時点コード（1-wayは`None`、`two_way_time`関数参照）。
+fn two_group_split_is_degenerate(
+    entity: &GroupCodes,
+    two_way_time: Option<&GroupCodes>,
+    groups: &GroupCodes,
+) -> bool {
+    every_level_splits_once_across_two_groups(entity, groups)
+        || two_way_time.is_some_and(|time| every_level_splits_once_across_two_groups(time, groups))
 }
 
 /// `levels`の全水準がちょうど2観測を持ち、その2観測の`groups`ラベルが異なるか
@@ -2696,6 +2645,45 @@ mod tests {
     }
 
     #[test]
+    fn fe_estimator_fit_two_way_without_time_reports_requires_time_before_any_other_error() {
+        // 2-wayで`time`が無いことは、他のどの欠陥（entityのsingleton・不正な
+        // `confidence_level`・cov_type固有の検証）よりも先に報告される。優先順位は
+        // `fit()`冒頭の`two_way_time`が守る。
+        let entity = strings(&["a", "a", "c"]);
+        let y = [1.0, 2.0, 3.0];
+        let covs = || {
+            vec![
+                FeCovType::Classical,
+                FeCovType::Hc2,
+                FeCovType::Cluster { groups: None },
+                FeCovType::Dk {
+                    bandwidth: Some(100),
+                    time: lex_time(&["1", "2", "3"]),
+                },
+            ]
+        };
+        for cov_type in covs() {
+            let input = FeInput::from_columns(
+                &y,
+                &[vec![1.0, 2.0, 4.0]],
+                vec!["x1".to_string()],
+                &entity,
+                None,
+                "y".into(),
+            )
+            .unwrap();
+
+            let result = FeEstimator::fit(input, FeEffects::TwoWay, cov_type.clone(), 1.5);
+
+            assert_eq!(
+                result.unwrap_err(),
+                PanelError::TwoWayRequiresTime,
+                "cov_type = {cov_type:?}"
+            );
+        }
+    }
+
+    #[test]
     fn fe_estimator_fit_two_way_propagates_singleton_error() {
         // entity "c"は時点"1"のみの1観測（singleton）。`fit()`が
         // `validate_no_singleton_groups_two_way`（entity/time双方を対称にチェックする方）を
@@ -3581,16 +3569,7 @@ mod tests {
         let k = 1;
         let n_entities = 2;
         let df_model = k + n_entities; // 実際のFeEstimator::fitと同じneffects=n_entitiesの関係
-        let k_correction = fe_cluster_k_correction(
-            FeEffects::OneWay,
-            &entity,
-            None,
-            n_entities,
-            None,
-            df_model,
-            k,
-            &entity,
-        );
+        let k_correction = fe_cluster_k_correction(&entity, None, n_entities, df_model, k, &entity);
         assert_eq!(k_correction, k + 1);
     }
 
@@ -3607,16 +3586,7 @@ mod tests {
         let k = 1;
         let n_entities = 2;
         let df_model = 2; // 本来のneffects=n_entities=2との整合を意図的に崩す
-        let k_correction = fe_cluster_k_correction(
-            FeEffects::OneWay,
-            &entity,
-            None,
-            n_entities,
-            None,
-            df_model,
-            k,
-            &entity,
-        );
+        let k_correction = fe_cluster_k_correction(&entity, None, n_entities, df_model, k, &entity);
         assert_eq!(
             k_correction,
             k + 1,

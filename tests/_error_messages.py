@@ -91,8 +91,8 @@ NOT_A_POLARS_DATAFRAME_LAZY = (
     NOT_A_POLARS_DATAFRAME + "; call .collect() first"
 )
 
-# extract_f64_column: y/x/weight/hac_time の抽出で使う（engine_pybind/src/
-# column_extraction.rs:27-75）。
+# extract_f64_column: y/x/weight/hac_time の抽出で使う（engine_pybind/src/shared/
+# column_extraction.rs）。
 
 COLUMN_DOES_NOT_EXIST = "column '{name}' does not exist in the data"
 COLUMN_HAS_MISSING_VALUES = (

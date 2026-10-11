@@ -2427,75 +2427,25 @@ mod tests {
         assert!(!estimator.converged());
     }
 
-    /// 平均が標準偏差に比べて大きい列（平均÷標準偏差が約12〜16）を持つ設計行列で、`lbfgs`が
-    /// 既定の`max_iter=35`以内に収束することを固定する回帰テスト。標準化で平均を引かないと
-    /// 列が切片列とほぼ共線になり（標準化後のHessianの条件数が数千）、`lbfgs`は
-    /// 数十〜100反復を要した（Wooldridge appleの実測95反復）。平均を引く標準化（切片あり）で
-    /// 条件数が下がり、`newton`/`bfgs`と同じ収束点に少ない反復で到達する。
+    /// 回帰変数どうしの相関が強い（等相関`ρ=0.9`・`k=20`）データでも、`lbfgs`が既定の
+    /// `max_iter=35`以内に`newton`と同じ解へ収束する回帰テスト。標準化後Hessianの条件数が
+    /// 数百になり、`γI`を初期行列とするL-BFGSは40反復前後を要し既定を超えた。warm start点の
+    /// 逆Hessianを初期行列にすると4反復前後になる（centeringでは直らない、相関による悪条件）。
     #[test]
-    fn fit_lbfgs_converges_within_default_max_iter_for_columns_with_large_means() {
-        fn lcg(seed: &mut u64) -> f64 {
-            *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
-            ((*seed >> 11) as f64) / ((1u64 << 53) as f64)
-        }
-
-        let n = 600;
-        let mut seed = 7u64;
-        // (平均, 標準偏差, 真の係数（標準化した値に対する））
-        let spec = [
-            (20.0, 1.5, 0.6),
-            (12.0, 1.0, -0.4),
-            (30.0, 2.0, 0.5),
-            (8.0, 0.5, -0.3),
-        ];
-        let columns: Vec<Vec<f64>> = spec
-            .iter()
-            .map(|&(mean, sd, _)| {
-                (0..n)
-                    .map(|_| {
-                        // 12個の一様乱数の和-6で近似した標準正規乱数
-                        let z: f64 = (0..12).map(|_| lcg(&mut seed)).sum::<f64>() - 6.0;
-                        mean + sd * z
-                    })
-                    .collect()
-            })
-            .collect();
-        let y: Vec<f64> = (0..n)
-            .map(|i| {
-                let eta: f64 = -0.2
-                    + spec
-                        .iter()
-                        .zip(&columns)
-                        .map(|(&(mean, sd, b), col)| b * (col[i] - mean) / sd)
-                        .sum::<f64>();
-                // 線形予測子のリンク（logit）はテスト対象外のため、一様乱数との比較は
-                // ロジスティック形で代用する（データ生成の方式が何であれ、MLEは存在する）。
-                let p = 1.0 / (1.0 + (-eta).exp());
-                if lcg(&mut seed) < p { 1.0 } else { 0.0 }
-            })
-            .collect();
-        let make_input = || {
-            LogitInput::from_columns(
-                &y,
-                &columns,
-                vec![
-                    "x1".to_string(),
-                    "x2".to_string(),
-                    "x3".to_string(),
-                    "x4".to_string(),
-                ],
-                true,
-                "y".to_string(),
-            )
-            .unwrap()
-        };
-        let fit = |solver: SolverType, tol: f64| {
+    fn fit_lbfgs_converges_within_default_max_iter_for_strongly_correlated_regressors() {
+        let (y, columns) =
+            crate::nonlinear::common::test_support::equicorrelated_binary_data(1000, 20, 0.9, 1);
+        let names: Vec<String> = (1..=20).map(|j| format!("x{j}")).collect();
+        let fit = |solver: SolverType| {
+            let input =
+                LogitInput::from_columns(&y, &columns, names.clone(), true, "y".to_string())
+                    .unwrap();
             LogitEstimator::fit(
-                make_input(),
+                input,
                 MleFitOptions {
                     solver,
                     max_iter: 35,
-                    tol,
+                    tol: 1e-8,
                     raise_on_non_convergence: true,
                     cov_type: CovType::Classical,
                     confidence_level: 0.95,
@@ -2504,11 +2454,11 @@ mod tests {
             .unwrap()
         };
 
-        let newton = fit(SolverType::Newton, 1e-8);
-        let lbfgs = fit(SolverType::Lbfgs, 1e-8);
+        let newton = fit(SolverType::Newton);
+        let lbfgs = fit(SolverType::Lbfgs);
 
         assert!(lbfgs.converged());
-        // 平均を引く標準化では5〜6反復、引かないと28〜42反復を要する（実測）。
+        // 初期行列が`γI`だと40反復前後、warm start点の逆Hessianだと4反復前後（実測）。
         assert!(lbfgs.n_iter() <= 15, "n_iter={}", lbfgs.n_iter());
         for (a, b) in lbfgs.params().iter().zip(newton.params()) {
             assert!(
@@ -2518,6 +2468,26 @@ mod tests {
                 newton.params()
             );
         }
+    }
+
+    /// 平均が標準偏差に比べて大きい列（平均÷標準偏差が約12〜16）を持つ設計行列でも、標準化後の
+    /// Hessianは良条件（条件数が小さい）になる。標準化で平均を引かないと列が切片列とほぼ共線に
+    /// なり、条件数が数千になる（Wooldridge appleで約7,300）。ソルバーの初期化（`FaerBfgs`/
+    /// `FaerLbfgs`の逆Hessian）はこの悪条件を反復数の面で隠すため、反復数ではなく条件数を直接見る。
+    #[test]
+    fn standardized_hessian_is_well_conditioned_for_columns_with_large_means() {
+        let (y, columns) = crate::nonlinear::common::test_support::large_means_binary_data();
+        let names: Vec<String> = (1..=columns.len()).map(|j| format!("x{j}")).collect();
+        let input = LogitInput::from_columns(&y, &columns, names, true, "y".to_string()).unwrap();
+        let k = input.k();
+
+        let (x_std, _) = standardize_columns(input.x(), input.has_intercept());
+        let problem = LogitProblem::from_standardized(x_std, input.y().clone());
+        let hessian = problem.hessian(&vec![0.0; k]).unwrap();
+
+        let cond = crate::nonlinear::common::test_support::condition_number(&hessian);
+        // 平均を引く標準化では列が互いにほぼ直交し1〜2程度、引かないと数百〜数千（実測）。
+        assert!(cond < 10.0, "condition number={cond}");
     }
 
     /// `beta1=20`（分離と誤検知してはいけない境界ケース、`tests/

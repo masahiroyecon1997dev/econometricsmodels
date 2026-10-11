@@ -159,14 +159,15 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
     領域を持つため、打ち切り点がそこに着地するとHessianの逆行列を使う`cov_type`
     （classical/hc0/hc1/cluster）は`SingularHessian`（`ComputationError`）を返す。負の分散を
     返さないための設計で、`raise_on_non_convergence`とは独立。Hessianを使わない`opg`は成功する。
-    solverで結果が分かれる: `newton`はLM減衰で凹な領域に留まり、`bfgs`は初期点のHessianが
-    正定値ならその厳密な逆行列から出発して1手目が`newton`と一致するが、`lbfgs`は勾配方向の
-    1手目で凹でない領域に入りうる。実測（`max_iter=1`、打ち切り率85%・n=60の合成データ）では
-    `lbfgs`の打ち切り点の費用関数Hessianの最小固有値が約-0.6、`newton`/`bfgs`は全て正（最小約76）。
-    `max_iter`を増やすとこの失敗は出なくなる（n=200・打ち切り率84.5%の合成60データで、`max_iter=1`は
-    8件が`SingularHessian`、`max_iter=2〜10`は全件が未収束の結果を返した）。
-    Rust（`tobit.rs`の`fit_with_lbfgs_returns_singular_hessian_at_truncated_point_in_non_concave_region`）
-    とPython（`test_tobit.py`の`test_lbfgs_truncated_point_in_non_concave_region_raises_singular_hessian`）
+    solverによる違い: `newton`はLM減衰で凹な領域に留まり、`bfgs`と`lbfgs`は初期点のHessianが
+    正定値ならその厳密な逆行列から出発して1手目が`newton`と一致する。かつて`lbfgs`は初期点の
+    Hessianを使わず勾配方向の1手目で凹でない領域に入りえたため（実測: `max_iter=1`、打ち切り率85%・
+    n=60の合成データで打ち切り点の費用関数Hessianの最小固有値が約-0.6、`newton`/`bfgs`は全て
+    正で最小約76）、この`SingularHessian`は`lbfgs`だけの挙動だった。今は全solverが未収束の結果を
+    返す。初期点のHessianが正定値でない場合は`lbfgs`も従来の`γI`初期化に戻るので、そこでは
+    凹でない領域に入る可能性が残る。
+    Rust（`tobit.rs`の`fit_returns_unconverged_result_for_every_solver_and_cov_type_at_truncated_point`）
+    とPython（`test_tobit.py`の`test_truncated_point_returns_unconverged_result_for_every_solver`）
     で同じ入力に対して固定している。
   - **`bfgs`/`lbfgs`は`tol`を観測数`n`で正規化した基準を使う（実装済み）**:
     `newton`は絶対閾値のまま（既定`tol=1e-6`、Tobitでも反復回数は`n`によらずほぼ一定でこの

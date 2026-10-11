@@ -1103,67 +1103,19 @@ def test_raise_on_non_convergence_false_returns_result_without_raising(
         assert math.isfinite(se), f"std_errors[{name}]={se} is not finite"
 
 
-@pytest.mark.parametrize("cov_type", ["classical", "hc0", "hc1", "cluster"])
-def test_lbfgs_truncated_point_in_non_concave_region_raises_singular_hessian(
-    cov_type,
-):
-    """`solver="lbfgs"`・`max_iter=1`・`raise_on_non_convergence=False`で、重く打ち切られた
-    データ（85%が左打ち切り）の打ち切り点が`(β, log σ)`尤度の凹でない領域に入ると、
-    Hessianの逆行列を使う`cov_type`（classical/hc0/hc1/cluster）は`ComputationError`
-    （engineの`SingularHessian`）になる。不定なHessianから負の分散を返さないための設計で、
-    `raise_on_non_convergence`とは独立（`False`でもこのエラーは出る）。
-    `docs/spec/tobit-spec.md`「最適化・収束判定・病理ケース」参照。
-    """
-    df = heavily_censored_tobit_dataset()
-    kwargs = {"cluster": "g"} if cov_type == "cluster" else {}
-    with pytest.raises(ComputationError, match="Hessian is singular"):
-        Tobit(
-            df,
-            y="y",
-            x=["x1", "x2"],
-            options=TobitOptions(
-                solver="lbfgs",
-                cov_type=cov_type,
-                lower=0.0,
-                max_iter=1,
-                tol=1e-12,
-                raise_on_non_convergence=False,
-                **kwargs,
-            ),
-        ).fit()
-
-
-def test_lbfgs_truncated_point_succeeds_with_opg():
-    """同じ入力でも`opg`はHessianを使わず、未収束の結果を返す。"""
-    res = Tobit(
-        heavily_censored_tobit_dataset(),
-        y="y",
-        x=["x1", "x2"],
-        options=TobitOptions(
-            solver="lbfgs",
-            cov_type="opg",
-            lower=0.0,
-            max_iter=1,
-            tol=1e-12,
-            raise_on_non_convergence=False,
-        ),
-    ).fit()
-    assert res.converged is False
-    assert res.n_iter == 1
-    for name, se in res.std_errors.items():
-        assert math.isfinite(se), f"std_errors[{name}]={se} is not finite"
-
-
-@pytest.mark.parametrize("solver", ["newton", "bfgs"])
+@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
 @pytest.mark.parametrize(
     "cov_type", ["classical", "opg", "hc0", "hc1", "cluster"]
 )
-def test_newton_and_bfgs_truncated_point_returns_unconverged_result(
+def test_truncated_point_returns_unconverged_result_for_every_solver(
     solver, cov_type
 ):
-    """同じ入力・同じ`max_iter=1`でも、newton（LM減衰で凹な領域に留まる）とbfgs
-    （初期点のHessianが正定値なら厳密な逆行列から出発し、1手目がNewtonステップと一致）は
-    全`cov_type`で未収束の結果を返す。lbfgsだけが上の`SingularHessian`になる対比。
+    """`max_iter=1`・`raise_on_non_convergence=False`で、重く打ち切られた
+    データ（85%が左打ち切り）の打ち切り点でも、全solver・全`cov_type`で未収束の結果を返し、
+    標準誤差は有限値になる。newton（LM減衰で凹な領域に留まる）・bfgs・lbfgs（初期点のHessianが
+    正定値なら厳密な逆行列から出発し、1手目がNewtonステップと一致）が同じ振る舞いになる。
+    かつてlbfgsは初期点のHessianを使わず1手目が勾配方向だったため、凹でない領域に着地して
+    Hessianの逆行列を使う`cov_type`が`ComputationError`（`SingularHessian`）になっていた。
     """
     kwargs = {"cluster": "g"} if cov_type == "cluster" else {}
     res = Tobit(

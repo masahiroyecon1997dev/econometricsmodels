@@ -1319,6 +1319,7 @@ where
                 stalled_at_optimum: false,
                 s_history: VecDeque::with_capacity(LBFGS_HISTORY_SIZE),
                 y_history: VecDeque::with_capacity(LBFGS_HISTORY_SIZE),
+                h0: None,
             };
             let result = Executor::new(problem, optimizer)
                 .configure(|state| state.param(initial_params).max_iters(max_iter))
@@ -1915,23 +1916,25 @@ fn newton_step(hessian: &[Vec<f64>], grad: &[f64]) -> Result<Vec<f64>, MleError>
 /// コスト関数のHessian`H`が正定値かつ可逆なとき、その逆行列`H⁻¹`（対称化済み）を返す。
 /// そうでない（正定値でない・特異・非有限値を含む）場合は`None`。
 ///
-/// `FaerBfgs::init`が初期逆Hessian近似に使う。`H`が正定値でない場合の`H⁻¹`は降下方向を
-/// 作らない（line searchが`Search direction must be a descent direction`で失敗する）ため、
-/// 呼び出し側は`None`のとき従来の初期化（単位行列＋self-scaling）へ戻す。
+/// `FaerBfgs::init`・`FaerLbfgs::init`が初期逆Hessian近似に使う。`H`が正定値でない場合の`H⁻¹`は
+/// 降下方向を作らない（line searchが`Search direction must be a descent direction`で
+/// 失敗する）ため、呼び出し側は`None`のとき従来の初期化（`FaerBfgs`は単位行列＋self-scaling、
+/// `FaerLbfgs`は`γI`）へ戻す。
+///
+/// 列ピボットQRは1回だけ行い（特異性判定は`newton_step`と同じ`checked_col_piv_qr`）、単位行列を
+/// 右辺にまとめて解く（`k`本の右辺ごとにQRをやり直すと`O(k⁴)`になる）。
 fn inverse_if_positive_definite(hessian: &[Vec<f64>]) -> Option<Vec<Vec<f64>>> {
     if !cost_hessian_is_positive_definite(hessian) {
         return None;
     }
     let k = hessian.len();
-    let mut inv = vec![vec![0.0; k]; k];
-    for j in 0..k {
-        let mut unit = vec![0.0; k];
-        unit[j] = 1.0;
-        let column = newton_step(hessian, &unit).ok()?;
-        for (i, value) in column.into_iter().enumerate() {
-            inv[i][j] = value;
-        }
-    }
+    let h = Mat::from_fn(k, k, |i, j| hessian[i][j]);
+    let qr = checked_col_piv_qr(&h).ok()?;
+    let identity = Mat::from_fn(k, k, |i, j| if i == j { 1.0 } else { 0.0 });
+    let solved = qr.solve_lstsq(&identity);
+    let inv: Vec<Vec<f64>> = (0..k)
+        .map(|i| (0..k).map(|j| *solved.get(i, j)).collect())
+        .collect();
     let symmetrized: Vec<Vec<f64>> = (0..k)
         .map(|i| (0..k).map(|j| 0.5 * (inv[i][j] + inv[j][i])).collect())
         .collect();
@@ -2330,8 +2333,20 @@ fn bfgs_updated_inv_hessian(
 /// チェックだが、この実装では`FaerLbfgs`のみを対象とし`FaerBfgs`側は変更しない、
 /// ユーザー確認済み）。
 ///
-/// `FaerBfgs`と異なり逆Hessian近似を陽には持たず、直近[`LBFGS_HISTORY_SIZE`]件の
-/// secantペア`(s,y)`だけを保持する（limited-memoryの由来）。
+/// `FaerBfgs`と異なり逆Hessian近似の全体は更新せず、直近[`LBFGS_HISTORY_SIZE`]件の
+/// secantペア`(s,y)`だけを保持する（limited-memoryの由来）。初期行列だけは`k×k`の行列`h0`を持つ。
+///
+/// **初期行列（`h0`）**: two-loop recursionの初期行列には、標準の`γI`（`γ=sᵀy/yᵀy`）ではなく、
+/// warm start点の厳密Hessianの逆行列`H₀⁻¹`を使う（`FaerBfgs::init`と同じ
+/// `inverse_if_positive_definite`で正定値かつ可逆のときのみ）。`γI`は曲率のスケールしか表さず、
+/// 回帰変数間の相関による悪条件の形を履歴から学習するのに多くの反復を要するため。`H₀⁻¹`は直近の
+/// ペアで`sᵀy/(yᵀH₀⁻¹y)`倍に再スケールして使う（warm start点と収束点でHessianが大きく違う
+/// データで、素の`H₀⁻¹`が`γI`より悪化するのを避ける）。
+///
+/// **正定値でない場合（Tobitのように尤度が大域凹でない手法のwarm start点）は、`H₀⁻¹`が降下方向を
+/// 作らないため従来の初期化（`γI`と1回目のline search初期ステップ幅の調整）へ戻す。**
+/// `h0`が`Some`のとき1回目のステップは既にNewtonステップに相当するスケールなので、初期ステップ幅は
+/// 標準の`1.0`のままにする。実測値と経緯は`engine/src/nonlinear/CLAUDE.md`参照。
 struct FaerLbfgs {
     /// line search。`self`が所有し反復間で使い回す（`FaerBfgs::linesearch`と同じ理由）。
     linesearch: MoreThuenteLineSearch<Vec<f64>, Vec<f64>, f64>,
@@ -2344,6 +2359,9 @@ struct FaerLbfgs {
     s_history: VecDeque<Vec<f64>>,
     /// 直近`y`（勾配差分`∇f_{k+1}-∇f_k`）の履歴。`s_history`のdocコメント参照。
     y_history: VecDeque<Vec<f64>>,
+    /// warm start点の厳密Hessianの逆行列（正定値のときのみ`Some`。構造体docコメント参照）。
+    /// `None`のときは従来の`γI`初期化。
+    h0: Option<Vec<Vec<f64>>>,
 }
 
 type LbfgsState = IterState<Vec<f64>, Vec<f64>, (), (), (), f64>;
@@ -2351,7 +2369,8 @@ type LbfgsState = IterState<Vec<f64>, Vec<f64>, (), (), (), f64>;
 impl<O> Solver<O, LbfgsState> for FaerLbfgs
 where
     O: CostFunction<Param = Vec<f64>, Output = f64>
-        + Gradient<Param = Vec<f64>, Gradient = Vec<f64>>,
+        + Gradient<Param = Vec<f64>, Gradient = Vec<f64>>
+        + Hessian<Param = Vec<f64>, Hessian = Vec<Vec<f64>>>,
 {
     /// `argmin::core::Solver`トレイトの必須メソッド（`FaerNewton::name`と同じ理由で
     /// 未カバーでも振る舞いの正しさに影響しない）。
@@ -2370,6 +2389,14 @@ where
             )
         })?;
         let grad = problem.gradient(&param)?;
+
+        // 初期点（warm start）の厳密Hessianが正定値なら、その逆行列を初期行列にする
+        // （`FaerLbfgs`のdocコメント「初期行列」参照）。1回目のステップがほぼNewtonステップに
+        // なるため、line searchの初期ステップ幅は標準の`1.0`のままでよい。
+        if let Some(inv_hessian) = inverse_if_positive_definite(&problem.hessian(&param)?) {
+            self.h0 = Some(inv_hessian);
+            return Ok((state.param(param).gradient(grad), None));
+        }
 
         // 1回目の反復専用のline search初期ステップ幅（`FaerBfgs::init`と同じ式・同じ
         // 理由）。履歴が空の1回目は`two_loop_recursion`のγが既定`1.0`のままで探索方向
@@ -2412,7 +2439,12 @@ where
         // `FaerBfgs::next_iter`の`is_first_iter`と同じ役割（履歴追加前に判定する）。
         let is_first_iter = state.get_iter() == 0;
 
-        let direction = two_loop_recursion(&self.s_history, &self.y_history, &prev_grad);
+        let direction = two_loop_recursion(
+            &self.s_history,
+            &self.y_history,
+            &prev_grad,
+            self.h0.as_deref(),
+        );
         self.linesearch.search_direction(direction);
 
         // `take_problem()`が`None`になるのは既に一度取り出した後に再度取り出した場合
@@ -2534,19 +2566,22 @@ where
 /// 直近`m`件のsecantペア`(sᵢ,yᵢ)`（`s_history`/`y_history`、古い順）と現在の勾配`grad`から
 /// 近似逆Hessian×勾配`H_k∇f_k`を計算し、降下方向`-H_k∇f_k`を返す。
 ///
-/// `s_history`/`y_history`が空（最適化1回目の反復）の場合は`γ=1.0`（スケーリング無し）
-/// として単位行列近似にフォールバックし、`-grad`を返す（`FaerLbfgs::init`が設定する
-/// line search初期ステップ幅でこの反復のスケールを別途補う、`FaerLbfgs`のdocコメント
-/// 参照）。
+/// `h0`は初期行列（`FaerLbfgs`のdocコメント「初期行列」参照）。`Some(H₀⁻¹)`のときは
+/// `H₀⁻¹`を直近のペアで`sᵀy/(yᵀH₀⁻¹y)`倍に再スケールして使い、履歴が空（最適化1回目の反復）なら
+/// 再スケールせず`-H₀⁻¹grad`を返す。`yᵀH₀⁻¹y`・`sᵀy`が実質ゼロ以下（縮退）のときも再スケール
+/// しない（`1.0`）。
 ///
-/// `γ=(s_lastᵀy_last)/(y_lastᵀy_last)`（直近のペアのみを使うself-scaling、argmin組み込み
-/// `LBFGS::next_iter`の`gamma`計算と同じ式）。`y_lastᵀy_last`が実質ゼロ（縮退）の場合は
-/// ゼロ除算を避け`γ=1.0`にフォールバックする（`bfgs_updated_inv_hessian`の
+/// `None`のときは標準の`γI`: 履歴が空なら`γ=1.0`（スケーリング無し）として単位行列近似にフォール
+/// バックし`-grad`を返す（`FaerLbfgs::init`が設定するline search初期ステップ幅でこの反復の
+/// スケールを別途補う）。`γ=(s_lastᵀy_last)/(y_lastᵀy_last)`（直近のペアのみを使うself-scaling、
+/// argmin組み込み`LBFGS::next_iter`の`gamma`計算と同じ式）で、`y_lastᵀy_last`が実質ゼロ（縮退）
+/// の場合はゼロ除算を避け`γ=1.0`にフォールバックする（`bfgs_updated_inv_hessian`の
 /// `ykyk > f64::EPSILON`ガードと同じ発想）。
 fn two_loop_recursion(
     s_history: &VecDeque<Vec<f64>>,
     y_history: &VecDeque<Vec<f64>>,
     grad: &[f64],
+    h0: Option<&[Vec<f64>]>,
 ) -> Vec<f64> {
     let m = s_history.len();
     let mut q = grad.to_vec();
@@ -2578,19 +2613,39 @@ fn two_loop_recursion(
         alpha[i] = alpha_i;
     }
 
-    let gamma = s_history
-        .back()
-        .zip(y_history.back())
-        .map(|(s, y)| {
-            let yy = dot(y, y);
-            if yy > f64::EPSILON {
-                dot(s, y) / yy
-            } else {
-                1.0
-            }
-        })
-        .unwrap_or(1.0);
-    let mut r: Vec<f64> = q.iter().map(|v| v * gamma).collect();
+    let mut r: Vec<f64> = match h0 {
+        Some(h0) => {
+            // 初期行列`H₀⁻¹`を直近のペアで`sᵀy/(yᵀH₀⁻¹y)`倍に再スケールして`H₀⁻¹q`に掛ける
+            // （`FaerLbfgs`のdocコメント「初期行列」参照）。ペアが無い（1回目の反復）、または
+            // `yᵀH₀⁻¹y`・`sᵀy`が実質ゼロ以下（縮退）のときは再スケールしない（`1.0`）。
+            let scale = s_history
+                .back()
+                .zip(y_history.back())
+                .and_then(|(s, y)| {
+                    let h0_y: Vec<f64> = h0.iter().map(|row| dot(row, y)).collect();
+                    let y_h0_y = dot(y, &h0_y);
+                    let s_y = dot(s, y);
+                    (y_h0_y > f64::EPSILON && s_y > f64::EPSILON).then(|| s_y / y_h0_y)
+                })
+                .unwrap_or(1.0);
+            h0.iter().map(|row| scale * dot(row, &q)).collect()
+        }
+        None => {
+            let gamma = s_history
+                .back()
+                .zip(y_history.back())
+                .map(|(s, y)| {
+                    let yy = dot(y, y);
+                    if yy > f64::EPSILON {
+                        dot(s, y) / yy
+                    } else {
+                        1.0
+                    }
+                })
+                .unwrap_or(1.0);
+            q.iter().map(|v| v * gamma).collect()
+        }
+    };
 
     for (i, (s, y)) in s_history.iter().zip(y_history.iter()).enumerate() {
         let beta_i = rho[i] * dot(y, &r);
@@ -2998,6 +3053,116 @@ pub(crate) fn cluster_cov_params(
     }))
 }
 
+/// テスト共有の補助（`logit.rs`・`probit.rs`のテストからも使う）。
+#[cfg(test)]
+pub(crate) mod test_support {
+    /// 対称行列（`Vec<Vec<f64>>`）の条件数（最大固有値/最小固有値。正定値を仮定）。
+    pub(crate) fn condition_number(matrix: &[Vec<f64>]) -> f64 {
+        let k = matrix.len();
+        let m = faer::Mat::from_fn(k, k, |i, j| matrix[i][j]);
+        let eig = m.self_adjoint_eigenvalues(faer::Side::Lower).unwrap();
+        let (min, max) = eig
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| {
+                (lo.min(*v), hi.max(*v))
+            });
+        max / min
+    }
+
+    /// 平均が標準偏差に比べて大きい説明変数4個（平均÷標準偏差が約12〜16）と、ロジスティック形の
+    /// 2値`y`を決定的に作る（標準化で平均を引く処理の回帰テスト用）。
+    pub(crate) fn large_means_binary_data() -> (Vec<f64>, Vec<Vec<f64>>) {
+        fn lcg(seed: &mut u64) -> f64 {
+            *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            ((*seed >> 11) as f64) / ((1u64 << 53) as f64)
+        }
+        let n = 600;
+        let mut seed = 7u64;
+        // (平均, 標準偏差, 標準化した値に対する真の係数)
+        let spec = [
+            (20.0, 1.5, 0.6),
+            (12.0, 1.0, -0.4),
+            (30.0, 2.0, 0.5),
+            (8.0, 0.5, -0.3),
+        ];
+        let columns: Vec<Vec<f64>> = spec
+            .iter()
+            .map(|&(mean, sd, _)| {
+                (0..n)
+                    .map(|_| {
+                        // 12個の一様乱数の和-6で近似した標準正規乱数
+                        let z: f64 = (0..12).map(|_| lcg(&mut seed)).sum::<f64>() - 6.0;
+                        mean + sd * z
+                    })
+                    .collect()
+            })
+            .collect();
+        let y = (0..n)
+            .map(|i| {
+                let eta: f64 = -0.2
+                    + spec
+                        .iter()
+                        .zip(&columns)
+                        .map(|(&(mean, sd, b), col)| b * (col[i] - mean) / sd)
+                        .sum::<f64>();
+                if lcg(&mut seed) < 1.0 / (1.0 + (-eta).exp()) {
+                    1.0
+                } else {
+                    0.0
+                }
+            })
+            .collect();
+        (y, columns)
+    }
+
+    /// 等相関`ρ`の説明変数`k`個（各列は平均0・分散1）と、ロジスティック形の2値`y`を決定的に
+    /// 作る（Logit/Probitの`lbfgs`回帰テスト用。相関が強いと標準化後Hessianの条件数が大きくなる）。
+    /// 乱数は線形合同法、正規乱数は12個の一様乱数の和-6で近似する。
+    pub(crate) fn equicorrelated_binary_data(
+        n: usize,
+        k: usize,
+        rho: f64,
+        seed: u64,
+    ) -> (Vec<f64>, Vec<Vec<f64>>) {
+        fn lcg(seed: &mut u64) -> f64 {
+            *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            ((*seed >> 11) as f64) / ((1u64 << 53) as f64)
+        }
+        fn normal(seed: &mut u64) -> f64 {
+            (0..12).map(|_| lcg(seed)).sum::<f64>() - 6.0
+        }
+        let mut seed = seed;
+        let common: Vec<f64> = (0..n).map(|_| normal(&mut seed)).collect();
+        let columns: Vec<Vec<f64>> = (0..k)
+            .map(|_| {
+                common
+                    .iter()
+                    .map(|z0| rho.sqrt() * z0 + (1.0 - rho).sqrt() * normal(&mut seed))
+                    .collect()
+            })
+            .collect();
+        let y = (0..n)
+            .map(|i| {
+                let eta: f64 = -0.2
+                    + columns
+                        .iter()
+                        .enumerate()
+                        .map(|(j, col)| {
+                            0.5 * (1.0 + 0.3 * j as f64) * col[i] / (k as f64).sqrt()
+                                * if j % 2 == 0 { 1.0 } else { -1.0 }
+                        })
+                        .sum::<f64>();
+                if lcg(&mut seed) < 1.0 / (1.0 + (-eta).exp()) {
+                    1.0
+                } else {
+                    0.0
+                }
+            })
+            .collect();
+        (y, columns)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3053,6 +3218,31 @@ mod tests {
                         .collect()
                 })
                 .collect())
+        }
+    }
+
+    /// `f(x)=x⁴/4-x²/2`（極小点`x=±1`、`|x|<1/√3`で`f''<0`）。初期点のHessianが正定値でない
+    /// 場合の初期化（フォールバック）を確かめるための1変数の非凸問題。
+    struct Quartic;
+    impl CostFunction for Quartic {
+        type Param = Vec<f64>;
+        type Output = f64;
+        fn cost(&self, p: &Self::Param) -> Result<Self::Output, OptimizerError> {
+            Ok(p[0].powi(4) / 4.0 - p[0].powi(2) / 2.0)
+        }
+    }
+    impl Gradient for Quartic {
+        type Param = Vec<f64>;
+        type Gradient = Vec<f64>;
+        fn gradient(&self, p: &Self::Param) -> Result<Self::Gradient, OptimizerError> {
+            Ok(vec![p[0].powi(3) - p[0]])
+        }
+    }
+    impl Hessian for Quartic {
+        type Param = Vec<f64>;
+        type Hessian = Vec<Vec<f64>>;
+        fn hessian(&self, p: &Self::Param) -> Result<Self::Hessian, OptimizerError> {
+            Ok(vec![vec![3.0 * p[0].powi(2) - 1.0]])
         }
     }
 
@@ -3200,7 +3390,7 @@ mod tests {
         let y_history = VecDeque::new();
         let grad = vec![3.0, -4.0];
 
-        let direction = two_loop_recursion(&s_history, &y_history, &grad);
+        let direction = two_loop_recursion(&s_history, &y_history, &grad, None);
         assert_eq!(direction, vec![-3.0, 4.0]);
     }
 
@@ -3219,7 +3409,7 @@ mod tests {
         y_history.push_back(vec![1.0, 2.0]);
         let grad = vec![2.0, 3.0];
 
-        let direction = two_loop_recursion(&s_history, &y_history, &grad);
+        let direction = two_loop_recursion(&s_history, &y_history, &grad, None);
         assert!(
             (direction[0] - (-2.4)).abs() < 1e-10,
             "direction={direction:?}"
@@ -3248,7 +3438,7 @@ mod tests {
         y_history.push_back(vec![1.0, 2.0]);
         let grad = vec![2.0, 3.0];
 
-        let direction = two_loop_recursion(&s_history, &y_history, &grad);
+        let direction = two_loop_recursion(&s_history, &y_history, &grad, None);
         assert!(
             (direction[0] - (-2.4)).abs() < 1e-10,
             "degenerate pair should be fully transparent: direction={direction:?}"
@@ -3278,7 +3468,7 @@ mod tests {
         y_history.push_back(vec![1e-10, 0.0]);
         let grad = vec![2.0, 3.0];
 
-        let direction = two_loop_recursion(&s_history, &y_history, &grad);
+        let direction = two_loop_recursion(&s_history, &y_history, &grad, None);
         assert_eq!(
             direction[1], -3.0,
             "gamma=1.0 fallback should leave the y-orthogonal component exact: {direction:?}"
@@ -3519,33 +3709,234 @@ mod tests {
     /// line searchが失敗する、という事態を避けて極小点`x=1`へ収束する。
     #[test]
     fn run_solver_bfgs_falls_back_when_hessian_at_initial_point_is_indefinite() {
-        struct Quartic;
-        impl CostFunction for Quartic {
-            type Param = Vec<f64>;
-            type Output = f64;
-            fn cost(&self, p: &Self::Param) -> Result<Self::Output, OptimizerError> {
-                Ok(p[0].powi(4) / 4.0 - p[0].powi(2) / 2.0)
-            }
-        }
-        impl Gradient for Quartic {
-            type Param = Vec<f64>;
-            type Gradient = Vec<f64>;
-            fn gradient(&self, p: &Self::Param) -> Result<Self::Gradient, OptimizerError> {
-                Ok(vec![p[0].powi(3) - p[0]])
-            }
-        }
-        impl Hessian for Quartic {
-            type Param = Vec<f64>;
-            type Hessian = Vec<Vec<f64>>;
-            fn hessian(&self, p: &Self::Param) -> Result<Self::Hessian, OptimizerError> {
-                Ok(vec![vec![3.0 * p[0].powi(2) - 1.0]])
-            }
-        }
-
         let output = run_solver(Quartic, SolverType::Bfgs, vec![0.1], 100, 1e-9, 1, true).unwrap();
 
         assert!(output.converged);
         assert!((output.params[0] - 1.0).abs() < 1e-6, "{:?}", output.params);
+    }
+
+    /// `FaerLbfgs`も`FaerBfgs`と同じく、初期点のHessianが正定値ならその厳密な逆行列を初期行列
+    /// にするため、二次関数は初期スケールの大きな食い違い（初期点`(1000,-1000)`）があっても
+    /// 1〜2反復で収束する（`γI`からの出発では、履歴がHessianの形を学習するのに`k`反復以上要る）。
+    #[test]
+    fn run_solver_lbfgs_uses_exact_inverse_hessian_at_initial_point_when_positive_definite() {
+        let output = run_solver(
+            quadratic_problem(),
+            SolverType::Lbfgs,
+            vec![1000.0, -1000.0],
+            100,
+            1e-9,
+            1,
+            true,
+        )
+        .unwrap();
+
+        assert!(output.converged);
+        assert!(output.n_iter <= 2, "n_iter={}", output.n_iter);
+    }
+
+    /// 初期点のHessianが正定値でない場合は従来の初期化（`γI`と1回目のline search初期ステップ幅の
+    /// 調整）に戻り、`H⁻¹`が降下方向を作らずline searchが失敗する、という事態を避けて極小点`x=1`へ
+    /// 収束する（`run_solver_bfgs_falls_back_when_hessian_at_initial_point_is_indefinite`の`lbfgs`版）。
+    #[test]
+    fn run_solver_lbfgs_falls_back_when_hessian_at_initial_point_is_indefinite() {
+        let output = run_solver(Quartic, SolverType::Lbfgs, vec![0.1], 100, 1e-9, 1, true).unwrap();
+
+        assert!(output.converged);
+        assert!((output.params[0] - 1.0).abs() < 1e-6, "{:?}", output.params);
+    }
+
+    /// 初期行列`H₀⁻¹`を渡したtwo-loop recursionの手計算。履歴が空（1回目の反復）なら
+    /// 再スケールせず`-H₀⁻¹g`。
+    #[test]
+    fn two_loop_recursion_with_initial_matrix_returns_minus_h0_times_gradient_when_history_is_empty()
+     {
+        let h0 = vec![vec![2.0, 0.0], vec![0.0, 4.0]];
+        let direction = two_loop_recursion(
+            &VecDeque::new(),
+            &VecDeque::new(),
+            &[1.0, 1.0],
+            Some(h0.as_slice()),
+        );
+        assert_eq!(direction, vec![-2.0, -4.0]);
+    }
+
+    /// 1組のペアがあるとき、`H₀⁻¹`を`sᵀy/(yᵀH₀⁻¹y)`倍に再スケールして使う。
+    /// `s=[1,0]`・`y=[1,2]`・`H₀⁻¹=diag(2,1)`・`g=[3,1]`:
+    /// `ρ=1/sᵀy=1`、`α=ρsᵀg=3`、`q=g-αy=[0,-5]`、`yᵀH₀⁻¹y=2+4=6`なのでスケール`1/6`、
+    /// `r=(1/6)H₀⁻¹q=[0,-5/6]`、`β=ρyᵀr=-5/3`、`r+=s(α-β)`で`r=[14/3,-5/6]`、方向`-r`。
+    #[test]
+    fn two_loop_recursion_with_initial_matrix_rescales_it_by_the_latest_pair() {
+        let h0 = vec![vec![2.0, 0.0], vec![0.0, 1.0]];
+        let s_history = VecDeque::from(vec![vec![1.0, 0.0]]);
+        let y_history = VecDeque::from(vec![vec![1.0, 2.0]]);
+
+        let direction =
+            two_loop_recursion(&s_history, &y_history, &[3.0, 1.0], Some(h0.as_slice()));
+
+        assert!((direction[0] + 14.0 / 3.0).abs() < 1e-12, "{direction:?}");
+        assert!((direction[1] - 5.0 / 6.0).abs() < 1e-12, "{direction:?}");
+    }
+
+    /// 割線方程式`H_new y = s`は初期行列のスケールによらず成り立つ（再スケールが
+    /// two-loop recursionの割線条件を壊さないことの確認）。`g=y`なら`-direction=s`。
+    #[test]
+    fn two_loop_recursion_with_initial_matrix_satisfies_the_secant_equation() {
+        let h0 = vec![vec![3.0, 1.0], vec![1.0, 2.0]];
+        let s = vec![0.5, -1.0];
+        let y = vec![1.5, 0.25];
+        let s_history = VecDeque::from(vec![s.clone()]);
+        let y_history = VecDeque::from(vec![y.clone()]);
+
+        let direction = two_loop_recursion(&s_history, &y_history, &y, Some(h0.as_slice()));
+
+        for (d, s_j) in direction.iter().zip(&s) {
+            assert!((d + s_j).abs() < 1e-12, "{direction:?} vs {s:?}");
+        }
+    }
+
+    /// 履歴`pairs`（古い順）と初期行列`h0`（再スケール済み）から、密な逆Hessian近似を
+    /// `bfgs_rank2_update`で古いペアから順に更新して`-H g`を返す（two-loop recursionの独立な参照実装）。
+    fn dense_lbfgs_direction(
+        h0: &[Vec<f64>],
+        pairs: &[(Vec<f64>, Vec<f64>)],
+        g: &[f64],
+    ) -> Vec<f64> {
+        let mut h = h0.to_vec();
+        for (s, y) in pairs {
+            h = bfgs_rank2_update(&h, s, y, 1.0 / dot(y, s));
+        }
+        h.iter().map(|row| -dot(row, g)).collect()
+    }
+
+    fn scaled(h0: &[Vec<f64>], scale: f64) -> Vec<Vec<f64>> {
+        h0.iter()
+            .map(|row| row.iter().map(|v| v * scale).collect())
+            .collect()
+    }
+
+    fn assert_close_relative(actual: &[f64], expected: &[f64], rtol: f64) {
+        for (a, e) in actual.iter().zip(expected) {
+            assert!(
+                (a - e).abs() <= rtol * (1.0 + e.abs()),
+                "{actual:?} vs {expected:?}"
+            );
+        }
+    }
+
+    /// 履歴が2ペア以上のとき、再スケールは**直近のペア**（`sᵀy/(yᵀH₀⁻¹y)`）から決まり、結果は
+    /// 「再スケールした`H₀⁻¹`に古いペアから順にBFGSのrank-2更新を適用した密な行列」×勾配と一致する。
+    /// 直近のペアではなく最古のペアから決めると、このデータでは別の値になる。
+    #[test]
+    fn two_loop_recursion_with_initial_matrix_matches_dense_bfgs_update_with_several_pairs() {
+        // 3次元で2ペア: 次元がペア数以下だと割線方程式が逆Hessianを一意に決め、初期行列の
+        // スケールが結果に現れない（2次元・2ペアでは区別できない）。
+        let h0 = vec![
+            vec![3.0, 1.0, 0.0],
+            vec![1.0, 2.0, 0.5],
+            vec![0.0, 0.5, 1.5],
+        ];
+        let pairs = vec![
+            (vec![1.0, 0.0, 0.5], vec![2.0, 1.0, 0.3]),
+            (vec![0.5, -1.0, 0.2], vec![1.5, 0.25, -0.1]),
+        ];
+        let g = [0.7, -1.3, 0.4];
+        let s_history: VecDeque<Vec<f64>> = pairs.iter().map(|(s, _)| s.clone()).collect();
+        let y_history: VecDeque<Vec<f64>> = pairs.iter().map(|(_, y)| y.clone()).collect();
+
+        let scale_from = |(s, y): &(Vec<f64>, Vec<f64>)| {
+            let h0_y: Vec<f64> = h0.iter().map(|row| dot(row, y)).collect();
+            dot(s, y) / dot(y, &h0_y)
+        };
+        let latest_scale = scale_from(&pairs[1]);
+        let oldest_scale = scale_from(&pairs[0]);
+        assert!(
+            (latest_scale - oldest_scale).abs() > 1e-3,
+            "テストデータの前提"
+        );
+
+        let direction = two_loop_recursion(&s_history, &y_history, &g, Some(h0.as_slice()));
+        let expected = dense_lbfgs_direction(&scaled(&h0, latest_scale), &pairs, &g);
+        assert_close_relative(&direction, &expected, 1e-12);
+
+        let wrong = dense_lbfgs_direction(&scaled(&h0, oldest_scale), &pairs, &g);
+        assert!(
+            direction
+                .iter()
+                .zip(&wrong)
+                .any(|(a, w)| (a - w).abs() > 1e-6),
+            "最古のペアから決めたスケールと区別できない"
+        );
+    }
+
+    /// 直近のペアだけが縮退（`sᵀy≤ε`）し、それ以前に有効なペアがあるとき、縮退したペアは
+    /// two-loop recursionが無視し、再スケールもしない（`1.0`）。結果は有効な古いペアだけを
+    /// `H₀⁻¹`に適用した密な行列と一致する。
+    #[test]
+    fn two_loop_recursion_with_initial_matrix_ignores_a_degenerate_latest_pair() {
+        let h0 = vec![vec![3.0, 1.0], vec![1.0, 2.0]];
+        let valid = (vec![1.0, 0.0], vec![2.0, 1.0]);
+        let degenerate = (vec![1.0, 0.0], vec![-1.0, 0.0]);
+        let g = [0.7, -1.3];
+        let s_history = VecDeque::from(vec![valid.0.clone(), degenerate.0.clone()]);
+        let y_history = VecDeque::from(vec![valid.1.clone(), degenerate.1.clone()]);
+
+        let direction = two_loop_recursion(&s_history, &y_history, &g, Some(h0.as_slice()));
+        let expected = dense_lbfgs_direction(&h0, &[valid], &g);
+
+        assert_close_relative(&direction, &expected, 1e-12);
+    }
+
+    /// `sᵀy`は十分正だが`yᵀH₀⁻¹y≤ε`（`y`が極端に小さい）の場合も再スケールしない（`1.0`）。
+    /// `sᵀy>ε`のガードとは独立に、`yᵀH₀⁻¹y`側のガード（ゼロ除算回避）を通る。
+    #[test]
+    fn two_loop_recursion_with_initial_matrix_does_not_rescale_when_y_h0_y_is_negligible() {
+        let h0 = vec![vec![2.0, 0.0], vec![0.0, 4.0]];
+        let pair = (vec![1.0, 1.0], vec![5e-9, 5e-9]);
+        assert!(dot(&pair.0, &pair.1) > f64::EPSILON, "テストデータの前提");
+        let h0_y: Vec<f64> = h0.iter().map(|row| dot(row, &pair.1)).collect();
+        assert!(dot(&pair.1, &h0_y) <= f64::EPSILON, "テストデータの前提");
+        let g = [1.0, -2.0];
+        let s_history = VecDeque::from(vec![pair.0.clone()]);
+        let y_history = VecDeque::from(vec![pair.1.clone()]);
+
+        let direction = two_loop_recursion(&s_history, &y_history, &g, Some(h0.as_slice()));
+        let expected = dense_lbfgs_direction(&h0, &[pair], &g);
+
+        assert_close_relative(&direction, &expected, 1e-8);
+    }
+
+    /// `run_solver_lbfgs_falls_back_...`の補足: 初期点のHessianは正定値だが`f''`がほぼ0で
+    /// 最初の`H₀⁻¹`が巨大になる初期点（`x=0.6`、`f''=3x²-1≈0.08`）でも、再スケールと強Wolfe条件の
+    /// 下で極小点`x=1`へ収束する（固定の`H₀⁻¹`が反復途中で不適切になっても破綻しない）。
+    #[test]
+    fn run_solver_lbfgs_converges_from_a_start_where_the_initial_inverse_hessian_is_huge() {
+        for x0 in [0.6, 0.7, -0.6, 3.0] {
+            let output =
+                run_solver(Quartic, SolverType::Lbfgs, vec![x0], 100, 1e-9, 1, true).unwrap();
+
+            assert!(output.converged, "x0={x0}");
+            assert!(
+                (output.params[0].abs() - 1.0).abs() < 1e-6,
+                "x0={x0}, {:?}",
+                output.params
+            );
+        }
+    }
+
+    /// 直近のペアの曲率が実質ゼロ以下（`sᵀy≤ε`）なら再スケールせず（`1.0`）、そのペアは
+    /// two-loop recursion自体が無視する（`two_loop_recursion_skips_degenerate_pair_...`と同じ
+    /// ガード）ため、方向は`-H₀⁻¹g`になる。
+    #[test]
+    fn two_loop_recursion_with_initial_matrix_does_not_rescale_for_a_degenerate_pair() {
+        let h0 = vec![vec![2.0, 0.0], vec![0.0, 4.0]];
+        let s_history = VecDeque::from(vec![vec![1.0, 0.0]]);
+        let y_history = VecDeque::from(vec![vec![-1.0, 0.0]]);
+
+        let direction =
+            two_loop_recursion(&s_history, &y_history, &[1.0, 1.0], Some(h0.as_slice()));
+
+        assert_eq!(direction, vec![-2.0, -4.0]);
     }
 
     #[test]
@@ -3814,6 +4205,7 @@ mod tests {
             stalled_at_optimum: false,
             s_history: VecDeque::with_capacity(LBFGS_HISTORY_SIZE),
             y_history: VecDeque::with_capacity(LBFGS_HISTORY_SIZE),
+            h0: None,
         };
         let result = Executor::new(NoisyCostFloorProblem::new(), lbfgs)
             .configure(|state| state.param(vec![0.0, 0.0]).max_iters(100))

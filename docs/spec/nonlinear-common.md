@@ -78,7 +78,13 @@ Logit/Probit/Tobit（最尤推定ベースの非線形モデル）が共有す�
   `H⁻¹`が降下方向を作らないため、従来の単位行列＋self-scalingに戻す。nullモデルの
   `w·X'X`で`H`を代用する案は、Hessian評価が不要になる反面、反復数が改善せず不採用。
 - **L-BFGS**: 同じ理由（`s`/`y`履歴・初期`γ`を注入する公開APIが無い）で自前実装
-  （`two_loop_recursion`、Nocedal & Wright Algorithm 7.4）。line search内側`Executor`に
+  （`two_loop_recursion`、Nocedal & Wright Algorithm 7.4）。two-loop recursionの初期行列は、
+  warm start点の厳密Hessianが正定値ならその逆行列`H₀⁻¹`を直近のペアで`sᵀy/(yᵀH₀⁻¹y)`倍に
+  再スケールしたもの、正定値でなければ従来の`γI`（`FaerBfgs::init`と同じ判定）。`γI`は曲率の
+  スケールしか表せず、回帰変数間の相関による悪条件（centeringでは直らない。等相関`ρ=0.9`・`k=20`で
+  条件数約235）で`lbfgs`が44反復かかり既定の`max_iter=35`を超えた（`newton`3・`bfgs`4反復）。
+  `H₀⁻¹`を再スケールせず使うと、warm start点と収束点でHessianが大きく違うデータ
+  （Logit `near_separation`・Tobit `heavy_censoring`）で`γI`より悪化するため再スケールする。line search内側`Executor`に
   明示的な`max_iters`（`LINE_SEARCH_MAX_ITERS=100`）を設定し、到達時は`ComputationFailed`
   として明示的にエラー化する（`FaerBfgs`には無い追加ガード）。`two_loop_recursion`の
   逆向きループには`yᵀs<=f64::EPSILON`のペアをゼロ除算回避のため無視するガードを持つが、

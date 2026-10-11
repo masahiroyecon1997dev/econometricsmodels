@@ -3781,40 +3781,16 @@ mod tests {
         ]
     }
 
-    /// `max_iter=1`・`raise_on_non_convergence=false`で打ち切ったとき、`Lbfgs`の1手目は
-    /// 勾配方向に進み、重く打ち切られたデータでは`(β, log σ)`尤度が凹でない領域
-    /// （費用関数のHessianが負の固有値を持つ）に着地することがある。Hessianの逆行列を使う
-    /// `Classical`/`Hc0`/`Hc1`/`Cluster`はそこで`SingularHessian`を返す（`neg_hessian_inverse`が
-    /// 不定なHessianを弾く。負の分散を返さないための設計で、`raise_on_non_convergence`とは
-    /// 独立）。このデータでの打ち切り点の費用関数Hessianの最小固有値は約-0.6
-    /// （数値微分で確認。`Newton`・`Bfgs`の打ち切り点は全て正で最小約76）。Hessianを使わない`Opg`は成功し、未収束の結果を返す。
+    /// `max_iter=1`・`raise_on_non_convergence=false`で打ち切った点は、重く打ち切られたデータでは
+    /// `(β, log σ)`尤度が凹でない領域の近くにある。`Newton`（LM減衰で凹な領域に留まる）・`Bfgs`・`Lbfgs`
+    /// （初期点のHessianが正定値ならその厳密な逆行列から出発するため、1手目がNewtonステップと一致）は、
+    /// 全`cov_type`で未収束の結果を返す（Hessianの逆行列を使う`Classical`/`Hc0`/`Hc1`/`Cluster`でも
+    /// `SingularHessian`にならない）。かつて`Lbfgs`は初期点のHessianを使わず1手目が勾配方向だったため、
+    /// このデータでは凹でない領域（費用関数Hessianの最小固有値が約-0.6）に着地し、Hessianの逆行列を使う
+    /// `cov_type`が`SingularHessian`になっていた。
     #[test]
-    fn fit_with_lbfgs_returns_singular_hessian_at_truncated_point_in_non_concave_region() {
-        for cov_type in all_cov_types_for_heavily_censored_input() {
-            let result = TobitEstimator::fit(
-                heavily_censored_input(),
-                truncated_fit_options(SolverType::Lbfgs, cov_type.clone()),
-            );
-            match cov_type {
-                CovType::Opg => {
-                    let estimator = result.expect("opg does not invert the Hessian");
-                    assert!(!estimator.converged());
-                }
-                _ => assert!(
-                    matches!(result, Err(MleError::SingularHessian)),
-                    "cov_type={cov_type:?}, result={result:?}"
-                ),
-            }
-        }
-    }
-
-    /// 同じデータ・同じ`max_iter=1`でも、`Newton`（LM減衰付きで凹な領域に留まる）と`Bfgs`
-    /// （初期点のHessianが正定値ならその厳密な逆行列から出発するため1手目がNewtonステップと
-    /// 一致する）は、全`cov_type`で未収束の結果を返す。`Lbfgs`だけが上のテストの
-    /// `SingularHessian`になることを対比として固定する。
-    #[test]
-    fn fit_with_newton_and_bfgs_returns_unconverged_result_for_every_cov_type_at_truncated_point() {
-        for solver in [SolverType::Newton, SolverType::Bfgs] {
+    fn fit_returns_unconverged_result_for_every_solver_and_cov_type_at_truncated_point() {
+        for solver in [SolverType::Newton, SolverType::Bfgs, SolverType::Lbfgs] {
             for cov_type in all_cov_types_for_heavily_censored_input() {
                 let result = TobitEstimator::fit(
                     heavily_censored_input(),

@@ -289,8 +289,8 @@ def heavily_censored_tobit_dataset() -> pl.DataFrame:
 
     外部の乱数に依存しない線形合同法で作る。Rust側
     （`engine/src/nonlinear/tobit.rs`の`heavily_censored_input`）と同じ手順・同じ値で、
-    `solver="lbfgs"`・`max_iter=1`の打ち切り点で`SingularHessian`になる挙動を
-    両側で同じ入力に対して固定するために使う。潜在変数は
+    `max_iter=1`の打ち切り点が全solver（newton/bfgs/lbfgs）で未収束の結果になる挙動を
+    両側で同じ入力に対して固定するために使う（かつて`solver="lbfgs"`だけ`SingularHessian`だった）。潜在変数は
     `y* = -1.8 + x1 + 0.5*x2 + e`（`x1`・`x2`・`e`は12個の一様乱数の和-6で近似した
     正規乱数）。`g`は4グループのクラスター列。
     """

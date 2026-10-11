@@ -2680,42 +2680,90 @@ pub fn ols_based_initial_params(
     Ok(params)
 }
 
-/// 設計行列の列ごとの標準化スケール（標準偏差のみ。平均は引かない）。
+/// 設計行列の列ごとの標準化スケール（標準偏差と、切片ありのときのみ平均）。
 ///
-/// 分散1へのスケーリングのみ行い、平均センタリングは行わない。理由: `x_std = (x-mean)/std`と
-/// 平均も引く標準化は、切片が「平均分のズレ」を吸収する前提の変換で、`include_intercept=false`
-/// のとき逆変換の式が成立しない（吸収先の切片が存在しないため）。`x_std = x/std`のみなら
-/// `θ_orig_j = θ_std_j/std_j`で完結し、切片の有無に関係なく成立する。当初の目的（勾配ノルムの
-/// 絶対閾値がxのスケールに依存する問題への対処）もスケーリングのみで達成できる
+/// 切片ありのモデルでは`x̃ⱼ = (xⱼ - x̄ⱼ)/stdⱼ`（平均0・分散1）、切片なしのモデルでは
+/// `x̃ⱼ = xⱼ/stdⱼ`（分散1のみ）に標準化する。切片列は無変換。標準偏差0の列（定数列）は`std`を`1.0`の
+/// ままにするので、切片なしでは無変換、切片ありでは平均を引いて全ゼロ列になる（切片と共線なので
+/// `checked_design_matrix_qr`が`SingularDesignMatrix`で弾く）。
+///
+/// **切片ありのとき平均を引く理由**: 平均を引かないと、平均が標準偏差に比べて大きい列
+/// （例: Wooldridge appleの`ecoprc`は平均÷標準偏差が3.7）が切片列とほぼ同じ方向を向き、
+/// 標準化後のHessianが悪条件になる（appleで条件数約7,300、平均を引くと約14）。悪条件のまま
+/// だとBFGS/L-BFGSの反復数が桁違いに増える（appleのlbfgsが95反復、平均を引くと19反復。
+/// newton・bfgsはほぼ変わらない）。解きやすい問題に直してからソルバーに渡す方針で、
+/// ソルバーごとの補正（`FaerBfgs`の初期逆Hessian等）に頼らない。
+///
+/// **切片なしのときは引かない理由**: 平均を引く操作は「切片が平均分のズレを吸収する」ことで
+/// 成立する再パラメータ化のため、吸収先の切片が無いと逆変換が成立しない。切片なしでは
+/// 切片列との共線性という上の原因自体が無いので、スケーリングのみで足りる
 /// （`docs/spec/nonlinear-common.md`1.3節「スケール依存への対処（標準化）」参照）。
+///
+/// 標準化空間のパラメータ`θ̃`と元のスケールの`θ`の対応（`x̄₀=0`・`std₀=1`、切片列は列0）:
+///
+/// - 傾き: `θⱼ = θ̃ⱼ/stdⱼ`
+/// - 切片: `θ₀ = θ̃₀ - Σ_{j≥1} x̄ⱼθⱼ`（切片ありのときのみ。`x̃'θ̃ = x'θ`から導く）
 #[derive(Debug, Clone)]
 pub struct ColumnScale {
     /// 列ごとの標準偏差。切片列（`has_intercept=true`の先頭列）は`1.0`のまま
-    /// （スケーリング対象外）。標準偏差が0の列（定数列）も`1.0`のまま扱う（0除算回避）。
+    /// （スケーリング対象外）。標準偏差が0の列（定数列）も`1.0`のまま扱う（0除算回避。
+    /// 切片ありでは`means`が引かれて全ゼロ列になる、`ColumnScale`のdocコメント参照）。
     stds: Vec<f64>,
+    /// 列ごとの平均。切片ありのとき、切片列以外は元の列の平均。切片列と切片なしの
+    /// モデルは全列`0.0`（平均を引かない）。
+    means: Vec<f64>,
+    /// 先頭列が切片列か。切片の逆変換（`destandardize_params`）で使う。
+    has_intercept: bool,
 }
 
 impl ColumnScale {
     /// 列ごとの標準偏差（`standardize_columns`のdocコメント参照）。分離検出
     /// （`nonlinear::separation`）が、標準化後の行列を複製せず元の`x`から行を都度計算するために使う。
+    ///
+    /// 分離の有無は切片込みの再パラメータ化（平均を引く操作）で変わらないため、分離検出は
+    /// 平均を引かない標準偏差だけの行のまま使い続ける（`means`は渡さない）。
     pub fn stds(&self) -> &[f64] {
         &self.stds
     }
 
-    /// `stds`の末尾に、スケーリング対象外（無変換）を表す`1.0`を`n`個追加した新しい
-    /// `ColumnScale`を返す。Tobitの`(β, logσ)`のように、`x`の列に対応しない追加
-    /// パラメータ（`logσ`）を`params`に含む場合に、既存の`zip`ベースの
-    /// `destandardize_params`/`destandardize_cov_params`をそのまま再利用するために使う
-    /// （`logσ`は`x`の列スケーリングとは無関係な量で、線形再パラメータ化`x_std=x/std`の
-    /// 下で不変。`docs/spec/tobit-spec.md`3.2節「TobitScaling」参照）。
-    pub fn extend_unscaled(&self, n: usize) -> Self {
-        let mut stds = self.stds.clone();
-        stds.extend(std::iter::repeat_n(1.0, n));
-        Self { stds }
+    /// 元のスケールのパラメータ`θ`を標準化空間の`θ̃`へ変換する（`destandardize_params`の
+    /// 逆変換。テストで標準化空間の値を再現するために使う）。
+    #[cfg(test)]
+    pub fn standardize_params(&self, params: &[f64]) -> Vec<f64> {
+        let mut out: Vec<f64> = params.iter().zip(&self.stds).map(|(p, s)| p * s).collect();
+        if self.has_intercept {
+            let shift: f64 = params
+                .iter()
+                .zip(&self.means)
+                .skip(1)
+                .map(|(p, m)| p * m)
+                .sum();
+            if let Some(intercept) = out.first_mut() {
+                *intercept += shift;
+            }
+        }
+        out
+    }
+
+    /// 標準化空間のパラメータから元のスケールのパラメータへの線形変換の行列`J`
+    /// （`θ = Jθ̃`、`k×k`）。`J = diag(1/stds)`で、切片ありのときのみ第0行の
+    /// 傾き成分に`J[0][m] = -x̄ₘ/stdₘ`が入る（`destandardize_params`の式の係数）。
+    fn param_jacobian(&self) -> Mat<f64> {
+        let k = self.stds.len();
+        Mat::from_fn(k, k, |i, m| {
+            if i == m {
+                1.0 / self.stds[i]
+            } else if self.has_intercept && i == 0 {
+                -self.means[m] / self.stds[m]
+            } else {
+                0.0
+            }
+        })
     }
 }
 
-/// 設計行列`x`の各列を標準偏差でスケーリングする（切片列は除外）。
+/// 設計行列`x`の各列を標準化する（切片列は除外）。切片ありのときは平均も引く
+/// （`ColumnScale`のdocコメント参照）。
 /// 収束後は`destandardize_params`で元のスケールのパラメータへ逆変換する。
 pub fn standardize_columns(x: &Mat<f64>, has_intercept: bool) -> (Mat<f64>, ColumnScale) {
     let n = x.nrows();
@@ -2723,48 +2771,71 @@ pub fn standardize_columns(x: &Mat<f64>, has_intercept: bool) -> (Mat<f64>, Colu
     let start = usize::from(has_intercept);
 
     let mut stds = vec![1.0; k];
-    for (j, std) in stds.iter_mut().enumerate().take(k).skip(start) {
+    let mut means = vec![0.0; k];
+    for j in start..k {
         let mean: f64 = (0..n).map(|i| *x.get(i, j)).sum::<f64>() / n as f64;
         let var: f64 = (0..n).map(|i| (*x.get(i, j) - mean).powi(2)).sum::<f64>() / n as f64;
         let sd = var.sqrt();
         if sd > 0.0 {
-            *std = sd;
+            stds[j] = sd;
+        }
+        if has_intercept {
+            means[j] = mean;
         }
     }
 
-    let x_std = Mat::from_fn(n, k, |i, j| *x.get(i, j) / stds[j]);
-    (x_std, ColumnScale { stds })
+    let x_std = Mat::from_fn(n, k, |i, j| (*x.get(i, j) - means[j]) / stds[j]);
+    (
+        x_std,
+        ColumnScale {
+            stds,
+            means,
+            has_intercept,
+        },
+    )
 }
 
 /// `standardize_columns`で標準化した空間で最適化した`params_std`を、元のスケールの
-/// パラメータへ逆変換する（`θ_orig_j = θ_std_j / std_j`）。
+/// パラメータへ逆変換する（`ColumnScale`のdocコメントの式: 傾き`θⱼ=θ̃ⱼ/stdⱼ`、
+/// 切片ありのとき切片`θ₀=θ̃₀-Σ_{j≥1}x̄ⱼθⱼ`）。
 pub fn destandardize_params(params_std: &[f64], scale: &ColumnScale) -> Vec<f64> {
-    params_std
+    let mut out: Vec<f64> = params_std
         .iter()
         .zip(scale.stds.iter())
         .map(|(p, s)| p / s)
-        .collect()
+        .collect();
+    if scale.has_intercept {
+        // 確定した傾き係数（`out[1..]`）を使って切片を補正する。
+        let shift: f64 = out
+            .iter()
+            .zip(&scale.means)
+            .skip(1)
+            .map(|(b, m)| b * m)
+            .sum();
+        if let Some(intercept) = out.first_mut() {
+            *intercept -= shift;
+        }
+    }
+    out
 }
 
 /// `standardize_columns`で標準化した空間で評価した係数分散共分散行列`cov_std`
 /// （`observed_information_cov_params`等の`cov_type`共通行列演算の戻り値）を、
 /// 元のスケールの係数分散共分散行列へ逆変換する。
 ///
-/// `θ_orig = D⁻¹θ_std`（`D = diag(stds)`、`destandardize_params`と同じ変換）のとき、
-/// 対数尤度を`θ_std`の関数とみなすと連鎖律により`H_std = D⁻¹ H_orig D⁻¹`
-/// （`H`はHessian、`D`は対角行列なので`D⁻¹` の転置は`D⁻¹`自身）が成り立つ。
-/// 分散共分散行列はHessianの逆行列に比例する（`Σ = -H⁻¹`等）ため、
-/// `Σ_orig = -H_orig⁻¹ = -(D H_std D)⁻¹ = D⁻¹(-H_std⁻¹)D⁻¹ = D⁻¹ Σ_std D⁻¹`
-/// （`H_std = D⁻¹H_origD⁻¹`の逆を取ると`H_orig = D H_std D`になることを使った）。
+/// `θ_orig = Jθ_std`（`J`は`ColumnScale::param_jacobian`、`destandardize_params`と同じ
+/// 線形変換）のとき、対数尤度を`θ_std`の関数とみなすと連鎖律により
+/// `H_std = JᵀH_origJ`（`H`はHessian）が成り立つ。分散共分散行列はHessianの逆行列に
+/// 比例する（`Σ = -H⁻¹`等）ため、`J`が可逆なら
+/// `Σ_orig = -H_orig⁻¹ = -(J⁻ᵀH_stdJ⁻¹)⁻¹ = J(-H_std⁻¹)Jᵀ = J Σ_std Jᵀ`。
 /// この関係はOPG（`Σᵢsᵢsᵢ'`の逆行列）・サンドイッチ・クラスターの各`cov_type`でも
-/// 同様に成り立つ（いずれも`H⁻¹`を両側から掛ける、または`H⁻¹`の逆行列を取る形の式のため）。
-/// `D`が対角行列であることから、要素ごとに`Σ_orig[i,j] = Σ_std[i,j] / (stds[i]*stds[j])`
-/// という単純な計算に帰着する。
+/// 同様に成り立つ（いずれも`H⁻¹`を両側から掛ける、または`H⁻¹`の逆行列を取る形の式のため。
+/// スコアも`s_std = Jᵀ s_orig`と同じ連鎖律で変換される）。
+/// 平均を引かない（切片なし）場合は`J`が対角になり、要素ごとに
+/// `Σ_orig[i,j] = Σ_std[i,j] / (stds[i]*stds[j])`に帰着する。
 pub fn destandardize_cov_params(cov_std: &Mat<f64>, scale: &ColumnScale) -> Mat<f64> {
-    let k = scale.stds.len();
-    Mat::from_fn(k, k, |i, j| {
-        *cov_std.get(i, j) / (scale.stds[i] * scale.stds[j])
-    })
+    let j = scale.param_jacobian();
+    &j * cov_std * j.transpose()
 }
 
 // `cov_type`ごとの係数分散共分散行列の共通計算。モデル固有の尤度計算には依存せず、
@@ -4642,7 +4713,7 @@ mod tests {
         for i in 0..4 {
             assert_eq!(*x_std.get(i, 0), 1.0);
         }
-        // 平均は引いていないため、分散（平均まわりの2次モーメント）で検証する
+        // 切片列以外の標準化後の列は平均0（切片あり）・分散1。ここでは分散（平均まわりの2次モーメント）で検証する
         // （2乗の平均=E[x²]ではなくVar(x)=E[x²]-E[x]²が1になるはず）。
         let variance = |col: usize| -> f64 {
             let values: Vec<f64> = (0..4).map(|i| *x_std.get(i, col)).collect();
@@ -4690,28 +4761,101 @@ mod tests {
             }
         });
 
-        let (_, scale) = standardize_columns(&x, true);
+        let (x_std, scale) = standardize_columns(&x, true);
         let params_std = vec![1.5, 6.0, -3.0];
         let params_orig = destandardize_params(&params_std, &scale);
 
-        // 切片の係数はスケーリング対象外（scale.stds[0] == 1.0）のため、
-        // 切片なしのケースと同様に線形予測子が一致するはず。切片項自体は
-        // 平均センタリングをしていないため素通しでよい（destandardize_paramsの
-        // 補正対象にならない）。
-        assert_eq!(params_orig[0], params_std[0]);
+        // 切片以外の標準化後の列は平均0・分散1（平均を引くのは切片ありのときのみ）。
+        for j in 1..3 {
+            let mean = (0..4).map(|i| *x_std.get(i, j)).sum::<f64>() / 4.0;
+            let var = (0..4)
+                .map(|i| (*x_std.get(i, j) - mean).powi(2))
+                .sum::<f64>()
+                / 4.0;
+            assert!(mean.abs() < 1e-12, "col {j} mean={mean}");
+            assert!((var - 1.0).abs() < 1e-12, "col {j} var={var}");
+        }
+        // 切片列は無変換。
         for i in 0..4 {
-            let pred_std: f64 = params_std[0]
-                + (1..3)
-                    .map(|j| (*x.get(i, j) / scale.stds[j]) * params_std[j])
-                    .sum::<f64>();
-            let pred_orig: f64 =
-                params_orig[0] + (1..3).map(|j| *x.get(i, j) * params_orig[j]).sum::<f64>();
+            assert_eq!(*x_std.get(i, 0), 1.0);
+        }
+
+        // 傾きは`θⱼ=θ̃ⱼ/stdⱼ`、切片は`θ₀=θ̃₀-Σx̄ⱼθⱼ`（手計算した式）。標準化空間と元の
+        // スケールで線形予測子が一致することも確認する。
+        for j in 1..3 {
+            assert!((params_orig[j] - params_std[j] / scale.stds[j]).abs() < 1e-12);
+        }
+        let expected_intercept =
+            params_std[0] - (1..3).map(|j| scale.means[j] * params_orig[j]).sum::<f64>();
+        assert!((params_orig[0] - expected_intercept).abs() < 1e-12);
+        for i in 0..4 {
+            let pred_std: f64 = (0..3).map(|j| *x_std.get(i, j) * params_std[j]).sum();
+            let pred_orig: f64 = (0..3).map(|j| *x.get(i, j) * params_orig[j]).sum();
             assert!((pred_std - pred_orig).abs() < 1e-9);
+        }
+
+        // `standardize_params`は`destandardize_params`の逆変換。
+        let round_trip = scale.standardize_params(&params_orig);
+        for (a, b) in round_trip.iter().zip(&params_std) {
+            assert!((a - b).abs() < 1e-12, "{round_trip:?} vs {params_std:?}");
         }
     }
 
     #[test]
-    fn destandardize_cov_params_divides_by_outer_product_of_stds() {
+    fn standardize_columns_without_intercept_does_not_subtract_the_mean() {
+        // 切片なしでは吸収先の切片が無いため平均を引かない（`x/std`のみ）。`means`は全列0.0で、
+        // 逆変換（`destandardize_params`・`destandardize_cov_params`）も対角（`/std`）のまま。
+        let x = Mat::from_fn(4, 2, |i, j| {
+            if j == 0 {
+                [10.0, 20.0, 30.0, 40.0][i]
+            } else {
+                [100.0, 200.0, 150.0, 50.0][i]
+            }
+        });
+        let (x_std, scale) = standardize_columns(&x, false);
+
+        assert!(scale.means.iter().all(|m| *m == 0.0));
+        for i in 0..4 {
+            for j in 0..2 {
+                assert_eq!(*x_std.get(i, j), *x.get(i, j) / scale.stds[j]);
+            }
+        }
+        let cov_std = Mat::from_fn(2, 2, |i, j| [[4.0, 6.0], [6.0, 9.0]][i][j]);
+        let cov_orig = destandardize_cov_params(&cov_std, &scale);
+        for i in 0..2 {
+            for j in 0..2 {
+                let expected = *cov_std.get(i, j) / (scale.stds[i] * scale.stds[j]);
+                assert!((*cov_orig.get(i, j) - expected).abs() < 1e-12);
+            }
+        }
+    }
+
+    #[test]
+    fn standardize_columns_turns_a_constant_column_into_an_all_zero_column_with_intercept() {
+        // 標準偏差0の列は`std=1.0`のままで、切片ありでは平均が引かれて全ゼロ列になる
+        // （切片と共線。`fit()`の列ピボットQRランクチェックが弾く）。切片なしでは無変換。
+        let x = Mat::from_fn(4, 3, |i, j| match j {
+            0 => 1.0,
+            1 => [1.0, 2.0, 3.0, 4.0][i],
+            _ => 0.1,
+        });
+
+        let (x_std, scale) = standardize_columns(&x, true);
+        assert_eq!(scale.stds[2], 1.0);
+        assert_eq!(scale.means[2], 0.1);
+        for i in 0..4 {
+            assert_eq!(*x_std.get(i, 2), 0.0);
+        }
+
+        let (x_std_no_intercept, scale_no_intercept) = standardize_columns(&x, false);
+        assert_eq!(scale_no_intercept.stds[2], 1.0);
+        for i in 0..4 {
+            assert_eq!(*x_std_no_intercept.get(i, 2), 0.1);
+        }
+    }
+
+    #[test]
+    fn destandardize_cov_params_applies_the_intercept_adjusted_linear_map() {
         let x = Mat::from_fn(4, 2, |i, j| {
             if j == 0 {
                 1.0
@@ -4722,17 +4866,22 @@ mod tests {
         let (_, scale) = standardize_columns(&x, true);
         assert_eq!(scale.stds[0], 1.0);
         assert!(scale.stds[1] > 1.0);
+        assert_eq!(scale.means[1], 25.0);
 
         let cov_std = Mat::from_fn(2, 2, |i, j| [[4.0, 6.0], [6.0, 9.0]][i][j]);
         let cov_orig = destandardize_cov_params(&cov_std, &scale);
 
-        // 切片列は`stds[0]==1.0`なので影響を受けない。x1列は`stds[1]`で
-        // 割った分だけ小さくなる（`Σ_orig[i,j] = Σ_std[i,j]/(stds[i]*stds[j])`）。
-        let s1 = scale.stds[1];
-        assert!((*cov_orig.get(0, 0) - 4.0).abs() < 1e-12);
-        assert!((*cov_orig.get(0, 1) - 6.0 / s1).abs() < 1e-12);
-        assert!((*cov_orig.get(1, 0) - 6.0 / s1).abs() < 1e-12);
-        assert!((*cov_orig.get(1, 1) - 9.0 / (s1 * s1)).abs() < 1e-12);
+        // `θ₀ = θ̃₀ - (x̄/s)θ̃₁`、`θ₁ = θ̃₁/s`（`s=stds[1]`、`x̄=means[1]`）から、
+        // 分散・共分散の展開式（`Var(a-bc)`型）を手で書いた期待値。
+        let s = scale.stds[1];
+        let r = 25.0 / s;
+        let var0 = 4.0 - 2.0 * r * 6.0 + r * r * 9.0;
+        let cov01 = (6.0 - r * 9.0) / s;
+        let var1 = 9.0 / (s * s);
+        assert!((*cov_orig.get(0, 0) - var0).abs() < 1e-12);
+        assert!((*cov_orig.get(0, 1) - cov01).abs() < 1e-12);
+        assert!((*cov_orig.get(1, 0) - cov01).abs() < 1e-12);
+        assert!((*cov_orig.get(1, 1) - var1).abs() < 1e-12);
     }
 
     #[test]

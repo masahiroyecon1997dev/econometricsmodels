@@ -593,7 +593,9 @@ fn population_std(values: impl Iterator<Item = f64> + Clone, n: usize) -> f64 {
 /// （Tobit局所）。`nonlinear/common.rs`の`standardize_columns`/`ColumnScale`/
 /// `destandardize_params`を使わず、Tobit内で完結させる。
 ///
-/// **`standardize_columns`と分けた理由**:
+/// **`standardize_columns`（`ColumnScale`）とは別に持つ理由は1（`y`のスケーリングを含むため）**。
+/// 2の`x`列の平均センタリングは`ColumnScale`も切片ありで同じ方式を採っており、`x`側の平均・
+/// 標準偏差・切片補正・ヤコビアンは重複している（統合は未実施）:
 /// 1. **`y`のスケーリング**: 当時あった分離ヒューリスティック（標準化パラメータ空間のL2ノルムが
 ///    閾値を超えたら(準)分離と判定する、現在は廃止）はLogit/Probit（`y∈{0,1}`）で較正されていた。
 ///    Tobitは`y`が連続でスケールが任意のため、`y`のスケールが大きいだけで健全なMLE解でも
@@ -606,9 +608,7 @@ fn population_std(values: impl Iterator<Item = f64> + Clone, n: usize) -> f64 {
 ///    標準偏差（例: `0.949`）で割ると、その丸め誤差（~1e-16）だけでも打ち切り率が高く
 ///    Hessianが際どい悪条件のデータ（合成`heavy_censoring`、左打ち切り60%）で正則化
 ///    NewtonがSingularHessianに倒れることが実測で判明したため、丸めて厳密化する。
-/// 2. **`x`列の平均センタリング（切片ありのときのみ）**: `standardize_columns`は
-///    スケーリングのみで平均を引かない（`include_intercept=false`で逆変換が壊れるため、
-///    同関数のdocコメント参照）。しかし`exper`(0〜45)と`expersq`(0〜2025)のように
+/// 2. **`x`列の平均センタリング（切片ありのときのみ）**: `exper`(0〜45)と`expersq`(0〜2025)のように
 ///    強く共線な列を含むと、スケーリングだけでは標準化後のHessianが悪条件のままで、
 ///    正則化Newton（`regularized_newton_step`）が回復不能な不定符号領域に落ちる
 ///    （mroz `hours`で実測、`ols_initial_params`の丸め誤差~1e-14で結果が変わるほど際どい）。

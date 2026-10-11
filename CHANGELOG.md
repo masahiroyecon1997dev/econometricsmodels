@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 
 - **Breaking**: OLS / WLS / Logit / Probit / Tobit: `predict()` now returns a plain `list[float]` (one value per observation, like `residuals`) instead of a list of single-key dicts (`{"predicted": ...}` / `{"probability": ...}`). Intervals, if added later, will be a separate method rather than extra keys. Migration: replace `[row["predicted"] for row in res.predict()]` with `res.predict()`. `augment()` is unchanged
+- Logit / Probit: with an intercept, regressors are now centered as well as scaled before optimization (the result is mapped back to the original scale; without an intercept nothing changes). `solver="lbfgs"` needed about 95 iterations on Wooldridge `apple` and about 90 on `mroz`, so it failed at the default `max_iter=35`; it now converges in 14-22. `newton` and `bfgs` are unchanged in practice, and estimates agree with the references as before
 - FE: for a perfect fit or extreme scale differences between slope coefficients, the F-test failure is now reported by FE's own F-test (still `ComputationError`, with a different message) instead of by the internal OLS fit. With a robust `cov_type` an input that failed before can now succeed. Results of every other input are bit-for-bit unchanged
 
 ## [0.8.0] - 2026-10-04

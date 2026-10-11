@@ -66,8 +66,10 @@ pub(crate) enum SeparationVerdict {
 ///   （`ComputationFailed`）を返し、`false`なら`converged=false`を返す。推定結果そのものは
 ///   得られているので、フラグの契約（「結果を`converged=false`で返す」）を保つ。
 ///
-/// `x`は標準化前の設計行列で、`scale`・`y`は`fit()`が最適化に使ったもの。標準化は列を標準偏差で
-/// 割るだけなので、標準化後の行列を複製せず`x`と`scale`から行を都度計算する。
+/// `x`は標準化前の設計行列で、`scale`・`y`は`fit()`が最適化に使ったもの。ここでは列を標準偏差で
+/// 割るだけの行を使い（`fit()`の標準化が切片ありで平均も引くのとは別。切片込みの再パラメータ化は
+/// 分離の有無を変えず、LPの閾値の較正もこの行に対するもの）、標準化後の行列を複製せず`x`と
+/// `scale`から行を都度計算する。
 pub(crate) fn verify_no_separation(
     x: &Mat<f64>,
     scale: &ColumnScale,

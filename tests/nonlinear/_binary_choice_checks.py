@@ -1449,10 +1449,6 @@ SOLVER_COMBINATION_CASES = [
     "apple_cluster",
 ]
 
-# appleはlbfgsが既定のmax_iter=35では収束しない（実測で約95〜96回要する）ため、
-# solverの組み合わせテストでは上限を十分大きくする。
-_APPLE_MAX_ITER = 200
-
 
 def check_solver_combination_matches_newton_reference(
     config: BinaryChoiceReferenceConfig, fixtures, case: str, solver: str
@@ -1481,9 +1477,10 @@ def check_solver_combination_matches_newton_reference(
         ).fit()
         ref = fixtures["near_separation"][cov_type]
     elif case == "apple_cluster":
-        res = _apple_cluster_fit(
-            config, solver=solver, max_iter=_APPLE_MAX_ITER
-        )
+        # appleは平均が標準偏差に比べて大きい列を含む。標準化で平均を引かない
+        # 実装ではlbfgsが既定のmax_iter=35では収束しなかった（約95反復）ため、
+        # max_iterを指定しないこの呼び出しが既定値での収束の回帰ガードを兼ねる。
+        res = _apple_cluster_fit(config, solver=solver)
         ref = fixtures["apple"]["cluster"]
     else:
         res = _baseline_cluster_fit(config, case, solver=solver)

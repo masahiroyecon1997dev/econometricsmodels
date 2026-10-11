@@ -1471,6 +1471,99 @@ mod tests {
         assert!(!estimator.converged());
     }
 
+    /// 平均が標準偏差に比べて大きい列（平均÷標準偏差が約12〜16）を持つ設計行列で、`lbfgs`が
+    /// 既定の`max_iter=35`以内に収束することを固定する回帰テスト。標準化で平均を引かないと
+    /// 列が切片列とほぼ共線になり（標準化後のHessianの条件数が数千）、`lbfgs`は
+    /// 数十〜100反復を要した（Wooldridge appleの実測95反復）。平均を引く標準化（切片あり）で
+    /// 条件数が下がり、`newton`/`bfgs`と同じ収束点に少ない反復で到達する。
+    #[test]
+    fn fit_lbfgs_converges_within_default_max_iter_for_columns_with_large_means() {
+        fn lcg(seed: &mut u64) -> f64 {
+            *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            ((*seed >> 11) as f64) / ((1u64 << 53) as f64)
+        }
+
+        let n = 600;
+        let mut seed = 7u64;
+        // (平均, 標準偏差, 真の係数（標準化した値に対する））
+        let spec = [
+            (20.0, 1.5, 0.6),
+            (12.0, 1.0, -0.4),
+            (30.0, 2.0, 0.5),
+            (8.0, 0.5, -0.3),
+        ];
+        let columns: Vec<Vec<f64>> = spec
+            .iter()
+            .map(|&(mean, sd, _)| {
+                (0..n)
+                    .map(|_| {
+                        // 12個の一様乱数の和-6で近似した標準正規乱数
+                        let z: f64 = (0..12).map(|_| lcg(&mut seed)).sum::<f64>() - 6.0;
+                        mean + sd * z
+                    })
+                    .collect()
+            })
+            .collect();
+        let y: Vec<f64> = (0..n)
+            .map(|i| {
+                let eta: f64 = -0.2
+                    + spec
+                        .iter()
+                        .zip(&columns)
+                        .map(|(&(mean, sd, b), col)| b * (col[i] - mean) / sd)
+                        .sum::<f64>();
+                // 線形予測子のリンク（probit）はテスト対象外のため、一様乱数との比較は
+                // ロジスティック形で代用する（データ生成の方式が何であれ、MLEは存在する）。
+                let p = 1.0 / (1.0 + (-eta).exp());
+                if lcg(&mut seed) < p { 1.0 } else { 0.0 }
+            })
+            .collect();
+        let make_input = || {
+            ProbitInput::from_columns(
+                &y,
+                &columns,
+                vec![
+                    "x1".to_string(),
+                    "x2".to_string(),
+                    "x3".to_string(),
+                    "x4".to_string(),
+                ],
+                true,
+                "y".to_string(),
+            )
+            .unwrap()
+        };
+        let fit = |solver: SolverType, tol: f64| {
+            ProbitEstimator::fit(
+                make_input(),
+                MleFitOptions {
+                    solver,
+                    max_iter: 35,
+                    tol,
+                    raise_on_non_convergence: true,
+                    cov_type: CovType::Classical,
+                    confidence_level: 0.95,
+                },
+            )
+            .unwrap()
+        };
+
+        let newton = fit(SolverType::Newton, 1e-8);
+        let lbfgs = fit(SolverType::Lbfgs, 1e-8);
+
+        assert!(lbfgs.converged());
+        // 平均を引く標準化では5〜6反復、引かないと28〜42反復を要する（実測）。
+        assert!(lbfgs.n_iter() <= 15, "n_iter={}", lbfgs.n_iter());
+        for (a, b) in lbfgs.params().iter().zip(newton.params()) {
+            assert!(
+                (a - b).abs() <= 1e-5 * (1.0 + b.abs()),
+                "lbfgs={:?}, newton={:?}",
+                lbfgs.params(),
+                newton.params()
+            );
+        }
+    }
+
     /// `beta1=20`（分離と誤検知してはいけない境界ケース）で3手法とも正常に収束することを
     /// 固定するリグレッションテスト（`logit.rs`の同名テストと同じ位置づけ）。分離検出の
     /// 変更が既存の合格ケースを誤検知させないことを保証する。
@@ -1589,7 +1682,7 @@ mod tests {
     /// `cov_params`の対称性・各種統計量の内部整合性（z値・信頼区間の定義式通りの関係）を
     /// 検証する回帰テスト。特に`destandardize_cov_params`が非対角成分も含めて
     /// 正しく元のスケールへ逆変換できているかを確認する（対角成分だけでは
-    /// `destandardize_cov_params`の`stds[i]*stds[j]`の掛け違い（転置ミス等）を検出できない）。
+    /// `destandardize_cov_params`のヤコビアン`J`の非対角（切片行）の取り違えや転置ミス等を検出できない）。
     #[test]
     fn fit_cov_params_is_symmetric_and_stats_are_internally_consistent() {
         let y = vec![0.0, 1.0, 0.0, 1.0];
@@ -1848,12 +1941,7 @@ mod tests {
             input_for_reconstruction.x(),
             input_for_reconstruction.has_intercept(),
         );
-        let params_std: Vec<f64> = classical
-            .params()
-            .iter()
-            .zip(scale.stds())
-            .map(|(p, s)| p * s)
-            .collect();
+        let params_std = scale.standardize_params(classical.params());
         let problem_std =
             ProbitProblem::from_standardized(x_std, input_for_reconstruction.y().clone());
         let scores_std = problem_std.scores(&params_std);
@@ -1950,12 +2038,7 @@ mod tests {
             input_for_reconstruction.x(),
             input_for_reconstruction.has_intercept(),
         );
-        let params_std: Vec<f64> = classical
-            .params()
-            .iter()
-            .zip(scale.stds())
-            .map(|(p, s)| p * s)
-            .collect();
+        let params_std = scale.standardize_params(classical.params());
         let problem_std =
             ProbitProblem::from_standardized(x_std, input_for_reconstruction.y().clone());
         let scores_std = problem_std.scores(&params_std);
@@ -2049,12 +2132,7 @@ mod tests {
             input_for_reconstruction.x(),
             input_for_reconstruction.has_intercept(),
         );
-        let params_std: Vec<f64> = classical
-            .params()
-            .iter()
-            .zip(scale.stds())
-            .map(|(p, s)| p * s)
-            .collect();
+        let params_std = scale.standardize_params(classical.params());
         let problem_std =
             ProbitProblem::from_standardized(x_std, input_for_reconstruction.y().clone());
         let scores_std = problem_std.scores(&params_std);
@@ -2527,6 +2605,41 @@ mod tests {
             result.unwrap_err(),
             MleError::Common(CommonError::InsufficientObservations { n: 2, k: 2 })
         );
+    }
+
+    /// 標準偏差0の列（定数列）は、切片ありでは標準化で平均が引かれて全ゼロ列になり、
+    /// 設計行列がランク落ちして`SingularDesignMatrix`で弾かれる（`solver`に依らない）。
+    #[test]
+    fn fit_returns_singular_design_matrix_error_for_constant_column_with_intercept() {
+        let y = vec![0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0];
+        let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let constant = vec![0.1; 8];
+
+        for solver in [SolverType::Newton, SolverType::Bfgs, SolverType::Lbfgs] {
+            let input = ProbitInput::from_columns(
+                &y,
+                &[x1.clone(), constant.clone()],
+                vec!["x1".to_string(), "c".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap();
+            let result = ProbitEstimator::fit(
+                input,
+                MleFitOptions {
+                    solver,
+                    max_iter: 35,
+                    tol: 1e-6,
+                    raise_on_non_convergence: true,
+                    cov_type: CovType::Classical,
+                    confidence_level: 0.95,
+                },
+            );
+            assert!(
+                matches!(result, Err(MleError::SingularDesignMatrix)),
+                "solver={solver:?}, result={result:?}"
+            );
+        }
     }
 
     /// 完全な多重共線性（`x2 = 2·x1`）の設計行列は、`fit()`冒頭の列ピボットQR

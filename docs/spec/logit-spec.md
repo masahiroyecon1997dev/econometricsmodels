@@ -344,8 +344,10 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   `educ`・`age`・`reglbs`）。`apple`は`mroz`の`city`（`G=2`）が`G<=q`で成功パスを持てないため、
   実データのクラスターロバストSEの数値照合を担う（statsmodelsとRの両方で全統計量。
   Wooldridgeデータは固定CSVにしないため、`y`はロードの都度導出する）。
-  `bfgs`/`lbfgs`は`apple`で既定の`max_iter=35`では収束せず約95〜96反復を要する（`newton`は4〜5、
-  `bfgs`は8〜11）ため、`solver`の組み合わせテストでは`max_iter=200`にする。
+  `apple`は平均が標準偏差に比べて大きい列（`ecoprc`・`regprc`・`educ`等）を含み、標準化で平均を
+  引かないと`lbfgs`が既定の`max_iter=35`では収束しなかった（約95〜96反復）。切片ありでは平均も
+  引く標準化（`nonlinear-common.md`1.3節）により19・14反復になり、`solver`の組み合わせテストは
+  `max_iter`を指定せず既定値で収束を確認する。
 - **`solver`の組み合わせ**: `newton`は全シナリオ×`cov_type`で数値照合する。`bfgs`/`lbfgs`は
   baseline×classicalに加え、代表的な組み合わせ（`near_separation`×classical/opg/hc0、cluster・
   cluster_imbalanced、`apple`のcluster）を、statsmodelsの`newton`で生成した同じシナリオ・

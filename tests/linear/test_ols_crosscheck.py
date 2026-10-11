@@ -305,15 +305,14 @@ def test_hac_matches_r(crosscheck):
     除外した上でNewey-West公式自体の妥当性を確認する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_autocorrelated.csv")
-    entry = crosscheck["synthetic"]["autocorrelated"]["hac"]
+    ref = crosscheck["synthetic"]["autocorrelated"]["hac"]
     options = OLSOptions(
-        cov_type="hac", hac_lags=entry["hac_lag"], hac_time=ROW_TIME
+        cov_type="hac", hac_lags=ref["hac_lag"], hac_time=ROW_TIME
     )
     res = OLS(
         with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
     ).fit()
 
-    ref = entry
     # 係数（coef）・AIC・BIC・対数尤度はcov_typeに依存しない通常のOLS推定値の
     # ため厳密比較のまま。HACで乖離しうるのは標準誤差（se）とF統計量・F検定p値
     # （cov_typeごとのロバストWald検定のため、標準誤差と同じ慣習差が乗る）。
@@ -371,18 +370,17 @@ def test_no_intercept_hac_matches_r(crosscheck):
     （`hac_lag`）をそのまま使う（`test_hac_matches_r`と同じ方針）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
-    entry = crosscheck["synthetic"]["baseline"]["no_intercept"]["hac"]
+    ref = crosscheck["synthetic"]["baseline"]["no_intercept"]["hac"]
     options = OLSOptions(
         include_intercept=False,
         cov_type="hac",
-        hac_lags=entry["hac_lag"],
+        hac_lags=ref["hac_lag"],
         hac_time=ROW_TIME,
     )
     res = OLS(
         with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
     ).fit()
 
-    ref = entry
     label = "no_intercept/hac/R"
     assert res.param_names == ["x1", "x2", "x3"]
     _assert_close(res.params, ref["params"], f"{label} params")
@@ -423,18 +421,17 @@ def test_confidence_level_hac_matches_r(crosscheck):
     （`hac_lag`）をそのまま使う（`test_hac_matches_r`と同じ方針）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
-    entry = crosscheck["synthetic"]["baseline"]["confidence_level"]["hac"]
+    ref = crosscheck["synthetic"]["baseline"]["confidence_level"]["hac"]
     options = OLSOptions(
         confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
         cov_type="hac",
-        hac_lags=entry["hac_lag"],
+        hac_lags=ref["hac_lag"],
         hac_time=ROW_TIME,
     )
     res = OLS(
         with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
     ).fit()
 
-    ref = entry
     label = "confidence_level/hac/R"
     _assert_close(res.params, ref["params"], f"{label} params")
     _assert_close(

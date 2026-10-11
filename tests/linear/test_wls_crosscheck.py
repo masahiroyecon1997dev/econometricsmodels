@@ -283,9 +283,9 @@ def test_hac_matches_r(crosscheck):
     除外した上でNewey-West公式自体の妥当性を確認する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_autocorrelated.csv")
-    entry = crosscheck["synthetic"]["autocorrelated"]["hac"]
+    ref = crosscheck["synthetic"]["autocorrelated"]["hac"]
     options = WLSOptions(
-        cov_type="hac", hac_lags=entry["hac_lag"], hac_time=ROW_TIME
+        cov_type="hac", hac_lags=ref["hac_lag"], hac_time=ROW_TIME
     )
     res = WLS(
         with_row_time(df),
@@ -295,7 +295,6 @@ def test_hac_matches_r(crosscheck):
         options=options,
     ).fit()
 
-    ref = entry
     _assert_close(res.params, ref["params"], "hac/R params")
     _assert_close(
         res.std_errors, ref["std_errors"], "hac/R std_errors", rtol=RTOL_HAC
@@ -354,11 +353,11 @@ def test_no_intercept_hac_matches_r(crosscheck):
     （`hac_lag`）をそのまま使う（`test_hac_matches_r`と同じ方針）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
-    entry = crosscheck["synthetic"]["baseline"]["no_intercept"]["hac"]
+    ref = crosscheck["synthetic"]["baseline"]["no_intercept"]["hac"]
     options = WLSOptions(
         include_intercept=False,
         cov_type="hac",
-        hac_lags=entry["hac_lag"],
+        hac_lags=ref["hac_lag"],
         hac_time=ROW_TIME,
     )
     res = WLS(
@@ -369,7 +368,6 @@ def test_no_intercept_hac_matches_r(crosscheck):
         options=options,
     ).fit()
 
-    ref = entry
     label = "no_intercept/hac/R"
     assert res.param_names == ["x1", "x2", "x3"]
     _assert_close(res.params, ref["params"], f"{label} params")
@@ -415,11 +413,11 @@ def test_confidence_level_hac_matches_r(crosscheck):
     （`hac_lag`）をそのまま使う（`test_hac_matches_r`と同じ方針）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
-    entry = crosscheck["synthetic"]["baseline"]["confidence_level"]["hac"]
+    ref = crosscheck["synthetic"]["baseline"]["confidence_level"]["hac"]
     options = WLSOptions(
         confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
         cov_type="hac",
-        hac_lags=entry["hac_lag"],
+        hac_lags=ref["hac_lag"],
         hac_time=ROW_TIME,
     )
     res = WLS(
@@ -430,7 +428,6 @@ def test_confidence_level_hac_matches_r(crosscheck):
         options=options,
     ).fit()
 
-    ref = entry
     label = "confidence_level/hac/R"
     _assert_close(res.params, ref["params"], f"{label} params")
     _assert_close(

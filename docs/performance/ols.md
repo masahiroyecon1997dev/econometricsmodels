@@ -30,7 +30,7 @@
 
 ## 既知の限界
 
-- **engineのマルチスレッド線形代数が多コア機・負荷下で不安定だった（対応済み）**: スレッド数を制限しないと、classical n=1,000,000 でengineの実行時間がシングルスレッド時の約0.13秒から、全コア並列＋背景CPU負荷下では**中央値24.9秒**（無負荷でも中央値0.24秒・単発スパイク1.0秒）に膨れ上がる現象を実測。faerが`rayon` feature既定ONでグローバル並列度が`Par::Rayon(0)`（全コア）のまま、tall-skinnyな設計行列のQR/Gramを暗黙並列化していたことが原因（コードリグレッションではない）。**対策**: `engine::parallelism::ensure_serial()`でfaerのグローバル並列度を常時`Par::Seq`に固定（全`Estimator::fit()`冒頭＋`#[pymodule]`初期化）。対応後は全コア並列＋負荷下でも0.39秒、無負荷で0.14秒（分散1/14）に安定。並列化は今後、実測で有効な箇所のみ`Par::Rayon`を明示opt-inする方針（`.claude/rules/rust-style.md`「パフォーマンス」・`engine/src/linear/CLAUDE.md`）。tall-skinny OLS では暗黙の全コア並列化が高速化しないのは OpenBLAS も同様で、statsmodels 側も1スレッドの方が速い（下記「マルチスレッド環境での挙動」）。WSL2固有か native 多コア Linux でも同程度かは未検証（傾向自体はスレッドプールのオーバーサブスクリプションの一般的挙動でOS問わず出るはず）。
+- **engineのマルチスレッド線形代数が多コア機・負荷下で不安定だった（対応済み）**: スレッド数を制限しないと、classical n=1,000,000 でengineの実行時間がシングルスレッド時の約0.13秒から、全コア並列＋背景CPU負荷下では**中央値24.9秒**（無負荷でも中央値0.24秒・単発スパイク1.0秒）に膨れ上がる現象を実測。faerが`rayon` feature既定ONでグローバル並列度が`Par::Rayon(0)`（全コア）のまま、tall-skinnyな設計行列のQR/Gramを暗黙並列化していたことが原因（コードリグレッションではない）。**対策**: `engine::shared::parallelism::ensure_serial()`でfaerのグローバル並列度を常時`Par::Seq`に固定（全`Estimator::fit()`冒頭＋`#[pymodule]`初期化）。対応後は全コア並列＋負荷下でも0.39秒、無負荷で0.14秒（分散1/14）に安定。並列化は今後、実測で有効な箇所のみ`Par::Rayon`を明示opt-inする方針（`.claude/rules/rust-style.md`「パフォーマンス」・`engine/src/linear/CLAUDE.md`）。tall-skinny OLS では暗黙の全コア並列化が高速化しないのは OpenBLAS も同様で、statsmodels 側も1スレッドの方が速い（下記「マルチスレッド環境での挙動」）。WSL2固有か native 多コア Linux でも同程度かは未検証（傾向自体はスレッドプールのオーバーサブスクリプションの一般的挙動でOS問わず出るはず）。
 - 計測は開発コンテナ（devcontainer）上の1回のスイープ（`repeats=3`の中央値）。環境ノイズ・実行順序の影響を排除しきれていない。CI（`benchmark_performance.yml`、`ubuntu-latest`）でも同じスクリプトを回すが、共有ランナーのため数値は参考値。
 
 ## マルチスレッド環境での挙動（1スレッド固定の妥当性）

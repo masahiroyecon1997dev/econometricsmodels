@@ -206,7 +206,7 @@ Tobit固有のバリアント（打ち切り境界の検証等）も同じ`MleEr
 
 | バリアント | Python例外 | 由来 |
 |---|---|---|
-| `Common(CommonError)` | `ComputationFailed`のみ`ComputationError`、他は`ValidationError` | `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/`MissingClusterColumn`/`InsufficientClusters`/`InsufficientClustersForInference`/`NoRegressors`/`ComputationFailed`。系統横断で重複するバリアントは`CommonError`（`engine::error`）に切り出し、`MleError`は`#[error(transparent)] Common(#[from] CommonError)`で包む |
+| `Common(CommonError)` | `ComputationFailed`のみ`ComputationError`、他は`ValidationError` | `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/`MissingClusterColumn`/`InsufficientClusters`/`InsufficientClustersForInference`/`NoRegressors`/`ComputationFailed`。系統横断で重複するバリアントは`CommonError`（`engine::shared::error`）に切り出し、`MleError`は`#[error(transparent)] Common(#[from] CommonError)`で包む |
 | `InvalidMaxIter` / `InvalidTol` | `ValidationError` | `max_iter<=0`等 |
 | `NonConvergence { n_iter }` | `ComputationError` | `raise_on_non_convergence=true`かつ`max_iter`到達 |
 | `SingularDesignMatrix` | `ComputationError` | 最適化前の列ピボットQRランクチェックでのランク落ち（1.4節） |
@@ -252,13 +252,13 @@ Hessianとする。いずれも標準化空間で`Σ_std`を計算した後、`d
   識別失敗の隠蔽になるため`fit()`冒頭で弾く（OLS/WLS/Tobit/IVと横断統一）。少数クラスタ
   一般の漸近的信頼性（`G=5, q=2`等、計算は通るケース）は別軸で弾かない。
 - **クラスターキー未指定・クラスター数不足の検証はこの共通関数のスコープ外**（呼び出し側の
-  責務、OLSの`validate_cluster_groups`を共有し`engine::validation::validate_cluster_groups`
+  責務、OLSの`validate_cluster_groups`を共有し`engine::shared::validation::validate_cluster_groups`
   に集約済み）。反復最適化の無駄を避けるため、この検証は全手法`fit()`冒頭・最適化実行前に
   行う（OLS/WLSも閉形式解だが位置を統一）。
 - **特異性検出は固有値分解ベースの相対閾値判定を経由する**: 非ピボットCholesky分解の失敗
   だけでは構造的な特異性・悪条件を確実には検出できない（`solver=Bfgs`/`Lbfgs`は
   `newton_step`のピボット付きQRを経由しないため顕在化した）。`ensure_well_conditioned_
-  symmetric_matrix`（`engine/src/linear_algebra.rs`、`SelfAdjointEigen`ベース、OLSの
+  symmetric_matrix`（`engine/src/shared/linear_algebra.rs`、`SelfAdjointEigen`ベース、OLSの
   `wald_f_test`用実装を系統横断で共有）をCholesky分解の前に呼び、エラー時は
   `SingularHessian`/`SingularOpgMatrix`にマップする。
 

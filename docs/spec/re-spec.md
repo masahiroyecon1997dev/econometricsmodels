@@ -150,9 +150,10 @@ wx.shape[1]`）と自動的に一致する。この副産物として`estimator(
 だけ）で足りる。
 
 FE実装時（`panel::fe`）のcov_type計算関数（`design_matrix_from_columns`・`xtx_inverse`・
-`leverage_within`・分類/HC/cluster/DriscollKraay計算）は`common.rs`にFE/RE共有で移設済み——
+分類/HC/cluster/DriscollKraay計算）は`common.rs`にFE/RE共有で移設済み（素のレバレッジは
+`shared::covariance::leverages`）——
 数式自体はFE実装時から変更しておらず、`k_correction`・レバレッジ配列を引数で受け取る汎用実装の
-ため呼び出し側（REは常に`k_correction=df_model`・`leverage_within`）を差し替えるだけで
+ため呼び出し側（REは常に`k_correction=df_model`・素のレバレッジ）を差し替えるだけで
 再利用できる。
 
 `ReEstimator`は`cov_type`に関わらず常に自前のフィールド（`std_errors`/`test_stats`/`p_values`/

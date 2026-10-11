@@ -4,7 +4,7 @@
 `validation.rs`・各系統の`cov_type`/`solver`/`estimator`文字列パース）が実際に送出する
 メッセージの正確な文字列をPythonのフォーマット文字列としてここに集約する。
 
-Rust側のメッセージ文言が正本であり（`engine/src/error.rs`・
+Rust側のメッセージ文言が正本であり（`engine/src/shared/error.rs`・
 `engine_pybind/src/column_extraction.rs`・`engine_pybind/src/validation.rs`等）、
 このファイルはそのコピー。Rust側で文言を変更した場合はこのファイルも同時に
 更新すること（複数系統でメッセージが文字通り重複しているため直書きではなく共通化した）。
@@ -188,7 +188,7 @@ ROLE_OVERLAP_SINGLE_IN_MULTI = "the column '{col}' specified as {single_role} is
 ROLE_OVERLAP_SINGLE_EQUALS_SINGLE = "the column '{col}' specified as {later_role} is also specified as {earlier_role}"
 ROLE_OVERLAP_MULTI_VS_MULTI = "the column '{col}' specified as {later_role} is also included in {earlier_role}"
 
-# ── CommonError（engine/src/error.rs、OLS/WLS/Tobit/Logit/Probit/IV共通） ──
+# ── CommonError（engine/src/shared/error.rs、OLS/WLS/Tobit/Logit/Probit/IV共通） ──
 
 INSUFFICIENT_OBSERVATIONS = (
     "insufficient observations: n={n} must be greater than k={k} (number of "

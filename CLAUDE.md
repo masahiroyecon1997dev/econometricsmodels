@@ -48,9 +48,9 @@ econometricsmodels/
 │
 ├── engine/                       # 純粋Rustの計算心臓部（PyO3非依存）
 │   └── src/
-│       ├── lib.rs, error.rs, linear_algebra.rs, ...   # クレート直下の共有モジュール
+│       ├── lib.rs
 │       ├── linear/ nonlinear/ iv/ panel/           # 系統別。手法は最初1ファイル、肥大化したらディレクトリ（linear/ols/ 等）
-│       └── shared/                                 # 複数の系統が使う計算部品（共分散・Wald検定・最小二乗・適合度・クラスターのグループ化）。各系統の common.rs とは別
+│       └── shared/                                 # 複数の系統が共有するコード。error.rs・inference.rs・linear_algebra.rs・parallelism.rs・validation.rs・design_matrix.rs、計算部品（共分散・Wald検定・最小二乗・適合度・クラスターのグループ化）。各系統の common.rs とは別
 │
 ├── engine_pybind/                # PyO3の薄いバインディング層
 │   └── src/lib.rs                # #[pymodule] を定義し engine の関数を呼ぶ

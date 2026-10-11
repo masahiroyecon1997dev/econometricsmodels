@@ -12,7 +12,7 @@
 
 **クラスター時の自由度**: OLS/WLS/2SLSの`cov_type="cluster"`はp値・信頼区間の自由度を`G-1`にする（`ols-spec.md`3.2節）。FE/REも`cov_type="cluster"`では`G-1`（`G`は`cluster`列のクラスター数。既定のentityでなくても同様）、`cov_type="dk"`では`t_periods-1`、それ以外は`df_resid`（`fe-spec.md`3.2節、`re-spec.md`3.3節）。`fixest::feols(cluster=)`の`ssc()`既定`t.df="min"`と一致する。FE/REのF統計量も同じ`cov_type`別の共分散・自由度のWald検定のため、`f_df_denom`は`stat_df`と一致する（`fe-spec.md`3.2節、`re-spec.md`3.5節）。
 
-**engine側の型**: `engine::inference::StatDist::{T { df }, Normal}`で「t分布なら自由度がある、正規分布ならない」関係を型で保証する。Python側の`stat_dist`/`stat_df`はその写像。`marginal_effects()`は常に正規分布で、返り値が`list[dict]`のため行ごとの`stat_dist`は持たない（docstringに明記）。
+**engine側の型**: `engine::shared::inference::StatDist::{T { df }, Normal}`で「t分布なら自由度がある、正規分布ならない」関係を型で保証する。Python側の`stat_dist`/`stat_df`はその写像。`marginal_effects()`は常に正規分布で、返り値が`list[dict]`のため行ごとの`stat_dist`は持たない（docstringに明記）。
 
 **`stat_df`と`df_resid`の関係**: `stat_df`は実際にp値・信頼区間に使った自由度で、`df_resid`と一致するとは限らない（上記のcluster）。統計量がNaN/`None`のときは自由度も`None`。名前から分布が一意に決まらない`wald_*`（IV・Tobit）だけ`*_dist`を持つ。
 

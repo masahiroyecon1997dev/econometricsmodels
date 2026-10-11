@@ -25,7 +25,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   | `confidence_level` | `float` | `0.95` | |
   | `cluster` | `str \| None` | `None` | `cov_type="cluster"`時のグループキー列名。他の`cov_type`で指定すると`ValidationError` |
   | `solver` | `str` | `"newton"` | `"newton"` / `"bfgs"` / `"lbfgs"`（大小無視） |
-  | `max_iter` | `int` | `35` | `1`以上`10000`以下の整数（上限は`engine::validation::MAX_ITER_LIMIT`、収束しない問題が実質的に終わらなくなるのを防ぐ）。範囲外は`InvalidMaxIter` |
+  | `max_iter` | `int` | `35` | `1`以上`10000`以下の整数（上限は`engine::shared::validation::MAX_ITER_LIMIT`、収束しない問題が実質的に終わらなくなるのを防ぐ）。範囲外は`InvalidMaxIter` |
   | `tol` | `float` | `1e-6` | 勾配ノルム収束判定の閾値、以下は`InvalidTol` |
   | `raise_on_non_convergence` | `bool` | `True` | `False`なら未収束時も`converged=False`の結果を返す |
 
@@ -184,7 +184,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 検定分布は**標準正規分布**（z検定、statrs `Normal`）。
 
 - クラスターのグループキー未指定は`MissingClusterColumn`、クラスター数`<2`は`InsufficientClusters`
-  （検証ロジックはOLSの`validate_cluster_groups`と共有、`engine::validation`）。反復最適化・多段
+  （検証ロジックはOLSの`validate_cluster_groups`と共有、`engine::shared::validation`）。反復最適化・多段
   推定の無駄を避けるため、この検証は全手法で`fit()`冒頭・最適化実行前に行う（OLS/WLS も他手法に揃えた。
   OLSは閉形式解のため事後検証でもコストは変わらないが、位置を統一）。
 - クラスター数`G <= 傾き係数の数q`（`k - k_constant`）は`InsufficientClustersForInference`
@@ -228,7 +228,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 
 - `predict(new_data)`のengine側実装は`nonlinear::common::predict_new_data`（`engine::linear::ols::
   predict_new_data`のLogit/Probit共有版、`link`関数を差し替えられるようにしたもの）。新規データの
-  設計行列組み立て（`has_intercept`時の定数項自動付加）は、OLS/WLSと共有する`crate::design_matrix::
+  設計行列組み立て（`has_intercept`時の定数項自動付加）は、OLS/WLSと共有する`crate::shared::design_matrix::
   design_matrix_element`ヘルパーに委ねている。
 - `pred_table`の計算そのもの（`predicted`と`y`のみに依存、リンク関数を参照しない）は`common.rs`の
   `pred_table`関数としてProbitと共有する。`actual`側は`threshold`に関わらず常に**固定0.5**で二値化

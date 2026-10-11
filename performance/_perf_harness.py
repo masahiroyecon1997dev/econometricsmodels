@@ -41,7 +41,7 @@
 - **スレッド数を1に固定する**: `_run_isolated()` がワーカーサブプロセスの環境変数で
   engine・リファレンス実装（numpy/BLAS）とも1スレッドに固定する
   （`_SINGLE_THREAD_ENV`）。engine 側は faer のグローバル並列度を
-  常時 `Par::Seq` にした（`engine::parallelism::ensure_serial`）ため
+  常時 `Par::Seq` にした（`engine::shared::parallelism::ensure_serial`）ため
   `RAYON_NUM_THREADS` は実質効かないが、リファレンス実装と対称（両者とも逐次）に
   するため環境変数の設定は維持している。対応前は engine の classical
   n=1,000,000 が全コア並列＋負荷下で中央値24.9秒（単一スレッド比 約190倍）に

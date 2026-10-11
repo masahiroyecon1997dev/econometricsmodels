@@ -161,8 +161,8 @@ FE/REのClassical/HC1-3以外の全cov_typeに広げたもの）。`df_resid`自
 
 ### 4.1 既存の共通化パターン（前提）
 
-- `CommonError`（`engine/src/error.rs`）、`ensure_well_conditioned_symmetric_matrix`
-  （`engine::linear_algebra`）、`engine_pybind/src/validation.rs`の列名検証4関数
+- `CommonError`（`engine/src/shared/error.rs`）、`ensure_well_conditioned_symmetric_matrix`
+  （`engine::shared::linear_algebra`）、`engine_pybind/src/validation.rs`の列名検証4関数
   （`validate_x_non_empty`等）は既に系統横断で共有済み。
 - **WLSはOLSを「並行輸入」ではなく「委譲」で再利用している**: 重み変換
   （`sqrt(weight)`）したデータをそのまま`OlsEstimator::fit`に渡し、その後で重み付き用に
@@ -174,7 +174,7 @@ FE/REのClassical/HC1-3以外の全cov_typeに広げたもの）。`df_resid`自
 1. **t/z検定の後処理の共通関数化**: OLS（t分布、`ols.rs:396-420`）とLogit（z分布、
    `logit.rs:694-717`）で、`std_err`/`stat`/`p_value`/`conf_low`/`conf_high`を計算する
    ループがほぼ同型のまま系統ごとに独立実装されていた。`statrs::distribution::ContinuousCDF`を
-   ジェネリックに取る関数として`engine/src/inference.rs`（crate直下、系統をまたぐ位置）に
+   ジェネリックに取る関数として`engine/src/shared/inference.rs`（系統をまたいで共有する位置）に
    切り出した。OLS・Logitに加えて、同型の重複がある`probit.rs`（z分布）・`nonlinear/common.rs`の
    `marginal_effects_from_w_s`（限界効果のSE/z値/CI、Logit/Probit共通）も対象に含めた。
    FE/RE（t分布）・IVの2SLS（t分布）・GMM（z分布、[`iv-spec.md`](./iv-spec.md)3.3節）もこの

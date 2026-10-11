@@ -158,7 +158,7 @@ pub(crate) fn parse_marginal_effects_at(at_lower: &str) -> PyResult<MarginalEffe
 /// `solver`から解決する。`newton`は絶対閾値`1e-6`、`bfgs`/`lbfgs`は観測数正規化後の`1e-8`。
 /// 共有の単一既定値では、Newtonの既定値を締めると大標本で無視できない速度低下（実測:
 /// n=1,000,000で0.98s→3.15s）が起きる一方、bfgs/lbfgsの既定値を緩めると小標本の
-/// 精度検証テスト（RTOL=1e-8）を壊すため、solver別に分岐する（ユーザー確認済み）。
+/// 精度検証テスト（RTOL=1e-8）を壊すため、solver別に分岐する。
 /// `tol`が明示されていればそのまま返す。`solver`は大文字小文字を区別せず、未知の値は
 /// ここでは検証せず（`fit()`時の`parse_solver_type`が`ValidationError`にする）`1e-8`側になる。
 pub(crate) fn resolve_mle_tol_default(solver: &str, tol: Option<f64>) -> f64 {
@@ -179,6 +179,21 @@ mod tests {
         assert_eq!(resolve_mle_tol_default("NEWTON", None), 1e-6);
         assert_eq!(resolve_mle_tol_default("bfgs", None), 1e-8);
         assert_eq!(resolve_mle_tol_default("lbfgs", None), 1e-8);
+    }
+
+    #[test]
+    fn resolve_mle_tol_default_ignores_ascii_case_of_solver() {
+        assert_eq!(resolve_mle_tol_default("Newton", None), 1e-6);
+        assert_eq!(resolve_mle_tol_default("BFGS", None), 1e-8);
+        assert_eq!(resolve_mle_tol_default("LBFGS", None), 1e-8);
+    }
+
+    /// 未知のsolverはここでは検証しない（`fit()`時の`parse_solver_type`が`ValidationError`に
+    /// する）。コンストラクタは`1e-8`側に倒れる、というdocコメントの契約を固定する。
+    #[test]
+    fn resolve_mle_tol_default_treats_unknown_solver_as_non_newton() {
+        assert_eq!(resolve_mle_tol_default("bogus", None), 1e-8);
+        assert_eq!(resolve_mle_tol_default("", None), 1e-8);
     }
 
     #[test]

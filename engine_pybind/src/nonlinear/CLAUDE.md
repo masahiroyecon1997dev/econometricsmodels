@@ -20,7 +20,12 @@ Probit対応は当初「python_packageラッパー実装のみ」というスコ
 
 `solver`/`max_iter`/`tol`/`raise_on_non_convergence`（＋`cov_type`/`include_intercept`/`confidence_level`/`cluster`）は3つのpyclassに独立してフィールド宣言・コンストラクタ・`__repr__`が重複している。これは意図的な設計判断であり、共通base struct/traitへの切り出しは行わない: PyO3の`#[pyclass]`/`#[pymethods]`コンストラクタはフラットなkwargs surfaceが前提のため、共有structを導入すると`LogitOptions(mle=MleOptions(...), cov_type=...)`のようなcomposition構造がPython公開APIに漏れ出すか、Pythonの表面積を減らさないまま間接参照が増えるだけになる。`engine_pybind/src/iv/common.rs`の`IVOptions`が`OLSOptions`と同種のフィールド群（`cov_type`/`include_intercept`/`confidence_level`/`cluster`/`hac_lags`/`hac_time`）を既に独立再定義しており、この重複は既存precedentと一貫している（`engine_pybind/src/linear/CLAUDE.md`の`WLSOptions`の節も参照）。`macro_rules!`等でRust側の記述量（フィールド宣言/コンストラクタ/`__repr__`のボイラープレート）だけを機械的に削減できるかは、Python公開APIには影響しない別軸の検討として扱う。
 
-重複によるずれ（1クラスだけ直し忘れる）への備えとして、`tol`の既定値解決は`nonlinear/common.rs`の`resolve_mle_tol_default`に集約し（フラットなコンストラクタは3クラスとも維持し、計算だけ共有）、共通フィールドの署名・既定値・setterの有無・docの一致は`tests/nonlinear/test_mle_options_consistency.py`が検証する。Logit/Probitのフィールドを変えるときはTobitも、共通フィールドのdocを変えるときは3クラス同時に直す（`include_intercept`のdocだけは「ヘッセ行列」と「設計行列」で意図的に異なり、テストもそれを前提にしている）。マクロ化は可読性（grep・定義ジャンプ・エラー位置）の低下と、docの手法間差分の吸収が必要になる点から見送った。
+重複によるずれ（1クラスだけ直し忘れる）への備えとして、次を置いている。
+
+- `tol`の既定値解決は`nonlinear/common.rs`の`resolve_mle_tol_default`に集約した（フラットなコンストラクタは3クラスとも維持し、計算だけ共有）。
+- 共通フィールドの署名・既定値・setter・docの一致は`tests/nonlinear/test_mle_options_consistency.py`が検証する。Logit/Probitのフィールドを変えるときはTobitも、共通フィールドのdocを変えるときは3クラス同時に直す。`include_intercept`のdocだけは「ヘッセ行列」と「設計行列」の1語が意図的に異なり、テストもその差だけを許す。
+- `__repr__`の値はPythonのリテラル形式（`True`・`None`・`"g"`）で出す。`shared/option_repr.rs`の`PyRepr`を使い、`tests/test_options_repr.py`が全`*Options`で`eval(repr(...))`の往復を検証する。
+- `macro_rules!`によるクラス全体の生成は、可読性（grep・定義ジャンプ・エラー位置）の低下と、docの手法間差分の吸収が必要になる点から見送った。
 
 一方、`engine`層（`LogitEstimator::fit`/`ProbitEstimator::fit`/`TobitEstimator::fit`）の同じ6フィールド分のシグネチャ重複は、Python非公開の内部実装のためこの制約を受けない。`engine::nonlinear::common::MleFitOptions`という共有構造体に集約済み。`engine_pybind`側の`fit`関数は、pyclassの個別フィールドから`MleFitOptions`を組み立てて渡す（`logit.rs`/`probit.rs`/`tobit.rs`の`fit`関数末尾を参照）。
 

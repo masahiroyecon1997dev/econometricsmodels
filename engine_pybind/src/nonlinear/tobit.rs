@@ -159,7 +159,7 @@ impl TobitOptions {
         #[pyo3(from_py_with = crate::shared::option_values::lower_arg)] lower: Option<f64>,
         #[pyo3(from_py_with = crate::shared::option_values::upper_arg)] upper: Option<f64>,
     ) -> Self {
-        // `tol`の既定値はsolver依存（`tol`フィールドのdocコメント・`resolve_mle_tol_default`参照）。
+        // `tol`の既定値はsolver依存（理由は`resolve_mle_tol_default`参照）。
         let tol = resolve_mle_tol_default(&solver, tol);
         Self {
             cov_type,

@@ -114,7 +114,10 @@ class RE:
                 subclass of `ValueError`.
             ComputationError: A problem was detected during
                 computation (e.g. a singular quasi-demeaned design
-                matrix). A subclass of `RuntimeError`.
+                matrix, in particular a time-invariant regressor that
+                is constant across entities or collinear with another
+                time-invariant regressor). A subclass of
+                `RuntimeError`.
         """
         raw = _lib.fit_re(
             self._data, self._y, self._x, self._entity, self._options
@@ -310,7 +313,10 @@ class REResults:
     @property
     def r_squared_within(self) -> float:
         """Within R² (based on the entity-demeaned variables, θ=1;
-        unrelated to RE's own Swamy-Arora quasi-demeaning)."""
+        unrelated to RE's own Swamy-Arora quasi-demeaning). Only the
+        coefficients of time-varying regressors enter the fitted
+        values (a time-invariant regressor is zero after demeaning),
+        so it is `0.0` when every regressor is time-invariant."""
         return self._raw.r_squared_within
 
     @property
@@ -327,9 +333,10 @@ class REResults:
     def hausman_statistic(self) -> float | None:
         """Regression-based Hausman test statistic (chi-squared
         version, `k × F` of the Wald test that the `k` within-transformed
-        time-varying slope regressors are jointly zero in the auxiliary regression of
-        the quasi-demeaned `y` on the quasi-demeaned regressors and the
-        within-transformed regressors). Always non-negative. The
+        time-varying slope regressors (`k` is `hausman_df`) are jointly
+        zero in the auxiliary regression of the quasi-demeaned `y` on
+        the quasi-demeaned regressors and the within-transformed
+        regressors). Always non-negative. The
         comparison is always against one-way FE. The Wald test's
         covariance follows `cov_type` (default `"cluster"` gives the
         cluster-robust Hausman test; `"classical"` gives the classical
@@ -352,8 +359,8 @@ class REResults:
     def hausman_df(self) -> int | None:
         """Degrees of freedom of the Hausman test (number of compared
         slope coefficients: the time-varying regressors, which is
-        `df_model - 1` when no regressor is time-invariant). `None` under the same
-        conditions as `hausman_statistic`."""
+        `df_model - 1` when no regressor is time-invariant). `None`
+        under the same conditions as `hausman_statistic`."""
         return self._raw.hausman_df
 
     def coef_table(self) -> list[dict[str, float | str]]:

@@ -196,7 +196,7 @@
 //!   `X̃`の`k×k`ブロックが構造的に特異になる。数値的な特異性判定に任せると、理論上0の固有値に
 //!   乗る丸め誤差が閾値（`k·ε·λ_max`）を超えた場合に巨大な無意味な統計量を黙って返していた
 //!   （`T=6`・`k=6`で約3回に2回すり抜けることを実測）。
-//!   内部FE推定の失敗（singleton・時間不変変数等）は`swamy_arora_variance_components`が
+//!   内部FE推定の失敗（singleton等。時間不変変数は内部FEに渡さないため原因にならない）は`swamy_arora_variance_components`が
 //!   先に失敗するためRE本体もErrになる。
 
 use faer::Mat;
@@ -475,6 +475,10 @@ fn re_r_squared(
 /// ビット単位で同じ値になる（同じ変換を二度計算しないため再利用する）。
 fn re_r_squared_within(fe: &FeEstimator, time_varying: &[usize], params: &Mat<f64>) -> f64 {
     debug_assert_within_reuse_contract(fe, time_varying.len());
+    if time_varying.is_empty() {
+        // 時間変化のある列が無ければwithin変換後の当てはめ値は恒等的に0（R²=0）。
+        return 0.0;
+    }
     let y = fe.within_input().y();
     let x = fe.within_input().x();
     debug_assert_eq!(x.ncols(), time_varying.len());
@@ -600,7 +604,7 @@ pub(crate) struct VarianceComponents {
 /// 無駄を避ける）。
 ///
 /// # Errors
-/// - 内部FE推定が失敗した場合（singleton・分散ゼロ説明変数・自由度不足等）は、その
+/// - 内部FE推定が失敗した場合（singleton・自由度不足等）は、その
 ///   `PanelError`（FE用バリアント）をそのまま伝播する。
 /// - between回帰が失敗した場合（エンティティ数が説明変数の数以下等）は
 ///   `PanelError::BetweenRegressionFailed`。
@@ -1056,7 +1060,7 @@ impl ReEstimator {
     /// （`f_df()`、モジュールdoc「F統計量」参照）。
     ///
     /// # Errors
-    /// - Swamy-Arora分散成分推定が失敗した場合（内部FE推定のsingleton検出・分散ゼロ・
+    /// - Swamy-Arora分散成分推定が失敗した場合（内部FE推定のsingleton検出・
     ///   自由度不足、またはbetween回帰の失敗）は、その`PanelError`をそのまま伝播する。
     /// - 準偏差変換済みデータへの委譲が失敗した場合（観測数不足・特異行列等）は
     ///   `PanelError::QuasiDemeanedRegressionFailed`。
@@ -1089,6 +1093,7 @@ impl ReEstimator {
             means: entity_means,
             time_varying,
         } = swamy_arora_variance_components(&input, confidence_level)?;
+        debug_assert_eq!(fe_for_sigma2_eps.input().x().len(), time_varying.len());
         let (theta, y, x) = quasi_demean_transform(&input, sigma2_eps, sigma2_u);
 
         // 切片復元用の定数列（すべて1.0）を、y/xと同じthetaで準偏差変換する
@@ -2203,6 +2208,76 @@ mod tests {
             .sum();
         let tss: f64 = yw.iter().map(|v| v * v).sum();
         assert!((re.r_squared_within() - (1.0 - ssr / tss)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn re_estimator_fit_with_time_invariant_regressor_supports_every_cov_type_and_unbalanced_panel()
+    {
+        // 全`cov_type`で時間不変の列を含めて推定でき、ハウスマン検定の自由度は
+        // 時間変化のある列の数（2）。不均衡パネル（先頭エンティティの末尾2行を落とす）でも
+        // 同じ。係数は`cov_type`に依らず同じ。
+        let TimeInvariantColumns {
+            y,
+            z,
+            x1,
+            x2,
+            entity,
+        } = time_invariant_columns();
+        let keep: Vec<usize> = (0..24).filter(|&i| i != 2 && i != 3).collect();
+        let pick = |v: &[f64]| keep.iter().map(|&i| v[i]).collect::<Vec<f64>>();
+        let entity_u: Vec<String> = keep.iter().map(|&i| entity[i].clone()).collect();
+        let time: Vec<String> = keep.iter().map(|&i| format!("t{}", i % 4)).collect();
+        let build = |balanced: bool| {
+            let (yy, zz, a, b, ee, tt) = if balanced {
+                (
+                    y.clone(),
+                    z.clone(),
+                    x1.clone(),
+                    x2.clone(),
+                    entity.clone(),
+                    (0..24).map(|i| format!("t{}", i % 4)).collect::<Vec<_>>(),
+                )
+            } else {
+                (
+                    pick(&y),
+                    pick(&z),
+                    pick(&x1),
+                    pick(&x2),
+                    entity_u.clone(),
+                    time.clone(),
+                )
+            };
+            ReInput::from_columns(
+                &yy,
+                &[zz, a, b],
+                strings(&["z", "x1", "x2"]),
+                &ee,
+                Some(&tt),
+                "y".into(),
+            )
+            .unwrap()
+        };
+        for balanced in [true, false] {
+            let base = ReEstimator::fit(build(balanced), ReCovType::Classical, 0.95).unwrap();
+            for cov in [
+                ReCovType::Hc1,
+                ReCovType::Hc2,
+                ReCovType::Hc3,
+                ReCovType::Cluster { groups: None },
+                ReCovType::Dk { bandwidth: Some(1) },
+            ] {
+                let re = ReEstimator::fit(build(balanced), cov.clone(), 0.95).unwrap();
+                assert_eq!(re.hausman_df(), Some(2), "{cov:?} balanced={balanced}");
+                assert!(re.hausman_statistic().unwrap() >= 0.0);
+                for j in 0..4 {
+                    assert_eq!(
+                        *re.estimator().params().get(j, 0),
+                        *base.estimator().params().get(j, 0)
+                    );
+                    assert!(re.std_errors().get(j, 0).is_finite());
+                }
+            }
+        }
     }
 
     #[test]

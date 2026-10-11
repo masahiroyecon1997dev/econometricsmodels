@@ -18,7 +18,7 @@ use engine::linear::ols::CovType as EngineCovType;
 use polars::prelude::DataFrame;
 use pyo3::{PyErr, PyResult};
 
-use crate::shared::column_extraction::{extract_cluster_groups, extract_time_order_ranks};
+use crate::shared::column_extraction::{extract_optional_cluster_groups, extract_time_order_ranks};
 use crate::shared::errors::{ComputationError, ValidationError, common_error_to_pyerr};
 use crate::shared::validation::reject_unused_option;
 
@@ -160,9 +160,7 @@ pub(crate) fn build_cov_type(
             }
         }
         "cluster" => {
-            let groups = cluster
-                .map(|col_name| extract_cluster_groups(df, col_name))
-                .transpose()?;
+            let groups = extract_optional_cluster_groups(df, cluster)?;
             EngineCovType::Cluster { groups }
         }
         other => {

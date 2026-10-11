@@ -68,7 +68,7 @@ use crate::linear::common::{
 };
 use crate::linear::ols::{OLSResult, ols_estimator_to_result};
 use crate::shared::column_extraction::{
-    extract_cluster_groups, extract_f64_column, extract_time_order_ranks,
+    extract_f64_column, extract_optional_cluster_groups, extract_time_order_ranks,
 };
 use crate::shared::errors::{ComputationError, ValidationError, common_error_to_pyerr};
 use crate::shared::option_values::{
@@ -702,11 +702,7 @@ fn parse_weight_type(df: &DataFrame, options: &IVOptions) -> PyResult<(WeightTyp
         "classical" => WeightType::Classical,
         "robust" => WeightType::Robust,
         "cluster" => {
-            let groups = options
-                .cluster
-                .as_ref()
-                .map(|col_name| extract_cluster_groups(df, col_name))
-                .transpose()?;
+            let groups = extract_optional_cluster_groups(df, options.cluster.as_deref())?;
             WeightType::Cluster { groups }
         }
         "hac" => {

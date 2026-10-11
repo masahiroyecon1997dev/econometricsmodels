@@ -541,6 +541,21 @@ pub fn extract_cluster_groups(df: &DataFrame, name: &str) -> PyResult<GroupCodes
     })
 }
 
+/// オプションのクラスター列名（`None`＝未指定）を[`extract_cluster_groups`]でコード化する。
+/// `cov_type="cluster"`・`gmm_weight_type="cluster"`の各パース関数が共有する「指定があれば
+/// 抽出する」ための入口で、`None`をどう扱うか（既定の列を使うか、エラーにするか）は
+/// 呼び出し先の`engine`側が決める。
+///
+/// # Errors
+/// 列名が指定されていて、[`extract_cluster_groups`]が失敗した場合。
+pub fn extract_optional_cluster_groups(
+    df: &DataFrame,
+    name: Option<&str>,
+) -> PyResult<Option<GroupCodes>> {
+    name.map(|name| extract_cluster_groups(df, name))
+        .transpose()
+}
+
 /// `df`から`name`列を、パネルのエンティティ列（`entity`）として整数コード化した`GroupCodes`で
 /// 取り出す。[`extract_cluster_groups`]と同じ分解で、グループのキー（ラベル）も作る
 /// （`fixed_effects()`のキーに使う）。
@@ -870,6 +885,27 @@ mod tests {
         let with_null = df!("k" => [Some(1_i64), None]).unwrap();
         assert!(extract_cluster_groups(&with_null, "k").is_err());
         assert!(extract_cluster_groups(&df, "missing").is_err());
+    }
+
+    #[test]
+    fn extract_optional_cluster_groups_passes_none_through_and_extracts_when_named() {
+        let df = df!("k" => [9_i64, 10, 9, 2]).unwrap();
+
+        assert!(matches!(
+            extract_optional_cluster_groups(&df, None),
+            Ok(None)
+        ));
+
+        let Ok(Some(groups)) = extract_optional_cluster_groups(&df, Some("k")) else {
+            panic!("a named column must be extracted");
+        };
+        let Ok(expected) = extract_cluster_groups(&df, "k") else {
+            panic!("extract_cluster_groups failed");
+        };
+        assert_eq!(groups, expected);
+
+        // 指定した列が無い・不正な場合は`None`にせず`Err`。
+        assert!(extract_optional_cluster_groups(&df, Some("missing")).is_err());
     }
 
     /// 行ごとの`String`を経由する`extract_group_key_column`＋`from_labels_without_keys`

@@ -64,6 +64,7 @@ use faer::Mat;
 use thiserror::Error;
 
 use crate::linear::common::LeastSquaresError;
+use crate::shared::covariance::{cluster_correction, cluster_meat};
 use crate::shared::error::CommonError;
 use crate::shared::group_codes::GroupCodes;
 
@@ -670,27 +671,8 @@ pub(crate) fn panel_cluster_cov_params(
     groups: &GroupCodes,
     k_correction: usize,
 ) -> Mat<f64> {
-    let group_indices = groups.group_indices();
-    let n_groups = groups.n_groups();
-
-    let mut s_hat = Mat::<f64>::zeros(k, k);
-    for indices in group_indices.iter() {
-        let mut s_g = vec![0.0_f64; k];
-        for &i in indices {
-            let e = residuals[i];
-            for (a, s_g_a) in s_g.iter_mut().enumerate() {
-                *s_g_a += e * (*x.get(i, a));
-            }
-        }
-        for a in 0..k {
-            for b in 0..k {
-                *s_hat.get_mut(a, b) += s_g[a] * s_g[b];
-            }
-        }
-    }
-
-    let correction = (n_groups as f64 / (n_groups as f64 - 1.0))
-        * ((n as f64 - 1.0) / ((n - k_correction) as f64));
+    let (s_hat, n_groups) = cluster_meat(groups, k, |i, a| residuals[i] * (*x.get(i, a)));
+    let correction = cluster_correction(n_groups, n, k_correction);
     let cov_uncorrected = xtx_inv * &s_hat * xtx_inv;
     Mat::from_fn(k, k, |i, j| correction * (*cov_uncorrected.get(i, j)))
 }
@@ -1644,6 +1626,27 @@ mod tests {
             meat += 2.0 * weight * gamma;
         }
         meat
+    }
+
+    #[test]
+    fn panel_cluster_cov_params_uses_k_for_the_meat_and_k_correction_for_the_scale() {
+        // meatの次元は`k`（傾き係数の数）、小標本補正`(n-1)/(n-K)`の`K`は別引数`k_correction`。
+        // 2つが取り違えられないよう、`k=1`・`k_correction=3`として手計算と比べる。
+        // クラスター a={行0,行2}、b={行1,行3}、スコア s_i = e_i x_i。
+        let x_values = [1.0, 2.0, -1.0, 0.5];
+        let residuals = [0.5, -1.0, 2.0, 1.5];
+        let x = Mat::from_fn(4, 1, |i, _| x_values[i]);
+        let xtx_inv = Mat::from_fn(1, 1, |_, _| 0.25);
+        let groups = GroupCodes::from_labels(&labels(&["a", "b", "a", "b"]));
+
+        let cov = panel_cluster_cov_params(&x, &residuals, &xtx_inv, 4, 1, &groups, 3);
+
+        let s_a = residuals[0] * x_values[0] + residuals[2] * x_values[2];
+        let s_b = residuals[1] * x_values[1] + residuals[3] * x_values[3];
+        let meat = s_a * s_a + s_b * s_b;
+        let correction = (2.0 / 1.0) * ((4.0 - 1.0) / (4.0 - 3.0));
+        let expected = correction * 0.25 * meat * 0.25;
+        assert!((*cov.get(0, 0) - expected).abs() < 1e-12 * expected.abs());
     }
 
     #[test]

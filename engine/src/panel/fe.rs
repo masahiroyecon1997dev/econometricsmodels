@@ -234,7 +234,9 @@
 //!      entity効果とtime効果の重複分`-1/n`を補正）で計算できる
 //!      （`leverage_full`関数doc参照。fixestの`vcov="HC2"`/`"HC3"`と数値一致を
 //!      1-way・2-way双方で確認済み）。
-//! 3. **Clusterも独自に計算し直す**（`shared::covariance::cluster_cov_params`は使わない）:
+//! 3. **Clusterも独自に計算し直す**（`shared::covariance::cluster_cov_params`は使わない。
+//!    ただし蓄積`Σ_g S_g S_g'`は`cluster_meat`、補正式は`cluster_correction`を共有し、
+//!    FE固有なのは補正の`K`だけ）:
 //!    **【linearmodels方式からfixest方式へ変更】** 当初はlinearmodels
 //!    （旧FE主リファレンス）に合わせ`(G/(G-1))`補正を掛けず`n/(n-extra_df-k)`のみを
 //!    使っていたが、fixest（R）・Stata（`xtreg`/`reghdfe`）の利用者が期待する値と

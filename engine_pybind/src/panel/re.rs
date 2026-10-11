@@ -62,8 +62,8 @@ use pyo3_polars::PyDataFrame;
 use super::common::{panel_error_to_pyerr, validate_dk_time_role};
 use crate::linear::common::mat_to_vec;
 use crate::shared::column_extraction::{
-    extract_cluster_groups, extract_entity_groups, extract_f64_column, extract_f64_columns,
-    extract_time_keys,
+    extract_entity_groups, extract_f64_column, extract_f64_columns,
+    extract_optional_cluster_groups, extract_time_keys,
 };
 use crate::shared::errors::ValidationError;
 use crate::shared::option_values::{
@@ -312,11 +312,7 @@ fn parse_re_cov_type(df: &DataFrame, options: &REOptions) -> PyResult<(ReCovType
         "hc2" => ReCovType::Hc2,
         "hc3" => ReCovType::Hc3,
         "cluster" => {
-            let groups = options
-                .cluster
-                .as_ref()
-                .map(|col_name| extract_cluster_groups(df, col_name))
-                .transpose()?;
+            let groups = extract_optional_cluster_groups(df, options.cluster.as_deref())?;
             ReCovType::Cluster { groups }
         }
         "dk" => ReCovType::Dk {

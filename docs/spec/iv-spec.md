@@ -146,10 +146,13 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 `entity`のような常在するグルーピング列が無いため`"cluster"`をデフォルトにする根拠が無い）。
 
 - **2SLSの分散はサンドイッチ型**: `(X'PzX)^-1 X'Pz Ω Pz X (X'PzX)^-1`（`Ω`の推定方法が
-  `cov_type`で変わる）。`hc_cov_params`/`cluster_cov_params`/`hac_cov_params`
+  `cov_type`で変わる）。`hc_cov_params`/`hac_cov_params`
   （`engine/src/iv/two_sls.rs`）は`X̂`（射影後の予測値）ベースのレバレッジ・スコアで
   OLSの対応する実装と同型に計算するが、コード自体はOLS（`engine::linear::ols`）に寄せず
-  **意図的に独立実装**にしている（IVのサンドイッチ型分散計算はOLS/nonlinearどちらの既存
+  **意図的に独立実装**にしている（例外: クラスターの蓄積`Σ_g S_g S_g'`と小標本補正は、
+  OLS本体ではなく共有モジュール`shared::covariance`の`cluster_meat`/`cluster_correction`
+  を、設計行列`X̂`・構造残差`e`で呼ぶ。加算順を1か所に固定するため。レバレッジ・HAC等
+  OLS固有の調整はここに持ち込まない）（IVのサンドイッチ型分散計算はOLS/nonlinearどちらの既存
   計算にも寄せない独立実装でよいという既存方針）。GMMのモーメント共分散行列計算
   （`gmm.rs`）も同じ理由で2SLS側と独立に実装している（`iv/CLAUDE.md`「2SLSとGMMの独立実装
   方針」参照）。

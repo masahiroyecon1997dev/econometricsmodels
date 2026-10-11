@@ -11,7 +11,7 @@ use faer::linalg::matmul::matmul;
 use faer::prelude::Solve;
 use faer::{Accum, Mat, Par, Side};
 
-use super::group_codes::GroupCodes;
+use super::group_codes::{GroupCodes, GroupIndices};
 use crate::shared::linear_algebra::RankDeficient;
 
 /// `(X'X)⁻¹`を求める。classical・HC0-3・HAC・クラスターのいずれの標準誤差でも必要になる。
@@ -218,9 +218,18 @@ pub(crate) fn cluster_meat(
     k: usize,
     score: impl Fn(usize, usize) -> f64,
 ) -> (Mat<f64>, usize) {
-    let indices = groups.group_indices();
-    let n_groups = groups.n_groups();
+    let s_hat = cluster_meat_by_indices(&groups.group_indices(), k, score);
+    (s_hat, groups.n_groups())
+}
 
+/// `cluster_meat`の、行インデックス（`GroupCodes::group_indices`）を呼び出し側が持つ版。
+/// 同じクラスターで`meat`を繰り返し計算する場合（反復GMM等）に、行インデックスの作り直しを
+/// 避けるために使う。グループの反復順・加算順は`cluster_meat`と同じ。
+pub(crate) fn cluster_meat_by_indices(
+    indices: &GroupIndices,
+    k: usize,
+    score: impl Fn(usize, usize) -> f64,
+) -> Mat<f64> {
     let mut s_hat = Mat::<f64>::zeros(k, k);
     for rows in indices.iter() {
         let mut s_g = vec![0.0_f64; k];
@@ -235,7 +244,7 @@ pub(crate) fn cluster_meat(
             }
         }
     }
-    (s_hat, n_groups)
+    s_hat
 }
 
 /// クラスターロバストの小標本補正 `G/(G-1) * (n-1)/(n-k)`（Stata方式。常に適用する。
@@ -406,6 +415,28 @@ mod tests {
 
         assert_eq!(n_groups, 2);
         assert!((*meat.get(0, 0) - (16.0 + 4.0)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn cluster_meat_by_indices_is_bit_identical_to_cluster_meat() {
+        // 行インデックスを呼び出し側が持つ版（反復GMM用）は、同じ`GroupCodes`から作った
+        // `group_indices()`を渡せば`cluster_meat`と同じ値になる。スコアは2列で、列ごとに
+        // 異なる値にして列の取り違えを検出する。
+        let groups = codes(&["b", "a", "c", "a", "b", "c", "a"]);
+        let score = |i: usize, a: usize| (i as f64 + 1.0).sqrt() * if a == 0 { 1.0 } else { -0.7 };
+
+        let (expected, n_groups) = cluster_meat(&groups, 2, score);
+        let actual = cluster_meat_by_indices(&groups.group_indices(), 2, score);
+
+        assert_eq!(n_groups, 3);
+        for a in 0..2 {
+            for b in 0..2 {
+                assert_eq!(actual.get(a, b).to_bits(), expected.get(a, b).to_bits());
+            }
+        }
+        // 対称行列で、列0と列1のスコアが逆符号のため非対角は負になる。
+        assert!(*actual.get(0, 1) < 0.0);
+        assert_eq!(actual.get(0, 1).to_bits(), actual.get(1, 0).to_bits());
     }
 
     #[test]

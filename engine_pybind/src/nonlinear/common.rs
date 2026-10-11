@@ -11,7 +11,7 @@ use engine::nonlinear::common::{CovType, MarginalEffectsAt, MleError, SolverType
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 
-use crate::shared::column_extraction::extract_cluster_groups;
+use crate::shared::column_extraction::extract_optional_cluster_groups;
 use crate::shared::errors::{ComputationError, ValidationError, common_error_to_pyerr};
 use crate::shared::validation::reject_unused_option;
 
@@ -103,10 +103,7 @@ pub(crate) fn parse_cov_type(
         "hc0" => Ok(CovType::Hc0),
         "hc1" => Ok(CovType::Hc1),
         "cluster" => {
-            let groups = cluster
-                .as_ref()
-                .map(|col_name| extract_cluster_groups(df, col_name))
-                .transpose()?;
+            let groups = extract_optional_cluster_groups(df, cluster.as_deref())?;
             Ok(CovType::Cluster { groups })
         }
         other => Err(ValidationError::new_err(format!(

@@ -25,10 +25,13 @@
 //! （`Pz`が射影行列＝冪等・対称であることから代数的に導出できる、Wooldridge (2010) 5章）。
 //! そのため本モジュールは、第二段階の`OlsEstimator`（`params()`のみ利用、後述）とは別に、
 //! この`(X̂, e)`に対する独立実装のサンドイッチ計算（`classical_cov_params`/`hc_cov_params`/
-//! `hac_cov_params`/`cluster_cov_params`/`wald_f_test`、いずれも本ファイル下部）を行う。
+//! `hac_cov_params`/`wald_f_test`、いずれも本ファイル下部。クラスターのサンドイッチは
+//! 設計行列と残差を引数に取る`shared::covariance::cluster_cov_params`を、`X̂`・構造残差`e`で
+//! 呼ぶ）を行う。
 //! OLS（`engine::linear::ols`）の同名の同型計算とは**意図的に独立実装**にしている
 //! （`docs/spec/iv-spec.md`3.1節「IVのサンドイッチ型分散計算は独自実装でよい……OLS/nonlinear
-//! どちらの既存計算にも寄せない」）。
+//! どちらの既存計算にも寄せない」）。例外はクラスターの蓄積・補正で、共有モジュール
+//! `shared::covariance`（OLS本体ではない）の`cluster_meat`/`cluster_correction`を使う。
 //!
 //! 第一段階の各`OlsEstimator`はそれ自体が正しい（ナイーブな）OLS回帰であり、
 //! （弱操作変数診断等で必要になる）SE・F統計量も含めてそのまま公開してよい
@@ -64,9 +67,8 @@ use crate::iv::common::{
 };
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
-use crate::shared::covariance::time_ordering;
+use crate::shared::covariance::{cluster_cov_params, time_ordering};
 use crate::shared::error::CommonError;
-use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference;
 use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 use crate::shared::validation::validate_cluster_groups;
@@ -312,7 +314,9 @@ impl TwoSlsEstimator {
                 // クラスター数 `g <= q`（構造方程式の傾き係数の数）は`fit()`冒頭で
                 // 既に`InsufficientClustersForInference`として弾いている。
                 let n_groups = validate_cluster_groups(groups, n)?;
-                let cov = cluster_cov_params(x_hat, &residuals, &xtx_inv, n, k, groups);
+                // 設計行列に`X̂`、残差に構造残差`e`を使う点のみがOLSとの違い（共有関数は
+                // 設計行列と残差を引数に取る）。
+                let cov = cluster_cov_params(x_hat, &residuals, &xtx_inv, groups);
                 (cov, n_groups - 1)
             }
         };
@@ -818,44 +822,6 @@ fn hac_cov_params(
     xtx_inv * &s_hat * xtx_inv
 }
 
-/// クラスターロバストな係数分散共分散行列: `(X̂'X̂)⁻¹Ŝ(X̂'X̂)⁻¹ * correction`（k×k）。数式・
-/// 実装方針は`shared/covariance.rs`の`cluster_cov_params`と同型（グループの反復順を
-/// `GroupCodes`のコード順（辞書順）で決定的にする理由も同じ、`engine/src/linear/CLAUDE.md`
-/// 「踏んだ罠」参照）。設計行列に`X̂`、残差に構造残差`e`を使う点のみがOLSとの違い。
-/// `groups`が`G>=2`であることは`validate_cluster_groups`（呼び出し元）で検証済みの前提。
-fn cluster_cov_params(
-    x: &Mat<f64>,
-    residuals: &Mat<f64>,
-    xtx_inv: &Mat<f64>,
-    n: usize,
-    k: usize,
-    groups: &GroupCodes,
-) -> Mat<f64> {
-    let indices_by_group = groups.group_indices();
-    let n_groups = groups.n_groups();
-
-    let mut s_hat = Mat::<f64>::zeros(k, k);
-    for indices in indices_by_group.iter() {
-        let mut s_g = vec![0.0_f64; k];
-        for &i in indices {
-            let e = *residuals.get(i, 0);
-            for (a, s_g_a) in s_g.iter_mut().enumerate() {
-                *s_g_a += e * (*x.get(i, a));
-            }
-        }
-        for a in 0..k {
-            for b in 0..k {
-                *s_hat.get_mut(a, b) += s_g[a] * s_g[b];
-            }
-        }
-    }
-
-    let correction =
-        (n_groups as f64 / (n_groups as f64 - 1.0)) * ((n as f64 - 1.0) / ((n - k) as f64));
-    let cov_uncorrected = xtx_inv * &s_hat * xtx_inv;
-    Mat::from_fn(k, k, |i, j| correction * (*cov_uncorrected.get(i, j)))
-}
-
 /// 傾き係数（切片を除く`df_model`個の係数）が全てゼロという帰無仮説のロバストWald検定を行い、
 /// F統計量とそのp値を返す。数式・実装方針は`shared/wald.rs`の`wald_f_test`と同型（`cov_type=
 /// Classical`のとき代数的に古典的F検定と一致することも同じ、`ensure_well_conditioned_
@@ -902,6 +868,7 @@ mod tests {
     use super::*;
     use crate::linear::common::row_time_order;
     use crate::shared::error::CommonError;
+    use crate::shared::group_codes::GroupCodes;
 
     /// 丁度識別（`len(instruments) == len(x_endog)`）の閉形式解と数値照合するテストデータ。
     ///

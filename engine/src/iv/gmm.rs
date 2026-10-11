@@ -67,14 +67,15 @@
 //!   （後述「Hansen J過剰識別検定」参照、点推定とHansen Jで`S`の要件が異なる点に注意）。
 //! - `Robust`: `S = Σᵢ êᵢ² zᵢzᵢ'`（`two_sls.rs`の`hc_cov_params`
 //!   のHC0相当だがレバレッジ調整は無し）。
-//! - `Cluster`: `S = Σ_g (Σ_{i∈g} êᵢzᵢ)(Σ_{i∈g} êᵢzᵢ)'`（`two_sls.rs`の
-//!   `cluster_cov_params`と同型だが小標本補正は無し）。
+//! - `Cluster`: `S = Σ_g (Σ_{i∈g} êᵢzᵢ)(Σ_{i∈g} êᵢzᵢ)'`（`shared::covariance::cluster_meat`
+//!   と同じ蓄積で、小標本補正は無し）。
 //! - `Hac`: Newey-West（Bartlettカーネル）による`S`。`two_sls.rs`の`hac_cov_params`と
 //!   同型（時系列相関を仮定する、パネルのDriscoll-Kraayではない。
 //!   `docs/spec/iv-spec.md`1.2節・`two_sls.rs`冒頭コメント参照）。
 //!
-//! 上記4関数は、数式としては`two_sls.rs`の`hc_cov_params`/`cluster_cov_params`/
-//! `hac_cov_params`と同型だが、独立に実装している（後述「2SLSとの共通化の判断」参照）。
+//! 上記4関数は、数式としては`two_sls.rs`の`hc_cov_params`/`hac_cov_params`と同型だが、
+//! 独立に実装している（後述「2SLSとの共通化の判断」参照）。クラスターの蓄積
+//! （`Σ_g S_g S_g'`）だけは`shared::covariance::cluster_meat`と共有する。
 //!
 //! ## Hansen J過剰識別検定（`docs/spec/iv-spec.md`3.5節）
 //!
@@ -154,7 +155,8 @@
 //!   過ぎず、レバレッジの計算（`Z`空間での「距離」）には妥当でも、補正係数の分母にまで
 //!   機械的に`X̂`→`Z`・`k`→`l`を適用したのは誤りだった（`gmm_hc_omega`/`gmm_cluster_omega`
 //!   のdocコメント参照）。
-//! - `cluster`: `two_sls.rs`の`cluster_cov_params`と同型（`X̂`→`Z`、上記の通り補正は`k`）。
+//! - `cluster`: `cluster_meat`（`shared::covariance`）に`êᵢzᵢ`を渡し、補正は`cluster_correction`
+//!   の`k`（`X̂`→`Z`、上記の通り補正は`k`）。
 //! - `hac`: 上記の通り`hac_moment_covariance`をそのまま再利用。
 //!
 //! **検定分布はz（標準正規）**（`docs/spec/iv-spec.md`3.2節で確定済み、2-step efficient GMMの
@@ -194,7 +196,8 @@
 //!
 //! 以上より、**点推定の数値的一致は確認しつつ、実装は独立のまま維持する**
 //! （`docs/spec/iv-spec.md`3.1節の既存方針「IVのサンドイッチ型分散計算は独自実装でよい」を
-//! 2SLS/GMM間の関係にも適用した判断）。
+//! 2SLS/GMM間の関係にも適用した判断）。ただしクラスターの蓄積（`Σ_g S_g S_g'`）と小標本補正は、
+//! 2SLS・OLS・panel・nonlinearと共有する`shared::covariance`の`cluster_meat`系を使う。
 
 use faer::linalg::matmul::matmul;
 use faer::prelude::Solve;
@@ -203,7 +206,9 @@ use statrs::distribution::{ChiSquared, ContinuousCDF, Normal};
 
 use crate::iv::common::{IvError, IvInput, mat_to_columns, validate_structural_cluster_count};
 use crate::linear::ols::CovType;
-use crate::shared::covariance::time_ordering;
+use crate::shared::covariance::{
+    cluster_correction, cluster_meat, cluster_meat_by_indices, time_ordering,
+};
 use crate::shared::error::CommonError;
 use crate::shared::group_codes::{GroupCodes, GroupIndices};
 use crate::shared::inference;
@@ -953,10 +958,10 @@ fn robust_moment_covariance(z: &Mat<f64>, residuals: &Mat<f64>, n: usize, l: usi
 }
 
 /// クラスター頑健なモーメント分散共分散行列: `Σ_g (Σ_{i∈g} êᵢzᵢ)(Σ_{i∈g} êᵢzᵢ)'`（l×l）。
-/// `two_sls.rs`の`cluster_cov_params`と同型だが小標本補正は無し（モジュール冒頭の
-/// docコメント参照）。グループの反復順は`GroupCodes`のコード順（キーの辞書順）で、`two_sls.rs`と
-/// 同じ（`engine/src/linear/CLAUDE.md`「踏んだ罠」参照、`HashMap`はグループの反復順序が
-/// 実行のたびに変わりうる）。`indices_by_group`は反復GMMで毎回作り直さないよう、
+/// `shared::covariance::cluster_meat_by_indices`で`êᵢzᵢ`を集計するだけで小標本補正は無し
+/// （モジュール冒頭のdocコメント参照）。グループの反復順は`GroupCodes`のコード順
+/// （キーの辞書順）で、`cluster_meat_by_indices`と同じ（`engine/src/linear/CLAUDE.md`
+/// 「踏んだ罠」参照、`HashMap`はグループの反復順序が実行のたびに変わりうる）。`indices_by_group`は反復GMMで毎回作り直さないよう、
 /// 呼び出し元がループの外で一度だけ作る。`groups`が`G>=2`であることは`validate_cluster_groups`
 /// （呼び出し元）で検証済みの前提。
 fn cluster_moment_covariance(
@@ -965,22 +970,9 @@ fn cluster_moment_covariance(
     l: usize,
     indices_by_group: &GroupIndices,
 ) -> Mat<f64> {
-    let mut s = Mat::<f64>::zeros(l, l);
-    for indices in indices_by_group.iter() {
-        let mut s_g = vec![0.0_f64; l];
-        for &i in indices {
-            let e = *residuals.get(i, 0);
-            for (a, s_g_a) in s_g.iter_mut().enumerate() {
-                *s_g_a += e * (*z.get(i, a));
-            }
-        }
-        for a in 0..l {
-            for b in 0..l {
-                *s.get_mut(a, b) += s_g[a] * s_g[b];
-            }
-        }
-    }
-    s
+    cluster_meat_by_indices(indices_by_group, l, |i, a| {
+        (*residuals.get(i, 0)) * (*z.get(i, a))
+    })
 }
 
 /// `weight_type=Hac`の`lags`（`Option<i64>`）を実際に使うラグ数（`usize`）に解決する
@@ -1136,7 +1128,8 @@ enum HcVariant {
 
 /// クラスターロバストなモーメント条件の分散共分散行列（cov_type用）:
 /// `Σ_g (Σ_{i∈g} êᵢzᵢ)(Σ_{i∈g} êᵢzᵢ)' * correction`（l×l）。`two_sls.rs`の
-/// `cluster_cov_params`と同型の自己拡張（`X̂`→`Z`）。点推定用の`cluster_moment_covariance`は
+/// `shared::covariance::cluster_cov_params`（2SLSが呼ぶ共有関数）と同型の自己拡張
+/// （`X̂`→`Z`、集計は`cluster_meat`共有）。点推定用の`cluster_moment_covariance`は
 /// 小標本補正が無いため使い回さない（モジュール冒頭のdocコメント参照）。`groups`が
 /// `G>=2`であることは`validate_cluster_groups`（呼び出し元）で検証済みの前提。
 ///
@@ -1151,27 +1144,8 @@ fn gmm_cluster_omega(
     l: usize,
     groups: &GroupCodes,
 ) -> Mat<f64> {
-    let indices_by_group = groups.group_indices();
-    let n_groups = groups.n_groups();
-
-    let mut s_hat = Mat::<f64>::zeros(l, l);
-    for indices in indices_by_group.iter() {
-        let mut s_g = vec![0.0_f64; l];
-        for &i in indices {
-            let e = *residuals.get(i, 0);
-            for (a, s_g_a) in s_g.iter_mut().enumerate() {
-                *s_g_a += e * (*z.get(i, a));
-            }
-        }
-        for a in 0..l {
-            for b in 0..l {
-                *s_hat.get_mut(a, b) += s_g[a] * s_g[b];
-            }
-        }
-    }
-
-    let correction =
-        (n_groups as f64 / (n_groups as f64 - 1.0)) * ((n as f64 - 1.0) / ((n - k) as f64));
+    let (s_hat, n_groups) = cluster_meat(groups, l, |i, a| (*residuals.get(i, 0)) * (*z.get(i, a)));
+    let correction = cluster_correction(n_groups, n, k);
     Mat::from_fn(l, l, |i, j| correction * (*s_hat.get(i, j)))
 }
 

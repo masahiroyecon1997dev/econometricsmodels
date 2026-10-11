@@ -120,6 +120,27 @@ def test_one_way_has_no_n_periods(panel):
     assert plain.hausman_statistic is not None
 
 
+def test_one_way_accepts_time_only_regressor_like_plm(panel):
+    """1-wayでも、時点間でのみ変わる列（`xt`、年トレンド等）を含められる。
+    バランスパネルでは個体平均が一定になるためbetween回帰から落ち、plmと同じ
+    推定値になる。Hausman検定は`x̃t`が識別できないため`x1`だけを検定する。"""
+    res = _fit(panel, REOptions(cov_type="classical"), x=("x1", "xt"))
+
+    expected = {
+        "const": 0.117907102600895,
+        "x1": 0.400160538463792,
+        "xt": -1.029152589790345,
+    }
+    expected_se = [0.905185788075077, 0.851443915446071, 0.510706679841924]
+    for name, value in expected.items():
+        assert res.params[name] == pytest.approx(value, rel=1e-8)
+    assert list(res.std_errors.values()) == pytest.approx(
+        expected_se, rel=1e-8
+    )
+    assert res.df_resid == 21
+    assert res.hausman_df == 1
+
+
 def test_dk_time_is_independent_of_time(panel):
     """2-wayでも`cov_type="dk"`は`dk_time`が必須で、`time`は借用されない。
     `dk_time`が`time`と同じ列でも指定できる。"""

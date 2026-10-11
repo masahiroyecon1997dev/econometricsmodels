@@ -156,8 +156,11 @@ class REResults:
     over time within every entity) is allowed in RE: it is left out
     of the internal one-way FE regression and of the within-transformed
     regressors in the auxiliary regression, so `hausman_df` is the
-    number of time-varying regressors. All three are `None` only when
-    there are no time-varying regressors to compare, or for two-way
+    number of time-varying regressors. So is the within-transformed
+    copy of a regressor that varies only over time on a balanced panel
+    (a year trend): its coefficient is not identified, so it is not
+    tested and `hausman_df` is smaller by one for each. All three are
+    `None` only when there are no regressors to compare, or for two-way
     effects, where the test is not available yet. If the auxiliary
     regression cannot be computed (rank-deficient design, or a
     structurally singular robust covariance such as too few clusters or
@@ -374,8 +377,9 @@ class REResults:
     @property
     def hausman_df(self) -> int | None:
         """Degrees of freedom of the Hausman test (number of compared
-        slope coefficients: the time-varying regressors, which is
-        `df_model - 1` when no regressor is time-invariant). `None`
+        slope coefficients: the time-varying regressors that can be
+        tested, which is `df_model - 1` when no regressor is
+        time-invariant or varies only over time). `None`
         under the same conditions as `hausman_statistic`."""
         return self._raw.hausman_df
 

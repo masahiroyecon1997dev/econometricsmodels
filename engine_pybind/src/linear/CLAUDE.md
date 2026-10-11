@@ -11,19 +11,20 @@
 - `ChunkedArray::rechunk()`は`Cow<'_, ChunkedArray<T>>`を返す。`Cow`は`IntoIterator`非実装のため`.into_iter()`ではなく`.iter()`を使う（`Cow`はDerefで透過的に呼べる）。
 - pyo3 0.28では`PyObject`型エイリアスがpreludeから削除済み。`Py<PyAny>`を直接使う。
 - pyo3 0.28以降、`Clone`実装`#[pyclass]`の`FromPyObject`自動導出はopt-in。Python側インスタンスを引数で受け取るオプション型（`OLSOptions`等）には`#[pyclass(from_py_object)]`を明示する。
-- `DataFrame::new`は`(height: usize, columns: Vec<Column>)`という2引数シグネチャ（`Vec<Column>`のみを渡す旧APIではない）。列を追加するには`polars::prelude::Column::new(name.into(), values)`で構築し、既存の`DataFrame`には`.with_column(column)`（`PolarsResult<&mut Self>`）で付加する（`OLSResult::augment()`/`WLSResult::augment()`で使う）。
+- `DataFrame::new`は`(height: usize, columns: Vec<Column>)`という2引数シグネチャ（`Vec<Column>`のみを渡す旧APIではない）。列を追加するには`polars::prelude::Column::new(name.into(), values)`で構築し、既存の`DataFrame`には`.with_column(column)`（`PolarsResult<&mut Self>`）で付加する（`shared/augment.rs`の`append_predicted_column`が`OLSResult::augment()`/`WLSResult::augment()`等のために使う）。
 
 ## `white_test()`（事後診断）の配線
 
-`OLSResult`は`OlsEstimator`を保持しないため、`white_test()`は`predict_for`と同じ経路（`x_column_names` →
-`extract_f64_columns`）で`training_data`と`param_names`から`x`を再抽出し、保持している`residuals`と
+`OLSResult`は`OlsEstimator`を保持しないため、`white_test()`は`x_column_names` → `extract_f64_columns`（`predict_for`は両者を
+束ねた`extract_model_x_columns`を使うが、`white_test()`は列名自体も`engine`に渡すため
+分けて呼ぶ）で`training_data`と`param_names`から`x`を再抽出し、保持している`residuals`と
 合わせて`engine::linear::diagnostics::white_test`に渡す。`training_data`が`None`（`IVResult.first_stage()`
 由来）なら`augment(new_data=None)`と同じく`ValidationError`。`has_intercept`は`param_names[0] == "const"`で
 推定せず保持フィールドを使う（`include_intercept=false`で`x`に`"const"`列がありうるため）。LM/Fの両方を
 engineが計算し、`statistic`引数（`StatisticVersion`、大文字小文字を区別しない）で`WhiteTestOutput`の
 フィールドを選ぶだけ（`select_statistic`はWhite・BPで共通）。計算ロジックは持たない。
 
-`breusch_godfrey_test(time, nlags, statistic)`も同じ配線（`x`と残差に加え、時間列を
+`breusch_godfrey_test(time, nlags, statistic)`も同じ配線（`x`は`extract_model_x_columns`で再抽出し、残差に加え、時間列を
 `extract_time_order_ranks`で順位にして`engine`へ渡す。`hac_time`と同じく同値・欠損値・NaNは
 `ValidationError`）。引数は型検査を厳密にするため`&Bound<PyAny>`で受け、`extract_strict_text`/
 `extract_strict_int`（`bool`・`float`は`TypeError`）を通す。`nlags`は`i64`のまま`engine`に渡し、

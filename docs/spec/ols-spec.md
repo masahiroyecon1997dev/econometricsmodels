@@ -204,7 +204,7 @@ $$
   `new_data`指定時は`predict()`と同じ`x`列抽出＋`engine::linear::ols::predict_new_data`を再利用し、
   `new_data`自体をソースにする。
 - **列名衝突は`ValidationError`**（ソースデータに既に`"predicted"`列がある場合、`include_intercept=True`
-  時の`"const"`列衝突と同じ発想で黙って上書きしない。`engine_pybind::validation::validate_no_existing_column`）。
+  時の`"const"`列衝突と同じ発想で黙って上書きしない。`engine_pybind::shared::augment::append_predicted_column`）。
 - `training_data`が`None`（`IVResult.first_stage()`が`OLSResult`を構築する経路——各内生変数の
   第一段階回帰は単一のソースDataFrameを持たないため）の`OLSResults`に対して`augment(new_data=None)`を
   呼ぶと`ValidationError`になる（`new_data`を指定した呼び出しは通常どおり動作する）。

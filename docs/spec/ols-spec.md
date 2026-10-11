@@ -123,7 +123,8 @@ $$
   既定の`False`のままで一致することを確認済み。
 
 **クラスター**: $\hat S = \sum_g S_g S_g^\top$（$S_g = \sum_{i\in g}\hat\varepsilon_i x_i$）。
-- グループ化は**`BTreeMap`を使う（`HashMap`は禁止）**: `HashMap`はプロセスごとのハッシュシードで
+- グループ化は**キーの辞書順に整数コードを振る`GroupCodes`（`BTreeMap`と同じ反復順）を使う
+  （`HashMap`は禁止）**: `HashMap`はプロセスごとのハッシュシードで
   反復順序が変わり、浮動小数点加算の非結合性により`fit()`を複数回呼ぶと標準誤差が1 ULP程度ぶれる
   非決定性バグを起こす（`fit_cluster_std_errors_are_deterministic_across_repeated_fits`で固定）。
   クラスター系の実装を今後増やす場合も同じ罠がある。

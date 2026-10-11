@@ -194,7 +194,7 @@ use statrs::distribution::{ChiSquared, ContinuousCDF, StudentsT};
 use crate::error::CommonError;
 use crate::inference;
 use crate::linear::common::LeastSquaresError;
-use crate::linear::ols::{CovType, OlsEstimator, OlsInput, wald_f_test};
+use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use crate::panel::common::{
     GroupCodes, PanelDimension, PanelError, PanelHcVariant, TimeKeys, leverage_within,
     panel_classical_cov_params, panel_cluster_cov_params, panel_driscoll_kraay_cov_params,
@@ -202,6 +202,7 @@ use crate::panel::common::{
     validate_dk_periods_cover_tested_coefficients, xtx_inverse,
 };
 use crate::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput};
+use crate::shared::wald::wald_f_test;
 use crate::validation::validate_cluster_count_covers_slopes;
 
 /// REの被説明変数・説明変数・パネル識別子を保持する入力データ。

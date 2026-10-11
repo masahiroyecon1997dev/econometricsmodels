@@ -74,3 +74,61 @@ pub enum LeastSquaresError {
 pub(crate) fn row_time_order(n: usize) -> Vec<f64> {
     (0..n).map(|i| i as f64).collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::CommonError;
+
+    #[test]
+    fn least_squares_error_messages_are_human_readable() {
+        // 6種の共通バリアント（DimensionMismatch等）のメッセージ検証は
+        // `engine::error`側のテストに集約済み。ここではOLS/WLS固有の
+        // バリアントに加え、`Common`が`CommonError`のDisplayをtransparentに転送する
+        // ことだけを確認する。
+        assert_eq!(
+            LeastSquaresError::WeightDimensionMismatch {
+                y_rows: 10,
+                weight_rows: 8
+            }
+            .to_string(),
+            "dimension mismatch: y has 10 rows but weight has 8 rows"
+        );
+        assert_eq!(
+            LeastSquaresError::NonPositiveWeight {
+                row: 3,
+                weight: 0.0
+            }
+            .to_string(),
+            "weight at row 3 must be positive, got 0"
+        );
+        assert_eq!(
+            LeastSquaresError::InvalidHacLags {
+                hac_lags: -1,
+                n: 100
+            }
+            .to_string(),
+            "hac_lags must be in the range [0, n): got -1, n=100"
+        );
+        assert_eq!(
+            LeastSquaresError::SingularMatrix.to_string(),
+            "design matrix is singular (perfect multicollinearity detected)"
+        );
+        assert_eq!(
+            LeastSquaresError::Common(CommonError::MissingClusterColumn).to_string(),
+            "cov_type='cluster' requires cluster identifiers to be provided"
+        );
+    }
+
+    #[test]
+    fn least_squares_error_implements_partial_eq() {
+        assert_eq!(
+            LeastSquaresError::SingularMatrix,
+            LeastSquaresError::SingularMatrix
+        );
+        assert_ne!(
+            LeastSquaresError::Common(CommonError::InsufficientClusters { g: 1 }),
+            LeastSquaresError::Common(CommonError::InsufficientClusters { g: 0 })
+        );
+    }
+}

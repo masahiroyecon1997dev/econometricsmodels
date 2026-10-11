@@ -378,7 +378,7 @@ use statrs::distribution::StudentsT;
 
 use crate::error::CommonError;
 use crate::inference;
-use crate::linear::ols::{CovType, OlsEstimator, OlsInput, wald_f_test};
+use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use crate::panel::common::{
     GroupCodes, PanelDimension, PanelError, PanelHcVariant, TimeKeys, design_matrix_from_columns,
     leverage_within, panel_classical_cov_params, panel_cluster_cov_params,
@@ -387,6 +387,7 @@ use crate::panel::common::{
     validate_dk_periods_cover_tested_coefficients, xtx_inverse,
 };
 use crate::panel::re::ReInput;
+use crate::shared::wald::wald_f_test;
 use crate::validation::validate_cluster_count_covers_slopes;
 
 /// FEの被説明変数・説明変数・パネル識別子を保持する入力データ。

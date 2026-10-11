@@ -17,8 +17,9 @@ use faer::prelude::SolveLstsq;
 use statrs::distribution::{ChiSquared, ContinuousCDF, FisherSnedecor};
 
 use super::common::LeastSquaresError;
-use super::ols::{CovType, OlsEstimator, OlsInput, ensure_full_rank, time_ordering};
+use super::ols::{CovType, OlsEstimator, OlsInput, ensure_full_rank};
 use crate::error::CommonError;
+use crate::shared::covariance::time_ordering;
 
 /// 補助回帰の2列を「数値的に同一」、1列を「定数」とみなす相対許容誤差。
 ///

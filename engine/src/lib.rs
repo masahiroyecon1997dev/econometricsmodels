@@ -12,4 +12,5 @@ pub mod linear_algebra;
 pub mod nonlinear;
 pub mod panel;
 pub mod parallelism;
+pub mod shared;
 pub mod validation;

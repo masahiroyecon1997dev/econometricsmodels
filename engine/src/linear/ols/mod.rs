@@ -9,6 +9,7 @@
 //! ここ（engine側）の責務とする。詳細は`docs/spec/ols-spec.md`
 //! 「API引数」の`include_intercept`の項を参照。
 
+mod cov_params;
 mod cov_type;
 mod estimator;
 mod input;

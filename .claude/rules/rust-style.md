@@ -21,7 +21,7 @@ paths:
   - `io/`: IO構造推定（Nested Logit, Random Coefficient Logit, 単一エージェントモデル, 静学/動学ゲーム等）
   - `time_series/`: ARCH, GARCH, VAR（Phase7）
   - 系統名・手法の割り当ては上記を初期案とし、実装時に見直してよい（例: Phase2の"Logit"とPhase6の"Logit"は別系統ディレクトリに属するため衝突しない）
-- **手法＝最初は1ファイル**（例: `linear/wls.rs`）。ファイルが肥大化したら`ols/`のようにディレクトリに昇格し、責務ごとに分割する（`linear/ols/`は`mod.rs`（`pub use`の再エクスポートのみ）・`cov_type.rs`・`input.rs`・`estimator.rs`・`predict.rs`）。型とその`impl`は同じファイルに置き（「型だけ」「関数だけ」で分けない）、`mod tests`も対象コードと同じファイルに置く。公開パスは`mod.rs`の再エクスポートで保ち、呼び出し側を変えない。全手法に最初から複数ファイルを強制しない。
+- **手法＝最初は1ファイル**（例: `linear/wls.rs`）。ファイルが肥大化したら`ols/`のようにディレクトリに昇格し、責務ごとに分割する（`linear/ols/`は`mod.rs`（`pub use`の再エクスポートのみ）・`cov_type.rs`・`cov_params.rs`・`input.rs`・`estimator.rs`・`predict.rs`）。型とその`impl`は同じファイルに置き（「型だけ」「関数だけ」で分けない）、`mod tests`も対象コードと同じファイルに置く。公開パスは`mod.rs`の再エクスポートで保ち、呼び出し側を変えない。全手法に最初から複数ファイルを強制しない。
 - **系統内で共有するロジック**は`<系統>/common.rs`に置く。
 - **全手法で共有するロジック**（DataFrameからの列抽出等、統計手法に依存しない処理）は系統ディレクトリの外、クレート直下（例: `column_extraction.rs`）に置く。
 - **複数の系統が使う計算部品**（共分散行列のmeat/sandwich・Wald検定・最小二乗・適合度統計量・クラスターのグループ化）は`engine/src/shared/`に置く。各系統は他系統の内部ではなく`shared/`に依存する。`shared/`は**何をするコードか**（線形代数・共分散・推論等）で分け、どの系統が使うかでは分けない（利用側は手法の追加で変わり、利用者別にするとファイルの移動が繰り返し起きるため）。系統の`common.rs`（系統内で共有するロジック・エラー型）とは別物で、`shared/`の関数は特定系統のエラー型を返さない（`CommonError`か、`linear_algebra::RankDeficient`のような系統非依存の型を返し、呼び出し側が自系統のエラーへ`map_err`する）。既存のクレート直下の共有モジュール（`design_matrix.rs`・`error.rs`・`inference.rs`・`linear_algebra.rs`・`parallelism.rs`・`validation.rs`）は現状クレート直下のまま。

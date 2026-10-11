@@ -4,7 +4,7 @@
 
 ## モジュール構成
 
-- `ols/`: `mod.rs`（再エクスポートのみ）・`cov_type.rs`（`CovType`）・`input.rs`（`OlsInput`）・`estimator.rs`（`OlsEstimator`・`fit`・getter・`wald_test_last_columns`）・`predict.rs`（`predict_new_data`）。型とその`impl`は同じファイルに置き、テストも対象コードと同じファイルの`mod tests`に置く。公開パス（`crate::linear::ols::{CovType, OlsInput, OlsEstimator, predict_new_data}`）は`mod.rs`の再エクスポートで保っている。
+- `ols/`: `mod.rs`（再エクスポートのみ）・`cov_type.rs`（`CovType`）・`cov_params.rs`（cov_type別の共分散行列と推論の自由度`df_inference`・HACラグの解決・クラスター数の事前検証。`shared::covariance`の部品をOLS固有の規則でつなぐ層で、`LeastSquaresError`を返すため`shared/`には置けない）・`input.rs`（`OlsInput`）・`estimator.rs`（`OlsEstimator`・`fit`・getter・`wald_test_last_columns`）・`predict.rs`（`predict_new_data`）。型とその`impl`は同じファイルに置き、テストも対象コードと同じファイルの`mod tests`に置く。公開パス（`crate::linear::ols::{CovType, OlsInput, OlsEstimator, predict_new_data}`）は`mod.rs`の再エクスポートで保っている。
 - 共分散・Wald検定・最小二乗・適合度の部品は`engine/src/shared/`（`covariance.rs`・`wald.rs`・`least_squares.rs`・`goodness_of_fit.rs`・`cluster.rs`）。「何をするコードか」で分けてあり、どの系統が使うかでは分けない。`shared/`は`linear`のエラー型に依存しない（`CommonError`・`linear_algebra::RankDeficient`を返し、呼び出し側が`LeastSquaresError`等へ`map_err`する）。`OlsEstimator::fit`は「`least_squares`で係数・残差・`(X'X)⁻¹`→cov_type別の共分散→`gaussian_goodness_of_fit`→`wald_f_test`」を呼んで推論結果を組み立てるだけ。
 - 共分散は`meat`と`sandwich`に分けてある。HCは`S'S`のためスコア行列を作るが、HACとクラスターはスコアを返すクロージャ`score(i, a)`で受け、n×kの行列を追加で確保しない。HC/HAC/クラスターの演算順序（`resid * x`を先に作ってから積み上げる、`bread * meat * bread`の結合順）は変えない。変えると最終桁がずれ、ベンチマークの`1e-8`は通っても過去の出力とのビット一致が崩れる。
 

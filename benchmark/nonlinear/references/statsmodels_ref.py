@@ -54,7 +54,13 @@ get_robustcov_results`は`HC1`指定時に`getattr(self, "cov_HC1", None)`でモ
     python -m benchmark.nonlinear.references.statsmodels_ref --model logit \\
         --dataset-source wooldridge --dataset mroz \\
         --formula "inlf ~ nwifeinc + educ + exper + expersq + age + kidslt6 + kidsge6" \\
-        --cov-type cluster --cluster city
+        --cov-type hc0
+
+`--cluster`にはデータセットに既にある列名を指定する。合成データにはグループ列が
+無いため、クラスターのフィクスチャは`fixtures/generate_logit_fixtures.py`/
+`generate_probit_fixtures.py`の`_run_cluster_case`が担う。mrozの`city`はG=2で
+本実装が`InsufficientClustersForInference`として弾くため、クラスターの
+フィクスチャにしていない。
 """
 
 from __future__ import annotations

@@ -323,7 +323,9 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   整数列を丸めてしまうため使わず、`FUN_numeric=mean, FUN_integer=mean`を明示する。
 - 合成データセット（`benchmark/nonlinear/datasets.py`）はOLSの9シナリオを
   ベースに、誤差項構造に依存するもの（不均一分散・自己相関等）を除外し、Logit特有の病理シナリオ
-  `near_separation`（準完全分離、係数を大きくしてp≈0/1が支配的になる状況）を追加した7シナリオ。
+  `near_separation`（準完全分離、係数を大きくしてp≈0/1が支配的になる状況）・`complete_separation`・
+  `quasi_complete_separation`を追加した11シナリオ（数値比較8、`ComputationError`確認のみ3:
+  `complete_separation`・`quasi_complete_separation`・`perfect_multicollinearity`）。
   実データは`mroz`（Wooldridge、労働参加モデル）。
 - クラスターロバストSEの境界ケース（クラスター数G=2ちょうど）は、OLSの`wald_f_test`と異なり
   Logitの`cluster_cov_params`がq×q部分行列の反転を要求しないため、説明変数の数を絞る必要がない。

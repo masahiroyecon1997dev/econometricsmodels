@@ -68,6 +68,7 @@ _FIXTURE_MODULES = [
     "benchmark.panel.fixtures.generate_fe_crosscheck_fixtures",
     "benchmark.panel.fixtures.generate_fe_plm_crosscheck_fixtures",
     "benchmark.panel.fixtures.generate_re_crosscheck_fixtures",
+    "benchmark.panel.fixtures.generate_re_time_invariant_fixtures",
     "benchmark.panel.fixtures.generate_re_statsmodels_cluster_fixtures",
 ]
 

@@ -485,4 +485,23 @@ TOLERANCES: dict[str, dict[str, float]] = {
         # atol_p_value系と同じ理由）。全シナリオでp値を比較する。
         "atol_hausman_p_value": 1e-6,
     },
+    # 時間不変の説明変数を含むREのplmクロスチェック
+    # （`benchmark/panel/fixtures/generate_re_time_invariant_fixtures.py`参照）。
+    # バランスパネルは`re_crosscheck`と同じく機械精度で比較する。不均衡パネルは
+    # plmとlinearmodels準拠の本実装でσ_u²の推定（between回帰の重み付け）が異なり、
+    # 時間不変変数の係数はbetween変動だけで決まるため通常の不均衡シナリオより大きく
+    # 出る（実測: σ_u² 0.876 vs 0.924、σ_ε²は完全一致）。そのためplmとの比較は
+    # 大きく乖離していないことの確認に留め、厳密な検証は仕様どおりの独立な手計算
+    # （`test_re_time_invariant.py`のnumpy実装、機械精度）で行う。
+    # 実測最大相対誤差（cov_type別の最大）: params 1.5e-2・std_errors 1.9e-2・
+    # f_statistic 6.0e-2・hausman_statistic 3.8e-2。それぞれ約3倍のマージン。
+    "re_time_invariant": {
+        "rtol_unbalanced_coef": 5e-2,
+        "rtol_unbalanced_std_error": 6e-2,
+        "rtol_unbalanced_f": 2e-1,
+        "rtol_unbalanced_hausman": 1.2e-1,
+        # 独立な手計算（numpy）との比較。
+        "rtol_hand_computed": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_REFERENCE_FLOOR,
+    },
 }

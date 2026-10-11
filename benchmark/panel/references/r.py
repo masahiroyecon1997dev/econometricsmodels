@@ -51,6 +51,12 @@ _PLM_HAUSMAN_R_SCRIPT = (
     Path(__file__).resolve().parents[1] / "run_plm_hausman_benchmark.R"
 )
 
+# 時間不変の説明変数を含むREのハウスマン検定（`phtest`は検定する係数を位置で選ぶため
+# 使えない）。
+_PLM_HAUSMAN_TILDE_R_SCRIPT = (
+    Path(__file__).resolve().parents[1] / "run_plm_hausman_tilde_benchmark.R"
+)
+
 
 def default_dk_bandwidth(csv_path: Path, time_col: str = "time") -> int:
     """`bandwidth=None`時の本実装の自動選択`floor(4*(T/100)^(2/9))`（Tは
@@ -209,6 +215,37 @@ def run_re_hausman_plm_r(
         extra.append(str(maxlag))
     return run_r(
         _PLM_HAUSMAN_R_SCRIPT,
+        csv_path,
+        formula,
+        cov_type,
+        extra_args=extra,
+    )
+
+
+def run_re_hausman_tilde_plm_r(
+    csv_path: Path,
+    formula: str,
+    cov_type: str,
+    *,
+    entity_col: str = "entity",
+    time_col: str = "time",
+    maxlag: int | None = None,
+) -> dict:
+    """`run_plm_hausman_tilde_benchmark.R`を呼び、時間不変の説明変数を含む
+    RE用のハウスマン検定（`plm::phtest(method="aux")`の補助回帰を、検定する
+    係数を位置ではなく名前で選んで再現した値）を得る。
+
+    `phtest`は時間不変変数があると`X̃`ではなく別の係数を検定してしまうため
+    （`run_plm_hausman_tilde_benchmark.R`モジュールコメント参照）、
+    `run_re_hausman_plm_r`の代わりにこちらを使う。引数は同じ。
+    """
+    extra = [entity_col, time_col]
+    if cov_type == "dk":
+        if maxlag is None:
+            raise ValueError("maxlag is required for cov_type='dk'")
+        extra.append(str(maxlag))
+    return run_r(
+        _PLM_HAUSMAN_TILDE_R_SCRIPT,
         csv_path,
         formula,
         cov_type,

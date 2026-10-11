@@ -55,6 +55,7 @@ SCENARIOS = [
     "singleton_time",
     "unbalanced_two_way",
     "zero_variance_regressor",
+    "time_invariant_unbalanced",
 ]
 
 # baseline系シナリオの既定パネル規模（entities=40, periods=6, n=240）。
@@ -258,7 +259,8 @@ def generate_fe_dataset(
 
     Returns:
         (df, true_beta)のタプル。dfは列 entity, time, y, x1..xk を持つ
-        polars DataFrame（"zero_variance_regressor"はx_invariantも追加）。
+        polars DataFrame（"zero_variance_regressor"・
+        "time_invariant_unbalanced"はx_invariantも追加）。
 
     Raises:
         ValueError: 未知のscenarioの場合。
@@ -357,15 +359,22 @@ def generate_fe_dataset(
             pl.int_range(pl.len()).over("time") == 0
         )
         df = df.filter(keep)
-    elif scenario == "zero_variance_regressor":
-        # エンティティ内で時間不変な列を追加する（within変換後に分散ゼロ、
-        # `fe-spec.md`1章のValidationErrorを誘発。エラーパス専用）。
+    elif scenario in ("zero_variance_regressor", "time_invariant_unbalanced"):
+        # エンティティ内で時間不変な列を追加する（within変換後に分散ゼロ）。
+        # FEは`fe-spec.md`1章のValidationErrorで拒否する（エラーパス専用）が、
+        # REは時間不変の説明変数を許容するため、RE側では数値比較に使う
+        # （`zero_variance_regressor`はバランス、`time_invariant_unbalanced`は
+        # `unbalanced`と同じ間引きをかけた不均衡パネル）。
         entity_to_const = dict(zip(entity_ids, rng.normal(size=n_entities)))
         df = df.with_columns(
             pl.col("entity")
             .replace_strict(entity_to_const, return_dtype=pl.Float64)
             .alias("x_invariant")
         )
+        if scenario == "time_invariant_unbalanced":
+            df = _drop_rows_keep_min_count(
+                df, rng, _UNBALANCED_DROP_PROB, min_count=2
+            )
 
     return df, beta
 

@@ -46,6 +46,7 @@ import polars as pl
 from benchmark.common import (
     BENCHMARKS_DIR,
     DATA_DIR,
+    group_by_dataset_source,
     imbalanced_cluster_groups,
     run_fixture_cli,
 )
@@ -341,7 +342,7 @@ def build_fixtures() -> dict:
             "linearmodelsが中心化しないため比較に使える。`run_gmm()`のdocコメント参照）。"
         ),
     }
-    return fixtures
+    return group_by_dataset_source(fixtures, ["card"])
 
 
 def _run_cluster_case(

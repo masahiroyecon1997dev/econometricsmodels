@@ -13,8 +13,43 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
+
+
+def group_by_dataset_source(
+    flat: dict, wooldridge_datasets: Iterable[str]
+) -> dict:
+    """平坦なフィクスチャdictを`synthetic`/`wooldridge`の二層に振り分ける。
+
+    全フィクスチャJSONの最上位を`{"synthetic": ..., "wooldridge": ...,
+    "_meta": ...}`に揃えるための共通処理。`wooldridge_datasets`に挙げた
+    キー（Wooldridge実データのケース）を`wooldridge`へ、それ以外
+    （合成データのシナリオと、それを元にした`solver`・`no_intercept`等の
+    特殊ケース）を`synthetic`へ入れる。各内側の並び順は`flat`の挿入順を保つ。
+    `_meta`は最後に置く。
+
+    Args:
+        flat: 最上位にシナリオ名・実データ名・`_meta`が並ぶdict。
+        wooldridge_datasets: `wooldridge`側に入れるキーの集合。`flat`に
+            存在しないキーを渡すと`KeyError`にする（取りこぼし防止）。
+
+    Returns:
+        `{"synthetic": {...}, "wooldridge": {...}, "_meta": ...}`。
+    """
+    real = list(wooldridge_datasets)
+    missing = [name for name in real if name not in flat]
+    if missing:
+        raise KeyError(f"wooldridge datasets not in fixtures: {missing}")
+    grouped: dict = {
+        "synthetic": {
+            k: v for k, v in flat.items() if k not in real and k != "_meta"
+        },
+        "wooldridge": {name: flat[name] for name in real},
+    }
+    if "_meta" in flat:
+        grouped["_meta"] = flat["_meta"]
+    return grouped
 
 
 def run_fixture_cli(

@@ -66,7 +66,7 @@ def _method_tolerances() -> dict:
 @pytest.mark.parametrize("cov_type", _checks.COV_TYPES)
 @pytest.mark.parametrize("scenario", _checks.SCENARIOS)
 def test_matches_aer_tobit(fixtures, scenario, cov_type):
-    ref = fixtures[scenario][cov_type]
+    ref = fixtures["synthetic"][scenario][cov_type]
     res = _checks.build_fit(scenario, cov_type, ref)
     _checks.check_result(
         res, ref, f"{scenario}/{cov_type}", **_tolerances(scenario)
@@ -75,7 +75,7 @@ def test_matches_aer_tobit(fixtures, scenario, cov_type):
 
 @pytest.mark.parametrize("cov_key", _checks.CLUSTER_COV_KEYS)
 def test_cluster_matches_aer_tobit(fixtures, cov_key):
-    ref = fixtures[_checks.BASELINE_SCENARIO][cov_key]
+    ref = fixtures["synthetic"][_checks.BASELINE_SCENARIO][cov_key]
     res = _checks.build_fit(_checks.BASELINE_SCENARIO, cov_key, ref)
     _checks.check_result(
         res,
@@ -87,7 +87,7 @@ def test_cluster_matches_aer_tobit(fixtures, cov_key):
 
 @pytest.mark.parametrize("solver", _checks.METHODS)
 def test_method_matches_aer_tobit(fixtures, solver):
-    ref = fixtures["solver"][solver]
+    ref = fixtures["synthetic"]["solver"][solver]
     res = _checks.build_method_fit(solver, ref)
     _checks.check_result(res, ref, f"solver/{solver}", **_method_tolerances())
 
@@ -115,7 +115,7 @@ def _combination_tolerances(scenario: str) -> dict:
 def test_solver_combination_matches_aer_tobit(
     fixtures, scenario, cov_key, solver
 ):
-    ref = fixtures[scenario][cov_key]
+    ref = fixtures[_checks.fixture_group(scenario)][scenario][cov_key]
     res = _checks.build_fit(scenario, cov_key, ref, solver=solver)
     _checks.check_result(
         res,
@@ -127,7 +127,7 @@ def test_solver_combination_matches_aer_tobit(
 
 @pytest.mark.parametrize("cov_type", _checks.COV_TYPES)
 def test_no_intercept_matches_aer_tobit(fixtures, cov_type):
-    ref = fixtures["no_intercept"][cov_type]
+    ref = fixtures["synthetic"]["no_intercept"][cov_type]
     res = _checks.build_no_intercept_fit(cov_type, ref)
     _checks.check_result(
         res,
@@ -139,6 +139,6 @@ def test_no_intercept_matches_aer_tobit(fixtures, cov_type):
 
 @pytest.mark.parametrize("cov_type", _checks.COV_TYPES)
 def test_mroz_matches_aer_tobit(fixtures, cov_type):
-    ref = fixtures["mroz"][cov_type]
+    ref = fixtures["wooldridge"]["mroz"][cov_type]
     res = _checks.build_fit("mroz", cov_type, ref)
     _checks.check_result(res, ref, f"mroz/{cov_type}", **_tolerances("mroz"))

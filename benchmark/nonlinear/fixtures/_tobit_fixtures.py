@@ -29,6 +29,7 @@ from benchmark.common import (
     DATA_DIR,
     SYNTHETIC_FORMULA,
     TOBIT_MROZ_FORMULA,
+    group_by_dataset_source,
     imbalanced_cluster_groups,
     load_frozen_dataset,
 )
@@ -319,4 +320,4 @@ def build(engine: str) -> dict:
             "パラメータ名は切片を 'const' に正規化済み。"
         ),
     }
-    return fixtures
+    return group_by_dataset_source(fixtures, ["mroz"])

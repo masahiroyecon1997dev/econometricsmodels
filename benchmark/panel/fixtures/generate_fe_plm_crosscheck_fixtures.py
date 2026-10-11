@@ -54,6 +54,7 @@ from benchmark.common import (
     WAGEPAN_TIME,
     WAGEPAN_X,
     WAGEPAN_Y,
+    group_by_dataset_source,
     run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
@@ -277,7 +278,7 @@ def build_fixtures() -> dict:
             "r_squared_withinはplmのsummary(model)$r.squared（cov_type非依存）。"
         ),
     }
-    return fixtures
+    return group_by_dataset_source(fixtures, ["wagepan"])
 
 
 if __name__ == "__main__":

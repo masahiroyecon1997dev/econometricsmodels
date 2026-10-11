@@ -185,7 +185,7 @@ def test_synthetic_one_way_matches_plm(crosscheck, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
     _check_result(
         _fit(scenario, cov_type),
-        crosscheck[scenario]["one_way"][cov_type],
+        crosscheck["synthetic"][scenario]["one_way"][cov_type],
         f"{scenario}/one_way/{cov_type}",
         expected_df=_expected_df(df, cov_type),
         n_slopes=df.width - 3,
@@ -203,7 +203,7 @@ def test_dk_max_bandwidth_matches_plm(crosscheck, scenario):
 
     _check_result(
         res,
-        crosscheck["dk_max_bandwidth"][scenario],
+        crosscheck["synthetic"]["dk_max_bandwidth"][scenario],
         f"{scenario}/one_way/dk_max_bandwidth",
         expected_df=n_periods - 1,
         n_slopes=df.width - 3,
@@ -221,7 +221,9 @@ def test_dk_explicit_bandwidth_matches_plm(crosscheck, scenario, bandwidth):
 
     _check_result(
         res,
-        crosscheck["dk_explicit_bandwidth"][scenario][str(bandwidth)],
+        crosscheck["synthetic"]["dk_explicit_bandwidth"][scenario][
+            str(bandwidth)
+        ],
         f"{scenario}/one_way/dk_bandwidth_{bandwidth}",
         expected_df=df["time"].n_unique() - 1,
         n_slopes=df.width - 3,
@@ -238,7 +240,7 @@ def test_dk_three_periods_matches_plm(crosscheck):
 
     _check_result(
         res,
-        crosscheck["boundary"]["dk_three_periods"],
+        crosscheck["synthetic"]["boundary"]["dk_three_periods"],
         "boundary/dk_three_periods",
         expected_df=2,
         n_slopes=2,
@@ -253,7 +255,7 @@ def test_cluster_g3_two_slopes_matches_plm(crosscheck):
 
     _check_result(
         res,
-        crosscheck["boundary"]["cluster_g3_two_slopes"],
+        crosscheck["synthetic"]["boundary"]["cluster_g3_two_slopes"],
         "boundary/cluster_g3_two_slopes",
         expected_df=2,
         n_slopes=2,
@@ -267,7 +269,7 @@ def test_cluster_g2_matches_plm(crosscheck):
 
     _check_result(
         res,
-        crosscheck["boundary"]["cluster_g2"],
+        crosscheck["synthetic"]["boundary"]["cluster_g2"],
         "boundary/cluster_g2",
         expected_df=1,
         n_slopes=1,
@@ -283,7 +285,7 @@ def test_skewed_entity_sizes_cluster_matches_plm(crosscheck):
 
     _check_result(
         res,
-        crosscheck["boundary"]["skewed_entity_sizes"],
+        crosscheck["synthetic"]["boundary"]["skewed_entity_sizes"],
         "boundary/skewed_entity_sizes",
         expected_df=df["entity"].n_unique() - 1,
         n_slopes=2,
@@ -306,7 +308,7 @@ def test_wagepan_one_way_matches_plm(crosscheck, cov_type):
 
     _check_result(
         res,
-        crosscheck["wagepan"]["one_way"][cov_type],
+        crosscheck["wooldridge"]["wagepan"]["one_way"][cov_type],
         f"wagepan/one_way/{cov_type}",
         expected_df=_expected_df(df, cov_type, entity=WAGEPAN_ENTITY),
         n_slopes=len(WAGEPAN_X),

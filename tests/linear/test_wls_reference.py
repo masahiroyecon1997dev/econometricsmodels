@@ -135,7 +135,11 @@ def test_matches_statsmodels(fixtures, scenario, cov_type):
         with_row_time(df), y="y", x=x_cols, weight="weight", options=options
     ).fit()
 
-    _check_result(res, fixtures[scenario][cov_type], f"{scenario}/{cov_type}")
+    _check_result(
+        res,
+        fixtures["synthetic"][scenario][cov_type],
+        f"{scenario}/{cov_type}",
+    )
 
 
 def test_cluster_matches_statsmodels(fixtures):
@@ -156,7 +160,7 @@ def test_cluster_matches_statsmodels(fixtures):
         options=options,
     ).fit()
 
-    _check_result(res, fixtures["baseline"]["cluster"], "cluster")
+    _check_result(res, fixtures["synthetic"]["baseline"]["cluster"], "cluster")
 
 
 def test_cluster_imbalanced_matches_statsmodels(fixtures):
@@ -179,7 +183,9 @@ def test_cluster_imbalanced_matches_statsmodels(fixtures):
     ).fit()
 
     _check_result(
-        res, fixtures["baseline"]["cluster_imbalanced"], "cluster_imbalanced"
+        res,
+        fixtures["synthetic"]["baseline"]["cluster_imbalanced"],
+        "cluster_imbalanced",
     )
 
 
@@ -199,7 +205,9 @@ def test_cluster_g2_matches_statsmodels(fixtures):
         with_row_time(df), y="y", x=["x1"], weight="weight", options=options
     ).fit()
 
-    _check_result(res, fixtures["baseline"]["cluster_g2"], "cluster_g2")
+    _check_result(
+        res, fixtures["synthetic"]["baseline"]["cluster_g2"], "cluster_g2"
+    )
 
 
 @pytest.mark.parametrize(
@@ -227,7 +235,9 @@ def test_cluster_ill_conditioned_matches_statsmodels(fixtures, scenario):
         options=options,
     ).fit()
 
-    _check_result(res, fixtures[scenario]["cluster"], f"{scenario}/cluster")
+    _check_result(
+        res, fixtures["synthetic"][scenario]["cluster"], f"{scenario}/cluster"
+    )
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)
@@ -256,7 +266,7 @@ def test_no_intercept_matches_statsmodels(fixtures, cov_type):
     assert res.param_names == ["x1", "x2", "x3"]
     _check_result(
         res,
-        fixtures["baseline"]["no_intercept"][cov_type],
+        fixtures["synthetic"]["baseline"]["no_intercept"][cov_type],
         f"no_intercept/{cov_type}",
     )
 
@@ -286,7 +296,7 @@ def test_no_intercept_cluster_matches_statsmodels(fixtures):
     assert res.param_names == ["x1", "x2", "x3"]
     _check_result(
         res,
-        fixtures["baseline"]["no_intercept"]["cluster"],
+        fixtures["synthetic"]["baseline"]["no_intercept"]["cluster"],
         "no_intercept/cluster",
     )
 
@@ -320,7 +330,7 @@ def test_confidence_level_matches_statsmodels(fixtures, cov_type):
 
     _check_result(
         res,
-        fixtures["baseline"]["confidence_level"][cov_type],
+        fixtures["synthetic"]["baseline"]["confidence_level"][cov_type],
         f"confidence_level/{cov_type}",
     )
 
@@ -349,7 +359,7 @@ def test_confidence_level_cluster_matches_statsmodels(fixtures):
 
     _check_result(
         res,
-        fixtures["baseline"]["confidence_level"]["cluster"],
+        fixtures["synthetic"]["baseline"]["confidence_level"]["cluster"],
         "confidence_level/cluster",
     )
 
@@ -372,7 +382,9 @@ def test_weight_in_x_matches_statsmodels(fixtures):
     ).fit()
 
     _check_result(
-        res, fixtures["baseline"]["weight_in_x"], "baseline/weight_in_x"
+        res,
+        fixtures["synthetic"]["baseline"]["weight_in_x"],
+        "baseline/weight_in_x",
     )
 
 
@@ -397,7 +409,11 @@ def test_401ksubs_matches_statsmodels(fixtures, cov_type):
         options=options,
     ).fit()
 
-    _check_result(res, fixtures["401ksubs"][cov_type], f"401ksubs/{cov_type}")
+    _check_result(
+        res,
+        fixtures["wooldridge"]["401ksubs"][cov_type],
+        f"401ksubs/{cov_type}",
+    )
 
 
 def test_401ksubs_cluster_matches_statsmodels(fixtures):
@@ -420,4 +436,6 @@ def test_401ksubs_cluster_matches_statsmodels(fixtures):
         options=options,
     ).fit()
 
-    _check_result(res, fixtures["401ksubs"]["cluster"], "401ksubs/cluster")
+    _check_result(
+        res, fixtures["wooldridge"]["401ksubs"]["cluster"], "401ksubs/cluster"
+    )

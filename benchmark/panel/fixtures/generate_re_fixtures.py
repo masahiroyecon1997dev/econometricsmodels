@@ -30,6 +30,7 @@ from benchmark.common import (
     WAGEPAN_TIME,
     WAGEPAN_X,
     WAGEPAN_Y,
+    group_by_dataset_source,
     run_fixture_cli,
 )
 from benchmark.panel.fixtures.generate_fe_fixtures import (
@@ -133,7 +134,7 @@ def build_fixtures() -> dict:
             "本実装と一致せず極端な不均衡では負値になるため使わない。"
         ),
     }
-    return fixtures
+    return group_by_dataset_source(fixtures, ["wagepan"])
 
 
 if __name__ == "__main__":

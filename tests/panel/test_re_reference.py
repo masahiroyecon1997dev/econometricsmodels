@@ -119,7 +119,11 @@ def test_matches_linearmodels(fixtures, scenario, cov_type):
     options = REOptions(cov_type=cov_type)
     res = RE(df, y="y", x=x_cols, entity="entity", options=options).fit()
 
-    _check_result(res, fixtures[scenario][cov_type], f"{scenario}/{cov_type}")
+    _check_result(
+        res,
+        fixtures["synthetic"][scenario][cov_type],
+        f"{scenario}/{cov_type}",
+    )
 
 
 # ── 凍結フィクスチャとの数値照合（実データ: Wooldridge wagepan） ───────
@@ -133,4 +137,6 @@ def test_wagepan_matches_linearmodels(fixtures, cov_type):
         df, y=WAGEPAN_Y, x=WAGEPAN_X, entity=WAGEPAN_ENTITY, options=options
     ).fit()
 
-    _check_result(res, fixtures["wagepan"][cov_type], f"wagepan/{cov_type}")
+    _check_result(
+        res, fixtures["wooldridge"]["wagepan"][cov_type], f"wagepan/{cov_type}"
+    )

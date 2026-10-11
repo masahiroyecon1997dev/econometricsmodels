@@ -460,7 +460,7 @@ def test_401ksubs_matches_r(crosscheck, cov_type):
         options=options,
     ).fit()
 
-    ref = crosscheck["401ksubs"][cov_type]["r"]
+    ref = crosscheck["wooldridge"]["401ksubs"][cov_type]["r"]
     label = f"401ksubs/{cov_type}/R"
     _assert_close(res.params, ref["params"], f"{label} params")
     _assert_close(res.std_errors, ref["std_errors"], f"{label} std_errors")
@@ -486,7 +486,7 @@ def test_401ksubs_cluster_matches_r(crosscheck):
         options=options,
     ).fit()
 
-    ref = crosscheck["401ksubs"]["cluster"]["r"]
+    ref = crosscheck["wooldridge"]["401ksubs"]["cluster"]["r"]
     _assert_close(res.params, ref["params"], "401ksubs/cluster/R params")
     _assert_close(
         res.std_errors, ref["std_errors"], "401ksubs/cluster/R std_errors"

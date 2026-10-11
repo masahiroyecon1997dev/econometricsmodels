@@ -45,7 +45,7 @@ from benchmark.common.dgp import (
     preview_dataset,
     validate_choice,
 )
-from benchmark.common.driver import run_fixture_cli
+from benchmark.common.driver import group_by_dataset_source, run_fixture_cli
 from benchmark.common.reference.extract import extract_params_std_errors
 
 __all__ = [
@@ -66,6 +66,7 @@ __all__ = [
     "correlated_design_matrix",
     "extract_params_std_errors",
     "freeze_scenarios",
+    "group_by_dataset_source",
     "hac_auto_lag",
     "imbalanced_cluster_groups",
     "linear_predictor",

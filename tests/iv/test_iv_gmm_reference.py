@@ -215,7 +215,7 @@ def test_matches_linearmodels(fixtures, scenario, cov_type):
 
     _check_result(
         res,
-        fixtures[scenario]["classical"][cov_type],
+        fixtures["synthetic"][scenario]["classical"][cov_type],
         f"{scenario}/classical/{cov_type}",
     )
 
@@ -241,7 +241,7 @@ def test_cluster_matches_linearmodels(fixtures):
         options=options,
     ).fit()
 
-    ref = fixtures["baseline"]["classical"]["cluster"]
+    ref = fixtures["synthetic"]["baseline"]["classical"]["cluster"]
     _assert_dict_close(res.params, ref["params"], "cluster/params")
     _assert_dict_close(res.std_errors, ref["std_errors"], "cluster/std_errors")
 
@@ -268,7 +268,7 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
         options=options,
     ).fit()
 
-    ref = fixtures["baseline"]["classical"]["cluster_imbalanced"]
+    ref = fixtures["synthetic"]["baseline"]["classical"]["cluster_imbalanced"]
     _assert_dict_close(res.params, ref["params"], "cluster_imbalanced/params")
     _assert_dict_close(
         res.std_errors, ref["std_errors"], "cluster_imbalanced/std_errors"
@@ -300,7 +300,7 @@ def test_multi_endog_matches_linearmodels(fixtures, cov_type):
 
     _check_result(
         res,
-        fixtures["multi_endog"]["classical"][cov_type],
+        fixtures["synthetic"]["multi_endog"]["classical"][cov_type],
         f"multi_endog/classical/{cov_type}",
     )
 
@@ -328,7 +328,9 @@ def test_hac_weight_hac_cov_matches_linearmodels(fixtures):
         options=options,
     ).fit()
 
-    _check_result(res, fixtures["hac_weight_hac_cov"], "hac_weight_hac_cov")
+    _check_result(
+        res, fixtures["synthetic"]["hac_weight_hac_cov"], "hac_weight_hac_cov"
+    )
 
 
 # linearmodelsの`iter_limit`（初回推定を含む推定回数）ごとの対応する本実装の
@@ -380,7 +382,7 @@ def test_gmm_type_matches_linearmodels(fixtures, n_iter):
 
     _check_result(
         res,
-        fixtures["gmm_type"][str(n_iter)],
+        fixtures["synthetic"]["gmm_type"][str(n_iter)],
         f"gmm_type/{n_iter}",
         check_overid=(n_iter != 1),
     )
@@ -416,7 +418,7 @@ def test_other_weight_types_match_linearmodels(fixtures, gmm_weight_type):
 
     _check_result(
         res,
-        fixtures["baseline"][gmm_weight_type]["classical"],
+        fixtures["synthetic"]["baseline"][gmm_weight_type]["classical"],
         f"baseline/{gmm_weight_type}/classical",
     )
 
@@ -451,7 +453,7 @@ def test_cross_weight_cov_matches_linearmodels(
 
     _check_result(
         res,
-        fixtures["baseline"][gmm_weight_type][cov_type],
+        fixtures["synthetic"]["baseline"][gmm_weight_type][cov_type],
         f"baseline/{gmm_weight_type}/{cov_type}",
     )
 
@@ -480,7 +482,7 @@ def test_card_matches_linearmodels(fixtures, cov_type):
     """
     _check_result(
         _fit_card("classical", cov_type),
-        fixtures["card"]["classical"][cov_type],
+        fixtures["wooldridge"]["card"]["classical"][cov_type],
         f"card/classical/{cov_type}",
     )
 
@@ -492,7 +494,7 @@ def test_card_other_weight_types_match_linearmodels(fixtures, gmm_weight_type):
     """
     _check_result(
         _fit_card(gmm_weight_type, "classical"),
-        fixtures["card"][gmm_weight_type]["classical"],
+        fixtures["wooldridge"]["card"][gmm_weight_type]["classical"],
         f"card/{gmm_weight_type}/classical",
     )
 
@@ -525,7 +527,9 @@ def test_no_intercept_matches_linearmodels(fixtures, scenario, cov_type):
         options=options,
     ).fit()
 
-    ref = fixtures["no_intercept"][scenario]["classical"][cov_type]
+    ref = fixtures["synthetic"]["no_intercept"][scenario]["classical"][
+        cov_type
+    ]
     label = f"no_intercept/{scenario}/{cov_type}"
     assert "const" not in res.param_names, label
     over_identified = ref["hansen_j_statistic"] is not None
@@ -577,7 +581,9 @@ def test_no_intercept_cluster_covariance_matches_linearmodels(fixtures):
         options=options,
     ).fit()
 
-    ref = fixtures["no_intercept"]["baseline"]["classical"]["cluster"]
+    ref = fixtures["synthetic"]["no_intercept"]["baseline"]["classical"][
+        "cluster"
+    ]
     _check_result(
         res, ref, "no_intercept/baseline/classical/cluster", check_overid=False
     )
@@ -629,7 +635,9 @@ def test_no_intercept_other_weight_types_match_linearmodels(
         options=options,
     ).fit()
 
-    ref = fixtures["no_intercept"][scenario][gmm_weight_type]["classical"]
+    ref = fixtures["synthetic"]["no_intercept"][scenario][gmm_weight_type][
+        "classical"
+    ]
     label = f"no_intercept/{scenario}/{gmm_weight_type}/classical"
     assert "const" not in res.param_names, label
     _check_result(res, ref, label)

@@ -295,7 +295,7 @@ def test_synthetic_matches_plm(crosscheck, scenario, cov_type):
     coef_rtol, rtol = _rtols_for(scenario, cov_type)
     _check_result(
         res,
-        crosscheck[scenario][cov_type],
+        crosscheck["synthetic"][scenario][cov_type],
         f"{scenario}/{cov_type}",
         rtol=rtol,
         coef_rtol=coef_rtol,
@@ -352,7 +352,7 @@ def test_cluster_imbalanced_matches_plm_based_reference(crosscheck):
 
     _check_result(
         res,
-        crosscheck["baseline"]["cluster_imbalanced"],
+        crosscheck["synthetic"]["baseline"]["cluster_imbalanced"],
         "baseline/cluster_imbalanced",
         rtol=RTOL_BALANCED,
     )
@@ -371,7 +371,7 @@ def test_cluster_g3_boundary_matches_plm_based_reference(crosscheck):
 
     _check_result(
         res,
-        crosscheck["baseline"]["cluster_g3"],
+        crosscheck["synthetic"]["baseline"]["cluster_g3"],
         "baseline/cluster_g3",
         rtol=RTOL_BALANCED,
     )
@@ -391,7 +391,7 @@ def test_wagepan_matches_plm(crosscheck, cov_type):
 
     _check_result(
         res,
-        crosscheck["wagepan"][cov_type],
+        crosscheck["wooldridge"]["wagepan"][cov_type],
         f"wagepan/{cov_type}",
         rtol=RTOL_BALANCED,
     )
@@ -412,7 +412,7 @@ def test_synthetic_hausman_matches_plm(crosscheck, scenario, cov_type):
         entity="entity",
         options=_re_options(cov_type),
     )
-    ref = crosscheck[scenario][HAUSMAN_KEY][cov_type]
+    ref = crosscheck["synthetic"][scenario][HAUSMAN_KEY][cov_type]
     if ref is None:
         # ロバスト共分散が構造的に特異でplmに参照値が無いケース
         # （`generate_re_crosscheck_fixtures.py`の`_STRUCTURALLY_SINGULAR`）。
@@ -445,7 +445,7 @@ def test_wagepan_hausman_matches_plm(crosscheck, cov_type):
 
     _check_hausman(
         res,
-        crosscheck["wagepan"][HAUSMAN_KEY][cov_type],
+        crosscheck["wooldridge"]["wagepan"][HAUSMAN_KEY][cov_type],
         f"wagepan/{cov_type}",
         cov_type=cov_type,
     )
@@ -470,7 +470,9 @@ def test_hausman_dk_explicit_bandwidth_matches_plm(
 
     _check_hausman(
         res,
-        crosscheck[scenario][HAUSMAN_DK_BANDWIDTH_KEY][str(bandwidth)],
+        crosscheck["synthetic"][scenario][HAUSMAN_DK_BANDWIDTH_KEY][
+            str(bandwidth)
+        ],
         f"{scenario}/dk/bandwidth={bandwidth}",
         cov_type="dk",
         scenario=scenario,

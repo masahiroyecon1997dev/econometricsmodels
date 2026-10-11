@@ -1376,7 +1376,10 @@ def check_matches_statsmodels(
     res = config.estimator_cls(df, y="y", x=x_cols, options=options).fit()
 
     check_result(
-        config, res, fixtures[scenario][cov_type], f"{scenario}/{cov_type}"
+        config,
+        res,
+        fixtures["synthetic"][scenario][cov_type],
+        f"{scenario}/{cov_type}",
     )
 
 
@@ -1404,7 +1407,9 @@ def check_cluster_matches_statsmodels(
     """クラスターロバストSE（baselineシナリオ、行番号%10の疑似グループ）。
     係数・標準誤差に加え、z値・p値・信頼区間・適合度統計量・限界効果まで全統計量を比べる。"""
     res = _baseline_cluster_fit(config, "cluster")
-    check_result(config, res, fixtures["baseline"]["cluster"], "cluster")
+    check_result(
+        config, res, fixtures["synthetic"]["baseline"]["cluster"], "cluster"
+    )
 
 
 def check_cluster_imbalanced_matches_statsmodels(
@@ -1415,7 +1420,7 @@ def check_cluster_imbalanced_matches_statsmodels(
     check_result(
         config,
         res,
-        fixtures["baseline"]["cluster_imbalanced"],
+        fixtures["synthetic"]["baseline"]["cluster_imbalanced"],
         "cluster_imbalanced",
     )
 
@@ -1436,7 +1441,12 @@ def check_apple_cluster_matches_statsmodels(
     グループサイズ1〜66）。mrozの`city`（G=2）はG<=qのため成功パスを持てず、実データの
     クラスターロバストSEはここで全統計量を照合する。"""
     res = _apple_cluster_fit(config)
-    check_result(config, res, fixtures["apple"]["cluster"], "apple/cluster")
+    check_result(
+        config,
+        res,
+        fixtures["wooldridge"]["apple"]["cluster"],
+        "apple/cluster",
+    )
 
 
 # `solver="bfgs"/"lbfgs"`と掛け合わせる代表ケース。newtonは全シナリオ×cov_typeを
@@ -1477,16 +1487,16 @@ def check_solver_combination_matches_newton_reference(
             x=[c for c in df.columns if c != "y"],
             options=options,
         ).fit()
-        ref = fixtures["near_separation"][cov_type]
+        ref = fixtures["synthetic"]["near_separation"][cov_type]
     elif case == "apple_cluster":
         # appleは平均が標準偏差に比べて大きい列を含む。標準化で平均を引かない
         # 実装ではlbfgsが既定のmax_iter=35では収束しなかった（約95反復）ため、
         # max_iterを指定しないこの呼び出しが既定値での収束の回帰ガードを兼ねる。
         res = _apple_cluster_fit(config, solver=solver)
-        ref = fixtures["apple"]["cluster"]
+        ref = fixtures["wooldridge"]["apple"]["cluster"]
     else:
         res = _baseline_cluster_fit(config, case, solver=solver)
-        ref = fixtures["baseline"][case]
+        ref = fixtures["synthetic"]["baseline"][case]
     check_result(tight, res, ref, label)
 
 
@@ -1531,7 +1541,7 @@ def check_solver_matches_statsmodels(
         df, y="y", x=["x1", "x2", "x3"], options=options
     ).fit()
 
-    ref = fixtures["solver"][solver]
+    ref = fixtures["synthetic"]["solver"][solver]
     label = f"solver/{solver}"
     config.assert_dict_close_method(
         res.params, ref["params"], f"{label}/params"
@@ -1550,7 +1560,12 @@ def check_mroz_matches_statsmodels(
     options = config.options_cls(cov_type=cov_type)
     res = config.estimator_cls(df, y="inlf", x=MROZ_X, options=options).fit()
 
-    check_result(config, res, fixtures["mroz"][cov_type], f"mroz/{cov_type}")
+    check_result(
+        config,
+        res,
+        fixtures["wooldridge"]["mroz"][cov_type],
+        f"mroz/{cov_type}",
+    )
 
 
 # ── test_<method>_reference.py: ライブ statsmodels との照合 ──────────

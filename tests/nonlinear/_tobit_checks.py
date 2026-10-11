@@ -65,6 +65,13 @@ SOLVER_COMBINATION_CASES = [
 # solver 差を見分けられない。
 SOLVER_COMBINATION_CASES_REAL_DATA = [("mroz", "classical"), ("mroz", "hc0")]
 
+
+def fixture_group(scenario: str) -> str:
+    """フィクスチャJSON最上位のキー（実データのみ`wooldridge`、他は`synthetic`）。"""
+    real_data = {name for name, _ in SOLVER_COMBINATION_CASES_REAL_DATA}
+    return "wooldridge" if scenario in real_data else "synthetic"
+
+
 # フィクスチャの cluster cov_type キー → 疑似グループ列の作り方。
 # `_tobit_fixtures.py` の `build()` / `_cluster_case()` と対応させる。
 _CLUSTER_GROUP_BUILDERS = {

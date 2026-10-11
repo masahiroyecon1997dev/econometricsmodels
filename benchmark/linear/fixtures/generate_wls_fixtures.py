@@ -30,6 +30,7 @@ import statsmodels
 from benchmark.common import (
     BENCHMARKS_DIR,
     DATA_DIR,
+    group_by_dataset_source,
     imbalanced_cluster_groups,
     run_fixture_cli,
 )
@@ -249,7 +250,7 @@ def build_fixtures() -> dict:
             "よう拡張。OLS側の横展開）。"
         ),
     }
-    return fixtures
+    return group_by_dataset_source(fixtures, ["401ksubs"])
 
 
 def _run_cluster_case(

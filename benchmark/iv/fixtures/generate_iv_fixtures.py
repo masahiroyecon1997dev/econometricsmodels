@@ -27,6 +27,7 @@ import polars as pl
 from benchmark.common import (
     BENCHMARKS_DIR,
     DATA_DIR,
+    group_by_dataset_source,
     imbalanced_cluster_groups,
     run_fixture_cli,
 )
@@ -254,7 +255,7 @@ def build_fixtures() -> dict:
             "非中心化の定義、f_statistic/f_p_valueは全係数が傾きとして検定される。"
         ),
     }
-    return fixtures
+    return group_by_dataset_source(fixtures, ["card"])
 
 
 def _run_cluster_case(

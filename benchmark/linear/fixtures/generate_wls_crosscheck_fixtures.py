@@ -323,7 +323,7 @@ def build_fixtures() -> dict:
         tmpdir = Path(tmp)
         fixtures = {
             "synthetic": build_synthetic_fixtures(tmpdir),
-            "401ksubs": build_401ksubs_fixture(tmpdir),
+            "wooldridge": {"401ksubs": build_401ksubs_fixture(tmpdir)},
         }
 
     r_version = subprocess.run(

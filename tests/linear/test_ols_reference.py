@@ -155,7 +155,11 @@ def test_matches_statsmodels(fixtures, scenario, cov_type):
     options = OLSOptions(cov_type=cov_type, **kwargs)
     res = OLS(with_row_time(df), y="y", x=x_cols, options=options).fit()
 
-    _check_result(res, fixtures[scenario][cov_type], f"{scenario}/{cov_type}")
+    _check_result(
+        res,
+        fixtures["synthetic"][scenario][cov_type],
+        f"{scenario}/{cov_type}",
+    )
 
 
 @pytest.mark.parametrize("scenario", SCENARIOS)
@@ -171,7 +175,7 @@ def test_predict_none_matches_frozen_statsmodels(fixtures, scenario):
     res = OLS(with_row_time(df), y="y", x=x_cols, options=OLSOptions()).fit()
 
     predicted = res.predict()
-    ref = fixtures[scenario]["predict"]["fitted"]
+    ref = fixtures["synthetic"][scenario]["predict"]["fitted"]
 
     assert len(predicted) == len(ref)
     for i, (our_val, ref_val) in enumerate(zip(predicted, ref)):
@@ -199,7 +203,7 @@ def test_predict_new_data_matches_frozen_statsmodels(fixtures):
         }
     )
     predicted = res.predict(new_data)
-    ref = fixtures["baseline"]["predict"]["predicted"]
+    ref = fixtures["synthetic"]["baseline"]["predict"]["predicted"]
 
     assert len(predicted) == len(ref)
     for i, (our_val, ref_val) in enumerate(zip(predicted, ref)):
@@ -223,7 +227,7 @@ def test_cluster_matches_statsmodels(fixtures):
         with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
     ).fit()
 
-    _check_result(res, fixtures["baseline"]["cluster"], "cluster")
+    _check_result(res, fixtures["synthetic"]["baseline"]["cluster"], "cluster")
 
 
 def test_cluster_imbalanced_matches_statsmodels(fixtures):
@@ -242,7 +246,9 @@ def test_cluster_imbalanced_matches_statsmodels(fixtures):
     ).fit()
 
     _check_result(
-        res, fixtures["baseline"]["cluster_imbalanced"], "cluster_imbalanced"
+        res,
+        fixtures["synthetic"]["baseline"]["cluster_imbalanced"],
+        "cluster_imbalanced",
     )
 
 
@@ -261,7 +267,9 @@ def test_cluster_g2_matches_statsmodels(fixtures):
     options = OLSOptions(cov_type="cluster", cluster="cluster_group")
     res = OLS(with_row_time(df), y="y", x=["x1"], options=options).fit()
 
-    _check_result(res, fixtures["baseline"]["cluster_g2"], "cluster_g2")
+    _check_result(
+        res, fixtures["synthetic"]["baseline"]["cluster_g2"], "cluster_g2"
+    )
 
 
 @pytest.mark.parametrize(
@@ -284,7 +292,9 @@ def test_cluster_ill_conditioned_matches_statsmodels(fixtures, scenario):
         with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
     ).fit()
 
-    _check_result(res, fixtures[scenario]["cluster"], f"{scenario}/cluster")
+    _check_result(
+        res, fixtures["synthetic"][scenario]["cluster"], f"{scenario}/cluster"
+    )
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)
@@ -309,7 +319,7 @@ def test_no_intercept_matches_statsmodels(fixtures, cov_type):
     assert res.param_names == ["x1", "x2", "x3"]
     _check_result(
         res,
-        fixtures["baseline"]["no_intercept"][cov_type],
+        fixtures["synthetic"]["baseline"]["no_intercept"][cov_type],
         f"no_intercept/{cov_type}",
     )
 
@@ -334,7 +344,7 @@ def test_no_intercept_cluster_matches_statsmodels(fixtures):
     assert res.param_names == ["x1", "x2", "x3"]
     _check_result(
         res,
-        fixtures["baseline"]["no_intercept"]["cluster"],
+        fixtures["synthetic"]["baseline"]["no_intercept"]["cluster"],
         "no_intercept/cluster",
     )
 
@@ -364,7 +374,7 @@ def test_confidence_level_matches_statsmodels(fixtures, cov_type):
 
     _check_result(
         res,
-        fixtures["baseline"]["confidence_level"][cov_type],
+        fixtures["synthetic"]["baseline"]["confidence_level"][cov_type],
         f"confidence_level/{cov_type}",
     )
 
@@ -388,7 +398,7 @@ def test_confidence_level_cluster_matches_statsmodels(fixtures):
 
     _check_result(
         res,
-        fixtures["baseline"]["confidence_level"]["cluster"],
+        fixtures["synthetic"]["baseline"]["confidence_level"]["cluster"],
         "confidence_level/cluster",
     )
 
@@ -423,7 +433,9 @@ def test_wooldridge_matches_statsmodels(
     res = OLS(with_row_time(df), y=y, x=x, options=options).fit()
 
     _check_result(
-        res, fixtures[dataset_name][cov_type], f"{dataset_name}/{cov_type}"
+        res,
+        fixtures["wooldridge"][dataset_name][cov_type],
+        f"{dataset_name}/{cov_type}",
     )
 
 
@@ -457,7 +469,11 @@ def test_wooldridge_wage1_region_cluster_matches_statsmodels(
         options=options,
     ).fit()
 
-    _check_result(res, fixtures["wage1"]["cluster"], "wage1/cluster(region)")
+    _check_result(
+        res,
+        fixtures["wooldridge"]["wage1"]["cluster"],
+        "wage1/cluster(region)",
+    )
 
 
 # ── ライブ statsmodels との照合（共有 dataset フィクスチャ） ────────

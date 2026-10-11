@@ -45,6 +45,7 @@ from benchmark.common import (
     WAGEPAN_TIME,
     WAGEPAN_X,
     WAGEPAN_Y,
+    group_by_dataset_source,
     imbalanced_cluster_groups,
     run_fixture_cli,
 )
@@ -162,7 +163,7 @@ def build_fixtures() -> dict:
             "無く対象外。boundaryはentity以外のクラスター列（不均衡サイズ・行順シャッフル・G=3）。"
         ),
     }
-    return fixtures
+    return group_by_dataset_source(fixtures, ["wagepan"])
 
 
 if __name__ == "__main__":

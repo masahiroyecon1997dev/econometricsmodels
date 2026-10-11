@@ -33,6 +33,7 @@ from benchmark.common import (
     BENCHMARKS_DIR,
     DATA_DIR,
     MROZ_FORMULA,
+    group_by_dataset_source,
     imbalanced_cluster_groups,
     run_fixture_cli,
 )
@@ -198,7 +199,7 @@ def build_fixtures() -> dict:
             "（OLSの同種ケース相当）。"
         ),
     }
-    return fixtures
+    return group_by_dataset_source(fixtures, ["mroz", "apple"])
 
 
 if __name__ == "__main__":

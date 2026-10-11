@@ -28,6 +28,7 @@ from benchmark.common import (
     WAGEPAN_TIME,
     WAGEPAN_X,
     WAGEPAN_Y,
+    group_by_dataset_source,
     run_fixture_cli,
 )
 from benchmark.panel.references.linearmodels_ref import run
@@ -194,7 +195,7 @@ def build_fixtures() -> dict:
             "（fe_baseline_df1_one_way.csv/fe_baseline_df1_two_way.csv）。"
         ),
     }
-    return fixtures
+    return group_by_dataset_source(fixtures, ["wagepan"])
 
 
 if __name__ == "__main__":

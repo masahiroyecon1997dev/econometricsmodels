@@ -183,7 +183,7 @@ def test_synthetic_one_way_matches_fixest(crosscheck, scenario, cov_type):
 
     _check_result(
         res,
-        crosscheck[scenario]["one_way"][cov_type],
+        crosscheck["synthetic"][scenario]["one_way"][cov_type],
         f"{scenario}/one_way/{cov_type}",
     )
 
@@ -202,7 +202,7 @@ def test_synthetic_two_way_matches_fixest(crosscheck, scenario, cov_type):
 
     _check_result(
         res,
-        crosscheck[scenario]["two_way"][cov_type],
+        crosscheck["synthetic"][scenario]["two_way"][cov_type],
         f"{scenario}/two_way/{cov_type}",
     )
 
@@ -227,7 +227,7 @@ def test_cluster_imbalanced_matches_fixest(crosscheck):
 
     _check_result(
         res,
-        crosscheck["baseline"]["cluster_imbalanced"],
+        crosscheck["synthetic"]["baseline"]["cluster_imbalanced"],
         "baseline/cluster_imbalanced",
     )
 
@@ -242,7 +242,7 @@ def test_cluster_g2_matches_fixest(crosscheck):
 
     _check_result(
         res,
-        crosscheck["baseline"]["cluster_g2"],
+        crosscheck["synthetic"]["baseline"]["cluster_g2"],
         "baseline/cluster_g2",
     )
 
@@ -260,7 +260,7 @@ def test_cluster_g3_two_slopes_matches_fixest(crosscheck):
     assert (res.f_df_num, res.f_df_denom) == (2, 2)
     _check_result(
         res,
-        crosscheck["baseline"]["cluster_g3_two_slopes"],
+        crosscheck["synthetic"]["baseline"]["cluster_g3_two_slopes"],
         "baseline/cluster_g3_two_slopes",
     )
 
@@ -274,7 +274,7 @@ def test_dk_three_periods_matches_fixest(crosscheck):
     assert (res.f_df_num, res.f_df_denom) == (2, 2)
     _check_result(
         res,
-        crosscheck["baseline"]["dk_three_periods"],
+        crosscheck["synthetic"]["baseline"]["dk_three_periods"],
         "baseline/dk_three_periods",
     )
 
@@ -288,12 +288,16 @@ def test_boundary_df1_robust_matches_fixest(crosscheck, cov_type, two_way):
         df = pl.read_csv(DATA_DIR / "fe_baseline_df1_two_way.csv")
         x = ["x1", "x2", "x3"]
         options = FEOptions(cov_type=cov_type, time="time")
-        ref = crosscheck["baseline_df1"]["two_way_robust"][cov_type]
+        ref = crosscheck["synthetic"]["baseline_df1"]["two_way_robust"][
+            cov_type
+        ]
     else:
         df = pl.read_csv(DATA_DIR / "fe_baseline_df1_one_way.csv")
         x = ["x1", "x2"]
         options = FEOptions(cov_type=cov_type)
-        ref = crosscheck["baseline_df1"]["one_way_robust"][cov_type]
+        ref = crosscheck["synthetic"]["baseline_df1"]["one_way_robust"][
+            cov_type
+        ]
     res = FE(df, y="y", x=x, entity="entity", options=options).fit()
 
     assert res.f_df_denom == 1
@@ -308,7 +312,7 @@ def test_boundary_df1_one_way_matches_fixest(crosscheck):
 
     _check_result(
         res,
-        crosscheck["baseline_df1"]["one_way"],
+        crosscheck["synthetic"]["baseline_df1"]["one_way"],
         "baseline_df1/one_way",
     )
 
@@ -323,7 +327,7 @@ def test_boundary_df1_two_way_matches_fixest(crosscheck):
 
     _check_result(
         res,
-        crosscheck["baseline_df1"]["two_way"],
+        crosscheck["synthetic"]["baseline_df1"]["two_way"],
         "baseline_df1/two_way",
     )
 
@@ -338,7 +342,7 @@ def test_wagepan_one_way_matches_fixest(crosscheck, cov_type):
 
     _check_result(
         res,
-        crosscheck["wagepan"]["one_way"][cov_type],
+        crosscheck["wooldridge"]["wagepan"]["one_way"][cov_type],
         f"wagepan/one_way/{cov_type}",
     )
 
@@ -353,6 +357,6 @@ def test_wagepan_two_way_matches_fixest(crosscheck, cov_type):
 
     _check_result(
         res,
-        crosscheck["wagepan"]["two_way"][cov_type],
+        crosscheck["wooldridge"]["wagepan"]["two_way"][cov_type],
         f"wagepan/two_way/{cov_type}",
     )

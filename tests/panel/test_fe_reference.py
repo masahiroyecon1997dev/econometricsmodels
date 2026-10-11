@@ -141,7 +141,7 @@ def test_matches_linearmodels_one_way(fixtures, scenario, cov_type):
 
     _check_result(
         res,
-        fixtures[scenario]["one_way"][cov_type],
+        fixtures["synthetic"][scenario]["one_way"][cov_type],
         f"{scenario}/one_way/{cov_type}",
         check_r_squared_within=True,
     )
@@ -156,7 +156,7 @@ def test_matches_linearmodels_two_way(fixtures, scenario, cov_type):
 
     _check_result(
         res,
-        fixtures[scenario]["two_way"][cov_type],
+        fixtures["synthetic"][scenario]["two_way"][cov_type],
         f"{scenario}/two_way/{cov_type}",
         check_r_squared_within=False,
     )
@@ -174,7 +174,7 @@ def test_boundary_df1_one_way_matches_linearmodels(fixtures):
 
     _check_result(
         res,
-        fixtures["baseline_df1"]["one_way"],
+        fixtures["synthetic"]["baseline_df1"]["one_way"],
         "baseline_df1/one_way",
         check_r_squared_within=True,
     )
@@ -191,7 +191,7 @@ def test_boundary_df1_two_way_matches_linearmodels(fixtures):
 
     _check_result(
         res,
-        fixtures["baseline_df1"]["two_way"],
+        fixtures["synthetic"]["baseline_df1"]["two_way"],
         "baseline_df1/two_way",
         check_r_squared_within=False,
     )
@@ -210,7 +210,7 @@ def test_wagepan_one_way_matches_linearmodels(fixtures, cov_type):
 
     _check_result(
         res,
-        fixtures["wagepan"]["one_way"][cov_type],
+        fixtures["wooldridge"]["wagepan"]["one_way"][cov_type],
         f"wagepan/one_way/{cov_type}",
         check_r_squared_within=True,
     )
@@ -226,7 +226,7 @@ def test_wagepan_two_way_matches_linearmodels(fixtures, cov_type):
 
     _check_result(
         res,
-        fixtures["wagepan"]["two_way"][cov_type],
+        fixtures["wooldridge"]["wagepan"]["two_way"][cov_type],
         f"wagepan/two_way/{cov_type}",
         check_r_squared_within=False,
     )

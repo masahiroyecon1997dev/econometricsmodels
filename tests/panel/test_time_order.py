@@ -80,7 +80,7 @@ def frame() -> pl.DataFrame:
 
 @pytest.fixture(scope="module")
 def reference() -> dict:
-    return json.loads(FIXTURE_PATH.read_text())[SCENARIO]
+    return json.loads(FIXTURE_PATH.read_text())["synthetic"][SCENARIO]
 
 
 def _x_columns(df: pl.DataFrame) -> list[str]:

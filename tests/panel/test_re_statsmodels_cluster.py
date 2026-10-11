@@ -114,7 +114,7 @@ def test_synthetic_cluster_matches_statsmodels(reference, scenario):
 
     _check(
         res,
-        reference[scenario],
+        reference["synthetic"][scenario],
         df["entity"].n_unique(),
         f"{scenario}/cluster",
     )
@@ -143,7 +143,7 @@ def test_cluster_imbalanced_matches_statsmodels(reference):
 
     _check(
         res,
-        reference["boundary"]["cluster_imbalanced"],
+        reference["synthetic"]["boundary"]["cluster_imbalanced"],
         len(set(groups)),
         "boundary/cluster_imbalanced",
     )
@@ -165,7 +165,7 @@ def test_cluster_imbalanced_shuffled_rows_matches_statsmodels(reference):
 
     _check(
         res,
-        reference["boundary"]["cluster_imbalanced_shuffled"],
+        reference["synthetic"]["boundary"]["cluster_imbalanced_shuffled"],
         df["cluster_group"].n_unique(),
         "boundary/cluster_imbalanced_shuffled",
     )
@@ -178,7 +178,7 @@ def test_cluster_g3_boundary_matches_statsmodels(reference):
 
     _check(
         res,
-        reference["boundary"]["cluster_g3"],
+        reference["synthetic"]["boundary"]["cluster_g3"],
         len(set(groups)),
         "boundary/cluster_g3",
     )
@@ -196,7 +196,7 @@ def test_wagepan_cluster_matches_statsmodels(reference):
 
     _check(
         res,
-        reference["wagepan"],
+        reference["wooldridge"]["wagepan"],
         df[WAGEPAN_ENTITY].n_unique(),
         "wagepan/cluster",
     )

@@ -204,7 +204,11 @@ def test_matches_linearmodels(fixtures, scenario, cov_type):
         options=options,
     ).fit()
 
-    _check_result(res, fixtures[scenario][cov_type], f"{scenario}/{cov_type}")
+    _check_result(
+        res,
+        fixtures["synthetic"][scenario][cov_type],
+        f"{scenario}/{cov_type}",
+    )
 
 
 def test_cluster_matches_linearmodels(fixtures):
@@ -224,7 +228,7 @@ def test_cluster_matches_linearmodels(fixtures):
         options=options,
     ).fit()
 
-    ref = fixtures["baseline"]["cluster"]
+    ref = fixtures["synthetic"]["baseline"]["cluster"]
     _assert_dict_close(res.params, ref["params"], "cluster/params")
     _assert_dict_close(res.std_errors, ref["std_errors"], "cluster/std_errors")
 
@@ -248,7 +252,7 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
         options=options,
     ).fit()
 
-    ref = fixtures["baseline"]["cluster_imbalanced"]
+    ref = fixtures["synthetic"]["baseline"]["cluster_imbalanced"]
     _assert_dict_close(res.params, ref["params"], "cluster_imbalanced/params")
     _assert_dict_close(
         res.std_errors, ref["std_errors"], "cluster_imbalanced/std_errors"
@@ -274,7 +278,7 @@ def test_cluster_g2_matches_linearmodels(fixtures):
         options=options,
     ).fit()
 
-    ref = fixtures["baseline"]["cluster_g2"]
+    ref = fixtures["synthetic"]["baseline"]["cluster_g2"]
     _assert_dict_close(res.params, ref["params"], "cluster_g2/params")
     _assert_dict_close(
         res.std_errors, ref["std_errors"], "cluster_g2/std_errors"
@@ -300,7 +304,9 @@ def test_multi_endog_matches_linearmodels(fixtures, cov_type):
     ).fit()
 
     _check_result(
-        res, fixtures["multi_endog"][cov_type], f"multi_endog/{cov_type}"
+        res,
+        fixtures["synthetic"]["multi_endog"][cov_type],
+        f"multi_endog/{cov_type}",
     )
 
 
@@ -321,7 +327,9 @@ def test_card_matches_linearmodels(fixtures, cov_type):
         options=options,
     ).fit()
 
-    _check_result(res, fixtures["card"][cov_type], f"card/{cov_type}")
+    _check_result(
+        res, fixtures["wooldridge"]["card"][cov_type], f"card/{cov_type}"
+    )
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)
@@ -344,7 +352,9 @@ def test_df1_matches_linearmodels(fixtures, cov_type):
         options=options,
     ).fit()
 
-    _check_result(res, fixtures["df1"][cov_type], f"df1/{cov_type}")
+    _check_result(
+        res, fixtures["synthetic"]["df1"][cov_type], f"df1/{cov_type}"
+    )
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)
@@ -372,7 +382,7 @@ def test_no_intercept_matches_linearmodels(fixtures, scenario, cov_type):
         options=options,
     ).fit()
 
-    ref = fixtures["no_intercept"][scenario][cov_type]
+    ref = fixtures["synthetic"]["no_intercept"][scenario][cov_type]
     assert "const" not in res.param_names, f"{scenario}/{cov_type}"
     _check_result(res, ref, f"no_intercept/{scenario}/{cov_type}")
 
@@ -398,7 +408,7 @@ def test_no_intercept_cluster_matches_linearmodels(fixtures):
     ).fit()
 
     assert "const" not in res.param_names
-    ref = fixtures["no_intercept"]["baseline"]["cluster"]
+    ref = fixtures["synthetic"]["no_intercept"]["baseline"]["cluster"]
     _assert_dict_close(
         res.params, ref["params"], "no_intercept/cluster/params"
     )

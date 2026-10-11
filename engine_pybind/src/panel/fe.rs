@@ -83,6 +83,7 @@ use crate::shared::column_extraction::{
     extract_optional_cluster_groups, extract_time_keys,
 };
 use crate::shared::errors::ValidationError;
+use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
     extract_strict_float, extract_strict_opt_column, extract_strict_opt_int, extract_strict_text,
 };
@@ -214,14 +215,14 @@ impl FEOptions {
 
     fn __repr__(&self) -> String {
         format!(
-            "FEOptions(cov_type={:?}, confidence_level={}, time={:?}, cluster={:?}, \
-             dk_time={:?}, dk_bandwidth={:?})",
-            self.cov_type,
-            self.confidence_level,
-            self.time,
-            self.cluster,
-            self.dk_time,
-            self.dk_bandwidth
+            "FEOptions(cov_type={}, confidence_level={}, time={}, cluster={}, \
+             dk_time={}, dk_bandwidth={})",
+            self.cov_type.py_repr(),
+            self.confidence_level.py_repr(),
+            self.time.py_repr(),
+            self.cluster.py_repr(),
+            self.dk_time.py_repr(),
+            self.dk_bandwidth.py_repr()
         )
     }
 }

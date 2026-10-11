@@ -5,5 +5,6 @@
 
 pub(crate) mod column_extraction;
 pub(crate) mod errors;
+pub(crate) mod option_repr;
 pub(crate) mod option_values;
 pub(crate) mod validation;

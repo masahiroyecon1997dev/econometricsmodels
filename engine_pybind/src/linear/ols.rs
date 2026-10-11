@@ -25,6 +25,7 @@ use crate::shared::column_extraction::{
     extract_time_order_ranks, x_column_names,
 };
 use crate::shared::errors::ValidationError;
+use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
     extract_strict_float, extract_strict_int, extract_strict_opt_column, extract_strict_opt_int,
     extract_strict_text,
@@ -147,14 +148,14 @@ impl OLSOptions {
 
     fn __repr__(&self) -> String {
         format!(
-            "OLSOptions(cov_type={:?}, include_intercept={}, confidence_level={}, \
-             cluster={:?}, hac_lags={:?}, hac_time={:?})",
-            self.cov_type,
-            self.include_intercept,
-            self.confidence_level,
-            self.cluster,
-            self.hac_lags,
-            self.hac_time
+            "OLSOptions(cov_type={}, include_intercept={}, confidence_level={}, \
+             cluster={}, hac_lags={}, hac_time={})",
+            self.cov_type.py_repr(),
+            self.include_intercept.py_repr(),
+            self.confidence_level.py_repr(),
+            self.cluster.py_repr(),
+            self.hac_lags.py_repr(),
+            self.hac_time.py_repr()
         )
     }
 }

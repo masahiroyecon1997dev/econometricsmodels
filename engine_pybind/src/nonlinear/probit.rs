@@ -34,6 +34,7 @@ use super::common::{
 use crate::shared::column_extraction::{
     extract_dataframe, extract_f64_column, extract_f64_columns, x_column_names,
 };
+use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
     extract_strict_float, extract_strict_int, extract_strict_opt_column, extract_strict_text,
 };
@@ -195,16 +196,16 @@ impl ProbitOptions {
 
     fn __repr__(&self) -> String {
         format!(
-            "ProbitOptions(cov_type={:?}, include_intercept={}, confidence_level={}, \
-             cluster={:?}, solver={:?}, max_iter={}, tol={}, raise_on_non_convergence={})",
-            self.cov_type,
-            self.include_intercept,
-            self.confidence_level,
-            self.cluster,
-            self.solver,
-            self.max_iter,
-            self.tol,
-            self.raise_on_non_convergence
+            "ProbitOptions(cov_type={}, include_intercept={}, confidence_level={}, \
+             cluster={}, solver={}, max_iter={}, tol={}, raise_on_non_convergence={})",
+            self.cov_type.py_repr(),
+            self.include_intercept.py_repr(),
+            self.confidence_level.py_repr(),
+            self.cluster.py_repr(),
+            self.solver.py_repr(),
+            self.max_iter.py_repr(),
+            self.tol.py_repr(),
+            self.raise_on_non_convergence.py_repr()
         )
     }
 }

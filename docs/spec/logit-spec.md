@@ -85,7 +85,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 
 - **初期値（warm start）と設計行列のランクチェック**: `solver`に関わらず、最適化を開始する前に
   標準化空間の設計行列を列ピボットQR分解する（`nonlinear::common::checked_design_matrix_qr`）。
-  `R`の対角成分の相対閾値`k·ε·max|R_ii|`（`linear::ols`の`ensure_full_rank`と同一式）でランク落ちを
+  `R`の対角成分の相対閾値`k·ε·max|R_ii|`（OLS・Newton法と共通の`linear_algebra::checked_col_piv_qr`）でランク落ちを
   検出し、完全な多重共線性等は`MleError::SingularDesignMatrix`（`ComputationError`）で弾く。この
   QR解＝標準化空間のLPM最小二乗解 `b_lpm` に、nullモデル `p≡p̄`（`p̄=ȳ`）を起点にしたIRLSの
   1反復目に相当するスケール補正を施したものを初期値にする: 全成分を `1/w` 倍し（`w`はlogitの

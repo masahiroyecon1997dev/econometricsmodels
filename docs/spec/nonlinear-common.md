@@ -36,7 +36,7 @@ Logit/Probit/Tobit（最尤推定ベースの非線形モデル）が共有す�
 
 - **Newton**: 組み込み`Newton`ソルバーは`H: ArgminInv<H>`（Hessianの逆行列）を要求するが、
   `argmin-math`の`vec`機能には`ArgminInv`の実装が存在しない。Newtonステップの求解
-  （`H·Δθ = g`）はfaerの列ピボットQR（`col_piv_qr`、OLSの`ensure_full_rank`と同じ相対閾値
+  （`H·Δθ = g`）はfaerの列ピボットQR（`col_piv_qr`、OLSと共通の`linear_algebra::checked_col_piv_qr`と同じ相対閾値
   での特異性検出）で行う。特異なら`MleError::SingularHessian`。
   - **ステップの検証（LM型減衰）**: `regularized_newton_step`は`H + λI`で`cost`が狭義に減少する
     候補が見つかるまで`λ`を`0→1e-3→×4→…`（最大40段）と増やす（Tobitの不定符号Hessian対策、
@@ -231,7 +231,7 @@ Hessianとする。いずれも標準化空間で`Σ_std`を計算した後、`d
 | `opg` | outer product of gradients `Σ = (Σᵢ sᵢsᵢ')⁻¹`（BHHH） |
 | `hc0` | サンドイッチ型 `Σ = H⁻¹(Σᵢ sᵢsᵢ')H⁻¹`（misspecification-robust） |
 | `hc1` | `hc0`に小標本補正`n/(n-k)`を乗じる |
-| `cluster` | `Σ = correction・H⁻¹(Σ_g S_gS_g')H⁻¹`、`S_g = Σ_{i∈g} sᵢ`（OLSの`cluster_cov_params`と同型） |
+| `cluster` | `Σ = correction・H⁻¹(Σ_g S_gS_g')H⁻¹`、`S_g = Σ_{i∈g} sᵢ`（OLSの`shared::covariance::cluster_cov_params`と`cluster_meat`・`cluster_correction`・`sandwich`を共有） |
 
 - HC2/HC3は対象外（レバレッジ・hat行列に依存した補正で線形回帰特有の概念のため）。HACも
   対象外（時系列拡張として保留）。

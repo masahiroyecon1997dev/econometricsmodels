@@ -1,6 +1,6 @@
 # OLS 仕様書
 
-OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols.rs`・`engine_pybind/src/linear/ols.rs`・
+OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols/`・`engine/src/shared/`（共分散・Wald検定・最小二乗・適合度の部品）・`engine_pybind/src/linear/ols.rs`・
 `python_package/econometricsmodels/linear/ols.py`として実装済み。パフォーマンス比較の詳細は
 [`../performance/ols.md`](../performance/ols.md)、CI/CD・セキュリティはmethod非依存のため
 [`ci-cd-notes.md`](./ci-cd-notes.md)を参照。
@@ -70,7 +70,7 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols.rs`・`en
   `diag.is_nan() || diag <= threshold`という形で、NaNも明示的に検出する（`include_intercept=false`
   かつ全説明変数列がゼロという設計行列全体が完全にゼロのケースで、`col_piv_qr`が列選択時の0除算に
   よりR対角成分にNaNを生成しうるため。単純な`<=`比較だとNaNとの比較が常にfalseになりすり抜ける）。
-- 標準誤差計算用の`(X'X)⁻¹`（`xtx_inverse`）は`X'X`自体のCholesky分解で求める（QR分解の`R`因子から
+- 標準誤差計算用の`(X'X)⁻¹`（`shared::covariance::xtx_inverse`）は`X'X`自体のCholesky分解で求める（QR分解の`R`因子から
   導出する案は実測で高速化しないことを確認済み）。
 
 ### 3.2 標準誤差
@@ -117,7 +117,7 @@ $$
   同値に潰れて、この検査をすり抜けるため。
 - **パフォーマンス上の罠**: `k×k`という小さい出力サイズの行列積で、faer既定の並列実行は
   ディスパッチオーバーヘッドが計算本体を上回り逐次より遅くなる（実測n=10,000,k=2で6倍悪化）。
-  `hac_cov_params`内でのみ`Par::Seq`を明示指定して回避している。他手法で同様の小さい行列の
+  `shared::covariance::hac_meat`内でのみ`Par::Seq`を明示指定して回避している。他手法で同様の小さい行列の
   頻繁な積を書く場合も並列化の要否を実測してから決めること。
 - statsmodelsとの照合は`cov_kwds={"maxlags": L}, use_t=True`。`use_correction`（小標本補正）は
   既定の`False`のままで一致することを確認済み。
@@ -255,7 +255,7 @@ $$
   `wage1`はさらに地域ダミー（northcen/south/west、基準northeast）から合成したregion列
   でのクラスターロバストSE（実データでのグループ列、4グループ・不均衡サイズ）も両方で検証する。
 - `engine`側は上記の固定シナリオ単体テストに加え、property-basedテスト（`proptest`、
-  `engine/src/linear/ols.rs`の`mod proptests`）で不変条件を検証する（詳細な方針は
+  `engine/src/linear/ols/estimator.rs`の`mod proptests`）で不変条件を検証する（詳細な方針は
   `testing-policy.md`「property-basedテスト」参照）。対象プロパティ: 定数項ありなら残差和は常に0、
   yのスカラー倍で係数（切片含む）も同じ倍率でスケールする、xの列順序を入れ替えても係数名で
   対応付ければ値は変わらない、HC0の標準誤差は常にHC1以下。いずれも意図的なバグ注入により

@@ -34,8 +34,8 @@ FE固有の内容のみを記載する。
   （個体・時間固定効果によるyの分解という別の操作になる）ためユーザー指摘を受けて拒否に
   変更した。**この検証は`engine_pybind`層のみ**（`build_fe_input`の`validate_x_non_empty`）。
   `engine`側（`FeInput::from_columns`・`FeEstimator::fit`）はk=0を引き続き受理する設計を
-  維持している（`OlsEstimator::fit_allowing_no_regressors`という、通常の`fit`からk=0拒否
-  ガードだけを外した別関数への切り替えで実現。RE自身の内部`OlsEstimator::fit`呼び出しは
+  維持している（`FeEstimator::fit`は`OlsEstimator`を経由せず、0列も受理する
+  `shared::least_squares::least_squares`を直接呼ぶ。RE自身の内部`OlsEstimator::fit`呼び出しは
   between回帰・最終回帰どちらも構造的にk=0にならないため無変更）。
 - 列名を受け取る引数は`entity`/`time`/`cluster`/`dk_time`のいずれも`_col`サフィックスを
   付けない（`y`/`x`と同じ規約）。`dk_time`は`cov_type="dk"`の値を接頭辞にした名前。

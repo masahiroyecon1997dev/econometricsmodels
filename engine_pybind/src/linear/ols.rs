@@ -20,16 +20,16 @@ use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
 use super::common::{least_squares_error_to_pyerr, mat_to_vec, parse_cov_type};
-use crate::column_extraction::{
+use crate::shared::column_extraction::{
     extract_column_list, extract_dataframe, extract_f64_column, extract_f64_columns,
     extract_time_order_ranks, x_column_names,
 };
-use crate::errors::ValidationError;
-use crate::option_values::{
+use crate::shared::errors::ValidationError;
+use crate::shared::option_values::{
     extract_strict_float, extract_strict_int, extract_strict_opt_column, extract_strict_opt_int,
     extract_strict_text,
 };
-use crate::validation::{
+use crate::shared::validation::{
     validate_common_roles, validate_no_duplicate_within_role, validate_no_existing_column,
     validate_x_non_empty,
 };
@@ -98,12 +98,12 @@ impl OLSOptions {
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
-        #[pyo3(from_py_with = crate::option_values::cov_type_arg)] cov_type: String,
+        #[pyo3(from_py_with = crate::shared::option_values::cov_type_arg)] cov_type: String,
         include_intercept: bool,
-        #[pyo3(from_py_with = crate::option_values::confidence_level_arg)] confidence_level: f64,
-        #[pyo3(from_py_with = crate::option_values::cluster_arg)] cluster: Option<String>,
-        #[pyo3(from_py_with = crate::option_values::hac_lags_arg)] hac_lags: Option<i64>,
-        #[pyo3(from_py_with = crate::option_values::hac_time_arg)] hac_time: Option<String>,
+        #[pyo3(from_py_with = crate::shared::option_values::confidence_level_arg)] confidence_level: f64,
+        #[pyo3(from_py_with = crate::shared::option_values::cluster_arg)] cluster: Option<String>,
+        #[pyo3(from_py_with = crate::shared::option_values::hac_lags_arg)] hac_lags: Option<i64>,
+        #[pyo3(from_py_with = crate::shared::option_values::hac_time_arg)] hac_time: Option<String>,
     ) -> Self {
         Self {
             cov_type,

@@ -21,7 +21,7 @@ use pyo3::exceptions::{PyOverflowError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::PyBool;
 
-use crate::column_extraction::{extract_column_name, type_name_of};
+use super::column_extraction::{extract_column_name, type_name_of};
 
 /// `ob`が真偽値（Pythonの`bool`、またはNumPyの`numpy.bool_`）なら`TypeError`にする。
 ///

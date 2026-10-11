@@ -10,7 +10,7 @@
 //! `engine::linear::common::LeastSquaresError`に改名・移動した。
 //!
 //! `LeastSquaresError`の`Common`バリアント（`engine::shared::error::CommonError`、nonlinear系統の
-//! `MleError`と共有する6種のバリデーションエラー）は`crate::errors::common_error_to_pyerr`
+//! `MleError`と共有する6種のバリデーションエラー）は`crate::shared::errors::common_error_to_pyerr`
 //! に委譲する（系統ごとに同じ判定ロジックを重複させない）。
 
 use engine::linear::common::LeastSquaresError;
@@ -18,9 +18,9 @@ use engine::linear::ols::CovType as EngineCovType;
 use polars::prelude::DataFrame;
 use pyo3::{PyErr, PyResult};
 
-use crate::column_extraction::{extract_group_key_column, extract_time_order_ranks};
-use crate::errors::{ComputationError, ValidationError, common_error_to_pyerr};
-use crate::validation::reject_unused_option;
+use crate::shared::column_extraction::{extract_group_key_column, extract_time_order_ranks};
+use crate::shared::errors::{ComputationError, ValidationError, common_error_to_pyerr};
+use crate::shared::validation::reject_unused_option;
 
 /// `engine::linear::common::LeastSquaresError`をPython例外に変換する。
 ///

@@ -3,15 +3,15 @@
 //! `.claude/rules/rust-style.md`「ファイル・ディレクトリ構成」: 系統内で共有するロジックは
 //! `<系統>/common.rs`に置く（`engine_pybind/src/iv/common.rs`と同じ位置づけ）。
 //!
-//! `PanelError`の`Common`バリアント（`engine::shared::error::CommonError`）は`crate::errors::
+//! `PanelError`の`Common`バリアント（`engine::shared::error::CommonError`）は`crate::shared::errors::
 //! common_error_to_pyerr`に委譲する（系統ごとに同じ判定ロジックを重複させない）。
 
 use engine::panel::common::PanelError;
 use pyo3::{PyErr, PyResult};
 
-use crate::errors::{ComputationError, ValidationError, common_error_to_pyerr};
 use crate::linear::common::least_squares_error_is_computation_error;
-use crate::validation::{RoleValue, validate_no_duplicate_roles};
+use crate::shared::errors::{ComputationError, ValidationError, common_error_to_pyerr};
+use crate::shared::validation::{RoleValue, validate_no_duplicate_roles};
 
 /// `dk_time`（Driscoll-Kraay HACの時点列、FE/RE共通）が`y`・`entity`と同じ列でないことを
 /// 検証する。

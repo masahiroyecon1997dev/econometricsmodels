@@ -31,13 +31,13 @@ use super::common::{
     MarginalEffectsResult, mat_to_nested_vec, mle_error_to_pyerr, parse_cov_type,
     parse_marginal_effects_at, parse_solver_type,
 };
-use crate::column_extraction::{
+use crate::shared::column_extraction::{
     extract_dataframe, extract_f64_column, extract_f64_columns, x_column_names,
 };
-use crate::option_values::{
+use crate::shared::option_values::{
     extract_strict_float, extract_strict_int, extract_strict_opt_column, extract_strict_text,
 };
-use crate::validation::{validate_common_roles, validate_no_existing_column};
+use crate::shared::validation::{validate_common_roles, validate_no_existing_column};
 
 /// Estimation options for Logit.
 ///
@@ -134,13 +134,13 @@ impl LogitOptions {
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
-        #[pyo3(from_py_with = crate::option_values::cov_type_arg)] cov_type: String,
+        #[pyo3(from_py_with = crate::shared::option_values::cov_type_arg)] cov_type: String,
         include_intercept: bool,
-        #[pyo3(from_py_with = crate::option_values::confidence_level_arg)] confidence_level: f64,
-        #[pyo3(from_py_with = crate::option_values::cluster_arg)] cluster: Option<String>,
-        #[pyo3(from_py_with = crate::option_values::solver_arg)] solver: String,
-        #[pyo3(from_py_with = crate::option_values::max_iter_arg)] max_iter: i64,
-        #[pyo3(from_py_with = crate::option_values::tol_arg)] tol: Option<f64>,
+        #[pyo3(from_py_with = crate::shared::option_values::confidence_level_arg)] confidence_level: f64,
+        #[pyo3(from_py_with = crate::shared::option_values::cluster_arg)] cluster: Option<String>,
+        #[pyo3(from_py_with = crate::shared::option_values::solver_arg)] solver: String,
+        #[pyo3(from_py_with = crate::shared::option_values::max_iter_arg)] max_iter: i64,
+        #[pyo3(from_py_with = crate::shared::option_values::tol_arg)] tol: Option<f64>,
         raise_on_non_convergence: bool,
     ) -> Self {
         // `tol`の既定値は`solver`依存（`tol`フィールドのdocコメント参照）。`newton`は

@@ -1,16 +1,11 @@
-mod column_extraction;
-mod errors;
 mod iv;
 mod linear;
 mod nonlinear;
-mod option_values;
 mod panel;
-mod validation;
+mod shared;
 
 use pyo3::prelude::*;
 
-use column_extraction::{extract_column_list, extract_column_name, extract_dataframe};
-use errors::{ComputationError, ValidationError};
 use iv::common::{IVOptions, IVResult};
 use linear::ols::{
     BreuschGodfreyTestOutput, BreuschPaganTestOutput, OLSOptions, OLSResult, WhiteTestOutput,
@@ -24,6 +19,8 @@ use nonlinear::tobit::{
 };
 use panel::fe::{FEOptions, FEResult};
 use panel::re::{REOptions, REResult};
+use shared::column_extraction::{extract_column_list, extract_column_name, extract_dataframe};
+use shared::errors::{ComputationError, ValidationError};
 
 /// Entry point for OLS estimation.
 ///

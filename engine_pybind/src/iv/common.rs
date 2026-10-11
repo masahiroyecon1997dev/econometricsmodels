@@ -8,7 +8,7 @@
 //! 置き場所という位置づけに素直に合致する（`two_sls.rs`/`gmm.rs`のような手法ごとの
 //! ファイル分割はしない）。
 //!
-//! `IvError`の`Common`バリアント（`engine::shared::error::CommonError`）は`crate::errors::
+//! `IvError`の`Common`バリアント（`engine::shared::error::CommonError`）は`crate::shared::errors::
 //! common_error_to_pyerr`に委譲する（系統ごとに同じ判定ロジックを重複させない）。
 //!
 //! ## 実装の経緯（要点のみ、詳細は各コミット・`engine/src/iv/CLAUDE.md`参照）
@@ -63,19 +63,19 @@ use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
-use crate::column_extraction::{
-    extract_f64_column, extract_group_key_column, extract_time_order_ranks,
-};
-use crate::errors::{ComputationError, ValidationError, common_error_to_pyerr};
 use crate::linear::common::{
     build_cov_type, least_squares_error_is_computation_error, mat_to_vec, require_hac_time,
 };
 use crate::linear::ols::{OLSResult, ols_estimator_to_result};
-use crate::option_values::{
+use crate::shared::column_extraction::{
+    extract_f64_column, extract_group_key_column, extract_time_order_ranks,
+};
+use crate::shared::errors::{ComputationError, ValidationError, common_error_to_pyerr};
+use crate::shared::option_values::{
     extract_strict_float, extract_strict_opt_column, extract_strict_opt_float,
     extract_strict_opt_int, extract_strict_opt_text, extract_strict_text,
 };
-use crate::validation::{
+use crate::shared::validation::{
     RoleValue, reject_unused_option, validate_no_const_collision, validate_no_duplicate_roles,
     validate_no_duplicate_within_role, validate_x_non_empty,
 };
@@ -238,19 +238,20 @@ impl IVOptions {
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
-        #[pyo3(from_py_with = crate::option_values::estimator_arg)] estimator: String,
-        #[pyo3(from_py_with = crate::option_values::cov_type_arg)] cov_type: String,
+        #[pyo3(from_py_with = crate::shared::option_values::estimator_arg)] estimator: String,
+        #[pyo3(from_py_with = crate::shared::option_values::cov_type_arg)] cov_type: String,
         include_intercept: bool,
-        #[pyo3(from_py_with = crate::option_values::confidence_level_arg)] confidence_level: f64,
-        #[pyo3(from_py_with = crate::option_values::cluster_arg)] cluster: Option<String>,
-        #[pyo3(from_py_with = crate::option_values::hac_lags_arg)] hac_lags: Option<i64>,
-        #[pyo3(from_py_with = crate::option_values::hac_time_arg)] hac_time: Option<String>,
-        #[pyo3(from_py_with = crate::option_values::gmm_weight_type_arg)] gmm_weight_type: Option<
-            String,
+        #[pyo3(from_py_with = crate::shared::option_values::confidence_level_arg)] confidence_level: f64,
+        #[pyo3(from_py_with = crate::shared::option_values::cluster_arg)] cluster: Option<String>,
+        #[pyo3(from_py_with = crate::shared::option_values::hac_lags_arg)] hac_lags: Option<i64>,
+        #[pyo3(from_py_with = crate::shared::option_values::hac_time_arg)] hac_time: Option<String>,
+        #[pyo3(from_py_with = crate::shared::option_values::gmm_weight_type_arg)]
+        gmm_weight_type: Option<String>,
+        #[pyo3(from_py_with = crate::shared::option_values::gmm_type_arg)] gmm_type: Option<String>,
+        #[pyo3(from_py_with = crate::shared::option_values::gmm_max_iter_arg)] gmm_max_iter: Option<
+            i64,
         >,
-        #[pyo3(from_py_with = crate::option_values::gmm_type_arg)] gmm_type: Option<String>,
-        #[pyo3(from_py_with = crate::option_values::gmm_max_iter_arg)] gmm_max_iter: Option<i64>,
-        #[pyo3(from_py_with = crate::option_values::gmm_tol_arg)] gmm_tol: Option<f64>,
+        #[pyo3(from_py_with = crate::shared::option_values::gmm_tol_arg)] gmm_tol: Option<f64>,
         raise_on_non_convergence: Option<bool>,
     ) -> Self {
         Self {

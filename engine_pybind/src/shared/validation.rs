@@ -20,7 +20,7 @@ use std::collections::HashSet;
 use polars::prelude::DataFrame;
 use pyo3::PyResult;
 
-use crate::errors::ValidationError;
+use super::errors::ValidationError;
 
 /// `validate_no_duplicate_roles`に渡す1ロール分の値。単一列（`y`/`weight`等）と
 /// 複数列（`x`/`x_exog`/`instruments`等）の両方を同じ関数で扱えるようにするための

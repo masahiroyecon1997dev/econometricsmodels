@@ -4,16 +4,16 @@
 //! `<系統>/common.rs`に置く（`engine_pybind/src/linear/common.rs`と同じ位置づけ）。
 //!
 //! `MleError`の`Common`バリアント（`engine::shared::error::CommonError`、`linear`系統の
-//! `LeastSquaresError`と共有する6種のバリデーションエラー）は`crate::errors::
+//! `LeastSquaresError`と共有する6種のバリデーションエラー）は`crate::shared::errors::
 //! common_error_to_pyerr`に委譲する（系統ごとに同じ判定ロジックを重複させない）。
 
 use engine::nonlinear::common::{CovType, MarginalEffectsAt, MleError, SolverType};
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 
-use crate::column_extraction::extract_group_key_column;
-use crate::errors::{ComputationError, ValidationError, common_error_to_pyerr};
-use crate::validation::reject_unused_option;
+use crate::shared::column_extraction::extract_group_key_column;
+use crate::shared::errors::{ComputationError, ValidationError, common_error_to_pyerr};
+use crate::shared::validation::reject_unused_option;
 
 /// `engine::nonlinear::common::MleError`をPython例外に変換する。
 ///

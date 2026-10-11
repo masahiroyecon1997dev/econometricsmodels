@@ -21,7 +21,7 @@ use pyo3_polars::PyDataFrame;
 
 use engine::panel::common::TimeKeys;
 
-use crate::errors::ValidationError;
+use super::errors::ValidationError;
 use crate::panel::common::panel_error_to_pyerr;
 
 /// Pythonオブジェクト`ob`をpolars DataFrameとして取り出す。

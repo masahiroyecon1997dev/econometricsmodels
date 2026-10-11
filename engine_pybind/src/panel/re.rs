@@ -60,15 +60,15 @@ use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
 use super::common::{panel_error_to_pyerr, validate_dk_time_role};
-use crate::column_extraction::{
+use crate::linear::common::mat_to_vec;
+use crate::shared::column_extraction::{
     extract_f64_column, extract_f64_columns, extract_group_key_column, extract_time_keys,
 };
-use crate::errors::ValidationError;
-use crate::linear::common::mat_to_vec;
-use crate::option_values::{
+use crate::shared::errors::ValidationError;
+use crate::shared::option_values::{
     extract_strict_float, extract_strict_opt_column, extract_strict_opt_int, extract_strict_text,
 };
-use crate::validation::{
+use crate::shared::validation::{
     RoleValue, reject_unused_option, validate_no_duplicate_roles,
     validate_no_duplicate_within_role, validate_x_non_empty,
 };
@@ -128,11 +128,13 @@ impl REOptions {
         dk_bandwidth = None,
     ))]
     fn new(
-        #[pyo3(from_py_with = crate::option_values::cov_type_arg)] cov_type: String,
-        #[pyo3(from_py_with = crate::option_values::confidence_level_arg)] confidence_level: f64,
-        #[pyo3(from_py_with = crate::option_values::dk_time_arg)] dk_time: Option<String>,
-        #[pyo3(from_py_with = crate::option_values::cluster_arg)] cluster: Option<String>,
-        #[pyo3(from_py_with = crate::option_values::dk_bandwidth_arg)] dk_bandwidth: Option<i64>,
+        #[pyo3(from_py_with = crate::shared::option_values::cov_type_arg)] cov_type: String,
+        #[pyo3(from_py_with = crate::shared::option_values::confidence_level_arg)] confidence_level: f64,
+        #[pyo3(from_py_with = crate::shared::option_values::dk_time_arg)] dk_time: Option<String>,
+        #[pyo3(from_py_with = crate::shared::option_values::cluster_arg)] cluster: Option<String>,
+        #[pyo3(from_py_with = crate::shared::option_values::dk_bandwidth_arg)] dk_bandwidth: Option<
+            i64,
+        >,
     ) -> Self {
         Self {
             cov_type,

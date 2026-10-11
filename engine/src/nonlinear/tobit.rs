@@ -2697,7 +2697,7 @@ mod tests {
     /// 従来は`wald_chi2_test`内の`ComputationFailed`だった）。`wald_chi2_test`の
     /// `ensure_well_conditioned_symmetric_matrix`側のbackstop（`g > q`だが悪条件で
     /// 数値的にほぼ特異なケース）は、`wald_f_test`と共有する純粋な線形代数
-    /// ユーティリティであり`linear_algebra.rs`の単体テスト・OLSの
+    /// ユーティリティであり`shared/linear_algebra.rs`の単体テスト・OLSの
     /// `fit_returns_computation_failed_for_extreme_scale_difference_in_f_test`で担保する
     /// （Tobitは`TobitScaling`が`x`を内部で列標準化するため、極端なスケール差による
     /// 悪条件をTobitの`fit()`経由で再現するのが困難で、Tobit固有テストは設けない）。

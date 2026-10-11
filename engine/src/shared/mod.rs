@@ -4,7 +4,8 @@
 //! 使うかでは分けない（利用側は手法の追加で変わるため）。各系統の`common.rs`（系統内で共有する
 //! ロジック）とは別。
 //!
-//! `engine_pybind`から使うモジュールのみ`pub`、engine内部だけで使う計算部品は`pub(crate)`。
+//! クレート直下から移した6モジュールは従来どおり`pub`（可視性は変えていない）。後から足した
+//! 計算部品はengine内部だけで使うため`pub(crate)`。
 
 pub mod design_matrix;
 pub mod error;

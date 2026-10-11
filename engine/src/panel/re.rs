@@ -1650,7 +1650,7 @@ mod tests {
         // シフトする」回避策は切片の係数を非ゼロにするだけで、傾き係数は依然coef=0・se=0
         // のまま——後述の通りこちらは偶然F検定の特異性チェックに先に弾かれるため表面化
         // しない）。修正前は`compute_inference_stat`が`stat=0.0/0.0=NaN`を計算し、続く
-        // `StudentsT::cdf(NaN)`が`statrs`内部でパニックしていた（`inference.rs`の
+        // `StudentsT::cdf(NaN)`が`statrs`内部でパニックしていた（`shared/inference.rs`の
         // `compute_inference_stat_returns_nan_p_value_without_panicking_when_coef_and_se_are_both_zero`
         // で直接固定した修正）。
         //

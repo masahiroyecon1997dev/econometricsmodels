@@ -45,4 +45,4 @@ Logitと同じ2段階に分けた。
 
 ## `IVResult.test_stats`と`stat_dist`/`stat_df`
 
-`IVResult`は`estimator="2sls"`（t分布）・`estimator="gmm"`（z分布、`docs/spec/iv-spec.md`3.2節）の両方で共有される単一の型のため、統計量は全手法共通の名前`test_stats`とし、分布は`stat_dist`（`"t"`/`"normal"`）と`stat_df`（t分布の自由度、正規分布は`None`）で示す（他の手法のResultsと同じ形。IVを`IV2SLS`/`IVGMM`に分ける案や、`t_stats`/`z_stats`の両方を持たせて片方を`None`にする案は、推定量を変えただけで結果の形が変わるため不採用）。`stat_dist`/`stat_df`は`TwoSlsEstimator::stat_dist()`/`GmmEstimator::stat_dist()`（`engine::inference::StatDist`）から配線する。2SLSの`cov_type="cluster"`は`df_resid`ではなく`G-1`を使うため、`stat_df`は`df_resid`と一致するとは限らない。
+`IVResult`は`estimator="2sls"`（t分布）・`estimator="gmm"`（z分布、`docs/spec/iv-spec.md`3.2節）の両方で共有される単一の型のため、統計量は全手法共通の名前`test_stats`とし、分布は`stat_dist`（`"t"`/`"normal"`）と`stat_df`（t分布の自由度、正規分布は`None`）で示す（他の手法のResultsと同じ形。IVを`IV2SLS`/`IVGMM`に分ける案や、`t_stats`/`z_stats`の両方を持たせて片方を`None`にする案は、推定量を変えただけで結果の形が変わるため不採用）。`stat_dist`/`stat_df`は`TwoSlsEstimator::stat_dist()`/`GmmEstimator::stat_dist()`（`engine::shared::inference::StatDist`）から配線する。2SLSの`cov_type="cluster"`は`df_resid`ではなく`G-1`を使うため、`stat_df`は`df_resid`と一致するとは限らない。

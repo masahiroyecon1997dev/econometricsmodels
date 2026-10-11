@@ -388,7 +388,7 @@ impl TimeKeys {
     /// ラベルの辞書順を時間順とみなす（ISO 8601の日付・ゼロ埋めした年月等、辞書順が時間順と
     /// 一致するラベル向け）。`FeInput::from_columns`/`ReInput::from_columns`はこの順序を使う。
     pub fn lexicographic(ids: Vec<String>) -> Self {
-        let codes = GroupCodes::from_ids(&ids);
+        let codes = GroupCodes::from_labels(&ids);
         Self { ids, codes }
     }
 
@@ -399,7 +399,7 @@ impl TimeKeys {
     /// （`engine_pybind`が同じ列から作る限り起こり得ない契約違反に対する防御）。
     pub fn by_integer(ids: Vec<String>, values: &[i128]) -> Result<Self, PanelError> {
         check_key_lengths(&ids, values.len())?;
-        let codes = GroupCodes::from_ids_ordered(&ids, |a, b| values[a].cmp(&values[b]));
+        let codes = GroupCodes::from_labels_ordered(&ids, |a, b| values[a].cmp(&values[b]));
         Ok(Self { ids, codes })
     }
 
@@ -410,7 +410,7 @@ impl TimeKeys {
     /// `values`の長さが`ids`と一致しない場合は`PanelError::IdentifierDimensionMismatch`。
     pub fn by_float(ids: Vec<String>, values: &[f64]) -> Result<Self, PanelError> {
         check_key_lengths(&ids, values.len())?;
-        let codes = GroupCodes::from_ids_ordered(&ids, |a, b| values[a].total_cmp(&values[b]));
+        let codes = GroupCodes::from_labels_ordered(&ids, |a, b| values[a].total_cmp(&values[b]));
         Ok(Self { ids, codes })
     }
 
@@ -1103,10 +1103,10 @@ mod tests {
     }
 
     #[test]
-    fn time_keys_lexicographic_matches_group_codes_from_ids() {
+    fn time_keys_lexicographic_matches_group_codes_from_labels() {
         let ids = labels(&["b", "a", "c", "a"]);
         let keys = TimeKeys::lexicographic(ids.clone());
-        assert_eq!(keys.codes(), &GroupCodes::from_ids(&ids));
+        assert_eq!(keys.codes(), &GroupCodes::from_labels(&ids));
         assert_eq!(keys.periods(), ["a", "b", "c"]);
     }
 
@@ -1136,7 +1136,7 @@ mod tests {
     /// `["a", "a", "b", "b", "b"]`のエンティティ列から整数コードを作るヘルパ。
     fn entities(ids: &[&str]) -> GroupCodes {
         let ids: Vec<String> = ids.iter().map(|s| s.to_string()).collect();
-        GroupCodes::from_ids(&ids)
+        GroupCodes::from_labels(&ids)
     }
 
     /// エンティティID→θの組を、`entity`のコード順（キーの辞書順）の`Vec`に並べるヘルパ。
@@ -1306,7 +1306,7 @@ mod tests {
         // 最終ラグ項を落とし、本実装とは一致しない。本実装は標準の定義どおり含める
         // （`docs/spec/fe-spec.md`3.3節）。`bandwidth <= T-2`ではfixestと一致する。
         let ids: Vec<String> = (0..5).map(|t| t.to_string()).collect();
-        let time = GroupCodes::from_ids(&ids);
+        let time = GroupCodes::from_labels(&ids);
         let x_values = [1.0, -2.0, 0.5, 3.0, -1.5];
         let residuals = [0.7, 1.1, -0.4, 0.9, 2.0];
         let x = Mat::from_fn(5, 1, |i, _| x_values[i]);

@@ -393,7 +393,7 @@ mod tests {
 
     fn codes(ids: &[&str]) -> GroupCodes {
         let ids: Vec<String> = ids.iter().map(|s| s.to_string()).collect();
-        GroupCodes::from_ids(&ids)
+        GroupCodes::from_labels(&ids)
     }
 
     #[test]
@@ -499,9 +499,9 @@ mod tests {
         let score = |i: usize, a: usize| scores[i][a];
 
         let (expected, expected_groups) = btree_cluster_meat(&labels, k, score);
-        let (actual, actual_groups) = cluster_meat(&GroupCodes::from_ids(&labels), k, score);
+        let (actual, actual_groups) = cluster_meat(&GroupCodes::from_labels(&labels), k, score);
         let (actual_keyless, _) =
-            cluster_meat(&GroupCodes::from_ids_without_keys(&labels), k, score);
+            cluster_meat(&GroupCodes::from_labels_without_keys(&labels), k, score);
 
         assert_eq!(actual_groups, expected_groups);
         for a in 0..k {

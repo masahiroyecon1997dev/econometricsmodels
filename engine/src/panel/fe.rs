@@ -531,7 +531,7 @@ impl FeInput {
             entity: entity.to_vec(),
             time,
             dep_var_name,
-            entity_codes: GroupCodes::from_ids(entity),
+            entity_codes: GroupCodes::from_labels(entity),
         })
     }
 
@@ -652,7 +652,7 @@ pub enum FeCovType {
     Hc3,
     /// クラスターロバスト。`groups`が`None`なら`entity`引数の列を自動的に使う
     /// （3.2節、`cluster`省略時のデフォルト挙動）。
-    Cluster { groups: Option<Vec<String>> },
+    Cluster { groups: Option<GroupCodes> },
     /// Driscoll-Kraay型パネルHAC（3.1節）。`bandwidth`が`None`なら
     /// `floor(4*(t/100)^(2/9))`（`t`はユニークな時点数）で自動計算する（モジュールdoc
     /// 「Driscoll-Kraay型パネルHAC対応」参照）。
@@ -906,10 +906,9 @@ impl FeEstimator {
                 )
             }
             FeCovType::Cluster { groups } => {
-                // 既定（entityクラスター）は`FeInput`のコードを再利用し、明示指定の列だけ
-                // ここでコード化する。
-                let explicit_codes = groups.as_deref().map(GroupCodes::from_ids);
-                let group_codes = explicit_codes.as_ref().unwrap_or(input.entity_codes());
+                // 既定（entityクラスター）は`FeInput`のコードを再利用し、明示指定の列は
+                // 渡されたコードをそのまま使う。
+                let group_codes = groups.as_ref().unwrap_or(input.entity_codes());
                 let n_groups = validate_cluster_groups(group_codes, n)?;
                 validate_cluster_count_covers_slopes(n_groups, k)?;
                 // 直前の`G > k`により、ここで`G=2`なら`k`は高々1。
@@ -1812,7 +1811,7 @@ mod tests {
     }
 
     fn codes(values: &[&str]) -> GroupCodes {
-        GroupCodes::from_ids(&strings(values))
+        GroupCodes::from_labels(&strings(values))
     }
 
     #[test]
@@ -2236,7 +2235,7 @@ mod tests {
         // regressor_succeeds`と同様の境界値テストの慣習に合わせる）。空配列にはsingleton
         // となりうる要素自体が存在しないため`Ok(())`になる。
         assert_eq!(
-            reject_singleton_group(PanelDimension::Entity, &GroupCodes::from_ids(&[])),
+            reject_singleton_group(PanelDimension::Entity, &GroupCodes::from_labels(&[])),
             Ok(())
         );
     }
@@ -3333,7 +3332,9 @@ mod tests {
         let fe = FeEstimator::fit(
             input,
             FeEffects::OneWay,
-            FeCovType::Cluster { groups: Some(time) },
+            FeCovType::Cluster {
+                groups: Some(GroupCodes::from_labels_without_keys(&time)),
+            },
             0.95,
         )
         .unwrap();
@@ -3498,7 +3499,7 @@ mod tests {
             input,
             FeEffects::OneWay,
             FeCovType::Cluster {
-                groups: Some(single_cluster),
+                groups: Some(GroupCodes::from_labels_without_keys(&single_cluster)),
             },
             0.95,
         );
@@ -3534,7 +3535,7 @@ mod tests {
             input,
             FeEffects::OneWay,
             FeCovType::Cluster {
-                groups: Some(two_clusters),
+                groups: Some(GroupCodes::from_labels_without_keys(&two_clusters)),
             },
             0.95,
         );
@@ -3881,7 +3882,9 @@ mod tests {
         let cluster = FeEstimator::fit(
             input,
             FeEffects::OneWay,
-            FeCovType::Cluster { groups: Some(time) },
+            FeCovType::Cluster {
+                groups: Some(GroupCodes::from_labels_without_keys(&time)),
+            },
             0.95,
         )
         .unwrap();
@@ -4087,7 +4090,9 @@ mod tests {
         let result = FeEstimator::fit(
             input,
             FeEffects::OneWay,
-            FeCovType::Cluster { groups: Some(time) },
+            FeCovType::Cluster {
+                groups: Some(GroupCodes::from_labels_without_keys(&time)),
+            },
             0.95,
         );
         assert_eq!(result.unwrap_err(), PanelError::DegenerateClusterTwoGroups);
@@ -4106,7 +4111,9 @@ mod tests {
         let cluster = FeEstimator::fit(
             input,
             FeEffects::OneWay,
-            FeCovType::Cluster { groups: Some(time) },
+            FeCovType::Cluster {
+                groups: Some(GroupCodes::from_labels_without_keys(&time)),
+            },
             0.95,
         )
         .unwrap();
@@ -4178,7 +4185,7 @@ mod tests {
             four_by_two_input(&THREE_PERIOD_LABELS),
             FeEffects::OneWay,
             FeCovType::Cluster {
-                groups: Some(groups),
+                groups: Some(GroupCodes::from_labels_without_keys(&groups)),
             },
             0.95,
         );
@@ -4192,7 +4199,9 @@ mod tests {
         let result = FeEstimator::fit(
             input,
             FeEffects::OneWay,
-            FeCovType::Cluster { groups: Some(time) },
+            FeCovType::Cluster {
+                groups: Some(GroupCodes::from_labels_without_keys(&time)),
+            },
             0.95,
         );
         assert!(result.is_ok());

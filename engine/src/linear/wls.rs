@@ -213,6 +213,7 @@ fn original_scale_fitted_and_residuals(
 mod tests {
     use super::*;
     use crate::linear::common::row_time_order;
+    use crate::shared::group_codes::GroupCodes;
 
     #[test]
     fn fit_with_all_weights_one_matches_ols() {
@@ -452,7 +453,7 @@ mod tests {
                 time_order: row_time_order(6),
             },
             CovType::Cluster {
-                groups: Some(clusters.clone()),
+                groups: Some(GroupCodes::from_labels_without_keys(&clusters)),
             },
         ];
 

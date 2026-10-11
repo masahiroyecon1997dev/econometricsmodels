@@ -20,6 +20,7 @@ use pyo3::types::PyList;
 use pyo3_polars::PyDataFrame;
 
 use engine::panel::common::TimeKeys;
+use engine::shared::group_codes::GroupCodes;
 
 use super::errors::ValidationError;
 use crate::panel::common::panel_error_to_pyerr;
@@ -461,6 +462,19 @@ fn check_key_dtype(name: &str, dtype: &DataType, role: KeyRole) -> PyResult<()> 
 /// - 浮動小数の列にNaN・無限大を含む（数値列と同じく自動では扱わない）
 pub fn extract_group_key_column(df: &DataFrame, name: &str) -> PyResult<Vec<String>> {
     extract_key_column(df, name, KeyRole::Identity)
+}
+
+/// `df`から`name`列を、クラスター列（`cluster`）として整数コード化した`GroupCodes`で取り出す。
+///
+/// ラベル（文字列表現）の抽出は[`extract_group_key_column`]と同じで、続けて`engine`の
+/// `GroupCodes::from_labels_without_keys`でコード化する（コードの順序はラベルの辞書順）。
+/// クラスターのラベル自体は結果に出ないため、キーの`String`は作らない。
+///
+/// # Errors
+/// [`extract_group_key_column`]と同じ。
+pub fn extract_cluster_groups(df: &DataFrame, name: &str) -> PyResult<GroupCodes> {
+    let labels = extract_group_key_column(df, name)?;
+    Ok(GroupCodes::from_labels_without_keys(&labels))
 }
 
 /// `df`から`name`列を、時点を表すキー（FE/REの`time`・`dk_time`）の文字列のVecで取り出す。

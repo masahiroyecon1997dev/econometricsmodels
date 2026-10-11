@@ -59,8 +59,8 @@
 //! 一度も回らないため、この検証が範囲外エラーを検知する唯一の経路になる）。
 
 use crate::iv::common::{
-    IvError, IvInput, compute_first_stage_with_codes, mat_column_to_vec, mat_to_columns,
-    structural_cluster_codes, without_baked_in_intercept,
+    IvError, IvInput, compute_first_stage, mat_column_to_vec, mat_to_columns,
+    validate_structural_cluster_count, without_baked_in_intercept,
 };
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
@@ -193,7 +193,7 @@ impl TwoSlsEstimator {
         // 第一段階固有の傾き係数の数で判定され`FirstStageFailed`にラップされて`q`の値も
         // 構造方程式のものと食い違うため、`fit()`冒頭で構造方程式の`q`を使って明示的に
         // 弾き、`IvError::Common`として一貫させる（`compute_first_stage`より前）。
-        let cluster_codes = structural_cluster_codes(&input, &cov_type)?;
+        validate_structural_cluster_count(&input, &cov_type)?;
 
         // `x_exog`は`second_stage_columns`（第二段階）・`structural_columns`
         // （サンドイッチSE計算）でも同じ内容を使うため、`Mat`からの変換を一度だけ行い
@@ -221,12 +221,8 @@ impl TwoSlsEstimator {
         // 2SLS/GMM間で共有するロジック（`common::compute_first_stage`、`iv/CLAUDE.md`
         // 「2SLSとGMMの独立実装方針」参照——GMM自体は第一段階回帰を必要としないが、
         // `engine_pybind`が`estimator="gmm"`でも同じ診断情報を独立に提供するために使う）。
-        let (first_stage, weak_instrument_f_statistics) = compute_first_stage_with_codes(
-            &input,
-            &cov_type,
-            cluster_codes.as_ref(),
-            confidence_level,
-        )?;
+        let (first_stage, weak_instrument_f_statistics) =
+            compute_first_stage(&input, &cov_type, confidence_level)?;
         let x_endog_hat_columns: Vec<Vec<f64>> = first_stage
             .iter()
             .map(|(_, estimator)| {
@@ -311,10 +307,8 @@ impl TwoSlsEstimator {
                     df_resid,
                 )
             }
-            CovType::Cluster { .. } => {
-                let groups = cluster_codes
-                    .as_ref()
-                    .ok_or(CommonError::MissingClusterColumn)?;
+            CovType::Cluster { groups } => {
+                let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
                 // クラスター数 `g <= q`（構造方程式の傾き係数の数）は`fit()`冒頭で
                 // 既に`InsufficientClustersForInference`として弾いている。
                 let n_groups = validate_cluster_groups(groups, n)?;
@@ -426,12 +420,8 @@ impl TwoSlsEstimator {
                     input.has_intercept(),
                     input.dep_var_name().to_string(),
                 )?;
-                let hausman_estimator = OlsEstimator::fit_with_cluster_codes(
-                    hausman_input,
-                    cov_type.clone(),
-                    cluster_codes.as_ref(),
-                    confidence_level,
-                )?;
+                let hausman_estimator =
+                    OlsEstimator::fit(hausman_input, cov_type.clone(), confidence_level)?;
                 let (stat, p_value) = hausman_estimator.wald_test_last_columns(input.k_endog())?;
                 Ok((
                     stat,
@@ -1754,7 +1744,7 @@ mod tests {
     fn fit_computes_cluster_std_errors_matching_manual_formula() {
         let (input, groups) = cluster_test_input_and_groups();
         let cov_type = CovType::Cluster {
-            groups: Some(groups.clone()),
+            groups: Some(GroupCodes::from_labels_without_keys(&groups)),
         };
         let estimator = TwoSlsEstimator::fit(input, cov_type, 0.95).unwrap();
 
@@ -2005,7 +1995,7 @@ mod tests {
         let result = TwoSlsEstimator::fit(
             x_endog_empty_input(),
             CovType::Cluster {
-                groups: Some(groups),
+                groups: Some(GroupCodes::from_labels_without_keys(&groups)),
             },
             0.95,
         );
@@ -2038,7 +2028,7 @@ mod tests {
         let result = TwoSlsEstimator::fit(
             input,
             CovType::Cluster {
-                groups: Some(groups),
+                groups: Some(GroupCodes::from_labels_without_keys(&groups)),
             },
             0.95,
         );
@@ -2064,7 +2054,7 @@ mod tests {
         let estimator = TwoSlsEstimator::fit(
             input,
             CovType::Cluster {
-                groups: Some(groups),
+                groups: Some(GroupCodes::from_labels_without_keys(&groups)),
             },
             0.95,
         )
@@ -2109,7 +2099,7 @@ mod tests {
         )
         .unwrap();
         let cov_type = CovType::Cluster {
-            groups: Some(groups.clone()),
+            groups: Some(GroupCodes::from_labels_without_keys(&groups)),
         };
         let estimator = TwoSlsEstimator::fit(input, cov_type, 0.95).unwrap();
 
@@ -2130,7 +2120,7 @@ mod tests {
         let expected = OlsEstimator::fit(
             ols_input,
             CovType::Cluster {
-                groups: Some(groups),
+                groups: Some(GroupCodes::from_labels_without_keys(&groups)),
             },
             0.95,
         )

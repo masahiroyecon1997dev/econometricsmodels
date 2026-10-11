@@ -1368,8 +1368,7 @@ impl TobitEstimator {
         let n = input.nobs();
         let k = input.k();
         validate_sufficient_observations(n, k + 1)?;
-        let cluster_codes =
-            validate_cluster_cov_type(&cov_type, n, k - usize::from(input.has_intercept()))?;
+        validate_cluster_cov_type(&cov_type, n, k - usize::from(input.has_intercept()))?;
         validate_has_uncensored_observations(input.y(), input.lower(), input.upper())?;
 
         // `x`（切片ありなら列を平均センタリング＋スケーリング、切片なしはスケーリング
@@ -1451,16 +1450,16 @@ impl TobitEstimator {
                     SandwichVariant::Hc1,
                 )?
             }
-            CovType::Cluster { .. } => {
+            CovType::Cluster { groups } => {
                 let problem = problem_for_scores
                     .as_ref()
                     .expect("problem_for_scores must be Some for CovType::Cluster");
                 // `groups`のNone・クラスター数不足の検証はfit()冒頭の
-                // `validate_cluster_cov_type`で完了済み（そのとき作ったコードを使う）。
+                // `validate_cluster_cov_type`で完了済み。
                 // ここでの`expect`はその契約を明記する防御的な扱い（`LogitEstimator::fit`と同じ）。
-                let groups = cluster_codes
+                let groups = groups
                     .as_ref()
-                    .expect("cluster codes are built by validate_cluster_cov_type for Cluster");
+                    .expect("groups are validated by validate_cluster_cov_type for Cluster");
                 cluster_cov_params(
                     &hessian_std,
                     &problem.scores(&output.params),
@@ -1854,6 +1853,7 @@ impl TobitEstimator {
 mod tests {
     use super::*;
     use crate::nonlinear::common::SolverType;
+    use crate::shared::group_codes::GroupCodes;
     use statrs::distribution::{Continuous, ContinuousCDF};
 
     #[test]
@@ -2722,7 +2722,7 @@ mod tests {
                 tol: 1e-8,
                 raise_on_non_convergence: true,
                 cov_type: CovType::Cluster {
-                    groups: Some(groups),
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
                 },
                 confidence_level: 0.95,
             },
@@ -2872,7 +2872,7 @@ mod tests {
                 tol: 1e-12,
                 raise_on_non_convergence: false,
                 cov_type: CovType::Cluster {
-                    groups: Some(groups),
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
                 },
                 confidence_level: 0.95,
             },
@@ -3793,7 +3793,7 @@ mod tests {
             CovType::Hc0,
             CovType::Hc1,
             CovType::Cluster {
-                groups: Some(groups),
+                groups: Some(GroupCodes::from_labels_without_keys(&groups)),
             },
         ] {
             let newton = TobitEstimator::fit(
@@ -3879,7 +3879,7 @@ mod tests {
                     s,
                     n,
                     k_plus_1,
-                    &crate::shared::group_codes::GroupCodes::from_ids(&groups_for_expected),
+                    &crate::shared::group_codes::GroupCodes::from_labels(&groups_for_expected),
                 )
                 .unwrap()
             });
@@ -3892,7 +3892,7 @@ mod tests {
                 tol: 1e-8,
                 raise_on_non_convergence: true,
                 cov_type: CovType::Cluster {
-                    groups: Some(groups),
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
                 },
                 confidence_level: 0.95,
             },
@@ -3943,7 +3943,7 @@ mod tests {
                     s,
                     n,
                     k_plus_1,
-                    &crate::shared::group_codes::GroupCodes::from_ids(&groups_for_expected),
+                    &crate::shared::group_codes::GroupCodes::from_labels(&groups_for_expected),
                 )
                 .unwrap()
             });
@@ -3956,7 +3956,7 @@ mod tests {
                 tol: 1e-8,
                 raise_on_non_convergence: true,
                 cov_type: CovType::Cluster {
-                    groups: Some(groups),
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
                 },
                 confidence_level: 0.95,
             },
@@ -3995,7 +3995,7 @@ mod tests {
                 tol: 1e-8,
                 raise_on_non_convergence: true,
                 cov_type: CovType::Cluster {
-                    groups: Some(groups),
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
                 },
                 confidence_level: 0.95,
             },

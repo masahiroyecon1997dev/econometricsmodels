@@ -326,7 +326,7 @@ impl ReInput {
             entity: entity.to_vec(),
             time,
             dep_var_name,
-            entity_codes: GroupCodes::from_ids(entity),
+            entity_codes: GroupCodes::from_labels(entity),
         })
     }
 
@@ -876,7 +876,7 @@ pub enum ReCovType {
     Hc3,
     /// クラスターロバスト。`groups`が`None`なら`entity`引数の列を自動的に使う
     /// （3.2節、`cluster`省略時のデフォルト挙動）。
-    Cluster { groups: Option<Vec<String>> },
+    Cluster { groups: Option<GroupCodes> },
     /// Driscoll-Kraay型パネルHAC（3.1節）。`bandwidth`が`None`なら
     /// `floor(4*(t/100)^(2/9))`（`t`はユニークな時点数）で自動計算する。時系列順序は
     /// `ReInput::time()`を使う（`time`が`None`なら`PanelError::DkRequiresTime`）。
@@ -1099,16 +1099,13 @@ impl ReEstimator {
         // 。`FeEstimator::fit`と同じ切り替えパターン）。それ以外
         // （Classical/HC1-3）は`df_resid`のまま。
         // クラスター列のコード。既定（entityクラスター）は`ReInput`のコードを再利用し、明示指定の
-        // 列だけここで一度コード化して、RE本体の共分散とハウスマン補助回帰で共有する。
-        let explicit_cluster_codes = match &cov_type {
+        // 列は渡されたコードを、RE本体の共分散とハウスマン補助回帰で共有する。
+        let cluster_codes = match &cov_type {
             ReCovType::Cluster {
                 groups: Some(groups),
-            } => Some(GroupCodes::from_ids(groups)),
-            _ => None,
+            } => groups,
+            _ => input.entity_codes(),
         };
-        let cluster_codes = explicit_cluster_codes
-            .as_ref()
-            .unwrap_or(input.entity_codes());
 
         let mut dk_bandwidth_used = None;
         let (cov_params, df_inference) = match &cov_type {
@@ -1733,7 +1730,7 @@ mod tests {
         let sigma2_eps = 0.064_516_129_032_258_03;
         let sigma2_u = 7.429_453_144_752_303;
 
-        let theta = compute_theta(&GroupCodes::from_ids(&entity), sigma2_eps, sigma2_u);
+        let theta = compute_theta(&GroupCodes::from_labels(&entity), sigma2_eps, sigma2_u);
 
         assert!((theta[0] - 0.946_276_110_063_922_5).abs() < 1e-12);
         assert!((theta[1] - 0.934_249_367_520_359).abs() < 1e-12);
@@ -1746,7 +1743,7 @@ mod tests {
         // θ = 1 - sqrt(1/3)を確認する（手計算で検算可能な境界値）。
         let entity = strings(&["a", "a", "b", "b"]);
 
-        let theta = compute_theta(&GroupCodes::from_ids(&entity), 1.0, 1.0);
+        let theta = compute_theta(&GroupCodes::from_labels(&entity), 1.0, 1.0);
 
         let expected = 1.0 - (1.0_f64 / 3.0).sqrt();
         assert!((theta[0] - expected).abs() < 1e-12);
@@ -1763,7 +1760,7 @@ mod tests {
         // 固定しておく。
         let entity = strings(&["a", "a", "b", "b", "b"]);
 
-        let theta = compute_theta(&GroupCodes::from_ids(&entity), 2.5, 0.0);
+        let theta = compute_theta(&GroupCodes::from_labels(&entity), 2.5, 0.0);
 
         assert_eq!(theta[0], 0.0);
         assert_eq!(theta[1], 0.0);
@@ -2285,7 +2282,7 @@ mod tests {
         let re = ReEstimator::fit(
             input,
             ReCovType::Cluster {
-                groups: Some(explicit_groups),
+                groups: Some(GroupCodes::from_labels_without_keys(&explicit_groups)),
             },
             0.95,
         )
@@ -2311,7 +2308,7 @@ mod tests {
         let result = ReEstimator::fit(
             input,
             ReCovType::Cluster {
-                groups: Some(all_same_cluster),
+                groups: Some(GroupCodes::from_labels_without_keys(&all_same_cluster)),
             },
             0.95,
         );
@@ -2711,7 +2708,7 @@ mod tests {
         let input = re.input();
         let (sigma2_eps, sigma2_u, ..) = swamy_arora_variance_components(input, 0.95).unwrap();
         let (_, y_star, x_star) = quasi_demean_transform(input, sigma2_eps, sigma2_u);
-        let entity = GroupCodes::from_ids(input.entity());
+        let entity = GroupCodes::from_labels(input.entity());
         let x_within = quasi_demean_column(&input.x()[0], &entity, &vec![1.0; entity.n_groups()]);
 
         let aux_input = OlsInput::from_columns(
@@ -2754,7 +2751,7 @@ mod tests {
     fn manual_hausman_aux(input: &ReInput, cov_type: CovType) -> OlsEstimator {
         let (sigma2_eps, sigma2_u, ..) = swamy_arora_variance_components(input, 0.95).unwrap();
         let (_, y_star, x_star) = quasi_demean_transform(input, sigma2_eps, sigma2_u);
-        let entity = GroupCodes::from_ids(input.entity());
+        let entity = GroupCodes::from_labels(input.entity());
         let theta = vec![1.0; entity.n_groups()];
         let mut columns = x_star;
         for col in input.x() {
@@ -2789,7 +2786,7 @@ mod tests {
             (
                 ReCovType::Cluster { groups: None },
                 CovType::Cluster {
-                    groups: Some(entity.clone()),
+                    groups: Some(GroupCodes::from_labels_without_keys(&entity)),
                 },
             ),
         ];
@@ -2825,7 +2822,7 @@ mod tests {
         let re = ReEstimator::fit(
             hausman_two_slope_input(None),
             ReCovType::Cluster {
-                groups: Some(groups_by_obs.clone()),
+                groups: Some(GroupCodes::from_labels_without_keys(&groups_by_obs)),
             },
             0.95,
         )
@@ -2833,7 +2830,7 @@ mod tests {
         let by_entity = ReEstimator::fit(
             hausman_two_slope_input(None),
             ReCovType::Cluster {
-                groups: Some(groups),
+                groups: Some(GroupCodes::from_labels_without_keys(&groups)),
             },
             0.95,
         )
@@ -2841,7 +2838,7 @@ mod tests {
         let aux = manual_hausman_aux(
             re.input(),
             CovType::Cluster {
-                groups: Some(groups_by_obs),
+                groups: Some(GroupCodes::from_labels_without_keys(&groups_by_obs)),
             },
         );
         let expected = 2.0 * aux.wald_test_last_columns(2).unwrap().0;
@@ -2869,7 +2866,7 @@ mod tests {
         let k_aux = aux.input().k();
         let xtx_inv = xtx_inverse(x_mat).unwrap();
         let residuals: Vec<f64> = (0..n).map(|i| *aux.residuals().get(i, 0)).collect();
-        let time_codes = GroupCodes::from_ids(&time);
+        let time_codes = GroupCodes::from_labels(&time);
         let cov =
             panel_cluster_cov_params(x_mat, &residuals, &xtx_inv, n, k_aux, &time_codes, k_aux);
         let t_periods = time_codes.n_groups();
@@ -2919,7 +2916,7 @@ mod tests {
             &["x1_star".to_string()],
             "y",
             &ReCovType::Classical,
-            &GroupCodes::from_ids(&entity),
+            &GroupCodes::from_labels(&entity),
             None,
             0.95,
         );
@@ -2937,7 +2934,7 @@ mod tests {
         let result = ReEstimator::fit(
             hausman_two_slope_input(None),
             ReCovType::Cluster {
-                groups: Some(groups),
+                groups: Some(GroupCodes::from_labels_without_keys(&groups)),
             },
             0.95,
         );
@@ -3114,7 +3111,7 @@ mod tests {
                     entity.extend(std::iter::repeat_n(format!("e{i}"), size));
                 }
 
-                let theta = compute_theta(&GroupCodes::from_ids(&entity), sigma2_eps, sigma2_u);
+                let theta = compute_theta(&GroupCodes::from_labels(&entity), sigma2_eps, sigma2_u);
 
                 prop_assert_eq!(theta.len(), sizes.len());
                 for (id, t) in theta.iter().enumerate() {

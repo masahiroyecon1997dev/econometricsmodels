@@ -356,22 +356,18 @@ pub fn validate_sufficient_observations(n: usize, k: usize) -> Result<(), MleErr
 /// 多数の同型引数を持つため`has_intercept: bool`を受け取るのとは対照的に、こちらは
 /// 引数が3つで`cov_type`が異なる型のため`usize`のまま受け取る）。
 ///
-/// 検証のために作ったグループキーの整数コードを返す（`Cluster`以外は`None`）。呼び出し側は
-/// これを`cluster_cov_params`にそのまま渡し、検証と集計で`String`列を別々に走査し直さない
-/// （`GroupCodes`のdoc参照）。
 pub(crate) fn validate_cluster_cov_type(
     cov_type: &CovType,
     n: usize,
     n_slopes: usize,
-) -> Result<Option<GroupCodes>, MleError> {
+) -> Result<(), MleError> {
     let CovType::Cluster { groups } = cov_type else {
-        return Ok(None);
+        return Ok(());
     };
     let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
-    let codes = GroupCodes::from_ids_without_keys(groups);
-    let g = validate_cluster_groups(&codes, n)?;
+    let g = validate_cluster_groups(groups, n)?;
     validate_cluster_count_covers_slopes(g, n_slopes)?;
-    Ok(Some(codes))
+    Ok(())
 }
 
 /// `fit()`冒頭で行う推定オプション（`MleFitOptions`由来のスカラー値）の検証。
@@ -427,7 +423,7 @@ pub(crate) fn validate_fit_preconditions(
     k: usize,
     has_intercept: bool,
     cov_type: &CovType,
-) -> Result<Option<GroupCodes>, MleError> {
+) -> Result<(), MleError> {
     validate_mle_options(confidence_level, max_iter, tol)?;
     validate_binary_y(y)?;
 
@@ -560,9 +556,9 @@ pub enum CovType {
     /// クラスターロバスト（`"cluster"`）: `Σ = correction * H⁻¹(Σ_g S_gS_g')H⁻¹`
     /// （`docs/spec/nonlinear-common.md`3章参照）。
     Cluster {
-        /// クラスターのグループキー。モデルの入力データの行と対応する長さnの配列。
+        /// クラスターのグループ（整数コード化済み）。モデルの入力データの行と対応する長さnの列。
         /// `None`の場合、モデルの`fit()`は`CommonError::MissingClusterColumn`を返す。
-        groups: Option<Vec<String>>,
+        groups: Option<GroupCodes>,
     },
 }
 
@@ -5056,7 +5052,7 @@ mod tests {
     /// `cov_test_scores`と同じ4行に対応する、a/bが交互のクラスターのコード。
     fn cov_test_groups() -> GroupCodes {
         let ids: Vec<String> = ["a", "b", "a", "b"].iter().map(|s| s.to_string()).collect();
-        GroupCodes::from_ids(&ids)
+        GroupCodes::from_labels(&ids)
     }
 
     #[test]
@@ -5221,7 +5217,7 @@ mod tests {
         let y = Mat::from_fn(4, 1, |i, _| [0.0, 1.0, 0.0, 1.0][i]);
         assert_eq!(
             validate_fit_preconditions(0.95, 100, 1e-8, &y, 2, true, &CovType::Classical),
-            Ok(None)
+            Ok(())
         );
     }
 
@@ -5292,7 +5288,7 @@ mod tests {
                 3,
                 true,
                 &CovType::Cluster {
-                    groups: Some(groups)
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups))
                 }
             ),
             Err(CommonError::InsufficientClustersForInference { g: 2, q: 2 }.into())
@@ -5707,49 +5703,34 @@ mod tests {
     }
 
     #[test]
-    fn validate_cluster_cov_type_returns_codes_for_valid_cluster_and_none_otherwise() {
+    fn validate_cluster_cov_type_accepts_valid_cluster_and_other_cov_types() {
         let groups: Vec<String> = ["a", "b", "c", "a", "b", "c"]
             .iter()
             .map(|s| s.to_string())
             .collect();
-        let codes = validate_cluster_cov_type(
-            &CovType::Cluster {
-                groups: Some(groups),
-            },
-            6,
-            1,
-        )
-        .unwrap()
-        .expect("Cluster with groups must produce codes");
-        assert_eq!(codes.nobs(), 6);
-        assert_eq!(codes.n_groups(), 3);
-
         assert_eq!(
-            validate_cluster_cov_type(&CovType::Classical, 6, 1),
-            Ok(None)
+            validate_cluster_cov_type(
+                &CovType::Cluster {
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
+                },
+                6,
+                1,
+            ),
+            Ok(())
         );
-    }
-
-    #[test]
-    fn validate_fit_preconditions_returns_cluster_codes_for_valid_cluster() {
-        let y = Mat::from_fn(6, 1, |i, _| [0.0, 1.0, 0.0, 1.0, 1.0, 0.0][i]);
-        let groups: Vec<String> = ["a", "b", "c", "a", "b", "c"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        let codes = validate_fit_preconditions(
-            0.95,
-            100,
-            1e-8,
-            &y,
-            2,
-            true,
-            &CovType::Cluster {
-                groups: Some(groups),
-            },
-        )
-        .unwrap()
-        .expect("Cluster with groups must produce codes");
-        assert_eq!(codes.n_groups(), 3);
+        assert_eq!(validate_cluster_cov_type(&CovType::Classical, 6, 1), Ok(()));
+        // グループ数（3）が傾き係数の数以下なら、コードを作ったうえで弾く。
+        assert!(matches!(
+            validate_cluster_cov_type(
+                &CovType::Cluster {
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
+                },
+                6,
+                3,
+            ),
+            Err(MleError::Common(
+                CommonError::InsufficientClustersForInference { g: 3, q: 3 }
+            ))
+        ));
     }
 }

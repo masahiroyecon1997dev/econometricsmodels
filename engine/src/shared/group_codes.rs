@@ -2,7 +2,9 @@
 //!
 //! クラスターロバスト分散・FE/REのwithin変換等、「行がどのグループに属するか」を引く処理は
 //! `String`をキーにしたハッシュ表・`BTreeMap`で毎回引き直すと遅い（`GroupCodes`のdoc参照）。
-//! 各`fit()`の冒頭で一度だけ整数コードに変換し、以降はコードで配列を直接引く。コードの順序は
+//! 一度だけ整数コードに変換し、以降はコードで配列を直接引く。クラスター列は呼び出し側
+//! （`engine_pybind`）が`CovType::Cluster`等に渡す時点でコード化し、パネルのentity/timeは
+//! 入力の構築時にコード化する。コードの順序は
 //! `BTreeMap<&str, _>`の反復順（キーの辞書順）と同じで、グループ間の加算順（`Σ_g S_g S_g'`）が
 //! 変わらないため、結果はビット単位で同じになる。
 
@@ -15,54 +17,57 @@ use std::collections::HashMap;
 /// within変換・準偏差変換・グループ平均・クラスター/DKの集計は、行ごとに「どのグループか」を
 /// 引く処理を列ごと・統計量ごとに繰り返す。`String`をキーにしたハッシュ表・`BTreeMap`で毎回
 /// 引き直すと、大標本（n=1,000,000・エンティティ166,666）では1列あたり約0.2秒かかり、FE/REの
-/// 計算時間の大半を占めていた（QR分解よりはるかに重い）。`FeInput`/`ReInput`の構築時（クラスター
-/// 列は各`fit()`の冒頭）に一度だけコード化して保持し、以降はコードで配列を直接引く
-/// （1列あたり数ms）。
+/// 計算時間の大半を占めていた（QR分解よりはるかに重い）。`FeInput`/`ReInput`の構築時、または
+/// クラスター列を`CovType::Cluster`等に渡す時点で一度だけコード化して保持し、以降はコードで
+/// 配列を直接引く（1列あたり数ms）。
 ///
-/// **コードの順序は、`from_ids`ではキーの辞書順（`String`の`Ord`、旧実装の
+/// **コードの順序は、`from_labels`ではキーの辞書順（`String`の`Ord`、旧実装の
 /// `BTreeMap<&str, _>`の反復順と同じ）にする**。グループ間の加算順（クラスターの
 /// `Σ_g S_g S_g'`等）・between回帰の行順を旧実装と同じに保ち、結果をビット単位で
 /// 変えないため。時点だけは、DKの時系列順序が値の順序で決まる必要があるため、
-/// `TimeKeys`が`from_ids_ordered`で値の順序のコードを振る（`TimeKeys`のdoc参照）。
+/// `TimeKeys`が`from_labels_ordered`で値の順序のコードを振る（`TimeKeys`のdoc参照）。
 /// グループ内の行は観測順に積む（`group_indices`の安定な計数ソート）。
 ///
-/// `engine`クレート内部専用（`FeInput`/`ReInput`・`CovType::Cluster`等の公開APIは引き続き
-/// `String`列で受け取り、各`fit()`が冒頭で一度だけコード化する）。
+/// クラスター列は`CovType::Cluster { groups }`・`WeightType::Cluster { groups }`・
+/// `FeCovType::Cluster`/`ReCovType::Cluster`が`Option<GroupCodes>`で受け取る（同じ型で揃える）。
+/// 構築は[`Self::from_labels`]/[`Self::from_labels_without_keys`]（ラベルの`String`列から）が
+/// 公開で、コードの参照・集計用の読み出し口は`engine`内部専用（`pub(crate)`）。パネルの
+/// `FeInput`/`ReInput`のentityと`TimeKeys`は、現状は`String`列で受け取り構築時にコード化する。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct GroupCodes {
+pub struct GroupCodes {
     /// 各行のグループコード（長さ`n`、値は`0..n_groups`）。
     codes: Vec<usize>,
     /// グループごとの観測数（長さ`n_groups`、コード順）。
     counts: Vec<usize>,
-    /// グループのキー（長さ`n_groups`、コード順）。`from_ids_without_keys`で作ったコードは
+    /// グループのキー（長さ`n_groups`、コード順）。`from_labels_without_keys`で作ったコードは
     /// `None`（クラスターの検証・集計はコードと観測数だけを使い、キーの`String`を
     /// `n_groups`個確保する無駄を省く）。
     keys: Option<Vec<String>>,
 }
 
 impl GroupCodes {
-    /// `ids`を辞書順の整数コードに変換する。ハッシュは`ids`全体に1回、ソートはユニークな
-    /// キー（`n_groups`個）にだけ行う。
-    pub(crate) fn from_ids(ids: &[String]) -> Self {
-        Self::build(ids, |_, _| Ordering::Equal, true)
+    /// 各行のラベル`labels`を辞書順の整数コードに変換する。ハッシュは`labels`全体に1回、
+    /// ソートはユニークなキー（`n_groups`個）にだけ行う。
+    pub fn from_labels(labels: &[String]) -> Self {
+        Self::build(labels, |_, _| Ordering::Equal, true)
     }
 
-    /// [`Self::from_ids`]と同じコード・観測数・グループ内の行順で、グループのキー（`keys`）だけ
+    /// [`Self::from_labels`]と同じコード・観測数・グループ内の行順で、グループのキー（`keys`）だけ
     /// 作らない。クラスターロバスト分散のように、検証（クラスター数）と集計（行インデックス）に
     /// コードと観測数しか使わない呼び出し向け（グループ数が多いときの`String`の確保を省く）。
     /// [`Self::keys`]は呼べない。
-    pub(crate) fn from_ids_without_keys(ids: &[String]) -> Self {
-        Self::build(ids, |_, _| Ordering::Equal, false)
+    pub fn from_labels_without_keys(labels: &[String]) -> Self {
+        Self::build(labels, |_, _| Ordering::Equal, false)
     }
 
     /// `ids`を整数コードに変換する。コードの順序は`compare_rows`（各キーが最初に現れた行の
-    /// インデックス2つを比べる）で決め、同順位は`String`の辞書順で決める。`from_ids`は
+    /// インデックス2つを比べる）で決め、同順位は`String`の辞書順で決める。`from_labels`は
     /// `compare_rows`が常に`Equal`の場合（辞書順のみ）にあたる。
     ///
     /// 同じキーの行は同じ順序づけの値を持つこと（`TimeKeys`の各コンストラクタが保証する）。
     /// 異なるキーが同順位になるのは、値としては等しい別表記（浮動小数点の`0.0`と`-0.0`等）
     /// だけで、その2つの順序はキーの辞書順で行の並びに依らず決まる。
-    pub(crate) fn from_ids_ordered(
+    pub(crate) fn from_labels_ordered(
         ids: &[String],
         compare_rows: impl Fn(usize, usize) -> Ordering,
     ) -> Self {
@@ -129,12 +134,12 @@ impl GroupCodes {
     /// グループのキー（コード順）。
     ///
     /// # Panics
-    /// [`Self::from_ids_without_keys`]で作ったコードでは呼べない（キーを作っていない）。
+    /// [`Self::from_labels_without_keys`]で作ったコードでは呼べない（キーを作っていない）。
     /// どのコンストラクタを使うかは呼び出し側が決める内部契約で、入力データには依らない。
     pub(crate) fn keys(&self) -> &[String] {
         self.keys
             .as_deref()
-            .expect("keys are not built for codes made by from_ids_without_keys")
+            .expect("keys are not built for codes made by from_labels_without_keys")
     }
 
     /// ユニークなグループ数。
@@ -201,7 +206,7 @@ mod tests {
     /// `["a", "a", "b", "b", "b"]`のようなラベル列から整数コードを作るヘルパ。
     fn entities(ids: &[&str]) -> GroupCodes {
         let ids: Vec<String> = ids.iter().map(|s| s.to_string()).collect();
-        GroupCodes::from_ids(&ids)
+        GroupCodes::from_labels(&ids)
     }
 
     #[test]
@@ -210,8 +215,8 @@ mod tests {
             .iter()
             .map(|s| s.to_string())
             .collect();
-        let keyed = GroupCodes::from_ids(&ids);
-        let keyless = GroupCodes::from_ids_without_keys(&ids);
+        let keyed = GroupCodes::from_labels(&ids);
+        let keyless = GroupCodes::from_labels_without_keys(&ids);
 
         assert_eq!(keyless.codes(), keyed.codes());
         assert_eq!(keyless.counts(), keyed.counts());
@@ -227,7 +232,7 @@ mod tests {
     #[should_panic(expected = "keys are not built")]
     fn group_codes_without_keys_panics_when_keys_are_requested() {
         let ids = vec!["a".to_string(), "b".to_string()];
-        let _ = GroupCodes::from_ids_without_keys(&ids).keys();
+        let _ = GroupCodes::from_labels_without_keys(&ids).keys();
     }
 
     #[test]
@@ -245,7 +250,7 @@ mod tests {
     fn group_codes_uses_string_byte_order_like_btreemap() {
         // 数値文字列も`String`の辞書順（"10" < "9"）。DKの時系列順序の規約と同じ。
         let ids: Vec<String> = ["9", "10", "2"].iter().map(|s| s.to_string()).collect();
-        let codes = GroupCodes::from_ids(&ids);
+        let codes = GroupCodes::from_labels(&ids);
         let btree_order: Vec<&str> = group_indices_by_key(&ids).keys().copied().collect();
         assert_eq!(codes.keys(), btree_order.as_slice());
     }
@@ -278,7 +283,7 @@ mod tests {
             fn group_codes_agree_with_btreemap_grouping(
                 ids in collection::vec(label(), 1..80),
             ) {
-                let codes = GroupCodes::from_ids(&ids);
+                let codes = GroupCodes::from_labels(&ids);
                 let oracle = group_indices_by_key(&ids);
 
                 let oracle_keys: Vec<&str> = oracle.keys().copied().collect();
@@ -306,7 +311,7 @@ mod tests {
             .map(|s| s.to_string())
             .collect();
         let expected: Vec<Vec<usize>> = group_indices_by_key(&ids).into_values().collect();
-        let actual: Vec<Vec<usize>> = GroupCodes::from_ids(&ids)
+        let actual: Vec<Vec<usize>> = GroupCodes::from_labels(&ids)
             .group_indices()
             .iter()
             .map(<[usize]>::to_vec)
@@ -316,7 +321,7 @@ mod tests {
 
     #[test]
     fn group_codes_handles_empty_input() {
-        let codes = GroupCodes::from_ids(&[]);
+        let codes = GroupCodes::from_labels(&[]);
         assert_eq!(codes.n_groups(), 0);
         assert_eq!(codes.nobs(), 0);
         assert_eq!(codes.group_indices().iter().count(), 0);

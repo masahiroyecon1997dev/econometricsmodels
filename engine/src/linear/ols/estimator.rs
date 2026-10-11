@@ -7,7 +7,6 @@ use super::input::OlsInput;
 use crate::linear::common::LeastSquaresError;
 use crate::shared::error::CommonError;
 use crate::shared::goodness_of_fit::{GaussianGoodnessOfFit, gaussian_goodness_of_fit};
-use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference;
 use crate::shared::least_squares::{LeastSquaresFit, least_squares, residual_sum_of_squares};
 use crate::shared::validation::validate_has_regressors;
@@ -119,35 +118,6 @@ impl OlsEstimator {
         cov_type: CovType,
         confidence_level: f64,
     ) -> Result<Self, LeastSquaresError> {
-        // クラスターのグループキーは、検証（クラスター数）と集計（`Σ_g S_g S_g'`）の両方で
-        // 使うため、ここで一度だけ整数コードにする（`CovType::cluster_codes`参照）。
-        let cluster_codes = cov_type.cluster_codes();
-        Self::fit_with_cluster_codes(input, cov_type, cluster_codes.as_ref(), confidence_level)
-    }
-
-    /// [`Self::fit`]と同じだが、`cov_type=Cluster`のグループキーを整数コード化済みの
-    /// `cluster_codes`で受け取る。IVの第一段階・Wu-Hausman拡張回帰のように、同じクラスター列で
-    /// `fit`を何度も呼ぶ呼び出し元が、列ごとに（内生変数の数だけ）コード化し直さずに済む
-    /// ようにするための内部入口。
-    ///
-    /// # Contract
-    /// `cluster_codes`は`cov_type.cluster_codes()`と同じ内容であること。つまり`cov_type`が
-    /// `Cluster { groups: Some(_) }`のときだけ`Some`で、それ以外（他の`cov_type`、
-    /// `Cluster { groups: None }`）では`None`。食い違うと、非クラスターの`cov_type`に
-    /// `Some`を渡せばクラスター数の検証が走り、`Cluster { groups: Some(_) }`に`None`を渡せば
-    /// `MissingClusterColumn`になる。呼び出し元（engine内部のIVの第一段階・Wu-Hausman拡張回帰）が
-    /// 自分の`cov_type`から作ったコードだけを渡す内部契約のため、`debug_assert!`で検出する。
-    pub(crate) fn fit_with_cluster_codes(
-        input: OlsInput,
-        cov_type: CovType,
-        cluster_codes: Option<&GroupCodes>,
-        confidence_level: f64,
-    ) -> Result<Self, LeastSquaresError> {
-        debug_assert_eq!(
-            matches!(&cov_type, CovType::Cluster { groups: Some(_) }),
-            cluster_codes.is_some(),
-            "cluster_codes must be Some exactly when cov_type is Cluster with groups"
-        );
         validate_has_regressors(input.nobs(), input.k())?;
 
         // faer のグローバル並列度を Par::Seq に固定する（`crate::shared::parallelism`）。
@@ -166,7 +136,7 @@ impl OlsEstimator {
 
         // 入力だけから判定できるクラスター数の検証は、QR分解・残差計算より前に行う
         // （`cov_params::validate_cluster_count`参照）。
-        validate_cluster_count(cluster_codes, n, k - usize::from(input.has_intercept()))?;
+        validate_cluster_count(&cov_type, n, k - usize::from(input.has_intercept()))?;
 
         let LeastSquaresFit {
             params,
@@ -182,15 +152,7 @@ impl OlsEstimator {
             cov_params,
             df_inference,
             hac_lags_used,
-        } = compute_cov_params(
-            &cov_type,
-            cluster_codes,
-            input.x(),
-            &residuals,
-            &xtx_inv,
-            sigma2,
-            df_resid,
-        )?;
+        } = compute_cov_params(&cov_type, input.x(), &residuals, &xtx_inv, sigma2, df_resid)?;
 
         let mut std_errors = Mat::zeros(k, 1);
         for j in 0..k {

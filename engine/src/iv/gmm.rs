@@ -201,7 +201,7 @@ use faer::prelude::Solve;
 use faer::{Accum, Mat, Par, Side};
 use statrs::distribution::{ChiSquared, ContinuousCDF, Normal};
 
-use crate::iv::common::{IvError, IvInput, mat_to_columns, structural_cluster_codes};
+use crate::iv::common::{IvError, IvInput, mat_to_columns, validate_structural_cluster_count};
 use crate::linear::ols::CovType;
 use crate::shared::covariance::time_ordering;
 use crate::shared::error::CommonError;
@@ -222,7 +222,7 @@ pub enum WeightType {
     /// 不均一分散頑健。
     Robust,
     /// クラスター頑健。`groups`が`None`の場合は`CommonError::MissingClusterColumn`。
-    Cluster { groups: Option<Vec<String>> },
+    Cluster { groups: Option<GroupCodes> },
     /// Newey-West（Bartlettカーネル）によるHAC型。`lags=None`なら`two_sls.rs`と同じ
     /// 経験則で自動計算する。`time_order`は`IvInput`の行と対応する長さnの配列で、この値の昇順を
     /// 時系列順とする（必須。行順を暗黙に時系列順とみなす既定は置かない）。
@@ -396,7 +396,7 @@ impl GmmEstimator {
         // `g`・`q`は入力だけから判定できるため、点推定・SE計算より前に弾く。
         // `weight_type=Cluster`の重み行列`S`（l×l）の`G`と`l`の関係は別軸のため
         // `validate_weight_type`側で検証する。
-        let cov_cluster_codes = structural_cluster_codes(&input, &cov_type)?;
+        validate_structural_cluster_count(&input, &cov_type)?;
 
         // 1段階GMMは`weight_type`を持たない（点推定・Hansen Jとも`(Z'Z)⁻¹`のみで計算する）
         // ため検証もしない。2段階・反復では点推定に使う重みの妥当性を検証する。
@@ -405,9 +405,8 @@ impl GmmEstimator {
             GmmType::TwoStep { weight } | GmmType::Iterated { weight, .. } => Some(weight),
         };
         let l_instruments = input.k_exog() + input.instruments().ncols();
-        // `weight_type=Cluster`のグループキーの整数コード（`validate_weight_type`が検証のために
-        // 作る）。`cov_type=Cluster`のコード（上の`cov_cluster_codes`）とは、同じ列を指して
-        // いても別々の`Vec<String>`から作るため別のコードになる。
+        // `weight_type=Cluster`のグループ（`validate_weight_type`が検証して返す）。`cov_type=Cluster`
+        // のグループとは別の入力で、同じ列を指していても別々に渡される。
         let weight_cluster_codes = match weight_type {
             Some(weight_type) => validate_weight_type(weight_type, n, k, l_instruments)?,
             None => None,
@@ -415,7 +414,7 @@ impl GmmEstimator {
         // グループごとの行インデックスは反復中不変のため、ループの外で一度だけ作る
         // （反復GMMで`cluster_moment_covariance`が反復のたびに集計し直さない）。
         let weight_group_indices: Option<GroupIndices> =
-            weight_cluster_codes.as_ref().map(GroupCodes::group_indices);
+            weight_cluster_codes.map(GroupCodes::group_indices);
 
         let x_exog_columns = mat_to_columns(input.x_exog());
 
@@ -621,12 +620,10 @@ impl GmmEstimator {
                 // 補正が無く使い回せないのと対照的）。
                 hac_moment_covariance(&z, &residuals, n, l, lags, &order)
             }
-            CovType::Cluster { .. } => {
+            CovType::Cluster { groups } => {
                 // クラスター数 `g >= 2`・`g > df_model`（構造方程式の傾き係数の数）は`fit()`冒頭
-                // （`structural_cluster_codes`）で検証済み。
-                let groups = cov_cluster_codes
-                    .as_ref()
-                    .ok_or(CommonError::MissingClusterColumn)?;
+                // （`validate_structural_cluster_count`）で検証済み。
+                let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
                 gmm_cluster_omega(&z, &residuals, n, k, l, groups)
             }
         };
@@ -888,25 +885,24 @@ fn gmm_coefficients_converged(prev: &Mat<f64>, next: &Mat<f64>, rtol: f64) -> bo
 /// `rank(S) ≤ G-1`となる。よって過剰識別は`G < l`、丁度識別は`G <= l`で構造的に特異に
 /// なるため`IvError::InsufficientClustersForWeightMatrix`で弾く。
 ///
-/// `Cluster`のとき、検証のために作ったグループキーの整数コードを返す（それ以外は`None`）。
+/// `Cluster`のとき、検証したグループ（整数コード）を返す（それ以外は`None`）。
 /// 呼び出し元は、このコードから集計用の行インデックスを一度だけ作って反復に使い回す。
 fn validate_weight_type(
     weight_type: &WeightType,
     n: usize,
     k: usize,
     l: usize,
-) -> Result<Option<GroupCodes>, IvError> {
+) -> Result<Option<&GroupCodes>, IvError> {
     match weight_type {
         WeightType::Classical | WeightType::Robust => {}
         WeightType::Cluster { groups } => {
             let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
-            let codes = GroupCodes::from_ids_without_keys(groups);
-            let g = validate_cluster_groups(&codes, n)?;
+            let g = validate_cluster_groups(groups, n)?;
             let exactly_identified = l == k;
             if g < l || (exactly_identified && g == l) {
                 return Err(IvError::InsufficientClustersForWeightMatrix { g, l });
             }
-            return Ok(Some(codes));
+            return Ok(Some(groups));
         }
         WeightType::Hac { lags, .. } => {
             resolve_hac_lags(*lags, n)?;
@@ -1698,7 +1694,7 @@ mod tests {
             input,
             GmmType::TwoStep {
                 weight: WeightType::Cluster {
-                    groups: Some(groups),
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
                 },
             },
             true,
@@ -1984,7 +1980,7 @@ mod tests {
             input,
             GmmType::TwoStep {
                 weight: WeightType::Cluster {
-                    groups: Some(groups),
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
                 },
             },
             true,
@@ -2029,7 +2025,7 @@ mod tests {
             input,
             GmmType::TwoStep {
                 weight: WeightType::Cluster {
-                    groups: Some(groups.clone()),
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
                 },
             },
             true,
@@ -3291,18 +3287,16 @@ mod tests {
     }
 
     #[test]
-    fn validate_weight_type_returns_codes_only_for_cluster() {
+    fn validate_weight_type_returns_the_groups_only_for_cluster() {
         let n = 16;
-        let codes = validate_weight_type(
-            &WeightType::Cluster {
-                groups: Some(labelled_groups(n, 4, "a")),
-            },
-            n,
-            2,
-            3,
-        )
-        .unwrap()
-        .expect("Cluster weight must produce codes");
+        let cluster = WeightType::Cluster {
+            groups: Some(GroupCodes::from_labels_without_keys(&labelled_groups(
+                n, 4, "a",
+            ))),
+        };
+        let codes = validate_weight_type(&cluster, n, 2, 3)
+            .unwrap()
+            .expect("Cluster weight must expose its groups");
         assert_eq!(codes.nobs(), n);
         assert_eq!(codes.n_groups(), 4);
 
@@ -3339,13 +3333,13 @@ mod tests {
                 input,
                 GmmType::TwoStep {
                     weight: WeightType::Cluster {
-                        groups: Some(weight.to_vec()),
+                        groups: Some(GroupCodes::from_labels_without_keys(weight)),
                     },
                 },
                 true,
                 match cov {
                     Some(groups) => CovType::Cluster {
-                        groups: Some(groups.to_vec()),
+                        groups: Some(GroupCodes::from_labels_without_keys(groups)),
                     },
                     None => CovType::Classical,
                 },
@@ -3424,7 +3418,7 @@ mod tests {
             }
         }
 
-        let codes = GroupCodes::from_ids_without_keys(&labels);
+        let codes = GroupCodes::from_labels_without_keys(&labels);
         let actual = cluster_moment_covariance(&z, &residuals, l, &codes.group_indices());
         for a in 0..l {
             for b in 0..l {
@@ -3461,7 +3455,7 @@ mod tests {
             },
             true,
             CovType::Cluster {
-                groups: Some(groups.clone()),
+                groups: Some(GroupCodes::from_labels_without_keys(&groups)),
             },
             0.95,
         )
@@ -3726,7 +3720,7 @@ mod tests {
             },
             true,
             CovType::Cluster {
-                groups: Some(groups),
+                groups: Some(GroupCodes::from_labels_without_keys(&groups)),
             },
             0.95,
         );
@@ -3770,7 +3764,7 @@ mod tests {
             },
             true,
             CovType::Cluster {
-                groups: Some(groups),
+                groups: Some(GroupCodes::from_labels_without_keys(&groups)),
             },
             0.95,
         );

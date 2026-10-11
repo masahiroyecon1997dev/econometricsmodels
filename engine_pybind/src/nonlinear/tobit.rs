@@ -715,6 +715,7 @@ pub(crate) fn fit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use engine::shared::group_codes::GroupCodes;
     use polars::df;
 
     /// `build_tobit_input`のテスト全体で使う既定の`TobitOptions`（`cov_type="classical"`・
@@ -973,12 +974,12 @@ mod tests {
             EngineCovType::Cluster { groups } => {
                 assert_eq!(
                     groups,
-                    Some(vec![
+                    Some(GroupCodes::from_labels_without_keys(&[
                         "g1".to_string(),
                         "g1".to_string(),
                         "g2".to_string(),
                         "g2".to_string()
-                    ])
+                    ]))
                 );
             }
             other => panic!("expected Cluster, got {other:?}"),

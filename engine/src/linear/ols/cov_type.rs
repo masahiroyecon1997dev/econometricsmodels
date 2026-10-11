@@ -30,26 +30,25 @@ pub enum CovType {
     /// 無効化するオプションは設けない。`docs/spec/ols-spec.md`
     /// 「標準誤差」のクラスター参照）。
     Cluster {
-        /// クラスターのグループキー。`OlsInput`の行と対応する長さnの配列。
+        /// クラスターのグループ（整数コード化済み）。`OlsInput`の行と対応する長さnの列。
         /// `None`の場合、`OlsEstimator::fit`は`CommonError::MissingClusterColumn`を返す
         /// （`hac_lags: Option<i64>`と同じ設計パターンで、値の妥当性検証を`engine`内で
         /// 行うため`Option`にしている。`engine_pybind`側で`cluster`未指定を
         /// 事前に弾かない）。
-        groups: Option<Vec<String>>,
+        groups: Option<GroupCodes>,
     },
 }
 
 impl CovType {
-    /// `Cluster`のグループキーを整数コードに変換する（それ以外、または`groups=None`は`None`）。
+    /// `Cluster`のグループ（それ以外、または`groups=None`は`None`）。
     ///
-    /// クラスターロバスト分散は`String`のままだと、検証・集計のたびに全行をハッシュ/比較し直す
-    /// ことになる。各`fit()`が冒頭でこれを1回だけ呼び、得たコードを検証と集計の両方に使う
+    /// 各`fit()`は冒頭でこれを取り出し、クラスター数の検証と集計の両方に同じコードを使う
     /// （`GroupCodes`のdoc参照）。
-    pub(crate) fn cluster_codes(&self) -> Option<GroupCodes> {
+    pub(crate) fn cluster_groups(&self) -> Option<&GroupCodes> {
         match self {
             CovType::Cluster {
                 groups: Some(groups),
-            } => Some(GroupCodes::from_ids_without_keys(groups)),
+            } => Some(groups),
             _ => None,
         }
     }
@@ -60,13 +59,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cluster_codes_returns_codes_for_cluster_with_groups() {
-        let groups: Vec<String> = ["b", "a", "b", "c"].iter().map(|s| s.to_string()).collect();
-        let codes = CovType::Cluster {
-            groups: Some(groups),
-        }
-        .cluster_codes()
-        .expect("Cluster with groups must produce codes");
+    fn cluster_groups_returns_the_codes_for_cluster_with_groups() {
+        let labels: Vec<String> = ["b", "a", "b", "c"].iter().map(|s| s.to_string()).collect();
+        let cov_type = CovType::Cluster {
+            groups: Some(GroupCodes::from_labels_without_keys(&labels)),
+        };
+        let codes = cov_type
+            .cluster_groups()
+            .expect("Cluster with groups must expose its codes");
 
         assert_eq!(codes.nobs(), 4);
         assert_eq!(codes.n_groups(), 3);
@@ -75,16 +75,16 @@ mod tests {
     }
 
     #[test]
-    fn cluster_codes_is_none_without_groups_or_for_other_cov_types() {
-        assert!(CovType::Cluster { groups: None }.cluster_codes().is_none());
-        assert!(CovType::Classical.cluster_codes().is_none());
-        assert!(CovType::Hc1.cluster_codes().is_none());
+    fn cluster_groups_is_none_without_groups_or_for_other_cov_types() {
+        assert!(CovType::Cluster { groups: None }.cluster_groups().is_none());
+        assert!(CovType::Classical.cluster_groups().is_none());
+        assert!(CovType::Hc1.cluster_groups().is_none());
         assert!(
             CovType::Hac {
                 lags: Some(1),
                 time_order: vec![0.0, 1.0]
             }
-            .cluster_codes()
+            .cluster_groups()
             .is_none()
         );
     }

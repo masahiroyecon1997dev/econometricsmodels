@@ -496,7 +496,7 @@ impl LogitEstimator {
 
         let n = input.nobs();
         let k = input.k();
-        let cluster_codes = validate_fit_preconditions(
+        validate_fit_preconditions(
             confidence_level,
             max_iter,
             tol,
@@ -588,16 +588,16 @@ impl LogitEstimator {
                     SandwichVariant::Hc1,
                 )?
             }
-            CovType::Cluster { .. } => {
+            CovType::Cluster { groups } => {
                 let problem = problem_for_scores
                     .as_ref()
                     .expect("problem_for_scores must be Some for CovType::Cluster");
                 // `groups`のNone・クラスター数不足の検証はfit()冒頭で完了済み
                 // （MissingClusterColumn/InsufficientClustersを最適化前に早期に返す
                 // ため）。ここでの`expect`はその契約を明記する防御的な扱い。
-                let groups = cluster_codes
+                let groups = groups
                     .as_ref()
-                    .expect("cluster codes are built by validate_fit_preconditions for Cluster");
+                    .expect("groups are validated by validate_fit_preconditions for Cluster");
                 cluster_cov_params(&hessian_std, &problem.scores(&output.params), n, k, groups)?
             }
         };
@@ -886,6 +886,7 @@ impl LogitEstimator {
 mod tests {
     use super::*;
     use crate::nonlinear::common::{SolverType, dydx_and_jacobian};
+    use crate::shared::group_codes::GroupCodes;
     use statrs::distribution::{ChiSquared, ContinuousCDF};
 
     #[test]
@@ -1596,7 +1597,7 @@ mod tests {
                 &scores_std,
                 n,
                 k,
-                &crate::shared::group_codes::GroupCodes::from_ids(&groups),
+                &crate::shared::group_codes::GroupCodes::from_labels(&groups),
             )
             .unwrap(),
             &scale,
@@ -1610,7 +1611,7 @@ mod tests {
                 tol: 1e-8,
                 raise_on_non_convergence: true,
                 cov_type: CovType::Cluster {
-                    groups: Some(groups),
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
                 },
                 confidence_level: 0.95,
             },
@@ -1697,7 +1698,7 @@ mod tests {
                 &scores_std,
                 n,
                 k,
-                &crate::shared::group_codes::GroupCodes::from_ids(&groups),
+                &crate::shared::group_codes::GroupCodes::from_labels(&groups),
             )
             .unwrap(),
             &scale,
@@ -1711,7 +1712,7 @@ mod tests {
                 tol: 1e-8,
                 raise_on_non_convergence: true,
                 cov_type: CovType::Cluster {
-                    groups: Some(groups),
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
                 },
                 confidence_level: 0.95,
             },
@@ -1782,7 +1783,7 @@ mod tests {
                 tol: 1e-8,
                 raise_on_non_convergence: true,
                 cov_type: CovType::Cluster {
-                    groups: Some(groups),
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
                 },
                 confidence_level: 0.95,
             },
@@ -1828,7 +1829,7 @@ mod tests {
                 tol: 1e-8,
                 raise_on_non_convergence: true,
                 cov_type: CovType::Cluster {
-                    groups: Some(groups),
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
                 },
                 confidence_level: 0.95,
             },
@@ -1875,7 +1876,7 @@ mod tests {
             CovType::Hc0,
             CovType::Hc1,
             CovType::Cluster {
-                groups: Some(groups),
+                groups: Some(GroupCodes::from_labels_without_keys(&groups)),
             },
         ] {
             let newton = LogitEstimator::fit(
@@ -2235,7 +2236,7 @@ mod tests {
                 CovType::Hc1,
                 CovType::Opg,
                 CovType::Cluster {
-                    groups: Some(groups.clone()),
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
                 },
             ] {
                 let input = LogitInput::from_columns(

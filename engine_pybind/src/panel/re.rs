@@ -62,7 +62,8 @@ use pyo3_polars::PyDataFrame;
 use super::common::{panel_error_to_pyerr, validate_dk_time_role};
 use crate::linear::common::mat_to_vec;
 use crate::shared::column_extraction::{
-    extract_f64_column, extract_f64_columns, extract_group_key_column, extract_time_keys,
+    extract_cluster_groups, extract_f64_column, extract_f64_columns, extract_group_key_column,
+    extract_time_keys,
 };
 use crate::shared::errors::ValidationError;
 use crate::shared::option_values::{
@@ -314,7 +315,7 @@ fn parse_re_cov_type(df: &DataFrame, options: &REOptions) -> PyResult<(ReCovType
             let groups = options
                 .cluster
                 .as_ref()
-                .map(|col_name| extract_group_key_column(df, col_name))
+                .map(|col_name| extract_cluster_groups(df, col_name))
                 .transpose()?;
             ReCovType::Cluster { groups }
         }
@@ -494,6 +495,7 @@ pub(crate) fn fit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use engine::shared::group_codes::GroupCodes;
     use polars::df;
 
     /// `build_re_input`のテスト全体で使う既定の`REOptions`（`cov_type="cluster"`・
@@ -729,12 +731,12 @@ mod tests {
         assert_eq!(
             cov_type,
             ReCovType::Cluster {
-                groups: Some(vec![
+                groups: Some(GroupCodes::from_labels_without_keys(&[
                     "x".to_string(),
                     "y".to_string(),
                     "x".to_string(),
                     "y".to_string(),
-                ])
+                ]))
             }
         );
     }

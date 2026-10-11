@@ -11,7 +11,7 @@ use engine::nonlinear::common::{CovType, MarginalEffectsAt, MleError, SolverType
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 
-use crate::shared::column_extraction::extract_group_key_column;
+use crate::shared::column_extraction::extract_cluster_groups;
 use crate::shared::errors::{ComputationError, ValidationError, common_error_to_pyerr};
 use crate::shared::validation::reject_unused_option;
 
@@ -79,7 +79,7 @@ pub struct MarginalEffectsResult {
 
 /// `cov_type`文字列（大文字小文字を区別しない）を`engine::nonlinear::common::CovType`に
 /// パースする。`cov_type="cluster"`のときのみ`cluster`で指定された列を
-/// `extract_group_key_column`で抽出する（他のcov_typeで`cluster`が指定されていれば
+/// `extract_cluster_groups`で抽出する（他のcov_typeで`cluster`が指定されていれば
 /// `ValidationError`、OLSの`cluster`/`hac_*`の扱いと同じ方針）。
 ///
 /// Logit/Probit/Tobit共通（元は`logit.rs`/`probit.rs`/`tobit.rs`に
@@ -105,7 +105,7 @@ pub(crate) fn parse_cov_type(
         "cluster" => {
             let groups = cluster
                 .as_ref()
-                .map(|col_name| extract_group_key_column(df, col_name))
+                .map(|col_name| extract_cluster_groups(df, col_name))
                 .transpose()?;
             Ok(CovType::Cluster { groups })
         }

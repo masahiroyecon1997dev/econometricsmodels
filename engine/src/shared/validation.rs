@@ -113,7 +113,7 @@ mod tests {
 
     fn codes(ids: &[&str]) -> GroupCodes {
         let ids: Vec<String> = ids.iter().map(|s| s.to_string()).collect();
-        GroupCodes::from_ids(&ids)
+        GroupCodes::from_labels(&ids)
     }
 
     #[test]

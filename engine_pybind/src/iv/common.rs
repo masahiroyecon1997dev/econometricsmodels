@@ -68,7 +68,7 @@ use crate::linear::common::{
 };
 use crate::linear::ols::{OLSResult, ols_estimator_to_result};
 use crate::shared::column_extraction::{
-    extract_f64_column, extract_group_key_column, extract_time_order_ranks,
+    extract_cluster_groups, extract_f64_column, extract_time_order_ranks,
 };
 use crate::shared::errors::{ComputationError, ValidationError, common_error_to_pyerr};
 use crate::shared::option_values::{
@@ -705,7 +705,7 @@ fn parse_weight_type(df: &DataFrame, options: &IVOptions) -> PyResult<(WeightTyp
             let groups = options
                 .cluster
                 .as_ref()
-                .map(|col_name| extract_group_key_column(df, col_name))
+                .map(|col_name| extract_cluster_groups(df, col_name))
                 .transpose()?;
             WeightType::Cluster { groups }
         }
@@ -1088,6 +1088,7 @@ pub(crate) fn fit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use engine::shared::group_codes::GroupCodes;
     use polars::df;
 
     /// `build_iv_input`のテスト全体で使う既定の`IVOptions`（`estimator="2sls"`・
@@ -1560,12 +1561,12 @@ mod tests {
         assert_eq!(
             cov_type,
             EngineCovType::Cluster {
-                groups: Some(vec![
+                groups: Some(GroupCodes::from_labels_without_keys(&[
                     "a".to_string(),
                     "a".to_string(),
                     "b".to_string(),
                     "b".to_string()
-                ])
+                ]))
             }
         );
     }

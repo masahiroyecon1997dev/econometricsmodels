@@ -128,6 +128,8 @@ $$
   反復順序が変わり、浮動小数点加算の非結合性により`fit()`を複数回呼ぶと標準誤差が1 ULP程度ぶれる
   非決定性バグを起こす（`fit_cluster_std_errors_are_deterministic_across_repeated_fits`で固定）。
   クラスター系の実装を今後増やす場合も同じ罠がある。
+- `CovType::Cluster { groups }`は整数コード化済みの`Option<GroupCodes>`で受け取る（`engine_pybind`が
+  クラスター列のラベルから作って渡す）。`fit()`はクラスター数の検証と集計に同じコードを使う。
 - 小標本補正`G/(G-1) * (n-1)/(n-k)`は常に適用し、無効化オプションは設けない（statsmodels
   `cov_cluster`の既定`use_correction=True`と一致）。
 - t検定・信頼区間・F検定の自由度は`cov_type="cluster"`のときのみ`n-k`ではなく**`G-1`**に切り替える

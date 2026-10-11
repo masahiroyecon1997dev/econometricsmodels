@@ -355,10 +355,13 @@ FEの`WithinRegressionFailed`と同じく内側の`LeastSquaresError`の分類�
     `plm`の`random.method`既定値とも一致する）。Wallace-Hussain法・Amemiya法はオプションで選べるように
     するが、実装はSwamy-Aroraの後に回す。オプションの名前・値の表記は実装時に決める。Nerlove法は
     対象にしない。`plm`の`ercomp`で、3法は別々の分散成分・θを返すことを確認済み。
-  - **分散成分の推定法を選ぶオプション（仮称`variance_method`）は1-wayにも付ける**（2-wayだけに
-    付けると1-wayと非対称になるため）。既定は`"swar"`で、1-wayの既定の挙動（3.1節、`linearmodels`準拠）は
-    変えない。Swamy-Arora以外を実装するまでは、他の値は`ValidationError`にする。Wallace-Hussain・Amemiya
-    の参照実装は`plm`のみで、`linearmodels`には無い。
+  - **分散成分の推定法を選ぶオプション`variance_method`は、Swamy-Arora以外の推定法を実装する時点で
+    追加する**（最初のリリースでは設けない。選択肢が1つのオプションを公開しないため）。追加するときは
+    1-wayにも2-wayにも付け（片方だけだと非対称になるため）、既定は`"swamy_arora"`として、既定の挙動
+    （3.1節、`linearmodels`準拠）は変えない（追加は破壊的変更にならない）。名前は`variance_method`
+    （`cov_type`と取り違えず、`plm`の`random.method`と同じ語）、値は省略しない小文字のスネークケース
+    （`"swamy_arora"`・`"wallace_hussain"`・`"amemiya"`、`cov_type`と同じく大文字小文字は区別しない）。
+    Wallace-Hussain・Amemiyaの参照実装は`plm`のみで、`linearmodels`には無い。
   - **`plm`の分散成分推定の構造**（`plm` 2.6.7の`ercomp`のソース確認と、1-wayの3法をRで再実装した
     数値照合による。バランス・不均衡とも`ercomp`の出力と小数8桁まで一致）。3法は同じ枠組みで、
     1段目の回帰の残差から2つの二乗和（within型の`Q_w`、個体平均型の`Q_id`）を作り、期待値の行列`M`と
@@ -462,6 +465,10 @@ FEの`WithinRegressionFailed`と同じく内側の`LeastSquaresError`の分類�
       チェック」の例外になる）。
     - 切片と共線な定数列・時間不変変数同士の共線など、設計行列が特異になる入力は最終回帰の特異性検出
       （`ComputationError`）に任せる。
-  - **実装時に決める事項**（現時点では未確定）: `REResult`への
-    `n_periods`の追加（FEの仕様では「REには追加しない」としている記述の見直し）、`variance_method`の
-    名前・値の表記。
+  - **`REResult`に`n_periods`を追加する**（FEと同じ定義: `time`を指定した2-wayのときだけユニークな
+    時点数、1-wayは`None`で、`dk_time`だけの指定でも`None`）。2-way RE実装時に、`fe-spec.md`2章の
+    「REには追加しない」という記述と、`panel-common.md`2.1節の表の`n_periods`（FEのみ）を直す。
+  - **分散成分を結果として公開する**（σ_ε²・σ_u²・θ。2-wayではσ_λ²と3つの重みも）。現行の`REResult`は
+    公開していない。時期は2-way RE実装時とし、フィールド名・θの返し方（1-wayは個体ごと、2-wayは3つの
+    重み）はそのときに決める。
+  - **実装時に決める事項**（現時点では未確定）: 分散成分の公開フィールドの名前と形式。

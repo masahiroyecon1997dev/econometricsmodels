@@ -108,9 +108,9 @@ OLS（`OLSResult`、`engine_pybind/src/linear/ols.rs:137-191`）の項目を土�
   `hausman_p_value` / `hausman_df`として含める（詳細は[`re-spec.md`](./re-spec.md)3.7節）。
   - **回帰ベース（補助回帰）版**（`plm::phtest(method = "aux")`相当）で、比較は常に1-way。
     補助回帰のWald検定の共分散はRE本体の`cov_type`に連動する（`re-spec.md`3.7節）。
-  - 補助回帰が成立しない場合（傾き係数0個・ランク落ち等）は、`hausman_statistic`等を
-    `None`にしたうえで、RE本体の結果は正常に返す（REの主要な結果自体は有効なため、
-    診断情報の欠落だけに留める）。
+  - **`hausman_*`が`None`になるのは、比較対象の傾き係数が0個の場合のみ**。補助回帰のランク落ち・
+    Wald検定の特異性・クラスター数不足など、計算自体が成立しない場合は`hausman_*`を`None`にせず
+    `fit()`が失敗する（設計行列の多重共線性でエラーにするのと同じ方針。`re-spec.md`3.7節）。
 - **パネル固有R²（2.3節）**: `fit()`の結果本体に含める（別メソッド化しない）。
 - **IV: 第一段階回帰結果は別メソッド**（[`iv-spec.md`](./iv-spec.md)2章参照）。
 

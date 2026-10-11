@@ -32,6 +32,15 @@ Note:
       （`GmmEstimator`はWu-Hausman検定を実装しないため、`IVResults.
       wu_hausman_statistic`は`estimator="gmm"`で常に`None`。`test_iv_api.py`の
       `test_wu_hausman_is_none_for_gmm`で構造確認済み）。
+    - `include_intercept=False`（切片なし）は`iv_gmm.json`の`no_intercept`
+      （`NO_INTERCEPT_SCENARIOS`の4シナリオ、`gmm_weight_type="classical"`固定×
+      classical/hc0/hc1/hac）と比較する（`test_no_intercept_matches_linearmodels`）。
+      **過剰識別のHansen Jだけは比較しない**: linearmodelsは`gmm_weight_type=
+      "classical"`の重みを作る際に残差を常に中心化するため、定数項が無く
+      `mean(e) != 0`のとき本実装（非中心化`σ̂²₀=e'e/n`）と一致しない（baselineで
+      0.311対0.190）。定数項があれば一致する。Hansen J（過剰識別）は
+      `test_iv_gmm_crosscheck.py`（momentfit、非中心化）で検証する
+      （`docs/guide/verification.md`参照）。
     - `weak_instrument_f_statistics`は本実装が`estimator`によらず常にclassicalで
       計算する設計のため、フィクスチャの`weak_instrument_f_independent`と比較する
       （`test_iv_reference.py`と同じ理由）。
@@ -62,7 +71,10 @@ from _tolerances import TOLERANCES
 from econometricsmodels import IV, IVOptions
 
 from benchmark.common import imbalanced_cluster_groups
-from benchmark.iv.fixtures.generate_iv_fixtures import CARD_X_EXOG
+from benchmark.iv.fixtures.generate_iv_fixtures import (
+    CARD_X_EXOG,
+    NO_INTERCEPT_SCENARIOS,
+)
 from benchmark.iv.fixtures.generate_iv_gmm_fixtures import (
     CARD_OTHER_WEIGHT_TYPES,
     COV_TYPES,
@@ -479,3 +491,61 @@ def test_card_other_weight_types_match_linearmodels(fixtures, gmm_weight_type):
         fixtures["card"][gmm_weight_type]["classical"],
         f"card/{gmm_weight_type}/classical",
     )
+
+
+@pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("scenario", list(NO_INTERCEPT_SCENARIOS))
+def test_no_intercept_matches_linearmodels(fixtures, scenario, cov_type):
+    """`include_intercept=False`（切片なし）、`gmm_weight_type="classical"`固定。
+
+    過剰識別のHansen Jはlinearmodelsとは比較しない（linearmodelsが残差を中心化して
+    重みを作るため本実装と一致しない、モジュールdocコメント参照）。代わりに、
+    2SLSのSargan統計量との一致で検証する。丁度識別は他の統計量と同じく`None`
+    であることを確認する。
+    """
+    spec = NO_INTERCEPT_SCENARIOS[scenario]
+    df = pl.read_csv(DATA_DIR / f"iv_{spec['dataset']}.csv")
+    options = IVOptions(
+        estimator="gmm",
+        include_intercept=False,
+        gmm_weight_type="classical",
+        cov_type=cov_type,
+        **hac_time_for(cov_type),
+    )
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=spec["x_exog"],
+        x_endog=spec["x_endog"],
+        instruments=spec["instruments"],
+        options=options,
+    ).fit()
+
+    ref = fixtures["no_intercept"][scenario]["classical"][cov_type]
+    label = f"no_intercept/{scenario}/{cov_type}"
+    assert "const" not in res.param_names, label
+    over_identified = ref["hansen_j_statistic"] is not None
+    _check_result(res, ref, label, check_overid=not over_identified)
+    if over_identified:
+        # linearmodelsとは比較できない代わりに、`gmm_weight_type="classical"`の
+        # Hansen Jが2SLSのSargan統計量と一致する不変条件（`engine/src/iv/
+        # CLAUDE.md`、どちらも`σ̂²₀=e'e/n`の非中心化）で検証する。Sarganは
+        # `test_iv_reference.py`でlinearmodelsと比較済み。
+        res_2sls = IV(
+            with_row_time(df),
+            y="y",
+            x_exog=spec["x_exog"],
+            x_endog=spec["x_endog"],
+            instruments=spec["instruments"],
+            options=IVOptions(include_intercept=False),
+        ).fit()
+        _assert_close(
+            res.overid_statistic,
+            res_2sls.overid_statistic,
+            f"{label}/overid_statistic_vs_sargan",
+        )
+        _assert_close(
+            res.overid_p_value,
+            res_2sls.overid_p_value,
+            f"{label}/overid_p_value_vs_sargan",
+        )

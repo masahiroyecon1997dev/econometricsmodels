@@ -50,6 +50,7 @@ from econometricsmodels import IV, IVOptions
 
 from benchmark.common import imbalanced_cluster_groups
 from benchmark.iv.fixtures.generate_iv_crosscheck_fixtures import CARD_X_EXOG
+from benchmark.iv.fixtures.generate_iv_fixtures import NO_INTERCEPT_SCENARIOS
 from benchmark.iv.fixtures.generate_iv_gmm_fixtures import (
     CARD_OTHER_WEIGHT_TYPES,
     COV_TYPES,
@@ -136,6 +137,7 @@ def _fit(
     instruments: list[str],
     gmm_weight_type: str,
     cov_type: str,
+    include_intercept: bool = True,
 ):
     """`gmm_weight_type`・`cov_type`のどちらかがclusterなら`CLUSTER_COL`列を
     クラスター変数として渡す（重みと共分散で共用）。
@@ -143,6 +145,7 @@ def _fit(
     uses_cluster = "cluster" in (gmm_weight_type, cov_type)
     options = IVOptions(
         estimator="gmm",
+        include_intercept=include_intercept,
         gmm_weight_type=gmm_weight_type,
         cov_type=cov_type,
         **({"cluster": CLUSTER_COL} if uses_cluster else {}),
@@ -316,4 +319,30 @@ def test_card_other_weight_types_match_momentfit(
         _fit_card(gmm_weight_type, "classical"),
         crosscheck_wooldridge["card"][gmm_weight_type]["classical"],
         f"card/{gmm_weight_type}/classical",
+    )
+
+
+@pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("scenario", list(NO_INTERCEPT_SCENARIOS))
+def test_no_intercept_matches_momentfit(crosscheck, scenario, cov_type):
+    """`include_intercept=False`（切片なし）、`gmm_weight_type="classical"`固定。
+    過剰識別のHansen Jは、linearmodelsと異なり非中心化の分散を使うmomentfitと
+    比較する（`test_iv_gmm_reference.py`のモジュールdocコメント参照）。
+    """
+    spec = NO_INTERCEPT_SCENARIOS[scenario]
+    df = pl.read_csv(DATA_DIR / f"iv_{spec['dataset']}.csv")
+    res = _fit(
+        df,
+        y="y",
+        x_exog=spec["x_exog"],
+        x_endog=spec["x_endog"],
+        instruments=spec["instruments"],
+        gmm_weight_type="classical",
+        cov_type=cov_type,
+        include_intercept=False,
+    )
+    label = f"no_intercept/{scenario}/{cov_type}/momentfit"
+    assert "const" not in res.param_names, label
+    _check_result(
+        res, crosscheck["no_intercept"][scenario]["classical"][cov_type], label
     )

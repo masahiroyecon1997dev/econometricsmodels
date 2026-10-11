@@ -77,10 +77,15 @@ from _tolerances import TOLERANCES
 from econometricsmodels import IV, IVOptions
 
 from benchmark.common import imbalanced_cluster_groups
-from benchmark.iv.fixtures.generate_iv_crosscheck_fixtures import CARD_X_EXOG
+from benchmark.iv.fixtures.generate_iv_crosscheck_fixtures import (
+    CARD_X_EXOG,
+    IVREG_UNSUPPORTED_NO_INTERCEPT,
+    NO_INTERCEPT_COV_TYPES,
+)
 from benchmark.iv.fixtures.generate_iv_crosscheck_fixtures import (
     NUMERIC_SCENARIOS as SCENARIOS,
 )
+from benchmark.iv.fixtures.generate_iv_fixtures import NO_INTERCEPT_SCENARIOS
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parents[1]
@@ -158,6 +163,7 @@ def _check_result(
     *,
     check_wu_hausman: bool = True,
     check_wu_hausman_p_value: bool = True,
+    check_sargan: bool = True,
 ) -> None:
     # hac呼び出し（rtolがRTOL_HAC/RTOL_HAC_SMALL_N）ではp_values/conf_int/
     # wu_hausman_statisticの実測乖離がclassical/hc0/hc1/cluster向けの許容誤差を
@@ -226,7 +232,13 @@ def _check_result(
         f"{label}/weak_instrument_f_statistics",
     )
 
-    if ref["sargan_statistic"] is None:
+    # check_sargan=False: 切片なしのivregは残差の中心化TSSを使うSarganで負の値に
+    # なりうる（定数項がZに入っている前提の式）ため、フィクスチャ側がnullで
+    # 比較不能。本実装側の値はlinearmodelsとの比較（`test_iv_reference.py`）で
+    # 検証する。
+    if not check_sargan:
+        pass
+    elif ref["sargan_statistic"] is None:
         assert res.overid_statistic is None, f"{label}/overid_statistic"
         assert res.overid_p_value is None, f"{label}/overid_p_value"
     else:
@@ -463,3 +475,44 @@ def test_cluster_imbalanced_matches_r(crosscheck):
         rtol=RTOL_STRICT,
         check_wu_hausman_p_value=False,
     )
+
+
+@pytest.mark.parametrize("cov_type", NO_INTERCEPT_COV_TYPES)
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        name
+        for name in NO_INTERCEPT_SCENARIOS
+        if name not in IVREG_UNSUPPORTED_NO_INTERCEPT
+    ],
+)
+def test_no_intercept_matches_r(crosscheck, scenario, cov_type):
+    """`include_intercept=False`（切片なし）。ivregの式は両辺に`0 +`を付ける。
+
+    - `x_exog_empty`（`x_exog=[]`かつ切片なし）はivregがfitできないため対象外
+      （`IVREG_UNSUPPORTED_NO_INTERCEPT`、linearmodelsのテストで検証）。
+    - Sarganは比較しない（`_check_result`の`check_sargan`参照）。
+    - hacの小標本補正の慣習差（ivregの`NeweyWest(adjust=TRUE)`が掛ける`n/(n-k)`、
+      本実装・linearmodelsは掛けない）は切片ありと同じで、`RTOL_HAC`の範囲に収まる。
+    """
+    spec = NO_INTERCEPT_SCENARIOS[scenario]
+    df = pl.read_csv(DATA_DIR / f"iv_{spec['dataset']}.csv")
+    options = IVOptions(
+        include_intercept=False,
+        cov_type=cov_type,
+        **hac_time_for(cov_type),
+    )
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=spec["x_exog"],
+        x_endog=spec["x_endog"],
+        instruments=spec["instruments"],
+        options=options,
+    ).fit()
+
+    rtol = RTOL_HAC if cov_type == "hac" else RTOL_STRICT
+    ref = crosscheck["no_intercept"][scenario][cov_type]
+    label = f"no_intercept/{scenario}/{cov_type}/R"
+    assert "const" not in res.param_names, label
+    _check_result(res, ref, label, rtol=rtol, check_sargan=False)

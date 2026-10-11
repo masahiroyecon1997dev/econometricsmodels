@@ -45,9 +45,12 @@ Note:
       （statsmodelsで独立計算した同じ定義のnested F検定）と比較する
       （`weak_instrument_f_linearmodels`と機械精度で一致することは
       フィクスチャ生成時に確認済み、`iv.json`の`_meta.note`参照）。
-    - 第一段階回帰の結果（`first_stage()`）自体はここでは比較しない
-      （`first_stage()`は通常のOLS回帰の結果をそのまま返すだけで、
-      `test_ols_reference.py`が既にOLSの数値一致を検証済みのため）。
+    - 第一段階回帰の結果（`first_stage()`）はここでは比較しない（IV固有の
+      配線＝どの列を・どの切片設定で回帰に渡すかは、同じ入力の`OLS`との直接比較で
+      `test_iv_first_stage.py`が検証する）。
+    - `include_intercept=False`（切片なし）は`iv.json`の`no_intercept`
+      （`NO_INTERCEPT_SCENARIOS`の4シナリオ×classical/hc0/hc1/hac）と比較する
+      （`test_no_intercept_matches_linearmodels`）。
 
     フィクスチャ生成時と同じ入力データを、`tests/fixtures/benchmarks/data/`
     に固定済みのCSV（`benchmark/iv/freeze.py`参照）から読む。
@@ -74,7 +77,10 @@ from _tolerances import TOLERANCES
 from econometricsmodels import IV, IVOptions
 
 from benchmark.common import imbalanced_cluster_groups
-from benchmark.iv.fixtures.generate_iv_fixtures import CARD_X_EXOG
+from benchmark.iv.fixtures.generate_iv_fixtures import (
+    CARD_X_EXOG,
+    NO_INTERCEPT_SCENARIOS,
+)
 from benchmark.iv.fixtures.generate_iv_fixtures import (
     NUMERIC_SCENARIOS as SCENARIOS,
 )
@@ -333,6 +339,36 @@ def test_df1_matches_linearmodels(fixtures, cov_type):
     ).fit()
 
     _check_result(res, fixtures["df1"][cov_type], f"df1/{cov_type}")
+
+
+@pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("scenario", list(NO_INTERCEPT_SCENARIOS))
+def test_no_intercept_matches_linearmodels(fixtures, scenario, cov_type):
+    """`include_intercept=False`（切片なし）。`param_names`に`const`が無いこと、
+    R²が切片なしの定義（非中心化）、Wald統計量が全係数を検定すること
+    （`_check_result`が係数・SE・R²・Wald・診断統計量を一括比較する）。
+    `x_exog_empty`は`x_exog=[]`かつ切片なしで、弱操作変数診断の制限モデルが
+    回帰変数0個になる退化ケース。
+    """
+    spec = NO_INTERCEPT_SCENARIOS[scenario]
+    df = pl.read_csv(DATA_DIR / f"iv_{spec['dataset']}.csv")
+    options = IVOptions(
+        include_intercept=False,
+        cov_type=cov_type,
+        **hac_time_for(cov_type),
+    )
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=spec["x_exog"],
+        x_endog=spec["x_endog"],
+        instruments=spec["instruments"],
+        options=options,
+    ).fit()
+
+    ref = fixtures["no_intercept"][scenario][cov_type]
+    assert "const" not in res.param_names, f"{scenario}/{cov_type}"
+    _check_result(res, ref, f"no_intercept/{scenario}/{cov_type}")
 
 
 # 完全な多重共線性・極端なスケール差（`ComputationError` パス）は

@@ -2516,6 +2516,149 @@
             "hansen_j_statistic": 0.190279200922643,
             "hansen_j_p_value": 0.662684342568851,
             "hac_lag": 5
+          },
+          "cluster": {
+            "coef": {
+              "x1": 1.08491591453125,
+              "endog1": -0.167227617041582
+            },
+            "se": {
+              "x1": 0.0286646378336336,
+              "endog1": 0.0575066779951191
+            },
+            "test_stats": {
+              "x1": 37.8485826623027,
+              "endog1": -2.90796865462783
+            },
+            "p_values": {
+              "x1": 1.80660174225e-313,
+              "endog1": 0.00363784799183913
+            },
+            "conf_int": {
+              "x1": [
+                1.02873425674744,
+                1.14109757231505
+              ],
+              "endog1": [
+                -0.279938634782557,
+                -0.0545165993006066
+              ]
+            },
+            "nobs": 500,
+            "df_resid": 498,
+            "f_statistic": 1525.1831297586,
+            "f_p_value": 0,
+            "hansen_j_statistic": 0.190279200922643,
+            "hansen_j_p_value": 0.662684342568851
+          }
+        },
+        "robust": {
+          "classical": {
+            "coef": {
+              "x1": 1.08526571413492,
+              "endog1": -0.165910377737854
+            },
+            "se": {
+              "x1": 0.0465133181613542,
+              "endog1": 0.0647590701832207
+            },
+            "test_stats": {
+              "x1": 23.3323649448131,
+              "endog1": -2.56196355612348
+            },
+            "p_values": {
+              "x1": 2.08157094420838e-120,
+              "endog1": 0.0104082239541595
+            },
+            "conf_int": {
+              "x1": [
+                0.994101285737213,
+                1.17643014253263
+              ],
+              "endog1": [
+                -0.292835822969268,
+                -0.0389849325064397
+              ]
+            },
+            "nobs": 500,
+            "df_resid": 498,
+            "f_statistic": 548.087606623015,
+            "f_p_value": 9.64469330757625e-120,
+            "hansen_j_statistic": 0.168639644347768,
+            "hansen_j_p_value": 0.681323639299997
+          }
+        },
+        "cluster": {
+          "classical": {
+            "coef": {
+              "x1": 1.08542928253217,
+              "endog1": -0.177822629651914
+            },
+            "se": {
+              "x1": 0.0468380940925509,
+              "endog1": 0.0679161977146365
+            },
+            "test_stats": {
+              "x1": 23.1740702426402,
+              "endog1": -2.61826538639679
+            },
+            "p_values": {
+              "x1": 8.31600057358258e-119,
+              "endog1": 0.00883780417471758
+            },
+            "conf_int": {
+              "x1": [
+                0.993628305006268,
+                1.17723026005806
+              ],
+              "endog1": [
+                -0.310935931139503,
+                -0.0447093281643246
+              ]
+            },
+            "nobs": 500,
+            "df_resid": 498,
+            "f_statistic": 540.258699879446,
+            "f_p_value": 4.8340809764299e-118,
+            "hansen_j_statistic": 0.168911908071269,
+            "hansen_j_p_value": 0.681080645253097
+          }
+        },
+        "hac": {
+          "classical": {
+            "coef": {
+              "x1": 1.08343689211892,
+              "endog1": -0.162777892248941
+            },
+            "se": {
+              "x1": 0.0465025721319881,
+              "endog1": 0.0650918259941448
+            },
+            "test_stats": {
+              "x1": 23.2984293652361,
+              "endog1": -2.50074244750153
+            },
+            "p_values": {
+              "x1": 4.59879623177553e-120,
+              "endog1": 0.0123933271084249
+            },
+            "conf_int": {
+              "x1": [
+                0.992293525551751,
+                1.1745802586861
+              ],
+              "endog1": [
+                -0.290355526885413,
+                -0.0352002576124695
+              ]
+            },
+            "nobs": 500,
+            "df_resid": 498,
+            "f_statistic": 547.303120044004,
+            "f_p_value": 1.42770183670329e-119,
+            "hansen_j_statistic": 0.207713639863643,
+            "hansen_j_p_value": 0.648565362115248,
+            "hac_lag": 5
           }
         }
       },
@@ -2939,6 +3082,50 @@
             "hansen_j_statistic": 0.26163778456357,
             "hansen_j_p_value": 0.608997201088935,
             "hac_lag": 5
+          }
+        },
+        "robust": {
+          "classical": {
+            "coef": {
+              "x1": 0.91137341999826,
+              "endog1": -6.25847925176572e-05,
+              "endog2": 1.05942241943622
+            },
+            "se": {
+              "x1": 0.205722756460677,
+              "endog1": 0.223916527939919,
+              "endog2": 0.334276159007217
+            },
+            "test_stats": {
+              "x1": 4.43010503882911,
+              "endog1": -0.000279500549126279,
+              "endog2": 3.16930295771812
+            },
+            "p_values": {
+              "x1": 9.41872005681814e-06,
+              "endog1": 0.99977699083002,
+              "endog2": 0.00152805027845749
+            },
+            "conf_int": {
+              "x1": [
+                0.508164226535028,
+                1.31458261346149
+              ],
+              "endog1": [
+                -0.438930915098015,
+                0.43880574551298
+              ],
+              "endog2": [
+                0.404253186891696,
+                1.71459165198075
+              ]
+            },
+            "nobs": 500,
+            "df_resid": 497,
+            "f_statistic": 318.882773068923,
+            "f_p_value": 8.13948275988617e-69,
+            "hansen_j_statistic": 0.235554647362718,
+            "hansen_j_p_value": 0.627435381821045
           }
         }
       }
@@ -3403,9 +3590,9 @@
   "_meta": {
     "method": "gmm",
     "purpose": "linearmodels主リファレンス（iv_gmm.json）とは独立した実装（R: momentfit）によるクロスチェック用。係数・標準誤差・z値・p値・信頼区間・nobs/df_resid・ロバストWald検定（f_statistic/f_p_value）・Hansen J（過剰識別のときのみ）を含む（iv-spec.md 4章）",
-    "generated_at": "2026-10-11T06:28:29.275139+00:00",
+    "generated_at": "2026-10-11T06:56:21.139702+00:00",
     "r_version": "4.5.3",
     "momentfit_version": "1.0",
-    "note": "ivregはGMM非対応のためmomentfitを使う。構成（シナリオ×重み×共分散）はiv_gmm.json（generate_iv_gmm_fixtures.py）と揃える。hc2/hc3・反復GMM・1段階GMM・弱操作変数F・R²・Wu-Hausmanは対象外。momentfitを本実装・linearmodelsと揃える設定（初期重みtsls、非中心化モーメント、HAC・クラスター重みはmomentfit 1.0のピボット欠落バグを避けて重み行列を明示的に渡す、HACのbwはラグ数+1、Hansen Jは推定時の重みで評価、標準誤差の小標本補正の手計算係数）の詳細と原因は`benchmark/iv/references/run_momentfit.R`のヘッダコメント参照。f_statistic/f_p_valueは傾き係数のカイ二乗形式Wald（qで割らない）、test_stats/p_values/conf_intはz分布。hac_lagはhacが重みまたは共分散に含まれるエントリのみ（重みと共分散で共用）。just_identifiedシナリオはhansen_j_statistic/hansen_j_p_valueがnull（丁度識別）。no_intercept（`include_intercept=False`、式の両辺に`0 +`）はbaseline・just_identified・x_exog_empty・multi_endogのclassical重み×classical/hc0/hc1/hac。momentfitは切片なしだと`tsls()`・`initW='tsls'`が2SLSと一致しないため、重みを明示して推定する（`run_momentfit.R`ヘッダコメント8.参照）。wooldridge.cardはcluster重み・cluster共分散を含まない（クラスター列が無いため）。"
+    "note": "ivregはGMM非対応のためmomentfitを使う。構成（シナリオ×重み×共分散）はiv_gmm.json（generate_iv_gmm_fixtures.py）と揃える。hc2/hc3・反復GMM・1段階GMM・弱操作変数F・R²・Wu-Hausmanは対象外。momentfitを本実装・linearmodelsと揃える設定（初期重みtsls、非中心化モーメント、HAC・クラスター重みはmomentfit 1.0のピボット欠落バグを避けて重み行列を明示的に渡す、HACのbwはラグ数+1、Hansen Jは推定時の重みで評価、標準誤差の小標本補正の手計算係数）の詳細と原因は`benchmark/iv/references/run_momentfit.R`のヘッダコメント参照。f_statistic/f_p_valueは傾き係数のカイ二乗形式Wald（qで割らない）、test_stats/p_values/conf_intはz分布。hac_lagはhacが重みまたは共分散に含まれるエントリのみ（重みと共分散で共用）。just_identifiedシナリオはhansen_j_statistic/hansen_j_p_valueがnull（丁度識別）。no_intercept（`include_intercept=False`、式の両辺に`0 +`）はbaseline・just_identified・x_exog_empty・multi_endogのclassical重み×classical/hc0/hc1/hac（baselineには追加でcluster共分散、robust/cluster/hac重み×classical共分散、multi_endogにはrobust重み×classical共分散）。momentfitは切片なしだと`tsls()`・`initW='tsls'`が2SLSと一致しないため、重みを明示して推定する（`run_momentfit.R`ヘッダコメント8.参照）。wooldridge.cardはcluster重み・cluster共分散を含まない（クラスター列が無いため）。"
   }
 }

@@ -346,3 +346,63 @@ def test_no_intercept_matches_momentfit(crosscheck, scenario, cov_type):
     _check_result(
         res, crosscheck["no_intercept"][scenario]["classical"][cov_type], label
     )
+
+
+def test_no_intercept_cluster_covariance_matches_momentfit(crosscheck):
+    """切片なし×クラスターロバストSE（`baseline`、classical重み、疑似グループ
+    行番号%10）。
+    """
+    df = with_cluster_groups(
+        pl.read_csv(DATA_DIR / "iv_baseline.csv"), 10, col=CLUSTER_COL
+    )
+    res = _fit(
+        df,
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1"],
+        instruments=["z1", "z2"],
+        gmm_weight_type="classical",
+        cov_type="cluster",
+        include_intercept=False,
+    )
+    _check_result(
+        res,
+        crosscheck["no_intercept"]["baseline"]["classical"]["cluster"],
+        "no_intercept/baseline/classical/cluster/momentfit",
+    )
+
+
+@pytest.mark.parametrize(
+    ("scenario", "gmm_weight_type"),
+    [
+        ("baseline", "robust"),
+        ("baseline", "cluster"),
+        ("baseline", "hac"),
+        ("multi_endog", "robust"),
+    ],
+)
+def test_no_intercept_other_weight_types_match_momentfit(
+    crosscheck, scenario, gmm_weight_type
+):
+    """切片なし×classical以外の重み、`cov_type="classical"`（GMM固有の、残差から
+    重み行列を作る経路）。momentfit側の2SLS・重みの扱いは
+    `run_momentfit.R`のヘッダコメント8.参照。
+    """
+    spec = NO_INTERCEPT_SCENARIOS[scenario]
+    df = pl.read_csv(DATA_DIR / f"iv_{spec['dataset']}.csv")
+    if gmm_weight_type == "cluster":
+        df = with_cluster_groups(df, 10, col=CLUSTER_COL)
+    res = _fit(
+        df,
+        y="y",
+        x_exog=spec["x_exog"],
+        x_endog=spec["x_endog"],
+        instruments=spec["instruments"],
+        gmm_weight_type=gmm_weight_type,
+        cov_type="classical",
+        include_intercept=False,
+    )
+    ref = crosscheck["no_intercept"][scenario][gmm_weight_type]["classical"]
+    _check_result(
+        res, ref, f"no_intercept/{scenario}/{gmm_weight_type}/momentfit"
+    )

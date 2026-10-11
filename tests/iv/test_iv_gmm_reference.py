@@ -549,3 +549,83 @@ def test_no_intercept_matches_linearmodels(fixtures, scenario, cov_type):
             res_2sls.overid_p_value,
             f"{label}/overid_p_value_vs_sargan",
         )
+
+
+def test_no_intercept_cluster_covariance_matches_linearmodels(fixtures):
+    """切片なし×クラスターロバストSE（`baseline`、classical重み、疑似グループ
+    行番号%10）。過剰識別のHansen Jは他のclassical重みの切片なしと同じ理由で
+    linearmodelsとは比較せず、2SLSのSarganとの一致で確認する。
+    """
+    df = with_cluster_groups(pl.read_csv(DATA_DIR / "iv_baseline.csv"), 10)
+    options = IVOptions(
+        estimator="gmm",
+        include_intercept=False,
+        gmm_weight_type="classical",
+        cov_type="cluster",
+        cluster="cluster_group",
+    )
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1"],
+        instruments=["z1", "z2"],
+        options=options,
+    ).fit()
+
+    ref = fixtures["no_intercept"]["baseline"]["classical"]["cluster"]
+    _check_result(
+        res, ref, "no_intercept/baseline/classical/cluster", check_overid=False
+    )
+    assert res.overid_statistic is not None
+
+
+NO_INTERCEPT_WEIGHT_CASES = [
+    ("baseline", "robust"),
+    ("baseline", "cluster"),
+    ("baseline", "hac"),
+    ("multi_endog", "robust"),
+]
+
+
+@pytest.mark.parametrize(
+    ("scenario", "gmm_weight_type"), NO_INTERCEPT_WEIGHT_CASES
+)
+def test_no_intercept_other_weight_types_match_linearmodels(
+    fixtures, scenario, gmm_weight_type
+):
+    """切片なし×classical以外の重み（robust/cluster/hac）、`cov_type="classical"`。
+    係数は2SLSと異なる推定値になり、残差から重み行列を作るGMM固有の経路を通る。
+    robust/cluster/hacの重みはlinearmodelsも残差を中心化しない（`center=False`が
+    既定）ため、過剰識別のHansen Jもlinearmodelsと比較できる
+    （classical重みだけが中心化の規約差で比較できない）。
+    """
+    spec = NO_INTERCEPT_SCENARIOS[scenario]
+    df = pl.read_csv(DATA_DIR / f"iv_{spec['dataset']}.csv")
+    if gmm_weight_type == "cluster":
+        df = with_cluster_groups(df, 10)
+    options = IVOptions(
+        estimator="gmm",
+        include_intercept=False,
+        gmm_weight_type=gmm_weight_type,
+        cov_type="classical",
+        **hac_time_for(gmm_weight_type),
+        **(
+            {"cluster": "cluster_group"}
+            if gmm_weight_type == "cluster"
+            else {}
+        ),
+    )
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=spec["x_exog"],
+        x_endog=spec["x_endog"],
+        instruments=spec["instruments"],
+        options=options,
+    ).fit()
+
+    ref = fixtures["no_intercept"][scenario][gmm_weight_type]["classical"]
+    label = f"no_intercept/{scenario}/{gmm_weight_type}/classical"
+    assert "const" not in res.param_names, label
+    _check_result(res, ref, label)

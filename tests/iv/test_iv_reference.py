@@ -371,5 +371,31 @@ def test_no_intercept_matches_linearmodels(fixtures, scenario, cov_type):
     _check_result(res, ref, f"no_intercept/{scenario}/{cov_type}")
 
 
+def test_no_intercept_cluster_matches_linearmodels(fixtures):
+    """`include_intercept=False`×クラスターロバストSE（`baseline`、切片ありの
+    `test_cluster_matches_linearmodels`と同じ疑似グループ行番号%10）。係数と標準誤差
+    のみ比較する（切片ありと同じ。フィクスチャのp値・信頼区間はt(df_resid)で
+    計算されるが、本実装のclusterはt(G-1)を使うため比較できない。検定統計量・p値・
+    Wald・診断統計量は`test_iv_crosscheck.py`のR ivregと比較する）。
+    """
+    df = with_cluster_groups(pl.read_csv(DATA_DIR / "iv_baseline.csv"), 10)
+    options = IVOptions(
+        include_intercept=False, cov_type="cluster", cluster="cluster_group"
+    )
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1"],
+        instruments=["z1", "z2"],
+        options=options,
+    ).fit()
+
+    assert "const" not in res.param_names
+    ref = fixtures["no_intercept"]["baseline"]["cluster"]
+    _assert_dict_close(res.params, ref["coef"], "no_intercept/cluster/coef")
+    _assert_dict_close(res.std_errors, ref["se"], "no_intercept/cluster/se")
+
+
 # 完全な多重共線性・極端なスケール差（`ComputationError` パス）は
 # `test_iv_validation.py` へ移設（4分割、項目68）。

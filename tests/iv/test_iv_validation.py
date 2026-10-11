@@ -595,6 +595,55 @@ def test_cluster_count_between_structural_and_first_stage_slopes_raises(
         our_fit(df, options=options)
 
 
+@pytest.mark.parametrize("estimator", ["2sls", "gmm"])
+@pytest.mark.parametrize(
+    ("n_groups", "outcome"),
+    [(2, "structural"), (3, "first_stage"), (4, "ok")],
+)
+def test_cluster_count_boundaries_without_intercept(
+    iv_dataset, estimator, n_groups, outcome
+):
+    """`include_intercept=False`でのクラスター数の境界。構造方程式の傾き係数の数は
+    `x1`・`endog1`の2個、第一段階は`x1`・`z1`・`z2`の3個（切片の有無で傾き係数の数は
+    変わらない。切片なしでは定数項が無い分、全係数が傾きになるため`q = k`）。
+    G=2は構造方程式のG≤q、G=3は構造方程式ではG>qだが第一段階でG≤q
+    （`test_cluster_count_between_structural_and_first_stage_slopes_raises`と同じ
+    現状の挙動）、G=4は成功する。
+    """
+    cluster = pl.Series(
+        "cluster_group", [i % n_groups for i in range(iv_dataset.height)]
+    )
+    df = iv_dataset.with_columns(cluster)
+    options = IVOptions(
+        estimator=estimator,
+        include_intercept=False,
+        cov_type="cluster",
+        cluster="cluster_group",
+    )
+    if outcome == "structural":
+        with pytest.raises(
+            ValidationError,
+            match=escaped(msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=2, q=2),
+        ):
+            our_fit(df, options=options)
+    elif outcome == "first_stage":
+        with pytest.raises(
+            ValidationError,
+            match=escaped(
+                msgs.FIRST_STAGE_FAILED,
+                endog_name="endog1",
+                source=msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE.format(
+                    g=3, q=3
+                ),
+            ),
+        ):
+            our_fit(df, options=options)
+    else:
+        res = our_fit(df, options=options)
+        assert res.param_names == ["x1", "endog1"]
+        assert res.n_obs == df.height
+
+
 @pytest.mark.parametrize("confidence_level", [1.5, 0.0, -0.1])
 def test_invalid_confidence_level_raises(iv_dataset, confidence_level):
     """`confidence_level`が(0, 1)の範囲外（境界値0.0を含む）の場合

@@ -79,6 +79,7 @@ from econometricsmodels import IV, IVOptions
 from benchmark.common import imbalanced_cluster_groups
 from benchmark.iv.fixtures.generate_iv_crosscheck_fixtures import (
     CARD_X_EXOG,
+    IVREG_NO_INTERCEPT_EXTRA_COV_TYPES,
     IVREG_UNSUPPORTED_NO_INTERCEPT,
     NO_INTERCEPT_COV_TYPES,
 )
@@ -477,7 +478,9 @@ def test_cluster_imbalanced_matches_r(crosscheck):
     )
 
 
-@pytest.mark.parametrize("cov_type", NO_INTERCEPT_COV_TYPES)
+@pytest.mark.parametrize(
+    "cov_type", NO_INTERCEPT_COV_TYPES + IVREG_NO_INTERCEPT_EXTRA_COV_TYPES
+)
 @pytest.mark.parametrize(
     "scenario",
     [
@@ -492,6 +495,8 @@ def test_no_intercept_matches_r(crosscheck, scenario, cov_type):
     - `x_exog_empty`（`x_exog=[]`かつ切片なし）はivregがfitできないため対象外
       （`IVREG_UNSUPPORTED_NO_INTERCEPT`、linearmodelsのテストで検証）。
     - Sarganは比較しない（`_check_result`の`check_sargan`参照）。
+    - hc2/hc3はlinearmodelsに実装が無く、ivregだけが参照になる（レバレッジが
+      切片の有無で変わる）。
     - hacの小標本補正の慣習差（ivregの`NeweyWest(adjust=TRUE)`が掛ける`n/(n-k)`、
       本実装・linearmodelsは掛けない）は切片ありと同じで、`RTOL_HAC`の範囲に収まる。
     """
@@ -516,3 +521,32 @@ def test_no_intercept_matches_r(crosscheck, scenario, cov_type):
     label = f"no_intercept/{scenario}/{cov_type}/R"
     assert "const" not in res.param_names, label
     _check_result(res, ref, label, rtol=rtol, check_sargan=False)
+
+
+def test_no_intercept_cluster_matches_r(crosscheck):
+    """`include_intercept=False`×クラスターロバストSE（`baseline`、疑似グループ
+    行番号%10）。cluster cov_typeのWu-Hausman p値はivregの既知の制約で比較しない
+    （切片ありの`test_cluster_matches_r`と同じ）。
+    """
+    df = with_cluster_groups(pl.read_csv(DATA_DIR / "iv_baseline.csv"), 10)
+    options = IVOptions(
+        include_intercept=False, cov_type="cluster", cluster="cluster_group"
+    )
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1"],
+        instruments=["z1", "z2"],
+        options=options,
+    ).fit()
+
+    assert "const" not in res.param_names
+    _check_result(
+        res,
+        crosscheck["no_intercept"]["baseline"]["cluster"],
+        "no_intercept/baseline/cluster/R",
+        rtol=RTOL_STRICT,
+        check_wu_hausman_p_value=False,
+        check_sargan=False,
+    )

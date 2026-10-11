@@ -186,14 +186,16 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             for cov_type in COV_TYPES
         }
     }
-    fixtures["no_intercept"] = build_no_intercept_fixtures()
+    fixtures["no_intercept"] = build_no_intercept_fixtures(tmpdir)
     return fixtures
 
 
-def build_no_intercept_fixtures() -> dict:
+def build_no_intercept_fixtures(tmpdir: Path) -> dict:
     """include_intercept=False（切片なし）。`generate_iv_fixtures.py`の
     `NO_INTERCEPT_SCENARIOS`と同じシナリオを、classical重み×cov_type
-    （classical/hc0/hc1/hac）で持つ（`generate_iv_gmm_fixtures.py`と同じ構成）。
+    （classical/hc0/hc1/hac）で持つ。加えて`generate_iv_gmm_fixtures.py`と同じく、
+    baselineにcluster共分散（classical重み）・robust/cluster/hac重み
+    ×classical共分散、multi_endogにrobust重み×classical共分散を持つ。
     """
     fixtures: dict = {}
     for name, spec in NO_INTERCEPT_SCENARIOS.items():
@@ -213,6 +215,53 @@ def build_no_intercept_fixtures() -> dict:
                 for cov_type in COV_TYPES
             }
         }
+
+    baseline_csv = DATA_DIR / "iv_baseline.csv"
+    baseline_df, _ = load_frozen_dataset("iv", "baseline")
+    n = baseline_df.height
+    baseline_formula = _ivreg_formula(
+        ["x1"], ["endog1"], ["z1", "z2"], include_intercept=False
+    )
+    pseudo = _with_cluster_csv(
+        baseline_df,
+        baseline_csv,
+        tmpdir,
+        [i % 10 for i in range(n)],
+        "_no_intercept_cluster",
+    )
+    baseline = fixtures["baseline"]
+    baseline["classical"]["cluster"] = _run(
+        pseudo, baseline_formula, n, "classical", "cluster", "cluster_group"
+    )
+    for weight_type in OTHER_WEIGHT_TYPES:
+        use_csv = pseudo if weight_type == "cluster" else baseline_csv
+        baseline[weight_type] = {
+            "classical": _run(
+                use_csv,
+                baseline_formula,
+                n,
+                weight_type,
+                "classical",
+                "cluster_group" if weight_type == "cluster" else None,
+            )
+        }
+
+    multi_csv = DATA_DIR / "iv_baseline_multi_endog.csv"
+    multi_df, _ = load_frozen_dataset("iv", "baseline_multi_endog")
+    fixtures["multi_endog"]["robust"] = {
+        "classical": _run(
+            multi_csv,
+            _ivreg_formula(
+                ["x1"],
+                ["endog1", "endog2"],
+                ["z1", "z2", "z3"],
+                include_intercept=False,
+            ),
+            multi_df.height,
+            "robust",
+            "classical",
+        )
+    }
     return fixtures
 
 
@@ -291,7 +340,8 @@ def build_fixtures() -> dict:
             "hansen_j_statistic/hansen_j_p_valueがnull（丁度識別）。"
             "no_intercept（`include_intercept=False`、式の両辺に`0 +`）は"
             "baseline・just_identified・x_exog_empty・multi_endogのclassical重み×"
-            "classical/hc0/hc1/hac。momentfitは切片なしだと`tsls()`・`initW='tsls'`が"
+            "classical/hc0/hc1/hac（baselineには追加でcluster共分散、robust/cluster/hac"
+            "重み×classical共分散、multi_endogにはrobust重み×classical共分散）。momentfitは切片なしだと`tsls()`・`initW='tsls'`が"
             "2SLSと一致しないため、重みを明示して推定する"
             "（`run_momentfit.R`ヘッダコメント8.参照）。"
             "wooldridge.cardはcluster重み・cluster共分散を含まない"

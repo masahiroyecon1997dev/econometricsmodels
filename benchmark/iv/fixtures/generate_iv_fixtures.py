@@ -195,6 +195,12 @@ def build_fixtures() -> dict:
         }
         for name, spec in NO_INTERCEPT_SCENARIOS.items()
     }
+    # 切片なし×クラスターロバストSE（baselineのみ、切片ありの`cluster`と同じ
+    # 疑似グループ）。切片なしでは傾き係数の数qが`k`になり、小標本補正・自由度・
+    # Wald検定の次元が切片ありと変わる。
+    fixtures["no_intercept"]["baseline"]["cluster"] = _run_cluster_case(
+        "baseline", include_intercept=False
+    )
 
     fixtures["_meta"] = {
         "method": "2sls",
@@ -243,14 +249,19 @@ def build_fixtures() -> dict:
             "no_intercept（`include_intercept=False`、式に定数項`1`を含めない）は"
             "baseline・just_identified・x_exog_empty（`x_exog=[]`かつ切片なし、"
             "弱操作変数診断の制限モデルが回帰変数0個の退化ケース）・multi_endogの"
-            "4シナリオ×classical/hc0/hc1/hac。r_squared/adj_r_squaredは切片なしの"
+            "4シナリオ×classical/hc0/hc1/hac（baselineのみ追加でcluster）。"
+            "r_squared/adj_r_squaredは切片なしの"
             "非中心化の定義、f_statistic/f_p_valueは全係数が傾きとして検定される。"
         ),
     }
     return fixtures
 
 
-def _run_cluster_case(dataset: str, groups: list | None = None) -> dict:
+def _run_cluster_case(
+    dataset: str,
+    groups: list | None = None,
+    include_intercept: bool = True,
+) -> dict:
     """クラスターロバストSE確認用に、疑似グループを付けて
     `benchmark/iv/references/linearmodels_ref.py` を呼ぶ
     （`generate_ols_fixtures.py`の`_run_cluster_case`と同じ発想）。
@@ -272,6 +283,7 @@ def _run_cluster_case(dataset: str, groups: list | None = None) -> dict:
             instrument_cols=["z1", "z2"],
             cov_type="cluster",
             cluster="cluster_group",
+            include_intercept=include_intercept,
         )
     finally:
         tmp_path.unlink()

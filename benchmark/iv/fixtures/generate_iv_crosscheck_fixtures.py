@@ -85,8 +85,12 @@ X_EXOG_BY_SCENARIO = {
     "scale_variance_mild": ["x1", "x2"],
 }
 COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac", "cluster"]
-# 切片なし（no_intercept）で持つcov_type（linearmodelsのiv.jsonと同じ4種）。
+# 切片なし（no_intercept）で、linearmodelsのiv.jsonと共通に持つcov_type（4種）。
 NO_INTERCEPT_COV_TYPES = ["classical", "hc0", "hc1", "hac"]
+# ivregの切片なしで追加で持つcov_type。hc2/hc3はlinearmodelsに実装が無く、
+# ivreg（`vcovHC(type="HC2"/"HC3")`）だけが参照になる（切片ありと同じ）。
+# レバレッジは射影行列に依存し、切片の有無で値が変わる。
+IVREG_NO_INTERCEPT_EXTRA_COV_TYPES = ["hc2", "hc3"]
 # ivregが切片なしでfitできないシナリオ。回帰変数が1列だけ（`x_exog=[]`かつ
 # 切片なし）だと`ivreg.fit`が`coef(auxreg)`を行列として扱えず
 # "incorrect number of dimensions"で失敗する（ivreg 0.6.8で実測、切片ありの
@@ -191,14 +195,14 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             entry = run_ivreg_r(df1_csv, df1_formula, cov_type)
         fixtures["df1"][cov_type] = entry
 
-    fixtures["no_intercept"] = build_no_intercept_fixtures()
+    fixtures["no_intercept"] = build_no_intercept_fixtures(tmpdir)
     return fixtures
 
 
-def build_no_intercept_fixtures() -> dict:
+def build_no_intercept_fixtures(tmpdir: Path) -> dict:
     """include_intercept=False（切片なし）。`generate_iv_fixtures.py`の
     `NO_INTERCEPT_SCENARIOS`と同じシナリオ。cov_typeはlinearmodelsと同じ
-    classical/hc0/hc1/hac（hc2/hc3・clusterは含めない）。
+    classical/hc0/hc1/hac、ivregだけの参照としてhc2/hc3、baselineのみcluster。
 
     - `IVREG_UNSUPPORTED_NO_INTERCEPT`のシナリオはivregが失敗するため含めない。
     - `sargan_statistic`/`sargan_p_value`はnullにする。ivregのSarganは補助回帰の
@@ -220,7 +224,9 @@ def build_no_intercept_fixtures() -> dict:
             include_intercept=False,
         )
         fixtures[name] = {}
-        for cov_type in NO_INTERCEPT_COV_TYPES:
+        for cov_type in (
+            NO_INTERCEPT_COV_TYPES + IVREG_NO_INTERCEPT_EXTRA_COV_TYPES
+        ):
             if cov_type == "hac":
                 lag = hac_auto_lag(df.height)
                 entry = run_ivreg_r(csv_path, formula, cov_type, hac_lag=lag)
@@ -230,6 +236,15 @@ def build_no_intercept_fixtures() -> dict:
             entry["sargan_statistic"] = None
             entry["sargan_p_value"] = None
             fixtures[name][cov_type] = entry
+
+        if name == "baseline":
+            # 切片なし×クラスターロバストSE（`generate_iv_fixtures.py`と同じ
+            # 疑似グループ）。cluster cov_typeのWu-Hausman p値はivregの既知の制約で
+            # null（切片ありと同じ）。
+            entry = _run_cluster_case(df, csv_path, formula, tmpdir)
+            entry["sargan_statistic"] = None
+            entry["sargan_p_value"] = None
+            fixtures[name]["cluster"] = entry
     return fixtures
 
 
@@ -374,6 +389,8 @@ def build_fixtures() -> dict:
             "対象外。"
             "no_intercept（`include_intercept=False`、式の両辺に`0 +`）は"
             "baseline・just_identified・multi_endogのclassical/hc0/hc1/hac。"
+            "切片なしはbaselineのみ追加でcluster、全3シナリオに追加でhc2/hc3"
+            "（linearmodelsには無くivregだけの参照）。"
             "x_exog_empty（`x_exog=[]`かつ切片なし）はivregが"
             "`incorrect number of dimensions`で失敗するため含めない。"
             "no_interceptのsargan_statistic/sargan_p_valueはivregが残差の中心化TSSを"

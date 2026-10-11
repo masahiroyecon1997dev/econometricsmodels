@@ -219,6 +219,51 @@ def build_fixtures() -> dict:
         for name, spec in NO_INTERCEPT_SCENARIOS.items()
     }
 
+    # 切片なしのGMM固有の経路。classical重みの係数は2SLSと同一になるため、
+    # 残差から重み行列を作るrobust/cluster/hac重み（baseline、cov_type=classical）と、
+    # 切片なし×cluster共分散（baseline、classical重み）、複数内生変数のrobust重みも持つ。
+    # robust/cluster/hacの重みはlinearmodelsでも残差を中心化しないため、過剰識別の
+    # Hansen Jもlinearmodelsと比較できる（classical重みだけが中心化の規約差で比較不能）。
+    no_intercept_baseline = fixtures["no_intercept"]["baseline"]
+    no_intercept_baseline["classical"]["cluster"] = _run_cluster_case(
+        "baseline",
+        weight_type="classical",
+        include_intercept=False,
+    )
+    for weight_type in OTHER_WEIGHT_TYPES:
+        if weight_type == "cluster":
+            no_intercept_baseline[weight_type] = {
+                "classical": _run_cluster_case(
+                    "baseline",
+                    weight_type="cluster",
+                    cov_type="classical",
+                    include_intercept=False,
+                )
+            }
+        else:
+            no_intercept_baseline[weight_type] = {
+                "classical": run_gmm(
+                    dataset="baseline",
+                    x_exog_cols=["x1"],
+                    x_endog_cols=["endog1"],
+                    instrument_cols=["z1", "z2"],
+                    weight_type=weight_type,
+                    cov_type="classical",
+                    include_intercept=False,
+                )
+            }
+    fixtures["no_intercept"]["multi_endog"]["robust"] = {
+        "classical": run_gmm(
+            dataset="baseline_multi_endog",
+            x_exog_cols=["x1"],
+            x_endog_cols=["endog1", "endog2"],
+            instrument_cols=["z1", "z2", "z3"],
+            weight_type="robust",
+            cov_type="classical",
+            include_intercept=False,
+        )
+    }
+
     # weight_type='hac' × cov_type='hac'の組み合わせ（実務上最も典型的な
     # 「HACカーネル重み＋HAC標準誤差」の組み合わせ経路。上記OTHER_WEIGHT_TYPESループは
     # cov_type='classical'固定のためこの組み合わせを通らない）。
@@ -285,12 +330,15 @@ def build_fixtures() -> dict:
             "cov_type=classicalのみ（クラスター列が無いためclusterは含めない）。"
             "no_intercept（`include_intercept=False`）は2SLSのiv.jsonと同じ4シナリオ"
             "（baseline・just_identified・x_exog_empty・multi_endog）を"
-            "weight_type='classical'固定でclassical/hc0/hc1/hac。"
+            "weight_type='classical'固定でclassical/hc0/hc1/hac。baselineには追加で"
+            "cluster共分散（classical重み）、robust/cluster/hac重み×classical共分散、"
+            "multi_endogにはrobust重み×classical共分散を持つ。"
             "切片なしの過剰識別ではlinearmodelsが残差を中心化して重みを作る"
             "ため、hansen_j_statistic/hansen_j_p_valueは本実装（非中心化"
-            "σ̂²₀=e'e/n）と一致しない（baselineで0.311対0.190）。比較対象は"
-            "momentfitのクロスチェック側とし、このフィクスチャのhansen_j_*は"
-            "切片なしでは比較に使わない（`run_gmm()`のdocコメント参照）。"
+            "σ̂²₀=e'e/n）と一致しない（baselineで0.311対0.190）。classical重みの比較対象は"
+            "momentfitのクロスチェック側とし、このフィクスチャのclassical重みの"
+            "hansen_j_*は切片なしでは比較に使わない（robust/cluster/hac重みは"
+            "linearmodelsが中心化しないため比較に使える。`run_gmm()`のdocコメント参照）。"
         ),
     }
     return fixtures
@@ -301,6 +349,7 @@ def _run_cluster_case(
     weight_type: str,
     cov_type: str = "cluster",
     groups: list | None = None,
+    include_intercept: bool = True,
 ) -> dict:
     """クラスターロバストSE確認用に、疑似グループを付けて`run_gmm`を呼ぶ
     （`generate_iv_fixtures.py`の`_run_cluster_case`と同じ発想）。
@@ -323,6 +372,7 @@ def _run_cluster_case(
             weight_type=weight_type,
             cov_type=cov_type,
             cluster="cluster_group",
+            include_intercept=include_intercept,
         )
     finally:
         tmp_path.unlink()

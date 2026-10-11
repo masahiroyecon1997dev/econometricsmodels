@@ -7,8 +7,11 @@
   役割が近いが、これは均等サイズ版でテスト専用のロジックのため、`benchmark/`とは
   ライフサイクルが異なる`tests/`側に置く（`.claude/rules/testing-policy.md`
   「テストの分離」参照。ユーザー確認済み）。
-- `separation_suspected_dataset`: 準完全分離データのDGP
+- `separated_dataset`: ほぼ分離したデータのDGP（`beta1=100`で完全分離になる）。
   （`test_logit_validation.py`/`test_probit_validation.py`で完全に同一実装だった）。
+- `small_sample_separation_dataset`: 自由度が1の極小標本（`n=k+1`）で完全分離になる5行のデータ。
+- `multi_dummy_separation_dataset`: 3つのダミーが同時に準完全分離するデータ（分離方向が複数）。
+- `strongly_collinear_binary_dataset`: 2列がほぼ完全に相関するが分離していない2値データ。
 - `load_wooldridge_dataset`: Wooldridgeデータセットのロード。`benchmark/
   load_wooldridge.py`の`load`を呼ぶだけの`wooldridge.data(name)`→
   `pl.from_pandas`実装が、複数ファイルに微妙に異なる書き方（直接呼び出し／
@@ -32,6 +35,7 @@ from collections.abc import Callable
 import numpy as np
 import polars as pl
 import pytest
+from scipy.stats import norm
 
 # 行順をそのまま時間順として使うHACテスト用の、行番号の列名。
 ROW_TIME = "row_time"
@@ -138,11 +142,11 @@ def with_cluster_groups(
     )
 
 
-def separation_suspected_dataset() -> pl.DataFrame:
-    """准完全分離データ（`x1`の真の係数を極端に大きくし、ほぼ全観測がx1の符号だけで
+def separated_dataset() -> pl.DataFrame:
+    """分離データ（`x1`の真の係数を極端に大きくし、全観測がx1の符号だけで
     完全に分類できるようにしたDGP）を生成する。
 
-    `Logit`/`Probit`いずれのComputationError（`SeparationSuspected`）テストにも
+    `Logit`/`Probit`いずれの`ComputationError`（分離検出）テストにも
     使う（Probit側もsigmoidベースのDGPをそのまま流用する。
     `test_logit_validation.py`のLogit版のProbit版という位置づけ、DGP自体の
     正確なProbitリンクである必要はない）。
@@ -160,6 +164,88 @@ def separation_suspected_dataset() -> pl.DataFrame:
     p = 1.0 / (1.0 + np.exp(-z))
     y = rng.binomial(1, p).astype(np.float64)
     return pl.DataFrame({"y": y, "x1": x1, "x2": x2})
+
+
+def small_sample_separation_dataset() -> pl.DataFrame:
+    """自由度が1（`n=k+1`、`k`は定数項を含む4）で完全分離になる5行のデータ。
+
+    `benchmark.nonlinear.datasets.generate_binary_choice_dataset("baseline", n=5, k=3,
+    seed=42)`の出力を固定した値（Logit/Probitで同じ`y`になる）。極小標本では
+    パラメータの数と観測数がほぼ等しく、ほぼ必ず完全分離になる。標準化パラメータの
+    ノルムによる旧来の検出は、この種のデータを無警告の「成功」として返していた
+    （係数は有限だが標準誤差が数千になる）。
+    """
+    return pl.DataFrame(
+        {
+            "y": [1.0, 0.0, 1.0, 0.0, 0.0],
+            "x1": [
+                -1.9510351886538364,
+                -0.3162425923435822,
+                0.8793979748628286,
+                1.1272412069680329,
+                0.36875078408249884,
+            ],
+            "x2": [
+                -1.302179506862318,
+                -0.016801157504288795,
+                0.7777919354289483,
+                0.4675093422520456,
+                -0.9588826008289989,
+            ],
+            "x3": [
+                0.12784040316728537,
+                -0.85304392757358,
+                0.06603069756121605,
+                -0.8592924628832382,
+                0.8784503013072725,
+            ],
+        }
+    )
+
+
+def multi_dummy_separation_dataset(seed: int = 58) -> pl.DataFrame:
+    """3つのダミーが同時に準完全分離するデータ（`n=600`、連続変数5本）。
+
+    d0・d2が1なら必ず`y=1`、d1が1なら必ず`y=0`。分離方向が複数ある（錐の次元が2以上）ので、
+    情報行列の近零固有空間が多次元になる。収束点の係数方向や最小固有ベクトルの方向だけで
+    分離を判定する方式は、この種のデータを取りこぼす（lbfgsで実測）。
+    """
+    rng = np.random.default_rng(seed)
+    n = 600
+    d0 = (rng.random(n) > 0.8).astype(np.float64)
+    d1 = (rng.random(n) > 0.8).astype(np.float64)
+    d2 = (rng.random(n) > 0.9).astype(np.float64)
+    c = rng.normal(size=(n, 5))
+    base = (
+        rng.random(n)
+        < 1.0 / (1.0 + np.exp(-c @ np.array([0.5, -0.4, 0.3, 0.2, -0.3])))
+    ).astype(np.float64)
+    y = np.where((d0 == 1) | (d2 == 1), 1.0, np.where(d1 == 1, 0.0, base))
+    data = {"y": y, "d0": d0, "d1": d1, "d2": d2}
+    for j in range(5):
+        data[f"c{j}"] = c[:, j]
+    return pl.DataFrame(data)
+
+
+def strongly_collinear_binary_dataset(
+    link: str, seed: int = 6
+) -> pl.DataFrame:
+    """`x2 = x1 + 1e-3·ε`（相関がほぼ1）で、分離していない2値データを生成する。
+
+    有限の最尤推定量が存在する（係数は`x1`と`x2`で符号が逆に大きく振れうるが、
+    線形予測子への寄与は打ち消し合う）。標準化パラメータのノルムによる旧来の
+    分離検出はこの種のデータを誤って棄却していた（`seed=6`のProbitで再現）。
+    `link`は`"logit"`または`"probit"`。
+    """
+    rng = np.random.default_rng(seed)
+    n = 400
+    x1 = rng.normal(size=n)
+    x2 = x1 + 1e-3 * rng.normal(size=n)
+    x3 = rng.normal(size=n)
+    z = 0.5 * x1 + 0.5 * x2 + 0.5 * x3
+    p = 1.0 / (1.0 + np.exp(-z)) if link == "logit" else norm.cdf(z)
+    y = (rng.random(n) < p).astype(np.float64)
+    return pl.DataFrame({"y": y, "x1": x1, "x2": x2, "x3": x3})
 
 
 def wooldridge_loader() -> Callable[[str], pl.DataFrame]:

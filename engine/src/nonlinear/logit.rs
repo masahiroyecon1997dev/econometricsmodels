@@ -31,13 +31,13 @@
 
 use crate::nonlinear::common::{
     CovType, FittedModelForMarginalEffects, GoodnessOfFit, MarginalEffects, MarginalEffectsAt,
-    MleError, MleFitOptions, SandwichVariant, SeparationNormCheck, cluster_cov_params,
-    column_means, column_medians, compensated_sum, destandardize_cov_params, destandardize_params,
-    goodness_of_fit, log_likelihood_null, marginal_effects_from_w_s,
-    observed_information_cov_params, ols_based_initial_params, opg_cov_params, pred_table,
-    predict_from_link, predict_new_data, run_solver, sandwich_cov_params, standardize_columns,
-    validate_fit_preconditions,
+    MleError, MleFitOptions, SandwichVariant, cluster_cov_params, column_means, column_medians,
+    compensated_sum, destandardize_cov_params, destandardize_params, goodness_of_fit,
+    log_likelihood_null, marginal_effects_from_w_s, observed_information_cov_params,
+    ols_based_initial_params, opg_cov_params, pred_table, predict_from_link, predict_new_data,
+    run_solver, sandwich_cov_params, standardize_columns, validate_fit_preconditions,
 };
+use crate::nonlinear::separation::verify_no_separation;
 use crate::shared::error::CommonError;
 use crate::shared::inference;
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
@@ -543,14 +543,20 @@ impl LogitEstimator {
             tol,
             input.y().nrows(),
             raise_on_non_convergence,
-            // Logitは`y∈{0,1}`で係数が±∞へ発散するため(準)完全分離の
-            // 標準化パラメータノルム事後チェックを有効にする。
-            SeparationNormCheck::Enabled,
         )?;
 
         let params = destandardize_params(&output.params, &scale);
 
         let hessian_std = Mat::from_fn(k, k, |i, j| output.hessian[i][j]);
+        // 収束後に完全分離・準完全分離を厳密に判定する（`nonlinear::separation`）。
+        // 分離なら`raise_on_non_convergence`に応じてエラー、または`converged=false`で続行する。
+        let converged = verify_no_separation(
+            input.x(),
+            &scale,
+            input.y(),
+            output.converged,
+            raise_on_non_convergence,
+        )?;
         // `problem_for_scores.as_ref().expect(...)`は各非`Classical`分岐でのみ呼ばれ、
         // 直前の`match cov_type { CovType::Classical => None, _ => Some(...) }`により
         // 常に`Some`であることが保証されている内部契約（`cov_type`という同じ値で
@@ -652,7 +658,7 @@ impl LogitEstimator {
             p_values,
             conf_lower,
             conf_upper,
-            converged: output.converged,
+            converged,
             n_iter: output.n_iter,
             log_likelihood: llf,
             log_likelihood_null: llnull,
@@ -2276,12 +2282,11 @@ mod tests {
     //      `fit_converges_normally_for_mild_near_separation_data_across_all_methods`
     //      （`max_iter=35`で3手法とも収束）で正常収束が保証されており、かつ warm start
     //      からでも1反復では`tol=1e-12`に到底届かない。
-    //   2. `SeparationNormCheck::Enabled`との相互作用: `run_solver`の事後チェックは
-    //      「収束扱い かつ 標準化パラメータノルム>閾値」でのみ`SeparationSuspected`を
-    //      返す。`max_iter=1`では未収束のため事後チェックは素通りし、必ず
-    //      `NonConvergence`（`raise=true`）／`converged=false`（`raise=false`）になる。
-    //      `beta1=100`（`fit_returns_separation_suspected_error_for_near_separation_data`）
-    //      だと収束判定が絡んで話が変わるため、境界側の`20`である必要がある。
+    //   2. 分離チェックとの相互作用: 分離の検出（`verify_no_separation`）は収束した場合にだけ
+    //      走る。`max_iter=1`では未収束のため必ず`NonConvergence`（`raise=true`）／
+    //      `converged=false`（`raise=false`）になる。`beta1=100`
+    //      （`fit_returns_separation_detected_error_for_separated_data`）は完全分離になる
+    //      ため、境界側の`20`である必要がある。
     #[test]
     fn fit_returns_non_convergence_error_when_max_iter_is_too_small_and_raise_is_true() {
         let result = LogitEstimator::fit(
@@ -2319,22 +2324,12 @@ mod tests {
         assert!(!estimator.converged());
     }
 
-    /// 准完全分離データ（`x1`の真の係数を極端に大きくし、ほぼ全観測がx1の符号だけで
-    /// 完全に分類できるようにしたDGP）で、勾配ノルム基準では収束済みと誤判定されず
-    /// `SeparationSuspected`を返すことを確認する。
-    ///
-    /// 疑似乱数生成は`benchmark/nonlinear/generate_logit_datasets.py`の
-    /// `_NEAR_SEPARATION_BETA1`と同じ設計思想（真のlogit DGPで生成）だが、
-    /// このケースを確実に再現するため既存の`near_separation`シナリオ
-    /// （`beta1=20`、意図的に境界ケースに留めてある）よりさらに極端な`beta1=100`を使う。
-    /// 実機診断で、この`beta1`だと標準化パラメータ空間でのノルムが約1282に達し、
-    /// `near_separation`シナリオ（約31）を大きく上回ることを確認済み
-    /// （`SEPARATION_PARAM_NORM_THRESHOLD`のdocコメント参照）。
-    /// `beta1`（`x1`の真の係数）を指定して准分離データを生成する。`beta1`が大きいほど
-    /// `y`が`x1`の符号だけで決まりやすくなる（`SeparationSuspected`のテスト用、
-    /// `beta1=100`）。小さい`beta1`（例: `20`）は`benchmark/nonlinear/
-    /// generate_logit_datasets.py`の`near_separation`シナリオ（意図的に境界ケースに
-    /// 留めてある、既存の合格テストが使う）と同じ設計思想の、正常に収束するデータになる。
+    /// `beta1`（`x1`の真の係数）を指定して、ほぼ分離したデータを生成する。`beta1`が大きいほど
+    /// `y`が`x1`の符号だけで決まりやすくなり、`beta1=100`では`x1`の符号で全観測が完全に分類
+    /// できる（完全分離、`fit_returns_separation_detected_error_for_separated_data`）。
+    /// 疑似乱数生成は`benchmark/nonlinear/datasets.py`の`near_separation`シナリオと同じ設計
+    /// 思想（真のlogit DGPで生成）。小さい`beta1`（例: `20`）は、そのシナリオと同様に意図的に
+    /// 境界ケースに留めた、正常に収束するデータになる。
     fn near_separation_input_with_beta1(beta1: f64) -> LogitInput {
         fn lcg(seed: &mut u64) -> f64 {
             *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
@@ -2369,17 +2364,11 @@ mod tests {
     }
 
     #[test]
-    fn fit_returns_separation_suspected_error_for_near_separation_data() {
-        // 実測で確認済みの最小反復回数（`SeparationSuspected`が発火するまでの
-        // `n_iter`）: newton=22・bfgs=36（自前実装`FaerBfgs`）・
-        // lbfgs=29。手法ごとに実測値+数回分の余裕を持たせた`max_iter`にすることで、
-        // 将来いずれかの手法だけ反復回数が増加する回帰が起きても検出できるように
-        // する（3手法で同じ`max_iter`を共有すると、他手法に合わせて緩めた分だけ
-        // 検出力が落ちるため）。
+    fn fit_returns_separation_detected_error_for_separated_data() {
         for (solver, max_iter) in [
-            (SolverType::Newton, 25),
-            (SolverType::Bfgs, 40),
-            (SolverType::Lbfgs, 32),
+            (SolverType::Newton, 100),
+            (SolverType::Bfgs, 100),
+            (SolverType::Lbfgs, 100),
         ] {
             let result = LogitEstimator::fit(
                 near_separation_input(),
@@ -2393,7 +2382,7 @@ mod tests {
                 },
             );
             assert!(
-                matches!(result, Err(MleError::SeparationSuspected { .. })),
+                matches!(result, Err(MleError::SeparationDetected)),
                 "solver={:?}, result={:?}",
                 solver,
                 result
@@ -2402,7 +2391,7 @@ mod tests {
     }
 
     #[test]
-    fn fit_returns_unconverged_result_for_near_separation_data_without_raising() {
+    fn fit_returns_unconverged_result_for_separated_data_without_raising() {
         let estimator = LogitEstimator::fit(
             near_separation_input(),
             MleFitOptions {
@@ -2418,11 +2407,10 @@ mod tests {
         assert!(!estimator.converged());
     }
 
-    /// `beta1=20`（`SeparationSuspected`を誤検知させてはいけない境界ケース、`tests/
+    /// `beta1=20`（分離と誤検知してはいけない境界ケース、`tests/
     /// api_tests/fixtures/benchmarks/data/logit_near_separation.csv`と同じ設計思想）で
     /// 3手法とも正常に収束することを固定するリグレッションテスト（rust-reviewer指摘）。
-    /// `SEPARATION_PARAM_NORM_THRESHOLD`を将来変更する際にこのテストが
-    /// 壊れないか確認することで、閾値の調整が既存の合格ケースを誤検知させないことを保証する。
+    /// 分離検出の変更が既存の合格ケースを誤検知させないことを保証する。
     #[test]
     fn fit_converges_normally_for_mild_near_separation_data_across_all_methods() {
         for solver in [SolverType::Newton, SolverType::Bfgs, SolverType::Lbfgs] {

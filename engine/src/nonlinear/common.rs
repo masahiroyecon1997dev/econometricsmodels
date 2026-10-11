@@ -146,10 +146,9 @@ pub enum MleError {
     /// 判定するロジック——線形計画法的な実行可能性判定に相当——は複雑さに見合わないと
     /// 判断、ユーザー確認済み）。
     ///
-    /// `SeparationSuspected`（Logit/Probitの準/完全分離）と同様の「有限のMLEが
-    /// 存在しない」病理だが、Tobitでは標準化パラメータ空間のノルムが必ずしも
-    /// 大きくならない（`σ`が小さくなる形で退化するため）ため`SeparationSuspected`の
-    /// 検出条件では捕捉できない。実測で確認済み: 全件打ち切りデータ（`x`が単調増加で
+    /// [`SeparationDetected`](Self::SeparationDetected)（Logit/Probitの準/完全分離）と
+    /// 同様の「有限のMLEが存在しない」病理だが、Tobitでは係数が±∞へ発散せず`σ`が小さくなる
+    /// 形で退化するため、Logit/Probitの分離検出（`nonlinear::separation`）では捕捉できない。実測で確認済み: 全件打ち切りデータ（`x`が単調増加で
     /// 完全分離が成立するケース）で`fit()`が`converged=true`のまま統計的に無意味な
     /// 巨大SE（標準誤差が実測で100万倍オーダー）を返す退化収束を起こす。参照実装
     /// `survival::survreg`（`AER::tobit`のエンジン）は同種のデータで初期反復に失敗し
@@ -164,39 +163,26 @@ pub enum MleError {
         upper: Option<f64>,
     },
 
-    /// 勾配ノルム基準（`‖∇ℓ(θ)‖ < tol`）は満たしたが、標準化パラメータ空間でのノルムが
-    /// 異常に大きい。(準)完全分離（quasi-/complete separation）では、係数が発散していく
-    /// 過程でロジスティックのスコア項`p(1-p)`が浮動小数点アンダーフローによりほぼ0.0に
-    /// なり、真には収束していないのに勾配ノルムだけが先に`tol`を割り込む。
+    /// Logit/Probit専用: データが完全分離または準完全分離している。説明変数の線形結合が
+    /// （全観測または一部の観測について）2値の被説明変数を完全に予測するため、有限の
+    /// 最尤推定量は存在せず、係数が発散する方向に尤度が増え続ける。
     ///
-    /// 当初はNewton法のステップ幅（更新前後のパラメータの差）が縮小しているかを見る、
-    /// より直接的な基準を検討した（真の停留点への収束ならステップ幅も勾配ノルムと共に
-    /// 縮小するはずという理屈）。しかしargminの`IterState`は、ソルバーが`take_param()`で
-    /// 現在のパラメータを取り出してから新しい`param()`を設定する実装パターン（自作の
-    /// `FaerNewton`、および組み込みのBFGS/LBFGSも同じパターン）だと、`prev_param`が
-    /// 正しく追跡されない（`take_param()`の時点で`param`が`None`になるため、`param()`
-    /// 内部の退避swapが空振りする）ことが実装時に判明し、3手法統一では使えなかった
-    /// （ユーザー確認済み）。代わりに、`fit()`が最適化前に標準化する設計行列
-    /// （`standardize_columns`）を活かし、標準化パラメータ空間でのノルムの大きさを
-    /// 事後チェックする、より単純だが3手法へ確実に統一適用できる基準を採用した。
-    /// 実測（既存の`near_separation`シナリオ=境界ケース vs 発見時の病的データ）で
-    /// 標準化パラメータノルムに40倍以上の差があることを確認済み
-    /// （`SEPARATION_PARAM_NORM_THRESHOLD`のdocコメント参照）。
+    /// 収束後に`nonlinear::separation`が厳密に判定する（`Zθ ≥ 0`かつどれかが厳密に正となる`θ`が
+    /// 存在するか、という線形計画）。閾値を持たないため標本サイズ・説明変数の数・リンク関数に
+    /// 依らず、分離は「疑い」ではなく確定した事実として扱う。
     ///
-    /// **Logit/Probit専用**（`run_solver`に[`SeparationNormCheck`]を渡して切り替え、
-    /// Logit/Probitは`Enabled`・Tobitは`Disabled`）。Tobitでは発火しない: (準)完全分離が
-    /// 起きても係数は±∞へ発散せず`σ→0`退化として現れるため標準化パラメータノルムは
-    /// 閾値を超えない。Tobitの分離は全件打ち切りなら`NoUncensoredObservations`
-    /// （`fit()`冒頭のバリデーション）、部分的な準完全分離なら`NonConvergence`
-    /// （`max_iter`到達）として捕捉される。加えてその後のTobitは`standardize_columns`
-    /// ではなく`tobit.rs`局所の`TobitScaling`で標準化しており、`y∈{0,1}`で較正した
-    /// この閾値はTobitのパラメータ空間には適用できない。
+    /// 旧来の標準化パラメータのL2ノルム（閾値`100`）による検出は、この判定に置き換えて廃止した。
+    /// ノルムは分離の有無ではなく停止時のマージンと点の幾何配置で決まる量で、小標本（`n≲20`）
+    /// では分離解を見逃し、強い多重共線性では有限のMLEを誤って棄却していた。
+    ///
+    /// `Tobit`では発火しない（[`NoUncensoredObservations`](Self::NoUncensoredObservations)参照）。
     #[error(
-        "convergence could not be verified after {n_iter} iterations: the gradient norm \
-         dropped below tol, but the (standardized) parameter norm is implausibly large. This \
-         pattern is typical of (quasi-)complete separation, where no finite MLE exists"
+        "the data are completely or quasi-completely separated: some combination of the \
+         regressors perfectly predicts the binary outcome (for all or a subset of observations), \
+         so no finite maximum likelihood estimate exists. Remove or combine the offending \
+         regressors, or use a penalized estimator"
     )]
-    SeparationSuspected { n_iter: usize },
+    SeparationDetected,
 
     /// `bfgs`/`lbfgs`のline search（`MoreThuenteLineSearch`）が、収束判定を一度も満たさない
     /// まま目的関数・勾配の評価回数の総枠（[`BudgetedProblem`]）を使い切った。
@@ -227,52 +213,6 @@ pub enum MleError {
          this input); try a different solver, or adjust max_iter/tol"
     )]
     EvaluationBudgetExceeded { budget: u64 },
-}
-
-/// [`SeparationSuspected`](MleError::SeparationSuspected)を検出する閾値。標準化
-/// パラメータ空間（`fit()`が最適化に使う空間、`standardize_columns`参照）でのノルムが
-/// これを超える場合、勾配ノルム基準で収束と判定されていても取り消す。`LogitOptions`等に
-/// 公開の調整用オプションとしては設けず（ユーザー確認済み）、内部実装の
-/// 詳細として固定する。
-///
-/// 値の根拠: 既存の`near_separation`シナリオ（`beta1=20`、意図的に境界ケースに留めてある
-/// 合成データ、既存の合格テストが使う）は標準化パラメータノルムが約31。一方、発見時の
-/// 病的データ（`beta1=100`）は約1282。両者の間には40倍以上の開きがあり、`100`はこの
-/// ギャップの中間（正常な境界ケース側に3倍強のマージンを残す）に位置する。
-///
-/// **Logit/Probitの`y∈{0,1}`で較正した値**であり、`run_solver`に
-/// [`SeparationNormCheck::Enabled`]を渡したとき（Logit/Probit）のみ使われる。Tobitでは
-/// 適用しない（[`MleError::SeparationSuspected`]参照）。
-const SEPARATION_PARAM_NORM_THRESHOLD: f64 = 100.0;
-
-/// `run_solver`の(準)完全分離事後チェック（標準化パラメータノルムが
-/// [`SEPARATION_PARAM_NORM_THRESHOLD`]を超えたら収束判定を取り消す、
-/// [`MleError::SeparationSuspected`]参照）を有効にするか。隣接する`raise_on_non_convergence`
-/// と同型の生`bool`を並べると取り違えても型で気づけないため、bool引数ではなく専用enumで
-/// 呼び出し側を自己記述的にする（rust-reviewer指摘）。
-///
-/// - [`Enabled`](SeparationNormCheck::Enabled): Logit/Probit。`y∈{0,1}`で係数が±∞へ
-///   発散するため、この検出が意味を持つ。
-/// - [`Disabled`](SeparationNormCheck::Disabled): Tobit。真の分離は`σ→0`退化として現れ
-///   標準化パラメータノルムは閾値を超えず、実質発火しない。かつその後のTobitは
-///   `standardize_columns`ではなく`tobit.rs`局所の`TobitScaling`で標準化しており、この
-///   閾値はそもそもTobitのパラメータ空間には未較正。Tobitの分離は
-///   `NoUncensoredObservations`（全件打ち切り）または`NonConvergence`（部分的準分離）で
-///   捕捉される。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SeparationNormCheck {
-    Enabled,
-    Disabled,
-}
-
-/// 標準化パラメータ空間でのノルムが[`SEPARATION_PARAM_NORM_THRESHOLD`]を超えるか
-/// （[`MleError::SeparationSuspected`]の判定条件そのもの）。`run_solver`本体から
-/// 切り出しているのは、実際の最適化トラジェクトリ（`beta1`を振っても、ロジスティック
-/// 関数の浮動小数点飽和により`y`の実現値が広い範囲で同一になり、閾値付近の境界データを
-/// 意図的に作るのが難しい）に頼らず、境界値そのものを直接検証できるようにするため
-/// （rust-reviewerの指摘を受けて追加）。
-fn separation_suspected(params: &[f64]) -> bool {
-    l2_norm(params) > SEPARATION_PARAM_NORM_THRESHOLD
 }
 
 /// `y`が`{0.0, 1.0}`の2値でない値を含む場合にエラーを返す（Logit/Probit専用、
@@ -1296,10 +1236,8 @@ where
 /// `SolverOutput.hessian`（対数尤度そのもののHessian、符号が逆）への変換はこの関数が
 /// 内部で1回だけ行う（呼び出し側・各モデルの実装は意識しなくてよい）。
 ///
-/// `separation_norm_check`（[`SeparationNormCheck`]）は(準)完全分離の事後チェック
-/// （標準化パラメータ空間のノルムが[`SEPARATION_PARAM_NORM_THRESHOLD`]を超えたら収束
-/// 判定を取り消す、[`MleError::SeparationSuspected`]参照）を有効にするか。Logit/Probitは
-/// `Enabled`、Tobitは`Disabled`（理由は[`SeparationNormCheck`]のdocコメント参照）。
+/// (準)完全分離の検出はこの関数では行わない。Logit/Probitの`fit()`が収束後に
+/// `nonlinear::separation::verify_no_separation`を呼ぶ（[`MleError::SeparationDetected`]参照）。
 ///
 /// **`tol`の意味論はsolverにより異なる**: `Newton`は総和勾配に対する
 /// 絶対閾値`‖∇ℓ(θ)‖ < tol`のまま（2次収束のため`n`依存性の影響をほとんど受けない、
@@ -1313,12 +1251,9 @@ where
 /// # Errors
 /// - 収束点のHessianが特異（`SingularHessian`）
 /// - `raise_on_non_convergence=true`かつ`max_iter`回で収束しなかった（`NonConvergence`）
-/// - `separation_norm_check=Enabled`かつ`raise_on_non_convergence=true`で、勾配ノルム基準は
-///   満たしたが標準化パラメータノルムが過大（`SeparationSuspected`）
 /// - `bfgs`/`lbfgs`のline searchが収束判定を満たさないまま評価回数の総枠を使い切った
 ///   （`EvaluationBudgetExceeded`、`BudgetedProblem`参照）
 /// - その他ソルバー内部でのエラー（`ComputationFailed`）
-#[allow(clippy::too_many_arguments)]
 pub fn run_solver<O>(
     problem: O,
     solver: SolverType,
@@ -1327,7 +1262,6 @@ pub fn run_solver<O>(
     tol: f64,
     n_obs: usize,
     raise_on_non_convergence: bool,
-    separation_norm_check: SeparationNormCheck,
 ) -> Result<SolverOutput, MleError>
 where
     O: CostFunction<Param = Vec<f64>, Output = f64>
@@ -1347,7 +1281,7 @@ where
         .saturating_mul(MAX_EVALUATIONS_PER_ITER);
     let problem = BudgetedProblem::new(problem, budget);
 
-    let (params, mut converged, n_iter, model) = match solver {
+    let (params, converged, n_iter, model) = match solver {
         SolverType::Newton => {
             let optimizer = FaerNewton {
                 tol,
@@ -1393,22 +1327,6 @@ where
             extract_outcome(result.state, result.problem)?
         }
     };
-
-    // 勾配ノルム基準では収束と判定されたが、標準化パラメータ空間でのノルムが異常に
-    // 大きい場合（准/完全分離の兆候、`MleError::SeparationSuspected`のdocコメント参照）は、
-    // 収束の判定を取り消す。`raise_on_non_convergence`の扱いは通常の`NonConvergence`と
-    // 揃える（`true`なら専用エラーで即座に返す、`false`なら`converged=false`のまま
-    // 後続処理を継続する）。この事後チェックはLogit/Probit（`Enabled`）のみ通り、Tobitは
-    // `Disabled`で素通しする（`SeparationNormCheck`のdocコメント参照）。
-    if matches!(separation_norm_check, SeparationNormCheck::Enabled)
-        && converged
-        && separation_suspected(&params)
-    {
-        converged = false;
-        if raise_on_non_convergence {
-            return Err(MleError::SeparationSuspected { n_iter });
-        }
-    }
 
     if !converged && raise_on_non_convergence {
         return Err(MleError::NonConvergence { n_iter });
@@ -1513,10 +1431,7 @@ fn identity_matrix(k: usize) -> Vec<Vec<f64>> {
         .collect()
 }
 
-/// L2ノルム。勾配ベクトルの収束判定（`FaerNewton::terminate`）だけでなく、
-/// パラメータベクトルのノルム（`SEPARATION_PARAM_NORM_THRESHOLD`の判定）にも流用する
-/// 中立的な名前にしている（元は`gradient_norm`という名前だったが、勾配以外の用途にも
-/// 使うようになったため改名した（rust-reviewer指摘）。
+/// L2ノルム（勾配ベクトルの収束判定`FaerNewton::terminate`等で使う）。
 fn l2_norm(g: &[f64]) -> f64 {
     g.iter().map(|x| x * x).sum::<f64>().sqrt()
 }
@@ -1608,8 +1523,8 @@ type NewtonState = IterState<Vec<f64>, Vec<f64>, (), Vec<Vec<f64>>, (), f64>;
 /// ステップが最急降下方向`-g/λ`に漸近し、非零の勾配に対しては理論上必ず降下方向になる
 /// （`regularized_newton_step`のdocコメント参照）ため、実務的にはこれよりずっと少ない
 /// 回数（Tobitの打ち切りデータでの実測では1反復あたり最大9回程度）で受理される。
-/// `SEPARATION_PARAM_NORM_THRESHOLD`のように実測比較による厳密な根拠があるわけではなく、
-/// 「理論上十分すぎるほど大きい」という設計上の安全マージンとして選んだ値。
+/// 実測比較による厳密な根拠があるわけではなく、「理論上十分すぎるほど大きい」という
+/// 設計上の安全マージンとして選んだ値。
 const MAX_LM_ATTEMPTS: usize = 40;
 /// `λ=0`（生のNewtonステップ）がコストを減少させなかった場合の初期正則化係数。
 const INITIAL_LM_LAMBDA: f64 = 1e-3;
@@ -2781,13 +2696,8 @@ pub struct ColumnScale {
 }
 
 impl ColumnScale {
-    /// 列ごとの標準偏差（`standardize_columns`のdocコメント参照）。標準化はengine内部の
-    /// 実装詳細であり`engine_pybind`に公開する必然性は無い（rust-reviewer指摘）が、
-    /// `pub(crate)`にすると`cargo clippy --all-targets -- -D warnings`の`lib`ターゲット
-    /// （テストコードを含まないビルド）で`dead_code`エラーになる（唯一の呼び出し元が
-    /// `nonlinear/logit.rs`の`#[cfg(test)] mod tests`のみのため）。`pub`アイテムは
-    /// dead_code検出の対象外という言語仕様上の扱いにより、`pub`のままにしている
-    /// （テストが`fit()`と同じ標準化・逆標準化の手順を独立に再現するために必要）。
+    /// 列ごとの標準偏差（`standardize_columns`のdocコメント参照）。分離検出
+    /// （`nonlinear::separation`）が、標準化後の行列を複製せず元の`x`から行を都度計算するために使う。
     pub fn stds(&self) -> &[f64] {
         &self.stds
     }
@@ -3156,7 +3066,6 @@ mod tests {
             1e-6,
             1,
             true,
-            SeparationNormCheck::Enabled,
         );
 
         assert!(matches!(
@@ -3183,7 +3092,6 @@ mod tests {
             1e-6,
             1,
             true,
-            SeparationNormCheck::Enabled,
         );
 
         let message = result.unwrap_err().to_string();
@@ -3296,7 +3204,6 @@ mod tests {
             1e-6,
             1,
             true,
-            SeparationNormCheck::Enabled,
         )
         .unwrap();
 
@@ -3326,7 +3233,6 @@ mod tests {
             1e-6,
             1,
             true,
-            SeparationNormCheck::Enabled,
         )
         .unwrap();
 
@@ -3354,7 +3260,6 @@ mod tests {
             1e-9,
             1000,
             true,
-            SeparationNormCheck::Enabled,
         )
         .unwrap();
         let via_tol = run_solver(
@@ -3365,7 +3270,6 @@ mod tests {
             1e-6,
             1,
             true,
-            SeparationNormCheck::Enabled,
         )
         .unwrap();
 
@@ -3385,7 +3289,6 @@ mod tests {
             1e-9,
             1000,
             true,
-            SeparationNormCheck::Enabled,
         )
         .unwrap();
         let via_tol = run_solver(
@@ -3396,7 +3299,6 @@ mod tests {
             1e-6,
             1,
             true,
-            SeparationNormCheck::Enabled,
         )
         .unwrap();
 
@@ -3417,7 +3319,6 @@ mod tests {
             1e-6,
             1,
             true,
-            SeparationNormCheck::Enabled,
         )
         .unwrap();
         let large_n_obs = run_solver(
@@ -3428,7 +3329,6 @@ mod tests {
             1e-6,
             1_000_000,
             true,
-            SeparationNormCheck::Enabled,
         )
         .unwrap();
 
@@ -3516,7 +3416,6 @@ mod tests {
             1e-9,
             1,
             true,
-            SeparationNormCheck::Enabled,
         )
         .unwrap();
 
@@ -3552,17 +3451,7 @@ mod tests {
             }
         }
 
-        let output = run_solver(
-            Quartic,
-            SolverType::Bfgs,
-            vec![0.1],
-            100,
-            1e-9,
-            1,
-            true,
-            SeparationNormCheck::Disabled,
-        )
-        .unwrap();
+        let output = run_solver(Quartic, SolverType::Bfgs, vec![0.1], 100, 1e-9, 1, true).unwrap();
 
         assert!(output.converged);
         assert!((output.params[0] - 1.0).abs() < 1e-6, "{:?}", output.params);
@@ -3783,17 +3672,7 @@ mod tests {
         for solver in [SolverType::Bfgs, SolverType::Lbfgs] {
             let problem = NoisyCostFloorProblem::new();
             let evaluations = std::rc::Rc::clone(&problem.evaluations);
-            let output = run_solver(
-                problem,
-                solver,
-                vec![0.0, 0.0],
-                100,
-                1e-2,
-                1,
-                true,
-                SeparationNormCheck::Disabled,
-            )
-            .unwrap();
+            let output = run_solver(problem, solver, vec![0.0, 0.0], 100, 1e-2, 1, true).unwrap();
 
             assert!(output.converged, "{solver:?}: {output:?}");
             let grad = NoisyCostFloorProblem::new()
@@ -3883,7 +3762,6 @@ mod tests {
             1e-6,
             1,
             true,
-            SeparationNormCheck::Enabled,
         )
         .unwrap();
 
@@ -3907,7 +3785,6 @@ mod tests {
             1e-12,
             1,
             true,
-            SeparationNormCheck::Enabled,
         );
 
         assert!(matches!(result, Err(MleError::NonConvergence { .. })));
@@ -3924,7 +3801,6 @@ mod tests {
             1e-12,
             1,
             false,
-            SeparationNormCheck::Enabled,
         )
         .unwrap();
 
@@ -3941,7 +3817,6 @@ mod tests {
             1e-12,
             1,
             true,
-            SeparationNormCheck::Enabled,
         );
 
         assert!(matches!(result, Err(MleError::NonConvergence { .. })));
@@ -3957,7 +3832,6 @@ mod tests {
             1e-12,
             1,
             false,
-            SeparationNormCheck::Enabled,
         )
         .unwrap();
 
@@ -4008,7 +3882,6 @@ mod tests {
             1e-6,
             1,
             true,
-            SeparationNormCheck::Enabled,
         );
 
         assert!(
@@ -4076,7 +3949,6 @@ mod tests {
             1e-6,
             1,
             false,
-            SeparationNormCheck::Enabled,
         )
         .unwrap();
 
@@ -4164,7 +4036,6 @@ mod tests {
             1e-6,
             1,
             true,
-            SeparationNormCheck::Disabled,
         )
         .unwrap();
 
@@ -4194,7 +4065,6 @@ mod tests {
             1e-6,
             1,
             false,
-            SeparationNormCheck::Disabled,
         )
         .unwrap();
 
@@ -4251,7 +4121,6 @@ mod tests {
             1e-6,
             1,
             true,
-            SeparationNormCheck::Disabled,
         );
 
         assert!(
@@ -4309,7 +4178,6 @@ mod tests {
             1e-6,
             1,
             true,
-            SeparationNormCheck::Disabled,
         );
 
         assert!(
@@ -4400,7 +4268,6 @@ mod tests {
             1e-6,
             1,
             true,
-            SeparationNormCheck::Disabled,
         )
         .unwrap();
 
@@ -4600,7 +4467,6 @@ mod tests {
             1e-6,
             1,
             true,
-            SeparationNormCheck::Disabled,
         )
         .unwrap();
 
@@ -5295,119 +5161,6 @@ mod tests {
             ),
             Err(CommonError::InsufficientClustersForInference { g: 2, q: 2 }.into())
         );
-    }
-
-    /// [`SEPARATION_PARAM_NORM_THRESHOLD`]の境界値を直接検証する（実際の最適化
-    /// トラジェクトリに頼らない理由は`separation_suspected`のdocコメント参照）。
-    #[test]
-    fn separation_suspected_is_false_just_below_threshold() {
-        assert!(!separation_suspected(&[
-            SEPARATION_PARAM_NORM_THRESHOLD - 0.1,
-            0.0
-        ]));
-    }
-
-    #[test]
-    fn separation_suspected_is_false_exactly_at_threshold() {
-        // `>`（`>=`ではない）で判定するため、ちょうど閾値と一致する場合はfalse。
-        assert!(!separation_suspected(&[
-            SEPARATION_PARAM_NORM_THRESHOLD,
-            0.0
-        ]));
-    }
-
-    #[test]
-    fn separation_suspected_is_true_just_above_threshold() {
-        assert!(separation_suspected(&[
-            SEPARATION_PARAM_NORM_THRESHOLD + 0.1,
-            0.0
-        ]));
-    }
-
-    /// 最小点のノルムが[`SEPARATION_PARAM_NORM_THRESHOLD`]を超える2次問題。`diag_a`が
-    /// 全て`1.0`なのでコスト関数のHessianは単位行列（非特異）、`run_solver`は`target`へ
-    /// 素直に収束する。`target`のノルムは`200 > 100`。
-    fn large_norm_minimum_problem() -> QuadraticProblem {
-        QuadraticProblem {
-            target: vec![200.0, 0.0],
-            diag_a: vec![1.0, 1.0],
-        }
-    }
-
-    /// `SeparationNormCheck::Enabled`（Logit/Probit相当）: 勾配ノルム基準では収束するが
-    /// 標準化パラメータノルムが過大なので`raise_on_non_convergence=true`で
-    /// `SeparationSuspected`を返す。
-    #[test]
-    fn run_solver_returns_separation_suspected_when_check_is_enabled() {
-        let result = run_solver(
-            large_norm_minimum_problem(),
-            SolverType::Newton,
-            vec![0.0, 0.0],
-            35,
-            1e-6,
-            1,
-            true,
-            SeparationNormCheck::Enabled,
-        );
-
-        assert!(
-            matches!(result, Err(MleError::SeparationSuspected { .. })),
-            "{result:?}"
-        );
-    }
-
-    /// `SeparationNormCheck::Enabled`かつ`raise_on_non_convergence=false`: エラーは返さず
-    /// `converged=false`へ格下げする（通常の`NonConvergence`と揃えた挙動）。格下げは
-    /// `converged`フラグだけを落とし、`params`/`n_iter`/`hessian`等の結果本体は通常通り
-    /// 埋めて返す（rust-reviewer指摘、downgradeの契約を明示）。
-    #[test]
-    fn run_solver_downgrades_to_unconverged_on_separation_norm_when_raise_is_false() {
-        let output = run_solver(
-            large_norm_minimum_problem(),
-            SolverType::Newton,
-            vec![0.0, 0.0],
-            35,
-            1e-6,
-            1,
-            false,
-            SeparationNormCheck::Enabled,
-        )
-        .unwrap();
-
-        assert!(!output.converged);
-        // 結果本体は素通し: `target=[200,0]`近傍のパラメータがそのまま返る。
-        assert!(
-            (output.params[0] - 200.0).abs() < 1e-6,
-            "{:?}",
-            output.params
-        );
-        assert!(output.params[1].abs() < 1e-6, "{:?}", output.params);
-        assert!(output.n_iter > 0);
-    }
-
-    /// `SeparationNormCheck::Disabled`（Tobit相当）: 同じ大ノルム収束点でも事後チェックを
-    /// 通らず、`converged=true`で`target`へ収束した結果をそのまま返す。
-    #[test]
-    fn run_solver_ignores_separation_norm_when_check_is_disabled() {
-        let output = run_solver(
-            large_norm_minimum_problem(),
-            SolverType::Newton,
-            vec![0.0, 0.0],
-            35,
-            1e-6,
-            1,
-            true,
-            SeparationNormCheck::Disabled,
-        )
-        .unwrap();
-
-        assert!(output.converged);
-        assert!(
-            (output.params[0] - 200.0).abs() < 1e-6,
-            "{:?}",
-            output.params
-        );
-        assert!(output.params[1].abs() < 1e-6, "{:?}", output.params);
     }
 
     /// `log_likelihood_null`は`n1`（y=1の観測数）または`n0`（y=0の観測数）が0の

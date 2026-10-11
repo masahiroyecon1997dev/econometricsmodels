@@ -191,17 +191,63 @@ def test_perfect_multicollinearity_raises_computation_error(solver):
     )
 
 
+_SEPARATION_SCENARIOS = ["complete_separation", "quasi_complete_separation"]
+
+
+@pytest.mark.parametrize("scenario", _SEPARATION_SCENARIOS)
 @pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
-def test_complete_separation_raises_computation_error(solver):
-    _checks.check_complete_separation_raises_computation_error(
-        Probit, "probit", ProbitOptions, solver
+def test_separation_raises_computation_error(solver, scenario):
+    _checks.check_separation_raises_computation_error(
+        Probit, "probit", ProbitOptions, solver, scenario
+    )
+
+
+@pytest.mark.parametrize("scenario", _SEPARATION_SCENARIOS)
+def test_separation_is_reported_as_separation_by_newton(scenario):
+    _checks.check_separation_is_reported_as_separation_by_newton(
+        Probit, "probit", ProbitOptions, scenario
+    )
+
+
+@pytest.mark.parametrize("scenario", _SEPARATION_SCENARIOS)
+@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
+def test_separation_with_raise_on_non_convergence_false(solver, scenario):
+    _checks.check_separation_with_raise_on_non_convergence_false(
+        Probit, "probit", ProbitOptions, solver, scenario
+    )
+
+
+@pytest.mark.parametrize("scenario", _SEPARATION_SCENARIOS)
+def test_separation_returns_unconverged_result_for_newton(scenario):
+    _checks.check_separation_returns_unconverged_result_for_newton(
+        Probit, "probit", ProbitOptions, scenario
     )
 
 
 @pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
-def test_complete_separation_with_raise_on_non_convergence_false(solver):
-    _checks.check_complete_separation_with_raise_on_non_convergence_false(
-        Probit, "probit", ProbitOptions, solver
+def test_small_sample_separation_is_not_reported_as_success(solver):
+    _checks.check_small_sample_separation_is_not_reported_as_success(
+        Probit, ProbitOptions, solver
+    )
+
+
+@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
+def test_multiple_dummy_separation_raises_computation_error(solver):
+    _checks.check_multiple_dummy_separation_raises_computation_error(
+        Probit, ProbitOptions, solver
+    )
+
+
+def test_separation_without_intercept_raises_computation_error():
+    _checks.check_separation_without_intercept_raises_computation_error(
+        Probit, ProbitOptions
+    )
+
+
+@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
+def test_strongly_collinear_regressors_are_not_rejected_as_separation(solver):
+    _checks.check_strongly_collinear_regressors_are_not_rejected_as_separation(
+        Probit, ProbitOptions, "probit", solver
     )
 
 
@@ -213,10 +259,8 @@ def test_non_convergence_raises_computation_error_with_tiny_max_iter(
     )
 
 
-def test_separation_suspected_raises_computation_error_for_near_separation_data():
-    _checks.check_separation_suspected_raises_computation_error_for_near_separation_data(
-        Probit
-    )
+def test_separated_data_raises_computation_error():
+    _checks.check_separated_data_raises_computation_error(Probit)
 
 
 def test_cluster_unused_by_cov_type_raises(binary_dataset):

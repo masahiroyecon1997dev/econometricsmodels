@@ -65,13 +65,14 @@
 
 use crate::nonlinear::common::{
     CovType, FittedModelForMarginalEffects, GoodnessOfFit, MarginalEffects, MarginalEffectsAt,
-    MleError, MleFitOptions, SandwichVariant, SeparationNormCheck, U_CLAMP, clamped_pdf_cdf,
-    cluster_cov_params, column_means, column_medians, compensated_sum, destandardize_cov_params,
-    destandardize_params, goodness_of_fit, log_likelihood_null, marginal_effects_from_w_s,
+    MleError, MleFitOptions, SandwichVariant, U_CLAMP, clamped_pdf_cdf, cluster_cov_params,
+    column_means, column_medians, compensated_sum, destandardize_cov_params, destandardize_params,
+    goodness_of_fit, log_likelihood_null, marginal_effects_from_w_s,
     observed_information_cov_params, ols_based_initial_params, opg_cov_params, pred_table,
     predict_from_link, predict_new_data, run_solver, sandwich_cov_params, standardize_columns,
     validate_fit_preconditions,
 };
+use crate::nonlinear::separation::verify_no_separation;
 use crate::shared::error::CommonError;
 use crate::shared::inference;
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
@@ -609,14 +610,20 @@ impl ProbitEstimator {
             tol,
             input.y().nrows(),
             raise_on_non_convergence,
-            // Probitは`y∈{0,1}`で係数が±∞へ発散するため(準)完全分離の
-            // 標準化パラメータノルム事後チェックを有効にする。
-            SeparationNormCheck::Enabled,
         )?;
 
         let params = destandardize_params(&output.params, &scale);
 
         let hessian_std = Mat::from_fn(k, k, |i, j| output.hessian[i][j]);
+        // 収束後に完全分離・準完全分離を厳密に判定する（`nonlinear::separation`）。
+        // 分離なら`raise_on_non_convergence`に応じてエラー、または`converged=false`で続行する。
+        let converged = verify_no_separation(
+            input.x(),
+            &scale,
+            input.y(),
+            output.converged,
+            raise_on_non_convergence,
+        )?;
         // `problem_for_scores.as_ref().expect(...)`は各非`Classical`分岐でのみ呼ばれ、
         // 直前の`match cov_type { CovType::Classical => None, _ => Some(...) }`により
         // 常に`Some`であることが保証されている内部契約（`LogitEstimator::fit`と同じ、
@@ -713,7 +720,7 @@ impl ProbitEstimator {
             p_values,
             conf_lower,
             conf_upper,
-            converged: output.converged,
+            converged,
             n_iter: output.n_iter,
             log_likelihood: llf,
             log_likelihood_null: llnull,
@@ -1341,7 +1348,6 @@ mod tests {
                 1e-6,
                 input.y().nrows(),
                 true,
-                SeparationNormCheck::Enabled,
             )
             .unwrap();
             assert!(output.converged, "{solver:?} did not converge");
@@ -1382,22 +1388,12 @@ mod tests {
         }
     }
 
-    /// `SEPARATION_PARAM_NORM_THRESHOLD=100.0`（`nonlinear/common.rs`、Logitの実測に
-    /// 基づく較正値）がProbitでも同程度に機能するかを検証する一連のテスト
-    /// （`docs/spec/probit-spec.md`4章）。
+    /// `beta1`（`x1`の真の係数）を指定して、ほぼ分離したデータを生成する。
     ///
     /// `logit.rs`の`near_separation_input_with_beta1`と同型の設計（`beta=[0,beta1,0.5]`、
     /// 同じLCG・同じ`n=200`・同じ`x1`/`x2`分布）だが、リンク関数のみ`Normal::cdf`に
-    /// 変える。この意図的な「他はすべて揃えてリンクだけ変える」設計により、閾値較正の
-    /// リンク依存性を直接比較できる。実測較正（2026-09-13）:
-    /// `beta1`を段階的に強めると、標準化パラメータのL2ノルムはLogitと同程度の
-    /// オーダーで増加し（例: 真の分離に限りなく近い境界で両リンクとも閾値100に対し
-    /// 5〜11%の余裕で収束）、閾値を超えて`SeparationSuspected`が正常に発火する
-    /// `beta1`もLogit（`100`）よりProbitの方が小さい値（`50`）で足りる——Probitの方が
-    /// テイルの減衰が速く、同じ標準化スケールでもより低い`beta1`で飽和に達するため、
-    /// これは較正のズレではなくリンク関数の性質の違いとして期待通り。この一連のテストの
-    /// 範囲ではLogit用に較正された閾値100がProbit固有の誤検知/検出漏れを起こす証拠は
-    /// 見つからなかった。
+    /// 変える。完全分離になる`beta1`はLogit（`100`）よりProbitの方が小さい値（`50`）で足りる
+    /// ——Probitの方がテイルの減衰が速く、より低い`beta1`で飽和に達するため。
     fn near_separation_input_with_beta1(beta1: f64) -> ProbitInput {
         fn lcg(seed: &mut u64) -> f64 {
             *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
@@ -1432,14 +1428,11 @@ mod tests {
     }
 
     #[test]
-    fn fit_returns_separation_suspected_error_for_near_separation_data() {
-        // 実測で確認済みの最小反復回数（`SeparationSuspected`が発火するまでの
-        // `n_iter`）: newton=22・bfgs=28・lbfgs=26（`logit.rs`の同名テストと同じ考え方、
-        // 手法ごとに実測値+数回分の余裕を持たせる）。
+    fn fit_returns_separation_detected_error_for_separated_data() {
         for (solver, max_iter) in [
-            (SolverType::Newton, 25),
-            (SolverType::Bfgs, 32),
-            (SolverType::Lbfgs, 30),
+            (SolverType::Newton, 100),
+            (SolverType::Bfgs, 100),
+            (SolverType::Lbfgs, 100),
         ] {
             let result = ProbitEstimator::fit(
                 near_separation_input(),
@@ -1453,7 +1446,7 @@ mod tests {
                 },
             );
             assert!(
-                matches!(result, Err(MleError::SeparationSuspected { .. })),
+                matches!(result, Err(MleError::SeparationDetected)),
                 "solver={:?}, result={:?}",
                 solver,
                 result
@@ -1462,7 +1455,7 @@ mod tests {
     }
 
     #[test]
-    fn fit_returns_unconverged_result_for_near_separation_data_without_raising() {
+    fn fit_returns_unconverged_result_for_separated_data_without_raising() {
         let estimator = ProbitEstimator::fit(
             near_separation_input(),
             MleFitOptions {
@@ -1478,11 +1471,9 @@ mod tests {
         assert!(!estimator.converged());
     }
 
-    /// `beta1=20`（`SeparationSuspected`を誤検知させてはいけない境界ケース）で3手法とも
-    /// 正常に収束することを固定するリグレッションテスト（`logit.rs`の同名テストと同じ
-    /// 位置づけ）。`SEPARATION_PARAM_NORM_THRESHOLD`を将来変更する際にこのテストが
-    /// 壊れないか確認することで、閾値の調整が既存の合格ケースを誤検知させないことを
-    /// 保証する。
+    /// `beta1=20`（分離と誤検知してはいけない境界ケース）で3手法とも正常に収束することを
+    /// 固定するリグレッションテスト（`logit.rs`の同名テストと同じ位置づけ）。分離検出の
+    /// 変更が既存の合格ケースを誤検知させないことを保証する。
     #[test]
     fn fit_converges_normally_for_mild_near_separation_data_across_all_methods() {
         for solver in [SolverType::Newton, SolverType::Bfgs, SolverType::Lbfgs] {

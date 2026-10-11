@@ -38,7 +38,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
     無視できる）。
 - **非識別データの検出**: `y`が`lower`/`upper`いずれの境界にも一致しない観測（厳密に内部の観測）が
   1件も無い場合は`NoUncensoredObservations { lower, upper }`（`ValidationError`）。Tobitのこの退化は
-  `β`が発散するのではなく`σ→0`収束として現れ、標準化パラメータノルム基準の`SeparationSuspected`
+  `β`が発散するのではなく`σ→0`収束として現れ、Logit/Probitの分離検出（`nonlinear::separation`）
   では捕捉できないため、事後検知ではなく決定的な入力バリデーションを採用した（打ち切り判定は
   `y==lower`/`y==upper`の完全一致比較、`censoring_fit_check`と同じ規約）。「非打ち切り観測0件」は
   非識別の十分条件であり必要条件ではない（厳密には「打ち切りカテゴリが`x`の線形結合で完全分離
@@ -115,8 +115,8 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 - **`TobitScaling`（`tobit.rs`局所の標準化。共有`standardize_columns`は未使用）**: Logit/Probitが
   使う`common.rs`の`standardize_columns`は`x`列を分散1へスケーリングするだけで`y`をスケーリング
   しないため、`y`のスケールが大きいデータ（例: Wooldridge mroz `hours`、`σ̂≈1122`）で健全なMLE解
-  でも標準化係数のノルムが大きくなり、勾配ノルム基準の収束判定や分離ヒューリスティックが不安定に
-  なる。対策として`y`のスケーリングと`x`の平均センタリングを行う`TobitScaling`を新設した:
+  でも標準化係数のノルムが大きくなり、勾配ノルム基準の収束判定や（当時あった標準化パラメータの
+  ノルムによる）分離ヒューリスティックが不安定になる。対策として`y`のスケーリングと`x`の平均センタリングを行う`TobitScaling`を新設した:
   - `y`・打ち切り境界を`y_scale = 2^round(log2(母集団std(y)))`（**2の冪に丸める**）で一律
     スケーリング。2の冪での除算は倍精度で仮数部不変＝厳密なので、程よいスケールの`y`
     （`std ∈ [1/√2, √2)`）では`y_scale=1`の完全恒等変換になり、反復軌道がスケーリング前と厳密に
@@ -161,10 +161,8 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
     proptests`で発覚。devビルドで80分超のCPU時間を消費し続けるケースを実測で確認済み）。
     詳細は[`logit-spec.md`](./logit-spec.md)3.2節参照。
 - **Tobitの「真の」分離は`σ→0`退化として現れる**（Logit/Probitの「係数が±∞へ発散」とは異なる）。
-  そのため`run_solver`共有の`SeparationSuspected`（標準化パラメータノルム基準、`y∈{0,1}`で較正）は
-  `run_solver`の`separation_norm_check: SeparationNormCheck`引数で**Tobitは`Disabled`**にし、この
-  事後チェック自体を通らないようにする（スケール由来偽陽性を回避。多変量モデルでノルムが
-  `√k`オーダーに増える偽陽性の潜在リスクも排除）。Tobitの分離の現れ方:
+  そのためLogit/Probitの分離検出（`nonlinear::separation`、`zᵢ=(2yᵢ-1)xᵢ`の符号条件に基づく
+  線形計画で、`y∈{0,1}`が前提）はTobitの`fit()`では呼ばない。Tobitの分離の現れ方:
   - 非打ち切り観測ゼロ（`σ→0`）→ `fit()`冒頭の`NoUncensoredObservations`（`ValidationError`）で
     先に弾く（1章）。
   - 部分的な準完全分離 → `NonConvergence`（`max_iter`到達、`ComputationError`）。BFGS/L-BFGSも
@@ -342,7 +340,7 @@ Tobit固有の差分:
 - `dist`（誤差分布）は**Gaussian固定**。`survival::survreg`が選べるlogistic/extreme value等は対象外。
 - `censoring_fit_check`の許容誤差付き打ち切り判定（現状は浮動小数点完全一致）。実データで丸め誤差に
   よる誤分類が問題になった時点で検討する。
-- **`SeparationNormCheck`を無効化したことによる「有限だが統計的に無意味なほど巨大な`β̂`」の検知**:
+- **「有限だが統計的に無意味なほど巨大な`β̂`」の検知**（Tobitは分離検出を持たない）:
   標準化ノルムとは別の指標（Hessianの条件数、SEの発散、`σ̂/σ_y`比の下限等）は未着手。実データで
   問題が顕在化した時点で再検討する。
 - **`censored_contribution`のHessian項がクランプ済み`λ`と生の`zeta`を混在させるバグは

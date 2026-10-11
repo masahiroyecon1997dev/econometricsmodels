@@ -212,7 +212,7 @@ Tobit固有のバリアント（打ち切り境界の検証等）も同じ`MleEr
 | `SingularDesignMatrix` | `ComputationError` | 最適化前の列ピボットQRランクチェックでのランク落ち（1.4節） |
 | `SingularHessian` | `ComputationError` | 収束点のHessianが特異で観測情報行列の逆行列が計算できない |
 | `SingularOpgMatrix` | `ComputationError` | OPG行列（`Σsᵢsᵢ'`、`cov_type="opg"`）が特異。`SingularHessian`と原因が異なるため別バリアントに分離 |
-| `SeparationSuspected { n_iter }` | `ComputationError` | 完全分離下のアンダーフローによる誤収束判定を検出（Logit/Probitのみ、3.4節） |
+| `SeparationDetected` | `ComputationError` | 完全分離・準完全分離（有限のMLEが存在しない）を収束後に線形計画で厳密に検出（Logit/Probitのみ。`engine/src/nonlinear/separation.rs`、`logit-spec.md`3.2節） |
 | `EvaluationBudgetExceeded { budget }` | `ComputationError` | line searchの評価回数バジェット超過（1.2節） |
 | `InvalidCensoringBounds` 等（Tobit専用） | `ValidationError` | 下限≧上限等の不正な指定 |
 

@@ -84,7 +84,10 @@ class Probit:
                 A subclass of `ValueError`.
             ComputationError: A problem was detected during
                 computation (e.g. non-convergence, a singular
-                Hessian/OPG matrix). A subclass of `RuntimeError`.
+                Hessian/OPG matrix, or complete or quasi-complete
+                separation of the outcome, for which no finite
+                maximum likelihood estimate exists). A subclass of
+                `RuntimeError`.
         """
         raw = _lib.fit_probit(self._data, self._y, self._x, self._options)
         return ProbitResults(raw)

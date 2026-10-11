@@ -104,15 +104,15 @@ A wrong argument *type*, as opposed to a wrong value, raises the built-in `TypeE
 | Near-singular matrices | All methods | A matrix needed for the covariance or a joint test is numerically singular, typically because regressors are on extremely different scales (for example `1e6` and `1e-3`) or because of an almost perfect linear dependence. Rescale the variables. |
 | Non-convergence | Logit, Probit, Tobit | The optimizer did not converge within `max_iter`. |
 | Singular Hessian or OPG matrix | Logit, Probit, Tobit | The information matrix cannot be inverted. |
-| Suspected separation | Logit, Probit | The gradient is near zero but the coefficients are implausibly large, which is the signature of a (quasi-)complete separation of the outcome. |
+| Separation | Logit, Probit | Some combination of the regressors perfectly predicts the binary outcome, either for all observations (complete separation) or for a subset (quasi-complete separation, for example a dummy variable that equals 1 only when the outcome is 1). No finite maximum likelihood estimate exists, so the coefficients would diverge. It is detected exactly after the optimizer converges, whatever the sample size. Remove or combine the offending regressors, or use a penalized estimator. |
 | Non-convergence | IV (GMM) | The iterated GMM did not converge. |
 | Degenerate variance components | RE | For example, no remaining idiosyncratic variance in noise-free data. |
 | Auxiliary matrix too large | OLS (`breusch_godfrey_test()`) | The auxiliary regression matrix (`n` rows by the number of regressors plus `nlags` columns) cannot be allocated, which happens only when `nlags` is close to `n` and `n` is large. Use a smaller `nlags`. |
 | Singular auxiliary regression | OLS (`white_test()`, `breusch_pagan_test()`, `breusch_godfrey_test()`) | Every regressor is constant, or the auxiliary design stays linearly dependent after constant and duplicate terms are dropped (for example a full set of dummies in a model fitted with `include_intercept=False`), or the auxiliary R² is undefined. For `breusch_godfrey_test()` it also covers residuals that are all zero or fitted exactly by the auxiliary regression. Only columns identical to a constant or to an earlier column are dropped; a column that is a multiple of another (for example `2 * x1`) is not, and makes the auxiliary regression singular. The message names the test (`White test`, `Breusch-Pagan test` or `Breusch-Godfrey test`), so it is not confused with the model's own collinearity. |
 
-How the cause is reported can depend on the estimator and on the solver. For instance, completely separated data in a binary-choice model may surface as suspected separation, as non-convergence or as a singular Hessian.
+How the cause is reported can depend on the estimator and on the solver. For instance, separated data in a binary-choice model may surface as detected separation, as non-convergence or as a singular Hessian, because the optimizer can fail before the separation check runs.
 
-For Logit, Probit, Tobit and IV (GMM), `raise_on_non_convergence=False` returns the result of the last iteration with `converged=False` instead of raising when the optimizer does not converge. Other failures, such as a singular Hessian, are still raised, so inspect `converged` before using a result obtained this way.
+For Logit, Probit, Tobit and IV (GMM), `raise_on_non_convergence=False` returns the result of the last iteration with `converged=False` instead of raising when the optimizer does not converge. Other failures, such as a singular Hessian, are still raised, so inspect `converged` before using a result obtained this way. Detected separation is treated like non-convergence: with `raise_on_non_convergence=False` the result is returned with `converged=False`.
 
 ## What is not checked
 
@@ -123,7 +123,7 @@ The absence of an error says nothing about the following. They are your responsi
 - **Endogeneity.** For OLS, FE and RE nothing tests whether regressors are correlated with the error term. The Hausman test for RE and the Wu–Hausman test for IV are reported as statistics, not used to stop the estimation.
 - **Instrument validity and strength.** In IV only the order condition (at least as many instruments as endogenous regressors) is checked up front. The rank condition is not, so irrelevant instruments may surface later as a singular first stage. The weak-instrument F statistic is reported without a verdict, and the over-identification test is `None` when the model is just identified.
 - **Stationarity, outliers and influential observations.**
-- **Near-separation.** Data that are close to, but not at, separation estimate without an error. Only the detected pathology above is an error, using a heuristic threshold, and very small samples can still be misclassified.
+- **Near-separation.** Data that are close to, but not at, separation have a finite estimate, so they estimate without an error, although the standard errors can be very large. Only exact separation is an error.
 - **Panel structure beyond what the estimator needs.** A one-way FE model does not complain about unbalanced panels or about repeated (entity, time) pairs. Only the two-way model requires a balanced panel.
 - **Numeric precision.** Numeric columns are converted to 64-bit floating point without a warning, so integers beyond 2^53 and decimals with many digits can lose precision. See [Accepted data](accepted-data.md#how-values-are-converted).
 

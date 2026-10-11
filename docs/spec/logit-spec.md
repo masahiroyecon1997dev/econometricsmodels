@@ -96,16 +96,59 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   検出が収束後の`observed_information_cov_params`に依存していた構造的な差が解消された。収束先の
   推定値・既存のクロスチェック数値は不変（尤度が大域凹で無制約のためMLEは一意）。
 
-- **完全分離下でのアンダーフロー対策**: 完全分離に近いデータでは、係数が発散する過程でスコア項
-  `p(1-p)`が浮動小数点アンダーフローし、勾配ノルム基準が`tol`の値によらず「収束済み」と誤判定しうる
-  （`tol`の調整では解決しない構造的な限界）。対策として、`run_solver`の後処理で標準化パラメータ空間
-  でのL2ノルムが閾値`SEPARATION_PARAM_NORM_THRESHOLD=100.0`を超える場合は収束判定を取り消し、
-  `MleError::SeparationSuspected { n_iter }`を返す（`raise_on_non_convergence=false`なら
-  `converged=false`のまま結果を返す）。閾値はn=200・k=3の単一データセットでの実測較正値であり、
-  パラメータ数`k`が大きい多変量モデルでの誤検知リスクは未検証（4章参照）。この事後チェックは
-  `run_solver`の`separation_norm_check: SeparationNormCheck`引数で切り替え、`y∈{0,1}`で係数が
-  ±∞へ発散するLogit/Probitのみ`Enabled`にする。Tobitは`Disabled`（分離が`σ→0`退化として現れ
-  標準化パラメータノルムが閾値を超えないため。[`tobit-spec.md`](./tobit-spec.md)3.2節参照）。
+- **完全分離・準完全分離の検出（`nonlinear::separation`、Probitと共有）**: ある`θ`について全観測で
+  `zᵢ'θ ≥ 0`（`zᵢ=(2yᵢ-1)xᵢ`）かつどれかが厳密に正なら、`θ`の方向へ係数を大きくするほど対数尤度が
+  増え続け、有限の最尤推定量は存在しない（Albert & Anderson 1984）。全観測で`zᵢ'θ>0`なら完全分離、
+  `≥0`で一部が0なら準完全分離（ダミー変数が1の観測は全て`y=1`、など）。この条件は閾値を持たない
+  厳密な判定で、行を単位長にそろえた`uᵢ=zᵢ/‖zᵢ‖`について線形計画
+  `max Σᵢuᵢ'θ  s.t.  uᵢ'θ≥0, |θⱼ|≤1`に帰着する。正常なデータでは許容解が原点だけで解の最大マージンは0、
+  分離していれば分離した観測に`O(1)`のマージンが付く。
+  収束後に`fit()`が`verify_no_separation`を1回呼ぶ（ソルバーが収束していないときは呼ばない）。
+  分離なら`raise_on_non_convergence=true`で`MleError::SeparationDetected`（`ComputationError`）、
+  `false`なら`converged=false`のまま結果を返す。標準化後の設計行列は複製せず、元の`x`と
+  `ColumnScale`から行を都度計算する。
+  - **常にLP（制約生成）で判定する。事前スクリーニングは採らない**: LPは全観測を一度に制約に
+    入れず、小さな作業集合の制約で解き、違反した制約（最大64本/ラウンド）だけを足して繰り返す。
+    実測では3〜4ラウンド・作業集合は数百本以下（上限2000本、超えたら数値的な異常として扱う）。
+    当初は、収束点の係数方向`θ̂`とHessianの最小固有ベクトル方向でほぼ全観測が正側のときだけLPを
+    走らせる事前スクリーニングを置いていたが、分離方向が複数ある（錐の次元が2以上）と、情報行列の
+    近零固有空間が多次元になり最小固有ベクトルが錐の外を向いて、構造的に取りこぼすと分かった
+    （3つのダミーが同時に準完全分離するデータで、lbfgsの200件中2件が`converged=True`のまま
+    返った）。取りこぼしは分離を無警告の「成功」として返す検出漏れになるため廃止し、常にLPで
+    確かめる。判定は、LPの解`θ`が全制約を満たす（違反1e-9以内）うえで最大マージン
+    `maxᵢ uᵢ'θ`が`1e-6`を超えるかで行う（和ではなく最大値を使うのは、和は`n`に比例して雑音が
+    積もり、大標本で正常データが誤検知されうるため）。
+  - **LPソルバーの差し替え**: LPは`shared::linear_program::LinearProgramSolver`トレイトの裏にあり、
+    自前の密な単体法`DenseSimplex`を使う。変数を`x=p-q`に分け箱制約を行として足す標準形で、原点が
+    許容解なのでPhase 1が要らない。右辺0の錐制約は原点で強く退化するため、(1)入る変数はDantzig規則、
+    比検定の同点は絶対値最大のピボット要素、(2)退化ピボットが30回続いたらBland規則に切り替えて
+    巡回を断つ、(3)制約の右辺に行ごとに異なる`1e-11`級の決定的な摂動を足して退化そのものを解く。
+    Bland規則だけの初版は`k>=10`でピボット上限に達して有効なデータを失敗させ、同じ`x`で結果が
+    逆の行対のようにDantzig/Blandでも終了しない入力（`k=30`）があった。将来LPクレートに替える場合は、
+    トレイトの実装を1つ足して`verify_no_separation`の既定実装を切り替えるだけでよい。
+  - **LPが数値的に完了しないとき**（ピボット上限・作業集合の肥大・解が自分の制約を大きく破る）:
+    分離が無いと確認できなかったので、`raise_on_non_convergence=true`なら`ComputationFailed`
+    （メッセージは「分離が無いことを確認できなかった」旨）、`false`なら推定結果は返して
+    `converged=false`にする。実測のデータでは発生していない。
+  - **実測（合成データ、scipy/HiGHSの全制約LPを正解とする）**: 分離データ883件（`n=5〜2000`・
+    Logit/Probit・完全/準完全分離）を`newton`で全件検出、見逃し0・誤検知0。`bfgs`/`lbfgs`は
+    分離データの一部でソルバー自身が`NonConvergence`等になるが、いずれも`ComputationError`で無警告の
+    「成功」は0。`k=10/20/30`（`n=2000`、完全分離と少数ラベル反転）225件で正解と全件一致、LP失敗0。
+    3つのダミーが同時に準完全分離するデータは3 solverとも200/200件で検出。`tol`が`1e-8`〜`1e-3`でも
+    結果は変わらない。
+  - **性能**: 分離検査は`n=1,000,000`・`k=6`（切片込み）で約68ms（Newtonの`fit()`約620msの約11%）、
+    `n=100,000`で約4ms（約8%）。行列を数パス走査するだけでメモリ帯域が律速。LPが走る準完全分離
+    データでも`fit()`全体は2〜3秒。
+  - **旧方式（標準化パラメータのL2ノルムが閾値`100`を超えたら収束を取り消す）は廃止した**。
+    当初は「完全分離下のスコア項`p(1-p)`のアンダーフローで勾配ノルム基準が誤って収束と判定する」
+    と考えていたが、実測で機序が違うと分かった: 勾配の絶対閾値`tol`は、分離方向で最も飽和していない
+    観測の残差が`tol`を下回れば満たされるため、停止時のマージンは`ln(1/tol)`程度（Probitは約5）で
+    `n`にほぼ依存しない。ノルムは「マージン÷点と分離超平面の幾何学的な隙間」で決まり、`n`が小さいと
+    隙間が大きく、閾値`100`に届く前に止まる。`n=5`（`n=k+1`）では分離したLogit 500件中415件が
+    `converged=True`のまま標準誤差が数千の結果を返し、`n≲15〜20`まで見逃しが続いた。`n`依存の閾値に
+    しても、`n=8〜15`では分離解と正常解のノルム分布が重なり判別できない。準完全分離（ダミー型）は
+    `n=1000`でもノルムが10程度で、全て見逃した。逆に強い多重共線性では、有限のMLEが存在するのに
+    係数が符号反対に大きく振れてノルムだけが膨張し、Probitで`20`件中`8`件が誤って棄却された。
 - **`bfgs`/`lbfgs`のline searchの評価回数バジェット（実装済み）**: `MoreThuenteLineSearch`
   （argmin組み込み）は、`bfgs`の自前実装（`FaerBfgs`）・`lbfgs`の自前実装（`FaerLbfgs`）いずれの
   経路でも内側`Executor`に反復上限が設定されておらず（argmin既定`u64::MAX`）、ステップ幅の上限
@@ -257,7 +300,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 | `Common(DimensionMismatch \| InsufficientObservations \| InvalidConfidenceLevel \| MissingClusterColumn \| InsufficientClusters \| InsufficientClustersForInference \| NoRegressors)` | `ValidationError` |
 | `Common(ComputationFailed)` | `ComputationError` |
 | `InvalidMaxIter` / `InvalidTol` / `InvalidBinaryY` | `ValidationError` |
-| `NonConvergence` / `SingularDesignMatrix` / `SingularHessian` / `SingularOpgMatrix` / `SeparationSuspected` / `EvaluationBudgetExceeded` | `ComputationError` |
+| `NonConvergence` / `SingularDesignMatrix` / `SingularHessian` / `SingularOpgMatrix` / `SeparationDetected` / `EvaluationBudgetExceeded` | `ComputationError` |
 
 ### 3.8 テスト
 
@@ -291,24 +334,15 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   `pred_table()`のout-of-sample対応は引き続き未実装（別issueでトラッキング）。
 - `augment()`は実装済み（3.6参照）。
 - `start_params`（ユーザー指定初期値）
-- `SEPARATION_PARAM_NORM_THRESHOLD`の誤検知リスク: 当初「k大で穏やかな係数が
-  積み重なる」ケースを懸念していたが、2026-09-13の実測で真のメカニズムは**強い多重共線性**と
-  判明した。列が無相関なら`norm(β_std)²≈Var(線形予測子)`が近似的に成り立ち閾値は妥当に機能するが、
-  列が強く相関していると係数が符号反対に大きく振れて線形予測子への寄与は打ち消し合う一方で
-  ノルムだけが膨張するため、分離していない正当な有限MLE（statsmodelsは正常収束）を誤って
-  `SeparationSuspected`として弾いてしまう（実測: 列相関をほぼ1に近づけたLogitデータで
-  ノルム推定値≈580、閾値100の約5.8倍）。詳細は上記参照
-- `SeparationSuspected`検出が使う量（標準化パラメータのL2ノルム）と実際にアンダーフローを
-  引き起こす量（線形予測子`|x_std_i・θ_std|`の最大値）は相関的な関係に過ぎず、数学的に保証された
-  関係ではない（例: 特定の1列のみが分離に寄与するケースでは検出漏れがありうる。未検証）
-- **完全分離でNonConvergenceになるシナリオ（`complete_separation`）は対応済み（2026-09-13）**:
-  当初は3.2の既知の限界（アンダーフローによる誤収束判定）により意図通りに動作しないと判断し
-  見送っていたが、`n=500`程度（極小標本ではない）では誤判定が起きず、newton/bfgs/lbfgs
-  いずれのsolverでも確実に`ComputationError`（`SeparationSuspected`または`NonConvergence`、
-  solver依存）が発生することを実測確認した上で`benchmark/nonlinear/datasets.py`の
-  `complete_separation`シナリオとして追加した（`perfect_multicollinearity`と同型、数値比較の
-  対象外）。小標本境界（`n=k+1`近傍）でのみ誤判定が顕在化することは別途確認済み。
-  - **未対応のまま残る点**: `raise_on_non_convergence=False`とこの完全分離データの組み合わせは
-    未検証（`run_solver`は`raise_on_non_convergence=False`のとき`SeparationSuspected`を
-    送出せず`converged=False`のまま結果を返すのみのため、この経路で無意味な値が返っていないかの
-    確認が別途必要）
+- **分離検出の既知の限界**: (1)`bfgs`/`lbfgs`は分離データで分離検出に至る前にソルバー自身が
+  `NonConvergence`や`SingularHessian`で失敗することがある（いずれも`ComputationError`で、無警告の
+  「成功」にはならない）。(2)LPが数値的に完了しない異常（実測のデータでは発生していない）は
+  `ComputationFailed`または`converged=false`になる。(3)判定は`1e-6`未満のマージンしか持たない
+  「ほぼ分離」を分離と見なさない（有限のMLEは存在するので推定は進み、標準誤差が大きくなる）。
+  (4)制約を作業集合に足す上限（2000本）を超える病的な入力は数値的な異常として扱う。
+- **完全分離でNonConvergenceになるシナリオ（`complete_separation`）・準完全分離（`quasi_complete_separation`）**:
+  `benchmark/nonlinear/datasets.py`にシナリオとして追加済み（`perfect_multicollinearity`と同型、
+  数値比較の対象外）。サンプルサイズに依らず、newton/bfgs/lbfgsいずれでも`ComputationError`になる。
+  `raise_on_non_convergence=False`では、newtonは例外を送出せず`converged=False`で結果を返す
+  （`tests/nonlinear/`で固定）。bfgs/lbfgsはソルバー自身の失敗経路に入ることがあり、結果を返した
+  場合は`converged=False`で標準誤差が有限であることのみを保証する。

@@ -46,7 +46,7 @@ Probit固有の差分のみを記載する。
 ### 3.2 最適化・収束判定
 
 `LogitEstimator::fit`と同じ設計（標準化空間での最適化、`solver`に関わらず収束点のHessianを解析的に
-評価、`SeparationSuspected`による完全分離下のアンダーフロー対策を共有）。近似解析解
+評価、収束後の完全分離・準完全分離の検出`nonlinear::separation`を共有）。近似解析解
 （切片のみモデル、`Φ(θ̂)=ȳ`すなわち`θ̂=Φ⁻¹(ȳ)`）で検証している。
 
 初期値（warm start）・設計行列のランクチェックもLogitと共通（[`logit-spec.md`](./logit-spec.md)
@@ -170,27 +170,17 @@ in-sample限定のまま。`augment(new_data=None)`もLogitと完全に同一の
   - **回帰テスト**:
     `fit_bfgs_and_lbfgs_match_newton_despite_deep_u_clamp_excursions_in_near_separation_data`
     （near separationデータでbfgs/lbfgsがnewtonと一致し続けることを固定）。
-- **`SEPARATION_PARAM_NORM_THRESHOLD=100.0`（Logitの実測に基づく較正値）はProbitでも
-  同程度に機能することを実測で確認済み（実害なし、2026-09-13）**: Probitはリンク関数の
-  テイルの減衰特性がLogitと異なるため、同じ閾値がProbitでも適切かは未較正だった。
-  この事後チェック（`run_solver`の`separation_norm_check: SeparationNormCheck`）は
-  `y∈{0,1}`のLogit/Probitのみ`Enabled`で、Tobitは`Disabled`。
-  - **実測内容**: 同一の`x1`/`x2`分布・同一の疑似乱数seedで、リンク関数のみ変えて
-    分離度合い（`beta1`）を段階的に強めながら、収束点の標準化パラメータL2ノルムを
-    比較した。既存のcalibration値での成功パス（probit `beta1=10`→norm≈7.5、logit
-    `beta1=20`→norm≈17.7）ではどちらも閾値100に対して十分な余裕があった。真の分離に
-    限りなく近い境界付近（浮動小数点精度で`p`が飽和する直前）では、probitはnorm≈93.3、
-    logitはnorm≈89.0で収束しており、どちらも閾値100に対し5〜11%程度の余裕で収まって
-    いた（probitの方がやや余裕が小さいが差は5%程度）。さらに分離度を上げると、両リンク
-    ともnormが数百に急激に飛び、`SeparationSuspected`が正常に発火した。真の分離に
-    近づくほど`SeparationSuspected`が発火する`beta1`はLogit（`100`）よりProbitの方が
-    小さい値（`50`）で足りたが、これは較正のズレではなくProbitのテイルの減衰が速く
-    同じ標準化スケールでもより低い`beta1`で飽和に達するという、リンク関数の性質の
-    違いとして期待通り。この実測の範囲ではProbit固有の追加の誤検知/検出漏れリスクは
-    確認できなかった。
-  - **回帰テスト**:
-    `fit_returns_separation_suspected_error_for_near_separation_data`
-    （`beta1=50`で3手法とも`SeparationSuspected`を返すことを固定）・
-    `fit_returns_unconverged_result_for_near_separation_data_without_raising`・
+- **分離検出はLogitと同じ仕組み（`nonlinear::separation`、[`logit-spec.md`](./logit-spec.md)3.2節）**:
+  収束後に線形計画で完全分離・準完全分離を厳密に判定する。閾値を持たず、リンク関数に依らない
+  （`zᵢ=(2yᵢ-1)xᵢ`の符号条件のみ）。旧方式（標準化パラメータのL2ノルムが閾値`100`を超えたら
+  収束を取り消す）はProbitでも廃止した。Probitは同じ分離でもノルムが小さく（`n=5`で中央値約9）、
+  `n=5`（`n=k+1`）で分離した500件中467件が`converged=True`のまま返り、強い多重共線性では
+  有限のMLEが存在する`20`件中`8`件を誤って棄却していた。
+  - **回帰テスト**: `fit_returns_separation_detected_error_for_separated_data`
+    （`beta1=50`で3手法とも`SeparationDetected`を返すことを固定）・
+    `fit_returns_unconverged_result_for_separated_data_without_raising`・
     `fit_converges_normally_for_mild_near_separation_data_across_all_methods`
-    （`beta1=20`で3手法とも誤検知なく正常収束することを固定）。
+    （`beta1=20`で3手法とも誤検知なく正常収束することを固定）。Python側は
+    `tests/nonlinear/test_probit_validation.py`の`test_separation_*`・
+    `test_small_sample_separation_is_not_reported_as_success`・
+    `test_strongly_collinear_regressors_are_not_rejected_as_separation`。

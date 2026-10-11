@@ -161,7 +161,7 @@ All synthetic datasets are generated once, frozen as CSV files in the repository
 | IV | `card` |
 | FE, RE | `wagepan` |
 
-**Error paths.** Invalid input (missing values, duplicate columns, too few observations, too few clusters, out-of-range options) must raise a validation error, and numerical failure (for example perfect multicollinearity, complete separation) must raise a computation error. Only the exception type is checked, with no reference values: most reference packages silently drop the offending columns and continue, which this package deliberately does not do.
+**Error paths.** Invalid input (missing values, duplicate columns, too few observations, too few clusters, out-of-range options) must raise a validation error, and numerical failure (for example perfect multicollinearity, complete or quasi-complete separation) must raise a computation error. Only the exception type is checked, with no reference values: most reference packages silently drop the offending columns and continue, which this package deliberately does not do.
 
 ## Rust engine tests
 

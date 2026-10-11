@@ -47,29 +47,23 @@ autocorrelated/high_variance）は2値DGPに直接転用できないため、Log
 確認済み: logitはbeta1=20、probitはbeta1=10で、いずれもengine・statsmodelsの推定値が
 完全一致し、既定`tol=1e-6`でも収束することを確認した上で採用）。
 
+`quasi_complete_separation`（真の準完全分離）は`x3`を2値ダミーにし、ダミーが1の観測は全て
+`y=1`にする（ダミーが0の観測の`y`は混在）。完全分離ではないが、ダミーの係数が+∞へ発散し
+有限MLEが存在しない。`complete_separation`と同型（数値比較の対象外、`ComputationError`の
+発生確認のみ）。
+
 `complete_separation`（真の完全分離）は`y`を`x1`の符号で決定論的に生成する
 （`near_separation`のようにベルヌーイ乱数を介さない。有限MLEが数学的に存在しない
-データ）。当初は「NonConvergenceになるシナリオ」として検討したが、勾配ノルム
-`‖∇ℓ(θ)‖<tol`の収束判定が完全分離下の係数発散過程でスコア項の浮動小数点
-アンダーフローにより誤って「収束済み」と判定してしまう既知の限界
-（`docs/spec/logit-spec.md`参照。probitも`nonlinear/common.rs`の`run_solver`を
-共有するため同じ限界を持つ）があり、**極小標本（n=k+1近傍）ではこの誤判定が
-無視できない頻度で発生する**ため、当初は見送っていた。2026-09-13に
-`n=100〜200`程度の探索的な実測でこの誤判定が起きないことを確認した上で、
-実際に採用・凍結したフィクスチャは本関数の既定値`n=500`（探索時のnレンジより
-更に余裕を持たせた値、`freeze.py`はnを明示指定しないためこの既定値が使われる）
-であり、この誤判定（無警告の「成功」）は起きず、
-`method`（newton/bfgs/lbfgs）に応じて`SeparationSuspected`または`NonConvergence`
-のいずれか（実測ではnewton/lbfgsは主に`SeparationSuspected`、bfgsは稀に
-`NonConvergence`）が確実に発生することを確認できたため、`perfect_multicollinearity`
-と同型（数値比較の対象外、基底クラス`ComputationError`の発生確認のみ）の
-シナリオとして採用した。`n`を大きく（`n>=100`程度）取ることが、小標本境界での
-誤判定を避ける鍵になる。なお、`raise_on_non_convergence=False`時の挙動確認等、
-`n_iter`を確定的に制御したいテストは引き続き`LogitOptions(max_iter=1)`/
+データ）。`perfect_multicollinearity`と同型（数値比較の対象外、基底クラス
+`ComputationError`の発生確認のみ）。分離は収束後に`nonlinear::separation`（線形計画による
+厳密な判定、`docs/spec/logit-spec.md`参照）が検出するため、サンプルサイズに依らず
+（`n=k+1`の極小標本でも）`method`（newton/bfgs/lbfgs）を問わず`ComputationError`になる
+（bfgs/lbfgsは分離検出に至る前にソルバー自身が`NonConvergence`等で失敗することもある）。
+かつて検出に使っていた標準化パラメータのノルム基準は、小標本で分離を見逃し、強い多重
+共線性で正常なデータを誤って棄却するため廃止した。なお、`raise_on_non_convergence=False`時の
+挙動確認等、`n_iter`を確定的に制御したいテストは引き続き`LogitOptions(max_iter=1)`/
 `ProbitOptions(max_iter=1)`の人為的な打ち切り（`tests/nonlinear/
-test_logit_validation.py`/`test_probit_validation.py`）を使う（本シナリオは
-これを置き換えるものではなく、別の目的——自然な完全分離データでの
-`ComputationError`発生確認——を担う）。
+test_logit_validation.py`/`test_probit_validation.py`）を使う。
 
 使用例:
     from benchmark.nonlinear.datasets import generate_binary_choice_dataset
@@ -111,6 +105,7 @@ SCENARIOS = [
     "high_condition_number",
     "near_separation",
     "complete_separation",
+    "quasi_complete_separation",
     "perfect_multicollinearity",
     "scale_variance",
     "many_regressors",
@@ -121,6 +116,9 @@ SCENARIOS = [
 # docstring参照）: logitはbeta1=20、probitはbeta1=10でいずれも収束するが標準誤差が
 # 大きく膨らむ（成功パス、数値比較対象）。
 _NEAR_SEPARATION_BETA1 = {"logit": 20.0, "probit": 10.0}
+
+# quasi_complete_separationでx3（標準正規）を2値ダミーに変換する閾値。0.5なら約31%が1になる。
+_QUASI_COMPLETE_DUMMY_THRESHOLD = 0.5
 
 # scale_varianceで出力直前に列へ適用するスケール（OLSのbenchmark/linear/datasets.py
 # と同じ倍率、実体はbenchmark/common/dgp_constants.pyに集約済み）。x1は1e6倍、x2は1e-3倍。
@@ -231,6 +229,14 @@ def generate_binary_choice_dataset(
         beta = beta.copy()
         beta[1] = _NEAR_SEPARATION_BETA1[link]
 
+    if scenario == "quasi_complete_separation":
+        if k < 3:
+            raise ValueError(f"{scenario} requires k >= 3")
+        # x3を2値ダミーに置き換える（約31%が1）。
+        X[:, 2] = (X[:, 2] > _QUASI_COMPLETE_DUMMY_THRESHOLD).astype(
+            np.float64
+        )
+
     if scenario == "scale_variance" and k < 2:
         raise ValueError(f"{scenario} requires k >= 2")
 
@@ -246,6 +252,16 @@ def generate_binary_choice_dataset(
         # 真の完全分離: yをベルヌーイ乱数を介さずx1の符号のみで決定論的に生成する
         # （有限MLEが数学的に存在しないデータ、上記モジュールdocstring参照）。
         y = (X[:, 0] > 0.0).astype(np.float64)
+    elif scenario == "quasi_complete_separation":
+        # 真の準完全分離: x3を2値ダミー（約3割が1）にし、ダミーが1の観測は全て
+        # y=1にする。ダミーが0の観測のyはベルヌーイ乱数のままで0と1が混在するため
+        # 完全分離ではないが、ダミーの係数が+∞へ発散する（有限MLEが存在しない）。
+        # 標準誤差が極端に大きいだけで収束したように見え、実務で最もよく現れる分離。
+        y = np.where(
+            X[:, 2] == 1.0,
+            1.0,
+            rng.binomial(1, _LINK_CDF[link](linear_predictor(X, beta))),
+        ).astype(np.float64)
     else:
         p = _LINK_CDF[link](linear_predictor(X, beta))
         y = rng.binomial(1, p).astype(np.float64)

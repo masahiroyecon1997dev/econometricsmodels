@@ -912,12 +912,11 @@ def test_large_true_coefficient_dgp_converges_and_recovers_truth(solver):
     回帰テスト。
 
     `y`のスケール由来の分離ヒューリスティック誤発火の修正前は、この
-    DGP（`y* = 100·x1 + 0.5·x2 + N(0,1)`、n=200、左打ち切り約51%）が`run_solver`
-    共有の`SeparationSuspected`（標準化パラメータノルム基準、Logit/Probitの
-    `y∈{0,1}`で較正）に誤って引っかかり`ComputationError`になっていた。`y`の
-    標準偏差が約65あり標準化パラメータノルムが閾値100を超えていたのが原因で、
-    真の分離ではなかった。`TobitScaling`導入と、Tobitでは
-    `SeparationNormCheck.Disabled`とする対応を経て、Newton/BFGS/LBFGSのいずれでも
+    DGP（`y* = 100·x1 + 0.5·x2 + N(0,1)`、n=200、左打ち切り約51%）が、当時あった標準化
+    パラメータノルム基準の分離ヒューリスティック（Logit/Probitの`y∈{0,1}`で較正、現在は
+    廃止）に誤って引っかかり`ComputationError`になっていた。`y`の標準偏差が約65あり
+    標準化パラメータノルムが閾値100を超えていたのが原因で、真の分離ではなかった。
+    `TobitScaling`導入を経て、Newton/BFGS/LBFGSのいずれでも
     `x1≈100`・`σ≈1`（真値`β1=100`, `σ=1`）で収束する。
 
     真の（準完全）分離が`ComputationError`になることは
@@ -956,9 +955,8 @@ def test_true_separation_noise_free_dgp_raises_computation_error(solver):
     Tobitの「真の」分離は、Logit/Probitのように係数が±∞へ発散するのではなく
     `σ→0`退化として現れる。実測ではNewtonは`NonConvergence`（`max_iter`到達）、
     BFGS/L-BFGSも`ComputationError`になる（変種は問わない）。`max_iter`を
-    35→2000に増やしてもNewton/BFGSは`NonConvergence`のまま。標準化パラメータ
-    ノルム基準の`SeparationSuspected`はTobitでは無効
-    （`run_solver`に`SeparationNormCheck.Disabled`）。
+    35→2000に増やしてもNewton/BFGSは`NonConvergence`のまま。Logit/Probitの分離検出
+    （`SeparationDetected`）はTobitでは呼ばない。
 
     **全件打ち切りとの棲み分け**: 非打ち切り観測が1件も無い（全観測が境界値
     ちょうど）ケースは`fit()`冒頭の`validate_has_uncensored_observations`が
@@ -1019,14 +1017,13 @@ def test_quasi_separation_tiny_noise_converges_to_true_values():
 
 
 def test_many_regressors_no_false_separation():
-    """説明変数を15本に増やしても、健全なDGPで偽の`SeparationSuspected`無しに
-    収束する。
+    """説明変数を15本に増やしても、健全なDGPで偽の分離判定無しに収束する。
 
-    `SeparationNormCheck.Disabled`採用の根拠の一つが「多変量モデルでは
-    標準化パラメータノルムが`√k`オーダーで増え、この種の偽陽性が再発しうる」
-    （Tobitでは係数由来でもノルムが増える）。Tobitは検出自体を通らないため
-    ここで`ComputationError`になってはいけない。`TobitScaling`が設計行列を
-    列標準化・平均センタリングしてノルムを抑える回帰ガードでもある。
+    当時あったノルム基準の分離ヒューリスティックは、多変量モデルで標準化パラメータの
+    ノルムが`√k`オーダーで増え偽陽性が再発しうる懸念があった（Tobitでは係数由来でも
+    ノルムが増える）。Tobitは分離検出を呼ばないため、ここで`ComputationError`に
+    なってはいけない。`TobitScaling`が設計行列を列標準化・平均センタリングして
+    ノルムを抑える回帰ガードでもある。
     """
     rng = random.Random(3)
     n = 400
@@ -1049,9 +1046,8 @@ def test_many_regressors_no_false_separation():
 
 
 def test_mroz_hours_raw_scale_converges_without_false_separation():
-    """実データ（Wooldridge mroz `hours`、生スケール）で偽の`SeparationSuspected`
-    無しに収束する（分離ヒューリスティック誤発火の実データ回帰、
-    `SeparationNormCheck.Disabled`で無効化を確定）。
+    """実データ（Wooldridge mroz `hours`、生スケール）で偽の分離判定無しに
+    収束する（当時あったノルム基準の分離ヒューリスティック誤発火の実データ回帰）。
 
     `hours`（0〜4950、左打ち切り約43%）を Example 17.2 の RHS 7変数で推定する。
     `y`の標準偏差が大きく（σ̂≈1122）、修正前は標準化パラメータノルムが

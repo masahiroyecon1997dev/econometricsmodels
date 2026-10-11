@@ -107,11 +107,11 @@
 //! `regularized_newton_step`のdocコメント参照（ユーザー確認済み）。
 
 use crate::nonlinear::common::{
-    CovType, MarginalEffects, MarginalEffectsAt, MleError, MleFitOptions, SandwichVariant,
-    SeparationNormCheck, U_CLAMP, checked_design_matrix_qr, clamped_pdf_cdf, cluster_cov_params,
-    column_means, column_medians, compensated_sum, observed_information_cov_params, opg_cov_params,
-    predict_new_data, run_solver, sandwich_cov_params, validate_cluster_cov_type,
-    validate_confidence_level, validate_mle_options, validate_sufficient_observations,
+    CovType, MarginalEffects, MarginalEffectsAt, MleError, MleFitOptions, SandwichVariant, U_CLAMP,
+    checked_design_matrix_qr, clamped_pdf_cdf, cluster_cov_params, column_means, column_medians,
+    compensated_sum, observed_information_cov_params, opg_cov_params, predict_new_data, run_solver,
+    sandwich_cov_params, validate_cluster_cov_type, validate_confidence_level,
+    validate_mle_options, validate_sufficient_observations,
 };
 use crate::shared::error::CommonError;
 use crate::shared::inference;
@@ -594,11 +594,10 @@ fn population_std(values: impl Iterator<Item = f64> + Clone, n: usize) -> f64 {
 /// `destandardize_params`を使わず、Tobit内で完結させる。
 ///
 /// **`standardize_columns`と分けた理由**:
-/// 1. **`y`のスケーリング**: `separation_suspected`（`nonlinear/common.rs`、標準化
-///    パラメータ空間のL2ノルムが`SEPARATION_PARAM_NORM_THRESHOLD`超で(準)分離と判定）は
-///    Logit/Probit（`y∈{0,1}`）で較正されている。Tobitは`y`が連続でスケールが任意の
-///    ため、`y`のスケールが大きいだけで健全なMLE解でもノルムが閾値を超え誤発火する
-///    （Wooldridge mroz `hours`の生スケールTobitで発覚）。`x`の列標準化と同じ発想
+/// 1. **`y`のスケーリング**: 当時あった分離ヒューリスティック（標準化パラメータ空間のL2ノルムが
+///    閾値を超えたら(準)分離と判定する、現在は廃止）はLogit/Probit（`y∈{0,1}`）で較正されていた。
+///    Tobitは`y`が連続でスケールが任意のため、`y`のスケールが大きいだけで健全なMLE解でも
+///    ノルムが閾値を超え誤発火した（Wooldridge mroz `hours`の生スケールTobitで発覚）。`x`の列標準化と同じ発想
 ///    （R `survival::survreg`は設計行列を標準化する）を`y`にも適用してスケール不変にする。
 ///    **`y_scale`は`y`の母集団標準偏差を「2の冪に丸めた」値**（`2^round(log2(sd))`）。
 ///    2の冪で割る操作は倍精度浮動小数点で指数部のシフトのみ（仮数部は不変）＝厳密なため、
@@ -1400,13 +1399,11 @@ impl TobitEstimator {
             tol,
             input.y().nrows(),
             raise_on_non_convergence,
-            // Tobitの真の分離は係数発散ではなく`σ→0`退化として現れるため、標準化
-            // パラメータノルムによる(準)完全分離の事後チェックは無効にする。全件打ち切りは
-            // `validate_has_uncensored_observations`（`NoUncensoredObservations`）、
-            // 部分的な準完全分離は`NonConvergence`で捕捉される
-            // （`SeparationNormCheck`のdocコメント参照）。
-            SeparationNormCheck::Disabled,
         )?;
+        // Tobitの真の分離は係数発散ではなく`σ→0`退化として現れるため、Logit/Probitの分離検出
+        // （`nonlinear::separation`）は行わない。全件打ち切りは
+        // `validate_has_uncensored_observations`（`NoUncensoredObservations`）、
+        // 部分的な準完全分離は`NonConvergence`で捕捉される。
 
         // 標準化空間の内部パラメータ`(β̃, s̃)`を元のスケールの`(β, logσ)`へ逆変換する
         // （`TobitScaling`のdocコメントの式）。
@@ -3376,15 +3373,12 @@ mod tests {
     /// `y`（および打ち切り境界）を大きなスケールに引き伸ばしても、`fit()`が生スケールの
     /// データと数学的に同値な推定値に収束することを確認する回帰テスト。
     ///
-    /// `y`を標準化せず最適化していた頃は、`y`のスケールが大きいと健全なMLE解でも
-    /// 標準化パラメータ空間のL2ノルムが`SEPARATION_PARAM_NORM_THRESHOLD`を超え、
-    /// (準)分離ヒューリスティック（`nonlinear/common.rs`の`separation_suspected`）が
-    /// 誤発火して`MleError::SeparationSuspected`を返していた（Wooldridge mroz `hours`の
-    /// 生スケールTobitで発覚）。`TobitScaling`が`y`を2の冪に丸めたスケールで
-    /// スケーリングしてから最適化し収束後に逆変換することで解消した。その後
-    /// `run_solver`に`SeparationNormCheck::Disabled`を渡すようになりTobitはこの事後
-    /// チェック自体を通らなくなったため、現在は二重に発火し得ない（本テストは
-    /// `TobitScaling`によるスケール同値性の回帰テストとして維持する）。
+    /// `y`を標準化せず最適化していた頃は、`y`のスケールが大きいと健全なMLE解でも標準化
+    /// パラメータ空間のL2ノルムが大きくなり、当時あった標準化パラメータのノルムによる
+    /// (準)分離ヒューリスティックが誤発火して失敗していた（Wooldridge mroz `hours`の
+    /// 生スケールTobitで発覚）。`TobitScaling`が`y`を2の冪に丸めたスケールでスケーリング
+    /// してから最適化し収束後に逆変換することで解消した（本テストは`TobitScaling`による
+    /// スケール同値性の回帰テストとして維持する）。
     ///
     /// `y' = c·y`・`lower' = c·lower`（`c`は2の冪）とすると`β' = c·β`・`σ' = c·σ`・
     /// `SE' = c·SE`が厳密に成り立ち（`TobitScaling`が`y_scale`も`c`倍の2の冪に丸めるため、
@@ -3509,8 +3503,8 @@ mod tests {
 
         assert!(est.converged());
         // 傾きは真値 40 の近傍（打ち切り＋ノイズがあるため緩め）。以前は`y`の
-        // 大スケールで`SeparationSuspected`が誤発火し`.unwrap()`がpanicしていた
-        // （現在はTobitがこの事後チェックを通らないため）。
+        // 大スケールで当時のノルムによる分離ヒューリスティックが誤発火し`.unwrap()`が
+        // panicしていた（現在はこのヒューリスティック自体が無い）。
         assert!(
             (est.params()[0] - 40.0).abs() < 5.0,
             "slope={}, expected≈40",
@@ -3540,23 +3534,20 @@ mod tests {
         );
     }
 
-    /// Tobitの(準)完全分離は`MleError::SeparationSuspected`ではなく
+    /// Tobitの(準)完全分離は`MleError::SeparationDetected`ではなく
     /// `MleError::NonConvergence`として現れることを固定する。
     ///
-    /// `fit()`は`run_solver`に`SeparationNormCheck::Disabled`を渡すため、標準化
-    /// パラメータノルム基準の(準)完全分離事後チェックを通らない。これを
-    /// `SeparationNormCheck::Enabled`へ戻す回帰が入っても、その後の`TobitScaling`が
-    /// 標準化ノルムを閾値以下に保つため`SeparationSuspected`は発火せず——この失敗モードが
-    /// `NonConvergence`であること自体を、Tobitの分離の現れ方の正本として固定する
-    /// （`SeparationSuspected`と`NonConvergence`はどちらも`ComputationError`にマップ
-    /// されるため、Python API境界のテストでは区別できない）。`run_solver`ゲートの
-    /// 両方向の直接検証は`nonlinear/common.rs`の`run_solver_*_separation_*`テスト。
+    /// `fit()`はLogit/Probit用の分離検出（`nonlinear::separation`）を呼ばない。Tobitの分離は
+    /// 係数の発散ではなく`σ→0`への退化として現れるため、この失敗モードが`NonConvergence`で
+    /// あること自体を、Tobitの分離の現れ方の正本として固定する（`SeparationDetected`と
+    /// `NonConvergence`はどちらも`ComputationError`にマップされるため、Python API境界の
+    /// テストでは区別できない）。
     ///
     /// DGP: `y* = 100·x1 + 0.5·x2`（ノイズ皆無）を`lower=0`で左打ち切り。非打ち切り
     /// 観測は存在する（`NoUncensoredObservations`は通過する）が、分離方向に沿って
     /// `σ→0`へ退化し、Newtonは`max_iter`まで収束しない。
     #[test]
-    fn fit_returns_non_convergence_not_separation_suspected_for_noise_free_separation() {
+    fn fit_returns_non_convergence_not_separation_detected_for_noise_free_separation() {
         let n = 120;
         let x1: Vec<f64> = (0..n)
             .map(|i| -2.0 + 4.0 * (i as f64) / ((n - 1) as f64))

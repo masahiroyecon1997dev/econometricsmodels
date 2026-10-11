@@ -38,7 +38,10 @@ from _constants import DATA_DIR, MROZ_X
 from _error_messages import escaped
 from _helpers import (
     load_wooldridge_dataset,
-    separation_suspected_dataset,
+    multi_dummy_separation_dataset,
+    separated_dataset,
+    small_sample_separation_dataset,
+    strongly_collinear_binary_dataset,
     with_cluster_groups,
 )
 from econometricsmodels import ComputationError, ValidationError
@@ -996,29 +999,25 @@ def check_perfect_multicollinearity_raises_computation_error(
         ).fit()
 
 
-def check_complete_separation_raises_computation_error(
-    estimator_cls, dataset_prefix, options_cls, solver
+def check_separation_raises_computation_error(
+    estimator_cls, dataset_prefix, options_cls, solver, scenario
 ):
-    """真の完全分離（合成データセット、`y`が`x1`の符号のみで決定論的に決まり
-    有限MLEが存在しない）は数値比較の対象外（`testing-policy.md`「テストの3系統」）。
-    想定エラー（`ComputationError`）が発生することのみを確認する。`solver`
-    （newton/bfgs/lbfgs）でparametrizeする。
+    """真の分離（合成データセット、有限MLEが存在しない）は数値比較の対象外
+    （`testing-policy.md`「テストの3系統」）。想定エラー（`ComputationError`）が
+    発生することのみを確認する。`solver`（newton/bfgs/lbfgs）でparametrizeする。
 
-    実際に発生する例外の**サブタイプはsolverによって異なる**（実測: newton/lbfgsは
-    `SeparationSuspected`、bfgsは`max_iter`到達による`NonConvergence`になりやすい）
+    `scenario`は`complete_separation`（`y`が`x1`の符号のみで決まる完全分離）または
+    `quasi_complete_separation`（2値ダミーが1の観測は全て`y=1`となる準完全分離）。
+
+    実際に発生する例外の**メッセージはsolverによって異なる**（newtonは分離検出、
+    bfgs/lbfgsは分離検出に至る前にソルバー自身が`NonConvergence`等で失敗することがある）
     ため、基底クラス`ComputationError`のみをアサートする（`check_perfect_
     multicollinearity_raises_computation_error`と同型の設計だが、あちらは
-    `solver`によらず常に`SingularDesignMatrix`である点が異なる）。
-
-    以前は「完全分離データは勾配ノルムのアンダーフローにより誤って収束済みと
-    判定されうる」という既知の限界（`docs/spec/logit-spec.md`参照）により、
-    このシナリオ自体の追加を見送っていた。`n=500`（`benchmark/nonlinear/
-    datasets.py`の既定値）程度の標本では、この誤判定（無警告の「成功」）は
-    起きず確実に`ComputationError`になることを実測で確認した上で追加した
-    （小標本境界〔`n=k+1`近傍〕でのみ誤判定が顕在化することは
-    別途確認済み）。
+    `solver`によらず常に`SingularDesignMatrix`である点が異なる）。分離検出自体は
+    サンプルサイズ・分離の種類によらず厳密（線形計画）なので、無警告の「成功」には
+    ならない。
     """
-    df = pl.read_csv(DATA_DIR / f"{dataset_prefix}_complete_separation.csv")
+    df = pl.read_csv(DATA_DIR / f"{dataset_prefix}_{scenario}.csv")
     x_cols = [c for c in df.columns if c != "y"]
     with pytest.raises(ComputationError):
         estimator_cls(
@@ -1029,24 +1028,39 @@ def check_complete_separation_raises_computation_error(
         ).fit()
 
 
-def check_complete_separation_with_raise_on_non_convergence_false(
-    estimator_cls, dataset_prefix, options_cls, solver
+def check_separation_is_reported_as_separation_by_newton(
+    estimator_cls, dataset_prefix, options_cls, scenario
 ):
-    """完全分離データ（`check_complete_separation_raises_computation_error`と
-    同じフィクスチャ）で`raise_on_non_convergence=False`を指定した場合の挙動を
-    固定する（testing-completeness-reviewer指摘）。
+    """newtonは分離データで`NonConvergence`ではなく分離検出のメッセージを返す
+    （分離の原因と対処が利用者に伝わる）。`ComputationError`の基底クラスだけでは
+    区別できないため、メッセージで固定する。"""
+    df = pl.read_csv(DATA_DIR / f"{dataset_prefix}_{scenario}.csv")
+    x_cols = [c for c in df.columns if c != "y"]
+    with pytest.raises(ComputationError, match="separated"):
+        estimator_cls(
+            df,
+            y="y",
+            x=x_cols,
+            options=options_cls(solver="newton"),
+        ).fit()
 
-    `SeparationSuspected`検出は`raise_on_non_convergence=False`のとき例外を
-    送出せず`converged=False`のまま結果を返すのみだが（`docs/spec/logit-spec.md`
-    参照）、収束判定とは独立した`SingularHessian`等の別エラー経路は
-    `raise_on_non_convergence`に関わらず発生しうる（Tobitと同型の挙動。
-    実測ではLogit×bfgsのみこの経路に入り`SingularHessian`を送出する）。
-    そのため、この関数は「例外を投げず結果を
-    返した場合は標準誤差が有限値であること」のみを保証し、`ComputationError`が
-    飛ぶこと自体は許容する（メソッドごとに収束の軌道が異なり、どちらの経路に
-    入るかは実装の詳細のため）。
+
+def check_separation_with_raise_on_non_convergence_false(
+    estimator_cls, dataset_prefix, options_cls, solver, scenario
+):
+    """分離データ（`check_separation_raises_computation_error`と同じフィクスチャ）で
+    `raise_on_non_convergence=False`を指定した場合の挙動を固定する。
+
+    分離検出は`raise_on_non_convergence=False`のとき例外を送出せず`converged=False`の
+    まま結果を返す（`docs/spec/logit-spec.md`参照）。ただし収束判定とは独立した
+    `SingularHessian`等の別エラー経路は`raise_on_non_convergence`に関わらず発生しうる
+    （Tobitと同型の挙動。bfgs/lbfgsで入ることがある）ため、「例外を投げず結果を返した
+    場合は`converged=False`で標準誤差が有限値であること」のみを保証し、
+    `ComputationError`が飛ぶこと自体は許容する（メソッドごとに軌道が異なり、どちらの
+    経路に入るかは実装の詳細のため）。newtonは必ず結果を返すことを別途固定する
+    （`check_separation_returns_unconverged_result_for_newton`）。
     """
-    df = pl.read_csv(DATA_DIR / f"{dataset_prefix}_complete_separation.csv")
+    df = pl.read_csv(DATA_DIR / f"{dataset_prefix}_{scenario}.csv")
     x_cols = [c for c in df.columns if c != "y"]
     options = options_cls(solver=solver, raise_on_non_convergence=False)
     try:
@@ -1058,6 +1072,94 @@ def check_complete_separation_with_raise_on_non_convergence_false(
         assert math.isfinite(se), f"std_errors[{name}]={se} is not finite"
 
 
+def check_separation_returns_unconverged_result_for_newton(
+    estimator_cls, dataset_prefix, options_cls, scenario
+):
+    """newtonは分離データで`raise_on_non_convergence=False`なら例外を送出せず、
+    `converged=False`の結果を返す（分離を無警告で「収束」と報告しない）。"""
+    df = pl.read_csv(DATA_DIR / f"{dataset_prefix}_{scenario}.csv")
+    x_cols = [c for c in df.columns if c != "y"]
+    res = estimator_cls(
+        df,
+        y="y",
+        x=x_cols,
+        options=options_cls(solver="newton", raise_on_non_convergence=False),
+    ).fit()
+    assert res.converged is False
+
+
+def check_small_sample_separation_is_not_reported_as_success(
+    estimator_cls, options_cls, solver
+):
+    """自由度が1（`n=k+1`）の極小標本で完全分離になるデータは、無警告の「収束」として
+    返さず`ComputationError`にする。かつては標準化パラメータのノルム基準がこの種の
+    データを見逃し、`converged=True`のまま標準誤差が数千の結果を返していた。
+    `raise_on_non_convergence=False`でも`converged=True`にならない。"""
+    df = small_sample_separation_dataset()
+    x = ["x1", "x2", "x3"]
+    with pytest.raises(ComputationError):
+        estimator_cls(df, y="y", x=x, options=options_cls(solver=solver)).fit()
+    try:
+        res = estimator_cls(
+            df,
+            y="y",
+            x=x,
+            options=options_cls(solver=solver, raise_on_non_convergence=False),
+        ).fit()
+    except ComputationError:
+        return
+    assert res.converged is False
+
+
+def check_multiple_dummy_separation_raises_computation_error(
+    estimator_cls, options_cls, solver
+):
+    """3つのダミーが同時に準完全分離するデータ（分離方向が複数）も、全solverで
+    無警告の「成功」にならず`ComputationError`になる。`raise_on_non_convergence=False`でも
+    結果を返すなら`converged=False`。"""
+    df = multi_dummy_separation_dataset()
+    x = [c for c in df.columns if c != "y"]
+    with pytest.raises(ComputationError):
+        estimator_cls(df, y="y", x=x, options=options_cls(solver=solver)).fit()
+    try:
+        res = estimator_cls(
+            df,
+            y="y",
+            x=x,
+            options=options_cls(solver=solver, raise_on_non_convergence=False),
+        ).fit()
+    except ComputationError:
+        return
+    assert res.converged is False
+
+
+def check_separation_without_intercept_raises_computation_error(
+    estimator_cls, options_cls
+):
+    """切片なし（`include_intercept=False`）でも、完全分離は`ComputationError`になる。"""
+    df = separated_dataset()
+    with pytest.raises(ComputationError, match="separated"):
+        estimator_cls(
+            df,
+            y="y",
+            x=["x1", "x2"],
+            options=options_cls(include_intercept=False),
+        ).fit()
+
+
+def check_strongly_collinear_regressors_are_not_rejected_as_separation(
+    estimator_cls, options_cls, link, solver
+):
+    """相関がほぼ1の2列を含む、分離していない2値データは有限のMLEが存在するので、
+    分離として棄却せず収束させる（かつてはノルム基準が係数の符号反転した大きな値を
+    分離と誤認していた）。"""
+    df = strongly_collinear_binary_dataset(link)
+    res = estimator_cls(
+        df, y="y", x=["x1", "x2", "x3"], options=options_cls(solver=solver)
+    ).fit()
+    assert res.converged is True
+
+
 def check_non_convergence_raises_computation_error_with_tiny_max_iter(
     dataset, estimator_cls, options_cls
 ):
@@ -1065,10 +1167,10 @@ def check_non_convergence_raises_computation_error_with_tiny_max_iter(
     （既定）で`ComputationError`（engine側の`NonConvergence`）。
 
     完全分離等の病理的なデータは`NonConvergence`ではなく専用の
-    `SeparationSuspected`（engineの`MleError`の別バリアント。Pythonでは
+    `SeparationDetected`（engineの`MleError`の別バリアント。Pythonでは
     `NonConvergence`と同じ`ComputationError`で、例外クラスでは区別できない。
-    `check_separation_suspected_raises_computation_error_for_near_separation_data`
-    参照）を返すため、`NonConvergence`自体の発生確認には使えない。そのため
+    `check_separated_data_raises_computation_error`参照）を返すため、
+    `NonConvergence`自体の発生確認には使えない。そのため
     `NonConvergence`の発生確認は、専用データセットに頼らずmax_iterを
     人為的に小さくする方法で行う（`docs/spec/<solver>-spec.md`参照）。
     """
@@ -1081,20 +1183,15 @@ def check_non_convergence_raises_computation_error_with_tiny_max_iter(
         ).fit()
 
 
-def check_separation_suspected_raises_computation_error_for_near_separation_data(
-    estimator_cls,
-):
-    """准完全分離データ（`x1`の真の係数を極端に大きくし、ほぼ全観測がx1の符号
-    だけで完全に分類できるようにしたDGP）は`ComputationError`（engine側の
-    `SeparationSuspected`）。
+def check_separated_data_raises_computation_error(estimator_cls):
+    """分離データ（`x1`の真の係数を極端に大きくし、全観測がx1の符号だけで完全に
+    分類できるようにしたDGP）は`ComputationError`（engine側の`SeparationDetected`）。
 
-    勾配ノルム基準の収束判定が浮動小数点アンダーフローにより誤って
-    「収束済み」と判定してしまう問題が、Python API境界を通しても正しく
-    検出されエラーになることを確認する（`engine`側のRust単体テスト
-    `fit_returns_separation_suspected_error_for_near_separation_data`
+    分離が、Python API境界を通しても正しく検出されエラーになることを確認する
+    （`engine`側のRust単体テスト`fit_returns_separation_detected_error_for_separated_data`
     のAPIレベル版）。
     """
-    df = separation_suspected_dataset()
+    df = separated_dataset()
 
     with pytest.raises(ComputationError):
         estimator_cls(df, y="y", x=["x1", "x2"]).fit()

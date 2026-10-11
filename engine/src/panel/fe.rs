@@ -378,15 +378,17 @@ use statrs::distribution::StudentsT;
 
 use crate::error::CommonError;
 use crate::inference;
-use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
+use crate::linear::common::LeastSquaresError;
+use crate::linear::ols::OlsInput;
 use crate::panel::common::{
-    GroupCodes, PanelDimension, PanelError, PanelHcVariant, TimeKeys, design_matrix_from_columns,
-    leverage_within, panel_classical_cov_params, panel_cluster_cov_params,
-    panel_driscoll_kraay_cov_params, panel_hc_cov_params, quasi_demean_column,
-    resolve_dk_bandwidth, validate_cluster_group_codes,
-    validate_dk_periods_cover_tested_coefficients, xtx_inverse,
+    GroupCodes, PanelDimension, PanelError, PanelHcVariant, TimeKeys, leverage_within,
+    panel_classical_cov_params, panel_cluster_cov_params, panel_driscoll_kraay_cov_params,
+    panel_hc_cov_params, quasi_demean_column, resolve_dk_bandwidth, validate_cluster_group_codes,
+    validate_dk_periods_cover_tested_coefficients,
 };
 use crate::panel::re::ReInput;
+use crate::shared::goodness_of_fit::gaussian_goodness_of_fit;
+use crate::shared::least_squares::{LeastSquaresFit, least_squares, residual_sum_of_squares};
 use crate::shared::wald::wald_f_test;
 use crate::validation::validate_cluster_count_covers_slopes;
 
@@ -672,7 +674,15 @@ pub struct FeEstimator {
     input: FeInput,
     effects: FeEffects,
     cov_type: FeCovType,
-    estimator: OlsEstimator,
+    /// within変換済みの`y`・設計行列・係数名（切片なし）。
+    within_input: OlsInput,
+    /// FE推定量`β̂`（within変換後の最小二乗解、Frisch-Waugh-Lovell定理）。
+    params: Mat<f64>,
+    /// within変換後の回帰の残差（固定効果込み）。
+    residuals: Mat<f64>,
+    /// 正規誤差を仮定した対数尤度。`SSR/n`のみに依存しdf非依存の式（AIC/BICの罰則項の
+    /// 乗数だけ`k`から`df_model`に差し替える、モジュールdoc参照）。
+    log_likelihood: f64,
     /// パネル自由度調整後のモデル自由度（`k + neffects`、`fe-spec.md`3.2節）。
     df_model: usize,
     /// パネル自由度調整後の残差自由度（`n - df_model`、`fe-spec.md`3.2節）。
@@ -695,7 +705,7 @@ pub struct FeEstimator {
     conf_lower: Mat<f64>,
     conf_upper: Mat<f64>,
     /// 実際に使ったFE構造でdemeanしたR²（1-wayはentityのみ、2-wayはentity+time）。
-    /// `estimator().r_squared()`と同じ値（モジュールdoc「パネル固有R²」参照）。
+    /// モジュールdoc「パネル固有R²」参照。
     r_squared_within: f64,
     /// エンティティ平均ベースのR²（linearmodelsの`rsquared_between`と完全一致、
     /// モジュールdoc参照）。
@@ -811,9 +821,9 @@ impl FeEstimator {
         // `input.x()`（`FeInput::from_columns`が既に同じ長さであることを検証済み）から
         // 1対1で生成した同じ長さの列であり、この関数内で長さがずれる操作をしていない。
         // それでも`Result`を返す契約（`from_columns`のシグネチャ）をそのまま守り、
-        // `unwrap`はしない（`ols::xtx_inverse`等の「理論上到達不能でも`Result`化する」方針
-        // に揃える、`.claude/rules/rust-style.md`「テスト」参照）。
-        let ols_input = OlsInput::from_columns(
+        // `unwrap`はしない（`.claude/rules/rust-style.md`「テスト」の「理論上到達不能でも
+        // `Result`化する」方針に揃える）。
+        let within_input = OlsInput::from_columns(
             &y,
             &x,
             input.x_names().to_vec(),
@@ -821,27 +831,30 @@ impl FeEstimator {
             input.dep_var_name().to_string(),
         )
         .map_err(|source| PanelError::WithinRegressionFailed { source })?;
-        // `cov_type`は常に`Classical`で委譲する（`β̂`・残差の取得のみが目的で、
-        // `cov_type`ごとの標準誤差は下記でFE自身が計算し直すため。モジュールdoc
-        // 「`cov_type`対応」参照）。
-        //
-        // `OlsEstimator::fit`（ゲート付き公開エントリ）ではなく`fit_allowing_no_regressors`
-        // を呼ぶ: `x=[]`（固定効果のみのモデル）だとwithin変換後の設計行列`x`も0列になり
-        // `k=0`になるため（`engine/src/linear/CLAUDE.md`「k=0の扱い」参照）。
-        let estimator = OlsEstimator::fit_allowing_no_regressors(
-            ols_input,
-            CovType::Classical,
-            confidence_level,
-        )
-        .map_err(|source| PanelError::WithinRegressionFailed { source })?;
 
-        // `cov_type`別の共分散行列の計算に使う共通の材料（within変換後の設計行列とその
-        // グラム逆行列、残差・SSR）。`OlsEstimator`は`cov_params`をprivateで保持しており
-        // 再利用できないため、`x`（内部で既に持っているwithin変換後の列）から独立に
-        // 組み立て直す（モジュールdoc「`cov_type`対応」参照）。
-        let x_mat = design_matrix_from_columns(&x, n);
-        let xtx_inv = xtx_inverse(&x_mat, k)?;
-        let residuals: Vec<f64> = (0..n).map(|i| *estimator.residuals().get(i, 0)).collect();
+        if !(confidence_level > 0.0 && confidence_level < 1.0) {
+            return Err(PanelError::WithinRegressionFailed {
+                source: CommonError::InvalidConfidenceLevel { confidence_level }.into(),
+            });
+        }
+
+        // `β̂`・残差・`(X̃'X̃)⁻¹`は最小二乗の部品を直接呼んで求める（`cov_type`ごとの標準誤差は
+        // 下記でFE自身が計算し直すため、`OlsEstimator`の推論は使わない。モジュールdoc
+        // 「`cov_type`対応」参照）。`x=[]`（固定効果のみのモデル）だとwithin変換後の設計行列`x`も
+        // 0列になり`k=0`になるが、`least_squares`は0列も受理する。
+        let LeastSquaresFit {
+            params,
+            residuals: residual_mat,
+            xtx_inv,
+        } = least_squares(within_input.x(), within_input.y()).map_err(|_| {
+            PanelError::WithinRegressionFailed {
+                source: LeastSquaresError::SingularMatrix,
+            }
+        })?;
+
+        // `cov_type`別の共分散行列の計算に使う共通の材料（within変換後の設計行列、残差・SSR）。
+        let x_mat = within_input.x();
+        let residuals: Vec<f64> = (0..n).map(|i| *residual_mat.get(i, 0)).collect();
         let ssr: f64 = residuals.iter().map(|r| r * r).sum();
 
         // `df_inference`はt検定・信頼区間・F検定に使う自由度。`cov_type=Cluster`のとき
@@ -858,7 +871,7 @@ impl FeEstimator {
             ),
             FeCovType::Hc1 => (
                 panel_hc_cov_params(
-                    &x_mat,
+                    x_mat,
                     &residuals,
                     &xtx_inv,
                     df_resid,
@@ -868,7 +881,7 @@ impl FeEstimator {
                 df_resid,
             ),
             FeCovType::Hc2 | FeCovType::Hc3 => {
-                let h_within = leverage_within(&x_mat, &xtx_inv, n, k);
+                let h_within = leverage_within(x_mat, &xtx_inv, n, k);
                 let time_for_leverage = match effects {
                     FeEffects::OneWay => None,
                     FeEffects::TwoWay => input.time_codes(),
@@ -881,7 +894,7 @@ impl FeEstimator {
                 };
                 (
                     panel_hc_cov_params(
-                        &x_mat,
+                        x_mat,
                         &residuals,
                         &xtx_inv,
                         df_resid,
@@ -916,7 +929,7 @@ impl FeEstimator {
                     group_codes,
                 );
                 let cov = panel_cluster_cov_params(
-                    &x_mat,
+                    x_mat,
                     &residuals,
                     &xtx_inv,
                     n,
@@ -957,7 +970,7 @@ impl FeEstimator {
                 // 発生しない、`fe_cluster_k_correction`のdocコメント参照）。`K=df_model`を
                 // そのまま使う。
                 let cov = panel_driscoll_kraay_cov_params(
-                    &x_mat, &residuals, &xtx_inv, time_codes, df_model, bw,
+                    x_mat, &residuals, &xtx_inv, time_codes, df_model, bw,
                 );
                 (cov, t_periods - 1)
             }
@@ -980,7 +993,7 @@ impl FeEstimator {
         let mut conf_lower = Mat::zeros(k, 1);
         let mut conf_upper = Mat::zeros(k, 1);
         for j in 0..k {
-            let coef = *estimator.params().get(j, 0);
+            let coef = *params.get(j, 0);
             let se = (*cov_params.get(j, j)).sqrt();
             let stat = inference::compute_inference_stat(&t_dist, coef, se, t_crit);
 
@@ -991,23 +1004,25 @@ impl FeEstimator {
             *conf_upper.get_mut(j, 0) = stat.conf_high;
         }
 
-        // パネル固有R²（モジュールdoc「パネル固有R²」参照）。within R²は
-        // 実際に使ったFE構造でdemeanした残差ベースで、`OlsInput::from_columns`が
-        // `include_intercept=false`で呼ばれているため`estimator().r_squared()`が既に
-        // この定義と一致する（再計算不要）。between/overallはlinearmodelsの`_rsquared`と
-        // 完全一致させるため、変換前の元の`y`/`x`から独立に計算し直す。
-        let r_squared_within = estimator.r_squared();
-        let r_squared_between = fe_r_squared_between(
-            input.y(),
-            input.x(),
-            estimator.params(),
-            input.entity_codes(),
+        // パネル固有R²（モジュールdoc「パネル固有R²」参照）。within R²は実際に使ったFE構造で
+        // demeanした残差ベースで、切片なしのwithin変換後データへの最小二乗の適合度
+        // （`has_intercept=false`、非中心化TSS）がそのままこの定義と一致する。
+        // between/overallはlinearmodelsの`_rsquared`と完全一致させるため、変換前の元の
+        // `y`/`x`から独立に計算し直す。
+        let fit_stats = gaussian_goodness_of_fit(
+            within_input.y(),
+            residual_sum_of_squares(&residual_mat),
+            k,
+            false,
         );
-        let r_squared_overall = fe_r_squared_overall(input.y(), input.x(), estimator.params());
+        let r_squared_within = fit_stats.r_squared;
+        let r_squared_between =
+            fe_r_squared_between(input.y(), input.x(), &params, input.entity_codes());
+        let r_squared_overall = fe_r_squared_overall(input.y(), input.x(), &params);
 
         // `log_likelihood`自体は`SSR/n`のみに依存しdf非依存の式のためそのまま再利用できる
         // （モジュールdoc参照）。ペナルティ項の乗数だけ`k`から`df_model`に差し替える。
-        let log_likelihood = estimator.log_likelihood();
+        let log_likelihood = fit_stats.log_likelihood;
         let aic = -2.0 * log_likelihood + 2.0 * (df_model as f64);
         let bic = -2.0 * log_likelihood + (n as f64).ln() * (df_model as f64);
 
@@ -1021,15 +1036,21 @@ impl FeEstimator {
             // （0除算を避ける）。
             (f64::NAN, f64::NAN)
         } else {
-            wald_f_test(estimator.params(), &cov_params, 0, k, df_inference)
-                .map_err(|source| PanelError::FTestFailed { source })?
+            wald_f_test(&params, &cov_params, 0, k, df_inference).map_err(|source| {
+                PanelError::FTestFailed {
+                    source: source.into(),
+                }
+            })?
         };
 
         Ok(Self {
             input,
             effects,
             cov_type,
-            estimator,
+            within_input,
+            params,
+            residuals: residual_mat,
+            log_likelihood,
             df_model,
             df_resid,
             df_inference,
@@ -1065,19 +1086,26 @@ impl FeEstimator {
         &self.cov_type
     }
 
-    /// within変換済みデータに対する`OlsEstimator`本体。
-    ///
-    /// **係数（`params()`）・残差（`residuals()`）・within R²（`r_squared()`、
-    /// `FeEstimator::r_squared_within()`と同値）は正しい値**だが、**標準誤差・t値・p値・
-    /// 信頼区間・調整済みR²・AIC/BICは`cov_type=Classical`・パネル自由度調整前の値の
-    /// ままで誤り**（`FeEstimator`自身の同名メソッド（`std_errors()`等）を使うこと、
-    /// モジュールdoc「自由度調整」「`cov_type`対応」「パネル固有R²」参照）。
-    /// **F統計量も同様に誤り**——`estimator().f_statistic()`/`f_p_value()`は
-    /// `df_resid_ols = n - k`・`CovType::Classical`ベースのまま（`FeEstimator`自身の
-    /// `f_statistic()`/`f_p_value()`を使うこと、モジュールdoc「自由度調整」のF統計量節
-    /// 参照）。
-    pub fn estimator(&self) -> &OlsEstimator {
-        &self.estimator
+    /// within変換済みの`y`・設計行列・係数名（切片なし）。`param_names()`・`dep_var_name()`・
+    /// `nobs()`・`k()`もここから読む。
+    pub fn within_input(&self) -> &OlsInput {
+        &self.within_input
+    }
+
+    /// FE推定量`β̂`（k, 1）。within変換後の回帰の最小二乗解で、`within_input().param_names()`と
+    /// 対応する。
+    pub fn params(&self) -> &Mat<f64> {
+        &self.params
+    }
+
+    /// within変換後の回帰の残差（n, 1）。
+    pub fn residuals(&self) -> &Mat<f64> {
+        &self.residuals
+    }
+
+    /// 対数尤度（正規誤差を仮定した最尤推定量`σ̂² = SSR/n`ベース、`df`非依存）。
+    pub fn log_likelihood(&self) -> f64 {
+        self.log_likelihood
     }
 
     /// パネル自由度調整後のモデル自由度（`k + neffects`、`fe-spec.md`3.2節）。
@@ -1179,7 +1207,7 @@ impl FeEstimator {
 
     /// `f_statistic()`の自由度`(分子, 分母)` = `(k, df_inference)`。`k=0`でNaNのときは`None`。
     pub fn f_df(&self) -> Option<(usize, usize)> {
-        let k = self.estimator.input().k();
+        let k = self.within_input.k();
         (k > 0).then_some((k, self.df_inference))
     }
 
@@ -1194,7 +1222,7 @@ impl FeEstimator {
     pub fn fixed_effects(&self) -> FixedEffects {
         let y = self.input.y();
         let x = self.input.x();
-        let params = self.estimator.params();
+        let params = &self.params;
 
         match self.effects {
             FeEffects::OneWay => FixedEffects::OneWay(
@@ -2384,11 +2412,11 @@ mod tests {
 
         let fe = FeEstimator::fit(input, FeEffects::OneWay, FeCovType::Classical, 0.95).unwrap();
 
-        assert!((*fe.estimator().params().get(0, 0) - 2.0).abs() < 1e-9);
+        assert!((*fe.params().get(0, 0) - 2.0).abs() < 1e-9);
         assert_eq!(fe.effects(), FeEffects::OneWay);
-        assert!(!fe.estimator().input().has_intercept());
+        assert!(!fe.within_input().has_intercept());
         assert_eq!(fe.n_periods(), None);
-        for r in fe.estimator().residuals().col(0).iter() {
+        for r in fe.residuals().col(0).iter() {
             assert!(r.abs() < 1e-9);
         }
     }
@@ -2460,7 +2488,7 @@ mod tests {
         // との数値比較ではなく、本テスト自身が注入した擾乱ノイズに対する内部整合性の
         // 確認のため）。ノイズの大きさ（最大0.02、xスケール比で見ると相対誤差1〜2%程度）
         // に対してスロープ推定への影響がこの範囲に収まることを確認する目的の閾値。
-        assert!((*fe.estimator().params().get(0, 0) - 0.5).abs() < 0.01);
+        assert!((*fe.params().get(0, 0) - 0.5).abs() < 0.01);
         assert_eq!(fe.effects(), FeEffects::TwoWay);
         assert_eq!(fe.df_model(), 6);
         assert_eq!(fe.n_periods(), Some(3));
@@ -2736,7 +2764,7 @@ mod tests {
 
         assert_eq!(fe.df_model(), 5); // k(1) + n_entities(4)
         assert_eq!(fe.df_resid(), 7); // n(12) - df_model(5)
-        assert!((*fe.estimator().params().get(0, 0) - 1.402_777_777_777_78).abs() < 1e-9);
+        assert!((*fe.params().get(0, 0) - 1.402_777_777_777_78).abs() < 1e-9);
         assert!((*fe.std_errors().get(0, 0) - 0.432_598_838_244_034).abs() < 1e-6);
         assert!((*fe.test_stats().get(0, 0) - 3.242_675_785_889_31).abs() < 1e-6);
         assert!((*fe.p_values().get(0, 0) - 0.014_200_386_789_949_8).abs() < 1e-6);
@@ -2774,7 +2802,7 @@ mod tests {
 
         assert_eq!(fe.df_model(), 7); // k(1) + neffects(n_entities(4)+n_periods(3)-1=6)
         assert_eq!(fe.df_resid(), 5); // n(12) - df_model(7)
-        assert!((*fe.estimator().params().get(0, 0) - 0.822_429_906_542_056).abs() < 1e-9);
+        assert!((*fe.params().get(0, 0) - 0.822_429_906_542_056).abs() < 1e-9);
         assert!((*fe.std_errors().get(0, 0) - 0.227_239_295_931_651).abs() < 1e-6);
         assert!((*fe.test_stats().get(0, 0) - 3.619_223_969_033_19).abs() < 1e-6);
         assert!((*fe.p_values().get(0, 0) - 0.015_231_948_369_008_1).abs() < 1e-6);
@@ -2895,7 +2923,7 @@ mod tests {
 
         let fe = FeEstimator::fit(input, FeEffects::OneWay, FeCovType::Classical, 0.95).unwrap();
 
-        assert!((*fe.estimator().params().get(0, 0) - 1.497_297_297_297_297_5).abs() < 1e-9);
+        assert!((*fe.params().get(0, 0) - 1.497_297_297_297_297_5).abs() < 1e-9);
         assert!((fe.r_squared_within() - 0.975_885_532_591_415).abs() < 1e-9);
         assert!((fe.r_squared_between() - 0.943_825_384_692_178_9).abs() < 1e-9);
         assert!((fe.r_squared_overall() - 0.947_558_874_189_504_9).abs() < 1e-9);
@@ -2917,7 +2945,7 @@ mod tests {
 
         let fe = FeEstimator::fit(input, FeEffects::OneWay, FeCovType::Classical, 0.95).unwrap();
 
-        assert!((*fe.estimator().params().get(0, 0) - (-1.310_344_827_586_206_9)).abs() < 1e-9);
+        assert!((*fe.params().get(0, 0) - (-1.310_344_827_586_206_9)).abs() < 1e-9);
         assert!((fe.r_squared_within() - 0.889_162_561_576_354_6).abs() < 1e-9);
         assert_eq!(fe.r_squared_between(), 0.0);
         assert!((fe.r_squared_overall() - (-2.330_219_126_889_757_4)).abs() < 1e-9);
@@ -2997,8 +3025,8 @@ mod tests {
         .unwrap();
 
         let fe = FeEstimator::fit(input, FeEffects::TwoWay, FeCovType::Classical, 0.95).unwrap();
-        let beta = *fe.estimator().params().get(0, 0);
-        let residuals = fe.estimator().residuals();
+        let beta = *fe.params().get(0, 0);
+        let residuals = fe.residuals();
 
         let FixedEffects::TwoWay {
             entity: entity_effects,
@@ -3098,7 +3126,7 @@ mod tests {
         assert!(fe.f_p_value().is_nan());
 
         // 不変条件: k=0でも `α_i + γ_t + ε̂_it = y_it`（正規化の選び方に依存しない）。
-        let residuals = fe.estimator().residuals();
+        let residuals = fe.residuals();
         let entity_ids = ["e1", "e1", "e2", "e2"];
         let time_ids = ["9", "10", "9", "10"];
         for i in 0..y.len() {
@@ -3526,7 +3554,7 @@ mod tests {
         )
         .unwrap();
 
-        assert!((*fe.estimator().params().get(0, 0) - 1.402_777_777_777_78).abs() < 1e-9);
+        assert!((*fe.params().get(0, 0) - 1.402_777_777_777_78).abs() < 1e-9);
         assert!((*fe.std_errors().get(0, 0) - 0.112_778_272_530_122_7).abs() < 1e-9);
         assert!((*fe.test_stats().get(0, 0) - 12.438_369_078_610_43).abs() < 1e-6);
         assert!((*fe.p_values().get(0, 0) - 0.006_401_580_635_206_468).abs() < 1e-9);
@@ -3559,7 +3587,7 @@ mod tests {
         )
         .unwrap();
 
-        assert!((*fe.estimator().params().get(0, 0) - 1.402_777_777_777_78).abs() < 1e-9);
+        assert!((*fe.params().get(0, 0) - 1.402_777_777_777_78).abs() < 1e-9);
         assert!((*fe.std_errors().get(0, 0) - 0.112_778_272_530_122_7).abs() < 1e-9);
     }
 
@@ -3741,7 +3769,7 @@ mod tests {
         )
         .unwrap();
 
-        assert!((*fe.estimator().params().get(0, 0) - 0.822_429_906_542_056).abs() < 1e-9);
+        assert!((*fe.params().get(0, 0) - 0.822_429_906_542_056).abs() < 1e-9);
         assert!((*fe.std_errors().get(0, 0) - 0.258_392_668_199_213_7).abs() < 1e-9);
         assert!((*fe.test_stats().get(0, 0) - 3.182_868_586_302_089).abs() < 1e-6);
         assert!((*fe.p_values().get(0, 0) - 0.086_146_397_773_918_86).abs() < 1e-9);
@@ -4339,7 +4367,7 @@ mod tests {
 
         assert_eq!(fe.df_model(), 3);
         assert_eq!(fe.df_resid(), 3);
-        assert_eq!(fe.estimator().params().nrows(), 0);
+        assert_eq!(fe.params().nrows(), 0);
         assert_eq!(fe.std_errors().nrows(), 0);
         assert!(fe.aic().is_finite());
         assert!(fe.bic().is_finite());
@@ -4376,6 +4404,7 @@ mod tests {
     /// 複製する」と同じ教訓を踏まえ、実装の内部関数を再利用しない独立実装にしている）。
     mod proptests {
         use super::*;
+        use crate::linear::ols::{CovType, OlsEstimator};
         use proptest::collection;
         use proptest::prelude::*;
 
@@ -4559,9 +4588,7 @@ mod tests {
                 FeInput::from_columns(y, x, names, entity, Some(time), "y".to_string()).ok()?;
             let est = FeEstimator::fit(input, case.effects, cov, 0.95).ok()?;
             let k = x.len();
-            let params = (0..k)
-                .map(|j| *est.estimator().params().get(j, 0))
-                .collect();
+            let params = (0..k).map(|j| *est.params().get(j, 0)).collect();
             let se = (0..k).map(|j| *est.std_errors().get(j, 0)).collect();
             Some((params, se))
         }

@@ -6,7 +6,6 @@ use faer::prelude::Solve;
 use statrs::distribution::{ContinuousCDF, FisherSnedecor};
 
 use crate::error::CommonError;
-use crate::linear::common::LeastSquaresError;
 use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 
 /// 傾き係数（切片を除く`df_model`個の係数）が全てゼロという帰無仮説のロバストWald検定を行い、
@@ -55,7 +54,7 @@ pub(crate) fn wald_f_test(
     k_constant: usize,
     df_model: usize,
     df_inference: usize,
-) -> Result<(f64, f64), LeastSquaresError> {
+) -> Result<(f64, f64), CommonError> {
     let beta_slopes = Mat::from_fn(df_model, 1, |i, _| *params.get(i + k_constant, 0));
     let v_slopes = Mat::from_fn(df_model, df_model, |i, j| {
         *cov_params.get(i + k_constant, j + k_constant)

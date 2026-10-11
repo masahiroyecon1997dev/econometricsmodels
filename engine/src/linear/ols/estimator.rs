@@ -1,5 +1,4 @@
 use faer::Mat;
-use faer::prelude::SolveLstsq;
 use statrs::distribution::StudentsT;
 
 use super::cov_type::CovType;
@@ -7,11 +6,12 @@ use super::input::OlsInput;
 use crate::error::CommonError;
 use crate::inference;
 use crate::linear::common::LeastSquaresError;
-use crate::linear_algebra::checked_col_piv_qr;
 use crate::shared::covariance::{
     HcVariant, classical_cov_params, cluster_cov_params, hac_cov_params, hc_cov_params,
-    time_ordering, xtx_inverse,
+    time_ordering,
 };
+use crate::shared::goodness_of_fit::{GaussianGoodnessOfFit, gaussian_goodness_of_fit};
+use crate::shared::least_squares::{LeastSquaresFit, least_squares, residual_sum_of_squares};
 use crate::shared::wald::wald_f_test;
 use crate::validation::{
     validate_cluster_count_covers_slopes, validate_cluster_groups, validate_has_regressors,
@@ -102,13 +102,11 @@ impl OlsEstimator {
     ///
     /// # Errors
     /// - `k`（定数項を含む説明変数の数）が0（`include_intercept=false`かつ説明変数も無い）:
-    ///   `CommonError::NoRegressors`（Logit/Probitと同じ早期リジェクト。
-    ///   `fit_allowing_no_regressors`はこのチェックを行わない）。**このチェックは
-    ///   `confidence_level`より先に行う**（`fit`が`fit_allowing_no_regressors`へ委譲する
-    ///   実装構造上、外側でしか検証できないため）。nonlinear系統の
-    ///   `validate_fit_preconditions`は逆順（`confidence_level`→…→`k==0`）だが、
-    ///   Python APIの`validate_x_non_empty`によりどちらの入力もそもそも到達不能なため
-    ///   実害はなく、系統間で順序を揃えるという明示的な方針も無い
+    ///   `CommonError::NoRegressors`（Logit/Probitと同じ早期リジェクト）。**このチェックは
+    ///   `confidence_level`より先に行う**。nonlinear系統の`validate_fit_preconditions`は
+    ///   逆順（`confidence_level`→…→`k==0`）だが、Python APIの`validate_x_non_empty`により
+    ///   どちらの入力もそもそも到達不能なため実害はなく、系統間で順序を揃えるという
+    ///   明示的な方針も無い
     /// - `confidence_level`が`(0, 1)`の範囲外: `CommonError::InvalidConfidenceLevel`
     /// - 観測数`n`が`k`（定数項を含む説明変数の数）以下: `CommonError::InsufficientObservations`
     /// - 設計行列が特異（完全な多重共線性等）: `LeastSquaresError::SingularMatrix`
@@ -126,29 +124,7 @@ impl OlsEstimator {
         confidence_level: f64,
     ) -> Result<Self, LeastSquaresError> {
         validate_has_regressors(input.nobs(), input.k())?;
-        Self::fit_allowing_no_regressors(input, cov_type, confidence_level)
-    }
 
-    /// `fit`と同じ計算を行うが、`k`（定数項を含む説明変数の数）が0の入力も受理する
-    /// （`fit`が行う`CommonError::NoRegressors`の早期リジェクトをスキップする）。
-    ///
-    /// `pub(crate)`: `panel::fe::FeEstimator::fit`が「固定効果のみのモデル」（`x=[]`。
-    /// FEは常に`include_intercept=false`で委譲するためこの場合`k=0`になる）を
-    /// サポートするために、`fit`のガードを迂回してこの内部実装を直接呼ぶ。他の呼び出し元
-    /// （`WlsEstimator::fit`・`panel::re::ReEstimator::fit`・IV系統）はいずれも構造的に
-    /// `k=0`になりえない呼び出し方をしており（RE/IVは常に切片または操作変数由来の列を
-    /// 最低1列持つ、`engine/src/linear/CLAUDE.md`「k=0の扱い」参照）、`fit`（ゲート付き）を
-    /// そのまま使う。`k=0`でも`col_piv_qr`・`wald_f_test`が安全に動作することは
-    /// `checked_col_piv_qr`のNaN明示チェック・`df_model==0`分岐により保証済み（同ドキュメント
-    /// 参照）。
-    ///
-    /// # Errors
-    /// `fit`から`NoRegressors`を除いたもの。
-    pub(crate) fn fit_allowing_no_regressors(
-        input: OlsInput,
-        cov_type: CovType,
-        confidence_level: f64,
-    ) -> Result<Self, LeastSquaresError> {
         // faer のグローバル並列度を Par::Seq に固定する（`crate::parallelism`）。
         crate::parallelism::ensure_serial();
 
@@ -177,16 +153,15 @@ impl OlsEstimator {
             validate_cluster_count_covers_slopes(g, k - usize::from(input.has_intercept()))?;
         }
 
-        let qr = checked_col_piv_qr(input.x()).map_err(|_| LeastSquaresError::SingularMatrix)?;
-
-        let params = qr.solve_lstsq(input.y());
-        let residuals = input.y() - input.x() * &params;
+        let LeastSquaresFit {
+            params,
+            residuals,
+            xtx_inv,
+        } = least_squares(input.x(), input.y()).map_err(|_| LeastSquaresError::SingularMatrix)?;
 
         let df_resid = n - k;
-        let ssr: f64 = (0..n).map(|i| (*residuals.get(i, 0)).powi(2)).sum();
+        let ssr = residual_sum_of_squares(&residuals);
         let sigma2 = ssr / (df_resid as f64);
-
-        let xtx_inv = xtx_inverse(input.x(), k)?;
 
         // `df_inference`はt検定・信頼区間・F検定に使う自由度。通常は`df_resid`（n-k）と
         // 同じだが、`cov_type=Cluster`のときだけ`G-1`（クラスター数-1）に切り替える
@@ -198,19 +173,19 @@ impl OlsEstimator {
         let (cov_params, df_inference) = match &cov_type {
             CovType::Classical => (classical_cov_params(sigma2, &xtx_inv, k), df_resid),
             CovType::Hc0 => (
-                hc_cov_params(input.x(), &residuals, &xtx_inv, n, k, HcVariant::Hc0),
+                hc_cov_params(input.x(), &residuals, &xtx_inv, HcVariant::Hc0),
                 df_resid,
             ),
             CovType::Hc1 => (
-                hc_cov_params(input.x(), &residuals, &xtx_inv, n, k, HcVariant::Hc1),
+                hc_cov_params(input.x(), &residuals, &xtx_inv, HcVariant::Hc1),
                 df_resid,
             ),
             CovType::Hc2 => (
-                hc_cov_params(input.x(), &residuals, &xtx_inv, n, k, HcVariant::Hc2),
+                hc_cov_params(input.x(), &residuals, &xtx_inv, HcVariant::Hc2),
                 df_resid,
             ),
             CovType::Hc3 => (
-                hc_cov_params(input.x(), &residuals, &xtx_inv, n, k, HcVariant::Hc3),
+                hc_cov_params(input.x(), &residuals, &xtx_inv, HcVariant::Hc3),
                 df_resid,
             ),
             CovType::Hac { lags, time_order } => {
@@ -218,7 +193,7 @@ impl OlsEstimator {
                 hac_lags_used = Some(lags);
                 let order = time_ordering(time_order, n);
                 (
-                    hac_cov_params(input.x(), &residuals, &xtx_inv, n, k, lags, &order),
+                    hac_cov_params(input.x(), &residuals, &xtx_inv, lags, &order),
                     df_resid,
                 )
             }
@@ -228,7 +203,7 @@ impl OlsEstimator {
                 // ここでは`n_groups - 1`（検定の自由度）に再利用するため
                 // 再度ユニーク数を数えるだけ。
                 let n_groups = validate_cluster_groups(groups, n)?;
-                let cov = cluster_cov_params(input.x(), &residuals, &xtx_inv, n, k, groups);
+                let cov = cluster_cov_params(input.x(), &residuals, &xtx_inv, groups);
                 (cov, n_groups - 1)
             }
         };
@@ -259,21 +234,13 @@ impl OlsEstimator {
         }
 
         let k_constant = usize::from(input.has_intercept());
-        let sst: f64 = if input.has_intercept() {
-            let y_mean: f64 = (0..n).map(|i| *input.y().get(i, 0)).sum::<f64>() / (n as f64);
-            (0..n)
-                .map(|i| (*input.y().get(i, 0) - y_mean).powi(2))
-                .sum()
-        } else {
-            (0..n).map(|i| (*input.y().get(i, 0)).powi(2)).sum()
-        };
-        let r_squared = 1.0 - ssr / sst;
-        let adj_r_squared = 1.0 - ((n - k_constant) as f64 / df_resid as f64) * (1.0 - r_squared);
-
-        let log_likelihood =
-            -(n as f64 / 2.0) * ((2.0 * std::f64::consts::PI).ln() + (ssr / n as f64).ln() + 1.0);
-        let aic = -2.0 * log_likelihood + 2.0 * (k as f64);
-        let bic = -2.0 * log_likelihood + (n as f64).ln() * (k as f64);
+        let GaussianGoodnessOfFit {
+            r_squared,
+            adj_r_squared,
+            log_likelihood,
+            aic,
+            bic,
+        } = gaussian_goodness_of_fit(input.y(), ssr, k, input.has_intercept());
 
         let df_model = k - k_constant;
         let (f_statistic, f_p_value) = if df_model == 0 {
@@ -449,7 +416,13 @@ impl OlsEstimator {
             q > 0 && q <= k,
             "wald_test_last_columns: q must be in (0, k], got q={q}, k={k}"
         );
-        wald_f_test(&self.params, &self.cov_params, k - q, q, self.df_inference)
+        Ok(wald_f_test(
+            &self.params,
+            &self.cov_params,
+            k - q,
+            q,
+            self.df_inference,
+        )?)
     }
 
     /// 学習データに対する予測値 `ŷ = Xβ̂`（`predict(new_data=None)`のPython APIが返す値、
@@ -524,24 +497,6 @@ mod tests {
             result.unwrap_err(),
             LeastSquaresError::Common(CommonError::NoRegressors { n: 5 })
         );
-    }
-
-    #[test]
-    fn fit_allowing_no_regressors_succeeds_when_k_is_zero() {
-        // `fit`とは異なり`NoRegressors`ガードを迂回する（`panel::fe::FeEstimator::fit`が
-        // 固定効果のみモデルのために直接呼ぶ経路）。k=0でもOkを返し、
-        // paramsは空（0行）になる。
-        let y = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-        let input = OlsInput::from_columns(&y, &[], vec![], false, "y".to_string()).unwrap();
-
-        let estimator =
-            OlsEstimator::fit_allowing_no_regressors(input, CovType::Classical, 0.95).unwrap();
-
-        assert_eq!(estimator.params().nrows(), 0);
-        assert_eq!(estimator.residuals().nrows(), 5);
-        for (i, &yi) in y.iter().enumerate() {
-            assert_eq!(*estimator.residuals().get(i, 0), yi);
-        }
     }
 
     #[test]

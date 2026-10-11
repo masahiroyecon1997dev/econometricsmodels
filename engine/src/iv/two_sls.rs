@@ -67,6 +67,8 @@ use crate::iv::common::{
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
+use crate::shared::cluster::group_indices;
+use crate::shared::covariance::time_ordering;
 use crate::validation::validate_cluster_groups;
 use faer::linalg::matmul::matmul;
 use faer::prelude::Solve;
@@ -764,20 +766,6 @@ fn resolve_hac_lags(lags: Option<i64>, n: usize) -> Result<usize, IvError> {
     }
 }
 
-/// `CovType::Hac`の`time_order`から、時系列の昇順に並べたときの行インデックス列を求める
-/// （`ols.rs`の`time_ordering`と同型）。
-///
-/// `partial_cmp().unwrap()`について: `time_order`の値はNaN/無限大を含まないことが
-/// `engine_pybind::column_extraction`側で既に保証されている前提（`ols.rs`の
-/// `time_ordering`と同じ理由）。値が互いに異なる（同値は`ValidationError`で弾かれ、
-/// 昇順の位置＝順位で渡される）ことも同様に前提で、この関数自身は同値を検出しない。
-fn time_ordering(time_order: &[f64], n: usize) -> Vec<usize> {
-    debug_assert_eq!(time_order.len(), n);
-    let mut order: Vec<usize> = (0..n).collect();
-    order.sort_by(|&a, &b| time_order[a].partial_cmp(&time_order[b]).unwrap());
-    order
-}
-
 /// Newey-West HACの係数分散共分散行列: `(X̂'X̂)⁻¹Ŝ(X̂'X̂)⁻¹`（k×k）。数式・実装方針は
 /// `ols.rs`の`hac_cov_params`と同型（`Par::Seq`を明示指定する理由も同じ、
 /// `.claude/rules/rust-style.md`「パフォーマンス」参照）。設計行列に`X̂`、残差に構造残差
@@ -843,11 +831,7 @@ fn cluster_cov_params(
     k: usize,
     groups: &[String],
 ) -> Mat<f64> {
-    let mut group_indices: std::collections::BTreeMap<&str, Vec<usize>> =
-        std::collections::BTreeMap::new();
-    for (i, g) in groups.iter().enumerate() {
-        group_indices.entry(g.as_str()).or_default().push(i);
-    }
+    let group_indices = group_indices(groups);
     let n_groups = group_indices.len();
 
     let mut s_hat = Mat::<f64>::zeros(k, k);

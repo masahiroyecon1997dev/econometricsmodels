@@ -517,7 +517,8 @@ pub(crate) fn build_fe_input(
 /// エンティティコードのユニーク数）から取得する。
 ///
 /// `params`/`param_names`/`residuals`/`dep_var_name`/`n_obs`/`log_likelihood`は
-/// `FeEstimator::estimator()`（内部で委譲した`OlsEstimator`）から取得する
+/// `FeEstimator`のgetter（`params()`・`within_input()`・`residuals()`・`log_likelihood()`）から
+/// 取得する
 /// （`std_errors`/`test_stats`/`p_values`/`conf_lower`/`conf_upper`はFE自身が`cov_type`・
 /// 自由度調整を反映して計算し直した値のため、`FeEstimator`自身のgetterを使う——
 /// `engine/src/panel/fe.rs`モジュールdoc「`OlsEstimator`への委譲」参照）。
@@ -540,10 +541,9 @@ pub(crate) fn fit(
 
     let estimator = FeEstimator::fit(input, effects, cov_type, options.confidence_level)
         .map_err(panel_error_to_pyerr)?;
-    let ols = estimator.estimator();
 
     Ok(FEResult {
-        params: mat_to_vec(ols.params()),
+        params: mat_to_vec(estimator.params()),
         std_errors: mat_to_vec(estimator.std_errors()),
         test_stats: mat_to_vec(estimator.test_stats()),
         stat_dist: estimator.stat_dist().name().to_string(),
@@ -551,10 +551,10 @@ pub(crate) fn fit(
         p_values: mat_to_vec(estimator.p_values()),
         conf_lower: mat_to_vec(estimator.conf_lower()),
         conf_upper: mat_to_vec(estimator.conf_upper()),
-        param_names: ols.input().param_names().to_vec(),
-        residuals: mat_to_vec(ols.residuals()),
-        dep_var_name: ols.input().dep_var_name().to_string(),
-        n_obs: ols.input().nobs(),
+        param_names: estimator.within_input().param_names().to_vec(),
+        residuals: mat_to_vec(estimator.residuals()),
+        dep_var_name: estimator.within_input().dep_var_name().to_string(),
+        n_obs: estimator.within_input().nobs(),
         df_resid: estimator.df_resid(),
         df_model: estimator.df_model(),
         n_entities: estimator.input().n_entities(),
@@ -565,7 +565,7 @@ pub(crate) fn fit(
         f_p_value: estimator.f_p_value(),
         f_df_num: estimator.f_df().map(|(num, _)| num),
         f_df_denom: estimator.f_df().map(|(_, denom)| denom),
-        log_likelihood: ols.log_likelihood(),
+        log_likelihood: estimator.log_likelihood(),
         aic: estimator.aic(),
         bic: estimator.bic(),
         r_squared_within: estimator.r_squared_within(),

@@ -930,13 +930,6 @@ mod tests {
     }
 
     #[test]
-    fn time_ordering_does_not_panic_on_nan() {
-        // NaNは`engine_pybind`で弾かれるが、`engine`単体でもパニックしない（最後に並ぶ）。
-        let order = time_ordering(&[2.0, f64::NAN, 1.0], 3);
-        assert_eq!(order, vec![2, 0, 1]);
-    }
-
-    #[test]
     fn breusch_godfrey_rejects_invalid_nlags_and_mismatched_lengths() {
         let x = cols(&[&X1, &X2]);
         let time = time_order_identity();

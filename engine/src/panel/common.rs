@@ -62,8 +62,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt;
 
-use faer::prelude::Solve;
-use faer::{Mat, Side};
+use faer::Mat;
 use thiserror::Error;
 
 use crate::error::CommonError;
@@ -619,30 +618,6 @@ impl GroupIndices {
     }
 }
 
-/// FE/RE共有のcov_type計算ヘルパー（元は`fe.rs`の`fe_*_cov_params`をFE→common.rsへ移設。
-/// 「FE専用で書いたが後にREでも同じ数式が必要と判明したため共有ロジックとして移設した」
-/// 経緯）。**数式自体はFE実装時のまま変更していない**——移設したのは
-/// 呼び出し側（`fe.rs`/`re.rs`）が渡す`df_resid`・`extra_df`・レバレッジの値がFE/REで
-/// 異なるだけで、計算ロジック自体はモデル非依存（`.claude/rules/rust-style.md`
-/// 「全手法で共有するロジック」）。
-///
-/// **RE実装で判明した重要な事実**: `linearmodels.RandomEffects.fit()`の
-/// ソース確認により、REは`cov_type`によらず常に`extra_df=0`を使う（FEのような
-/// `neffects`・`entity_nested_within_cluster`の条件分岐が一切不要）。REの変換済み
-/// 設計行列は「省略された固定効果ダミー」を持たない（切片も含め全パラメータが実際に
-/// 列として含まれている）ため、HC2/HC3のレバレッジも`leverage_full`（FE専用、
-/// `fe.rs`に残置）ではなく本モジュールの`leverage_within`（＝素の`h_ii = x_i(X'X)⁻¹x_i'`）
-/// で足りる。手動データで`linearmodels`（Classical/HC1/Cluster/HAC）・`plm`
-/// （HC2/HC3、`linearmodels`に実装が無いため）との数値一致を実地検証済み
-/// （`engine/src/panel/re.rs`のテスト参照、ユーザー確認済み・2026-09-19）。
-///
-/// within変換後の列（`Vec<Vec<f64>>`、列ごとに長さ`n`）から`faer::Mat`を組み立てる。
-/// `OlsInput::from_columns`と同じ列順・行順の規約（`columns[j][i]`がi行j列）。
-pub(crate) fn design_matrix_from_columns(columns: &[Vec<f64>], n: usize) -> Mat<f64> {
-    let k = columns.len();
-    Mat::from_fn(n, k, |i, j| columns[j][i])
-}
-
 /// `(X̃'X̃)⁻¹`を求める（`X̃`はFE/REそれぞれの変換後の設計行列）。HC1〜HC3・Clusterいずれの
 /// 計算でも共通して必要になる。`ols::xtx_inverse`と同じ発想だが、`OlsEstimator`が
 /// 保持する`cov_params`はprivateで再利用できないため独立に計算し直す。
@@ -651,15 +626,15 @@ pub(crate) fn design_matrix_from_columns(columns: &[Vec<f64>], n: usize) -> Mat<
 /// （＝特異ではないと確認済み）ことから理論上保証されるが、`OlsEstimator`と同じく
 /// 浮動小数点演算の境界的なケースに備えて`Result`化する。
 pub(crate) fn xtx_inverse(x: &Mat<f64>, k: usize) -> Result<Mat<f64>, PanelError> {
-    let xtx = x.transpose() * x;
-    let llt = xtx.llt(Side::Lower).map_err(|_| {
+    debug_assert_eq!(x.ncols(), k, "k must equal the number of columns of x");
+    crate::shared::covariance::xtx_inverse(x).map_err(|_| {
         CommonError::ComputationFailed(
             "failed to invert the transformed design matrix's Gram matrix for panel cov_type \
              computation"
                 .to_string(),
         )
-    })?;
-    Ok(llt.solve(Mat::<f64>::identity(k, k)))
+        .into()
+    })
 }
 
 /// 行ごとのレバレッジ `h_ii = x̃_i (X̃'X̃)⁻¹ x̃_i'`（`ols::hc_cov_params`のレバレッジ計算と

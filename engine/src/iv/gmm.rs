@@ -196,8 +196,6 @@
 //! （`docs/spec/iv-spec.md`3.1節の既存方針「IVのサンドイッチ型分散計算は独自実装でよい」を
 //! 2SLS/GMM間の関係にも適用した判断）。
 
-use std::collections::BTreeMap;
-
 use faer::linalg::matmul::matmul;
 use faer::prelude::Solve;
 use faer::{Accum, Mat, Par, Side};
@@ -208,6 +206,8 @@ use crate::inference;
 use crate::iv::common::{IvError, IvInput, mat_to_columns, validate_structural_cluster_count};
 use crate::linear::ols::CovType;
 use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
+use crate::shared::cluster::group_indices;
+use crate::shared::covariance::time_ordering;
 use crate::validation::MAX_ITER_LIMIT;
 use crate::validation::validate_cluster_groups;
 
@@ -952,10 +952,7 @@ fn cluster_moment_covariance(
     l: usize,
     groups: &[String],
 ) -> Mat<f64> {
-    let mut group_indices: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
-    for (i, g) in groups.iter().enumerate().take(n) {
-        group_indices.entry(g.as_str()).or_default().push(i);
-    }
+    let group_indices = group_indices(groups.iter().take(n));
 
     let mut s = Mat::<f64>::zeros(l, l);
     for indices in group_indices.values() {
@@ -989,20 +986,6 @@ fn resolve_hac_lags(lags: Option<i64>, n: usize) -> Result<usize, IvError> {
         }
         None => Ok((4.0 * (n as f64 / 100.0).powf(2.0 / 9.0)).floor() as usize),
     }
-}
-
-/// `weight_type=Hac`の`time_order`から、時系列の昇順に並べたときの行インデックス列を
-/// 求める（`two_sls.rs`の`time_ordering`と同型）。
-///
-/// `partial_cmp().unwrap()`について: `time_order`の値はNaN/無限大を含まないことが
-/// `engine_pybind::column_extraction`側で既に保証されている前提（`two_sls.rs`の
-/// `time_ordering`と同じ理由）。値が互いに異なる（同値は`ValidationError`で弾かれ、
-/// 昇順の位置＝順位で渡される）ことも同様に前提で、この関数自身は同値を検出しない。
-fn time_ordering(time_order: &[f64], n: usize) -> Vec<usize> {
-    debug_assert_eq!(time_order.len(), n);
-    let mut order: Vec<usize> = (0..n).collect();
-    order.sort_by(|&a, &b| time_order[a].partial_cmp(&time_order[b]).unwrap());
-    order
 }
 
 /// Newey-West（Bartlettカーネル）によるモーメント分散共分散行列: `two_sls.rs`の
@@ -1157,10 +1140,7 @@ fn gmm_cluster_omega(
     l: usize,
     groups: &[String],
 ) -> Mat<f64> {
-    let mut group_indices: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
-    for (i, g) in groups.iter().enumerate().take(n) {
-        group_indices.entry(g.as_str()).or_default().push(i);
-    }
+    let group_indices = group_indices(groups.iter().take(n));
     let n_groups = group_indices.len();
 
     let mut s_hat = Mat::<f64>::zeros(l, l);

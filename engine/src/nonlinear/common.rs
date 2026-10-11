@@ -33,6 +33,7 @@ use crate::design_matrix::design_matrix_element;
 use crate::error::CommonError;
 use crate::inference;
 use crate::linear_algebra::{checked_col_piv_qr, ensure_well_conditioned_symmetric_matrix};
+use crate::shared::covariance::{cluster_correction, cluster_meat, sandwich};
 use crate::validation::MAX_ITER_LIMIT;
 use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 
@@ -2983,33 +2984,10 @@ pub fn cluster_cov_params(
 
     let neg_h_inv = neg_hessian_inverse(hessian, k)?;
 
-    // `HashMap`は反復順序がプロセスごとのハッシュシードに依存し非決定的なため、`BTreeMap`
-    // （クラスター名の辞書順）を使う（OLSの`cluster_cov_params`と同じ理由）。
-    let mut group_indices: std::collections::BTreeMap<&str, Vec<usize>> =
-        std::collections::BTreeMap::new();
-    for (i, g) in groups.iter().enumerate() {
-        group_indices.entry(g.as_str()).or_default().push(i);
-    }
-    let n_groups = group_indices.len();
+    let (s_hat, n_groups) = cluster_meat(groups, k, |i, a| *scores.get(i, a));
 
-    let mut s_hat = Mat::<f64>::zeros(k, k);
-    for indices in group_indices.values() {
-        let mut s_g = vec![0.0_f64; k];
-        for &i in indices {
-            for (a, s_g_a) in s_g.iter_mut().enumerate() {
-                *s_g_a += *scores.get(i, a);
-            }
-        }
-        for a in 0..k {
-            for b in 0..k {
-                *s_hat.get_mut(a, b) += s_g[a] * s_g[b];
-            }
-        }
-    }
-
-    let correction =
-        (n_groups as f64 / (n_groups as f64 - 1.0)) * ((n as f64 - 1.0) / ((n - k) as f64));
-    let sandwich = &neg_h_inv * &s_hat * &neg_h_inv;
+    let correction = cluster_correction(n_groups, n, k);
+    let sandwich = sandwich(&neg_h_inv, &s_hat);
     Ok(Mat::from_fn(k, k, |i, j| {
         correction * (*sandwich.get(i, j))
     }))

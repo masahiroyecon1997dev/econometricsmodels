@@ -145,7 +145,8 @@ result.coef_table()
 Each key of a row is the singular of the matching result attribute
 (`param_name` / `param_names`, `param` / `params`, `std_error` / `std_errors`,
 `test_stat` / `test_stats`, `p_value` / `p_values`; `conf_lower` and `conf_upper`
-are the two ends of `conf_int`).
+are the two ends of `conf_int`). The rows of `marginal_effects()` use the same keys,
+with `effect` in place of `param`.
 
 There is no formatted text to parse. `coef_table()` is shaped so it can
 be passed directly into a Polars DataFrame, a JSON API response, or an

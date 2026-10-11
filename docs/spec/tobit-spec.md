@@ -76,7 +76,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   `censoring_fit_check()`用に非公開フィールド`estimator: TobitEstimator`として保持する。
 - python_package層（`TobitResults`）: `params`/`std_errors`/`test_stats`/`p_values`/`conf_int`は
   係数名→値の`dict`。`coef_table()`は行指向`list[dict]`（`param_name`/`param`/`std_error`/`test_stat`/
-  `p_value`/`conf_lower`/`conf_upper`）。`summary()`は作らない。
+  `p_value`/`conf_lower`/`conf_upper`）。`sigma`の行も同じキーで、値のキーが`param`のため係数でなくても正確に表せる。`summary()`は作らない。
 
 ## 3. 内部実装の計算仕様
 

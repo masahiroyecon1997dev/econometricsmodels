@@ -210,7 +210,7 @@ pub fn extract_f64_column(df: &DataFrame, name: &str) -> PyResult<Vec<f64>> {
         .map_err(|_| ColumnExtractionError::not_found(name))?;
 
     check_numeric_dtype(name, series.dtype(), NumericRole::Value)?;
-    cast_to_finite_f64_values(name, series)
+    Ok(cast_to_finite_f64_values(name, series)?)
 }
 
 /// `df`から`name`列を、行の並び順を決めるための**順位**のVecで取り出す（HACの`hac_time`）。
@@ -270,7 +270,10 @@ fn reject_missing_values(name: &str, null_count: usize) -> Result<(), ColumnExtr
 }
 
 /// dtype検査済みの`series`を、欠損値・NaN・無限大が無いことを確かめたうえでf64のVecにする。
-fn cast_to_finite_f64_values(name: &str, series: &Column) -> PyResult<Vec<f64>> {
+fn cast_to_finite_f64_values(
+    name: &str,
+    series: &Column,
+) -> Result<Vec<f64>, ColumnExtractionError> {
     // 許可したdtypeはすべてf64にキャストできるため、ここでの失敗は想定していない
     // （防御的に`ValidationError`へ変換する）。
     let series = series
@@ -300,7 +303,7 @@ fn cast_to_finite_f64_values(name: &str, series: &Column) -> PyResult<Vec<f64>> 
     // polarsのnull_count()はNaN/無限大を検出しない（値としては存在するため）。
     // IEEE754のNaN・infinityは別途スキャンする必要がある。
     if let Some((row, &bad_value)) = values.iter().enumerate().find(|(_, v)| !v.is_finite()) {
-        return Err(ColumnExtractionError::non_finite(name, row, bad_value).into());
+        return Err(ColumnExtractionError::non_finite(name, row, bad_value));
     }
 
     Ok(values)
@@ -491,7 +494,10 @@ struct FactorizedKey {
 
 /// 検査済みのキー列`column`を、値そのもの（文字列・整数の内部表現・浮動小数のビット列）で
 /// ハッシュして仮コードに分解する。行ごとの`String`は作らない。
-fn factorize_checked_key(name: &str, column: &Column) -> PyResult<FactorizedKey> {
+fn factorize_checked_key(
+    name: &str,
+    column: &Column,
+) -> Result<FactorizedKey, ColumnExtractionError> {
     let (codes, first_rows) = factorize_key_column(name, column)?;
     let first_rows: Vec<IdxSize> = first_rows.iter().map(|&row| row as IdxSize).collect();
     let representatives = column
@@ -520,12 +526,13 @@ fn with_group_labels<T>(
         .iter()
         .map(|v| {
             v.ok_or_else(|| {
-                ValidationError::new_err(format!(
-                    "column '{name}' could not be interpreted as a group key"
-                ))
+                ColumnExtractionError::conversion_failed(
+                    name,
+                    "a value could not be converted to a string",
+                )
             })
         })
-        .collect::<PyResult<_>>()?;
+        .collect::<Result<_, _>>()?;
     build(&labels)
 }
 
@@ -646,10 +653,8 @@ pub fn extract_time_keys(df: &DataFrame, name: &str) -> PyResult<TimeKeys> {
     })
 }
 
-fn time_order_error(name: &str, err: PolarsError) -> PyErr {
-    ValidationError::new_err(format!(
-        "column '{name}' could not be ordered as a time column: {err}"
-    ))
+fn time_order_error(name: &str, err: PolarsError) -> ColumnExtractionError {
+    ColumnExtractionError::ordering_failed(name, err)
 }
 
 /// キー列`name`の存在・dtype・欠損値・（浮動小数の）非有限値を検査し、問題が無ければその列を返す。
@@ -672,16 +677,14 @@ fn checked_key_column<'a>(df: &'a DataFrame, name: &str, role: KeyRole) -> PyRes
 
 /// キー列をUtf8にキャストする（元の型が数値・カテゴリカルでもよい。文字列表現で比較する）。
 #[cfg(test)]
-fn cast_key_column_to_string(name: &str, series: &Column) -> PyResult<Series> {
+fn cast_key_column_to_string(name: &str, series: &Column) -> Result<Series, ColumnExtractionError> {
     cast_series_to_string(name, series.as_materialized_series())
 }
 
-fn cast_series_to_string(name: &str, series: &Series) -> PyResult<Series> {
-    series.cast(&DataType::String).map_err(|e| {
-        ValidationError::new_err(format!(
-            "column '{name}' could not be interpreted as a group key: {e}"
-        ))
-    })
+fn cast_series_to_string(name: &str, series: &Series) -> Result<Series, ColumnExtractionError> {
+    series
+        .cast(&DataType::String)
+        .map_err(|e| ColumnExtractionError::conversion_failed(name, e))
 }
 
 #[cfg(test)]
@@ -725,7 +728,10 @@ fn factorize_keys<K: std::hash::Hash + Eq>(
 /// 値の同一性は元のdtypeの値の等しさで判定する。ラベルの文字列表現との対応は、呼び出し側が
 /// 仮グループごとに文字列化して`GroupCodes::from_factorized_without_keys`に渡すとき、同じ
 /// 文字列になる仮グループがまとめられるため、文字列で比べた場合と同じグルーピングになる。
-fn factorize_key_column(name: &str, series: &Column) -> PyResult<(Vec<usize>, Vec<usize>)> {
+fn factorize_key_column(
+    name: &str,
+    series: &Column,
+) -> Result<(Vec<usize>, Vec<usize>), ColumnExtractionError> {
     let convert = |e: PolarsError| ColumnExtractionError::conversion_failed(name, e);
     let dtype = series.dtype();
     if dtype.is_float() {
@@ -755,7 +761,7 @@ fn factorize_key_column(name: &str, series: &Column) -> PyResult<(Vec<usize>, Ve
 }
 
 /// 浮動小数の列に非有限値（NaN・無限大）があれば、最初の1件を`ValidationError`にする。
-fn reject_non_finite(name: &str, series: &Column) -> PyResult<()> {
+fn reject_non_finite(name: &str, series: &Column) -> Result<(), ColumnExtractionError> {
     let as_f64 = series
         .cast(&DataType::Float64)
         .map_err(|e| ColumnExtractionError::conversion_failed(name, e))?;
@@ -767,7 +773,7 @@ fn reject_non_finite(name: &str, series: &Column) -> PyResult<()> {
         .enumerate()
         .find_map(|(row, v)| v.filter(|v| !v.is_finite()).map(|v| (row, v)))
     {
-        return Err(ColumnExtractionError::non_finite(name, row, bad_value).into());
+        return Err(ColumnExtractionError::non_finite(name, row, bad_value));
     }
     Ok(())
 }

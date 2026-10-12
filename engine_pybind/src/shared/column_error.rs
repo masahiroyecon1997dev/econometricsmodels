@@ -27,6 +27,11 @@ pub(crate) enum ColumnExtractionError {
     #[error("failed to convert column '{name}': {detail}")]
     ConversionFailed { name: String, detail: String },
 
+    /// 時点の列として順序づけできなかった（整数への変換・取り出しの失敗）。
+    /// 許可したdtypeでは起こらない想定の防御的な経路。
+    #[error("column '{name}' could not be ordered as a time column: {detail}")]
+    OrderingFailed { name: String, detail: String },
+
     /// 欠損値（null）を含む。
     #[error(
         "column '{name}' contains {count} missing value(s). Missing values are not handled \
@@ -62,6 +67,14 @@ impl ColumnExtractionError {
         }
     }
 
+    /// `detail`は順序づけに失敗した原因（polarsのエラー等）。
+    pub(crate) fn ordering_failed(name: &str, detail: impl std::fmt::Display) -> Self {
+        Self::OrderingFailed {
+            name: name.to_string(),
+            detail: detail.to_string(),
+        }
+    }
+
     pub(crate) fn contains_null(name: &str, count: usize) -> Self {
         Self::ContainsNull {
             name: name.to_string(),
@@ -85,6 +98,7 @@ impl From<ColumnExtractionError> for PyErr {
         match err {
             ColumnExtractionError::NotFound { .. }
             | ColumnExtractionError::ConversionFailed { .. }
+            | ColumnExtractionError::OrderingFailed { .. }
             | ColumnExtractionError::ContainsNull { .. }
             | ColumnExtractionError::NonFinite { .. } => ValidationError::new_err(err.to_string()),
         }
@@ -111,6 +125,14 @@ mod tests {
         assert_eq!(
             ColumnExtractionError::conversion_failed("wage", "boom").to_string(),
             "failed to convert column 'wage': boom"
+        );
+    }
+
+    #[test]
+    fn ordering_failed_message_includes_the_cause() {
+        assert_eq!(
+            ColumnExtractionError::ordering_failed("t", "boom").to_string(),
+            "column 't' could not be ordered as a time column: boom"
         );
     }
 

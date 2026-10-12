@@ -13,15 +13,16 @@ from __future__ import annotations
 
 import json
 import math
-import random
 
 import _error_messages as msgs
+import numpy as np
 import pandas as pd
 import polars as pl
 import pytest
 from _constants import DATA_DIR
 from _error_messages import escaped, rust_f64
 from _helpers import (
+    censored_separation_dataset,
     heavily_censored_tobit_dataset,
     name_collision_frame,
     with_cluster_groups,
@@ -751,34 +752,22 @@ def test_large_true_coefficient_dgp_converges_and_recovers_truth(solver):
     """大きい真の係数（`x1`の係数=100）でもノイズがあれば識別可能で、真値を回復する
     回帰テスト。
 
-    `y`のスケール由来の分離ヒューリスティック誤発火の修正前は、この
-    DGP（`y* = 100·x1 + 0.5·x2 + N(0,1)`、n=200、左打ち切り約51%）が、当時あった標準化
-    パラメータノルム基準の分離ヒューリスティック（Logit/Probitの`y∈{0,1}`で較正、現在は
-    廃止）に誤って引っかかり`ComputationError`になっていた。`y`の標準偏差が約65あり
-    標準化パラメータノルムが閾値100を超えていたのが原因で、真の分離ではなかった。
-    `TobitScaling`導入を経て、Newton/BFGS/LBFGSのいずれでも
-    `x1≈100`・`σ≈1`（真値`β1=100`, `σ=1`）で収束する。
+    DGPは`y* = 100·x1 + 0.5·x2 + N(0,1)`（n=200、左打ち切り約52%）。`y`の標準偏差が
+    約65と大きく、`y`のスケールだけを根拠にした分離判定だと真の分離と取り違える。
+    Newton/BFGS/LBFGSのいずれでも`x1≈100`・`σ≈1`（真値`β1=100`, `σ=1`）で収束する。
 
     真の（準完全）分離が`ComputationError`になることは
     `test_true_separation_noise_free_dgp_raises_computation_error`で検証する。
     """
-    rng = random.Random(42)
-    n = 200
-    x1 = [rng.uniform(-2.0, 2.0) for _ in range(n)]
-    x2 = [rng.uniform(-1.0, 1.0) for _ in range(n)]
-    y = []
-    for i in range(n):
-        y_star = 0.0 + 100.0 * x1[i] + 0.5 * x2[i] + rng.gauss(0.0, 1.0)
-        y.append(max(0.0, y_star))
-    df = pl.DataFrame({"y": y, "x1": x1, "x2": x2})
+    df = censored_separation_dataset(noise_sd=1.0)
 
     res = Tobit(
         df, y="y", x=["x1", "x2"], options=TobitOptions(solver=solver)
     ).fit()
 
     # これはリファレンス数値照合ではなく分離誤検知に対する回帰テスト。許容幅は「真値を回復し、
-    # かつσ→0退化に倒れていない」ことだけを担保する緩いバンド。実測は3メソッドとも
-    # x1≈99.98・x2≈0.5・const≈0・σ≈1.02（相互のズレは1e-3未満）だが、将来の
+    # かつσ→0退化に倒れていない」ことだけを担保する緩いバンド。実測は（既定solverで）
+    # x1≈99.91・x2≈0.52・const≈0.15・σ≈0.94だが、将来の
     # ソルバー変更でのメソッド間変動を吸収するためマージンを広く取る。σの下限0.5は
     # 「(準)分離で σ→0 へ退化していない」ことの実質的なガード。
     assert res.converged
@@ -805,12 +794,7 @@ def test_true_separation_noise_free_dgp_raises_computation_error(solver):
     非打ち切り観測が存在するため、そのバリデーションは通過し、最適化の
     非収束＝`ComputationError`（`ValueError`系ではない）として現れる。
     """
-    rng = random.Random(42)
-    n = 200
-    x1 = [rng.uniform(-2.0, 2.0) for _ in range(n)]
-    x2 = [rng.uniform(-1.0, 1.0) for _ in range(n)]
-    y = [max(0.0, 100.0 * x1[i] + 0.5 * x2[i]) for i in range(n)]
-    df = pl.DataFrame({"y": y, "x1": x1, "x2": x2})
+    df = censored_separation_dataset(noise_sd=0.0)
 
     with pytest.raises(ComputationError):
         Tobit(
@@ -831,15 +815,7 @@ def test_quasi_separation_tiny_noise_converges_to_true_values():
     打ち切り境界付近の`zeta`は`U_CLAMP`を超えやすいため、この境界レジームが
     その影響を受ける。
     """
-    rng = random.Random(7)
-    n = 200
-    x1 = [rng.uniform(-2.0, 2.0) for _ in range(n)]
-    x2 = [rng.uniform(-1.0, 1.0) for _ in range(n)]
-    y = [
-        max(0.0, 100.0 * x1[i] + 0.5 * x2[i] + rng.gauss(0.0, 0.001))
-        for i in range(n)
-    ]
-    df = pl.DataFrame({"y": y, "x1": x1, "x2": x2})
+    df = censored_separation_dataset(noise_sd=0.001, seed=7)
 
     res = Tobit(df, y="y", x=["x1", "x2"]).fit()
 
@@ -858,16 +834,15 @@ def test_many_regressors_no_false_separation():
     なってはいけない。`TobitScaling`が設計行列を列標準化・平均センタリングして
     ノルムを抑える回帰ガードでもある。
     """
-    rng = random.Random(3)
+    rng = np.random.default_rng(3)
     n = 400
     k = 15
-    cols = {f"x{j}": [rng.gauss(0.0, 1.0) for _ in range(n)] for j in range(k)}
-    betas = [1.0 if j % 2 == 0 else -0.7 for j in range(k)]
-    y = []
-    for i in range(n):
-        lin = 2.0 + sum(betas[j] * cols[f"x{j}"][i] for j in range(k))
-        y.append(max(0.0, lin + rng.gauss(0.0, 1.5)))
-    df = pl.DataFrame({"y": y, **cols})
+    x = rng.normal(0.0, 1.0, size=(n, k))
+    betas = np.where(np.arange(k) % 2 == 0, 1.0, -0.7)
+    y_star = 2.0 + x @ betas + rng.normal(0.0, 1.5, size=n)
+    df = pl.DataFrame(
+        {"y": np.maximum(y_star, 0.0)} | {f"x{j}": x[:, j] for j in range(k)}
+    )
 
     res = Tobit(df, y="y", x=[f"x{j}" for j in range(k)]).fit()
 

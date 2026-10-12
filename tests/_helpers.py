@@ -8,6 +8,8 @@
   ライフサイクルが異なる`tests/`側に置く（`.claude/rules/testing-policy.md`
   「テストの分離」参照）。
 - `separated_dataset`: ほぼ分離したデータのDGP（`beta1=100`で完全分離になる）。
+- `censored_separation_dataset`: `separated_dataset`の左打ち切り版（Tobitの分離・準分離
+  テスト用。ノイズの大きさを引数に取る）。
 - `small_sample_separation_dataset`: 自由度が1の極小標本（`n=k+1`）で完全分離になる5行のデータ。
 - `multi_dummy_separation_dataset`: 3つのダミーが同時に準完全分離するデータ（分離方向が複数）。
 - `strongly_collinear_binary_dataset`: 2列がほぼ完全に相関するが分離していない2値データ。
@@ -238,6 +240,28 @@ def separated_dataset() -> pl.DataFrame:
     p = 1.0 / (1.0 + np.exp(-z))
     y = rng.binomial(1, p).astype(np.float64)
     return pl.DataFrame({"y": y, "x1": x1, "x2": x2})
+
+
+def censored_separation_dataset(
+    noise_sd: float, seed: int = 42, n: int = 200
+) -> pl.DataFrame:
+    """`separated_dataset`の左打ち切り版（Tobit用）。`x1`の真の係数が100と極端に大きい。
+
+    `y* = 100·x1 + 0.5·x2 + N(0, noise_sd²)`（`x1`~U(-2, 2)、`x2`~U(-1, 1)）を0で
+    左打ち切りする（`noise_sd=1`で約51%が打ち切り）。`noise_sd=0`は`x1`の符号だけで
+    `y`が決まる完全分離で、Tobitでは係数の発散ではなく`σ→0`の退化として現れる。
+    ノイズがあれば識別可能で、真値を回復できる。
+
+    外部のデータファイルは持たず、numpyの`default_rng(seed)`で作る。数値照合を
+    しない（エラーパスと収束の確認だけ）ため、ベンチマークCSVとしては固定しない。
+    """
+    rng = np.random.default_rng(seed)
+    x1 = rng.uniform(-2.0, 2.0, size=n)
+    x2 = rng.uniform(-1.0, 1.0, size=n)
+    y_star = 100.0 * x1 + 0.5 * x2
+    if noise_sd > 0.0:
+        y_star = y_star + rng.normal(0.0, noise_sd, size=n)
+    return pl.DataFrame({"y": np.maximum(y_star, 0.0), "x1": x1, "x2": x2})
 
 
 def small_sample_separation_dataset() -> pl.DataFrame:

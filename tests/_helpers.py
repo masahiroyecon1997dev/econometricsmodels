@@ -1,6 +1,6 @@
 """テストデータ生成・ロードの共通ヘルパー。
 
-複数のテストファイルに重複していた以下を集約する。
+複数のテストファイルが共有する以下を置く。
 
 - `with_cluster_groups`: 「行番号%N」の疑似クラスターラベル付与。
   `benchmark/common/dgp.py`の`imbalanced_cluster_groups`（不均衡クラスタ版）とは
@@ -8,14 +8,12 @@
   ライフサイクルが異なる`tests/`側に置く（`.claude/rules/testing-policy.md`
   「テストの分離」参照）。
 - `separated_dataset`: ほぼ分離したデータのDGP（`beta1=100`で完全分離になる）。
-  （`test_logit_validation.py`/`test_probit_validation.py`で完全に同一実装だった）。
 - `small_sample_separation_dataset`: 自由度が1の極小標本（`n=k+1`）で完全分離になる5行のデータ。
 - `multi_dummy_separation_dataset`: 3つのダミーが同時に準完全分離するデータ（分離方向が複数）。
 - `strongly_collinear_binary_dataset`: 2列がほぼ完全に相関するが分離していない2値データ。
 - `load_wooldridge_dataset`: Wooldridgeデータセットのロード。`benchmark/
   load_wooldridge.py`の`load`を呼ぶだけの`wooldridge.data(name)`→
-  `pl.from_pandas`実装が、複数ファイルに微妙に異なる書き方（直接呼び出し／
-  `load_wooldridge.py`経由）で重複していた。
+  `pl.from_pandas`を1箇所にまとめたもの。
 - `TIED_TIME_COLUMNS`: `hac_time`に同値を含む時点列（全値同一・各値2回・
   離れた1組のみ同値）とその最初の同値の行の組。OLS/WLS/IVのバリデーション
   テストで共有する。
@@ -26,8 +24,7 @@
   暗黙に使わない）なので、行順をそのまま時間順として使うテストが、行番号の列を明示的に
   足して`hac_time`に渡すための共通部品。
 
-定数（`DATA_DIR`・`MROZ_X`）は`_constants.py`に分離済み
-（ファイル名が関数を示唆するのに定数も同居していたための整理）。
+定数（`DATA_DIR`・`MROZ_X`）は`_constants.py`に置く。
 """
 
 from __future__ import annotations

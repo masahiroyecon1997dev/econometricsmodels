@@ -29,7 +29,7 @@ import pytest
 from _helpers import CASE_SPELLINGS
 from econometricsmodels import Logit, LogitOptions, LogitResults
 
-# ── 成功パス・結果型 ──────────────────────────────────────────────
+# ── 成功パス・結果型 ──────────────────────────────────────────────────
 
 
 def test_fit_succeeds_and_returns_logit_results(binary_dataset):
@@ -44,7 +44,7 @@ def test_default_options_use_classical_and_converge(binary_dataset):
     )
 
 
-# ── API構造 ──────────────────────────────────────────────────────
+# ── API構造 ───────────────────────────────────────────────────────────
 
 
 def test_params_table_structure(binary_dataset):
@@ -69,7 +69,9 @@ def test_param_names_include_const_first(binary_dataset):
     _checks.check_param_names_include_const_first(binary_dataset, Logit)
 
 
-# ── オプションの反映 ──────────────────────────────────────────────
+# ── オプションの反映 ──────────────────────────────────────────────────
+
+
 #
 # cov_type 以外の LogitOptions フィールド（solver・include_intercept・
 # confidence_level・raise_on_non_convergence）が、engine_pybind 側の
@@ -137,7 +139,7 @@ def test_cov_type_is_case_insensitive(binary_dataset, cov_type, spelling):
     )
 
 
-# ── predict() ────────────────────────────────────────────────────
+# ── predict() ─────────────────────────────────────────────────────────
 
 
 def test_predict_returns_probabilities(binary_dataset):
@@ -154,7 +156,7 @@ def test_predict_with_include_intercept_false_and_x_named_const():
     )
 
 
-# ── augment() ────────────────────────────────────────────────────
+# ── augment() ─────────────────────────────────────────────────────────
 
 
 def test_augment_none_returns_training_data_with_probability_column(
@@ -179,7 +181,7 @@ def test_augment_without_intercept_matches_predict():
     )
 
 
-# ── pred_table() ─────────────────────────────────────────────────
+# ── pred_table() ──────────────────────────────────────────────────────
 
 
 def test_pred_table_default_threshold_sums_to_n_obs(binary_dataset):
@@ -194,7 +196,7 @@ def test_pred_table_actual_counts_invariant_to_threshold(binary_dataset):
     )
 
 
-# ── marginal_effects() ────────────────────────────────────────────
+# ── marginal_effects() ────────────────────────────────────────────────
 
 
 def test_marginal_effects_default_excludes_intercept(binary_dataset):

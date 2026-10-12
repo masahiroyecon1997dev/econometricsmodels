@@ -29,7 +29,8 @@ from econometricsmodels import Tobit, TobitOptions, TobitResults
 # censored_datasetフィクスチャ（`dataset`のyを0.0で左打ち切り、打ち切り率21%）は
 # conftest.pyで定義。
 
-# ── 成功パス・結果型 ──────────────────────────────────────────
+
+# ── 成功パス・結果型 ──────────────────────────────────────────────────
 
 
 def test_fit_succeeds_and_returns_tobit_results(censored_dataset):
@@ -47,7 +48,7 @@ def test_default_options_use_classical_left_censored_at_zero(
     assert res.converged
 
 
-# ── API構造 ────────────────────────────────────────────────
+# ── API構造 ───────────────────────────────────────────────────────────
 
 
 def test_param_names_include_const_first_and_sigma_last(censored_dataset):
@@ -120,7 +121,7 @@ def test_wald_statistic_and_p_value_are_present(censored_dataset):
     assert 0.0 <= res.wald_p_value <= 1.0
 
 
-# ── オプションの反映 ──────────────────────────────────────────
+# ── オプションの反映 ──────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
@@ -285,7 +286,7 @@ def test_cov_type_is_case_insensitive(censored_dataset, cov_type, spelling):
     assert_same_estimates(res, fit(cov_type))
 
 
-# ── predict() ────────────────────────────────────────
+# ── predict() ─────────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -367,7 +368,7 @@ def test_predict_augment_take_new_data_as_first_positional_arg(
     assert "predicted_expected_observed" in augmented.columns
 
 
-# ── augment() ────────────────────────────────────────
+# ── augment() ─────────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -458,7 +459,7 @@ def test_augment_different_targets_do_not_collide_on_same_dataframe(
     assert "predicted_prob_uncensored" in twice.columns
 
 
-# ── censoring_fit_check() ────────────────
+# ── censoring_fit_check() ─────────────────────────────────────────────
 
 
 def test_censoring_fit_check_structure(censored_dataset):
@@ -481,7 +482,7 @@ def test_censoring_fit_check_omits_upper_when_upper_is_none(
     assert "upper" not in {row["category"] for row in check}
 
 
-# ── marginal_effects() ──────────────────────
+# ── marginal_effects() ────────────────────────────────────────────────
 
 
 def test_marginal_effects_default_excludes_intercept(censored_dataset):

@@ -35,7 +35,7 @@ from econometricsmodels import (
 COV_TYPES = ["classical", "hc0", "hc1", "hac"]
 
 
-# ── ValidationError（入力データ・変数指定） ───────────────────────
+# ── ValidationError（入力データ） ─────────────────────────────────────
 
 
 _DEFAULT_ROLE_KWARGS = {
@@ -293,8 +293,7 @@ def test_y_empty_string_raises(iv_dataset):
 @pytest.mark.parametrize("bad_col", ["y", "x1", "endog1", "z1"])
 def test_null_values_raise(bad_col):
     """欠損値は`column_extraction`の責務で`ValidationError`。`y`列だけでなく
-    `x_exog`/`x_endog`/`instruments`側の列でも検証する（`testing-completeness-
-    reviewer`指摘）。
+    `x_exog`/`x_endog`/`instruments`側の列でも検証する。
     """
     values: dict[str, list[float | None]] = {
         "y": [1.0, 2.0, 3.0, 4.0],
@@ -429,10 +428,9 @@ def test_insufficient_instruments_raises(iv_dataset):
 def test_x_endog_empty_raises(iv_dataset, x_endog, instruments):
     """`x_endog`が空リストの場合`ValidationError`。
 
-    旧仕様では`x_endog=[]`・`instruments=[]`は実質OLSとして成功していたが、
-    「そもそもIVを使用すること自体が誤り」と判断し弾く方向にした
-    （2026-08-30ユーザー決定）。`x_endog=[]`・`instruments`非空（対応する内生変数の
-    無い操作変数だけを指定する誤用）も同様に弾く。
+    `x_endog=[]`・`instruments=[]`は実質OLSになるが、そもそもIVを使用すること自体が
+    誤りなので弾く。`x_endog=[]`・`instruments`非空（対応する内生変数の無い操作変数
+    だけを指定する誤用）も同様に弾く。
     """
     with pytest.raises(
         ValidationError, match=escaped(msgs.X_EMPTY, role="x_endog")
@@ -464,7 +462,7 @@ def test_instruments_empty_raises(iv_dataset):
         ).fit()
 
 
-# ── ValidationError（オプション） ──────────────────────────────────
+# ── ValidationError（オプション） ─────────────────────────────────────
 
 
 @pytest.mark.parametrize("estimator", ["invalid", ""])
@@ -841,7 +839,7 @@ def test_non_finite_gmm_tol_raises(iv_dataset, gmm_tol, shown):
         our_fit(iv_dataset, options=options)
 
 
-# ── ComputationError ──────────────────────────────────────────────
+# ── ComputationError ──────────────────────────────────────────────────
 
 
 def test_perfect_multicollinearity_raises_computation_error():
@@ -869,7 +867,7 @@ def test_scale_variance_raises_computation_error(cov_type):
     第一段階の`ComputationError`（`IvError::FirstStageFailed`）になる
     （実測確認済み、OLSの同名テストと同じ原理）。
     `test_perfect_multicollinearity_raises_computation_error`と同様、数値比較は
-    せずエラーパスのみ確認する（`_reference.py` から移設）。
+    せずエラーパスのみ確認する。
     """
     df = pl.read_csv(DATA_DIR / "iv_scale_variance.csv")
     options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))

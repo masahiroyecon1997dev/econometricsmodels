@@ -180,11 +180,9 @@ TOLERANCES: dict[str, dict[str, float]] = {
         # `rtol_solver`（1e-3）と同じ位置づけだが Tobit は最適化がよく条件付けられて
         # おり桁違いに小さい。solver ケースの全フィールドに適用する。
         #
-        # `Method::Lbfgs`をargmin組み込みLBFGSから自前実装`FaerLbfgs`へ
-        # 置き換えたことで実測値が変わり、`1e-7`（旧実測: 予測値`E[y*|x]=x'β`で最大
-        # ~2.2e-8）を`predict/expected_latent`の1点（lbfgs、実測1.055e-7）がわずかに
-        # 超過するようになったため`2e-7`に緩めた（他の全フィールドは実測6e-9〜4e-8で
-        # 旧値のままでも十分収まる。bfgs側の同じ点は5.49e-8）。
+        # `Method::Lbfgs`は自前実装`FaerLbfgs`。`predict/expected_latent`の1点
+        # （lbfgs、予測値`E[y*|x]=x'β`、実測1.055e-7）が`1e-7`をわずかに超えるため`2e-7`とする
+        # （他の全フィールドは実測6e-9〜4e-8。bfgs側の同じ点は5.49e-8）。
         #
         # **原因調査**: 同一セッション内で`FaerLbfgs`実装の2つの不具合
         # （secant条件ガードによる履歴凍結バグ・`two_loop_recursion`のゼロ除算未ガード）
@@ -450,9 +448,10 @@ TOLERANCES: dict[str, dict[str, float]] = {
         # 共分散部分行列がほぼ特異（det/(V00*V11)=6e-5）なため、入力の丸め誤差が条件数倍に
         # 増幅され、機械精度から外れる。実測最大相対誤差: dkの統計量7.6e-9・p値9.8e-9
         # （60桁演算の真値に対しplmは-3.8e-9。1ulpの入力摂動で3e-9程度動く丸め誤差の床）、
-        # classical/hc1/hc2/hc3/clusterは1e-10以下。約5倍のマージンを置く。以前はWald検定が
-        # 共分散の下三角だけを読み（行列積の丸めで非対称になった共分散の片側の誤差が
-        # そのまま出て）dkで1.2e-7に達していた（`wald_f_test`で両側の平均を取って解消）。
+        # classical/hc1/hc2/hc3/clusterは1e-10以下。約5倍のマージンを置く。
+        # Wald検定は共分散の両側の平均を取ってから逆行列を求める（`wald_f_test`）。下三角だけ
+        # を読むと、行列積の丸めで非対称になった共分散の片側の誤差がそのまま出て、dkで
+        # 1.2e-7に達する。
         "rtol_hausman_ill_conditioned": 5e-8,
         # ハウスマン検定のp値は裾確率がゼロ近傍に潰れるケースが多く、
         # unbalancedシナリオでは絶対誤差フロアで比較する
@@ -507,5 +506,21 @@ TOLERANCES: dict[str, dict[str, float]] = {
         "atol": ATOL_REFERENCE_FLOOR,
         "rtol_p_value": 1e-8,
         "rtol_absolute_year": 1e-6,
+    },
+    # --- 本実装内の不変条件（リファレンス実装との比較ではない） ---
+    # 同じ入力に対して計算経路が異なる出力どうしが、丸め誤差の範囲で一致することの
+    # 確認。相対誤差は意味を持たない（参照値が0のものを含む）ため絶対誤差のみで比較する。
+    # 実測は固定データ（n=100、`tests/conftest.py`の`dataset`等）での最大絶対差。
+    # 実測の約30〜1000倍（別環境の丸め差を吸収できる幅）のマージンを置く。
+    # 定数項ありOLSの残差和（理論上0）。実測最大3.0e-14。
+    "ols_api": {
+        "atol_residual_sum": 1e-12,
+    },
+    # 重み=1（または定数重み）のWLSとOLSの一致（r_squared・aic/bic・対数尤度・残差・
+    # 予測値）と、`hac_time`の行順入れ替え不変性。WLSは元スケールのy・重みから
+    # 統計量を計算し直す経路（`engine/src/linear/wls.rs`）、OLSはfaerの行列演算の経路を
+    # 通るため加算順序に由来する差が出る。実測最大8.9e-16。
+    "wls_api": {
+        "atol_ols_invariant": 1e-12,
     },
 }

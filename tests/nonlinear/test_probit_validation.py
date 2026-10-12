@@ -18,7 +18,7 @@ import _binary_choice_checks as _checks
 import pytest
 from econometricsmodels import Probit, ProbitOptions
 
-# ── ValidationError（入力データ） ───────────────────────────────────
+# ── ValidationError（入力データ） ─────────────────────────────────────
 
 
 def test_y_in_x_raises(binary_dataset):
@@ -70,7 +70,7 @@ def test_insufficient_observations_raises(binary_dataset):
     _checks.check_insufficient_observations_raises(binary_dataset, Probit)
 
 
-# ── ValidationError（predict()のnew_data） ─────────────────────────
+# ── ValidationError（predict()のnew_data） ────────────────────────────
 
 
 def test_predict_missing_column_raises(binary_dataset):
@@ -87,7 +87,7 @@ def test_predict_null_or_non_finite_values_raise(binary_dataset):
     )
 
 
-# ── ValidationError（augment()） ────────────────────────────────────
+# ── ValidationError（augment()） ──────────────────────────────────────
 
 
 def test_augment_column_collision_raises(binary_dataset):
@@ -98,7 +98,7 @@ def test_augment_missing_column_raises(binary_dataset):
     _checks.check_augment_missing_column_raises(binary_dataset, Probit)
 
 
-# ── ValidationError（オプション） ──────────────────────────────────
+# ── ValidationError（オプション） ─────────────────────────────────────
 
 
 @pytest.mark.parametrize("cov_type", ["bogus", ""])
@@ -173,7 +173,7 @@ def test_cluster_nonexistent_column_raises(binary_dataset):
     )
 
 
-# ── ValidationError（marginal_effects()） ─────────────────────────
+# ── ValidationError（marginal_effects()） ─────────────────────────────
 
 
 def test_marginal_effects_unknown_at_raises(binary_dataset):
@@ -188,7 +188,7 @@ def test_marginal_effects_confidence_level_out_of_range_raises(
     )
 
 
-# ── ComputationError ──────────────────────────────────────────────
+# ── ComputationError ──────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])

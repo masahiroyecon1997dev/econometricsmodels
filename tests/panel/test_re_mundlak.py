@@ -48,7 +48,7 @@ def _fit(x, options=None, df=None):
 
 
 def test_mundlak_specification_is_estimated():
-    """以前は`ComputationError`だった指定が推定でき、個体平均の係数も推定される。"""
+    """個体平均の列を`x`に含むMundlak指定が推定でき、個体平均の係数も推定される。"""
     res = _fit(["x1", "x2", "x1_bar"])
     assert list(res.params) == ["const", "x1", "x2", "x1_bar"]
     assert res.df_model == 4

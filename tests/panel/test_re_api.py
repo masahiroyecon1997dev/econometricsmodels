@@ -33,7 +33,7 @@ from econometricsmodels import RE, REOptions, REResults
 
 from benchmark.common import hac_auto_lag
 
-# ── 成功パス・結果型 ──────────────────────────────────────────────
+# ── 成功パス・結果型 ──────────────────────────────────────────────────
 
 
 def test_fit_succeeds_and_returns_re_results(fe_dataset):
@@ -68,7 +68,7 @@ def test_aic_bic_log_likelihood_are_finite(fe_dataset):
     assert math.isfinite(res.log_likelihood)
 
 
-# ── API構造 ──────────────────────────────────────────────────────
+# ── API構造 ───────────────────────────────────────────────────────────
 
 
 def test_param_names_start_with_const(fe_dataset):
@@ -138,60 +138,7 @@ def test_df_resid_and_df_model(fe_dataset):
     assert res.df_resid == fe_dataset.height - 3
 
 
-# ── ハウスマン検定（panel-common.md 2.4節・docs/spec/re-spec.md 3.7節） ──
-
-
-def test_hausman_present(fe_dataset):
-    """ハウスマン検定（回帰ベース、常に1-way比較）が計算される。"""
-    res = our_fit_re(fe_dataset)
-    assert isinstance(res.hausman_statistic, float)
-    assert isinstance(res.hausman_p_value, float)
-    assert res.hausman_df == 2  # 傾き係数の数（x1, x2）
-    assert res.hausman_statistic >= 0.0
-
-
-def test_hausman_follows_cov_type(fe_dataset):
-    """ハウスマン検定の補助回帰の共分散はRE本体の`cov_type`に連動する
-    （既定の`cluster`ならcluster-robust版）。`df`は`cov_type`によらず一定で、
-    各`cov_type`の統計量は互いに異なる（`re-spec.md`3.7節）。
-    """
-    options = {
-        "classical": REOptions(cov_type="classical"),
-        "hc1": REOptions(cov_type="hc1"),
-        "hc2": REOptions(cov_type="hc2"),
-        "hc3": REOptions(cov_type="hc3"),
-        "cluster": REOptions(cov_type="cluster"),
-        "dk": REOptions(cov_type="dk", dk_time="time"),
-    }
-    results = {
-        name: our_fit_re(fe_dataset, options=opt)
-        for name, opt in options.items()
-    }
-
-    default = our_fit_re(fe_dataset)
-    assert default.hausman_statistic == results["cluster"].hausman_statistic
-    for res in results.values():
-        assert res.hausman_df == 2
-        assert res.hausman_statistic >= 0.0
-    statistics = {res.hausman_statistic for res in results.values()}
-    assert len(statistics) == len(results)
-
-
-def test_hausman_computed_with_singleton_time():
-    """1-wayでは`time`列を使わないため、singleton timeがあってもハウスマン検定は
-    計算される（`fe_singleton_time.csv`、`cov_type="dk"`で`dk_time`を指定。2-wayは
-    `time`のsingletonを`ValidationError`にする）。
-    """
-    df = pl.read_csv(DATA_DIR / "fe_singleton_time.csv")
-    options = REOptions(cov_type="dk", dk_time="time")
-    res = RE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
-
-    assert isinstance(res.hausman_statistic, float)
-    assert isinstance(res.hausman_p_value, float)
-    assert res.hausman_df == 2
-
-
-# ── オプションの反映 ──────────────────────────────────────────────
+# ── オプションの反映 ──────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize("spelling", CASE_SPELLINGS)
@@ -269,7 +216,60 @@ def test_dk_bandwidth_zero_succeeds(fe_dataset):
     assert all(se > 0.0 for se in res.std_errors.values())
 
 
-# ── 統計的健全性チェック（他の3分類に当てはまらない） ──────────────────
+# ── ハウスマン検定（panel-common.md 2.4節・docs/spec/re-spec.md 3.7節） ────
+
+
+def test_hausman_present(fe_dataset):
+    """ハウスマン検定（回帰ベース、常に1-way比較）が計算される。"""
+    res = our_fit_re(fe_dataset)
+    assert isinstance(res.hausman_statistic, float)
+    assert isinstance(res.hausman_p_value, float)
+    assert res.hausman_df == 2  # 傾き係数の数（x1, x2）
+    assert res.hausman_statistic >= 0.0
+
+
+def test_hausman_follows_cov_type(fe_dataset):
+    """ハウスマン検定の補助回帰の共分散はRE本体の`cov_type`に連動する
+    （既定の`cluster`ならcluster-robust版）。`df`は`cov_type`によらず一定で、
+    各`cov_type`の統計量は互いに異なる（`re-spec.md`3.7節）。
+    """
+    options = {
+        "classical": REOptions(cov_type="classical"),
+        "hc1": REOptions(cov_type="hc1"),
+        "hc2": REOptions(cov_type="hc2"),
+        "hc3": REOptions(cov_type="hc3"),
+        "cluster": REOptions(cov_type="cluster"),
+        "dk": REOptions(cov_type="dk", dk_time="time"),
+    }
+    results = {
+        name: our_fit_re(fe_dataset, options=opt)
+        for name, opt in options.items()
+    }
+
+    default = our_fit_re(fe_dataset)
+    assert default.hausman_statistic == results["cluster"].hausman_statistic
+    for res in results.values():
+        assert res.hausman_df == 2
+        assert res.hausman_statistic >= 0.0
+    statistics = {res.hausman_statistic for res in results.values()}
+    assert len(statistics) == len(results)
+
+
+def test_hausman_computed_with_singleton_time():
+    """1-wayでは`time`列を使わないため、singleton timeがあってもハウスマン検定は
+    計算される（`fe_singleton_time.csv`、`cov_type="dk"`で`dk_time`を指定。2-wayは
+    `time`のsingletonを`ValidationError`にする）。
+    """
+    df = pl.read_csv(DATA_DIR / "fe_singleton_time.csv")
+    options = REOptions(cov_type="dk", dk_time="time")
+    res = RE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
+
+    assert isinstance(res.hausman_statistic, float)
+    assert isinstance(res.hausman_p_value, float)
+    assert res.hausman_df == 2
+
+
+# ── 統計的健全性チェック（他の3分類に当てはまらない） ─────────────────
 
 
 def test_cluster_se_exceeds_classical_under_serial_correlation():
@@ -300,7 +300,7 @@ def test_cluster_se_exceeds_classical_under_serial_correlation():
     assert clustered_variance_sum > classical_variance_sum
 
 
-# ── Driscoll-Kraayバンド幅の実使用値（dk_bandwidth_used）─────────────
+# ── Driscoll-Kraayバンド幅の実使用値（dk_bandwidth_used） ─────────────
 
 
 @pytest.mark.parametrize("n_periods", HAC_AUTO_LAG_SAMPLE_SIZES)

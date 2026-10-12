@@ -55,7 +55,8 @@ _assert_close = partial(
     atol=TOLERANCES["ols_reference"]["atol"],
 )
 
-# ── 成功パス・結果型 ──────────────────────────────────────────────
+
+# ── 成功パス・結果型 ──────────────────────────────────────────────────
 
 
 def test_fit_succeeds_and_returns_ols_results(dataset):
@@ -122,10 +123,16 @@ def test_hac_lags_used_is_none_unless_hac(dataset, cov_type):
 def test_residuals_sum_near_zero(dataset):
     """残差の和が0に近いこと（定数項ありOLSの性質）。"""
     our_res = our_fit(dataset)
-    _assert_close(sum(our_res.residuals), 0.0, "sum(residuals)")
+    assert_close(
+        sum(our_res.residuals),
+        0.0,
+        "sum(residuals)",
+        rtol=0.0,
+        atol=TOLERANCES["ols_api"]["atol_residual_sum"],
+    )
 
 
-# ── API構造 ──────────────────────────────────────────────────────
+# ── API構造 ───────────────────────────────────────────────────────────
 
 
 def test_params_table_structure(dataset):
@@ -175,7 +182,9 @@ def test_n_obs_and_dep_var_name(dataset):
     assert res.dep_var_name == "y"
 
 
-# ── オプションの反映 ──────────────────────────────────────────────
+# ── オプションの反映 ──────────────────────────────────────────────────
+
+
 #
 # cov_type以外のOLSOptionsフィールド（include_intercept・confidence_level・
 # hac_lags=None・hac_time）が、engine_pybind側の列抽出・分岐ロジックを経て
@@ -291,7 +300,7 @@ def test_hac_time_reorders_rows_before_computing_lags():
         ), name
 
 
-# ── predict() ────────────────────────────────────────────────────
+# ── predict() ─────────────────────────────────────────────────────────
 
 
 def test_predict_none_matches_statsmodels_fitted_values(dataset):
@@ -398,7 +407,7 @@ def test_predict_new_data_structure(dataset):
     assert all(isinstance(value, float) for value in predicted)
 
 
-# ── augment() ────────────────────────────────────────────────────
+# ── augment() ─────────────────────────────────────────────────────────
 
 
 def test_augment_none_returns_training_data_with_predicted_column(dataset):
@@ -479,6 +488,8 @@ def test_augment_without_intercept_matches_predict():
 
 
 # ── クラスターロバストSEの健全性チェック（真のクラスター内相関） ──────
+
+
 #
 # 上記のクラスター系テスト・test_ols_reference.py/test_ols_crosscheck.pyの
 # クラスター系テストは、いずれも誤差i.i.d.なデータに疑似グループラベルを

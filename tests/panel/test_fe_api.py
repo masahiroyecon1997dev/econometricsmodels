@@ -31,7 +31,7 @@ from econometricsmodels import FE, FEOptions, FEResults
 
 from benchmark.common import hac_auto_lag
 
-# ── 成功パス・結果型 ──────────────────────────────────────────────
+# ── 成功パス・結果型 ──────────────────────────────────────────────────
 
 
 def test_fit_succeeds_and_returns_fe_results(fe_dataset):
@@ -54,7 +54,7 @@ def test_residuals_length_matches_n_obs(fe_dataset):
     assert len(res.residuals) == res.n_obs == fe_dataset.height
 
 
-# ── API構造 ──────────────────────────────────────────────────────
+# ── API構造 ───────────────────────────────────────────────────────────
 
 
 def test_param_names_have_no_intercept(fe_dataset):
@@ -128,38 +128,7 @@ def test_n_periods_is_none_for_one_way_and_unique_times_for_two_way(
     assert two_way.n_periods == fe_dataset["time"].n_unique()
 
 
-# ── fixed_effects()（追加メソッド、docs/spec/fe-spec.md 3.5節） ────────
-
-
-def test_fixed_effects_one_way_structure(fe_dataset):
-    """1-way（`time`未指定）は`dict[str, float]`（エンティティID→効果）。"""
-    res = our_fit(fe_dataset)
-    effects = res.fixed_effects()
-
-    assert isinstance(effects, dict)
-    assert set(effects.keys()) == set(fe_dataset["entity"].unique().to_list())
-    assert all(isinstance(v, float) for v in effects.values())
-
-
-def test_fixed_effects_two_way_structure(fe_dataset):
-    """2-way（`time`指定）はトップレベルキー"entity"/"time"を持つ
-    `dict[str, dict[str, float]]`。
-    """
-    res = our_fit(fe_dataset, options=FEOptions(time="time"))
-    effects = res.fixed_effects()
-
-    assert set(effects.keys()) == {"entity", "time"}
-    assert set(effects["entity"].keys()) == set(
-        fe_dataset["entity"].unique().to_list()
-    )
-    assert set(effects["time"].keys()) == set(
-        fe_dataset["time"].unique().to_list()
-    )
-    assert all(isinstance(v, float) for v in effects["entity"].values())
-    assert all(isinstance(v, float) for v in effects["time"].values())
-
-
-# ── オプションの反映 ──────────────────────────────────────────────
+# ── オプションの反映 ──────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize("spelling", CASE_SPELLINGS)
@@ -236,7 +205,38 @@ def test_dk_bandwidth_zero_succeeds(fe_dataset):
     assert all(se > 0.0 for se in res.std_errors.values())
 
 
-# ── 統計的健全性チェック（他の3分類に当てはまらない） ──────────────────
+# ── fixed_effects()（追加メソッド、docs/spec/fe-spec.md 3.5節） ───────
+
+
+def test_fixed_effects_one_way_structure(fe_dataset):
+    """1-way（`time`未指定）は`dict[str, float]`（エンティティID→効果）。"""
+    res = our_fit(fe_dataset)
+    effects = res.fixed_effects()
+
+    assert isinstance(effects, dict)
+    assert set(effects.keys()) == set(fe_dataset["entity"].unique().to_list())
+    assert all(isinstance(v, float) for v in effects.values())
+
+
+def test_fixed_effects_two_way_structure(fe_dataset):
+    """2-way（`time`指定）はトップレベルキー"entity"/"time"を持つ
+    `dict[str, dict[str, float]]`。
+    """
+    res = our_fit(fe_dataset, options=FEOptions(time="time"))
+    effects = res.fixed_effects()
+
+    assert set(effects.keys()) == {"entity", "time"}
+    assert set(effects["entity"].keys()) == set(
+        fe_dataset["entity"].unique().to_list()
+    )
+    assert set(effects["time"].keys()) == set(
+        fe_dataset["time"].unique().to_list()
+    )
+    assert all(isinstance(v, float) for v in effects["entity"].values())
+    assert all(isinstance(v, float) for v in effects["time"].values())
+
+
+# ── 統計的健全性チェック（他の3分類に当てはまらない） ─────────────────
 
 
 def test_cluster_se_exceeds_classical_under_serial_correlation():
@@ -271,7 +271,7 @@ def test_cluster_se_exceeds_classical_under_serial_correlation():
     assert clustered_variance_sum > classical_variance_sum
 
 
-# ── Driscoll-Kraayバンド幅の実使用値（dk_bandwidth_used）─────────────
+# ── Driscoll-Kraayバンド幅の実使用値（dk_bandwidth_used） ─────────────
 
 
 @pytest.mark.parametrize("n_periods", HAC_AUTO_LAG_SAMPLE_SIZES)

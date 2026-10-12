@@ -36,7 +36,8 @@ _TOBIT_CENSORING_BOUNDS = json.loads(
 # censored_datasetフィクスチャ（`dataset`のyを0.0で左打ち切り、打ち切り率21%）は
 # conftest.pyで定義。
 
-# ── ValidationError（入力データ） ──────────────
+
+# ── ValidationError（入力データ） ─────────────────────────────────────
 
 
 def test_y_in_x_raises(censored_dataset):
@@ -154,7 +155,7 @@ def test_null_values_raise():
 
 def test_null_values_in_x_raise():
     """`x` 列に null が含まれる場合も `ValidationError`（`y` だけでなく `x` も
-    欠損チェックの対象、テスト網羅性レビュー 観点5）。"""
+    欠損チェックの対象）。"""
     df = pl.DataFrame({"y": [0.0, 1.0, 2.0, 3.0], "x1": [1.0, None, 3.0, 4.0]})
     with pytest.raises(
         ValidationError,
@@ -169,7 +170,7 @@ def test_non_finite_values_raise(bad):
 
     null（`test_null_values_raise` / `test_null_values_in_x_raise`）と NaN/無限大は
     `column_extraction.rs` 内で別ロジックのため個別に確認する（OLS の
-    `test_non_finite_values_raise` と同じ、テスト網羅性レビュー 観点5）。
+    `test_non_finite_values_raise` と同じ）。
     """
     bad_repr = "NaN" if math.isnan(bad) else "inf"
     df_y = pl.DataFrame(
@@ -278,7 +279,7 @@ def test_no_uncensored_observations_raises():
         Tobit(df, y="y", x=["x1"]).fit()
 
 
-# ── ValidationError（predict()のnew_data） ────
+# ── ValidationError（predict()のnew_data） ────────────────────────────
 
 
 def test_predict_unknown_target_raises(censored_dataset):
@@ -334,7 +335,7 @@ def test_predict_null_or_non_finite_values_raise(censored_dataset):
         res.predict(new_data=new_data_inf)
 
 
-# ── ValidationError（augment()） ──────
+# ── ValidationError（augment()） ──────────────────────────────────────
 
 
 def test_augment_unknown_target_raises(censored_dataset):
@@ -385,7 +386,7 @@ def test_augment_missing_column_raises(censored_dataset):
         res.augment(new_data=new_data)
 
 
-# ── ValidationError（オプション） ──────────────
+# ── ValidationError（オプション） ─────────────────────────────────────
 
 
 @pytest.mark.parametrize("cov_type", ["bogus", ""])
@@ -497,8 +498,8 @@ def test_cluster_count_at_most_slopes_raises_validation_error(
     （engine側の`CommonError::InsufficientClustersForInference`）。
 
     `rank(Ŝ)≤G-1`のため全体Wald検定のq×q部分行列がG≤qで構造的に特異になる。
-    従来は`wald_chi2_test`内の`ComputationError`だったが、GもqもR行列計算なしで
-    即座に判定できるため`fit()`冒頭の`ValidationError`へ前倒しした（mroz
+    GもqもR行列計算なしで即座に判定できるため、`wald_chi2_test`内の
+    `ComputationError`ではなく`fit()`冒頭の`ValidationError`で弾く（mroz
     `hours`クラスターケースがこの経路。`G<q`側はOLSの同名テストで確認）。
     """
     cluster = pl.Series(
@@ -524,8 +525,7 @@ def test_mroz_hours_cluster_cov_type_raises_validation_error():
     `cluster="city"`（都市部居住ダミー、G=2）で推定すると`G=2 <= q=7`。
     `rank(Ŝ) <= G-1 = 1`のため全体Wald検定の`7×7`部分行列が構造的に特異になり、
     `fit()`冒頭のバリデーションが`ValidationError`
-    （`CommonError::InsufficientClustersForInference`）で弾く。従来は
-    `wald_chi2_test`内の`ComputationError`で`fit()`全体が失敗していた
+    （`CommonError::InsufficientClustersForInference`）で弾く
     （参照実装Rの`linearHypothesis`相当も同データで計算不能）。
     """
     from _constants import MROZ_X
@@ -564,7 +564,7 @@ def test_cluster_nonexistent_column_raises(censored_dataset):
 
 def test_cluster_with_null_raises(censored_dataset):
     """`cluster` に null（欠損）が含まれる場合 `ValidationError`
-    （`extract_group_key_column` の null チェック、テスト網羅性レビュー 観点5）。"""
+    （`extract_group_key_column` の null チェック）。"""
     n = censored_dataset.height
     groups = [None] + [str(i % 5) for i in range(n - 1)]
     df = censored_dataset.with_columns(pl.Series("grp", groups, dtype=pl.Utf8))
@@ -597,7 +597,7 @@ def test_cluster_unused_by_cov_type_raises(censored_dataset, cov_type):
         ).fit()
 
 
-# ── ValidationError（marginal_effects()） ────
+# ── ValidationError（marginal_effects()） ─────────────────────────────
 
 
 def test_marginal_effects_unknown_at_raises(censored_dataset):
@@ -632,7 +632,7 @@ def test_marginal_effects_confidence_level_out_of_range_raises(
         res.marginal_effects(confidence_level=1.5)
 
 
-# ── ComputationError ──────────────────────────
+# ── ComputationError ──────────────────────────────────────────────────
 
 
 def _narrow_interval_dataset(n_interior: int) -> pl.DataFrame:
@@ -728,7 +728,7 @@ def test_scale_variance_raises_computation_error(cov_type):
     classical を含む全 cov_type で `ComputationError` になる。`scale_variance_mild`
     （スケール比 1e3）が数値リグレッション検知用の成功パス
     （`test_tobit_reference.py`）。数値比較はせずエラーパスのみ確認する
-    （テスト網羅性レビュー 観点3、`TOBIT_ERROR_PATH_SCENARIOS`）。
+    （`TOBIT_ERROR_PATH_SCENARIOS`）。
     """
     df = pl.read_csv(DATA_DIR / "tobit_scale_variance.csv")
     lower, upper = _TOBIT_CENSORING_BOUNDS["scale_variance"]

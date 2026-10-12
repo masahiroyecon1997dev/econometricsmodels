@@ -5,9 +5,8 @@
 generate_iv_gmm_fixtures.py`で生成）を読み込み、10個の合成データシナリオ×
 classical/HC0/HC1/HAC（+クラスター、baselineのみ）を`gmm_weight_type="classical"`
 固定で、加えてbaselineシナリオ×`cov_type="classical"`固定で他の`gmm_weight_type`
-（robust/cluster/kernel）を検証する（
-`gmm_weight_type`×`cov_type`の全組み合わせ（10シナリオ×4weight_type×6cov_type）は
-規模が大きすぎるため）。
+（robust/cluster/kernel）を検証する。`gmm_weight_type`×`cov_type`の全組み合わせ
+（10シナリオ×4weight_type×6cov_type）は規模が大きすぎるため対象にしない。
 
 役割分担（OLS/WLS/Logit/Probit の `test_<手法>_*.py` と同じ4分割。
 IV は主リファレンス数値照合のみ 2SLS/GMM で
@@ -353,8 +352,7 @@ _GMM_TYPE_OPTIONS = {
 @pytest.mark.parametrize("n_iter", [1, 3])
 def test_gmm_type_matches_linearmodels(fixtures, n_iter):
     """`gmm_type`が既定値（`"two_step"`）以外（`"one_step"`・`"iterated"`）
-    でも主リファレンスと一致することを確認する（`testing-completeness-reviewer`
-    指摘）。
+    でも主リファレンスと一致することを確認する。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
     gmm_type_options = _GMM_TYPE_OPTIONS[n_iter]

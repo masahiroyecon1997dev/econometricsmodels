@@ -34,7 +34,7 @@ from econometricsmodels import IV, IVOptions, IVResults
 
 from benchmark.common import hac_auto_lag
 
-# ── 成功パス・結果型 ──────────────────────────────────────────────
+# ── 成功パス・結果型 ──────────────────────────────────────────────────
 
 
 def test_fit_succeeds_and_returns_iv_results(iv_dataset):
@@ -126,7 +126,7 @@ def test_residuals_length_matches_n_obs(iv_dataset):
     assert len(res.residuals) == res.n_obs == iv_dataset.height
 
 
-# ── API構造 ──────────────────────────────────────────────────────
+# ── API構造 ───────────────────────────────────────────────────────────
 
 
 def test_param_names_order(iv_dataset):
@@ -281,7 +281,7 @@ def test_wu_hausman_degrades_to_none_when_cluster_count_at_most_augmented_slopes
     assert res.params["endog1"] is not None
 
 
-# ── オプションの反映 ──────────────────────────────────────────────
+# ── オプションの反映 ──────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize("spelling", CASE_SPELLINGS)
@@ -570,7 +570,7 @@ def test_gmm_only_options_default_to_none():
     assert options.raise_on_non_convergence is None
 
 
-# ── HACの実使用ラグ数（hac_lags_used）─────────────────────────────
+# ── HACの実使用ラグ数（hac_lags_used） ────────────────────────────────
 
 
 @pytest.mark.parametrize("n", HAC_AUTO_LAG_SAMPLE_SIZES)

@@ -52,122 +52,8 @@ _assert_close = partial(
     atol=TOLERANCES["wls_reference"]["atol"],
 )
 
-# ── OLSとの不変条件回帰テスト ───────────────────────────────────────
-#
-# 内部実装（sqrt(w)変換方式か将来別方式に変わるか等）が変わっても壊れないよう、
-# public API経由でのみ比較する。
-#
-# WLSとOLSで計算経路が異なる統計量（r_squared・残差・予測値等）は、加算順序に
-# 由来する丸め誤差レベルでの一致を、相対誤差なし（rtol=0）の絶対誤差で確認する。
-_assert_rounding_close = partial(assert_close, rtol=0.0, atol=1e-9)
 
-
-@pytest.mark.parametrize(
-    "option_kwargs",
-    [
-        {},
-        {"cov_type": "hc3"},
-        {"cov_type": "cluster", "cluster": "cluster"},
-        {"include_intercept": False},
-    ],
-)
-def test_weight_one_matches_ols(dataset, option_kwargs):
-    """重み=1のときWLSの結果がOLSの結果と完全一致すること。
-
-    params/std_errors/test_stats/p_values/conf_int/F統計量/n_obsは、WLSがOLSソルバーを`sqrt(weight)`変換した
-    データにそのまま適用する実装であるため（weight=1なら変換が恒等写像になる）
-    厳密な`==`で一致する。r_squared・log_likelihood（→aic/bic）・残差は、
-    WLS側で元スケールのy・weightsから独立に計算し直す実装のため、加算順序
-    等に由来する浮動小数点誤差レベルの差が生じうる（`engine/src/linear/wls.rs`
-    の対応するRust単体テストで確認済みの挙動）。
-
-    `OLSOptions`/`WLSOptions`はフィールド構成が同一の独立クラスのため、
-    同じ`option_kwargs`からそれぞれ構築して`OLS`/`WLS`に渡す。
-    """
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-
-    ols_res = OLS(
-        df, y="y", x=["x1", "x2"], options=OLSOptions(**option_kwargs)
-    ).fit()
-    wls_res = WLS(
-        df,
-        y="y",
-        x=["x1", "x2"],
-        weight="weight",
-        options=WLSOptions(**option_kwargs),
-    ).fit()
-
-    assert wls_res.param_names == ols_res.param_names
-    for name in ols_res.param_names:
-        assert wls_res.params[name] == ols_res.params[name], name
-        assert wls_res.std_errors[name] == ols_res.std_errors[name], name
-        assert wls_res.test_stats[name] == ols_res.test_stats[name], name
-        assert wls_res.p_values[name] == ols_res.p_values[name], name
-        assert wls_res.conf_int[name] == ols_res.conf_int[name], name
-
-    assert wls_res.f_statistic == ols_res.f_statistic
-    assert wls_res.f_p_value == ols_res.f_p_value
-    assert wls_res.n_obs == ols_res.n_obs
-    assert wls_res.dep_var_name == ols_res.dep_var_name
-    assert wls_res.cov_type == ols_res.cov_type
-
-    for stat in ("r_squared", "adj_r_squared", "log_likelihood", "aic", "bic"):
-        _assert_rounding_close(
-            getattr(wls_res, stat), getattr(ols_res, stat), stat
-        )
-    for i, (wls_r, ols_r) in enumerate(
-        zip(wls_res.residuals, ols_res.residuals)
-    ):
-        _assert_rounding_close(wls_r, ols_r, f"residuals[{i}]")
-
-
-def test_weight_one_matches_ols_params_table(dataset):
-    """params_table()の内容もOLSと一致すること（辞書系プロパティ以外の確認）。"""
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-
-    ols_table = OLS(df, y="y", x=["x1", "x2"]).fit().params_table()
-    wls_table = (
-        WLS(df, y="y", x=["x1", "x2"], weight="weight").fit().params_table()
-    )
-
-    assert [row["param_name"] for row in wls_table] == [
-        row["param_name"] for row in ols_table
-    ]
-    for wls_row, ols_row in zip(wls_table, ols_table):
-        assert wls_row["param"] == ols_row["param"]
-        assert wls_row["std_error"] == ols_row["std_error"]
-
-
-def test_weight_one_matches_ols_predict(dataset):
-    """重み=1のとき、`predict()`（学習データ・新規データいずれも）が
-    OLSの`predict()`と一致すること（予測値は重みに関与しない、
-    という設計の帰結を確認する）。
-
-    学習データ（`new_data=None`）の計算経路自体はwls.rs（手動ループ、
-    `original_scale_fitted_and_residuals`）とols.rs（faerの行列演算、
-    `OlsEstimator::fitted_values`）で異なるため、丸め誤差レベルでの一致を
-    確認する（`test_residuals_are_original_scale_not_weighted`と同じ理由）。
-    一方、新規データに対する予測は両者とも同じ純粋関数
-    `engine::linear::ols::predict_new_data`を呼ぶため、厳密な`==`で一致する。
-    """
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-
-    ols_res = OLS(df, y="y", x=["x1", "x2"]).fit()
-    wls_res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
-
-    for i, (wls_val, ols_val) in enumerate(
-        zip(wls_res.predict(), ols_res.predict())
-    ):
-        _assert_rounding_close(wls_val, ols_val, f"predict()[{i}]")
-
-    new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
-    for wls_val, ols_val in zip(
-        wls_res.predict(new_data), ols_res.predict(new_data)
-    ):
-        assert wls_val == ols_val
-
-
-# ── 成功パス・結果型 ──────────────────────────────────────────────
+# ── 成功パス・結果型 ──────────────────────────────────────────────────
 
 
 def test_default_options_use_classical(dataset):
@@ -192,7 +78,7 @@ def test_residuals_are_original_scale_not_weighted(dataset):
     # スケールにはならないはず（sqrt(100)=10倍にはならない）。
     ols_res = OLS(dataset, y="y", x=["x1", "x2"]).fit()
     for i, (wls_r, ols_r) in enumerate(zip(res.residuals, ols_res.residuals)):
-        assert_close(wls_r, ols_r, f"residuals[{i}]", rtol=0.0, atol=1e-6)
+        _assert_rounding_close(wls_r, ols_r, f"residuals[{i}]")
 
 
 def test_fit_succeeds_and_returns_wls_results(dataset):
@@ -202,7 +88,7 @@ def test_fit_succeeds_and_returns_wls_results(dataset):
     assert isinstance(res, WLSResults)
 
 
-# ── API構造 ──────────────────────────────────────────────────────
+# ── API構造 ───────────────────────────────────────────────────────────
 
 
 def test_params_table_structure(dataset):
@@ -256,7 +142,7 @@ def test_n_obs_and_dep_var_name(dataset):
     assert res.dep_var_name == "y"
 
 
-# ── オプションの反映（OLSと同じ観点、共通化された経路の検証） ──────
+# ── オプションの反映 ──────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize("spelling", CASE_SPELLINGS)
@@ -382,7 +268,9 @@ def test_hac_time_reorders_rows_before_computing_lags():
         )
 
 
-# ── predict() ────────────────────────────────────────────────────
+# ── predict() ─────────────────────────────────────────────────────────
+
+
 #
 # 重み=1でのOLSとの一致は「OLSとの不変条件回帰テスト」節
 # （test_weight_one_matches_ols_predict）で確認済み。ここでは重みが
@@ -460,7 +348,7 @@ def test_predict_returns_list_of_floats(dataset):
     assert all(isinstance(value, float) for value in predicted)
 
 
-# ── augment() ────────────────────────────────────────────────────
+# ── augment() ─────────────────────────────────────────────────────────
 
 
 def test_augment_none_returns_training_data_with_predicted_column(dataset):
@@ -545,7 +433,126 @@ def test_augment_without_intercept_matches_predict():
     assert augmented_new["predicted"].to_list() == expected_new
 
 
-# ── HACの実使用ラグ数（hac_lags_used）─────────────────────────────
+# ── OLSとの不変条件回帰テスト ─────────────────────────────────────────
+
+
+#
+# 内部実装（sqrt(w)変換方式か将来別方式に変わるか等）が変わっても壊れないよう、
+# public API経由でのみ比較する。
+#
+# WLSとOLSで計算経路が異なる統計量（r_squared・残差・予測値等）は、加算順序に
+# 由来する丸め誤差レベルでの一致を、相対誤差なし（rtol=0）の絶対誤差で確認する。
+_assert_rounding_close = partial(
+    assert_close, rtol=0.0, atol=TOLERANCES["wls_api"]["atol_ols_invariant"]
+)
+
+
+@pytest.mark.parametrize(
+    "option_kwargs",
+    [
+        {},
+        {"cov_type": "hc3"},
+        {"cov_type": "cluster", "cluster": "cluster"},
+        {"include_intercept": False},
+    ],
+)
+def test_weight_one_matches_ols(dataset, option_kwargs):
+    """重み=1のときWLSの結果がOLSの結果と完全一致すること。
+
+    params/std_errors/test_stats/p_values/conf_int/F統計量/n_obsは、WLSがOLSソルバーを`sqrt(weight)`変換した
+    データにそのまま適用する実装であるため（weight=1なら変換が恒等写像になる）
+    厳密な`==`で一致する。r_squared・log_likelihood（→aic/bic）・残差は、
+    WLS側で元スケールのy・weightsから独立に計算し直す実装のため、加算順序
+    等に由来する浮動小数点誤差レベルの差が生じうる（`engine/src/linear/wls.rs`
+    の対応するRust単体テストで確認済みの挙動）。
+
+    `OLSOptions`/`WLSOptions`はフィールド構成が同一の独立クラスのため、
+    同じ`option_kwargs`からそれぞれ構築して`OLS`/`WLS`に渡す。
+    """
+    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+
+    ols_res = OLS(
+        df, y="y", x=["x1", "x2"], options=OLSOptions(**option_kwargs)
+    ).fit()
+    wls_res = WLS(
+        df,
+        y="y",
+        x=["x1", "x2"],
+        weight="weight",
+        options=WLSOptions(**option_kwargs),
+    ).fit()
+
+    assert wls_res.param_names == ols_res.param_names
+    for name in ols_res.param_names:
+        assert wls_res.params[name] == ols_res.params[name], name
+        assert wls_res.std_errors[name] == ols_res.std_errors[name], name
+        assert wls_res.test_stats[name] == ols_res.test_stats[name], name
+        assert wls_res.p_values[name] == ols_res.p_values[name], name
+        assert wls_res.conf_int[name] == ols_res.conf_int[name], name
+
+    assert wls_res.f_statistic == ols_res.f_statistic
+    assert wls_res.f_p_value == ols_res.f_p_value
+    assert wls_res.n_obs == ols_res.n_obs
+    assert wls_res.dep_var_name == ols_res.dep_var_name
+    assert wls_res.cov_type == ols_res.cov_type
+
+    for stat in ("r_squared", "adj_r_squared", "log_likelihood", "aic", "bic"):
+        _assert_rounding_close(
+            getattr(wls_res, stat), getattr(ols_res, stat), stat
+        )
+    for i, (wls_r, ols_r) in enumerate(
+        zip(wls_res.residuals, ols_res.residuals)
+    ):
+        _assert_rounding_close(wls_r, ols_r, f"residuals[{i}]")
+
+
+def test_weight_one_matches_ols_params_table(dataset):
+    """params_table()の内容もOLSと一致すること（辞書系プロパティ以外の確認）。"""
+    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+
+    ols_table = OLS(df, y="y", x=["x1", "x2"]).fit().params_table()
+    wls_table = (
+        WLS(df, y="y", x=["x1", "x2"], weight="weight").fit().params_table()
+    )
+
+    assert [row["param_name"] for row in wls_table] == [
+        row["param_name"] for row in ols_table
+    ]
+    for wls_row, ols_row in zip(wls_table, ols_table):
+        assert wls_row["param"] == ols_row["param"]
+        assert wls_row["std_error"] == ols_row["std_error"]
+
+
+def test_weight_one_matches_ols_predict(dataset):
+    """重み=1のとき、`predict()`（学習データ・新規データいずれも）が
+    OLSの`predict()`と一致すること（予測値は重みに関与しない、
+    という設計の帰結を確認する）。
+
+    学習データ（`new_data=None`）の計算経路自体はwls.rs（手動ループ、
+    `original_scale_fitted_and_residuals`）とols.rs（faerの行列演算、
+    `OlsEstimator::fitted_values`）で異なるため、丸め誤差レベルでの一致を
+    確認する（`test_residuals_are_original_scale_not_weighted`と同じ理由）。
+    一方、新規データに対する予測は両者とも同じ純粋関数
+    `engine::linear::ols::predict_new_data`を呼ぶため、厳密な`==`で一致する。
+    """
+    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+
+    ols_res = OLS(df, y="y", x=["x1", "x2"]).fit()
+    wls_res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
+
+    for i, (wls_val, ols_val) in enumerate(
+        zip(wls_res.predict(), ols_res.predict())
+    ):
+        _assert_rounding_close(wls_val, ols_val, f"predict()[{i}]")
+
+    new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
+    for wls_val, ols_val in zip(
+        wls_res.predict(new_data), ols_res.predict(new_data)
+    ):
+        assert wls_val == ols_val
+
+
+# ── HACの実使用ラグ数（hac_lags_used） ────────────────────────────────
 
 
 @pytest.mark.parametrize("n", HAC_AUTO_LAG_SAMPLE_SIZES)

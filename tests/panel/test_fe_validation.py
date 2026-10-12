@@ -41,7 +41,10 @@ from econometricsmodels import FE, ComputationError, FEOptions, ValidationError
 # 同じ全cov_type網羅、hc0はFE非対応のため除く）。
 COV_TYPES = ["classical", "hc1", "hc2", "hc3", "cluster"]
 
-# ── ValidationError（変数ロールの重複） ────────────────────────────
+
+# ── ValidationError（入力データ: 変数ロールの重複） ───────────────────
+
+
 #
 # `roles = [("y", Single), ("entity", Single), ("time", Single)?, ("x", Multi)]`
 # の並びに沿って、後方のロールほど先に検証される総当たり
@@ -196,7 +199,7 @@ def test_x_empty_raises(fe_dataset):
         FE(fe_dataset, y="y", x=[], entity="entity").fit()
 
 
-# ── ValidationError（列の存在・欠損値） ────────────────────────────
+# ── ValidationError（入力データ: 列の存在・欠損値） ───────────────────
 
 
 def test_data_not_polars_raises():
@@ -338,7 +341,7 @@ def test_cluster_null_values_raise():
         FE(df, y="y", x=["x1"], entity="entity", options=options).fit()
 
 
-# ── ValidationError（自由度不足） ────────────────────────────────────
+# ── ValidationError（入力データ: 自由度不足） ─────────────────────────
 
 
 def test_insufficient_degrees_of_freedom_one_way_raises():
@@ -416,7 +419,7 @@ def test_insufficient_degrees_of_freedom_two_way_raises():
         ).fit()
 
 
-# ── ValidationError（singleton group・不均衡パネル・分散ゼロ） ────────
+# ── ValidationError（入力データ: singleton group・不均衡パネル・分散ゼロ） ────
 
 
 def test_singleton_entity_raises():
@@ -482,7 +485,7 @@ def test_zero_variance_after_demeaning_raises():
         FE(df, y="y", x=["x1", "x2", "x_invariant"], entity="entity").fit()
 
 
-# ── ValidationError（オプション） ──────────────────────────────────
+# ── ValidationError（オプション） ─────────────────────────────────────
 
 
 @pytest.mark.parametrize("cov_type", ["invalid", "", "hac"])
@@ -711,55 +714,6 @@ def test_two_group_split_with_broken_pattern_is_accepted(options):
     assert res.std_errors["x"] > 1e-8
 
 
-# ── ComputationError ──────────────────────────────────────────────
-
-
-def test_perfect_multicollinearity_raises_computation_error(fe_dataset):
-    """`x3 = 2*x1 + 3*x2`はwithin変換後も線形従属のまま残るため、委譲先の
-    within回帰（`OlsEstimator`）が特異行列を検出し`ComputationError`
-    （`PanelError::WithinRegressionFailed`）。完全な多重共線性は数値比較の
-    対象外（`testing-policy.md`「テストの3系統」）で、想定エラーの送出のみ
-    確認する。
-    """
-    df = fe_dataset.with_columns(
-        (2 * pl.col("x1") + 3 * pl.col("x2")).alias("x3")
-    )
-    with pytest.raises(ComputationError):
-        FE(df, y="y", x=["x1", "x2", "x3"], entity="entity").fit()
-
-
-@pytest.mark.parametrize("cov_type", COV_TYPES)
-def test_scale_variance_raises_computation_error(fe_dataset, cov_type):
-    """変数間のスケールが極端に異なる設計行列（x1を`*1e6`、x2を`*1e-3`）は、
-    傾き係数の共分散部分行列がスケール比の2乗相当の条件数を持ち倍精度浮動
-    小数点の限界を超えて数値的に特異になり、`wald_f_test`が検出して
-    `ComputationError`（`PanelError::FTestFailed`、OLSの同名テストと同じ
-    原理）。G=40>>q=2のため`test_cluster_count_at_most_slopes_raises_
-    validation_error`（G<=q、`ValidationError`）とは別の失敗経路の
-    backstop確認になる。
-    """
-    df = fe_dataset.with_columns(
-        (pl.col("x1") * 1e6).alias("x1"), (pl.col("x2") * 1e-3).alias("x2")
-    )
-    options = FEOptions(cov_type=cov_type)
-    with pytest.raises(ComputationError):
-        FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
-
-
-# ── 例外クラスの継承 ──────────────────────────────────────────────
-
-
-def test_validation_error_is_value_error():
-    assert issubclass(ValidationError, ValueError)
-
-
-def test_computation_error_is_runtime_error():
-    assert issubclass(ComputationError, RuntimeError)
-
-
-# ── ValidationError（使われないオプション） ─────────────────────────
-
-
 @pytest.mark.parametrize(
     ("cov_type", "option", "value", "condition"),
     [
@@ -798,3 +752,49 @@ def test_unknown_cov_type_is_reported_before_unused_option(fe_dataset):
         match=escaped(msgs.UNKNOWN_COV_TYPE_FE, other="dkk"),
     ):
         our_fit(fe_dataset, options=options)
+
+
+# ── ComputationError ──────────────────────────────────────────────────
+
+
+def test_perfect_multicollinearity_raises_computation_error(fe_dataset):
+    """`x3 = 2*x1 + 3*x2`はwithin変換後も線形従属のまま残るため、委譲先の
+    within回帰（`OlsEstimator`）が特異行列を検出し`ComputationError`
+    （`PanelError::WithinRegressionFailed`）。完全な多重共線性は数値比較の
+    対象外（`testing-policy.md`「テストの3系統」）で、想定エラーの送出のみ
+    確認する。
+    """
+    df = fe_dataset.with_columns(
+        (2 * pl.col("x1") + 3 * pl.col("x2")).alias("x3")
+    )
+    with pytest.raises(ComputationError):
+        FE(df, y="y", x=["x1", "x2", "x3"], entity="entity").fit()
+
+
+@pytest.mark.parametrize("cov_type", COV_TYPES)
+def test_scale_variance_raises_computation_error(fe_dataset, cov_type):
+    """変数間のスケールが極端に異なる設計行列（x1を`*1e6`、x2を`*1e-3`）は、
+    傾き係数の共分散部分行列がスケール比の2乗相当の条件数を持ち倍精度浮動
+    小数点の限界を超えて数値的に特異になり、`wald_f_test`が検出して
+    `ComputationError`（`PanelError::FTestFailed`、OLSの同名テストと同じ
+    原理）。G=40>>q=2のため`test_cluster_count_at_most_slopes_raises_
+    validation_error`（G<=q、`ValidationError`）とは別の失敗経路の
+    backstop確認になる。
+    """
+    df = fe_dataset.with_columns(
+        (pl.col("x1") * 1e6).alias("x1"), (pl.col("x2") * 1e-3).alias("x2")
+    )
+    options = FEOptions(cov_type=cov_type)
+    with pytest.raises(ComputationError):
+        FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
+
+
+# ── 例外クラスの継承 ──────────────────────────────────────────────────
+
+
+def test_validation_error_is_value_error():
+    assert issubclass(ValidationError, ValueError)
+
+
+def test_computation_error_is_runtime_error():
+    assert issubclass(ComputationError, RuntimeError)

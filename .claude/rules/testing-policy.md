@@ -65,15 +65,18 @@ Issue番号・内部管理ドキュメント（`docs/planning/specs/`配下の�
 
 - **ファイル = 結果別**:
   - `_api.py`: 成功パスの構造・結果型・オプション反映。
-  - `_validation.py`: `ValidationError`/`ComputationError`パス。入力・オプションを弾くテストは、拒否する別名の確認（`cov_type="nonrobust"`の拒否等）も含めてこちらに置く。
+  - `_validation.py`: `ValidationError`/`ComputationError`の境界を確認するテスト。入力・オプションを弾くテストは、拒否する別名の確認（`cov_type="nonrobust"`の拒否等）も含めてこちらに置く。境界の反対側の成功パス（分離と誤検出しない、境界ちょうどで収束する等）も、境界のテストと対にして同じ見出しの下に置く（離すと、境界のどちら側を何が守っているかが読み取れなくなるため）。
   - `_reference.py`: 主リファレンス（statsmodels/linearmodels/R `AER`等）との数値照合。
   - `_crosscheck.py`: 独立実装（R）との数値照合。
-- **見出し = 機能別**（`# ── predict() ──`のようなセクション見出し）。`_api.py`は「成功パス・結果型」「API構造」「オプションの反映」「predict()」「augment()」…、`_validation.py`は「ValidationError（入力データ）」「ValidationError（predict()のnew_data）」「ValidationError（augment()）」「ValidationError（オプション）」「ValidationError（marginal_effects()）」「ComputationError」の順に並べる。1ファイルが大きくなっても、見出しの軸（機能別）を結果別に変えない。
+- **見出し = 機能別**（`# ── predict() ──`のようなセクション見出し）。見出しの文言と並び順は次のとおりに揃える（該当する機能がある手法のみ）。見出しの罫線は表示幅72桁にそろえる。1ファイルが大きくなっても、見出しの軸（機能別）を結果別に変えない。
+  - `_api.py`: 「成功パス・結果型」「API構造」「オプションの反映」「predict()」「augment()」「pred_table()」「censoring_fit_check()」「marginal_effects()」の順。手法固有の見出し（`fixed_effects()`・ハウスマン検定・OLSとの不変条件・`hac_lags_used`等）はこれらの後ろに置く。
+  - `_validation.py`: 「ValidationError（入力データ）」「ValidationError（predict()のnew_data）」「ValidationError（augment()）」「ValidationError（オプション）」「ValidationError（marginal_effects()）」「ComputationError」「例外クラスの継承」の順。入力データを主題で分ける場合は「ValidationError（入力データ: 重み列）」のように`入力データ:`に続けて主題を書く。「使われないオプション」は「ValidationError（オプション）」の下に置く。
+- **主題別ファイル**: 上記4種類に収まらない大きな主題（White検定などの事後診断、二元配置、Mundlak、第一段階回帰、GMM等）は、`test_<手法>_<主題>.py`として別ファイルにしてよい。その中でも、数値照合と構造・エラーの区別は上のファイル分割に倣う。
 - **`include_intercept=False`の置き場**: `_api.py`には構造・配線（`param_names`に`const`が出ない、`df_model`、収束）だけを置き、statsmodels/R/linearmodelsとの数値照合は凍結フィクスチャを使う`_reference.py`/`_crosscheck.py`に置く。`predict()`/`augment()`のように独立したAPI面のスモーク級照合に限り、`_api.py`でライブstatsmodels照合を行ってよい（各`_api.py`のモジュールdoc参照）。
 - **文字列オプションの大文字小文字**: `cov_type`・`gmm_weight_type`は、各手法が受け付ける全ての値について、`tests/_helpers.py`の`CASE_SPELLINGS`（小文字・全大文字・先頭のみ大文字・大小交互）×値の網羅で`test_cov_type_is_case_insensitive`等に集約する。`res.<オプション>`が正規形（小文字）で返ることと、全ての綴りで正規形と同一の推定結果になること（`_assertions.assert_same_estimates`）を確認し、ラベルだけを見る別テストは作らない。クラスターが必要な値（`cluster`）は専用データを使う引数にして同じテストに含める。
 - **共通の命名**: 結果型は`test_fit_succeeds_and_returns_<手法>_results`、件数・被説明変数名は`test_n_obs_and_dep_var_name`（FE/REは`n_entities`も確認するため`test_n_obs_dep_var_name_and_n_entities`）。
 - **solverの収束**: `_api.py`のsolver別テストは`converged`のみを確認する（最尤解との一致は`_reference.py`が厳しい許容誤差で担う）。
-- **数値の比較**: `assert abs(...) < tol`や`pytest.approx`を直書きせず、`_assertions.assert_close`（`label`を渡せる）を使う。許容誤差は`_tolerances.py`の値か、`functools.partial`で束縛した定数にする。
+- **数値の比較**: `assert abs(...) < tol`や`pytest.approx`を直書きせず、`_assertions.assert_close`（`label`を渡せる）を使う。許容誤差のリテラルを直書きせず、`_tolerances.py`の`TOLERANCES`に実測の最大差とマージンの根拠をコメントして置き、`functools.partial`で束縛して使う（本実装内の不変条件の比較は`<手法>_api`のキー）。
 - **docstring**: 現在の挙動と理由だけを書く。「従来は〜だった」「〜に統合した」のような変更履歴、レビュー指摘・ユーザー確認の記録は書かない（経緯はgit logが持つ）。回帰ガードとして「過去にこの入力で〜が起きた」ことが、そのテストの存在理由を説明する場合に限り、理由として残してよい。シナリオの件数は書かず、`NUMERIC_SCENARIOS`のように定数名で参照する。
 
 ## engine（Rust）のカバレッジ方針

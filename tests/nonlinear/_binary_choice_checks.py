@@ -1470,9 +1470,9 @@ def check_mroz_cluster_cov_type_raises_validation_error(
     mrozの`city`（都市部居住ダミー、484/269の2値）はG=2、`MROZ_X`は7変数なので
     `G=2 <= q=7`。`rank(Ŝ) <= G-1`のためクラスターロバスト共分散が退化するため、
     `fit()`冒頭のバリデーションが`ValidationError`
-    （`CommonError::InsufficientClustersForInference`）で弾く。従来はLogit/Probitが
-    この縮退した共分散から読んだSEを無警告で返していた（silent-pass、実質バグ。
-    数値照合フィクスチャ`mroz/cluster`を持っていたが、この対応で削除）。
+    （`CommonError::InsufficientClustersForInference`）で弾く。縮退した共分散から
+    読んだSEを無警告で返す（silent-pass）ことを防ぐため、数値照合フィクスチャ
+    `mroz/cluster`は持たない。
     """
     df = load_wooldridge_dataset("mroz")
     options = options_cls(cov_type="cluster", cluster="city")

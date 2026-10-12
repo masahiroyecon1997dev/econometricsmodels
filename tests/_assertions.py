@@ -2,9 +2,9 @@
 
 主リファレンス（statsmodels/linearmodels）との数値比較テスト6ファイル
 （`test_ols_reference.py`/`test_wls_reference.py`/`test_logit_reference.py`/
-`test_probit_reference.py`/`test_iv_reference.py`/`test_iv_gmm_reference.py`）で
-バイト単位同一だった`_assert_close`/`_assert_dict_close`/`_rename`と、
-Logit/Probitの`_check_margeff`（reference版）を集約する。
+`test_probit_reference.py`/`test_iv_reference.py`/`test_iv_gmm_reference.py`）が
+共有する`assert_close`/`assert_dict_close`/`rename_intercept`と、
+Logit/Probitの`check_margeff`（reference版）を置く。
 
 crosscheck系（`test_*_crosscheck.py`）は`test_ols_crosscheck.py`/
 `test_wls_crosscheck.py`/`test_iv_crosscheck.py`がこのモジュールの
@@ -13,12 +13,11 @@ crosscheck系（`test_*_crosscheck.py`）は`test_ols_crosscheck.py`/
 `assert_close`/`assert_dict_close`は独自実装のままだが、限界効果は
 `check_margeff`（`rtol_conf_int`/`atol_p_value`で統計量別の許容誤差を指定）を
 共有している。`_check_result`は手法ごとに検証するフィールド自体が異なるため、
-いずれもこのモジュールには含めない（Logit/Probit間では検証フィールドが同一
-だったため、両者の`_check_result`は`tests/nonlinear/_binary_choice_checks.py`
-の`check_result`に集約済み）。
+いずれもこのモジュールには含めない（Logit/Probit間では検証フィールドが同一の
+ため、両者の`_check_result`は`tests/nonlinear/_binary_choice_checks.py`の
+`check_result`にまとめている）。
 
-`MARGEFF_AT`定数は`_constants.py`に分離済み（ファイル名が関数
-〔アサーション〕を示唆するのに定数も同居していたための整理）。
+`MARGEFF_AT`定数は`_constants.py`に置く。
 """
 
 from __future__ import annotations

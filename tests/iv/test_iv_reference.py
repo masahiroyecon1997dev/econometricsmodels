@@ -15,10 +15,9 @@ classical/HC0/HC1/HAC（+クラスター、baselineのみ）で、係数・標�
     - GMM の独立実装（R `momentfit`）とのクロスチェック: `test_iv_gmm_crosscheck.py`
 
 Note:
-    - `estimator="gmm"`はこのフィクスチャの対象外（フィクスチャ生成時点で
-      `estimator="gmm"`を含まないため、`benchmark/iv/fixtures/
-      generate_iv_fixtures.py`のモジュールdocコメント参照）。GMMのlinearmodels
-      （`IVGMM`）との照合は`test_iv_gmm_reference.py`。
+    - `estimator="gmm"`はこのフィクスチャの対象外（2SLSのみを生成する。
+      `benchmark/iv/fixtures/generate_iv_fixtures.py`のモジュールdocコメント参照）。
+      GMMのlinearmodels（`IVGMM`）との照合は`test_iv_gmm_reference.py`。
     - `hc2`/`hc3`は`linearmodels`固有の制約により対象外（`linearmodels.iv.covariance`が
       hc2/hc3相当の実装を持たないため、`iv.json`の`_meta.note`参照）。ただし
       「参照実装が無い」わけではない——R `ivreg`+`sandwich::vcovHC`では検証可能なことを
@@ -411,4 +410,4 @@ def test_no_intercept_cluster_matches_linearmodels(fixtures):
 
 
 # 完全な多重共線性・極端なスケール差（`ComputationError` パス）は
-# `test_iv_validation.py` へ移設（4分割）。
+# `test_iv_validation.py`で確認する。

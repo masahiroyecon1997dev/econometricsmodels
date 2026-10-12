@@ -46,7 +46,9 @@ from _error_messages import escaped
 from _re_helpers import our_fit_re
 from econometricsmodels import RE, ComputationError, REOptions, ValidationError
 
-# ── ValidationError（変数ロールの重複） ────────────────────────────
+# ── ValidationError（入力データ: 変数ロールの重複） ───────────────────
+
+
 #
 # `validation.rs`はFE/RE共通のためメッセージ文言も完全に同一
 # （`test_fe_validation.py`と対照）。
@@ -203,7 +205,7 @@ def test_x_empty_raises(fe_dataset):
         RE(fe_dataset, y="y", x=[], entity="entity").fit()
 
 
-# ── ValidationError（列の存在・欠損値） ────────────────────────────
+# ── ValidationError（入力データ: 列の存在・欠損値） ───────────────────
 
 
 def test_data_not_polars_raises():
@@ -357,7 +359,7 @@ def test_cluster_null_values_raise():
         RE(df, y="y", x=["x1"], entity="entity", options=options).fit()
 
 
-# ── ValidationError（singleton・分散成分推定の失敗） ─────────────────
+# ── ValidationError（入力データ: singleton・分散成分推定の失敗） ──────
 
 
 def test_singleton_entity_raises():
@@ -416,7 +418,7 @@ def test_quasi_demeaned_regression_fails_when_sigma2_eps_is_zero():
         RE(df, y="y", x=["x1"], entity="entity").fit()
 
 
-# ── ValidationError（オプション） ──────────────────────────────────
+# ── ValidationError（オプション） ─────────────────────────────────────
 
 
 @pytest.mark.parametrize("cov_type", ["invalid", "", "hac"])
@@ -556,7 +558,40 @@ def test_dk_periods_at_most_hausman_slopes_raises_validation_error():
         RE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 
 
-# ── ComputationError ──────────────────────────────────────────────
+@pytest.mark.parametrize(
+    ("cov_type", "option", "value", "condition"),
+    [
+        ("classical", "cluster", "entity", 'cov_type="cluster"'),
+        ("dk", "cluster", "entity", 'cov_type="cluster"'),
+        ("cluster", "dk_bandwidth", 2, 'cov_type="dk"'),
+        ("classical", "dk_time", "time", 'cov_type="dk"'),
+        ("cluster", "dk_time", "time", 'cov_type="dk"'),
+    ],
+)
+def test_option_unused_by_cov_type_raises(
+    fe_dataset, cov_type, option, value, condition
+):
+    """選んだ`cov_type`で使われない`cluster`/`dk_bandwidth`/`dk_time`が指定されたら
+    黙って無視せず`ValidationError`（`dk_time`はDriscoll-Kraay HACの時点列専用で、
+    ハウスマン検定には影響しない）。
+    """
+    # dkは時点列(`dk_time`)が必須なので、他のオプションの検証だけを見るため添える。
+    extra = {"dk_time": "time"} if cov_type == "dk" else {}
+    options = REOptions(cov_type=cov_type, **extra, **{option: value})
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.UNUSED_OPTION, option=option, condition=condition),
+    ):
+        our_fit_re(fe_dataset, options=options)
+
+
+@pytest.mark.parametrize("cov_type", ["dk", "DK"])
+def test_dk_bandwidth_used_by_dk_is_accepted(fe_dataset, cov_type):
+    options = REOptions(cov_type=cov_type, dk_time="time", dk_bandwidth=1)
+    our_fit_re(fe_dataset, options=options)
+
+
+# ── ComputationError ──────────────────────────────────────────────────
 
 
 def test_perfect_multicollinearity_raises_computation_error(fe_dataset):
@@ -591,7 +626,7 @@ def test_scale_variance_raises_computation_error(fe_dataset, cov_type):
         RE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 
 
-# ── 例外クラスの継承 ──────────────────────────────────────────────
+# ── 例外クラスの継承 ──────────────────────────────────────────────────
 
 
 def test_validation_error_is_value_error():
@@ -600,39 +635,3 @@ def test_validation_error_is_value_error():
 
 def test_computation_error_is_runtime_error():
     assert issubclass(ComputationError, RuntimeError)
-
-
-# ── ValidationError（使われないオプション） ─────────────────────────
-
-
-@pytest.mark.parametrize(
-    ("cov_type", "option", "value", "condition"),
-    [
-        ("classical", "cluster", "entity", 'cov_type="cluster"'),
-        ("dk", "cluster", "entity", 'cov_type="cluster"'),
-        ("cluster", "dk_bandwidth", 2, 'cov_type="dk"'),
-        ("classical", "dk_time", "time", 'cov_type="dk"'),
-        ("cluster", "dk_time", "time", 'cov_type="dk"'),
-    ],
-)
-def test_option_unused_by_cov_type_raises(
-    fe_dataset, cov_type, option, value, condition
-):
-    """選んだ`cov_type`で使われない`cluster`/`dk_bandwidth`/`dk_time`が指定されたら
-    黙って無視せず`ValidationError`（`dk_time`はDriscoll-Kraay HACの時点列専用で、
-    ハウスマン検定には影響しない）。
-    """
-    # dkは時点列(`dk_time`)が必須なので、他のオプションの検証だけを見るため添える。
-    extra = {"dk_time": "time"} if cov_type == "dk" else {}
-    options = REOptions(cov_type=cov_type, **extra, **{option: value})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.UNUSED_OPTION, option=option, condition=condition),
-    ):
-        our_fit_re(fe_dataset, options=options)
-
-
-@pytest.mark.parametrize("cov_type", ["dk", "DK"])
-def test_dk_bandwidth_used_by_dk_is_accepted(fe_dataset, cov_type):
-    options = REOptions(cov_type=cov_type, dk_time="time", dk_bandwidth=1)
-    our_fit_re(fe_dataset, options=options)

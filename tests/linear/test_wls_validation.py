@@ -32,7 +32,7 @@ from econometricsmodels import (
 from benchmark.linear.constants import HAC_MAXLAGS
 from benchmark.linear.fixtures.generate_wls_fixtures import COV_TYPES
 
-# ── ValidationError（重み列固有） ─────────────────────────────────
+# ── ValidationError（入力データ: 重み列） ─────────────────────────────
 
 
 def test_missing_weight_column_raises(dataset):
@@ -118,7 +118,7 @@ def test_null_weight_raises(dataset):
         WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
 
 
-# ── ValidationError（入力データ、OLSと共通の検証） ───────────────
+# ── ValidationError（入力データ） ─────────────────────────────────────
 
 
 def test_y_in_x_raises(dataset):
@@ -273,9 +273,7 @@ def test_null_values_raise():
 def test_non_finite_values_raise():
     """`y`/`x`にNaN・無限大が含まれる場合`ValidationError`
     （OLSと同じ検証、`test_ols_validation.py::test_non_finite_values_raise`
-    参照。`weight`列自体のNaN検証は`test_nan_weight_raises`が対象。
-    `weight`列は既に分割済みなのに`y`/`x`列本体は未検証という非対称の
-    解消に対応する。
+    参照。`weight`列自体のNaN検証は`test_nan_weight_raises`が対象）。
     """
     df_y_nan = pl.DataFrame(
         {
@@ -354,7 +352,7 @@ def test_non_numeric_dtype_raises():
         WLS(df, y="y", x=["x1"], weight="weight").fit()
 
 
-# ── ValidationError（predict()、OLSと共通の検証） ─────────────────
+# ── ValidationError（predict()のnew_data） ────────────────────────────
 
 
 def test_predict_missing_column_raises(dataset):
@@ -411,7 +409,7 @@ def test_predict_null_or_non_finite_values_raise(dataset):
         res.predict(new_data_inf)
 
 
-# ── ValidationError（augment()、OLSと共通の検証） ─────────────────
+# ── ValidationError（augment()） ──────────────────────────────────────
 
 
 def test_augment_column_collision_raises(dataset):
@@ -451,7 +449,7 @@ def test_augment_missing_column_raises(dataset):
         res.augment(new_data)
 
 
-# ── ValidationError（オプション、OLSと共通化された経路） ─────────
+# ── ValidationError（オプション） ─────────────────────────────────────
 
 
 @pytest.mark.parametrize("cov_type", ["invalid", ""])
@@ -573,66 +571,6 @@ def test_cluster_count_at_most_slopes_raises_validation_error(n_groups):
         ).fit()
 
 
-# ── ComputationError ──────────────────────────────────────────────
-
-
-def test_perfect_multicollinearity_raises_computation_error():
-    """完全な多重共線性は数値比較の対象外（`testing-policy.md`「テストの3系統」）。
-    想定エラー（`ComputationError`）が発生することのみを確認する
-    （OLS・Logitと同じ凍結CSVパターンに統一）。
-    """
-    df = pl.read_csv(DATA_DIR / "synthetic_perfect_multicollinearity.csv")
-    with pytest.raises(ComputationError):
-        WLS(df, y="y", x=["x1", "x2", "x3"], weight="weight").fit()
-
-
-@pytest.mark.parametrize("cov_type", COV_TYPES)
-def test_scale_variance_raises_computation_error(cov_type):
-    """変数間のスケールが極端に異なる設計行列（x1を`*1e6`、x2を`*1e-3`）は、
-    傾き係数の同時共分散部分行列がスケール比の2乗（≈1e18）相当の条件数を持ち
-    倍精度浮動小数点の限界を超えて数値的に特異になる（OLSと同じ理由、
-    `test_ols_validation.py`参照。WLSでも実測確認済み）。
-    数値比較はせずエラーパスのみ確認する。
-    """
-    df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
-    kwargs = (
-        {"hac_lags": HAC_MAXLAGS, "hac_time": ROW_TIME}
-        if cov_type == "hac"
-        else {}
-    )
-    options = WLSOptions(cov_type=cov_type, **kwargs)
-    with pytest.raises(ComputationError):
-        WLS(
-            with_row_time(df),
-            y="y",
-            x=["x1", "x2", "x3"],
-            weight="weight",
-            options=options,
-        ).fit()
-
-
-def test_scale_variance_cluster_raises_computation_error():
-    """`cluster`も上記`test_scale_variance_raises_computation_error`と同じ
-    backstopの対象。`cov_type="cluster"`は`cluster`列の指定が別途必要なため`COV_TYPES`
-    パラメトライズには含められず、専用テストとして確認する（OLS
-    `test_ols_validation.py`の同名テストと同じ理由）。均等な疑似グループ
-    （行番号%10、`G=10>q=3`）を使い、クラスター数不足による`ValidationError`
-    （`test_cluster_count_at_most_slopes_raises_validation_error`参照）
-    ではなく、傾き係数の共分散部分行列の条件数超過による
-    `ComputationError`が発生することを確認する。
-    """
-    df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
-    df = with_cluster_groups(df, 10)
-    options = WLSOptions(cov_type="cluster", cluster="cluster_group")
-    with pytest.raises(ComputationError):
-        WLS(
-            df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
-        ).fit()
-
-
-# ── ValidationError（使われないオプション） ─────────────────────────
-
-
 @pytest.mark.parametrize(
     ("cov_type", "option", "value", "condition"),
     [
@@ -694,3 +632,60 @@ def test_hac_time_with_tied_values_raises(dataset, time_expr, rows):
         ),
     ):
         WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
+
+
+# ── ComputationError ──────────────────────────────────────────────────
+
+
+def test_perfect_multicollinearity_raises_computation_error():
+    """完全な多重共線性は数値比較の対象外（`testing-policy.md`「テストの3系統」）。
+    想定エラー（`ComputationError`）が発生することのみを確認する
+    （OLS・Logitと同じ凍結CSVパターンに統一）。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_perfect_multicollinearity.csv")
+    with pytest.raises(ComputationError):
+        WLS(df, y="y", x=["x1", "x2", "x3"], weight="weight").fit()
+
+
+@pytest.mark.parametrize("cov_type", COV_TYPES)
+def test_scale_variance_raises_computation_error(cov_type):
+    """変数間のスケールが極端に異なる設計行列（x1を`*1e6`、x2を`*1e-3`）は、
+    傾き係数の同時共分散部分行列がスケール比の2乗（≈1e18）相当の条件数を持ち
+    倍精度浮動小数点の限界を超えて数値的に特異になる（OLSと同じ理由、
+    `test_ols_validation.py`参照。WLSでも実測確認済み）。
+    数値比較はせずエラーパスのみ確認する。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
+    kwargs = (
+        {"hac_lags": HAC_MAXLAGS, "hac_time": ROW_TIME}
+        if cov_type == "hac"
+        else {}
+    )
+    options = WLSOptions(cov_type=cov_type, **kwargs)
+    with pytest.raises(ComputationError):
+        WLS(
+            with_row_time(df),
+            y="y",
+            x=["x1", "x2", "x3"],
+            weight="weight",
+            options=options,
+        ).fit()
+
+
+def test_scale_variance_cluster_raises_computation_error():
+    """`cluster`も上記`test_scale_variance_raises_computation_error`と同じ
+    backstopの対象。`cov_type="cluster"`は`cluster`列の指定が別途必要なため`COV_TYPES`
+    パラメトライズには含められず、専用テストとして確認する（OLS
+    `test_ols_validation.py`の同名テストと同じ理由）。均等な疑似グループ
+    （行番号%10、`G=10>q=3`）を使い、クラスター数不足による`ValidationError`
+    （`test_cluster_count_at_most_slopes_raises_validation_error`参照）
+    ではなく、傾き係数の共分散部分行列の条件数超過による
+    `ComputationError`が発生することを確認する。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
+    df = with_cluster_groups(df, 10)
+    options = WLSOptions(cov_type="cluster", cluster="cluster_group")
+    with pytest.raises(ComputationError):
+        WLS(
+            df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+        ).fit()

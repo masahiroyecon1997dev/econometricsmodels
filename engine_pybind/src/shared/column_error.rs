@@ -16,6 +16,46 @@ use thiserror::Error;
 
 use super::errors::ValidationError;
 
+/// 列の使われ方。dtype不許可・タイムゾーン拒否のメッセージで、使い道と代わりに使える
+/// dtypeを示すために使う。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ColumnRole {
+    /// 値そのものを計算に使う数値の列（`y`・`x`・重み・操作変数等）。
+    Numeric,
+    /// 行の並び順を決めるだけに使う列（HACの`hac_time`）。
+    TimeOrder,
+    /// グループの同一性だけが意味を持つ列（`entity`・`cluster`）。
+    GroupIdentifier,
+    /// 時点を表す列（FE/REの`time`・`dk_time`）。
+    Time,
+}
+
+impl ColumnRole {
+    /// 「cannot be used as a ... column」に入る、使い道の呼び名。
+    fn label(self) -> &'static str {
+        match self {
+            Self::Numeric => "numeric",
+            Self::TimeOrder => "time-order",
+            Self::GroupIdentifier => "group identifier",
+            Self::Time => "time",
+        }
+    }
+
+    /// dtypeを拒否したときに、代わりに使えるdtypeを示す文。
+    fn accepted_dtypes_hint(self) -> &'static str {
+        match self {
+            Self::Numeric => {
+                "use an integer, float, boolean or decimal column (cast it first if it holds numbers)"
+            }
+            Self::TimeOrder => "use an integer, float, Date or Datetime column",
+            Self::GroupIdentifier => {
+                "use an integer, float, string, categorical, boolean, Date or Datetime column"
+            }
+            Self::Time => "use an integer, float, string, categorical, Date or Datetime column",
+        }
+    }
+}
+
 /// 列の抽出・検査で見つかった入力不正。すべて`ValidationError`になる。
 #[derive(Debug, Error)]
 pub(crate) enum ColumnExtractionError {
@@ -49,6 +89,44 @@ pub(crate) enum ColumnExtractionError {
         name: String,
         row: usize,
         value: f64,
+    },
+
+    /// その使われ方では許可していないdtype。`dtype`はPythonの`pl.String`等と同じ呼び名。
+    #[error(
+        "column '{name}' has dtype {dtype}, which cannot be used as a {} column; {}",
+        .role.label(),
+        .role.accepted_dtypes_hint()
+    )]
+    UnsupportedDtype {
+        name: String,
+        dtype: String,
+        role: ColumnRole,
+    },
+
+    /// タイムゾーン付きの`Datetime`（キー列としては拒否する）。
+    #[error(
+        "column '{name}' is a Datetime with time zone '{time_zone}', which cannot be used as a \
+         {} column; remove the time zone first, for example with \
+         .dt.replace_time_zone(None) after converting to the zone you want to keep",
+        .role.label()
+    )]
+    TimeZoneNotSupported {
+        name: String,
+        time_zone: String,
+        role: ColumnRole,
+    },
+
+    /// 時点の順序を決める列に同じ値の行がある。`first_row`・`second_row`は同値の2行（0始まり）。
+    #[error(
+        "column '{name}' has the same value at rows {first_row} and {second_row}. A time-order \
+         column must give every observation a distinct value, because tied observations \
+         cannot be put in time order; make the values distinct, or omit the time-order \
+         option to use the row order of the data"
+    )]
+    TiedValues {
+        name: String,
+        first_row: usize,
+        second_row: usize,
     },
 }
 
@@ -89,6 +167,34 @@ impl ColumnExtractionError {
             value,
         }
     }
+
+    pub(crate) fn unsupported_dtype(name: &str, dtype: String, role: ColumnRole) -> Self {
+        Self::UnsupportedDtype {
+            name: name.to_string(),
+            dtype,
+            role,
+        }
+    }
+
+    pub(crate) fn time_zone_not_supported(
+        name: &str,
+        time_zone: impl std::fmt::Display,
+        role: ColumnRole,
+    ) -> Self {
+        Self::TimeZoneNotSupported {
+            name: name.to_string(),
+            time_zone: time_zone.to_string(),
+            role,
+        }
+    }
+
+    pub(crate) fn tied_values(name: &str, first_row: usize, second_row: usize) -> Self {
+        Self::TiedValues {
+            name: name.to_string(),
+            first_row,
+            second_row,
+        }
+    }
 }
 
 impl From<ColumnExtractionError> for PyErr {
@@ -100,7 +206,10 @@ impl From<ColumnExtractionError> for PyErr {
             | ColumnExtractionError::ConversionFailed { .. }
             | ColumnExtractionError::OrderingFailed { .. }
             | ColumnExtractionError::ContainsNull { .. }
-            | ColumnExtractionError::NonFinite { .. } => ValidationError::new_err(err.to_string()),
+            | ColumnExtractionError::NonFinite { .. }
+            | ColumnExtractionError::UnsupportedDtype { .. }
+            | ColumnExtractionError::TimeZoneNotSupported { .. }
+            | ColumnExtractionError::TiedValues { .. } => ValidationError::new_err(err.to_string()),
         }
     }
 }
@@ -157,6 +266,55 @@ mod tests {
             ColumnExtractionError::non_finite("wage", 0, f64::NEG_INFINITY)
                 .to_string()
                 .contains("(-inf) at row 0")
+        );
+    }
+
+    #[test]
+    fn unsupported_dtype_message_depends_on_the_role() {
+        let message = |role| {
+            ColumnExtractionError::unsupported_dtype("c", "String".to_string(), role).to_string()
+        };
+        assert_eq!(
+            message(ColumnRole::Numeric),
+            "column 'c' has dtype String, which cannot be used as a numeric column; \
+             use an integer, float, boolean or decimal column (cast it first if it holds numbers)"
+        );
+        assert_eq!(
+            message(ColumnRole::TimeOrder),
+            "column 'c' has dtype String, which cannot be used as a time-order column; \
+             use an integer, float, Date or Datetime column"
+        );
+        assert_eq!(
+            message(ColumnRole::GroupIdentifier),
+            "column 'c' has dtype String, which cannot be used as a group identifier column; \
+             use an integer, float, string, categorical, boolean, Date or Datetime column"
+        );
+        assert_eq!(
+            message(ColumnRole::Time),
+            "column 'c' has dtype String, which cannot be used as a time column; \
+             use an integer, float, string, categorical, Date or Datetime column"
+        );
+    }
+
+    #[test]
+    fn time_zone_message_names_the_zone_and_the_remedy() {
+        assert_eq!(
+            ColumnExtractionError::time_zone_not_supported("t", "UTC", ColumnRole::Time)
+                .to_string(),
+            "column 't' is a Datetime with time zone 'UTC', which cannot be used as a time \
+             column; remove the time zone first, for example with .dt.replace_time_zone(None) \
+             after converting to the zone you want to keep"
+        );
+    }
+
+    #[test]
+    fn tied_values_message_names_both_rows() {
+        assert_eq!(
+            ColumnExtractionError::tied_values("t", 1, 3).to_string(),
+            "column 't' has the same value at rows 1 and 3. A time-order column must give \
+             every observation a distinct value, because tied observations cannot be put in \
+             time order; make the values distinct, or omit the time-order option to use the \
+             row order of the data"
         );
     }
 }

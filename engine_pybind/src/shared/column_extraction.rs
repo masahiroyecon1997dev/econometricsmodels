@@ -24,7 +24,7 @@ use pyo3_polars::PyDataFrame;
 use engine::panel::common::TimeKeys;
 use engine::shared::group_codes::GroupCodes;
 
-use super::column_error::ColumnExtractionError;
+use super::column_error::{ColumnExtractionError, ColumnRole};
 use super::errors::{ValidationError, common_error_to_pyerr};
 use crate::panel::common::panel_error_to_pyerr;
 
@@ -162,12 +162,16 @@ fn dtype_label(dtype: &DataType) -> String {
     }
 }
 
-/// `dtype`がf64に変換して使える数値の列かを検査し、そうでなければ`ValidationError`にする。
+/// `dtype`がf64に変換して使える数値の列かを検査し、そうでなければ`UnsupportedDtype`にする。
 ///
 /// 整数・浮動小数・Boolean（`True`=1）・Decimalを許可する。文字列・日付・時刻・カテゴリ等は
 /// キャストで黙って数値になったり欠損値扱いになったりして意図が判定できないため拒否する。
 /// `Null`型（全値が欠損の列）は後続の欠損値チェックで「欠損値を含む」と報告させるため通す。
-fn check_numeric_dtype(name: &str, dtype: &DataType, role: NumericRole) -> PyResult<()> {
+fn check_numeric_dtype(
+    name: &str,
+    dtype: &DataType,
+    role: NumericRole,
+) -> Result<(), ColumnExtractionError> {
     let is_ordering = role == NumericRole::Ordering;
     // `Boolean`は値が2種類しかなく、3行以上では必ず同値ができて順序が定まらないため、
     // 順序づけの列としては拒否する。
@@ -180,18 +184,15 @@ fn check_numeric_dtype(name: &str, dtype: &DataType, role: NumericRole) -> PyRes
     if is_numeric || (is_ordering && is_ordering_extra) {
         return Ok(());
     }
-    let label = dtype_label(dtype);
-    let message = match role {
-        NumericRole::Value => format!(
-            "column '{name}' has dtype {label}, which cannot be used as a numeric column; \
-             use an integer, float, boolean or decimal column (cast it first if it holds numbers)"
-        ),
-        NumericRole::Ordering => format!(
-            "column '{name}' has dtype {label}, which cannot be used as a time-order column; \
-             use an integer, float, Date or Datetime column"
-        ),
+    let column_role = match role {
+        NumericRole::Value => ColumnRole::Numeric,
+        NumericRole::Ordering => ColumnRole::TimeOrder,
     };
-    Err(ValidationError::new_err(message))
+    Err(ColumnExtractionError::unsupported_dtype(
+        name,
+        dtype_label(dtype),
+        column_role,
+    ))
 }
 
 /// `df`から`name`列をf64のVecとして取り出す。
@@ -242,7 +243,7 @@ pub fn extract_time_order_ranks(df: &DataFrame, name: &str) -> PyResult<Vec<f64>
 
     if dtype.is_float() {
         let values = cast_to_finite_f64_values(name, series)?;
-        return strict_ranks(name, &values);
+        return Ok(strict_ranks(name, &values)?);
     }
 
     reject_missing_values(name, series.null_count())?;
@@ -258,7 +259,7 @@ pub fn extract_time_order_ranks(df: &DataFrame, name: &str) -> PyResult<Vec<f64>
         .iter()
         .map(|v| v.expect("null_countチェック済み"))
         .collect();
-    strict_ranks(name, &values)
+    Ok(strict_ranks(name, &values)?)
 }
 
 /// 欠損値（null）が1つでもあれば`ColumnExtractionError::ContainsNull`にする。
@@ -309,16 +310,13 @@ fn cast_to_finite_f64_values(
     Ok(values)
 }
 
-/// `values`の昇順での位置（0始まり）を行ごとに返す。値が重複すれば`ValidationError`。
-fn strict_ranks<T: PartialOrd>(name: &str, values: &[T]) -> PyResult<Vec<f64>> {
-    rank_distinct_values(values).map_err(|(first, second)| {
-        ValidationError::new_err(format!(
-            "column '{name}' has the same value at rows {first} and {second}. A time-order \
-             column must give every observation a distinct value, because tied observations \
-             cannot be put in time order; make the values distinct, or omit the time-order \
-             option to use the row order of the data"
-        ))
-    })
+/// `values`の昇順での位置（0始まり）を行ごとに返す。値が重複すれば`TiedValues`。
+fn strict_ranks<T: PartialOrd>(
+    name: &str,
+    values: &[T],
+) -> Result<Vec<f64>, ColumnExtractionError> {
+    rank_distinct_values(values)
+        .map_err(|(first, second)| ColumnExtractionError::tied_values(name, first, second))
 }
 
 /// `values`の昇順での位置（0始まり）を行ごとに返す。同値の組があれば、同値の行のうち
@@ -410,26 +408,34 @@ enum KeyRole {
     Time,
 }
 
-/// `dtype`がキー列として使えるかを検査し、そうでなければ`ValidationError`にする。
+/// `dtype`がキー列として使えるかを検査し、そうでなければ`ColumnExtractionError`にする。
 ///
 /// 整数・浮動小数・文字列・Categorical/Enum・`Date`・タイムゾーンなしの`Datetime`は両方の
 /// 役割で許可する。`Boolean`は同一性のキーだけで許可する。タイムゾーンなしの`Datetime`は
 /// 文字列表現の桁数が固定のため辞書順が時系列順に一致する。タイムゾーン付きの`Datetime`は
 /// 拒否する（組み込んだpolarsが文字列化できず、夏時間の重複する1時間の順序の問題もあるため）。
 /// `Null`型は後続の欠損値チェックに回す。
-fn check_key_dtype(name: &str, dtype: &DataType, role: KeyRole) -> PyResult<()> {
+///
+/// 許可するdtypeを変えたら、メッセージの案内文（`ColumnRole::accepted_dtypes_hint`）・
+/// `tests/_error_messages.py`・`docs/guide/accepted-data.md`も同時に更新する
+/// （`check_numeric_dtype`も同じ）。
+fn check_key_dtype(
+    name: &str,
+    dtype: &DataType,
+    role: KeyRole,
+) -> Result<(), ColumnExtractionError> {
+    let column_role = match role {
+        KeyRole::Identity => ColumnRole::GroupIdentifier,
+        KeyRole::Time => ColumnRole::Time,
+    };
     // タイムゾーン付きの`Datetime`は、この拡張に組み込んだpolarsがタイムゾーンを扱えず
     // 文字列化に失敗する。原因の分からないエラーにならないよう、対処法を示して拒否する。
     if let DataType::Datetime(_, Some(time_zone)) = dtype {
-        let role_label = match role {
-            KeyRole::Identity => "group identifier",
-            KeyRole::Time => "time",
-        };
-        return Err(ValidationError::new_err(format!(
-            "column '{name}' is a Datetime with time zone '{time_zone}', which cannot be used as a \
-             {role_label} column; remove the time zone first, for example with \
-             .dt.replace_time_zone(None) after converting to the zone you want to keep"
-        )));
+        return Err(ColumnExtractionError::time_zone_not_supported(
+            name,
+            time_zone,
+            column_role,
+        ));
     }
     let common = dtype.is_integer()
         || dtype.is_float()
@@ -448,19 +454,11 @@ fn check_key_dtype(name: &str, dtype: &DataType, role: KeyRole) -> PyResult<()> 
     if common || by_role {
         return Ok(());
     }
-    let label = dtype_label(dtype);
-    let message = match role {
-        KeyRole::Identity => format!(
-            "column '{name}' has dtype {label}, which cannot be used as a group identifier \
-             column; use an integer, float, string, categorical, boolean, Date or Datetime \
-             column"
-        ),
-        KeyRole::Time => format!(
-            "column '{name}' has dtype {label}, which cannot be used as a time column; \
-             use an integer, float, string, categorical, Date or Datetime column"
-        ),
-    };
-    Err(ValidationError::new_err(message))
+    Err(ColumnExtractionError::unsupported_dtype(
+        name,
+        dtype_label(dtype),
+        column_role,
+    ))
 }
 
 /// `df`から`name`列を、同一性だけが意味を持つグループキー（`entity`・`cluster`）として
@@ -836,6 +834,53 @@ mod tests {
         for role in [KeyRole::Identity, KeyRole::Time] {
             assert!(check_key_dtype("k", &aware, role).is_err());
         }
+    }
+
+    #[test]
+    fn check_key_dtype_reports_the_role_of_the_rejected_column() {
+        let aware = DataType::Datetime(TimeUnit::Microseconds, Some(TimeZone::UTC));
+        for (key_role, expected) in [
+            (KeyRole::Identity, ColumnRole::GroupIdentifier),
+            (KeyRole::Time, ColumnRole::Time),
+        ] {
+            assert!(matches!(
+                check_key_dtype("k", &aware, key_role),
+                Err(ColumnExtractionError::TimeZoneNotSupported { role, .. }) if role == expected
+            ));
+            assert!(matches!(
+                check_key_dtype("k", &DataType::Binary, key_role),
+                Err(ColumnExtractionError::UnsupportedDtype { role, .. }) if role == expected
+            ));
+        }
+    }
+
+    #[test]
+    fn check_numeric_dtype_reports_the_role_of_the_rejected_column() {
+        for (numeric_role, expected) in [
+            (NumericRole::Value, ColumnRole::Numeric),
+            (NumericRole::Ordering, ColumnRole::TimeOrder),
+        ] {
+            assert!(matches!(
+                check_numeric_dtype("x", &DataType::String, numeric_role),
+                Err(ColumnExtractionError::UnsupportedDtype { role, .. }) if role == expected
+            ));
+        }
+    }
+
+    #[test]
+    fn strict_ranks_reports_the_tied_rows() {
+        assert!(matches!(
+            strict_ranks("t", &[4, 9, 4]),
+            Err(ColumnExtractionError::TiedValues {
+                first_row: 0,
+                second_row: 2,
+                ..
+            })
+        ));
+        assert_eq!(
+            strict_ranks("t", &[4, 9, 2]).ok(),
+            Some(vec![1.0, 2.0, 0.0])
+        );
     }
 
     #[test]

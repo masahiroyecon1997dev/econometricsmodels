@@ -18,6 +18,7 @@ import _error_messages as msgs
 import pandas as pd
 import polars as pl
 import pytest
+from _assertions import assert_params_table_matches_attributes
 from _constants import DATA_DIR
 from _error_messages import escaped
 from _helpers import heavily_censored_tobit_dataset
@@ -170,6 +171,7 @@ def test_dep_var_name(censored_dataset):
 def test_params_table_structure(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
     table = res.params_table()
+    assert_params_table_matches_attributes(res)
 
     assert isinstance(table, list)
     assert len(table) == 4  # const, x1, x2, sigma
@@ -190,6 +192,10 @@ def test_params_table_structure(censored_dataset):
         "x2",
         "sigma",
     ]
+    # `sigma`は係数ではないが、他の行と同じキーで値が表せる。
+    sigma_row = table[-1]
+    assert sigma_row["param_name"] == "sigma"
+    assert sigma_row["param"] == res.params["sigma"]
 
 
 def test_wald_statistic_and_p_value_are_present(censored_dataset):

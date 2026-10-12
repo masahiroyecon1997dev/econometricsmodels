@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import polars as pl
 import pytest
+from _assertions import assert_params_table_matches_attributes
 from _constants import DATA_DIR
 from _fe_helpers import our_fit
 from _helpers import HAC_AUTO_LAG_SAMPLE_SIZES, hac_lag_panel_frame
@@ -60,6 +61,7 @@ def test_param_names_have_no_intercept(fe_dataset):
 def test_params_table_structure(fe_dataset):
     res = our_fit(fe_dataset)
     table = res.params_table()
+    assert_params_table_matches_attributes(res)
 
     assert isinstance(table, list)
     assert len(table) == 2  # x1, x2

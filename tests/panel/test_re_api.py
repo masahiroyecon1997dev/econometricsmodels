@@ -17,6 +17,7 @@ import math
 
 import polars as pl
 import pytest
+from _assertions import assert_params_table_matches_attributes
 from _constants import DATA_DIR
 from _helpers import HAC_AUTO_LAG_SAMPLE_SIZES, hac_lag_panel_frame
 from _re_helpers import our_fit_re
@@ -74,6 +75,7 @@ def test_param_names_start_with_const(fe_dataset):
 def test_params_table_structure(fe_dataset):
     res = our_fit_re(fe_dataset)
     table = res.params_table()
+    assert_params_table_matches_attributes(res)
 
     assert isinstance(table, list)
     assert len(table) == 3  # const, x1, x2

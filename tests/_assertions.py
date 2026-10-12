@@ -84,7 +84,7 @@ def check_margeff(
     """限界効果6統計量を`at`×係数名の全組み合わせでリファレンスと比較する。
 
     `rtol_conf_int`/`atol_p_value`は信頼区間の相対許容誤差・p値の絶対許容誤差の
-    個別指定（`None`なら`rtol`/`atol`を使う）。係数表の`conf_int`/`p_values`と
+    個別指定（`None`なら`rtol`/`atol`を使う）。パラメータ表の`conf_int`/`p_values`と
     同じく、0に近い境界・裾での誤差増幅に備えるRクロスチェック用。
     """
     rtol_ci = rtol if rtol_conf_int is None else rtol_conf_int
@@ -137,3 +137,27 @@ def check_margeff(
                 rtol=rtol_ci,
                 atol=atol,
             )
+
+
+def assert_params_table_matches_attributes(res) -> None:
+    """`params_table()`の各行が、結果の属性と同じ値を持つこと。
+
+    行キー`param`は名前ではなく値を指す（名前は`param_name`）。行を組み立てる
+    ときの列の取り違え（`param`と`std_error`の入れ替え、`test_stat`と`p_value`
+    の入れ替え等）は、キーの集合と名前の並びだけの検査では見つからないため、
+    属性（`params`・`std_errors`・`test_stats`・`p_values`・`conf_int`）との
+    一致を行ごとに確かめる。Tobitの`sigma`の行も`params`に含まれるため同じ
+    検査で覆う。旧名`coef_table()`が別名として残っていないことも確かめる。
+    """
+    assert not hasattr(res, "coef_table"), "旧名coef_tableは廃止済み"
+    table = res.params_table()
+    assert [row["param_name"] for row in table] == list(res.params)
+    for row in table:
+        name = row["param_name"]
+        assert row["param"] == res.params[name], f"{name}/param"
+        assert row["std_error"] == res.std_errors[name], f"{name}/std_error"
+        assert row["test_stat"] == res.test_stats[name], f"{name}/test_stat"
+        assert row["p_value"] == res.p_values[name], f"{name}/p_value"
+        lower, upper = res.conf_int[name]
+        assert row["conf_lower"] == lower, f"{name}/conf_lower"
+        assert row["conf_upper"] == upper, f"{name}/conf_upper"

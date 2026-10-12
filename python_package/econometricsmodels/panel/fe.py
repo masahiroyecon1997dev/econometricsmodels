@@ -309,7 +309,7 @@ class FEResults:
         Shaped to be usable almost as-is in a REST API response (same
         policy as `OLSResults.params_table()`). Returned as `list[dict]`
         rather than a polars DataFrame, per the project's policy of
-        not using DataFrames for the coefficient table itself.
+        not using DataFrames for the parameter table itself.
 
         Returns:
             A list of dictionaries, one per coefficient. Keys are

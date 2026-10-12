@@ -26,7 +26,7 @@ import numpy as np
 import polars as pl
 import pytest
 import statsmodels.api as sm
-from _assertions import assert_close
+from _assertions import assert_close, assert_params_table_matches_attributes
 from _helpers import (
     HAC_AUTO_LAG_SAMPLE_SIZES,
     ROW_TIME,
@@ -122,6 +122,7 @@ def test_residuals_sum_near_zero(dataset):
 def test_params_table_structure(dataset):
     res = our_fit(dataset)
     table = res.params_table()
+    assert_params_table_matches_attributes(res)
 
     assert isinstance(table, list)
     assert len(table) == 3  # const, x1, x2

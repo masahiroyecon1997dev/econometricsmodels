@@ -32,7 +32,12 @@ import _error_messages as msgs
 import pandas as pd
 import polars as pl
 import pytest
-from _assertions import assert_close, assert_dict_close, check_margeff
+from _assertions import (
+    assert_close,
+    assert_dict_close,
+    assert_params_table_matches_attributes,
+    check_margeff,
+)
 from _assertions import rename_intercept as _rename
 from _constants import APPLE_CLUSTER, APPLE_X, DATA_DIR, MROZ_X
 from _error_messages import escaped
@@ -72,6 +77,7 @@ def check_default_options_use_classical_and_converge(dataset, estimator_cls):
 def check_params_table_structure(dataset, estimator_cls):
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
     table = res.params_table()
+    assert_params_table_matches_attributes(res)
 
     assert isinstance(table, list)
     assert len(table) == 3  # const, x1, x2

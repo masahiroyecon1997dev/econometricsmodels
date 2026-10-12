@@ -30,7 +30,7 @@ class _ConfIntColumns(Protocol):
     def conf_upper(self) -> Sequence[float]: ...
 
 
-class _CoefTableColumns(_ConfIntColumns, Protocol):
+class _ParamsTableColumns(_ConfIntColumns, Protocol):
     @property
     def params(self) -> Sequence[float]: ...
     @property
@@ -87,8 +87,10 @@ def conf_int_by_param(
     }
 
 
-def params_table_rows(raw: _CoefTableColumns) -> list[dict[str, float | str]]:
-    """Build the row-oriented coefficient table.
+def params_table_rows(
+    raw: _ParamsTableColumns,
+) -> list[dict[str, float | str]]:
+    """Build the row-oriented parameter table.
 
     Args:
         raw: A `_lib` result object exposing the coefficient columns.

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import polars as pl
 import pytest
+from _assertions import assert_params_table_matches_attributes
 from _constants import DATA_DIR
 from _helpers import (
     HAC_AUTO_LAG_SAMPLE_SIZES,
@@ -134,6 +135,7 @@ def test_param_names_order(iv_dataset):
 def test_params_table_structure(iv_dataset):
     res = our_fit(iv_dataset)
     table = res.params_table()
+    assert_params_table_matches_attributes(res)
 
     assert isinstance(table, list)
     assert len(table) == 3  # const, x1, endog1

@@ -91,6 +91,54 @@ def test_entity_overlaps_x_raises(fe_dataset):
         RE(fe_dataset, y="y", x=["entity", "x2"], entity="entity").fit()
 
 
+def test_y_overlaps_time_raises(fe_dataset):
+    options = REOptions(time="y")
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.ROLE_OVERLAP_SINGLE_EQUALS_SINGLE,
+            col="y",
+            later_role="time",
+            earlier_role="y",
+        ),
+    ):
+        RE(
+            fe_dataset, y="y", x=["x1", "x2"], entity="entity", options=options
+        ).fit()
+
+
+def test_entity_overlaps_time_raises(fe_dataset):
+    options = REOptions(time="entity")
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.ROLE_OVERLAP_SINGLE_EQUALS_SINGLE,
+            col="entity",
+            later_role="time",
+            earlier_role="entity",
+        ),
+    ):
+        RE(
+            fe_dataset, y="y", x=["x1", "x2"], entity="entity", options=options
+        ).fit()
+
+
+def test_x_overlaps_time_raises(fe_dataset):
+    options = REOptions(time="x1")
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
+            col="x1",
+            single_role="time",
+            multi_role="x",
+        ),
+    ):
+        RE(
+            fe_dataset, y="y", x=["x1", "x2"], entity="entity", options=options
+        ).fit()
+
+
 def test_y_overlaps_dk_time_raises(fe_dataset):
     """`dk_time`ロールは`REOptions.dk_time`設定時のみ存在する。"""
     options = REOptions(dk_time="y")
@@ -200,6 +248,18 @@ def test_missing_entity_column_raises(fe_dataset):
         match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="nonexistent"),
     ):
         RE(fe_dataset, y="y", x=["x1", "x2"], entity="nonexistent").fit()
+
+
+def test_missing_time_column_raises(fe_dataset):
+    """2-way（`REOptions.time`）の時点列が存在しない場合。"""
+    options = REOptions(time="nonexistent")
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="nonexistent"),
+    ):
+        RE(
+            fe_dataset, y="y", x=["x1", "x2"], entity="entity", options=options
+        ).fit()
 
 
 def test_missing_dk_time_column_raises(fe_dataset):

@@ -1,24 +1,29 @@
 """2-way RE（`REOptions.time`、バランスパネル）の構造・API・バリデーションのテスト。
 
-参照実装との網羅的な数値照合（全`cov_type`・不均衡でない複数シナリオ・実データ）は別のテスト
-（plmとの照合）が担う。ここでは、plm（`model = "random"`・`effect = "twoways"`・
-Swamy-Arora）の値を小さなバランスパネルに埋め込んだスモークテストと、`n_periods`・
-Hausman検定・パネルR²・オプションのバリデーションを確認する。
+参照実装（plm）・仕様どおりの手計算との網羅的な数値照合（全`cov_type`・複数シナリオ・
+実データ）は`test_re_two_way_reference.py`が担う。ここでは小さなバランスパネル
+（`re_two_way_small.csv`）で、`n_periods`・自由度・Hausman検定（手計算との照合、クラスター数・
+時点数の境界、`cluster`・`dk_time`の列指定）・分散成分と重みの構造・オプションの
+バリデーションを確認する。
 
 データ（6エンティティ×4時点）: `xi`は個体間でのみ、`xt`は時点間でのみ変わる（どちらも
-RE（2-way）で許容される）。plmの参照値は`y ~ x1 + xi + xt`。
+RE（2-way）で許容される）。
 """
 
 from __future__ import annotations
 
+import json
 import math
+from pathlib import Path
 
 import _error_messages as msgs
 import numpy as np
 import polars as pl
 import pytest
 import statsmodels.api as sm
+from _constants import DATA_DIR
 from _error_messages import escaped
+from _re_oracle import hand_computed
 from econometricsmodels import (
     RE,
     ComputationError,
@@ -26,67 +31,26 @@ from econometricsmodels import (
     ValidationError,
 )
 
-_Y = [
-    2.973, 0.102, -4.005, -1.69, 4.512, 2.697, 1.044, 0.361, 0.457, -1.063,
-    -3.188, -3.244, 2.213, 0.875, -0.479, -2.389, 5.936, 5.314, 2.163, -0.585,
-    2.081, 0.631, -1.679, -4.541,
-]  # fmt: skip
-_X1 = [
-    -0.828, -0.348, -1.538, -0.256, -1.15, 0.012, -0.223, 0.888, -0.592,
-    -0.656, -0.683, -0.016, -0.443, 0.353, 0.073, 0.007, -0.188, -0.766,
-    -0.221, -0.984, -1.104, -0.938, 0.679, -1.577,
-]  # fmt: skip
-_X2 = [
-    -0.256, 0.511, -0.226, -0.315, -0.93, -0.213, 1.112, 0.424, 1.037, 0.249,
-    0.395, 0.185, -1.666, 0.855, 0.506, 0.499, -1.691, -1.744, -0.89, -0.468,
-    0.305, -0.046, 0.521, -0.642,
-]  # fmt: skip
-_XI = [-0.87, 0.485, -0.186, 1.546, -0.611, -0.348]
-_XT = [-1.637, 0.02, 0.892, -0.873]
-
-PLM_PARAMS = {
-    "const": 0.307929272368423,
-    "x1": 0.89132496100334,
-    "xi": -0.195188876604849,
-    "xt": -1.09263770513503,
-}
-PLM_SE = {
-    "classical": [
-        1.26709012892926,
-        0.364650749295775,
-        1.00460548400194,
-        0.959418507617424,
-    ],
-    "cluster": [
-        1.38606716539328,
-        0.352916535514244,
-        0.690856338748332,
-        1.0762204598989,
-    ],
-}
-PLM_F = 2.3413216172082
+_FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "benchmarks"
 
 
 @pytest.fixture(scope="module")
 def panel() -> pl.DataFrame:
-    return pl.DataFrame(
-        {
-            "entity": [f"e{r // 4 + 1}" for r in range(24)],
-            "time": [r % 4 + 1 for r in range(24)],
-            "y": _Y,
-            "x1": _X1,
-            "xi": [_XI[r // 4] for r in range(24)],
-            "xt": [_XT[r % 4] for r in range(24)],
-            "x2": _X2,
-            # 個体平均も時点平均も0の交互作用列。
-            "z": [(r // 4 + 1 - 3.5) * (r % 4 + 1 - 2.5) for r in range(24)],
-            # entityと別のクラスター列（3グループ）。
-            "grp": [f"g{r // 8}" for r in range(24)],
-            # timeと別の並び順の時点列（値の昇順は t = 2, 4, 1, 3）。
-            "dk_perm": [[30, 10, 40, 20][r % 4] for r in range(24)],
-            # 3時点にまとめた時点列。
-            "dk3": [min(r % 4 + 1, 3) for r in range(24)],
-        }
+    """6エンティティ×4時点（`benchmark/panel/datasets.py`の`re_two_way_small_panel`を
+    固定したCSV）に、テスト用の列を足したもの。"""
+    base = pl.read_csv(DATA_DIR / "re_two_way_small.csv")
+    entity_idx = pl.col("entity").str.slice(1).cast(pl.Int64)  # 1〜6
+    return base.with_columns(
+        # 個体平均も時点平均も0の交互作用列。
+        z=(entity_idx - 3.5) * (pl.col("time") - 2.5),
+        # entityと別のクラスター列（3グループ）。
+        grp=pl.format("g{}", (entity_idx - 1) // 2),
+        # timeと別の並び順の時点列（値の昇順は t = 2, 4, 1, 3）。
+        dk_perm=pl.col("time").replace_strict(
+            {1: 30, 2: 10, 3: 40, 4: 20}, return_dtype=pl.Int64
+        ),
+        # 3時点にまとめた時点列。
+        dk3=pl.min_horizontal(pl.col("time"), 3),
     )
 
 
@@ -94,22 +58,16 @@ def _fit(df, options, x=("x1", "xi", "xt")):
     return RE(df, y="y", x=list(x), entity="entity", options=options).fit()
 
 
-@pytest.mark.parametrize("cov_type", ["classical", "cluster"])
-def test_matches_plm_reference_values(panel, cov_type):
-    """係数・標準誤差・F統計量がplmと一致する（一次元でしか変わらない`xi`・`xt`を含む）。"""
-    res = _fit(panel, REOptions(cov_type=cov_type, time="time"))
-
-    for name, value in PLM_PARAMS.items():
-        assert math.isclose(res.params[name], value, rel_tol=1e-6), name
-    for name, value in zip(res.param_names, PLM_SE[cov_type], strict=True):
-        assert math.isclose(res.std_errors[name], value, rel_tol=1e-6), name
-    assert res.df_resid == 20
-    assert res.df_model == 4
-    if cov_type == "classical":
-        assert math.isclose(res.f_statistic, PLM_F, rel_tol=1e-6)
-        assert res.f_df_denom == 20
-    else:
-        assert res.f_df_denom == 5  # G - 1
+def test_two_way_reports_degrees_of_freedom(panel):
+    """`df_resid = n - k`、`df_model = k + 1`（切片込み）。classicalのF検定の
+    分母自由度は`df_resid`、clusterは`G - 1`（plmとの数値照合は
+    `test_re_two_way_reference.py`）。"""
+    classical = _fit(panel, REOptions(cov_type="classical", time="time"))
+    cluster = _fit(panel, REOptions(cov_type="cluster", time="time"))
+    assert classical.df_resid == 20
+    assert classical.df_model == 4
+    assert classical.f_df_denom == 20
+    assert cluster.f_df_denom == 5  # G - 1
 
 
 def test_two_way_reports_n_periods(panel):
@@ -119,98 +77,49 @@ def test_two_way_reports_n_periods(panel):
     assert res.n_entities == 6
 
 
-# Hausman統計量（cov_type順: classical, hc1, hc2, hc3, cluster, dk）。`x1`のみは
-# `plm::phtest(method = "aux", effect = "twoways", vcov = ...)`、`x1 + xi + xt`は
-# plmが係数を位置で選び別の係数を検定するため、手計算の補助回帰（plmの重みで変換）。
 HAUSMAN_COV_TYPES = ["classical", "hc1", "hc2", "hc3", "cluster", "dk"]
-HAUSMAN_X1 = [
-    1.21903853599678,
-    2.28844134052052,
-    2.14306739182005,
-    1.7470737346624,
-    5.18687585651008,
-    1.11028511099932,
-]
-HAUSMAN_ALL = [
-    0.0201721912671051,
-    0.0302578942037087,
-    0.0273194335631459,
-    0.018691740018767,
-    0.439816368093923,
-    0.0247358427162044,
-]
 
 
+def _oracle(panel, x, cov_type, **kwargs):
+    """仕様どおりの手計算（`_re_oracle.py`）。2-wayのDKは`dk_bandwidth=1`（T=4の既定）。"""
+    return hand_computed(
+        panel, list(x), cov_type, two_way=True, dk_bandwidth=1, **kwargs
+    )
+
+
+def _options(cov_type, **kwargs):
+    extra = {"dk_time": "time", "dk_bandwidth": 1} if cov_type == "dk" else {}
+    return REOptions(cov_type=cov_type, time="time", **extra, **kwargs)
+
+
+@pytest.mark.parametrize("cov_type", HAUSMAN_COV_TYPES)
 @pytest.mark.parametrize(
-    ("x", "expected"),
-    [(("x1",), HAUSMAN_X1), (("x1", "xi", "xt"), HAUSMAN_ALL)],
-)
-def test_two_way_hausman_test_matches_reference(panel, x, expected):
-    """2-wayのHausman検定（補助回帰版）の統計量が参照値と一致し、`hausman_df`は
-    2-way within変換後に分散のある列の数（`xi`・`xt`は入らない）になる。"""
-    for cov_type, want in zip(HAUSMAN_COV_TYPES, expected, strict=True):
-        kwargs = (
-            {"dk_time": "time", "dk_bandwidth": 1} if cov_type == "dk" else {}
-        )
-        res = _fit(
-            panel, REOptions(cov_type=cov_type, time="time", **kwargs), x=x
-        )
-        assert res.hausman_df == 1, cov_type
-        assert res.hausman_statistic == pytest.approx(want, rel=1e-8), cov_type
-        assert 0.0 <= res.hausman_p_value <= 1.0
-
-
-# 手計算の補助回帰（`x1 + x2`はplm::phtestとも一致）。cov_type順は
-# HAUSMAN_COV_TYPES。各要素は（統計量, p値）。
-HAUSMAN_X1_X2 = [
-    (9.92830801953696, 0.00698385648499824),
-    (8.10342574438997, 0.0173925578818405),
-    (6.72610170604262, 0.0346294482635305),
-    (4.38401947725594, 0.111692051071814),
-    (18.094162886712, 0.00011773414976345),
-    (11.0661183693506, 0.00395387493521181),
-]
-HAUSMAN_X1_Z_X2 = [
-    (10.0371631198638, 0.00661390148183497),
-    (9.07856691110755, 0.010681057264421),
-    (7.64418368167015, 0.021881979367307),
-    (4.7824250943718, 0.0915186458951753),
-    (20.078462535067, 4.36533178816285e-05),
-    (14.0801205135569, 0.000876073771284616),
-]
-HAUSMAN_X1_Z = [
-    (1.14428813461403, 0.284748043158543),
-    (1.83787825176763, 0.175199832831764),
-    (1.51093262045524, 0.218996831908603),
-    (1.014108147529, 0.313920661605621),
-    (3.63171340231645, 0.0566884270413592),
-    (1.06814571765199, 0.301364660153732),
-]
-
-
-@pytest.mark.parametrize(
-    ("x", "df", "expected"),
+    ("x", "df"),
     [
-        (("x1", "x2"), 2, HAUSMAN_X1_X2),
-        # 交互作用列`z`は識別できず検定対象から外れる（df = 2）。
-        (("x1", "z", "x2"), 2, HAUSMAN_X1_Z_X2),
-        (("x1", "z"), 1, HAUSMAN_X1_Z),
+        # `xi`・`xt`は2-way within変換後に全ゼロで、検定対象は`x1`だけ。
+        (("x1",), 1),
+        (("x1", "xi", "xt"), 1),
+        (("x1", "x2"), 2),
+        # 交互作用列`z`は識別できず（`x*`との差が定数）検定対象から外れる。
+        (("x1", "z", "x2"), 2),
+        (("x1", "z"), 1),
     ],
 )
-def test_two_way_hausman_test_with_several_tested_coefficients(
-    panel, x, df, expected
-):
-    """検定対象が複数列のとき（`k > 1`）の統計量・p値（`χ²_df`の上側確率）。"""
-    for cov_type, (stat, p) in zip(HAUSMAN_COV_TYPES, expected, strict=True):
-        kwargs = (
-            {"dk_time": "time", "dk_bandwidth": 1} if cov_type == "dk" else {}
-        )
-        res = _fit(
-            panel, REOptions(cov_type=cov_type, time="time", **kwargs), x=x
-        )
-        assert res.hausman_df == df, cov_type
-        assert res.hausman_statistic == pytest.approx(stat, rel=1e-8), cov_type
-        assert res.hausman_p_value == pytest.approx(p, rel=1e-7), cov_type
+def test_two_way_hausman_test_matches_hand_computed(panel, x, df, cov_type):
+    """2-wayのHausman検定（補助回帰版）の統計量・p値（`χ²_df`の上側確率）・自由度が
+    手計算と一致する。`hausman_df`は2-way within変換後に分散のある列のうち識別できる列の数
+    （plmとの照合は`test_re_two_way_reference.py`）。"""
+    res = _fit(panel, _options(cov_type), x=x)
+    hand = _oracle(panel, x, cov_type)
+
+    assert res.hausman_df == hand["hausman_df"] == df
+    assert res.hausman_statistic == pytest.approx(
+        hand["hausman_statistic"], rel=1e-8
+    )
+    assert res.hausman_p_value == pytest.approx(
+        hand["hausman_p_value"], rel=1e-7
+    )
+    assert 0.0 <= res.hausman_p_value <= 1.0
 
 
 def test_two_way_results_do_not_depend_on_the_column_order(panel):
@@ -249,8 +158,13 @@ def test_two_way_hausman_cluster_count_must_cover_the_auxiliary_slopes(panel):
     ):
         _fit(panel, options, x=("x1", "xi", "xt"))
     res = _fit(panel, options, x=("x1", "xi"))
+    hand = _oracle(
+        panel, ("x1", "xi"), "cluster", cluster=panel["time"].to_numpy() - 1
+    )
     assert res.hausman_df == 1
-    assert res.hausman_statistic == pytest.approx(2.27570721529081, rel=1e-8)
+    assert res.hausman_statistic == pytest.approx(
+        hand["hausman_statistic"], rel=1e-8
+    )
 
 
 def test_two_way_hausman_dk_periods_must_exceed_the_slopes(panel):
@@ -267,24 +181,32 @@ def test_two_way_hausman_dk_periods_must_exceed_the_slopes(panel):
     ):
         _fit(panel, options, x=("x1", "xi", "xt"))
     res = _fit(panel, options, x=("x1", "xi"))
-    assert res.hausman_statistic == pytest.approx(4.37954416942038, rel=1e-8)
+    hand = _oracle(panel, ("x1", "xi"), "dk", dk_time_col="dk3")
+    assert res.hausman_statistic == pytest.approx(
+        hand["hausman_statistic"], rel=1e-8
+    )
 
 
 def test_two_way_hausman_uses_the_cluster_and_dk_time_columns(panel):
     """`cluster`をentityと別の列に、`dk_time`をtimeと別の並び順の列にすると、
-    補助回帰の共分散もその列を使う（手計算の補助回帰と一致）。"""
+    補助回帰の共分散もその列を使う（手計算の補助回帰と一致）。別の列で変わることも
+    確かめる（既定のentityクラスター・`time`のDKとは異なる値になる）。"""
+    groups = np.unique(panel["grp"].to_numpy(), return_inverse=True)[1]
     clustered = _fit(
         panel,
         REOptions(cov_type="cluster", time="time", cluster="grp"),
         x=("x1",),
     )
+    hand = _oracle(panel, ("x1",), "cluster", cluster=groups)
     assert clustered.hausman_statistic == pytest.approx(
-        7.77470735811636, rel=1e-8
+        hand["hausman_statistic"], rel=1e-8
     )
-    for x, want in [
-        (("x1",), 1.3729036142545),
-        (("x1", "xi", "xt"), 0.0199827525899269),
-    ]:
+    default = _fit(panel, _options("cluster"), x=("x1",))
+    assert default.hausman_statistic != pytest.approx(
+        clustered.hausman_statistic, rel=1e-3
+    )
+
+    for x in [("x1",), ("x1", "xi", "xt")]:
         dk = _fit(
             panel,
             REOptions(
@@ -292,7 +214,14 @@ def test_two_way_hausman_uses_the_cluster_and_dk_time_columns(panel):
             ),
             x=x,
         )
-        assert dk.hausman_statistic == pytest.approx(want, rel=1e-8)
+        hand = _oracle(panel, x, "dk", dk_time_col="dk_perm")
+        assert dk.hausman_statistic == pytest.approx(
+            hand["hausman_statistic"], rel=1e-8
+        )
+        by_time = _fit(panel, _options("dk"), x=x)
+        assert by_time.hausman_statistic != pytest.approx(
+            dk.hausman_statistic, rel=1e-3
+        )
 
 
 def test_two_way_hausman_test_is_none_without_two_way_variation(panel):
@@ -304,71 +233,41 @@ def test_two_way_hausman_test_is_none_without_two_way_variation(panel):
     assert res.r_squared_within == 0.0
 
 
-@pytest.mark.parametrize(
-    ("x", "expected"),
-    [
-        (
-            ("x1",),
-            (0.341387359645643, 0.0661068209178726, -0.00993188989019012),
-        ),
-        (
-            ("x1", "xi", "xt"),
-            (0.342681797459257, 0.0770260805105586, 0.13065765245062),
-        ),
-    ],
-)
-def test_two_way_r_squared_matches_definition(panel, x, expected):
-    """plmの係数から定義どおりに計算したR²（plmの`r.squared`は変換後の回帰の
-    R²で、この3種に対応する参照が無い）: within = 個体と時点でdemeanした
-    変数、between = 個体平均、overall = 生の変数（between・overallは切片込み）。"""
-    res = _fit(panel, REOptions(time="time"), x=x)
-    assert res.r_squared_within == pytest.approx(expected[0], rel=1e-7)
-    assert res.r_squared_between == pytest.approx(expected[1], rel=1e-7)
-    assert res.r_squared_overall == pytest.approx(expected[2], rel=1e-7)
-
-
-# plm::ercomp（`effect = "twoways"`, Swamy-Arora）: σ²（idios, id, time）とθ（id, time, total）。
-VARIANCE_COMPONENTS = {
-    ("x1",): (
-        (0.7105636082063154, 3.9931983188209288, 1.8311358682852061),
-        (0.7936237292092024, 0.7535338941957259, 0.7074067054651654),
-    ),
-    ("x1", "xi", "xt"): (
-        (0.7105636082063154, 3.0199895045281573, 2.5967363260251166),
-        (0.7643012103250293, 0.7911531859652488, 0.7137120129901442),
-    ),
-}
-
-
-@pytest.mark.parametrize("x", list(VARIANCE_COMPONENTS))
-def test_two_way_exposes_variance_components_and_weights(panel, x):
-    """σ_ε²・σ_u²・σ_λ²と3つの重み（θ₁・θ₂・θ₃）がplm::ercompと一致する。
-    1-wayの`theta`（個体ごと）は2-wayでは`None`。"""
-    sigma2, theta = VARIANCE_COMPONENTS[x]
-    res = _fit(panel, REOptions(time="time"), x=x)
-    assert res.sigma2_eps == pytest.approx(sigma2[0], rel=1e-9)
-    assert res.sigma2_u == pytest.approx(sigma2[1], rel=1e-9)
-    assert res.sigma2_lambda == pytest.approx(sigma2[2], rel=1e-9)
-    assert res.theta_entity == pytest.approx(theta[0], rel=1e-9)
-    assert res.theta_time == pytest.approx(theta[1], rel=1e-9)
-    assert res.theta_total == pytest.approx(theta[2], rel=1e-9)
+def test_two_way_exposes_variance_components_and_weights_but_no_entity_theta(
+    panel,
+):
+    """2-wayは`sigma2_lambda`と3つの重みを持ち、1-wayの`theta`（個体ごと）は`None`
+    （値のplm::ercompとの照合は`test_re_two_way_reference.py`）。重みは分散成分から
+    `θ₁ = 1 - σ_ε/σ₁`・`θ₂ = 1 - σ_ε/σ₂`・`θ₃ = θ₁ + θ₂ - 1 + σ_ε/σ₄`と定まる。"""
+    res = _fit(panel, REOptions(time="time"), x=("x1", "xi", "xt"))
+    n, t = 6, 4
+    eps, u, lam = res.sigma2_eps, res.sigma2_u, res.sigma2_lambda
+    sigma = [
+        math.sqrt(eps + t * u),
+        math.sqrt(eps + n * lam),
+        math.sqrt(eps + t * u + n * lam),
+    ]
+    theta1 = 1 - math.sqrt(eps) / sigma[0]
+    theta2 = 1 - math.sqrt(eps) / sigma[1]
+    theta3 = theta1 + theta2 - 1 + math.sqrt(eps) / sigma[2]
     assert res.theta is None
+    assert res.theta_entity == pytest.approx(theta1, rel=1e-12)
+    assert res.theta_time == pytest.approx(theta2, rel=1e-12)
+    assert res.theta_total == pytest.approx(theta3, rel=1e-12)
 
 
 def test_one_way_exposes_theta_per_entity_and_no_two_way_fields(panel):
     """1-wayは`σ_λ²`と2-wayの重みが`None`で、`theta`はエンティティID→θ_i
-    （plm::ercompの`σ²`・`theta`、`y ~ x1 + xt`）。"""
+    （バランスパネルなので全エンティティで同じ値、`1 - sqrt(σ_ε² / (T·σ_u² + σ_ε²))`）。
+    値のplmとの照合は`test_re_time_invariant.py`。"""
     res = _fit(panel, REOptions(cov_type="classical"), x=("x1", "xt"))
-    assert res.sigma2_eps == pytest.approx(5.558492530031272, rel=1e-9)
-    assert res.sigma2_u == pytest.approx(2.781216088364690, rel=1e-9)
     assert res.sigma2_lambda is None
     assert res.theta_entity is None
     assert res.theta_time is None
     assert res.theta_total is None
     assert list(res.theta) == [f"e{i}" for i in range(1, 7)]
-    assert list(res.theta.values()) == pytest.approx(
-        [0.4227860837470446] * 6, rel=1e-9
-    )
+    want = 1 - math.sqrt(res.sigma2_eps / (4 * res.sigma2_u + res.sigma2_eps))
+    assert list(res.theta.values()) == pytest.approx([want] * 6, rel=1e-12)
 
 
 def test_theta_total_is_zero_when_a_variance_component_is_zero(panel):
@@ -408,25 +307,31 @@ def test_one_way_accepts_time_only_regressor_like_plm(panel):
     推定値になる。Hausman検定は`x̃t`が識別できないため`x1`だけを検定する。"""
     res = _fit(panel, REOptions(cov_type="classical"), x=("x1", "xt"))
 
-    expected = {
-        "const": 0.117907102600895,
-        "x1": 0.400160538463792,
-        "xt": -1.029152589790345,
-    }
-    expected_se = [0.905185788075077, 0.851443915446071, 0.510706679841924]
-    for name, value in expected.items():
+    for name, value in _ONE_WAY_REF["params"].items():
         assert res.params[name] == pytest.approx(value, rel=1e-8)
-    assert list(res.std_errors.values()) == pytest.approx(
-        expected_se, rel=1e-8
-    )
+    for name, value in _ONE_WAY_REF["std_errors"].items():
+        assert res.std_errors[name] == pytest.approx(value, rel=1e-8)
     assert res.df_resid == 21
     assert res.hausman_df == 1
 
 
-# plm（`ercomp`）の準偏差変換の重み。`y ~ x1 + xt`（1-way）と`y ~ x1 + xi + xt`
-# （2-way: id, time, total）。
-THETA_ONE_WAY_X1_XT = 0.422786083747045
-THETA_TWO_WAY = (0.764301210325029, 0.791153185965249, 0.713712012990144)
+# plm（`ercomp`）の準偏差変換の重み。`y ~ x1 + xt`（1-way、全エンティティで共通の
+# `1 - sqrt(σ_ε² / (T·σ_u² + σ_ε²))`）と`y ~ x1 + xi + xt`（2-way: id, time, total）。
+_ONE_WAY_REF = json.loads((_FIXTURES / "re_time_invariant.json").read_text())[
+    "synthetic"
+]["small_hand_time_only"]["classical"]
+_TWO_WAY_REF = json.loads((_FIXTURES / "re_two_way.json").read_text())[
+    "synthetic"
+]["small_hand_all"]["classical"]
+THETA_ONE_WAY_X1_XT = 1 - math.sqrt(
+    _ONE_WAY_REF["sigma2_eps"]
+    / (4 * _ONE_WAY_REF["sigma2_u"] + _ONE_WAY_REF["sigma2_eps"])
+)
+THETA_TWO_WAY = (
+    _TWO_WAY_REF["theta_entity"],
+    _TWO_WAY_REF["theta_time"],
+    _TWO_WAY_REF["theta_total"],
+)
 
 
 def _group_mean(df: pl.DataFrame, col: str, by: str) -> np.ndarray:
@@ -623,21 +528,23 @@ def test_singleton_time_raises(panel):
         _fit(panel.filter(keep), REOptions(time="time"), x=("x1",))
 
 
-def test_missing_time_column_raises(panel):
+@pytest.mark.parametrize(
+    ("keep", "means"),
+    [
+        # 2時点: 時点平均のbetween回帰（`[1, x̄.ₜ]`）が`T = 2 <= K_b + 1`で失敗する。
+        (pl.col("time") <= 2, "time"),
+        # 2エンティティ: 個体平均のbetween回帰が`N = 2 <= K_b + 1`で失敗する。
+        (pl.col("entity").is_in(["e1", "e2"]), "entity"),
+    ],
+)
+def test_between_regression_failure_names_the_regression(panel, keep, means):
+    """2-wayは個体平均・時点平均の2本のbetween回帰を推定するため、失敗したメッセージが
+    どちらかを示す。"""
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="nonexistent"),
+        match=f"between-regression on {means} means",
     ):
-        _fit(panel, REOptions(time="nonexistent"))
-
-
-@pytest.mark.parametrize(
-    ("time_col", "x"),
-    [("y", ("x1",)), ("entity", ("x1",)), ("x1", ("x1", "xi"))],
-)
-def test_time_overlapping_another_role_raises(panel, time_col, x):
-    with pytest.raises(ValidationError):
-        _fit(panel, REOptions(time=time_col), x=x)
+        _fit(panel.filter(keep), REOptions(time="time"), x=("x1",))
 
 
 def test_time_with_null_values_raises(panel):

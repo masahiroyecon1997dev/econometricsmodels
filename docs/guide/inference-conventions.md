@@ -9,7 +9,7 @@ This page summarizes which reference distribution each method uses for its test 
 | OLS | t | F (`f_statistic`) | `n - k`; `G - 1` with `cov_type="cluster"` |
 | WLS | t | F | same as OLS |
 | FE | t | F | `df_resid` (`n - n_entities - k` for one-way) for `classical`/`hc1`-`hc3`; `G - 1` with `cov_type="cluster"`; `t_periods - 1` with `cov_type="dk"` |
-| RE | t | F | `df_resid` (`n - k`) for `classical`/`hc1`-`hc3`; `G - 1` with `cov_type="cluster"`; `t_periods - 1` with `cov_type="dk"`. The F statistic is the same Wald test as FE (it follows `cov_type`), so `f_df_denom` equals the degrees of freedom of the t tests |
+| RE (one-way and two-way) | t | F | `df_resid` (`n - k`, also for two-way: the GLS transformation does not absorb entity or time dummies, so nothing is subtracted for the effects) for `classical`/`hc1`-`hc3`; `G - 1` with `cov_type="cluster"`; `t_periods - 1` with `cov_type="dk"`. The F statistic is the same Wald test as FE (it follows `cov_type`), so `f_df_denom` equals the degrees of freedom of the t tests |
 | IV, `estimator="2sls"` | t | F (`wald_dist="f"`) | `df_resid`; `G - 1` with `cov_type="cluster"` |
 | IV, `estimator="gmm"` | normal | chi-squared (`wald_dist="chi2"`) | none |
 | Logit / Probit | normal | likelihood-ratio chi-squared (`lr_statistic`, `lr_df`) | none |
@@ -17,6 +17,7 @@ This page summarizes which reference distribution each method uses for its test 
 
 - Every results object reports the distribution actually used in `stat_dist` (`"t"` or `"normal"`) and the t degrees of freedom in `stat_df` (`None` for the normal distribution). `stat_df` is the value used for the p-values and confidence intervals, so it can differ from `df_resid` (for example with `cov_type="cluster"` in OLS, WLS, FE, RE and 2SLS, or `cov_type="dk"` in FE and RE).
 - The degrees of freedom of every test statistic are exposed so you can recompute a p-value yourself: `f_df_num` / `f_df_denom` (OLS, WLS, FE, RE), `wald_df_num` / `wald_df_denom` (IV), `wu_hausman_df_num` / `wu_hausman_df_denom`, `weak_instrument_f_df_num` / `weak_instrument_f_df_denom`, `overid_df` (IV), `lr_df` (Logit, Probit), `wald_df` (Tobit), `hausman_df` (RE). A degrees-of-freedom field is `None` when its statistic is not available.
+- Two-way RE (`REOptions.time`, balanced panels) reports `n_periods` (the number of distinct values of the `time` column; `None` for one-way RE and for the other methods). `time` only defines the time effect: the Driscoll–Kraay time column is the separate `dk_time` option, so `t_periods` for `cov_type="dk"` comes from `dk_time`, never from `time`.
 - `wald_dist` (IV and Tobit) tells whether the overall Wald statistic is F or chi-squared, since the name alone does not.
 - `marginal_effects()` always uses the normal distribution.
 

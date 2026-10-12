@@ -13,7 +13,11 @@ import json
 from pathlib import Path
 
 from benchmark.common import freeze_scenarios, run_freeze_cli
-from benchmark.panel.datasets import SCENARIOS, generate_fe_dataset
+from benchmark.panel.datasets import (
+    SCENARIOS,
+    generate_fe_dataset,
+    re_two_way_small_panel,
+)
 
 # df_resid=1境界（1-way）成功パス専用。SCENARIOSには追加せず、baselineを
 # n_entities=3, n_periods=2, k=2でオーバーライドした専用データとして固定する
@@ -88,6 +92,8 @@ def freeze(output_dir: Path) -> None:
         key_suffix="_k1",
         k=1,
     )
+    # 2-way REの手計算・plm照合用の小さな手作りパネル（乱数ではないため真の係数は無い）。
+    re_two_way_small_panel().write_csv(output_dir / "re_two_way_small.csv")
     (output_dir / "fe_true_beta.json").write_text(
         json.dumps(true_betas, indent=2)
     )

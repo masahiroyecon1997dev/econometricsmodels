@@ -15,6 +15,12 @@
 # 一致を確認済み）。これは外部パッケージの値そのものではなく、plmの部品を使った
 # 独立な手計算で、`phtest`の誤った係数選択だけを直したもの。
 #
+# さらに、個体平均が全個体で一定の列（バランスパネルで時点間でのみ変わる列、年トレンド等）は、
+# `X̃`がwithin変動を持つ（`cstcovar.rm = "all"`では落ちない）一方で、`X*`との差
+# `x* - x̃ = (1 - θ)·x̄ᵢ`が定数になり、補助回帰で切片と共線になる（`plm`は係数を捨てるか
+# 検定対象を取り違える）。そのため`X*`と`X̃`の差が定数の列は`X̃`から外し、その列の`X*`の
+# 係数だけを補助回帰に残す（本実装の「識別できない列は検定から外す」規則、`re-spec.md`3.6節）。
+#
 # cov_typeとvcovの対応・使用例は`run_plm_hausman_benchmark.R`と同じ。
 #
 # 使用例:
@@ -66,6 +72,14 @@ reX <- model.matrix(re_mod, cstcovar.rm = "intercept")
 feX <- model.matrix(fe_mod, cstcovar.rm = "all")
 stopifnot(identical(row.names(reX), row.names(feX)))
 stopifnot(identical(names(reY), row.names(reX)))
+
+# `X*`と`X̃`の差が定数の列（上記）は検定から外す。
+aliased <- vapply(dimnames(feX)[[2L]], function(nm) {
+  d <- reX[, nm] - feX[, nm]
+  (max(d) - min(d)) <= 1e-9 * max(1, max(abs(reX[, nm])))
+}, logical(1))
+feX <- feX[, !aliased, drop = FALSE]
+stopifnot(ncol(feX) > 0)
 
 tilde_names <- paste(dimnames(feX)[[2L]], "tilde", sep = ".")
 dimnames(feX)[[2L]] <- tilde_names

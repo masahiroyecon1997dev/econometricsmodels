@@ -491,9 +491,32 @@ TOLERANCES: dict[str, dict[str, float]] = {
     # wagepan）の本実装とplmの比較は、いずれも閉形式の推定量で機械精度で一致する
     # （実測1e-12程度）。不均衡パネルのplmと本実装はσ_u²の定義が異なり係数で最大
     # 13%ずれるため、直接は比較しない（テストのモジュールdoc参照）。p値は相対誤差のみ。
+    # `rtol_absolute_year`: 絶対年（1980〜1990年代の値）の列を含む入力（合成データの
+    # `absolute_year_regressor`と、時点トレンド`yr`を加えたwagepan）。他の列とスケールが
+    # 3桁異なり丸め誤差が拡大する（`re_two_way`と同じ理由。実測最大 ~8e-8、wagepanの
+    # ハウスマン統計量。約10倍のマージンを置く）。
     "re_time_invariant": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_REFERENCE_FLOOR,
         "rtol_p_value": 1e-6,
+        "rtol_absolute_year": 1e-6,
+    },
+    # 2-way RE（`tests/panel/test_re_two_way_reference.py`）の本実装とplmの比較、
+    # および仕様どおりの独立な手計算（numpy・statsmodels・scipy）との比較。
+    # 閉形式のGLSで、絶対年の列を含まない入力は全統計量が機械精度で一致する
+    # （実測最大 ~4e-12。許容誤差を 1e-11 まで締めても通る）。p値は相対誤差のみで、
+    # `rtol_p_value`は裾の値で統計量の丸め誤差が（`ln p ≈ -統計量/2`のため統計量の大きさ倍に）
+    # 増幅されることへの余裕を除いた基準値（`_re_oracle.py`の`assert_p_value_close`が
+    # `max(1, |ln p|)`倍に広げて比べる）。
+    # `rtol_absolute_year`: 絶対年（1980〜1990年代の値）の列を含む入力（合成データと
+    # wagepan）。他の列とスケールが3桁異なり、本実装もplmも丸め誤差を ~1e-9〜1e-7 失う
+    # （年を中心化した同じ回帰では本実装とplmは ~1e-12で一致し、本実装自身も中心化の
+    # 有無で ~1e-9動く）。実測最大は ~1.8e-7（wagepan、ハウスマン検定のp値）のため、
+    # 約5倍のマージンを置いて1e-6とする。
+    "re_two_way": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_REFERENCE_FLOOR,
+        "rtol_p_value": 1e-8,
+        "rtol_absolute_year": 1e-6,
     },
 }

@@ -29,6 +29,29 @@ _FIXEST_SCALAR_KEYS = (
 
 _PLM_SCALAR_KEYS = ("f_statistic", "f_p_value")
 
+# 2-way RE（plm）で名前正規化せず通すスカラー統計量。
+_PLM_RE_TWO_WAY_SCALAR_KEYS = (
+    *_PLM_SCALAR_KEYS,
+    "f_df_num",
+    "f_df_denom",
+    "df_resid",
+    "log_likelihood",
+    "aic",
+    "bic",
+    "r_squared_within",
+    "r_squared_between",
+    "r_squared_overall",
+    "sigma2_eps",
+    "sigma2_u",
+    "sigma2_lambda",
+    "theta_entity",
+    "theta_time",
+    "theta_total",
+    "hausman_statistic",
+    "hausman_df",
+    "hausman_p_value",
+)
+
 # FEの第2リファレンス（plm within）はwithin R²も持つ。
 _PLM_FE_SCALAR_KEYS = (*_PLM_SCALAR_KEYS, "r_squared_within")
 
@@ -66,6 +89,13 @@ def default_dk_bandwidth(csv_path: Path, time_col: str = "time") -> int:
     異なるため、同じ値を明示的に渡して既定式自体の実装差を比較から除く。
     """
     return hac_auto_lag(pl.read_csv(csv_path)[time_col].n_unique())
+
+
+# 2-way RE（plm、`model = "random"`・`effect = "twoways"`）。係数・標準誤差・
+# 分散成分・重み・ハウスマン検定・手計算のR²・AIC/BICを1回で返す。
+_PLM_RE_TWO_WAY_R_SCRIPT = (
+    Path(__file__).resolve().parent / "run_plm_re_two_way_benchmark.R"
+)
 
 
 def run_fixest_r(
@@ -279,4 +309,49 @@ def export_re_transformed_r(
         formula,
         "export",
         extra_args=[entity_col, time_col],
+    )
+
+
+def run_re_two_way_plm_r(
+    csv_path: Path,
+    formula: str,
+    cov_type: str,
+    *,
+    entity_col: str = "entity",
+    time_col: str = "time",
+    maxlag: int | None = None,
+) -> dict:
+    """`run_plm_re_two_way_benchmark.R`を呼び、2-way RE（バランスパネル、
+    Swamy-Arora）の統計量一式を得る。
+
+    係数・標準誤差・t値・p値・信頼区間・F統計量はplmの`cov_type`連動の共分散から、
+    分散成分（`sigma2_eps`・`sigma2_u`・`sigma2_lambda`）と重み（`theta_entity`・
+    `theta_time`・`theta_total`）は`ercomp`から、ハウスマン検定は`phtest`の補助回帰を
+    名前で選んで再現した値、R²・対数尤度・AIC・BICはplmの係数からの手計算
+    （モジュールコメント参照）。時間変化のある列が無ければ`hausman_*`は`None`。
+
+    Args:
+        csv_path: データCSV。
+        formula: `plm`の回帰式（例: "y ~ x1 + xi + xt"）。
+        cov_type: classical / hc1 / hc2 / hc3 / cluster / dk。
+        entity_col: エンティティ識別子の列名。
+        time_col: 時点識別子の列名。
+        maxlag: `cov_type="dk"`のバンド幅（`vcovSCC`の`maxlag`）。
+    """
+    extra = [entity_col, time_col]
+    if cov_type == "dk":
+        if maxlag is None:
+            raise ValueError("maxlag is required for cov_type='dk'")
+        extra.append(str(maxlag))
+    raw = run_r(
+        _PLM_RE_TWO_WAY_R_SCRIPT,
+        csv_path,
+        formula,
+        cov_type,
+        extra_args=extra,
+    )
+    return normalize_names(
+        raw,
+        stat_key="test_stats",
+        scalar_keys=(*_PLM_RE_TWO_WAY_SCALAR_KEYS,),
     )

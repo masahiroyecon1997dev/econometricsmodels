@@ -57,6 +57,9 @@ SCENARIOS = [
     "zero_variance_regressor",
     "time_invariant_unbalanced",
     "time_invariant_multi_unbalanced",
+    "one_dimensional_regressors",
+    "absolute_year_regressor",
+    "time_only_nearly_balanced",
 ]
 
 # baseline系シナリオの既定パネル規模（entities=40, periods=6, n=240）。
@@ -129,6 +132,21 @@ _MULTI_INVARIANT_N_PERIODS = 10
 _MULTI_INVARIANT_K = 3
 # エンティティごとの観測数`T_i`（順に繰り返し割り当てる）。2〜10に偏らせる。
 _MULTI_INVARIANT_COUNTS = [2, 2, 3, 5, 7, 10]
+
+
+# 一次元でしか変わらない列を含むシナリオ（"one_dimensional_regressors"・
+# "absolute_year_regressor"・"time_only_nearly_balanced"）の規模。T=5の小さな
+# バランスパネルで、2-way REのtime平均へのbetween回帰（`[1, x̄.ₜ]`）の自由度が
+# 小さくなる境界を含める。
+_ONE_DIM_N_ENTITIES = 30
+_ONE_DIM_N_PERIODS = 5
+# 一次元の列が`y`に与える係数（xi: entityのみ、xt: 時点のみ、year: 絶対年）。
+_ONE_DIM_XI_COEF = 0.8
+_ONE_DIM_XT_COEF = -0.6
+_ABSOLUTE_YEAR_COEF = 0.05
+_ABSOLUTE_YEAR_BASE = 1990
+# "time_only_nearly_balanced"で落とす行（異なるエンティティから1行ずつ）。
+_NEARLY_BALANCED_DROP_ROWS = (7, 63)
 
 
 def _thin_to_skewed_counts(
@@ -269,9 +287,10 @@ def generate_fe_dataset(
     Args:
         scenario: SCENARIOSのいずれか。
         n_entities: エンティティ数（"small_panel"は5、
-            "cross_sectionally_correlated"は15に強制される）。
+            "cross_sectionally_correlated"は15、一次元の列を含む3シナリオは
+            30に強制される）。
         n_periods: 時点数（"small_panel"は4、"cross_sectionally_correlated"は
-            25に強制される）。
+            25、一次元の列を含む3シナリオは5に強制される）。
         k: 説明変数の数（x1..xk）。
         seed: 乱数シード。
         beta: 真の傾き係数ベクトル（**切片を含まない**、長さk。FEはwithin
@@ -283,7 +302,9 @@ def generate_fe_dataset(
         (df, true_beta)のタプル。dfは列 entity, time, y, x1..xk を持つ
         polars DataFrame（"zero_variance_regressor"・
         "time_invariant_unbalanced"はx_invariantも、
-        "time_invariant_multi_unbalanced"はz1・z2を追加）。
+        "time_invariant_multi_unbalanced"はz1・z2、
+        "one_dimensional_regressors"はxi・xt、"absolute_year_regressor"はyear、
+        "time_only_nearly_balanced"はtrendを追加）。
 
     Raises:
         ValueError: 未知のscenarioの場合。
@@ -298,6 +319,12 @@ def generate_fe_dataset(
         n_entities, n_periods = _DK_N_ENTITIES, _DK_N_PERIODS
     elif scenario == "many_regressors":
         k = _MANY_REGRESSORS_K
+    elif scenario in (
+        "one_dimensional_regressors",
+        "absolute_year_regressor",
+        "time_only_nearly_balanced",
+    ):
+        n_entities, n_periods = _ONE_DIM_N_ENTITIES, _ONE_DIM_N_PERIODS
     elif scenario == "time_invariant_multi_unbalanced":
         n_entities, n_periods = (
             _MULTI_INVARIANT_N_ENTITIES,
@@ -357,7 +384,32 @@ def generate_fe_dataset(
         errors = rng.normal(size=n)
 
     y = alpha[entity_idx] + gamma[time_idx] + X @ beta + errors
+    extra_columns: dict[str, np.ndarray] = {}
+    if scenario == "one_dimensional_regressors":
+        # entityだけで変わる`xi`と時点だけで変わる`xt`（どちらもwithin変換後に
+        # 全ゼロ）。2-way REは両方を許容する（`re-spec.md`5章）。
+        xi = rng.normal(size=n_entities)[entity_idx]
+        xt = rng.normal(size=n_periods)[time_idx]
+        y = y + _ONE_DIM_XI_COEF * xi + _ONE_DIM_XT_COEF * xt
+        extra_columns = {"xi": xi, "xt": xt}
+    elif scenario == "absolute_year_regressor":
+        # 絶対年（1990〜）の時点だけで変わる列。他の列とスケールが3桁異なり、
+        # between回帰の定数判定（生スケール基準の閾値）を検証する。
+        year = (_ABSOLUTE_YEAR_BASE + time_idx).astype(float)
+        y = y + _ABSOLUTE_YEAR_COEF * (year - _ABSOLUTE_YEAR_BASE)
+        extra_columns = {"year": year}
+    elif scenario == "time_only_nearly_balanced":
+        # 時点トレンド（0〜）の時点だけで変わる列。絶対年にしないのは、plmが
+        # 準バランスのbetween回帰（`solve(crossprod(Z))`）で絶対年の列を数値的に
+        # 特異と判定して失敗するため（スケール問題は`absolute_year_regressor`が担う）。
+        trend = time_idx.astype(float)
+        y = y + _ABSOLUTE_YEAR_COEF * trend
+        extra_columns = {"trend": trend}
     df = _assemble_frame(entity_ids, time_ids, entity_idx, time_idx, y, X)
+    if extra_columns:
+        df = df.with_columns(
+            pl.Series(name, values) for name, values in extra_columns.items()
+        )
 
     if scenario == "unbalanced":
         # 不均衡だが各エンティティT_i>=2を保つ「成功パス」
@@ -388,6 +440,15 @@ def generate_fe_dataset(
             pl.int_range(pl.len()).over("time") == 0
         )
         df = df.filter(keep)
+    elif scenario == "time_only_nearly_balanced":
+        # バランスパネルから2行だけ（別々のエンティティから）落とす。時点だけで変わる
+        # `trend`の個体平均が、落とした2エンティティでだけ一定でなくなる
+        # （1-wayのbetween回帰が列を落とすかどうかの境界、`re-spec.md`3.1節）。
+        df = (
+            df.with_row_index("_row")
+            .filter(~pl.col("_row").is_in(_NEARLY_BALANCED_DROP_ROWS))
+            .drop("_row")
+        )
     elif scenario == "time_invariant_multi_unbalanced":
         # 時間変化のある列x1..x3に加え、エンティティ内で一定の列を2本足す
         # （z1: 連続、z2: 0/1ダミー）。観測数`T_i`を2〜10に偏らせた不均衡パネル
@@ -424,6 +485,48 @@ def generate_fe_dataset(
             )
 
     return df, beta
+
+
+# 2-way REの手計算・plmとの照合に使う小さなバランスパネル（6エンティティ×4時点）。
+# 乱数ではなく3桁に丸めた固定値で、`xi`は個体間でのみ、`xt`は時点間でのみ変わる
+# （どちらもRE（2-way）で許容される）。`benchmark/panel/freeze.py`が
+# `re_two_way_small.csv`に固定する。
+RE_TWO_WAY_SMALL_Y = [
+    2.973, 0.102, -4.005, -1.69, 4.512, 2.697,
+    1.044, 0.361, 0.457, -1.063, -3.188, -3.244,
+    2.213, 0.875, -0.479, -2.389, 5.936, 5.314,
+    2.163, -0.585, 2.081, 0.631, -1.679, -4.541,
+]  # fmt: skip
+RE_TWO_WAY_SMALL_X1 = [
+    -0.828, -0.348, -1.538, -0.256, -1.15, 0.012,
+    -0.223, 0.888, -0.592, -0.656, -0.683, -0.016,
+    -0.443, 0.353, 0.073, 0.007, -0.188, -0.766,
+    -0.221, -0.984, -1.104, -0.938, 0.679, -1.577,
+]  # fmt: skip
+RE_TWO_WAY_SMALL_X2 = [
+    -0.256, 0.511, -0.226, -0.315, -0.93, -0.213,
+    1.112, 0.424, 1.037, 0.249, 0.395, 0.185,
+    -1.666, 0.855, 0.506, 0.499, -1.691, -1.744,
+    -0.89, -0.468, 0.305, -0.046, 0.521, -0.642,
+]  # fmt: skip
+RE_TWO_WAY_SMALL_XI = [-0.87, 0.485, -0.186, 1.546, -0.611, -0.348]
+RE_TWO_WAY_SMALL_XT = [-1.637, 0.02, 0.892, -0.873]
+
+
+def re_two_way_small_panel() -> pl.DataFrame:
+    """6エンティティ×4時点のバランスパネル（列: entity, time, y, x1, xi, xt, x2）。"""
+    n_periods = len(RE_TWO_WAY_SMALL_XT)
+    return pl.DataFrame(
+        {
+            "entity": [f"e{r // n_periods + 1}" for r in range(24)],
+            "time": [r % n_periods + 1 for r in range(24)],
+            "y": RE_TWO_WAY_SMALL_Y,
+            "x1": RE_TWO_WAY_SMALL_X1,
+            "xi": [RE_TWO_WAY_SMALL_XI[r // n_periods] for r in range(24)],
+            "xt": [RE_TWO_WAY_SMALL_XT[r % n_periods] for r in range(24)],
+            "x2": RE_TWO_WAY_SMALL_X2,
+        }
+    )
 
 
 if __name__ == "__main__":

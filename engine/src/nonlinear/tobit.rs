@@ -7276,7 +7276,7 @@ mod tests {
             );
             // 実測`n_iter=11`（緩い上限、rust-reviewer指摘）。`FaerLbfgs`の1回目line
             // search初期ステップ幅の設計変更（`engine/src/nonlinear/CLAUDE.md`
-            // 「実装時に踏んだ罠その2」参照、未解決）時に、収束はするが反復回数が
+            // 「実装時に踏んだ罠その2」参照）時に、収束はするが反復回数が
             // 大きく増える形の劣化が紛れ込んでいないかを検知するためのガード。
             let n_iter = result.unwrap().n_iter();
             assert!(

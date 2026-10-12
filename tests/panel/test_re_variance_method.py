@@ -65,6 +65,7 @@ from benchmark.panel.fixtures.generate_re_variance_method_fixtures import (
     WAGEPAN_CSV,
     WAGEPAN_TREND,
     Case,
+    with_mean_columns,
 )
 from benchmark.panel.references.statsmodels_ref import run_re_cluster
 
@@ -126,10 +127,12 @@ def reference() -> dict:
 
 def _frame(case: Case) -> pl.DataFrame:
     if case.csv == WAGEPAN_CSV:
-        return load_wooldridge_dataset("wagepan").with_columns(
+        df = load_wooldridge_dataset("wagepan").with_columns(
             pl.col("year").alias(WAGEPAN_TREND)
         )
-    return pl.read_csv(DATA_DIR / f"{case.csv}.csv")
+    else:
+        df = pl.read_csv(DATA_DIR / f"{case.csv}.csv")
+    return with_mean_columns(df, case)
 
 
 def _plm_entry(reference: dict, case: Case) -> dict:
@@ -174,9 +177,14 @@ def _plm_stats(case: Case, entry: dict, cov_type: str) -> dict:
         out = {key: plm[key] for key in _ONE_WAY_PLM_KEYS}
         if case.hausman:
             hausman = entry[HAUSMAN_KEY][cov_type]
+            # 検定できる列が残らない入力（全ての時間変化列の個体平均を加えた場合）は`null`。
             out["hausman_statistic"] = hausman["hausman_statistic"]
             out["hausman_p_value"] = hausman["hausman_p_value"]
-            out["hausman_df"] = int(hausman["hausman_df"])
+            out["hausman_df"] = (
+                None
+                if hausman["hausman_df"] is None
+                else int(hausman["hausman_df"])
+            )
     out["conf_int"] = {k: tuple(v) for k, v in plm["conf_int"].items()}
     return out
 
@@ -196,6 +204,13 @@ HAND_PARAMS = [
     for case in CASES
     for method in case.methods
     for cov_type in ALL_COV_TYPES
+]
+# 分散成分の手計算（`first_stage_variance_components`）はWallace-HussainとAmemiyaだけ。
+FIRST_STAGE_PARAMS = [
+    pytest.param(case, method, id=f"{case.name}-{method}")
+    for case in PLM_CASES
+    for method in case.methods
+    if method != "swamy_arora"
 ]
 METHOD_PARAMS = [
     pytest.param(case, method, id=f"{case.name}-{method}")
@@ -287,7 +302,7 @@ def test_matches_hand_computed(case, method, cov_type):
     )
 
 
-@pytest.mark.parametrize(("case", "method"), METHOD_PARAMS)
+@pytest.mark.parametrize(("case", "method"), FIRST_STAGE_PARAMS)
 def test_hand_computed_variance_components_match_plm(reference, case, method):
     """手計算の分散成分（閉形式・トレース項の式）がplmの`ercomp`と一致する
     （手計算の実装がplmと同じ推定量であることの確認）。"""

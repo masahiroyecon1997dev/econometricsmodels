@@ -447,15 +447,14 @@ def test_wagepan_hausman_matches_plm(reference, name, x_cols, cov_type):
     [
         pytest.param(pl.lit(2.0), id="constant_column"),
         pytest.param(pl.col("x_invariant") * 2.0, id="collinear_invariants"),
-        pytest.param(
-            pl.col("x1").mean().over("entity"), id="entity_mean_of_regressor"
-        ),
     ],
 )
 def test_collinear_time_invariant_regressor_raises_computation_error(z):
-    """定数列（切片と共線）・時間不変変数同士の共線・同じエンティティ平均の複製は、
-    設計行列が特異になるため`ComputationError`（定数列は変換後の最終回帰、
-    定数ではない列同士の共線はbetween回帰が検出する）。
+    """定数列（切片と共線）・時間不変変数同士の共線は、準偏差変換した最終回帰の設計行列が
+    特異になるため`ComputationError`（between回帰は後ろの列を落として進み、最終回帰は
+    全列を残すため特異性を検出する）。個体平均の列（相関ランダム効果）は別名になるのが
+    between回帰・ハウスマン補助回帰だけで、最終回帰は特異にならず推定できる
+    （`test_re_variance_method.py`）。
     """
     df = _frame(BALANCED).with_columns(z.alias("z"))
     with pytest.raises(ComputationError):

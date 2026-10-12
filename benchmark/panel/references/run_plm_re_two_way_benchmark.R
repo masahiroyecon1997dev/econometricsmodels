@@ -202,16 +202,21 @@ if (tilde_ok) {
     paste(tilde_names, collapse = "+")
   ))
   auxmod <- plm(formula = auxfm, data = auxdata, model = "pooling")
+  # `lm`は別名になった係数（`X*`・前の`X̃`の線形結合になる列。相関ランダム効果（Mundlak型）の
+  # 指定で`x*`の差が加えた個体平均・時点平均で表せる場合）を落とす。落ちずに残った`X̃`だけを
+  # 名前で選んで検定する（本実装の「別名の`X̃`は検定から外す」規則）。
   idx <- match(tilde_names, names(coef(auxmod)))
-  stopifnot(!anyNA(idx))
-  aux_vc <- vc_fun(auxmod)[idx, idx, drop = FALSE]
-  beta_aux <- coef(auxmod)[idx]
-  stat <- as.numeric(crossprod(beta_aux, solve(aux_vc, beta_aux)))
-  hausman <- list(
-    hausman_statistic = stat,
-    hausman_df = length(idx),
-    hausman_p_value = pchisq(stat, df = length(idx), lower.tail = FALSE)
-  )
+  idx <- idx[!is.na(idx)]
+  if (length(idx) > 0) {
+    aux_vc <- vc_fun(auxmod)[idx, idx, drop = FALSE]
+    beta_aux <- coef(auxmod)[idx]
+    stat <- as.numeric(crossprod(beta_aux, solve(aux_vc, beta_aux)))
+    hausman <- list(
+      hausman_statistic = stat,
+      hausman_df = length(idx),
+      hausman_p_value = pchisq(stat, df = length(idx), lower.tail = FALSE)
+    )
+  }
 }
 
 library(jsonlite)

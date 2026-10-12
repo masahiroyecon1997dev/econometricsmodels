@@ -516,10 +516,18 @@ def _baseline() -> pl.DataFrame:
             ("x1", "x3"),
             "within-transformed",
         ),
-        # 個体間でのみ変わる列同士の共線は個体平均のbetween回帰が、時点間でのみ変わる
-        # 列同士の共線は時点平均のbetween回帰が検出する。
-        ({"xi2": 2 * pl.col("xi")}, ("x1", "xi", "xi2"), "on entity means"),
-        ({"xt2": 2 * pl.col("xt")}, ("x1", "xt", "xt2"), "on time means"),
+        # 個体間でのみ変わる列同士・時点間でのみ変わる列同士の共線は、between回帰では後ろの列が
+        # 別名として落ちて進み、全列を残す最終回帰が検出する。
+        (
+            {"xi2": 2 * pl.col("xi")},
+            ("x1", "xi", "xi2"),
+            "quasi-demeaned",
+        ),
+        (
+            {"xt2": 2 * pl.col("xt")},
+            ("x1", "xt", "xt2"),
+            "quasi-demeaned",
+        ),
         # 説明変数のスケール差が極端でF検定の共分散部分行列がほぼ特異になる。
         (
             {"x1": 1e6 * pl.col("x1"), "x2": 1e-3 * pl.col("x2")},
@@ -537,7 +545,8 @@ def _baseline() -> pl.DataFrame:
 )
 def test_two_way_computation_error_paths(columns, x, path):
     """2-wayは分散成分に内部の2-way FEと2本のbetween回帰を使うため、失敗する経路が
-    1-wayと別になる。どれも`ComputationError`で、メッセージが失敗した回帰を示す。"""
+    1-wayと別になる。どれも`ComputationError`で、メッセージが失敗した回帰を示す。
+    between回帰は別名の列を落とすため、最終回帰が特異性を検出する。"""
     df = _baseline().with_columns(**columns)
     with pytest.raises(ComputationError, match=path):
         _fit(df, REOptions(time="time"), x=x)

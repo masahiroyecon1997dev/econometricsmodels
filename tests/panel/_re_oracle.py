@@ -161,12 +161,44 @@ def r_squared(
     return float(within), float(between), float(overall)
 
 
+_COLLINEARITY_TOL = 1e-7
+
+
+def independent_columns(columns: np.ndarray) -> list[bool]:
+    """列を左から順に見て、前の（独立と判定した）列の線形結合で表せる列を見つける。
+    Rの`lm`と同じ規則（前の独立な列への最小二乗残差のノルムが、元の列のノルムの`1e-7`倍
+    以下なら従属）。本実装のGram-Schmidt版とは別に、`lstsq`の残差で書いた。"""
+    kept: list[int] = []
+    flags: list[bool] = []
+    for j in range(columns.shape[1]):
+        col = columns[:, j]
+        norm = float(np.linalg.norm(col))
+        if kept:
+            basis = columns[:, kept]
+            resid = col - basis @ np.linalg.lstsq(basis, col, rcond=None)[0]
+        else:
+            resid = col
+        independent = norm > 0.0 and np.linalg.norm(resid) > (
+            _COLLINEARITY_TOL * norm
+        )
+        flags.append(bool(independent))
+        if independent:
+            kept.append(j)
+    return flags
+
+
 def _between_ssr_and_df(
     means: np.ndarray, target: np.ndarray, scale: np.ndarray
 ) -> tuple[float, int]:
     """単位平均`means`（行=単位）への`target`の回帰`[1, means]`の残差平方和と自由度。
-    単位間で一定の列は除き、自由度（`単位数 - K_b - 1`）にも数えない。"""
-    kept = means[:, _varies(means, scale)]
+    単位間で一定の列と、前の列の線形結合になる列（相関ランダム効果の個体平均の列が元の列と
+    同じ平均になる場合等。後ろの列を落とす）は除き、自由度（`単位数 - K_b - 1`）にも
+    数えない。"""
+    varying = means[:, _varies(means, scale)]
+    flags = independent_columns(
+        np.column_stack([np.ones(len(target)), varying])
+    )
+    kept = varying[:, flags[1:]]
     design = np.column_stack([np.ones(len(target)), kept])
     resid = target - design @ np.linalg.lstsq(design, target, rcond=None)[0]
     return float(resid @ resid), len(target) - design.shape[1]
@@ -440,12 +472,20 @@ def hand_computed(
 
     # ハウスマン検定の補助回帰: `y*`を`[1（変換なし）, X*, X̃]`に回帰し`X̃`の係数を
     # Wald検定する。`X̃`はwithin変動のある列のうち、`X*`との差が定数の列（補助回帰で
-    # 切片と共線）を除いたもの。
+    # 切片と共線）と、定数項・`X*`・前の`X̃`の線形結合になる列（個体平均を説明変数に加えた
+    # ときの`x̃_j`。`lm`が別名として落とす係数）を除いたもの。
     tested = [
         j
         for j in varying
         if np.ptp(x_star[:, j] - x_w[:, j]) > _REL_TOL * max(p.scale[j], 1.0)
     ]
+    if tested:
+        flags = independent_columns(
+            np.column_stack([np.ones(n), x_star, x_w[:, tested]])
+        )
+        tested = [
+            j for j, keep in zip(tested, flags[1 + k :], strict=True) if keep
+        ]
     if tested:
         aux = np.column_stack([np.ones(n), x_star, x_w[:, tested]])
         gamma = np.linalg.lstsq(aux, y_star, rcond=None)[0]

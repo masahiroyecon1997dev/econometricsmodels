@@ -86,7 +86,11 @@ aliased <- vapply(dimnames(feX)[[2L]], function(nm) {
   (max(d) - min(d)) <= 1e-9 * max(1, max(abs(reX[, nm])))
 }, logical(1))
 feX <- feX[, !aliased, drop = FALSE]
-stopifnot(ncol(feX) > 0)
+if (ncol(feX) == 0) {
+  library(jsonlite)
+  cat(toJSON(list(hausman_statistic = NA, hausman_df = NA, hausman_p_value = NA), auto_unbox = TRUE, null = "null"))
+  quit(save = "no")
+}
 
 tilde_names <- paste(dimnames(feX)[[2L]], "tilde", sep = ".")
 dimnames(feX)[[2L]] <- tilde_names
@@ -100,18 +104,30 @@ auxfm <- as.formula(paste0(
 auxmod <- plm(formula = auxfm, data = auxdata, model = "pooling")
 
 # 検定対象は`X̃`の係数だけ。plmの係数名は`.tilde`を含むため、名前で選ぶ。
+# `lm`は別名になった係数（`X*`・前の`X̃`の線形結合になる列。相関ランダム効果（Mundlak型）の
+# 指定で`x*`の差が加えた個体平均で表せる場合）を落とす。落ちずに残った`X̃`だけを検定する
+# （本実装の「別名の`X̃`は検定から外す」規則）。
 coef_names <- names(coef(auxmod))
 idx <- match(tilde_names, coef_names)
-stopifnot(!anyNA(idx))
-omega0 <- vc(auxmod)[idx, idx, drop = FALSE]
-beta <- coef(auxmod)[idx]
-stat <- as.numeric(crossprod(beta, solve(omega0, beta)))
-nvars <- length(idx)
-
+idx <- idx[!is.na(idx)]
 library(jsonlite)
-result <- list(
-  hausman_statistic = stat,
-  hausman_df = nvars,
-  hausman_p_value = pchisq(stat, df = nvars, lower.tail = FALSE)
-)
-cat(toJSON(result, auto_unbox = TRUE, digits = NA))
+if (length(idx) == 0) {
+  # 検定できる列が無い: JSONでは`null`。
+  result <- list(
+    hausman_statistic = NA,
+    hausman_df = NA,
+    hausman_p_value = NA
+  )
+  cat(toJSON(result, auto_unbox = TRUE, digits = NA, null = "null"))
+} else {
+  omega0 <- vc(auxmod)[idx, idx, drop = FALSE]
+  beta <- coef(auxmod)[idx]
+  stat <- as.numeric(crossprod(beta, solve(omega0, beta)))
+  nvars <- length(idx)
+  result <- list(
+    hausman_statistic = stat,
+    hausman_df = nvars,
+    hausman_p_value = pchisq(stat, df = nvars, lower.tail = FALSE)
+  )
+  cat(toJSON(result, auto_unbox = TRUE, digits = NA))
+}

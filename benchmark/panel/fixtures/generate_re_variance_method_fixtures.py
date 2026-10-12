@@ -67,8 +67,14 @@ from benchmark.panel.references.r import (
 )
 
 METHODS = ["wallace_hussain", "amemiya"]
-# `variance_method`の値 -> plmの`random.method`。
-PLM_RANDOM_METHOD = {"wallace_hussain": "walhus", "amemiya": "amemiya"}
+# `variance_method`の値 -> plmの`random.method`。`swamy_arora`は、バランスパネルの相関ランダム効果
+# （Mundlak型）のケースだけが持つ（Swamy-Aroraの他の入力は`re_time_invariant.json`・
+# `re_two_way.json`の担当）。
+PLM_RANDOM_METHOD = {
+    "swamy_arora": "swar",
+    "wallace_hussain": "walhus",
+    "amemiya": "amemiya",
+}
 ALL_COV_TYPES = ["classical", "hc1", "hc2", "hc3", "cluster", "dk"]
 PARTIAL_COV_TYPES = ["classical", "cluster"]
 HAUSMAN_KEY = "hausman"
@@ -95,6 +101,10 @@ class Case:
     # plmと値が異なる入力（観測数が等しく時点がずれた1-way）。plmは時点集合も同じことを要求して
     # トレース形を使い、本実装は観測数だけで閉形式を使う。plmとの一致は比べず、差そのものを固定する。
     differs_from_plm: bool = False
+    # 個体平均（`<列>_bar`）・時点平均（`<列>_tbar`）を説明変数に加える元の列（相関ランダム効果、
+    # Mundlak型）。平均は入力の全行から求め、`x`に列名で入れる。
+    means: tuple[str, ...] = ()
+    time_means: tuple[str, ...] = ()
     # `AMEMIYA_REJECTED_CASES`で、`ValidationError`のメッセージに載る列名（", "区切り）。
     rejected_columns: str = ""
 
@@ -117,6 +127,8 @@ class Case:
 
 BOTH = tuple(METHODS)
 WALHUS = ("wallace_hussain",)
+# バランスパネルのMundlak型（Amemiyaは時間不変の個体平均の列を拒否する）。
+SWAR_WALHUS = ("swamy_arora", "wallace_hussain")
 
 ONE_WAY_CASES = [
     Case("ow_baseline", "fe_baseline", ("x1", "x2"), BOTH, full=True),
@@ -204,6 +216,56 @@ ONE_WAY_CASES = [
         ("x1", "x2"),
         BOTH,
         full=True,
+    ),
+    # 個体平均を説明変数に加える相関ランダム効果（Mundlak型）。between回帰では`x1`と`x1_bar`の
+    # 個体平均が同じ列になり、ハウスマン補助回帰では`x̃1`が`x1*`と`x1_bar*`の差で表せる別名になる
+    # （`lm`が落とす）。`x1_bar`は列順で後ろでも前でも分散成分は同じ。
+    Case(
+        "ow_mundlak",
+        "fe_baseline",
+        ("x1", "x2", "x1_bar"),
+        SWAR_WALHUS,
+        full=True,
+        means=("x1",),
+    ),
+    Case(
+        "ow_mundlak_reordered",
+        "fe_baseline",
+        ("x1_bar", "x1", "x2"),
+        SWAR_WALHUS,
+        means=("x1",),
+    ),
+    # 全ての時間変化列の個体平均を加える（ハウスマン検定できる列が残らず、`hausman_*`は`None`）。
+    Case(
+        "ow_mundlak_all_means",
+        "fe_baseline",
+        ("x1", "x2", "x1_bar", "x2_bar"),
+        SWAR_WALHUS,
+        means=("x1", "x2"),
+    ),
+    # 不均衡パネル（個体平均は個体ごとの観測だけから求める）と、時間不変の列との併用。
+    Case(
+        "ow_mundlak_unbalanced",
+        "fe_unbalanced",
+        ("x1", "x2", "x1_bar"),
+        WALHUS,
+        full=True,
+        means=("x1",),
+    ),
+    Case(
+        "ow_mundlak_time_invariant",
+        "fe_time_invariant_multi_unbalanced",
+        ("x1", "x2", "z1", "x1_bar"),
+        WALHUS,
+        means=("x1",),
+    ),
+    Case(
+        "ow_mundlak_wagepan",
+        WAGEPAN_CSV,
+        (*WAGEPAN_X, "married_bar", "union_bar"),
+        SWAR_WALHUS,
+        full=True,
+        means=("married", "union"),
     ),
     # 全個体の観測数が同じで時点がずれたパネル（plmと値が異なる既知の差）。
     Case(
@@ -293,6 +355,37 @@ TWO_WAY_CASES = [
         two_way=True,
         full=True,
     ),
+    # 相関ランダム効果（Mundlak型）。個体平均だけなら時点方向の別名は無く、個体平均と時点平均の
+    # 両方を入れると個体平均の回帰で`x1_bar`が`x1`と、時点平均の回帰で`x1_tbar`が`x1`と同じ列に
+    # なる（ハウスマン補助回帰では`x̃1`が別名）。plmは係数の数が時点数以上だと推定できないため、
+    # 時点数6のパネルで説明変数は4個までにする。
+    Case(
+        "tw_mundlak_entity",
+        "fe_baseline",
+        ("x1", "x2", "x1_bar"),
+        SWAR_WALHUS,
+        two_way=True,
+        full=True,
+        means=("x1",),
+    ),
+    Case(
+        "tw_mundlak_time",
+        "fe_baseline",
+        ("x1", "x2", "x1_tbar"),
+        SWAR_WALHUS,
+        two_way=True,
+        time_means=("x1",),
+    ),
+    Case(
+        "tw_mundlak_both",
+        "fe_baseline",
+        ("x1", "x2", "x1_bar", "x1_tbar"),
+        SWAR_WALHUS,
+        two_way=True,
+        full=True,
+        means=("x1",),
+        time_means=("x1",),
+    ),
     # 個体効果なし（`σ_u²`が0に切り上げられる）・時点効果なし（`σ_λ²`が0に切り上げられる）。
     Case(
         "tw_no_entity_effect",
@@ -361,6 +454,25 @@ AMEMIYA_REJECTED_CASES = [
         ("amemiya",),
         rejected_columns="educ, black, hisp",
     ),
+    # 相関ランダム効果の個体平均の列は時間不変（2-wayでは一次元でしか変わらない）なので拒否される。
+    Case(
+        "amemiya_mundlak",
+        "fe_baseline",
+        ("x1", "x2", "x1_bar"),
+        ("amemiya",),
+        means=("x1",),
+        rejected_columns="x1_bar",
+    ),
+    Case(
+        "amemiya_mundlak_two_way",
+        "fe_baseline",
+        ("x1", "x2", "x1_bar", "x1_tbar"),
+        ("amemiya",),
+        two_way=True,
+        means=("x1",),
+        time_means=("x1",),
+        rejected_columns="x1_bar, x1_tbar",
+    ),
     Case(
         "amemiya_one_dimensional_two_way",
         "fe_one_dimensional_regressors",
@@ -372,19 +484,36 @@ AMEMIYA_REJECTED_CASES = [
 ]
 
 
+def with_mean_columns(df: pl.DataFrame, case: Case) -> pl.DataFrame:
+    """`case.means`の個体平均`<列>_bar`・`case.time_means`の時点平均`<列>_tbar`を加える。"""
+    return df.with_columns(
+        *(
+            pl.col(c).mean().over(case.entity_col).alias(f"{c}_bar")
+            for c in case.means
+        ),
+        *(
+            pl.col(c).mean().over(case.time_col).alias(f"{c}_tbar")
+            for c in case.time_means
+        ),
+    )
+
+
 def _formula(case: Case) -> str:
     return f"{case.y_col} ~ {' + '.join(case.x)}"
 
 
 def _csv_path(case: Case, tmp: Path) -> Path:
     if case.csv == WAGEPAN_CSV:
-        path = tmp / "wagepan.csv"
-        if not path.exists():
-            load_wooldridge("wagepan").with_columns(
-                pl.col(WAGEPAN_TIME).alias(WAGEPAN_TREND)
-            ).write_csv(path)
-        return path
-    return DATA_DIR / f"{case.csv}.csv"
+        frame = load_wooldridge("wagepan").with_columns(
+            pl.col(WAGEPAN_TIME).alias(WAGEPAN_TREND)
+        )
+    else:
+        if not (case.means or case.time_means):
+            return DATA_DIR / f"{case.csv}.csv"
+        frame = pl.read_csv(DATA_DIR / f"{case.csv}.csv")
+    path = tmp / f"{case.name}.csv"
+    with_mean_columns(frame, case).write_csv(path)
+    return path
 
 
 def _run_one_way(case: Case, csv_path: Path, method: str) -> dict:

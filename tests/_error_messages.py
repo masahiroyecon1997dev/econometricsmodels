@@ -389,6 +389,22 @@ ZERO_VARIANCE_AFTER_DEMEANING = (
 # `PanelError::TwoWayRequiresTime`。
 TWO_WAY_REQUIRES_TIME = "two-way estimation (fixed or random effects) requires the `time` option to be set"
 
+# RE: 未知の`variance_method`。
+UNKNOWN_VARIANCE_METHOD = (
+    "unknown variance_method: '{value}'. Expected one of 'swamy_arora', "
+    "'wallace_hussain', or 'amemiya'"
+)
+
+# RE: `variance_method="amemiya"`でwithin変動の無い列がある
+# （`PanelError::AmemiyaRequiresWithinVariation`）。
+AMEMIYA_NEEDS_WITHIN_VARIATION = (
+    'variance_method="amemiya" needs every regressor to vary within the '
+    "effect (within each entity; for two-way effects also across entities and "
+    "across periods), but these have no within variation: {columns}. Use "
+    'variance_method="swamy_arora" or "wallace_hussain", which accept such '
+    "regressors"
+)
+
 # RE: `cov_type="dk"`で`dk_time`が未指定（`time`は借用されない。1-way・2-wayとも）。
 DK_REQUIRES_TIME = (
     "cov_type='dk' requires the `dk_time` option: the column that defines the "

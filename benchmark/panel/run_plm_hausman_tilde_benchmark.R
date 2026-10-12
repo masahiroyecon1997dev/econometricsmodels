@@ -66,7 +66,14 @@ if (cov_type == "classical") {
 
 fm <- as.formula(formula_str)
 fe_mod <- plm(fm, data = pdf, model = "within", effect = "individual")
-re_mod <- plm(fm, data = pdf, model = "random", effect = "individual")
+# 分散成分の推定法は環境変数`PLM_RANDOM_METHOD`（既定`swar`、`run_plm_benchmark.R`と同じ）。
+re_mod <- plm(
+  fm,
+  data = pdf,
+  model = "random",
+  effect = "individual",
+  random.method = Sys.getenv("PLM_RANDOM_METHOD", "swar")
+)
 reY <- pmodel.response(re_mod)
 reX <- model.matrix(re_mod, cstcovar.rm = "intercept")
 feX <- model.matrix(fe_mod, cstcovar.rm = "all")

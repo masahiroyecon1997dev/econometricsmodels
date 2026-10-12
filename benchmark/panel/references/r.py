@@ -98,6 +98,13 @@ _PLM_RE_TWO_WAY_R_SCRIPT = (
 )
 
 
+def _random_method_env(random_method: str | None) -> dict[str, str] | None:
+    """plmの`random.method`を選ぶ環境変数（R側は`PLM_RANDOM_METHOD`、既定`swar`）。"""
+    return (
+        None if random_method is None else {"PLM_RANDOM_METHOD": random_method}
+    )
+
+
 def run_fixest_r(
     csv_path: Path,
     formula: str,
@@ -188,6 +195,7 @@ def run_re_plm_r(
     time_col: str = "time",
     maxlag: int | None = None,
     cluster_col: str | None = None,
+    random_method: str | None = None,
 ) -> dict:
     """`run_plm_benchmark.R`を呼び、係数・標準誤差・ハウスマン検定を得る（RE専用）。
 
@@ -204,6 +212,8 @@ def run_re_plm_r(
         maxlag: `cov_type="dk"`のバンド幅（`vcovSCC`の`maxlag`）。
         cluster_col: `cov_type="cluster"`でentity以外の列をクラスターに
             使う場合の列名（省略時はentityクラスター）。
+        random_method: plmの`random.method`（"swar"・"walhus"・"amemiya"、
+            省略時は"swar"）。
     """
     extra = [entity_col, time_col]
     if cov_type == "dk":
@@ -212,7 +222,14 @@ def run_re_plm_r(
         extra.append(str(maxlag))
     elif cov_type == "cluster" and cluster_col is not None:
         extra.append(cluster_col)
-    raw = run_r(_PLM_R_SCRIPT, csv_path, formula, cov_type, extra_args=extra)
+    raw = run_r(
+        _PLM_R_SCRIPT,
+        csv_path,
+        formula,
+        cov_type,
+        extra_args=extra,
+        env=_random_method_env(random_method),
+    )
     return normalize_names(
         raw,
         stat_key="test_stats",
@@ -262,6 +279,7 @@ def run_re_hausman_tilde_plm_r(
     entity_col: str = "entity",
     time_col: str = "time",
     maxlag: int | None = None,
+    random_method: str | None = None,
 ) -> dict:
     """`run_plm_hausman_tilde_benchmark.R`を呼び、時間不変の説明変数を含む
     RE用のハウスマン検定（`plm::phtest(method="aux")`の補助回帰を、検定する
@@ -269,7 +287,8 @@ def run_re_hausman_tilde_plm_r(
 
     `phtest`は時間不変変数があると`X̃`ではなく別の係数を検定してしまうため
     （`run_plm_hausman_tilde_benchmark.R`モジュールコメント参照）、
-    `run_re_hausman_plm_r`の代わりにこちらを使う。引数は同じ。
+    `run_re_hausman_plm_r`の代わりにこちらを使う。引数は同じ（`random_method`は
+    `run_re_plm_r`と同じ）。
     """
     extra = [entity_col, time_col]
     if cov_type == "dk":
@@ -282,6 +301,7 @@ def run_re_hausman_tilde_plm_r(
         formula,
         cov_type,
         extra_args=extra,
+        env=_random_method_env(random_method),
     )
 
 
@@ -320,6 +340,7 @@ def run_re_two_way_plm_r(
     entity_col: str = "entity",
     time_col: str = "time",
     maxlag: int | None = None,
+    random_method: str | None = None,
 ) -> dict:
     """`run_plm_re_two_way_benchmark.R`を呼び、2-way RE（バランスパネル、
     Swamy-Arora）の統計量一式を得る。
@@ -337,6 +358,8 @@ def run_re_two_way_plm_r(
         entity_col: エンティティ識別子の列名。
         time_col: 時点識別子の列名。
         maxlag: `cov_type="dk"`のバンド幅（`vcovSCC`の`maxlag`）。
+        random_method: plmの`random.method`（"swar"・"walhus"・"amemiya"、
+            省略時は"swar"）。
     """
     extra = [entity_col, time_col]
     if cov_type == "dk":
@@ -349,6 +372,7 @@ def run_re_two_way_plm_r(
         formula,
         cov_type,
         extra_args=extra,
+        env=_random_method_env(random_method),
     )
     return normalize_names(
         raw,

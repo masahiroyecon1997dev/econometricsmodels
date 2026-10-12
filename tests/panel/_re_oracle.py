@@ -172,6 +172,78 @@ def _between_ssr_and_df(
     return float(resid @ resid), len(target) - design.shape[1]
 
 
+def first_stage_variance_components(
+    p: _Panel, method: str, two_way: bool
+) -> tuple[float, float, float | None]:
+    """`plm::ercomp`の`walhus`・`amemiya`を、観測ごとの行列で書き下した
+    (σ_ε², σ_u², σ_λ²)（1-wayのσ_λ²は`None`、負の成分は0に切り上げ）。
+
+    1段目の残差`e`は、`wallace_hussain`ならプールドOLS、`amemiya`ならwithin推定
+    （切片は`ȳ - x̄'β̂`）。二乗和は`Q_w = Σ(within(e))²`・`Q_id = Σ_i T_i ē_i²`（2-wayは
+    `Q_ts = Σ_t N_t ē_t²`）。バランス（全個体の観測数が等しい。2-wayは常に）は
+    `plm`の`dfcor = 1`の閉形式、不均衡の1-wayは`dfcor = 3`のトレース項の式
+    （`Z`の`Between`・`Sum`・`within`を観測ごとに展開した行列で`plm`のソースどおりに組む）。
+    """
+    n, n_ent, n_per = p.n, p.n_entities, p.n_periods if two_way else 0
+    ones = np.ones((n, 1))
+    z = np.column_stack([ones, p.x])
+    if method == "wallace_hussain":
+        e = p.y - z @ np.linalg.lstsq(z, p.y, rcond=None)[0]
+    else:
+        xw = p.within(p.x, two_way)
+        yw = p.within(p.y, two_way)
+        beta = np.linalg.lstsq(xw, yw, rcond=None)[0]
+        e = p.y - p.x @ beta - (p.y.mean() - p.x.mean(axis=0) @ beta)
+    q_w = float(np.sum(p.within(e, two_way) ** 2))
+    e_ent = p.entity_mean(e)
+    q_id = float(np.sum(p.t_count * e_ent**2))
+    balanced = bool(np.all(p.t_count == p.t_count[0]))
+
+    if two_way or balanced:
+        t = n_per if two_way else p.t_count[0]
+        dof = n - n_ent - (n_per - 1 if two_way else 0)
+        eps = q_w / dof
+        u = max(0.0, q_id / (t * n_ent) - eps / t)
+        if not two_way:
+            return eps, u, None
+        e_per = p.time_mean(e)
+        q_ts = float(np.sum(p.e_count * e_per**2))
+        lam = max(0.0, q_ts / (n_ent * n_per) - eps / n_ent)
+        return eps, u, lam
+
+    # 不均衡の1-way: トレース項（観測ごとの`Between`・`Sum`・`within`）。
+    counts = p.t_count[p.ecodes]
+    z_between = p.entity_mean(z)[p.ecodes]
+    z_sum = z_between * counts[:, None]
+    z_within = z - z_between
+    if method == "wallace_hussain":
+        inv = np.linalg.inv(z.T @ z)
+        cp_w, cp_b, cp_s = (
+            z_within.T @ z_within,
+            z_between.T @ z_between,
+            z_sum.T @ z,
+        )
+        m_w_nu = n - n_ent - np.trace(inv @ cp_w)
+        m_w_eta = np.trace(inv @ cp_w @ inv @ cp_s)
+        m_id_nu = n_ent - np.trace(inv @ cp_b)
+        m_id_eta = (
+            n - 2 * np.trace(inv @ cp_s) + np.trace(inv @ cp_b @ inv @ cp_s)
+        )
+    else:
+        wx = p.within(p.x, False)
+        xb = p.entity_mean(p.x)[p.ecodes]
+        xb = xb - xb.mean(axis=0)
+        k = p.x.shape[1]
+        m_w_nu = n - n_ent - k
+        m_w_eta = 0.0
+        m_id_nu = n_ent - 1 + np.trace(np.linalg.inv(wx.T @ wx) @ (xb.T @ xb))
+        m_id_eta = n - float(np.sum(p.t_count**2)) / n
+    eps, u = np.linalg.solve(
+        [[m_w_nu, m_w_eta], [m_id_nu, m_id_eta]], [q_w, q_id]
+    )
+    return float(eps), max(0.0, float(u)), None
+
+
 def hand_computed(
     df: pl.DataFrame,
     x_cols: list[str],
@@ -185,6 +257,7 @@ def hand_computed(
     y_col: str = "y",
     dk_time_col: str | None = None,
     dk_bandwidth: int | None = None,
+    variance_method: str = "swamy_arora",
 ) -> dict:
     """`re-spec.md`3章の手順を、本実装を呼ばずに書き下した参照値（モジュールdoc参照）。
 
@@ -193,6 +266,8 @@ def hand_computed(
     パネルのSwamy-Arora）。`cluster`は観測ごとのクラスターのコード（省略時はentity）。
     DKの時点は`dk_time_col`（省略時は`time_col`）、バンド幅は`dk_bandwidth`（省略時は
     本実装の既定式`floor(4·(T/100)^(2/9))`）。2-wayは、バランスパネルが前提。
+    `variance_method`は分散成分の推定法（`"swamy_arora"`以外は
+    `first_stage_variance_components`、`sigma2`の指定が優先）。
 
     返す辞書のキーは`REResults`の統計量名に合わせてある（`conf_int`は
     `{名前: (下限, 上限)}`、ハウスマン検定が無いときは`hausman_*`が`None`、使わない側の
@@ -245,6 +320,10 @@ def hand_computed(
         t_bar = n_ent / np.sum(1.0 / p.t_count)
         sigma2_u = max(0.0, ssr_u / df_u - sigma2_eps / t_bar)
         sigma2_lambda = None
+    if sigma2 is None and variance_method != "swamy_arora":
+        sigma2_eps, sigma2_u, sigma2_lambda = first_stage_variance_components(
+            p, variance_method, two_way
+        )
     if sigma2 is not None:
         sigma2_eps, sigma2_u, *rest = sigma2
         sigma2_lambda = rest[0] if two_way else None

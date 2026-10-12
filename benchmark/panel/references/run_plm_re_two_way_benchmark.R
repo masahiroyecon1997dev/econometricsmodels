@@ -4,7 +4,8 @@
 #
 # `linearmodels.RandomEffects`は1-wayしか持たないため、2-wayの参照実装は`plm`だけ
 # （単一参照実装の例外、`docs/guide/verification.md`参照）。
-# `model = "random"`・`effect = "twoways"`・`random.method = "swar"`で推定する。
+# `model = "random"`・`effect = "twoways"`で推定する。分散成分の推定法`random.method`は環境変数
+# `PLM_RANDOM_METHOD`（既定`swar`、`walhus`・`amemiya`も可）。
 #
 # ## 出力
 #
@@ -68,7 +69,7 @@ model <- plm(
   data = pdf,
   model = "random",
   effect = "twoways",
-  random.method = "swar"
+  random.method = Sys.getenv("PLM_RANDOM_METHOD", "swar")
 )
 
 n_groups <- length(unique(df[[entity_col]]))
@@ -167,11 +168,19 @@ r2_overall <- 1 - sum((y_raw - fitted_o)^2) / sum((y_raw - mean(y_raw))^2)
 
 # ハウスマン検定（モジュールコメント参照）。
 hausman <- NULL
-fe_mod <- plm(fm, data = pdf, model = "within", effect = "twoways")
+# 全列が2-way within変換後に全ゼロなら、withinモデルは`empty model`で推定できない
+# （検定できる列が無い）。
+fe_mod <- tryCatch(
+  plm(fm, data = pdf, model = "within", effect = "twoways"),
+  error = function(e) NULL
+)
 re_y <- pmodel.response(model)
 re_x <- model.matrix(model, cstcovar.rm = "intercept")
-fe_x <- model.matrix(fe_mod, cstcovar.rm = "all")
-tilde_ok <- ncol(fe_x) > 0
+tilde_ok <- !is.null(fe_mod)
+if (tilde_ok) {
+  fe_x <- model.matrix(fe_mod, cstcovar.rm = "all")
+  tilde_ok <- ncol(fe_x) > 0
+}
 if (tilde_ok) {
   stopifnot(identical(row.names(re_x), row.names(fe_x)))
   # `X*`と`X̃`の差が定数になる列は、補助回帰で切片と共線になるため外す。

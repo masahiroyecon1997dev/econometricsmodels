@@ -78,6 +78,11 @@
 # 独立したR実装での検証は現時点で行わない（式自体の正しさはOLS本体のテストで
 # 別途担保済み）。
 #
+# ## 分散成分の推定法（環境変数`PLM_RANDOM_METHOD`）
+#
+# 既定は`swar`（Swamy-Arora）。環境変数`PLM_RANDOM_METHOD`に`walhus`・`amemiya`を指定すると、
+# その推定法の`random.method`で推定する（本実装の`variance_method`の参照）。
+#
 # 事前準備: plm・jsonlite（.devcontainer/Dockerfileに導入済み）
 #
 # 使用例:
@@ -113,7 +118,7 @@ model <- plm(
   as.formula(formula_str),
   data = pdf,
   model = "random",
-  random.method = "swar"
+  random.method = Sys.getenv("PLM_RANDOM_METHOD", "swar")
 )
 
 n_groups <- length(unique(df[[entity_col]]))

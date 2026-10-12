@@ -18,6 +18,7 @@ Rスクリプトはどの分岐でも `list(...)` で全キーを無条件に構
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from collections.abc import Iterable
 from pathlib import Path
@@ -55,9 +56,13 @@ def run_r(
     cov_type: str,
     *,
     extra_args: Iterable[str] = (),
+    env: dict[str, str] | None = None,
 ) -> dict:
     """`Rscript <r_script> <csv> <formula> <cov_type> [extra_args...]` を実行し、
     標準出力の JSON を dict として返す（名前の正規化は行わない）。
+
+    `env`は子プロセスの環境変数への追加分（例: plmの`random.method`を選ぶ
+    `PLM_RANDOM_METHOD`）。
 
     Raises:
         RuntimeError: Rスクリプトが非ゼロ終了した場合（stderr を添えて送出）。
@@ -70,7 +75,13 @@ def run_r(
         cov_type,
         *extra_args,
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    proc = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, **env} if env else None,
+    )
     if proc.returncode != 0:
         raise RuntimeError(f"Rscript failed ({' '.join(cmd)}):\n{proc.stderr}")
     return json.loads(proc.stdout)

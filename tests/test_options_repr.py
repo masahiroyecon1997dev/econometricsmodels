@@ -65,6 +65,7 @@ NON_DEFAULT_KWARGS: dict[type, dict[str, Any]] = {
         "cluster": "g",
         "dk_time": "t",
         "dk_bandwidth": 2,
+        "variance_method": "amemiya",
     },
     IVOptions: {
         "estimator": "gmm",
@@ -159,8 +160,10 @@ def test_repr_lists_fields_in_signature_order(cls: type) -> None:
 
 
 def test_re_options_positional_order_matches_fe_options():
-    """`REOptions`の位置引数の順は`FEOptions`と同じ（`time`の次が`cluster`、`dk_time`）。"""
-    re_options = REOptions("cluster", 0.9, "t", "g", "d", 2)
+    """`REOptions`の位置引数の順は`FEOptions`と同じ（`time`の次が`cluster`、`dk_time`）。
+    REだけの`variance_method`は末尾に置く（先頭6個の順を保つ）。"""
+    re_options = REOptions("cluster", 0.9, "t", "g", "d", 2, "amemiya")
+    assert re_options.variance_method == "amemiya"
     fe_options = FEOptions("cluster", 0.9, "t", "g", "d", 2)
     for name in (
         "cov_type",

@@ -206,18 +206,23 @@ def test_const_collision_in_instruments_with_include_intercept_raises():
         ).fit()
 
 
-def test_missing_column_raises(iv_dataset):
+@pytest.mark.parametrize("role", ["y", "x_exog", "x_endog", "instruments"])
+def test_missing_column_raises(iv_dataset, role):
+    """`y`・`x_exog`・`x_endog`・`instruments`のどの役割でも、存在しない列名は
+    `ValidationError`になる。
+    """
+    args = {
+        "y": "y",
+        "x_exog": ["x1"],
+        "x_endog": ["endog1"],
+        "instruments": ["z1", "z2"],
+    }
+    args[role] = "nonexistent" if role == "y" else ["nonexistent"]
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="nonexistent"),
     ):
-        IV(
-            iv_dataset,
-            y="y",
-            x_exog=["nonexistent"],
-            x_endog=["endog1"],
-            instruments=["z1", "z2"],
-        ).fit()
+        IV(iv_dataset, **args).fit()
 
 
 def test_data_not_polars_raises():

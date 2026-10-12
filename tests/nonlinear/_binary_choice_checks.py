@@ -498,6 +498,14 @@ def check_missing_column_raises(dataset, estimator_cls):
         estimator_cls(dataset, y="y", x=["does_not_exist"]).fit()
 
 
+def check_missing_y_column_raises(dataset, estimator_cls):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
+    ):
+        estimator_cls(dataset, y="does_not_exist", x=["x1", "x2"]).fit()
+
+
 def check_data_not_polars_raises(dataset, estimator_cls):
     """`data`/`new_data`にpolars以外のDataFrame（pandas等）を渡すと、内部実装
     （`pyo3-polars`の`get_columns`呼び出し）が漏れた`AttributeError`ではなく
@@ -789,7 +797,7 @@ def check_invalid_confidence_level_raises(
     """`confidence_level`が(0, 1)の範囲外（境界値0.0を含む）の場合
     `ValidationError`。
 
-    `marginal_effects(confidence_level=1.5)`側は
+    `marginal_effects(confidence_level=...)`側は
     `check_marginal_effects_confidence_level_out_of_range_raises`で確認する
     （OLS/WLSの`test_invalid_confidence_level_raises`と同型）。
     """
@@ -921,17 +929,17 @@ def check_marginal_effects_unknown_at_raises(dataset, estimator_cls):
 
 
 def check_marginal_effects_confidence_level_out_of_range_raises(
-    dataset, estimator_cls
+    dataset, estimator_cls, confidence_level
 ):
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
     with pytest.raises(
         ValidationError,
         match=escaped(
             msgs.INVALID_CONFIDENCE_LEVEL,
-            confidence_level=msgs.rust_f64(1.5),
+            confidence_level=msgs.rust_f64(confidence_level),
         ),
     ):
-        res.marginal_effects(confidence_level=1.5)
+        res.marginal_effects(confidence_level=confidence_level)
 
 
 # ── test_<solver>_validation.py: ComputationError ───────────────────

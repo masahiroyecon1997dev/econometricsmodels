@@ -45,6 +45,10 @@ def test_missing_column_raises(binary_dataset):
     _checks.check_missing_column_raises(binary_dataset, Probit)
 
 
+def test_missing_y_column_raises(binary_dataset):
+    _checks.check_missing_y_column_raises(binary_dataset, Probit)
+
+
 def test_data_not_polars_raises(binary_dataset):
     _checks.check_data_not_polars_raises(binary_dataset, Probit)
 
@@ -180,11 +184,12 @@ def test_marginal_effects_unknown_at_raises(binary_dataset):
     _checks.check_marginal_effects_unknown_at_raises(binary_dataset, Probit)
 
 
+@pytest.mark.parametrize("confidence_level", [1.5, 0.0, -0.1])
 def test_marginal_effects_confidence_level_out_of_range_raises(
-    binary_dataset,
+    binary_dataset, confidence_level
 ):
     _checks.check_marginal_effects_confidence_level_out_of_range_raises(
-        binary_dataset, Probit
+        binary_dataset, Probit, confidence_level
     )
 
 

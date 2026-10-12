@@ -43,6 +43,17 @@ def test_missing_weight_column_raises(dataset):
         WLS(dataset, y="y", x=["x1", "x2"], weight="nonexistent").fit()
 
 
+def test_weight_empty_string_raises(unit_weight_dataset):
+    """`weight`に空文字列を渡した場合も、`y`と同じ「列が存在しない」経路の
+    `ValidationError`になる（空文字列は存在しない列名の一種）。
+    """
+    df = unit_weight_dataset
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="")
+    ):
+        WLS(df, y="y", x=["x1", "x2"], weight="").fit()
+
+
 def test_weight_equals_y_raises(dataset):
     """`weight`に`y`と同じ列名を指定した場合`ValidationError`。"""
     with pytest.raises(
@@ -185,6 +196,22 @@ def test_missing_column_raises(unit_weight_dataset):
         match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="nonexistent"),
     ):
         WLS(df, y="y", x=["x1", "nonexistent"], weight="weight").fit()
+
+
+def test_missing_y_column_raises(unit_weight_dataset):
+    """`y`に存在しない列名を指定した場合`ValidationError`（`x`側の
+    `test_missing_column_raises`と対称）。
+    """
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="nonexistent"),
+    ):
+        WLS(
+            unit_weight_dataset,
+            y="nonexistent",
+            x=["x1", "x2"],
+            weight="weight",
+        ).fit()
 
 
 def test_data_not_polars_raises(unit_weight_dataset):
@@ -496,6 +523,18 @@ def test_cluster_nonexistent_column_raises(unit_weight_dataset):
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
+    ):
+        WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
+
+
+def test_cluster_empty_string_raises(unit_weight_dataset):
+    """`cluster=""`も「未指定」（`MISSING_CLUSTER_COLUMN`）ではなく、存在しない
+    列名として`ValidationError`になる。
+    """
+    df = unit_weight_dataset
+    options = WLSOptions(cov_type="cluster", cluster="")
+    with pytest.raises(
+        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="")
     ):
         WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
 

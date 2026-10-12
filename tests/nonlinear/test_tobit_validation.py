@@ -109,6 +109,14 @@ def test_missing_column_raises(censored_dataset):
         Tobit(censored_dataset, y="y", x=["does_not_exist"]).fit()
 
 
+def test_missing_y_column_raises(censored_dataset):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
+    ):
+        Tobit(censored_dataset, y="does_not_exist", x=["x1", "x2"]).fit()
+
+
 def test_data_not_polars_raises(censored_dataset):
     """`data`/`new_data`にpolars以外のDataFrame（pandas等）を渡すと、内部実装
     （`pyo3-polars`の`get_columns`呼び出し）が漏れた`AttributeError`ではなく
@@ -618,18 +626,19 @@ def test_marginal_effects_unknown_target_raises(censored_dataset):
         res.marginal_effects(target="bogus")
 
 
+@pytest.mark.parametrize("confidence_level", [1.5, 0.0, -0.1])
 def test_marginal_effects_confidence_level_out_of_range_raises(
-    censored_dataset,
+    censored_dataset, confidence_level
 ):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
     with pytest.raises(
         ValidationError,
         match=escaped(
             msgs.INVALID_CONFIDENCE_LEVEL,
-            confidence_level=msgs.rust_f64(1.5),
+            confidence_level=msgs.rust_f64(confidence_level),
         ),
     ):
-        res.marginal_effects(confidence_level=1.5)
+        res.marginal_effects(confidence_level=confidence_level)
 
 
 # ── ComputationError ──────────────────────────────────────────────────

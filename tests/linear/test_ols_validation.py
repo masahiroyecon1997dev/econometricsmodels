@@ -43,6 +43,14 @@ def test_missing_column_raises(dataset):
         OLS(dataset, y="y", x=["x1", "nonexistent"]).fit()
 
 
+def test_missing_y_column_raises(dataset):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="nonexistent"),
+    ):
+        OLS(dataset, y="nonexistent", x=["x1", "x2"]).fit()
+
+
 def test_y_empty_string_raises(dataset):
     """`y`に空文字列を渡した場合`ValidationError`（`x`側の`test_empty_x_raises`と
     対称。空文字列は存在しない列名の一種のため、`test_missing_column_raises`と

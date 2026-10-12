@@ -61,7 +61,6 @@ import polars as pl
 
 from benchmark.common import (
     BENCHMARKS_DIR,
-    hac_auto_lag,
     imbalanced_cluster_groups,
     load_frozen_dataset,
     run_fixture_cli,
@@ -145,12 +144,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
 
         fixtures[scenario] = {}
         for cov_type in R_COV_TYPES:
-            if cov_type == "hac":
-                lag = hac_auto_lag(n)
-                entry = run_lm_r(csv_path, formula, cov_type, hac_lag=lag)
-                entry["hac_lag"] = lag
-            else:
-                entry = run_lm_r(csv_path, formula, cov_type)
+            entry = run_lm_r(csv_path, formula, cov_type)
 
             fixtures[scenario][cov_type] = entry
 
@@ -201,14 +195,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             formula_no_intercept = f"{formula} - 1"
             fixtures[scenario]["no_intercept"] = {}
             for cov_type in R_COV_TYPES:
-                if cov_type == "hac":
-                    lag = hac_auto_lag(n)
-                    entry = run_lm_r(
-                        csv_path, formula_no_intercept, cov_type, hac_lag=lag
-                    )
-                    entry["hac_lag"] = lag
-                else:
-                    entry = run_lm_r(csv_path, formula_no_intercept, cov_type)
+                entry = run_lm_r(csv_path, formula_no_intercept, cov_type)
                 fixtures[scenario]["no_intercept"][cov_type] = entry
             fixtures[scenario]["no_intercept"]["cluster"] = _run_cluster_case(
                 df,
@@ -222,23 +209,12 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             # （generate_ols_fixtures.pyの横展開）。
             fixtures[scenario]["confidence_level"] = {}
             for cov_type in R_COV_TYPES:
-                if cov_type == "hac":
-                    lag = hac_auto_lag(n)
-                    entry = run_lm_r(
-                        csv_path,
-                        formula,
-                        cov_type,
-                        hac_lag=lag,
-                        confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
-                    )
-                    entry["hac_lag"] = lag
-                else:
-                    entry = run_lm_r(
-                        csv_path,
-                        formula,
-                        cov_type,
-                        confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
-                    )
+                entry = run_lm_r(
+                    csv_path,
+                    formula,
+                    cov_type,
+                    confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+                )
                 fixtures[scenario]["confidence_level"][cov_type] = entry
             fixtures[scenario]["confidence_level"]["cluster"] = (
                 _run_cluster_case(

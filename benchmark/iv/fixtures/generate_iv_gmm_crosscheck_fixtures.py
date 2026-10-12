@@ -49,7 +49,6 @@ import polars as pl
 from benchmark.common import (
     BENCHMARKS_DIR,
     DATA_DIR,
-    hac_auto_lag,
     imbalanced_cluster_groups,
     load_frozen_dataset,
     run_fixture_cli,
@@ -70,33 +69,6 @@ from benchmark.iv.fixtures.generate_iv_gmm_fixtures import (
     X_EXOG_BY_SCENARIO,
 )
 from benchmark.iv.references.r import run_momentfit_r
-
-
-def _run(
-    csv_path: Path,
-    formula: str,
-    n: int,
-    weight_type: str,
-    cov_type: str,
-    cluster: str | None = None,
-) -> dict:
-    """`run_momentfit_r`を呼ぶ。重みまたは共分散がhacのときは自動ラグ
-    （`hac_auto_lag(n)`、linearmodelsフィクスチャと同じ）を渡し、エントリに
-    `hac_lag`を残す。
-    """
-    uses_hac = "hac" in (weight_type, cov_type)
-    lag = hac_auto_lag(n) if uses_hac else None
-    entry = run_momentfit_r(
-        csv_path,
-        formula,
-        weight_type,
-        cov_type,
-        cluster=cluster,
-        hac_lag=lag,
-    )
-    if lag is not None:
-        entry["hac_lag"] = lag
-    return entry
 
 
 def _with_cluster_csv(
@@ -120,8 +92,8 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
 
         fixtures[scenario] = {"classical": {}}
         for cov_type in COV_TYPES:
-            fixtures[scenario]["classical"][cov_type] = _run(
-                csv_path, formula, n, "classical", cov_type
+            fixtures[scenario]["classical"][cov_type] = run_momentfit_r(
+                csv_path, formula, "classical", cov_type
             )
 
         if scenario != "baseline":
@@ -139,33 +111,40 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             imbalanced_cluster_groups(n),
             "_cluster_imbalanced",
         )
-        fixtures[scenario]["classical"]["cluster"] = _run(
-            pseudo, formula, n, "classical", "cluster", "cluster_group"
+        fixtures[scenario]["classical"]["cluster"] = run_momentfit_r(
+            pseudo, formula, "classical", "cluster", cluster="cluster_group"
         )
-        fixtures[scenario]["classical"]["cluster_imbalanced"] = _run(
-            imbalanced, formula, n, "classical", "cluster", "cluster_group"
+        fixtures[scenario]["classical"]["cluster_imbalanced"] = (
+            run_momentfit_r(
+                imbalanced,
+                formula,
+                "classical",
+                "cluster",
+                cluster="cluster_group",
+            )
         )
 
         for weight_type in OTHER_WEIGHT_TYPES:
             use_csv = pseudo if weight_type == "cluster" else csv_path
             fixtures[scenario][weight_type] = {
-                "classical": _run(
+                "classical": run_momentfit_r(
                     use_csv,
                     formula,
-                    n,
                     weight_type,
                     "classical",
-                    "cluster_group" if weight_type == "cluster" else None,
+                    cluster="cluster_group"
+                    if weight_type == "cluster"
+                    else None,
                 )
             }
         # 重みと共分散の型が一致するhac×hac（linearmodels側では別キー
         # `hac_weight_hac_cov`だが、ここでは[重み][共分散]の位置に格納する）。
-        fixtures[scenario]["hac"]["hac"] = _run(
-            csv_path, formula, n, "hac", "hac"
+        fixtures[scenario]["hac"]["hac"] = run_momentfit_r(
+            csv_path, formula, "hac", "hac"
         )
         for weight_type, cov_type in CROSS_WEIGHT_COV_COMBINATIONS:
-            fixtures[scenario][weight_type][cov_type] = _run(
-                pseudo, formula, n, weight_type, cov_type, "cluster_group"
+            fixtures[scenario][weight_type][cov_type] = run_momentfit_r(
+                pseudo, formula, weight_type, cov_type, cluster="cluster_group"
             )
 
     # 複数内生変数（k_endog>=2）。generate_iv_gmm_fixtures.pyのmulti_endogと同じ構成。
@@ -173,15 +152,10 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
     multi_formula = _ivreg_formula(
         ["x1"], ["endog1", "endog2"], ["z1", "z2", "z3"]
     )
-    multi_df, _ = load_frozen_dataset("iv", "baseline_multi_endog")
     fixtures["multi_endog"] = {
         "classical": {
-            cov_type: _run(
-                multi_csv,
-                multi_formula,
-                multi_df.height,
-                "classical",
-                cov_type,
+            cov_type: run_momentfit_r(
+                multi_csv, multi_formula, "classical", cov_type
             )
             for cov_type in COV_TYPES
         }
@@ -200,7 +174,6 @@ def build_no_intercept_fixtures(tmpdir: Path) -> dict:
     fixtures: dict = {}
     for name, spec in NO_INTERCEPT_SCENARIOS.items():
         csv_path = DATA_DIR / f"iv_{spec['dataset']}.csv"
-        df, _ = load_frozen_dataset("iv", spec["dataset"])
         formula = _ivreg_formula(
             spec["x_exog"],
             spec["x_endog"],
@@ -209,8 +182,8 @@ def build_no_intercept_fixtures(tmpdir: Path) -> dict:
         )
         fixtures[name] = {
             "classical": {
-                cov_type: _run(
-                    csv_path, formula, df.height, "classical", cov_type
+                cov_type: run_momentfit_r(
+                    csv_path, formula, "classical", cov_type
                 )
                 for cov_type in COV_TYPES
             }
@@ -230,26 +203,28 @@ def build_no_intercept_fixtures(tmpdir: Path) -> dict:
         "_no_intercept_cluster",
     )
     baseline = fixtures["baseline"]
-    baseline["classical"]["cluster"] = _run(
-        pseudo, baseline_formula, n, "classical", "cluster", "cluster_group"
+    baseline["classical"]["cluster"] = run_momentfit_r(
+        pseudo,
+        baseline_formula,
+        "classical",
+        "cluster",
+        cluster="cluster_group",
     )
     for weight_type in OTHER_WEIGHT_TYPES:
         use_csv = pseudo if weight_type == "cluster" else baseline_csv
         baseline[weight_type] = {
-            "classical": _run(
+            "classical": run_momentfit_r(
                 use_csv,
                 baseline_formula,
-                n,
                 weight_type,
                 "classical",
-                "cluster_group" if weight_type == "cluster" else None,
+                cluster="cluster_group" if weight_type == "cluster" else None,
             )
         }
 
     multi_csv = DATA_DIR / "iv_baseline_multi_endog.csv"
-    multi_df, _ = load_frozen_dataset("iv", "baseline_multi_endog")
     fixtures["multi_endog"]["robust"] = {
-        "classical": _run(
+        "classical": run_momentfit_r(
             multi_csv,
             _ivreg_formula(
                 ["x1"],
@@ -257,7 +232,6 @@ def build_no_intercept_fixtures(tmpdir: Path) -> dict:
                 ["z1", "z2", "z3"],
                 include_intercept=False,
             ),
-            multi_df.height,
             "robust",
             "classical",
         )
@@ -275,17 +249,18 @@ def build_wooldridge_fixtures(tmpdir: Path) -> dict:
     formula = _ivreg_formula(
         CARD_X_EXOG, ["educ"], ["nearc2", "nearc4"], y_col="lwage"
     )
-    n = df.height
 
     fixtures: dict = {
         "classical": {
-            cov_type: _run(csv_path, formula, n, "classical", cov_type)
+            cov_type: run_momentfit_r(csv_path, formula, "classical", cov_type)
             for cov_type in COV_TYPES
         }
     }
     for weight_type in CARD_OTHER_WEIGHT_TYPES:
         fixtures[weight_type] = {
-            "classical": _run(csv_path, formula, n, weight_type, "classical")
+            "classical": run_momentfit_r(
+                csv_path, formula, weight_type, "classical"
+            )
         }
     return fixtures
 

@@ -50,7 +50,6 @@ import polars as pl
 from benchmark.common import (
     BENCHMARKS_DIR,
     DATA_DIR,
-    hac_auto_lag,
     imbalanced_cluster_groups,
     load_frozen_dataset,
     run_fixture_cli,
@@ -132,12 +131,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
         for cov_type in COV_TYPES:
             if cov_type == "cluster":
                 continue  # baselineのみ別途複数パターンで確認（下記）
-            if cov_type == "hac":
-                lag = hac_auto_lag(n)
-                entry = run_ivreg_r(csv_path, formula, cov_type, hac_lag=lag)
-                entry["hac_lag"] = lag
-            else:
-                entry = run_ivreg_r(csv_path, formula, cov_type)
+            entry = run_ivreg_r(csv_path, formula, cov_type)
             fixtures[scenario][cov_type] = entry
 
         if scenario == "baseline":
@@ -160,20 +154,11 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
     multi_endog_formula = _ivreg_formula(
         ["x1"], ["endog1", "endog2"], ["z1", "z2", "z3"]
     )
-    multi_endog_df, _ = load_frozen_dataset("iv", "baseline_multi_endog")
-    multi_endog_n = multi_endog_df.height
     fixtures["multi_endog"] = {}
     for cov_type in COV_TYPES:
         if cov_type == "cluster":
             continue
-        if cov_type == "hac":
-            lag = hac_auto_lag(multi_endog_n)
-            entry = run_ivreg_r(
-                multi_endog_csv, multi_endog_formula, cov_type, hac_lag=lag
-            )
-            entry["hac_lag"] = lag
-        else:
-            entry = run_ivreg_r(multi_endog_csv, multi_endog_formula, cov_type)
+        entry = run_ivreg_r(multi_endog_csv, multi_endog_formula, cov_type)
         fixtures["multi_endog"][cov_type] = entry
 
     # 自由度1境界（df_resid=1ちょうど）。generate_iv_fixtures.pyのdf1と
@@ -181,18 +166,11 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
     # あるため、他シナリオと同じくその値をそのまま使う。
     df1_csv = DATA_DIR / "iv_baseline_df1.csv"
     df1_formula = _ivreg_formula([], ["endog1"], ["z1"])
-    df1_df, _ = load_frozen_dataset("iv", "baseline_df1")
-    df1_n = df1_df.height
     fixtures["df1"] = {}
     for cov_type in COV_TYPES:
         if cov_type == "cluster":
             continue  # n=3では意味のあるクラスタ数を確保できないため対象外
-        if cov_type == "hac":
-            lag = hac_auto_lag(df1_n)
-            entry = run_ivreg_r(df1_csv, df1_formula, cov_type, hac_lag=lag)
-            entry["hac_lag"] = lag
-        else:
-            entry = run_ivreg_r(df1_csv, df1_formula, cov_type)
+        entry = run_ivreg_r(df1_csv, df1_formula, cov_type)
         fixtures["df1"][cov_type] = entry
 
     fixtures["no_intercept"] = build_no_intercept_fixtures(tmpdir)
@@ -227,12 +205,7 @@ def build_no_intercept_fixtures(tmpdir: Path) -> dict:
         for cov_type in (
             NO_INTERCEPT_COV_TYPES + IVREG_NO_INTERCEPT_EXTRA_COV_TYPES
         ):
-            if cov_type == "hac":
-                lag = hac_auto_lag(df.height)
-                entry = run_ivreg_r(csv_path, formula, cov_type, hac_lag=lag)
-                entry["hac_lag"] = lag
-            else:
-                entry = run_ivreg_r(csv_path, formula, cov_type)
+            entry = run_ivreg_r(csv_path, formula, cov_type)
             entry["sargan_statistic"] = None
             entry["sargan_p_value"] = None
             fixtures[name][cov_type] = entry
@@ -296,18 +269,12 @@ def build_wooldridge_fixtures(tmpdir: Path) -> dict:
     formula = _ivreg_formula(
         CARD_X_EXOG, ["educ"], ["nearc2", "nearc4"], y_col="lwage"
     )
-    n = df.height
 
     fixtures: dict = {}
     for cov_type in COV_TYPES:
         if cov_type == "cluster":
             continue  # 対応する自然なカテゴリ列が無いため対象外（generate_iv_fixtures.py参照）。
-        if cov_type == "hac":
-            lag = hac_auto_lag(n)
-            entry = run_ivreg_r(csv_path, formula, cov_type, hac_lag=lag)
-            entry["hac_lag"] = lag
-        else:
-            entry = run_ivreg_r(csv_path, formula, cov_type)
+        entry = run_ivreg_r(csv_path, formula, cov_type)
         fixtures[cov_type] = entry
     return fixtures
 

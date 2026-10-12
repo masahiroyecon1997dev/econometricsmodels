@@ -20,6 +20,29 @@ import subprocess
 from collections.abc import Iterable
 from pathlib import Path
 
+import polars as pl
+
+from benchmark.common.dgp import hac_auto_lag
+
+
+def resolve_hac_lag(csv_path: Path, hac_lag: int | None) -> int:
+    """HACのラグ数を決める。未指定なら本実装の自動選択式`hac_auto_lag(n)`。
+
+    `n`はCSVの行数。フィクスチャ生成時はデータフレームをそのままCSVに書く
+    （または凍結CSVを読む）ため、データの観測数と一致する。linearmodels・
+    statsmodelsの主リファレンスが`hac_lags=None`のとき内部で同じ式を使うのと
+    同じ扱いで、Rクロスチェックの呼び出し側がラグを組み立てなくて済むように
+    する。ラッパーはここで決めた値を結果の`hac_lag`にも残す（テストが本実装へ
+    同じラグを渡すため）。
+
+    Args:
+        csv_path: Rへ渡すデータCSV。
+        hac_lag: 明示するラグ数。`None`なら自動選択。
+    """
+    if hac_lag is not None:
+        return hac_lag
+    return hac_auto_lag(pl.read_csv(csv_path).height)
+
 
 def run_r(
     r_script: Path,

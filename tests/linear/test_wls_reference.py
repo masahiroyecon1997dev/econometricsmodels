@@ -34,7 +34,7 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-from _assertions import assert_close, assert_dict_close
+from _assertions import assert_close, assert_dict_close, assert_fields_close
 from _constants import DATA_DIR
 from _helpers import (
     ROW_TIME,
@@ -83,6 +83,7 @@ def fixtures() -> dict:
 
 _assert_close = partial(assert_close, rtol=RTOL, atol=ATOL)
 _assert_dict_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
+_assert_fields_close = partial(assert_fields_close, rtol=RTOL, atol=ATOL)
 
 
 def _check_result(res, ref: dict, label: str) -> None:
@@ -100,16 +101,19 @@ def _check_result(res, ref: dict, label: str) -> None:
         _assert_close(our_lower, ref_lower, f"{label}/conf_lower/{name}")
         _assert_close(our_upper, ref_upper, f"{label}/conf_upper/{name}")
 
-    _assert_close(res.r_squared, ref["r_squared"], f"{label}/r_squared")
-    _assert_close(
-        res.adj_r_squared, ref["adj_r_squared"], f"{label}/adj_r_squared"
-    )
-    _assert_close(res.f_statistic, ref["f_statistic"], f"{label}/f_statistic")
-    _assert_close(res.f_p_value, ref["f_p_value"], f"{label}/f_p_value")
-    _assert_close(res.aic, ref["aic"], f"{label}/aic")
-    _assert_close(res.bic, ref["bic"], f"{label}/bic")
-    _assert_close(
-        res.log_likelihood, ref["log_likelihood"], f"{label}/log_likelihood"
+    _assert_fields_close(
+        res,
+        ref,
+        (
+            "r_squared",
+            "adj_r_squared",
+            "f_statistic",
+            "f_p_value",
+            "aic",
+            "bic",
+            "log_likelihood",
+        ),
+        label,
     )
     assert res.n_obs == ref["nobs"], f"{label}/n_obs"
 

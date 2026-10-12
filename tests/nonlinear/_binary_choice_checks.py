@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -35,6 +35,7 @@ import pytest
 from _assertions import (
     assert_close,
     assert_dict_close,
+    assert_fields_close,
     assert_params_table_matches_attributes,
     assert_same_estimates,
     check_margeff,
@@ -1250,6 +1251,17 @@ class BinaryChoiceReferenceConfig:
     ) -> None:
         assert_dict_close(ours, ref, label, rtol=self.rtol, atol=self.atol)
 
+    def assert_fields_close(
+        self,
+        res,
+        ref: dict,
+        fields: Iterable[str | tuple[str, str]],
+        label: str,
+    ) -> None:
+        assert_fields_close(
+            res, ref, fields, label, rtol=self.rtol, atol=self.atol
+        )
+
     def assert_dict_close_method(
         self, ours: dict[str, float], ref: dict[str, float], label: str
     ) -> None:
@@ -1280,27 +1292,20 @@ def check_result(
         config.assert_close(our_lower, ref_lower, f"{label}/conf_lower/{name}")
         config.assert_close(our_upper, ref_upper, f"{label}/conf_upper/{name}")
 
-    config.assert_close(
-        res.log_likelihood, ref["log_likelihood"], f"{label}/log_likelihood"
+    config.assert_fields_close(
+        res,
+        ref,
+        (
+            "log_likelihood",
+            "log_likelihood_null",
+            "lr_statistic",
+            "lr_p_value",
+            "pseudo_r_squared",
+            "aic",
+            "bic",
+        ),
+        label,
     )
-    config.assert_close(
-        res.log_likelihood_null,
-        ref["log_likelihood_null"],
-        f"{label}/log_likelihood_null",
-    )
-    config.assert_close(
-        res.lr_statistic, ref["lr_statistic"], f"{label}/lr_statistic"
-    )
-    config.assert_close(
-        res.lr_p_value, ref["lr_p_value"], f"{label}/lr_p_value"
-    )
-    config.assert_close(
-        res.pseudo_r_squared,
-        ref["pseudo_r_squared"],
-        f"{label}/pseudo_r_squared",
-    )
-    config.assert_close(res.aic, ref["aic"], f"{label}/aic")
-    config.assert_close(res.bic, ref["bic"], f"{label}/bic")
     assert res.n_obs == ref["nobs"], f"{label}/n_obs"
     assert res.df_model == ref["df_model"], f"{label}/df_model"
     assert res.df_resid == ref["df_resid"], f"{label}/df_resid"

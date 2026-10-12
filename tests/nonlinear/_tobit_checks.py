@@ -26,7 +26,7 @@ import json
 from pathlib import Path
 
 import polars as pl
-from _assertions import assert_close, assert_dict_close
+from _assertions import assert_close, assert_dict_close, assert_fields_close
 from _constants import DATA_DIR, MARGEFF_AT
 from _helpers import load_wooldridge_dataset
 from econometricsmodels import Tobit, TobitOptions
@@ -355,14 +355,14 @@ def check_result(
         rtol=rtol_point,
         atol=atol,
     )
-    for field in ("log_likelihood", "aic", "bic"):
-        assert_close(
-            getattr(res, field),
-            ref[field],
-            f"{label}/{field}",
-            rtol=rtol_point,
-            atol=atol,
-        )
+    assert_fields_close(
+        res,
+        ref,
+        ("log_likelihood", "aic", "bic"),
+        label,
+        rtol=rtol_point,
+        atol=atol,
+    )
     assert res.n_obs == ref["n_obs"], f"{label}/n_obs"
     assert res.df_model == ref["df_model"], f"{label}/df_model"
     assert res.df_resid == ref["df_resid"], f"{label}/df_resid"

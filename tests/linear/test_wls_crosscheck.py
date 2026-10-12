@@ -36,7 +36,7 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-from _assertions import assert_close, assert_dict_close
+from _assertions import assert_close, assert_dict_close, assert_fields_close
 from _constants import DATA_DIR
 from _helpers import (
     ROW_TIME,
@@ -78,36 +78,30 @@ def crosscheck() -> dict:
     return json.loads(FIXTURE_PATH.read_text())
 
 
-# _assert_close（dict版）はtests/_assertions.pyのassert_dict_closeに、
-# _assert_scalar_close（scalar版）はassert_closeに対応する
-# （test_ols_crosscheck.pyと同じ計算式に統合）。
-_assert_close = partial(assert_dict_close, rtol=RTOL_STRICT, atol=ATOL)
-_assert_scalar_close = partial(assert_close, rtol=RTOL_STRICT, atol=ATOL)
+_assert_dict_close = partial(assert_dict_close, rtol=RTOL_STRICT, atol=ATOL)
+_assert_close = partial(assert_close, rtol=RTOL_STRICT, atol=ATOL)
+_assert_fields_close = partial(
+    assert_fields_close, rtol=RTOL_STRICT, atol=ATOL
+)
 
 
 def _assert_fit_stats_close(res, ref: dict, label: str, rtol: float) -> None:
     """R²・調整済みR²・AIC・BIC・対数尤度・F統計量・F検定p値・t値・p値・
     信頼区間の検証（`test_ols_crosscheck.py`と同じ方針）。
     """
-    _assert_scalar_close(res.r_squared, ref["r_squared"], f"{label}/r_squared")
-    _assert_scalar_close(
-        res.adj_r_squared, ref["adj_r_squared"], f"{label}/adj_r_squared"
+    _assert_fields_close(
+        res,
+        ref,
+        ("r_squared", "adj_r_squared", "aic", "bic", "log_likelihood"),
+        label,
     )
-    _assert_scalar_close(res.aic, ref["aic"], f"{label}/aic")
-    _assert_scalar_close(res.bic, ref["bic"], f"{label}/bic")
-    _assert_scalar_close(
-        res.log_likelihood, ref["log_likelihood"], f"{label}/log_likelihood"
+    _assert_fields_close(
+        res, ref, ("f_statistic", "f_p_value"), label, rtol=rtol
     )
-    _assert_scalar_close(
-        res.f_statistic, ref["f_statistic"], f"{label}/f_statistic", rtol=rtol
-    )
-    _assert_scalar_close(
-        res.f_p_value, ref["f_p_value"], f"{label}/f_p_value", rtol=rtol
-    )
-    _assert_close(
+    _assert_dict_close(
         res.test_stats, ref["test_stats"], f"{label}/test_stats", rtol=rtol
     )
-    _assert_close(
+    _assert_dict_close(
         res.p_values,
         ref["p_values"],
         f"{label}/p_values",
@@ -115,10 +109,10 @@ def _assert_fit_stats_close(res, ref: dict, label: str, rtol: float) -> None:
     )
     for name, (ref_lower, ref_upper) in ref["conf_int"].items():
         our_lower, our_upper = res.conf_int[name]
-        _assert_scalar_close(
+        _assert_close(
             our_lower, ref_lower, f"{label}/conf_lower/{name}", rtol=rtol
         )
-        _assert_scalar_close(
+        _assert_close(
             our_upper, ref_upper, f"{label}/conf_upper/{name}", rtol=rtol
         )
 
@@ -135,8 +129,10 @@ def test_synthetic_matches_r(crosscheck, scenario, cov_type):
 
     ref = crosscheck["synthetic"][scenario][cov_type]
     label = f"{scenario}/{cov_type}/R"
-    _assert_close(res.params, ref["params"], f"{label} params")
-    _assert_close(res.std_errors, ref["std_errors"], f"{label} std_errors")
+    _assert_dict_close(res.params, ref["params"], f"{label} params")
+    _assert_dict_close(
+        res.std_errors, ref["std_errors"], f"{label} std_errors"
+    )
     _assert_fit_stats_close(res, ref, label, rtol=RTOL_STRICT)
 
 
@@ -156,8 +152,10 @@ def test_cluster_matches_r(crosscheck):
     ).fit()
 
     ref = crosscheck["synthetic"]["baseline"]["cluster"]
-    _assert_close(res.params, ref["params"], "cluster/R params")
-    _assert_close(res.std_errors, ref["std_errors"], "cluster/R std_errors")
+    _assert_dict_close(res.params, ref["params"], "cluster/R params")
+    _assert_dict_close(
+        res.std_errors, ref["std_errors"], "cluster/R std_errors"
+    )
     _assert_fit_stats_close(res, ref, "cluster/R", rtol=RTOL_STRICT)
 
 
@@ -181,8 +179,10 @@ def test_cluster_imbalanced_matches_r(crosscheck):
     ).fit()
 
     ref = crosscheck["synthetic"]["baseline"]["cluster_imbalanced"]
-    _assert_close(res.params, ref["params"], "cluster_imbalanced/R params")
-    _assert_close(
+    _assert_dict_close(
+        res.params, ref["params"], "cluster_imbalanced/R params"
+    )
+    _assert_dict_close(
         res.std_errors, ref["std_errors"], "cluster_imbalanced/R std_errors"
     )
     _assert_fit_stats_close(res, ref, "cluster_imbalanced/R", rtol=RTOL_STRICT)
@@ -205,8 +205,10 @@ def test_cluster_g2_matches_r(crosscheck):
     ).fit()
 
     ref = crosscheck["synthetic"]["baseline"]["cluster_g2"]
-    _assert_close(res.params, ref["params"], "cluster_g2/R params")
-    _assert_close(res.std_errors, ref["std_errors"], "cluster_g2/R std_errors")
+    _assert_dict_close(res.params, ref["params"], "cluster_g2/R params")
+    _assert_dict_close(
+        res.std_errors, ref["std_errors"], "cluster_g2/R std_errors"
+    )
     _assert_fit_stats_close(res, ref, "cluster_g2/R", rtol=RTOL_STRICT)
 
 
@@ -234,8 +236,10 @@ def test_cluster_ill_conditioned_matches_r(crosscheck, scenario):
 
     ref = crosscheck["synthetic"][scenario]["cluster"]
     label = f"{scenario}/cluster/R"
-    _assert_close(res.params, ref["params"], f"{label} params")
-    _assert_close(res.std_errors, ref["std_errors"], f"{label} std_errors")
+    _assert_dict_close(res.params, ref["params"], f"{label} params")
+    _assert_dict_close(
+        res.std_errors, ref["std_errors"], f"{label} std_errors"
+    )
     _assert_fit_stats_close(res, ref, label, rtol=RTOL_STRICT)
 
 
@@ -257,8 +261,8 @@ def test_weight_in_x_matches_r(crosscheck):
     ).fit()
 
     ref = crosscheck["synthetic"]["baseline"]["weight_in_x"]
-    _assert_close(res.params, ref["params"], "weight_in_x/R params")
-    _assert_close(
+    _assert_dict_close(res.params, ref["params"], "weight_in_x/R params")
+    _assert_dict_close(
         res.std_errors, ref["std_errors"], "weight_in_x/R std_errors"
     )
     _assert_fit_stats_close(res, ref, "weight_in_x/R", rtol=RTOL_STRICT)
@@ -287,8 +291,10 @@ def test_hac_matches_r(crosscheck, scenario):
     ).fit()
 
     label = f"{scenario}/hac/R"
-    _assert_close(res.params, ref["params"], f"{label} params")
-    _assert_close(res.std_errors, ref["std_errors"], f"{label} std_errors")
+    _assert_dict_close(res.params, ref["params"], f"{label} params")
+    _assert_dict_close(
+        res.std_errors, ref["std_errors"], f"{label} std_errors"
+    )
     _assert_fit_stats_close(res, ref, label, rtol=RTOL_STRICT)
 
 
@@ -333,8 +339,10 @@ def test_no_intercept_matches_r(crosscheck, cov_type):
     ref = crosscheck["synthetic"]["baseline"]["no_intercept"][cov_type]
     label = f"no_intercept/{cov_type}/R"
     assert res.param_names == ["x1", "x2", "x3"]
-    _assert_close(res.params, ref["params"], f"{label} params")
-    _assert_close(res.std_errors, ref["std_errors"], f"{label} std_errors")
+    _assert_dict_close(res.params, ref["params"], f"{label} params")
+    _assert_dict_close(
+        res.std_errors, ref["std_errors"], f"{label} std_errors"
+    )
     _assert_fit_stats_close(res, ref, label, rtol=RTOL_STRICT)
 
 
@@ -360,8 +368,8 @@ def test_no_intercept_hac_matches_r(crosscheck):
 
     label = "no_intercept/hac/R"
     assert res.param_names == ["x1", "x2", "x3"]
-    _assert_close(res.params, ref["params"], f"{label} params")
-    _assert_close(
+    _assert_dict_close(res.params, ref["params"], f"{label} params")
+    _assert_dict_close(
         res.std_errors,
         ref["std_errors"],
         f"{label} std_errors",
@@ -396,8 +404,10 @@ def test_confidence_level_matches_r(crosscheck, cov_type):
 
     ref = crosscheck["synthetic"]["baseline"]["confidence_level"][cov_type]
     label = f"confidence_level/{cov_type}/R"
-    _assert_close(res.params, ref["params"], f"{label} params")
-    _assert_close(res.std_errors, ref["std_errors"], f"{label} std_errors")
+    _assert_dict_close(res.params, ref["params"], f"{label} params")
+    _assert_dict_close(
+        res.std_errors, ref["std_errors"], f"{label} std_errors"
+    )
     _assert_fit_stats_close(res, ref, label, rtol=RTOL_STRICT)
 
 
@@ -422,8 +432,8 @@ def test_confidence_level_hac_matches_r(crosscheck):
     ).fit()
 
     label = "confidence_level/hac/R"
-    _assert_close(res.params, ref["params"], f"{label} params")
-    _assert_close(
+    _assert_dict_close(res.params, ref["params"], f"{label} params")
+    _assert_dict_close(
         res.std_errors,
         ref["std_errors"],
         f"{label} std_errors",
@@ -453,8 +463,10 @@ def test_401ksubs_matches_r(crosscheck, cov_type):
 
     ref = crosscheck["wooldridge"]["401ksubs"][cov_type]
     label = f"401ksubs/{cov_type}/R"
-    _assert_close(res.params, ref["params"], f"{label} params")
-    _assert_close(res.std_errors, ref["std_errors"], f"{label} std_errors")
+    _assert_dict_close(res.params, ref["params"], f"{label} params")
+    _assert_dict_close(
+        res.std_errors, ref["std_errors"], f"{label} std_errors"
+    )
     _assert_fit_stats_close(res, ref, label, rtol=RTOL_STRICT)
 
 
@@ -478,8 +490,8 @@ def test_401ksubs_cluster_matches_r(crosscheck):
     ).fit()
 
     ref = crosscheck["wooldridge"]["401ksubs"]["cluster"]
-    _assert_close(res.params, ref["params"], "401ksubs/cluster/R params")
-    _assert_close(
+    _assert_dict_close(res.params, ref["params"], "401ksubs/cluster/R params")
+    _assert_dict_close(
         res.std_errors, ref["std_errors"], "401ksubs/cluster/R std_errors"
     )
     _assert_fit_stats_close(res, ref, "401ksubs/cluster/R", rtol=RTOL_STRICT)

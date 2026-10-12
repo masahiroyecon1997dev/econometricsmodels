@@ -56,7 +56,7 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-from _assertions import assert_close, assert_dict_close
+from _assertions import assert_close, assert_dict_close, assert_fields_close
 from _constants import DATA_DIR
 from _helpers import load_wooldridge_dataset
 from _tolerances import TOLERANCES
@@ -105,6 +105,7 @@ def crosscheck() -> dict:
 
 _assert_close = partial(assert_close, rtol=RTOL, atol=ATOL)
 _assert_dict_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
+_assert_fields_close = partial(assert_fields_close, rtol=RTOL, atol=ATOL)
 # p値は絶対誤差の下限を設けず相対誤差だけで比較する（`test_fe_crosscheck.py`と
 # 同じ理由）。
 _assert_p_close = partial(assert_close, rtol=RTOL_P_VALUE, atol=ATOL_P_VALUE)
@@ -137,14 +138,9 @@ def _check_result(
         _assert_close(our_lower, ref_lower, f"{label}/conf_lower/{name}")
         _assert_close(our_upper, ref_upper, f"{label}/conf_upper/{name}")
 
-    _assert_close(res.f_statistic, ref["f_statistic"], f"{label}/f_statistic")
     _assert_p_close(res.f_p_value, ref["f_p_value"], f"{label}/f_p_value")
     # within R²はcov_typeに依存しない（plmのsummary(model)$r.squared）。
-    _assert_close(
-        res.r_squared_within,
-        ref["r_squared_within"],
-        f"{label}/r_squared_within",
-    )
+    _assert_fields_close(res, ref, ("f_statistic", "r_squared_within"), label)
 
 
 def _expected_df(

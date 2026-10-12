@@ -37,7 +37,7 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-from _assertions import assert_close, assert_dict_close
+from _assertions import assert_close, assert_dict_close, assert_fields_close
 from _constants import DATA_DIR
 from _helpers import (
     hac_time_for,
@@ -73,6 +73,7 @@ ATOL = TOLERANCES["iv_gmm_crosscheck"]["atol"]
 
 _assert_close = partial(assert_close, rtol=RTOL, atol=ATOL)
 _assert_dict_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
+_assert_fields_close = partial(assert_fields_close, rtol=RTOL, atol=ATOL)
 
 CLUSTER_COL = "cluster_group"
 
@@ -104,10 +105,12 @@ def _check_result(res, ref: dict, label: str) -> None:
 
     assert res.n_obs == ref["nobs"], f"{label}/n_obs"
     assert res.df_resid == ref["df_resid"], f"{label}/df_resid"
-    _assert_close(
-        res.wald_statistic, ref["f_statistic"], f"{label}/f_statistic"
+    _assert_fields_close(
+        res,
+        ref,
+        (("wald_statistic", "f_statistic"), ("wald_p_value", "f_p_value")),
+        label,
     )
-    _assert_close(res.wald_p_value, ref["f_p_value"], f"{label}/f_p_value")
 
     if ref["hansen_j_statistic"] is None:
         assert res.overid_statistic is None, f"{label}/overid_statistic"

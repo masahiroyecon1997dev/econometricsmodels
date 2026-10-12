@@ -52,7 +52,7 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-from _assertions import assert_close, assert_dict_close
+from _assertions import assert_close, assert_dict_close, assert_fields_close
 from _constants import DATA_DIR
 from _helpers import (
     hac_time_for,
@@ -108,6 +108,9 @@ def crosscheck_wooldridge() -> dict:
 # assert_dict_closeに対応する（フェーズ3.5で計算式のバグを修正した上で統合）。
 _assert_close = partial(assert_close, rtol=RTOL_STRICT, atol=ATOL)
 _assert_dict_close = partial(assert_dict_close, rtol=RTOL_STRICT, atol=ATOL)
+_assert_fields_close = partial(
+    assert_fields_close, rtol=RTOL_STRICT, atol=ATOL
+)
 
 
 def _check_result(
@@ -146,16 +149,17 @@ def _check_result(
     assert res.n_obs == ref["nobs"], f"{label}/n_obs"
     assert res.df_resid == ref["df_resid"], f"{label}/df_resid"
 
-    _assert_close(res.r_squared, ref["r_squared"], f"{label}/r_squared")
-    _assert_close(
-        res.adj_r_squared, ref["adj_r_squared"], f"{label}/adj_r_squared"
+    _assert_fields_close(
+        res,
+        ref,
+        (
+            "r_squared",
+            "adj_r_squared",
+            ("wald_statistic", "f_statistic"),
+            ("wald_p_value", "f_p_value"),
+        ),
+        label,
     )
-    _assert_close(
-        res.wald_statistic,
-        ref["f_statistic"],
-        f"{label}/f_statistic",
-    )
-    _assert_close(res.wald_p_value, ref["f_p_value"], f"{label}/f_p_value")
 
     _assert_dict_close(
         res.weak_instrument_f_statistics,

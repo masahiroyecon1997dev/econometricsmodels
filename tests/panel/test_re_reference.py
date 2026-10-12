@@ -37,7 +37,7 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-from _assertions import assert_close, assert_dict_close
+from _assertions import assert_close, assert_dict_close, assert_fields_close
 from _constants import DATA_DIR
 from _helpers import load_wooldridge_dataset
 from _tolerances import TOLERANCES
@@ -65,6 +65,7 @@ def fixtures() -> dict:
 
 _assert_close = partial(assert_close, rtol=RTOL, atol=ATOL)
 _assert_dict_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
+_assert_fields_close = partial(assert_fields_close, rtol=RTOL, atol=ATOL)
 
 
 def _check_result(res, ref: dict, label: str) -> None:
@@ -89,28 +90,22 @@ def _check_result(res, ref: dict, label: str) -> None:
 
     # `f_statistic_robust`（cov_type連動のWald二次形式）と比較する。
     # classical/hc1ともに不均衡パネルでも機械精度で一致する。
-    _assert_close(res.f_statistic, ref["f_statistic"], f"{label}/f_statistic")
-    _assert_close(res.f_p_value, ref["f_p_value"], f"{label}/f_p_value")
-    _assert_close(
-        res.r_squared_within,
-        ref["r_squared_within"],
-        f"{label}/r_squared_within",
-    )
-    _assert_close(
-        res.r_squared_between,
-        ref["r_squared_between"],
-        f"{label}/r_squared_between",
-    )
-    _assert_close(
-        res.r_squared_overall,
-        ref["r_squared_overall"],
-        f"{label}/r_squared_overall",
+    _assert_fields_close(
+        res,
+        ref,
+        (
+            "f_statistic",
+            "f_p_value",
+            "r_squared_within",
+            "r_squared_between",
+            "r_squared_overall",
+        ),
+        label,
     )
 
     # 分散成分（linearmodels `variance_decomposition`）と準偏差変換の重み
     # （`theta`、エンティティごと）。1-wayは`σ_λ²`・2-wayの重みを持たない。
-    _assert_close(res.sigma2_eps, ref["sigma2_eps"], f"{label}/sigma2_eps")
-    _assert_close(res.sigma2_u, ref["sigma2_u"], f"{label}/sigma2_u")
+    _assert_fields_close(res, ref, ("sigma2_eps", "sigma2_u"), label)
     _assert_dict_close(res.theta, ref["theta"], f"{label}/theta")
     assert len(res.theta) == len(ref["theta"]), f"{label}/theta length"
     assert res.sigma2_lambda is None, f"{label}/sigma2_lambda"

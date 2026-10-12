@@ -54,7 +54,7 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-from _assertions import assert_close, assert_dict_close
+from _assertions import assert_close, assert_dict_close, assert_fields_close
 from _constants import DATA_DIR
 from _helpers import load_wooldridge_dataset
 from _tolerances import TOLERANCES
@@ -115,6 +115,7 @@ def crosscheck() -> dict:
 
 _assert_close = partial(assert_close, rtol=RTOL, atol=ATOL)
 _assert_dict_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
+_assert_fields_close = partial(assert_fields_close, rtol=RTOL, atol=ATOL)
 # p値は絶対誤差の下限を設けず相対誤差だけで比較する（下限があると、参照値が
 # 1e-8未満の裾のp値が0.0でも通ってしまう）。
 _assert_p_close = partial(assert_close, rtol=RTOL_P_VALUE, atol=ATOL_P_VALUE)
@@ -143,19 +144,13 @@ def _check_result(res, ref: dict, label: str) -> None:
         _assert_close(our_lower, ref_lower, f"{label}/conf_lower/{name}")
         _assert_close(our_upper, ref_upper, f"{label}/conf_upper/{name}")
 
-    _assert_close(res.f_statistic, ref["f_statistic"], f"{label}/f_statistic")
+    # f_p_valueは裾でも0.0を通さないよう、p値用の許容誤差（下限なし）で比べる。
     _assert_p_close(res.f_p_value, ref["f_p_value"], f"{label}/f_p_value")
-    _assert_close(res.aic, ref["aic"], f"{label}/aic")
-    _assert_close(res.bic, ref["bic"], f"{label}/bic")
-    _assert_close(
-        res.log_likelihood, ref["log_likelihood"], f"{label}/log_likelihood"
+    _assert_fields_close(
+        res, ref, ("f_statistic", "aic", "bic", "log_likelihood"), label
     )
     if "r_squared_within" in ref:
-        _assert_close(
-            res.r_squared_within,
-            ref["r_squared_within"],
-            f"{label}/r_squared_within",
-        )
+        _assert_fields_close(res, ref, ("r_squared_within",), label)
 
 
 def _options(cov_type: str, *, two_way: bool) -> FEOptions:

@@ -38,7 +38,7 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-from _assertions import assert_close, assert_dict_close
+from _assertions import assert_close, assert_dict_close, assert_fields_close
 from _constants import DATA_DIR
 from _helpers import load_wooldridge_dataset
 from _tolerances import TOLERANCES
@@ -85,6 +85,7 @@ def fixtures() -> dict:
 
 _assert_close = partial(assert_close, rtol=RTOL, atol=ATOL)
 _assert_dict_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
+_assert_fields_close = partial(assert_fields_close, rtol=RTOL, atol=ATOL)
 
 
 def _check_result(
@@ -109,23 +110,11 @@ def _check_result(
     assert res.df_model == ref["df_model"], f"{label}/df_model"
     assert res.n_entities == ref["n_entities"], f"{label}/n_entities"
 
-    _assert_close(res.f_statistic, ref["f_statistic"], f"{label}/f_statistic")
-    _assert_close(res.f_p_value, ref["f_p_value"], f"{label}/f_p_value")
+    _assert_fields_close(res, ref, ("f_statistic", "f_p_value"), label)
     if check_r_squared_within:
-        _assert_close(
-            res.r_squared_within,
-            ref["r_squared_within"],
-            f"{label}/r_squared_within",
-        )
-    _assert_close(
-        res.r_squared_between,
-        ref["r_squared_between"],
-        f"{label}/r_squared_between",
-    )
-    _assert_close(
-        res.r_squared_overall,
-        ref["r_squared_overall"],
-        f"{label}/r_squared_overall",
+        _assert_fields_close(res, ref, ("r_squared_within",), label)
+    _assert_fields_close(
+        res, ref, ("r_squared_between", "r_squared_overall"), label
     )
 
 

@@ -1,26 +1,26 @@
 """数値比較アサーションの共通ヘルパー。
 
-主リファレンス（statsmodels/linearmodels）との数値比較テスト6ファイル
-（`test_ols_reference.py`/`test_wls_reference.py`/`test_logit_reference.py`/
-`test_probit_reference.py`/`test_iv_reference.py`/`test_iv_gmm_reference.py`）が
-共有する`assert_close`/`assert_dict_close`と、
-Logit/Probitの`check_margeff`（reference版）を置く。
+主リファレンス（statsmodels/linearmodels）・独立実装（R）との数値比較テスト
+（`test_*_reference.py`/`test_*_crosscheck.py`）が共有する。
 
-crosscheck系（`test_*_crosscheck.py`）は`test_ols_crosscheck.py`/
-`test_wls_crosscheck.py`/`test_iv_crosscheck.py`がこのモジュールの
-`assert_close`/`assert_dict_close`を`functools.partial`で許容誤差を束縛して
-再利用している。`test_logit_crosscheck.py`/`test_probit_crosscheck.py`は
-`assert_close`/`assert_dict_close`は独自実装のままだが、限界効果は
-`check_margeff`（`rtol_conf_int`/`atol_p_value`で統計量別の許容誤差を指定）を
-共有している。`_check_result`は手法ごとに検証するフィールド自体が異なるため、
-いずれもこのモジュールには含めない（Logit/Probit間では検証フィールドが同一の
-ため、両者の`_check_result`は`tests/nonlinear/_binary_choice_checks.py`の
-`check_result`にまとめている）。
+- `assert_close`/`assert_dict_close`: スカラー・係数名キーの辞書の比較。各テスト
+  ファイルは`functools.partial`で許容誤差を束縛して`_assert_close`/
+  `_assert_dict_close`として使う（`_assert_close`はスカラー版、
+  `_assert_dict_close`は辞書版で統一）。
+- `assert_fields_close`: 結果の属性（適合度統計量等）をフィクスチャの同名キーと
+  まとめて比較する。属性名とキーが異なるときは`(属性名, キー)`で渡す。
+- `check_margeff`: Logit/Probitの限界効果6統計量の比較。
+
+`_check_result`は手法ごとに検証するフィールド自体が異なるため、このモジュールには
+含めない（Logit/Probit間では検証フィールドが同一のため、両者のreference側は
+`tests/nonlinear/_binary_choice_checks.py`の`check_result`にまとめている）。
 
 `MARGEFF_AT`定数は`_constants.py`に置く。
 """
 
 from __future__ import annotations
+
+from collections.abc import Iterable
 
 from _constants import MARGEFF_AT
 
@@ -33,6 +33,34 @@ def assert_close(
     assert diff <= tol, (
         f"{label}: ours={ours!r}, ref={ref!r}, diff={diff!r} > tol={tol!r}"
     )
+
+
+def assert_fields_close(
+    res,
+    ref: dict,
+    fields: Iterable[str | tuple[str, str]],
+    label: str,
+    *,
+    rtol: float,
+    atol: float,
+) -> None:
+    """結果の属性`fields`を、リファレンスの同名キーと比較する。
+
+    `fields`の要素は属性名（フィクスチャの同名キーと比べる）か、名前が異なるときの
+    `(属性名, フィクスチャのキー)`。ラベルはフィクスチャのキーで付ける。
+    """
+    assert not isinstance(fields, str), (
+        "fields must be a collection of names, not a bare string"
+    )
+    for field in fields:
+        attr, key = (field, field) if isinstance(field, str) else field
+        assert_close(
+            getattr(res, attr),
+            ref[key],
+            f"{label}/{key}",
+            rtol=rtol,
+            atol=atol,
+        )
 
 
 def assert_hac_time_reorders_rows(

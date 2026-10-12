@@ -252,7 +252,9 @@ def test_hac_time_reorders_rows_before_computing_lags():
         fit_std_errors(shuffled_df, "time"),
         fit_std_errors(with_row_time(shuffled_df), ROW_TIME),
         atol_invariant=TOLERANCES["wls_api"]["atol_hac_time_reorder"],
-        min_effect=TOLERANCES["wls_api"]["min_hac_time_row_order_effect"],
+        min_rel_effect=TOLERANCES["wls_api"][
+            "min_rel_hac_time_row_order_effect"
+        ],
     )
 
 

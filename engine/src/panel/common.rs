@@ -41,6 +41,10 @@
 //!   失敗した場合（エンティティ数が説明変数の数以下等）。`WithinRegressionFailed`と同じ
 //!   `LeastSquaresError`ラップだが、対象がFEのwithin回帰ではなくREのbetween回帰のため
 //!   別バリアントにする（`FTestFailed`と同じ判断）。
+//! - `PooledRegressionFailed`・`AmemiyaRequiresWithinVariation`・
+//!   `NonPositiveIdiosyncraticVariance`: REの`variance_method`（Wallace-Hussain・Amemiya、
+//!   `re-spec.md`3.1.2節）の1段目の回帰の失敗、Amemiyaがwithin変動の無い列を受け付けない
+//!   こと、σ_ε²が正にならないこと。
 //! - `QuasiDemeanedRegressionFailed`: RE（`ReEstimator::fit`、`re-spec.md`3.2節）の
 //!   準偏差変換済みデータ（`quasi_demean_transform`の出力に、同じθで変換した定数列を
 //!   加えたもの）への`OlsEstimator::fit(include_intercept=false)`委譲が失敗した場合。
@@ -350,6 +354,46 @@ pub enum PanelError {
         means: BetweenMeans,
         #[source]
         source: LeastSquaresError,
+    },
+
+    /// RE（`variance_method`が`WallaceHussain`、`re-spec.md`3.1.2節）の1段目の回帰
+    /// （全説明変数と切片へのプールドOLS）が失敗した。
+    ///
+    /// 残差の二乗和から分散成分を求めるため、設計行列が特異（完全な多重共線性）だと
+    /// 推定できない。`WithinRegressionFailed`等と同じ`LeastSquaresError`ラップだが、
+    /// 対象が別のため別バリアントにする。
+    #[error("pooled least-squares estimation for the variance component failed: {source}")]
+    PooledRegressionFailed {
+        #[source]
+        source: LeastSquaresError,
+    },
+
+    /// RE（`variance_method`が`Amemiya`、`re-spec.md`3.1.2節）で、within変動の無い説明変数
+    /// （時間不変の列。2-wayでは個体間でのみ・時点間でのみ変わる列も）がある。
+    ///
+    /// Amemiya法は1段目をwithin推定だけで行うため、within変動の無い列の効果が残差に残り、
+    /// σ_u²が偏る。`plm`も不均衡パネルでは同じ理由で推定を拒否する。
+    #[error(
+        "variance_method=\"amemiya\" needs every regressor to vary within the effect (within \
+         each entity; for two-way effects also across entities and across periods), but \
+         these have no within variation: {columns}. Use variance_method=\"swamy_arora\" or \
+         \"wallace_hussain\", which accept such regressors"
+    )]
+    AmemiyaRequiresWithinVariation {
+        /// within変動の無い列の名前（`, `区切り）。
+        columns: String,
+    },
+
+    /// RE（`variance_method`が`WallaceHussain`・`Amemiya`）で推定したσ_ε²が0以下になった
+    /// （θが定まらない）。`plm`は0に切り上げてθが`NaN`になる。
+    #[error(
+        "the estimated idiosyncratic variance is not positive ({sigma2_eps}) with \
+         variance_method=\"{method}\"; the weights of the quasi-demeaning are undefined"
+    )]
+    NonPositiveIdiosyncraticVariance {
+        /// 推定法の名前（`variance_method`の値）。
+        method: &'static str,
+        sigma2_eps: f64,
     },
 
     /// RE（`ReEstimator::fit`、`re-spec.md`3.2節）の準偏差変換済みデータへの

@@ -25,6 +25,7 @@ RE固有の内容のみを記載する。FEとの共有範囲は[`fe-spec.md`](.
   | `dk_time` | `str \| None` | `None` | `cov_type="dk"`時のDK時点列（`FEOptions.dk_time`と同名・同じ意味。`"dk"`では必須で、`time`は借用されない）。RE自身の準偏差変換には使わない。`"dk"`以外で指定すると`ValidationError` |
   | `cluster` | `str \| None` | `None` | `cov_type="cluster"`時のグループキー列名。省略時は`entity`をそのまま使う。他の`cov_type`で指定すると`ValidationError` |
   | `dk_bandwidth` | `int \| None` | `None` | DK HACのバンド幅。省略時は自動計算。`cov_type="dk"`以外で指定すると`ValidationError` |
+  | `variance_method` | `str` | `"swamy_arora"` | 分散成分の推定法: `"swamy_arora"`（既定、3.1節）/ `"wallace_hussain"` / `"amemiya"`（3.1.2節。`plm`の`random.method`の`swar`・`walhus`・`amemiya`）。大小無視。1-way・2-wayとも指定でき、末尾に置く（先頭6個の位置引数の順は`FEOptions`と同じ）。未知の値は`ValidationError` |
 
 - **`time`と`dk_time`は別物（`FEOptions`と同じ規約、`panel-common.md`1.1節）**: `time`は2-way REの
   時間次元で、`dk_time`はDriscoll-Kraay HAC（`cov_type="dk"`）専用の時点列。`cov_type="dk"`では
@@ -68,6 +69,7 @@ RE固有の内容のみを記載する。FEとの共有範囲は[`fe-spec.md`](.
 - **`hausman_*`・`r_squared_*`は1-way・2-wayとも計算される**（3.6・3.7節）。`hausman_*`が`None`に
   なるのは、検定できる傾き係数が無いとき（1-wayは時間変化のある列が無い、2-wayは2-way within変換後に
   分散のある列が無い、または残りがすべて識別できない列）だけ。
+- **`variance_method`**: 実際に使った推定法（正規化した小文字の`str`。`sigma2_*`・θが、どの推定法の値かを示す）。
 - **分散成分と準偏差変換の重み**: `sigma2_eps`（σ_ε²）・`sigma2_u`（σ_u²、負の推定値は0に切り上げた値）は1-way・
   2-wayとも`float`。`sigma2_lambda`（σ_λ²、同じく0に切り上げ）は2-wayのみで1-wayは`None`。θは、1-wayは
   `theta`（`dict[str, float]`、キーはエンティティIDの文字列表現を辞書順に並べたもの（整数IDでも`"10"`が`"2"`より前）→θ_i。`θ_i`は観測数`T_i`で決まるため不均衡パネル
@@ -151,6 +153,51 @@ Python `linearmodels.RandomEffects`の実装（Swamy-Arora）に準拠する。R
 - **θ**: 3つの重み`θ₁ = 1 - σ_ε/σ₁`・`θ₂ = 1 - σ_ε/σ₂`・`θ₃ = θ₁ + θ₂ - 1 + σ_ε/σ₄`
   （`σ₁² = σ_ε² + Tσ_u²`・`σ₂² = σ_ε² + Nσ_λ²`・`σ₄² = σ_ε² + Tσ_u² + Nσ_λ²`）。`θ₃ ≠ θ₁θ₂`で、
   `σ_u² = 0`または`σ_λ² = 0`なら`θ₃ = 0`。`plm`の`ercomp`のθ（id・time・total）と機械精度で一致する。
+
+### 3.1.2 `variance_method`: Wallace-HussainとAmemiya
+
+`variance_method`は分散成分（σ_ε²・σ_u²、2-wayはσ_λ²も）の推定法を選ぶ。GLS変換・`cov_type`・
+ハウスマン検定・パネル固有R²の式は推定法によらず同じで、変わるのは分散成分と、そこから決まるθ・
+係数・標準誤差・F統計量だけ（内部のFE推定は全推定法で作り、ハウスマン検定とwithin R²が再利用する）。
+参照実装は`plm`（`random.method = "walhus"`・`"amemiya"`）だけで、`linearmodels`にはSwamy-Arora
+しか無い。
+
+3法は同じ枠組みで、1段目の回帰の残差`e`から二乗和を作り、期待値の行列`M`と連立させて解く。負の
+σ_u²・σ_λ²は0に切り上げる。
+
+- **1段目の回帰**: `wallace_hussain`は切片と全説明変数へのプールドOLS（時間不変の列も入れる）、
+  `amemiya`はwithin推定（内部FEの係数。切片は`ȳ - x̄'β̂_within`）。
+- **二乗和**: `Q_w = Σ(within変換した e)²`、`Q_id = Σ_i T_i ē_i²`、2-wayは`Q_ts = Σ_t N_t ē_t²`。
+  within変換は1-wayがentity、2-wayがentityとtime。
+- **バランス**（1-wayは全個体の観測数が等しい、2-wayは常に）は`plm`の`dfcor = 1`の閉形式:
+  `σ_ε² = Q_w/(O - N)`（2-wayは`O - N - T + 1`、`K`は引かない）、`σ_u² = Q_id/(T·N) - σ_ε²/T`、
+  `σ_λ² = Q_ts/(N·T) - σ_ε²/N`（`O`は総観測数、`N`は個体数、`T`は時点数）。
+- **不均衡の1-way**は`plm`の`dfcor = 3`（固定）のトレース項の式で、`M·(σ_ε², σ_u²)ᵀ = (Q_w, Q_id)ᵀ`を
+  2×2の連立として解く。`Z = [1, X]`、`B = Σ_i T_i z̄_i z̄_i'`、`S = Σ_i T_i² z̄_i z̄_i'`、
+  `W = Z'Z - B`として、`wallace_hussain`は`M_w,ν = O - N - tr((Z'Z)⁻¹W)`、
+  `M_w,η = tr((Z'Z)⁻¹W(Z'Z)⁻¹S)`、`M_id,ν = N - tr((Z'Z)⁻¹B)`、
+  `M_id,η = O - 2tr((Z'Z)⁻¹S) + tr((Z'Z)⁻¹B(Z'Z)⁻¹S)`。`amemiya`は`M_w,ν = O - N - K`、`M_w,η = 0`、
+  `M_id,ν = N - 1 + tr((X̃'X̃)⁻¹C)`（`C = Σ_i T_i(x̄_i - x̄)(x̄_i - x̄)'`）、`M_id,η = O - ΣT_i²/O`。
+  不均衡の2-wayは対象外（`ValidationError`のまま）。
+
+閉形式とトレース形は、同じバランスパネルでも値が異なる（`plm`が切り替えている）。つまり、1行落として
+不均衡にすると`wallace_hussain`・`amemiya`の値は連続でなくなる。1-wayは時点列を持たないため、`plm`の
+`is.pbalanced`（同じ時点集合も要求する）ではなく「全個体の観測数が等しい」でバランスを判定する。
+観測数が等しく時点がずれたパネルでは、`plm`がトレース形を使う一方で本実装は閉形式を使うため、値が
+異なる（実測でσ_u²が約7%）。
+
+**`amemiya`が拒否する入力**: 1段目がwithinだけなので、within変動の無い説明変数（時間不変の列。2-wayでは
+個体間でのみ・時点間でのみ変わる列も）があると、その効果が残差に残ってσ_u²が偏る。`plm`は不均衡
+パネルでは拒否し、バランスパネルでは時間不変の列を無視して推定する。本実装は一律に`ValidationError`で
+拒否し、列の名前を示して`swamy_arora`・`wallace_hussain`を案内する（時点間でのみ変わる1-wayの列は
+個体内で変動するため使える）。`wallace_hussain`は時間不変の列・全列が時間不変でも推定できる。
+
+**失敗する入力**: `wallace_hussain`のプールドOLSが特異（`ComputationError`）、σ_ε²が正でない
+（`ComputationError`。`plm`は0に切り上げてθが`NaN`になる）、トレース形の連立が特異
+（`ComputationError`）。内部のFE推定の失敗（singleton・自由度不足）は`swamy_arora`と同じ。
+
+**`swamy_arora`の不均衡1-way**は3.1節の式（`linearmodels`準拠）のままで、`plm`の`swar`のトレース形には
+切り替えない（`plm`互換の推定法を別の値として足すかは要望が出てから検討する）。
 
 ### 3.2 θ（準偏差変換の重み）
 
@@ -409,6 +456,14 @@ FEの`WithinRegressionFailed`と同じく内側の`LeastSquaresError`の分類�
   （`benchmark/panel/run_plm_hausman_benchmark.R`）に全6種を照合し、ロバスト共分散が構造的に
   特異なシナリオ（`many_regressors`のcluster/dk）は`fit()`が`ValidationError`/`ComputationError`で
   失敗することを確認する。
+- **`variance_method`（Wallace-Hussain・Amemiya）**: 参照実装は`plm`（`random.method = "walhus"`・
+  `"amemiya"`）のみで、`linearmodels`には無い（単一リファレンスの例外）。`tests/panel/test_re_variance_method.py`が、
+  `re_variance_method.json`（`benchmark/panel/fixtures/generate_re_variance_method_fixtures.py`、1-wayは
+  バランス・不均衡（トレース項の式）・準バランス・時間不変の列・時点間のみ変わる列・実データ、2-wayは
+  バランス）の分散成分・θ・係数・標準誤差・F統計量・ハウスマン検定を代表ケースで全`cov_type`照合し、
+  plmのソースどおりに観測ごとの行列で書いた手計算（`tests/panel/_re_oracle.py`）とも比べる。許容誤差は
+  `tests/_tolerances.py`の`re_variance_method`（機械精度。絶対年の列を含む入力のみ丸め誤差が拡大する統計量で
+  `1e-6`）。拒否する入力（Amemiyaとwithin変動の無い列）はフィクスチャを持たず例外だけを確かめる。
 - `aic`/`bic`は`estimator()`（内部`OlsEstimator`）からそのまま取得するため、FEのような
   Rクロスチェック限定の例外は無く`linearmodels`と直接比較できる。
 
@@ -419,7 +474,7 @@ FEの`WithinRegressionFailed`と同じく内側の`LeastSquaresError`の分類�
   拒否している。
 - **2-way RE**（バランスパネルの本体は実装済み: `time`オプション・Swamy-Arora分散成分・3つのθの
   GLS変換・F統計量・`cov_type`・`n_periods`・ハウスマン検定・パネル固有R²。**未実装**:
-  分散成分の公開、`variance_method`、不均衡パネル。以下は設計検討で確定した方針）:
+  不均衡パネル。分散成分の公開と`variance_method`は実装済み。以下は設計検討で確定した方針）:
   - **対象はバランスパネルのみ**。不均衡パネルは、FEの2-wayと同じく`ValidationError`で拒否する
     （`validate_balanced_panel`相当の検証を共有する）。アンバランスパネルの2-way REは教科書レベルの
     閉形式が無く、Wansbeek and Kapteyn (1989)の推定量が候補になる別問題として切り分ける。
@@ -455,10 +510,9 @@ FEの`WithinRegressionFailed`と同じく内側の`LeastSquaresError`の分類�
       行わない。`plm`の式を別の値として足すかどうかは、Rの計算慣習への互換モードの要否と合わせて、
       具体的な要望が出た時点で検討する。一方、`walhus`・`amemiya`は参照実装が`plm`のみなので、
       不均衡パネルを含めて`plm`の式に従う。
-    - **実装構造の見通し**: 「1段目の回帰」と「行列`M`の組み立て」だけを手法ごとに差し替える1つの関数に
-      まとめ、連立方程式は1-wayで2×2、2-wayで3×3の小さな系として解く。バランス用の簡約形と、
-      不均衡用のトレース形の2系統が要る（計算量は`O(n·k²)`）。`plm`は2-wayの不均衡パネルにも3法の
-      モーメント行列を持つが、数値検証はしていない。
+    - **実装**（3.1.2節）: 「1段目の回帰」と「行列`M`の組み立て」だけを推定法ごとに分け、バランス用の閉形式と
+      不均衡の1-way用のトレース形の2系統を持つ（`engine/src/panel/re_variance_method.rs`）。`plm`は2-wayの
+      不均衡パネルにも3法のモーメント行列を持つが、数値検証はしておらず、対象外のまま。
   - **θは3つの重みが要る**。2-wayのGLS変換は`y - θ₁ȳᵢ. - θ₂ȳ.ₜ + θ₃ȳ..`の形で、`plm`の
     `ercomp`が返す`theta$total`は`theta$id × theta$time`と一致しない（3法とも別の値、確認済み）。
     このため、FEの2-way within変換と同じ「entityでquasi-demean→その結果をtimeでquasi-demean」の

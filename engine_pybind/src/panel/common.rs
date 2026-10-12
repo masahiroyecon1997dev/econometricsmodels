@@ -84,10 +84,13 @@ pub(crate) fn panel_error_to_pyerr(err: PanelError) -> PyErr {
         | PanelError::InsufficientDkPeriods { .. }
         | PanelError::InsufficientDkPeriodsForInference { .. }
         | PanelError::DegenerateDkTwoPeriods
-        | PanelError::DegenerateClusterTwoGroups => ValidationError::new_err(message),
+        | PanelError::DegenerateClusterTwoGroups
+        | PanelError::AmemiyaRequiresWithinVariation { .. } => ValidationError::new_err(message),
+        PanelError::NonPositiveIdiosyncraticVariance { .. } => ComputationError::new_err(message),
         PanelError::WithinRegressionFailed { source }
         | PanelError::FTestFailed { source }
         | PanelError::BetweenRegressionFailed { source, .. }
+        | PanelError::PooledRegressionFailed { source }
         | PanelError::QuasiDemeanedRegressionFailed { source }
         | PanelError::HausmanTestFailed { source } => {
             if least_squares_error_is_computation_error(&source) {

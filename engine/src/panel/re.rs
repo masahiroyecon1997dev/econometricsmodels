@@ -26,6 +26,12 @@
 //! 自動的に一致する（詳細な導出・数値検証は`swamy_arora_variance_components`関数doc
 //! 参照、ユーザー確認済み・2026-09-13）。
 //!
+//! ## 分散成分の推定法（`VarianceMethod`、`re-spec.md`3.1.2節）
+//!
+//! 既定は上のSwamy-Arora。`ReEstimator::fit_with_variance_method`でWallace-Hussain・Amemiya
+//! （`plm`の`walhus`・`amemiya`）を選べる。実装は`re_variance_method.rs`（`variance_components`が3法を
+//! 振り分ける）。内部FE（`internal_fe`）と準偏差変換以降は推定法によらず共通。
+//!
 //! ## 時間不変の説明変数（`re-spec.md`5章）
 //!
 //! REは、エンティティ内で値が変わらない説明変数（within変換後に分散がゼロの列）を許容する
@@ -235,6 +241,34 @@ pub enum ReEffects {
     TwoWay,
 }
 
+/// RE（GLS）の分散成分（σ_ε²・σ_u²・σ_λ²）の推定法（`re-spec.md`3.1節・3.1.2節）。
+/// `plm::ercomp`の`method`（`swar`・`walhus`・`amemiya`）に対応する。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum VarianceMethod {
+    /// Swamy-Arora。1段目はwithin回帰とbetween回帰。1-wayの不均衡パネルは
+    /// `linearmodels`と同じ式（`plm`のトレース項の式とは異なる、`re-spec.md`3.1節）。
+    #[default]
+    SwamyArora,
+    /// Wallace-Hussain。1段目は切片と全説明変数へのプールドOLSの残差。参照実装は`plm`
+    /// （`random.method = "walhus"`）のみ。
+    WallaceHussain,
+    /// Amemiya。1段目はwithin推定の残差（切片は`ȳ - x̄'β̂_within`）。within変動の無い列が
+    /// あると推定できない（`PanelError::AmemiyaRequiresWithinVariation`）。参照実装は`plm`
+    /// （`random.method = "amemiya"`）のみ。
+    Amemiya,
+}
+
+impl VarianceMethod {
+    /// `variance_method`オプションの正規化した値（小文字のスネークケース）。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SwamyArora => "swamy_arora",
+            Self::WallaceHussain => "wallace_hussain",
+            Self::Amemiya => "amemiya",
+        }
+    }
+}
+
 /// REの被説明変数・説明変数・パネル識別子を保持する入力データ。
 ///
 /// 準偏差変換前の生データを保持するだけの入れ物（`Mat`を組み立てない理由はモジュール
@@ -411,13 +445,13 @@ impl ReInput {
 /// `swamy_arora_variance_components`が一度だけ計算して返し、between R²が再利用する。
 #[derive(Debug)]
 pub(crate) struct EntityMeans {
-    y: Vec<f64>,
-    x: Vec<Vec<f64>>,
-    t: Vec<f64>,
+    pub(crate) y: Vec<f64>,
+    pub(crate) x: Vec<Vec<f64>>,
+    pub(crate) t: Vec<f64>,
 }
 
 /// エンティティの整数コード（`GroupCodes::group_indices`）で集計して`EntityMeans`を作る。
-fn entity_means(y: &[f64], x: &[Vec<f64>], entity: &GroupCodes) -> EntityMeans {
+pub(crate) fn entity_means(y: &[f64], x: &[Vec<f64>], entity: &GroupCodes) -> EntityMeans {
     let groups = entity.group_indices();
     let n_groups = entity.n_groups();
     let k = x.len();
@@ -671,17 +705,7 @@ fn two_way_variance_components(
 ) -> Result<VarianceComponents, PanelError> {
     let entity = input.entity_codes();
     let time = input.time_codes().ok_or(PanelError::TwoWayRequiresTime)?;
-    reject_singleton_group(PanelDimension::Entity, entity)?;
-    reject_singleton_group(PanelDimension::Time, time)?;
-    validate_balanced_panel(entity, time)?;
-
-    let time_varying = two_way_time_varying_regressor_indices(input.x(), entity, time);
-    let fe = FeEstimator::fit(
-        FeInput::from_re_input(input, &time_varying, ReEffects::TwoWay),
-        FeEffects::TwoWay,
-        FeCovType::Classical,
-        confidence_level,
-    )?;
+    let (fe, time_varying) = internal_fe(input, ReEffects::TwoWay, confidence_level)?;
     let ssr_within = residual_sum_of_squares(fe.residuals());
     let sigma2_eps = ssr_within / fe.df_resid() as f64;
 
@@ -772,20 +796,55 @@ fn between_column_is_constant(column: &[f64], raw_scale: f64, max_terms: f64) ->
     std_dev <= max_terms * f64::EPSILON * raw_scale
 }
 
+/// 分散成分の推定に使う内部のFE推定量と、それに渡した説明変数（within変動のある列）の添字を作る。
+/// 全ての`variance_method`で共通（ハウスマン検定・within R²・σ_ε²がこのFEを再利用する）。
+///
+/// 2-wayは検証の順序を2-way FEと同じにする（singleton検出→バランスパネルの検証）。
+///
+/// # Errors
+/// 内部FE推定の失敗（singleton・自由度不足・不均衡な2-way等）は`PanelError`（FE用バリアント）
+/// のまま伝播する。2-wayで`time`が無ければ`PanelError::TwoWayRequiresTime`。
+pub(crate) fn internal_fe(
+    input: &ReInput,
+    effects: ReEffects,
+    confidence_level: f64,
+) -> Result<(FeEstimator, Vec<usize>), PanelError> {
+    match effects {
+        ReEffects::OneWay => {
+            let time_varying = time_varying_regressor_indices(input.x(), input.entity_codes());
+            let fe = FeEstimator::fit(
+                FeInput::from_re_input(input, &time_varying, ReEffects::OneWay),
+                FeEffects::OneWay,
+                FeCovType::Classical,
+                confidence_level,
+            )?;
+            Ok((fe, time_varying))
+        }
+        ReEffects::TwoWay => {
+            let entity = input.entity_codes();
+            let time = input.time_codes().ok_or(PanelError::TwoWayRequiresTime)?;
+            reject_singleton_group(PanelDimension::Entity, entity)?;
+            reject_singleton_group(PanelDimension::Time, time)?;
+            validate_balanced_panel(entity, time)?;
+            let time_varying = two_way_time_varying_regressor_indices(input.x(), entity, time);
+            let fe = FeEstimator::fit(
+                FeInput::from_re_input(input, &time_varying, ReEffects::TwoWay),
+                FeEffects::TwoWay,
+                FeCovType::Classical,
+                confidence_level,
+            )?;
+            Ok((fe, time_varying))
+        }
+    }
+}
+
 /// 1-wayのSwamy-Arora分散成分（`swamy_arora_variance_components`のdoc参照）。
 fn one_way_variance_components(
     input: &ReInput,
     confidence_level: f64,
 ) -> Result<VarianceComponents, PanelError> {
     // σ_ε²: 内部1-way FE推定のwithin回帰残差を再利用する（`re-spec.md`3.2節）。
-    let time_varying = time_varying_regressor_indices(input.x(), input.entity_codes());
-    let fe_input = FeInput::from_re_input(input, &time_varying, ReEffects::OneWay);
-    let fe = FeEstimator::fit(
-        fe_input,
-        FeEffects::OneWay,
-        FeCovType::Classical,
-        confidence_level,
-    )?;
+    let (fe, time_varying) = internal_fe(input, ReEffects::OneWay, confidence_level)?;
 
     let fe_residuals = fe.residuals();
     let ssr_within: f64 = (0..fe_residuals.nrows())
@@ -1188,6 +1247,8 @@ pub struct ReEstimator {
     df_inference: usize,
     /// 個体効果の方向（`fit`に渡された`ReEffects`）。
     effects: ReEffects,
+    /// 分散成分の推定法（`fit`に渡された`VarianceMethod`、`fit()`は`SwamyArora`）。
+    variance_method: VarianceMethod,
     /// 推定した分散成分`σ_ε²`・`σ_u²`と、2-wayの`σ_λ²`（1-wayは`None`）。`σ_u²`・`σ_λ²`は
     /// 負の推定値を0に切り上げた値（`re-spec.md`3.1節）。
     sigma2_eps: f64,
@@ -1329,6 +1390,29 @@ impl ReEstimator {
         cov_type: ReCovType,
         confidence_level: f64,
     ) -> Result<Self, PanelError> {
+        Self::fit_with_variance_method(
+            input,
+            effects,
+            cov_type,
+            VarianceMethod::SwamyArora,
+            confidence_level,
+        )
+    }
+
+    /// `fit`の分散成分の推定法`variance_method`を選べる版（`fit`は`SwamyArora`）。
+    /// 推定法ごとの式・不均衡パネルの扱い・拒否する入力は`re-spec.md`3.1節・3.1.2節。
+    ///
+    /// # Errors
+    /// `fit`と同じ。加えて`variance_method`に応じて`PanelError::PooledRegressionFailed`
+    /// （`WallaceHussain`の1段目の特異性）・`PanelError::AmemiyaRequiresWithinVariation`・
+    /// `PanelError::NonPositiveIdiosyncraticVariance`（`WallaceHussain`・`Amemiya`）。
+    pub fn fit_with_variance_method(
+        input: ReInput,
+        effects: ReEffects,
+        cov_type: ReCovType,
+        variance_method: VarianceMethod,
+        confidence_level: f64,
+    ) -> Result<Self, PanelError> {
         // faerのグローバル並列度をPar::Seqに固定する（`crate::shared::parallelism`。
         // 委譲先の`FeEstimator::fit`/`OlsEstimator::fit`自身も呼ぶが、`cargo test -p engine`
         // で`ReEstimator::fit`を直接叩く経路との統一のためここでも呼ぶ、
@@ -1342,7 +1426,12 @@ impl ReEstimator {
             fe: fe_for_sigma2_eps,
             means: entity_means,
             time_varying,
-        } = swamy_arora_variance_components(&input, effects, confidence_level)?;
+        } = crate::panel::re_variance_method::variance_components(
+            &input,
+            effects,
+            variance_method,
+            confidence_level,
+        )?;
         debug_assert_eq!(fe_for_sigma2_eps.input().x().len(), time_varying.len());
         // 内部FEはRE本体と同じ個体効果構造（within R²・ハウスマン検定がその within 変換を再利用する前提）。
         debug_assert_eq!(
@@ -1623,6 +1712,7 @@ impl ReEstimator {
             conf_upper,
             df_inference,
             effects,
+            variance_method,
             sigma2_eps,
             sigma2_u,
             sigma2_lambda: match effects {
@@ -1726,7 +1816,13 @@ impl ReEstimator {
         self.effects
     }
 
-    /// 個体特有でない誤差の分散`σ_ε²`（`re-spec.md`3.1節。内部FE推定のwithin回帰残差分散）。
+    /// 分散成分の推定法（`fit`に渡した`VarianceMethod`）。`sigma2_*`・`theta`がどの推定法の値かを示す。
+    pub fn variance_method(&self) -> VarianceMethod {
+        self.variance_method
+    }
+
+    /// 個体特有でない誤差の分散`σ_ε²`（`re-spec.md`3.1節。`SwamyArora`・`Amemiya`は
+    /// within回帰の残差分散型、`WallaceHussain`はプールドOLS残差のwithin二乗和型、3.1.2節）。
     pub fn sigma2_eps(&self) -> f64 {
         self.sigma2_eps
     }
@@ -5890,10 +5986,27 @@ mod tests {
             time: &[String],
             cov_index: usize,
         ) -> Result<ReEstimator, PanelError> {
+            fit_two_way_with(y, x, entity, time, cov_index, VarianceMethod::SwamyArora)
+        }
+
+        fn fit_two_way_with(
+            y: &[f64],
+            x: &[Vec<f64>],
+            entity: &[String],
+            time: &[String],
+            cov_index: usize,
+            method: VarianceMethod,
+        ) -> Result<ReEstimator, PanelError> {
             let names: Vec<String> = (0..x.len()).map(|j| format!("x{j}")).collect();
             ReInput::from_columns(y, x, names, entity, Some(time), "y".to_string()).and_then(
                 |input| {
-                    ReEstimator::fit(input, ReEffects::TwoWay, two_way_cov(cov_index, time), 0.95)
+                    ReEstimator::fit_with_variance_method(
+                        input,
+                        ReEffects::TwoWay,
+                        two_way_cov(cov_index, time),
+                        method,
+                        0.95,
+                    )
                 },
             )
         }
@@ -6047,7 +6160,8 @@ mod tests {
 
             /// 2-wayのGLSは、報告した3つの重み`θ₁・θ₂・θ₃`で`y - θ₁ȳᵢ - θ₂ȳₜ + θ₃ȳ`と
             /// 各列を手で変換し（切片列は`1 - θ₁ - θ₂ + θ₃`倍）、そのOLSを当てはめた係数・
-            /// 標準誤差（Classical・HC1〜HC3）と一致する。一次元の列を含む。変換式の各項
+            /// 標準誤差（Classical・HC1〜HC3）と一致する。一次元の列を含む。`variance_method`は3法とも
+            /// （重みは推定法ごとに異なるが、報告した重みでの変換との一致は共通）。変換式の各項
             /// （個体平均・時点平均・全体平均）の取り違えや符号の誤りを検出する。
             ///
             /// 検出できる誤り: 全体平均項の符号反転と全体平均の除数のずれは本テストが、個体・
@@ -6060,9 +6174,19 @@ mod tests {
             fn two_way_fit_equals_ols_on_the_hand_transformed_data(
                 case in one_dim_case_strategy(),
                 cov_index in 0..=3usize,
+                method in prop_oneof![
+                    Just(VarianceMethod::SwamyArora),
+                    Just(VarianceMethod::WallaceHussain),
+                    Just(VarianceMethod::Amemiya)
+                ],
             ) {
                 let (entity, time) = two_way_labels(case.n_entities, case.n_periods);
-                let est = fit_two_way(&case.y, &case.x, &entity, &time, cov_index);
+                let est = fit_two_way_with(&case.y, &case.x, &entity, &time, cov_index, method);
+                // Amemiyaはwithin変動の無い列（一次元の列）があると拒否される。それ以外の失敗は誤り。
+                if matches!(est, Err(PanelError::AmemiyaRequiresWithinVariation { .. })) {
+                    prop_assert_eq!(method, VarianceMethod::Amemiya);
+                    prop_assume!(false);
+                }
                 prop_assert!(est.is_ok(), "{:?}", est.as_ref().err());
                 let est = est.unwrap();
                 let (theta1, theta2, theta3) = est.two_way_theta().unwrap();

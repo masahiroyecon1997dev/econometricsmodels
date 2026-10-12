@@ -57,7 +57,7 @@
 use std::collections::BTreeMap;
 
 use engine::panel::common::TimeKeys;
-use engine::panel::re::{ReCovType, ReEffects, ReEstimator, ReInput};
+use engine::panel::re::{ReCovType, ReEffects, ReEstimator, ReInput, VarianceMethod};
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
@@ -127,6 +127,17 @@ pub struct REOptions {
     /// Specifying it with any other `cov_type` raises `ValidationError`.
     #[pyo3(get)]
     pub dk_bandwidth: Option<i64>,
+
+    /// Estimator of the variance components `sigma_eps^2`, `sigma_u^2` (and `sigma_lambda^2`
+    /// for two-way effects), one of "swamy_arora" (default), "wallace_hussain", "amemiya"
+    /// (case-insensitive; `plm`'s `random.method` "swar", "walhus", "amemiya"). Applies to
+    /// one-way and two-way effects alike. "swamy_arora" on an unbalanced one-way panel is the
+    /// `linearmodels` estimator, which differs from `plm`'s; "wallace_hussain" and "amemiya" follow
+    /// `plm` (closed forms on a balanced panel, the trace-term forms on an unbalanced one-way
+    /// panel). "amemiya" raises `ValidationError` when a regressor has no within variation
+    /// (time-invariant; for two-way effects, varying in at most one dimension).
+    #[pyo3(get)]
+    pub variance_method: String,
 }
 
 #[pymethods]
@@ -139,6 +150,7 @@ impl REOptions {
         cluster = None,
         dk_time = None,
         dk_bandwidth = None,
+        variance_method = "swamy_arora".to_string(),
     ))]
     fn new(
         #[pyo3(from_py_with = crate::shared::option_values::cov_type_arg)] cov_type: String,
@@ -149,6 +161,8 @@ impl REOptions {
         #[pyo3(from_py_with = crate::shared::option_values::dk_bandwidth_arg)] dk_bandwidth: Option<
             i64,
         >,
+        #[pyo3(from_py_with = crate::shared::option_values::variance_method_arg)]
+        variance_method: String,
     ) -> Self {
         Self {
             cov_type,
@@ -157,6 +171,7 @@ impl REOptions {
             cluster,
             dk_time,
             dk_bandwidth,
+            variance_method,
         }
     }
 
@@ -175,6 +190,12 @@ impl REOptions {
     #[setter]
     fn set_cov_type(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
         self.cov_type = extract_strict_text(value, "cov_type")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_variance_method(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.variance_method = extract_strict_text(value, "variance_method")?;
         Ok(())
     }
 
@@ -199,13 +220,14 @@ impl REOptions {
     fn __repr__(&self) -> String {
         format!(
             "REOptions(cov_type={}, confidence_level={}, time={}, cluster={}, dk_time={}, \
-             dk_bandwidth={})",
+             dk_bandwidth={}, variance_method={})",
             self.cov_type.py_repr(),
             self.confidence_level.py_repr(),
             self.time.py_repr(),
             self.cluster.py_repr(),
             self.dk_time.py_repr(),
-            self.dk_bandwidth.py_repr()
+            self.dk_bandwidth.py_repr(),
+            self.variance_method.py_repr()
         )
     }
 }
@@ -273,15 +295,22 @@ pub struct REResult {
     /// panel, so this equals the number of observations per entity.
     #[pyo3(get)]
     pub n_periods: Option<usize>,
-    /// Estimated variance of the idiosyncratic error, `sigma_eps^2`: the residual variance of
-    /// the internal fixed-effects regression with the same effect structure as the model
-    /// (entity for one-way, entity and time for two-way). Its degrees of freedom exclude the
-    /// regressors without within variation, as in `plm` (`docs/spec/re-spec.md` section 3.1).
+    /// Estimator of the variance components actually used (echoes `REOptions.variance_method`,
+    /// normalized to lowercase): "swamy_arora", "wallace_hussain" or "amemiya". `sigma2_eps`,
+    /// `sigma2_u`, `sigma2_lambda` and the weights `theta*` are the values of this estimator.
+    #[pyo3(get)]
+    pub variance_method: String,
+    /// Estimated variance of the idiosyncratic error, `sigma_eps^2`. Swamy-Arora: the residual
+    /// variance of the internal fixed-effects regression with the same effect structure as the
+    /// model (entity for one-way, entity and time for two-way), whose degrees of freedom exclude
+    /// the regressors without within variation, as in `plm` (`docs/spec/re-spec.md` section
+    /// 3.1). Wallace-Hussain and Amemiya: from the within-transformed first-stage residuals, see
+    /// section 3.1.2.
     #[pyo3(get)]
     pub sigma2_eps: f64,
-    /// Estimated variance of the entity effect, `sigma_u^2` (Swamy-Arora; a negative estimate
-    /// is raised to 0). On an unbalanced panel it is the `linearmodels` estimator, which
-    /// differs from `plm`'s.
+    /// Estimated variance of the entity effect, `sigma_u^2` (a negative estimate is raised to
+    /// 0). Swamy-Arora on an unbalanced panel is the `linearmodels` estimator, which differs
+    /// from `plm`'s.
     #[pyo3(get)]
     pub sigma2_u: f64,
     /// Estimated variance of the time effect, `sigma_lambda^2`, for two-way effects (a negative
@@ -446,6 +475,22 @@ fn parse_re_cov_type(df: &DataFrame, options: &REOptions) -> PyResult<(ReCovType
     Ok((cov_type, cov_type_lower))
 }
 
+/// `REOptions.variance_method`（大文字小文字を区別しない）を`VarianceMethod`にする。
+///
+/// # Errors
+/// 未知の値は`ValidationError`。
+fn parse_variance_method(value: &str) -> PyResult<VarianceMethod> {
+    match value.to_lowercase().as_str() {
+        "swamy_arora" => Ok(VarianceMethod::SwamyArora),
+        "wallace_hussain" => Ok(VarianceMethod::WallaceHussain),
+        "amemiya" => Ok(VarianceMethod::Amemiya),
+        other => Err(ValidationError::new_err(format!(
+            "unknown variance_method: '{other}'. Expected one of 'swamy_arora', \
+             'wallace_hussain', or 'amemiya'"
+        ))),
+    }
+}
+
 /// Pythonから渡された `data` / `y` / `x` / `entity` / `options` を検証し、
 /// `engine::panel::re::ReInput::from_columns`を呼び出すところまでを行う。
 /// `ReEstimator::fit`の呼び出し・`REResult`の構築は後続issueの`fit`関数が行う
@@ -547,10 +592,17 @@ pub(crate) fn fit(
     options: &REOptions,
 ) -> PyResult<REResult> {
     let df: DataFrame = data.into();
+    let variance_method = parse_variance_method(&options.variance_method)?;
     let (input, effects, cov_type, cov_type_lower) = build_re_input(&df, y, x, entity, options)?;
 
-    let estimator = ReEstimator::fit(input, effects, cov_type, options.confidence_level)
-        .map_err(panel_error_to_pyerr)?;
+    let estimator = ReEstimator::fit_with_variance_method(
+        input,
+        effects,
+        cov_type,
+        variance_method,
+        options.confidence_level,
+    )
+    .map_err(panel_error_to_pyerr)?;
     let ols = estimator.estimator();
     let two_way_theta = estimator.two_way_theta();
 
@@ -571,6 +623,7 @@ pub(crate) fn fit(
         df_model: estimator.df_model(),
         n_entities: estimator.input().n_entities(),
         n_periods: estimator.n_periods(),
+        variance_method: variance_method.as_str().to_string(),
         sigma2_eps: estimator.sigma2_eps(),
         sigma2_u: estimator.sigma2_u(),
         sigma2_lambda: estimator.sigma2_lambda(),
@@ -613,7 +666,15 @@ mod tests {
     /// `build_re_input`のテスト全体で使う既定の`REOptions`（`cov_type="cluster"`・
     /// `dk_time=None`）。フィールドごとに上書きして使う。
     fn default_options() -> REOptions {
-        REOptions::new("cluster".to_string(), 0.95, None, None, None, None)
+        REOptions::new(
+            "cluster".to_string(),
+            0.95,
+            None,
+            None,
+            None,
+            None,
+            "swamy_arora".to_string(),
+        )
     }
 
     fn well_formed_df() -> DataFrame {

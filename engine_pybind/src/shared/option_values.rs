@@ -156,6 +156,7 @@ arg_extractors! {
     gmm_tol_arg => extract_strict_opt_float("gmm_tol") -> Option<f64>;
     dk_bandwidth_arg => extract_strict_opt_int("dk_bandwidth") -> Option<i64>;
     cov_type_arg => extract_strict_text("cov_type") -> String;
+    variance_method_arg => extract_strict_text("variance_method") -> String;
     solver_arg => extract_strict_text("solver") -> String;
     estimator_arg => extract_strict_text("estimator") -> String;
     gmm_weight_type_arg => extract_strict_opt_text("gmm_weight_type") -> Option<String>;

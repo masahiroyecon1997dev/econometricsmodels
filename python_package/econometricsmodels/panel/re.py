@@ -39,7 +39,11 @@ __all__ = ["RE", "REOptions", "REResults"]
 
 
 class RE:
-    """Random effects (Swamy-Arora GLS) panel regression estimator.
+    """Random effects (GLS) panel regression estimator.
+
+    The variance components are estimated by Swamy-Arora by default;
+    `REOptions.variance_method` selects Wallace-Hussain or Amemiya
+    instead.
 
     Unlike FE, RE has an intercept. By default it estimates one-way
     (entity) random effects. Setting `REOptions.time` requests two-way
@@ -117,14 +121,18 @@ class RE:
                 regressors: the Driscoll-Kraay covariance has rank at
                 most T-1, so the Hausman test cannot be computed, or
                 `cov_type="cluster"` with no more clusters than the
-                slopes of the Hausman auxiliary regression). A
-                subclass of `ValueError`.
+                slopes of the Hausman auxiliary regression, an unknown
+                `variance_method`, or `variance_method="amemiya"` with a
+                regressor that has no within variation). A subclass of
+                `ValueError`.
             ComputationError: A problem was detected during
                 computation (e.g. a singular quasi-demeaned design
                 matrix, in particular a time-invariant regressor that
                 is constant across entities or collinear with another
-                time-invariant regressor). A subclass of
-                `RuntimeError`.
+                time-invariant regressor, a singular pooled first-stage
+                regression with `variance_method="wallace_hussain"`, or
+                a non-positive estimate of σ_ε² with `"wallace_hussain"`
+                or `"amemiya"`). A subclass of `RuntimeError`.
         """
         raw = _lib.fit_re(
             self._data, self._y, self._x, self._entity, self._options
@@ -185,6 +193,7 @@ class REResults:
     quasi-demeaning that follow from them (`theta` for one-way,
     `theta_entity`/`theta_time`/`theta_total` for two-way) are exposed as
     properties; the ones that do not apply to the model are `None`.
+    `variance_method` tells which estimator produced them.
 
     Args:
         raw: The estimation result object returned by `_lib.fit_re`
@@ -286,22 +295,38 @@ class REResults:
         return self._raw.n_periods
 
     @property
+    def variance_method(self) -> str:
+        """Estimator of the variance components actually used (the
+        normalized value of `REOptions.variance_method`):
+        `"swamy_arora"`, `"wallace_hussain"` or `"amemiya"`. `sigma2_eps`,
+        `sigma2_u`, `sigma2_lambda` and the weights `theta`,
+        `theta_entity`, `theta_time` and `theta_total` are the values of
+        this estimator."""
+        return self._raw.variance_method
+
+    @property
     def sigma2_eps(self) -> float:
-        """Estimated variance of the idiosyncratic error, σ_ε²: the
-        residual variance of the internal fixed-effects regression with
-        the same effect structure as the model (entity for one-way,
-        entity and time for two-way). Its degrees of freedom exclude the
-        regressors without within variation (time-invariant ones), as in
-        `plm`; `linearmodels` counts them and so differs."""
+        """Estimated variance of the idiosyncratic error, σ_ε².
+        Swamy-Arora: the residual variance of the internal
+        fixed-effects regression with the same effect structure as the
+        model (entity for one-way, entity and time for two-way); its
+        degrees of freedom exclude the regressors without within
+        variation (time-invariant ones), as in `plm`, whereas
+        `linearmodels` counts them and so differs. Wallace-Hussain and
+        Amemiya: the within sum of squares of the first-stage residuals
+        divided by `n - N` (`n - N - T + 1` for two-way effects) on a
+        balanced panel, and the trace-term form of `plm` on an
+        unbalanced one-way panel."""
         return self._raw.sigma2_eps
 
     @property
     def sigma2_u(self) -> float:
-        """Estimated variance of the entity effect, σ_u² (Swamy-Arora;
-        a negative estimate is raised to 0). On an unbalanced panel it
-        is the `linearmodels` estimator (harmonic mean of the entity
+        """Estimated variance of the entity effect, σ_u² (a negative
+        estimate is raised to 0). Swamy-Arora on an unbalanced panel is
+        the `linearmodels` estimator (harmonic mean of the entity
         sizes), which differs from `plm`'s by a few percent up to about
-        10 %; on a balanced panel the two agree."""
+        10 %; on a balanced panel the two agree. Wallace-Hussain and
+        Amemiya follow `plm` on balanced and unbalanced panels."""
         return self._raw.sigma2_u
 
     @property

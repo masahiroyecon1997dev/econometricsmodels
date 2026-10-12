@@ -168,9 +168,12 @@
 //!   （`re-spec.md`3.7節）。2-wayでは`k`は2-way within変換後に分散のある列の数で、
 //!   一次元でしか変わらない列は`X*`には入るが`X̃`には入らない。
 //! - **識別できない`X̃`の列は検定対象から外す**: バランスパネルで時点間でのみ変わる列は
-//!   `x*_j - x̃_j`が全観測で一定になり、未変換の定数項と共線になる（`re_hausman_test`）。判定は
-//!   列ごとで、複数列の線形結合による共線は検出しない（その場合は補助回帰が特異になり
-//!   `PanelError::HausmanTestFailed`）。
+//!   `x*_j - x̃_j`が全観測で一定になり、未変換の定数項と共線になる（`re_hausman_test`）。この
+//!   判定は列ごと。さらに、定数項・`X*`・前の`x̃`の線形結合になる`x̃_j`も外す（個体平均を説明変数に
+//!   加える相関ランダム効果（Mundlak型）では、`x*_j - x̃_j = (1-θ)·x̄_j`が加えた個体平均の列
+//!   （の`X*`）で表せて`x̃_j`が別名になる。`plm`の`lm`と同じ「列順で後ろの列を落とす」規則、
+//!   `independent_columns_in_order`、許容誤差`1e-7`。最終回帰が通った時点で`[1, X*]`は独立なため、
+//!   落ちるのは検定対象の`x̃`だけ）。`hausman_df`は残った列の数。
 //! - **`cov_type`連動**: 補助回帰のWald検定の共分散はRE本体の`cov_type`に対応させる
 //!   （既定の`cluster`ならcluster-robust版のロバストHausman検定、`classical`なら
 //!   帰無仮説のもとでREが完全に効率的という前提の古典版）。専用オプションは設けない。
@@ -195,7 +198,8 @@
 //!   基づくため、`T`が短いと検定サイズが歪みうる。
 //! - **`None`になるのは検定できる傾き係数が無い場合のみ**（`input.x()`が空、within変換後に
 //!   分散のある列が無い、または残りがすべて識別できない列）。
-//!   補助回帰のランク落ち・クラスター数不足（`G <= 2k`）・DK/ロバスト共分散部分行列の
+//!   補助回帰のランク落ち（`X*`の列が互いに従属な場合）・クラスター数不足（`G <= q`、`q`は
+//!   別名を除いた補助回帰の傾き係数の数）・DK/ロバスト共分散部分行列の
 //!   ほぼ特異性など、計算自体が成立しない
 //!   場合は`PanelError::HausmanTestFailed`として`fit()`全体を失敗させる（設計行列の多重共線性でエラーにするのと同じ方針）。
 //!   DKの時点数不足（`T <= k`）だけは入力から判定できるため、補助回帰の前に`fit()`のDkアームが
@@ -227,6 +231,7 @@ use crate::shared::error::CommonError;
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference;
 use crate::shared::least_squares::{least_squares, residual_sum_of_squares};
+use crate::shared::linear_algebra::{COLLINEARITY_TOLERANCE, independent_columns_in_order};
 use crate::shared::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 use crate::shared::wald::wald_f_test;
 
@@ -739,6 +744,11 @@ fn two_way_variance_components(
 /// 最終回帰の特異性（`QuasiDemeanedRegressionFailed`）で検出される。一定かどうかの判定は`column_is_zero_variance`
 /// （`fe.rs`）と同じ発想の相対閾値（平均の標準偏差が`n_units·ε·max|x̄|`以下）。
 ///
+/// 一定の列を落とした後、残りの列の線形結合になっている列も落とす（`plm`の`lm`と同じ、
+/// `independent_columns_in_order`の規則: 列順で前の列に従属する列、許容誤差`1e-7`）。個体平均を
+/// 説明変数に加える相関ランダム効果（Mundlak）の指定では、`x`と`x̄`の個体平均が同じ列になる。
+/// どちらを落としても残差平方和とランクは変わらないため`σ_u²`は同じで、後ろの列を落とす。
+///
 /// # Errors
 /// 単位数が`K_b + 1`以下、または落とした後の設計行列が特異なら`PanelError::BetweenRegressionFailed`
 /// （`kind`が個体平均・時点平均のどちらの回帰かを持つ）。
@@ -749,8 +759,17 @@ fn between_ssr_and_df(
 ) -> Result<(f64, usize), PanelError> {
     let n_units = means.y.len();
     let max_terms = means.t.iter().fold(0.0_f64, |acc, &t| acc.max(t));
-    let kept: Vec<usize> = (0..means.x.len())
+    let non_constant: Vec<usize> = (0..means.x.len())
         .filter(|&j| !between_column_is_constant(&means.x[j], x_scales[j], max_terms))
+        .collect();
+    let ones = vec![1.0; n_units];
+    let mut candidates: Vec<&[f64]> = vec![&ones];
+    candidates.extend(non_constant.iter().map(|&j| means.x[j].as_slice()));
+    let independent = independent_columns_in_order(&candidates, COLLINEARITY_TOLERANCE);
+    let kept: Vec<usize> = non_constant
+        .iter()
+        .zip(&independent[1..])
+        .filter_map(|(&j, &keep)| keep.then_some(j))
         .collect();
     let n_params = kept.len() + 1;
     if n_units <= n_params {
@@ -1072,6 +1091,20 @@ fn re_hausman_test(
                 raw_scale,
             )
         })
+        .collect();
+    // 残った`x̃_j`のうち、定数項・`X*`・前の`x̃`の線形結合になっている列も外す。個体平均を説明変数に
+    // 加える相関ランダム効果（Mundlak）の指定では、`x*_j - x̃_j = (1-θ)·x̄_j`が加えた個体平均の列
+    // （の`X*`）で表せるため、`x̃_j`が別名になる。落とすのは検定対象の`x̃`側だけ（列順で後ろの列を
+    // 落とす規則で、最終回帰が通った時点で`[1, X*]`は独立なため、従属になりうるのは`x̃`だけ）。
+    let ones = vec![1.0; y_star.len()];
+    let mut candidates: Vec<&[f64]> = vec![ones.as_slice()];
+    candidates.extend(x_star.iter().map(Vec::as_slice));
+    candidates.extend(tested.iter().map(|&m| x_within_mat.col_as_slice(m)));
+    let independent = independent_columns_in_order(&candidates, COLLINEARITY_TOLERANCE);
+    let tested: Vec<usize> = tested
+        .iter()
+        .zip(&independent[1 + x_star.len()..])
+        .filter_map(|(&m, &keep)| keep.then_some(m))
         .collect();
     let k = tested.len();
     if k == 0 {
@@ -2784,9 +2817,137 @@ mod tests {
         ));
     }
 
+    /// 6×4の小パネルに、`x1`の個体平均（`entity_mean`）・時点平均（`time_mean`）の列を加えた入力
+    /// （相関ランダム効果、Mundlak型）。列は`names`の順で、`x1`・`x2`・`x1bar`・`x1tbar`。
+    fn mundlak_input(names: &[&str], with_time: bool) -> ReInput {
+        let c = two_way_columns();
+        let entity_mean = |r: usize| (0..4).map(|t| c.x1[r / 4 * 4 + t]).sum::<f64>() / 4.0;
+        let time_mean = |r: usize| (0..6).map(|e| c.x1[e * 4 + r % 4]).sum::<f64>() / 6.0;
+        let columns: Vec<Vec<f64>> = names
+            .iter()
+            .map(|n| match *n {
+                "x1" => c.x1.clone(),
+                "x2" => x2_values(),
+                "x1bar" => (0..24).map(entity_mean).collect(),
+                "x1tbar" => (0..24).map(time_mean).collect(),
+                other => panic!("unknown column {other}"),
+            })
+            .collect();
+        ReInput::from_columns(
+            &c.y,
+            &columns,
+            names.iter().map(|n| n.to_string()).collect(),
+            &c.entity,
+            with_time.then_some(c.time.as_slice()),
+            "y".into(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn between_regression_drops_a_column_that_repeats_an_earlier_one() {
+        // 個体平均の回帰で`x1bar`の個体平均は`x1`のそれと同じ列になる（`plm`の`lm`は後ろの列を
+        // 落とし、残差平方和・ランクは変わらない）。落とした列を数えず、`σ_u²`の自由度が変わらない。
+        let with_bar = mundlak_input(&["x1", "x2", "x1bar"], false);
+        let without = mundlak_input(&["x1", "x2"], false);
+        let stats = |input: &ReInput| {
+            let means = entity_means(input.y(), input.x(), input.entity_codes());
+            between_ssr_and_df(&means, &column_max_abs(input.x()), BetweenMeans::Entity).unwrap()
+        };
+        let (ssr_bar, df_bar) = stats(&with_bar);
+        let (ssr, df) = stats(&without);
+        assert_eq!(df_bar, df);
+        assert_close(ssr_bar, ssr, 1e-12, "ssr");
+        assert!(ssr > 0.0);
+        // 列順を入れ替えても（落ちる列が`x1`に変わっても）同じ。
+        let reordered = mundlak_input(&["x1bar", "x1", "x2"], false);
+        let (ssr_re, df_re) = stats(&reordered);
+        assert_eq!(df_re, df);
+        assert_close(ssr_re, ssr, 1e-12, "ssr reordered");
+    }
+
+    #[test]
+    fn one_way_mundlak_specification_is_estimated_and_tests_only_the_identified_columns() {
+        // `x1`の個体平均を入れると`x̃1 = x1* - x1bar*`が別名になり、ハウスマン検定は`x̃2`だけを
+        // 検定する（`hausman_df = 1`）。列順によらず同じ統計量。分散成分は個体平均を入れない
+        // 場合と同じ（時間不変の`x1bar`は内部FEにも入らない）。
+        let fit = |names: &[&str]| {
+            ReEstimator::fit(
+                mundlak_input(names, false),
+                ReEffects::OneWay,
+                ReCovType::Classical,
+                0.95,
+            )
+            .unwrap()
+        };
+        let with_bar = fit(&["x1", "x2", "x1bar"]);
+        let without = fit(&["x1", "x2"]);
+        assert_eq!(with_bar.hausman_df(), Some(1));
+        assert_eq!(without.hausman_df(), Some(2));
+        assert_close(with_bar.sigma2_u(), without.sigma2_u(), 1e-12, "sigma2_u");
+        assert_close(
+            with_bar.sigma2_eps(),
+            without.sigma2_eps(),
+            1e-12,
+            "sigma2_eps",
+        );
+        let reordered = fit(&["x1bar", "x1", "x2"]);
+        assert_eq!(reordered.hausman_df(), Some(1));
+        assert_close(
+            reordered.hausman_statistic().unwrap(),
+            with_bar.hausman_statistic().unwrap(),
+            1e-9,
+            "hausman statistic",
+        );
+        assert_eq!(with_bar.estimator().params().nrows(), 4);
+    }
+
+    #[test]
+    fn one_way_mundlak_with_a_single_regressor_has_no_testable_column() {
+        // `x1`と`x1bar`だけなら`x̃1`が別名で、検定できる列が残らない（`hausman_*`は`None`）。
+        let re = ReEstimator::fit(
+            mundlak_input(&["x1", "x1bar"], false),
+            ReEffects::OneWay,
+            ReCovType::Classical,
+            0.95,
+        )
+        .unwrap();
+        assert_eq!(re.hausman_df(), None);
+        assert_eq!(re.hausman_statistic(), None);
+    }
+
+    #[test]
+    fn two_way_mundlak_with_entity_and_time_means_drops_the_aliased_columns() {
+        // 個体平均と時点平均の両方を入れる。個体平均の回帰では`x1bar`が`x1`と、時点平均の回帰では
+        // `x1tbar`が`x1`と同じ列になり、`σ_u²`・`σ_λ²`は平均を入れない場合と同じ。ハウスマン検定は
+        // `x̃1`が別名で`x̃2`だけを検定する。
+        let fit = |names: &[&str]| {
+            ReEstimator::fit(
+                mundlak_input(names, true),
+                ReEffects::TwoWay,
+                ReCovType::Classical,
+                0.95,
+            )
+            .unwrap()
+        };
+        let with_bars = fit(&["x1", "x2", "x1bar", "x1tbar"]);
+        let without = fit(&["x1", "x2"]);
+        assert_close(with_bars.sigma2_u(), without.sigma2_u(), 1e-12, "sigma2_u");
+        assert_close(
+            with_bars.sigma2_lambda().unwrap(),
+            without.sigma2_lambda().unwrap(),
+            1e-12,
+            "sigma2_lambda",
+        );
+        assert_eq!(with_bars.hausman_df(), Some(1));
+        // 個体平均だけなら時点方向の別名は無く、`x̃1`・`x̃2`の両方を検定する。
+        assert_eq!(fit(&["x1", "x2", "x1bar"]).hausman_df(), Some(2));
+    }
+
     #[test]
     fn re_estimator_fit_rejects_proportional_time_invariant_regressors() {
-        // 定数ではない時間不変の列同士が比例していれば、between回帰が特異になる。
+        // 定数ではない時間不変の列同士が比例していれば、between回帰では後ろの列が落ちるが、
+        // 最終回帰（全列を残す）は特異になる。
         let TimeInvariantColumns { y, x1, entity, .. } = time_invariant_columns();
         let z: Vec<f64> = (0..24).map(|r| (r / 4) as f64).collect();
         let z2: Vec<f64> = z.iter().map(|v| 2.0 * v).collect();
@@ -2802,7 +2963,7 @@ mod tests {
 
         assert!(matches!(
             ReEstimator::fit(input, ReEffects::OneWay, ReCovType::Classical, 0.95),
-            Err(PanelError::BetweenRegressionFailed { .. })
+            Err(PanelError::QuasiDemeanedRegressionFailed { .. })
         ));
     }
 
@@ -3967,7 +4128,8 @@ mod tests {
             ReEstimator::fit(constant, ReEffects::TwoWay, ReCovType::Classical, 0.95),
             Err(PanelError::QuasiDemeanedRegressionFailed { .. })
         ));
-        // 定数ではない列同士の完全共線（`xi`と`2·xi`）は、between回帰（個体平均の回帰）が特異になる。
+        // 定数ではない列同士の完全共線（`xi`と`2·xi`）は、between回帰（個体平均の回帰）では後ろの列が
+        // 落ち、最終回帰が特異になる。
         let doubled: Vec<f64> = c.xi.iter().map(|v| 2.0 * v).collect();
         let collinear = ReInput::from_columns(
             &c.y,
@@ -3980,10 +4142,7 @@ mod tests {
         .unwrap();
         assert!(matches!(
             ReEstimator::fit(collinear, ReEffects::TwoWay, ReCovType::Classical, 0.95),
-            Err(PanelError::BetweenRegressionFailed {
-                means: BetweenMeans::Entity,
-                source: LeastSquaresError::SingularMatrix
-            })
+            Err(PanelError::QuasiDemeanedRegressionFailed { .. })
         ));
     }
 
@@ -5656,6 +5815,43 @@ mod tests {
                 for (id, t) in theta.iter().enumerate() {
                     prop_assert!((0.0..1.0).contains(t), "theta[{id}]={t}");
                 }
+            }
+
+            /// 説明変数の個体平均の列を加えても（相関ランダム効果、Mundlak型）、between回帰ではその列が
+            /// 元の列と同じ列になって落ちるため、分散成分は変わらず、最終回帰・ハウスマン検定も
+            /// 失敗しない（ハウスマン検定の自由度は別名になった`x̃`の分だけ減る）。
+            #[test]
+            fn adding_an_entity_mean_column_leaves_the_variance_components_unchanged(
+                case in re_case_strategy(),
+            ) {
+                let entity = entity_labels(&case.entity_idx);
+                let codes = GroupCodes::from_labels(&entity);
+                let base = re_input(&case.y, &case.x, &entity);
+                let mean = entity_means(base.y(), base.x(), &codes);
+                let bar: Vec<f64> = (0..base.nobs())
+                    .map(|i| mean.x[0][codes.codes()[i]])
+                    .collect();
+                let mut x = case.x.clone();
+                x.push(bar);
+                let extended = re_input(&case.y, &x, &entity);
+
+                let plain = swamy_arora_variance_components(&base, ReEffects::OneWay, 0.95);
+                prop_assume!(plain.is_ok());
+                let plain = plain.unwrap();
+                let with_bar = swamy_arora_variance_components(&extended, ReEffects::OneWay, 0.95)
+                    .unwrap();
+                assert_approx_eq(with_bar.sigma2_eps, plain.sigma2_eps, "sigma2_eps");
+                assert_approx_eq(with_bar.sigma2_u, plain.sigma2_u, "sigma2_u");
+
+                let fit = ReEstimator::fit(extended, ReEffects::OneWay, ReCovType::Classical, 0.95);
+                prop_assume!(plain.sigma2_eps > 0.0);
+                let fit = fit.unwrap();
+                let base_fit = ReEstimator::fit(base, ReEffects::OneWay, ReCovType::Classical, 0.95)
+                    .unwrap();
+                prop_assert_eq!(
+                    fit.hausman_df(),
+                    base_fit.hausman_df().and_then(|df| df.checked_sub(1)).filter(|&df| df > 0)
+                );
             }
 
             /// Swamy-Arora分散成分から実際に組み立てたθも`[0, 1)`に収まる。

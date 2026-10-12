@@ -95,9 +95,131 @@ pub fn ensure_well_conditioned_symmetric_matrix(
     Ok(())
 }
 
+/// [`independent_columns_in_order`]の既定の許容誤差（Rの`lm`の`tol = 1e-7`と同じ）。
+pub const COLLINEARITY_TOLERANCE: f64 = 1e-7;
+
+/// 列を与えられた順に見て、それより前の（独立と判定した）列の線形結合で表せる列を見つける。
+/// 返す配列は列ごとに「前の列から独立か」（`true`なら残す、`false`なら従属で落とす）。
+///
+/// Rの`lm`（LINPACK `dqrdc2`）と同じ規則: 前の独立な列に射影した残差のノルムが、元の列のノルムの
+/// `tolerance`倍以下なら従属とみなす（列ごとの一様スケーリングに対して不変）。ピボットの
+/// 並べ替えをしないため、対称な別名（`x`と`x̄`が同じ）では後ろの列が落ちる。`checked_col_piv_qr`
+/// （全列がフルランクかの判定）と違い、どの列を落とすかを呼び出し側の列順で決めたいときに使う。
+/// 全ゼロの列と、非有限値を含む列は従属として扱う。直交化は2回行い（再直交化）、近共線な列でも
+/// 射影後の残差の丸め誤差を抑える。
+///
+/// 全ての列は同じ長さでなければならない（呼び出し側の契約）。
+pub fn independent_columns_in_order(columns: &[&[f64]], tolerance: f64) -> Vec<bool> {
+    let mut basis: Vec<Vec<f64>> = Vec::new();
+    columns
+        .iter()
+        .map(|col| {
+            let norm = col.iter().map(|v| v * v).sum::<f64>().sqrt();
+            if !norm.is_finite() || norm == 0.0 {
+                return false;
+            }
+            let mut residual = col.to_vec();
+            for _ in 0..2 {
+                for q in &basis {
+                    let dot: f64 = residual.iter().zip(q).map(|(a, b)| a * b).sum();
+                    for (r, b) in residual.iter_mut().zip(q) {
+                        *r -= dot * b;
+                    }
+                }
+            }
+            let residual_norm = residual.iter().map(|v| v * v).sum::<f64>().sqrt();
+            if residual_norm <= tolerance * norm {
+                return false;
+            }
+            basis.push(residual.iter().map(|v| v / residual_norm).collect());
+            true
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn independent_columns_in_order_drops_the_later_of_two_identical_columns() {
+        let a = [1.0, 2.0, 3.0, 5.0];
+        let b = [1.0, 1.0, 1.0, 1.0];
+        assert_eq!(
+            independent_columns_in_order(&[&b, &a, &a], COLLINEARITY_TOLERANCE),
+            vec![true, true, false]
+        );
+    }
+
+    #[test]
+    fn independent_columns_in_order_drops_a_linear_combination_of_earlier_columns() {
+        let ones = [1.0; 5];
+        let x = [1.0, 4.0, 2.0, 8.0, 5.0];
+        let z = [3.0, -1.0, 0.5, 2.0, 7.0];
+        let combo: Vec<f64> = (0..5).map(|i| 2.0 * x[i] - 3.0 * z[i] + 1.0e6).collect();
+        // 落ちるのは列順で後ろの列: 結合の列が後ろなら結合の列、前なら`z`。
+        assert_eq!(
+            independent_columns_in_order(&[&ones, &x, &z, &combo], COLLINEARITY_TOLERANCE),
+            vec![true, true, true, false]
+        );
+        assert_eq!(
+            independent_columns_in_order(&[&ones, &x, &combo, &z], COLLINEARITY_TOLERANCE),
+            vec![true, true, true, false]
+        );
+        // `z`と結合の列を入れ替えても、前の2列の独立性は変わらない。
+        assert_eq!(
+            independent_columns_in_order(&[&z, &combo, &ones, &x], COLLINEARITY_TOLERANCE),
+            vec![true, true, true, false]
+        );
+    }
+
+    #[test]
+    fn independent_columns_in_order_is_invariant_to_column_scaling() {
+        let ones = [1.0; 4];
+        let x = [1.0, 2.0, 4.0, 3.0];
+        let scaled: Vec<f64> = x.iter().map(|v| v * 1.0e9).collect();
+        let tiny: Vec<f64> = x.iter().map(|v| v * 1.0e-9).collect();
+        assert_eq!(
+            independent_columns_in_order(&[&ones, &x, &scaled, &tiny], COLLINEARITY_TOLERANCE),
+            vec![true, true, false, false]
+        );
+    }
+
+    #[test]
+    fn independent_columns_in_order_keeps_nearly_but_not_collinear_columns() {
+        // 相関が1に近くても、相対残差が許容誤差（1e-7）より大きければ残す。
+        let ones = [1.0; 6];
+        let x = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let near: Vec<f64> = x
+            .iter()
+            .enumerate()
+            .map(|(i, v)| v + 1.0e-3 * if i % 2 == 0 { 1.0 } else { -1.0 })
+            .collect();
+        let nearer: Vec<f64> = x
+            .iter()
+            .enumerate()
+            .map(|(i, v)| v + 1.0e-9 * if i % 2 == 0 { 1.0 } else { -1.0 })
+            .collect();
+        assert_eq!(
+            independent_columns_in_order(&[&ones, &x, &near], COLLINEARITY_TOLERANCE),
+            vec![true, true, true]
+        );
+        assert_eq!(
+            independent_columns_in_order(&[&ones, &x, &nearer], COLLINEARITY_TOLERANCE),
+            vec![true, true, false]
+        );
+    }
+
+    #[test]
+    fn independent_columns_in_order_treats_zero_and_non_finite_columns_as_dependent() {
+        let ones = [1.0; 3];
+        let zeros = [0.0; 3];
+        let nan = [1.0, f64::NAN, 2.0];
+        assert_eq!(
+            independent_columns_in_order(&[&ones, &zeros, &nan], COLLINEARITY_TOLERANCE),
+            vec![true, false, false]
+        );
+        assert!(independent_columns_in_order(&[], COLLINEARITY_TOLERANCE).is_empty());
+    }
 
     #[test]
     fn checked_col_piv_qr_returns_qr_for_full_rank_matrix() {

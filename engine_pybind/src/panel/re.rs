@@ -244,7 +244,9 @@ impl REOptions {
 /// `fixed_effects()`, RE has no separate diagnostic method; see `panel-common.md`
 /// section 2.4). All three are `None` when there is no regressor left to test (every
 /// regressor is time-invariant, or varies only over time on a balanced panel; for two-way
-/// effects, every regressor varies in at most one dimension). If the comparison cannot be
+/// effects, every regressor varies in at most one dimension, or the within-transformed copy of
+/// every time-varying regressor is aliased because its entity or time mean is also a
+/// regressor, as in a correlated-random-effects specification). If the comparison cannot be
 /// computed, `fit()` fails instead.
 // `REResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`OLSResult`/`FEResult`と同じ理由）。

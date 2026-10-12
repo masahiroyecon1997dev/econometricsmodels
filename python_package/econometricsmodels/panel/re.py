@@ -121,7 +121,7 @@ class RE:
                 Driscoll-Kraay covariance has rank at most T-1, so the
                 Hausman test cannot be computed),
                 `cov_type="cluster"` with no more clusters than the
-                slopes of the Hausman auxiliary regression, an unknown
+                identified slopes of the Hausman auxiliary regression, an unknown
                 `variance_method`, or `variance_method="amemiya"` with a
                 regressor that has no within variation (time-invariant;
                 for two-way effects, varying in at most one
@@ -179,7 +179,13 @@ class REResults:
     balanced panel, a regressor that varies only over time (a year
     trend) stays in the model but its within-transformed copy is
     collinear with the constant, so it is left out of the tested set.
-    A time-invariant regressor (constant over time within every entity)
+    So is the within-transformed copy of a regressor whose entity mean
+    (or, for two-way effects, time mean) is also a regressor, as in a
+    correlated-random-effects (Mundlak) specification: it is a linear
+    combination of the constant and the other columns, and, as in R's
+    `lm`, the later aliased column is dropped (only within-transformed
+    copies are dropped; a perfectly collinear design still raises
+    `ComputationError`). A time-invariant regressor (constant over time within every entity)
     is allowed in RE and is never tested. All three values are `None`
     only when no coefficient can be tested. If the auxiliary regression
     cannot be computed (rank-deficient design, or a structurally

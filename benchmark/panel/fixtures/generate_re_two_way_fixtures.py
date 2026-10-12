@@ -34,7 +34,9 @@
 - 手作りの小パネル（`small_hand_*`、6エンティティ×4時点）: `xi`・`xt`を含む
   `x1 + xi + xt`・`x1`・`x1 + x2`。T=4でDriscoll-Kraay・クラスターの境界に近い。
 - 絶対年（`absolute_year_regressor`）: 時点だけで変わる`year`（1990〜）が他の列とスケールが
-  3桁異なる入力。
+  3桁異なる入力。同じデータで年を中心化した`absolute_year_centred`は、plmとの差が丸め誤差の
+  拡大だけであること（中心化した列では機械精度で一致する）の裏付け。
+- `high_condition_number`: 説明変数の相関が極めて高い悪条件のデータ。
 - wagepan（実データ、N=545・T=8、バランスパネル）: `married`・`union`・`expersq`に
   個人ごとに一定の`educ`と時点トレンド`yr`（時点列`year`の複製、絶対年）を加えた
   `lwage ~ married + union + expersq + educ + yr`。
@@ -99,6 +101,12 @@ SYNTHETIC_CASES: dict[str, tuple[str, list[str]]] = {
         ["xi", "xt", "x1", "x2"],
     ),
     "absolute_year": ("absolute_year_regressor", ["x1", "x2", "year"]),
+    # 同じデータで年を平均で中心化した列。絶対年との差（丸め誤差の拡大）の裏付け。
+    "absolute_year_centred": (
+        "absolute_year_regressor",
+        ["x1", "x2", "year_c"],
+    ),
+    "high_condition_number": ("high_condition_number", _BASIC_X),
 }
 
 # 手作りの小パネル（`re_two_way_small.csv`、6エンティティ×4時点）。構造・API・
@@ -131,8 +139,9 @@ def _run_all_cov_types(
     time_col: str = "time",
 ) -> dict:
     bandwidth = default_dk_bandwidth(csv_path, time_col)
-    return {
-        cov_type: run_re_two_way_plm_r(
+    out: dict = {}
+    for cov_type in COV_TYPES:
+        entry = run_re_two_way_plm_r(
             csv_path,
             formula,
             cov_type,
@@ -140,8 +149,11 @@ def _run_all_cov_types(
             time_col=time_col,
             maxlag=bandwidth if cov_type == "dk" else None,
         )
-        for cov_type in COV_TYPES
-    }
+        if cov_type == "dk":
+            # plmに渡したバンド幅。本実装の既定式との一致を固定する。
+            entry["maxlag"] = bandwidth
+        out[cov_type] = entry
+    return out
 
 
 def build_fixtures() -> dict:

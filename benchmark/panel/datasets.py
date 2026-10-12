@@ -303,7 +303,7 @@ def generate_fe_dataset(
         polars DataFrame（"zero_variance_regressor"・
         "time_invariant_unbalanced"はx_invariantも、
         "time_invariant_multi_unbalanced"はz1・z2、
-        "one_dimensional_regressors"はxi・xt、"absolute_year_regressor"はyear、
+        "one_dimensional_regressors"はxi・xt、"absolute_year_regressor"はyearと中心化したyear_c、
         "time_only_nearly_balanced"はtrendを追加）。
 
     Raises:
@@ -397,7 +397,9 @@ def generate_fe_dataset(
         # between回帰の定数判定（生スケール基準の閾値）を検証する。
         year = (_ABSOLUTE_YEAR_BASE + time_idx).astype(float)
         y = y + _ABSOLUTE_YEAR_COEF * (year - _ABSOLUTE_YEAR_BASE)
-        extra_columns = {"year": year}
+        # 平均で中心化した同じ列。絶対年との差が丸め誤差の拡大だけであること
+        # （中心化した列ではplmと機械精度で一致する）を確かめるために持つ。
+        extra_columns = {"year": year, "year_c": year - year.mean()}
     elif scenario == "time_only_nearly_balanced":
         # 時点トレンド（0〜）の時点だけで変わる列。絶対年にしないのは、plmが
         # 準バランスのbetween回帰（`solve(crossprod(Z))`）で絶対年の列を数値的に

@@ -50,6 +50,7 @@ from _assertions import assert_close
 from _constants import DATA_DIR
 from _helpers import load_wooldridge_dataset
 from _re_oracle import (
+    CONDITIONING_SENSITIVE_KEYS,
     assert_p_value_close,
     assert_stats_close,
     hand_computed,
@@ -147,16 +148,21 @@ _result_stats = result_stats
 
 
 def _assert_stats_close(ours, ref, label, *, keys=None):
-    """許容誤差は、ラベル先頭のシナリオ名で決まる（絶対年の列を含む入力は緩める）。"""
+    """許容誤差は、ラベル先頭のシナリオ名で決まる（絶対年の列を含む入力は、丸め誤差が
+    拡大する統計量だけ緩める）。"""
     absolute_year = label.split("/")[0] in ABSOLUTE_YEAR_SCENARIOS
-    rtol = RTOL_ABSOLUTE_YEAR if absolute_year else RTOL
     assert_stats_close(
         ours,
         ref,
         label,
-        rtol=rtol,
+        rtol=RTOL,
         atol=ATOL,
-        rtol_p_value=rtol if absolute_year else RTOL_P_VALUE,
+        rtol_p_value=RTOL_P_VALUE,
+        rtol_by_key=(
+            dict.fromkeys(CONDITIONING_SENSITIVE_KEYS, RTOL_ABSOLUTE_YEAR)
+            if absolute_year
+            else None
+        ),
         keys=keys,
     )
 

@@ -33,7 +33,12 @@ import statsmodels.api as sm
 from _assertions import assert_close
 from _constants import DATA_DIR
 from _helpers import load_wooldridge_dataset
-from _re_oracle import assert_stats_close, hand_computed, result_stats
+from _re_oracle import (
+    CONDITIONING_SENSITIVE_KEYS,
+    assert_stats_close,
+    hand_computed,
+    result_stats,
+)
 from _tolerances import TOLERANCES
 from econometricsmodels import RE, REOptions
 
@@ -127,12 +132,14 @@ class Case:
         )
 
     def tolerances(self) -> dict:
-        rtol = RTOL_ABSOLUTE_YEAR if self.absolute_year else RTOL
-        return {
-            "rtol": rtol,
-            "atol": ATOL,
-            "rtol_p_value": RTOL_P_VALUE if not self.absolute_year else rtol,
-        }
+        """絶対年の列を含む入力は、丸め誤差が拡大する統計量
+        （`CONDITIONING_SENSITIVE_KEYS`）だけ許容誤差を緩める。"""
+        tol = {"rtol": RTOL, "atol": ATOL, "rtol_p_value": RTOL_P_VALUE}
+        if self.absolute_year:
+            tol["rtol_by_key"] = dict.fromkeys(
+                CONDITIONING_SENSITIVE_KEYS, RTOL_ABSOLUTE_YEAR
+            )
+        return tol
 
 
 PLM_CASES = (
@@ -141,7 +148,7 @@ PLM_CASES = (
             name,
             scenario,
             x_cols,
-            absolute_year=scenario == "absolute_year_regressor",
+            absolute_year=name == "absolute_year",
         )
         for name, (scenario, x_cols) in SYNTHETIC_CASES.items()
     ]
@@ -234,6 +241,14 @@ def test_matches_plm(reference, case, cov_type):
         f"{case.name}/{cov_type}",
         **case.tolerances(),
     )
+
+
+@pytest.mark.parametrize("case", PLM_CASES, ids=lambda c: c.name)
+def test_default_dk_bandwidth_matches_the_one_given_to_plm(reference, case):
+    """plmに渡したDriscoll-Kraayのバンド幅（フィクスチャの`maxlag`）が、本実装の既定式
+    `floor(4·(T/100)^(2/9))`で選ぶ値と一致する。"""
+    res = case.fit("dk")
+    assert res.dk_bandwidth_used == case.plm(reference)["dk"]["maxlag"]
 
 
 @pytest.mark.parametrize("case", PLM_CASES, ids=lambda c: c.name)

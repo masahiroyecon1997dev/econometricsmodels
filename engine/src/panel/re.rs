@@ -5960,7 +5960,7 @@ mod tests {
             ) {
                 let (entity, time) = two_way_labels(case.n_entities, case.n_periods);
                 let base = fit_two_way(&case.y, &case.x, &entity, &time, cov_index);
-                prop_assume!(base.is_ok());
+                prop_assert!(base.is_ok(), "{:?}", base.as_ref().err());
                 let base = base.unwrap();
                 let (params, se) = params_and_se(&base);
 
@@ -5982,7 +5982,7 @@ mod tests {
                     .map(|&r| format!("u{}", case.n_periods - 1 - r % case.n_periods))
                     .collect();
                 let permuted = fit_two_way(&y2, &x2, &entity2, &time2, cov_index);
-                prop_assume!(permuted.is_ok());
+                prop_assert!(permuted.is_ok(), "{:?}", permuted.as_ref().err());
                 let permuted = permuted.unwrap();
                 let (params2, se2) = params_and_se(&permuted);
 
@@ -6010,13 +6010,13 @@ mod tests {
             ) {
                 let (entity, time) = two_way_labels(case.n_entities, case.n_periods);
                 let base = fit_two_way(&case.y, &case.x, &entity, &time, cov_index);
-                prop_assume!(base.is_ok());
+                prop_assert!(base.is_ok(), "{:?}", base.as_ref().err());
                 let base = base.unwrap();
                 let (params, se) = params_and_se(&base);
 
                 let y_scaled: Vec<f64> = case.y.iter().map(|v| v * scale).collect();
                 let scaled = fit_two_way(&y_scaled, &case.x, &entity, &time, cov_index);
-                prop_assume!(scaled.is_ok());
+                prop_assert!(scaled.is_ok(), "{:?}", scaled.as_ref().err());
                 let scaled = scaled.unwrap();
                 let (params_s, se_s) = params_and_se(&scaled);
                 for j in 0..params.len() {
@@ -6034,7 +6034,7 @@ mod tests {
                     *v += shift;
                 }
                 let shifted = fit_two_way(&case.y, &x_shifted, &entity, &time, cov_index);
-                prop_assume!(shifted.is_ok());
+                prop_assert!(shifted.is_ok(), "{:?}", shifted.as_ref().err());
                 let (params_h, se_h) = params_and_se(&shifted.unwrap());
                 assert_approx_eq(params_h[0], params[0] - params[1 + target] * shift, "const");
                 for j in 1..params.len() {
@@ -6047,22 +6047,23 @@ mod tests {
 
             /// 2-wayのGLSは、報告した3つの重み`θ₁・θ₂・θ₃`で`y - θ₁ȳᵢ - θ₂ȳₜ + θ₃ȳ`と
             /// 各列を手で変換し（切片列は`1 - θ₁ - θ₂ + θ₃`倍）、そのOLSを当てはめた係数・
-            /// 標準誤差（Classical・HC1）と一致する。一次元の列を含む。変換式の各項
+            /// 標準誤差（Classical・HC1〜HC3）と一致する。一次元の列を含む。変換式の各項
             /// （個体平均・時点平均・全体平均）の取り違えや符号の誤りを検出する。
             ///
-            /// 有効性の確認（`quasi_demean_two_way`へのバグ注入、確認後に元へ戻した）:
-            /// 全体平均項の符号反転と全体平均の除数のずれは本テストが、個体・時点の重みの
-            /// 入れ替えは本テストと`two_way_with_one_zero_component_equals_the_one_component_gls`が
-            /// 検出する。
+            /// 検出できる誤り: 全体平均項の符号反転と全体平均の除数のずれは本テストが、個体・
+            /// 時点の重みの入れ替えは本テストと
+            /// `two_way_with_one_zero_component_equals_the_one_component_gls`が検出する
+            /// （`quasi_demean_two_way`へのバグ注入で確認）。変換式が一貫して誤っていても
+            /// 不変性・同変性のテストは通るため、変換式の正しさはこのテストと固定値
+            /// （plm）のテストが担う。
             #[test]
             fn two_way_fit_equals_ols_on_the_hand_transformed_data(
                 case in one_dim_case_strategy(),
-                robust in any::<bool>(),
+                cov_index in 0..=3usize,
             ) {
                 let (entity, time) = two_way_labels(case.n_entities, case.n_periods);
-                let cov_index = usize::from(robust);
                 let est = fit_two_way(&case.y, &case.x, &entity, &time, cov_index);
-                prop_assume!(est.is_ok());
+                prop_assert!(est.is_ok(), "{:?}", est.as_ref().err());
                 let est = est.unwrap();
                 let (theta1, theta2, theta3) = est.two_way_theta().unwrap();
 
@@ -6090,9 +6091,14 @@ mod tests {
                 let ols_input =
                     OlsInput::from_columns(&y_star, &columns, names, false, "y".to_string())
                         .unwrap();
-                let cov = if robust { CovType::Hc1 } else { CovType::Classical };
+                let cov = match cov_index {
+                    0 => CovType::Classical,
+                    1 => CovType::Hc1,
+                    2 => CovType::Hc2,
+                    _ => CovType::Hc3,
+                };
                 let ols = OlsEstimator::fit(ols_input, cov, 0.95);
-                prop_assume!(ols.is_ok());
+                prop_assert!(ols.is_ok(), "{:?}", ols.as_ref().err());
                 let ols = ols.unwrap();
 
                 let (params, se) = params_and_se(&est);
@@ -6112,7 +6118,7 @@ mod tests {
             ) {
                 let (entity, time) = two_way_labels(case.n_entities, case.n_periods);
                 let est = fit_two_way(&case.y, &case.x, &entity, &time, 0);
-                prop_assume!(est.is_ok());
+                prop_assert!(est.is_ok(), "{:?}", est.as_ref().err());
                 let est = est.unwrap();
                 let (sigma2_u, sigma2_lambda) =
                     (est.sigma2_u(), est.sigma2_lambda().unwrap());
@@ -6156,7 +6162,7 @@ mod tests {
                     OlsInput::from_columns(&y_star, &columns, names, false, "y".to_string())
                         .unwrap();
                 let ols = OlsEstimator::fit(ols_input, CovType::Classical, 0.95);
-                prop_assume!(ols.is_ok());
+                prop_assert!(ols.is_ok(), "{:?}", ols.as_ref().err());
                 let ols = ols.unwrap();
 
                 let (params, se) = params_and_se(&est);
@@ -6185,7 +6191,7 @@ mod tests {
                     cov.clone(),
                     0.95,
                 );
-                prop_assume!(base.is_ok());
+                prop_assert!(base.is_ok(), "{:?}", base.as_ref().err());
                 let base = base.unwrap();
                 let (params, se) = params_and_se(&base);
                 prop_assert_eq!(base.hausman_df(), Some(case.x.len() - 1));
@@ -6208,7 +6214,7 @@ mod tests {
                     cov.clone(),
                     0.95,
                 );
-                prop_assume!(permuted.is_ok());
+                prop_assert!(permuted.is_ok(), "{:?}", permuted.as_ref().err());
                 let permuted = permuted.unwrap();
                 let (params2, se2) = params_and_se(&permuted);
                 for j in 0..params.len() {
@@ -6232,7 +6238,7 @@ mod tests {
                     cov,
                     0.95,
                 );
-                prop_assume!(shifted.is_ok());
+                prop_assert!(shifted.is_ok(), "{:?}", shifted.as_ref().err());
                 let (params_h, se_h) = params_and_se(&shifted.unwrap());
                 assert_approx_eq(params_h[0], params[0] - params[1 + target] * shift, "const");
                 for j in 1..params.len() {

@@ -426,10 +426,30 @@ def test_cluster_standard_errors_match_ols_on_the_plm_transformed_data(
     ref = sm.OLS(y, design).fit(
         cov_type="cluster",
         cov_kwds={"groups": groups, "use_correction": True},
+        use_t=True,
     )
-    assert [res.std_errors[n] for n in res.param_names] == pytest.approx(
+    names = res.param_names
+    assert [res.std_errors[n] for n in names] == pytest.approx(
         list(ref.bse), rel=1e-6
     )
+    # t統計量・p値・信頼区間・F検定とその自由度（`G - 1`）はstatsmodelsがネイティブに計算する
+    # （plmはz検定のため、`G - 1`の規約を独立に確かめられるのはここだけ）。
+    assert [res.test_stats[n] for n in names] == pytest.approx(
+        list(ref.tvalues), rel=1e-6
+    )
+    assert [res.p_values[n] for n in names] == pytest.approx(
+        list(ref.pvalues), rel=1e-5
+    )
+    assert np.ravel([res.conf_int[n] for n in names]) == pytest.approx(
+        np.ravel(ref.conf_int()), rel=1e-6
+    )
+    k = len(names) - 1
+    slopes = np.hstack([np.zeros((k, 1)), np.eye(k)])
+    wald = ref.wald_test(slopes, use_f=True, scalar=True)
+    assert res.stat_df == int(wald.df_denom) == len(set(groups)) - 1
+    assert res.f_df_denom == res.stat_df
+    assert res.f_statistic == pytest.approx(float(wald.statistic), rel=1e-6)
+    assert res.f_p_value == pytest.approx(float(wald.pvalue), rel=1e-5)
 
 
 def test_two_way_driscoll_kraay_without_lags_equals_time_clusters(panel):
@@ -471,6 +491,272 @@ def test_two_way_constant_column_raises_computation_error(panel):
     df = panel.with_columns(c=pl.lit(2.0))
     with pytest.raises(ComputationError):
         _fit(df, REOptions(time="time"), x=("x1", "c"))
+
+
+def _baseline() -> pl.DataFrame:
+    """`baseline`（40エンティティ×6時点）に一次元の列`xi`・`xt`を足したもの。"""
+    e = pl.col("entity").str.slice(1).cast(pl.Int64)
+    t = pl.col("time").str.slice(1).cast(pl.Int64)
+    return pl.read_csv(DATA_DIR / "fe_baseline.csv").with_columns(
+        xi=e * 0.3 + (e % 5), xt=t * 0.5 + (t % 3)
+    )
+
+
+@pytest.mark.parametrize(
+    ("columns", "x", "path"),
+    [
+        # 2-way within変換後に変動する列同士の完全共線（内部の2-way FEが検出）。
+        (
+            {"x3": 2 * pl.col("x1") + 3 * pl.col("x2")},
+            ("x1", "x2", "x3"),
+            "within-transformed",
+        ),
+        (
+            {"x3": 1e8 * pl.col("x1")},
+            ("x1", "x3"),
+            "within-transformed",
+        ),
+        # 個体間でのみ変わる列同士の共線は個体平均のbetween回帰が、時点間でのみ変わる
+        # 列同士の共線は時点平均のbetween回帰が検出する。
+        ({"xi2": 2 * pl.col("xi")}, ("x1", "xi", "xi2"), "on entity means"),
+        ({"xt2": 2 * pl.col("xt")}, ("x1", "xt", "xt2"), "on time means"),
+        # 説明変数のスケール差が極端でF検定の共分散部分行列がほぼ特異になる。
+        (
+            {"x1": 1e6 * pl.col("x1"), "x2": 1e-3 * pl.col("x2")},
+            ("x1", "x2"),
+            "F-test",
+        ),
+    ],
+    ids=[
+        "within_collinear",
+        "scaled_duplicate",
+        "xi_collinear",
+        "xt_collinear",
+        "extreme_scale",
+    ],
+)
+def test_two_way_computation_error_paths(columns, x, path):
+    """2-wayは分散成分に内部の2-way FEと2本のbetween回帰を使うため、失敗する経路が
+    1-wayと別になる。どれも`ComputationError`で、メッセージが失敗した回帰を示す。"""
+    df = _baseline().with_columns(**columns)
+    with pytest.raises(ComputationError, match=path):
+        _fit(df, REOptions(time="time"), x=x)
+
+
+def test_two_way_noiseless_data_fits_with_zero_idiosyncratic_variance():
+    """誤差の無いデータ（`σ_ε² = 0`）でも失敗せず、真の係数を返す。"""
+    df = _baseline().with_columns(
+        y=1.0 + 2.0 * pl.col("x1") - 1.0 * pl.col("x2")
+    )
+    res = _fit(df, REOptions(time="time"), x=("x1", "x2"))
+    assert res.sigma2_eps == pytest.approx(0.0, abs=1e-20)
+    assert [res.params[n] for n in ("const", "x1", "x2")] == pytest.approx(
+        [1.0, 2.0, -1.0], abs=1e-8
+    )
+
+
+def test_two_way_with_too_few_degrees_of_freedom_for_the_internal_fe_raises(
+    panel,
+):
+    """内部の2-way FEの自由度（`n - N - T + 1 - k_tv`）が足りない2×2パネル。"""
+    df = panel.filter(
+        pl.col("entity").is_in(["e1", "e2"]) & (pl.col("time") <= 2)
+    )
+    with pytest.raises(
+        ValidationError, match="insufficient degrees of freedom"
+    ):
+        _fit(df, REOptions(time="time"), x=("x1",))
+
+
+def test_two_way_with_many_regressors_raises_because_time_means_cannot_be_fitted():
+    """`k = 20`・`T = 6`: 時点平均のbetween回帰が`T <= K_b + 1`で失敗する。"""
+    many = pl.read_csv(DATA_DIR / "fe_many_regressors.csv")
+    with pytest.raises(
+        ValidationError, match="between-regression on time means"
+    ):
+        _fit(
+            many,
+            REOptions(time="time"),
+            x=tuple(f"x{i}" for i in range(1, 21)),
+        )
+
+
+@pytest.mark.parametrize(("n_entities", "n_periods"), [(3, 3), (3, 4), (6, 3)])
+def test_between_regression_success_boundary_matches_hand_computed(
+    panel, n_entities, n_periods
+):
+    """between回帰の成功境界（`N = K_b + 2`・`T = K_b + 2`、`K_b = 1`）。"""
+    df = panel.filter(
+        pl.col("entity").is_in([f"e{i}" for i in range(1, n_entities + 1)])
+        & (pl.col("time") <= n_periods)
+    )
+    res = _fit(df, REOptions(cov_type="classical", time="time"), x=("x1",))
+    hand = hand_computed(df, ["x1"], "classical", two_way=True)
+    for name in res.param_names:
+        assert res.params[name] == pytest.approx(
+            hand["params"][name], rel=1e-9
+        )
+        assert res.std_errors[name] == pytest.approx(
+            hand["std_errors"][name], rel=1e-9
+        )
+    assert res.sigma2_lambda == pytest.approx(hand["sigma2_lambda"], rel=1e-9)
+
+
+def test_two_way_results_do_not_depend_on_the_row_order(panel):
+    """行をシャッフルしても係数・標準誤差・Hausman検定は同じで、`residuals`は入力の
+    行順に並ぶ（個体平均・時点平均を行コードで取るため、取り違えの回帰ガード）。"""
+    options = REOptions(cov_type="hc1", time="time")
+    base = _fit(panel, options, x=("x1", "xi", "xt"))
+    order = np.random.default_rng(7).permutation(panel.height)
+    shuffled_df = panel[order.tolist()]
+    shuffled = _fit(shuffled_df, options, x=("x1", "xi", "xt"))
+
+    for name in base.param_names:
+        assert shuffled.params[name] == pytest.approx(
+            base.params[name], rel=1e-9
+        )
+        assert shuffled.std_errors[name] == pytest.approx(
+            base.std_errors[name], rel=1e-9
+        )
+    assert shuffled.hausman_statistic == pytest.approx(
+        base.hausman_statistic, rel=1e-9
+    )
+    assert shuffled.residuals == pytest.approx(
+        [base.residuals[i] for i in order], rel=1e-9
+    )
+
+
+def test_two_way_residuals_match_hand_computed(panel):
+    """`residuals`は準偏差変換した回帰の残差（入力の行順）。"""
+    res = _fit(
+        panel, REOptions(cov_type="classical", time="time"), x=("x1", "xi")
+    )
+    hand = hand_computed(panel, ["x1", "xi"], "classical", two_way=True)
+    assert res.residuals == pytest.approx(
+        hand["residuals"], rel=1e-8, abs=1e-12
+    )
+
+
+def test_two_way_without_variance_components_equals_pooled_ols(panel):
+    """`σ_u² = σ_λ² = 0`なら全ての重みが0でpooled OLS（切片あり）に一致する。"""
+    df = panel.with_columns(
+        y=2.0 * pl.col("x1")
+        + pl.Series([0.1 * ((r * 7) % 5) for r in range(24)])
+    )
+    res = _fit(
+        df, REOptions(cov_type="classical", time="time"), x=("x1", "xi")
+    )
+    assert res.sigma2_u == 0.0
+    assert res.sigma2_lambda == 0.0
+    design = sm.add_constant(df.select("x1", "xi").to_numpy())
+    ols = sm.OLS(df["y"].to_numpy(), design).fit()
+    assert [res.params[n] for n in res.param_names] == pytest.approx(
+        list(ols.params), rel=1e-9
+    )
+    assert [res.std_errors[n] for n in res.param_names] == pytest.approx(
+        list(ols.bse), rel=1e-9
+    )
+
+
+@pytest.mark.parametrize("zero", ["entity", "time"])
+def test_two_way_with_one_zero_component_equals_the_one_component_gls(zero):
+    """片方の分散成分だけが0に切り上げられると、残った成分だけのGLS
+    （`σ_u² = 0`なら時点、`σ_λ² = 0`ならエンティティ）に一致する。手で準偏差変換した
+    `y`・`X`（切片列は`1 - θ`倍）へのOLSと比べる。"""
+    n_e, n_t = 30, 8
+    entity = np.repeat(np.arange(n_e), n_t)
+    time = np.tile(np.arange(n_t), n_e)
+    for seed in range(100):
+        rng = np.random.default_rng(seed)
+        x = rng.normal(size=n_e * n_t)
+        # `zero`の側の効果を持たないDGP（標本の揺れで、その成分が0に切り上げられる
+        # 乱数の種を探す）。
+        effect = (
+            3.0 * rng.normal(size=n_t)[time]
+            if zero == "entity"
+            else 3.0 * rng.normal(size=n_e)[entity]
+        )
+        y = 1.0 + 0.5 * x + effect + rng.normal(size=n_e * n_t)
+        df = pl.DataFrame(
+            {
+                "entity": [f"e{i:02d}" for i in entity],
+                "time": time,
+                "y": y,
+                "x": x,
+            }
+        )
+        res = RE(
+            df,
+            y="y",
+            x=["x"],
+            entity="entity",
+            options=REOptions(cov_type="classical", time="time"),
+        ).fit()
+        if (res.sigma2_u if zero == "entity" else res.sigma2_lambda) == 0.0:
+            break
+    else:
+        pytest.fail("no seed produced the zero variance component")
+    assert (res.sigma2_u if zero == "entity" else res.sigma2_lambda) == 0.0
+    assert (res.sigma2_lambda if zero == "entity" else res.sigma2_u) > 0.0
+    assert res.theta_total == 0.0
+
+    group, theta = (
+        (time, res.theta_time)
+        if zero == "entity"
+        else (entity, res.theta_entity)
+    )
+
+    def quasi(v):
+        means = np.bincount(group, weights=v) / np.bincount(group)
+        return v - theta * means[group]
+
+    design = np.column_stack([np.full(n_e * n_t, 1.0 - theta), quasi(x)])
+    ols = sm.OLS(quasi(y), design).fit()
+    assert [res.params[n] for n in res.param_names] == pytest.approx(
+        list(ols.params), rel=1e-9
+    )
+    assert [res.std_errors[n] for n in res.param_names] == pytest.approx(
+        list(ols.bse), rel=1e-9
+    )
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf")])
+@pytest.mark.parametrize("role", ["entity", "time", "cluster", "dk_time"])
+def test_non_finite_float_group_key_columns_raise(panel, role, bad):
+    """float型のグループキー列（entity・time・cluster・dk_time）のNaN・infは
+    `ValidationError`（自動で除外・変換しない）。"""
+    df = panel.with_columns(
+        pl.when(pl.int_range(pl.len()) == 3)
+        .then(bad)
+        .otherwise(pl.col("time").cast(pl.Float64))
+        .alias("key")
+    )
+    kwargs = {
+        "entity": {"entity": "key", "options": REOptions(time="time")},
+        "time": {"entity": "entity", "options": REOptions(time="key")},
+        "cluster": {
+            "entity": "entity",
+            "options": REOptions(
+                cov_type="cluster", time="time", cluster="key"
+            ),
+        },
+        "dk_time": {
+            "entity": "entity",
+            "options": REOptions(
+                cov_type="dk", time="time", dk_time="key", dk_bandwidth=1
+            ),
+        },
+    }[role]
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_NON_FINITE_VALUE,
+            name="key",
+            value="NaN" if math.isnan(bad) else "inf",
+            row=3,
+        ),
+    ):
+        RE(df, y="y", x=["x1"], **kwargs).fit()
 
 
 def test_one_way_time_only_column_on_unbalanced_panel_is_tested(panel):

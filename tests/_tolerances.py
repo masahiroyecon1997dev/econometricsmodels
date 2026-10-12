@@ -492,7 +492,7 @@ TOLERANCES: dict[str, dict[str, float]] = {
     # （実測1e-12程度）。不均衡パネルのplmと本実装はσ_u²の定義が異なり係数で最大
     # 13%ずれるため、直接は比較しない（テストのモジュールdoc参照）。p値は相対誤差のみ。
     # `rtol_absolute_year`: 絶対年（1980〜1990年代の値）の列を含む入力（合成データの
-    # `absolute_year_regressor`と、時点トレンド`yr`を加えたwagepan）。他の列とスケールが
+    # `absolute_year_regressor`と、時点トレンド`yr`を加えたwagepan）の、丸め誤差が拡大する統計量だけ。他の列とスケールが
     # 3桁異なり丸め誤差が拡大する（`re_two_way`と同じ理由。実測最大 ~8e-8、wagepanの
     # ハウスマン統計量。約10倍のマージンを置く）。
     "re_time_invariant": {
@@ -509,9 +509,10 @@ TOLERANCES: dict[str, dict[str, float]] = {
     # 増幅されることへの余裕を除いた基準値（`_re_oracle.py`の`assert_p_value_close`が
     # `max(1, |ln p|)`倍に広げて比べる）。
     # `rtol_absolute_year`: 絶対年（1980〜1990年代の値）の列を含む入力（合成データと
-    # wagepan）。他の列とスケールが3桁異なり、本実装もplmも丸め誤差を ~1e-9〜1e-7 失う
+    # wagepan）で、丸め誤差が拡大する統計量（標準誤差とそれに由来する値・F統計量・ハウスマン検定、
+    # `_re_oracle.py`の`CONDITIONING_SENSITIVE_KEYS`）だけに適用する（他は`rtol`のまま）。他の列とスケールが3桁異なり、本実装もplmも丸め誤差を ~1e-9〜1e-7 失う
     # （年を中心化した同じ回帰では本実装とplmは ~1e-12で一致し、本実装自身も中心化の
-    # 有無で ~1e-9動く）。実測最大は ~1.8e-7（wagepan、ハウスマン検定のp値）のため、
+    # 有無で ~1e-9動く。年を中心化した合成データのケースは通常の`rtol`で通る）。実測最大は ~1.8e-7（wagepan、ハウスマン検定のp値）のため、
     # 約5倍のマージンを置いて1e-6とする。
     "re_two_way": {
         "rtol": RTOL_MACHINE_PRECISION,

@@ -333,6 +333,8 @@ def hand_computed(
         "f_p_value": float(stats.f.sf(f_stat, k, df_inf)),
         "f_df_num": k,
         "f_df_denom": df_inf,
+        # 準偏差変換した回帰の残差（入力の行順）。
+        "residuals": [float(v) for v in resid],
         "stat_df": df_inf,
         "df_resid": n - k_cols,
         "df_model": k_cols,
@@ -381,6 +383,20 @@ def hand_computed(
 
 # ── 比較 ─────────────────────────────────────────────────────────
 
+# 絶対年の列を含む入力で、丸め誤差が拡大する統計量（切片の標準誤差とそれに由来する値、
+# 補助回帰の共分散を使うハウスマン検定）。係数・分散成分・重み・情報量規準・R²は拡大
+# せず、通常の許容誤差のまま比べる。
+CONDITIONING_SENSITIVE_KEYS = {
+    "std_errors",
+    "test_stats",
+    "p_values",
+    "conf_int",
+    "f_statistic",
+    "f_p_value",
+    "hausman_statistic",
+    "hausman_p_value",
+}
+
 P_VALUE_KEYS = {"p_values", "f_p_value", "hausman_p_value"}
 
 
@@ -396,6 +412,7 @@ def result_stats(res) -> dict:
         "f_p_value": res.f_p_value,
         "f_df_num": res.f_df_num,
         "f_df_denom": res.f_df_denom,
+        "residuals": res.residuals,
         "stat_df": res.stat_df,
         "df_resid": res.df_resid,
         "df_model": res.df_model,
@@ -451,18 +468,21 @@ def assert_stats_close(
     rtol: float,
     atol: float,
     rtol_p_value: float,
+    rtol_by_key: dict[str, float] | None = None,
     keys: list[str] | None = None,
 ) -> None:
-    """`ref`にあるキー（または`keys`）について`ours`と比較する。p値は相対誤差のみ
-    （絶対誤差の下限があると、裾のp値が0に潰れても通ってしまうため）。"""
+    """`ref`にあるキー（または`keys`）について`ours`と比較する。`ours`に無いキーは失敗
+    （キー名の誤りで統計量が無検証になるのを防ぐ）。p値は相対誤差のみ
+    （絶対誤差の下限があると、裾のp値が0に潰れても通ってしまうため）。
+    `rtol_by_key`は、実測で丸め誤差が拡大する統計量だけ許容誤差を緩めるための上書き
+    （`rtol`・`rtol_p_value`の両方に優先する）。"""
+    overrides = rtol_by_key or {}
     for key in keys if keys is not None else ref:
-        if key not in ours:
-            continue
+        assert key in ours, f"{label}/{key}: missing from the compared result"
         a, b = ours[key], ref[key]
         tag = f"{label}/{key}"
-        tol, floor = (
-            (rtol_p_value, 0.0) if key in P_VALUE_KEYS else (rtol, atol)
-        )
+        tol = overrides.get(key, rtol_p_value if key in P_VALUE_KEYS else rtol)
+        floor = 0.0 if key in P_VALUE_KEYS else atol
         if b is None:
             assert a is None, tag
         elif isinstance(b, dict):
@@ -485,6 +505,10 @@ def assert_stats_close(
                     assert_close(
                         a[name], b[name], f"{tag}/{name}", rtol=tol, atol=floor
                     )
+        elif isinstance(b, list):
+            assert len(a) == len(b), tag
+            for i, (x, y) in enumerate(zip(a, b, strict=True)):
+                assert_close(x, y, f"{tag}/{i}", rtol=tol, atol=floor)
         elif key in _INTEGER_KEYS:
             assert a == b, f"{tag}: ours={a!r}, ref={b!r}"
         elif key in P_VALUE_KEYS:

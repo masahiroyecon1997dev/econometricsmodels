@@ -872,21 +872,27 @@ const MILLS_CONTINUED_FRACTION_THRESHOLD: f64 = 3.0;
 /// 連分数展開の段数（`a>=MILLS_CONTINUED_FRACTION_THRESHOLD`で倍精度に十分収束する）。
 const MILLS_CONTINUED_FRACTION_DEPTH: u32 = 60;
 
-/// `Φ(x)-1/2`（`x>=0`）を絶対誤差`≈1e-16`で計算する。`statrs`の`Normal::cdf`は絶対誤差が
+/// `Φ(x)-1/2`（`x>=0`）を絶対誤差`≈5e-16`以下で計算する。`statrs`の`Normal::cdf`は絶対誤差が
 /// 約`1.4e-11`（`Φ(-1)`で相対`8.6e-11`）あり、`W=Φ(zb)-Φ(za)`で割る量では限界効果の
 /// 標準誤差に`100`倍程度に増幅されて現れる（`k=20`で相対`1e-8`）ため使わない。
-/// `x<MILLS_CONTINUED_FRACTION_THRESHOLD`ではテイラー級数
-/// `Φ(x)-1/2=φ(x)·Σₙ x^{2n+1}/(2n+1)!!`（全項が正で桁落ちなし）、それ以上では
+/// `x<MILLS_CONTINUED_FRACTION_THRESHOLD`では`normal_cdf_minus_half_series`、それ以上では
 /// `1/2-φ(x)/λ(x)`（`λ`は連分数、`Φ(x)`が1に近いので絶対誤差で足りる）。
 fn normal_cdf_minus_half(normal: &Normal, x: f64) -> f64 {
+    debug_assert!(x >= 0.0 || x.is_nan(), "requires x >= 0");
     if x >= MILLS_CONTINUED_FRACTION_THRESHOLD {
         let (lambda, _) = inverse_mills_ratio_continued_fraction(x, MILLS_CONTINUED_FRACTION_DEPTH);
         return 0.5 - normal.pdf(x) / lambda;
     }
+    normal_cdf_minus_half_series(normal, x)
+}
+
+/// `Φ(x)-1/2=φ(x)·Σₙ x^{2n+1}/(2n+1)!!`（`x>=0`、全項が正で桁落ちなし）。`x<3`なら最大33項で
+/// 収束する（打ち切り条件は項が和の`1e-17`以下）。上限500は収束しない入力（NaN等）での
+/// 無限ループ防止。`x`が大きいほど項数が増えるため`x<MILLS_CONTINUED_FRACTION_THRESHOLD`で使う。
+fn normal_cdf_minus_half_series(normal: &Normal, x: f64) -> f64 {
     let x2 = x * x;
     let mut term = x;
     let mut sum = x;
-    // `x<3`なら40項程度で収束する。上限は収束しない入力（NaN等）での無限ループ防止
     for n in 1..=500u32 {
         term *= x2 / (2.0 * f64::from(n) + 1.0);
         sum += term;
@@ -897,9 +903,11 @@ fn normal_cdf_minus_half(normal: &Normal, x: f64) -> f64 {
     normal.pdf(x) * sum
 }
 
-/// 標準正規分布の生存関数`Φ(-a)`を、`a`の全域で`normal_cdf_minus_half`と同じ精度で計算する
-/// （`a<0`は`1/2+(Φ(-a)-1/2)`、`0<=a<3`は`1/2-(Φ(a)-1/2)`で`Φ(-3)≈1.3e-3`でも
-/// 桁落ちは約3桁、`a>=3`は`φ(a)/λ(a)`（連分数）で`a≈38`でもアンダーフローしない）。
+/// 標準正規分布の生存関数`Φ(-a)`。`a<0`は`1/2+(Φ(-a)-1/2)`、`0<=a<3`は`1/2-(Φ(a)-1/2)`
+/// （`Φ(-3)≈1.3e-3`で桁落ちは約3桁、`a→3`で相対誤差が最大`4e-13`）、`a>=3`は
+/// `φ(a)/λ(a)`（連分数、相対`5e-16`以下）。`a>=3`は`a≈38`で`φ(a)/λ`が非正規化数になり
+/// `a≳38.6`で0になるので、それより遠い裾は`inverse_mills_ratio_and_gap`（`φ`を作らない）を
+/// 使う。本番経路（`inverse_mills_ratio_and_gap`）が呼ぶのは`a<3`のみ。
 fn normal_survival(normal: &Normal, a: f64) -> f64 {
     if a < 0.0 {
         0.5 + normal_cdf_minus_half(normal, -a)
@@ -1168,10 +1176,11 @@ fn target_w_and_s(
 ///   打ち消し合うため、絶対誤差は小さいままでも`w`・`w_a`・`w_b`の**相対**精度は
 ///   `|z|≳1e3`から落ち、`|z|≳1e4`で`w_a`は符号も保証されない（`w≈1/z²`・`w_a≈-2/z³`自体が
 ///   無視できる大きさなので、全観測の平均には影響しない）。
-/// - **非打ち切り区間が極端に狭い場合**: `zb-za=(upper-lower)/σ`が`1e-4`程度より小さい
-///   （`σ`が区間幅の`1e4`倍以上）と、上側/下側の裾の`q-r·p`や中央の`W`・`1-Pa·A-Pb·B+…`が
-///   桁落ちして精度を失い、`zb-za`が丸め誤差のレベルでは`NaN`になる。この領域の扱い
-///   （級数への切り替え・入力の拒否）は未決定。
+/// - **非打ち切り区間が極端に狭い場合**: 区間幅`δ=zb-za=(upper-lower)/σ`が小さいと、上側/下側の
+///   裾の`q-r·p`や中央の`W`・`1-Pa·A-Pb·B+…`が桁落ちする。`w`の絶対誤差は約`ε/δ²`、真値は
+///   `≈δ²/12`なので相対誤差は約`12ε/δ⁴`で、`δ≈0.02`から相対`1e-8`を超え、`δ=1e-3`で
+///   相対`2e-4`、`δ≲2e-4`で相対100%（絶対誤差はなお`1e-10`級）になる。`δ`が丸め誤差の
+///   レベルでは`NaN`。この領域の扱い（級数への切り替え・エラー）は未決定。
 fn uncensored_w_and_s(
     x_point: &[f64],
     mu: f64,
@@ -4676,20 +4685,24 @@ mod tests {
         );
     }
 
-    /// 逆ミルズ比`λ(a)=φ(a)/Φ(-a)`とその超過分`λ(a)-a`の参照値。`a<=3`は
+    /// 逆ミルズ比`λ(a)=φ(a)/Φ(-a)`とその超過分`λ(a)-a`の参照値。`a<=1`は
     /// `scipy.special.erfcx`（`λ=√(2/π)/erfcx(a/√2)`）、`a>=3`は連分数を60桁の10進演算で
-    /// 20000段評価した値（超過分`λ-a`も同じ演算で直接作った値）。直接計算
+    /// 20000段評価した値（超過分`λ-a`も同じ演算で直接作った値）。`a∈[2.5,3)`の参照は
+    /// 70桁の10進演算のテイラー級数（`scipy`の`erfcx`と一致を確認済み）。直接計算
     /// （`a<MILLS_CONTINUED_FRACTION_THRESHOLD=3`、テイラー級数の`Φ`）と連分数の両方の領域、
-    /// および切り替え点の前後（`2.99`・`3.0`）を含む。両領域とも`1e-13`で一致する。
+    /// および切り替え点の前後（`2.9999`・`3.0`）を含む。
     #[test]
     fn inverse_mills_ratio_and_gap_match_high_precision_reference_on_both_branches() {
         let normal = Normal::new(0.0, 1.0).unwrap();
-        // (a, lambda, gap)。`a<3`のgapは`λ-a`の引き算（`gap`の相対精度は`ε·a²`程度）
+        // (a, lambda, gap)。`a<3`のgapは`λ-a`の引き算で、`λ/gap≈12`倍に誤差が増幅される
         let cases = [
             (-5.0, 1.486_719_940_904_908_6e-6, None),
             (0.0, 0.797_884_560_802_865_4, None),
             (1.0, 1.525_135_276_160_981_3, None),
-            (2.99, 3.273_805_823_492_689, None),
+            (2.5, 2.822_744_797_663_907, Some(0.322_744_797_663_907_2)),
+            (2.9, 3.190_315_139_542_982, Some(0.290_315_139_542_982)),
+            (2.99, 3.273_805_823_492_689, Some(0.283_805_823_492_688_8)),
+            (2.9999, 3.283_005_711_006_472, Some(0.283_105_711_006_471_4)),
             (3.0, 3.283_098_654_930_436, Some(0.283_098_654_930_436_5)),
             (5.0, 5.186_503_967_125_842, Some(0.186_503_967_125_842_1)),
             (10.0, 10.098_093_233_962_512, Some(0.098_093_233_962_511_96)),
@@ -4704,9 +4717,16 @@ mod tests {
         ];
         for (a, lambda, gap) in cases {
             let (actual, actual_gap) = inverse_mills_ratio_and_gap(&normal, a);
-            assert_relative_eq(actual, lambda, 1e-13, &format!("lambda({a})"));
+            // 級数側（`a<3`）は`a→3`で`Φ(-a)=1/2-(Φ(a)-1/2)`の桁落ちが増え、`λ`は最大`4e-13`、
+            // `gap`は最大`4e-12`（実測）。連分数側（`a>=3`）は`5e-16`以下
+            let (lambda_rtol, gap_rtol) = if a < MILLS_CONTINUED_FRACTION_THRESHOLD {
+                (1e-12, 1e-11)
+            } else {
+                (1e-14, 1e-13)
+            };
+            assert_relative_eq(actual, lambda, lambda_rtol, &format!("lambda({a})"));
             if let Some(gap) = gap {
-                assert_relative_eq(actual_gap, gap, 1e-13, &format!("gap({a})"));
+                assert_relative_eq(actual_gap, gap, gap_rtol, &format!("gap({a})"));
             }
         }
     }
@@ -4717,24 +4737,25 @@ mod tests {
     fn mills_ratio_and_normal_cdf_are_continuous_across_the_series_to_continued_fraction_switch() {
         let normal = Normal::new(0.0, 1.0).unwrap();
         let t = MILLS_CONTINUED_FRACTION_THRESHOLD;
-        let below = t * (1.0 - 1e-12);
+        // 切り替え点の直前の浮動小数点数（傾きによる変化を除き、飛びだけを見る）
+        let below = f64::from_bits(t.to_bits() - 1);
         let (lambda_below, _) = inverse_mills_ratio_and_gap(&normal, below);
         let (lambda_at, _) = inverse_mills_ratio_and_gap(&normal, t);
-        // `λ`は傾き約`1`なので`t·1e-12`の差分だけ許す
+        // 飛びの実測は`λ`で`1.3e-13`、`Φ(-a)`で`3.6e-13`（級数側の桁落ち）。許容は`1e-12`
         assert!(
-            (lambda_at - lambda_below).abs() < 2e-11,
+            (lambda_at - lambda_below).abs() < 1e-12,
             "lambda: below={lambda_below}, at={lambda_at}"
         );
         assert_relative_eq(
             normal_survival(&normal, below),
             normal_survival(&normal, t),
-            1e-8,
+            1e-12,
             "survival around switch",
         );
         assert_relative_eq(
             normal_cdf_minus_half(&normal, below),
             normal_cdf_minus_half(&normal, t),
-            1e-8,
+            1e-12,
             "cdf-1/2 around switch",
         );
     }
@@ -4779,35 +4800,57 @@ mod tests {
         }
     }
 
-    /// 連分数展開は`a>=3`で、直接計算（`normal_survival`のテイラー級数側の`φ(a)/Φ(-a)`を
-    /// 切り替え点より上へ外挿して使った値）と`1e-12`で一致する。段数
-    /// `MILLS_CONTINUED_FRACTION_DEPTH`が切り替え点（`a=3`）でも収束していることの確認。
-    /// `a=3`・`4`・`5`のテイラー級数側は`Φ(-a)=1/2-(Φ(a)-1/2)`の桁落ちで相対`1e-13`/`1e-11`/
-    /// `1e-9`程度まで落ちるため、`a`が大きいほど許容を緩める（連分数側が正しい）。
+    /// 連分数展開は、切り替え点より上（`a=3`・`3.5`・`4`）でも、テイラー級数
+    /// （`normal_cdf_minus_half_series`、切り替え点より上へ外挿して`Φ(-a)=1/2-(Φ(a)-1/2)`を作る）
+    /// 由来の`φ(a)/Φ(-a)`と一致する。段数`MILLS_CONTINUED_FRACTION_DEPTH`が切り替え点でも
+    /// 収束していることの確認で、段数を落とす（20等）と失敗する。級数側は`a`が大きいほど
+    /// `Φ(-a)=1/2-(Φ(a)-1/2)`の桁落ち（相対`ε/Φ(-a)`）で精度が落ちるため、許容は`a`に応じて
+    /// `Φ(-3)=1.3e-3`で`5e-13`、`Φ(-3.5)=2.3e-4`で`2e-12`、`Φ(-4)=3.2e-5`で`1e-11`（実測`4e-12`）。
     #[test]
     fn inverse_mills_ratio_continued_fraction_agrees_with_series_based_survival_near_the_switch() {
         let normal = Normal::new(0.0, 1.0).unwrap();
-        for (a, rtol) in [(3.0, 1e-12), (3.5, 1e-11), (4.0, 1e-10)] {
-            let series_survival = 0.5 - normal_cdf_minus_half(&normal, a);
+        for (a, rtol) in [(3.0, 5e-13), (3.5, 2e-12), (4.0, 1e-11)] {
+            let series_survival = 0.5 - normal_cdf_minus_half_series(&normal, a);
             let series_lambda = normal.pdf(a) / series_survival;
             let (cf, _) = inverse_mills_ratio_continued_fraction(a, MILLS_CONTINUED_FRACTION_DEPTH);
             assert_relative_eq(cf, series_lambda, rtol, &format!("cf vs series at a={a}"));
         }
     }
 
-    /// 裾での`(Pa,Pb)`と`ExpectedUncensored`の`(w, ∂w/∂μ, ∂w/∂σ)`を、80桁の10進演算で
-    /// 直接評価した参照値（`W=Φ(-za)-Φ(-zb)`を連分数の`Φ(-z)`から作り、定義通りに
-    /// `φ/W`・`w=1+ρ2-ρ1²`・偏微分を計算）と突き合わせる。左のみ・右のみ・両側の
-    /// 上側の裾・下側の裾（符号反転）・`zb`が遥か先で片側と一致する場合を含む。`z=40`では
-    /// `Φ(-40)≈3.7e-350`が倍精度でアンダーフローし、直接計算では`W=0`になる領域。
-    /// 絶対誤差の許容は、`w`が数`ε`、`∂w/∂μ`が`Pa≈z`に比例する`≈ε·z`、
-    /// `∂w/∂σ`がさらに`za`倍の`≈ε·z²`程度に収まる想定で置いた。
+    /// 補助関数は`NaN`・`±inf`・`±40`でもpanicや無限ループなしに有限時間で戻り、値は
+    /// `Φ(-a)`の定義（`a=-inf`で1、`a=+inf`で0、`NaN`は`NaN`）に従う。
+    #[test]
+    fn normal_cdf_helpers_handle_non_finite_and_far_tail_inputs_without_panicking() {
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        assert!(normal_survival(&normal, f64::NAN).is_nan());
+        assert!(normal_cdf_minus_half(&normal, f64::NAN).is_nan());
+        assert_eq!(normal_survival(&normal, f64::INFINITY), 0.0);
+        assert_eq!(normal_survival(&normal, f64::NEG_INFINITY), 1.0);
+        assert_eq!(normal_survival(&normal, -40.0), 1.0);
+        assert!(normal_survival(&normal, 40.0) >= 0.0);
+        assert_eq!(normal_cdf_minus_half(&normal, 40.0), 0.5);
+        // 遠い裾の逆ミルズ比は有限（`φ`を作らない連分数）
+        for a in [-1e8, -40.0, 40.0, 1e8] {
+            let (lambda, gap) = inverse_mills_ratio_and_gap(&normal, a);
+            assert!(lambda.is_finite() && gap.is_finite(), "a={a}");
+        }
+    }
+
+    /// `(Pa,Pb)`と`ExpectedUncensored`の`(w, ∂w/∂μ, ∂w/∂σ)`を、70〜80桁の10進演算で
+    /// 直接評価した参照値（定義通りに`φ/W`・`w=1+ρ2-ρ1²`・偏微分を計算。裾は`W=Φ(-za)-Φ(-zb)`を
+    /// 連分数の`Φ(-z)`から、中央・級数側は`Φ(x)-1/2`のテイラー級数から作る）と突き合わせる。
+    /// 左のみ・右のみ・両側の上側の裾・下側の裾（符号反転）・`zb`が遥か先で片側と一致する場合に
+    /// 加え、切り替え点の前後の両側`(2.9,3.1)`・`(-3.2,-2.9)`・`(2.99,3.5)`、中央`(-1,1.5)`、
+    /// 級数側の上側`(0.5,1)`を含む。`z=40`では`Φ(-40)≈3.7e-350`が倍精度でアンダーフローし、
+    /// 直接計算では`W=0`になる領域。許容は実測（`w`の絶対誤差`2e-16`、`Pa`/`Pb`の相対`1e-16`、
+    /// `s_beta`は`z=40`で`3e-15`、`s_sigma`は`z=40`で`1e-13`・`z=1000`で`9e-12`）の約10倍。
+    /// 整理前の式（`ε·z³`の桁落ち）は`z=40`以上で許容を超える。
     #[test]
     fn uncensored_terms_and_w_match_high_precision_reference_in_extreme_tails() {
         let normal = Normal::new(0.0, 1.0).unwrap();
         // (label, za, zb, Pa, Pb, w, w_a, w_b)
         #[allow(clippy::type_complexity)]
-        let cases: [(&str, Option<f64>, Option<f64>, f64, f64, f64, f64, f64); 10] = [
+        let cases: [(&str, Option<f64>, Option<f64>, f64, f64, f64, f64, f64); 15] = [
             (
                 "left-only z=40",
                 Some(40.0),
@@ -4908,6 +4951,56 @@ mod tests {
                 -5.293_800_087_694_461_5e-3,
                 4.483_156_195_574_498e-3,
             ),
+            (
+                "two-sided middle (-1,1.5)",
+                Some(-1.0),
+                Some(1.5),
+                0.312_406_707_904_292_9,
+                0.167_219_260_751_766_74,
+                0.415_685_006_157_389_35,
+                -0.279_844_332_730_801_1,
+                0.237_423_265_323_732_5,
+            ),
+            (
+                "two-sided series side (0.5,1)",
+                Some(0.5),
+                Some(1.0),
+                2.348_945_555_820_274,
+                1.614_405_096_978_975_4,
+                0.020_517_995_256_376_27,
+                -0.081_018_025_127_821_73,
+                0.080_640_782_102_733_44,
+            ),
+            (
+                "two-sided across switch (2.9,3.1)",
+                Some(2.9),
+                Some(3.1),
+                6.627_104_844_212_096,
+                3.637_032_252_118_688_6,
+                0.003_269_960_658_955_57,
+                -0.032_095_805_611_538_79,
+                0.032_057_072_683_910_62,
+            ),
+            (
+                "two-sided lower across switch (-3.2,-2.9)",
+                Some(-3.2),
+                Some(-2.9),
+                2.022_684_343_271_988,
+                5.050_188_210_696_992,
+                0.007_176_245_277_561_196,
+                -0.045_669_523_263_236_76,
+                0.045_860_713_340_026_13,
+            ),
+            (
+                "two-sided just above switch (2.99,3.5)",
+                Some(2.99),
+                Some(3.5),
+                3.929_066_816_439_395_4,
+                0.750_850_996_568_809_9,
+                0.018_875_495_487_299_693,
+                -0.065_024_874_586_292_15,
+                0.063_574_225_828_370_7,
+            ),
         ];
         // `mu=1, sigma=2`で`za=(lower-mu)/sigma`が上の値になるよう境界を逆算する
         let (mu, sigma) = (1.0, 2.0);
@@ -4915,28 +5008,42 @@ mod tests {
             let lower = za.map(|z| mu + sigma * z);
             let upper = zb.map(|z| mu + sigma * z);
             let terms = UncensoredTerms::new(mu, sigma, lower, upper, &normal);
-            assert_relative_eq(terms.ratios.pa, pa, 1e-12, &format!("{label}: Pa"));
-            assert_relative_eq(terms.ratios.pb, pb, 1e-12, &format!("{label}: Pb"));
+            // 切り替え点の手前（`a<3`）を通る級数側は`λ`の相対誤差が最大`4e-13`
+            let near_switch = label.contains("switch");
+            let ratio_rtol = if near_switch { 1e-12 } else { 1e-14 };
+            assert_relative_eq(terms.ratios.pa, pa, ratio_rtol, &format!("{label}: Pa"));
+            assert_relative_eq(terms.ratios.pb, pb, ratio_rtol, &format!("{label}: Pb"));
 
             let x_point = [1.0, 2.0];
             let (w_actual, s_beta, s_sigma) =
                 uncensored_w_and_s(&x_point, mu, sigma, lower, upper, &normal);
             let z_scale = za.unwrap_or(0.0).abs().max(zb.unwrap_or(0.0).abs());
-            // `w`は`1-Pa·A-Pb·B+2·Pa·Pb`（`O(1)`同士の和）なので絶対誤差は数`ε`
+            // `w`は`1-Pa·A-Pb·B+2·Pa·Pb`（`O(1)`同士の和）なので絶対誤差は数`ε`。切り替え点付近の
+            // 級数側は`Pa`・`Pb`・`A`・`B`の誤差（`λ`で最大`4e-13`、`gap`で最大`4e-12`）が`O(10)`倍で効く
             assert!(
-                (w_actual - w).abs() <= 1e-14,
+                (w_actual - w).abs() <= if near_switch { 2e-12 } else { 2e-15 },
                 "{label}: w actual={w_actual:e}, expected={w:e}"
             );
             let dw_dmu = -(w_a + w_b) / sigma;
             let dw_dsigma = -(za.unwrap_or(0.0) * w_a + zb.unwrap_or(0.0) * w_b) / sigma;
             assert!(
-                (s_beta[1] - dw_dmu * x_point[1]).abs() <= 1e-14 * z_scale + 1e-15,
+                (s_beta[1] - dw_dmu * x_point[1]).abs()
+                    <= if near_switch {
+                        5e-12
+                    } else {
+                        1e-15 * z_scale + 1e-15
+                    },
                 "{label}: s_beta actual={:e}, expected={:e}",
                 s_beta[1],
                 dw_dmu * x_point[1]
             );
             assert!(
-                (s_sigma - dw_dsigma).abs() <= 1e-14 * z_scale * z_scale + 1e-15,
+                (s_sigma - dw_dsigma).abs()
+                    <= if near_switch {
+                        2e-11
+                    } else {
+                        1e-15 * z_scale * z_scale + 1e-15
+                    },
                 "{label}: s_sigma actual={s_sigma:e}, expected={dw_dsigma:e}"
             );
         }
@@ -5083,6 +5190,10 @@ mod tests {
     /// `w=∂m/∂μ`・`s_beta=∂w/∂μ·x`・`s_sigma=∂w/∂σ`を、独立の閉形式`m`の中心差分
     /// （`w`は`m`の`μ`微分、`s`は`w`の微分なので`m`の2階・3階の差分）と突き合わせる。
     /// 3構成 × `μ`・`σ`の格子で、領域の切り替え（`za>=0`・`zb<=0`・中央）をまたぐ。
+    /// `w`の比較に使うオラクル`expected_uncensored_closed_form`は`statrs`の`cdf`（絶対誤差
+    /// 約`1.4e-11`）を使うため、中心差分（`h=1e-4`）経由で約`1e-7`・`h`で割る分`1e-9`級の誤差を
+    /// 含む（実測の最大差`1.1e-9`）。許容`1e-8`はその約10倍。`s`の比較は本番の`w`の差分なので
+    /// 中心差分の打ち切り誤差`h²·|w'''|/6`だけ（実測の最大`1.4e-8`）で、許容は`1e-7`。
     #[test]
     fn target_w_and_s_expected_uncensored_matches_finite_differences_of_closed_form_mean() {
         let normal = Normal::new(0.0, 1.0).unwrap();
@@ -5117,7 +5228,7 @@ mod tests {
                         &normal,
                     );
                     let w_fd = (m(mu + h, sigma) - m(mu - h, sigma)) / (2.0 * h);
-                    assert!((w - w_fd).abs() < 1e-7, "{label}: w={w}, fd={w_fd}");
+                    assert!((w - w_fd).abs() < 1e-8, "{label}: w={w}, fd={w_fd}");
                     assert!((0.0..=1.0).contains(&w), "{label}: w={w}");
 
                     let dw_dmu_fd = (w_of(mu + h, sigma, lower, upper)

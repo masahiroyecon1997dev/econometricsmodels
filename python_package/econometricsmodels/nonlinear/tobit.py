@@ -326,12 +326,18 @@ class TobitResults:
                 `"prob_uncensored"` (`P(uncensored|x)`), or
                 `"expected_uncensored"` (`E[y|lower<y<upper,x]`, the
                 expectation restricted to the uncensored region; with
-                a single lower bound of 0 this is `E[y|y>0,x]`). They
-                satisfy `E[y|x] = lower*P(lower) + upper*P(upper) +
-                P(uncensored|x) * E[y|lower<y<upper,x]`.
+                a single lower bound of 0 this is `E[y|y>0,x]`).
                 Case-insensitive. Independent of `new_data`: the same
                 four targets are available whether predicting on the
-                training data or new data.
+                training data or new data, and for left-, right- and
+                two-sided censoring.
+
+                The last three are related by `E[y|x] = lower *
+                P(y*<=lower|x) + upper * P(y*>=upper|x) +
+                P(uncensored|x) * E[y|lower<y<upper,x]`, where `y*` is
+                the latent variable; the term of a bound that does not
+                exist is dropped (with a single lower bound of 0 this is
+                `E[y|x] = P(y>0|x) * E[y|y>0,x]`).
 
         Returns:
             Predicted values of `target`, one per observation, in

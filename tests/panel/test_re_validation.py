@@ -30,9 +30,9 @@ Note:
     スケール差はすべて**この内部FE呼び出しが真っ先に失敗し`RE.fit()`自体が
     例外を送出する**（`REResults`クラスdocstring参照、`FeEstimator::fit`の
     失敗がそのまま伝播するため`WithinRegressionFailed`のメッセージ文言に
-    なる）。ハウスマン検定はこの1-way FE推定量を再利用するため、
-    単独で失敗するケースは無い（`hausman_*`が`None`になるのは傾き係数が
-    0個等、補助回帰が成立しない場合のみ）。
+    なる）。ハウスマン検定はこのFE推定量を再利用するため、
+    単独で失敗するケースは無い（`hausman_*`が`None`になるのは検定できる傾き係数が
+    無い場合のみ）。
 """
 
 from __future__ import annotations

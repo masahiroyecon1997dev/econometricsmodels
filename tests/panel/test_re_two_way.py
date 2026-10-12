@@ -36,6 +36,11 @@ _X1 = [
     -0.656, -0.683, -0.016, -0.443, 0.353, 0.073, 0.007, -0.188, -0.766,
     -0.221, -0.984, -1.104, -0.938, 0.679, -1.577,
 ]  # fmt: skip
+_X2 = [
+    -0.256, 0.511, -0.226, -0.315, -0.93, -0.213, 1.112, 0.424, 1.037, 0.249,
+    0.395, 0.185, -1.666, 0.855, 0.506, 0.499, -1.691, -1.744, -0.89, -0.468,
+    0.305, -0.046, 0.521, -0.642,
+]  # fmt: skip
 _XI = [-0.87, 0.485, -0.186, 1.546, -0.611, -0.348]
 _XT = [-1.637, 0.02, 0.892, -0.873]
 
@@ -72,6 +77,15 @@ def panel() -> pl.DataFrame:
             "x1": _X1,
             "xi": [_XI[r // 4] for r in range(24)],
             "xt": [_XT[r % 4] for r in range(24)],
+            "x2": _X2,
+            # 個体平均も時点平均も0の交互作用列。
+            "z": [(r // 4 + 1 - 3.5) * (r % 4 + 1 - 2.5) for r in range(24)],
+            # entityと別のクラスター列（3グループ）。
+            "grp": [f"g{r // 8}" for r in range(24)],
+            # timeと別の並び順の時点列（値の昇順は t = 2, 4, 1, 3）。
+            "dk_perm": [[30, 10, 40, 20][r % 4] for r in range(24)],
+            # 3時点にまとめた時点列。
+            "dk3": [min(r % 4 + 1, 3) for r in range(24)],
         }
     )
 
@@ -142,8 +156,143 @@ def test_two_way_hausman_test_matches_reference(panel, x, expected):
             panel, REOptions(cov_type=cov_type, time="time", **kwargs), x=x
         )
         assert res.hausman_df == 1, cov_type
-        assert res.hausman_statistic == pytest.approx(want, rel=1e-6), cov_type
+        assert res.hausman_statistic == pytest.approx(want, rel=1e-8), cov_type
         assert 0.0 <= res.hausman_p_value <= 1.0
+
+
+# 手計算の補助回帰（`x1 + x2`はplm::phtestとも一致）。cov_type順は
+# HAUSMAN_COV_TYPES。各要素は（統計量, p値）。
+HAUSMAN_X1_X2 = [
+    (9.92830801953696, 0.00698385648499824),
+    (8.10342574438997, 0.0173925578818405),
+    (6.72610170604262, 0.0346294482635305),
+    (4.38401947725594, 0.111692051071814),
+    (18.094162886712, 0.00011773414976345),
+    (11.0661183693506, 0.00395387493521181),
+]
+HAUSMAN_X1_Z_X2 = [
+    (10.0371631198638, 0.00661390148183497),
+    (9.07856691110755, 0.010681057264421),
+    (7.64418368167015, 0.021881979367307),
+    (4.7824250943718, 0.0915186458951753),
+    (20.078462535067, 4.36533178816285e-05),
+    (14.0801205135569, 0.000876073771284616),
+]
+HAUSMAN_X1_Z = [
+    (1.14428813461403, 0.284748043158543),
+    (1.83787825176763, 0.175199832831764),
+    (1.51093262045524, 0.218996831908603),
+    (1.014108147529, 0.313920661605621),
+    (3.63171340231645, 0.0566884270413592),
+    (1.06814571765199, 0.301364660153732),
+]
+
+
+@pytest.mark.parametrize(
+    ("x", "df", "expected"),
+    [
+        (("x1", "x2"), 2, HAUSMAN_X1_X2),
+        # 交互作用列`z`は識別できず検定対象から外れる（df = 2）。
+        (("x1", "z", "x2"), 2, HAUSMAN_X1_Z_X2),
+        (("x1", "z"), 1, HAUSMAN_X1_Z),
+    ],
+)
+def test_two_way_hausman_test_with_several_tested_coefficients(
+    panel, x, df, expected
+):
+    """検定対象が複数列のとき（`k > 1`）の統計量・p値（`χ²_df`の上側確率）。"""
+    for cov_type, (stat, p) in zip(HAUSMAN_COV_TYPES, expected, strict=True):
+        kwargs = (
+            {"dk_time": "time", "dk_bandwidth": 1} if cov_type == "dk" else {}
+        )
+        res = _fit(
+            panel, REOptions(cov_type=cov_type, time="time", **kwargs), x=x
+        )
+        assert res.hausman_df == df, cov_type
+        assert res.hausman_statistic == pytest.approx(stat, rel=1e-8), cov_type
+        assert res.hausman_p_value == pytest.approx(p, rel=1e-7), cov_type
+
+
+def test_two_way_results_do_not_depend_on_the_column_order(panel):
+    """時間変化のある列が先頭以外にあっても結果は同じ（列の対応づけの回帰ガード）。"""
+    base = _fit(
+        panel,
+        REOptions(cov_type="classical", time="time"),
+        x=("x1", "xi", "z", "x2"),
+    )
+    for x in [
+        ("xi", "x1", "x2", "z"),
+        ("z", "x2", "xi", "x1"),
+        ("x2", "z", "x1", "xi"),
+    ]:
+        res = _fit(panel, REOptions(cov_type="classical", time="time"), x=x)
+        assert res.hausman_df == base.hausman_df
+        assert res.hausman_statistic == pytest.approx(
+            base.hausman_statistic, rel=1e-9
+        )
+        assert res.r_squared_within == pytest.approx(
+            base.r_squared_within, rel=1e-9
+        )
+        for name in x:
+            assert res.params[name] == pytest.approx(
+                base.params[name], rel=1e-9
+            )
+
+
+def test_two_way_hausman_cluster_count_must_cover_the_auxiliary_slopes(panel):
+    """時点でクラスタリング（G = 4）。RE本体の傾き3個には足りるが、補助回帰の傾き
+    （`x*`の3個と`x̃`の1個）には足りず`ValidationError`になる。`x1 + xi`なら通る。"""
+    options = REOptions(cov_type="cluster", time="time", cluster="time")
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=4, q=4),
+    ):
+        _fit(panel, options, x=("x1", "xi", "xt"))
+    res = _fit(panel, options, x=("x1", "xi"))
+    assert res.hausman_df == 1
+    assert res.hausman_statistic == pytest.approx(2.27570721529081, rel=1e-8)
+
+
+def test_two_way_hausman_dk_periods_must_exceed_the_slopes(panel):
+    """`dk_time`を3時点にまとめる。RE本体の傾き3個では`T = 3 <= q`で
+    `ValidationError`、`x1 + xi`（q = 2）なら通って手計算と一致する。"""
+    options = REOptions(
+        cov_type="dk", time="time", dk_time="dk3", dk_bandwidth=1
+    )
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INSUFFICIENT_DK_PERIODS_FOR_INFERENCE, t_periods=3, q=3
+        ),
+    ):
+        _fit(panel, options, x=("x1", "xi", "xt"))
+    res = _fit(panel, options, x=("x1", "xi"))
+    assert res.hausman_statistic == pytest.approx(4.37954416942038, rel=1e-8)
+
+
+def test_two_way_hausman_uses_the_cluster_and_dk_time_columns(panel):
+    """`cluster`をentityと別の列に、`dk_time`をtimeと別の並び順の列にすると、
+    補助回帰の共分散もその列を使う（手計算の補助回帰と一致）。"""
+    clustered = _fit(
+        panel,
+        REOptions(cov_type="cluster", time="time", cluster="grp"),
+        x=("x1",),
+    )
+    assert clustered.hausman_statistic == pytest.approx(
+        7.77470735811636, rel=1e-8
+    )
+    for x, want in [
+        (("x1",), 1.3729036142545),
+        (("x1", "xi", "xt"), 0.0199827525899269),
+    ]:
+        dk = _fit(
+            panel,
+            REOptions(
+                cov_type="dk", time="time", dk_time="dk_perm", dk_bandwidth=1
+            ),
+            x=x,
+        )
+        assert dk.hausman_statistic == pytest.approx(want, rel=1e-8)
 
 
 def test_two_way_hausman_test_is_none_without_two_way_variation(panel):
@@ -173,9 +322,9 @@ def test_two_way_r_squared_matches_definition(panel, x, expected):
     R²で、この3種に対応する参照が無い）: within = 個体と時点でdemeanした
     変数、between = 個体平均、overall = 生の変数（between・overallは切片込み）。"""
     res = _fit(panel, REOptions(time="time"), x=x)
-    assert res.r_squared_within == pytest.approx(expected[0], rel=1e-5)
-    assert res.r_squared_between == pytest.approx(expected[1], rel=1e-5)
-    assert res.r_squared_overall == pytest.approx(expected[2], rel=1e-5)
+    assert res.r_squared_within == pytest.approx(expected[0], rel=1e-7)
+    assert res.r_squared_between == pytest.approx(expected[1], rel=1e-7)
+    assert res.r_squared_overall == pytest.approx(expected[2], rel=1e-7)
 
 
 def test_one_way_has_no_n_periods(panel):

@@ -170,8 +170,9 @@ def test_hausman_follows_cov_type(fe_dataset):
 
 
 def test_hausman_computed_with_singleton_time():
-    """singleton timeがあっても、ハウスマン検定は2-way FE比較を使わないため
-    計算される（`fe_singleton_time.csv`、`cov_type="dk"`で`time`を指定）。
+    """1-wayでは`time`列を使わないため、singleton timeがあってもハウスマン検定は
+    計算される（`fe_singleton_time.csv`、`cov_type="dk"`で`dk_time`を指定。2-wayは
+    `time`のsingletonを`ValidationError`にする）。
     """
     df = pl.read_csv(DATA_DIR / "fe_singleton_time.csv")
     options = REOptions(cov_type="dk", dk_time="time")

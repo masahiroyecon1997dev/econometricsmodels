@@ -303,6 +303,10 @@ TOBIT_SCENARIOS = [
     # 打ち切り方向のバリエーション（engineは lower/upper 両対応）。
     "right_censoring",
     "interval_censoring",
+    # 両側打ち切りで、非打ち切り区間が線形予測子の散らばりよりずっと狭い（両端に計90%）。
+    # 区間より遥か下/上に線形予測子が来る観測が多く、限界効果・予測値の両側の裾
+    # （標準化した下限 za>=3 かつ上限 zb 有限、および zb<=-3 かつ za 有限）を通す。
+    "interval_wide_spread",
     # 誤差項構造のバリエーション（左打ち切り30%固定、設計行列は無相関）。high_variance は
     # 誤差 SD を大きくした成功パス、heteroskedastic は σ_i が x1 に依存する誤設定ケース
     # （ロバスト共分散の検証用）。OLS（benchmark/linear/datasets.py）と同じ発想。
@@ -350,6 +354,11 @@ _TOBIT_SCENARIO_CONFIG: dict[str, dict[str, object]] = {
         "kind": "interval",
         "frac_lower": 0.20,
         "frac_upper": 0.20,
+    },
+    "interval_wide_spread": {
+        "kind": "interval",
+        "frac_lower": 0.45,
+        "frac_upper": 0.45,
     },
     "high_variance": {"kind": "left", "frac": 0.30, "err": "high_variance"},
     "heteroskedastic": {

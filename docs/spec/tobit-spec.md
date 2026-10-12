@@ -355,6 +355,19 @@ Tobit固有の差分:
     ずれた点に収束するため全フィールドに緩めた`rtol_solver`を使う。`tobit_crosscheck`は`1e-7`
     （実測は変わらず）、主リファレンス`tobit_reference`は`2e-7`（`FaerLbfgs`導入後、
     `predict/expected_latent`の1点が実測1.055e-7で`1e-7`を超えたため）。
+- **`expected_uncensored`の第三者実装による照合**: `AER::tobit`・`censReg`にこの量のネイティブな
+  実装が無く、Rの値は手書きの閉形式（下記の`numDeriv`・数値積分・分解恒等式で検証）。独立な
+  第三者実装として`scipy.stats.truncnorm`（切断正規分布の平均・分散。`w`は`var/σ²`）を使い、
+  Rの推定した`(β,σ)`から計算した予測値（先頭10行・新規データ）と限界効果`w·β_j`
+  （`overall`/`mean`/`median`）を生成時にフィクスチャ（`third_party_expected_uncensored`）へ固定する
+  （`scipy`のバージョン更新で値が変わってもテストが意図せず壊れないよう、生成時の値をコミットする。
+  `scipy`のバージョンは`_meta.scipy_version`）。標準誤差は`scipy`に対応物が無く対象外。
+  実測は`z`が約100の裾（`many_regressors`）でも`3e-11`で一致。
+- **`survreg`の収束打ち切りを締める**: `run_tobit_crosscheck.R`は`AER::tobit`に
+  `survreg.control(rel.tolerance=1e-13)`を渡す（既定は`1e-9`）。`interval_wide_spread`で既定のままだと
+  `survreg`の解が本実装・`censReg`から相対`1.3e-8`ずれ（本実装と`censReg`は`3e-11`で一致）、
+  `RTOL=1e-8`を割ったため。締めると本実装と`6e-10`で一致する。`censReg`を`reltol=1e-14`まで締めた
+  のと同じ扱いで、既存シナリオの`survreg`の値は最大`6e-10`（相対）しか動かない。
 - **手計算箇所のformula非依存検証**（主・交差ともR実装で第三者三角測量が効かないため、
   `.claude/rules/testing-policy.md`「リファレンス実装」2.）: `run_tobit_crosscheck.R`内で
   `stopifnot`により以下を検証する — スコア（`estfun`）↔ Tobit対数尤度の`numDeriv::grad`、
@@ -367,7 +380,9 @@ Tobit固有の差分:
   （`estfun`自体は`numDeriv`検証済みのため共有の手書き部分は変換のみに限定される）。
 - **合成データセット**（`benchmark/nonlinear/datasets.py`、
   `generate_censored_regression_dataset`）: 打ち切り比率違い（light/moderate/heavy ≈ 左打ち切り
-  15/35/60%）、`right_censoring`、`interval_censoring`、誤差構造（`high_variance`＝`ε~N(0,10²)`、
+  15/35/60%）、`right_censoring`、`interval_censoring`、`interval_wide_spread`（両側90%打ち切りで非打ち切り
+  区間が線形予測子の散らばりよりずっと狭く、`za>=3`かつ`zb`有限・`zb<=-3`かつ`za`有限の観測を含む。
+  `expected_uncensored`の両側の裾を通す）、誤差構造（`high_variance`＝`ε~N(0,10²)`、
   `heteroskedastic`＝`σ_i = exp(0.5·x1)`の乗法的不均一分散で Tobit MLE の等分散仮定に対する誤設定
   → ロバスト共分散 opg/hc0/hc1 と classical が乖離、点推定は擬似真値に一致）、悪条件
   （`small_n`、`moderate_multicollinearity`、`high_condition_number`、`scale_variance_mild`）。

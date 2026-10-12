@@ -12,9 +12,11 @@
 検証対象フィールド:
     係数・標準誤差・z値・p値・信頼区間（末尾に `sigma` を含む）・`sigma` プロパティ・
     対数尤度・AIC・BIC・全体 Wald 統計量/ p値・`n_obs`/`df_model`/`df_resid`・
-    限界効果（`expected_latent`/`expected_observed`/`prob_uncensored` ×
+    限界効果（`expected_latent`/`expected_observed`/`prob_uncensored`/
+    `expected_uncensored` ×
     `overall`/`mean`/`median`）・予測値（`predict()` の3対象、フィクスチャに固定した
-    先頭行分）・新規データ（out-of-sample）予測値（`predict(new_data=...)` の3対象）・
+    先頭行分）・新規データ（out-of-sample）予測値（`predict(new_data=...)` の4対象）・
+    `expected_uncensored` の第三者実装（`scipy.stats.truncnorm`）との照合・
     打ち切り適合度（`censoring_fit_check()`）。
 """
 
@@ -245,6 +247,62 @@ def _check_predict_new_data(
             )
 
 
+def _check_third_party_expected_uncensored(
+    res,
+    ref_new_x: dict,
+    ref: dict,
+    label: str,
+    *,
+    rtol: float,
+    atol: float,
+) -> None:
+    """`expected_uncensored`（`E[y|lower<y<upper,x]`）を、`scipy.stats.truncnorm`
+    （切断正規分布の平均・分散）から作った第三者の参照値と照合する。
+
+    `AER::tobit`・`censReg`にはこの量のネイティブな実装が無く、Rの値（`margeff`・
+    `predict_*`）は手書きの閉形式のため、独立な実装として`scipy`の値を生成時に
+    フィクスチャへ固定している（`benchmark/nonlinear/references/scipy_tobit.py`）。
+    Rの推定した`(β, σ)`から計算した値と、本実装が自分の推定値から計算した値を比べる。
+    標準誤差は`scipy`に対応物が無いため対象外（Rの`numDeriv`検証が担う）。
+    """
+    ours_head = res.predict(target="expected_uncensored")
+    for i, ref_v in enumerate(ref["predict_head"]):
+        assert_close(
+            ours_head[i],
+            ref_v,
+            f"{label}/scipy/predict_head/[{i}]",
+            rtol=rtol,
+            atol=atol,
+        )
+    ours_new = res.predict(
+        target="expected_uncensored", new_data=pl.DataFrame(ref_new_x)
+    )
+    assert len(ours_new) == len(ref["predict_new_data"])
+    for i, ref_v in enumerate(ref["predict_new_data"]):
+        assert_close(
+            ours_new[i],
+            ref_v,
+            f"{label}/scipy/predict_new_data/[{i}]",
+            rtol=rtol,
+            atol=atol,
+        )
+    for at in MARGEFF_AT:
+        rows = {
+            row["param_name"]: row
+            for row in res.marginal_effects(
+                at=at, target="expected_uncensored"
+            )
+        }
+        for name, ref_effect in ref["margeff_effect"][at].items():
+            assert_close(
+                rows[name]["effect"],
+                ref_effect,
+                f"{label}/scipy/margeff/{at}/{name}",
+                rtol=rtol,
+                atol=atol,
+            )
+
+
 def _check_censoring_fit_check(
     res, ref_rows: list, label: str, *, rtol: float, atol: float
 ) -> None:
@@ -380,6 +438,14 @@ def check_result(
         res,
         ref["new_x"],
         ref["predict_new_data"],
+        label,
+        rtol=rtol_point,
+        atol=atol,
+    )
+    _check_third_party_expected_uncensored(
+        res,
+        ref["new_x"],
+        ref["third_party_expected_uncensored"],
         label,
         rtol=rtol_point,
         atol=atol,

@@ -91,9 +91,15 @@ suppressMessages({
 # beta（切片含む）, sigma, V_raw（(β, log σ) 空間の生の分散共分散）を engine 別に得る。
 if (engine == "survreg") {
   suppressMessages(library(AER))
+  # survreg の収束打ち切り（既定 rel.tolerance=1e-9）を締める。両側打ち切りで非打ち切り
+  # 区間が線形予測子の散らばりよりずっと狭い `interval_wide_spread` では、既定だと survreg の
+  # 解が本実装・censReg（reltol=1e-14 まで締めた下の分岐）から相対 ~1.3e-8 ずれ、
+  # RTOL=1e-8 を割る（本実装と censReg は 3e-11 で一致、実測）。rel.tolerance=1e-13 まで
+  # 締めると本実装と ~6e-10 まで一致する。censReg を締めた前例と同じ扱い。
   fit <- AER::tobit(
     as.formula(formula_str),
-    left = lower, right = upper, dist = "gaussian", data = df
+    left = lower, right = upper, dist = "gaussian", data = df,
+    control = survival::survreg.control(rel.tolerance = 1e-13, iter.max = 200)
   )
   beta <- coef(fit)
   sigma <- fit$scale

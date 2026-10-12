@@ -39,6 +39,10 @@ from benchmark.nonlinear.datasets import (
     TOBIT_SCENARIOS,
 )
 from benchmark.nonlinear.references.r import run_tobit_r
+from benchmark.nonlinear.references.scipy_tobit import (
+    expected_uncensored_reference,
+    scipy_version,
+)
 
 # 数値比較する合成シナリオ（エラーパス専用シナリオを除いた全て）。
 NUMERIC_SCENARIOS = [
@@ -108,6 +112,16 @@ def _run(
     result["censoring_bounds"] = [lower, upper]
     result["x_cols"] = x_cols
     result["include_intercept"] = include_intercept
+    # `expected_uncensored`（E[y|lower<y<upper,x]）の第三者実装（scipy.stats.truncnorm）
+    # による参照値。AER/censReg にネイティブの対応物が無いため。生成時の値をJSONに固定する。
+    result["third_party_expected_uncensored"] = expected_uncensored_reference(
+        csv_path,
+        result,
+        x_cols=x_cols,
+        include_intercept=include_intercept,
+        lower=lower,
+        upper=upper,
+    )
     return result
 
 
@@ -293,9 +307,13 @@ def build(engine: str) -> dict:
         "sandwich_version": _r_package_version("sandwich"),
         # run_tobit_crosscheck.R が手計算箇所の formula 非依存検証に使う。
         "numDeriv_version": _r_package_version("numDeriv"),
+        # `expected_uncensored` の第三者参照（scipy.stats.truncnorm）。
+        "scipy_version": scipy_version(),
         "note": (
             "合成シナリオは打ち切り比率（light/moderate/heavy）・打ち切り方向"
-            "（right/interval）・誤差構造（high_variance/heteroskedastic）・悪条件"
+            "（right/interval）・両側の裾に入る区間打ち切り（interval_wide_spread: "
+            "非打ち切り区間が線形予測子の散らばりよりずっと狭く、標準化した下限 >=3 かつ"
+            "上限が有限、および上限 <=-3 かつ下限が有限の観測を含む）・誤差構造（high_variance/heteroskedastic）・悪条件"
             "（small_n/moderate_multicollinearity/high_condition_number/"
             "scale_variance_mild）を含む。heteroskedastic は Tobit MLE の等分散仮定に"
             "対する誤設定で opg/hc0/hc1 と classical が乖離する（点推定は擬似真値に一致）。"

@@ -167,7 +167,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
     返す。初期点のHessianが正定値でない場合は`lbfgs`も従来の`γI`初期化に戻るので、そこでは
     凹でない領域に入る可能性が残る。
     Rust（`tobit.rs`の`fit_returns_unconverged_result_for_every_solver_and_cov_type_at_truncated_point`）
-    とPython（`test_tobit.py`の`test_truncated_point_returns_unconverged_result_for_every_solver`）
+    とPython（`test_tobit_validation.py`の`test_truncated_point_returns_unconverged_result_for_every_solver`）
     で同じ入力に対して固定している。
   - **`bfgs`/`lbfgs`は`tol`を観測数`n`で正規化した基準を使う（実装済み）**:
     `newton`は絶対閾値のまま（既定`tol=1e-6`、Tobitでも反復回数は`n`によらずほぼ一定でこの
@@ -436,7 +436,7 @@ Tobit固有の差分:
   よう修正した（`zeta_for_hessian = zeta.clamp(-U_CLAMP, U_CLAMP)`）。この修正により、
   境界レジーム（軽度の準完全分離＋ごく小さいノイズ、「中間レジーム」）で
   以前は`NonConvergence`になっていたケースが正しく収束するようになったことを実測で確認した
-  （`tests/nonlinear/test_tobit.py`の`test_quasi_separation_tiny_noise_converges_to_true_values`
+  （`tests/nonlinear/test_tobit_validation.py`の`test_quasi_separation_tiny_noise_converges_to_true_values`
   参照）。`score_s`（勾配）は今回のスコープ外（`U_CLAMP`領域でのcost/gradientの数学的非整合は
   別の既知の課題、[`probit-spec.md`](./probit-spec.md)4章参照）のため変更していない。
 - **`wald_chi2_test`とOLSの`wald_f_test`の重複**: 部分行列抽出→悪条件検出→Cholesky→二次形式の

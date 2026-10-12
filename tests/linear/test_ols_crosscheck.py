@@ -16,7 +16,7 @@ small_nシナリオ n=20, k=4で約11.8%）。fixestの仕様ではなくpyfixes
 classical/HC0-3/clusterはRとほぼ機械精度で一致する（実測で相対誤差1e-14程度）
 ため`RTOL_STRICT`で厳密比較する。HACも同じ（R側は`NeweyWest(adjust = FALSE)`。
 既定の`adjust = TRUE`は共分散全体に`n/(n-k)`を掛けるが、本実装・statsmodelsは
-掛けず、これだけが差の全てだったため、スカラー補正の有無だけを揃えた。
+掛けず、これだけが差の全てのため、スカラー補正の有無だけを揃えている。
 `benchmark/linear/references/run_lm_crosscheck.R`参照）。詳細は
 `docs/spec/ols-spec.md`「テスト」参照。
 
@@ -33,8 +33,7 @@ crosscheckする。
 
 `include_intercept=False`（切片なし）・`confidence_level`非既定は、baseline
 シナリオのみで全cov_type（classical/HC0-3/cluster/HAC）と組み合わせてRとも
-数値照合する（従来ライブstatsmodels比較・相対比較のみだったものを、他の
-オプションと同じ凍結フィクスチャでの厳密比較に統合）。
+数値照合する（他のオプションと同じ凍結フィクスチャでの厳密比較）。
 
 Note:
     合成データはフィクスチャ生成時と同じ入力データを、`tests/fixtures/
@@ -273,10 +272,9 @@ def test_cluster_g2_matches_r(crosscheck):
 def test_cluster_ill_conditioned_matches_r(crosscheck, scenario):
     """悪条件・多重共線性シナリオとクラスターロバストSEの組み合わせ。
 
-    クラスターは従来`baseline`シナリオのみで、他のcov_typeでは全シナリオ検証
-    済みの悪条件・多重共線性との組み合わせが未検証だった。均等な疑似グループ
-    （行番号%10）のみ確認する（グルーピングパターン自体の網羅性は
-    `test_cluster_matches_r`等`baseline`シナリオで確認済み）。
+    他のcov_typeと同様に、悪条件・多重共線性との組み合わせをクラスターでも
+    確認する。均等な疑似グループ（行番号%10）のみ確認する（グルーピング
+    パターン自体の網羅性は`test_cluster_matches_r`等`baseline`シナリオで確認）。
     """
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
     df = with_cluster_groups(df, 10)

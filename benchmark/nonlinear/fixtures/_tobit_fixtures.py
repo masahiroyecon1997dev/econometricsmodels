@@ -274,7 +274,7 @@ def build(engine: str) -> dict:
         # `G=2 <= q=7` のため、`rank(Ŝ) <= G-1` で全体 Wald 検定の `7×7` 部分行列が
         # 構造的に特異になり、`fit()` 冒頭のバリデーションが `ValidationError`
         # （`InsufficientClustersForInference`）で弾く。エラーパスは
-        # test_tobit.py::test_mroz_hours_cluster_cov_type_raises_validation_error。
+        # test_tobit_validation.py::test_mroz_hours_cluster_cov_type_raises_validation_error。
 
     is_primary = engine == "survreg"
     fixtures["_meta"] = {
@@ -318,7 +318,7 @@ def build(engine: str) -> dict:
             "scale_variance_mild）を含む。heteroskedastic は Tobit MLE の等分散仮定に"
             "対する誤設定で opg/hc0/hc1 と classical が乖離する（点推定は擬似真値に一致）。"
             "perfect_multicollinearity / scale_variance シナリオは含まない"
-            "（ComputationError の発生確認のみ、test_tobit.py で凍結 CSV に対して確認）。"
+            "（ComputationError の発生確認のみ、test_tobit_validation.py で凍結 CSV に対して確認）。"
             "cluster は合成データ（moderate_censoring、均等疑似グループ・不均衡グループ・"
             "G=2 境界）を含む。`G <= q`（傾き係数の数）のケース（旧 mroz/city、"
             "G=2・q=7）は ValidationError になるため成功パスフィクスチャを持たない。"
@@ -334,7 +334,7 @@ def build(engine: str) -> dict:
             "AER:::summary.tobit$wald、スコア・限界効果/予測の閉形式は numDeriv 数値微分と "
             "run_tobit_crosscheck.R 内で一致確認済み（formula 非依存の独立検証、"
             "testing-policy.md「リファレンス実装」2.）。意図的にフィクスチャ化しない"
-            "組み合わせ: confidence_level 非既定（幅の単調性のみ test_tobit.py で確認）、"
+            "組み合わせ: confidence_level 非既定（幅の単調性のみ test_tobit_api.py で確認）、"
             "method×非classical、cluster×右/区間打ち切り、実データ×cluster 成功パス。"
             "パラメータ名は切片を 'const' に正規化済み。"
         ),

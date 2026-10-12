@@ -9,8 +9,8 @@ G>q 境界）+ solver(bfgs/lbfgs) + Wooldridge 実データ（mroz `hours`、Exa
 
 役割分担（Logit/Probit の `test_<手法>_*.py` と同じ4分割）:
     - 成功パスの構造・API・オプション反映・predict/marginal_effects/
-      censoring_fit_check の構造・`ValidationError`/`ComputationError` パス:
-      `test_tobit.py`
+      censoring_fit_check の構造: `test_tobit_api.py`
+    - `ValidationError`/`ComputationError` パス: `test_tobit_validation.py`
     - 主リファレンス（`AER::tobit`）との厳密な数値一致: このファイル
     - 独立実装（`censReg`）とのクロスチェック: `test_tobit_crosscheck.py`
 

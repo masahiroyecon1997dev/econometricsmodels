@@ -457,7 +457,7 @@ def test_augment_missing_column_raises(dataset):
 @pytest.mark.parametrize("cov_type", ["invalid", ""])
 def test_invalid_cov_type_raises(dataset, cov_type):
     """`cov_type`が未知の文字列（空文字列を含む）の場合`ValidationError`
-    （OLSと同じ検証、共通化された経路。テスト網羅性候補・項目46）。
+    （OLSと同じ検証、共通化された経路）。
     """
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
     options = WLSOptions(cov_type=cov_type)
@@ -466,6 +466,19 @@ def test_invalid_cov_type_raises(dataset, cov_type):
         match=escaped(msgs.UNKNOWN_COV_TYPE_LINEAR, other=cov_type),
     ):
         WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
+
+
+@pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
+def test_nonrobust_is_rejected(dataset, cov_type):
+    """`"nonrobust"`（旧別名）は受け付けない（概念ごとに文字列を1つに絞る）。"""
+    with pytest.raises(ValidationError, match="unknown cov_type: 'nonrobust'"):
+        WLS(
+            dataset.with_columns(pl.lit(1.0).alias("weight")),
+            y="y",
+            x=["x1", "x2"],
+            weight="weight",
+            options=WLSOptions(cov_type=cov_type),
+        ).fit()
 
 
 def test_cluster_without_col_raises(dataset):

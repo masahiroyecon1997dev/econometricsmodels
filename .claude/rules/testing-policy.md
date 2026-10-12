@@ -59,6 +59,23 @@ Issue番号・内部管理ドキュメント（`docs/planning/specs/`配下の�
 2. **`ValidationError`パス**: 入力起因のエラー（欠損値、列の重複、観測数不足、`confidence_level`範囲外等）。想定した例外クラスが発生することを確認する（数値比較はしない）
 3. **`ComputationError`パス**: 計算過程で発覚する問題（完全な多重共線性等）。同じく例外クラスの発生のみを確認する
 
+## テストファイルの構成規約
+
+手法ごとのテストは、次の4種類のファイルに分ける（`tests/<系統>/test_<手法>_*.py`）。手法が増えても同じ構成・命名に揃える。
+
+- **ファイル = 結果別**:
+  - `_api.py`: 成功パスの構造・結果型・オプション反映。
+  - `_validation.py`: `ValidationError`/`ComputationError`パス。入力・オプションを弾くテストは、拒否する別名の確認（`cov_type="nonrobust"`の拒否等）も含めてこちらに置く。
+  - `_reference.py`: 主リファレンス（statsmodels/linearmodels/R `AER`等）との数値照合。
+  - `_crosscheck.py`: 独立実装（R）との数値照合。
+- **見出し = 機能別**（`# ── predict() ──`のようなセクション見出し）。`_api.py`は「成功パス・結果型」「API構造」「オプションの反映」「predict()」「augment()」…、`_validation.py`は「ValidationError（入力データ）」「ValidationError（predict()のnew_data）」「ValidationError（augment()）」「ValidationError（オプション）」「ValidationError（marginal_effects()）」「ComputationError」の順に並べる。1ファイルが大きくなっても、見出しの軸（機能別）を結果別に変えない。
+- **`include_intercept=False`の置き場**: `_api.py`には構造・配線（`param_names`に`const`が出ない、`df_model`、収束）だけを置き、statsmodels/R/linearmodelsとの数値照合は凍結フィクスチャを使う`_reference.py`/`_crosscheck.py`に置く。`predict()`/`augment()`のように独立したAPI面のスモーク級照合に限り、`_api.py`でライブstatsmodels照合を行ってよい（各`_api.py`のモジュールdoc参照）。
+- **文字列オプションの大文字小文字**: `cov_type`・`gmm_weight_type`は、各手法が受け付ける全ての値について、`tests/_helpers.py`の`CASE_SPELLINGS`（小文字・全大文字・先頭のみ大文字・大小交互）×値の網羅で`test_cov_type_is_case_insensitive`等に集約する。`res.<オプション>`が正規形（小文字）で返ることと、全ての綴りで正規形と同一の推定結果になること（`_assertions.assert_same_estimates`）を確認し、ラベルだけを見る別テストは作らない。クラスターが必要な値（`cluster`）は専用データを使う引数にして同じテストに含める。
+- **共通の命名**: 結果型は`test_fit_succeeds_and_returns_<手法>_results`、件数・被説明変数名は`test_n_obs_and_dep_var_name`（FE/REは`n_entities`も確認するため`test_n_obs_dep_var_name_and_n_entities`）。
+- **solverの収束**: `_api.py`のsolver別テストは`converged`のみを確認する（最尤解との一致は`_reference.py`が厳しい許容誤差で担う）。
+- **数値の比較**: `assert abs(...) < tol`や`pytest.approx`を直書きせず、`_assertions.assert_close`（`label`を渡せる）を使う。許容誤差は`_tolerances.py`の値か、`functools.partial`で束縛した定数にする。
+- **docstring**: 現在の挙動と理由だけを書く。「従来は〜だった」「〜に統合した」のような変更履歴、レビュー指摘・ユーザー確認の記録は書かない（経緯はgit logが持つ）。回帰ガードとして「過去にこの入力で〜が起きた」ことが、そのテストの存在理由を説明する場合に限り、理由として残してよい。シナリオの件数は書かず、`NUMERIC_SCENARIOS`のように定数名で参照する。
+
 ## engine（Rust）のカバレッジ方針
 
 - `cargo-llvm-cov`で実測するが、**100%は目指さない**。事前に検証済みの不変条件により理論上到達不能な

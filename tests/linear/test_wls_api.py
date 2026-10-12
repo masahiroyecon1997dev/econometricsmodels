@@ -18,12 +18,18 @@ from functools import partial
 
 import polars as pl
 import pytest
-from _assertions import assert_close, assert_params_table_matches_attributes
+from _assertions import (
+    assert_close,
+    assert_params_table_matches_attributes,
+    assert_same_estimates,
+)
 from _helpers import (
+    CASE_SPELLINGS,
     HAC_AUTO_LAG_SAMPLE_SIZES,
     ROW_TIME,
     hac_lag_frame,
     hac_time_for,
+    respell,
     with_row_time,
 )
 from _tolerances import TOLERANCES
@@ -31,7 +37,6 @@ from econometricsmodels import (
     OLS,
     WLS,
     OLSOptions,
-    ValidationError,
     WLSOptions,
     WLSResults,
 )
@@ -51,6 +56,10 @@ _assert_close = partial(
 #
 # 内部実装（sqrt(w)変換方式か将来別方式に変わるか等）が変わっても壊れないよう、
 # public API経由でのみ比較する。
+#
+# WLSとOLSで計算経路が異なる統計量（r_squared・残差・予測値等）は、加算順序に
+# 由来する丸め誤差レベルでの一致を、相対誤差なし（rtol=0）の絶対誤差で確認する。
+_assert_rounding_close = partial(assert_close, rtol=0.0, atol=1e-9)
 
 
 @pytest.mark.parametrize(
@@ -102,13 +111,14 @@ def test_weight_one_matches_ols(dataset, option_kwargs):
     assert wls_res.dep_var_name == ols_res.dep_var_name
     assert wls_res.cov_type == ols_res.cov_type
 
-    assert abs(wls_res.r_squared - ols_res.r_squared) < 1e-9
-    assert abs(wls_res.adj_r_squared - ols_res.adj_r_squared) < 1e-9
-    assert abs(wls_res.log_likelihood - ols_res.log_likelihood) < 1e-9
-    assert abs(wls_res.aic - ols_res.aic) < 1e-9
-    assert abs(wls_res.bic - ols_res.bic) < 1e-9
-    for wls_r, ols_r in zip(wls_res.residuals, ols_res.residuals):
-        assert abs(wls_r - ols_r) < 1e-9
+    for stat in ("r_squared", "adj_r_squared", "log_likelihood", "aic", "bic"):
+        _assert_rounding_close(
+            getattr(wls_res, stat), getattr(ols_res, stat), stat
+        )
+    for i, (wls_r, ols_r) in enumerate(
+        zip(wls_res.residuals, ols_res.residuals)
+    ):
+        _assert_rounding_close(wls_r, ols_r, f"residuals[{i}]")
 
 
 def test_weight_one_matches_ols_params_table(dataset):
@@ -145,8 +155,10 @@ def test_weight_one_matches_ols_predict(dataset):
     ols_res = OLS(df, y="y", x=["x1", "x2"]).fit()
     wls_res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
 
-    for wls_val, ols_val in zip(wls_res.predict(), ols_res.predict()):
-        assert abs(wls_val - ols_val) < 1e-9
+    for i, (wls_val, ols_val) in enumerate(
+        zip(wls_res.predict(), ols_res.predict())
+    ):
+        _assert_rounding_close(wls_val, ols_val, f"predict()[{i}]")
 
     new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
     for wls_val, ols_val in zip(
@@ -179,11 +191,11 @@ def test_residuals_are_original_scale_not_weighted(dataset):
     # 元スケールの残差は「予測値からの素の差」であり、重み(=100)を掛けた
     # スケールにはならないはず（sqrt(100)=10倍にはならない）。
     ols_res = OLS(dataset, y="y", x=["x1", "x2"]).fit()
-    for wls_r, ols_r in zip(res.residuals, ols_res.residuals):
-        assert abs(wls_r - ols_r) < 1e-6
+    for i, (wls_r, ols_r) in enumerate(zip(res.residuals, ols_res.residuals)):
+        assert_close(wls_r, ols_r, f"residuals[{i}]", rtol=0.0, atol=1e-6)
 
 
-def test_result_is_wls_results_type(dataset):
+def test_fit_succeeds_and_returns_wls_results(dataset):
     """`WLS.fit()`の返り値が`WLSResults`（`OLSResults`とは別型）であること。"""
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
@@ -237,7 +249,7 @@ def test_params_std_errors_test_stats_p_values_share_keys(dataset):
     assert set(res.p_values.keys()) == expected_keys
 
 
-def test_nobs_and_dep_var_name(dataset):
+def test_n_obs_and_dep_var_name(dataset):
     df = dataset.with_columns(pl.lit(1.0).alias("weight"))
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
     assert res.n_obs == 100
@@ -247,61 +259,44 @@ def test_nobs_and_dep_var_name(dataset):
 # ── オプションの反映（OLSと同じ観点、共通化された経路の検証） ──────
 
 
-def test_cov_type_label(dataset):
-    """全cov_typeで`res.cov_type`が指定通り反映されること（OLSと同じ検証）。"""
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
-    for cov_type in ["classical", "hc0", "hc1", "hc2", "hc3"]:
-        options = WLSOptions(cov_type=cov_type)
-        res = WLS(
-            df, y="y", x=["x1", "x2"], weight="weight", options=options
-        ).fit()
-        assert res.cov_type == cov_type
-
-    cluster_options = WLSOptions(cov_type="cluster", cluster="cluster")
-    cluster_res = WLS(
-        df, y="y", x=["x1", "x2"], weight="weight", options=cluster_options
-    ).fit()
-    assert cluster_res.cov_type == "cluster"
-
-
+@pytest.mark.parametrize("spelling", CASE_SPELLINGS)
 @pytest.mark.parametrize(
-    "cov_type, expected_label",
-    [
-        ("CLASSICAL", "classical"),
-        ("Classical", "classical"),
-        ("HC0", "hc0"),
-        ("Hc1", "hc1"),
-        ("HC2", "hc2"),
-        ("hc3", "hc3"),
-        ("HAC", "hac"),
-        ("Hac", "hac"),
-    ],
+    "cov_type", ["classical", "hc0", "hc1", "hc2", "hc3", "hac", "cluster"]
 )
-def test_cov_type_is_case_insensitive(dataset, cov_type, expected_label):
-    """`cov_type`が大文字小文字を区別しないこと（OLSの`test_ols_api.py::
-    test_cov_type_is_case_insensitive`と同じ観点、共通化された経路の検証。
-    HACは`hac_lags`省略時の自動計算式で成功パスを確認する
-    （テスト網羅性候補・項目35）。
+def test_cov_type_is_case_insensitive(dataset, cov_type, spelling):
+    """全`cov_type`で、`res.cov_type`が正規形（小文字）で返り、どの大文字小文字の
+    綴りでも正規形と同一の推定結果になること（OLSの
+    `test_ols_api.py::test_cov_type_is_case_insensitive`と同じ観点、共通化された
+    経路の検証）。HACは`hac_lags`省略時の自動計算式で確認する。
     """
     df = with_row_time(dataset).with_columns(pl.lit(1.0).alias("weight"))
-    options = WLSOptions(cov_type=cov_type, **hac_time_for(cov_type))
+
+    def fit(label: str):
+        kwargs = {"cluster": "cluster"} if cov_type == "cluster" else {}
+        options = WLSOptions(
+            cov_type=label, **kwargs, **hac_time_for(cov_type)
+        )
+        return WLS(
+            df, y="y", x=["x1", "x2"], weight="weight", options=options
+        ).fit()
+
+    res = fit(respell(cov_type, spelling))
+    assert res.cov_type == cov_type
+    assert_same_estimates(res, fit(cov_type))
+
+
+def test_include_intercept_false_omits_const(dataset):
+    """`include_intercept=False`では`const`が出ず、`df_model`は傾き係数の数
+    （切片あり・なしで同じ）になること（数値照合は`test_wls_reference.py`の
+    `test_no_intercept_matches_statsmodels`）。
+    """
+    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    options = WLSOptions(include_intercept=False)
     res = WLS(
         df, y="y", x=["x1", "x2"], weight="weight", options=options
     ).fit()
-    assert res.cov_type == expected_label
-
-
-@pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
-def test_nonrobust_is_rejected(dataset, cov_type):
-    """`"nonrobust"`（旧別名）は受け付けない（概念ごとに文字列を1つに絞る）。"""
-    with pytest.raises(ValidationError, match="unknown cov_type: 'nonrobust'"):
-        WLS(
-            dataset.with_columns(pl.lit(1.0).alias("weight")),
-            y="y",
-            x=["x1", "x2"],
-            weight="weight",
-            options=WLSOptions(cov_type=cov_type),
-        ).fit()
+    assert res.param_names == ["x1", "x2"]
+    assert res.df_model == 2
 
 
 def test_confidence_level_changes_interval_width(dataset):
@@ -332,9 +327,7 @@ def test_confidence_level_changes_interval_width(dataset):
 
 def test_hac_auto_lags_runs_and_returns_finite_std_errors(dataset):
     """`hac_lags`省略時（`None`、自動計算式）でもエラーなく動作すること
-    （OLSと同じ検証。既存のHAC動作確認テストは`test_weight_one_matches_ols`
-    経由で`hac_lags`を明示していなかったが、`cov_type="hac"`自体のテストは
-    無かった）。
+    （OLSと同じ検証）。
     """
     df = with_row_time(dataset).with_columns(pl.lit(1.0).alias("weight"))
     # hac_lags省略 = 自動計算
@@ -384,10 +377,9 @@ def test_hac_time_reorders_rows_before_computing_lags():
     ).fit()
 
     for name in ["const", "x1"]:
-        assert (
-            abs(shuffled_res.std_errors[name] - ordered_res.std_errors[name])
-            < 1e-9
-        ), name
+        _assert_rounding_close(
+            shuffled_res.std_errors[name], ordered_res.std_errors[name], name
+        )
 
 
 # ── predict() ────────────────────────────────────────────────────

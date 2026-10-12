@@ -16,10 +16,9 @@ classical/HC0/HC1/HAC（+クラスター、baselineのみ）で、係数・標�
 
 Note:
     - `estimator="gmm"`はこのフィクスチャの対象外（フィクスチャ生成時点で
-      `estimator="gmm"`がまだPython側に配線されていなかったため、
-      `benchmark/iv/fixtures/generate_iv_fixtures.py`のモジュールdoc
-      コメント参照）。GMMのlinearmodels（`IVGMM`）クロスチェックは
-      別途フィクスチャ生成からやり直す必要がある。
+      `estimator="gmm"`を含まないため、`benchmark/iv/fixtures/
+      generate_iv_fixtures.py`のモジュールdocコメント参照）。GMMのlinearmodels
+      （`IVGMM`）との照合は`test_iv_gmm_reference.py`。
     - `hc2`/`hc3`は`linearmodels`固有の制約により対象外（`linearmodels.iv.covariance`が
       hc2/hc3相当の実装を持たないため、`iv.json`の`_meta.note`参照）。ただし
       「参照実装が無い」わけではない——R `ivreg`+`sandwich::vcovHC`では検証可能なことを
@@ -257,9 +256,8 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
 def test_cluster_g2_matches_linearmodels(fixtures):
     """クラスタ数境界（G=2ちょうど）の成功パス。`x_exog=[]`・`instruments`1本・
     行番号%2の疑似グループ（`engine/src/iv/CLAUDE.md`「修正済み」の再現条件と
-    同じ、フィクスチャ化した。以前は構造確認
-    （`test_iv_api.py::test_cluster_g2_boundary_succeeds_when_x_exog_is_empty`）
-    のみでリファレンス実装との数値照合が無かった）。
+    同じ。構造確認は
+    `test_iv_api.py::test_cluster_g2_boundary_succeeds_when_x_exog_is_empty`）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_g2.csv")
     df = df.with_columns((pl.int_range(pl.len()) % 2).alias("cluster_group"))
@@ -285,7 +283,7 @@ def test_multi_endog_matches_linearmodels(fixtures, cov_type):
     """複数内生変数（`x_endog=["endog1", "endog2"]`）の成功パス。
     `weak_instrument_f_statistics`・`overid_statistic`（Sargan、過剰識別）・
     `wu_hausman_statistic`（複数内生変数のジョイント検定）が正しく機能することを
-    確認する（`testing-completeness-reviewer`指摘のmust fix）。
+    確認する。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv")
     options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
@@ -309,7 +307,7 @@ def test_multi_endog_matches_linearmodels(fixtures, cov_type):
 def test_card_matches_linearmodels(fixtures, cov_type):
     """実データセット（Wooldridge card、Card 1995の大学近接操作変数による教育の
     収益率推定）。`testing-policy.md`「テスト用データセット」2.が要求する実データ
-    検証がIV系統に無かった（`testing-completeness-reviewer`指摘のshould fix）。
+    検証がIV系統に無かった。
     """
     df = load_wooldridge_dataset("card")
     options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
@@ -413,4 +411,4 @@ def test_no_intercept_cluster_matches_linearmodels(fixtures):
 
 
 # 完全な多重共線性・極端なスケール差（`ComputationError` パス）は
-# `test_iv_validation.py` へ移設（4分割、項目68）。
+# `test_iv_validation.py` へ移設（4分割）。

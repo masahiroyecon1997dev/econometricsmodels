@@ -5,11 +5,11 @@
 （`TOLERANCES`辞書専用）と同じく、定数は関数と分離しこのファイルに集約する。
 
 - `DATA_DIR`: 固定済み合成データセットCSV（`tests/fixtures/benchmarks/data/`）
-  の置き場所（旧`_helpers.py`）。
-- `MROZ_X`: Wooldridge mrozデータセットの説明変数リスト（旧`_helpers.py`）。
+  の置き場所。
+- `MROZ_X`: Wooldridge mrozデータセットの説明変数リスト。
 - `APPLE_X`/`APPLE_CLUSTER`: Wooldridge appleデータセットの説明変数・クラスター列。
 - `MARGEFF_AT`: `marginal_effects(at=...)`で検証する`at`の全パターン
-  （旧`_assertions.py`、`check_margeff`が使う）。
+  （`check_margeff`が使う）。
 """
 
 from __future__ import annotations

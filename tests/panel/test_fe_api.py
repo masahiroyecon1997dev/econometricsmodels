@@ -15,10 +15,18 @@ from __future__ import annotations
 
 import polars as pl
 import pytest
-from _assertions import assert_params_table_matches_attributes
+from _assertions import (
+    assert_params_table_matches_attributes,
+    assert_same_estimates,
+)
 from _constants import DATA_DIR
 from _fe_helpers import our_fit
-from _helpers import HAC_AUTO_LAG_SAMPLE_SIZES, hac_lag_panel_frame
+from _helpers import (
+    CASE_SPELLINGS,
+    HAC_AUTO_LAG_SAMPLE_SIZES,
+    hac_lag_panel_frame,
+    respell,
+)
 from econometricsmodels import FE, FEOptions, FEResults
 
 from benchmark.common import hac_auto_lag
@@ -99,7 +107,7 @@ def test_params_std_errors_test_stats_p_values_share_keys(fe_dataset):
     assert set(res.p_values.keys()) == expected_keys
 
 
-def test_n_obs_dep_var_name_n_entities(fe_dataset):
+def test_n_obs_dep_var_name_and_n_entities(fe_dataset):
     res = our_fit(fe_dataset)
     assert res.n_obs == fe_dataset.height
     assert res.dep_var_name == "y"
@@ -154,27 +162,25 @@ def test_fixed_effects_two_way_structure(fe_dataset):
 # ── オプションの反映 ──────────────────────────────────────────────
 
 
+@pytest.mark.parametrize("spelling", CASE_SPELLINGS)
 @pytest.mark.parametrize(
-    "cov_type, expected_label",
-    [
-        ("classical", "classical"),
-        ("CLASSICAL", "classical"),
-        ("Hc1", "hc1"),
-        ("HC2", "hc2"),
-        ("hc3", "hc3"),
-        ("Cluster", "cluster"),
-        ("DK", "dk"),
-    ],
+    "cov_type", ["classical", "hc1", "hc2", "hc3", "cluster", "dk"]
 )
-def test_cov_type_is_case_insensitive(fe_dataset, cov_type, expected_label):
-    """`dk`は`dk_time`が無いと`ValidationError`になるため、
-    1-way維持のまま`dk_time`だけ渡す（`test_fe_validation.py`
+def test_cov_type_is_case_insensitive(fe_dataset, cov_type, spelling):
+    """全`cov_type`で、`res.cov_type`が正規形（小文字）で返り、どの大文字小文字の
+    綴りでも正規形と同一の推定結果になること。`hc0`はパネルでは受け付けない
+    （`test_fe_validation.py`）。`dk`は`dk_time`が無いと`ValidationError`に
+    なるため`dk_time="time"`を渡す（`test_fe_validation.py`の
     `test_dk_requires_dk_time_raises`と対照）。
     """
-    kwargs = {"dk_time": "time"} if expected_label == "dk" else {}
-    options = FEOptions(cov_type=cov_type, **kwargs)
-    res = our_fit(fe_dataset, options=options)
-    assert res.cov_type == expected_label
+    kwargs = {"dk_time": "time"} if cov_type == "dk" else {}
+
+    def fit(label: str):
+        return our_fit(fe_dataset, options=FEOptions(cov_type=label, **kwargs))
+
+    res = fit(respell(cov_type, spelling))
+    assert res.cov_type == cov_type
+    assert_same_estimates(res, fit(cov_type))
 
 
 def test_confidence_level_affects_conf_int_width(fe_dataset):

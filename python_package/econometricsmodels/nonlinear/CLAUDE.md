@@ -44,4 +44,4 @@
 
 Logit/Probitとも `test_<手法>_api.py`（成功パスの構造・API・オプション反映・predict/augment/pred_table/marginal_effects）・`test_<手法>_validation.py`（`ValidationError`/`ComputationError`パス）・`test_<手法>_reference.py`（statsmodels主リファレンスとの厳密な数値比較）・`test_<手法>_crosscheck.py`（R glmとのクロスチェック）の4ファイル分担（OLS/WLSと同じ）。`test_probit_*.py`は`test_logit_*.py`と同型。
 
-`tests/nonlinear/test_tobit.py`も同じ位置づけ（構造・API・エラーパスのスモークテストのみ）。`tests/conftest.py`の共有`dataset`フィクスチャを`y=0.0`で左打ち切りした`censored_dataset`フィクスチャ（打ち切り率21%、`TobitOptions`の既定`lower=0.0`と一致）を使う。R`survival::survreg`/`AER::tobit`との数値比較は`test_tobit_fixtures.py`/`test_tobit_crosscheck.py`で行う。
+`tests/nonlinear/test_tobit_api.py`・`test_tobit_validation.py`も同じ位置づけ（構造・API・エラーパスのスモークテストのみ）。`tests/conftest.py`の共有`dataset`フィクスチャを`y=0.0`で左打ち切りした`censored_dataset`フィクスチャ（打ち切り率21%、`TobitOptions`の既定`lower=0.0`と一致）を使う。R`survival::survreg`/`AER::tobit`との数値比較は`test_tobit_reference.py`/`test_tobit_crosscheck.py`で行う。

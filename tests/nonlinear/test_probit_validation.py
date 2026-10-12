@@ -108,6 +108,13 @@ def test_unknown_cov_type_raises(binary_dataset, cov_type):
     )
 
 
+@pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
+def test_nonrobust_is_rejected(binary_dataset, cov_type):
+    _checks.check_nonrobust_is_rejected(
+        binary_dataset, Probit, ProbitOptions, cov_type
+    )
+
+
 @pytest.mark.parametrize("solver", ["bogus", ""])
 def test_unknown_solver_raises(binary_dataset, solver):
     _checks.check_unknown_method_raises(

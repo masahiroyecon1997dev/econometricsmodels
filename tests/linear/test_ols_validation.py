@@ -276,9 +276,8 @@ def test_series_data_raises(dataset):
 
 @pytest.mark.parametrize("cov_type", ["invalid", ""])
 def test_invalid_cov_type_raises(dataset, cov_type):
-    """未知の文字列（空文字列を含む）は`ValidationError`（テスト網羅性
-    候補・項目46、空文字列は`.is_empty()`等の特別扱いで`match`の網羅から
-    漏れていないことのロックイン）。
+    """未知の文字列（空文字列を含む）は`ValidationError`
+    （空文字列が`.is_empty()`等の特別扱いで`match`の網羅から漏れていないこと）。
     """
     options = OLSOptions(cov_type=cov_type)
     with pytest.raises(
@@ -286,6 +285,13 @@ def test_invalid_cov_type_raises(dataset, cov_type):
         match=escaped(msgs.UNKNOWN_COV_TYPE_LINEAR, other=cov_type),
     ):
         OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
+
+
+@pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
+def test_nonrobust_is_rejected(dataset, cov_type):
+    """`"nonrobust"`（旧別名）は受け付けない（概念ごとに文字列を1つに絞る）。"""
+    with pytest.raises(ValidationError, match="unknown cov_type: 'nonrobust'"):
+        our_fit(dataset, cov_type)
 
 
 def test_cluster_without_col_raises(dataset):
@@ -298,8 +304,7 @@ def test_cluster_without_col_raises(dataset):
 
 def test_cluster_nonexistent_column_raises(dataset):
     """`cluster`が実在しない列名を指すと`ValidationError`
-    （`column_extraction`の責務、既存の欠落を確認するテストが無かった、
-    `testing-completeness-reviewer`指摘）。
+    （`column_extraction`の責務）。
     """
     options = OLSOptions(cov_type="cluster", cluster="does_not_exist")
     with pytest.raises(
@@ -439,7 +444,7 @@ def test_cluster_count_at_most_slopes_raises_validation_error(n_groups):
     構造的に特異になる。GもqもデータからR行列計算なしで即座に判定できるため、
     `fit()`冒頭で`ValidationError`（`CommonError::InsufficientClustersForInference`）。
     G=2（G<q）とG=3（G==q、`rank(Ŝ)≤2<3`で依然特異）の両方を確認する。
-    G>qでも悪条件で数値的にほぼ特異なケースは従来どおり`ComputationError`が
+    G>qでも悪条件で数値的にほぼ特異なケースは`ComputationError`が
     backstop（`cov_type="cluster"`は`cluster`列の指定が別途必要なため専用の
     `test_scale_variance_cluster_raises_computation_error`で確認、
     他のcov_typeは`test_scale_variance_raises_computation_error`）。
@@ -464,9 +469,7 @@ def test_perfect_multicollinearity_raises_computation_error():
     （`testing-policy.md`「テストの3系統」）。想定エラー（`ComputationError`）が
     発生することのみを確認する。
 
-    以前は手書きの極小 df（`x2 = 2*x1`）による `test_singular_matrix_raises_
-    computation_error` も併存していたが、同じ経路の確認で追加検証が無かったため、
-    固定済みベンチマーク CSV を使うこのテストへ一本化した。
+    入力は固定済みベンチマーク CSV を使う。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_perfect_multicollinearity.csv")
     with pytest.raises(ComputationError):
@@ -500,7 +503,6 @@ def test_scale_variance_cluster_raises_computation_error():
     backstopの対象（`test_cluster_count_at_most_slopes_raises_validation_error`
     のdocstring参照）。`cov_type="cluster"`は`cluster`列の指定が別途必要なため
     `COV_TYPES`パラメトライズには含められず、専用テストとして確認する
-    （従来docstringの主張のみで自動テストが無かった非対称の解消）。
     均等な疑似グループ（行番号%10、
     `G=10>q=3`）を使い、クラスター数不足による`ValidationError`
     ではなく、傾き係数の共分散部分行列の条件数超過による

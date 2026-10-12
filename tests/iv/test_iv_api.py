@@ -16,16 +16,21 @@ from __future__ import annotations
 
 import polars as pl
 import pytest
-from _assertions import assert_params_table_matches_attributes
+from _assertions import (
+    assert_params_table_matches_attributes,
+    assert_same_estimates,
+)
 from _constants import DATA_DIR
 from _helpers import (
+    CASE_SPELLINGS,
     HAC_AUTO_LAG_SAMPLE_SIZES,
     ROW_TIME,
     hac_lag_frame,
     hac_time_for,
+    respell,
 )
 from _iv_helpers import our_fit
-from econometricsmodels import IV, IVOptions, IVResults, ValidationError
+from econometricsmodels import IV, IVOptions, IVResults
 
 from benchmark.common import hac_auto_lag
 
@@ -279,81 +284,29 @@ def test_wu_hausman_degrades_to_none_when_cluster_count_at_most_augmented_slopes
 # ── オプションの反映 ──────────────────────────────────────────────
 
 
-def test_cov_type_label(iv_dataset):
-    for cov_type in ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]:
-        options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
-        res = our_fit(iv_dataset, options=options)
-        assert res.cov_type == cov_type
-
-
-def test_cluster_cov_type_label(clustered_dataset):
-    options = IVOptions(cov_type="cluster", cluster="cluster_group")
-    res = our_fit(clustered_dataset, options=options)
-    assert res.cov_type == "cluster"
-
-
+@pytest.mark.parametrize("spelling", CASE_SPELLINGS)
 @pytest.mark.parametrize(
-    "cov_type, expected_label",
-    [
-        ("CLASSICAL", "classical"),
-        ("Classical", "classical"),
-        ("HC0", "hc0"),
-        ("Hc1", "hc1"),
-        ("HC2", "hc2"),
-        ("hc3", "hc3"),
-        ("HAC", "hac"),
-    ],
+    "cov_type", ["classical", "hc0", "hc1", "hc2", "hc3", "hac", "cluster"]
 )
-def test_cov_type_is_case_insensitive(iv_dataset, cov_type, expected_label):
-    """`cov_type`が大文字小文字を区別しないこと（`engine_pybind`側の
-    `parse_iv_cov_type`のRust実装と対になる、Python API境界での確認。
-    OLS/WLS/Logit/Probitの`test_cov_type_is_case_insensitive`と同型、
-    `testing-completeness-reviewer`指摘）。
-    """
-    options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
-    res = our_fit(iv_dataset, options=options)
-    assert res.cov_type == expected_label
-
-
-@pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
-def test_nonrobust_is_rejected(iv_dataset, cov_type):
-    """`"nonrobust"`（旧別名）は受け付けない（概念ごとに文字列を1つに絞る）。"""
-    with pytest.raises(ValidationError, match="unknown cov_type: 'nonrobust'"):
-        our_fit(
-            iv_dataset,
-            options=IVOptions(cov_type=cov_type, **hac_time_for(cov_type)),
-        )
-
-
-@pytest.mark.parametrize(
-    "gmm_weight_type, expected",
-    [
-        ("CLASSICAL", "classical"),
-        ("Classical", "classical"),
-        ("ROBUST", "robust"),
-        ("HAC", "hac"),
-    ],
-)
-def test_weight_type_matches_canonical_result_regardless_of_case(
-    iv_dataset, gmm_weight_type, expected
+def test_cov_type_is_case_insensitive(
+    iv_dataset, clustered_dataset, cov_type, spelling
 ):
-    """`gmm_weight_type`が大文字小文字を区別しないこと
-    （`engine_pybind`側の`parse_weight_type`と対になる、Python API境界での確認。
-    `testing-completeness-reviewer`指摘）。
+    """全`cov_type`で、`res.cov_type`が正規形（小文字）で返り、どの大文字小文字の
+    綴りでも正規形と同一の推定結果になること（`engine_pybind`側の
+    `parse_iv_cov_type`のRust実装と対になる、Python API境界での確認。
+    OLS/WLS/Logit/Probit/Tobit/FE/REの`test_cov_type_is_case_insensitive`と同型）。
+    clusterは`cluster`列を持つ`clustered_dataset`を使う。
     """
-    options = IVOptions(
-        estimator="gmm",
-        gmm_weight_type=gmm_weight_type,
-        **hac_time_for(gmm_weight_type),
-    )
-    res = our_fit(iv_dataset, options=options)
+    df = clustered_dataset if cov_type == "cluster" else iv_dataset
+    kwargs = {"cluster": "cluster_group"} if cov_type == "cluster" else {}
 
-    canonical_options = IVOptions(
-        estimator="gmm", gmm_weight_type=expected, **hac_time_for(expected)
-    )
-    canonical_res = our_fit(iv_dataset, options=canonical_options)
-    for name in res.param_names:
-        assert res.params[name] == canonical_res.params[name], name
+    def fit(label: str):
+        options = IVOptions(cov_type=label, **kwargs, **hac_time_for(cov_type))
+        return our_fit(df, options=options)
+
+    res = fit(respell(cov_type, spelling))
+    assert res.cov_type == cov_type
+    assert_same_estimates(res, fit(cov_type))
 
 
 def test_confidence_level_changes_interval_width(iv_dataset):
@@ -481,31 +434,6 @@ def test_include_intercept_false_allows_const_in_instruments():
     assert res.first_stage()["endog1"].param_names == ["x1", "const"]
 
 
-@pytest.mark.parametrize(
-    "gmm_weight_type", ["classical", "robust", "cluster", "hac"]
-)
-def test_gmm_weight_type_options_run(
-    iv_dataset, clustered_dataset, gmm_weight_type
-):
-    """`estimator="gmm"`の`gmm_weight_type`各値が成功パスで動作すること（数値照合は
-    `test_iv_gmm_reference.py`）。`cluster`/`hac`は`cov_type`と同じ
-    `cluster`フィールドと`hac_lags`フィールドを共用する仕様
-    （`engine_pybind/src/iv/CLAUDE.md`参照）。
-    """
-    df = clustered_dataset if gmm_weight_type == "cluster" else iv_dataset
-    kwargs = (
-        {"cluster": "cluster_group"} if gmm_weight_type == "cluster" else {}
-    )
-    options = IVOptions(
-        estimator="gmm",
-        gmm_weight_type=gmm_weight_type,
-        **kwargs,
-        **hac_time_for(gmm_weight_type),
-    )
-    res = our_fit(df, options=options)
-    assert res.converged
-
-
 @pytest.mark.parametrize("cov_type", ["classical", "hc0", "hac", "cluster"])
 def test_gmm_cov_type_options_run_independently_of_weight_type(
     iv_dataset, clustered_dataset, cov_type
@@ -528,32 +456,9 @@ def test_gmm_cov_type_options_run_independently_of_weight_type(
 
 @pytest.mark.parametrize("estimator", ["2sls", "gmm"])
 def test_estimator_label(iv_dataset, estimator):
-    """`res.estimator`が指定した`estimator`（正規化済み小文字）を反映すること
-    （`test_cov_type_label`と同型）。
-    """
+    """`res.estimator`が指定した`estimator`（正規化済み小文字）を反映すること。"""
     res = our_fit(iv_dataset, options=IVOptions(estimator=estimator))
     assert res.estimator == estimator
-
-
-@pytest.mark.parametrize(
-    "gmm_weight_type", ["classical", "robust", "cluster", "hac"]
-)
-def test_weight_type_label(iv_dataset, clustered_dataset, gmm_weight_type):
-    """`res.gmm_weight_type`が`estimator="gmm"`のとき指定した`gmm_weight_type`
-    （正規化済み小文字）を反映すること。
-    """
-    df = clustered_dataset if gmm_weight_type == "cluster" else iv_dataset
-    kwargs = (
-        {"cluster": "cluster_group"} if gmm_weight_type == "cluster" else {}
-    )
-    options = IVOptions(
-        estimator="gmm",
-        gmm_weight_type=gmm_weight_type,
-        **kwargs,
-        **hac_time_for(gmm_weight_type),
-    )
-    res = our_fit(df, options=options)
-    assert res.gmm_weight_type == gmm_weight_type
 
 
 @pytest.mark.parametrize(
@@ -573,38 +478,38 @@ def test_estimator_is_case_insensitive(iv_dataset, estimator, expected_label):
     assert res.estimator == expected_label
 
 
+@pytest.mark.parametrize("spelling", CASE_SPELLINGS)
 @pytest.mark.parametrize(
-    "gmm_weight_type, expected_label",
-    [
-        ("CLASSICAL", "classical"),
-        ("Classical", "classical"),
-        ("ROBUST", "robust"),
-        ("Robust", "robust"),
-        ("CLUSTER", "cluster"),
-        ("HAC", "hac"),
-    ],
+    "gmm_weight_type", ["classical", "robust", "cluster", "hac"]
 )
 def test_weight_type_is_case_insensitive(
-    iv_dataset, clustered_dataset, gmm_weight_type, expected_label
+    iv_dataset, clustered_dataset, gmm_weight_type, spelling
 ):
-    df = (
-        clustered_dataset
-        if gmm_weight_type.lower() == "cluster"
-        else iv_dataset
-    )
+    """`estimator="gmm"`の全`gmm_weight_type`で、`res.gmm_weight_type`が正規形
+    （小文字）で返り、どの大文字小文字の綴りでも正規形と同一の推定結果で収束
+    すること（`engine_pybind`側の`parse_weight_type`と対になる、Python API
+    境界での確認。数値照合は`test_iv_gmm_reference.py`）。`cluster`/`hac`は
+    `cov_type`と同じ`cluster`フィールドと`hac_lags`フィールドを共用する仕様
+    （`engine_pybind/src/iv/CLAUDE.md`参照）。
+    """
+    df = clustered_dataset if gmm_weight_type == "cluster" else iv_dataset
     kwargs = (
-        {"cluster": "cluster_group"}
-        if gmm_weight_type.lower() == "cluster"
-        else {}
+        {"cluster": "cluster_group"} if gmm_weight_type == "cluster" else {}
     )
-    options = IVOptions(
-        estimator="gmm",
-        gmm_weight_type=gmm_weight_type,
-        **kwargs,
-        **hac_time_for(gmm_weight_type),
-    )
-    res = our_fit(df, options=options)
-    assert res.gmm_weight_type == expected_label
+
+    def fit(label: str):
+        options = IVOptions(
+            estimator="gmm",
+            gmm_weight_type=label,
+            **kwargs,
+            **hac_time_for(gmm_weight_type),
+        )
+        return our_fit(df, options=options)
+
+    res = fit(respell(gmm_weight_type, spelling))
+    assert res.gmm_weight_type == gmm_weight_type
+    assert res.converged
+    assert_same_estimates(res, fit(gmm_weight_type))
 
 
 def test_weight_type_is_none_for_2sls(iv_dataset):

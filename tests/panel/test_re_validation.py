@@ -197,7 +197,7 @@ def test_duplicate_within_x_raises(fe_dataset):
 def test_x_empty_raises(fe_dataset):
     """`x=[]`は「分散成分（ICC）のみを推定するnullモデル」として単独で意味を
     持つユースケースだが、他手法との一貫性を優先し拒否する設計判断
-    （`engine_pybind/src/panel/re.rs`モジュールdoc参照、ユーザー確認済み）。
+    （`engine_pybind/src/panel/re.rs`モジュールdoc参照）。
     """
     with pytest.raises(ValidationError, match=escaped(msgs.X_EMPTY, role="x")):
         RE(fe_dataset, y="y", x=[], entity="entity").fit()

@@ -4,24 +4,17 @@
 
 1. **凍結フィクスチャとの厳密比較**: `tests/fixtures/benchmarks/ols.json`
    （`benchmark/linear/fixtures/generate_ols_fixtures.py` で生成）を読み込み、
-   合成データシナリオ×classical/HC0-3/HAC + クラスター(baselineのみ)で、
    係数・標準誤差・検定統計量・適合度統計量を相対誤差1e-8で厳密比較する
-   （`.claude/rules/testing-policy.md`「許容誤差」の基本方針）。クラスター系
-   （cluster/cluster_imbalanced/cluster_g2/wage1の地域クラスター）は従来
-   係数・標準誤差のみだったが、t値・p値・信頼区間・適合度統計量まで
-   `_check_result`で検証するよう拡張した（従来Rクロスチェック側にしか
-   無かった検証範囲を主リファレンス側にも追加した）。Wooldridge実データ
-   （wage1/gpa2、classical/HC0-3 + wage1のみ地域クラスター）も同じフィクスチャ
-   経由で検証する（従来Rクロスチェック側にしか無かった実データ検証を主
-   リファレンス側にも追加した）。全シナリオの
-   `predict()`（学習データに対するfitted値、baselineシナリオのみout-of-sample
-   predicted値）も同じフィクスチャ経由で検証する（従来Rクロスチェック側にしか
-   無かったpredict()の網羅的検証を主リファレンス側にも追加した）。
-   `include_intercept=False`（切片なし）・`confidence_level`非既定も、
-   baselineシナリオのみで全cov_type（classical/HC0-3/cluster/HAC）と
-   組み合わせて同じフィクスチャ経由で検証する（従来はそれぞれライブ
-   statsmodels比較〔ad-hocデータ1パターン〕・相対比較〔幅の単調性のみ〕
-   だったものを、他オプションと同じ凍結フィクスチャでの数値照合に統合した）。
+   （`.claude/rules/testing-policy.md`「許容誤差」の基本方針）。対象は次のとおり。
+   - 合成データの全シナリオ（`NUMERIC_SCENARIOS`）×`COV_TYPES`
+   - クラスターロバストSE: `baseline`の均等・不均衡・G=2グループ、
+     `CLUSTER_ILL_CONDITIONED_SCENARIOS`の均等グループ、Wooldridge `wage1`の
+     地域クラスター
+   - Wooldridge実データ（`WOOLDRIDGE_DATASETS`×`WOOLDRIDGE_COV_TYPES`）
+   - 全シナリオの`predict()`（学習データのfitted値）と、`baseline`のout-of-sample
+     `predict()`
+   - `include_intercept=False`（切片なし）・`confidence_level`非既定: `baseline`
+     シナリオで全cov_type（classical/HC0-3/cluster/HAC）と組み合わせる
 2. **ライブ statsmodels との照合**: 共有 `dataset` フィクスチャ（n=100）で
    毎回 statsmodels を実行し、係数・標準誤差・R²・F統計量が一致することを
    確認する（statsmodels の挙動変化そのものの検知が目的）。
@@ -218,7 +211,7 @@ def test_cluster_matches_statsmodels(fixtures):
     """クラスターロバストSE。`generate_ols_fixtures.py`と同じ疑似グループ
     （行番号%10）を再現する。統計的な意味はなく、実装の動作確認用のため
     `baseline`シナリオのみ。params/std_errorsだけでなくt値・p値・信頼区間・適合度統計量
-    まで`_check_result`で検証する（従来params/std_errorsのみだった非対称の解消）。
+    まで`_check_result`で検証する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df = with_cluster_groups(df, 10)
@@ -279,9 +272,8 @@ def test_cluster_ill_conditioned_matches_statsmodels(fixtures, scenario):
     """悪条件・多重共線性シナリオとクラスターロバストSEの組み合わせ。
 
     クラスターロバスト共分散`Ŝ=(X'X)⁻¹(...)`は`(X'X)⁻¹`を他のcov_type
-    （classical/HC0-3/HAC）と共有する。他のcov_typeは全シナリオで検証済みだが、
-    クラスターは従来`baseline`シナリオのみで、悪条件・多重共線性との組み合わせ
-    での数値的挙動が未検証だった。均等な疑似グループ（行番号%10）のみ確認する
+    （classical/HC0-3/HAC）と共有するため、悪条件・多重共線性との組み合わせでの
+    数値的挙動をクラスターでも確認する。均等な疑似グループ（行番号%10）のみ確認する
     （グルーピングパターン自体の網羅性は`test_cluster_matches_statsmodels`等
     `baseline`シナリオで確認済みのため重複させない）。
     """
@@ -300,9 +292,7 @@ def test_cluster_ill_conditioned_matches_statsmodels(fixtures, scenario):
 @pytest.mark.parametrize("cov_type", COV_TYPES)
 def test_no_intercept_matches_statsmodels(fixtures, cov_type):
     """`include_intercept=False`（切片なし）が、cov_typeによらずstatsmodels
-    と一致すること（baselineシナリオ）。従来はライブstatsmodels比較
-    （ad-hocデータ1パターン）のみだったものを、他オプションと同じ凍結
-    フィクスチャでの数値照合に統合した。クラスターは
+    と一致すること（baselineシナリオ）。クラスターは
     `test_no_intercept_cluster_matches_statsmodels`で別途確認する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
@@ -352,9 +342,8 @@ def test_no_intercept_cluster_matches_statsmodels(fixtures):
 @pytest.mark.parametrize("cov_type", COV_TYPES)
 def test_confidence_level_matches_statsmodels(fixtures, cov_type):
     """confidence_level非既定が、cov_typeによらずstatsmodelsと一致すること
-    （baselineシナリオ）。従来は幅の広さの単調性のみの相対比較
-    （`test_ols_api.py::test_confidence_level_changes_interval_width`）
-    だったものを、具体的な数値の正しさまで検証するよう拡張した。クラスターは
+    （baselineシナリオ）。幅の単調性は`test_ols_api.py::
+    test_confidence_level_changes_interval_width`で確認する。クラスターは
     `test_confidence_level_cluster_matches_statsmodels`で別途確認する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
@@ -423,9 +412,8 @@ def load_wooldridge():
 def test_wooldridge_matches_statsmodels(
     fixtures, load_wooldridge, dataset_name, cov_type
 ):
-    """Wooldridge実データ（wage1/gpa2）でのstatsmodels照合。従来Rクロスチェック
-    側（`test_ols_crosscheck.py::test_wooldridge_matches_r`）にしか無かった
-    実データ検証を主リファレンス側にも追加したものである。
+    """Wooldridge実データ（wage1/gpa2）でのstatsmodels照合
+    （Rとの照合は`test_ols_crosscheck.py::test_wooldridge_matches_r`）。
     """
     y, x = WOOLDRIDGE_Y_X[dataset_name]
     df = load_wooldridge(dataset_name)

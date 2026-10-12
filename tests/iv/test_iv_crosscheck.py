@@ -21,10 +21,9 @@ Note:
     - `hc2`/`hc3`は`vcovHC(model, type="HC2"/"HC3")`（`ivreg:::hatvalues.ivreg`の
       type="stage2"、第二段階OLSのレバレッジをそのまま使う実装）で計算でき、本実装
       （`engine/src/iv/two_sls.rs`の`hc_cov_params`）と数値一致することを実機確認済み
-      のため対象に含む（`iv-spec.md`3.1節。旧記述「ivreg側に確立した参照実装が
-      無い」は`ivreg`がdevcontainerにインストールできなかった時期の調査に基づく
-      誤りだった）。`linearmodels`（`test_iv_reference.py`）は引き続き対応していない
-      ため、hc2/hc3の主リファレンス比較はこのファイルのみで行う。
+      のため対象に含む（`iv-spec.md`3.1節）。`linearmodels`
+      （`test_iv_reference.py`）は対応していないため、hc2/hc3の主リファレンス比較は
+      このファイルのみで行う。
     - `weak_instrument_f`・`sargan_statistic`/`sargan_p_value`はivregの
       `summary(diagnostics=TRUE)`が常にclassical vcovで計算する仕様のため、
       全cov_typeで同じ値になる（`benchmark/iv/references/run_ivreg.R`参照）。
@@ -34,7 +33,7 @@ Note:
       `benchmark/iv/references/run_ivreg.R`のモジュールコメント参照）。ただしcluster
       cov_typeのみ、ivreg側のWald検定がF分布の分母自由度にクラスター数を
       反映しない既知の制約によりp値が一致しないため、`_check_result`の
-      `check_wu_hausman_p_value=False`で統計量のみ比較する（ユーザー確認済み）。
+      `check_wu_hausman_p_value=False`で統計量のみ比較する。
     - GMMはivregが対応していないため対象外（R momentfitによるクロスチェックは
       `test_iv_gmm_crosscheck.py`）。
     - 第一段階回帰の結果（`first_stage()`）自体はここでは比較しない
@@ -215,7 +214,7 @@ def _check_result(
         # cluster cov_typeはivregのWald検定がF分布の分母自由度にクラスター数を
         # 反映しない既知の制約によりp値が一致しないため、統計量のみ比較する
         # （呼び出し元がcheck_wu_hausman_p_value=Falseを渡す。モジュール
-        # docコメント参照、ユーザー確認済み）。
+        # docコメント参照）。
         if check_wu_hausman_p_value:
             _assert_close(
                 res.wu_hausman_p_value,
@@ -321,9 +320,9 @@ def test_df1_matches_r(crosscheck, cov_type):
     同名テストと同じ再現条件）。x_exog=[]・x_endog=['endog1']・
     instruments=['z1']（丁度識別、n=3）。augmented regressionがsaturated
     （残差自由度0）になるため、wu_hausman_statistic/wu_hausman_p_valueは
-    本実装・ivreg双方でNoneになる（`_check_result`参照）。hacも含む（以前は
-    R側の`adjust = TRUE`の`n/(n-k)`がn=3で標準誤差を42%ずらすため除外していたが、
-    `adjust = FALSE`で機械精度になった）。
+    本実装・ivreg双方でNoneになる（`_check_result`参照）。hacも含む（R側は
+    `adjust = FALSE`で、`adjust = TRUE`の`n/(n-k)`がn=3で標準誤差を42%ずらす
+    のを避けている）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_df1.csv")
     options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))

@@ -17,7 +17,7 @@ crosscheck系（`test_*_crosscheck.py`）は`test_ols_crosscheck.py`/
 だったため、両者の`_check_result`は`tests/nonlinear/_binary_choice_checks.py`
 の`check_result`に集約済み）。
 
-`MARGEFF_AT`定数は`_constants.py`に分離済み（項目46、ファイル名が関数
+`MARGEFF_AT`定数は`_constants.py`に分離済み（ファイル名が関数
 〔アサーション〕を示唆するのに定数も同居していたための整理）。
 """
 
@@ -161,3 +161,15 @@ def assert_params_table_matches_attributes(res) -> None:
         lower, upper = res.conf_int[name]
         assert row["conf_lower"] == lower, f"{name}/conf_lower"
         assert row["conf_upper"] == upper, f"{name}/conf_upper"
+
+
+def assert_same_estimates(res, canonical, label: str = "") -> None:
+    """`res`が`canonical`と同一の推定結果であること（係数・標準誤差とも完全一致）。
+
+    文字列オプションの綴り違い（大文字小文字）が、正規形と同じ推定経路に入る
+    ことの確認に使う。数値の近さではなく同一経路かどうかを見るので許容誤差は
+    持たない。
+    """
+    prefix = f"{label}: " if label else ""
+    assert res.params == canonical.params, f"{prefix}params"
+    assert res.std_errors == canonical.std_errors, f"{prefix}std_errors"

@@ -469,9 +469,7 @@ def test_instruments_empty_raises(iv_dataset):
 
 @pytest.mark.parametrize("estimator", ["invalid", ""])
 def test_unknown_estimator_raises(iv_dataset, estimator):
-    """未知の`estimator`（空文字列を含む）は`ValidationError`（テスト網羅性
-    候補・項目46）。
-    """
+    """未知の`estimator`（空文字列を含む）は`ValidationError`。"""
     options = IVOptions(estimator=estimator)
     with pytest.raises(
         ValidationError,
@@ -482,9 +480,7 @@ def test_unknown_estimator_raises(iv_dataset, estimator):
 
 @pytest.mark.parametrize("cov_type", ["invalid", ""])
 def test_unknown_cov_type_raises(iv_dataset, cov_type):
-    """未知の`cov_type`（空文字列を含む）は`ValidationError`
-    （テスト網羅性候補・項目46）。
-    """
+    """未知の`cov_type`（空文字列を含む）は`ValidationError`。"""
     options = IVOptions(cov_type=cov_type)
     with pytest.raises(
         ValidationError,
@@ -493,11 +489,19 @@ def test_unknown_cov_type_raises(iv_dataset, cov_type):
         our_fit(iv_dataset, options=options)
 
 
+@pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
+def test_nonrobust_is_rejected(iv_dataset, cov_type):
+    """`"nonrobust"`（旧別名）は受け付けない（概念ごとに文字列を1つに絞る）。"""
+    with pytest.raises(ValidationError, match="unknown cov_type: 'nonrobust'"):
+        our_fit(
+            iv_dataset,
+            options=IVOptions(cov_type=cov_type, **hac_time_for(cov_type)),
+        )
+
+
 @pytest.mark.parametrize("gmm_weight_type", ["invalid", ""])
 def test_unknown_weight_type_raises(iv_dataset, gmm_weight_type):
-    """未知の`gmm_weight_type`（空文字列を含む）は`ValidationError`
-    （テスト網羅性候補・項目46）。
-    """
+    """未知の`gmm_weight_type`（空文字列を含む）は`ValidationError`。"""
     options = IVOptions(estimator="gmm", gmm_weight_type=gmm_weight_type)
     with pytest.raises(
         ValidationError,
@@ -845,11 +849,6 @@ def test_perfect_multicollinearity_raises_computation_error():
     （`x_endog[j] ~ x_exog + instruments`）の設計行列が特異になり
     `ComputationError`（`IvError::FirstStageFailed`）。完全な多重共線性は数値比較の
     対象外（`testing-policy.md`「テストの3系統」）で、想定エラーの送出のみ確認する。
-
-    以前は手書きの極小 df（`x2 = 2*x1`）による
-    `test_singular_first_stage_design_matrix_raises_computation_error` も
-    併存していたが、同じ経路の確認で追加検証が無かったため、固定済みベンチマーク
-    CSV を使うこのテストへ一本化した（OLS の同名テストと同じ整理）。
     """
     df = pl.read_csv(DATA_DIR / "iv_perfect_multicollinearity.csv")
     with pytest.raises(ComputationError):

@@ -23,7 +23,7 @@ Note:
     フィクスチャ生成時と同じ入力データを、`tests/fixtures/benchmarks/data/`に
     固定済みのCSV（`fe_{scenario}.csv`、FEと共用）から読む——RE専用の合成
     データセットは無い（`benchmark/panel/references/linearmodels_ref.py`
-    モジュールdoc「RE（`run_re()`）固有の相違点」参照、ユーザー確認済み）。
+    モジュールdoc「RE（`run_re()`）固有の相違点」参照）。
     hc2/hc3・aic/bic・log_likelihood・ハウスマン検定は`linearmodels.
     RandomEffects`が提供しないためこのファイルの対象外
     （`test_re_crosscheck.py`のplmのみで検証する単一参照実装の例外）。

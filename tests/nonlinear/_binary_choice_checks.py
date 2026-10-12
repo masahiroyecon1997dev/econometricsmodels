@@ -17,7 +17,7 @@
 ラッパーになる。
 
 `test_logit_crosscheck.py`/`test_probit_crosscheck.py`はProbit固有の観測情報
-行列の説明等、実質的な差分があるため対象外（項目95参照）。
+行列の説明等、実質的な差分があるため対象外。
 """
 
 from __future__ import annotations
@@ -36,6 +36,7 @@ from _assertions import (
     assert_close,
     assert_dict_close,
     assert_params_table_matches_attributes,
+    assert_same_estimates,
     check_margeff,
 )
 from _assertions import rename_intercept as _rename
@@ -45,6 +46,7 @@ from _helpers import (
     load_apple_adoption_dataset,
     load_wooldridge_dataset,
     multi_dummy_separation_dataset,
+    respell,
     separated_dataset,
     single_overlap_binary_dataset,
     small_sample_separation_dataset,
@@ -114,13 +116,9 @@ def check_params_std_errors_test_stats_p_values_share_keys(
     assert set(res.p_values.keys()) == expected_keys
 
 
-def check_n_obs_matches_dataset_size(dataset, estimator_cls):
+def check_n_obs_and_dep_var_name(dataset, estimator_cls):
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
     assert res.n_obs == dataset.height
-
-
-def check_dep_var_name(dataset, estimator_cls):
-    res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
     assert res.dep_var_name == "y"
 
 
@@ -136,17 +134,13 @@ def check_param_names_include_const_first(dataset, estimator_cls):
 # 文字列パース・列抽出・分岐ロジックを経て正しく反映されることを確認する。
 
 
-def check_method_option_converges_to_same_params(
-    dataset, estimator_cls, options_cls, solver
-):
-    """`solver`（newton/bfgs/lbfgs）はいずれも同じ最尤解に収束する。
+def check_method_option_converges(dataset, estimator_cls, options_cls, solver):
+    """`solver`（newton/bfgs/lbfgs）はいずれも収束する。
 
-    engineのRust単体テストは3手法の一致を検証済みだが、engine_pybindの
-    文字列→`Method`パースやpython_packageラッパーの配線（例:
-    "bfgs"と"lbfgs"の実装取り違え）を検出するAPIレベルのテストが無かった
-    ため追加した。
+    engine_pybindの文字列→`Method`パースやpython_packageラッパーの配線が
+    成功パスで動くことの確認に留める。最尤解との数値一致は主リファレンスとの
+    照合（`test_<solver>_reference.py`）が、より厳しい許容誤差で担う。
     """
-    baseline = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
     res = estimator_cls(
         dataset,
         y="y",
@@ -154,10 +148,6 @@ def check_method_option_converges_to_same_params(
         options=options_cls(solver=solver),
     ).fit()
     assert res.converged
-    for name in res.param_names:
-        assert res.params[name] == pytest.approx(
-            baseline.params[name], rel=1e-4
-        )
 
 
 def check_include_intercept_false_omits_const_and_converges(
@@ -167,8 +157,7 @@ def check_include_intercept_false_omits_const_and_converges(
     `test_<method>_reference.py::test_include_intercept_false_matches_statsmodels`）。
 
     `include_intercept`の値に関わらず`df_model`は常に`k-1`（`docs/spec/
-    <solver>-spec.md`参照）となるため、その旨も確認する
-    （`testing-completeness-reviewer`指摘）。
+    <solver>-spec.md`参照）となるため、その旨も確認する。
     """
     res = estimator_cls(
         dataset,
@@ -239,32 +228,8 @@ def check_raise_on_non_convergence_false_returns_result_without_raising(
         assert math.isfinite(se), f"std_errors[{name}]={se} is not finite"
 
 
-def check_cov_type_label(dataset, estimator_cls, options_cls):
-    """`res.cov_type`が指定した`cov_type`（正規化済み小文字）を反映すること
-    （OLSの`test_cov_type_label`と同型）。
-    """
-    for cov_type in ["classical", "opg", "hc0", "hc1"]:
-        res = estimator_cls(
-            dataset,
-            y="y",
-            x=["x1", "x2"],
-            options=options_cls(cov_type=cov_type),
-        ).fit()
-        assert res.cov_type == cov_type
-
-    res = estimator_cls(
-        dataset,
-        y="y",
-        x=["x1", "x2"],
-        options=options_cls(cov_type="cluster", cluster="cluster"),
-    ).fit()
-    assert res.cov_type == "cluster"
-
-
 def check_method_label(dataset, estimator_cls, options_cls):
-    """`res.solver`が指定した`solver`（正規化済み小文字）を反映すること
-    （`check_cov_type_label`と同型）。
-    """
+    """`res.solver`が指定した`solver`（正規化済み小文字）を反映すること。"""
     for solver in ["newton", "bfgs", "lbfgs"]:
         res = estimator_cls(
             dataset,
@@ -278,36 +243,31 @@ def check_method_label(dataset, estimator_cls, options_cls):
 def check_method_is_case_insensitive(
     dataset, estimator_cls, options_cls, solver, expected_label
 ):
-    """`solver`が大文字小文字を区別しないこと（`check_cov_type_is_case_insensitive`
-    と同型）。
-    """
+    """`solver`が大文字小文字を区別しないこと。"""
     options = options_cls(solver=solver)
     res = estimator_cls(dataset, y="y", x=["x1", "x2"], options=options).fit()
     assert res.solver == expected_label
 
 
 def check_cov_type_is_case_insensitive(
-    dataset, estimator_cls, options_cls, cov_type, expected_label
+    dataset, estimator_cls, options_cls, cov_type, spelling
 ):
-    """`cov_type`が大文字小文字を区別しないこと（`engine_pybind`側の
+    """`cov_type`（正規形）について、`res.cov_type`が正規形で返り、どの大文字
+    小文字の綴りでも正規形と同一の推定結果になること（`engine_pybind`側の
     `build_<solver>_input`のRust単体テストと対になる、Python API境界での
-    確認。OLS/WLSの`test_cov_type_is_case_insensitive`と同型）。
+    確認。OLS/WLS/IV/Tobit/FE/REの`test_cov_type_is_case_insensitive`と同型）。
     """
-    kwargs = {"cluster": "cluster"} if cov_type == "CLUSTER" else {}
-    options = options_cls(cov_type=cov_type, **kwargs)
-    res = estimator_cls(dataset, y="y", x=["x1", "x2"], options=options).fit()
-    assert res.cov_type == expected_label
+    kwargs = {"cluster": "cluster"} if cov_type == "cluster" else {}
 
-
-def check_nonrobust_is_rejected(dataset, estimator_cls, options_cls, cov_type):
-    """`"nonrobust"`（旧別名）は受け付けない（概念ごとに文字列を1つに絞る）。"""
-    with pytest.raises(ValidationError, match="unknown cov_type: 'nonrobust'"):
-        estimator_cls(
-            dataset,
-            y="y",
-            x=["x1", "x2"],
-            options=options_cls(cov_type=cov_type),
+    def fit(label):
+        options = options_cls(cov_type=label, **kwargs)
+        return estimator_cls(
+            dataset, y="y", x=["x1", "x2"], options=options
         ).fit()
+
+    res = fit(respell(cov_type, spelling))
+    assert res.cov_type == cov_type
+    assert_same_estimates(res, fit(cov_type))
 
 
 # ── test_<solver>_api.py: predict() ─────────────────────────────────
@@ -389,8 +349,7 @@ def check_augment_without_intercept_matches_predict(
     """`include_intercept=False`でfitした場合も`augment()`が`predict()`と
     同じ予測確率を返すこと（`augment()`はRust側で`predict()`とは別に
     `has_intercept`分岐を実装しているため、個別に確認する。OLSの
-    `test_augment_without_intercept_matches_predict`と同型、
-    python-reviewer指摘）。
+    `test_augment_without_intercept_matches_predict`と同型）。
     """
     df = pl.DataFrame(
         {
@@ -578,7 +537,7 @@ def check_data_not_polars_raises(dataset, estimator_cls):
 
 def check_null_values_raise(estimator_cls):
     """欠損値は`column_extraction`の責務で`ValidationError`（OLSの
-    `test_null_values_raise`と同型、Python API境界で未検証だった）。
+    `test_null_values_raise`と同型）。
     """
     df_y = pl.DataFrame({"y": [0.0, None, 1.0], "x1": [1.0, 2.0, 3.0]})
     with pytest.raises(
@@ -783,9 +742,7 @@ def check_augment_missing_column_raises(dataset, estimator_cls):
 def check_unknown_cov_type_raises(
     dataset, estimator_cls, options_cls, cov_type="bogus"
 ):
-    """未知の`cov_type`（空文字列を含む）は`ValidationError`
-    （テスト網羅性候補・項目46）。
-    """
+    """未知の`cov_type`（空文字列を含む）は`ValidationError`。"""
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.UNKNOWN_COV_TYPE_NONLINEAR, other=cov_type),
@@ -798,12 +755,21 @@ def check_unknown_cov_type_raises(
         ).fit()
 
 
+def check_nonrobust_is_rejected(dataset, estimator_cls, options_cls, cov_type):
+    """`"nonrobust"`（旧別名）は受け付けない（概念ごとに文字列を1つに絞る）。"""
+    with pytest.raises(ValidationError, match="unknown cov_type: 'nonrobust'"):
+        estimator_cls(
+            dataset,
+            y="y",
+            x=["x1", "x2"],
+            options=options_cls(cov_type=cov_type),
+        ).fit()
+
+
 def check_unknown_method_raises(
     dataset, estimator_cls, options_cls, solver="bogus"
 ):
-    """未知の`solver`（空文字列を含む）は`ValidationError`
-    （テスト網羅性候補・項目46）。
-    """
+    """未知の`solver`（空文字列を含む）は`ValidationError`。"""
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.UNKNOWN_METHOD_NONLINEAR, other=solver),
@@ -823,10 +789,8 @@ def check_invalid_confidence_level_raises(
     `ValidationError`。
 
     `marginal_effects(confidence_level=1.5)`側は
-    `check_marginal_effects_confidence_level_out_of_range_raises`で既存
-    だが、`fit()`本体側（`Options.confidence_level`）が未検証だった
-    （`testing-policy.md`「テストの3系統」・OLS/WLSの
-    `test_invalid_confidence_level_raises`との非対称）。
+    `check_marginal_effects_confidence_level_out_of_range_raises`で確認する
+    （OLS/WLSの`test_invalid_confidence_level_raises`と同型）。
     """
     options = options_cls(confidence_level=confidence_level)
     with pytest.raises(
@@ -860,9 +824,7 @@ def check_non_positive_max_iter_raises(
 ):
     """`max_iter<=0`は`ValidationError`（engine側の`MleError::InvalidMaxIter`）。
 
-    `tol<=0`側は`check_non_positive_tol_raises`で既存だが、対応する
-    `max_iter`側のPython API境界のテストが無かった
-    （`testing-completeness-reviewer`指摘）。
+    `tol<=0`側は`check_non_positive_tol_raises`で確認する。
     """
     with pytest.raises(
         ValidationError,
@@ -981,19 +943,13 @@ def check_perfect_multicollinearity_raises_computation_error(
     （`testing-policy.md`「テストの3系統」）。想定エラー（`ComputationError`）が
     発生することのみを確認する。`solver`（newton/bfgs/lbfgs）でparametrizeする。
 
-    以前は、この`solver`網羅を`check_singular_hessian_raises_computation_error`
-    （インラインの極小データ、`x2=2*x1`直書き）が担っていた。`newton`は
-    `newton_step`内のQR、`bfgs`/`lbfgs`は収束後の`observed_information_cov_params`と
-    いう`solver`依存の別経路で特異性を検出しており、過去に`bfgs`だけ検出漏れした
-    実バグの回帰ガードだった。その後`engine`内の検出経路は`fit()`冒頭の列ピボットQR
-    ランクチェック（`solver`非依存の単一経路、`SingularDesignMatrix`）に一本化された
-    が、**`engine_pybind`側のsolver文字列パース（`"bfgs"`/`"lbfgs"` → `EngineSolverType`）
-    と配線はsolver固有のまま**なので、「非既定solverの文字列 × 特異入力 ×
-    `ComputationError`」を踏むAPI境界テストは引き続き必要（testing-completeness-
-    reviewer指摘）。インラインの極小データはCSVフィクスチャ版へ統合した
-    （`engine`側の`solver`×`cov_type`網羅は
+    `engine`内の特異性の検出経路は`fit()`冒頭の列ピボットQRランクチェック
+    （`solver`非依存の単一経路、`SingularDesignMatrix`）だが、**`engine_pybind`側の
+    solver文字列パース（`"bfgs"`/`"lbfgs"` → `EngineSolverType`）と配線は
+    solver固有**なので、「非既定solverの文字列 × 特異入力 × `ComputationError`」を
+    踏むAPI境界テストが必要になる（`engine`側の`solver`×`cov_type`網羅は
     `fit_returns_singular_design_matrix_error_for_perfectly_collinear_design_matrix`
-    1本に集約）。
+    1本に集約している）。
     """
     df = pl.read_csv(
         DATA_DIR / f"{dataset_prefix}_perfect_multicollinearity.csv"
@@ -1535,11 +1491,10 @@ def check_solver_matches_statsmodels(
     """`solver="bfgs"/"lbfgs"`が主リファレンス（statsmodelsの同じsolver）と
     フルの統計量（std_errors含む）で一致すること。
 
-    既定の`solver="newton"`のみ全シナリオ×cov_typeで数値照合しており、
-    bfgs/lbfgsは`test_<solver>_api.py::test_method_option_converges_to_same_params`
-    で自身のnewton結果とparamsのみ緩い許容誤差(rel=1e-4)で比較していたが、
-    主リファレンスに対するフルの統計量照合が無かった
-    （`testing-completeness-reviewer`指摘）。
+    既定の`solver="newton"`は全シナリオ×cov_typeで数値照合する
+    （`check_result`）。bfgs/lbfgsはここで、baselineシナリオの全統計量を
+    主リファレンスと照合する（`test_<solver>_api.py::test_method_option_converges`
+    は収束することのみを確認する）。
     """
     df = pl.read_csv(config.dataset_path("baseline"))
     options = config.options_cls(cov_type="classical", solver=solver)
@@ -1581,13 +1536,11 @@ def check_mroz_matches_statsmodels(
 def check_include_intercept_false_matches_statsmodels(
     config: BinaryChoiceReferenceConfig, sm_estimator_cls, cov_type
 ) -> None:
-    """`include_intercept=False`の成功パスが構造テスト・数値照合テストとも
-    一切検証されていなかった（`df_model`は`include_intercept`の値に関わらず
-    常に`k-1`、`log_likelihood_null`は常に「切片のみ」モデルを参照するため
+    """`include_intercept=False`の成功パスをstatsmodelsと数値照合する。
+    `df_model`は`include_intercept`の値に関わらず常に`k-1`、
+    `log_likelihood_null`は常に「切片のみ」モデルを参照するため
     `include_intercept=False`時は`lr_statistic`が負値になりうる、という特殊
-    挙動が`engine`側の単体テストのみで数値照合が無かった。
-    `testing-completeness-reviewer`指摘）。frozen
-    fixtureではなくstatsmodelsとの直接照合で確認する
+    挙動を含む。frozen fixtureではなくstatsmodelsとの直接照合で確認する
     （`test_ols_reference.py`と同じ方針）。
 
     `statsmodels_ref.run()`はformula API（`patsy`経由でpandasを要求する）を
@@ -1683,7 +1636,7 @@ def check_predict_new_data_without_intercept_matches_statsmodels(
 ) -> None:
     """`include_intercept=False`でfitした場合の`predict(new_data)`も
     statsmodelsと一致すること（OLSの`test_predict_new_data_without_intercept_
-    matches_statsmodels`と同型、python-reviewer指摘）。
+    matches_statsmodels`と同型）。
     """
     df = pl.read_csv(config.dataset_path("baseline"))
     y = df["y"].to_numpy()

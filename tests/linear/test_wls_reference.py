@@ -2,19 +2,15 @@
 
 `tests/fixtures/benchmarks/wls.json`（`benchmark/linear/fixtures/
 generate_wls_fixtures.py`で生成）を読み込み、合成データシナリオ×
-classical/HC0-3/HAC + クラスター(baselineのみ) + 実データ（401ksubs）で、
+classical/HC0-3/HAC + クラスター + 実データ（401ksubs）で、
 係数・標準誤差・検定統計量・適合度統計量を相対誤差1e-8で厳密比較する
 （`.claude/rules/testing-policy.md`「許容誤差」の基本方針。`test_ols_reference.py`
-と同じ方針）。クラスター系（cluster/cluster_imbalanced/cluster_g2）は従来
-係数・標準誤差のみだったが、t値・p値・信頼区間・適合度統計量まで
-`_check_result`で検証するよう拡張した（OLS側の同種の拡張を横展開したもの。
-あわせて`generate_wls_fixtures.py`の`_run_cluster_case`に`use_t=True`が
-指定されていなかった不備も修正済み）。
+と同じ方針）。クラスター系（baselineの均等・不均衡・G=2グループ、
+`CLUSTER_ILL_CONDITIONED_SCENARIOS`、401ksubs）も、係数・標準誤差だけでなく
+t値・p値・信頼区間・適合度統計量まで`_check_result`で検証する。
 `include_intercept=False`（切片なし）・`confidence_level`非既定も、
-baselineシナリオのみで全cov_type（classical/HC0-3/cluster/HAC）と
-組み合わせて同じフィクスチャ経由で検証する（従来はそれぞれライブ
-statsmodels比較・相対比較〔幅の単調性のみ〕だったものを、他オプションと
-同じ凍結フィクスチャでの数値照合に統合した。OLS側の横展開）。
+baselineシナリオで全cov_type（classical/HC0-3/cluster/HAC）と
+組み合わせて同じフィクスチャ経由で検証する。
 
 役割分担:
     - 構造・API・OLSとの不変条件回帰テスト: `test_wls_api.py`
@@ -146,8 +142,7 @@ def test_cluster_matches_statsmodels(fixtures):
     """クラスターロバストSE。`generate_wls_fixtures.py`と同じ疑似グループ
     （行番号%10）を再現する。統計的な意味はなく、実装の動作確認用のため
     `baseline`シナリオのみ。params/std_errorsだけでなくt値・p値・信頼区間・適合度統計量
-    まで`_check_result`で検証する（従来params/std_errorsのみだった非対称の解消、OLS側の
-    同種の拡張を横展開したもの）。
+    まで`_check_result`で検証する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df = with_cluster_groups(df, 10)
@@ -218,9 +213,8 @@ def test_cluster_ill_conditioned_matches_statsmodels(fixtures, scenario):
     同種ケース相当）。
 
     クラスターロバスト共分散`Ŝ=(X'X)⁻¹(...)`は`(X'X)⁻¹`を他のcov_type
-    （classical/HC0-3/HAC）と共有する。他のcov_typeは全シナリオで検証済みだが、
-    クラスターは従来`baseline`シナリオのみで、悪条件・多重共線性との組み合わせ
-    での数値的挙動が未検証だった。均等な疑似グループ（行番号%10）のみ確認する
+    （classical/HC0-3/HAC）と共有するため、悪条件・多重共線性との組み合わせでの
+    数値的挙動をクラスターでも確認する。均等な疑似グループ（行番号%10）のみ確認する
     （グルーピングパターン自体の網羅性は`test_cluster_matches_statsmodels`等
     `baseline`シナリオで確認済みのため重複させない）。
     """
@@ -243,9 +237,7 @@ def test_cluster_ill_conditioned_matches_statsmodels(fixtures, scenario):
 @pytest.mark.parametrize("cov_type", COV_TYPES)
 def test_no_intercept_matches_statsmodels(fixtures, cov_type):
     """`include_intercept=False`（切片なし）が、cov_typeによらずWLSでも
-    statsmodelsと一致すること（baselineシナリオ、OLS側の横展開）。従来は
-    ライブstatsmodels比較のみだったものを、他オプションと同じ凍結フィクスチャ
-    での数値照合に統合した。クラスターは
+    statsmodelsと一致すること（baselineシナリオ）。クラスターは
     `test_no_intercept_cluster_matches_statsmodels`で別途確認する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
@@ -304,9 +296,8 @@ def test_no_intercept_cluster_matches_statsmodels(fixtures):
 @pytest.mark.parametrize("cov_type", COV_TYPES)
 def test_confidence_level_matches_statsmodels(fixtures, cov_type):
     """confidence_level非既定が、cov_typeによらずWLSでもstatsmodelsと一致
-    すること（baselineシナリオ、OLS側の横展開）。従来は幅の広さの単調性のみの
-    相対比較（`test_wls_api.py::test_confidence_level_changes_interval_width`）
-    だったものを、具体的な数値の正しさまで検証するよう拡張した。クラスターは
+    すること（baselineシナリオ）。幅の単調性は`test_wls_api.py::
+    test_confidence_level_changes_interval_width`で確認する。クラスターは
     `test_confidence_level_cluster_matches_statsmodels`で別途確認する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")

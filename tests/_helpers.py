@@ -6,7 +6,7 @@
   `benchmark/common/dgp.py`の`imbalanced_cluster_groups`（不均衡クラスタ版）とは
   役割が近いが、これは均等サイズ版でテスト専用のロジックのため、`benchmark/`とは
   ライフサイクルが異なる`tests/`側に置く（`.claude/rules/testing-policy.md`
-  「テストの分離」参照。ユーザー確認済み）。
+  「テストの分離」参照）。
 - `separated_dataset`: ほぼ分離したデータのDGP（`beta1=100`で完全分離になる）。
   （`test_logit_validation.py`/`test_probit_validation.py`で完全に同一実装だった）。
 - `small_sample_separation_dataset`: 自由度が1の極小標本（`n=k+1`）で完全分離になる5行のデータ。
@@ -20,6 +20,8 @@
   離れた1組のみ同値）とその最初の同値の行の組。OLS/WLS/IVのバリデーション
   テストで共有する。
 
+- `CASE_SPELLINGS` / `respell`: 文字列オプションの大文字小文字の綴りバリアント
+  （`test_*_is_case_insensitive`が全手法で同じ網羅性になるよう共有する）。
 - `ROW_TIME` / `with_row_time` / `hac_time_for`: HACの時間順序列`hac_time`は必須（行順を
   暗黙に使わない）なので、行順をそのまま時間順として使うテストが、行番号の列を明示的に
   足して`hac_time`に渡すための共通部品。
@@ -56,6 +58,28 @@ def hac_time_for(*settings: str) -> dict[str, str]:
     if any(setting.lower() == "hac" for setting in settings):
         return {"hac_time": ROW_TIME}
     return {}
+
+
+def _alternating_case(label: str) -> str:
+    return "".join(
+        char.upper() if i % 2 else char.lower() for i, char in enumerate(label)
+    )
+
+
+# 文字列オプション（`cov_type`・`gmm_weight_type`等）の大文字小文字の綴り方。
+# 正規形（小文字）・全大文字・先頭のみ大文字・大小交互の4通りで、
+# `test_*_is_case_insensitive`が全ての値に同じ網羅性で適用する。
+CASE_SPELLINGS = {
+    "lower": str.lower,
+    "upper": str.upper,
+    "title": str.title,
+    "alternating": _alternating_case,
+}
+
+
+def respell(label: str, spelling: str) -> str:
+    """`label`を`CASE_SPELLINGS[spelling]`の綴りに変換する。"""
+    return CASE_SPELLINGS[spelling](label)
 
 
 # `hac_lags_used`/`dk_bandwidth_used`の自動選択ラグ（`floor(4*(n/100)^(2/9))`）を
@@ -152,8 +176,7 @@ def separated_dataset() -> pl.DataFrame:
     正確なProbitリンクである必要はない）。
 
     `benchmark/`側のDGP（`benchmark/nonlinear/datasets.py`等）と同じ
-    `numpy`（`np.random.default_rng`）ベースのベクトル化演算で書く
-    （以前は標準ライブラリ`random`＋素朴な`for`ループだった）。
+    `numpy`（`np.random.default_rng`）ベースのベクトル化演算で書く。
     """
     rng = np.random.default_rng(42)
     n = 200

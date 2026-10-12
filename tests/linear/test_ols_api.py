@@ -26,17 +26,23 @@ import numpy as np
 import polars as pl
 import pytest
 import statsmodels.api as sm
-from _assertions import assert_close, assert_params_table_matches_attributes
+from _assertions import (
+    assert_close,
+    assert_params_table_matches_attributes,
+    assert_same_estimates,
+)
 from _helpers import (
+    CASE_SPELLINGS,
     HAC_AUTO_LAG_SAMPLE_SIZES,
     ROW_TIME,
     hac_lag_frame,
     hac_time_for,
+    respell,
     with_row_time,
 )
-from _ols_helpers import our_fit, our_fit_cluster, sm_fit
+from _ols_helpers import our_fit, sm_fit
 from _tolerances import TOLERANCES
-from econometricsmodels import OLS, OLSOptions, ValidationError
+from econometricsmodels import OLS, OLSOptions, OLSResults
 
 from benchmark.common import hac_auto_lag
 
@@ -50,6 +56,11 @@ _assert_close = partial(
 )
 
 # ── 成功パス・結果型 ──────────────────────────────────────────────
+
+
+def test_fit_succeeds_and_returns_ols_results(dataset):
+    res = our_fit(dataset)
+    assert isinstance(res, OLSResults)
 
 
 def test_hac_runs_and_returns_finite_std_errors(dataset):
@@ -66,10 +77,8 @@ def test_hac_runs_and_returns_finite_std_errors(dataset):
 
 def test_hac_auto_lags_runs_and_returns_finite_std_errors(dataset):
     """`hac_lags`省略時（`None`、自動計算式）でもエラーなく動作すること
-
-    （既存の`test_hac_runs_and_returns_finite_std_errors`は`hac_lags=2`を
-    明示していたため、`None`がPython→Rustに正しく伝播する経路は
-    未検証だった）。
+    （`None`がPython→Rustに正しく伝播する経路。`hac_lags`を明示する経路は
+    `test_hac_runs_and_returns_finite_std_errors`）。
     """
     # hac_lags省略 = 自動計算
     options = OLSOptions(cov_type="hac", hac_time=ROW_TIME)
@@ -113,7 +122,7 @@ def test_hac_lags_used_is_none_unless_hac(dataset, cov_type):
 def test_residuals_sum_near_zero(dataset):
     """残差の和が0に近いこと（定数項ありOLSの性質）。"""
     our_res = our_fit(dataset)
-    assert abs(sum(our_res.residuals)) < 1e-8
+    _assert_close(sum(our_res.residuals), 0.0, "sum(residuals)")
 
 
 # ── API構造 ──────────────────────────────────────────────────────
@@ -173,47 +182,41 @@ def test_n_obs_and_dep_var_name(dataset):
 # 正しく反映されることを確認する。
 
 
-def test_cov_type_label(dataset):
-    for cov_type in ["classical", "hc0", "hc1", "hc2", "hc3"]:
-        res = our_fit(dataset, cov_type)
-        assert res.cov_type == cov_type
-
-    res = our_fit_cluster(dataset)
-    assert res.cov_type == "cluster"
-
-
+@pytest.mark.parametrize("spelling", CASE_SPELLINGS)
 @pytest.mark.parametrize(
-    "cov_type, expected_label",
-    [
-        ("CLASSICAL", "classical"),
-        ("Classical", "classical"),
-        ("HC0", "hc0"),
-        ("Hc1", "hc1"),
-        ("HC2", "hc2"),
-        ("hc3", "hc3"),
-        ("HAC", "hac"),
-        ("Hac", "hac"),
-    ],
+    "cov_type", ["classical", "hc0", "hc1", "hc2", "hc3", "hac", "cluster"]
 )
-def test_cov_type_is_case_insensitive(dataset, cov_type, expected_label):
-    """`cov_type`が大文字小文字を区別しないこと（`engine_pybind`側の
-    `parse_cov_type`のRust単体テストと対になる、Python API境界での確認。
-    テスト網羅性レビューで判明した抜け。HACは
-    `hac_lags`省略時の自動計算式で成功パスを確認する
-    （テスト網羅性候補・項目35）。
+def test_cov_type_is_case_insensitive(dataset, cov_type, spelling):
+    """全`cov_type`で、`res.cov_type`が正規形（小文字）で返り、どの大文字小文字の
+    綴りでも正規形と同一の推定結果になること（`engine_pybind`側の
+    `parse_cov_type`のRust単体テストと対になる、Python API境界での確認）。
+    HACは`hac_lags`省略時の自動計算式で確認する。
     """
-    options = OLSOptions(cov_type=cov_type, **hac_time_for(cov_type))
-    res = OLS(
-        with_row_time(dataset), y="y", x=["x1", "x2"], options=options
-    ).fit()
-    assert res.cov_type == expected_label
+
+    def fit(label: str):
+        kwargs = {"cluster": "cluster"} if cov_type == "cluster" else {}
+        options = OLSOptions(
+            cov_type=label, **kwargs, **hac_time_for(cov_type)
+        )
+        return OLS(
+            with_row_time(dataset), y="y", x=["x1", "x2"], options=options
+        ).fit()
+
+    res = fit(respell(cov_type, spelling))
+    assert res.cov_type == cov_type
+    assert_same_estimates(res, fit(cov_type))
 
 
-@pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
-def test_nonrobust_is_rejected(dataset, cov_type):
-    """`"nonrobust"`（旧別名）は受け付けない（概念ごとに文字列を1つに絞る）。"""
-    with pytest.raises(ValidationError, match="unknown cov_type: 'nonrobust'"):
-        our_fit(dataset, cov_type)
+def test_include_intercept_false_omits_const(dataset):
+    """`include_intercept=False`では`const`が出ず、`df_model`は傾き係数の数（
+    切片あり・なしで同じ）になること（数値照合は`test_ols_reference.py`の
+    `test_no_intercept_matches_statsmodels`）。
+    """
+    options = OLSOptions(include_intercept=False)
+    res = OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
+    assert res.param_names == ["x1", "x2"]
+    assert res.df_model == 2
+    assert our_fit(dataset).df_model == 2
 
 
 def test_default_options_use_classical():
@@ -480,11 +483,10 @@ def test_augment_without_intercept_matches_predict():
 # 上記のクラスター系テスト・test_ols_reference.py/test_ols_crosscheck.pyの
 # クラスター系テストは、いずれも誤差i.i.d.なデータに疑似グループラベルを
 # 後付けしたものであり、リファレンス実装（statsmodels/R）との数値一致を
-# 検証する目的には十分だが、「クラスターロバストSEが真のクラスター内相関が
-# ある状況で意図通り機能するか（通常のSEより適切に大きくなるか）」という
-# 別種の健全性は検証していなかった。以下はその
-# 健全性のみを確認する専用テストであり、他のテストと異なりリファレンス
-# 実装との数値比較は行わない。
+# 検証する。「クラスターロバストSEが真のクラスター内相関がある状況で意図通り
+# 機能するか（通常のSEより適切に大きくなるか）」という別種の健全性は、
+# 以下の専用テストで確認する。他のテストと異なりリファレンス実装との
+# 数値比較は行わない。
 
 
 def test_cluster_std_error_exceeds_classical_under_true_intra_cluster_correlation():

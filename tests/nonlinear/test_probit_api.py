@@ -21,6 +21,7 @@ from statistics import NormalDist
 
 import _binary_choice_checks as _checks
 import pytest
+from _helpers import CASE_SPELLINGS
 from econometricsmodels import Probit, ProbitOptions, ProbitResults
 
 # ── 成功パス・結果型 ──────────────────────────────────────────────
@@ -55,12 +56,8 @@ def test_params_std_errors_test_stats_p_values_share_keys(binary_dataset):
     )
 
 
-def test_n_obs_matches_dataset_size(binary_dataset):
-    _checks.check_n_obs_matches_dataset_size(binary_dataset, Probit)
-
-
-def test_dep_var_name(binary_dataset):
-    _checks.check_dep_var_name(binary_dataset, Probit)
+def test_n_obs_and_dep_var_name(binary_dataset):
+    _checks.check_n_obs_and_dep_var_name(binary_dataset, Probit)
 
 
 def test_param_names_include_const_first(binary_dataset):
@@ -75,8 +72,8 @@ def test_param_names_include_const_first(binary_dataset):
 
 
 @pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
-def test_method_option_converges_to_same_params(binary_dataset, solver):
-    _checks.check_method_option_converges_to_same_params(
+def test_method_option_converges(binary_dataset, solver):
+    _checks.check_method_option_converges(
         binary_dataset, Probit, ProbitOptions, solver
     )
 
@@ -104,10 +101,6 @@ def test_raise_on_non_convergence_false_returns_result_without_raising(
     )
 
 
-def test_cov_type_label(binary_dataset):
-    _checks.check_cov_type_label(binary_dataset, Probit, ProbitOptions)
-
-
 def test_method_label(binary_dataset):
     _checks.check_method_label(binary_dataset, Probit, ProbitOptions)
 
@@ -129,30 +122,13 @@ def test_method_is_case_insensitive(binary_dataset, solver, expected_label):
     )
 
 
+@pytest.mark.parametrize("spelling", CASE_SPELLINGS)
 @pytest.mark.parametrize(
-    "cov_type, expected_label",
-    [
-        ("CLASSICAL", "classical"),
-        ("Classical", "classical"),
-        ("OPG", "opg"),
-        ("Opg", "opg"),
-        ("HC0", "hc0"),
-        ("Hc1", "hc1"),
-        ("CLUSTER", "cluster"),
-    ],
+    "cov_type", ["classical", "opg", "hc0", "hc1", "cluster"]
 )
-def test_cov_type_is_case_insensitive(
-    binary_dataset, cov_type, expected_label
-):
+def test_cov_type_is_case_insensitive(binary_dataset, cov_type, spelling):
     _checks.check_cov_type_is_case_insensitive(
-        binary_dataset, Probit, ProbitOptions, cov_type, expected_label
-    )
-
-
-@pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
-def test_nonrobust_is_rejected(binary_dataset, cov_type):
-    _checks.check_nonrobust_is_rejected(
-        binary_dataset, Probit, ProbitOptions, cov_type
+        binary_dataset, Probit, ProbitOptions, cov_type, spelling
     )
 
 

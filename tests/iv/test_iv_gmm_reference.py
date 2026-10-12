@@ -5,7 +5,7 @@
 generate_iv_gmm_fixtures.py`で生成）を読み込み、10個の合成データシナリオ×
 classical/HC0/HC1/HAC（+クラスター、baselineのみ）を`gmm_weight_type="classical"`
 固定で、加えてbaselineシナリオ×`cov_type="classical"`固定で他の`gmm_weight_type`
-（robust/cluster/kernel）を検証する（ユーザー確認済みの検証範囲。
+（robust/cluster/kernel）を検証する（
 `gmm_weight_type`×`cov_type`の全組み合わせ（10シナリオ×4weight_type×6cov_type）は
 規模が大きすぎるため）。
 
@@ -160,7 +160,7 @@ def _check_result(
     # では一度もループが実行されず`wmat`が`(Z'Z/n)⁻¹`という生の初期値のまま
     # J統計量に使われる（σ̂²スケーリング無し）。一方、本実装は
     # `gmm_weight_type=Unadjusted`のHansen Jに常にσ̂²スケーリング込みの重みを
-    # 使う設計（ユーザー確認済み）のため、`iter_limit=1`固有の規約の違いに
+    # 使う設計のため、`iter_limit=1`固有の規約の違いに
     # よる原理的に一致しえない差異と判明した（バグではない）。
     # one_stepのときはoverid_statistic/overid_p_valueの比較のみ除外する
     # （係数・SE等の他の統計量は引き続き比較する）。
@@ -280,7 +280,7 @@ def test_multi_endog_matches_linearmodels(fixtures, cov_type):
     """複数内生変数（`x_endog=["endog1", "endog2"]`）の成功パス
     （`weak_instrument_f_statistics`・`overid_statistic`（Hansen J、過剰識別）が
     複数内生変数を同時に扱うことをGMMでも確認する。`test_iv_reference.py`の
-    同名テストと同じ理由、`testing-completeness-reviewer`指摘）。
+    同名テストと同じ理由）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv")
     options = IVOptions(
@@ -310,7 +310,7 @@ def test_hac_weight_hac_cov_matches_linearmodels(fixtures):
     「HACカーネル重み＋HAC標準誤差」の組み合わせ経路が、他の`gmm_weight_type`×
     `cov_type`の組み合わせと同様に独立して機能することを確認する。
     `test_other_weight_types_match_linearmodels`はcov_type="classical"固定のため
-    この組み合わせを通らない（`testing-completeness-reviewer`指摘）。
+    この組み合わせを通らない。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
     options = IVOptions(

@@ -357,7 +357,9 @@ impl TobitResult {
         let has_intercept = self.estimator.input().has_intercept();
         let x_columns = extract_model_x_columns(df, &self.param_names, has_intercept, 1)?;
 
-        Ok(self.estimator.predict_new_data(target, &x_columns))
+        self.estimator
+            .predict_new_data(target, &x_columns)
+            .map_err(mle_error_to_pyerr)
     }
 }
 
@@ -384,7 +386,7 @@ impl TobitResult {
     fn predict(&self, new_data: Option<&Bound<'_, PyAny>>, target: String) -> PyResult<Vec<f64>> {
         let target = parse_marginal_effects_target(&target.to_lowercase())?;
         let Some(new_data) = new_data else {
-            return Ok(self.estimator.predict(target));
+            return self.estimator.predict(target).map_err(mle_error_to_pyerr);
         };
 
         let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
@@ -426,7 +428,9 @@ impl TobitResult {
             }
             None => (
                 self.training_data.clone(),
-                self.estimator.predict(target_enum),
+                self.estimator
+                    .predict(target_enum)
+                    .map_err(mle_error_to_pyerr)?,
             ),
         };
 

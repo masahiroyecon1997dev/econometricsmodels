@@ -270,11 +270,18 @@ Tobit固有の差分:
   ずれた。(3)`statrs`の`Normal::cdf`は絶対誤差が約`1.4e-11`あり、`W`の逆数にかかるこの量では標準誤差へ
   増幅されるため、`Φ(x)-1/2`を自前のテイラー級数・連分数で計算する。`w`は`[0,1]`にクランプする。
 - **限界**: (a)遠い裾（`|z|≳1e3`）では`w`・`w_a`・`w_b`の相対精度が落ちる（絶対誤差は`ε`級で、
-  `w≈1/z²`自体が無視できるため全観測の平均には影響しない）。(b)非打ち切り区間が極端に狭い
-  と`q-r·p`・`W`が桁落ちする。区間幅`δ=(upper-lower)/σ`に対して`w`の絶対誤差は約`ε/δ²`、
-  真値は`≈δ²/12`なので相対誤差は約`12ε/δ⁴`（`δ≈0.02`から相対`1e-8`超、`δ=1e-3`で`2e-4`、
-  `δ≲2e-4`で100%。絶対誤差はなお`1e-10`級）で、丸め誤差のレベルでは`NaN`になる。
-  この領域の扱い（級数への切り替え・エラー）は未決定（4章）。
+  `w≈1/z²`自体が無視できるため全観測の平均には影響しない）。(b)非打ち切り区間が`σ̂`に比べて
+  狭いと`q-r·p`・`W`が桁落ちする。区間幅`δ=(upper-lower)/σ̂`に対して`w`の絶対誤差は約`ε/δ²`、
+  真値は`≈δ²/12`なので相対誤差は約`12ε/δ⁴`で、デルタ法に使う`∂w/∂μ`・`∂w/∂σ`の誤差はさらに
+  大きい（`ε/δ³`級）。80桁参照の実測（`za∈[-10,10]`）は、`δ=1e-2`で`w`の相対誤差が最大`6e-7`、
+  `δ=1e-3`で`3e-3`〜`2e-4`かつ`s`が`w`の1%超、`δ≲1e-4`で`w`の相対誤差が100%超、`δ`が丸め誤差の
+  レベルでは`NaN`。**`δ<MIN_UNCENSORED_WIDTH_RATIO=1e-2`（`σ̂`が区間幅の100倍超、非打ち切りの
+  確率が約0.4%未満）のときは`MleError::UncensoredIntervalTooNarrow`（Pythonでは
+  `ComputationError`）にする**（`predict`・`predict_new_data`・`augment`・`marginal_effects`の
+  `target="expected_uncensored"`のみ。片側打ち切りと他の3 targetは対象外）。`ValidationError`
+  にしないのは、入力が不正なのではなく推定した`σ̂`で決まる条件で、`σ̂`が分かるまで判定できない
+  から。級数への内部切り替え（近似へ黙って変わる）は採らない。`δ`は観測に依存せずモデルで
+  1つに決まるので、呼び出しごとに1回だけ検査する。
 
 - 4対象とも`dydx_j = w(θ)·βⱼ`という同一の形（Logit/Probitと同じ骨格、`w`の中身のみ異なる）に帰着
   するため、`target_w_and_s`（`w`とその勾配`(s_beta, s_sigma)`を計算）→
@@ -322,6 +329,7 @@ Tobit固有の差分:
 | `MleError` | Python例外 |
 |---|---|
 | `NoUncensoredObservations` / `InvalidCensoringBounds` / `YOutOfCensoringBounds` | `ValidationError` |
+| `UncensoredIntervalTooNarrow`（`expected_uncensored`の非打ち切り区間が`σ̂`の1%未満） | `ComputationError` |
 
 - `predict()`/`marginal_effects()`の`target`引数のPython文字列は`"expected_latent"` /
   `"expected_observed"` / `"prob_uncensored"` / `"expected_uncensored"`（Rust enum名のsnake_case版。`at`のような単語1つの
@@ -391,12 +399,6 @@ Tobit固有の差分:
 
 ## 4. 未実装・未対応
 
-- **`expected_uncensored`の極端に狭い非打ち切り区間**: `δ=(upper-lower)/σ`が小さい（`δ≈0.02`から
-  `w`の相対精度が`1e-8`を割る）と精度が落ち、丸め誤差のレベルでは`NaN`になる（3.5節の「限界」）。
-  条件は`μ`に依らず`σ`だけで決まる（モデルごとに1つ）。区間中点まわりの級数
-  （`m≈中点`、`w≈δ²/12`）への切り替え、`ValidationError`、`ComputationError`のどれにするかは未決定
-  （`ValidationError`は入力が不正ではなく`σ̂`で決まる条件なので不適切、内部の黙った切り替えは
-  近似に変わることが見えないので避けたい、という論点がある）。
 - `predict()`のout-of-sample対応は実装済み（3.6参照）。`censoring_fit_check()`の
   out-of-sample対応は引き続き未実装。
 - `augment()`は実装済み（3.6参照）。

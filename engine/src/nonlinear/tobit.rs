@@ -1138,6 +1138,36 @@ fn target_w_and_s(
     }
 }
 
+/// `ExpectedUncensored`を信頼できる精度で評価できる、非打ち切り区間の幅`(upper-lower)/σ`の下限。
+/// `w`の絶対誤差は約`ε/δ²`、真値は`≈δ²/12`なので相対誤差は約`12ε/δ⁴`で、デルタ法に使う
+/// `∂w/∂μ`・`∂w/∂σ`の誤差はさらに大きい（`ε/δ³`級。`|z|=10`で`δ=1e-3`の`s`は
+/// 絶対`2e-8`で`w≈1e-7`の`1/5`）。`δ=1e-2`で`w`の相対誤差が全領域（`za∈[-10,10]`）で
+/// `6e-7`以下（80桁参照の実測）、`δ=1e-3`では`w`の相対誤差が`3e-3`〜、`s`が`w`の1%超になる。
+/// `σ̂`が区間幅の100倍以上（非打ち切りの確率が約0.4%未満）でほぼ識別できない当てはめのときだけ
+/// 超える。
+const MIN_UNCENSORED_WIDTH_RATIO: f64 = 1e-2;
+
+/// 両側打ち切りで非打ち切り区間が`σ`に比べて狭すぎる場合に
+/// [`MleError::UncensoredIntervalTooNarrow`]を返す（`MIN_UNCENSORED_WIDTH_RATIO`）。
+/// 片側打ち切りは区間が無限大なので常に`Ok`。幅`(upper-lower)/σ`はモデル（`σ̂`）で1つに
+/// 決まり観測に依存しないので、呼び出しごとに1回検査すれば足りる。
+fn ensure_uncensored_interval_resolvable(
+    lower: Option<f64>,
+    upper: Option<f64>,
+    sigma: f64,
+) -> Result<(), MleError> {
+    if let (Some(lower), Some(upper)) = (lower, upper)
+        && (upper - lower) / sigma < MIN_UNCENSORED_WIDTH_RATIO
+    {
+        return Err(MleError::UncensoredIntervalTooNarrow {
+            lower,
+            upper,
+            sigma,
+        });
+    }
+    Ok(())
+}
+
 /// `ExpectedUncensored`（`m(μ,σ)=E[y|lower<y<upper,x]=μ+σ(Pa-Pb)`）の`(w, s_beta, s_sigma)`。
 ///
 /// ## 数式
@@ -1177,10 +1207,10 @@ fn target_w_and_s(
 ///   `|z|≳1e3`から落ち、`|z|≳1e4`で`w_a`は符号も保証されない（`w≈1/z²`・`w_a≈-2/z³`自体が
 ///   無視できる大きさなので、全観測の平均には影響しない）。
 /// - **非打ち切り区間が極端に狭い場合**: 区間幅`δ=zb-za=(upper-lower)/σ`が小さいと、上側/下側の
-///   裾の`q-r·p`や中央の`W`・`1-Pa·A-Pb·B+…`が桁落ちする。`w`の絶対誤差は約`ε/δ²`、真値は
-///   `≈δ²/12`なので相対誤差は約`12ε/δ⁴`で、`δ≈0.02`から相対`1e-8`を超え、`δ=1e-3`で
-///   相対`2e-4`、`δ≲2e-4`で相対100%（絶対誤差はなお`1e-10`級）になる。`δ`が丸め誤差の
-///   レベルでは`NaN`。この領域の扱い（級数への切り替え・エラー）は未決定。
+///   裾の`q-r·p`や中央の`W`・`1-Pa·A-Pb·B+…`が桁落ちする（`MIN_UNCENSORED_WIDTH_RATIO`の
+///   docコメント参照）。この関数は`δ`を検査しない。`TobitEstimator`の`predict`・
+///   `predict_new_data`・`marginal_effects`が入口で`ensure_uncensored_interval_resolvable`
+///   により`δ<1e-2`を`MleError::UncensoredIntervalTooNarrow`として拒否する。
 fn uncensored_w_and_s(
     x_point: &[f64],
     mu: f64,
@@ -1919,7 +1949,9 @@ impl TobitEstimator {
     /// 自動判定は行わない（常に連続変数として扱う、Logit/Probitと同じ方針）。
     ///
     /// # Errors
-    /// `confidence_level`が`(0, 1)`の範囲外: `CommonError::InvalidConfidenceLevel`
+    /// - `confidence_level`が`(0, 1)`の範囲外: `CommonError::InvalidConfidenceLevel`
+    /// - `target`が`ExpectedUncensored`で、両側打ち切りの非打ち切り区間が`σ̂`に比べて狭すぎる:
+    ///   `MleError::UncensoredIntervalTooNarrow`
     pub fn marginal_effects(
         &self,
         at: MarginalEffectsAt,
@@ -1931,6 +1963,9 @@ impl TobitEstimator {
         let lower = self.input.lower();
         let upper = self.input.upper();
         let normal = Normal::standard();
+        if target == MarginalEffectsTarget::ExpectedUncensored {
+            ensure_uncensored_interval_resolvable(lower, upper, self.sigma)?;
+        }
 
         let (w, s_beta, s_sigma) = match at {
             MarginalEffectsAt::Overall => {
@@ -1982,19 +2017,26 @@ impl TobitEstimator {
     /// （`target`省略時の`E[y|x]`、`docs/spec/nonlinear-common.md`
     /// 6章）はPython層（engine_pybind）の責務（`SolverType`/`CovType`等と同じ設計、
     /// `.claude/rules/rust-style.md`参照）。
-    pub fn predict(&self, target: MarginalEffectsTarget) -> Vec<f64> {
+    ///
+    /// # Errors
+    /// `target`が`ExpectedUncensored`で、両側打ち切りの非打ち切り区間が`σ̂`に比べて狭すぎる:
+    /// `MleError::UncensoredIntervalTooNarrow`
+    pub fn predict(&self, target: MarginalEffectsTarget) -> Result<Vec<f64>, MleError> {
         let x = self.input.x();
         let n = x.nrows();
         let k = self.input.k();
         let lower = self.input.lower();
         let upper = self.input.upper();
         let normal = Normal::standard();
-        (0..n)
+        if target == MarginalEffectsTarget::ExpectedUncensored {
+            ensure_uncensored_interval_resolvable(lower, upper, self.sigma)?;
+        }
+        Ok((0..n)
             .map(|i| {
                 let mu: f64 = (0..k).map(|j| *x.get(i, j) * self.params[j]).sum();
                 predicted_value(target, mu, self.sigma, lower, upper, &normal)
             })
-            .collect()
+            .collect())
     }
 
     /// 新規データ（out-of-sample、`new_x_columns`）に対する予測値。
@@ -2009,19 +2051,28 @@ impl TobitEstimator {
     ///
     /// `new_x_columns`の本数・順序の契約、パニック条件は
     /// `nonlinear::common::predict_new_data`のdocコメント参照。
+    ///
+    /// # Errors
+    /// `predict`と同じ（`MleError::UncensoredIntervalTooNarrow`）。
     pub fn predict_new_data(
         &self,
         target: MarginalEffectsTarget,
         new_x_columns: &[Vec<f64>],
-    ) -> Vec<f64> {
+    ) -> Result<Vec<f64>, MleError> {
         let has_intercept = self.input.has_intercept();
         let lower = self.input.lower();
         let upper = self.input.upper();
         let sigma = self.sigma;
         let normal = Normal::standard();
-        predict_new_data(&self.params, has_intercept, new_x_columns, |mu| {
-            predicted_value(target, mu, sigma, lower, upper, &normal)
-        })
+        if target == MarginalEffectsTarget::ExpectedUncensored {
+            ensure_uncensored_interval_resolvable(lower, upper, sigma)?;
+        }
+        Ok(predict_new_data(
+            &self.params,
+            has_intercept,
+            new_x_columns,
+            |mu| predicted_value(target, mu, sigma, lower, upper, &normal),
+        ))
     }
 
     /// 打ち切り予測の適合度チェック（Logit/Probitの`pred_table`の代替、`predict`とは独立
@@ -5363,7 +5414,9 @@ mod tests {
             let params = estimator.params();
             let sigma = estimator.sigma();
 
-            let predicted = estimator.predict(MarginalEffectsTarget::ExpectedUncensored);
+            let predicted = estimator
+                .predict(MarginalEffectsTarget::ExpectedUncensored)
+                .unwrap();
             for (i, &p) in predicted.iter().enumerate() {
                 let mu: f64 = params[0] + params[1] * (*x.get(i, 1));
                 let expected = expected_uncensored_closed_form(mu, sigma, lower, upper);
@@ -5374,13 +5427,139 @@ mod tests {
             }
 
             let x1: Vec<f64> = (0..x.nrows()).map(|i| *x.get(i, 1)).collect();
-            let predicted_new =
-                estimator.predict_new_data(MarginalEffectsTarget::ExpectedUncensored, &[x1]);
+            let predicted_new = estimator
+                .predict_new_data(MarginalEffectsTarget::ExpectedUncensored, &[x1])
+                .unwrap();
             assert_eq!(predicted_new.len(), predicted.len());
             for (a, b) in predicted_new.iter().zip(&predicted) {
                 assert!((a - b).abs() < 1e-12, "predict_new_data={a}, predict={b}");
             }
         }
+    }
+
+    /// 非打ち切り区間の幅`(upper-lower)/σ`が`MIN_UNCENSORED_WIDTH_RATIO`未満のときだけ
+    /// `UncensoredIntervalTooNarrow`を返す。境界ちょうど（`=1e-2`）は通し、片側打ち切り
+    /// （`lower`か`upper`が`None`）は`σ`がどれほど大きくても通す。
+    #[test]
+    fn ensure_uncensored_interval_resolvable_rejects_only_narrow_two_sided_intervals() {
+        // 幅/σ = 1/100 = 0.01（境界ちょうど）は通す
+        assert!(ensure_uncensored_interval_resolvable(Some(0.0), Some(1.0), 100.0).is_ok());
+        // 幅/σ = 1/100.5 < 0.01 は拒否し、境界とσを持つ
+        match ensure_uncensored_interval_resolvable(Some(0.0), Some(1.0), 100.5) {
+            Err(MleError::UncensoredIntervalTooNarrow {
+                lower,
+                upper,
+                sigma,
+            }) => {
+                assert_eq!((lower, upper, sigma), (0.0, 1.0, 100.5));
+            }
+            other => panic!("expected UncensoredIntervalTooNarrow, got {other:?}"),
+        }
+        // 片側打ち切りは区間が無限大なので`σ`が巨大でも通す
+        assert!(ensure_uncensored_interval_resolvable(Some(0.0), None, 1e12).is_ok());
+        assert!(ensure_uncensored_interval_resolvable(None, Some(0.0), 1e12).is_ok());
+        // 広い区間は通す
+        assert!(ensure_uncensored_interval_resolvable(Some(-5.0), Some(5.0), 1.0).is_ok());
+    }
+
+    /// ほぼ全観測が両端に打ち切られた当てはめ（`σ̂`が区間幅の100倍超）。
+    fn narrow_interval_estimator(n_interior: usize) -> TobitEstimator {
+        let n = 2000usize;
+        let x: Vec<f64> = (0..n)
+            .map(|i| ((i * 7919) % 1009) as f64 / 1009.0)
+            .collect();
+        let y: Vec<f64> = (0..n)
+            .map(|i| {
+                if i < n_interior {
+                    0.5
+                } else if i % 2 == 0 {
+                    0.0
+                } else {
+                    1.0
+                }
+            })
+            .collect();
+        let input = TobitInput::from_columns(
+            &y,
+            &[x],
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+            Some(0.0),
+            Some(1.0),
+        )
+        .unwrap();
+        TobitEstimator::fit(
+            input,
+            MleFitOptions {
+                solver: SolverType::Newton,
+                max_iter: 200,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
+        )
+        .unwrap()
+    }
+
+    /// 狭い区間の当てはめ（`σ̂≈160`、`δ≈6e-3`）では`ExpectedUncensored`の`predict`・
+    /// `predict_new_data`・`marginal_effects`が`UncensoredIntervalTooNarrow`になり、他の3targetは
+    /// 通常どおり計算できる（エラーは`expected_uncensored`固有）。区間がちょうど十分な当てはめ
+    /// （`σ̂≈40`、`δ≈0.025`）では`ExpectedUncensored`も計算できる。
+    #[test]
+    fn expected_uncensored_errors_only_when_the_fitted_interval_is_too_narrow() {
+        let narrow = narrow_interval_estimator(5);
+        assert!(
+            1.0 / narrow.sigma() < MIN_UNCENSORED_WIDTH_RATIO,
+            "fixture is not narrow"
+        );
+        let new_x = vec![vec![0.2, 0.8]];
+        assert!(matches!(
+            narrow.predict(MarginalEffectsTarget::ExpectedUncensored),
+            Err(MleError::UncensoredIntervalTooNarrow { .. })
+        ));
+        assert!(matches!(
+            narrow.predict_new_data(MarginalEffectsTarget::ExpectedUncensored, &new_x),
+            Err(MleError::UncensoredIntervalTooNarrow { .. })
+        ));
+        assert!(matches!(
+            narrow.marginal_effects(
+                MarginalEffectsAt::Overall,
+                MarginalEffectsTarget::ExpectedUncensored,
+                0.95
+            ),
+            Err(MleError::UncensoredIntervalTooNarrow { .. })
+        ));
+        for target in [
+            MarginalEffectsTarget::ExpectedLatent,
+            MarginalEffectsTarget::ExpectedObserved,
+            MarginalEffectsTarget::ProbUncensored,
+        ] {
+            let predicted = narrow.predict(target).unwrap();
+            assert!(predicted.iter().all(|v| v.is_finite()), "{target:?}");
+            assert!(
+                narrow.predict_new_data(target, &new_x).is_ok(),
+                "{target:?}"
+            );
+            assert!(
+                narrow
+                    .marginal_effects(MarginalEffectsAt::Overall, target, 0.95)
+                    .is_ok(),
+                "{target:?}"
+            );
+        }
+
+        let wide_enough = narrow_interval_estimator(20);
+        assert!(1.0 / wide_enough.sigma() >= MIN_UNCENSORED_WIDTH_RATIO);
+        let predicted = wide_enough
+            .predict(MarginalEffectsTarget::ExpectedUncensored)
+            .unwrap();
+        assert!(
+            predicted
+                .iter()
+                .all(|v| v.is_finite() && (0.0..=1.0).contains(v))
+        );
     }
 
     /// 切片のみモデル（k=1）は限界効果の出力対象となる説明変数が存在しない
@@ -5944,7 +6123,9 @@ mod tests {
         let k = 2;
         let params = estimator.params();
 
-        let predicted = estimator.predict(MarginalEffectsTarget::ExpectedLatent);
+        let predicted = estimator
+            .predict(MarginalEffectsTarget::ExpectedLatent)
+            .unwrap();
         assert_eq!(predicted.len(), n);
         for (i, &predicted_i) in predicted.iter().enumerate() {
             let expected: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
@@ -5980,8 +6161,12 @@ mod tests {
         assert_eq!(lower, Some(0.0));
         assert_eq!(upper, None);
 
-        let predicted_observed = estimator.predict(MarginalEffectsTarget::ExpectedObserved);
-        let predicted_prob = estimator.predict(MarginalEffectsTarget::ProbUncensored);
+        let predicted_observed = estimator
+            .predict(MarginalEffectsTarget::ExpectedObserved)
+            .unwrap();
+        let predicted_prob = estimator
+            .predict(MarginalEffectsTarget::ProbUncensored)
+            .unwrap();
         for i in 0..n {
             let mu: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
             let expected_observed = expected_observed_closed_form(mu, sigma, lower, upper);
@@ -6025,8 +6210,12 @@ mod tests {
         assert_eq!(lower, None);
         assert_eq!(upper, Some(6.0));
 
-        let predicted_observed = estimator.predict(MarginalEffectsTarget::ExpectedObserved);
-        let predicted_prob = estimator.predict(MarginalEffectsTarget::ProbUncensored);
+        let predicted_observed = estimator
+            .predict(MarginalEffectsTarget::ExpectedObserved)
+            .unwrap();
+        let predicted_prob = estimator
+            .predict(MarginalEffectsTarget::ProbUncensored)
+            .unwrap();
         for i in 0..n {
             let mu: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
             let expected_observed = expected_observed_closed_form(mu, sigma, lower, upper);
@@ -6062,8 +6251,12 @@ mod tests {
         assert_eq!(lower, Some(0.0));
         assert_eq!(upper, Some(6.0));
 
-        let predicted_observed = estimator.predict(MarginalEffectsTarget::ExpectedObserved);
-        let predicted_prob = estimator.predict(MarginalEffectsTarget::ProbUncensored);
+        let predicted_observed = estimator
+            .predict(MarginalEffectsTarget::ExpectedObserved)
+            .unwrap();
+        let predicted_prob = estimator
+            .predict(MarginalEffectsTarget::ProbUncensored)
+            .unwrap();
         for i in 0..n {
             let mu: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
             let expected_observed = expected_observed_closed_form(mu, sigma, lower, upper);
@@ -6280,9 +6473,15 @@ mod tests {
         let lower = estimator.input().lower();
         let upper = estimator.input().upper();
 
-        let predicted_latent = estimator.predict(MarginalEffectsTarget::ExpectedLatent);
-        let predicted_observed = estimator.predict(MarginalEffectsTarget::ExpectedObserved);
-        let predicted_prob = estimator.predict(MarginalEffectsTarget::ProbUncensored);
+        let predicted_latent = estimator
+            .predict(MarginalEffectsTarget::ExpectedLatent)
+            .unwrap();
+        let predicted_observed = estimator
+            .predict(MarginalEffectsTarget::ExpectedObserved)
+            .unwrap();
+        let predicted_prob = estimator
+            .predict(MarginalEffectsTarget::ProbUncensored)
+            .unwrap();
         for i in 0..n {
             let mu: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
             assert!((predicted_latent[i] - mu).abs() < 1e-12);
@@ -6318,12 +6517,15 @@ mod tests {
 
         // 学習データには無い新規のx値
         let new_x_columns = vec![vec![15.0, 25.0], vec![3.0, -1.0]];
-        let predicted_latent =
-            estimator.predict_new_data(MarginalEffectsTarget::ExpectedLatent, &new_x_columns);
-        let predicted_observed =
-            estimator.predict_new_data(MarginalEffectsTarget::ExpectedObserved, &new_x_columns);
-        let predicted_prob =
-            estimator.predict_new_data(MarginalEffectsTarget::ProbUncensored, &new_x_columns);
+        let predicted_latent = estimator
+            .predict_new_data(MarginalEffectsTarget::ExpectedLatent, &new_x_columns)
+            .unwrap();
+        let predicted_observed = estimator
+            .predict_new_data(MarginalEffectsTarget::ExpectedObserved, &new_x_columns)
+            .unwrap();
+        let predicted_prob = estimator
+            .predict_new_data(MarginalEffectsTarget::ProbUncensored, &new_x_columns)
+            .unwrap();
 
         assert_eq!(predicted_latent.len(), 2);
         for i in 0..2 {
@@ -6373,12 +6575,15 @@ mod tests {
         let upper = estimator.input().upper();
 
         let new_x_columns = vec![vec![15.0, 25.0], vec![3.0, -1.0]];
-        let predicted_latent =
-            estimator.predict_new_data(MarginalEffectsTarget::ExpectedLatent, &new_x_columns);
-        let predicted_observed =
-            estimator.predict_new_data(MarginalEffectsTarget::ExpectedObserved, &new_x_columns);
-        let predicted_prob =
-            estimator.predict_new_data(MarginalEffectsTarget::ProbUncensored, &new_x_columns);
+        let predicted_latent = estimator
+            .predict_new_data(MarginalEffectsTarget::ExpectedLatent, &new_x_columns)
+            .unwrap();
+        let predicted_observed = estimator
+            .predict_new_data(MarginalEffectsTarget::ExpectedObserved, &new_x_columns)
+            .unwrap();
+        let predicted_prob = estimator
+            .predict_new_data(MarginalEffectsTarget::ProbUncensored, &new_x_columns)
+            .unwrap();
 
         assert_eq!(predicted_observed.len(), 2);
         for i in 0..2 {

@@ -38,6 +38,7 @@ pub(crate) fn mle_error_to_pyerr(err: MleError) -> PyErr {
         | MleError::SingularOpgMatrix
         | MleError::SingularDesignMatrix
         | MleError::SeparationDetected
+        | MleError::UncensoredIntervalTooNarrow { .. }
         | MleError::EvaluationBudgetExceeded { .. } => ComputationError::new_err(err.to_string()),
     }
 }

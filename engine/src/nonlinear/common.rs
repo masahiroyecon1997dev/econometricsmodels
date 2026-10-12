@@ -184,6 +184,18 @@ pub enum MleError {
     )]
     SeparationDetected,
 
+    /// Tobit専用: `target="expected_uncensored"`（`E[y|lower<y<upper,x]`）の非打ち切り区間の幅
+    /// `(upper-lower)/σ̂`が小さすぎ（`MIN_UNCENSORED_WIDTH_RATIO`未満）、`W=Φ(zb)-Φ(za)`で
+    /// 割る量が桁落ちで信頼できない（`w`の相対誤差が約`12ε/δ⁴`、デルタ法の`s`はさらに悪い）。
+    /// 推定済みの`σ̂`で決まる条件で入力そのものは不正ではないため`ComputationError`
+    /// （`ValidationError`ではない）。`lower`/`upper`が`None`の片側打ち切りでは発生しない。
+    #[error(
+        "target 'expected_uncensored' cannot be computed reliably: the uncensored interval \
+         [{lower}, {upper}] is narrower than 1% of the estimated sigma ({sigma}), so the \
+         model puts almost no probability on uncensored values. Use another target"
+    )]
+    UncensoredIntervalTooNarrow { lower: f64, upper: f64, sigma: f64 },
+
     /// `bfgs`/`lbfgs`のline search（`MoreThuenteLineSearch`）が、収束判定を一度も満たさない
     /// まま目的関数・勾配の評価回数の総枠（[`BudgetedProblem`]）を使い切った。
     ///

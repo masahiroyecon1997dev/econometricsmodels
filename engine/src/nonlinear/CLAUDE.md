@@ -91,7 +91,7 @@
 - **`W=Φ(zb)-Φ(za)`で割る量は、`W`を作らずに`Pa=φ(za)/W`・`Pb=φ(zb)/W`を直接計算する**（`tobit.rs`の`truncation_pdf_ratios`）。既存3 targetは`W`で割らないので、`clamped_pdf_cdf`（`|z|>8.13`でクランプ）で足りたが、`E[y|uncensored]`は`μ`が境界から遠い観測（実データ`many_regressors`で`za=72`）で`W→0`になり、素の`φ/W`は`0/0`になる。片側は逆ミルズ比（`a>=3`は連分数）、両側は上側/下側の裾を比（`p·q/(q-r·p)`）で、中央は正の項の和で組む。
 - **`w`の偏微分を`1+ρ2-ρ1²`の教科書形のまま書かない**: `z²`と`z·Pa`の引き算で絶対誤差が`ε·z³`になり、`z=72`で`s_sigma`の相対誤差が`5e-9`、限界効果の標準誤差が`1e-8`ずれた（Rクロスチェックの許容`1e-8`で露呈）。`A=Pa-za`・`B=zb+Pb`を引き算せず直接計算し、`w=1-Pa·A-Pb·B+2·Pa·Pb`等で評価する。回帰ガード: `uncensored_terms_and_w_match_high_precision_reference_in_extreme_tails`（80桁の10進演算の参照値）。
 - **`statrs`の`Normal::cdf`は絶対誤差が約`1.4e-11`（`Φ(-1)`で相対`8.6e-11`）**: `W`の逆数にかかる量では標準誤差に約100倍で増幅されるため、この経路では`normal_cdf_minus_half`・`normal_survival`（テイラー級数＋連分数。`a→3`の級数側で`λ`の相対誤差は最大`4e-13`、`gap=λ-a`は最大`4e-12`）を使う。`normal_cdf_minus_half`は`x>=0`が前提。既存の`ExpectedObserved`等は`W`で割らないので`statrs`のままでよい。
-- **未対応の限界**: 非打ち切り区間が極端に狭い（`δ=(upper-lower)/σ`が小さい。`w`の相対誤差は約`12ε/δ⁴`で`δ≈0.02`から`1e-8`超）と`q-r·p`・`W`が桁落ちし、丸め誤差のレベルでは`NaN`。`docs/spec/tobit-spec.md`3.5節「限界」・4章。
+- **非打ち切り区間が`σ̂`に比べて極端に狭い（`δ=(upper-lower)/σ̂<1e-2`）場合は`MleError::UncensoredIntervalTooNarrow`（`ComputationError`）にする**（`ensure_uncensored_interval_resolvable`、`predict`・`predict_new_data`・`marginal_effects`の入口で1回検査）。`q-r·p`・`W`が桁落ちし、`w`の相対誤差は約`12ε/δ⁴`、デルタ法の`s`はさらに悪い（`δ=1e-3`で`s`が`w`の1%超、`δ≲1e-4`で`w`が100%超）。**級数への内部切り替えはしない**（近似へ黙って変わる）。`ValidationError`でもない（`σ̂`で決まる条件で入力が不正なのではない）。閾値の根拠は`MIN_UNCENSORED_WIDTH_RATIO`のdocコメントと`docs/spec/tobit-spec.md`3.5節。`predict`系は`Result`を返す。`docs/spec/tobit-spec.md`3.5節「限界」・4章。
 
 ## Tobitのproperty-basedテスト（`tobit.rs`の`mod proptests`）
 

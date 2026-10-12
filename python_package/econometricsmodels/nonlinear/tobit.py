@@ -348,6 +348,11 @@ class TobitResults:
                 values, or `new_data` is missing a required `x`
                 column, or a column contains missing/NaN/infinite
                 values. A subclass of `ValueError`.
+            ComputationError: `target="expected_uncensored"` with a
+                two-sided censoring model whose uncensored interval is
+                narrower than 1% of the estimated `sigma` (the
+                conditional expectation is not computable reliably).
+                A subclass of `RuntimeError`.
         """
         return self._raw.predict(new_data, target)
 
@@ -387,6 +392,7 @@ class TobitResults:
             ValidationError: Same as `predict()`, or the source data
                 already has a column named `"predicted_{target}"`
                 (which would otherwise be silently overwritten).
+            ComputationError: Same as `predict()`.
         """
         return self._raw.augment(new_data, target)
 
@@ -429,6 +435,7 @@ class TobitResults:
                 `"median"`, `target` is not one of the four known
                 values, or `confidence_level` is out of range. A
                 subclass of `ValueError`.
+            ComputationError: Same as `predict()`.
         """
         raw = self._raw.marginal_effects(at, target, confidence_level)
         return marginal_effect_rows(raw)

@@ -20,7 +20,7 @@ import polars as pl
 import pytest
 from _assertions import assert_params_table_matches_attributes
 from _constants import DATA_DIR
-from _error_messages import escaped
+from _error_messages import escaped, rust_f64
 from _helpers import heavily_censored_tobit_dataset
 from econometricsmodels import (
     ComputationError,
@@ -246,6 +246,67 @@ def test_predict_expected_uncensored_satisfies_decomposition_identity(
     for obs, p, cond in zip(observed, prob, conditional, strict=True):
         assert cond > 0.0
         assert obs == pytest.approx(p * cond, rel=1e-8, abs=1e-12)
+
+
+def _narrow_interval_dataset(n_interior: int) -> pl.DataFrame:
+    """ほぼ全観測が下限0・上限1に打ち切られたデータ（内側は`n_interior`件だけ）。
+    `[0, 1]`で両側打ち切りにすると`sigma`が区間幅の100倍近く以上に推定され、
+    非打ち切り区間が`sigma`に比べて極端に狭くなる。"""
+    n = 2000
+    x = [((i * 7919) % 1009) / 1009 for i in range(n)]
+    y = [
+        0.5 if i < n_interior else (0.0 if i % 2 == 0 else 1.0)
+        for i in range(n)
+    ]
+    return pl.DataFrame({"y": y, "x1": x})
+
+
+def test_expected_uncensored_raises_computation_error_for_narrow_interval():
+    """非打ち切り区間が`sigma`の1%未満（`sigma`が区間幅の100倍超）だと
+    `expected_uncensored`は数値的に信頼できない（`W`で割る量が桁落ち）ため、
+    `predict`・`augment`・`marginal_effects`が`ComputationError`になる。他の
+    3つのtargetは同じ当てはめで通常どおり計算できる（エラーは固有）。
+    `new_data`付きの`predict`も同様。"""
+    data = _narrow_interval_dataset(n_interior=5)
+    res = Tobit(
+        data, y="y", x=["x1"], options=TobitOptions(lower=0.0, upper=1.0)
+    ).fit()
+    assert 1.0 / res.sigma < 0.01
+    message = escaped(
+        msgs.UNCENSORED_INTERVAL_TOO_NARROW,
+        lower=rust_f64(0.0),
+        upper=rust_f64(1.0),
+        sigma=rust_f64(res.sigma),
+    )
+    new_data = pl.DataFrame({"x1": [0.2, 0.8]})
+
+    with pytest.raises(ComputationError, match=message):
+        res.predict(target="expected_uncensored")
+    with pytest.raises(ComputationError, match=message):
+        res.predict(target="expected_uncensored", new_data=new_data)
+    with pytest.raises(ComputationError, match=message):
+        res.augment(target="expected_uncensored")
+    with pytest.raises(ComputationError, match=message):
+        res.marginal_effects(target="expected_uncensored")
+
+    for target in ["expected_latent", "expected_observed", "prob_uncensored"]:
+        assert len(res.predict(target=target)) == data.height
+        assert len(res.predict(target=target, new_data=new_data)) == 2
+        assert res.augment(target=target).height == data.height
+        assert len(res.marginal_effects(target=target)) == 1
+
+
+def test_expected_uncensored_is_computed_when_the_interval_is_wide_enough():
+    """境界の内側（`sigma`が区間幅の100倍未満）では同じ構成でも`expected_uncensored`
+    が計算でき、値は非打ち切り区間`[0, 1]`に収まる。"""
+    data = _narrow_interval_dataset(n_interior=20)
+    res = Tobit(
+        data, y="y", x=["x1"], options=TobitOptions(lower=0.0, upper=1.0)
+    ).fit()
+    assert 1.0 / res.sigma >= 0.01
+    predicted = res.predict(target="expected_uncensored")
+    assert all(0.0 <= value <= 1.0 for value in predicted)
+    assert len(res.marginal_effects(target="expected_uncensored")) == 1
 
 
 def test_predict_unknown_target_raises(censored_dataset):

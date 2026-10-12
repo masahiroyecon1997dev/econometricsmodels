@@ -104,9 +104,9 @@ OLS（`OLSResult`、`engine_pybind/src/linear/ols.rs:137-191`）の項目を土�
 
 - **RE: ハウスマン検定は`fit()`内で自動計算**し、`REResult`に`hausman_statistic` /
   `hausman_p_value` / `hausman_df`として含める（詳細は[`re-spec.md`](./re-spec.md)3.7節）。
-  - **回帰ベース（補助回帰）版**（`plm::phtest(method = "aux")`相当）で、比較は常に1-way。
+  - **回帰ベース（補助回帰）版**（`plm::phtest(method = "aux")`相当）で、比較相手はRE本体と同じ個体効果構造のFE（1-wayはentity、2-wayはentity+time）。
     補助回帰のWald検定の共分散はRE本体の`cov_type`に連動する（`re-spec.md`3.7節）。
-  - **`hausman_*`が`None`になるのは、比較対象の傾き係数が0個の場合のみ**。補助回帰のランク落ち・
+  - **`hausman_*`が`None`になるのは、検定できる傾き係数が無い場合のみ**（1-wayは時間変化のある列が無い、2-wayは2-way within変換後に分散のある列が無い、または残りが識別できない列）。補助回帰のランク落ち・
     Wald検定の特異性・クラスター数不足など、計算自体が成立しない場合は`hausman_*`を`None`にせず
     `fit()`が失敗する（設計行列の多重共線性でエラーにするのと同じ方針。`re-spec.md`3.7節）。
 - **パネル固有R²（2.3節）**: `fit()`の結果本体に含める（別メソッド化しない）。

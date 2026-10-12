@@ -172,8 +172,11 @@
 //!   判定は列ごと。さらに、定数項・`X*`・前の`x̃`の線形結合になる`x̃_j`も外す（個体平均を説明変数に
 //!   加える相関ランダム効果（Mundlak型）では、`x*_j - x̃_j = (1-θ)·x̄_j`が加えた個体平均の列
 //!   （の`X*`）で表せて`x̃_j`が別名になる。`plm`の`lm`と同じ「列順で後ろの列を落とす」規則、
-//!   `independent_columns_in_order`、許容誤差`1e-7`。最終回帰が通った時点で`[1, X*]`は独立なため、
-//!   落ちるのは検定対象の`x̃`だけ）。`hausman_df`は残った列の数。
+//!   `independent_columns_in_order`、許容誤差`1e-7`。補助回帰の列は`[1, X*, X̃]`の順で`X̃`が最後のため、
+//!   落ちるのは検定対象の`x̃`だけで、`X*`の列同士が従属なら補助回帰は特異のまま
+//!   `PanelError::HausmanTestFailed`で失敗する。最終回帰の定数列は不均衡パネルでは`1-θ_i`で、補助回帰の
+//!   未変換の`1`とは異なるため、最終回帰が通っても`[1, X*]`が従属になる人工的な入力はありうる）。
+//!   `hausman_df`は残った列の数。
 //! - **`cov_type`連動**: 補助回帰のWald検定の共分散はRE本体の`cov_type`に対応させる
 //!   （既定の`cluster`ならcluster-robust版のロバストHausman検定、`classical`なら
 //!   帰無仮説のもとでREが完全に効率的という前提の古典版）。専用オプションは設けない。
@@ -750,8 +753,9 @@ fn two_way_variance_components(
 /// どちらを落としても残差平方和とランクは変わらないため`σ_u²`は同じで、後ろの列を落とす。
 ///
 /// # Errors
-/// 単位数が`K_b + 1`以下、または落とした後の設計行列が特異なら`PanelError::BetweenRegressionFailed`
-/// （`kind`が個体平均・時点平均のどちらの回帰かを持つ）。
+/// 単位数が`K_b + 1`以下なら`PanelError::BetweenRegressionFailed`（`kind`が個体平均・時点平均の
+/// どちらの回帰かを持つ）。別名の列を落とした後の設計行列が特異になることは通常無い（相対`1e-7`で落とすので、
+/// `least_squares`の判定（約`1e-15`）より厳しい）が、非有限値などで失敗したときも同じバリアントで返す。
 fn between_ssr_and_df(
     means: &EntityMeans,
     x_scales: &[f64],
@@ -786,7 +790,8 @@ fn between_ssr_and_df(
     });
     let y = Mat::from_fn(n_units, 1, |i, _| means.y[i]);
     // `least_squares`が返しうるエラーは`RankDeficient`（特異な設計行列）だけのため、
-    // `SingularMatrix`への対応づけは損失が無い。
+    // `SingularMatrix`への対応づけは損失が無い。別名の列は上で落としてあり、残りは前の列に対する
+    // 相対残差が`1e-7`より大きいので、ここで特異と判定される入力は通常無い（防御的なエラー）。
     let fit = least_squares(&design, &y).map_err(|_| PanelError::BetweenRegressionFailed {
         means: kind,
         source: LeastSquaresError::SingularMatrix,
@@ -1095,7 +1100,8 @@ fn re_hausman_test(
     // 残った`x̃_j`のうち、定数項・`X*`・前の`x̃`の線形結合になっている列も外す。個体平均を説明変数に
     // 加える相関ランダム効果（Mundlak）の指定では、`x*_j - x̃_j = (1-θ)·x̄_j`が加えた個体平均の列
     // （の`X*`）で表せるため、`x̃_j`が別名になる。落とすのは検定対象の`x̃`側だけ（列順で後ろの列を
-    // 落とす規則で、最終回帰が通った時点で`[1, X*]`は独立なため、従属になりうるのは`x̃`だけ）。
+    // 落とす規則で、`X̃`は列順で最後のため`X*`の列は落ちない。`X*`の列同士が従属なら補助回帰が
+    // 特異になって`HausmanTestFailed`）。
     let ones = vec![1.0; y_star.len()];
     let mut candidates: Vec<&[f64]> = vec![ones.as_slice()];
     candidates.extend(x_star.iter().map(Vec::as_slice));
@@ -2900,6 +2906,36 @@ mod tests {
             "hausman statistic",
         );
         assert_eq!(with_bar.estimator().params().nrows(), 4);
+    }
+
+    #[test]
+    fn mundlak_cluster_prevalidation_counts_the_identified_auxiliary_slopes() {
+        // 補助回帰の傾き係数は`X*`の3個と別名を除いた`x̃`の1個で4個。クラスター数が5なら成功し、
+        // 4なら補助回帰の事前検証で`HausmanTestFailed`になる（別名を数えると5個になり、
+        // クラスター数5でも失敗してしまう）。RE本体の事前検証（傾き3個）は両方で通る。
+        let fit = |labels: &[&str]| {
+            ReEstimator::fit(
+                mundlak_input(&["x1", "x2", "x1bar"], false),
+                ReEffects::OneWay,
+                ReCovType::Cluster {
+                    groups: Some(GroupCodes::from_labels_without_keys(&strings(labels))),
+                },
+                0.95,
+            )
+        };
+        let five = [
+            "a", "a", "a", "a", "a", "b", "b", "b", "b", "c", "c", "c", "c", "d", "d", "d", "d",
+            "e", "e", "e", "e", "e", "e", "e",
+        ];
+        assert_eq!(fit(&five).unwrap().hausman_df(), Some(1));
+        let four: Vec<&str> = five
+            .iter()
+            .map(|g| if *g == "e" { "d" } else { g })
+            .collect();
+        assert!(matches!(
+            fit(&four),
+            Err(PanelError::HausmanTestFailed { .. })
+        ));
     }
 
     #[test]

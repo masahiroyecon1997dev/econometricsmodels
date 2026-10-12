@@ -17,8 +17,10 @@ import pytest
 from _assertions import assert_close
 from _constants import DATA_DIR
 from econometricsmodels import (
+    FE,
     RE,
     ComputationError,
+    FEOptions,
     REOptions,
     ValidationError,
 )
@@ -132,6 +134,22 @@ def test_two_way_means_in_both_directions():
         )
 
 
+def test_two_way_means_of_every_regressor_leave_nothing_to_test():
+    """2-wayで全ての時間変化列の個体平均・時点平均を加えると、ハウスマン検定できる列が残らず
+    `hausman_*`は`None`（推定は成功する）。"""
+    df = _frame().with_columns(
+        x2_tbar=pl.col("x2").mean().over("time"),
+    )
+    res = _fit(
+        ["x1", "x2", "x1_bar", "x2_bar", "x1_tbar", "x2_tbar"],
+        REOptions(cov_type="classical", time="time"),
+        df,
+    )
+    assert res.hausman_df is None
+    assert res.hausman_statistic is None
+    assert res.hausman_p_value is None
+
+
 def test_cluster_validation_counts_the_identified_columns():
     """クラスターロバストなハウスマン検定は、補助回帰の傾き係数の数（別名を除く）より多い
     クラスターを要する。`x1`・`x2`・`x1_bar`では`x*`の3個と`x̃2`の1個で4個、
@@ -155,21 +173,87 @@ def test_cluster_validation_counts_the_identified_columns():
 
 
 @pytest.mark.parametrize(
-    "x",
+    ("x", "stage"),
     [
-        pytest.param(["x1", "x2", "x3", "x1_bar"], id="within_collinear"),
-        pytest.param(["x1", "x2", "x1_bar", "x1_bar2"], id="repeated_mean"),
+        pytest.param(
+            ["x1", "x2", "x3", "x1_bar"],
+            "within-transformed",
+            id="within_collinear",
+        ),
+        pytest.param(
+            ["x1", "x2", "x1_bar", "x1_bar2"],
+            "quasi-demeaned",
+            id="repeated_mean",
+        ),
     ],
 )
-def test_collinear_designs_are_still_computation_errors(x):
+def test_collinear_designs_are_still_computation_errors(x, stage):
     """別名を落とすのはbetween回帰とハウスマン補助回帰だけで、内部のwithin回帰と最終回帰は
-    全列を残すため、完全共線は`ComputationError`のまま。"""
+    全列を残すため、完全共線は`ComputationError`のまま。失敗するのは、within変動のある列同士
+    なら内部のwithin回帰、個体平均とその倍数なら最終回帰（準偏差変換後）。"""
     df = _frame().with_columns(
         x3=2.0 * pl.col("x1") + 3.0 * pl.col("x2"),
         x1_bar2=2.0 * pl.col("x1_bar"),
     )
-    with pytest.raises(ComputationError):
+    with pytest.raises(ComputationError, match=stage):
         _fit(x, df=df)
+
+
+def test_all_means_add_up_to_the_fixed_effects_slopes():
+    """全ての時間変化列の個体平均を加えたRE（Mundlak）の時間変化列の係数は、FEの係数と一致する
+    （個体平均の係数がbetweenとwithinの差を吸収する）。plm・手計算に依存しない性質で、
+    不均衡パネル・既定のSwamy-Aroraで確かめる。"""
+    df = pl.read_csv(DATA_DIR / "fe_unbalanced.csv").with_columns(
+        x1_bar=pl.col("x1").mean().over("entity"),
+        x2_bar=pl.col("x2").mean().over("entity"),
+    )
+    re_res = _fit(["x1", "x2", "x1_bar", "x2_bar"], df=df)
+    fe_res = FE(
+        df,
+        y="y",
+        x=["x1", "x2"],
+        entity="entity",
+        options=FEOptions(cov_type="classical"),
+    ).fit()
+    for name in ("x1", "x2"):
+        assert_close(
+            re_res.params[name],
+            fe_res.params[name],
+            name,
+            rtol=1e-8,
+            atol=1e-10,
+        )
+
+
+def test_entity_count_boundary_uses_the_identified_columns():
+    """個体数が傾き係数の数+1（自由度ちょうど0のbetween回帰）では、別名を落とした後の
+    列数で判定する。`x1`・`x2`・`x1_bar`は別名を落とすと3列で`ValidationError`、
+    `x1`・`x1_bar`は2列（`hausman_*`は`None`）で推定できる。"""
+    df = pl.DataFrame(
+        {
+            "entity": [0] * 5 + [1] * 5 + [2] * 5,
+            "x1": [
+                0.3, -1.2, 0.8, 1.9, -0.4,
+                1.1, 0.2, -0.7, 0.5, -1.6,
+                -0.9, 1.4, 0.6, -0.2, 0.1,
+            ],
+            "x2": [
+                1.5, 0.1, -0.8, 0.9, 0.4,
+                -1.1, 0.7, 0.3, -0.5, 1.2,
+                0.2, -0.6, 1.3, -1.0, 0.8,
+            ],
+            "y": [
+                1.0, -0.5, 2.1, 3.0, 0.2,
+                0.4, 1.7, -0.3, 1.1, -1.4,
+                -0.8, 2.2, 0.9, 0.3, 0.6,
+            ],
+        }
+    ).with_columns(x1_bar=pl.col("x1").mean().over("entity"))  # fmt: skip
+    with pytest.raises(ValidationError, match="between-regression"):
+        _fit(["x1", "x2", "x1_bar"], df=df)
+    res = _fit(["x1", "x1_bar"], df=df)
+    assert res.hausman_df is None
+    assert res.hausman_statistic is None
 
 
 @pytest.mark.parametrize("variance_method", ["swamy_arora", "wallace_hussain"])

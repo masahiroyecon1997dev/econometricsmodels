@@ -105,36 +105,125 @@ pub const COLLINEARITY_TOLERANCE: f64 = 1e-7;
 /// `tolerance`倍以下なら従属とみなす（列ごとの一様スケーリングに対して不変）。ピボットの
 /// 並べ替えをしないため、対称な別名（`x`と`x̄`が同じ）では後ろの列が落ちる。`checked_col_piv_qr`
 /// （全列がフルランクかの判定）と違い、どの列を落とすかを呼び出し側の列順で決めたいときに使う。
-/// 全ゼロの列と、非有限値を含む列は従属として扱う。直交化は2回行い（再直交化）、近共線な列でも
-/// 射影後の残差の丸め誤差を抑える。
+/// 全ゼロの列と、非有限値を含む列は従属として扱う（呼び出し側は有限値だけを渡す前提）。
+/// 直交化はGram-Schmidtで、1回の射影で残差のノルムが元の0.7倍を下回ったとき（近共線）だけ
+/// 再直交化する（"twice is enough"）。通常の入力は1回で済み、近共線な列でも射影後の残差の
+/// 丸め誤差を抑える。
 ///
 /// 全ての列は同じ長さでなければならない（呼び出し側の契約）。
 pub fn independent_columns_in_order(columns: &[&[f64]], tolerance: f64) -> Vec<bool> {
-    let mut basis: Vec<Vec<f64>> = Vec::new();
+    // 再直交化を行うかの閾値（1回の射影でノルムがこの割合未満に縮んだら、丸め誤差が効いている）。
+    const REORTHOGONALIZE_BELOW: f64 = 0.7;
+    let n_rows = columns.first().map_or(0, |c| c.len());
+    debug_assert!(
+        columns.iter().all(|c| c.len() == n_rows),
+        "all columns must have the same length (caller contract)"
+    );
+    // 全列が明らかに独立なら（通常の入力）、Gram行列だけで判定を終える。
+    if gram_screen_all_independent(columns, tolerance) {
+        return vec![true; columns.len()];
+    }
+    let mut basis: Vec<Vec<f64>> = Vec::with_capacity(columns.len());
     columns
         .iter()
         .map(|col| {
-            let norm = col.iter().map(|v| v * v).sum::<f64>().sqrt();
+            let norm = dot(col, col).sqrt();
             if !norm.is_finite() || norm == 0.0 {
                 return false;
             }
             let mut residual = col.to_vec();
+            let mut before = norm;
             for _ in 0..2 {
                 for q in &basis {
-                    let dot: f64 = residual.iter().zip(q).map(|(a, b)| a * b).sum();
+                    let coefficient = dot(&residual, q);
                     for (r, b) in residual.iter_mut().zip(q) {
-                        *r -= dot * b;
+                        *r -= coefficient * b;
                     }
                 }
+                let after = dot(&residual, &residual).sqrt();
+                if after >= REORTHOGONALIZE_BELOW * before || after <= tolerance * norm {
+                    before = after;
+                    break;
+                }
+                before = after;
             }
-            let residual_norm = residual.iter().map(|v| v * v).sum::<f64>().sqrt();
-            if residual_norm <= tolerance * norm {
+            if before <= tolerance * norm {
                 return false;
             }
-            basis.push(residual.iter().map(|v| v / residual_norm).collect());
+            let scale = 1.0 / before;
+            for r in &mut residual {
+                *r *= scale;
+            }
+            basis.push(residual);
             true
         })
         .collect()
+}
+
+/// Gram行列のCholesky分解で、全列が前の列に対して十分に独立（射影残差のノルムが元の列のノルムの
+/// `SCREEN`倍より大きい）なら`true`。判定が曖昧（近共線・従属・非有限値）なら`false`を返し、
+/// 呼び出し側が厳密なGram-Schmidtで決める。Gram行列は条件数を2乗するため、閾値から十分離れた
+/// （`SCREEN = 1e-3`、残差の2乗比で`1e-6`）列だけを独立と確定させる。行を小さなブロックに分けて
+/// 全列の内積をまとめて計算するので、列を何度も走査するGram-Schmidtよりメモリ転送が少ない。
+fn gram_screen_all_independent(columns: &[&[f64]], tolerance: f64) -> bool {
+    const SCREEN: f64 = 1.0e-3;
+    const BLOCK_ROWS: usize = 2048;
+    let p = columns.len();
+    if p == 0 {
+        return true;
+    }
+    if tolerance >= SCREEN / 10.0 {
+        return false;
+    }
+    let n_rows = columns[0].len();
+    let mut gram = vec![0.0_f64; p * p];
+    for start in (0..n_rows).step_by(BLOCK_ROWS) {
+        let end = (start + BLOCK_ROWS).min(n_rows);
+        for a in 0..p {
+            let col_a = &columns[a][start..end];
+            for b in 0..=a {
+                gram[a * p + b] += dot(col_a, &columns[b][start..end]);
+            }
+        }
+    }
+    // 下三角のCholesky因子（`factor[j][..j]`が前の列への係数、対角が残差のノルム）。
+    let mut factor = vec![0.0_f64; p * p];
+    for j in 0..p {
+        let diag = gram[j * p + j];
+        if !diag.is_finite() || diag <= 0.0 {
+            return false;
+        }
+        let mut squared_projection = 0.0;
+        for i in 0..j {
+            let mut value = gram[j * p + i];
+            for l in 0..i {
+                value -= factor[j * p + l] * factor[i * p + l];
+            }
+            let coefficient = value / factor[i * p + i];
+            factor[j * p + i] = coefficient;
+            squared_projection += coefficient * coefficient;
+        }
+        let residual_squared = diag - squared_projection;
+        if !residual_squared.is_finite() || residual_squared <= SCREEN * SCREEN * diag {
+            return false;
+        }
+        factor[j * p + j] = residual_squared.sqrt();
+    }
+    true
+}
+
+/// 内積（4本の部分和で足し、自動ベクトル化しやすくする）。
+fn dot(a: &[f64], b: &[f64]) -> f64 {
+    let mut lanes = [0.0_f64; 4];
+    let (a_chunks, a_tail) = a.as_chunks::<4>();
+    let (b_chunks, b_tail) = b.as_chunks::<4>();
+    for (x, y) in a_chunks.iter().zip(b_chunks) {
+        for l in 0..4 {
+            lanes[l] += x[l] * y[l];
+        }
+    }
+    let tail: f64 = a_tail.iter().zip(b_tail).map(|(x, y)| x * y).sum();
+    lanes.iter().sum::<f64>() + tail
 }
 
 #[cfg(test)]
@@ -210,6 +299,48 @@ mod tests {
     }
 
     #[test]
+    fn independent_columns_in_order_switches_at_the_relative_tolerance() {
+        // 中心化した`x`と、それに直交する`w`（ノルム2）を`eps`だけ足した列。切片・`x`に射影した
+        // 残差の相対ノルムは`2·eps / ||x + eps·w||`（約`0.378·eps`）で、許容誤差1e-7をまたぐ。
+        let ones = [1.0; 6];
+        let x = [-3.0, -2.0, -1.0, 1.0, 2.0, 3.0];
+        let w = [1.0, -1.0, 0.0, 0.0, -1.0, 1.0];
+        let near = |eps: f64| -> Vec<f64> { x.iter().zip(&w).map(|(a, b)| a + eps * b).collect() };
+        for (eps, kept) in [
+            (1.0e-3, true),
+            (1.0e-6, true),
+            (1.0e-7, false),
+            (1.0e-9, false),
+        ] {
+            let column = near(eps);
+            assert_eq!(
+                independent_columns_in_order(&[&ones, &x, &column], COLLINEARITY_TOLERANCE),
+                vec![true, true, kept],
+                "eps={eps}"
+            );
+        }
+    }
+
+    #[test]
+    fn independent_columns_in_order_handles_columns_with_a_large_mean() {
+        // 絶対年のように平均が大きく変動が小さい列は、切片に対する射影後の相対残差が小さくなる
+        // （約`sd/|mean|`）が、1e-7よりは大きいので残る。丸め誤差だけ違う複製は落ちる。
+        let ones = [1.0; 10];
+        let year: Vec<f64> = (0..10).map(|i| 2000.0 + f64::from(i)).collect();
+        let jittered: Vec<f64> = year.iter().map(|v| v * (1.0 + 1.0e-15)).collect();
+        assert_eq!(
+            independent_columns_in_order(&[&ones, &year, &jittered], COLLINEARITY_TOLERANCE),
+            vec![true, true, false]
+        );
+        // 変動が平均の1e-8倍しかない列は、非中心化ノルムに対する相対値で従属とみなされる。
+        let almost_constant: Vec<f64> = (0..10).map(|i| 1.0e9 + f64::from(i)).collect();
+        assert_eq!(
+            independent_columns_in_order(&[&ones, &almost_constant], COLLINEARITY_TOLERANCE),
+            vec![true, false]
+        );
+    }
+
+    #[test]
     fn independent_columns_in_order_treats_zero_and_non_finite_columns_as_dependent() {
         let ones = [1.0; 3];
         let zeros = [0.0; 3];
@@ -279,5 +410,51 @@ mod tests {
         let v = Mat::from_fn(2, 2, |i, j| if i == j { [1e12, 1e-6][i] } else { 0.0 });
         let result = ensure_well_conditioned_symmetric_matrix(&v, 2, "test matrix");
         assert!(matches!(result, Err(CommonError::ComputationFailed(_))));
+    }
+
+    /// 返す判定が、ランク（`checked_col_piv_qr`）・張る空間と一致する。
+    mod proptests {
+        use super::*;
+        use crate::shared::least_squares::least_squares;
+        use proptest::collection;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(64))]
+
+            /// 独立な列の後ろに、それらの線形結合の列を置いた入力で、結合の列だけが落ち、残した列は
+            /// フルランクで、落とした列は残した列の張る空間にある。
+            #[test]
+            fn flags_match_the_rank_and_the_span(
+                n_rows in 8..=14usize,
+                base in collection::vec(collection::vec(-5.0f64..5.0, 14), 2..=4),
+                coefficients in collection::vec(-3.0f64..3.0, 4),
+            ) {
+                let k = base.len();
+                let base: Vec<Vec<f64>> = base.iter().map(|c| c[..n_rows].to_vec()).collect();
+                let combo: Vec<f64> = (0..n_rows)
+                    .map(|i| (0..k).map(|j| coefficients[j] * base[j][i]).sum())
+                    .collect();
+                prop_assume!(combo.iter().any(|v| v.abs() > 1.0e-3));
+                let mut columns: Vec<Vec<f64>> = base.clone();
+                columns.push(combo);
+                let slices: Vec<&[f64]> = columns.iter().map(Vec::as_slice).collect();
+                let flags = independent_columns_in_order(&slices, COLLINEARITY_TOLERANCE);
+                prop_assert_eq!(flags.len(), k + 1);
+                prop_assert!(flags[..k].iter().all(|&f| f), "base columns kept: {:?}", flags);
+                prop_assert!(!flags[k], "combination dropped: {:?}", flags);
+
+                let kept = Mat::from_fn(n_rows, k, |i, j| base[j][i]);
+                prop_assert!(checked_col_piv_qr(&kept).is_ok());
+                let target = Mat::from_fn(n_rows, 1, |i, _| columns[k][i]);
+                let fit = least_squares(&kept, &target).unwrap();
+                let residual_norm = (0..n_rows)
+                    .map(|i| fit.residuals.get(i, 0).powi(2))
+                    .sum::<f64>()
+                    .sqrt();
+                let norm = columns[k].iter().map(|v| v * v).sum::<f64>().sqrt();
+                prop_assert!(residual_norm <= 1.0e-8 * norm);
+            }
+        }
     }
 }

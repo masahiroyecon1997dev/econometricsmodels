@@ -105,6 +105,13 @@ class Case:
     # Mundlak型）。平均は入力の全行から求め、`x`に列名で入れる。
     means: tuple[str, ...] = ()
     time_means: tuple[str, ...] = ()
+    # `<列>_near`: 個体平均に、個体ごとに定数の小さな値（相対的な大きさ`scale`）を足した列。
+    # 個体平均の回帰・ハウスマン補助回帰で別名と判定する許容誤差（相対`1e-7`）の両側を、plmの
+    # `lm`と比べるために使う。`(列名, scale)`の組。
+    near_means: tuple[tuple[str, float], ...] = ()
+    # plmのフィクスチャを持たず、手計算とだけ比べる推定法（plmは不均衡のSwamy-Aroraを
+    # linearmodels準拠の本実装と別の式で推定するため、plmとは比べられない）。
+    hand_only_methods: tuple[str, ...] = ()
     # `AMEMIYA_REJECTED_CASES`で、`ValidationError`のメッセージに載る列名（", "区切り）。
     rejected_columns: str = ""
 
@@ -251,6 +258,7 @@ ONE_WAY_CASES = [
         WALHUS,
         full=True,
         means=("x1",),
+        hand_only_methods=("swamy_arora",),
     ),
     Case(
         "ow_mundlak_time_invariant",
@@ -258,6 +266,24 @@ ONE_WAY_CASES = [
         ("x1", "x2", "z1", "x1_bar"),
         WALHUS,
         means=("x1",),
+        hand_only_methods=("swamy_arora",),
+    ),
+    # 個体平均に近い列（相対`1e-3`は別名と判定せず、`1e-9`は別名と判定する。許容誤差`1e-7`の両側。
+    # 相対`1e-4`以下の近さではロバスト共分散の補助回帰が数値的にほぼ特異になり`ComputationError`に
+    # なるため、別名でない側は1e-3にする）。
+    Case(
+        "ow_mundlak_near_kept",
+        "fe_baseline",
+        ("x1", "x2", "x1_near"),
+        SWAR_WALHUS,
+        near_means=(("x1", 1.0e-3),),
+    ),
+    Case(
+        "ow_mundlak_near_dropped",
+        "fe_baseline",
+        ("x1", "x2", "x1_near"),
+        SWAR_WALHUS,
+        near_means=(("x1", 1.0e-9),),
     ),
     Case(
         "ow_mundlak_wagepan",
@@ -386,6 +412,14 @@ TWO_WAY_CASES = [
         means=("x1",),
         time_means=("x1",),
     ),
+    Case(
+        "tw_mundlak_wagepan",
+        WAGEPAN_CSV,
+        (*WAGEPAN_X, "married_bar"),
+        SWAR_WALHUS,
+        two_way=True,
+        means=("married",),
+    ),
     # 個体効果なし（`σ_u²`が0に切り上げられる）・時点効果なし（`σ_λ²`が0に切り上げられる）。
     Case(
         "tw_no_entity_effect",
@@ -486,7 +520,17 @@ AMEMIYA_REJECTED_CASES = [
 
 def with_mean_columns(df: pl.DataFrame, case: Case) -> pl.DataFrame:
     """`case.means`の個体平均`<列>_bar`・`case.time_means`の時点平均`<列>_tbar`を加える。"""
+    # 個体ごとに定数のずれ（-1〜1の7値）。個体平均の回帰・補助回帰で別名に近い列を作る。
+    offset = (pl.col(case.entity_col).rank("dense") % 7).cast(
+        pl.Float64
+    ) / 3.0 - 1.0
     return df.with_columns(
+        *(
+            (pl.col(c).mean().over(case.entity_col) + scale * offset).alias(
+                f"{c}_near"
+            )
+            for c, scale in case.near_means
+        ),
         *(
             pl.col(c).mean().over(case.entity_col).alias(f"{c}_bar")
             for c in case.means
@@ -508,7 +552,7 @@ def _csv_path(case: Case, tmp: Path) -> Path:
             pl.col(WAGEPAN_TIME).alias(WAGEPAN_TREND)
         )
     else:
-        if not (case.means or case.time_means):
+        if not (case.means or case.time_means or case.near_means):
             return DATA_DIR / f"{case.csv}.csv"
         frame = pl.read_csv(DATA_DIR / f"{case.csv}.csv")
     path = tmp / f"{case.name}.csv"
@@ -597,7 +641,7 @@ def build_fixtures() -> dict:
         "plm_version": plm_version,
         "plm_call": (
             "plm(formula, data, model='random', effect='individual' | 'twoways', "
-            "random.method='walhus' | 'amemiya')"
+            "random.method='swar' | 'walhus' | 'amemiya')"
         ),
         "r_scripts": [
             "benchmark/panel/run_plm_benchmark.R",
@@ -605,13 +649,18 @@ def build_fixtures() -> dict:
             "benchmark/panel/references/run_plm_re_two_way_benchmark.R",
         ],
         "note": (
-            "variance_method（Wallace-Hussain・Amemiya）の単一リファレンスplm。"
+            "variance_method（Wallace-Hussain・Amemiya。バランスの相関ランダム効果のケースだけ"
+            "Swamy-Arora）の単一リファレンスplm。"
             "分散成分はercompの値、係数・標準誤差・F統計量はplmの値、t値・p値・信頼区間は"
             "run_plm_benchmark.R・run_plm_re_two_way_benchmark.Rと同じ規約（t分布）で"
             "計算し直した値、ハウスマン検定はphtest(method='aux')の補助回帰を再現して"
             "係数を名前で選んだ値。バランスパネルは閉形式（dfcor=1）、不均衡の1-wayは"
             "トレース項の式（dfcor=3）。Amemiyaはwithin変動の無い列を含む入力を持たない"
-            "（本実装は拒否する）。dkのバンド幅は本実装の既定式をmaxlagに渡している。"
+            "（本実装は拒否する）。相関ランダム効果（Mundlak型。説明変数に個体平均`<列>_bar`・時点平均"
+            "`<列>_tbar`・個体平均に近い列`<列>_near`を加える）のケースでは、plmの`lm`が別名として"
+            "落とした補助回帰の係数を除いて、残った`X̃`だけを名前で選んで検定した値"
+            "（phtest(method='aux')は係数を位置で選ぶため参照にできない）。"
+            "dkのバンド幅は本実装の既定式をmaxlagに渡している。"
             "wagepanはyear列の複製yrを時点トレンドに使う（時点列そのものは説明変数にできない）。"
         ),
     }

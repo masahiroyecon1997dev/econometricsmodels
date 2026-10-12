@@ -121,8 +121,9 @@ class RE:
                 Driscoll-Kraay covariance has rank at most T-1, so the
                 Hausman test cannot be computed),
                 `cov_type="cluster"` with no more clusters than the
-                identified slopes of the Hausman auxiliary regression, an unknown
-                `variance_method`, or `variance_method="amemiya"` with a
+                identified slopes of the Hausman auxiliary regression,
+                an unknown `variance_method`, or
+                `variance_method="amemiya"` with a
                 regressor that has no within variation (time-invariant;
                 for two-way effects, varying in at most one
                 dimension)). A subclass of `ValueError`.
@@ -130,7 +131,12 @@ class RE:
                 computation (e.g. a singular quasi-demeaned design
                 matrix, in particular a time-invariant regressor that
                 is constant across entities or collinear with another
-                time-invariant regressor, a singular pooled first-stage
+                time-invariant regressor, or a regressor together with
+                a multiple of itself or of its entity mean; the
+                between and Hausman auxiliary regressions drop such
+                aliased columns, the final regression does not, so
+                the failure comes from the final regression; a
+                singular pooled first-stage
                 regression with `variance_method="wallace_hussain"`, or
                 a non-positive estimate of σ_ε² with `"wallace_hussain"`
                 or `"amemiya"`). A subclass of `RuntimeError`.
@@ -182,12 +188,14 @@ class REResults:
     So is the within-transformed copy of a regressor whose entity mean
     (or, for two-way effects, time mean) is also a regressor, as in a
     correlated-random-effects (Mundlak) specification: it is a linear
-    combination of the constant and the other columns, and, as in R's
-    `lm`, the later aliased column is dropped (only within-transformed
-    copies are dropped; a perfectly collinear design still raises
-    `ComputationError`). A time-invariant regressor (constant over time within every entity)
-    is allowed in RE and is never tested. All three values are `None`
-    only when no coefficient can be tested. If the auxiliary regression
+    combination of the constant, the quasi-demeaned regressors and the
+    earlier within-transformed copies, and, as in R's `lm`, the later
+    aliased column is dropped (relative tolerance `1e-7`). Only
+    within-transformed copies are dropped; a perfectly collinear
+    design still raises `ComputationError`. A time-invariant regressor
+    (constant over time within every entity) is allowed in RE and is
+    never tested. All three values are `None` only when no coefficient
+    can be tested. If the auxiliary regression
     cannot be computed (rank-deficient design, or a structurally
     singular robust covariance such as too few clusters or periods for
     the auxiliary slopes), `fit()` raises
@@ -489,7 +497,9 @@ class REResults:
         auxiliary regression's constant is left untransformed, as in
         `plm::phtest`. `None` when no coefficient can be tested (no
         regressor varies after the within transformation, or the
-        remaining ones are not identified); see the class docstring. If
+        remaining ones are aliased, for example because the entity
+        mean of every time-varying regressor is also a regressor); see
+        the class docstring. If
         the auxiliary regression cannot be computed, `fit()` raises
         instead."""
         return self._raw.hausman_statistic
@@ -506,8 +516,13 @@ class REResults:
         """Degrees of freedom of the Hausman test (number of compared
         slope coefficients: the regressors that still vary after the
         within transformation and can be identified, which is
-        `df_model - 1` when every regressor does). `None`
-        under the same conditions as `hausman_statistic`."""
+        `df_model - 1` when every regressor does). A
+        within-transformed copy is not counted when it is aliased: its
+        quasi-demeaned counterpart differs from it by a constant, or
+        the regressor's entity (or, for two-way effects, time) mean is
+        also a regressor (correlated random effects), so `hausman_df`
+        is then smaller than the number of time-varying regressors.
+        `None` under the same conditions as `hausman_statistic`."""
         return self._raw.hausman_df
 
     def params_table(self) -> list[dict[str, float | str]]:

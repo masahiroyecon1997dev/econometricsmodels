@@ -3,7 +3,9 @@
 `variance_method`は`plm`の`random.method`（`walhus`・`amemiya`）に対応し、参照実装は`plm`だけ
 （`linearmodels.RandomEffects`はSwamy-Arora（既定）のみ。単一リファレンスの例外、
 `docs/guide/verification.md`）。Swamy-Aroraの検証は`test_re_reference.py`・
-`test_re_time_invariant.py`・`test_re_two_way_reference.py`が担う。
+`test_re_time_invariant.py`・`test_re_two_way_reference.py`が担い、ここでは相関ランダム効果
+（Mundlak型。説明変数にその個体平均・時点平均を加える指定）のバランスのケースだけが
+`swamy_arora`もplmと比べる（`test_re_mundlak.py`が列順・自由度などの性質を確かめる）。
 
 1. **plm**（`re_variance_method.json`、
    `benchmark/panel/fixtures/generate_re_variance_method_fixtures.py`）: 1-way（バランス・
@@ -12,7 +14,9 @@
    ハウスマン検定を比べる。代表ケースは全`cov_type`。不均衡の1-wayはplmのトレース項の式、
    バランスは閉形式で、両者は値が異なる（plmの切り替えに従う）。
 2. **仕様どおりの独立な手計算**（`_re_oracle.py`）: plmのソースどおりに観測ごとの行列で書いた
-   分散成分（`first_stage_variance_components`）を含め、全統計量を比べる。
+   分散成分（`first_stage_variance_components`）を含め、全統計量を全ケース×全`cov_type`で比べる。
+   別名の列を落とすランク判定も、本実装と別に`lstsq`の残差で書いてある。plmと比べられない
+   不均衡の相関ランダム効果の`swamy_arora`（`Case.hand_only_methods`）は手計算だけが参照。
 3. **statsmodels**: plmの分散成分から求めた重みで準偏差変換した`y`・`X`（切片込み）への
    OLSが計算する対数尤度・AIC・BICと、クラスターロバストの標準誤差・t値・p値・信頼区間・
    傾き係数の同時F検定（自由度`G-1`）を、本実装と比べる（plmが持たない値・plmと規約が
@@ -82,11 +86,13 @@ ATOL = _TOL["atol"]
 RTOL_P_VALUE = _TOL["rtol_p_value"]
 RTOL_ABSOLUTE_YEAR = _TOL["rtol_absolute_year"]
 
-# 絶対年の列を含む入力（丸め誤差が拡大する統計量だけ許容誤差を緩める）。
+# 絶対年の列を含む入力・個体平均に相対`1e-3`まで近い列を含む入力（補助回帰の設計行列の
+# 条件数が大きく、丸め誤差が拡大する統計量だけ許容誤差を緩める）。
 ABSOLUTE_YEAR_CASES = {
     "ow_absolute_year",
     "tw_absolute_year",
     "tw_wagepan_educ_trend",
+    "ow_mundlak_near_kept",
 }
 
 _ONE_WAY_PLM_KEYS = (
@@ -202,7 +208,7 @@ PLM_PARAMS = [
 HAND_PARAMS = [
     pytest.param(case, method, cov_type, id=f"{case.name}-{method}-{cov_type}")
     for case in CASES
-    for method in case.methods
+    for method in (*case.methods, *case.hand_only_methods)
     for cov_type in ALL_COV_TYPES
 ]
 # 分散成分の手計算（`first_stage_variance_components`）はWallace-HussainとAmemiyaだけ。

@@ -70,10 +70,18 @@ zero. Its properties:
   Stata/R-style small-sample corrections as RE's own standard errors.
 - All three are `None` only when there are no slope coefficients to compare. If the auxiliary
   regression cannot be computed (rank-deficient design, or a robust covariance that is
-  structurally singular such as `cov_type="cluster"` with no more clusters than the `2k`
-  auxiliary slopes, or `"dk"` with too few periods), `fit()` raises `ValidationError` /
-  `ComputationError` instead, like a multicollinear design matrix. Use `cov_type="classical"`
-  or more clusters in that case. See `REResults`'s docstring.
+  structurally singular such as `cov_type="cluster"` with no more clusters than the
+  identified auxiliary slopes (`2k` at most), or `"dk"` with too few periods), `fit()` raises
+  `ValidationError` / `ComputationError` instead, like a multicollinear design matrix. Use
+  `cov_type="classical"` or more clusters in that case. See `REResults`'s docstring.
+- Correlated random effects (Mundlak): a regressor may be included together with its entity
+  mean (and, for two-way effects, its time mean). The between regressions and the Hausman
+  auxiliary regression drop aliased columns by rank, like R's `lm` (the later column, relative
+  tolerance `1e-7`), so the within-transformed copy of such a regressor is not tested and
+  `hausman_df` counts only the identified copies; all three values are `None` when every
+  time-varying regressor's mean is included. The final regression keeps every column, so a
+  perfectly collinear design still raises `ComputationError`. `variance_method="amemiya"`
+  rejects the time-invariant mean columns.
 
 ## Panel R² and `df_resid`
 

@@ -242,11 +242,11 @@ impl REOptions {
 /// The Hausman test (`hausman_statistic` / `hausman_p_value` / `hausman_df`) is computed
 /// automatically inside `fit()` and included directly here (unlike FE's
 /// `fixed_effects()`, RE has no separate diagnostic method; see `panel-common.md`
-/// section 2.4). All three are `None` when there is no regressor left to test (every
-/// regressor is time-invariant, or varies only over time on a balanced panel; for two-way
-/// effects, every regressor varies in at most one dimension, or the within-transformed copy of
-/// every time-varying regressor is aliased because its entity or time mean is also a
-/// regressor, as in a correlated-random-effects specification). If the comparison cannot be
+/// section 2.4). All three are `None` when there is no regressor left to test: every
+/// regressor is time-invariant, or varies only over time on a balanced panel, or the
+/// within-transformed copy of every time-varying regressor is aliased (its entity or time mean
+/// is also a regressor, as in a correlated-random-effects specification); for two-way effects,
+/// also when every regressor varies in at most one dimension. If the comparison cannot be
 /// computed, `fit()` fails instead.
 // `REResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`OLSResult`/`FEResult`と同じ理由）。
@@ -398,7 +398,9 @@ pub struct REResult {
     pub hausman_p_value: Option<f64>,
     /// Degrees of freedom of the Hausman test (number of tested slope coefficients: the
     /// regressors that still vary after the within transformation and can be identified,
-    /// which is `df_model - 1` when every regressor does).
+    /// which is `df_model - 1` when every regressor does). A within-transformed copy is not
+    /// counted when it is aliased, for example when the regressor's entity (or time) mean is
+    /// also a regressor (correlated random effects).
     #[pyo3(get)]
     pub hausman_df: Option<usize>,
 }

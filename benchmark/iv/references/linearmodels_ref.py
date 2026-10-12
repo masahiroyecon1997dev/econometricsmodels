@@ -2,8 +2,7 @@
 診断統計量）を生成するスクリプト。
 
 IVの主リファレンス（`docs/spec/iv-spec.md`4章参照）。
-2SLSは`run()`、GMMは`run_gmm()`（`estimator="gmm"`のPython配線完了後に追加、
-`run_gmm()`のモジュールdocコメント参照）。
+2SLSは`run()`、GMMは`run_gmm()`（`run_gmm()`のdocstring参照）。
 
 合成データは`benchmark/iv/datasets.py`を直接呼ばず、`tests/fixtures/
 benchmarks/data/`に固定済みのCSVを読む（`benchmark/iv/freeze.py`参照。

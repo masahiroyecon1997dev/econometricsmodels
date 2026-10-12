@@ -3,8 +3,8 @@
 
 `benchmark/iv/references/linearmodels_ref.py`（1回呼べば1ケース分の結果を返す
 汎用アダプタ）を全シナリオ×全cov_typeの組み合わせで呼び出し、結果を1つのJSONに
-まとめて書き出す。GMMは`estimator="gmm"`がまだPython側に配線されていないため対象外
-（`linearmodels_ref.py`のモジュールdocstring参照）。
+まとめて書き出す。GMM（`estimator="gmm"`）は`iv_gmm.json`に別途生成する
+（`generate_iv_gmm_fixtures.py`）ため、ここでは対象外。
 
 このスクリプト自体は`benchmark/`側に置く。生成される`iv.json`は
 `tests/fixtures/benchmarks/`に置く（両者を分ける理由は
@@ -49,8 +49,7 @@ NUMERIC_SCENARIOS = [
     # scale_variance（x1*1e6, x2*1e-3、全cov_typeでComputationError）より
     # 緩いスケール差（x1*1e2, x2*1e-1）の成功パス。faer等の数値計算
     # ライブラリ依存部分の将来の精度リグレッションを検知する
-    # （OLSのscale_variance_mildと同じ発想、
-    # ユーザー確認済み）。
+    # （OLSのscale_variance_mildと同じ発想）。
     "scale_variance_mild",
 ]
 
@@ -212,7 +211,7 @@ def build_fixtures() -> dict:
             "hc2/hc3はlinearmodelsに対応する実装が無いため対象外（`iv-spec.md`"
             "3.1節、`benchmark/iv/references/linearmodels_ref.py`のモジュール"
             "docstring参照）。"
-            "GMMは`estimator='gmm'`がまだPython側に配線されていないため対象外。"
+            "GMM（`estimator='gmm'`）は`iv_gmm.json`に別途生成するため対象外。"
             "wu_hausman_statisticはclassical/hc0/hc1/clusterで`res.wooldridge_"
             "regression`をqで割った値を基準とし、hacを含む全cov_typeで機械精度で一致する"
             "（実測確認済み、`benchmark/iv/references/linearmodels_ref.py`の"
@@ -221,7 +220,7 @@ def build_fixtures() -> dict:
             "f.stat、常にclassical/debiased=Trueで再fitして計算）と"
             "weak_instrument_f_independent（本スクリプトでSSRベースのnested F検定を"
             "独立計算した値）の両方を含む。実測では機械精度で一致することを確認済み"
-            "（独立計算自体のミスパターン検出用、ユーザー確認済み）。"
+            "（独立計算自体のミスパターン検出用）。"
             "perfect_multicollinearityはここに含まない"
             "（ComputationErrorの発生確認のみ、テストコード側で対応）。"
             "scale_variance_mildはscale_variance（x1*1e6, x2*1e-3、"

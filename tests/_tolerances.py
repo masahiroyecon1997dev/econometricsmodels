@@ -541,4 +541,10 @@ TOLERANCES: dict[str, dict[str, float]] = {
         "atol_hac_time_reorder": 1e-12,
         "min_rel_hac_time_row_order_effect": 1e-3,
     },
+    # `aic`/`bic`/`df_resid`と、`log_likelihood`・パラメータ数から組み立て直した値の
+    # 一致（`σ`を含む総パラメータ数`k+1`を使う代数的な恒等式）。同じ式なので実測の
+    # 相対差は0。浮動小数点の評価順の違いだけを吸収する幅を置く。
+    "tobit_api": {
+        "rtol_information_criterion": 1e-12,
+    },
 }

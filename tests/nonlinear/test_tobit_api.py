@@ -20,10 +20,12 @@ import math
 import polars as pl
 import pytest
 from _assertions import (
+    assert_close,
     assert_params_table_matches_attributes,
     assert_same_estimates,
 )
 from _helpers import CASE_SPELLINGS, respell
+from _tolerances import TOLERANCES
 from econometricsmodels import Tobit, TobitOptions, TobitResults
 
 from benchmark.nonlinear.constants import MLE_COV_TYPES
@@ -194,6 +196,43 @@ def test_include_intercept_false_omits_const_and_converges(
     assert res.param_names == ["x1", "x2", "sigma"]
     assert res.converged
     assert res.df_model == 2
+
+
+@pytest.mark.parametrize("include_intercept", [True, False])
+def test_aic_bic_count_sigma_as_a_parameter(
+    censored_dataset, include_intercept
+):
+    """`aic`/`bic`の罰則は`σ`を含む総パラメータ数（`params`の長さ）を使う。
+    一方`df_model`はWald検定の対象となる傾き係数の数で、`σ`と切片を含まない
+    （`docs/spec/tobit-spec.md`「適合度統計量」）。
+    """
+    res = Tobit(
+        censored_dataset,
+        y="y",
+        x=["x1", "x2"],
+        options=TobitOptions(include_intercept=include_intercept),
+    ).fit()
+    n_params = len(res.params)
+
+    assert "sigma" in res.params
+    rtol = TOLERANCES["tobit_api"]["rtol_information_criterion"]
+    assert_close(
+        res.aic,
+        -2.0 * res.log_likelihood + 2.0 * n_params,
+        "aic",
+        rtol=rtol,
+        atol=0.0,
+    )
+    assert_close(
+        res.bic,
+        -2.0 * res.log_likelihood + math.log(res.n_obs) * n_params,
+        "bic",
+        rtol=rtol,
+        atol=0.0,
+    )
+    assert res.df_resid == res.n_obs - n_params
+    assert res.df_model == 2
+    assert res.df_model == n_params - 1 - int(include_intercept)
 
 
 def test_confidence_level_changes_interval_width(censored_dataset):

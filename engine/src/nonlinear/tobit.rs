@@ -1789,6 +1789,10 @@ impl TobitEstimator {
             input.upper(),
             &params_full,
         );
+        // `σ`は推定されるパラメータなので、`aic`/`bic`の罰則と`df_resid`はそれを含む総パラメータ数
+        // `k+1`を使う。一方`df_model`（下）はWald検定の対象となる傾き係数の数で、`σ`は検定対象
+        // ではないため`k - k_constant`になる（両者は意図的に別の数え方。
+        // `docs/spec/tobit-spec.md`「適合度統計量」参照）。
         let aic = -2.0 * llf + 2.0 * ((k + 1) as f64);
         let bic = -2.0 * llf + (n as f64).ln() * ((k + 1) as f64);
         let df_resid = n - (k + 1);

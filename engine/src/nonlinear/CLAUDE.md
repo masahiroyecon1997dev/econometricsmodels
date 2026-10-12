@@ -96,5 +96,6 @@
 ## Tobitのproperty-basedテスト（`tobit.rs`の`mod proptests`）
 
 - 打ち切り境界は`censoring_strategy`で左（`lower=0`）・右（`upper=0`）・両側（`[-1,1]`）をランダムに選ぶ。`score_is_near_zero`・列順序不変・HC0≤HC1に加え、「`y`と境界を符号反転（`(l,u)→(-u,-l)`）すると係数は符号反転・`σ`とSEは不変」という鏡像対称性を検証する（左右の分岐が別コードパス`censored_contribution(direction)`を通るため、片側の符号・スケールのバグが顕在化する）。
+- `expected_uncensored`は`fit()`を介さない3つのプロパティ（分解恒等式、値域`m∈[lower,upper]`・`w∈[0,1]`、鏡像対称性`(μ,lower,upper)→(-μ,-upper,-lower)`）を持つ。乱数の`μ`は`±60`まで振って連分数・鏡像変換の分岐を踏み、区間幅は`σ`の1/100以上に限る（それ未満は`UncensoredIntervalTooNarrow`）。鏡像対称性は上側/下側の裾が別の分岐を通ることを利用し、`(Pa,Pb)`・`(A,B)`の入れ替えの誤りを検出する。バグ注入で有効性を確認済み。バグ注入で生成される`engine/proptest-regressions/`のシードはコミットしない。
 - 右打ち切り分岐のバグ注入（`zeta>1`かつ`direction<0`のときだけ`score_beta_coef`を1.05倍）は、既存の固定値テストでは検出されず、鏡像対称性と`score_is_near_zero`のproptestだけが失敗する。
 

@@ -6835,6 +6835,13 @@ mod tests {
     /// sandwich_cov_params`のHC1補正係数を反転（`n/(n-k)`→`(n-k)/n`、Logit/Probitと
     /// 共有するロジックのため同一のバグ注入で確認）するバグを注入し、いずれも検出
     /// できることを確認した。
+    ///
+    /// `ExpectedUncensored`の3件（`decomposition_identity_holds_for_random_inputs`・
+    /// `expected_uncensored_stays_within_bounds_and_w_in_unit_interval`・
+    /// `mirror_symmetry_negates_mean_and_derivative_and_keeps_weight`）は`fit()`を介さず
+    /// `predicted_value`・`target_w_and_s`を乱数の`(μ,σ,境界)`で直接検証する。バグ注入で
+    /// 有効性を確認済み: 下側の裾の鏡像で`(Pa,Pb)`・`(A,B)`の入れ替えを外す→3件とも失敗、
+    /// 平均を`μ+σ(Pa+Pb)`にする→3件とも失敗、`∂w/∂μ`の符号を誤る→鏡像対称性が失敗。
     mod proptests {
         use super::*;
         use proptest::collection;
@@ -7278,6 +7285,127 @@ mod tests {
                  iterations (a large increase would indicate a regression in FaerLbfgs's \
                  first-iteration self-scaling, even though it still converges)"
             );
+        }
+
+        // ── ExpectedUncensored（`E[y|lower<y<upper,x]`）の不変条件 ──────────
+        // 以降は`fit()`を介さず`predicted_value`・`target_w_and_s`を直接検証する。
+        // 乱数の`(μ, σ, lower, upper)`は、非打ち切り区間の幅/σが
+        // `MIN_UNCENSORED_WIDTH_RATIO`以上になる範囲に限る（それ未満は`TobitEstimator`が
+        // `UncensoredIntervalTooNarrow`で拒否する）。`μ`は`±60`まで振って`z`が数十に
+        // なる裾（連分数・鏡像変換の分岐）も踏む。
+
+        /// `(mu, sigma, lower, upper)`。`lower`/`upper`は片側・両側のいずれかで、
+        /// 両側のときは幅が`σ`の`1/100`以上。
+        type UncensoredCase = (f64, f64, Option<f64>, Option<f64>);
+
+        fn uncensored_case_strategy() -> impl Strategy<Value = UncensoredCase> {
+            (
+                -60.0f64..60.0,
+                0.2f64..5.0,
+                -3.0f64..3.0,
+                0.0f64..8.0,
+                0u8..3,
+            )
+                .prop_map(|(mu, sigma, lower, width, kind)| {
+                    // 幅の下限: `δ=width/σ>=0.01`を満たすよう`σ/100`以上にする
+                    let width = width + sigma / 100.0;
+                    let (lo, up) = match kind {
+                        0 => (Some(lower), None),
+                        1 => (None, Some(lower)),
+                        _ => (Some(lower), Some(lower + width)),
+                    };
+                    (mu, sigma, lo, up)
+                })
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(512))]
+
+            /// 分解恒等式: `E[y|x] = lower·P(下限) + upper·P(上限) + P(uncensored|x)·E[y|uncensored,x]`
+            /// （下限0のみの左打ち切りなら`E[y|x]=P(y>0|x)·E[y|y>0,x]`）。既存の`ExpectedObserved`・
+            /// `ProbUncensored`（`statrs`の`cdf`、絶対誤差`1e-11`級）と新`ExpectedUncensored`
+            /// （別の安定実装）が、乱数の`(μ,σ,境界)`全域で整合する。裾（`z`が数十）では
+            /// `P(uncensored)≈0`なので右辺は`lower`/`upper`の項が支配する。
+            #[test]
+            fn decomposition_identity_holds_for_random_inputs(
+                (mu, sigma, lower, upper) in uncensored_case_strategy(),
+            ) {
+                let normal = Normal::standard();
+                let value = |t| predicted_value(t, mu, sigma, lower, upper, &normal);
+                let p_lower = lower.map_or(0.0, |l| normal.cdf((l - mu) / sigma));
+                let p_upper = upper.map_or(0.0, |u| 1.0 - normal.cdf((u - mu) / sigma));
+                let decomposed = lower.unwrap_or(0.0) * p_lower
+                    + upper.unwrap_or(0.0) * p_upper
+                    + value(MarginalEffectsTarget::ProbUncensored)
+                        * value(MarginalEffectsTarget::ExpectedUncensored);
+                let observed = value(MarginalEffectsTarget::ExpectedObserved);
+                prop_assert!(
+                    (observed - decomposed).abs() <= 1e-8 * (1.0 + observed.abs()),
+                    "observed={observed}, decomposed={decomposed}"
+                );
+            }
+
+            /// 値域: `E[y|lower<y<upper,x]`は非打ち切り領域`[lower, upper]`に収まり
+            /// （境界は丸め誤差分だけ許す）、重み`w`（切断分散/σ²）は`[0,1]`、`s_beta`・
+            /// `s_sigma`は有限。裾（`z`が数十）でも破綻しない。
+            #[test]
+            fn expected_uncensored_stays_within_bounds_and_w_in_unit_interval(
+                (mu, sigma, lower, upper) in uncensored_case_strategy(),
+            ) {
+                let normal = Normal::standard();
+                let m = predicted_value(
+                    MarginalEffectsTarget::ExpectedUncensored, mu, sigma, lower, upper, &normal,
+                );
+                let (w, s_beta, s_sigma) = target_w_and_s(
+                    MarginalEffectsTarget::ExpectedUncensored,
+                    &[1.0], &[mu], sigma, lower, upper, &normal,
+                );
+                prop_assert!(m.is_finite() && w.is_finite() && s_beta[0].is_finite() && s_sigma.is_finite());
+                prop_assert!((0.0..=1.0).contains(&w), "w={w}");
+                let eps = 1e-9 * (1.0 + m.abs());
+                if let Some(l) = lower {
+                    prop_assert!(m >= l - eps, "m={m} < lower={l}");
+                }
+                if let Some(u) = upper {
+                    prop_assert!(m <= u + eps, "m={m} > upper={u}");
+                }
+            }
+
+            /// 鏡像対称性: `(μ, lower, upper)→(-μ, -upper, -lower)`で、平均`m`は符号反転、
+            /// 重み`w`は不変、`∂w/∂μ`は符号反転、`∂w/∂σ`は不変。左のみ↔右のみに入れ替わり、
+            /// 両側の上側の裾（`za>=0`）↔下側の裾（`zb<=0`）が別の分岐（符号反転した
+            /// `upper_tail_pdf_ratios`）を通るため、片方の分岐の符号・入れ替え（`Pa↔Pb`・`A↔B`）の
+            /// バグを検出できる。
+            #[test]
+            fn mirror_symmetry_negates_mean_and_derivative_and_keeps_weight(
+                (mu, sigma, lower, upper) in uncensored_case_strategy(),
+            ) {
+                let normal = Normal::standard();
+                let (mirror_lower, mirror_upper) = (upper.map(|u| -u), lower.map(|l| -l));
+                let m = predicted_value(
+                    MarginalEffectsTarget::ExpectedUncensored, mu, sigma, lower, upper, &normal,
+                );
+                let m_mirror = predicted_value(
+                    MarginalEffectsTarget::ExpectedUncensored, -mu, sigma, mirror_lower, mirror_upper, &normal,
+                );
+                let (w, s_beta, s_sigma) = target_w_and_s(
+                    MarginalEffectsTarget::ExpectedUncensored, &[1.0], &[mu], sigma, lower, upper, &normal,
+                );
+                let (w_mirror, s_beta_mirror, s_sigma_mirror) = target_w_and_s(
+                    MarginalEffectsTarget::ExpectedUncensored, &[1.0], &[-mu], sigma, mirror_lower, mirror_upper, &normal,
+                );
+                // `z`が数十の裾では`ε·z`〜`ε·z²`の丸め誤差があるので`z`に応じて許容を広げる
+                let z_max = [lower, upper]
+                    .iter()
+                    .flatten()
+                    .map(|b| ((b - mu) / sigma).abs())
+                    .fold(0.0f64, f64::max);
+                let tol = 1e-9 * (1.0 + z_max * z_max);
+                prop_assert!((m + m_mirror).abs() <= 1e-9 * (1.0 + m.abs() + mu.abs()), "m={m}, mirror={m_mirror}");
+                prop_assert!((w - w_mirror).abs() <= tol, "w={w}, mirror={w_mirror}");
+                prop_assert!((s_beta[0] + s_beta_mirror[0]).abs() <= tol, "s_beta={}, mirror={}", s_beta[0], s_beta_mirror[0]);
+                prop_assert!((s_sigma - s_sigma_mirror).abs() <= tol, "s_sigma={s_sigma}, mirror={s_sigma_mirror}");
+            }
         }
     }
 }

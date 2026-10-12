@@ -39,8 +39,7 @@
 //! `"dk"`以外で`dk_time`を指定すると黙って無視されるため`ValidationError`にする
 //! （`parse_re_cov_type`）。
 //!
-//! 2-wayのハウスマン検定・パネル固有R²は未実装（`re-spec.md`5章）で、`time`を指定すると
-//! `hausman_*`は`None`・`r_squared_*`は`NaN`になる（単独でリリースしない暫定の扱い）。
+//! ハウスマン検定とパネル固有R²は1-way・2-wayとも計算される（`re-spec.md`2.3・3.7節）。
 //!
 //! ## `cov_type`の非対応値
 //!
@@ -100,9 +99,7 @@ pub struct REOptions {
     /// (entity + time; balanced panels only, an unbalanced panel raises `ValidationError`);
     /// when `None` (default), one-way (entity only). It only defines the random-effects
     /// structure: it is never used as the Driscoll-Kraay time periods (set `dk_time` for
-    /// that). The Hausman test and the panel R² are not available for two-way yet
-    /// (`hausman_*` are `None` and `r_squared_*` are `NaN`). The results do not depend on
-    /// the order of the periods.
+    /// that). The results do not depend on the order of the periods.
     #[pyo3(get)]
     pub time: Option<String>,
 
@@ -222,10 +219,9 @@ impl REOptions {
 /// automatically inside `fit()` and included directly here (unlike FE's
 /// `fixed_effects()`, RE has no separate diagnostic method; see `panel-common.md`
 /// section 2.4). All three are `None` when there is no regressor left to test (every
-/// regressor is time-invariant, or varies only over time on a balanced panel) and for
-/// two-way effects, where the test is not available yet. If the comparison cannot be
-/// computed, `fit()` fails instead. For two-way effects `r_squared_within`,
-/// `r_squared_between` and `r_squared_overall` are `NaN` for the same reason.
+/// regressor is time-invariant, or varies only over time on a balanced panel; for two-way
+/// effects, every regressor varies in at most one dimension). If the comparison cannot be
+/// computed, `fit()` fails instead.
 // `REResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`OLSResult`/`FEResult`と同じ理由）。
 //
@@ -302,13 +298,13 @@ pub struct REResult {
     pub aic: f64,
     #[pyo3(get)]
     pub bic: f64,
-    /// Within R² (`NaN` for two-way effects, not available yet).
+    /// Within R² (entity-demeaned, or demeaned by entity and time for two-way effects).
     #[pyo3(get)]
     pub r_squared_within: f64,
-    /// Between R² (`NaN` for two-way effects, not available yet).
+    /// Between R² (entity means, with the intercept).
     #[pyo3(get)]
     pub r_squared_between: f64,
-    /// Overall R² (`NaN` for two-way effects, not available yet).
+    /// Overall R² (untransformed variables, with the intercept).
     #[pyo3(get)]
     pub r_squared_overall: f64,
     /// Regression-based Hausman test statistic (chi-squared version, Wald test that the
@@ -316,7 +312,7 @@ pub struct REResult {
     /// `docs/spec/re-spec.md` section 3.7). The Wald test's covariance follows
     /// `cov_type`. Always non-negative. `None` when no slope coefficient can be tested
     /// (a time-invariant regressor, or one that varies only over time on a balanced panel,
-    /// is left out of the comparison) and for two-way effects (not available yet); if the
+    /// is left out of the comparison); if the
     /// auxiliary regression cannot be computed (e.g. too few clusters or periods for the
     /// robust covariance) `fit()` fails.
     #[pyo3(get)]
@@ -325,8 +321,8 @@ pub struct REResult {
     #[pyo3(get)]
     pub hausman_p_value: Option<f64>,
     /// Degrees of freedom of the Hausman test (number of tested slope coefficients: the
-    /// time-varying regressors that can be tested, which is `df_model - 1` when no regressor
-    /// is time-invariant or varies only over time).
+    /// regressors that still vary after the within transformation and can be identified,
+    /// which is `df_model - 1` when every regressor does).
     #[pyo3(get)]
     pub hausman_df: Option<usize>,
 }

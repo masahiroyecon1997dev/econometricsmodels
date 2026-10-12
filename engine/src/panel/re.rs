@@ -158,7 +158,7 @@
 //! - **比較は常に1-way**: `X̃`はRE本体と同じ個体効果構造の1-way FE
 //!   （`swamy_arora_variance_components`が返す`FeEstimator`）のwithin変換から得る。
 //!   `input.time_keys()`の有無は結果に影響しない。2-way RE（`ReEffects::TwoWay`）のハウスマン検定は
-//!   未実装で`None`（1-wayの検定を流用しない、`re-spec.md`5章）。
+//!   対応する2-way FE（`FeEffects::TwoWay`）のwithin変換から`X̃`を取る（`re-spec.md`3.7節）。
 //! - **識別できない`X̃`の列は検定対象から外す**: バランスパネルで時点間でのみ変わる列は
 //!   `x*_j - x̃_j`が全観測で一定になり、未変換の定数項と共線になる（`re_hausman_test`）。判定は
 //!   列ごとで、複数列の線形結合による共線は検出しない（その場合は補助回帰が特異になり
@@ -437,13 +437,16 @@ fn entity_means(y: &[f64], x: &[Vec<f64>], entity: &GroupCodes) -> EntityMeans {
 }
 
 /// `re_r_squared_within`/`re_hausman_test`が内部FE推定のwithin変換済みデータを再利用する
-/// 前提（`fe`は1-way・`time`なし・切片なしで、`OlsEstimator`への入力が
-/// `within_transform_one_way(fe.input())`の全列そのもの）をdebugビルドで確認する。
-/// `swamy_arora_variance_components`を変更して（2-way化・重み付け・共線列の自動除外等）
-/// この前提が崩れた場合に、ビット単位で同値という再利用の根拠が黙って壊れないようにする。
+/// 前提（`fe`はRE本体と同じ個体効果構造——1-wayは`time`なし、2-wayは`time`あり——で、
+/// 切片なしの`OlsEstimator`への入力が`within_transform_one_way`/`within_transform_two_way`の
+/// 全列そのもの）をdebugビルドで確認する。`swamy_arora_variance_components`を変更して
+/// （重み付け・共線列の自動除外等）この前提が崩れた場合に、ビット単位で同値という
+/// 再利用の根拠が黙って壊れないようにする。
 fn debug_assert_within_reuse_contract(fe: &FeEstimator, k_time_varying: usize) {
-    debug_assert_eq!(fe.effects(), FeEffects::OneWay);
-    debug_assert!(fe.input().time_keys().is_none());
+    match fe.effects() {
+        FeEffects::OneWay => debug_assert!(fe.input().time_keys().is_none()),
+        FeEffects::TwoWay => debug_assert!(fe.input().time_keys().is_some()),
+    }
     debug_assert!(!fe.within_input().has_intercept());
     debug_assert_eq!(fe.within_input().k(), k_time_varying);
     debug_assert_eq!(fe.input().x().len(), k_time_varying);
@@ -1539,38 +1542,32 @@ impl ReEstimator {
         // パネル固有R²（2.3節）。`input`はこの後`Self`に格納するため、
         // ムーブ前にここで計算する。
         //
-        // **2-wayのR²・ハウスマン検定は未実装**（`re-spec.md`5章。2-wayの定義は別の計算が要る）。
-        // 1-wayの値を流用すると意味の違う値が黙って出てしまうため、R²は`NaN`、ハウスマン検定は
-        // `None`にする（単独でリリースしない暫定の扱い）。
-        let (r_squared_within, r_squared_between, r_squared_overall) = match effects {
-            ReEffects::OneWay => re_r_squared(
-                &input,
-                &fe_for_sigma2_eps,
-                &time_varying,
-                &entity_means,
-                estimator.params(),
-                df_model,
-            ),
-            ReEffects::TwoWay => (f64::NAN, f64::NAN, f64::NAN),
-        };
+        // 2-wayでも、`fe_for_sigma2_eps`はRE本体と同じ個体効果構造（2-way）の内部FE推定量で、
+        // within R²のwithin変換済みデータ・ハウスマン検定の`X̃`はその`within_input()`から取る
+        // （`entity_means`は個体平均で、between/overall R²は1-wayと同じ定義、`re-spec.md`2.3節）。
+        let (r_squared_within, r_squared_between, r_squared_overall) = re_r_squared(
+            &input,
+            &fe_for_sigma2_eps,
+            &time_varying,
+            &entity_means,
+            estimator.params(),
+            df_model,
+        );
 
         // ハウスマン検定（`re-spec.md`3.7節、モジュールdoc「ハウスマン検定」参照）。
-        // 1-wayの比較用の内部FEは、`swamy_arora_variance_components`が返す1-way FE推定量
-        // （RE本体と同じ個体効果構造）を再利用する。
-        let hausman_result = match effects {
-            ReEffects::OneWay => re_hausman_test(
-                &fe_for_sigma2_eps,
-                &time_varying,
-                &y,
-                &x_all[1..],
-                &param_names[1..],
-                input.dep_var_name(),
-                &cov_type,
-                cluster_codes,
-                confidence_level,
-            )?,
-            ReEffects::TwoWay => None,
-        };
+        // 比較用の内部FEは、`swamy_arora_variance_components`が返すFE推定量（RE本体と同じ
+        // 個体効果構造、1-wayはentity、2-wayはentity+time）を再利用する。
+        let hausman_result = re_hausman_test(
+            &fe_for_sigma2_eps,
+            &time_varying,
+            &y,
+            &x_all[1..],
+            &param_names[1..],
+            input.dep_var_name(),
+            &cov_type,
+            cluster_codes,
+            confidence_level,
+        )?;
         let (hausman_statistic, hausman_df, hausman_p_value) = match hausman_result {
             Some((stat, df, p_value)) => (Some(stat), Some(df), Some(p_value)),
             None => (None, None, None),
@@ -2944,23 +2941,129 @@ mod tests {
     }
 
     #[test]
-    fn two_way_fit_reports_pending_hausman_and_r_squared_as_missing() {
-        // 2-wayのハウスマン検定・パネルR²は未実装（`fit()`のコメント参照）。1-wayの値を流用
-        // せず、ハウスマン検定は`None`・R²は`NaN`にする。
+    fn two_way_hausman_matches_the_auxiliary_regression_reference_for_every_cov_type() {
+        // 補助回帰: 3つのθで変換した`y*`を`[1, X*, X̃]`（`X̃`は2-way within変換後に分散のある列）に
+        // 回帰し`X̃`の係数をWald検定する。参照は`plm::phtest(method = "aux", effect = "twoways",
+        // vcov = ...)`（`x1`のみ、全列が両次元で変動する入力）と、一次元でしか変わらない列を含む
+        // 入力での手計算の補助回帰（plmは係数を位置で選ぶため、この入力ではplmの値が別の係数の
+        // 検定になり使えない）。cov_type順: classical, HC1, HC2, HC3, cluster（entity）,
+        // DK（bandwidth=1）。
+        let c = two_way_columns();
+        let cases: [(&[&str], [f64; 6]); 2] = [
+            (
+                &["x1"],
+                [
+                    1.219_038_535_996_78,
+                    2.288_441_340_520_52,
+                    2.143_067_391_820_05,
+                    1.747_073_734_662_46,
+                    5.186_875_856_510_08,
+                    1.110_285_110_999_32,
+                ],
+            ),
+            (
+                &["x1", "xi", "xt"],
+                [
+                    0.020_172_191_267_105_1,
+                    0.030_257_894_203_708_7,
+                    0.027_319_433_563_145_9,
+                    0.018_691_740_018_767,
+                    0.439_816_368_093_923,
+                    0.024_735_842_716_204_3,
+                ],
+            ),
+        ];
+        for (names, expected) in cases {
+            for ((label, cov_type), want) in all_cov_types(&c.time).into_iter().zip(expected) {
+                let re = ReEstimator::fit(two_way_input(names), ReEffects::TwoWay, cov_type, 0.95)
+                    .unwrap_or_else(|e| panic!("{names:?} {label}: {e}"));
+                assert_eq!(re.hausman_df(), Some(1), "{names:?} {label}");
+                assert_close(
+                    re.hausman_statistic().unwrap(),
+                    want,
+                    1e-7,
+                    &format!("{names:?} {label}"),
+                );
+                let p = re.hausman_p_value().unwrap();
+                assert!((0.0..=1.0).contains(&p), "{names:?} {label}: p={p}");
+            }
+        }
+    }
+
+    #[test]
+    fn two_way_hausman_is_none_without_two_way_within_variation() {
+        // 一次元でしか変わらない列だけなら、2-way within変換後の`X̃`が0列で検定できない。
         let re = ReEstimator::fit(
-            two_way_input(&["x1", "xi", "xt"]),
+            two_way_input(&["xi", "xt"]),
             ReEffects::TwoWay,
             ReCovType::Classical,
             0.95,
         )
         .unwrap();
-
         assert_eq!(re.hausman_statistic(), None);
         assert_eq!(re.hausman_p_value(), None);
         assert_eq!(re.hausman_df(), None);
-        assert!(re.r_squared_within().is_nan());
-        assert!(re.r_squared_between().is_nan());
-        assert!(re.r_squared_overall().is_nan());
+        // within R²は1-wayと同じく0（within変換後の当てはめ値が恒等的に0）。
+        assert_eq!(re.r_squared_within(), 0.0);
+    }
+
+    #[test]
+    fn two_way_hausman_leaves_out_a_column_that_is_its_own_within_transform() {
+        // 個体平均も時点平均も0の交互作用列`(e - ē)(t - t̄)`は、準偏差変換しても変わらず
+        // （`x* = x̃`）、補助回帰で識別できない。検定対象から外し、`x1`だけを検定する。
+        let c = two_way_columns();
+        let interaction: Vec<f64> = (0..24)
+            .map(|r| ((r / 4) as f64 - 2.5) * ((r % 4) as f64 - 1.5))
+            .collect();
+        let input = ReInput::from_columns(
+            &c.y,
+            &[c.x1.clone(), interaction],
+            strings(&["x1", "z"]),
+            &c.entity,
+            Some(&c.time),
+            "y".into(),
+        )
+        .unwrap();
+        let re = ReEstimator::fit(input, ReEffects::TwoWay, ReCovType::Classical, 0.95).unwrap();
+        assert_eq!(re.hausman_df(), Some(1));
+        assert!(re.hausman_statistic().unwrap().is_finite());
+    }
+
+    #[test]
+    fn two_way_r_squared_matches_the_definition_computed_from_plm_coefficients() {
+        // plmの係数から定義どおりに計算したR²（plmの`r.squared`は変換後の回帰のR²で対応が無い）:
+        // within = 2-way within（個体＋時点でdemean）した`y`・`x`に傾きを当てはめたR²、
+        // between = 個体平均に切片込みで当てはめたR²、overall = 生の`y`・`x`に切片込みで当てはめたR²。
+        let cases: [(&[&str], [f64; 3]); 2] = [
+            (
+                &["x1"],
+                [
+                    0.341_387_359_645_643,
+                    0.066_106_820_917_872_6,
+                    -0.009_931_889_890_190_12,
+                ],
+            ),
+            (
+                &["x1", "xi", "xt"],
+                [
+                    0.342_681_797_459_257,
+                    0.077_026_080_510_558_6,
+                    0.130_657_652_451_062,
+                ],
+            ),
+        ];
+        for (names, [within, between, overall]) in cases {
+            let re = ReEstimator::fit(
+                two_way_input(names),
+                ReEffects::TwoWay,
+                ReCovType::Classical,
+                0.95,
+            )
+            .unwrap();
+            assert_close(re.r_squared_within(), within, 1e-6, "within");
+            assert_close(re.r_squared_between(), between, 1e-6, "between");
+            assert_close(re.r_squared_overall(), overall, 1e-6, "overall");
+        }
     }
 
     #[test]
@@ -3326,7 +3429,7 @@ mod tests {
         let c = two_way_columns();
         let all: Vec<usize> = (0..24).collect();
         let dk = ReEstimator::fit(
-            subset_input(&all, &["x1", "xi", "xt"], true),
+            subset_input(&all, &["x1"], true),
             ReEffects::TwoWay,
             ReCovType::Dk {
                 bandwidth: Some(0),
@@ -3336,7 +3439,7 @@ mod tests {
         )
         .unwrap();
         let cluster = ReEstimator::fit(
-            subset_input(&all, &["x1", "xi", "xt"], true),
+            subset_input(&all, &["x1"], true),
             ReEffects::TwoWay,
             ReCovType::Cluster {
                 groups: Some(GroupCodes::from_labels_without_keys(&c.time)),
@@ -3344,7 +3447,7 @@ mod tests {
             0.95,
         )
         .unwrap();
-        for j in 0..4 {
+        for j in 0..2 {
             assert_close(
                 *dk.std_errors().get(j, 0),
                 *cluster.std_errors().get(j, 0),

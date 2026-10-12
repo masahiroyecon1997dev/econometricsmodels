@@ -43,9 +43,9 @@ class RE:
     Unlike FE, RE has an intercept. By default it estimates one-way
     (entity) random effects. Setting `REOptions.time` requests two-way
     (entity + time) random effects, which requires a balanced panel
-    (`ValidationError` otherwise). For two-way effects the Hausman test
-    and the panel R² (within / between / overall) are not available
-    yet: `hausman_*` are `None` and `r_squared_*` are `NaN`.
+    (`ValidationError` otherwise). The Hausman test and the panel R²
+    (within / between / overall) are available for both one-way and
+    two-way effects; see `REResults`.
 
     Args:
         data: A polars DataFrame containing the dependent variable,
@@ -145,26 +145,28 @@ class REResults:
     directly as properties here, rather than as a separate method like
     FE's `fixed_effects()` (`panel-common.md` section 2.4). It is the
     regression-based (auxiliary regression) version (Wooldridge 2010,
-    section 10.7.3; equivalent to `plm::phtest(method = "aux",
-    effect = "individual")`), always comparing against one-way (entity)
-    fixed effects — the same structure as RE itself — regardless of
-    `REOptions.dk_time`. The Wald test's covariance follows `cov_type`
+    section 10.7.3; equivalent to `plm::phtest(method = "aux")` with
+    `effect = "individual"` or `"twoways"`), comparing against fixed
+    effects with the same structure as RE itself (entity for one-way,
+    entity and time for two-way), regardless of `REOptions.dk_time`. The Wald test's covariance follows `cov_type`
     (the default `"cluster"` gives the cluster-robust Hausman test;
     `"classical"` gives the classical version). The auxiliary
     regression uses OLS-style small-sample corrections, which differ
     from the RE standard errors'. A time-invariant regressor (constant
     over time within every entity) is allowed in RE: it is left out
-    of the internal one-way FE regression and of the within-transformed
+    of the internal FE regression and of the within-transformed
     regressors in the auxiliary regression, so `hausman_df` is the
-    number of time-varying regressors. A regressor that varies only
+    number of regressors that still vary after the within
+    transformation (for two-way effects, after removing both the entity
+    and the time means, so a regressor that varies in only one
+    dimension is left out too). A regressor that varies only
     over time, with the same entity mean for every entity (a year trend
     on a balanced panel), stays in the model and in the internal
     one-way FE regression, but its within-transformed copy in the
     auxiliary regression is collinear with the constant, so that
     coefficient is not identified and is left out of the tested set:
     `hausman_df` is smaller by one for each such regressor. All three are
-    `None` only when there are no regressors to compare, or for two-way
-    effects, where the test is not available yet. If the auxiliary
+    `None` only when there are no regressors to compare. If the auxiliary
     regression cannot be computed (rank-deficient design, or a
     structurally singular robust covariance such as too few clusters or
     periods for the auxiliary slopes), `fit()` raises
@@ -335,20 +337,22 @@ class REResults:
         unrelated to RE's own Swamy-Arora quasi-demeaning). Only the
         coefficients of time-varying regressors enter the fitted
         values (a time-invariant regressor is zero after demeaning),
-        so it is `0.0` when every regressor is time-invariant. `NaN`
-        for two-way effects (not available yet)."""
+        so it is `0.0` when every regressor is time-invariant. For two-way
+        effects the variables are demeaned by entity and by time."""
         return self._raw.r_squared_within
 
     @property
     def r_squared_between(self) -> float:
-        """Between R² (based on entity-mean variables). `NaN` for
-        two-way effects (not available yet)."""
+        """Between R² (based on entity-mean variables, with the
+        intercept; the same definition for one-way and two-way
+        effects)."""
         return self._raw.r_squared_between
 
     @property
     def r_squared_overall(self) -> float:
-        """Overall R² (based on the untransformed variables). `NaN` for
-        two-way effects (not available yet)."""
+        """Overall R² (based on the untransformed variables, with the
+        intercept; the same definition for one-way and two-way
+        effects)."""
         return self._raw.r_squared_overall
 
     @property
@@ -358,8 +362,9 @@ class REResults:
         time-varying slope regressors (`k` is `hausman_df`) are jointly
         zero in the auxiliary regression of the quasi-demeaned `y` on
         the quasi-demeaned regressors and the within-transformed
-        regressors). Always non-negative. The
-        comparison is always against one-way FE. The Wald test's
+        regressors). Always non-negative. The comparison is against FE
+        with the same structure as RE (entity, or entity and time for
+        two-way effects). The Wald test's
         covariance follows `cov_type` (default `"cluster"` gives the
         cluster-robust Hausman test; `"classical"` gives the classical
         version). The auxiliary regression uses OLS-style small-sample
@@ -367,8 +372,7 @@ class REResults:
         For unbalanced panels the auxiliary regression's constant is
         left untransformed, as in `plm::phtest`. `None` when no
         regressor can be tested (every regressor is time-invariant or
-        not identified) and for two-way effects (not available yet); see
-        the class docstring. If the auxiliary regression cannot be
+        not identified); see the class docstring. If the auxiliary regression cannot be
         computed, `fit()` raises instead."""
         return self._raw.hausman_statistic
 
@@ -382,9 +386,9 @@ class REResults:
     @property
     def hausman_df(self) -> int | None:
         """Degrees of freedom of the Hausman test (number of compared
-        slope coefficients: the time-varying regressors that can be
-        tested, which is `df_model - 1` when no regressor is
-        time-invariant or varies only over time). `None`
+        slope coefficients: the regressors that still vary after the
+        within transformation and can be identified, which is
+        `df_model - 1` when every regressor does). `None`
         under the same conditions as `hausman_statistic`."""
         return self._raw.hausman_df
 

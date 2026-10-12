@@ -3,8 +3,7 @@
 参照実装との網羅的な数値照合（全`cov_type`・不均衡でない複数シナリオ・実データ）は別のテスト
 （plmとの照合）が担う。ここでは、plm（`model = "random"`・`effect = "twoways"`・
 Swamy-Arora）の値を小さなバランスパネルに埋め込んだスモークテストと、`n_periods`・
-暫定値・オプションのバリデーションを確認する。2-wayのハウスマン検定とパネルR²は未実装
-（`hausman_*`は`None`・`r_squared_*`は`NaN`）。
+Hausman検定・パネルR²・オプションのバリデーションを確認する。
 
 データ（6エンティティ×4時点）: `xi`は個体間でのみ、`xt`は時点間でのみ変わる（どちらも
 RE（2-way）で許容される）。plmの参照値は`y ~ x1 + xi + xt`。
@@ -99,18 +98,84 @@ def test_matches_plm_reference_values(panel, cov_type):
         assert res.f_df_denom == 5  # G - 1
 
 
-def test_two_way_reports_n_periods_and_pending_values(panel):
+def test_two_way_reports_n_periods(panel):
     res = _fit(panel, REOptions(cov_type="classical", time="time"))
 
     assert res.n_periods == 4
     assert res.n_entities == 6
-    # 2-wayのハウスマン検定・パネルR²は未実装（1-wayの値を流用しない）。
+
+
+# Hausman統計量（cov_type順: classical, hc1, hc2, hc3, cluster, dk）。`x1`のみは
+# `plm::phtest(method = "aux", effect = "twoways", vcov = ...)`、`x1 + xi + xt`は
+# plmが係数を位置で選び別の係数を検定するため、手計算の補助回帰（plmの重みで変換）。
+HAUSMAN_COV_TYPES = ["classical", "hc1", "hc2", "hc3", "cluster", "dk"]
+HAUSMAN_X1 = [
+    1.21903853599678,
+    2.28844134052052,
+    2.14306739182005,
+    1.7470737346624,
+    5.18687585651008,
+    1.11028511099932,
+]
+HAUSMAN_ALL = [
+    0.0201721912671051,
+    0.0302578942037087,
+    0.0273194335631459,
+    0.018691740018767,
+    0.439816368093923,
+    0.0247358427162044,
+]
+
+
+@pytest.mark.parametrize(
+    ("x", "expected"),
+    [(("x1",), HAUSMAN_X1), (("x1", "xi", "xt"), HAUSMAN_ALL)],
+)
+def test_two_way_hausman_test_matches_reference(panel, x, expected):
+    """2-wayのHausman検定（補助回帰版）の統計量が参照値と一致し、`hausman_df`は
+    2-way within変換後に分散のある列の数（`xi`・`xt`は入らない）になる。"""
+    for cov_type, want in zip(HAUSMAN_COV_TYPES, expected, strict=True):
+        kwargs = (
+            {"dk_time": "time", "dk_bandwidth": 1} if cov_type == "dk" else {}
+        )
+        res = _fit(
+            panel, REOptions(cov_type=cov_type, time="time", **kwargs), x=x
+        )
+        assert res.hausman_df == 1, cov_type
+        assert res.hausman_statistic == pytest.approx(want, rel=1e-6), cov_type
+        assert 0.0 <= res.hausman_p_value <= 1.0
+
+
+def test_two_way_hausman_test_is_none_without_two_way_variation(panel):
+    """一次元でしか変わらない列だけなら検定できず`None`（`fit()`は成功する）。"""
+    res = _fit(panel, REOptions(time="time"), x=("xi", "xt"))
     assert res.hausman_statistic is None
     assert res.hausman_p_value is None
     assert res.hausman_df is None
-    assert math.isnan(res.r_squared_within)
-    assert math.isnan(res.r_squared_between)
-    assert math.isnan(res.r_squared_overall)
+    assert res.r_squared_within == 0.0
+
+
+@pytest.mark.parametrize(
+    ("x", "expected"),
+    [
+        (
+            ("x1",),
+            (0.341387359645643, 0.0661068209178726, -0.00993188989019012),
+        ),
+        (
+            ("x1", "xi", "xt"),
+            (0.342681797459257, 0.0770260805105586, 0.13065765245062),
+        ),
+    ],
+)
+def test_two_way_r_squared_matches_definition(panel, x, expected):
+    """plmの係数から定義どおりに計算したR²（plmの`r.squared`は変換後の回帰の
+    R²で、この3種に対応する参照が無い）: within = 個体と時点でdemeanした
+    変数、between = 個体平均、overall = 生の変数（between・overallは切片込み）。"""
+    res = _fit(panel, REOptions(time="time"), x=x)
+    assert res.r_squared_within == pytest.approx(expected[0], rel=1e-5)
+    assert res.r_squared_between == pytest.approx(expected[1], rel=1e-5)
+    assert res.r_squared_overall == pytest.approx(expected[2], rel=1e-5)
 
 
 def test_one_way_has_no_n_periods(panel):
@@ -255,12 +320,16 @@ def test_cluster_standard_errors_match_ols_on_the_plm_transformed_data(
 def test_two_way_driscoll_kraay_without_lags_equals_time_clusters(panel):
     """`dk_bandwidth=0`のDriscoll-Kraayは、`dk_time`でクラスタリングした
     cluster（`cluster="time"`）と同じ標準誤差になる。"""
+    # Hausmanの補助回帰がクラスター数（4）を要するため、`x1`だけで比べる。
     dk = _fit(
         panel,
         REOptions(cov_type="dk", time="time", dk_time="time", dk_bandwidth=0),
+        x=("x1",),
     )
     clustered = _fit(
-        panel, REOptions(cov_type="cluster", time="time", cluster="time")
+        panel,
+        REOptions(cov_type="cluster", time="time", cluster="time"),
+        x=("x1",),
     )
     assert list(dk.std_errors.values()) == pytest.approx(
         list(clustered.std_errors.values()), rel=1e-10

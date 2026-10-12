@@ -20,8 +20,14 @@ import polars as pl
 import pytest
 from _constants import DATA_DIR
 from _error_messages import escaped
-from _helpers import ROW_TIME, TIED_TIME_COLUMNS, hac_time_for, with_row_time
-from _iv_helpers import our_fit
+from _helpers import (
+    ROW_TIME,
+    TIED_TIME_COLUMNS,
+    hac_time_for,
+    with_cluster_groups,
+    with_row_time,
+)
+from _iv_helpers import iv_name_collision_frame, our_fit
 from econometricsmodels import (
     IV,
     ComputationError,
@@ -155,14 +161,7 @@ def test_const_collision_with_include_intercept_raises():
     """`include_intercept=True`のとき`x_exog`に`"const"`という列名を含めると
     自動追加される定数項と衝突し`ValidationError`になること。
     """
-    df = pl.DataFrame(
-        {
-            "y": [1.0, 2.0, 3.0, 4.0],
-            "const": [1.0, 2.0, 3.5, 2.5],
-            "endog1": [2.0, 1.0, 4.0, 3.0],
-            "z1": [1.0, 3.0, 2.0, 4.0],
-        }
-    )
+    df = iv_name_collision_frame()
     with pytest.raises(
         ValidationError, match=escaped(msgs.CONST_COLLISION, role="x_exog")
     ):
@@ -180,14 +179,7 @@ def test_const_collision_in_x_endog_with_include_intercept_raises():
     （`dict(zip(param_names, params))`）構築時の後勝ちにより真の切片係数が
     サイレントに失われていた（前項のテストの背景参照）。
     """
-    df = pl.DataFrame(
-        {
-            "y": [1.0, 2.0, 3.0, 4.0],
-            "x1": [2.0, 1.0, 4.0, 3.0],
-            "const": [2.0, 1.0, 4.0, 3.0],
-            "z1": [1.0, 3.0, 2.0, 4.0],
-        }
-    )
+    df = iv_name_collision_frame()
     with pytest.raises(
         ValidationError, match=escaped(msgs.CONST_COLLISION, role="x_endog")
     ):
@@ -204,15 +196,7 @@ def test_const_collision_in_instruments_with_include_intercept_raises():
     に`"const"`が2回出現し、`OlsResults.params`構築時の後勝ちにより真の切片
     係数が操作変数の係数でサイレントに上書きされていた（前々項のテストの背景参照）。
     """
-    df = pl.DataFrame(
-        {
-            "y": [1.0, 2.0, 3.0, 4.0],
-            "x1": [2.0, 1.0, 4.0, 3.0],
-            "endog1": [3.0, 4.0, 1.0, 2.0],
-            "const": [1.0, 3.0, 2.0, 4.0],
-            "z1": [2.0, 4.0, 1.0, 3.0],
-        }
-    )
+    df = iv_name_collision_frame()
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.CONST_COLLISION, role="instruments"),
@@ -554,10 +538,7 @@ def test_cluster_count_at_most_slopes_raises_validation_error(
     `gmm_weight_type="cluster"`の重み行列`S`（l×l）が`G<l`で特異になる別軸の問題
     とは区別する。
     """
-    cluster = pl.Series(
-        "cluster_group", [i % 2 for i in range(iv_dataset.height)]
-    )
-    df = iv_dataset.with_columns(cluster)
+    df = with_cluster_groups(iv_dataset, 2)
     options = IVOptions(
         estimator=estimator, cov_type="cluster", cluster="cluster_group"
     )
@@ -579,10 +560,7 @@ def test_cluster_count_between_structural_and_first_stage_slopes_raises(
     統計量自体は`cov_type`に依存しない。この拒否が妥当かは未決定の設計論点で、
     変更する場合は本テストの期待値を更新する。
     """
-    cluster = pl.Series(
-        "cluster_group", [i % 3 for i in range(iv_dataset.height)]
-    )
-    df = iv_dataset.with_columns(cluster)
+    df = with_cluster_groups(iv_dataset, 3)
     options = IVOptions(
         estimator=estimator, cov_type="cluster", cluster="cluster_group"
     )
@@ -612,10 +590,7 @@ def test_cluster_count_boundaries_without_intercept(
     （`test_cluster_count_between_structural_and_first_stage_slopes_raises`と同じ
     現状の挙動）、G=4は成功する。
     """
-    cluster = pl.Series(
-        "cluster_group", [i % n_groups for i in range(iv_dataset.height)]
-    )
-    df = iv_dataset.with_columns(cluster)
+    df = with_cluster_groups(iv_dataset, n_groups)
     options = IVOptions(
         estimator=estimator,
         include_intercept=False,
@@ -898,8 +873,7 @@ def test_scale_variance_cluster_raises_computation_error():
     発生することを確認する。
     """
     df = pl.read_csv(DATA_DIR / "iv_scale_variance.csv")
-    cluster = pl.Series("cluster_group", [i % 10 for i in range(df.height)])
-    df = df.with_columns(cluster)
+    df = with_cluster_groups(df, 10)
     options = IVOptions(cov_type="cluster", cluster="cluster_group")
     with pytest.raises(ComputationError):
         IV(

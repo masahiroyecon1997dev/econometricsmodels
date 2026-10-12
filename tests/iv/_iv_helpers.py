@@ -14,6 +14,24 @@ from _helpers import with_row_time
 from econometricsmodels import IV, IVOptions, IVResults
 
 
+def iv_name_collision_frame() -> pl.DataFrame:
+    """列名`const`が自動追加される定数項と衝突する`ValidationError`テスト用の、
+    4行のDataFrame（列は`y`/`x1`/`endog1`/`z1`/`const`）。
+
+    `const`を`x_exog`・`x_endog`・`instruments`のどれに置くかは呼び出し側が選ぶ
+    （衝突は入力の列名だけで判定されるため、値は問わない）。
+    """
+    return pl.DataFrame(
+        {
+            "y": [1.0, 2.0, 3.0, 4.0],
+            "x1": [2.0, 1.0, 4.0, 3.0],
+            "endog1": [3.0, 4.0, 1.0, 2.0],
+            "z1": [2.0, 4.0, 1.0, 3.0],
+            "const": [1.0, 3.0, 2.0, 4.0],
+        }
+    )
+
+
 def our_fit(
     df: pl.DataFrame,
     *,

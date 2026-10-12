@@ -19,6 +19,7 @@ from _error_messages import escaped
 from _helpers import (
     ROW_TIME,
     TIED_TIME_COLUMNS,
+    name_collision_frame,
     with_cluster_groups,
     with_row_time,
 )
@@ -148,12 +149,8 @@ def test_duplicate_x_column_raises(dataset):
 
 def test_const_collision_with_include_intercept_raises():
     """`include_intercept=True`のとき`x`に`"const"`を含めると`ValidationError`。"""
-    df = pl.DataFrame(
-        {
-            "y": [1.0, 2.0, 3.0],
-            "const": [1.0, 2.0, 3.5],
-            "weight": [1.0, 1.0, 1.0],
-        }
+    df = name_collision_frame([1.0, 2.0, 3.0]).with_columns(
+        pl.lit(1.0).alias("weight")
     )
     with pytest.raises(
         ValidationError, match=escaped(msgs.CONST_COLLISION, role="x")

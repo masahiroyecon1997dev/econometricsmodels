@@ -21,7 +21,11 @@ import polars as pl
 import pytest
 from _constants import DATA_DIR
 from _error_messages import escaped, rust_f64
-from _helpers import heavily_censored_tobit_dataset
+from _helpers import (
+    heavily_censored_tobit_dataset,
+    name_collision_frame,
+    with_cluster_groups,
+)
 from econometricsmodels import (
     ComputationError,
     Tobit,
@@ -72,9 +76,7 @@ def test_duplicate_x_column_raises(censored_dataset):
 
 
 def test_const_collision_with_include_intercept_raises():
-    df = pl.DataFrame(
-        {"y": [0.0, 1.0, 0.0, 1.0], "const": [1.0, 2.0, 3.0, 3.5]}
-    )
+    df = name_collision_frame([0.0, 1.0, 0.0, 1.0])
     with pytest.raises(
         ValidationError, match=escaped(msgs.CONST_COLLISION, role="x")
     ):
@@ -86,9 +88,7 @@ def test_sigma_collision_raises():
     追加する合成パラメータ名`"sigma"`と衝突する（`"const"`列衝突と同型、
     `engine_pybind`の`validate_no_sigma_collision`のPython API境界での確認）。
     """
-    df = pl.DataFrame(
-        {"y": [0.0, 1.0, 0.0, 1.0], "sigma": [1.0, 2.0, 3.0, 3.5]}
-    )
+    df = name_collision_frame([0.0, 1.0, 0.0, 1.0], "sigma")
     with pytest.raises(ValidationError, match=escaped(msgs.SIGMA_COLLISION)):
         Tobit(df, y="y", x=["sigma"]).fit()
 
@@ -502,10 +502,7 @@ def test_cluster_count_at_most_slopes_raises_validation_error(
     `ComputationError`ではなく`fit()`冒頭の`ValidationError`で弾く（mroz
     `hours`クラスターケースがこの経路。`G<q`側はOLSの同名テストで確認）。
     """
-    cluster = pl.Series(
-        "cluster", [i % 2 for i in range(censored_dataset.height)]
-    )
-    df = censored_dataset.with_columns(cluster)
+    df = with_cluster_groups(censored_dataset, 2, col="cluster")
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=2, q=2),

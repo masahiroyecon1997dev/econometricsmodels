@@ -18,6 +18,7 @@ from _error_messages import escaped
 from _helpers import (
     ROW_TIME,
     TIED_TIME_COLUMNS,
+    name_collision_frame,
     with_cluster_groups,
     with_row_time,
 )
@@ -166,7 +167,7 @@ def test_const_collision_with_include_intercept_raises():
 
     自動追加される定数項と衝突し`ValidationError`になること。
     """
-    df = pl.DataFrame({"y": [1.0, 2.0, 3.0], "const": [1.0, 2.0, 3.5]})
+    df = name_collision_frame([1.0, 2.0, 3.0])
     with pytest.raises(
         ValidationError, match=escaped(msgs.CONST_COLLISION, role="x")
     ):

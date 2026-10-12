@@ -30,6 +30,7 @@ from _helpers import (
     hac_time_for,
     reorder_rows,
     respell,
+    with_cluster_groups,
     with_row_time,
 )
 from _iv_helpers import our_fit
@@ -272,10 +273,7 @@ def test_wu_hausman_degrades_to_none_when_cluster_count_at_most_augmented_slopes
     （`instruments=["z1"]`、第一段階`q_fs=2`なので`G=3`で第一段階は成功）で
     構造方程式`q=2`・`k_endog=1`・`q_aug=3`、`G=3`（`q=2 < G=3 <= q_aug=3`）。
     """
-    cluster = pl.Series(
-        "cluster_group", [i % 3 for i in range(iv_dataset.height)]
-    )
-    df = iv_dataset.with_columns(cluster)
+    df = with_cluster_groups(iv_dataset, 3)
     options = IVOptions(cov_type="cluster", cluster="cluster_group")
     res = our_fit(df, instruments=["z1"], options=options)
 

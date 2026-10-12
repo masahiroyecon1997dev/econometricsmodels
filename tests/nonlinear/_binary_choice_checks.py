@@ -46,6 +46,7 @@ from _helpers import (
     load_apple_adoption_dataset,
     load_wooldridge_dataset,
     multi_dummy_separation_dataset,
+    name_collision_frame,
     respell,
     separated_dataset,
     single_overlap_binary_dataset,
@@ -475,9 +476,7 @@ def check_duplicate_x_column_raises(dataset, estimator_cls):
 
 
 def check_const_collision_with_include_intercept_raises(estimator_cls):
-    df = pl.DataFrame(
-        {"y": [0.0, 1.0, 0.0, 1.0], "const": [1.0, 2.0, 3.0, 3.5]}
-    )
+    df = name_collision_frame([0.0, 1.0, 0.0, 1.0])
     with pytest.raises(
         ValidationError, match=escaped(msgs.CONST_COLLISION, role="x")
     ):

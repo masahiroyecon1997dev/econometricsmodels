@@ -24,6 +24,9 @@
   暗黙に使わない）なので、行順をそのまま時間順として使うテストが、行番号の列を明示的に
   足して`hac_time`に渡すための共通部品。
 
+- `name_collision_frame`: 列名`const`・`sigma`が自動追加される合成パラメータ名と
+  衝突する`ValidationError`テスト用の、`y`と衝突列だけの小さなDataFrame
+  （IVは列構成が違うため`tests/iv/_iv_helpers.py`の`iv_name_collision_frame`）。
 - `HAC_REORDER_ORDER` / `hac_reorder_frame` / `reorder_rows`: `hac_time`の行順入れ替え
   テスト（OLS/WLS/IV）で、時間順のDataFrameと、行の並べ替えだけを施したDataFrameを
   作る。
@@ -91,6 +94,21 @@ def reorder_rows(df: pl.DataFrame, order: Sequence[int]) -> pl.DataFrame:
     if list(order) == list(range(n)):
         raise ValueError("order is the identity and does not reorder rows")
     return df[list(order)]
+
+
+def name_collision_frame(
+    y: Sequence[float], collided: str = "const"
+) -> pl.DataFrame:
+    """`y`と、自動追加される合成パラメータ名（`"const"`・`"sigma"`）と同名の列
+    `collided`だけを持つ、列名衝突の`ValidationError`テスト用のDataFrame。
+
+    衝突列は`y`と同じ行数で、最後の値だけ0.5ずらした1, 2, 3, ...（定数列にならず、
+    `y`とも一致しない）。衝突は入力の列名だけで判定されるため、値は問わない。
+    """
+    n = len(y)
+    values = [float(i + 1) for i in range(n)]
+    values[-1] += 0.5
+    return pl.DataFrame({"y": list(y), collided: values})
 
 
 def _alternating_case(label: str) -> str:

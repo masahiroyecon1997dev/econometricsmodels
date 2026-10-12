@@ -279,6 +279,53 @@ class REResults:
         return self._raw.n_periods
 
     @property
+    def sigma2_eps(self) -> float:
+        """Estimated variance of the idiosyncratic error, σ_ε² (the
+        residual variance of the internal fixed-effects regression, with
+        degrees of freedom that exclude the time-invariant regressors,
+        as in `plm`)."""
+        return self._raw.sigma2_eps
+
+    @property
+    def sigma2_u(self) -> float:
+        """Estimated variance of the entity effect, σ_u² (Swamy-Arora;
+        a negative estimate is raised to 0)."""
+        return self._raw.sigma2_u
+
+    @property
+    def sigma2_lambda(self) -> float | None:
+        """Estimated variance of the time effect, σ_λ² (two-way effects
+        only; a negative estimate is raised to 0). `None` for one-way."""
+        return self._raw.sigma2_lambda
+
+    @property
+    def theta(self) -> dict[str, float] | None:
+        """One-way quasi-demeaning weight θ_i of each entity, keyed by
+        entity id (ids in sorted order): the data are transformed as
+        `x - θ_i · mean_i(x)`. θ_i depends on the number of observations
+        of the entity, so it differs across entities only on an
+        unbalanced panel. `None` for two-way effects (see `theta_entity`,
+        `theta_time` and `theta_total`)."""
+        return self._raw.theta
+
+    @property
+    def theta_entity(self) -> float | None:
+        """Two-way weight θ₁ of the entity means in the GLS
+        transformation `x - θ₁·x̄ᵢ - θ₂·x̄ₜ + θ₃·x̄`. `None` for one-way."""
+        return self._raw.theta_entity
+
+    @property
+    def theta_time(self) -> float | None:
+        """Two-way weight θ₂ of the time means. `None` for one-way."""
+        return self._raw.theta_time
+
+    @property
+    def theta_total(self) -> float | None:
+        """Two-way weight θ₃ of the overall mean. It is not the product
+        θ₁·θ₂ (it is 0 when σ_u² or σ_λ² is 0). `None` for one-way."""
+        return self._raw.theta_total
+
+    @property
     def cov_type(self) -> str:
         """Standard error type actually used (normalized to lowercase)."""
         return self._raw.cov_type

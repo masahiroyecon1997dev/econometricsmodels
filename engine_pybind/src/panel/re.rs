@@ -54,6 +54,8 @@
 //! 決定が無く、他手法（OLS/WLS/Logit/Probit/IV/FE）と一貫させる方針をユーザーが
 //! 選択した。nullモデル・ICC推定のサポートは別途検討する。
 
+use std::collections::BTreeMap;
+
 use engine::panel::common::TimeKeys;
 use engine::panel::re::{ReCovType, ReEffects, ReEstimator, ReInput};
 use polars::prelude::DataFrame;
@@ -271,6 +273,33 @@ pub struct REResult {
     /// panel, so this equals the number of observations per entity.
     #[pyo3(get)]
     pub n_periods: Option<usize>,
+    /// Estimated variance of the idiosyncratic error, `sigma_eps^2` (`docs/spec/re-spec.md`
+    /// section 3.1).
+    #[pyo3(get)]
+    pub sigma2_eps: f64,
+    /// Estimated variance of the entity effect, `sigma_u^2` (a negative estimate is raised
+    /// to 0).
+    #[pyo3(get)]
+    pub sigma2_u: f64,
+    /// Estimated variance of the time effect, `sigma_lambda^2`, for two-way effects (a negative
+    /// estimate is raised to 0); `None` for one-way.
+    #[pyo3(get)]
+    pub sigma2_lambda: Option<f64>,
+    /// One-way quasi-demeaning weight `theta_i` of each entity, keyed by entity id (the ids in
+    /// sorted order; the same value for every entity on a balanced panel); `None` for two-way.
+    #[pyo3(get)]
+    pub theta: Option<BTreeMap<String, f64>>,
+    /// Two-way weight of the entity means in the GLS transformation (`theta_1`); `None` for
+    /// one-way.
+    #[pyo3(get)]
+    pub theta_entity: Option<f64>,
+    /// Two-way weight of the time means (`theta_2`); `None` for one-way.
+    #[pyo3(get)]
+    pub theta_time: Option<f64>,
+    /// Two-way weight of the overall mean (`theta_3`, not the product `theta_1 * theta_2`);
+    /// `None` for one-way.
+    #[pyo3(get)]
+    pub theta_total: Option<f64>,
     /// Standard error type actually used (echoes `REOptions.cov_type`, normalized to
     /// lowercase; e.g. "classical", "hc1", "cluster", "dk").
     #[pyo3(get)]
@@ -529,6 +558,21 @@ pub(crate) fn fit(
         df_model: estimator.df_model(),
         n_entities: estimator.input().n_entities(),
         n_periods: estimator.n_periods(),
+        sigma2_eps: estimator.sigma2_eps(),
+        sigma2_u: estimator.sigma2_u(),
+        sigma2_lambda: estimator.sigma2_lambda(),
+        theta: estimator.theta_by_entity().map(|theta| {
+            estimator
+                .input()
+                .entity_labels()
+                .iter()
+                .cloned()
+                .zip(theta.iter().copied())
+                .collect()
+        }),
+        theta_entity: estimator.two_way_theta().map(|t| t.0),
+        theta_time: estimator.two_way_theta().map(|t| t.1),
+        theta_total: estimator.two_way_theta().map(|t| t.2),
         cov_type: cov_type_lower,
         dk_bandwidth_used: estimator.dk_bandwidth_used().map(|bw| bw as i64),
         f_statistic: estimator.f_statistic(),

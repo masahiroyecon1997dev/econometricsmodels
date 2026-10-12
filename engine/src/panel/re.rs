@@ -1177,6 +1177,16 @@ pub struct ReEstimator {
     df_inference: usize,
     /// 個体効果の方向（`fit`に渡された`ReEffects`）。
     effects: ReEffects,
+    /// 推定した分散成分`σ_ε²`・`σ_u²`と、2-wayの`σ_λ²`（1-wayは`None`）。`σ_u²`・`σ_λ²`は
+    /// 負の推定値を0に切り上げた値（`re-spec.md`3.1節）。
+    sigma2_eps: f64,
+    sigma2_u: f64,
+    sigma2_lambda: Option<f64>,
+    /// 1-wayの準偏差変換の重み`θ_i`（エンティティのコード順、`input.entity_labels()`と同順）。
+    /// 2-wayは`None`。
+    theta_by_entity: Option<Vec<f64>>,
+    /// 2-wayのGLS変換の3つの重み。1-wayは`None`。
+    two_way_theta: Option<TwoWayTheta>,
     /// 2-wayのときのユニークな時点数（`input.time`、FEの`n_periods`と同じ定義）。1-wayは`None`
     /// （`dk_time`だけの指定でも`None`）。
     n_periods: Option<usize>,
@@ -1337,11 +1347,11 @@ impl ReEstimator {
         // `include_intercept=true`は使えない——それだと変換されない生の`1.0`列に
         // なってしまう）。2-wayでは定数列が`1 - θ₁ - θ₂ + θ₃`倍になる。
         let const_column = vec![1.0; input.nobs()];
-        let (y, x, const_transformed) = match effects {
+        let (y, x, const_transformed, theta_by_entity, two_way_theta) = match effects {
             ReEffects::OneWay => {
                 let (theta, y, x) = quasi_demean_transform(&input, sigma2_eps, sigma2_u);
                 let c = quasi_demean_column(&const_column, input.entity_codes(), &theta);
-                (y, x, c)
+                (y, x, c, Some(theta), None)
             }
             ReEffects::TwoWay => {
                 let theta = compute_two_way_theta(
@@ -1355,7 +1365,7 @@ impl ReEstimator {
                 // `quasi_demean_transform_two_way`が`time`の存在を確認済み。
                 let time = input.time_codes().ok_or(PanelError::TwoWayRequiresTime)?;
                 let c = quasi_demean_two_way(&const_column, input.entity_codes(), time, theta);
-                (y, x, c)
+                (y, x, c, None, Some(theta))
             }
         };
 
@@ -1602,6 +1612,14 @@ impl ReEstimator {
             conf_upper,
             df_inference,
             effects,
+            sigma2_eps,
+            sigma2_u,
+            sigma2_lambda: match effects {
+                ReEffects::OneWay => None,
+                ReEffects::TwoWay => Some(sigma2_lambda),
+            },
+            theta_by_entity,
+            two_way_theta,
             n_periods,
             dk_bandwidth_used,
             df_resid,
@@ -1695,6 +1713,32 @@ impl ReEstimator {
     /// 個体効果の方向（`fit`に渡された`ReEffects`）。
     pub fn effects(&self) -> ReEffects {
         self.effects
+    }
+
+    /// 個体特有でない誤差の分散`σ_ε²`（`re-spec.md`3.1節。内部FE推定のwithin回帰残差分散）。
+    pub fn sigma2_eps(&self) -> f64 {
+        self.sigma2_eps
+    }
+
+    /// 個体効果の分散`σ_u²`（負の推定値は0に切り上げ済み、`re-spec.md`3.1節）。
+    pub fn sigma2_u(&self) -> f64 {
+        self.sigma2_u
+    }
+
+    /// 時点効果の分散`σ_λ²`（2-wayのみ。負の推定値は0に切り上げ済み、`re-spec.md`3.1.1節）。
+    /// 1-wayは`None`。
+    pub fn sigma2_lambda(&self) -> Option<f64> {
+        self.sigma2_lambda
+    }
+
+    /// 1-wayの準偏差変換の重み`θ_i`（`input().entity_labels()`と同じ順）。2-wayは`None`。
+    pub fn theta_by_entity(&self) -> Option<&[f64]> {
+        self.theta_by_entity.as_deref()
+    }
+
+    /// 2-wayのGLS変換の重み`(θ₁, θ₂, θ₃)`（entity・time・total）。1-wayは`None`。
+    pub fn two_way_theta(&self) -> Option<(f64, f64, f64)> {
+        self.two_way_theta.map(|t| (t.entity, t.time, t.total))
     }
 
     /// 2-wayのときのユニークな時点数（`ReInput`の`time`）。1-wayは`None`。
@@ -2867,8 +2911,8 @@ mod tests {
                 vec!["x1", "xi", "xt"],
                 [
                     0.710_563_608_206_315,
-                    3.019_989_504_528_16,
-                    2.596_734_503_231_58,
+                    3.019_989_504_528_157,
+                    2.596_736_326_025_116_6,
                 ],
                 [
                     0.764_301_210_325_029,
@@ -2886,11 +2930,11 @@ mod tests {
                 1e-9,
                 &format!("{label} sigma2_eps"),
             );
-            assert_close(vc.sigma2_u, sigma2[1], 1e-6, &format!("{label} sigma2_u"));
-            assert_close(
+            assert_rel(vc.sigma2_u, sigma2[1], 1e-9, &format!("{label} sigma2_u"));
+            assert_rel(
                 vc.sigma2_lambda,
                 sigma2[2],
-                1e-6,
+                1e-9,
                 &format!("{label} sigma2_lambda"),
             );
             let t = compute_two_way_theta(vc.sigma2_eps, vc.sigma2_u, vc.sigma2_lambda, 6, 4);
@@ -3299,6 +3343,108 @@ mod tests {
             (0.0, 0.0, 0.0)
         );
         assert_eq!(re.hausman_statistic(), None);
+    }
+
+    #[test]
+    fn fit_exposes_variance_components_and_weights() {
+        // 1-way（plm::ercomp、`y ~ x1 + xt`）: σ²と個体ごとのθ（バランスなので全個体で同じ）。
+        let one_way = ReEstimator::fit(
+            subset_input(&(0..24).collect::<Vec<_>>(), &["x1", "xt"], false),
+            ReEffects::OneWay,
+            ReCovType::Classical,
+            0.95,
+        )
+        .unwrap();
+        assert_rel(
+            one_way.sigma2_eps(),
+            5.558_492_530_031_272,
+            1e-9,
+            "sigma2_eps",
+        );
+        assert_rel(one_way.sigma2_u(), 2.781_216_088_364_69, 1e-9, "sigma2_u");
+        assert_eq!(one_way.sigma2_lambda(), None);
+        assert_eq!(one_way.two_way_theta(), None);
+        let theta = one_way.theta_by_entity().unwrap();
+        assert_eq!(theta.len(), 6);
+        for t in theta {
+            assert_rel(*t, 0.422_786_083_747_044_6, 1e-9, "theta");
+        }
+
+        // 2-way（plm::ercomp、`y ~ x1 + xi + xt`）: σ²（idios, id, time）とθ（id, time, total）。
+        let two_way = ReEstimator::fit(
+            two_way_input(&["x1", "xi", "xt"]),
+            ReEffects::TwoWay,
+            ReCovType::Classical,
+            0.95,
+        )
+        .unwrap();
+        assert_rel(
+            two_way.sigma2_eps(),
+            0.710_563_608_206_315_4,
+            1e-9,
+            "sigma2_eps",
+        );
+        assert_rel(two_way.sigma2_u(), 3.019_989_504_528_157, 1e-9, "sigma2_u");
+        assert_rel(
+            two_way.sigma2_lambda().unwrap(),
+            2.596_736_326_025_116_6,
+            1e-9,
+            "sigma2_lambda",
+        );
+        assert_eq!(two_way.theta_by_entity(), None);
+        let (te, tt, tot) = two_way.two_way_theta().unwrap();
+        assert_rel(te, 0.764_301_210_325_029_3, 1e-9, "theta_entity");
+        assert_rel(tt, 0.791_153_185_965_248_8, 1e-9, "theta_time");
+        assert_rel(tot, 0.713_712_012_990_144_2, 1e-9, "theta_total");
+    }
+
+    #[test]
+    fn one_way_theta_follows_the_entity_size_on_an_unbalanced_panel() {
+        // 不均衡パネルでは`θ_i = 1 - sqrt(σ_ε² / (T_i·σ_u² + σ_ε²))`が観測数`T_i`に応じて個体ごとに
+        // 異なる。エンティティ順（ID順）は`input().entity_labels()`と同じ。
+        let rows: Vec<usize> = (0..24).filter(|&r| r != 5 && r != 6).collect();
+        let re = ReEstimator::fit(
+            subset_input(&rows, &["x1"], false),
+            ReEffects::OneWay,
+            ReCovType::Classical,
+            0.95,
+        )
+        .unwrap();
+        let theta = re.theta_by_entity().unwrap();
+        let counts = re.input().entity_codes().counts();
+        assert_eq!(theta.len(), counts.len());
+        assert!(counts.iter().any(|&c| c != counts[0]));
+        for (t, &count) in theta.iter().zip(counts) {
+            let want =
+                1.0 - (re.sigma2_eps() / (count as f64 * re.sigma2_u() + re.sigma2_eps())).sqrt();
+            assert_rel(*t, want, 1e-12, "theta_i");
+        }
+        assert!(theta.windows(2).any(|w| w[0] != w[1]));
+    }
+
+    #[test]
+    fn exposed_variance_components_are_clipped_at_zero() {
+        // 負の推定値は0に切り上げた値（θの計算に使った値）を返す。グループ効果が無いDGPでは
+        // 両方0になり、θもすべて0（変換なし）。
+        let c = two_way_columns();
+        let y: Vec<f64> =
+            c.x1.iter()
+                .enumerate()
+                .map(|(r, v)| 2.0 * v + 0.1 * ((r * 7) % 5) as f64)
+                .collect();
+        let input = ReInput::from_columns(
+            &y,
+            std::slice::from_ref(&c.x1),
+            strings(&["x1"]),
+            &c.entity,
+            Some(&c.time),
+            "y".into(),
+        )
+        .unwrap();
+        let re = ReEstimator::fit(input, ReEffects::TwoWay, ReCovType::Classical, 0.95).unwrap();
+        assert_eq!(re.sigma2_u(), 0.0);
+        assert_eq!(re.sigma2_lambda(), Some(0.0));
+        assert_eq!(re.two_way_theta(), Some((0.0, 0.0, 0.0)));
     }
 
     #[test]

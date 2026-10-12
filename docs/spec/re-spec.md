@@ -65,9 +65,9 @@ RE固有の内容のみを記載する。FEとの共有範囲は[`fe-spec.md`](.
 - **`n_periods`**: `time`を指定した2-wayのときだけユニークな時点数（FEと同じ定義、`fe-spec.md`
   「結果構造体」参照）。1-wayは`None`で、`dk_time`だけの指定でも`None`。2-wayはバランスパネル
   必須のため各エンティティの観測数と一致する。
-- **2-wayの`hausman_*`・`r_squared_*`は暫定値**: 2-wayのハウスマン検定とパネル固有R²は未実装で、
-  `time`を指定すると`hausman_*`は`None`、`r_squared_*`は`NaN`になる（1-wayの値を流用すると
-  意味の違う値が黙って出るため。実装後に外す暫定の扱いで、未実装のまま単独でリリースしない）。
+- **`hausman_*`・`r_squared_*`は1-way・2-wayとも計算される**（3.6・3.7節）。`hausman_*`が`None`に
+  なるのは、検定できる傾き係数が無いとき（1-wayは時間変化のある列が無い、2-wayは2-way within変換後に
+  分散のある列が無い、または残りがすべて識別できない列）だけ。
 - **`dk_bandwidth_used`**: `cov_type="dk"`のとき実際に使われたバンド幅（FEと同じ意味、`fe-spec.md`
   「結果構造体」参照）。`dk`以外は`None`。ハウスマン検定の補助回帰が内部で解決するバンド幅は
   本体と同じ値だが、この項目はRE本体の`fit()`で解決した値を報告する。
@@ -270,7 +270,11 @@ FEの`r_squared_between`/`r_squared_overall`をそのまま流用できず、RE�
 
 `r_squared_within`はFEと同じ定義（θ=1固定の通常のwithin変換、REの`θ_i`とは無関係）。
 `linearmodels`の早期リターン（`has_constant`かつ傾き係数0個なら3種とも`0.0`）に倣い、
-`df_model==1`なら3種とも`0.0`とする。`r_squared_between`が負値になりうる（`linearmodels`のSST/SSR方式のF統計量と
+`df_model==1`なら3種とも`0.0`とする。**2-wayでも定義は同じで、withinだけがFEの2-wayと揃えて個体と時点の
+両方でdemeanする**: `r_squared_within`は2-way within変換した`y`・`x`に傾きを当てはめたR²（時間変化のある
+列が無ければ`0.0`）、`r_squared_between`は個体平均への当てはめ、`r_squared_overall`は生の`y`・`x`への
+当てはめ（どちらも切片込みの中心化TSS）。`plm`の`r.squared`は変換後の回帰のR²を返すだけで対応する参照が
+無く、検証は`plm`の係数から定義どおりに計算した独立な値との照合になる。`r_squared_between`が負値になりうる（`linearmodels`のSST/SSR方式のF統計量と
 同型の性質。F統計量自体は3.5節のWald形式で負値にならない）ことも実地確認済み。検証は`linearmodels`（`cov_type="unadjusted"`）の
 `rsquared_within`/`rsquared_between`/`rsquared_overall`と直接数値比較。
 
@@ -296,10 +300,16 @@ FEの`r_squared_between`/`r_squared_overall`をそのまま流用できず、RE�
 - **定数項の扱い**: `plm`は`reX`から定数列を除き補助回帰に未変換の`1`を足す。バランス
   パネルでは`θ_i`が全個体共通のため変換済み定数列を使う版と同値だが、不均衡パネルでは
   値が異なる。本実装は`plm`に合わせる。
-- **比較は常に1-way**（個体効果のみ、RE本体と同じ構造）。`X̃`はRE本体が分散成分推定に
-  使う1-way FEのwithin変換から得る。`REOptions.dk_time`（`cov_type="dk"`専用）の有無は
-  結果に影響しない（`dk_time`は`cov_type="dk"`の時点列にのみ使う）。**`time`を指定した2-wayでは
-  未実装で、`hausman_*`は`None`**（設計は5章。1-wayの検定を流用しない）。
+- **比較相手はRE本体と同じ個体効果構造のFE**: 1-wayはentityのみ、`time`を指定した2-wayは
+  entity+timeの2-way FE。`X̃`はRE本体が分散成分推定に使う内部FE（1-wayは1-way、2-wayは2-way）の
+  within変換から得る（2-wayでは2-way within変換後に分散のある列だけ、`hausman_df`はその数）。
+  `REOptions.dk_time`（`cov_type="dk"`専用）の有無は結果に影響しない（`dk_time`は`cov_type="dk"`の
+  時点列にのみ使う）。2-wayの補助回帰の`X*`は3つのθで変換した全傾き、`y*`も同じ変換で、定数項は
+  未変換の`1`（1-wayと同じ）。
+- **識別できない`X̃`の列の判定は列ごと**（`x*_j - x̃_j`が全観測で一定）。1-wayのバランスパネルの
+  時点間でのみ変わる列のほか、2-wayでは個体平均も時点平均も一定の交互作用列（`x* = x̃`）が該当する。
+  複数列の線形結合による共線（例: 個体平均`x̄ᵢ`を説明変数に加える相関ランダム効果の定式化）は
+  検出せず、補助回帰が特異になって`fit()`が失敗する（ランクベースの判定への一般化は今後の課題）。
 - **`cov_type`連動**: 補助回帰のWald検定の共分散はRE本体の`cov_type`に対応させる
   （専用オプションは設けない）。既定の`cov_type="cluster"`ではcluster-robust版（Wooldridgeの
   robust Hausman検定）になり、`cov_type="classical"`では帰無仮説のもとでREが完全に効率的
@@ -401,7 +411,7 @@ FEの`WithinRegressionFailed`と同じく内側の`LeastSquaresError`の分類�
   マルチレベルモデルの標準的なユースケースだが、v1は他手法との一貫性を優先し`x`の空リストを
   拒否している。
 - **2-way RE**（バランスパネルの本体は実装済み: `time`オプション・Swamy-Arora分散成分・3つのθの
-  GLS変換・F統計量・`cov_type`・`n_periods`。**未実装**: ハウスマン検定とパネル固有R²（暫定値は2章）、
+  GLS変換・F統計量・`cov_type`・`n_periods`・ハウスマン検定・パネル固有R²。**未実装**:
   分散成分の公開、`variance_method`、不均衡パネル。以下は設計検討で確定した方針）:
   - **対象はバランスパネルのみ**。不均衡パネルは、FEの2-wayと同じく`ValidationError`で拒否する
     （`validate_balanced_panel`相当の検証を共有する）。アンバランスパネルの2-way REは教科書レベルの
@@ -480,16 +490,18 @@ FEの`WithinRegressionFailed`と同じく内側の`LeastSquaresError`の分類�
       `plm::phtest(method = "aux", effect = "twoways", vcov = ...)`が、`X`の全列が両次元で変動する
       データでclassical・HC1・HC2・HC3（`vcovHC`のwhite1）・cluster（arellano・sss、entity）の
       全てについて、補助回帰の手計算と機械精度（相対`1e-14`）で一致することを確認済み。DK
-      （`vcovSCC`）の2-wayでの数値照合は実装時に行う。
+      （`vcovSCC`、`type = "sss"`・Bartlett重み）も同じ入力で手計算と相対`7e-14`で一致する
+      （スケールは`T/(T-1)·(n-1)/(n-K)`、`K`は補助回帰の説明変数の数）。
     - **検定対象は`X̃`の列数**（2-way within変換後に分散のある列の数、以下`k_tv`）。時点間でのみ・個体間で
-      のみ変わる列は`X*`には入るが`X̃`には入らない。`k_tv = 0`なら`None`。クラスター数・DKの時点数の
-      事前検証は、1-wayと同じく補助回帰の説明変数の数と検定対象の係数の数に合わせて直す。
+      のみ変わる列は`X*`には入るが`X̃`には入らない。`k_tv = 0`なら`None`。クラスター数の
+      事前検証は補助回帰の傾き係数の数（`X*`と`X̃`）に対して、DKの時点数の事前検証は1-wayと同じく
+      RE本体の傾き係数の数に対して行う（検定対象の係数の数より保守的）。
     - **参照**: 全列が両次元で変動するシナリオは`plm`で照合する。時点間でのみ・個体間でのみ変わる列を含む
       シナリオは、`plm`が係数を位置で選ぶため`X̃`ではない係数を検定してしまい、手計算（独立な補助回帰）
       との照合になる（plmとの食い違いを実測: 同じデータで`plm` 5.388・手計算3.291）。
-    - **実装の見通し**: 1-wayの`re_hausman_test`は、`X̃`を内部FE推定量（分散成分用、1-way）が持つ
-      within変換済み設計行列から取っている。2-wayでは、分散成分用に作る2-way FE推定量（`k_tv`列のみ）を
-      そのまま渡す形になり、補助回帰以降の計算は共通のまま使える。`dk_time`は引き続きDKの時点列として
+    - **実装**: `re_hausman_test`は、`X̃`を内部FE推定量（分散成分用）が持つwithin変換済み設計行列から
+      取る。2-wayでは分散成分用に作る2-way FE推定量（`k_tv`列のみ）がそのまま渡り、補助回帰以降の計算は
+      1-wayと共通。`dk_time`は引き続きDKの時点列として
       `time`とは独立に扱う（FEと同じ規約）。
   - **パネル固有R²は1-wayと同じ3種を持つ**。定義はFEの2-wayと揃える: `r_squared_within`は2-way
     within（個体＋時点でdemean）した`y`・`x`に`β̂`を当てはめたR²、`r_squared_between`は個体平均に

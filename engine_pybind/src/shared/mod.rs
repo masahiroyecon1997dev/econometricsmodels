@@ -4,6 +4,7 @@
 //! 分け、どの系統が使うかでは分けない（`engine/src/shared/`と同じ方針）。
 
 pub(crate) mod augment;
+pub(crate) mod column_error;
 pub(crate) mod column_extraction;
 pub(crate) mod errors;
 pub(crate) mod option_repr;

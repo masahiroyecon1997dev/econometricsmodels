@@ -91,8 +91,9 @@ NOT_A_POLARS_DATAFRAME_LAZY = (
     NOT_A_POLARS_DATAFRAME + "; call .collect() first"
 )
 
-# extract_f64_column: y/x/weight/hac_time の抽出で使う（engine_pybind/src/shared/
-# column_extraction.rs）。
+# 列の抽出で使う（engine_pybind/src/shared/column_error.rs の`ColumnExtractionError`、
+# 抽出は column_extraction.rs）。y/x/weight/hac_time等の数値列と、entity/time/
+# clusterのキー列で、列が存在しない・欠損値・非有限値の文言は共通。
 
 COLUMN_DOES_NOT_EXIST = "column '{name}' does not exist in the data"
 COLUMN_HAS_MISSING_VALUES = (
@@ -160,11 +161,6 @@ COLUMN_UNSUPPORTED_TIME_DTYPE = (
     "column; use an integer, float, string, categorical, Date or Datetime "
     "column"
 )
-
-# extract_group_key_column: cluster の抽出で使う（同ファイル86-111行）。
-# 列が存在しない場合のメッセージは extract_f64_column と同文言だが、欠損値の
-# メッセージはグループキー列専用の短い文言になる点に注意。
-GROUP_KEY_COLUMN_HAS_MISSING_VALUES = "column '{name}' contains missing values"
 
 # ── validation.rs（全系統共通、y/weight/x/x_exog/x_endog/instruments等の
 #    ロール間検証） ────────────────────────────────────────────────────

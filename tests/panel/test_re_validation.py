@@ -335,7 +335,7 @@ def test_group_key_column_null_values_raise(bad_col, option):
     )
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.GROUP_KEY_COLUMN_HAS_MISSING_VALUES, name=bad_col),
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name=bad_col, count=1),
     ):
         RE(df, y="y", x=["x1"], entity="entity", options=options).fit()
 
@@ -352,7 +352,7 @@ def test_cluster_null_values_raise():
     options = REOptions(cov_type="cluster", cluster="state")
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.GROUP_KEY_COLUMN_HAS_MISSING_VALUES, name="state"),
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="state", count=1),
     ):
         RE(df, y="y", x=["x1"], entity="entity", options=options).fit()
 

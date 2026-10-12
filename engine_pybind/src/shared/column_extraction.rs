@@ -24,6 +24,7 @@ use pyo3_polars::PyDataFrame;
 use engine::panel::common::TimeKeys;
 use engine::shared::group_codes::GroupCodes;
 
+use super::column_error::ColumnExtractionError;
 use super::errors::{ValidationError, common_error_to_pyerr};
 use crate::panel::common::panel_error_to_pyerr;
 
@@ -204,9 +205,9 @@ fn check_numeric_dtype(name: &str, dtype: &DataType, role: NumericRole) -> PyRes
 /// - 欠損値（null）を含む
 /// - NaN・無限大（infinity）を含む
 pub fn extract_f64_column(df: &DataFrame, name: &str) -> PyResult<Vec<f64>> {
-    let series = df.column(name).map_err(|_| {
-        ValidationError::new_err(format!("column '{name}' does not exist in the data"))
-    })?;
+    let series = df
+        .column(name)
+        .map_err(|_| ColumnExtractionError::not_found(name))?;
 
     check_numeric_dtype(name, series.dtype(), NumericRole::Value)?;
     cast_to_finite_f64_values(name, series)
@@ -232,9 +233,9 @@ pub fn extract_f64_column(df: &DataFrame, name: &str) -> PyResult<Vec<f64>> {
 /// - 浮動小数の列にNaN・無限大を含む
 /// - 値が重複する
 pub fn extract_time_order_ranks(df: &DataFrame, name: &str) -> PyResult<Vec<f64>> {
-    let series = df.column(name).map_err(|_| {
-        ValidationError::new_err(format!("column '{name}' does not exist in the data"))
-    })?;
+    let series = df
+        .column(name)
+        .map_err(|_| ColumnExtractionError::not_found(name))?;
     let dtype = series.dtype();
 
     check_numeric_dtype(name, dtype, NumericRole::Ordering)?;
@@ -260,13 +261,10 @@ pub fn extract_time_order_ranks(df: &DataFrame, name: &str) -> PyResult<Vec<f64>
     strict_ranks(name, &values)
 }
 
-/// 欠損値（null）が1つでもあれば`ValidationError`にする。
-fn reject_missing_values(name: &str, null_count: usize) -> PyResult<()> {
+/// 欠損値（null）が1つでもあれば`ColumnExtractionError::ContainsNull`にする。
+fn reject_missing_values(name: &str, null_count: usize) -> Result<(), ColumnExtractionError> {
     if null_count > 0 {
-        return Err(ValidationError::new_err(format!(
-            "column '{name}' contains {null_count} missing value(s). Missing values are not \
-             handled automatically; please impute or remove them before calling this function"
-        )));
+        return Err(ColumnExtractionError::contains_null(name, null_count));
     }
     Ok(())
 }
@@ -275,15 +273,13 @@ fn reject_missing_values(name: &str, null_count: usize) -> PyResult<()> {
 fn cast_to_finite_f64_values(name: &str, series: &Column) -> PyResult<Vec<f64>> {
     // 許可したdtypeはすべてf64にキャストできるため、ここでの失敗は想定していない
     // （防御的に`ValidationError`へ変換する）。
-    let series = series.cast(&DataType::Float64).map_err(|e| {
-        ValidationError::new_err(format!(
-            "column '{name}' could not be cast to a numeric type (f64): {e}"
-        ))
-    })?;
+    let series = series
+        .cast(&DataType::Float64)
+        .map_err(|e| ColumnExtractionError::conversion_failed(name, e))?;
 
     let ca = series
         .f64()
-        .map_err(|e| ValidationError::new_err(format!("failed to convert column '{name}': {e}")))?;
+        .map_err(|e| ColumnExtractionError::conversion_failed(name, e))?;
 
     reject_missing_values(name, ca.null_count())?;
 
@@ -303,12 +299,8 @@ fn cast_to_finite_f64_values(name: &str, series: &Column) -> PyResult<Vec<f64>> 
 
     // polarsのnull_count()はNaN/無限大を検出しない（値としては存在するため）。
     // IEEE754のNaN・infinityは別途スキャンする必要がある。
-    if let Some((row, bad_value)) = values.iter().enumerate().find(|(_, v)| !v.is_finite()) {
-        return Err(ValidationError::new_err(format!(
-            "column '{name}' contains a non-finite value ({bad_value}) at row {row}. NaN and \
-             infinite values are not handled automatically; please impute or remove them \
-             before calling this function"
-        )));
+    if let Some((row, &bad_value)) = values.iter().enumerate().find(|(_, v)| !v.is_finite()) {
+        return Err(ColumnExtractionError::non_finite(name, row, bad_value).into());
     }
 
     Ok(values)
@@ -505,7 +497,7 @@ fn factorize_checked_key(name: &str, column: &Column) -> PyResult<FactorizedKey>
     let representatives = column
         .as_materialized_series()
         .take(&IdxCa::from_vec("first_rows".into(), first_rows))
-        .map_err(|e| ValidationError::new_err(format!("failed to convert column '{name}': {e}")))?;
+        .map_err(|e| ColumnExtractionError::conversion_failed(name, e))?;
     Ok(FactorizedKey {
         codes,
         representatives,
@@ -522,7 +514,7 @@ fn with_group_labels<T>(
     let strings = cast_series_to_string(name, representatives)?;
     let ca = strings
         .str()
-        .map_err(|e| ValidationError::new_err(format!("failed to convert column '{name}': {e}")))?;
+        .map_err(|e| ColumnExtractionError::conversion_failed(name, e))?;
     // キャストは非strictで、文字列にできない値はnullになりうる。panicせず`Err`にする。
     let labels: Vec<&str> = ca
         .iter()
@@ -662,17 +654,13 @@ fn time_order_error(name: &str, err: PolarsError) -> PyErr {
 
 /// キー列`name`の存在・dtype・欠損値・（浮動小数の）非有限値を検査し、問題が無ければその列を返す。
 fn checked_key_column<'a>(df: &'a DataFrame, name: &str, role: KeyRole) -> PyResult<&'a Column> {
-    let series = df.column(name).map_err(|_| {
-        ValidationError::new_err(format!("column '{name}' does not exist in the data"))
-    })?;
+    let series = df
+        .column(name)
+        .map_err(|_| ColumnExtractionError::not_found(name))?;
 
     check_key_dtype(name, series.dtype(), role)?;
 
-    if series.null_count() > 0 {
-        return Err(ValidationError::new_err(format!(
-            "column '{name}' contains missing values"
-        )));
-    }
+    reject_missing_values(name, series.null_count())?;
 
     // 浮動小数のキーのNaN・無限大は、nullと違い`null_count`に現れず、文字列化すると
     // `"NaN"`という1つのグループになってしまう。数値列と同じく拒否する。
@@ -702,7 +690,7 @@ fn extract_key_column(df: &DataFrame, name: &str, role: KeyRole) -> PyResult<Vec
     let series = cast_key_column_to_string(name, series)?;
     let ca = series
         .str()
-        .map_err(|e| ValidationError::new_err(format!("failed to convert column '{name}': {e}")))?;
+        .map_err(|e| ColumnExtractionError::conversion_failed(name, e))?;
 
     Ok(ca
         .iter()
@@ -738,9 +726,7 @@ fn factorize_keys<K: std::hash::Hash + Eq>(
 /// 仮グループごとに文字列化して`GroupCodes::from_factorized_without_keys`に渡すとき、同じ
 /// 文字列になる仮グループがまとめられるため、文字列で比べた場合と同じグルーピングになる。
 fn factorize_key_column(name: &str, series: &Column) -> PyResult<(Vec<usize>, Vec<usize>)> {
-    let convert = |e: PolarsError| {
-        ValidationError::new_err(format!("failed to convert column '{name}': {e}"))
-    };
+    let convert = |e: PolarsError| ColumnExtractionError::conversion_failed(name, e);
     let dtype = series.dtype();
     if dtype.is_float() {
         let as_f64 = series.cast(&DataType::Float64).map_err(convert)?;
@@ -772,20 +758,16 @@ fn factorize_key_column(name: &str, series: &Column) -> PyResult<(Vec<usize>, Ve
 fn reject_non_finite(name: &str, series: &Column) -> PyResult<()> {
     let as_f64 = series
         .cast(&DataType::Float64)
-        .map_err(|e| ValidationError::new_err(format!("failed to convert column '{name}': {e}")))?;
+        .map_err(|e| ColumnExtractionError::conversion_failed(name, e))?;
     let ca = as_f64
         .f64()
-        .map_err(|e| ValidationError::new_err(format!("failed to convert column '{name}': {e}")))?;
+        .map_err(|e| ColumnExtractionError::conversion_failed(name, e))?;
     if let Some((row, bad_value)) = ca
         .iter()
         .enumerate()
         .find_map(|(row, v)| v.filter(|v| !v.is_finite()).map(|v| (row, v)))
     {
-        return Err(ValidationError::new_err(format!(
-            "column '{name}' contains a non-finite value ({bad_value}) at row {row}. NaN and \
-             infinite values are not handled automatically; please impute or remove them \
-             before calling this function"
-        )));
+        return Err(ColumnExtractionError::non_finite(name, row, bad_value).into());
     }
     Ok(())
 }

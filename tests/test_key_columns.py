@@ -318,7 +318,7 @@ def test_null_key_raises_for_every_method(frame, column, fits):
         with pytest.raises(
             ValidationError,
             match=escaped(
-                msgs.GROUP_KEY_COLUMN_HAS_MISSING_VALUES, name=column
+                msgs.COLUMN_HAS_MISSING_VALUES, name=column, count=1
             ),
         ):
             fit(df)

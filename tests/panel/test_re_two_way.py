@@ -842,6 +842,6 @@ def test_time_with_null_values_raises(panel):
     )
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.GROUP_KEY_COLUMN_HAS_MISSING_VALUES, name="time"),
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="time", count=1),
     ):
         _fit(df, REOptions(time="time"))

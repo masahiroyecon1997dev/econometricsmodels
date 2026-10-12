@@ -56,4 +56,5 @@ polars = { version = "=0.55.2", features = [
 ] }
 pyo3-polars = "=0.28.0"
 faer = { workspace = true }
+thiserror = { workspace = true }
 engine = { path = "../engine" }

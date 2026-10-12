@@ -1361,7 +1361,7 @@ def test_cluster_with_null_raises(censored_dataset):
     options = TobitOptions(cov_type="cluster", cluster="grp")
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.GROUP_KEY_COLUMN_HAS_MISSING_VALUES, name="grp"),
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="grp", count=1),
     ):
         Tobit(df, y="y", x=["x1", "x2"], options=options).fit()
 

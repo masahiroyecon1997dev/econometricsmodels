@@ -303,9 +303,7 @@ def test_numeric_column_non_finite_values_raise(bad_col, value, display):
 
 @pytest.mark.parametrize("bad_col", ["entity", "time"])
 def test_group_key_column_null_values_raise(bad_col):
-    """`entity`/`time`（`extract_group_key_column`）は件数を含まない専用文言
-    `GROUP_KEY_COLUMN_HAS_MISSING_VALUES`（`y`/`x`とは別ロジック）。
-    """
+    """`entity`/`time`の欠損値も、`y`/`x`と同じ`COLUMN_HAS_MISSING_VALUES`。"""
     values: dict[str, list[float | str | None]] = {
         "y": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
         "x1": [0.5, 1.5, 2.5, 3.5, 4.5, 5.5],
@@ -317,15 +315,13 @@ def test_group_key_column_null_values_raise(bad_col):
     options = FEOptions(time="time")
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.GROUP_KEY_COLUMN_HAS_MISSING_VALUES, name=bad_col),
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name=bad_col, count=1),
     ):
         FE(df, y="y", x=["x1"], entity="entity", options=options).fit()
 
 
 def test_cluster_null_values_raise():
-    """`cluster`（`extract_group_key_column`経由）の欠損値も`entity`/
-    `time`と同じ`GROUP_KEY_COLUMN_HAS_MISSING_VALUES`。
-    """
+    """`cluster`の欠損値も`entity`/`time`と同じ`COLUMN_HAS_MISSING_VALUES`。"""
     df = pl.DataFrame(
         {
             "y": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
@@ -337,7 +333,7 @@ def test_cluster_null_values_raise():
     options = FEOptions(cov_type="cluster", cluster="state")
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.GROUP_KEY_COLUMN_HAS_MISSING_VALUES, name="state"),
+        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="state", count=1),
     ):
         FE(df, y="y", x=["x1"], entity="entity", options=options).fit()
 

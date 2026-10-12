@@ -96,7 +96,7 @@ def check_params_table_structure(dataset, estimator_cls):
         "conf_upper",
     }
     for row in table:
-        assert expected_keys <= set(row.keys())
+        assert set(row.keys()) == expected_keys
     assert [row["param_name"] for row in table] == ["const", "x1", "x2"]
 
 
@@ -421,7 +421,7 @@ def check_marginal_effects_default_excludes_intercept(dataset, estimator_cls):
         "conf_upper",
     }
     for row in effects:
-        assert expected_keys <= set(row.keys())
+        assert set(row.keys()) == expected_keys
 
 
 def check_marginal_effects_mean_and_median_differ_from_overall(
@@ -436,10 +436,12 @@ def check_marginal_effects_mean_and_median_differ_from_overall(
     assert overall != median
 
 
-def check_marginal_effects_at_is_case_insensitive(dataset, estimator_cls):
+def check_marginal_effects_at_is_case_insensitive(
+    dataset, estimator_cls, at, spelling
+):
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
-    assert res.marginal_effects(at="OVERALL") == res.marginal_effects(
-        at="overall"
+    assert res.marginal_effects(at=respell(at, spelling)) == (
+        res.marginal_effects(at=at)
     )
 
 

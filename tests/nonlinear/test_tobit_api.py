@@ -104,7 +104,7 @@ def test_params_table_structure(censored_dataset):
         "conf_upper",
     }
     for row in table:
-        assert expected_keys <= set(row.keys())
+        assert set(row.keys()) == expected_keys
     assert [row["param_name"] for row in table] == [
         "const",
         "x1",
@@ -480,6 +480,55 @@ def test_censoring_fit_check_omits_upper_when_upper_is_none(
     assert "upper" not in {row["category"] for row in check}
 
 
+@pytest.mark.parametrize(
+    ("lower_quantile", "expected_categories"),
+    [
+        (None, {"uncensored", "upper"}),
+        (0.05, {"lower", "uncensored", "upper"}),
+    ],
+    ids=["right_only", "two_sided"],
+)
+def test_censoring_fit_check_includes_upper_when_upper_is_set(
+    dataset, lower_quantile, expected_categories
+):
+    """`upper`を指定したモデルでは`"upper"`カテゴリが現れる（右打ち切りのみ・
+    両側打ち切り）。観測された割合・モデルが示す割合はそれぞれ全カテゴリで
+    合計1になり、`"upper"`の観測割合は`y`が上限ちょうどの観測の割合に一致する。
+    モデルが示す割合は、各カテゴリで観測割合の近く（0.05以内）にある。両側の
+    ケースは下限（約5%）と上限（約20%）の打ち切り率を大きく変えてあり、
+    `"lower"`と`"upper"`のモデル割合の取り違えもこの近さの確認で検出できる。
+    共有`dataset`の`y`を分位点で打ち切るのは、`censored_dataset`が下限0の
+    左打ち切りのみで上限側を持たないため。
+    """
+    upper = float(dataset["y"].quantile(0.8))
+    lower = (
+        None
+        if lower_quantile is None
+        else float(dataset["y"].quantile(lower_quantile))
+    )
+    y = dataset["y"].clip(lower_bound=lower, upper_bound=upper)
+    df = dataset.with_columns(y.alias("y"))
+    res = Tobit(
+        df,
+        y="y",
+        x=["x1", "x2"],
+        options=TobitOptions(lower=lower, upper=upper),
+    ).fit()
+    check = {row["category"]: row for row in res.censoring_fit_check()}
+
+    assert set(check) == expected_categories
+    for key in ("observed_rate", "model_implied_rate"):
+        total = sum(row[key] for row in check.values())
+        assert total == pytest.approx(1.0), key
+    for category, row in check.items():
+        assert row["model_implied_rate"] == pytest.approx(
+            row["observed_rate"], abs=0.05
+        ), category
+    observed_upper = float((df["y"] == upper).mean())
+    assert 0.0 < observed_upper < 1.0
+    assert check["upper"]["observed_rate"] == pytest.approx(observed_upper)
+
+
 # ── marginal_effects() ────────────────────────────────────────────────
 
 
@@ -498,7 +547,7 @@ def test_marginal_effects_default_excludes_intercept(censored_dataset):
         "conf_upper",
     }
     for row in effects:
-        assert expected_keys <= set(row.keys())
+        assert set(row.keys()) == expected_keys
 
 
 @pytest.mark.parametrize(
@@ -528,8 +577,12 @@ def test_marginal_effects_mean_and_median_differ_from_overall(
     assert overall != median
 
 
-def test_marginal_effects_at_is_case_insensitive(censored_dataset):
+@pytest.mark.parametrize("at", ["overall", "mean", "median"])
+@pytest.mark.parametrize("spelling", CASE_SPELLINGS)
+def test_marginal_effects_at_is_case_insensitive(
+    censored_dataset, at, spelling
+):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
-    assert res.marginal_effects(at="OVERALL") == res.marginal_effects(
-        at="overall"
+    assert res.marginal_effects(at=respell(at, spelling)) == (
+        res.marginal_effects(at=at)
     )

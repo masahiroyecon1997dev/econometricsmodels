@@ -40,6 +40,19 @@ from econometricsmodels import IV, IVOptions, IVResults
 from benchmark.common import hac_auto_lag
 from benchmark.iv.constants import IV_COV_TYPES
 
+
+def _assert_valid_test_statistic(
+    statistic: float | None, p_value: float | None
+) -> None:
+    """統計量が正、p値が開区間(0, 1)にあること。`is not None`だけでは見逃す
+    退化した値（0・NaN・スケールの誤り等）への簡易ガード。
+    """
+    assert statistic is not None
+    assert p_value is not None
+    assert statistic > 0.0
+    assert 0.0 < p_value < 1.0
+
+
 # ── 成功パス・結果型 ──────────────────────────────────────────────────
 
 
@@ -160,7 +173,7 @@ def test_params_table_structure(iv_dataset):
         "conf_upper",
     }
     for row in table:
-        assert expected_keys <= set(row.keys())
+        assert set(row.keys()) == expected_keys
     assert [row["param_name"] for row in table] == ["const", "x1", "endog1"]
 
 
@@ -219,8 +232,7 @@ def test_overid_statistic_present_when_over_identified(iv_dataset):
     はNoneにならない（2SLSのSargan検定）。
     """
     res = our_fit(iv_dataset)
-    assert res.overid_statistic is not None
-    assert res.overid_p_value is not None
+    _assert_valid_test_statistic(res.overid_statistic, res.overid_p_value)
 
 
 def test_overid_statistic_none_when_just_identified(iv_dataset):
@@ -241,8 +253,7 @@ def test_overid_statistic_present_for_gmm_hansen_j(iv_dataset):
     """
     options = IVOptions(estimator="gmm")
     res = our_fit(iv_dataset, options=options)
-    assert res.overid_statistic is not None
-    assert res.overid_p_value is not None
+    _assert_valid_test_statistic(res.overid_statistic, res.overid_p_value)
 
 
 def test_wu_hausman_is_none_for_gmm(iv_dataset):
@@ -258,8 +269,9 @@ def test_wu_hausman_is_none_for_gmm(iv_dataset):
 
 def test_wu_hausman_is_not_none_for_2sls(iv_dataset):
     res = our_fit(iv_dataset)
-    assert res.wu_hausman_statistic is not None
-    assert res.wu_hausman_p_value is not None
+    _assert_valid_test_statistic(
+        res.wu_hausman_statistic, res.wu_hausman_p_value
+    )
 
 
 def test_wu_hausman_degrades_to_none_when_cluster_count_at_most_augmented_slopes(

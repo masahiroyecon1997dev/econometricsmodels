@@ -211,7 +211,9 @@ def test_marginal_effects_mean_and_median_differ_from_overall(
     )
 
 
-def test_marginal_effects_at_is_case_insensitive(binary_dataset):
+@pytest.mark.parametrize("at", ["overall", "mean", "median"])
+@pytest.mark.parametrize("spelling", CASE_SPELLINGS)
+def test_marginal_effects_at_is_case_insensitive(binary_dataset, at, spelling):
     _checks.check_marginal_effects_at_is_case_insensitive(
-        binary_dataset, Logit
+        binary_dataset, Logit, at, spelling
     )

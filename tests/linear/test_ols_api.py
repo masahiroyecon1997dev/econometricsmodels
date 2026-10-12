@@ -157,7 +157,7 @@ def test_params_table_structure(dataset):
         "conf_upper",
     }
     for row in table:
-        assert expected_keys <= set(row.keys())
+        assert set(row.keys()) == expected_keys
     assert [row["param_name"] for row in table] == ["const", "x1", "x2"]
 
 

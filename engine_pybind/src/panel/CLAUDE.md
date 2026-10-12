@@ -102,7 +102,7 @@ FEの1段階目（データ抽出・pyclass定義）と同じ段階（`REOptions
   `ReCovType::Dk { time }`に渡し、`ReInput`には渡さない。`build_re_input`は
   `(ReInput, ReEffects, ReCovType, String)`を返す。`REResult.n_periods`は
   `ReEstimator::n_periods()`をそのまま渡す。2-wayでも`hausman_*`・`r_squared_*`は1-wayと同じ項目に入る
-  （`docs/spec/re-spec.md`2.3・3.7節）。`cov_type`が`"dk"`以外で`dk_time`を指定すると
+  （`docs/spec/re-spec.md`3.6・3.7節）。`cov_type`が`"dk"`以外で`dk_time`を指定すると
   `parse_re_cov_type`が`reject_unused_option`で`ValidationError`にする（`cluster`/
   `dk_bandwidth`と同じ規則）。詳細は`panel/re.rs`モジュールdoc参照。
 - **`x`の空リストを許容しない（ユーザー確認済み、2026-09-20）**: REで`x=[]`は「分散成分

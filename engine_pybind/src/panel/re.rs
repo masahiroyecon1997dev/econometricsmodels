@@ -39,7 +39,7 @@
 //! `"dk"`以外で`dk_time`を指定すると黙って無視されるため`ValidationError`にする
 //! （`parse_re_cov_type`）。
 //!
-//! ハウスマン検定とパネル固有R²は1-way・2-wayとも計算される（`re-spec.md`2.3・3.7節）。
+//! ハウスマン検定とパネル固有R²は1-way・2-wayとも計算される（`re-spec.md`3.6・3.7節）。
 //!
 //! ## `cov_type`の非対応値
 //!
@@ -298,7 +298,8 @@ pub struct REResult {
     pub aic: f64,
     #[pyo3(get)]
     pub bic: f64,
-    /// Within R² (entity-demeaned, or demeaned by entity and time for two-way effects).
+    /// Within R² (entity-demeaned, or demeaned by entity and time for two-way effects);
+    /// `0.0` when no regressor varies after demeaning.
     #[pyo3(get)]
     pub r_squared_within: f64,
     /// Between R² (entity means, with the intercept).
@@ -309,12 +310,15 @@ pub struct REResult {
     pub r_squared_overall: f64,
     /// Regression-based Hausman test statistic (chi-squared version, Wald test that the
     /// within-transformed regressors are jointly zero in the auxiliary regression;
-    /// `docs/spec/re-spec.md` section 3.7). The Wald test's covariance follows
-    /// `cov_type`. Always non-negative. `None` when no slope coefficient can be tested
-    /// (a time-invariant regressor, or one that varies only over time on a balanced panel,
-    /// is left out of the comparison); if the
-    /// auxiliary regression cannot be computed (e.g. too few clusters or periods for the
-    /// robust covariance) `fit()` fails.
+    /// `docs/spec/re-spec.md` section 3.7). The comparison is against FE with the same
+    /// structure as the RE model (entity for one-way, entity and time for two-way). The Wald
+    /// test's covariance follows `cov_type`. Always non-negative. `None` when no slope
+    /// coefficient can be tested: a regressor that does not vary after the within
+    /// transformation (time-invariant; for two-way effects, varying in only one dimension) or
+    /// whose within-transformed copy is not identified (for example a regressor that varies
+    /// only over time on a balanced panel, or an interaction with zero entity and time means)
+    /// is left out of the comparison. If the auxiliary regression cannot be computed (e.g.
+    /// too few clusters or periods for the robust covariance) `fit()` fails.
     #[pyo3(get)]
     pub hausman_statistic: Option<f64>,
     /// p-value of `hausman_statistic` (upper-tail chi-squared probability).
@@ -679,7 +683,7 @@ mod tests {
 
     #[test]
     fn build_re_input_rejects_dk_time_when_cov_type_is_not_dk() {
-        // `dk_time`はDK HACの時系列順序専用（ハウスマン検定は常に1-way）。`cov_type`が"dk"以外だと
+        // `dk_time`はDK HACの時系列順序専用（ハウスマン検定の比較相手には影響しない）。`cov_type`が"dk"以外だと
         // 黙って無視されるため`ValidationError`にする。
         let df = well_formed_df();
         let mut options = default_options();

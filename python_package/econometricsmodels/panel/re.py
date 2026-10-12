@@ -4,9 +4,10 @@ A thin wrapper around `econometricsmodels._lib.fit_re` (the Rust
 implementation, `engine`/`engine_pybind`). Validation and estimation
 logic live entirely on the Rust side; this module only provides the
 Python-facing API shape for polars DataFrames — `entity` as a bare
-column-name argument (`time` goes in `REOptions`), `x` as a list, an options object for estimation
-settings (CLAUDE.md section 2, `.claude/rules/python-style.md`
-"設計方針との整合性", `docs/spec/panel-common.md` section 1).
+column-name argument (`time` goes in `REOptions`), `x` as a list, an
+options object for estimation settings (CLAUDE.md section 2,
+`.claude/rules/python-style.md` "設計方針との整合性",
+`docs/spec/panel-common.md` section 1).
 
 `REOptions` is re-exported as-is from `_lib` (not redefined as a
 separate class; same policy as `OLSOptions`/`IVOptions`/`FEOptions`).
@@ -109,12 +110,14 @@ class RE:
                 range, an unknown `cov_type` (or `cov_type="hc0"`,
                 unsupported for RE), `dk_time` specified with a
                 `cov_type` other than `"dk"`, a singleton entity group
-                (raised by the internal one-way FE regression that
-                RE's σ_ε² estimation delegates to), a
+                (raised by the internal FE regression that RE's σ_ε²
+                estimation delegates to), a
                 `cov_type="dk"` request with `dk_time` unset, or
                 `cov_type="dk"` with no more unique time periods than
                 regressors: the Driscoll-Kraay covariance has rank at
-                most T-1, so the Hausman test cannot be computed). A
+                most T-1, so the Hausman test cannot be computed, or
+                `cov_type="cluster"` with no more clusters than the
+                slopes of the Hausman auxiliary regression). A
                 subclass of `ValueError`.
             ComputationError: A problem was detected during
                 computation (e.g. a singular quasi-demeaned design
@@ -145,35 +148,37 @@ class REResults:
     directly as properties here, rather than as a separate method like
     FE's `fixed_effects()` (`panel-common.md` section 2.4). It is the
     regression-based (auxiliary regression) version (Wooldridge 2010,
-    section 10.7.3; equivalent to `plm::phtest(method = "aux")` with
-    `effect = "individual"` or `"twoways"`), comparing against fixed
-    effects with the same structure as RE itself (entity for one-way,
-    entity and time for two-way), regardless of `REOptions.dk_time`. The Wald test's covariance follows `cov_type`
-    (the default `"cluster"` gives the cluster-robust Hausman test;
-    `"classical"` gives the classical version). The auxiliary
-    regression uses OLS-style small-sample corrections, which differ
-    from the RE standard errors'. A time-invariant regressor (constant
-    over time within every entity) is allowed in RE: it is left out
-    of the internal FE regression and of the within-transformed
-    regressors in the auxiliary regression, so `hausman_df` is the
-    number of regressors that still vary after the within
-    transformation (for two-way effects, after removing both the entity
-    and the time means, so a regressor that varies in only one
-    dimension is left out too). A regressor that varies only
-    over time, with the same entity mean for every entity (a year trend
-    on a balanced panel), stays in the model and in the internal
-    one-way FE regression, but its within-transformed copy in the
-    auxiliary regression is collinear with the constant, so that
-    coefficient is not identified and is left out of the tested set:
-    `hausman_df` is smaller by one for each such regressor. All three are
-    `None` only when there are no regressors to compare. If the auxiliary
-    regression cannot be computed (rank-deficient design, or a
-    structurally singular robust covariance such as too few clusters or
-    periods for the auxiliary slopes), `fit()` raises
-    `ValidationError`/`ComputationError`. A failure in RE's
-    own internal one-way FE call (used to estimate σ_ε²) makes `fit()`
-    itself raise instead (e.g. a singleton entity); see
-    `RE.fit()`'s docstring.
+    section 10.7.3): the quasi-demeaned `y` is regressed on a constant,
+    the quasi-demeaned regressors and the within-transformed
+    regressors, and the within-transformed coefficients are tested
+    jointly. The comparison is against fixed effects with the same
+    structure as RE itself (entity for one-way, entity and time for
+    two-way), regardless of `REOptions.dk_time`. It matches
+    `plm::phtest(method = "aux")` (`effect = "individual"` or
+    `"twoways"`) when every regressor varies in both dimensions;
+    otherwise `plm` tests the wrong coefficients. The Wald test's
+    covariance follows `cov_type` (the default `"cluster"` gives the
+    cluster-robust Hausman test; `"classical"` gives the classical
+    version). The auxiliary regression uses OLS-style small-sample
+    corrections, which differ from the RE standard errors'.
+
+    `hausman_df` is the number of tested coefficients: the regressors
+    that still vary after the within transformation (entity means
+    removed for one-way, entity and time means removed for two-way, so
+    for two-way a regressor that varies in only one dimension is not
+    tested) and whose coefficient is identified. In a one-way model on a
+    balanced panel, a regressor that varies only over time (a year
+    trend) stays in the model but its within-transformed copy is
+    collinear with the constant, so it is left out of the tested set.
+    A time-invariant regressor (constant over time within every entity)
+    is allowed in RE and is never tested. All three values are `None`
+    only when no coefficient can be tested. If the auxiliary regression
+    cannot be computed (rank-deficient design, or a structurally
+    singular robust covariance such as too few clusters or periods for
+    the auxiliary slopes), `fit()` raises
+    `ValidationError`/`ComputationError`. A failure in RE's own internal
+    FE call (used to estimate σ_ε²) makes `fit()` itself raise instead
+    (e.g. a singleton entity); see `RE.fit()`'s docstring.
 
     Args:
         raw: The estimation result object returned by `_lib.fit_re`
@@ -333,12 +338,12 @@ class REResults:
 
     @property
     def r_squared_within(self) -> float:
-        """Within R² (based on the entity-demeaned variables, θ=1;
-        unrelated to RE's own Swamy-Arora quasi-demeaning). Only the
-        coefficients of time-varying regressors enter the fitted
-        values (a time-invariant regressor is zero after demeaning),
-        so it is `0.0` when every regressor is time-invariant. For two-way
-        effects the variables are demeaned by entity and by time."""
+        """Within R² (based on the demeaned variables, θ=1; unrelated to
+        RE's own Swamy-Arora quasi-demeaning). The variables are
+        demeaned by entity, and for two-way effects by entity and time.
+        Only the coefficients of regressors that still vary after
+        demeaning enter the fitted values, so it is `0.0` when none
+        does (for example every regressor is time-invariant)."""
         return self._raw.r_squared_within
 
     @property
@@ -359,21 +364,22 @@ class REResults:
     def hausman_statistic(self) -> float | None:
         """Regression-based Hausman test statistic (chi-squared
         version, `k × F` of the Wald test that the `k` within-transformed
-        time-varying slope regressors (`k` is `hausman_df`) are jointly
+        slope regressors (`k` is `hausman_df`) are jointly
         zero in the auxiliary regression of the quasi-demeaned `y` on
         the quasi-demeaned regressors and the within-transformed
         regressors). Always non-negative. The comparison is against FE
         with the same structure as RE (entity, or entity and time for
-        two-way effects). The Wald test's
-        covariance follows `cov_type` (default `"cluster"` gives the
-        cluster-robust Hausman test; `"classical"` gives the classical
-        version). The auxiliary regression uses OLS-style small-sample
-        corrections, unlike the RE standard errors.
-        For unbalanced panels the auxiliary regression's constant is
-        left untransformed, as in `plm::phtest`. `None` when no
-        regressor can be tested (every regressor is time-invariant or
-        not identified); see the class docstring. If the auxiliary regression cannot be
-        computed, `fit()` raises instead."""
+        two-way effects). The Wald test's covariance follows
+        `cov_type` (default `"cluster"` gives the cluster-robust
+        Hausman test; `"classical"` gives the classical version). The
+        auxiliary regression uses OLS-style small-sample corrections,
+        unlike the RE standard errors. For unbalanced panels the
+        auxiliary regression's constant is left untransformed, as in
+        `plm::phtest`. `None` when no coefficient can be tested (no
+        regressor varies after the within transformation, or the
+        remaining ones are not identified); see the class docstring. If
+        the auxiliary regression cannot be computed, `fit()` raises
+        instead."""
         return self._raw.hausman_statistic
 
     @property

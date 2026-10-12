@@ -70,7 +70,7 @@ RE固有の内容のみを記載する。FEとの共有範囲は[`fe-spec.md`](.
   分散のある列が無い、または残りがすべて識別できない列）だけ。
 - **分散成分と準偏差変換の重み**: `sigma2_eps`（σ_ε²）・`sigma2_u`（σ_u²、負の推定値は0に切り上げた値）は1-way・
   2-wayとも`float`。`sigma2_lambda`（σ_λ²、同じく0に切り上げ）は2-wayのみで1-wayは`None`。θは、1-wayは
-  `theta`（`dict[str, float]`、エンティティID（辞書順）→θ_i。`θ_i`は観測数`T_i`で決まるため不均衡パネル
+  `theta`（`dict[str, float]`、キーはエンティティIDの文字列表現を辞書順に並べたもの（整数IDでも`"10"`が`"2"`より前）→θ_i。`θ_i`は観測数`T_i`で決まるため不均衡パネル
   でだけ個体間で異なる）、2-wayは`theta_entity`（θ₁）・`theta_time`（θ₂）・`theta_total`（θ₃、θ₁θ₂ではない）
   の`float`で、使わない側は`None`（`n_periods`・`hausman_*`と同じ「該当しなければ`None`」の型安定な形）。
   値は`plm::ercomp`（バランスパネルの`σ²`・`theta`）、1-wayは`linearmodels`の`variance_decomposition`・

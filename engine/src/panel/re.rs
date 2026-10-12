@@ -206,9 +206,9 @@ use statrs::distribution::{ChiSquared, ContinuousCDF, StudentsT};
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use crate::panel::common::{
-    PanelDimension, PanelError, PanelHcVariant, TimeKeys, TwoWayTheta, panel_classical_cov_params,
-    panel_cluster_cov_params, panel_driscoll_kraay_cov_params, panel_hc_cov_params,
-    quasi_demean_column, quasi_demean_two_way, resolve_dk_bandwidth,
+    BetweenMeans, PanelDimension, PanelError, PanelHcVariant, TimeKeys, TwoWayTheta,
+    panel_classical_cov_params, panel_cluster_cov_params, panel_driscoll_kraay_cov_params,
+    panel_hc_cov_params, quasi_demean_column, quasi_demean_two_way, resolve_dk_bandwidth,
     validate_dk_periods_cover_tested_coefficients, validate_panel_input, xtx_inverse,
 };
 use crate::panel::fe::{
@@ -688,8 +688,9 @@ fn two_way_variance_components(
     let entity_mean_stats = entity_means(input.y(), input.x(), entity);
     let time_means = entity_means(input.y(), input.x(), time);
     let x_scales = column_max_abs(input.x());
-    let (ssr_entity, df_entity) = between_ssr_and_df(&entity_mean_stats, &x_scales)?;
-    let (ssr_time, df_time) = between_ssr_and_df(&time_means, &x_scales)?;
+    let (ssr_entity, df_entity) =
+        between_ssr_and_df(&entity_mean_stats, &x_scales, BetweenMeans::Entity)?;
+    let (ssr_time, df_time) = between_ssr_and_df(&time_means, &x_scales, BetweenMeans::Time)?;
     let n_periods = time.n_groups() as f64;
     let n_entities = entity.n_groups() as f64;
     let sigma2_u = (ssr_entity / df_entity as f64 - sigma2_eps / n_periods).max(0.0);
@@ -715,8 +716,13 @@ fn two_way_variance_components(
 /// （`fe.rs`）と同じ発想の相対閾値（平均の標準偏差が`n_units·ε·max|x̄|`以下）。
 ///
 /// # Errors
-/// 単位数が`K_b + 1`以下、または落とした後の設計行列が特異なら`PanelError::BetweenRegressionFailed`。
-fn between_ssr_and_df(means: &EntityMeans, x_scales: &[f64]) -> Result<(f64, usize), PanelError> {
+/// 単位数が`K_b + 1`以下、または落とした後の設計行列が特異なら`PanelError::BetweenRegressionFailed`
+/// （`kind`が個体平均・時点平均のどちらの回帰かを持つ）。
+fn between_ssr_and_df(
+    means: &EntityMeans,
+    x_scales: &[f64],
+    kind: BetweenMeans,
+) -> Result<(f64, usize), PanelError> {
     let n_units = means.y.len();
     let max_terms = means.t.iter().fold(0.0_f64, |acc, &t| acc.max(t));
     let kept: Vec<usize> = (0..means.x.len())
@@ -725,6 +731,7 @@ fn between_ssr_and_df(means: &EntityMeans, x_scales: &[f64]) -> Result<(f64, usi
     let n_params = kept.len() + 1;
     if n_units <= n_params {
         return Err(PanelError::BetweenRegressionFailed {
+            means: kind,
             source: LeastSquaresError::Common(CommonError::InsufficientObservations {
                 n: n_units,
                 k: n_params,
@@ -735,7 +742,10 @@ fn between_ssr_and_df(means: &EntityMeans, x_scales: &[f64]) -> Result<(f64, usi
         if j == 0 { 1.0 } else { means.x[kept[j - 1]][i] }
     });
     let y = Mat::from_fn(n_units, 1, |i, _| means.y[i]);
+    // `least_squares`が返しうるエラーは`RankDeficient`（特異な設計行列）だけのため、
+    // `SingularMatrix`への対応づけは損失が無い。
     let fit = least_squares(&design, &y).map_err(|_| PanelError::BetweenRegressionFailed {
+        means: kind,
         source: LeastSquaresError::SingularMatrix,
     })?;
     Ok((residual_sum_of_squares(&fit.residuals), n_units - n_params))
@@ -791,7 +801,8 @@ fn one_way_variance_components(
     // （`between_ssr_and_df`、`plm`と同じ）。
     let means = entity_means(input.y(), input.x(), input.entity_codes());
     let n_entities = means.y.len();
-    let (ssr_between, df_resid_between) = between_ssr_and_df(&means, &column_max_abs(input.x()))?;
+    let (ssr_between, df_resid_between) =
+        between_ssr_and_df(&means, &column_max_abs(input.x()), BetweenMeans::Entity)?;
 
     let t_bar = n_entities as f64 / means.t.iter().map(|t_i| 1.0 / t_i).sum::<f64>();
     let sigma2_u = (ssr_between / df_resid_between as f64 - sigma2_eps / t_bar).max(0.0);
@@ -3733,7 +3744,7 @@ mod tests {
         let balanced = subset_input(&(0..24).collect::<Vec<_>>(), &["x1", "xt"], false);
         let df = |input: &ReInput| {
             let means = entity_means(input.y(), input.x(), input.entity_codes());
-            between_ssr_and_df(&means, &column_max_abs(input.x()))
+            between_ssr_and_df(&means, &column_max_abs(input.x()), BetweenMeans::Entity)
                 .unwrap()
                 .1
         };
@@ -3872,6 +3883,7 @@ mod tests {
         assert!(matches!(
             ReEstimator::fit(collinear, ReEffects::TwoWay, ReCovType::Classical, 0.95),
             Err(PanelError::BetweenRegressionFailed {
+                means: BetweenMeans::Entity,
                 source: LeastSquaresError::SingularMatrix
             })
         ));
@@ -3891,8 +3903,26 @@ mod tests {
         let two_periods: Vec<usize> = (0..24).filter(|r| r % 4 < 2).collect();
         assert!(matches!(
             fit(&two_periods, &["x1"]),
-            Err(PanelError::BetweenRegressionFailed { .. })
+            Err(PanelError::BetweenRegressionFailed {
+                means: BetweenMeans::Time,
+                ..
+            })
         ));
+        // 2エンティティ×4時点: 個体平均側のbetween回帰が`N = 2 <= K_b + 1 = 2`で失敗する
+        // （個体平均の回帰が先に走るため、メッセージはどちらの回帰かを区別する）。
+        let two_entities: Vec<usize> = (0..24).filter(|r| r / 4 < 2).collect();
+        let err = fit(&two_entities, &["x1"]).unwrap_err();
+        assert!(matches!(
+            err,
+            PanelError::BetweenRegressionFailed {
+                means: BetweenMeans::Entity,
+                ..
+            }
+        ));
+        assert!(
+            err.to_string()
+                .starts_with("between-regression on entity means")
+        );
         // 2エンティティ×2時点: 内部の2-way FEの自由度が足りない（`n = 4 <= k + N + T - 1 = 4`）。
         let tiny: Vec<usize> = (0..24).filter(|&r| r / 4 < 2 && r % 4 < 2).collect();
         assert!(matches!(
@@ -5738,6 +5768,476 @@ mod tests {
                 for j in 1..p0.len() {
                     assert_approx_eq(p1[j], p0[j], &format!("param[{j}]"));
                     assert_approx_eq(se1[j], se0[j], &format!("se[{j}]"));
+                }
+            }
+        }
+
+        /// 一次元でしか変わらない列（`xi`: 個体間のみ、`xt`: 時点間のみ）を含む2-wayのバランス
+        /// パネル。`has_entity_effect`・`has_time_effect`が偽のDGPでは、対応する分散成分が0に
+        /// 切り詰められるケースが高頻度で現れる。エンティティ数・時点数は、ハウスマンの補助回帰
+        /// （傾き最大6個）がクラスター（`G = N`）・Driscoll-Kraay（`T`）のどちらでも成立する
+        /// 7以上にする。
+        #[derive(Debug, Clone)]
+        struct OneDimCase {
+            n_entities: usize,
+            n_periods: usize,
+            y: Vec<f64>,
+            /// 両次元で変動する列、続いて`xi`・`xt`（使う場合）。
+            x: Vec<Vec<f64>>,
+            keys: Vec<u64>,
+        }
+
+        fn one_dim_case_strategy() -> impl Strategy<Value = OneDimCase> {
+            (
+                7..=9usize,
+                7..=9usize,
+                1..=2usize,
+                any::<bool>(),
+                any::<bool>(),
+                any::<bool>(),
+                any::<bool>(),
+            )
+                .prop_flat_map(
+                    |(n_entities, n_periods, k_both, has_xi, has_xt, has_ent, has_time)| {
+                        let n = n_entities * n_periods;
+                        (
+                            Just((n_entities, n_periods, k_both, has_xi, has_xt)),
+                            Just((has_ent, has_time)),
+                            collection::vec(-5.0f64..5.0, n),
+                            collection::vec(collection::vec(-10.0f64..10.0, n), k_both),
+                            collection::vec(-10.0f64..10.0, n_entities),
+                            collection::vec(-10.0f64..10.0, n_periods),
+                            collection::vec(-15.0f64..15.0, n_entities),
+                            collection::vec(-15.0f64..15.0, n_periods),
+                            collection::vec(any::<u64>(), n),
+                        )
+                    },
+                )
+                .prop_map(
+                    |(
+                        (n_entities, n_periods, _k_both, has_xi, has_xt),
+                        (has_ent, has_time),
+                        noise,
+                        both,
+                        xi_by_entity,
+                        xt_by_time,
+                        entity_effect,
+                        time_effect,
+                        keys,
+                    )| {
+                        let n = n_entities * n_periods;
+                        let mut x = both;
+                        if has_xi {
+                            x.push((0..n).map(|r| xi_by_entity[r / n_periods]).collect());
+                        }
+                        if has_xt {
+                            x.push((0..n).map(|r| xt_by_time[r % n_periods]).collect());
+                        }
+                        let y: Vec<f64> = (0..n)
+                            .map(|r| {
+                                let e = if has_ent {
+                                    entity_effect[r / n_periods]
+                                } else {
+                                    0.0
+                                };
+                                let t = if has_time {
+                                    time_effect[r % n_periods]
+                                } else {
+                                    0.0
+                                };
+                                x.iter().map(|c| c[r]).sum::<f64>() + e + t + noise[r]
+                            })
+                            .collect();
+                        OneDimCase {
+                            n_entities,
+                            n_periods,
+                            y,
+                            x,
+                            keys,
+                        }
+                    },
+                )
+        }
+
+        /// 2-wayの全`cov_type`（インデックス0..=5: Classical, Hc1, Hc2, Hc3, Cluster(entity),
+        /// Dk(時点ラベルは`time`)）。
+        fn two_way_cov(index: usize, time: &[String]) -> ReCovType {
+            match index {
+                0 => ReCovType::Classical,
+                1 => ReCovType::Hc1,
+                2 => ReCovType::Hc2,
+                3 => ReCovType::Hc3,
+                4 => ReCovType::Cluster { groups: None },
+                _ => ReCovType::Dk {
+                    bandwidth: None,
+                    time: TimeKeys::lexicographic(time.to_vec()),
+                },
+            }
+        }
+
+        fn two_way_labels(n_entities: usize, n_periods: usize) -> (Vec<String>, Vec<String>) {
+            let n = n_entities * n_periods;
+            (
+                (0..n).map(|r| format!("e{}", r / n_periods)).collect(),
+                (0..n).map(|r| format!("t{}", r % n_periods)).collect(),
+            )
+        }
+
+        fn fit_two_way(
+            y: &[f64],
+            x: &[Vec<f64>],
+            entity: &[String],
+            time: &[String],
+            cov_index: usize,
+        ) -> Result<ReEstimator, PanelError> {
+            let names: Vec<String> = (0..x.len()).map(|j| format!("x{j}")).collect();
+            ReInput::from_columns(y, x, names, entity, Some(time), "y".to_string()).and_then(
+                |input| {
+                    ReEstimator::fit(input, ReEffects::TwoWay, two_way_cov(cov_index, time), 0.95)
+                },
+            )
+        }
+
+        /// 一次元でしか変わらない列を含むバランスパネルの1-way用（`xt`は時点間のみ変わる）。
+        #[derive(Debug, Clone)]
+        struct TimeOnlyCase {
+            n_entities: usize,
+            n_periods: usize,
+            y: Vec<f64>,
+            /// 両次元で変動する列、続いて時点間のみ変わる`xt`。
+            x: Vec<Vec<f64>>,
+            keys: Vec<u64>,
+        }
+
+        fn time_only_case_strategy() -> impl Strategy<Value = TimeOnlyCase> {
+            (6..=9usize, 3..=5usize, 1..=2usize, any::<bool>())
+                .prop_flat_map(|(n_entities, n_periods, k, has_effect)| {
+                    let n = n_entities * n_periods;
+                    (
+                        Just((n_entities, n_periods, has_effect)),
+                        collection::vec(-5.0f64..5.0, n),
+                        collection::vec(collection::vec(-10.0f64..10.0, n), k),
+                        collection::vec(-10.0f64..10.0, n_periods),
+                        collection::vec(-15.0f64..15.0, n_entities),
+                        collection::vec(any::<u64>(), n),
+                    )
+                })
+                .prop_map(
+                    |((n_entities, n_periods, has_effect), noise, mut x, xt, effect, keys)| {
+                        let n = n_entities * n_periods;
+                        x.push((0..n).map(|r| xt[r % n_periods]).collect());
+                        let y: Vec<f64> = (0..n)
+                            .map(|r| {
+                                let e = if has_effect {
+                                    effect[r / n_periods]
+                                } else {
+                                    0.0
+                                };
+                                x.iter().map(|c| c[r]).sum::<f64>() + e + noise[r]
+                            })
+                            .collect();
+                        TimeOnlyCase {
+                            n_entities,
+                            n_periods,
+                            y,
+                            x,
+                            keys,
+                        }
+                    },
+                )
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(48))]
+
+            /// 2-wayで一次元でしか変わらない列（`xi`・`xt`）を含んでも、全`cov_type`
+            /// （Classical・HC1〜HC3・cluster・Driscoll-Kraay）で、行の並べ替えとエンティティ・時点
+            /// ラベルの付け替えによって係数・標準誤差・ハウスマン統計量が変わらない。
+            #[test]
+            fn two_way_one_dimensional_columns_are_invariant_to_relabeling_for_every_cov_type(
+                case in one_dim_case_strategy(),
+                cov_index in 0..=5usize,
+            ) {
+                let (entity, time) = two_way_labels(case.n_entities, case.n_periods);
+                let base = fit_two_way(&case.y, &case.x, &entity, &time, cov_index);
+                prop_assume!(base.is_ok());
+                let base = base.unwrap();
+                let (params, se) = params_and_se(&base);
+
+                let n = case.y.len();
+                let mut order: Vec<usize> = (0..n).collect();
+                order.sort_by_key(|&r| case.keys[r]);
+                let y2: Vec<f64> = order.iter().map(|&r| case.y[r]).collect();
+                let x2: Vec<Vec<f64>> = case
+                    .x
+                    .iter()
+                    .map(|c| order.iter().map(|&r| c[r]).collect())
+                    .collect();
+                let entity2: Vec<String> = order
+                    .iter()
+                    .map(|&r| format!("z{}", case.n_entities - 1 - r / case.n_periods))
+                    .collect();
+                let time2: Vec<String> = order
+                    .iter()
+                    .map(|&r| format!("u{}", case.n_periods - 1 - r % case.n_periods))
+                    .collect();
+                let permuted = fit_two_way(&y2, &x2, &entity2, &time2, cov_index);
+                prop_assume!(permuted.is_ok());
+                let permuted = permuted.unwrap();
+                let (params2, se2) = params_and_se(&permuted);
+
+                for j in 0..params.len() {
+                    assert_approx_eq(params2[j], params[j], &format!("param[{j}]"));
+                    assert_approx_eq(se2[j], se[j], &format!("se[{j}]"));
+                }
+                match (base.hausman_statistic(), permuted.hausman_statistic()) {
+                    (Some(a), Some(b)) => assert_approx_eq(b, a, "hausman_statistic"),
+                    (None, None) => {}
+                    (a, b) => prop_assert!(false, "hausman presence differs: {a:?} vs {b:?}"),
+                }
+                prop_assert_eq!(base.hausman_df(), permuted.hausman_df());
+            }
+
+            /// 2-wayで`y`を`c`倍すると、係数・標準誤差は`c`倍、ハウスマン統計量（Wald、
+            /// スケール不変）は不変。一次元の列（あれば先頭のもの）に定数を足すと、切片だけが
+            /// 動き、他の係数・標準誤差は変わらない。全`cov_type`。
+            #[test]
+            fn two_way_is_equivariant_to_y_scale_and_a_constant_shift_moves_only_the_intercept(
+                case in one_dim_case_strategy(),
+                cov_index in 0..=5usize,
+                scale in 0.5f64..4.0,
+                shift in -5.0f64..5.0,
+            ) {
+                let (entity, time) = two_way_labels(case.n_entities, case.n_periods);
+                let base = fit_two_way(&case.y, &case.x, &entity, &time, cov_index);
+                prop_assume!(base.is_ok());
+                let base = base.unwrap();
+                let (params, se) = params_and_se(&base);
+
+                let y_scaled: Vec<f64> = case.y.iter().map(|v| v * scale).collect();
+                let scaled = fit_two_way(&y_scaled, &case.x, &entity, &time, cov_index);
+                prop_assume!(scaled.is_ok());
+                let scaled = scaled.unwrap();
+                let (params_s, se_s) = params_and_se(&scaled);
+                for j in 0..params.len() {
+                    assert_approx_eq(params_s[j], params[j] * scale, &format!("scaled param[{j}]"));
+                    assert_approx_eq(se_s[j], se[j] * scale, &format!("scaled se[{j}]"));
+                }
+                if let (Some(a), Some(b)) = (base.hausman_statistic(), scaled.hausman_statistic()) {
+                    assert_approx_eq(b, a, "hausman_statistic under y scaling");
+                }
+
+                // 一次元の列（なければ両次元の最後の列）に定数を足す。
+                let target = case.x.len() - 1;
+                let mut x_shifted = case.x.clone();
+                for v in x_shifted[target].iter_mut() {
+                    *v += shift;
+                }
+                let shifted = fit_two_way(&case.y, &x_shifted, &entity, &time, cov_index);
+                prop_assume!(shifted.is_ok());
+                let (params_h, se_h) = params_and_se(&shifted.unwrap());
+                assert_approx_eq(params_h[0], params[0] - params[1 + target] * shift, "const");
+                for j in 1..params.len() {
+                    assert_approx_eq(params_h[j], params[j], &format!("shifted param[{j}]"));
+                }
+                for j in 1..se.len() {
+                    assert_approx_eq(se_h[j], se[j], &format!("shifted se[{j}]"));
+                }
+            }
+
+            /// 2-wayのGLSは、報告した3つの重み`θ₁・θ₂・θ₃`で`y - θ₁ȳᵢ - θ₂ȳₜ + θ₃ȳ`と
+            /// 各列を手で変換し（切片列は`1 - θ₁ - θ₂ + θ₃`倍）、そのOLSを当てはめた係数・
+            /// 標準誤差（Classical・HC1）と一致する。一次元の列を含む。変換式の各項
+            /// （個体平均・時点平均・全体平均）の取り違えや符号の誤りを検出する。
+            ///
+            /// 有効性の確認（`quasi_demean_two_way`へのバグ注入、確認後に元へ戻した）:
+            /// 全体平均項の符号反転と全体平均の除数のずれは本テストが、個体・時点の重みの
+            /// 入れ替えは本テストと`two_way_with_one_zero_component_equals_the_one_component_gls`が
+            /// 検出する。
+            #[test]
+            fn two_way_fit_equals_ols_on_the_hand_transformed_data(
+                case in one_dim_case_strategy(),
+                robust in any::<bool>(),
+            ) {
+                let (entity, time) = two_way_labels(case.n_entities, case.n_periods);
+                let cov_index = usize::from(robust);
+                let est = fit_two_way(&case.y, &case.x, &entity, &time, cov_index);
+                prop_assume!(est.is_ok());
+                let est = est.unwrap();
+                let (theta1, theta2, theta3) = est.two_way_theta().unwrap();
+
+                let n = case.y.len();
+                let (n_e, n_t) = (case.n_entities, case.n_periods);
+                let quasi = |v: &[f64]| -> Vec<f64> {
+                    let mut by_entity = vec![0.0; n_e];
+                    let mut by_time = vec![0.0; n_t];
+                    for (r, &value) in v.iter().enumerate() {
+                        by_entity[r / n_t] += value / n_t as f64;
+                        by_time[r % n_t] += value / n_e as f64;
+                    }
+                    let overall = v.iter().sum::<f64>() / n as f64;
+                    (0..n)
+                        .map(|r| {
+                            v[r] - theta1 * by_entity[r / n_t] - theta2 * by_time[r % n_t]
+                                + theta3 * overall
+                        })
+                        .collect()
+                };
+                let y_star = quasi(&case.y);
+                let mut columns = vec![vec![1.0 - theta1 - theta2 + theta3; n]];
+                columns.extend(case.x.iter().map(|c| quasi(c)));
+                let names: Vec<String> = (0..columns.len()).map(|j| format!("c{j}")).collect();
+                let ols_input =
+                    OlsInput::from_columns(&y_star, &columns, names, false, "y".to_string())
+                        .unwrap();
+                let cov = if robust { CovType::Hc1 } else { CovType::Classical };
+                let ols = OlsEstimator::fit(ols_input, cov, 0.95);
+                prop_assume!(ols.is_ok());
+                let ols = ols.unwrap();
+
+                let (params, se) = params_and_se(&est);
+                for j in 0..params.len() {
+                    assert_approx_eq(params[j], *ols.params().get(j, 0), &format!("param[{j}]"));
+                    assert_approx_eq(se[j], *ols.std_errors().get(j, 0), &format!("se[{j}]"));
+                }
+            }
+
+            /// 2-wayで`σ_u²`だけ（または`σ_λ²`だけ）が0に切り詰められると、2-way GLSは
+            /// 残った成分だけのGLS（`θ₁ = θ₃ = 0`のとき`y - θ₂·ȳ_t`、`θ₂ = θ₃ = 0`のとき
+            /// `y - θ₁·ȳ_i`）に退化する。手で準偏差変換した`y`・`X`（切片列は`1 - θ`倍）への
+            /// OLSの係数・Classical標準誤差と一致する。
+            #[test]
+            fn two_way_with_one_zero_component_equals_the_one_component_gls(
+                case in one_dim_case_strategy(),
+            ) {
+                let (entity, time) = two_way_labels(case.n_entities, case.n_periods);
+                let est = fit_two_way(&case.y, &case.x, &entity, &time, 0);
+                prop_assume!(est.is_ok());
+                let est = est.unwrap();
+                let (sigma2_u, sigma2_lambda) =
+                    (est.sigma2_u(), est.sigma2_lambda().unwrap());
+                let (theta1, theta2, theta3) = est.two_way_theta().unwrap();
+                // 片方だけが0（両方0ならθはすべて0でpooled OLSになり別の性質）。
+                prop_assume!((sigma2_u == 0.0) != (sigma2_lambda == 0.0));
+                prop_assert_eq!(theta3, 0.0);
+
+                // 残った成分のグループ（`σ_u² = 0`なら時点、`σ_λ² = 0`ならエンティティ）。
+                let (group_of, n_groups, theta) = if sigma2_u == 0.0 {
+                    prop_assert_eq!(theta1, 0.0);
+                    (
+                        (0..case.y.len()).map(|r| r % case.n_periods).collect::<Vec<_>>(),
+                        case.n_periods,
+                        theta2,
+                    )
+                } else {
+                    prop_assert_eq!(theta2, 0.0);
+                    (
+                        (0..case.y.len()).map(|r| r / case.n_periods).collect::<Vec<_>>(),
+                        case.n_entities,
+                        theta1,
+                    )
+                };
+                let quasi = |v: &[f64]| -> Vec<f64> {
+                    let mut sum = vec![0.0; n_groups];
+                    let mut count = vec![0.0; n_groups];
+                    for (r, &g) in group_of.iter().enumerate() {
+                        sum[g] += v[r];
+                        count[g] += 1.0;
+                    }
+                    (0..v.len())
+                        .map(|r| v[r] - theta * sum[group_of[r]] / count[group_of[r]])
+                        .collect()
+                };
+                let y_star = quasi(&case.y);
+                let mut columns = vec![vec![1.0 - theta; case.y.len()]];
+                columns.extend(case.x.iter().map(|c| quasi(c)));
+                let names: Vec<String> = (0..columns.len()).map(|j| format!("c{j}")).collect();
+                let ols_input =
+                    OlsInput::from_columns(&y_star, &columns, names, false, "y".to_string())
+                        .unwrap();
+                let ols = OlsEstimator::fit(ols_input, CovType::Classical, 0.95);
+                prop_assume!(ols.is_ok());
+                let ols = ols.unwrap();
+
+                let (params, se) = params_and_se(&est);
+                for j in 0..params.len() {
+                    assert_approx_eq(params[j], *ols.params().get(j, 0), &format!("param[{j}]"));
+                    assert_approx_eq(se[j], *ols.std_errors().get(j, 0), &format!("se[{j}]"));
+                }
+            }
+
+            /// 1-wayのバランスパネルで時点間でのみ変わる列`xt`を含んでも、行の並べ替えと
+            /// エンティティラベルの付け替えで結果が変わらず、ハウスマン検定の自由度は
+            /// 両次元で変動する列の数（`xt`は`X̃`が識別できず外れる）、`xt`に定数を足すと
+            /// 切片だけが動く。
+            #[test]
+            fn one_way_balanced_time_only_column_is_invariant_and_excluded_from_hausman(
+                case in time_only_case_strategy(),
+                cov in re_cov_strategy(),
+                shift in -5.0f64..5.0,
+            ) {
+                let n = case.y.len();
+                let entity: Vec<String> =
+                    (0..n).map(|r| format!("e{}", r / case.n_periods)).collect();
+                let base = ReEstimator::fit(
+                    re_input(&case.y, &case.x, &entity),
+                    ReEffects::OneWay,
+                    cov.clone(),
+                    0.95,
+                );
+                prop_assume!(base.is_ok());
+                let base = base.unwrap();
+                let (params, se) = params_and_se(&base);
+                prop_assert_eq!(base.hausman_df(), Some(case.x.len() - 1));
+
+                let mut order: Vec<usize> = (0..n).collect();
+                order.sort_by_key(|&r| case.keys[r]);
+                let y2: Vec<f64> = order.iter().map(|&r| case.y[r]).collect();
+                let x2: Vec<Vec<f64>> = case
+                    .x
+                    .iter()
+                    .map(|c| order.iter().map(|&r| c[r]).collect())
+                    .collect();
+                let entity2: Vec<String> = order
+                    .iter()
+                    .map(|&r| format!("z{}", case.n_entities - 1 - r / case.n_periods))
+                    .collect();
+                let permuted = ReEstimator::fit(
+                    re_input(&y2, &x2, &entity2),
+                    ReEffects::OneWay,
+                    cov.clone(),
+                    0.95,
+                );
+                prop_assume!(permuted.is_ok());
+                let permuted = permuted.unwrap();
+                let (params2, se2) = params_and_se(&permuted);
+                for j in 0..params.len() {
+                    assert_approx_eq(params2[j], params[j], &format!("param[{j}]"));
+                    assert_approx_eq(se2[j], se[j], &format!("se[{j}]"));
+                }
+                match (base.hausman_statistic(), permuted.hausman_statistic()) {
+                    (Some(a), Some(b)) => assert_approx_eq(b, a, "hausman_statistic"),
+                    (a, b) => prop_assert!(false, "hausman must exist: {a:?} vs {b:?}"),
+                }
+
+                // `xt`（最後の列）に定数を足す。
+                let target = case.x.len() - 1;
+                let mut x_shifted = case.x.clone();
+                for v in x_shifted[target].iter_mut() {
+                    *v += shift;
+                }
+                let shifted = ReEstimator::fit(
+                    re_input(&case.y, &x_shifted, &entity),
+                    ReEffects::OneWay,
+                    cov,
+                    0.95,
+                );
+                prop_assume!(shifted.is_ok());
+                let (params_h, se_h) = params_and_se(&shifted.unwrap());
+                assert_approx_eq(params_h[0], params[0] - params[1 + target] * shift, "const");
+                for j in 1..params.len() {
+                    assert_approx_eq(params_h[j], params[j], &format!("shifted param[{j}]"));
+                    assert_approx_eq(se_h[j], se[j], &format!("shifted se[{j}]"));
                 }
             }
         }

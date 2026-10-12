@@ -87,7 +87,7 @@ pub(crate) fn panel_error_to_pyerr(err: PanelError) -> PyErr {
         | PanelError::DegenerateClusterTwoGroups => ValidationError::new_err(message),
         PanelError::WithinRegressionFailed { source }
         | PanelError::FTestFailed { source }
-        | PanelError::BetweenRegressionFailed { source }
+        | PanelError::BetweenRegressionFailed { source, .. }
         | PanelError::QuasiDemeanedRegressionFailed { source }
         | PanelError::HausmanTestFailed { source } => {
             if least_squares_error_is_computation_error(&source) {

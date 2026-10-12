@@ -147,7 +147,7 @@ Python `linearmodels.RandomEffects`の実装（Swamy-Arora）に準拠する。R
 - **between回帰から落とす列**: 平均が単位間で一定の列（entity平均の回帰では時点間でのみ変わる列、
   time平均の回帰では個体間でのみ変わる列）は切片と共線になるため、その回帰から除き`K_b`にも数えない
   （`plm`と同じ）。一定かどうかは平均の標準偏差が`単位数·ε·max|x̄|`以下かで判定する。残った設計行列が
-  特異なら`BetweenRegressionFailed`（`ComputationError`）。
+  特異なら`BetweenRegressionFailed`（`ComputationError`。個体平均・時点平均のどちらの回帰かがメッセージに入る）。
 - **θ**: 3つの重み`θ₁ = 1 - σ_ε/σ₁`・`θ₂ = 1 - σ_ε/σ₂`・`θ₃ = θ₁ + θ₂ - 1 + σ_ε/σ₄`
   （`σ₁² = σ_ε² + Tσ_u²`・`σ₂² = σ_ε² + Nσ_λ²`・`σ₄² = σ_ε² + Tσ_u² + Nσ_λ²`）。`θ₃ ≠ θ₁θ₂`で、
   `σ_u² = 0`または`σ_λ² = 0`なら`θ₃ = 0`。`plm`の`ercomp`のθ（id・time・total）と機械精度で一致する。

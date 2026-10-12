@@ -32,7 +32,7 @@ FEはIVの「データ抽出・pyclass定義」→「engine呼び出し」→「
 ## 踏んだ罠: `engine`側で`PanelError`に新バリアントを追加すると`panel_error_to_pyerr`が非網羅マッチでコンパイル不能になる
 
 RE（Swamy-Arora分散成分推定）の実装で`engine::panel::common::PanelError`に
-`BetweenRegressionFailed { source: LeastSquaresError }`を追加した際、`engine_pybind/src/
+`BetweenRegressionFailed { means, source: LeastSquaresError }`を追加した際、`engine_pybind/src/
 panel/common.rs`の`panel_error_to_pyerr`側を更新し忘れ、`cargo build -p engine_pybind`
 （`cargo build --workspace`も同様）が`E0004: non-exhaustive patterns`で失敗する状態に
 なった（rust-reviewerの指摘で発覚。`cargo test -p engine`だけでは検出できない——

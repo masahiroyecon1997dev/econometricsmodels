@@ -100,6 +100,25 @@ fn n_periods_clause(n_periods: &Option<usize>) -> String {
     }
 }
 
+/// REの分散成分推定で、between回帰がどの単位の平均に対する回帰か
+/// （`PanelError::BetweenRegressionFailed`の`means`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BetweenMeans {
+    /// 個体（エンティティ）平均への回帰（1-way・2-wayのσ_u²）。
+    Entity,
+    /// 時点平均への回帰（2-wayのσ_λ²）。
+    Time,
+}
+
+impl std::fmt::Display for BetweenMeans {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Entity => "entity",
+            Self::Time => "time",
+        })
+    }
+}
+
 /// FE/REの計算過程で発生しうるエラー。
 ///
 /// `engine`はPyO3を知らないため、Python例外への変換は`engine_pybind`側で行う
@@ -322,8 +341,13 @@ pub enum PanelError {
     /// ではなくREのbetween回帰のため別バリアントにする（`FTestFailed`と同じ判断、
     /// モジュールdoc参照）。最も起こりやすいのはエンティティ数が説明変数の数以下
     /// （`CommonError::InsufficientObservations`）。
-    #[error("between-regression least-squares estimation for variance component failed: {source}")]
+    #[error(
+        "between-regression on {means} means least-squares estimation for variance component \
+         failed: {source}"
+    )]
     BetweenRegressionFailed {
+        /// どの平均への回帰が失敗したか（2-wayは個体平均・時点平均の2本を推定する）。
+        means: BetweenMeans,
         #[source]
         source: LeastSquaresError,
     },
@@ -1235,17 +1259,19 @@ mod tests {
     #[test]
     fn between_regression_failed_message_and_equality() {
         let err = PanelError::BetweenRegressionFailed {
+            means: BetweenMeans::Time,
             source: LeastSquaresError::Common(CommonError::InsufficientObservations { n: 2, k: 3 }),
         };
         assert_eq!(
             err.to_string(),
-            "between-regression least-squares estimation for variance component failed: \
-             insufficient observations: n=2 must be greater than k=3 \
+            "between-regression on time means least-squares estimation for variance component \
+             failed: insufficient observations: n=2 must be greater than k=3 \
              (number of independent variables, including the intercept)"
         );
         assert_eq!(
             err,
             PanelError::BetweenRegressionFailed {
+                means: BetweenMeans::Time,
                 source: LeastSquaresError::Common(CommonError::InsufficientObservations {
                     n: 2,
                     k: 3,

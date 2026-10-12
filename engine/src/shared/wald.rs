@@ -56,8 +56,14 @@ pub(crate) fn wald_f_test(
     df_inference: usize,
 ) -> Result<(f64, f64), CommonError> {
     let beta_slopes = Mat::from_fn(df_model, 1, |i, _| *params.get(i + k_constant, 0));
+    // `cov_params`は理論上対称だが、`(X'X)⁻¹ Ŝ (X'X)⁻¹`のような行列積の丸め誤差で非対称に
+    // なりうる。下の`llt(Side::Lower)`は下三角しか読まないため、そのままだと片側の丸め誤差が
+    // そのまま結果になる。検定対象の係数が準共線（部分行列がほぼ特異）だと誤差が条件数倍に
+    // 増幅され、相対誤差1e-7に達する（RE相関の強い2列×Driscoll-Kraayのハウスマン検定で実測、
+    // 上三角を使うと逆符号で同じ大きさ）。両側の平均を取ると入力の丸め誤差程度（3e-9）に戻る。
     let v_slopes = Mat::from_fn(df_model, df_model, |i, j| {
-        *cov_params.get(i + k_constant, j + k_constant)
+        0.5 * (*cov_params.get(i + k_constant, j + k_constant)
+            + *cov_params.get(j + k_constant, i + k_constant))
     });
 
     ensure_well_conditioned_symmetric_matrix(
@@ -125,6 +131,24 @@ mod tests {
         assert!((f - 6.5).abs() < 1e-12);
         let expected_p = FisherSnedecor::new(2.0, 10.0).unwrap().sf(6.5);
         assert!((p - expected_p).abs() < 1e-15);
+    }
+
+    #[test]
+    fn wald_f_test_symmetrizes_a_slightly_asymmetric_covariance() {
+        // 丸め誤差で非対称になった共分散（下三角2.8・上三角3.2）は、両側の平均
+        // Σ=[[4, 3], [3, 4]]として扱う。Σ⁻¹ = (1/7)[[4, -3], [-3, 4]]、β=(1, 2)で
+        // β'Σ⁻¹β = (4 - 12 + 16)/7 = 8/7、F = 4/7。下三角だけを使うと
+        // (4 - 11.2 + 16)/8.16 ≠ 8/7となり、上三角だけでも別の値になる。
+        let params = Mat::from_fn(2, 1, |i, _| [1.0, 2.0][i]);
+        let cov = Mat::from_fn(2, 2, |i, j| match (i, j) {
+            (0, 0) | (1, 1) => 4.0,
+            (0, 1) => 3.2,
+            _ => 2.8,
+        });
+
+        let (f, _) = wald_f_test(&params, &cov, 0, 2, 30).unwrap();
+
+        assert!((f - 4.0 / 7.0).abs() < 1e-14);
     }
 
     #[test]

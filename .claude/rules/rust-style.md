@@ -76,6 +76,7 @@ Issue番号・内部管理ドキュメント（`docs/planning/specs/`配下の�
   - `ComputationError`: 計算過程で発覚した問題（特異行列等）。Python側の`RuntimeError`を継承させる。
   - メモリ不足等は専用の例外クラスを設けない（Rust/Pythonのメモリ確保失敗は通常このレイヤーで綺麗に変換できるものではないため）。
 - **系統をまたいで同じ意味・同じメッセージのバリアントが複数の系統のエラー型に重複する場合は`engine::shared::error::CommonError`に切り出す**（`DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/`MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`がOLS/WLSとnonlinearで重複していたことから導入）。各系統のエラー型（`LeastSquaresError`/`MleError`等）はthiserrorの`#[error(transparent)] Common(#[from] CommonError)`バリアントでこれを包む。`?`演算子は`#[from]`により自動変換されるため、`CommonError`のバリアントを直接構築する箇所（`return Err(...)`等`?`を経由しない箇所）でのみ`.into()`を明示する。系統固有の追加バリアント（`SingularHessian`等）や、将来「意味は同じだが系統固有の追加フィールドが要る」ケースは`CommonError`に含めず、各系統のエラー型に直接定義してよい（`CommonError`を使うかどうかは系統ごとに選べる）。`engine_pybind`側の変換は`engine_pybind/src/shared/errors.rs`の`common_error_to_pyerr`に集約し、各系統の`*_error_to_pyerr`関数はこれに委譲する。
+- **`PyErr`への変換は、エラー型が自クレート（`engine_pybind`）の型なら`impl From<E> for PyErr`、外部クレート（`engine`）の型なら関数形式（`common_error_to_pyerr`等）にする**。外部クレートの型には、orphan ruleにより`engine_pybind`側で`impl From<EngineError> for PyErr`を書けないため。自クレートの型は`?`で`PyErr`に変換できる。例: `engine_pybind/src/shared/column_error.rs`の`ColumnExtractionError`（列抽出で起きる入力不正。`engine`由来の`CommonError`・`PanelError`は包まず従来どおり`*_error_to_pyerr`で変換する）。変換の`match`は`_`で受けず全バリアントを列挙し、バリアントを足したときに`ValidationError`と`ComputationError`のどちらにするかを決め忘れないようにする。メッセージ文言の単体テストは、`PyErr::to_string()`がPythonインタプリタを要求しpanicするため、`PyErr`に変換する前のエラー型の`to_string()`で行う。
 
 ## Lint / フォーマット
 

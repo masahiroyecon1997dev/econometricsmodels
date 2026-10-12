@@ -1,11 +1,11 @@
 """全系統で共有する`ValidationError`メッセージのテンプレート文字列。
 
-`engine`（`CommonError`等）・`engine_pybind`（`column_extraction.rs`・
+`engine`（`CommonError`等）・`engine_pybind`（`column_error.rs`の`ColumnExtractionError`・
 `validation.rs`・各系統の`cov_type`/`solver`/`estimator`文字列パース）が実際に送出する
 メッセージの正確な文字列をPythonのフォーマット文字列としてここに集約する。
 
 Rust側のメッセージ文言が正本であり（`engine/src/shared/error.rs`・
-`engine_pybind/src/shared/column_extraction.rs`・`engine_pybind/src/shared/validation.rs`等）、
+`engine_pybind/src/shared/column_error.rs`・`engine_pybind/src/shared/validation.rs`等）、
 このファイルはそのコピー。Rust側で文言を変更した場合はこのファイルも同時に
 更新すること（複数系統でメッセージが文字通り重複しているため直書きではなく共通化した）。
 

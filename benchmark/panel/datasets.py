@@ -531,6 +531,99 @@ def re_two_way_small_panel() -> pl.DataFrame:
     )
 
 
+# 分散成分が0に切り上げられる合成パネル（RE。`variance_method`のplm照合用）。個体効果または
+# 時点効果を持たないDGPで、推定した`σ_u²`・`σ_λ²`が負になり0に切り上げられる（θ=0、GLSが
+# 切り上げた成分について退化する）。8エンティティ×5時点、`y = 1 + 0.5 x1 - 0.3 x2 + α_i + λ_t + ε`。
+# 切り上げが起きる乱数シードは、`variance_method`の3法で確認して固定した。
+_ZERO_COMPONENT_N_ENTITIES = 8
+_ZERO_COMPONENT_N_PERIODS = 5
+_ZERO_COMPONENT_EFFECT_SD = 1.5
+# 不均衡版で落とす行（0始まり。どのエンティティにも2行以上残る）。
+_ZERO_COMPONENT_DROP_ROWS = (3, 4, 11, 17, 18, 19, 26, 30)
+# DGPごとの（個体効果の標準偏差、時点効果の標準偏差、シード）。
+_ZERO_COMPONENT_DGPS = {
+    "re_no_entity_effect": (0.0, _ZERO_COMPONENT_EFFECT_SD, 0),
+    "re_no_time_effect": (_ZERO_COMPONENT_EFFECT_SD, 0.0, 1),
+}
+
+
+def _zero_component_panel(
+    entity_sd: float, time_sd: float, seed: int
+) -> pl.DataFrame:
+    rng = np.random.default_rng(seed)
+    n, t = _ZERO_COMPONENT_N_ENTITIES, _ZERO_COMPONENT_N_PERIODS
+    entity_effect = rng.normal(0.0, entity_sd, n) if entity_sd else np.zeros(n)
+    time_effect = rng.normal(0.0, time_sd, t) if time_sd else np.zeros(t)
+    rows = []
+    for i in range(n):
+        for j in range(t):
+            x1, x2 = rng.normal(), rng.normal()
+            y = (
+                1.0
+                + 0.5 * x1
+                - 0.3 * x2
+                + entity_effect[i]
+                + time_effect[j]
+                + rng.normal()
+            )
+            rows.append(
+                (
+                    f"e{i + 1:02d}",
+                    j + 1,
+                    round(y, 3),
+                    round(x1, 3),
+                    round(x2, 3),
+                )
+            )
+    return pl.DataFrame(
+        rows, schema=["entity", "time", "y", "x1", "x2"], orient="row"
+    )
+
+
+def re_zero_variance_component_panels() -> dict[str, pl.DataFrame]:
+    """分散成分が0に切り上げられるパネル（ファイル名（拡張子なし）→データ）。
+
+    `re_no_entity_effect`（個体効果なし。1-wayの`σ_u²`・2-wayの`σ_u²`が0）、
+    `re_no_entity_effect_unbalanced`（同じデータから`_ZERO_COMPONENT_DROP_ROWS`の行を
+    落とした1-wayの不均衡パネル）、`re_no_time_effect`（時点効果なし。2-wayの`σ_λ²`が0）。
+    """
+    panels = {
+        name: _zero_component_panel(*dgp)
+        for name, dgp in _ZERO_COMPONENT_DGPS.items()
+    }
+    panels["re_no_entity_effect_unbalanced"] = (
+        panels["re_no_entity_effect"]
+        .with_row_index("_row")
+        .filter(~pl.col("_row").is_in(_ZERO_COMPONENT_DROP_ROWS))
+        .drop("_row")
+    )
+    return panels
+
+
+# 全個体の観測数は同じだが、時点がずれたパネル（RE。`variance_method`の1-wayは観測数でバランスを
+# 判定するため閉形式を使うが、plmは時点集合も同じことを要求してトレース形を使う。値が異なる既知の
+# 差の固定用）。20エンティティ×6時点で、奇数番目のエンティティの時点を1つずらす（`t1`〜`t6`）。
+_SHIFTED_TIME_N_ENTITIES = 20
+_SHIFTED_TIME_SEED = 11
+
+
+def re_equal_counts_shifted_time_panel() -> pl.DataFrame:
+    """全個体の観測数が同じで、奇数番目の個体だけ時点が1つずれたパネル。"""
+    df, _ = generate_fe_dataset(
+        "baseline",
+        n_entities=_SHIFTED_TIME_N_ENTITIES,
+        seed=_SHIFTED_TIME_SEED,
+    )
+    shifted = df["entity"].str.slice(1).cast(pl.Int64) % 2 == 1
+    shifted_time = (df["time"].str.slice(1).cast(pl.Int64) + 1).cast(pl.String)
+    return df.with_columns(
+        pl.when(shifted)
+        .then(pl.lit("t") + shifted_time)
+        .otherwise(pl.col("time"))
+        .alias("time")
+    )
+
+
 if __name__ == "__main__":
     from benchmark.common import preview_dataset
 

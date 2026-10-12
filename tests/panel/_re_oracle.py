@@ -173,7 +173,7 @@ def _between_ssr_and_df(
 
 
 def first_stage_variance_components(
-    p: _Panel, method: str, two_way: bool
+    p: _Panel, method: str, two_way: bool, *, force_trace: bool = False
 ) -> tuple[float, float, float | None]:
     """`plm::ercomp`の`walhus`・`amemiya`を、観測ごとの行列で書き下した
     (σ_ε², σ_u², σ_λ²)（1-wayのσ_λ²は`None`、負の成分は0に切り上げ）。
@@ -183,6 +183,8 @@ def first_stage_variance_components(
     `Q_ts = Σ_t N_t ē_t²`）。バランス（全個体の観測数が等しい。2-wayは常に）は
     `plm`の`dfcor = 1`の閉形式、不均衡の1-wayは`dfcor = 3`のトレース項の式
     （`Z`の`Between`・`Sum`・`within`を観測ごとに展開した行列で`plm`のソースどおりに組む）。
+    `force_trace`は、全個体の観測数が等しくても1-wayでトレース項の式を使う（`plm`は時点集合が
+    同じでないパネルをバランスとみなさずトレース項の式を使う）。
     """
     n, n_ent, n_per = p.n, p.n_entities, p.n_periods if two_way else 0
     ones = np.ones((n, 1))
@@ -197,7 +199,7 @@ def first_stage_variance_components(
     q_w = float(np.sum(p.within(e, two_way) ** 2))
     e_ent = p.entity_mean(e)
     q_id = float(np.sum(p.t_count * e_ent**2))
-    balanced = bool(np.all(p.t_count == p.t_count[0]))
+    balanced = bool(np.all(p.t_count == p.t_count[0])) and not force_trace
 
     if two_way or balanced:
         t = n_per if two_way else p.t_count[0]

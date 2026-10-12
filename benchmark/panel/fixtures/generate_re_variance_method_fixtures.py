@@ -25,8 +25,14 @@ Swamy-Aroraの値は`re_time_invariant.json`・`re_two_way.json`が持つため�
 ## シナリオ
 
 `ONE_WAY_CASES`・`TWO_WAY_CASES`参照。`full`のケースは全`cov_type`（classical・hc1〜hc3・
-cluster・dk）、それ以外はclassicalとclusterだけを持つ。dkのバンド幅は本実装の既定式で求めた
-値を`maxlag`に渡す。
+cluster・dk）、それ以外はclassicalとclusterだけを持つ（手計算との照合は全ケース×全`cov_type`で、
+フィクスチャの`cov_type`に依らない）。dkのバンド幅は本実装の既定式で求めた値を`maxlag`に渡す。
+
+- 個体効果なし・時点効果なしのDGP（`re_no_entity_effect`・`re_no_time_effect`）は、推定した
+  `σ_u²`・`σ_λ²`が負になり0に切り上げられる入力（θ=0、GLSがプールドOLSに退化）。
+- `ow_equal_counts_shifted_time`は全個体の観測数が同じで時点がずれたパネル。plmは時点集合も
+  同じことを要求してトレース形を使うため、本実装（閉形式）と値が異なる。plmとの一致は比べず
+  （`Case.differs_from_plm`）、差そのものをテストが固定する。
 
 使用例（リポジトリルートから）:
     python -m benchmark.panel.fixtures.generate_re_variance_method_fixtures
@@ -86,6 +92,11 @@ class Case:
     # 1-wayのハウスマン検定の参照（`run_plm_hausman_tilde_benchmark.R`）は、検定できる列が
     # 無いと作れない。全列がwithin変動を持たないケースはFalseにして持たない。
     hausman: bool = True
+    # plmと値が異なる入力（観測数が等しく時点がずれた1-way）。plmは時点集合も同じことを要求して
+    # トレース形を使い、本実装は観測数だけで閉形式を使う。plmとの一致は比べず、差そのものを固定する。
+    differs_from_plm: bool = False
+    # `AMEMIYA_REJECTED_CASES`で、`ValidationError`のメッセージに載る列名（", "区切り）。
+    rejected_columns: str = ""
 
     @property
     def cov_types(self) -> list[str]:
@@ -138,6 +149,7 @@ ONE_WAY_CASES = [
         "fe_time_invariant_unbalanced",
         ("x1", "x2", "x_invariant"),
         WALHUS,
+        full=True,
     ),
     # T_iが2〜10に偏る極端な不均衡（トレース項の効きが大きい）。
     Case(
@@ -145,12 +157,14 @@ ONE_WAY_CASES = [
         "fe_time_invariant_multi_unbalanced",
         ("x1", "x2", "x3"),
         BOTH,
+        full=True,
     ),
     Case(
         "ow_multi_unbalanced_time_invariant",
         "fe_time_invariant_multi_unbalanced",
         ("x1", "x2", "x3", "z1", "z2"),
         WALHUS,
+        full=True,
     ),
     Case(
         "ow_nearly_balanced",
@@ -167,12 +181,37 @@ ONE_WAY_CASES = [
     ),
     Case("ow_small_panel", "fe_small_panel", ("x1", "x2"), BOTH),
     Case("ow_heteroskedastic", "fe_heteroskedastic", ("x1", "x2"), BOTH),
-    Case("ow_wagepan", WAGEPAN_CSV, tuple(WAGEPAN_X), BOTH),
+    Case("ow_wagepan", WAGEPAN_CSV, tuple(WAGEPAN_X), BOTH, full=True),
     Case(
         "ow_wagepan_time_invariant",
         WAGEPAN_CSV,
         (*WAGEPAN_X, "educ", "black", "hisp"),
         WALHUS,
+        full=True,
+    ),
+    # 個体効果を持たないDGP。推定した`σ_u²`が負になり0に切り上げられる（θ=0、GLSはプールドOLSに
+    # 退化する）。バランスと不均衡で、閉形式とトレース形の両方の切り上げを通る。
+    Case(
+        "ow_no_entity_effect",
+        "re_no_entity_effect",
+        ("x1", "x2"),
+        BOTH,
+        full=True,
+    ),
+    Case(
+        "ow_no_entity_effect_unbalanced",
+        "re_no_entity_effect_unbalanced",
+        ("x1", "x2"),
+        BOTH,
+        full=True,
+    ),
+    # 全個体の観測数が同じで時点がずれたパネル（plmと値が異なる既知の差）。
+    Case(
+        "ow_equal_counts_shifted_time",
+        "re_equal_counts_shifted_time",
+        ("x1", "x2"),
+        BOTH,
+        differs_from_plm=True,
     ),
 ]
 
@@ -252,6 +291,24 @@ TWO_WAY_CASES = [
         tuple(WAGEPAN_X),
         BOTH,
         two_way=True,
+        full=True,
+    ),
+    # 個体効果なし（`σ_u²`が0に切り上げられる）・時点効果なし（`σ_λ²`が0に切り上げられる）。
+    Case(
+        "tw_no_entity_effect",
+        "re_no_entity_effect",
+        ("x1", "x2"),
+        BOTH,
+        two_way=True,
+        full=True,
+    ),
+    Case(
+        "tw_no_time_effect",
+        "re_no_time_effect",
+        ("x1", "x2"),
+        BOTH,
+        two_way=True,
+        full=True,
     ),
     Case(
         "tw_wagepan_educ_trend",
@@ -264,19 +321,45 @@ TWO_WAY_CASES = [
 
 CASES = [*ONE_WAY_CASES, *TWO_WAY_CASES]
 
-# Amemiyaが拒否する入力（within変動の無い列を含む）。本実装は`ValidationError`にする。
+# Amemiyaが拒否する入力（within変動の無い列を含む）。本実装は`ValidationError`にし、
+# メッセージに`rejected_columns`の列を載せる。
 AMEMIYA_REJECTED_CASES = [
     Case(
         "amemiya_time_invariant_balanced",
         "fe_zero_variance_regressor",
         ("x1", "x2", "x_invariant"),
         ("amemiya",),
+        rejected_columns="x_invariant",
     ),
     Case(
         "amemiya_time_invariant_unbalanced",
         "fe_time_invariant_unbalanced",
         ("x1", "x2", "x_invariant"),
         ("amemiya",),
+        rejected_columns="x_invariant",
+    ),
+    # 複数の列が拒否される。
+    Case(
+        "amemiya_two_time_invariant_unbalanced",
+        "fe_time_invariant_multi_unbalanced",
+        ("x1", "x2", "x3", "z1", "z2"),
+        ("amemiya",),
+        rejected_columns="z1, z2",
+    ),
+    # 全列が時間不変（plmは`empty model`で失敗する）。
+    Case(
+        "amemiya_all_time_invariant",
+        "fe_zero_variance_regressor",
+        ("x_invariant",),
+        ("amemiya",),
+        rejected_columns="x_invariant",
+    ),
+    Case(
+        "amemiya_wagepan_time_invariant",
+        WAGEPAN_CSV,
+        (*WAGEPAN_X, "educ", "black", "hisp"),
+        ("amemiya",),
+        rejected_columns="educ, black, hisp",
     ),
     Case(
         "amemiya_one_dimensional_two_way",
@@ -284,6 +367,7 @@ AMEMIYA_REJECTED_CASES = [
         ("x1", "x2", "xi", "xt"),
         ("amemiya",),
         two_way=True,
+        rejected_columns="xi, xt",
     ),
 ]
 

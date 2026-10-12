@@ -405,6 +405,21 @@ AMEMIYA_NEEDS_WITHIN_VARIATION = (
     "regressors"
 )
 
+# RE: `variance_method="wallace_hussain"`の1段目（プールドOLS）が特異
+# （`PanelError::PooledRegressionFailed`、`source`は`LeastSquaresError::SingularMatrix`）。
+POOLED_REGRESSION_FAILED = (
+    "pooled least-squares estimation for the variance component failed: "
+    "design matrix is singular (perfect multicollinearity detected)"
+)
+
+# RE: `variance_method`が推定した`σ_ε²`が正でない
+# （`PanelError::NonPositiveIdiosyncraticVariance`）。`{sigma2_eps}`はRustのf64のDisplay。
+NON_POSITIVE_IDIOSYNCRATIC_VARIANCE = (
+    "the estimated idiosyncratic variance is not positive ({sigma2_eps}) "
+    'with variance_method="{method}"; the weights of the quasi-demeaning '
+    "are undefined"
+)
+
 # RE: `cov_type="dk"`で`dk_time`が未指定（`time`は借用されない。1-way・2-wayとも）。
 DK_REQUIRES_TIME = (
     "cov_type='dk' requires the `dk_time` option: the column that defines the "

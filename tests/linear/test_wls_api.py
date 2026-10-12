@@ -60,9 +60,9 @@ _assert_close = partial(
 # ── 成功パス・結果型 ──────────────────────────────────────────────────
 
 
-def test_default_options_use_classical(dataset):
+def test_default_options_use_classical(unit_weight_dataset):
     """`options`省略時は`WLSOptions()`の既定値（classical）が使われること。"""
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    df = unit_weight_dataset
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
     assert res.cov_type == "classical"
 
@@ -85,9 +85,9 @@ def test_residuals_are_original_scale_not_weighted(dataset):
         _assert_rounding_close(wls_r, ols_r, f"residuals[{i}]")
 
 
-def test_fit_succeeds_and_returns_wls_results(dataset):
+def test_fit_succeeds_and_returns_wls_results(unit_weight_dataset):
     """`WLS.fit()`の返り値が`WLSResults`（`OLSResults`とは別型）であること。"""
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    df = unit_weight_dataset
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
     assert isinstance(res, WLSResults)
 
@@ -95,8 +95,8 @@ def test_fit_succeeds_and_returns_wls_results(dataset):
 # ── API構造 ───────────────────────────────────────────────────────────
 
 
-def test_params_table_structure(dataset):
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+def test_params_table_structure(unit_weight_dataset):
+    df = unit_weight_dataset
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
     table = res.params_table()
     assert_params_table_matches_attributes(res)
@@ -117,8 +117,8 @@ def test_params_table_structure(dataset):
     assert [row["param_name"] for row in table] == ["const", "x1", "x2"]
 
 
-def test_conf_int_structure(dataset):
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+def test_conf_int_structure(unit_weight_dataset):
+    df = unit_weight_dataset
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
     ci = res.conf_int
 
@@ -128,8 +128,8 @@ def test_conf_int_structure(dataset):
         assert lower < upper
 
 
-def test_params_std_errors_test_stats_p_values_share_keys(dataset):
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+def test_params_std_errors_test_stats_p_values_share_keys(unit_weight_dataset):
+    df = unit_weight_dataset
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
     expected_keys = {"const", "x1", "x2"}
 
@@ -139,8 +139,8 @@ def test_params_std_errors_test_stats_p_values_share_keys(dataset):
     assert set(res.p_values.keys()) == expected_keys
 
 
-def test_n_obs_and_dep_var_name(dataset):
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+def test_n_obs_and_dep_var_name(unit_weight_dataset):
+    df = unit_weight_dataset
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
     assert res.n_obs == 100
     assert res.dep_var_name == "y"
@@ -153,13 +153,13 @@ def test_n_obs_and_dep_var_name(dataset):
 @pytest.mark.parametrize(
     "cov_type", ["classical", "hc0", "hc1", "hc2", "hc3", "hac", "cluster"]
 )
-def test_cov_type_is_case_insensitive(dataset, cov_type, spelling):
+def test_cov_type_is_case_insensitive(unit_weight_dataset, cov_type, spelling):
     """全`cov_type`で、`res.cov_type`が正規形（小文字）で返り、どの大文字小文字の
     綴りでも正規形と同一の推定結果になること（OLSの
     `test_ols_api.py::test_cov_type_is_case_insensitive`と同じ観点、共通化された
     経路の検証）。HACは`hac_lags`省略時の自動計算式で確認する。
     """
-    df = with_row_time(dataset).with_columns(pl.lit(1.0).alias("weight"))
+    df = with_row_time(unit_weight_dataset)
 
     def fit(label: str):
         kwargs = {"cluster": "cluster"} if cov_type == "cluster" else {}
@@ -175,12 +175,12 @@ def test_cov_type_is_case_insensitive(dataset, cov_type, spelling):
     assert_same_estimates(res, fit(cov_type))
 
 
-def test_include_intercept_false_omits_const(dataset):
+def test_include_intercept_false_omits_const(unit_weight_dataset):
     """`include_intercept=False`では`const`が出ず、`df_model`は傾き係数の数
     （切片あり・なしで同じ）になること（数値照合は`test_wls_reference.py`の
     `test_no_intercept_matches_statsmodels`）。
     """
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    df = unit_weight_dataset
     options = WLSOptions(include_intercept=False)
     res = WLS(
         df, y="y", x=["x1", "x2"], weight="weight", options=options
@@ -189,11 +189,11 @@ def test_include_intercept_false_omits_const(dataset):
     assert res.df_model == 2
 
 
-def test_confidence_level_changes_interval_width(dataset):
+def test_confidence_level_changes_interval_width(unit_weight_dataset):
     """`confidence_level`を下げると信頼区間が狭くなること（OLSと同じ検証、
     既定の0.95以外の値がengine_pybind経由で実際に反映されることの確認）。
     """
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    df = unit_weight_dataset
     wide = WLS(
         df,
         y="y",
@@ -215,11 +215,11 @@ def test_confidence_level_changes_interval_width(dataset):
         assert narrow_width < wide_width, name
 
 
-def test_hac_auto_lags_runs_and_returns_finite_std_errors(dataset):
+def test_hac_auto_lags_runs_and_returns_finite_std_errors(unit_weight_dataset):
     """`hac_lags`省略時（`None`、自動計算式）でもエラーなく動作すること
     （OLSと同じ検証）。
     """
-    df = with_row_time(dataset).with_columns(pl.lit(1.0).alias("weight"))
+    df = with_row_time(unit_weight_dataset)
     # hac_lags省略 = 自動計算
     options = WLSOptions(cov_type="hac", hac_time=ROW_TIME)
     res = WLS(
@@ -325,9 +325,9 @@ def test_predict_new_data_matches_statsmodels(dataset):
         _assert_close(value, exp, f"predicted/{i}")
 
 
-def test_predict_returns_list_of_floats(dataset):
+def test_predict_returns_list_of_floats(unit_weight_dataset):
     """`predict()`が観測値ごとの`float`のリストを返すこと（`residuals`と同じ形）。"""
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    df = unit_weight_dataset
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
 
     predicted = res.predict()
@@ -339,11 +339,13 @@ def test_predict_returns_list_of_floats(dataset):
 # ── augment() ─────────────────────────────────────────────────────────
 
 
-def test_augment_none_returns_training_data_with_predicted_column(dataset):
+def test_augment_none_returns_training_data_with_predicted_column(
+    unit_weight_dataset,
+):
     """`augment(new_data=None)`が、学習データの全列＋`"predicted"`列を持つ
     DataFrameを、`predict()`と同じ予測値・元データと同じ行順で返すこと。
     """
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    df = unit_weight_dataset
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
 
     augmented = res.augment()
@@ -358,11 +360,13 @@ def test_augment_none_returns_training_data_with_predicted_column(dataset):
     assert augmented["predicted"].to_list() == expected
 
 
-def test_augment_new_data_returns_new_data_with_predicted_column(dataset):
+def test_augment_new_data_returns_new_data_with_predicted_column(
+    unit_weight_dataset,
+):
     """`augment(new_data)`が、`new_data`の全列＋`"predicted"`列を持つ
     DataFrameを、`predict(new_data)`と同じ予測値で返すこと。
     """
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    df = unit_weight_dataset
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
     new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
 
@@ -376,11 +380,11 @@ def test_augment_new_data_returns_new_data_with_predicted_column(dataset):
     assert augmented["predicted"].to_list() == expected
 
 
-def test_augment_new_data_with_extra_column_preserves_it(dataset):
+def test_augment_new_data_with_extra_column_preserves_it(unit_weight_dataset):
     """`new_data`が`x`列以外の余分な列（予測に使わない識別子列等）を含む場合、
     その列もそのまま`"predicted"`列と一緒に返されること。
     """
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    df = unit_weight_dataset
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
     new_data = pl.DataFrame(
         {
@@ -444,7 +448,7 @@ _assert_rounding_close = partial(
         {"include_intercept": False},
     ],
 )
-def test_weight_one_matches_ols(dataset, option_kwargs):
+def test_weight_one_matches_ols(unit_weight_dataset, option_kwargs):
     """重み=1のときWLSの結果がOLSの結果と完全一致すること。
 
     params/std_errors/test_stats/p_values/conf_int/F統計量/n_obsは、WLSがOLSソルバーを`sqrt(weight)`変換した
@@ -457,7 +461,7 @@ def test_weight_one_matches_ols(dataset, option_kwargs):
     `OLSOptions`/`WLSOptions`はフィールド構成が同一の独立クラスのため、
     同じ`option_kwargs`からそれぞれ構築して`OLS`/`WLS`に渡す。
     """
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    df = unit_weight_dataset
 
     ols_res = OLS(
         df, y="y", x=["x1", "x2"], options=OLSOptions(**option_kwargs)
@@ -494,9 +498,9 @@ def test_weight_one_matches_ols(dataset, option_kwargs):
         _assert_rounding_close(wls_r, ols_r, f"residuals[{i}]")
 
 
-def test_weight_one_matches_ols_params_table(dataset):
+def test_weight_one_matches_ols_params_table(unit_weight_dataset):
     """params_table()の内容もOLSと一致すること（辞書系プロパティ以外の確認）。"""
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    df = unit_weight_dataset
 
     ols_table = OLS(df, y="y", x=["x1", "x2"]).fit().params_table()
     wls_table = (
@@ -511,7 +515,7 @@ def test_weight_one_matches_ols_params_table(dataset):
         assert wls_row["std_error"] == ols_row["std_error"]
 
 
-def test_weight_one_matches_ols_predict(dataset):
+def test_weight_one_matches_ols_predict(unit_weight_dataset):
     """重み=1のとき、`predict()`（学習データ・新規データいずれも）が
     OLSの`predict()`と一致すること（予測値は重みに関与しない、
     という設計の帰結を確認する）。
@@ -523,7 +527,7 @@ def test_weight_one_matches_ols_predict(dataset):
     一方、新規データに対する予測は両者とも同じ純粋関数
     `engine::linear::ols::predict_new_data`を呼ぶため、厳密な`==`で一致する。
     """
-    df = dataset.with_columns(pl.lit(1.0).alias("weight"))
+    df = unit_weight_dataset
 
     ols_res = OLS(df, y="y", x=["x1", "x2"]).fit()
     wls_res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()

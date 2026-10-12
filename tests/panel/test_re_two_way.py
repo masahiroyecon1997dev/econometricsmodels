@@ -327,6 +327,67 @@ def test_two_way_r_squared_matches_definition(panel, x, expected):
     assert res.r_squared_overall == pytest.approx(expected[2], rel=1e-7)
 
 
+# plm::ercomp（`effect = "twoways"`, Swamy-Arora）: σ²（idios, id, time）とθ（id, time, total）。
+VARIANCE_COMPONENTS = {
+    ("x1",): (
+        (0.7105636082063154, 3.9931983188209288, 1.8311358682852061),
+        (0.7936237292092024, 0.7535338941957259, 0.7074067054651654),
+    ),
+    ("x1", "xi", "xt"): (
+        (0.7105636082063154, 3.0199895045281573, 2.5967363260251166),
+        (0.7643012103250293, 0.7911531859652488, 0.7137120129901442),
+    ),
+}
+
+
+@pytest.mark.parametrize("x", list(VARIANCE_COMPONENTS))
+def test_two_way_exposes_variance_components_and_weights(panel, x):
+    """σ_ε²・σ_u²・σ_λ²と3つの重み（θ₁・θ₂・θ₃）がplm::ercompと一致する。
+    1-wayの`theta`（個体ごと）は2-wayでは`None`。"""
+    sigma2, theta = VARIANCE_COMPONENTS[x]
+    res = _fit(panel, REOptions(time="time"), x=x)
+    assert res.sigma2_eps == pytest.approx(sigma2[0], rel=1e-9)
+    assert res.sigma2_u == pytest.approx(sigma2[1], rel=1e-9)
+    assert res.sigma2_lambda == pytest.approx(sigma2[2], rel=1e-9)
+    assert res.theta_entity == pytest.approx(theta[0], rel=1e-9)
+    assert res.theta_time == pytest.approx(theta[1], rel=1e-9)
+    assert res.theta_total == pytest.approx(theta[2], rel=1e-9)
+    assert res.theta is None
+
+
+def test_one_way_exposes_theta_per_entity_and_no_two_way_fields(panel):
+    """1-wayは`σ_λ²`と2-wayの重みが`None`で、`theta`はエンティティID→θ_i
+    （plm::ercompの`σ²`・`theta`、`y ~ x1 + xt`）。"""
+    res = _fit(panel, REOptions(cov_type="classical"), x=("x1", "xt"))
+    assert res.sigma2_eps == pytest.approx(5.558492530031272, rel=1e-9)
+    assert res.sigma2_u == pytest.approx(2.781216088364690, rel=1e-9)
+    assert res.sigma2_lambda is None
+    assert res.theta_entity is None
+    assert res.theta_time is None
+    assert res.theta_total is None
+    assert list(res.theta) == [f"e{i}" for i in range(1, 7)]
+    assert list(res.theta.values()) == pytest.approx(
+        [0.4227860837470446] * 6, rel=1e-9
+    )
+
+
+def test_theta_total_is_zero_when_a_variance_component_is_zero(panel):
+    """分散成分が0に切り上げられると`θ₃`は丸め誤差なしで0になる
+    （グループ効果が無いDGPで`σ_u²`・`σ_λ²`がともに0）。"""
+    df = panel.with_columns(
+        y=2.0 * pl.col("x1")
+        + pl.Series([0.1 * ((r * 7) % 5) for r in range(24)])
+    )
+    res = _fit(df, REOptions(time="time"), x=("x1",))
+    assert res.sigma2_u == 0.0
+    assert res.sigma2_lambda == 0.0
+    assert (res.theta_entity, res.theta_time, res.theta_total) == (
+        0.0,
+        0.0,
+        0.0,
+    )
+
+
 def test_one_way_has_no_n_periods(panel):
     """`time`を指定しない1-wayは`n_periods`が`None`で、`dk_time`だけの指定でも同じ。"""
     plain = _fit(panel, REOptions(cov_type="classical"), x=("x1", "xi"))

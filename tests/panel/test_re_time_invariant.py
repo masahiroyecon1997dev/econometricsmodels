@@ -500,6 +500,62 @@ def test_sigma2_eps_matches_plm(reference, scenario):
     )
 
 
+@pytest.mark.parametrize("scenario", SCENARIOS)
+def test_exposed_variance_components_match_plm(reference, scenario):
+    """公開する`sigma2_eps`はplmと一致し、`sigma2_u`・`theta`はバランスパネルで
+    plmと一致する（不均衡パネルの`σ_u²`は定義が異なる）。`theta`は
+    `1 - sqrt(σ_ε² / (T_i·σ_u² + σ_ε²))`で、plmの`σ²`から計算した値と比べる。"""
+    df = _frame(scenario)
+    res = _fit(df, SCENARIO_X_COLS[scenario], "classical")
+    ref = reference["synthetic"][scenario]["classical"]
+    assert_close(
+        res.sigma2_eps,
+        ref["sigma2_eps"],
+        f"{scenario}/sigma2_eps",
+        rtol=RTOL,
+        atol=ATOL,
+    )
+    if scenario == BALANCED:
+        assert_close(
+            res.sigma2_u,
+            ref["sigma2_u"],
+            f"{scenario}/sigma2_u",
+            rtol=RTOL,
+            atol=ATOL,
+        )
+        t = df.group_by("entity").len()["len"].unique().to_list()
+        assert len(t) == 1
+        want = 1.0 - np.sqrt(
+            ref["sigma2_eps"] / (t[0] * ref["sigma2_u"] + ref["sigma2_eps"])
+        )
+        for entity, theta in res.theta.items():
+            assert_close(
+                theta,
+                float(want),
+                f"{scenario}/theta/{entity}",
+                rtol=RTOL,
+                atol=ATOL,
+            )
+
+
+def test_wagepan_variance_components_match_plm(reference):
+    """実データ（バランスパネル）の`σ_ε²`・`σ_u²`がplmと一致する。"""
+    df = load_wooldridge_dataset("wagepan")
+    res = RE(
+        df,
+        y="lwage",
+        x=WAGEPAN_X_TIME_INVARIANT,
+        entity="nr",
+        options=REOptions(cov_type="classical"),
+    ).fit()
+    ref = reference["wooldridge"]["wagepan"]["classical"]
+    for ours, name in [
+        (res.sigma2_eps, "sigma2_eps"),
+        (res.sigma2_u, "sigma2_u"),
+    ]:
+        assert_close(ours, ref[name], f"wagepan/{name}", rtol=RTOL, atol=ATOL)
+
+
 def _plm_stats(plm: dict, hausman: dict) -> dict:
     """plmのフィクスチャを`_hand_computed`と同じキー名の辞書にそろえる。
     plmには`r_squared_*`・`aic`等が無いので含めない。"""

@@ -107,6 +107,16 @@ def _check_result(res, ref: dict, label: str) -> None:
         f"{label}/r_squared_overall",
     )
 
+    # 分散成分（linearmodels `variance_decomposition`）と準偏差変換の重み
+    # （`theta`、エンティティごと）。1-wayは`σ_λ²`・2-wayの重みを持たない。
+    _assert_close(res.sigma2_eps, ref["sigma2_eps"], f"{label}/sigma2_eps")
+    _assert_close(res.sigma2_u, ref["sigma2_u"], f"{label}/sigma2_u")
+    _assert_dict_close(res.theta, ref["theta"], f"{label}/theta")
+    assert res.sigma2_lambda is None, f"{label}/sigma2_lambda"
+    assert res.theta_entity is None, f"{label}/theta_entity"
+    assert res.theta_time is None, f"{label}/theta_time"
+    assert res.theta_total is None, f"{label}/theta_total"
+
 
 # ── 凍結フィクスチャとの数値照合（合成データ） ───────────────────────
 

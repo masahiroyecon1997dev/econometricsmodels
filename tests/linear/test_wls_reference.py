@@ -35,7 +35,6 @@ from pathlib import Path
 import polars as pl
 import pytest
 from _assertions import assert_close, assert_dict_close
-from _assertions import rename_intercept as _rename
 from _constants import DATA_DIR
 from _helpers import (
     ROW_TIME,
@@ -97,8 +96,7 @@ def _check_result(res, ref: dict, label: str) -> None:
     _assert_dict_close(res.p_values, ref["p_values"], f"{label}/p_values")
 
     for name, (ref_lower, ref_upper) in ref["conf_int"].items():
-        our_name = _rename(name)
-        our_lower, our_upper = res.conf_int[our_name]
+        our_lower, our_upper = res.conf_int[name]
         _assert_close(our_lower, ref_lower, f"{label}/conf_lower/{name}")
         _assert_close(our_upper, ref_upper, f"{label}/conf_upper/{name}")
 

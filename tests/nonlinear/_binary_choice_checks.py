@@ -39,7 +39,6 @@ from _assertions import (
     assert_same_estimates,
     check_margeff,
 )
-from _assertions import rename_intercept as _rename
 from _constants import APPLE_CLUSTER, APPLE_X, DATA_DIR, MROZ_X
 from _error_messages import escaped
 from _helpers import (
@@ -1277,8 +1276,7 @@ def check_result(
     )
 
     for name, (ref_lower, ref_upper) in ref["conf_int"].items():
-        our_name = _rename(name)
-        our_lower, our_upper = res.conf_int[our_name]
+        our_lower, our_upper = res.conf_int[name]
         config.assert_close(our_lower, ref_lower, f"{label}/conf_lower/{name}")
         config.assert_close(our_upper, ref_upper, f"{label}/conf_upper/{name}")
 

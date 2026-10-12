@@ -27,7 +27,6 @@ from pathlib import Path
 
 import polars as pl
 from _assertions import assert_close, assert_dict_close
-from _assertions import rename_intercept as _rename
 from _constants import DATA_DIR, MARGEFF_AT
 from _helpers import load_wooldridge_dataset
 from econometricsmodels import Tobit, TobitOptions
@@ -390,7 +389,7 @@ def check_result(
         atol=atol,
     )
     for name, (ref_lower, ref_upper) in ref["conf_int"].items():
-        our_lower, our_upper = res.conf_int[_rename(name)]
+        our_lower, our_upper = res.conf_int[name]
         assert_close(
             our_lower,
             ref_lower,

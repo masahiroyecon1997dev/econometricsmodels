@@ -3,7 +3,7 @@
 主リファレンス（statsmodels/linearmodels）との数値比較テスト6ファイル
 （`test_ols_reference.py`/`test_wls_reference.py`/`test_logit_reference.py`/
 `test_probit_reference.py`/`test_iv_reference.py`/`test_iv_gmm_reference.py`）が
-共有する`assert_close`/`assert_dict_close`/`rename_intercept`と、
+共有する`assert_close`/`assert_dict_close`と、
 Logit/Probitの`check_margeff`（reference版）を置く。
 
 crosscheck系（`test_*_crosscheck.py`）は`test_ols_crosscheck.py`/
@@ -22,22 +22,7 @@ crosscheck系（`test_*_crosscheck.py`）は`test_ols_crosscheck.py`/
 
 from __future__ import annotations
 
-from collections.abc import Callable
-
 from _constants import MARGEFF_AT
-
-
-def rename_intercept(name: str) -> str:
-    """statsmodels/linearmodels(formula API)の切片名"Intercept"を本実装の"const"に揃える。
-
-    OLS/WLS/Logit/Probitの主リファレンス（statsmodels）は生成時点で
-    `benchmark/common/reference/normalize.py`により`"const"`へ正規化済みなため、
-    現状このデフォルト値がそのまま使われる呼び出しでは実質no-opになる。
-    `rename`引数自体は、`normalize.py`の`intercept_aliases`引数と同じ理由
-    （将来切片名の命名規則が異なるリファレンス実装が加わった場合の拡張
-    ポイント、コストの低いデフォルト引数のため維持）で残している。
-    """
-    return "const" if name == "Intercept" else name
 
 
 def assert_close(
@@ -96,11 +81,10 @@ def assert_dict_close(
     *,
     rtol: float,
     atol: float,
-    rename: Callable[[str], str] = rename_intercept,
 ) -> None:
     for name, ref_val in ref.items():
         assert_close(
-            ours[rename(name)],
+            ours[name],
             ref_val,
             f"{label}/{name}",
             rtol=rtol,
@@ -117,7 +101,6 @@ def check_margeff(
     atol: float,
     rtol_conf_int: float | None = None,
     atol_p_value: float | None = None,
-    rename: Callable[[str], str] = rename_intercept,
 ) -> None:
     """限界効果6統計量を`at`×係数名の全組み合わせでリファレンスと比較する。
 
@@ -132,7 +115,7 @@ def check_margeff(
             row["param_name"]: row for row in res.marginal_effects(at=at)
         }
         for name, ref_stats in ref_margeff[at].items():
-            row = effects[rename(name)]
+            row = effects[name]
             assert_close(
                 row["effect"],
                 ref_stats["effect"],

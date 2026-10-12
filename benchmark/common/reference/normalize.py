@@ -8,9 +8,20 @@ statsmodels_ref.py`、OLS/WLS/Logit/Probit共通）でも同じ形（切片名�
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Sequence
 
 _INTERCEPT_ALIASES_DEFAULT = ("(Intercept)", "Intercept")
+
+
+def fix_intercept_name(
+    name: str, intercept_aliases: Collection[str] = _INTERCEPT_ALIASES_DEFAULT
+) -> str:
+    """切片の別名を本実装の`"const"`へ畳む（それ以外の名前はそのまま返す）。
+
+    `normalize_names`を通さず係数dictを自前で組み立てる生成スクリプト
+    （IVの`linearmodels_ref.py`）が、同じ規則で名前を揃えるための単一の定義元。
+    """
+    return "const" if name in intercept_aliases else name
 
 
 def normalize_names(
@@ -18,7 +29,7 @@ def normalize_names(
     *,
     stat_key: str = "test_stats",
     scalar_keys: Sequence[str] = (),
-    intercept_aliases: Iterable[str] = _INTERCEPT_ALIASES_DEFAULT,
+    intercept_aliases: Collection[str] = _INTERCEPT_ALIASES_DEFAULT,
     conf_from_low_high: bool = False,
     fix_margeff: bool = False,
 ) -> dict:
@@ -48,7 +59,7 @@ def normalize_names(
     """
 
     def fix(name: str) -> str:
-        return "const" if name in intercept_aliases else name
+        return fix_intercept_name(name, intercept_aliases)
 
     def fixed(mapping: dict) -> dict:
         return {fix(k): v for k, v in mapping.items()}

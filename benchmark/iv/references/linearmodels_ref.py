@@ -84,6 +84,7 @@ import polars as pl
 
 from benchmark.common import hac_auto_lag, load_frozen_dataset
 from benchmark.common.load_wooldridge import load as _load_wooldridge
+from benchmark.common.reference.normalize import fix_intercept_name
 
 
 def _load_iv_dataset(
@@ -260,9 +261,6 @@ def run(
     mod = IV2SLS.from_formula(formula, pdf)
     res = mod.fit(cov_type=lm_cov_type, **cov_config)
 
-    def _fix_name(name: str) -> str:
-        return "const" if name == "Intercept" else name
-
     # 本実装はcov_typeによらず常にt分布（df=df_resid）で推論統計量を報告する
     # （iv-spec.md 3.2節）。`linearmodels`は`debiased=False`のとき正規分布・
     # F統計量は生のカイ二乗形式（qで割らない）を返す仕様のため（`IVResults.pvalues`/
@@ -270,8 +268,14 @@ def run(
     # ついての対応関係）、params/std_errorsは`linearmodels`の値をそのまま使いつつ、
     # t統計量・p値・信頼区間・F統計量はdf_resid・t分布を使って本実装と同じ規則で
     # 独自に計算し直す（`debiased`の値によらず一貫した比較ができるようにするため）。
-    coef = {_fix_name(k): float(v) for k, v in res.params.to_dict().items()}
-    se = {_fix_name(k): float(v) for k, v in res.std_errors.to_dict().items()}
+    coef = {
+        fix_intercept_name(k): float(v)
+        for k, v in res.params.to_dict().items()
+    }
+    se = {
+        fix_intercept_name(k): float(v)
+        for k, v in res.std_errors.to_dict().items()
+    }
     df_resid = int(res.df_resid)
     alpha = 1.0 - confidence_level
     t_crit = float(scipy_stats.t.ppf(1 - alpha / 2, df_resid))
@@ -526,12 +530,15 @@ def run_gmm(
 
     res = mod.fit(iter_limit=iter_limit, cov_type=lm_cov_type, **cov_config)
 
-    def _fix_name(name: str) -> str:
-        return "const" if name == "Intercept" else name
-
     # z分布で独自に計算し直す（本関数のdocコメント「検定分布・F統計量の対応関係」参照）。
-    coef = {_fix_name(k): float(v) for k, v in res.params.to_dict().items()}
-    se = {_fix_name(k): float(v) for k, v in res.std_errors.to_dict().items()}
+    coef = {
+        fix_intercept_name(k): float(v)
+        for k, v in res.params.to_dict().items()
+    }
+    se = {
+        fix_intercept_name(k): float(v)
+        for k, v in res.std_errors.to_dict().items()
+    }
     alpha = 1.0 - confidence_level
     z_crit = float(scipy_stats.norm.ppf(1 - alpha / 2))
     test_stats = {k: coef[k] / se[k] for k in coef}
@@ -547,7 +554,11 @@ def run_gmm(
     # （本関数のdocコメント参照）。
     param_names = list(res.params.index)
     # 切片なし（`include_intercept=False`）では`Intercept`が無く全係数が傾き。
-    slope_idx = [i for i, nm in enumerate(param_names) if nm != "Intercept"]
+    slope_idx = [
+        i
+        for i, nm in enumerate(param_names)
+        if fix_intercept_name(nm) != "const"
+    ]
     beta_slopes = res.params.to_numpy()[slope_idx]
     cov_slopes = res.cov.to_numpy()[np.ix_(slope_idx, slope_idx)]
     q = len(slope_idx)

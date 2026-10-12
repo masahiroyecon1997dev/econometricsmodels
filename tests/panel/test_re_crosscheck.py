@@ -62,7 +62,7 @@ from pathlib import Path
 import _error_messages as msgs
 import polars as pl
 import pytest
-from _assertions import assert_close, assert_dict_close, rename_intercept
+from _assertions import assert_close, assert_dict_close
 from _constants import DATA_DIR
 from _error_messages import escaped
 from _helpers import load_wooldridge_dataset
@@ -206,7 +206,7 @@ def _check_result(
     )
     for name, p_ref in ref["p_values"].items():
         _assert_p_close(
-            res.p_values[rename_intercept(name)],
+            res.p_values[name],
             p_ref,
             f"{label}/p_values/{name}",
             balanced=balanced,

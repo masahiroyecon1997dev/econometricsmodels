@@ -13,9 +13,10 @@ Wooldridge実データ（mroz）で、係数・標準誤差・検定統計量・
     - 主リファレンス（statsmodels）との厳密な数値一致: このファイル
     - 独立実装（R）とのクロスチェック: `test_logit_crosscheck.py`
 
-このファイルは2種類の照合を行う。凍結フィクスチャ（`logit.json`）との厳密比較を
-主軸としつつ、凍結フィクスチャが対象にしない `include_intercept=False` は
-ライブ statsmodels との直接照合で確認する（`test_ols_reference.py` と同じ構成）。
+このファイルは2種類の照合を行う。凍結フィクスチャ（`logit.json`、
+`include_intercept=False` を含む）との厳密比較を主軸としつつ、凍結フィクスチャが
+対象にしない `predict()` の分岐はライブ statsmodels との直接照合で確認する
+（`test_ols_reference.py` と同じ構成）。
 
 Note:
     `cov_type="hc1"`はここに含めない（statsmodelsのdiscrete modelがn/(n-k)
@@ -104,6 +105,19 @@ def test_cluster_imbalanced_matches_statsmodels(fixtures):
     _checks.check_cluster_imbalanced_matches_statsmodels(CONFIG, fixtures)
 
 
+@pytest.mark.parametrize("cov_type", CONFIG.cov_types)
+def test_include_intercept_false_matches_statsmodels(fixtures, cov_type):
+    _checks.check_include_intercept_false_matches_statsmodels(
+        CONFIG, fixtures, cov_type
+    )
+
+
+def test_include_intercept_false_cluster_matches_statsmodels(fixtures):
+    _checks.check_include_intercept_false_cluster_matches_statsmodels(
+        CONFIG, fixtures
+    )
+
+
 @pytest.mark.parametrize("solver", ["bfgs", "lbfgs"])
 def test_solver_matches_statsmodels(fixtures, solver):
     _checks.check_solver_matches_statsmodels(CONFIG, fixtures, solver)
@@ -127,13 +141,6 @@ def test_mroz_matches_statsmodels(fixtures, cov_type):
 
 
 # ── ライブ statsmodels との照合（凍結フィクスチャ対象外の分岐） ─────
-
-
-@pytest.mark.parametrize("cov_type", CONFIG.cov_types)
-def test_include_intercept_false_matches_statsmodels(cov_type):
-    _checks.check_include_intercept_false_matches_statsmodels(
-        CONFIG, sm.Logit, cov_type
-    )
 
 
 def test_predict_new_data_matches_statsmodels():

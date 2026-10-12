@@ -108,8 +108,12 @@ def run(
     model: str = "logit",
     method: str = "newton",
     groups: Sequence | None = None,
+    include_intercept: bool = True,
 ) -> dict:
     """1ケース分のstatsmodels結果を返す。
+
+    `include_intercept=False`は式に`- 1`を付けて切片を落とす（パラメータ名に`const`は現れず、`log_likelihood_null`は切片のみのモデルを
+    参照する）。
 
     `groups`は合成データにグループ列が無いときの疑似グループラベル（データ行数と同じ長さ）。
     渡すと列`_group`として付与し、`cluster`が未指定ならそれでクラスターする。
@@ -148,9 +152,10 @@ def run(
         raise ValueError(f"unknown dataset_source: {dataset_source!r}")
 
     alpha = 1.0 - confidence_level
+    fit_formula = formula if include_intercept else f"{formula} - 1"
 
     if cov_type.lower() == "opg":
-        base = smf_fit(formula=formula, data=pandas_df).fit(
+        base = smf_fit(formula=fit_formula, data=pandas_df).fit(
             disp=0, method=method
         )
         params = base.params.to_numpy()
@@ -189,7 +194,7 @@ def run(
         if sm_cov_type == "cluster":
             fit_kwargs["cov_kwds"] = {"groups": pandas_df[cluster]}
 
-        sm_model = smf_fit(formula=formula, data=pandas_df)
+        sm_model = smf_fit(formula=fit_formula, data=pandas_df)
         fitted = sm_model.fit(disp=0, **fit_kwargs)
 
         ci = fitted.conf_int(alpha=alpha)
@@ -250,7 +255,8 @@ def run(
         "cov_type_requested": cov_type,
         "method_requested": method,
         "confidence_level": confidence_level,
-        "formula": formula,
+        "formula": fit_formula,
+        "include_intercept": include_intercept,
     }
     return result
 
@@ -273,6 +279,11 @@ if __name__ == "__main__":
     parser.add_argument("--cluster", default=None)
     parser.add_argument("--confidence-level", type=float, default=0.95)
     parser.add_argument("--method", default="newton")
+    parser.add_argument(
+        "--no-intercept",
+        action="store_true",
+        help="指定するとinclude_intercept=False相当（formulaに'- 1'を付与）",
+    )
     args = parser.parse_args()
 
     output = run(
@@ -284,5 +295,6 @@ if __name__ == "__main__":
         args.confidence_level,
         args.model,
         args.method,
+        include_intercept=not args.no_intercept,
     )
     print(json.dumps(output, indent=2))

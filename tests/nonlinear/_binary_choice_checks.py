@@ -1339,6 +1339,40 @@ def check_matches_statsmodels(
     )
 
 
+def check_include_intercept_false_matches_statsmodels(
+    config: BinaryChoiceReferenceConfig, fixtures, cov_type
+) -> None:
+    """`include_intercept=False`（切片なし）の全統計量（baseline、`cov_type`別）。
+
+    `df_model`は`include_intercept`の値に関わらず常に`k-1`、`log_likelihood_null`は
+    常に切片のみのモデルを参照するため、切片なしでは`lr_statistic`が負値になりうる。
+    """
+    df = pl.read_csv(config.dataset_path("baseline"))
+    options = config.options_cls(cov_type=cov_type, include_intercept=False)
+    res = config.estimator_cls(
+        df, y="y", x=["x1", "x2", "x3"], options=options
+    ).fit()
+    check_result(
+        config,
+        res,
+        fixtures["synthetic"]["baseline"]["no_intercept"][cov_type],
+        f"no_intercept/{cov_type}",
+    )
+
+
+def check_include_intercept_false_cluster_matches_statsmodels(
+    config: BinaryChoiceReferenceConfig, fixtures
+) -> None:
+    """`include_intercept=False`×クラスターロバストSE（行番号%10の疑似グループ）。"""
+    res = _baseline_cluster_fit(config, "cluster", include_intercept=False)
+    check_result(
+        config,
+        res,
+        fixtures["synthetic"]["baseline"]["no_intercept"]["cluster"],
+        "no_intercept/cluster",
+    )
+
+
 def _baseline_cluster_fit(
     config: BinaryChoiceReferenceConfig, kind: str, **option_kwargs
 ):
@@ -1524,60 +1558,7 @@ def check_mroz_matches_statsmodels(
 
 
 # ── test_<method>_reference.py: ライブ statsmodels との照合 ──────────
-# （凍結フィクスチャが対象にしない include_intercept=False の分岐）
-
-
-def check_include_intercept_false_matches_statsmodels(
-    config: BinaryChoiceReferenceConfig, sm_estimator_cls, cov_type
-) -> None:
-    """`include_intercept=False`の成功パスをstatsmodelsと数値照合する。
-    `df_model`は`include_intercept`の値に関わらず常に`k-1`、
-    `log_likelihood_null`は常に「切片のみ」モデルを参照するため
-    `include_intercept=False`時は`lr_statistic`が負値になりうる、という特殊
-    挙動を含む。frozen fixtureではなくstatsmodelsとの直接照合で確認する
-    （`test_ols_reference.py`と同じ方針）。
-
-    `statsmodels_ref.run()`はformula API（`patsy`経由でpandasを要求する）を
-    使うため、ここでは使わない。OLS側と同じ配列API（`sm.Logit(y, x)`/
-    `sm.Probit(y, x)`）で直接比較する（`tests/`はpyarrow等のformula API
-    依存パッケージをdev依存に持たない方針、`.claude/rules/testing-policy.md`
-    参照）。
-    """
-    import numpy as np
-
-    df = pl.read_csv(config.dataset_path("baseline"))
-    y = df["y"].to_numpy()
-    x_cols = ["x1", "x2", "x3"]
-    x = np.column_stack([df[c].to_numpy() for c in x_cols])
-
-    if cov_type == "opg":
-        base = sm_estimator_cls(y, x).fit(disp=0)
-        scores = base.model.score_obs(base.params)
-        opg_cov = np.linalg.inv(scores.T @ scores)
-        sm_se = np.sqrt(np.diag(opg_cov))
-        sm_params = base.params
-        fitted = base
-    else:
-        sm_cov_type = {"classical": "nonrobust"}.get(cov_type, cov_type)
-        fitted = sm_estimator_cls(y, x).fit(disp=0, cov_type=sm_cov_type)
-        sm_params = fitted.params
-        sm_se = fitted.bse
-
-    options = config.options_cls(cov_type=cov_type, include_intercept=False)
-    res = config.estimator_cls(df, y="y", x=x_cols, options=options).fit()
-
-    label = f"include_intercept_false/{cov_type}"
-    for i, name in enumerate(x_cols):
-        config.assert_close(
-            res.params[name], sm_params[i], f"{label}/coef/{name}"
-        )
-        config.assert_close(
-            res.std_errors[name], sm_se[i], f"{label}/se/{name}"
-        )
-    assert res.converged == bool(fitted.mle_retvals["converged"]), (
-        f"{label}/converged"
-    )
-    assert res.df_model == fitted.df_model, f"{label}/df_model"
+# （凍結フィクスチャが対象にしない predict() の分岐）
 
 
 def check_predict_new_data_matches_statsmodels(

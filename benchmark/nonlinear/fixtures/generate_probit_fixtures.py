@@ -107,6 +107,28 @@ def build_fixtures() -> dict:
         groups=imbalanced_cluster_groups(n),
         model="probit",
     )
+    # include_intercept=False（切片なし）。全cov_type（STATSMODELS_COV_TYPES +
+    # cluster）と組み合わせて確認する（OLS/WLSと同じ）。
+    fixtures["baseline"]["no_intercept"] = {
+        cov_type: run(
+            dataset_source="synthetic",
+            dataset="baseline",
+            formula=None,
+            cov_type=cov_type,
+            model="probit",
+            include_intercept=False,
+        )
+        for cov_type in STATSMODELS_COV_TYPES
+    }
+    fixtures["baseline"]["no_intercept"]["cluster"] = run(
+        dataset_source="synthetic",
+        dataset="baseline",
+        formula=None,
+        cov_type="cluster",
+        model="probit",
+        include_intercept=False,
+        groups=balanced_cluster_groups(n),
+    )
     # NOTE: G=2×説明変数3個（cluster_g2）の成功パスフィクスチャは
     # 削除した（Logitと同じ理由。`rank(Ŝ)<=G-1`のため`G<=q`でクラスターロバスト
     # 共分散が退化し ValidationError になる）。エラーパスは
@@ -181,6 +203,10 @@ def build_fixtures() -> dict:
             "ValidationErrorになるため成功パスフィクスチャを持たない。"
             "clusterはbaselineシナリオ（均等・不均衡の疑似グループ）とapple（実データ、"
             "州でG=49）。全統計量・限界効果を持つ。"
+            "baseline.no_interceptはinclude_intercept=False（切片なし）を"
+            "全cov_type（opgを含む。opgのmargeffはnull）とクラスター（均等な疑似グループ）"
+            "で確認する。log_likelihood_nullは常に切片のみのモデルを参照するため、"
+            "lr_statisticが負値になりうる。"
             "bfgs/lbfgsのnear_separation・cluster・apple組み合わせは、ここにsolver別の"
             "フィクスチャを持たず、statsmodelsのnewtonで生成した同じシナリオ・cov_typeの"
             "エントリを参照にする（statsmodels自身のbfgs/lbfgsは収束許容が緩く、"

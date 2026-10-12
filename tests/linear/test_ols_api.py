@@ -28,15 +28,19 @@ import pytest
 import statsmodels.api as sm
 from _assertions import (
     assert_close,
+    assert_hac_time_reorders_rows,
     assert_params_table_matches_attributes,
     assert_same_estimates,
 )
 from _helpers import (
     CASE_SPELLINGS,
     HAC_AUTO_LAG_SAMPLE_SIZES,
+    HAC_REORDER_ORDER,
     ROW_TIME,
     hac_lag_frame,
+    hac_reorder_frame,
     hac_time_for,
+    reorder_rows,
     respell,
     with_row_time,
 )
@@ -264,40 +268,25 @@ def test_hac_time_reorders_rows_before_computing_lags():
 
     ラグ付き自己共分散を計算すること。データは`engine/src/linear/ols.rs`の
     `fit_computes_hac_std_errors_respecting_time_order`と同一（時系列順で
-    x=[1..5], y=[2,4,5,4,5]をtime順=[3,1,5,2,4]にシャッフルして入力し、
-    `hac_time`無指定・時系列順の入力と同じ結果になることを確認する）。
-    engine_pybindの`hac_time`列抽出（`extract_time_order_ranks`）を
+    x=[1..5], y=[2,4,5,4,5]の行を並べ替えて入力し、時系列順の入力と同じ
+    結果になること、および行順をそのまま時間順とみなした結果とは異なること
+    を確認する）。engine_pybindの`hac_time`列抽出（`extract_time_order_ranks`）を
     Python API境界から検証する。
     """
-    ordered_df = pl.DataFrame(
-        {
-            "y": [2.0, 4.0, 5.0, 4.0, 5.0],
-            "x1": [1.0, 2.0, 3.0, 4.0, 5.0],
-            "time": [1.0, 2.0, 3.0, 4.0, 5.0],
-        }
-    )
-    ordered_options = OLSOptions(cov_type="hac", hac_lags=1, hac_time="time")
-    ordered_res = OLS(
-        ordered_df, y="y", x=["x1"], options=ordered_options
-    ).fit()
+    ordered_df = hac_reorder_frame()
+    shuffled_df = reorder_rows(ordered_df, HAC_REORDER_ORDER)
 
-    shuffled_df = pl.DataFrame(
-        {
-            "y": [5.0, 2.0, 5.0, 4.0, 4.0],
-            "x1": [3.0, 1.0, 5.0, 2.0, 4.0],
-            "time": [3.0, 1.0, 5.0, 2.0, 4.0],
-        }
-    )
-    shuffled_options = OLSOptions(cov_type="hac", hac_lags=1, hac_time="time")
-    shuffled_res = OLS(
-        shuffled_df, y="y", x=["x1"], options=shuffled_options
-    ).fit()
+    def fit_std_errors(df: pl.DataFrame, hac_time: str) -> dict[str, float]:
+        options = OLSOptions(cov_type="hac", hac_lags=1, hac_time=hac_time)
+        return OLS(df, y="y", x=["x1"], options=options).fit().std_errors
 
-    for name in ["const", "x1"]:
-        assert (
-            abs(shuffled_res.std_errors[name] - ordered_res.std_errors[name])
-            < 1e-9
-        ), name
+    assert_hac_time_reorders_rows(
+        fit_std_errors(ordered_df, "time"),
+        fit_std_errors(shuffled_df, "time"),
+        fit_std_errors(with_row_time(shuffled_df), ROW_TIME),
+        atol_invariant=TOLERANCES["ols_api"]["atol_hac_time_reorder"],
+        min_effect=TOLERANCES["ols_api"]["min_hac_time_row_order_effect"],
+    )
 
 
 # ── predict() ─────────────────────────────────────────────────────────

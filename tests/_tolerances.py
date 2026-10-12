@@ -515,12 +515,30 @@ TOLERANCES: dict[str, dict[str, float]] = {
     # 定数項ありOLSの残差和（理論上0）。実測最大3.0e-14。
     "ols_api": {
         "atol_residual_sum": 1e-12,
+        # `hac_time`の行順入れ替え不変性（行を並べ替えて時間列を渡した推定と、
+        # 時間順の入力の標準誤差の一致）。実測最大5.0e-16。
+        "atol_hac_time_reorder": 1e-12,
+        # 並べ替えが効いていることの確認（`hac_time`に行番号を渡して行順を
+        # そのまま時間順とみなした推定との、標準誤差の差が超えるべき下限）。
+        # 実測最小1.7e-2（約17倍のマージン）。
+        "min_hac_time_row_order_effect": 1e-3,
     },
     # 重み=1（または定数重み）のWLSとOLSの一致（r_squared・aic/bic・対数尤度・残差・
-    # 予測値）と、`hac_time`の行順入れ替え不変性。WLSは元スケールのy・重みから
-    # 統計量を計算し直す経路（`engine/src/linear/wls.rs`）、OLSはfaerの行列演算の経路を
-    # 通るため加算順序に由来する差が出る。実測最大8.9e-16。
+    # 予測値）。WLSは元スケールのy・重みから統計量を計算し直す経路
+    # （`engine/src/linear/wls.rs`）、OLSはfaerの行列演算の経路を通るため加算順序に
+    # 由来する差が出る。実測最大8.9e-16。
     "wls_api": {
         "atol_ols_invariant": 1e-12,
+        # `hac_time`の行順入れ替え不変性と、並べ替えが効いていることの下限
+        # （`ols_api`と同じ定義・同じ実測。重み=1のため値はOLSと一致する）。
+        "atol_hac_time_reorder": 1e-12,
+        "min_hac_time_row_order_effect": 1e-3,
+    },
+    # `hac_time`の行順入れ替え不変性と、並べ替えが効いていることの下限
+    # （`ols_api`と同じ定義）。実測は不変性の最大差2.1e-17、効果の最小1.4e-2
+    # （約14倍のマージン）。
+    "iv_api": {
+        "atol_hac_time_reorder": 1e-12,
+        "min_hac_time_row_order_effect": 1e-3,
     },
 }

@@ -50,6 +50,39 @@ def assert_close(
     )
 
 
+def assert_hac_time_reorders_rows(
+    ordered: dict[str, float],
+    shuffled: dict[str, float],
+    row_order: dict[str, float],
+    *,
+    atol_invariant: float,
+    min_effect: float,
+) -> None:
+    """`hac_time`が行順ではなく時間列の順でラグを取っていることの確認。
+
+    `ordered`は時間順の入力、`shuffled`は同じ行を並べ替えて`hac_time`に時間列を渡した
+    推定、`row_order`は並べ替えた行に行番号を`hac_time`として渡した（行順をそのまま
+    時間順とみなした）推定の標準誤差。`shuffled`が`ordered`と一致し
+    （`atol_invariant`以内）、かつ`row_order`が全ての係数で`min_effect`より大きく
+    外れる場合にだけ通る。後者が無いと、並べ替えの影響を受けないデータ（または
+    `hac_time`を無視する実装）でも通ってしまう。
+    """
+    for name, ref in ordered.items():
+        assert_close(
+            shuffled[name],
+            ref,
+            f"hac_time reorder/{name}",
+            rtol=0.0,
+            atol=atol_invariant,
+        )
+        effect = abs(row_order[name] - ref)
+        assert effect > min_effect, (
+            f"hac_time reorder/{name}: the row-order fit differs by only "
+            f"{effect!r} (<= {min_effect!r}), so the test cannot tell the "
+            "reordering from a no-op"
+        )
+
+
 def assert_dict_close(
     ours: dict[str, float],
     ref: dict[str, float],

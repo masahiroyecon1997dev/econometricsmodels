@@ -24,12 +24,16 @@
   暗黙に使わない）なので、行順をそのまま時間順として使うテストが、行番号の列を明示的に
   足して`hac_time`に渡すための共通部品。
 
+- `HAC_REORDER_ORDER` / `hac_reorder_frame` / `reorder_rows`: `hac_time`の行順入れ替え
+  テスト（OLS/WLS/IV）で、時間順のDataFrameと、行の並べ替えだけを施したDataFrameを
+  作る。
+
 定数（`DATA_DIR`・`MROZ_X`）は`_constants.py`に置く。
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 import numpy as np
 import polars as pl
@@ -55,6 +59,38 @@ def hac_time_for(*settings: str) -> dict[str, str]:
     if any(setting.lower() == "hac" for setting in settings):
         return {"hac_time": ROW_TIME}
     return {}
+
+
+# `hac_time`の行順入れ替えテスト（OLS/WLS）の時間順データ（n=5）と、行の並べ替え。
+# `engine/src/linear/ols.rs`の`fit_computes_hac_std_errors_respecting_time_order`と
+# 同じデータ（x=[1..5]、y=[2,4,5,4,5]）で、`HAC_REORDER_ORDER`は時間列が
+# [3,1,5,2,4]の順に並ぶ行の取り方。
+HAC_REORDER_ORDER = [2, 0, 4, 1, 3]
+
+
+def hac_reorder_frame() -> pl.DataFrame:
+    """`hac_time`の行順入れ替えテスト用の、時間順に並んだ5行（列は`y`/`x1`/`time`）。"""
+    return pl.DataFrame(
+        {
+            "y": [2.0, 4.0, 5.0, 4.0, 5.0],
+            "x1": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "time": [1.0, 2.0, 3.0, 4.0, 5.0],
+        }
+    )
+
+
+def reorder_rows(df: pl.DataFrame, order: Sequence[int]) -> pl.DataFrame:
+    """`df`の行を`order`（行番号の置換）の順に並べ替えた、中身の同じDataFrame。
+
+    `hac_time`の行順入れ替えテストで「並べ替えただけ」を構成上保証するために使う。
+    `order`が恒等置換（並べ替えにならない）または置換でない場合は`ValueError`。
+    """
+    n = df.height
+    if sorted(order) != list(range(n)):
+        raise ValueError(f"order is not a permutation of range({n}): {order}")
+    if list(order) == list(range(n)):
+        raise ValueError("order is the identity and does not reorder rows")
+    return df[list(order)]
 
 
 def _alternating_case(label: str) -> str:

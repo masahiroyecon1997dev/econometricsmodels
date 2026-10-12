@@ -17,6 +17,7 @@ from __future__ import annotations
 import polars as pl
 import pytest
 from _assertions import (
+    assert_hac_time_reorders_rows,
     assert_params_table_matches_attributes,
     assert_same_estimates,
 )
@@ -27,9 +28,12 @@ from _helpers import (
     ROW_TIME,
     hac_lag_frame,
     hac_time_for,
+    reorder_rows,
     respell,
+    with_row_time,
 )
 from _iv_helpers import our_fit
+from _tolerances import TOLERANCES
 from econometricsmodels import IV, IVOptions, IVResults
 
 from benchmark.common import hac_auto_lag
@@ -341,40 +345,30 @@ def test_hac_time_reorders_rows_before_computing_lags():
             "time": [float(i) for i in range(8)],
         }
     )
-    ordered_options = IVOptions(cov_type="hac", hac_lags=1, hac_time="time")
-    ordered_res = IV(
-        ordered_df,
-        y="y",
-        x_exog=[],
-        x_endog=["endog1"],
-        instruments=["z1"],
-        options=ordered_options,
-    ).fit()
+    shuffled_df = reorder_rows(ordered_df, [3, 1, 5, 2, 4, 0, 7, 6])
 
-    perm = [3, 1, 5, 2, 4, 0, 7, 6]
-    shuffled_df = pl.DataFrame(
-        {
-            "y": [ordered_df["y"][i] for i in perm],
-            "endog1": [ordered_df["endog1"][i] for i in perm],
-            "z1": [ordered_df["z1"][i] for i in perm],
-            "time": [float(i) for i in perm],
-        }
+    def fit_std_errors(df: pl.DataFrame, hac_time: str) -> dict[str, float]:
+        options = IVOptions(cov_type="hac", hac_lags=1, hac_time=hac_time)
+        return (
+            IV(
+                df,
+                y="y",
+                x_exog=[],
+                x_endog=["endog1"],
+                instruments=["z1"],
+                options=options,
+            )
+            .fit()
+            .std_errors
+        )
+
+    assert_hac_time_reorders_rows(
+        fit_std_errors(ordered_df, "time"),
+        fit_std_errors(shuffled_df, "time"),
+        fit_std_errors(with_row_time(shuffled_df), ROW_TIME),
+        atol_invariant=TOLERANCES["iv_api"]["atol_hac_time_reorder"],
+        min_effect=TOLERANCES["iv_api"]["min_hac_time_row_order_effect"],
     )
-    shuffled_options = IVOptions(cov_type="hac", hac_lags=1, hac_time="time")
-    shuffled_res = IV(
-        shuffled_df,
-        y="y",
-        x_exog=[],
-        x_endog=["endog1"],
-        instruments=["z1"],
-        options=shuffled_options,
-    ).fit()
-
-    for name in ["const", "endog1"]:
-        assert (
-            abs(shuffled_res.std_errors[name] - ordered_res.std_errors[name])
-            < 1e-9
-        ), name
 
 
 def test_include_intercept_false_omits_const(iv_dataset):

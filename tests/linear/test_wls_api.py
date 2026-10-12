@@ -20,15 +20,19 @@ import polars as pl
 import pytest
 from _assertions import (
     assert_close,
+    assert_hac_time_reorders_rows,
     assert_params_table_matches_attributes,
     assert_same_estimates,
 )
 from _helpers import (
     CASE_SPELLINGS,
     HAC_AUTO_LAG_SAMPLE_SIZES,
+    HAC_REORDER_ORDER,
     ROW_TIME,
     hac_lag_frame,
+    hac_reorder_frame,
     hac_time_for,
+    reorder_rows,
     respell,
     with_row_time,
 )
@@ -232,40 +236,24 @@ def test_hac_time_reorders_rows_before_computing_lags():
     ラグ付き自己共分散を計算すること（OLSと同じ検証データ・観点、重み=1で
     OLSと同じ結果になることを利用する）。
     """
-    ordered_df = pl.DataFrame(
-        {
-            "y": [2.0, 4.0, 5.0, 4.0, 5.0],
-            "x1": [1.0, 2.0, 3.0, 4.0, 5.0],
-            "time": [1.0, 2.0, 3.0, 4.0, 5.0],
-            "weight": [1.0] * 5,
-        }
-    )
-    ordered_options = WLSOptions(cov_type="hac", hac_lags=1, hac_time="time")
-    ordered_res = WLS(
-        ordered_df, y="y", x=["x1"], weight="weight", options=ordered_options
-    ).fit()
+    ordered_df = hac_reorder_frame().with_columns(pl.lit(1.0).alias("weight"))
+    shuffled_df = reorder_rows(ordered_df, HAC_REORDER_ORDER)
 
-    shuffled_df = pl.DataFrame(
-        {
-            "y": [5.0, 2.0, 5.0, 4.0, 4.0],
-            "x1": [3.0, 1.0, 5.0, 2.0, 4.0],
-            "time": [3.0, 1.0, 5.0, 2.0, 4.0],
-            "weight": [1.0] * 5,
-        }
-    )
-    shuffled_options = WLSOptions(cov_type="hac", hac_lags=1, hac_time="time")
-    shuffled_res = WLS(
-        shuffled_df,
-        y="y",
-        x=["x1"],
-        weight="weight",
-        options=shuffled_options,
-    ).fit()
-
-    for name in ["const", "x1"]:
-        _assert_rounding_close(
-            shuffled_res.std_errors[name], ordered_res.std_errors[name], name
+    def fit_std_errors(df: pl.DataFrame, hac_time: str) -> dict[str, float]:
+        options = WLSOptions(cov_type="hac", hac_lags=1, hac_time=hac_time)
+        return (
+            WLS(df, y="y", x=["x1"], weight="weight", options=options)
+            .fit()
+            .std_errors
         )
+
+    assert_hac_time_reorders_rows(
+        fit_std_errors(ordered_df, "time"),
+        fit_std_errors(shuffled_df, "time"),
+        fit_std_errors(with_row_time(shuffled_df), ROW_TIME),
+        atol_invariant=TOLERANCES["wls_api"]["atol_hac_time_reorder"],
+        min_effect=TOLERANCES["wls_api"]["min_hac_time_row_order_effect"],
+    )
 
 
 # ── predict() ─────────────────────────────────────────────────────────

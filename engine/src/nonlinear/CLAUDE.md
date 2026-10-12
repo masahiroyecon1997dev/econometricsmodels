@@ -86,6 +86,13 @@
   - **LP定式化の注意**: 目的関数を`Σ‖z‖`などで正規化すると`n`で縮み、和の閾値は`n`で雑音が積もる。単位長の行にそろえ、解の最大マージンを絶対閾値と比べる。分離観測の個数を数える定式化（`s_i≤1`）は`n=1e5`で12〜18秒と超線形に遅く不採用。
   - **実測・限界**: `docs/spec/logit-spec.md`3.2節・4章。再現データは`benchmark/nonlinear/datasets.py`の`quasi_complete_separation`・`complete_separation`と`tests/_helpers.py`の`small_sample_separation_dataset`・`strongly_collinear_binary_dataset`。
 
+## Tobit `expected_uncensored`（`E[y|lower<y<upper,x]`）の数値実装で踏む罠
+
+- **`W=Φ(zb)-Φ(za)`で割る量は、`W`を作らずに`Pa=φ(za)/W`・`Pb=φ(zb)/W`を直接計算する**（`tobit.rs`の`truncation_pdf_ratios`）。既存3 targetは`W`で割らないので、`clamped_pdf_cdf`（`|z|>8.13`でクランプ）で足りたが、`E[y|uncensored]`は`μ`が境界から遠い観測（実データ`many_regressors`で`za=72`）で`W→0`になり、素の`φ/W`は`0/0`になる。片側は逆ミルズ比（`a>=3`は連分数）、両側は上側/下側の裾を比（`p·q/(q-r·p)`）で、中央は正の項の和で組む。
+- **`w`の偏微分を`1+ρ2-ρ1²`の教科書形のまま書かない**: `z²`と`z·Pa`の引き算で絶対誤差が`ε·z³`になり、`z=72`で`s_sigma`の相対誤差が`5e-9`、限界効果の標準誤差が`1e-8`ずれた（Rクロスチェックの許容`1e-8`で露呈）。`A=Pa-za`・`B=zb+Pb`を引き算せず直接計算し、`w=1-Pa·A-Pb·B+2·Pa·Pb`等で評価する。回帰ガード: `uncensored_terms_and_w_match_high_precision_reference_in_extreme_tails`（80桁の10進演算の参照値）。
+- **`statrs`の`Normal::cdf`は絶対誤差が約`1.4e-11`（`Φ(-1)`で相対`8.6e-11`）**: `W`の逆数にかかる量では標準誤差に約100倍で増幅されるため、この経路では`normal_cdf_minus_half`・`normal_survival`（テイラー級数＋連分数）を使う。既存の`ExpectedObserved`等は`W`で割らないので`statrs`のままでよい。
+- **未対応の限界**: 非打ち切り区間が極端に狭い（`(upper-lower)/σ<1e-4`程度）と`q-r·p`・`W`が桁落ちする。`docs/spec/tobit-spec.md`3.5節「限界」・4章。
+
 ## Tobitのproperty-basedテスト（`tobit.rs`の`mod proptests`）
 
 - 打ち切り境界は`censoring_strategy`で左（`lower=0`）・右（`upper=0`）・両側（`[-1,1]`）をランダムに選ぶ。`score_is_near_zero`・列順序不変・HC0≤HC1に加え、「`y`と境界を符号反転（`(l,u)→(-u,-l)`）すると係数は符号反転・`σ`とSEは不変」という鏡像対称性を検証する（左右の分岐が別コードパス`censored_contribution(direction)`を通るため、片側の符号・スケールのバグが顕在化する）。

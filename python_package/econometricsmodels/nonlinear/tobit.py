@@ -322,10 +322,15 @@ class TobitResults:
                 `"expected_latent"` (`E[y*|x] = x'β`),
                 `"expected_observed"` (default; `E[y|x]`, the
                 censoring-adjusted conditional expectation, directly
-                comparable to the observed `y`), or
-                `"prob_uncensored"` (`P(uncensored|x)`).
+                comparable to the observed `y`),
+                `"prob_uncensored"` (`P(uncensored|x)`), or
+                `"expected_uncensored"` (`E[y|lower<y<upper,x]`, the
+                expectation restricted to the uncensored region; with
+                a single lower bound of 0 this is `E[y|y>0,x]`). They
+                satisfy `E[y|x] = lower*P(lower) + upper*P(upper) +
+                P(uncensored|x) * E[y|lower<y<upper,x]`.
                 Case-insensitive. Independent of `new_data`: the same
-                three targets are available whether predicting on the
+                four targets are available whether predicting on the
                 training data or new data.
 
         Returns:
@@ -333,7 +338,7 @@ class TobitResults:
             row order.
 
         Raises:
-            ValidationError: `target` is not one of the three known
+            ValidationError: `target` is not one of the four known
                 values, or `new_data` is missing a required `x`
                 column, or a column contains missing/NaN/infinite
                 values. A subclass of `ValueError`.
@@ -400,7 +405,7 @@ class TobitResults:
                 marginal effects), `"mean"`, or `"median"`.
                 Case-insensitive.
             target: Which quantity's marginal effect to compute. Same
-                three values as `predict()`. Case-insensitive.
+                four values as `predict()`. Case-insensitive.
             confidence_level: Confidence level for the confidence
                 interval, in the range (0, 1). Defaults to 0.95.
 
@@ -415,7 +420,7 @@ class TobitResults:
 
         Raises:
             ValidationError: `at` is not one of `"overall"`, `"mean"`,
-                `"median"`, `target` is not one of the three known
+                `"median"`, `target` is not one of the four known
                 values, or `confidence_level` is out of range. A
                 subclass of `ValueError`.
         """

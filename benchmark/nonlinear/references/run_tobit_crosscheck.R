@@ -15,7 +15,9 @@
 #   - スコア（estfun）・McDonald-Moffitt の限界効果閉形式（`target_w_and_s`）・
 #     予測値（`predicted_value`）・打ち切り適合度（`censoring_fit_check`）:
 #     `numDeriv::grad` による数値微分、および閉形式間の相互整合を `stopifnot` で検証
-#     （末尾の「手計算箇所の formula 非依存検証」ブロック）。
+#     （末尾の「手計算箇所の formula 非依存検証」ブロック）。`expected_uncensored`
+#     （E[y|lower<y<upper,x]）は対数空間の安定実装に加え、素の φ/W 閉形式・
+#     打ち切り領域上の数値積分・E[y|x] との分解恒等式でも照合する（(4)）。
 #   - 新規データ（out-of-sample）予測（`predict_new_data`）: `predicted_value`
 #     自体は上記で検証済みのため、`new_mm %*% beta`という単純な行列積のみ（`predict_head`
 #     の直後を参照）。
@@ -229,6 +231,111 @@ boundary_terms <- function(bound, mu, is_lower) {
   list(z = z, phi = dnorm(z), cdf = pnorm(z))
 }
 
+# 非打ち切り領域 (za, zb) に切断した標準正規分布の Pa=φ(za)/W, Pb=φ(zb)/W
+# （W = Φ(zb) - Φ(za)。無限境界は Pa/Pb=0）。W が裾で 0 に潰れないよう対数空間で
+# 計算する（`pnorm(log.p=TRUE)` は裾でも正確）。Rust 側の実装（逆ミルズ比の連分数・
+# 上側/下側の裾の鏡像変換）とは独立な計算経路。
+log_surv <- function(z) pnorm(z, lower.tail = FALSE, log.p = TRUE)
+log_sub <- function(lx, ly) lx + log1p(-exp(ly - lx))
+trunc_ratios <- function(za, zb) {
+  log_w <- if (za >= 0) {
+    log_sub(log_surv(za), log_surv(zb))
+  } else if (zb <= 0) {
+    log_sub(pnorm(zb, log.p = TRUE), pnorm(za, log.p = TRUE))
+  } else {
+    log(pnorm(zb) - pnorm(za))
+  }
+  list(
+    pa = exp(dnorm(za, log = TRUE) - log_w),
+    pb = exp(dnorm(zb, log = TRUE) - log_w)
+  )
+}
+
+# 逆ミルズ比 λ(a)=φ(a)/Φ(-a) と超過分 λ(a)-a。a>=3 では連分数
+# λ(a)=a+1/(a+2/(a+3/(a+…)))（60段）、それ未満は対数空間の生存関数。`λ-a` は
+# a が大きいと桁落ちするため連分数から引き算なしに得る。
+mills_and_gap <- function(a) {
+  if (a >= 3) {
+    t <- a
+    for (kk in 60:2) t <- a + kk / t
+    return(c(lambda = a + 1 / t, gap = 1 / t))
+  }
+  lam <- exp(dnorm(a, log = TRUE) - log_surv(a))
+  c(lambda = lam, gap = lam - a)
+}
+
+# A = Pa - za, B = zb + Pb（Pa=φ(za)/W, Pb=φ(zb)/W）。`za` が大きい裾では
+# Pa ≈ za で引き算が桁落ちする（絶対誤差 ε·za。za=72 で w の za 偏微分に 5e-11、
+# `s_sigma` に相対 5e-9 の誤差が出て SE を ~1e-8 狂わせることを実データ
+# `many_regressors` で確認した）ため、上側の裾（0<=za<zb）では
+# A = gap(za) + r·p²/(q-r·p)（正の項の和。p=λ(za), q=λ(zb), r=φ(zb)/φ(za)）と
+# 引き算なしに組む。下側の裾は (za,zb)→(-zb,-za) の鏡像、片側のみは λ と gap、
+# 中央（za<0<zb）は正の項の和なので直接引き算で足りる。
+trunc_gaps <- function(za, zb, pa, pb) {
+  if (is.infinite(zb) && zb > 0) {
+    return(c(a = if (is.infinite(za)) 0 else mills_and_gap(za)[["gap"]], b = 0))
+  }
+  if (is.infinite(za) && za < 0) {
+    return(c(a = 0, b = mills_and_gap(-zb)[["gap"]]))
+  }
+  upper_tail <- function(za, zb) {
+    p <- mills_and_gap(za)
+    q <- mills_and_gap(zb)
+    r <- exp(-0.5 * (zb - za) * (zb + za))
+    denom <- q[["lambda"]] - r * p[["lambda"]]
+    c(a = p[["gap"]] + r * p[["lambda"]]^2 / denom,
+      b = zb + r * p[["lambda"]] * q[["lambda"]] / denom)
+  }
+  if (za >= 0) {
+    upper_tail(za, zb)
+  } else if (zb <= 0) {
+    m <- upper_tail(-zb, -za)
+    c(a = m[["b"]], b = m[["a"]])
+  } else {
+    c(a = pa - za, b = zb + pb)
+  }
+}
+
+# E[y | lower < y < upper, x] = μ + σ(Pa - Pb) と、その μ についての微分 w および
+# za, zb についての偏微分 w_a, w_b。A, B で整理した式（Rust 側と同じ代数）:
+#   w = 1 - Pa·A - Pb·B + 2·Pa·Pb
+#   w_a = Pa[1 + za·A - zb·Pb - 2ρ1(A - Pb)]
+#   w_b = Pb[-1 + zb·B - za·Pa - 2ρ1(B - Pa)]
+# Pa, Pb は上の対数空間版（Rust の連分数・鏡像変換とは独立）。整理前の教科書形
+# （ρ1=Pa-Pb, ρ2=za·Pa-zb·Pb, w=1+ρ2-ρ1², w_a=Pa(1-za²+ρ2)-2ρ1·Pa(ρ1-za) 等）との
+# 一致は (4) で z が中程度の観測について確認する（教科書形は裾で桁落ちするため
+# フィクスチャ値には使わない）。
+uncensored_terms <- function(mu, s) {
+  za <- (lower - mu) / s
+  zb <- (upper - mu) / s
+  r <- trunc_ratios(za, zb)
+  za0 <- if (is.infinite(lower)) 0 else za
+  zb0 <- if (is.infinite(upper)) 0 else zb
+  g <- trunc_gaps(za, zb, r$pa, r$pb)
+  rho1 <- r$pa - r$pb
+  list(
+    za0 = za0, zb0 = zb0, pa = r$pa, pb = r$pb, rho1 = rho1,
+    a_gap = g[["a"]], b_gap = g[["b"]],
+    mean = mu + s * rho1,
+    w = 1 - r$pa * g[["a"]] - r$pb * g[["b"]] + 2 * r$pa * r$pb,
+    w_a = r$pa * (1 + za0 * g[["a"]] - zb0 * r$pb -
+      2 * rho1 * (g[["a"]] - r$pb)),
+    w_b = r$pb * (-1 + zb0 * g[["b"]] - za0 * r$pa -
+      2 * rho1 * (g[["b"]] - r$pa))
+  )
+}
+
+# 整理前の教科書形（検証専用。裾では桁落ちする）。
+uncensored_terms_textbook <- function(mu, s) {
+  ut <- uncensored_terms(mu, s)
+  rho2 <- ut$za0 * ut$pa - ut$zb0 * ut$pb
+  list(
+    w = 1 + rho2 - ut$rho1^2,
+    w_a = ut$pa * (1 - ut$za0^2 + rho2) - 2 * ut$rho1 * ut$pa * (ut$rho1 - ut$za0),
+    w_b = ut$pb * (ut$zb0^2 - 1 - rho2) - 2 * ut$rho1 * ut$pb * (ut$zb0 - ut$rho1)
+  )
+}
+
 # target ごとの (w, s_beta, s_sigma)（`target_w_and_s`）。x_point は切片列を含む
 # 長さ k のベクトル。
 target_w_and_s <- function(target, x_point) {
@@ -236,6 +343,14 @@ target_w_and_s <- function(target, x_point) {
     return(list(w = 1, s_beta = rep(0, k), s_sigma = 0))
   }
   mu <- sum(x_point * beta)
+  if (target == "expected_uncensored") {
+    ut <- uncensored_terms(mu, sigma)
+    dw_dmu <- -(ut$w_a + ut$w_b) / sigma
+    return(list(
+      w = ut$w, s_beta = dw_dmu * x_point,
+      s_sigma = -(ut$za0 * ut$w_a + ut$zb0 * ut$w_b) / sigma
+    ))
+  }
   a <- boundary_terms(lower, mu, TRUE)
   b <- boundary_terms(upper, mu, FALSE)
   if (target == "expected_observed") {
@@ -295,7 +410,10 @@ margeff_at <- function(target, at) {
   out
 }
 
-margeff_targets <- c("expected_latent", "expected_observed", "prob_uncensored")
+margeff_targets <- c(
+  "expected_latent", "expected_observed", "prob_uncensored",
+  "expected_uncensored"
+)
 margeff_ats <- c("overall", "mean", "median")
 margeff <- list()
 for (mt in margeff_targets) {
@@ -315,6 +433,9 @@ predicted_value <- function(target, mu) {
   b <- boundary_terms(upper, mu, FALSE)
   if (target == "prob_uncensored") {
     return(b$cdf - a$cdf)
+  }
+  if (target == "expected_uncensored") {
+    return(uncensored_terms(mu, sigma)$mean)
   }
   lower_c <- if (is.infinite(lower)) 0 else lower
   upper_c <- if (is.infinite(upper)) 0 else upper
@@ -427,6 +548,11 @@ tobit_pred_mu <- function(target, mu, s) {
   if (target == "expected_latent") {
     return(mu)
   }
+  if (target == "expected_uncensored") {
+    # 裾でも安定な対数空間版（`uncensored_terms`）。素の φ/W 閉形式・数値積分との
+    # 一致は下の (4) で別途確認する。
+    return(uncensored_terms(mu, s)$mean)
+  }
   fa <- if (is.infinite(lower)) 0 else pnorm((lower - mu) / s)
   fb <- if (is.infinite(upper)) 1 else pnorm((upper - mu) / s)
   da <- if (is.infinite(lower)) 0 else dnorm((lower - mu) / s)
@@ -441,6 +567,9 @@ tobit_pred_mu <- function(target, mu, s) {
 tobit_w_mu <- function(target, mu, s) {
   if (target == "expected_latent") {
     return(1)
+  }
+  if (target == "expected_uncensored") {
+    return(uncensored_terms(mu, s)$w)
   }
   fa <- if (is.infinite(lower)) 0 else pnorm((lower - mu) / s)
   fb <- if (is.infinite(upper)) 1 else pnorm((upper - mu) / s)
@@ -487,6 +616,54 @@ for (pt in margeff_targets) {
   )
   stopifnot(isTRUE(all.equal(
     as.numeric(predict_head[[pt]]), indep_pred
+  )))
+}
+# (4) E[y | lower < y < upper, x] の独立検証。`uncensored_terms`（対数空間）が、
+# (4a) 素の φ/W 閉形式（W が十分大きい観測のみ。裾では素の式は桁落ちする）、
+# (4b) 打ち切り領域上の切断正規分布の平均を直接数値積分した値、
+# (4c) 分解恒等式 E[y|x] = lower·P(下限) + upper·P(上限) + P(uncensored)·E[y|uncensored]
+# の全てと一致することを確認する。
+# (4d) A/B で整理した安定形が教科書形と一致する（z が中程度の領域。全観測のうち
+# |z|<=6 のもの。裾では教科書形が桁落ちするため比較しない）。
+for (i in seq_len(n)) {
+  zs <- c((lower - mu_all[i]) / sigma, (upper - mu_all[i]) / sigma)
+  if (all(abs(zs[is.finite(zs)]) <= 6)) {
+    st <- uncensored_terms(mu_all[i], sigma)
+    tb <- uncensored_terms_textbook(mu_all[i], sigma)
+    stopifnot(isTRUE(all.equal(st$w, tb$w, tolerance = 1e-8)))
+    stopifnot(isTRUE(all.equal(st$w_a, tb$w_a, tolerance = 1e-6)))
+    stopifnot(isTRUE(all.equal(st$w_b, tb$w_b, tolerance = 1e-6)))
+  }
+}
+for (i in head_idx) {
+  mu_i <- mu_all[i]
+  za <- (lower - mu_i) / sigma
+  zb <- (upper - mu_i) / sigma
+  w_i <- pnorm(zb) - pnorm(za)
+  m_i <- uncensored_terms(mu_i, sigma)$mean
+  if (w_i > 1e-6) {
+    naive <- mu_i + sigma * (dnorm(za) - dnorm(zb)) / w_i
+    stopifnot(isTRUE(all.equal(m_i, naive, tolerance = 1e-8)))
+  }
+  if (w_i > 1e-3) {
+    f <- function(y) dnorm((y - mu_i) / sigma) / sigma
+    # 半無限区間のまま積分すると、質量が境界から遠い（μ が境界より遥かに内側）とき
+    # 積分器がピークを見落とすため、質量の大半（±12σ、残余 1e-32）に切り詰める。
+    int_lo <- max(lower, mu_i - 12 * sigma)
+    int_hi <- min(upper, mu_i + 12 * sigma)
+    integral <- function(g) integrate(function(y) g(y) * f(y), int_lo, int_hi,
+                                      rel.tol = 1e-12, subdivisions = 1000L)$value
+    num <- integral(function(y) y)
+    den <- integral(function(y) rep(1, length(y)))
+    stopifnot(isTRUE(all.equal(m_i, num / den, tolerance = 1e-8)))
+  }
+  p_low <- if (is.infinite(lower)) 0 else pnorm(za)
+  p_up <- if (is.infinite(upper)) 0 else pnorm(zb, lower.tail = FALSE)
+  lc <- if (is.infinite(lower)) 0 else lower
+  uc <- if (is.infinite(upper)) 0 else upper
+  decomposed <- lc * p_low + uc * p_up + w_i * m_i
+  stopifnot(isTRUE(all.equal(
+    predicted_value("expected_observed", mu_i), decomposed, tolerance = 1e-8
   )))
 }
 cfc_cat <- vapply(cfc_rows, function(r) r$category, character(1))

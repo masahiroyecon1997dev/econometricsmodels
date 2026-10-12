@@ -208,7 +208,13 @@ def test_wald_statistic_and_p_value_are_present(censored_dataset):
 
 
 @pytest.mark.parametrize(
-    "target", ["expected_latent", "expected_observed", "prob_uncensored"]
+    "target",
+    [
+        "expected_latent",
+        "expected_observed",
+        "prob_uncensored",
+        "expected_uncensored",
+    ],
 )
 def test_predict_returns_list_of_floats(censored_dataset, target):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
@@ -225,6 +231,23 @@ def test_predict_prob_uncensored_is_a_probability(censored_dataset):
         assert 0.0 <= prob <= 1.0
 
 
+def test_predict_expected_uncensored_satisfies_decomposition_identity(
+    censored_dataset,
+):
+    """`censored_dataset`は下限0のみの左打ち切り。`E[y|x] = P(y>0|x) *
+    E[y|y>0,x]`（`expected_observed = prob_uncensored * expected_uncensored`）
+    が成り立ち、`E[y|y>0,x]`は常に下限0以上。
+    """
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+    observed = res.predict(target="expected_observed")
+    prob = res.predict(target="prob_uncensored")
+    conditional = res.predict(target="expected_uncensored")
+
+    for obs, p, cond in zip(observed, prob, conditional, strict=True):
+        assert cond > 0.0
+        assert obs == pytest.approx(p * cond, rel=1e-8, abs=1e-12)
+
+
 def test_predict_unknown_target_raises(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
     with pytest.raises(
@@ -235,7 +258,13 @@ def test_predict_unknown_target_raises(censored_dataset):
 
 
 @pytest.mark.parametrize(
-    "target", ["expected_latent", "expected_observed", "prob_uncensored"]
+    "target",
+    [
+        "expected_latent",
+        "expected_observed",
+        "prob_uncensored",
+        "expected_uncensored",
+    ],
 )
 def test_predict_new_data_returns_list_of_floats(censored_dataset, target):
     """`predict(new_data=...)`（out-of-sample）が学習データと構造の
@@ -299,7 +328,13 @@ def test_predict_null_or_non_finite_values_raise(censored_dataset):
 
 
 @pytest.mark.parametrize(
-    "target", ["expected_latent", "expected_observed", "prob_uncensored"]
+    "target",
+    [
+        "expected_latent",
+        "expected_observed",
+        "prob_uncensored",
+        "expected_uncensored",
+    ],
 )
 def test_augment_none_returns_training_data_with_predicted_column(
     censored_dataset, target
@@ -471,7 +506,13 @@ def test_marginal_effects_default_excludes_intercept(censored_dataset):
 
 
 @pytest.mark.parametrize(
-    "target", ["expected_latent", "expected_observed", "prob_uncensored"]
+    "target",
+    [
+        "expected_latent",
+        "expected_observed",
+        "prob_uncensored",
+        "expected_uncensored",
+    ],
 )
 def test_marginal_effects_accepts_all_targets(censored_dataset, target):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()

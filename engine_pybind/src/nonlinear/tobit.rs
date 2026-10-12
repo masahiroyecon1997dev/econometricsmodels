@@ -12,8 +12,8 @@
 //!   `param_names`の末尾に`"sigma"`を追加して`params`に`sigma()`の値を追加し、全フィールドを
 //!   `(k+1)`長に揃えてzipできるようにする。ユーザー確認済み）
 //! - `predict()`/`marginal_effects()`は`target`引数（`"expected_latent"`/
-//!   `"expected_observed"`/`"prob_uncensored"`、Rust側`MarginalEffectsTarget`の
-//!   snake_case版、ユーザー確認済み）を追加で受け取る
+//!   `"expected_observed"`/`"prob_uncensored"`/`"expected_uncensored"`、Rust側
+//!   `MarginalEffectsTarget`のsnake_case版、ユーザー確認済み）を追加で受け取る
 //! - `pred_table()`の代わりに`censoring_fit_check()`を提供する（`y`が連続変数のため
 //!   分類の的中表は意味を持たない、`docs/spec/nonlinear-common.md`6章）
 //! - `log_likelihood_null`/`lr_statistic`/`lr_p_value`/`pseudo_r_squared`は無い
@@ -368,12 +368,14 @@ impl TobitResult {
     ///
     /// `target` selects which quantity to predict: `"expected_latent"` (`E[y*|x]=x'β`),
     /// `"expected_observed"` (`E[y|x]`, the censoring-adjusted conditional expectation;
-    /// default, directly comparable to the observed `y`), or `"prob_uncensored"`
-    /// (`P(uncensored|x)`). Independent of `new_data`: the same three targets are
+    /// default, directly comparable to the observed `y`), `"prob_uncensored"`
+    /// (`P(uncensored|x)`), or `"expected_uncensored"` (`E[y|lower<y<upper,x]`, the
+    /// expectation restricted to the uncensored region; `E[y|y>0,x]` for a single
+    /// lower bound of 0). Independent of `new_data`: the same four targets are
     /// available whether predicting on the training data or new data.
     ///
     /// # Errors
-    /// - `target` is not one of the three known values (case-insensitive):
+    /// - `target` is not one of the four known values (case-insensitive):
     ///   `ValidationError`
     /// - A required `x` column is missing from `new_data`, cannot be cast to a
     ///   numeric type, or contains missing/NaN/infinite values: `ValidationError`
@@ -434,7 +436,7 @@ impl TobitResult {
 
     /// Marginal effects (`dy/dx`) with delta-method standard errors.
     ///
-    /// `target` selects the same three quantities as `predict()` (see its doc). Unlike
+    /// `target` selects the same four quantities as `predict()` (see its doc). Unlike
     /// Logit/Probit, this is an independent implementation (not the shared
     /// `dydx_and_jacobian` pattern) because the formula differs per `target`
     /// (`docs/spec/nonlinear-common.md` section 6).
@@ -445,7 +447,7 @@ impl TobitResult {
     /// # Errors
     /// - `at` is not one of `"overall"`, `"mean"`, `"median"` (case-insensitive):
     ///   `ValidationError`
-    /// - `target` is not one of the three known values (case-insensitive):
+    /// - `target` is not one of the four known values (case-insensitive):
     ///   `ValidationError`
     /// - `confidence_level` is outside `(0, 1)`: `ValidationError`
     #[pyo3(signature = (
@@ -546,9 +548,10 @@ fn parse_marginal_effects_target(target_lower: &str) -> PyResult<MarginalEffects
         "expected_latent" => Ok(MarginalEffectsTarget::ExpectedLatent),
         "expected_observed" => Ok(MarginalEffectsTarget::ExpectedObserved),
         "prob_uncensored" => Ok(MarginalEffectsTarget::ProbUncensored),
+        "expected_uncensored" => Ok(MarginalEffectsTarget::ExpectedUncensored),
         other => Err(ValidationError::new_err(format!(
             "unknown target: '{other}'. Expected one of 'expected_latent', \
-             'expected_observed', or 'prob_uncensored'"
+             'expected_observed', 'prob_uncensored', or 'expected_uncensored'"
         ))),
     }
 }
@@ -1092,6 +1095,10 @@ mod tests {
         assert!(matches!(
             parse_marginal_effects_target("prob_uncensored"),
             Ok(MarginalEffectsTarget::ProbUncensored)
+        ));
+        assert!(matches!(
+            parse_marginal_effects_target("expected_uncensored"),
+            Ok(MarginalEffectsTarget::ExpectedUncensored)
         ));
     }
 

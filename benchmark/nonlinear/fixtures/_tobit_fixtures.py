@@ -276,7 +276,8 @@ def build(engine: str) -> dict:
             + engine
             + "。係数・標準誤差・z値・p値・信頼区間（末尾に sigma を含む）・"
             "対数尤度・AIC・BIC・全体 Wald 統計量/ p値・限界効果"
-            "（expected_latent/expected_observed/prob_uncensored × "
+            "（expected_latent/expected_observed/prob_uncensored/"
+            "expected_uncensored × "
             "overall/mean/median）・予測値（先頭10行）・打ち切り適合度を含む。"
             "AER::tobit は survival::survreg の薄いラッパーで、係数・スケール・"
             "vcov・logLik は survreg 由来。survreg / censReg はいずれも "

@@ -29,6 +29,9 @@
 | `"expected_latent"` | `E[y*\|x] = x'β` (the linear predictor) |
 | `"expected_observed"` (default) | `E[y\|x]`, the censoring-adjusted conditional mean (McDonald–Moffitt) |
 | `"prob_uncensored"` | `P(uncensored\|x)` |
+| `"expected_uncensored"` | `E[y\|lower<y<upper,x]`, the expected value among uncensored observations (`E[y\|y>0,x]` for a single lower bound of 0) |
+
+The four are related by `E[y|x] = lower·P(lower) + upper·P(upper) + P(uncensored|x)·E[y|lower<y<upper,x]`; with a single lower bound of 0 this is `E[y|x] = P(y>0|x)·E[y|y>0,x]`. `"expected_uncensored"` answers questions such as "among households with positive spending, how does average spending change with x?".
 
 `marginal_effects()` computes `dy/dx` with delta-method standard errors, evaluated at `"overall"` (average marginal effects, the default), `"mean"`, or `"median"`; the constant term is excluded. `predict()` returns a plain list of predicted values, for the training data or for `new_data` when given. See [Getting Started](../getting-started.md#tobit-censored-regression) for an example.
 

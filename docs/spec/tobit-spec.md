@@ -231,23 +231,55 @@ Tobit固有の差分:
 ### 3.5 限界効果
 
 `marginal_effects(at, target, confidence_level)`は`fit()`とは独立したメソッド。`at`は
-`"overall"`（既定、AME）/`"mean"`/`"median"`。`target`は3種:
+`"overall"`（既定、AME）/`"mean"`/`"median"`。`target`は4種:
 
 | `target` | 予測量 | 重み `w`（`dydx_j = w·βⱼ`） |
 |---|---|---|
 | `expected_latent` | `E[y*\|x] = x'β` | `w = 1`（`s_beta = 0`, `s_sigma = 0`の自明形） |
 | `expected_observed`（既定） | `E[y\|x]`（打ち切り考慮の条件付き期待値） | `w = Φ(z_b) - Φ(z_a)`（McDonald-Moffitt 1980） |
 | `prob_uncensored` | `P(uncensored\|x) = Φ(z_b) - Φ(z_a)` | `w = (φ(z_a) - φ(z_b))/σ` |
+| `expected_uncensored` | `E[y\|lower<y<upper,x] = μ + σ(Pa - Pb)`（非打ち切り領域での条件付き期待値。下限0のみなら`E[y\|y>0,x]`） | `w = 1 - Pa·A - Pb·B + 2·Pa·Pb`（下記） |
 
 （`z_a = (lower - x'β)/σ`、`z_b = (upper - x'β)/σ`。左のみ・右のみ・両側いずれでも`boundary_terms`
 経由で同一の式が正しい値を返す。右打ち切りのみの場合`prob_uncensored`の限界効果は符号が反転する。）
 
-- 3対象とも`dydx_j = w(θ)·βⱼ`という同一の形（Logit/Probitと同じ骨格、`w`の中身のみ異なる）に帰着
+**`expected_uncensored`**（`E[y|lower<y<upper,x]`、切断正規分布の平均）は、`E[y|x]`との間に
+`E[y|x] = lower·P(下限) + upper·P(上限) + P(uncensored|x)·E[y|lower<y<upper,x]`
+という分解の関係を持つ（下限0のみの左打ち切りなら`E[y|x] = P(y>0|x)·E[y|y>0,x]`。McDonald-Moffitt
+1980の分解の「打ち切られなかった集団に限定した」側）。左のみ・右のみ・両側すべてを`E[y|lower<y<upper,x]`
+として一般化している。「打ち切りを受けなかった世帯に限定すると平均支出額はどう変わるか」のような
+解釈に使う。
+
+- 記号: `W = Φ(z_b) - Φ(z_a)`、`Pa = φ(z_a)/W`、`Pb = φ(z_b)/W`（境界が無い方向は0）、`ρ1 = Pa - Pb`、
+  `ρ2 = z_a·Pa - z_b·Pb`。`m = μ + σ·ρ1`は`x`に`μ = x'β`を通してしか依存しないので
+  `dydx_j = w·βⱼ`、`w = ∂m/∂μ = 1 + ρ2 - ρ1²`（切断正規分布の分散を`σ²`で割った値、`(0,1)`に入る。
+  左のみなら`1 + z_a·λ - λ²`、`λ`は逆ミルズ比）。
+- 勾配: `∂ρ1/∂z_a = Pa(ρ1 - z_a)`・`∂ρ1/∂z_b = Pb(z_b - ρ1)`・`∂ρ2/∂z_a = Pa(1 - z_a² + ρ2)`・
+  `∂ρ2/∂z_b = Pb(z_b² - 1 - ρ2)`から`w_a = ∂ρ2/∂z_a - 2ρ1∂ρ1/∂z_a`、`w_b`も同様に得て、
+  `s_beta = -(w_a + w_b)/σ · x`、`s_sigma = -(z_a·w_a + z_b·w_b)/σ`。
+- **数値安定性**（実装は`engine/src/nonlinear/tobit.rs`の`truncation_pdf_ratios`・`uncensored_w_and_s`）:
+  `W`で割るため、`μ`が境界から遠い観測（重い打ち切りの標本や外れた`x`で`z`が数十〜）で`W→0`になる。
+  既存の3 targetは`W`で割らないので、この問題は新target固有。(1)`Pa`・`Pb`は`W`を作らずに直接計算する
+  （片側は逆ミルズ比`λ(a)=φ(a)/Φ(-a)`、`a>=3`は連分数`a+1/(a+2/(a+3/(a+…)))`、`a<3`は`Φ(-a)`を
+  テイラー級数で。両側は`0<=z_a`の上側の裾と`z_b<=0`の下側の裾を`W/Φ(-z_a)=1-r·p/q`の比
+  （`p=λ(z_a)`・`q=λ(z_b)`・`r=φ(z_b)/φ(z_a)`）で、`z_a<0<z_b`は正の項の和で）。
+  (2)`A = Pa - z_a`・`B = z_b + Pb`を引き算せず直接計算し、`w`・`w_a`・`w_b`を
+  `w = 1 - Pa·A - Pb·B + 2·Pa·Pb`・`w_a = Pa[1 + z_a·A - z_b·Pb - 2ρ1(A - Pb)]`・
+  `w_b = Pb[-1 + z_b·B - z_a·Pa - 2ρ1(B - Pa)]`で評価する。整理前の式は`z_a²`と`z_a·Pa`の
+  引き算で絶対誤差が`ε·z³`になり、`z=72`の観測を含む実データ（`many_regressors`）で標準誤差が`1e-8`
+  ずれた。(3)`statrs`の`Normal::cdf`は絶対誤差が約`1.4e-11`あり、`W`の逆数にかかるこの量では標準誤差へ
+  増幅されるため、`Φ(x)-1/2`を自前のテイラー級数・連分数で計算する。`w`は`[0,1]`にクランプする。
+- **限界**: (a)遠い裾（`|z|≳1e3`）では`w`・`w_a`・`w_b`の相対精度が落ちる（絶対誤差は`ε`級で、
+  `w≈1/z²`自体が無視できるため全観測の平均には影響しない）。(b)非打ち切り区間が極端に狭い
+  （`(upper-lower)/σ`が`1e-4`程度未満）と`q-r·p`・`W`が桁落ちして精度を失い、丸め誤差のレベルでは
+  `NaN`になる。この領域の扱い（級数への切り替え・入力の拒否）は未決定（4章）。
+
+- 4対象とも`dydx_j = w(θ)·βⱼ`という同一の形（Logit/Probitと同じ骨格、`w`の中身のみ異なる）に帰着
   するため、`target_w_and_s`（`w`とその勾配`(s_beta, s_sigma)`を計算）→
   `marginal_effects_from_tobit_w_s`という2段構成で実装する。ただしパラメータ次元が`k`ではなく
   `k+1`（`β∪{σ}`）である点が`common.rs`の`dydx_and_jacobian`と異なるため**Logit/Probitとは共有
   せず独立実装する**（`w`/`s`の計算式そのものが共有できないため）。
-- デルタ法のヤコビアン: `∂g_j/∂β_m = βⱼ·s_beta[m] + [j==m]·w`、`∂g_j/∂σ = βⱼ·s_sigma`。分散は
+- デルタ法のヤコビアン（4対象共通）: `∂g_j/∂β_m = βⱼ·s_beta[m] + [j==m]·w`、`∂g_j/∂σ = βⱼ·s_sigma`。分散は
   `jac_j·cov_params·jac_j'`（`(k+1)`次元の二次形式）、標準誤差はその平方根、検定分布は標準正規分布。
   `fit()`時の`cov_params`をそのまま再利用し再最適化しない。
 - 定数項は出力から除外する。
@@ -255,8 +287,9 @@ Tobit固有の差分:
 ### 3.6 predict() / augment() / censoring_fit_check()
 
 - `predict(target, new_data=None)`は`marginal_effects`と同じ`MarginalEffectsTarget`を再利用し、
-  `E[y*|x]=x'β`・`E[y|x]`（既定）・`P(uncensored|x)`の3種を返す。値の計算は`predicted_value`
-  （`target_w_and_s`と同じ`boundary_terms`を再利用、左/右/両側いずれでも単一の式）。`new_data`が
+  `E[y*|x]=x'β`・`E[y|x]`（既定）・`P(uncensored|x)`・`E[y|lower<y<upper,x]`の4種を返す。値の計算は
+  `predicted_value`（`target_w_and_s`と同じ`boundary_terms`を再利用、左/右/両側いずれでも単一の式。
+  `expected_uncensored`のみ`truncation_pdf_ratios`で`μ + σ(Pa - Pb)`）。`new_data`が
   `None`（既定）なら学習データ、指定すれば新規データ（out-of-sample）に対する予測値を返す
   （`x`列名マッチング・`include_intercept`時の定数項自動付加はOLS/Logit/Probitの`predict(new_data)`
   と同じ規約）。戻り値は観測順の`list[float]`（OLS/WLS/Logit/Probitと同じ形）。engine側の`predict_new_data`は`nonlinear::common::predict_new_data`に
@@ -289,7 +322,7 @@ Tobit固有の差分:
 | `NoUncensoredObservations` / `InvalidCensoringBounds` / `YOutOfCensoringBounds` | `ValidationError` |
 
 - `predict()`/`marginal_effects()`の`target`引数のPython文字列は`"expected_latent"` /
-  `"expected_observed"` / `"prob_uncensored"`（Rust enum名のsnake_case版。`at`のような単語1つの
+  `"expected_observed"` / `"prob_uncensored"` / `"expected_uncensored"`（Rust enum名のsnake_case版。`at`のような単語1つの
   慣習が無いためenum名との対応を優先）。パース関数`parse_marginal_effects_target`はTobit専用
   （`tobit.rs`）。
 
@@ -316,7 +349,8 @@ Tobit固有の差分:
   `.claude/rules/testing-policy.md`「リファレンス実装」2.）: `run_tobit_crosscheck.R`内で
   `stopifnot`により以下を検証する — スコア（`estfun`）↔ Tobit対数尤度の`numDeriv::grad`、
   McDonald-Moffitt閉形式（重み`w = dE[y|x]/dμ`・デルタ法ヤコビアン）↔ `numDeriv::grad`および
-  `boundary_terms`を使わない独立実装、AIC/BIC ↔ R標準の`AIC()`/`BIC()`ジェネリック、classicalの
+  `boundary_terms`を使わない独立実装（`expected_uncensored`は対数空間の`Pa`・`Pb`、整理前の
+  教科書形との一致（`|z|<=6`）、素の`φ/W`閉形式、打ち切り領域上の数値積分、`E[y|x]`との分解恒等式）、AIC/BIC ↔ R標準の`AIC()`/`BIC()`ジェネリック、classicalの
   全体Wald ↔ `AER:::summary.tobit(fit)$wald`。ロバスト共分散の meat（`sandwich::estfun`）と bread
   （`sandwich::bread`）は`sandwich`パッケージ由来で本実装から独立だが、`(β,logσ)→(β,σ)`ヤコビアン
   変換と hc1 小標本補正は本スクリプトの手書きで、`clubSandwich`等との三角測量は行っていない
@@ -347,7 +381,7 @@ Tobit固有の差分:
 - **新規データ（out-of-sample）予測値の数値照合**: `run_tobit_crosscheck.R`が学習
   データの各スロープ列の「平均±1標準偏差」を新規x値とする2行を組み立て（切片列は`model.matrix`の
   規約通り常に1.0）、`predicted_value`（上記のformula非依存検証で既に正しさを確認済みの閉形式）で
-  target3種を計算した`predict_new_data`と、その新規x値自体（`new_x`）をフィクスチャに含める。
+  target4種を計算した`predict_new_data`と、その新規x値自体（`new_x`）をフィクスチャに含める。
   `predicted_value`の数式そのものは検証済みのため、この照合が対象とするのは新規データの設計行列
   組み立て（切片自動付加・列の対応付け）がRust側（`predict_new_data`/`design_matrix_element`）と
   Rの`model.matrix`規約とで一致するかであり、`new_mm %*% beta`という単純な行列積で十分（`numDeriv`
@@ -355,6 +389,10 @@ Tobit固有の差分:
 
 ## 4. 未実装・未対応
 
+- **`expected_uncensored`の極端に狭い非打ち切り区間**: `(upper-lower)/σ`が`1e-4`程度未満
+  （`σ`が区間幅の`1e4`倍以上）だと精度が落ち、丸め誤差のレベルでは`NaN`になる（3.5節の「限界」）。
+  境界は`μ`に依らず`σ`だけで決まる条件なので、区間中点まわりの級数（`m≈中点`、`w≈((upper-lower)/σ)²/12`）への
+  切り替えか、入力の拒否（`ValidationError`）かの方針を実データで問題が顕在化した時点で決める。
 - `predict()`のout-of-sample対応は実装済み（3.6参照）。`censoring_fit_check()`の
   out-of-sample対応は引き続き未実装。
 - `augment()`は実装済み（3.6参照）。

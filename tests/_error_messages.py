@@ -303,7 +303,7 @@ NO_UNCENSORED_OBSERVATIONS = (
 )
 UNKNOWN_MARGINAL_EFFECTS_TARGET = (
     "unknown target: '{other}'. Expected one of 'expected_latent', "
-    "'expected_observed', or 'prob_uncensored'"
+    "'expected_observed', 'prob_uncensored', or 'expected_uncensored'"
 )
 
 # ── IV系統固有（engine/src/iv/common.rs・engine_pybind/src/iv/common.rs） ──

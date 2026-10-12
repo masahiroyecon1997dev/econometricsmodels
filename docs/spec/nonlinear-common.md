@@ -347,8 +347,9 @@ MLEベースの非線形モデルは漸近理論が正規分布に基づいて�
   ベクトル（外部から任意の評価点を指定するオプションは見送り）。
 - **Tobitは`predict()`/`marginal_effects()`/`pred_table()`のいずれも独自の形になる**
   （詳細は[`tobit-spec.md`](./tobit-spec.md)3.5〜3.6節）: `predict(target)`/
-  `marginal_effects(target)`は`E[y*|x]=x'β`・`E[y|x]`（既定）・`P(uncensored|x)`の3対象を
-  取る（McDonald-Moffitt 1980）。3対象とも`dydx_j = w(θ)·βⱼ`に帰着するが`w`の式が対象
+  `marginal_effects(target)`は`E[y*|x]=x'β`・`E[y|x]`（既定）・`P(uncensored|x)`・
+  `E[y|lower<y<upper,x]`（非打ち切り領域での条件付き期待値）の4対象を
+  取る（McDonald-Moffitt 1980）。4対象とも`dydx_j = w(θ)·βⱼ`に帰着するが`w`の式が対象
   ごとに異なるためLogit/Probitの`dydx_and_jacobian`とは共有せず独立実装する。`pred_table()`
   は廃止し`censoring_fit_check()`（方向別の観測打ち切り率 vs モデル含意率）に置き換える。
 

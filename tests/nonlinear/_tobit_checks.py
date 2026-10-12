@@ -41,7 +41,12 @@ SCENARIOS = _tobit_fixtures.NUMERIC_SCENARIOS
 COV_TYPES = _tobit_fixtures.PER_SCENARIO_COV_TYPES
 BASELINE_SCENARIO = _tobit_fixtures.BASELINE_SCENARIO
 
-MARGEFF_TARGETS = ["expected_latent", "expected_observed", "prob_uncensored"]
+MARGEFF_TARGETS = [
+    "expected_latent",
+    "expected_observed",
+    "prob_uncensored",
+    "expected_uncensored",
+]
 MARGEFF_AT = ["overall", "mean", "median"]
 
 CLUSTER_COV_KEYS = ["cluster", "cluster_imbalanced", "cluster_g2"]

@@ -119,7 +119,7 @@ use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::prelude::{Solve, SolveLstsq};
 use faer::{Mat, Side};
-use statrs::distribution::{ChiSquared, ContinuousCDF, Normal};
+use statrs::distribution::{ChiSquared, Continuous, ContinuousCDF, Normal};
 
 /// Tobitの被説明変数・設計行列・打ち切り境界を保持する入力データ。
 ///
@@ -857,6 +857,189 @@ pub enum MarginalEffectsTarget {
     ExpectedObserved,
     /// 非打ち切り確率 `P(uncensored|x)`
     ProbUncensored,
+    /// 非打ち切り領域での条件付き期待値 `E[y|lower<y<upper,x]`（切断正規分布の平均）。
+    /// 下限0のみの左打ち切りなら `E[y|y>0,x]`。`E[y|x]`との関係は
+    /// `E[y|x]=lower·P(下限)+upper·P(上限)+P(uncensored|x)·E[y|lower<y<upper,x]`
+    ExpectedUncensored,
+}
+
+/// 逆ミルズ比・生存関数を連分数展開で評価する`a`の下限。連分数は`a>=3`で60段あれば相対誤差
+/// `3e-17`以下に収束する。`a`がこれ未満では`normal_survival`（テイラー級数）で`Φ(-a)`を
+/// 作って`φ(a)/Φ(-a)`を直接計算する。`a≈38`では`φ`・`Φ(-a)`がアンダーフローするため、
+/// 裾は連分数でなければ評価できない。
+const MILLS_CONTINUED_FRACTION_THRESHOLD: f64 = 3.0;
+
+/// 連分数展開の段数（`a>=MILLS_CONTINUED_FRACTION_THRESHOLD`で倍精度に十分収束する）。
+const MILLS_CONTINUED_FRACTION_DEPTH: u32 = 60;
+
+/// `Φ(x)-1/2`（`x>=0`）を絶対誤差`≈1e-16`で計算する。`statrs`の`Normal::cdf`は絶対誤差が
+/// 約`1.4e-11`（`Φ(-1)`で相対`8.6e-11`）あり、`W=Φ(zb)-Φ(za)`で割る量では限界効果の
+/// 標準誤差に`100`倍程度に増幅されて現れる（`k=20`で相対`1e-8`）ため使わない。
+/// `x<MILLS_CONTINUED_FRACTION_THRESHOLD`ではテイラー級数
+/// `Φ(x)-1/2=φ(x)·Σₙ x^{2n+1}/(2n+1)!!`（全項が正で桁落ちなし）、それ以上では
+/// `1/2-φ(x)/λ(x)`（`λ`は連分数、`Φ(x)`が1に近いので絶対誤差で足りる）。
+fn normal_cdf_minus_half(normal: &Normal, x: f64) -> f64 {
+    if x >= MILLS_CONTINUED_FRACTION_THRESHOLD {
+        let (lambda, _) = inverse_mills_ratio_continued_fraction(x, MILLS_CONTINUED_FRACTION_DEPTH);
+        return 0.5 - normal.pdf(x) / lambda;
+    }
+    let x2 = x * x;
+    let mut term = x;
+    let mut sum = x;
+    // `x<3`なら40項程度で収束する。上限は収束しない入力（NaN等）での無限ループ防止
+    for n in 1..=500u32 {
+        term *= x2 / (2.0 * f64::from(n) + 1.0);
+        sum += term;
+        if term <= sum * 1e-17 {
+            break;
+        }
+    }
+    normal.pdf(x) * sum
+}
+
+/// 標準正規分布の生存関数`Φ(-a)`を、`a`の全域で`normal_cdf_minus_half`と同じ精度で計算する
+/// （`a<0`は`1/2+(Φ(-a)-1/2)`、`0<=a<3`は`1/2-(Φ(a)-1/2)`で`Φ(-3)≈1.3e-3`でも
+/// 桁落ちは約3桁、`a>=3`は`φ(a)/λ(a)`（連分数）で`a≈38`でもアンダーフローしない）。
+fn normal_survival(normal: &Normal, a: f64) -> f64 {
+    if a < 0.0 {
+        0.5 + normal_cdf_minus_half(normal, -a)
+    } else if a < MILLS_CONTINUED_FRACTION_THRESHOLD {
+        0.5 - normal_cdf_minus_half(normal, a)
+    } else {
+        let (lambda, _) = inverse_mills_ratio_continued_fraction(a, MILLS_CONTINUED_FRACTION_DEPTH);
+        normal.pdf(a) / lambda
+    }
+}
+
+/// 逆ミルズ比`λ(a)=φ(a)/Φ(-a)`（標準正規分布の右裾のハザード率）と、その`a`からの
+/// 超過分`λ(a)-a`を返す。`a`が大きいと`λ≈a`で、引き算`λ-a`は桁落ちするため
+/// （真値は`≈1/a`）、超過分は引き算せず直接計算して一緒に返す。
+///
+/// `a`が小さい（負を含む）ときは`normal_survival`の`Φ(-a)`を使い（`1-Φ(a)`は裾で0に潰れる
+/// ため使わない）、`a>=MILLS_CONTINUED_FRACTION_THRESHOLD`では連分数展開
+/// `λ(a)=a+1/(a+2/(a+3/(a+…)))`に切り替える（`φ`と`Φ(-a)`が`a≈38`でアンダーフローする
+/// 領域でも有効）。
+fn inverse_mills_ratio_and_gap(normal: &Normal, a: f64) -> (f64, f64) {
+    if a < MILLS_CONTINUED_FRACTION_THRESHOLD {
+        let lambda = normal.pdf(a) / normal_survival(normal, a);
+        (lambda, lambda - a)
+    } else {
+        inverse_mills_ratio_continued_fraction(a, MILLS_CONTINUED_FRACTION_DEPTH)
+    }
+}
+
+/// `inverse_mills_ratio_and_gap`の連分数展開（`depth>=2`段で打ち切り、内側から評価する）。
+/// `a>0`が前提。`λ(a)-a=1/(a+2/(a+3/(a+…)))`は第2項以降の連分数の逆数として
+/// 引き算なしに得られる。
+fn inverse_mills_ratio_continued_fraction(a: f64, depth: u32) -> (f64, f64) {
+    let mut t = a;
+    for k in (2..=depth).rev() {
+        t = a + f64::from(k) / t;
+    }
+    let gap = 1.0 / t;
+    (a + gap, gap)
+}
+
+/// `0<=za<zb`の上側裾での`(Pa, Pb, A, B)`。`Pa=φ(za)/W`・`Pb=φ(zb)/W`
+/// （`W=Φ(zb)-Φ(za)`）、`A=Pa-za`・`B=zb+Pb`（`ExpectedUncensored`の式で`za`・`zb`との
+/// 大きな数同士の差を避けるための量。`truncation_pdf_ratios`参照）。
+///
+/// `W`を直接作ると両方が裾にあるとき桁落ち・アンダーフローするため、`W=Φ(-za)-Φ(-zb)`を
+/// `Φ(-za)`で割った比で表す。`p=λ(za)`・`q=λ(zb)`・`r=φ(zb)/φ(za)=exp(-(zb²-za²)/2)`と
+/// すると`φ(zb)/Φ(-za)=r·p`・`Φ(-zb)/Φ(-za)=r·p/q`なので、`W/Φ(-za)=1-r·p/q`、
+/// `Pa=p·q/(q-r·p)`、`Pb=r·p·q/(q-r·p)`となる（`q>p>=r·p`で分母は正）。
+/// `A=(p-za)+(Pa-p)=gap_p+r·p²/(q-r·p)`は正の項の和で、`B=zb+Pb`も正の項の和。
+fn upper_tail_pdf_ratios(normal: &Normal, za: f64, zb: f64) -> (f64, f64, f64, f64) {
+    debug_assert!(0.0 <= za && za < zb, "upper tail requires 0 <= za < zb");
+    let (p, gap_p) = inverse_mills_ratio_and_gap(normal, za);
+    let (q, _) = inverse_mills_ratio_and_gap(normal, zb);
+    let r = (-0.5 * (zb - za) * (zb + za)).exp();
+    let denom = q - r * p;
+    let pa = p * q / denom;
+    let pb = r * p * q / denom;
+    (pa, pb, gap_p + r * p * p / denom, zb + pb)
+}
+
+/// `truncation_pdf_ratios`の返り値。`pa=φ(za)/W`・`pb=φ(zb)/W`（`W=Φ(zb)-Φ(za)`、
+/// 境界が無い方向は0）、`a_gap=pa-za`・`b_gap=zb+pb`。
+struct TruncationRatios {
+    pa: f64,
+    pb: f64,
+    a_gap: f64,
+    b_gap: f64,
+}
+
+/// 非打ち切り領域`(za,zb)`（標準化した下限・上限。`None`はその方向の打ち切りなし）に
+/// 切断した標準正規分布について、`W=Φ(zb)-Φ(za)`で割る量を`W→0`となる裾でも
+/// 破綻しない形で返す（`TruncationRatios`）。`E[y|uncensored]`の`μ`からのずれ
+/// `σ(Pa-Pb)`、切断分散比`w`など、`W`で割る量は全てこれで書ける。`A=Pa-za`・
+/// `B=zb+Pb`は`|z|`が大きいと`Pa≈za`のように大きな数同士の差になるため、引き算せず
+/// 直接計算して返す（`uncensored_w_and_s`が`z²`同士の桁落ちを避けるのに使う）。
+///
+/// - 片側のみ: 逆ミルズ比（左のみ`Pa=λ(za)`、`A=λ(za)-za`。右のみ`Pb=λ(-zb)`、
+///   `B=λ(-zb)-(-zb)`）
+/// - 両側で`za>=0`（上側の裾）: `upper_tail_pdf_ratios`
+/// - 両側で`zb<=0`（下側の裾）: 符号反転`(za,zb)→(-zb,-za)`で上側の裾へ写し、
+///   `(Pa,Pb)`と`(A,B)`をそれぞれ入れ替える
+/// - 両側で`za<0<zb`: `W`が裾に潰れないので直接計算する（`A`・`B`は正の項の和）
+fn truncation_pdf_ratios(normal: &Normal, za: Option<f64>, zb: Option<f64>) -> TruncationRatios {
+    let (pa, pb, a_gap, b_gap) = match (za, zb) {
+        (None, None) => (0.0, 0.0, 0.0, 0.0),
+        (Some(a), None) => {
+            let (lambda, gap) = inverse_mills_ratio_and_gap(normal, a);
+            (lambda, 0.0, gap, 0.0)
+        }
+        (None, Some(b)) => {
+            let (lambda, gap) = inverse_mills_ratio_and_gap(normal, -b);
+            (0.0, lambda, 0.0, gap)
+        }
+        (Some(a), Some(b)) => {
+            if a >= 0.0 {
+                upper_tail_pdf_ratios(normal, a, b)
+            } else if b <= 0.0 {
+                let (pa_m, pb_m, a_gap_m, b_gap_m) = upper_tail_pdf_ratios(normal, -b, -a);
+                (pb_m, pa_m, b_gap_m, a_gap_m)
+            } else {
+                // `Φ(b)-Φ(a)=(Φ(b)-1/2)+(1/2-Φ(a))`は正の項の和（`a<0<b`）
+                let w = normal_cdf_minus_half(normal, b) + normal_cdf_minus_half(normal, -a);
+                let pa = normal.pdf(a) / w;
+                let pb = normal.pdf(b) / w;
+                (pa, pb, pa - a, b + pb)
+            }
+        }
+    };
+    TruncationRatios {
+        pa,
+        pb,
+        a_gap,
+        b_gap,
+    }
+}
+
+/// `ExpectedUncensored`の評価に使う、線形予測子`mu`での標準化境界と`TruncationRatios`。
+/// `za`/`zb`は境界が無い方向を`0.0`のダミー値にする（対応する`pa`/`pb`が0なので
+/// 以降の式に影響しない）。
+struct UncensoredTerms {
+    za: f64,
+    zb: f64,
+    ratios: TruncationRatios,
+}
+
+impl UncensoredTerms {
+    fn new(mu: f64, sigma: f64, lower: Option<f64>, upper: Option<f64>, normal: &Normal) -> Self {
+        let za = lower.map(|l| (l - mu) / sigma);
+        let zb = upper.map(|u| (u - mu) / sigma);
+        Self {
+            za: za.unwrap_or(0.0),
+            zb: zb.unwrap_or(0.0),
+            ratios: truncation_pdf_ratios(normal, za, zb),
+        }
+    }
+
+    /// `E[y|uncensored]=μ+σ·(Pa-Pb)`
+    fn mean(&self, mu: f64, sigma: f64) -> f64 {
+        mu + sigma * (self.ratios.pa - self.ratios.pb)
+    }
 }
 
 /// 打ち切り境界`bound`を標準化した`z=(bound-μ)/σ`・`φ(z)`・`Φ(z)`を計算する。`None`は
@@ -899,6 +1082,7 @@ fn boundary_terms(
 /// - `ProbUncensored`（`P(uncensored|x)=W(θ)`自体）: `w=∂W/∂μ=(φ(za)-φ(zb))/σ`。
 ///   その勾配は`∂²W/∂μ²=(za·φ(za)-zb·φ(zb))/σ²`・
 ///   `∂(∂W/∂μ)/∂σ=(φ(za)(za²-1)-φ(zb)(zb²-1))/σ²`
+/// - `ExpectedUncensored`（`E[y|uncensored,x]`）: `uncensored_w_and_s`
 ///
 /// いずれも境界項がある方向のみ`φ≠0`となるため（`boundary_terms`のNone時`φ=0`）、
 /// 左/右/両側打ち切りいずれでも同じ式で正しく計算できる（両側打ち切りは
@@ -919,11 +1103,16 @@ fn target_w_and_s(
     }
 
     let mu: f64 = (0..k).map(|m| x_point[m] * beta[m]).sum();
+    if target == MarginalEffectsTarget::ExpectedUncensored {
+        return uncensored_w_and_s(x_point, mu, sigma, lower, upper, normal);
+    }
     let (za, phi_za, cdf_za) = boundary_terms(lower, mu, sigma, normal, true);
     let (zb, phi_zb, cdf_zb) = boundary_terms(upper, mu, sigma, normal, false);
 
     match target {
-        MarginalEffectsTarget::ExpectedLatent => unreachable!("handled by early return above"),
+        MarginalEffectsTarget::ExpectedLatent | MarginalEffectsTarget::ExpectedUncensored => {
+            unreachable!("handled by early return above")
+        }
         MarginalEffectsTarget::ExpectedObserved => {
             let w = cdf_zb - cdf_za;
             let dw_dmu = (phi_za - phi_zb) / sigma;
@@ -939,6 +1128,78 @@ fn target_w_and_s(
             (w, s_beta, s_sigma)
         }
     }
+}
+
+/// `ExpectedUncensored`（`m(μ,σ)=E[y|lower<y<upper,x]=μ+σ(Pa-Pb)`）の`(w, s_beta, s_sigma)`。
+///
+/// ## 数式
+///
+/// `m`は`x`に`μ=x'β`を通してしか依存しないので`dydx_j=w·βⱼ`、`w=∂m/∂μ`。
+/// `Pa=φ(za)/W`・`Pb=φ(zb)/W`・`ρ1=Pa-Pb`・`ρ2=za·Pa-zb·Pb`とおくと
+/// `w=1+ρ2-ρ1²`（切断正規分布の分散を`σ²`で割った値で、`(0,1)`に入る）。
+/// `za`/`zb`についての偏微分は`W_a=-φa`・`W_b=φb`などから
+///
+/// - `∂ρ1/∂za=Pa(ρ1-za)`・`∂ρ1/∂zb=Pb(zb-ρ1)`
+/// - `∂ρ2/∂za=Pa(1-za²+ρ2)`・`∂ρ2/∂zb=Pb(zb²-1-ρ2)`
+/// - `w_a=∂ρ2/∂za-2ρ1∂ρ1/∂za`・`w_b=∂ρ2/∂zb-2ρ1∂ρ1/∂zb`
+///
+/// で、`∂za/∂μ=∂zb/∂μ=-1/σ`・`∂za/∂σ=-za/σ`・`∂zb/∂σ=-zb/σ`より
+/// `∂w/∂μ=-(w_a+w_b)/σ`・`∂w/∂σ=-(za·w_a+zb·w_b)/σ`。左のみ打ち切り（`zb`なし）で
+/// `Pa=λ(za)`とすると`w=1+za·λ-λ²`（McDonald-Moffittの`1-zλ-λ²`型の式）に一致する。
+///
+/// ## 数値安定性
+///
+/// 上の式をそのまま書くと、`|z|`が大きい裾（`Pa≈za`）では`za²`と`za·Pa`の大きな数同士の
+/// 引き算になり、`w_a`の絶対誤差が`ε·z³`で増える（`z=72`の観測を含む実データで`s_sigma`の
+/// 相対誤差が`5e-9`、限界効果の標準誤差が`1e-8`ずれた）。
+/// `A=Pa-za`・`B=zb+Pb`（`truncation_pdf_ratios`が引き算なしに返す）で整理すると
+///
+/// - `w=1-Pa·A-Pb·B+2·Pa·Pb`
+/// - `w_a=Pa[1+za·A-zb·Pb-2ρ1(A-Pb)]`
+/// - `w_b=Pb[-1+zb·B-za·Pa-2ρ1(B-Pa)]`
+///
+/// となり、括弧内は`O(1)`同士の和なので絶対誤差は`ε·Pa`程度に収まる。`W→0`となる裾でも
+/// `Pa`・`Pb`が直接計算されるため割り算は破綻しない。`w`は理論上`(0,1)`なので、丸め誤差で
+/// 範囲外になった値が平均に混ざらないよう`[0,1]`にクランプする。
+///
+/// ## 既知の限界
+///
+/// - **遠い裾の相対精度**: 片側の裾で`|z|`が大きいと、括弧内の`O(1)`同士が`O(z⁻⁴)`まで
+///   打ち消し合うため、絶対誤差は小さいままでも`w`・`w_a`・`w_b`の**相対**精度は
+///   `|z|≳1e3`から落ち、`|z|≳1e4`で`w_a`は符号も保証されない（`w≈1/z²`・`w_a≈-2/z³`自体が
+///   無視できる大きさなので、全観測の平均には影響しない）。
+/// - **非打ち切り区間が極端に狭い場合**: `zb-za=(upper-lower)/σ`が`1e-4`程度より小さい
+///   （`σ`が区間幅の`1e4`倍以上）と、上側/下側の裾の`q-r·p`や中央の`W`・`1-Pa·A-Pb·B+…`が
+///   桁落ちして精度を失い、`zb-za`が丸め誤差のレベルでは`NaN`になる。この領域の扱い
+///   （級数への切り替え・入力の拒否）は未決定。
+fn uncensored_w_and_s(
+    x_point: &[f64],
+    mu: f64,
+    sigma: f64,
+    lower: Option<f64>,
+    upper: Option<f64>,
+    normal: &Normal,
+) -> (f64, Vec<f64>, f64) {
+    let UncensoredTerms {
+        za,
+        zb,
+        ratios:
+            TruncationRatios {
+                pa,
+                pb,
+                a_gap,
+                b_gap,
+            },
+    } = UncensoredTerms::new(mu, sigma, lower, upper, normal);
+    let rho1 = pa - pb;
+    let w = (1.0 - pa * a_gap - pb * b_gap + 2.0 * pa * pb).clamp(0.0, 1.0);
+
+    let w_a = pa * (1.0 + za * a_gap - zb * pb - 2.0 * rho1 * (a_gap - pb));
+    let w_b = pb * (-1.0 + zb * b_gap - za * pa - 2.0 * rho1 * (b_gap - pa));
+    let dw_dmu = -(w_a + w_b) / sigma;
+    let s_beta: Vec<f64> = x_point.iter().map(|&x_m| dw_dmu * x_m).collect();
+    let s_sigma = -(za * w_a + zb * w_b) / sigma;
+    (w, s_beta, s_sigma)
 }
 
 /// `target_w_and_s`の`at="overall"`（AME）版。全観測を1回走査し、各観測の`(w,s_beta,
@@ -1107,6 +1368,9 @@ fn marginal_effects_from_tobit_w_s(
 /// 左のみ・右のみ・両側打ち切りいずれでも同じ式で正しく計算できる（`target_w_and_s`の
 /// docコメント「数式」と同じ考え方。こちらは値そのもの、`target_w_and_s`はその微分）。
 ///
+/// `ExpectedUncensored`は`E[y|lower<y<upper,x]=μ+σ(Pa-Pb)`（`UncensoredTerms::mean`、
+/// 裾でも安定な`truncation_pdf_ratios`経由）。
+///
 /// `E[y|x]`の閉形式は`Φ(za)*lower + (1-Φ(zb))*upper + (Φ(zb)-Φ(za))*mu - σ(φ(zb)-φ(za))`
 /// （両側打ち切りの一般形。`lower`/`upper`が`None`の側は`boundary_terms`の規約により
 /// 係数が0になるため、ダミー値`lower.unwrap_or(0.0)`/`upper.unwrap_or(0.0)`を掛けても
@@ -1122,10 +1386,15 @@ fn predicted_value(
     if target == MarginalEffectsTarget::ExpectedLatent {
         return mu;
     }
+    if target == MarginalEffectsTarget::ExpectedUncensored {
+        return UncensoredTerms::new(mu, sigma, lower, upper, normal).mean(mu, sigma);
+    }
     let (_, phi_za, cdf_za) = boundary_terms(lower, mu, sigma, normal, true);
     let (_, phi_zb, cdf_zb) = boundary_terms(upper, mu, sigma, normal, false);
     match target {
-        MarginalEffectsTarget::ExpectedLatent => unreachable!("handled by early return above"),
+        MarginalEffectsTarget::ExpectedLatent | MarginalEffectsTarget::ExpectedUncensored => {
+            unreachable!("handled by early return above")
+        }
         MarginalEffectsTarget::ExpectedObserved => {
             let lower_c = lower.unwrap_or(0.0);
             let upper_c = upper.unwrap_or(0.0);
@@ -1831,7 +2100,6 @@ mod tests {
     use super::*;
     use crate::nonlinear::common::SolverType;
     use crate::shared::group_codes::GroupCodes;
-    use statrs::distribution::{Continuous, ContinuousCDF};
 
     #[test]
     fn wald_chi2_test_keeps_precision_in_the_far_tail() {
@@ -4332,6 +4600,675 @@ mod tests {
                 (normal.pdf((c1 - mu) / sigma) - normal.pdf((c2 - mu) / sigma)) / sigma
             }
             (None, None) => unreachable!("TobitInput::from_columns rejects both-None bounds"),
+        }
+    }
+
+    /// `E[y|lower<y<upper,x]`の閉形式。`(lower,upper)`ごとに独立した分岐で、`φ/W`を
+    /// 素直に直接計算する教科書通りの式（`1-Φ`や`Φ(zb)-Φ(za)`をそのまま使うため、裾では
+    /// 桁落ちする。片側は生存関数`Φ(-z)`を使うので裾でも正確だが、両側は中程度の`z`
+    /// での検算専用。いずれも`truncation_pdf_ratios`とは別のコードパス）。
+    fn expected_uncensored_closed_form(
+        mu: f64,
+        sigma: f64,
+        lower: Option<f64>,
+        upper: Option<f64>,
+    ) -> f64 {
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        match (lower, upper) {
+            (Some(c), None) => {
+                let z = (c - mu) / sigma;
+                mu + sigma * normal.pdf(z) / normal.cdf(-z)
+            }
+            (None, Some(c)) => {
+                let z = (c - mu) / sigma;
+                mu - sigma * normal.pdf(z) / normal.cdf(z)
+            }
+            (Some(c1), Some(c2)) => {
+                let za = (c1 - mu) / sigma;
+                let zb = (c2 - mu) / sigma;
+                mu + sigma * (normal.pdf(za) - normal.pdf(zb)) / (normal.cdf(zb) - normal.cdf(za))
+            }
+            (None, None) => unreachable!("TobitInput::from_columns rejects both-None bounds"),
+        }
+    }
+
+    /// ノイズの大きい決定論的な打ち切りデータ（`y*=-2+0.7x+ε`、`ε`は`±2.5`の一様、
+    /// `x=0.25·i`、`i=0..60`）に`lower`/`upper`を適用した入力。既存の少数観測データは
+    /// 当てはめ後の`σ`が小さく`z`が裾に入るため、素直な閉形式（`expected_uncensored_closed_form`）
+    /// で独立に検算できる範囲に`z`を収める用途。
+    fn noisy_censored_input(lower: Option<f64>, upper: Option<f64>) -> TobitInput {
+        let x: Vec<f64> = (0..60).map(|i| 0.25 * f64::from(i)).collect();
+        let y: Vec<f64> = (0..60u32)
+            .map(|i| {
+                let u = f64::from((i * 7919) % 1009) / 1009.0;
+                let latent = -2.0 + 0.7 * x[i as usize] + (u - 0.5) * 5.0;
+                let latent = lower.map_or(latent, |l| latent.max(l));
+                upper.map_or(latent, |u| latent.min(u))
+            })
+            .collect();
+        TobitInput::from_columns(
+            &y,
+            &[x],
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+            lower,
+            upper,
+        )
+        .unwrap()
+    }
+
+    /// `(lower,upper)`の代表的な3構成（左のみ・右のみ・両側）。
+    fn bounds_configs() -> [(Option<f64>, Option<f64>); 3] {
+        [
+            (Some(0.0), None),
+            (None, Some(1.0)),
+            (Some(-1.0), Some(1.5)),
+        ]
+    }
+
+    fn assert_relative_eq(actual: f64, expected: f64, rtol: f64, label: &str) {
+        let scale = expected.abs().max(f64::MIN_POSITIVE);
+        assert!(
+            (actual - expected).abs() <= rtol * scale,
+            "{label}: actual={actual:e}, expected={expected:e}, rel={:e}",
+            (actual - expected).abs() / scale
+        );
+    }
+
+    /// 逆ミルズ比`λ(a)=φ(a)/Φ(-a)`とその超過分`λ(a)-a`の参照値。`a<=3`は
+    /// `scipy.special.erfcx`（`λ=√(2/π)/erfcx(a/√2)`）、`a>=3`は連分数を60桁の10進演算で
+    /// 20000段評価した値（超過分`λ-a`も同じ演算で直接作った値）。直接計算
+    /// （`a<MILLS_CONTINUED_FRACTION_THRESHOLD=3`、テイラー級数の`Φ`）と連分数の両方の領域、
+    /// および切り替え点の前後（`2.99`・`3.0`）を含む。両領域とも`1e-13`で一致する。
+    #[test]
+    fn inverse_mills_ratio_and_gap_match_high_precision_reference_on_both_branches() {
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        // (a, lambda, gap)。`a<3`のgapは`λ-a`の引き算（`gap`の相対精度は`ε·a²`程度）
+        let cases = [
+            (-5.0, 1.486_719_940_904_908_6e-6, None),
+            (0.0, 0.797_884_560_802_865_4, None),
+            (1.0, 1.525_135_276_160_981_3, None),
+            (2.99, 3.273_805_823_492_689, None),
+            (3.0, 3.283_098_654_930_436, Some(0.283_098_654_930_436_5)),
+            (5.0, 5.186_503_967_125_842, Some(0.186_503_967_125_842_1)),
+            (10.0, 10.098_093_233_962_512, Some(0.098_093_233_962_511_96)),
+            (29.9, 29.933_370_411_296_167, None),
+            (38.0, 38.026_279_466_575_87, Some(0.026_279_466_575_868_99)),
+            (
+                100.0,
+                100.009_998_000_999_26,
+                Some(0.009_998_000_999_260_705),
+            ),
+            (1000.0, 1_000.000_999_998, Some(0.000_999_998_000_01)),
+        ];
+        for (a, lambda, gap) in cases {
+            let (actual, actual_gap) = inverse_mills_ratio_and_gap(&normal, a);
+            assert_relative_eq(actual, lambda, 1e-13, &format!("lambda({a})"));
+            if let Some(gap) = gap {
+                assert_relative_eq(actual_gap, gap, 1e-13, &format!("gap({a})"));
+            }
+        }
+    }
+
+    /// 切り替え点`MILLS_CONTINUED_FRACTION_THRESHOLD`の前後で`λ`・`Φ(x)-1/2`・`Φ(-a)`が
+    /// 連続（飛びがない）。直接計算側（テイラー級数）と連分数側が同じ値を返すことの確認。
+    #[test]
+    fn mills_ratio_and_normal_cdf_are_continuous_across_the_series_to_continued_fraction_switch() {
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        let t = MILLS_CONTINUED_FRACTION_THRESHOLD;
+        let below = t * (1.0 - 1e-12);
+        let (lambda_below, _) = inverse_mills_ratio_and_gap(&normal, below);
+        let (lambda_at, _) = inverse_mills_ratio_and_gap(&normal, t);
+        // `λ`は傾き約`1`なので`t·1e-12`の差分だけ許す
+        assert!(
+            (lambda_at - lambda_below).abs() < 2e-11,
+            "lambda: below={lambda_below}, at={lambda_at}"
+        );
+        assert_relative_eq(
+            normal_survival(&normal, below),
+            normal_survival(&normal, t),
+            1e-8,
+            "survival around switch",
+        );
+        assert_relative_eq(
+            normal_cdf_minus_half(&normal, below),
+            normal_cdf_minus_half(&normal, t),
+            1e-8,
+            "cdf-1/2 around switch",
+        );
+    }
+
+    /// `statrs`の`Normal::cdf`（絶対誤差約`1.4e-11`）に代わる`normal_cdf_minus_half`・
+    /// `normal_survival`の精度。参照は`scipy.special`（`0.5·erf(x/√2)`・`ndtr(-a)`）。
+    /// `Φ(-8)≈6.2e-16`のような裾でも相対`1e-13`、`1/2`近傍も絶対`1e-16`級で一致する。
+    #[test]
+    fn normal_cdf_minus_half_and_survival_match_scipy_to_machine_precision() {
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        for (x, expected) in [
+            (0.5, 0.191_462_461_274_013_06),
+            (1.0, 0.341_344_746_068_542_9),
+            (2.0, 0.477_249_868_051_820_8),
+            (2.99, 0.498_605_112_764_507_75),
+            (3.0, 0.498_650_101_968_369_9),
+            (5.0, 0.499_999_713_348_428_13),
+        ] {
+            assert_relative_eq(
+                normal_cdf_minus_half(&normal, x),
+                expected,
+                1e-14,
+                &format!("Phi({x})-1/2"),
+            );
+        }
+        for (a, expected) in [
+            (-2.0, 0.977_249_868_051_820_8),
+            (0.0, 0.5),
+            (1.0, 0.158_655_253_931_457_07),
+            (2.0, 0.022_750_131_948_179_195),
+            (2.99, 0.001_394_887_235_492_246_8),
+            (3.0, 0.001_349_898_031_630_093_3),
+            (4.0, 3.167_124_183_311_986e-5),
+            (8.0, 6.220_960_574_271_74e-16),
+        ] {
+            assert_relative_eq(
+                normal_survival(&normal, a),
+                expected,
+                1e-13,
+                &format!("Phi(-{a})"),
+            );
+        }
+    }
+
+    /// 連分数展開は`a>=3`で、直接計算（`normal_survival`のテイラー級数側の`φ(a)/Φ(-a)`を
+    /// 切り替え点より上へ外挿して使った値）と`1e-12`で一致する。段数
+    /// `MILLS_CONTINUED_FRACTION_DEPTH`が切り替え点（`a=3`）でも収束していることの確認。
+    /// `a=3`・`4`・`5`のテイラー級数側は`Φ(-a)=1/2-(Φ(a)-1/2)`の桁落ちで相対`1e-13`/`1e-11`/
+    /// `1e-9`程度まで落ちるため、`a`が大きいほど許容を緩める（連分数側が正しい）。
+    #[test]
+    fn inverse_mills_ratio_continued_fraction_agrees_with_series_based_survival_near_the_switch() {
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        for (a, rtol) in [(3.0, 1e-12), (3.5, 1e-11), (4.0, 1e-10)] {
+            let series_survival = 0.5 - normal_cdf_minus_half(&normal, a);
+            let series_lambda = normal.pdf(a) / series_survival;
+            let (cf, _) = inverse_mills_ratio_continued_fraction(a, MILLS_CONTINUED_FRACTION_DEPTH);
+            assert_relative_eq(cf, series_lambda, rtol, &format!("cf vs series at a={a}"));
+        }
+    }
+
+    /// 裾での`(Pa,Pb)`と`ExpectedUncensored`の`(w, ∂w/∂μ, ∂w/∂σ)`を、80桁の10進演算で
+    /// 直接評価した参照値（`W=Φ(-za)-Φ(-zb)`を連分数の`Φ(-z)`から作り、定義通りに
+    /// `φ/W`・`w=1+ρ2-ρ1²`・偏微分を計算）と突き合わせる。左のみ・右のみ・両側の
+    /// 上側の裾・下側の裾（符号反転）・`zb`が遥か先で片側と一致する場合を含む。`z=40`では
+    /// `Φ(-40)≈3.7e-350`が倍精度でアンダーフローし、直接計算では`W=0`になる領域。
+    /// 絶対誤差の許容は、`w`が数`ε`、`∂w/∂μ`が`Pa≈z`に比例する`≈ε·z`、
+    /// `∂w/∂σ`がさらに`za`倍の`≈ε·z²`程度に収まる想定で置いた。
+    #[test]
+    fn uncensored_terms_and_w_match_high_precision_reference_in_extreme_tails() {
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        // (label, za, zb, Pa, Pb, w, w_a, w_b)
+        #[allow(clippy::type_complexity)]
+        let cases: [(&str, Option<f64>, Option<f64>, f64, f64, f64, f64, f64); 10] = [
+            (
+                "left-only z=40",
+                Some(40.0),
+                None,
+                40.024_968_847_207_26,
+                0.0,
+                6.226_683_785_913_888e-4,
+                -3.101_744_039_648_625e-5,
+                0.0,
+            ),
+            (
+                "left-only z=100",
+                Some(100.0),
+                None,
+                100.009_998_000_999_26,
+                0.0,
+                9.994_004_994_826_346e-5,
+                -1.997_602_995_862_343e-6,
+                0.0,
+            ),
+            (
+                "left-only z=1000",
+                Some(1000.0),
+                None,
+                1_000.000_999_998,
+                0.0,
+                9.999_940_000_499_995e-7,
+                -1.999_976_000_299_996e-9,
+                0.0,
+            ),
+            (
+                "right-only z=-40",
+                None,
+                Some(-40.0),
+                0.0,
+                40.024_968_847_207_26,
+                6.226_683_785_913_888e-4,
+                0.0,
+                3.101_744_039_648_625e-5,
+            ),
+            (
+                "two-sided upper (40,45)",
+                Some(40.0),
+                Some(45.0),
+                40.024_968_847_207_26,
+                2.064_208_671_428_423_9e-91,
+                6.226_683_785_913_888e-4,
+                -3.101_744_039_648_625e-5,
+                5.108_980_927_616_573e-90,
+            ),
+            (
+                "two-sided upper (30,31)",
+                Some(30.0),
+                Some(31.0),
+                30.033_259_667_435_328,
+                1.704_593_283_822_866_3e-12,
+                1.103_771_511_835_282_2e-3,
+                -7.309_993_169_431_127e-5,
+                1.591_209_021_285_825_6e-12,
+            ),
+            (
+                "two-sided upper (40,1000)",
+                Some(40.0),
+                Some(1000.0),
+                40.024_968_847_207_26,
+                0.0,
+                6.226_683_785_913_888e-4,
+                -3.101_744_039_648_625e-5,
+                0.0,
+            ),
+            (
+                "two-sided lower (-45,-40)",
+                Some(-45.0),
+                Some(-40.0),
+                2.064_208_671_428_423_9e-91,
+                40.024_968_847_207_26,
+                6.226_683_785_913_888e-4,
+                -5.108_980_927_616_573e-90,
+                3.101_744_039_648_625e-5,
+            ),
+            (
+                "two-sided lower (-31,-30)",
+                Some(-31.0),
+                Some(-30.0),
+                1.704_593_283_822_866_3e-12,
+                30.033_259_667_435_328,
+                1.103_771_511_835_282_2e-3,
+                -1.591_209_021_285_825_6e-12,
+                7.309_993_169_431_127e-5,
+            ),
+            (
+                "two-sided upper (12,12.5)",
+                Some(12.0),
+                Some(12.5),
+                12.107_653_550_680_133,
+                0.026_485_384_604_148_263,
+                6.151_043_601_970_409e-3,
+                -5.293_800_087_694_461_5e-3,
+                4.483_156_195_574_498e-3,
+            ),
+        ];
+        // `mu=1, sigma=2`で`za=(lower-mu)/sigma`が上の値になるよう境界を逆算する
+        let (mu, sigma) = (1.0, 2.0);
+        for (label, za, zb, pa, pb, w, w_a, w_b) in cases {
+            let lower = za.map(|z| mu + sigma * z);
+            let upper = zb.map(|z| mu + sigma * z);
+            let terms = UncensoredTerms::new(mu, sigma, lower, upper, &normal);
+            assert_relative_eq(terms.ratios.pa, pa, 1e-12, &format!("{label}: Pa"));
+            assert_relative_eq(terms.ratios.pb, pb, 1e-12, &format!("{label}: Pb"));
+
+            let x_point = [1.0, 2.0];
+            let (w_actual, s_beta, s_sigma) =
+                uncensored_w_and_s(&x_point, mu, sigma, lower, upper, &normal);
+            let z_scale = za.unwrap_or(0.0).abs().max(zb.unwrap_or(0.0).abs());
+            // `w`は`1-Pa·A-Pb·B+2·Pa·Pb`（`O(1)`同士の和）なので絶対誤差は数`ε`
+            assert!(
+                (w_actual - w).abs() <= 1e-14,
+                "{label}: w actual={w_actual:e}, expected={w:e}"
+            );
+            let dw_dmu = -(w_a + w_b) / sigma;
+            let dw_dsigma = -(za.unwrap_or(0.0) * w_a + zb.unwrap_or(0.0) * w_b) / sigma;
+            assert!(
+                (s_beta[1] - dw_dmu * x_point[1]).abs() <= 1e-14 * z_scale + 1e-15,
+                "{label}: s_beta actual={:e}, expected={:e}",
+                s_beta[1],
+                dw_dmu * x_point[1]
+            );
+            assert!(
+                (s_sigma - dw_dsigma).abs() <= 1e-14 * z_scale * z_scale + 1e-15,
+                "{label}: s_sigma actual={s_sigma:e}, expected={dw_dsigma:e}"
+            );
+        }
+    }
+
+    /// 極端な入力（`z`が`1e8`、`w`が丸め誤差に支配される領域を含む）でも、`m`・`w`・`s`が
+    /// 有限で、`w`は`[0,1]`に収まり`m`は非打ち切り領域`[lower,upper]`に収まる。
+    #[test]
+    fn expected_uncensored_stays_finite_and_bounded_for_extreme_inputs() {
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        let sigma = 1.0;
+        for (lower, upper) in bounds_configs() {
+            for mu in [
+                -1e8, -1e4, -100.0, -39.0, -8.0, 0.0, 0.5, 8.0, 39.0, 100.0, 1e4, 1e8,
+            ] {
+                let m = predicted_value(
+                    MarginalEffectsTarget::ExpectedUncensored,
+                    mu,
+                    sigma,
+                    lower,
+                    upper,
+                    &normal,
+                );
+                let (w, s_beta, s_sigma) = target_w_and_s(
+                    MarginalEffectsTarget::ExpectedUncensored,
+                    &[1.0],
+                    &[mu],
+                    sigma,
+                    lower,
+                    upper,
+                    &normal,
+                );
+                let label = format!("lower={lower:?}, upper={upper:?}, mu={mu}");
+                assert!(m.is_finite(), "{label}: m={m}");
+                assert!(w.is_finite() && (0.0..=1.0).contains(&w), "{label}: w={w}");
+                assert!(s_beta[0].is_finite(), "{label}: s_beta={}", s_beta[0]);
+                assert!(s_sigma.is_finite(), "{label}: s_sigma={s_sigma}");
+                // 非打ち切り領域への条件付き期待値は領域内（境界は丸め誤差分だけ許す）
+                let eps = 1e-9 * (1.0 + m.abs());
+                if let Some(l) = lower {
+                    assert!(m >= l - eps, "{label}: m={m} < lower");
+                }
+                if let Some(u) = upper {
+                    assert!(m <= u + eps, "{label}: m={m} > upper");
+                }
+            }
+        }
+    }
+
+    /// 遠い裾では`E[y|uncensored]`は最寄りの境界に漸近する（`μ`が下限よりずっと下なら
+    /// `m→lower`、上限よりずっと上なら`m→upper`）。素直な`φ/W`だと`W=0`で`NaN`になる領域。
+    #[test]
+    fn expected_uncensored_converges_to_nearest_bound_in_far_tail() {
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        let m_left = predicted_value(
+            MarginalEffectsTarget::ExpectedUncensored,
+            -100.0,
+            1.0,
+            Some(0.0),
+            None,
+            &normal,
+        );
+        // 左のみ: m = μ+σλ(za), za=100 → λ=100.00999800099926 → m=0.00999800099926
+        assert_relative_eq(m_left, 0.009_998_000_999_26, 1e-9, "left-only far tail");
+        let m_right = predicted_value(
+            MarginalEffectsTarget::ExpectedUncensored,
+            100.0,
+            1.0,
+            None,
+            Some(0.0),
+            &normal,
+        );
+        assert_relative_eq(m_right, -0.009_998_000_999_26, 1e-9, "right-only far tail");
+        let m_two_sided_above = predicted_value(
+            MarginalEffectsTarget::ExpectedUncensored,
+            1000.0,
+            1.0,
+            Some(-1.0),
+            Some(2.0),
+            &normal,
+        );
+        // 上限より遥か上（`zb=-998`）: m = μ - σ·λ(998) = 1000 - (998 + gap), gap = λ(998)-998 ≈ 1/(998+2/998)
+        assert!(
+            (m_two_sided_above - (2.0 - 1.0 / (998.0 + 2.0 / 998.0))).abs() < 1e-9,
+            "m={m_two_sided_above}"
+        );
+    }
+
+    /// 全領域（左のみ・右のみ・両側、`za=0`・`zb=0`の領域境界を含む）で、
+    /// `predicted_value`が独立の閉形式`expected_uncensored_closed_form`と一致する。
+    #[test]
+    fn predicted_value_expected_uncensored_matches_independent_closed_form() {
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        for (lower, upper) in bounds_configs() {
+            for sigma in [0.8, 1.0, 3.0] {
+                for mu in [-3.5, -1.5, -1.0, 0.0, 0.3, 1.0, 1.5, 2.5, 4.5] {
+                    let actual = predicted_value(
+                        MarginalEffectsTarget::ExpectedUncensored,
+                        mu,
+                        sigma,
+                        lower,
+                        upper,
+                        &normal,
+                    );
+                    let expected = expected_uncensored_closed_form(mu, sigma, lower, upper);
+                    assert!(
+                        (actual - expected).abs() < 1e-9 * (1.0 + expected.abs()),
+                        "lower={lower:?}, upper={upper:?}, sigma={sigma}, mu={mu}: \
+                         actual={actual}, expected={expected}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// 分解恒等式 `E[y|x]=lower·P(下限)+upper·P(上限)+P(uncensored|x)·E[y|uncensored,x]`
+    /// （下限0のみの左打ち切りなら`E[y|x]=P(y>0|x)·E[y|y>0,x]`）。既存の
+    /// `ExpectedObserved`・`ProbUncensored`と新`ExpectedUncensored`が互いに整合することの確認。
+    #[test]
+    fn expected_observed_equals_censoring_mass_plus_prob_uncensored_times_expected_uncensored() {
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        for (lower, upper) in bounds_configs() {
+            for sigma in [0.8, 1.0, 3.0] {
+                for mu in [-3.5, -1.0, 0.0, 0.7, 1.5, 2.5, 4.5] {
+                    let predict =
+                        |target| predicted_value(target, mu, sigma, lower, upper, &normal);
+                    let p_lower = lower.map_or(0.0, |l| normal.cdf((l - mu) / sigma));
+                    let p_upper = upper.map_or(0.0, |u| 1.0 - normal.cdf((u - mu) / sigma));
+                    let decomposed = lower.unwrap_or(0.0) * p_lower
+                        + upper.unwrap_or(0.0) * p_upper
+                        + predict(MarginalEffectsTarget::ProbUncensored)
+                            * predict(MarginalEffectsTarget::ExpectedUncensored);
+                    let observed = predict(MarginalEffectsTarget::ExpectedObserved);
+                    assert!(
+                        (observed - decomposed).abs() < 1e-9 * (1.0 + observed.abs()),
+                        "lower={lower:?}, upper={upper:?}, sigma={sigma}, mu={mu}: \
+                         observed={observed}, decomposed={decomposed}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// `w=∂m/∂μ`・`s_beta=∂w/∂μ·x`・`s_sigma=∂w/∂σ`を、独立の閉形式`m`の中心差分
+    /// （`w`は`m`の`μ`微分、`s`は`w`の微分なので`m`の2階・3階の差分）と突き合わせる。
+    /// 3構成 × `μ`・`σ`の格子で、領域の切り替え（`za>=0`・`zb<=0`・中央）をまたぐ。
+    #[test]
+    fn target_w_and_s_expected_uncensored_matches_finite_differences_of_closed_form_mean() {
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        let w_of = |mu: f64, sigma: f64, lower, upper| {
+            target_w_and_s(
+                MarginalEffectsTarget::ExpectedUncensored,
+                &[1.0],
+                &[mu],
+                sigma,
+                lower,
+                upper,
+                &normal,
+            )
+            .0
+        };
+        for (lower, upper) in bounds_configs() {
+            for sigma in [0.7, 1.0, 2.5] {
+                for mu in [-3.0, -1.0, -0.4, 0.0, 0.4, 1.0, 1.5, 2.0, 4.0] {
+                    let h = 1e-4;
+                    let m = |mu: f64, sigma: f64| {
+                        expected_uncensored_closed_form(mu, sigma, lower, upper)
+                    };
+                    let label = format!("lower={lower:?}, upper={upper:?}, sigma={sigma}, mu={mu}");
+
+                    let (w, s_beta, s_sigma) = target_w_and_s(
+                        MarginalEffectsTarget::ExpectedUncensored,
+                        &[1.0],
+                        &[mu],
+                        sigma,
+                        lower,
+                        upper,
+                        &normal,
+                    );
+                    let w_fd = (m(mu + h, sigma) - m(mu - h, sigma)) / (2.0 * h);
+                    assert!((w - w_fd).abs() < 1e-7, "{label}: w={w}, fd={w_fd}");
+                    assert!((0.0..=1.0).contains(&w), "{label}: w={w}");
+
+                    let dw_dmu_fd = (w_of(mu + h, sigma, lower, upper)
+                        - w_of(mu - h, sigma, lower, upper))
+                        / (2.0 * h);
+                    assert!(
+                        (s_beta[0] - dw_dmu_fd).abs() < 1e-7,
+                        "{label}: s_beta={}, fd={dw_dmu_fd}",
+                        s_beta[0]
+                    );
+                    let dw_dsigma_fd = (w_of(mu, sigma + h, lower, upper)
+                        - w_of(mu, sigma - h, lower, upper))
+                        / (2.0 * h);
+                    assert!(
+                        (s_sigma - dw_dsigma_fd).abs() < 1e-7,
+                        "{label}: s_sigma={s_sigma}, fd={dw_dsigma_fd}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// `at="overall"`の限界効果（effect・デルタ法のSE）を、独立の閉形式`m`から作った
+    /// AME関数の中心差分ヤコビアンで再計算した値と突き合わせる（左のみ・右のみ・両側）。
+    #[test]
+    fn fit_marginal_effects_expected_uncensored_overall_matches_independent_recomputation() {
+        let inputs = [
+            noisy_censored_input(Some(0.0), None),
+            noisy_censored_input(None, Some(6.0)),
+            noisy_censored_input(Some(0.0), Some(6.0)),
+        ];
+        for input in inputs {
+            let estimator = TobitEstimator::fit(
+                input,
+                MleFitOptions {
+                    solver: SolverType::Newton,
+                    max_iter: 100,
+                    tol: 1e-8,
+                    raise_on_non_convergence: true,
+                    cov_type: CovType::Classical,
+                    confidence_level: 0.95,
+                },
+            )
+            .unwrap();
+            let lower = estimator.input().lower();
+            let upper = estimator.input().upper();
+            let x = estimator.input().x();
+            let n = x.nrows();
+            let k = 2;
+            let label = format!("lower={lower:?}, upper={upper:?}");
+
+            let effects = estimator
+                .marginal_effects(
+                    MarginalEffectsAt::Overall,
+                    MarginalEffectsTarget::ExpectedUncensored,
+                    0.95,
+                )
+                .unwrap();
+
+            // AME_j = (1/n)Σ w_i·β_j, w_i=∂m/∂μ を m の中心差分で作る（k=2なのでj=1のみ）
+            let ame = |params: &[f64], sigma: f64| -> f64 {
+                let h = 1e-5;
+                (0..n)
+                    .map(|i| {
+                        let mu: f64 = params[0] + params[1] * (*x.get(i, 1));
+                        let m = |mu: f64| expected_uncensored_closed_form(mu, sigma, lower, upper);
+                        (m(mu + h) - m(mu - h)) / (2.0 * h) * params[1]
+                    })
+                    .sum::<f64>()
+                    / (n as f64)
+            };
+            let params = estimator.params();
+            let sigma = estimator.sigma();
+            assert!(
+                (effects.effect()[0] - ame(params, sigma)).abs() < 1e-6,
+                "{label}: actual={}, expected={}",
+                effects.effect()[0],
+                ame(params, sigma)
+            );
+
+            let h_param = 1e-3;
+            let mut jac_row = vec![0.0; k + 1];
+            for (m_idx, jac) in jac_row.iter_mut().take(k).enumerate() {
+                let mut plus_p = params.to_vec();
+                plus_p[m_idx] += h_param;
+                let mut minus_p = params.to_vec();
+                minus_p[m_idx] -= h_param;
+                *jac = (ame(&plus_p, sigma) - ame(&minus_p, sigma)) / (2.0 * h_param);
+            }
+            jac_row[k] =
+                (ame(params, sigma + h_param) - ame(params, sigma - h_param)) / (2.0 * h_param);
+            let mut var = 0.0;
+            for a in 0..=k {
+                for b in 0..=k {
+                    var += jac_row[a] * (*estimator.cov_params().get(a, b)) * jac_row[b];
+                }
+            }
+            let expected_se = var.sqrt();
+            assert!(
+                (effects.std_errors()[0] - expected_se).abs() < 1e-5 * (1.0 + expected_se),
+                "{label}: actual SE={}, expected SE={expected_se}",
+                effects.std_errors()[0]
+            );
+        }
+    }
+
+    /// `predict`/`predict_new_data`が`ExpectedUncensored`で独立の閉形式と一致し、
+    /// 学習データへの`predict`と同じ`x`での`predict_new_data`が一致する。
+    #[test]
+    fn predict_and_predict_new_data_expected_uncensored_match_closed_form() {
+        let inputs = [
+            noisy_censored_input(Some(0.0), None),
+            noisy_censored_input(None, Some(6.0)),
+            noisy_censored_input(Some(0.0), Some(6.0)),
+        ];
+        for input in inputs {
+            let estimator = TobitEstimator::fit(
+                input,
+                MleFitOptions {
+                    solver: SolverType::Newton,
+                    max_iter: 100,
+                    tol: 1e-8,
+                    raise_on_non_convergence: true,
+                    cov_type: CovType::Classical,
+                    confidence_level: 0.95,
+                },
+            )
+            .unwrap();
+            let lower = estimator.input().lower();
+            let upper = estimator.input().upper();
+            let x = estimator.input().x();
+            let params = estimator.params();
+            let sigma = estimator.sigma();
+
+            let predicted = estimator.predict(MarginalEffectsTarget::ExpectedUncensored);
+            for (i, &p) in predicted.iter().enumerate() {
+                let mu: f64 = params[0] + params[1] * (*x.get(i, 1));
+                let expected = expected_uncensored_closed_form(mu, sigma, lower, upper);
+                assert!(
+                    (p - expected).abs() < 1e-9 * (1.0 + expected.abs()),
+                    "lower={lower:?}, upper={upper:?}, i={i}: actual={p}, expected={expected}"
+                );
+            }
+
+            let x1: Vec<f64> = (0..x.nrows()).map(|i| *x.get(i, 1)).collect();
+            let predicted_new =
+                estimator.predict_new_data(MarginalEffectsTarget::ExpectedUncensored, &[x1]);
+            assert_eq!(predicted_new.len(), predicted.len());
+            for (a, b) in predicted_new.iter().zip(&predicted) {
+                assert!((a - b).abs() < 1e-12, "predict_new_data={a}, predict={b}");
+            }
         }
     }
 

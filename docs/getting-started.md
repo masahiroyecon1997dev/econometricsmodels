@@ -257,7 +257,7 @@ print(result.wald_statistic, result.wald_p_value)
 
 ### Predictions and marginal effects
 
-`predict()` and `marginal_effects()` take a `target`: `"expected_latent"` (`E[y*|x] = x'β`), `"expected_observed"` (the default, the censoring-adjusted mean `E[y|x]`), or `"prob_uncensored"`. `marginal_effects()` also takes `at` (`"overall"`, `"mean"`, `"median"`) and excludes the constant term.
+`predict()` and `marginal_effects()` take a `target`: `"expected_latent"` (`E[y*|x] = x'β`), `"expected_observed"` (the default, the censoring-adjusted mean `E[y|x]`), `"prob_uncensored"` (`P(uncensored|x)`), or `"expected_uncensored"` (`E[y|lower<y<upper,x]`, the mean among uncensored observations; `E[y|y>0,x]` for a lower bound of 0). `marginal_effects()` also takes `at` (`"overall"`, `"mean"`, `"median"`) and excludes the constant term.
 
 ```python
 for row in result.marginal_effects(target="expected_observed"):

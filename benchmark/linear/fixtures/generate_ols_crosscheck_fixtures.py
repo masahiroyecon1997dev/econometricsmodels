@@ -61,51 +61,23 @@ import polars as pl
 
 from benchmark.common import (
     BENCHMARKS_DIR,
+    balanced_cluster_groups,
     imbalanced_cluster_groups,
     load_frozen_dataset,
     run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
-from benchmark.linear.constants import PREDICT_NEW_DATA
+from benchmark.linear.constants import (
+    CLUSTER_ILL_CONDITIONED_SCENARIOS,
+    CONFIDENCE_LEVEL_NON_DEFAULT,
+    COV_TYPES,
+    NUMERIC_SCENARIOS,
+    PREDICT_NEW_DATA,
+)
 from benchmark.linear.references.r import run_lm_r
 
 REFERENCES_DIR = Path(__file__).resolve().parent.parent / "references"
 PREDICT_R_SCRIPT = REFERENCES_DIR / "run_lm_predict_crosscheck.R"
-
-# 完全な多重共線性・scale_varianceは数値比較の対象外（generate_ols_fixtures.pyと
-# 同じ方針。scale_varianceは全cov_typeでComputationErrorになる）。
-NUMERIC_SCENARIOS = [
-    "baseline",
-    "small_n",
-    "high_variance",
-    "heteroskedastic",
-    "autocorrelated",
-    "moderate_multicollinearity",
-    "high_condition_number",
-    # scale_varianceより緩いスケール差の成功パス（generate_ols_fixtures.py
-    # と同じ理由）。
-    "scale_variance_mild",
-    # n=k+1（自由度1ちょうど）の成功パス。
-    "baseline_df1",
-    # 高次元（説明変数k=20、列ごとに0.1〜100倍のスケール差）の成功パス
-    # （generate_ols_fixtures.pyと同じ理由）。
-    "many_regressors",
-    # x1の5%を外れ値に置き換えた成功パス（generate_ols_fixtures.pyと同じ理由）。
-    "outlier_regressor",
-]
-
-R_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
-
-# 悪条件・多重共線性シナリオとクラスターロバストSEの組み合わせでの数値的
-# 頑健性確認用（generate_ols_fixtures.pyと同じリスト・同じ理由）。
-CLUSTER_ILL_CONDITIONED_SCENARIOS = [
-    "high_condition_number",
-    "moderate_multicollinearity",
-]
-
-# generate_ols_fixtures.pyと同じ値・同じ理由（baselineシナリオのみで
-# COV_TYPES全種＋clusterと組み合わせて確認する。ユーザー確認済み）。
-CONFIDENCE_LEVEL_NON_DEFAULT = 0.90
 
 
 def _write_csv(df, tmpdir: Path, name: str) -> Path:
@@ -143,7 +115,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
         n = df.height
 
         fixtures[scenario] = {}
-        for cov_type in R_COV_TYPES:
+        for cov_type in COV_TYPES:
             entry = run_lm_r(csv_path, formula, cov_type)
 
             fixtures[scenario][cov_type] = entry
@@ -190,11 +162,11 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             )
 
             # include_intercept=False（切片なし）。R側はformula自体に"- 1"を
-            # 付けるだけで表現できる。全cov_type（R_COV_TYPES + cluster）と
+            # 付けるだけで表現できる。全cov_type（COV_TYPES + cluster）と
             # 組み合わせて確認する（generate_ols_fixtures.pyの横展開）。
             formula_no_intercept = f"{formula} - 1"
             fixtures[scenario]["no_intercept"] = {}
-            for cov_type in R_COV_TYPES:
+            for cov_type in COV_TYPES:
                 entry = run_lm_r(csv_path, formula_no_intercept, cov_type)
                 fixtures[scenario]["no_intercept"][cov_type] = entry
             fixtures[scenario]["no_intercept"]["cluster"] = _run_cluster_case(
@@ -205,10 +177,10 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             )
 
             # confidence_level非既定（0.95以外）。全cov_type
-            # （R_COV_TYPES + cluster）と組み合わせて確認する
+            # （COV_TYPES + cluster）と組み合わせて確認する
             # （generate_ols_fixtures.pyの横展開）。
             fixtures[scenario]["confidence_level"] = {}
-            for cov_type in R_COV_TYPES:
+            for cov_type in COV_TYPES:
                 entry = run_lm_r(
                     csv_path,
                     formula,
@@ -258,7 +230,7 @@ def _run_cluster_case(
     """
     n = df.height
     cluster_group = (
-        groups if groups is not None else [i % 10 for i in range(n)]
+        groups if groups is not None else balanced_cluster_groups(n)
     )
     grouped = df.with_columns(pl.Series("cluster_group", cluster_group))
     tmp_path = csv_path.with_name(csv_path.stem + suffix + ".csv")
@@ -384,10 +356,10 @@ def build_fixtures() -> dict:
             "クラスター系はbaselineシナリオのみで、悪条件・多重共線性シナリオ"
             "との組み合わせが未検証だった。均等な疑似グループ（行番号%10）のみ）。"
             "baseline.no_interceptはinclude_intercept=False（切片なし、"
-            "formulaに'- 1'を付与）をR_COV_TYPES全種＋clusterと組み合わせて"
+            "formulaに'- 1'を付与）をCOV_TYPES全種＋clusterと組み合わせて"
             "確認する（statsmodels主リファレンス側〔ols.json〕の横展開）。"
             "baseline.confidence_levelはconfidence_level="
-            f"{CONFIDENCE_LEVEL_NON_DEFAULT}（既定0.95以外）をR_COV_TYPES"
+            f"{CONFIDENCE_LEVEL_NON_DEFAULT}（既定0.95以外）をCOV_TYPES"
             "全種＋clusterと組み合わせて確認する（run_lm_crosscheck.R側に"
             "'--confidence-level='フラグを追加して対応、同じくstatsmodels"
             "主リファレンス側の横展開）。"

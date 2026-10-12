@@ -35,11 +35,7 @@ from econometricsmodels import (
     ValidationError,
 )
 
-# `test_iv_reference.py` の COV_TYPES と同じ（hc2/hc3 は linearmodels に対応実装が
-# 無く数値照合の対象外だが、エラーパスの網羅としてはここでも classical/hc0/hc1/hac
-# で十分。scale_variance は cov_type によらず第一段階回帰が特異になる）。
-COV_TYPES = ["classical", "hc0", "hc1", "hac"]
-
+from benchmark.iv.constants import LINEARMODELS_COV_TYPES
 
 # ── ValidationError（入力データ） ─────────────────────────────────────
 
@@ -834,7 +830,7 @@ def test_perfect_multicollinearity_raises_computation_error():
         ).fit()
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
 def test_scale_variance_raises_computation_error(cov_type):
     """変数間のスケールが極端に異なる設計行列（x1を`*1e6`、x2を`*1e-3`）は、
     第一段階回帰の傾き係数の同時共分散部分行列がスケール比の2乗相当の
@@ -842,7 +838,8 @@ def test_scale_variance_raises_computation_error(cov_type):
     第一段階の`ComputationError`（`IvError::FirstStageFailed`）になる
     （実測確認済み、OLSの同名テストと同じ原理）。
     `test_perfect_multicollinearity_raises_computation_error`と同様、数値比較は
-    せずエラーパスのみ確認する。
+    せずエラーパスのみ確認する。`cov_type`は`LINEARMODELS_COV_TYPES`（hc2/hc3は
+    エラーパスの網羅としては不要）で、cov_typeによらず第一段階回帰が特異になる。
     """
     df = pl.read_csv(DATA_DIR / "iv_scale_variance.csv")
     options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
@@ -859,8 +856,8 @@ def test_scale_variance_raises_computation_error(cov_type):
 
 def test_scale_variance_cluster_raises_computation_error():
     """`cluster`も上記`test_scale_variance_raises_computation_error`と同じ
-    backstopの対象。`cov_type="cluster"`は`cluster`列の指定が別途必要なため`COV_TYPES`
-    パラメトライズには含められず、専用テストとして確認する
+    backstopの対象。`cov_type="cluster"`は`cluster`列の指定が別途必要なため
+    `LINEARMODELS_COV_TYPES`のパラメトライズには含められず、専用テストとして確認する
     （OLS`test_ols_validation.py::test_scale_variance_cluster_raises_
     computation_error`・WLS`test_wls_validation.py`の同名テストと同じ理由）。
     均等な疑似グループ（行番号%10、

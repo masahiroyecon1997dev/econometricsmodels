@@ -36,12 +36,14 @@ from benchmark.common import (
     APPLE_FORMULA,
     BENCHMARKS_DIR,
     MROZ_FORMULA,
+    balanced_cluster_groups,
     imbalanced_cluster_groups,
     load_frozen_dataset,
     run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
 from benchmark.common.load_wooldridge import load_apple_adoption
+from benchmark.nonlinear.constants import NON_CLUSTER_COV_TYPES
 from benchmark.nonlinear.references.r import run_glm_r
 
 NUMERIC_SCENARIOS = [
@@ -52,9 +54,6 @@ NUMERIC_SCENARIOS = [
     "near_separation",
     "scale_variance",
 ]
-
-# hc1をここでは主リファレンスとして含める（他はクロスチェック用）。
-R_COV_TYPES = ["classical", "opg", "hc0", "hc1", "cluster"]
 
 
 def _write_csv(df, tmpdir: Path, name: str) -> Path:
@@ -72,9 +71,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
         csv_path = _write_csv(df, tmpdir, scenario)
 
         fixtures[scenario] = {}
-        for cov_type in R_COV_TYPES:
-            if cov_type == "cluster":
-                continue
+        for cov_type in NON_CLUSTER_COV_TYPES:
             fixtures[scenario][cov_type] = run_glm_r(
                 csv_path, formula, cov_type, link="probit"
             )
@@ -109,7 +106,7 @@ def _run_cluster_case(
     df = pl.read_csv(csv_path)
     n = df.height
     cluster_group = (
-        groups if groups is not None else [i % 10 for i in range(n)]
+        groups if groups is not None else balanced_cluster_groups(n)
     )
     grouped = df.with_columns(pl.Series("cluster_group", cluster_group))
     tmp_path = csv_path.with_name(csv_path.stem + suffix + ".csv")
@@ -128,9 +125,7 @@ def build_wooldridge_fixtures(tmpdir: Path) -> dict:
     csv_path = _write_csv(df, tmpdir, "mroz")
 
     fixtures: dict = {}
-    for cov_type in R_COV_TYPES:
-        if cov_type == "cluster":
-            continue
+    for cov_type in NON_CLUSTER_COV_TYPES:
         fixtures[cov_type] = run_glm_r(
             csv_path, MROZ_FORMULA, cov_type, link="probit"
         )

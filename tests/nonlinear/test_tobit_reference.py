@@ -33,6 +33,8 @@ import _tobit_checks as _checks
 import pytest
 from _tolerances import TOLERANCES
 
+from benchmark.nonlinear.constants import NON_CLUSTER_COV_TYPES
+
 _TOL = TOLERANCES["tobit_reference"]
 FIXTURE_PATH = _checks.FIXTURE_DIR / "tobit.json"
 
@@ -63,7 +65,7 @@ def _method_tolerances() -> dict:
     }
 
 
-@pytest.mark.parametrize("cov_type", _checks.COV_TYPES)
+@pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
 @pytest.mark.parametrize("scenario", _checks.SCENARIOS)
 def test_matches_aer_tobit(fixtures, scenario, cov_type):
     ref = fixtures["synthetic"][scenario][cov_type]
@@ -125,7 +127,7 @@ def test_solver_combination_matches_aer_tobit(
     )
 
 
-@pytest.mark.parametrize("cov_type", _checks.COV_TYPES)
+@pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
 def test_no_intercept_matches_aer_tobit(fixtures, cov_type):
     ref = fixtures["synthetic"]["no_intercept"][cov_type]
     res = _checks.build_no_intercept_fit(cov_type, ref)
@@ -137,7 +139,7 @@ def test_no_intercept_matches_aer_tobit(fixtures, cov_type):
     )
 
 
-@pytest.mark.parametrize("cov_type", _checks.COV_TYPES)
+@pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
 def test_mroz_matches_aer_tobit(fixtures, cov_type):
     ref = fixtures["wooldridge"]["mroz"][cov_type]
     res = _checks.build_fit("mroz", cov_type, ref)

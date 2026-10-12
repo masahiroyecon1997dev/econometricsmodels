@@ -38,6 +38,7 @@ from _tolerances import TOLERANCES
 from econometricsmodels import IV, IVOptions, IVResults
 
 from benchmark.common import hac_auto_lag
+from benchmark.iv.constants import IV_COV_TYPES
 
 # ── 成功パス・結果型 ──────────────────────────────────────────────────
 
@@ -287,9 +288,7 @@ def test_wu_hausman_degrades_to_none_when_cluster_count_at_most_augmented_slopes
 
 
 @pytest.mark.parametrize("spelling", CASE_SPELLINGS)
-@pytest.mark.parametrize(
-    "cov_type", ["classical", "hc0", "hc1", "hc2", "hc3", "hac", "cluster"]
-)
+@pytest.mark.parametrize("cov_type", IV_COV_TYPES)
 def test_cov_type_is_case_insensitive(
     iv_dataset, clustered_dataset, cov_type, spelling
 ):

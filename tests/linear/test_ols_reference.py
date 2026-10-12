@@ -10,7 +10,7 @@
    - クラスターロバストSE: `baseline`の均等・不均衡・G=2グループ、
      `CLUSTER_ILL_CONDITIONED_SCENARIOS`の均等グループ、Wooldridge `wage1`の
      地域クラスター
-   - Wooldridge実データ（`WOOLDRIDGE_DATASETS`×`WOOLDRIDGE_COV_TYPES`）
+   - Wooldridge実データ（`WOOLDRIDGE_DATASETS`×`NON_HAC_COV_TYPES`）
    - 全シナリオの`predict()`（学習データのfitted値）と、`baseline`のout-of-sample
      `predict()`
    - `include_intercept=False`（切片なし）・`confidence_level`非既定: `baseline`
@@ -63,15 +63,21 @@ from _tolerances import TOLERANCES
 from econometricsmodels import OLS, OLSOptions
 
 from benchmark.common import imbalanced_cluster_groups
-from benchmark.linear.constants import HAC_MAXLAGS, PREDICT_NEW_DATA
-from benchmark.linear.fixtures.generate_ols_fixtures import (
+
+# SCENARIOS/COV_TYPESはフィクスチャ生成と常に一致させる必要があるため、
+# `benchmark/linear/constants.py`をimportして単一の定義元にする。
+from benchmark.linear.constants import (
     CONFIDENCE_LEVEL_NON_DEFAULT,
     COV_TYPES,
-    WOOLDRIDGE_COV_TYPES,
-    WOOLDRIDGE_DATASETS,
+    HAC_MAXLAGS,
+    NON_HAC_COV_TYPES,
+    PREDICT_NEW_DATA,
+)
+from benchmark.linear.constants import (
+    NUMERIC_SCENARIOS as SCENARIOS,
 )
 from benchmark.linear.fixtures.generate_ols_fixtures import (
-    NUMERIC_SCENARIOS as SCENARIOS,
+    WOOLDRIDGE_DATASETS,
 )
 
 FIXTURE_PATH = (
@@ -83,9 +89,6 @@ FIXTURE_PATH = (
 
 RTOL = TOLERANCES["ols_reference"]["rtol"]
 ATOL = TOLERANCES["ols_reference"]["atol"]
-
-# SCENARIOS/COV_TYPESはgenerate_ols_fixtures.pyのNUMERIC_SCENARIOS/COV_TYPESと
-# 常に一致させる必要があるため、そちらをimportして単一の定義元にする。
 
 # フィクスチャ生成側（benchmark/linear/references/statsmodels_ref.py）と同じ
 # HAC_MAXLAGSを明示的に指定し、自動ラグ選択式の違いを比較対象から除外する
@@ -407,7 +410,7 @@ def load_wooldridge():
     return wooldridge_loader()
 
 
-@pytest.mark.parametrize("cov_type", WOOLDRIDGE_COV_TYPES)
+@pytest.mark.parametrize("cov_type", NON_HAC_COV_TYPES)
 @pytest.mark.parametrize("dataset_name", list(WOOLDRIDGE_DATASETS))
 def test_wooldridge_matches_statsmodels(
     fixtures, load_wooldridge, dataset_name, cov_type
@@ -467,7 +470,7 @@ def test_wooldridge_wage1_region_cluster_matches_statsmodels(
 # ── ライブ statsmodels との照合（共有 dataset フィクスチャ） ────────
 
 
-@pytest.mark.parametrize("cov_type", ["classical", "hc0", "hc1", "hc2", "hc3"])
+@pytest.mark.parametrize("cov_type", NON_HAC_COV_TYPES)
 def test_params_match_statsmodels(dataset, cov_type):
     """回帰係数がstatsmodelsと一致すること（cov_typeによらず係数は同じ）。"""
     sm_res = sm_fit(dataset, cov_type)
@@ -479,7 +482,7 @@ def test_params_match_statsmodels(dataset, cov_type):
         )
 
 
-@pytest.mark.parametrize("cov_type", ["classical", "hc0", "hc1", "hc2", "hc3"])
+@pytest.mark.parametrize("cov_type", NON_HAC_COV_TYPES)
 def test_std_errors_match_statsmodels(dataset, cov_type):
     """標準誤差がstatsmodelsと一致すること。"""
     sm_res = sm_fit(dataset, cov_type)

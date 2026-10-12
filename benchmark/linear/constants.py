@@ -18,6 +18,68 @@ from __future__ import annotations
 # 両方がこの1箇所を参照することで、値のズレが原理的に起こらないようにする。
 HAC_MAXLAGS = 1
 
+# 数値比較する合成シナリオ（OLS・WLSの主リファレンス（statsmodels）とRクロスチェックの
+# 4つのフィクスチャ生成と、テストが共有する。WLSも同じ合成データセットを使う）。
+# 片方の手法だけシナリオ・cov_typeを増やすときは、この共有リストを直接編集せず
+# `[*NUMERIC_SCENARIOS, "..."]`のように別名で拡張する（全フィクスチャ・テストに波及するため）。
+# 完全な多重共線性・scale_varianceは数値比較の対象外（testing-policy.md「テストの3系統」
+# 参照）で、ComputationErrorが発生することのみをテストコード側で確認する。
+# scale_varianceは傾き係数の同時共分散部分行列がスケール比の2乗相当の条件数を持ち
+# 倍精度の限界を超えるため、wald_f_test側で全cov_typeでComputationErrorになる。
+NUMERIC_SCENARIOS = [
+    "baseline",
+    "small_n",
+    "high_variance",
+    "heteroskedastic",
+    "autocorrelated",
+    "moderate_multicollinearity",
+    "high_condition_number",
+    # scale_variance（x1*1e6, x2*1e-3）より緩いスケール差（x1*1e2, x2*1e-1）の成功パス。
+    # faer等の数値計算ライブラリ依存部分の将来の精度リグレッションを検知する
+    # （testing-policy.md「テスト用データセット」1.）。
+    "scale_variance_mild",
+    # n=k+1（自由度1ちょうど）の成功パス。baselineをn=5,k=3でオーバーライドした
+    # 専用データ（engine側の`k`は定数項込みでk=4になるため、df_resid=1にはn=5が必要。
+    # benchmark/linear/freeze.py参照）。同じx1..x3の列構成のため、他シナリオと同じ
+    # 自動フォーミュラ生成に乗る。
+    "baseline_df1",
+    # 高次元（説明変数k=20、列ごとに0.1〜100倍のスケール差）の成功パス。列数依存バグ
+    # （インデックス誤り等）・高kでの数値的頑健性を検証する。x1..x20の列構成のため、
+    # 他シナリオと同じ自動フォーミュラ生成に乗る。
+    "many_regressors",
+    # x1の5%をTukeyの汚染混合モデル（SD20倍）で外れ値に置き換えた成功パス。
+    # 少数の高レバレッジ行での数値的頑健性を検証する。
+    "outlier_regressor",
+]
+
+# OLS・WLSで全シナリオ・全検証に使う`cov_type`（クラスターを除く）。HACは
+# autocorrelatedシナリオが本来の目的（他のシナリオでも動くことの確認はできるが、
+# 統計的な意味は薄い）。クラスターはシナリオ非依存のため、baselineなど少数の
+# ケースで個別に確認する。
+COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
+
+# 実データ（Wooldridge）で確認する`cov_type`。実データは横断面データで時系列順が
+# 無く、HACは対象外（クラスターは別途個別に確認する）。
+NON_HAC_COV_TYPES = [c for c in COV_TYPES if c != "hac"]
+
+# クラスターロバスト共分散Ŝ=(X'X)⁻¹(Σ_g X_g'e_ge_g'X_g)(X'X)⁻¹は(X'X)⁻¹を他の
+# cov_type（classical/HC0-3/HAC）と共有するが、この(X'X)⁻¹自体が悪条件・
+# 多重共線性シナリオでは数値的に不安定になりうる。他のcov_typeは`COV_TYPES`経由で
+# 全シナリオを検証するが、クラスターはシナリオ非依存のためbaselineが中心で、悪条件
+# シナリオとの組み合わせはここで追加確認する。均等な疑似グループ（行番号%10）1パターンのみ
+# （グルーピングパターン自体の網羅性はbaselineシナリオで確認済みのため重複させない）。
+CLUSTER_ILL_CONDITIONED_SCENARIOS = [
+    "high_condition_number",
+    "moderate_multicollinearity",
+]
+
+# include_intercept=False・confidence_level非既定の効果は、シナリオ依存ではなく
+# オプションの配線自体の動作確認が目的のため（クラスター同様、testing-policy.md
+# 「テスト用データセット」3.）、baselineシナリオのみで全cov_type（`COV_TYPES`+
+# cluster）と組み合わせて確認する。0.95（既定）・0.99/0.80（`test_ols_api.py`・
+# `test_wls_api.py`の幅の単調性テストで使用済み）とは異なる値として0.90を選ぶ。
+CONFIDENCE_LEVEL_NON_DEFAULT = 0.90
+
 # predict()のout-of-sample新規データ（x1/x2/x3、baselineシナリオのみ）。
 # 学習データの実現値とは無関係に、値域内で手で選んだ値。主リファレンス
 # （statsmodels、`generate_ols_fixtures.py`）とクロスチェック（R、

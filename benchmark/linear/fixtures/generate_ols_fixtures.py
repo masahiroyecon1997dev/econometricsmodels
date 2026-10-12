@@ -27,54 +27,26 @@ import statsmodels
 from benchmark.common import (
     BENCHMARKS_DIR,
     DATA_DIR,
+    balanced_cluster_groups,
     group_by_dataset_source,
     imbalanced_cluster_groups,
     run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
-from benchmark.linear.constants import HAC_MAXLAGS, PREDICT_NEW_DATA
+from benchmark.linear.constants import (
+    CLUSTER_ILL_CONDITIONED_SCENARIOS,
+    CONFIDENCE_LEVEL_NON_DEFAULT,
+    COV_TYPES,
+    HAC_MAXLAGS,
+    NON_HAC_COV_TYPES,
+    NUMERIC_SCENARIOS,
+    PREDICT_NEW_DATA,
+)
 from benchmark.linear.references.statsmodels_ref import (
     extract_full_fit_stats,
     run,
     run_predict,
 )
-
-# 完全な多重共線性・scale_varianceは数値比較の対象外（testing-policy.md「テストの3系統」参照）。
-# ComputationErrorが発生することのみをテストコード側で対応する。scale_varianceは
-# 傾き係数の同時共分散部分行列がスケール比の2乗相当の条件数を持ち倍精度の限界を
-# 超えるため、wald_f_test側で全cov_typeでComputationErrorになる。
-NUMERIC_SCENARIOS = [
-    "baseline",
-    "small_n",
-    "high_variance",
-    "heteroskedastic",
-    "autocorrelated",
-    "moderate_multicollinearity",
-    "high_condition_number",
-    # scale_variance（x1*1e6, x2*1e-3、全cov_typeでComputationError）より
-    # 緩いスケール差（x1*1e2, x2*1e-1）の成功パス。faer等の数値計算
-    # ライブラリ依存部分の将来の精度リグレッションを検知する
-    # （testing-policy.md「テスト用データセット」1.、ユーザー確認済み）。
-    "scale_variance_mild",
-    # n=k+1（自由度1ちょうど）の成功パス。baselineをn=5,k=3で
-    # オーバーライドした専用データ（engine側の`k`は定数項込みでk=4になる
-    # ため、df_resid=1にはn=5が必要。benchmark/linear/freeze.py参照）。同じx1..x3の
-    # 列構成のため、他シナリオと同じ自動フォーミュラ生成に乗る。
-    "baseline_df1",
-    # 高次元（説明変数k=20、列ごとに0.1〜100倍のスケール差）の成功パス。
-    # 列数依存バグ（インデックス誤り等）・高kでの数値的頑健性を検証する
-    # （ユーザー確認済み）。x1..x20の
-    # 列構成のため、他シナリオと同じ自動フォーミュラ生成に乗る。
-    "many_regressors",
-    # x1の5%をTukeyの汚染混合モデル（SD20倍）で外れ値に置き換えた成功パス。
-    # 少数の高レバレッジ行での数値的頑健性を検証する
-    # （ユーザー確認済み）。
-    "outlier_regressor",
-]
-
-# classical/HC系は全シナリオで確認。HACはautocorrelatedシナリオが本来の目的
-# （他のシナリオでも動くことの確認はできるが、統計的な意味は薄い）。
-COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
 
 # 実データ（Wooldridge）。`generate_ols_crosscheck_fixtures.py`
 # （build_wooldridge_fixtures）と同じデータセット・回帰式・cov_type
@@ -85,28 +57,6 @@ WOOLDRIDGE_DATASETS = {
     "wage1": "lwage ~ educ + exper + tenure",
     "gpa2": "colgpa ~ sat + hsperc + tothrs",
 }
-WOOLDRIDGE_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3"]
-
-# クラスターロバスト共分散Ŝ=(X'X)⁻¹(Σ_g X_g'e_ge_g'X_g)(X'X)⁻¹は(X'X)⁻¹を他の
-# cov_type（classical/HC0-3/HAC）と共有するが、この(X'X)⁻¹自体が悪条件・
-# 多重共線性シナリオでは数値的に不安定になりうる（他のcov_typeでは
-# COV_TYPES経由で全シナリオ検証済みだが、クラスターは従来baselineのみ
-# だったため、この組み合わせが未検証だった）。均等な疑似グループ
-# （行番号%10）1パターンのみ追加確認する（グルーピングパターン自体の
-# 網羅性はbaselineシナリオで既に確認済みのため重複させない。
-# ユーザー確認済み）。
-CLUSTER_ILL_CONDITIONED_SCENARIOS = [
-    "high_condition_number",
-    "moderate_multicollinearity",
-]
-
-# include_intercept=False・confidence_level非既定の効果は、シナリオ依存では
-# なくオプションの配線自体の動作確認が目的のため（クラスター同様、
-# testing-policy.md「テスト用データセット」3.）、baselineシナリオのみで
-# 全cov_type（COV_TYPES + cluster）と組み合わせて確認する（ユーザー確認済み）。
-# 0.95（既定）・0.99/0.80（test_ols_api.pyの幅の単調性テストで使用済み）とは
-# 異なる値として0.90を選ぶ。
-CONFIDENCE_LEVEL_NON_DEFAULT = 0.90
 
 
 def build_fixtures() -> dict:
@@ -214,7 +164,7 @@ def build_fixtures() -> dict:
                 formula=formula,
                 cov_type=cov_type,
             )
-            for cov_type in WOOLDRIDGE_COV_TYPES
+            for cov_type in NON_HAC_COV_TYPES
         }
     fixtures["wage1"]["cluster"] = _run_wage1_region_cluster_case()
 
@@ -309,7 +259,7 @@ def _run_cluster_case(
     pandas_df["_group"] = (
         groups
         if groups is not None
-        else [i % 10 for i in range(len(pandas_df))]
+        else balanced_cluster_groups(len(pandas_df))
     )
 
     x_cols = [c for c in df.columns if c not in ("y", "weight")]

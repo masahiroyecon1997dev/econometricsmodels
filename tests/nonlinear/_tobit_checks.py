@@ -28,19 +28,19 @@ from pathlib import Path
 import polars as pl
 from _assertions import assert_close, assert_dict_close
 from _assertions import rename_intercept as _rename
-from _constants import DATA_DIR
+from _constants import DATA_DIR, MARGEFF_AT
 from _helpers import load_wooldridge_dataset
 from econometricsmodels import Tobit, TobitOptions
 
-from benchmark.common import imbalanced_cluster_groups
+from benchmark.common import balanced_cluster_groups, imbalanced_cluster_groups
 from benchmark.nonlinear.fixtures import _tobit_fixtures
 
 FIXTURE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "benchmarks"
 
-# フィクスチャ生成側と同じシナリオ・cov_type 集合を単一ソースから引く
-# （`benchmark/nonlinear/fixtures/_tobit_fixtures.py`）。
+# フィクスチャ生成側と同じシナリオ集合を単一ソースから引く
+# （`benchmark/nonlinear/fixtures/_tobit_fixtures.py`）。cov_type 集合は
+# `benchmark.nonlinear.constants`。
 SCENARIOS = _tobit_fixtures.NUMERIC_SCENARIOS
-COV_TYPES = _tobit_fixtures.PER_SCENARIO_COV_TYPES
 BASELINE_SCENARIO = _tobit_fixtures.BASELINE_SCENARIO
 
 MARGEFF_TARGETS = [
@@ -49,7 +49,6 @@ MARGEFF_TARGETS = [
     "prob_uncensored",
     "expected_uncensored",
 ]
-MARGEFF_AT = ["overall", "mean", "median"]
 
 CLUSTER_COV_KEYS = ["cluster", "cluster_imbalanced", "cluster_g2"]
 METHODS = ["bfgs", "lbfgs"]
@@ -82,7 +81,7 @@ def fixture_group(scenario: str) -> str:
 # フィクスチャの cluster cov_type キー → 疑似グループ列の作り方。
 # `_tobit_fixtures.py` の `build()` / `_cluster_case()` と対応させる。
 _CLUSTER_GROUP_BUILDERS = {
-    "cluster": lambda n: [i % 10 for i in range(n)],
+    "cluster": lambda n: balanced_cluster_groups(n),
     "cluster_g2": lambda n: [str(i % 2) for i in range(n)],
     "cluster_imbalanced": lambda n: imbalanced_cluster_groups(n),
 }

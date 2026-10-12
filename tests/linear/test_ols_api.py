@@ -49,6 +49,7 @@ from _tolerances import TOLERANCES
 from econometricsmodels import OLS, OLSOptions, OLSResults
 
 from benchmark.common import hac_auto_lag
+from benchmark.linear.constants import COV_TYPES
 
 # predict() の statsmodels 照合も凍結フィクスチャ照合と同じ許容誤差
 # （`_tolerances.py` の "ols_reference"）で行う。`_assertions.assert_close`
@@ -196,9 +197,7 @@ def test_n_obs_and_dep_var_name(dataset):
 
 
 @pytest.mark.parametrize("spelling", CASE_SPELLINGS)
-@pytest.mark.parametrize(
-    "cov_type", ["classical", "hc0", "hc1", "hc2", "hc3", "hac", "cluster"]
-)
+@pytest.mark.parametrize("cov_type", [*COV_TYPES, "cluster"])
 def test_cov_type_is_case_insensitive(dataset, cov_type, spelling):
     """全`cov_type`で、`res.cov_type`が正規形（小文字）で返り、どの大文字小文字の
     綴りでも正規形と同一の推定結果になること（`engine_pybind`側の

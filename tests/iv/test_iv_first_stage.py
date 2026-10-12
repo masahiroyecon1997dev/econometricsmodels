@@ -30,11 +30,12 @@ from _helpers import ROW_TIME, hac_time_for, with_cluster_groups, with_row_time
 from _tolerances import TOLERANCES
 from econometricsmodels import IV, OLS, IVOptions, OLSOptions
 
+from benchmark.iv.constants import IV_COV_TYPES
+
 RTOL = TOLERANCES["iv_reference"]["rtol"]
 ATOL = TOLERANCES["iv_reference"]["atol"]
 
 CLUSTER_COL = "cluster_group"
-COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac", "cluster"]
 
 # シナリオ: (CSV名, x_exog, x_endog, instruments)。
 SCENARIOS = {
@@ -211,7 +212,7 @@ def _assert_first_stage_matches_ols(
 
 
 @pytest.mark.parametrize("include_intercept", [True, False])
-@pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("cov_type", IV_COV_TYPES)
 @pytest.mark.parametrize("estimator", ["2sls", "gmm"])
 @pytest.mark.parametrize("scenario", list(SCENARIOS))
 def test_first_stage_matches_direct_ols(

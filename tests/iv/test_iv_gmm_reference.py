@@ -70,17 +70,16 @@ from _tolerances import TOLERANCES
 from econometricsmodels import IV, IVOptions
 
 from benchmark.common import imbalanced_cluster_groups
-from benchmark.iv.fixtures.generate_iv_fixtures import (
-    CARD_X_EXOG,
-    NO_INTERCEPT_SCENARIOS,
+from benchmark.iv.constants import CARD_X_EXOG, LINEARMODELS_COV_TYPES
+from benchmark.iv.datasets import (
+    NUMERIC_SCENARIOS as SCENARIOS,
 )
+from benchmark.iv.datasets import scenario_instruments, scenario_x_exog
+from benchmark.iv.fixtures.generate_iv_fixtures import NO_INTERCEPT_SCENARIOS
 from benchmark.iv.fixtures.generate_iv_gmm_fixtures import (
     CARD_OTHER_WEIGHT_TYPES,
-    COV_TYPES,
     CROSS_WEIGHT_COV_COMBINATIONS,
-)
-from benchmark.iv.fixtures.generate_iv_gmm_fixtures import (
-    NUMERIC_SCENARIOS as SCENARIOS,
+    OTHER_WEIGHT_TYPES,
 )
 
 FIXTURE_PATH = (
@@ -92,16 +91,6 @@ FIXTURE_PATH = (
 
 RTOL = TOLERANCES["iv_gmm_reference"]["rtol"]
 ATOL = TOLERANCES["iv_gmm_reference"]["atol"]
-
-# SCENARIOS/COV_TYPESはgenerate_iv_gmm_fixtures.pyのNUMERIC_SCENARIOS/COV_TYPESと
-# 常に一致させる必要があるため、そちらをimportして単一の定義元にする。
-
-INSTRUMENTS_BY_SCENARIO = {"just_identified": ["z1"]}
-X_EXOG_BY_SCENARIO = {
-    "moderate_multicollinearity": ["x1", "x2"],
-    "high_condition_number": ["x1", "x2"],
-    "scale_variance_mild": ["x1", "x2"],
-}
 
 # HACラグはIVOptions.hac_lags未指定（自動計算）で、engineとlinearmodelsが
 # 同じ式を使うため明示指定不要（`test_iv_reference.py`と同じ理由）。
@@ -191,11 +180,11 @@ def _check_result(
 # ── 凍結フィクスチャとの数値照合 ───────────────────────────────────
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
 @pytest.mark.parametrize("scenario", SCENARIOS)
 def test_matches_linearmodels(fixtures, scenario, cov_type):
-    x_exog = X_EXOG_BY_SCENARIO.get(scenario, ["x1"])
-    instruments = INSTRUMENTS_BY_SCENARIO.get(scenario, ["z1", "z2"])
+    x_exog = scenario_x_exog(scenario)
+    instruments = scenario_instruments(scenario)
     df = pl.read_csv(DATA_DIR / f"iv_{scenario}.csv")
     options = IVOptions(
         estimator="gmm",
@@ -274,7 +263,7 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
     )
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
 def test_multi_endog_matches_linearmodels(fixtures, cov_type):
     """複数内生変数（`x_endog=["endog1", "endog2"]`）の成功パス
     （`weak_instrument_f_statistics`・`overid_statistic`（Hansen J、過剰識別）が
@@ -386,7 +375,7 @@ def test_gmm_type_matches_linearmodels(fixtures, n_iter):
     )
 
 
-@pytest.mark.parametrize("gmm_weight_type", ["robust", "cluster", "hac"])
+@pytest.mark.parametrize("gmm_weight_type", OTHER_WEIGHT_TYPES)
 def test_other_weight_types_match_linearmodels(fixtures, gmm_weight_type):
     """`gmm_weight_type`（点推定の重み）が`cov_type`（SE計算方式、ここでは`classical`
     固定）と独立な軸であることを、baselineシナリオで数値照合する
@@ -473,7 +462,7 @@ def _fit_card(gmm_weight_type: str, cov_type: str):
     ).fit()
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
 def test_card_matches_linearmodels(fixtures, cov_type):
     """実データセット（Wooldridge card、`test_iv_reference.py`の同名テストと同じ
     変数構成）。`gmm_weight_type="classical"`で全`cov_type`を照合する。
@@ -497,7 +486,7 @@ def test_card_other_weight_types_match_linearmodels(fixtures, gmm_weight_type):
     )
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
 @pytest.mark.parametrize("scenario", list(NO_INTERCEPT_SCENARIOS))
 def test_no_intercept_matches_linearmodels(fixtures, scenario, cov_type):
     """`include_intercept=False`（切片なし）、`gmm_weight_type="classical"`固定。

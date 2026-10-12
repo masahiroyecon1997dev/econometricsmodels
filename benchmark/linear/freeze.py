@@ -18,8 +18,8 @@ from benchmark.linear.datasets import (
 )
 from benchmark.linear.datasets import generate_linear_dataset
 
-# benchmark/linear/datasets.pyのSCENARIOS（全シナリオ、generate_ols_fixtures.py /
-# generate_wls_fixtures.pyのNUMERIC_SCENARIOSにperfect_multicollinearity・
+# benchmark/linear/datasets.pyのSCENARIOS（全シナリオ、benchmark/linear/constants.pyの
+# NUMERIC_SCENARIOSにperfect_multicollinearity・
 # scale_variance（いずれもComputationErrorパスのテストで使う、数値比較はしない）を
 # 加えたもの）をそのまま使う。
 

@@ -46,6 +46,7 @@ from econometricsmodels import (
 )
 
 from benchmark.common import hac_auto_lag
+from benchmark.linear.constants import COV_TYPES
 
 # predict()のstatsmodels照合は主リファレンス照合と同じ許容誤差
 # （`_tolerances.py`の"wls_reference"）で行う（`test_ols_api.py`と同じ方針、
@@ -55,6 +56,10 @@ _assert_close = partial(
     rtol=TOLERANCES["wls_reference"]["rtol"],
     atol=TOLERANCES["wls_reference"]["atol"],
 )
+
+# 全観測に同じ重みを置くWLSの重み。重み付き残差`sqrt(w)(y-ŷ)`と元スケールの残差の
+# 差が`sqrt(CONSTANT_WEIGHT)`倍として現れるよう、1から十分離した値にする。
+CONSTANT_WEIGHT = 100.0
 
 
 # ── 成功パス・結果型 ──────────────────────────────────────────────────
@@ -73,13 +78,13 @@ def test_residuals_are_original_scale_not_weighted(dataset):
     重みを大きく偏らせると、重み付き残差 `sqrt(w)(y-ŷ)` は元スケールの
     残差 `y-ŷ` と大きく異なる値になるはず。
     """
-    n = dataset.height
-    weight = [100.0] * n
-    df = dataset.with_columns(pl.Series("weight", weight))
+    df = dataset.with_columns(
+        pl.Series("weight", [CONSTANT_WEIGHT] * dataset.height)
+    )
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
 
-    # 元スケールの残差は「予測値からの素の差」であり、重み(=100)を掛けた
-    # スケールにはならないはず（sqrt(100)=10倍にはならない）。
+    # 元スケールの残差は「予測値からの素の差」であり、重みを掛けたスケール
+    # （`sqrt(CONSTANT_WEIGHT)`倍）にはならないはず。
     ols_res = OLS(dataset, y="y", x=["x1", "x2"]).fit()
     for i, (wls_r, ols_r) in enumerate(zip(res.residuals, ols_res.residuals)):
         _assert_rounding_close(wls_r, ols_r, f"residuals[{i}]")
@@ -150,9 +155,7 @@ def test_n_obs_and_dep_var_name(unit_weight_dataset):
 
 
 @pytest.mark.parametrize("spelling", CASE_SPELLINGS)
-@pytest.mark.parametrize(
-    "cov_type", ["classical", "hc0", "hc1", "hc2", "hc3", "hac", "cluster"]
-)
+@pytest.mark.parametrize("cov_type", [*COV_TYPES, "cluster"])
 def test_cov_type_is_case_insensitive(unit_weight_dataset, cov_type, spelling):
     """全`cov_type`で、`res.cov_type`が正規形（小文字）で返り、どの大文字小文字の
     綴りでも正規形と同一の推定結果になること（OLSの

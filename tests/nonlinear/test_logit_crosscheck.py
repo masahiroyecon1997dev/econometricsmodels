@@ -40,6 +40,7 @@ from _tolerances import TOLERANCES
 from econometricsmodels import Logit, LogitOptions
 
 from benchmark.common import imbalanced_cluster_groups
+from benchmark.nonlinear.constants import NON_CLUSTER_COV_TYPES
 from benchmark.nonlinear.fixtures.generate_logit_crosscheck_fixtures import (
     NUMERIC_SCENARIOS as SCENARIOS,
 )
@@ -59,7 +60,6 @@ ATOL = TOLERANCES["logit_crosscheck"]["atol"]
 # 係数・限界効果とも）。
 ATOL_P_VALUE = TOLERANCES["logit_crosscheck"]["atol_p_value"]
 
-COV_TYPES = ["classical", "opg", "hc0", "hc1"]
 
 # near_separationは既定tol=1e-6だとstatsmodels/Rとの一致精度が下がる境界ケース
 # （test_logit_reference.py参照）。ここでも同じ理由でtol=1e-8を明示指定する。
@@ -139,7 +139,7 @@ def _check_result(res, ref: dict, label: str) -> None:
         )
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
 @pytest.mark.parametrize("scenario", SCENARIOS)
 def test_matches_r_glm(fixtures, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"logit_{scenario}.csv")
@@ -184,7 +184,7 @@ def test_apple_cluster_matches_r_glm(fixtures):
     _check_result(res, ref, "apple/cluster")
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
 def test_mroz_matches_r_glm(fixtures, cov_type):
     df = load_wooldridge_dataset("mroz")
     options = LogitOptions(cov_type=cov_type)

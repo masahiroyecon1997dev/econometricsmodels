@@ -7,9 +7,9 @@ iv_gmm_crosscheck.json）を生成するスクリプト。
 （`generate_iv_crosscheck_fixtures.py`）とは別ファイル・別スクリプトにしている。
 
 シナリオ・重み×共分散の構成は`generate_iv_gmm_fixtures.py`（linearmodels）と
-揃える（ユーザー確認済み）。構成の定義（`NUMERIC_SCENARIOS`・`COV_TYPES`・
-`OTHER_WEIGHT_TYPES`・`CROSS_WEIGHT_COV_COMBINATIONS`・`CARD_OTHER_WEIGHT_TYPES`）は
-そちらをimportして単一の定義元にする。
+揃える（ユーザー確認済み）。構成の定義は単一の定義元をimportする。シナリオは`benchmark/iv/datasets.py`、
+cov_typeは`benchmark/iv/constants.py`、重みの組み合わせは
+`generate_iv_gmm_fixtures.py`が定義元。
 
 ## 対象範囲
 
@@ -49,24 +49,26 @@ import polars as pl
 from benchmark.common import (
     BENCHMARKS_DIR,
     DATA_DIR,
+    balanced_cluster_groups,
     imbalanced_cluster_groups,
     load_frozen_dataset,
     run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
+from benchmark.iv.constants import CARD_X_EXOG, LINEARMODELS_COV_TYPES
+from benchmark.iv.datasets import (
+    NUMERIC_SCENARIOS,
+    scenario_instruments,
+    scenario_x_exog,
+)
 from benchmark.iv.fixtures.generate_iv_crosscheck_fixtures import (
-    CARD_X_EXOG,
     _ivreg_formula,
 )
 from benchmark.iv.fixtures.generate_iv_fixtures import NO_INTERCEPT_SCENARIOS
 from benchmark.iv.fixtures.generate_iv_gmm_fixtures import (
     CARD_OTHER_WEIGHT_TYPES,
-    COV_TYPES,
     CROSS_WEIGHT_COV_COMBINATIONS,
-    INSTRUMENTS_BY_SCENARIO,
-    NUMERIC_SCENARIOS,
     OTHER_WEIGHT_TYPES,
-    X_EXOG_BY_SCENARIO,
 )
 from benchmark.iv.references.r import run_momentfit_r
 
@@ -83,15 +85,15 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
     fixtures: dict = {}
 
     for scenario in NUMERIC_SCENARIOS:
-        x_exog = X_EXOG_BY_SCENARIO.get(scenario, ["x1"])
-        instruments = INSTRUMENTS_BY_SCENARIO.get(scenario, ["z1", "z2"])
+        x_exog = scenario_x_exog(scenario)
+        instruments = scenario_instruments(scenario)
         formula = _ivreg_formula(x_exog, ["endog1"], instruments)
         csv_path = DATA_DIR / f"iv_{scenario}.csv"
         df, _ = load_frozen_dataset("iv", scenario)
         n = df.height
 
         fixtures[scenario] = {"classical": {}}
-        for cov_type in COV_TYPES:
+        for cov_type in LINEARMODELS_COV_TYPES:
             fixtures[scenario]["classical"][cov_type] = run_momentfit_r(
                 csv_path, formula, "classical", cov_type
             )
@@ -102,7 +104,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
         # クラスター（重み・共分散とも）は疑似グループ（行番号%10）と不均衡
         # グループ（サイズ[2, 3, 5, 10, 30, 50]のタイル）の2通り。
         pseudo = _with_cluster_csv(
-            df, csv_path, tmpdir, [i % 10 for i in range(n)], "_cluster"
+            df, csv_path, tmpdir, balanced_cluster_groups(n), "_cluster"
         )
         imbalanced = _with_cluster_csv(
             df,
@@ -157,7 +159,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             cov_type: run_momentfit_r(
                 multi_csv, multi_formula, "classical", cov_type
             )
-            for cov_type in COV_TYPES
+            for cov_type in LINEARMODELS_COV_TYPES
         }
     }
     fixtures["no_intercept"] = build_no_intercept_fixtures(tmpdir)
@@ -185,7 +187,7 @@ def build_no_intercept_fixtures(tmpdir: Path) -> dict:
                 cov_type: run_momentfit_r(
                     csv_path, formula, "classical", cov_type
                 )
-                for cov_type in COV_TYPES
+                for cov_type in LINEARMODELS_COV_TYPES
             }
         }
 
@@ -199,7 +201,7 @@ def build_no_intercept_fixtures(tmpdir: Path) -> dict:
         baseline_df,
         baseline_csv,
         tmpdir,
-        [i % 10 for i in range(n)],
+        balanced_cluster_groups(n),
         "_no_intercept_cluster",
     )
     baseline = fixtures["baseline"]
@@ -253,7 +255,7 @@ def build_wooldridge_fixtures(tmpdir: Path) -> dict:
     fixtures: dict = {
         "classical": {
             cov_type: run_momentfit_r(csv_path, formula, "classical", cov_type)
-            for cov_type in COV_TYPES
+            for cov_type in LINEARMODELS_COV_TYPES
         }
     }
     for weight_type in CARD_OTHER_WEIGHT_TYPES:

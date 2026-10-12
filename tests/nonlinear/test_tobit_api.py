@@ -26,6 +26,8 @@ from _assertions import (
 from _helpers import CASE_SPELLINGS, respell
 from econometricsmodels import Tobit, TobitOptions, TobitResults
 
+from benchmark.nonlinear.constants import MLE_COV_TYPES
+
 # censored_datasetフィクスチャ（`dataset`のyを0.0で左打ち切り、打ち切り率21%）は
 # conftest.pyで定義。
 
@@ -231,9 +233,7 @@ def test_supports_right_censoring_only():
     assert res.upper == 5.0
 
 
-@pytest.mark.parametrize(
-    "cov_type", ["classical", "opg", "hc0", "hc1", "cluster"]
-)
+@pytest.mark.parametrize("cov_type", MLE_COV_TYPES)
 def test_raise_on_non_convergence_false_returns_result_without_raising(
     censored_dataset, cov_type
 ):
@@ -264,9 +264,7 @@ def test_raise_on_non_convergence_false_returns_result_without_raising(
 
 
 @pytest.mark.parametrize("spelling", CASE_SPELLINGS)
-@pytest.mark.parametrize(
-    "cov_type", ["classical", "opg", "hc0", "hc1", "cluster"]
-)
+@pytest.mark.parametrize("cov_type", MLE_COV_TYPES)
 def test_cov_type_is_case_insensitive(censored_dataset, cov_type, spelling):
     """全`cov_type`で、`res.cov_type`が正規形（小文字）で返り、どの大文字小文字の
     綴りでも正規形と同一の推定結果になること（`engine_pybind`側の

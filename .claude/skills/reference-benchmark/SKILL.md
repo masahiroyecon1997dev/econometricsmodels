@@ -26,7 +26,7 @@ allowed-tools: Read, Write, Bash(python3:*), Bash(Rscript:*), Bash(pytest:*)
 
 - `benchmark/common/`（系統をまたぐ共通ヘルパー）: 旧 `benchmark/_common.py` / `_dgp_constants.py` / `_common.R` / `load_wooldridge.py` を関心事ごとに分割したパッケージ。
   - `datasets_io.py`: `DATA_DIR`・`BENCHMARKS_DIR`・`load_frozen_dataset`（`{prefix}_{scenario}.csv`＋`{prefix}_true_beta.json`読み込み）・`freeze_scenarios`（freezeの共通ループ）・`run_freeze_cli`（各系統`freeze.py`の`__main__`）。
-  - `dgp.py`: `imbalanced_cluster_groups`（クラスターロバストSE確認用の不均衡グループ生成、全系統共通）・`hac_auto_lag`（HAC自動ラグ選択式）・`linear_predictor`・`correlated_design_matrix`・`apply_perfect_multicollinearity`・`validate_choice`・`preview_dataset`（`datasets.py`単体実行時のシナリオ1件プレビュー）。
+  - `dgp.py`: `balanced_cluster_groups`（クラスターロバストSE確認用の均等な疑似グループ生成、行番号%10）・`imbalanced_cluster_groups`（同じく不均衡グループ生成、全系統共通）・`hac_auto_lag`（HAC自動ラグ選択式）・`linear_predictor`・`correlated_design_matrix`・`apply_perfect_multicollinearity`・`validate_choice`・`preview_dataset`（`datasets.py`単体実行時のシナリオ1件プレビュー）。
   - `dgp_constants.py`: 3系統のDGPで共通の誤差項・スケール倍率の定数。
   - `constants.py`: `SYNTHETIC_FORMULA`・`MROZ_FORMULA`・`WEIGHT_COLUMN_NAME`。
   - `driver.py`: `run_fixture_cli`（11個の`generate_*_fixtures.py`で一字一句同じだった`__main__`＝引数パース→`build_fixtures()`→JSON書き出し）。

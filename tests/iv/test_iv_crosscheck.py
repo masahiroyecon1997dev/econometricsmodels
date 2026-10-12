@@ -64,14 +64,18 @@ from _tolerances import TOLERANCES
 from econometricsmodels import IV, IVOptions
 
 from benchmark.common import imbalanced_cluster_groups
-from benchmark.iv.fixtures.generate_iv_crosscheck_fixtures import (
+from benchmark.iv.constants import (
     CARD_X_EXOG,
-    IVREG_NO_INTERCEPT_EXTRA_COV_TYPES,
-    IVREG_UNSUPPORTED_NO_INTERCEPT,
-    NO_INTERCEPT_COV_TYPES,
+    IVREG_ONLY_COV_TYPES,
+    LINEARMODELS_COV_TYPES,
+    NON_CLUSTER_COV_TYPES,
 )
-from benchmark.iv.fixtures.generate_iv_crosscheck_fixtures import (
+from benchmark.iv.datasets import (
     NUMERIC_SCENARIOS as SCENARIOS,
+)
+from benchmark.iv.datasets import scenario_instruments, scenario_x_exog
+from benchmark.iv.fixtures.generate_iv_crosscheck_fixtures import (
+    IVREG_UNSUPPORTED_NO_INTERCEPT,
 )
 from benchmark.iv.fixtures.generate_iv_fixtures import NO_INTERCEPT_SCENARIOS
 
@@ -88,15 +92,6 @@ RTOL_STRICT = TOLERANCES["iv_crosscheck"]["rtol_strict"]
 
 # 絶対誤差フロア（ref値が0近傍のとき相対誤差比較が意味を持たなくなるのを防ぐ）。
 ATOL = TOLERANCES["iv_crosscheck"]["atol"]
-
-COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
-
-INSTRUMENTS_BY_SCENARIO = {"just_identified": ["z1"]}
-X_EXOG_BY_SCENARIO = {
-    "moderate_multicollinearity": ["x1", "x2"],
-    "high_condition_number": ["x1", "x2"],
-    "scale_variance_mild": ["x1", "x2"],
-}
 
 
 @pytest.fixture(scope="module")
@@ -223,11 +218,11 @@ def _check_result(
             )
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
 @pytest.mark.parametrize("scenario", SCENARIOS)
 def test_synthetic_matches_r(crosscheck, scenario, cov_type):
-    x_exog = X_EXOG_BY_SCENARIO.get(scenario, ["x1"])
-    instruments = INSTRUMENTS_BY_SCENARIO.get(scenario, ["z1", "z2"])
+    x_exog = scenario_x_exog(scenario)
+    instruments = scenario_instruments(scenario)
     df = pl.read_csv(DATA_DIR / f"iv_{scenario}.csv")
     options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
     res = IV(
@@ -294,7 +289,7 @@ def test_cluster_g2_matches_r(crosscheck):
     )
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
 def test_multi_endog_matches_r(crosscheck, cov_type):
     """複数内生変数（`x_endog=["endog1", "endog2"]`）の成功パス
     （`test_iv_reference.py`の同名テストと同じ理由）。
@@ -314,7 +309,7 @@ def test_multi_endog_matches_r(crosscheck, cov_type):
     _check_result(res, ref, f"multi_endog/{cov_type}/R")
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
 def test_df1_matches_r(crosscheck, cov_type):
     """自由度1境界（df_resid=1ちょうど）の成功パス（`test_iv_reference.py`の
     同名テストと同じ再現条件）。x_exog=[]・x_endog=['endog1']・
@@ -339,7 +334,7 @@ def test_df1_matches_r(crosscheck, cov_type):
     _check_result(res, ref, f"df1/{cov_type}/R")
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
 def test_card_matches_r(crosscheck_wooldridge, cov_type):
     """実データセット（Wooldridge card）。`test_iv_reference.py`の同名テストと
     同じ理由。
@@ -388,7 +383,7 @@ def test_cluster_imbalanced_matches_r(crosscheck):
 
 
 @pytest.mark.parametrize(
-    "cov_type", NO_INTERCEPT_COV_TYPES + IVREG_NO_INTERCEPT_EXTRA_COV_TYPES
+    "cov_type", LINEARMODELS_COV_TYPES + IVREG_ONLY_COV_TYPES
 )
 @pytest.mark.parametrize(
     "scenario",

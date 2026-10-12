@@ -27,53 +27,18 @@ import polars as pl
 from benchmark.common import (
     BENCHMARKS_DIR,
     DATA_DIR,
+    balanced_cluster_groups,
     group_by_dataset_source,
     imbalanced_cluster_groups,
     run_fixture_cli,
 )
+from benchmark.iv.constants import CARD_X_EXOG, LINEARMODELS_COV_TYPES
+from benchmark.iv.datasets import (
+    NUMERIC_SCENARIOS,
+    scenario_instruments,
+    scenario_x_exog,
+)
 from benchmark.iv.references.linearmodels_ref import run
-
-# 丁度識別・過剰識別を問わずx_exog=['x1'], x_endog=['endog1'], instruments=[...]の
-# 構造で数値比較できるシナリオ。perfect_multicollinearityはComputationErrorの発生
-# 確認のみ（testing-policy.md「テストの3系統」）のためここに含めない。
-NUMERIC_SCENARIOS = [
-    "baseline",
-    "just_identified",
-    "weak_instruments",
-    "small_n",
-    "high_variance",
-    "heteroskedastic",
-    "autocorrelated",
-    "moderate_multicollinearity",
-    "high_condition_number",
-    # scale_variance（x1*1e6, x2*1e-3、全cov_typeでComputationError）より
-    # 緩いスケール差（x1*1e2, x2*1e-1）の成功パス。faer等の数値計算
-    # ライブラリ依存部分の将来の精度リグレッションを検知する
-    # （OLSのscale_variance_mildと同じ発想）。
-    "scale_variance_mild",
-]
-
-# just_identifiedのみinstruments=['z1']（k_instruments == k_endogに強制される、
-# benchmark/iv/datasets.pyのdocstring参照）。他は全シナリオ共通でinstruments=2本。
-INSTRUMENTS_BY_SCENARIO = {"just_identified": ["z1"]}
-
-# moderate_multicollinearity/high_condition_numberはk_exog=2（x1, x2）で固定済み
-# （benchmark/iv/freeze.pyのIV_K_EXOG_OVERRIDES参照）。
-X_EXOG_BY_SCENARIO = {
-    "moderate_multicollinearity": ["x1", "x2"],
-    "high_condition_number": ["x1", "x2"],
-    "scale_variance_mild": ["x1", "x2"],
-}
-
-# clusterはbaselineのみ、下のcluster専用ケース（_run_cluster_case/
-# _run_cluster_g2_case）で個別に扱うためここには含めない（OLS/WLSと同じ書き方、
-# 項目14参照）。multi_endog/card/df1がclusterを持たない理由は_metaのnote参照。
-COV_TYPES = ["classical", "hc0", "hc1", "hac"]
-
-# Wooldridge card（Card 1995の教育収益率推定、大学近接ダミーnearc2/nearc4を
-# 操作変数として教育年数educの内生性を補正する教科書的定番例）。
-CARD_X_EXOG = ["exper", "expersq", "black", "smsa", "south"]
-
 
 # include_intercept=False（切片なし）のシナリオ。キーが`fixtures["no_intercept"]`
 # 直下のシナリオ名。generate_iv_gmm_fixtures.py・クロスチェック側
@@ -112,11 +77,11 @@ def build_fixtures() -> dict:
     fixtures: dict = {}
 
     for scenario in NUMERIC_SCENARIOS:
-        x_exog = X_EXOG_BY_SCENARIO.get(scenario, ["x1"])
-        instruments = INSTRUMENTS_BY_SCENARIO.get(scenario, ["z1", "z2"])
+        x_exog = scenario_x_exog(scenario)
+        instruments = scenario_instruments(scenario)
 
         fixtures[scenario] = {}
-        for cov_type in COV_TYPES:
+        for cov_type in LINEARMODELS_COV_TYPES:
             result = run(
                 dataset=scenario,
                 x_exog_cols=x_exog,
@@ -144,7 +109,7 @@ def build_fixtures() -> dict:
     # 複数内生変数（k_endog>=2）の成功パス確認。x_exog=['x1']・
     # x_endog=['endog1', 'endog2']・instruments=['z1','z2','z3']（過剰識別）。
     fixtures["multi_endog"] = {}
-    for cov_type in COV_TYPES:
+    for cov_type in LINEARMODELS_COV_TYPES:
         fixtures["multi_endog"][cov_type] = run(
             dataset="baseline_multi_endog",
             x_exog_cols=["x1"],
@@ -157,7 +122,7 @@ def build_fixtures() -> dict:
     # 収益率推定）。testing-policy.md「テスト用データセット」2.（実データセット）の
     # 要求に対しIV系統は未対応だった。
     fixtures["card"] = {}
-    for cov_type in COV_TYPES:
+    for cov_type in LINEARMODELS_COV_TYPES:
         fixtures["card"][cov_type] = run(
             dataset="card",
             x_exog_cols=CARD_X_EXOG,
@@ -171,7 +136,7 @@ def build_fixtures() -> dict:
     # 自由度1境界（df_resid=1ちょうど）の成功パス確認。
     # x_exog=[]・x_endog=['endog1']・instruments=['z1']（丁度識別、n=3）。
     fixtures["df1"] = {}
-    for cov_type in COV_TYPES:
+    for cov_type in LINEARMODELS_COV_TYPES:
         fixtures["df1"][cov_type] = run(
             dataset="baseline_df1",
             x_exog_cols=[],
@@ -191,7 +156,7 @@ def build_fixtures() -> dict:
                 cov_type=cov_type,
                 include_intercept=False,
             )
-            for cov_type in COV_TYPES
+            for cov_type in LINEARMODELS_COV_TYPES
         }
         for name, spec in NO_INTERCEPT_SCENARIOS.items()
     }
@@ -268,7 +233,7 @@ def _run_cluster_case(
     df = pl.read_csv(DATA_DIR / filename)
     n = df.height
     cluster_group = (
-        groups if groups is not None else [i % 10 for i in range(n)]
+        groups if groups is not None else balanced_cluster_groups(n)
     )
     grouped = df.with_columns(pl.Series("cluster_group", cluster_group))
     tmp_path = DATA_DIR / f"iv_{dataset}_cluster_tmp.csv"

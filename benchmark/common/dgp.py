@@ -1,6 +1,7 @@
 """データ生成過程（DGP）まわりの系統非依存ヘルパー。
 
-- `imbalanced_cluster_groups`: 不均衡なクラスタラベル列の生成。
+- `balanced_cluster_groups`/`imbalanced_cluster_groups`: 均等・不均衡な
+  クラスタラベル列の生成。
 - `linear_predictor`: 「切片＋線形結合」の計算。
 - `correlated_design_matrix`/`apply_perfect_multicollinearity`:
   multicollinearity系シナリオの説明変数行列生成。
@@ -22,6 +23,23 @@ import polars as pl
 # [2, 3, 5, 10, 30, 50]（合計100）を1タイルとして繰り返す不均衡なクラスタサイズ
 # パターン（testing-policy.md「テスト用データセット」3.参照）。
 _IMBALANCED_CLUSTER_TILE = [2, 3, 5, 10, 30, 50]
+
+
+def balanced_cluster_groups(n: int, n_groups: int = 10) -> list[int]:
+    """均等サイズの疑似クラスターラベル（行番号を`n_groups`で割った余り）を生成する。
+
+    統計的な意味はなく、クラスターロバストSEの実装の動作確認用
+    （`.claude/rules/testing-policy.md`「テスト用データセット」3.）。
+
+    Args:
+        n: 観測数。
+        n_groups: グループ数（既定10）。
+
+    Returns:
+        長さnのグループラベル（整数0〜`n_groups - 1`）のリスト。
+        `imbalanced_cluster_groups`の文字列ラベルとは型が異なる。
+    """
+    return [i % n_groups for i in range(n)]
 
 
 def imbalanced_cluster_groups(n: int) -> list[str]:

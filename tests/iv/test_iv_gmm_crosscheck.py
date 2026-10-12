@@ -8,7 +8,8 @@ generate_iv_gmm_crosscheck_fixtures.py`で生成）を読み込み、主リフ�
 
 検証範囲は`test_iv_gmm_reference.py`と同じ構成（10合成シナリオ×classical重み×
 cov_type、baselineの他の重み・重みと共分散の組み合わせ、複数内生変数、Wooldridge
-card）。構成の定義は`generate_iv_gmm_fixtures.py`からimportして単一の定義元にする。
+card）。構成の定義は単一の定義元からimportする（シナリオは`benchmark/iv/datasets.py`、cov_typeと
+Card実データは`benchmark/iv/constants.py`、重みの組み合わせは`generate_iv_gmm_fixtures.py`）。
 
 比較する統計量: 係数・標準誤差・z値・p値・信頼区間・`n_obs`/`df_resid`・
 ロバストWald（`wald_statistic`/`wald_p_value`）・Hansen J（過剰識別のときのみ）。
@@ -49,18 +50,16 @@ from _tolerances import TOLERANCES
 from econometricsmodels import IV, IVOptions
 
 from benchmark.common import imbalanced_cluster_groups
-from benchmark.iv.fixtures.generate_iv_crosscheck_fixtures import CARD_X_EXOG
+from benchmark.iv.constants import CARD_X_EXOG, LINEARMODELS_COV_TYPES
+from benchmark.iv.datasets import (
+    NUMERIC_SCENARIOS as SCENARIOS,
+)
+from benchmark.iv.datasets import scenario_instruments, scenario_x_exog
 from benchmark.iv.fixtures.generate_iv_fixtures import NO_INTERCEPT_SCENARIOS
 from benchmark.iv.fixtures.generate_iv_gmm_fixtures import (
     CARD_OTHER_WEIGHT_TYPES,
-    COV_TYPES,
     CROSS_WEIGHT_COV_COMBINATIONS,
-    INSTRUMENTS_BY_SCENARIO,
     OTHER_WEIGHT_TYPES,
-    X_EXOG_BY_SCENARIO,
-)
-from benchmark.iv.fixtures.generate_iv_gmm_fixtures import (
-    NUMERIC_SCENARIOS as SCENARIOS,
 )
 
 FIXTURE_PATH = (
@@ -187,16 +186,16 @@ def _fit_baseline(
 # ── 合成データ ────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
 @pytest.mark.parametrize("scenario", SCENARIOS)
 def test_matches_momentfit(crosscheck, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"iv_{scenario}.csv")
     res = _fit(
         df,
         y="y",
-        x_exog=X_EXOG_BY_SCENARIO.get(scenario, ["x1"]),
+        x_exog=scenario_x_exog(scenario),
         x_endog=["endog1"],
-        instruments=INSTRUMENTS_BY_SCENARIO.get(scenario, ["z1", "z2"]),
+        instruments=scenario_instruments(scenario),
         gmm_weight_type="classical",
         cov_type=cov_type,
     )
@@ -265,7 +264,7 @@ def test_cross_weight_cov_matches_momentfit(
     )
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
 def test_multi_endog_matches_momentfit(crosscheck, cov_type):
     """複数内生変数（`x_endog=["endog1", "endog2"]`）。"""
     df = pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv")
@@ -300,7 +299,7 @@ def _fit_card(gmm_weight_type: str, cov_type: str):
     )
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
 def test_card_matches_momentfit(crosscheck_wooldridge, cov_type):
     """実データセット（Wooldridge card）。classical重みで全cov_type。"""
     _check_result(
@@ -324,7 +323,7 @@ def test_card_other_weight_types_match_momentfit(
     )
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
 @pytest.mark.parametrize("scenario", list(NO_INTERCEPT_SCENARIOS))
 def test_no_intercept_matches_momentfit(crosscheck, scenario, cov_type):
     """`include_intercept=False`（切片なし）、`gmm_weight_type="classical"`固定。

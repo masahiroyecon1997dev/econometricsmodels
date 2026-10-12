@@ -34,6 +34,8 @@ from econometricsmodels import (
     ValidationError,
 )
 
+from benchmark.nonlinear.constants import MLE_COV_TYPES, NON_CLUSTER_COV_TYPES
+
 _TOBIT_CENSORING_BOUNDS = json.loads(
     (DATA_DIR / "tobit_censoring_bounds.json").read_text()
 )
@@ -574,7 +576,7 @@ def test_cluster_with_null_raises(censored_dataset):
         Tobit(df, y="y", x=["x1", "x2"], options=options).fit()
 
 
-@pytest.mark.parametrize("cov_type", ["classical", "opg", "hc0", "hc1"])
+@pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
 def test_cluster_unused_by_cov_type_raises(censored_dataset, cov_type):
     """`cov_type="cluster"`以外で`cluster`が指定されたら黙って無視せず
     `ValidationError`。
@@ -715,7 +717,7 @@ def test_perfect_multicollinearity_raises_computation_error():
         ).fit()
 
 
-@pytest.mark.parametrize("cov_type", ["classical", "opg", "hc0", "hc1"])
+@pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
 def test_scale_variance_raises_computation_error(cov_type):
     """変数間のスケールが極端に異なる設計行列（x1 を `*1e6`、x2 を `*1e-3`）は、
     傾き係数の同時共分散部分行列がスケール比の 2 乗（≈1e18）相当の条件数を持ち
@@ -879,9 +881,7 @@ def test_mroz_hours_raw_scale_converges_without_false_separation():
 
 
 @pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
-@pytest.mark.parametrize(
-    "cov_type", ["classical", "opg", "hc0", "hc1", "cluster"]
-)
+@pytest.mark.parametrize("cov_type", MLE_COV_TYPES)
 def test_truncated_point_returns_unconverged_result_for_every_solver(
     solver, cov_type
 ):

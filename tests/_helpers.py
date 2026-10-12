@@ -45,6 +45,8 @@ import polars as pl
 import pytest
 from scipy.stats import norm
 
+from benchmark.common import balanced_cluster_groups
+
 # 行順をそのまま時間順として使うHACテスト用の、行番号の列名。
 ROW_TIME = "row_time"
 
@@ -207,15 +209,16 @@ TIED_TIME_COLUMNS = [
 def with_cluster_groups(
     df: pl.DataFrame, n_groups: int, col: str = "cluster_group"
 ) -> pl.DataFrame:
-    """行番号を`n_groups`で割った余りを疑似クラスターラベルとして付与する。
+    """行番号を`n_groups`で割った余りを疑似クラスターラベル（整数）として付与する
+    （`benchmark.common.balanced_cluster_groups`と同じラベル）。
 
     統計的な意味はなく、クラスターロバストSEの実装の動作確認用
     （`.claude/rules/testing-policy.md`「テスト用データセット」3.）。
     """
-    return (
-        df.with_row_index("_row")
-        .with_columns((pl.col("_row") % n_groups).alias(col))
-        .drop("_row")
+    return df.with_columns(
+        pl.Series(
+            col, balanced_cluster_groups(df.height, n_groups), dtype=pl.Int64
+        )
     )
 
 

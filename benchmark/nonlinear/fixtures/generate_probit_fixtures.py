@@ -33,10 +33,12 @@ from benchmark.common import (
     BENCHMARKS_DIR,
     DATA_DIR,
     MROZ_FORMULA,
+    balanced_cluster_groups,
     group_by_dataset_source,
     imbalanced_cluster_groups,
     run_fixture_cli,
 )
+from benchmark.nonlinear.constants import STATSMODELS_COV_TYPES
 from benchmark.nonlinear.references.statsmodels_ref import run
 
 # perfect_multicollinearityは数値比較の対象外（ComputationErrorの発生確認のみ、
@@ -64,11 +66,6 @@ NUMERIC_SCENARIOS = [
     "outlier_regressor",
 ]
 
-# hc1はstatsmodelsで未実装のためここには含めない（上記docstring参照）。
-# clusterはbaselineのみ、下のcluster専用ケース（_run_cluster_case）で個別に扱うため
-# ここには含めない（OLS/WLSと同じ書き方、項目14参照）。
-COV_TYPES = ["classical", "opg", "hc0"]
-
 # newton以外のmethod（bfgs/lbfgs）が主リファレンスに対しフルの統計量（std_errors含む）で
 # 一致することの確認用（generate_logit_fixtures.pyと同じ方針）。
 METHODS = ["bfgs", "lbfgs"]
@@ -79,7 +76,7 @@ def build_fixtures() -> dict:
 
     for scenario in NUMERIC_SCENARIOS:
         fixtures[scenario] = {}
-        for cov_type in COV_TYPES:
+        for cov_type in STATSMODELS_COV_TYPES:
             result = run(
                 dataset_source="synthetic",
                 dataset=scenario,
@@ -98,7 +95,7 @@ def build_fixtures() -> dict:
         dataset="baseline",
         formula=None,
         cov_type="cluster",
-        groups=[i % 10 for i in range(n)],
+        groups=balanced_cluster_groups(n),
         model="probit",
     )
     # 不均衡な疑似グループ（サイズ[2,3,5,10,30,50]のタイル）。
@@ -118,7 +115,7 @@ def build_fixtures() -> dict:
     # 実データセット（Wooldridge mroz、労働参加モデル）。Logitと同じformula・データ
     # （probit_logitとも定番の比較対象、mrozはWooldridge教科書でも両方の例に使われる）。
     fixtures["mroz"] = {}
-    for cov_type in COV_TYPES:
+    for cov_type in STATSMODELS_COV_TYPES:
         fixtures["mroz"][cov_type] = run(
             dataset_source="wooldridge",
             dataset="mroz",

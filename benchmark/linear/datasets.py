@@ -6,7 +6,8 @@
 
 系統非依存のクラスターラベル生成（`imbalanced_cluster_groups`）は
 `benchmark/common/`へ分離した（他系統からも使われるため）。凍結（CSV固定）は
-`benchmark/linear/freeze.py`が担当する。
+`benchmark/linear/freeze.py`が担当する。実データ（401ksubs）に疑似グループ列を
+足す補助関数（`add_age_bin`）と、検定ケースの補助関数もここに置く。
 
 使用例:
     from benchmark.linear.datasets import generate_linear_dataset
@@ -247,3 +248,19 @@ def resolve_bp_case(
     if case.get("extra_columns"):
         df = with_bp_extra_columns(df)
     return df, x_cols, case.get("variables")
+
+
+def add_age_bin(df: pl.DataFrame, n_bins: int = 8) -> pl.DataFrame:
+    """`age`を分位点で`n_bins`個にビン化した`age_bin`列を追加する。
+
+    401ksubsには地域等の自然なカテゴリ列が無いため（marr/maleのような
+    2値変数のみ）、実データでのクラスターロバストSE検証（testing-policy.md
+    「実データでのグループ列も検証する」）用に、実データの分布から作る
+    疑似グループとして年齢の分位ビンを使う（G=8、q=6の説明変数より十分大きい）。
+    """
+    return df.with_columns(
+        pl.col("age")
+        .qcut(n_bins, allow_duplicates=True)
+        .alias("age_bin")
+        .cast(pl.Utf8)
+    )

@@ -68,6 +68,41 @@ SCENARIOS = [
     "scale_variance_mild",
 ]
 
+# 丁度識別・過剰識別を問わずx_exog=['x1'], x_endog=['endog1'], instruments=[...]の
+# 構造で数値比較できるシナリオ。perfect_multicollinearityはComputationErrorの発生
+# 確認のみ（testing-policy.md「テストの3系統」）、scale_variance（x1*1e6, x2*1e-3）は
+# 全cov_typeでComputationErrorのためここに含めない。scale_variance_mildは、より緩い
+# スケール差（x1*1e2, x2*1e-1）の成功パスで、faer等の数値計算ライブラリ依存部分の
+# 精度リグレッションを検知する（OLSのscale_variance_mildと同じ発想）。
+NUMERIC_SCENARIOS = [
+    s
+    for s in SCENARIOS
+    if s not in ("perfect_multicollinearity", "scale_variance")
+]
+
+# just_identifiedのみinstruments=['z1']（k_instruments == k_endogに強制される、
+# 上のdocstring参照）。他は全シナリオ共通でinstruments=2本。
+INSTRUMENTS_BY_SCENARIO = {"just_identified": ["z1"]}
+
+# moderate_multicollinearity/high_condition_number/scale_variance_mildはk_exog=2
+# （x1, x2）で固定済み（`benchmark/iv/freeze.py`のIV_K_EXOG_OVERRIDES参照）。
+X_EXOG_BY_SCENARIO = {
+    "moderate_multicollinearity": ["x1", "x2"],
+    "high_condition_number": ["x1", "x2"],
+    "scale_variance_mild": ["x1", "x2"],
+}
+
+
+def scenario_x_exog(scenario: str) -> list[str]:
+    """`NUMERIC_SCENARIOS`の各シナリオで`IV`に渡す外生説明変数（既定は`x1`のみ）。"""
+    return X_EXOG_BY_SCENARIO.get(scenario, ["x1"])
+
+
+def scenario_instruments(scenario: str) -> list[str]:
+    """`NUMERIC_SCENARIOS`の各シナリオで`IV`に渡す操作変数（既定は`z1`・`z2`）。"""
+    return INSTRUMENTS_BY_SCENARIO.get(scenario, ["z1", "z2"])
+
+
 # 内生性の強さ: 構造誤差uと第一段階誤差vの相関（シナリオ間で共通の固定値）。
 _RHO_ENDOG = 0.6
 

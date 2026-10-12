@@ -30,8 +30,7 @@ from econometricsmodels import (
     WLSOptions,
 )
 
-from benchmark.linear.constants import HAC_MAXLAGS
-from benchmark.linear.fixtures.generate_wls_fixtures import COV_TYPES
+from benchmark.linear.constants import COV_TYPES, HAC_MAXLAGS
 
 # ── ValidationError（入力データ: 重み列） ─────────────────────────────
 

@@ -48,14 +48,14 @@ from _tolerances import TOLERANCES
 from econometricsmodels import WLS, WLSOptions
 
 from benchmark.common import imbalanced_cluster_groups
-from benchmark.linear.fixtures.generate_wls_crosscheck_fixtures import (
+from benchmark.linear.constants import (
     CONFIDENCE_LEVEL_NON_DEFAULT,
-    WOOLDRIDGE_COV_TYPES,
+    NON_HAC_COV_TYPES,
 )
-from benchmark.linear.fixtures.generate_wls_crosscheck_fixtures import (
+from benchmark.linear.constants import (
     NUMERIC_SCENARIOS as SYNTHETIC_SCENARIOS,
 )
-from benchmark.linear.fixtures.generate_wls_fixtures import _add_age_bin
+from benchmark.linear.datasets import add_age_bin
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parents[1]
@@ -121,9 +121,6 @@ def _assert_fit_stats_close(res, ref: dict, label: str, rtol: float) -> None:
         _assert_scalar_close(
             our_upper, ref_upper, f"{label}/conf_upper/{name}", rtol=rtol
         )
-
-
-NON_HAC_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3"]
 
 
 @pytest.mark.parametrize("cov_type", NON_HAC_COV_TYPES)
@@ -435,12 +432,12 @@ def test_confidence_level_hac_matches_r(crosscheck):
     _assert_fit_stats_close(res, ref, label, rtol=RTOL_STRICT)
 
 
-@pytest.mark.parametrize("cov_type", WOOLDRIDGE_COV_TYPES)
+@pytest.mark.parametrize("cov_type", NON_HAC_COV_TYPES)
 def test_401ksubs_matches_r(crosscheck, cov_type):
     """実データ（401ksubs、fsize==1）でのWLSクロスチェック。回帰式・重み定義は
     `test_wls_reference.py::test_401ksubs_matches_statsmodels`と揃える。
     HACは時系列順の無いクロスセクションデータのため対象外
-    （`generate_wls_crosscheck_fixtures.py`のWOOLDRIDGE_COV_TYPESと同じ方針）。
+    （`benchmark/linear/constants.py`のNON_HAC_COV_TYPESと同じ方針）。
     """
     df = load_wooldridge_dataset("401ksubs").filter(pl.col("fsize") == 1)
     df = df.with_columns((1.0 / pl.col("inc")).alias("inv_inc"))
@@ -463,13 +460,13 @@ def test_401ksubs_matches_r(crosscheck, cov_type):
 
 def test_401ksubs_cluster_matches_r(crosscheck):
     """実データ（401ksubs、fsize==1）でのクラスターロバストSE。地域等の実
-    カテゴリ列が無いため、ageの分位ビン（8分位、`_add_age_bin`）を疑似的な
+    カテゴリ列が無いため、ageの分位ビン（8分位、`add_age_bin`）を疑似的な
     クラスター列として使う（`test_wls_reference.py`
     ::test_401ksubs_cluster_matches_statsmodelsと同じグループ構成）。
     """
     df = load_wooldridge_dataset("401ksubs").filter(pl.col("fsize") == 1)
     df = df.with_columns((1.0 / pl.col("inc")).alias("inv_inc"))
-    df = _add_age_bin(df)
+    df = add_age_bin(df)
     options = WLSOptions(cov_type="cluster", cluster="age_bin")
 
     res = WLS(

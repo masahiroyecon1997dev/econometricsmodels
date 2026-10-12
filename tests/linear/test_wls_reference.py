@@ -47,16 +47,19 @@ from _tolerances import TOLERANCES
 from econometricsmodels import WLS, WLSOptions
 
 from benchmark.common import imbalanced_cluster_groups
-from benchmark.linear.constants import HAC_MAXLAGS
-from benchmark.linear.fixtures.generate_wls_fixtures import (
+
+# SCENARIOS/COV_TYPESはフィクスチャ生成と常に一致させる必要があるため、
+# `benchmark/linear/constants.py`をimportして単一の定義元にする。
+from benchmark.linear.constants import (
     CONFIDENCE_LEVEL_NON_DEFAULT,
     COV_TYPES,
-    WOOLDRIDGE_COV_TYPES,
-    _add_age_bin,
+    HAC_MAXLAGS,
+    NON_HAC_COV_TYPES,
 )
-from benchmark.linear.fixtures.generate_wls_fixtures import (
+from benchmark.linear.constants import (
     NUMERIC_SCENARIOS as SCENARIOS,
 )
+from benchmark.linear.datasets import add_age_bin
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parents[1]
@@ -67,9 +70,6 @@ FIXTURE_PATH = (
 
 RTOL = TOLERANCES["wls_reference"]["rtol"]
 ATOL = TOLERANCES["wls_reference"]["atol"]
-
-# SCENARIOS/COV_TYPESはgenerate_wls_fixtures.pyのNUMERIC_SCENARIOS/COV_TYPESと
-# 常に一致させる必要があるため、そちらをimportして単一の定義元にする。
 
 # フィクスチャ生成側（benchmark/linear/references/statsmodels_ref.py）と同じ
 # HAC_MAXLAGSを明示的に指定し、自動ラグ選択式の違いを比較対象から除外する
@@ -379,14 +379,14 @@ def test_weight_in_x_matches_statsmodels(fixtures):
     )
 
 
-@pytest.mark.parametrize("cov_type", WOOLDRIDGE_COV_TYPES)
+@pytest.mark.parametrize("cov_type", NON_HAC_COV_TYPES)
 def test_401ksubs_matches_statsmodels(fixtures, cov_type):
     """実データ（401ksubs、fsize==1）でのWLSベンチマーク。
 
     回帰式・重み定義は`docs/spec/wls-spec.md`
     「テスト」参照（`nettfa ~ inc + incsq + age + agesq + male + e401k`、
     重み=1/inc）。HACは時系列順の無いクロスセクションデータのため対象外
-    （`generate_wls_fixtures.py`のWOOLDRIDGE_COV_TYPESと同じ方針）。
+    （`benchmark/linear/constants.py`のNON_HAC_COV_TYPESと同じ方針）。
     """
     df = load_wooldridge_dataset("401ksubs").filter(pl.col("fsize") == 1)
     df = df.with_columns((1.0 / pl.col("inc")).alias("inv_inc"))
@@ -410,13 +410,13 @@ def test_401ksubs_matches_statsmodels(fixtures, cov_type):
 def test_401ksubs_cluster_matches_statsmodels(fixtures):
     """実データ（401ksubs、fsize==1）でのクラスターロバストSE。
 
-    地域等の実カテゴリ列が無いため、ageの分位ビン（8分位、`_add_age_bin`）を
+    地域等の実カテゴリ列が無いため、ageの分位ビン（8分位、`add_age_bin`）を
     疑似的なクラスター列として使う（`testing-policy.md`「実データでの
     グループ列も検証する」）。
     """
     df = load_wooldridge_dataset("401ksubs").filter(pl.col("fsize") == 1)
     df = df.with_columns((1.0 / pl.col("inc")).alias("inv_inc"))
-    df = _add_age_bin(df)
+    df = add_age_bin(df)
     options = WLSOptions(cov_type="cluster", cluster="age_bin")
 
     res = WLS(

@@ -66,11 +66,12 @@ from _tolerances import TOLERANCES
 from econometricsmodels import OLS, OLSOptions
 
 from benchmark.common import imbalanced_cluster_groups
-from benchmark.linear.constants import PREDICT_NEW_DATA
-from benchmark.linear.fixtures.generate_ols_crosscheck_fixtures import (
+from benchmark.linear.constants import (
     CONFIDENCE_LEVEL_NON_DEFAULT,
+    NON_HAC_COV_TYPES,
+    PREDICT_NEW_DATA,
 )
-from benchmark.linear.fixtures.generate_ols_crosscheck_fixtures import (
+from benchmark.linear.constants import (
     NUMERIC_SCENARIOS as SYNTHETIC_SCENARIOS,
 )
 
@@ -145,9 +146,6 @@ def _assert_fit_stats_close(res, ref: dict, label: str, rtol: float) -> None:
         _assert_scalar_close(
             our_upper, ref_upper, f"{label}/conf_upper/{name}", rtol=rtol
         )
-
-
-NON_HAC_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3"]
 
 
 @pytest.mark.parametrize("cov_type", NON_HAC_COV_TYPES)
@@ -449,7 +447,7 @@ def load_wooldridge():
     return wooldridge_loader()
 
 
-@pytest.mark.parametrize("cov_type", ["classical", "hc0", "hc1", "hc2", "hc3"])
+@pytest.mark.parametrize("cov_type", NON_HAC_COV_TYPES)
 @pytest.mark.parametrize("dataset_name", list(WOOLDRIDGE_DATASETS))
 def test_wooldridge_matches_r(
     crosscheck, load_wooldridge, dataset_name, cov_type

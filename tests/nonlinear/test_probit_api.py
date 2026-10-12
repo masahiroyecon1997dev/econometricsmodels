@@ -24,6 +24,8 @@ import pytest
 from _helpers import CASE_SPELLINGS
 from econometricsmodels import Probit, ProbitOptions, ProbitResults
 
+from benchmark.nonlinear.constants import MLE_COV_TYPES
+
 # ── 成功パス・結果型 ──────────────────────────────────────────────────
 
 
@@ -92,9 +94,7 @@ def test_confidence_level_changes_interval_width(binary_dataset):
     )
 
 
-@pytest.mark.parametrize(
-    "cov_type", ["classical", "opg", "hc0", "hc1", "cluster"]
-)
+@pytest.mark.parametrize("cov_type", MLE_COV_TYPES)
 def test_raise_on_non_convergence_false_returns_result_without_raising(
     binary_dataset, cov_type
 ):
@@ -125,9 +125,7 @@ def test_method_is_case_insensitive(binary_dataset, solver, expected_label):
 
 
 @pytest.mark.parametrize("spelling", CASE_SPELLINGS)
-@pytest.mark.parametrize(
-    "cov_type", ["classical", "opg", "hc0", "hc1", "cluster"]
-)
+@pytest.mark.parametrize("cov_type", MLE_COV_TYPES)
 def test_cov_type_is_case_insensitive(binary_dataset, cov_type, spelling):
     _checks.check_cov_type_is_case_insensitive(
         binary_dataset, Probit, ProbitOptions, cov_type, spelling

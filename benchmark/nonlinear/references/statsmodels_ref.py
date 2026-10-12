@@ -41,7 +41,7 @@ get_robustcov_results`は`HC1`指定時に`getattr(self, "cov_HC1", None)`でモ
 （`sandwich::vcovHC(glm_obj, type="HC1")`、`n/(n-k)`補正を正しく適用し本実装の
 式と一致）を主リファレンスとして扱う（ユーザー確認済み）**。このスクリプトの
 呼び出し元（`fixtures/generate_logit_fixtures.py`/`generate_probit_fixtures.py`）は
-`cov_type="hc1"`をCOV_TYPESに含めない。`fixtures/generate_logit_crosscheck_fixtures.py`/
+`cov_type="hc1"`を`STATSMODELS_COV_TYPES`（`benchmark/nonlinear/constants.py`）に含めない。`fixtures/generate_logit_crosscheck_fixtures.py`/
 `generate_probit_crosscheck_fixtures.py`（R側）が`hc1`の数値比較のfixtureを担う。
 
 使用例（リポジトリルートから）:

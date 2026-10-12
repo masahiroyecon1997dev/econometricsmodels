@@ -6,7 +6,7 @@ re-export する（サブモジュール構成が変わっても利用側の imp
 
 - `datasets_io`: `DATA_DIR` / `load_frozen_dataset` / `freeze_scenarios` /
   `run_freeze_cli`（固定CSV/JSONの読み書き・凍結CLI）。
-- `dgp`: `imbalanced_cluster_groups` / `linear_predictor` /
+- `dgp`: `balanced_cluster_groups` / `imbalanced_cluster_groups` / `linear_predictor` /
   `correlated_design_matrix` / `apply_perfect_multicollinearity` /
   `hac_auto_lag` / `validate_choice` / `preview_dataset`（DGPまわり）。
 - `dgp_constants`: 誤差項・スケール倍率の数値定数（直接 import する）。
@@ -38,6 +38,7 @@ from benchmark.common.datasets_io import (
 )
 from benchmark.common.dgp import (
     apply_perfect_multicollinearity,
+    balanced_cluster_groups,
     correlated_design_matrix,
     hac_auto_lag,
     imbalanced_cluster_groups,
@@ -63,6 +64,7 @@ __all__ = [
     "WAGEPAN_Y",
     "WEIGHT_COLUMN_NAME",
     "apply_perfect_multicollinearity",
+    "balanced_cluster_groups",
     "correlated_design_matrix",
     "extract_params_std_errors",
     "freeze_scenarios",

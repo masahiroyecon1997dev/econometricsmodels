@@ -42,6 +42,7 @@ import statsmodels.api as sm
 from _tolerances import TOLERANCES
 from econometricsmodels import Probit, ProbitOptions
 
+from benchmark.nonlinear.constants import STATSMODELS_COV_TYPES
 from benchmark.nonlinear.fixtures.generate_probit_fixtures import (
     NUMERIC_SCENARIOS as SCENARIOS,
 )
@@ -68,7 +69,7 @@ CONFIG = _checks.BinaryChoiceReferenceConfig(
     dataset_prefix="probit",
     fixture_path=FIXTURE_PATH,
     scenarios=SCENARIOS,
-    cov_types=["classical", "opg", "hc0"],
+    cov_types=STATSMODELS_COV_TYPES,
     rtol=TOLERANCES["probit_reference"]["rtol"],
     atol=TOLERANCES["probit_reference"]["atol"],
     # solver="bfgs"/"lbfgs"はnewtonと異なる最適化経路で収束するため、既定の

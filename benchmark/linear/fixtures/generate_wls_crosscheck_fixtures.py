@@ -42,48 +42,21 @@ import polars as pl
 from benchmark.common import (
     BENCHMARKS_DIR,
     WEIGHT_COLUMN_NAME,
+    balanced_cluster_groups,
     imbalanced_cluster_groups,
     load_frozen_dataset,
     run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
-from benchmark.linear.fixtures.generate_wls_fixtures import _add_age_bin
+from benchmark.linear.constants import (
+    CLUSTER_ILL_CONDITIONED_SCENARIOS,
+    CONFIDENCE_LEVEL_NON_DEFAULT,
+    COV_TYPES,
+    NON_HAC_COV_TYPES,
+    NUMERIC_SCENARIOS,
+)
+from benchmark.linear.datasets import add_age_bin
 from benchmark.linear.references.r import run_lm_r
-
-# 完全な多重共線性・scale_varianceは数値比較の対象外（generate_wls_fixtures.pyと
-# 同じ方針。scale_varianceは全cov_typeでComputationErrorになる）。
-NUMERIC_SCENARIOS = [
-    "baseline",
-    "small_n",
-    "high_variance",
-    "heteroskedastic",
-    "autocorrelated",
-    "moderate_multicollinearity",
-    "high_condition_number",
-    # scale_varianceより緩いスケール差の成功パス（OLSの同種ケース相当）。
-    "scale_variance_mild",
-    # n=k+1（自由度1ちょうど）の成功パス（OLSの同種ケース相当）。
-    "baseline_df1",
-    # 高次元（説明変数k=20、列ごとに0.1〜100倍のスケール差）の成功パス
-    # （OLSの同種ケース相当）。
-    "many_regressors",
-    # x1の5%を外れ値に置き換えた成功パス（OLSの同種ケース相当）。
-    "outlier_regressor",
-]
-
-R_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
-
-# 悪条件・多重共線性シナリオとクラスターロバストSEの組み合わせでの数値的
-# 頑健性確認用（generate_ols_crosscheck_fixtures.pyと同じリスト・同じ理由、
-# OLS側の横展開）。
-CLUSTER_ILL_CONDITIONED_SCENARIOS = [
-    "high_condition_number",
-    "moderate_multicollinearity",
-]
-
-# generate_ols_crosscheck_fixtures.pyと同じ値・同じ理由（baselineシナリオ
-# のみでR_COV_TYPES全種＋clusterと組み合わせて確認する。ユーザー確認済み）。
-CONFIDENCE_LEVEL_NON_DEFAULT = 0.90
 
 
 def _write_csv(df, tmpdir: Path, name: str) -> Path:
@@ -105,7 +78,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
         n = df.height
 
         fixtures[scenario] = {}
-        for cov_type in R_COV_TYPES:
+        for cov_type in COV_TYPES:
             entry = run_lm_r(
                 csv_path, formula, cov_type, weight_col=WEIGHT_COLUMN_NAME
             )
@@ -149,11 +122,11 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             )
 
             # include_intercept=False（切片なし）。R側はformula自体に"- 1"を
-            # 付けるだけで表現できる。全cov_type（R_COV_TYPES + cluster）と
+            # 付けるだけで表現できる。全cov_type（COV_TYPES + cluster）と
             # 組み合わせて確認する（OLS側の横展開）。
             formula_no_intercept = f"{formula} - 1"
             fixtures[scenario]["no_intercept"] = {}
-            for cov_type in R_COV_TYPES:
+            for cov_type in COV_TYPES:
                 entry = run_lm_r(
                     csv_path,
                     formula_no_intercept,
@@ -169,9 +142,9 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             )
 
             # confidence_level非既定（0.95以外）。全cov_type
-            # （R_COV_TYPES + cluster）と組み合わせて確認する（OLS側の横展開）。
+            # （COV_TYPES + cluster）と組み合わせて確認する（OLS側の横展開）。
             fixtures[scenario]["confidence_level"] = {}
-            for cov_type in R_COV_TYPES:
+            for cov_type in COV_TYPES:
                 entry = run_lm_r(
                     csv_path,
                     formula,
@@ -222,7 +195,7 @@ def _run_cluster_case(
     """
     n = df.height
     cluster_group = (
-        groups if groups is not None else [i % 10 for i in range(n)]
+        groups if groups is not None else balanced_cluster_groups(n)
     )
     grouped = df.with_columns(pl.Series("cluster_group", cluster_group))
     tmp_path = csv_path.with_name(csv_path.stem + suffix + ".csv")
@@ -237,17 +210,12 @@ def _run_cluster_case(
     )
 
 
-# HACは時系列順の無いクロスセクションデータのため対象外（generate_wls_fixtures.py
-# のWOOLDRIDGE_COV_TYPESと同じ方針。OLSのwage1/gpa2実データcrosscheckも同様）。
-WOOLDRIDGE_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3"]
-
-
 def build_401ksubs_fixture(tmpdir: Path) -> dict:
     """実データ（401ksubs、fsize==1）でのWLSクロスチェック。
 
     回帰式・重み定義はgenerate_wls_fixtures.py（statsmodels側）と揃える
     （docs/spec/wls-spec.md参照）。classical/HC0-3に加え、地域等の実カテゴリ列が
-    無いため、ageの分位ビン（`generate_wls_fixtures._add_age_bin`と同じ8分位）を
+    無いため、ageの分位ビン（`benchmark.linear.datasets.add_age_bin`の8分位）を
     疑似的なクラスター列としたクラスターロバストSEも確認する。
     """
     df = load_wooldridge("401ksubs").filter(pl.col("fsize") == 1)
@@ -257,10 +225,10 @@ def build_401ksubs_fixture(tmpdir: Path) -> dict:
 
     fixtures = {
         cov_type: run_lm_r(csv_path, formula, cov_type, weight_col="inv_inc")
-        for cov_type in WOOLDRIDGE_COV_TYPES
+        for cov_type in NON_HAC_COV_TYPES
     }
 
-    df_clustered = _add_age_bin(df)
+    df_clustered = add_age_bin(df)
     csv_path_clustered = _write_csv(df_clustered, tmpdir, "401ksubs_cluster")
     fixtures["cluster"] = run_lm_r(
         csv_path_clustered,
@@ -338,14 +306,14 @@ def build_fixtures() -> dict:
             "パラメータ名は全ソースで切片を'const'に正規化済み。"
             "重みは合成データセットの'weight'列。401ksubsはinv_inc（1/inc）。"
             "401ksubsはclassical/HC0-3（HACは時系列順が無いため対象外）に加え、"
-            "ageの分位ビン（8分位、generate_wls_fixtures._add_age_bin）を"
+            "ageの分位ビン（8分位、benchmark.linear.datasets.add_age_bin）を"
             "疑似的なクラスター列としたクラスターロバストSEも含む。"
             "pyfixestとの比較は正確性検証から除外（性能比較専用）。"
             "baseline.no_interceptはinclude_intercept=False（切片なし、"
-            "formulaに'- 1'を付与）をR_COV_TYPES全種＋clusterと組み合わせて"
+            "formulaに'- 1'を付与）をCOV_TYPES全種＋clusterと組み合わせて"
             "確認する（statsmodels主リファレンス側〔wls.json〕・OLS側の横展開）。"
             "baseline.confidence_levelはconfidence_level="
-            f"{CONFIDENCE_LEVEL_NON_DEFAULT}（既定0.95以外）をR_COV_TYPES"
+            f"{CONFIDENCE_LEVEL_NON_DEFAULT}（既定0.95以外）をCOV_TYPES"
             "全種＋clusterと組み合わせて確認する（run_lm_crosscheck.R側の"
             "'--confidence-level='フラグを利用、同じくstatsmodels主リファレンス"
             "側・OLS側の横展開）。"

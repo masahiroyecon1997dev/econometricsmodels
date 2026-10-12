@@ -1,8 +1,7 @@
 """系統によらず全テストが使う定数の集約。
 
 `_helpers.py`/`_assertions.py`はファイル名が関数（ヘルパー・アサーション）を
-示唆するが、実際には以下の定数も同居していた。`_tolerances.py`
-（`TOLERANCES`辞書専用）と同じく、定数は関数と分離しこのファイルに集約する。
+示唆するため、定数はこのファイルに置く（`_tolerances.py`は`TOLERANCES`辞書専用）。
 
 - `DATA_DIR`: 固定済み合成データセットCSV（`tests/fixtures/benchmarks/data/`）
   の置き場所。
@@ -10,19 +9,18 @@
 - `APPLE_X`/`APPLE_CLUSTER`: Wooldridge appleデータセットの説明変数・クラスター列。
 - `MARGEFF_AT`: `marginal_effects(at=...)`で検証する`at`の全パターン
   （`check_margeff`が使う）。
+
+`DATA_DIR`・`APPLE_X`・`APPLE_CLUSTER`は、フィクスチャ生成側と値がずれないよう
+`benchmark.common`が定義する値をそのまま公開する（テストはこのファイルから
+import する）。
 """
 
 from __future__ import annotations
 
-from pathlib import Path
+from benchmark.common import APPLE_CLUSTER, APPLE_X, DATA_DIR
 
-DATA_DIR = Path(__file__).resolve().parent / "fixtures" / "benchmarks" / "data"
+__all__ = ["APPLE_CLUSTER", "APPLE_X", "DATA_DIR", "MARGEFF_AT", "MROZ_X"]
 
 MROZ_X = ["nwifeinc", "educ", "exper", "expersq", "age", "kidslt6", "kidsge6"]
-
-# Wooldridge appleデータセット（`ecolbs > 0`を2値`y`にしたLogit/Probit、州でクラスター）の
-# 説明変数・クラスター列（`benchmark/common/constants.py`と同じ値）。
-APPLE_X = ["ecoprc", "regprc", "faminc", "hhsize", "educ", "age", "reglbs"]
-APPLE_CLUSTER = "state"
 
 MARGEFF_AT = ["overall", "mean", "median"]

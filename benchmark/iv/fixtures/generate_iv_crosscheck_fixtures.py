@@ -5,8 +5,9 @@ iv_crosscheck.json）を生成するスクリプト。
 別に、独立実装（R: ivreg + sandwich/lmtest）によるクロスチェック値を生成する
 （`docs/spec/iv-spec.md`4章参照）。
 
-シナリオ・cov_type・クラスタケースの構成は`generate_iv_fixtures.py`
-（linearmodelsクロスチェック）と揃える（ユーザー確認済み）。
+シナリオ・クラスタケースの構成は`generate_iv_fixtures.py`（linearmodels）と揃える
+（ユーザー確認済み）。シナリオは`benchmark/iv/datasets.py`、cov_typeは
+`benchmark/iv/constants.py`が定義元で、linearmodelsに無いhc2/hc3も含む。
 
 ## 対象範囲
 
@@ -50,46 +51,26 @@ import polars as pl
 from benchmark.common import (
     BENCHMARKS_DIR,
     DATA_DIR,
+    balanced_cluster_groups,
     imbalanced_cluster_groups,
     load_frozen_dataset,
     run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
+from benchmark.iv.constants import (
+    CARD_X_EXOG,
+    IVREG_ONLY_COV_TYPES,
+    LINEARMODELS_COV_TYPES,
+    NON_CLUSTER_COV_TYPES,
+)
+from benchmark.iv.datasets import (
+    NUMERIC_SCENARIOS,
+    scenario_instruments,
+    scenario_x_exog,
+)
 from benchmark.iv.fixtures.generate_iv_fixtures import NO_INTERCEPT_SCENARIOS
 from benchmark.iv.references.r import run_ivreg_r
 
-# generate_iv_fixtures.pyのCARD_X_EXOGと同じ（Wooldridge card実データ）。
-CARD_X_EXOG = ["exper", "expersq", "black", "smsa", "south"]
-
-# generate_iv_fixtures.pyと同じシナリオ・構成（ユーザー確認済み）。
-NUMERIC_SCENARIOS = [
-    "baseline",
-    "just_identified",
-    "weak_instruments",
-    "small_n",
-    "high_variance",
-    "heteroskedastic",
-    "autocorrelated",
-    "moderate_multicollinearity",
-    "high_condition_number",
-    # scale_variance（x1*1e6, x2*1e-3、全cov_typeでComputationError）より
-    # 緩いスケール差（x1*1e2, x2*1e-1）の成功パス
-    # （generate_iv_fixtures.pyと同じ構成、ユーザー確認済み）。
-    "scale_variance_mild",
-]
-INSTRUMENTS_BY_SCENARIO = {"just_identified": ["z1"]}
-X_EXOG_BY_SCENARIO = {
-    "moderate_multicollinearity": ["x1", "x2"],
-    "high_condition_number": ["x1", "x2"],
-    "scale_variance_mild": ["x1", "x2"],
-}
-COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac", "cluster"]
-# 切片なし（no_intercept）で、linearmodelsのiv.jsonと共通に持つcov_type（4種）。
-NO_INTERCEPT_COV_TYPES = ["classical", "hc0", "hc1", "hac"]
-# ivregの切片なしで追加で持つcov_type。hc2/hc3はlinearmodelsに実装が無く、
-# ivreg（`vcovHC(type="HC2"/"HC3")`）だけが参照になる（切片ありと同じ）。
-# レバレッジは射影行列に依存し、切片の有無で値が変わる。
-IVREG_NO_INTERCEPT_EXTRA_COV_TYPES = ["hc2", "hc3"]
 # ivregが切片なしでfitできないシナリオ。回帰変数が1列だけ（`x_exog=[]`かつ
 # 切片なし）だと`ivreg.fit`が`coef(auxreg)`を行列として扱えず
 # "incorrect number of dimensions"で失敗する（ivreg 0.6.8で実測、切片ありの
@@ -119,8 +100,8 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
     fixtures: dict = {}
 
     for scenario in NUMERIC_SCENARIOS:
-        x_exog = X_EXOG_BY_SCENARIO.get(scenario, ["x1"])
-        instruments = INSTRUMENTS_BY_SCENARIO.get(scenario, ["z1", "z2"])
+        x_exog = scenario_x_exog(scenario)
+        instruments = scenario_instruments(scenario)
         x_endog = ["endog1"]
         formula = _ivreg_formula(x_exog, x_endog, instruments)
         csv_path = DATA_DIR / f"iv_{scenario}.csv"
@@ -128,9 +109,8 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
         n = df.height
 
         fixtures[scenario] = {}
-        for cov_type in COV_TYPES:
-            if cov_type == "cluster":
-                continue  # baselineのみ別途複数パターンで確認（下記）
+        # clusterは別途個別に扱う。baselineのみ別途複数パターンで確認（下記）。
+        for cov_type in NON_CLUSTER_COV_TYPES:
             entry = run_ivreg_r(csv_path, formula, cov_type)
             fixtures[scenario][cov_type] = entry
 
@@ -155,9 +135,8 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
         ["x1"], ["endog1", "endog2"], ["z1", "z2", "z3"]
     )
     fixtures["multi_endog"] = {}
-    for cov_type in COV_TYPES:
-        if cov_type == "cluster":
-            continue
+    # clusterは別途個別に扱う。
+    for cov_type in NON_CLUSTER_COV_TYPES:
         entry = run_ivreg_r(multi_endog_csv, multi_endog_formula, cov_type)
         fixtures["multi_endog"][cov_type] = entry
 
@@ -167,9 +146,8 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
     df1_csv = DATA_DIR / "iv_baseline_df1.csv"
     df1_formula = _ivreg_formula([], ["endog1"], ["z1"])
     fixtures["df1"] = {}
-    for cov_type in COV_TYPES:
-        if cov_type == "cluster":
-            continue  # n=3では意味のあるクラスタ数を確保できないため対象外
+    # clusterは別途個別に扱う。n=3では意味のあるクラスタ数を確保できないため対象外。
+    for cov_type in NON_CLUSTER_COV_TYPES:
         entry = run_ivreg_r(df1_csv, df1_formula, cov_type)
         fixtures["df1"][cov_type] = entry
 
@@ -202,9 +180,9 @@ def build_no_intercept_fixtures(tmpdir: Path) -> dict:
             include_intercept=False,
         )
         fixtures[name] = {}
-        for cov_type in (
-            NO_INTERCEPT_COV_TYPES + IVREG_NO_INTERCEPT_EXTRA_COV_TYPES
-        ):
+        # hc2/hc3はlinearmodelsに無くivregだけが参照になる（切片ありと同じ）。
+        # レバレッジは射影行列に依存し、切片の有無で値が変わる。
+        for cov_type in LINEARMODELS_COV_TYPES + IVREG_ONLY_COV_TYPES:
             entry = run_ivreg_r(csv_path, formula, cov_type)
             entry["sargan_statistic"] = None
             entry["sargan_p_value"] = None
@@ -234,7 +212,7 @@ def _run_cluster_case(
     """
     n = df.height
     cluster_group = (
-        groups if groups is not None else [i % 10 for i in range(n)]
+        groups if groups is not None else balanced_cluster_groups(n)
     )
     grouped = df.with_columns(pl.Series("cluster_group", cluster_group))
     tmp_path = tmpdir / (csv_path.stem + suffix + ".csv")
@@ -260,7 +238,7 @@ def _run_cluster_g2_case(tmpdir: Path) -> dict:
 
 
 def build_wooldridge_fixtures(tmpdir: Path) -> dict:
-    """実データセット（card、`generate_iv_fixtures.py`のCARD_X_EXOGと同じ構成）の
+    """実データセット（card、`benchmark/iv/constants.py`のCARD_X_EXOG）の
     Rクロスチェック。
     """
     df = load_wooldridge("card")
@@ -271,9 +249,8 @@ def build_wooldridge_fixtures(tmpdir: Path) -> dict:
     )
 
     fixtures: dict = {}
-    for cov_type in COV_TYPES:
-        if cov_type == "cluster":
-            continue  # 対応する自然なカテゴリ列が無いため対象外（generate_iv_fixtures.py参照）。
+    # clusterは別途個別に扱う。対応する自然なカテゴリ列が無いため対象外（generate_iv_fixtures.py参照）。
+    for cov_type in NON_CLUSTER_COV_TYPES:
         entry = run_ivreg_r(csv_path, formula, cov_type)
         fixtures[cov_type] = entry
     return fixtures

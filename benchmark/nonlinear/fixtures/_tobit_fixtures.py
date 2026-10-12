@@ -29,11 +29,13 @@ from benchmark.common import (
     DATA_DIR,
     SYNTHETIC_FORMULA,
     TOBIT_MROZ_FORMULA,
+    balanced_cluster_groups,
     group_by_dataset_source,
     imbalanced_cluster_groups,
     load_frozen_dataset,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
+from benchmark.nonlinear.constants import NON_CLUSTER_COV_TYPES
 from benchmark.nonlinear.datasets import (
     TOBIT_ERROR_PATH_SCENARIOS,
     TOBIT_SCENARIOS,
@@ -49,10 +51,10 @@ NUMERIC_SCENARIOS = [
     s for s in TOBIT_SCENARIOS if s not in TOBIT_ERROR_PATH_SCENARIOS
 ]
 
-# 各シナリオで回す cov_type。cluster はグルーピングの動作確認が目的でシナリオ非依存の
-# ため、下の baseline 相当シナリオ（moderate_censoring）でのみ複数パターンを確認する
-# （generate_logit_fixtures.py と同じ方針、testing-policy.md「テスト用データセット」3.）。
-PER_SCENARIO_COV_TYPES = ["classical", "opg", "hc0", "hc1"]
+# 各シナリオで回す cov_type は `NON_CLUSTER_COV_TYPES`。cluster はグルーピングの動作確認が
+# 目的でシナリオ非依存のため、下の baseline 相当シナリオ（moderate_censoring）でのみ
+# 複数パターンを確認する（generate_logit_fixtures.py と同じ方針、testing-policy.md
+# 「テスト用データセット」3.）。
 
 # baseline 相当（Logit の "baseline" に対応する、素直な中程度打ち切りシナリオ）。
 # cluster / method の特殊ケースはここに付ける。
@@ -147,7 +149,7 @@ def _cluster_case(
     """
     n = base_df.height
     cluster_group = (
-        groups if groups is not None else [i % 10 for i in range(n)]
+        groups if groups is not None else balanced_cluster_groups(n)
     )
     grouped = base_df.with_columns(pl.Series("cluster_group", cluster_group))
     csv_path = tmpdir / f"{BASELINE_SCENARIO}{suffix}.csv"
@@ -183,7 +185,7 @@ def build(engine: str) -> dict:
             formula = "y ~ " + " + ".join(x_cols)
 
             fixtures[scenario] = {}
-            for cov_type in PER_SCENARIO_COV_TYPES:
+            for cov_type in NON_CLUSTER_COV_TYPES:
                 result = _run(
                     csv_path,
                     formula,
@@ -244,7 +246,7 @@ def build(engine: str) -> dict:
         # 同じ 4 cov_type を回す（切片なし経路がロバスト共分散でも一致することの確認、
         # テスト網羅性レビュー 観点3）。
         fixtures["no_intercept"] = {}
-        for cov_type in PER_SCENARIO_COV_TYPES:
+        for cov_type in NON_CLUSTER_COV_TYPES:
             fixtures["no_intercept"][cov_type] = _run(
                 tmpdir / f"{BASELINE_SCENARIO}.csv",
                 SYNTHETIC_FORMULA,
@@ -260,7 +262,7 @@ def build(engine: str) -> dict:
         mroz_csv = tmpdir / "mroz.csv"
         mroz_df.write_csv(mroz_csv)
         fixtures["mroz"] = {}
-        for cov_type in PER_SCENARIO_COV_TYPES:
+        for cov_type in NON_CLUSTER_COV_TYPES:
             fixtures["mroz"][cov_type] = _run(
                 mroz_csv,
                 TOBIT_MROZ_FORMULA,

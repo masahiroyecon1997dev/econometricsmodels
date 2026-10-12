@@ -71,13 +71,12 @@ from _tolerances import TOLERANCES
 from econometricsmodels import IV, IVOptions
 
 from benchmark.common import imbalanced_cluster_groups
-from benchmark.iv.fixtures.generate_iv_fixtures import (
-    CARD_X_EXOG,
-    NO_INTERCEPT_SCENARIOS,
-)
-from benchmark.iv.fixtures.generate_iv_fixtures import (
+from benchmark.iv.constants import CARD_X_EXOG, LINEARMODELS_COV_TYPES
+from benchmark.iv.datasets import (
     NUMERIC_SCENARIOS as SCENARIOS,
 )
+from benchmark.iv.datasets import scenario_instruments, scenario_x_exog
+from benchmark.iv.fixtures.generate_iv_fixtures import NO_INTERCEPT_SCENARIOS
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parents[1] / "fixtures" / "benchmarks" / "iv.json"
@@ -86,19 +85,6 @@ FIXTURE_PATH = (
 RTOL = TOLERANCES["iv_reference"]["rtol"]
 ATOL = TOLERANCES["iv_reference"]["atol"]
 
-# SCENARIOSはgenerate_iv_fixtures.pyのNUMERIC_SCENARIOSと常に一致させる必要が
-# あるため、そちらをimportして単一の定義元にする。
-# hc2/hc3はlinearmodelsに対応する実装が無いため対象外（モジュールdocコメント参照）。
-COV_TYPES = ["classical", "hc0", "hc1", "hac"]
-
-# just_identifiedのみinstruments=["z1"]（`generate_iv_fixtures.py`と同じ）。
-INSTRUMENTS_BY_SCENARIO = {"just_identified": ["z1"]}
-# moderate_multicollinearity/high_condition_numberはk_exog=2（`generate_iv_fixtures.py`と同じ）。
-X_EXOG_BY_SCENARIO = {
-    "moderate_multicollinearity": ["x1", "x2"],
-    "high_condition_number": ["x1", "x2"],
-    "scale_variance_mild": ["x1", "x2"],
-}
 
 # HACラグ: `IVOptions.hac_lags`未指定（自動計算）で、`engine::iv::two_sls::
 # resolve_hac_lags`と`benchmark/iv/references/linearmodels_ref.py`の`_hac_auto_lag`が
@@ -181,11 +167,11 @@ def _check_result(res, ref: dict, label: str) -> None:
 # ── 凍結フィクスチャとの数値照合 ───────────────────────────────────
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
 @pytest.mark.parametrize("scenario", SCENARIOS)
 def test_matches_linearmodels(fixtures, scenario, cov_type):
-    x_exog = X_EXOG_BY_SCENARIO.get(scenario, ["x1"])
-    instruments = INSTRUMENTS_BY_SCENARIO.get(scenario, ["z1", "z2"])
+    x_exog = scenario_x_exog(scenario)
+    instruments = scenario_instruments(scenario)
     df = pl.read_csv(DATA_DIR / f"iv_{scenario}.csv")
     options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
     res = IV(
@@ -277,7 +263,7 @@ def test_cluster_g2_matches_linearmodels(fixtures):
     )
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
 def test_multi_endog_matches_linearmodels(fixtures, cov_type):
     """複数内生変数（`x_endog=["endog1", "endog2"]`）の成功パス。
     `weak_instrument_f_statistics`・`overid_statistic`（Sargan、過剰識別）・
@@ -302,7 +288,7 @@ def test_multi_endog_matches_linearmodels(fixtures, cov_type):
     )
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
 def test_card_matches_linearmodels(fixtures, cov_type):
     """実データセット（Wooldridge card、Card 1995の大学近接操作変数による教育の
     収益率推定）。`testing-policy.md`「テスト用データセット」2.が要求する実データ
@@ -324,7 +310,7 @@ def test_card_matches_linearmodels(fixtures, cov_type):
     )
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
 def test_df1_matches_linearmodels(fixtures, cov_type):
     """自由度1境界（df_resid=1ちょうど）の成功パス。`x_exog=[]`・
     `x_endog=['endog1']`・`instruments=['z1']`（丁度識別、n=3）。境界値・
@@ -349,7 +335,7 @@ def test_df1_matches_linearmodels(fixtures, cov_type):
     )
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
 @pytest.mark.parametrize("scenario", list(NO_INTERCEPT_SCENARIOS))
 def test_no_intercept_matches_linearmodels(fixtures, scenario, cov_type):
     """`include_intercept=False`（切片なし）。`param_names`に`const`が無いこと、

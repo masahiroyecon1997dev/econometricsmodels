@@ -46,43 +46,20 @@ import polars as pl
 from benchmark.common import (
     BENCHMARKS_DIR,
     DATA_DIR,
+    balanced_cluster_groups,
     group_by_dataset_source,
     imbalanced_cluster_groups,
     run_fixture_cli,
 )
-from benchmark.iv.fixtures.generate_iv_fixtures import (
-    CARD_X_EXOG,
-    NO_INTERCEPT_SCENARIOS,
+from benchmark.iv.constants import CARD_X_EXOG, LINEARMODELS_COV_TYPES
+from benchmark.iv.datasets import (
+    NUMERIC_SCENARIOS,
+    scenario_instruments,
+    scenario_x_exog,
 )
+from benchmark.iv.fixtures.generate_iv_fixtures import NO_INTERCEPT_SCENARIOS
 from benchmark.iv.references.linearmodels_ref import run_gmm
 
-# `generate_iv_fixtures.py`のNUMERIC_SCENARIOSと同一（2SLSと同じ合成データセットを
-# 再利用する）。
-NUMERIC_SCENARIOS = [
-    "baseline",
-    "just_identified",
-    "weak_instruments",
-    "small_n",
-    "high_variance",
-    "heteroskedastic",
-    "autocorrelated",
-    "moderate_multicollinearity",
-    "high_condition_number",
-    # scale_variance（x1*1e6, x2*1e-3、全cov_typeでComputationError）より
-    # 緩いスケール差（x1*1e2, x2*1e-1）の成功パス
-    # （generate_iv_fixtures.pyと同じ構成、ユーザー確認済み）。
-    "scale_variance_mild",
-]
-
-INSTRUMENTS_BY_SCENARIO = {"just_identified": ["z1"]}
-
-X_EXOG_BY_SCENARIO = {
-    "moderate_multicollinearity": ["x1", "x2"],
-    "high_condition_number": ["x1", "x2"],
-    "scale_variance_mild": ["x1", "x2"],
-}
-
-COV_TYPES = ["classical", "hc0", "hc1", "hac"]
 # `weight_type`と`cov_type`が独立な軸であることの確認用（baselineのみ）。
 OTHER_WEIGHT_TYPES = ["robust", "cluster", "hac"]
 # `weight_type`と`cov_type`が両方とも非既定かつ異なる組み合わせ（baselineのみ）。
@@ -105,11 +82,11 @@ def build_fixtures() -> dict:
     fixtures: dict = {}
 
     for scenario in NUMERIC_SCENARIOS:
-        x_exog = X_EXOG_BY_SCENARIO.get(scenario, ["x1"])
-        instruments = INSTRUMENTS_BY_SCENARIO.get(scenario, ["z1", "z2"])
+        x_exog = scenario_x_exog(scenario)
+        instruments = scenario_instruments(scenario)
 
         fixtures[scenario] = {"classical": {}}
-        for cov_type in COV_TYPES:
+        for cov_type in LINEARMODELS_COV_TYPES:
             result = run_gmm(
                 dataset=scenario,
                 x_exog_cols=x_exog,
@@ -161,7 +138,7 @@ def build_fixtures() -> dict:
 
     # 実データセット（Wooldridge card、2SLSの`iv.json`の`wooldridge.card`と同じ変数構成）。
     fixtures["card"] = {"classical": {}}
-    for cov_type in COV_TYPES:
+    for cov_type in LINEARMODELS_COV_TYPES:
         fixtures["card"]["classical"][cov_type] = run_gmm(
             dataset="card",
             x_exog_cols=CARD_X_EXOG,
@@ -189,7 +166,7 @@ def build_fixtures() -> dict:
     # 複数内生変数（k_endog>=2）。2SLSのiv.jsonと同じ構成。weight_type=
     # 'classical'固定でcov_typeのみ変える（上記と同じ検証範囲の絞り方）。
     fixtures["multi_endog"] = {"classical": {}}
-    for cov_type in COV_TYPES:
+    for cov_type in LINEARMODELS_COV_TYPES:
         fixtures["multi_endog"]["classical"][cov_type] = run_gmm(
             dataset="baseline_multi_endog",
             x_exog_cols=["x1"],
@@ -214,7 +191,7 @@ def build_fixtures() -> dict:
                     cov_type=cov_type,
                     include_intercept=False,
                 )
-                for cov_type in COV_TYPES
+                for cov_type in LINEARMODELS_COV_TYPES
             }
         }
         for name, spec in NO_INTERCEPT_SCENARIOS.items()
@@ -359,7 +336,7 @@ def _run_cluster_case(
     df = pl.read_csv(DATA_DIR / filename)
     n = df.height
     cluster_group = (
-        groups if groups is not None else [i % 10 for i in range(n)]
+        groups if groups is not None else balanced_cluster_groups(n)
     )
     grouped = df.with_columns(pl.Series("cluster_group", cluster_group))
     tmp_path = DATA_DIR / f"iv_{dataset}_gmm_cluster_tmp.csv"

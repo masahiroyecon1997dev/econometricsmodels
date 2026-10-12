@@ -57,6 +57,7 @@ from _helpers import (
 from econometricsmodels import ComputationError, ValidationError
 
 from benchmark.common import imbalanced_cluster_groups
+from benchmark.nonlinear.constants import NON_CLUSTER_COV_TYPES
 
 # ── test_<solver>_api.py: 成功パス・結果型 ──────────────────────────
 
@@ -1703,7 +1704,7 @@ def check_cluster_unused_by_cov_type_raises(
     """`cov_type="cluster"`以外で`cluster`が指定されたら黙って無視せず
     `ValidationError`。
     """
-    for cov_type in ["classical", "opg", "hc0", "hc1"]:
+    for cov_type in NON_CLUSTER_COV_TYPES:
         options = options_cls(cov_type=cov_type, cluster="cluster")
         with pytest.raises(
             ValidationError,

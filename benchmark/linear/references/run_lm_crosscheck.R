@@ -110,7 +110,12 @@ if (cov_type == "classical") {
   # 本実装（Newey-West, Bartlettカーネル）と同じlagを明示的に渡し、
   # bwNeweyWest()による自動バンド幅選択（本実装のfloor(4*(n/100)^(2/9))とは
   # 別のアルゴリズム）とは条件を揃えて比較する。
-  vc <- NeweyWest(model, lag = lag, prewhite = FALSE, adjust = TRUE)
+  # adjust=FALSE: `NeweyWest(adjust = TRUE)`は共分散全体に`n/(n-k)`を掛けるが、本実装・
+  # statsmodels（主リファレンス）は掛けない。このスカラー倍だけが両者の差の全てで
+  # （標準誤差で`sqrt(n/(n-k))-1`、F統計量で`n/(n-k)-1`。n=500・k=4で0.4%・0.8%、
+  # 手計算のNewey-Westとは1e-15で一致する）、`adjust = FALSE`にすれば機械精度で一致する。
+  # カーネル・ラグ・重みの検証は独立のまま、スカラー補正の有無だけを揃える。
+  vc <- NeweyWest(model, lag = lag, prewhite = FALSE, adjust = FALSE)
 } else {
   stop(paste("unknown cov_type:", cov_type))
 }

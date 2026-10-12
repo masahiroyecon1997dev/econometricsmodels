@@ -37,6 +37,7 @@ The defaults below were checked against R 4.5.3 (sandwich 3.1.3, lmtest 0.9.40, 
 |---|---|---|
 | `lm` + `summary` | t, `n - k` | same as OLS |
 | `lm` + `lmtest::coeftest` with `sandwich::vcovHC` / `vcovCL` | t, `n - k` | same as OLS for HC; with clustering, `cov_type="cluster"` uses `G - 1` degrees of freedom instead of `n - k` |
+| `lm` + `sandwich::NeweyWest` | t, `n - k` | the standard errors agree only with `adjust = FALSE`. The default `adjust = TRUE` multiplies the covariance by `n/(n-k)` (standard errors by `sqrt(n/(n-k))`; 0.4 % for n = 500, k = 4, 4 % for n = 40, k = 3), which OLS, WLS and IV (HAC) here, statsmodels and linearmodels do not apply. For the 2SLS Wu-Hausman test the factor is `n/(n-k_aug)`, with one more regressor per endogenous variable |
 | `glm(family = binomial)` (logit / probit) | z | same as Logit / Probit |
 | `glm(family = gaussian)` | t | not applicable (use OLS) |
 | `fixest::feols` | t, `n - k`; with `cluster`, t with `G - 1` | OLS matches; FE's small-sample corrections (`cov_type="cluster"`/`"dk"`) and their degrees of freedom (`G - 1` / `t_periods - 1`) are aligned with fixest's `ssc()` defaults (`K.fixef="nonnested"` for cluster, `"full"` for `hc1`-`hc3`/`dk`). One exception: with `dk_bandwidth = t_periods - 1` fixest's `vcov = DK(...)` silently drops the last lag term (an off-by-one in its compiled code), so its standard errors differ from this package, which keeps the standard Bartlett kernel; smaller bandwidths agree |

@@ -107,7 +107,12 @@ if (cov_type == "classical") {
     stop("hac requires <hac_lag> (integer) as arg4")
   }
   lag <- as.integer(args[4])
-  vcov_fn <- function(m) NeweyWest(m, lag = lag, prewhite = FALSE, adjust = TRUE)
+  # adjust=FALSE: `NeweyWest(adjust = TRUE)`は共分散全体に`n/(n-k)`を掛けるが、本実装・
+  # linearmodelsは掛けない。構造式では`k`は係数の数、Wu-Hausmanの補助回帰では内生変数の
+  # 第一段階残差の分だけ多い`k_aug`（`n/(n-k_aug)`）が掛かる。このスカラー倍だけが
+  # 差の全てで（n=40・k=3で標準誤差4.0%・Wu-Hausman統計量11.1%、p値はそれがF分布の
+  # 裾で増幅されて16.8%）、`adjust = FALSE`にすれば小標本でも機械精度で一致する。
+  vcov_fn <- function(m) NeweyWest(m, lag = lag, prewhite = FALSE, adjust = FALSE)
 } else {
   stop(paste("unknown cov_type:", cov_type))
 }

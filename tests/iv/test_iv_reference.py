@@ -29,14 +29,10 @@ Note:
       （`two_sls.rs`の`fit_computes_hc2_std_errors_matching_manual_sandwich_formula`
       等、独立な素朴ループでの手計算とのクロスチェック）は数式レベルの細粒度回帰確認と
       して引き続き有効。
-    - `wu_hausman_statistic`はcov_type="hac"のときlinearmodels側との対応式が
-      不明なためフィクスチャ自体が`None`（`linearmodels`側で一致しない原因は
-      未特定、`benchmark/iv/references/linearmodels_ref.py`のモジュールdocコメント参照）。
-      `hac`を含む全cov_typeの値自体は、独立実装のR `ivreg`を使う
-      `test_iv_crosscheck.py`で検証している。
-      本実装側は`hac`でも値を返す（`None`にはならない）ため、`ref`が`None`の
-      ときは比較をスキップするだけで、本実装側の値が`None`であることは
-      要求しない。df1（自由度1境界）は逆にaugmented regressionが
+    - `wu_hausman_statistic`は`hac`を含む全cov_typeで`res.wooldridge_regression`
+      と機械精度で一致する（`benchmark/iv/references/linearmodels_ref.py`の
+      モジュールdocコメント参照）。独立実装のR `ivreg`は`test_iv_crosscheck.py`で
+      検証している。df1（自由度1境界）はaugmented regressionが
       saturated（残差自由度0）になるため全cov_typeでフィクスチャが`None`に
       なり、本実装側も同じ理由でNoneを返す（`engine/src/iv/CLAUDE.md`
       「Wu-Hausmanの拡張回帰が想定内の理由で失敗した場合」参照）。
@@ -163,9 +159,8 @@ def _check_result(res, ref: dict, label: str) -> None:
             f"{label}/overid_p_value",
         )
 
-    # wu_hausmanはcov_type="hac"だとフィクスチャ側がNone（モジュールdoc
-    # コメント参照）。本実装側は依然値を返しうるため、ref側がNoneのときは
-    # 比較自体をスキップする（本実装側がNoneであることは要求しない）。
+    # ref側がNone（df1: 拡張回帰がsaturatedで双方None）のときは比較自体を
+    # スキップする（本実装側がNoneであることは要求しない）。
     if ref["wu_hausman_statistic"] is not None:
         _assert_close(
             res.wu_hausman_statistic,

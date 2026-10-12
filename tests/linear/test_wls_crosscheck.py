@@ -6,17 +6,15 @@
 を用いて、statsmodelsとは独立した実装（R）との一致を確認する。役割分担・
 pyfixest除外の理由は`test_ols_crosscheck.py`と同じ。
 
-classical/HC0-3/clusterはRとほぼ機械精度で一致する（実測で相対誤差1e-13〜1e-15
-程度）ため`RTOL_STRICT`で厳密比較する。**HACのみOLSより乖離が大きく、実測で
-最大相対誤差約4.3%**（OLSの実測約0.4%の10倍程度）だったため、`RTOL_HAC`は
-OLSの1e-2ではなく5e-2を採用する（`docs/spec/wls-spec.md`「テスト」参照。`testing-policy.md`「同じクロスチェック用
-パッケージでも、統計量・cov_typeごとに実測乖離が大きく異なる場合は、許容誤差を
-分けてよい」に従う）。
+classical/HC0-3/cluster/HACはRとほぼ機械精度で一致する（実測で相対誤差1e-13〜1e-15
+程度）ため`RTOL_STRICT`で厳密比較する。HACのR側は`NeweyWest(adjust = FALSE)`
+（既定の`adjust = TRUE`は共分散全体に`n/(n-k)`を掛けるが本実装・statsmodelsは
+掛けず、これだけが差の全てだった。OLSと完全に同じ値で、WLSに固有の乖離は無い。
+`benchmark/linear/references/run_lm_crosscheck.R`・`docs/spec/wls-spec.md`
+「テスト」参照）。
 
 係数・標準誤差に加え、t値・p値・信頼区間・R²・調整済みR²・AIC・BIC・対数尤度・
-F統計量・F検定p値も検証する（`test_ols_crosscheck.py`と同じ方針）。p_valuesのみ
-HAC/autocorrelatedで裾確率がゼロ近傍に潰れるため絶対誤差フロア（`ATOL_P_VALUE`）
-で比較する。
+F統計量・F検定p値も検証する（`test_ols_crosscheck.py`と同じ方針）。
 
 `include_intercept=False`（切片なし）・`confidence_level`非既定は、baseline
 シナリオのみで全cov_type（classical/HC0-3/cluster/HAC）と組み合わせてRとも
@@ -70,15 +68,9 @@ FIXTURE_PATH = (
 # 程度）。testing-policy.md「許容誤差」の基本方針（相対誤差1e-8）と揃える。
 RTOL_STRICT = TOLERANCES["wls_crosscheck"]["rtol_strict"]
 
-# HACのみ実測最大相対誤差約4.3%（wls-spec.md「テスト」参照）。
-RTOL_HAC = TOLERANCES["wls_crosscheck"]["rtol_hac"]
 
 # 絶対誤差フロア（ref値が0近傍のとき相対誤差比較が意味を持たなくなるのを防ぐ）。
 ATOL = TOLERANCES["wls_crosscheck"]["atol"]
-
-# p_values専用の絶対誤差フロア（HAC/autocorrelatedで裾確率がゼロ近傍に
-# 潰れるため、_tolerances.py参照）。
-ATOL_P_VALUE = TOLERANCES["wls_crosscheck"]["atol_p_value"]
 
 
 @pytest.fixture(scope="module")
@@ -120,7 +112,6 @@ def _assert_fit_stats_close(res, ref: dict, label: str, rtol: float) -> None:
         ref["p_values"],
         f"{label}/p_values",
         rtol=rtol,
-        atol=ATOL_P_VALUE,
     )
     for name, (ref_lower, ref_upper) in ref["conf_int"].items():
         our_lower, our_upper = res.conf_int[name]
@@ -277,35 +268,38 @@ def test_weight_in_x_matches_r(crosscheck):
     _assert_fit_stats_close(res, ref, "weight_in_x/R", rtol=RTOL_STRICT)
 
 
-def test_hac_matches_r(crosscheck):
+@pytest.mark.parametrize("scenario", SYNTHETIC_SCENARIOS)
+def test_hac_matches_r(crosscheck, scenario):
     """HAC標準誤差。フィクスチャ生成時に本実装の自動ラグ式で計算した
     ラグ（`hac_lag`）をそのまま使い、ラグ選択方式自体の違いを比較対象から
-    除外した上でNewey-West公式自体の妥当性を確認する。
+    除外した上でNewey-West公式自体の妥当性を確認する。全合成シナリオ
+    （小標本・高次元・悪条件を含む）で他のcov_typeと同じ機械精度で一致する
+    （R側が`adjust = FALSE`、`run_lm_crosscheck.R`参照）。
     """
-    df = pl.read_csv(DATA_DIR / "synthetic_autocorrelated.csv")
-    ref = crosscheck["synthetic"]["autocorrelated"]["hac"]
+    df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
+    x_cols = [c for c in df.columns if c not in ("y", "weight")]
+    ref = crosscheck["synthetic"][scenario]["hac"]
     options = WLSOptions(
         cov_type="hac", hac_lags=ref["hac_lag"], hac_time=ROW_TIME
     )
     res = WLS(
         with_row_time(df),
         y="y",
-        x=["x1", "x2", "x3"],
+        x=x_cols,
         weight="weight",
         options=options,
     ).fit()
 
-    _assert_close(res.params, ref["params"], "hac/R params")
-    _assert_close(
-        res.std_errors, ref["std_errors"], "hac/R std_errors", rtol=RTOL_HAC
-    )
-    _assert_fit_stats_close(res, ref, "hac/R", rtol=RTOL_HAC)
+    label = f"{scenario}/hac/R"
+    _assert_close(res.params, ref["params"], f"{label} params")
+    _assert_close(res.std_errors, ref["std_errors"], f"{label} std_errors")
+    _assert_fit_stats_close(res, ref, label, rtol=RTOL_STRICT)
 
 
 # ── include_intercept=False・confidence_level非既定（凍結フィクスチャ、
 # baselineシナリオ、OLS側の横展開） ──────────────────────────────
-# クラスターも含めるがHACのみ小標本補正の慣習差があるため専用テストで
-# RTOL_HACを使う（`test_hac_matches_r`と同じ方針）。
+# クラスターも含める。HACは`hac_lag`を使う専用テスト（`test_*_hac_matches_r`）で、
+# 同じ`RTOL_STRICT`で確認する。
 NO_INTERCEPT_AND_CONFIDENCE_LEVEL_STRICT_COV_TYPES = [
     *NON_HAC_COV_TYPES,
     "cluster",
@@ -372,9 +366,12 @@ def test_no_intercept_hac_matches_r(crosscheck):
     assert res.param_names == ["x1", "x2", "x3"]
     _assert_close(res.params, ref["params"], f"{label} params")
     _assert_close(
-        res.std_errors, ref["std_errors"], f"{label} std_errors", rtol=RTOL_HAC
+        res.std_errors,
+        ref["std_errors"],
+        f"{label} std_errors",
+        rtol=RTOL_STRICT,
     )
-    _assert_fit_stats_close(res, ref, label, rtol=RTOL_HAC)
+    _assert_fit_stats_close(res, ref, label, rtol=RTOL_STRICT)
 
 
 @pytest.mark.parametrize(
@@ -431,9 +428,12 @@ def test_confidence_level_hac_matches_r(crosscheck):
     label = "confidence_level/hac/R"
     _assert_close(res.params, ref["params"], f"{label} params")
     _assert_close(
-        res.std_errors, ref["std_errors"], f"{label} std_errors", rtol=RTOL_HAC
+        res.std_errors,
+        ref["std_errors"],
+        f"{label} std_errors",
+        rtol=RTOL_STRICT,
     )
-    _assert_fit_stats_close(res, ref, label, rtol=RTOL_HAC)
+    _assert_fit_stats_close(res, ref, label, rtol=RTOL_STRICT)
 
 
 @pytest.mark.parametrize("cov_type", WOOLDRIDGE_COV_TYPES)

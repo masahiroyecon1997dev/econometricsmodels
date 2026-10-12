@@ -15,7 +15,7 @@
 3つは、testing-policy.md「相対誤差1e-8程度（厳密）を基本方針とする」に
 直接対応する**設計方針レベルで複数箇所に共通する値**のみを名前付き定数化した
 ものであり、下記辞書内で使う。
-`rtol_hac`・`atol_p_value`のように実測値に基づき個別に決めた値は、現在
+`rtol_solver`・`atol_p_value`のように実測値に基づき個別に決めた値は、現在
 たまたま複数エントリで同じ値でも共通定数化しない（`testing-policy.md`
 「一律に緩めると本来検出できるはずのバグを見逃す」、将来の再実測で値が
 乖離しうるため）。
@@ -190,10 +190,15 @@ TOLERANCES: dict[str, dict[str, float]] = {
         # （secant条件ガードによる履歴凍結バグ・`two_loop_recursion`のゼロ除算未ガード）
         # を発見・修正したが、この1点の乖離量（`diff=3.361856272532382e-09`）は
         # 両方の修正の前後で**完全に不変**だった（rust-reviewer指摘を受けて確認済み）。
-        # したがって既知の実装不具合とは無関係と判断した。`FaerBfgs`と同じく参照実装
-        # （`survreg`）とは異なる最適化経路に収束するために生じる、想定内の僅かな
-        # ズレと考えられる（詳細は`engine/src/nonlinear/CLAUDE.md`「FaerLbfgs」
-        # セクション参照）。
+        # したがって既知の実装不具合とは無関係と判断した。
+        # **再測定**: baseline相当のsolverシナリオで、`tol`を1e-8から1e-14、`max_iter`を
+        # 2000まで締めても、newton解（survregと6.9e-12で一致）との係数の最大相対差は
+        # bfgsが1.44e-8、lbfgsが2.32e-8のまま全く変わらず、反復数も11→12・9→10しか増えない。
+        # つまり収束基準の緩さが原因ではなく、準Newton法がコスト関数の丸め誤差の床で
+        # line searchの停滞検出により止まるため（`engine/src/nonlinear/CLAUDE.md`
+        # 「line search停滞を検出して終了する」）。到達できる精度の下限であり、
+        # 参照実装との差ではない。mroz（hours生スケール）で`tol`を締めても差が縮まない
+        # 同じ挙動も、同じ機序と整合する（未確認: 勾配ノルムの直接測定）。
         "rtol_solver": 2e-7,
         # solver="bfgs"/"lbfgs"を打ち切り重い・区間打ち切りシナリオ、opg/hc0/hc1、
         # クラスターと掛け合わせた組み合わせ（`_tobit_checks.SOLVER_COMBINATION_CASES`）。
@@ -239,57 +244,23 @@ TOLERANCES: dict[str, dict[str, float]] = {
         "rtol_solver_combination": 2e-6,
     },
     # --- 独立実装（R）とのクロスチェック ---
-    # classical/HC0-3/clusterは機械精度一致（実測1e-14程度）のためRTOL_STRICTを
-    # 適用、HACのみ小標本補正の慣習差により緩める。ATOLは絶対誤差フロア
-    # （ref値が0近傍のとき、相対誤差比較が意味を持たなくなるのを防ぐ）。
+    # classical/HC0-3/cluster/HACは機械精度一致（実測1e-14程度）のためRTOL_STRICTを
+    # 適用する。HACのR側は`NeweyWest(adjust = FALSE)`: 既定の`adjust = TRUE`は共分散全体に
+    # `n/(n-k)`（IVのWu-Hausmanの補助回帰は`n/(n-k_aug)`）を掛けるが、本実装・statsmodels・
+    # linearmodelsは掛けず、このスカラー倍だけが差の全てだった（標準誤差で
+    # `sqrt(n/(n-k))-1`、F統計量で`n/(n-k)-1`。n=500・k=4で0.4%・0.8%、n=40で4%・11%）。
+    # ATOLは絶対誤差フロア（ref値が0近傍のとき、相対誤差比較が意味を持たなくなるのを防ぐ）。
     "ols_crosscheck": {
         "rtol_strict": RTOL_MACHINE_PRECISION,
-        "rtol_hac": 1e-2,
         "atol": ATOL_CROSSCHECK_FLOOR,
-        # p_valuesのみ絶対誤差フロアで比較する（HAC/autocorrelatedシナリオで
-        # 裾確率がゼロ近傍に潰れ、相対誤差比較が意味を持たなくなるため。
-        # 実測最大絶対乖離~1.69e-7にマージン。IV/Logit/Probitクロスチェックの
-        # atol_f_pvalue/atol_p_valueと同じ理由）。
-        "atol_p_value": 1e-6,
     },
     "wls_crosscheck": {
         "rtol_strict": RTOL_MACHINE_PRECISION,
-        # HACの実測最大相対誤差が約4.3%（OLSの10倍程度）のためOLSより緩い。
-        "rtol_hac": 5e-2,
         "atol": ATOL_CROSSCHECK_FLOOR,
-        # ols_crosscheckと同じ理由（HAC/autocorrelatedで裾確率がゼロ近傍に
-        # 潰れるため）。値もOLSと同じ実測オーダーのため揃える。
-        "atol_p_value": 1e-6,
     },
     "iv_crosscheck": {
         "rtol_strict": RTOL_MACHINE_PRECISION,
-        "rtol_hac": 1e-2,
-        # small_nシナリオ（n=40, hac_lag=3）のみ実測乖離がrtol_hacを超える
-        # （SE最大3.8%）ため専用に緩めた値。
-        "rtol_hac_small_n": 0.1,
-        # f_p_valueは絶対誤差フロア（実測最大乖離1.523e-6にマージン）を使う。
-        "atol_f_pvalue": 1e-5,
-        # ols_crosscheckと同じ絶対誤差フロア（f_p_value以外の統計量向け）。
         "atol": ATOL_CROSSCHECK_FLOOR,
-        # p_values/wu_hausman_p_valueはhacケースで
-        # t分布/F分布の裾の確率がわずかな統計量の差を増幅する（f_p_valueと同じ
-        # 理由）。実測最大乖離0.00157（multi_endog/hac/p_values/const）に
-        # マージンを載せた絶対誤差フロア。hac以外はatol（1e-8）のまま。
-        "atol_hac_pvalue": 2e-3,
-        # conf_intもhacケースで実測乖離がrtol_hac（1%）を
-        # 超えることがある（実測最大乖離0.00856、multi_endog/hac/conf_lower/
-        # const）。絶対誤差フロアにマージンを載せた値。
-        "atol_hac_conf_int": 1.2e-2,
-        # wu_hausman_statisticはhacケースで実測乖離が
-        # rtol_hac（1%）を僅かに超えることがある（実測最大相対誤差1.01%、
-        # high_condition_number）。専用に緩めた相対誤差。
-        "rtol_hac_wu_hausman": 0.02,
-        # small_nシナリオ×wu_hausman_statistic/wu_hausman_p_valueはさらに
-        # 乖離が大きい（実測相対誤差: statistic 11.1%、p_value 16.8%。
-        # rtol_hac_small_nの10%も超える。augmented regressionが元のモデルより
-        # さらに1列多い分、小標本での不安定性が増幅されるためと考えられる）。
-        # 専用に緩めた相対誤差（両方で共用、実測最大値にマージン）。
-        "rtol_hac_wu_hausman_small_n": 0.2,
     },
     # GMMのRクロスチェック（momentfit）。全ケースで閉形式解の機械精度一致
     # （実測最大相対誤差: 係数2.1e-12、SE8.2e-11、z値8.3e-11、ロバストWald
@@ -475,10 +446,14 @@ TOLERANCES: dict[str, dict[str, float]] = {
             "cluster": 1e-2,
             "dk": 1e-2,
         },
-        # high_condition_numberシナリオのdkのみ、悪条件の設計行列で補助回帰の
-        # ロバスト共分散の丸め誤差が増幅され、機械精度から外れる（実測最大
-        # 相対誤差1.2e-7にマージン。他のcov_type・シナリオは機械精度一致）。
-        "rtol_hausman_ill_conditioned": 1e-6,
+        # high_condition_numberシナリオ（x1,x2の相関0.999）のみ。検定対象の2係数が準共線で
+        # 共分散部分行列がほぼ特異（det/(V00*V11)=6e-5）なため、入力の丸め誤差が条件数倍に
+        # 増幅され、機械精度から外れる。実測最大相対誤差: dkの統計量7.6e-9・p値9.8e-9
+        # （60桁演算の真値に対しplmは-3.8e-9。1ulpの入力摂動で3e-9程度動く丸め誤差の床）、
+        # classical/hc1/hc2/hc3/clusterは1e-10以下。約5倍のマージンを置く。以前はWald検定が
+        # 共分散の下三角だけを読み（行列積の丸めで非対称になった共分散の片側の誤差が
+        # そのまま出て）dkで1.2e-7に達していた（`wald_f_test`で両側の平均を取って解消）。
+        "rtol_hausman_ill_conditioned": 5e-8,
         # ハウスマン検定のp値は裾確率がゼロ近傍に潰れるケースが多く、
         # unbalancedシナリオでは絶対誤差フロアで比較する
         # （実測最大絶対誤差1.5e-8にマージン、他のRクロスチェックの

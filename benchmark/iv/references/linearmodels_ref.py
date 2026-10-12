@@ -55,14 +55,13 @@ t(df_resid)・F(q, df_resid)分布を使って独自に計算し直す（`debias
 基づく射影ベースの検定・`cov_type`非依存、`res.wooldridge_regression`:
 augmented regressionのWald検定・モデルの`cov_type`を使う）。本実装
 （`wald_test_last_columns`によるaugmented regression Wald検定）と数式が対応
-するのは名前に反して`wooldridge_regression`の方で、`classical`/`hc0`/`hc1`/
-`cluster`では`wooldridge_regression.stat / n_endog`が本実装の
-`wu_hausman_statistic`と機械精度で一致することを実測確認した（`wu_hausman()`は
+するのは名前に反して`wooldridge_regression`の方で、全cov_type（`classical`/`hc0`/`hc1`/
+`cluster`/`hac`）で`wooldridge_regression.stat / n_endog`が本実装の
+`wu_hausman_statistic`と機械精度で一致する（`wu_hausman()`は
 asymptotically equivalentな別定式化のため、classicalでも相対誤差1e-5〜1e-2程度の
-ズレが残り、一致しない）。`hac`（kernel）のみ`wooldridge_regression`でも一致しない
-（実測相対誤差が大きい、原因未特定）ため、`hac`の`wu_hausman_statistic`/
-`wu_hausman_p_value`は`None`にする（R `ivreg`クロスチェック実装時に別途確認、
-ユーザー確認済み）。
+ズレが残り、一致しない）。`hac`（kernel）は`debiased=False`で`fit`すると一致する
+（`debiased=True`だと補助回帰の`n/(n-k_aug)`が掛かり、n=40で統計量が0.9倍になる）。
+`hac`だけ一致しないとされていた時期があるが、その後は機械精度で一致する。
 
 `wu_hausman_p_value`のF分布p値計算には、主モデルの`df_resid`ではなく
 augmented regression自身の`df_resid`（= 主モデルの`df_resid - n_endog`、
@@ -297,11 +296,9 @@ def run(
     # （SSR差分に基づく射影ベースの検定、cov_type非依存の別定式化）ではなく
     # `res.wooldridge_regression`（augmented regression、モデルのcov_typeをそのまま
     # 使う）の方だと実測で判明した（`wu_hausman()`は理論上asymptotically
-    # equivalentだが有限標本では厳密には一致しない別定式化であり、classical/hc0/
-    # hc1/clusterでは`wooldridge_regression`をqで割った値が機械精度で一致する一方、
-    # `wu_hausman()`は相対誤差1e-5〜1e-2程度のズレが残る）。ただしhac（kernel）のみ
-    # `wooldridge_regression`でも一致しない（実測相対誤差大、原因未特定）ため
-    # `None`にする（モジュールdocstringの既知の未解決事項）。
+    # equivalentだが有限標本では厳密には一致しない別定式化であり、全cov_type
+    # （hacを含む）で`wooldridge_regression`をqで割った値が機械精度で一致する一方、
+    # `wu_hausman()`は相対誤差1e-5〜1e-2程度のズレが残る）。
     #
     # p値のF分布の分母自由度は、augmented regression（第一段階残差をn_endog列
     # 追加した拡張回帰）自身のdf_resid（= 主モデルのdf_resid - n_endog）を使う
@@ -319,11 +316,7 @@ def run(
     # ここでも同じくNoneにして揃える。
     n_endog = len(x_endog_cols)
     wu_hausman_df_resid_candidate = df_resid - n_endog
-    if (
-        not x_endog_cols
-        or cov_type == "hac"
-        or wu_hausman_df_resid_candidate <= 0
-    ):
+    if not x_endog_cols or wu_hausman_df_resid_candidate <= 0:
         wu_hausman_statistic = None
         wu_hausman_p_value = None
     else:

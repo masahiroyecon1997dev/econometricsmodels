@@ -241,7 +241,9 @@ $$
 ### 3.7 テスト
 
 - 許容誤差: classical/HC0-3/cluster/係数はRとの実測で相対誤差1e-14程度のため`rtol_strict=1e-8`（`tests/_tolerances.py`の`ols_crosscheck`）。
-  HACはRとの`prewhite`/`adjust`慣習差により実測0.4%程度のため`rtol_hac=1e-2`。
+  HACも同じ`rtol_strict`（R側は`NeweyWest(adjust = FALSE)`。既定の`adjust = TRUE`は共分散に
+  `n/(n-k)`を掛けるが本実装・statsmodelsは掛けず、このスカラー倍だけが差の全てで、
+  小標本（n=20）・高次元（k=21）を含む全合成シナリオで機械精度一致する）。
 - `tests/linear/` に4ファイルで役割分担する:
   `test_ols_api.py`（成功パスの構造・API・オプション反映・`predict()`/`augment()`）/
   `test_ols_validation.py`（`ValidationError`/`ComputationError`パス）/

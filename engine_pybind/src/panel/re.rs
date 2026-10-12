@@ -273,30 +273,42 @@ pub struct REResult {
     /// panel, so this equals the number of observations per entity.
     #[pyo3(get)]
     pub n_periods: Option<usize>,
-    /// Estimated variance of the idiosyncratic error, `sigma_eps^2` (`docs/spec/re-spec.md`
-    /// section 3.1).
+    /// Estimated variance of the idiosyncratic error, `sigma_eps^2`: the residual variance of
+    /// the internal fixed-effects regression with the same effect structure as the model
+    /// (entity for one-way, entity and time for two-way). Its degrees of freedom exclude the
+    /// regressors without within variation, as in `plm` (`docs/spec/re-spec.md` section 3.1).
     #[pyo3(get)]
     pub sigma2_eps: f64,
-    /// Estimated variance of the entity effect, `sigma_u^2` (a negative estimate is raised
-    /// to 0).
+    /// Estimated variance of the entity effect, `sigma_u^2` (Swamy-Arora; a negative estimate
+    /// is raised to 0). On an unbalanced panel it is the `linearmodels` estimator, which
+    /// differs from `plm`'s.
     #[pyo3(get)]
     pub sigma2_u: f64,
     /// Estimated variance of the time effect, `sigma_lambda^2`, for two-way effects (a negative
     /// estimate is raised to 0); `None` for one-way.
     #[pyo3(get)]
     pub sigma2_lambda: Option<f64>,
-    /// One-way quasi-demeaning weight `theta_i` of each entity, keyed by entity id (the ids in
-    /// sorted order; the same value for every entity on a balanced panel); `None` for two-way.
+    /// One-way quasi-demeaning weight of each entity,
+    /// `theta_i = 1 - sqrt(sigma_eps^2 / (T_i * sigma_u^2 + sigma_eps^2))` with `T_i` the number
+    /// of observations of the entity (0 when `sigma_u^2` is 0; different across entities only on
+    /// an unbalanced panel). The keys are the entity ids as strings, in lexicographic order (so
+    /// `"10"` precedes `"2"` for integer ids); `None` for two-way.
     #[pyo3(get)]
     pub theta: Option<BTreeMap<String, f64>>,
-    /// Two-way weight of the entity means in the GLS transformation (`theta_1`); `None` for
-    /// one-way.
+    /// Two-way weight of the entity means in the GLS transformation
+    /// `x - theta_1 * mean_i(x) - theta_2 * mean_t(x) + theta_3 * mean(x)`:
+    /// `theta_1 = 1 - sigma_eps / sigma_1` with `sigma_1^2 = sigma_eps^2 + T * sigma_u^2`;
+    /// `None` for one-way.
     #[pyo3(get)]
     pub theta_entity: Option<f64>,
-    /// Two-way weight of the time means (`theta_2`); `None` for one-way.
+    /// Two-way weight of the time means: `theta_2 = 1 - sigma_eps / sigma_2` with
+    /// `sigma_2^2 = sigma_eps^2 + N * sigma_lambda^2`; `None` for one-way.
     #[pyo3(get)]
     pub theta_time: Option<f64>,
-    /// Two-way weight of the overall mean (`theta_3`, not the product `theta_1 * theta_2`);
+    /// Two-way weight of the overall mean:
+    /// `theta_3 = theta_1 + theta_2 - 1 + sigma_eps / sigma_4` with
+    /// `sigma_4^2 = sigma_eps^2 + T * sigma_u^2 + N * sigma_lambda^2`. It is not the product
+    /// `theta_1 * theta_2`, and it is exactly 0 when `sigma_u^2` or `sigma_lambda^2` is 0;
     /// `None` for one-way.
     #[pyo3(get)]
     pub theta_total: Option<f64>,
@@ -540,6 +552,7 @@ pub(crate) fn fit(
     let estimator = ReEstimator::fit(input, effects, cov_type, options.confidence_level)
         .map_err(panel_error_to_pyerr)?;
     let ols = estimator.estimator();
+    let two_way_theta = estimator.two_way_theta();
 
     Ok(REResult {
         params: mat_to_vec(ols.params()),
@@ -570,9 +583,9 @@ pub(crate) fn fit(
                 .zip(theta.iter().copied())
                 .collect()
         }),
-        theta_entity: estimator.two_way_theta().map(|t| t.0),
-        theta_time: estimator.two_way_theta().map(|t| t.1),
-        theta_total: estimator.two_way_theta().map(|t| t.2),
+        theta_entity: two_way_theta.map(|t| t.0),
+        theta_time: two_way_theta.map(|t| t.1),
+        theta_total: two_way_theta.map(|t| t.2),
         cov_type: cov_type_lower,
         dk_bandwidth_used: estimator.dk_bandwidth_used().map(|bw| bw as i64),
         f_statistic: estimator.f_statistic(),

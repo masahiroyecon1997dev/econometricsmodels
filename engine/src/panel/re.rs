@@ -3423,6 +3423,30 @@ mod tests {
     }
 
     #[test]
+    fn one_way_exposed_variance_components_are_clipped_at_zero() {
+        // 個体効果の無いDGPでは負の推定が0に切り上げられ、公開される`σ_u²`は0、`θ_i`はすべて0
+        // （変換なし、pooled OLSに一致）。
+        let c = two_way_columns();
+        let y: Vec<f64> =
+            c.x1.iter()
+                .enumerate()
+                .map(|(r, v)| 2.0 * v + 0.1 * ((r * 7) % 5) as f64)
+                .collect();
+        let input = ReInput::from_columns(
+            &y,
+            std::slice::from_ref(&c.x1),
+            strings(&["x1"]),
+            &c.entity,
+            None,
+            "y".into(),
+        )
+        .unwrap();
+        let re = ReEstimator::fit(input, ReEffects::OneWay, ReCovType::Classical, 0.95).unwrap();
+        assert_eq!(re.sigma2_u(), 0.0);
+        assert!(re.theta_by_entity().unwrap().iter().all(|&t| t == 0.0));
+    }
+
+    #[test]
     fn exposed_variance_components_are_clipped_at_zero() {
         // 負の推定値は0に切り上げた値（θの計算に使った値）を返す。グループ効果が無いDGPでは
         // 両方0になり、θもすべて0（変換なし）。

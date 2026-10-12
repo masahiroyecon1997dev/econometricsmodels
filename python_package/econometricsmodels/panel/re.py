@@ -180,6 +180,12 @@ class REResults:
     FE call (used to estimate σ_ε²) makes `fit()` itself raise instead
     (e.g. a singleton entity); see `RE.fit()`'s docstring.
 
+    The estimated variance components (`sigma2_eps`, `sigma2_u`, and
+    `sigma2_lambda` for two-way effects) and the weights of the
+    quasi-demeaning that follow from them (`theta` for one-way,
+    `theta_entity`/`theta_time`/`theta_total` for two-way) are exposed as
+    properties; the ones that do not apply to the model are `None`.
+
     Args:
         raw: The estimation result object returned by `_lib.fit_re`
             (`_lib.REResult`).
@@ -191,6 +197,7 @@ class REResults:
 
     def __init__(self, raw: _lib.REResult) -> None:
         self._raw = raw
+        self._theta: dict[str, float] | None = None
 
     @property
     def param_names(self) -> list[str]:
@@ -280,16 +287,21 @@ class REResults:
 
     @property
     def sigma2_eps(self) -> float:
-        """Estimated variance of the idiosyncratic error, σ_ε² (the
-        residual variance of the internal fixed-effects regression, with
-        degrees of freedom that exclude the time-invariant regressors,
-        as in `plm`)."""
+        """Estimated variance of the idiosyncratic error, σ_ε²: the
+        residual variance of the internal fixed-effects regression with
+        the same effect structure as the model (entity for one-way,
+        entity and time for two-way). Its degrees of freedom exclude the
+        regressors without within variation (time-invariant ones), as in
+        `plm`; `linearmodels` counts them and so differs."""
         return self._raw.sigma2_eps
 
     @property
     def sigma2_u(self) -> float:
         """Estimated variance of the entity effect, σ_u² (Swamy-Arora;
-        a negative estimate is raised to 0)."""
+        a negative estimate is raised to 0). On an unbalanced panel it
+        is the `linearmodels` estimator (harmonic mean of the entity
+        sizes), which differs from `plm`'s by a few percent up to about
+        10 %; on a balanced panel the two agree."""
         return self._raw.sigma2_u
 
     @property
@@ -300,29 +312,43 @@ class REResults:
 
     @property
     def theta(self) -> dict[str, float] | None:
-        """One-way quasi-demeaning weight θ_i of each entity, keyed by
-        entity id (ids in sorted order): the data are transformed as
-        `x - θ_i · mean_i(x)`. θ_i depends on the number of observations
-        of the entity, so it differs across entities only on an
-        unbalanced panel. `None` for two-way effects (see `theta_entity`,
-        `theta_time` and `theta_total`)."""
-        return self._raw.theta
+        """One-way quasi-demeaning weight of each entity,
+        `θ_i = 1 - sqrt(σ_ε² / (T_i·σ_u² + σ_ε²))`, where `T_i` is the
+        number of observations of entity `i`: the data are transformed
+        as `x - θ_i · mean_i(x)`. θ_i is 0 when σ_u² is 0 (pooled OLS)
+        and it differs across entities only on an unbalanced panel.
+
+        The keys are the entity ids as strings, in lexicographic order
+        (so `"10"` precedes `"2"` for integer ids, and `res.theta[1]`
+        raises `KeyError`; use `res.theta["1"]`). The same dictionary is
+        returned on every access: do not modify it. `None` for two-way
+        effects (see `theta_entity`, `theta_time` and `theta_total`)."""
+        # 個体数に比例する辞書のため、最初の参照で一度だけ作る。
+        if self._theta is None and self._raw.theta is not None:
+            self._theta = self._raw.theta
+        return self._theta
 
     @property
     def theta_entity(self) -> float | None:
         """Two-way weight θ₁ of the entity means in the GLS
-        transformation `x - θ₁·x̄ᵢ - θ₂·x̄ₜ + θ₃·x̄`. `None` for one-way."""
+        transformation `x - θ₁·x̄ᵢ - θ₂·x̄ₜ + θ₃·x̄`:
+        `θ₁ = 1 - σ_ε/σ₁` with `σ₁² = σ_ε² + T·σ_u²` (`T` periods).
+        It is 0 when σ_u² is 0. `None` for one-way."""
         return self._raw.theta_entity
 
     @property
     def theta_time(self) -> float | None:
-        """Two-way weight θ₂ of the time means. `None` for one-way."""
+        """Two-way weight θ₂ of the time means: `θ₂ = 1 - σ_ε/σ₂` with
+        `σ₂² = σ_ε² + N·σ_λ²` (`N` entities). It is 0 when σ_λ² is 0.
+        `None` for one-way."""
         return self._raw.theta_time
 
     @property
     def theta_total(self) -> float | None:
-        """Two-way weight θ₃ of the overall mean. It is not the product
-        θ₁·θ₂ (it is 0 when σ_u² or σ_λ² is 0). `None` for one-way."""
+        """Two-way weight θ₃ of the overall mean:
+        `θ₃ = θ₁ + θ₂ - 1 + σ_ε/σ₄` with
+        `σ₄² = σ_ε² + T·σ_u² + N·σ_λ²`. It is not the product θ₁·θ₂, and
+        it is exactly 0 when σ_u² or σ_λ² is 0. `None` for one-way."""
         return self._raw.theta_total
 
     @property

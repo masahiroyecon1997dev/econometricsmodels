@@ -34,7 +34,7 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-from _assertions import assert_close, assert_dict_close
+from _assertions import assert_close, assert_dict_close, assert_inference_close
 from _constants import DATA_DIR
 from _helpers import load_wooldridge_dataset
 from _tolerances import TOLERANCES
@@ -83,18 +83,14 @@ def _check(res, ref: dict, n_clusters: int, label: str) -> None:
     assert res.stat_df == n_clusters - 1, label
     assert res.f_df_denom == n_clusters - 1, label
 
-    _assert_dict_close(res.params, ref["params"], f"{label}/params")
-    _assert_dict_close(
-        res.std_errors, ref["std_errors"], f"{label}/std_errors"
+    assert_inference_close(
+        res,
+        ref,
+        label,
+        rtol=RTOL,
+        atol=ATOL,
+        p_value_check=_assert_p_dict_close,
     )
-    _assert_dict_close(
-        res.test_stats, ref["test_stats"], f"{label}/test_stats"
-    )
-    _assert_p_dict_close(res.p_values, ref["p_values"], f"{label}/p_values")
-    for name, (ref_lower, ref_upper) in ref["conf_int"].items():
-        our_lower, our_upper = res.conf_int[name]
-        _assert_close(our_lower, ref_lower, f"{label}/conf_lower/{name}")
-        _assert_close(our_upper, ref_upper, f"{label}/conf_upper/{name}")
 
     _assert_close(res.f_statistic, ref["f_statistic"], f"{label}/f_statistic")
     _assert_p_close(res.f_p_value, ref["f_p_value"], f"{label}/f_p_value")

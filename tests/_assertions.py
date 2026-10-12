@@ -7,6 +7,8 @@
   ファイルは`functools.partial`で許容誤差を束縛して`_assert_close`/
   `_assert_dict_close`として使う（`_assert_close`はスカラー版、
   `_assert_dict_close`は辞書版で統一）。
+- `assert_inference_close`: 推論の5ブロック（`params`・`std_errors`・`test_stats`・
+  `p_values`・`conf_int`）の比較。許容誤差を係数・信頼区間端点・p値で分けられる。
 - `assert_fields_close`: 結果の属性（適合度統計量等）をフィクスチャの同名キーと
   まとめて比較する。属性名とキーが異なるときは`(属性名, キー)`で渡す。
 - `check_margeff`: Logit/Probitの限界効果6統計量の比較。
@@ -20,7 +22,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 
 from _constants import MARGEFF_AT
 
@@ -33,6 +35,66 @@ def assert_close(
     assert diff <= tol, (
         f"{label}: ours={ours!r}, ref={ref!r}, diff={diff!r} > tol={tol!r}"
     )
+
+
+def assert_inference_close(
+    res,
+    ref: dict,
+    label: str,
+    *,
+    rtol: float,
+    atol: float,
+    rtol_params: float | None = None,
+    rtol_conf_int: float | None = None,
+    p_value_check: Callable[[dict[str, float], dict[str, float], str], None]
+    | None = None,
+) -> None:
+    """推論の5ブロック（`params`・`std_errors`・`test_stats`・`p_values`・
+    `conf_int`）をリファレンスと比較する。
+
+    `rtol_params`/`rtol_conf_int`は係数・信頼区間端点の相対許容誤差の個別指定
+    （`None`なら`rtol`）。p値を別の基準で比べるときは、`(ours, ref, label)`を取る
+    `p_value_check`を渡す（`None`なら`rtol`/`atol`で他の統計量と同じに比べる）。
+    """
+    rtol_coef = rtol if rtol_params is None else rtol_params
+    rtol_ci = rtol if rtol_conf_int is None else rtol_conf_int
+    assert_dict_close(
+        res.params, ref["params"], f"{label}/params", rtol=rtol_coef, atol=atol
+    )
+    for field in ("std_errors", "test_stats"):
+        assert_dict_close(
+            getattr(res, field),
+            ref[field],
+            f"{label}/{field}",
+            rtol=rtol,
+            atol=atol,
+        )
+    if p_value_check is None:
+        assert_dict_close(
+            res.p_values,
+            ref["p_values"],
+            f"{label}/p_values",
+            rtol=rtol,
+            atol=atol,
+        )
+    else:
+        p_value_check(res.p_values, ref["p_values"], f"{label}/p_values")
+    for name, (ref_lower, ref_upper) in ref["conf_int"].items():
+        our_lower, our_upper = res.conf_int[name]
+        assert_close(
+            our_lower,
+            ref_lower,
+            f"{label}/conf_lower/{name}",
+            rtol=rtol_ci,
+            atol=atol,
+        )
+        assert_close(
+            our_upper,
+            ref_upper,
+            f"{label}/conf_upper/{name}",
+            rtol=rtol_ci,
+            atol=atol,
+        )
 
 
 def assert_fields_close(

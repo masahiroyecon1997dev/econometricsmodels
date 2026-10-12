@@ -37,7 +37,12 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-from _assertions import assert_close, assert_dict_close, assert_fields_close
+from _assertions import (
+    assert_close,
+    assert_dict_close,
+    assert_fields_close,
+    assert_inference_close,
+)
 from _constants import DATA_DIR
 from _helpers import load_wooldridge_dataset
 from _tolerances import TOLERANCES
@@ -69,19 +74,7 @@ _assert_fields_close = partial(assert_fields_close, rtol=RTOL, atol=ATOL)
 
 
 def _check_result(res, ref: dict, label: str) -> None:
-    _assert_dict_close(res.params, ref["params"], f"{label}/params")
-    _assert_dict_close(
-        res.std_errors, ref["std_errors"], f"{label}/std_errors"
-    )
-    _assert_dict_close(
-        res.test_stats, ref["test_stats"], f"{label}/test_stats"
-    )
-    _assert_dict_close(res.p_values, ref["p_values"], f"{label}/p_values")
-
-    for name, (ref_lower, ref_upper) in ref["conf_int"].items():
-        our_lower, our_upper = res.conf_int[name]
-        _assert_close(our_lower, ref_lower, f"{label}/conf_lower/{name}")
-        _assert_close(our_upper, ref_upper, f"{label}/conf_upper/{name}")
+    assert_inference_close(res, ref, label, rtol=RTOL, atol=ATOL)
 
     assert res.n_obs == ref["n_obs"], f"{label}/n_obs"
     assert res.df_resid == ref["df_resid"], f"{label}/df_resid"

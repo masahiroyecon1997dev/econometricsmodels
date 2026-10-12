@@ -36,6 +36,7 @@ from _assertions import (
     assert_close,
     assert_dict_close,
     assert_fields_close,
+    assert_inference_close,
     assert_params_table_matches_attributes,
     assert_same_estimates,
     check_margeff,
@@ -1246,10 +1247,8 @@ class BinaryChoiceReferenceConfig:
     def assert_close(self, ours: float, ref: float, label: str) -> None:
         assert_close(ours, ref, label, rtol=self.rtol, atol=self.atol)
 
-    def assert_dict_close(
-        self, ours: dict[str, float], ref: dict[str, float], label: str
-    ) -> None:
-        assert_dict_close(ours, ref, label, rtol=self.rtol, atol=self.atol)
+    def assert_inference_close(self, res, ref: dict, label: str) -> None:
+        assert_inference_close(res, ref, label, rtol=self.rtol, atol=self.atol)
 
     def assert_fields_close(
         self,
@@ -1276,21 +1275,7 @@ class BinaryChoiceReferenceConfig:
 def check_result(
     config: BinaryChoiceReferenceConfig, res, ref: dict, label: str
 ) -> None:
-    config.assert_dict_close(res.params, ref["params"], f"{label}/params")
-    config.assert_dict_close(
-        res.std_errors, ref["std_errors"], f"{label}/std_errors"
-    )
-    config.assert_dict_close(
-        res.test_stats, ref["test_stats"], f"{label}/test_stats"
-    )
-    config.assert_dict_close(
-        res.p_values, ref["p_values"], f"{label}/p_values"
-    )
-
-    for name, (ref_lower, ref_upper) in ref["conf_int"].items():
-        our_lower, our_upper = res.conf_int[name]
-        config.assert_close(our_lower, ref_lower, f"{label}/conf_lower/{name}")
-        config.assert_close(our_upper, ref_upper, f"{label}/conf_upper/{name}")
+    config.assert_inference_close(res, ref, label)
 
     config.assert_fields_close(
         res,
@@ -1320,7 +1305,13 @@ def check_result(
             f"{label}/pred_table/{i}"
         )
 
-    if ref["margeff"] is not None:
+    # statsmodelsはOPG共分散の限界効果を持たず、フィクスチャは`opg`のときだけ
+    # `margeff`が`None`。それ以外は必ず持つ（欠けたフィクスチャを黙ってスキップ
+    # しないよう、有無を`cov_type`から決める）。
+    if res.cov_type == "opg":
+        assert ref["margeff"] is None, f"{label}/margeff"
+    else:
+        assert ref["margeff"] is not None, f"{label}/margeff"
         config.check_margeff(res, ref["margeff"], label)
 
 

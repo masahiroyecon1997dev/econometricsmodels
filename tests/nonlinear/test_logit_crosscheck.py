@@ -25,11 +25,17 @@ Note:
 from __future__ import annotations
 
 import json
+from functools import partial
 from pathlib import Path
 
 import polars as pl
 import pytest
-from _assertions import check_margeff
+from _assertions import (
+    assert_dict_close,
+    assert_fields_close,
+    assert_inference_close,
+    check_margeff,
+)
 from _constants import APPLE_CLUSTER, APPLE_X, DATA_DIR, MROZ_X
 from _helpers import (
     load_apple_adoption_dataset,
@@ -71,72 +77,39 @@ def fixtures() -> dict:
     return json.loads(FIXTURE_PATH.read_text())
 
 
-def _assert_close(
-    ours: float,
-    ref: float,
-    label: str,
-    rtol: float = RTOL,
-    atol: float = ATOL,
-) -> None:
-    diff = abs(ours - ref)
-    tol = max(rtol * abs(ref), atol)
-    assert diff <= tol, (
-        f"{label}: ours={ours!r}, ref={ref!r}, diff={diff!r} > tol={tol!r}"
-    )
-
-
-def _assert_dict_close(
-    ours: dict[str, float],
-    ref: dict[str, float],
-    label: str,
-    atol: float = ATOL,
-) -> None:
-    for name, ref_val in ref.items():
-        _assert_close(ours[name], ref_val, f"{label}/{name}", atol=atol)
-
-
 def _check_result(res, ref: dict, label: str) -> None:
-    _assert_dict_close(res.params, ref["params"], f"{label}/params")
-    _assert_dict_close(
-        res.std_errors, ref["std_errors"], f"{label}/std_errors"
+    assert_inference_close(
+        res,
+        ref,
+        label,
+        rtol=RTOL,
+        atol=ATOL,
+        p_value_check=partial(assert_dict_close, rtol=RTOL, atol=ATOL_P_VALUE),
     )
-    _assert_dict_close(
-        res.test_stats, ref["test_stats"], f"{label}/test_stats"
+    assert_fields_close(
+        res,
+        ref,
+        (
+            "log_likelihood",
+            "log_likelihood_null",
+            "aic",
+            "bic",
+            "lr_statistic",
+            "lr_p_value",
+            "pseudo_r_squared",
+        ),
+        label,
+        rtol=RTOL,
+        atol=ATOL,
     )
-    _assert_dict_close(
-        res.p_values, ref["p_values"], f"{label}/p_values", atol=ATOL_P_VALUE
+    check_margeff(
+        res,
+        ref["margeff"],
+        label,
+        rtol=RTOL,
+        atol=ATOL,
+        atol_p_value=ATOL_P_VALUE,
     )
-    for name, (ref_lower, ref_upper) in ref["conf_int"].items():
-        our_lower, our_upper = res.conf_int[name]
-        _assert_close(
-            our_lower,
-            ref_lower,
-            f"{label}/conf_lower/{name}",
-        )
-        _assert_close(
-            our_upper,
-            ref_upper,
-            f"{label}/conf_upper/{name}",
-        )
-    for field in (
-        "log_likelihood",
-        "log_likelihood_null",
-        "aic",
-        "bic",
-        "lr_statistic",
-        "lr_p_value",
-        "pseudo_r_squared",
-    ):
-        _assert_close(getattr(res, field), ref[field], f"{label}/{field}")
-    if "margeff" in ref:
-        check_margeff(
-            res,
-            ref["margeff"],
-            label,
-            rtol=RTOL,
-            atol=ATOL,
-            atol_p_value=ATOL_P_VALUE,
-        )
 
 
 @pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)

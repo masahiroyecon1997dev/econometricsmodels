@@ -62,7 +62,7 @@ from pathlib import Path
 import _error_messages as msgs
 import polars as pl
 import pytest
-from _assertions import assert_close, assert_dict_close
+from _assertions import assert_close, assert_dict_close, assert_inference_close
 from _constants import DATA_DIR
 from _error_messages import escaped
 from _helpers import load_wooldridge_dataset
@@ -195,31 +195,24 @@ def _check_result(
 ) -> None:
     coef_rtol = rtol if coef_rtol is None else coef_rtol
     f_rtol = rtol if f_rtol is None else f_rtol
-    _assert_dict_close(
-        res.params, ref["params"], f"{label}/params", rtol=coef_rtol
-    )
-    _assert_dict_close(
-        res.std_errors, ref["std_errors"], f"{label}/std_errors", rtol=rtol
-    )
-    _assert_dict_close(
-        res.test_stats, ref["test_stats"], f"{label}/test_stats", rtol=rtol
-    )
-    for name, p_ref in ref["p_values"].items():
-        _assert_p_close(
-            res.p_values[name],
-            p_ref,
-            f"{label}/p_values/{name}",
-            balanced=balanced,
-        )
 
-    for name, (ref_lower, ref_upper) in ref["conf_int"].items():
-        our_lower, our_upper = res.conf_int[name]
-        _assert_close(
-            our_lower, ref_lower, f"{label}/conf_lower/{name}", rtol=rtol
-        )
-        _assert_close(
-            our_upper, ref_upper, f"{label}/conf_upper/{name}", rtol=rtol
-        )
+    def p_value_check(
+        ours: dict[str, float], ref_p: dict[str, float], p_label: str
+    ) -> None:
+        for name, p_ref in ref_p.items():
+            _assert_p_close(
+                ours[name], p_ref, f"{p_label}/{name}", balanced=balanced
+            )
+
+    assert_inference_close(
+        res,
+        ref,
+        label,
+        rtol=rtol,
+        atol=ATOL,
+        rtol_params=coef_rtol,
+        p_value_check=p_value_check,
+    )
 
     # F統計量はcov_typeに連動するWald検定（plm::pwaldtest(vcov=...)の統計量と
     # t検定と同じ分母自由度から計算したp値）。

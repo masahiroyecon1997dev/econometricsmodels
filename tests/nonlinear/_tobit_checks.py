@@ -26,7 +26,11 @@ import json
 from pathlib import Path
 
 import polars as pl
-from _assertions import assert_close, assert_dict_close, assert_fields_close
+from _assertions import (
+    assert_close,
+    assert_fields_close,
+    assert_inference_close,
+)
 from _constants import DATA_DIR, MARGEFF_AT
 from _helpers import load_wooldridge_dataset
 from econometricsmodels import Tobit, TobitOptions
@@ -341,13 +345,6 @@ def check_result(
         - ``rtol_conf_int`` : 係数の信頼区間端点（0 近傍で相対誤差が増幅するため
           さらに個別扱いにできる）。
     """
-    assert_dict_close(
-        res.params,
-        ref["params"],
-        f"{label}/params",
-        rtol=rtol_point,
-        atol=atol,
-    )
     assert_close(
         res.sigma,
         ref["sigma"],
@@ -367,43 +364,15 @@ def check_result(
     assert res.df_model == ref["df_model"], f"{label}/df_model"
     assert res.df_resid == ref["df_resid"], f"{label}/df_resid"
 
-    assert_dict_close(
-        res.std_errors,
-        ref["std_errors"],
-        f"{label}/std_errors",
+    assert_inference_close(
+        res,
+        ref,
+        label,
         rtol=rtol_inference,
         atol=atol,
+        rtol_params=rtol_point,
+        rtol_conf_int=rtol_conf_int,
     )
-    assert_dict_close(
-        res.test_stats,
-        ref["test_stats"],
-        f"{label}/test_stats",
-        rtol=rtol_inference,
-        atol=atol,
-    )
-    assert_dict_close(
-        res.p_values,
-        ref["p_values"],
-        f"{label}/p_values",
-        rtol=rtol_inference,
-        atol=atol,
-    )
-    for name, (ref_lower, ref_upper) in ref["conf_int"].items():
-        our_lower, our_upper = res.conf_int[name]
-        assert_close(
-            our_lower,
-            ref_lower,
-            f"{label}/conf_lower/{name}",
-            rtol=rtol_conf_int,
-            atol=atol,
-        )
-        assert_close(
-            our_upper,
-            ref_upper,
-            f"{label}/conf_upper/{name}",
-            rtol=rtol_conf_int,
-            atol=atol,
-        )
 
     if ref["wald_statistic"] is not None:
         assert_close(

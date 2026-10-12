@@ -101,7 +101,7 @@ def run_momentfit_r(
         hac_lag: `weight_type` または `cov_type` が hac のときのラグ数
             （重みと共分散で共用）。未指定なら本実装の自動選択式
             （`hac_auto_lag(n)`、`n`はCSVの行数）。使ったラグは結果の`hac_lag`に
-            残る。
+            残る。どちらもhacでないときは無視され、結果に`hac_lag`は入らない。
     """
     lag = (
         resolve_hac_lag(csv_path, hac_lag)

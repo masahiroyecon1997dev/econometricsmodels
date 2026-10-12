@@ -163,7 +163,7 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
 
     # 自由度1境界（df_resid=1ちょうど）。generate_iv_fixtures.pyのdf1と
     # 同じ構成。n=3ではHACの自動ラグ選択式（hac_auto_lag）が0を返す可能性が
-    # あるため、他シナリオと同じくその値をそのまま使う。
+    # あるが、Rラッパー（resolve_hac_lag）が他シナリオと同じくその値をそのまま使う。
     df1_csv = DATA_DIR / "iv_baseline_df1.csv"
     df1_formula = _ivreg_formula([], ["endog1"], ["z1"])
     fixtures["df1"] = {}

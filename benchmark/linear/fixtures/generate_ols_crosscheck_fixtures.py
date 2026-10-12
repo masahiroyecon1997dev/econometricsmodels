@@ -361,7 +361,7 @@ def build_fixtures() -> dict:
         "note": (
             "perfect_multicollinearityシナリオはここに含まない"
             "（ComputationErrorの発生確認のみ、テストコード側で対応）。"
-            "HACはR側のみ（explicit lagを本実装の自動ラグ式に合わせて指定）。"
+            "HACはR側のみ（ラグは本実装の自動ラグ式に合わせてRラッパーが決め、`hac_lag`に残す）。"
             "clusterはR側のみ確認。baselineシナリオで均等疑似グループ（行番号%10）"
             "に加え、不均衡グループ（cluster_imbalanced）・クラスタ数境界G=2"
             "（cluster_g2）、wage1の実カテゴリ列region（northcen/south/west"

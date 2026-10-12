@@ -3,7 +3,9 @@
 `run_r`: コマンドライン組み立て → `subprocess.run` → JSON parse の骨格。
 cov_type 固有の末尾引数（cluster / hac_lag / weight_col / link 等）は
 R スクリプトの位置引数の契約が系統ごとに違うため、呼び出し側（系統別の
-`references/r.py`）が `extra_args` として組み立てて渡す。
+`references/r.py`）が `extra_args` として組み立てて渡す。HACのラグは
+`resolve_hac_lag`が未指定なら本実装の自動選択式で決める（系統別ラッパーが
+呼び、結果の`hac_lag`にも残す）。
 
 パラメータ名の正規化（`normalize_names`）は`benchmark/common/reference/
 normalize.py`に分離されている（statsmodels主リファレンス側でも同じ正規化が
@@ -41,7 +43,9 @@ def resolve_hac_lag(csv_path: Path, hac_lag: int | None) -> int:
     """
     if hac_lag is not None:
         return hac_lag
-    return hac_auto_lag(pl.read_csv(csv_path).height)
+    return hac_auto_lag(
+        pl.scan_csv(csv_path).select(pl.len()).collect().item()
+    )
 
 
 def run_r(

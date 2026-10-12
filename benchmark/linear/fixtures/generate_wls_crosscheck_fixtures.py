@@ -316,7 +316,7 @@ def build_fixtures() -> dict:
             "scale_varianceはOLSと同じ理由でロバストWald検定の"
             "共分散部分行列が全cov_typeで数値的にほぼ特異になる、"
             "WLSでも実測確認済み）。"
-            "HACはR側のみ（explicit lagを本実装の自動ラグ式に合わせて指定）。"
+            "HACはR側のみ（ラグは本実装の自動ラグ式に合わせてRラッパーが決め、`hac_lag`に残す）。"
             "clusterはR側のみ確認。baselineシナリオで疑似グループ（行番号%10）"
             "に加え、不均衡グループ（cluster_imbalanced）・クラスタ数境界G=2"
             "（cluster_g2）を含む（OLSの同種ケース相当。グルーピングパターンの"

@@ -484,8 +484,8 @@ fn parse_variance_method(value: &str) -> PyResult<VarianceMethod> {
         "swamy_arora" => Ok(VarianceMethod::SwamyArora),
         "wallace_hussain" => Ok(VarianceMethod::WallaceHussain),
         "amemiya" => Ok(VarianceMethod::Amemiya),
-        other => Err(ValidationError::new_err(format!(
-            "unknown variance_method: '{other}'. Expected one of 'swamy_arora', \
+        _ => Err(ValidationError::new_err(format!(
+            "unknown variance_method: '{value}'. Expected one of 'swamy_arora', \
              'wallace_hussain', or 'amemiya'"
         ))),
     }

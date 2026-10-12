@@ -12,7 +12,7 @@
 //! `Q_ts = Σ_t N_t ē_t²`。
 //!
 //! - **バランス**（1-wayは全個体の観測数が等しい、2-wayは常に）: `plm`の`dfcor = 1`の簡約形。
-//!   `σ_ε² = Q_w/(O - N - (T - 1))`（1-wayは`O - N`）、`σ_u² = Q_id/(T·N) - σ_ε²/T`、
+//!   `σ_ε² = Q_w/(O - N - T + 1)`（1-wayは`O - N`）、`σ_u² = Q_id/(T·N) - σ_ε²/T`、
 //!   `σ_λ² = Q_ts/(N·T) - σ_ε²/N`。負の`σ_u²`・`σ_λ²`は0に切り上げる。
 //! - **不均衡**（1-wayのみ）: `plm`の`dfcor = 3`のトレース項の式。
 //!   `M·(σ_ε², σ_u²)ᵀ = (Q_w, Q_id)ᵀ`を2×2の連立として解く。
@@ -280,9 +280,8 @@ fn pooled_trace_moments(input: &ReInput, entity: &GroupCodes, fit: &LeastSquares
     let p = k + 1;
     let means = entity_means(input.y(), input.x(), entity);
     let z_bar = mean_vectors(&means, true);
-    let t: Vec<f64> = means.t.clone();
-    let t_squared: Vec<f64> = t.iter().map(|v| v * v).collect();
-    let b = weighted_outer_sum(&z_bar, &t, p);
+    let t_squared: Vec<f64> = means.t.iter().map(|v| v * v).collect();
+    let b = weighted_outer_sum(&z_bar, &means.t, p);
     let s = weighted_outer_sum(&z_bar, &t_squared, p);
 
     // Z'Z（観測ごとの外積の和）。
@@ -616,7 +615,61 @@ mod tests {
     }
 
     #[test]
+    fn negative_sigma2_eps_from_the_trace_form_is_rejected_through_fit() {
+        // 観測数2・6・2の不均衡パネル。y は個体間でほぼ決まり、プールドOLSの残差から作る
+        // トレース形の連立が負の`σ_ε²`（約-1.09）を返す。`plm`は0に切り上げてθがNaNになるが、
+        // 本実装は拒否する。閉形式（バランス）とAmemiya（`Q_w ≥ 0`を正の自由度で割る）は
+        // 負にならず、0になるのは完全適合のときだけ。
+        let y = [0.0, 1.0, 3.0, 3.0, 4.0, 4.0, 3.0, 3.0, 6.0, 7.0];
+        let x1 = [2.0, 1.0, 0.0, -2.0, -1.0, -3.0, -3.0, -3.0, -2.0, 2.0];
+        let entity: Vec<String> = [0, 0, 1, 1, 1, 1, 1, 1, 2, 2]
+            .iter()
+            .map(|i| format!("e{i}"))
+            .collect();
+        let build = || {
+            ReInput::from_columns(
+                &y,
+                &[x1.to_vec()],
+                vec!["x1".into()],
+                &entity,
+                None,
+                "y".into(),
+            )
+            .unwrap()
+        };
+        let err = ReEstimator::fit_with_variance_method(
+            build(),
+            ReEffects::OneWay,
+            ReCovType::Classical,
+            VarianceMethod::WallaceHussain,
+            0.95,
+        )
+        .unwrap_err();
+        match err {
+            PanelError::NonPositiveIdiosyncraticVariance { method, sigma2_eps } => {
+                assert_eq!(method, "wallace_hussain");
+                assert!(sigma2_eps < 0.0, "{sigma2_eps}");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+        // 同じデータでもAmemiyaは推定できる。
+        assert!(
+            ReEstimator::fit_with_variance_method(
+                build(),
+                ReEffects::OneWay,
+                ReCovType::Classical,
+                VarianceMethod::Amemiya,
+                0.95,
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
     fn singular_moment_system_is_a_computation_failure() {
+        // 実入力でこの連立が特異になる例は見つかっていない（Amemiyaは`M_w,η = 0`で行列式が
+        // `(O - N - K)(O - ΣT_i²/O) > 0`、Wallace-Hussainも一般の設計では非特異）。到達不能と
+        // 断定せず、数値的に特異な連立を黙って解かないための防御として残す。
         // 2行が比例する連立（トレース形の`M`が特異）。
         let result = solve_two_by_two((1.0, 2.0, 2.0, 4.0), (1.0, 1.0), VarianceMethod::Amemiya);
         assert!(matches!(

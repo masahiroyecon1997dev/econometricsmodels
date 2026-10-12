@@ -371,7 +371,7 @@ FE has no `predict()`, `augment()`, or `summary()`.
 
 ## RE (random effects panel regression)
 
-`RE` estimates a random effects (Swamy-Arora GLS) panel regression, entity-direction only (unlike FE, two-way random effects are out of scope). Unlike FE, RE has an intercept, and a Hausman test comparing against the equivalent one-way FE specification is computed automatically as part of `fit()`.
+`RE` estimates a random effects (GLS) panel regression: entity-direction effects, or entity and time effects on a balanced panel when `REOptions.time` is set. The variance components are estimated by Swamy-Arora by default; `REOptions(variance_method="wallace_hussain")` or `"amemiya"` selects the other estimators. Unlike FE, RE has an intercept, and a Hausman test comparing against the equivalent FE specification is computed automatically as part of `fit()`.
 
 ```python
 from econometricsmodels import RE

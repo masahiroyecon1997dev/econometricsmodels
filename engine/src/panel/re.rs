@@ -1821,8 +1821,10 @@ impl ReEstimator {
         self.variance_method
     }
 
-    /// 個体特有でない誤差の分散`σ_ε²`（`re-spec.md`3.1節。`SwamyArora`・`Amemiya`は
-    /// within回帰の残差分散型、`WallaceHussain`はプールドOLS残差のwithin二乗和型、3.1.2節）。
+    /// 個体特有でない誤差の分散`σ_ε²`（`re-spec.md`3.1節）。`SwamyArora`はwithin回帰の残差分散
+    /// （分母は`df_resid`）。`WallaceHussain`・`Amemiya`は1段目の残差のwithin二乗和を、バランスなら
+    /// `O - N`（2-wayは`O - N - T + 1`。説明変数の数を引かない）、不均衡の1-wayならトレース形の
+    /// 連立で割る（3.1.2節）。
     pub fn sigma2_eps(&self) -> f64 {
         self.sigma2_eps
     }

@@ -114,17 +114,18 @@ class RE:
                 range, an unknown `cov_type` (or `cov_type="hc0"`,
                 unsupported for RE), `dk_time` specified with a
                 `cov_type` other than `"dk"`, a singleton entity group
-                (raised by the internal FE regression that RE's σ_ε²
-                estimation delegates to), a
-                `cov_type="dk"` request with `dk_time` unset, or
-                `cov_type="dk"` with no more unique time periods than
-                regressors: the Driscoll-Kraay covariance has rank at
-                most T-1, so the Hausman test cannot be computed, or
+                (raised by RE's internal FE regression, which is built
+                for every `variance_method`), a `cov_type="dk"` request
+                with `dk_time` unset, `cov_type="dk"` with no more
+                unique time periods than regressors (the
+                Driscoll-Kraay covariance has rank at most T-1, so the
+                Hausman test cannot be computed),
                 `cov_type="cluster"` with no more clusters than the
                 slopes of the Hausman auxiliary regression, an unknown
                 `variance_method`, or `variance_method="amemiya"` with a
-                regressor that has no within variation). A subclass of
-                `ValueError`.
+                regressor that has no within variation (time-invariant;
+                for two-way effects, varying in at most one
+                dimension)). A subclass of `ValueError`.
             ComputationError: A problem was detected during
                 computation (e.g. a singular quasi-demeaned design
                 matrix, in particular a time-invariant regressor that
@@ -185,8 +186,10 @@ class REResults:
     singular robust covariance such as too few clusters or periods for
     the auxiliary slopes), `fit()` raises
     `ValidationError`/`ComputationError`. A failure in RE's own internal
-    FE call (used to estimate σ_ε²) makes `fit()` itself raise instead
-    (e.g. a singleton entity); see `RE.fit()`'s docstring.
+    FE call (used for the Hausman test, the within R² and the
+    Swamy-Arora and Amemiya variance components) makes `fit()` itself
+    raise instead (e.g. a singleton entity); see `RE.fit()`'s
+    docstring.
 
     The estimated variance components (`sigma2_eps`, `sigma2_u`, and
     `sigma2_lambda` for two-way effects) and the weights of the
@@ -314,9 +317,14 @@ class REResults:
         variation (time-invariant ones), as in `plm`, whereas
         `linearmodels` counts them and so differs. Wallace-Hussain and
         Amemiya: the within sum of squares of the first-stage residuals
-        divided by `n - N` (`n - N - T + 1` for two-way effects) on a
-        balanced panel, and the trace-term form of `plm` on an
-        unbalanced one-way panel."""
+        divided by `n - N` (`n - N - T + 1` for two-way effects; the
+        number of regressors is not subtracted) on a balanced panel,
+        and the trace-term form of `plm` on an unbalanced one-way
+        panel. A one-way panel is balanced here when every entity has
+        the same number of observations, and a two-way panel always is.
+        The two forms give different values even on the same balanced
+        panel, so the values are not continuous when a row is
+        dropped."""
         return self._raw.sigma2_eps
 
     @property
@@ -437,7 +445,7 @@ class REResults:
     @property
     def r_squared_within(self) -> float:
         """Within R² (based on the demeaned variables, θ=1; unrelated to
-        RE's own Swamy-Arora quasi-demeaning). The variables are
+        RE's own quasi-demeaning). The variables are
         demeaned by entity, and for two-way effects by entity and time.
         Only the coefficients of regressors that still vary after
         demeaning enter the fitted values, so it is `0.0` when none

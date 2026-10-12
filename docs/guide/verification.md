@@ -43,7 +43,7 @@ pyfixest is not used for accuracy checks. Its HC2/HC3 standard errors apply the 
 | Logit, Probit | coefficients, standard errors, z statistics, p-values, confidence intervals, log-likelihood, null log-likelihood, likelihood-ratio statistic and p-value, McFadden R², AIC, BIC, marginal effects with standard errors, z statistics, p-values and confidence intervals |
 | Tobit | coefficients and σ with their standard errors, z statistics, p-values and confidence intervals, log-likelihood, AIC, BIC, Wald statistic and p-value, marginal effects, predictions |
 | IV | coefficients, standard errors, test statistics, p-values, confidence intervals, R², robust Wald statistic, weak-instrument F, Wu-Hausman (2SLS), Sargan (2SLS) or Hansen J (GMM); `first_stage()` against a direct OLS fit (see below) |
-| FE, RE | coefficients, standard errors, t statistics, p-values, confidence intervals, F statistic, within / between / overall R², Hausman test (RE) |
+| FE, RE | coefficients, standard errors, t statistics, p-values, confidence intervals, F statistic, within / between / overall R², Hausman test (RE), variance components and quasi-demeaning weights (RE) |
 | RE with a time-invariant regressor | the same statistics, plus the degrees of freedom of the tests, log-likelihood, AIC and BIC (against the hand-written implementation) |
 
 Standard-error types are covered per method: classical, HC0–HC3, HAC, cluster, Driscoll–Kraay (panel) and OPG (maximum likelihood), wherever the method supports them. Each reference package covers a subset, so some combinations have only one reference (listed under [Not compared against a second reference](#not-compared-against-a-second-reference)).

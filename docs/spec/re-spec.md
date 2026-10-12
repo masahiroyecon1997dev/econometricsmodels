@@ -57,7 +57,7 @@ RE固有の内容のみを記載する。FEとの共有範囲は[`fe-spec.md`](.
 
 `REResult`（`#[pyclass]`）が公開する項目: `params` / `std_errors` / `test_stats`（**t検定**） /
 `p_values` / `conf_lower` / `conf_upper` / `param_names`（`param_names[0]`は常に`"const"`） /
-`residuals` / `dep_var_name` / `n_obs` / `df_resid` / `df_model` / `n_entities` / `n_periods`（2-wayのみ、1-wayは`None`） / `cov_type` / `dk_bandwidth_used` /
+`residuals` / `dep_var_name` / `n_obs` / `df_resid` / `df_model` / `n_entities` / `n_periods`（2-wayのみ、1-wayは`None`） / `sigma2_eps` / `sigma2_u` / `sigma2_lambda`（2-wayのみ） / `theta`（1-wayのみ） / `theta_entity` / `theta_time` / `theta_total`（2-wayのみ） / `cov_type` / `dk_bandwidth_used` /
 `f_statistic` / `f_p_value` / `log_likelihood` / `aic` / `bic` / `r_squared_within` /
 `r_squared_between` / `r_squared_overall` / `hausman_statistic` / `hausman_p_value` /
 `hausman_df`。
@@ -68,6 +68,13 @@ RE固有の内容のみを記載する。FEとの共有範囲は[`fe-spec.md`](.
 - **`hausman_*`・`r_squared_*`は1-way・2-wayとも計算される**（3.6・3.7節）。`hausman_*`が`None`に
   なるのは、検定できる傾き係数が無いとき（1-wayは時間変化のある列が無い、2-wayは2-way within変換後に
   分散のある列が無い、または残りがすべて識別できない列）だけ。
+- **分散成分と準偏差変換の重み**: `sigma2_eps`（σ_ε²）・`sigma2_u`（σ_u²、負の推定値は0に切り上げた値）は1-way・
+  2-wayとも`float`。`sigma2_lambda`（σ_λ²、同じく0に切り上げ）は2-wayのみで1-wayは`None`。θは、1-wayは
+  `theta`（`dict[str, float]`、エンティティID（辞書順）→θ_i。`θ_i`は観測数`T_i`で決まるため不均衡パネル
+  でだけ個体間で異なる）、2-wayは`theta_entity`（θ₁）・`theta_time`（θ₂）・`theta_total`（θ₃、θ₁θ₂ではない）
+  の`float`で、使わない側は`None`（`n_periods`・`hausman_*`と同じ「該当しなければ`None`」の型安定な形）。
+  値は`plm::ercomp`（バランスパネルの`σ²`・`theta`）、1-wayは`linearmodels`の`variance_decomposition`・
+  `theta`と一致する。不均衡パネルの`σ_u²`は`plm`と定義が異なる（3.1節）。
 - **`dk_bandwidth_used`**: `cov_type="dk"`のとき実際に使われたバンド幅（FEと同じ意味、`fe-spec.md`
   「結果構造体」参照）。`dk`以外は`None`。ハウスマン検定の補助回帰が内部で解決するバンド幅は
   本体と同じ値だが、この項目はRE本体の`fit()`で解決した値を報告する。
@@ -538,7 +545,5 @@ FEの`WithinRegressionFailed`と同じく内側の`LeastSquaresError`の分類�
   - **`REResult`に`n_periods`を追加する**（実装済み。FEと同じ定義: `time`を指定した2-wayのときだけ
     ユニークな時点数、1-wayは`None`で、`dk_time`だけの指定でも`None`）。`fe-spec.md`2章・
     `panel-common.md`2.1節の記述も直した。
-  - **分散成分を結果として公開する**（σ_ε²・σ_u²・θ。2-wayではσ_λ²と3つの重みも）。現行の`REResult`は
-    公開していない。時期は2-way RE実装時とし、フィールド名・θの返し方（1-wayは個体ごと、2-wayは3つの
-    重み）はそのときに決める。
-  - **実装時に決める事項**（現時点では未確定）: 分散成分の公開フィールドの名前と形式。
+  - **分散成分を結果として公開する**（実装済み、2章）。`variance_method`を追加するときも、この項目が
+    「どの推定法の値か」を示す。

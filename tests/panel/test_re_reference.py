@@ -112,6 +112,7 @@ def _check_result(res, ref: dict, label: str) -> None:
     _assert_close(res.sigma2_eps, ref["sigma2_eps"], f"{label}/sigma2_eps")
     _assert_close(res.sigma2_u, ref["sigma2_u"], f"{label}/sigma2_u")
     _assert_dict_close(res.theta, ref["theta"], f"{label}/theta")
+    assert len(res.theta) == len(ref["theta"]), f"{label}/theta length"
     assert res.sigma2_lambda is None, f"{label}/sigma2_lambda"
     assert res.theta_entity is None, f"{label}/theta_entity"
     assert res.theta_time is None, f"{label}/theta_time"

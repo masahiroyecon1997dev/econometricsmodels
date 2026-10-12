@@ -311,6 +311,11 @@ def _hand_computed(
         "r_squared_overall": overall,
         "sigma2_eps": sigma2_eps,
         "sigma2_u": sigma2_u,
+        # エンティティID（文字列表現）→θ_i。
+        "theta": {
+            str(label): float(th)
+            for label, th in zip(np.unique(df["entity"].to_numpy()), theta)
+        },
         "dk_bandwidth_used": bandwidth if cov_type == "dk" else None,
         "hausman_statistic": None,
         "hausman_p_value": None,
@@ -361,6 +366,9 @@ def _result_stats(res) -> dict:
         "r_squared_within": res.r_squared_within,
         "r_squared_between": res.r_squared_between,
         "r_squared_overall": res.r_squared_overall,
+        "sigma2_eps": res.sigma2_eps,
+        "sigma2_u": res.sigma2_u,
+        "theta": res.theta,
         "dk_bandwidth_used": res.dk_bandwidth_used,
         "hausman_statistic": res.hausman_statistic,
         "hausman_p_value": res.hausman_p_value,

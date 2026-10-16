@@ -425,7 +425,7 @@ def test_unknown_cov_type_raises(censored_dataset, cov_type):
 
 @pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
 def test_nonrobust_is_rejected(censored_dataset, cov_type):
-    """`"nonrobust"`（旧別名）は受け付けない（概念ごとに文字列を1つに絞る）。"""
+    """`"nonrobust"`は別名として受け付けない（概念ごとに文字列を1つに絞る）。"""
     with pytest.raises(ValidationError, match="unknown cov_type: 'nonrobust'"):
         Tobit(
             censored_dataset,

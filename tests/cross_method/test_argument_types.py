@@ -258,7 +258,7 @@ def test_iv_column_list_elements_must_be_str(df, name, value, position, got):
 
 
 def test_list_arguments_still_work(df):
-    """正しい`list`・`str`の引数は従来どおり推定できる（回帰確認）。"""
+    """正しい`list`・`str`の引数は推定できる（回帰確認）。"""
     assert _build_ols(df, x=["x1", "x2"]).fit().n_obs == N
     assert FE(df, y="y", x=["x1"], entity="entity").fit().n_obs == N
     assert (

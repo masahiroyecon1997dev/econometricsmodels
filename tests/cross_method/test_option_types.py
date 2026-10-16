@@ -189,7 +189,7 @@ def test_none_is_accepted_for_nullable_fields(cls, name):
 
 
 def test_valid_values_round_trip():
-    """正しい値（整数・実数）は従来どおり受け付け、属性代入でも反映される。"""
+    """正しい値（整数・実数）は受け付け、属性代入でも反映される。"""
     options = OLSOptions(
         cov_type="hac",
         confidence_level=0.9,

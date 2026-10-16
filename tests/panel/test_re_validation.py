@@ -19,9 +19,8 @@ Note:
     `MISSING_CLUSTER_COLUMN`はFEと同じ理由で構造的に到達不能
     （`cluster=None`は常に`entity`引数の列に自動フォールバックする、
     `engine_pybind/src/panel/re.rs::parse_re_cov_type`参照）。`x=[]`が
-    `ValidationError`になる設計判断の経緯は`engine_pybind/src/panel/re.rs`
-    モジュールdoc「`x`の空リストを許容しない」参照（ユーザー
-    確認済み・2026-09-20）。
+    `ValidationError`になる理由は`engine_pybind/src/panel/re.rs`
+    モジュールdoc「`x`の空リストを許容しない」参照。
 
     **RE固有の重要な注意（σ_ε²用の内部1-way FE呼び出し vs ハウスマン検定用の
     内部FE呼び出しの違い）**: RE自身の`swamy_arora_variance_components`

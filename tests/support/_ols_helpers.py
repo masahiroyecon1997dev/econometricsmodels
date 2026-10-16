@@ -2,10 +2,9 @@
 `hac_time`の行順入れ替えテスト用データ`hac_reorder_frame`）。
 
 `tests/support/` は `pyproject.toml` の `pythonpath` に載っているため、
-`from _ols_helpers import ...` の裸importで解決できる（`_helpers.py` と同じ）。関心事分割で `test_ols.py` を
-validation/api/reference に分けた際、ライブ statsmodels
-照合（reference）と predict() の statsmodels 照合（api）の双方が同じラッパーを
-使うため、重複を避けてここへ集約した。
+`from _ols_helpers import ...` の裸importで解決できる（`_helpers.py` と同じ）。
+ライブ statsmodels 照合（reference）と predict() の statsmodels 照合（api）の
+双方が同じラッパーを使うため、ここに置く。
 
 許容誤差は独自の絶対誤差定数を持たず、`_tolerances_linear.py` の `"ols_reference"`
 （`_assertions.assert_close` 経由、`tol = max(rtol*|ref|, atol)`）で統一する。

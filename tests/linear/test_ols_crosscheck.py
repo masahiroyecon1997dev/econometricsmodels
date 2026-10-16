@@ -88,8 +88,7 @@ FIXTURE_PATH = (
 RTOL_STRICT = TOLERANCES["ols_crosscheck"]["rtol_strict"]
 
 
-# 絶対誤差フロア（ref値が0近傍のとき相対誤差比較が意味を持たなくなるのを防ぐ、
-# フェーズ3.5でtest_wls_crosscheck.pyと同じ計算式に修正）。
+# 絶対誤差フロア（ref値が0近傍のとき相対誤差比較が意味を持たなくなるのを防ぐ）。
 ATOL = TOLERANCES["ols_crosscheck"]["atol"]
 
 

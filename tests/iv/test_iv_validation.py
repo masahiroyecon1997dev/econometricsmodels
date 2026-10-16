@@ -475,7 +475,7 @@ def test_unknown_cov_type_raises(iv_dataset, cov_type):
 
 @pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
 def test_nonrobust_is_rejected(iv_dataset, cov_type):
-    """`"nonrobust"`（旧別名）は受け付けない（概念ごとに文字列を1つに絞る）。"""
+    """`"nonrobust"`は別名として受け付けない（概念ごとに文字列を1つに絞る）。"""
     with pytest.raises(ValidationError, match="unknown cov_type: 'nonrobust'"):
         our_fit(
             iv_dataset,
@@ -655,8 +655,8 @@ def test_invalid_hac_lags_raises(iv_dataset, hac_lags):
     ["unadjusted", "homoskedastic", "heteroskedastic", "kernel", "invalid"],
 )
 def test_unknown_gmm_weight_type_raises(iv_dataset, gmm_weight_type):
-    """旧名（`unadjusted`/`kernel`）と別名（`homoskedastic`/`heteroskedastic`）は
-    受け付けない（`cov_type`と同じ語彙`classical`/`hac`に統一済み）。
+    """別名（`unadjusted`/`kernel`/`homoskedastic`/`heteroskedastic`）は
+    受け付けない（`cov_type`と同じ語彙`classical`/`hac`に絞る）。
     """
     options = IVOptions(estimator="gmm", gmm_weight_type=gmm_weight_type)
     with pytest.raises(

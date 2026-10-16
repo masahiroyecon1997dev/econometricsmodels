@@ -188,9 +188,9 @@ def assert_params_table_matches_attributes(res) -> None:
     の入れ替え等）は、キーの集合と名前の並びだけの検査では見つからないため、
     属性（`params`・`std_errors`・`test_stats`・`p_values`・`conf_int`）との
     一致を行ごとに確かめる。Tobitの`sigma`の行も`params`に含まれるため同じ
-    検査で覆う。旧名`coef_table()`が別名として残っていないことも確かめる。
+    検査で覆う。`coef_table()`という名前では公開していないことも確かめる。
     """
-    assert not hasattr(res, "coef_table"), "旧名coef_tableは廃止済み"
+    assert not hasattr(res, "coef_table"), "coef_tableという名前では公開しない"
     table = res.params_table()
     assert [row["param_name"] for row in table] == list(res.params)
     for row in table:

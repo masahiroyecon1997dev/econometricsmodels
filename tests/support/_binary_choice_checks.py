@@ -774,7 +774,7 @@ def check_unknown_cov_type_raises(
 
 
 def check_nonrobust_is_rejected(dataset, estimator_cls, options_cls, cov_type):
-    """`"nonrobust"`（旧別名）は受け付けない（概念ごとに文字列を1つに絞る）。"""
+    """`"nonrobust"`は別名として受け付けない（概念ごとに文字列を1つに絞る）。"""
     with pytest.raises(ValidationError, match="unknown cov_type: 'nonrobust'"):
         estimator_cls(
             dataset,

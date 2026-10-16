@@ -441,7 +441,7 @@ def test_matches_statsmodels_on_the_plm_transformed_data(
 )
 def test_default_variance_method_is_swamy_arora(case_name):
     """既定は`swamy_arora`で、明示した場合と同じ値（不均衡の1-wayでは`plm`の式ではなく
-    従来どおりの`linearmodels`準拠の式のまま）。"""
+    `linearmodels`準拠の式）。"""
     case = next(c for c in CASES if c.name == case_name)
     default = RE(
         _frame(case),

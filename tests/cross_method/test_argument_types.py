@@ -10,9 +10,9 @@ from __future__ import annotations
 import re
 
 import _error_messages as msgs
-import numpy as np
 import polars as pl
 import pytest
+from _dtype_helpers import N, make_frame
 from econometricsmodels import (
     FE,
     IV,
@@ -26,27 +26,11 @@ from econometricsmodels import (
     ValidationError,
 )
 
-N = 60
-
 
 @pytest.fixture(scope="module")
 def df() -> pl.DataFrame:
-    rng = np.random.default_rng(1)
-    x1 = rng.normal(0.0, 1.0, N)
-    x2 = rng.normal(0.0, 1.0, N)
-    y = 1.0 + x1 - 0.5 * x2 + rng.normal(0.0, 1.0, N)
-    return pl.DataFrame(
-        {
-            "y": y,
-            "y01": (y > np.median(y)).astype(np.float64),
-            "x1": x1,
-            "x2": x2,
-            "z": x1 + rng.normal(0.0, 1.0, N),
-            "w": np.ones(N),
-            "entity": np.arange(N) // 6,
-            "t": np.arange(N) % 6,
-        }
-    )
+    """`make_frame`（60行の均衡パネル。全手法で使える列を持つ）。"""
+    return make_frame(1)
 
 
 # 引数の既定値を使うことを表す番兵（`None`も「`None`を渡す」テスト値として使うため）。

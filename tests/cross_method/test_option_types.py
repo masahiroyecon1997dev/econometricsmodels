@@ -18,6 +18,7 @@ import _error_messages_panel as panel_msgs
 import numpy as np
 import polars as pl
 import pytest
+from _dtype_helpers import N, make_frame
 from _error_messages import escaped
 from econometricsmodels import (
     FE,
@@ -39,33 +40,14 @@ from econometricsmodels import (
     WLSOptions,
 )
 
-N = 60
 I64_MAX = 2**63 - 1
 I64_MIN = -(2**63)
 
 
 @pytest.fixture(scope="module")
 def df() -> pl.DataFrame:
-    rng = np.random.default_rng(2)
-    x1 = rng.normal(0.0, 1.0, N)
-    x2 = rng.normal(0.0, 1.0, N)
-    y = 1.0 + x1 - 0.5 * x2 + rng.normal(0.0, 1.0, N)
-    return pl.DataFrame(
-        {
-            "y": y,
-            "y01": (y > np.median(y)).astype(np.float64),
-            "yc": np.clip(y, 0.0, None),
-            "x1": x1,
-            "x2": x2,
-            "z": x1 + rng.normal(0.0, 1.0, N),
-            "z2": x1 + rng.normal(0.0, 1.0, N),
-            "w": np.ones(N),
-            "entity": np.arange(N) // 6,
-            # HACの時間順序列（行順を明示する。`hac_time`は必須）
-            "row": np.arange(N),
-            "t": np.arange(N) % 6,
-        }
-    )
+    """`make_frame`に、HACの時間順序列`row`（行順を明示する。`hac_time`は必須）を足したもの。"""
+    return make_frame(2).with_columns(pl.Series("row", np.arange(N)))
 
 
 # (オプションクラス, フィールド名, 種類)。種類は`int`・`float`。`Option`のフィールド

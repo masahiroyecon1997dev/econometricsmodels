@@ -148,7 +148,7 @@ def test_cov_type_is_case_insensitive(fe_dataset, cov_type, spelling):
     assert_same_estimates(res, fit(cov_type))
 
 
-def test_confidence_level_affects_conf_int_width(fe_dataset):
+def test_confidence_level_changes_interval_width(fe_dataset):
     narrow = our_fit(fe_dataset, options=FEOptions(confidence_level=0.80))
     wide = our_fit(fe_dataset, options=FEOptions(confidence_level=0.99))
 

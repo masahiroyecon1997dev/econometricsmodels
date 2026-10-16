@@ -460,7 +460,7 @@ def test_augment_without_intercept_matches_predict():
 # 数値比較は行わない。
 
 
-def test_cluster_std_error_exceeds_classical_under_true_intra_cluster_correlation():
+def test_cluster_se_exceeds_classical_under_intra_cluster_correlation():
     """説明変数・誤差の両方にクラスター内相関を持たせたMoulton型DGPで、
     クラスターロバストSEが古典的SEより明確に大きくなることを確認する。
 

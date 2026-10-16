@@ -141,7 +141,7 @@ def test_conf_int_structure(iv_dataset):
         assert lower < upper
 
 
-def test_params_std_errors_stats_p_values_share_keys(iv_dataset):
+def test_params_std_errors_test_stats_p_values_share_keys(iv_dataset):
     res = our_fit(iv_dataset)
     expected_keys = {"const", "x1", "endog1"}
 
@@ -639,5 +639,5 @@ def test_hac_lags_used_echoes_explicit_hac_lags(iv_dataset, estimator):
     ],
     ids=["2sls_hc1", "gmm_hc1", "gmm_one_step", "gmm_robust_weight"],
 )
-def test_hac_lags_used_is_none_without_hac(iv_dataset, options):
+def test_hac_lags_used_is_none_unless_hac(iv_dataset, options):
     assert our_fit(iv_dataset, options=options).hac_lags_used is None

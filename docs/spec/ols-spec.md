@@ -270,9 +270,9 @@ $$
   実際に検出できることを確認済み。
 - `white_test()`（3.9節）・`breusch_godfrey_test()`（3.10節）は、診断検定1つで1ファイルにまとめた
   `test_ols_white.py`・`test_ols_breusch_godfrey.py`に置く（上記4分割と同じ区分を1ファイル内に持つ）。
-- 上記4ファイルの役割分担（リファレンス実装との数値照合）とは別に、`test_ols_api.py`末尾に
+- 上記4ファイルの役割分担（リファレンス実装との数値照合）とは別に、`test_ols_api.py`に
   クラスターロバストSEの統計的健全性チェックを1本持つ
-  （`test_cluster_std_error_exceeds_classical_under_true_intra_cluster_correlation`）。
+  （`test_cluster_se_exceeds_classical_under_intra_cluster_correlation`）。
   既存のクラスター系テストは誤差i.i.d.なデータに疑似グループラベルを後付けしたもので、
   「クラスターロバストSEが真のクラスター内相関がある状況で意図通り機能するか」は未検証
   だった。説明変数・誤差の両方にクラスター内相関を

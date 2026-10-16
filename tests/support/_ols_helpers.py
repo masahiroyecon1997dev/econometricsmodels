@@ -1,8 +1,7 @@
 """`test_ols_*.py` 共通の小さなヘルパー（statsmodels ラッパー・engine ラッパー）。
 
-pytest が各テストファイルのディレクトリ（`tests/linear/`）を `sys.path` に載せる
-ため、`from _ols_helpers import ...` の裸importで解決できる（`tests/_helpers.py`
-と同じ仕組みの、系統ディレクトリ版）。関心事分割で `test_ols.py` を
+`tests/support/` は `pyproject.toml` の `pythonpath` に載っているため、
+`from _ols_helpers import ...` の裸importで解決できる（`_helpers.py` と同じ）。関心事分割で `test_ols.py` を
 validation/api/reference に分けた際、ライブ statsmodels
 照合（reference）と predict() の statsmodels 照合（api）の双方が同じラッパーを
 使うため、重複を避けてここへ集約した。

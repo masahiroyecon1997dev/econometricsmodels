@@ -6,8 +6,8 @@
 `engine` 引数違いで生成され、フィクスチャ（`tobit.json` / `tobit_crosscheck.json`）
 の構造が完全に同一。推定器（`Tobit`）・入力データ・検証フィールドも共通なため、
 テスト本体をこのモジュールに集約し、2ファイルはフィクスチャパスと許容誤差
-（`tests/_tolerances.py`）だけを渡す薄いラッパーにする（Logit/Probit の
-`_binary_choice_checks.py` と同じ rootless import の仕組み）。
+（`tests/support/_tolerances.py`）だけを渡す薄いラッパーにする（Logit/Probit の
+`_binary_choice_checks.py` と同じ構成）。
 
 検証対象フィールド:
     係数・標準誤差・z値・p値・信頼区間（末尾に `sigma` を含む）・`sigma` プロパティ・
@@ -337,7 +337,7 @@ def check_result(
 ) -> None:
     """1ケース分の全フィールドを照合する。
 
-    許容誤差は3種類に分ける（`tests/_tolerances.py` の tobit_* エントリ参照）:
+    許容誤差は3種類に分ける（`tests/support/_tolerances.py` の tobit_* エントリ参照）:
         - ``rtol_point``  : 点推定・尤度系（係数・sigma・対数尤度・AIC・BIC・
           限界効果・予測値・打ち切り適合度）。基本は 1e-8。
         - ``rtol_inference``: 分散に依存する量（標準誤差・z値・p値・Wald 統計量・

@@ -15,7 +15,7 @@
 
 `_check_result`は手法ごとに検証するフィールド自体が異なるため、このモジュールには
 含めない（Logit/Probit間では検証フィールドが同一のため、両者のreference側は
-`tests/nonlinear/_binary_choice_checks.py`の`check_result`にまとめている）。
+`tests/support/_binary_choice_checks.py`の`check_result`にまとめている）。
 
 `MARGEFF_AT`定数は`_constants.py`に置く。
 """

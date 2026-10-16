@@ -344,7 +344,7 @@ Tobit固有の差分:
 - **交差検証**: R `censReg`（`maxLik`エンジン）。`survreg`と`maxLik`は最適化実装が完全に独立。
   `censReg`側の`maxLik`収束を`reltol=1e-14 / gradtol=1e-10`まで詰めた上で、合成シナリオは点推定・
   SE・限界効果とも ~2e-9 で一致し`rtol=1e-8`（`tobit_crosscheck`）。実測乖離に基づき個別に緩めた項目
-  （`tests/_tolerances.py`）:
+  （`tests/support/_tolerances.py`）:
   - `high_condition_number`（x1,x2 相関 0.999）の hc0/hc1: SE・z・信頼区間・限界効果SEが ~1.9e-8
     まで増幅するため`5e-8`。
   - `mroz`（`hours`生スケール）: `censReg`の`maxLik`が`survreg`ほど収束が詰まらず、SE系・Wald・

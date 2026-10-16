@@ -1,6 +1,6 @@
 """`test_re_*.py`共通の小さなヘルパー（engineラッパー）。
 
-`tests/panel/_fe_helpers.py`と同じ仕組みのRE版。
+`tests/support/_fe_helpers.py`と同じ位置づけの、RE用ヘルパー。
 """
 
 from __future__ import annotations

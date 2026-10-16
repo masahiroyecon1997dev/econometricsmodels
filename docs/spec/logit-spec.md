@@ -137,7 +137,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
     結果は変わらない。
   - **境界の実測（1観測だけが分離を壊すデータ）**: 完全分離データ（`x`が`±0.01〜±1.00`、
     `n=201`）に`y=1`の観測を1つ、分離を壊す側へ`overlap`だけずらして足し、`overlap`を変えて
-    判定を測った（`tests/_helpers.py`の`single_overlap_binary_dataset`）。`overlap=1e-4`以上は
+    判定を測った（`tests/support/_helpers.py`の`single_overlap_binary_dataset`）。`overlap=1e-4`以上は
     分離とみなさず収束する（係数は`x1`で500前後と大きいが有限のMLE、`1e-3`で約300、`1e-4`で約530）。
     `overlap=1e-5`以下は分離として`ComputationError`（`raise_on_non_convergence=false`なら
     `converged=false`、係数は760〜990に達している）。境界はこのデータで`overlap`が`1e-5`〜`3e-5`
@@ -350,7 +350,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 - **`solver`の組み合わせ**: `newton`は全シナリオ×`cov_type`で数値照合する。`bfgs`/`lbfgs`は
   baseline×classicalに加え、代表的な組み合わせ（`near_separation`×classical/opg/hc0、cluster・
   cluster_imbalanced、`apple`のcluster）を、statsmodelsの`newton`で生成した同じシナリオ・
-  `cov_type`の全統計量に対して`rtol=2e-5`で照合する（`tests/_tolerances.py`の
+  `cov_type`の全統計量に対して`rtol=2e-5`で照合する（`tests/support/_tolerances.py`の
   `logit_reference.rtol_solver_vs_newton`、実測最大~3.6e-6）。statsmodels自身の`bfgs`/`lbfgs`を
   参照にしないのは、`near_separation`で収束許容が緩く本実装とLogitで最大~7e-3（Probitは~8e-4）乖離する
   （statsmodels側の誤差）ため。

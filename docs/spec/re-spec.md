@@ -296,7 +296,7 @@ FE実装時（`panel::fe`）のcov_type計算関数（`design_matrix_from_column
 計算した`cov_params`（3.4節）の傾き係数部分行列を`wald_f_test`（OLS本体の検定の再利用、
 サンドイッチ計算を複製しない）で検定し、分母自由度`f_df_denom`は`df_inference`
 （`cluster`で`G-1`、`dk`で`t_periods-1`、それ以外は`df_resid`）で、t検定・信頼区間の
-`stat_df`と常に一致する（`tests/test_test_dfs.py`が全`cov_type`で固定している）。`classical`のとき
+`stat_df`と常に一致する（`tests/cross_method/test_test_dfs.py`が全`cov_type`で固定している）。`classical`のとき
 `plm::pwaldtest(test = "F")`の既定（古典的分散共分散行列・`df.residual`）、ロバストの
 ときは`pwaldtest(test = "F", vcov = ...)`の統計量と一致する。傾き係数が0個（`df_model==1`）なら
 NaN。失敗（共分散部分行列のほぼ特異性）は`PanelError::FTestFailed`。
@@ -316,7 +316,7 @@ Wald二次形式は`V`が正定値である限り負値にならず、FEのF統�
   一致する。`linearmodels`の`f_statistic_robust`は不均衡パネルでも機械精度で一致する
   （点推定が一致するため）。`plm`との不均衡パネルは、Swamy-Arora分散成分の推定差
   （`θ`の差）で`cov_type`別に最大約0.1〜0.7%の差が出るため専用の許容誤差を使う
-  （`tests/_tolerances.py`の`re_crosscheck.rtol_unbalanced_f`）。
+  （`tests/support/_tolerances.py`の`re_crosscheck.rtol_unbalanced_f`）。
   `linearmodels`の`res.f_statistic`（SST/SSR方式、`cov_type`非依存）はバランスパネルの
   classicalでのみ一致するため比較に使わない。
 - 傾き係数が1個のケースは「1自由度のF検定は両側t検定と代数的に等価」
@@ -465,12 +465,12 @@ FEの`WithinRegressionFailed`と同じく内側の`LeastSquaresError`の分類�
   cadjust = TRUE)`を当てた値を参照値にする（entityクラスターでは`vcovHC(arellano, sss)`と
   機械精度で一致を確認済み）。クラスター不均衡（サイズ[2,3,5,10,30,50]）と、境界の成功パス
   （ハウスマン検定の補助回帰が`G > 2k`を要するため`k=1`・`G=3`）を持つ。
-- 許容誤差: Classical/HC1は`linearmodels`と相対誤差`1e-8`（`tests/_tolerances.py`の
+- 許容誤差: Classical/HC1は`linearmodels`と相対誤差`1e-8`（`tests/support/_tolerances.py`の
   `re_reference`。実測は`1e-9`〜`1e-14`程度）で数値完全一致。Cluster/DK・
   HC2/HC3の`plm`クロスチェックは、バランスパネルでは機械精度で一致する（`1e-8`）。不均衡
   パネルのみ分散成分推定（Swamy-Arora）が`plm`とlinearmodels準拠の本実装で僅かに異なるため、
   統計量・cov_type別に実測へマージンを載せて緩める（係数`5e-3`、se・t・p値・信頼区間は
-  cluster `5e-3`・hc2/hc3 `2e-2`・dk `5e-2`。`tests/_tolerances.py`の`re_crosscheck`参照。
+  cluster `5e-3`・hc2/hc3 `2e-2`・dk `5e-2`。`tests/support/_tolerances.py`の`re_crosscheck`参照。
   一律に緩めるとclusterの`G/(G-1)`欠落（seに約1.3%）を見逃すため分けている）。
 - **ハウスマン検定は`plm::phtest(method = "aux", effect = "individual", vcov = ...)`のみを参照値と
   する例外規定**（`linearmodels`のソースに`hausman`という文字列が一切登場せず専用実装が
@@ -485,8 +485,8 @@ FEの`WithinRegressionFailed`と同じく内側の`LeastSquaresError`の分類�
   `re_variance_method.json`（`benchmark/panel/fixtures/generate_re_variance_method_fixtures.py`、1-wayは
   バランス・不均衡（トレース項の式）・準バランス・時間不変の列・時点間のみ変わる列・実データ、2-wayは
   バランス）の分散成分・θ・係数・標準誤差・F統計量・ハウスマン検定を代表ケースで全`cov_type`照合し、
-  plmのソースどおりに観測ごとの行列で書いた手計算（`tests/panel/_re_oracle.py`）とも比べる。許容誤差は
-  `tests/_tolerances.py`の`re_variance_method`（機械精度。絶対年の列を含む入力のみ丸め誤差が拡大する統計量で
+  plmのソースどおりに観測ごとの行列で書いた手計算（`tests/support/_re_oracle.py`）とも比べる。許容誤差は
+  `tests/support/_tolerances.py`の`re_variance_method`（機械精度。絶対年の列を含む入力のみ丸め誤差が拡大する統計量で
   `1e-6`）。手計算との照合は全ケース×全`cov_type`で行い、plmの準偏差変換済みデータへのstatsmodels
   OLSで対数尤度・AIC・BICとクラスターロバスト推論（`G-1`の自由度）を全ケースで照合する（パネル固有R²は
   手計算だけが参照）。個体効果なし・時点効果なしのDGPで`σ_u²`・`σ_λ²`が0に切り上げられる場合

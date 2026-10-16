@@ -109,7 +109,7 @@ def crosscheck_wooldridge() -> dict:
     return json.loads(FIXTURE_PATH.read_text())["wooldridge"]
 
 
-# _assert_close/_assert_dict_closeはtests/_assertions.pyのassert_close/
+# _assert_close/_assert_dict_closeはtests/support/_assertions.pyのassert_close/
 # assert_dict_closeに対応する（フェーズ3.5で計算式のバグを修正した上で統合）。
 _assert_close = partial(assert_close, rtol=RTOL_STRICT, atol=ATOL)
 _assert_dict_close = partial(assert_dict_close, rtol=RTOL_STRICT, atol=ATOL)

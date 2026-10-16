@@ -364,8 +364,8 @@ common.rs`）:
     補正係数はスクリプト内のスカラー手計算で、独立検証として効くのは重み行列・ブレッド・
     ミート行列本体（momentfitの計算）。z値・p値・信頼区間・ロバストWaldは係数・標準誤差・
     共分散行列からの計算（momentfitがネイティブに出す統計量ではない）。
-  - 許容誤差は`tests/_tolerances.py`の`iv_gmm_crosscheck`（rtol 1e-8、atol 1e-8）。
-- **許容誤差**: 相対誤差1e-8＋絶対誤差フロア1e-10（`tests/_tolerances.py`の`iv_reference`）を
+  - 許容誤差は`tests/support/_tolerances.py`の`iv_gmm_crosscheck`（rtol 1e-8、atol 1e-8）。
+- **許容誤差**: 相対誤差1e-8＋絶対誤差フロア1e-10（`tests/support/_tolerances.py`の`iv_reference`）を
   基本。`classical`/`hc0`〜`hc1`/`cluster`/`hac`は
   `linearmodels`と(`cov_type`, `debiased`)の対応（`classical`↔(`unadjusted`,
   `debiased=True`)、`hc0`↔(`robust`, `debiased=False`)、`hc1`↔(`robust`,

@@ -74,7 +74,7 @@ CONFIG = _checks.BinaryChoiceReferenceConfig(
     rtol=TOLERANCES["logit_reference"]["rtol"],
     atol=TOLERANCES["logit_reference"]["atol"],
     # solver="bfgs"/"lbfgs"はnewtonと異なる最適化経路で収束するため、既定の
-    # RTOLより緩めた許容誤差を使う（tests/_tolerances.py参照）。
+    # RTOLより緩めた許容誤差を使う（tests/support/_tolerances.py参照）。
     rtol_solver=TOLERANCES["logit_reference"]["rtol_solver"],
     rtol_solver_vs_newton=TOLERANCES["logit_reference"][
         "rtol_solver_vs_newton"

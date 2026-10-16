@@ -13,7 +13,7 @@
 `fe_dataset`（baseline、entity/time付きバランスパネル、n_entities=40 x
 n_periods=6）は`tests/panel/conftest.py`（FEと共用、RE専用の合成データセットは
 無い）、`our_fit_re`ヘルパー（既定`x=["x1","x2"], entity="entity"`）は
-`tests/panel/_re_helpers.py`。
+`tests/support/_re_helpers.py`。
 
 Note:
     `MISSING_CLUSTER_COLUMN`はFEと同じ理由で構造的に到達不能

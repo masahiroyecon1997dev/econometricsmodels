@@ -59,7 +59,7 @@ test = [
     # （`docs/spec/iv-spec.md`4章）。statsmodelsと同じ理由で`==`厳密固定。
     "linearmodels==7.0",
     "ruff==0.16.9",
-    # Wooldridge実データでのクロスチェックテスト用（tests/_helpers.pyの
+    # Wooldridge実データでのクロスチェックテスト用（tests/support/_helpers.pyの
     # wooldridge_loader）。標準CIで確実に実行されるようbenchmarkグループから
     # ここへ移した。依存はpandasのみで、statsmodels/linearmodels経由で既に
     # 間接的に入っているため追加コストはwooldridge本体のwheelのみ。実データ
@@ -97,8 +97,8 @@ line-length = 79
 # pytest実行時にsys.pathへ載せるパス。
 # - "."   : `import benchmark.<系統>....` を1経路で解決（旧: 各テストファイルの
 #           `sys.path.insert`＋devcontainerのPYTHONPATHを全廃したもの）。
-# - "tests": `tests/` を系統別サブディレクトリ（linear/ nonlinear/ iv/）に分けた際、
-#           各テストが `from _helpers import ...` 等の裸import で共有ヘルパー
-#           （tests/_helpers.py 等）を解決できるようにする（サブディレクトリからでも1経路）。
+# - "tests/support": 共有ヘルパー・系統別ヘルパー（`tests/support/_helpers.py` 等）の置き場。
+#           `tests/` の全サブディレクトリのテストが `from _helpers import ...` 等の
+#           裸importで解決できるようにする（サブディレクトリからでも1経路）。
 [tool.pytest.ini_options]
-pythonpath = [".", "tests"]
+pythonpath = [".", "tests/support"]

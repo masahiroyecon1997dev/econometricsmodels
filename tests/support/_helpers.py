@@ -28,7 +28,7 @@
 
 - `name_collision_frame`: 列名`const`・`sigma`が自動追加される合成パラメータ名と
   衝突する`ValidationError`テスト用の、`y`と衝突列だけの小さなDataFrame
-  （IVは列構成が違うため`tests/iv/_iv_helpers.py`の`iv_name_collision_frame`）。
+  （IVは列構成が違うため`tests/support/_iv_helpers.py`の`iv_name_collision_frame`）。
 - `HAC_REORDER_ORDER` / `hac_reorder_frame` / `reorder_rows`: `hac_time`の行順入れ替え
   テスト（OLS/WLS/IV）で、時間順のDataFrameと、行の並べ替えだけを施したDataFrameを
   作る。

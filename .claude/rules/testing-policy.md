@@ -15,7 +15,7 @@ Issue番号・内部管理ドキュメント（`docs/planning/specs/`配下の�
 ## テストの分離
 
 - `engine`の純粋ロジックの単体テストは、対象コードと同じファイル内の`#[cfg(test)] mod tests`に置く（`cargo test -p engine`）。
-- `tests/`: リファレンス実装との答え合わせテスト（`pytest`）。系統別サブディレクトリ（`tests/linear/`・`tests/nonlinear/`・`tests/iv/`・`tests/panel/`。`benchmark/` と同じ grain）に手法別ファイル `test_<手法>*.py` を置く。系統によらず全テストが使う共有物（`conftest.py`・`_assertions.py`・`_helpers.py`・`_tolerances.py`）は `tests/` 直下。サブディレクトリからでも `from _helpers import ...` 等の裸importが通るのは `pyproject.toml` の `pythonpath = [".", "tests"]` による。
+- `tests/`: リファレンス実装との答え合わせテスト（`pytest`）。系統別サブディレクトリ（`tests/linear/`・`tests/nonlinear/`・`tests/iv/`・`tests/panel/`。`benchmark/` と同じ grain）に手法別ファイル `test_<手法>*.py` を置く。全手法を横断するテスト（入力の型・オプションの型・`stat_dist`/自由度の整合等）は `tests/cross_method/` に置く。テストではないヘルパー（共有の `_assertions.py`・`_helpers.py`・`_tolerances.py`・`_error_messages.py` 等と、系統別の `_ols_helpers.py`・`_binary_choice_checks.py` 等）は `tests/support/` 一箇所に集約する。`conftest.py` は `tests/` 直下（共有フィクスチャ）と各系統ディレクトリ（系統固有のフィクスチャ）に置く。どのディレクトリからでも `from _helpers import ...` 等の裸importが通るのは `pyproject.toml` の `pythonpath = [".", "tests/support"]` による。
 
 ## リファレンス実装
 
@@ -73,7 +73,7 @@ Issue番号・内部管理ドキュメント（`docs/planning/specs/`配下の�
   - `_validation.py`: 「ValidationError（入力データ）」「ValidationError（predict()のnew_data）」「ValidationError（augment()）」「ValidationError（オプション）」「ValidationError（marginal_effects()）」「ComputationError」「例外クラスの継承」の順。入力データを主題で分ける場合は「ValidationError（入力データ: 重み列）」のように`入力データ:`に続けて主題を書く。「使われないオプション」は「ValidationError（オプション）」の下に置く。
 - **主題別ファイル**: 上記4種類に収まらない大きな主題（White検定などの事後診断、二元配置、Mundlak、第一段階回帰、GMM等）は、`test_<手法>_<主題>.py`として別ファイルにしてよい。その中でも、数値照合と構造・エラーの区別は上のファイル分割に倣う。
 - **`include_intercept=False`の置き場**: `_api.py`には構造・配線（`param_names`に`const`が出ない、`df_model`、収束）だけを置き、statsmodels/R/linearmodelsとの数値照合は凍結フィクスチャを使う`_reference.py`/`_crosscheck.py`に置く。`predict()`/`augment()`のように独立したAPI面のスモーク級照合に限り、`_api.py`でライブstatsmodels照合を行ってよい（各`_api.py`のモジュールdoc参照）。
-- **文字列オプションの大文字小文字**: `cov_type`・`gmm_weight_type`は、各手法が受け付ける全ての値について、`tests/_helpers.py`の`CASE_SPELLINGS`（小文字・全大文字・先頭のみ大文字・大小交互）×値の網羅で`test_cov_type_is_case_insensitive`等に集約する。`res.<オプション>`が正規形（小文字）で返ることと、全ての綴りで正規形と同一の推定結果になること（`_assertions.assert_same_estimates`）を確認し、ラベルだけを見る別テストは作らない。クラスターが必要な値（`cluster`）は専用データを使う引数にして同じテストに含める。
+- **文字列オプションの大文字小文字**: `cov_type`・`gmm_weight_type`は、各手法が受け付ける全ての値について、`tests/support/_helpers.py`の`CASE_SPELLINGS`（小文字・全大文字・先頭のみ大文字・大小交互）×値の網羅で`test_cov_type_is_case_insensitive`等に集約する。`res.<オプション>`が正規形（小文字）で返ることと、全ての綴りで正規形と同一の推定結果になること（`_assertions.assert_same_estimates`）を確認し、ラベルだけを見る別テストは作らない。クラスターが必要な値（`cluster`）は専用データを使う引数にして同じテストに含める。
 - **共通の命名**: 結果型は`test_fit_succeeds_and_returns_<手法>_results`、件数・被説明変数名は`test_n_obs_and_dep_var_name`（FE/REは`n_entities`も確認するため`test_n_obs_dep_var_name_and_n_entities`）。
 - **solverの収束**: `_api.py`のsolver別テストは`converged`のみを確認する（最尤解との一致は`_reference.py`が厳しい許容誤差で担う）。
 - **数値の比較**: `assert abs(...) < tol`や`pytest.approx`を直書きせず、`_assertions.assert_close`（`label`を渡せる）を使う。許容誤差のリテラルを直書きせず、`_tolerances.py`の`TOLERANCES`に実測の最大差とマージンの根拠をコメントして置き、`functools.partial`で束縛して使う（本実装内の不変条件の比較は`<手法>_api`のキー）。

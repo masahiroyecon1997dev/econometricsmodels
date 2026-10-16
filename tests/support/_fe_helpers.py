@@ -1,6 +1,6 @@
 """`test_fe_*.py`共通の小さなヘルパー（engineラッパー）。
 
-`tests/iv/_iv_helpers.py`と同じ仕組みの系統ディレクトリ版。
+`tests/support/_iv_helpers.py`と同じ位置づけの、FE用ヘルパー。
 """
 
 from __future__ import annotations

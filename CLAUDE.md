@@ -60,7 +60,9 @@ econometricsmodels/
 │   └── py.typed
 │
 ├── tests/                          # pytest（statsmodels/linearmodels / R実装との答え合わせ）
-│   ├── conftest.py _assertions.py _helpers.py _tolerances.py  # 共有（系統によらず全テストが使う）
+│   ├── conftest.py                 # 共有フィクスチャ（系統によらず全テストが使う）
+│   ├── support/                    # テストではないヘルパー（共有・系統別とも一箇所に集約。_assertions.py _helpers.py _tolerances.py _error_messages.py 等）
+│   ├── cross_method/               # 全手法を横断するテスト（入力型・オプション型・stat_dist/自由度の整合等）
 │   ├── linear/ nonlinear/ iv/ panel/  # 系統別サブディレクトリ（benchmark/ と同じ grain）。test_<手法>*.py（Tobitはnonlinear/）
 │   └── fixtures/benchmarks/        # 固定CSV＋リファレンスJSON（コミット済み成果物）
 │
@@ -163,7 +165,7 @@ econometricsmodels/
 - 性能比較記録: `docs/performance/<method>.md`（`performance/compare_<method>.py`の計測方法論・設計判断・既知の限界・今後の検討を残す日本語の開発ノート。
   計測結果の表は置かない）。生成JSONは`docs/performance/results/`（`.gitignore`対象）。
 - **公開ページ（mkdocs nav掲載・英語）の運用ルール**: 検証と性能は、手法が増えたら公開ページにも反映する。
-  - `docs/guide/verification.md`: 手法×リファレンス（主・独立クロスチェック）・比較する統計量・許容誤差（`tests/_tolerances.py`が正）・実データ・単一リファレンスの例外。新手法のテスト作成（`/test-new`）の完了条件に含める。
+  - `docs/guide/verification.md`: 手法×リファレンス（主・独立クロスチェック）・比較する統計量・許容誤差（`tests/support/_tolerances.py`が正）・実データ・単一リファレンスの例外。新手法のテスト作成（`/test-new`）の完了条件に含める。
   - `docs/guide/performance.md`（概要・既知の課題・計測条件は手書き、先頭のサマリー表は生成ブロック）と`docs/guide/performance-results.md`（全表、全体が生成物）: **数値は`benchmark_performance.yml`のCI計測値を正とする**（devcontainerの単発計測は使わない）。リリース準備時（`/release`）にリリースブランチで手動実行し、artifactから`python -m performance.render_docs_results`で再生成する。`README.md`「Performance」節の表・例にも同じ数値を丸めて転記しているため、再生成のたびに合わせて更新する（手順は`/release`）。手法を足すときは`benchmark_performance.yml`のmatrixに加えれば、次回の再生成で自動的にページへ現れる。
   - `docs/guide/accepted-data.md`: 受け付ける入力（polarsの`DataFrame`のみ）・列の役割ごとに許可するdtype・値の変換と精度・引数の型（`TypeError`との分担）。許可するdtypeの表は`engine_pybind/src/shared/column_extraction.rs`のdtype検査が正で、検査を変更したらこの表を同時に更新する（許可・拒否の方針を各手法specに複製しない）。
   - `docs/guide/validation.md`: バリデーションの設計思想（欠損値を自動除外しない理由等）と、`ValidationError`/`ComputationError`が出る状況の分類。手法固有のチェック（新しい列引数・オプションの検証、手法固有の`ComputationError`）を追加したら、該当する分類表に1行足す。欠損値・共線列等の共通方針は各手法specに複製せず、このページを参照する。

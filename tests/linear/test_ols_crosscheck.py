@@ -449,7 +449,7 @@ WOOLDRIDGE_DATASETS = {
 
 @pytest.fixture(scope="module")
 def load_wooldridge():
-    """`wooldridge_loader`（`tests/_helpers.py`）参照。複数データセット名を
+    """`wooldridge_loader`（`tests/support/_helpers.py`）参照。複数データセット名を
     `pytest.mark.parametrize`で振るため、ロード関数自体をfixtureとして返す。
     """
     return wooldridge_loader()

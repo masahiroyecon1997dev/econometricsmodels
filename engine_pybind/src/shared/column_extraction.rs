@@ -417,7 +417,7 @@ enum KeyRole {
 /// `Null`型は後続の欠損値チェックに回す。
 ///
 /// 許可するdtypeを変えたら、メッセージの案内文（`ColumnRole::accepted_dtypes_hint`）・
-/// `tests/_error_messages.py`・`docs/guide/accepted-data.md`も同時に更新する
+/// `tests/support/_error_messages.py`・`docs/guide/accepted-data.md`も同時に更新する
 /// （`check_numeric_dtype`も同じ）。
 fn check_key_dtype(
     name: &str,

@@ -331,7 +331,7 @@ def build(engine: str) -> dict:
             "フィットでき、非クラスターの4 cov_type で数値照合する（G<=q のため"
             "クラスターケースは持たない、上記）。censReg 交差検証は生スケール mroz で "
             "maxLik の収束が survreg ほど詰まらず標準誤差系で相対 ~1e-7 乖離するため、"
-            "テスト側で mroz 専用に許容誤差を緩める（tests/_tolerances.py）。"
+            "テスト側で mroz 専用に許容誤差を緩める（tests/support/_tolerances.py）。"
             "AIC/BIC は R の AIC()/BIC() ジェネリック、classical の全体 Wald は "
             "AER:::summary.tobit$wald、スコア・限界効果/予測の閉形式は numDeriv 数値微分と "
             "run_tobit_crosscheck.R 内で一致確認済み（formula 非依存の独立検証、"

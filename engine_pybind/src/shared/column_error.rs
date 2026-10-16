@@ -219,7 +219,7 @@ mod tests {
     use super::*;
 
     // `PyErr::to_string()`はPythonインタプリタを要求しpanicするため、`PyErr`に変換する前の
-    // この型の`to_string()`で文言を検証する。`tests/_error_messages.py`の複製元。
+    // この型の`to_string()`で文言を検証する。`tests/support/_error_messages.py`の複製元。
 
     #[test]
     fn not_found_message_names_the_column() {

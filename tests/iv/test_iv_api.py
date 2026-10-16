@@ -9,7 +9,7 @@ R クロスチェックは `test_iv_crosscheck.py`（OLS/WLS/Logit/Probit の
 `test_<手法>_api.py` 等と同じ4分割）。
 
 `iv_dataset`/`clustered_dataset` フィクスチャと `our_fit` ヘルパーは
-`tests/iv/conftest.py`／`tests/iv/_iv_helpers.py`。
+`tests/iv/conftest.py`／`tests/support/_iv_helpers.py`。
 """
 
 from __future__ import annotations

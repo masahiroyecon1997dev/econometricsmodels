@@ -27,7 +27,7 @@
 
 ## Resultsに属性を足すとき
 
-`LogitResults`/`ProbitResults`/`TobitResults`の公開属性の集合は`tests/nonlinear/test_mle_result_consistency.py`が固定している（共通＋手法固有、ラッパーと`_raw`の両方）。共通の属性は3クラス全てに足し、そのテストの集合も更新する。
+`LogitResults`/`ProbitResults`/`TobitResults`の公開属性の集合は`tests/cross_method/test_mle_result_consistency.py`が固定している（共通＋手法固有、ラッパーと`_raw`の両方）。共通の属性は3クラス全てに足し、そのテストの集合も更新する。
 
 ## 実装パターン
 

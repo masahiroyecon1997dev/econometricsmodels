@@ -12,7 +12,7 @@
 
 `fe_dataset`（baseline、entity/time付きバランスパネル、n_entities=40 x
 n_periods=6）は`tests/panel/conftest.py`、`our_fit`ヘルパー（既定
-`x=["x1","x2"], entity="entity"`）は`tests/panel/_fe_helpers.py`。
+`x=["x1","x2"], entity="entity"`）は`tests/support/_fe_helpers.py`。
 
 Note:
     `MISSING_CLUSTER_COLUMN`（OLS/WLS/IVが持つ「`cov_type='cluster'`なのに

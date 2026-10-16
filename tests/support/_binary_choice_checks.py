@@ -1,9 +1,9 @@
 """Logit/Probitの`test_logit_*.py`/`test_probit_*.py`で重複していた
 テスト本体を関数として集約する。
 
-`tests/linear/_ols_helpers.py`と同じ仕組み（pytestが各テストファイルの
-ディレクトリを`sys.path`に載せるrootless import）で、`tests/nonlinear/`配下
-から`from _binary_choice_checks import ...`の裸importで解決できる。
+`tests/support/`は`pyproject.toml`の`pythonpath`に載っているため、
+`tests/nonlinear/`配下から`from _binary_choice_checks import ...`の裸importで
+解決できる。
 
 `Logit`/`Probit`のAPI（`fit()`の引数・`Options`のフィールド構成・`Results`の
 プロパティ）が完全に対称に設計されている結果、テストコードもほぼ全て重複していた

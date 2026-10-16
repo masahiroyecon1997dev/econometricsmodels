@@ -152,7 +152,7 @@ OLSの`augment()`（`ols-spec.md`「augment()」）と完全に同じ設計・�
 
 ### 3.7 テスト
 
-- 許容誤差: classical/HC0-3/clusterはOLSと同じ`rtol_strict=1e-8`（`tests/_tolerances.py`の`wls_crosscheck`）（Rとの実測でほぼ機械精度）。
+- 許容誤差: classical/HC0-3/clusterはOLSと同じ`rtol_strict=1e-8`（`tests/support/_tolerances.py`の`wls_crosscheck`）（Rとの実測でほぼ機械精度）。
   HACもOLSと同じ`rtol_strict`（R側は`NeweyWest(adjust = FALSE)`。既定の`adjust = TRUE`は共分散に
   `n/(n-k)`を掛けるが本実装・statsmodelsは掛けず、WLSでもこのスカラー倍だけが差の全てで、
   OLSと同じ値になる。以前の`rtol_hac=5e-2`（実測約4.3%）は現在の入力では再現しない）。

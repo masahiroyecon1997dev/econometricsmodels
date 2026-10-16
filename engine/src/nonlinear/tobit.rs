@@ -4051,7 +4051,7 @@ mod tests {
     }
 
     /// 打ち切りが重い（60観測中51観測＝85%が0で左打ち切り）合成データ。外部の乱数に依存しない
-    /// 線形合同法で作る（`tests/_helpers.py`の`heavily_censored_tobit_dataset`と同じ手順・
+    /// 線形合同法で作る（`tests/support/_helpers.py`の`heavily_censored_tobit_dataset`と同じ手順・
     /// 同じ値。Python側の同名テストと同じ入力で挙動を固定する）。潜在変数は
     /// `y* = -1.8 + x1 + 0.5·x2 + e`（`x1`・`x2`・`e`は12個の一様乱数の和−6で近似した正規乱数）。
     fn heavily_censored_input() -> TobitInput {

@@ -22,7 +22,7 @@ survreg 由来。survreg は内部で `(β, log σ)` を最適化するが、本
 Note:
     mroz（`hours` 生スケール）は説明変数のスケール差が大きく、信頼区間の端点が
     0 近傍になる係数で相対誤差が ~1.4e-8 まで増幅する（係数・SE 本体は ~3e-10）。
-    このシナリオの `conf_int` のみ緩めた許容誤差を使う（`tests/_tolerances.py`）。
+    このシナリオの `conf_int` のみ緩めた許容誤差を使う（`tests/support/_tolerances.py`）。
     テスト対象フィクスチャは主・交差検証で構造が同一のため、テスト本体は
     `_tobit_checks.py` に集約している（`test_tobit_crosscheck.py` も同モジュールを使う）。
 """

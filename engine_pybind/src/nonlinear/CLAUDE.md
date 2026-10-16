@@ -23,9 +23,9 @@ Probit対応は当初「python_packageラッパー実装のみ」というスコ
 重複によるずれ（1クラスだけ直し忘れる）への備えとして、次を置いている。
 
 - `tol`の既定値解決は`nonlinear/common.rs`の`resolve_mle_tol_default`に集約した（フラットなコンストラクタは3クラスとも維持し、計算だけ共有）。
-- 共通フィールドの署名・既定値・setter・docの一致は`tests/nonlinear/test_mle_options_consistency.py`が検証する。Logit/Probitのフィールドを変えるときはTobitも、共通フィールドのdocを変えるときは3クラス同時に直す。`include_intercept`のdocだけは「ヘッセ行列」と「設計行列」の1語が意図的に異なり、テストもその差だけを許す。
-- Result側（`LogitResult`/`ProbitResult`/`TobitResult`）のフィールド構築も3クラスで独立に書いている（trait化・継承・マクロは、OLS等のResultとの構造の一貫性が下がるため採用しない）。共通属性の公開し忘れは`tests/nonlinear/test_mle_result_consistency.py`が、ラッパーと`_raw`の両方で検出する。共通属性を足すときは3クラス全てに足し、このテストの集合も更新する。`predict()`/`augment()`の共通手順は`shared/`の`extract_model_x_columns`/`append_predicted_column`に切り出してある。
-- `__repr__`の値はPythonのリテラル形式（`True`・`None`・`"g"`）で出す。`shared/option_repr.rs`の`PyRepr`を使い、`tests/test_options_repr.py`が全`*Options`で`eval(repr(...))`の往復を検証する。
+- 共通フィールドの署名・既定値・setter・docの一致は`tests/cross_method/test_mle_options_consistency.py`が検証する。Logit/Probitのフィールドを変えるときはTobitも、共通フィールドのdocを変えるときは3クラス同時に直す。`include_intercept`のdocだけは「ヘッセ行列」と「設計行列」の1語が意図的に異なり、テストもその差だけを許す。
+- Result側（`LogitResult`/`ProbitResult`/`TobitResult`）のフィールド構築も3クラスで独立に書いている（trait化・継承・マクロは、OLS等のResultとの構造の一貫性が下がるため採用しない）。共通属性の公開し忘れは`tests/cross_method/test_mle_result_consistency.py`が、ラッパーと`_raw`の両方で検出する。共通属性を足すときは3クラス全てに足し、このテストの集合も更新する。`predict()`/`augment()`の共通手順は`shared/`の`extract_model_x_columns`/`append_predicted_column`に切り出してある。
+- `__repr__`の値はPythonのリテラル形式（`True`・`None`・`"g"`）で出す。`shared/option_repr.rs`の`PyRepr`を使い、`tests/cross_method/test_options_repr.py`が全`*Options`で`eval(repr(...))`の往復を検証する。
 - `macro_rules!`によるクラス全体の生成は、可読性（grep・定義ジャンプ・エラー位置）の低下と、docの手法間差分の吸収が必要になる点から見送った。
 
 一方、`engine`層（`LogitEstimator::fit`/`ProbitEstimator::fit`/`TobitEstimator::fit`）の同じ6フィールド分のシグネチャ重複は、Python非公開の内部実装のためこの制約を受けない。`engine::nonlinear::common::MleFitOptions`という共有構造体に集約済み。`engine_pybind`側の`fit`関数は、pyclassの個別フィールドから`MleFitOptions`を組み立てて渡す（`logit.rs`/`probit.rs`/`tobit.rs`の`fit`関数末尾を参照）。

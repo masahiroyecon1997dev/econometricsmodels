@@ -5,7 +5,7 @@
 個別に緩めてよい）通り、値は手法・比較対象（主リファレンス/クロスチェック）
 ごとに異なる。そのため単一のRTOL/ATOL定数への集約はせず、ファイルごとに
 使っていた値をこの1ファイルに辞書化して見落としを防ぐ（計算式自体は
-`tests/_assertions.py`の`assert_close`/`assert_dict_close`
+`tests/support/_assertions.py`の`assert_close`/`assert_dict_close`
 （`tol = max(rtol * |ref|, atol)`）に統一済み）。
 
 キーはテストファイル名の接頭辞（例: `test_ols_reference.py` → `"ols_reference"`、

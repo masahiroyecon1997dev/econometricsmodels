@@ -8,7 +8,7 @@
 と同じ4分割）。
 
 `fe_dataset`フィクスチャは`tests/panel/conftest.py`（FEと共用、RE専用の合成
-データセットは無い）、`our_fit_re`ヘルパーは`tests/panel/_re_helpers.py`。
+データセットは無い）、`our_fit_re`ヘルパーは`tests/support/_re_helpers.py`。
 """
 
 from __future__ import annotations

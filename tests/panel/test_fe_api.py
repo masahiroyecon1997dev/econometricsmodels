@@ -8,7 +8,7 @@ engine_pybind経由で反映されることを確認する。`ValidationError`/
 `test_fe_crosscheck.py`（OLS/WLS/IVの`test_<手法>_api.py`等と同じ4分割）。
 
 `fe_dataset`フィクスチャと`our_fit`ヘルパーは`tests/panel/conftest.py`／
-`tests/panel/_fe_helpers.py`。
+`tests/support/_fe_helpers.py`。
 """
 
 from __future__ import annotations

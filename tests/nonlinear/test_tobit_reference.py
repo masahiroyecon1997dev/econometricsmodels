@@ -65,6 +65,9 @@ def _method_tolerances() -> dict:
     }
 
 
+# ── 凍結フィクスチャとの数値照合（合成データ） ────────────────────────
+
+
 @pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
 @pytest.mark.parametrize("scenario", _checks.SCENARIOS)
 def test_matches_aer_tobit(fixtures, scenario, cov_type):
@@ -83,6 +86,21 @@ def test_cluster_matches_aer_tobit(fixtures, cov_key):
         res,
         ref,
         f"{_checks.BASELINE_SCENARIO}/{cov_key}",
+        **_tolerances(_checks.BASELINE_SCENARIO),
+    )
+
+
+# ── 凍結フィクスチャとの数値照合（オプション） ────────────────────────
+
+
+@pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
+def test_no_intercept_matches_aer_tobit(fixtures, cov_type):
+    ref = fixtures["synthetic"]["no_intercept"][cov_type]
+    res = _checks.build_no_intercept_fit(cov_type, ref)
+    _checks.check_result(
+        res,
+        ref,
+        f"no_intercept/{cov_type}",
         **_tolerances(_checks.BASELINE_SCENARIO),
     )
 
@@ -127,16 +145,7 @@ def test_solver_combination_matches_aer_tobit(
     )
 
 
-@pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
-def test_no_intercept_matches_aer_tobit(fixtures, cov_type):
-    ref = fixtures["synthetic"]["no_intercept"][cov_type]
-    res = _checks.build_no_intercept_fit(cov_type, ref)
-    _checks.check_result(
-        res,
-        ref,
-        f"no_intercept/{cov_type}",
-        **_tolerances(_checks.BASELINE_SCENARIO),
-    )
+# ── 凍結フィクスチャとの数値照合（実データ） ──────────────────────────
 
 
 @pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)

@@ -204,6 +204,9 @@ def _check_result(
             )
 
 
+# ── 凍結フィクスチャとの数値照合（合成データ） ────────────────────────
+
+
 @pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
 @pytest.mark.parametrize("scenario", SCENARIOS)
 def test_synthetic_matches_r(crosscheck, scenario, cov_type):
@@ -246,6 +249,34 @@ def test_cluster_matches_r(crosscheck):
         res,
         ref,
         "cluster/R",
+        check_wu_hausman_p_value=False,
+    )
+
+
+def test_cluster_imbalanced_matches_r(crosscheck):
+    """不均衡クラスタ（サイズ[2, 3, 5, 10, 30, 50]のタイル）。
+
+    均等サイズの疑似グループ（行番号%10）だけでは見逃す、実務で起こりやすい
+    グループサイズの偏りを持つケース（`testing-policy.md`「テスト用データセット」3.）。
+    """
+    df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
+    groups = imbalanced_cluster_groups(df.height)
+    df = df.with_columns(pl.Series("cluster_group", groups))
+    options = IVOptions(cov_type="cluster", cluster="cluster_group")
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1"],
+        instruments=["z1", "z2"],
+        options=options,
+    ).fit()
+
+    ref = crosscheck["baseline"]["cluster_imbalanced"]
+    _check_result(
+        res,
+        ref,
+        "cluster_imbalanced/R",
         check_wu_hausman_p_value=False,
     )
 
@@ -320,52 +351,7 @@ def test_df1_matches_r(crosscheck, cov_type):
     _check_result(res, ref, f"df1/{cov_type}/R")
 
 
-@pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
-def test_card_matches_r(crosscheck_wooldridge, cov_type):
-    """実データセット（Wooldridge card）。`test_iv_reference.py`の同名テストと
-    同じ理由。
-    """
-    df = load_wooldridge_dataset("card")
-    options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
-    res = IV(
-        with_row_time(df),
-        y="lwage",
-        x_exog=CARD_X_EXOG,
-        x_endog=["educ"],
-        instruments=["nearc2", "nearc4"],
-        options=options,
-    ).fit()
-
-    ref = crosscheck_wooldridge["card"][cov_type]
-    _check_result(res, ref, f"card/{cov_type}/R")
-
-
-def test_cluster_imbalanced_matches_r(crosscheck):
-    """不均衡クラスタ（サイズ[2, 3, 5, 10, 30, 50]のタイル）。
-
-    均等サイズの疑似グループ（行番号%10）だけでは見逃す、実務で起こりやすい
-    グループサイズの偏りを持つケース（`testing-policy.md`「テスト用データセット」3.）。
-    """
-    df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
-    groups = imbalanced_cluster_groups(df.height)
-    df = df.with_columns(pl.Series("cluster_group", groups))
-    options = IVOptions(cov_type="cluster", cluster="cluster_group")
-    res = IV(
-        with_row_time(df),
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog1"],
-        instruments=["z1", "z2"],
-        options=options,
-    ).fit()
-
-    ref = crosscheck["baseline"]["cluster_imbalanced"]
-    _check_result(
-        res,
-        ref,
-        "cluster_imbalanced/R",
-        check_wu_hausman_p_value=False,
-    )
+# ── 凍結フィクスチャとの数値照合（オプション） ────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -438,3 +424,26 @@ def test_no_intercept_cluster_matches_r(crosscheck):
         check_wu_hausman_p_value=False,
         check_sargan=False,
     )
+
+
+# ── 凍結フィクスチャとの数値照合（実データ） ──────────────────────────
+
+
+@pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
+def test_card_matches_r(crosscheck_wooldridge, cov_type):
+    """実データセット（Wooldridge card）。`test_iv_reference.py`の同名テストと
+    同じ理由。
+    """
+    df = load_wooldridge_dataset("card")
+    options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
+    res = IV(
+        with_row_time(df),
+        y="lwage",
+        x_exog=CARD_X_EXOG,
+        x_endog=["educ"],
+        instruments=["nearc2", "nearc4"],
+        options=options,
+    ).fit()
+
+    ref = crosscheck_wooldridge["card"][cov_type]
+    _check_result(res, ref, f"card/{cov_type}/R")

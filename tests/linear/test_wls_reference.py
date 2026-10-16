@@ -111,6 +111,9 @@ def _check_result(res, ref: dict, label: str) -> None:
     assert res.n_obs == ref["nobs"], f"{label}/n_obs"
 
 
+# ── 凍結フィクスチャとの数値照合（合成データ） ────────────────────────
+
+
 @pytest.mark.parametrize("cov_type", COV_TYPES)
 @pytest.mark.parametrize("scenario", SCENARIOS)
 def test_matches_statsmodels(fixtures, scenario, cov_type):
@@ -227,6 +230,33 @@ def test_cluster_ill_conditioned_matches_statsmodels(fixtures, scenario):
     _check_result(
         res, fixtures["synthetic"][scenario]["cluster"], f"{scenario}/cluster"
     )
+
+
+def test_weight_in_x_matches_statsmodels(fixtures):
+    """`weight`と同じ列を`x`にも含める成功パス。
+
+    列名の重複が許容されることの数値的な確認が目的で、cov_type間の
+    挙動差を検証する趣旨ではないためclassicalのみ
+    （`generate_wls_fixtures.py`と同じ方針）。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    options = WLSOptions(cov_type="classical")
+    res = WLS(
+        with_row_time(df),
+        y="y",
+        x=["x1", "x2", "x3", "weight"],
+        weight="weight",
+        options=options,
+    ).fit()
+
+    _check_result(
+        res,
+        fixtures["synthetic"]["baseline"]["weight_in_x"],
+        "baseline/weight_in_x",
+    )
+
+
+# ── 凍結フィクスチャとの数値照合（オプション） ────────────────────────
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)
@@ -350,28 +380,7 @@ def test_confidence_level_cluster_matches_statsmodels(fixtures):
     )
 
 
-def test_weight_in_x_matches_statsmodels(fixtures):
-    """`weight`と同じ列を`x`にも含める成功パス。
-
-    列名の重複が許容されることの数値的な確認が目的で、cov_type間の
-    挙動差を検証する趣旨ではないためclassicalのみ
-    （`generate_wls_fixtures.py`と同じ方針）。
-    """
-    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
-    options = WLSOptions(cov_type="classical")
-    res = WLS(
-        with_row_time(df),
-        y="y",
-        x=["x1", "x2", "x3", "weight"],
-        weight="weight",
-        options=options,
-    ).fit()
-
-    _check_result(
-        res,
-        fixtures["synthetic"]["baseline"]["weight_in_x"],
-        "baseline/weight_in_x",
-    )
+# ── 凍結フィクスチャとの数値照合（実データ） ──────────────────────────
 
 
 @pytest.mark.parametrize("cov_type", NON_HAC_COV_TYPES)

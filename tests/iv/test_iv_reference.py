@@ -159,7 +159,7 @@ def _check_result(res, ref: dict, label: str) -> None:
     )
 
 
-# ── 凍結フィクスチャとの数値照合 ───────────────────────────────────
+# ── 凍結フィクスチャとの数値照合（合成データ） ────────────────────────
 
 
 @pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
@@ -284,28 +284,6 @@ def test_multi_endog_matches_linearmodels(fixtures, cov_type):
 
 
 @pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
-def test_card_matches_linearmodels(fixtures, cov_type):
-    """実データセット（Wooldridge card、Card 1995の大学近接操作変数による教育の
-    収益率推定）。`testing-policy.md`「テスト用データセット」2.が要求する実データ
-    検証がIV系統に無かった。
-    """
-    df = load_wooldridge_dataset("card")
-    options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
-    res = IV(
-        with_row_time(df),
-        y="lwage",
-        x_exog=CARD_X_EXOG,
-        x_endog=["educ"],
-        instruments=["nearc2", "nearc4"],
-        options=options,
-    ).fit()
-
-    _check_result(
-        res, fixtures["wooldridge"]["card"][cov_type], f"card/{cov_type}"
-    )
-
-
-@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
 def test_df1_matches_linearmodels(fixtures, cov_type):
     """自由度1境界（df_resid=1ちょうど）の成功パス。`x_exog=[]`・
     `x_endog=['endog1']`・`instruments=['z1']`（丁度識別、n=3）。境界値・
@@ -328,6 +306,9 @@ def test_df1_matches_linearmodels(fixtures, cov_type):
     _check_result(
         res, fixtures["synthetic"]["df1"][cov_type], f"df1/{cov_type}"
     )
+
+
+# ── 凍結フィクスチャとの数値照合（オプション） ────────────────────────
 
 
 @pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
@@ -392,3 +373,28 @@ def test_no_intercept_cluster_matches_linearmodels(fixtures):
 
 # 完全な多重共線性・極端なスケール差（`ComputationError` パス）は
 # `test_iv_validation.py`で確認する。
+
+
+# ── 凍結フィクスチャとの数値照合（実データ） ──────────────────────────
+
+
+@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
+def test_card_matches_linearmodels(fixtures, cov_type):
+    """実データセット（Wooldridge card、Card 1995の大学近接操作変数による教育の
+    収益率推定）。`testing-policy.md`「テスト用データセット」2.が要求する実データ
+    検証がIV系統に無かった。
+    """
+    df = load_wooldridge_dataset("card")
+    options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
+    res = IV(
+        with_row_time(df),
+        y="lwage",
+        x_exog=CARD_X_EXOG,
+        x_endog=["educ"],
+        instruments=["nearc2", "nearc4"],
+        options=options,
+    ).fit()
+
+    _check_result(
+        res, fixtures["wooldridge"]["card"][cov_type], f"card/{cov_type}"
+    )

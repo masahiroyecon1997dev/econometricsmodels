@@ -88,7 +88,7 @@ def fixtures() -> dict:
     return CONFIG.load_fixtures()
 
 
-# ── 凍結フィクスチャとの数値照合 ───────────────────────────────────
+# ── 凍結フィクスチャとの数値照合（合成データ） ────────────────────────
 
 
 @pytest.mark.parametrize("cov_type", CONFIG.cov_types)
@@ -103,6 +103,9 @@ def test_cluster_matches_statsmodels(fixtures):
 
 def test_cluster_imbalanced_matches_statsmodels(fixtures):
     _checks.check_cluster_imbalanced_matches_statsmodels(CONFIG, fixtures)
+
+
+# ── 凍結フィクスチャとの数値照合（オプション） ────────────────────────
 
 
 @pytest.mark.parametrize("cov_type", CONFIG.cov_types)
@@ -131,6 +134,9 @@ def test_solver_combination_matches_statsmodels_newton(fixtures, case, solver):
     )
 
 
+# ── 凍結フィクスチャとの数値照合（実データ） ──────────────────────────
+
+
 def test_apple_cluster_matches_statsmodels(fixtures):
     _checks.check_apple_cluster_matches_statsmodels(CONFIG, fixtures)
 
@@ -140,7 +146,7 @@ def test_mroz_matches_statsmodels(fixtures, cov_type):
     _checks.check_mroz_matches_statsmodels(CONFIG, fixtures, cov_type)
 
 
-# ── ライブ statsmodels との照合（凍結フィクスチャ対象外の分岐） ─────
+# ── ライブ statsmodels との照合（凍結フィクスチャ対象外の分岐） ───────
 
 
 def test_predict_new_data_matches_statsmodels():

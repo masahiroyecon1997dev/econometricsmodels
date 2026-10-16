@@ -108,6 +108,9 @@ def _check_result(res, ref: dict, label: str) -> None:
     )
 
 
+# ── 凍結フィクスチャとの数値照合（合成データ） ────────────────────────
+
+
 @pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
 @pytest.mark.parametrize("scenario", SCENARIOS)
 def test_matches_r_glm(fixtures, scenario, cov_type):
@@ -141,6 +144,9 @@ def test_cluster_imbalanced_matches_r_glm(fixtures):
 
     ref = fixtures["synthetic"]["baseline"]["cluster_imbalanced"]
     _check_result(res, ref, "cluster_imbalanced")
+
+
+# ── 凍結フィクスチャとの数値照合（実データ） ──────────────────────────
 
 
 def test_apple_cluster_matches_r_glm(fixtures):

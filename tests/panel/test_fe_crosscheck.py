@@ -162,7 +162,7 @@ def _options(cov_type: str, *, two_way: bool) -> FEOptions:
     return FEOptions(cov_type=cov_type, **kwargs)
 
 
-# ── 凍結フィクスチャとの数値照合（合成データ） ───────────────────────
+# ── 凍結フィクスチャとの数値照合（合成データ） ────────────────────────
 
 
 @pytest.mark.parametrize("scenario, cov_type", ONE_WAY_CASES)
@@ -203,10 +203,7 @@ def test_synthetic_two_way_matches_fixest(crosscheck, scenario, cov_type):
     )
 
 
-# ── 凍結フィクスチャとの数値照合（実データ: Wooldridge wagepan） ───────
-
-
-# ── 境界値・クラスター不均衡 ────────────────────────────────────
+# ── 境界値・クラスター不均衡 ──────────────────────────────────────────
 
 
 def test_cluster_imbalanced_matches_fixest(crosscheck):
@@ -326,6 +323,9 @@ def test_boundary_df1_two_way_matches_fixest(crosscheck):
         crosscheck["synthetic"]["baseline_df1"]["two_way"],
         "baseline_df1/two_way",
     )
+
+
+# ── 凍結フィクスチャとの数値照合（実データ: Wooldridge wagepan） ──────
 
 
 @pytest.mark.parametrize("cov_type", WAGEPAN_COV_TYPES)

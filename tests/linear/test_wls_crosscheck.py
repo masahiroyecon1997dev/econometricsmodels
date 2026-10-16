@@ -117,6 +117,9 @@ def _assert_fit_stats_close(res, ref: dict, label: str, rtol: float) -> None:
         )
 
 
+# ── 凍結フィクスチャとの数値照合（合成データ） ────────────────────────
+
+
 @pytest.mark.parametrize("cov_type", NON_HAC_COV_TYPES)
 @pytest.mark.parametrize("scenario", SYNTHETIC_SCENARIOS)
 def test_synthetic_matches_r(crosscheck, scenario, cov_type):
@@ -298,10 +301,15 @@ def test_hac_matches_r(crosscheck, scenario):
     _assert_fit_stats_close(res, ref, label, rtol=RTOL_STRICT)
 
 
-# ── include_intercept=False・confidence_level非既定（凍結フィクスチャ、
-# baselineシナリオ、OLS側の横展開） ──────────────────────────────
+# ── 凍結フィクスチャとの数値照合（オプション） ────────────────────────
+
+
+#
+# include_intercept=False・confidence_level非既定（凍結フィクスチャ、baselineシナリオ、OLS側の横展開）。
 # クラスターも含める。HACは`hac_lag`を使う専用テスト（`test_*_hac_matches_r`）で、
 # 同じ`RTOL_STRICT`で確認する。
+
+
 NO_INTERCEPT_AND_CONFIDENCE_LEVEL_STRICT_COV_TYPES = [
     *NON_HAC_COV_TYPES,
     "cluster",
@@ -440,6 +448,9 @@ def test_confidence_level_hac_matches_r(crosscheck):
         rtol=RTOL_STRICT,
     )
     _assert_fit_stats_close(res, ref, label, rtol=RTOL_STRICT)
+
+
+# ── 凍結フィクスチャとの数値照合（実データ） ──────────────────────────
 
 
 @pytest.mark.parametrize("cov_type", NON_HAC_COV_TYPES)

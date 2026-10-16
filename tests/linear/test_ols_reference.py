@@ -130,7 +130,7 @@ def _check_result(res, ref: dict, label: str) -> None:
     assert res.n_obs == ref["nobs"], f"{label}/n_obs"
 
 
-# ── 凍結フィクスチャとの数値照合 ───────────────────────────────────
+# ── 凍結フィクスチャとの数値照合（合成データ） ────────────────────────
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)
@@ -287,6 +287,9 @@ def test_cluster_ill_conditioned_matches_statsmodels(fixtures, scenario):
     )
 
 
+# ── 凍結フィクスチャとの数値照合（オプション） ────────────────────────
+
+
 @pytest.mark.parametrize("cov_type", COV_TYPES)
 def test_no_intercept_matches_statsmodels(fixtures, cov_type):
     """`include_intercept=False`（切片なし）が、cov_typeによらずstatsmodels
@@ -390,6 +393,9 @@ def test_confidence_level_cluster_matches_statsmodels(fixtures):
     )
 
 
+# ── 凍結フィクスチャとの数値照合（実データ） ──────────────────────────
+
+
 # Wooldridge実データ用のy/x列構成。`generate_ols_fixtures.py`のformula文字列
 # （statsmodels側のフォーミュラAPI用）とは別に、本実装のy=str/x=list渡し
 # （CLAUDE.md 2章）用の構成をここで持つ（`test_ols_crosscheck.py`の
@@ -462,7 +468,7 @@ def test_wooldridge_wage1_region_cluster_matches_statsmodels(
     )
 
 
-# ── ライブ statsmodels との照合（共有 dataset フィクスチャ） ────────
+# ── ライブ statsmodels との照合 ───────────────────────────────────────
 
 
 @pytest.mark.parametrize("cov_type", NON_HAC_COV_TYPES)

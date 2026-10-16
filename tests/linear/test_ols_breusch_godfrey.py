@@ -551,7 +551,7 @@ def _check_against(fitted, time: str, ref: dict, label: str) -> None:
 
 
 @pytest.mark.parametrize("scenario", BG_SYNTHETIC_SCENARIOS)
-def test_synthetic_matches_statsmodels(reference, scenario):
+def test_matches_statsmodels(reference, scenario):
     df, x_cols = _synthetic(scenario)
     fitted = OLS(df, y="y", x=x_cols).fit()
     _check_against(
@@ -596,7 +596,7 @@ def _check_against_r(fitted, time: str, ref: dict, label: str) -> None:
 
 
 @pytest.mark.parametrize("scenario", BG_SYNTHETIC_SCENARIOS)
-def test_synthetic_matches_r(crosscheck, scenario):
+def test_matches_r(crosscheck, scenario):
     df, x_cols = _synthetic(scenario)
     fitted = OLS(df, y="y", x=x_cols).fit()
     _check_against_r(

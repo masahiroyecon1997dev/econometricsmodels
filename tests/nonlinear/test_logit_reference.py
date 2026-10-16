@@ -109,16 +109,12 @@ def test_cluster_imbalanced_matches_statsmodels(fixtures):
 
 
 @pytest.mark.parametrize("cov_type", CONFIG.cov_types)
-def test_include_intercept_false_matches_statsmodels(fixtures, cov_type):
-    _checks.check_include_intercept_false_matches_statsmodels(
-        CONFIG, fixtures, cov_type
-    )
+def test_no_intercept_matches_statsmodels(fixtures, cov_type):
+    _checks.check_no_intercept_matches_statsmodels(CONFIG, fixtures, cov_type)
 
 
-def test_include_intercept_false_cluster_matches_statsmodels(fixtures):
-    _checks.check_include_intercept_false_cluster_matches_statsmodels(
-        CONFIG, fixtures
-    )
+def test_no_intercept_cluster_matches_statsmodels(fixtures):
+    _checks.check_no_intercept_cluster_matches_statsmodels(CONFIG, fixtures)
 
 
 @pytest.mark.parametrize("solver", ["bfgs", "lbfgs"])

@@ -274,7 +274,7 @@ def _re_options(cov_type: str) -> REOptions:
 
 
 @pytest.mark.parametrize("scenario, cov_type", ALL_CASES)
-def test_synthetic_matches_plm(crosscheck, scenario, cov_type):
+def test_matches_plm(crosscheck, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
     x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
     res = RE(
@@ -395,7 +395,7 @@ def test_wagepan_matches_plm(crosscheck, cov_type):
 
 @pytest.mark.parametrize("cov_type", HAUSMAN_COV_TYPES)
 @pytest.mark.parametrize("scenario", NUMERIC_SCENARIOS)
-def test_synthetic_hausman_matches_plm(crosscheck, scenario, cov_type):
+def test_hausman_matches_plm(crosscheck, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
     x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
     model = RE(

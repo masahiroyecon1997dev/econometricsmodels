@@ -191,7 +191,7 @@ def test_method_option_converges(censored_dataset, solver):
 
     engine_pybindの文字列→`Method`パースやpython_packageラッパーの配線が
     成功パスで動くことの確認に留める。最尤解との数値一致は主リファレンスとの
-    照合（`test_tobit_reference.py`の`test_method_matches_aer_tobit`）が、
+    照合（`test_tobit_reference.py`の`test_solver_matches_aer_tobit`）が、
     より厳しい許容誤差で担う。
     """
     res = Tobit(

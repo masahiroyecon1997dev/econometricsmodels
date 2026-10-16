@@ -122,7 +122,7 @@ def _assert_fit_stats_close(res, ref: dict, label: str, rtol: float) -> None:
 
 @pytest.mark.parametrize("cov_type", NON_HAC_COV_TYPES)
 @pytest.mark.parametrize("scenario", SYNTHETIC_SCENARIOS)
-def test_synthetic_matches_r(crosscheck, scenario, cov_type):
+def test_matches_r(crosscheck, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
     x_cols = [c for c in df.columns if c not in ("y", "weight")]
     options = WLSOptions(cov_type=cov_type)

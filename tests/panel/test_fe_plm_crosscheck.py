@@ -178,7 +178,7 @@ def _fit(scenario: str, cov_type: str, *, dk_bandwidth: int | None = None):
 
 
 @pytest.mark.parametrize("scenario, cov_type", ONE_WAY_CASES)
-def test_synthetic_one_way_matches_plm(crosscheck, scenario, cov_type):
+def test_matches_plm_one_way(crosscheck, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
     _check_result(
         _fit(scenario, cov_type),

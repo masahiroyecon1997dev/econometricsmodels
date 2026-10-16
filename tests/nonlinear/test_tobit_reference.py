@@ -55,7 +55,7 @@ def _tolerances(scenario: str) -> dict:
     }
 
 
-def _method_tolerances() -> dict:
+def _solver_tolerances() -> dict:
     rtol = _TOL["rtol_solver"]
     return {
         "rtol_point": rtol,
@@ -106,10 +106,10 @@ def test_no_intercept_matches_aer_tobit(fixtures, cov_type):
 
 
 @pytest.mark.parametrize("solver", _checks.METHODS)
-def test_method_matches_aer_tobit(fixtures, solver):
+def test_solver_matches_aer_tobit(fixtures, solver):
     ref = fixtures["synthetic"]["solver"][solver]
     res = _checks.build_method_fit(solver, ref)
-    _checks.check_result(res, ref, f"solver/{solver}", **_method_tolerances())
+    _checks.check_result(res, ref, f"solver/{solver}", **_solver_tolerances())
 
 
 def _combination_tolerances(scenario: str) -> dict:

@@ -166,7 +166,7 @@ def _options(cov_type: str, *, two_way: bool) -> FEOptions:
 
 
 @pytest.mark.parametrize("scenario, cov_type", ONE_WAY_CASES)
-def test_synthetic_one_way_matches_fixest(crosscheck, scenario, cov_type):
+def test_matches_fixest_one_way(crosscheck, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
     x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
     res = FE(
@@ -185,7 +185,7 @@ def test_synthetic_one_way_matches_fixest(crosscheck, scenario, cov_type):
 
 
 @pytest.mark.parametrize("scenario, cov_type", TWO_WAY_CASES)
-def test_synthetic_two_way_matches_fixest(crosscheck, scenario, cov_type):
+def test_matches_fixest_two_way(crosscheck, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
     x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
     res = FE(

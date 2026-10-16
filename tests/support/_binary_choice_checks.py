@@ -160,7 +160,7 @@ def check_include_intercept_false_omits_const_and_converges(
     dataset, estimator_cls, options_cls
 ):
     """`include_intercept=False`の構造面での成功パス（数値照合は
-    `test_<method>_reference.py::test_include_intercept_false_matches_statsmodels`）。
+    `test_<method>_reference.py::test_no_intercept_matches_statsmodels`）。
 
     `include_intercept`の値に関わらず`df_model`は常に`k-1`（`docs/spec/
     <solver>-spec.md`参照）となるため、その旨も確認する。
@@ -1358,7 +1358,7 @@ def check_matches_statsmodels(
     )
 
 
-def check_include_intercept_false_matches_statsmodels(
+def check_no_intercept_matches_statsmodels(
     config: BinaryChoiceReferenceConfig, fixtures, cov_type
 ) -> None:
     """`include_intercept=False`（切片なし）の全統計量（baseline、`cov_type`別）。
@@ -1379,7 +1379,7 @@ def check_include_intercept_false_matches_statsmodels(
     )
 
 
-def check_include_intercept_false_cluster_matches_statsmodels(
+def check_no_intercept_cluster_matches_statsmodels(
     config: BinaryChoiceReferenceConfig, fixtures
 ) -> None:
     """`include_intercept=False`×クラスターロバストSE（行番号%10の疑似グループ）。"""

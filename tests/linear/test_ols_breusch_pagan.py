@@ -642,7 +642,7 @@ def _check_against(fitted, variables, ref: dict, label: str) -> None:
 
 
 @pytest.mark.parametrize("case", list(BP_SYNTHETIC_CASES))
-def test_synthetic_matches_statsmodels(reference, case):
+def test_matches_statsmodels(reference, case):
     fitted, variables = _fit_synthetic_case(case)
 
     _check_against(fitted, variables, reference["synthetic"][case], case)
@@ -740,7 +740,7 @@ def _check_against_r(fitted, variables, ref: dict, label: str) -> None:
 
 
 @pytest.mark.parametrize("case", list(BP_SYNTHETIC_CASES))
-def test_synthetic_matches_r(crosscheck, case):
+def test_matches_r(crosscheck, case):
     """`baseline_constant_and_duplicate`は`Z`の定数列・重複列をそのままRに渡す。Rは
     エイリアスとしてランクに基づく自由度を使い、本実装が除いて数えた自由度と一致する。"""
     fitted, variables = _fit_synthetic_case(case)

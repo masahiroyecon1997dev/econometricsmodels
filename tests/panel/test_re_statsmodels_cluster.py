@@ -97,7 +97,7 @@ def _check(res, ref: dict, n_clusters: int, label: str) -> None:
 
 
 @pytest.mark.parametrize("scenario", SCENARIOS)
-def test_synthetic_cluster_matches_statsmodels(reference, scenario):
+def test_cluster_matches_statsmodels(reference, scenario):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
     x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
     res = RE(

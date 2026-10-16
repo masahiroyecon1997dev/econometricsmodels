@@ -209,7 +209,7 @@ def _check_result(
 
 @pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
 @pytest.mark.parametrize("scenario", SCENARIOS)
-def test_synthetic_matches_r(crosscheck, scenario, cov_type):
+def test_matches_r(crosscheck, scenario, cov_type):
     x_exog = scenario_x_exog(scenario)
     instruments = scenario_instruments(scenario)
     df = pl.read_csv(DATA_DIR / f"iv_{scenario}.csv")

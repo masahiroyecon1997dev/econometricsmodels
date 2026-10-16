@@ -6,7 +6,7 @@ validation/api/reference に分けた際、ライブ statsmodels
 照合（reference）と predict() の statsmodels 照合（api）の双方が同じラッパーを
 使うため、重複を避けてここへ集約した。
 
-許容誤差は独自の絶対誤差定数を持たず、`_tolerances.py` の `"ols_reference"`
+許容誤差は独自の絶対誤差定数を持たず、`_tolerances_linear.py` の `"ols_reference"`
 （`_assertions.assert_close` 経由、`tol = max(rtol*|ref|, atol)`）で統一する。
 """
 

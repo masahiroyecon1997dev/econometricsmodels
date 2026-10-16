@@ -56,7 +56,7 @@ plmの変量効果分散成分推定（Swamy-Arora）はlinearmodelsと僅かに
 最大1%台（dkの信頼区間は3.7%）乖離することを実測確認済み（バランスパネルでは
 機械精度で一致）。このためテストコード側では、バランス
 パネルを機械精度、不均衡パネル（`unbalanced`）のみ統計量・cov_type別に緩めた
-許容誤差で比較する（`tests/support/_tolerances.py`の`re_crosscheck`参照）。
+許容誤差で比較する（`tests/support/_tolerances_panel.py`の`re_crosscheck`参照）。
 
 ## aic/bic/log_likelihoodを含まない理由
 
@@ -72,7 +72,7 @@ REのaic/bic/log_likelihoodの独立検証は現時点で行わない
 定数項に準偏差変換前の`1`を使うため、不均衡パネルでは変換済み定数列を使う版と
 値が異なる（本実装は`plm`に合わせる）。またSwamy-Arora分散成分がlinearmodels
 準拠の本実装と`plm`とで不均衡パネルでは異なるため、統計量は不均衡パネルで
-数％ずれる（`tests/support/_tolerances.py`の`rtol_hausman_unbalanced`）。バランス
+数％ずれる（`tests/support/_tolerances_panel.py`の`rtol_hausman_unbalanced`）。バランス
 パネルでは機械精度で一致する。
 
 `cluster_col`にentity以外を指定した場合は、plmがクラスターにできるのが
@@ -322,7 +322,7 @@ def build_fixtures() -> dict:
             "cov_typeに応じて最大1%台（dkの信頼区間は3.7%）乖離する"
             "（実測確認済み、実装バグではない）。テストコード側ではバランス"
             "パネルを機械精度、unbalancedのみ統計量・cov_type別に緩めた許容誤差"
-            "で比較すること（tests/support/_tolerances.pyのre_crosscheck参照）。t検定"
+            "で比較すること（tests/support/_tolerances_panel.pyのre_crosscheck参照）。t検定"
             "（test_stats/p_values/conf_int）はplmの既定であるz検定（漸近正規"
             "近似）ではなく、本実装と同じt分布（hc2/hc3はdf_resid、clusterはG-1、"
             "dkはT-1）の式でparams/std_errorsから計算し直している"

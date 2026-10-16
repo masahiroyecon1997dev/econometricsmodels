@@ -29,7 +29,7 @@ Note:
     数値微分の刻み幅を厳しくして生成しており（`benchmark/nonlinear/references/
     run_glm_crosscheck.R`参照）、基本方針はLogitと同じRTOL=1e-6（実測最大相対誤差
     ~1.4e-7に対するマージン。ATOLは1e-12で純粋な相対誤差比較）。信頼区間（0に近い境界での増幅）とp値のみ個別の
-    許容誤差を設定している（根拠は`tests/support/_tolerances.py`の`probit_crosscheck`の
+    許容誤差を設定している（根拠は`tests/support/_tolerances_nonlinear.py`の`probit_crosscheck`の
     コメント参照。`testing-policy.md`「許容誤差」の方針通り）。
 """
 
@@ -85,7 +85,7 @@ ATOL_P_VALUE = TOLERANCES["probit_crosscheck"]["atol_p_value"]
 # 観測情報行列の手計算（`run_glm_crosscheck.R`）で増幅されるため、SE・z値・信頼区間・
 # 限界効果が~2e-6、p値が絶対~2.5e-7ずれる。statsmodelsのnewtonと本実装は~1e-9で
 # 一致する（`probit.json`のapple/cluster）ため、R側の精度限界として個別の許容誤差を使う
-# （`tests/support/_tolerances.py`の`probit_crosscheck`参照）。
+# （`tests/support/_tolerances_nonlinear.py`の`probit_crosscheck`参照）。
 RTOL_APPLE = TOLERANCES["probit_crosscheck"]["rtol_apple"]
 ATOL_P_VALUE_APPLE = TOLERANCES["probit_crosscheck"]["atol_p_value_apple"]
 

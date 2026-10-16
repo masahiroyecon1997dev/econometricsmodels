@@ -76,7 +76,7 @@ Issue番号・内部管理ドキュメント（`docs/planning/specs/`配下の�
 - **文字列オプションの大文字小文字**: `cov_type`・`gmm_weight_type`は、各手法が受け付ける全ての値について、`tests/support/_helpers.py`の`CASE_SPELLINGS`（小文字・全大文字・先頭のみ大文字・大小交互）×値の網羅で`test_cov_type_is_case_insensitive`等に集約する。`res.<オプション>`が正規形（小文字）で返ることと、全ての綴りで正規形と同一の推定結果になること（`_assertions.assert_same_estimates`）を確認し、ラベルだけを見る別テストは作らない。クラスターが必要な値（`cluster`）は専用データを使う引数にして同じテストに含める。
 - **共通の命名**: 結果型は`test_fit_succeeds_and_returns_<手法>_results`、件数・被説明変数名は`test_n_obs_and_dep_var_name`（FE/REは`n_entities`も確認するため`test_n_obs_dep_var_name_and_n_entities`）。
 - **solverの収束**: `_api.py`のsolver別テストは`converged`のみを確認する（最尤解との一致は`_reference.py`が厳しい許容誤差で担う）。
-- **数値の比較**: `assert abs(...) < tol`や`pytest.approx`を直書きせず、`_assertions.assert_close`（`label`を渡せる）を使う。許容誤差のリテラルを直書きせず、`_tolerances.py`の`TOLERANCES`に実測の最大差とマージンの根拠をコメントして置き、`functools.partial`で束縛して使う（本実装内の不変条件の比較は`<手法>_api`のキー）。
+- **数値の比較**: `assert abs(...) < tol`や`pytest.approx`を直書きせず、`_assertions.assert_close`（`label`を渡せる）を使う。許容誤差のリテラルを直書きせず、系統別の`_tolerances_<系統>.py`（`linear`・`nonlinear`・`iv`・`panel`）に実測の最大差とマージンの根拠をコメントして置き、`_tolerances.py`が結合して公開する`TOLERANCES`から引いて`functools.partial`で束縛して使う（キーが系統間で重複するとimport時に`ValueError`）（本実装内の不変条件の比較は`<手法>_api`のキー）。
 - **docstring**: 現在の挙動と理由だけを書く。「従来は〜だった」「〜に統合した」のような変更履歴、レビュー指摘・ユーザー確認の記録は書かない（経緯はgit logが持つ）。回帰ガードとして「過去にこの入力で〜が起きた」ことが、そのテストの存在理由を説明する場合に限り、理由として残してよい。シナリオの件数は書かず、`NUMERIC_SCENARIOS`のように定数名で参照する。
 
 ## engine（Rust）のカバレッジ方針

@@ -15,7 +15,7 @@ generate_tobit_crosscheck_fixtures.py` で生成）を読み込み、`test_tobit
 Note:
     許容誤差は基本 1e-8（`censReg` 側の maxLik 収束を reltol=1e-14 まで詰めたため、
     合成シナリオは点推定・SE・限界効果とも ~2e-9 で一致する）。ただし以下は
-    実測乖離に基づき個別に緩める（`tests/support/_tolerances.py` の `tobit_crosscheck`）:
+    実測乖離に基づき個別に緩める（`tests/support/_tolerances_nonlinear.py` の `tobit_crosscheck`）:
         - `high_condition_number`（x1,x2 相関 0.999）の SE・z・信頼区間・限界効果 SE:
           悪条件下で2つの独立最適化器の解の僅差が分散系で ~1.9e-8 まで増幅する。
         - `mroz`（`hours` 生スケール）の SE・z・Wald・信頼区間・限界効果 SE:

@@ -337,7 +337,7 @@ def check_result(
 ) -> None:
     """1ケース分の全フィールドを照合する。
 
-    許容誤差は3種類に分ける（`tests/support/_tolerances.py` の tobit_* エントリ参照）:
+    許容誤差は3種類に分ける（`tests/support/_tolerances_nonlinear.py` の tobit_* エントリ参照）:
         - ``rtol_point``  : 点推定・尤度系（係数・sigma・対数尤度・AIC・BIC・
           限界効果・予測値・打ち切り適合度）。基本は 1e-8。
         - ``rtol_inference``: 分散に依存する量（標準誤差・z値・p値・Wald 統計量・

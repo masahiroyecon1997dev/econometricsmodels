@@ -350,7 +350,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 - **`solver`の組み合わせ**: `newton`は全シナリオ×`cov_type`で数値照合する。`bfgs`/`lbfgs`は
   baseline×classicalに加え、代表的な組み合わせ（`near_separation`×classical/opg/hc0、cluster・
   cluster_imbalanced、`apple`のcluster）を、statsmodelsの`newton`で生成した同じシナリオ・
-  `cov_type`の全統計量に対して`rtol=2e-5`で照合する（`tests/support/_tolerances.py`の
+  `cov_type`の全統計量に対して`rtol=2e-5`で照合する（`tests/support/_tolerances_nonlinear.py`の
   `logit_reference.rtol_solver_vs_newton`、実測最大~3.6e-6）。statsmodels自身の`bfgs`/`lbfgs`を
   参照にしないのは、`near_separation`で収束許容が緩く本実装とLogitで最大~7e-3（Probitは~8e-4）乖離する
   （statsmodels側の誤差）ため。

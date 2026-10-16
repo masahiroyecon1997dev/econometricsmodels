@@ -52,7 +52,7 @@ from benchmark.common import hac_auto_lag
 from benchmark.linear.constants import COV_TYPES
 
 # predict() の statsmodels 照合も凍結フィクスチャ照合と同じ許容誤差
-# （`_tolerances.py` の "ols_reference"）で行う。`_assertions.assert_close`
+# （`_tolerances_linear.py` の "ols_reference"）で行う。`_assertions.assert_close`
 # （`tol = max(rtol*|ref|, atol)`）に統一し、独自の絶対誤差定数は持たない。
 _assert_close = partial(
     assert_close,

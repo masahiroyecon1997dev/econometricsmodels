@@ -307,7 +307,7 @@ demeanしたR²」を3種とも定義すると誤る）:
   本実装と異なるため、本実装の既定式`floor(4*(T/100)^(2/9))`で求めた値を`DK(lag)`へ明示的に
   渡す。`linearmodels`との比較は`classical`（`unadjusted`）・`hc1`（`robust`）のみ、
   `hc2`/`hc3`は`linearmodels`に無いためfixestのみ。
-- 許容誤差: 相対誤差`1e-8`（`tests/support/_tolerances.py`の`fe_reference`・`fe_crosscheck`、
+- 許容誤差: 相対誤差`1e-8`（`tests/support/_tolerances_panel.py`の`fe_reference`・`fe_crosscheck`、
   `.claude/rules/testing-policy.md`の基本方針通り）。実測の一致は`1e-14`程度で、許容誤差は
   それにマージンを載せた基本値のまま。
 - **`aic`/`bic`はRクロスチェック（`fixest`）のみで検証する**: `linearmodels.PanelOLS`は

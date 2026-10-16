@@ -49,7 +49,7 @@ from benchmark.common import hac_auto_lag
 from benchmark.linear.constants import COV_TYPES
 
 # predict()のstatsmodels照合は主リファレンス照合と同じ許容誤差
-# （`_tolerances.py`の"wls_reference"）で行う（`test_ols_api.py`と同じ方針、
+# （`_tolerances_linear.py`の"wls_reference"）で行う（`test_ols_api.py`と同じ方針、
 # 独自の絶対誤差定数は持たない）。
 _assert_close = partial(
     assert_close,

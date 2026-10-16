@@ -18,7 +18,7 @@ Note:
     数値微分の刻み幅を厳しくして生成しており（`benchmark/nonlinear/references/
     run_glm_crosscheck.R`参照）、基本方針はRTOL=1e-6（実測最大相対誤差~6e-8に対する
     マージン。ATOLは1e-12で純粋な相対誤差比較）。p値のみ裾での増幅に備えた個別のATOLを設定している
-    （根拠は`tests/support/_tolerances.py`の`logit_crosscheck`のコメント参照。
+    （根拠は`tests/support/_tolerances_nonlinear.py`の`logit_crosscheck`のコメント参照。
     `testing-policy.md`「許容誤差」の方針通り）。
 """
 

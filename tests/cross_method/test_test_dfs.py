@@ -83,22 +83,48 @@ def _chi2_p(stat, df_):
     return float(sps.chi2.sf(stat, df_))
 
 
+def _fe(df, *, two_way=False, **options):
+    if two_way:
+        options["time"] = "time"
+    return FE(
+        df,
+        y="y",
+        x=["x1", "x2"],
+        entity="entity",
+        options=FEOptions(**options),
+    ).fit()
+
+
+def _re(df, **options):
+    return RE(
+        df,
+        y="y",
+        x=["x1", "x2"],
+        entity="entity",
+        options=REOptions(**options),
+    ).fit()
+
+
+def _iv(df, **options):
+    return IV(
+        df,
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog"],
+        instruments=["z1", "z2", "z3"],
+        options=IVOptions(**options),
+    ).fit()
+
+
+# ── 既定のcov_typeでのF/Wald検定の自由度 ──────────────────────────────
+
+
 def test_ols_df_resid_df_model_and_f_dfs(df):
     res = OLS(df, y="y", x=["x1", "x2"]).fit()
     assert res.df_resid == N - 3
     assert res.df_model == 2
     assert (res.f_df_num, res.f_df_denom) == (2, N - 3)
     assert _f_p(res.f_statistic, 2, N - 3) == pytest.approx(
-        res.f_p_value, rel=1e-8
-    )
-
-
-def test_ols_cluster_f_denominator_is_g_minus_one(df):
-    options = OLSOptions(cov_type="cluster", cluster="entity")
-    res = OLS(df, y="y", x=["x1", "x2"], options=options).fit()
-    assert res.df_resid == N - 3
-    assert (res.f_df_num, res.f_df_denom) == (2, N_ENTITIES - 1)
-    assert _f_p(res.f_statistic, 2, N_ENTITIES - 1) == pytest.approx(
         res.f_p_value, rel=1e-8
     )
 
@@ -118,6 +144,45 @@ def test_wls_df_resid_df_model_and_f_dfs(df):
     assert (res.f_df_num, res.f_df_denom) == (2, N - 3)
     assert _f_p(res.f_statistic, 2, N - 3) == pytest.approx(
         res.f_p_value, rel=1e-8
+    )
+
+
+@pytest.mark.parametrize("model", [Logit, Probit])
+def test_logit_probit_lr_df(df, model):
+    res = model(df, y="y_bin", x=["x1", "x2"]).fit()
+    assert res.lr_df == 2
+    assert _chi2_p(res.lr_statistic, 2) == pytest.approx(
+        res.lr_p_value, rel=1e-6
+    )
+
+
+def test_tobit_wald_dist_and_df(df):
+    res = Tobit(
+        df, y="y_cens", x=["x1", "x2"], options=TobitOptions(lower=0.5)
+    ).fit()
+    assert res.wald_dist == "chi2"
+    assert res.wald_df == 2
+    assert _chi2_p(res.wald_statistic, 2) == pytest.approx(
+        res.wald_p_value, rel=1e-6
+    )
+
+
+def test_iv_2sls_wald_is_f_type(df):
+    res = _iv(df)
+    assert res.wald_dist == "f"
+    assert (res.wald_df_num, res.wald_df_denom) == (2, res.df_resid)
+    assert _f_p(res.wald_statistic, 2, res.df_resid) == pytest.approx(
+        res.wald_p_value, rel=1e-8
+    )
+
+
+def test_iv_gmm_wald_is_chi2_type(df):
+    res = _iv(df, estimator="gmm")
+    assert res.wald_dist == "chi2"
+    assert res.wald_df_num == 2
+    assert res.wald_df_denom is None
+    assert _chi2_p(res.wald_statistic, 2) == pytest.approx(
+        res.wald_p_value, rel=1e-8
     )
 
 
@@ -168,26 +233,22 @@ def test_re_f_dfs_and_hausman_df(df):
     assert res.hausman_df == 2
 
 
-def _fe(df, *, two_way=False, **options):
-    if two_way:
-        options["time"] = "time"
-    return FE(
-        df,
-        y="y",
-        x=["x1", "x2"],
-        entity="entity",
-        options=FEOptions(**options),
-    ).fit()
+# ── cov_typeに連動する分母自由度（cluster: G-1、dk: T-1） ─────────────
 
 
-def _re(df, **options):
-    return RE(
-        df,
-        y="y",
-        x=["x1", "x2"],
-        entity="entity",
-        options=REOptions(**options),
-    ).fit()
+def test_ols_cluster_f_denominator_is_g_minus_one(df):
+    options = OLSOptions(cov_type="cluster", cluster="entity")
+    res = OLS(df, y="y", x=["x1", "x2"], options=options).fit()
+    assert res.df_resid == N - 3
+    assert (res.f_df_num, res.f_df_denom) == (2, N_ENTITIES - 1)
+    assert _f_p(res.f_statistic, 2, N_ENTITIES - 1) == pytest.approx(
+        res.f_p_value, rel=1e-8
+    )
+
+
+def test_iv_2sls_cluster_wald_denominator_is_g_minus_one(df):
+    res = _iv(df, cov_type="cluster", cluster="entity")
+    assert (res.wald_df_num, res.wald_df_denom) == (2, N_ENTITIES - 1)
 
 
 @pytest.mark.parametrize("two_way", [False, True])
@@ -312,7 +373,10 @@ def test_re_f_statistic_depends_on_cov_type(df):
         assert res.f_statistic != pytest.approx(base.f_statistic, rel=1e-6)
 
 
-# --- 不均衡パネル・不均衡クラスター --------------------------------------------
+# ── 不均衡パネル ──────────────────────────────────────────────────────
+
+
+#
 # 時点を欠かせ（時点0は全entityで欠測、entityごとに観測数が異なる）、クラスターの
 # サイズも偏らせる。期待値は実装を呼ばずデータから直接数える。2-way FEは均衡パネル
 # 前提のため、不均衡側は1-way FEとREのみ。
@@ -381,59 +445,7 @@ def test_unbalanced_dk_f_denominator_uses_observed_periods(df_unbalanced):
     )
 
 
-@pytest.mark.parametrize("model", [Logit, Probit])
-def test_logit_probit_lr_df(df, model):
-    res = model(df, y="y_bin", x=["x1", "x2"]).fit()
-    assert res.lr_df == 2
-    assert _chi2_p(res.lr_statistic, 2) == pytest.approx(
-        res.lr_p_value, rel=1e-6
-    )
-
-
-def test_tobit_wald_dist_and_df(df):
-    res = Tobit(
-        df, y="y_cens", x=["x1", "x2"], options=TobitOptions(lower=0.5)
-    ).fit()
-    assert res.wald_dist == "chi2"
-    assert res.wald_df == 2
-    assert _chi2_p(res.wald_statistic, 2) == pytest.approx(
-        res.wald_p_value, rel=1e-6
-    )
-
-
-def _iv(df, **options):
-    return IV(
-        df,
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog"],
-        instruments=["z1", "z2", "z3"],
-        options=IVOptions(**options),
-    ).fit()
-
-
-def test_iv_2sls_wald_is_f_type(df):
-    res = _iv(df)
-    assert res.wald_dist == "f"
-    assert (res.wald_df_num, res.wald_df_denom) == (2, res.df_resid)
-    assert _f_p(res.wald_statistic, 2, res.df_resid) == pytest.approx(
-        res.wald_p_value, rel=1e-8
-    )
-
-
-def test_iv_2sls_cluster_wald_denominator_is_g_minus_one(df):
-    res = _iv(df, cov_type="cluster", cluster="entity")
-    assert (res.wald_df_num, res.wald_df_denom) == (2, N_ENTITIES - 1)
-
-
-def test_iv_gmm_wald_is_chi2_type(df):
-    res = _iv(df, estimator="gmm")
-    assert res.wald_dist == "chi2"
-    assert res.wald_df_num == 2
-    assert res.wald_df_denom is None
-    assert _chi2_p(res.wald_statistic, 2) == pytest.approx(
-        res.wald_p_value, rel=1e-8
-    )
+# ── IVの診断検定の自由度 ──────────────────────────────────────────────
 
 
 @pytest.mark.parametrize("estimator", ["2sls", "gmm"])

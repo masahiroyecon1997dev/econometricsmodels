@@ -115,6 +115,9 @@ def _expected(name: str, kind: str, got: str) -> str:
     return re.escape(f"'{name}' must be {article}, got {got}")
 
 
+# ── コンストラクタ引数（型の誤りと受理） ──────────────────────────────
+
+
 @pytest.mark.parametrize(("cls", "name", "kind"), FIELDS, ids=FIELD_IDS)
 @pytest.mark.parametrize("value", [True, False], ids=["True", "False"])
 def test_bool_is_rejected_with_type_error(cls, name, kind, value):

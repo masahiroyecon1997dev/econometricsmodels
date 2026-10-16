@@ -90,6 +90,31 @@ def _check_normal(res) -> None:
     assert set(res.test_stats) == set(res.params)
 
 
+def _fe(df, *, two_way=False, **options):
+    if two_way:
+        options["time"] = "time"
+    return FE(
+        df,
+        y="y",
+        x=["x1", "x2"],
+        entity="entity",
+        options=FEOptions(**options),
+    ).fit()
+
+
+def _re(df, **options):
+    return RE(
+        df,
+        y="y",
+        x=["x1", "x2"],
+        entity="entity",
+        options=REOptions(**options),
+    ).fit()
+
+
+# ── 手法別の分布と自由度 ──────────────────────────────────────────────
+
+
 def test_ols_classical_uses_t_with_residual_df(df):
     res = OLS(df, y="y", x=["x1", "x2"]).fit()
     _check_t(res, N - 3)
@@ -104,6 +129,51 @@ def test_ols_cluster_uses_g_minus_one_df(df):
 def test_wls_uses_t_with_residual_df(df):
     res = WLS(df, y="y", x=["x1", "x2"], weight="w").fit()
     _check_t(res, N - 3)
+
+
+def test_logit_uses_normal(df):
+    _check_normal(Logit(df, y="y_bin", x=["x1", "x2"]).fit())
+
+
+def test_probit_uses_normal(df):
+    _check_normal(Probit(df, y="y_bin", x=["x1", "x2"]).fit())
+
+
+def test_tobit_uses_normal(df):
+    options = TobitOptions(lower=0.5)
+    _check_normal(Tobit(df, y="y_cens", x=["x1", "x2"], options=options).fit())
+
+
+@pytest.mark.parametrize(
+    ("estimator", "dist"), [("2sls", "t"), ("gmm", "normal")]
+)
+def test_iv_distribution_follows_estimator(df, estimator, dist):
+    res = IV(
+        df,
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog"],
+        instruments=["z1", "z2"],
+        options=IVOptions(estimator=estimator),
+    ).fit()
+    assert res.stat_dist == dist
+    if dist == "t":
+        assert res.stat_df == res.df_resid
+    else:
+        assert res.stat_df is None
+    assert set(res.test_stats) == set(res.params)
+
+
+def test_iv_2sls_cluster_uses_g_minus_one_df(df):
+    res = IV(
+        df,
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog"],
+        instruments=["z1", "z2"],
+        options=IVOptions(cov_type="cluster", cluster="entity"),
+    ).fit()
+    _check_t(res, N_ENTITIES - 1)
 
 
 def test_fe_classical_uses_t_with_panel_residual_df(df):
@@ -143,51 +213,6 @@ def test_re_dk_uses_t_minus_one_df(df):
     _check_t(res, N_PERIODS - 1)
 
 
-@pytest.mark.parametrize(
-    ("estimator", "dist"), [("2sls", "t"), ("gmm", "normal")]
-)
-def test_iv_distribution_follows_estimator(df, estimator, dist):
-    res = IV(
-        df,
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog"],
-        instruments=["z1", "z2"],
-        options=IVOptions(estimator=estimator),
-    ).fit()
-    assert res.stat_dist == dist
-    if dist == "t":
-        assert res.stat_df == res.df_resid
-    else:
-        assert res.stat_df is None
-    assert set(res.test_stats) == set(res.params)
-
-
-def test_iv_2sls_cluster_uses_g_minus_one_df(df):
-    res = IV(
-        df,
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog"],
-        instruments=["z1", "z2"],
-        options=IVOptions(cov_type="cluster", cluster="entity"),
-    ).fit()
-    _check_t(res, N_ENTITIES - 1)
-
-
-def test_logit_uses_normal(df):
-    _check_normal(Logit(df, y="y_bin", x=["x1", "x2"]).fit())
-
-
-def test_probit_uses_normal(df):
-    _check_normal(Probit(df, y="y_bin", x=["x1", "x2"]).fit())
-
-
-def test_tobit_uses_normal(df):
-    options = TobitOptions(lower=0.5)
-    _check_normal(Tobit(df, y="y_cens", x=["x1", "x2"], options=options).fit())
-
-
 def test_test_stats_are_consistent_with_stat_df_for_t_dist(df):
     """`stat_df`から`test_stats`のp値を再計算でき、`p_values`と一致すること
     （`stat_df`が実際に使われた自由度であることの確認、cluster版）。
@@ -201,38 +226,23 @@ def test_test_stats_are_consistent_with_stat_df_for_t_dist(df):
         assert p == pytest.approx(res.p_values[name], rel=1e-8)
 
 
-# --- FE/REの`stat_df`を`cov_type`ごとに網羅する --------------------------------
+# ── FE/REのstat_dfをcov_typeごとに網羅する ────────────────────────────
+
+
 #
 # `stat_df`は`cluster`のとき`G-1`、`dk`のとき`T-1`（時点数）、それ以外
 # （`classical`/`hc1`〜`hc3`）は`df_resid`。`G`は`cluster`列のクラスター数で、
 # 既定（`cluster`省略）ではentity数だが、他の列を指定すればそのクラスター数になる。
 
+
 FE_DF_RESID_ONE_WAY = N - N_ENTITIES - 2
+
+
 # 2-way: df_model = k + n_entities + n_periods - 1
 FE_DF_RESID_TWO_WAY = N - (2 + N_ENTITIES + N_PERIODS - 1)
+
+
 RE_DF_RESID = N - 3
-
-
-def _fe(df, *, two_way=False, **options):
-    if two_way:
-        options["time"] = "time"
-    return FE(
-        df,
-        y="y",
-        x=["x1", "x2"],
-        entity="entity",
-        options=FEOptions(**options),
-    ).fit()
-
-
-def _re(df, **options):
-    return RE(
-        df,
-        y="y",
-        x=["x1", "x2"],
-        entity="entity",
-        options=REOptions(**options),
-    ).fit()
 
 
 @pytest.mark.parametrize("two_way", [False, True])
@@ -369,7 +379,9 @@ def test_confidence_interval_uses_stat_df_critical_value(
         )
 
 
-# --- 不均衡パネル・不均衡クラスター --------------------------------------------
+# ── 不均衡パネル・不均衡クラスター ────────────────────────────────────
+
+
 #
 # 完全バランスのパネルでは`n_entities`・`T`・`n/G`が揃うため、取り違えても
 # 気づきにくい。ここでは時点を欠かせ（entityごとに観測数が異なり、時点0は

@@ -1,4 +1,5 @@
-"""`test_ols_*.py` 共通の小さなヘルパー（statsmodels ラッパー・engine ラッパー）。
+"""`test_ols_*.py`・`test_wls_*.py` 共通の小さなヘルパー（statsmodels ラッパー・engine ラッパー、
+`hac_time`の行順入れ替えテスト用データ`hac_reorder_frame`）。
 
 `tests/support/` は `pyproject.toml` の `pythonpath` に載っているため、
 `from _ols_helpers import ...` の裸importで解決できる（`_helpers.py` と同じ）。関心事分割で `test_ols.py` を
@@ -57,3 +58,21 @@ def our_fit(df: pl.DataFrame, cov_type: str = "classical") -> OLSResults:
 def our_fit_cluster(df: pl.DataFrame) -> OLSResults:
     options = OLSOptions(cov_type="cluster", cluster="cluster")
     return OLS(df, y="y", x=["x1", "x2"], options=options).fit()
+
+
+# `hac_time`の行順入れ替えテスト（OLS/WLS）の時間順データ（n=5）と、行の並べ替え。
+# `engine/src/linear/ols.rs`の`fit_computes_hac_std_errors_respecting_time_order`と
+# 同じデータ（x=[1..5]、y=[2,4,5,4,5]）で、`HAC_REORDER_ORDER`は時間列が
+# [3,1,5,2,4]の順に並ぶ行の取り方。
+HAC_REORDER_ORDER = [2, 0, 4, 1, 3]
+
+
+def hac_reorder_frame() -> pl.DataFrame:
+    """`hac_time`の行順入れ替えテスト用の、時間順に並んだ5行（列は`y`/`x1`/`time`）。"""
+    return pl.DataFrame(
+        {
+            "y": [2.0, 4.0, 5.0, 4.0, 5.0],
+            "x1": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "time": [1.0, 2.0, 3.0, 4.0, 5.0],
+        }
+    )

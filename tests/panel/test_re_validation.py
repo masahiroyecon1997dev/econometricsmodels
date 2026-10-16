@@ -38,6 +38,7 @@ Note:
 from __future__ import annotations
 
 import _error_messages as msgs
+import _error_messages_panel as panel_msgs
 import pandas as pd
 import polars as pl
 import pytest
@@ -371,7 +372,7 @@ def test_singleton_entity_raises():
     with pytest.raises(
         ValidationError,
         match=escaped(
-            msgs.SINGLETON_GROUP, dimension="entity", group_id="e00"
+            panel_msgs.SINGLETON_GROUP, dimension="entity", group_id="e00"
         ),
     ):
         RE(df, y="y", x=["x1", "x2"], entity="entity").fit()
@@ -424,12 +425,12 @@ def test_quasi_demeaned_regression_fails_when_sigma2_eps_is_zero():
 @pytest.mark.parametrize("cov_type", ["invalid", "", "hac"])
 def test_unknown_cov_type_raises(fe_dataset, cov_type):
     """`unknown cov_type`の文言はFEと一字一句同じ（`UNKNOWN_COV_TYPE_FE`を
-    流用、`_error_messages.py`のコメント参照）。
+    流用、`_error_messages_panel.py`のコメント参照）。
     """
     options = REOptions(cov_type=cov_type)
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_COV_TYPE_FE, other=cov_type),
+        match=escaped(panel_msgs.UNKNOWN_COV_TYPE_FE, other=cov_type),
     ):
         our_fit_re(fe_dataset, options=options)
 
@@ -437,7 +438,7 @@ def test_unknown_cov_type_raises(fe_dataset, cov_type):
 def test_hc0_not_supported_raises(fe_dataset):
     options = REOptions(cov_type="hc0")
     with pytest.raises(
-        ValidationError, match=escaped(msgs.HC0_NOT_SUPPORTED_RE)
+        ValidationError, match=escaped(panel_msgs.HC0_NOT_SUPPORTED_RE)
     ):
         our_fit_re(fe_dataset, options=options)
 
@@ -461,7 +462,9 @@ def test_dk_requires_dk_time_raises(fe_dataset):
     モジュールdoc「`REOptions.dk_time`」参照）。
     """
     options = REOptions(cov_type="dk")
-    with pytest.raises(ValidationError, match=escaped(msgs.DK_REQUIRES_TIME)):
+    with pytest.raises(
+        ValidationError, match=escaped(panel_msgs.DK_REQUIRES_TIME)
+    ):
         our_fit_re(fe_dataset, options=options)
 
 
@@ -472,7 +475,9 @@ def test_invalid_dk_bandwidth_raises(fe_dataset, dk_bandwidth):
     )
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.INVALID_DK_BANDWIDTH, bandwidth=dk_bandwidth, t=6),
+        match=escaped(
+            panel_msgs.INVALID_DK_BANDWIDTH, bandwidth=dk_bandwidth, t=6
+        ),
     ):
         our_fit_re(fe_dataset, options=options)
 
@@ -552,7 +557,7 @@ def test_dk_periods_at_most_hausman_slopes_raises_validation_error():
     with pytest.raises(
         ValidationError,
         match=escaped(
-            msgs.INSUFFICIENT_DK_PERIODS_FOR_INFERENCE, t_periods=2, q=2
+            panel_msgs.INSUFFICIENT_DK_PERIODS_FOR_INFERENCE, t_periods=2, q=2
         ),
     ):
         RE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()

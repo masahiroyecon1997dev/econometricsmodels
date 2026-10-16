@@ -24,6 +24,7 @@ from functools import partial
 from pathlib import Path
 
 import _error_messages as msgs
+import _error_messages_linear as linear_msgs
 import numpy as np
 import polars as pl
 import pytest
@@ -390,7 +391,7 @@ def test_variables_that_is_not_a_list_raises_type_error(baseline, variables):
     with pytest.raises(
         TypeError,
         match=escaped(
-            msgs.VARIABLES_NOT_A_LIST,
+            linear_msgs.VARIABLES_NOT_A_LIST,
             type_name=fully_qualified_type_name(variables),
         ),
     ):
@@ -401,7 +402,7 @@ def test_variables_element_that_is_not_a_str_raises_type_error(baseline):
     with pytest.raises(
         TypeError,
         match=escaped(
-            msgs.VARIABLES_ELEMENT_NOT_STR, index=1, type_name="int"
+            linear_msgs.VARIABLES_ELEMENT_NOT_STR, index=1, type_name="int"
         ),
     ):
         baseline.fit().breusch_pagan_test(["x1", 2])
@@ -421,7 +422,7 @@ def test_none_statistic_raises_type_error(baseline):
 def test_unknown_statistic_raises_validation_error(baseline):
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_DIAGNOSTIC_STATISTIC, other="chi2"),
+        match=escaped(linear_msgs.UNKNOWN_DIAGNOSTIC_STATISTIC, other="chi2"),
     ):
         baseline.fit().breusch_pagan_test(statistic="chi2")
 
@@ -519,7 +520,9 @@ def test_too_few_observations_for_the_auxiliary_regression_raises():
 
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.INSUFFICIENT_OBSERVATIONS_AUX_REGRESSION, n=3, k=3),
+        match=escaped(
+            linear_msgs.INSUFFICIENT_OBSERVATIONS_AUX_REGRESSION, n=3, k=3
+        ),
     ):
         fitted.breusch_pagan_test(["x1", "x2"])
 
@@ -540,7 +543,9 @@ def test_sample_size_is_checked_against_the_variables_that_remain_after_dropping
 
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.INSUFFICIENT_OBSERVATIONS_AUX_REGRESSION, n=3, k=3),
+        match=escaped(
+            linear_msgs.INSUFFICIENT_OBSERVATIONS_AUX_REGRESSION, n=3, k=3
+        ),
     ):
         OLS(df.head(3), y="y", x=["x1"]).fit().breusch_pagan_test(
             ["one", "x1", "x2"]
@@ -569,7 +574,7 @@ def test_result_without_training_data_raises_validation_error():
     first_stage = res.first_stage()["endog1"]
 
     with pytest.raises(
-        ValidationError, match=escaped(msgs.BP_NO_TRAINING_DATA)
+        ValidationError, match=escaped(linear_msgs.BP_NO_TRAINING_DATA)
     ):
         first_stage.breusch_pagan_test()
 
@@ -580,7 +585,7 @@ def test_all_constant_variables_raise_computation_error():
     fitted = OLS(df, y="y", x=["x1"]).fit()
 
     with pytest.raises(
-        ComputationError, match=escaped(msgs.BP_AUX_REGRESSION_PREFIX)
+        ComputationError, match=escaped(linear_msgs.BP_AUX_REGRESSION_PREFIX)
     ):
         fitted.breusch_pagan_test(["c"])
 
@@ -593,7 +598,7 @@ def test_collinear_but_not_identical_variables_raise_computation_error():
     fitted = OLS(df, y="y", x=["x1"]).fit()
 
     with pytest.raises(
-        ComputationError, match=escaped(msgs.BP_AUX_REGRESSION_PREFIX)
+        ComputationError, match=escaped(linear_msgs.BP_AUX_REGRESSION_PREFIX)
     ):
         fitted.breusch_pagan_test(["x1", "x1_double"])
 
@@ -616,7 +621,7 @@ def test_full_set_of_dummies_without_intercept_raises_computation_error():
     fitted = OLS(df, y="y", x=["x1"]).fit()
 
     with pytest.raises(
-        ComputationError, match=escaped(msgs.BP_AUX_REGRESSION_PREFIX)
+        ComputationError, match=escaped(linear_msgs.BP_AUX_REGRESSION_PREFIX)
     ):
         fitted.breusch_pagan_test(["d1", "d2", "d3"])
 

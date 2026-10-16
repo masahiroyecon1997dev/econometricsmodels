@@ -59,7 +59,7 @@ import math
 from functools import partial
 from pathlib import Path
 
-import _error_messages as msgs
+import _error_messages_panel as panel_msgs
 import polars as pl
 import pytest
 from _assertions import assert_close, assert_dict_close, assert_inference_close
@@ -551,7 +551,7 @@ def test_hausman_dk_too_few_periods_raises():
     with pytest.raises(
         ValidationError,
         match=escaped(
-            msgs.INSUFFICIENT_DK_PERIODS_FOR_INFERENCE, t_periods=2, q=2
+            panel_msgs.INSUFFICIENT_DK_PERIODS_FOR_INFERENCE, t_periods=2, q=2
         ),
     ):
         RE(

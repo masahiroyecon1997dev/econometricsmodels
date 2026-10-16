@@ -29,6 +29,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 import _error_messages as msgs
+import _error_messages_nonlinear as nonlinear_msgs
 import pandas as pd
 import polars as pl
 import pytest
@@ -39,21 +40,23 @@ from _assertions import (
     assert_inference_close,
     assert_params_table_matches_attributes,
     assert_same_estimates,
-    check_margeff,
 )
 from _constants import APPLE_CLUSTER, APPLE_X, DATA_DIR, MROZ_X
 from _error_messages import escaped
 from _helpers import (
-    load_apple_adoption_dataset,
     load_wooldridge_dataset,
-    multi_dummy_separation_dataset,
     name_collision_frame,
     respell,
+    with_cluster_groups,
+)
+from _nonlinear_helpers import (
+    check_margeff,
+    load_apple_adoption_dataset,
+    multi_dummy_separation_dataset,
     separated_dataset,
     single_overlap_binary_dataset,
     small_sample_separation_dataset,
     strongly_collinear_binary_dataset,
-    with_cluster_groups,
 )
 from econometricsmodels import ComputationError, ValidationError
 
@@ -639,7 +642,9 @@ def check_non_binary_y_raises(dataset, estimator_cls, bad_value):
     with pytest.raises(
         ValidationError,
         match=escaped(
-            msgs.INVALID_BINARY_Y, row=0, value=msgs.rust_f64(bad_value)
+            nonlinear_msgs.INVALID_BINARY_Y,
+            row=0,
+            value=msgs.rust_f64(bad_value),
         ),
     ):
         estimator_cls(df, y="y", x=["x1", "x2"]).fit()
@@ -756,7 +761,9 @@ def check_unknown_cov_type_raises(
     """未知の`cov_type`（空文字列を含む）は`ValidationError`。"""
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_COV_TYPE_NONLINEAR, other=cov_type),
+        match=escaped(
+            nonlinear_msgs.UNKNOWN_COV_TYPE_NONLINEAR, other=cov_type
+        ),
     ):
         estimator_cls(
             dataset,
@@ -783,7 +790,7 @@ def check_unknown_method_raises(
     """未知の`solver`（空文字列を含む）は`ValidationError`。"""
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_METHOD_NONLINEAR, other=solver),
+        match=escaped(nonlinear_msgs.UNKNOWN_METHOD_NONLINEAR, other=solver),
     ):
         estimator_cls(
             dataset,
@@ -820,7 +827,7 @@ def check_non_positive_tol_raises(dataset, estimator_cls, options_cls, tol):
     """
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.INVALID_TOL, tol=msgs.rust_f64(tol)),
+        match=escaped(nonlinear_msgs.INVALID_TOL, tol=msgs.rust_f64(tol)),
     ):
         estimator_cls(
             dataset,
@@ -839,7 +846,7 @@ def check_non_positive_max_iter_raises(
     """
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.INVALID_MAX_ITER, max_iter=max_iter),
+        match=escaped(nonlinear_msgs.INVALID_MAX_ITER, max_iter=max_iter),
     ):
         estimator_cls(
             dataset,
@@ -925,7 +932,9 @@ def check_marginal_effects_unknown_at_raises(dataset, estimator_cls):
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_MARGINAL_EFFECTS_AT, other="bogus"),
+        match=escaped(
+            nonlinear_msgs.UNKNOWN_MARGINAL_EFFECTS_AT, other="bogus"
+        ),
     ):
         res.marginal_effects(at="bogus")
 

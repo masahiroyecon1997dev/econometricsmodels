@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import _error_messages as msgs
+import _error_messages_iv as iv_msgs
 import pandas as pd
 import polars as pl
 import pytest
@@ -365,13 +366,13 @@ def test_insufficient_observations_raises(iv_dataset):
     ではなく第一段階回帰（`endog1 ~ x_exog(x1) + instruments(z1, z2)`、
     k=4: const, x1, z1, z2）。`engine_pybind::fit()`が弱操作変数診断のため
     `compute_first_stage`を`TwoSlsEstimator::fit`より先に無条件で呼ぶため
-    （`_error_messages.py`の`FIRST_STAGE_FAILED`のコメント参照）。
+    （`_error_messages_iv.py`の`FIRST_STAGE_FAILED`のコメント参照）。
     """
     df = iv_dataset.head(2)  # n=2、第一段階回帰はk=4（const, x1, z1, z2）
     with pytest.raises(
         ValidationError,
         match=escaped(
-            msgs.FIRST_STAGE_FAILED,
+            iv_msgs.FIRST_STAGE_FAILED,
             endog_name="endog1",
             source=msgs.INSUFFICIENT_OBSERVATIONS.format(n=2, k=4),
         ),
@@ -391,7 +392,7 @@ def test_insufficient_instruments_raises(iv_dataset):
     with pytest.raises(
         ValidationError,
         match=escaped(
-            msgs.INSUFFICIENT_INSTRUMENTS, n_instruments=1, n_endog=2
+            iv_msgs.INSUFFICIENT_INSTRUMENTS, n_instruments=1, n_endog=2
         ),
     ):
         IV(
@@ -456,7 +457,7 @@ def test_unknown_estimator_raises(iv_dataset, estimator):
     options = IVOptions(estimator=estimator)
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_IV_ESTIMATOR, estimator=estimator),
+        match=escaped(iv_msgs.UNKNOWN_IV_ESTIMATOR, estimator=estimator),
     ):
         our_fit(iv_dataset, options=options)
 
@@ -488,7 +489,7 @@ def test_unknown_weight_type_raises(iv_dataset, gmm_weight_type):
     options = IVOptions(estimator="gmm", gmm_weight_type=gmm_weight_type)
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_WEIGHT_TYPE, other=gmm_weight_type),
+        match=escaped(iv_msgs.UNKNOWN_WEIGHT_TYPE, other=gmm_weight_type),
     ):
         our_fit(iv_dataset, options=options)
 
@@ -568,7 +569,7 @@ def test_cluster_count_between_structural_and_first_stage_slopes_raises(
     with pytest.raises(
         ValidationError,
         match=escaped(
-            msgs.FIRST_STAGE_FAILED,
+            iv_msgs.FIRST_STAGE_FAILED,
             endog_name="endog1",
             source=msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE.format(g=3, q=3),
         ),
@@ -608,7 +609,7 @@ def test_cluster_count_boundaries_without_intercept(
         with pytest.raises(
             ValidationError,
             match=escaped(
-                msgs.FIRST_STAGE_FAILED,
+                iv_msgs.FIRST_STAGE_FAILED,
                 endog_name="endog1",
                 source=msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE.format(
                     g=3, q=3
@@ -660,7 +661,7 @@ def test_unknown_gmm_weight_type_raises(iv_dataset, gmm_weight_type):
     options = IVOptions(estimator="gmm", gmm_weight_type=gmm_weight_type)
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_WEIGHT_TYPE, other=gmm_weight_type),
+        match=escaped(iv_msgs.UNKNOWN_WEIGHT_TYPE, other=gmm_weight_type),
     ):
         our_fit(iv_dataset, options=options)
 
@@ -672,7 +673,7 @@ def test_invalid_gmm_max_iter_raises(iv_dataset, gmm_max_iter):
     )
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.INVALID_GMM_MAX_ITER, max_iter=gmm_max_iter),
+        match=escaped(iv_msgs.INVALID_GMM_MAX_ITER, max_iter=gmm_max_iter),
     ):
         our_fit(iv_dataset, options=options)
 
@@ -681,7 +682,7 @@ def test_unknown_gmm_type_raises(iv_dataset):
     options = IVOptions(estimator="gmm", gmm_type="three_step")
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_GMM_TYPE, other="three_step"),
+        match=escaped(iv_msgs.UNKNOWN_GMM_TYPE, other="three_step"),
     ):
         our_fit(iv_dataset, options=options)
 
@@ -793,7 +794,7 @@ def test_invalid_gmm_tol_raises(iv_dataset, gmm_tol):
     with pytest.raises(
         ValidationError,
         match=escaped(
-            msgs.INVALID_GMM_TOL,
+            iv_msgs.INVALID_GMM_TOL,
             gmm_tol=msgs.rust_f64(gmm_tol),
         ),
     ):
@@ -810,7 +811,7 @@ def test_non_finite_gmm_tol_raises(iv_dataset, gmm_tol, shown):
     options = IVOptions(estimator="gmm", gmm_type="iterated", gmm_tol=gmm_tol)
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.INVALID_GMM_TOL, gmm_tol=shown),
+        match=escaped(iv_msgs.INVALID_GMM_TOL, gmm_tol=shown),
     ):
         our_fit(iv_dataset, options=options)
 
@@ -913,7 +914,9 @@ def test_gmm_cluster_weight_type_raises_validation_error_when_cluster_count_is_l
     )
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.INSUFFICIENT_CLUSTERS_FOR_WEIGHT_MATRIX, g=2, l=3),
+        match=escaped(
+            iv_msgs.INSUFFICIENT_CLUSTERS_FOR_WEIGHT_MATRIX, g=2, l=3
+        ),
     ):
         IV(
             df,

@@ -35,16 +35,14 @@ from _assertions import (
 from _helpers import (
     CASE_SPELLINGS,
     HAC_AUTO_LAG_SAMPLE_SIZES,
-    HAC_REORDER_ORDER,
     ROW_TIME,
     hac_lag_frame,
-    hac_reorder_frame,
     hac_time_for,
     reorder_rows,
     respell,
     with_row_time,
 )
-from _ols_helpers import our_fit, sm_fit
+from _ols_helpers import HAC_REORDER_ORDER, hac_reorder_frame, our_fit, sm_fit
 from _tolerances import TOLERANCES
 from econometricsmodels import OLS, OLSOptions, OLSResults
 

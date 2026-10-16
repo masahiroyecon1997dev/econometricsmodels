@@ -12,6 +12,9 @@ from __future__ import annotations
 import re
 
 import _error_messages as msgs
+import _error_messages_iv as iv_msgs
+import _error_messages_nonlinear as nonlinear_msgs
+import _error_messages_panel as panel_msgs
 import numpy as np
 import polars as pl
 import pytest
@@ -379,7 +382,7 @@ def test_huge_dk_bandwidth_is_validation_error(df, cls, huge, how):
     with pytest.raises(
         ValidationError,
         match=escaped(
-            msgs.INVALID_DK_BANDWIDTH,
+            panel_msgs.INVALID_DK_BANDWIDTH,
             bandwidth=I64_MAX if huge > 0 else I64_MIN,
             t=6,
         ),
@@ -399,7 +402,7 @@ class TestMleOptionValues:
 
         with pytest.raises(
             ValidationError,
-            match=escaped(msgs.INVALID_MAX_ITER, max_iter=I64_MIN),
+            match=escaped(nonlinear_msgs.INVALID_MAX_ITER, max_iter=I64_MIN),
         ):
             _fit(options, df)
 
@@ -414,7 +417,9 @@ class TestMleOptionValues:
 
         with pytest.raises(
             ValidationError,
-            match=escaped(msgs.INVALID_MAX_ITER, max_iter=min(above, I64_MAX)),
+            match=escaped(
+                nonlinear_msgs.INVALID_MAX_ITER, max_iter=min(above, I64_MAX)
+            ),
         ):
             _fit(options, df)
 
@@ -448,7 +453,8 @@ class TestMleOptionValues:
         options = _with_value(cls, "tol", tol, how)
 
         with pytest.raises(
-            ValidationError, match=escaped(msgs.INVALID_TOL, tol=shown)
+            ValidationError,
+            match=escaped(nonlinear_msgs.INVALID_TOL, tol=shown),
         ):
             _fit(options, df)
 
@@ -517,7 +523,7 @@ def test_gmm_max_iter_outside_the_range_is_validation_error(df, invalid, how):
     with pytest.raises(
         ValidationError,
         match=escaped(
-            msgs.INVALID_GMM_MAX_ITER,
+            iv_msgs.INVALID_GMM_MAX_ITER,
             max_iter=max(min(invalid, I64_MAX), I64_MIN),
         ),
     ):
@@ -557,7 +563,7 @@ def test_invalid_gmm_tol_is_validation_error(df, tol, shown, how):
     )
 
     with pytest.raises(
-        ValidationError, match=escaped(msgs.INVALID_GMM_TOL, gmm_tol=shown)
+        ValidationError, match=escaped(iv_msgs.INVALID_GMM_TOL, gmm_tol=shown)
     ):
         _fit(options, df)
 

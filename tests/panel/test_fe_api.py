@@ -21,12 +21,8 @@ from _assertions import (
 )
 from _constants import DATA_DIR
 from _fe_helpers import our_fit
-from _helpers import (
-    CASE_SPELLINGS,
-    HAC_AUTO_LAG_SAMPLE_SIZES,
-    hac_lag_panel_frame,
-    respell,
-)
+from _helpers import CASE_SPELLINGS, HAC_AUTO_LAG_SAMPLE_SIZES, respell
+from _panel_helpers import hac_lag_panel_frame
 from econometricsmodels import FE, FEOptions, FEResults
 
 from benchmark.common import hac_auto_lag

@@ -11,20 +11,18 @@
   `p_values`・`conf_int`）の比較。許容誤差を係数・信頼区間端点・p値で分けられる。
 - `assert_fields_close`: 結果の属性（適合度統計量等）をフィクスチャの同名キーと
   まとめて比較する。属性名とキーが異なるときは`(属性名, キー)`で渡す。
-- `check_margeff`: Logit/Probitの限界効果6統計量の比較。
 
 `_check_result`は手法ごとに検証するフィールド自体が異なるため、このモジュールには
 含めない（Logit/Probit間では検証フィールドが同一のため、両者のreference側は
 `tests/support/_binary_choice_checks.py`の`check_result`にまとめている）。
 
-`MARGEFF_AT`定数は`_constants.py`に置く。
+限界効果の比較（`check_margeff`）はLogit/Probit/Tobitだけが使うため、
+`_nonlinear_helpers.py`に置く。
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-
-from _constants import MARGEFF_AT
 
 
 def assert_close(
@@ -180,74 +178,6 @@ def assert_dict_close(
             rtol=rtol,
             atol=atol,
         )
-
-
-def check_margeff(
-    res,
-    ref_margeff: dict,
-    label: str,
-    *,
-    rtol: float,
-    atol: float,
-    rtol_conf_int: float | None = None,
-    atol_p_value: float | None = None,
-) -> None:
-    """限界効果6統計量を`at`×係数名の全組み合わせでリファレンスと比較する。
-
-    `rtol_conf_int`/`atol_p_value`は信頼区間の相対許容誤差・p値の絶対許容誤差の
-    個別指定（`None`なら`rtol`/`atol`を使う）。パラメータ表の`conf_int`/`p_values`と
-    同じく、0に近い境界・裾での誤差増幅に備えるRクロスチェック用。
-    """
-    rtol_ci = rtol if rtol_conf_int is None else rtol_conf_int
-    atol_p = atol if atol_p_value is None else atol_p_value
-    for at in MARGEFF_AT:
-        effects = {
-            row["param_name"]: row for row in res.marginal_effects(at=at)
-        }
-        for name, ref_stats in ref_margeff[at].items():
-            row = effects[name]
-            assert_close(
-                row["effect"],
-                ref_stats["effect"],
-                f"{label}/{at}/{name}/effect",
-                rtol=rtol,
-                atol=atol,
-            )
-            assert_close(
-                row["std_error"],
-                ref_stats["std_error"],
-                f"{label}/{at}/{name}/std_error",
-                rtol=rtol,
-                atol=atol,
-            )
-            assert_close(
-                row["test_stat"],
-                ref_stats["test_stat"],
-                f"{label}/{at}/{name}/test_stat",
-                rtol=rtol,
-                atol=atol,
-            )
-            assert_close(
-                row["p_value"],
-                ref_stats["p_value"],
-                f"{label}/{at}/{name}/p_value",
-                rtol=rtol,
-                atol=atol_p,
-            )
-            assert_close(
-                row["conf_lower"],
-                ref_stats["conf_lower"],
-                f"{label}/{at}/{name}/conf_lower",
-                rtol=rtol_ci,
-                atol=atol,
-            )
-            assert_close(
-                row["conf_upper"],
-                ref_stats["conf_upper"],
-                f"{label}/{at}/{name}/conf_upper",
-                rtol=rtol_ci,
-                atol=atol,
-            )
 
 
 def assert_params_table_matches_attributes(res) -> None:

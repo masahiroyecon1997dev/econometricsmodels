@@ -4,6 +4,10 @@
 `validation.rs`・各系統の`cov_type`/`solver`/`estimator`文字列パース）が実際に送出する
 メッセージの正確な文字列をPythonのフォーマット文字列としてここに集約する。
 
+系統固有のメッセージは`_error_messages_<系統>.py`（`linear`・`nonlinear`・`iv`・
+`panel`）に置き、ここには全系統（または複数の系統）が共有するものだけを置く。
+テストからは`import _error_messages_<系統> as <系統>_msgs`で参照する。
+
 Rust側のメッセージ文言が正本であり（`engine/src/shared/error.rs`・
 `engine_pybind/src/shared/column_error.rs`・`engine_pybind/src/shared/validation.rs`等）、
 このファイルはそのコピー。Rust側で文言を変更した場合はこのファイルも同時に
@@ -56,17 +60,6 @@ def fully_qualified_type_name(obj: object) -> str:
     return f"{module}.{cls.__qualname__}"
 
 
-def rust_option_f64_debug(value: float | None) -> str:
-    """RustのDebug（`{:?}`）での`Option<f64>`表示を模したフォーマット。
-
-    `TobitError`の打ち切り境界系メッセージ（`InvalidCensoringBounds`等）が
-    使う。RustのDebugはf64のDisplayと異なり整数値でも常に小数点を付ける
-    （`None`→`"None"`、`Some(0.0)`→`"Some(0.0)"`）。Pythonの`repr(float)`は
-    常に小数点付きのため、そのまま使えばRustのDebugと一致する。
-    """
-    return "None" if value is None else f"Some({value!r})"
-
-
 # ── column_extraction.rs（全系統共通） ──────────────────────────────
 #
 # extract_dataframe: `data`/`new_data`にpolars以外のDataFrame（pandas等）が
@@ -76,15 +69,6 @@ def rust_option_f64_debug(value: float | None) -> str:
 # （`type(obj).__module__ + "." + type(obj).__qualname__`相当）。
 NOT_A_POLARS_DATAFRAME = (
     "'{param_name}' must be a polars.DataFrame, got {type_name}"
-)
-# 渡されたオブジェクト自体が本物の`polars.DataFrame`なのに変換に失敗した場合の文言。
-# `pyo3`/`polars`/`pyo3-polars`のバージョンの組み合わせによるABI不整合等でのみ
-# 発生しうるため、通常のテスト環境では再現できず対応するテストは無い
-# （`extract_dataframe`のロジックそのものはRust側で経路を確認済み）。
-# `LazyFrame`・`Series`等の他のpolarsオブジェクトはこの文言ではなく
-# `NOT_A_POLARS_DATAFRAME`になる。
-DATAFRAME_EXTRACTION_FAILED = (
-    "failed to read '{param_name}' as a polars.DataFrame: {error}"
 )
 # `polars.LazyFrame`を渡した場合は、`NOT_A_POLARS_DATAFRAME`に`.collect()`の案内が付く。
 NOT_A_POLARS_DATAFRAME_LAZY = (
@@ -206,12 +190,12 @@ INSUFFICIENT_CLUSTERS_FOR_INFERENCE = (
     "Wald/F submatrix is singular when g <= q"
 )
 
-# ── linear系統固有（engine/src/linear/common.rs、OLS/WLS） ─────────────
+
+# ── 複数系統が使う（系統固有の節に由来するが、系統をまたいで共有） ──
 
 INVALID_HAC_LAGS = (
     "hac_lags must be in the range [0, n): got {hac_lags}, n={n}"
 )
-NON_POSITIVE_WEIGHT = "weight at row {row} must be positive, got {weight}"
 
 # cov_type文字列パース。OLS/WLS/IVは文言が完全一致（実装は別々、
 # engine_pybind/src/linear/common.rs::parse_cov_type・
@@ -221,283 +205,9 @@ UNKNOWN_COV_TYPE_LINEAR = (
     "through 'hc3', 'hac', or 'cluster'"
 )
 
-# White検定（engine/src/linear/common.rs・engine/src/linear/diagnostics.rs・
-# engine_pybind/src/linear/ols.rs）。
-UNKNOWN_DIAGNOSTIC_STATISTIC = (
-    "unknown statistic: '{other}'. Expected 'lm' or 'f'"
-)
-INSUFFICIENT_OBSERVATIONS_AUX_REGRESSION = (
-    "insufficient observations for the auxiliary regression of the diagnostic "
-    "test: n={n} must be greater than the number of auxiliary regressors "
-    "including the intercept (k={k})"
-)
-WHITE_NO_TRAINING_DATA = (
-    "white_test() requires the original training data, which is not "
-    "retained for this result"
-)
-# 補助回帰が除外後も特異・推定不能など、`fit()`は通ったがWhite検定の補助回帰で
-# 失敗した場合のメッセージの先頭（原因の文言は状況で変わるため先頭のみ固定）。
-WHITE_AUX_REGRESSION_PREFIX = "computation failed: White test:"
-
-# Breusch-Pagan検定。`variables`の型の誤りは`TypeError`（`extract_column_list`）。
-BP_NO_TRAINING_DATA = (
-    "breusch_pagan_test() requires the original training data, which is not "
-    "retained for this result"
-)
-BP_AUX_REGRESSION_PREFIX = "computation failed: Breusch-Pagan test:"
-VARIABLES_NOT_A_LIST = (
-    "'variables' must be a list of column names (e.g. variables=[\"x1\"]), "
-    "got {type_name}"
-)
-VARIABLES_ELEMENT_NOT_STR = (
-    "'variables[{index}]' must be a str column name, got {type_name}"
-)
-
-# Breusch-Godfrey検定。
-INVALID_NLAGS = "nlags must be a positive integer: got {nlags}"
-BG_NO_TRAINING_DATA = (
-    "breusch_godfrey_test() requires the original training data, which is "
-    "not retained for this result"
-)
-
-# ── nonlinear系統固有（Logit/Probit/Tobit） ─────────────────────────────
-
-UNKNOWN_COV_TYPE_NONLINEAR = (
-    "unknown cov_type: '{other}'. Expected one of 'classical', 'opg', "
-    "'hc0', 'hc1', or 'cluster'"
-)
-UNKNOWN_METHOD_NONLINEAR = (
-    "unknown solver: '{other}'. Expected one of 'newton', 'bfgs', or 'lbfgs'"
-)
-INVALID_TOL = "tol must be a positive finite number, got {tol}"
-INVALID_MAX_ITER = (
-    "max_iter must be an integer between 1 and 10000, got {max_iter}"
-)
-INVALID_BINARY_Y = (
-    "y at row {row} must be coded as 0.0 or 1.0 (binary outcome), got {value}"
-)
-UNKNOWN_MARGINAL_EFFECTS_AT = (
-    "unknown at: '{other}'. Expected one of 'overall', 'mean', or 'median'"
-)
-
-# Tobit固有（engine/src/nonlinear/common.rs・engine_pybind/src/nonlinear/tobit.rs）
-SIGMA_COLLISION = (
-    "x cannot contain a column named 'sigma' (it collides with the error "
-    "term's standard deviation, which TobitResult appends to param_names/params)"
-)
-INVALID_CENSORING_BOUNDS = (
-    "invalid censoring bounds: lower={lower}, upper={upper} (at least one "
-    "bound must be set, and lower must be less than upper when both are set)"
-)
-Y_OUT_OF_CENSORING_BOUNDS = (
-    "y at row {row} is out of the censoring bounds (lower={lower}, "
-    "upper={upper}): got {value}"
-)
-NO_UNCENSORED_OBSERVATIONS = (
-    "no uncensored observations: at least one y value strictly between "
-    "lower={lower} and upper={upper} is required to identify the model"
-)
-UNCENSORED_INTERVAL_TOO_NARROW = (
-    "target 'expected_uncensored' cannot be computed reliably: the uncensored "
-    "interval [{lower}, {upper}] is narrower than 1% of the estimated sigma "
-    "({sigma}), so the model puts almost no probability on uncensored values. "
-    "Use another target"
-)
-UNKNOWN_MARGINAL_EFFECTS_TARGET = (
-    "unknown target: '{other}'. Expected one of 'expected_latent', "
-    "'expected_observed', 'prob_uncensored', or 'expected_uncensored'"
-)
-
-# ── IV系統固有（engine/src/iv/common.rs・engine_pybind/src/iv/common.rs） ──
-
-UNKNOWN_IV_ESTIMATOR = (
-    "unknown estimator: '{estimator}'. Expected one of '2sls' or 'gmm'"
-)
-UNKNOWN_WEIGHT_TYPE = (
-    "unknown gmm_weight_type: '{other}'. Expected one of 'classical', "
-    "'robust', 'cluster', or 'hac'"
-)
-INSUFFICIENT_INSTRUMENTS = (
-    "insufficient instruments for identification: {n_instruments} "
-    "instrument(s) provided but {n_endog} endogenous regressor(s) require "
-    "at least {n_endog} (order condition: len(instruments) >= len(x_endog))"
-)
-INVALID_GMM_MAX_ITER = (
-    "gmm_max_iter must be an integer between 3 (counting the initial "
-    "estimate) and 10000, got {max_iter}; for fewer than 3 use "
-    'gmm_type="two_step" for a two-step GMM'
-)
-UNKNOWN_GMM_TYPE = (
-    "unknown gmm_type: '{other}'. Expected one of 'one_step', 'two_step', "
-    "or 'iterated'"
-)
 # 選んだモードで使われないオプションが明示指定された場合の共通文言
 # （`engine_pybind/src/shared/validation.rs`の`reject_unused_option`）。
 UNUSED_OPTION = (
     "{option} is only used with {condition}, so it would be silently "
     "ignored; set {condition} or remove {option}"
 )
-INVALID_GMM_TOL = "gmm_tol must be a positive finite number, got {gmm_tol}"
-INSUFFICIENT_CLUSTERS_FOR_WEIGHT_MATRIX = (
-    "gmm_weight_type='cluster' requires at least l clusters (l+1 if exactly "
-    "identified) for the moment weight matrix: got g={g} clusters for l={l} "
-    "instruments (including exogenous regressors), but the cluster moment "
-    "covariance has rank at most g (g-1 if exactly identified), so it is "
-    "singular"
-)
-
-# ── panel系統固有（FE、engine/src/panel/common.rs・
-#    engine_pybind/src/panel/fe.rs） ─────────────────────────────────────
-
-# `PanelError::InsufficientDegreesOfFreedom`。1-wayでは`n_periods_clause`が
-# 空文字列、2-wayでは`, n_periods={n}`になる（Rust側の`n_periods_clause`
-# 関数と同じ。`OptionのDebug表記が漏れるのを避けるための専用フォーマット、
-# engine/src/panel/common.rs参照）。
-INSUFFICIENT_DEGREES_OF_FREEDOM_PANEL = (
-    "insufficient degrees of freedom for panel estimation: n_obs={n_obs}, "
-    "n_entities={n_entities}{n_periods_clause}, k={k} (the panel-adjusted "
-    "residual degrees of freedom must be positive)"
-)
-
-
-def n_periods_clause(n_periods: int | None) -> str:
-    """`INSUFFICIENT_DEGREES_OF_FREEDOM_PANEL`の`{n_periods_clause}`用。"""
-    return "" if n_periods is None else f", n_periods={n_periods}"
-
-
-# `PanelError::SingletonGroup`（6.5節）。`{dimension}`は"entity"/"time"。
-SINGLETON_GROUP = (
-    "singleton {dimension} group detected: {dimension} '{group_id}' has "
-    "only 1 observation. Singleton groups are not dropped automatically; "
-    "remove them from the input"
-)
-
-# `PanelError::UnbalancedPanelForTwoWay`（6.4節）。
-UNBALANCED_PANEL_FOR_TWO_WAY = (
-    "two-way estimation (fixed or random effects) requires a balanced "
-    "panel: got n_obs={n_obs} for n_entities={n_entities} x "
-    "n_periods={n_periods} (expected {expected} observations)"
-)
-
-# `PanelError::ZeroVarianceAfterDemeaning`（6.7節）。
-ZERO_VARIANCE_AFTER_DEMEANING = (
-    "regressor '{column}' has zero variance after the within-"
-    "transformation (it is time-invariant, or collinear with the fixed "
-    "effects)"
-)
-
-# `PanelError::TwoWayRequiresTime`。
-TWO_WAY_REQUIRES_TIME = "two-way estimation (fixed or random effects) requires the `time` option to be set"
-
-# RE: 未知の`variance_method`。
-UNKNOWN_VARIANCE_METHOD = (
-    "unknown variance_method: '{value}'. Expected one of 'swamy_arora', "
-    "'wallace_hussain', or 'amemiya'"
-)
-
-# RE: `variance_method="amemiya"`でwithin変動の無い列がある
-# （`PanelError::AmemiyaRequiresWithinVariation`）。
-AMEMIYA_NEEDS_WITHIN_VARIATION = (
-    'variance_method="amemiya" needs every regressor to vary within the '
-    "effect (within each entity; for two-way effects also across entities and "
-    "across periods), but these have no within variation: {columns}. Use "
-    'variance_method="swamy_arora" or "wallace_hussain", which accept such '
-    "regressors"
-)
-
-# RE: `variance_method="wallace_hussain"`の1段目（プールドOLS）が特異
-# （`PanelError::PooledRegressionFailed`、`source`は`LeastSquaresError::SingularMatrix`）。
-POOLED_REGRESSION_FAILED = (
-    "pooled least-squares estimation for the variance component failed: "
-    "design matrix is singular (perfect multicollinearity detected)"
-)
-
-# RE: `variance_method`が推定した`σ_ε²`が正でない
-# （`PanelError::NonPositiveIdiosyncraticVariance`）。`{sigma2_eps}`はRustのf64のDisplay。
-NON_POSITIVE_IDIOSYNCRATIC_VARIANCE = (
-    "the estimated idiosyncratic variance is not positive ({sigma2_eps}) "
-    'with variance_method="{method}"; the weights of the quasi-demeaning '
-    "are undefined"
-)
-
-# RE: `cov_type="dk"`で`dk_time`が未指定（`time`は借用されない。1-way・2-wayとも）。
-DK_REQUIRES_TIME = (
-    "cov_type='dk' requires the `dk_time` option: the column that defines the "
-    "time periods of the Driscoll-Kraay estimator (it is not taken from "
-    "`time`, which only sets the two-way random effects)"
-)
-# FE: `cov_type="dk"`で`dk_time`が未指定（`time`は借用されない。1-way・2-wayとも）。
-FE_DK_REQUIRES_DK_TIME = (
-    "cov_type='dk' requires the `dk_time` option: the column that defines the "
-    "time periods of the Driscoll-Kraay estimator (it is not taken from "
-    "`time`, which only sets the two-way fixed effects)"
-)
-
-# `PanelError::InvalidDkBandwidth`。`t`は時点数（観測数`n`ではない点に
-# 注意、OLSの`INVALID_HAC_LAGS`とは上限の意味が異なる）。
-INVALID_DK_BANDWIDTH = (
-    "bandwidth must be in the range [0, t): got {bandwidth}, t={t}"
-)
-
-# `PanelError::InsufficientDkPeriodsForInference`（`INSUFFICIENT_CLUSTERS_FOR_
-# INFERENCE`のDK版。`q`はFEでは傾き係数のF検定、REではハウスマン検定の対象数）。
-INSUFFICIENT_DK_PERIODS_FOR_INFERENCE = (
-    "cov_type='dk' requires more unique time periods than jointly tested "
-    "coefficients: got t_periods={t_periods} for q={q} coefficient(s) (the "
-    "slope F-test for FE, the Hausman test for RE), but the Driscoll-Kraay "
-    "covariance has rank at most t_periods-1, so the q×q Wald submatrix is "
-    "singular when t_periods <= q"
-)
-
-# `PanelError::DegenerateDkTwoPeriods` / `DegenerateClusterTwoGroups`（FEのみ）。
-DEGENERATE_DK_TWO_PERIODS = (
-    "cov_type='dk' with 2 unique time periods is degenerate for fixed "
-    "effects when every entity (or, with two-way effects, every time period) "
-    "is observed exactly once in each of the two periods: the within "
-    "transformation makes the two per-period scores equal, and they sum to "
-    "zero, so the Driscoll-Kraay covariance is identically zero. Use more "
-    "time periods or another cov_type"
-)
-DEGENERATE_CLUSTER_TWO_GROUPS = (
-    "cov_type='cluster' with 2 clusters is degenerate for fixed effects when "
-    "every entity (or, with two-way effects, every time period) is observed "
-    "exactly once in each cluster (e.g. clustering by time with 2 periods, "
-    "or by entity with 2 entities and two-way effects): the within "
-    "transformation makes the two cluster scores equal, and they sum to "
-    "zero, so the cluster-robust covariance is identically zero. Use more "
-    "clusters or another cov_type"
-)
-
-# FE用cov_type文字列パース（engine_pybind/src/panel/fe.rs::parse_fe_cov_type）。
-# OLS/WLS/IVの`UNKNOWN_COV_TYPE_LINEAR`と異なりhc0を含まない一覧になる。
-UNKNOWN_COV_TYPE_FE = (
-    "unknown cov_type: '{other}'. Expected one of 'classical', 'hc1' "
-    "through 'hc3', 'cluster', or 'dk'"
-)
-HC0_NOT_SUPPORTED_FE = (
-    "cov_type='hc0' is not supported for FE (neither linearmodels nor "
-    "fixest offer HC0 for panel/FE regressions); use 'hc1', 'hc2', or "
-    "'hc3' instead"
-)
-
-# RE用cov_type文字列パース（engine_pybind/src/panel/re.rs::parse_re_cov_type）。
-# 「unknown cov_type」文言自体はFEと一字一句同じ（UNKNOWN_COV_TYPE_FEを流用する）が、
-# hc0専用メッセージはFEと文言が異なる（参照実装の主語が「no reference
-# implementation」でlinearmodels/fixestを個別に挙げない）ため別定数にする。
-HC0_NOT_SUPPORTED_RE = (
-    "cov_type='hc0' is not supported for RE (no reference implementation "
-    "offers HC0 for panel/RE regressions); use 'hc1', 'hc2', or 'hc3' "
-    "instead"
-)
-
-# `IvError::FirstStageFailed`（engine/src/iv/common.rs）。`engine_pybind::fit()`
-# （engine_pybind/src/iv/common.rs）は`TwoSlsEstimator::fit`/`GmmEstimator::fit`
-# を呼ぶより前に無条件で`compute_first_stage`（弱操作変数診断用）を呼ぶため、
-# 第一段階回帰由来の`ValidationError`（`InsufficientObservations`・
-# `InsufficientClustersForInference`等）はこのラッパー経由で観測される。
-# 構造方程式自身のqを使う`TwoSlsEstimator::fit`/`GmmEstimator::fit`冒頭の同種
-# 事前チェックのうち、クラスター数（`G<=q`）は`engine_pybind::fit()`が
-# `compute_first_stage`より前に重複して行うためラッパー無しで観測される。
-# 観測数のチェックは、第一段階の回帰変数の数が識別条件`instruments>=x_endog`により
-# 常に構造方程式以上のため、第一段階側が先に発火する（Python APIからは到達不能）。
-FIRST_STAGE_FAILED = "first stage regression for endogenous variable '{endog_name}' failed: {source}"

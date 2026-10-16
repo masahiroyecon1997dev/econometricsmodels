@@ -22,12 +22,8 @@ from _assertions import (
     assert_same_estimates,
 )
 from _constants import DATA_DIR
-from _helpers import (
-    CASE_SPELLINGS,
-    HAC_AUTO_LAG_SAMPLE_SIZES,
-    hac_lag_panel_frame,
-    respell,
-)
+from _helpers import CASE_SPELLINGS, HAC_AUTO_LAG_SAMPLE_SIZES, respell
+from _panel_helpers import hac_lag_panel_frame
 from _re_helpers import our_fit_re
 from econometricsmodels import RE, REOptions, REResults
 

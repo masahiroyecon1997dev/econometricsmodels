@@ -29,6 +29,7 @@ Note:
 from __future__ import annotations
 
 import _error_messages as msgs
+import _error_messages_panel as panel_msgs
 import pandas as pd
 import polars as pl
 import pytest
@@ -366,10 +367,10 @@ def test_insufficient_degrees_of_freedom_one_way_raises():
     with pytest.raises(
         ValidationError,
         match=escaped(
-            msgs.INSUFFICIENT_DEGREES_OF_FREEDOM_PANEL,
+            panel_msgs.INSUFFICIENT_DEGREES_OF_FREEDOM_PANEL,
             n_obs=6,
             n_entities=3,
-            n_periods_clause=msgs.n_periods_clause(None),
+            n_periods_clause=panel_msgs.n_periods_clause(None),
             k=3,
         ),
     ):
@@ -403,10 +404,10 @@ def test_insufficient_degrees_of_freedom_two_way_raises():
     with pytest.raises(
         ValidationError,
         match=escaped(
-            msgs.INSUFFICIENT_DEGREES_OF_FREEDOM_PANEL,
+            panel_msgs.INSUFFICIENT_DEGREES_OF_FREEDOM_PANEL,
             n_obs=9,
             n_entities=3,
-            n_periods_clause=msgs.n_periods_clause(3),
+            n_periods_clause=panel_msgs.n_periods_clause(3),
             k=4,
         ),
     ):
@@ -430,7 +431,7 @@ def test_singleton_entity_raises():
     with pytest.raises(
         ValidationError,
         match=escaped(
-            msgs.SINGLETON_GROUP, dimension="entity", group_id="e00"
+            panel_msgs.SINGLETON_GROUP, dimension="entity", group_id="e00"
         ),
     ):
         FE(df, y="y", x=["x1", "x2"], entity="entity").fit()
@@ -446,7 +447,9 @@ def test_singleton_time_raises():
     options = FEOptions(time="time")
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.SINGLETON_GROUP, dimension="time", group_id="t5"),
+        match=escaped(
+            panel_msgs.SINGLETON_GROUP, dimension="time", group_id="t5"
+        ),
     ):
         FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 
@@ -460,7 +463,7 @@ def test_unbalanced_two_way_raises():
     with pytest.raises(
         ValidationError,
         match=escaped(
-            msgs.UNBALANCED_PANEL_FOR_TWO_WAY,
+            panel_msgs.UNBALANCED_PANEL_FOR_TWO_WAY,
             n_obs=239,
             n_entities=40,
             n_periods=6,
@@ -479,7 +482,7 @@ def test_zero_variance_after_demeaning_raises():
     with pytest.raises(
         ValidationError,
         match=escaped(
-            msgs.ZERO_VARIANCE_AFTER_DEMEANING, column="x_invariant"
+            panel_msgs.ZERO_VARIANCE_AFTER_DEMEANING, column="x_invariant"
         ),
     ):
         FE(df, y="y", x=["x1", "x2", "x_invariant"], entity="entity").fit()
@@ -493,7 +496,7 @@ def test_unknown_cov_type_raises(fe_dataset, cov_type):
     options = FEOptions(cov_type=cov_type)
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_COV_TYPE_FE, other=cov_type),
+        match=escaped(panel_msgs.UNKNOWN_COV_TYPE_FE, other=cov_type),
     ):
         our_fit(fe_dataset, options=options)
 
@@ -505,7 +508,7 @@ def test_hc0_not_supported_raises(fe_dataset):
     """
     options = FEOptions(cov_type="hc0")
     with pytest.raises(
-        ValidationError, match=escaped(msgs.HC0_NOT_SUPPORTED_FE)
+        ValidationError, match=escaped(panel_msgs.HC0_NOT_SUPPORTED_FE)
     ):
         our_fit(fe_dataset, options=options)
 
@@ -532,7 +535,7 @@ def test_dk_requires_dk_time_raises(fe_dataset, time):
     """
     options = FEOptions(cov_type="dk", time=time)
     with pytest.raises(
-        ValidationError, match=escaped(msgs.FE_DK_REQUIRES_DK_TIME)
+        ValidationError, match=escaped(panel_msgs.FE_DK_REQUIRES_DK_TIME)
     ):
         our_fit(fe_dataset, options=options)
 
@@ -545,7 +548,9 @@ def test_invalid_dk_bandwidth_raises(fe_dataset, dk_bandwidth):
     )
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.INVALID_DK_BANDWIDTH, bandwidth=dk_bandwidth, t=6),
+        match=escaped(
+            panel_msgs.INVALID_DK_BANDWIDTH, bandwidth=dk_bandwidth, t=6
+        ),
     ):
         our_fit(fe_dataset, options=options)
 
@@ -619,7 +624,7 @@ def test_dk_periods_at_most_slopes_raises_validation_error():
     with pytest.raises(
         ValidationError,
         match=escaped(
-            msgs.INSUFFICIENT_DK_PERIODS_FOR_INFERENCE, t_periods=3, q=3
+            panel_msgs.INSUFFICIENT_DK_PERIODS_FOR_INFERENCE, t_periods=3, q=3
         ),
     ):
         FE(
@@ -644,17 +649,17 @@ _TWO_PERIOD_PANEL = {
     [
         (
             FEOptions(cov_type="dk", dk_time="time", dk_bandwidth=0),
-            msgs.DEGENERATE_DK_TWO_PERIODS,
+            panel_msgs.DEGENERATE_DK_TWO_PERIODS,
         ),
         (
             FEOptions(
                 cov_type="dk", time="time", dk_time="time", dk_bandwidth=0
             ),
-            msgs.DEGENERATE_DK_TWO_PERIODS,
+            panel_msgs.DEGENERATE_DK_TWO_PERIODS,
         ),
         (
             FEOptions(cov_type="cluster", cluster="time"),
-            msgs.DEGENERATE_CLUSTER_TWO_GROUPS,
+            panel_msgs.DEGENERATE_CLUSTER_TWO_GROUPS,
         ),
     ],
     ids=["dk-one_way", "dk-two_way", "cluster_by_time"],
@@ -685,7 +690,8 @@ def test_two_way_two_entity_default_cluster_raises_validation_error():
         }
     )
     with pytest.raises(
-        ValidationError, match=escaped(msgs.DEGENERATE_CLUSTER_TWO_GROUPS)
+        ValidationError,
+        match=escaped(panel_msgs.DEGENERATE_CLUSTER_TWO_GROUPS),
     ):
         FE(
             df, y="y", x=["x"], entity="entity", options=FEOptions(time="time")
@@ -749,7 +755,7 @@ def test_unknown_cov_type_is_reported_before_unused_option(fe_dataset):
     options = FEOptions(cov_type="dkk", dk_bandwidth=1)
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_COV_TYPE_FE, other="dkk"),
+        match=escaped(panel_msgs.UNKNOWN_COV_TYPE_FE, other="dkk"),
     ):
         our_fit(fe_dataset, options=options)
 

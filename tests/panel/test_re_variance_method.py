@@ -36,7 +36,7 @@ import math
 import re
 from pathlib import Path
 
-import _error_messages as msgs
+import _error_messages_panel as panel_msgs
 import numpy as np
 import polars as pl
 import pytest
@@ -483,7 +483,7 @@ def test_unknown_variance_method_raises_with_the_original_value():
     """メッセージには小文字化した値ではなく、渡された値をそのまま載せる。"""
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_VARIANCE_METHOD, value="Nerlove"),
+        match=escaped(panel_msgs.UNKNOWN_VARIANCE_METHOD, value="Nerlove"),
     ):
         _fit(CASES[0], "classical", "Nerlove")
 
@@ -493,7 +493,7 @@ def test_unknown_variance_method_is_reported_before_the_data_is_checked():
     case = CASES[0]
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_VARIANCE_METHOD, value="nerlove"),
+        match=escaped(panel_msgs.UNKNOWN_VARIANCE_METHOD, value="nerlove"),
     ):
         RE(
             _frame(case),
@@ -614,7 +614,8 @@ def test_amemiya_rejects_regressors_without_within_variation(case):
     with pytest.raises(
         ValidationError,
         match=escaped(
-            msgs.AMEMIYA_NEEDS_WITHIN_VARIATION, columns=case.rejected_columns
+            panel_msgs.AMEMIYA_NEEDS_WITHIN_VARIATION,
+            columns=case.rejected_columns,
         ),
     ):
         _fit(case, "classical", "amemiya")
@@ -638,7 +639,7 @@ def test_wallace_hussain_pooled_regression_failure_is_a_computation_error():
     case = _case("ow_time_invariant_balanced")
     df = _frame(case).with_columns(z2=2.0 * pl.col("x_invariant"))
     with pytest.raises(
-        ComputationError, match=escaped(msgs.POOLED_REGRESSION_FAILED)
+        ComputationError, match=escaped(panel_msgs.POOLED_REGRESSION_FAILED)
     ):
         RE(
             df,
@@ -671,7 +672,7 @@ def test_non_positive_sigma2_eps_is_a_computation_error():
         ).fit()
 
     pattern = re.escape(
-        msgs.NON_POSITIVE_IDIOSYNCRATIC_VARIANCE.format(
+        panel_msgs.NON_POSITIVE_IDIOSYNCRATIC_VARIANCE.format(
             sigma2_eps="@@", method="wallace_hussain"
         )
     ).replace("@@", r"-\d+\.\d+")
@@ -784,7 +785,7 @@ def test_singleton_entity_is_a_validation_error_for_every_method(method):
     with pytest.raises(
         ValidationError,
         match=escaped(
-            msgs.SINGLETON_GROUP, dimension="entity", group_id="e00"
+            panel_msgs.SINGLETON_GROUP, dimension="entity", group_id="e00"
         ),
     ):
         _fit(case, "classical", method, kept)
@@ -797,7 +798,7 @@ def test_two_way_unbalanced_panel_still_raises(method):
     with pytest.raises(
         ValidationError,
         match=escaped(
-            msgs.UNBALANCED_PANEL_FOR_TWO_WAY,
+            panel_msgs.UNBALANCED_PANEL_FOR_TWO_WAY,
             n_obs=df.height,
             n_entities=40,
             n_periods=6,

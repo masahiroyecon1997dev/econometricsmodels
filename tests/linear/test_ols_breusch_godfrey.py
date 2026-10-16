@@ -21,6 +21,7 @@ from functools import partial
 from pathlib import Path
 
 import _error_messages as msgs
+import _error_messages_linear as linear_msgs
 import numpy as np
 import polars as pl
 import pytest
@@ -317,7 +318,8 @@ def test_nlags_below_one_raises_validation_error(ar1, nlags):
     # 巨大な負の整数は`i64::MIN`に飽和して報告される。
     expected = max(nlags, -(2**63))
     with pytest.raises(
-        ValidationError, match=escaped(msgs.INVALID_NLAGS, nlags=expected)
+        ValidationError,
+        match=escaped(linear_msgs.INVALID_NLAGS, nlags=expected),
     ):
         fitted.breusch_godfrey_test("t", nlags)
 
@@ -356,7 +358,7 @@ def test_unknown_statistic_raises_validation_error(ar1):
     fitted = OLS(ar1, y="y", x=["x"]).fit()
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_DIAGNOSTIC_STATISTIC, other="chi2"),
+        match=escaped(linear_msgs.UNKNOWN_DIAGNOSTIC_STATISTIC, other="chi2"),
     ):
         fitted.breusch_godfrey_test("t", 1, "chi2")
 
@@ -477,7 +479,7 @@ def test_observation_count_at_the_boundary():
     with pytest.raises(
         ValidationError,
         match=escaped(
-            msgs.INSUFFICIENT_OBSERVATIONS_AUX_REGRESSION, n=10, k=10
+            linear_msgs.INSUFFICIENT_OBSERVATIONS_AUX_REGRESSION, n=10, k=10
         ),
     ):
         fitted.breusch_godfrey_test("t", 8)
@@ -512,7 +514,7 @@ def test_result_without_training_data_raises_validation_error():
     first_stage = res.first_stage()["endog1"]
 
     with pytest.raises(
-        ValidationError, match=escaped(msgs.BG_NO_TRAINING_DATA)
+        ValidationError, match=escaped(linear_msgs.BG_NO_TRAINING_DATA)
     ):
         first_stage.breusch_godfrey_test("t", 1)
 

@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import _error_messages as msgs
+import _error_messages_linear as linear_msgs
 import pandas as pd
 import polars as pl
 import pytest
@@ -92,7 +93,7 @@ def test_non_positive_weight_raises(dataset, bad_weight):
     with pytest.raises(
         ValidationError,
         match=escaped(
-            msgs.NON_POSITIVE_WEIGHT,
+            linear_msgs.NON_POSITIVE_WEIGHT,
             row=n - 1,
             weight=msgs.rust_f64(bad_weight),
         ),

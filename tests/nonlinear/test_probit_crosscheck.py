@@ -45,14 +45,10 @@ from _assertions import (
     assert_dict_close,
     assert_fields_close,
     assert_inference_close,
-    check_margeff,
 )
 from _constants import APPLE_CLUSTER, APPLE_X, DATA_DIR, MROZ_X
-from _helpers import (
-    load_apple_adoption_dataset,
-    load_wooldridge_dataset,
-    with_cluster_groups,
-)
+from _helpers import load_wooldridge_dataset, with_cluster_groups
+from _nonlinear_helpers import check_margeff, load_apple_adoption_dataset
 from _tolerances import TOLERANCES
 from econometricsmodels import Probit, ProbitOptions
 

@@ -17,6 +17,7 @@ import math
 from pathlib import Path
 
 import _error_messages as msgs
+import _error_messages_panel as panel_msgs
 import numpy as np
 import polars as pl
 import pytest
@@ -176,7 +177,7 @@ def test_two_way_hausman_dk_periods_must_exceed_the_slopes(panel):
     with pytest.raises(
         ValidationError,
         match=escaped(
-            msgs.INSUFFICIENT_DK_PERIODS_FOR_INFERENCE, t_periods=3, q=3
+            panel_msgs.INSUFFICIENT_DK_PERIODS_FOR_INFERENCE, t_periods=3, q=3
         ),
     ):
         _fit(panel, options, x=("x1", "xi", "xt"))
@@ -781,7 +782,9 @@ def test_one_way_time_only_column_on_unbalanced_panel_is_tested(panel):
 def test_dk_time_is_independent_of_time(panel):
     """2-wayでも`cov_type="dk"`は`dk_time`が必須で、`time`は借用されない。
     `dk_time`が`time`と同じ列でも指定できる。"""
-    with pytest.raises(ValidationError, match=escaped(msgs.DK_REQUIRES_TIME)):
+    with pytest.raises(
+        ValidationError, match=escaped(panel_msgs.DK_REQUIRES_TIME)
+    ):
         _fit(panel, REOptions(cov_type="dk", time="time"), x=("x1", "xi"))
 
     res = _fit(
@@ -798,7 +801,7 @@ def test_unbalanced_panel_raises(panel):
     with pytest.raises(
         ValidationError,
         match=escaped(
-            msgs.UNBALANCED_PANEL_FOR_TWO_WAY,
+            panel_msgs.UNBALANCED_PANEL_FOR_TWO_WAY,
             n_obs=23,
             n_entities=6,
             n_periods=4,
@@ -818,7 +821,9 @@ def test_singleton_time_raises(panel):
     keep = (pl.col("time") != 4) | (pl.int_range(pl.len()).over("time") == 0)
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.SINGLETON_GROUP, dimension="time", group_id="4"),
+        match=escaped(
+            panel_msgs.SINGLETON_GROUP, dimension="time", group_id="4"
+        ),
     ):
         _fit(panel.filter(keep), REOptions(time="time"), x=("x1",))
 

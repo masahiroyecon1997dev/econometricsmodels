@@ -20,7 +20,7 @@ import json
 from functools import partial
 from pathlib import Path
 
-import _error_messages as msgs
+import _error_messages_linear as linear_msgs
 import numpy as np
 import polars as pl
 import pytest
@@ -347,7 +347,7 @@ def test_non_string_statistic_raises_type_error(baseline):
 def test_unknown_statistic_raises_validation_error(baseline):
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_DIAGNOSTIC_STATISTIC, other="chi2"),
+        match=escaped(linear_msgs.UNKNOWN_DIAGNOSTIC_STATISTIC, other="chi2"),
     ):
         baseline.fit().white_test("chi2")
 
@@ -361,7 +361,7 @@ def test_too_few_observations_for_the_auxiliary_regression_raises():
     with pytest.raises(
         ValidationError,
         match=escaped(
-            msgs.INSUFFICIENT_OBSERVATIONS_AUX_REGRESSION, n=5, k=10
+            linear_msgs.INSUFFICIENT_OBSERVATIONS_AUX_REGRESSION, n=5, k=10
         ),
     ):
         fitted.white_test()
@@ -381,7 +381,9 @@ def test_observation_count_equal_to_the_auxiliary_columns_raises():
 
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.INSUFFICIENT_OBSERVATIONS_AUX_REGRESSION, n=6, k=6),
+        match=escaped(
+            linear_msgs.INSUFFICIENT_OBSERVATIONS_AUX_REGRESSION, n=6, k=6
+        ),
     ):
         fitted.white_test()
 
@@ -400,7 +402,9 @@ def test_sample_size_is_checked_against_the_terms_that_remain_after_dropping():
 
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.INSUFFICIENT_OBSERVATIONS_AUX_REGRESSION, n=5, k=5),
+        match=escaped(
+            linear_msgs.INSUFFICIENT_OBSERVATIONS_AUX_REGRESSION, n=5, k=5
+        ),
     ):
         OLS(df.head(5), y="y", x=["x1", "d"]).fit().white_test()
 
@@ -427,7 +431,7 @@ def test_result_without_training_data_raises_validation_error():
     first_stage = res.first_stage()["endog1"]
 
     with pytest.raises(
-        ValidationError, match=escaped(msgs.WHITE_NO_TRAINING_DATA)
+        ValidationError, match=escaped(linear_msgs.WHITE_NO_TRAINING_DATA)
     ):
         first_stage.white_test()
 
@@ -461,7 +465,8 @@ def test_full_set_of_dummies_without_intercept_raises_computation_error():
     fitted = OLS(df, y="y", x=["d1", "d2", "d3"], options=options).fit()
 
     with pytest.raises(
-        ComputationError, match=escaped(msgs.WHITE_AUX_REGRESSION_PREFIX)
+        ComputationError,
+        match=escaped(linear_msgs.WHITE_AUX_REGRESSION_PREFIX),
     ):
         fitted.white_test()
 

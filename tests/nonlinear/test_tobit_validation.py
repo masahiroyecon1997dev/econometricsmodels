@@ -15,17 +15,17 @@ import json
 import math
 
 import _error_messages as msgs
+import _error_messages_nonlinear as nonlinear_msgs
 import numpy as np
 import pandas as pd
 import polars as pl
 import pytest
 from _constants import DATA_DIR
 from _error_messages import escaped, rust_f64
-from _helpers import (
+from _helpers import name_collision_frame, with_cluster_groups
+from _nonlinear_helpers import (
     censored_separation_dataset,
     heavily_censored_tobit_dataset,
-    name_collision_frame,
-    with_cluster_groups,
 )
 from econometricsmodels import (
     ComputationError,
@@ -92,7 +92,9 @@ def test_sigma_collision_raises():
     `engine_pybind`の`validate_no_sigma_collision`のPython API境界での確認）。
     """
     df = name_collision_frame([0.0, 1.0, 0.0, 1.0], "sigma")
-    with pytest.raises(ValidationError, match=escaped(msgs.SIGMA_COLLISION)):
+    with pytest.raises(
+        ValidationError, match=escaped(nonlinear_msgs.SIGMA_COLLISION)
+    ):
         Tobit(df, y="y", x=["sigma"]).fit()
 
 
@@ -243,9 +245,9 @@ def test_invalid_censoring_bounds_raises(censored_dataset):
     with pytest.raises(
         ValidationError,
         match=escaped(
-            msgs.INVALID_CENSORING_BOUNDS,
-            lower=msgs.rust_option_f64_debug(None),
-            upper=msgs.rust_option_f64_debug(None),
+            nonlinear_msgs.INVALID_CENSORING_BOUNDS,
+            lower=nonlinear_msgs.rust_option_f64_debug(None),
+            upper=nonlinear_msgs.rust_option_f64_debug(None),
         ),
     ):
         Tobit(
@@ -264,11 +266,11 @@ def test_y_out_of_censoring_bounds_raises():
     with pytest.raises(
         ValidationError,
         match=escaped(
-            msgs.Y_OUT_OF_CENSORING_BOUNDS,
+            nonlinear_msgs.Y_OUT_OF_CENSORING_BOUNDS,
             row=0,
             value=msgs.rust_f64(-1.0),
-            lower=msgs.rust_option_f64_debug(0.0),
-            upper=msgs.rust_option_f64_debug(None),
+            lower=nonlinear_msgs.rust_option_f64_debug(0.0),
+            upper=nonlinear_msgs.rust_option_f64_debug(None),
         ),
     ):
         Tobit(df, y="y", x=["x1"], options=TobitOptions(lower=0.0)).fit()
@@ -282,9 +284,9 @@ def test_no_uncensored_observations_raises():
     with pytest.raises(
         ValidationError,
         match=escaped(
-            msgs.NO_UNCENSORED_OBSERVATIONS,
-            lower=msgs.rust_option_f64_debug(0.0),
-            upper=msgs.rust_option_f64_debug(None),
+            nonlinear_msgs.NO_UNCENSORED_OBSERVATIONS,
+            lower=nonlinear_msgs.rust_option_f64_debug(0.0),
+            upper=nonlinear_msgs.rust_option_f64_debug(None),
         ),
     ):
         Tobit(df, y="y", x=["x1"]).fit()
@@ -297,7 +299,9 @@ def test_predict_unknown_target_raises(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_MARGINAL_EFFECTS_TARGET, other="bogus"),
+        match=escaped(
+            nonlinear_msgs.UNKNOWN_MARGINAL_EFFECTS_TARGET, other="bogus"
+        ),
     ):
         res.predict(target="bogus")
 
@@ -353,7 +357,9 @@ def test_augment_unknown_target_raises(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_MARGINAL_EFFECTS_TARGET, other="bogus"),
+        match=escaped(
+            nonlinear_msgs.UNKNOWN_MARGINAL_EFFECTS_TARGET, other="bogus"
+        ),
     ):
         res.augment(target="bogus")
 
@@ -405,7 +411,9 @@ def test_unknown_cov_type_raises(censored_dataset, cov_type):
     """未知の`cov_type`（空文字列を含む）は`ValidationError`。"""
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_COV_TYPE_NONLINEAR, other=cov_type),
+        match=escaped(
+            nonlinear_msgs.UNKNOWN_COV_TYPE_NONLINEAR, other=cov_type
+        ),
     ):
         Tobit(
             censored_dataset,
@@ -432,7 +440,7 @@ def test_unknown_solver_raises(censored_dataset, solver):
     """未知の`solver`（空文字列を含む）は`ValidationError`。"""
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_METHOD_NONLINEAR, other=solver),
+        match=escaped(nonlinear_msgs.UNKNOWN_METHOD_NONLINEAR, other=solver),
     ):
         Tobit(
             censored_dataset,
@@ -459,7 +467,7 @@ def test_invalid_confidence_level_raises(censored_dataset, confidence_level):
 def test_non_positive_tol_raises(censored_dataset, tol):
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.INVALID_TOL, tol=msgs.rust_f64(tol)),
+        match=escaped(nonlinear_msgs.INVALID_TOL, tol=msgs.rust_f64(tol)),
     ):
         Tobit(
             censored_dataset,
@@ -473,7 +481,7 @@ def test_non_positive_tol_raises(censored_dataset, tol):
 def test_non_positive_max_iter_raises(censored_dataset, max_iter):
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.INVALID_MAX_ITER, max_iter=max_iter),
+        match=escaped(nonlinear_msgs.INVALID_MAX_ITER, max_iter=max_iter),
     ):
         Tobit(
             censored_dataset,
@@ -612,7 +620,9 @@ def test_marginal_effects_unknown_at_raises(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_MARGINAL_EFFECTS_AT, other="bogus"),
+        match=escaped(
+            nonlinear_msgs.UNKNOWN_MARGINAL_EFFECTS_AT, other="bogus"
+        ),
     ):
         res.marginal_effects(at="bogus")
 
@@ -621,7 +631,9 @@ def test_marginal_effects_unknown_target_raises(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.UNKNOWN_MARGINAL_EFFECTS_TARGET, other="bogus"),
+        match=escaped(
+            nonlinear_msgs.UNKNOWN_MARGINAL_EFFECTS_TARGET, other="bogus"
+        ),
     ):
         res.marginal_effects(target="bogus")
 
@@ -669,7 +681,7 @@ def test_expected_uncensored_raises_computation_error_for_narrow_interval():
     ).fit()
     assert 1.0 / res.sigma < 0.01
     message = escaped(
-        msgs.UNCENSORED_INTERVAL_TOO_NARROW,
+        nonlinear_msgs.UNCENSORED_INTERVAL_TOO_NARROW,
         lower=rust_f64(0.0),
         upper=rust_f64(1.0),
         sigma=rust_f64(res.sigma),

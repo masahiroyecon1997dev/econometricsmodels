@@ -9,6 +9,7 @@ dtypeごとの許可・拒否の方針は`docs/guide/accepted-data.md`が正本�
 from __future__ import annotations
 
 import _error_messages as msgs
+import _error_messages_linear as linear_msgs
 import numpy as np
 import polars as pl
 import pytest
@@ -412,7 +413,7 @@ def test_boolean_weight_is_accepted_when_all_true_and_rejected_with_false(
     )
     with pytest.raises(
         ValidationError,
-        match=escaped(msgs.NON_POSITIVE_WEIGHT, row=0, weight="0"),
+        match=escaped(linear_msgs.NON_POSITIVE_WEIGHT, row=0, weight="0"),
     ):
         ROLE_FITS["wls.weight"](with_false)
 

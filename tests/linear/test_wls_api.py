@@ -329,6 +329,43 @@ def test_predict_new_data_matches_statsmodels(dataset):
         _assert_close(value, exp, f"predicted/{i}")
 
 
+def test_predict_with_include_intercept_false_and_x_named_const():
+    """`include_intercept=False`かつ`x`に`"const"`という名前の列を含む場合でも
+    `predict(new_data)`が、その列の値を使って正しく計算されること。
+
+    `include_intercept=True`のときのみ`"const"`列名との衝突チェックが働く仕様の
+    ため（`wls-spec.md`「API引数」）、`include_intercept=False`ならユーザーが
+    `"const"`という名前の（切片ではない）通常の説明変数を`x`に含めることは正当な
+    入力。`predict()`が列名から「自動追加された切片列かどうか」を推測すると、この
+    列の値を無視して1.0固定にしてしまう（OLS・Logit・Probitで過去にあった回帰バグと
+    同じ型）。重みは予測に関与しないので、重みは1でない値にして確かめる。
+    """
+    df = pl.DataFrame(
+        {
+            "y": [3.0, 7.0, 9.0, 19.0, 11.0],
+            "const": [2.0, 5.0, 1.0, 8.0, 3.0],
+            "x2": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "weight": [1.0, 2.0, 0.5, 1.5, 1.0],
+        }
+    )
+    options = WLSOptions(include_intercept=False)
+    res = WLS(
+        df, y="y", x=["const", "x2"], weight="weight", options=options
+    ).fit()
+
+    new_data = pl.DataFrame({"const": [100.0, 200.0], "x2": [10.0, 20.0]})
+    predicted = res.predict(new_data)
+
+    coef_const = res.params["const"]
+    coef_x2 = res.params["x2"]
+    assert len(predicted) == 2
+    for i, (value, (c, x2)) in enumerate(
+        zip(predicted, [(100.0, 10.0), (200.0, 20.0)], strict=True)
+    ):
+        expected = coef_const * c + coef_x2 * x2
+        _assert_close(value, expected, f"predicted/{i}")
+
+
 def test_predict_returns_list_of_floats(unit_weight_dataset):
     """`predict()`が観測値ごとの`float`のリストを返すこと（`residuals`と同じ形）。"""
     df = unit_weight_dataset

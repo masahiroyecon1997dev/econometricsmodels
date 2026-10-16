@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import polars as pl
 import pytest
 from _assertions import (
@@ -27,6 +28,7 @@ from _assertions import (
 from _helpers import CASE_SPELLINGS, respell
 from _tolerances import TOLERANCES
 from econometricsmodels import Tobit, TobitOptions, TobitResults
+from scipy.stats import norm
 
 from benchmark.nonlinear.constants import MLE_COV_TYPES
 
@@ -388,6 +390,51 @@ def test_predict_new_data_returns_list_of_floats(censored_dataset, target):
     assert isinstance(predicted, list)
     assert len(predicted) == 2
     assert all(isinstance(value, float) for value in predicted)
+
+
+@pytest.mark.parametrize(
+    "target", ["expected_latent", "prob_uncensored", "expected_observed"]
+)
+def test_predict_with_include_intercept_false_and_x_named_const(target):
+    """`include_intercept=False`かつ`x`に`"const"`という名前の列を含む場合でも
+    `predict(new_data)`が、その列の値を使って正しく計算されること。
+
+    `include_intercept=True`のときのみ`"const"`列名との衝突チェックが働く仕様の
+    ため、`include_intercept=False`ならユーザーが`"const"`という名前の（切片では
+    ない）通常の説明変数を`x`に含めることは正当な入力。`predict()`が列名から
+    「自動追加された切片列かどうか」を推測すると、この列の値を無視して1.0固定にして
+    しまう（OLS・Logit・Probitで過去にあった回帰バグと同じ型）。期待値は、同じ推定結果の
+    係数と`sigma`から閉形式（下限0の左打ち切り）で組み立てる。
+    """
+    rng = np.random.default_rng(0)
+    n = 60
+    const = rng.uniform(1.0, 4.0, n)
+    x2 = rng.normal(size=n)
+    y = np.maximum(-1.0 + 1.2 * const - 0.5 * x2 + rng.normal(size=n), 0.0)
+    df = pl.DataFrame({"y": y, "const": const, "x2": x2})
+    options = TobitOptions(include_intercept=False)
+    res = Tobit(df, y="y", x=["const", "x2"], options=options).fit()
+    assert res.converged
+
+    # `const`が1.0固定扱いになると予測値が大きく変わる、1から離れた値を含める。
+    new_data = pl.DataFrame({"const": [3.0, 0.2, 1.0], "x2": [1.0, -0.5, 0.0]})
+    xb = (
+        res.params["const"] * new_data["const"].to_numpy()
+        + res.params["x2"] * new_data["x2"].to_numpy()
+    )
+    z = xb / res.sigma
+    expected = {
+        "expected_latent": xb,
+        "prob_uncensored": norm.cdf(z),
+        "expected_observed": xb * norm.cdf(z) + res.sigma * norm.pdf(z),
+    }[target]
+
+    predicted = res.predict(new_data, target=target)
+
+    assert len(predicted) == 3
+    rtol = TOLERANCES["tobit_api"]["rtol_predict_closed_form"]
+    for i, (value, exp) in enumerate(zip(predicted, expected, strict=True)):
+        assert_close(value, exp, f"{target}/{i}", rtol=rtol, atol=0.0)
 
 
 def test_predict_augment_take_new_data_as_first_positional_arg(

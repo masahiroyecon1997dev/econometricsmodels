@@ -179,5 +179,10 @@ NONLINEAR_TOLERANCES: dict[str, dict[str, float]] = {
     # 相対差は0。浮動小数点の評価順の違いだけを吸収する幅を置く。
     "tobit_api": {
         "rtol_information_criterion": 1e-12,
+        # `predict()`を、同じ推定結果の係数・`sigma`から閉形式（`scipy.stats.norm`の
+        # `cdf`/`pdf`）で組み立てた値と比べる。`expected_latent`は同じ線形結合で相対差0、
+        # `prob_uncensored`・`expected_observed`は正規分布の関数の実装差が出て、実測最大
+        # 相対差は2.4e-11。約40倍のマージンを置く。
+        "rtol_predict_closed_form": 1e-9,
     },
 }

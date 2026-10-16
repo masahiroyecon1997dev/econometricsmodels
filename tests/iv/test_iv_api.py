@@ -71,50 +71,9 @@ def test_default_options_use_2sls_classical(iv_dataset):
     assert res.n_iter == 1
 
 
-def test_gmm_method_runs_and_converges(iv_dataset):
-    """`estimator="gmm"`の既定オプション（`gmm_type="two_step"`、2-step
-    efficient GMM）が成功パスで動作すること。
-    """
-    options = IVOptions(estimator="gmm")
-    res = our_fit(iv_dataset, options=options)
-    assert res.converged
-    assert res.n_iter == 2
-    assert res.gmm_type == "two_step"
-
-
-def test_gmm_one_step_has_no_weight_type_and_runs_once(iv_dataset):
-    """`gmm_type="one_step"`は`gmm_weight_type`を使わず、`gmm_weight_type`は
-    `None`、`n_iter=1`で常に収束扱い。
-    """
-    options = IVOptions(estimator="gmm", gmm_type="one_step")
-    res = our_fit(iv_dataset, options=options)
-    assert res.gmm_type == "one_step"
-    assert res.gmm_weight_type is None
-    assert res.n_iter == 1
-    assert res.converged
-
-
-def test_gmm_type_is_case_insensitive_and_echoed_lowercase(iv_dataset):
-    options = IVOptions(estimator="gmm", gmm_type="Two_Step")
-    assert our_fit(iv_dataset, options=options).gmm_type == "two_step"
-
-
-def test_gmm_iterated_uses_effective_defaults(iv_dataset):
-    """`gmm_max_iter`/`gmm_tol`が`None`（既定）でも`"iterated"`では
-    実効既定値（100 / 1e-6）で反復し、収束すること。
-    """
-    options = IVOptions(
-        estimator="gmm", gmm_type="iterated", gmm_weight_type="robust"
-    )
-    res = our_fit(iv_dataset, options=options)
-    assert res.gmm_type == "iterated"
-    assert res.converged
-    assert 3 <= res.n_iter <= 100
-
-
-def test_gmm_type_is_none_for_2sls(iv_dataset):
-    res = our_fit(iv_dataset, options=IVOptions(estimator="2sls"))
-    assert res.gmm_type is None
+def test_residuals_length_matches_n_obs(iv_dataset):
+    res = our_fit(iv_dataset)
+    assert len(res.residuals) == res.n_obs == iv_dataset.height
 
 
 def test_cluster_g2_boundary_succeeds_when_x_exog_is_empty():
@@ -138,11 +97,6 @@ def test_cluster_g2_boundary_succeeds_when_x_exog_is_empty():
         options=options,
     ).fit()
     assert res.params["endog1"] != 0.0
-
-
-def test_residuals_length_matches_n_obs(iv_dataset):
-    res = our_fit(iv_dataset)
-    assert len(res.residuals) == res.n_obs == iv_dataset.height
 
 
 # ── API構造 ───────────────────────────────────────────────────────────
@@ -332,56 +286,6 @@ def test_confidence_level_changes_interval_width(iv_dataset):
         assert narrow_width < wide_width, name
 
 
-def test_hac_auto_lags_runs_and_returns_finite_std_errors(iv_dataset):
-    """`hac_lags`省略時（`None`、自動計算式）でもエラーなく動作すること。"""
-    options = IVOptions(cov_type="hac", hac_time=ROW_TIME)
-    res = our_fit(iv_dataset, options=options)
-    assert res.cov_type == "hac"
-    for se in res.std_errors.values():
-        assert se > 0.0
-
-
-def test_hac_time_reorders_rows_before_computing_lags():
-    """`hac_time`を指定すると、DataFrameの行順に関わらず時系列順で
-    ラグ付き自己共分散を計算すること（`test_ols_api.py`の同名テストと同じ発想を
-    IVに適用、engine_pybindの`hac_time`列抽出経路をAPI境界から検証する）。
-    """
-    ordered_df = pl.DataFrame(
-        {
-            "y": [2.0, 4.0, 5.0, 4.0, 5.0, 6.0, 5.0, 7.0],
-            "endog1": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
-            "z1": [1.5, 2.5, 2.0, 4.5, 3.0, 5.5, 6.0, 7.5],
-            "time": [float(i) for i in range(8)],
-        }
-    )
-    shuffled_df = reorder_rows(ordered_df, [3, 1, 5, 2, 4, 0, 7, 6])
-
-    def fit_std_errors(df: pl.DataFrame, hac_time: str) -> dict[str, float]:
-        options = IVOptions(cov_type="hac", hac_lags=1, hac_time=hac_time)
-        return (
-            IV(
-                df,
-                y="y",
-                x_exog=[],
-                x_endog=["endog1"],
-                instruments=["z1"],
-                options=options,
-            )
-            .fit()
-            .std_errors
-        )
-
-    assert_hac_time_reorders_rows(
-        fit_std_errors(ordered_df, "time"),
-        fit_std_errors(shuffled_df, "time"),
-        fit_std_errors(with_row_time(shuffled_df), ROW_TIME),
-        atol_invariant=TOLERANCES["iv_api"]["atol_hac_time_reorder"],
-        min_rel_effect=TOLERANCES["iv_api"][
-            "min_rel_hac_time_row_order_effect"
-        ],
-    )
-
-
 def test_include_intercept_false_omits_const(iv_dataset):
     """`include_intercept=False`だと`param_names`に`"const"`が含まれない
     （`x_endog`/`instruments`には元々自動で切片が付かない仕様と対称）。
@@ -437,6 +341,56 @@ def test_include_intercept_false_allows_const_in_instruments():
         options=options,
     )
     assert res.first_stage()["endog1"].param_names == ["x1", "const"]
+
+
+def test_hac_auto_lags_runs_and_returns_finite_std_errors(iv_dataset):
+    """`hac_lags`省略時（`None`、自動計算式）でもエラーなく動作すること。"""
+    options = IVOptions(cov_type="hac", hac_time=ROW_TIME)
+    res = our_fit(iv_dataset, options=options)
+    assert res.cov_type == "hac"
+    for se in res.std_errors.values():
+        assert se > 0.0
+
+
+def test_hac_time_reorders_rows_before_computing_lags():
+    """`hac_time`を指定すると、DataFrameの行順に関わらず時系列順で
+    ラグ付き自己共分散を計算すること（`test_ols_api.py`の同名テストと同じ発想を
+    IVに適用、engine_pybindの`hac_time`列抽出経路をAPI境界から検証する）。
+    """
+    ordered_df = pl.DataFrame(
+        {
+            "y": [2.0, 4.0, 5.0, 4.0, 5.0, 6.0, 5.0, 7.0],
+            "endog1": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+            "z1": [1.5, 2.5, 2.0, 4.5, 3.0, 5.5, 6.0, 7.5],
+            "time": [float(i) for i in range(8)],
+        }
+    )
+    shuffled_df = reorder_rows(ordered_df, [3, 1, 5, 2, 4, 0, 7, 6])
+
+    def fit_std_errors(df: pl.DataFrame, hac_time: str) -> dict[str, float]:
+        options = IVOptions(cov_type="hac", hac_lags=1, hac_time=hac_time)
+        return (
+            IV(
+                df,
+                y="y",
+                x_exog=[],
+                x_endog=["endog1"],
+                instruments=["z1"],
+                options=options,
+            )
+            .fit()
+            .std_errors
+        )
+
+    assert_hac_time_reorders_rows(
+        fit_std_errors(ordered_df, "time"),
+        fit_std_errors(shuffled_df, "time"),
+        fit_std_errors(with_row_time(shuffled_df), ROW_TIME),
+        atol_invariant=TOLERANCES["iv_api"]["atol_hac_time_reorder"],
+        min_rel_effect=TOLERANCES["iv_api"][
+            "min_rel_hac_time_row_order_effect"
+        ],
+    )
 
 
 @pytest.mark.parametrize("cov_type", ["classical", "hc0", "hac", "cluster"])
@@ -573,6 +527,55 @@ def test_gmm_only_options_default_to_none():
     assert options.gmm_max_iter is None
     assert options.gmm_tol is None
     assert options.raise_on_non_convergence is None
+
+
+# ── GMM（estimator="gmm"） ────────────────────────────────────────────
+
+
+def test_gmm_method_runs_and_converges(iv_dataset):
+    """`estimator="gmm"`の既定オプション（`gmm_type="two_step"`、2-step
+    efficient GMM）が成功パスで動作すること。
+    """
+    options = IVOptions(estimator="gmm")
+    res = our_fit(iv_dataset, options=options)
+    assert res.converged
+    assert res.n_iter == 2
+    assert res.gmm_type == "two_step"
+
+
+def test_gmm_one_step_has_no_weight_type_and_runs_once(iv_dataset):
+    """`gmm_type="one_step"`は`gmm_weight_type`を使わず、`gmm_weight_type`は
+    `None`、`n_iter=1`で常に収束扱い。
+    """
+    options = IVOptions(estimator="gmm", gmm_type="one_step")
+    res = our_fit(iv_dataset, options=options)
+    assert res.gmm_type == "one_step"
+    assert res.gmm_weight_type is None
+    assert res.n_iter == 1
+    assert res.converged
+
+
+def test_gmm_type_is_case_insensitive_and_echoed_lowercase(iv_dataset):
+    options = IVOptions(estimator="gmm", gmm_type="Two_Step")
+    assert our_fit(iv_dataset, options=options).gmm_type == "two_step"
+
+
+def test_gmm_iterated_uses_effective_defaults(iv_dataset):
+    """`gmm_max_iter`/`gmm_tol`が`None`（既定）でも`"iterated"`では
+    実効既定値（100 / 1e-6）で反復し、収束すること。
+    """
+    options = IVOptions(
+        estimator="gmm", gmm_type="iterated", gmm_weight_type="robust"
+    )
+    res = our_fit(iv_dataset, options=options)
+    assert res.gmm_type == "iterated"
+    assert res.converged
+    assert 3 <= res.n_iter <= 100
+
+
+def test_gmm_type_is_none_for_2sls(iv_dataset):
+    res = our_fit(iv_dataset, options=IVOptions(estimator="2sls"))
+    assert res.gmm_type is None
 
 
 # ── HACの実使用ラグ数（hac_lags_used） ────────────────────────────────

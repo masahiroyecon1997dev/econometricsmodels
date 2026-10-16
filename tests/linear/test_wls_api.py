@@ -64,6 +64,13 @@ CONSTANT_WEIGHT = 100.0
 # ── 成功パス・結果型 ──────────────────────────────────────────────────
 
 
+def test_fit_succeeds_and_returns_wls_results(unit_weight_dataset):
+    """`WLS.fit()`の返り値が`WLSResults`（`OLSResults`とは別型）であること。"""
+    df = unit_weight_dataset
+    res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
+    assert isinstance(res, WLSResults)
+
+
 def test_default_options_use_classical(unit_weight_dataset):
     """`options`省略時は`WLSOptions()`の既定値（classical）が使われること。"""
     df = unit_weight_dataset
@@ -87,13 +94,6 @@ def test_residuals_are_original_scale_not_weighted(dataset):
     ols_res = OLS(dataset, y="y", x=["x1", "x2"]).fit()
     for i, (wls_r, ols_r) in enumerate(zip(res.residuals, ols_res.residuals)):
         _assert_rounding_close(wls_r, ols_r, f"residuals[{i}]")
-
-
-def test_fit_succeeds_and_returns_wls_results(unit_weight_dataset):
-    """`WLS.fit()`の返り値が`WLSResults`（`OLSResults`とは別型）であること。"""
-    df = unit_weight_dataset
-    res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
-    assert isinstance(res, WLSResults)
 
 
 # ── API構造 ───────────────────────────────────────────────────────────
@@ -177,20 +177,6 @@ def test_cov_type_is_case_insensitive(unit_weight_dataset, cov_type, spelling):
     assert_same_estimates(res, fit(cov_type))
 
 
-def test_include_intercept_false_omits_const(unit_weight_dataset):
-    """`include_intercept=False`では`const`が出ず、`df_model`は傾き係数の数
-    （切片あり・なしで同じ）になること（数値照合は`test_wls_reference.py`の
-    `test_no_intercept_matches_statsmodels`）。
-    """
-    df = unit_weight_dataset
-    options = WLSOptions(include_intercept=False)
-    res = WLS(
-        df, y="y", x=["x1", "x2"], weight="weight", options=options
-    ).fit()
-    assert res.param_names == ["x1", "x2"]
-    assert res.df_model == 2
-
-
 def test_confidence_level_changes_interval_width(unit_weight_dataset):
     """`confidence_level`を下げると信頼区間が狭くなること（OLSと同じ検証、
     既定の0.95以外の値がengine_pybind経由で実際に反映されることの確認）。
@@ -215,6 +201,20 @@ def test_confidence_level_changes_interval_width(unit_weight_dataset):
         wide_width = wide.conf_int[name][1] - wide.conf_int[name][0]
         narrow_width = narrow.conf_int[name][1] - narrow.conf_int[name][0]
         assert narrow_width < wide_width, name
+
+
+def test_include_intercept_false_omits_const(unit_weight_dataset):
+    """`include_intercept=False`では`const`が出ず、`df_model`は傾き係数の数
+    （切片あり・なしで同じ）になること（数値照合は`test_wls_reference.py`の
+    `test_no_intercept_matches_statsmodels`）。
+    """
+    df = unit_weight_dataset
+    options = WLSOptions(include_intercept=False)
+    res = WLS(
+        df, y="y", x=["x1", "x2"], weight="weight", options=options
+    ).fit()
+    assert res.param_names == ["x1", "x2"]
+    assert res.df_model == 2
 
 
 def test_hac_auto_lags_runs_and_returns_finite_std_errors(unit_weight_dataset):
@@ -438,6 +438,8 @@ def test_augment_without_intercept_matches_predict():
 #
 # WLSとOLSで計算経路が異なる統計量（r_squared・残差・予測値等）は、加算順序に
 # 由来する丸め誤差レベルでの一致を、相対誤差なし（rtol=0）の絶対誤差で確認する。
+
+
 _assert_rounding_close = partial(
     assert_close, rtol=0.0, atol=TOLERANCES["wls_api"]["atol_ols_invariant"]
 )

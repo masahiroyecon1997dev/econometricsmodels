@@ -232,7 +232,7 @@ def test_fixed_effects_two_way_structure(fe_dataset):
     assert all(isinstance(v, float) for v in effects["time"].values())
 
 
-# ── 統計的健全性チェック（他の3分類に当てはまらない） ─────────────────
+# ── 統計的健全性チェック（クラスターSE） ──────────────────────────────
 
 
 def test_cluster_se_exceeds_classical_under_serial_correlation():

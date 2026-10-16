@@ -60,35 +60,6 @@ def test_param_names_include_const_first_and_sigma_last(censored_dataset):
     assert res.param_names == ["const", "x1", "x2", "sigma"]
 
 
-def test_params_std_errors_test_stats_p_values_share_keys(censored_dataset):
-    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
-    expected_keys = {"const", "x1", "x2", "sigma"}
-    assert set(res.params.keys()) == expected_keys
-    assert set(res.std_errors.keys()) == expected_keys
-    assert set(res.test_stats.keys()) == expected_keys
-    assert set(res.p_values.keys()) == expected_keys
-
-
-def test_sigma_property_matches_params_sigma(censored_dataset):
-    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
-    assert res.sigma == res.params["sigma"]
-    assert res.sigma > 0.0
-
-
-def test_conf_int_structure(censored_dataset):
-    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
-    ci = res.conf_int
-    assert set(ci.keys()) == {"const", "x1", "x2", "sigma"}
-    for lower, upper in ci.values():
-        assert lower < upper
-
-
-def test_n_obs_and_dep_var_name(censored_dataset):
-    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
-    assert res.n_obs == censored_dataset.height
-    assert res.dep_var_name == "y"
-
-
 def test_params_table_structure(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
     table = res.params_table()
@@ -119,6 +90,35 @@ def test_params_table_structure(censored_dataset):
     assert sigma_row["param"] == res.params["sigma"]
 
 
+def test_conf_int_structure(censored_dataset):
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+    ci = res.conf_int
+    assert set(ci.keys()) == {"const", "x1", "x2", "sigma"}
+    for lower, upper in ci.values():
+        assert lower < upper
+
+
+def test_params_std_errors_test_stats_p_values_share_keys(censored_dataset):
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+    expected_keys = {"const", "x1", "x2", "sigma"}
+    assert set(res.params.keys()) == expected_keys
+    assert set(res.std_errors.keys()) == expected_keys
+    assert set(res.test_stats.keys()) == expected_keys
+    assert set(res.p_values.keys()) == expected_keys
+
+
+def test_n_obs_and_dep_var_name(censored_dataset):
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+    assert res.n_obs == censored_dataset.height
+    assert res.dep_var_name == "y"
+
+
+def test_sigma_property_matches_params_sigma(censored_dataset):
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+    assert res.sigma == res.params["sigma"]
+    assert res.sigma > 0.0
+
+
 def test_wald_statistic_and_p_value_are_present(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
     assert res.wald_statistic > 0.0
@@ -126,6 +126,61 @@ def test_wald_statistic_and_p_value_are_present(censored_dataset):
 
 
 # ── オプションの反映 ──────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("spelling", CASE_SPELLINGS)
+@pytest.mark.parametrize("cov_type", MLE_COV_TYPES)
+def test_cov_type_is_case_insensitive(censored_dataset, cov_type, spelling):
+    """全`cov_type`で、`res.cov_type`が正規形（小文字）で返り、どの大文字小文字の
+    綴りでも正規形と同一の推定結果になること（`engine_pybind`側の
+    `build_<solver>_input`のRust単体テストと対になる、Python API境界での
+    確認。OLS/WLS/IV/Logit/Probit/FE/REの`test_cov_type_is_case_insensitive`と同型）。
+    """
+    kwargs = {"cluster": "cluster"} if cov_type == "cluster" else {}
+
+    def fit(label: str):
+        options = TobitOptions(cov_type=label, **kwargs)
+        return Tobit(
+            censored_dataset, y="y", x=["x1", "x2"], options=options
+        ).fit()
+
+    res = fit(respell(cov_type, spelling))
+    assert res.cov_type == cov_type
+    assert_same_estimates(res, fit(cov_type))
+
+
+def test_confidence_level_changes_interval_width(censored_dataset):
+    wide = Tobit(
+        censored_dataset,
+        y="y",
+        x=["x1", "x2"],
+        options=TobitOptions(confidence_level=0.99),
+    ).fit()
+    narrow = Tobit(
+        censored_dataset,
+        y="y",
+        x=["x1", "x2"],
+        options=TobitOptions(confidence_level=0.80),
+    ).fit()
+
+    for name in ["const", "x1", "x2", "sigma"]:
+        wide_width = wide.conf_int[name][1] - wide.conf_int[name][0]
+        narrow_width = narrow.conf_int[name][1] - narrow.conf_int[name][0]
+        assert narrow_width < wide_width
+
+
+def test_include_intercept_false_omits_const_and_converges(
+    censored_dataset,
+):
+    res = Tobit(
+        censored_dataset,
+        y="y",
+        x=["x1", "x2"],
+        options=TobitOptions(include_intercept=False),
+    ).fit()
+    assert res.param_names == ["x1", "x2", "sigma"]
+    assert res.converged
+    assert res.df_model == 2
 
 
 @pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
@@ -184,18 +239,34 @@ def test_method_is_case_insensitive(censored_dataset, solver, expected_label):
     assert res.solver == expected_label
 
 
-def test_include_intercept_false_omits_const_and_converges(
-    censored_dataset,
+@pytest.mark.parametrize("cov_type", MLE_COV_TYPES)
+def test_raise_on_non_convergence_false_returns_result_without_raising(
+    censored_dataset, cov_type
 ):
+    """`raise_on_non_convergence=False`だと未収束でも例外を投げず、
+    `converged=False`の`Results`を返す。`cov_type`は`classical`以外
+    （`opg`/`hc0`/`hc1`/`cluster`）も検証する（`_binary_choice_checks.py`の
+    Logit/Probit版と同じ懸念——打ち切り点でのHessian/スコア評価はcov_typeの
+    分岐によって経由する行列演算が異なるため、想定外の例外を投げず標準誤差が
+    有限値であることまで確認する）。
+    """
+    kwargs = {
+        "max_iter": 1,
+        "raise_on_non_convergence": False,
+        "cov_type": cov_type,
+    }
+    if cov_type == "cluster":
+        kwargs["cluster"] = "cluster"
     res = Tobit(
         censored_dataset,
         y="y",
         x=["x1", "x2"],
-        options=TobitOptions(include_intercept=False),
+        options=TobitOptions(**kwargs),
     ).fit()
-    assert res.param_names == ["x1", "x2", "sigma"]
-    assert res.converged
-    assert res.df_model == 2
+    assert res.converged is False
+    assert res.n_iter == 1
+    for name, se in res.std_errors.items():
+        assert math.isfinite(se), f"std_errors[{name}]={se} is not finite"
 
 
 @pytest.mark.parametrize("include_intercept", [True, False])
@@ -235,26 +306,6 @@ def test_aic_bic_count_sigma_as_a_parameter(
     assert res.df_model == n_params - 1 - int(include_intercept)
 
 
-def test_confidence_level_changes_interval_width(censored_dataset):
-    wide = Tobit(
-        censored_dataset,
-        y="y",
-        x=["x1", "x2"],
-        options=TobitOptions(confidence_level=0.99),
-    ).fit()
-    narrow = Tobit(
-        censored_dataset,
-        y="y",
-        x=["x1", "x2"],
-        options=TobitOptions(confidence_level=0.80),
-    ).fit()
-
-    for name in ["const", "x1", "x2", "sigma"]:
-        wide_width = wide.conf_int[name][1] - wide.conf_int[name][0]
-        narrow_width = narrow.conf_int[name][1] - narrow.conf_int[name][0]
-        assert narrow_width < wide_width
-
-
 def test_supports_right_censoring_only():
     """`lower=None`・`upper`指定で右打ち切りのみのモデルとして推定できる
     （`nonlinear-common.md`7章）。
@@ -270,57 +321,6 @@ def test_supports_right_censoring_only():
     ).fit()
     assert res.lower is None
     assert res.upper == 5.0
-
-
-@pytest.mark.parametrize("cov_type", MLE_COV_TYPES)
-def test_raise_on_non_convergence_false_returns_result_without_raising(
-    censored_dataset, cov_type
-):
-    """`raise_on_non_convergence=False`だと未収束でも例外を投げず、
-    `converged=False`の`Results`を返す。`cov_type`は`classical`以外
-    （`opg`/`hc0`/`hc1`/`cluster`）も検証する（`_binary_choice_checks.py`の
-    Logit/Probit版と同じ懸念——打ち切り点でのHessian/スコア評価はcov_typeの
-    分岐によって経由する行列演算が異なるため、想定外の例外を投げず標準誤差が
-    有限値であることまで確認する）。
-    """
-    kwargs = {
-        "max_iter": 1,
-        "raise_on_non_convergence": False,
-        "cov_type": cov_type,
-    }
-    if cov_type == "cluster":
-        kwargs["cluster"] = "cluster"
-    res = Tobit(
-        censored_dataset,
-        y="y",
-        x=["x1", "x2"],
-        options=TobitOptions(**kwargs),
-    ).fit()
-    assert res.converged is False
-    assert res.n_iter == 1
-    for name, se in res.std_errors.items():
-        assert math.isfinite(se), f"std_errors[{name}]={se} is not finite"
-
-
-@pytest.mark.parametrize("spelling", CASE_SPELLINGS)
-@pytest.mark.parametrize("cov_type", MLE_COV_TYPES)
-def test_cov_type_is_case_insensitive(censored_dataset, cov_type, spelling):
-    """全`cov_type`で、`res.cov_type`が正規形（小文字）で返り、どの大文字小文字の
-    綴りでも正規形と同一の推定結果になること（`engine_pybind`側の
-    `build_<solver>_input`のRust単体テストと対になる、Python API境界での
-    確認。OLS/WLS/IV/Logit/Probit/FE/REの`test_cov_type_is_case_insensitive`と同型）。
-    """
-    kwargs = {"cluster": "cluster"} if cov_type == "cluster" else {}
-
-    def fit(label: str):
-        options = TobitOptions(cov_type=label, **kwargs)
-        return Tobit(
-            censored_dataset, y="y", x=["x1", "x2"], options=options
-        ).fit()
-
-    res = fit(respell(cov_type, spelling))
-    assert res.cov_type == cov_type
-    assert_same_estimates(res, fit(cov_type))
 
 
 # ── predict() ─────────────────────────────────────────────────────────

@@ -49,6 +49,10 @@ def test_default_options_use_classical_and_converge(binary_dataset):
 # ── API構造 ───────────────────────────────────────────────────────────
 
 
+def test_param_names_include_const_first(binary_dataset):
+    _checks.check_param_names_include_const_first(binary_dataset, Logit)
+
+
 def test_params_table_structure(binary_dataset):
     _checks.check_params_table_structure(binary_dataset, Logit)
 
@@ -67,10 +71,6 @@ def test_n_obs_and_dep_var_name(binary_dataset):
     _checks.check_n_obs_and_dep_var_name(binary_dataset, Logit)
 
 
-def test_param_names_include_const_first(binary_dataset):
-    _checks.check_param_names_include_const_first(binary_dataset, Logit)
-
-
 # ── オプションの反映 ──────────────────────────────────────────────────
 
 
@@ -80,16 +80,11 @@ def test_param_names_include_const_first(binary_dataset):
 # 文字列パース・列抽出・分岐ロジックを経て正しく反映されることを確認する。
 
 
-@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
-def test_method_option_converges(binary_dataset, solver):
-    _checks.check_method_option_converges(
-        binary_dataset, Logit, LogitOptions, solver
-    )
-
-
-def test_include_intercept_false_omits_const_and_converges(binary_dataset):
-    _checks.check_include_intercept_false_omits_const_and_converges(
-        binary_dataset, Logit, LogitOptions
+@pytest.mark.parametrize("spelling", CASE_SPELLINGS)
+@pytest.mark.parametrize("cov_type", MLE_COV_TYPES)
+def test_cov_type_is_case_insensitive(binary_dataset, cov_type, spelling):
+    _checks.check_cov_type_is_case_insensitive(
+        binary_dataset, Logit, LogitOptions, cov_type, spelling
     )
 
 
@@ -99,12 +94,16 @@ def test_confidence_level_changes_interval_width(binary_dataset):
     )
 
 
-@pytest.mark.parametrize("cov_type", MLE_COV_TYPES)
-def test_raise_on_non_convergence_false_returns_result_without_raising(
-    binary_dataset, cov_type
-):
-    _checks.check_raise_on_non_convergence_false_returns_result_without_raising(
-        binary_dataset, Logit, LogitOptions, cov_type
+def test_include_intercept_false_omits_const_and_converges(binary_dataset):
+    _checks.check_include_intercept_false_omits_const_and_converges(
+        binary_dataset, Logit, LogitOptions
+    )
+
+
+@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
+def test_method_option_converges(binary_dataset, solver):
+    _checks.check_method_option_converges(
+        binary_dataset, Logit, LogitOptions, solver
     )
 
 
@@ -129,11 +128,12 @@ def test_method_is_case_insensitive(binary_dataset, solver, expected_label):
     )
 
 
-@pytest.mark.parametrize("spelling", CASE_SPELLINGS)
 @pytest.mark.parametrize("cov_type", MLE_COV_TYPES)
-def test_cov_type_is_case_insensitive(binary_dataset, cov_type, spelling):
-    _checks.check_cov_type_is_case_insensitive(
-        binary_dataset, Logit, LogitOptions, cov_type, spelling
+def test_raise_on_non_convergence_false_returns_result_without_raising(
+    binary_dataset, cov_type
+):
+    _checks.check_raise_on_non_convergence_false_returns_result_without_raising(
+        binary_dataset, Logit, LogitOptions, cov_type
     )
 
 

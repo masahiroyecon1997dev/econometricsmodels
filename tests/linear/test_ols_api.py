@@ -67,60 +67,11 @@ def test_fit_succeeds_and_returns_ols_results(dataset):
     assert isinstance(res, OLSResults)
 
 
-def test_hac_runs_and_returns_finite_std_errors(dataset):
-    """HACが（statsmodelsとの数値照合なしで）エラーなく動作すること。"""
-    options = OLSOptions(cov_type="hac", hac_lags=2, hac_time=ROW_TIME)
-    res = OLS(
-        with_row_time(dataset), y="y", x=["x1", "x2"], options=options
-    ).fit()
-
-    assert res.cov_type == "hac"
-    for se in res.std_errors.values():
-        assert se > 0.0
-
-
-def test_hac_auto_lags_runs_and_returns_finite_std_errors(dataset):
-    """`hac_lags`省略時（`None`、自動計算式）でもエラーなく動作すること
-    （`None`がPython→Rustに正しく伝播する経路。`hac_lags`を明示する経路は
-    `test_hac_runs_and_returns_finite_std_errors`）。
-    """
-    # hac_lags省略 = 自動計算
-    options = OLSOptions(cov_type="hac", hac_time=ROW_TIME)
-    res = OLS(
-        with_row_time(dataset), y="y", x=["x1", "x2"], options=options
-    ).fit()
-
-    assert res.cov_type == "hac"
-    for se in res.std_errors.values():
-        assert se > 0.0
-
-
-@pytest.mark.parametrize("n", HAC_AUTO_LAG_SAMPLE_SIZES)
-def test_hac_lags_used_matches_python_auto_lag_formula(n):
-    """`hac_lags`省略時の`hac_lags_used`が、Python側の独立実装
-    （`benchmark.common.hac_auto_lag`）と複数の標本サイズで一致すること。
-    """
-    options = OLSOptions(cov_type="hac", hac_time=ROW_TIME)
-    res = OLS(hac_lag_frame(n), y="y", x=["x1", "x2"], options=options).fit()
-    assert res.hac_lags_used == hac_auto_lag(n)
-
-
-@pytest.mark.parametrize("hac_lags", [0, 3, 10])
-def test_hac_lags_used_echoes_explicit_hac_lags(dataset, hac_lags):
-    """`hac_lags`を明示指定したときは、自動計算値ではなく指定値が返ること。"""
-    options = OLSOptions(cov_type="hac", hac_lags=hac_lags, hac_time=ROW_TIME)
-    res = OLS(
-        with_row_time(dataset), y="y", x=["x1", "x2"], options=options
-    ).fit()
-    assert res.hac_lags_used == hac_lags
-
-
-@pytest.mark.parametrize("cov_type", ["classical", "hc0", "hc3"])
-def test_hac_lags_used_is_none_unless_hac(dataset, cov_type):
-    res = OLS(
-        dataset, y="y", x=["x1", "x2"], options=OLSOptions(cov_type=cov_type)
-    ).fit()
-    assert res.hac_lags_used is None
+def test_default_options_use_classical():
+    """`options`省略時は`OLSOptions()`の既定値（classical）が使われること。"""
+    df = pl.DataFrame({"y": [1.0, 2.0, 3.0], "x1": [1.0, 2.0, 3.5]})
+    res = OLS(df, y="y", x=["x1"]).fit()
+    assert res.cov_type == "classical"
 
 
 def test_residuals_sum_near_zero(dataset):
@@ -217,25 +168,6 @@ def test_cov_type_is_case_insensitive(dataset, cov_type, spelling):
     assert_same_estimates(res, fit(cov_type))
 
 
-def test_include_intercept_false_omits_const(dataset):
-    """`include_intercept=False`では`const`が出ず、`df_model`は傾き係数の数（
-    切片あり・なしで同じ）になること（数値照合は`test_ols_reference.py`の
-    `test_no_intercept_matches_statsmodels`）。
-    """
-    options = OLSOptions(include_intercept=False)
-    res = OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
-    assert res.param_names == ["x1", "x2"]
-    assert res.df_model == 2
-    assert our_fit(dataset).df_model == 2
-
-
-def test_default_options_use_classical():
-    """`options`省略時は`OLSOptions()`の既定値（classical）が使われること。"""
-    df = pl.DataFrame({"y": [1.0, 2.0, 3.0], "x1": [1.0, 2.0, 3.5]})
-    res = OLS(df, y="y", x=["x1"]).fit()
-    assert res.cov_type == "classical"
-
-
 def test_confidence_level_changes_interval_width(dataset):
     """`confidence_level`を下げると信頼区間が狭くなること
 
@@ -258,6 +190,46 @@ def test_confidence_level_changes_interval_width(dataset):
         wide_width = wide.conf_int[name][1] - wide.conf_int[name][0]
         narrow_width = narrow.conf_int[name][1] - narrow.conf_int[name][0]
         assert narrow_width < wide_width, name
+
+
+def test_include_intercept_false_omits_const(dataset):
+    """`include_intercept=False`では`const`が出ず、`df_model`は傾き係数の数（
+    切片あり・なしで同じ）になること（数値照合は`test_ols_reference.py`の
+    `test_no_intercept_matches_statsmodels`）。
+    """
+    options = OLSOptions(include_intercept=False)
+    res = OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
+    assert res.param_names == ["x1", "x2"]
+    assert res.df_model == 2
+    assert our_fit(dataset).df_model == 2
+
+
+def test_hac_runs_and_returns_finite_std_errors(dataset):
+    """HACが（statsmodelsとの数値照合なしで）エラーなく動作すること。"""
+    options = OLSOptions(cov_type="hac", hac_lags=2, hac_time=ROW_TIME)
+    res = OLS(
+        with_row_time(dataset), y="y", x=["x1", "x2"], options=options
+    ).fit()
+
+    assert res.cov_type == "hac"
+    for se in res.std_errors.values():
+        assert se > 0.0
+
+
+def test_hac_auto_lags_runs_and_returns_finite_std_errors(dataset):
+    """`hac_lags`省略時（`None`、自動計算式）でもエラーなく動作すること
+    （`None`がPython→Rustに正しく伝播する経路。`hac_lags`を明示する経路は
+    `test_hac_runs_and_returns_finite_std_errors`）。
+    """
+    # hac_lags省略 = 自動計算
+    options = OLSOptions(cov_type="hac", hac_time=ROW_TIME)
+    res = OLS(
+        with_row_time(dataset), y="y", x=["x1", "x2"], options=options
+    ).fit()
+
+    assert res.cov_type == "hac"
+    for se in res.std_errors.values():
+        assert se > 0.0
 
 
 def test_hac_time_reorders_rows_before_computing_lags():
@@ -475,7 +447,7 @@ def test_augment_without_intercept_matches_predict():
     assert augmented_new["predicted"].to_list() == expected_new
 
 
-# ── クラスターロバストSEの健全性チェック（真のクラスター内相関） ──────
+# ── 統計的健全性チェック（クラスターSE） ──────────────────────────────
 
 
 #
@@ -536,3 +508,34 @@ def test_cluster_std_error_exceeds_classical_under_true_intra_cluster_correlatio
 
     ratio = cluster.std_errors["x1"] / classical.std_errors["x1"]
     assert ratio > 1.5, f"ratio={ratio}"
+
+
+# ── HACの実使用ラグ数（hac_lags_used） ────────────────────────────────
+
+
+@pytest.mark.parametrize("n", HAC_AUTO_LAG_SAMPLE_SIZES)
+def test_hac_lags_used_matches_python_auto_lag_formula(n):
+    """`hac_lags`省略時の`hac_lags_used`が、Python側の独立実装
+    （`benchmark.common.hac_auto_lag`）と複数の標本サイズで一致すること。
+    """
+    options = OLSOptions(cov_type="hac", hac_time=ROW_TIME)
+    res = OLS(hac_lag_frame(n), y="y", x=["x1", "x2"], options=options).fit()
+    assert res.hac_lags_used == hac_auto_lag(n)
+
+
+@pytest.mark.parametrize("hac_lags", [0, 3, 10])
+def test_hac_lags_used_echoes_explicit_hac_lags(dataset, hac_lags):
+    """`hac_lags`を明示指定したときは、自動計算値ではなく指定値が返ること。"""
+    options = OLSOptions(cov_type="hac", hac_lags=hac_lags, hac_time=ROW_TIME)
+    res = OLS(
+        with_row_time(dataset), y="y", x=["x1", "x2"], options=options
+    ).fit()
+    assert res.hac_lags_used == hac_lags
+
+
+@pytest.mark.parametrize("cov_type", ["classical", "hc0", "hc3"])
+def test_hac_lags_used_is_none_unless_hac(dataset, cov_type):
+    res = OLS(
+        dataset, y="y", x=["x1", "x2"], options=OLSOptions(cov_type=cov_type)
+    ).fit()
+    assert res.hac_lags_used is None

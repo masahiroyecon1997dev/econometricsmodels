@@ -265,7 +265,7 @@ def test_hausman_computed_with_singleton_time():
     assert res.hausman_df == 2
 
 
-# ── 統計的健全性チェック（他の3分類に当てはまらない） ─────────────────
+# ── 統計的健全性チェック（クラスターSE） ──────────────────────────────
 
 
 def test_cluster_se_exceeds_classical_under_serial_correlation():

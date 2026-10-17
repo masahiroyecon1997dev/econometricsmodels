@@ -159,6 +159,21 @@ def test_cluster_count_at_most_slopes_raises_validation_error(binary_dataset):
     )
 
 
+@pytest.mark.parametrize("n_groups", [2, 3])
+def test_cluster_count_at_most_slopes_on_baseline_raises_validation_error(
+    n_groups,
+):
+    _checks.check_cluster_count_at_most_slopes_on_baseline_raises_validation_error(
+        Logit, "logit", LogitOptions, n_groups
+    )
+
+
+def test_cluster_count_just_above_slopes_succeeds():
+    _checks.check_cluster_count_just_above_slopes_succeeds(
+        Logit, "logit", LogitOptions
+    )
+
+
 def test_mroz_cluster_cov_type_raises_validation_error():
     _checks.check_mroz_cluster_cov_type_raises_validation_error(
         Logit, LogitOptions

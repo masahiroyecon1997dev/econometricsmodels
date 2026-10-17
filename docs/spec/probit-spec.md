@@ -112,7 +112,7 @@ in-sample限定のまま。`augment(new_data=None)`もLogitと完全に同一の
 ### 3.8 テスト
 
 - 許容誤差はLogitと同じ基本方針（statsmodels主リファレンス`RTOL=1e-8`、Rクロスチェック
-  `RTOL=2e-7`、`ATOL=1e-12`、実測最大~2.8e-8。切片なし（`baseline.no_intercept`）も同じ許容誤差で通る。非既定の`confidence_level`（0.90、`baseline.confidence_level`）も同じ許容誤差で、係数と限界効果の信頼区間の両方を比べる。
+  `RTOL=2e-7`、`ATOL=1e-12`、実測最大~2.8e-8。切片なし（`baseline.no_intercept`）も同じ許容誤差で通る。クラスター数の境界`G = q + 1`（`baseline.cluster_g4`、q=3でG=4）も同じ許容誤差で通る。非既定の`confidence_level`（0.90、`baseline.confidence_level`）も同じ許容誤差で、係数と限界効果の信頼区間の両方を比べる。
   R側参照値の生成方針もLogitと同じ）。信頼区間（下限/上限が0に近い項目）・p値・`apple`を含め、
   全統計量・全ケースに同じ許容誤差を使う（`tests/support/_tolerances_nonlinear.py`の`probit_crosscheck`）。
   Rの`glm(probit)`は収束判定がデビアンスの変化量だけで、非正準リンクのFisher scoringは収束が線形のため

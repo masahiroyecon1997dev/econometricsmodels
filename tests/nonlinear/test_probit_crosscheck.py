@@ -2,7 +2,7 @@
 
 `tests/fixtures/benchmarks/probit_crosscheck.json`（`benchmark/nonlinear/
 fixtures/generate_probit_crosscheck_fixtures.py`で生成）を読み込み、係数・標準誤差・
-適合度統計量・限界効果（全統計量）をRとクロスチェックする（cluster 2ケースと、切片なし
+適合度統計量・限界効果（全統計量）をRとクロスチェックする（cluster 3ケース（均等・不均衡・境界G=q+1）と、切片なし
 （`include_intercept=False`）と非既定の`confidence_level`（0.90）の全cov_typeも全統計量・限界効果）。役割分担は`test_probit_reference.py`と同じ（`test_logit_crosscheck.py`と同型。
 `.claude/rules/testing-policy.md`「リファレンス実装」参照）。
 
@@ -149,6 +149,17 @@ def test_cluster_imbalanced_matches_r_glm(fixtures):
 
     ref = fixtures["synthetic"]["baseline"]["cluster_imbalanced"]
     _check_result(res, ref, "cluster_imbalanced")
+
+
+def test_cluster_g4_boundary_matches_r_glm(fixtures):
+    """クラスター数の境界`G = q + 1`（baselineの傾きq=3、G=4）。"""
+    df = pl.read_csv(DATA_DIR / "probit_baseline.csv")
+    df = with_cluster_groups(df, 4)
+    options = ProbitOptions(cov_type="cluster", cluster="cluster_group")
+    res = Probit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+    ref = fixtures["synthetic"]["baseline"]["cluster_g4"]
+    _check_result(res, ref, "cluster_g4")
 
 
 # ── 凍結フィクスチャとの数値照合（オプション） ────────────────────────

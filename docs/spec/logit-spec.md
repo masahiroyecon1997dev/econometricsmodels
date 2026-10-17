@@ -318,7 +318,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 
 - 許容誤差: statsmodels主リファレンス（`test_logit_reference.py`）は`RTOL=1e-8`。Rクロスチェック
   （`test_logit_crosscheck.py`、反復最適化同士の比較のため機械精度一致は期待できない）は
-  `RTOL=2e-7`（係数・SE・p値・信頼区間・限界効果の全統計量（`effect`/`std_error`/`test_stat`/`conf_lower`/`conf_upper`）・cluster 2ケースの全統計量で共通、実測最大~3.5e-8。切片なし（`baseline.no_intercept`、全cov_type・均等/不均衡クラスター）も同じ許容誤差で通る（実測~1e-9以下）。非既定の`confidence_level`（0.90、`baseline.confidence_level`、全cov_type＋クラスター）も同じ許容誤差で、係数の信頼区間（`Options`の水準）と限界効果の信頼区間（`marginal_effects(confidence_level=)`の水準）の両方を比べる（statsmodels側のopgの限界効果は算出不可）。`ATOL=1e-12`で
+  `RTOL=2e-7`（係数・SE・p値・信頼区間・限界効果の全統計量（`effect`/`std_error`/`test_stat`/`conf_lower`/`conf_upper`）・cluster 3ケース（均等・不均衡・境界G=q+1）の全統計量で共通、実測最大~3.5e-8。切片なし（`baseline.no_intercept`、全cov_type・均等/不均衡クラスター）も同じ許容誤差で通る（実測~1e-9以下）。クラスター数の境界`G = q + 1`（`baseline.cluster_g4`、q=3でG=4）も同じ許容誤差で通る（`G <= q`のエラーはbaselineでG=2・G=3を確認）。非既定の`confidence_level`（0.90、`baseline.confidence_level`、全cov_type＋クラスター）も同じ許容誤差で、係数の信頼区間（`Options`の水準）と限界効果の信頼区間（`marginal_effects(confidence_level=)`の水準）の両方を比べる（statsmodels側のopgの限界効果は算出不可）。`ATOL=1e-12`で
   `|ref|`が小さい項目も純粋な相対誤差で比較する）を全統計量に共通で使う（p値の専用許容誤差は置かない。裾のp値（`|ref|`が約5e-6未満）は`ATOL`の下限で比較されるため、同じ係数のz値の厳密な比較で担保している）。R側の参照値は
   `glm()`の収束判定を`epsilon=1e-14`に厳しくした上で、収束後の係数から再fitを係数が動かなくなるまで繰り返し
   （`glm()`の収束判定はデビアンスの変化量だけなので係数が~1e-7ずれて止まりうる。また

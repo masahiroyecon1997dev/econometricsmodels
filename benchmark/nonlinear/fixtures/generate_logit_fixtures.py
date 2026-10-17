@@ -105,6 +105,15 @@ def build_fixtures() -> dict:
         cov_type="cluster",
         groups=imbalanced_cluster_groups(n),
     )
+    # クラスター数の境界G=q+1（q=3、G=4）。G<=qはValidationErrorで、成功パスを持てる
+    # 最小のG（testing-policy.md「テスト用データセット」3.）。
+    fixtures["baseline"]["cluster_g4"] = run(
+        dataset_source="synthetic",
+        dataset="baseline",
+        formula=None,
+        cov_type="cluster",
+        groups=balanced_cluster_groups(n, 4),
+    )
     # include_intercept=False（切片なし）。全cov_type（STATSMODELS_COV_TYPES +
     # cluster）と組み合わせて確認する（OLS/WLSと同じ）。
     fixtures["baseline"]["no_intercept"] = {
@@ -219,7 +228,7 @@ def build_fixtures() -> dict:
             "ならない。docs/spec/logit-spec.md参照）。"
             "G<=q（傾き係数の数）でのクラスターロバストSE（cluster_g2・mroz/city）は"
             "ValidationErrorになるため成功パスフィクスチャを持たない。"
-            "clusterはbaselineシナリオ（均等・不均衡の疑似グループ）とapple（実データ、"
+            "clusterはbaselineシナリオ（均等・不均衡の疑似グループ、境界G=q+1のcluster_g4）とapple（実データ、"
             "州でG=49）。全統計量・限界効果を持つ。"
             "baseline.confidence_levelは非既定の信頼水準（0.90）を全cov_type（opgを含む。"
             "opgのmargeffはnull）とクラスター（均等な疑似グループ）で確認する。"

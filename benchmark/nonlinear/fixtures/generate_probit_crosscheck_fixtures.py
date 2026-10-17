@@ -101,6 +101,15 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
         groups=imbalanced_cluster_groups(n),
         suffix="_cluster_imbalanced",
     )
+    # クラスター数の境界G=q+1（q=3、G=4）。G<=qはValidationErrorで、成功パスを持てる
+    # 最小のG（testing-policy.md「テスト用データセット」3.）。
+    fixtures["baseline"]["cluster_g4"] = _run_cluster_case(
+        baseline_csv,
+        formula="y ~ x1 + x2 + x3",
+        tmpdir=tmpdir,
+        groups=balanced_cluster_groups(n, 4),
+        suffix="_cluster_g4",
+    )
     # NOTE: cluster_g2（G=2×説明変数3個）の成功パスフィクスチャは
     # 削除した（Logitと同じ。`G<=q`でクラスターロバスト共分散が退化し
     # ValidationErrorになる）。
@@ -248,7 +257,7 @@ def build_fixtures() -> dict:
             "perfect_multicollinearityシナリオはここに含まない"
             "（ComputationErrorの発生確認のみ、テストコード側で対応）。"
             "clusterは合成データ（baselineシナリオ、均等疑似グループ・不均衡"
-            "グループ）を含む。G<=q（傾き係数の数）のケース（旧cluster_g2・mroz/city）は"
+            "グループ）に加え、クラスター数の境界G=q+1（cluster_g4、q=3でG=4）を含む。G<=q（傾き係数の数）のケース（旧cluster_g2・mroz/city）は"
             "ValidationErrorになるため成功パスフィクスチャを持たない。"
             "実データのクラスターはapple（`ecolbs > 0`、州でG=49）が担う。"
             "baseline.no_interceptはinclude_intercept=False（切片なし）のクロスチェックで、"

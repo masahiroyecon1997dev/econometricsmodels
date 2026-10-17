@@ -805,6 +805,140 @@
           }
         }
       },
+      "cluster_g4": {
+        "params": {
+          "const": 0.395565865952039,
+          "x1": -0.147640135092641,
+          "x2": 0.663235818976544,
+          "x3": 0.496603438924999
+        },
+        "std_errors": {
+          "const": 0.100318612183663,
+          "x1": 0.102146322587224,
+          "x2": 0.078073543711462,
+          "x3": 0.0564783626887745
+        },
+        "test_stats": {
+          "const": 3.94309547691746,
+          "x1": -1.44537885802565,
+          "x2": 8.49501364287599,
+          "x3": 8.79280870200764
+        },
+        "p_values": {
+          "const": 8.04366137734189e-05,
+          "x1": 0.148351498578407,
+          "x2": 1.97909666219956e-17,
+          "x3": 1.45866714561021e-18
+        },
+        "conf_int": {
+          "const": [
+            0.198944999093018,
+            0.592186732811059
+          ],
+          "x1": [
+            -0.347843248516811,
+            0.0525629783315282
+          ],
+          "x2": [
+            0.510214485156665,
+            0.816257152796423
+          ],
+          "x3": [
+            0.385907882149211,
+            0.607298995700788
+          ]
+        },
+        "log_likelihood": -302.64438282578,
+        "log_likelihood_null": -340.146000096077,
+        "aic": 613.28876565156,
+        "bic": 630.147198045249,
+        "lr_statistic": 75.0032345405931,
+        "lr_p_value": 3.61754020800207e-16,
+        "pseudo_r_squared": 0.110251530988764,
+        "irls_iterations": 4,
+        "refit_count": 1,
+        "refit_max_rel_change": 2.4591962748613e-15,
+        "margeff": {
+          "overall": {
+            "x1": {
+              "effect": -0.0308612563671667,
+              "std_error": 0.0206767600142793,
+              "test_stat": -1.49255765148186,
+              "p_value": 0.135553015606346,
+              "conf_lower": -0.0713869613121319,
+              "conf_upper": 0.00966444857779857
+            },
+            "x2": {
+              "effect": 0.138636358119358,
+              "std_error": 0.0148912673604892,
+              "test_stat": 9.30990994676516,
+              "p_value": 1.2794077896212e-20,
+              "conf_lower": 0.109450010408642,
+              "conf_upper": 0.167822705830073
+            },
+            "x3": {
+              "effect": 0.103805147780801,
+              "std_error": 0.0107421549039031,
+              "test_stat": 9.66334489768758,
+              "p_value": 4.31538802374264e-22,
+              "conf_lower": 0.082750911052801,
+              "conf_upper": 0.124859384508802
+            }
+          },
+          "mean": {
+            "x1": {
+              "effect": -0.0356368912211119,
+              "std_error": 0.024580458057438,
+              "test_stat": -1.44980582289548,
+              "p_value": 0.147112675289951,
+              "conf_lower": -0.0838137037371877,
+              "conf_upper": 0.012539921294964
+            },
+            "x2": {
+              "effect": 0.160089685077579,
+              "std_error": 0.0204263335328286,
+              "test_stat": 7.83741657896106,
+              "p_value": 4.59910288899398e-15,
+              "conf_lower": 0.120054807017032,
+              "conf_upper": 0.200124563138126
+            },
+            "x3": {
+              "effect": 0.11986850810287,
+              "std_error": 0.013455730530759,
+              "test_stat": 8.90836122415336,
+              "p_value": 5.1792412363771e-19,
+              "conf_lower": 0.0934957608769065,
+              "conf_upper": 0.146241255328834
+            }
+          },
+          "median": {
+            "x1": {
+              "effect": -0.0352003698601529,
+              "std_error": 0.0242199675480986,
+              "test_stat": -1.45336156170516,
+              "p_value": 0.146123392955021,
+              "conf_lower": -0.0826706339611551,
+              "conf_upper": 0.0122698942408493
+            },
+            "x2": {
+              "effect": 0.158128723748581,
+              "std_error": 0.0201793677379187,
+              "test_stat": 7.83615848634565,
+              "p_value": 4.64539476064489e-15,
+              "conf_lower": 0.118577889751471,
+              "conf_upper": 0.197679557745691
+            },
+            "x3": {
+              "effect": 0.118400221705916,
+              "std_error": 0.0132908313259391,
+              "test_stat": 8.90841353729621,
+              "p_value": 5.17679846081442e-19,
+              "conf_lower": 0.0923506709824789,
+              "conf_upper": 0.144449772429353
+            }
+          }
+        }
+      },
       "no_intercept": {
         "classical": {
           "params": {
@@ -9499,7 +9633,7 @@
     "method": "logit",
     "primary_reference": "r-glm-sandwich-marginaleffects",
     "purpose": "statsmodels主リファレンス（logit.json）とは独立した実装（R: glm + sandwich + marginaleffects）によるクロスチェック用。係数・標準誤差・z値・p値・信頼区間・対数尤度・AIC・BIC・LR統計量・LR検定p値・疑似決定係数・限界効果を含む。cov_type='hc1'はここが主リファレンス（statsmodelsのdiscrete modelがn/(n-k)補正を未実装のため、benchmark/nonlinear/references/statsmodels_ref.py参照）。cov_type='opg'の限界効果もここのみが数値照合対象（statsmodels側は算出不可）。",
-    "generated_at": "2026-10-17T08:58:12.739657+00:00",
+    "generated_at": "2026-10-17T09:13:04.520521+00:00",
     "r_version": "4.5.3",
     "sandwich_version": "3.1.3",
     "lmtest_version": "0.9.40",
@@ -9513,6 +9647,6 @@
       "margeff_eps_sd_factor": 1e-05,
       "margeff_eps_rule": "eps = margeff_eps_sd_factor * sd(x), per variable"
     },
-    "note": "many_regressors（k=20）とoutlier_regressor（x1の5%が外れ値）を含む。ロバストSE・クラスターSEの参照値は、収束後の係数から再fitを繰り返したglmで計算している（run_glm_crosscheck.R参照）。その設定は_meta.glm_reference_settings、各エントリのirls_iterations・refit_count・refit_max_rel_changeは実際の収束の記録。perfect_multicollinearityシナリオはここに含まない（ComputationErrorの発生確認のみ、テストコード側で対応）。clusterは合成データ（baselineシナリオ、均等疑似グループ・不均衡グループ）を含む。G<=q（傾き係数の数）のケース（旧cluster_g2・mroz/city）はValidationErrorになるため成功パスフィクスチャを持たない。実データのクラスターはapple（`ecolbs > 0`、州でG=49）が担う。baseline.no_interceptはinclude_intercept=False（切片なし）のクロスチェックで、全cov_type（opg・hc1を含む）と均等・不均衡のクラスターを持つ。statsmodels側にはhc1と不均衡クラスターが無いため、ここが唯一の数値照合対象。log_likelihood_nullは常に切片のみのモデルを参照するため、lr_statisticが負値になりうる。baseline.confidence_levelは非既定の信頼水準（0.90）のクロスチェックで、係数と限界効果の信頼区間を全cov_type（opg・hc1を含む）とクラスターで持つ。パラメータ名は全ソースで切片を'const'に正規化済み。"
+    "note": "many_regressors（k=20）とoutlier_regressor（x1の5%が外れ値）を含む。ロバストSE・クラスターSEの参照値は、収束後の係数から再fitを繰り返したglmで計算している（run_glm_crosscheck.R参照）。その設定は_meta.glm_reference_settings、各エントリのirls_iterations・refit_count・refit_max_rel_changeは実際の収束の記録。perfect_multicollinearityシナリオはここに含まない（ComputationErrorの発生確認のみ、テストコード側で対応）。clusterは合成データ（baselineシナリオ、均等疑似グループ・不均衡グループ）に加え、クラスター数の境界G=q+1（cluster_g4、q=3でG=4）を含む。G<=q（傾き係数の数）のケース（旧cluster_g2・mroz/city）はValidationErrorになるため成功パスフィクスチャを持たない。実データのクラスターはapple（`ecolbs > 0`、州でG=49）が担う。baseline.no_interceptはinclude_intercept=False（切片なし）のクロスチェックで、全cov_type（opg・hc1を含む）と均等・不均衡のクラスターを持つ。statsmodels側にはhc1と不均衡クラスターが無いため、ここが唯一の数値照合対象。log_likelihood_nullは常に切片のみのモデルを参照するため、lr_statisticが負値になりうる。baseline.confidence_levelは非既定の信頼水準（0.90）のクロスチェックで、係数と限界効果の信頼区間を全cov_type（opg・hc1を含む）とクラスターで持つ。パラメータ名は全ソースで切片を'const'に正規化済み。"
   }
 }

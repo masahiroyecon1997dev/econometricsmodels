@@ -938,6 +938,45 @@ def check_cluster_count_at_most_slopes_raises_validation_error(
         estimator_cls(df, y="y", x=["x1", "x2"], options=options).fit()
 
 
+def check_cluster_count_at_most_slopes_on_baseline_raises_validation_error(
+    estimator_cls, dataset_prefix, options_cls, n_groups
+):
+    """3傾き（`x1`〜`x3`、q=3）のbaselineで`G <= q`（G=2、G=3=q）は`ValidationError`。
+
+    `G = q`ちょうども`rank(Ŝ) <= G-1 < q`で特異なため弾く（`G = q + 1 = 4`の成功パスは
+    `check_cluster_count_just_above_slopes_succeeds`と対で境界の両側を守る）。
+    """
+    df = with_cluster_groups(
+        pl.read_csv(DATA_DIR / f"{dataset_prefix}_baseline.csv"), n_groups
+    )
+    options = options_cls(cov_type="cluster", cluster="cluster_group")
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=n_groups, q=3
+        ),
+    ):
+        estimator_cls(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+
+def check_cluster_count_just_above_slopes_succeeds(
+    estimator_cls, dataset_prefix, options_cls
+):
+    """3傾きのbaselineで`G = q + 1 = 4`は`ValidationError`にならず、収束して
+    有限の標準誤差を返す（境界の成功側。数値の正しさは`_reference`/`_crosscheck`の
+    `cluster_g4`が担う）。
+    """
+    df = with_cluster_groups(
+        pl.read_csv(DATA_DIR / f"{dataset_prefix}_baseline.csv"), 4
+    )
+    options = options_cls(cov_type="cluster", cluster="cluster_group")
+    res = estimator_cls(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+    assert res.converged
+    assert all(
+        math.isfinite(se) and se > 0.0 for se in res.std_errors.values()
+    )
+
+
 def check_cluster_without_col_raises(dataset, estimator_cls, options_cls):
     """`cov_type="cluster"`なのに`cluster`未指定の場合`ValidationError`
     （OLS/WLS/IVと同じ検証、共通化された経路）。
@@ -1500,6 +1539,8 @@ def _baseline_cluster_fit(
     df = pl.read_csv(config.dataset_path("baseline"))
     if kind == "cluster":
         df = with_cluster_groups(df, 10)
+    elif kind == "cluster_g4":
+        df = with_cluster_groups(df, 4)
     else:
         df = df.with_columns(
             pl.Series("cluster_group", imbalanced_cluster_groups(df.height))
@@ -1533,6 +1574,23 @@ def check_cluster_imbalanced_matches_statsmodels(
         res,
         fixtures["synthetic"]["baseline"]["cluster_imbalanced"],
         "cluster_imbalanced",
+    )
+
+
+def check_cluster_g4_matches_statsmodels(
+    config: BinaryChoiceReferenceConfig, fixtures
+) -> None:
+    """クラスター数の境界`G = q + 1`（baselineの傾きq=3、行番号%4のG=4）。全統計量を比べる。
+
+    `G <= q`は`ValidationError`で、`G = q + 1`は成功パスを持てる最小のG。
+    `testing-policy.md`「テスト用データセット」3.の境界値ケース。
+    """
+    res = _baseline_cluster_fit(config, "cluster_g4")
+    check_result(
+        config,
+        res,
+        fixtures["synthetic"]["baseline"]["cluster_g4"],
+        "cluster_g4",
     )
 
 

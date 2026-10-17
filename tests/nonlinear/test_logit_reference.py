@@ -105,6 +105,10 @@ def test_cluster_imbalanced_matches_statsmodels(fixtures):
     _checks.check_cluster_imbalanced_matches_statsmodels(CONFIG, fixtures)
 
 
+def test_cluster_g4_boundary_matches_statsmodels(fixtures):
+    _checks.check_cluster_g4_matches_statsmodels(CONFIG, fixtures)
+
+
 # ── 凍結フィクスチャとの数値照合（オプション） ────────────────────────
 
 

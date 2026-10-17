@@ -69,6 +69,20 @@ A wrong argument *type*, as opposed to a wrong value, raises the built-in `TypeE
 
 ## When `ValidationError` is raised
 
+### Order in which errors are reported
+
+A call is checked in a fixed order, the same for every method, and the **first** problem found is the one reported. If an input has several problems, fixing the error you see can reveal the next one. The order is:
+
+1. **Argument types.** A wrong type raises `TypeError` (see above), before anything else.
+2. **Option values.** An unknown string for `estimator`, `cov_type`, `gmm_type`, `gmm_weight_type`, `solver` or `variance_method`, checked in this order (a method without the option skips it). An unknown value is reported even if the option would not be used, for example `gmm_type="bogus"` with `estimator="2sls"`.
+3. **Option combinations.** An option that the chosen `cov_type` or estimator does not use (for example `cluster` with `cov_type="classical"`), and then a required option that is missing (for example `hac_time` with `cov_type="hac"`, or `dk_time` with `cov_type="dk"`).
+4. **Roles.** The same column used in two roles, a column named twice, an empty `x`, `"const"` in `x` when an intercept is added.
+5. **The `y`, `x` and other model columns.** A column that does not exist, has an unsupported dtype or contains missing values.
+6. **The columns named by options.** `cluster`, `hac_time` and `dk_time`, with the same checks as in step 5.
+7. **The estimation itself.** Checks that need the sizes of the problem, such as `confidence_level`, `max_iter`, the number of observations or clusters, and singular matrices.
+
+Steps 2 to 4 look only at the arguments and options, never at the data. So a typo in `cov_type` is reported even if a column name is also wrong, and an option that the chosen `cov_type` ignores is reported before a column it names is looked up. `ComputationError` can only come from step 7.
+
 ### In every method
 
 | Category | Situation |

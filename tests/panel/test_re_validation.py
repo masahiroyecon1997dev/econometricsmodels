@@ -18,7 +18,7 @@ n_periods=6）は`tests/panel/conftest.py`（FEと共用、RE専用の合成デ�
 Note:
     `MISSING_CLUSTER_COLUMN`はFEと同じ理由で構造的に到達不能
     （`cluster=None`は常に`entity`引数の列に自動フォールバックする、
-    `engine_pybind/src/panel/re.rs::parse_re_cov_type`参照）。`x=[]`が
+    `engine_pybind/src/panel/re.rs::resolve_re_cov_type`参照）。`x=[]`が
     `ValidationError`になる理由は`engine_pybind/src/panel/re.rs`
     モジュールdoc「`x`の空リストを許容しない」参照。
 

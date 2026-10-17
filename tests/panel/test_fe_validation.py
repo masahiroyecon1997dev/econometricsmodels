@@ -18,7 +18,7 @@ Note:
     `MISSING_CLUSTER_COLUMN`（OLS/WLS/IVが持つ「`cov_type='cluster'`なのに
     クラスター列が一切無い」エラー）はFEには存在しない。`cluster=None`
     は常に`entity`引数の列に自動フォールバックするため、この失敗経路が
-    構造的に到達不能（`engine_pybind/src/panel/fe.rs::parse_fe_cov_type`
+    構造的に到達不能（`engine_pybind/src/panel/fe.rs::resolve_fe_cov_type`
     参照）。
 
     `PanelError::TwoWayRequiresTime`もテスト対象に含めない。`effects`
@@ -503,7 +503,7 @@ def test_unknown_cov_type_raises(fe_dataset, cov_type):
 def test_hc0_not_supported_raises(fe_dataset):
     """`hc0`はOLS/WLS/IVでは有効な値のため、他の未知の値とは別の専用メッセージ
     （`UNKNOWN_COV_TYPE_FE`ではなく`HC0_NOT_SUPPORTED_FE`）で弾く
-    （`engine_pybind/src/panel/fe.rs::parse_fe_cov_type`）。
+    （`engine_pybind/src/panel/common.rs::parse_panel_cov_kind`）。
     """
     options = FEOptions(cov_type="hc0")
     with pytest.raises(

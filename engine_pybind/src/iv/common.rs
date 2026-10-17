@@ -931,7 +931,7 @@ pub(crate) struct IvPlan {
 ///   `x_endog`/`instruments`が空リストの場合（`x_exog`は対象外）は
 ///   ここ（受け口）の責務で`ValidationError`
 /// - `estimator`の文字列が`"2sls"`/`"gmm"`のいずれでもない場合は`ValidationError`
-/// - `cov_type`の文字列が不正な場合は`ValidationError`（`linear::common::parse_cov_type`参照）
+/// - `cov_type`の文字列が不正な場合は`ValidationError`（`linear::common::parse_cov_kind`参照）
 /// - それ以外（行数不一致等）は`engine::iv::common::IvError`から`iv_error_to_pyerr`で変換
 ///   （`IvInput::from_columns`はこの時点では識別可能性を検証しないため、
 ///   `InsufficientInstruments`はここでは発生しない。`IvInput`の構造体docコメント参照）

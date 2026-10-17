@@ -76,4 +76,8 @@ engineが計算し、`statistic`引数（`StatisticVersion`、大文字小文字
 
 `WLS`は当初専用の`WLSOptions`を持たず`OLSOptions`をそのまま再利用していたが（`WLSResult`は元から独立型だったのと非対称だった）、ユーザビリティ向上のため`WLSOptions`を新設した。フィールド構成は`OLSOptions`と完全に同一（`cov_type`/`include_intercept`/`confidence_level`/`cluster`/`hac_lags`/`hac_time`、既定値・意味論とも同じ、`docs/spec/wls-spec.md`「API引数」参照）。このフィールド重複は意図的で共通base構造体には切り出さない（`engine_pybind/src/nonlinear/CLAUDE.md`「`LogitOptions`/`ProbitOptions`/`TobitOptions`のフィールド重複は意図的」節と同じ理由。`IVOptions`が`OLSOptions`と同種のフィールドを独立再定義している既存precedentとの一貫性、PyO3のpyclassコンストラクタがフラットなkwargs surface前提であること）。
 
-`parse_cov_type`（`linear/common.rs`）はこの新設に伴い、`&OLSOptions`ではなく`cov_type: &str, cluster: Option<&str>, hac_lags: Option<i64>, hac_time: Option<&str>`という個々のフィールド値を引数に取る形に一般化した（`nonlinear::common::parse_cov_type`が最初から個々の値を取っているのと同じ設計）。`OLSOptions`/`WLSOptions`どちらの`fit`関数も、呼び出し側で`&options.cov_type`等を展開して渡す。
+`cov_type`の検査（`linear/common.rs`）は、`&OLSOptions`ではなく`cov_type: &str, cluster: Option<&str>, hac_lags: Option<i64>, hac_time: Option<&str>`という個々のフィールド値を引数に取る形にしている（`nonlinear::common`の`parse_cov_kind`等と同じ設計）。`OLSOptions`/`WLSOptions`/`IVOptions`のどの`fit`関数も、呼び出し側で`&options.cov_type`等を展開して渡す。
+
+## `cov_type`の検査（値・組合せ・列）と報告順
+
+`linear/common.rs`の`CovKind`（文字列だけで決まる種類）を、`parse_cov_kind`（値。正規形は`CovKind::name()`）→ `check_cov_options`（`cluster`/`hac_lags`/`hac_time`の未使用 → `hac`での`hac_time`欠落）→ `resolve_cov_type`（`cluster`/`hac_time`の列を抽出して`engine`の`CovType`にする）の3段で使う。`fit`は、DataFrameを見ない検査（`cov_type`の値 → 組合せ）→ ロール構造（`validate_common_roles`等）→ `y`/`x`（WLSは`weight`も）の列 → `cluster`/`hac_time`の列の順に呼ぶ。`*Result.cov_type`は`CovKind::name()`から作り、呼び出し側で小文字化し直さない。IVは`cov_type`と`gmm_weight_type`が`cluster`/`hac_*`を共有するため、組合せの検査は`iv::common::check_iv_options`が行い、値と列の解決にはこの`parse_cov_kind`/`resolve_cov_type`を使う。この順序は`tests/cross_method/test_validation_order.py`が固定している。

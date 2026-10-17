@@ -174,7 +174,7 @@ def test_n_obs_and_dep_var_name(dataset):
 def test_cov_type_is_case_insensitive(dataset, cov_type, spelling):
     """全`cov_type`で、`res.cov_type`が正規形（小文字）で返り、どの大文字小文字の
     綴りでも正規形と同一の推定結果になること（`engine_pybind`側の
-    `parse_cov_type`のRust単体テストと対になる、Python API境界での確認）。
+    `parse_cov_kind`のRust単体テストと対になる、Python API境界での確認）。
     HACは`hac_lags`省略時の自動計算式で確認する。
     """
 

@@ -125,7 +125,7 @@ DEGENERATE_CLUSTER_TWO_GROUPS = (
     "clusters or another cov_type"
 )
 
-# FE用cov_type文字列パース（engine_pybind/src/panel/fe.rs::parse_fe_cov_type）。
+# FE用cov_type文字列パース（engine_pybind/src/panel/common.rs::parse_panel_cov_kind）。
 # OLS/WLS/IVの`UNKNOWN_COV_TYPE_LINEAR`と異なりhc0を含まない一覧になる。
 UNKNOWN_COV_TYPE_FE = (
     "unknown cov_type: '{other}'. Expected one of 'classical', 'hc1' "
@@ -138,7 +138,7 @@ HC0_NOT_SUPPORTED_FE = (
     "'hc3' instead"
 )
 
-# RE用cov_type文字列パース（engine_pybind/src/panel/re.rs::parse_re_cov_type）。
+# RE用cov_type文字列パース（engine_pybind/src/panel/common.rs::parse_panel_cov_kind）。
 # 「unknown cov_type」文言自体はFEと一字一句同じ（UNKNOWN_COV_TYPE_FEを流用する）が、
 # hc0専用メッセージはFEと文言が異なる（参照実装の主語が「no reference
 # implementation」でlinearmodels/fixestを個別に挙げない）ため別定数にする。

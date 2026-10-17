@@ -3,7 +3,6 @@
 //! `.claude/rules/rust-style.md`「ファイル・ディレクトリ構成」: 系統内で共有するロジックは
 //! `<系統>/common.rs`に置く。以前はOLSしかなく未作成だったが、WLSが`LeastSquaresError`の
 //! エラー変換等をOLSと共有する形で実装されたため作成した（`docs/spec/wls-spec.md`「エラー型」）。
-//! `Mat<f64>`→`Vec<f64>`変換（`mat_to_vec`）はIV・panelも使うため`crate::shared::mat_conversion`にある。
 //!
 //! `LeastSquaresError`は元々`OlsError`という名前だったが、OLS単体のエラー型ではなくWLSも
 //! 含む`linear`系統共通のエラー型であることを名前に反映するため、`engine`側で

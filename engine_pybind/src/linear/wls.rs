@@ -6,11 +6,10 @@
 //! （`docs/spec/wls-spec.md`「API引数」参照）。`WLSOptions`は`OLSOptions`と
 //! フィールド構成が完全に同一の独立したpyclassである（下記
 //! `WLSOptions`のdocコメント参照）。エラー変換（`least_squares_error_to_pyerr`）・
-//! `cov_type`のパース（`parse_cov_type`）は
-//! `super::common`のものを、`Mat<f64>`→`Vec<f64>`変換（`mat_to_vec`）は
-//! `crate::shared::mat_conversion`のものをそのまま再利用する（`LeastSquaresError`がOLS・WLS共通の
-//! エラー型のため。`.claude/rules/rust-style.md`「系統内で共有するロジックは
-//! common.rsに置く」）。
+//! `cov_type`のパース（`parse_cov_type`）は`super::common`のものをそのまま再利用する
+//! （`LeastSquaresError`がOLS・WLS共通のエラー型のため。`.claude/rules/rust-style.md`
+//! 「系統内で共有するロジックはcommon.rsに置く」）。`Mat<f64>`→`Vec<f64>`変換（`mat_to_vec`）は
+//! 系統によらず使うため`crate::shared::mat_conversion`のものを再利用する。
 //!
 //! 【言語方針】`.claude/rules/rust-style.md`「言語方針」参照。
 //! 公開API（`WLSOptions`/`WLSResult`）のdocコメントは英語。それ以外（このファイルの

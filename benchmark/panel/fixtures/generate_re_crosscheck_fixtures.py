@@ -131,10 +131,13 @@ from benchmark.common import (
     WAGEPAN_X,
     WAGEPAN_Y,
     group_by_dataset_source,
-    imbalanced_cluster_groups,
     run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
+from benchmark.panel.datasets import (
+    CLUSTER_IMBALANCED_CSV,
+    cluster_imbalanced_groups,
+)
 from benchmark.panel.fixtures.generate_fe_crosscheck_fixtures import (
     dk_three_periods_frame,
 )
@@ -491,14 +494,11 @@ def build_fixtures() -> dict:
     with tempfile.TemporaryDirectory() as tmp:
         tmpdir = Path(tmp)
 
-        n_imbalanced = pl.read_csv(
-            DATA_DIR / "fe_baseline_cluster_imbalanced.csv"
-        ).height
         fixtures["baseline"]["cluster_imbalanced"] = _run_cluster_case(
             tmpdir,
-            "fe_baseline_cluster_imbalanced.csv",
+            CLUSTER_IMBALANCED_CSV,
             ["x1", "x2"],
-            imbalanced_cluster_groups(n_imbalanced),
+            cluster_imbalanced_groups(),
         )
         n_k1 = pl.read_csv(DATA_DIR / "fe_baseline_k1.csv").height
         fixtures["baseline"]["cluster_g3"] = _run_cluster_case(

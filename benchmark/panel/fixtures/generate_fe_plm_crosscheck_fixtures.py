@@ -59,6 +59,7 @@ from benchmark.common import (
     run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
+from benchmark.panel.datasets import CLUSTER_IMBALANCED_CSV
 from benchmark.panel.fixtures.generate_fe_crosscheck_fixtures import (
     DK_EXPLICIT_BANDWIDTHS,
     SCENARIO_COV_TYPES,
@@ -131,7 +132,7 @@ def skewed_entity_sizes_frame() -> pl.DataFrame:
     """`fe_baseline_cluster_imbalanced.csv`（20 entity × 10期）を、entityごとに
     先頭`SKEWED_ENTITY_SIZES`期（循環）だけ残した、entityあたりの観測数が
     偏った不均衡データ。生成側・テスト側で共有する。"""
-    df = pl.read_csv(DATA_DIR / "fe_baseline_cluster_imbalanced.csv")
+    df = pl.read_csv(DATA_DIR / CLUSTER_IMBALANCED_CSV)
     entities = df["entity"].unique(maintain_order=True).to_list()
     size_of = {
         e: SKEWED_ENTITY_SIZES[i % len(SKEWED_ENTITY_SIZES)]

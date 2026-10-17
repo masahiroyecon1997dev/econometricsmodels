@@ -83,8 +83,8 @@ from benchmark.common import (
     WAGEPAN_TIME,
     WAGEPAN_X,
     WAGEPAN_Y,
-    imbalanced_cluster_groups,
 )
+from benchmark.panel.datasets import cluster_imbalanced_frame
 from benchmark.panel.fixtures.generate_fe_crosscheck_fixtures import (
     COV_TYPES,
     DK_EXPLICIT_BANDWIDTHS,
@@ -286,9 +286,7 @@ def test_cluster_imbalanced_matches_fixest(crosscheck):
     csv`（entity=20×period=10のn=200）を使う。クラスター列自体はCSVに含めず
     テスト側で都度動的生成する（`generate_fe_crosscheck_fixtures.py`と同じ方針）。
     """
-    df = pl.read_csv(DATA_DIR / "fe_baseline_cluster_imbalanced.csv")
-    groups = imbalanced_cluster_groups(df.height)
-    df = df.with_columns(pl.Series("cluster_group", groups))
+    df = cluster_imbalanced_frame()
     options = FEOptions(cov_type="cluster", cluster="cluster_group")
     res = FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 

@@ -67,10 +67,14 @@ from benchmark.common import (
     WAGEPAN_X,
     WAGEPAN_Y,
     group_by_dataset_source,
-    imbalanced_cluster_groups,
     run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
+from benchmark.panel.datasets import (
+    CLUSTER_IMBALANCED_CSV,
+    cluster_imbalanced_frame,
+    cluster_imbalanced_groups,
+)
 from benchmark.panel.fixtures.generate_fe_fixtures import (
     ONE_WAY_ONLY_SCENARIOS,
     SCENARIO_X_COLS,
@@ -172,7 +176,7 @@ TWO_WAY_CLUSTER_CASES: dict[str, TwoWayClusterCase] = {
         "fe_baseline.csv", "cluster_group", "two_way_cluster_g3_boundary"
     ),
     "imbalanced": TwoWayClusterCase(
-        "fe_baseline_cluster_imbalanced.csv",
+        CLUSTER_IMBALANCED_CSV,
         "cluster_group",
         "two_way_cluster_imbalanced",
     ),
@@ -195,7 +199,7 @@ def two_way_cluster_frame(case: str) -> tuple[pl.DataFrame, str]:
         time_pos = df["time"].rank("dense") - 1
         groups = ((entity_pos + time_pos) % 3).cast(pl.String).to_list()
     elif case == "imbalanced":
-        groups = imbalanced_cluster_groups(df.height)
+        groups = cluster_imbalanced_groups()
     else:
         raise ValueError(f"unknown two-way cluster case: {case}")
     return df.with_columns(pl.Series(cluster, groups)), cluster
@@ -220,9 +224,7 @@ def _run_cluster_imbalanced_case(tmpdir: Path) -> dict:
     都度動的生成する。fixestの`K.fixef="nonnested"`がentityをネストと見なさない
     （クラスター変数がentityと無関係）側の分岐を踏む。
     """
-    df = pl.read_csv(DATA_DIR / "fe_baseline_cluster_imbalanced.csv")
-    groups = imbalanced_cluster_groups(df.height)
-    df = df.with_columns(pl.Series("cluster_group", groups))
+    df = cluster_imbalanced_frame()
     csv_path = tmpdir / "fe_baseline_cluster_imbalanced_with_cluster.csv"
     df.write_csv(csv_path)
     formula = _formula(["x1", "x2"], "entity")

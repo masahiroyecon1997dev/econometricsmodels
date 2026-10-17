@@ -31,7 +31,12 @@ import sys
 import numpy as np
 import polars as pl
 
-from benchmark.common import correlated_design_matrix, validate_choice
+from benchmark.common import (
+    DATA_DIR,
+    correlated_design_matrix,
+    imbalanced_cluster_groups,
+    validate_choice,
+)
 from benchmark.common.dgp_constants import (
     AUTOCORRELATED_RHO,
     HETEROSKEDASTIC_SIGMA_BASE,
@@ -621,6 +626,29 @@ def re_equal_counts_shifted_time_panel() -> pl.DataFrame:
         .then(pl.lit("t") + shifted_time)
         .otherwise(pl.col("time"))
         .alias("time")
+    )
+
+
+# クラスター不均衡シナリオの凍結CSV（`freeze.py`の`FE_CLUSTER_IMBALANCED_SCENARIOS`、
+# entity=20×period=10のn=200）。クラスター列はCSVに含めず、生成側・テスト側が
+# 都度付与する。
+CLUSTER_IMBALANCED_CSV = "fe_baseline_cluster_imbalanced.csv"
+
+
+def cluster_imbalanced_groups() -> list[str]:
+    """`CLUSTER_IMBALANCED_CSV`の行順に並んだ、サイズ[2,3,5,10,30,50]のタイルの
+    クラスター列（entityとは無関係）。"""
+    n = pl.read_csv(DATA_DIR / CLUSTER_IMBALANCED_CSV).height
+    return imbalanced_cluster_groups(n)
+
+
+def cluster_imbalanced_frame(
+    cluster_col: str = "cluster_group",
+) -> pl.DataFrame:
+    """`CLUSTER_IMBALANCED_CSV`に、`cluster_imbalanced_groups()`のクラスター列
+    （列名`cluster_col`）を付けたデータ。"""
+    return pl.read_csv(DATA_DIR / CLUSTER_IMBALANCED_CSV).with_columns(
+        pl.Series(cluster_col, cluster_imbalanced_groups())
     )
 
 

@@ -105,7 +105,10 @@ from benchmark.common import (
     WAGEPAN_TIME,
     WAGEPAN_X,
     WAGEPAN_Y,
-    imbalanced_cluster_groups,
+)
+from benchmark.panel.datasets import (
+    CLUSTER_IMBALANCED_CSV,
+    cluster_imbalanced_groups,
 )
 from benchmark.panel.fixtures.generate_fe_crosscheck_fixtures import (
     dk_three_periods_frame,
@@ -291,10 +294,9 @@ def test_cluster_imbalanced_matches_plm_based_reference(crosscheck):
     （`run_plm_benchmark.R`モジュールコメント参照）。`stat_df`はentity数ではなく
     クラスター数`G-1`になる。バランスパネルのため機械精度で比較する。
     """
-    n = pl.read_csv(DATA_DIR / "fe_baseline_cluster_imbalanced.csv").height
-    groups = imbalanced_cluster_groups(n)
+    groups = cluster_imbalanced_groups()
     res = _fit_with_cluster_column(
-        "fe_baseline_cluster_imbalanced.csv", ["x1", "x2"], groups
+        CLUSTER_IMBALANCED_CSV, ["x1", "x2"], groups
     )
 
     _check_result(

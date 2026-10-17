@@ -42,10 +42,13 @@ from _tolerances import TOLERANCES
 from econometricsmodels import RE, REOptions
 
 from benchmark.common import WAGEPAN_ENTITY, WAGEPAN_X, WAGEPAN_Y
+from benchmark.panel.datasets import (
+    CLUSTER_IMBALANCED_CSV,
+    cluster_imbalanced_groups,
+)
 from benchmark.panel.fixtures.generate_re_statsmodels_cluster_fixtures import (
     SCENARIOS,
     cluster_g3_groups,
-    cluster_imbalanced_groups,
     shuffled_cluster_imbalanced_frame,
 )
 
@@ -135,7 +138,7 @@ def test_cluster_imbalanced_matches_statsmodels(reference):
     専用クラスター列、G=12）。自由度はentity数ではなくクラスター数`G-1`。"""
     groups = cluster_imbalanced_groups()
     res = _fit_with_cluster_column(
-        "fe_baseline_cluster_imbalanced.csv", ["x1", "x2"], groups
+        CLUSTER_IMBALANCED_CSV, ["x1", "x2"], groups
     )
 
     _check(

@@ -46,10 +46,13 @@ from benchmark.common import (
     WAGEPAN_X,
     WAGEPAN_Y,
     group_by_dataset_source,
-    imbalanced_cluster_groups,
     run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
+from benchmark.panel.datasets import (
+    CLUSTER_IMBALANCED_CSV,
+    cluster_imbalanced_groups,
+)
 from benchmark.panel.fixtures.generate_fe_fixtures import (
     NUMERIC_SCENARIOS,
     SCENARIO_X_COLS,
@@ -71,13 +74,6 @@ def _run_synthetic(scenario: str) -> dict:
     return run_re_cluster(export_re_transformed_r(csv_path, formula))
 
 
-def cluster_imbalanced_groups() -> list[str]:
-    """`fe_baseline_cluster_imbalanced.csv`の行順に並んだ、サイズ
-    [2,3,5,10,30,50]のタイルのクラスター列（`test_re_crosscheck.py`と同じ）。"""
-    n = pl.read_csv(DATA_DIR / "fe_baseline_cluster_imbalanced.csv").height
-    return [str(g) for g in imbalanced_cluster_groups(n)]
-
-
 def shuffled_cluster_imbalanced_frame() -> pl.DataFrame:
     """`cluster_imbalanced`と同じデータの行順を固定seedでシャッフルし、
     `cluster_group`列（行位置に対するサイズ[2,3,5,10,30,50]のタイル）を付けたもの。
@@ -86,7 +82,7 @@ def shuffled_cluster_imbalanced_frame() -> pl.DataFrame:
     クラスター列の対応づけが効くことを確認するために使う（ソート済みでは
     恒等写像でも順序入れ替えでも同じ結果になり、取り違えを検出できない）。
     """
-    df = pl.read_csv(DATA_DIR / "fe_baseline_cluster_imbalanced.csv")
+    df = pl.read_csv(DATA_DIR / CLUSTER_IMBALANCED_CSV)
     df = df.sample(fraction=1.0, shuffle=True, seed=7)
     return df.with_columns(
         pl.Series("cluster_group", cluster_imbalanced_groups())
@@ -118,7 +114,7 @@ def build_fixtures() -> dict:
     fixtures: dict = {s: _run_synthetic(s) for s in SCENARIOS}
     fixtures["boundary"] = {
         "cluster_imbalanced": _run_with_groups(
-            "fe_baseline_cluster_imbalanced.csv",
+            CLUSTER_IMBALANCED_CSV,
             "y ~ x1 + x2",
             cluster_imbalanced_groups(),
         ),

@@ -47,6 +47,8 @@ plm自身のREでは係数が最大0.18%、標準誤差・信頼区間等がcov_
 F統計量が一致することで、生成のたびにcov_type・バンド幅ごとに確かめる
 （`_check_given_variance_equivalence`）。ハウスマン検定は補助回帰がplmの`phtest`
 内部のθに依存するため、この方式にできずplm自身の値と緩い許容誤差で比べる。
+なお、この方式の参照値は分散成分を出力しないため、`unbalanced`のエントリには
+`sigma2_eps`・`sigma2_u`が無い（他のシナリオはplm自身の値を持つ）。
 
 ## entity以外の列でクラスターするケース
 
@@ -176,12 +178,12 @@ DK_EXPLICIT_BANDWIDTHS: dict[str, list[int]] = {
     "cross_sectionally_correlated": [0, 2, 3, 12],
 }
 # unbalancedの標準誤差・推論統計量は、plmとSwamy-Arora分散成分が異なる分だけ
-# plm自身のREと約1%ずれる（バンド幅0では信頼区間の端が0に近くなり相対誤差が
-# 10%超に増幅される。バンド幅の扱いとは無関係なずれ）。そのためunbalancedは
-# `linearmodels`のRE（本実装と機械精度で一致、`re.json`）の分散成分をplmに
-# 与えて準偏差変換し、`vcovSCC`を当てた値を参照値にする
-# （`run_plm_re_given_variance_benchmark.R`モジュールコメント参照）。
-# バランスパネルはplm自身のREで機械精度に一致する。
+# plm自身のREと約1%ずれる（dkのバンド幅0では信頼区間の端が0に近くなり相対誤差が
+# 10%超に増幅される。共分散推定量や小標本補正とは無関係なずれ）。そのため
+# unbalancedは`linearmodels`のRE（本実装と機械精度で一致、`re.json`）の分散成分を
+# plmに与えて準偏差変換し、cov_typeに応じた`vcov`・`vcovHC`・`vcovSCC`を当てた値を
+# 参照値にする（`run_plm_re_given_variance_benchmark.R`モジュールコメント参照、
+# `_run_effects_reference`）。バランスパネルはplm自身のREで機械精度に一致する。
 
 # 補助回帰の傾き係数`2k`個に対し、クラスター数G（cluster）・時点数T（dk）が少なく
 # ロバスト共分散`Ŝ`が`rank(Ŝ) <= G-1`（またはT）で構造的に特異になるケース。
@@ -229,7 +231,8 @@ def _run_effects(
 
 
 # 分散成分を与える参照値の自己検証（`_check_given_variance_equivalence`）の相対
-# 許容誤差。同じ分散成分を与えれば同じGLS推定量・同じ`vcovSCC`になるため機械精度。
+# 許容誤差。同じ分散成分を与えれば同じGLS推定量・同じ共分散推定量になるため
+# 機械精度（実測4e-13以下）。
 _GIVEN_VARIANCE_RTOL = 1e-10
 
 
@@ -237,25 +240,30 @@ def _check_given_variance_equivalence(
     given: dict, plm_re: dict, label: str
 ) -> None:
     """plm自身の分散成分を与えた参照値`given`が、plm自身のRE（`plm_re`）の
-    `vcovSCC`と、係数・標準誤差・F統計量で一致することを確かめる。
+    同じcov_typeの共分散推定量と、全統計量（係数・標準誤差・t統計量・p値・
+    信頼区間・F統計量・F検定のp値）で相対`_GIVEN_VARIANCE_RTOL`以内に一致する
+    ことを確かめる。
 
     分散成分を与える方式（`run_plm_re_given_variance_benchmark.R`）の根拠で
-    ある等価性を、フィクスチャを作るたびに検証する。F統計量は傾きだけの
-    手書き式なので、plm自身の`pwaldtest`との一致が式の妥当性の確認になる。
+    ある等価性を、フィクスチャを作るたびに検証する。θの式、傾きだけの手書きの
+    Wald F、t検定への変換（cov_type別の自由度）が、plm自身のREを出す側
+    （`run_plm_benchmark.R`）と同じ結果になることの確認になる。
     """
     pairs = [
         (given["f_statistic"], plm_re["f_statistic"], "f_statistic"),
-        *[
-            (given["params"][k], v, f"params/{k}")
-            for k, v in plm_re["params"].items()
-        ],
-        *[
-            (given["std_errors"][k], v, f"std_errors/{k}")
-            for k, v in plm_re["std_errors"].items()
-        ],
+        (given["f_p_value"], plm_re["f_p_value"], "f_p_value"),
     ]
+    for stat in ("params", "std_errors", "test_stats", "p_values"):
+        pairs += [
+            (given[stat][k], v, f"{stat}/{k}") for k, v in plm_re[stat].items()
+        ]
+    for k, (lower, upper) in plm_re["conf_int"].items():
+        pairs += [
+            (given["conf_int"][k][0], lower, f"conf_int/{k}/lower"),
+            (given["conf_int"][k][1], upper, f"conf_int/{k}/upper"),
+        ]
     for ours, ref, name in pairs:
-        if abs(ours - ref) > _GIVEN_VARIANCE_RTOL * max(abs(ref), 1.0):
+        if abs(ours - ref) > _GIVEN_VARIANCE_RTOL * abs(ref):
             raise AssertionError(
                 f"{label}/{name}: given-variance reference {ours!r} differs "
                 f"from plm's own RE {ref!r}"
@@ -274,7 +282,7 @@ def _run_effects_reference(
     scenario: str, cov_type: str, *, maxlag: int | None = None
 ) -> dict:
     """標準誤差・推論統計量の参照値。balancedはplm自身のRE、unbalancedは
-    `linearmodels`の分散成分を与えたplm（`UNBALANCED_SCENARIO`直後のコメント参照）。
+    `linearmodels`の分散成分を与えたplm（`DK_EXPLICIT_BANDWIDTHS`直後のコメント参照）。
     plm自身の分散成分を与えた値がplm自身のREと一致することを、生成のたびに確かめる。"""
     plm_re = _run_effects(scenario, cov_type, maxlag=maxlag)
     if scenario != UNBALANCED_SCENARIO:

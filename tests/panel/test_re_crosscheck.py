@@ -2,7 +2,9 @@
 
 主リファレンス（linearmodels）との厳密比較（classical/hc1）は
 `test_re_reference.py`で行う。classical/hc1もこのファイルのplmで独立に検証する
-（全統計量。F統計量はこのファイルが全cov_typeの独立リファレンス）。
+（全統計量。F統計量はこのファイルが全cov_typeの独立リファレンス。ただし
+`unbalanced`は傾きだけのWald Fを手書きした参照値で、独立性が下がる。下記
+「不均衡パネル（unbalanced）の参照値」参照）。
 ここでは`tests/fixtures/benchmarks/re_crosscheck.json`（`benchmark/panel/
 fixtures/generate_re_crosscheck_fixtures.py`で生成）を用いて、linearmodelsとは
 独立した実装（R: plm）との一致を確認する。
@@ -145,7 +147,7 @@ ATOL_HAUSMAN_P_VALUE = TOLERANCES["re_crosscheck"]["atol_hausman_p_value"]
 # （`rtol_hausman_ill_conditioned`）を使うシナリオ。不均衡の
 # `UNBALANCED_SCENARIO`は、plm/linearmodelsの分散成分（σ_u²）推定の差でθが
 # 変わり、ハウスマン統計量への増幅がparams/std_errorsよりさらに大きくなる
-# （モジュールdoc「許容誤差について」参照）。
+# （モジュールdoc「ハウスマン統計量の方式について」参照）。
 _ILL_CONDITIONED_HAUSMAN_SCENARIO = "high_condition_number"
 
 
@@ -240,7 +242,7 @@ def _check_hausman(
 
 def _reference_label(scenario: str) -> str:
     """参照値の出どころ。`unbalanced`はplm自身のREではなく、`linearmodels`の
-    分散成分を与えたplm（モジュールdoc「許容誤差について」参照）。"""
+    分散成分を与えたplm（モジュールdoc「不均衡パネル（unbalanced）の参照値」参照）。"""
     if scenario == UNBALANCED_SCENARIO:
         return "plm with linearmodels variance components"
     return "plm"

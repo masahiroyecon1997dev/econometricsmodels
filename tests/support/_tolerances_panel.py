@@ -88,7 +88,9 @@ PANEL_TOLERANCES: dict[str, dict[str, float]] = {
         # params 0.18%・std_errors 0.71%・test_stats 0.67%・p_values 0.56%・
         # conf_int 1.05%、dkのバンド幅0ではconf_int 12.3%）ため、参照値は
         # plm自身のREではなく、linearmodelsの分散成分を与えたplm
-        # （`run_plm_re_given_variance_benchmark.R`）にして揃える。
+        # （`run_plm_re_given_variance_benchmark.R`）にして揃える。unbalancedの
+        # 実測最大相対誤差（全cov_type）: std_errors 5e-15・p値 5e-13・conf_int 8e-13・
+        # F統計量 5e-15・F p値 1.5e-13。
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_CROSSCHECK_FLOOR,
         # p値（係数・F統計量）は絶対誤差の下限なし。

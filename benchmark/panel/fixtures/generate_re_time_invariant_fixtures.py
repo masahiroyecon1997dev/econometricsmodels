@@ -24,7 +24,7 @@ REは時間不変の説明変数（within変換後に分散がゼロの列）を
   機械精度で比較する。
 - `time_invariant_unbalanced`（不均衡パネル、同じ列構成）: plmとlinearmodels準拠の
   本実装でSwamy-Arora分散成分（σ_u²）の推定が異なる既存の差（
-  `generate_re_crosscheck_fixtures.py`モジュールdoc「許容誤差について」）が
+  `generate_re_crosscheck_fixtures.py`モジュールdoc「unbalancedの参照値」）が
   同じ形で出るため、統計量・cov_type別に緩めた許容誤差で比較する。
 - `time_invariant_multi_unbalanced`（時間変化の`x1`〜`x3`と時間不変の`z1`・`z2`、
   `T_i`が2〜10に偏る不均衡パネル）: 複数の時間不変列と、σ_u²の差が増幅される極端な

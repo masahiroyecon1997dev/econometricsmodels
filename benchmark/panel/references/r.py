@@ -64,7 +64,7 @@ _PLM_FE_R_SCRIPT = Path(__file__).resolve().parent / "run_plm_fe_benchmark.R"
 # 中身のみRE専用に更新済みで、ファイルの移動は行っていない）。
 _PLM_R_SCRIPT = Path(__file__).resolve().parents[1] / "run_plm_benchmark.R"
 
-# 分散成分を外から与えたREのDriscoll-Kraay標準誤差（不均衡パネル用）。
+# 分散成分を外から与えたREの標準誤差・推論統計量（不均衡パネル用、全cov_type）。
 _PLM_RE_GIVEN_VARIANCE_R_SCRIPT = (
     Path(__file__).resolve().parent / "run_plm_re_given_variance_benchmark.R"
 )

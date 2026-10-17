@@ -272,8 +272,8 @@ FE実装時（`panel::fe`）のcov_type計算関数（`design_matrix_from_column
 - **HC2/HC3の参照実装が無い**: `linearmodels`は`RandomEffects`・`PanelOLS`どちらも
   "heteroskedastic"（HC1相当）しか持たない。REは`plm::vcovHC(fit, method="white1",
   type="HC2"/"HC3")`をクロスチェックに使う。`plm`は変量効果の分散成分推定法が
-  `linearmodels`と僅かに異なる（点推定自体が僅かに違う）ため、Classical/HC1/Cluster/HAC
-  ほどの精度ではなくクロスチェック水準で検証する（4章参照）。
+  `linearmodels`と僅かに異なる（不均衡パネルでは点推定自体が僅かに違う）ため、不均衡
+  パネルは`linearmodels`の分散成分を与えたplmと比べる（下記「許容誤差」参照）。
 - `ReCovType::Cluster`の`q`（傾き係数の数、切片を除く）は`df_model - 1`。`ReCovType::Dk`は
   `time`（必須の`TimeKeys`、`REOptions.dk_time`由来）を持つ。2-wayの`time`（`ReInput`）とは独立で借用しない。
 - **【linearmodels方式からfixest（R）・Stata型に変更】**: `Cluster`は当初
@@ -468,11 +468,12 @@ FEの`WithinRegressionFailed`と同じく内側の`LeastSquaresError`の分類�
   （ハウスマン検定の補助回帰が`G > 2k`を要するため`k=1`・`G=3`）を持つ。
 - 許容誤差: Classical/HC1は`linearmodels`と相対誤差`1e-8`（`tests/support/_tolerances_panel.py`の
   `re_reference`。実測は`1e-9`〜`1e-14`程度）で数値完全一致。Cluster/DK・
-  HC2/HC3の`plm`クロスチェックは、バランスパネルでは機械精度で一致する（`1e-8`）。不均衡
-  パネルのみ分散成分推定（Swamy-Arora）が`plm`とlinearmodels準拠の本実装で僅かに異なるため、
-  統計量・cov_type別に実測へマージンを載せて緩める（係数`5e-3`、se・t・p値・信頼区間は
-  cluster `5e-3`・hc2/hc3 `2e-2`・dk `5e-2`。`tests/support/_tolerances_panel.py`の`re_crosscheck`参照。
-  一律に緩めるとclusterの`G/(G-1)`欠落（seに約1.3%）を見逃すため分けている）。
+  HC2/HC3の`plm`クロスチェックは、標準誤差・推論統計量・F統計量を全シナリオ`1e-8`で
+  比べる（`tests/support/_tolerances_panel.py`の`re_crosscheck.rtol`）。不均衡パネルは分散成分推定
+  （Swamy-Arora）が`plm`とlinearmodels準拠の本実装で僅かに異なる（plm自身のREとは係数が
+  最大0.18%、標準誤差が1%前後ずれる）ため、`linearmodels`の分散成分を与えて準偏差変換した
+  データへのplmの`vcov`系を参照値にする。clusterの`G/(G-1)`欠落（seに約1.3%）のような
+  補正式の取り違えも検出できる。
 - **ハウスマン検定は`plm::phtest(method = "aux", effect = "individual", vcov = ...)`のみを参照値と
   する例外規定**（`linearmodels`のソースに`hausman`という文字列が一切登場せず専用実装が
   無いことを確認済み。通常の「Python主リファレンス＋Rクロスチェック」の2系統検証の例外）。

@@ -110,6 +110,7 @@ def run(
     confidence_level: float = 0.95,
     weight_col: str | None = None,
     include_intercept: bool = True,
+    hac_lags: int | None = None,
 ) -> dict:
     import statsmodels.formula.api as smf
 
@@ -146,9 +147,12 @@ def run(
     if sm_cov_type == "cluster":
         fit_kwargs["cov_kwds"] = {"groups": pandas_df[cluster]}
     elif sm_cov_type == "hac":
-        # ラグは本実装の自動選択式（`hac_auto_lag(n)`）に合わせ、Rクロスチェック・IVと
-        # 同じラグで照合する。使ったラグは結果の`hac_lag`に残す。
-        hac_lag = hac_auto_lag(len(pandas_df))
+        # ラグは`hac_lags`で明示しない限り本実装の自動選択式（`hac_auto_lag(n)`）に
+        # 合わせ、Rクロスチェック・IVと同じラグで照合する。使ったラグは結果の
+        # `hac_lag`に残す。
+        hac_lag = (
+            hac_lags if hac_lags is not None else hac_auto_lag(len(pandas_df))
+        )
         fit_kwargs["cov_kwds"] = {"maxlags": hac_lag}
 
     if weight_col is not None:

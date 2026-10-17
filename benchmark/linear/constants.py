@@ -73,6 +73,11 @@ CLUSTER_ILL_CONDITIONED_SCENARIOS = [
 # `test_wls_api.py`の幅の単調性テストで使用済み）とは異なる値として0.90を選ぶ。
 CONFIDENCE_LEVEL_NON_DEFAULT = 0.90
 
+# baselineシナリオで、自動選択（`hac_auto_lag(n)`）とは別に明示指定して確認する
+# `hac_lags`。0はHC0相当の境界値、1は自動選択値（n=100で4）より小さい最小の
+# 非自明なラグ。フィクスチャでは`baseline.hac_lags`の下に文字列キー（"0"・"1"）で置く。
+HAC_LAGS_EXPLICIT = [0, 1]
+
 # predict()のout-of-sample新規データ（x1/x2/x3、baselineシナリオのみ）。
 # 学習データの実現値とは無関係に、値域内で手で選んだ値。主リファレンス
 # （statsmodels、`generate_ols_fixtures.py`）とクロスチェック（R、

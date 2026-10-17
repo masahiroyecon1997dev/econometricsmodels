@@ -1619,6 +1619,112 @@
           "r_squared": 0.861773449386115,
           "adj_r_squared": 0.86093740170095
         }
+      },
+      "hac_lags": {
+        "0": {
+          "params": {
+            "const": 1.48170108484838,
+            "x1": -0.345524276385676,
+            "x2": 2.09531209867639,
+            "x3": 1.18358650351986
+          },
+          "std_errors": {
+            "const": 0.0446700494034201,
+            "x1": 0.0477647922245703,
+            "x2": 0.0429040341832446,
+            "x3": 0.0424403471403585
+          },
+          "test_stats": {
+            "const": 33.1699002941988,
+            "x1": -7.23386955733343,
+            "x2": 48.8371813645131,
+            "x3": 27.8882380392768
+          },
+          "p_values": {
+            "const": 5.56344569642714e-128,
+            "x1": 1.79260053784575e-12,
+            "x2": 1.27328526719283e-191,
+            "x3": 1.19894546092601e-103
+          },
+          "conf_int": {
+            "const": [
+              1.3939352352704,
+              1.56946693442636
+            ],
+            "x1": [
+              -0.439370547555996,
+              -0.251678005215356
+            ],
+            "x2": [
+              2.01101604213057,
+              2.1796081552222
+            ],
+            "x3": [
+              1.10020147993238,
+              1.26697152710733
+            ]
+          },
+          "aic": 1425.08093273993,
+          "bic": 1441.93936513361,
+          "log_likelihood": -708.540466369963,
+          "f_statistic": 1215.78825275942,
+          "f_p_value": 0,
+          "r_squared": 0.861773449386115,
+          "adj_r_squared": 0.86093740170095,
+          "hac_lag": 0
+        },
+        "1": {
+          "params": {
+            "const": 1.48170108484838,
+            "x1": -0.345524276385676,
+            "x2": 2.09531209867639,
+            "x3": 1.18358650351986
+          },
+          "std_errors": {
+            "const": 0.0428078946968486,
+            "x1": 0.0484177836779925,
+            "x2": 0.0437734560629069,
+            "x3": 0.0412930195210744
+          },
+          "test_stats": {
+            "const": 34.6127997029823,
+            "x1": -7.13630922645326,
+            "x2": 47.8671845253711,
+            "x3": 28.6631134571256
+          },
+          "p_values": {
+            "const": 2.16201378234798e-134,
+            "x1": 3.42253277693243e-12,
+            "x2": 4.69352521156594e-188,
+            "x3": 2.6993882224349e-107
+          },
+          "conf_int": {
+            "const": [
+              1.39759391915481,
+              1.56580825054195
+            ],
+            "x1": [
+              -0.44065351792299,
+              -0.250395034848362
+            ],
+            "x2": [
+              2.00930783829088,
+              2.18131635906189
+            ],
+            "x3": [
+              1.10245570137596,
+              1.26471730566376
+            ]
+          },
+          "aic": 1425.08093273993,
+          "bic": 1441.93936513361,
+          "log_likelihood": -708.540466369963,
+          "f_statistic": 1187.00826814769,
+          "f_p_value": 0,
+          "r_squared": 0.861773449386115,
+          "adj_r_squared": 0.86093740170095,
+          "hac_lag": 1
+        }
       }
     },
     "small_n": {
@@ -10311,10 +10417,10 @@
   "_meta": {
     "method": "ols",
     "purpose": "statsmodels主リファレンス（ols.json）とは独立した実装（R: lm + sandwich/lmtest）によるクロスチェック用。係数・標準誤差・t値・p値・信頼区間・R²・調整済みR²・AIC・BIC・対数尤度・F統計量・F検定p値を含む（信頼区間はconfidence_level=0.95固定で計算）。全cov_type（HACを含む）を厳密比較する想定（testing-policy.md参照）",
-    "generated_at": "2026-10-17T04:32:06.311833+00:00",
+    "generated_at": "2026-10-17T04:46:43.128866+00:00",
     "r_version": "4.5.3",
     "sandwich_version": "3.1.3",
     "lmtest_version": "0.9.40",
-    "note": "perfect_multicollinearityシナリオはここに含まない（ComputationErrorの発生確認のみ、テストコード側で対応）。HACのラグは本実装の自動ラグ式に合わせてRラッパーが決め、`hac_lag`に残す（statsmodels側のols.json/wls.jsonも同じ自動ラグ）。clusterはR側のみ確認。baselineシナリオで均等疑似グループ（行番号%10）に加え、不均衡グループ（cluster_imbalanced）・クラスタ数境界G=2（cluster_g2）、wage1の実カテゴリ列region（northcen/south/westダミーから合成、基準カテゴリnortheast）を含む（グルーピングパターンのバリエーションはbaselineシナリオのみ、他シナリオは均等疑似グループ1パターンのみ、後述）。パラメータ名は全ソースで切片を'const'に正規化済み。pyfixestとの比較は正確性検証から除外（性能比較専用）。high_condition_number/baseline_df1は境界値・悪条件ケース。scale_varianceはここに含まない。傾き係数の同時共分散部分行列の条件数が倍精度の限界を超え、本実装・RのSolve()の双方が全cov_typeで計算不能（エラー）になるため（perfect_multicollinearityと同様、ComputationErrorの発生確認のみテストコード側で対応）。many_regressorsはk=20・列ごとに0.1〜100倍のスケール差を持つ高次元シナリオ（generate_ols_fixtures.pyと同じ理由）。outlier_regressorはx1の5%を外れ値に置き換えた成功パス（generate_ols_fixtures.pyと同じ理由）。high_condition_number/moderate_multicollinearityにもclusterエントリを追加（従来クラスター系はbaselineシナリオのみで、悪条件・多重共線性シナリオとの組み合わせが未検証だった。均等な疑似グループ（行番号%10）のみ）。baseline.no_interceptはinclude_intercept=False（切片なし、formulaに'- 1'を付与）をCOV_TYPES全種＋clusterと組み合わせて確認する（statsmodels主リファレンス側〔ols.json〕の横展開）。baseline.confidence_levelはconfidence_level=0.9（既定0.95以外）をCOV_TYPES全種＋clusterと組み合わせて確認する（run_lm_crosscheck.R側に'--confidence-level='フラグを追加して対応、同じくstatsmodels主リファレンス側の横展開）。"
+    "note": "perfect_multicollinearityシナリオはここに含まない（ComputationErrorの発生確認のみ、テストコード側で対応）。HACのラグは本実装の自動ラグ式に合わせてRラッパーが決め、`hac_lag`に残す（statsmodels側のols.json/wls.jsonも同じ自動ラグ）。clusterはR側のみ確認。baselineシナリオで均等疑似グループ（行番号%10）に加え、不均衡グループ（cluster_imbalanced）・クラスタ数境界G=2（cluster_g2）、wage1の実カテゴリ列region（northcen/south/westダミーから合成、基準カテゴリnortheast）を含む（グルーピングパターンのバリエーションはbaselineシナリオのみ、他シナリオは均等疑似グループ1パターンのみ、後述）。パラメータ名は全ソースで切片を'const'に正規化済み。pyfixestとの比較は正確性検証から除外（性能比較専用）。high_condition_number/baseline_df1は境界値・悪条件ケース。scale_varianceはここに含まない。傾き係数の同時共分散部分行列の条件数が倍精度の限界を超え、本実装・RのSolve()の双方が全cov_typeで計算不能（エラー）になるため（perfect_multicollinearityと同様、ComputationErrorの発生確認のみテストコード側で対応）。many_regressorsはk=20・列ごとに0.1〜100倍のスケール差を持つ高次元シナリオ（generate_ols_fixtures.pyと同じ理由）。outlier_regressorはx1の5%を外れ値に置き換えた成功パス（generate_ols_fixtures.pyと同じ理由）。high_condition_number/moderate_multicollinearityにもclusterエントリを追加（従来クラスター系はbaselineシナリオのみで、悪条件・多重共線性シナリオとの組み合わせが未検証だった。均等な疑似グループ（行番号%10）のみ）。baseline.no_interceptはinclude_intercept=False（切片なし、formulaに'- 1'を付与）をCOV_TYPES全種＋clusterと組み合わせて確認する（statsmodels主リファレンス側〔ols.json〕の横展開）。baseline.hac_lagsは自動選択とは別に明示したHACラグ（[0, 1]、キーは文字列。0はHC0相当）。baseline.confidence_levelはconfidence_level=0.9（既定0.95以外）をCOV_TYPES全種＋clusterと組み合わせて確認する（run_lm_crosscheck.R側に'--confidence-level='フラグを追加して対応、同じくstatsmodels主リファレンス側の横展開）。"
   }
 }

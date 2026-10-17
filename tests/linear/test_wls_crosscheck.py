@@ -50,6 +50,7 @@ from econometricsmodels import WLS, WLSOptions
 from benchmark.common import imbalanced_cluster_groups
 from benchmark.linear.constants import (
     CONFIDENCE_LEVEL_NON_DEFAULT,
+    HAC_LAGS_EXPLICIT,
     NON_HAC_COV_TYPES,
 )
 from benchmark.linear.constants import (
@@ -330,8 +331,9 @@ def _options_kwargs_for_cov_type(df: pl.DataFrame, cov_type: str):
 )
 def test_no_intercept_matches_r(crosscheck, cov_type):
     """`include_intercept=False`が、cov_typeによらずWLSでもRと一致すること
-    （baselineシナリオ、classical/HC0-3/cluster、OLS側の横展開）。HACのみ
-    `test_no_intercept_hac_matches_r`で別途確認する。
+    （baselineシナリオ、classical/HC0-3/cluster、OLS側の横展開）。HACはフィクスチャの
+    `hac_lag`を`hac_lags`に渡す必要があるため`test_no_intercept_hac_matches_r`で
+    別途確認する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df, kwargs = _options_kwargs_for_cov_type(df, cov_type)
@@ -392,8 +394,9 @@ def test_no_intercept_hac_matches_r(crosscheck):
 def test_confidence_level_matches_r(crosscheck, cov_type):
     """confidence_level非既定（`CONFIDENCE_LEVEL_NON_DEFAULT`）が、cov_type
     によらずWLSでもRと一致すること（baselineシナリオ、classical/HC0-3/
-    cluster、OLS側の横展開）。HACのみ`test_confidence_level_hac_matches_r`
-    で別途確認する。
+    cluster、OLS側の横展開）。HACはフィクスチャの
+    `hac_lag`を`hac_lags`に渡す必要があるため`test_confidence_level_hac_matches_r`で
+    別途確認する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df, kwargs = _options_kwargs_for_cov_type(df, cov_type)
@@ -448,6 +451,34 @@ def test_confidence_level_hac_matches_r(crosscheck):
         rtol=RTOL_STRICT,
     )
     _assert_fit_stats_close(res, ref, label, rtol=RTOL_STRICT)
+
+
+@pytest.mark.parametrize("hac_lags", HAC_LAGS_EXPLICIT)
+def test_hac_lags_matches_r(crosscheck, hac_lags):
+    """自動選択とは別に`hac_lags`を明示指定したHAC標準誤差が、Rの
+    `NeweyWest(lag = )`と一致すること（baselineシナリオ）。`hac_lags=0`は
+    HC0相当の境界値。ラグはフィクスチャの`hac_lag`ではなくパラメータの値を
+    渡し、記録された`hac_lag`と一致することも確認する。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    ref = crosscheck["synthetic"]["baseline"]["hac_lags"][str(hac_lags)]
+    assert ref["hac_lag"] == hac_lags
+    options = WLSOptions(cov_type="hac", hac_lags=hac_lags, hac_time=ROW_TIME)
+    res = WLS(
+        with_row_time(df),
+        y="y",
+        x=["x1", "x2", "x3"],
+        weight="weight",
+        options=options,
+    ).fit()
+
+    label = f"hac_lags={hac_lags}/R"
+    _assert_dict_close(res.params, ref["params"], f"{label} params")
+    _assert_dict_close(
+        res.std_errors, ref["std_errors"], f"{label} std_errors"
+    )
+    _assert_fit_stats_close(res, ref, label, rtol=RTOL_STRICT)
+    assert res.hac_lags_used == hac_lags, f"{label}/hac_lags_used"
 
 
 # ── 凍結フィクスチャとの数値照合（実データ） ──────────────────────────

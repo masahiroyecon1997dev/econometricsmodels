@@ -40,6 +40,7 @@ from benchmark.linear.constants import (
     CLUSTER_ILL_CONDITIONED_SCENARIOS,
     CONFIDENCE_LEVEL_NON_DEFAULT,
     COV_TYPES,
+    HAC_LAGS_EXPLICIT,
     NON_HAC_COV_TYPES,
     NUMERIC_SCENARIOS,
 )
@@ -140,6 +141,19 @@ def build_fixtures() -> dict:
                     "均等な疑似グループ（行番号%10）のみ（OLS側の横展開）。",
                 )
             )
+
+            # 自動選択とは別に明示指定したhac_lags（HAC_LAGS_EXPLICIT）。
+            fixtures[scenario]["hac_lags"] = {
+                str(lag): run(
+                    dataset_source="synthetic",
+                    dataset=scenario,
+                    formula=None,
+                    cov_type="hac",
+                    weight_col="weight",
+                    hac_lags=lag,
+                )
+                for lag in HAC_LAGS_EXPLICIT
+            }
         elif scenario in CLUSTER_ILL_CONDITIONED_SCENARIOS:
             fixtures[scenario]["cluster"] = _run_cluster_case(
                 scenario=scenario,
@@ -199,6 +213,8 @@ def build_fixtures() -> dict:
             "COV_TYPES全種＋clusterと組み合わせて確認する（従来ライブ"
             "statsmodels比較〔ad-hocデータ1パターン〕のみだったものを、"
             "他オプションと同じ凍結フィクスチャに統合。OLS側の横展開）。"
+            "baseline.hac_lagsは自動選択とは別に明示したHACラグ"
+            f"（{HAC_LAGS_EXPLICIT}、キーは文字列。0はHC0相当）。"
             "baseline.confidence_levelはconfidence_level="
             f"{CONFIDENCE_LEVEL_NON_DEFAULT}（既定0.95以外）をCOV_TYPES全種＋"
             "clusterと組み合わせて確認する（従来相対比較〔幅の広さの"

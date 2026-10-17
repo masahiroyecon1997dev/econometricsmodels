@@ -125,7 +125,8 @@ $$
 - statsmodelsとの照合は`cov_kwds={"maxlags": L}, use_t=True`。`use_correction`（小標本補正）は
   既定の`False`のままで一致することを確認済み。`L`は主リファレンス（statsmodels）もRクロスチェックも
   本実装の自動選択式（`benchmark.common.hac_auto_lag(n)`）に揃え、どちらのフィクスチャにも`hac_lag`として残す
-  （テストは`hac_lags`を省略し、`hac_lags_used`が`hac_lag`と一致することも確認する）。
+  （statsmodelsとの照合は`hac_lags`を省略し、`hac_lags_used`が`hac_lag`と一致することも確認する）。
+  自動選択とは別に、baselineで`hac_lags`を明示した`0`（HC0相当）・`1`もstatsmodels・Rの両方と照合する。
 
 **クラスター**: $\hat S = \sum_g S_g S_g^\top$（$S_g = \sum_{i\in g}\hat\varepsilon_i x_i$）。
 - グループ化は**キーの辞書順に整数コードを振る`GroupCodes`（`BTreeMap`と同じ反復順）を使う

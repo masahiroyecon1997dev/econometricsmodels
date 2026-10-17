@@ -74,6 +74,7 @@ from benchmark.common import imbalanced_cluster_groups
 from benchmark.linear.constants import (
     CONFIDENCE_LEVEL_NON_DEFAULT,
     COV_TYPES,
+    HAC_LAGS_EXPLICIT,
     NON_HAC_COV_TYPES,
     PREDICT_NEW_DATA,
 )
@@ -128,7 +129,8 @@ def _check_result(res, ref: dict, label: str) -> None:
         label,
     )
     assert res.n_obs == ref["nobs"], f"{label}/n_obs"
-    if "hac_lag" in ref:
+    if res.cov_type == "hac":
+        # `hac_lag`が無い（フィクスチャ再生成で落ちた）場合はKeyErrorで失敗させる。
         assert res.hac_lags_used == ref["hac_lag"], f"{label}/hac_lags_used"
 
 
@@ -380,6 +382,28 @@ def test_confidence_level_cluster_matches_statsmodels(fixtures):
         res,
         fixtures["synthetic"]["baseline"]["confidence_level"]["cluster"],
         "confidence_level/cluster",
+    )
+
+
+@pytest.mark.parametrize("hac_lags", HAC_LAGS_EXPLICIT)
+def test_hac_lags_matches_statsmodels(fixtures, hac_lags):
+    """自動選択とは別に`hac_lags`を明示指定したHAC標準誤差が、statsmodelsの
+    `maxlags`と一致すること（baselineシナリオ）。`hac_lags=0`はHC0相当の
+    境界値。自動ラグは合成データ・実データの`hac`ケースで確認する。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
+    options = OLSOptions(cov_type="hac", hac_lags=hac_lags, hac_time=ROW_TIME)
+    res = OLS(
+        with_row_time(df),
+        y="y",
+        x=["x1", "x2", "x3"],
+        options=options,
+    ).fit()
+
+    _check_result(
+        res,
+        fixtures["synthetic"]["baseline"]["hac_lags"][str(hac_lags)],
+        f"hac_lags={hac_lags}",
     )
 
 

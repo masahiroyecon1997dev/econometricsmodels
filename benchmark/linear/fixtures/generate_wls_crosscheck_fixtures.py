@@ -52,6 +52,7 @@ from benchmark.linear.constants import (
     CLUSTER_ILL_CONDITIONED_SCENARIOS,
     CONFIDENCE_LEVEL_NON_DEFAULT,
     COV_TYPES,
+    HAC_LAGS_EXPLICIT,
     NON_HAC_COV_TYPES,
     NUMERIC_SCENARIOS,
 )
@@ -162,6 +163,18 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
                     confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
                 )
             )
+
+            # 自動選択とは別に明示指定したhac_lags（HAC_LAGS_EXPLICIT）。
+            fixtures[scenario]["hac_lags"] = {
+                str(lag): run_lm_r(
+                    csv_path,
+                    formula,
+                    "hac",
+                    weight_col=WEIGHT_COLUMN_NAME,
+                    hac_lag=lag,
+                )
+                for lag in HAC_LAGS_EXPLICIT
+            }
         elif scenario in CLUSTER_ILL_CONDITIONED_SCENARIOS:
             # 悪条件・多重共線性シナリオとクラスターの組み合わせでの数値的
             # 頑健性確認用（generate_ols_crosscheck_fixtures.pyと同じ理由）。
@@ -312,6 +325,8 @@ def build_fixtures() -> dict:
             "baseline.no_interceptはinclude_intercept=False（切片なし、"
             "formulaに'- 1'を付与）をCOV_TYPES全種＋clusterと組み合わせて"
             "確認する（statsmodels主リファレンス側〔wls.json〕・OLS側の横展開）。"
+            "baseline.hac_lagsは自動選択とは別に明示したHACラグ"
+            f"（{HAC_LAGS_EXPLICIT}、キーは文字列。0はHC0相当）。"
             "baseline.confidence_levelはconfidence_level="
             f"{CONFIDENCE_LEVEL_NON_DEFAULT}（既定0.95以外）をCOV_TYPES"
             "全種＋clusterと組み合わせて確認する（run_lm_crosscheck.R側の"

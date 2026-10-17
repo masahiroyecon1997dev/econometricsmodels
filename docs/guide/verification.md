@@ -175,7 +175,7 @@ All synthetic datasets are generated once, frozen as CSV files in the repository
 | Method | Dataset |
 |---|---|
 | OLS | `wage1`, `gpa2`; the time series `prminwge` for HAC, with the automatic lag, against both statsmodels and R (the White test also uses `wage1` with the dummies `female` and `married`, with the squared terms `expersq` and `tenursq`, and with the mutually exclusive region dummies `northcen`, `south` and `west`, so that terms of its auxiliary regression are duplicated or constant; the Breusch-Pagan test uses `hprice1` (its LM and F statistics are also compared with the values printed in Wooldridge's Example 8.4), `wage1`, and `wage1` with columns that are not in the model as the variables; the Breusch-Godfrey test also uses the time series `phillips`, with the rows shuffled and ordered by `year`) |
-| WLS | `401ksubs` |
+| WLS | `401ksubs` (cross-sectional, so HAC is not checked on real data) |
 | Logit, Probit, Tobit | `mroz` |
 | Logit, Probit (cluster standard errors with many clusters) | `apple` (`y = ecolbs > 0`, clustered by `state`: 49 clusters of 1 to 66 observations) |
 | IV | `card` |

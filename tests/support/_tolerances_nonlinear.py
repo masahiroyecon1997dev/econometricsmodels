@@ -95,17 +95,19 @@ NONLINEAR_TOLERANCES: dict[str, dict[str, float]] = {
         "rtol_mroz_solver_inference": 3e-4,
     },
     # --- 独立実装（R等）とのクロスチェック ---
-    # Rのglm()は収束判定を厳しく（epsilon=1e-14）して参照値を生成している
-    # （`benchmark/nonlinear/references/run_glm_crosscheck.R`参照）。既定の
-    # epsilon=1e-8だと`sandwich::estfun()`が1反復前の作業重みを使い、ロバストSEの
-    # 参照値に~3e-5のノイズが乗るため。限界効果もmarginaleffectsの有限差分の
-    # 刻み幅を変数ごとに標準偏差の1e-5倍にして解析解に合わせてある。
+    # Rのglm()は収束判定を厳しく（epsilon=1e-14）し、収束後の係数から再fitして参照値を
+    # 生成している（`benchmark/nonlinear/references/run_glm_crosscheck.R`参照）。
+    # `sandwich::estfun()`は1反復前の係数で作った作業重みを使うため、収束判定を厳しく
+    # するだけではロバストSEの参照値にノイズが残る（既定のepsilon=1e-8で~3e-5、
+    # epsilon=1e-14でもk=20では~1e-7）。再fitで最終係数の作業重みにするとこのノイズは
+    # 消える。限界効果もmarginaleffectsの有限差分の刻み幅を変数ごとに標準偏差の1e-5倍に
+    # して解析解に合わせてある。
     # atolは`ATOL_LOGIT_PROBIT_CROSSCHECK`（1e-12）で、`|ref|`が小さい項目も
     # 純粋な相対誤差で比較する。以下の実測最大相対誤差は、atolを無視した全項目の値。
-    # Logit: 係数~4e-10、SE~3.6e-8、z~3.1e-8、conf_int~6.1e-8（cluster含む）、
-    # 限界効果effect~1.5e-9・std_error~2.9e-8・z~3.3e-8・conf_int~6.1e-8。cluster
-    # （均等・不均衡）の全統計量・限界効果も同水準。基本rtol=1e-6は最大値（conf_int）の
-    # 約16倍のマージン。
+    # Logit: 全統計量・限界効果（many_regressors・outlier_regressorを含む全シナリオ、
+    # cluster（均等・不均衡）、mroz、apple）の実測最大相対誤差は~3.5e-8
+    # （small_n/opg/hc1のconf_int、下限が0に近く増幅される）。基本rtol=1e-6は
+    # 最大値の約29倍のマージン。
     # 切片なし（baseline.no_intercept、全cov_type・均等/不均衡クラスター）は係数~2.2e-10、
     # SE・z・conf_int・限界効果~5e-10以下で、同じ許容誤差で通る（p値は相対~1.4e-8、
     # 絶対~3e-11）ため専用の許容誤差は置かない。
@@ -118,13 +120,15 @@ NONLINEAR_TOLERANCES: dict[str, dict[str, float]] = {
         # 限界効果とも）の約14倍のマージンとして1e-7を置く。
         "atol_p_value": 1e-7,
     },
-    # Logitと同じ生成方針。実測最大相対誤差は係数~4.9e-8、SE~1.2e-7
-    # （mroz/hc0/nwifeinc）、z~1.35e-7（mroz/opg/nwifeinc）、限界効果effect~5e-8・
-    # std_error~1.2e-7・z~1.4e-7。cluster（均等・不均衡）の全統計量・限界効果も同水準
-    # （SE~6.8e-8）。基本rtol=1e-6は最大値の約7倍のマージン。
-    # 切片なし（baseline.no_intercept、全cov_type・均等/不均衡クラスター）は係数~3.4e-9、
-    # SE・z・限界効果~4.4e-8、conf_int~6.3e-8で基本rtol=1e-6に収まり、p値は相対~2.1e-6
-    # （絶対~1.6e-9）でatol_p_value=1e-7に収まるため、専用の許容誤差は置かない。
+    # Logitと同じ生成方針（Rは収束後の係数から再fitして参照値を作る）。再fit後の実測
+    # 最大相対誤差は、係数・SE・z・限界効果（many_regressors・outlier_regressorを含む
+    # 全シナリオ、cluster、mroz、切片なし）が~1e-7以下、conf_int（限界効果を含む）が
+    # ~1.3e-7以下（small_n）。apple（州クラスター）のみSEなどが~1.0e-6。p値は裾で
+    # 相対誤差が~1e-6まで増幅される（many_regressors）。基本rtol=1e-6は、appleを除き
+    # 最大値の約8倍以上のマージン。
+    # 以下の個別の許容誤差（rtol_conf_int・rtol_apple・atol_p_value・atol_p_value_apple）
+    # は、再fit前の参照値（実測がより大きかった）に対して置いたまま変えていない。
+    # 切片なし（baseline.no_intercept、全cov_type・均等/不均衡クラスター）も基本rtolで通る。
     "probit_crosscheck": {
         "rtol": 1e-6,
         "atol": ATOL_LOGIT_PROBIT_CROSSCHECK,

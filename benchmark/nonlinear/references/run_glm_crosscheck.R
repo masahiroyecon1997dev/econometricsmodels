@@ -71,11 +71,14 @@ library(lmtest)
 library(marginaleffects)
 library(jsonlite)
 
-# 収束判定を既定（epsilon=1e-8）より厳しくする: `sandwich::estfun()`は`glm()`が
-# 最終反復の1つ前の係数で計算した作業重みを使うため、既定のままだとスコア寄与が
-# 最終係数のスコアとずれ、hc0/hc1/opgの標準誤差（とそれを使う限界効果の標準誤差・
-# 信頼区間）に相対誤差~3e-5程度の参照側ノイズが乗る（mrozで実測。係数・classicalは
-# 影響なし）。epsilon=1e-14では~4e-10まで下がる。
+# `sandwich::estfun()`/`meatHC()`は`glm()`が保持する作業重み・作業残差を使うが、
+# これらは最終反復の1つ前の係数で計算されている。収束判定（epsilon）を厳しくしても
+# 1つ前の係数の誤差は最終係数の誤差の2乗オーダー（IRLSは2次収束）より小さくならず、
+# スコア寄与が最終係数のスコアとずれて、hc0/hc1/opgの標準誤差（とそれを使う限界効果の
+# 標準誤差・信頼区間）に参照側ノイズが乗る。既定（epsilon=1e-8）ではmrozで相対誤差
+# ~3e-5、epsilon=1e-14でもk=20（many_regressors）では~1.1e-7残る（係数・classicalは
+# 影響なし）。そこで収束後の係数を`start`にして再fitし、作業重み・作業残差が最終係数
+# のものになるようにする（係数自体は~1e-16しか動かない）。
 glm_control <- glm.control(epsilon = 1e-14, maxit = 100)
 model <- glm(
   as.formula(formula_str),
@@ -85,6 +88,16 @@ model <- glm(
 )
 if (!model$converged) {
   stop("glm() did not converge with epsilon=1e-14")
+}
+model <- glm(
+  as.formula(formula_str),
+  data = df,
+  family = binomial(link = link),
+  start = coef(model),
+  control = glm_control
+)
+if (!model$converged) {
+  stop("glm() refit from converged coefficients did not converge")
 }
 
 # 観測情報行列（真の対数尤度のHessian）の重みを、本実装（nonlinear/probit.rs・

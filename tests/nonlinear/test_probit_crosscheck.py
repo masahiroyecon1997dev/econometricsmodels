@@ -154,7 +154,8 @@ def test_matches_r_glm(fixtures, scenario, cov_type):
         {"tol": _NEAR_SEPARATION_TOL} if scenario == "near_separation" else {}
     )
     options = ProbitOptions(cov_type=cov_type, **kwargs)
-    res = Probit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+    x_cols = [c for c in df.columns if c != "y"]
+    res = Probit(df, y="y", x=x_cols, options=options).fit()
 
     ref = fixtures["synthetic"][scenario][cov_type]
     _check_result(res, ref, f"{scenario}/{cov_type}")

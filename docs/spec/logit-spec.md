@@ -318,11 +318,12 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 
 - 許容誤差: statsmodels主リファレンス（`test_logit_reference.py`）は`RTOL=1e-8`。Rクロスチェック
   （`test_logit_crosscheck.py`、反復最適化同士の比較のため機械精度一致は期待できない）は
-  `RTOL=1e-6`（係数・SE・信頼区間・限界効果の全統計量（`effect`/`std_error`/`test_stat`/`conf_lower`/`conf_upper`）・cluster 2ケースの全統計量で共通、実測最大~6e-8。切片なし（`baseline.no_intercept`、全cov_type・均等/不均衡クラスター）も同じ許容誤差で通る（実測~5e-10以下）。`ATOL=1e-12`で
+  `RTOL=1e-6`（係数・SE・信頼区間・限界効果の全統計量（`effect`/`std_error`/`test_stat`/`conf_lower`/`conf_upper`）・cluster 2ケースの全統計量で共通、実測最大~3.5e-8。切片なし（`baseline.no_intercept`、全cov_type・均等/不均衡クラスター）も同じ許容誤差で通る（実測~5e-10以下）。`ATOL=1e-12`で
   `|ref|`が小さい項目も純粋な相対誤差で比較する）を基本とし、
   p値（標準正規分布CDFの裾での増幅）のみ`ATOL=1e-7`を設定している。R側の参照値は
-  `glm()`の収束判定を`epsilon=1e-14`に厳しくし（既定の1e-8だと`sandwich::estfun()`が1反復前の
-  作業重みを使い、ロバストSEの参照値に~3e-5のノイズが乗る）、`marginaleffects`の有限差分の
+  `glm()`の収束判定を`epsilon=1e-14`に厳しくした上で収束後の係数から再fitし
+  （`sandwich::estfun()`は1反復前の係数で作った作業重みを使うため、既定の1e-8だとロバストSEの
+  参照値に~3e-5、`epsilon=1e-14`でもk=20では~1e-7のノイズが乗る）、`marginaleffects`の有限差分の
   刻み幅を変数ごとに標準偏差の1e-5倍にして生成する（`benchmark/nonlinear/references/run_glm_crosscheck.R`）。
 - **statsmodelsのdiscrete modelにおける既知の欠落**: `cov_type="hc1"`は`LogitResults`に
   `cov_HC1`が未定義のためstatsmodelsが暗黙に`hc0`と同じ値を返す（Rの`n/(n-k)`補正版とは一致しない）。

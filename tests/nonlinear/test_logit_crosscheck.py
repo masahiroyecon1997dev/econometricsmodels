@@ -16,7 +16,7 @@ Note:
     どちらも反復最適化のため、OLSの閉形式解同士の比較（機械精度一致）ほどの
     精度は出ない。ただしR側の参照値は`glm()`の収束判定と`marginaleffects`の
     数値微分の刻み幅を厳しくして生成しており（`benchmark/nonlinear/references/
-    run_glm_crosscheck.R`参照）、基本方針はRTOL=1e-6（実測最大相対誤差~6e-8に対する
+    run_glm_crosscheck.R`参照）、基本方針はRTOL=1e-6（実測最大相対誤差~3.5e-8に対する
     マージン。ATOLは1e-12で純粋な相対誤差比較）。p値のみ裾での増幅に備えた個別のATOLを設定している
     （根拠は`tests/support/_tolerances_nonlinear.py`の`logit_crosscheck`のコメント参照。
     `testing-policy.md`「許容誤差」の方針通り）。
@@ -119,7 +119,8 @@ def test_matches_r_glm(fixtures, scenario, cov_type):
         {"tol": _NEAR_SEPARATION_TOL} if scenario == "near_separation" else {}
     )
     options = LogitOptions(cov_type=cov_type, **kwargs)
-    res = Logit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+    x_cols = [c for c in df.columns if c != "y"]
+    res = Logit(df, y="y", x=x_cols, options=options).fit()
 
     ref = fixtures["synthetic"][scenario][cov_type]
     _check_result(res, ref, f"{scenario}/{cov_type}")

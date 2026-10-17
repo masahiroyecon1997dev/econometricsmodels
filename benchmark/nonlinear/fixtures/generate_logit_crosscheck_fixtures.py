@@ -53,6 +53,10 @@ NUMERIC_SCENARIOS = [
     "high_condition_number",
     "near_separation",
     "scale_variance",
+    # 高次元（k=20）と高レバレッジ行。hc1のn/(n-k)補正とOPG・HC0の挙動は
+    # Rのみが参照のため、主リファレンス（statsmodels）と同じシナリオを通す。
+    "many_regressors",
+    "outlier_regressor",
 ]
 
 
@@ -67,7 +71,9 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
 
     for scenario in NUMERIC_SCENARIOS:
         df, _ = load_frozen_dataset("logit", scenario)
-        formula = "y ~ x1 + x2 + x3"
+        # many_regressorsはx1..x20なので、式は列名から組む。
+        x_cols = [c for c in df.columns if c != "y"]
+        formula = "y ~ " + " + ".join(x_cols)
         csv_path = _write_csv(df, tmpdir, scenario)
 
         fixtures[scenario] = {}
@@ -211,6 +217,9 @@ def build_fixtures() -> dict:
         "r_version": r_version,
         "marginaleffects_version": marginaleffects_version,
         "note": (
+            "many_regressors（k=20）とoutlier_regressor（x1の5%が外れ値）を含む。"
+            "ロバストSE（opg/hc0/hc1）の参照値は、収束後の係数から再fitした"
+            "glmで計算している（run_glm_crosscheck.R参照）。"
             "perfect_multicollinearityシナリオはここに含まない"
             "（ComputationErrorの発生確認のみ、テストコード側で対応）。"
             "clusterは合成データ（baselineシナリオ、均等疑似グループ・不均衡"

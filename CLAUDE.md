@@ -140,6 +140,7 @@ econometricsmodels/
 
 - `.devcontainer/`（`devcontainer.json` / `Dockerfile` / `docker-compose.yml`）で開発環境を統一。
 - ベースイメージ: `python:3.14-slim-bookworm`。Rust（stable、clippy/rustfmt/llvm-tools）、uv、R（fixest/plm/ivreg/AER/censReg/marginaleffects等、`benchmark/`のベンチマーク生成用。Rパッケージは`Dockerfile`で`remotes::install_version()`によりバージョンをピン留めし、新版の有無は`check_r_updates.yml`が週次で確認してIssueで通知する）を導入済み。**旧経緯**: `ivreg`は当初`Dockerfile`が`install.packages()`でインストールを試みていたが実際には失敗し導入されていなかった（依存先`car`→`MatrixModels`が`Matrix>=1.6.0`（→R>=4.4）を要求するが、Debian bookworm標準のr-baseは4.2.2固定でこれを満たせなかった。`install.packages()`はベクタの一部が失敗してもRUNコマンド自体は成功扱いになるため、ビルドは通ってしまいこの状態に気づきにくかった）。CRAN公式のDebian向けAPTリポジトリ（`bookworm-cran40`、実体は最新のRリリースを追従）を追加してR 4.x系（執筆時点で4.5.3）に更新し解消した。現在は`install_version()`で導入済みで、IVのRクロスチェックに使っている。Rパッケージの追加時は`install.packages()`ではなく`install_version()`を使い、導入失敗をビルドエラーとして検知できるようにする。
+- `cargo install --locked`で導入するcargo開発ツール（cargo-audit/about/llvm-cov）も`Dockerfile`の`ARG`でバージョンをピン留めしており、新版の有無とCI（`ci_engine.yml`のcargo-audit）とのピンの食い違いは`check_cargo_tool_updates.yml`が週次で確認してIssueで通知する（手順は`docs/spec/ci-cd-notes.md`）。
 - Claude Code CLIはdevcontainer.jsonの`ghcr.io/anthropics/devcontainer-features/claude-code`featureで導入（Dockerfile側での重複インストールはしない）。`gh`（GitHub CLI）は`ghcr.io/devcontainers/features/github-cli`featureで導入（`/cicd`等のコマンドが前提とするため）。
 - **トークン消費を抑えるための除外設定**: `.claude/settings.json`の`permissions.deny`/`ask`で、lockファイル・`target/`・`.venv/`・ベンチマークのフィクスチャJSON等を除外している。
 - 詳細は`.claude/settings.json`を参照。

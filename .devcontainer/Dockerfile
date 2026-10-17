@@ -139,6 +139,8 @@ ENV PATH="${CARGO_HOME}/bin:${PATH}"
 # サプライチェーン攻撃対策として、cargo経由で入れる開発ツールはバージョンを固定し、
 # ソースからビルドする（`--locked`でツール自身の依存もそのクレートのCargo.lockで固定）。
 # cargo-auditのバージョンはCIの`ci_engine.yml`（`tool: cargo-audit@...`）と揃えること。
+# 新版の有無と両者の食い違いは.github/workflows/check_cargo_tool_updates.ymlが週次で確認し、
+# Issueで通知する（`ARG`名と`cargo install`行の`<crate>@${ARG}`の書式を変えると解析できなくなる）。
 ARG CARGO_AUDIT_VERSION=0.22.2
 ARG CARGO_ABOUT_VERSION=0.9.2
 ARG CARGO_LLVM_COV_VERSION=0.9.1

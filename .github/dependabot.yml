@@ -33,6 +33,7 @@ updates:
 
   # .devcontainer/Dockerfileのベースイメージ（python:3.14-slim-bookworm）。
   # Rパッケージ・R本体はDependabot非対応のため別途check_r_updates.ymlで確認する。
+  # cargo install でピン留めした開発ツールも同様にcheck_cargo_tool_updates.ymlで確認する。
   - package-ecosystem: "docker"
     directory: "/.devcontainer"
     target-branch: "dev"

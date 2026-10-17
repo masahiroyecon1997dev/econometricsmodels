@@ -267,6 +267,10 @@ def build_fixtures() -> dict:
             "なりうる。"
             "baseline.confidence_levelは非既定の信頼水準（0.90）のクロスチェックで、"
             "係数と限界効果の信頼区間を全cov_type（opg・hc1を含む）とクラスターで持つ。"
+            "全エントリが予測関連の参照値を持つ: 分類表pred_table（確率>0.5で1）、"
+            "標本内の予測確率の先頭10行predict_headと全行の合計predict_sum、"
+            "新規データ（学習データの各傾きの平均±1標準偏差の2行new_x）の予測確率"
+            "predict_new_data。"
             "パラメータ名は全ソースで切片を'const'に正規化済み。"
         ),
     }

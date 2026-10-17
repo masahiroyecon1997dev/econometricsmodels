@@ -295,6 +295,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   異なる。0/1の分類結果が欲しい場合は`predict()`の出力に自前でしきい値を適用するか、学習データに限り
   `pred_table()`を使う。これはstatsmodelsの`predict()`と同じ標準的な慣習であり、docstringの
   注記で明示する。
+- 検証: Rクロスチェック（`run_glm_crosscheck.R`）が全エントリで`pred_table`（確率>0.5で1、既定のしきい値のみ）・標本内予測確率（先頭10行と全行の合計）・新規データ（学習データの各傾きの平均±1標準偏差の2行）の予測確率を出し、`predict()`と`augment()`の両方を`RTOL=2e-7`で比べる。statsmodels側は`pred_table`を全ケースで、`predict(new_data)`をライブで比べる（切片あり・なし）。
 - **`augment(new_data=None)`は`predict()`と同じ`new_data`意味論**で、ソースデータ（学習データまたは
   `new_data`）に予測確率の列（`"predicted_probability"`）を1列付加したpolars DataFrameを返す（OLSの
   `augment()`と同型）。列名衝突（ソースデータに既に`"predicted_probability"`列が

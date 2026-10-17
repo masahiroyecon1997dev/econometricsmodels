@@ -3,6 +3,8 @@
 - 分離・準分離・打ち切りの境界を作る合成データ（`separated_dataset`等）と、
   Wooldridge `apple`のロード（`load_apple_adoption_dataset`）。
 - `check_margeff`: 限界効果6統計量を`at`×係数名の全組み合わせで比較する。
+- `check_predictions`: `pred_table()`・`predict()`・`augment()`（標本内と新規データ）を
+  Rの参照値と比較する（Logit/Probit。Tobitは`_tobit_checks.py`に別途ある）。
 
 全系統で共通のデータ生成は`_helpers.py`、アサーションは`_assertions.py`を参照。
 """
@@ -315,3 +317,89 @@ def check_margeff(
                 rtol=rtol,
                 atol=atol,
             )
+
+
+# `run_glm_crosscheck.R`の`PRED_HEAD`（標本内予測の先頭の行数）と同じ値。
+PREDICT_HEAD_ROWS = 10
+
+# 分類表を整数で比べるときに、確率が0.5から離れていなければならない最小の距離。
+# 実装とRの確率の差（~1e-7）より十分大きい。
+PRED_TABLE_MIN_MARGIN = 1e-6
+
+
+def check_predictions(
+    res, ref: dict, label: str, *, rtol: float, atol: float
+) -> None:
+    """`pred_table()`・`predict()`・`augment()`をRの参照値と比較する。
+
+    参照値は`run_glm_crosscheck.R`の出力: 分類表`pred_table`（行=実際のクラス、
+    列=予測クラス、確率>0.5で1）、標本内の予測確率の先頭`predict_head`と全行の合計
+    `predict_sum`、新規データ`new_x`（学習データの各傾きの平均±1標準偏差の2行）に対する
+    予測確率`predict_new_data`。`augment()`は`predict()`と同じ確率を
+    `predicted_probability`列に付けた表なので、同じ参照値で比べる。
+    """
+    predicted = res.predict()
+    # 分類表は整数の一致で比べるため、0.5のごく近くに確率を持つ観測があると、
+    # 実装とRの確率の微小なずれ（~1e-7）で分類が分かれて誤って落ちる。データに
+    # その余裕があることを先に確かめ、無ければ原因が分かる形で落とす
+    # （既存のフィクスチャの最小の余裕は~3e-5）。
+    margin = min(abs(p - 0.5) for p in predicted)
+    assert margin > PRED_TABLE_MIN_MARGIN, (
+        f"{label}/pred_table: a probability lies within {margin!r} of the "
+        "threshold 0.5, so the classification table cannot be compared"
+    )
+    ours_table = {
+        row["actual"]: (row["predicted_0"], row["predicted_1"])
+        for row in res.pred_table()
+    }
+    assert set(ours_table) == {0, 1}, f"{label}/pred_table/actual"
+    for actual, ref_row in enumerate(ref["pred_table"]):
+        assert ours_table[actual] == tuple(ref_row), (
+            f"{label}/pred_table/{actual}: ours={ours_table[actual]}, "
+            f"ref={tuple(ref_row)}"
+        )
+
+    assert len(predicted) == res.n_obs, f"{label}/predict/length"
+    head = ref["predict_head"]
+    assert len(head) == min(PREDICT_HEAD_ROWS, len(predicted)), (
+        f"{label}/predict/head_length"
+    )
+    for i, ref_value in enumerate(head):
+        assert_close(
+            predicted[i],
+            ref_value,
+            f"{label}/predict/[{i}]",
+            rtol=rtol,
+            atol=atol,
+        )
+    assert_close(
+        sum(predicted),
+        ref["predict_sum"],
+        f"{label}/predict/sum",
+        rtol=rtol,
+        atol=atol,
+    )
+    augmented = res.augment()
+    assert augmented["predicted_probability"].to_list() == predicted, (
+        f"{label}/augment/in_sample"
+    )
+
+    new_data = pl.DataFrame(ref["new_x"])
+    ref_new = ref["predict_new_data"]
+    predicted_new = res.predict(new_data)
+    assert len(predicted_new) == len(ref_new), f"{label}/predict_new/length"
+    augmented_new = res.augment(new_data)
+    assert augmented_new["predicted_probability"].to_list() == predicted_new, (
+        f"{label}/augment/new_data"
+    )
+    assert augmented_new.select(new_data.columns).equals(new_data), (
+        f"{label}/augment/new_data_columns"
+    )
+    for i, ref_value in enumerate(ref_new):
+        assert_close(
+            predicted_new[i],
+            ref_value,
+            f"{label}/predict_new/[{i}]",
+            rtol=rtol,
+            atol=atol,
+        )

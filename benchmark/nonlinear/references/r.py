@@ -40,6 +40,15 @@ _GLM_SCALAR_KEYS = (
     "refit_max_rel_change",
 )
 
+# 名前正規化不要でそのまま通す予測関連のキー。
+_GLM_PREDICTION_KEYS = (
+    "pred_table",
+    "predict_head",
+    "predict_sum",
+    "predict_new_data",
+    "new_x",
+)
+
 
 def run_glm_r(
     csv_path: Path,
@@ -69,13 +78,27 @@ def run_glm_r(
         extra.append(f"--confidence-level={confidence_level}")
 
     raw = run_r(_R_SCRIPT, csv_path, formula, cov_type, extra_args=extra)
-    return normalize_names(
+    result = normalize_names(
         raw,
         stat_key="test_stats",
         scalar_keys=_GLM_SCALAR_KEYS,
         conf_from_low_high=True,
         fix_margeff=True,
     )
+    # 名前正規化が要らない予測関連の出力（`pred_table`は2x2の`[actual][predicted]`、
+    # `new_x`は`predict(new_data=...)`に渡す新規データのx列）。
+    for key in _GLM_PREDICTION_KEYS:
+        result[key] = raw[key]
+    # `new_x`の列名はRの`model.matrix`の列名。Python側の`x`列（切片を除く係数名）と
+    # 一致しないと`predict(new_data=...)`に渡せない（式に`I(x^2)`や因子を使った場合等）。
+    slope_names = set(result["params"]) - {"const"}
+    if set(result["new_x"]) != slope_names:
+        raise RuntimeError(
+            f"new_x columns {sorted(result['new_x'])} do not match the slope "
+            f"coefficients {sorted(slope_names)}; use plain column names in "
+            "the formula"
+        )
+    return result
 
 
 def glm_reference_settings() -> dict:

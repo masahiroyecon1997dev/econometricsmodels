@@ -46,7 +46,11 @@ from _assertions import (
 )
 from _constants import APPLE_CLUSTER, APPLE_X, DATA_DIR, MROZ_X
 from _helpers import load_wooldridge_dataset, with_cluster_groups
-from _nonlinear_helpers import check_margeff, load_apple_adoption_dataset
+from _nonlinear_helpers import (
+    check_margeff,
+    check_predictions,
+    load_apple_adoption_dataset,
+)
 from _tolerances import TOLERANCES
 from econometricsmodels import Probit, ProbitOptions
 
@@ -110,6 +114,7 @@ def _check_result(
         atol=ATOL,
         confidence_level=confidence_level,
     )
+    check_predictions(res, ref, label, rtol=RTOL, atol=ATOL)
 
 
 # ── 凍結フィクスチャとの数値照合（合成データ） ────────────────────────

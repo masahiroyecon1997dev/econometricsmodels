@@ -344,6 +344,47 @@ margeff <- list(
   }))
 )
 
+# 予測確率と分類表。cov_typeに依存しない（点推定のみ）ため全エントリに同じ形で出す。
+# `pred_table`は本実装・statsmodelsと同じ規約: 行は実際のクラス（y >= 0.5で0/1）、
+# 列は予測クラス（確率 > 0.5 で1。ちょうど0.5は0側の厳密な不等号）。
+fitted_prob <- as.numeric(fitted(model))
+pred_table <- matrix(
+  as.numeric(table(
+    factor(as.integer(model$y >= 0.5), levels = 0:1),
+    factor(as.integer(fitted_prob > 0.5), levels = 0:1)
+  )),
+  nrow = 2,
+  ncol = 2
+)
+
+stopifnot(sum(pred_table) == nrow(df))
+
+# 標本内予測は先頭PRED_HEAD行と全行の合計（先頭以外の行の取り違えも合計で検知する）。
+PRED_HEAD <- 10
+predict_head <- fitted_prob[seq_len(min(PRED_HEAD, length(fitted_prob)))]
+predict_sum <- sum(fitted_prob)
+
+# 新規データ（out-of-sample）の予測確率。学習データの各スロープ列の「平均+1標準偏差」
+# 「平均-1標準偏差」を値とする2行を作り、`linkinv(new_mm %*% beta)`で計算する。
+# 切片列がある場合は常に1。この検証が対象にするのは確率の式そのもの（標本内で検証済み）
+# ではなく、新規データの設計行列組み立て（切片の自動付加・列名による対応付け）が
+# Rの`model.matrix`の規約と一致すること。Python側は`new_x`をそのまま`new_data`に使う。
+mm <- model.matrix(model)
+beta <- coef(model)
+slope_cols <- which(colnames(mm) != "(Intercept)")
+new_mm <- matrix(0, nrow = 2, ncol = ncol(mm))
+colnames(new_mm) <- colnames(mm)
+if ("(Intercept)" %in% colnames(mm)) new_mm[, "(Intercept)"] <- 1
+slope_means <- colMeans(mm[, slope_cols, drop = FALSE])
+slope_sds <- apply(mm[, slope_cols, drop = FALSE], 2, sd)
+new_mm[1, slope_cols] <- slope_means + slope_sds
+new_mm[2, slope_cols] <- slope_means - slope_sds
+predict_new_data <- as.numeric(model$family$linkinv(new_mm %*% beta))
+new_x <- list()
+for (col_idx in slope_cols) {
+  new_x[[colnames(mm)[col_idx]]] <- new_mm[, col_idx]
+}
+
 result <- list(
   params = as.list(coefs),
   std_errors = as.list(ses),
@@ -361,6 +402,11 @@ result <- list(
   irls_iterations = irls_iterations,
   refit_count = refit_count,
   refit_max_rel_change = refit_max_rel_change,
-  margeff = margeff
+  margeff = margeff,
+  pred_table = pred_table,
+  predict_head = predict_head,
+  predict_sum = predict_sum,
+  predict_new_data = predict_new_data,
+  new_x = new_x
 )
 cat(toJSON(result, auto_unbox = TRUE, digits = NA))

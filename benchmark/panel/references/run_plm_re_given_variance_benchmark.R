@@ -58,10 +58,13 @@
 #   Rscript run_plm_re_given_variance_benchmark.R data.csv "y ~ x1 + x2" dk \
 #       entity time 1.5274426 0.8642969 3
 
-# `benchmark/common/_common.R`の`wald_f_test()`を使う（Rには__file__相当が無い
-# ため、commandArgs()の--file=から自身のディレクトリを特定してsource()する）。
+# `benchmark/common/_common.R`の`wald_f_test()`と、同じディレクトリの
+# `_given_variance.R`（準偏差変換とcov_type別のvcov）を使う（Rには__file__相当が
+# 無いため、commandArgs()の--file=から自身のディレクトリを特定してsource()する）。
 script_path <- sub("^--file=", "", grep("^--file=", commandArgs(), value = TRUE))
-source(file.path(dirname(script_path), "..", "..", "common", "_common.R"))
+script_dir <- dirname(script_path)
+source(file.path(script_dir, "..", "..", "common", "_common.R"))
+source(file.path(script_dir, "_given_variance.R"))
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 7) {
@@ -89,25 +92,17 @@ vars <- all.vars(as.formula(formula_str))
 y_name <- vars[1]
 x_names <- vars[-1]
 
-t_i <- ave(rep(1, nrow(df)), df[[entity_col]], FUN = sum)
-if (length(unique(t_i)) == 1) {
-  stop("balanced panel: use run_plm_benchmark.R (see the module comment)")
-}
-theta <- 1 - sqrt(sigma2_eps / (sigma2_eps + t_i * sigma2_u))
-
-quasi_demean <- function(v) {
-  v - theta * ave(v, df[[entity_col]], FUN = mean)
-}
+theta <- given_variance_theta(df, entity_col, sigma2_eps, sigma2_u)
 const_name <- "const__transformed"
 d <- data.frame(
   df[[entity_col]],
   df[[time_col]],
-  quasi_demean(df[[y_name]]),
+  quasi_demean(df[[y_name]], df, entity_col, theta),
   1 - theta
 )
 names(d) <- c(entity_col, time_col, y_name, const_name)
 for (x in x_names) {
-  d[[x]] <- quasi_demean(df[[x]])
+  d[[x]] <- quasi_demean(df[[x]], df, entity_col, theta)
 }
 
 pdf <- pdata.frame(d, index = c(entity_col, time_col))
@@ -123,30 +118,14 @@ n_periods <- length(unique(df[[time_col]]))
 df_resid <- df.residual(model)
 
 # cov_typeごとのvcovとt分布の自由度（モジュールコメント参照）。
-if (cov_type == "classical") {
-  vc <- vcov(model)
-  t_df <- df_resid
-} else if (cov_type == "hc1") {
-  vc <- vcovHC(model, method = "white1", type = "HC1")
-  t_df <- df_resid
-} else if (cov_type == "hc2") {
-  vc <- vcovHC(model, method = "white1", type = "HC2")
-  t_df <- df_resid
-} else if (cov_type == "hc3") {
-  vc <- vcovHC(model, method = "white1", type = "HC3")
-  t_df <- df_resid
-} else if (cov_type == "cluster") {
-  vc <- vcovHC(model, method = "arellano", type = "sss")
-  t_df <- n_groups - 1
-} else if (cov_type == "dk") {
-  if (length(args) < 8) {
-    stop("dk requires maxlag as the 8th argument")
-  }
-  vc <- vcovSCC(model, maxlag = as.integer(args[8]), type = "sss")
-  t_df <- n_periods - 1
-} else {
-  stop(paste("unknown cov_type:", cov_type))
-}
+maxlag <- if (length(args) >= 8) as.integer(args[8]) else NA
+vc <- plm_vcov_function(cov_type, maxlag)(model)
+t_df <- switch(
+  cov_type,
+  cluster = n_groups - 1,
+  dk = n_periods - 1,
+  df_resid
+)
 coefs <- coef(model)
 ses <- sqrt(diag(vc))
 

@@ -32,7 +32,11 @@ from benchmark.common import (
     imbalanced_cluster_groups,
     run_fixture_cli,
 )
-from benchmark.iv.constants import CARD_X_EXOG, LINEARMODELS_COV_TYPES
+from benchmark.iv.constants import (
+    CARD_X_EXOG,
+    CONFIDENCE_LEVEL_NON_DEFAULT,
+    LINEARMODELS_COV_TYPES,
+)
 from benchmark.iv.datasets import (
     MULTI_ENDOG_SCENARIOS,
     NUMERIC_SCENARIOS,
@@ -101,6 +105,26 @@ def build_fixtures() -> dict:
                 groups=imbalanced_cluster_groups(n),
             )
             fixtures[scenario]["cluster_g2"] = _run_cluster_g2_case()
+
+            # confidence_level非既定（0.95以外）。信頼区間の臨界値はcov_typeごとに
+            # 自由度が異なる（clusterはt(G-1)）ため、全cov_typeとclusterで持つ。
+            fixtures[scenario]["confidence_level"] = {
+                cov_type: run(
+                    dataset=scenario,
+                    x_exog_cols=x_exog,
+                    x_endog_cols=["endog1"],
+                    instrument_cols=instruments,
+                    cov_type=cov_type,
+                    confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+                )
+                for cov_type in LINEARMODELS_COV_TYPES
+            }
+            fixtures[scenario]["confidence_level"]["cluster"] = (
+                _run_cluster_case(
+                    "baseline",
+                    confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+                )
+            )
             # G=2境界の成功パス。実装時に`econometricsmodels.IV`で実際に試したところ
             # `TwoSlsEstimator`の第一段階回帰（`x_exog=[]`・instruments=1本・G=2の
             # クラスターロバストF検定）が`ComputationError`（"near-singular"）を
@@ -121,6 +145,14 @@ def build_fixtures() -> dict:
                 x_endog_cols=["endog1", "endog2"],
                 instrument_cols=multi_endog_instruments(scenario),
                 cov_type=cov_type,
+            )
+        if scenario == "baseline":
+            # 複数内生変数×クラスターロバストSE。Wu-HausmanのF分布の自由度は
+            # (n_endog, G-1)=(2, 9)になる（n_endog=1のbaselineでは走らない経路）。
+            fixtures["multi_endog"][scenario]["cluster"] = _run_cluster_case(
+                "baseline_multi_endog",
+                x_endog_cols=["endog1", "endog2"],
+                instrument_cols=["z1", "z2", "z3"],
             )
 
     # 実データセット（Wooldridge card、Card 1995の大学近接操作変数による教育の
@@ -200,6 +232,9 @@ def build_fixtures() -> dict:
             "cluster_g2（G=2境界の成功パス）は、`engine/src/iv/CLAUDE.md`"
             "「修正済み」に記録の`k_constant`取り違えバグの修正後にフィクスチャ化"
             "した。"
+            "baseline.confidence_levelはconfidence_level="
+            f"{CONFIDENCE_LEVEL_NON_DEFAULT}（既定0.95以外）を全cov_type"
+            "（classical/hc0/hc1/hac）とclusterで持つ。"
             "invalid_instrument（最後の操作変数を構造誤差と相関させ、Sargan検定が"
             "棄却する）・many_regressors（k_exog=20、列ごとに0.1〜100倍のスケール差）"
             "・outlier_regressor（x1の5%が外れ値）は他のシナリオと同じ構成。"
@@ -234,10 +269,14 @@ def _run_cluster_case(
     dataset: str,
     groups: list | None = None,
     include_intercept: bool = True,
+    x_endog_cols: list[str] | None = None,
+    instrument_cols: list[str] | None = None,
+    confidence_level: float = 0.95,
 ) -> dict:
     """クラスターロバストSE確認用に、疑似グループを付けて
     `benchmark/iv/references/linearmodels_ref.py` を呼ぶ
     （`generate_ols_fixtures.py`の`_run_cluster_case`と同じ発想）。
+    `x_endog_cols`・`instrument_cols`の既定は`["endog1"]`・`["z1", "z2"]`。
     """
     filename = f"iv_{dataset}.csv"
     df = pl.read_csv(DATA_DIR / filename)
@@ -252,11 +291,12 @@ def _run_cluster_case(
         return run(
             dataset=f"{dataset}_cluster_tmp",
             x_exog_cols=["x1"],
-            x_endog_cols=["endog1"],
-            instrument_cols=["z1", "z2"],
+            x_endog_cols=x_endog_cols or ["endog1"],
+            instrument_cols=instrument_cols or ["z1", "z2"],
             cov_type="cluster",
             cluster="cluster_group",
             include_intercept=include_intercept,
+            confidence_level=confidence_level,
         )
     finally:
         tmp_path.unlink()

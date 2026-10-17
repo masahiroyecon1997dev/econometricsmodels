@@ -63,6 +63,7 @@ from _assertions import (
     assert_dict_close,
     assert_fields_close,
     assert_inference_close,
+    assert_p_value_close,
 )
 from _constants import DATA_DIR
 from _helpers import (
@@ -76,7 +77,11 @@ from _tolerances import TOLERANCES
 from econometricsmodels import IV, IVOptions
 
 from benchmark.common import imbalanced_cluster_groups
-from benchmark.iv.constants import CARD_X_EXOG, LINEARMODELS_COV_TYPES
+from benchmark.iv.constants import (
+    CARD_X_EXOG,
+    CONFIDENCE_LEVEL_NON_DEFAULT,
+    LINEARMODELS_COV_TYPES,
+)
 from benchmark.iv.datasets import (
     MULTI_ENDOG_SCENARIOS,
     multi_endog_instruments,
@@ -166,10 +171,11 @@ def _check_result(
                 ref["hansen_j_statistic"],
                 f"{label}/overid_statistic",
             )
-            _assert_close(
+            assert_p_value_close(
                 res.overid_p_value,
                 ref["hansen_j_p_value"],
                 f"{label}/overid_p_value",
+                rtol=RTOL,
             )
 
     assert res.wu_hausman_statistic is None, f"{label}/wu_hausman_statistic"
@@ -376,6 +382,35 @@ def test_multi_endog_other_weight_types_match_linearmodels(
             "classical"
         ],
         f"multi_endog/{scenario}/{gmm_weight_type}/classical",
+    )
+
+
+def test_multi_endog_cluster_matches_linearmodels(fixtures):
+    """複数内生変数×クラスター共分散（classical重み、疑似グループ行番号%10）。"""
+    df = with_cluster_groups(
+        pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv"), 10
+    )
+    options = IVOptions(
+        estimator="gmm",
+        gmm_weight_type="classical",
+        cov_type="cluster",
+        cluster="cluster_group",
+    )
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1", "endog2"],
+        instruments=["z1", "z2", "z3"],
+        options=options,
+    ).fit()
+
+    _check_result(
+        res,
+        fixtures["synthetic"]["multi_endog"]["baseline"]["classical"][
+            "cluster"
+        ],
+        "multi_endog/baseline/classical/cluster",
     )
 
 
@@ -714,3 +749,59 @@ def test_no_intercept_other_weight_types_match_linearmodels(
     label = f"no_intercept/{scenario}/{gmm_weight_type}/classical"
     assert "const" not in res.param_names, label
     _check_result(res, ref, label)
+
+
+@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
+def test_confidence_level_matches_linearmodels(fixtures, cov_type):
+    """`confidence_level`非既定（classical重み、baselineシナリオ）。GMMの信頼区間は
+    z分布の臨界値で、`cov_type`によらず一致すること。クラスターは
+    `test_confidence_level_cluster_matches_linearmodels`。
+    """
+    df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
+    options = IVOptions(
+        estimator="gmm",
+        gmm_weight_type="classical",
+        confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+        cov_type=cov_type,
+        **hac_time_for(cov_type),
+    )
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1"],
+        instruments=["z1", "z2"],
+        options=options,
+    ).fit()
+
+    _check_result(
+        res,
+        fixtures["synthetic"]["baseline"]["confidence_level"][cov_type],
+        f"confidence_level/{cov_type}",
+    )
+
+
+def test_confidence_level_cluster_matches_linearmodels(fixtures):
+    """`confidence_level`非既定×クラスター共分散（classical重み）。"""
+    df = with_cluster_groups(pl.read_csv(DATA_DIR / "iv_baseline.csv"), 10)
+    options = IVOptions(
+        estimator="gmm",
+        gmm_weight_type="classical",
+        confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+        cov_type="cluster",
+        cluster="cluster_group",
+    )
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1"],
+        instruments=["z1", "z2"],
+        options=options,
+    ).fit()
+
+    _check_result(
+        res,
+        fixtures["synthetic"]["baseline"]["confidence_level"]["cluster"],
+        "confidence_level/cluster",
+    )

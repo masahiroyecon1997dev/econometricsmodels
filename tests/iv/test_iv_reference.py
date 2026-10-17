@@ -63,6 +63,7 @@ from _assertions import (
     assert_dict_close,
     assert_fields_close,
     assert_inference_close,
+    assert_p_value_close,
 )
 from _constants import DATA_DIR
 from _helpers import (
@@ -75,7 +76,11 @@ from _tolerances import TOLERANCES
 from econometricsmodels import IV, IVOptions
 
 from benchmark.common import imbalanced_cluster_groups
-from benchmark.iv.constants import CARD_X_EXOG, LINEARMODELS_COV_TYPES
+from benchmark.iv.constants import (
+    CARD_X_EXOG,
+    CONFIDENCE_LEVEL_NON_DEFAULT,
+    LINEARMODELS_COV_TYPES,
+)
 from benchmark.iv.datasets import (
     MULTI_ENDOG_SCENARIOS,
     multi_endog_instruments,
@@ -137,10 +142,11 @@ def _check_result(res, ref: dict, label: str) -> None:
             ref["sargan_statistic"],
             f"{label}/overid_statistic",
         )
-        _assert_close(
+        assert_p_value_close(
             res.overid_p_value,
             ref["sargan_p_value"],
             f"{label}/overid_p_value",
+            rtol=RTOL,
         )
 
     # ref側がNone（df1: 拡張回帰がsaturatedで双方None）のときは比較自体を
@@ -151,10 +157,11 @@ def _check_result(res, ref: dict, label: str) -> None:
             ref["wu_hausman_statistic"],
             f"{label}/wu_hausman_statistic",
         )
-        _assert_close(
+        assert_p_value_close(
             res.wu_hausman_p_value,
             ref["wu_hausman_p_value"],
             f"{label}/wu_hausman_p_value",
+            rtol=RTOL,
         )
 
     _assert_dict_close(
@@ -290,6 +297,33 @@ def test_multi_endog_matches_linearmodels(fixtures, scenario, cov_type):
     )
 
 
+def test_multi_endog_cluster_matches_linearmodels(fixtures):
+    """複数内生変数×クラスターロバストSE（疑似グループ行番号%10）。Wu-Hausmanの
+    F分布の自由度が`(n_endog, G-1)=(2, 9)`になる経路（内生変数1本の`baseline`
+    のクラスターでは`(1, 9)`）。
+    """
+    df = with_cluster_groups(
+        pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv"), 10
+    )
+    options = IVOptions(cov_type="cluster", cluster="cluster_group")
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1", "endog2"],
+        instruments=["z1", "z2", "z3"],
+        options=options,
+    ).fit()
+
+    _check_result(
+        res,
+        fixtures["synthetic"]["multi_endog"]["baseline"]["cluster"],
+        "multi_endog/baseline/cluster",
+    )
+    assert res.wu_hausman_df_num == 2
+    assert res.wu_hausman_df_denom == 9
+
+
 @pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
 def test_df1_matches_linearmodels(fixtures, cov_type):
     """自由度1境界（df_resid=1ちょうど）の成功パス。`x_exog=[]`・
@@ -313,6 +347,9 @@ def test_df1_matches_linearmodels(fixtures, cov_type):
     _check_result(
         res, fixtures["synthetic"]["df1"][cov_type], f"df1/{cov_type}"
     )
+    # augmented regressionがsaturatedで、本実装も参照と同じくNoneを返す。
+    assert res.wu_hausman_statistic is None, f"df1/{cov_type}"
+    assert res.wu_hausman_p_value is None, f"df1/{cov_type}"
 
 
 # ── 凍結フィクスチャとの数値照合（オプション） ────────────────────────
@@ -375,6 +412,60 @@ def test_no_intercept_cluster_matches_linearmodels(fixtures):
 
 # 完全な多重共線性・極端なスケール差（`ComputationError` パス）は
 # `test_iv_validation.py`で確認する。
+
+
+@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
+def test_confidence_level_matches_linearmodels(fixtures, cov_type):
+    """`confidence_level`非既定が、cov_typeによらず信頼区間の臨界値まで
+    linearmodelsと一致すること（baselineシナリオ）。クラスターは
+    `test_confidence_level_cluster_matches_linearmodels`。
+    """
+    df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
+    options = IVOptions(
+        confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+        cov_type=cov_type,
+        **hac_time_for(cov_type),
+    )
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1"],
+        instruments=["z1", "z2"],
+        options=options,
+    ).fit()
+
+    _check_result(
+        res,
+        fixtures["synthetic"]["baseline"]["confidence_level"][cov_type],
+        f"confidence_level/{cov_type}",
+    )
+
+
+def test_confidence_level_cluster_matches_linearmodels(fixtures):
+    """`confidence_level`非既定×クラスターロバストSE。信頼区間の臨界値は
+    t(G-1)（`df_resid`ではない）で計算される。
+    """
+    df = with_cluster_groups(pl.read_csv(DATA_DIR / "iv_baseline.csv"), 10)
+    options = IVOptions(
+        confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+        cov_type="cluster",
+        cluster="cluster_group",
+    )
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1"],
+        instruments=["z1", "z2"],
+        options=options,
+    ).fit()
+
+    _check_result(
+        res,
+        fixtures["synthetic"]["baseline"]["confidence_level"]["cluster"],
+        "confidence_level/cluster",
+    )
 
 
 # ── 凍結フィクスチャとの数値照合（実データ） ──────────────────────────

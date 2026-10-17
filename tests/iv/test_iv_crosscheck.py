@@ -58,6 +58,7 @@ from _assertions import (
     assert_dict_close,
     assert_fields_close,
     assert_inference_close,
+    assert_p_value_close,
 )
 from _constants import DATA_DIR
 from _helpers import (
@@ -171,10 +172,11 @@ def _check_result(
             ref["sargan_statistic"],
             f"{label}/overid_statistic",
         )
-        _assert_close(
+        assert_p_value_close(
             res.overid_p_value,
             ref["sargan_p_value"],
             f"{label}/overid_p_value",
+            rtol=RTOL_STRICT,
         )
 
     # wu_hausmanは全cov_typeでフィクスチャに実測値を持つ。
@@ -200,10 +202,11 @@ def _check_result(
             f"{label}/wu_hausman_statistic",
         )
         if n_clusters is None:
-            _assert_close(
+            assert_p_value_close(
                 res.wu_hausman_p_value,
                 ref["wu_hausman_p_value"],
                 f"{label}/wu_hausman_p_value",
+                rtol=RTOL_STRICT,
             )
         else:
             # cluster cov_typeはivregのWald検定がF分布の分母自由度にクラスター数を
@@ -214,21 +217,23 @@ def _check_result(
             assert ref["wu_hausman_p_value"] is None, (
                 f"{label}/wu_hausman_p_value"
             )
+            # 自由度は本実装の値を検証対象にせず、参照側から独立に決まる値
+            # （内生変数の数、クラスター数-1）と照合する。
+            n_endog = len(ref["weak_instrument_f"])
+            assert res.wu_hausman_df_num == n_endog, (
+                f"{label}/wu_hausman_df_num"
+            )
             assert res.wu_hausman_df_denom == n_clusters - 1, (
                 f"{label}/wu_hausman_df_denom"
             )
-            assert res.wu_hausman_df_num is not None
             recomputed = sps.f.sf(
-                ref["wu_hausman_statistic"],
-                res.wu_hausman_df_num,
-                n_clusters - 1,
+                ref["wu_hausman_statistic"], n_endog, n_clusters - 1
             )
-            assert_close(
+            assert_p_value_close(
                 res.wu_hausman_p_value,
                 float(recomputed),
                 f"{label}/wu_hausman_p_value_recomputed",
                 rtol=RTOL_STRICT,
-                atol=0.0,
             )
 
 
@@ -332,6 +337,10 @@ def test_cluster_g2_matches_r(crosscheck):
         "cluster_g2/R",
         check_wu_hausman=False,
     )
+    # 拡張回帰の傾き係数の数q_aug=2がG=2以上のため、本実装はNoneを返す
+    # （ivreg側は値を返すので比較はしない）。
+    assert res.wu_hausman_statistic is None
+    assert res.wu_hausman_p_value is None
 
 
 @pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
@@ -353,6 +362,31 @@ def test_multi_endog_matches_r(crosscheck, scenario, cov_type):
 
     ref = crosscheck["multi_endog"][scenario][cov_type]
     _check_result(res, ref, f"multi_endog/{scenario}/{cov_type}/R")
+
+
+def test_multi_endog_cluster_matches_r(crosscheck):
+    """複数内生変数×クラスターロバストSE（`test_iv_reference.py`の同名テストと
+    同じ再現条件）。Wu-Hausmanのp値は、Rの統計量とF(2, G-1)から再計算して比較する。
+    """
+    df = with_cluster_groups(
+        pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv"), 10
+    )
+    options = IVOptions(cov_type="cluster", cluster="cluster_group")
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1", "endog2"],
+        instruments=["z1", "z2", "z3"],
+        options=options,
+    ).fit()
+
+    _check_result(
+        res,
+        crosscheck["multi_endog"]["baseline"]["cluster"],
+        "multi_endog/baseline/cluster/R",
+        n_clusters=df["cluster_group"].n_unique(),
+    )
 
 
 @pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)

@@ -51,7 +51,11 @@ from benchmark.common import (
     imbalanced_cluster_groups,
     run_fixture_cli,
 )
-from benchmark.iv.constants import CARD_X_EXOG, LINEARMODELS_COV_TYPES
+from benchmark.iv.constants import (
+    CARD_X_EXOG,
+    CONFIDENCE_LEVEL_NON_DEFAULT,
+    LINEARMODELS_COV_TYPES,
+)
 from benchmark.iv.datasets import (
     MULTI_ENDOG_SCENARIOS,
     NUMERIC_SCENARIOS,
@@ -139,6 +143,28 @@ def build_fixtures() -> dict:
                 )
             )
 
+            # confidence_level非既定（0.95以外）。classical重み×全cov_type
+            # （GMMの信頼区間はz分布）とcluster。
+            fixtures[scenario]["confidence_level"] = {
+                cov_type: run_gmm(
+                    dataset=scenario,
+                    x_exog_cols=x_exog,
+                    x_endog_cols=["endog1"],
+                    instrument_cols=instruments,
+                    weight_type="classical",
+                    cov_type=cov_type,
+                    confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+                )
+                for cov_type in LINEARMODELS_COV_TYPES
+            }
+            fixtures[scenario]["confidence_level"]["cluster"] = (
+                _run_cluster_case(
+                    "baseline",
+                    weight_type="classical",
+                    confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+                )
+            )
+
             for weight_type in OTHER_WEIGHT_TYPES:
                 if weight_type == "cluster":
                     fixtures[scenario][weight_type] = {
@@ -207,6 +233,14 @@ def build_fixtures() -> dict:
                 instrument_cols=multi_instruments,
                 weight_type="classical",
                 cov_type=cov_type,
+            )
+        if scenario == "baseline":
+            # 複数内生変数×クラスター共分散（classical重み）。
+            entry["classical"]["cluster"] = _run_cluster_case(
+                f"{scenario}_multi_endog",
+                weight_type="classical",
+                x_endog_cols=["endog1", "endog2"],
+                instrument_cols=multi_instruments,
             )
         for weight_type in MULTI_ENDOG_OTHER_WEIGHT_TYPES[scenario]:
             if weight_type == "cluster":
@@ -348,6 +382,9 @@ def build_fixtures() -> dict:
             "perfect_multicollinearity/G=2クラスター境界はここに含まない"
             "（2SLSの`iv.json`と同じ理由、G=2境界は`engine/src/iv/CLAUDE.md`"
             "「修正済み」参照）。"
+            "baseline.confidence_levelはconfidence_level="
+            f"{CONFIDENCE_LEVEL_NON_DEFAULT}（既定0.95以外）をclassical重み×全cov_type"
+            "とclusterで持つ。"
             "invalid_instrument（最後の操作変数を構造誤差と相関させ、Hansen Jが"
             "棄却する）はclassical重みに加えてrobust重み×classical共分散も持つ。"
             "multi_endog（複数内生変数、x_endog=['endog1','endog2']）は"
@@ -389,6 +426,7 @@ def _run_cluster_case(
     include_intercept: bool = True,
     x_endog_cols: list[str] | None = None,
     instrument_cols: list[str] | None = None,
+    confidence_level: float = 0.95,
 ) -> dict:
     """クラスターロバストSE確認用に、疑似グループを付けて`run_gmm`を呼ぶ
     （`generate_iv_fixtures.py`の`_run_cluster_case`と同じ発想）。
@@ -413,6 +451,7 @@ def _run_cluster_case(
             cov_type=cov_type,
             cluster="cluster_group",
             include_intercept=include_intercept,
+            confidence_level=confidence_level,
         )
     finally:
         tmp_path.unlink()

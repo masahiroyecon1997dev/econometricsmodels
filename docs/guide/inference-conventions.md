@@ -43,7 +43,7 @@ The defaults below were checked against R 4.5.3 (sandwich 3.1.3, lmtest 0.9.40, 
 | `fixest::feols` | t, `n - k`; with `cluster`, t with `G - 1` | OLS matches; FE's small-sample corrections (`cov_type="cluster"`/`"dk"`) and their degrees of freedom (`G - 1` / `t_periods - 1`) are aligned with fixest's `ssc()` defaults (`K.fixef="nonnested"` for cluster, `"full"` for `hc1`-`hc3`/`dk`). One exception: with `dk_bandwidth = t_periods - 1` fixest's `vcov = DK(...)` silently drops the last lag term (an off-by-one in its compiled code), so its standard errors differ from this package, which keeps the standard Bartlett kernel; smaller bandwidths agree |
 | `fixest::feglm` | z | same as Logit / Probit |
 | `plm` (`within`, `random`) | p-values from the normal distribution | FE and RE always use t (never normal), so p-values and confidence intervals differ; RE's `cov_type="cluster"` small-sample correction matches `plm::vcovHC(type="sss")` (Stata/R-style `G/(G-1)·(n-1)/(n-K)`) |
-| `ivreg::ivreg` | t | same as 2SLS |
+| `ivreg::ivreg` | t | same as 2SLS, except with cluster standard errors: `ivreg` takes the Wu-Hausman F denominator degrees of freedom from the observations (`n - k_aug`), while this package uses `G - 1` |
 | `AER::tobit` | z | same as Tobit |
 
 ### statsmodels
@@ -53,7 +53,7 @@ The defaults below were checked against R 4.5.3 (sandwich 3.1.3, lmtest 0.9.40, 
 
 ### linearmodels
 
-- **IV (`IV2SLS`, `IVGMM`)**: `fit(debiased=False)` is the default, which reports normal and chi-squared statistics. econometricsmodels 2SLS always reports t and F (equivalent to `debiased=True`); GMM always reports normal and chi-squared (equivalent to `debiased=False`).
+- **IV (`IV2SLS`, `IVGMM`)**: `fit(debiased=False)` is the default, which reports normal and chi-squared statistics. econometricsmodels 2SLS always reports t and F (equivalent to `debiased=True`, except with `cov_type="cluster"`, where the degrees of freedom are `G - 1` and linearmodels uses `n - k`); GMM always reports normal and chi-squared (equivalent to `debiased=False`).
 - **Panel (`PanelOLS`, `RandomEffects`)**: `fit(debiased=True)` is the default, which reports t and F, consistent with FE and RE here. Point estimates and the `classical`/`hc1`-`hc3` standard errors still match linearmodels' `PanelOLS`/`RandomEffects`. The `cluster` and `dk` standard errors and their degrees of freedom no longer match linearmodels: FE/RE switched to fixest (R) / Stata-style small-sample corrections (`G/(G-1)·(n-1)/(n-K)`) instead of linearmodels' `n/(n-extra_df-k)`, because that is what fixest, `xtreg` and `reghdfe` users expect. See `docs/spec/fe-spec.md` / `docs/spec/re-spec.md` for the exact formulas. The RE F statistic is the Wald quadratic form (the same as `plm::pwaldtest(test = "F", vcov = ...)` and linearmodels' `f_statistic_robust`), not linearmodels' `f_statistic`, which is a sum-of-squares version that ignores `cov_type`: the two agree only for the classical covariance on balanced panels, and linearmodels' value can even be negative on very unbalanced panels. RE accepts a time-invariant regressor (FE rejects it); the variance component σ_ε² is then estimated from the within regression of the time-varying regressors only, with `n - N - k_tv` degrees of freedom (as in `plm`), whereas linearmodels also counts the time-invariant columns, so its σ_ε² and therefore its coefficients differ from the fourth digit.
 
 ## Weak instruments

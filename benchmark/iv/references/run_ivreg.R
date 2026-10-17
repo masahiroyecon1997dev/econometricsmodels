@@ -42,8 +42,10 @@
 # 高精度で一致するがp値は一致しない（実測: G=10のケースでstatistic=112.32は
 # 完全一致、p値はR側8.5e-24 vs 本実装2.2e-06——G-1=9で計算するとRのstatisticから
 # 本実装のp値が再現できることを確認済み）。このためcluster cov_typeのみ
-# `wu_hausman_p_value`をクロスチェック対象から除外する（`gmm_type="one_step"`の
-# Hansen J除外と同型のパターン、ユーザー確認済み）。
+# `wu_hausman_p_value`をフィクスチャ（NA）から除外する。テスト側（`tests/iv/
+# test_iv_crosscheck.py`）がこのstatisticとF(n_endog, G-1)からp値を再計算して
+# 本実装と比較するため、p値の確認自体は外していない（フィクスチャからの除外は
+# `gmm_type="one_step"`のHansen J除外と同型のパターン、ユーザー確認済み）。
 #
 # 事前準備: install.packages(c("ivreg", "sandwich", "lmtest", "jsonlite"))
 #

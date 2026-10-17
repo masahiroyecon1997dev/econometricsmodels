@@ -178,6 +178,21 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
                 for cov_type in LINEARMODELS_COV_TYPES
             }
         }
+        if scenario == "baseline":
+            # 複数内生変数×クラスター共分散（classical重み）。
+            entry["classical"]["cluster"] = run_momentfit_r(
+                _with_cluster_csv(
+                    multi_df,
+                    multi_csv,
+                    tmpdir,
+                    balanced_cluster_groups(multi_df.height),
+                    "_cov_cluster",
+                ),
+                multi_formula,
+                "classical",
+                "cluster",
+                cluster="cluster_group",
+            )
         for weight_type in MULTI_ENDOG_OTHER_WEIGHT_TYPES[scenario]:
             use_csv = multi_csv
             if weight_type == "cluster":

@@ -335,8 +335,9 @@ common.rs`）:
   はcov_typeによらず一律クロスチェックできる。`wu_hausman_statistic`/`wu_hausman_p_value`も
   `summary(diagnostics=TRUE, vcov.=<関数>)`でcov_type別のロバスト共分散を診断表に反映できるため、
   全cov_typeでクロスチェックする（`benchmark/iv/references/run_ivreg.R`参照）。ただしclusterの
-  p値のみ、`ivreg`のWald検定がF分布の分母自由度にクラスター数を反映しないため一致せず、統計量のみ
-  比較する。
+  p値のみ、`ivreg`のWald検定がF分布の分母自由度にクラスター数を反映しないため一致しない。
+  統計量はそのまま比較し、p値は`ivreg`の統計量とF(`n_endog`, `G-1`)から再計算して本実装と比較する
+  （`tests/iv/test_iv_crosscheck.py`の`_check_result`の`n_clusters`）。
 - **Rクロスチェック（GMM）**: `ivreg`はGMM非対応のため、R `momentfit`（1.0、`gmm`パッケージの
   後継）を使う（`benchmark/iv/references/run_momentfit.R`、フィクスチャ
   `iv_gmm_crosscheck.json`、テスト`tests/iv/test_iv_gmm_crosscheck.py`）。`gmm`パッケージは

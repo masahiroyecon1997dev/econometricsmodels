@@ -42,6 +42,7 @@ from _assertions import (
     assert_dict_close,
     assert_fields_close,
     assert_inference_close,
+    assert_p_value_close,
 )
 from _constants import DATA_DIR
 from _helpers import (
@@ -121,10 +122,11 @@ def _check_result(res, ref: dict, label: str) -> None:
             ref["hansen_j_statistic"],
             f"{label}/overid_statistic",
         )
-        _assert_close(
+        assert_p_value_close(
             res.overid_p_value,
             ref["hansen_j_p_value"],
             f"{label}/overid_p_value",
+            rtol=RTOL,
         )
 
     if "hac_lag" in ref:
@@ -341,6 +343,29 @@ def test_multi_endog_other_weight_types_match_momentfit(
         res,
         crosscheck["multi_endog"][scenario][gmm_weight_type]["classical"],
         f"multi_endog/{scenario}/{gmm_weight_type}/classical",
+    )
+
+
+def test_multi_endog_cluster_matches_momentfit(crosscheck):
+    """複数内生変数×クラスター共分散（classical重み、疑似グループ行番号%10）。"""
+    df = with_cluster_groups(
+        pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv"),
+        10,
+        col=CLUSTER_COL,
+    )
+    res = _fit(
+        df,
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1", "endog2"],
+        instruments=["z1", "z2", "z3"],
+        gmm_weight_type="classical",
+        cov_type="cluster",
+    )
+    _check_result(
+        res,
+        crosscheck["multi_endog"]["baseline"]["classical"]["cluster"],
+        "multi_endog/baseline/classical/cluster",
     )
 
 

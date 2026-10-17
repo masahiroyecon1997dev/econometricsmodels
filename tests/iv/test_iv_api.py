@@ -40,6 +40,10 @@ from econometricsmodels import IV, IVOptions, IVResults
 
 from benchmark.common import hac_auto_lag
 from benchmark.iv.constants import IV_COV_TYPES
+from benchmark.iv.datasets import (
+    MULTI_ENDOG_SCENARIOS,
+    multi_endog_instruments,
+)
 
 
 def _assert_valid_test_statistic(
@@ -240,6 +244,38 @@ def test_overid_test_rejects_only_when_instrument_is_invalid(
     assert invalid.overid_p_value is not None
     assert valid.overid_p_value > 0.05
     assert 0.0 < invalid.overid_p_value < 1e-4
+
+
+@pytest.mark.parametrize("scenario", MULTI_ENDOG_SCENARIOS)
+@pytest.mark.parametrize("estimator", ["2sls", "gmm"])
+def test_multi_endog_overid_df_and_wu_hausman_df(scenario, estimator):
+    """複数内生変数（`k_endog=2`）の過剰識別検定とWu-Hausman検定の自由度。
+    過剰識別検定の自由度は`len(instruments) - len(x_endog)`（丁度識別の
+    `just_identified`は`None`）、Wu-Hausman検定はF(n_endog, df_resid - n_endog)
+    （2SLSのみ、GMMは`None`）。内生変数1本の小データだけを見る
+    `tests/cross_method/test_test_dfs.py`では`df_num=2`・`overid_df=l-2`が
+    検証されない。
+    """
+    df = pl.read_csv(DATA_DIR / f"iv_{scenario}_multi_endog.csv")
+    instruments = multi_endog_instruments(scenario)
+    res = our_fit(
+        df,
+        x_endog=["endog1", "endog2"],
+        instruments=instruments,
+        options=IVOptions(estimator=estimator),
+    )
+
+    n_endog = 2
+    if len(instruments) == n_endog:
+        assert res.overid_df is None
+    else:
+        assert res.overid_df == len(instruments) - n_endog
+    if estimator == "2sls":
+        assert res.wu_hausman_df_num == n_endog
+        assert res.wu_hausman_df_denom == res.df_resid - n_endog
+    else:
+        assert res.wu_hausman_df_num is None
+        assert res.wu_hausman_df_denom is None
 
 
 def test_wu_hausman_is_none_for_gmm(iv_dataset):

@@ -31,6 +31,10 @@ LINEARMODELS_COV_TYPES = [
     c for c in NON_CLUSTER_COV_TYPES if c not in IVREG_ONLY_COV_TYPES
 ]
 
+# `confidence_level`を既定（0.95）から変えたときの数値照合用の値
+# （`benchmark/linear/constants.py`と同じ0.90）。
+CONFIDENCE_LEVEL_NON_DEFAULT = 0.90
+
 # Wooldridge card（Card 1995の教育収益率推定、大学近接ダミーnearc2/nearc4を
 # 操作変数として教育年数educの内生性を補正する教科書的定番例）の外生説明変数。
 CARD_X_EXOG = ["exper", "expersq", "black", "smsa", "south"]

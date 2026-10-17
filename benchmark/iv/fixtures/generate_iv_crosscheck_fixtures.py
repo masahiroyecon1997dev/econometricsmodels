@@ -143,6 +143,15 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
         for cov_type in NON_CLUSTER_COV_TYPES:
             entry = run_ivreg_r(multi_endog_csv, multi_endog_formula, cov_type)
             fixtures["multi_endog"][scenario][cov_type] = entry
+        if scenario == "baseline":
+            # 複数内生変数×クラスターロバストSE（Wu-Hausmanの自由度が(2, G-1)に
+            # なる経路。generate_iv_fixtures.pyと同じ構成）。
+            multi_endog_df, _ = load_frozen_dataset(
+                "iv", f"{scenario}_multi_endog"
+            )
+            fixtures["multi_endog"][scenario]["cluster"] = _run_cluster_case(
+                multi_endog_df, multi_endog_csv, multi_endog_formula, tmpdir
+            )
 
     # 自由度1境界（df_resid=1ちょうど）。generate_iv_fixtures.pyのdf1と
     # 同じ構成。n=3ではHACの自動ラグ選択式（hac_auto_lag）が0を返す可能性が
@@ -285,6 +294,16 @@ def build_fixtures() -> dict:
         check=True,
     ).stdout
 
+    sandwich_version, lmtest_version = (
+        subprocess.run(
+            ["Rscript", "-e", f'cat(as.character(packageVersion("{pkg}")))'],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        for pkg in ("sandwich", "lmtest")
+    )
+
     fixtures["_meta"] = {
         "method": "2sls",
         "purpose": (
@@ -298,6 +317,8 @@ def build_fixtures() -> dict:
         "generated_at": datetime.now(UTC).isoformat(),
         "r_version": r_version,
         "ivreg_version": ivreg_version,
+        "sandwich_version": sandwich_version,
+        "lmtest_version": lmtest_version,
         "note": (
             'hc2/hc3も`vcovHC(type="HC2"/"HC3")`で計算し含める（本実装と数値'
             "一致することを実機確認済み、iv-spec.md 3.1節）。GMMはivregが"

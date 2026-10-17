@@ -3546,6 +3546,56 @@
             "hansen_j_statistic": 0.0651290717226409,
             "hansen_j_p_value": 0.798565556755917,
             "hac_lag": 5
+          },
+          "cluster": {
+            "params": {
+              "const": 1.62116516776986,
+              "x1": 0.708623215537041,
+              "endog1": 0.364517250360434,
+              "endog2": 0.777305398663535
+            },
+            "std_errors": {
+              "const": 1.0035099735294,
+              "x1": 0.327492611091012,
+              "endog1": 0.490357700171571,
+              "endog2": 0.554467654585242
+            },
+            "test_stats": {
+              "const": 1.61549482370179,
+              "x1": 2.16378382759943,
+              "endog1": 0.743370095407686,
+              "endog2": 1.40189493874982
+            },
+            "p_values": {
+              "const": 0.106203580398798,
+              "x1": 0.0304809438949785,
+              "endog1": 0.457257644271047,
+              "endog2": 0.160946622084643
+            },
+            "conf_int": {
+              "const": [
+                -0.345678238474498,
+                3.58800857401423
+              ],
+              "x1": [
+                0.0667494925956741,
+                1.35049693847841
+              ],
+              "endog1": [
+                -0.596566181517735,
+                1.3256006822386
+              ],
+              "endog2": [
+                -0.309431234915933,
+                1.864042032243
+              ]
+            },
+            "nobs": 500,
+            "df_resid": 496,
+            "f_statistic": 596.456205183584,
+            "f_p_value": 5.91066492981753e-129,
+            "hansen_j_statistic": 0.0651290717226409,
+            "hansen_j_p_value": 0.798565556755917
           }
         },
         "robust": {
@@ -5639,7 +5689,7 @@
   "_meta": {
     "method": "gmm",
     "purpose": "linearmodels主リファレンス（iv_gmm.json）とは独立した実装（R: momentfit）によるクロスチェック用。係数・標準誤差・z値・p値・信頼区間・nobs/df_resid・ロバストWald検定（f_statistic/f_p_value）・Hansen J（過剰識別のときのみ）を含む（iv-spec.md 4章）",
-    "generated_at": "2026-10-17T02:15:26.736690+00:00",
+    "generated_at": "2026-10-17T03:23:59.480003+00:00",
     "r_version": "4.5.3",
     "momentfit_version": "1.0",
     "note": "ivregはGMM非対応のためmomentfitを使う。構成（シナリオ×重み×共分散）はiv_gmm.json（generate_iv_gmm_fixtures.py）と揃える。hc2/hc3・反復GMM・1段階GMM・弱操作変数F・R²・Wu-Hausmanは対象外。momentfitを本実装・linearmodelsと揃える設定（初期重みtsls、非中心化モーメント、HAC・クラスター重みはmomentfit 1.0のピボット欠落バグを避けて重み行列を明示的に渡す、HACのbwはラグ数+1、Hansen Jは推定時の重みで評価、標準誤差の小標本補正の手計算係数）の詳細と原因は`benchmark/iv/references/run_momentfit.R`のヘッダコメント参照。f_statistic/f_p_valueは傾き係数のカイ二乗形式Wald（qで割らない）、test_stats/p_values/conf_intはz分布。hac_lagはhacが重みまたは共分散に含まれるエントリのみ（重みと共分散で共用）。just_identifiedシナリオはhansen_j_statistic/hansen_j_p_valueがnull（丁度識別）。no_intercept（`include_intercept=False`、式の両辺に`0 +`）はbaseline・just_identified・x_exog_empty・multi_endogのclassical重み×classical/hc0/hc1/hac（baselineには追加でcluster共分散、robust/cluster/hac重み×classical共分散、multi_endogにはrobust重み×classical共分散）。momentfitは切片なしだと`tsls()`・`initW='tsls'`が2SLSと一致しないため、重みを明示して推定する（`run_momentfit.R`ヘッダコメント8.参照）。wooldridge.cardはcluster重み・cluster共分散を含まない（クラスター列が無いため）。"

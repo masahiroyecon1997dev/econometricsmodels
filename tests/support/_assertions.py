@@ -38,6 +38,23 @@ def assert_close(
     )
 
 
+def assert_p_value_close(
+    ours: float, ref: float, label: str, *, rtol: float
+) -> None:
+    """p値を相対誤差のみで比較する（絶対誤差の下限を付けない）。
+
+    下限（`atol`）を付けると、裾のp値（`1e-8`未満など）が下限より小さい分だけ
+    ずれても、あるいは`0`に潰れても通ってしまい、棄却するp値を確認する意味が
+    なくなる。参照値は正であること（`0`は比較不能なため失敗させる）。
+    """
+    assert ref > 0.0, f"{label}: ref p-value must be positive, got {ref!r}"
+    diff = abs(ours - ref)
+    tol = rtol * ref
+    assert diff <= tol, (
+        f"{label}: ours={ours!r}, ref={ref!r}, diff={diff!r} > tol={tol!r}"
+    )
+
+
 def assert_inference_close(
     res,
     ref: dict,

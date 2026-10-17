@@ -42,13 +42,14 @@ from _tolerances import TOLERANCES
 from econometricsmodels import RE, REOptions
 
 from benchmark.common import WAGEPAN_ENTITY, WAGEPAN_X, WAGEPAN_Y
-from benchmark.panel.datasets import (
+from benchmark.panel.cluster_cases import (
     CLUSTER_IMBALANCED_CSV,
+    K1_CSV,
+    cluster_g3_groups,
     cluster_imbalanced_groups,
 )
 from benchmark.panel.fixtures.generate_re_statsmodels_cluster_fixtures import (
     SCENARIOS,
-    cluster_g3_groups,
     shuffled_cluster_imbalanced_frame,
 )
 
@@ -174,7 +175,7 @@ def test_cluster_imbalanced_shuffled_rows_matches_statsmodels(reference):
 def test_cluster_g3_boundary_matches_statsmodels(reference):
     """クラスター数の境界の成功パス（k=1、G=3、自由度2）。"""
     groups = cluster_g3_groups()
-    res = _fit_with_cluster_column("fe_baseline_k1.csv", ["x1"], groups)
+    res = _fit_with_cluster_column(K1_CSV, ["x1"], groups)
 
     _check(
         res,

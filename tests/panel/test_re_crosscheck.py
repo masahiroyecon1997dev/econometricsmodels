@@ -106,8 +106,10 @@ from benchmark.common import (
     WAGEPAN_X,
     WAGEPAN_Y,
 )
-from benchmark.panel.datasets import (
+from benchmark.panel.cluster_cases import (
     CLUSTER_IMBALANCED_CSV,
+    K1_CSV,
+    cluster_g3_groups,
     cluster_imbalanced_groups,
 )
 from benchmark.panel.fixtures.generate_fe_crosscheck_fixtures import (
@@ -313,9 +315,7 @@ def test_cluster_g3_boundary_matches_plm_based_reference(crosscheck):
     （`G=2`は`test_hausman_cluster_count_equal_to_auxiliary_slopes_raises`系の
     `ValidationError`）。
     """
-    n = pl.read_csv(DATA_DIR / "fe_baseline_k1.csv").height
-    groups = [str(i % 3) for i in range(n)]
-    res = _fit_with_cluster_column("fe_baseline_k1.csv", ["x1"], groups)
+    res = _fit_with_cluster_column(K1_CSV, ["x1"], cluster_g3_groups())
 
     _check_result(
         res,

@@ -84,7 +84,7 @@ from benchmark.common import (
     WAGEPAN_X,
     WAGEPAN_Y,
 )
-from benchmark.panel.datasets import cluster_imbalanced_frame
+from benchmark.panel.cluster_cases import K1_CSV, cluster_imbalanced_frame
 from benchmark.panel.fixtures.generate_fe_crosscheck_fixtures import (
     COV_TYPES,
     DK_EXPLICIT_BANDWIDTHS,
@@ -299,7 +299,7 @@ def test_cluster_imbalanced_matches_fixest(crosscheck):
 
 def test_cluster_g2_matches_fixest(crosscheck):
     """クラスタ数境界（G=2、q=1でG>q）の成功パスのfixestクロスチェック。"""
-    df = pl.read_csv(DATA_DIR / "fe_baseline_k1.csv")
+    df = pl.read_csv(DATA_DIR / K1_CSV)
     groups = [str(i % 2) for i in range(df.height)]
     df = df.with_columns(pl.Series("cluster_group", groups))
     options = FEOptions(cov_type="cluster", cluster="cluster_group")

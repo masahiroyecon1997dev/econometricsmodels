@@ -134,8 +134,10 @@ from benchmark.common import (
     run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
-from benchmark.panel.datasets import (
+from benchmark.panel.cluster_cases import (
     CLUSTER_IMBALANCED_CSV,
+    K1_CSV,
+    cluster_g3_groups,
     cluster_imbalanced_groups,
 )
 from benchmark.panel.fixtures.generate_fe_crosscheck_fixtures import (
@@ -209,13 +211,16 @@ _STRUCTURALLY_SINGULAR = {
 }
 
 
-def _scenario_inputs(scenario: str) -> tuple[Path, list[str], str]:
-    """シナリオの`(CSVパス, 説明変数, plmの回帰式)`。"""
-    x_cols = SCENARIO_X_COLS.get(scenario, ["x1", "x2"])
+def _scenario_x_cols(scenario: str) -> list[str]:
+    """シナリオの説明変数の列名。"""
+    return SCENARIO_X_COLS.get(scenario, ["x1", "x2"])
+
+
+def _scenario_inputs(scenario: str) -> tuple[Path, str]:
+    """シナリオの`(CSVパス, plmの回帰式)`。"""
     return (
         DATA_DIR / f"fe_{scenario}.csv",
-        x_cols,
-        f"y ~ {' + '.join(x_cols)}",
+        f"y ~ {' + '.join(_scenario_x_cols(scenario))}",
     )
 
 
@@ -246,7 +251,8 @@ def _run_hausman(
     time_col: str = "time",
     maxlag: int | None = None,
 ) -> dict:
-    maxlag = _resolve_dk_maxlag(csv_path, cov_type, maxlag, time_col)
+    """plmの`phtest`の値。dkのバンド幅は呼び出し側が`_resolve_dk_maxlag`で決めて
+    渡す（未指定だと`ValueError`）。"""
     return run_re_hausman_plm_r(
         csv_path,
         formula,
@@ -263,8 +269,9 @@ WAGEPAN_FORMULA = f"{WAGEPAN_Y} ~ {' + '.join(WAGEPAN_X)}"
 def _run_effects(
     scenario: str, cov_type: str, *, maxlag: int | None = None
 ) -> dict:
-    csv_path, _, formula = _scenario_inputs(scenario)
-    maxlag = _resolve_dk_maxlag(csv_path, cov_type, maxlag)
+    """plm自身のREの値。dkのバンド幅は呼び出し側が`_resolve_dk_maxlag`で決めて
+    渡す（未指定だと`ValueError`）。"""
+    csv_path, formula = _scenario_inputs(scenario)
     return run_re_plm_r(csv_path, formula, cov_type, maxlag=maxlag)
 
 
@@ -327,8 +334,9 @@ def _check_given_variance_equivalence(
 def _linearmodels_variance(scenario: str) -> dict:
     """`linearmodels`のREの分散成分（`sigma2_eps`・`sigma2_u`）。本実装と機械精度で
     一致する（`re.json`）。分散成分は`cov_type`・バンド幅によらないため1回だけ求める。"""
-    _, x_cols, _ = _scenario_inputs(scenario)
-    return run_re(scenario, x_cols, "classical", time_col="time")
+    return run_re(
+        scenario, _scenario_x_cols(scenario), "classical", time_col="time"
+    )
 
 
 def _run_effects_reference(
@@ -337,7 +345,7 @@ def _run_effects_reference(
     """標準誤差・推論統計量の参照値。balancedはplm自身のRE、unbalancedは
     `linearmodels`の分散成分を与えたplm（`DK_EXPLICIT_BANDWIDTHS`直後のコメント参照）。
     plm自身の分散成分を与えた値がplm自身のREと一致することを、生成のたびに確かめる。"""
-    csv_path, _, formula = _scenario_inputs(scenario)
+    csv_path, formula = _scenario_inputs(scenario)
     maxlag = _resolve_dk_maxlag(csv_path, cov_type, maxlag)
     plm_re = _run_effects(scenario, cov_type, maxlag=maxlag)
     if scenario != UNBALANCED_SCENARIO:
@@ -399,7 +407,7 @@ def _run_hausman_reference(
     `linearmodels`の分散成分を与えて補助回帰を組み立てたplm
     （`run_plm_re_given_variance_hausman_benchmark.R`）。plm自身の分散成分を与えた
     値が`phtest`と一致することを、生成のたびに確かめる。"""
-    csv_path, _, formula = _scenario_inputs(scenario)
+    csv_path, formula = _scenario_inputs(scenario)
     maxlag = _resolve_dk_maxlag(csv_path, cov_type, maxlag)
     phtest = _run_hausman(csv_path, formula, cov_type, maxlag=maxlag)
     if scenario != UNBALANCED_SCENARIO:
@@ -510,12 +518,11 @@ def build_fixtures() -> dict:
             ["x1", "x2"],
             cluster_imbalanced_groups(),
         )
-        n_k1 = pl.read_csv(DATA_DIR / "fe_baseline_k1.csv").height
         fixtures["baseline"]["cluster_g3"] = _run_cluster_case(
             tmpdir,
-            "fe_baseline_k1.csv",
+            K1_CSV,
             ["x1"],
-            [str(i % 3) for i in range(n_k1)],
+            cluster_g3_groups(),
         )
 
         (
@@ -538,6 +545,9 @@ def build_fixtures() -> dict:
                 cov_type,
                 entity_col=WAGEPAN_ENTITY,
                 time_col=WAGEPAN_TIME,
+                maxlag=_resolve_dk_maxlag(
+                    csv_path, cov_type, None, WAGEPAN_TIME
+                ),
             )
             for cov_type in HAUSMAN_COV_TYPES
         }

@@ -67,13 +67,14 @@ from benchmark.common import (
     WAGEPAN_X,
     WAGEPAN_Y,
     group_by_dataset_source,
+    imbalanced_cluster_groups,
     run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
-from benchmark.panel.datasets import (
+from benchmark.panel.cluster_cases import (
     CLUSTER_IMBALANCED_CSV,
+    K1_CSV,
     cluster_imbalanced_frame,
-    cluster_imbalanced_groups,
 )
 from benchmark.panel.fixtures.generate_fe_fixtures import (
     ONE_WAY_ONLY_SCENARIOS,
@@ -199,7 +200,7 @@ def two_way_cluster_frame(case: str) -> tuple[pl.DataFrame, str]:
         time_pos = df["time"].rank("dense") - 1
         groups = ((entity_pos + time_pos) % 3).cast(pl.String).to_list()
     elif case == "imbalanced":
-        groups = cluster_imbalanced_groups()
+        groups = imbalanced_cluster_groups(df.height)
     else:
         raise ValueError(f"unknown two-way cluster case: {case}")
     return df.with_columns(pl.Series(cluster, groups)), cluster
@@ -240,7 +241,7 @@ def _run_cluster_g2_case(tmpdir: Path) -> dict:
     ならない（`G<=q`なら`ValidationError`、`testing-policy.md`「グループ数が
     境界値に近いケース」参照）。
     """
-    df = pl.read_csv(DATA_DIR / "fe_baseline_k1.csv")
+    df = pl.read_csv(DATA_DIR / K1_CSV)
     groups = [str(i % 2) for i in range(df.height)]
     df = df.with_columns(pl.Series("cluster_group", groups))
     csv_path = tmpdir / "fe_baseline_k1_with_cluster.csv"

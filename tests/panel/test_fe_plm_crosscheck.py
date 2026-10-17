@@ -74,6 +74,7 @@ from benchmark.common import (
     WAGEPAN_X,
     WAGEPAN_Y,
 )
+from benchmark.panel.cluster_cases import K1_CSV
 from benchmark.panel.fixtures.generate_fe_plm_crosscheck_fixtures import (
     DK_EXPLICIT_BANDWIDTHS,
     MAX_BANDWIDTH_SCENARIOS,
@@ -279,7 +280,7 @@ def test_cluster_g3_two_slopes_matches_plm(crosscheck):
 
 def test_cluster_g2_matches_plm(crosscheck):
     """クラスタ数境界（G=2、q=1でG>q）。先頭2 entityだけ残して作る。"""
-    df = first_entities_frame("fe_baseline_k1.csv", 2)
+    df = first_entities_frame(K1_CSV, 2)
     res = _fit_frame(df, "cluster")
 
     _check_result(

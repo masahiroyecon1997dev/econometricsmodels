@@ -59,7 +59,7 @@ from benchmark.common import (
     run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
-from benchmark.panel.datasets import CLUSTER_IMBALANCED_CSV
+from benchmark.panel.cluster_cases import CLUSTER_IMBALANCED_CSV, K1_CSV
 from benchmark.panel.fixtures.generate_fe_crosscheck_fixtures import (
     DK_EXPLICIT_BANDWIDTHS,
     SCENARIO_COV_TYPES,
@@ -173,7 +173,7 @@ def _run_boundary_cases(tmpdir: Path) -> dict:
             "cluster",
         ),
         "cluster_g2": _run_frame(
-            first_entities_frame("fe_baseline_k1.csv", 2),
+            first_entities_frame(K1_CSV, 2),
             tmpdir,
             "g2",
             "cluster",

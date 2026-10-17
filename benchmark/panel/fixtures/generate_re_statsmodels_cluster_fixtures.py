@@ -49,8 +49,10 @@ from benchmark.common import (
     run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
-from benchmark.panel.datasets import (
+from benchmark.panel.cluster_cases import (
     CLUSTER_IMBALANCED_CSV,
+    K1_CSV,
+    cluster_g3_groups,
     cluster_imbalanced_groups,
 )
 from benchmark.panel.fixtures.generate_fe_fixtures import (
@@ -89,13 +91,6 @@ def shuffled_cluster_imbalanced_frame() -> pl.DataFrame:
     )
 
 
-def cluster_g3_groups() -> list[str]:
-    """`fe_baseline_k1.csv`の行順に並んだ3グループ（行番号%3、
-    `test_re_crosscheck.py`と同じ）。"""
-    n = pl.read_csv(DATA_DIR / "fe_baseline_k1.csv").height
-    return [str(i % 3) for i in range(n)]
-
-
 def _run_shuffled_cluster_imbalanced() -> dict:
     df = shuffled_cluster_imbalanced_frame()
     with tempfile.TemporaryDirectory() as tmp:
@@ -119,9 +114,7 @@ def build_fixtures() -> dict:
             cluster_imbalanced_groups(),
         ),
         "cluster_imbalanced_shuffled": _run_shuffled_cluster_imbalanced(),
-        "cluster_g3": _run_with_groups(
-            "fe_baseline_k1.csv", "y ~ x1", cluster_g3_groups()
-        ),
+        "cluster_g3": _run_with_groups(K1_CSV, "y ~ x1", cluster_g3_groups()),
     }
 
     with tempfile.TemporaryDirectory() as tmp:

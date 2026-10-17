@@ -50,6 +50,7 @@ allowed-tools: Read, Write, Bash(python3:*), Bash(Rscript:*), Bash(pytest:*)
   - `benchmark/linear/references/run_lm_crosscheck.R`: base R `lm` + sandwich/lmtestによるOLS/WLS標準誤差クロスチェック（classical/HC0-3/cluster/HAC対応、`weights`引数でWLSにも対応）。動作検証済み、正式なクロスチェックとして使用中。
   - `benchmark/linear/references/run_lm_predict_crosscheck.R`: `predict()`のクロスチェック用。
   - `benchmark/panel/run_plm_benchmark.R`: plmパッケージ。未検証（Phase4着手時に確認）。
+  - `benchmark/panel/cluster_cases.py`（Rスクリプトではない、panel系統のPythonヘルパー）: クラスターを動的に付与する凍結CSV（クラスター不均衡`fe_baseline_cluster_imbalanced.csv`、k=1の`fe_baseline_k1.csv`）のファイル名定数（`freeze.py`の`filename_suffix`と共有）と、クラスター列の生成（`cluster_imbalanced_groups`・`cluster_imbalanced_frame`・`cluster_g3_groups`）。生成側・テスト側で同じ列を共有する。
   - `benchmark/panel/_plm_common.R`: panel系のplm Rスクリプトが共有する部品（cov_type別のplm `vcov`関数`plm_vcov_function`・t検定の自由度`plm_t_df`・t統計量/p値/信頼区間への変換`plm_t_inference`）。`source()`で読み込む（`benchmark/common/_common.R`と同じ方式）。cov_type→vcovの対応を変えるときはここだけを直す（FEの`run_plm_fe_benchmark.R`はvcovの式が異なり`plm_t_inference`だけを使う）。
   - `benchmark/iv/references/run_ivreg.R`: ivreg/AERパッケージによる2SLSクロスチェック。動作検証済み、正式なクロスチェックとして使用中。
   - `benchmark/iv/references/run_momentfit.R`: momentfitパッケージによるGMMクロスチェック（ivregはGMM非対応）。momentfitを本実装・linearmodelsに揃える設定と、揃えないと一致しない原因（HAC・クラスター重みのピボット欠落バグ、`bw`の定義、Hansen Jの重み、標準誤差の小標本補正の流儀）はスクリプトのヘッダコメントと`docs/spec/iv-spec.md`4章が正本。

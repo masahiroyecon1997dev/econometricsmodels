@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 
 from benchmark.common import freeze_scenarios, run_freeze_cli
+from benchmark.panel.cluster_cases import CLUSTER_IMBALANCED_SUFFIX, K1_SUFFIX
 from benchmark.panel.datasets import (
     SCENARIOS,
     generate_fe_dataset,
@@ -79,8 +80,8 @@ def freeze(output_dir: Path) -> None:
         FE_CLUSTER_IMBALANCED_SCENARIOS,
         "fe",
         true_betas,
-        filename_suffix="_cluster_imbalanced",
-        key_suffix="_cluster_imbalanced",
+        filename_suffix=CLUSTER_IMBALANCED_SUFFIX,
+        key_suffix=CLUSTER_IMBALANCED_SUFFIX,
         n_entities=20,
         n_periods=10,
     )
@@ -90,8 +91,8 @@ def freeze(output_dir: Path) -> None:
         FE_CLUSTER_G2_SCENARIOS,
         "fe",
         true_betas,
-        filename_suffix="_k1",
-        key_suffix="_k1",
+        filename_suffix=K1_SUFFIX,
+        key_suffix=K1_SUFFIX,
         k=1,
     )
     # 2-way REの手計算・plm照合用の小さな手作りパネル（乱数ではないため真の係数は無い）。

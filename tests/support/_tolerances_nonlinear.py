@@ -106,6 +106,9 @@ NONLINEAR_TOLERANCES: dict[str, dict[str, float]] = {
     # 限界効果effect~1.5e-9・std_error~2.9e-8・z~3.3e-8・conf_int~6.1e-8。cluster
     # （均等・不均衡）の全統計量・限界効果も同水準。基本rtol=1e-6は最大値（conf_int）の
     # 約16倍のマージン。
+    # 切片なし（baseline.no_intercept、全cov_type・均等/不均衡クラスター）は係数~2.2e-10、
+    # SE・z・conf_int・限界効果~5e-10以下で、同じ許容誤差で通る（p値は相対~1.4e-8、
+    # 絶対~3e-11）ため専用の許容誤差は置かない。
     "logit_crosscheck": {
         "rtol": 1e-6,
         "atol": ATOL_LOGIT_PROBIT_CROSSCHECK,
@@ -119,6 +122,9 @@ NONLINEAR_TOLERANCES: dict[str, dict[str, float]] = {
     # （mroz/hc0/nwifeinc）、z~1.35e-7（mroz/opg/nwifeinc）、限界効果effect~5e-8・
     # std_error~1.2e-7・z~1.4e-7。cluster（均等・不均衡）の全統計量・限界効果も同水準
     # （SE~6.8e-8）。基本rtol=1e-6は最大値の約7倍のマージン。
+    # 切片なし（baseline.no_intercept、全cov_type・均等/不均衡クラスター）は係数~3.4e-9、
+    # SE・z・限界効果~4.4e-8、conf_int~6.3e-8で基本rtol=1e-6に収まり、p値は相対~2.1e-6
+    # （絶対~1.6e-9）でatol_p_value=1e-7に収まるため、専用の許容誤差は置かない。
     "probit_crosscheck": {
         "rtol": 1e-6,
         "atol": ATOL_LOGIT_PROBIT_CROSSCHECK,

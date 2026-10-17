@@ -44,6 +44,11 @@
 #   Rscript run_glm_crosscheck.R data.csv "y ~ x1 + x2 + x3" opg probit
 #   Rscript run_glm_crosscheck.R data.csv "y ~ x1 + x2 + x3" hc0 logit
 #   Rscript run_glm_crosscheck.R data.csv "y ~ x1 + x2 + x3" cluster logit cluster
+#   # include_intercept=False相当はformula自体に"- 1"を付ける（例: "y ~ x1 + x2 + x3 - 1"）。
+#   # 係数名・model.matrix・限界効果の変数選択はいずれも名前ベースで切片列を仮定せず、
+#   # 帰無モデル（対数尤度null）は常に切片のみ（y ~ 1）を使う。df_modelはk_params - 1のまま
+#   # （本実装・statsmodelsと同じ定義）で、lr_statisticは負値になりうる。
+#   Rscript run_glm_crosscheck.R data.csv "y ~ x1 + x2 + x3 - 1" hc1 logit
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 2) {

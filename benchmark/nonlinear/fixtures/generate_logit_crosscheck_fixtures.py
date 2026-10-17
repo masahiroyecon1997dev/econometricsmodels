@@ -93,6 +93,31 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
     # 削除した。`rank(Ŝ)<=G-1`のため`G<=q`ではクラスターロバスト共分散が退化し、
     # `fit()`冒頭のバリデーションが ValidationError で弾く。
 
+    # include_intercept=False（切片なし）。式に`- 1`を付けて切片を落とす
+    # （`run_glm_crosscheck.R`は式以外の変更なしで切片なしのfitに対応する）。
+    # statsmodels側（logit.json）は`hc1`と不均衡クラスターを持たないため、
+    # ここが切片なしのhc1・不均衡クラスターの唯一の数値照合対象になる。
+    no_intercept_formula = "y ~ x1 + x2 + x3 - 1"
+    fixtures["baseline"]["no_intercept"] = {
+        cov_type: run_glm_r(baseline_csv, no_intercept_formula, cov_type)
+        for cov_type in NON_CLUSTER_COV_TYPES
+    }
+    fixtures["baseline"]["no_intercept"]["cluster"] = _run_cluster_case(
+        baseline_csv,
+        formula=no_intercept_formula,
+        tmpdir=tmpdir,
+        suffix="_no_intercept_cluster",
+    )
+    fixtures["baseline"]["no_intercept"]["cluster_imbalanced"] = (
+        _run_cluster_case(
+            baseline_csv,
+            formula=no_intercept_formula,
+            tmpdir=tmpdir,
+            groups=imbalanced_cluster_groups(n),
+            suffix="_no_intercept_cluster_imbalanced",
+        )
+    )
+
     return fixtures
 
 
@@ -192,6 +217,11 @@ def build_fixtures() -> dict:
             "グループ）を含む。G<=q（傾き係数の数）のケース（旧cluster_g2・mroz/city）は"
             "ValidationErrorになるため成功パスフィクスチャを持たない。"
             "実データのクラスターはapple（`ecolbs > 0`、州でG=49）が担う。"
+            "baseline.no_interceptはinclude_intercept=False（切片なし）のクロスチェックで、"
+            "全cov_type（opg・hc1を含む）と均等・不均衡のクラスターを持つ。statsmodels側には"
+            "hc1と不均衡クラスターが無いため、ここが唯一の数値照合対象。"
+            "log_likelihood_nullは常に切片のみのモデルを参照するため、lr_statisticが負値に"
+            "なりうる。"
             "パラメータ名は全ソースで切片を'const'に正規化済み。"
         ),
     }

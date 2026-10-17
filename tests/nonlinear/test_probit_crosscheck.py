@@ -2,8 +2,8 @@
 
 `tests/fixtures/benchmarks/probit_crosscheck.json`（`benchmark/nonlinear/
 fixtures/generate_probit_crosscheck_fixtures.py`で生成）を読み込み、係数・標準誤差・
-適合度統計量・限界効果（全統計量）をRとクロスチェックする（cluster 2ケースも
-全統計量・限界効果）。役割分担は`test_probit_reference.py`と同じ（`test_logit_crosscheck.py`と同型。
+適合度統計量・限界効果（全統計量）をRとクロスチェックする（cluster 2ケースと、切片なし
+（`include_intercept=False`）の全cov_typeも全統計量・限界効果）。役割分担は`test_probit_reference.py`と同じ（`test_logit_crosscheck.py`と同型。
 `.claude/rules/testing-policy.md`「リファレンス実装」参照）。
 
 Note:
@@ -179,6 +179,51 @@ def test_cluster_imbalanced_matches_r_glm(fixtures):
 
     ref = fixtures["synthetic"]["baseline"]["cluster_imbalanced"]
     _check_result(res, ref, "cluster_imbalanced")
+
+
+# ── 凍結フィクスチャとの数値照合（オプション） ────────────────────────
+
+
+@pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
+def test_no_intercept_matches_r_glm(fixtures, cov_type):
+    """`include_intercept=False`（baseline）。hc1（全統計量）とopgの限界効果はRのみが参照。
+
+    `log_likelihood_null`は常に切片のみのモデルを参照するため、`lr_statistic`が
+    負値になりうる。
+    """
+    df = pl.read_csv(DATA_DIR / "probit_baseline.csv")
+    options = ProbitOptions(cov_type=cov_type, include_intercept=False)
+    res = Probit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+    ref = fixtures["synthetic"]["baseline"]["no_intercept"][cov_type]
+    _check_result(res, ref, f"no_intercept/{cov_type}")
+
+
+def test_no_intercept_cluster_matches_r_glm(fixtures):
+    df = pl.read_csv(DATA_DIR / "probit_baseline.csv")
+    df = with_cluster_groups(df, 10)
+    options = ProbitOptions(
+        cov_type="cluster", cluster="cluster_group", include_intercept=False
+    )
+    res = Probit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+    ref = fixtures["synthetic"]["baseline"]["no_intercept"]["cluster"]
+    _check_result(res, ref, "no_intercept/cluster")
+
+
+def test_no_intercept_cluster_imbalanced_matches_r_glm(fixtures):
+    df = pl.read_csv(DATA_DIR / "probit_baseline.csv")
+    groups = imbalanced_cluster_groups(df.height)
+    df = df.with_columns(pl.Series("cluster_group", groups))
+    options = ProbitOptions(
+        cov_type="cluster", cluster="cluster_group", include_intercept=False
+    )
+    res = Probit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+    ref = fixtures["synthetic"]["baseline"]["no_intercept"][
+        "cluster_imbalanced"
+    ]
+    _check_result(res, ref, "no_intercept/cluster_imbalanced")
 
 
 # ── 凍結フィクスチャとの数値照合（実データ） ──────────────────────────

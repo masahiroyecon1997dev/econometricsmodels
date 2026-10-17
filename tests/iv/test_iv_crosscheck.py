@@ -32,8 +32,9 @@ Note:
       cov_type別のロバスト共分散を診断表に反映できることが判明、
       `benchmark/iv/references/run_ivreg.R`のモジュールコメント参照）。ただしcluster
       cov_typeのみ、ivreg側のWald検定がF分布の分母自由度にクラスター数を
-      反映しない既知の制約によりp値が一致しないため、`_check_result`の
-      `check_wu_hausman_p_value=False`で統計量のみ比較する。
+      反映しない既知の制約によりフィクスチャのp値が`null`になる。代わりに
+      `_check_result`の`n_clusters`で、Rの統計量とF(n_endog, G-1)から
+      p値を再計算して本実装と比較し、分母自由度がG-1であることも確認する。
     - GMMはivregが対応していないため対象外（R momentfitによるクロスチェックは
       `test_iv_gmm_crosscheck.py`）。
     - 第一段階回帰の結果（`first_stage()`）自体はここでは比較しない
@@ -67,6 +68,7 @@ from _helpers import (
 )
 from _tolerances import TOLERANCES
 from econometricsmodels import IV, IVOptions
+from scipy import stats as sps
 
 from benchmark.common import imbalanced_cluster_groups
 from benchmark.iv.constants import (
@@ -124,7 +126,7 @@ def _check_result(
     label: str,
     *,
     check_wu_hausman: bool = True,
-    check_wu_hausman_p_value: bool = True,
+    n_clusters: int | None = None,
     check_sargan: bool = True,
 ) -> None:
     assert_inference_close(res, ref, label, rtol=RTOL_STRICT, atol=ATOL)
@@ -192,15 +194,36 @@ def _check_result(
             ref["wu_hausman_statistic"],
             f"{label}/wu_hausman_statistic",
         )
-        # cluster cov_typeはivregのWald検定がF分布の分母自由度にクラスター数を
-        # 反映しない既知の制約によりp値が一致しないため、統計量のみ比較する
-        # （呼び出し元がcheck_wu_hausman_p_value=Falseを渡す。モジュール
-        # docコメント参照）。
-        if check_wu_hausman_p_value:
+        if n_clusters is None:
             _assert_close(
                 res.wu_hausman_p_value,
                 ref["wu_hausman_p_value"],
                 f"{label}/wu_hausman_p_value",
+            )
+        else:
+            # cluster cov_typeはivregのWald検定がF分布の分母自由度にクラスター数を
+            # 反映せず（n-k_augのまま）、フィクスチャのp値は`null`。本実装は
+            # G-1を使うため、Rの統計量からF(n_endog, G-1)でp値を再計算して比較する
+            # （モジュールdocコメント参照）。絶対誤差の下限は付けない（裾のp値が
+            # 0に潰れても通ってしまうため）。
+            assert ref["wu_hausman_p_value"] is None, (
+                f"{label}/wu_hausman_p_value"
+            )
+            assert res.wu_hausman_df_denom == n_clusters - 1, (
+                f"{label}/wu_hausman_df_denom"
+            )
+            assert res.wu_hausman_df_num is not None
+            recomputed = sps.f.sf(
+                ref["wu_hausman_statistic"],
+                res.wu_hausman_df_num,
+                n_clusters - 1,
+            )
+            assert_close(
+                res.wu_hausman_p_value,
+                float(recomputed),
+                f"{label}/wu_hausman_p_value_recomputed",
+                rtol=RTOL_STRICT,
+                atol=0.0,
             )
 
 
@@ -249,7 +272,7 @@ def test_cluster_matches_r(crosscheck):
         res,
         ref,
         "cluster/R",
-        check_wu_hausman_p_value=False,
+        n_clusters=df["cluster_group"].n_unique(),
     )
 
 
@@ -277,7 +300,7 @@ def test_cluster_imbalanced_matches_r(crosscheck):
         res,
         ref,
         "cluster_imbalanced/R",
-        check_wu_hausman_p_value=False,
+        n_clusters=df["cluster_group"].n_unique(),
     )
 
 
@@ -400,8 +423,8 @@ def test_no_intercept_matches_r(crosscheck, scenario, cov_type):
 
 def test_no_intercept_cluster_matches_r(crosscheck):
     """`include_intercept=False`×クラスターロバストSE（`baseline`、疑似グループ
-    行番号%10）。cluster cov_typeのWu-Hausman p値はivregの既知の制約で比較しない
-    （切片ありの`test_cluster_matches_r`と同じ）。
+    行番号%10）。cluster cov_typeのWu-Hausman p値は、切片ありの
+    `test_cluster_matches_r`と同じくRの統計量とG-1から再計算して比較する。
     """
     df = with_cluster_groups(pl.read_csv(DATA_DIR / "iv_baseline.csv"), 10)
     options = IVOptions(
@@ -421,7 +444,7 @@ def test_no_intercept_cluster_matches_r(crosscheck):
         res,
         crosscheck["no_intercept"]["baseline"]["cluster"],
         "no_intercept/baseline/cluster/R",
-        check_wu_hausman_p_value=False,
+        n_clusters=df["cluster_group"].n_unique(),
         check_sargan=False,
     )
 

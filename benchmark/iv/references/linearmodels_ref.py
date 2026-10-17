@@ -44,7 +44,8 @@ results.IVResults.pvalues`/`f_statistic`のdocstring参照、実装ソースで�
 本実装の2SLSは`cov_type`によらず常にt分布・F分布で報告する設計（`iv-spec.md`
 3.2節）のため、`hc0`/`hac`（`debiased=False`）と突き合わせる際は`linearmodels`が
 返す`params`/`std_errors`のみ使い、t統計量・p値・信頼区間・F統計量は本関数側で
-t(df_resid)・F(q, df_resid)分布を使って独自に計算し直す（`debiased`の値に
+t(df_inference)・F(q, df_inference)分布（`df_inference`は`cov_type="cluster"`のとき
+`G-1`、それ以外は`df_resid`）を使って独自に計算し直す（`debiased`の値に
 関係なく一貫した比較ができるようにするため。`run()`本体のコメント参照）。
 
 ## Wu-Hausman検定の対応関係（実装時に実測して発覚、`iv-spec.md`3.6節の
@@ -261,13 +262,16 @@ def run(
     mod = IV2SLS.from_formula(formula, pdf)
     res = mod.fit(cov_type=lm_cov_type, **cov_config)
 
-    # 本実装はcov_typeによらず常にt分布（df=df_resid）で推論統計量を報告する
-    # （iv-spec.md 3.2節）。`linearmodels`は`debiased=False`のとき正規分布・
-    # F統計量は生のカイ二乗形式（qで割らない）を返す仕様のため（`IVResults.pvalues`/
-    # `f_statistic`のdocstring参照、モジュールdocstringの表は`params`/`std_errors`のみに
-    # ついての対応関係）、params/std_errorsは`linearmodels`の値をそのまま使いつつ、
-    # t統計量・p値・信頼区間・F統計量はdf_resid・t分布を使って本実装と同じ規則で
-    # 独自に計算し直す（`debiased`の値によらず一貫した比較ができるようにするため）。
+    # 本実装の2SLSは常にt分布・F分布で推論統計量を報告する（iv-spec.md 3.2節）。
+    # 自由度は`df_resid`（n-k）だが、`cov_type="cluster"`のときだけ`G-1`（クラスター
+    # 数-1）を使う（`IVResults.df_inference`）。`linearmodels`は`debiased=False`のとき
+    # 正規分布・F統計量は生のカイ二乗形式（qで割らない）を返し、クラスターでも
+    # 自由度にGを反映しない仕様のため（`IVResults.pvalues`/`f_statistic`のdocstring参照、
+    # モジュールdocstringの表は`params`/`std_errors`のみについての対応関係）、
+    # params/std_errorsは`linearmodels`の値をそのまま使いつつ、t統計量・p値・信頼区間・
+    # F統計量は`df_inference`・t分布を使って本実装と同じ規則で独自に計算し直す
+    # （`debiased`の値によらず一貫した比較ができるようにするため）。
+    n_groups = int(pdf[cluster].nunique()) if cov_type == "cluster" else None
     coef = {
         fix_intercept_name(k): float(v)
         for k, v in res.params.to_dict().items()
@@ -277,11 +281,12 @@ def run(
         for k, v in res.std_errors.to_dict().items()
     }
     df_resid = int(res.df_resid)
+    df_inference = df_resid if n_groups is None else n_groups - 1
     alpha = 1.0 - confidence_level
-    t_crit = float(scipy_stats.t.ppf(1 - alpha / 2, df_resid))
+    t_crit = float(scipy_stats.t.ppf(1 - alpha / 2, df_inference))
     test_stats = {k: coef[k] / se[k] for k in coef}
     p_values = {
-        k: float(2 * (1 - scipy_stats.t.cdf(abs(v), df_resid)))
+        k: float(2 * scipy_stats.t.sf(abs(v), df_inference))
         for k, v in test_stats.items()
     }
     conf_int = {
@@ -292,7 +297,7 @@ def run(
     q = len(coef) - (1 if include_intercept else 0)
     raw_f = float(res.f_statistic.stat)
     f_statistic = raw_f if debiased else raw_f / q
-    f_p_value = float(1 - scipy_stats.f.cdf(f_statistic, q, df_resid))
+    f_p_value = float(scipy_stats.f.sf(f_statistic, q, df_inference))
 
     # Wu-Hausman検定: 本実装（`wald_test_last_columns`によるaugmented regression
     # Wald検定、iv-spec.md 3.6節）と数式が対応するのは`res.wu_hausman()`
@@ -317,17 +322,32 @@ def run(
     # wu_hausman_p_valueをNoneにする設計（`engine/src/iv/CLAUDE.md`
     # 「Wu-Hausmanの拡張回帰が想定内の理由で失敗した場合」参照）のため、
     # ここでも同じくNoneにして揃える。
+    #
+    # `cov_type="cluster"`ではF分布の分母自由度が`G-1`になる（本実装は拡張回帰の
+    # `df_inference`を使う）。さらに拡張回帰の傾き係数の数`q_aug`
+    # （`x_exog` + `x_endog` + 第一段階残差）がG以上だと、クラスターロバスト共分散の
+    # ランク（G-1以下）が足りず本実装は`wu_hausman_*`を`None`にするため、
+    # ここでも`None`に揃える（`cluster_g2`が該当）。
     n_endog = len(x_endog_cols)
     wu_hausman_df_resid_candidate = df_resid - n_endog
-    if not x_endog_cols or wu_hausman_df_resid_candidate <= 0:
+    q_aug = len(x_exog_cols) + 2 * n_endog
+    if (
+        not x_endog_cols
+        or wu_hausman_df_resid_candidate <= 0
+        or (n_groups is not None and n_groups <= q_aug)
+    ):
         wu_hausman_statistic = None
         wu_hausman_p_value = None
     else:
         wr_stat = float(res.wooldridge_regression.stat) / n_endog
         wu_hausman_statistic = wr_stat
-        wu_hausman_df_resid = df_resid - n_endog
+        wu_hausman_df_denom = (
+            wu_hausman_df_resid_candidate
+            if n_groups is None
+            else n_groups - 1
+        )
         wu_hausman_p_value = float(
-            1 - scipy_stats.f.cdf(wr_stat, n_endog, wu_hausman_df_resid)
+            scipy_stats.f.sf(wr_stat, n_endog, wu_hausman_df_denom)
         )
 
     result: dict = {

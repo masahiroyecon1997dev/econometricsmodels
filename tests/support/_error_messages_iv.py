@@ -54,3 +54,19 @@ INSUFFICIENT_CLUSTERS_FOR_WEIGHT_MATRIX = (
 # 観測数のチェックは、第一段階の回帰変数の数が識別条件`instruments>=x_endog`により
 # 常に構造方程式以上のため、第一段階側が先に発火する（Python APIからは到達不能）。
 FIRST_STAGE_FAILED = "first stage regression for endogenous variable '{endog_name}' failed: {source}"
+
+# 設計行列が特異なときの`LeastSquaresError::SingularMatrix`の文言。第一段階では
+# `FIRST_STAGE_FAILED`の`source`、第二段階では`SECOND_STAGE_FAILED`の`source`になる。
+SINGULAR_DESIGN_MATRIX = (
+    "design matrix is singular (perfect multicollinearity detected)"
+)
+
+# `IvError::SecondStageFailed`（engine/src/iv/common.rs）。2SLSのみ。
+SECOND_STAGE_FAILED = "second stage regression failed: {source}"
+
+# GMMは第二段階回帰を持たず、`X'ZWZ'X`の逆行列が取れないときに失敗する
+# （`engine/src/iv/gmm.rs`）。第一段階が成功し、構造方程式の説明変数同士が
+# 共線のときにこの経路になる。
+GMM_BREAD_NOT_INVERTIBLE = (
+    "computation failed: failed to invert X'ZWZ'X (GMM bread matrix)"
+)

@@ -836,6 +836,75 @@ def test_perfect_multicollinearity_raises_computation_error():
         ).fit()
 
 
+@pytest.mark.parametrize("estimator", ["2sls", "gmm"])
+@pytest.mark.parametrize(
+    ("label", "column", "expr"),
+    [
+        ("instruments_collinear", "z2", 2 * pl.col("z1") + 1),
+        (
+            "instrument_collinear_with_x_exog",
+            "z2",
+            pl.col("x1") + pl.col("z1"),
+        ),
+        ("instrument_constant", "z1", pl.lit(5.0)),
+    ],
+)
+def test_collinear_instruments_raise_computation_error(
+    iv_dataset, estimator, label, column, expr
+):
+    """`instruments`同士の共線、`instruments`と`x_exog`の共線（`const`込みの
+    `Z=[const, x_exog, instruments]`が列ランク落ち）、定数の操作変数（`const`と共線）は、
+    いずれも第一段階回帰の設計行列が特異になり`ComputationError`
+    （`IvError::FirstStageFailed`）。第一段階は`estimator`によらず先に走るため、
+    2SLSとGMMで同じ経路・同じメッセージになる。
+    """
+    df = iv_dataset.with_columns(expr.alias(column))
+    with pytest.raises(
+        ComputationError,
+        match=escaped(
+            iv_msgs.FIRST_STAGE_FAILED,
+            endog_name="endog1",
+            source=iv_msgs.SINGULAR_DESIGN_MATRIX,
+        ),
+    ):
+        our_fit(df, options=IVOptions(estimator=estimator))
+
+
+@pytest.mark.parametrize("estimator", ["2sls", "gmm"])
+@pytest.mark.parametrize("label", ["x_endog_collinear", "x_endog_with_x_exog"])
+def test_collinear_x_endog_raises_computation_error(estimator, label):
+    """第一段階は成功するが構造方程式の説明変数が共線になるケース。第一段階は
+    内生変数ごとに独立に走り、各回帰の設計行列`[const, x_exog, instruments]`は
+    特異にならない。`x_endog`同士が共線（`endog2 = 2*endog1+3`）、または
+    `x_endog`が`x_exog`と共線（`endog1 = 3*x1`）だと、第二段階の設計行列
+    `[const, x_exog, x̂_endog]`が特異になる（`second_stage_input`経路）。
+    2SLSは第二段階回帰の`ComputationError`
+    （`IvError::SecondStageFailed`）、GMMは第二段階を持たず`X'ZWZ'X`の
+    逆行列が取れずに`ComputationError`になる。
+    """
+    df = pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv")
+    if label == "x_endog_collinear":
+        df = df.with_columns((2 * pl.col("endog1") + 3).alias("endog2"))
+        x_endog = ["endog1", "endog2"]
+    else:
+        df = df.with_columns((3 * pl.col("x1")).alias("endog1"))
+        x_endog = ["endog1"]
+    match = (
+        escaped(
+            iv_msgs.SECOND_STAGE_FAILED, source=iv_msgs.SINGULAR_DESIGN_MATRIX
+        )
+        if estimator == "2sls"
+        else escaped(iv_msgs.GMM_BREAD_NOT_INVERTIBLE)
+    )
+    with pytest.raises(ComputationError, match=match):
+        our_fit(
+            df,
+            x_endog=x_endog,
+            instruments=["z1", "z2", "z3"],
+            options=IVOptions(estimator=estimator),
+        )
+
+
 @pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
 def test_scale_variance_raises_computation_error(cov_type):
     """変数間のスケールが極端に異なる設計行列（x1を`*1e6`、x2を`*1e-3`）は、

@@ -224,9 +224,11 @@ def test_cluster_matches_linearmodels(fixtures):
         options=options,
     ).fit()
 
-    ref = fixtures["synthetic"]["baseline"]["classical"]["cluster"]
-    _assert_dict_close(res.params, ref["params"], "cluster/params")
-    _assert_dict_close(res.std_errors, ref["std_errors"], "cluster/std_errors")
+    _check_result(
+        res,
+        fixtures["synthetic"]["baseline"]["classical"]["cluster"],
+        "cluster",
+    )
 
 
 def test_cluster_imbalanced_matches_linearmodels(fixtures):
@@ -251,10 +253,10 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
         options=options,
     ).fit()
 
-    ref = fixtures["synthetic"]["baseline"]["classical"]["cluster_imbalanced"]
-    _assert_dict_close(res.params, ref["params"], "cluster_imbalanced/params")
-    _assert_dict_close(
-        res.std_errors, ref["std_errors"], "cluster_imbalanced/std_errors"
+    _check_result(
+        res,
+        fixtures["synthetic"]["baseline"]["classical"]["cluster_imbalanced"],
+        "cluster_imbalanced",
     )
 
 

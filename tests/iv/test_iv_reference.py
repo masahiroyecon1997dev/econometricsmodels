@@ -188,7 +188,8 @@ def test_matches_linearmodels(fixtures, scenario, cov_type):
 def test_cluster_matches_linearmodels(fixtures):
     """クラスターロバストSE。`generate_iv_fixtures.py`と同じ疑似グループ
     （行番号%10）を再現する。統計的な意味はなく、実装の動作確認用のため
-    `baseline`シナリオのみ（`params`/`std_errors`のみが記録されている）。
+    `baseline`シナリオのみ。推論統計量はt(G-1)・F(q, G-1)で比較する
+    （`linearmodels`の`run()`が同じ自由度で計算し直している）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
     df = with_cluster_groups(df, 10)
@@ -202,9 +203,7 @@ def test_cluster_matches_linearmodels(fixtures):
         options=options,
     ).fit()
 
-    ref = fixtures["synthetic"]["baseline"]["cluster"]
-    _assert_dict_close(res.params, ref["params"], "cluster/params")
-    _assert_dict_close(res.std_errors, ref["std_errors"], "cluster/std_errors")
+    _check_result(res, fixtures["synthetic"]["baseline"]["cluster"], "cluster")
 
 
 def test_cluster_imbalanced_matches_linearmodels(fixtures):
@@ -226,10 +225,10 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
         options=options,
     ).fit()
 
-    ref = fixtures["synthetic"]["baseline"]["cluster_imbalanced"]
-    _assert_dict_close(res.params, ref["params"], "cluster_imbalanced/params")
-    _assert_dict_close(
-        res.std_errors, ref["std_errors"], "cluster_imbalanced/std_errors"
+    _check_result(
+        res,
+        fixtures["synthetic"]["baseline"]["cluster_imbalanced"],
+        "cluster_imbalanced",
     )
 
 
@@ -252,10 +251,11 @@ def test_cluster_g2_matches_linearmodels(fixtures):
     ).fit()
 
     ref = fixtures["synthetic"]["baseline"]["cluster_g2"]
-    _assert_dict_close(res.params, ref["params"], "cluster_g2/params")
-    _assert_dict_close(
-        res.std_errors, ref["std_errors"], "cluster_g2/std_errors"
-    )
+    _check_result(res, ref, "cluster_g2")
+    # 拡張回帰の傾き係数の数q_aug=2がG=2以上のため、Wu-Hausmanは双方None。
+    assert ref["wu_hausman_statistic"] is None
+    assert res.wu_hausman_statistic is None
+    assert res.wu_hausman_p_value is None
 
 
 @pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
@@ -343,10 +343,7 @@ def test_no_intercept_matches_linearmodels(fixtures, scenario, cov_type):
 
 def test_no_intercept_cluster_matches_linearmodels(fixtures):
     """`include_intercept=False`×クラスターロバストSE（`baseline`、切片ありの
-    `test_cluster_matches_linearmodels`と同じ疑似グループ行番号%10）。係数と標準誤差
-    のみ比較する（切片ありと同じ。フィクスチャのp値・信頼区間はt(df_resid)で
-    計算されるが、本実装のclusterはt(G-1)を使うため比較できない。検定統計量・p値・
-    Wald・診断統計量は`test_iv_crosscheck.py`のR ivregと比較する）。
+    `test_cluster_matches_linearmodels`と同じ疑似グループ行番号%10）。
     """
     df = with_cluster_groups(pl.read_csv(DATA_DIR / "iv_baseline.csv"), 10)
     options = IVOptions(
@@ -362,12 +359,10 @@ def test_no_intercept_cluster_matches_linearmodels(fixtures):
     ).fit()
 
     assert "const" not in res.param_names
-    ref = fixtures["synthetic"]["no_intercept"]["baseline"]["cluster"]
-    _assert_dict_close(
-        res.params, ref["params"], "no_intercept/cluster/params"
-    )
-    _assert_dict_close(
-        res.std_errors, ref["std_errors"], "no_intercept/cluster/std_errors"
+    _check_result(
+        res,
+        fixtures["synthetic"]["no_intercept"]["baseline"]["cluster"],
+        "no_intercept/cluster",
     )
 
 

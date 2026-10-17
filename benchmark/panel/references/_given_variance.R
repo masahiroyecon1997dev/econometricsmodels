@@ -1,7 +1,7 @@
 # 分散成分（σ_ε²・σ_u²）を外から与えるREの参照スクリプト
 # （`run_plm_re_given_variance_benchmark.R`・
 # `run_plm_re_given_variance_hausman_benchmark.R`）が共有する部品。`source()`で
-# 読み込んで使う（`plm`・`sandwich`は呼び出し側で読み込む）。
+# 読み込んで使う。
 #
 # 対象は不均衡パネルのみ。バランスパネル（全個体で`T_i`が同じ）はplm自身の分散成分が
 # `linearmodels`準拠の本実装と機械精度で一致するため、`run_plm_benchmark.R`・
@@ -9,8 +9,8 @@
 # スクリプト（`run_plm_re_given_variance_benchmark.R`）はバランスパネルでは準偏差変換後の
 # 定数列`1 - θ`が全行で同じ値になり、plmのpoolingが定数列を落とすため使えない。
 #
-# cov_type→plmのvcovの対応は`run_plm_benchmark.R`・`run_plm_hausman_benchmark.R`と
-# 同じ（両スクリプトにも同じ対応表が独立してある）。
+# cov_type→plmのvcovの対応（`plm_vcov_function`）は、`benchmark/panel/_plm_common.R`を
+# 呼び出し側で読み込んで使う。
 
 # 与えられた分散成分から、個体ごとの準偏差変換の重み
 # `θ_i = 1 - sqrt(σ_ε² / (σ_ε² + T_i σ_u²))`を行ごとに返す。
@@ -30,24 +30,4 @@ quasi_demean <- function(v, df, entity_col, theta) {
 # within変換`v - v̄_i`。
 within_demean <- function(v, df, entity_col) {
   v - ave(v, df[[entity_col]], FUN = mean)
-}
-
-# cov_typeに対応するplmのvcov関数（plmモデルを受け取り共分散行列を返す）。
-# clusterはentityクラスターのみ（plmはgroup/timeしかクラスターにできない）。
-plm_vcov_function <- function(cov_type, maxlag = NA) {
-  if (cov_type == "classical") {
-    vcov
-  } else if (cov_type %in% c("hc1", "hc2", "hc3")) {
-    hc_type <- toupper(cov_type)
-    function(x) vcovHC(x, method = "white1", type = hc_type)
-  } else if (cov_type == "cluster") {
-    function(x) vcovHC(x, method = "arellano", type = "sss")
-  } else if (cov_type == "dk") {
-    if (is.na(maxlag)) {
-      stop("dk requires maxlag")
-    }
-    function(x) vcovSCC(x, maxlag = maxlag, type = "sss")
-  } else {
-    stop(paste("unknown cov_type:", cov_type))
-  }
 }

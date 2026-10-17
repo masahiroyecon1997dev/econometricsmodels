@@ -40,7 +40,9 @@
 #       dk entity time 1.5274426 0.8642969 2
 
 script_path <- sub("^--file=", "", grep("^--file=", commandArgs(), value = TRUE))
-source(file.path(dirname(script_path), "_given_variance.R"))
+script_dir <- dirname(script_path)
+source(file.path(script_dir, "..", "_plm_common.R"))
+source(file.path(script_dir, "_given_variance.R"))
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 7) {

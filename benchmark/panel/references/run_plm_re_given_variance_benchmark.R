@@ -58,12 +58,14 @@
 #   Rscript run_plm_re_given_variance_benchmark.R data.csv "y ~ x1 + x2" dk \
 #       entity time 1.5274426 0.8642969 3
 
-# `benchmark/common/_common.R`の`wald_f_test()`と、同じディレクトリの
-# `_given_variance.R`（準偏差変換とcov_type別のvcov）を使う（Rには__file__相当が
-# 無いため、commandArgs()の--file=から自身のディレクトリを特定してsource()する）。
+# `benchmark/common/_common.R`の`wald_f_test()`、`benchmark/panel/_plm_common.R`
+# （cov_type別のvcovとt検定への変換）、同じディレクトリの`_given_variance.R`
+# （準偏差変換）を使う（Rには__file__相当が無いため、commandArgs()の--file=から
+# 自身のディレクトリを特定してsource()する）。
 script_path <- sub("^--file=", "", grep("^--file=", commandArgs(), value = TRUE))
 script_dir <- dirname(script_path)
 source(file.path(script_dir, "..", "..", "common", "_common.R"))
+source(file.path(script_dir, "..", "_plm_common.R"))
 source(file.path(script_dir, "_given_variance.R"))
 
 args <- commandArgs(trailingOnly = TRUE)
@@ -120,21 +122,16 @@ df_resid <- df.residual(model)
 # cov_typeごとのvcovとt分布の自由度（モジュールコメント参照）。
 maxlag <- if (length(args) >= 8) as.integer(args[8]) else NA
 vc <- plm_vcov_function(cov_type, maxlag)(model)
-t_df <- switch(
-  cov_type,
-  cluster = n_groups - 1,
-  dk = n_periods - 1,
-  df_resid
-)
+t_df <- plm_t_df(cov_type, df_resid, n_groups, n_periods)
 coefs <- coef(model)
 ses <- sqrt(diag(vc))
 
 # t検定への変換（run_plm_benchmark.Rと同じ規約、95%信頼区間）。
-test_stats <- coefs / ses
-p_values <- 2 * pt(-abs(test_stats), df = t_df)
-crit <- qt(0.975, df = t_df)
-conf_lower <- coefs - crit * ses
-conf_upper <- coefs + crit * ses
+inference <- plm_t_inference(coefs, ses, t_df)
+test_stats <- inference$test_stats
+p_values <- inference$p_values
+conf_lower <- inference$conf_lower
+conf_upper <- inference$conf_upper
 
 # 係数名を他のスクリプトの出力に合わせる（定数は"(Intercept)"）。
 out_names <- ifelse(names(coefs) == const_name, "(Intercept)", names(coefs))

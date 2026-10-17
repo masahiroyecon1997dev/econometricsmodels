@@ -27,6 +27,11 @@
 #   Rscript run_plm_hausman_tilde_benchmark.R data.csv "y ~ x1 + z" hc1 entity time
 #   Rscript run_plm_hausman_tilde_benchmark.R data.csv "y ~ x1 + z" dk entity time 2
 
+# cov_type別のvcovは`_plm_common.R`を使う（Rには__file__相当が無いため、
+# commandArgs()の--file=から自身のディレクトリを特定してsource()する）。
+script_path <- sub("^--file=", "", grep("^--file=", commandArgs(), value = TRUE))
+source(file.path(dirname(script_path), "_plm_common.R"))
+
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 5) {
   stop(
@@ -47,22 +52,8 @@ suppressMessages(library(plm))
 pdf <- pdata.frame(df, index = c(entity_col, time_col))
 row.names(pdf) <- NULL
 
-if (cov_type == "classical") {
-  vc <- vcov
-} else if (cov_type %in% c("hc1", "hc2", "hc3")) {
-  hc_type <- toupper(cov_type)
-  vc <- function(x) vcovHC(x, method = "white1", type = hc_type)
-} else if (cov_type == "cluster") {
-  vc <- function(x) vcovHC(x, method = "arellano", type = "sss")
-} else if (cov_type == "dk") {
-  if (length(args) < 6) {
-    stop("dk requires maxlag as the 6th argument")
-  }
-  maxlag <- as.integer(args[6])
-  vc <- function(x) vcovSCC(x, maxlag = maxlag, type = "sss")
-} else {
-  stop(paste("unknown cov_type:", cov_type))
-}
+maxlag <- if (length(args) >= 6) as.integer(args[6]) else NA
+vc <- plm_vcov_function(cov_type, maxlag)
 
 fm <- as.formula(formula_str)
 fe_mod <- plm(fm, data = pdf, model = "within", effect = "individual")

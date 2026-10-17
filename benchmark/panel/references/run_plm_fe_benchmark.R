@@ -53,6 +53,11 @@
 #   Rscript run_plm_fe_benchmark.R data.csv "y ~ x1 + x2" cluster entity time
 #   Rscript run_plm_fe_benchmark.R data.csv "y ~ x1 + x2" dk entity time 2
 
+# t検定への変換は`benchmark/panel/_plm_common.R`を使う（Rには__file__相当が無い
+# ため、commandArgs()の--file=から自身のディレクトリを特定してsource()する）。
+script_path <- sub("^--file=", "", grep("^--file=", commandArgs(), value = TRUE))
+source(file.path(dirname(script_path), "..", "_plm_common.R"))
+
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 5) {
   stop(
@@ -105,11 +110,11 @@ if (cov_type == "cluster") {
 }
 
 ses <- sqrt(diag(vc))
-test_stats <- coefs / ses
-p_values <- 2 * pt(-abs(test_stats), df = t_df)
-crit <- qt(0.975, df = t_df) # 95%信頼区間固定（run_fixest_benchmark.Rと揃える）
-conf_lower <- coefs - crit * ses
-conf_upper <- coefs + crit * ses
+inference <- plm_t_inference(coefs, ses, t_df)
+test_stats <- inference$test_stats
+p_values <- inference$p_values
+conf_lower <- inference$conf_lower
+conf_upper <- inference$conf_upper
 
 # pwaldtestは`vcov`にclusterの属性が無いと分母自由度が`df.residual`のままになる
 # （警告が出る）。p値は下で`t_df`から計算し直すため警告は無視する。

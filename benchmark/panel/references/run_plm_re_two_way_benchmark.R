@@ -42,6 +42,12 @@
 #   Rscript run_plm_re_two_way_benchmark.R data.csv "y ~ x1 + x2" classical entity time
 #   Rscript run_plm_re_two_way_benchmark.R data.csv "y ~ x1 + xi" dk entity time 1
 
+# cov_type別のvcovとt検定への変換は`benchmark/panel/_plm_common.R`を使う（Rには
+# __file__相当が無いため、commandArgs()の--file=から自身のディレクトリを特定して
+# source()する）。
+script_path <- sub("^--file=", "", grep("^--file=", commandArgs(), value = TRUE))
+source(file.path(dirname(script_path), "..", "_plm_common.R"))
+
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 5) {
   stop(
@@ -77,37 +83,18 @@ n_periods <- length(unique(df[[time_col]]))
 df_resid <- df.residual(model)
 
 # cov_typeごとのvcovとt分布の自由度。
-if (cov_type == "dk") {
-  if (length(args) < 6) {
-    stop("dk requires maxlag as the 6th argument")
-  }
-  maxlag <- as.integer(args[6])
-}
-vc_fun <- switch(
-  cov_type,
-  classical = function(x) vcov(x),
-  hc1 = function(x) vcovHC(x, method = "white1", type = "HC1"),
-  hc2 = function(x) vcovHC(x, method = "white1", type = "HC2"),
-  hc3 = function(x) vcovHC(x, method = "white1", type = "HC3"),
-  cluster = function(x) vcovHC(x, method = "arellano", type = "sss"),
-  dk = function(x) vcovSCC(x, maxlag = maxlag, type = "sss"),
-  stop(paste("unknown cov_type:", cov_type))
-)
-t_df <- switch(
-  cov_type,
-  cluster = n_groups - 1,
-  dk = n_periods - 1,
-  df_resid
-)
+maxlag <- if (length(args) >= 6) as.integer(args[6]) else NA
+vc_fun <- plm_vcov_function(cov_type, maxlag)
+t_df <- plm_t_df(cov_type, df_resid, n_groups, n_periods)
 
 vc <- vc_fun(model)
 coefs <- coef(model)
 ses <- sqrt(diag(vc))
-test_stats <- coefs / ses
-p_values <- 2 * pt(-abs(test_stats), df = t_df)
-crit <- qt(0.975, df = t_df)
-conf_lower <- coefs - crit * ses
-conf_upper <- coefs + crit * ses
+inference <- plm_t_inference(coefs, ses, t_df)
+test_stats <- inference$test_stats
+p_values <- inference$p_values
+conf_lower <- inference$conf_lower
+conf_upper <- inference$conf_upper
 
 # F統計量。p値は`run_plm_benchmark.R`と同じ理由で`t_df`から計算し直す。
 wald_f <- suppressWarnings(pwaldtest(model, test = "F", vcov = vc))

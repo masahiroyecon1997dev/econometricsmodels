@@ -92,6 +92,11 @@
 #   Rscript run_plm_benchmark.R data.csv "y ~ x1 + x2" dk entity time 2
 #   Rscript run_plm_benchmark.R data.csv "y ~ x1 + x2" cluster entity time cluster_group
 
+# cov_type別のvcovとt検定への変換は`_plm_common.R`を使う（Rには__file__相当が無い
+# ため、commandArgs()の--file=から自身のディレクトリを特定してsource()する）。
+script_path <- sub("^--file=", "", grep("^--file=", commandArgs(), value = TRUE))
+source(file.path(dirname(script_path), "_plm_common.R"))
+
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 5) {
   stop(
@@ -126,22 +131,7 @@ n_periods <- length(unique(df[[time_col]]))
 df_resid <- df.residual(model)
 
 # cov_typeごとのvcovとt分布の自由度（モジュールコメント参照）。
-if (cov_type == "classical") {
-  vc <- vcov(model)
-  t_df <- df_resid
-} else if (cov_type == "hc1") {
-  vc <- vcovHC(model, method = "white1", type = "HC1")
-  t_df <- df_resid
-} else if (cov_type == "hc2") {
-  vc <- vcovHC(model, method = "white1", type = "HC2")
-  t_df <- df_resid
-} else if (cov_type == "hc3") {
-  vc <- vcovHC(model, method = "white1", type = "HC3")
-  t_df <- df_resid
-} else if (cov_type == "cluster" && length(args) < 6) {
-  vc <- vcovHC(model, method = "arellano", type = "sss")
-  t_df <- n_groups - 1
-} else if (cov_type == "cluster") {
+if (cov_type == "cluster" && length(args) >= 6) {
   # entity以外の列でクラスター（モジュールコメント参照）。
   # `pdata.frame`は行をentity・時点でソートし行名を"entity-time"にするため、
   # 元データの"entity-time"キーでクラスター列と対応づける（行順が崩れた入力でも
@@ -158,28 +148,21 @@ if (cov_type == "classical") {
   # lmの係数名（"X(Intercept)"等）をplmの係数名に戻す。
   dimnames(vc) <- list(names(coef(model)), names(coef(model)))
   t_df <- length(unique(cluster_ids)) - 1
-} else if (cov_type == "dk") {
-  if (length(args) < 6) {
-    stop("dk requires maxlag as the 6th argument")
-  }
-  vc <- vcovSCC(model, maxlag = as.integer(args[6]), type = "sss")
-  t_df <- n_periods - 1
 } else {
-  stop(paste(
-    "unknown cov_type (or unsupported for R crosscheck):",
-    cov_type
-  ))
+  maxlag <- if (cov_type == "dk" && length(args) >= 6) as.integer(args[6]) else NA
+  vc <- plm_vcov_function(cov_type, maxlag)(model)
+  t_df <- plm_t_df(cov_type, df_resid, n_groups, n_periods)
 }
 
 coefs <- coef(model)
 ses <- sqrt(diag(vc))
 
 # t検定への変換（モジュールコメント「t検定への変換」参照）。
-test_stats <- coefs / ses
-p_values <- 2 * pt(-abs(test_stats), df = t_df)
-crit <- qt(0.975, df = t_df) # 95%信頼区間固定（run_fixest_benchmark.Rのconfint()既定と揃える）
-conf_lower <- coefs - crit * ses
-conf_upper <- coefs + crit * ses
+inference <- plm_t_inference(coefs, ses, t_df)
+test_stats <- inference$test_stats
+p_values <- inference$p_values
+conf_lower <- inference$conf_lower
+conf_upper <- inference$conf_upper
 
 # F統計量（上記コメント参照）。`vc`は上のcov_typeごとの分散共分散行列。
 # pwaldtestは`vcov`に`cluster`属性が無いと分母自由度を`df.residual`のままにする

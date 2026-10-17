@@ -32,6 +32,20 @@
   ロバスト共分散が構造的に特異になるケース（`_STRUCTURALLY_SINGULAR`）は`null`
   （本実装は`fit()`がエラーになる）。
 
+## unbalancedのdk明示バンド幅（分散成分を与えたplm）
+
+不均衡パネルではplmのSwamy-Arora分散成分が`linearmodels`準拠の本実装と異なり、
+plm自身のREに`vcovSCC`を当てると標準誤差が約1%ずれる（バンド幅0では信頼区間の
+端が0に近い係数で相対誤差が10%超に増幅される。バンド幅の扱いとは無関係）。
+そのため`unbalanced`の`dk_explicit_bandwidth`だけは、`linearmodels`の分散成分
+（本実装と機械精度で一致、`re.json`）をRに渡して準偏差変換し、plmの`vcovSCC`を
+当てた値を参照値にする（`run_plm_re_given_variance_benchmark.R`）。plmが
+検証するのは係数・共分散行列・小標本補正までで、θの式・傾きだけのWald F・t検定
+への変換（自由度`T-1`）は手書き。この方式の根拠は、plm自身の分散成分を与えると
+plm自身のREと係数・標準誤差・F統計量が一致することで、生成のたびに確かめる
+（`_check_given_variance_equivalence`）。`unbalanced`の既定バンド幅のdkと他の
+cov_type、ハウスマン検定はplm自身の値と緩い許容誤差で比べる。
+
 ## entity以外の列でクラスターするケース
 
 `cluster`に`entity`以外の列を指定する場合は、plmの`vcovHC`がgroup/timeしか
@@ -88,6 +102,7 @@ group/timeのみでリファレンスが存在しないため、このフィク�
 
 from __future__ import annotations
 
+import importlib.metadata
 import subprocess
 import tempfile
 from datetime import UTC, datetime
@@ -212,21 +227,77 @@ def _run_effects(
     return run_re_plm_r(csv_path, formula, cov_type, maxlag=maxlag)
 
 
-def _run_dk_explicit_bandwidth(scenario: str, bandwidth: int) -> dict:
-    """`dk_bandwidth`を明示した標準誤差・推論統計量の参照値。balancedはplm自身の
-    RE、unbalancedはlinearmodelsの分散成分を与えたplm（`DK_EXPLICIT_BANDWIDTHS`
-    直前のコメント参照）。"""
+# 分散成分を与える参照値の自己検証（`_check_given_variance_equivalence`）の相対
+# 許容誤差。同じ分散成分を与えれば同じGLS推定量・同じ`vcovSCC`になるため機械精度。
+_GIVEN_VARIANCE_RTOL = 1e-10
+
+
+def _check_given_variance_equivalence(
+    given: dict, plm_re: dict, label: str
+) -> None:
+    """plm自身の分散成分を与えた参照値`given`が、plm自身のRE（`plm_re`）の
+    `vcovSCC`と、係数・標準誤差・F統計量で一致することを確かめる。
+
+    分散成分を与える方式（`run_plm_re_given_variance_benchmark.R`）の根拠で
+    ある等価性を、フィクスチャを作るたびに検証する。F統計量は傾きだけの
+    手書き式なので、plm自身の`pwaldtest`との一致が式の妥当性の確認になる。
+    """
+    pairs = [
+        (given["f_statistic"], plm_re["f_statistic"], "f_statistic"),
+        *[
+            (given["params"][k], v, f"params/{k}")
+            for k, v in plm_re["params"].items()
+        ],
+        *[
+            (given["std_errors"][k], v, f"std_errors/{k}")
+            for k, v in plm_re["std_errors"].items()
+        ],
+    ]
+    for ours, ref, name in pairs:
+        if abs(ours - ref) > _GIVEN_VARIANCE_RTOL * max(abs(ref), 1.0):
+            raise AssertionError(
+                f"{label}/{name}: given-variance reference {ours!r} differs "
+                f"from plm's own RE {ref!r}"
+            )
+
+
+def _run_dk_explicit_bandwidths(scenario: str) -> dict[str, dict]:
+    """`dk_bandwidth`を明示した標準誤差・推論統計量の参照値（バンド幅 -> 値）。
+    balancedはplm自身のRE、unbalancedはlinearmodelsの分散成分を与えたplm
+    （`DK_EXPLICIT_BANDWIDTHS`直後のコメント参照）。"""
+    bandwidths = DK_EXPLICIT_BANDWIDTHS[scenario]
     if scenario != UNBALANCED_SCENARIO:
-        return _run_effects(scenario, "dk", maxlag=bandwidth)
+        return {
+            str(bw): _run_effects(scenario, "dk", maxlag=bw)
+            for bw in bandwidths
+        }
     x_cols = SCENARIO_X_COLS.get(scenario, ["x1", "x2"])
+    csv_path = DATA_DIR / f"fe_{scenario}.csv"
+    formula = f"y ~ {' + '.join(x_cols)}"
+    # 分散成分はバンド幅によらないため1回だけ求める。
     variance = run_re(scenario, x_cols, "classical", time_col="time")
-    return run_re_dk_given_variance_plm_r(
-        DATA_DIR / f"fe_{scenario}.csv",
-        f"y ~ {' + '.join(x_cols)}",
-        sigma2_eps=variance["sigma2_eps"],
-        sigma2_u=variance["sigma2_u"],
-        maxlag=bandwidth,
-    )
+    references = {}
+    for bw in bandwidths:
+        plm_re = _run_effects(scenario, "dk", maxlag=bw)
+        _check_given_variance_equivalence(
+            run_re_dk_given_variance_plm_r(
+                csv_path,
+                formula,
+                sigma2_eps=plm_re["sigma2_eps"],
+                sigma2_u=plm_re["sigma2_u"],
+                maxlag=bw,
+            ),
+            plm_re,
+            f"{scenario}/bandwidth={bw}",
+        )
+        references[str(bw)] = run_re_dk_given_variance_plm_r(
+            csv_path,
+            formula,
+            sigma2_eps=variance["sigma2_eps"],
+            sigma2_u=variance["sigma2_u"],
+            maxlag=bw,
+        )
+    return references
 
 
 def _run_cluster_case(
@@ -290,10 +361,9 @@ def build_fixtures() -> dict:
         x_cols = SCENARIO_X_COLS.get(scenario, ["x1", "x2"])
         if scenario in DK_EXPLICIT_BANDWIDTHS:
             bandwidths = DK_EXPLICIT_BANDWIDTHS[scenario]
-            fixtures[scenario][DK_EXPLICIT_BANDWIDTH_KEY] = {
-                str(bw): _run_dk_explicit_bandwidth(scenario, bw)
-                for bw in bandwidths
-            }
+            fixtures[scenario][DK_EXPLICIT_BANDWIDTH_KEY] = (
+                _run_dk_explicit_bandwidths(scenario)
+            )
             fixtures[scenario][HAUSMAN_DK_BANDWIDTH_KEY] = {
                 str(bw): _run_hausman(
                     csv_path,
@@ -364,6 +434,7 @@ def build_fixtures() -> dict:
         text=True,
         check=True,
     ).stdout
+    linearmodels_version = importlib.metadata.version("linearmodels")
     plm_version = subprocess.run(
         ["Rscript", "-e", 'cat(as.character(packageVersion("plm")))'],
         capture_output=True,
@@ -377,6 +448,7 @@ def build_fixtures() -> dict:
         "reference": "plm (R)",
         "r_version": r_version,
         "plm_version": plm_version,
+        "linearmodels_version": linearmodels_version,
         "note": (
             "hc2/hc3・ハウスマン検定は、linearmodelsが提供しない/実装を持たない"
             "ためplmのみが参照値になる単一参照実装の例外（モジュールdoc参照）。"
@@ -391,7 +463,11 @@ def build_fixtures() -> dict:
             "dk_three_periods_hausmanは"
             "dkの時点数の境界の成功パス。dkの明示バンド幅は各シナリオの"
             "dk_explicit_bandwidth（標準誤差）・"
-            "hausman_dk_bandwidth（ハウスマン検定）。"
+            "hausman_dk_bandwidth（ハウスマン検定）。unbalancedの"
+            "dk_explicit_bandwidthだけは、linearmodelsの分散成分を与えて"
+            "準偏差変換したデータにplmのvcovSCCを当てた値（傾きだけのWald Fは"
+            "手書き。plm自身の分散成分を与えるとplm自身のREと一致することを"
+            "生成時に確認済み。モジュールdoc参照）。"
             "baseline.cluster_imbalanced（サイズ[2,3,5,10,30,50]のタイル）・"
             "baseline.cluster_g3（k=1、G=3=2k+1の境界成功パス）は、cluster列が"
             "entity以外のケースで、plmの準偏差変換済みデータにlm+"
@@ -401,8 +477,8 @@ def build_fixtures() -> dict:
             "異なる実装のため、不均衡パネルで点推定が最大0.18%、標準誤差・信頼区間等が"
             "cov_typeに応じて最大1%台（dkの信頼区間は3.7%）乖離する"
             "（実測確認済み、実装バグではない）。テストコード側ではバランス"
-            "パネルを機械精度、unbalancedのみ統計量・cov_type別に緩めた許容誤差"
-            "で比較すること（tests/support/_tolerances_panel.pyのre_crosscheck参照）。t検定"
+            "パネルとunbalancedのdk明示バンド幅を機械精度、unbalancedのその他は"
+            "統計量・cov_type別に緩めた許容誤差で比較すること（tests/support/_tolerances_panel.pyのre_crosscheck参照）。t検定"
             "（test_stats/p_values/conf_int）はplmの既定であるz検定（漸近正規"
             "近似）ではなく、本実装と同じt分布（hc2/hc3はdf_resid、clusterはG-1、"
             "dkはT-1）の式でparams/std_errorsから計算し直している"

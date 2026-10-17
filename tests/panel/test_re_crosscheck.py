@@ -58,7 +58,7 @@ plmの変量効果分散成分推定（Swamy-Arora）がlinearmodels準拠の本
 
 `unbalanced`のdk明示バンド幅の標準誤差・推論統計量は、plm自身のREとは比べない。
 標準誤差のずれがバンド幅によらず約0.9%あり、バンド幅0では信頼区間の端が0に
-近い`x2`で相対誤差が12%に増幅され、既存の許容誤差（dk: 5e-2）を超えるため。
+近い`x2`で相対誤差が12%に増幅され、`rtol_unbalanced["dk"]`（5e-2）を超えるため。
 代わりに`linearmodels`の分散成分をplmに与えて準偏差変換し、`vcovSCC`を当てた
 値と比べると、バランスパネルと同じく機械精度で一致する
 （`run_plm_re_given_variance_benchmark.R`）。傾きだけのWald F統計量はこの
@@ -398,8 +398,14 @@ DK_BANDWIDTH_CASES = bandwidth_cases(DK_EXPLICIT_BANDWIDTHS)
 @pytest.mark.parametrize("scenario, bandwidth", DK_BANDWIDTH_CASES)
 def test_dk_explicit_bandwidth_matches_plm(crosscheck, scenario, bandwidth):
     """`dk_bandwidth`を明示指定した場合の標準誤差・推論統計量も
-    `vcovSCC(maxlag=bandwidth)`と機械精度で一致する。`unbalanced`の参照値は
-    `linearmodels`の分散成分を与えたplm（モジュールdoc参照）。"""
+    `vcovSCC(maxlag=bandwidth)`と機械精度で一致する。
+
+    参照値は、balancedではplm自身のRE、`unbalanced`では`linearmodels`の分散成分
+    を与えて準偏差変換したデータへのplmの`vcovSCC`（モジュールdoc参照）。後者は
+    係数・共分散行列・小標本補正までをplmが検証し、θの式・傾きだけのWald F・
+    t検定への変換は手書きなので、検証できるのはバンド幅の扱いと小標本補正に
+    限られる（等価性は生成時にplm自身の分散成分で確認済み）。バンド幅の扱いは
+    wagepan（実データ）のplm自身のREでも確かめている。"""
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
     res = RE(
         df,
@@ -409,13 +415,18 @@ def test_dk_explicit_bandwidth_matches_plm(crosscheck, scenario, bandwidth):
         options=_re_options("dk", dk_bandwidth=bandwidth),
     ).fit()
 
+    reference = (
+        "plm vcovSCC with linearmodels variance components"
+        if scenario == UNBALANCED_SCENARIO
+        else "plm"
+    )
     assert res.dk_bandwidth_used == bandwidth
     _check_result(
         res,
         crosscheck["synthetic"][scenario][DK_EXPLICIT_BANDWIDTH_KEY][
             str(bandwidth)
         ],
-        f"{scenario}/dk/bandwidth={bandwidth}",
+        f"{scenario}/dk/bandwidth={bandwidth} vs {reference}",
         rtol=RTOL_BALANCED,
     )
 

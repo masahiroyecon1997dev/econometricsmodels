@@ -88,7 +88,9 @@ PANEL_TOLERANCES: dict[str, dict[str, float]] = {
     # マージンを載せた緩いRTOLを使う。
     "re_crosscheck": {
         # バランスパネルでは分散成分推定の差が無く機械精度一致するため、
-        # unbalancedシナリオ以外はこちらで厳密に比較する（cluster/dkの
+        # unbalancedシナリオ以外はこちらで厳密に比較する。unbalancedでも、
+        # linearmodelsの分散成分を与えたplmを参照にするdkの明示バンド幅の
+        # 標準誤差・推論統計量・F統計量はこちらで比較する（cluster/dkの
         # `G/(G-1)`・`T/(T-1)`補正は標準誤差に1%前後しか効かず、`rtol`の
         # ような緩い許容誤差では補正式の取り違えを検出できない）。
         "rtol_balanced": RTOL_MACHINE_PRECISION,
@@ -116,12 +118,12 @@ PANEL_TOLERANCES: dict[str, dict[str, float]] = {
         # hc2/hc3 1.1e-2（conf_int）・dk 3.7e-2（conf_int、se 0.9%がt分布の
         # 自由度`T-1=5`の裾でp値・信頼区間に増幅される）。
         # classical・hc1（実測最大相対誤差: std_errors 0.71%・conf_int 1.06%）も同水準。
-        # dkで`dk_bandwidth`を明示した場合の実測（unbalanced、std_errors・
+        # plm自身のREとの乖離の記録（この許容誤差では比べない）: dkで
+        # `dk_bandwidth`を明示した場合の実測（unbalanced、std_errors・
         # conf_int）: バンド幅0で0.95%・12.3%（信頼区間の端が0に近いx2で
         # 増幅され、上の5e-2を超える）、2で0.88%・3.7%、3で0.89%・1.2%。
-        # このためunbalancedの明示バンド幅の標準誤差・推論統計量はこの許容誤差
-        # では比べず、`linearmodels`の分散成分を与えたplmの値と`rtol_balanced`
-        # で比べる。ハウスマン検定側（下の`rtol_hausman_unbalanced["dk"]`）の
+        # このためunbalancedの明示バンド幅の標準誤差・推論統計量は、
+        # `linearmodels`の分散成分を与えたplmの値と`rtol_balanced`で比べる。ハウスマン検定側（下の`rtol_hausman_unbalanced["dk"]`）の
         # 許容誤差ではバンド幅2と3の統計量の差（約2.1%）を判別できない。
         "rtol_unbalanced": {
             "classical": 2e-2,

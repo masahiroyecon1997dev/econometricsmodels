@@ -15,14 +15,25 @@
 # 3. 変換後のデータに対する定数なしのpooling（`plm(model = "pooling")`）に
 #    `vcovSCC(maxlag, type = "sss")`を当てる。変換後のデータのOLSはREのGLS推定量
 #    と一致するため、plm自身の分散成分を与えた場合は`plm(model = "random")`に
-#    対する`vcovSCC`と標準誤差が一致する（実測確認済み）。
+#    対する`vcovSCC`と係数・標準誤差・F統計量が一致する。この等価性は生成側が
+#    フィクスチャを作るたびに確かめる（`generate_re_crosscheck_fixtures.py`の
+#    `_check_given_variance_equivalence`）。
 #
-# ## 傾きだけのWald F統計量を手書きする理由
+# 回帰式は素の列名の加法（`y ~ x1 + x2`）のみ対応する。`log(x1)`のような変換は
+# `all.vars`で素の列名になり、変換なしのまま走ってしまう。
+#
+# ## 傾きだけのWald F統計量
 #
 # 変換後の定数列は`plm`から見ると通常の説明変数（名前が"(Intercept)"ではない）の
 # ため、`pwaldtest`は定数列も検定に含めてしまい、分子自由度が傾きの数+1になって
 # 本実装のF統計量と照合できない。そのため傾き係数だけの二次形式`β'V⁻¹β/q`を
-# ここで計算する（係数と`vcovSCC`の行列はplm由来、F統計量の式は手書き）。
+# `benchmark/common/_common.R`の`wald_f_test()`（他のクロスチェックと共通の
+# 手書き）で計算する（係数と`vcovSCC`の行列はplm由来、F統計量の式は手書き）。
+# このF統計量の独立性は限定的で、plmが検証するのは係数と共分散行列まで。式の
+# 妥当性は、生成側（`generate_re_crosscheck_fixtures.py`）が毎回、plm自身の
+# 分散成分を与えたこのスクリプトの結果とplm自身のREの`pwaldtest`のF統計量を
+# 突き合わせて確かめる。`car::linearHypothesis`は`Dockerfile`で版を固定して
+# いない推移的な依存のため使わない。
 # p値はt検定と同じ分母自由度`T-1`の`pf()`で計算する（`run_plm_benchmark.R`と同じ規約）。
 #
 # ## 対象
@@ -35,6 +46,11 @@
 #   Rscript run_plm_re_given_variance_benchmark.R data.csv "y ~ x1 + x2" dk \
 #       entity time 1.5274426 0.8642969 3
 
+# `benchmark/common/_common.R`の`wald_f_test()`を使う（Rには__file__相当が無い
+# ため、commandArgs()の--file=から自身のディレクトリを特定してsource()する）。
+script_path <- sub("^--file=", "", grep("^--file=", commandArgs(), value = TRUE))
+source(file.path(dirname(script_path), "..", "..", "common", "_common.R"))
+
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 8) {
   stop(
@@ -45,6 +61,9 @@ if (length(args) < 8) {
 }
 data_path <- args[1]
 formula_str <- args[2]
+if (tolower(args[3]) != "dk") {
+  stop("only cov_type 'dk' is supported (the third argument is checked)")
+}
 entity_col <- args[4]
 time_col <- args[5]
 sigma2_eps <- as.numeric(args[6])
@@ -83,8 +102,9 @@ for (x in x_names) {
 }
 
 pdf <- pdata.frame(d, index = c(entity_col, time_col))
+rhs <- paste(c(const_name, x_names), collapse = " + ")
 model <- plm(
-  as.formula(paste(y_name, "~ 0 +", paste(c(const_name, x_names), collapse = " + "))),
+  as.formula(paste(y_name, "~ 0 +", rhs)),
   data = pdf,
   model = "pooling"
 )
@@ -103,15 +123,17 @@ crit <- qt(0.975, df = t_df)
 conf_lower <- coefs - crit * ses
 conf_upper <- coefs + crit * ses
 
-# 傾きだけのWald F統計量（モジュールコメント参照）。
-q <- length(x_names)
-b <- coefs[x_names]
-v_slopes <- vc[x_names, x_names, drop = FALSE]
-f_stat <- as.numeric(t(b) %*% solve(v_slopes) %*% b) / q
-f_p_value <- pf(f_stat, q, t_df, lower.tail = FALSE)
-
 # 係数名を他のスクリプトの出力に合わせる（定数は"(Intercept)"）。
 out_names <- ifelse(names(coefs) == const_name, "(Intercept)", names(coefs))
+
+# 傾きだけのWald F統計量（モジュールコメント参照）。`wald_f_test()`は
+# "(Intercept)"以外を傾きと見なすため、定数の名前を直した係数を渡す。
+# p値は裾で桁落ちしないよう`pf(lower.tail = FALSE)`で計算する。
+slope_model <- list(coefficients = setNames(coefs, out_names))
+vc_named <- vc
+dimnames(vc_named) <- list(out_names, out_names)
+f_stat <- wald_f_test(slope_model, vc_named, t_df)$f_statistic
+f_p_value <- pf(f_stat, length(x_names), t_df, lower.tail = FALSE)
 
 library(jsonlite)
 result <- list(
@@ -129,8 +151,6 @@ result <- list(
     out_names
   ),
   f_statistic = f_stat,
-  f_p_value = f_p_value,
-  sigma2_eps = sigma2_eps,
-  sigma2_u = sigma2_u
+  f_p_value = f_p_value
 )
 cat(toJSON(result, auto_unbox = TRUE, digits = NA))

@@ -269,6 +269,7 @@ def run_re_dk_given_variance_plm_r(
         entity_col: エンティティ識別子の列名。
         time_col: 時点識別子の列名。
     """
+    # 3番目の引数（cov_typeの位置）はスクリプトが"dk"であることだけを確かめる。
     raw = run_r(
         _PLM_RE_GIVEN_VARIANCE_R_SCRIPT,
         csv_path,
@@ -283,9 +284,7 @@ def run_re_dk_given_variance_plm_r(
         ],
     )
     return normalize_names(
-        raw,
-        stat_key="test_stats",
-        scalar_keys=(*_PLM_SCALAR_KEYS, "sigma2_eps", "sigma2_u"),
+        raw, stat_key="test_stats", scalar_keys=_PLM_SCALAR_KEYS
     )
 
 

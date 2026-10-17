@@ -2361,6 +2361,71 @@ mod tests {
         );
     }
 
+    /// `n < l`（`k < n`）でも同じ専用エラーで拒否する。
+    #[test]
+    fn fit_returns_insufficient_observations_for_first_stage_when_n_is_below_l() {
+        // n=3、k=2（切片+endog1）、l=4（切片+z1..z3）。
+        let y = vec![1.0, 2.0, 4.0];
+        let x_endog = vec![vec![1.0, 2.5, 2.0]];
+        let instruments = vec![
+            vec![1.0, 2.0, 4.0],
+            vec![2.0, 1.0, 5.0],
+            vec![0.5, 3.0, 1.0],
+        ];
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            &x_endog,
+            vec!["endog1".to_string()],
+            &instruments,
+            vec!["z1".to_string(), "z2".to_string(), "z3".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = TwoSlsEstimator::fit(input, CovType::Classical, 0.95);
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::InsufficientObservationsForFirstStage { n: 3, l: 4 }
+        );
+    }
+
+    /// 観測数の検証はクラスター数の検証より先に走る（クラスターが1つだけでも、
+    /// `n <= l`なら観測数不足を返す）。
+    #[test]
+    fn fit_checks_observation_count_before_cluster_count() {
+        let y = vec![1.0, 2.0, 4.0];
+        let x_endog = vec![vec![1.0, 2.5, 2.0]];
+        let instruments = vec![vec![1.0, 2.0, 4.0], vec![2.0, 1.0, 5.0]];
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            &x_endog,
+            vec!["endog1".to_string()],
+            &instruments,
+            vec!["z1".to_string(), "z2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+        let one_cluster = CovType::Cluster {
+            groups: Some(GroupCodes::from_labels_without_keys(&[
+                "a".to_string(),
+                "a".to_string(),
+                "a".to_string(),
+            ])),
+        };
+
+        let result = TwoSlsEstimator::fit(input, one_cluster, 0.95);
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::InsufficientObservationsForFirstStage { n: 3, l: 3 }
+        );
+    }
+
     /// 正規方程式`β=(X'X)⁻¹X'y`を`faer`演算で直接解く、SUT（`partial_wald_statistic`・
     /// `OlsEstimator`）とは独立した最小限のOLSオラクル（SEや検定統計量は不要なため
     /// 点推定のみ）。

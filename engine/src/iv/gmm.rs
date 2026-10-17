@@ -3973,6 +3973,46 @@ mod tests {
         );
     }
 
+    /// `n < l`（`k < n`）でも同じ専用エラーで拒否する（以前は`Z'Z`が特異になり
+    /// `ComputationFailed`だった経路）。
+    #[test]
+    fn fit_returns_insufficient_observations_for_first_stage_when_n_is_below_l() {
+        // n=3、k=2（切片+endog1）、l=4（切片+z1..z3）。
+        let y = vec![1.0, 2.0, 4.0];
+        let x_endog = vec![1.0, 2.5, 2.0];
+        let z = vec![
+            vec![1.0, 2.0, 4.0],
+            vec![2.0, 1.0, 5.0],
+            vec![0.5, 3.0, 1.0],
+        ];
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            std::slice::from_ref(&x_endog),
+            vec!["endog1".to_string()],
+            &z,
+            vec!["z1".to_string(), "z2".to_string(), "z3".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = GmmEstimator::fit(
+            input,
+            GmmType::TwoStep {
+                weight: WeightType::Classical,
+            },
+            true,
+            CovType::Classical,
+            0.95,
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::InsufficientObservationsForFirstStage { n: 3, l: 4 }
+        );
+    }
+
     /// `gmm_wald_chi2_test`（F統計量、常にロバストWald検定・χ²）を、`GmmEstimator`とは
     /// 独立に手計算したオラクルと数値照合する（rust-reviewerの指摘で追加。他の新規ロジック
     /// と同水準の検証にする）。

@@ -271,9 +271,10 @@ $$
 - 列数・列順に依存するapiテスト（`param_names`の並び、`params_table`/`conf_int`のキー、
   `predict()`/`augment()`の列の扱い、`include_intercept=False`）は、共有の`dataset`（説明変数2列）
   ではなく凍結済みの`synthetic_baseline_wide.csv`（`wide_dataset`フィクスチャ、n=100・x1..x8、
-  真の係数は全て絶対値の異なる値、`benchmark.linear.constants.WIDE_BETA`）で行う。2列だと
+  切片を含む真の係数は全て0.75以上離した値、`benchmark.linear.constants.WIDE_BETA`）で行う。2列だと
   列の取り違えは1通りの入れ替えしか起こり得ず、3列以上が絡むバグを検出できないため。真の係数との
-  近さ（標準誤差の5倍以内）でも並びを確認する。WLSの`test_wls_api.py`も同じデータを使う
+  近さ（標準誤差の5倍以内）で並びを確認し、係数・標準誤差・t値・p値・信頼区間が列名ごとに
+  statsmodelsと一致することを`test_ols_reference.py`（WLSは`test_wls_reference.py`）で確認する。WLSの`test_wls_api.py`も同じデータを使う
   （重みは同CSVの`weight`列）。列数に依存しない`ValidationError`系は小さい`dataset`のまま。
   `wage1`はさらに地域ダミー（northcen/south/west、基準northeast）から合成したregion列
   でのクラスターロバストSE（実データでのグループ列、4グループ・不均衡サイズ）も両方で検証する。

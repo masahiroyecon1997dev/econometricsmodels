@@ -35,7 +35,12 @@ from _helpers import (
     respell,
     with_row_time,
 )
-from _ols_helpers import HAC_REORDER_ORDER, hac_reorder_frame, wide_new_data
+from _ols_helpers import (
+    HAC_REORDER_ORDER,
+    hac_reorder_frame,
+    sm_wls_fit,
+    wide_new_data,
+)
 from _tolerances import TOLERANCES
 from econometricsmodels import (
     OLS,
@@ -142,19 +147,19 @@ def test_conf_int_structure(wide_dataset):
     ci = res.conf_int
 
     assert isinstance(ci, dict)
-    assert set(ci.keys()) == {"const", *WIDE_X}
+    assert list(ci) == ["const", *WIDE_X]
     for lower, upper in ci.values():
         assert lower < upper
 
 
 def test_params_std_errors_test_stats_p_values_share_keys(wide_dataset):
     res = WLS(wide_dataset, y="y", x=WIDE_X, weight="weight").fit()
-    expected_keys = {"const", *WIDE_X}
+    expected_keys = ["const", *WIDE_X]
 
-    assert set(res.params.keys()) == expected_keys
-    assert set(res.std_errors.keys()) == expected_keys
-    assert set(res.test_stats.keys()) == expected_keys
-    assert set(res.p_values.keys()) == expected_keys
+    assert list(res.params) == expected_keys
+    assert list(res.std_errors) == expected_keys
+    assert list(res.test_stats) == expected_keys
+    assert list(res.p_values) == expected_keys
 
 
 def test_n_obs_and_dep_var_name(unit_weight_dataset):
@@ -282,22 +287,12 @@ def test_hac_time_reorders_rows_before_computing_lags():
 # statsmodelsとの直接比較で確認する。
 
 
-def _sm_wls_wide(df: pl.DataFrame):
-    """`wide_dataset`（x1..x8、重みは`weight`列）のstatsmodels `sm.WLS`の推定。"""
-    import statsmodels.api as sm
-
-    x = sm.add_constant(df.select(WIDE_X).to_numpy())
-    return sm.WLS(df["y"].to_numpy(), x, weights=df["weight"].to_numpy()).fit(
-        use_t=True
-    )
-
-
 def test_predict_none_matches_statsmodels_fitted_values(wide_dataset):
     """`predict(new_data=None)`が学習データに対するstatsmodels `sm.WLS`の
     fittedvaluesと一致すること（重みは1ではない）。
     """
     df = wide_dataset
-    sm_res = _sm_wls_wide(df)
+    sm_res = sm_wls_fit(df, x=WIDE_X)
 
     res = WLS(df, y="y", x=WIDE_X, weight="weight").fit()
     predicted = res.predict()
@@ -315,7 +310,7 @@ def test_predict_new_data_matches_statsmodels(wide_dataset):
     import statsmodels.api as sm
 
     df = wide_dataset
-    sm_res = _sm_wls_wide(df)
+    sm_res = sm_wls_fit(df, x=WIDE_X)
 
     res = WLS(df, y="y", x=WIDE_X, weight="weight").fit()
     new_data = wide_new_data()

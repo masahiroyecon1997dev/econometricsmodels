@@ -139,19 +139,19 @@ def test_conf_int_structure(wide_dataset):
     ci = res.conf_int
 
     assert isinstance(ci, dict)
-    assert set(ci.keys()) == {"const", *WIDE_X}
+    assert list(ci) == ["const", *WIDE_X]
     for lower, upper in ci.values():
         assert lower < upper
 
 
 def test_params_std_errors_test_stats_p_values_share_keys(wide_dataset):
     res = our_fit(wide_dataset, x=WIDE_X)
-    expected_keys = {"const", *WIDE_X}
+    expected_keys = ["const", *WIDE_X]
 
-    assert set(res.params.keys()) == expected_keys
-    assert set(res.std_errors.keys()) == expected_keys
-    assert set(res.test_stats.keys()) == expected_keys
-    assert set(res.p_values.keys()) == expected_keys
+    assert list(res.params) == expected_keys
+    assert list(res.std_errors) == expected_keys
+    assert list(res.test_stats) == expected_keys
+    assert list(res.p_values) == expected_keys
 
 
 def test_n_obs_and_dep_var_name(dataset):

@@ -57,6 +57,17 @@ def sm_fit(
     return model.fit(cov_type=cov_type.upper(), use_t=True)
 
 
+def sm_wls_fit(
+    df: pl.DataFrame, x: list[str] = NARROW_X, weight: str = "weight"
+):
+    """statsmodels `sm.WLS`での推定（`use_t=True`、classical）。"""
+    return sm.WLS(
+        df["y"].to_numpy(),
+        sm_design(df, x),
+        weights=df[weight].to_numpy(),
+    ).fit(use_t=True)
+
+
 def sm_fit_cluster(df: pl.DataFrame):
     y = df["y"].to_numpy()
     x = sm_design(df)

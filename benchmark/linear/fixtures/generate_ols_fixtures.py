@@ -9,7 +9,7 @@ JSONにまとめて書き出す。
 両者を分けている理由は`.claude/skills/reference-benchmark/SKILL.md`参照。
 
 入力データは`tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
-（`benchmark/linear/freeze.py`参照）。Wooldridgeデータ（wage1/gpa2）は
+（`benchmark/linear/freeze.py`参照）。Wooldridgeデータ（wage1/gpa2/mroz）は
 `load_wooldridge.py`経由で都度ロードする（データの再配布ライセンスが
 未確認のためCSVとして固定しない）。
 

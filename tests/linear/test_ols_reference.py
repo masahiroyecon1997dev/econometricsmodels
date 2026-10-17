@@ -51,7 +51,7 @@ from _assertions import (
     assert_fields_close,
     assert_inference_close,
 )
-from _constants import DATA_DIR, MROZ_X
+from _constants import DATA_DIR, MROZ_X, WIDE_X
 from _helpers import (
     ROW_TIME,
     with_cluster_groups,
@@ -487,7 +487,7 @@ def test_wooldridge_prminwge_hac_matches_statsmodels(
     fixtures, load_wooldridge
 ):
     """時系列の実データ（Wooldridge `prminwge`、年次昇順でn=38）でのHAC。
-    横断面データ（wage1/gpa2）では検証できないHACを実データで確認する。ラグは
+    横断面データ（wage1/gpa2/mroz）では検証できないHACを実データで確認する。ラグは
     自動選択に任せ、行順をそのまま時間順（`hac_time`）にする（Rとの照合は
     `test_ols_crosscheck.py::test_wooldridge_prminwge_hac_matches_r`）。
     """
@@ -556,3 +556,20 @@ def test_f_statistic_match_statsmodels(dataset):
     our_res = our_fit(dataset)
 
     _assert_close(our_res.f_statistic, sm_res.fvalue, "f_statistic")
+
+
+def test_wide_dataset_per_name_statistics_match_statsmodels(wide_dataset):
+    """説明変数8列（x1..x8）で、係数・標準誤差・t値・p値・信頼区間が列名ごとに
+    statsmodelsと一致すること（列の取り違えは、値の並びが入れ替わる形で現れる）。
+    """
+    sm_res = sm_fit(wide_dataset, x=WIDE_X)
+    res = our_fit(wide_dataset, x=WIDE_X)
+    sm_ci = sm_res.conf_int(alpha=0.05)
+
+    for i, name in enumerate(res.param_names):
+        _assert_close(res.params[name], sm_res.params[i], f"params/{name}")
+        _assert_close(res.std_errors[name], sm_res.bse[i], f"se/{name}")
+        _assert_close(res.test_stats[name], sm_res.tvalues[i], f"t/{name}")
+        _assert_close(res.p_values[name], sm_res.pvalues[i], f"p/{name}")
+        _assert_close(res.conf_int[name][0], sm_ci[i][0], f"ci_lower/{name}")
+        _assert_close(res.conf_int[name][1], sm_ci[i][1], f"ci_upper/{name}")

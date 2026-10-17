@@ -298,7 +298,7 @@ def _run_401ksubs_case(cov_type: str, cluster: str | None = None) -> dict:
 
     Args:
         cov_type: "classical"/"hc0"-"hc3"/"cluster"（HACは時系列順の無い
-            クロスセクションデータのため対象外、OLSのwage1/gpa2と同じ方針）。
+            クロスセクションデータのため対象外、OLSのwage1/gpa2/mrozと同じ方針）。
         cluster: cov_type="cluster"のときのグループ列名
             （`age_bin`、地域等の自然なカテゴリ列が無いため年齢の分位ビンで代用。
             `add_age_bin`参照）。

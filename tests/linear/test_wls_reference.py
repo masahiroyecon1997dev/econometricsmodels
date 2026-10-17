@@ -40,13 +40,14 @@ from _assertions import (
     assert_fields_close,
     assert_inference_close,
 )
-from _constants import DATA_DIR
+from _constants import DATA_DIR, WIDE_X
 from _helpers import (
     ROW_TIME,
     load_wooldridge_dataset,
     with_cluster_groups,
     with_row_time,
 )
+from _ols_helpers import sm_wls_fit
 from _tolerances import TOLERANCES
 from econometricsmodels import WLS, WLSOptions
 
@@ -448,3 +449,23 @@ def test_401ksubs_cluster_matches_statsmodels(fixtures):
     _check_result(
         res, fixtures["wooldridge"]["401ksubs"]["cluster"], "401ksubs/cluster"
     )
+
+
+# ── ライブ statsmodels との照合 ───────────────────────────────────────
+
+
+def test_wide_dataset_per_name_statistics_match_statsmodels(wide_dataset):
+    """説明変数8列（x1..x8）で、係数・標準誤差・t値・p値・信頼区間が列名ごとに
+    statsmodelsと一致すること（列の取り違えは、値の並びが入れ替わる形で現れる）。
+    """
+    sm_res = sm_wls_fit(wide_dataset, x=WIDE_X)
+    res = WLS(wide_dataset, y="y", x=WIDE_X, weight="weight").fit()
+    sm_ci = sm_res.conf_int(alpha=0.05)
+
+    for i, name in enumerate(res.param_names):
+        _assert_close(res.params[name], sm_res.params[i], f"params/{name}")
+        _assert_close(res.std_errors[name], sm_res.bse[i], f"se/{name}")
+        _assert_close(res.test_stats[name], sm_res.tvalues[i], f"t/{name}")
+        _assert_close(res.p_values[name], sm_res.pvalues[i], f"p/{name}")
+        _assert_close(res.conf_int[name][0], sm_ci[i][0], f"ci_lower/{name}")
+        _assert_close(res.conf_int[name][1], sm_ci[i][1], f"ci_upper/{name}")

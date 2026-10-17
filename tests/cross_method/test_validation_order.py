@@ -8,14 +8,17 @@
 2. オプションの値: `estimator` → `cov_type` → `gmm_type` → `gmm_weight_type` →
    `solver` → `variance_method`。使われないオプションの未知の値も報告する
 3. オプションの組合せ: 使われないオプション → 必須オプションの欠落
+   （`cov_type`の`hac`/`dk`が先、`gmm_weight_type`の`hac`が後）
 4. ロールの構造（列名の重複など）
-5. `y`・`x`の列（存在・dtype・欠損値）
-6. オプションの列（`cluster`・`hac_time`・`dk_time`）
+5. `y`・`x`などモデルの列（存在・dtype・欠損値）
+6. オプションの列（`cluster`・`hac_time`・`dk_time`・GMMの重み行列の列）
 7. エンジンの検査（`confidence_level`の範囲など）
 
-故障を1つずつ`FAULTS`に定義し、手法ごとに「その手法に当てはまる故障」を総当たりで2つ
-組み合わせる。段階が違う（同じ段階の故障は順序を決めない）組について、段階が早い
-故障のエラーが出ることを確かめる。
+故障を1つずつ`FAULTS`に定義し、手法ごとに「その手法に当てはまる故障」を総当たりで
+2つ組み合わせる。順位（段階と段階内の順）が違う組について、順位が早い故障のエラーが
+出ることを確かめる。2つの故障が互いの成立を打ち消す組（片方が`cov_type`を書き換えて、
+もう片方の故障が「使われている」状態になる等）と、同じキーに別の値を入れる組は、
+組合せから除く（`compose`）。
 """
 
 from __future__ import annotations
@@ -50,6 +53,8 @@ from econometricsmodels import (
 
 Changes = tuple[dict[str, Any], dict[str, Any]]
 
+# ── 手法 ─────────────────────────────────────────────────────────────
+
 
 @dataclass(frozen=True)
 class Method:
@@ -59,14 +64,15 @@ class Method:
     # `(data, args, options_kwargs)`から`fit()`を呼ぶ。
     run: Callable[[pl.DataFrame, dict[str, Any], dict[str, Any]], object]
     base_args: dict[str, Any]
-    # 当てはまる故障のうち、手法ごとに内容が変わるもの（時間順の列を取らない手法は
-    # `None`）。
+    # この手法に当てはまる故障の`id`。
+    faults: tuple[str, ...]
+    # 故障を混ぜる前から指定しているオプション（IVのGMMの`estimator`等）。
+    base_opts: dict[str, Any] = field(default_factory=dict)
+    # 時間順の列を取る`cov_type`（OLS/WLS/IVは`hac`、FE/REは`dk`）とそのオプション名。
     time_cov_type: str | None = None
     time_option: str | None = None
+    # `x`にあたるロール名（IVは外生変数の`x_exog`）。
     x_role: str = "x"
-    # この手法が持つオプションの値の故障（`unknown_*`）。
-    value_faults: tuple[str, ...] = ("unknown_cov_type",)
-    extra_faults: tuple[str, ...] = field(default_factory=tuple)
 
 
 def _simple(model_cls, options_cls):
@@ -76,82 +82,162 @@ def _simple(model_cls, options_cls):
     return run
 
 
+_X = ["x1", "x2"]
+_LINEAR_FAULTS = (
+    "unknown_cov_type",
+    "unused_cluster",
+    "unused_hac_lags",
+    "missing_time_option",
+    "duplicate_x",
+    "y_in_x",
+    "const_in_x",
+    "empty_x",
+    "missing_y",
+    "missing_x",
+    "missing_cluster_column",
+    "missing_time_column",
+    "bad_confidence_level",
+)
+_NONLINEAR_FAULTS = (
+    "unknown_cov_type",
+    "unknown_solver",
+    "unused_cluster",
+    "duplicate_x",
+    "y_in_x",
+    "const_in_x",
+    "empty_x",
+    "missing_y",
+    "missing_x",
+    "missing_cluster_column",
+    "bad_confidence_level",
+    "bad_max_iter",
+)
+_IV_FAULTS = (
+    "unknown_estimator",
+    "unknown_cov_type",
+    "unknown_gmm_type",
+    "unknown_gmm_weight_type",
+    "unused_cluster",
+    "unused_hac_lags",
+    "unused_gmm_max_iter",
+    "unused_gmm_tol",
+    "missing_time_option",
+    "duplicate_x",
+    "y_in_x",
+    "const_in_x",
+    "empty_x",
+    "missing_y",
+    "missing_x",
+    "missing_instrument",
+    "missing_cluster_column",
+    "missing_time_column",
+    "bad_confidence_level",
+)
+_PANEL_FAULTS = (
+    "unknown_cov_type",
+    "unused_cluster",
+    "unused_dk_bandwidth",
+    "unused_dk_time",
+    "missing_time_option",
+    "duplicate_x",
+    "y_in_x",
+    "empty_x",
+    "time_is_y",
+    "dk_time_is_y",
+    "missing_y",
+    "missing_x",
+    "missing_entity",
+    "missing_time",
+    "missing_cluster_column",
+    "missing_time_column",
+    "bad_confidence_level",
+)
+_IV_ARGS = {
+    "y": "y",
+    "x_exog": ["x2"],
+    "x_endog": ["x1"],
+    "instruments": ["z", "z2"],
+}
+_PANEL_ARGS = {"y": "y", "x": _X, "entity": "entity"}
+
 METHODS = [
     Method(
         "ols",
         _simple(OLS, OLSOptions),
-        {"y": "y", "x": ["x1", "x2"]},
+        {"y": "y", "x": _X},
+        _LINEAR_FAULTS,
         time_cov_type="hac",
         time_option="hac_time",
-        extra_faults=("unused_cluster",),
     ),
     Method(
         "wls",
         _simple(WLS, WLSOptions),
-        {"y": "y", "x": ["x1", "x2"], "weight": "w"},
+        {"y": "y", "x": _X, "weight": "w"},
+        (*_LINEAR_FAULTS, "weight_is_y", "missing_weight"),
         time_cov_type="hac",
         time_option="hac_time",
-        extra_faults=("unused_cluster",),
-    ),
-    Method(
-        "iv",
-        _simple(IV, IVOptions),
-        {
-            "y": "y",
-            "x_exog": ["x2"],
-            "x_endog": ["x1"],
-            "instruments": ["z", "z2"],
-        },
-        time_cov_type="hac",
-        time_option="hac_time",
-        x_role="x_exog",
-        value_faults=(
-            "unknown_estimator",
-            "unknown_cov_type",
-            "unknown_gmm_type",
-            "unknown_gmm_weight_type",
-        ),
-        extra_faults=("unused_cluster", "unused_gmm_max_iter"),
     ),
     Method(
         "logit",
         _simple(Logit, LogitOptions),
-        {"y": "y01", "x": ["x1", "x2"]},
-        value_faults=("unknown_cov_type", "unknown_solver"),
-        extra_faults=("unused_cluster",),
+        {"y": "y01", "x": _X},
+        (*_NONLINEAR_FAULTS, "non_binary_y"),
     ),
     Method(
         "probit",
         _simple(Probit, ProbitOptions),
-        {"y": "y01", "x": ["x1", "x2"]},
-        value_faults=("unknown_cov_type", "unknown_solver"),
-        extra_faults=("unused_cluster",),
+        {"y": "y01", "x": _X},
+        (*_NONLINEAR_FAULTS, "non_binary_y"),
     ),
     Method(
         "tobit",
         _simple(Tobit, TobitOptions),
-        {"y": "yc", "x": ["x1", "x2"]},
-        value_faults=("unknown_cov_type", "unknown_solver"),
-        extra_faults=("unused_cluster",),
+        {"y": "yc", "x": _X},
+        (*_NONLINEAR_FAULTS, "sigma_in_x", "bad_censoring_bounds"),
+    ),
+    Method(
+        "iv",
+        _simple(IV, IVOptions),
+        _IV_ARGS,
+        _IV_FAULTS,
+        time_cov_type="hac",
+        time_option="hac_time",
+        x_role="x_exog",
+    ),
+    Method(
+        "iv_gmm",
+        _simple(IV, IVOptions),
+        _IV_ARGS,
+        (
+            *_IV_FAULTS,
+            "unused_gmm_weight_type",
+            "missing_weight_time_option",
+            "missing_weight_cluster_column",
+        ),
+        base_opts={"estimator": "gmm"},
+        time_cov_type="hac",
+        time_option="hac_time",
+        x_role="x_exog",
     ),
     Method(
         "fe",
         _simple(FE, FEOptions),
-        {"y": "y", "x": ["x1", "x2"], "entity": "entity"},
+        _PANEL_ARGS,
+        _PANEL_FAULTS,
         time_cov_type="dk",
         time_option="dk_time",
-        extra_faults=("unused_cluster", "unused_dk_bandwidth"),
     ),
     Method(
         "re",
         _simple(RE, REOptions),
-        {"y": "y", "x": ["x1", "x2"], "entity": "entity"},
+        _PANEL_ARGS,
+        (*_PANEL_FAULTS, "unknown_variance_method"),
         time_cov_type="dk",
         time_option="dk_time",
-        value_faults=("unknown_cov_type", "unknown_variance_method"),
-        extra_faults=("unused_cluster", "unused_dk_bandwidth"),
     ),
 ]
+
+# ── 故障 ─────────────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True)
@@ -163,9 +249,11 @@ class Fault:
     marker: str
 
 
-# 段階2の第2要素は、仕様の報告順（estimator → cov_type → gmm_type →
-# gmm_weight_type → solver → variance_method）。段階3は使われないオプション(0) →
-# 必須オプションの欠落(1)。
+# 順位の第1要素が段階、第2要素が段階内の順。段階2の第2要素は仕様の報告順
+# （estimator → cov_type → gmm_type → gmm_weight_type → solver → variance_method）。
+# 段階3は使われないオプション(0) → `cov_type`の必須オプションの欠落(1) →
+# `gmm_weight_type`の必須オプションの欠落(2)。段階6は`cov_type`の列(0, 1)が先、
+# GMMの重み行列の列(2)が後。同じ順位の故障は、組にしない。
 FAULTS = {
     f.id: f
     for f in [
@@ -176,19 +264,72 @@ FAULTS = {
         Fault("unknown_solver", (2, 4), r"unknown solver"),
         Fault("unknown_variance_method", (2, 5), r"unknown variance_method"),
         Fault("unused_cluster", (3, 0), r"cluster is only used with"),
+        Fault("unused_hac_lags", (3, 0), r"hac_lags is only used with"),
         Fault("unused_dk_bandwidth", (3, 0), r"dk_bandwidth is only used"),
+        Fault("unused_dk_time", (3, 0), r"dk_time is only used with"),
         Fault("unused_gmm_max_iter", (3, 0), r"gmm_max_iter is only used"),
+        Fault("unused_gmm_tol", (3, 0), r"gmm_tol is only used"),
+        Fault(
+            "unused_gmm_weight_type", (3, 0), r"gmm_weight_type is only used"
+        ),
         Fault(
             "missing_time_option",
             (3, 1),
-            r"requires the `(hac_time|dk_time)` option",
+            r"cov_type='(hac|dk)' requires the `(hac_time|dk_time)` option",
+        ),
+        Fault(
+            "missing_weight_time_option",
+            (3, 2),
+            r"gmm_weight_type='hac' requires the `hac_time` option",
         ),
         Fault(
             "duplicate_x",
             (4, 0),
             r"column '(x1|x2)' is specified more than once in x(_exog)?",
         ),
+        Fault(
+            "y_in_x",
+            (4, 0),
+            r"column '\w+' specified as y is also included in x(_exog)?",
+        ),
+        Fault(
+            "const_in_x",
+            (4, 0),
+            r"x(_exog)? cannot contain a column named 'const'",
+        ),
+        Fault(
+            "empty_x", (4, 0), r"(x|x_endog) must contain at least one column"
+        ),
+        Fault(
+            "weight_is_y",
+            (4, 0),
+            r"column 'y' specified as weight is also specified as y",
+        ),
+        Fault(
+            "sigma_in_x", (4, 0), r"x cannot contain a column named 'sigma'"
+        ),
+        Fault(
+            "time_is_y",
+            (4, 0),
+            r"column 'y' specified as time is also specified as y",
+        ),
+        Fault(
+            "dk_time_is_y",
+            (4, 0),
+            r"column 'y' specified as dk_time is also specified as y",
+        ),
         Fault("missing_y", (5, 0), r"column 'no_such_y' does not exist"),
+        Fault("missing_x", (5, 0), r"column 'no_such_x' does not exist"),
+        Fault(
+            "missing_weight",
+            (5, 0),
+            r"column 'no_such_weight' does not exist",
+        ),
+        Fault(
+            "missing_instrument", (5, 0), r"column 'no_such_z' does not exist"
+        ),
+        Fault("missing_entity", (5, 0), r"column 'no_such_e' does not exist"),
+        Fault("missing_time", (5, 0), r"column 'no_such_t' does not exist"),
         Fault(
             "missing_cluster_column",
             (6, 0),
@@ -200,27 +341,34 @@ FAULTS = {
             r"column 'no_such_time' does not exist",
         ),
         Fault(
+            "missing_weight_cluster_column",
+            (6, 2),
+            r"column 'no_such_cluster' does not exist",
+        ),
+        Fault(
             "bad_confidence_level",
             (7, 0),
             r"confidence_level must be in the range",
         ),
+        Fault("bad_max_iter", (7, 0), r"max_iter must be an integer"),
+        Fault("non_binary_y", (7, 0), r"must be coded as 0\.0 or 1\.0"),
+        Fault("bad_censoring_bounds", (7, 0), r"invalid censoring bounds"),
     ]
 }
 
-
-def fault_ids(method: Method) -> list[str]:
-    """`method`に当てはまる故障の`id`。"""
-    ids = list(method.value_faults)
-    ids += method.extra_faults
-    ids += ["duplicate_x", "missing_y", "missing_cluster_column"]
-    if method.time_cov_type is not None:
-        ids += ["missing_time_option", "missing_time_column"]
-    ids.append("bad_confidence_level")
-    return ids
+# `y`の列名を使う故障。`y`を別の列名に変える故障と混ぜると、成立しなくなる。
+_Y_FAULTS = frozenset({"y_in_x", "weight_is_y", "time_is_y", "dk_time_is_y"})
+_Y_CHANGERS = frozenset({"missing_y", "non_binary_y"})
+# `hac`/`dk`を選ぶと使われてしまう、`hac_lags`/`dk_*`の未使用の故障。
+_UNUSED_WITHOUT_TIME_COV = frozenset(
+    {"unused_hac_lags", "unused_dk_bandwidth", "unused_dk_time"}
+)
 
 
 def changes(method: Method, fault_id: str) -> Changes:
     """故障を入力に混ぜるための、`(引数の差分, オプションの差分)`。"""
+    x_role = method.x_role
+    base_x = method.base_args[x_role]
     match fault_id:
         case "unknown_estimator":
             return {}, {"estimator": "bogus"}
@@ -240,17 +388,53 @@ def changes(method: Method, fault_id: str) -> Changes:
             if method.time_cov_type == "dk":
                 return {}, {"cov_type": "classical", "cluster": "cluster"}
             return {}, {"cluster": "cluster"}
+        case "unused_hac_lags":
+            return {}, {"hac_lags": 2}
         case "unused_dk_bandwidth":
             return {}, {"dk_bandwidth": 2}
+        case "unused_dk_time":
+            return {}, {"dk_time": "t"}
         case "unused_gmm_max_iter":
             return {}, {"gmm_max_iter": 10}
+        case "unused_gmm_tol":
+            return {}, {"gmm_tol": 1e-3}
+        case "unused_gmm_weight_type":
+            return {}, {"gmm_type": "one_step", "gmm_weight_type": "robust"}
         case "missing_time_option":
             return {}, {"cov_type": method.time_cov_type}
+        case "missing_weight_time_option":
+            return {}, {"gmm_weight_type": "hac"}
         case "duplicate_x":
-            name = method.base_args[method.x_role][0]
-            return {method.x_role: [name, name]}, {}
+            return {x_role: [base_x[0], base_x[0]]}, {}
+        case "y_in_x":
+            return {x_role: [method.base_args["y"], *base_x]}, {}
+        case "const_in_x":
+            return {x_role: ["const", *base_x]}, {}
+        case "empty_x":
+            if method.name.startswith("iv"):
+                return {"x_endog": []}, {}
+            return {x_role: []}, {}
+        case "weight_is_y":
+            return {"weight": method.base_args["y"]}, {}
+        case "sigma_in_x":
+            return {x_role: [*base_x, "sigma"]}, {}
+        case "time_is_y":
+            return {}, {"time": method.base_args["y"]}
+        case "dk_time_is_y":
+            return {}, {"cov_type": "dk", "dk_time": method.base_args["y"]}
         case "missing_y":
             return {"y": "no_such_y"}, {}
+        case "missing_x":
+            return {x_role: [*base_x, "no_such_x"]}, {}
+        case "missing_weight":
+            return {"weight": "no_such_weight"}, {}
+        case "missing_instrument":
+            instruments = method.base_args["instruments"]
+            return {"instruments": [*instruments, "no_such_z"]}, {}
+        case "missing_entity":
+            return {"entity": "no_such_e"}, {}
+        case "missing_time":
+            return {}, {"time": "no_such_t"}
         case "missing_cluster_column":
             return {}, {"cov_type": "cluster", "cluster": "no_such_cluster"}
         case "missing_time_column":
@@ -258,8 +442,19 @@ def changes(method: Method, fault_id: str) -> Changes:
                 "cov_type": method.time_cov_type,
                 method.time_option: "no_such_time",
             }
+        case "missing_weight_cluster_column":
+            return {}, {
+                "gmm_weight_type": "cluster",
+                "cluster": "no_such_cluster",
+            }
         case "bad_confidence_level":
             return {}, {"confidence_level": 2.0}
+        case "bad_max_iter":
+            return {}, {"max_iter": 0}
+        case "non_binary_y":
+            return {"y": "y"}, {}
+        case "bad_censoring_bounds":
+            return {}, {"lower": 1.0, "upper": 0.0}
     raise AssertionError(fault_id)
 
 
@@ -268,43 +463,61 @@ def compose(
 ) -> tuple[dict[str, Any], dict[str, Any]] | None:
     """2つの故障を混ぜた`(args, options)`。混ぜられない組は`None`。
 
-    同じキーに別の値を入れる故障同士は、先に報告される側が段階2（オプションの値）の
-    ときだけ、先の側の値を優先して混ぜる（未知の値は他の設定の意味を変えない）。
-    後の側のキーがすべて上書きされて故障が残らない組と、それ以外の衝突は省く。
+    混ぜられないのは、次の組。どれも、混ぜると片方の故障が成立しなくなる。
+
+    - 同じキーに別の値を入れる故障同士
+    - 「時間順の列が無い」故障と、その列を指定する故障
+    - `hac_lags`/`dk_*`の未使用の故障と、`hac`/`dk`を選ぶ故障
+      （選ぶと`hac_lags`/`dk_*`は使われる）
+    - `y`の列名を使う故障と、`y`を別の列に変える故障
     """
     e_args, e_opts = changes(method, early)
     l_args, l_opts = changes(method, late)
-    # 時間順の列が「無い」故障は、同じ列を指定する故障とは両立しない。
-    if early == "missing_time_option" and method.time_option in l_opts:
-        return None
-    # `dk`では`dk_bandwidth`が使われるので、`dk`を選ぶ故障とは「未使用」にならない。
-    if early == "unused_dk_bandwidth" and l_opts.get("cov_type") == "dk":
-        return None
-    # FE/REの`unused_cluster`は`cov_type`を`classical`にするが、`dk`の故障と混ぜるときは
-    # `dk`のまま`cluster`だけを残す（`dk`では`cluster`は使われない）。
     if (
         early == "unused_cluster"
         and method.time_cov_type == "dk"
         and late in ("missing_time_option", "missing_time_column")
     ):
-        return {**method.base_args, **l_args}, {**l_opts, "cluster": "cluster"}
-    conflicts = {
-        ("args", k) for k in e_args if k in l_args and e_args[k] != l_args[k]
-    } | {("opts", k) for k in e_opts if k in l_opts and e_opts[k] != l_opts[k]}
-    if conflicts:
-        late_keys = {("args", k) for k in l_args} | {
-            ("opts", k) for k in l_opts
+        # FE/REの`unused_cluster`は`cov_type`を`classical`にするが、`dk`の故障と混ぜる
+        # ときは`dk`のまま`cluster`だけを残す（`dk`では`cluster`は使われない）。
+        return {**method.base_args, **l_args}, {
+            **method.base_opts,
+            **l_opts,
+            "cluster": "cluster",
         }
-        if FAULTS[early].rank[0] != 2 or late_keys <= conflicts:
-            return None
+    conflicts = {k for k in e_args if k in l_args and e_args[k] != l_args[k]}
+    conflicts |= {k for k in e_opts if k in l_opts and e_opts[k] != l_opts[k]}
+    if conflicts:
+        return None
+    if (
+        early in ("missing_time_option", "missing_weight_time_option")
+        and method.time_option in l_opts
+    ):
+        return None
+    if early in _UNUSED_WITHOUT_TIME_COV and (
+        l_opts.get("cov_type") == method.time_cov_type
+        or l_opts.get("gmm_weight_type") == "hac"
+    ):
+        return None
+    if early in _Y_FAULTS and late in _Y_CHANGERS:
+        return None
     args = {**method.base_args, **l_args, **e_args}
-    opts = {**l_opts, **e_opts}
+    opts = {**method.base_opts, **l_opts, **e_opts}
     return args, opts
 
 
-@pytest.fixture(scope="module")
-def df() -> pl.DataFrame:
-    return make_frame(11)
+# ── 組合せの列挙 ─────────────────────────────────────────────────────
+
+BOUNDARIES = [(2, 3), (3, 4), (4, 5), (5, 6), (6, 7)]
+
+
+def _pairs(method: Method) -> list[tuple[str, str]]:
+    """`method`で混ぜられる、順位の異なる故障の組（早い方, 遅い方）。"""
+    return [
+        (a, b)
+        for a, b in itertools.permutations(method.faults, 2)
+        if FAULTS[a].rank < FAULTS[b].rank and compose(method, a, b)
+    ]
 
 
 def _method_params():
@@ -312,29 +525,42 @@ def _method_params():
 
 
 def _pair_params():
-    params = []
-    for m in METHODS:
-        for a, b in itertools.permutations(fault_ids(m), 2):
-            if FAULTS[a].rank >= FAULTS[b].rank:
-                continue
-            if compose(m, a, b) is None:
-                continue
-            params.append(pytest.param(m, a, b, id=f"{m.name}-{a}-before-{b}"))
-    return params
+    return [
+        pytest.param(m, a, b, id=f"{m.name}-{a}-before-{b}")
+        for m in METHODS
+        for a, b in _pairs(m)
+    ]
 
 
 def _single_params():
     return [
         pytest.param(m, f, id=f"{m.name}-{f}")
         for m in METHODS
-        for f in fault_ids(m)
+        for f in m.faults
     ]
+
+
+@pytest.fixture(scope="module")
+def df() -> pl.DataFrame:
+    return make_frame(11)
+
+
+# ── 前提（故障の定義と単独の故障）────────────────────────────────────
 
 
 @pytest.mark.parametrize("method", _method_params())
 def test_baseline_input_is_valid(df, method):
     """故障を混ぜる前の入力は、そのまま推定できる（以降のテストの前提）。"""
-    assert method.run(df, dict(method.base_args), {}) is not None
+    result = method.run(df, dict(method.base_args), dict(method.base_opts))
+    assert result is not None
+
+
+@pytest.mark.parametrize("method", _method_params())
+def test_every_fault_of_a_method_is_defined(method):
+    """手法に当てはめた故障は、すべて`FAULTS`にあり、混ぜ方を持つ。"""
+    for fault in method.faults:
+        assert fault in FAULTS, fault
+        changes(method, fault)
 
 
 @pytest.mark.parametrize(("method", "fault"), _single_params())
@@ -343,12 +569,15 @@ def test_each_fault_alone_raises_its_own_error(df, method, fault):
     args_changes, opts = changes(method, fault)
     args = {**method.base_args, **args_changes}
     with pytest.raises(ValidationError, match=FAULTS[fault].marker):
-        method.run(df, args, opts)
+        method.run(df, args, {**method.base_opts, **opts})
+
+
+# ── 組合せ（順位の早い故障が先に報告される）──────────────────────────
 
 
 @pytest.mark.parametrize(("method", "early", "late"), _pair_params())
-def test_earlier_stage_error_is_reported_first(df, method, early, late):
-    """誤りが2つあると、仕様上先の段階のエラーが報告される。"""
+def test_earlier_error_is_reported_first(df, method, early, late):
+    """誤りが2つあると、仕様上先に来るエラーが報告される。"""
     composed = compose(method, early, late)
     assert composed is not None
     args, opts = composed
@@ -356,11 +585,14 @@ def test_earlier_stage_error_is_reported_first(df, method, early, late):
         method.run(df, args, opts)
 
 
-def test_pairs_cover_every_stage_boundary():
-    """組合せが、段階2〜7の隣り合う境界をすべて含む（故障の定義を変えたときの保険）。"""
-    stages = {
-        (FAULTS[a].rank[0], FAULTS[b].rank[0])
-        for _, a, b in (p.values for p in _pair_params())
+@pytest.mark.parametrize("method", _method_params())
+def test_every_method_covers_every_stage_boundary(method):
+    """どの手法も、段階2〜7の隣り合う境界のすべてを組合せで確かめている。
+
+    故障の定義を変えて、ある手法の境界の組がすべて消えたときに気づくための検査。
+    """
+    covered = {
+        (FAULTS[a].rank[0], FAULTS[b].rank[0]) for a, b in _pairs(method)
     }
-    for boundary in [(2, 3), (3, 4), (4, 5), (5, 6), (6, 7)]:
-        assert boundary in stages, boundary
+    for boundary in BOUNDARIES:
+        assert boundary in covered, boundary

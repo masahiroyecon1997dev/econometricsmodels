@@ -3,7 +3,7 @@
 `tests/fixtures/benchmarks/probit_crosscheck.json`（`benchmark/nonlinear/
 fixtures/generate_probit_crosscheck_fixtures.py`で生成）を読み込み、係数・標準誤差・
 適合度統計量・限界効果（全統計量）をRとクロスチェックする（cluster 2ケースと、切片なし
-（`include_intercept=False`）の全cov_typeも全統計量・限界効果）。役割分担は`test_probit_reference.py`と同じ（`test_logit_crosscheck.py`と同型。
+（`include_intercept=False`）と非既定の`confidence_level`（0.90）の全cov_typeも全統計量・限界効果）。役割分担は`test_probit_reference.py`と同じ（`test_logit_crosscheck.py`と同型。
 `.claude/rules/testing-policy.md`「リファレンス実装」参照）。
 
 Note:
@@ -51,7 +51,10 @@ from _tolerances import TOLERANCES
 from econometricsmodels import Probit, ProbitOptions
 
 from benchmark.common import imbalanced_cluster_groups
-from benchmark.nonlinear.constants import NON_CLUSTER_COV_TYPES
+from benchmark.nonlinear.constants import (
+    CONFIDENCE_LEVEL_NON_DEFAULT,
+    NON_CLUSTER_COV_TYPES,
+)
 from benchmark.nonlinear.fixtures.generate_probit_crosscheck_fixtures import (
     NUMERIC_SCENARIOS as SCENARIOS,
 )
@@ -77,7 +80,11 @@ def fixtures() -> dict:
     return json.loads(FIXTURE_PATH.read_text())
 
 
-def _check_result(res, ref: dict, label: str) -> None:
+def _check_result(
+    res, ref: dict, label: str, *, confidence_level: float = 0.95
+) -> None:
+    """全統計量を比べる。`confidence_level`は係数の信頼区間は`fit()`のオプション側で、
+    限界効果の信頼区間は`marginal_effects()`の引数側で指定するため、後者に渡す。"""
     assert_inference_close(res, ref, label, rtol=RTOL, atol=ATOL)
     assert_fields_close(
         res,
@@ -95,7 +102,14 @@ def _check_result(res, ref: dict, label: str) -> None:
         rtol=RTOL,
         atol=ATOL,
     )
-    check_margeff(res, ref["margeff"], label, rtol=RTOL, atol=ATOL)
+    check_margeff(
+        res,
+        ref["margeff"],
+        label,
+        rtol=RTOL,
+        atol=ATOL,
+        confidence_level=confidence_level,
+    )
 
 
 # ── 凍結フィクスチャとの数値照合（合成データ） ────────────────────────
@@ -180,6 +194,37 @@ def test_no_intercept_cluster_imbalanced_matches_r_glm(fixtures):
         "cluster_imbalanced"
     ]
     _check_result(res, ref, "no_intercept/cluster_imbalanced")
+
+
+@pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
+def test_confidence_level_matches_r_glm(fixtures, cov_type):
+    """非既定の`confidence_level`（baseline）。係数と限界効果の信頼区間をRと比べる。
+
+    臨界値を固定した実装（例: 1.96）は0.90の区間で外れる。限界効果の水準は
+    `fit()`のオプションとは独立の`marginal_effects(confidence_level=...)`で指定する。
+    """
+    level = CONFIDENCE_LEVEL_NON_DEFAULT
+    df = pl.read_csv(DATA_DIR / "probit_baseline.csv")
+    options = ProbitOptions(cov_type=cov_type, confidence_level=level)
+    res = Probit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+    ref = fixtures["synthetic"]["baseline"]["confidence_level"][cov_type]
+    _check_result(
+        res, ref, f"confidence_level/{cov_type}", confidence_level=level
+    )
+
+
+def test_confidence_level_cluster_matches_r_glm(fixtures):
+    level = CONFIDENCE_LEVEL_NON_DEFAULT
+    df = pl.read_csv(DATA_DIR / "probit_baseline.csv")
+    df = with_cluster_groups(df, 10)
+    options = ProbitOptions(
+        cov_type="cluster", cluster="cluster_group", confidence_level=level
+    )
+    res = Probit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+    ref = fixtures["synthetic"]["baseline"]["confidence_level"]["cluster"]
+    _check_result(res, ref, "confidence_level/cluster", confidence_level=level)
 
 
 # ── 凍結フィクスチャとの数値照合（実データ） ──────────────────────────

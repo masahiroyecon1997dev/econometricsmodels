@@ -32,3 +32,10 @@ R_ONLY_COV_TYPES = ["hc1"]
 STATSMODELS_COV_TYPES = [
     c for c in NON_CLUSTER_COV_TYPES if c not in R_ONLY_COV_TYPES
 ]
+
+# `confidence_level`の非既定値のフィクスチャ（係数と限界効果の信頼区間）に使う値。
+# オプションの配線自体の確認が目的のため、baselineシナリオのみで全`cov_type`
+# （`NON_CLUSTER_COV_TYPES` + cluster）と組み合わせる。0.95（既定）・0.99/0.80
+# （`test_logit_api.py`等の幅の単調性テストで使用済み）とは異なる値として0.90を選ぶ
+# （`benchmark/linear/constants.py`・`benchmark/iv/constants.py`と同じ値）。
+CONFIDENCE_LEVEL_NON_DEFAULT = 0.90

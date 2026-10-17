@@ -42,7 +42,10 @@ from benchmark.common import (
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
 from benchmark.common.load_wooldridge import load_apple_adoption
-from benchmark.nonlinear.constants import NON_CLUSTER_COV_TYPES
+from benchmark.nonlinear.constants import (
+    CONFIDENCE_LEVEL_NON_DEFAULT,
+    NON_CLUSTER_COV_TYPES,
+)
 from benchmark.nonlinear.references.r import (
     glm_reference_settings,
     glm_reference_versions,
@@ -127,6 +130,26 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
         )
     )
 
+    # confidence_level非既定（0.95以外）。係数と限界効果の信頼区間を、全cov_type
+    # （opg・hc1を含む）とクラスターで確認する（OLS/WLS/IVと同じ。statsmodels側
+    # にhc1が無いため、hc1の非既定水準はここが唯一の数値照合対象）。
+    fixtures["baseline"]["confidence_level"] = {
+        cov_type: run_glm_r(
+            baseline_csv,
+            "y ~ x1 + x2 + x3",
+            cov_type,
+            confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+        )
+        for cov_type in NON_CLUSTER_COV_TYPES
+    }
+    fixtures["baseline"]["confidence_level"]["cluster"] = _run_cluster_case(
+        baseline_csv,
+        formula="y ~ x1 + x2 + x3",
+        tmpdir=tmpdir,
+        suffix="_confidence_level_cluster",
+        confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+    )
+
     return fixtures
 
 
@@ -136,6 +159,7 @@ def _run_cluster_case(
     tmpdir: Path,
     groups: list | None = None,
     suffix: str = "_cluster",
+    confidence_level: float = 0.95,
 ) -> dict:
     df = pl.read_csv(csv_path)
     n = df.height
@@ -145,7 +169,13 @@ def _run_cluster_case(
     grouped = df.with_columns(pl.Series("cluster_group", cluster_group))
     tmp_path = csv_path.with_name(csv_path.stem + suffix + ".csv")
     grouped.write_csv(tmp_path)
-    return run_glm_r(tmp_path, formula, "cluster", cluster="cluster_group")
+    return run_glm_r(
+        tmp_path,
+        formula,
+        "cluster",
+        cluster="cluster_group",
+        confidence_level=confidence_level,
+    )
 
 
 def build_wooldridge_fixtures(tmpdir: Path) -> dict:
@@ -219,6 +249,8 @@ def build_fixtures() -> dict:
             "hc1と不均衡クラスターが無いため、ここが唯一の数値照合対象。"
             "log_likelihood_nullは常に切片のみのモデルを参照するため、lr_statisticが負値に"
             "なりうる。"
+            "baseline.confidence_levelは非既定の信頼水準（0.90）のクロスチェックで、"
+            "係数と限界効果の信頼区間を全cov_type（opg・hc1を含む）とクラスターで持つ。"
             "パラメータ名は全ソースで切片を'const'に正規化済み。"
         ),
     }

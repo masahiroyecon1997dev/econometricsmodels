@@ -49,6 +49,11 @@
 #   # 帰無モデル（対数尤度null）は常に切片のみ（y ~ 1）を使う。df_modelはk_params - 1のまま
 #   # （本実装・statsmodelsと同じ定義）で、lr_statisticは負値になりうる。
 #   Rscript run_glm_crosscheck.R data.csv "y ~ x1 + x2 + x3 - 1" hc1 logit
+#
+#   # 信頼区間（係数・限界効果）のconfidence_level（既定0.95）を変える場合は
+#   # "--confidence-level="フラグを任意の位置に追加する（cov_type固有の位置引数とは
+#   # 独立に抜き出すため。linear/references/run_lm_crosscheck.Rと同じ方式）。
+#   Rscript run_glm_crosscheck.R data.csv "y ~ x1 + x2 + x3" hc0 logit --confidence-level=0.90
 
 # 参照値を決める設定の単一の情報源。`--settings`で出力し、生成スクリプトが
 # fixtureの`_meta`へ転記する（理由は下の`glm()`・限界効果の各コメント参照）。
@@ -61,13 +66,29 @@ glm_settings <- list(
   margeff_eps_rule = "eps = margeff_eps_sd_factor * sd(x), per variable"
 )
 
-args <- commandArgs(trailingOnly = TRUE)
-if (length(args) == 1 && args[1] == "--settings") {
+args_raw <- commandArgs(trailingOnly = TRUE)
+if (length(args_raw) == 1 && args_raw[1] == "--settings") {
   cat(jsonlite::toJSON(glm_settings, auto_unbox = TRUE, digits = NA))
   quit(status = 0)
 }
+
+# "--confidence-level="フラグは、clusterのような位置引数とは独立に先に抜き出す
+# （残りの引数の位置関係を崩さないため）。
+confidence_level <- 0.95
+cl_flag_pattern <- "^--confidence-level="
+cl_flag_idx <- grep(cl_flag_pattern, args_raw)
+if (length(cl_flag_idx) > 0) {
+  confidence_level <- as.numeric(sub(cl_flag_pattern, "", args_raw[cl_flag_idx[1]]))
+  args <- args_raw[-cl_flag_idx]
+} else {
+  args <- args_raw
+}
+if (is.na(confidence_level) || confidence_level <= 0 || confidence_level >= 1) {
+  stop("--confidence-level must be in (0, 1)")
+}
+
 if (length(args) < 2) {
-  stop("usage: Rscript run_glm_crosscheck.R <data.csv> <formula> [cov_type=classical] [link=logit] [cluster]")
+  stop("usage: Rscript run_glm_crosscheck.R <data.csv> <formula> [cov_type=classical] [link=logit] [cluster] [--confidence-level=X]")
 }
 data_path <- args[1]
 formula_str <- args[2]
@@ -218,14 +239,14 @@ if (cov_type == "classical") {
 }
 
 # z検定（本実装・statsmodelsと同じくz分布ベース、glm/binomialのcoeftestの既定）。
-# 信頼区間は標準正規分布の臨界値で手計算する（本実装のz検定・nonlinear-common.md
-# 4章と揃える。coeftestは信頼区間を返さないため）。
+# 信頼区間は標準正規分布の臨界値（`confidence_level`から求める。既定0.95）で手計算する
+# （本実装のz検定・nonlinear-common.md4章と揃える。coeftestは信頼区間を返さないため）。
 ct <- coeftest(model, vcov = vc)
 coefs <- ct[, 1]
 ses <- ct[, 2]
 zs <- ct[, 3]
 pvalues <- ct[, 4]
-z_crit <- qnorm(0.975)
+z_crit <- qnorm(1 - (1 - confidence_level) / 2)
 conf_low <- coefs - z_crit * ses
 conf_high <- coefs + z_crit * ses
 names(coefs) <- rownames(ct)
@@ -293,7 +314,13 @@ margeff_by_var <- function(call_fun) {
 }
 margeff <- list(
   overall = format_margeff(margeff_by_var(function(v, eps) {
-    avg_slopes(model, variables = v, vcov = vc, eps = eps)
+    avg_slopes(
+      model,
+      variables = v,
+      vcov = vc,
+      eps = eps,
+      conf_level = confidence_level
+    )
   })),
   mean = format_margeff(margeff_by_var(function(v, eps) {
     slopes(
@@ -301,7 +328,8 @@ margeff <- list(
       variables = v,
       newdata = datagrid(model = model, FUN_numeric = mean, FUN_integer = mean),
       vcov = vc,
-      eps = eps
+      eps = eps,
+      conf_level = confidence_level
     )
   })),
   median = format_margeff(margeff_by_var(function(v, eps) {
@@ -310,7 +338,8 @@ margeff <- list(
       variables = v,
       newdata = datagrid(model = model, FUN_numeric = median, FUN_integer = median),
       vcov = vc,
-      eps = eps
+      eps = eps,
+      conf_level = confidence_level
     )
   }))
 )

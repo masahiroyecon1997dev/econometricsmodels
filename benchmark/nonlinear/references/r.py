@@ -2,6 +2,7 @@
 
 - `run_glm_r`: `run_glm_crosscheck.R`（Logit/Probit クロスチェック）。位置引数の契約は
   `link` が cov_type の直後＝arg4、`cluster` は `cov_type="cluster"` のとき arg5。
+  `confidence_level` は位置に依存しない `--confidence-level=X` フラグで渡す。
 - `glm_reference_settings`: 同スクリプトが参照値を作るときの設定（`--settings`）。
 - `glm_reference_versions`: 同スクリプトが使うRと各パッケージのバージョン。
 - `run_tobit_r`: `run_tobit_crosscheck.R`（Tobit の主リファレンス `AER::tobit` と
@@ -47,6 +48,7 @@ def run_glm_r(
     *,
     cluster: str | None = None,
     link: str = "logit",
+    confidence_level: float = 0.95,
 ) -> dict:
     """`run_glm_crosscheck.R` を呼び、係数・標準誤差・適合度統計量・限界効果を得る。
 
@@ -56,10 +58,15 @@ def run_glm_r(
         cov_type: classical / opg / hc0 / hc1 / cluster。
         cluster: `cov_type="cluster"` のときのグループ列名。
         link: "logit" または "probit"。
+        confidence_level: 係数と限界効果の信頼区間の水準（既定0.95）。0.95以外は
+            `--confidence-level=X` フラグとして渡す（位置引数とは独立にRスクリプト側で
+            抜き出すため、位置には依存しない）。
     """
     extra: list[str] = [link]
     if cov_type == "cluster":
         extra.append(cluster or "")
+    if confidence_level != 0.95:
+        extra.append(f"--confidence-level={confidence_level}")
 
     raw = run_r(_R_SCRIPT, csv_path, formula, cov_type, extra_args=extra)
     return normalize_names(

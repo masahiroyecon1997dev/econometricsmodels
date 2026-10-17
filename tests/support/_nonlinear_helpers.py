@@ -247,11 +247,15 @@ def check_margeff(
     *,
     rtol: float,
     atol: float,
+    confidence_level: float = 0.95,
 ) -> None:
     """限界効果6統計量を`at`×係数名の全組み合わせでリファレンスと比較する。
 
     比較の前に、`at`のキー集合と各`at`の変数集合が`res.param_names`由来の
     期待（切片を除く全係数）と過不足なく一致することを確認する。
+
+    `confidence_level`は`marginal_effects()`に渡す信頼水準で、`fit()`の
+    `Options.confidence_level`とは独立（リファレンスの信頼区間の水準に合わせる）。
     """
     assert set(ref_margeff) == set(MARGEFF_AT), (
         f"{label}: リファレンスのatが{sorted(MARGEFF_AT)}と一致しない"
@@ -259,7 +263,7 @@ def check_margeff(
     )
     expected_names = slope_param_names(res)
     for at in MARGEFF_AT:
-        rows = res.marginal_effects(at=at)
+        rows = res.marginal_effects(at=at, confidence_level=confidence_level)
         assert_margeff_names(
             [row["param_name"] for row in rows],
             ref_margeff[at],

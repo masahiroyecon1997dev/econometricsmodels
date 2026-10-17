@@ -39,13 +39,14 @@ pub struct OlsEstimator {
     r_squared: f64,
     /// 自由度調整済み決定係数
     adj_r_squared: f64,
-    /// F統計量。`cov_type=Classical`なら古典的F検定、それ以外（HC0-3/HAC）は
-    /// `cov_params`を使ったロバストWald検定（`docs/spec/ols-spec.md`
-    /// 「適合度統計量」参照）
-    f_statistic: f64,
-    /// F統計量のp値（F分布、自由度は`(k - k_constant, df_inference)`。`df_inference`は
-    /// 通常`n - k`、`cov_type=Cluster`のときだけ`G-1`）
-    f_p_value: f64,
+    /// 全体F検定の`(F統計量, p値)`。`cov_type=Classical`なら古典的F検定、それ以外
+    /// （HC0-3/HAC/Cluster）は`cov_params`を使ったロバストWald検定（`docs/spec/ols-spec.md`
+    /// 「適合度統計量」参照）。p値はF分布（自由度`(k - k_constant, df_inference)`。
+    /// `df_inference`は通常`n - k`、`cov_type=Cluster`のときだけ`G-1`）。
+    /// 検定が定義できないとき`None`: 傾き係数が無い（定数項のみ）、または
+    /// [`OlsEstimator::fit_with_optional_f_test`]で`cov_type=Cluster`のクラスター数`G`が
+    /// 傾き係数の数`q`以下（`rank(Ŝ) ≤ G-1 < q`で`q×q`部分行列が構造的に特異）
+    f_test: Option<(f64, f64)>,
     /// 対数尤度（正規分布を仮定した最尤推定量ベース。`σ̂²`は`SSR/n`であり、
     /// classical標準誤差の不偏推定量`SSR/(n-k)`とは異なる点に注意）
     log_likelihood: f64,
@@ -118,6 +119,39 @@ impl OlsEstimator {
         cov_type: CovType,
         confidence_level: f64,
     ) -> Result<Self, LeastSquaresError> {
+        Self::fit_impl(input, cov_type, confidence_level, false)
+    }
+
+    /// [`fit`](Self::fit)と同じだが、`cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`
+    /// （`k - k_constant`）以下のときも`InsufficientClustersForInference`で失敗させず、
+    /// 全体F検定だけを定義なし（`f_statistic()`/`f_p_value()`/`f_df()`が`None`）にして
+    /// 推定を続ける。
+    ///
+    /// `rank(Ŝ) ≤ g - 1`のため`g ≤ q`では`q×q`部分行列が構造的に特異で全体F検定だけが
+    /// 計算できなくなるが、係数・各係数の標準誤差・t検定・信頼区間・適合度は`g - 1`自由度で
+    /// そのまま計算できる。呼び出し元が全体F検定を必須の出力にしない（診断として扱う）場合に
+    /// 使う（`engine::iv::common::compute_first_stage`の第一段階回帰）。クラスター数が2未満
+    /// （`InsufficientClusters`）・`groups`未指定（`MissingClusterColumn`）は従来どおり失敗し、
+    /// `g > q`でのほぼ特異性（`ComputationFailed`）も`None`へ握りつぶさず失敗のまま伝播する。
+    ///
+    /// # Errors
+    /// `g ≤ q`による`InsufficientClustersForInference`を除き[`fit`](Self::fit)と同じ。
+    pub fn fit_with_optional_f_test(
+        input: OlsInput,
+        cov_type: CovType,
+        confidence_level: f64,
+    ) -> Result<Self, LeastSquaresError> {
+        Self::fit_impl(input, cov_type, confidence_level, true)
+    }
+
+    /// `fit`/`fit_with_optional_f_test`の共通実装。`allow_undefined_f_test`が真のとき、
+    /// クラスター数が傾き係数の数以下でも全体F検定を`None`にして続行する。
+    fn fit_impl(
+        input: OlsInput,
+        cov_type: CovType,
+        confidence_level: f64,
+        allow_undefined_f_test: bool,
+    ) -> Result<Self, LeastSquaresError> {
         validate_has_regressors(input.nobs(), input.k())?;
 
         // faer のグローバル並列度を Par::Seq に固定する（`crate::shared::parallelism`）。
@@ -136,7 +170,12 @@ impl OlsEstimator {
 
         // 入力だけから判定できるクラスター数の検証は、QR分解・残差計算より前に行う
         // （`cov_params::validate_cluster_count`参照）。
-        validate_cluster_count(&cov_type, n, k - usize::from(input.has_intercept()))?;
+        let f_test_defined = validate_cluster_count(
+            &cov_type,
+            n,
+            k - usize::from(input.has_intercept()),
+            allow_undefined_f_test,
+        )?;
 
         let LeastSquaresFit {
             params,
@@ -189,12 +228,19 @@ impl OlsEstimator {
         } = gaussian_goodness_of_fit(input.y(), ssr, k, input.has_intercept());
 
         let df_model = k - k_constant;
-        let (f_statistic, f_p_value) = if df_model == 0 {
-            // 説明変数が定数項のみ（傾き係数が無い）モデル。検定対象が存在しないため
-            // statsmodels同様NaNを返す（0除算を避ける）。
-            (f64::NAN, f64::NAN)
+        let f_test = if df_model == 0 || !f_test_defined {
+            // 説明変数が定数項のみ（傾き係数が無い）モデルは検定対象が存在しない。
+            // クラスター数が傾き係数の数以下（`fit_with_optional_f_test`のみ）では
+            // `q×q`部分行列が構造的に特異で検定できない。どちらも定義なし（`None`）。
+            None
         } else {
-            wald_f_test(&params, &cov_params, k_constant, df_model, df_inference)?
+            Some(wald_f_test(
+                &params,
+                &cov_params,
+                k_constant,
+                df_model,
+                df_inference,
+            )?)
         };
 
         Ok(Self {
@@ -209,8 +255,7 @@ impl OlsEstimator {
             conf_upper,
             r_squared,
             adj_r_squared,
-            f_statistic,
-            f_p_value,
+            f_test,
             log_likelihood,
             aic,
             bic,
@@ -283,14 +328,16 @@ impl OlsEstimator {
         self.adj_r_squared
     }
 
-    /// F統計量
-    pub fn f_statistic(&self) -> f64 {
-        self.f_statistic
+    /// 全体F検定の統計量。検定が定義できない（傾き係数が無い、または
+    /// [`fit_with_optional_f_test`](Self::fit_with_optional_f_test)でクラスター数が傾き係数の数
+    /// 以下）ときは`None`。
+    pub fn f_statistic(&self) -> Option<f64> {
+        self.f_test.map(|(statistic, _)| statistic)
     }
 
-    /// F統計量のp値
-    pub fn f_p_value(&self) -> f64 {
-        self.f_p_value
+    /// 全体F検定のp値。`f_statistic()`が`None`のとき`None`。
+    pub fn f_p_value(&self) -> Option<f64> {
+        self.f_test.map(|(_, p_value)| p_value)
     }
 
     /// 残差自由度 `n - k`。
@@ -315,10 +362,9 @@ impl OlsEstimator {
         self.hac_lags_used
     }
 
-    /// F統計量の自由度`(分子, 分母)`。傾き係数が無く`f_statistic()`がNaNのときは`None`。
+    /// F統計量の自由度`(分子, 分母)`。`f_statistic()`が`None`のときは`None`。
     pub fn f_df(&self) -> Option<(usize, usize)> {
-        let df_model = self.df_model();
-        (df_model > 0).then_some((df_model, self.df_inference))
+        self.f_test.map(|_| (self.df_model(), self.df_inference))
     }
 
     /// 対数尤度
@@ -545,8 +591,8 @@ mod tests {
         let estimator = OlsEstimator::fit(input, CovType::Hc1, 0.95).unwrap();
 
         let (stat, p_value) = estimator.wald_test_last_columns(2).unwrap();
-        assert!((stat - estimator.f_statistic()).abs() < 1e-10);
-        assert!((p_value - estimator.f_p_value()).abs() < 1e-10);
+        assert!((stat - estimator.f_statistic().unwrap()).abs() < 1e-10);
+        assert!((p_value - estimator.f_p_value().unwrap()).abs() < 1e-10);
     }
 
     /// `q=1`（末尾1列だけを対象）のとき、`F = t²`という標準的な恒等式
@@ -692,8 +738,8 @@ mod tests {
         assert!((estimator.log_likelihood() - (-5.259_769_728_322_863)).abs() < 1e-9);
         assert!((estimator.aic() - 14.519_539_456_645_726).abs() < 1e-9);
         assert!((estimator.bic() - 13.738_415_281_513_927).abs() < 1e-9);
-        assert!((estimator.f_statistic() - 4.499_999_999_999_999).abs() < 1e-6);
-        assert!((estimator.f_p_value() - 0.124_027_062_657_554_59).abs() < 1e-6);
+        assert!((estimator.f_statistic().unwrap() - 4.499_999_999_999_999).abs() < 1e-6);
+        assert!((estimator.f_p_value().unwrap() - 0.124_027_062_657_554_59).abs() < 1e-6);
     }
 
     /// 同じ(x, y)を切片なしで推定した場合。R²・調整済みR²がuncentered TSS
@@ -719,8 +765,8 @@ mod tests {
         assert!((estimator.log_likelihood() - (-7.863_404_415_393_264)).abs() < 1e-9);
         assert!((estimator.aic() - 17.726_808_830_786_528).abs() < 1e-9);
         assert!((estimator.bic() - 17.336_246_743_220_627).abs() < 1e-9);
-        assert!((estimator.f_statistic() - 46.588_235_294_117_66).abs() < 1e-6);
-        assert!((estimator.f_p_value() - 0.002_409_205_984_197_115_5).abs() < 1e-6);
+        assert!((estimator.f_statistic().unwrap() - 46.588_235_294_117_66).abs() < 1e-6);
+        assert!((estimator.f_p_value().unwrap() - 0.002_409_205_984_197_115_5).abs() < 1e-6);
     }
 
     /// HC1・HAC(maxlags=1)でのF統計量がロバストWald検定になることを確認する
@@ -741,8 +787,8 @@ mod tests {
         )
         .unwrap();
         let estimator_hc1 = OlsEstimator::fit(input_hc1, CovType::Hc1, 0.95).unwrap();
-        assert!((estimator_hc1.f_statistic() - 6.279_069_767_441_904).abs() < 1e-6);
-        assert!((estimator_hc1.f_p_value() - 0.087_259_022_565_828_96).abs() < 1e-6);
+        assert!((estimator_hc1.f_statistic().unwrap() - 6.279_069_767_441_904).abs() < 1e-6);
+        assert!((estimator_hc1.f_p_value().unwrap() - 0.087_259_022_565_828_96).abs() < 1e-6);
 
         let input_hac = OlsInput::from_columns(
             &y,
@@ -757,21 +803,21 @@ mod tests {
             time_order: row_time_order(5),
         };
         let estimator_hac = OlsEstimator::fit(input_hac, cov_type_hac, 0.95).unwrap();
-        assert!((estimator_hac.f_statistic() - 13.235_294_117_647_193).abs() < 1e-6);
-        assert!((estimator_hac.f_p_value() - 0.035_791_053_269_350_51).abs() < 1e-6);
+        assert!((estimator_hac.f_statistic().unwrap() - 13.235_294_117_647_193).abs() < 1e-6);
+        assert!((estimator_hac.f_p_value().unwrap() - 0.035_791_053_269_350_51).abs() < 1e-6);
     }
 
     /// 説明変数が定数項のみ（傾き係数が無い）モデル。F検定は検定対象が存在しないため、
-    /// statsmodels同様NaNを返す（`OlsEstimator::fit`の`df_model == 0`分岐）。
+    /// 定義なし（`None`）を返す（`OlsEstimator::fit`の`df_model == 0`分岐）。
     #[test]
-    fn fit_returns_nan_f_statistic_when_model_has_no_slope_regressors() {
+    fn fit_returns_no_f_test_when_model_has_no_slope_regressors() {
         let y = vec![1.0, 2.0, 3.0, 4.0, 5.0];
         let input = OlsInput::from_columns(&y, &[], vec![], true, "y".to_string()).unwrap();
 
         let estimator = OlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
 
-        assert!(estimator.f_statistic().is_nan());
-        assert!(estimator.f_p_value().is_nan());
+        assert!(estimator.f_statistic().is_none());
+        assert!(estimator.f_p_value().is_none());
     }
 
     #[test]

@@ -64,7 +64,7 @@ FE固有の内容のみを記載する。
 `FEResult`（`#[pyclass]`）が公開する項目: `params` / `std_errors` / `test_stats`（**t検定**） /
 `p_values` / `conf_lower` / `conf_upper` / `param_names`（切片なし） / `residuals` /
 `dep_var_name` / `n_obs` / `df_resid` / `df_model` / `n_entities` / `n_periods`（2-wayのみ、1-wayは`None`） / `cov_type` / `dk_bandwidth_used` / `f_statistic` /
-`f_p_value` / `f_df_num` / `f_df_denom`（`(k, df_resid)`、`k=0`で`None`） / `log_likelihood` / `aic` / `bic` / `r_squared_within` / `r_squared_between` /
+`f_p_value` / `f_df_num` / `f_df_denom`（`(k, df_resid)`、`k=0`で`f_statistic`/`f_p_value`ともども`None`） / `log_likelihood` / `aic` / `bic` / `r_squared_within` / `r_squared_between` /
 `r_squared_overall`。
 
 - **`dk_bandwidth_used`**: `cov_type="dk"`のとき実際に使われたバンド幅（`dk_bandwidth`明示指定ならその値、

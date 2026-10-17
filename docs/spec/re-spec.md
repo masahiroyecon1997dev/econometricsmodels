@@ -59,7 +59,7 @@ RE固有の内容のみを記載する。FEとの共有範囲は[`fe-spec.md`](.
 `REResult`（`#[pyclass]`）が公開する項目: `params` / `std_errors` / `test_stats`（**t検定**） /
 `p_values` / `conf_lower` / `conf_upper` / `param_names`（`param_names[0]`は常に`"const"`） /
 `residuals` / `dep_var_name` / `n_obs` / `df_resid` / `df_model` / `n_entities` / `n_periods`（2-wayのみ、1-wayは`None`） / `sigma2_eps` / `sigma2_u` / `sigma2_lambda`（2-wayのみ） / `theta`（1-wayのみ） / `theta_entity` / `theta_time` / `theta_total`（2-wayのみ） / `cov_type` / `dk_bandwidth_used` /
-`f_statistic` / `f_p_value` / `log_likelihood` / `aic` / `bic` / `r_squared_within` /
+`f_statistic` / `f_p_value`（傾き係数が無ければ`None`） / `log_likelihood` / `aic` / `bic` / `r_squared_within` /
 `r_squared_between` / `r_squared_overall` / `hausman_statistic` / `hausman_p_value` /
 `hausman_df`。
 

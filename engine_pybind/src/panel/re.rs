@@ -354,14 +354,17 @@ pub struct REResult {
     /// of unique time periods in `dk_time`. `None` unless `cov_type="dk"`.
     #[pyo3(get)]
     pub dk_bandwidth_used: Option<i64>,
+    /// Overall F-test statistic of the slope coefficients. `None` when the test is not
+    /// defined: there are no slope coefficients.
     #[pyo3(get)]
-    pub f_statistic: f64,
+    pub f_statistic: Option<f64>,
+    /// P-value of `f_statistic` (`None` exactly when `f_statistic` is `None`).
     #[pyo3(get)]
-    pub f_p_value: f64,
-    /// Numerator degrees of freedom of `f_statistic` (`None` when it is NaN).
+    pub f_p_value: Option<f64>,
+    /// Numerator degrees of freedom of `f_statistic` (`None` when `f_statistic` is `None`).
     #[pyo3(get)]
     pub f_df_num: Option<usize>,
-    /// Denominator degrees of freedom of `f_statistic` (`None` when it is NaN). Follows
+    /// Denominator degrees of freedom of `f_statistic` (`None` when `f_statistic` is `None`). Follows
     /// `cov_type` like the t-tests (`G - 1` for cluster, `T - 1` for Driscoll-Kraay,
     /// `df_resid` otherwise).
     #[pyo3(get)]

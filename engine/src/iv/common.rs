@@ -425,9 +425,11 @@ pub(crate) fn without_baked_in_intercept<'a>(
 /// `groups=None`（`MissingClusterColumn`は呼び出し側が別途扱う）では何もしない。
 ///
 /// `rank(Ŝ) ≤ g - 1`のため`g <= q`でロバストWald/F（χ²）検定の`q×q`部分行列が構造的に
-/// 特異になる（`validate_cluster_count_covers_slopes`参照）。第一段階の傾き係数の数は
-/// 識別条件により構造方程式以上のため、`compute_first_stage`より先にこのチェックを
-/// 行わないと常に第一段階の`FirstStageFailed`（第一段階の`g`・`q`）に隠れる。
+/// 特異になる（`validate_cluster_count_covers_slopes`参照）。構造方程式の結果は全体Wald
+/// 検定を必須の出力に持つため拒否する（第一段階は全体F検定が診断なので、`g <= q_first`でも
+/// 失敗させず`None`にする。`compute_first_stage`参照）。第一段階の傾き係数の数は識別条件に
+/// より構造方程式以上のため、`compute_first_stage`より先にこのチェックを行わないと、
+/// 構造方程式側で`g <= q`の入力が第一段階の処理を無駄に走らせてから初めて弾かれる。
 /// `TwoSlsEstimator::fit`/`GmmEstimator::fit`冒頭と`engine_pybind`の`fit`が
 /// 同じ判定を共有するための単一の実装（`q`の式をここに集約する）。
 ///
@@ -465,10 +467,17 @@ pub type FirstStageResult = (Vec<(String, OlsEstimator)>, Vec<(String, f64)>);
 /// 自体は`estimator`に依存しない、素の（第二段階の推定方式によらない）診断情報のため、
 /// SEサンドイッチ計算（2SLS/GMMで数式が異なるため独立実装が必要）とは性質が異なる）。
 ///
-/// `cov_type`は第一段階`OlsEstimator::fit`にそのまま渡す（`two_sls.rs`の`fit()`冒頭
+/// `cov_type`は第一段階の推定にそのまま渡す（`two_sls.rs`の`fit()`冒頭
 /// コメント「第一段階・第二段階での`cov_type`/`confidence_level`の扱い」と同じ）。
 /// 弱操作変数診断自体は常に等分散前提で`cov_type`に依存しない（`partial_f_statistic`の
 /// docコメント参照）。
+///
+/// **`cov_type=Cluster`で`G`が第一段階の傾き係数の数`q_first`以下でも失敗させない**
+/// （`OlsEstimator::fit_with_optional_f_test`）。第一段階の全体F検定は`rank(Ŝ) ≤ G-1 <
+/// q_first`で計算できないが、診断でしかなく、係数・標準誤差・弱操作変数診断（SSRだけで
+/// 決まる部分F統計量）は有効なため、各第一段階の`f_statistic()`/`f_p_value()`が`None`に
+/// なるだけで続行する。構造方程式の`G <= q_struct`（`q_struct <= q_first`）は呼び出し元が
+/// 先に`validate_structural_cluster_count`で弾く前提。
 ///
 /// # Errors
 /// - 第一段階回帰が失敗: `IvError::FirstStageFailed`
@@ -508,11 +517,10 @@ pub fn compute_first_stage(
             source,
         })?;
         let estimator =
-            OlsEstimator::fit(ols_input, cov_type.clone(), confidence_level).map_err(|source| {
-                IvError::FirstStageFailed {
-                    endog_name: endog_name.clone(),
-                    source,
-                }
+            OlsEstimator::fit_with_optional_f_test(ols_input, cov_type.clone(), confidence_level)
+                .map_err(|source| IvError::FirstStageFailed {
+                endog_name: endog_name.clone(),
+                source,
             })?;
         first_stage.push((endog_name.clone(), estimator));
     }
@@ -836,6 +844,108 @@ mod tests {
                     .collect::<Vec<String>>(),
             )),
         }
+    }
+
+    /// 12観測の`x_exog`(1列)・`x_endog`(1列)・`instruments`(2列)。互いに線形独立なので第一段階
+    /// （`endog1 ~ x1 + z1 + z2`）がフルランクになる。構造方程式の傾き係数の数は`q_struct=2`、
+    /// 第一段階の傾き係数の数は定数項の有無によらず`q_first=3`（`x1`・`z1`・`z2`）。
+    fn first_stage_boundary_input(include_intercept: bool) -> IvInput {
+        let col = |freq: f64, phase: f64| -> Vec<f64> {
+            (0..12).map(|i| (freq * i as f64 + phase).sin()).collect()
+        };
+        IvInput::from_columns(
+            &col(0.9, 0.3),
+            &[col(1.1, 0.7)],
+            vec!["x1".to_string()],
+            &[col(1.7, 0.2)],
+            vec!["endog1".to_string()],
+            &[col(2.3, 0.5), col(2.9, 1.1)],
+            vec!["z1".to_string(), "z2".to_string()],
+            include_intercept,
+            "y".to_string(),
+        )
+        .unwrap()
+    }
+
+    fn first_stage_cluster_cov(n_groups: usize) -> CovType {
+        CovType::Cluster {
+            groups: Some(GroupCodes::from_labels_without_keys(
+                &(0..12)
+                    .map(|i| format!("g{}", i % n_groups))
+                    .collect::<Vec<String>>(),
+            )),
+        }
+    }
+
+    /// 構造方程式では`G > q_struct`でも、第一段階の傾き係数の数`q_first`以下のクラスター数
+    /// （`G == q_first`）では第一段階の全体F検定だけが定義なし（`None`）になり、
+    /// `compute_first_stage`は失敗しない。係数の標準誤差と弱操作変数診断は有効なまま。
+    #[test]
+    fn compute_first_stage_leaves_overall_f_undefined_when_g_equals_first_stage_slopes() {
+        for include_intercept in [true, false] {
+            let input = first_stage_boundary_input(include_intercept);
+            assert!(validate_structural_cluster_count(&input, &first_stage_cluster_cov(3)).is_ok());
+
+            let (first_stage, weak_f) =
+                compute_first_stage(&input, &first_stage_cluster_cov(3), 0.95).unwrap();
+            let (_, estimator) = &first_stage[0];
+            let label = format!("include_intercept={include_intercept}");
+            assert_eq!(estimator.f_statistic(), None, "{label}");
+            assert_eq!(estimator.f_p_value(), None, "{label}");
+            assert_eq!(estimator.f_df(), None, "{label}");
+            for j in 0..estimator.input().k() {
+                let se = *estimator.std_errors().get(j, 0);
+                assert!(se.is_finite() && se > 0.0, "{label} j={j} se={se}");
+            }
+            assert!(weak_f[0].1.is_finite() && weak_f[0].1 > 0.0, "{label}");
+        }
+    }
+
+    /// 境界の反対側（`G == q_first + 1`）では第一段階の全体F検定が定義でき、自由度は
+    /// `(q_first, G - 1)`。
+    #[test]
+    fn compute_first_stage_computes_overall_f_when_g_exceeds_first_stage_slopes() {
+        for include_intercept in [true, false] {
+            let input = first_stage_boundary_input(include_intercept);
+            let (first_stage, _) =
+                compute_first_stage(&input, &first_stage_cluster_cov(4), 0.95).unwrap();
+            let (_, estimator) = &first_stage[0];
+            let label = format!("include_intercept={include_intercept}");
+            assert!(estimator.f_statistic().is_some(), "{label}");
+            assert!(estimator.f_p_value().is_some(), "{label}");
+            assert_eq!(estimator.f_df(), Some((3, 3)), "{label}");
+        }
+    }
+
+    /// 弱操作変数診断（古典的ネストF）と第一段階の係数は`cov_type`と`G`に依存しないため、
+    /// 全体Fが定義なしになるクラスター数でも定義ありのクラスター数と同じ値になる。
+    #[test]
+    fn compute_first_stage_weak_instrument_f_and_params_do_not_depend_on_cluster_count() {
+        let input = first_stage_boundary_input(true);
+        let (undefined, weak_undefined) =
+            compute_first_stage(&input, &first_stage_cluster_cov(3), 0.95).unwrap();
+        let (defined, weak_defined) =
+            compute_first_stage(&input, &first_stage_cluster_cov(4), 0.95).unwrap();
+        assert_eq!(weak_undefined, weak_defined);
+        let params = |e: &OlsEstimator| mat_to_columns(e.params());
+        assert_eq!(params(&undefined[0].1), params(&defined[0].1));
+    }
+
+    /// クラスターが1つだけの入力は、全体F検定を飛ばす第一段階でも従来どおり
+    /// `FirstStageFailed`（`InsufficientClusters`）で失敗する。
+    #[test]
+    fn compute_first_stage_still_rejects_a_single_cluster() {
+        let input = first_stage_boundary_input(true);
+        let err = compute_first_stage(&input, &first_stage_cluster_cov(1), 0.95).unwrap_err();
+        assert_eq!(
+            err,
+            IvError::FirstStageFailed {
+                endog_name: "endog1".to_string(),
+                source: crate::linear::common::LeastSquaresError::Common(
+                    CommonError::InsufficientClusters { g: 1 }
+                ),
+            }
+        );
     }
 
     #[test]

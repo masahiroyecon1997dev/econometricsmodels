@@ -350,14 +350,19 @@ pub struct OLSResult {
     pub r_squared: f64,
     #[pyo3(get)]
     pub adj_r_squared: f64,
+    /// Overall F-test statistic of the slope coefficients. `None` when the test is not
+    /// defined: there are no slope coefficients (intercept only), or, for a first-stage regression of
+    /// `IVResults.first_stage()` with `cov_type="cluster"`, the number of clusters is not larger
+    /// than the number of slope coefficients.
     #[pyo3(get)]
-    pub f_statistic: f64,
+    pub f_statistic: Option<f64>,
+    /// P-value of `f_statistic` (`None` exactly when `f_statistic` is `None`).
     #[pyo3(get)]
-    pub f_p_value: f64,
-    /// Numerator degrees of freedom of `f_statistic` (`None` when it is NaN).
+    pub f_p_value: Option<f64>,
+    /// Numerator degrees of freedom of `f_statistic` (`None` when `f_statistic` is `None`).
     #[pyo3(get)]
     pub f_df_num: Option<usize>,
-    /// Denominator degrees of freedom of `f_statistic` (`None` when it is NaN). May differ
+    /// Denominator degrees of freedom of `f_statistic` (`None` when `f_statistic` is `None`). May differ
     /// from `df_resid` (e.g. OLS/WLS with cluster-robust inference uses `G - 1`).
     #[pyo3(get)]
     pub f_df_denom: Option<usize>,

@@ -173,11 +173,15 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   部分行列が構造的に特異。`fit()`冒頭で構造方程式の`q`を使って弾く。判定は
   `engine::iv::common::validate_structural_cluster_count`に集約し、`TwoSlsEstimator::fit`/
   `GmmEstimator::fit`冒頭と`engine_pybind`の`fit`（`compute_first_stage`より前）が共有する。
-  第一段階・第二段階回帰の`OlsEstimator::fit`内でも同じ検証が走るが、そちらは
-  `FirstStageFailed`/`SecondStageFailed`にラップされるため区別される。**構造方程式では
-  `G > q`でも、第一段階の傾き係数の数`q_first = k_exog傾き + k_instruments (>= q)`が`G`以上の
-  ときは第一段階の`FirstStageFailed`（`ValidationError`）で弾かれる**（第一段階回帰の
-  ロバストWald/F検定が構造的に特異になるため。この領域の扱いは未決定の設計論点）。OLS/WLS/Tobit/Logit/Probit/IVで横断
+  第二段階回帰の`OlsEstimator::fit`内でも同じ検証が走るが、そちらは
+  `SecondStageFailed`にラップされるため区別される。**構造方程式では
+  `G > q`でも、第一段階の傾き係数の数`q_first = k_exog傾き + k_instruments (>= q)`が`G`以下の
+  ときは、第一段階の全体F検定（`first_stage()`の`f_statistic`/`f_p_value`/`f_df_num`/
+  `f_df_denom`）だけを`None`にして`fit()`は成功する**（第一段階のロバストWald/F検定が構造的に
+  特異になるが、診断でしかなく、係数・標準誤差・弱操作変数診断は有効なため。構造方程式の結果は
+  全体Wald検定を必須の出力に持つので、`G <= q`は上のとおり拒否したまま）。第一段階の推定は
+  `OlsEstimator::fit_with_optional_f_test`（`G <= q`でも`G >= 2`ならF検定だけ定義なしにして続行）
+  を使う（`compute_first_stage`）。OLS/WLS/Tobit/Logit/Probit/IVの主結果は横断
   統一。Wu-Hausman拡張回帰は`q_aug = q + k_endog`で`G <= q_aug`になりうるが、実際に使う
   末尾`k_endog`列の部分行列は`rank(Ŝ) ≤ G-1 ≥ k_endog`なら計算可能なので`wu_hausman_*`を
   `None`へdegradeする（3.6節）。
@@ -309,6 +313,15 @@ Sargan検定（2SLS）／Hansen J検定（GMM）を`fit()`の結果本体に含�
   OLS自体が軽量という前提で許容した設計判断。
 - 返す`OLSResults.f_statistic`/`f_p_value`は`x_exog`の寄与を含む通常のOLS F検定であり、
   弱操作変数診断の部分F統計量（3.4節）とは別物。
+- **`cov_type="cluster"`でクラスター数`G`が第一段階の傾き係数の数`q_first`以下（構造方程式は
+  `G > q_struct`）のときは、その第一段階回帰の`f_statistic`/`f_p_value`/`f_df_num`/`f_df_denom`が
+  `None`になる**（2章・3.1節）。標準誤差・t検定・信頼区間は`G-1`自由度で計算され、弱操作変数F
+  （3.4節）は古典的なネストF検定で`cov_type`・`G`に依存しないため値が出る。ただしこの
+  弱操作変数Fは等分散前提の統計量で、クラスターが少ないときにクラスターロバストな関連性の
+  根拠にはならない（`G`の大小によらない既存の限界）。なお`G`が小さいときのクラスターロバスト
+  標準誤差は下方バイアスが大きく信頼性が低い（`G-1`自由度のt分布を使うのはその緩和にすぎない）。
+  この領域の第一段階は診断として読み、F検定が`None`になる＝標準誤差が十分に信頼できる、
+  という意味ではない。
 
 ### 3.8 engine_pybind: エラー変換
 

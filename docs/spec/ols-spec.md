@@ -39,8 +39,15 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols/`・`engi
 `df_resid` / `df_model` / `log_likelihood` / `aic` / `bic`。
 
 - `df_resid = n - k`、`df_model`は定数項を除く傾き係数の数。`f_df_num = df_model`、`f_df_denom`は
-  検定に使った自由度（`df_resid`、`cov_type="cluster"`のときだけ`G-1`）。傾き係数が無く
-  `f_statistic`がNaNのときは`f_df_num`/`f_df_denom`も`None`。
+  検定に使った自由度（`df_resid`、`cov_type="cluster"`のときだけ`G-1`）。
+- `f_statistic`/`f_p_value`/`f_df_num`/`f_df_denom`は、全体F検定が定義できないとき**4つとも`None`**
+  （`float | None`）。定義できないのは、傾き係数が無いとき（NaNではなく`None`。Python APIは
+  `x`が空だと拒否するため通常は起きない）と、`IVResults.first_stage()`が返す第一段階回帰で
+  `cov_type="cluster"`のクラスター数`G`が第一段階の傾き係数の数`q`以下のとき（`rank(Ŝ) ≤ G-1 < q`で
+  傾き部分行列が構造的に特異。`iv-spec.md`2章・3.7節）。後者のため、engineには`G <= q`でも
+  全体F検定だけを`None`にして続行する`OlsEstimator::fit_with_optional_f_test`がある。
+  `OlsEstimator::fit`（`OLS(...).fit()`・WLS・FE・REの各`fit`が使う）は従来どおり`G <= q`を
+  `ValidationError`で拒否する。FE・RE・WLSの`f_statistic`/`f_p_value`も同じ`float | None`。
 
 - `hac_lags_used`: `cov_type="hac"`のとき実際に使われたラグ数`L`（`hac_lags`明示指定ならその値、
   未指定なら経験則で自動計算した値。engineの`resolve_hac_lags`の戻り値をそのまま保持する）。

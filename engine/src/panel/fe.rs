@@ -711,11 +711,10 @@ pub struct FeEstimator {
     r_squared_overall: f64,
     aic: f64,
     bic: f64,
-    /// 傾き係数`k`個の同時Wald F検定（素の最小二乗の`f_statistic`とは異なりFE用に
-    /// panel自由度調整済み・`cov_type`反映済み、モジュールdoc「自由度調整」のF統計量節
-    /// 参照）。`k=0`ならNaN。
-    f_statistic: f64,
-    f_p_value: f64,
+    /// 傾き係数`k`個の同時Wald F検定の`(F統計量, p値)`（素の最小二乗の`f_statistic`とは
+    /// 異なりFE用にpanel自由度調整済み・`cov_type`反映済み、モジュールdoc「自由度調整」の
+    /// F統計量節参照）。`k=0`なら`None`。
+    f_test: Option<(f64, f64)>,
 }
 
 impl FeEstimator {
@@ -1010,16 +1009,18 @@ impl FeEstimator {
         // （`cov_type=Cluster`/`Dk`のときだけ`df_resid`から切り替わる、`shared::wald::wald_f_test`の
         // `df_inference`引数と同じ扱い）を使う。`k_constant=0`（FEに切片は無い、上記
         // `OlsInput::from_columns`呼び出しと同じ理由）。
-        let (f_statistic, f_p_value) = if k == 0 {
-            // 説明変数が無いモデル。検定対象が存在しないため`OlsEstimator::fit`同様NaN
-            // （0除算を避ける）。
-            (f64::NAN, f64::NAN)
+        let f_test = if k == 0 {
+            // 説明変数が無いモデル。検定対象が存在しないため`OlsEstimator::fit`同様
+            // 定義なし（`None`）。
+            None
         } else {
-            wald_f_test(&params, &cov_params, 0, k, df_inference).map_err(|source| {
-                PanelError::FTestFailed {
-                    source: source.into(),
-                }
-            })?
+            Some(
+                wald_f_test(&params, &cov_params, 0, k, df_inference).map_err(|source| {
+                    PanelError::FTestFailed {
+                        source: source.into(),
+                    }
+                })?,
+            )
         };
 
         Ok(Self {
@@ -1045,8 +1046,7 @@ impl FeEstimator {
             r_squared_overall,
             aic,
             bic,
-            f_statistic,
-            f_p_value,
+            f_test,
         })
     }
 
@@ -1174,20 +1174,20 @@ impl FeEstimator {
     }
 
     /// 傾き係数`k`個が同時にゼロという帰無仮説のWald F検定統計量
-    /// （モジュールdoc「自由度調整」のF統計量節参照）。`k=0`ならNaN。
-    pub fn f_statistic(&self) -> f64 {
-        self.f_statistic
+    /// （モジュールdoc「自由度調整」のF統計量節参照）。`k=0`なら`None`。
+    pub fn f_statistic(&self) -> Option<f64> {
+        self.f_test.map(|(statistic, _)| statistic)
     }
 
-    /// `f_statistic()`のp値。
-    pub fn f_p_value(&self) -> f64 {
-        self.f_p_value
+    /// `f_statistic()`のp値。`f_statistic()`が`None`のとき`None`。
+    pub fn f_p_value(&self) -> Option<f64> {
+        self.f_test.map(|(_, p_value)| p_value)
     }
 
-    /// `f_statistic()`の自由度`(分子, 分母)` = `(k, df_inference)`。`k=0`でNaNのときは`None`。
+    /// `f_statistic()`の自由度`(分子, 分母)` = `(k, df_inference)`。`k=0`で`None`のときは`None`。
     pub fn f_df(&self) -> Option<(usize, usize)> {
-        let k = self.within_input.k();
-        (k > 0).then_some((k, self.df_inference))
+        self.f_test
+            .map(|_| (self.within_input.k(), self.df_inference))
     }
 
     /// 固定効果自体（α_i、2-wayはγ_tも）を事後的に復元する（`fe-spec.md`3.5節）。
@@ -3062,8 +3062,8 @@ mod tests {
         assert!((fe.r_squared_overall() - 0.732_444_936_421_435).abs() < 1e-9);
         // F統計量: k=1のため「1自由度のF検定は両側t検定と代数的に等価」
         // （モジュールdoc「自由度調整」のF統計量節参照）。
-        assert!((fe.f_statistic() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
-        assert!((fe.f_p_value() - *fe.p_values().get(0, 0)).abs() < 1e-9);
+        assert!((fe.f_statistic().unwrap() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((fe.f_p_value().unwrap() - *fe.p_values().get(0, 0)).abs() < 1e-9);
     }
 
     #[test]
@@ -3102,8 +3102,8 @@ mod tests {
         assert!((fe.r_squared_overall() - 0.511_356_250_429_877).abs() < 1e-9);
         // F統計量: k=1のため「1自由度のF検定は両側t検定と代数的に等価」
         // （モジュールdoc「自由度調整」のF統計量節参照）。
-        assert!((fe.f_statistic() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
-        assert!((fe.f_p_value() - *fe.p_values().get(0, 0)).abs() < 1e-9);
+        assert!((fe.f_statistic().unwrap() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((fe.f_p_value().unwrap() - *fe.p_values().get(0, 0)).abs() < 1e-9);
     }
 
     // ── F統計量 ───────────────────────────────────────────────────────────
@@ -3145,8 +3145,8 @@ mod tests {
         assert_eq!(fe.df_resid(), 6); // n(12) - df_model(k(2)+n_entities(4))
         // `PanelOLS(y, [x1, x2], entity_effects=True).fit(cov_type="unadjusted",
         // debiased=True).f_statistic`: F(2,6)。
-        assert!((fe.f_statistic() - 4.544_331_119_544_591).abs() < 1e-9);
-        assert!((fe.f_p_value() - 0.062_878_408_429_192_23).abs() < 1e-9);
+        assert!((fe.f_statistic().unwrap() - 4.544_331_119_544_591).abs() < 1e-9);
+        assert!((fe.f_p_value().unwrap() - 0.062_878_408_429_192_23).abs() < 1e-9);
     }
 
     #[test]
@@ -3167,8 +3167,8 @@ mod tests {
         assert_eq!(fe.df_resid(), 4); // n(12) - df_model(k(2)+neffects(4+3-1=6))
         // `PanelOLS(y, [x1, x2], entity_effects=True, time_effects=True).fit(
         // cov_type="unadjusted", debiased=True).f_statistic`: F(2,4)。
-        assert!((fe.f_statistic() - 9.574_202_321_891_761).abs() < 1e-9);
-        assert!((fe.f_p_value() - 0.029_859_178_280_428_5).abs() < 1e-9);
+        assert!((fe.f_statistic().unwrap() - 9.574_202_321_891_761).abs() < 1e-9);
+        assert!((fe.f_p_value().unwrap() - 0.029_859_178_280_428_5).abs() < 1e-9);
     }
 
     #[test]
@@ -3376,9 +3376,9 @@ mod tests {
         assert!((effects["a"] - 2.0).abs() < 1e-12);
         assert!((effects["b"] - 6.0).abs() < 1e-12);
         assert!((effects["c"] - 3.0).abs() < 1e-12);
-        // F統計量: k=0（検定対象の傾き係数が無い）はOlsEstimatorと同じくNaN。
-        assert!(fe.f_statistic().is_nan());
-        assert!(fe.f_p_value().is_nan());
+        // F統計量: k=0（検定対象の傾き係数が無い）は`OlsEstimator`と同じく`None`。
+        assert!(fe.f_statistic().is_none());
+        assert!(fe.f_p_value().is_none());
     }
 
     #[test]
@@ -3430,9 +3430,9 @@ mod tests {
         assert!((time["9"] - (-3.0)).abs() < 1e-12);
         assert!((entity["e1"] - 3.5).abs() < 1e-12);
         assert!((entity["e2"] - 8.5).abs() < 1e-12);
-        // F統計量: k=0（検定対象の傾き係数が無い）はOlsEstimatorと同じくNaN。
-        assert!(fe.f_statistic().is_nan());
-        assert!(fe.f_p_value().is_nan());
+        // F統計量: k=0（検定対象の傾き係数が無い）は`OlsEstimator`と同じく`None`。
+        assert!(fe.f_statistic().is_none());
+        assert!(fe.f_p_value().is_none());
 
         // 不変条件: k=0でも `α_i + γ_t + ε̂_it = y_it`（正規化の選び方に依存しない）。
         let residuals = fe.residuals();
@@ -3464,8 +3464,8 @@ mod tests {
         // （モジュールdoc「自由度調整」のF統計量節参照）。HC1のcov_paramsが正しく
         // wald_f_testに渡っていることの回帰ガード（classical以外のcov_typeでの唯一の
         // F統計量検証、rust-reviewer指摘）。
-        assert!((hc1.f_statistic() - hc1.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
-        assert!((hc1.f_p_value() - *hc1.p_values().get(0, 0)).abs() < 1e-9);
+        assert!((hc1.f_statistic().unwrap() - hc1.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((hc1.f_p_value().unwrap() - *hc1.p_values().get(0, 0)).abs() < 1e-9);
 
         let (entity, _time, x, y) = fixest_reference_input();
         let input =
@@ -3475,8 +3475,8 @@ mod tests {
         assert!((*hc2.std_errors().get(0, 0) - 0.492_939_313_874_837).abs() < 1e-9);
         assert!((*hc2.test_stats().get(0, 0) - 2.845_741_328_178_91).abs() < 1e-6);
         assert!((*hc2.p_values().get(0, 0) - 0.024_839_464_368_821_2).abs() < 1e-6);
-        assert!((hc2.f_statistic() - hc2.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
-        assert!((hc2.f_p_value() - *hc2.p_values().get(0, 0)).abs() < 1e-9);
+        assert!((hc2.f_statistic().unwrap() - hc2.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((hc2.f_p_value().unwrap() - *hc2.p_values().get(0, 0)).abs() < 1e-9);
 
         let (entity, _time, x, y) = fixest_reference_input();
         let input =
@@ -3486,8 +3486,8 @@ mod tests {
         assert!((*hc3.std_errors().get(0, 0) - 0.687_184_240_890_824).abs() < 1e-9);
         assert!((*hc3.test_stats().get(0, 0) - 2.041_341_599_975_14).abs() < 1e-6);
         assert!((*hc3.p_values().get(0, 0) - 0.080_553_228_223_064_4).abs() < 1e-6);
-        assert!((hc3.f_statistic() - hc3.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
-        assert!((hc3.f_p_value() - *hc3.p_values().get(0, 0)).abs() < 1e-9);
+        assert!((hc3.f_statistic().unwrap() - hc3.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((hc3.f_p_value().unwrap() - *hc3.p_values().get(0, 0)).abs() < 1e-9);
     }
 
     #[test]
@@ -3506,8 +3506,8 @@ mod tests {
         .unwrap();
         let hc1 = FeEstimator::fit(input, FeEffects::TwoWay, FeCovType::Hc1, 0.95).unwrap();
         assert!((*hc1.std_errors().get(0, 0) - 0.205_876_715_757_555).abs() < 1e-9);
-        assert!((hc1.f_statistic() - hc1.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
-        assert!((hc1.f_p_value() - *hc1.p_values().get(0, 0)).abs() < 1e-9);
+        assert!((hc1.f_statistic().unwrap() - hc1.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((hc1.f_p_value().unwrap() - *hc1.p_values().get(0, 0)).abs() < 1e-9);
 
         let (entity, time, x, y) = fixest_reference_input();
         let input = FeInput::from_columns(
@@ -3521,8 +3521,8 @@ mod tests {
         .unwrap();
         let hc2 = FeEstimator::fit(input, FeEffects::TwoWay, FeCovType::Hc2, 0.95).unwrap();
         assert!((*hc2.std_errors().get(0, 0) - 0.304_984_723_480_691).abs() < 1e-9);
-        assert!((hc2.f_statistic() - hc2.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
-        assert!((hc2.f_p_value() - *hc2.p_values().get(0, 0)).abs() < 1e-9);
+        assert!((hc2.f_statistic().unwrap() - hc2.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((hc2.f_p_value().unwrap() - *hc2.p_values().get(0, 0)).abs() < 1e-9);
 
         let (entity, time, x, y) = fixest_reference_input();
         let input = FeInput::from_columns(
@@ -3536,8 +3536,8 @@ mod tests {
         .unwrap();
         let hc3 = FeEstimator::fit(input, FeEffects::TwoWay, FeCovType::Hc3, 0.95).unwrap();
         assert!((*hc3.std_errors().get(0, 0) - 0.737_275_671_443_649).abs() < 1e-9);
-        assert!((hc3.f_statistic() - hc3.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
-        assert!((hc3.f_p_value() - *hc3.p_values().get(0, 0)).abs() < 1e-9);
+        assert!((hc3.f_statistic().unwrap() - hc3.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((hc3.f_p_value().unwrap() - *hc3.p_values().get(0, 0)).abs() < 1e-9);
     }
 
     #[test]
@@ -3564,8 +3564,8 @@ mod tests {
         assert!((*fe.std_errors().get(0, 0) - 0.603_104_702_643_124_5).abs() < 1e-9);
         assert!((*fe.test_stats().get(0, 0) - 2.325_927_441_172_424).abs() < 1e-6);
         assert!((*fe.p_values().get(0, 0) - 0.102_527_902_595_719_5).abs() < 1e-6);
-        assert!((fe.f_statistic() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
-        assert!((fe.f_p_value() - *fe.p_values().get(0, 0)).abs() < 1e-9);
+        assert!((fe.f_statistic().unwrap() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((fe.f_p_value().unwrap() - *fe.p_values().get(0, 0)).abs() < 1e-9);
         // `f_df()`（カバレッジ監査で判明した未検証の単純getter。分母自由度が
         // `df_resid`から`df_inference`に変わったため、`df_resid`
         // （`n-df_model=12-5=7`）とは異なる`df_inference`（`G-1=n_entities-1=3`）を
@@ -3602,8 +3602,8 @@ mod tests {
         assert!((*fe.std_errors().get(0, 0) - 0.158_754_475_018_330_4).abs() < 1e-9);
         assert!((*fe.test_stats().get(0, 0) - 5.180_514_794_604_026).abs() < 1e-6);
         assert!((*fe.p_values().get(0, 0) - 0.013_962_411_468_796_73).abs() < 1e-6);
-        assert!((fe.f_statistic() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
-        assert!((fe.f_p_value() - *fe.p_values().get(0, 0)).abs() < 1e-9);
+        assert!((fe.f_statistic().unwrap() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((fe.f_p_value().unwrap() - *fe.p_values().get(0, 0)).abs() < 1e-9);
     }
 
     #[test]
@@ -3628,8 +3628,8 @@ mod tests {
         .unwrap();
 
         assert!((*fe.std_errors().get(0, 0) - 0.115_060_764_365_329_2).abs() < 1e-9);
-        assert!((fe.f_statistic() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
-        assert!((fe.f_p_value() - *fe.p_values().get(0, 0)).abs() < 1e-9);
+        assert!((fe.f_statistic().unwrap() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((fe.f_p_value().unwrap() - *fe.p_values().get(0, 0)).abs() < 1e-9);
     }
 
     #[test]
@@ -3853,8 +3853,8 @@ mod tests {
         assert!((*fe.p_values().get(0, 0) - 0.006_401_580_635_206_468).abs() < 1e-9);
         assert!((*fe.conf_lower().get(0, 0) - 0.917_532_035_619_617).abs() < 1e-6);
         assert!((*fe.conf_upper().get(0, 0) - 1.888_023_519_935_939).abs() < 1e-6);
-        assert!((fe.f_statistic() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
-        assert!((fe.f_p_value() - *fe.p_values().get(0, 0)).abs() < 1e-9);
+        assert!((fe.f_statistic().unwrap() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((fe.f_p_value().unwrap() - *fe.p_values().get(0, 0)).abs() < 1e-9);
     }
 
     #[test]
@@ -4068,8 +4068,8 @@ mod tests {
         assert!((*fe.p_values().get(0, 0) - 0.086_146_397_773_918_86).abs() < 1e-9);
         assert!((*fe.conf_lower().get(0, 0) - (-0.289_344_012_632_537_7)).abs() < 1e-6);
         assert!((*fe.conf_upper().get(0, 0) - 1.934_203_825_716_65).abs() < 1e-6);
-        assert!((fe.f_statistic() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
-        assert!((fe.f_p_value() - *fe.p_values().get(0, 0)).abs() < 1e-9);
+        assert!((fe.f_statistic().unwrap() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((fe.f_p_value().unwrap() - *fe.p_values().get(0, 0)).abs() < 1e-9);
     }
 
     #[test]
@@ -4271,7 +4271,7 @@ mod tests {
             0.95,
         )
         .unwrap();
-        assert!(fe.f_statistic().is_finite());
+        assert!(fe.f_statistic().unwrap().is_finite());
         assert!((0..2).all(|j| *fe.std_errors().get(j, 0) > 0.0));
     }
 
@@ -4375,7 +4375,7 @@ mod tests {
         let dk_cov = dk_bandwidth_zero(&input);
         let dk = FeEstimator::fit(input, FeEffects::OneWay, dk_cov, 0.95).unwrap();
         assert!(*dk.std_errors().get(0, 0) > 1e-8);
-        assert!(dk.f_statistic().is_finite());
+        assert!(dk.f_statistic().unwrap().is_finite());
 
         let (input, _) = two_period_input(1, true);
         let cluster = FeEstimator::fit(

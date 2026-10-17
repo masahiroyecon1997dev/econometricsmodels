@@ -210,26 +210,28 @@ class WLSResults:
         return self._raw.adj_r_squared
 
     @property
-    def f_statistic(self) -> float:
-        """F-statistic."""
+    def f_statistic(self) -> float | None:
+        """F-statistic of the overall test that all slope coefficients are
+        zero (`None` when there are no slope coefficients)."""
         return self._raw.f_statistic
 
     @property
-    def f_p_value(self) -> float:
-        """P-value of the F-statistic."""
+    def f_p_value(self) -> float | None:
+        """P-value of the F-statistic (`None` when `f_statistic` is
+        `None`)."""
         return self._raw.f_p_value
 
     @property
     def f_df_num(self) -> int | None:
-        """Numerator degrees of freedom of `f_statistic` (`None` when it
-        is NaN, i.e. there are no slope coefficients)."""
+        """Numerator degrees of freedom of `f_statistic` (`None` when
+        `f_statistic` is `None`)."""
         return self._raw.f_df_num
 
     @property
     def f_df_denom(self) -> int | None:
-        """Denominator degrees of freedom of `f_statistic` (`None` when it
-        is NaN). May differ from `df_resid`, so use this to recompute the
-        p-value from `f_statistic`."""
+        """Denominator degrees of freedom of `f_statistic` (`None` when
+        `f_statistic` is `None`). May differ from `df_resid`, so use this to recompute
+        the p-value from `f_statistic`."""
         return self._raw.f_df_denom
 
     @property

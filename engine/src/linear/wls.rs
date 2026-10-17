@@ -255,8 +255,14 @@ mod tests {
                 *ols.conf_lower().get(j, 0)
             );
         }
-        assert_eq!(wls.estimator().f_statistic(), ols.f_statistic());
-        assert_eq!(wls.estimator().f_p_value(), ols.f_p_value());
+        assert_eq!(
+            wls.estimator().f_statistic().unwrap(),
+            ols.f_statistic().unwrap()
+        );
+        assert_eq!(
+            wls.estimator().f_p_value().unwrap(),
+            ols.f_p_value().unwrap()
+        );
 
         // r_squared/adj_r_squared/log_likelihood/aic/bicはWlsEstimator側の（元スケールの
         // y・weightsから計算し直した）値を使う。重みが全て1なら重み付き平均=単純平均、
@@ -336,8 +342,8 @@ mod tests {
         assert!((wls.log_likelihood() - (-4.694_800_450_440_493)).abs() < 1e-9);
         assert!((wls.aic() - 13.389_600_900_880_986).abs() < 1e-9);
         assert!((wls.bic() - 12.608_476_725_749_187).abs() < 1e-9);
-        assert!((wls.estimator().f_statistic() - 2.490_519_076_986_167_6).abs() < 1e-6);
-        assert!((wls.estimator().f_p_value() - 0.212_642_917_457_664_06).abs() < 1e-6);
+        assert!((wls.estimator().f_statistic().unwrap() - 2.490_519_076_986_167_6).abs() < 1e-6);
+        assert!((wls.estimator().f_p_value().unwrap() - 0.212_642_917_457_664_06).abs() < 1e-6);
     }
 
     #[test]

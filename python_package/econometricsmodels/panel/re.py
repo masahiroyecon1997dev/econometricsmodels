@@ -413,32 +413,33 @@ class REResults:
         return self._raw.dk_bandwidth_used
 
     @property
-    def f_statistic(self) -> float:
+    def f_statistic(self) -> float | None:
         """F-statistic for the joint significance of the slope
         coefficients, excluding the intercept (classical F-test when
         `cov_type="classical"`, a robust Wald test otherwise; the
-        degrees of freedom follow `cov_type`, see `f_df_denom`). `NaN`
+        degrees of freedom follow `cov_type`, see `f_df_denom`). `None`
         when there are no slope coefficients (`df_model == 1`)."""
         return self._raw.f_statistic
 
     @property
-    def f_p_value(self) -> float:
-        """P-value of the F-statistic."""
+    def f_p_value(self) -> float | None:
+        """P-value of the F-statistic (`None` when `f_statistic` is
+        `None`)."""
         return self._raw.f_p_value
 
     @property
     def f_df_num(self) -> int | None:
-        """Numerator degrees of freedom of `f_statistic` (`None` when it
-        is NaN, i.e. there are no slope coefficients)."""
+        """Numerator degrees of freedom of `f_statistic` (`None` when
+        `f_statistic` is `None`)."""
         return self._raw.f_df_num
 
     @property
     def f_df_denom(self) -> int | None:
-        """Denominator degrees of freedom of `f_statistic` (`None` when it
-        is NaN). Follows `cov_type` like the t-tests (`G - 1` for
+        """Denominator degrees of freedom of `f_statistic` (`None` when
+        `f_statistic` is `None`). Follows `cov_type` like the t-tests (`G - 1` for
         `cov_type="cluster"`, `T - 1` for `"dk"`, `df_resid` otherwise),
-        so it equals `stat_df` whenever `f_statistic` is not NaN. Use this
-        to recompute the p-value from `f_statistic`."""
+        so it equals `stat_df` whenever `f_statistic` is not `None`. Use
+        this to recompute the p-value from `f_statistic`."""
         return self._raw.f_df_denom
 
     @property

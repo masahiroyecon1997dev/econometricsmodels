@@ -36,16 +36,29 @@ pub(super) struct CovParams {
 /// `g`・`q`は入力だけから判定できるため、QR分解・残差計算より前に弾く
 /// （nonlinear/IVと同じく`fit()`冒頭で検証する方針に揃える）。`groups=None`は
 /// [`compute_cov_params`]の`CovType::Cluster`アームで`MissingClusterColumn`として扱う。
+///
+/// 戻り値は全体F検定が定義できるか。`g ≤ q`のとき、`allow_undefined_f_test`が偽なら
+/// `InsufficientClustersForInference`で失敗し、真なら`Ok(false)`（F検定だけ定義なし）を返す。
+/// クラスターでない`cov_type`は常に`Ok(true)`。
 pub(super) fn validate_cluster_count(
     cov_type: &CovType,
     n: usize,
     n_slopes: usize,
-) -> Result<(), LeastSquaresError> {
-    if let Some(groups) = cov_type.cluster_groups() {
-        let g = validate_cluster_groups(groups, n)?;
-        validate_cluster_count_covers_slopes(g, n_slopes)?;
+    allow_undefined_f_test: bool,
+) -> Result<bool, LeastSquaresError> {
+    let Some(groups) = cov_type.cluster_groups() else {
+        return Ok(true);
+    };
+    let g = validate_cluster_groups(groups, n)?;
+    match validate_cluster_count_covers_slopes(g, n_slopes) {
+        Ok(()) => Ok(true),
+        // F検定だけを定義なしにするのは`g <= q`の1種類に限る。将来`validate_cluster_count_
+        // covers_slopes`に別のエラーが足されても、黙って`Ok(false)`に変えない。
+        Err(CommonError::InsufficientClustersForInference { .. }) if allow_undefined_f_test => {
+            Ok(false)
+        }
+        Err(e) => Err(e.into()),
     }
-    Ok(())
 }
 
 /// `cov_type`に応じた係数分散共分散行列と推論の自由度を求める。
@@ -540,8 +553,8 @@ mod tests {
         assert!((*lower.get(1, 0) - (-2.334_372_289_923_566_6)).abs() < 1e-6);
         assert!((*upper.get(1, 0) - 3.534_372_289_923_567_7).abs() < 1e-6);
 
-        assert!((estimator.f_statistic() - 6.750_000_000_000_083_5).abs() < 1e-6);
-        assert!((estimator.f_p_value() - 0.233_908_049_281_92).abs() < 1e-6);
+        assert!((estimator.f_statistic().unwrap() - 6.750_000_000_000_083_5).abs() < 1e-6);
+        assert!((estimator.f_p_value().unwrap() - 0.233_908_049_281_92).abs() < 1e-6);
     }
 
     /// クラスターロバスト標準誤差は、同じ入力に対して`fit()`を複数回呼んでも
@@ -672,6 +685,186 @@ mod tests {
                 "g={g}"
             );
         }
+    }
+
+    /// 切片＋説明変数3個（`q = 3`）の12観測。`fit_with_optional_f_test`の境界テスト用。
+    fn cluster_boundary_input() -> OlsInput {
+        let n = 12;
+        let y: Vec<f64> = (0..n).map(|i| 1.0 + 0.5 * i as f64).collect();
+        let x_columns = vec![
+            (0..n).map(|i| i as f64).collect::<Vec<f64>>(),
+            (0..n).map(|i| (i * i) as f64).collect::<Vec<f64>>(),
+            (0..n).map(|i| ((i % 4) + 1) as f64).collect::<Vec<f64>>(),
+        ];
+        OlsInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string(), "x2".to_string(), "x3".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap()
+    }
+
+    fn cluster_cov_type(n_groups: usize) -> CovType {
+        let groups: Vec<String> = (0..12).map(|i| format!("g{}", i % n_groups)).collect();
+        CovType::Cluster {
+            groups: Some(GroupCodes::from_labels_without_keys(&groups)),
+        }
+    }
+
+    /// `fit_with_optional_f_test`は`g <= q`（`g == q`も構造的に特異）でも失敗せず、全体F検定
+    /// （統計量・p値・自由度）だけが`None`になる。係数・標準誤差・信頼区間は`g - 1`自由度で
+    /// 有限に求まる（`fit`は同じ入力を`InsufficientClustersForInference`で拒否する）。
+    #[test]
+    fn fit_with_optional_f_test_leaves_f_test_undefined_when_cluster_count_at_most_slopes() {
+        for g in [2_usize, 3_usize] {
+            let estimator = OlsEstimator::fit_with_optional_f_test(
+                cluster_boundary_input(),
+                cluster_cov_type(g),
+                0.95,
+            )
+            .unwrap();
+            assert_eq!(estimator.f_statistic(), None, "g={g}");
+            assert_eq!(estimator.f_p_value(), None, "g={g}");
+            assert_eq!(estimator.f_df(), None, "g={g}");
+            assert_eq!(estimator.df_inference(), g - 1, "g={g}");
+            for j in 0..estimator.input().k() {
+                let se = *estimator.std_errors().get(j, 0);
+                assert!(se.is_finite() && se > 0.0, "g={g} j={j} se={se}");
+                assert!(estimator.p_values().get(j, 0).is_finite(), "g={g} j={j}");
+            }
+        }
+    }
+
+    /// `g == q + 1`では全体F検定が定義でき、`fit`と同じ値を返す（境界の反対側）。
+    #[test]
+    fn fit_with_optional_f_test_matches_fit_when_cluster_count_exceeds_slopes() {
+        let optional = OlsEstimator::fit_with_optional_f_test(
+            cluster_boundary_input(),
+            cluster_cov_type(4),
+            0.95,
+        )
+        .unwrap();
+        let strict =
+            OlsEstimator::fit(cluster_boundary_input(), cluster_cov_type(4), 0.95).unwrap();
+        assert!(optional.f_statistic().is_some());
+        assert_eq!(optional.f_statistic(), strict.f_statistic());
+        assert_eq!(optional.f_p_value(), strict.f_p_value());
+        assert_eq!(optional.f_df(), Some((3, 3)));
+        assert_eq!(optional.f_df(), strict.f_df());
+    }
+
+    /// クラスター数の下限（`g >= 2`）は`fit_with_optional_f_test`でも検証される。
+    #[test]
+    fn fit_with_optional_f_test_still_rejects_a_single_cluster() {
+        let result = OlsEstimator::fit_with_optional_f_test(
+            cluster_boundary_input(),
+            cluster_cov_type(1),
+            0.95,
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            LeastSquaresError::Common(CommonError::InsufficientClusters { g: 1 })
+        );
+    }
+
+    /// 切片なし（`q = k`、`k_constant = 0`）でも境界は同じ形になる。`x`3列・`g`は`q = 3`以下で
+    /// `None`、`g = 4`で定義あり。
+    #[test]
+    fn fit_with_optional_f_test_handles_the_boundary_without_intercept() {
+        let n = 12;
+        let y: Vec<f64> = (0..n).map(|i| 1.0 + 0.5 * i as f64).collect();
+        let x_columns = vec![
+            (0..n).map(|i| i as f64).collect::<Vec<f64>>(),
+            (0..n).map(|i| (i * i) as f64).collect::<Vec<f64>>(),
+            (0..n).map(|i| ((i % 4) + 1) as f64).collect::<Vec<f64>>(),
+        ];
+        let fit = |g: usize| {
+            let input = OlsInput::from_columns(
+                &y,
+                &x_columns,
+                vec!["x1".to_string(), "x2".to_string(), "x3".to_string()],
+                false,
+                "y".to_string(),
+            )
+            .unwrap();
+            OlsEstimator::fit_with_optional_f_test(input, cluster_cov_type(g), 0.95).unwrap()
+        };
+        for g in [2_usize, 3_usize] {
+            let estimator = fit(g);
+            assert_eq!(estimator.f_statistic(), None, "g={g}");
+            assert_eq!(estimator.f_df(), None, "g={g}");
+        }
+        let estimator = fit(4);
+        assert!(estimator.f_statistic().is_some());
+        assert_eq!(estimator.f_df(), Some((3, 3)));
+    }
+
+    /// `fit_with_optional_f_test`が`None`にするのは`g <= q`だけで、他の失敗は`fit`と同じ
+    /// まま伝播する: `groups`未指定（`MissingClusterColumn`）、`groups`の長さが`n`と不一致
+    /// （`ClusterDimensionMismatch`）、`g > q`でのほぼ特異性（`ComputationFailed`）。
+    #[test]
+    fn fit_with_optional_f_test_does_not_hide_other_cluster_errors() {
+        let missing = OlsEstimator::fit_with_optional_f_test(
+            cluster_boundary_input(),
+            CovType::Cluster { groups: None },
+            0.95,
+        );
+        assert_eq!(
+            missing.unwrap_err(),
+            LeastSquaresError::Common(CommonError::MissingClusterColumn)
+        );
+
+        let short: Vec<String> = (0..7).map(|i| format!("g{}", i % 4)).collect();
+        let mismatch = OlsEstimator::fit_with_optional_f_test(
+            cluster_boundary_input(),
+            CovType::Cluster {
+                groups: Some(GroupCodes::from_labels_without_keys(&short)),
+            },
+            0.95,
+        );
+        assert!(matches!(
+            mismatch.unwrap_err(),
+            LeastSquaresError::Common(CommonError::ClusterDimensionMismatch { .. })
+        ));
+
+        let n = 12;
+        let x1: Vec<f64> = (1..=n).map(|i| 1e6 * (i as f64)).collect();
+        let x2: Vec<f64> = (1..=n).map(|i| 1e-3 * (i as f64).powi(2)).collect();
+        let x3: Vec<f64> = (0..n).map(|i| (i % 3) as f64).collect();
+        let y: Vec<f64> = (0..n)
+            .map(|i| {
+                let noise = if i % 2 == 0 { 0.1 } else { -0.1 };
+                1.0 + 2.0 * x1[i] + 3.0 * x2[i] + 0.5 * x3[i] + noise
+            })
+            .collect();
+        let ill_conditioned = OlsInput::from_columns(
+            &y,
+            &[x1, x2, x3],
+            vec!["x1".to_string(), "x2".to_string(), "x3".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+        let result =
+            OlsEstimator::fit_with_optional_f_test(ill_conditioned, cluster_cov_type(4), 0.95);
+        assert!(matches!(
+            result.unwrap_err(),
+            LeastSquaresError::Common(CommonError::ComputationFailed(_))
+        ));
+    }
+
+    /// クラスター以外の`cov_type`では`fit`と全く同じ結果になる。
+    #[test]
+    fn fit_with_optional_f_test_matches_fit_for_non_cluster_cov_types() {
+        let optional =
+            OlsEstimator::fit_with_optional_f_test(cluster_boundary_input(), CovType::Hc1, 0.95)
+                .unwrap();
+        let strict = OlsEstimator::fit(cluster_boundary_input(), CovType::Hc1, 0.95).unwrap();
+        assert_eq!(optional.f_statistic(), strict.f_statistic());
+        assert_eq!(optional.f_p_value(), strict.f_p_value());
+        assert_eq!(optional.f_df(), strict.f_df());
     }
 
     /// `cov_type=Cluster`かつ`g > q`（`fit()`冒頭のバリデーションを通過）でも、傾き係数

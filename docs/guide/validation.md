@@ -92,7 +92,7 @@ Steps 2 to 4 look only at the arguments and options, never at the data. So a typ
 | Missing values | A null in any used column, or a NaN or infinite value in a numeric column or in a float entity, cluster or time column. A column of the `Null` dtype counts as all missing. |
 | Sample size | There are not enough observations: `n <= k`. There are no regressors. |
 | Options | `confidence_level` is outside (0, 1) or NaN. An unknown `cov_type` or other option value. `hac_lags` is outside `[0, n)`, including a very large integer. `tol` or `gmm_tol` is not a positive finite number. An option is set that the chosen `cov_type` or estimator does not use. `cov_type="hac"` (or IV's `gmm_weight_type="hac"`) without `hac_time`. |
-| Clustering | `cov_type="cluster"` without a `cluster` column. Fewer than two clusters, or no more clusters than slope coefficients, so that the joint test is impossible. |
+| Clustering | `cov_type="cluster"` without a `cluster` column. Fewer than two clusters, or no more clusters than slope coefficients, so that the joint test is impossible. In IV the slope coefficients of the structural equation are counted. A first-stage regression with more slope coefficients than clusters does not fail: its overall F statistic is `None` (see [Inference conventions](inference-conventions.md#weak-instruments)). |
 | Prediction | Columns of `new_data` are missing, null or non-finite. |
 
 ### Method-specific

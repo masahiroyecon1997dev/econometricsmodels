@@ -46,11 +46,11 @@ INSUFFICIENT_CLUSTERS_FOR_WEIGHT_MATRIX = (
 # `IvError::FirstStageFailed`（engine/src/iv/common.rs）。`engine_pybind::fit()`
 # （engine_pybind/src/iv/common.rs）は`TwoSlsEstimator::fit`/`GmmEstimator::fit`
 # を呼ぶより前に無条件で`compute_first_stage`（弱操作変数診断用）を呼ぶため、
-# 第一段階回帰由来の`ValidationError`（`InsufficientObservations`・
-# `InsufficientClustersForInference`等）はこのラッパー経由で観測される。
-# 構造方程式自身のqを使う`TwoSlsEstimator::fit`/`GmmEstimator::fit`冒頭の同種
-# 事前チェックのうち、クラスター数（`G<=q`）は`engine_pybind::fit()`が
-# `compute_first_stage`より前に重複して行うためラッパー無しで観測される。
+# 第一段階回帰由来の`ValidationError`（`InsufficientObservations`等）はこの
+# ラッパー経由で観測される。クラスター数（`G<=q`）は、構造方程式自身のqを使う
+# `engine_pybind::fit()`のチェックが`compute_first_stage`より前にラッパー無しで
+# 弾く。第一段階側のクラスター数不足（構造方程式では`G>q`）は失敗にならず、
+# 第一段階の全体F検定が`None`になる。
 # 観測数のチェックは、第一段階の回帰変数の数が識別条件`instruments>=x_endog`により
 # 常に構造方程式以上のため、第一段階側が先に発火する（Python APIからは到達不能）。
 FIRST_STAGE_FAILED = "first stage regression for endogenous variable '{endog_name}' failed: {source}"

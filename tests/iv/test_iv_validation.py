@@ -14,6 +14,8 @@
 
 from __future__ import annotations
 
+import math
+
 import _error_messages as msgs
 import _error_messages_iv as iv_msgs
 import pandas as pd
@@ -638,36 +640,46 @@ def test_cluster_count_at_most_slopes_raises_validation_error(
 
 
 @pytest.mark.parametrize("estimator", ["2sls", "gmm"])
-def test_cluster_count_between_structural_and_first_stage_slopes_raises(
+def test_cluster_count_between_structural_and_first_stage_slopes_leaves_first_stage_f_undefined(
     iv_dataset, estimator
 ):
     """構造方程式ではG>q（G=3、q=2）だが第一段階ではG≤q（q=3）の場合、
-    現状は第一段階回帰の`FirstStageFailed`（`ValidationError`）で弾かれる。
+    `fit()`は成功し、第一段階の全体F検定（`f_statistic`/`f_p_value`/`f_df_num`/
+    `f_df_denom`）だけが`None`になる。
 
-    第一段階のロバストWald/F検定はクラスター数不足で特異になるが、弱操作変数F
-    統計量自体は`cov_type`に依存しない。この拒否が妥当かは未決定の設計論点で、
-    変更する場合は本テストの期待値を更新する。
+    第一段階のクラスターロバストな共分散は`rank(Ŝ)≤G-1<q`で傾き部分が特異なため
+    全体F検定は計算できないが、係数・標準誤差は有効で、弱操作変数F統計量は`cov_type`に
+    依存しない古典的なネストF検定なので`cov_type="classical"`と同じ値になる。
     """
     df = with_cluster_groups(iv_dataset, 3)
-    options = IVOptions(
-        estimator=estimator, cov_type="cluster", cluster="cluster_group"
-    )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            iv_msgs.FIRST_STAGE_FAILED,
-            endog_name="endog1",
-            source=msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE.format(g=3, q=3),
+    res = our_fit(
+        df,
+        options=IVOptions(
+            estimator=estimator, cov_type="cluster", cluster="cluster_group"
         ),
-    ):
-        our_fit(df, options=options)
+    )
+    first_stage = res.first_stage()["endog1"]
+    assert first_stage.f_statistic is None
+    assert first_stage.f_p_value is None
+    assert first_stage.f_df_num is None
+    assert first_stage.f_df_denom is None
+    assert all(
+        math.isfinite(se) and se > 0 for se in first_stage.std_errors.values()
+    )
+    assert math.isfinite(res.wald_statistic)
+
+    classical = our_fit(df, options=IVOptions(estimator=estimator))
+    assert (
+        res.weak_instrument_f_statistics
+        == classical.weak_instrument_f_statistics
+    )
 
 
 @pytest.mark.parametrize("estimator", ["2sls", "gmm"])
 @pytest.mark.parametrize("include_intercept", [True, False])
 @pytest.mark.parametrize(
     ("n_groups", "outcome"),
-    [(2, "structural"), (3, "first_stage"), (4, "ok")],
+    [(2, "structural"), (3, "first_stage_f_undefined"), (4, "ok")],
 )
 def test_cluster_count_boundaries(
     iv_dataset, estimator, include_intercept, n_groups, outcome
@@ -675,9 +687,10 @@ def test_cluster_count_boundaries(
     """クラスター数の境界を、切片の有無の両方で確認する。構造方程式の傾き係数の数は
     `x1`・`endog1`の2個、第一段階は`x1`・`z1`・`z2`の3個で、切片の有無で傾き係数の数は
     変わらない（切片ありは`const`が傾きから除かれ、切片なしでは定数項が無い分、全係数が
-    傾きになるため`q = k`）。G=2は構造方程式のG≤q、G=3は構造方程式ではG>qだが
-    第一段階でG≤q（`test_cluster_count_between_structural_and_first_stage_slopes_
-    raises`と同じ現状の挙動）、G=4は成功する。
+    傾きになるため`q = k`）。G=2は構造方程式のG≤qで`ValidationError`、G=3は構造方程式では
+    G>qだが第一段階でG≤qのため成功して第一段階の全体F検定だけが`None`
+    （`test_cluster_count_between_structural_and_first_stage_slopes_leaves_first_
+    stage_f_undefined`）、G=4は第一段階の全体F検定も計算できる（分母自由度`G-1=3`）。
     """
     df = with_cluster_groups(iv_dataset, n_groups)
     options = IVOptions(
@@ -692,25 +705,23 @@ def test_cluster_count_boundaries(
             match=escaped(msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=2, q=2),
         ):
             our_fit(df, options=options)
-    elif outcome == "first_stage":
-        with pytest.raises(
-            ValidationError,
-            match=escaped(
-                iv_msgs.FIRST_STAGE_FAILED,
-                endog_name="endog1",
-                source=msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE.format(
-                    g=3, q=3
-                ),
-            ),
-        ):
-            our_fit(df, options=options)
+        return
+
+    res = our_fit(df, options=options)
+    expected = ["x1", "endog1"]
+    assert res.param_names == (
+        ["const", *expected] if include_intercept else expected
+    )
+    assert res.n_obs == df.height
+    first_stage = res.first_stage()["endog1"]
+    if outcome == "first_stage_f_undefined":
+        assert first_stage.f_statistic is None
+        assert first_stage.f_p_value is None
+        assert (first_stage.f_df_num, first_stage.f_df_denom) == (None, None)
     else:
-        res = our_fit(df, options=options)
-        expected = ["x1", "endog1"]
-        assert res.param_names == (
-            ["const", *expected] if include_intercept else expected
-        )
-        assert res.n_obs == df.height
+        assert first_stage.f_statistic is not None
+        assert first_stage.f_p_value is not None
+        assert (first_stage.f_df_num, first_stage.f_df_denom) == (3, 3)
 
 
 @pytest.mark.parametrize("gmm_type", ["two_step", "iterated"])

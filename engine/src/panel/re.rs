@@ -113,7 +113,7 @@
 //! Wald二次形式は`V`が正定値である限り負値にならない。`Classical`のバランスパネルでは
 //! `θ`が全エンティティで共通になり両定義は一致する（`plm`・`linearmodels`の両方と
 //! 機械精度で一致することを確認済み）が、不均衡パネルでは異なる。傾き係数が0個（`df_model==1`）なら
-//! OLS/FE同様NaN。
+//! OLS/FE同様`None`。
 //!
 //! ## パネル固有R²（`r_squared_within`/`between`/`overall`、2.3節）
 //!
@@ -147,7 +147,7 @@
 //!   （`re_r_squared_within`のdocコメント参照）。
 //! - `linearmodels`の`_rsquared`は`has_constant and exog.nvar==1`（傾き係数が0個）なら
 //!   3種とも`0.0`を即座に返す早期リターンを持つ。RE側もこれに倣い`df_model==1`なら
-//!   3種とも`0.0`とする（`f_statistic`のNaN分岐とは異なる扱いなので注意）。
+//!   3種とも`0.0`とする（`f_statistic`の`None`分岐とは異なる扱いなので注意）。
 //! - どちらのR²も`TSS<=0.0`なら`0.0`を返す（`linearmodels`と同じガード）。
 //!
 //! ## ハウスマン検定（`hausman_statistic`/`hausman_p_value`/`hausman_df`、`re-spec.md`3.7節）
@@ -1316,12 +1316,10 @@ pub struct ReEstimator {
     /// `FeEstimator::df_model()`の「消費した総自由度」という定義と揃える。F統計量の
     /// 分子自由度（`k - 1`、定数項を除く）とは異なる値なので混同しないこと）。
     df_model: usize,
-    /// 傾き係数`df_model - 1`個（定数項を除く）が同時にゼロという帰無仮説のF検定
-    /// （2.1節）。`estimator().f_statistic()`とは異なりREの切片を正しく
-    /// 除外している（モジュールdoc「F統計量」参照）。
-    f_statistic: f64,
-    /// `f_statistic()`のp値。
-    f_p_value: f64,
+    /// 傾き係数`df_model - 1`個（定数項を除く）が同時にゼロという帰無仮説のF検定の
+    /// `(F統計量, p値)`（2.1節）。`estimator().f_statistic()`とは異なりREの切片を正しく
+    /// 除外している（モジュールdoc「F統計量」参照）。傾き係数が無ければ`None`。
+    f_test: Option<(f64, f64)>,
     /// パネル固有R²（2.3節）。θ=1固定の通常のwithin変換（RE自身の
     /// Swamy-Arora準偏差変換とは無関係）での適合度。`df_model==1`（傾き係数0個）なら
     /// `0.0`（`fit()`のdocコメント「パネル固有R²」参照）。
@@ -1685,21 +1683,23 @@ impl ReEstimator {
         // Wald二次形式（`V`が正定値）のため負値にならない
         // （`linearmodels`のSST/SSR方式は極端な不均衡パネルで負値になる、モジュールdoc
         // 「F統計量」参照）。
-        let (f_statistic, f_p_value) = if df_model == 1 {
+        let f_test = if df_model == 1 {
             // 傾き係数が無い（定数項のみ）モデル。検定対象が存在しないため`OlsEstimator::fit`
-            // 自身の`df_model==0`分岐と同様NaN（0除算を避ける）。
-            (f64::NAN, f64::NAN)
+            // 自身の`df_model==0`分岐と同様定義なし（`None`）。
+            None
         } else {
-            wald_f_test(
-                estimator.params(),
-                &cov_params,
-                1,
-                df_model - 1,
-                df_inference,
+            Some(
+                wald_f_test(
+                    estimator.params(),
+                    &cov_params,
+                    1,
+                    df_model - 1,
+                    df_inference,
+                )
+                .map_err(|source| PanelError::FTestFailed {
+                    source: source.into(),
+                })?,
             )
-            .map_err(|source| PanelError::FTestFailed {
-                source: source.into(),
-            })?
         };
 
         // パネル固有R²（2.3節）。`input`はこの後`Self`に格納するため、
@@ -1764,8 +1764,7 @@ impl ReEstimator {
             dk_bandwidth_used,
             df_resid,
             df_model,
-            f_statistic,
-            f_p_value,
+            f_test,
             r_squared_within,
             r_squared_between,
             r_squared_overall,
@@ -1912,20 +1911,20 @@ impl ReEstimator {
     }
 
     /// 傾き係数（定数項を除く）が同時にゼロという帰無仮説のF検定（2.1節）。
-    /// 傾き係数が0個（定数項のみのモデル）ならNaN（フィールドdoc参照）。
-    pub fn f_statistic(&self) -> f64 {
-        self.f_statistic
+    /// 傾き係数が0個（定数項のみのモデル）なら`None`（フィールドdoc参照）。
+    pub fn f_statistic(&self) -> Option<f64> {
+        self.f_test.map(|(statistic, _)| statistic)
     }
 
-    /// `f_statistic()`のp値。
-    pub fn f_p_value(&self) -> f64 {
-        self.f_p_value
+    /// `f_statistic()`のp値。`f_statistic()`が`None`のとき`None`。
+    pub fn f_p_value(&self) -> Option<f64> {
+        self.f_test.map(|(_, p_value)| p_value)
     }
 
     /// `f_statistic()`の自由度`(分子, 分母)` = `(df_model - 1, df_inference)`。傾き係数が無く
-    /// NaNのときは`None`。
+    /// `None`のときは`None`。
     pub fn f_df(&self) -> Option<(usize, usize)> {
-        (self.df_model > 1).then_some((self.df_model - 1, self.df_inference))
+        self.f_test.map(|_| (self.df_model - 1, self.df_inference))
     }
 
     /// パネル固有R²（2.3節）。θ=1固定の通常のwithin変換での適合度
@@ -2603,7 +2602,7 @@ mod tests {
                 "std_error {j}: {se}"
             );
         }
-        assert!((re.f_statistic() - 46.788_682_481_996_1).abs() < 1e-8 * 46.79);
+        assert!((re.f_statistic().unwrap() - 46.788_682_481_996_1).abs() < 1e-8 * 46.79);
         assert_eq!(re.df_model(), 4);
         assert_eq!(re.df_resid(), 24 - 4);
 
@@ -3317,7 +3316,12 @@ mod tests {
             0.95,
         )
         .unwrap();
-        assert_close(classical.f_statistic(), 2.341_321_617_208_2, 1e-6, "F");
+        assert_close(
+            classical.f_statistic().unwrap(),
+            2.341_321_617_208_2,
+            1e-6,
+            "F",
+        );
         assert_eq!(classical.effects(), ReEffects::TwoWay);
         assert_eq!(classical.n_periods(), Some(4));
     }
@@ -4510,12 +4514,12 @@ mod tests {
 
         // F統計量（2.1節）はWald二次形式のため、傾き係数が1個（q=1）のこのデータでは
         // 「1自由度のF検定は両側t検定と代数的に等価」（`f_statistic = test_stat²`、
-        // `f_p_value = p_value`）が成り立つ。`estimator().f_statistic()`（定数項も検定に
+        // `f_p_value = p_value`）が成り立つ。`estimator().f_statistic().unwrap()`（定数項も検定に
         // 含めてしまい誤り）とは異なる正しい値であることを確認する。`plm`との数値照合は
         // Python側のテスト（バランスパネルで機械精度一致、不均衡パネルは分散成分の
         // 推定差で許容誤差付き）で行う。
-        assert!((re.f_statistic() - re.test_stats().get(1, 0).powi(2)).abs() < 1e-9);
-        assert!((re.f_p_value() - *re.p_values().get(1, 0)).abs() < 1e-9);
+        assert!((re.f_statistic().unwrap() - re.test_stats().get(1, 0).powi(2)).abs() < 1e-9);
+        assert!((re.f_p_value().unwrap() - *re.p_values().get(1, 0)).abs() < 1e-9);
 
         // `linearmodels.RandomEffects.fit(cov_type="unadjusted")`の`rsquared_within`/
         // `rsquared_between`/`rsquared_overall`と数値一致（2.3節）。
@@ -4766,9 +4770,9 @@ mod tests {
             let label = format!("{cov_type:?}");
             let re = ReEstimator::fit(input(), ReEffects::OneWay, cov_type, 0.95).unwrap();
             let t = *re.test_stats().get(1, 0);
-            assert!((re.f_statistic() - t * t).abs() < 1e-9, "{label}");
+            assert!((re.f_statistic().unwrap() - t * t).abs() < 1e-9, "{label}");
             assert!(
-                (re.f_p_value() - *re.p_values().get(1, 0)).abs() < 1e-9,
+                (re.f_p_value().unwrap() - *re.p_values().get(1, 0)).abs() < 1e-9,
                 "{label}"
             );
             assert_eq!(re.f_df(), Some((1, expected_df_denom)), "{label}");
@@ -5023,10 +5027,10 @@ mod tests {
         assert_eq!(re.df_resid(), 17);
         assert_eq!(re.df_model(), 2);
         let t = *re.test_stats().get(1, 0);
-        assert!((re.f_statistic() - t * t).abs() < 1e-9 * (1.0 + t * t));
+        assert!((re.f_statistic().unwrap() - t * t).abs() < 1e-9 * (1.0 + t * t));
         let p_value = *re.p_values().get(1, 0);
-        assert!((re.f_p_value() - p_value).abs() < 1e-9 * p_value.max(1e-300));
-        assert!(re.f_p_value() > 0.0 && re.f_p_value() < 1.0);
+        assert!((re.f_p_value().unwrap() - p_value).abs() < 1e-9 * p_value.max(1e-300));
+        assert!(re.f_p_value().unwrap() > 0.0 && re.f_p_value().unwrap() < 1.0);
     }
 
     #[test]
@@ -5045,9 +5049,9 @@ mod tests {
         assert_eq!(re.df_model(), 1);
         assert!((*re.estimator().params().get(0, 0) - 4.666_666_666_666_667).abs() < 1e-9);
 
-        // 傾き係数0個（定数項のみ）のモデルはOLS/FE同様NaN（2.1節）。
-        assert!(re.f_statistic().is_nan());
-        assert!(re.f_p_value().is_nan());
+        // 傾き係数0個（定数項のみ）のモデルはOLS/FE同様`None`（2.1節）。
+        assert!(re.f_statistic().is_none());
+        assert!(re.f_p_value().is_none());
 
         // 傾き係数0個（`df_model==1`）ならパネル固有R²は3種とも0.0（2.3節）。
         // `linearmodels`の`_rsquared`早期リターンと数値一致（実地検証済み）。
@@ -5258,13 +5262,13 @@ mod tests {
         assert_eq!(re.df_model(), 3);
 
         let (expected_f, expected_p) = re.estimator().wald_test_last_columns(2).unwrap();
-        assert!((re.f_statistic() - expected_f).abs() < 1e-9 * expected_f.abs());
-        assert!((re.f_p_value() - expected_p).abs() < 1e-9);
+        assert!((re.f_statistic().unwrap() - expected_f).abs() < 1e-9 * expected_f.abs());
+        assert!((re.f_p_value().unwrap() - expected_p).abs() < 1e-9);
         // 非対角要素を無視した（独立な2つのt²の平均）値とは異なる（q=2の部分行列が
         // 実際に使われていることの確認）。
         let t1 = *re.test_stats().get(1, 0);
         let t2 = *re.test_stats().get(2, 0);
-        assert!((re.f_statistic() - (t1 * t1 + t2 * t2) / 2.0).abs() > 1e-6);
+        assert!((re.f_statistic().unwrap() - (t1 * t1 + t2 * t2) / 2.0).abs() > 1e-6);
 
         assert_eq!(re.f_df(), Some((2, re.df_inference())));
         assert_eq!(re.df_inference(), re.df_resid());

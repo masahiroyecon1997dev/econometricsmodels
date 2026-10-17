@@ -454,6 +454,17 @@ class IVResults:
         contribution and are **not** the weak-instrument partial
         F-statistic (`weak_instrument_f_statistics`).
 
+        With `cov_type="cluster"` and a number of clusters that is larger
+        than the slope coefficients of the structural equation but not
+        larger than those of a first-stage regression, the cluster-robust
+        covariance of the first-stage slopes is singular and the overall
+        F-test cannot be computed: that regression's `f_statistic`,
+        `f_p_value`, `f_df_num` and `f_df_denom` are `None`. Its
+        coefficients, standard errors and the weak-instrument F-statistic
+        are unaffected (the latter is the classical nested F-test, not
+        cluster-robust, so with few clusters it is not cluster-robust
+        evidence of instrument relevance).
+
         Returns:
             A dictionary keyed by endogenous variable name (matching
             `x_endog`), values are the first-stage `OLSResults`.

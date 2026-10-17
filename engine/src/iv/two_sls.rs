@@ -975,8 +975,8 @@ mod tests {
             );
         }
         assert!((estimator.r_squared() - ols_estimator.r_squared()).abs() < 1e-8);
-        assert!((estimator.wald_statistic() - ols_estimator.f_statistic()).abs() < 1e-8);
-        assert!((estimator.wald_p_value() - ols_estimator.f_p_value()).abs() < 1e-8);
+        assert!((estimator.wald_statistic() - ols_estimator.f_statistic().unwrap()).abs() < 1e-8);
+        assert!((estimator.wald_p_value() - ols_estimator.f_p_value().unwrap()).abs() < 1e-8);
         for j in 0..2 {
             assert!(
                 (*estimator.p_values().get(j, 0) - *ols_estimator.p_values().get(j, 0)).abs()
@@ -2031,6 +2031,37 @@ mod tests {
         assert!(estimator.wu_hausman_p_value().is_none());
     }
 
+    /// 構造方程式は`G > q_struct`だが第一段階では`G == q_first`（`nontrivial_x_exog_input`は
+    /// `[const, x1, endog1]`で`q_struct=2`、第一段階は`x1`・`z1`・`z2`で`q_first=3`、`g=3`）の
+    /// とき、第一段階の全体F検定が定義できなくても`fit()`全体は成功する。第一段階の
+    /// `f_statistic()`は`None`、構造方程式の結果（Wald検定を含む）は計算され、弱操作変数診断は
+    /// `cov_type`に依存しないため古典的な`cov_type`と同じ値になる。
+    #[test]
+    fn fit_succeeds_when_cluster_count_is_between_structural_and_first_stage_slopes() {
+        let n = nontrivial_x_exog_input().nobs();
+        let groups: Vec<String> = (0..n).map(|i| format!("g{}", i % 3)).collect();
+        let estimator = TwoSlsEstimator::fit(
+            nontrivial_x_exog_input(),
+            CovType::Cluster {
+                groups: Some(GroupCodes::from_labels_without_keys(&groups)),
+            },
+            0.95,
+        )
+        .unwrap();
+
+        let (_, first_stage) = &estimator.first_stage_estimators()[0];
+        assert_eq!(first_stage.f_statistic(), None);
+        assert_eq!(first_stage.f_df(), None);
+        assert!(estimator.wald_statistic().is_finite());
+
+        let classical =
+            TwoSlsEstimator::fit(nontrivial_x_exog_input(), CovType::Classical, 0.95).unwrap();
+        assert_eq!(
+            estimator.weak_instrument_f_statistics(),
+            classical.weak_instrument_f_statistics()
+        );
+    }
+
     /// `G=2`クラスター・`x_exog=[]`・丁度識別（`instruments`1本）という、
     /// ベンチマーク作成中に発見した`ComputationError`（`engine/src/iv/CLAUDE.md`
     /// 「修正済み」参照）の再現条件そのもの。第一段階回帰の`OlsInput::
@@ -2115,7 +2146,10 @@ mod tests {
         // いた（`engine/src/iv/CLAUDE.md`「修正済み」参照）。修正後は素の
         // `OlsEstimator::fit`と一致する。
         assert!((first_stage_estimator.r_squared() - expected.r_squared()).abs() < 1e-10);
-        assert!((first_stage_estimator.f_statistic() - expected.f_statistic()).abs() < 1e-8);
+        assert!(
+            (first_stage_estimator.f_statistic().unwrap() - expected.f_statistic().unwrap()).abs()
+                < 1e-8
+        );
     }
 
     /// `r_squared`/`adj_r_squared`/`df_resid`/`df_model`を、構造残差のSSR・元の`y`のTSSから

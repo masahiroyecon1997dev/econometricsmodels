@@ -68,6 +68,15 @@ engine の `RE.fit()` は常にハウスマン検定（内部で FE の within �
 偏る。揃えられない非対称なので、結果の読み方として `docs/performance/re.md`・
 `docs/guide/performance.md` にも記す。
 
+## 非対称な点: cluster と dk の小標本補正
+
+RE の `cluster` と `dk` は、engine が fixest/Stata 型の小標本補正と自由度を
+意図的に使う（cluster は `G/(G-1)·(n-1)/(n-K)` と t(G-1)、dk は
+`T/(T-1)·(n-1)/(n-K)` と t(T-1)）ため、linearmodels（`df_resid`）と標準誤差が
+一致しない（n=3,000 で cluster は 1e-3 程度、dk は `sqrt(T/(T-1))` ≒ 9.5%）。
+差は補正のスカラーで計算量は同等なので両ライブラリで測るが、数値の一致は
+前提にしない。`classical` と `hc1` は機械精度で一致する。
+
 使用例（リポジトリルートから）:
     python -m performance.compare_re \\
         --output docs/performance/results/re.json

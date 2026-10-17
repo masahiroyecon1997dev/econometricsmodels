@@ -12,7 +12,7 @@
 
 - **重みの渡し方**: engine は `WLS(..., weight="weight")`、statsmodels は `smf.wls(..., weights=pandas_df["weight"])`。どちらも analytic weight（分散の逆数に比例、正規化不要）として扱うため、`generate_linear_dataset("baseline")` が返す `weight` 列（0.5〜1.5の一様乱数）をそのまま両方に渡している。
 - **計測範囲の対称性**: engine は係数・標準誤差と同じ呼び出しで R²・調整済みR²・対数尤度・AIC・BIC・F統計量・F検定のp値まで常に一括計算する。statsmodels はこれらを遅延評価（`cached_value`）にしているため、`.fit()`直後に該当プロパティへ明示アクセスして計測範囲を揃えている。
-- **cov_type**: n軸・k軸は既定の classical のみ。標準誤差の種類は **cov軸**（n=100,000・k=5）で全て測る: classical・hc0〜hc3・hac、cluster の 2×2（G=50 / G=n÷10 × クラスターの行が散らばる random / 連続する sorted）。全て statsmodels と比較する。以前は「最も軽い classical と最も重い HAC」の2点だけを実装時の軽い実測で手書き選定していたが、cov_type の順位は実装次第で入れ替わり、選ばなかった HC・cluster の劣化がどこにも現れないため、cov 軸に置き換えた（`.claude/rules/testing-policy.md`「パフォーマンス比較（ベンチマーク）の方法論」）。HACのラグ数は `hac_auto_lag(n)` で両ライブラリに明示指定する。 重みは全ケース共通。
+- **cov_type**: n軸・k軸は既定の classical のみ。標準誤差の種類は **cov軸**（n=100,000・k=5）で全て測る: classical・hc0〜hc3・hac、cluster の 2×2（G=50 / G=n÷10 × クラスターの行が散らばる random / 連続する sorted）。全て statsmodels と比較する。以前は「最も軽い classical と最も重い HAC」の2点だけを実装時の軽い実測で手書き選定していたが、cov_type の順位は実装次第で入れ替わり、選ばなかった HC・cluster の劣化がどこにも現れないため、cov 軸に置き換えた（`.claude/rules/testing-policy.md`「パフォーマンス比較（ベンチマーク）の方法論」）。HACのラグ数は `hac_auto_lag(n)` で両ライブラリに明示指定する。重みは全ケース共通。
 - **スイープ軸**: n軸（k=5固定、n=10,000 / 100,000 / 1,000,000）、k軸（n=10,000固定、k=5・20）、cov軸（上記）。n軸・k軸は既定の classical のみ。
 
 ## 既知の限界

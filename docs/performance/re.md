@@ -29,7 +29,7 @@
 ## 既知の限界
 
 - **ハウスマン検定の分だけ engine が余分に計算している（非対称）**: engine の `RE.fit()` は常にハウスマン検定（内部の FE within 推定と補助回帰）まで計算するが、`linearmodels.RandomEffects` には対応する処理が無く、揃えようがない。RE の速度比は engine に不利な方向（過小評価）に偏る。
-
+- **FE/RE の `cluster` と `dk` は linearmodels と数値が一致しない**: engine は fixest/Stata 型の小標本補正と自由度を意図的に使う（cluster は `G/(G-1)·(n-1)/(n-K)` と t(G-1)、dk は `T/(T-1)·(n-1)/(n-K)` と t(T-1)。linearmodels は `df_resid`）。n=3,000 で標準誤差の最大相対差は FE cluster 1e-3、RE cluster 8e-4、dk 約9.5%（`sqrt(6/5)` と一致、T=6）。差は補正のスカラーで計算量は同等なため、cluster と dk の行も linearmodels と比較するが、速度比は「同等の計算量の推定量どうし」の比較であって数値の一致を保証しない。`classical` と `hc1` は機械精度（1e-15）で一致する。
 - **dk は k=5 でのみ測る（FEと同じ）**: `fit()`が常に計算するハウスマン検定は`X̃`の`k`個を同時Wald検定するが、Driscoll-Kraay共分散のrankは`T-1`以下（時点ごとのスコアの和が正規方程式でゼロになるため）。n_periods=6に対しk=20では検定の部分行列が構造的に特異になるため、engineは`fit()`冒頭で`ValidationError`（`PanelError::InsufficientDkPeriodsForInference`）を返す。k軸は既定の classical のみで、cov軸の dk は k=5 < T=6 の境界ちょうどに依存する。
 - **n=1,000,000での run-to-run 分散が大きい**: 2回のフルスイープでlinearmodelsのclassical/hacの大小関係が変わらないことは確認したが、絶対値は±20%程度変動した（classical 8.25s/10.21s）。計測は開発コンテナ上の少数回のスイープ（`repeats=3`の中央値）であり、大標本での環境ノイズ（メモリ確保・GC等）を排除しきれていない。
 - その他は`ols.md`「既知の限界」と共通。

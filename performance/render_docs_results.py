@@ -408,9 +408,15 @@ def _matrix_caption(reports: dict[str, dict]) -> str:
         }
     )
     n = " / ".join(f"{size:,}" for size in sizes) or "-"
+    k = " / ".join(
+        str(size)
+        for size in sorted(
+            {r["_meta"]["n_sweep_fixed_k"] for r in reports.values()}
+        )
+    )
     return (
         "Every standard-error type is measured at a single sample size "
-        f"(`n = {n}`, `k = 5`). Each cell is the reference time divided by "
+        f"(`n = {n}`, `k = {k}`). Each cell is the reference time divided by "
         "the econometricsmodels time (below 1: the reference was faster). "
         "`cluster` is the lowest value over the cluster cases (50 clusters "
         "or `n / 10` clusters, with the rows of a cluster scattered or "

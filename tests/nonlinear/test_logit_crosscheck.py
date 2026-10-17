@@ -16,22 +16,19 @@ Note:
     どちらも反復最適化のため、OLSの閉形式解同士の比較（機械精度一致）ほどの
     精度は出ない。ただしR側の参照値は`glm()`の収束判定と`marginaleffects`の
     数値微分の刻み幅を厳しくして生成しており（`benchmark/nonlinear/references/
-    run_glm_crosscheck.R`参照）、基本方針はRTOL=1e-6（実測最大相対誤差~3.5e-8に対する
-    マージン。ATOLは1e-12で純粋な相対誤差比較）。p値のみ裾での増幅に備えた個別のATOLを設定している
-    （根拠は`tests/support/_tolerances_nonlinear.py`の`logit_crosscheck`のコメント参照。
-    `testing-policy.md`「許容誤差」の方針通り）。
+    run_glm_crosscheck.R`参照）、基本方針はRTOL=2e-7（実測最大相対誤差~3.5e-8に対する
+    マージン。ATOLは1e-12で純粋な相対誤差比較）。全統計量に同じ許容誤差を使う
+    （根拠は`tests/support/_tolerances_nonlinear.py`の`logit_crosscheck`のコメント参照）。
 """
 
 from __future__ import annotations
 
 import json
-from functools import partial
 from pathlib import Path
 
 import polars as pl
 import pytest
 from _assertions import (
-    assert_dict_close,
     assert_fields_close,
     assert_inference_close,
 )
@@ -57,12 +54,6 @@ FIXTURE_PATH = (
 RTOL = TOLERANCES["logit_crosscheck"]["rtol"]
 ATOL = TOLERANCES["logit_crosscheck"]["atol"]
 
-# p値は標準正規分布CDFの裾で係数・zのわずかな数値差が増幅されるため、係数・SE本体
-# より緩いATOLを置く（rtolで収まらない実測最大絶対誤差~7e-9、cluster_imbalanced。
-# 係数・限界効果とも）。
-ATOL_P_VALUE = TOLERANCES["logit_crosscheck"]["atol_p_value"]
-
-
 # near_separationは既定tol=1e-6だとstatsmodels/Rとの一致精度が下がる境界ケース
 # （test_logit_reference.py参照）。ここでも同じ理由でtol=1e-8を明示指定する。
 _NEAR_SEPARATION_TOL = 1e-8
@@ -80,7 +71,6 @@ def _check_result(res, ref: dict, label: str) -> None:
         label,
         rtol=RTOL,
         atol=ATOL,
-        p_value_check=partial(assert_dict_close, rtol=RTOL, atol=ATOL_P_VALUE),
     )
     assert_fields_close(
         res,
@@ -98,14 +88,7 @@ def _check_result(res, ref: dict, label: str) -> None:
         rtol=RTOL,
         atol=ATOL,
     )
-    check_margeff(
-        res,
-        ref["margeff"],
-        label,
-        rtol=RTOL,
-        atol=ATOL,
-        atol_p_value=ATOL_P_VALUE,
-    )
+    check_margeff(res, ref["margeff"], label, rtol=RTOL, atol=ATOL)
 
 
 # ── 凍結フィクスチャとの数値照合（合成データ） ────────────────────────

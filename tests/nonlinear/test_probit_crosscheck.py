@@ -25,24 +25,22 @@ Note:
     許容誤差はOLSのRクロスチェック（classical/HC0-3/clusterで機械精度一致）より
     緩い。ProbitはRのglm（IRLS/Fisher scoring）と本実装（Newton/BFGS/L-BFGS）が
     どちらも反復最適化のため、OLSの閉形式解同士の比較（機械精度一致）ほどの
-    精度は出ない。ただしR側の参照値は`glm()`の収束判定と`marginaleffects`の
-    数値微分の刻み幅を厳しくして生成しており（`benchmark/nonlinear/references/
-    run_glm_crosscheck.R`参照）、基本方針はLogitと同じRTOL=1e-6（実測最大相対誤差
-    ~1.4e-7に対するマージン。ATOLは1e-12で純粋な相対誤差比較）。信頼区間（0に近い境界での増幅）とp値のみ個別の
-    許容誤差を設定している（根拠は`tests/support/_tolerances_nonlinear.py`の`probit_crosscheck`の
-    コメント参照。`testing-policy.md`「許容誤差」の方針通り）。
+    精度は出ない。ただしR側の参照値は、収束後の係数から再fitを繰り返し、
+    `marginaleffects`の数値微分の刻み幅を厳しくして生成しており（`benchmark/
+    nonlinear/references/run_glm_crosscheck.R`参照）、基本方針はLogitと同じ
+    RTOL=2e-7（実測最大相対誤差~2.8e-8に対するマージン。ATOLは1e-12で純粋な相対
+    誤差比較）。全統計量に同じ許容誤差を使う（根拠は`tests/support/
+    _tolerances_nonlinear.py`の`probit_crosscheck`のコメント参照）。
 """
 
 from __future__ import annotations
 
 import json
-from functools import partial
 from pathlib import Path
 
 import polars as pl
 import pytest
 from _assertions import (
-    assert_dict_close,
     assert_fields_close,
     assert_inference_close,
 )
@@ -68,23 +66,6 @@ FIXTURE_PATH = (
 RTOL = TOLERANCES["probit_crosscheck"]["rtol"]
 ATOL = TOLERANCES["probit_crosscheck"]["atol"]
 
-# conf_intは下限（または上限）が0に近いと絶対誤差が相対誤差に増幅されるため、
-# 係数・SE本体より緩いRTOLを使う（実測最大相対誤差~3.9e-6、限界効果の
-# small_n/opg/mean/x2の下限。係数のconf_intは~1.8e-6）。
-RTOL_CONF_INT = TOLERANCES["probit_crosscheck"]["rtol_conf_int"]
-
-# p値は標準正規分布CDFの裾で係数・zのわずかな数値差が増幅されるため、係数・SE本体
-# より緩いATOLを置く（rtolで収まらない実測最大絶対誤差~1.8e-8、mroz/opg/kidsge6）。
-ATOL_P_VALUE = TOLERANCES["probit_crosscheck"]["atol_p_value"]
-
-# apple（実データ、州クラスター）のみ、Rのglm(probit)の精度限界で係数が~1.2e-7ずれ、
-# 観測情報行列の手計算（`run_glm_crosscheck.R`）で増幅されるため、SE・z値・信頼区間・
-# 限界効果が~2e-6、p値が絶対~2.5e-7ずれる。statsmodelsのnewtonと本実装は~1e-9で
-# 一致する（`probit.json`のapple/cluster）ため、R側の精度限界として個別の許容誤差を使う
-# （`tests/support/_tolerances_nonlinear.py`の`probit_crosscheck`参照）。
-RTOL_APPLE = TOLERANCES["probit_crosscheck"]["rtol_apple"]
-ATOL_P_VALUE_APPLE = TOLERANCES["probit_crosscheck"]["atol_p_value_apple"]
-
 
 # near_separationは既定tol=1e-6だとstatsmodels/Rとの一致精度が下がる境界ケース
 # （test_probit_reference.py参照）。ここでも同じ理由でtol=1e-8を明示指定する。
@@ -96,26 +77,8 @@ def fixtures() -> dict:
     return json.loads(FIXTURE_PATH.read_text())
 
 
-def _check_result(
-    res,
-    ref: dict,
-    label: str,
-    *,
-    rtol: float = RTOL,
-    rtol_conf_int: float = RTOL_CONF_INT,
-    atol_p_value: float = ATOL_P_VALUE,
-    rtol_coef: float = RTOL,
-) -> None:
-    assert_inference_close(
-        res,
-        ref,
-        label,
-        rtol=rtol,
-        atol=ATOL,
-        rtol_params=rtol_coef,
-        rtol_conf_int=rtol_conf_int,
-        p_value_check=partial(assert_dict_close, rtol=rtol, atol=atol_p_value),
-    )
+def _check_result(res, ref: dict, label: str) -> None:
+    assert_inference_close(res, ref, label, rtol=RTOL, atol=ATOL)
     assert_fields_close(
         res,
         ref,
@@ -129,18 +92,10 @@ def _check_result(
             "pseudo_r_squared",
         ),
         label,
-        rtol=rtol,
+        rtol=RTOL,
         atol=ATOL,
     )
-    check_margeff(
-        res,
-        ref["margeff"],
-        label,
-        rtol=rtol,
-        atol=ATOL,
-        rtol_conf_int=rtol_conf_int,
-        atol_p_value=atol_p_value,
-    )
+    check_margeff(res, ref["margeff"], label, rtol=RTOL, atol=ATOL)
 
 
 # ── 凍結フィクスチャとの数値照合（合成データ） ────────────────────────
@@ -237,15 +192,7 @@ def test_apple_cluster_matches_r_glm(fixtures):
     res = Probit(df, y="y", x=APPLE_X, options=options).fit()
 
     ref = fixtures["wooldridge"]["apple"]["cluster"]
-    _check_result(
-        res,
-        ref,
-        "apple/cluster",
-        rtol=RTOL_APPLE,
-        rtol_coef=RTOL,
-        rtol_conf_int=RTOL_APPLE,
-        atol_p_value=ATOL_P_VALUE_APPLE,
-    )
+    _check_result(res, ref, "apple/cluster")
 
 
 @pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)

@@ -71,33 +71,45 @@ library(lmtest)
 library(marginaleffects)
 library(jsonlite)
 
-# `sandwich::estfun()`/`meatHC()`は`glm()`が保持する作業重み・作業残差を使うが、
-# これらは最終反復の1つ前の係数で計算されている。収束判定（epsilon）を厳しくしても
-# 1つ前の係数の誤差は最終係数の誤差の2乗オーダー（IRLSは2次収束）より小さくならず、
-# スコア寄与が最終係数のスコアとずれて、hc0/hc1/opgの標準誤差（とそれを使う限界効果の
-# 標準誤差・信頼区間）に参照側ノイズが乗る。既定（epsilon=1e-8）ではmrozで相対誤差
-# ~3e-5、epsilon=1e-14でもk=20（many_regressors）では~1.1e-7残る（係数・classicalは
-# 影響なし）。そこで収束後の係数を`start`にして再fitし、作業重み・作業残差が最終係数
-# のものになるようにする（係数自体は~1e-16しか動かない）。
+# `glm()`の収束判定はデビアンスの変化量（epsilon）だけで、デビアンスは最適点の近くで
+# 係数の誤差の2乗にしか効かないため、epsilon=1e-14でも係数が相対~1e-7ずれて止まりうる
+# （非正準リンクのprobitはFisher scoringの収束が線形で、appleでは~6e-8）。この係数の
+# ずれは、観測情報行列の手計算（下記）とロバストSEで~1e-6に増幅される。
+# さらに`sandwich::estfun()`/`meatHC()`は`glm()`が保持する作業重み・作業残差を使うが、
+# これらは最終反復の1つ前の係数で計算されている。そのため収束判定を厳しくしても
+# スコア寄与が最終係数のスコアとずれ、hc0/hc1/opgの標準誤差（とそれを使う限界効果の
+# 標準誤差・信頼区間）に参照側ノイズが乗る（既定のepsilon=1e-8ではmrozで相対~3e-5、
+# epsilon=1e-14でもk=20（many_regressors）では~1.1e-7。係数・classicalは影響なし）。
+# どちらも、収束した係数を`start`にして再fitを繰り返す（再fitは毎回少なくとも
+# 1回のFisher scoringを行う）ことで解消する。係数の変化が相対1e-13未満になるまで続け、
+# 最後の再fitで作業重み・作業残差が最終係数のものになる。
 glm_control <- glm.control(epsilon = 1e-14, maxit = 100)
-model <- glm(
-  as.formula(formula_str),
-  data = df,
-  family = binomial(link = link),
-  control = glm_control
-)
+refit <- function(start = NULL) {
+  glm(
+    as.formula(formula_str),
+    data = df,
+    family = binomial(link = link),
+    start = start,
+    control = glm_control
+  )
+}
+model <- refit()
 if (!model$converged) {
   stop("glm() did not converge with epsilon=1e-14")
 }
-model <- glm(
-  as.formula(formula_str),
-  data = df,
-  family = binomial(link = link),
-  start = coef(model),
-  control = glm_control
-)
-if (!model$converged) {
-  stop("glm() refit from converged coefficients did not converge")
+max_refit <- 100
+for (i in seq_len(max_refit)) {
+  prev_coef <- coef(model)
+  model <- refit(start = prev_coef)
+  if (!model$converged) {
+    stop("glm() refit from converged coefficients did not converge")
+  }
+  if (max(abs(coef(model) - prev_coef) / pmax(abs(coef(model)), 1e-8)) < 1e-13) {
+    break
+  }
+  if (i == max_refit) {
+    stop("glm() refit did not reach a fixed point")
+  }
 }
 
 # 観測情報行列（真の対数尤度のHessian）の重みを、本実装（nonlinear/probit.rs・

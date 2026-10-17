@@ -112,16 +112,17 @@ in-sample限定のまま。`augment(new_data=None)`もLogitと完全に同一の
 ### 3.8 テスト
 
 - 許容誤差はLogitと同じ基本方針（statsmodels主リファレンス`RTOL=1e-8`、Rクロスチェック
-  `RTOL=1e-6`、`ATOL=1e-12`、実測最大~1e-7（apple除く）。切片なし（`baseline.no_intercept`）も同じ許容誤差で通る。R側参照値の生成方針もLogitと同じ）。個別の値を設定した項目:
-  信頼区間（下限/上限が0に近い境界での増幅、`RTOL=1e-5`。Rの参照値を収束後の係数から再fitして作る前の実測最大は係数~1.8e-6・限界効果~3.9e-6、再fit後は~1.3e-7以下）・p値（`ATOL=1e-7`）のみ
-  （`tests/support/_tolerances_nonlinear.py`の`probit_crosscheck`）。Wooldridge実データ（`mroz`）の
+  `RTOL=2e-7`、`ATOL=1e-12`、実測最大~2.8e-8。切片なし（`baseline.no_intercept`）も同じ許容誤差で通る。
+  R側参照値の生成方針もLogitと同じ）。信頼区間（下限/上限が0に近い項目）・p値・`apple`を含め、
+  全統計量・全ケースに同じ許容誤差を使う（`tests/support/_tolerances_nonlinear.py`の`probit_crosscheck`）。
+  Rの`glm(probit)`は収束判定がデビアンスの変化量だけで、非正準リンクのFisher scoringは収束が線形のため
+  係数が~1e-7ずれて止まりうる（`apple`で~6e-8、観測情報行列の手計算とロバストSEで~1e-6に増幅）。
+  参照値は再fitを繰り返してこのずれを消しており、`apple`の実測最大はp値を除いて~2e-9（p値込みで~2.7e-8）になった。裾のp値（`|ref|`が約5e-6未満）は`ATOL=1e-12`の下限で比較されるため、同じ係数のz値の厳密な比較で担保している。
+  Wooldridge実データ（`mroz`）の
   クラスターロバストSE（`cluster="city"`、G=2）は`G<=q`でクラスターロバスト共分散が退化し
   `ValidationError`になるため成功パスのフィクスチャを持たず、許容誤差も設けない
   （`test_probit_validation.py`でエラーを確認）。実データのクラスターロバストSEは、Logitと同じ
-  `apple`（州、`G=49`）が担う。Rクロスチェックの`apple`のみ、Rの`glm(probit)`が係数を~1.2e-7ずらし
-  観測情報行列の手計算で増幅されるため、SE・z値・信頼区間・限界効果が~2.1e-6・p値が絶対~2.5e-7
-  乖離する（statsmodelsの`newton`と本実装は~1e-9で一致）。このケースだけ個別の許容誤差
-  （`probit_crosscheck.rtol_apple=5e-6`・`atol_p_value_apple=1e-6`）を使う。`solver`の組み合わせは
+  `apple`（州、`G=49`）が担う。`solver`の組み合わせは
   Logitと同じ方針（[`logit-spec.md`](./logit-spec.md)3.8節。`probit_reference.rtol_solver_vs_newton=2e-5`）。
 - **`cov_type="hc1"`/`"opg"`の既知の欠落はLogitと同様**（statsmodelsのdiscrete modelでの非対応、
   対処もRを主リファレンスにする点まで同じ、[`logit-spec.md`](./logit-spec.md)3.8節参照）。

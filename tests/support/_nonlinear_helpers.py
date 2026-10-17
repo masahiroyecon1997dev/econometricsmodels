@@ -210,17 +210,8 @@ def check_margeff(
     *,
     rtol: float,
     atol: float,
-    rtol_conf_int: float | None = None,
-    atol_p_value: float | None = None,
 ) -> None:
-    """限界効果6統計量を`at`×係数名の全組み合わせでリファレンスと比較する。
-
-    `rtol_conf_int`/`atol_p_value`は信頼区間の相対許容誤差・p値の絶対許容誤差の
-    個別指定（`None`なら`rtol`/`atol`を使う）。パラメータ表の`conf_int`/`p_values`と
-    同じく、0に近い境界・裾での誤差増幅に備えるRクロスチェック用。
-    """
-    rtol_ci = rtol if rtol_conf_int is None else rtol_conf_int
-    atol_p = atol if atol_p_value is None else atol_p_value
+    """限界効果6統計量を`at`×係数名の全組み合わせでリファレンスと比較する。"""
     for at in MARGEFF_AT:
         effects = {
             row["param_name"]: row for row in res.marginal_effects(at=at)
@@ -253,19 +244,19 @@ def check_margeff(
                 ref_stats["p_value"],
                 f"{label}/{at}/{name}/p_value",
                 rtol=rtol,
-                atol=atol_p,
+                atol=atol,
             )
             assert_close(
                 row["conf_lower"],
                 ref_stats["conf_lower"],
                 f"{label}/{at}/{name}/conf_lower",
-                rtol=rtol_ci,
+                rtol=rtol,
                 atol=atol,
             )
             assert_close(
                 row["conf_upper"],
                 ref_stats["conf_upper"],
                 f"{label}/{at}/{name}/conf_upper",
-                rtol=rtol_ci,
+                rtol=rtol,
                 atol=atol,
             )

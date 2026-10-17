@@ -229,7 +229,7 @@ def build_fixtures() -> dict:
         "marginaleffects_version": marginaleffects_version,
         "note": (
             "many_regressors（k=20）とoutlier_regressor（x1の5%が外れ値）を含む。"
-            "ロバストSE（opg/hc0/hc1）の参照値は、収束後の係数から再fitした"
+            "ロバストSE・クラスターSEの参照値は、収束後の係数から再fitを繰り返した"
             "glmで計算している（run_glm_crosscheck.R参照）。"
             "perfect_multicollinearityシナリオはここに含まない"
             "（ComputationErrorの発生確認のみ、テストコード側で対応）。"

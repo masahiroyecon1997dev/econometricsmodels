@@ -95,62 +95,35 @@ NONLINEAR_TOLERANCES: dict[str, dict[str, float]] = {
         "rtol_mroz_solver_inference": 3e-4,
     },
     # --- 独立実装（R等）とのクロスチェック ---
-    # Rのglm()は収束判定を厳しく（epsilon=1e-14）し、収束後の係数から再fitして参照値を
-    # 生成している（`benchmark/nonlinear/references/run_glm_crosscheck.R`参照）。
-    # `sandwich::estfun()`は1反復前の係数で作った作業重みを使うため、収束判定を厳しく
-    # するだけではロバストSEの参照値にノイズが残る（既定のepsilon=1e-8で~3e-5、
-    # epsilon=1e-14でもk=20では~1e-7）。再fitで最終係数の作業重みにするとこのノイズは
-    # 消える。限界効果もmarginaleffectsの有限差分の刻み幅を変数ごとに標準偏差の1e-5倍に
-    # して解析解に合わせてある。
-    # atolは`ATOL_LOGIT_PROBIT_CROSSCHECK`（1e-12）で、`|ref|`が小さい項目も
-    # 純粋な相対誤差で比較する。以下の実測最大相対誤差は、atolを無視した全項目の値。
-    # Logit: 全統計量・限界効果（many_regressors・outlier_regressorを含む全シナリオ、
-    # cluster（均等・不均衡）、mroz、apple）の実測最大相対誤差は~3.5e-8
-    # （small_n/opg/hc1のconf_int、下限が0に近く増幅される）。基本rtol=1e-6は
-    # 最大値の約29倍のマージン。
-    # 切片なし（baseline.no_intercept、全cov_type・均等/不均衡クラスター）は係数~2.2e-10、
-    # SE・z・conf_int・限界効果~5e-10以下で、同じ許容誤差で通る（p値は相対~1.4e-8、
-    # 絶対~3e-11）ため専用の許容誤差は置かない。
+    # Rのglm()は、収束後の係数を`start`にした再fitを係数が動かなくなるまで繰り返して
+    # 参照値を生成している（`benchmark/nonlinear/references/run_glm_crosscheck.R`参照）。
+    # `glm()`の収束判定はデビアンスの変化量だけで、epsilon=1e-14でも係数が相対~1e-7
+    # ずれて止まりうる（非正準リンクのprobitはFisher scoringの収束が線形で、appleで
+    # ~6e-8）。このずれは観測情報行列の手計算とロバストSEで~1e-6に増幅される。さらに
+    # `sandwich::estfun()`は1反復前の係数で作った作業重みを使うため、k=20では
+    # ロバストSEの参照値に~1e-7のノイズが乗る。繰り返しの再fitでどちらも消える。
+    # 限界効果もmarginaleffectsの有限差分の刻み幅を変数ごとに標準偏差の1e-5倍にして
+    # 解析解に合わせてある。
+    # atolは`ATOL_LOGIT_PROBIT_CROSSCHECK`（1e-12）。専用の許容誤差は置かず、信頼区間
+    # （限界効果を含む、下限が0に近い項目を含む）・p値・appleも同じrtolで比べる。
+    # 実測最大相対誤差（係数・SE・z・信頼区間・対数尤度・情報量規準・LR統計量・限界効果の
+    # 全統計量。many_regressors・outlier_regressorを含む全シナリオ、cluster（均等・
+    # 不均衡）、切片なし、mroz、apple）:
+    #   Logit  ~3.5e-8（small_n/opg/conf_lower/x2、下限が0に近く増幅される）
+    #   Probit ~2.8e-8（mroz/hc1/conf_upper/nwifeinc）。appleは~2e-9
+    # p値は、`|ref|`が大きい項目の相対誤差がLogit~4.1e-8・Probit~6.5e-8。絶対誤差は
+    # Logit~3.2e-10・Probit~2.9e-9で、`|ref|`が約1e-2以上の項目は`rtol*|ref|`で通る。
+    # 一方、`|ref|`が約5e-6未満の裾のp値は`atol`=1e-12の下限で通るため、相対誤差が
+    # rtolを超えていても検知できない（同じ係数のz値を厳密に比べて担保している）。
+    # 基本rtol=2e-7は、信頼区間などの最大値に約5.7倍、p値を含む最大値（Probit）に
+    # 約3倍のマージン（固定フィクスチャとの比較で、OS・BLAS差の揺れに備える）。
     "logit_crosscheck": {
-        "rtol": 1e-6,
+        "rtol": 2e-7,
         "atol": ATOL_LOGIT_PROBIT_CROSSCHECK,
-        # p値は正規分布CDFの裾で係数・zの数値差が増幅され、相対誤差は係数~2.1e-6
-        # （cluster_imbalanced/x3）、限界効果~2.1e-6（同/overall/x3）に達する。rtolで
-        # 収まらずatolが必要になる実測最大絶対誤差~7e-9（cluster_imbalanced、係数・
-        # 限界効果とも）の約14倍のマージンとして1e-7を置く。
-        "atol_p_value": 1e-7,
     },
-    # Logitと同じ生成方針（Rは収束後の係数から再fitして参照値を作る）。再fit後の実測
-    # 最大相対誤差は、係数・SE・z・限界効果（many_regressors・outlier_regressorを含む
-    # 全シナリオ、cluster、mroz、切片なし）が~1e-7以下、conf_int（限界効果を含む）が
-    # ~1.3e-7以下（small_n）。apple（州クラスター）のみSEなどが~1.0e-6。p値は裾で
-    # 相対誤差が~1e-6まで増幅される（many_regressors）。基本rtol=1e-6は、appleを除き
-    # 最大値の約8倍以上のマージン。
-    # 以下の個別の許容誤差（rtol_conf_int・rtol_apple・atol_p_value・atol_p_value_apple）
-    # は、再fit前の参照値（実測がより大きかった）に対して置いたまま変えていない。
-    # 切片なし（baseline.no_intercept、全cov_type・均等/不均衡クラスター）も基本rtolで通る。
     "probit_crosscheck": {
-        "rtol": 1e-6,
+        "rtol": 2e-7,
         "atol": ATOL_LOGIT_PROBIT_CROSSCHECK,
-        # conf_intのみ、下限（または上限）が0に近いケースで絶対誤差が相対誤差に増幅
-        # される。係数のconf_intは実測最大相対誤差~1.8e-6（small_n/hc1/x2の下限
-        # -0.0083、絶対誤差1.5e-8。SEは1.4e-8、係数は4.6e-9）、限界効果のconf_intは
-        # ~3.9e-6（small_n/opg/mean/x2の下限0.0011、絶対誤差~4.5e-9）。後者に対する
-        # 約2.6倍のマージン。
-        "rtol_conf_int": 1e-5,
-        # p値の裾での増幅（相対誤差は係数~4.6e-6〜限界効果~4.9e-6、cluster）。rtolで
-        # 収まらずatolが必要になる実測最大絶対誤差~1.8e-8（係数・限界効果とも
-        # mroz/opg/kidsge6）の約5.7倍のマージンとして1e-7を置く。
-        "atol_p_value": 1e-7,
-        # apple（実データ、州でG=49）のみ。Rのglm(probit)は係数が~1.2e-7ずれ、
-        # 観測情報行列の手計算で増幅されて SE・z値・信頼区間・限界効果が実測最大
-        # 相対誤差~2.1e-6、p値が絶対~2.5e-7ずれる（statsmodelsのnewtonと本実装は
-        # ~1e-9で一致するためR側の精度限界）。係数自体は~1.2e-7で基本のrtol=1e-6のまま、
-        # SE・z値・信頼区間・限界効果に`rtol_apple`を適用する。相対誤差に約2.4倍、
-        # p値に約4倍のマージンを置く。Logitのappleは基本のrtol=1e-6・atol_p_value=1e-7で通る
-        # （実測~1.6e-9）。
-        "rtol_apple": 5e-6,
-        "atol_p_value_apple": 1e-6,
     },
     # Tobit の交差検証は R `censReg`（`maxLik` エンジン）。survreg とは最適化実装が
     # 完全に独立（`nonlinear-common.md` 8章）。censReg 側の maxLik 収束を

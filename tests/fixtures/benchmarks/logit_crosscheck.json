@@ -8692,9 +8692,9 @@
     "method": "logit",
     "primary_reference": "r-glm-sandwich-marginaleffects",
     "purpose": "statsmodels主リファレンス（logit.json）とは独立した実装（R: glm + sandwich + marginaleffects）によるクロスチェック用。係数・標準誤差・z値・p値・信頼区間・対数尤度・AIC・BIC・LR統計量・LR検定p値・疑似決定係数・限界効果を含む。cov_type='hc1'はここが主リファレンス（statsmodelsのdiscrete modelがn/(n-k)補正を未実装のため、benchmark/nonlinear/references/statsmodels_ref.py参照）。cov_type='opg'の限界効果もここのみが数値照合対象（statsmodels側は算出不可）。",
-    "generated_at": "2026-10-17T01:21:20.341238+00:00",
+    "generated_at": "2026-10-17T01:41:43.456364+00:00",
     "r_version": "4.5.3",
     "marginaleffects_version": "1.0.0",
-    "note": "many_regressors（k=20）とoutlier_regressor（x1の5%が外れ値）を含む。ロバストSE（opg/hc0/hc1）の参照値は、収束後の係数から再fitしたglmで計算している（run_glm_crosscheck.R参照）。perfect_multicollinearityシナリオはここに含まない（ComputationErrorの発生確認のみ、テストコード側で対応）。clusterは合成データ（baselineシナリオ、均等疑似グループ・不均衡グループ）を含む。G<=q（傾き係数の数）のケース（旧cluster_g2・mroz/city）はValidationErrorになるため成功パスフィクスチャを持たない。実データのクラスターはapple（`ecolbs > 0`、州でG=49）が担う。baseline.no_interceptはinclude_intercept=False（切片なし）のクロスチェックで、全cov_type（opg・hc1を含む）と均等・不均衡のクラスターを持つ。statsmodels側にはhc1と不均衡クラスターが無いため、ここが唯一の数値照合対象。log_likelihood_nullは常に切片のみのモデルを参照するため、lr_statisticが負値になりうる。パラメータ名は全ソースで切片を'const'に正規化済み。"
+    "note": "many_regressors（k=20）とoutlier_regressor（x1の5%が外れ値）を含む。ロバストSE・クラスターSEの参照値は、収束後の係数から再fitを繰り返したglmで計算している（run_glm_crosscheck.R参照）。perfect_multicollinearityシナリオはここに含まない（ComputationErrorの発生確認のみ、テストコード側で対応）。clusterは合成データ（baselineシナリオ、均等疑似グループ・不均衡グループ）を含む。G<=q（傾き係数の数）のケース（旧cluster_g2・mroz/city）はValidationErrorになるため成功パスフィクスチャを持たない。実データのクラスターはapple（`ecolbs > 0`、州でG=49）が担う。baseline.no_interceptはinclude_intercept=False（切片なし）のクロスチェックで、全cov_type（opg・hc1を含む）と均等・不均衡のクラスターを持つ。statsmodels側にはhc1と不均衡クラスターが無いため、ここが唯一の数値照合対象。log_likelihood_nullは常に切片のみのモデルを参照するため、lr_statisticが負値になりうる。パラメータ名は全ソースで切片を'const'に正規化済み。"
   }
 }

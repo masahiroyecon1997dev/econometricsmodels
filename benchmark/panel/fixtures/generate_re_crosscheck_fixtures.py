@@ -209,6 +209,34 @@ _STRUCTURALLY_SINGULAR = {
 }
 
 
+def _scenario_inputs(scenario: str) -> tuple[Path, list[str], str]:
+    """シナリオの`(CSVパス, 説明変数, plmの回帰式)`。"""
+    x_cols = SCENARIO_X_COLS.get(scenario, ["x1", "x2"])
+    return (
+        DATA_DIR / f"fe_{scenario}.csv",
+        x_cols,
+        f"y ~ {' + '.join(x_cols)}",
+    )
+
+
+def _resolve_dk_maxlag(
+    csv_path: Path,
+    cov_type: str,
+    maxlag: int | None,
+    time_col: str = "time",
+) -> int | None:
+    """dkでバンド幅が未指定なら本実装の既定式`floor(4*(T/100)^(2/9))`で補う。"""
+    if cov_type == "dk" and maxlag is None:
+        return default_dk_bandwidth(csv_path, time_col)
+    return maxlag
+
+
+def _reference_label(prefix: str, cov_type: str, maxlag: int | None) -> str:
+    """自己検証のエラーメッセージ用ラベル（dkはバンド幅付き）。"""
+    suffix = f"/bandwidth={maxlag}" if cov_type == "dk" else ""
+    return f"{prefix}/{cov_type}{suffix}"
+
+
 def _run_hausman(
     csv_path: Path,
     formula: str,
@@ -218,8 +246,7 @@ def _run_hausman(
     time_col: str = "time",
     maxlag: int | None = None,
 ) -> dict:
-    if cov_type == "dk" and maxlag is None:
-        maxlag = default_dk_bandwidth(csv_path, time_col)
+    maxlag = _resolve_dk_maxlag(csv_path, cov_type, maxlag, time_col)
     return run_re_hausman_plm_r(
         csv_path,
         formula,
@@ -236,11 +263,8 @@ WAGEPAN_FORMULA = f"{WAGEPAN_Y} ~ {' + '.join(WAGEPAN_X)}"
 def _run_effects(
     scenario: str, cov_type: str, *, maxlag: int | None = None
 ) -> dict:
-    csv_path = DATA_DIR / f"fe_{scenario}.csv"
-    x_cols = SCENARIO_X_COLS.get(scenario, ["x1", "x2"])
-    formula = f"y ~ {' + '.join(x_cols)}"
-    if cov_type == "dk" and maxlag is None:
-        maxlag = default_dk_bandwidth(csv_path)
+    csv_path, _, formula = _scenario_inputs(scenario)
+    maxlag = _resolve_dk_maxlag(csv_path, cov_type, maxlag)
     return run_re_plm_r(csv_path, formula, cov_type, maxlag=maxlag)
 
 
@@ -303,7 +327,7 @@ def _check_given_variance_equivalence(
 def _linearmodels_variance(scenario: str) -> dict:
     """`linearmodels`のREの分散成分（`sigma2_eps`・`sigma2_u`）。本実装と機械精度で
     一致する（`re.json`）。分散成分は`cov_type`・バンド幅によらないため1回だけ求める。"""
-    x_cols = SCENARIO_X_COLS.get(scenario, ["x1", "x2"])
+    _, x_cols, _ = _scenario_inputs(scenario)
     return run_re(scenario, x_cols, "classical", time_col="time")
 
 
@@ -313,17 +337,12 @@ def _run_effects_reference(
     """標準誤差・推論統計量の参照値。balancedはplm自身のRE、unbalancedは
     `linearmodels`の分散成分を与えたplm（`DK_EXPLICIT_BANDWIDTHS`直後のコメント参照）。
     plm自身の分散成分を与えた値がplm自身のREと一致することを、生成のたびに確かめる。"""
+    csv_path, _, formula = _scenario_inputs(scenario)
+    maxlag = _resolve_dk_maxlag(csv_path, cov_type, maxlag)
     plm_re = _run_effects(scenario, cov_type, maxlag=maxlag)
     if scenario != UNBALANCED_SCENARIO:
         return plm_re
-    csv_path = DATA_DIR / f"fe_{scenario}.csv"
-    x_cols = SCENARIO_X_COLS.get(scenario, ["x1", "x2"])
-    formula = f"y ~ {' + '.join(x_cols)}"
-    if cov_type == "dk" and maxlag is None:
-        maxlag = default_dk_bandwidth(csv_path)
-    label = f"{scenario}/{cov_type}" + (
-        f"/bandwidth={maxlag}" if cov_type == "dk" else ""
-    )
+    label = _reference_label(scenario, cov_type, maxlag)
     _check_given_variance_equivalence(
         run_re_given_variance_plm_r(
             csv_path,
@@ -380,17 +399,12 @@ def _run_hausman_reference(
     `linearmodels`の分散成分を与えて補助回帰を組み立てたplm
     （`run_plm_re_given_variance_hausman_benchmark.R`）。plm自身の分散成分を与えた
     値が`phtest`と一致することを、生成のたびに確かめる。"""
-    csv_path = DATA_DIR / f"fe_{scenario}.csv"
-    x_cols = SCENARIO_X_COLS.get(scenario, ["x1", "x2"])
-    formula = f"y ~ {' + '.join(x_cols)}"
+    csv_path, _, formula = _scenario_inputs(scenario)
+    maxlag = _resolve_dk_maxlag(csv_path, cov_type, maxlag)
     phtest = _run_hausman(csv_path, formula, cov_type, maxlag=maxlag)
     if scenario != UNBALANCED_SCENARIO:
         return phtest
-    if cov_type == "dk" and maxlag is None:
-        maxlag = default_dk_bandwidth(csv_path)
-    label = f"{scenario}/hausman/{cov_type}" + (
-        f"/bandwidth={maxlag}" if cov_type == "dk" else ""
-    )
+    label = _reference_label(f"{scenario}/hausman", cov_type, maxlag)
     plm_variance = _plm_variance(scenario)
     _check_given_variance_hausman_equivalence(
         run_re_hausman_given_variance_plm_r(
@@ -449,11 +463,7 @@ def _run_dk_three_periods_case(tmpdir: Path) -> tuple[dict, dict]:
 
 
 def _run_wagepan(csv_path: Path, cov_type: str) -> dict:
-    maxlag = (
-        default_dk_bandwidth(csv_path, WAGEPAN_TIME)
-        if cov_type == "dk"
-        else None
-    )
+    maxlag = _resolve_dk_maxlag(csv_path, cov_type, None, WAGEPAN_TIME)
     return run_re_plm_r(
         csv_path,
         WAGEPAN_FORMULA,

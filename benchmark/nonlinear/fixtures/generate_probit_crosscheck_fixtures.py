@@ -230,9 +230,7 @@ def build_fixtures() -> dict:
         "generated_at": datetime.now(UTC).isoformat(),
         "r_version": r_version,
         "marginaleffects_version": marginaleffects_version,
-        # 参照値を決める設定（正本はrun_glm_crosscheck.Rの`glm_settings`）。
-        # 各エントリのirls_iterations・refit_count・refit_max_rel_changeは、
-        # この設定のもとでの実際の収束の様子。
+        # 正本はrun_glm_crosscheck.Rの`glm_settings`。
         "glm_reference_settings": glm_reference_settings(),
         "note": (
             "many_regressors（k=20）とoutlier_regressor（x1の5%が外れ値）を含む。"

@@ -2,11 +2,12 @@
 
 - `run_glm_r`: `run_glm_crosscheck.R`（Logit/Probit クロスチェック）。位置引数の契約は
   `link` が cov_type の直後＝arg4、`cluster` は `cov_type="cluster"` のとき arg5。
+- `glm_reference_settings`: 同スクリプトが参照値を作るときの設定（`--settings`）。
 - `run_tobit_r`: `run_tobit_crosscheck.R`（Tobit の主リファレンス `AER::tobit` と
   交差検証 `censReg` の両方）。位置引数は `engine`（arg4）・`lower`（arg5）・`upper`
   （arg6）・`cluster`（`cov_type="cluster"` のとき arg7）。
 
-いずれも位置引数をここで組み立て、共通の `benchmark.common.reference.r` に渡す。
+`run_glm_r`・`run_tobit_r` は位置引数をここで組み立て、共通の `benchmark.common.reference.r` に渡す。
 """
 
 from __future__ import annotations

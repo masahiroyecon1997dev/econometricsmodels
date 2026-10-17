@@ -182,6 +182,13 @@ pub struct IVOptions {
     #[pyo3(get)]
     pub hac_time: Option<String>,
 
+    /// GMM estimation type: "one_step" (weight matrix `(Z'Z)^-1` only), "two_step"
+    /// (efficient two-step GMM), or "iterated" (repeat until convergence).
+    /// Case-insensitive. `None` (default) means "two_step" for `estimator="gmm"`.
+    /// Specifying it with `estimator="2sls"` raises `ValidationError`.
+    #[pyo3(get)]
+    pub gmm_type: Option<String>,
+
     /// Weight matrix used for GMM point estimation: one of "classical" (homoskedastic),
     /// "robust" (heteroskedasticity-robust), "cluster", "hac" (Newey-West). Same vocabulary
     /// as `cov_type`. Case-insensitive. `None` (default) means "classical" for
@@ -191,13 +198,6 @@ pub struct IVOptions {
     /// `cov_type` (no separate fields; see module docstring "GMMのgmm_weight_type").
     #[pyo3(get)]
     pub gmm_weight_type: Option<String>,
-
-    /// GMM estimation type: "one_step" (weight matrix `(Z'Z)^-1` only), "two_step"
-    /// (efficient two-step GMM), or "iterated" (repeat until convergence).
-    /// Case-insensitive. `None` (default) means "two_step" for `estimator="gmm"`.
-    /// Specifying it with `estimator="2sls"` raises `ValidationError`.
-    #[pyo3(get)]
-    pub gmm_type: Option<String>,
 
     /// Maximum number of GMM estimations for `gmm_type="iterated"`, counting the initial
     /// estimate; an integer from 3 to 10,000 (use `gmm_type="two_step"` for two steps).
@@ -233,8 +233,8 @@ impl IVOptions {
         cluster = None,
         hac_lags = None,
         hac_time = None,
-        gmm_weight_type = None,
         gmm_type = None,
+        gmm_weight_type = None,
         gmm_max_iter = None,
         gmm_tol = None,
         raise_on_non_convergence = None,
@@ -248,9 +248,9 @@ impl IVOptions {
         #[pyo3(from_py_with = crate::shared::option_values::cluster_arg)] cluster: Option<String>,
         #[pyo3(from_py_with = crate::shared::option_values::hac_lags_arg)] hac_lags: Option<i64>,
         #[pyo3(from_py_with = crate::shared::option_values::hac_time_arg)] hac_time: Option<String>,
+        #[pyo3(from_py_with = crate::shared::option_values::gmm_type_arg)] gmm_type: Option<String>,
         #[pyo3(from_py_with = crate::shared::option_values::gmm_weight_type_arg)]
         gmm_weight_type: Option<String>,
-        #[pyo3(from_py_with = crate::shared::option_values::gmm_type_arg)] gmm_type: Option<String>,
         #[pyo3(from_py_with = crate::shared::option_values::gmm_max_iter_arg)] gmm_max_iter: Option<
             i64,
         >,
@@ -265,8 +265,8 @@ impl IVOptions {
             cluster,
             hac_lags,
             hac_time,
-            gmm_weight_type,
             gmm_type,
+            gmm_weight_type,
             gmm_max_iter,
             gmm_tol,
             raise_on_non_convergence,
@@ -337,7 +337,7 @@ impl IVOptions {
         format!(
             "IVOptions(estimator={}, cov_type={}, include_intercept={}, \
              confidence_level={}, cluster={}, hac_lags={}, hac_time={}, \
-             gmm_weight_type={}, gmm_type={}, gmm_max_iter={}, gmm_tol={}, \
+             gmm_type={}, gmm_weight_type={}, gmm_max_iter={}, gmm_tol={}, \
              raise_on_non_convergence={})",
             self.estimator.py_repr(),
             self.cov_type.py_repr(),
@@ -346,8 +346,8 @@ impl IVOptions {
             self.cluster.py_repr(),
             self.hac_lags.py_repr(),
             self.hac_time.py_repr(),
-            self.gmm_weight_type.py_repr(),
             self.gmm_type.py_repr(),
+            self.gmm_weight_type.py_repr(),
             self.gmm_max_iter.py_repr(),
             self.gmm_tol.py_repr(),
             self.raise_on_non_convergence.py_repr(),

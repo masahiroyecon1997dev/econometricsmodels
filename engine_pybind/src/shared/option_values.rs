@@ -126,7 +126,7 @@ pub fn extract_strict_opt_column(ob: &Bound<'_, PyAny>, name: &str) -> PyResult<
     extract_column_name(ob, name).map(Some)
 }
 
-/// `None`を許す文字列のオプション値（`gmm_weight_type`・`gmm_type`）。
+/// `None`を許す文字列のオプション値（`gmm_type`・`gmm_weight_type`）。
 pub fn extract_strict_opt_text(ob: &Bound<'_, PyAny>, name: &str) -> PyResult<Option<String>> {
     if ob.is_none() {
         return Ok(None);

@@ -3,6 +3,7 @@
 - `run_glm_r`: `run_glm_crosscheck.R`（Logit/Probit クロスチェック）。位置引数の契約は
   `link` が cov_type の直後＝arg4、`cluster` は `cov_type="cluster"` のとき arg5。
 - `glm_reference_settings`: 同スクリプトが参照値を作るときの設定（`--settings`）。
+- `glm_reference_versions`: 同スクリプトが使うRと各パッケージのバージョン。
 - `run_tobit_r`: `run_tobit_crosscheck.R`（Tobit の主リファレンス `AER::tobit` と
   交差検証 `censReg` の両方）。位置引数は `engine`（arg4）・`lower`（arg5）・`upper`
   （arg6）・`cluster`（`cov_type="cluster"` のとき arg7）。
@@ -85,6 +86,37 @@ def glm_reference_settings() -> dict:
     if proc.returncode != 0:
         raise RuntimeError(f"Rscript failed ({' '.join(cmd)}):\n{proc.stderr}")
     return json.loads(proc.stdout)
+
+
+# `run_glm_crosscheck.R`が`library()`で読み込むパッケージ（参照値の計算・出力に
+# 使うもの）。追加・削除したらここも合わせる。
+_GLM_R_PACKAGES = ("sandwich", "lmtest", "marginaleffects", "jsonlite")
+
+
+def glm_reference_versions() -> dict[str, str]:
+    """`run_glm_crosscheck.R`が使うRと各パッケージのバージョンを、fixtureの
+    `_meta`のキー名（`r_version`・`<パッケージ名>_version`）で返す。
+
+    `Rscript`の起動は1回だけで済ませる。
+
+    Raises:
+        RuntimeError: Rscriptが非ゼロ終了した場合（stderr を添えて送出）。
+    """
+    pkgs = ", ".join(f'"{p}"' for p in _GLM_R_PACKAGES)
+    expr = (
+        f"pkgs <- c({pkgs});"
+        "versions <- c(list(r = as.character(getRversion())),"
+        " lapply(setNames(pkgs, pkgs),"
+        " function(p) as.character(packageVersion(p))));"
+        "cat(jsonlite::toJSON(versions, auto_unbox = TRUE))"
+    )
+    cmd = ["Rscript", "-e", expr]
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if proc.returncode != 0:
+        raise RuntimeError(f"Rscript failed ({' '.join(cmd)}):\n{proc.stderr}")
+    return {
+        f"{name}_version": v for name, v in json.loads(proc.stdout).items()
+    }
 
 
 # 名前正規化不要でそのまま通す Tobit のスカラー統計量（出力順を固定）。

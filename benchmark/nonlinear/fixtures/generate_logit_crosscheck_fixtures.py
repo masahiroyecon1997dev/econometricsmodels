@@ -24,7 +24,6 @@ logit_crosscheck.json）を生成するスクリプト。
 
 from __future__ import annotations
 
-import subprocess
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -46,6 +45,7 @@ from benchmark.common.load_wooldridge import load_apple_adoption
 from benchmark.nonlinear.constants import NON_CLUSTER_COV_TYPES
 from benchmark.nonlinear.references.r import (
     glm_reference_settings,
+    glm_reference_versions,
     run_glm_r,
 )
 
@@ -184,24 +184,6 @@ def build_fixtures() -> dict:
             },
         }
 
-    r_version = subprocess.run(
-        ["Rscript", "-e", "cat(as.character(getRversion()))"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-
-    marginaleffects_version = subprocess.run(
-        [
-            "Rscript",
-            "-e",
-            'cat(as.character(packageVersion("marginaleffects")))',
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-
     fixtures["_meta"] = {
         "method": "logit",
         "primary_reference": "r-glm-sandwich-marginaleffects",
@@ -217,8 +199,7 @@ def build_fixtures() -> dict:
             "算出不可）。"
         ),
         "generated_at": datetime.now(UTC).isoformat(),
-        "r_version": r_version,
-        "marginaleffects_version": marginaleffects_version,
+        **glm_reference_versions(),
         # 正本はrun_glm_crosscheck.Rの`glm_settings`。
         "glm_reference_settings": glm_reference_settings(),
         "note": (

@@ -60,8 +60,8 @@
 //! の領域では`zᵢ`に対して事実上定数になる。ここで生の（非クランプの）`zᵢ`を`w`の
 //! 計算に混ぜると、上記導出の前提（`λᵢ`が`zᵢ`の滑らかな関数であること）が崩れ、
 //! `λᵢ(λᵢ+zᵢ)>0`という大域凹性の恒等式が数値的に破れて`w`が負になりうる（実測で
-//! 悪条件パラメータ点にて確認済み）。`linear_predictor_and_residual`が返す`zᵢ`は
-//! `λᵢ`と同じクランプ済み`u`から再構成した値であり、この非対称性を避けている。
+//! 悪条件パラメータ点にて確認済み）。`hessian_weight`は`λᵢ`と同じクランプ済み`u`から
+//! `zᵢ`を再構成して重みを作っており、この非対称性を避けている。
 
 use crate::nonlinear::common::{
     CovType, FittedModelForMarginalEffects, GoodnessOfFit, MarginalEffects, MarginalEffectsAt,
@@ -305,35 +305,45 @@ impl ProbitProblem {
             .sum()
     }
 
-    /// 観測`i`の一般化残差`λ_i = q_i φ(q_i z_i)/Φ(q_i z_i)`（`q_i=2y_i-1`、モジュール
-    /// 冒頭の数式参照）と、`hessian`の重み`w=λᵢ(λᵢ+zᵢ)`が使う**`λᵢ`と整合するように
-    /// クランプ済みの`zᵢ`**（`z̃ᵢ = qᵢ·clamp(qᵢzᵢ, -U_CLAMP, U_CLAMP)`）をまとめて
-    /// 計算する。`hessian`が両方を必要とするため、個別に呼び出すより重複計算を避けられる。
-    /// `normal`は呼び出し側（観測`n`件のループ全体）で1回だけ構築して渡す
-    /// （`cost`/`gradient`/`hessian`いずれもn回ではなく1回の構築で済ませる）。
-    ///
-    /// **`z̃ᵢ`は生の線形予測子`zᵢ`ではない**: `λᵢ`は`clamped_pdf_cdf`で
-    /// `u=qᵢzᵢ`を`[-U_CLAMP, U_CLAMP]`にクランプした後の値を使うため、`|u|>U_CLAMP`の
-    /// 領域では`λᵢ`は`zᵢ`に対して事実上定数になる。この領域で`hessian`の重み計算に
-    /// 生の（非クランプの）`zᵢ`を混ぜると、`λᵢ(λᵢ+zᵢ)>0`という大域凹性の前提
-    /// （モジュール冒頭の導出参照）が数学的に破れ、`w`が負になりうる
-    /// （実測: 悪条件パラメータ点で`w<0`の観測を確認済み）。`λᵢ`が実際に依存している
-    /// のと同じクランプ済み引数から`z̃ᵢ`を再構成することで、`λᵢ(λᵢ+z̃ᵢ)>0`の恒等式が
-    /// クランプ領域でも保たれる（クランプ後の`u`に対する同一の解析式を評価しているに
-    /// すぎないため）。
-    fn linear_predictor_and_residual(
-        &self,
-        i: usize,
-        params: &[f64],
-        normal: &Normal,
-    ) -> (f64, f64) {
-        let z = self.linear_predictor(i, params);
+    /// 観測`i`の符号付き線形予測子 `(q_i, u_i)`（`q_i=2y_i-1`、`u_i=q_i z_i`）。
+    /// 一般化残差`λ_i`・`hessian`の重みの両方がこの`u_i`から作られる。
+    fn signed_index(&self, i: usize, params: &[f64]) -> (f64, f64) {
         let q = 2.0 * (*self.y.get(i, 0)) - 1.0;
-        let u = q * z;
+        (q, q * self.linear_predictor(i, params))
+    }
+
+    /// `signed_index`の`(q, u)`から一般化残差`λ = q φ(u)/Φ(u)`（モジュール冒頭の数式参照）を
+    /// 計算する。`u`は`clamped_pdf_cdf`が`[-U_CLAMP, U_CLAMP]`にクランプしてから評価する。
+    fn generalized_residual_at(normal: &Normal, q: f64, u: f64) -> f64 {
         let (phi, big_phi) = clamped_pdf_cdf(normal, u);
-        let lambda = q * phi / big_phi;
-        let z_for_hessian = q * u.clamp(-U_CLAMP, U_CLAMP);
-        (z_for_hessian, lambda)
+        q * phi / big_phi
+    }
+
+    /// 観測`i`の一般化残差`λ_i = q_i φ(q_i z_i)/Φ(q_i z_i)`（`q_i=2y_i-1`）。
+    /// `gradient`/`scores`が使う（`cost`は対数尤度を`log_likelihood`で直接評価する）。
+    /// `normal`は呼び出し側（観測`n`件のループ全体）で
+    /// 1回だけ構築して渡す。
+    fn generalized_residual(&self, i: usize, params: &[f64], normal: &Normal) -> f64 {
+        let (q, u) = self.signed_index(i, params);
+        Self::generalized_residual_at(normal, q, u)
+    }
+
+    /// 観測`i`の`hessian`の重み `w_i = λ_i(λ_i + z̃_i)`。`z̃_i = q_i·clamp(q_i z_i, -U_CLAMP,
+    /// U_CLAMP)`は`λ_i`と同じクランプ済み引数から再構成した値で、**生の線形予測子`z_i`では
+    /// ない**。`z̃_i`は`w_i`の中でしか意味を持たないため、単独では返さずこの関数の中に閉じている。
+    ///
+    /// `λ_i`は`clamped_pdf_cdf`で`u=q_i z_i`を`[-U_CLAMP, U_CLAMP]`にクランプした後の値を
+    /// 使うため、`|u|>U_CLAMP`の領域では`λ_i`は`z_i`に対して事実上定数になる。この領域で
+    /// 生の（非クランプの）`z_i`を`w_i`に混ぜると、`λ_i(λ_i+z_i)>0`という大域凹性の前提
+    /// （モジュール冒頭の導出参照）が数学的に破れ、`w_i`が負になりうる（実測: 悪条件
+    /// パラメータ点で`w<0`の観測を確認済み）。`λ_i`が実際に依存しているのと同じクランプ済み
+    /// 引数から`z̃_i`を再構成することで、`λ_i(λ_i+z̃_i)>0`の恒等式がクランプ領域でも保たれる
+    /// （クランプ後の`u`に対する同一の解析式を評価しているにすぎないため）。
+    fn hessian_weight(&self, i: usize, params: &[f64], normal: &Normal) -> f64 {
+        let (q, u) = self.signed_index(i, params);
+        let lambda = Self::generalized_residual_at(normal, q, u);
+        let clamped_z = q * u.clamp(-U_CLAMP, U_CLAMP);
+        lambda * (lambda + clamped_z)
     }
 
     /// 観測ごとのスコア行列（n×k）。各行が`sᵢ = λᵢxᵢ`（対数尤度の1階微分そのもの、
@@ -344,7 +354,7 @@ impl ProbitProblem {
         let k = self.x.ncols();
         let normal = Normal::standard();
         Mat::from_fn(n, k, |i, j| {
-            let (_, lambda) = self.linear_predictor_and_residual(i, params, &normal);
+            let lambda = self.generalized_residual(i, params, &normal);
             lambda * (*self.x.get(i, j))
         })
     }
@@ -371,7 +381,7 @@ impl Gradient for ProbitProblem {
         let normal = Normal::standard();
         let mut grad = vec![0.0; k];
         for i in 0..n {
-            let (_, lambda) = self.linear_predictor_and_residual(i, param, &normal);
+            let lambda = self.generalized_residual(i, param, &normal);
             for (j, grad_j) in grad.iter_mut().enumerate() {
                 *grad_j += -lambda * (*self.x.get(i, j));
             }
@@ -387,8 +397,8 @@ impl Hessian for ProbitProblem {
     /// `-ℓ(θ)`のHessian `X'WX`（`W = diag(λᵢ(λᵢ+zᵢ))`、対数尤度のHessian`-X'WX`の
     /// 符号反転）。`run_solver`のdocコメント「`Hessian`トレイトの符号規約」参照。
     ///
-    /// `zᵢ`は`linear_predictor_and_residual`が返す、`λᵢ`と同じクランプ済み引数から
-    /// 再構成した値（同関数のdocコメント参照）。これにより`λᵢ(λᵢ+zᵢ)>0`
+    /// 重みは`hessian_weight`が返す、`λᵢ`と同じクランプ済み引数から`zᵢ`を
+    /// 再構成して作った値（同関数のdocコメント参照）。これにより`λᵢ(λᵢ+zᵢ)>0`
     /// （`W`の正定値性、対数尤度の大域凹性の根拠）がクランプ領域でも保たれる。
     fn hessian(&self, param: &Self::Param) -> Result<Self::Hessian, OptimizerError> {
         let n = self.x.nrows();
@@ -396,8 +406,7 @@ impl Hessian for ProbitProblem {
         let normal = Normal::standard();
         let mut h = vec![vec![0.0; k]; k];
         for i in 0..n {
-            let (z, lambda) = self.linear_predictor_and_residual(i, param, &normal);
-            let w = lambda * (lambda + z);
+            let w = self.hessian_weight(i, param, &normal);
             for (a, row) in h.iter_mut().enumerate().take(k) {
                 let xa = *self.x.get(i, a);
                 for (b, cell) in row.iter_mut().enumerate().take(k) {
@@ -1188,6 +1197,34 @@ mod tests {
         let scores = problem.scores(&params);
         for i in 0..2 {
             assert!(scores.get(i, 0).is_finite(), "row {i}");
+        }
+    }
+
+    /// `|z|`が`U_CLAMP`未満の通常領域では`z̃=z`なので、`hessian_weight`は素の
+    /// `λ(λ+z)`と一致し、`generalized_residual`は`scores`の切片列（`λ·1`）と一致する。
+    #[test]
+    fn hessian_weight_and_generalized_residual_match_closed_form_in_the_unclamped_region() {
+        let y = vec![1.0, 0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![0.5, -1.0, 2.0, 0.3, -0.7]];
+        let input =
+            ProbitInput::from_columns(&y, &x_columns, vec!["x".to_string()], true, "y".to_string())
+                .unwrap();
+        let problem = ProbitProblem::new(&input);
+        let params = vec![0.2, 0.4];
+        let normal = Normal::standard();
+        let scores = problem.scores(&params);
+
+        for i in 0..y.len() {
+            let z = params[0] + params[1] * x_columns[0][i];
+            let q = 2.0 * y[i] - 1.0;
+            let lambda = q * normal.pdf(q * z) / normal.cdf(q * z);
+
+            let residual = problem.generalized_residual(i, &params, &normal);
+            assert!((residual - lambda).abs() < 1e-12, "row {i}");
+            assert!((*scores.get(i, 0) - residual).abs() < 1e-12, "row {i}");
+
+            let weight = problem.hessian_weight(i, &params, &normal);
+            assert!((weight - lambda * (lambda + z)).abs() < 1e-12, "row {i}");
         }
     }
 

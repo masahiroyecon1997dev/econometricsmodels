@@ -944,7 +944,7 @@ pub fn predict_new_data(
 /// 極端になると`λ=φ(u)/Φ(u)`（逆ミルズ比、一般化残差）が`0.0/0.0`のNaNになりうる
 /// （実測では`|u|≳39`から発生。本閾値`≈8.126`はそれよりずっと手前で安全に倒す）。
 ///
-/// 元はProbit専用（`ProbitProblem::linear_predictor_and_residual`の一般化残差
+/// 元はProbit専用（`ProbitProblem::generalized_residual_at`の一般化残差
 /// `λ_i=q_iφ(q_iz_i)/Φ(q_iz_i)`向け）だったが、Tobitの打ち切り観測の尤度
 /// （`logΦ(z)`・`log(1-Φ(z))`型）も同型の`λ=φ/Φ`を含み同じリスクを共有するため、
 /// Tobit実装時にここへ移設して共有した。

@@ -55,7 +55,7 @@ jobs:
       # "Unexpected token ... in JSON"で失敗する既知の不具合が未解決のまま残っている
       # （rustsec/audit-check#18, #33）。実際の脆弱性と無関係にCIが赤くなる偽陽性を避けるため、
       # アクションを介さず`cargo audit`をテキスト出力のまま直接実行する。
-      - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+      - uses: taiki-e/install-action@861a07ce7084f55488e375df125cdc99bba60eb7 # v2.87.23
         with:
           # バージョンは.devcontainer/DockerfileのCARGO_AUDIT_VERSIONと揃える
           tool: cargo-audit@0.22.2

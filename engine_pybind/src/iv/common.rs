@@ -64,13 +64,14 @@ use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
 use crate::linear::common::{
-    build_cov_type, least_squares_error_is_computation_error, mat_to_vec, require_hac_time,
+    build_cov_type, least_squares_error_is_computation_error, require_hac_time,
 };
 use crate::linear::ols::{OLSResult, ols_estimator_to_result};
 use crate::shared::column_extraction::{
     extract_f64_column, extract_optional_cluster_groups, extract_time_order_ranks,
 };
 use crate::shared::errors::{ComputationError, ValidationError, common_error_to_pyerr};
+use crate::shared::mat_conversion::mat_to_vec;
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
     extract_strict_float, extract_strict_opt_column, extract_strict_opt_float,

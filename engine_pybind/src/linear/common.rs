@@ -2,8 +2,8 @@
 //!
 //! `.claude/rules/rust-style.md`「ファイル・ディレクトリ構成」: 系統内で共有するロジックは
 //! `<系統>/common.rs`に置く。以前はOLSしかなく未作成だったが、WLSが`LeastSquaresError`の
-//! エラー変換・`Mat<f64>`→`Vec<f64>`変換の両方をOLSと共有する形で実装されたため作成した
-//! （`docs/spec/wls-spec.md`「エラー型」）。
+//! エラー変換等をOLSと共有する形で実装されたため作成した（`docs/spec/wls-spec.md`「エラー型」）。
+//! `Mat<f64>`→`Vec<f64>`変換（`mat_to_vec`）はIV・panelも使うため`crate::shared::mat_conversion`にある。
 //!
 //! `LeastSquaresError`は元々`OlsError`という名前だったが、OLS単体のエラー型ではなくWLSも
 //! 含む`linear`系統共通のエラー型であることを名前に反映するため、`engine`側で
@@ -59,11 +59,6 @@ pub(crate) fn least_squares_error_is_computation_error(err: &LeastSquaresError) 
         LeastSquaresError::SingularMatrix
             | LeastSquaresError::Common(engine::shared::error::CommonError::ComputationFailed(_))
     )
-}
-
-/// `faer::Mat<f64>`（n×1またはk×1の列ベクトル）を`Vec<f64>`に変換する。
-pub(crate) fn mat_to_vec(mat: &faer::Mat<f64>) -> Vec<f64> {
-    (0..mat.nrows()).map(|i| *mat.get(i, 0)).collect()
 }
 
 /// `cov_type`文字列をパースし、該当する`cov_type`のときのみ`cluster`/`hac_time`を

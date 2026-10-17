@@ -44,7 +44,7 @@ pub(crate) fn mle_error_to_pyerr(err: MleError) -> PyErr {
 }
 
 /// `faer::Mat<f64>`を行指向の`Vec<Vec<f64>>`に変換する（`pred_table`のような小さい
-/// 2次元行列をPython側にそのまま返すため）。`engine_pybind/src/linear/common.rs`の
+/// 2次元行列をPython側にそのまま返すため）。`engine_pybind/src/shared/mat_conversion.rs`の
 /// `mat_to_vec`は列ベクトル（n×1）専用のため、任意の形状に対応するこちらを別途用意した。
 pub(crate) fn mat_to_nested_vec(mat: &faer::Mat<f64>) -> Vec<Vec<f64>> {
     (0..mat.nrows())

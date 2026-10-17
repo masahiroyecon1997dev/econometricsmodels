@@ -19,13 +19,14 @@ use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
-use super::common::{least_squares_error_to_pyerr, mat_to_vec, parse_cov_type};
+use super::common::{least_squares_error_to_pyerr, parse_cov_type};
 use crate::shared::augment::append_predicted_column;
 use crate::shared::column_extraction::{
     extract_column_list, extract_dataframe, extract_f64_column, extract_f64_columns,
     extract_model_x_columns, extract_time_order_ranks, x_column_names,
 };
 use crate::shared::errors::ValidationError;
+use crate::shared::mat_conversion::mat_to_vec;
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
     extract_strict_float, extract_strict_int, extract_strict_opt_column, extract_strict_opt_int,

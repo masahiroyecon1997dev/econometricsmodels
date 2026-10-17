@@ -77,12 +77,12 @@ use pyo3::types::PyDict;
 use pyo3_polars::PyDataFrame;
 
 use super::common::{panel_error_to_pyerr, validate_dk_time_role};
-use crate::linear::common::mat_to_vec;
 use crate::shared::column_extraction::{
     extract_entity_groups, extract_f64_column, extract_f64_columns,
     extract_optional_cluster_groups, extract_time_keys,
 };
 use crate::shared::errors::ValidationError;
+use crate::shared::mat_conversion::mat_to_vec;
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
     extract_strict_float, extract_strict_opt_column, extract_strict_opt_int, extract_strict_text,

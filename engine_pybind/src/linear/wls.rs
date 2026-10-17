@@ -6,8 +6,9 @@
 //! （`docs/spec/wls-spec.md`「API引数」参照）。`WLSOptions`は`OLSOptions`と
 //! フィールド構成が完全に同一の独立したpyclassである（下記
 //! `WLSOptions`のdocコメント参照）。エラー変換（`least_squares_error_to_pyerr`）・
-//! `Mat<f64>`→`Vec<f64>`変換（`mat_to_vec`）・`cov_type`のパース（`parse_cov_type`）は
-//! `super::common`のものをそのまま再利用する（`LeastSquaresError`がOLS・WLS共通の
+//! `cov_type`のパース（`parse_cov_type`）は
+//! `super::common`のものを、`Mat<f64>`→`Vec<f64>`変換（`mat_to_vec`）は
+//! `crate::shared::mat_conversion`のものをそのまま再利用する（`LeastSquaresError`がOLS・WLS共通の
 //! エラー型のため。`.claude/rules/rust-style.md`「系統内で共有するロジックは
 //! common.rsに置く」）。
 //!
@@ -20,11 +21,12 @@ use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
-use super::common::{least_squares_error_to_pyerr, mat_to_vec, parse_cov_type};
+use super::common::{least_squares_error_to_pyerr, parse_cov_type};
 use crate::shared::augment::append_predicted_column;
 use crate::shared::column_extraction::{
     extract_dataframe, extract_f64_column, extract_f64_columns, extract_model_x_columns,
 };
+use crate::shared::mat_conversion::mat_to_vec;
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
     extract_strict_float, extract_strict_opt_column, extract_strict_opt_int, extract_strict_text,

@@ -24,6 +24,9 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 
+import polars as pl
+from _helpers import respell
+
 
 def assert_close(
     ours: float, ref: float, label: str, *, rtol: float, atol: float
@@ -214,3 +217,33 @@ def assert_same_estimates(res, canonical, label: str = "") -> None:
     prefix = f"{label}: " if label else ""
     assert res.params == canonical.params, f"{prefix}params"
     assert res.std_errors == canonical.std_errors, f"{prefix}std_errors"
+
+
+def assert_option_case_insensitive(
+    fit: Callable, attr: str, value: str, spelling: str
+) -> None:
+    """文字列オプション`value`（正規形）が大文字小文字を区別しないこと。
+
+    `fit(label)`はオプションに`label`を渡して推定した結果を返す。どの綴り
+    （`_helpers.CASE_SPELLINGS`）でも、結果の属性`attr`が正規形（小文字）で返り、
+    推定結果が正規形と同一であること（同じ推定経路に入ること）を確かめる。
+    """
+    res = fit(respell(value, spelling))
+    assert getattr(res, attr) == value
+    assert_same_estimates(res, fit(value))
+
+
+def assert_argument_case_insensitive(
+    call: Callable, value: str, spelling: str
+) -> None:
+    """メソッドの文字列引数`value`（正規形）が大文字小文字を区別しないこと。
+
+    `call(label)`は引数に`label`を渡してメソッドを呼んだ戻り値を返す。どの綴り
+    （`_helpers.CASE_SPELLINGS`）でも、戻り値が正規形のときと等しいことを確かめる
+    （`pl.DataFrame`は`equals`、それ以外は`==`で比べる）。
+    """
+    got, expected = call(respell(value, spelling)), call(value)
+    if isinstance(got, pl.DataFrame):
+        assert got.equals(expected)
+    else:
+        assert got == expected

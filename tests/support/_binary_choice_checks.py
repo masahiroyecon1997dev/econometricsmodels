@@ -38,6 +38,7 @@ from _assertions import (
     assert_dict_close,
     assert_fields_close,
     assert_inference_close,
+    assert_option_case_insensitive,
     assert_params_table_matches_attributes,
     assert_same_estimates,
 )
@@ -140,7 +141,7 @@ def check_param_names_include_const_first(dataset, estimator_cls):
 # 文字列パース・列抽出・分岐ロジックを経て正しく反映されることを確認する。
 
 
-def check_method_option_converges(dataset, estimator_cls, options_cls, solver):
+def check_solver_option_converges(dataset, estimator_cls, options_cls, solver):
     """`solver`（newton/bfgs/lbfgs）はいずれも収束する。
 
     engine_pybindの文字列→`Method`パースやpython_packageラッパーの配線が
@@ -234,25 +235,22 @@ def check_raise_on_non_convergence_false_returns_result_without_raising(
         assert math.isfinite(se), f"std_errors[{name}]={se} is not finite"
 
 
-def check_method_label(dataset, estimator_cls, options_cls):
-    """`res.solver`が指定した`solver`（正規化済み小文字）を反映すること。"""
-    for solver in ["newton", "bfgs", "lbfgs"]:
-        res = estimator_cls(
+def check_solver_is_case_insensitive(
+    dataset, estimator_cls, options_cls, solver, spelling
+):
+    """`solver`（正規形）について、`res.solver`が正規形で返り、どの大文字小文字の
+    綴りでも正規形と同一の推定結果になること。
+    """
+
+    def fit(label):
+        return estimator_cls(
             dataset,
             y="y",
             x=["x1", "x2"],
-            options=options_cls(solver=solver),
+            options=options_cls(solver=label),
         ).fit()
-        assert res.solver == solver
 
-
-def check_method_is_case_insensitive(
-    dataset, estimator_cls, options_cls, solver, expected_label
-):
-    """`solver`が大文字小文字を区別しないこと。"""
-    options = options_cls(solver=solver)
-    res = estimator_cls(dataset, y="y", x=["x1", "x2"], options=options).fit()
-    assert res.solver == expected_label
+    assert_option_case_insensitive(fit, "solver", solver, spelling)
 
 
 def check_cov_type_is_case_insensitive(
@@ -1540,7 +1538,7 @@ def check_solver_matches_statsmodels(
 
     既定の`solver="newton"`は全シナリオ×cov_typeで数値照合する
     （`check_result`）。bfgs/lbfgsはここで、baselineシナリオの全統計量を
-    主リファレンスと照合する（`test_<solver>_api.py::test_method_option_converges`
+    主リファレンスと照合する（`test_<solver>_api.py::test_solver_option_converges`
     は収束することのみを確認する）。
     """
     df = pl.read_csv(config.dataset_path("baseline"))

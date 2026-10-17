@@ -29,7 +29,7 @@ import pytest
 from _helpers import CASE_SPELLINGS
 from econometricsmodels import Logit, LogitOptions, LogitResults
 
-from benchmark.nonlinear.constants import MLE_COV_TYPES
+from benchmark.nonlinear.constants import MLE_COV_TYPES, MLE_SOLVERS
 
 # ── 成功パス・結果型 ──────────────────────────────────────────────────
 
@@ -100,31 +100,18 @@ def test_include_intercept_false_omits_const_and_converges(binary_dataset):
     )
 
 
-@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
-def test_method_option_converges(binary_dataset, solver):
-    _checks.check_method_option_converges(
+@pytest.mark.parametrize("solver", MLE_SOLVERS)
+def test_solver_option_converges(binary_dataset, solver):
+    _checks.check_solver_option_converges(
         binary_dataset, Logit, LogitOptions, solver
     )
 
 
-def test_method_label(binary_dataset):
-    _checks.check_method_label(binary_dataset, Logit, LogitOptions)
-
-
-@pytest.mark.parametrize(
-    "solver, expected_label",
-    [
-        ("NEWTON", "newton"),
-        ("Newton", "newton"),
-        ("BFGS", "bfgs"),
-        ("Bfgs", "bfgs"),
-        ("LBFGS", "lbfgs"),
-        ("Lbfgs", "lbfgs"),
-    ],
-)
-def test_method_is_case_insensitive(binary_dataset, solver, expected_label):
-    _checks.check_method_is_case_insensitive(
-        binary_dataset, Logit, LogitOptions, solver, expected_label
+@pytest.mark.parametrize("spelling", CASE_SPELLINGS)
+@pytest.mark.parametrize("solver", MLE_SOLVERS)
+def test_solver_is_case_insensitive(binary_dataset, solver, spelling):
+    _checks.check_solver_is_case_insensitive(
+        binary_dataset, Logit, LogitOptions, solver, spelling
     )
 
 

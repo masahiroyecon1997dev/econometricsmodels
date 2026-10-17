@@ -18,6 +18,7 @@ import polars as pl
 import pytest
 from _assertions import (
     assert_hac_time_reorders_rows,
+    assert_option_case_insensitive,
     assert_params_table_matches_attributes,
     assert_same_estimates,
 )
@@ -413,28 +414,17 @@ def test_gmm_cov_type_options_run_independently_of_weight_type(
     assert res.converged
 
 
+@pytest.mark.parametrize("spelling", CASE_SPELLINGS)
 @pytest.mark.parametrize("estimator", ["2sls", "gmm"])
-def test_estimator_label(iv_dataset, estimator):
-    """`res.estimator`が指定した`estimator`（正規化済み小文字）を反映すること。"""
-    res = our_fit(iv_dataset, options=IVOptions(estimator=estimator))
-    assert res.estimator == estimator
-
-
-@pytest.mark.parametrize(
-    "estimator, expected_label",
-    [
-        ("2SLS", "2sls"),
-        ("2Sls", "2sls"),
-        ("GMM", "gmm"),
-        ("Gmm", "gmm"),
-    ],
-)
-def test_estimator_is_case_insensitive(iv_dataset, estimator, expected_label):
-    """`estimator`が大文字小文字を区別しないこと（`test_cov_type_is_case_insensitive`
-    と同型）。
+def test_estimator_is_case_insensitive(iv_dataset, estimator, spelling):
+    """`res.estimator`が正規形（小文字）で返り、どの大文字小文字の綴りでも
+    正規形と同一の推定結果になること（`test_cov_type_is_case_insensitive`と同型）。
     """
-    res = our_fit(iv_dataset, options=IVOptions(estimator=estimator))
-    assert res.estimator == expected_label
+
+    def fit(label):
+        return our_fit(iv_dataset, options=IVOptions(estimator=label))
+
+    assert_option_case_insensitive(fit, "estimator", estimator, spelling)
 
 
 @pytest.mark.parametrize("spelling", CASE_SPELLINGS)

@@ -16,6 +16,9 @@ from __future__ import annotations
 # 別途必要。
 MLE_COV_TYPES = ["classical", "opg", "hc0", "hc1", "cluster"]
 
+# Logit/Probit/Tobitが受け付ける`solver`の全体（正規形）。
+MLE_SOLVERS = ["newton", "bfgs", "lbfgs"]
+
 # `cluster`列を使わない`cov_type`。クラスターはグルーピングの動作確認が目的で
 # シナリオ非依存のため、baselineのみ`cluster`専用のケースで個別に確認する
 # （OLS/WLSと同じ書き方）。

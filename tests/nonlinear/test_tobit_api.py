@@ -22,6 +22,7 @@ import polars as pl
 import pytest
 from _assertions import (
     assert_close,
+    assert_option_case_insensitive,
     assert_params_table_matches_attributes,
     assert_same_estimates,
 )
@@ -30,7 +31,7 @@ from _tolerances import TOLERANCES
 from econometricsmodels import Tobit, TobitOptions, TobitResults
 from scipy.stats import norm
 
-from benchmark.nonlinear.constants import MLE_COV_TYPES
+from benchmark.nonlinear.constants import MLE_COV_TYPES, MLE_SOLVERS
 
 # censored_datasetフィクスチャ（`dataset`のyを0.0で左打ち切り、打ち切り率21%）は
 # conftest.pyで定義。
@@ -185,8 +186,8 @@ def test_include_intercept_false_omits_const_and_converges(
     assert res.df_model == 2
 
 
-@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
-def test_method_option_converges(censored_dataset, solver):
+@pytest.mark.parametrize("solver", MLE_SOLVERS)
+def test_solver_option_converges(censored_dataset, solver):
     """`solver`（newton/bfgs/lbfgs）はいずれも収束する。
 
     engine_pybindの文字列→`Method`パースやpython_packageラッパーの配線が
@@ -203,42 +204,22 @@ def test_method_option_converges(censored_dataset, solver):
     assert res.converged
 
 
-@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
-def test_method_label(censored_dataset, solver):
-    """`res.solver`が指定した`solver`（正規化済み小文字）を反映すること
-    （Logit/Probitの`check_method_label`と同型）。
+@pytest.mark.parametrize("spelling", CASE_SPELLINGS)
+@pytest.mark.parametrize("solver", MLE_SOLVERS)
+def test_solver_is_case_insensitive(censored_dataset, solver, spelling):
+    """`res.solver`が正規形で返り、どの大文字小文字の綴りでも正規形と同一の推定結果に
+    なること（Logit/Probitの`check_solver_is_case_insensitive`と同型）。
     """
-    res = Tobit(
-        censored_dataset,
-        y="y",
-        x=["x1", "x2"],
-        options=TobitOptions(solver=solver),
-    ).fit()
-    assert res.solver == solver
 
+    def fit(label):
+        return Tobit(
+            censored_dataset,
+            y="y",
+            x=["x1", "x2"],
+            options=TobitOptions(solver=label),
+        ).fit()
 
-@pytest.mark.parametrize(
-    "solver, expected_label",
-    [
-        ("NEWTON", "newton"),
-        ("Newton", "newton"),
-        ("BFGS", "bfgs"),
-        ("Bfgs", "bfgs"),
-        ("LBFGS", "lbfgs"),
-        ("Lbfgs", "lbfgs"),
-    ],
-)
-def test_method_is_case_insensitive(censored_dataset, solver, expected_label):
-    """`solver`が大文字小文字を区別しないこと（Logit/Probitの
-    `check_method_is_case_insensitive`と同型）。
-    """
-    res = Tobit(
-        censored_dataset,
-        y="y",
-        x=["x1", "x2"],
-        options=TobitOptions(solver=solver),
-    ).fit()
-    assert res.solver == expected_label
+    assert_option_case_insensitive(fit, "solver", solver, spelling)
 
 
 @pytest.mark.parametrize("cov_type", MLE_COV_TYPES)

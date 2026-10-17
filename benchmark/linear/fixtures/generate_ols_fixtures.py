@@ -56,8 +56,6 @@ from benchmark.linear.references.statsmodels_ref import (
 # 回帰式`MROZ_FORMULA`）。誤差の分散がxに依存するため構造的に不均一分散で、
 # classicalとHC0-3の差が大きく出る。クラスターは自然なカテゴリ列が無く（`city`は
 # G=2でG<=qのため弾かれる）、HACは時系列順が無いため、いずれも対象外。
-# 従来Rクロスチェック側にしか無かった実データ検証を主リファレンス
-# （statsmodels）側にも追加する（ユーザー確認済み）。
 WOOLDRIDGE_DATASETS = {
     "wage1": "lwage ~ educ + exper + tenure",
     "gpa2": "colgpa ~ sat + hsperc + tothrs",
@@ -88,7 +86,7 @@ def build_fixtures() -> dict:
         # cov_typeループとは別に1回だけ計算する。全シナリオで学習データに
         # 対する予測値（fitted）、baselineシナリオのみout-of-sample予測値
         # （predicted）も確認する（Rクロスチェック側`ols_crosscheck.json`と
-        # 同じ網羅性。ユーザー確認済み）。
+        # 同じ網羅性）。
         fixtures[scenario]["predict"] = run_predict(
             dataset_source="synthetic",
             dataset=scenario,
@@ -122,7 +120,7 @@ def build_fixtures() -> dict:
             )
 
             # include_intercept=False（切片なし）。全cov_type（COV_TYPES +
-            # cluster）と組み合わせて確認する（ユーザー確認済み）。
+            # cluster）と組み合わせて確認する。
             fixtures[scenario]["no_intercept"] = {
                 cov_type: run(
                     dataset_source="synthetic",
@@ -223,41 +221,34 @@ def build_fixtures() -> dict:
             "本実装の自動選択式（benchmark.common.hac_auto_lag）で、使ったラグは"
             "各cov_type=hacエントリのhac_lagに残す。"
             "generate_ols_crosscheck_fixtures.pyのbuild_wooldridge_fixtures()と"
-            "同じデータセット・回帰式で、従来Rクロスチェック側にしか無かった"
-            "実データ検証を主リファレンス側にも追加したもの。wage1.clusterは"
+            "同じデータセット・回帰式を使う。wage1.clusterは"
             "地域ダミー（northcen/south/west、基準northeast）から合成した"
             "実カテゴリ列regionでのクラスターロバストSE。各シナリオの"
             "'predict'キーは学習データに対する予測値（fitted、cov_typeに"
             "依存しないためcov_typeループとは別に1回だけ計算）。baseline"
             "シナリオのみout-of-sample予測値（predicted、"
-            "benchmark.linear.constants.PREDICT_NEW_DATA）も含む。従来"
-            "Rクロスチェック側（ols_crosscheck.json）にしか無かったpredict()の"
-            "検証を主リファレンス側にも追加したもの。Wooldridge実データ側は"
-            "Rクロスチェック側と同じくpredict()"
-            "検証の対象外。クラスター系（cluster/cluster_imbalanced/cluster_g2/"
-            "wage1.cluster）は従来params/std_errorsのみだったが、test_stats/p_values/"
-            "conf_int/r_squared等のフル統計量まで検証範囲を広げた"
-            "（_run_cluster_case等がextract_full_fit_statsを使うよう変更）。"
-            "あわせて_run_cluster_caseに"
-            "use_t=Trueが指定されていなかった不備を修正（cluster時に既定の"
+            "benchmark.linear.constants.PREDICT_NEW_DATA）も含む"
+            "（Rクロスチェック側ols_crosscheck.jsonと同じ網羅性）。"
+            "Wooldridge実データ側はpredict()検証の対象外。"
+            "クラスター系（cluster/cluster_imbalanced/cluster_g2/"
+            "wage1.cluster）はparams/std_errorsに加え、test_stats/p_values/"
+            "conf_int/r_squared等のフル統計量まで検証する"
+            "（_run_cluster_case等がextract_full_fit_statsを使う）。"
+            "_run_cluster_caseはuse_t=Trueを指定する（cluster時に既定の"
             "正規分布ではなく自由度G-1のt分布を使う本プロジェクトの方針"
-            "〔docs/spec/ols-spec.md「標準誤差」〕に合わせた。params/std_errorsは"
-            "use_tに依存しないため既存フィクスチャの値に影響なし）。"
+            "〔docs/spec/ols-spec.md「標準誤差」〕に合わせる。params/std_errorsは"
+            "use_tに依存しない）。"
             "high_condition_number/moderate_multicollinearityにもcluster"
-            "エントリを追加（従来クラスター系はbaselineシナリオのみで、"
-            "悪条件・多重共線性シナリオとの組み合わせが未検証だった。"
+            "エントリを持つ（悪条件・多重共線性シナリオとの組み合わせの確認用。"
             "均等な疑似グループ（行番号%10）のみ）。"
             "baseline.no_interceptはinclude_intercept=False（切片なし）を"
-            "COV_TYPES全種＋clusterと組み合わせて確認する（従来ライブ"
-            "statsmodels比較〔ad-hocデータ1パターン〕のみだったものを、"
-            "他オプションと同じ凍結フィクスチャに統合）。"
+            "COV_TYPES全種＋clusterと組み合わせて確認する。"
             "baseline.hac_lagsは自動選択とは別に明示したHACラグ"
             f"（{HAC_LAGS_EXPLICIT}、キーは文字列。0はHC0相当）。"
             "baseline.confidence_levelはconfidence_level="
             f"{CONFIDENCE_LEVEL_NON_DEFAULT}（既定0.95以外）をCOV_TYPES全種＋"
-            "clusterと組み合わせて確認する（従来相対比較〔幅の広さの"
-            "単調性のみ〕だったものを、具体的な数値の正しさまで検証する"
-            "よう拡張）。"
+            "clusterと組み合わせて確認する（幅の広さの単調性だけでなく、"
+            "具体的な数値の正しさまで検証する）。"
         ),
     }
     return group_by_dataset_source(

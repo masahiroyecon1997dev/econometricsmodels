@@ -265,8 +265,7 @@ $$
   `mroz`（`inlf ~ nwifeinc + educ + exper + expersq + age + kidslt6 + kidsge6`、Logit/Probitと同じ
   回帰式。被説明変数が0/1の線形確率モデルで、分散がxに依存するためclassicalとHC0-3の差が大きく出る）の
   Wooldridgeデータセット3つ、classical/HC0-3で主リファレンス（statsmodels、`test_ols_reference.py`）・
-  独立実装（R、`test_ols_crosscheck.py`）の両方と照合する（従来Rクロスチェック側にしか
-  無かった実データ検証をstatsmodels側にも追加）。`mroz`はクラスターに使える自然なカテゴリ列が
+  独立実装（R、`test_ols_crosscheck.py`）の両方と照合する。`mroz`はクラスターに使える自然なカテゴリ列が
   無く（`city`はG=2でG<=qのため`ValidationError`）、HACも時系列順が無いため対象外。
 - 列数・列順に依存するapiテスト（`param_names`の並び、`params_table`/`conf_int`のキー、
   `predict()`/`augment()`の列の扱い、`include_intercept=False`）は、共有の`dataset`（説明変数2列）

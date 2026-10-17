@@ -474,8 +474,7 @@ def test_confidence_level_cluster_matches_linearmodels(fixtures):
 @pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
 def test_card_matches_linearmodels(fixtures, cov_type):
     """実データセット（Wooldridge card、Card 1995の大学近接操作変数による教育の
-    収益率推定）。`testing-policy.md`「テスト用データセット」2.が要求する実データ
-    検証がIV系統に無かった。
+    収益率推定）。`testing-policy.md`「テスト用データセット」2.の実データ検証。
     """
     df = load_wooldridge_dataset("card")
     options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))

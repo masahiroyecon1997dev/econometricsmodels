@@ -61,6 +61,18 @@ CLUSTER_FITS = {
         ["z", "z2"],
         IVOptions(**CLUSTER),
     ).fit(),
+    # GMMの重み行列用のクラスター列は、`cov_type`用とは別の抽出箇所を通る
+    # （`cov_type`はclassicalのまま、重みだけがクラスター列を使う）。
+    "IV.gmm_weight": lambda d: IV(
+        d,
+        "y",
+        ["x2"],
+        ["x1"],
+        ["z", "z2"],
+        IVOptions(
+            estimator="gmm", gmm_weight_type="cluster", cluster="cluster"
+        ),
+    ).fit(),
     "FE": lambda d: FE(d, "y", ["x1"], "entity", FEOptions(**CLUSTER)).fit(),
     "RE": lambda d: RE(d, "y", ["x1"], "entity", REOptions(**CLUSTER)).fit(),
 }

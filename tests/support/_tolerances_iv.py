@@ -48,5 +48,10 @@ IV_TOLERANCES: dict[str, dict[str, float]] = {
     "iv_api": {
         "atol_hac_time_reorder": 1e-12,
         "min_rel_hac_time_row_order_effect": 1e-3,
+        # 過剰識別検定が棄却しないデータ（`iv_baseline`、実測p値は2SLS・GMM各重みで
+        # 0.57〜0.60）と、明確に棄却するデータ（`invalid_instrument`、実測p値は
+        # 5.7e-8〜1.4e-5）を分ける閾値。比較許容誤差ではなく、棄却の有無の境界。
+        "overid_valid_min_p_value": 0.05,
+        "overid_rejection_max_p_value": 1e-4,
     },
 }

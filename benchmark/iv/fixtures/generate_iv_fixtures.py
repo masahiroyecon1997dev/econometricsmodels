@@ -156,8 +156,7 @@ def build_fixtures() -> dict:
             )
 
     # 実データセット（Wooldridge card、Card 1995の大学近接操作変数による教育の
-    # 収益率推定）。testing-policy.md「テスト用データセット」2.（実データセット）の
-    # 要求に対しIV系統は未対応だった。
+    # 収益率推定）。testing-policy.md「テスト用データセット」2.（実データセット）。
     fixtures["card"] = {}
     for cov_type in LINEARMODELS_COV_TYPES:
         fixtures["card"][cov_type] = run(

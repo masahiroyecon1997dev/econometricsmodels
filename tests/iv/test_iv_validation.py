@@ -276,26 +276,44 @@ def test_y_empty_string_raises(iv_dataset):
         ).fit()
 
 
-@pytest.mark.parametrize("bad_col", ["y", "x1", "endog1", "z1"])
+_ROLE_COLUMNS = ["y", "x1", "x2", "endog1", "endog2", "z1", "z2"]
+_ROLE_VALUES: dict[str, list[float]] = {
+    "y": [1.0, 2.0, 3.0, 4.0],
+    "x1": [0.5, 1.5, 2.5, 3.5],
+    "x2": [3.0, 1.0, 4.0, 2.0],
+    "endog1": [2.0, 1.0, 4.0, 3.0],
+    "endog2": [1.0, 4.0, 2.0, 3.0],
+    "z1": [1.0, 3.0, 2.0, 4.0],
+    "z2": [4.0, 2.0, 3.0, 1.0],
+}
+
+
+def _fit_all_roles(df: pl.DataFrame) -> None:
+    """`x_exog`・`x_endog`・`instruments`のいずれも2本以上持つ構成でfitする
+    （リスト引数の先頭だけでなく、2本目以降の列でも検証するため）。
+    """
+    IV(
+        df,
+        y="y",
+        x_exog=["x1", "x2"],
+        x_endog=["endog1", "endog2"],
+        instruments=["z1", "z2"],
+    ).fit()
+
+
+@pytest.mark.parametrize("bad_col", _ROLE_COLUMNS)
 def test_null_values_raise(bad_col):
     """欠損値は`column_extraction`の責務で`ValidationError`。`y`列だけでなく
     `x_exog`/`x_endog`/`instruments`側の列でも検証する。
     """
-    values: dict[str, list[float | None]] = {
-        "y": [1.0, 2.0, 3.0, 4.0],
-        "x1": [0.5, 1.5, 2.5, 3.5],
-        "endog1": [2.0, 1.0, 4.0, 3.0],
-        "z1": [1.0, 3.0, 2.0, 4.0],
-    }
+    values: dict[str, list[float | None]] = dict(_ROLE_VALUES)
     values[bad_col] = [values[bad_col][0], None, *values[bad_col][2:]]
     df = pl.DataFrame(values)
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name=bad_col, count=1),
     ):
-        IV(
-            df, y="y", x_exog=["x1"], x_endog=["endog1"], instruments=["z1"]
-        ).fit()
+        _fit_all_roles(df)
 
 
 @pytest.mark.parametrize(
@@ -303,19 +321,14 @@ def test_null_values_raise(bad_col):
     [(float("nan"), "NaN"), (float("inf"), "inf")],
     ids=["nan", "inf"],
 )
-@pytest.mark.parametrize("bad_col", ["y", "x1", "endog1", "z1"])
+@pytest.mark.parametrize("bad_col", _ROLE_COLUMNS)
 def test_non_finite_values_raise(bad_col, value, display):
     """NaN・無限大は`column_extraction.rs`内でnull（`test_null_values_raise`）
     とは別ロジックのため個別に確認する。`y`列だけでなく`x_exog`/`x_endog`/
-    `instruments`側の列でも検証する（`test_null_values_raise`と同じ理由。
-    IVにも同型のテストを追加、IVには`predict()`が無いため比較対象は無い）。
+    `instruments`側の列でも、リスト引数の2本目以降も含めて検証する
+    （`test_null_values_raise`と同じ理由）。
     """
-    values: dict[str, list[float]] = {
-        "y": [1.0, 2.0, 3.0, 4.0],
-        "x1": [0.5, 1.5, 2.5, 3.5],
-        "endog1": [2.0, 1.0, 4.0, 3.0],
-        "z1": [1.0, 3.0, 2.0, 4.0],
-    }
+    values: dict[str, list[float]] = dict(_ROLE_VALUES)
     values[bad_col] = [values[bad_col][0], value, *values[bad_col][2:]]
     df = pl.DataFrame(values)
     with pytest.raises(
@@ -327,23 +340,16 @@ def test_non_finite_values_raise(bad_col, value, display):
             row=1,
         ),
     ):
-        IV(
-            df, y="y", x_exog=["x1"], x_endog=["endog1"], instruments=["z1"]
-        ).fit()
+        _fit_all_roles(df)
 
 
-@pytest.mark.parametrize("bad_col", ["y", "x1", "endog1", "z1"])
+@pytest.mark.parametrize("bad_col", _ROLE_COLUMNS)
 def test_non_numeric_dtype_raises(bad_col):
     """文字列列は、dtypeの時点で`ValidationError`。`y`列だけでなく
     `x_exog`/`x_endog`/`instruments`側の列でも検証する（`test_null_values_raise`
     と同じ理由。`test_ols_validation.py::test_non_numeric_dtype_raises`参照）。
     """
-    values: dict[str, list] = {
-        "y": [1.0, 2.0, 3.0, 4.0],
-        "x1": [0.5, 1.5, 2.5, 3.5],
-        "endog1": [2.0, 1.0, 4.0, 3.0],
-        "z1": [1.0, 3.0, 2.0, 4.0],
-    }
+    values: dict[str, list] = dict(_ROLE_VALUES)
     values[bad_col] = ["a", "b", "c", "d"]
     df = pl.DataFrame(values)
     with pytest.raises(
@@ -354,9 +360,7 @@ def test_non_numeric_dtype_raises(bad_col):
             dtype="String",
         ),
     ):
-        IV(
-            df, y="y", x_exog=["x1"], x_endog=["endog1"], instruments=["z1"]
-        ).fit()
+        _fit_all_roles(df)
 
 
 def test_insufficient_observations_raises(iv_dataset):
@@ -836,27 +840,53 @@ def test_perfect_multicollinearity_raises_computation_error():
         ).fit()
 
 
+def _singular_first_stage_case(
+    label: str, column: str, expr: pl.Expr, include_intercept: bool
+):
+    return pytest.param(
+        column,
+        expr,
+        include_intercept,
+        id=f"{label}-intercept={include_intercept}",
+    )
+
+
+# 切片に依存する共線性（`const`と比例する）は切片ありのみ。それ以外
+# （操作変数同士の比例、操作変数と`x_exog`の共線）は切片の有無によらず特異になる。
+_SINGULAR_FIRST_STAGE_CASES = [
+    _singular_first_stage_case(
+        "instruments_collinear_with_constant",
+        "z2",
+        2 * pl.col("z1") + 1,
+        True,
+    ),
+    _singular_first_stage_case("instrument_constant", "z1", pl.lit(5.0), True),
+    *(
+        _singular_first_stage_case(label, "z2", expr, include_intercept)
+        for include_intercept in (True, False)
+        for label, expr in (
+            ("instruments_proportional", 2 * pl.col("z1")),
+            (
+                "instrument_collinear_with_x_exog",
+                pl.col("x1") + pl.col("z1"),
+            ),
+        )
+    ),
+]
+
+
 @pytest.mark.parametrize("estimator", ["2sls", "gmm"])
 @pytest.mark.parametrize(
-    ("label", "column", "expr"),
-    [
-        ("instruments_collinear", "z2", 2 * pl.col("z1") + 1),
-        (
-            "instrument_collinear_with_x_exog",
-            "z2",
-            pl.col("x1") + pl.col("z1"),
-        ),
-        ("instrument_constant", "z1", pl.lit(5.0)),
-    ],
+    ("column", "expr", "include_intercept"), _SINGULAR_FIRST_STAGE_CASES
 )
 def test_collinear_instruments_raise_computation_error(
-    iv_dataset, estimator, label, column, expr
+    iv_dataset, estimator, column, expr, include_intercept
 ):
-    """`instruments`同士の共線、`instruments`と`x_exog`の共線（`const`込みの
-    `Z=[const, x_exog, instruments]`が列ランク落ち）、定数の操作変数（`const`と共線）は、
-    いずれも第一段階回帰の設計行列が特異になり`ComputationError`
-    （`IvError::FirstStageFailed`）。第一段階は`estimator`によらず先に走るため、
-    2SLSとGMMで同じ経路・同じメッセージになる。
+    """`instruments`同士の共線、`instruments`と`x_exog`の共線（`Z=[const, x_exog,
+    instruments]`が列ランク落ち）、定数の操作変数（`const`と共線）は、いずれも第一段階
+    回帰の設計行列が特異になり`ComputationError`（`IvError::FirstStageFailed`）。
+    第一段階は`estimator`によらず先に走るため、2SLSとGMMで同じ経路・同じメッセージに
+    なる。切片に依存しない共線性は`include_intercept=False`でも同じ。
     """
     df = iv_dataset.with_columns(expr.alias(column))
     with pytest.raises(
@@ -867,28 +897,71 @@ def test_collinear_instruments_raise_computation_error(
             source=iv_msgs.SINGULAR_DESIGN_MATRIX,
         ),
     ):
-        our_fit(df, options=IVOptions(estimator=estimator))
+        our_fit(
+            df,
+            options=IVOptions(
+                estimator=estimator, include_intercept=include_intercept
+            ),
+        )
 
 
-@pytest.mark.parametrize("estimator", ["2sls", "gmm"])
-@pytest.mark.parametrize("label", ["x_endog_collinear", "x_endog_with_x_exog"])
-def test_collinear_x_endog_raises_computation_error(estimator, label):
-    """第一段階は成功するが構造方程式の説明変数が共線になるケース。第一段階は
-    内生変数ごとに独立に走り、各回帰の設計行列`[const, x_exog, instruments]`は
-    特異にならない。`x_endog`同士が共線（`endog2 = 2*endog1+3`）、または
-    `x_endog`が`x_exog`と共線（`endog1 = 3*x1`）だと、第二段階の設計行列
-    `[const, x_exog, x̂_endog]`が特異になる（`second_stage_input`経路）。
-    2SLSは第二段階回帰の`ComputationError`
-    （`IvError::SecondStageFailed`）、GMMは第二段階を持たず`X'ZWZ'X`の
-    逆行列が取れずに`ComputationError`になる。
+def _second_stage_singular_frame(label: str):
+    """第一段階は成功し、構造方程式の説明変数が共線になる入力
+    `(df, x_exog, x_endog, instruments)`。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv")
     if label == "x_endog_collinear":
-        df = df.with_columns((2 * pl.col("endog1") + 3).alias("endog2"))
-        x_endog = ["endog1", "endog2"]
-    else:
-        df = df.with_columns((3 * pl.col("x1")).alias("endog1"))
-        x_endog = ["endog1"]
+        return (
+            df.with_columns((2 * pl.col("endog1")).alias("endog2")),
+            ["x1"],
+            ["endog1", "endog2"],
+            ["z1", "z2", "z3"],
+        )
+    if label == "x_endog_with_x_exog":
+        return (
+            df.with_columns((3 * pl.col("x1")).alias("endog1")),
+            ["x1"],
+            ["endog1"],
+            ["z1", "z2"],
+        )
+    # 操作変数`z1`が内生変数と（中心化後に）厳密に無相関: 第一段階の予測値が定数に
+    # なり、第二段階で`const`と共線になる（階数条件の違反）。
+    assert label == "instrument_irrelevant"
+    small = pl.DataFrame(
+        {
+            "y": [1.0, 2.0, 3.0, 5.0],
+            "endog1": [1.0, 4.0, 4.0, 1.0],
+            "z1": [1.0, 2.0, 3.0, 4.0],
+        }
+    )
+    return small, [], ["endog1"], ["z1"]
+
+
+@pytest.mark.parametrize("estimator", ["2sls", "gmm"])
+@pytest.mark.parametrize(
+    ("label", "include_intercept"),
+    [
+        ("x_endog_collinear", True),
+        ("x_endog_collinear", False),
+        ("x_endog_with_x_exog", True),
+        ("x_endog_with_x_exog", False),
+        # 厳密に無相関な操作変数は`const`との共線性（切片あり）でのみ特異になる。
+        ("instrument_irrelevant", True),
+    ],
+)
+def test_second_stage_singular_raises_computation_error(
+    estimator, label, include_intercept
+):
+    """第一段階は成功するが構造方程式の説明変数が共線になるケース。第一段階は
+    内生変数ごとに独立に走り、各回帰の設計行列`[const, x_exog, instruments]`は
+    特異にならない。`x_endog`同士が共線（`endog2 = 2*endog1`）、`x_endog`が
+    `x_exog`と共線（`endog1 = 3*x1`）、または操作変数が内生変数と厳密に無相関
+    （階数条件の違反）だと、第二段階の設計行列`[const, x_exog, x̂_endog]`が特異になる
+    （`second_stage_input`経路）。2SLSは第二段階回帰の`ComputationError`
+    （`IvError::SecondStageFailed`）、GMMは第二段階を持たず`X'ZWZ'X`の逆行列が
+    取れずに`ComputationError`になる。
+    """
+    df, x_exog, x_endog, instruments = _second_stage_singular_frame(label)
     match = (
         escaped(
             iv_msgs.SECOND_STAGE_FAILED, source=iv_msgs.SINGULAR_DESIGN_MATRIX
@@ -899,9 +972,12 @@ def test_collinear_x_endog_raises_computation_error(estimator, label):
     with pytest.raises(ComputationError, match=match):
         our_fit(
             df,
+            x_exog=x_exog,
             x_endog=x_endog,
-            instruments=["z1", "z2", "z3"],
-            options=IVOptions(estimator=estimator),
+            instruments=instruments,
+            options=IVOptions(
+                estimator=estimator, include_intercept=include_intercept
+            ),
         )
 
 

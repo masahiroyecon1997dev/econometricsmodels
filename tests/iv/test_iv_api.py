@@ -242,8 +242,14 @@ def test_overid_test_rejects_only_when_instrument_is_invalid(
     )
     assert valid.overid_p_value is not None
     assert invalid.overid_p_value is not None
-    assert valid.overid_p_value > 0.05
-    assert 0.0 < invalid.overid_p_value < 1e-4
+    assert (
+        valid.overid_p_value > TOLERANCES["iv_api"]["overid_valid_min_p_value"]
+    )
+    assert (
+        0.0
+        < invalid.overid_p_value
+        < TOLERANCES["iv_api"]["overid_rejection_max_p_value"]
+    )
 
 
 @pytest.mark.parametrize("scenario", MULTI_ENDOG_SCENARIOS)

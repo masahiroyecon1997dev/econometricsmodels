@@ -5,7 +5,7 @@
 generate_iv_gmm_fixtures.py`で生成）を読み込み、`NUMERIC_SCENARIOS`の各合成データシナリオ×
 classical/HC0/HC1/HAC（+クラスター、baselineのみ）を`gmm_weight_type="classical"`
 固定で、加えてbaselineシナリオ×`cov_type="classical"`固定で他の`gmm_weight_type`
-（robust/cluster/kernel）を検証する。`gmm_weight_type`×`cov_type`の全組み合わせ
+（robust/cluster/hac）を検証する。`gmm_weight_type`×`cov_type`の全組み合わせ
 （`NUMERIC_SCENARIOS`×4weight_type×6cov_type）は規模が大きすぎるため対象にしない。
 複数内生変数（`MULTI_ENDOG_SCENARIOS`）はclassical重みに加えて、
 `MULTI_ENDOG_OTHER_WEIGHT_TYPES`の重みを検証する。

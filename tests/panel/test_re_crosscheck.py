@@ -43,7 +43,7 @@ fixtures/generate_re_crosscheck_fixtures.py`で生成）を用いて、linearmod
 補助回帰版は統計量が構造的に非負になるため符号処理は不要。`plm`は補助回帰の
 定数項に準偏差変換前の`1`を使い、本実装もこれに合わせている。バランスパネルでは
 機械精度で一致し、不均衡パネルではSwamy-Arora分散成分の差（σ_u²）で数％ずれる
-（`_UNBALANCED_HAUSMAN_SCENARIO`）。
+（`UNBALANCED_SCENARIO`）。
 
 ## 許容誤差について
 
@@ -147,10 +147,11 @@ RTOL_HAUSMAN_ILL_CONDITIONED = TOLERANCES["re_crosscheck"][
 ]
 ATOL_HAUSMAN_P_VALUE = TOLERANCES["re_crosscheck"]["atol_hausman_p_value"]
 
-# plm/linearmodelsの分散成分（σ_u²）推定の差でθが変わり、ハウスマン統計量への
-# 増幅がparams/std_errorsよりさらに大きくなる唯一のシナリオ（モジュールdoc「許容誤差に
-# ついて」参照）。
-_UNBALANCED_HAUSMAN_SCENARIO = UNBALANCED_SCENARIO
+# 条件数が大きく、ハウスマン統計量にだけ専用の緩めたrtol
+# （`rtol_hausman_ill_conditioned`）を使うシナリオ。不均衡の
+# `UNBALANCED_SCENARIO`は、plm/linearmodelsの分散成分（σ_u²）推定の差でθが
+# 変わり、ハウスマン統計量への増幅がparams/std_errorsよりさらに大きくなる
+# （モジュールdoc「許容誤差について」参照）。
 _ILL_CONDITIONED_HAUSMAN_SCENARIO = "high_condition_number"
 
 
@@ -197,7 +198,7 @@ ALL_CASES = [
 
 def _f_rtol_for(scenario: str, cov_type: str) -> float:
     """F統計量のrtol。不均衡パネルのみ分散成分の差をcov_type別に許容する。"""
-    if scenario != _UNBALANCED_HAUSMAN_SCENARIO:
+    if scenario != UNBALANCED_SCENARIO:
         return RTOL_BALANCED
     return RTOL_UNBALANCED_F[cov_type]
 
@@ -205,7 +206,7 @@ def _f_rtol_for(scenario: str, cov_type: str) -> float:
 def _rtols_for(scenario: str, cov_type: str) -> tuple[float, float]:
     """(係数のrtol, se・t・p値・信頼区間のrtol)。不均衡パネルのみSwamy-Arora
     分散成分の差を統計量・cov_type別に許容する（モジュールdoc参照）。"""
-    if scenario != _UNBALANCED_HAUSMAN_SCENARIO:
+    if scenario != UNBALANCED_SCENARIO:
         return RTOL_BALANCED, RTOL_BALANCED
     return RTOL_UNBALANCED_COEF, RTOL_UNBALANCED[cov_type]
 
@@ -266,7 +267,7 @@ def _check_hausman(
     scenario: str | None = None,
 ) -> None:
     rtol_p_value = None
-    if scenario == _UNBALANCED_HAUSMAN_SCENARIO:
+    if scenario == UNBALANCED_SCENARIO:
         rtol_hausman = RTOL_HAUSMAN_UNBALANCED[cov_type]
         rtol_p_value = RTOL_HAUSMAN_P_VALUE_UNBALANCED[cov_type]
     elif scenario == _ILL_CONDITIONED_HAUSMAN_SCENARIO:
@@ -327,7 +328,7 @@ def test_matches_plm(crosscheck, scenario, cov_type):
         rtol=rtol,
         coef_rtol=coef_rtol,
         f_rtol=_f_rtol_for(scenario, cov_type),
-        balanced=scenario != _UNBALANCED_HAUSMAN_SCENARIO,
+        balanced=scenario != UNBALANCED_SCENARIO,
     )
 
 

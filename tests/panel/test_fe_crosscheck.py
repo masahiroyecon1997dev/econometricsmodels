@@ -46,7 +46,8 @@ wagepan（T=8）は`WAGEPAN_X`が3変数で`T-1=7 > q=3`のため対象に含み
   `test_fe_plm_crosscheck.py`が持つ）。
 - **2-wayでentity以外のcluster列**: 時間効果とネストする`time`、どちらの
   固定効果ともネストしない列、`G = q+1`の境界、サイズが偏ったクラスター
-  （`K.fixef="nonnested"`の別々の分岐。`TWO_WAY_CLUSTER_CASES`）。
+  （`TWO_WAY_CLUSTER_CASES`）。fixestの`K.fixef="nonnested"`が分岐するのは
+  ネストする`time`とそれ以外の2通り。
 
 役割分担:
     - 構造・API・`fixed_effects()`: `test_fe_api.py`
@@ -335,16 +336,21 @@ def test_cluster_g3_two_slopes_matches_fixest(crosscheck):
 def test_two_way_cluster_on_non_entity_column_matches_fixest(crosscheck, case):
     """2-wayでentity以外の列によるクラスタリング（時間効果とネストする`time`、
     ネストしない列、`G = q+1`の境界、サイズが偏ったクラスター）。fixestの
-    `K.fixef="nonnested"`の別々の分岐を踏む（`TWO_WAY_CLUSTER_CASES`参照）。"""
+    `K.fixef="nonnested"`が分岐するのはネストする`time`とそれ以外の2通りで、
+    `G = q+1`は自由度の境界、サイズが偏ったクラスターはサイズの偏りを加える
+    （`TWO_WAY_CLUSTER_CASES`参照）。分母自由度は全ケースで`G-1`。"""
     df, cluster = two_way_cluster_frame(case)
     options = FEOptions(cov_type="cluster", cluster=cluster, time="time")
     res = FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 
     n_clusters = df[cluster].n_unique()
     assert res.stat_df == n_clusters - 1
+    assert res.f_df_denom == n_clusters - 1
     _check_result(
         res,
-        crosscheck["synthetic"]["baseline"][TWO_WAY_CLUSTER_CASES[case][2]],
+        crosscheck["synthetic"]["baseline"][
+            TWO_WAY_CLUSTER_CASES[case].fixture_key
+        ],
         f"baseline/two_way/cluster={case}",
     )
 

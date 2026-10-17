@@ -40,10 +40,10 @@ dkはfixestの既定バンド幅（`n_t^0.25`）が本実装の既定
 - **dkの明示バンド幅**: `DK_EXPLICIT_BANDWIDTHS`のシナリオで`T-1`未満の値
   （fixestは`bandwidth == T-1`で最終ラグを落とすため、その境界はplm側
   `generate_fe_plm_crosscheck_fixtures.py`が持つ）。
-- **2-wayでentity以外のcluster列**: `TWO_WAY_CLUSTER_CASES`の4ケース
-  （時間効果とネストする`time`、どちらの固定効果ともネストしない列、
-  `G = q+1`の境界、サイズが偏ったクラスター）。fixestの
-  `K.fixef="nonnested"`が分岐する。
+- **2-wayでentity以外のcluster列**: `TWO_WAY_CLUSTER_CASES`の4ケース。
+  fixestの`K.fixef="nonnested"`が分岐するのは、時間効果とネストする`time`と、
+  どちらの固定効果ともネストしない列（残り3ケース）の2通り。`G = q+1`の
+  境界は自由度の境界、サイズが偏ったクラスターはサイズの偏りを加える。
 
 使用例（リポジトリルートから）:
     python -m benchmark.panel.fixtures.generate_fe_crosscheck_fixtures
@@ -55,6 +55,7 @@ import subprocess
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import NamedTuple
 
 import polars as pl
 
@@ -101,9 +102,9 @@ WAGEPAN_FORMULA_RHS = " + ".join(WAGEPAN_X)
 # 0（ラグ項なし）・1を入れる。系列相関が最も効くautocorrelatedも対象にする。
 # fixestは`bandwidth == T-1`で最終ラグを落とす（`fe-spec.md`3.3節）ため
 # `T-1`未満に限る（`T-1`はplm側`generate_fe_plm_crosscheck_fixtures.py`が
-# 持つ）。T=25の
-# cross_sectionally_correlatedだけは、T=6では動かないカーネルの3ラグ超の項を
-# 通すため中間の12も加える。2-wayはバランスパネル（TWO_WAY_SCENARIOS）のみ。
+# 持つ）。T=25のcross_sectionally_correlatedだけは、T=6では動かない
+# カーネルの3ラグ超の項を通すため中間の12も加える。2-wayはバランスパネル
+# （TWO_WAY_SCENARIOS）のみ。plmの明示バンド幅も同じ辞書を使う。
 DK_EXPLICIT_BANDWIDTHS: dict[str, list[int]] = {
     "baseline": [0, 1, 3],
     "autocorrelated": [0, 1, 3],
@@ -140,8 +141,10 @@ def _run_dk_explicit_bandwidth(
 
 
 # 2-wayでentity以外の列でクラスタリングするケース（`baseline.two_way_cluster_*`
-# と同じ`fe_baseline*.csv`上の動的列）。ケース名 -> (CSV名, クラスター列名,
-# フィクスチャのキー)。
+# と同じ`fe_baseline*.csv`上の動的列）。ケース名 -> `TwoWayClusterCase`。
+# fixestの`K.fixef="nonnested"`が分岐するのはtime（ネストする）とそれ以外
+# （ネストしない）の2通りで、g3_boundaryは自由度の境界、imbalancedはサイズの
+# 偏りを加える。
 #
 # - time: 時間効果とネストするクラスター。fixestの`K.fixef="nonnested"`は、
 #   クラスターにネストする固定効果を自由度に数えない分岐を踏む（entity効果
@@ -152,19 +155,23 @@ def _run_dk_explicit_bandwidth(
 #   `G-1 = q`）。fixestの`wald()`が分母自由度を切り上げる境界。
 # - imbalanced: サイズが偏ったクラスター（`fe_baseline_cluster_imbalanced.csv`、
 #   entity=20×period=10のn=200、サイズ[2,3,5,10,30,50]のタイル）。
-TWO_WAY_CLUSTER_CASES: dict[str, tuple[str, str, str]] = {
-    "time": ("fe_baseline.csv", "time", "two_way_cluster_time"),
-    "nonnested": (
-        "fe_baseline.csv",
-        "cluster_group",
-        "two_way_cluster_nonnested",
+class TwoWayClusterCase(NamedTuple):
+    csv_name: str
+    cluster: str  # クラスター列名
+    fixture_key: str  # `fixtures["baseline"]`のキー
+
+
+TWO_WAY_CLUSTER_CASES: dict[str, TwoWayClusterCase] = {
+    "time": TwoWayClusterCase(
+        "fe_baseline.csv", "time", "two_way_cluster_time"
     ),
-    "g3_boundary": (
-        "fe_baseline.csv",
-        "cluster_group",
-        "two_way_cluster_g3_boundary",
+    "nonnested": TwoWayClusterCase(
+        "fe_baseline.csv", "cluster_group", "two_way_cluster_nonnested"
     ),
-    "imbalanced": (
+    "g3_boundary": TwoWayClusterCase(
+        "fe_baseline.csv", "cluster_group", "two_way_cluster_g3_boundary"
+    ),
+    "imbalanced": TwoWayClusterCase(
         "fe_baseline_cluster_imbalanced.csv",
         "cluster_group",
         "two_way_cluster_imbalanced",
@@ -178,6 +185,8 @@ def two_way_cluster_frame(case: str) -> tuple[pl.DataFrame, str]:
     生成側・テスト側で同じデータを共有する。"""
     csv_name, cluster, _ = TWO_WAY_CLUSTER_CASES[case]
     df = pl.read_csv(DATA_DIR / csv_name)
+    if case == "time":
+        return df, cluster
     if case == "nonnested":
         groups = [str(i % 4) for i in range(df.height)]
     elif case == "g3_boundary":
@@ -188,7 +197,7 @@ def two_way_cluster_frame(case: str) -> tuple[pl.DataFrame, str]:
     elif case == "imbalanced":
         groups = imbalanced_cluster_groups(df.height)
     else:
-        return df, cluster
+        raise ValueError(f"unknown two-way cluster case: {case}")
     return df.with_columns(pl.Series(cluster, groups)), cluster
 
 
@@ -359,8 +368,8 @@ def build_fixtures() -> dict:
         fixtures["baseline"]["dk_three_periods"] = _run_dk_three_periods_case(
             tmpdir
         )
-        for case, (_, _, key) in TWO_WAY_CLUSTER_CASES.items():
-            fixtures["baseline"][key] = _run_two_way_cluster_case(
+        for case, spec in TWO_WAY_CLUSTER_CASES.items():
+            fixtures["baseline"][spec.fixture_key] = _run_two_way_cluster_case(
                 tmpdir, case=case
             )
         fixtures["baseline_df1"] = {
@@ -430,7 +439,9 @@ def build_fixtures() -> dict:
             "max(df2, df1+1)に切り上げる（G-1<=q・T-1<=q・df_resid<=qの境界でt検定と"
             "食い違う）ため使わず、統計量とdegrees_freedom(model, 't', vcov)から"
             "pf()で計算し直している。その境界はbaseline.cluster_g2（q=1）・"
-            "baseline.cluster_g3_two_slopes（G=q+1、q=2）・baseline.dk_three_periods"
+            "baseline.cluster_g3_two_slopes（G=q+1、q=2）・"
+            "baseline.two_way_cluster_g3_boundary（2-way、G=q+1、q=2）・"
+            "baseline.dk_three_periods"
             "（T=q+1、q=2）・baseline_df1.*_robust（df_resid=1のhc1-hc3）が踏む。"
             "dkのバンド幅は本実装の既定floor(4*(T/100)^(2/9))を明示的に"
             "DK(lag)に渡している（fixestの既定n_t^0.25とは異なる）。"

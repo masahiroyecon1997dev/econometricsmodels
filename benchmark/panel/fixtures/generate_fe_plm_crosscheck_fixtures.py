@@ -25,7 +25,8 @@ entity単位のため、クラスター数の境界（`G = q+1`、`G = 2`）は�
 観測数が偏った不均衡（`skewed_entity_sizes`）も、クラスター列を偏らせる
 代わりにentityあたりの観測数を[2,3,5,10]で偏らせる。dkの時点数境界
 （`dk_three_periods`、T=q+1）はfixest側と同じ絞り込みを共有する。
-`dk_explicit_bandwidth`はバンド幅0と1を明示指定した場合、`dk_max_bandwidth`は
+`dk_explicit_bandwidth`はdkのバンド幅を既定値以外（0・1・3、T=25は12も）で
+明示指定した場合（fixestと同じ`DK_EXPLICIT_BANDWIDTHS`）、`dk_max_bandwidth`は
 下記のT-1境界。
 
 ## `bandwidth == T-1`の参照値
@@ -59,6 +60,7 @@ from benchmark.common import (
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
 from benchmark.panel.fixtures.generate_fe_crosscheck_fixtures import (
+    DK_EXPLICIT_BANDWIDTHS,
     SCENARIO_COV_TYPES,
     dk_three_periods_frame,
 )
@@ -81,18 +83,6 @@ WAGEPAN_FORMULA_RHS = " + ".join(WAGEPAN_X)
 
 # `bandwidth == T-1`境界を検証するシナリオ（バランス・不均衡・短いT=4）。
 MAX_BANDWIDTH_SCENARIOS = ["baseline", "unbalanced", "small_panel"]
-
-# dkのバンド幅を既定値以外（0=Newey-West補正なしのクロスセクション相関のみ、
-# 1、既定式がT=6でもT=25でも2になるため既定より大きい3）で明示指定する
-# シナリオとバンド幅。T=25のcross_sectionally_correlatedだけは、T=6では
-# 動かないカーネルの3ラグ超の項を通すため中間の12も加える。
-_COMMON_BANDWIDTHS = [0, 1, 3]
-DK_EXPLICIT_BANDWIDTHS: dict[str, list[int]] = {
-    "baseline": _COMMON_BANDWIDTHS,
-    "autocorrelated": _COMMON_BANDWIDTHS,
-    "unbalanced": _COMMON_BANDWIDTHS,
-    "cross_sectionally_correlated": [*_COMMON_BANDWIDTHS, 12],
-}
 
 # entityあたりの観測数を偏らせる（先頭から数えた期数）。entityごとに循環して
 # 割り当てる（`testing-policy.md`「テスト用データセット」3.の偏ったサイズ）。

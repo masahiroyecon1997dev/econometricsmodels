@@ -147,9 +147,9 @@ HAUSMAN_KEY = "hausman"
 # 確かめる。T=25のcross_sectionally_correlatedだけは、T=6では動かないカーネルの
 # 3ラグ超の項を通すため中間の12も加える。
 DK_EXPLICIT_BANDWIDTH_KEY = "dk_explicit_bandwidth"
+HAUSMAN_DK_BANDWIDTH_KEY = "hausman_dk_bandwidth"
 # plmとSwamy-Arora分散成分が異なる（本実装はlinearmodels準拠）不均衡パネル。
 UNBALANCED_SCENARIO = "unbalanced"
-HAUSMAN_DK_BANDWIDTH_KEY = "hausman_dk_bandwidth"
 DK_EXPLICIT_BANDWIDTHS: dict[str, list[int]] = {
     "baseline": [0, 2, 3],
     "autocorrelated": [0, 2, 3],

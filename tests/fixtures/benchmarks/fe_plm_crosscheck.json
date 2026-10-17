@@ -1618,7 +1618,7 @@
   },
   "_meta": {
     "method": "fe",
-    "generated_at": "2026-10-17T13:16:48.592653+00:00",
+    "generated_at": "2026-10-17T13:33:03.292601+00:00",
     "reference": "plm (R) within + sandwich",
     "r_version": "4.5.3",
     "plm_version": "2.6.7",

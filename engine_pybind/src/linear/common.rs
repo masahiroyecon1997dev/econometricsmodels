@@ -95,8 +95,7 @@ pub(crate) fn parse_cov_type(
 ) -> PyResult<(EngineCovType, String)> {
     // 未知の`cov_type`は「unknown cov_type」を優先して報告する（先に未使用オプションを
     // 指摘すると、typoの`cov_type`に対して`cluster`を消す方向へ誤誘導するため）。
-    let parsed = build_cov_type(df, cov_type, cluster, hac_lags, hac_time)?;
-    let cov_type_lower = cov_type.to_lowercase();
+    let (parsed, cov_type_lower) = build_cov_type(df, cov_type, cluster, hac_lags, hac_time)?;
     let is_hac = cov_type_lower == "hac";
     reject_unused_option(
         "cluster",
@@ -106,7 +105,7 @@ pub(crate) fn parse_cov_type(
     )?;
     reject_unused_option("hac_lags", hac_lags.is_some(), is_hac, "cov_type=\"hac\"")?;
     reject_unused_option("hac_time", hac_time.is_some(), is_hac, "cov_type=\"hac\"")?;
-    Ok(parsed)
+    Ok((parsed, cov_type_lower))
 }
 
 /// HAC（`cov_type="hac"`・IV GMMの`gmm_weight_type="hac"`）の時間順序列`hac_time`が

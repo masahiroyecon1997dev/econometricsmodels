@@ -605,8 +605,7 @@ pub(crate) fn build_tobit_input(
     y: String,
     x: Vec<String>,
     options: &TobitOptions,
-) -> PyResult<(TobitInput, EngineCovType, EngineSolverType)> {
-    let cov_type_lower = options.cov_type.to_lowercase();
+) -> PyResult<(TobitInput, EngineCovType, String, EngineSolverType)> {
     let solver_lower = options.solver.to_lowercase();
 
     validate_common_roles(&y, &x, options.include_intercept)?;
@@ -618,7 +617,7 @@ pub(crate) fn build_tobit_input(
     // ── x列の抽出 ──────────────────────────────────────────────────────
     let x_slices = extract_f64_columns(df, &x)?;
 
-    let cov_type = parse_cov_type(df, &cov_type_lower, &options.cluster)?;
+    let (cov_type, cov_type_lower) = parse_cov_type(df, &options.cov_type, &options.cluster)?;
     let solver = parse_solver_type(&solver_lower)?;
 
     let input = TobitInput::from_columns(
@@ -632,7 +631,7 @@ pub(crate) fn build_tobit_input(
     )
     .map_err(mle_error_to_pyerr)?;
 
-    Ok((input, cov_type, solver))
+    Ok((input, cov_type, cov_type_lower, solver))
 }
 
 /// Pythonから渡された `data` / `y` / `x` / `options` を検証し、
@@ -653,7 +652,7 @@ pub(crate) fn fit(
     options: &TobitOptions,
 ) -> PyResult<TobitResult> {
     let df: DataFrame = data.into();
-    let (input, cov_type, solver) = build_tobit_input(&df, y, x, options)?;
+    let (input, cov_type, cov_type_lower, solver) = build_tobit_input(&df, y, x, options)?;
 
     let estimator = TobitEstimator::fit(
         input,
@@ -699,7 +698,7 @@ pub(crate) fn fit(
         wald_df: estimator.wald_df(),
         converged: estimator.converged(),
         n_iter: estimator.n_iter(),
-        cov_type: options.cov_type.to_lowercase(),
+        cov_type: cov_type_lower,
         solver: options.solver.to_lowercase(),
         lower: options.lower,
         upper: options.upper,
@@ -796,7 +795,7 @@ mod tests {
         let df = well_formed_df();
         let options = default_options();
 
-        let Ok((input, cov_type, solver)) = build_tobit_input(
+        let Ok((input, cov_type, _, solver)) = build_tobit_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string(), "x2".to_string()],
@@ -824,7 +823,7 @@ mod tests {
         let mut options = default_options();
         options.include_intercept = false;
 
-        let Ok((input, _, _)) =
+        let Ok((input, _, _, _)) =
             build_tobit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
         else {
             panic!("expected Ok");
@@ -960,7 +959,7 @@ mod tests {
         options.cov_type = "cluster".to_string();
         options.cluster = Some("cluster".to_string());
 
-        let Ok((_, cov_type, _)) =
+        let Ok((_, cov_type, _, _)) =
             build_tobit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
         else {
             panic!("expected Ok");
@@ -988,7 +987,7 @@ mod tests {
         let mut options = default_options();
         options.cov_type = "cluster".to_string();
 
-        let Ok((_, cov_type, _)) =
+        let Ok((_, cov_type, _, _)) =
             build_tobit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
         else {
             panic!("expected Ok");
@@ -1001,11 +1000,8 @@ mod tests {
     }
 
     #[test]
-    // `parse_cov_type`自体は前処理済みの小文字文字列を受け取る想定
-    // （`parse_cov_type`のdocコメント参照）で、大文字小文字を区別しない処理は
-    // 呼び出し元の`build_tobit_input`が`options.cov_type.to_lowercase()`してから渡す
-    // ことで実現している。そのため、この不変条件は`parse_cov_type`単体ではなく
-    // `build_tobit_input`（実際にPythonから渡される文字列を受ける入口）を通して検証する
+    // `build_tobit_input`（実際にPythonから渡される文字列を受ける入口）を通した大文字小文字
+    // 非依存性と、戻り値の正規形の文字列（`TobitResult.cov_type`に格納する値）の検証
     // （Logitの`build_logit_input_cov_type_is_case_insensitive`と同じ理由）。
     fn build_tobit_input_cov_type_is_case_insensitive() {
         let df = well_formed_df();
@@ -1024,7 +1020,7 @@ mod tests {
         ] {
             let mut options = default_options();
             options.cov_type = input.to_string();
-            let Ok((_, cov_type, _)) = build_tobit_input(
+            let Ok((_, cov_type, cov_type_name, _)) = build_tobit_input(
                 &df,
                 "y".to_string(),
                 vec!["x1".to_string(), "x2".to_string()],
@@ -1033,6 +1029,7 @@ mod tests {
                 panic!("expected Ok for cov_type={input}");
             };
             assert!(is_expected(&cov_type), "input={input}, got={cov_type:?}");
+            assert_eq!(cov_type_name, input.to_lowercase(), "input={input}");
         }
     }
 
@@ -1047,7 +1044,7 @@ mod tests {
         options.lower = Some(0.0);
         options.upper = Some(6.0);
 
-        let Ok((input, _, _)) =
+        let Ok((input, _, _, _)) =
             build_tobit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
         else {
             panic!("expected Ok");
@@ -1063,7 +1060,7 @@ mod tests {
         options.lower = None;
         options.upper = Some(100.0);
 
-        let Ok((input, _, _)) =
+        let Ok((input, _, _, _)) =
             build_tobit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
         else {
             panic!("expected Ok");
@@ -1127,7 +1124,7 @@ mod tests {
         )
         .unwrap();
         let options = default_options();
-        let (input, cov_type, solver) =
+        let (input, cov_type, _, solver) =
             build_tobit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
                 .expect("expected Ok");
         let estimator = TobitEstimator::fit(

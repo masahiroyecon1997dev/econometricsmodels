@@ -83,6 +83,11 @@ pub struct MarginalEffectsResult {
 /// `extract_cluster_groups`で抽出する（他のcov_typeで`cluster`が指定されていれば
 /// `ValidationError`、OLSの`cluster`/`hac_*`の扱いと同じ方針）。
 ///
+/// 戻り値の2つ目は`*Result.cov_type`にそのまま格納する正規形の文字列。受け付ける綴りは
+/// 正規形の大文字小文字違いだけ（別名は無い）ため小文字化したものが正規形になるが、
+/// 呼び出し側が自前で小文字化せずここで返す値を使うことで、別名を足したときに結果へ
+/// 別名がそのまま出る事故を防ぐ（`linear::common::build_cov_type`と同じ形）。
+///
 /// Logit/Probit/Tobit共通（元は`logit.rs`/`probit.rs`/`tobit.rs`に
 /// バイト単位で完全一致するコードとして独立複製されていたが、`CovType`自体が
 /// 元々3手法共有の型であるのに合わせてここに集約した）。
@@ -95,10 +100,11 @@ pub struct MarginalEffectsResult {
 /// `engine`側の`CommonError::MissingClusterColumn`検証に委ねる（OLSの`fit()`と同じ役割分担）。
 pub(crate) fn parse_cov_type(
     df: &DataFrame,
-    cov_type_lower: &str,
+    cov_type: &str,
     cluster: &Option<String>,
-) -> PyResult<CovType> {
-    let parsed = match cov_type_lower {
+) -> PyResult<(CovType, String)> {
+    let cov_type_lower = cov_type.to_lowercase();
+    let parsed = match cov_type_lower.as_str() {
         "classical" => Ok(CovType::Classical),
         "opg" => Ok(CovType::Opg),
         "hc0" => Ok(CovType::Hc0),
@@ -119,7 +125,7 @@ pub(crate) fn parse_cov_type(
         cov_type_lower == "cluster",
         "cov_type=\"cluster\"",
     )?;
-    Ok(parsed)
+    Ok((parsed, cov_type_lower))
 }
 
 /// `solver`文字列（大文字小文字を区別しない）を`engine::nonlinear::common::SolverType`に
@@ -173,6 +179,38 @@ pub(crate) fn resolve_mle_tol_default(solver: &str, tol: Option<f64>) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use polars::df;
+
+    /// 大文字小文字の綴りによらず、正規形の文字列を返すこと（`*Result.cov_type`がそのまま
+    /// 使う値）。`let-else`を使う理由は`linear/common.rs`の同名テストと同じ（`PyErr`の
+    /// Debug実装はGIL取得を要求するため、`unwrap()`/`expect()`を避ける）。
+    #[test]
+    fn parse_cov_type_is_case_insensitive_and_returns_the_canonical_name() {
+        let df = df!("g" => [1.0, 2.0, 3.0]).unwrap();
+        for (input, expected) in [
+            ("classical", "classical"),
+            ("CLASSICAL", "classical"),
+            ("Classical", "classical"),
+            ("OPG", "opg"),
+            ("Hc0", "hc0"),
+            ("HC1", "hc1"),
+            ("CLUSTER", "cluster"),
+        ] {
+            let cluster = (expected == "cluster").then(|| "g".to_string());
+            let Ok((_, normalized)) = parse_cov_type(&df, input, &cluster) else {
+                panic!("expected Ok for input={input}");
+            };
+            assert_eq!(normalized, expected, "input={input}");
+        }
+    }
+
+    #[test]
+    fn parse_cov_type_rejects_unknown_value() {
+        let df = df!("g" => [1.0, 2.0, 3.0]).unwrap();
+        assert!(parse_cov_type(&df, "bogus", &None).is_err());
+        // 別名は無い（`"nonrobust"`は`"classical"`の別名として受け付けない）。
+        assert!(parse_cov_type(&df, "nonrobust", &None).is_err());
+    }
 
     #[test]
     fn resolve_mle_tol_default_uses_solver_dependent_default_when_tol_is_none() {

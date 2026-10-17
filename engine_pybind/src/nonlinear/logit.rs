@@ -427,8 +427,7 @@ pub(crate) fn build_logit_input(
     y: String,
     x: Vec<String>,
     options: &LogitOptions,
-) -> PyResult<(LogitInput, EngineCovType, EngineSolverType)> {
-    let cov_type_lower = options.cov_type.to_lowercase();
+) -> PyResult<(LogitInput, EngineCovType, String, EngineSolverType)> {
     let solver_lower = options.solver.to_lowercase();
 
     // 完全な多重共線性を早期に、分かりやすいエラーで防ぐ（`validation.rs`に集約、
@@ -441,13 +440,13 @@ pub(crate) fn build_logit_input(
     // ── x列の抽出 ──────────────────────────────────────────────────────
     let x_slices = extract_f64_columns(df, &x)?;
 
-    let cov_type = parse_cov_type(df, &cov_type_lower, &options.cluster)?;
+    let (cov_type, cov_type_lower) = parse_cov_type(df, &options.cov_type, &options.cluster)?;
     let solver = parse_solver_type(&solver_lower)?;
 
     let input = LogitInput::from_columns(&y_slice, &x_slices, x, options.include_intercept, y)
         .map_err(mle_error_to_pyerr)?;
 
-    Ok((input, cov_type, solver))
+    Ok((input, cov_type, cov_type_lower, solver))
 }
 
 /// Pythonから渡された `data` / `y` / `x` / `options` を検証し、
@@ -468,7 +467,7 @@ pub(crate) fn fit(
     options: &LogitOptions,
 ) -> PyResult<LogitResult> {
     let df: DataFrame = data.into();
-    let (input, cov_type, solver) = build_logit_input(&df, y, x, options)?;
+    let (input, cov_type, cov_type_lower, solver) = build_logit_input(&df, y, x, options)?;
 
     let estimator = LogitEstimator::fit(
         input,
@@ -507,7 +506,7 @@ pub(crate) fn fit(
         df_resid: estimator.df_resid(),
         converged: estimator.converged(),
         n_iter: estimator.n_iter(),
-        cov_type: options.cov_type.to_lowercase(),
+        cov_type: cov_type_lower,
         solver: options.solver.to_lowercase(),
         estimator,
         training_data: df,
@@ -623,7 +622,7 @@ mod tests {
         let df = well_formed_df();
         let options = default_options();
 
-        let Ok((input, cov_type, solver)) = build_logit_input(
+        let Ok((input, cov_type, _, solver)) = build_logit_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string(), "x2".to_string()],
@@ -649,7 +648,7 @@ mod tests {
         let mut options = default_options();
         options.include_intercept = false;
 
-        let Ok((input, _, _)) =
+        let Ok((input, _, _, _)) =
             build_logit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
         else {
             panic!("expected Ok");
@@ -769,7 +768,7 @@ mod tests {
         options.cov_type = "cluster".to_string();
         options.cluster = Some("cluster".to_string());
 
-        let Ok((_, cov_type, _)) =
+        let Ok((_, cov_type, _, _)) =
             build_logit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
         else {
             panic!("expected Ok");
@@ -800,7 +799,7 @@ mod tests {
         let mut options = default_options();
         options.cov_type = "cluster".to_string();
 
-        let Ok((_, cov_type, _)) =
+        let Ok((_, cov_type, _, _)) =
             build_logit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
         else {
             panic!("expected Ok");
@@ -812,14 +811,12 @@ mod tests {
         }
     }
 
-    /// `parse_cov_type`自体は前処理済みの小文字文字列を受け取る想定
-    /// （`parse_cov_type`のdocコメント参照）で、大文字小文字を区別しない処理は
-    /// 呼び出し元の`build_logit_input`が`options.cov_type.to_lowercase()`してから
-    /// 渡すことで実現している。そのため、この不変条件は`parse_cov_type`単体ではなく
-    /// `build_logit_input`（実際にPythonから渡される文字列を受ける入口）を通して
-    /// 検証する（`testing-completeness-reviewer`指摘。
-    /// `.unwrap()`ではなく`let-else`を使う理由は`engine_pybind/src/linear/common.rs`
-    /// の`parse_cov_type`テストと同じ、`PyErr`のDebug実装はGIL取得を要求するため）。
+    /// `build_logit_input`（実際にPythonから渡される文字列を受ける入口）を通した
+    /// 大文字小文字非依存性と、戻り値の正規形の文字列（`LogitResult.cov_type`に格納する値）の
+    /// 検証。`parse_cov_type`単体の同種のテストは`nonlinear/common.rs`にある。
+    /// （`testing-completeness-reviewer`指摘。`.unwrap()`ではなく`let-else`を使う理由は
+    /// `engine_pybind/src/linear/common.rs`の`parse_cov_type`テストと同じ、`PyErr`のDebug
+    /// 実装はGIL取得を要求するため）。
     #[test]
     fn build_logit_input_cov_type_is_case_insensitive() {
         let df = well_formed_df();
@@ -838,7 +835,7 @@ mod tests {
         ] {
             let mut options = default_options();
             options.cov_type = input.to_string();
-            let Ok((_, cov_type, _)) = build_logit_input(
+            let Ok((_, cov_type, cov_type_name, _)) = build_logit_input(
                 &df,
                 "y".to_string(),
                 vec!["x1".to_string(), "x2".to_string()],
@@ -847,6 +844,7 @@ mod tests {
                 panic!("expected Ok for cov_type={input}");
             };
             assert!(is_expected(&cov_type), "input={input}, got={cov_type:?}");
+            assert_eq!(cov_type_name, input.to_lowercase(), "input={input}");
         }
     }
 }

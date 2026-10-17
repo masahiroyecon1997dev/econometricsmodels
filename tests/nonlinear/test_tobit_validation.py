@@ -246,8 +246,8 @@ def test_invalid_censoring_bounds_raises(censored_dataset):
         ValidationError,
         match=escaped(
             nonlinear_msgs.INVALID_CENSORING_BOUNDS,
-            lower=nonlinear_msgs.rust_option_f64_debug(None),
-            upper=nonlinear_msgs.rust_option_f64_debug(None),
+            lower=nonlinear_msgs.format_bound(None),
+            upper=nonlinear_msgs.format_bound(None),
         ),
     ):
         Tobit(
@@ -269,8 +269,8 @@ def test_y_out_of_censoring_bounds_raises():
             nonlinear_msgs.Y_OUT_OF_CENSORING_BOUNDS,
             row=0,
             value=msgs.rust_f64(-1.0),
-            lower=nonlinear_msgs.rust_option_f64_debug(0.0),
-            upper=nonlinear_msgs.rust_option_f64_debug(None),
+            lower=nonlinear_msgs.format_bound(0.0),
+            upper=nonlinear_msgs.format_bound(None),
         ),
     ):
         Tobit(df, y="y", x=["x1"], options=TobitOptions(lower=0.0)).fit()
@@ -285,8 +285,8 @@ def test_no_uncensored_observations_raises():
         ValidationError,
         match=escaped(
             nonlinear_msgs.NO_UNCENSORED_OBSERVATIONS,
-            lower=nonlinear_msgs.rust_option_f64_debug(0.0),
-            upper=nonlinear_msgs.rust_option_f64_debug(None),
+            lower=nonlinear_msgs.format_bound(0.0),
+            upper=nonlinear_msgs.format_bound(None),
         ),
     ):
         Tobit(df, y="y", x=["x1"]).fit()

@@ -8,15 +8,14 @@ Rust側の送出元: `engine/src/nonlinear/`・`engine_pybind/src/nonlinear/`（
 from __future__ import annotations
 
 
-def rust_option_f64_debug(value: float | None) -> str:
-    """RustのDebug（`{:?}`）での`Option<f64>`表示を模したフォーマット。
+def format_bound(value: float | None) -> str:
+    """打ち切り境界のメッセージ内での表記（`None`・`0.0`）。
 
-    `TobitError`の打ち切り境界系メッセージ（`InvalidCensoringBounds`等）が
-    使う。RustのDebugはf64のDisplayと異なり整数値でも常に小数点を付ける
-    （`None`→`"None"`、`Some(0.0)`→`"Some(0.0)"`）。Pythonの`repr(float)`は
-    常に小数点付きのため、そのまま使えばRustのDebugと一致する。
+    `MleError`の打ち切り境界系メッセージ（`InvalidCensoringBounds`等）が使う。
+    設定されていない境界は`None`、設定されている境界はPythonの`repr(float)`
+    （整数値でも常に小数点付き）と一致する。
     """
-    return "None" if value is None else f"Some({value!r})"
+    return "None" if value is None else repr(value)
 
 
 UNKNOWN_COV_TYPE_NONLINEAR = (

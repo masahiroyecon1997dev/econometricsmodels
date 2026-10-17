@@ -38,6 +38,18 @@ use crate::shared::linear_algebra::{checked_col_piv_qr, ensure_well_conditioned_
 use crate::shared::validation::MAX_ITER_LIMIT;
 use crate::shared::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 
+/// 打ち切り境界を、エラーメッセージ用にPython側の表記（`None`・`0.0`）で整形する。
+///
+/// `Option<f64>`の`{:?}`だと`Some(0.0)`とRust固有の形で利用者に見えてしまうため、
+/// 設定されていない境界は`None`、設定されている境界は`{:?}`（`0.0`・`1.5`のように
+/// 整数値でも小数点付き）で表す。
+fn format_bound(bound: Option<f64>) -> String {
+    match bound {
+        Some(value) => format!("{value:?}"),
+        None => "None".to_string(),
+    }
+}
+
 /// Logit/Probit/Tobitの計算過程で発生しうるエラー。
 ///
 /// `engine`はPyO3を知らないため、Python例外への変換は`engine_pybind`側で行う
@@ -93,8 +105,10 @@ pub enum MleError {
 
     /// Tobit専用: 打ち切り境界（下限/上限）の指定が不正（下限≧上限等）。
     #[error(
-        "invalid censoring bounds: lower={lower:?}, upper={upper:?} \
-         (at least one bound must be set, and lower must be less than upper when both are set)"
+        "invalid censoring bounds: lower={}, upper={} \
+         (at least one bound must be set, and lower must be less than upper when both are set)",
+        format_bound(*.lower),
+        format_bound(*.upper)
     )]
     InvalidCensoringBounds {
         lower: Option<f64>,
@@ -121,7 +135,9 @@ pub enum MleError {
     /// 「行番号+値」パターンで、`TobitInput::from_columns`が構築する
     /// （`engine/src/nonlinear/tobit.rs`参照）。
     #[error(
-        "y at row {row} is out of the censoring bounds (lower={lower:?}, upper={upper:?}): got {value}"
+        "y at row {row} is out of the censoring bounds (lower={}, upper={}): got {value}",
+        format_bound(*.lower),
+        format_bound(*.upper)
     )]
     YOutOfCensoringBounds {
         row: usize,
@@ -155,8 +171,10 @@ pub enum MleError {
     /// エラーを返す（"initial iteration failed"）。`fit()`冒頭でのバリデーションとして
     /// 早期に検出する（`docs/spec/tobit-spec.md`1章「非識別データの検出」参照）。
     #[error(
-        "no uncensored observations: at least one y value strictly between lower={lower:?} and \
-         upper={upper:?} is required to identify the model"
+        "no uncensored observations: at least one y value strictly between lower={} and \
+         upper={} is required to identify the model",
+        format_bound(*.lower),
+        format_bound(*.upper)
     )]
     NoUncensoredObservations {
         lower: Option<f64>,
@@ -180,7 +198,7 @@ pub enum MleError {
         "the data are completely or quasi-completely separated: some combination of the \
          regressors perfectly predicts the binary outcome (for all or a subset of observations), \
          so no finite maximum likelihood estimate exists. Remove or combine the offending \
-         regressors, or use a penalized estimator"
+         regressors, or add observations that break the separation"
     )]
     SeparationDetected,
 
@@ -5371,8 +5389,24 @@ mod tests {
                 upper: Some(5.0),
             }
             .to_string(),
-            "invalid censoring bounds: lower=Some(10.0), upper=Some(5.0) \
+            "invalid censoring bounds: lower=10.0, upper=5.0 \
              (at least one bound must be set, and lower must be less than upper when both are set)"
+        );
+        assert_eq!(
+            MleError::InvalidCensoringBounds {
+                lower: None,
+                upper: None,
+            }
+            .to_string(),
+            "invalid censoring bounds: lower=None, upper=None \
+             (at least one bound must be set, and lower must be less than upper when both are set)"
+        );
+        assert_eq!(
+            MleError::SeparationDetected.to_string(),
+            "the data are completely or quasi-completely separated: some combination of the \
+             regressors perfectly predicts the binary outcome (for all or a subset of \
+             observations), so no finite maximum likelihood estimate exists. Remove or combine \
+             the offending regressors, or add observations that break the separation"
         );
         assert_eq!(
             MleError::SingularOpgMatrix.to_string(),

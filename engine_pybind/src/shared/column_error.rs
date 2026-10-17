@@ -120,8 +120,9 @@ pub(crate) enum ColumnExtractionError {
     #[error(
         "column '{name}' has the same value at rows {first_row} and {second_row}. A time-order \
          column must give every observation a distinct value, because tied observations \
-         cannot be put in time order; make the values distinct, or omit the time-order \
-         option to use the row order of the data"
+         cannot be put in time order. Make the values distinct. The row order of the data \
+         is never used as the time order, so if the rows are already in time order, add an \
+         index column such as `df.with_row_index(\"t\")` and use that instead"
     )]
     TiedValues {
         name: String,
@@ -313,8 +314,9 @@ mod tests {
             ColumnExtractionError::tied_values("t", 1, 3).to_string(),
             "column 't' has the same value at rows 1 and 3. A time-order column must give \
              every observation a distinct value, because tied observations cannot be put in \
-             time order; make the values distinct, or omit the time-order option to use the \
-             row order of the data"
+             time order. Make the values distinct. The row order of the data is never used \
+             as the time order, so if the rows are already in time order, add an index \
+             column such as `df.with_row_index(\"t\")` and use that instead"
         );
     }
 }

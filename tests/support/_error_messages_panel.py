@@ -92,7 +92,8 @@ FE_DK_REQUIRES_DK_TIME = (
 # `PanelError::InvalidDkBandwidth`。`t`は時点数（観測数`n`ではない点に
 # 注意、OLSの`INVALID_HAC_LAGS`とは上限の意味が異なる）。
 INVALID_DK_BANDWIDTH = (
-    "bandwidth must be in the range [0, t): got {bandwidth}, t={t}"
+    "dk_bandwidth must be in the range [0, t), where t is the number of "
+    "unique time periods in dk_time: got {bandwidth}, t={t}"
 )
 
 # `PanelError::InsufficientDkPeriodsForInference`（`INSUFFICIENT_CLUSTERS_FOR_

@@ -120,8 +120,10 @@ HAC_REQUIRES_HAC_TIME = (
 COLUMN_HAS_TIED_TIME_ORDER = (
     "column '{name}' has the same value at rows {first} and {second}. A "
     "time-order column must give every observation a distinct value, because "
-    "tied observations cannot be put in time order; make the values distinct, "
-    "or omit the time-order option to use the row order of the data"
+    "tied observations cannot be put in time order. Make the values distinct. "
+    "The row order of the data is never used as the time order, so if the rows "
+    'are already in time order, add an index column such as `df.with_row_index("t")` '
+    "and use that instead"
 )
 
 # キー列のdtypeが許可外の場合。`entity`・`cluster`（同一性だけのキー）と

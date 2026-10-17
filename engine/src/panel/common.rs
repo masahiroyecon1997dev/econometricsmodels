@@ -238,7 +238,10 @@ pub enum PanelError {
     /// ではなく時点数`t`になる点が異なる（DKのバンド幅は「時点のラグ」であり「観測の
     /// ラグ」ではないため、`engine/src/panel/CLAUDE.md`「Driscoll-Kraay型パネルHAC対応」
     /// 参照）。
-    #[error("bandwidth must be in the range [0, t): got {bandwidth}, t={t}")]
+    #[error(
+        "dk_bandwidth must be in the range [0, t), where t is the number of unique time \
+         periods in dk_time: got {bandwidth}, t={t}"
+    )]
     InvalidDkBandwidth { bandwidth: i64, t: usize },
 
     /// `FeCovType::Dk`/`ReCovType::Dk`でユニークな時点数`t_periods`が1しかない。
@@ -1079,6 +1082,11 @@ mod tests {
 
     #[test]
     fn panel_error_messages_are_human_readable() {
+        assert_eq!(
+            PanelError::InvalidDkBandwidth { bandwidth: 7, t: 6 }.to_string(),
+            "dk_bandwidth must be in the range [0, t), where t is the number of unique time \
+             periods in dk_time: got 7, t=6"
+        );
         assert!(
             PanelError::DegenerateDkTwoPeriods
                 .to_string()

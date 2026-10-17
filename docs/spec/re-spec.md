@@ -314,9 +314,10 @@ Wald二次形式は`V`が正定値である限り負値にならず、FEのF統�
   `tests/panel/test_re_crosscheck.py`）と`linearmodels`の`f_statistic_robust`
   （classical/hc1、`tests/panel/test_re_reference.py`）との数値比較。バランスパネルは機械精度で
   一致する。`linearmodels`の`f_statistic_robust`は不均衡パネルでも機械精度で一致する
-  （点推定が一致するため）。`plm`との不均衡パネルは、Swamy-Arora分散成分の推定差
-  （`θ`の差）で`cov_type`別に最大約0.1〜0.7%の差が出るため専用の許容誤差を使う
-  （`tests/support/_tolerances_panel.py`の`re_crosscheck.rtol_unbalanced_f`）。
+  （点推定が一致するため）。plm自身のREは不均衡パネルで、Swamy-Arora分散成分の推定差
+  （`θ`の差）により`cov_type`別に最大約0.1〜0.7%の差が出る。そのため不均衡パネルは、
+  `linearmodels`の分散成分を与えて準偏差変換したデータへのplmの`vcov`系と機械精度で
+  比べる（`tests/support/_tolerances_panel.py`の`re_crosscheck.rtol`）。
   `linearmodels`の`res.f_statistic`（SST/SSR方式、`cov_type`非依存）はバランスパネルの
   classicalでのみ一致するため比較に使わない。
 - 傾き係数が1個のケースは「1自由度のF検定は両側t検定と代数的に等価」

@@ -21,6 +21,7 @@ import numpy as np
 import polars as pl
 import pytest
 from _assertions import (
+    assert_argument_case_insensitive,
     assert_close,
     assert_option_case_insensitive,
     assert_params_table_matches_attributes,
@@ -32,6 +33,14 @@ from econometricsmodels import Tobit, TobitOptions, TobitResults
 from scipy.stats import norm
 
 from benchmark.nonlinear.constants import MLE_COV_TYPES, MLE_SOLVERS
+
+# `predict()`・`augment()`・`marginal_effects()`が受け付ける`target`の全体（正規形）。
+TARGETS = [
+    "expected_latent",
+    "expected_observed",
+    "prob_uncensored",
+    "expected_uncensored",
+]
 
 # censored_datasetフィクスチャ（`dataset`のyを0.0で左打ち切り、打ち切り率21%）は
 # conftest.pyで定義。
@@ -373,6 +382,18 @@ def test_predict_new_data_returns_list_of_floats(censored_dataset, target):
     assert all(isinstance(value, float) for value in predicted)
 
 
+@pytest.mark.parametrize("spelling", CASE_SPELLINGS)
+@pytest.mark.parametrize("target", TARGETS)
+def test_predict_target_is_case_insensitive(
+    censored_dataset, target, spelling
+):
+    """`target`が大文字小文字を区別せず、どの綴りでも正規形と同じ予測値になること。"""
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+    assert_argument_case_insensitive(
+        lambda label: res.predict(target=label), target, spelling
+    )
+
+
 @pytest.mark.parametrize(
     "target", ["expected_latent", "prob_uncensored", "expected_observed"]
 )
@@ -524,6 +545,20 @@ def test_augment_different_targets_do_not_collide_on_same_dataframe(
     assert "predicted_prob_uncensored" in twice.columns
 
 
+@pytest.mark.parametrize("spelling", CASE_SPELLINGS)
+@pytest.mark.parametrize("target", TARGETS)
+def test_augment_target_is_case_insensitive(
+    censored_dataset, target, spelling
+):
+    """`target`が大文字小文字を区別せず、どの綴りでも正規形と同じDataFrame
+    （追加列の名前`predicted_{target}`も正規形）になること。
+    """
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+    assert_argument_case_insensitive(
+        lambda label: res.augment(target=label), target, spelling
+    )
+
+
 # ── censoring_fit_check() ─────────────────────────────────────────────
 
 
@@ -632,6 +667,18 @@ def test_marginal_effects_accepts_all_targets(censored_dataset, target):
     assert [row["param_name"] for row in effects] == ["x1", "x2"]
 
 
+@pytest.mark.parametrize("spelling", CASE_SPELLINGS)
+@pytest.mark.parametrize("target", TARGETS)
+def test_marginal_effects_target_is_case_insensitive(
+    censored_dataset, target, spelling
+):
+    """`target`が大文字小文字を区別せず、どの綴りでも正規形と同じ限界効果になること。"""
+    res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
+    assert_argument_case_insensitive(
+        lambda label: res.marginal_effects(target=label), target, spelling
+    )
+
+
 def test_marginal_effects_mean_and_median_differ_from_overall(
     censored_dataset,
 ):
@@ -650,6 +697,6 @@ def test_marginal_effects_at_is_case_insensitive(
     censored_dataset, at, spelling
 ):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
-    assert res.marginal_effects(at=respell(at, spelling)) == (
-        res.marginal_effects(at=at)
+    assert_argument_case_insensitive(
+        lambda label: res.marginal_effects(at=label), at, spelling
     )

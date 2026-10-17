@@ -34,6 +34,7 @@ import pandas as pd
 import polars as pl
 import pytest
 from _assertions import (
+    assert_argument_case_insensitive,
     assert_close,
     assert_dict_close,
     assert_fields_close,
@@ -441,8 +442,8 @@ def check_marginal_effects_at_is_case_insensitive(
     dataset, estimator_cls, at, spelling
 ):
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
-    assert res.marginal_effects(at=respell(at, spelling)) == (
-        res.marginal_effects(at=at)
+    assert_argument_case_insensitive(
+        lambda label: res.marginal_effects(at=label), at, spelling
     )
 
 

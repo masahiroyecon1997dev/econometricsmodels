@@ -16,13 +16,12 @@ FE/RE共通のPython主リファレンス`linearmodels.panel.RandomEffects`と�
 「RE専用の合成データセット・凍結コードは追加していない」）に倣い、
 `benchmark.panel.datasets.generate_fe_dataset`を直接使う。
 
-## cov_type の範囲
+## 軸と cov_type の範囲
 
-FEと同じプロセスで実測選定した（`.claude/rules/testing-policy.md`「パフォーマンス
-比較（ベンチマーク）の方法論」）。n_entities=16,666・n_periods=6・k=5で
-`classical`/`hc1`/`hc2`/`hc3`/`cluster`/`dk`を実測した結果、`dk`が最重量
-（中央値318.5ms、classicalの212.0msに対し+50%）だったため、FEと同じく
-`classical`と`dk`を採用する。
+FEと同じ構成（`compare_fe.py`「軸と cov_type の範囲」参照）: n 軸・k 軸は既定の
+標準誤差（classical）だけを回し、cov 軸（n=100,000・k=5）で`classical`・`hc1`・
+`hc2`・`hc3`・`cluster`（entity クラスター）・`dk`を全て回す。`hc2`/`hc3` は
+linearmodels（`RandomEffects`）に対応が無いため engine 単独で測る。
 
 ## `RandomEffects`の切片（`build_pandas_df`での定数列追加）
 
@@ -40,14 +39,14 @@ FEと同じプロセスで実測選定した（`.claude/rules/testing-policy.md`
 
 2-way軸は無い（RE自体がv1で2-wayをスコープ外にしているため、`extra_methods=()`）。
 
-## k軸はclassicalのみ計測する（`k_sweep_cov_types`）
+## dk は k=5 < T=6 の境界に依存する
 
-FE（`compare_fe.py`の同名節）と同じ理由で、k軸のcov_typeをclassicalに絞る。
-RE本体の標準誤差は`dk`でも`k=20`・`T=6`で計算できるが、`fit()`が常に計算する
-ハウスマン検定は`X̃`の`k`個を同時Wald検定するため、DK共分散のrank（`T-1`以下）が
-`k`に足りず、engineは`ValidationError`
-（`PanelError::InsufficientDkPeriodsForInference`）で`fit()`を拒否する。
-n軸のdkが`k=5 < T=6`の境界ちょうどに依存している点もFEと同じ。
+FE（`compare_fe.py`の同名節）と同じ理由。RE本体の標準誤差は`dk`でも`k=20`・
+`T=6`で計算できるが、`fit()`が常に計算するハウスマン検定は`X̃`の`k`個を同時Wald
+検定するため、DK共分散のrank（`T-1`以下）が`k`に足りず、engineは
+`ValidationError`（`PanelError::InsufficientDkPeriodsForInference`）で`fit()`を
+拒否する。k軸は既定のclassicalだけを回すので影響しないが、cov軸のdkは
+`k=5 < T=6`の境界ちょうどに依存している。
 
 ## 計測範囲の対称性
 
@@ -60,6 +59,15 @@ F統計量自体が`cov_type`に連動しない独自定義のため（`benchmar
 linearmodels_ref.py`の`run_re()`と同じ理由）。`aic`/`bic`はlinearmodelsが
 提供しないため対称性を取る対象に含めない。
 
+## 非対称な点: ハウスマン検定
+
+engine の `RE.fit()` は常にハウスマン検定（内部で FE の within 推定と補助回帰を
+実行）まで計算するが、`linearmodels.RandomEffects` には対応する処理が無く、本
+スクリプトの `_fit_once_linearmodels` もそこを触らない（遅延評価ではなく、そもそも
+同等の計算が提供されない）。そのため RE の速度比は engine に不利な方向（過小評価）に
+偏る。揃えられない非対称なので、結果の読み方として `docs/performance/re.md`・
+`docs/guide/performance.md` にも記す。
+
 使用例（リポジトリルートから）:
     python -m performance.compare_re \\
         --output docs/performance/results/re.json
@@ -67,7 +75,7 @@ linearmodels_ref.py`の`run_re()`と同じ理由）。`aic`/`bic`はlinearmodels
     # 単体計測（デバッグ用）。一括実行と条件を揃えるにはスレッド数を1に固定する。
     RAYON_NUM_THREADS=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \\
         python -m performance.compare_re \\
-        --worker --library engine --cov-type dk --n 10000 --k 5
+        --worker --library engine --cov-case dk --n 10000 --k 5
 """
 
 from __future__ import annotations
@@ -78,7 +86,12 @@ import polars as pl
 
 from benchmark.common import hac_auto_lag
 from benchmark.panel.datasets import generate_fe_dataset
-from performance._perf_harness import FitContext, PerfAdapter, run_cli
+from performance._perf_harness import (
+    CovCase,
+    FitContext,
+    PerfAdapter,
+    run_cli,
+)
 
 _ENTITY_COL = "entity"
 _TIME_COL = "time"
@@ -88,6 +101,20 @@ _N_PERIODS_FIXED = 6
 
 # DKバンド幅は時点数Tベース（`compare_fe.py`と同じ理由）。
 _DK_BANDWIDTH = hac_auto_lag(_N_PERIODS_FIXED)
+
+
+_ENGINE_COV_TYPES = ("classical", "hc1", "hc2", "hc3", "cluster")
+
+_COV_CASES = (
+    CovCase("classical", "classical"),
+    CovCase("hc1", "hc1"),
+    # linearmodels に対応する HC2/HC3 が無いため engine 単独。
+    CovCase("hc2", "hc2", libraries=("engine",)),
+    CovCase("hc3", "hc3", libraries=("engine",)),
+    # entity クラスター（`compare_fe.py` docstring 参照）。
+    CovCase("cluster", "cluster"),
+    CovCase("dk", "dk"),
+)
 
 
 def _build_dataframe(n: int, k: int, seed: int) -> pl.DataFrame:
@@ -118,12 +145,12 @@ def _build_pandas_df(df: pl.DataFrame) -> pd.DataFrame:
 def _fit_once_engine(ctx: FitContext):
     from econometricsmodels import RE, REOptions
 
-    if ctx.cov_type == "classical":
-        options = REOptions(cov_type="classical")
-    elif ctx.cov_type == "dk":
+    if ctx.cov_type == "dk":
         options = REOptions(
             cov_type="dk", dk_time=_TIME_COL, dk_bandwidth=_DK_BANDWIDTH
         )
+    elif ctx.cov_type in _ENGINE_COV_TYPES:
+        options = REOptions(cov_type=ctx.cov_type)
     else:
         raise ValueError(f"unknown cov_type: {ctx.cov_type!r}")
     return RE(
@@ -139,6 +166,14 @@ def _fit_once_linearmodels(ctx: FitContext):
     )
     if ctx.cov_type == "classical":
         lm_cov_type, cov_config = "unadjusted", {"debiased": True}
+    elif ctx.cov_type == "hc1":
+        lm_cov_type, cov_config = "robust", {"debiased": True}
+    elif ctx.cov_type == "cluster":
+        # engine の既定（entity クラスター）に対応する。
+        lm_cov_type, cov_config = (
+            "clustered",
+            {"debiased": True, "cluster_entity": True},
+        )
     elif ctx.cov_type == "dk":
         lm_cov_type, cov_config = (
             "kernel",
@@ -179,8 +214,7 @@ RE_ADAPTER = PerfAdapter(
     method="re",
     module="performance.compare_re",
     libraries=("engine", "linearmodels"),
-    cov_types=("classical", "dk"),
-    k_sweep_cov_types=("classical",),
+    cov_cases=_COV_CASES,
     reference_versions=lambda: {
         "linearmodels_version": linearmodels.__version__
     },
@@ -188,6 +222,12 @@ RE_ADAPTER = PerfAdapter(
     build_pandas_df=_build_pandas_df,
     fit_once=_fit_once,
 )
+
+
+# cov 軸の dk は k < T（時点数）が前提（モジュール docstring 参照）。設定変更で
+# 崩れたら、計測の途中で engine の ValidationError になる前にここで気づく。
+if RE_ADAPTER.n_sweep_fixed_k >= _N_PERIODS_FIXED:
+    raise ValueError("cov-sweep dk needs n_sweep_fixed_k < _N_PERIODS_FIXED")
 
 
 if __name__ == "__main__":

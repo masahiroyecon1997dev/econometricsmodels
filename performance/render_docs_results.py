@@ -28,6 +28,11 @@ from performance.render_performance_summary import (
     _format_rss,
     _format_time,
     _render_axis_section,
+    _render_cov_section,
+    case_label,
+    default_case,
+    format_ratio,
+    speedup,
 )
 
 _REPO_URL = "https://github.com/masahiroyecon1997dev/econometricsmodels"
@@ -128,7 +133,7 @@ def _method_axis_section(report: dict) -> list[str]:
     rows = _relabel(rows)
     lines = [
         (
-            f"### Variants (cov_type={meta['cov_types'][0]}, "
+            f"### Variants ({default_case(meta)}, "
             f"k={meta['n_sweep_fixed_k']}, n={n_label})"
         ),
         "",
@@ -165,7 +170,6 @@ def _method_section(report: dict) -> list[str]:
     method = meta["method"]
     results = report["results"]
     libraries = [_label(lib) for lib in meta["libraries"]]
-    cov_types = meta["cov_types"]
 
     versions = _reference_versions(meta)
     if len(libraries) > 1:
@@ -181,13 +185,14 @@ def _method_section(report: dict) -> list[str]:
         )
     lines = [f"## {_display_name(method)}", "", compared, ""]
 
-    n_subtitle = "Time in seconds (median) / peak RSS in MB."
+    default = default_case(meta)
+    n_subtitle = f"Standard error: {default}. Time in seconds (median) / peak RSS in MB."
     engine_only = meta.get("n_sweep_engine_only") or []
     if engine_only:
         joined = ", ".join(f"{n:,}" for n in engine_only)
         n_subtitle += (
-            f" Rows for n={joined} are measured for {cov_types[0]} only, "
-            "without the reference implementation."
+            f" Rows for n={joined} are measured without the reference "
+            "implementation."
         )
     lines += _demote(
         _render_axis_section(
@@ -195,7 +200,6 @@ def _method_section(report: dict) -> list[str]:
             subtitle=n_subtitle,
             axis_key="n",
             axis_results=_relabel([r for r in results if r["axis"] == "n"]),
-            cov_types=cov_types,
             libraries=libraries,
             include_rss=True,
         )
@@ -203,12 +207,35 @@ def _method_section(report: dict) -> list[str]:
     lines += _demote(
         _render_axis_section(
             title=f"## k-axis (n={meta['k_sweep_fixed_n']:,})",
-            subtitle="Time in seconds (median).",
+            subtitle=f"Standard error: {default}. Time in seconds (median).",
             axis_key="k",
             axis_results=_relabel([r for r in results if r["axis"] == "k"]),
-            cov_types=cov_types,
             libraries=libraries,
             include_rss=False,
+        )
+    )
+    lines += _demote(
+        _render_cov_section(
+            title=(
+                f"## Standard errors (n={meta['cov_sweep_n']:,}, "
+                f"k={meta['n_sweep_fixed_k']})"
+                if meta.get("cov_sweep_n")
+                else "## Standard errors"
+            ),
+            subtitle=(
+                "One row per standard-error type. Time in seconds (median) "
+                "/ peak RSS in MB; speed-up is the reference time divided by "
+                "the econometricsmodels time (below 1: the reference was "
+                "faster). A row without a reference time has no equivalent "
+                "standard error in the reference implementation. Cluster "
+                "rows give the number of clusters G and whether the rows of "
+                "a cluster are scattered (random) or contiguous (sorted)."
+            ),
+            cov_results=_relabel([r for r in results if r["axis"] == "cov"]),
+            libraries=libraries,
+            cov_cases=meta.get("cov_cases") or [],
+            first_header="standard error",
+            speedup_header="speed-up",
         )
     )
     lines += _method_axis_section(report)
@@ -223,96 +250,202 @@ def _method_section(report: dict) -> list[str]:
 
 
 def _headline_rows(report: dict) -> list[dict]:
-    """サマリー表用に、cov_typeごとの代表点（全ライブラリが揃う最大n）を選ぶ。
+    """サマリー表用に、既定の標準誤差の代表点（全ライブラリが揃う最大n）を選ぶ。
 
     Returns:
-        `{"cov_type", "n", "times", "rss"}`の辞書のリスト。`times`・`rss`は
-        ライブラリ名（表示名）をキーとする。
+        `{"cov_type", "n", "times", "rss"}`の辞書のリスト（該当が無ければ空）。
+        `times`・`rss`はライブラリ名（表示名）をキーとする。
     """
     meta = report["_meta"]
-    rows = [r for r in report["results"] if r["axis"] == "n"]
-    headline = []
-    for cov_type in meta["cov_types"]:
-        by_n: dict[int, dict[str, dict]] = {}
-        for r in rows:
-            if r["cov_type"] == cov_type:
-                by_n.setdefault(r["n"], {})[r["library"]] = r
-        complete = [
-            n
-            for n, libs in by_n.items()
-            if set(libs) == set(meta["libraries"])
-        ]
-        if not complete:
-            continue
-        n = max(complete)
-        headline.append(
-            {
-                "cov_type": cov_type,
-                "n": n,
-                "times": {
-                    _label(lib): r["time_median_s"]
-                    for lib, r in by_n[n].items()
-                },
-                "rss": {
-                    _label(lib): r["peak_rss_kb"] for lib, r in by_n[n].items()
-                },
-            }
+    label = default_case(meta)
+    by_n: dict[int, dict[str, dict]] = {}
+    for r in report["results"]:
+        if r["axis"] == "n" and case_label(r) == label:
+            by_n.setdefault(r["n"], {})[r["library"]] = r
+    complete = [
+        n for n, libs in by_n.items() if set(libs) == set(meta["libraries"])
+    ]
+    if not complete:
+        return []
+    n = max(complete)
+    return [
+        {
+            "cov_type": label,
+            "n": n,
+            "times": {
+                _label(lib): r["time_median_s"] for lib, r in by_n[n].items()
+            },
+            "rss": {
+                _label(lib): r["peak_rss_kb"] for lib, r in by_n[n].items()
+            },
+        }
+    ]
+
+
+def _reference_libraries(method: str, meta: dict) -> list[str]:
+    """参照実装のライブラリ名（内部名）。サマリーは手法あたり1つまで対応する。"""
+    ref_libs = [lib for lib in meta["libraries"] if lib != "engine"]
+    if len(ref_libs) > 1:
+        raise ValueError(
+            f"{method}: the summary tables support one reference library "
+            f"per method, got {[_label(lib) for lib in ref_libs]}"
         )
-    return headline
+    return ref_libs
 
 
-def render_summary(reports: dict[str, dict]) -> str:
-    """手法別の代表値サマリー表（Markdown）を組み立てる。
-
-    各手法・cov_typeについて、全ライブラリが計測された最大のn（k固定）で、
-    econometricsmodelsと参照実装の実行時間・ピークRSS・速度比を並べる。
-
-    Args:
-        reports: `_load_reports`が返す手法別レポート。
-
-    Returns:
-        Markdownのテーブル文字列。
-    """
+def _default_table(reports: dict[str, dict]) -> list[str]:
+    """既定の標準誤差の代表点（最大n）の表を組み立てる。"""
     own = _label("engine")
     lines = [
         (
-            f"| Method | cov_type | n | {own} | Reference | Speed-up | "
+            f"| Method | Standard error | n | {own} | Reference | Speed-up | "
             f"Peak RSS ({own} / reference) |"
         ),
         "|---|---|---|---|---|---|---|",
     ]
     for method in _ordered_methods(list(reports)):
         meta = reports[method]["_meta"]
+        ref_libs = [_label(lib) for lib in _reference_libraries(method, meta)]
         for row in _headline_rows(reports[method]):
-            ref_libs = [
-                _label(lib) for lib in meta["libraries"] if lib != "engine"
-            ]
             own_time = row["times"][own]
             own_rss = _format_rss(row["rss"][own])
-            if len(ref_libs) > 1:
-                raise ValueError(
-                    f"{method}: the summary table supports one reference "
-                    f"library per method, got {ref_libs}"
-                )
             if ref_libs:
                 ref = ref_libs[0]
                 ref_time = row["times"][ref]
                 time_cell = (
                     f"{_format_time(own_time)} vs {_format_time(ref_time)}"
                 )
-                ratio = ref_time / own_time
-                speedup = f"{ratio:.2f}x" if ratio < 1 else f"{ratio:.1f}x"
+                speedup_cell = speedup(own_time, ref_time)
                 rss_cell = f"{own_rss} / {_format_rss(row['rss'][ref])}"
             else:
-                ref = "-"
-                time_cell = _format_time(own_time)
-                speedup = "-"
-                rss_cell = own_rss
+                ref, time_cell, speedup_cell, rss_cell = (
+                    "-",
+                    _format_time(own_time),
+                    "-",
+                    own_rss,
+                )
             lines.append(
                 f"| {_display_name(method)} | {row['cov_type']} | "
-                f"{row['n']:,} | {time_cell} | {ref} | {speedup} | "
+                f"{row['n']:,} | {time_cell} | {ref} | {speedup_cell} | "
                 f"{rss_cell} |"
             )
+    return lines
+
+
+# 速度比マトリクスの列（標準誤差の種類）の並び。どの手法にも無い列は出さない。
+_MATRIX_COLUMNS = (
+    "classical",
+    "hc0",
+    "hc1",
+    "hc2",
+    "hc3",
+    "opg",
+    "hac",
+    "dk",
+    "cluster",
+)
+_ENGINE_ONLY = "engine only"
+
+
+def _matrix_cell(report: dict, cov_type: str) -> str:
+    """1手法・1種類の標準誤差の速度比セル。
+
+    その種類のケースのうち参照実装と比べられたものの最小の速度比（cluster は
+    G・並びが違う複数ケースの最悪値になる）。比べられたケースが無く engine
+    だけを測っていれば "engine only"、その手法が対応しない種類は "-"。
+    method を変えたケース（IV の GMM）は標準誤差の種類ではないので含めない。
+    """
+    cases = [
+        c
+        for c in report["_meta"].get("cov_cases") or []
+        if c["cov_type"] == cov_type and c.get("method") is None
+    ]
+    cov_rows = [r for r in report["results"] if r["axis"] == "cov"]
+    ratios: list[float] = []
+    engine_measured = False
+    for case in cases:
+        rows = {
+            r["library"]: r for r in cov_rows if case_label(r) == case["label"]
+        }
+        own = rows.get("engine")
+        refs = [r for lib, r in rows.items() if lib != "engine"]
+        engine_measured |= own is not None
+        if own is not None and refs:
+            ratios.append(refs[0]["time_median_s"] / own["time_median_s"])
+    if ratios:
+        return format_ratio(min(ratios))
+    return _ENGINE_ONLY if engine_measured else "-"
+
+
+def _speedup_matrix(reports: dict[str, dict]) -> list[str]:
+    """標準誤差の種類 × 手法の速度比マトリクス（cov軸）を組み立てる。"""
+    methods = _ordered_methods(list(reports))
+    columns = [
+        c
+        for c in _MATRIX_COLUMNS
+        if any(_matrix_cell(reports[m], c) != "-" for m in methods)
+    ]
+    if not columns:
+        return []
+    lines = [
+        "| Method | " + " | ".join(columns) + " |",
+        "|---" * (len(columns) + 1) + "|",
+    ]
+    for method in methods:
+        cells = [_matrix_cell(reports[method], c) for c in columns]
+        lines.append(
+            f"| {_display_name(method)} | " + " | ".join(cells) + " |"
+        )
+    return lines
+
+
+def _matrix_caption(reports: dict[str, dict]) -> str:
+    sizes = sorted(
+        {
+            r["_meta"]["cov_sweep_n"]
+            for r in reports.values()
+            if r["_meta"].get("cov_sweep_n")
+        }
+    )
+    n = " / ".join(f"{size:,}" for size in sizes) or "-"
+    return (
+        "Every standard-error type is measured at a single sample size "
+        f"(`n = {n}`, `k = 5`). Each cell is the reference time divided by "
+        "the econometricsmodels time (below 1: the reference was faster). "
+        "`cluster` is the lowest value over the cluster cases (50 clusters "
+        "or `n / 10` clusters, with the rows of a cluster scattered or "
+        "contiguous); FE and RE are clustered by entity only. "
+        f"`{_ENGINE_ONLY}` marks standard errors that the "
+        "reference implementation does not offer, and `-` those the method "
+        "does not support. Times and peak memory for every case are on "
+        "[Performance results](performance-results.md)."
+    )
+
+
+def render_summary(reports: dict[str, dict]) -> str:
+    """手法別の代表値サマリー（Markdown）を組み立てる。
+
+    1つ目は既定の標準誤差について、全ライブラリが計測された最大のn（k固定）で
+    econometricsmodelsと参照実装の実行時間・ピークRSS・速度比を並べた表。
+    2つ目は全ての標準誤差の速度比マトリクス（cov軸、単一のn）。
+
+    Args:
+        reports: `_load_reports`が返す手法別レポート。
+
+    Returns:
+        Markdown（2つの表と、マトリクスの説明）。
+    """
+    lines = _default_table(reports)
+    matrix = _speedup_matrix(reports)
+    if matrix:
+        lines += [
+            "",
+            "**Speed-up by standard-error type**",
+            "",
+            _matrix_caption(reports),
+            "",
+            *matrix,
+        ]
     return "\n".join(lines)
 
 

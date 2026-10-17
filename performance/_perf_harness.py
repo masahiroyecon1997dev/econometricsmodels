@@ -74,10 +74,11 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
+import numpy as np
 import polars as pl
 
 from benchmark.common import hac_auto_lag
@@ -106,6 +107,121 @@ _SINGLE_THREAD_ENV = {
 # HACの時間順序列として、ハーネスが全手法の計測用DataFrameに足す行番号の列名。
 HAC_TIME_COL = "hac_time_index"
 
+# ハーネスが cluster 計測点で `df` に足すクラスター id 列の名前。手法側のアダプタは
+# 列を作らず、`FitContext.cluster` で受け取る（パネル系は entity 列を自前で使う）。
+CLUSTER_COL = "cluster_group"
+
+CLUSTER_LAYOUTS = ("random", "sorted")
+
+# cov 軸の cluster ケースが使うクラスター数 G と、1クラスターあたりの観測数
+# （G = n / 10 の「大きな G」）。Gが小さい場合と大きい場合で支配的なコストが変わる
+# ため、両方を測る。
+CLUSTER_N_GROUPS = 50
+CLUSTER_SIZE = 10
+
+# 計測軸の名前。`--axes` で選べる。
+AXES = ("n", "k", "cov", "method")
+
+
+@dataclass(frozen=True)
+class CovCase:
+    """cov 軸の1ケース（標準誤差の種類と、必要ならクラスターの作り方）。
+
+    Attributes:
+        label: 結果行の `cov_case` に入る名前。`--cov-filter` と worker の
+            `--cov-case` もこの値で指定する。adapter 内で一意。
+        cov_type: 手法の `cov_type` オプションの値（"classical"・"hc1"・
+            "cluster" 等）。同じ `cov_type` が複数ケースに現れてよい（cluster の
+            G・レイアウト違い）。
+        n_clusters: クラスター数 G を固定値で指定する。`cluster_size` とどちらか
+            一方だけ。
+        cluster_size: 1クラスターあたりの観測数（G = n // cluster_size）。
+        cluster_layout: ハーネスがクラスター id 列（`CLUSTER_COL`）を作るときの
+            行の並び。"random" はクラスターの行が散らばる並び、"sorted" は
+            クラスターごとに連続した並び。クラスター累積の速さは行の並びに依存
+            しうるため、明示して両方を測る。`None` ならハーネスは列を作らない
+            （cluster 以外のケース、およびパネル系の entity クラスター）。
+        libraries: このケースを計測するライブラリ。`None` なら adapter の
+            `libraries` 全て。リファレンスに同等の cov_type が無いケース
+            （linearmodels に無い HC2/HC3 等）で `("engine",)` にする。
+        method: このケースを計測する推定 method（`FitContext.method`）。`None`
+            なら adapter の `default_method`。IV の GMM ケース等、標準誤差と
+            推定 method の組で見たいケースで使う。adapter の `extra_methods` に
+            含まれる値であること。
+        variant: 手法側の `fit_once` だけが解釈する識別子（`FitContext.variant`）。
+            標準誤差の種類・method だけでは区別できない設定（IV の GMM の
+            重み行列・反復方式）を、ハーネスに手法固有の語彙を持ち込まずに
+            渡すために使う。
+    """
+
+    label: str
+    cov_type: str
+    n_clusters: int | None = None
+    cluster_size: int | None = None
+    cluster_layout: str | None = None
+    libraries: Sequence[str] | None = None
+    method: str | None = None
+    variant: str | None = None
+
+    def __post_init__(self) -> None:
+        has_size = (self.n_clusters is not None) + (
+            self.cluster_size is not None
+        )
+        if self.cluster_layout is None:
+            if has_size:
+                raise ValueError(
+                    f"{self.label}: n_clusters/cluster_size need cluster_layout"
+                )
+            return
+        if self.cluster_layout not in CLUSTER_LAYOUTS:
+            raise ValueError(
+                f"{self.label}: cluster_layout must be one of "
+                f"{CLUSTER_LAYOUTS}, got {self.cluster_layout!r}"
+            )
+        if has_size != 1:
+            raise ValueError(
+                f"{self.label}: give exactly one of n_clusters/cluster_size"
+            )
+
+    def groups_for(self, n: int) -> int | None:
+        """サンプルサイズ n でのクラスター数 G（ハーネスが列を作らないなら None）。"""
+        if self.cluster_layout is None:
+            return None
+        if self.n_clusters is not None:
+            return self.n_clusters
+        return max(2, n // self.cluster_size)
+
+
+def cluster_cases(cov_type: str = "cluster") -> tuple[CovCase, ...]:
+    """cluster の 2×2 ケース（G=50 / G=n/10 × random / sorted）を返す。"""
+    return tuple(
+        CovCase(
+            label=f"{cov_type}_{size_name}_{layout}",
+            cov_type=cov_type,
+            cluster_layout=layout,
+            **size_kwargs,
+        )
+        for size_name, size_kwargs in (
+            ("g50", {"n_clusters": CLUSTER_N_GROUPS}),
+            ("s10", {"cluster_size": CLUSTER_SIZE}),
+        )
+        for layout in CLUSTER_LAYOUTS
+    )
+
+
+def make_cluster_ids(
+    n: int, n_groups: int, layout: str, seed: int
+) -> np.ndarray:
+    """サイズが揃った n_groups 個のクラスター id を layout の並びで作る。
+
+    "sorted" はクラスターごとに連続した並び、"random" は同じ id の多重集合を
+    seed 固定で並べ替えた並び（クラスターの行が散らばる）。
+    """
+    ids = np.arange(n, dtype=np.int64) * n_groups // n
+    if layout == "sorted":
+        return ids
+    return np.random.default_rng(seed).permutation(ids)
+
 
 @dataclass(frozen=True)
 class FitContext:
@@ -125,7 +241,9 @@ class FitContext:
             行番号の列として `df` に足す（`hac_time` は必須で行順を暗黙には使わない
             ため。リファレンス実装は行順をそのまま時間順として使うので、同じ順序）。
             cov_type が HAC 以外なら無視してよい。
-        cluster: クラスターロバスト用のグループ列名。使わない手法・
+        cluster: クラスターロバスト用のグループ列名。cov ケースが
+            `cluster_layout` を持つならハーネスが作る `CLUSTER_COL`、そうでなければ
+            `PerfAdapter.cluster`（パネル系の entity 列等）。使わない手法・
             cov_type では `None`。
         weight_col: WLS の重み列名。重みを使わない手法（OLS/Logit 等）では
             `None`。
@@ -133,6 +251,7 @@ class FitContext:
             "2sls"/"gmm" 等。n/k スイープでは `PerfAdapter.default_method`、
             method 軸では `PerfAdapter.extra_methods` の各値が入る。method 軸を
             持たない手法では常に `default_method`（`fit_once` 側で無視してよい）。
+        variant: `CovCase.variant`。使わない手法・ケースでは `None`。
     """
 
     library: str
@@ -146,6 +265,7 @@ class FitContext:
     cluster: str | None
     weight_col: str | None
     method: str
+    variant: str | None
 
 
 @dataclass(frozen=True)
@@ -172,9 +292,12 @@ class PerfAdapter:
             `performance/compare_tobit.py` docstring 参照）。engine 単独の場合は
             n/k/method の全軸が engine のみで回り、レポートは相対比較ではなく
             engine の絶対値・スケーリングの推移になる。
-        cov_types: 計測する cov_type。`.claude/rules/testing-policy.md`
-            「パフォーマンス比較（ベンチマーク）の方法論」に従い、代表2点
-            （最も軽い classical と、最も計算コストの重いもの）で足りる。
+        cov_cases: cov 軸で計測するケース（`CovCase`）。その手法が対応する標準誤差を
+            全て並べる（リファレンスに同等物が無いものは `CovCase.libraries` で
+            engine 単独にする）。既定の標準誤差（`default_cov_case`）を必ず含める。
+            n・k・method 軸は既定ケースだけ、cov 軸は全ケースを
+            `cov_sweep_n`・`n_sweep_fixed_k` で回す。
+        default_cov_case: n・k・method 軸で使う `cov_cases` のラベル。
         reference_versions: `{"statsmodels_version": "0.14.6", ...}` を返す
             callable。`_meta` に記録する（testing-policy.md「必須事項」）。
             engine 分は git ハッシュで足りるため不要。
@@ -191,6 +314,8 @@ class PerfAdapter:
             （lazy property）で計算する設計の場合、この関数内で明示的にアクセスして
             計算を確定させること**（engine は係数・標準誤差と同じ呼び出しで適合度
             統計量まで常に一括計算するため、揃えないと不公平な比較になる）。
+        cov_sweep_n: cov 軸スイープで固定する n（k は `n_sweep_fixed_k`、method は
+            `default_method`）。
         n_sweep / n_sweep_fixed_k: n 軸スイープの n の刻みと、その際固定する k。
         k_sweep / k_sweep_fixed_n: k 軸スイープの k の刻みと、その際固定する n。
         cluster: `FitContext.cluster` に渡す列名。cluster を計測しない
@@ -203,22 +328,16 @@ class PerfAdapter:
         extra_methods: method 軸で追加計測する method（Logit/Probit の
             `("bfgs", "lbfgs")`、IV の `("gmm",)` 等）。`default_method` は n/k
             スイープに含まれるため列挙しない。空なら method 軸なし。method 軸は
-            cov_type=cov_types[0]・k=n_sweep_fixed_k・n=n_sweep[-1] の1点でのみ
+            既定の標準誤差・k=n_sweep_fixed_k・n=n_sweep[-1] の1点でのみ
             回す（testing-policy.md「方法論」＝代表点で足りる）。
         k_sweep_libraries: k 軸スイープでのみ使うライブラリの部分集合。`None`
             なら `libraries` をそのまま使う。リファレンス実装が k を増やすと
             計測不能になる手法で、k 軸だけ engine 単独に絞るために使う。n 軸・
             method 軸には影響しない。`libraries=("engine",)` の手法では指定不要。
-        k_sweep_cov_types: k 軸スイープでのみ使う cov_type の部分集合。`None`
-            なら `cov_types` をそのまま使う。`k_sweep_libraries` と同じ発想だが
-            対象が cov_type（FE/RE の Driscoll-Kraay HAC は共分散の rank が
-            時点数 T-1 以下のため、k 軸で k >= T にすると同時検定の部分行列が
-            構造的に特異になり engine が `ValidationError` で拒否する——
-            `performance/compare_fe.py` 参照）。n 軸・method 軸には影響しない。
-        n_sweep_engine_only: n 軸に追加する engine 単独計測点の n の刻み。大 n を
-            全 cov_type で回すと高コスト（またはリファレンス実装が大 n で計測不能）
-            だが、engine の大標本での健全性（収束すること・実行時間）は回帰検知
-            したい場合に使う。cov_type は `cov_types[0]`（最も軽いもの）のみ・
+        n_sweep_engine_only: n 軸に追加する engine 単独計測点の n の刻み。
+            リファレンス実装が大 n で計測不能（または高コスト）だが、engine の
+            大標本での健全性（収束すること・実行時間）は回帰検知したい場合に使う。
+            標準誤差は既定のもののみ・
             method は `default_method` のみ・library は engine のみ。`_run_isolated`
             は `check=True` なので、engine の `.fit()` が例外を投げれば benchmark
             ジョブが失敗する（例: Tobit で大標本 Hessian 特異エラーが
@@ -236,22 +355,23 @@ class PerfAdapter:
     method: str
     module: str
     libraries: Sequence[str]
-    cov_types: Sequence[str]
+    cov_cases: Sequence[CovCase]
     reference_versions: Callable[[], dict[str, str]]
     build_dataframe: Callable[[int, int, int], pl.DataFrame]
     fit_once: Callable[[FitContext], object]
+    default_cov_case: str = "classical"
+    cov_sweep_n: int = 100_000
 
     build_pandas_df: Callable[[pl.DataFrame], object] = lambda df: (
         df.to_pandas()
     )
 
-    n_sweep: Sequence[int] = (1_000, 10_000, 100_000, 1_000_000)
+    n_sweep: Sequence[int] = (10_000, 100_000, 1_000_000)
     n_sweep_fixed_k: int = 5
     n_sweep_engine_only: Sequence[int] = ()
     k_sweep: Sequence[int] = (5, 20)
     k_sweep_fixed_n: int = 10_000
     k_sweep_libraries: Sequence[str] | None = None
-    k_sweep_cov_types: Sequence[str] | None = None
     cluster: str | None = None
     weight_col: str | None = None
     default_method: str = "newton"
@@ -259,6 +379,29 @@ class PerfAdapter:
     check_report: Callable[[dict], list[str]] | None = None
     default_repeats: int = 3
     default_seed: int = 42
+
+    def __post_init__(self) -> None:
+        labels = [case.label for case in self.cov_cases]
+        if len(set(labels)) != len(labels):
+            raise ValueError(f"{self.method}: duplicate cov case labels")
+        if self.default_cov_case not in labels:
+            raise ValueError(
+                f"{self.method}: default_cov_case "
+                f"{self.default_cov_case!r} is not in cov_cases"
+            )
+        methods = {self.default_method, *self.extra_methods}
+        for case in self.cov_cases:
+            unknown = set(case.libraries or ()) - set(self.libraries)
+            if unknown:
+                raise ValueError(
+                    f"{self.method}/{case.label}: libraries {sorted(unknown)} "
+                    "are not in the adapter's libraries"
+                )
+            if case.method is not None and case.method not in methods:
+                raise ValueError(
+                    f"{self.method}/{case.label}: method {case.method!r} is "
+                    "neither default_method nor in extra_methods"
+                )
 
 
 def _warn_if_debug_build() -> None:
@@ -282,19 +425,46 @@ def _warn_if_debug_build() -> None:
         )
 
 
+def _find_case(adapter: PerfAdapter, label: str) -> CovCase:
+    for case in adapter.cov_cases:
+        if case.label == label:
+            return case
+    raise ValueError(f"unknown cov case: {label!r}")
+
+
+def _default_case(adapter: PerfAdapter) -> CovCase:
+    """n・k・method 軸で回す既定の標準誤差のケース。"""
+    return _find_case(adapter, adapter.default_cov_case)
+
+
+def _case_libraries(adapter: PerfAdapter, case: CovCase) -> list[str]:
+    if case.libraries is None:
+        return list(adapter.libraries)
+    return [lib for lib in adapter.libraries if lib in case.libraries]
+
+
 def _worker(
     adapter: PerfAdapter,
     library: str,
-    cov_type: str,
+    cov_case: str,
     n: int,
     k: int,
     seed: int,
     repeats: int,
     method: str = "newton",
 ) -> dict:
+    case = _find_case(adapter, cov_case)
     df = adapter.build_dataframe(n, k, seed).with_columns(
         pl.int_range(pl.len()).alias(HAC_TIME_COL)
     )
+    cluster = adapter.cluster
+    n_clusters = case.groups_for(df.height)
+    if n_clusters is not None:
+        cluster_ids = make_cluster_ids(
+            df.height, n_clusters, case.cluster_layout, seed
+        )
+        df = df.with_columns(pl.Series(CLUSTER_COL, cluster_ids))
+        cluster = CLUSTER_COL
     x_cols = [f"x{j + 1}" for j in range(k)]
     pandas_df = None if library == "engine" else adapter.build_pandas_df(df)
     ctx = FitContext(
@@ -303,12 +473,13 @@ def _worker(
         pandas_df=pandas_df,
         x_cols=x_cols,
         y_col="y",
-        cov_type=cov_type,
+        cov_type=case.cov_type,
         hac_lags=hac_auto_lag(n),
         hac_time=HAC_TIME_COL,
-        cluster=adapter.cluster,
+        cluster=cluster,
         weight_col=adapter.weight_col,
         method=method,
+        variant=case.variant,
     )
 
     if library == "engine":
@@ -326,13 +497,14 @@ def _worker(
         "time_median_s": statistics.median(times),
         "time_all_s": times,
         "peak_rss_kb": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+        "n_clusters": n_clusters,
     }
 
 
 def _run_isolated(
     adapter: PerfAdapter,
     library: str,
-    cov_type: str,
+    cov_case: str,
     n: int,
     k: int,
     seed: int,
@@ -352,8 +524,8 @@ def _run_isolated(
             "--worker",
             "--library",
             library,
-            "--cov-type",
-            cov_type,
+            "--cov-case",
+            cov_case,
             "--n",
             str(n),
             "--k",
@@ -379,26 +551,28 @@ def _measure_point(
     axis: str,
     n: int,
     k: int,
-    cov_type: str,
+    case: CovCase,
     library: str,
     repeats: int,
     seed: int,
     method: str = "newton",
 ) -> dict:
     measured = _run_isolated(
-        adapter, library, cov_type, n, k, seed, repeats, method
+        adapter, library, case.label, n, k, seed, repeats, method
     )
     row = {
         "axis": axis,
         "n": n,
         "k": k,
-        "cov_type": cov_type,
+        "cov_type": case.cov_type,
+        "cov_case": case.label,
+        "cluster_layout": case.cluster_layout,
         "method": method,
         "library": library,
         **measured,
     }
     print(
-        f"[{axis}-sweep] n={n} k={k} cov_type={cov_type} method={method} "
+        f"[{axis}-sweep] n={n} k={k} cov_case={case.label} method={method} "
         f"library={library}: time_median={row['time_median_s']:.4f}s "
         f"peak_rss={row['peak_rss_kb'] / 1024:.1f}MB",
         file=sys.stderr,
@@ -407,30 +581,29 @@ def _measure_point(
 
 
 def run_n_sweep(adapter: PerfAdapter, repeats: int, seed: int) -> list[dict]:
-    """n 軸のスイープ（k は `adapter.n_sweep_fixed_k` 固定）。
+    """n 軸のスイープ（k は `adapter.n_sweep_fixed_k` 固定、既定の標準誤差のみ）。
 
     `adapter.n_sweep_engine_only` が設定されていれば、その n では engine 単独・
-    `cov_types[0]` のみ追加で計測する（大 n を全 cov_type で回すと高コストな手法、
-    またはリファレンス実装が大 n で計測不能な手法の大標本回帰検知。`PerfAdapter`
-    docstring 参照）。
+    既定の標準誤差のみ追加で計測する（リファレンス実装が大 n で計測不能な手法の
+    大標本回帰検知。`PerfAdapter` docstring 参照）。
     """
+    case = _default_case(adapter)
     results = []
-    for cov_type in adapter.cov_types:
-        for n in adapter.n_sweep:
-            for library in adapter.libraries:
-                results.append(
-                    _measure_point(
-                        adapter,
-                        "n",
-                        n,
-                        adapter.n_sweep_fixed_k,
-                        cov_type,
-                        library,
-                        repeats,
-                        seed,
-                        adapter.default_method,
-                    )
+    for n in adapter.n_sweep:
+        for library in _case_libraries(adapter, case):
+            results.append(
+                _measure_point(
+                    adapter,
+                    "n",
+                    n,
+                    adapter.n_sweep_fixed_k,
+                    case,
+                    library,
+                    repeats,
+                    seed,
+                    adapter.default_method,
                 )
+            )
     for n in adapter.n_sweep_engine_only:
         results.append(
             _measure_point(
@@ -438,7 +611,7 @@ def run_n_sweep(adapter: PerfAdapter, repeats: int, seed: int) -> list[dict]:
                 "n",
                 n,
                 adapter.n_sweep_fixed_k,
-                adapter.cov_types[0],
+                case,
                 "engine",
                 repeats,
                 seed,
@@ -449,33 +622,71 @@ def run_n_sweep(adapter: PerfAdapter, repeats: int, seed: int) -> list[dict]:
 
 
 def run_k_sweep(adapter: PerfAdapter, repeats: int, seed: int) -> list[dict]:
-    """k 軸のスイープ（n は `adapter.k_sweep_fixed_n` 固定）。
+    """k 軸のスイープ（n は `adapter.k_sweep_fixed_n` 固定、既定の標準誤差のみ）。
 
     `adapter.k_sweep_libraries` が設定されていればそのライブラリのみを回す
     （リファレンス実装が k 軸で計測不能な手法向け。`PerfAdapter` docstring 参照）。
-    `adapter.k_sweep_cov_types` が設定されていればその cov_type のみを回す
-    （k 軸で計測不能になる cov_type 向け、同 docstring 参照）。
     """
     libraries = adapter.k_sweep_libraries or adapter.libraries
-    cov_types = adapter.k_sweep_cov_types or adapter.cov_types
+    case = _default_case(adapter)
     results = []
     for k in adapter.k_sweep:
-        for cov_type in cov_types:
-            for library in libraries:
-                results.append(
-                    _measure_point(
-                        adapter,
-                        "k",
-                        adapter.k_sweep_fixed_n,
-                        k,
-                        cov_type,
-                        library,
-                        repeats,
-                        seed,
-                        adapter.default_method,
-                    )
+        for library in _case_libraries(adapter, case):
+            if library not in libraries:
+                continue
+            results.append(
+                _measure_point(
+                    adapter,
+                    "k",
+                    adapter.k_sweep_fixed_n,
+                    k,
+                    case,
+                    library,
+                    repeats,
+                    seed,
+                    adapter.default_method,
                 )
+            )
     return results
+
+
+def run_cov_sweep(
+    adapter: PerfAdapter,
+    repeats: int,
+    seed: int,
+    cov_filter: Sequence[str] | None = None,
+) -> list[dict]:
+    """cov 軸（全 `cov_cases` を `cov_sweep_n`・k=`n_sweep_fixed_k` の1点で計測）。
+
+    method は `CovCase.method`（`None` なら `default_method`）。ケースごとに
+    `CovCase.libraries` で絞ったライブラリを回す。`cov_filter` があればそのラベルの
+    ケースだけを回す。
+    """
+    results = []
+    for case in _cov_axis_cases(adapter, cov_filter):
+        for library in _case_libraries(adapter, case):
+            results.append(
+                _measure_point(
+                    adapter,
+                    "cov",
+                    adapter.cov_sweep_n,
+                    adapter.n_sweep_fixed_k,
+                    case,
+                    library,
+                    repeats,
+                    seed,
+                    case.method or adapter.default_method,
+                )
+            )
+    return results
+
+
+def _cov_axis_cases(
+    adapter: PerfAdapter, cov_filter: Sequence[str] | None
+) -> list[CovCase]:
+    if cov_filter is None:
+        return list(adapter.cov_cases)
+    return [c for c in adapter.cov_cases if c.label in cov_filter]
 
 
 def run_method_sweep(
@@ -483,25 +694,25 @@ def run_method_sweep(
 ) -> list[dict]:
     """method 軸（`adapter.extra_methods` を代表点1つで計測）。
 
-    cov_type=cov_types[0]・k=n_sweep_fixed_k・n=n_sweep[-1] の1点で、
+    既定の標準誤差・k=n_sweep_fixed_k・n=n_sweep[-1] の1点で、
     追加 method（bfgs/lbfgs、gmm 等）× ライブラリを回す。`default_method` は
     n/k スイープに含まれるため対象外。`extra_methods` が空なら何もしない。
     """
     if not adapter.extra_methods:
         return []
-    cov_type = adapter.cov_types[0]
+    case = _default_case(adapter)
     n = adapter.n_sweep[-1]
     k = adapter.n_sweep_fixed_k
     results = []
     for method in adapter.extra_methods:
-        for library in adapter.libraries:
+        for library in _case_libraries(adapter, case):
             results.append(
                 _measure_point(
                     adapter,
                     "method",
                     n,
                     k,
-                    cov_type,
+                    case,
                     library,
                     repeats,
                     seed,
@@ -511,10 +722,36 @@ def run_method_sweep(
     return results
 
 
-def build_report(adapter: PerfAdapter, repeats: int, seed: int) -> dict:
-    n_results = run_n_sweep(adapter, repeats, seed)
-    k_results = run_k_sweep(adapter, repeats, seed)
-    method_results = run_method_sweep(adapter, repeats, seed)
+def _case_meta(case: CovCase) -> dict:
+    return {
+        "label": case.label,
+        "cov_type": case.cov_type,
+        "n_clusters": case.n_clusters,
+        "cluster_size": case.cluster_size,
+        "cluster_layout": case.cluster_layout,
+        "libraries": None if case.libraries is None else list(case.libraries),
+        "method": case.method,
+        "variant": case.variant,
+    }
+
+
+def build_report(
+    adapter: PerfAdapter,
+    repeats: int,
+    seed: int,
+    axes: Sequence[str] = AXES,
+    cov_filter: Sequence[str] | None = None,
+) -> dict:
+    """指定した軸を計測してレポート dict を作る（`axes` は `AXES` の部分集合）。"""
+    results: list[dict] = []
+    if "n" in axes:
+        results += run_n_sweep(adapter, repeats, seed)
+    if "k" in axes:
+        results += run_k_sweep(adapter, repeats, seed)
+    if "cov" in axes:
+        results += run_cov_sweep(adapter, repeats, seed, cov_filter)
+    if "method" in axes:
+        results += run_method_sweep(adapter, repeats, seed)
     # リファレンス実装（`libraries` の "engine" 以降）が無い手法（Tobit）では
     # 相対比較ではなく engine 単独の推移を記録する。
     reference_libs = "/".join(adapter.libraries[1:])
@@ -526,18 +763,23 @@ def build_report(adapter: PerfAdapter, repeats: int, seed: int) -> dict:
             else "engine 単独で計測する"
         )
     )
+    cov_axis_cases = _cov_axis_cases(adapter, cov_filter)
     report = {
         "_meta": {
+            "report_schema": 2,
             "method": adapter.method,
             "purpose": purpose,
             "generated_at": datetime.now(UTC).isoformat(),
             **adapter.reference_versions(),
+            "axes": list(axes),
             "n_sweep": list(adapter.n_sweep),
             "n_sweep_fixed_k": adapter.n_sweep_fixed_k,
             "n_sweep_engine_only": list(adapter.n_sweep_engine_only),
             "k_sweep": list(adapter.k_sweep),
             "k_sweep_fixed_n": adapter.k_sweep_fixed_n,
-            "cov_types": list(adapter.cov_types),
+            "default_cov_case": adapter.default_cov_case,
+            "cov_sweep_n": adapter.cov_sweep_n if cov_axis_cases else None,
+            "cov_cases": [_case_meta(c) for c in cov_axis_cases],
             "libraries": list(adapter.libraries),
             "default_method": adapter.default_method,
             "extra_methods": list(adapter.extra_methods),
@@ -547,7 +789,7 @@ def build_report(adapter: PerfAdapter, repeats: int, seed: int) -> dict:
             "repeats": repeats,
             "seed": seed,
         },
-        "results": n_results + k_results + method_results,
+        "results": results,
     }
     if adapter.check_report is not None:
         report_warnings = adapter.check_report(report)
@@ -555,6 +797,61 @@ def build_report(adapter: PerfAdapter, repeats: int, seed: int) -> dict:
         for warning in report_warnings:
             print(f"WARNING: {warning}", file=sys.stderr)
     return report
+
+
+def _csv(text: str) -> list[str]:
+    return [item.strip() for item in text.split(",") if item.strip()]
+
+
+def _csv_ints(text: str) -> list[int]:
+    return [int(item) for item in _csv(text)]
+
+
+def _apply_overrides(
+    parser: argparse.ArgumentParser,
+    adapter: PerfAdapter,
+    args: argparse.Namespace,
+) -> tuple[PerfAdapter, list[str], list[str] | None]:
+    """絞り込み用の CLI 引数を adapter・軸・cov フィルタへ反映する。
+
+    ローカルで一部の点だけを素早く回すための上書き。`--n-sweep` を指定すると
+    n 軸全体を上書きするため `n_sweep_engine_only` も空にする。
+    """
+    axes = _csv(args.axes) if args.axes else list(AXES)
+    for axis in axes:
+        if axis not in AXES:
+            parser.error(f"--axes: unknown axis {axis!r} (choose from {AXES})")
+
+    changes: dict = {}
+    if args.n_sweep:
+        changes["n_sweep"] = _csv_ints(args.n_sweep)
+        changes["n_sweep_engine_only"] = ()
+    if args.k_sweep:
+        changes["k_sweep"] = _csv_ints(args.k_sweep)
+    if args.cov_sweep_n:
+        changes["cov_sweep_n"] = args.cov_sweep_n
+    if args.libraries:
+        libraries = _csv(args.libraries)
+        for library in libraries:
+            if library not in adapter.libraries:
+                parser.error(
+                    f"--libraries: {library!r} not in {list(adapter.libraries)}"
+                )
+        if libraries[0] != "engine":
+            parser.error("--libraries: the first library must be 'engine'")
+        changes["libraries"] = tuple(libraries)
+
+    cov_filter = None
+    if args.cov_filter:
+        cov_filter = _csv(args.cov_filter)
+        known = {c.label for c in adapter.cov_cases}
+        for label in cov_filter:
+            if label not in known:
+                parser.error(
+                    f"--cov-filter: unknown cov case {label!r} "
+                    f"(choose from {sorted(known)})"
+                )
+    return replace(adapter, **changes), axes, cov_filter
 
 
 def run_cli(
@@ -565,17 +862,26 @@ def run_cli(
     """各 `compare_<method>.py` の `__main__` から呼ぶエントリポイント。
 
     `--worker` 指定時は1計測点をこのプロセス内で実行し JSON を標準出力する
-    （標準出力は JSON のみ。警告等は標準エラーへ）。それ以外はフルスイープを
+    （標準出力は JSON のみ。警告等は標準エラーへ）。それ以外はスイープを
     実行し、`--output` があればそこへ、無ければ標準出力へレポート JSON を書く。
+    `--axes`・`--n-sweep`・`--k-sweep`・`--cov-sweep-n`・`--cov-filter`・
+    `--libraries` で計測する点を絞れる（出力形式は絞り込みなしと同じ）。
     """
-    parser = argparse.ArgumentParser(description=doc)
+    parser = argparse.ArgumentParser(
+        description=doc, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument(
         "--worker",
         action="store_true",
         help="内部用: 1計測点をこのプロセス内で実行しJSONを標準出力する",
     )
     parser.add_argument("--library", choices=list(adapter.libraries))
-    parser.add_argument("--cov-type", choices=list(adapter.cov_types))
+    parser.add_argument(
+        "--cov-case",
+        dest="cov_case",
+        choices=[c.label for c in adapter.cov_cases],
+        help="内部用(--worker): 計測する cov ケースのラベル",
+    )
     parser.add_argument("--n", type=int)
     parser.add_argument("--k", type=int)
     parser.add_argument("--seed", type=int, default=adapter.default_seed)
@@ -590,13 +896,36 @@ def run_cli(
         default=None,
         help="結果JSONの出力先。省略時は標準出力のみ",
     )
+    narrowing = parser.add_argument_group(
+        "計測点の絞り込み（ローカルで素早く回す用。CIは指定しない）"
+    )
+    narrowing.add_argument(
+        "--axes",
+        help=f"回す軸のカンマ区切り（{','.join(AXES)}。既定は全軸）",
+    )
+    narrowing.add_argument(
+        "--n-sweep",
+        help="n 軸の n をカンマ区切りで上書き（n_sweep_engine_only も空にする）",
+    )
+    narrowing.add_argument("--k-sweep", help="k 軸の k をカンマ区切りで上書き")
+    narrowing.add_argument(
+        "--cov-sweep-n", type=int, help="cov 軸で固定する n を上書き"
+    )
+    narrowing.add_argument(
+        "--cov-filter",
+        help="cov 軸で回すケースのラベルをカンマ区切りで指定（既定は全ケース）",
+    )
+    narrowing.add_argument(
+        "--libraries",
+        help="計測するライブラリのカンマ区切り（例: engine で engine 単独）",
+    )
     args = parser.parse_args(argv)
 
     if args.worker:
         output = _worker(
             adapter,
             args.library,
-            args.cov_type,
+            args.cov_case,
             args.n,
             args.k,
             args.seed,
@@ -606,7 +935,8 @@ def run_cli(
         print(json.dumps(output))
         return
 
-    report = build_report(adapter, args.repeats, args.seed)
+    adapter, axes, cov_filter = _apply_overrides(parser, adapter, args)
+    report = build_report(adapter, args.repeats, args.seed, axes, cov_filter)
     if args.output:
         output_path = Path(args.output)
         output_path.parent.mkdir(parents=True, exist_ok=True)

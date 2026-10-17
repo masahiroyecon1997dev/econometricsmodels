@@ -60,12 +60,14 @@ Wald F統計量（`pwaldtest`は変換後の定数列も検定に含めるため
 
 補助回帰版は統計量が構造的に非負になるため符号処理は不要。`plm`は補助回帰の
 定数項に準偏差変換前の`1`を使い、本実装もこれに合わせている。バランスパネルでは
-機械精度で一致し、不均衡パネルではSwamy-Arora分散成分の差（σ_u²）で数％ずれる
-（`UNBALANCED_SCENARIO`）。補助回帰が`phtest`内部のθに依存するため、ハウスマン
-検定は不均衡パネルでもplm自身の値と比べ、分散成分の差を許容する専用の許容誤差
-（`_tolerances_panel.py`の`rtol_hausman_unbalanced`）を使う。3%ではdkの
-バンド幅2と3の統計量の差（約2.1%）を判別できず、見分けられるのはバンド幅0と2の
-取り違えまでである。
+機械精度で一致する。不均衡パネル（`UNBALANCED_SCENARIO`）では、`phtest`の補助回帰が
+plmのSwamy-Arora分散成分から作るθに依存し、plm自身の値とは統計量が1〜2%ずれる
+（dkのバンド幅2と3の差約2.1%を隠す）。そのためハウスマン検定も、`linearmodels`の
+分散成分から補助回帰を組み立ててplmの`vcov`系を当てた値と機械精度で比べる
+（`run_plm_re_given_variance_hausman_benchmark.R`）。plmが検証するのは補助回帰の
+係数と共分散行列まで。補助回帰の組み立て（準偏差変換した`y*`・`X*`、within変換した
+`X̃`、素の定数項、検定対象の選択）は手書きで、plm自身の分散成分を与えた値が
+`phtest`と一致することで、フィクスチャを作るたびに確かめている。
 
 役割分担:
     - 構造・API: `test_re_api.py`
@@ -132,22 +134,13 @@ ATOL = TOLERANCES["re_crosscheck"]["atol"]
 RTOL_P_VALUE = TOLERANCES["re_crosscheck"]["rtol_p_value"]
 RTOL_HAUSMAN = TOLERANCES["re_crosscheck"]["rtol_hausman"]
 ATOL_HAUSMAN = TOLERANCES["re_crosscheck"]["atol_hausman"]
-RTOL_HAUSMAN_UNBALANCED = TOLERANCES["re_crosscheck"][
-    "rtol_hausman_unbalanced"
-]  # cov_type別
-RTOL_HAUSMAN_P_VALUE_UNBALANCED = TOLERANCES["re_crosscheck"][
-    "rtol_hausman_p_value_unbalanced"
-]
 RTOL_HAUSMAN_ILL_CONDITIONED = TOLERANCES["re_crosscheck"][
     "rtol_hausman_ill_conditioned"
 ]
 ATOL_HAUSMAN_P_VALUE = TOLERANCES["re_crosscheck"]["atol_hausman_p_value"]
 
 # 条件数が大きく、ハウスマン統計量にだけ専用の緩めたrtol
-# （`rtol_hausman_ill_conditioned`）を使うシナリオ。不均衡の
-# `UNBALANCED_SCENARIO`は、plm/linearmodelsの分散成分（σ_u²）推定の差でθが
-# 変わり、ハウスマン統計量への増幅がparams/std_errorsよりさらに大きくなる
-# （モジュールdoc「ハウスマン統計量の方式について」参照）。
+# （`rtol_hausman_ill_conditioned`）を使うシナリオ。
 _ILL_CONDITIONED_HAUSMAN_SCENARIO = "high_condition_number"
 
 
@@ -209,17 +202,13 @@ def _check_hausman(
     ref: dict,
     label: str,
     *,
-    cov_type: str,
     scenario: str | None = None,
 ) -> None:
-    rtol_p_value = None
-    if scenario == UNBALANCED_SCENARIO:
-        rtol_hausman = RTOL_HAUSMAN_UNBALANCED[cov_type]
-        rtol_p_value = RTOL_HAUSMAN_P_VALUE_UNBALANCED[cov_type]
-    elif scenario == _ILL_CONDITIONED_HAUSMAN_SCENARIO:
-        rtol_hausman = RTOL_HAUSMAN_ILL_CONDITIONED
-    else:
-        rtol_hausman = RTOL_HAUSMAN
+    rtol_hausman = (
+        RTOL_HAUSMAN_ILL_CONDITIONED
+        if scenario == _ILL_CONDITIONED_HAUSMAN_SCENARIO
+        else RTOL_HAUSMAN
+    )
     assert_close(
         res.hausman_statistic,
         ref["hausman_statistic"],
@@ -231,7 +220,7 @@ def _check_hausman(
         res.hausman_p_value,
         ref["hausman_p_value"],
         f"{label}/hausman_p_value",
-        rtol=rtol_hausman if rtol_p_value is None else rtol_p_value,
+        rtol=rtol_hausman,
         atol=ATOL_HAUSMAN_P_VALUE,
     )
     assert res.hausman_df == ref["hausman_df"], f"{label}/hausman_df"
@@ -405,7 +394,6 @@ def test_dk_three_periods_hausman_matches_plm(crosscheck):
         _fit_dk_three_periods(),
         crosscheck["synthetic"]["baseline"]["dk_three_periods_hausman"],
         "baseline/dk_three_periods",
-        cov_type="dk",
     )
 
 
@@ -455,8 +443,7 @@ def test_hausman_matches_plm(crosscheck, scenario, cov_type):
     _check_hausman(
         model.fit(),
         ref,
-        f"{scenario}/{cov_type}",
-        cov_type=cov_type,
+        f"{scenario}/{cov_type} vs {_reference_label(scenario)}",
         scenario=scenario,
     )
 
@@ -477,7 +464,6 @@ def test_wagepan_hausman_matches_plm(crosscheck, cov_type):
         res,
         crosscheck["wooldridge"]["wagepan"][HAUSMAN_KEY][cov_type],
         f"wagepan/{cov_type}",
-        cov_type=cov_type,
     )
 
 
@@ -485,7 +471,8 @@ def test_wagepan_hausman_matches_plm(crosscheck, cov_type):
 def test_hausman_dk_explicit_bandwidth_matches_plm(
     crosscheck, scenario, bandwidth
 ):
-    """`dk_bandwidth`を明示指定した場合も`vcovSCC(maxlag=bandwidth)`と一致する。"""
+    """`dk_bandwidth`を明示指定した場合も`vcovSCC(maxlag=bandwidth)`と一致する。
+    `unbalanced`でもバンド幅2と3（統計量の差は約2%）を判別できる。"""
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
     res = RE(
         df,
@@ -502,8 +489,7 @@ def test_hausman_dk_explicit_bandwidth_matches_plm(
         crosscheck["synthetic"][scenario][HAUSMAN_DK_BANDWIDTH_KEY][
             str(bandwidth)
         ],
-        f"{scenario}/dk/bandwidth={bandwidth}",
-        cov_type="dk",
+        f"{scenario}/dk/bandwidth={bandwidth} vs {_reference_label(scenario)}",
         scenario=scenario,
     )
 

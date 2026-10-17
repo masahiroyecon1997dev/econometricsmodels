@@ -101,31 +101,13 @@ PANEL_TOLERANCES: dict[str, dict[str, float]] = {
         # バランスパネルでは機械精度一致。
         "rtol_hausman": RTOL_MACHINE_PRECISION,
         "atol_hausman": ATOL_REFERENCE_FLOOR,
-        # unbalancedシナリオのみ、plm/linearmodelsの分散成分（σ_u²）推定の
-        # 差でθが変わり統計量に増幅されるため、専用に緩めたrtolを使う。標準誤差と
-        # 違い、補助回帰がphtest内部のθに依存するため、linearmodelsの分散成分を与えた
-        # 参照にはできずplm自身の値と比べる。
-        # cov_type別の実測最大相対誤差（統計量）: classical 1.3%・hc1〜hc3 1.5%・
-        # dk 1.5%・cluster 0.024%。クラスターはσ_uの差が相殺されやすく桁違いに小さい
-        # ため、一律に緩めず実測にマージンを載せて分ける。
-        "rtol_hausman_unbalanced": {
-            "classical": 0.03,
-            "hc1": 0.03,
-            "hc2": 0.03,
-            "hc3": 0.03,
-            "cluster": 1e-3,
-            "dk": 0.03,
-        },
-        # 同・p値。裾確率で統計量の差が増幅される（実測最大相対誤差: classical 11%・
-        # hc1 13%・hc2 13%・hc3 12%。cluster・dkは統計量と同水準）。
-        "rtol_hausman_p_value_unbalanced": {
-            "classical": 0.2,
-            "hc1": 0.2,
-            "hc2": 0.2,
-            "hc3": 0.2,
-            "cluster": 1e-2,
-            "dk": 1e-2,
-        },
+        # unbalancedシナリオでは、plm自身のphtestの補助回帰がplmのSwamy-Arora分散
+        # 成分から作るθに依存し、本実装（linearmodels準拠）と統計量が数％ずれる
+        # （plm自身との実測最大相対誤差: 統計量 classical 1.3%・hc1〜hc3 1.5%・
+        # dk 1.5〜1.7%・cluster 0.024%、p値は裾で classical 11%・hc1 13%・
+        # hc2 13%・hc3 12%）ため、参照値は、linearmodelsの分散成分を与えて補助回帰を
+        # 組み立てたplm（`run_plm_re_given_variance_hausman_benchmark.R`）にして揃える。
+        # 実測最大相対誤差（全cov_type・dkのバンド幅0/2/3）: 統計量 1.4e-14・p値 8.5e-14。
         # high_condition_numberシナリオ（x1,x2の相関0.999）のみ。検定対象の2係数が準共線で
         # 共分散部分行列がほぼ特異（det/(V00*V11)=6e-5）なため、入力の丸め誤差が条件数倍に
         # 増幅され、機械精度から外れる。実測最大相対誤差: dkの統計量7.6e-9・p値9.8e-9
@@ -135,11 +117,9 @@ PANEL_TOLERANCES: dict[str, dict[str, float]] = {
         # を読むと、行列積の丸めで非対称になった共分散の片側の誤差がそのまま出て、dkで
         # 1.2e-7に達する。
         "rtol_hausman_ill_conditioned": 5e-8,
-        # ハウスマン検定のp値は裾確率がゼロ近傍に潰れるケースが多く、
-        # unbalancedシナリオでは絶対誤差フロアで比較する
-        # （実測最大絶対誤差1.5e-8にマージン、他のRクロスチェックの
-        # atol_p_value系と同じ理由）。全シナリオでp値を比較する。
-        "atol_hausman_p_value": 1e-6,
+        # ハウスマン検定のp値は絶対誤差の下限なし（下限があると、裾のp値が0.0に
+        # 潰れる実装を見逃す）。全シナリオ、unbalancedも相対誤差のみで一致する。
+        "atol_hausman_p_value": 0.0,
     },
     # 時間不変の説明変数を含むREの検証（`tests/panel/test_re_time_invariant.py`）。
     # 本実装と、仕様どおりに書いた独立な手計算（statsmodels・numpy）の比較、

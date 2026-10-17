@@ -86,6 +86,13 @@ _PLM_HAUSMAN_TILDE_R_SCRIPT = (
 )
 
 
+# 分散成分を外から与えたREのハウスマン検定（不均衡パネル用、全cov_type）。
+_PLM_RE_GIVEN_VARIANCE_HAUSMAN_R_SCRIPT = (
+    Path(__file__).resolve().parent
+    / "run_plm_re_given_variance_hausman_benchmark.R"
+)
+
+
 def default_dk_bandwidth(csv_path: Path, time_col: str = "time") -> int:
     """`bandwidth=None`時の本実装の自動選択`floor(4*(T/100)^(2/9))`（Tは
     ユニークな時点数、`hac_auto_lag`と同じ式で`n`の代わりに`T`を渡す）。
@@ -320,6 +327,54 @@ def run_re_hausman_plm_r(
         extra.append(str(maxlag))
     return run_r(
         _PLM_HAUSMAN_R_SCRIPT,
+        csv_path,
+        formula,
+        cov_type,
+        extra_args=extra,
+    )
+
+
+def run_re_hausman_given_variance_plm_r(
+    csv_path: Path,
+    formula: str,
+    cov_type: str,
+    *,
+    sigma2_eps: float,
+    sigma2_u: float,
+    maxlag: int | None = None,
+    entity_col: str = "entity",
+    time_col: str = "time",
+) -> dict:
+    """`run_plm_re_given_variance_hausman_benchmark.R`を呼び、外から与えた分散成分
+    （`sigma2_eps`・`sigma2_u`）で組み立てた補助回帰に`plm`の`cov_type`別の共分散を
+    当てたハウスマン検定（`hausman_statistic`/`hausman_df`/`hausman_p_value`）を得る。
+
+    plm自身のSwamy-Arora分散成分が本実装（linearmodels準拠）と異なる不均衡
+    パネルで、補助回帰の共分散と小標本補正だけを機械精度で比較するための参照値
+    （スクリプトのモジュールコメント参照）。バランスパネルでは使えない。
+
+    Args:
+        csv_path: データCSV（不均衡パネル）。
+        formula: `plm`の回帰式（例: "y ~ x1 + x2"）。
+        cov_type: classical / hc1 / hc2 / hc3 / cluster（entity）/ dk。
+        sigma2_eps: 特異誤差の分散σ_ε²（呼び出し側が`linearmodels`の値を渡す）。
+        sigma2_u: 個体効果の分散σ_u²。
+        maxlag: `cov_type="dk"`のバンド幅（`vcovSCC`の`maxlag`）。
+        entity_col: エンティティ識別子の列名。
+        time_col: 時点識別子の列名。
+    """
+    extra = [
+        entity_col,
+        time_col,
+        repr(float(sigma2_eps)),
+        repr(float(sigma2_u)),
+    ]
+    if cov_type == "dk":
+        if maxlag is None:
+            raise ValueError("maxlag is required for cov_type='dk'")
+        extra.append(str(maxlag))
+    return run_r(
+        _PLM_RE_GIVEN_VARIANCE_HAUSMAN_R_SCRIPT,
         csv_path,
         formula,
         cov_type,

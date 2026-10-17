@@ -3,7 +3,8 @@
 主リファレンス（statsmodels/linearmodels）・独立実装（R）との数値比較テスト
 （`test_*_reference.py`/`test_*_crosscheck.py`）が共有する。
 
-- `assert_close`/`assert_dict_close`: スカラー・係数名キーの辞書の比較。各テスト
+- `assert_close`/`assert_dict_close`: スカラー・係数名キーの辞書の比較（辞書版は
+  キー集合の一致も確認する）。各テスト
   ファイルは`functools.partial`で許容誤差を束縛して`_assert_close`/
   `_assert_dict_close`として使う（`_assert_close`はスカラー版、
   `_assert_dict_close`は辞書版で統一）。
@@ -97,6 +98,7 @@ def assert_inference_close(
         )
     else:
         p_value_check(res.p_values, ref["p_values"], f"{label}/p_values")
+    assert_same_keys(res.conf_int, ref["conf_int"], f"{label}/conf_int")
     for name, (ref_lower, ref_upper) in ref["conf_int"].items():
         our_lower, our_upper = res.conf_int[name]
         assert_close(
@@ -182,6 +184,16 @@ def assert_hac_time_reorders_rows(
         )
 
 
+def assert_same_keys(ours: dict, ref: dict, label: str) -> None:
+    """`ours`と`ref`のキー集合が過不足なく一致すること。"""
+    missing = sorted(set(ref) - set(ours))
+    extra = sorted(set(ours) - set(ref))
+    assert not missing and not extra, (
+        f"{label}: キー集合が一致しない（実装に無い={missing}、"
+        f"リファレンスに無い={extra}）"
+    )
+
+
 def assert_dict_close(
     ours: dict[str, float],
     ref: dict[str, float],
@@ -190,6 +202,13 @@ def assert_dict_close(
     rtol: float,
     atol: float,
 ) -> None:
+    """係数名キーの辞書を比較する。キー集合が過不足なく一致することも確認する。
+
+    比較ループはリファレンスのキーだけを回るため、実装が係数を返し損ねても
+    リファレンス側にも無ければ（または実装が余分な係数を返しても）通ってしまう。
+    キー集合は比較の前に別途確認する。
+    """
+    assert_same_keys(ours, ref, label)
     for name, ref_val in ref.items():
         assert_close(
             ours[name],

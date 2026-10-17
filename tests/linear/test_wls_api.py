@@ -66,6 +66,35 @@ _assert_close = partial(
 # 差が`sqrt(CONSTANT_WEIGHT)`倍として現れるよう、1から十分離した値にする。
 CONSTANT_WEIGHT = 100.0
 
+# 説明変数に依存し、範囲の広い重み`exp(0.5*x1 - 0.5*x2)`を持つ列の名前
+# （`regressor_weight_dataset`）。`wide_dataset`では最大/最小が約35、
+# x1・x2との相関の絶対値が約0.6。
+REGRESSOR_WEIGHT = "regressor_weight"
+# 上の性質が崩れていないことの確認用の下限（実測に余裕を持たせた値）。
+MIN_REGRESSOR_WEIGHT_RATIO = 10.0
+MIN_REGRESSOR_WEIGHT_ABS_CORR = 0.4
+
+
+@pytest.fixture(scope="module")
+def regressor_weight_dataset(wide_dataset: pl.DataFrame) -> pl.DataFrame:
+    """`wide_dataset`に、複数の説明変数（x1・x2）に依存する広い範囲の重み列
+    `REGRESSOR_WEIGHT`を足したもの。
+
+    `wide_dataset`の`weight`列は0.5〜1.5の一様乱数で説明変数と独立なため、
+    重み列と説明変数列の取り違えや、重みの変動が大きいときだけ現れる不具合は
+    そのままでは検出しにくい。足した列がその目的に足りる性質（範囲の広さ・
+    x1・x2との相関）を持つことを、ここで確認してから返す。
+    """
+    df = wide_dataset.with_columns(
+        (0.5 * pl.col("x1") - 0.5 * pl.col("x2")).exp().alias(REGRESSOR_WEIGHT)
+    )
+    weight = df[REGRESSOR_WEIGHT]
+    assert weight.max() / weight.min() >= MIN_REGRESSOR_WEIGHT_RATIO
+    for name in ("x1", "x2"):
+        corr = df.select(pl.corr(REGRESSOR_WEIGHT, name)).item()
+        assert abs(corr) >= MIN_REGRESSOR_WEIGHT_ABS_CORR, name
+    return df
+
 
 # ── 成功パス・結果型 ──────────────────────────────────────────────────
 
@@ -323,6 +352,46 @@ def test_predict_new_data_matches_statsmodels(wide_dataset):
         _assert_close(value, exp, f"predicted/{i}")
 
 
+def test_predict_none_with_regressor_dependent_weight_matches_statsmodels(
+    regressor_weight_dataset,
+):
+    """重みが説明変数に依存し範囲が広い場合（`REGRESSOR_WEIGHT`）も、
+    `predict(new_data=None)`がstatsmodels `sm.WLS`のfittedvaluesと一致すること。
+    """
+    df = regressor_weight_dataset
+    sm_res = sm_wls_fit(df, x=WIDE_X, weight=REGRESSOR_WEIGHT)
+
+    res = WLS(df, y="y", x=WIDE_X, weight=REGRESSOR_WEIGHT).fit()
+    predicted = res.predict()
+
+    assert len(predicted) == len(df)
+    for i, (value, expected) in enumerate(zip(predicted, sm_res.fittedvalues)):
+        _assert_close(value, expected, f"predicted/{i}")
+
+
+def test_predict_new_data_with_regressor_dependent_weight_matches_statsmodels(
+    regressor_weight_dataset,
+):
+    """重みが説明変数に依存し範囲が広い場合（`REGRESSOR_WEIGHT`）も、
+    新規データに対する`predict()`がstatsmodelsの`.predict()`と一致すること
+    （列順を学習時（x1..x8）と逆順にして渡す）。
+    """
+    import statsmodels.api as sm
+
+    df = regressor_weight_dataset
+    sm_res = sm_wls_fit(df, x=WIDE_X, weight=REGRESSOR_WEIGHT)
+
+    res = WLS(df, y="y", x=WIDE_X, weight=REGRESSOR_WEIGHT).fit()
+    new_data = wide_new_data()
+    predicted = res.predict(new_data.select(reversed(WIDE_X)))
+
+    expected = sm_res.predict(sm.add_constant(new_data.to_numpy()))
+
+    assert len(predicted) == 3
+    for i, (value, exp) in enumerate(zip(predicted, expected)):
+        _assert_close(value, exp, f"predicted/{i}")
+
+
 def test_predict_with_include_intercept_false_and_x_named_const():
     """`include_intercept=False`かつ`x`に`"const"`という名前の列を含む場合でも
     `predict(new_data)`が、その列の値を使って正しく計算されること。
@@ -427,6 +496,55 @@ def test_augment_new_data_with_extra_column_preserves_it(wide_dataset):
 
     assert augmented.columns == ["id", *WIDE_X, "predicted"]
     assert augmented["id"].to_list() == ["a", "b"]
+
+
+def test_augment_none_with_regressor_dependent_weight_matches_statsmodels(
+    regressor_weight_dataset,
+):
+    """重みが説明変数に依存し範囲が広い場合（`REGRESSOR_WEIGHT`）も、
+    `augment(new_data=None)`の`"predicted"`列がstatsmodels `sm.WLS`の
+    fittedvaluesと一致し、学習データの全列（重み列を含む）が行順どおり
+    保たれること。
+    """
+    df = regressor_weight_dataset
+    sm_res = sm_wls_fit(df, x=WIDE_X, weight=REGRESSOR_WEIGHT)
+
+    res = WLS(df, y="y", x=WIDE_X, weight=REGRESSOR_WEIGHT).fit()
+    augmented = res.augment()
+
+    assert augmented.columns == [*df.columns, "predicted"]
+    for col in df.columns:
+        assert augmented[col].to_list() == df[col].to_list(), col
+    for i, (value, expected) in enumerate(
+        zip(augmented["predicted"], sm_res.fittedvalues)
+    ):
+        _assert_close(value, expected, f"predicted/{i}")
+
+
+def test_augment_new_data_with_regressor_dependent_weight_matches_statsmodels(
+    regressor_weight_dataset,
+):
+    """重みが説明変数に依存し範囲が広い場合（`REGRESSOR_WEIGHT`）も、
+    `augment(new_data)`の`"predicted"`列がstatsmodelsの`.predict()`と一致し、
+    `new_data`の全列が渡した順のまま保たれること（列順は学習時と逆順）。
+    """
+    import statsmodels.api as sm
+
+    df = regressor_weight_dataset
+    sm_res = sm_wls_fit(df, x=WIDE_X, weight=REGRESSOR_WEIGHT)
+
+    res = WLS(df, y="y", x=WIDE_X, weight=REGRESSOR_WEIGHT).fit()
+    new_data = wide_new_data()
+    reversed_new_data = new_data.select(reversed(WIDE_X))
+    augmented = res.augment(reversed_new_data)
+
+    assert augmented.columns == [*reversed(WIDE_X), "predicted"]
+    for col in WIDE_X:
+        assert augmented[col].to_list() == new_data[col].to_list(), col
+    expected = sm_res.predict(sm.add_constant(new_data.to_numpy()))
+    assert augmented.height == 3
+    for i, (value, exp) in enumerate(zip(augmented["predicted"], expected)):
+        _assert_close(value, exp, f"predicted/{i}")
 
 
 def test_augment_without_intercept_matches_predict():

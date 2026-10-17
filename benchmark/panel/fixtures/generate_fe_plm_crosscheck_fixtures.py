@@ -77,17 +77,23 @@ NUMERIC_SCENARIOS = ONE_WAY_ONLY_SCENARIOS + TWO_WAY_SCENARIOS
 # many_regressors（k=20、T=6）はk>T-1のためdkが対象外（fe_crosscheck.jsonと同じ）。
 COV_TYPES = ["cluster", "dk"]
 
-# wagepan（T=8）はfe_crosscheck.jsonと同じ理由でdkを対象外にする。
-WAGEPAN_COV_TYPES = ["cluster"]
+# wagepan（T=8、`WAGEPAN_X`は3変数で`T-1=7 > q=3`）はdkも対象にする。
+WAGEPAN_COV_TYPES = ["cluster", "dk"]
 WAGEPAN_FORMULA_RHS = " + ".join(WAGEPAN_X)
 
 # `bandwidth == T-1`境界を検証するシナリオ（バランス・不均衡・短いT=4）。
 MAX_BANDWIDTH_SCENARIOS = ["baseline", "unbalanced", "small_panel"]
 
 # dkのバンド幅を既定値以外（0=Newey-West補正なしのクロスセクション相関のみ、
-# 1）で明示指定するシナリオ。
-EXPLICIT_BANDWIDTHS = [0, 1]
-EXPLICIT_BANDWIDTH_SCENARIOS = ["baseline", "unbalanced"]
+# 1、既定式がT=6でもT=25でも2になるため既定より大きい3）で明示指定する
+# シナリオ。T=25のcross_sectionally_correlatedだけは、T=6では動かない
+# カーネルの3ラグ超の項を通すため中間の12も加える。
+EXPLICIT_BANDWIDTHS = [0, 1, 3]
+EXPLICIT_BANDWIDTH_SCENARIOS = {
+    "baseline": EXPLICIT_BANDWIDTHS,
+    "unbalanced": EXPLICIT_BANDWIDTHS,
+    "cross_sectionally_correlated": [*EXPLICIT_BANDWIDTHS, 12],
+}
 
 # entityあたりの観測数を偏らせる（先頭から数えた期数）。entityごとに循環して
 # 割り当てる（`testing-policy.md`「テスト用データセット」3.の偏ったサイズ）。
@@ -191,12 +197,18 @@ def _run_boundary_cases(tmpdir: Path) -> dict:
 
 def _run_wagepan(csv_path: Path, cov_type: str) -> dict:
     formula = f"{WAGEPAN_Y} ~ {WAGEPAN_FORMULA_RHS}"
+    maxlag = (
+        default_dk_bandwidth(csv_path, WAGEPAN_TIME)
+        if cov_type == "dk"
+        else None
+    )
     return run_fe_plm_r(
         csv_path,
         formula,
         cov_type,
         entity_col=WAGEPAN_ENTITY,
         time_col=WAGEPAN_TIME,
+        maxlag=maxlag,
     )
 
 
@@ -228,9 +240,9 @@ def build_fixtures() -> dict:
     fixtures["dk_explicit_bandwidth"] = {
         scenario: {
             str(bw): _run_effects(scenario, "dk", maxlag=bw)
-            for bw in EXPLICIT_BANDWIDTHS
+            for bw in bandwidths
         }
-        for scenario in EXPLICIT_BANDWIDTH_SCENARIOS
+        for scenario, bandwidths in EXPLICIT_BANDWIDTH_SCENARIOS.items()
     }
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -271,10 +283,10 @@ def build_fixtures() -> dict:
             "最終ラグ項を落とすためこのフィクスチャだけが参照値になる。"
             "dkのバンド幅は本実装の既定floor(4*(T/100)^(2/9))を明示的に"
             "maxlagに渡している。many_regressorsはk>T-1のためdkを含まない。"
-            "wagepanはfe_crosscheck.jsonと同じ理由でclusterのみ。"
+            "wagepanはcluster・dk（時点列year、バンド幅は本実装の既定式）。"
             "boundaryはfixestの境界ケースのうちplmで再現できるもの（クラスター数"
             "の境界はentityの部分集合、観測数の偏りはentityごとの期数[2,3,5,10]"
-            "で代用）。dk_explicit_bandwidthはバンド幅0と1の明示指定。"
+            "で代用）。dk_explicit_bandwidthはバンド幅0・1・3（T=25のcross_sectionally_correlatedは12も）の明示指定。"
             "r_squared_withinはplmのsummary(model)$r.squared（cov_type非依存）。"
         ),
     }

@@ -562,6 +562,50 @@ def test_dk_periods_at_most_hausman_slopes_raises_validation_error():
         RE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 
 
+def test_many_regressors_cluster_raises_validation_error():
+    """`many_regressors`（k=20、40エンティティ、T=6）はRE本体は成功する入力
+    だが、ハウスマン検定の補助回帰の傾き係数`2k=40`がクラスター数`G=40`以下に
+    なり、ロバスト共分散が構造的に特異になるため`fit()`が失敗する
+    （`re-spec.md`3.7節）。このためplmとの標準誤差クロスチェックの対象外
+    （`SCENARIO_COV_TYPES`）で、失敗パスだけをここで確認する。"""
+    df = pl.read_csv(DATA_DIR / "fe_many_regressors.csv")
+    x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=40, q=40),
+    ):
+        RE(
+            df,
+            y="y",
+            x=x_cols,
+            entity="entity",
+            options=REOptions(cov_type="cluster"),
+        ).fit()
+
+
+def test_many_regressors_dk_raises_validation_error():
+    """同じ入力の`dk`は、検定対象`k=20`が`T-1=5`を超える（`T=6 <= q=20`）ため
+    `fit()`が`ValidationError`になる。FEの
+    `test_many_regressors_dk_raises_validation_error`と対になる。"""
+    df = pl.read_csv(DATA_DIR / "fe_many_regressors.csv")
+    x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            panel_msgs.INSUFFICIENT_DK_PERIODS_FOR_INFERENCE,
+            t_periods=6,
+            q=20,
+        ),
+    ):
+        RE(
+            df,
+            y="y",
+            x=x_cols,
+            entity="entity",
+            options=REOptions(cov_type="dk", dk_time="time"),
+        ).fit()
+
+
 @pytest.mark.parametrize(
     ("cov_type", "option", "value", "condition"),
     [

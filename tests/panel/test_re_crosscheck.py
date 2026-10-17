@@ -75,6 +75,7 @@ from econometricsmodels import (
 
 from benchmark.common import (
     WAGEPAN_ENTITY,
+    WAGEPAN_TIME,
     WAGEPAN_X,
     WAGEPAN_Y,
     imbalanced_cluster_groups,
@@ -82,13 +83,15 @@ from benchmark.common import (
 from benchmark.panel.fixtures.generate_fe_fixtures import NUMERIC_SCENARIOS
 from benchmark.panel.fixtures.generate_re_crosscheck_fixtures import (
     COV_TYPES,
+    DK_EXPLICIT_BANDWIDTH_KEY,
+    DK_EXPLICIT_BANDWIDTHS,
+    DK_EXPLICIT_BANDWIDTHS_BALANCED,
     HAUSMAN_COV_TYPES,
     HAUSMAN_DK_BANDWIDTH_KEY,
-    HAUSMAN_DK_BANDWIDTH_SCENARIOS,
-    HAUSMAN_DK_BANDWIDTHS,
     HAUSMAN_KEY,
     SCENARIO_COV_TYPES,
     WAGEPAN_COV_TYPES,
+    dk_three_periods_frame,
 )
 
 FIXTURE_PATH = (
@@ -266,10 +269,17 @@ def _check_hausman(
 # ── 凍結フィクスチャとの数値照合（合成データ） ───────────────────────
 
 
-def _re_options(cov_type: str) -> REOptions:
-    # timeはdkのときだけ指定できる（REOptionsのバリデーション）。
+def _re_options(
+    cov_type: str,
+    *,
+    dk_time: str = "time",
+    dk_bandwidth: int | None = None,
+) -> REOptions:
+    # dk_time・dk_bandwidthはdkのときだけ指定できる（REOptionsのバリデーション）。
     if cov_type == "dk":
-        return REOptions(cov_type="dk", dk_time="time")
+        return REOptions(
+            cov_type="dk", dk_time=dk_time, dk_bandwidth=dk_bandwidth
+        )
     return REOptions(cov_type=cov_type)
 
 
@@ -297,26 +307,6 @@ def test_matches_plm(crosscheck, scenario, cov_type):
     )
 
 
-@pytest.mark.parametrize("cov_type", ["cluster", "dk"])
-def test_many_regressors_cluster_dk_raise_validation_error(cov_type):
-    """`many_regressors`（k=20、40エンティティ、T=6）はRE本体は成功する入力
-    だが、ハウスマン検定の補助回帰のロバスト共分散が構造的に特異になり
-    `fit()`が失敗する（cluster: 補助回帰の傾き係数`2k=40`がG=40以下、dk:
-    検定対象`k=20`が`T-1=5`超。`re-spec.md`3.7節）。このためplmの標準誤差
-    クロスチェックの対象外（`SCENARIO_COV_TYPES`）で、失敗パスのみ確認する。
-    """
-    df = pl.read_csv(DATA_DIR / "fe_many_regressors.csv")
-    x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
-    with pytest.raises(ValidationError):
-        RE(
-            df,
-            y="y",
-            x=x_cols,
-            entity="entity",
-            options=_re_options(cov_type),
-        ).fit()
-
-
 def _fit_with_cluster_column(csv_name: str, x_cols: list[str], groups):
     df = pl.read_csv(DATA_DIR / csv_name).with_columns(
         pl.Series("cluster_group", groups)
@@ -328,6 +318,84 @@ def _fit_with_cluster_column(csv_name: str, x_cols: list[str], groups):
         entity="entity",
         options=REOptions(cov_type="cluster", cluster="cluster_group"),
     ).fit()
+
+
+# ── dkの明示バンド幅・時点数の境界 ────────────────────────────────────
+
+
+DK_BANDWIDTH_CASES = [
+    (scenario, bandwidth)
+    for scenario, bandwidths in DK_EXPLICIT_BANDWIDTHS.items()
+    for bandwidth in bandwidths
+]
+# 標準誤差・推論統計量はバランスパネルのみ（unbalancedを除く理由は
+# `generate_re_crosscheck_fixtures.py`の`DK_EXPLICIT_BANDWIDTHS_BALANCED`）。
+DK_BANDWIDTH_SE_CASES = [
+    (scenario, bandwidth)
+    for scenario, bandwidths in DK_EXPLICIT_BANDWIDTHS_BALANCED.items()
+    for bandwidth in bandwidths
+]
+
+
+@pytest.mark.parametrize("scenario, bandwidth", DK_BANDWIDTH_SE_CASES)
+def test_dk_explicit_bandwidth_matches_plm(crosscheck, scenario, bandwidth):
+    """`dk_bandwidth`を明示指定した場合の標準誤差・推論統計量も
+    `vcovSCC(maxlag=bandwidth)`と一致する。"""
+    df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
+    res = RE(
+        df,
+        y="y",
+        x=["x1", "x2"],
+        entity="entity",
+        options=_re_options("dk", dk_bandwidth=bandwidth),
+    ).fit()
+
+    assert res.dk_bandwidth_used == bandwidth
+    _check_result(
+        res,
+        crosscheck["synthetic"][scenario][DK_EXPLICIT_BANDWIDTH_KEY][
+            str(bandwidth)
+        ],
+        f"{scenario}/dk/bandwidth={bandwidth}",
+        rtol=RTOL_BALANCED,
+    )
+
+
+def _fit_dk_three_periods():
+    return RE(
+        dk_three_periods_frame(),
+        y="y",
+        x=["x1", "x2"],
+        entity="entity",
+        options=_re_options("dk"),
+    ).fit()
+
+
+def test_dk_three_periods_matches_plm(crosscheck):
+    """Driscoll-Kraayの時点数`T = k+1`（k=2、分母自由度`T-1 = k`）の境界の
+    成功パス。REは`fit()`のハウスマン検定の対象数`k`に対し`T > k`が必要で、
+    `T = 3`が`k = 2`での最小の時点数（`T <= k`は`ValidationError`、
+    `test_hausman_dk_too_few_periods_raises`）。"""
+    res = _fit_dk_three_periods()
+
+    assert res.stat_df == 2
+    _check_result(
+        res,
+        crosscheck["synthetic"]["baseline"]["dk_three_periods"],
+        "baseline/dk_three_periods",
+        rtol=RTOL_BALANCED,
+    )
+
+
+def test_dk_three_periods_hausman_matches_plm(crosscheck):
+    """`T = k+1`境界のハウスマン検定（補助回帰の傾き`2k`個ではなく検定対象`k`個に
+    対しDK共分散のrank`T-1`が足りるかが境界を決める。`re-spec.md`3.7節）。"""
+    _check_hausman(
+        _fit_dk_three_periods(),
+        crosscheck["synthetic"]["baseline"]["dk_three_periods_hausman"],
+        "baseline/dk_three_periods",
+        cov_type="dk",
+    )
 
 
 def test_cluster_imbalanced_matches_plm_based_reference(crosscheck):
@@ -377,7 +445,7 @@ def test_cluster_g3_boundary_matches_plm_based_reference(crosscheck):
 @pytest.mark.parametrize("cov_type", WAGEPAN_COV_TYPES)
 def test_wagepan_matches_plm(crosscheck, cov_type):
     df = load_wooldridge_dataset("wagepan")
-    options = REOptions(cov_type=cov_type)
+    options = _re_options(cov_type, dk_time=WAGEPAN_TIME)
     res = RE(
         df, y=WAGEPAN_Y, x=WAGEPAN_X, entity=WAGEPAN_ENTITY, options=options
     ).fit()
@@ -444,8 +512,7 @@ def test_wagepan_hausman_matches_plm(crosscheck, cov_type):
     )
 
 
-@pytest.mark.parametrize("bandwidth", HAUSMAN_DK_BANDWIDTHS)
-@pytest.mark.parametrize("scenario", HAUSMAN_DK_BANDWIDTH_SCENARIOS)
+@pytest.mark.parametrize("scenario, bandwidth", DK_BANDWIDTH_CASES)
 def test_hausman_dk_explicit_bandwidth_matches_plm(
     crosscheck, scenario, bandwidth
 ):

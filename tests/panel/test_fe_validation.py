@@ -635,6 +635,37 @@ def test_dk_periods_at_most_slopes_raises_validation_error():
         ).fit()
 
 
+@pytest.mark.parametrize("two_way", [False, True])
+def test_many_regressors_dk_raises_validation_error(two_way):
+    """`many_regressors`（k=20、T=6）の`dk`は、時点数が傾き係数の数を
+    超えない（`T=6 <= q=20`）ため`ValidationError`。同じ入力で`cluster`
+    （G=40 > q=20）は成功するので、`dk`だけが構造的に特異になる。
+    `fe_crosscheck.json`がこのシナリオに`dk`を持たない理由の確認でもある。
+    """
+    df = pl.read_csv(DATA_DIR / "fe_many_regressors.csv")
+    x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
+    assert len(x_cols) == 20
+    kwargs = {"time": "time"} if two_way else {}
+    options = FEOptions(cov_type="dk", dk_time="time", **kwargs)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            panel_msgs.INSUFFICIENT_DK_PERIODS_FOR_INFERENCE,
+            t_periods=6,
+            q=20,
+        ),
+    ):
+        FE(df, y="y", x=x_cols, entity="entity", options=options).fit()
+
+    FE(
+        df,
+        y="y",
+        x=x_cols,
+        entity="entity",
+        options=FEOptions(cov_type="cluster", **kwargs),
+    ).fit()
+
+
 _TWO_PERIOD_PANEL = {
     "y": [3.0, 4.5, 7.0, 8.0, 9.2, 6.0, 10.1, 8.0],
     "x": [1.0, 3.0, 2.0, 5.0, 4.0, 4.5, 0.0, 2.0],

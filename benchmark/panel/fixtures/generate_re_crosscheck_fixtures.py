@@ -24,7 +24,10 @@
   持つ（`run_plm_hausman_benchmark.R`のモジュールコメントにplmのvcovとの
   対応を記載）。比較は常に1-wayで、`REOptions.dk_time`の有無によらない。
   dkのバンド幅は`floor(4*(T/100)^(2/9))`を`maxlag`に明示的に渡す。
-  `dk_bandwidth`明示指定は`"hausman_dk_bandwidth"`キー配下（`{バンド幅: 値}`）。
+  `dk_bandwidth`明示指定は`"hausman_dk_bandwidth"`キー配下（`{バンド幅: 値}`、
+  標準誤差・推論統計量側は`"dk_explicit_bandwidth"`）。dkの時点数の境界
+  （`T = k+1`）の成功パスは`baseline.dk_three_periods`（標準誤差）・
+  `baseline.dk_three_periods_hausman`。
   ロバスト共分散が構造的に特異になるケース（`_STRUCTURALLY_SINGULAR`）は`null`
   （本実装は`fit()`がエラーになる）。
 
@@ -126,20 +129,38 @@ SCENARIO_COV_TYPES: dict[str, list[str]] = {
     "many_regressors": ["classical", "hc1", "hc2", "hc3"],
 }
 
-# wagepan（T=8）はdkを対象外にする（re.jsonと同様、短いTでのDKは対象外）。
-WAGEPAN_COV_TYPES = ["classical", "hc1", "hc2", "hc3", "cluster"]
+# wagepan（T=8）はdkも対象にする。`WAGEPAN_X`は3変数（ハウスマン検定の対象も
+# 3個）で`T-1=7 > 3`のため成立する。時点列は`year`。
+WAGEPAN_COV_TYPES = ["classical", "hc1", "hc2", "hc3", "cluster", "dk"]
 
 # ハウスマン検定はRE本体のcov_typeに連動するため、全cov_typeを対象にする
 # （モジュールdoc「ハウスマン検定」参照）。
 HAUSMAN_COV_TYPES = ["classical", "hc1", "hc2", "hc3", "cluster", "dk"]
 HAUSMAN_KEY = "hausman"
 
-# `dk_bandwidth`を明示指定した場合のハウスマン検定（`vcovSCC`の`maxlag`に対応）。
-# 自動選択（`_dk_bandwidth`）だけではT=6の合成シナリオで実質1に固定されるため、
-# 別のバンド幅でも一致することを確認する。
+# `dk_bandwidth`を明示指定した場合の標準誤差・推論統計量とハウスマン検定
+# （`vcovSCC`の`maxlag`に対応）。自動選択（`floor(4*(T/100)^(2/9))`）はT=6でも
+# T=25でも2に固定されるため、ラグ項なしの0・既定と同じ2・既定より大きい3を
+# 確かめる。T=25のcross_sectionally_correlatedだけは、T=6では動かないカーネルの
+# 3ラグ超の項を通すため中間の12も加える。
+DK_EXPLICIT_BANDWIDTH_KEY = "dk_explicit_bandwidth"
 HAUSMAN_DK_BANDWIDTH_KEY = "hausman_dk_bandwidth"
-HAUSMAN_DK_BANDWIDTHS = [0, 2]
-HAUSMAN_DK_BANDWIDTH_SCENARIOS = ["baseline", "autocorrelated", "unbalanced"]
+DK_EXPLICIT_BANDWIDTHS: dict[str, list[int]] = {
+    "baseline": [0, 2, 3],
+    "autocorrelated": [0, 2, 3],
+    "unbalanced": [0, 2, 3],
+    "cross_sectionally_correlated": [0, 2, 3, 12],
+}
+# 標準誤差・推論統計量の比較はバランスパネルのみ。unbalancedはplmとSwamy-Arora
+# 分散成分が異なる分だけ点推定・標準誤差が約1%ずれ、バンド幅0では信頼区間の
+# 端が0に近くなり相対誤差が10%超に増幅される（バンド幅の扱いとは無関係な
+# ずれ）。バンド幅の処理はバランスパネルで機械精度で確かめ、unbalancedの
+# 明示バンド幅はハウスマン検定側（`HAUSMAN_DK_BANDWIDTH_KEY`）で確かめる。
+DK_EXPLICIT_BANDWIDTHS_BALANCED: dict[str, list[int]] = {
+    scenario: bandwidths
+    for scenario, bandwidths in DK_EXPLICIT_BANDWIDTHS.items()
+    if scenario != "unbalanced"
+}
 
 # 補助回帰の傾き係数`2k`個に対し、クラスター数G（cluster）・時点数T（dk）が少なく
 # ロバスト共分散`Ŝ`が`rank(Ŝ) <= G-1`（またはT）で構造的に特異になるケース。
@@ -175,12 +196,24 @@ def _run_hausman(
 WAGEPAN_FORMULA = f"{WAGEPAN_Y} ~ {' + '.join(WAGEPAN_X)}"
 
 
-def _run_effects(scenario: str, cov_type: str) -> dict:
+def _run_effects(
+    scenario: str, cov_type: str, *, maxlag: int | None = None
+) -> dict:
     csv_path = DATA_DIR / f"fe_{scenario}.csv"
     x_cols = SCENARIO_X_COLS.get(scenario, ["x1", "x2"])
     formula = f"y ~ {' + '.join(x_cols)}"
-    maxlag = default_dk_bandwidth(csv_path) if cov_type == "dk" else None
+    if cov_type == "dk" and maxlag is None:
+        maxlag = default_dk_bandwidth(csv_path)
     return run_re_plm_r(csv_path, formula, cov_type, maxlag=maxlag)
+
+
+def dk_three_periods_frame() -> pl.DataFrame:
+    """`fe_baseline.csv`の先頭3時点だけを残した、dkの`T = k+1`（k=2）境界用
+    データ。ハウスマン検定の対象数`k=2`に対し`T=3 > k`で成立する最小の時点数。
+    生成側・テスト側で同じ絞り込みを共有する。"""
+    df = pl.read_csv(DATA_DIR / "fe_baseline.csv")
+    first_three = sorted(df["time"].unique().to_list())[:3]
+    return df.filter(pl.col("time").is_in(first_three))
 
 
 def _run_cluster_case(
@@ -203,13 +236,32 @@ def _run_cluster_case(
     )
 
 
+def _run_dk_three_periods_case(tmpdir: Path) -> tuple[dict, dict]:
+    """dkの`T = k+1`（k=2）境界の成功パスのplm参照値（標準誤差・推論統計量と
+    ハウスマン検定）。バンド幅は本実装の既定式（T=3で1）を明示する。"""
+    csv_path = tmpdir / "fe_baseline_three_periods.csv"
+    dk_three_periods_frame().write_csv(csv_path)
+    formula = "y ~ x1 + x2"
+    maxlag = default_dk_bandwidth(csv_path)
+    return (
+        run_re_plm_r(csv_path, formula, "dk", maxlag=maxlag),
+        _run_hausman(csv_path, formula, "dk", maxlag=maxlag),
+    )
+
+
 def _run_wagepan(csv_path: Path, cov_type: str) -> dict:
+    maxlag = (
+        default_dk_bandwidth(csv_path, WAGEPAN_TIME)
+        if cov_type == "dk"
+        else None
+    )
     return run_re_plm_r(
         csv_path,
         WAGEPAN_FORMULA,
         cov_type,
         entity_col=WAGEPAN_ENTITY,
         time_col=WAGEPAN_TIME,
+        maxlag=maxlag,
     )
 
 
@@ -223,7 +275,13 @@ def build_fixtures() -> dict:
         }
         csv_path = DATA_DIR / f"fe_{scenario}.csv"
         x_cols = SCENARIO_X_COLS.get(scenario, ["x1", "x2"])
-        if scenario in HAUSMAN_DK_BANDWIDTH_SCENARIOS:
+        if scenario in DK_EXPLICIT_BANDWIDTHS_BALANCED:
+            fixtures[scenario][DK_EXPLICIT_BANDWIDTH_KEY] = {
+                str(bw): _run_effects(scenario, "dk", maxlag=bw)
+                for bw in DK_EXPLICIT_BANDWIDTHS_BALANCED[scenario]
+            }
+        if scenario in DK_EXPLICIT_BANDWIDTHS:
+            bandwidths = DK_EXPLICIT_BANDWIDTHS[scenario]
             fixtures[scenario][HAUSMAN_DK_BANDWIDTH_KEY] = {
                 str(bw): _run_hausman(
                     csv_path,
@@ -231,7 +289,7 @@ def build_fixtures() -> dict:
                     "dk",
                     maxlag=bw,
                 )
-                for bw in HAUSMAN_DK_BANDWIDTHS
+                for bw in bandwidths
             }
         fixtures[scenario][HAUSMAN_KEY] = {
             cov_type: (
@@ -263,6 +321,11 @@ def build_fixtures() -> dict:
             ["x1"],
             [str(i % 3) for i in range(n_k1)],
         )
+
+        (
+            fixtures["baseline"]["dk_three_periods"],
+            fixtures["baseline"]["dk_three_periods_hausman"],
+        ) = _run_dk_three_periods_case(tmpdir)
 
         df = load_wooldridge("wagepan")
         csv_path = tmpdir / "wagepan.csv"
@@ -311,7 +374,10 @@ def build_fixtures() -> dict:
             "本実装の既定floor(4*(T/100)^(2/9))を明示的にmaxlagに渡している。"
             "many_regressorsはcluster/dkのロバスト共分散が構造的に特異で"
             "本実装のfit()がエラーになるため含めない。"
-            "wagepan（T=8）はdkを含めない。"
+            "wagepan（T=8）はdkも含む（時点列year）。"
+            "baseline.dk_three_periods（T=k+1、k=2）・dk_three_periods_hausmanは"
+            "dkの時点数の境界の成功パス。dkの明示バンド幅は各シナリオの"
+            "dk_explicit_bandwidth（標準誤差）・hausman_dk_bandwidth（ハウスマン検定）。"
             "baseline.cluster_imbalanced（サイズ[2,3,5,10,30,50]のタイル）・"
             "baseline.cluster_g3（k=1、G=3=2k+1の境界成功パス）は、cluster列が"
             "entity以外のケースで、plmの準偏差変換済みデータにlm+"

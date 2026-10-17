@@ -32,7 +32,17 @@ dkはfixestの既定バンド幅（`n_t^0.25`）が本実装の既定
 （`floor(4*(T/100)^(2/9))`）と異なるため、本実装の既定式で求めたバンド幅を
 `DK(lag)`に明示的に渡す。`many_regressors`（k=20、T=6）はk>T-1で同時検定の
 部分行列が構造的に特異になり本実装が`ValidationError`にするため、dkの対象外
-（`SCENARIO_COV_TYPES`）。wagepan（T=8）は`fe.json`と同じ理由でdk対象外。
+（`SCENARIO_COV_TYPES`）。wagepan（T=8）は`WAGEPAN_X`が3変数で`T-1=7 > q=3`の
+ため、時点列`year`でdkも対象にする。
+
+## 既定値以外の指定
+
+- **dkの明示バンド幅**: `DK_EXPLICIT_BANDWIDTHS`のシナリオで`T-1`未満の値
+  （fixestは`bandwidth == T-1`で最終ラグを落とすため、その境界はplm側
+  `generate_fe_plm_crosscheck_fixtures.py`が持つ）。
+- **2-wayでentity以外のcluster列**: `baseline.two_way_cluster_time`（時間効果と
+  ネストするクラスター）・`baseline.two_way_cluster_nonnested`（どちらの固定効果
+  ともネストしない列）。fixestの`K.fixef="nonnested"`が分岐する。
 
 使用例（リポジトリルートから）:
     python -m benchmark.panel.fixtures.generate_fe_crosscheck_fixtures
@@ -79,10 +89,24 @@ SCENARIO_COV_TYPES: dict[str, list[str]] = {
     "many_regressors": [c for c in COV_TYPES if c != "dk"],
 }
 
-# wagepan（T=8）はfe.jsonと同じ理由でdkを対象外にする（`fe.json`の
-# generate_fe_fixtures.py参照）。
-WAGEPAN_COV_TYPES = ["classical", "hc1", "hc2", "hc3", "cluster"]
+# wagepan（T=8）はdkも対象にする。`WAGEPAN_X`は3変数（`T-1=7 > q=3`）で
+# dkの同時検定が成立し、時点列は`year`（fixestの`DK(lag) ~ year`）。
+# `fe.json`（linearmodels）はdkを持たない。
+WAGEPAN_COV_TYPES = ["classical", "hc1", "hc2", "hc3", "cluster", "dk"]
 WAGEPAN_FORMULA_RHS = " + ".join(WAGEPAN_X)
+
+# dkのバンド幅を既定値以外で明示指定して検証するシナリオとバンド幅。既定式
+# `floor(4*(T/100)^(2/9))`はT=6でもT=25でも2になるため、既定より大きい3と、
+# 0（ラグ項なし）を入れる。fixestは`bandwidth == T-1`で最終ラグを落とす
+# （`fe-spec.md`3.3節）ため`T-1`未満に限る（`T-1`はplm側
+# `generate_fe_plm_crosscheck_fixtures.py`が持つ）。T=25の
+# cross_sectionally_correlatedだけは、T=6では動かないカーネルの3ラグ超の項を
+# 通すため中間の12も加える。2-wayはバランスパネル（TWO_WAY_SCENARIOS）のみ。
+DK_EXPLICIT_BANDWIDTHS: dict[str, list[int]] = {
+    "baseline": [0, 3],
+    "unbalanced": [0, 3],
+    "cross_sectionally_correlated": [0, 3, 12],
+}
 
 # df_resid=1境界で追加検証するロバスト系cov_type（classicalは別キーで既存）。
 ROBUST_BOUNDARY_COV_TYPES = ["hc1", "hc2", "hc3"]
@@ -101,6 +125,35 @@ def _run_effects(scenario: str, cov_type: str, *, two_way: bool) -> dict:
     return run_fixest_r(
         csv_path, formula, cov_type, cluster=cluster, dk_lag=dk_lag
     )
+
+
+def _run_dk_explicit_bandwidth(
+    scenario: str, bandwidth: int, *, two_way: bool
+) -> dict:
+    csv_path = DATA_DIR / f"fe_{scenario}.csv"
+    x_cols = SCENARIO_X_COLS.get(scenario, ["x1", "x2"])
+    formula = _formula(x_cols, "entity + time" if two_way else "entity")
+    return run_fixest_r(csv_path, formula, "dk", dk_lag=bandwidth)
+
+
+def _run_two_way_cluster_case(tmpdir: Path, *, cluster: str) -> dict:
+    """2-way FEでentity以外の列でクラスタリングする場合のfixestクロスチェック
+    （`fe_baseline.csv`、entity×period=6、x1・x2）。
+
+    - `cluster="time"`: クラスター列が時間効果とネストする。fixestの
+      `K.fixef="nonnested"`は、クラスターにネストする固定効果を自由度に数えない
+      分岐を踏む（entity効果だけが数えられる）。
+    - `cluster="cluster_group"`: どちらの固定効果ともネストしない列（行番号%4、
+      G=4 > q=2）。固定効果を両方数える分岐を踏む。
+    """
+    df = pl.read_csv(DATA_DIR / "fe_baseline.csv")
+    if cluster == "cluster_group":
+        groups = [str(i % 4) for i in range(df.height)]
+        df = df.with_columns(pl.Series("cluster_group", groups))
+    csv_path = tmpdir / f"fe_baseline_two_way_{cluster}.csv"
+    df.write_csv(csv_path)
+    formula = _formula(["x1", "x2"], "entity + time")
+    return run_fixest_r(csv_path, formula, "cluster", cluster=cluster)
 
 
 def _run_cluster_imbalanced_case(tmpdir: Path) -> dict:
@@ -199,7 +252,19 @@ def _run_wagepan(csv_path: Path, cov_type: str, *, two_way: bool) -> dict:
     )
     formula = f"{WAGEPAN_Y} ~ {WAGEPAN_FORMULA_RHS} | {fe_part}"
     cluster = WAGEPAN_ENTITY if cov_type == "cluster" else None
-    return run_fixest_r(csv_path, formula, cov_type, cluster=cluster)
+    dk_lag = (
+        default_dk_bandwidth(csv_path, WAGEPAN_TIME)
+        if cov_type == "dk"
+        else None
+    )
+    return run_fixest_r(
+        csv_path,
+        formula,
+        cov_type,
+        cluster=cluster,
+        dk_lag=dk_lag,
+        dk_time=WAGEPAN_TIME,
+    )
 
 
 def build_fixtures() -> dict:
@@ -219,6 +284,22 @@ def build_fixtures() -> dict:
                 for cov_type in cov_types
             }
 
+    for scenario, bandwidths in DK_EXPLICIT_BANDWIDTHS.items():
+        by_way = {
+            "one_way": {
+                str(bw): _run_dk_explicit_bandwidth(
+                    scenario, bw, two_way=False
+                )
+                for bw in bandwidths
+            }
+        }
+        if scenario in TWO_WAY_SCENARIOS:
+            by_way["two_way"] = {
+                str(bw): _run_dk_explicit_bandwidth(scenario, bw, two_way=True)
+                for bw in bandwidths
+            }
+        fixtures[scenario]["dk_explicit_bandwidth"] = by_way
+
     with tempfile.TemporaryDirectory() as tmp:
         tmpdir = Path(tmp)
 
@@ -231,6 +312,12 @@ def build_fixtures() -> dict:
         )
         fixtures["baseline"]["dk_three_periods"] = _run_dk_three_periods_case(
             tmpdir
+        )
+        fixtures["baseline"]["two_way_cluster_time"] = (
+            _run_two_way_cluster_case(tmpdir, cluster="time")
+        )
+        fixtures["baseline"]["two_way_cluster_nonnested"] = (
+            _run_two_way_cluster_case(tmpdir, cluster="cluster_group")
         )
         fixtures["baseline_df1"] = {
             "one_way": _run_boundary_df1_case(two_way=False),
@@ -304,7 +391,11 @@ def build_fixtures() -> dict:
             "dkのバンド幅は本実装の既定floor(4*(T/100)^(2/9))を明示的に"
             "DK(lag)に渡している（fixestの既定n_t^0.25とは異なる）。"
             "many_regressorsはk>T-1のためdkを含まない。wagepanは"
-            "fe.jsonと同じmarried/union/expersq・T=8のためdk対象外。"
+            "married/union/expersq・T=8（T-1=7>q=3）でdkも含む（時点列year）。"
+            "dkの明示バンド幅は各シナリオのdk_explicit_bandwidth"
+            "（T-1未満のみ、fixestはT-1で最終ラグを落とすため）。"
+            "baseline.two_way_cluster_time・two_way_cluster_nonnestedは2-wayで"
+            "entity以外の列でクラスタリングする（K.fixef=nonnestedの分岐）。"
             "moderate_multicollinearity/high_condition_number/"
             "scale_variance_mild/many_regressors/"
             "outlier_regressor/high_variance・baseline.cluster_imbalanced・"

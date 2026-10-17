@@ -34,8 +34,18 @@
 ## dkの対象外シナリオ
 
 `many_regressors`（k=20、T=6）はk>T-1で同時検定の部分行列が構造的に特異になり
-本実装が`ValidationError`にするため対象外。wagepan（T=8）は短いTでのDKのため
-`fe.json`と同様に対象外（`SCENARIO_COV_TYPES`・`WAGEPAN_COV_TYPES`）。
+本実装が`ValidationError`にするため対象外（`SCENARIO_COV_TYPES`。失敗パスは
+`test_fe_validation.py`の`test_many_regressors_dk_raises_validation_error`）。
+wagepan（T=8）は`WAGEPAN_X`が3変数で`T-1=7 > q=3`のため対象に含み、時点列は
+`year`。
+
+## 既定値以外の指定
+
+- **dkの明示バンド幅**: `DK_EXPLICIT_BANDWIDTHS`のシナリオで`T-1`未満の値を
+  fixestと比べる（`bandwidth == T-1`は最終ラグを落とすfixestと食い違うため
+  `test_fe_plm_crosscheck.py`が持つ）。
+- **2-wayでentity以外のcluster列**: 時間効果とネストする`time`と、どちらの
+  固定効果ともネストしない列（`K.fixef="nonnested"`の別々の分岐）。
 
 役割分担:
     - 構造・API・`fixed_effects()`: `test_fe_api.py`
@@ -74,6 +84,7 @@ from benchmark.common import (
 )
 from benchmark.panel.fixtures.generate_fe_crosscheck_fixtures import (
     COV_TYPES,
+    DK_EXPLICIT_BANDWIDTHS,
     ONE_WAY_ONLY_SCENARIOS,
     ROBUST_BOUNDARY_COV_TYPES,
     SCENARIO_COV_TYPES,
@@ -154,11 +165,18 @@ def _check_result(res, ref: dict, label: str) -> None:
         _assert_fields_close(res, ref, ("r_squared_within",), label)
 
 
-def _options(cov_type: str, *, two_way: bool) -> FEOptions:
+def _options(
+    cov_type: str,
+    *,
+    two_way: bool,
+    dk_bandwidth: int | None = None,
+    time: str = "time",
+) -> FEOptions:
     """`dk`は1-way・2-wayとも時点列（`dk_time`）を明示する必要がある。"""
-    kwargs = {"time": "time"} if two_way else {}
+    kwargs = {"time": time} if two_way else {}
     if cov_type == "dk":
-        kwargs["dk_time"] = "time"
+        kwargs["dk_time"] = time
+        kwargs["dk_bandwidth"] = dk_bandwidth
     return FEOptions(cov_type=cov_type, **kwargs)
 
 
@@ -200,6 +218,57 @@ def test_matches_fixest_two_way(crosscheck, scenario, cov_type):
         res,
         crosscheck["synthetic"][scenario]["two_way"][cov_type],
         f"{scenario}/two_way/{cov_type}",
+    )
+
+
+# ── dkの明示バンド幅（fixestはT-1未満のみ。T-1はtest_fe_plm_crosscheck.py） ──
+
+DK_BANDWIDTH_ONE_WAY_CASES = [
+    (scenario, bandwidth)
+    for scenario, bandwidths in DK_EXPLICIT_BANDWIDTHS.items()
+    for bandwidth in bandwidths
+]
+DK_BANDWIDTH_TWO_WAY_CASES = [
+    case for case in DK_BANDWIDTH_ONE_WAY_CASES if case[0] in TWO_WAY_SCENARIOS
+]
+
+
+def _fit_dk_bandwidth(scenario: str, bandwidth: int, *, two_way: bool):
+    df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
+    x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
+    options = _options("dk", two_way=two_way, dk_bandwidth=bandwidth)
+    return FE(df, y="y", x=x_cols, entity="entity", options=options).fit()
+
+
+@pytest.mark.parametrize("scenario, bandwidth", DK_BANDWIDTH_ONE_WAY_CASES)
+def test_dk_explicit_bandwidth_one_way_matches_fixest(
+    crosscheck, scenario, bandwidth
+):
+    res = _fit_dk_bandwidth(scenario, bandwidth, two_way=False)
+
+    assert res.dk_bandwidth_used == bandwidth
+    _check_result(
+        res,
+        crosscheck["synthetic"][scenario]["dk_explicit_bandwidth"]["one_way"][
+            str(bandwidth)
+        ],
+        f"{scenario}/one_way/dk_bandwidth_{bandwidth}",
+    )
+
+
+@pytest.mark.parametrize("scenario, bandwidth", DK_BANDWIDTH_TWO_WAY_CASES)
+def test_dk_explicit_bandwidth_two_way_matches_fixest(
+    crosscheck, scenario, bandwidth
+):
+    res = _fit_dk_bandwidth(scenario, bandwidth, two_way=True)
+
+    assert res.dk_bandwidth_used == bandwidth
+    _check_result(
+        res,
+        crosscheck["synthetic"][scenario]["dk_explicit_bandwidth"]["two_way"][
+            str(bandwidth)
+        ],
+        f"{scenario}/two_way/dk_bandwidth_{bandwidth}",
     )
 
 
@@ -255,6 +324,33 @@ def test_cluster_g3_two_slopes_matches_fixest(crosscheck):
         res,
         crosscheck["synthetic"]["baseline"]["cluster_g3_two_slopes"],
         "baseline/cluster_g3_two_slopes",
+    )
+
+
+_TWO_WAY_CLUSTER_KEYS = {
+    "time": "two_way_cluster_time",
+    "cluster_group": "two_way_cluster_nonnested",
+}
+
+
+@pytest.mark.parametrize("cluster", list(_TWO_WAY_CLUSTER_KEYS))
+def test_two_way_cluster_on_non_entity_column_matches_fixest(
+    crosscheck, cluster
+):
+    """2-wayでentity以外の列によるクラスタリング。`time`は時間効果とネスト
+    するクラスター、`cluster_group`（行番号%4）はどちらの固定効果ともネスト
+    しない列で、fixestの`K.fixef="nonnested"`の別々の分岐を踏む。"""
+    df = pl.read_csv(DATA_DIR / "fe_baseline.csv")
+    if cluster == "cluster_group":
+        groups = [str(i % 4) for i in range(df.height)]
+        df = df.with_columns(pl.Series("cluster_group", groups))
+    options = FEOptions(cov_type="cluster", cluster=cluster, time="time")
+    res = FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
+
+    _check_result(
+        res,
+        crosscheck["synthetic"]["baseline"][_TWO_WAY_CLUSTER_KEYS[cluster]],
+        f"baseline/two_way/cluster={cluster}",
     )
 
 
@@ -331,7 +427,7 @@ def test_boundary_df1_two_way_matches_fixest(crosscheck):
 @pytest.mark.parametrize("cov_type", WAGEPAN_COV_TYPES)
 def test_wagepan_one_way_matches_fixest(crosscheck, cov_type):
     df = load_wooldridge_dataset("wagepan")
-    options = FEOptions(cov_type=cov_type)
+    options = _options(cov_type, two_way=False, time=WAGEPAN_TIME)
     res = FE(
         df, y=WAGEPAN_Y, x=WAGEPAN_X, entity=WAGEPAN_ENTITY, options=options
     ).fit()
@@ -346,7 +442,7 @@ def test_wagepan_one_way_matches_fixest(crosscheck, cov_type):
 @pytest.mark.parametrize("cov_type", WAGEPAN_COV_TYPES)
 def test_wagepan_two_way_matches_fixest(crosscheck, cov_type):
     df = load_wooldridge_dataset("wagepan")
-    options = FEOptions(cov_type=cov_type, time=WAGEPAN_TIME)
+    options = _options(cov_type, two_way=True, time=WAGEPAN_TIME)
     res = FE(
         df, y=WAGEPAN_Y, x=WAGEPAN_X, entity=WAGEPAN_ENTITY, options=options
     ).fit()

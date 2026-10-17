@@ -86,6 +86,7 @@ import polars as pl
 from benchmark.common import hac_auto_lag, load_frozen_dataset
 from benchmark.common.load_wooldridge import load as _load_wooldridge
 from benchmark.common.reference.normalize import fix_intercept_name
+from benchmark.iv.datasets import with_card_region
 
 
 def _load_iv_dataset(
@@ -101,7 +102,11 @@ def _load_iv_dataset(
         # Wooldridgeデータはtrue_betaと比較できないため常に`None`
         # （`benchmark/linear/references/statsmodels_ref.py`のwooldridge分岐と
         # 同じ扱い）。
-        return _load_wooldridge(scenario), None
+        df = _load_wooldridge(scenario)
+        if scenario == "card":
+            # 実データでのクラスターロバストSE用のグループ列（9地域）。
+            df = with_card_region(df)
+        return df, None
     raise ValueError(f"unknown dataset_source: {dataset_source!r}")
 
 

@@ -35,6 +35,20 @@ LINEARMODELS_COV_TYPES = [
 # （`benchmark/linear/constants.py`と同じ0.90）。
 CONFIDENCE_LEVEL_NON_DEFAULT = 0.90
 
+# クラスターロバストSEとの組み合わせを確認する悪条件・多重共線性のシナリオ
+# （OLS/WLSの`cluster_ill_conditioned`と同じ2つ）。クラスター共分散は他のcov_type
+# と`(X'X)⁻¹`を共有するため、悪条件との組み合わせでの数値的挙動もクラスターで確認する。
+CLUSTER_ILL_CONDITIONED_SCENARIOS = [
+    "high_condition_number",
+    "moderate_multicollinearity",
+]
+
 # Wooldridge card（Card 1995の教育収益率推定、大学近接ダミーnearc2/nearc4を
 # 操作変数として教育年数educの内生性を補正する教科書的定番例）の外生説明変数。
 CARD_X_EXOG = ["exper", "expersq", "black", "smsa", "south"]
+
+# cardの実カテゴリ列（1966年の居住地域、9地域）のダミー。互いに排他的で、各観測は
+# ちょうど1つが1になる（群の大きさは85〜627の不均衡）。実データでのクラスターロバスト
+# SEのグループ列として使う（フィクスチャ生成とテストが同じ定義を参照する）。
+CARD_REGION_DUMMIES = [f"reg66{i}" for i in range(1, 10)]
+CARD_REGION_COLUMN = "region"

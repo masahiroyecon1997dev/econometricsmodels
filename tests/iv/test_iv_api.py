@@ -42,6 +42,8 @@ from benchmark.common import hac_auto_lag
 from benchmark.iv.constants import IV_COV_TYPES
 from benchmark.iv.datasets import (
     MULTI_ENDOG_SCENARIOS,
+    THREE_ENDOG_INSTRUMENTS,
+    THREE_ENDOG_X_ENDOG,
     multi_endog_instruments,
 )
 
@@ -279,6 +281,29 @@ def test_multi_endog_overid_df_and_wu_hausman_df(scenario, estimator):
     if estimator == "2sls":
         assert res.wu_hausman_df_num == n_endog
         assert res.wu_hausman_df_denom == res.df_resid - n_endog
+    else:
+        assert res.wu_hausman_df_num is None
+        assert res.wu_hausman_df_denom is None
+
+
+@pytest.mark.parametrize("estimator", ["2sls", "gmm"])
+def test_three_endog_overid_df_and_wu_hausman_df(estimator):
+    """内生変数3本・操作変数4本（過剰識別度1）の自由度。過剰識別検定は
+    `len(instruments) - len(x_endog) = 1`、Wu-Hausman検定（2SLSのみ）は
+    F(3, df_resid - 3)。
+    """
+    df = pl.read_csv(DATA_DIR / "iv_baseline_three_endog.csv")
+    res = our_fit(
+        df,
+        x_endog=THREE_ENDOG_X_ENDOG,
+        instruments=THREE_ENDOG_INSTRUMENTS,
+        options=IVOptions(estimator=estimator),
+    )
+
+    assert res.overid_df == 1
+    if estimator == "2sls":
+        assert res.wu_hausman_df_num == 3
+        assert res.wu_hausman_df_denom == res.df_resid - 3
     else:
         assert res.wu_hausman_df_num is None
         assert res.wu_hausman_df_denom is None

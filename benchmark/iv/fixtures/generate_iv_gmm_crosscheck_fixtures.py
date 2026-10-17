@@ -55,13 +55,21 @@ from benchmark.common import (
     run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
-from benchmark.iv.constants import CARD_X_EXOG, LINEARMODELS_COV_TYPES
+from benchmark.iv.constants import (
+    CARD_REGION_COLUMN,
+    CARD_X_EXOG,
+    CLUSTER_ILL_CONDITIONED_SCENARIOS,
+    LINEARMODELS_COV_TYPES,
+)
 from benchmark.iv.datasets import (
     MULTI_ENDOG_SCENARIOS,
     NUMERIC_SCENARIOS,
+    THREE_ENDOG_INSTRUMENTS,
+    THREE_ENDOG_X_ENDOG,
     multi_endog_instruments,
     scenario_instruments,
     scenario_x_exog,
+    with_card_region,
 )
 from benchmark.iv.fixtures.generate_iv_crosscheck_fixtures import (
     _ivreg_formula,
@@ -100,6 +108,22 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
         for cov_type in LINEARMODELS_COV_TYPES:
             fixtures[scenario]["classical"][cov_type] = run_momentfit_r(
                 csv_path, formula, "classical", cov_type
+            )
+
+        if scenario in CLUSTER_ILL_CONDITIONED_SCENARIOS:
+            # 悪条件・多重共線性×クラスター共分散（classical重み、均等な疑似グループ）。
+            fixtures[scenario]["classical"]["cluster"] = run_momentfit_r(
+                _with_cluster_csv(
+                    df,
+                    csv_path,
+                    tmpdir,
+                    balanced_cluster_groups(n),
+                    "_cluster",
+                ),
+                formula,
+                "classical",
+                "cluster",
+                cluster="cluster_group",
             )
 
         if scenario == "invalid_instrument":
@@ -160,6 +184,20 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             fixtures[scenario][weight_type][cov_type] = run_momentfit_r(
                 pseudo, formula, weight_type, cov_type, cluster="cluster_group"
             )
+
+    # 内生変数3本（k_endog=3）。classical重み×全cov_type。
+    three_csv = DATA_DIR / "iv_baseline_three_endog.csv"
+    three_formula = _ivreg_formula(
+        ["x1"], THREE_ENDOG_X_ENDOG, THREE_ENDOG_INSTRUMENTS
+    )
+    fixtures["three_endog"] = {
+        "classical": {
+            cov_type: run_momentfit_r(
+                three_csv, three_formula, "classical", cov_type
+            )
+            for cov_type in LINEARMODELS_COV_TYPES
+        }
+    }
 
     # 複数内生変数（k_endog>=2）。generate_iv_gmm_fixtures.pyのmulti_endogと同じ構成
     # （fixtures["multi_endog"][シナリオ][重み][cov_type]）。
@@ -296,9 +334,9 @@ def build_no_intercept_fixtures(tmpdir: Path) -> dict:
 
 def build_wooldridge_fixtures(tmpdir: Path) -> dict:
     """実データセット（card、`generate_iv_gmm_fixtures.py`と同じ構成）。
-    クラスター列が無いためcluster重み・cluster共分散は含めない。
+    cluster重みは含めない。cluster共分散は居住地域から作った9グループで持つ。
     """
-    df = load_wooldridge("card")
+    df = with_card_region(load_wooldridge("card"))
     csv_path = tmpdir / "card.csv"
     df.write_csv(csv_path)
     formula = _ivreg_formula(
@@ -311,6 +349,15 @@ def build_wooldridge_fixtures(tmpdir: Path) -> dict:
             for cov_type in LINEARMODELS_COV_TYPES
         }
     }
+    # 実データのグループ列（居住地域、9グループ・不均衡）でのクラスター共分散
+    # （classical重み）。
+    fixtures["classical"]["cluster"] = run_momentfit_r(
+        csv_path,
+        formula,
+        "classical",
+        "cluster",
+        cluster=CARD_REGION_COLUMN,
+    )
     for weight_type in CARD_OTHER_WEIGHT_TYPES:
         fixtures[weight_type] = {
             "classical": run_momentfit_r(

@@ -58,7 +58,9 @@ from benchmark.common import (
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
 from benchmark.iv.constants import (
+    CARD_REGION_COLUMN,
     CARD_X_EXOG,
+    CLUSTER_ILL_CONDITIONED_SCENARIOS,
     IVREG_ONLY_COV_TYPES,
     LINEARMODELS_COV_TYPES,
     NON_CLUSTER_COV_TYPES,
@@ -66,9 +68,12 @@ from benchmark.iv.constants import (
 from benchmark.iv.datasets import (
     MULTI_ENDOG_SCENARIOS,
     NUMERIC_SCENARIOS,
+    THREE_ENDOG_INSTRUMENTS,
+    THREE_ENDOG_X_ENDOG,
     multi_endog_instruments,
     scenario_instruments,
     scenario_x_exog,
+    with_card_region,
 )
 from benchmark.iv.fixtures.generate_iv_fixtures import NO_INTERCEPT_SCENARIOS
 from benchmark.iv.references.r import run_ivreg_r
@@ -116,6 +121,12 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             entry = run_ivreg_r(csv_path, formula, cov_type)
             fixtures[scenario][cov_type] = entry
 
+        if scenario in CLUSTER_ILL_CONDITIONED_SCENARIOS:
+            # 悪条件・多重共線性×クラスターロバストSE（均等な疑似グループ）。
+            fixtures[scenario]["cluster"] = _run_cluster_case(
+                df, csv_path, formula, tmpdir
+            )
+
         if scenario == "baseline":
             fixtures[scenario]["cluster"] = _run_cluster_case(
                 df, csv_path, formula, tmpdir
@@ -152,6 +163,16 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             fixtures["multi_endog"][scenario]["cluster"] = _run_cluster_case(
                 multi_endog_df, multi_endog_csv, multi_endog_formula, tmpdir
             )
+
+    # 内生変数3本（k_endog=3）。generate_iv_fixtures.pyのthree_endogと同じ構成。
+    three_endog_csv = DATA_DIR / "iv_baseline_three_endog.csv"
+    three_endog_formula = _ivreg_formula(
+        ["x1"], THREE_ENDOG_X_ENDOG, THREE_ENDOG_INSTRUMENTS
+    )
+    fixtures["three_endog"] = {
+        cov_type: run_ivreg_r(three_endog_csv, three_endog_formula, cov_type)
+        for cov_type in NON_CLUSTER_COV_TYPES
+    }
 
     # 自由度1境界（df_resid=1ちょうど）。generate_iv_fixtures.pyのdf1と
     # 同じ構成。n=3ではHACの自動ラグ選択式（hac_auto_lag）が0を返す可能性が
@@ -254,7 +275,7 @@ def build_wooldridge_fixtures(tmpdir: Path) -> dict:
     """実データセット（card、`benchmark/iv/constants.py`のCARD_X_EXOG）の
     Rクロスチェック。
     """
-    df = load_wooldridge("card")
+    df = with_card_region(load_wooldridge("card"))
     csv_path = tmpdir / "card.csv"
     df.write_csv(csv_path)
     formula = _ivreg_formula(
@@ -266,6 +287,11 @@ def build_wooldridge_fixtures(tmpdir: Path) -> dict:
     for cov_type in NON_CLUSTER_COV_TYPES:
         entry = run_ivreg_r(csv_path, formula, cov_type)
         fixtures[cov_type] = entry
+    # 実データのグループ列（居住地域、9グループ・不均衡）でのクラスターロバストSE。
+    # Wu-Hausman p値はivregの既知の制約でnull（テスト側で再計算して比較する）。
+    fixtures["cluster"] = run_ivreg_r(
+        csv_path, formula, "cluster", cluster=CARD_REGION_COLUMN
+    )
     return fixtures
 
 
@@ -346,6 +372,9 @@ def build_fixtures() -> dict:
             "発生確認のみ、テストコード側で対応）。cluster_g2（G=2境界の成功"
             "パス）は`engine/src/iv/CLAUDE.md`「修正済み」に記録の`k_constant`"
             "取り違えバグの修正後にフィクスチャ化した。"
+            "high_condition_number・moderate_multicollinearityはclusterも持つ。"
+            "cardはクラスター（居住地域から作った9グループ）も持つ。three_endogは"
+            "内生変数3本（k_instruments=4）。"
             "invalid_instrument・many_regressors・outlier_regressorは"
             "generate_iv_fixtures.pyの同名注記と同じ構成。"
             "multi_endog（複数内生変数、x_endog=['endog1','endog2']）は"

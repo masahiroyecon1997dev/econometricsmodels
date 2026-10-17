@@ -33,13 +33,17 @@ from benchmark.common import (
     run_fixture_cli,
 )
 from benchmark.iv.constants import (
+    CARD_REGION_COLUMN,
     CARD_X_EXOG,
+    CLUSTER_ILL_CONDITIONED_SCENARIOS,
     CONFIDENCE_LEVEL_NON_DEFAULT,
     LINEARMODELS_COV_TYPES,
 )
 from benchmark.iv.datasets import (
     MULTI_ENDOG_SCENARIOS,
     NUMERIC_SCENARIOS,
+    THREE_ENDOG_INSTRUMENTS,
+    THREE_ENDOG_X_ENDOG,
     multi_endog_instruments,
     scenario_instruments,
     scenario_x_exog,
@@ -96,6 +100,12 @@ def build_fixtures() -> dict:
                 cov_type=cov_type,
             )
             fixtures[scenario][cov_type] = result
+
+        if scenario in CLUSTER_ILL_CONDITIONED_SCENARIOS:
+            # 悪条件・多重共線性×クラスターロバストSE（均等な疑似グループ）。
+            fixtures[scenario]["cluster"] = _run_cluster_case(
+                scenario, x_exog_cols=x_exog
+            )
 
         if scenario == "baseline":
             n = pl.read_csv(DATA_DIR / "iv_baseline.csv").height
@@ -155,6 +165,18 @@ def build_fixtures() -> dict:
                 instrument_cols=["z1", "z2", "z3"],
             )
 
+    # 内生変数3本（k_endog=3）。fixtures["three_endog"][cov_type]。
+    fixtures["three_endog"] = {
+        cov_type: run(
+            dataset="baseline_three_endog",
+            x_exog_cols=["x1"],
+            x_endog_cols=THREE_ENDOG_X_ENDOG,
+            instrument_cols=THREE_ENDOG_INSTRUMENTS,
+            cov_type=cov_type,
+        )
+        for cov_type in LINEARMODELS_COV_TYPES
+    }
+
     # 実データセット（Wooldridge card、Card 1995の大学近接操作変数による教育の
     # 収益率推定）。testing-policy.md「テスト用データセット」2.（実データセット）。
     fixtures["card"] = {}
@@ -168,6 +190,18 @@ def build_fixtures() -> dict:
             dataset_source="wooldridge",
             y_col="lwage",
         )
+
+    # 実データのグループ列（居住地域、9グループ・不均衡）でのクラスターロバストSE。
+    fixtures["card"]["cluster"] = run(
+        dataset="card",
+        x_exog_cols=CARD_X_EXOG,
+        x_endog_cols=["educ"],
+        instrument_cols=["nearc2", "nearc4"],
+        cov_type="cluster",
+        cluster=CARD_REGION_COLUMN,
+        dataset_source="wooldridge",
+        y_col="lwage",
+    )
 
     # 自由度1境界（df_resid=1ちょうど）の成功パス確認。
     # x_exog=[]・x_endog=['endog1']・instruments=['z1']（丁度識別、n=3）。
@@ -234,6 +268,10 @@ def build_fixtures() -> dict:
             "baseline.confidence_levelはconfidence_level="
             f"{CONFIDENCE_LEVEL_NON_DEFAULT}（既定0.95以外）を全cov_type"
             "（classical/hc0/hc1/hac）とclusterで持つ。"
+            "high_condition_number・moderate_multicollinearityはclusterも持つ"
+            "（均等な疑似グループ）。cardはクラスター（居住地域reg661〜reg669から作った"
+            "9グループ、群の大きさ85〜627）も持つ。three_endogは内生変数3本"
+            "（k_instruments=4）。"
             "invalid_instrument（最後の操作変数を構造誤差と相関させ、Sargan検定が"
             "棄却する）・many_regressors（k_exog=20、列ごとに0.1〜100倍のスケール差）"
             "・outlier_regressor（x1の5%が外れ値）は他のシナリオと同じ構成。"
@@ -271,11 +309,13 @@ def _run_cluster_case(
     x_endog_cols: list[str] | None = None,
     instrument_cols: list[str] | None = None,
     confidence_level: float = 0.95,
+    x_exog_cols: list[str] | None = None,
 ) -> dict:
     """クラスターロバストSE確認用に、疑似グループを付けて
     `benchmark/iv/references/linearmodels_ref.py` を呼ぶ
     （`generate_ols_fixtures.py`の`_run_cluster_case`と同じ発想）。
-    `x_endog_cols`・`instrument_cols`の既定は`["endog1"]`・`["z1", "z2"]`。
+    `x_exog_cols`・`x_endog_cols`・`instrument_cols`の既定は`["x1"]`・`["endog1"]`・
+    `["z1", "z2"]`。
     """
     filename = f"iv_{dataset}.csv"
     df = pl.read_csv(DATA_DIR / filename)
@@ -289,7 +329,7 @@ def _run_cluster_case(
     try:
         return run(
             dataset=f"{dataset}_cluster_tmp",
-            x_exog_cols=["x1"],
+            x_exog_cols=x_exog_cols or ["x1"],
             x_endog_cols=x_endog_cols or ["endog1"],
             instrument_cols=instrument_cols or ["z1", "z2"],
             cov_type="cluster",

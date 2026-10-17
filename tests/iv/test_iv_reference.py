@@ -77,15 +77,20 @@ from econometricsmodels import IV, IVOptions
 
 from benchmark.common import imbalanced_cluster_groups
 from benchmark.iv.constants import (
+    CARD_REGION_COLUMN,
     CARD_X_EXOG,
+    CLUSTER_ILL_CONDITIONED_SCENARIOS,
     CONFIDENCE_LEVEL_NON_DEFAULT,
     LINEARMODELS_COV_TYPES,
 )
 from benchmark.iv.datasets import (
     MULTI_ENDOG_SCENARIOS,
+    THREE_ENDOG_INSTRUMENTS,
+    THREE_ENDOG_X_ENDOG,
     multi_endog_instruments,
     scenario_instruments,
     scenario_x_exog,
+    with_card_region,
 )
 from benchmark.iv.datasets import (
     NUMERIC_SCENARIOS as SCENARIOS,
@@ -116,19 +121,22 @@ _assert_dict_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
 _assert_fields_close = partial(assert_fields_close, rtol=RTOL, atol=ATOL)
 
 
-def _check_result(res, ref: dict, label: str) -> None:
+def _check_result(
+    res, ref: dict, label: str, *, rtol_wald: float = RTOL
+) -> None:
     assert_inference_close(res, ref, label, rtol=RTOL, atol=ATOL)
 
-    _assert_fields_close(
+    # `rtol_wald`: Wald/F統計量とp値だけの相対許容誤差。実データ（card）×クラスターで
+    # クラスター共分散Vの精度（約3e-12）が`V_slopes`の条件数（約3e7）で増幅され、
+    # 他の統計量より緩い値が要る（`_tolerances_iv.py`の`rtol_wald_card_cluster`参照）。
+    _assert_fields_close(res, ref, ("r_squared", "adj_r_squared"), label)
+    assert_fields_close(
         res,
         ref,
-        (
-            "r_squared",
-            "adj_r_squared",
-            ("wald_statistic", "f_statistic"),
-            ("wald_p_value", "f_p_value"),
-        ),
+        (("wald_statistic", "f_statistic"), ("wald_p_value", "f_p_value")),
         label,
+        rtol=rtol_wald,
+        atol=ATOL,
     )
     assert res.n_obs == ref["nobs"], f"{label}/n_obs"
     assert res.df_resid == ref["df_resid"], f"{label}/df_resid"
@@ -270,6 +278,28 @@ def test_cluster_g2_matches_linearmodels(fixtures):
     assert res.wu_hausman_p_value is None
 
 
+@pytest.mark.parametrize("scenario", CLUSTER_ILL_CONDITIONED_SCENARIOS)
+def test_cluster_ill_conditioned_matches_linearmodels(fixtures, scenario):
+    """悪条件・多重共線性シナリオ×クラスターロバストSE（均等な疑似グループ行番号%10）。
+    クラスター共分散は`(X̂'X̂)⁻¹`を他の`cov_type`と共有するため、悪条件との組み合わせでの
+    数値的挙動もクラスターで確認する（OLS/WLSの同名テストと同じ理由）。
+    """
+    df = with_cluster_groups(pl.read_csv(DATA_DIR / f"iv_{scenario}.csv"), 10)
+    options = IVOptions(cov_type="cluster", cluster="cluster_group")
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=scenario_x_exog(scenario),
+        x_endog=["endog1"],
+        instruments=scenario_instruments(scenario),
+        options=options,
+    ).fit()
+
+    _check_result(
+        res, fixtures["synthetic"][scenario]["cluster"], f"{scenario}/cluster"
+    )
+
+
 @pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
 @pytest.mark.parametrize("scenario", MULTI_ENDOG_SCENARIOS)
 def test_multi_endog_matches_linearmodels(fixtures, scenario, cov_type):
@@ -322,6 +352,31 @@ def test_multi_endog_cluster_matches_linearmodels(fixtures):
     )
     assert res.wu_hausman_df_num == 2
     assert res.wu_hausman_df_denom == 9
+
+
+@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
+def test_three_endog_matches_linearmodels(fixtures, cov_type):
+    """内生変数3本（過剰識別度1）。Wu-Hausmanの分子自由度が3になる経路と、
+    `weak_instrument_f_statistics`が内生変数ごとに3つ返ることを確認する。
+    """
+    df = pl.read_csv(DATA_DIR / "iv_baseline_three_endog.csv")
+    options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=["x1"],
+        x_endog=THREE_ENDOG_X_ENDOG,
+        instruments=THREE_ENDOG_INSTRUMENTS,
+        options=options,
+    ).fit()
+
+    _check_result(
+        res,
+        fixtures["synthetic"]["three_endog"][cov_type],
+        f"three_endog/{cov_type}",
+    )
+    assert res.wu_hausman_df_num == 3
+    assert set(res.weak_instrument_f_statistics) == set(THREE_ENDOG_X_ENDOG)
 
 
 @pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
@@ -489,4 +544,30 @@ def test_card_matches_linearmodels(fixtures, cov_type):
 
     _check_result(
         res, fixtures["wooldridge"]["card"][cov_type], f"card/{cov_type}"
+    )
+
+
+def test_card_cluster_matches_linearmodels(fixtures):
+    """実データのグループ列でのクラスターロバストSE。居住地域ダミー
+    （`reg661`〜`reg669`）から作った9グループ（群の大きさ85〜627の不均衡）。
+    均等な疑似グループ（行番号%10）だけでは見逃す、実データのグループ構造での確認。
+    Wald/F統計量だけ、クラスター共分散の条件数による丸め誤差のぶん緩い許容誤差を使う
+    （`_tolerances_iv.py`の`RTOL_WALD_CARD_CLUSTER`参照）。
+    """
+    df = with_card_region(load_wooldridge_dataset("card"))
+    options = IVOptions(cov_type="cluster", cluster=CARD_REGION_COLUMN)
+    res = IV(
+        with_row_time(df),
+        y="lwage",
+        x_exog=CARD_X_EXOG,
+        x_endog=["educ"],
+        instruments=["nearc2", "nearc4"],
+        options=options,
+    ).fit()
+
+    _check_result(
+        res,
+        fixtures["wooldridge"]["card"]["cluster"],
+        "card/cluster",
+        rtol_wald=TOLERANCES["iv_reference"]["rtol_wald_card_cluster"],
     )

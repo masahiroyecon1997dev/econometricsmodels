@@ -35,6 +35,10 @@ IV_G2_BOUNDARY_SCENARIOS = ["baseline"]
 # k_instruments=k_endog=2の丁度識別に強制される（datasets.pyのdocstring参照）。
 IV_MULTI_ENDOG_SCENARIOS = MULTI_ENDOG_SCENARIOS
 
+# 内生変数3本（k_endog=3）の成功パス確認専用。k_instruments=4で過剰識別
+# （自由度1）にする。
+IV_THREE_ENDOG_SCENARIOS = ["baseline"]
+
 # 自由度1境界（df_resid=1ちょうど）の成功パス確認専用。IVは
 # OLSと異なり内生変数1本・操作変数1本が最低限必要なため、x_exog=0・k_endog=1・
 # k_instruments=1（丁度識別）の最小構成にする。df_resid = n - (k_exog + k_endog + 1) = 1
@@ -78,6 +82,18 @@ def freeze(output_dir: Path) -> None:
         key_suffix="_multi_endog",
         k_endog=2,
         k_instruments=3,
+    )
+
+    freeze_scenarios(
+        output_dir,
+        generate_iv_dataset,
+        IV_THREE_ENDOG_SCENARIOS,
+        "iv",
+        iv_true_betas,
+        filename_suffix="_three_endog",
+        key_suffix="_three_endog",
+        k_endog=3,
+        k_instruments=4,
     )
 
     freeze_scenarios(

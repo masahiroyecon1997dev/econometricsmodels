@@ -73,16 +73,21 @@ from scipy import stats as sps
 
 from benchmark.common import imbalanced_cluster_groups
 from benchmark.iv.constants import (
+    CARD_REGION_COLUMN,
     CARD_X_EXOG,
+    CLUSTER_ILL_CONDITIONED_SCENARIOS,
     IVREG_ONLY_COV_TYPES,
     LINEARMODELS_COV_TYPES,
     NON_CLUSTER_COV_TYPES,
 )
 from benchmark.iv.datasets import (
     MULTI_ENDOG_SCENARIOS,
+    THREE_ENDOG_INSTRUMENTS,
+    THREE_ENDOG_X_ENDOG,
     multi_endog_instruments,
     scenario_instruments,
     scenario_x_exog,
+    with_card_region,
 )
 from benchmark.iv.datasets import (
     NUMERIC_SCENARIOS as SCENARIOS,
@@ -134,21 +139,23 @@ def _check_result(
     check_wu_hausman: bool = True,
     n_clusters: int | None = None,
     check_sargan: bool = True,
+    rtol_wald: float = RTOL_STRICT,
 ) -> None:
     assert_inference_close(res, ref, label, rtol=RTOL_STRICT, atol=ATOL)
     assert res.n_obs == ref["nobs"], f"{label}/n_obs"
     assert res.df_resid == ref["df_resid"], f"{label}/df_resid"
 
-    _assert_fields_close(
+    # `rtol_wald`: Wald/F統計量とp値だけの相対許容誤差。実データ（card）×クラスターで
+    # クラスター共分散Vの精度（約3e-12）が`V_slopes`の条件数（約3e7）で増幅され、
+    # 他の統計量より緩い値が要る（`_tolerances_iv.py`の`rtol_wald_card_cluster`参照）。
+    _assert_fields_close(res, ref, ("r_squared", "adj_r_squared"), label)
+    assert_fields_close(
         res,
         ref,
-        (
-            "r_squared",
-            "adj_r_squared",
-            ("wald_statistic", "f_statistic"),
-            ("wald_p_value", "f_p_value"),
-        ),
+        (("wald_statistic", "f_statistic"), ("wald_p_value", "f_p_value")),
         label,
+        rtol=rtol_wald,
+        atol=ATOL,
     )
 
     _assert_dict_close(
@@ -343,6 +350,30 @@ def test_cluster_g2_matches_r(crosscheck):
     assert res.wu_hausman_p_value is None
 
 
+@pytest.mark.parametrize("scenario", CLUSTER_ILL_CONDITIONED_SCENARIOS)
+def test_cluster_ill_conditioned_matches_r(crosscheck, scenario):
+    """悪条件・多重共線性シナリオ×クラスターロバストSE（`test_iv_reference.py`の
+    同名テストと同じ再現条件）。
+    """
+    df = with_cluster_groups(pl.read_csv(DATA_DIR / f"iv_{scenario}.csv"), 10)
+    options = IVOptions(cov_type="cluster", cluster="cluster_group")
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=scenario_x_exog(scenario),
+        x_endog=["endog1"],
+        instruments=scenario_instruments(scenario),
+        options=options,
+    ).fit()
+
+    _check_result(
+        res,
+        crosscheck[scenario]["cluster"],
+        f"{scenario}/cluster/R",
+        n_clusters=df["cluster_group"].n_unique(),
+    )
+
+
 @pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
 @pytest.mark.parametrize("scenario", MULTI_ENDOG_SCENARIOS)
 def test_multi_endog_matches_r(crosscheck, scenario, cov_type):
@@ -387,6 +418,25 @@ def test_multi_endog_cluster_matches_r(crosscheck):
         "multi_endog/baseline/cluster/R",
         n_clusters=df["cluster_group"].n_unique(),
     )
+
+
+@pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
+def test_three_endog_matches_r(crosscheck, cov_type):
+    """内生変数3本（過剰識別度1、`test_iv_reference.py`の同名テストと同じ再現条件）。"""
+    df = pl.read_csv(DATA_DIR / "iv_baseline_three_endog.csv")
+    options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=["x1"],
+        x_endog=THREE_ENDOG_X_ENDOG,
+        instruments=THREE_ENDOG_INSTRUMENTS,
+        options=options,
+    ).fit()
+
+    ref = crosscheck["three_endog"][cov_type]
+    _check_result(res, ref, f"three_endog/{cov_type}/R")
+    assert res.wu_hausman_df_num == 3
 
 
 @pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
@@ -510,3 +560,28 @@ def test_card_matches_r(crosscheck_wooldridge, cov_type):
 
     ref = crosscheck_wooldridge["card"][cov_type]
     _check_result(res, ref, f"card/{cov_type}/R")
+
+
+def test_card_cluster_matches_r(crosscheck_wooldridge):
+    """実データのグループ列（居住地域の9グループ）でのクラスターロバストSE
+    （`test_iv_reference.py`の同名テストと同じ理由）。Wu-Hausmanのp値は、Rの統計量と
+    F(1, G-1)から再計算して比較する。
+    """
+    df = with_card_region(load_wooldridge_dataset("card"))
+    options = IVOptions(cov_type="cluster", cluster=CARD_REGION_COLUMN)
+    res = IV(
+        with_row_time(df),
+        y="lwage",
+        x_exog=CARD_X_EXOG,
+        x_endog=["educ"],
+        instruments=["nearc2", "nearc4"],
+        options=options,
+    ).fit()
+
+    _check_result(
+        res,
+        crosscheck_wooldridge["card"]["cluster"],
+        "card/cluster/R",
+        n_clusters=df[CARD_REGION_COLUMN].n_unique(),
+        rtol_wald=TOLERANCES["iv_crosscheck"]["rtol_wald_card_cluster"],
+    )

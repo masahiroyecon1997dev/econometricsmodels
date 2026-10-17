@@ -52,13 +52,17 @@ from benchmark.common import (
     run_fixture_cli,
 )
 from benchmark.iv.constants import (
+    CARD_REGION_COLUMN,
     CARD_X_EXOG,
+    CLUSTER_ILL_CONDITIONED_SCENARIOS,
     CONFIDENCE_LEVEL_NON_DEFAULT,
     LINEARMODELS_COV_TYPES,
 )
 from benchmark.iv.datasets import (
     MULTI_ENDOG_SCENARIOS,
     NUMERIC_SCENARIOS,
+    THREE_ENDOG_INSTRUMENTS,
+    THREE_ENDOG_X_ENDOG,
     multi_endog_instruments,
     scenario_instruments,
     scenario_x_exog,
@@ -83,7 +87,7 @@ CARD_OTHER_WEIGHT_TYPES = ["robust", "hac"]
 # （cov_type=classical）。classical重みの点推定は2SLSと同じで、Hansen Jが2SLSの
 # Sargan統計量と一致する。robust重みが「不均一分散に頑健なHansen J」という本来の
 # 用途で、これが棄却されることを確認する。
-OVERID_REJECTION_WEIGHT_TYPES = ["robust"]
+OVERID_REJECTION_WEIGHT_TYPES = ["robust", "hac"]
 # 複数内生変数（MULTI_ENDOG_SCENARIOS）でclassical重み（全cov_type）に加えて持つ重み
 # （cov_type=classical）。丁度識別（just_identified）は重みによらず点推定が2SLSと
 # 同じなので持たない。cluster/hac重みはbaselineの1ケースずつに絞る。
@@ -92,6 +96,9 @@ MULTI_ENDOG_OTHER_WEIGHT_TYPES = {
     "just_identified": [],
     "weak_instruments": ["robust"],
     "heteroskedastic": ["robust"],
+    # 自己相関のある誤差ではHAC重みが本来の使い方。
+    "autocorrelated": ["hac"],
+    "small_n": [],
 }
 # 1-step（iter_limit=1）・iterated GMM（3以上、固定回数モード）の成功パス確認用
 # （既定値2以外）。
@@ -116,6 +123,12 @@ def build_fixtures() -> dict:
                 cov_type=cov_type,
             )
             fixtures[scenario]["classical"][cov_type] = result
+
+        if scenario in CLUSTER_ILL_CONDITIONED_SCENARIOS:
+            # 悪条件・多重共線性×クラスター共分散（classical重み、均等な疑似グループ）。
+            fixtures[scenario]["classical"]["cluster"] = _run_cluster_case(
+                scenario, weight_type="classical", x_exog_cols=x_exog
+            )
 
         if scenario == "invalid_instrument":
             for weight_type in OVERID_REJECTION_WEIGHT_TYPES:
@@ -204,6 +217,19 @@ def build_fixtures() -> dict:
             dataset_source="wooldridge",
             y_col="lwage",
         )
+    # 実データのグループ列（居住地域、9グループ・不均衡）でのクラスター共分散
+    # （classical重み）。
+    fixtures["card"]["classical"]["cluster"] = run_gmm(
+        dataset="card",
+        x_exog_cols=CARD_X_EXOG,
+        x_endog_cols=["educ"],
+        instrument_cols=["nearc2", "nearc4"],
+        weight_type="classical",
+        cov_type="cluster",
+        cluster=CARD_REGION_COLUMN,
+        dataset_source="wooldridge",
+        y_col="lwage",
+    )
     for weight_type in CARD_OTHER_WEIGHT_TYPES:
         fixtures["card"][weight_type] = {
             "classical": run_gmm(
@@ -217,6 +243,21 @@ def build_fixtures() -> dict:
                 y_col="lwage",
             )
         }
+
+    # 内生変数3本（k_endog=3）。classical重み×全cov_type。
+    fixtures["three_endog"] = {
+        "classical": {
+            cov_type: run_gmm(
+                dataset="baseline_three_endog",
+                x_exog_cols=["x1"],
+                x_endog_cols=THREE_ENDOG_X_ENDOG,
+                instrument_cols=THREE_ENDOG_INSTRUMENTS,
+                weight_type="classical",
+                cov_type=cov_type,
+            )
+            for cov_type in LINEARMODELS_COV_TYPES
+        }
+    }
 
     # 複数内生変数（k_endog>=2）。fixtures["multi_endog"][シナリオ][重み][cov_type]。
     # classical重みは全cov_type、他の重みはMULTI_ENDOG_OTHER_WEIGHT_TYPESに従って
@@ -382,6 +423,9 @@ def build_fixtures() -> dict:
             "perfect_multicollinearity/G=2クラスター境界はここに含まない"
             "（2SLSの`iv.json`と同じ理由、G=2境界は`engine/src/iv/CLAUDE.md`"
             "「修正済み」参照）。"
+            "high_condition_number・moderate_multicollinearityはclassical重み×"
+            "cluster共分散も持つ。cardはclassical重み×cluster共分散（居住地域から"
+            "作った9グループ）も持つ。three_endogは内生変数3本（k_instruments=4）。"
             "baseline.confidence_levelはconfidence_level="
             f"{CONFIDENCE_LEVEL_NON_DEFAULT}（既定0.95以外）をclassical重み×全cov_type"
             "とclusterで持つ。"
@@ -427,10 +471,12 @@ def _run_cluster_case(
     x_endog_cols: list[str] | None = None,
     instrument_cols: list[str] | None = None,
     confidence_level: float = 0.95,
+    x_exog_cols: list[str] | None = None,
 ) -> dict:
     """クラスターロバストSE確認用に、疑似グループを付けて`run_gmm`を呼ぶ
     （`generate_iv_fixtures.py`の`_run_cluster_case`と同じ発想）。
-    `x_endog_cols`・`instrument_cols`の既定は`["endog1"]`・`["z1", "z2"]`。
+    `x_exog_cols`・`x_endog_cols`・`instrument_cols`の既定は`["x1"]`・`["endog1"]`・
+    `["z1", "z2"]`。
     """
     filename = f"iv_{dataset}.csv"
     df = pl.read_csv(DATA_DIR / filename)
@@ -444,7 +490,7 @@ def _run_cluster_case(
     try:
         return run_gmm(
             dataset=f"{dataset}_gmm_cluster_tmp",
-            x_exog_cols=["x1"],
+            x_exog_cols=x_exog_cols or ["x1"],
             x_endog_cols=x_endog_cols or ["endog1"],
             instrument_cols=instrument_cols or ["z1", "z2"],
             weight_type=weight_type,

@@ -58,6 +58,7 @@ from benchmark.common.dgp_constants import (
     SCALE_VARIANCE_X1_SCALE,
     SCALE_VARIANCE_X2_SCALE,
 )
+from benchmark.iv.constants import CARD_REGION_COLUMN, CARD_REGION_DUMMIES
 
 SCENARIOS = [
     "baseline",
@@ -105,14 +106,33 @@ X_EXOG_BY_SCENARIO = {
 # 複数内生変数（k_endog=2）を持つシナリオ。`benchmark/iv/freeze.py`が
 # `k_endog=2`・`k_instruments=3`でCSV（`iv_<シナリオ>_multi_endog.csv`）を凍結する。
 # `just_identified`は操作変数が`k_endog`に強制されるため2本（丁度識別）。
-# `autocorrelated`は誤差生成がk_endog=1専用のため含めない。
 MULTI_ENDOG_SCENARIOS = [
     "baseline",
     "just_identified",
     "weak_instruments",
     "heteroskedastic",
+    "autocorrelated",
+    "small_n",
 ]
 MULTI_ENDOG_INSTRUMENTS_BY_SCENARIO = {"just_identified": ["z1", "z2"]}
+
+# 内生変数3本（`x_endog=["endog1", "endog2", "endog3"]`）の成功パス確認用データ
+# （baselineシナリオ、`benchmark/iv/freeze.py`が`k_endog=3`・`k_instruments=4`で
+# `iv_baseline_three_endog.csv`として凍結する）。Wu-Hausmanの分子自由度が3になる
+# 経路と、過剰識別度（4-3=1）が内生変数の数と独立であることを確認する。
+THREE_ENDOG_X_ENDOG = ["endog1", "endog2", "endog3"]
+THREE_ENDOG_INSTRUMENTS = ["z1", "z2", "z3", "z4"]
+
+
+def with_card_region(df: pl.DataFrame) -> pl.DataFrame:
+    """Wooldridge cardに、地域ダミー（`reg661`〜`reg669`）から作った実カテゴリ列
+    `region`（文字列、9グループ）を足す。実データでのクラスターロバストSEの
+    グループ列として、フィクスチャ生成とテストが共有する。
+    """
+    expr = pl.lit(None, dtype=pl.String)
+    for dummy in reversed(CARD_REGION_DUMMIES):
+        expr = pl.when(pl.col(dummy) == 1).then(pl.lit(dummy)).otherwise(expr)
+    return df.with_columns(expr.alias(CARD_REGION_COLUMN))
 
 
 def scenario_x_exog(scenario: str) -> list[str]:
@@ -134,6 +154,16 @@ def scenario_instruments(scenario: str) -> list[str]:
 
 # 内生性の強さ: 構造誤差uと第一段階誤差vの相関（シナリオ間で共通の固定値）。
 _RHO_ENDOG = 0.6
+
+
+def _rho_endog(k_endog: int) -> float:
+    """構造誤差uと各第一段階誤差v_jの相関。共分散行列(u, v_1..v_k)が正定値であるには
+    `rho * sqrt(k_endog) < 1`が必要なため（v_i・v_jは無相関）、k_endogが大きいときは
+    `_RHO_ENDOG`を下げる。k_endog<=2では`_RHO_ENDOG`のまま（0.9/sqrt(2)=0.636 > 0.6）で、
+    既存のデータは変わらない。
+    """
+    return min(_RHO_ENDOG, 0.9 / np.sqrt(k_endog))
+
 
 # high_varianceシナリオでの構造誤差uの分散（`benchmark/linear/datasets.py`の
 # high_variance、errors ~ N(0, 10.0)と同じ標準偏差10）。既定は分散1。
@@ -226,9 +256,6 @@ def generate_iv_dataset(
         raise ValueError(f"{scenario} requires k_exog >= 3")
     if scenario in ("scale_variance", "scale_variance_mild") and k_exog < 2:
         raise ValueError(f"{scenario} requires k_exog >= 2")
-    if scenario == "autocorrelated" and k_endog != 1:
-        # 下記の誤差生成ロジック（AR(1)の分岐）がk_endog=1専用のため。
-        raise ValueError(f"{scenario} requires k_endog == 1")
 
     rng = np.random.default_rng(seed)
 
@@ -272,21 +299,27 @@ def generate_iv_dataset(
     z = rng.normal(0.0, 1.0, size=(n, k_instruments))
 
     # --- 内生性: 構造誤差uと第一段階誤差vの相関 ---
-    # autocorrelated分岐はAR(1)の二変量正規分布（k_endog=1専用、呼び出し側で
-    # 強制済み）、それ以外（"else"分岐）は内生変数ごとに独立な第一段階誤差v_jに
-    # 一般化する（下記参照）。
-    cov_uv = np.array([[1.0, _RHO_ENDOG], [_RHO_ENDOG, 1.0]])
+    # autocorrelated分岐はAR(1)の構造誤差、それ以外（"else"分岐）はi.i.d.の
+    # 構造誤差。どちらも内生変数ごとに独立な第一段階誤差v_jを持つ（下記参照）。
     if scenario == "autocorrelated":
         # AR(1): u_t = rho_ar * u_{t-1} + innovation_t
         # （`benchmark/linear/datasets.py`のautocorrelatedシナリオと同じ発想。
         # vは自己相関させない: HAC/Kernelの検証対象は構造誤差uの時系列相関のため）。
+        # 内生変数ごとに独立な第一段階誤差v_jを持つ。k_endog=1では従来の二変量
+        # 正規分布からの生成と乱数列が一致する。
         rho_ar = AUTOCORRELATED_RHO
-        uv_innov = rng.multivariate_normal(mean=[0.0, 0.0], cov=cov_uv, size=n)
+        dim = 1 + k_endog
+        cov_innov = np.eye(dim)
+        cov_innov[0, 1:] = _rho_endog(k_endog)
+        cov_innov[1:, 0] = _rho_endog(k_endog)
+        uv_innov = rng.multivariate_normal(
+            mean=np.zeros(dim), cov=cov_innov, size=n
+        )
         u = np.zeros(n)
         u[0] = uv_innov[0, 0]
         for t in range(1, n):
             u[t] = rho_ar * u[t - 1] + uv_innov[t, 0]
-        v = uv_innov[:, 1:2]  # (n, 1)
+        v = uv_innov[:, 1:]  # (n, k_endog)
     else:
         # 内生変数ごとに独立な第一段階誤差v_j（構造誤差uとはそれぞれ相関
         # _RHO_ENDOGを持つが、v_i・v_j（i≠j）同士は無相関）。k_endog=1では
@@ -296,13 +329,13 @@ def generate_iv_dataset(
         # 実測）になり、Wu-Hausman検定の拡張回帰が推定不能になるため、内生変数
         # ごとに独立なvが必須。
         # high_varianceは構造誤差uの分散のみ拡大する（vの分散は1のまま、
-        # u-v_j間の共分散はcorr(u,v_j)=_RHO_ENDOGを保つようスケーリング）。
+        # u-v_j間の共分散はcorr(u,v_j)=_rho_endog(k_endog)を保つようスケーリング）。
         u_var = _U_VAR_HIGH_VARIANCE if scenario == "high_variance" else 1.0
         dim = 1 + k_endog
         cov_u_v = np.eye(dim)
         cov_u_v[0, 0] = u_var
-        cov_u_v[0, 1:] = _RHO_ENDOG * np.sqrt(u_var)
-        cov_u_v[1:, 0] = _RHO_ENDOG * np.sqrt(u_var)
+        cov_u_v[0, 1:] = _rho_endog(k_endog) * np.sqrt(u_var)
+        cov_u_v[1:, 0] = _rho_endog(k_endog) * np.sqrt(u_var)
         draws = rng.multivariate_normal(
             mean=np.zeros(dim), cov=cov_u_v, size=n
         )

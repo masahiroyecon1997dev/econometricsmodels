@@ -55,12 +55,20 @@ from _tolerances import TOLERANCES
 from econometricsmodels import IV, IVOptions
 
 from benchmark.common import imbalanced_cluster_groups
-from benchmark.iv.constants import CARD_X_EXOG, LINEARMODELS_COV_TYPES
+from benchmark.iv.constants import (
+    CARD_REGION_COLUMN,
+    CARD_X_EXOG,
+    CLUSTER_ILL_CONDITIONED_SCENARIOS,
+    LINEARMODELS_COV_TYPES,
+)
 from benchmark.iv.datasets import (
     MULTI_ENDOG_SCENARIOS,
+    THREE_ENDOG_INSTRUMENTS,
+    THREE_ENDOG_X_ENDOG,
     multi_endog_instruments,
     scenario_instruments,
     scenario_x_exog,
+    with_card_region,
 )
 from benchmark.iv.datasets import (
     NUMERIC_SCENARIOS as SCENARIOS,
@@ -101,16 +109,23 @@ def crosscheck_wooldridge() -> dict:
     return json.loads(FIXTURE_PATH.read_text())["wooldridge"]
 
 
-def _check_result(res, ref: dict, label: str) -> None:
+def _check_result(
+    res, ref: dict, label: str, *, rtol_wald: float = RTOL
+) -> None:
     assert_inference_close(res, ref, label, rtol=RTOL, atol=ATOL)
 
     assert res.n_obs == ref["nobs"], f"{label}/n_obs"
     assert res.df_resid == ref["df_resid"], f"{label}/df_resid"
-    _assert_fields_close(
+    # `rtol_wald`: Wald/F統計量とp値だけの相対許容誤差。実データ（card）×クラスターで
+    # クラスター共分散Vの精度（約3e-12）が`V_slopes`の条件数（約3e7）で増幅され、
+    # 他の統計量より緩い値が要る（`_tolerances_iv.py`の`rtol_wald_card_cluster`参照）。
+    assert_fields_close(
         res,
         ref,
         (("wald_statistic", "f_statistic"), ("wald_p_value", "f_p_value")),
         label,
+        rtol=rtol_wald,
+        atol=ATOL,
     )
 
     if ref["hansen_j_statistic"] is None:
@@ -187,7 +202,7 @@ def _fit_baseline(
     )
 
 
-# ── 合成データ ────────────────────────────────────────────────
+# ── 凍結フィクスチャとの数値照合（合成データ） ────────────────────────
 
 
 @pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
@@ -232,6 +247,38 @@ def test_cluster_imbalanced_matches_momentfit(crosscheck):
     )
 
 
+@pytest.mark.parametrize("scenario", CLUSTER_ILL_CONDITIONED_SCENARIOS)
+def test_cluster_ill_conditioned_matches_momentfit(crosscheck, scenario):
+    """悪条件・多重共線性シナリオ×クラスター共分散（classical重み、均等な疑似グループ
+    行番号%10）。
+    """
+    df = with_cluster_groups(
+        pl.read_csv(DATA_DIR / f"iv_{scenario}.csv"), 10, col=CLUSTER_COL
+    )
+    res = _fit(
+        df,
+        y="y",
+        x_exog=scenario_x_exog(scenario),
+        x_endog=["endog1"],
+        instruments=scenario_instruments(scenario),
+        gmm_weight_type="classical",
+        cov_type="cluster",
+    )
+    _check_result(
+        res,
+        crosscheck[scenario]["classical"]["cluster"],
+        f"{scenario}/classical/cluster",
+    )
+
+
+def test_hac_weight_hac_cov_matches_momentfit(crosscheck):
+    """HACカーネル重み×HAC標準誤差。"""
+    res = _fit_baseline("hac", "hac")
+    _check_result(
+        res, crosscheck["baseline"]["hac"]["hac"], "baseline/hac/hac"
+    )
+
+
 @pytest.mark.parametrize("gmm_weight_type", OTHER_WEIGHT_TYPES)
 def test_other_weight_types_match_momentfit(crosscheck, gmm_weight_type):
     """`gmm_weight_type`（点推定の重み）が`cov_type`（classical固定）と独立な軸
@@ -242,14 +289,6 @@ def test_other_weight_types_match_momentfit(crosscheck, gmm_weight_type):
         res,
         crosscheck["baseline"][gmm_weight_type]["classical"],
         f"baseline/{gmm_weight_type}/classical",
-    )
-
-
-def test_hac_weight_hac_cov_matches_momentfit(crosscheck):
-    """HACカーネル重み×HAC標準誤差。"""
-    res = _fit_baseline("hac", "hac")
-    _check_result(
-        res, crosscheck["baseline"]["hac"]["hac"], "baseline/hac/hac"
     )
 
 
@@ -346,6 +385,26 @@ def test_multi_endog_other_weight_types_match_momentfit(
     )
 
 
+@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
+def test_three_endog_matches_momentfit(crosscheck, cov_type):
+    """内生変数3本（過剰識別度1、classical重み）。"""
+    df = pl.read_csv(DATA_DIR / "iv_baseline_three_endog.csv")
+    res = _fit(
+        df,
+        y="y",
+        x_exog=["x1"],
+        x_endog=THREE_ENDOG_X_ENDOG,
+        instruments=THREE_ENDOG_INSTRUMENTS,
+        gmm_weight_type="classical",
+        cov_type=cov_type,
+    )
+    _check_result(
+        res,
+        crosscheck["three_endog"]["classical"][cov_type],
+        f"three_endog/classical/{cov_type}",
+    )
+
+
 def test_multi_endog_cluster_matches_momentfit(crosscheck):
     """複数内生変数×クラスター共分散（classical重み、疑似グループ行番号%10）。"""
     df = with_cluster_groups(
@@ -369,43 +428,7 @@ def test_multi_endog_cluster_matches_momentfit(crosscheck):
     )
 
 
-# ── 実データ（Wooldridge card） ──────────────────────────────
-
-
-def _fit_card(gmm_weight_type: str, cov_type: str):
-    return _fit(
-        load_wooldridge_dataset("card"),
-        y="lwage",
-        x_exog=CARD_X_EXOG,
-        x_endog=["educ"],
-        instruments=["nearc2", "nearc4"],
-        gmm_weight_type=gmm_weight_type,
-        cov_type=cov_type,
-    )
-
-
-@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
-def test_card_matches_momentfit(crosscheck_wooldridge, cov_type):
-    """実データセット（Wooldridge card）。classical重みで全cov_type。"""
-    _check_result(
-        _fit_card("classical", cov_type),
-        crosscheck_wooldridge["card"]["classical"][cov_type],
-        f"card/classical/{cov_type}",
-    )
-
-
-@pytest.mark.parametrize("gmm_weight_type", CARD_OTHER_WEIGHT_TYPES)
-def test_card_other_weight_types_match_momentfit(
-    crosscheck_wooldridge, gmm_weight_type
-):
-    """実データセット（Wooldridge card）で非classicalの重み（cov_type=classical
-    固定）。
-    """
-    _check_result(
-        _fit_card(gmm_weight_type, "classical"),
-        crosscheck_wooldridge["card"][gmm_weight_type]["classical"],
-        f"card/{gmm_weight_type}/classical",
-    )
+# ── 凍結フィクスチャとの数値照合（オプション） ────────────────────────
 
 
 @pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
@@ -491,4 +514,67 @@ def test_no_intercept_other_weight_types_match_momentfit(
     ref = crosscheck["no_intercept"][scenario][gmm_weight_type]["classical"]
     _check_result(
         res, ref, f"no_intercept/{scenario}/{gmm_weight_type}/momentfit"
+    )
+
+
+# ── 凍結フィクスチャとの数値照合（実データ） ──────────────────────────
+
+
+def _fit_card(gmm_weight_type: str, cov_type: str):
+    return _fit(
+        load_wooldridge_dataset("card"),
+        y="lwage",
+        x_exog=CARD_X_EXOG,
+        x_endog=["educ"],
+        instruments=["nearc2", "nearc4"],
+        gmm_weight_type=gmm_weight_type,
+        cov_type=cov_type,
+    )
+
+
+@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
+def test_card_matches_momentfit(crosscheck_wooldridge, cov_type):
+    """実データセット（Wooldridge card）。classical重みで全cov_type。"""
+    _check_result(
+        _fit_card("classical", cov_type),
+        crosscheck_wooldridge["card"]["classical"][cov_type],
+        f"card/classical/{cov_type}",
+    )
+
+
+@pytest.mark.parametrize("gmm_weight_type", CARD_OTHER_WEIGHT_TYPES)
+def test_card_other_weight_types_match_momentfit(
+    crosscheck_wooldridge, gmm_weight_type
+):
+    """実データセット（Wooldridge card）で非classicalの重み（cov_type=classical
+    固定）。
+    """
+    _check_result(
+        _fit_card(gmm_weight_type, "classical"),
+        crosscheck_wooldridge["card"][gmm_weight_type]["classical"],
+        f"card/{gmm_weight_type}/classical",
+    )
+
+
+def test_card_cluster_matches_momentfit(crosscheck_wooldridge):
+    """実データのグループ列（居住地域の9グループ）でのクラスター共分散
+    （classical重み、`test_iv_gmm_reference.py`の同名テストと同じ理由）。
+    """
+    df = with_card_region(load_wooldridge_dataset("card")).rename(
+        {CARD_REGION_COLUMN: CLUSTER_COL}
+    )
+    res = _fit(
+        df,
+        y="lwage",
+        x_exog=CARD_X_EXOG,
+        x_endog=["educ"],
+        instruments=["nearc2", "nearc4"],
+        gmm_weight_type="classical",
+        cov_type="cluster",
+    )
+    _check_result(
+        res,
+        crosscheck_wooldridge["card"]["classical"]["cluster"],
+        "card/classical/cluster",
+        rtol_wald=TOLERANCES["iv_gmm_crosscheck"]["rtol_wald_card_cluster"],
     )

@@ -277,6 +277,8 @@ def test_y_empty_string_raises(iv_dataset):
 
 
 _ROLE_COLUMNS = ["y", "x1", "x2", "endog1", "endog2", "z1", "z2"]
+
+
 _ROLE_VALUES: dict[str, list[float]] = {
     "y": [1.0, 2.0, 3.0, 4.0],
     "x1": [0.5, 1.5, 2.5, 3.5],
@@ -452,6 +454,86 @@ def test_instruments_empty_raises(iv_dataset):
         ).fit()
 
 
+# ── ValidationError（入力データ: hac_time列） ─────────────────────────
+
+
+@pytest.mark.parametrize(
+    "options_kwargs",
+    [
+        pytest.param({"cov_type": "hac"}, id="2sls_cov_type"),
+        pytest.param(
+            {"estimator": "gmm", "cov_type": "hac"}, id="gmm_cov_type"
+        ),
+        pytest.param(
+            {"estimator": "gmm", "gmm_weight_type": "hac"},
+            id="gmm_weight_type",
+        ),
+        # `gmm_type`ごとに重み行列を組み立てる箇所が異なる
+        pytest.param(
+            {
+                "estimator": "gmm",
+                "gmm_type": "iterated",
+                "gmm_weight_type": "hac",
+            },
+            id="gmm_iterated_weight_type",
+        ),
+        pytest.param(
+            {"estimator": "gmm", "gmm_type": "one_step", "cov_type": "hac"},
+            id="gmm_one_step_cov_type",
+        ),
+        # 同じ列が`cov_type`と`gmm_weight_type`の両方から読まれる
+        pytest.param(
+            {
+                "estimator": "gmm",
+                "cov_type": "hac",
+                "gmm_weight_type": "hac",
+            },
+            id="gmm_cov_type_and_weight_type",
+        ),
+    ],
+)
+@pytest.mark.parametrize(("time_expr", "rows"), TIED_TIME_COLUMNS)
+def test_hac_time_with_tied_values_raises(
+    iv_dataset, options_kwargs, time_expr, rows
+):
+    """`hac_time`に同じ値が1組でもあれば`ValidationError`にする。2SLS・GMMの
+    `cov_type="hac"`と、GMMの重み行列（`gmm_weight_type="hac"`、別の抽出経路）の
+    どちらでも、時点の順序が定まらないまま行順にフォールバックしない。
+    """
+    df = iv_dataset.with_columns(time_expr.alias("t"))
+    options = IVOptions(hac_lags=2, hac_time="t", **options_kwargs)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_TIED_TIME_ORDER,
+            name="t",
+            first=rows[0],
+            second=rows[1],
+        ),
+    ):
+        our_fit(df, options=options)
+
+
+# ── ValidationError（augment()） ──────────────────────────────────────
+
+
+def test_first_stage_augment_none_raises_validation_error(iv_dataset):
+    """`first_stage()`が返す`OLSResults`は、各内生変数の第一段階回帰専用に
+    構築され単一のソースDataFrameを持たないため、`augment(new_data=None)`は
+    `ValidationError`（`new_data`を指定した呼び出しは通常どおり動作する、
+    `docs/spec/ols-spec.md`「augment()」参照）。
+    """
+    res = our_fit(iv_dataset)
+    first_stage = res.first_stage()["endog1"]
+
+    with pytest.raises(ValidationError, match="augment.*training data"):
+        first_stage.augment()
+
+    new_data = pl.DataFrame({"x1": [1.0], "z1": [0.5], "z2": [0.2]})
+    augmented = first_stage.augment(new_data)
+    assert augmented.columns == ["x1", "z1", "z2", "predicted"]
+
+
 # ── ValidationError（オプション） ─────────────────────────────────────
 
 
@@ -582,24 +664,25 @@ def test_cluster_count_between_structural_and_first_stage_slopes_raises(
 
 
 @pytest.mark.parametrize("estimator", ["2sls", "gmm"])
+@pytest.mark.parametrize("include_intercept", [True, False])
 @pytest.mark.parametrize(
     ("n_groups", "outcome"),
     [(2, "structural"), (3, "first_stage"), (4, "ok")],
 )
-def test_cluster_count_boundaries_without_intercept(
-    iv_dataset, estimator, n_groups, outcome
+def test_cluster_count_boundaries(
+    iv_dataset, estimator, include_intercept, n_groups, outcome
 ):
-    """`include_intercept=False`でのクラスター数の境界。構造方程式の傾き係数の数は
-    `x1`・`endog1`の2個、第一段階は`x1`・`z1`・`z2`の3個（切片の有無で傾き係数の数は
-    変わらない。切片なしでは定数項が無い分、全係数が傾きになるため`q = k`）。
-    G=2は構造方程式のG≤q、G=3は構造方程式ではG>qだが第一段階でG≤q
-    （`test_cluster_count_between_structural_and_first_stage_slopes_raises`と同じ
-    現状の挙動）、G=4は成功する。
+    """クラスター数の境界を、切片の有無の両方で確認する。構造方程式の傾き係数の数は
+    `x1`・`endog1`の2個、第一段階は`x1`・`z1`・`z2`の3個で、切片の有無で傾き係数の数は
+    変わらない（切片ありは`const`が傾きから除かれ、切片なしでは定数項が無い分、全係数が
+    傾きになるため`q = k`）。G=2は構造方程式のG≤q、G=3は構造方程式ではG>qだが
+    第一段階でG≤q（`test_cluster_count_between_structural_and_first_stage_slopes_
+    raises`と同じ現状の挙動）、G=4は成功する。
     """
     df = with_cluster_groups(iv_dataset, n_groups)
     options = IVOptions(
         estimator=estimator,
-        include_intercept=False,
+        include_intercept=include_intercept,
         cov_type="cluster",
         cluster="cluster_group",
     )
@@ -623,7 +706,118 @@ def test_cluster_count_boundaries_without_intercept(
             our_fit(df, options=options)
     else:
         res = our_fit(df, options=options)
-        assert res.param_names == ["x1", "endog1"]
+        expected = ["x1", "endog1"]
+        assert res.param_names == (
+            ["const", *expected] if include_intercept else expected
+        )
+        assert res.n_obs == df.height
+
+
+@pytest.mark.parametrize("gmm_type", ["two_step", "iterated"])
+def test_gmm_cluster_weight_type_raises_validation_error_when_cluster_count_is_less_than_instrument_count(
+    iv_dataset, gmm_type
+):
+    """`estimator="gmm"`固有のValidationErrorパス。`gmm_weight_type="cluster"`の重み行列`S`
+    （l×l、`l`は全操作変数の数）はG個のランク1行列の和のため`rank(S)≤G`
+    （`engine/src/iv/CLAUDE.md`「クラスター数Gと操作変数の数lの関係」参照）。
+    `G=2 < l=3`（`x_exog=[]`・`instruments=["z1","z2"]`で`l=const+z1+z2=3`、過剰識別）
+    だと`S`が構造的に特異になるため、`fit()`冒頭で`ValidationError`
+    （`IvError::InsufficientClustersForWeightMatrix`）として弾く。`gmm_type="one_step"`
+    は`gmm_weight_type`を使わないため検証しない。
+    """
+    n = iv_dataset.height
+    df = iv_dataset.with_columns(
+        (pl.int_range(pl.len()) < n // 2).cast(pl.Int64).alias("cluster_group")
+    )
+    options = IVOptions(
+        estimator="gmm",
+        gmm_weight_type="cluster",
+        cluster="cluster_group",
+        cov_type="classical",
+        gmm_type=gmm_type,
+    )
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            iv_msgs.INSUFFICIENT_CLUSTERS_FOR_WEIGHT_MATRIX, g=2, l=3
+        ),
+    ):
+        IV(
+            df,
+            y="y",
+            x_exog=[],
+            x_endog=["endog1"],
+            instruments=["z1", "z2"],
+            options=options,
+        ).fit()
+
+
+@pytest.mark.parametrize(
+    ("gmm_type", "instruments", "n_groups", "l", "outcome"),
+    [
+        # 過剰識別（l=3, k=2）: rank(S)≤Gなので、G=l=3ちょうどで成功する。
+        ("two_step", ["z1", "z2"], 3, 3, "ok"),
+        # 丁度識別（l=k=2）: Z'ê=0によりrank(S)≤G-1なので、G=l=2は失敗し、
+        # G=l+1=3で成功する。
+        ("two_step", ["z1"], 2, 2, "raises"),
+        ("iterated", ["z1"], 2, 2, "raises"),
+        ("two_step", ["z1"], 3, 2, "ok"),
+        ("iterated", ["z1"], 3, 2, "ok"),
+    ],
+    ids=[
+        "over_identified_g_equals_l-two_step",
+        "just_identified_g_equals_l-two_step",
+        "just_identified_g_equals_l-iterated",
+        "just_identified_g_exceeds_l-two_step",
+        "just_identified_g_exceeds_l-iterated",
+    ],
+)
+def test_gmm_cluster_weight_type_cluster_count_boundaries(
+    iv_dataset, gmm_type, instruments, n_groups, l, outcome
+):
+    """`gmm_weight_type="cluster"`のクラスター数の境界の、失敗の反対側（成功）。
+    `test_gmm_cluster_weight_type_raises_validation_error_when_cluster_count_is_less_
+    than_instrument_count`（過剰識別でG<l）と対にする（閾値は識別状態で異なる、
+    `engine/src/iv/CLAUDE.md`「クラスター数Gと操作変数の数lの関係」参照）。
+    `cov_type="classical"`のため、この検証だけが効く。
+
+    過剰識別でG=lちょうどは`two_step`のみ確認する。`iterated`では、重みを残差から
+    作り直すたびにJ統計量が常にl（`S`が`G×G`の正方行列`ĜĜ'`になり
+    `Ĝ'S⁻¹Ĝ=I`）となって目的関数が平坦になり、反復推定が退化して
+    `ComputationError`になる。
+    """
+    df = with_cluster_groups(iv_dataset, n_groups)
+    options = IVOptions(
+        estimator="gmm",
+        gmm_weight_type="cluster",
+        cluster="cluster_group",
+        cov_type="classical",
+        gmm_type=gmm_type,
+    )
+
+    def fit():
+        return IV(
+            df,
+            y="y",
+            x_exog=[],
+            x_endog=["endog1"],
+            instruments=instruments,
+            options=options,
+        ).fit()
+
+    if outcome == "raises":
+        with pytest.raises(
+            ValidationError,
+            match=escaped(
+                iv_msgs.INSUFFICIENT_CLUSTERS_FOR_WEIGHT_MATRIX,
+                g=n_groups,
+                l=l,
+            ),
+        ):
+            fit()
+    else:
+        res = fit()
+        assert res.param_names == ["const", "endog1"]
         assert res.n_obs == df.height
 
 
@@ -692,11 +886,19 @@ def test_unknown_gmm_type_raises(iv_dataset):
 
 
 _GMM = 'estimator="gmm"'
+
+
 _GMM_WEIGHTED = 'estimator="gmm" with gmm_type="two_step" or "iterated"'
+
+
 _GMM_ITERATED = 'estimator="gmm" with gmm_type="iterated"'
+
+
 _CLUSTER_CONDITION = (
     'cov_type="cluster" (or gmm_weight_type="cluster" with estimator="gmm")'
 )
+
+
 _HAC_CONDITION = (
     'cov_type="hac" (or gmm_weight_type="hac" with estimator="gmm")'
 )
@@ -816,6 +1018,109 @@ def test_non_finite_gmm_tol_raises(iv_dataset, gmm_tol, shown):
     with pytest.raises(
         ValidationError,
         match=escaped(iv_msgs.INVALID_GMM_TOL, gmm_tol=shown),
+    ):
+        our_fit(iv_dataset, options=options)
+
+
+@pytest.mark.parametrize(
+    "options_kwargs",
+    [
+        # gmm_weight_type="hac"だけがhac_*を使う（大文字小文字を問わない）
+        {
+            "estimator": "GMM",
+            "gmm_weight_type": "HAC",
+            "hac_lags": 2,
+            "hac_time": "x1",
+        },
+        # gmm_type="iterated"は重みと反復オプションの全てを使う
+        {
+            "estimator": "gmm",
+            "gmm_type": "ITERATED",
+            "gmm_weight_type": "robust",
+            "gmm_max_iter": 10,
+            "gmm_tol": 1e-3,
+            "raise_on_non_convergence": False,
+        },
+        # cov_typeだけがhac_*を使う
+        {
+            "estimator": "2sls",
+            "cov_type": "HAC",
+            "hac_lags": 2,
+            "hac_time": "x1",
+        },
+    ],
+)
+def test_options_used_by_mode_are_accepted(iv_dataset, options_kwargs):
+    our_fit(iv_dataset, options=IVOptions(**options_kwargs))
+
+
+@pytest.mark.parametrize(
+    "options_kwargs",
+    [
+        {"cov_type": "clusterr", "cluster": "x1"},
+        {"estimator": "gmm", "gmm_type": "bogus", "gmm_max_iter": 10},
+    ],
+)
+def test_unknown_value_is_reported_before_unused_option(
+    iv_dataset, options_kwargs
+):
+    """未知の値のエラーを優先し、未使用オプションの指摘で埋もれさせない。"""
+    with pytest.raises(ValidationError, match="unknown"):
+        our_fit(iv_dataset, options=IVOptions(**options_kwargs))
+
+
+@pytest.mark.parametrize(
+    ("options_kwargs", "setting"),
+    [
+        pytest.param({"cov_type": "hac"}, "cov_type", id="2sls_cov_type"),
+        pytest.param(
+            {"estimator": "gmm", "cov_type": "hac"}, "cov_type", id="gmm_cov"
+        ),
+        pytest.param(
+            {"cov_type": "HAC"}, "cov_type", id="2sls_cov_type_uppercase"
+        ),
+        pytest.param(
+            {"estimator": "gmm", "cov_type": "hac", "gmm_weight_type": "hac"},
+            "cov_type",
+            id="both_missing_reports_cov_type_first",
+        ),
+        pytest.param(
+            {"estimator": "gmm", "gmm_weight_type": "hac"},
+            "gmm_weight_type",
+            id="gmm_weight_type",
+        ),
+        pytest.param(
+            {
+                "estimator": "gmm",
+                "gmm_type": "iterated",
+                "gmm_weight_type": "HAC",
+            },
+            "gmm_weight_type",
+            id="gmm_iterated_weight_type",
+        ),
+    ],
+)
+def test_hac_requires_hac_time(iv_dataset, options_kwargs, setting):
+    """HAC（`cov_type="hac"`、GMMの`gmm_weight_type="hac"`）で`hac_time`が未指定だと
+    `ValidationError`。`hac_time`は`cov_type`と`gmm_weight_type`で共用するが、
+    どちらが要求しているかをメッセージで示す。
+    """
+    options = IVOptions(hac_lags=2, **options_kwargs)
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.HAC_REQUIRES_HAC_TIME, setting=setting),
+    ):
+        our_fit(iv_dataset, options=options)
+
+
+def test_gmm_one_step_with_hac_cov_type_requires_hac_time(iv_dataset):
+    """`gmm_type="one_step"`は重み行列を使わないが、`cov_type="hac"`が`hac_time`を
+    要求する。
+    """
+    options = IVOptions(estimator="gmm", gmm_type="one_step", cov_type="hac")
+    with pytest.raises(
+        ValidationError,
+        match=escaped(msgs.HAC_REQUIRES_HAC_TIME, setting="cov_type"),
     ):
         our_fit(iv_dataset, options=options)
 
@@ -1034,45 +1339,6 @@ def test_scale_variance_cluster_raises_computation_error():
         ).fit()
 
 
-@pytest.mark.parametrize("gmm_type", ["two_step", "iterated"])
-def test_gmm_cluster_weight_type_raises_validation_error_when_cluster_count_is_less_than_instrument_count(
-    iv_dataset, gmm_type
-):
-    """`estimator="gmm"`固有のValidationErrorパス。`gmm_weight_type="cluster"`の重み行列`S`
-    （l×l、`l`は全操作変数の数）はG個のランク1行列の和のため`rank(S)≤G`
-    （`engine/src/iv/CLAUDE.md`「クラスター数Gと操作変数の数lの関係」参照）。
-    `G=2 < l=3`（`x_exog=[]`・`instruments=["z1","z2"]`で`l=const+z1+z2=3`、過剰識別）
-    だと`S`が構造的に特異になるため、`fit()`冒頭で`ValidationError`
-    （`IvError::InsufficientClustersForWeightMatrix`）として弾く。`gmm_type="one_step"`
-    は`gmm_weight_type`を使わないため検証しない。
-    """
-    n = iv_dataset.height
-    df = iv_dataset.with_columns(
-        (pl.int_range(pl.len()) < n // 2).cast(pl.Int64).alias("cluster_group")
-    )
-    options = IVOptions(
-        estimator="gmm",
-        gmm_weight_type="cluster",
-        cluster="cluster_group",
-        cov_type="classical",
-        gmm_type=gmm_type,
-    )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            iv_msgs.INSUFFICIENT_CLUSTERS_FOR_WEIGHT_MATRIX, g=2, l=3
-        ),
-    ):
-        IV(
-            df,
-            y="y",
-            x_exog=[],
-            x_endog=["endog1"],
-            instruments=["z1", "z2"],
-            options=options,
-        ).fit()
-
-
 def test_gmm_raise_on_non_convergence_true_raises_computation_error(
     iv_dataset,
 ):
@@ -1091,178 +1357,18 @@ def test_gmm_raise_on_non_convergence_true_raises_computation_error(
         our_fit(iv_dataset, options=options)
 
 
-def test_first_stage_augment_none_raises_validation_error(iv_dataset):
-    """`first_stage()`が返す`OLSResults`は、各内生変数の第一段階回帰専用に
-    構築され単一のソースDataFrameを持たないため、`augment(new_data=None)`は
-    `ValidationError`（`new_data`を指定した呼び出しは通常どおり動作する、
-    `docs/spec/ols-spec.md`「augment()」参照）。
+# ── 例外クラスの継承 ──────────────────────────────────────────────────
+
+
+def test_validation_error_is_value_error():
+    """ValidationErrorがValueErrorのサブクラスであること。
+
+    素の`except ValueError`でも捕まえられる
+    （`.claude/rules/rust-style.md`「エラーハンドリング」参照）。
     """
-    res = our_fit(iv_dataset)
-    first_stage = res.first_stage()["endog1"]
-
-    with pytest.raises(ValidationError, match="augment.*training data"):
-        first_stage.augment()
-
-    new_data = pl.DataFrame({"x1": [1.0], "z1": [0.5], "z2": [0.2]})
-    augmented = first_stage.augment(new_data)
-    assert augmented.columns == ["x1", "z1", "z2", "predicted"]
+    assert issubclass(ValidationError, ValueError)
 
 
-@pytest.mark.parametrize(
-    "options_kwargs",
-    [
-        # gmm_weight_type="hac"だけがhac_*を使う（大文字小文字を問わない）
-        {
-            "estimator": "GMM",
-            "gmm_weight_type": "HAC",
-            "hac_lags": 2,
-            "hac_time": "x1",
-        },
-        # gmm_type="iterated"は重みと反復オプションの全てを使う
-        {
-            "estimator": "gmm",
-            "gmm_type": "ITERATED",
-            "gmm_weight_type": "robust",
-            "gmm_max_iter": 10,
-            "gmm_tol": 1e-3,
-            "raise_on_non_convergence": False,
-        },
-        # cov_typeだけがhac_*を使う
-        {
-            "estimator": "2sls",
-            "cov_type": "HAC",
-            "hac_lags": 2,
-            "hac_time": "x1",
-        },
-    ],
-)
-def test_options_used_by_mode_are_accepted(iv_dataset, options_kwargs):
-    our_fit(iv_dataset, options=IVOptions(**options_kwargs))
-
-
-@pytest.mark.parametrize(
-    "options_kwargs",
-    [
-        {"cov_type": "clusterr", "cluster": "x1"},
-        {"estimator": "gmm", "gmm_type": "bogus", "gmm_max_iter": 10},
-    ],
-)
-def test_unknown_value_is_reported_before_unused_option(
-    iv_dataset, options_kwargs
-):
-    """未知の値のエラーを優先し、未使用オプションの指摘で埋もれさせない。"""
-    with pytest.raises(ValidationError, match="unknown"):
-        our_fit(iv_dataset, options=IVOptions(**options_kwargs))
-
-
-@pytest.mark.parametrize(
-    "options_kwargs",
-    [
-        pytest.param({"cov_type": "hac"}, id="2sls_cov_type"),
-        pytest.param(
-            {"estimator": "gmm", "cov_type": "hac"}, id="gmm_cov_type"
-        ),
-        pytest.param(
-            {"estimator": "gmm", "gmm_weight_type": "hac"},
-            id="gmm_weight_type",
-        ),
-        # `gmm_type`ごとに重み行列を組み立てる箇所が異なる
-        pytest.param(
-            {
-                "estimator": "gmm",
-                "gmm_type": "iterated",
-                "gmm_weight_type": "hac",
-            },
-            id="gmm_iterated_weight_type",
-        ),
-        pytest.param(
-            {"estimator": "gmm", "gmm_type": "one_step", "cov_type": "hac"},
-            id="gmm_one_step_cov_type",
-        ),
-        # 同じ列が`cov_type`と`gmm_weight_type`の両方から読まれる
-        pytest.param(
-            {
-                "estimator": "gmm",
-                "cov_type": "hac",
-                "gmm_weight_type": "hac",
-            },
-            id="gmm_cov_type_and_weight_type",
-        ),
-    ],
-)
-@pytest.mark.parametrize(("time_expr", "rows"), TIED_TIME_COLUMNS)
-def test_hac_time_with_tied_values_raises(
-    iv_dataset, options_kwargs, time_expr, rows
-):
-    """`hac_time`に同じ値が1組でもあれば`ValidationError`にする。2SLS・GMMの
-    `cov_type="hac"`と、GMMの重み行列（`gmm_weight_type="hac"`、別の抽出経路）の
-    どちらでも、時点の順序が定まらないまま行順にフォールバックしない。
-    """
-    df = iv_dataset.with_columns(time_expr.alias("t"))
-    options = IVOptions(hac_lags=2, hac_time="t", **options_kwargs)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_TIED_TIME_ORDER,
-            name="t",
-            first=rows[0],
-            second=rows[1],
-        ),
-    ):
-        our_fit(df, options=options)
-
-
-@pytest.mark.parametrize(
-    ("options_kwargs", "setting"),
-    [
-        pytest.param({"cov_type": "hac"}, "cov_type", id="2sls_cov_type"),
-        pytest.param(
-            {"estimator": "gmm", "cov_type": "hac"}, "cov_type", id="gmm_cov"
-        ),
-        pytest.param(
-            {"cov_type": "HAC"}, "cov_type", id="2sls_cov_type_uppercase"
-        ),
-        pytest.param(
-            {"estimator": "gmm", "cov_type": "hac", "gmm_weight_type": "hac"},
-            "cov_type",
-            id="both_missing_reports_cov_type_first",
-        ),
-        pytest.param(
-            {"estimator": "gmm", "gmm_weight_type": "hac"},
-            "gmm_weight_type",
-            id="gmm_weight_type",
-        ),
-        pytest.param(
-            {
-                "estimator": "gmm",
-                "gmm_type": "iterated",
-                "gmm_weight_type": "HAC",
-            },
-            "gmm_weight_type",
-            id="gmm_iterated_weight_type",
-        ),
-    ],
-)
-def test_hac_requires_hac_time(iv_dataset, options_kwargs, setting):
-    """HAC（`cov_type="hac"`、GMMの`gmm_weight_type="hac"`）で`hac_time`が未指定だと
-    `ValidationError`。`hac_time`は`cov_type`と`gmm_weight_type`で共用するが、
-    どちらが要求しているかをメッセージで示す。
-    """
-    options = IVOptions(hac_lags=2, **options_kwargs)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.HAC_REQUIRES_HAC_TIME, setting=setting),
-    ):
-        our_fit(iv_dataset, options=options)
-
-
-def test_gmm_one_step_with_hac_cov_type_requires_hac_time(iv_dataset):
-    """`gmm_type="one_step"`は重み行列を使わないが、`cov_type="hac"`が`hac_time`を
-    要求する。
-    """
-    options = IVOptions(estimator="gmm", gmm_type="one_step", cov_type="hac")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.HAC_REQUIRES_HAC_TIME, setting="cov_type"),
-    ):
-        our_fit(iv_dataset, options=options)
+def test_computation_error_is_runtime_error():
+    """ComputationErrorがRuntimeErrorのサブクラスであること。"""
+    assert issubclass(ComputationError, RuntimeError)

@@ -78,15 +78,20 @@ from econometricsmodels import IV, IVOptions
 
 from benchmark.common import imbalanced_cluster_groups
 from benchmark.iv.constants import (
+    CARD_REGION_COLUMN,
     CARD_X_EXOG,
+    CLUSTER_ILL_CONDITIONED_SCENARIOS,
     CONFIDENCE_LEVEL_NON_DEFAULT,
     LINEARMODELS_COV_TYPES,
 )
 from benchmark.iv.datasets import (
     MULTI_ENDOG_SCENARIOS,
+    THREE_ENDOG_INSTRUMENTS,
+    THREE_ENDOG_X_ENDOG,
     multi_endog_instruments,
     scenario_instruments,
     scenario_x_exog,
+    with_card_region,
 )
 from benchmark.iv.datasets import (
     NUMERIC_SCENARIOS as SCENARIOS,
@@ -125,20 +130,26 @@ _assert_fields_close = partial(assert_fields_close, rtol=RTOL, atol=ATOL)
 
 
 def _check_result(
-    res, ref: dict, label: str, *, check_overid: bool = True
+    res,
+    ref: dict,
+    label: str,
+    *,
+    check_overid: bool = True,
+    rtol_wald: float = RTOL,
 ) -> None:
     assert_inference_close(res, ref, label, rtol=RTOL, atol=ATOL)
 
-    _assert_fields_close(
+    # `rtol_wald`: Wald/F統計量とp値だけの相対許容誤差。実データ（card）×クラスターで
+    # クラスター共分散Vの精度（約3e-12）が`V_slopes`の条件数（約3e7）で増幅され、
+    # 他の統計量より緩い値が要る（`_tolerances_iv.py`の`rtol_wald_card_cluster`参照）。
+    _assert_fields_close(res, ref, ("r_squared", "adj_r_squared"), label)
+    assert_fields_close(
         res,
         ref,
-        (
-            "r_squared",
-            "adj_r_squared",
-            ("wald_statistic", "f_statistic"),
-            ("wald_p_value", "f_p_value"),
-        ),
+        (("wald_statistic", "f_statistic"), ("wald_p_value", "f_p_value")),
         label,
+        rtol=rtol_wald,
+        atol=ATOL,
     )
     assert res.n_obs == ref["nobs"], f"{label}/n_obs"
     assert res.df_resid == ref["df_resid"], f"{label}/df_resid"
@@ -187,7 +198,7 @@ def _check_result(
     )
 
 
-# ── 凍結フィクスチャとの数値照合 ───────────────────────────────────
+# ── 凍結フィクスチャとの数値照合（合成データ） ────────────────────────
 
 
 @pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
@@ -272,6 +283,132 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
         res,
         fixtures["synthetic"]["baseline"]["classical"]["cluster_imbalanced"],
         "cluster_imbalanced",
+    )
+
+
+@pytest.mark.parametrize("scenario", CLUSTER_ILL_CONDITIONED_SCENARIOS)
+def test_cluster_ill_conditioned_matches_linearmodels(fixtures, scenario):
+    """悪条件・多重共線性シナリオ×クラスター共分散（classical重み、均等な疑似グループ
+    行番号%10）。`test_iv_reference.py`の同名テストと同じ理由。
+    """
+    df = with_cluster_groups(pl.read_csv(DATA_DIR / f"iv_{scenario}.csv"), 10)
+    options = IVOptions(
+        estimator="gmm",
+        gmm_weight_type="classical",
+        cov_type="cluster",
+        cluster="cluster_group",
+    )
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=scenario_x_exog(scenario),
+        x_endog=["endog1"],
+        instruments=scenario_instruments(scenario),
+        options=options,
+    ).fit()
+
+    _check_result(
+        res,
+        fixtures["synthetic"][scenario]["classical"]["cluster"],
+        f"{scenario}/classical/cluster",
+    )
+
+
+def test_hac_weight_hac_cov_matches_linearmodels(fixtures):
+    """`gmm_weight_type="hac"`×`cov_type="hac"`の組み合わせ（実務上最も典型的な
+    「HACカーネル重み＋HAC標準誤差」の組み合わせ経路が、他の`gmm_weight_type`×
+    `cov_type`の組み合わせと同様に独立して機能することを確認する。
+    `test_other_weight_types_match_linearmodels`はcov_type="classical"固定のため
+    この組み合わせを通らない。
+    """
+    df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
+    options = IVOptions(
+        estimator="gmm",
+        gmm_weight_type="hac",
+        cov_type="hac",
+        hac_time=ROW_TIME,
+    )
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1"],
+        instruments=["z1", "z2"],
+        options=options,
+    ).fit()
+
+    _check_result(
+        res, fixtures["synthetic"]["hac_weight_hac_cov"], "hac_weight_hac_cov"
+    )
+
+
+@pytest.mark.parametrize("gmm_weight_type", OTHER_WEIGHT_TYPES)
+def test_other_weight_types_match_linearmodels(fixtures, gmm_weight_type):
+    """`gmm_weight_type`（点推定の重み）が`cov_type`（SE計算方式、ここでは`classical`
+    固定）と独立な軸であることを、baselineシナリオで数値照合する
+    （`gmm_weight_type="classical"`は`test_matches_linearmodels`で既に検証済み）。
+    """
+    df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
+    kwargs = {}
+    if gmm_weight_type == "cluster":
+        df = with_cluster_groups(df, 10)
+        kwargs["cluster"] = "cluster_group"
+
+    options = IVOptions(
+        estimator="gmm",
+        gmm_weight_type=gmm_weight_type,
+        cov_type="classical",
+        **kwargs,
+        **hac_time_for(gmm_weight_type),
+    )
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1"],
+        instruments=["z1", "z2"],
+        options=options,
+    ).fit()
+
+    _check_result(
+        res,
+        fixtures["synthetic"]["baseline"][gmm_weight_type]["classical"],
+        f"baseline/{gmm_weight_type}/classical",
+    )
+
+
+@pytest.mark.parametrize(
+    ("gmm_weight_type", "cov_type"), CROSS_WEIGHT_COV_COMBINATIONS
+)
+def test_cross_weight_cov_matches_linearmodels(
+    fixtures, gmm_weight_type, cov_type
+):
+    """`gmm_weight_type`と`cov_type`が両方とも非既定かつ異なる組み合わせ
+    （cluster重み×hac共分散、hac重み×cluster共分散）。実装は重みと共分散の型が
+    一致する場合の特別分岐を持たず常に一般形のサンドイッチを使うため構造上の
+    リスクは低いが、`hac`×`hac`の1点だけを裏付けにしないよう複数点で照合する。
+    """
+    df = with_cluster_groups(pl.read_csv(DATA_DIR / "iv_baseline.csv"), 10)
+    options = IVOptions(
+        estimator="gmm",
+        gmm_weight_type=gmm_weight_type,
+        cov_type=cov_type,
+        cluster="cluster_group",
+        **hac_time_for(gmm_weight_type, cov_type),
+    )
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1"],
+        instruments=["z1", "z2"],
+        options=options,
+    ).fit()
+
+    _check_result(
+        res,
+        fixtures["synthetic"]["baseline"][gmm_weight_type][cov_type],
+        f"baseline/{gmm_weight_type}/{cov_type}",
     )
 
 
@@ -385,6 +522,34 @@ def test_multi_endog_other_weight_types_match_linearmodels(
     )
 
 
+@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
+def test_three_endog_matches_linearmodels(fixtures, cov_type):
+    """内生変数3本（過剰識別度1、classical重み）。`test_iv_reference.py`の同名テストと
+    同じ再現条件。
+    """
+    df = pl.read_csv(DATA_DIR / "iv_baseline_three_endog.csv")
+    options = IVOptions(
+        estimator="gmm",
+        gmm_weight_type="classical",
+        cov_type=cov_type,
+        **hac_time_for(cov_type),
+    )
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=["x1"],
+        x_endog=THREE_ENDOG_X_ENDOG,
+        instruments=THREE_ENDOG_INSTRUMENTS,
+        options=options,
+    ).fit()
+
+    _check_result(
+        res,
+        fixtures["synthetic"]["three_endog"]["classical"][cov_type],
+        f"three_endog/classical/{cov_type}",
+    )
+
+
 def test_multi_endog_cluster_matches_linearmodels(fixtures):
     """複数内生変数×クラスター共分散（classical重み、疑似グループ行番号%10）。"""
     df = with_cluster_groups(
@@ -414,197 +579,7 @@ def test_multi_endog_cluster_matches_linearmodels(fixtures):
     )
 
 
-def test_hac_weight_hac_cov_matches_linearmodels(fixtures):
-    """`gmm_weight_type="hac"`×`cov_type="hac"`の組み合わせ（実務上最も典型的な
-    「HACカーネル重み＋HAC標準誤差」の組み合わせ経路が、他の`gmm_weight_type`×
-    `cov_type`の組み合わせと同様に独立して機能することを確認する。
-    `test_other_weight_types_match_linearmodels`はcov_type="classical"固定のため
-    この組み合わせを通らない。
-    """
-    df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
-    options = IVOptions(
-        estimator="gmm",
-        gmm_weight_type="hac",
-        cov_type="hac",
-        hac_time=ROW_TIME,
-    )
-    res = IV(
-        with_row_time(df),
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog1"],
-        instruments=["z1", "z2"],
-        options=options,
-    ).fit()
-
-    _check_result(
-        res, fixtures["synthetic"]["hac_weight_hac_cov"], "hac_weight_hac_cov"
-    )
-
-
-# linearmodelsの`iter_limit`（初回推定を含む推定回数）ごとの対応する本実装の
-# オプション。固定回数の反復は公開APIから消えたため、`iter_limit=3`は
-# `gmm_type="iterated"`・`gmm_max_iter=3`に、収束しない極小の`gmm_tol`と
-# `raise_on_non_convergence=False`を組み合わせて再現する（係数が
-# 機械精度で先に収束していても、linearmodelsの3回目の推定値との差は
-# 許容誤差より十分小さい）。
-_GMM_TYPE_OPTIONS = {
-    1: {"gmm_type": "one_step"},
-    3: {
-        "gmm_type": "iterated",
-        "gmm_max_iter": 3,
-        "gmm_tol": 1e-300,
-        "raise_on_non_convergence": False,
-    },
-}
-
-
-@pytest.mark.parametrize("n_iter", [1, 3])
-def test_gmm_type_matches_linearmodels(fixtures, n_iter):
-    """`gmm_type`が既定値（`"two_step"`）以外（`"one_step"`・`"iterated"`）
-    でも主リファレンスと一致することを確認する。
-    """
-    df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
-    gmm_type_options = _GMM_TYPE_OPTIONS[n_iter]
-    # `one_step`は重み行列を使わないため`gmm_weight_type`は指定できない
-    # （指定するとValidationError）。
-    weight_options = (
-        {}
-        if gmm_type_options["gmm_type"] == "one_step"
-        else {"gmm_weight_type": "classical"}
-    )
-    options = IVOptions(
-        estimator="gmm",
-        cov_type="classical",
-        **weight_options,
-        **gmm_type_options,
-    )
-    res = IV(
-        with_row_time(df),
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog1"],
-        instruments=["z1", "z2"],
-        options=options,
-    ).fit()
-
-    _check_result(
-        res,
-        fixtures["synthetic"]["gmm_type"][str(n_iter)],
-        f"gmm_type/{n_iter}",
-        check_overid=(n_iter != 1),
-    )
-
-
-@pytest.mark.parametrize("gmm_weight_type", OTHER_WEIGHT_TYPES)
-def test_other_weight_types_match_linearmodels(fixtures, gmm_weight_type):
-    """`gmm_weight_type`（点推定の重み）が`cov_type`（SE計算方式、ここでは`classical`
-    固定）と独立な軸であることを、baselineシナリオで数値照合する
-    （`gmm_weight_type="classical"`は`test_matches_linearmodels`で既に検証済み）。
-    """
-    df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
-    kwargs = {}
-    if gmm_weight_type == "cluster":
-        df = with_cluster_groups(df, 10)
-        kwargs["cluster"] = "cluster_group"
-
-    options = IVOptions(
-        estimator="gmm",
-        gmm_weight_type=gmm_weight_type,
-        cov_type="classical",
-        **kwargs,
-        **hac_time_for(gmm_weight_type),
-    )
-    res = IV(
-        with_row_time(df),
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog1"],
-        instruments=["z1", "z2"],
-        options=options,
-    ).fit()
-
-    _check_result(
-        res,
-        fixtures["synthetic"]["baseline"][gmm_weight_type]["classical"],
-        f"baseline/{gmm_weight_type}/classical",
-    )
-
-
-@pytest.mark.parametrize(
-    ("gmm_weight_type", "cov_type"), CROSS_WEIGHT_COV_COMBINATIONS
-)
-def test_cross_weight_cov_matches_linearmodels(
-    fixtures, gmm_weight_type, cov_type
-):
-    """`gmm_weight_type`と`cov_type`が両方とも非既定かつ異なる組み合わせ
-    （cluster重み×hac共分散、hac重み×cluster共分散）。実装は重みと共分散の型が
-    一致する場合の特別分岐を持たず常に一般形のサンドイッチを使うため構造上の
-    リスクは低いが、`hac`×`hac`の1点だけを裏付けにしないよう複数点で照合する。
-    """
-    df = with_cluster_groups(pl.read_csv(DATA_DIR / "iv_baseline.csv"), 10)
-    options = IVOptions(
-        estimator="gmm",
-        gmm_weight_type=gmm_weight_type,
-        cov_type=cov_type,
-        cluster="cluster_group",
-        **hac_time_for(gmm_weight_type, cov_type),
-    )
-    res = IV(
-        with_row_time(df),
-        y="y",
-        x_exog=["x1"],
-        x_endog=["endog1"],
-        instruments=["z1", "z2"],
-        options=options,
-    ).fit()
-
-    _check_result(
-        res,
-        fixtures["synthetic"]["baseline"][gmm_weight_type][cov_type],
-        f"baseline/{gmm_weight_type}/{cov_type}",
-    )
-
-
-def _fit_card(gmm_weight_type: str, cov_type: str):
-    options = IVOptions(
-        estimator="gmm",
-        gmm_weight_type=gmm_weight_type,
-        cov_type=cov_type,
-        **hac_time_for(gmm_weight_type, cov_type),
-    )
-    return IV(
-        with_row_time(load_wooldridge_dataset("card")),
-        y="lwage",
-        x_exog=CARD_X_EXOG,
-        x_endog=["educ"],
-        instruments=["nearc2", "nearc4"],
-        options=options,
-    ).fit()
-
-
-@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
-def test_card_matches_linearmodels(fixtures, cov_type):
-    """実データセット（Wooldridge card、`test_iv_reference.py`の同名テストと同じ
-    変数構成）。`gmm_weight_type="classical"`で全`cov_type`を照合する。
-    """
-    _check_result(
-        _fit_card("classical", cov_type),
-        fixtures["wooldridge"]["card"]["classical"][cov_type],
-        f"card/classical/{cov_type}",
-    )
-
-
-@pytest.mark.parametrize("gmm_weight_type", CARD_OTHER_WEIGHT_TYPES)
-def test_card_other_weight_types_match_linearmodels(fixtures, gmm_weight_type):
-    """実データセット（Wooldridge card）で、非classicalの`gmm_weight_type`
-    （robust/hac）を`cov_type="classical"`固定で照合する。
-    """
-    _check_result(
-        _fit_card(gmm_weight_type, "classical"),
-        fixtures["wooldridge"]["card"][gmm_weight_type]["classical"],
-        f"card/{gmm_weight_type}/classical",
-    )
+# ── 凍結フィクスチャとの数値照合（オプション） ────────────────────────
 
 
 @pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
@@ -804,4 +779,131 @@ def test_confidence_level_cluster_matches_linearmodels(fixtures):
         res,
         fixtures["synthetic"]["baseline"]["confidence_level"]["cluster"],
         "confidence_level/cluster",
+    )
+
+
+# linearmodelsの`iter_limit`（初回推定を含む推定回数）ごとの対応する本実装の
+# オプション。固定回数の反復は公開APIから消えたため、`iter_limit=3`は
+# `gmm_type="iterated"`・`gmm_max_iter=3`に、収束しない極小の`gmm_tol`と
+# `raise_on_non_convergence=False`を組み合わせて再現する（係数が
+# 機械精度で先に収束していても、linearmodelsの3回目の推定値との差は
+# 許容誤差より十分小さい）。
+_GMM_TYPE_OPTIONS = {
+    1: {"gmm_type": "one_step"},
+    3: {
+        "gmm_type": "iterated",
+        "gmm_max_iter": 3,
+        "gmm_tol": 1e-300,
+        "raise_on_non_convergence": False,
+    },
+}
+
+
+@pytest.mark.parametrize("n_iter", [1, 3])
+def test_gmm_type_matches_linearmodels(fixtures, n_iter):
+    """`gmm_type`が既定値（`"two_step"`）以外（`"one_step"`・`"iterated"`）
+    でも主リファレンスと一致することを確認する。
+    """
+    df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
+    gmm_type_options = _GMM_TYPE_OPTIONS[n_iter]
+    # `one_step`は重み行列を使わないため`gmm_weight_type`は指定できない
+    # （指定するとValidationError）。
+    weight_options = (
+        {}
+        if gmm_type_options["gmm_type"] == "one_step"
+        else {"gmm_weight_type": "classical"}
+    )
+    options = IVOptions(
+        estimator="gmm",
+        cov_type="classical",
+        **weight_options,
+        **gmm_type_options,
+    )
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1"],
+        instruments=["z1", "z2"],
+        options=options,
+    ).fit()
+
+    _check_result(
+        res,
+        fixtures["synthetic"]["gmm_type"][str(n_iter)],
+        f"gmm_type/{n_iter}",
+        check_overid=(n_iter != 1),
+    )
+
+
+# ── 凍結フィクスチャとの数値照合（実データ） ──────────────────────────
+
+
+def _fit_card(gmm_weight_type: str, cov_type: str):
+    options = IVOptions(
+        estimator="gmm",
+        gmm_weight_type=gmm_weight_type,
+        cov_type=cov_type,
+        **hac_time_for(gmm_weight_type, cov_type),
+    )
+    return IV(
+        with_row_time(load_wooldridge_dataset("card")),
+        y="lwage",
+        x_exog=CARD_X_EXOG,
+        x_endog=["educ"],
+        instruments=["nearc2", "nearc4"],
+        options=options,
+    ).fit()
+
+
+@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
+def test_card_matches_linearmodels(fixtures, cov_type):
+    """実データセット（Wooldridge card、`test_iv_reference.py`の同名テストと同じ
+    変数構成）。`gmm_weight_type="classical"`で全`cov_type`を照合する。
+    """
+    _check_result(
+        _fit_card("classical", cov_type),
+        fixtures["wooldridge"]["card"]["classical"][cov_type],
+        f"card/classical/{cov_type}",
+    )
+
+
+@pytest.mark.parametrize("gmm_weight_type", CARD_OTHER_WEIGHT_TYPES)
+def test_card_other_weight_types_match_linearmodels(fixtures, gmm_weight_type):
+    """実データセット（Wooldridge card）で、非classicalの`gmm_weight_type`
+    （robust/hac）を`cov_type="classical"`固定で照合する。
+    """
+    _check_result(
+        _fit_card(gmm_weight_type, "classical"),
+        fixtures["wooldridge"]["card"][gmm_weight_type]["classical"],
+        f"card/{gmm_weight_type}/classical",
+    )
+
+
+def test_card_cluster_matches_linearmodels(fixtures):
+    """実データのグループ列（居住地域の9グループ）でのクラスター共分散
+    （classical重み）。Wald/F統計量だけ、緩い許容誤差を使う
+    （`test_iv_reference.py`の同名テストと同じ理由）。
+    """
+    df = with_card_region(load_wooldridge_dataset("card"))
+    options = IVOptions(
+        estimator="gmm",
+        gmm_weight_type="classical",
+        cov_type="cluster",
+        cluster=CARD_REGION_COLUMN,
+    )
+    res = IV(
+        with_row_time(df),
+        y="lwage",
+        x_exog=CARD_X_EXOG,
+        x_endog=["educ"],
+        instruments=["nearc2", "nearc4"],
+        options=options,
+    ).fit()
+
+    _check_result(
+        res,
+        fixtures["wooldridge"]["card"]["classical"]["cluster"],
+        "card/classical/cluster",
+        rtol_wald=TOLERANCES["iv_gmm_reference"]["rtol_wald_card_cluster"],
     )

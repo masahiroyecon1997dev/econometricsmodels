@@ -116,6 +116,13 @@ PANEL_TOLERANCES: dict[str, dict[str, float]] = {
         # hc2/hc3 1.1e-2（conf_int）・dk 3.7e-2（conf_int、se 0.9%がt分布の
         # 自由度`T-1=5`の裾でp値・信頼区間に増幅される）。
         # classical・hc1（実測最大相対誤差: std_errors 0.71%・conf_int 1.06%）も同水準。
+        # dkで`dk_bandwidth`を明示した場合の実測（unbalanced、std_errors・
+        # conf_int）: バンド幅0で0.95%・12.3%（信頼区間の端が0に近いx2で
+        # 増幅され、上の5e-2を超える）、2で0.88%・3.7%、3で0.89%・1.2%。
+        # このため標準誤差・推論統計量のunbalancedの明示バンド幅比較は
+        # 持たず、ハウスマン検定側（下の`rtol_hausman_unbalanced["dk"]`）で
+        # 比べる。ただし同許容誤差ではバンド幅2と3の統計量の差（約2.1%）を
+        # 判別できない。
         "rtol_unbalanced": {
             "classical": 2e-2,
             "hc1": 2e-2,

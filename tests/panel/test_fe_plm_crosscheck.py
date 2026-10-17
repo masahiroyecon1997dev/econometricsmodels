@@ -20,9 +20,9 @@ t統計量・p値・信頼区間・F統計量・F p値・within R²（AIC/BIC等
 
 fixest側（`test_fe_crosscheck.py`）の境界ケースのうちplmで再現できるものを持つ:
 クラスター数`G = q+1`・`G = 2`（plmのクラスターはentity単位のため先頭3・2
-entityに絞って作る）、dkの`T = q+1`、dkのバンド幅0・1・3（T=25は12も）、entityあたりの観測数が
-偏った不均衡（クラスターサイズの偏りの代用）。いずれもplm側で`wald()`のような
-分母自由度の切り上げはなく、手計算した自由度`G-1`/`T-1`で比較する。
+entityに絞って作る）、dkの`T = q+1`、dkのバンド幅0・1・3（T=25は12も）、
+entityあたりの観測数が偏った不均衡（クラスターサイズの偏りの代用）。
+いずれもplm側で`wald()`のような分母自由度の切り上げはなく、手計算した自由度`G-1`/`T-1`で比較する。
 
 ## 独立性の限界
 
@@ -211,7 +211,9 @@ def test_dk_max_bandwidth_matches_plm(crosscheck, scenario):
     )
 
 
-# ── dkのバンド幅を既定値以外で明示指定（0, 1, 3。T=25は12も） ─────────────────────────
+# ── dkの明示バンド幅 ──────────────────────────────────────────────────
+
+# 既定値以外の0・1・3（T=25は12も）。
 
 
 @pytest.mark.parametrize(
@@ -226,6 +228,7 @@ def test_dk_explicit_bandwidth_matches_plm(crosscheck, scenario, bandwidth):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
     res = _fit_frame(df, "dk", dk_bandwidth=bandwidth)
 
+    assert res.dk_bandwidth_used == bandwidth
     _check_result(
         res,
         crosscheck["synthetic"]["dk_explicit_bandwidth"][scenario][

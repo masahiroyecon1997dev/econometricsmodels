@@ -88,9 +88,11 @@ from benchmark.panel.fixtures.generate_fe_crosscheck_fixtures import (
     ONE_WAY_ONLY_SCENARIOS,
     ROBUST_BOUNDARY_COV_TYPES,
     SCENARIO_COV_TYPES,
+    TWO_WAY_CLUSTER_KEYS,
     TWO_WAY_SCENARIOS,
     WAGEPAN_COV_TYPES,
-    _dk_three_periods_frame,
+    dk_three_periods_frame,
+    two_way_cluster_frame,
 )
 
 FIXTURE_PATH = (
@@ -221,8 +223,10 @@ def test_matches_fixest_two_way(crosscheck, scenario, cov_type):
     )
 
 
-# ── dkの明示バンド幅（fixestはT-1未満のみ。T-1はtest_fe_plm_crosscheck.py） ──
+# ── dkの明示バンド幅 ──────────────────────────────────────────────────
 
+# fixestは`bandwidth == T-1`で最終ラグを落とすためT-1未満のみ
+# （T-1は`test_fe_plm_crosscheck.py`）。
 DK_BANDWIDTH_ONE_WAY_CASES = [
     (scenario, bandwidth)
     for scenario, bandwidths in DK_EXPLICIT_BANDWIDTHS.items()
@@ -327,36 +331,27 @@ def test_cluster_g3_two_slopes_matches_fixest(crosscheck):
     )
 
 
-_TWO_WAY_CLUSTER_KEYS = {
-    "time": "two_way_cluster_time",
-    "cluster_group": "two_way_cluster_nonnested",
-}
-
-
-@pytest.mark.parametrize("cluster", list(_TWO_WAY_CLUSTER_KEYS))
+@pytest.mark.parametrize("cluster", list(TWO_WAY_CLUSTER_KEYS))
 def test_two_way_cluster_on_non_entity_column_matches_fixest(
     crosscheck, cluster
 ):
     """2-wayでentity以外の列によるクラスタリング。`time`は時間効果とネスト
     するクラスター、`cluster_group`（行番号%4）はどちらの固定効果ともネスト
     しない列で、fixestの`K.fixef="nonnested"`の別々の分岐を踏む。"""
-    df = pl.read_csv(DATA_DIR / "fe_baseline.csv")
-    if cluster == "cluster_group":
-        groups = [str(i % 4) for i in range(df.height)]
-        df = df.with_columns(pl.Series("cluster_group", groups))
+    df = two_way_cluster_frame(cluster)
     options = FEOptions(cov_type="cluster", cluster=cluster, time="time")
     res = FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 
     _check_result(
         res,
-        crosscheck["synthetic"]["baseline"][_TWO_WAY_CLUSTER_KEYS[cluster]],
+        crosscheck["synthetic"]["baseline"][TWO_WAY_CLUSTER_KEYS[cluster]],
         f"baseline/two_way/cluster={cluster}",
     )
 
 
 def test_dk_three_periods_matches_fixest(crosscheck):
     """Driscoll-Kraayの時点数`T = q+1`（q=2、分母自由度`T-1 = q`）の境界。"""
-    df = _dk_three_periods_frame()
+    df = dk_three_periods_frame()
     options = FEOptions(cov_type="dk", dk_time="time")
     res = FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 

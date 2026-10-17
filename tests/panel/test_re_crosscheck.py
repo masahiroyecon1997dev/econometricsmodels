@@ -26,6 +26,18 @@ fixtures/generate_re_crosscheck_fixtures.py`で生成）を用いて、linearmod
   5.3節）。比較は常に1-wayで`REOptions.dk_time`の有無によらない
   （`generate_re_crosscheck_fixtures.py`モジュールdoc参照）。
 
+## dkの明示バンド幅・時点数の境界・実データ
+
+- **明示バンド幅**: 既定式は`T=6`でも`T=25`でも2になるため、`dk_bandwidth`を
+  0・2・3（`T=25`のシナリオは12も）で明示して`vcovSCC(maxlag=)`と比べる。
+  標準誤差・推論統計量はバランスパネルのみで、`unbalanced`はハウスマン検定側で
+  比べる（下記「許容誤差について」）。
+- **時点数の境界**: ハウスマン検定の対象数`k=2`に対し`T=k+1=3`の成功パス
+  （`baseline.dk_three_periods`）。`T<=k`は`test_re_validation.py`の
+  `ValidationError`。
+- **wagepan**: `T=8`、検定対象3個（`T-1=7`）でdkも標準誤差・ハウスマン検定の
+  両方をplmと比べる（時点列は`year`）。
+
 ## ハウスマン統計量の方式について
 
 補助回帰版は統計量が構造的に非負になるため符号処理は不要。`plm`は補助回帰の
@@ -42,6 +54,14 @@ plmの変量効果分散成分推定（Swamy-Arora）がlinearmodels準拠の本
 機械精度で一致するため、それ以外のシナリオは`rtol_balanced`で厳密に比較する
 （cluster・dkの`G/(G-1)`・`T/(T-1)`補正は標準誤差に1%前後しか効かず、緩い
 許容誤差では補正式の取り違えを検出できないため、バランスパネルを緩めない）。
+
+`unbalanced`のdk明示バンド幅は、標準誤差・推論統計量の比較から外している
+（ハウスマン検定では比べる）。標準誤差のずれはバンド幅によらず約0.9%だが、
+バンド幅0では信頼区間の端が0に近い`x2`で相対誤差が12%に増幅され、既存の
+許容誤差（dk: 5e-2）を超えるため。ただしハウスマン検定の許容誤差（3%）では
+バンド幅2と3の統計量の差（約2.1%）を判別できず、`unbalanced`で見分けられるのは
+バンド幅0と2の取り違えまでで、バンド幅の取り違えを判別できるのはバランス
+パネルだけである。
 
 役割分担:
     - 構造・API: `test_re_api.py`
@@ -80,6 +100,9 @@ from benchmark.common import (
     WAGEPAN_Y,
     imbalanced_cluster_groups,
 )
+from benchmark.panel.fixtures.generate_fe_crosscheck_fixtures import (
+    dk_three_periods_frame,
+)
 from benchmark.panel.fixtures.generate_fe_fixtures import NUMERIC_SCENARIOS
 from benchmark.panel.fixtures.generate_re_crosscheck_fixtures import (
     COV_TYPES,
@@ -91,7 +114,6 @@ from benchmark.panel.fixtures.generate_re_crosscheck_fixtures import (
     HAUSMAN_KEY,
     SCENARIO_COV_TYPES,
     WAGEPAN_COV_TYPES,
-    dk_three_periods_frame,
 )
 
 FIXTURE_PATH = (
@@ -275,7 +297,7 @@ def _re_options(
     dk_time: str = "time",
     dk_bandwidth: int | None = None,
 ) -> REOptions:
-    # dk_time・dk_bandwidthはdkのときだけ指定できる（REOptionsのバリデーション）。
+    # dk_time・dk_bandwidthはdkのときだけ指定できる（REOptionsの検証）。
     if cov_type == "dk":
         return REOptions(
             cov_type="dk", dk_time=dk_time, dk_bandwidth=dk_bandwidth
@@ -320,7 +342,48 @@ def _fit_with_cluster_column(csv_name: str, x_cols: list[str], groups):
     ).fit()
 
 
-# ── dkの明示バンド幅・時点数の境界 ────────────────────────────────────
+def test_cluster_imbalanced_matches_plm_based_reference(crosscheck):
+    """クラスター不均衡（サイズ[2,3,5,10,30,50]のタイル、entityとは無関係な
+    専用クラスター列）。plmはgroup/timeしかクラスターにできないため、参照値は
+    plmの準偏差変換済みデータに`lm` + `sandwich::vcovCL`を当てたもの
+    （`run_plm_benchmark.R`モジュールコメント参照）。`stat_df`はentity数ではなく
+    クラスター数`G-1`になる。バランスパネルのため機械精度で比較する。
+    """
+    n = pl.read_csv(DATA_DIR / "fe_baseline_cluster_imbalanced.csv").height
+    groups = imbalanced_cluster_groups(n)
+    res = _fit_with_cluster_column(
+        "fe_baseline_cluster_imbalanced.csv", ["x1", "x2"], groups
+    )
+
+    _check_result(
+        res,
+        crosscheck["synthetic"]["baseline"]["cluster_imbalanced"],
+        "baseline/cluster_imbalanced",
+        rtol=RTOL_BALANCED,
+    )
+    assert res.stat_df == len(set(groups)) - 1
+
+
+def test_cluster_g3_boundary_matches_plm_based_reference(crosscheck):
+    """クラスター数の境界の成功パス。REはハウスマン検定の補助回帰の傾き係数
+    `2k`に対し`G > 2k`が必要なため、`k=1`・`G=3`（`G = 2k+1`）が最小の成功パス
+    （`G=2`は`test_hausman_cluster_count_equal_to_auxiliary_slopes_raises`系の
+    `ValidationError`）。
+    """
+    n = pl.read_csv(DATA_DIR / "fe_baseline_k1.csv").height
+    groups = [str(i % 3) for i in range(n)]
+    res = _fit_with_cluster_column("fe_baseline_k1.csv", ["x1"], groups)
+
+    _check_result(
+        res,
+        crosscheck["synthetic"]["baseline"]["cluster_g3"],
+        "baseline/cluster_g3",
+        rtol=RTOL_BALANCED,
+    )
+    assert res.stat_df == 2
+
+
+# ── dkの明示バンド幅 ──────────────────────────────────────────────────
 
 
 DK_BANDWIDTH_CASES = [
@@ -361,6 +424,9 @@ def test_dk_explicit_bandwidth_matches_plm(crosscheck, scenario, bandwidth):
     )
 
 
+# ── 境界値（dkの時点数） ──────────────────────────────────────────────
+
+
 def _fit_dk_three_periods():
     return RE(
         dk_three_periods_frame(),
@@ -388,55 +454,15 @@ def test_dk_three_periods_matches_plm(crosscheck):
 
 
 def test_dk_three_periods_hausman_matches_plm(crosscheck):
-    """`T = k+1`境界のハウスマン検定（補助回帰の傾き`2k`個ではなく検定対象`k`個に
-    対しDK共分散のrank`T-1`が足りるかが境界を決める。`re-spec.md`3.7節）。"""
+    """`T = k+1`境界のハウスマン検定（補助回帰の傾き`2k`個ではなく検定対象
+    `k`個に対しDK共分散のrank`T-1`が足りるかが境界を決める。`re-spec.md`
+    3.7節）。"""
     _check_hausman(
         _fit_dk_three_periods(),
         crosscheck["synthetic"]["baseline"]["dk_three_periods_hausman"],
         "baseline/dk_three_periods",
         cov_type="dk",
     )
-
-
-def test_cluster_imbalanced_matches_plm_based_reference(crosscheck):
-    """クラスター不均衡（サイズ[2,3,5,10,30,50]のタイル、entityとは無関係な
-    専用クラスター列）。plmはgroup/timeしかクラスターにできないため、参照値は
-    plmの準偏差変換済みデータに`lm` + `sandwich::vcovCL`を当てたもの
-    （`run_plm_benchmark.R`モジュールコメント参照）。`stat_df`はentity数ではなく
-    クラスター数`G-1`になる。バランスパネルのため機械精度で比較する。
-    """
-    n = pl.read_csv(DATA_DIR / "fe_baseline_cluster_imbalanced.csv").height
-    groups = imbalanced_cluster_groups(n)
-    res = _fit_with_cluster_column(
-        "fe_baseline_cluster_imbalanced.csv", ["x1", "x2"], groups
-    )
-
-    _check_result(
-        res,
-        crosscheck["synthetic"]["baseline"]["cluster_imbalanced"],
-        "baseline/cluster_imbalanced",
-        rtol=RTOL_BALANCED,
-    )
-    assert res.stat_df == len(set(groups)) - 1
-
-
-def test_cluster_g3_boundary_matches_plm_based_reference(crosscheck):
-    """クラスター数の境界の成功パス。REはハウスマン検定の補助回帰の傾き係数
-    `2k`に対し`G > 2k`が必要なため、`k=1`・`G=3`（`G = 2k+1`）が最小の成功パス
-    （`G=2`は`test_hausman_cluster_count_equal_to_auxiliary_slopes_raises`系の
-    `ValidationError`）。
-    """
-    n = pl.read_csv(DATA_DIR / "fe_baseline_k1.csv").height
-    groups = [str(i % 3) for i in range(n)]
-    res = _fit_with_cluster_column("fe_baseline_k1.csv", ["x1"], groups)
-
-    _check_result(
-        res,
-        crosscheck["synthetic"]["baseline"]["cluster_g3"],
-        "baseline/cluster_g3",
-        rtol=RTOL_BALANCED,
-    )
-    assert res.stat_df == 2
 
 
 # ── 凍結フィクスチャとの数値照合（実データ: Wooldridge wagepan） ───────

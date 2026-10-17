@@ -60,9 +60,7 @@ from benchmark.common import (
 from benchmark.common.load_wooldridge import load as load_wooldridge
 from benchmark.panel.fixtures.generate_fe_crosscheck_fixtures import (
     SCENARIO_COV_TYPES,
-)
-from benchmark.panel.fixtures.generate_fe_crosscheck_fixtures import (
-    _dk_three_periods_frame as dk_three_periods_frame,
+    dk_three_periods_frame,
 )
 from benchmark.panel.fixtures.generate_fe_fixtures import (
     ONE_WAY_ONLY_SCENARIOS,
@@ -286,7 +284,8 @@ def build_fixtures() -> dict:
             "wagepanはcluster・dk（時点列year、バンド幅は本実装の既定式）。"
             "boundaryはfixestの境界ケースのうちplmで再現できるもの（クラスター数"
             "の境界はentityの部分集合、観測数の偏りはentityごとの期数[2,3,5,10]"
-            "で代用）。dk_explicit_bandwidthはバンド幅0・1・3（T=25のcross_sectionally_correlatedは12も）の明示指定。"
+            "で代用）。dk_explicit_bandwidthはバンド幅0・1・3"
+            "（T=25のcross_sectionally_correlatedは12も）の明示指定。"
             "r_squared_withinはplmのsummary(model)$r.squared（cov_type非依存）。"
         ),
     }

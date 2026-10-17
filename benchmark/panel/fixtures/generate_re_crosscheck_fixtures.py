@@ -106,6 +106,9 @@ from benchmark.common import (
     run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
+from benchmark.panel.fixtures.generate_fe_crosscheck_fixtures import (
+    dk_three_periods_frame,
+)
 from benchmark.panel.fixtures.generate_fe_fixtures import (
     NUMERIC_SCENARIOS,
     SCENARIO_X_COLS,
@@ -205,15 +208,6 @@ def _run_effects(
     if cov_type == "dk" and maxlag is None:
         maxlag = default_dk_bandwidth(csv_path)
     return run_re_plm_r(csv_path, formula, cov_type, maxlag=maxlag)
-
-
-def dk_three_periods_frame() -> pl.DataFrame:
-    """`fe_baseline.csv`の先頭3時点だけを残した、dkの`T = k+1`（k=2）境界用
-    データ。ハウスマン検定の対象数`k=2`に対し`T=3 > k`で成立する最小の時点数。
-    生成側・テスト側で同じ絞り込みを共有する。"""
-    df = pl.read_csv(DATA_DIR / "fe_baseline.csv")
-    first_three = sorted(df["time"].unique().to_list())[:3]
-    return df.filter(pl.col("time").is_in(first_three))
 
 
 def _run_cluster_case(
@@ -375,9 +369,11 @@ def build_fixtures() -> dict:
             "many_regressorsはcluster/dkのロバスト共分散が構造的に特異で"
             "本実装のfit()がエラーになるため含めない。"
             "wagepan（T=8）はdkも含む（時点列year）。"
-            "baseline.dk_three_periods（T=k+1、k=2）・dk_three_periods_hausmanは"
+            "baseline.dk_three_periods（T=k+1、k=2）・"
+            "dk_three_periods_hausmanは"
             "dkの時点数の境界の成功パス。dkの明示バンド幅は各シナリオの"
-            "dk_explicit_bandwidth（標準誤差）・hausman_dk_bandwidth（ハウスマン検定）。"
+            "dk_explicit_bandwidth（標準誤差）・"
+            "hausman_dk_bandwidth（ハウスマン検定）。"
             "baseline.cluster_imbalanced（サイズ[2,3,5,10,30,50]のタイル）・"
             "baseline.cluster_g3（k=1、G=3=2k+1の境界成功パス）は、cluster列が"
             "entity以外のケースで、plmの準偏差変換済みデータにlm+"

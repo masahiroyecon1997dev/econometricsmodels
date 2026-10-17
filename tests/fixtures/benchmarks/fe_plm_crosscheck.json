@@ -1523,11 +1523,11 @@
   },
   "_meta": {
     "method": "fe",
-    "generated_at": "2026-10-17T12:36:26.128839+00:00",
+    "generated_at": "2026-10-17T12:58:41.507695+00:00",
     "reference": "plm (R) within + sandwich",
     "r_version": "4.5.3",
     "plm_version": "2.6.7",
     "sandwich_version": "3.1.3",
-    "note": "FEのcluster/dkの第2リファレンス（fixestとは別実装）。1-wayのcluster（entityクラスター）とdkのみ。clusterはplmのwithin変換後の設計行列に定数項付きlmを当てたsandwich::vcovCL(HC1, cadjust=TRUE)（K=k+1、fixestのK.fixef=nonnestedと同じ数え方）、dkはplm::vcovSCC(type='HC0')にT/(T-1)·(n-1)/(n-k-G)を手計算で掛けたもの（fixestのK.fixef=fullと同じ補正）。t検定の自由度（cluster:G-1、dk:T-1）とp値は手計算。f_statisticはplm::pwaldtest(test='F', vcov=同じvcov)の統計量で、p値は同じ自由度からpf()で計算し直している。dk_max_bandwidthはbandwidth==T-1で、fixestは最終ラグ項を落とすためこのフィクスチャだけが参照値になる。dkのバンド幅は本実装の既定floor(4*(T/100)^(2/9))を明示的にmaxlagに渡している。many_regressorsはk>T-1のためdkを含まない。wagepanはcluster・dk（時点列year、バンド幅は本実装の既定式）。boundaryはfixestの境界ケースのうちplmで再現できるもの（クラスター数の境界はentityの部分集合、観測数の偏りはentityごとの期数[2,3,5,10]で代用）。dk_explicit_bandwidthはバンド幅0と1の明示指定。r_squared_withinはplmのsummary(model)$r.squared（cov_type非依存）。"
+    "note": "FEのcluster/dkの第2リファレンス（fixestとは別実装）。1-wayのcluster（entityクラスター）とdkのみ。clusterはplmのwithin変換後の設計行列に定数項付きlmを当てたsandwich::vcovCL(HC1, cadjust=TRUE)（K=k+1、fixestのK.fixef=nonnestedと同じ数え方）、dkはplm::vcovSCC(type='HC0')にT/(T-1)·(n-1)/(n-k-G)を手計算で掛けたもの（fixestのK.fixef=fullと同じ補正）。t検定の自由度（cluster:G-1、dk:T-1）とp値は手計算。f_statisticはplm::pwaldtest(test='F', vcov=同じvcov)の統計量で、p値は同じ自由度からpf()で計算し直している。dk_max_bandwidthはbandwidth==T-1で、fixestは最終ラグ項を落とすためこのフィクスチャだけが参照値になる。dkのバンド幅は本実装の既定floor(4*(T/100)^(2/9))を明示的にmaxlagに渡している。many_regressorsはk>T-1のためdkを含まない。wagepanはcluster・dk（時点列year、バンド幅は本実装の既定式）。boundaryはfixestの境界ケースのうちplmで再現できるもの（クラスター数の境界はentityの部分集合、観測数の偏りはentityごとの期数[2,3,5,10]で代用）。dk_explicit_bandwidthはバンド幅0・1・3（T=25のcross_sectionally_correlatedは12も）の明示指定。r_squared_withinはplmのsummary(model)$r.squared（cov_type非依存）。"
   }
 }

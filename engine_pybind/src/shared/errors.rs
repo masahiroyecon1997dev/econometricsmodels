@@ -44,9 +44,8 @@ pub(crate) fn common_error_to_pyerr(err: CommonError) -> PyErr {
         | CommonError::MissingClusterColumn
         | CommonError::ClusterDimensionMismatch { .. }
         | CommonError::InsufficientClusters { .. }
-        | CommonError::InsufficientClustersForInference { .. } => {
-            ValidationError::new_err(err.to_string())
-        }
+        | CommonError::InsufficientClustersForInference { .. }
+        | CommonError::InvalidHacLags { .. } => ValidationError::new_err(err.to_string()),
         CommonError::ComputationFailed(_) => ComputationError::new_err(err.to_string()),
     }
 }

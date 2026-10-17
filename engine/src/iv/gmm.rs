@@ -209,7 +209,9 @@ use crate::iv::common::{
     validate_structural_cluster_count,
 };
 use crate::linear::ols::CovType;
-use crate::shared::covariance::{cluster_correction, cluster_meat, time_ordering};
+use crate::shared::covariance::{
+    cluster_correction, cluster_meat, resolve_hac_lags, time_ordering,
+};
 use crate::shared::error::CommonError;
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference;
@@ -333,7 +335,7 @@ impl GmmEstimator {
     ///   以内に収束しなかった: `IvError::GmmNonConvergence`
     /// - 識別の順序条件`len(instruments) >= len(x_endog)`を満たさない:
     ///   `IvError::InsufficientInstruments`
-    /// - `TwoStep`/`Iterated`の`weight`が`Hac`で`lags`が不正: `IvError::InvalidHacLags`
+    /// - `TwoStep`/`Iterated`の`weight`が`Hac`で`lags`が不正: `CommonError::InvalidHacLags`
     /// - `TwoStep`/`Iterated`の`weight`が`Cluster`でグループキー未指定・クラスター数不足:
     ///   `IvError::Common(CommonError::MissingClusterColumn` /
     ///   `CommonError::InsufficientClusters)`
@@ -350,7 +352,7 @@ impl GmmEstimator {
     /// - `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下:
     ///   `IvError::Common(CommonError::InsufficientClustersForInference)`（`rank(Ŝ) ≤ g-1`
     ///   のためロバストWald（χ²）検定の`q×q`部分行列が構造的に特異になる）
-    /// - `cov_type=Hac`の`lags`が不正: `IvError::InvalidHacLags`
+    /// - `cov_type=Hac`の`lags`が不正: `CommonError::InvalidHacLags`
     pub fn fit(
         input: IvInput,
         gmm_type: GmmType,
@@ -964,22 +966,6 @@ fn cluster_moment_covariance(
     cluster_meat(groups, l, |i, a| (*residuals.get(i, 0)) * (*z.get(i, a))).0
 }
 
-/// `weight_type=Hac`の`lags`（`Option<i64>`）を実際に使うラグ数（`usize`）に解決する
-/// （`two_sls.rs`の`resolve_hac_lags`と同じ経験則。エラー型が`IvError`のため独立実装だが、
-/// `IvError::InvalidHacLags`自体は`two_sls.rs`のcov_type=Hacと共有する既存バリアント、
-/// `iv/common.rs`参照）。
-fn resolve_hac_lags(lags: Option<i64>, n: usize) -> Result<usize, IvError> {
-    match lags {
-        Some(l) => {
-            if l < 0 || (l as usize) >= n {
-                return Err(IvError::InvalidHacLags { hac_lags: l, n });
-            }
-            Ok(l as usize)
-        }
-        None => Ok((4.0 * (n as f64 / 100.0).powf(2.0 / 9.0)).floor() as usize),
-    }
-}
-
 /// Newey-West（Bartlettカーネル）によるモーメント分散共分散行列: `two_sls.rs`の
 /// `hac_cov_params`と同型（`Par::Seq`を明示指定する理由も同じ、`.claude/rules/
 /// rust-style.md`「パフォーマンス」参照）。設計行列が`Z`である点、小標本補正が無い点が
@@ -1587,7 +1573,7 @@ mod tests {
         );
         assert_eq!(
             result.unwrap_err(),
-            IvError::InvalidHacLags { hac_lags: -1, n }
+            IvError::Common(CommonError::InvalidHacLags { hac_lags: -1, n })
         );
     }
 
@@ -2095,7 +2081,7 @@ mod tests {
         );
         assert_eq!(
             result.unwrap_err(),
-            IvError::InvalidHacLags { hac_lags: -1, n }
+            IvError::Common(CommonError::InvalidHacLags { hac_lags: -1, n })
         );
 
         let result = GmmEstimator::fit(
@@ -2112,10 +2098,10 @@ mod tests {
         );
         assert_eq!(
             result.unwrap_err(),
-            IvError::InvalidHacLags {
+            IvError::Common(CommonError::InvalidHacLags {
                 hac_lags: n as i64,
                 n
-            }
+            })
         );
     }
 
@@ -3771,7 +3757,7 @@ mod tests {
         );
         assert_eq!(
             result.unwrap_err(),
-            IvError::InvalidHacLags { hac_lags: -1, n }
+            IvError::Common(CommonError::InvalidHacLags { hac_lags: -1, n })
         );
     }
 

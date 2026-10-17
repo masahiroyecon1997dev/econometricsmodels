@@ -105,8 +105,9 @@ RTOL = TOLERANCES["iv_reference"]["rtol"]
 ATOL = TOLERANCES["iv_reference"]["atol"]
 
 
-# HACラグ: `IVOptions.hac_lags`未指定（自動計算）で、`engine::iv::two_sls::
-# resolve_hac_lags`と`benchmark/iv/references/linearmodels_ref.py`の`_hac_auto_lag`が
+# HACラグ: `IVOptions.hac_lags`未指定（自動計算）で、
+# `engine::shared::covariance::{resolve_hac_lags,default_hac_lags}`と
+# `benchmark/iv/references/linearmodels_ref.py`の`_hac_auto_lag`が
 # 同じ式（`floor(4*(n/100)**(2/9))`）を使うため、明示指定しなくても一致する
 # （OLS/WLSのreferenceテストも同じ方式）。
 

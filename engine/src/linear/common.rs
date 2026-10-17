@@ -46,10 +46,6 @@ pub enum LeastSquaresError {
     #[error("weight at row {row} must be positive, got {weight}")]
     NonPositiveWeight { row: usize, weight: f64 },
 
-    /// `hac_lags`が負、または観測数`n`以上。
-    #[error("hac_lags must be in the range [0, n): got {hac_lags}, n={n}")]
-    InvalidHacLags { hac_lags: i64, n: usize },
-
     /// 設計行列が特異（完全な多重共線性等）。
     #[error("design matrix is singular (perfect multicollinearity detected)")]
     SingularMatrix,
@@ -101,14 +97,6 @@ mod tests {
             }
             .to_string(),
             "weight at row 3 must be positive, got 0"
-        );
-        assert_eq!(
-            LeastSquaresError::InvalidHacLags {
-                hac_lags: -1,
-                n: 100
-            }
-            .to_string(),
-            "hac_lags must be in the range [0, n): got -1, n=100"
         );
         assert_eq!(
             LeastSquaresError::SingularMatrix.to_string(),

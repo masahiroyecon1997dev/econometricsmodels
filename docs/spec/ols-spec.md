@@ -235,9 +235,8 @@ $$
 
   | `LeastSquaresError` | Python例外 |
   |---|---|
-  | `Common(DimensionMismatch \| InsufficientObservations \| MissingClusterColumn \| InvalidConfidenceLevel \| InsufficientClusters \| InsufficientClustersForInference \| NoRegressors)` | `ValidationError` |
+  | `Common(DimensionMismatch \| InsufficientObservations \| MissingClusterColumn \| InvalidConfidenceLevel \| InsufficientClusters \| InsufficientClustersForInference \| NoRegressors \| InvalidHacLags)` | `ValidationError` |
   | `WeightDimensionMismatch \| NonPositiveWeight`（WLS） | `ValidationError` |
-  | `InvalidHacLags` | `ValidationError` |
   | `SingularMatrix` | `ComputationError` |
   | `Common(ComputationFailed)` | `ComputationError` |
 
@@ -264,7 +263,7 @@ $$
   `.claude/rules/testing-policy.md`を参照。
 - `hac_lags_used`（自動選択ラグ数）は、`tests/linear/test_ols_api.py`が複数の標本サイズ
   （境界`n=51200`を含む）でPython側の独立実装`benchmark.common.hac_auto_lag`と直接比較する
-  （Rust側`resolve_hac_lags`との式の一致の直接検証。WLS・IV・FE/REのDKも各`*_api.py`で同様）。
+  （Rust側`shared::covariance::resolve_hac_lags`との式の一致の直接検証。WLS・IV・FE/REのDKも各`*_api.py`で同様）。
 - pyfixestはOLSの正確性検証には使わない（HC2/HC3にHC1用の小標本補正を誤って適用する既知の
   実装バグがあるため）。性能比較専用（[`../performance/ols.md`](../performance/ols.md)）。
 - 実データセット: `wage1`（`lwage ~ educ + exper + tenure`）・

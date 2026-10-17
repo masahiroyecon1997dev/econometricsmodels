@@ -30,8 +30,9 @@
 //! 呼ぶ）を行う。
 //! OLS（`engine::linear::ols`）の同名の同型計算とは**意図的に独立実装**にしている
 //! （`docs/spec/iv-spec.md`3.1節「IVのサンドイッチ型分散計算は独自実装でよい……OLS/nonlinear
-//! どちらの既存計算にも寄せない」）。例外はクラスターの蓄積・補正で、共有モジュール
-//! `shared::covariance`（OLS本体ではない）の`cluster_meat`/`cluster_correction`を使う。
+//! どちらの既存計算にも寄せない」）。例外はクラスターの蓄積・補正と、HACのラグ数の解決で、
+//! 共有モジュール`shared::covariance`（OLS本体ではない）の`cluster_meat`/`cluster_correction`・
+//! `resolve_hac_lags`を使う。
 //!
 //! 第一段階の各`OlsEstimator`はそれ自体が正しい（ナイーブな）OLS回帰であり、
 //! （弱操作変数診断等で必要になる）SE・F統計量も含めてそのまま公開してよい
@@ -67,7 +68,7 @@ use crate::iv::common::{
 };
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
-use crate::shared::covariance::{cluster_cov_params, time_ordering};
+use crate::shared::covariance::{cluster_cov_params, resolve_hac_lags, time_ordering};
 use crate::shared::error::CommonError;
 use crate::shared::inference;
 use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
@@ -162,7 +163,7 @@ impl TwoSlsEstimator {
     /// - 第二段階回帰（`second_stage`の内部委譲フィット）が失敗: `IvError::SecondStageFailed`
     ///   （`x_endog=[]`の退化ケースでは第一段階ループが一度も回らないため、
     ///   `confidence_level`が範囲外の場合のエラーもここ経由になる）
-    /// - `cov_type=Hac`の`hac_lags`が不正: `IvError::InvalidHacLags`
+    /// - `cov_type=Hac`の`hac_lags`が不正: `CommonError::InvalidHacLags`
     /// - `cov_type=Cluster`でグループキー未指定・クラスター数不足:
     ///   `IvError::Common(CommonError::MissingClusterColumn` /
     ///   `CommonError::InsufficientClusters)`
@@ -761,21 +762,6 @@ fn hc_cov_params(
 
     let psi_hat = x_scaled.transpose() * &x_scaled;
     xtx_inv * &psi_hat * xtx_inv
-}
-
-/// `CovType::Hac`の`lags`（`Option<i64>`）を実際に使うラグ数（`usize`）に解決する
-/// （`ols/estimator.rs`の`resolve_hac_lags`と同じ経験則。数式・境界条件は同一だがエラー型が
-/// `IvError`のため独立実装、モジュール冒頭のdocコメント参照）。
-fn resolve_hac_lags(lags: Option<i64>, n: usize) -> Result<usize, IvError> {
-    match lags {
-        Some(l) => {
-            if l < 0 || (l as usize) >= n {
-                return Err(IvError::InvalidHacLags { hac_lags: l, n });
-            }
-            Ok(l as usize)
-        }
-        None => Ok((4.0 * (n as f64 / 100.0).powf(2.0 / 9.0)).floor() as usize),
-    }
 }
 
 /// Newey-West HACの係数分散共分散行列: `(X̂'X̂)⁻¹Ŝ(X̂'X̂)⁻¹`（k×k）。数式・実装方針は
@@ -1947,7 +1933,7 @@ mod tests {
         );
         assert_eq!(
             result.unwrap_err(),
-            IvError::InvalidHacLags { hac_lags: -1, n: 5 }
+            IvError::Common(CommonError::InvalidHacLags { hac_lags: -1, n: 5 })
         );
     }
 

@@ -11,6 +11,7 @@ use faer::linalg::matmul::matmul;
 use faer::prelude::Solve;
 use faer::{Accum, Mat, Par, Side};
 
+use super::error::CommonError;
 use super::group_codes::GroupCodes;
 use crate::shared::linear_algebra::RankDeficient;
 
@@ -125,6 +126,31 @@ pub(crate) fn time_ordering(time_order: &[f64], n: usize) -> Vec<usize> {
     let mut order: Vec<usize> = (0..n).collect();
     order.sort_by(|&a, &b| time_order[a].total_cmp(&time_order[b]));
     order
+}
+
+/// Newey-West HACの既定のラグ数（バンド幅）`floor(4*(m/100)^(2/9))`。データに依存しない
+/// 決定的な経験則で、`m`はOLS・2SLS・GMMでは観測数`n`、パネルのDriscoll-Kraay型では
+/// ユニークな時点数`t`を渡す。
+pub(crate) fn default_hac_lags(m: usize) -> usize {
+    (4.0 * (m as f64 / 100.0).powf(2.0 / 9.0)).floor() as usize
+}
+
+/// `cov_type="hac"`（および GMMの`weight_type="hac"`）の`lags`（`Option<i64>`）を実際に使う
+/// ラグ数（`usize`）に解決する。
+///
+/// `Some(l)`は`0 <= l < n`を検証してそのまま使い、範囲外は`CommonError::InvalidHacLags`。
+/// `None`は[`default_hac_lags`]で自動計算する。OLS/WLS・2SLS・GMMが共有する（以前は
+/// エラー型ごとに同じ本体を3か所に持っていた）。
+pub(crate) fn resolve_hac_lags(lags: Option<i64>, n: usize) -> Result<usize, CommonError> {
+    match lags {
+        Some(l) => {
+            if l < 0 || (l as usize) >= n {
+                return Err(CommonError::InvalidHacLags { hac_lags: l, n });
+            }
+            Ok(l as usize)
+        }
+        None => Ok(default_hac_lags(n)),
+    }
 }
 
 /// Newey-West HAC（Bartlettカーネル）の`meat`: `Ŝ = Ŝ₀ + Σ_{l=1}^{L} w_l (Ŝ_l + Ŝ_l')`（k×k）。
@@ -372,6 +398,38 @@ mod tests {
                 *cov.get(0, 0)
             );
         }
+    }
+
+    #[test]
+    fn default_hac_lags_follows_the_floor_4_m_over_100_to_2_9_rule() {
+        // floor(4*(m/100)^(2/9)): m=100 → 4、m=5 → 2.06 → 2、m=1000 → 6.67 → 6、m=1 → 1.44 → 1。
+        assert_eq!(default_hac_lags(100), 4);
+        assert_eq!(default_hac_lags(5), 2);
+        assert_eq!(default_hac_lags(1000), 6);
+        assert_eq!(default_hac_lags(1), 1);
+    }
+
+    #[test]
+    fn resolve_hac_lags_accepts_explicit_lags_in_zero_to_n_minus_one() {
+        assert_eq!(resolve_hac_lags(Some(0), 5), Ok(0));
+        assert_eq!(resolve_hac_lags(Some(4), 5), Ok(4));
+    }
+
+    #[test]
+    fn resolve_hac_lags_uses_the_default_rule_when_lags_is_none() {
+        assert_eq!(resolve_hac_lags(None, 100), Ok(4));
+    }
+
+    #[test]
+    fn resolve_hac_lags_rejects_negative_and_n_or_larger_lags() {
+        assert_eq!(
+            resolve_hac_lags(Some(-1), 5),
+            Err(CommonError::InvalidHacLags { hac_lags: -1, n: 5 })
+        );
+        assert_eq!(
+            resolve_hac_lags(Some(5), 5),
+            Err(CommonError::InvalidHacLags { hac_lags: 5, n: 5 })
+        );
     }
 
     #[test]

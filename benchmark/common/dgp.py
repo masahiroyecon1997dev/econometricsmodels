@@ -5,7 +5,7 @@
 - `linear_predictor`: 「切片＋線形結合」の計算。
 - `correlated_design_matrix`/`apply_perfect_multicollinearity`:
   multicollinearity系シナリオの説明変数行列生成。
-- `hac_auto_lag`: HACの自動ラグ選択式（engineの`resolve_hac_lags`と同じ）。
+- `hac_auto_lag`: HACの自動ラグ選択式（engineの`default_hac_lags`と同じ）。
 - `validate_choice`: 候補集合に含まれなければ`ValueError`（`scenario`/`link`検証）。
 - `preview_dataset`: `benchmark/<系統>/datasets.py`共通の単体実行プレビュー。
 
@@ -131,7 +131,7 @@ def apply_perfect_multicollinearity(X: np.ndarray) -> None:
 
 
 def hac_auto_lag(n: int) -> int:
-    """engineのHAC自動ラグ選択式（`resolve_hac_lags`）と同じ計算式。
+    """engineのHAC自動ラグ選択式（`shared::covariance::default_hac_lags`）と同じ計算式。
 
     Rクロスチェック・性能比較の各スクリプトに同じ明示ラグを渡すことで、
     自動ラグ選択式自体の実装差を比較対象から除外するために使う。

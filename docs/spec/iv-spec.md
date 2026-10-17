@@ -160,8 +160,9 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   OLSの対応する実装と同型に計算するが、コード自体はOLS（`engine::linear::ols`）に寄せず
   **意図的に独立実装**にしている（例外: クラスターの蓄積`Σ_g S_g S_g'`と小標本補正は、
   OLS本体ではなく共有モジュール`shared::covariance`の`cluster_meat`/`cluster_correction`
-  を、設計行列`X̂`・構造残差`e`で呼ぶ。加算順を1か所に固定するため。レバレッジ・HAC等
-  OLS固有の調整はここに持ち込まない）（IVのサンドイッチ型分散計算はOLS/nonlinearどちらの既存
+  を、設計行列`X̂`・構造残差`e`で呼ぶ。加算順を1か所に固定するため。HACのラグ数の解決
+  （範囲検証と既定式）も同モジュールの`resolve_hac_lags`を共有する。レバレッジ・HACの
+  カーネル計算等OLS固有の調整はここに持ち込まない）（IVのサンドイッチ型分散計算はOLS/nonlinearどちらの既存
   計算にも寄せない独立実装でよいという既存方針）。GMMのモーメント共分散行列計算
   （`gmm.rs`）も同じ理由で2SLS側と独立に実装している（`iv/CLAUDE.md`「2SLSとGMMの独立実装
   方針」参照）。
@@ -339,8 +340,8 @@ common.rs`）:
 
 | `IvError` | Python例外 |
 |---|---|
-| `Common(CommonError)` | `common_error_to_pyerr`に委譲 |
-| `InsufficientInstruments` / `InsufficientObservationsForFirstStage` / `InvalidHacLags` / `InvalidGmmMaxIter` / `InvalidGmmTol` / `InsufficientClustersForWeightMatrix` | `ValidationError` |
+| `Common(CommonError)`（`InvalidHacLags`を含む） | `common_error_to_pyerr`に委譲 |
+| `InsufficientInstruments` / `InsufficientObservationsForFirstStage` / `InvalidGmmMaxIter` / `InvalidGmmTol` / `InsufficientClustersForWeightMatrix` | `ValidationError` |
 | `GmmNonConvergence` | `ComputationError`（`MleError::NonConvergence`と同じ分類: パラメータの不正ではなく計算過程で発覚した問題） |
 | `FirstStageFailed` / `SecondStageFailed` / `HausmanRegressionFailed` | 内部の`LeastSquaresError`が`ComputationError`相当かどうかで`ComputationError`/`ValidationError`に分岐（`least_squares_error_is_computation_error`） |
 

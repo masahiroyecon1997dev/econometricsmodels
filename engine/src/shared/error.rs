@@ -3,7 +3,8 @@
 //! `engine::linear::common::LeastSquaresError`と`engine::nonlinear::common::MleError`で、
 //! `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/
 //! `MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`の6バリアントが
-//! エラーメッセージの文言まで完全に重複していた。IV/panel/causal/io/
+//! エラーメッセージの文言まで完全に重複していた（その後、OLS/2SLS/GMMで重複していた
+//! `InvalidHacLags`等も加えている）。IV/panel/causal/io/
 //! time_series等、今後7系統・20〜30手法に増える前提のため、系統をまたぐ共通バリデーション
 //! エラーをここに集約し、各系統のエラー型はthiserrorの
 //! `#[error(transparent)] Common(#[from] CommonError)`で包む設計にする。
@@ -83,6 +84,14 @@ pub enum CommonError {
     )]
     InsufficientClustersForInference { g: usize, q: usize },
 
+    /// `cov_type="hac"`（GMMの`weight_type="hac"`を含む）の`hac_lags`が負、または観測数`n`以上（`[0, n)`の範囲外）。
+    ///
+    /// OLS/WLS・2SLS・GMMのHACが共有する検証（`shared::covariance::resolve_hac_lags`）。
+    /// パネルのDriscoll-Kraay型HACは上限が観測数`n`ではなく時点数`t`なので、同型でも
+    /// 別のバリアント（`PanelError::InvalidDkBandwidth`）にしてある。
+    #[error("hac_lags must be in the range [0, n): got {hac_lags}, n={n}")]
+    InvalidHacLags { hac_lags: i64, n: usize },
+
     /// 上記以外の計算過程での失敗（分布のCDF計算等）。
     #[error("computation failed: {0}")]
     ComputationFailed(String),
@@ -141,6 +150,14 @@ mod tests {
              inference: got g=2 clusters for q=3 slope coefficient(s), but the \
              cluster-robust covariance has rank at most g-1, so the q×q Wald/F submatrix \
              is singular when g <= q"
+        );
+        assert_eq!(
+            CommonError::InvalidHacLags {
+                hac_lags: -1,
+                n: 100
+            }
+            .to_string(),
+            "hac_lags must be in the range [0, n): got -1, n=100"
         );
         assert_eq!(
             CommonError::ComputationFailed("t-distribution CDF did not converge".to_string())

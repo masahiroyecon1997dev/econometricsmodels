@@ -113,7 +113,6 @@ pub(crate) fn iv_error_to_pyerr(err: IvError) -> PyErr {
     match err {
         IvError::Common(common) => common_error_to_pyerr(common),
         IvError::InsufficientInstruments { .. }
-        | IvError::InvalidHacLags { .. }
         | IvError::InvalidGmmMaxIter { .. }
         | IvError::InvalidGmmTol { .. }
         | IvError::InsufficientClustersForWeightMatrix { .. }

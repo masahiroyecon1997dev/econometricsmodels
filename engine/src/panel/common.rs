@@ -19,7 +19,7 @@
 //! - `ZeroVarianceAfterDemeaning`: within変換後に分散ゼロの説明変数（`fe-spec.md`1章）
 //! - `TwoWayRequiresTime`: 2-way FE・RE指定時の`time`必須（`panel-common.md`1.1節）
 //! - `InvalidDkBandwidth`: `FeCovType::Dk`の明示的な`bandwidth`が`[0, t)`の範囲外
-//!   （`t`はユニークな時点数。`LeastSquaresError::InvalidHacLags`と同型だが
+//!   （`t`はユニークな時点数。`CommonError::InvalidHacLags`と同型だが
 //!   上限が観測数`n`ではなく時点数`t`）
 //! - `InsufficientDkPeriodsForInference`: DK指定時に時点数`t`が同時Wald検定の対象係数の
 //!   数`q`以下（`rank(S) ≤ t-1`のため検定の部分行列が構造的に特異。
@@ -65,7 +65,7 @@ use faer::Mat;
 use thiserror::Error;
 
 use crate::linear::common::LeastSquaresError;
-use crate::shared::covariance::{cluster_correction, cluster_meat};
+use crate::shared::covariance::{cluster_correction, cluster_meat, default_hac_lags};
 use crate::shared::error::CommonError;
 use crate::shared::group_codes::GroupCodes;
 
@@ -234,7 +234,7 @@ pub enum PanelError {
 
     /// `FeCovType::Dk`の明示的な`bandwidth`が`[0, t)`の範囲外（`t`はユニークな時点数）。
     ///
-    /// `LeastSquaresError::InvalidHacLags`と同型のバリデーションだが、上限が観測数`n`
+    /// `CommonError::InvalidHacLags`と同型のバリデーションだが、上限が観測数`n`
     /// ではなく時点数`t`になる点が異なる（DKのバンド幅は「時点のラグ」であり「観測の
     /// ラグ」ではないため、`engine/src/panel/CLAUDE.md`「Driscoll-Kraay型パネルHAC対応」
     /// 参照）。
@@ -739,8 +739,9 @@ pub(crate) fn panel_cluster_cov_params(
 ///
 /// `Some(bw)`の場合は`0 <= bw < t`を検証してそのまま使う（`t`はユニークな時点数）。`None`の
 /// 場合は`linearmodels`の`DriscollKraay`と同じ経験則`floor(4*(t/100)^(2/9))`で自動計算する
-/// （`fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照。OLSの`resolve_hac_lags`と
-/// 式の形は同じだが、観測数`n`ではなく時点数`t`が引数になる点が異なる）。
+/// （`fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照。式は
+/// `shared::covariance::default_hac_lags`でOLS・IVのHACと共有するが、引数が観測数`n`では
+/// なく時点数`t`になる点が異なる）。
 ///
 /// `t < 2`は`bandwidth`の値によらず`PanelError::InsufficientDkPeriods`で拒否する
 /// （fixest型の`G/(G-1)`相当補正を導入したことに伴う前提条件。同エラーの
@@ -757,7 +758,7 @@ pub(crate) fn resolve_dk_bandwidth(bandwidth: Option<i64>, t: usize) -> Result<u
             }
             Ok(bw as usize)
         }
-        None => Ok((4.0 * (t as f64 / 100.0).powf(2.0 / 9.0)).floor() as usize),
+        None => Ok(default_hac_lags(t)),
     }
 }
 

@@ -1,8 +1,8 @@
 //! OLSの`cov_type`別の係数分散共分散行列と、それに伴う推論の自由度。
 //!
 //! `shared::covariance`の部品（classical / HC0-3 / HAC / cluster）を、OLS固有の規則で
-//! つなぐ層: HACのラグ数の解決（`LeastSquaresError::InvalidHacLags`）、クラスター列の検証、
-//! 推論の自由度`df_inference`（`cov_type=Cluster`のときだけ`G-1`）。エラー型が
+//! つなぐ層: HACのラグ数の解決（`shared::covariance::resolve_hac_lags`、範囲外は
+//! `CommonError::InvalidHacLags`）、クラスター列の検証、推論の自由度`df_inference`（`cov_type=Cluster`のときだけ`G-1`）。エラー型が
 //! `LeastSquaresError`のため`shared/`には置けない。
 
 use faer::Mat;
@@ -11,7 +11,7 @@ use super::cov_type::CovType;
 use crate::linear::common::LeastSquaresError;
 use crate::shared::covariance::{
     HcVariant, classical_cov_params, cluster_cov_params, hac_cov_params, hc_cov_params,
-    time_ordering,
+    resolve_hac_lags, time_ordering,
 };
 use crate::shared::error::CommonError;
 use crate::shared::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
@@ -117,23 +117,6 @@ pub(super) fn compute_cov_params(
         df_inference,
         hac_lags_used,
     })
-}
-
-/// `CovType::Hac`の`lags`（`Option<i64>`）を実際に使うラグ数（`usize`）に解決する。
-///
-/// `Some(l)`の場合は`0 <= l < n`を検証してそのまま使う。`None`の場合は経験則
-/// `L = floor(4*(n/100)^(2/9))`で自動計算する（`docs/spec/ols-spec.md`
-/// 「標準誤差」のHAC。EViews等でも使われる、データに依存しない決定的な式）。
-fn resolve_hac_lags(lags: Option<i64>, n: usize) -> Result<usize, LeastSquaresError> {
-    match lags {
-        Some(l) => {
-            if l < 0 || (l as usize) >= n {
-                return Err(LeastSquaresError::InvalidHacLags { hac_lags: l, n });
-            }
-            Ok(l as usize)
-        }
-        None => Ok((4.0 * (n as f64 / 100.0).powf(2.0 / 9.0)).floor() as usize),
-    }
 }
 
 #[cfg(test)]
@@ -405,7 +388,7 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            LeastSquaresError::InvalidHacLags { hac_lags: -1, n: 5 }
+            LeastSquaresError::Common(CommonError::InvalidHacLags { hac_lags: -1, n: 5 })
         );
     }
 
@@ -432,7 +415,7 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            LeastSquaresError::InvalidHacLags { hac_lags: 5, n: 5 }
+            LeastSquaresError::Common(CommonError::InvalidHacLags { hac_lags: 5, n: 5 })
         );
     }
 

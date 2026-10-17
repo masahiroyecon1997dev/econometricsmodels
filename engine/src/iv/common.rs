@@ -110,15 +110,6 @@ pub enum IvError {
         source: LeastSquaresError,
     },
 
-    /// `cov_type=Hac`の`hac_lags`が負、または観測数`n`以上。
-    ///
-    /// `LeastSquaresError::InvalidHacLags`と同じ検証だが、2SLSのサンドイッチ型分散計算は
-    /// OLS/nonlinearどちらの既存計算にも寄せない独立実装のため（`docs/spec/
-    /// iv-spec.md`3.1節）、`CommonError`にもなく、`LeastSquaresError`をそのまま
-    /// 再利用もしない。2SLSの`cov_type`対応実装時に追加した（`engine/src/iv/two_sls.rs`参照）。
-    #[error("hac_lags must be in the range [0, n): got {hac_lags}, n={n}")]
-    InvalidHacLags { hac_lags: i64, n: usize },
-
     /// `gmm_type="iterated"`の`gmm_max_iter`が3未満。
     ///
     /// 上限を初回推定を含めて数えるため、2回以下の反復は2段階GMMに収束判定を付けただけに

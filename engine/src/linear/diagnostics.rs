@@ -1493,11 +1493,8 @@ mod tests {
 
         // 他のエラーはそのまま通す。
         assert_eq!(
-            aux_fit_error(
-                "White test",
-                LeastSquaresError::InvalidHacLags { hac_lags: 1, n: 1 }
-            ),
-            LeastSquaresError::InvalidHacLags { hac_lags: 1, n: 1 }
+            aux_fit_error("White test", LeastSquaresError::InvalidNlags { nlags: 0 }),
+            LeastSquaresError::InvalidNlags { nlags: 0 }
         );
     }
 

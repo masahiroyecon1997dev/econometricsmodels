@@ -4,7 +4,10 @@
 # `plm::phtest(method = "aux", effect = "individual", vcov = ...)`を、本実装の
 # `ReOptions.cov_type`（RE本体の`cov_type`に連動、`re-spec.md`3.7節）ごとに計算する。
 # linearmodelsにハウスマン検定の専用実装は無いため、plmが唯一の参照実装
-# （panel-common.md 5.3節）。
+# （panel-common.md 5.3節）。バランスパネルではplm自身の分散成分が本実装と一致するが、
+# 不均衡パネルでは統計量が1〜2%ずれるため、不均衡パネルの参照値には使わず、分散成分を
+# 与えて補助回帰を組み立てる`references/run_plm_re_given_variance_hausman_benchmark.R`
+# を使う。
 #
 # ## cov_typeとplmのvcovの対応（数値照合で確定済み）
 #

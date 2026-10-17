@@ -101,13 +101,12 @@ PANEL_TOLERANCES: dict[str, dict[str, float]] = {
         # バランスパネルでは機械精度一致。
         "rtol_hausman": RTOL_MACHINE_PRECISION,
         "atol_hausman": ATOL_REFERENCE_FLOOR,
-        # unbalancedシナリオでは、plm自身のphtestの補助回帰がplmのSwamy-Arora分散
-        # 成分から作るθに依存し、本実装（linearmodels準拠）と統計量が数％ずれる
-        # （plm自身との実測最大相対誤差: 統計量 classical 1.3%・hc1〜hc3 1.5%・
-        # dk 1.5〜1.7%・cluster 0.024%、p値は裾で classical 11%・hc1 13%・
-        # hc2 13%・hc3 12%）ため、参照値は、linearmodelsの分散成分を与えて補助回帰を
-        # 組み立てたplm（`run_plm_re_given_variance_hausman_benchmark.R`）にして揃える。
-        # 実測最大相対誤差（全cov_type・dkのバンド幅0/2/3）: 統計量 1.4e-14・p値 8.5e-14。
+        # unbalancedシナリオも機械精度で比較する。plm自身のphtestは分散成分の差で
+        # 統計量が1〜2%ずれるため、参照値は、linearmodelsの分散成分から補助回帰を
+        # 組み立てたplm（`run_plm_re_given_variance_hausman_benchmark.R`）にして
+        # 揃える。実測最大相対誤差（全cov_type・dkのバンド幅0/2/3）: 統計量 1.4e-14・
+        # p値 8.5e-14。
+        #
         # high_condition_numberシナリオ（x1,x2の相関0.999）のみ。検定対象の2係数が準共線で
         # 共分散部分行列がほぼ特異（det/(V00*V11)=6e-5）なため、入力の丸め誤差が条件数倍に
         # 増幅され、機械精度から外れる。実測最大相対誤差: dkの統計量7.6e-9・p値9.8e-9

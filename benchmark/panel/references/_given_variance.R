@@ -3,10 +3,11 @@
 # `run_plm_re_given_variance_hausman_benchmark.R`）が共有する部品。`source()`で
 # 読み込んで使う（`plm`・`sandwich`は呼び出し側で読み込む）。
 #
-# 対象は不均衡パネルのみ。バランスパネル（全個体で`T_i`が同じ）では、準偏差変換後の
+# 対象は不均衡パネルのみ。バランスパネル（全個体で`T_i`が同じ）はplm自身の分散成分が
+# `linearmodels`準拠の本実装と機械精度で一致するため、`run_plm_benchmark.R`・
+# `run_plm_hausman_benchmark.R`（plm自身のRE・`phtest`）を参照にする。加えて、標準誤差の
+# スクリプト（`run_plm_re_given_variance_benchmark.R`）はバランスパネルでは準偏差変換後の
 # 定数列`1 - θ`が全行で同じ値になり、plmのpoolingが定数列を落とすため使えない。
-# バランスパネルは`run_plm_benchmark.R`・`run_plm_hausman_benchmark.R`（plm自身の
-# 分散成分で機械精度に一致）を使う。
 #
 # cov_type→plmのvcovの対応は`run_plm_benchmark.R`・`run_plm_hausman_benchmark.R`と
 # 同じ（両スクリプトにも同じ対応表が独立してある）。

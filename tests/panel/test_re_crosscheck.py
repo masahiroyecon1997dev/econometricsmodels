@@ -25,7 +25,8 @@ fixtures/generate_re_crosscheck_fixtures.py`で生成）を用いて、linearmod
 - **ハウスマン検定**（`hausman_statistic`/`hausman_p_value`/`hausman_df`）:
   `linearmodels`に専用実装が無いため、`plm::phtest(method = "aux",
   effect = "individual")`（回帰ベース）が唯一の参照実装（panel-common.md
-  5.3節）。比較は常に1-wayで`REOptions.dk_time`の有無によらない
+  5.3節）。`unbalanced`だけは、`linearmodels`の分散成分から補助回帰を組み立てた
+  plmを参照にする（下記）。比較は常に1-wayで`REOptions.dk_time`の有無によらない
   （`generate_re_crosscheck_fixtures.py`モジュールdoc参照）。
 
 ## 不均衡パネル（unbalanced）の参照値
@@ -415,7 +416,7 @@ def test_wagepan_matches_plm(crosscheck, cov_type):
     )
 
 
-# ── ハウスマン検定（RE本体のcov_typeに連動、plm::phtest(method="aux", vcov=...)） ──
+# ── ハウスマン検定（RE本体のcov_typeに連動、plm::phtest(method="aux", vcov=...)。unbalancedは分散成分を与えた補助回帰） ──
 
 
 @pytest.mark.parametrize("cov_type", HAUSMAN_COV_TYPES)

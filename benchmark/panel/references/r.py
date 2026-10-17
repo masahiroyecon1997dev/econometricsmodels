@@ -249,6 +249,29 @@ def run_re_plm_r(
     )
 
 
+def _given_variance_extra_args(
+    cov_type: str,
+    *,
+    sigma2_eps: float,
+    sigma2_u: float,
+    maxlag: int | None,
+    entity_col: str,
+    time_col: str,
+) -> list[str]:
+    """分散成分を与える2本のRスクリプトに共通の、cov_type以降の引数。"""
+    extra = [
+        entity_col,
+        time_col,
+        repr(float(sigma2_eps)),
+        repr(float(sigma2_u)),
+    ]
+    if cov_type == "dk":
+        if maxlag is None:
+            raise ValueError("maxlag is required for cov_type='dk'")
+        extra.append(str(maxlag))
+    return extra
+
+
 def run_re_given_variance_plm_r(
     csv_path: Path,
     formula: str,
@@ -278,16 +301,14 @@ def run_re_given_variance_plm_r(
         entity_col: エンティティ識別子の列名。
         time_col: 時点識別子の列名。
     """
-    extra = [
-        entity_col,
-        time_col,
-        repr(float(sigma2_eps)),
-        repr(float(sigma2_u)),
-    ]
-    if cov_type == "dk":
-        if maxlag is None:
-            raise ValueError("maxlag is required for cov_type='dk'")
-        extra.append(str(maxlag))
+    extra = _given_variance_extra_args(
+        cov_type,
+        sigma2_eps=sigma2_eps,
+        sigma2_u=sigma2_u,
+        maxlag=maxlag,
+        entity_col=entity_col,
+        time_col=time_col,
+    )
     raw = run_r(
         _PLM_RE_GIVEN_VARIANCE_R_SCRIPT,
         csv_path,
@@ -363,16 +384,14 @@ def run_re_hausman_given_variance_plm_r(
         entity_col: エンティティ識別子の列名。
         time_col: 時点識別子の列名。
     """
-    extra = [
-        entity_col,
-        time_col,
-        repr(float(sigma2_eps)),
-        repr(float(sigma2_u)),
-    ]
-    if cov_type == "dk":
-        if maxlag is None:
-            raise ValueError("maxlag is required for cov_type='dk'")
-        extra.append(str(maxlag))
+    extra = _given_variance_extra_args(
+        cov_type,
+        sigma2_eps=sigma2_eps,
+        sigma2_u=sigma2_u,
+        maxlag=maxlag,
+        entity_col=entity_col,
+        time_col=time_col,
+    )
     return run_r(
         _PLM_RE_GIVEN_VARIANCE_HAUSMAN_R_SCRIPT,
         csv_path,

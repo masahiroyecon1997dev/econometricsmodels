@@ -13,7 +13,8 @@
 #   （classical: `vcov`、hc1〜hc3: `vcovHC(method = "white1")`、cluster:
 #   `vcovHC(method = "arellano", type = "sss")`、dk: `vcovSCC(type = "sss")`）。
 #   t検定の自由度は本実装の規約（classical・hc*は`n - k`、clusterは`G - 1`、dkは
-#   `T - 1`）で、plmの既定のz検定から`run_plm_benchmark.R`と同じ式で計算し直す。
+#   `T - 1`）で、plmの既定のz検定から計算し直す（`benchmark/panel/_plm_common.R`の
+#   `plm_vcov_function`・`plm_t_df`・`plm_t_inference`）。
 # - 分散成分（σ_ε², σ_u², σ_λ²）と重み（θ₁, θ₂, θ₃）: `ercomp`の値。
 # - ハウスマン検定: `phtest(method = "aux")`は、一次元でしか変わらない説明変数が
 #   あると検定する係数を位置で選び間違える（`run_plm_hausman_tilde_benchmark.R`の

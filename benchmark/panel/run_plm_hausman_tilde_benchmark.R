@@ -21,7 +21,8 @@
 # 検定対象を取り違える）。そのため`X*`と`X̃`の差が定数の列は`X̃`から外し、その列の`X*`の
 # 係数だけを補助回帰に残す（本実装の「識別できない列は検定から外す」規則、`re-spec.md`3.6節）。
 #
-# cov_typeとvcovの対応・使用例は`run_plm_hausman_benchmark.R`と同じ。
+# cov_typeとvcovの対応は`run_plm_hausman_benchmark.R`と同じ（実装は`_plm_common.R`の
+# `plm_vcov_function`）。使用例も同じ。
 #
 # 使用例:
 #   Rscript run_plm_hausman_tilde_benchmark.R data.csv "y ~ x1 + z" hc1 entity time

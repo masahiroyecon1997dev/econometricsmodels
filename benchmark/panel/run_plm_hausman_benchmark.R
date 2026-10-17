@@ -11,6 +11,8 @@
 #
 # ## cov_typeとplmのvcovの対応（数値照合で確定済み）
 #
+# 実装は`_plm_common.R`の`plm_vcov_function`（classicalだけ`phtest`にvcovを渡さない）。
+#
 # - classical: vcovなし（補助回帰のclassical Wald）
 # - hc1/hc2/hc3: `vcovHC(method = "white1", type = "HC1"/"HC2"/"HC3")`
 # - cluster: `vcovHC(method = "arellano", type = "sss")`

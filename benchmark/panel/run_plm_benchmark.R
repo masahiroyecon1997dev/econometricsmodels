@@ -32,6 +32,9 @@
 # type="HC1")`、`n/(n-K)`補正）もplmで計算する。バランスパネルでは本実装と機械精度で
 # 一致する（実測確認済み）。hc1は`linearmodels`の"robust"とも同じ式。
 #
+# 上記のcov_type→vcovの対応とt検定への変換の実装は`_plm_common.R`
+# （`plm_vcov_function`・`plm_t_df`・`plm_t_inference`）。
+#
 # plmの変量効果分散成分推定（Swamy-Arora）がlinearmodelsと僅かに異なる実装の
 # ため、点推定自体が不均衡パネルで最大0.1%程度乖離することを実測確認済み
 # （バランスパネルでは6桁程度で一致）。この乖離のためplm側の値は不均衡パネルで

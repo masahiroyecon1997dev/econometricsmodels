@@ -15,7 +15,7 @@
 #    準偏差変換、各説明変数`X̃`をwithin変換する（`_given_variance.R`）。
 # 2. 補助回帰`y* ~ 1 + X* + X̃`を、plmのpooling（定数項は準偏差変換前の素の`1`、
 #    `phtest`と同じ）で当てはめる。
-# 3. cov_typeごとのplmの共分散（`_given_variance.R`の`plm_vcov_function`）で、
+# 3. cov_typeごとのplmの共分散（`benchmark/panel/_plm_common.R`の`plm_vcov_function`）で、
 #    検定対象`X̃`の係数のWald統計量`β' V⁻¹ β`を作り、p値は`χ²_k`の上側確率にする。
 #
 # ## 独立性の限界

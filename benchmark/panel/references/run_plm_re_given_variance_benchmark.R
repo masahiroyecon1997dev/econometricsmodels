@@ -14,7 +14,8 @@
 #    `θ_i = 1 - sqrt(σ_ε² / (σ_ε² + T_i σ_u²))`を計算する。
 # 2. 応答・各説明変数・定数列に`x - θ_i · x̄_i`（定数列は`1 - θ_i`）を当てる。
 # 3. 変換後のデータに対する定数なしのpooling（`plm(model = "pooling")`）に、
-#    cov_typeごとの共分散推定量を当てる（`run_plm_benchmark.R`と同じ対応）。
+#    cov_typeごとの共分散推定量を当てる（`run_plm_benchmark.R`と同じ対応、実装は
+#    `benchmark/panel/_plm_common.R`の`plm_vcov_function`）。
 #    変換後のデータのOLSはREのGLS推定量と一致するため、plm自身の分散成分を
 #    与えた場合は`plm(model = "random")`に対する同じ共分散推定量と係数・標準誤差・
 #    F統計量が一致する。この等価性は生成側がフィクスチャを作るたびに確かめる
@@ -26,7 +27,7 @@
 #    - dk: `vcovSCC(maxlag, type = "sss")`
 #
 #    t検定の自由度はclassical・hc*が`df.residual`、clusterが`G-1`、dkが`T-1`
-#    （`run_plm_benchmark.R`と同じ規約）。clusterは`entity`のみ（entity以外の列は
+#    （`_plm_common.R`の`plm_t_df`）。clusterは`entity`のみ（entity以外の列は
 #    `run_plm_benchmark.R`の`vcovCL`の経路を使い、バランスパネルで比較する）。
 #
 # 回帰式は素の列名の加法（`y ~ x1 + x2`）のみ対応する。`log(x1)`のような変換は
@@ -44,7 +45,8 @@
 # 分散成分を与えたこのスクリプトの結果とplm自身のREの`pwaldtest`のF統計量を
 # 突き合わせて確かめる。`car::linearHypothesis`は`Dockerfile`で版を固定して
 # いない推移的な依存のため使わない。
-# p値はt検定と同じ分母自由度の`pf()`で計算する（`run_plm_benchmark.R`と同じ規約）。
+# p値はt検定と同じ分母自由度の`pf()`で計算する（t検定への変換は`_plm_common.R`の
+# `plm_t_inference`）。
 #
 # ## 対象
 #

@@ -3605,5 +3605,122 @@ mod tests {
                 }
             }
         }
+
+        /// `hessian_weight_is_non_negative_at_extreme_params`が生成するケース:
+        /// `(n, k, x_cols, y_flags, intercept, slopes, v)`。`intercept`・`slopes`は
+        /// `(符号, 10の指数)`で、パラメータの大きさを対数一様に振る（`|z|`が`U_CLAMP`を
+        /// 大きく超える領域まで）。`v`は二次形式の方向ベクトル。
+        type ExtremeCase = (
+            usize,
+            usize,
+            Vec<Vec<f64>>,
+            Vec<bool>,
+            (bool, f64),
+            Vec<(bool, f64)>,
+            Vec<f64>,
+        );
+
+        /// `fit()`を通さずHessianを直接評価する点のケース。通常の`probit_case_strategy`は
+        /// `|z|`が`U_CLAMP≈8.13`に届くことがほとんどなく、クランプ領域の誤分類観測を作れない
+        /// ため、切片を`|β₀|∈[10, 1000]`（`U_CLAMP`超）、傾きを`|βⱼ|∈[1, 1000]`で振る。
+        fn extreme_param_case_strategy() -> impl Strategy<Value = ExtremeCase> {
+            (1..=MAX_K).prop_flat_map(|k| {
+                (k + 5..=60usize).prop_flat_map(move |n| {
+                    (
+                        Just(n),
+                        Just(k),
+                        collection::vec(collection::vec(-2.0f64..2.0, n), k),
+                        collection::vec(any::<bool>(), n),
+                        (any::<bool>(), 1.0f64..3.0),
+                        collection::vec((any::<bool>(), 0.0f64..3.0), k),
+                        collection::vec(-1.0f64..1.0, k + 1),
+                    )
+                })
+            })
+        }
+
+        fn signed_power_of_ten((positive, exponent): (bool, f64)) -> f64 {
+            let magnitude = 10f64.powf(exponent);
+            if positive { magnitude } else { -magnitude }
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(256))]
+
+            /// 任意のパラメータ点で、観測ごとのHessian重み`wᵢ=λᵢ(λᵢ+z̃ᵢ)`が非負で、Hessian
+            /// `X'WX`が半正定値（対角成分が非負、任意の`v`で`v'Hv≥0`）になる。`A(u)=λ(λ+u)>0`
+            /// （モジュール冒頭の導出）の数値版で、クランプ領域の誤分類観測（`qᵢzᵢ<-U_CLAMP`）
+            /// で`λ`だけクランプして生の`z`を混ぜると`w`が負になる回帰を捕まえる。
+            ///
+            /// 符号だけだと`|w|`で隠す変更や`hessian()`の組み立て誤りを見逃すため、(1)0行目の重みが
+            /// クランプ境界`u=-U_CLAMP`での閉形式`m(m-U_CLAMP)`（`m=φ/Φ`）に一致すること、
+            /// (2)`hessian()`が`Σᵢwᵢxᵢₐxᵢᵦ`と一致することも確認する。保証するのは「クランプ後の
+            /// 関数としての半正定値性」で、クランプしない真のHessianとの一致ではない
+            /// （クランプ領域で`cost`/`gradient`とHessianが非整合な既知の課題は別、`probit-spec.md`4章）。
+            ///
+            /// 0行目は説明変数を全て0にして`z₀=β₀`（`|β₀|>U_CLAMP`）とし、`y₀`を符号と逆に
+            /// 置く（誤分類、`q₀z₀=-|β₀|<-U_CLAMP`）ので、どのケースでもクランプ領域の誤分類
+            /// 観測を少なくとも1件含む。`y₁`は`y₀`と逆の値にして`y`に変動を持たせる。
+            ///
+            /// 有効性確認済み: `hessian_weight`の`clamped_z`を生の線形予測子`z`に戻すと失敗する。
+            #[test]
+            fn hessian_weight_is_non_negative_at_extreme_params(
+                (n, k, mut x_cols, y_flags, intercept, slopes, v) in extreme_param_case_strategy(),
+            ) {
+                for col in &mut x_cols {
+                    col[0] = 0.0;
+                }
+                let mut params = vec![signed_power_of_ten(intercept)];
+                params.extend(slopes.iter().map(|&s| signed_power_of_ten(s)));
+
+                let mut y: Vec<f64> = y_flags.iter().map(|&b| if b { 1.0 } else { 0.0 }).collect();
+                y[0] = if params[0] > 0.0 { 0.0 } else { 1.0 };
+                y[1] = 1.0 - y[0];
+
+                let input = ProbitInput::from_columns(&y, &x_cols, x_names(k), true, "y".to_string()).unwrap();
+                let problem = ProbitProblem::new(&input);
+                let normal = Normal::standard();
+
+                let (_, u0) = problem.signed_index(0, &params);
+                prop_assert!(u0 < -U_CLAMP, "row 0 must be misclassified beyond U_CLAMP, got u={u0}");
+
+                let weights: Vec<f64> = (0..n)
+                    .map(|i| problem.hessian_weight(i, &params, &normal))
+                    .collect();
+                for (i, w) in weights.iter().enumerate() {
+                    prop_assert!(*w >= 0.0, "w[{i}]={w} should be non-negative");
+                }
+                // 0行目はクランプ境界`u=-U_CLAMP`と同じ重み: `q²=1`なので`w=m(m-U_CLAMP)`
+                let (phi, big_phi) = clamped_pdf_cdf(&normal, -U_CLAMP);
+                let m = phi / big_phi;
+                let boundary_weight = m * (m - U_CLAMP);
+                prop_assert!(
+                    (weights[0] - boundary_weight).abs() <= 1e-9 * (1.0 + boundary_weight),
+                    "w[0]={} should equal the boundary weight {boundary_weight}", weights[0]
+                );
+
+                let hessian = problem.hessian(&params).unwrap();
+                let scale: f64 = 1.0 + (0..=k).map(|a| hessian[a][a].abs()).sum::<f64>();
+                for (a, row) in hessian.iter().enumerate() {
+                    for (b, cell) in row.iter().enumerate() {
+                        let expected: f64 = (0..n)
+                            .map(|i| weights[i] * problem.x.get(i, a) * problem.x.get(i, b))
+                            .sum();
+                        prop_assert!(
+                            (cell - expected).abs() <= 1e-9 * scale,
+                            "H[{a}][{b}]={cell} should equal sum_i w_i x_ia x_ib = {expected}"
+                        );
+                    }
+                }
+                for (a, row) in hessian.iter().enumerate() {
+                    prop_assert!(row[a] >= 0.0, "H[{a}][{a}]={} should be non-negative", row[a]);
+                }
+                let quad: f64 = (0..=k)
+                    .flat_map(|a| (0..=k).map(move |b| (a, b)))
+                    .map(|(a, b)| v[a] * hessian[a][b] * v[b])
+                    .sum();
+                prop_assert!(quad >= -1e-9 * scale, "v'Hv={quad} should be non-negative (scale={scale})");
+            }
+        }
     }
 }

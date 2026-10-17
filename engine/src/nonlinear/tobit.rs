@@ -7411,5 +7411,166 @@ mod tests {
                 prop_assert!((s_sigma - s_sigma_mirror).abs() <= tol, "s_sigma={s_sigma}, mirror={s_sigma_mirror}");
             }
         }
+
+        /// `censored_hessian_weight_is_non_negative_at_extreme_params`が生成するケース:
+        /// `(n, k, x_cols, y_raw, censored_flags, bounds, intercept, slopes, s, v)`。
+        /// `intercept`・`slopes`は`(符号, 10の指数)`、`s`は`logσ`、`v`は二次形式の方向。
+        type ExtremeCase = (
+            usize,
+            usize,
+            Vec<Vec<f64>>,
+            Vec<f64>,
+            Vec<bool>,
+            Bounds,
+            f64,
+            Vec<(bool, f64)>,
+            f64,
+            Vec<f64>,
+        );
+
+        /// `fit()`を通さずHessianを直接評価する点のケース。`tobit_case_strategy`は
+        /// `|zeta|`が`U_CLAMP≈8.13`に届くことがほとんどないため、`σ=e^s`（`s∈[-1,1]`）に
+        /// 対して切片を`|β₀|∈[10^1.5, 1000]`で振り、0行目の`|zeta|=|β₀|/σ`が`U_CLAMP`を
+        /// 超えるようにする。
+        fn extreme_param_case_strategy() -> impl Strategy<Value = ExtremeCase> {
+            (1..=MAX_K).prop_flat_map(|k| {
+                (k + 5..=60usize).prop_flat_map(move |n| {
+                    (
+                        Just(n),
+                        Just(k),
+                        collection::vec(collection::vec(-2.0f64..2.0, n), k),
+                        collection::vec(0.05f64..0.9, n),
+                        collection::vec(any::<bool>(), n),
+                        censoring_strategy(),
+                        1.5f64..3.0,
+                        collection::vec((any::<bool>(), 0.0f64..3.0), k),
+                        -1.0f64..1.0,
+                        collection::vec(-1.0f64..1.0, k + 1),
+                    )
+                })
+            })
+        }
+
+        fn signed_power_of_ten((positive, exponent): (bool, f64)) -> f64 {
+            let magnitude = 10f64.powf(exponent);
+            if positive { magnitude } else { -magnitude }
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(256))]
+
+            /// 任意のパラメータ点で、打ち切り観測の`A(u)=λ(λ+u)`（`h_beta_coef`）が非負で、
+            /// Hessianの`β`ブロック（`A(u)`と非打ち切りの`1`を係数とする`Σ coef·xx'/σ²`）が
+            /// 半正定値になる。`λ`だけクランプして生の`zeta`を混ぜると`|zeta|>U_CLAMP`の
+            /// 領域で`A(u)`が負になる回帰を捕まえる（Probitの`hessian_weight_is_non_negative_
+            /// at_extreme_params`と対）。`(β, logσ)`全体のHessianは大域凹でないため、符号の性質
+            /// （非負・半正定値）は`β`ブロックだけに表明する。`β`-`s`・`s`-`s`ブロックは符号の
+            /// 性質が無いので、代わりに(1)0行目の寄与がクランプ境界`zeta=-U_CLAMP`での閉形式
+            /// （`A=m(m-U)`、`c=-U·A-m`、`h_beta_s=direction·c`、`h_ss=-U·c`、`m=φ/Φ`）に
+            /// 一致すること、(2)`hessian()`が`Contribution`の和として組み立てられていること
+            /// （全ブロック）を確認する。保証するのは「クランプ後の関数としての性質」で、クランプ
+            /// しない真のHessianとの一致ではない（`score_s`は生の`zeta`を使うため、クランプ領域で
+            /// `gradient`とHessianが非整合な既知の課題は別）。
+            ///
+            /// 0行目は説明変数を全て0にして`xb=β₀`とし、`β₀`の符号を打ち切り方向と逆に置く
+            /// （左・両側は下限で打ち切り、`β₀>0`で`zeta=(l-β₀)/σ<-U_CLAMP`。右は
+            /// `β₀<0`で`zeta=(β₀-u)/σ<-U_CLAMP`）ので、どのケースでもクランプ領域の打ち切り
+            /// 観測を少なくとも1件含む。1行目は非打ち切りにして、打ち切りと非打ち切りの両方を含める。
+            ///
+            /// 有効性確認済み: `censored_contribution`の`zeta_for_hessian`を生の`zeta`に戻すと、
+            /// 左・右どちらの分岐だけを戻しても失敗する（通常の`tobit_case_strategy`は`|zeta|`が
+            /// `U_CLAMP`に届かず検出できない）。
+            #[test]
+            fn censored_hessian_weight_is_non_negative_at_extreme_params(
+                (n, k, mut x_cols, y_raw, censored, bounds, intercept_exp, slopes, s, v)
+                    in extreme_param_case_strategy(),
+            ) {
+                for col in &mut x_cols {
+                    col[0] = 0.0;
+                }
+                let (lower, upper) = bounds;
+                let beta0 = signed_power_of_ten((lower.is_some(), intercept_exp));
+                let mut params = vec![beta0];
+                params.extend(slopes.iter().map(|&slope| signed_power_of_ten(slope)));
+                params.push(s);
+
+                // 観測の値: 打ち切りなら境界値、そうでなければ区間内部の値。0行目は必ず
+                // 打ち切り、1行目は必ず非打ち切り。0行目の境界は`β₀`の符号と逆側にそろえる
+                // （下限があれば下限、なければ上限）。
+                let y: Vec<f64> = (0..n)
+                    .map(|i| {
+                        let r = y_raw[i];
+                        let is_censored = i == 0 || (i != 1 && censored[i]);
+                        match (lower, upper) {
+                            (Some(l), None) => if is_censored { l } else { l + r },
+                            (None, Some(u)) => if is_censored { u } else { u - r },
+                            (Some(l), Some(_)) if i == 0 => l,
+                            (Some(l), Some(u)) => {
+                                if !is_censored { l + (u - l) * r } else if r > 0.5 { u } else { l }
+                            }
+                            (None, None) => unreachable!("censoring_strategy always sets a bound"),
+                        }
+                    })
+                    .collect();
+
+                let input = TobitInput::from_columns(&y, &x_cols, x_names(k), true, "y".to_string(), lower, upper).unwrap();
+                let problem = TobitProblem::new(&input);
+                let normal = Normal::standard();
+                let sigma = s.exp();
+
+                let zeta0 = match lower {
+                    Some(l) => (l - params[0]) / sigma,
+                    None => (params[0] - upper.unwrap_or(0.0)) / sigma,
+                };
+                prop_assert!(zeta0 < -U_CLAMP, "row 0 must be censored beyond U_CLAMP, got zeta={zeta0}");
+
+                let contributions: Vec<Contribution> =
+                    (0..n).map(|i| problem.contribution(i, &params, &normal)).collect();
+                for (i, c) in contributions.iter().enumerate() {
+                    prop_assert!(c.h_beta_coef >= 0.0, "A(u)[{i}]={} should be non-negative", c.h_beta_coef);
+                }
+                // 0行目はクランプ境界`zeta=-U_CLAMP`と同じ寄与（0行目は`lower`があれば左、なければ右）
+                let (phi, big_phi) = clamped_pdf_cdf(&normal, -U_CLAMP);
+                let m = phi / big_phi;
+                let a0 = m * (m - U_CLAMP);
+                let c0 = -U_CLAMP * a0 - m;
+                let direction = if lower.is_some() { 1.0 } else { -1.0 };
+                let close = |actual: f64, expected: f64| (actual - expected).abs() <= 1e-9 * (1.0 + expected.abs());
+                prop_assert!(close(contributions[0].h_beta_coef, a0), "A[0]={} vs {a0}", contributions[0].h_beta_coef);
+                prop_assert!(close(contributions[0].h_beta_s_coef, direction * c0), "h_beta_s[0]={} vs {}", contributions[0].h_beta_s_coef, direction * c0);
+                prop_assert!(close(contributions[0].h_ss, -U_CLAMP * c0), "h_ss[0]={} vs {}", contributions[0].h_ss, -U_CLAMP * c0);
+
+                // `hessian()`は`Contribution`の和: 全ブロックを別ループで組み立て直して比べる
+                let hessian = problem.hessian(&params).unwrap();
+                let kb = k + 1; // 切片を含む`β`の本数
+                let sigma2 = sigma * sigma;
+                let scale: f64 = 1.0 + (0..=kb).map(|a| hessian[a][a].abs()).sum::<f64>();
+                for (a, row) in hessian.iter().enumerate().take(kb) {
+                    for (b, cell) in row.iter().enumerate().take(kb) {
+                        let expected: f64 = (0..n)
+                            .map(|i| contributions[i].h_beta_coef * problem.x.get(i, a) * problem.x.get(i, b) / sigma2)
+                            .sum();
+                        prop_assert!((cell - expected).abs() <= 1e-9 * scale, "H[{a}][{b}]={cell} vs {expected}");
+                    }
+                    let cross: f64 = (0..n)
+                        .map(|i| contributions[i].h_beta_s_coef * problem.x.get(i, a) / sigma)
+                        .sum();
+                    prop_assert!((hessian[a][kb] - cross).abs() <= 1e-9 * scale, "H[{a}][s]={} vs {cross}", hessian[a][kb]);
+                    prop_assert!((hessian[kb][a] - cross).abs() <= 1e-9 * scale, "H[s][{a}]={} vs {cross}", hessian[kb][a]);
+                }
+                let h_ss: f64 = contributions.iter().map(|c| c.h_ss).sum();
+                prop_assert!((hessian[kb][kb] - h_ss).abs() <= 1e-9 * scale, "H[s][s]={} vs {h_ss}", hessian[kb][kb]);
+
+                // `β`ブロックの半正定値性: 対角が非負、任意方向`v'H_ββv ≥ 0`
+                for (a, row) in hessian.iter().enumerate().take(kb) {
+                    prop_assert!(row[a] >= 0.0, "H[{a}][{a}]={} should be non-negative", row[a]);
+                }
+                let quad: f64 = (0..kb)
+                    .flat_map(|a| (0..kb).map(move |b| (a, b)))
+                    .map(|(a, b)| v[a] * hessian[a][b] * v[b])
+                    .sum();
+                prop_assert!(quad >= -1e-9 * scale, "v'H_bb v={quad} should be non-negative (scale={scale})");
+            }
+        }
     }
 }

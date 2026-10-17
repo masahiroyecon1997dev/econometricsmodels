@@ -434,7 +434,7 @@ pub(crate) fn build_logit_input(
     // オプションの組合せ → ロール構造 → `y`/`x`の列 → オプション列 → エンジン。
     let cov_kind = parse_cov_kind(&options.cov_type)?;
     let solver = parse_solver_type(&options.solver)?;
-    check_cov_options(cov_kind, &options.cluster)?;
+    check_cov_options(cov_kind, options.cluster.as_deref())?;
 
     // 完全な多重共線性を早期に、分かりやすいエラーで防ぐ（`validation.rs`に集約、
     // OLS/WLSと共通、`.claude/rules/rust-style.md`参照）。
@@ -446,7 +446,7 @@ pub(crate) fn build_logit_input(
     // ── x列の抽出 ──────────────────────────────────────────────────────
     let x_slices = extract_f64_columns(df, &x)?;
 
-    let cov_type = resolve_cov_type(df, cov_kind, &options.cluster)?;
+    let cov_type = resolve_cov_type(df, cov_kind, options.cluster.as_deref())?;
 
     let input = LogitInput::from_columns(&y_slice, &x_slices, x, options.include_intercept, y)
         .map_err(mle_error_to_pyerr)?;

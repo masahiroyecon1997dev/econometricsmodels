@@ -287,6 +287,23 @@ mod tests {
     }
 
     #[test]
+    fn resolve_cov_type_leaves_cluster_groups_unset_when_cluster_is_omitted() {
+        // 未指定はここでは弾かず、engineの`MissingClusterColumn`検証に委ねる。
+        let df = df!("g" => [1.0, 2.0, 3.0]).unwrap();
+        let Ok(resolved) = resolve_cov_type(&df, CovKind::Cluster, None, None, None) else {
+            panic!("expected Ok");
+        };
+        assert!(matches!(resolved, EngineCovType::Cluster { groups: None }));
+        let Ok(resolved) = resolve_cov_type(&df, CovKind::Cluster, Some("g"), None, None) else {
+            panic!("expected Ok");
+        };
+        assert!(matches!(
+            resolved,
+            EngineCovType::Cluster { groups: Some(_) }
+        ));
+    }
+
+    #[test]
     fn require_hac_time_returns_column_name_or_errors() {
         assert!(matches!(require_hac_time(Some("t"), "cov_type"), Ok("t")));
         assert!(require_hac_time(None, "cov_type").is_err());

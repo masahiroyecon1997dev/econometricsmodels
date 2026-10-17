@@ -301,6 +301,23 @@ mod tests {
     }
 
     #[test]
+    fn check_panel_cov_options_rejects_every_option_for_kinds_that_use_none() {
+        for kind in [
+            PanelCovKind::Classical,
+            PanelCovKind::Hc1,
+            PanelCovKind::Hc2,
+            PanelCovKind::Hc3,
+        ] {
+            for model in [PanelModel::Fe, PanelModel::Re] {
+                assert!(check_panel_cov_options(kind, model, Some("g"), None, None).is_err());
+                assert!(check_panel_cov_options(kind, model, None, Some("t"), None).is_err());
+                assert!(check_panel_cov_options(kind, model, None, None, Some(2)).is_err());
+                assert!(check_panel_cov_options(kind, model, None, None, None).is_ok());
+            }
+        }
+    }
+
+    #[test]
     fn check_panel_cov_options_requires_dk_time_for_dk() {
         for model in [PanelModel::Fe, PanelModel::Re] {
             assert!(check_panel_cov_options(PanelCovKind::Dk, model, None, None, None).is_err());

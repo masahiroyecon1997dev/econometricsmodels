@@ -571,8 +571,8 @@ impl IVResult {
     }
 }
 
-/// `gmm_type`/`gmm_weight_type`の実効既定値（`IVOptions`の既定値は`None`のため、使われる
-/// モードでここに解決する）。
+/// `gmm_max_iter`/`gmm_tol`の実効既定値（`IVOptions`の既定値は`None`のため、使われる
+/// モードでここに解決する。`gmm_type`/`gmm_weight_type`の既定値は[`parse_iv_option_values`]）。
 const DEFAULT_GMM_MAX_ITER: usize = 100;
 const DEFAULT_GMM_TOL: f64 = 1e-6;
 
@@ -915,12 +915,13 @@ pub(crate) struct IvPlan {
 /// `TwoSlsEstimator::fit`/`GmmEstimator::fit`の呼び出し・`IVResult`の構築は`fit`
 /// （本ファイル）が行う。
 ///
-/// 戻り値に`estimator`のパース済み小文字文字列（`"2sls"`/`"gmm"`のいずれか）を含めるのは、
-/// `cov_type_lower`と同じ理由（`fit`が2SLS/GMMのどちらを呼ぶか分岐する際、ここでの妥当性
-/// チェックと同じ正規化ロジックを再実装せずに済ませるため。`Logit`の`build_logit_input`が
-/// `solver`を`SolverType`にパースして返す設計と同じ考え方だが、IVには`TwoSlsEstimator`/
-/// `GmmEstimator`を横断する共通enumが`engine`側に無いため、ここでは正規化済み文字列の
-/// まま返す）。
+/// 戻り値の3つ目は`IVResult.cov_type`に格納する正規形の名前、4つ目の[`IvPlan`]は`fit`が
+/// 2SLS/GMMのどちらを呼ぶかの分岐と、GMMの`GmmType`（重み行列の列の抽出済み）・
+/// `IVResult.gmm_type`/`gmm_weight_type`に格納する正規形の名前を運ぶ。ここでの妥当性
+/// チェックと同じ正規化ロジックを`fit`で再実装しないためである。
+///
+/// 検査の順序は`docs/guide/validation.md`「Order in which errors are reported」: DataFrameを
+/// 見ない検査（オプションの値 → 組合せ）→ ロール構造 → `y`/`x`の列 → オプションの列。
 ///
 /// # Errors
 /// - 列の抽出時に発覚する問題（列が存在しない、数値/文字列型にキャストできない、
@@ -930,8 +931,12 @@ pub(crate) struct IvPlan {
 ///   `"const"`列との衝突（`x_exog`だけでなく全ロールが対象）、
 ///   `x_endog`/`instruments`が空リストの場合（`x_exog`は対象外）は
 ///   ここ（受け口）の責務で`ValidationError`
-/// - `estimator`の文字列が`"2sls"`/`"gmm"`のいずれでもない場合は`ValidationError`
-/// - `cov_type`の文字列が不正な場合は`ValidationError`（`linear::common::parse_cov_kind`参照）
+/// - `estimator`/`cov_type`/`gmm_type`/`gmm_weight_type`の文字列が不正な場合は
+///   `ValidationError`（使われないオプションでも。`parse_iv_option_values`参照）
+/// - 使われないオプションの指定、`hac`で`hac_time`が未指定の場合は`ValidationError`
+///   （`check_iv_options`参照）
+/// - 重み行列の列（`estimator="gmm"`のみ）の抽出時に発覚する問題、`gmm_max_iter`が負値の
+///   場合は`ValidationError`（`resolve_gmm_setup`参照。範囲と`gmm_tol`の検証はengine）
 /// - それ以外（行数不一致等）は`engine::iv::common::IvError`から`iv_error_to_pyerr`で変換
 ///   （`IvInput::from_columns`はこの時点では識別可能性を検証しないため、
 ///   `InsufficientInstruments`はここでは発生しない。`IvInput`の構造体docコメント参照）
@@ -1383,9 +1388,107 @@ mod tests {
         assert_eq!(values.cov.name(), "hc1");
         assert_eq!(values.gmm_type.name(), "two_step");
         assert_eq!(values.weight.name(), "classical");
-        // 別名は無い。
-        options.estimator = "3sls".to_string();
-        assert!(parse_iv_option_values(&options).is_err());
+    }
+
+    #[test]
+    fn parse_iv_option_values_is_case_insensitive_for_every_kind() {
+        for (estimator, expected) in [("2sls", "2sls"), ("2SLS", "2sls"), ("Gmm", "gmm")] {
+            let Ok(kind) = parse_estimator(estimator) else {
+                panic!("expected Ok for estimator={estimator}");
+            };
+            assert_eq!(kind.name(), expected);
+        }
+        for (input, expected) in [
+            ("one_step", "one_step"),
+            ("ONE_STEP", "one_step"),
+            ("Two_Step", "two_step"),
+            ("Iterated", "iterated"),
+        ] {
+            let Ok(kind) = parse_gmm_kind(input) else {
+                panic!("expected Ok for gmm_type={input}");
+            };
+            assert_eq!(kind.name(), expected);
+        }
+        for (input, expected) in [
+            ("classical", "classical"),
+            ("ROBUST", "robust"),
+            ("Cluster", "cluster"),
+            ("HAC", "hac"),
+        ] {
+            let Ok(kind) = parse_weight_kind(input) else {
+                panic!("expected Ok for gmm_weight_type={input}");
+            };
+            assert_eq!(kind.name(), expected);
+        }
+    }
+
+    #[test]
+    fn parse_iv_option_values_rejects_aliases() {
+        for alias in ["3sls", "tsls", "iv"] {
+            assert!(parse_estimator(alias).is_err(), "{alias}");
+        }
+        for alias in ["onestep", "twostep", "two-step", "continuous"] {
+            assert!(parse_gmm_kind(alias).is_err(), "{alias}");
+        }
+        // 旧名（`unadjusted`/`kernel`）と、`cov_type`の語彙に無い別名は受け付けない。
+        for alias in [
+            "unadjusted",
+            "kernel",
+            "white",
+            "homoskedastic",
+            "heteroskedastic",
+        ] {
+            assert!(parse_weight_kind(alias).is_err(), "{alias}");
+        }
+    }
+
+    #[test]
+    fn check_iv_options_covers_the_remaining_gmm_and_cov_combinations() {
+        // `gmm_tol`/`raise_on_non_convergence`は`iterated`のときだけ使われる。
+        assert!(!options_are_ok(|o| o.gmm_tol = Some(1e-3), "gmm"));
+        assert!(!options_are_ok(
+            |o| o.raise_on_non_convergence = Some(false),
+            "gmm"
+        ));
+        assert!(options_are_ok(
+            |o| {
+                o.gmm_type = Some("iterated".into());
+                // `gmm_weight_type`未指定は実効既定値（`classical`）になる。
+                o.gmm_tol = Some(1e-3);
+            },
+            "gmm"
+        ));
+        // `cov_type`が`classical`/`cluster`のとき`hac_*`は使われない。
+        assert!(!options_are_ok(|o| o.hac_lags = Some(2), "2sls"));
+        assert!(!options_are_ok(|o| o.hac_time = Some("t".into()), "2sls"));
+        assert!(!options_are_ok(
+            |o| {
+                o.cov_type = "cluster".into();
+                o.cluster = Some("g".into());
+                o.hac_lags = Some(2);
+            },
+            "2sls"
+        ));
+        // `two_step`で`gmm_weight_type="cluster"`と`cluster`の組は使われる。
+        assert!(options_are_ok(
+            |o| {
+                o.gmm_weight_type = Some("cluster".into());
+                o.cluster = Some("g".into());
+            },
+            "gmm"
+        ));
+        // `cov_type="cluster"`と`gmm_weight_type="hac"`が同時に使われるとき、`cluster`は
+        // `cov_type`側で、`hac_*`は`gmm_weight_type`側で使われる。
+        assert!(options_are_ok(
+            |o| {
+                o.cov_type = "cluster".into();
+                o.cluster = Some("g".into());
+                o.gmm_weight_type = Some("hac".into());
+                o.hac_time = Some("t".into());
+                o.hac_lags = Some(1);
+            },
+            "gmm"
+        ));
     }
 
     #[test]

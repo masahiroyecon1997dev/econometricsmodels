@@ -612,7 +612,7 @@ pub(crate) fn build_tobit_input(
     // オプションの組合せ → ロール構造 → `y`/`x`の列 → オプション列 → エンジン。
     let cov_kind = parse_cov_kind(&options.cov_type)?;
     let solver = parse_solver_type(&options.solver)?;
-    check_cov_options(cov_kind, &options.cluster)?;
+    check_cov_options(cov_kind, options.cluster.as_deref())?;
 
     validate_common_roles(&y, &x, options.include_intercept)?;
     validate_no_sigma_collision(&x)?;
@@ -623,7 +623,7 @@ pub(crate) fn build_tobit_input(
     // ── x列の抽出 ──────────────────────────────────────────────────────
     let x_slices = extract_f64_columns(df, &x)?;
 
-    let cov_type = resolve_cov_type(df, cov_kind, &options.cluster)?;
+    let cov_type = resolve_cov_type(df, cov_kind, options.cluster.as_deref())?;
 
     let input = TobitInput::from_columns(
         &y_slice,

@@ -52,12 +52,12 @@ computation_error`に従うだけ）。他系統（`IvError`・`MleError`等）�
 
 `engine_pybind/src/iv/CLAUDE.md`「踏んだ罠」に記録済みの罠を、既存コード（`panel/common.rs`の`panel_error_to_pyerr`）で実際に踏んだ。初期実装の時点では`panel_error_to_pyerr`はどこからも呼ばれておらず`#[expect(dead_code, ...)]`が付いていたが、後続の実装で`build_fe_input`（`FeInput::from_columns`のエラーを`.map_err(panel_error_to_pyerr)`で変換）がこれを呼ぶようになった。`build_fe_input`自体は`#[cfg(test)] mod tests`からしか呼ばれない（`#[pymodule]`未登録のため）ため、`cargo test`/`clippy --all-targets`では`panel_error_to_pyerr`が到達可能になり`dead_code`が発火しなくなる → `#[expect]`の期待が外れ`unfulfilled_lint_expectations`が`-D warnings`下でエラーになった。`#[allow(dead_code)]`（無条件抑制）に変更して解消した。**「本番未接続だがテストからは呼ばれる」関数を新規に追加するとき、その関数が呼ぶ既存の`#[expect(dead_code)]`付き関数にも同じ変更が波及する**ことに注意（呼び出しグラフを辿って確認すること）。
 
-`build_fe_input`/`resolve_fe_cov_type`自身も同じ理由で`#[allow(dead_code, reason = "...")]`を付けている（`build_iv_input`/`parse_iv_cov_type`の1段階目時点と同じパターン）。`fit_fe`が`#[pymodule]`に登録されたら、これらの属性はすべて削除すること。
+`build_fe_input`/`resolve_fe_cov_type`も1段階目の時点では同じ理由で`#[allow(dead_code, reason = "...")]`を付けていた。`fit_fe`が`#[pymodule]`に登録された時点で、これらの属性は削除済み。
 
 ## RE: engine呼び出し・エラー変換
 
-FEの2段階目（engine呼び出し・エラー変換）と同じ構成: `build_re_input`で`ReInput`/`ReCovType`/`cov_type`（小文字正規化済み
-文字列）を得たあと、`ReEstimator::fit`を呼び、`REResult`を組み立てて返す（`panel/re.rs`の
+FEの2段階目（engine呼び出し・エラー変換）と同じ構成: `build_re_input`で`ReInput`/`ReEffects`/`ReCovType`/`cov_type`（正規形の
+文字列）/`VarianceMethod`を得たあと、`ReEstimator::fit`を呼び、`REResult`を組み立てて返す（`panel/re.rs`の
 `fit`関数）。`lib.rs`に`#[pyfunction] fit_re`を新設して`#[pymodule]`に登録し、
 `build_re_input`の`#[allow(dead_code)]`を削除した（`resolve_re_cov_type`は元々属性を付けて
 いなかった——`build_re_input`から呼ばれる非公開関数のため、`build_re_input`自体が
@@ -110,9 +110,9 @@ FEの1段階目（データ抽出・pyclass定義）と同じ段階（`REOptions
   `panel-common.md`にこの点の明示的な決定が無かったため確認した。他手法（FE・
   OLS/WLS/Logit/Probit/IV）と一貫させ`validate_x_non_empty`で拒否する方針を
   選択した。nullモデル・ICC推定のサポート自体は別途検討する。
-- **`cov_type`は`FEOptions`と同じ集合**（`classical`/`hc1`〜`hc3`/`cluster`/`hac`、`hc0`は
-  非対応）。`resolve_re_cov_type`は`resolve_fe_cov_type`とほぼ同型だが、上記の通り`hac`分岐で
-  `dk_time`はengineの`ReCovType`ではなく`ReInput`に渡す点だけが異なる。
+- **`cov_type`は`FEOptions`と同じ集合**（`classical`/`hc1`〜`hc3`/`cluster`/`dk`、`hc0`は
+  非対応）。`resolve_re_cov_type`は`resolve_fe_cov_type`と同型で、`dk_time`はどちらも
+  engineの`ReCovType::Dk`/`FeCovType::Dk`に渡す（`ReInput`/`FeInput`には渡さない）。
 - **`REResult`に`estimator`のような非公開フィールドは無い**: `FEResult`は`fixed_effects()`
   用に`FeEstimator`本体を保持する必要があったが、REのハウスマン検定
   （`hausman_statistic`/`hausman_p_value`/`hausman_df`）は`fit()`内で計算済みの値を

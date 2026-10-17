@@ -740,11 +740,11 @@ pub fn fit(
 /// 非公開フィールド`fitted_values`/`has_intercept`にアクセスする都合上、`OLSResult`と
 /// 同じ`linear::ols`モジュール内に置く）。
 ///
-/// `cov_type_lower`を引数で受け取るのは、`fit`ではPythonから渡された`OLSOptions.cov_type`
-/// をパース時に一度だけ小文字化した値、`first_stage()`では`IVResult.cov_type`
+/// `cov_type_lower`を引数で受け取るのは、`fit`では`CovKind::name()`で作った正規形の名前、
+/// `first_stage()`では`IVResult.cov_type`
 /// （呼び出し元が指定した`cov_type`、第一段階にもそのまま使われる、`iv::two_sls`の
 /// モジュールdocコメント参照）と、呼び出し元ごとに文字列の出どころが異なるため。
-/// **呼び出し元が正規化済み（`to_lowercase()`済み）の値を渡す責任を持つ**（この関数自体は
+/// **呼び出し元が正規形の値を渡す責任を持つ**（この関数自体は
 /// 正規化・妥当性検証を行わない。`OlsEstimator`が実際に使った`cov_type`と一致する文字列を
 /// 呼び出し元の責任で渡す契約）。
 pub(crate) fn ols_estimator_to_result(

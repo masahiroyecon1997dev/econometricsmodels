@@ -993,4 +993,26 @@ mod tests {
         };
         assert_eq!(bandwidth, Some(2));
     }
+
+    #[test]
+    fn parse_variance_method_is_case_insensitive_and_returns_the_canonical_name() {
+        for (input, expected) in [
+            ("swamy_arora", "swamy_arora"),
+            ("Swamy_Arora", "swamy_arora"),
+            ("WALLACE_HUSSAIN", "wallace_hussain"),
+            ("Amemiya", "amemiya"),
+        ] {
+            let Ok(method) = parse_variance_method(input) else {
+                panic!("expected Ok for input={input}");
+            };
+            assert_eq!(method.as_str(), expected, "input={input}");
+        }
+    }
+
+    #[test]
+    fn parse_variance_method_rejects_aliases_and_unknown_values() {
+        for value in ["swamy-arora", "swamyarora", "walhus", "bogus", ""] {
+            assert!(parse_variance_method(value).is_err(), "{value}");
+        }
+    }
 }

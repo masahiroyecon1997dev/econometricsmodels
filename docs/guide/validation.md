@@ -81,7 +81,7 @@ A call is checked in a fixed order, the same for every method, and the **first**
 6. **The columns named by options.** `cluster`, `hac_time` and `dk_time`, with the same checks as in step 5.
 7. **The estimation itself.** Checks that need the sizes of the problem, such as `confidence_level`, `max_iter`, the number of observations or clusters, and singular matrices.
 
-Steps 2 to 4 look only at the arguments and options, never at the data. So a typo in `cov_type` is reported even if a column name is also wrong, and an option that the chosen `cov_type` ignores is reported before a column it names is looked up. `ComputationError` can only come from step 7.
+Steps 2 to 4 look only at the arguments and options, never at the data. So a typo in `cov_type` is reported even if a column name is also wrong, and an option that the chosen `cov_type` ignores is reported before a column it names is looked up. `ComputationError` can only come from step 7. One detail of step 7: a negative `gmm_max_iter` cannot be converted to a count, so it is rejected together with the columns of step 6, before the other checks of step 7; a positive value outside 3 to 10,000 is checked in step 7 itself.
 
 ### In every method
 

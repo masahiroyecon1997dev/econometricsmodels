@@ -142,7 +142,7 @@ pub(crate) fn parse_cov_kind(cov_type: &str) -> PyResult<CovKind> {
 ///
 /// # Errors
 /// `kind`が`Cluster`でないのに`cluster`が指定された場合は`ValidationError`。
-pub(crate) fn check_cov_options(kind: CovKind, cluster: &Option<String>) -> PyResult<()> {
+pub(crate) fn check_cov_options(kind: CovKind, cluster: Option<&str>) -> PyResult<()> {
     reject_unused_option(
         "cluster",
         cluster.is_some(),
@@ -161,7 +161,7 @@ pub(crate) fn check_cov_options(kind: CovKind, cluster: &Option<String>) -> PyRe
 pub(crate) fn resolve_cov_type(
     df: &DataFrame,
     kind: CovKind,
-    cluster: &Option<String>,
+    cluster: Option<&str>,
 ) -> PyResult<CovType> {
     Ok(match kind {
         CovKind::Classical => CovType::Classical,
@@ -169,7 +169,7 @@ pub(crate) fn resolve_cov_type(
         CovKind::Hc0 => CovType::Hc0,
         CovKind::Hc1 => CovType::Hc1,
         CovKind::Cluster => CovType::Cluster {
-            groups: extract_optional_cluster_groups(df, cluster.as_deref())?,
+            groups: extract_optional_cluster_groups(df, cluster)?,
         },
     })
 }
@@ -266,29 +266,27 @@ mod tests {
 
     #[test]
     fn check_cov_options_rejects_cluster_unless_kind_is_cluster() {
-        let cluster = Some("g".to_string());
-        assert!(check_cov_options(CovKind::Classical, &cluster).is_err());
-        assert!(check_cov_options(CovKind::Hc1, &cluster).is_err());
-        assert!(check_cov_options(CovKind::Cluster, &cluster).is_ok());
+        for kind in [CovKind::Classical, CovKind::Opg, CovKind::Hc0, CovKind::Hc1] {
+            assert!(check_cov_options(kind, Some("g")).is_err(), "{kind:?}");
+            assert!(check_cov_options(kind, None).is_ok(), "{kind:?}");
+        }
+        assert!(check_cov_options(CovKind::Cluster, Some("g")).is_ok());
         // `Cluster`で`cluster`が未指定なのはここでは弾かない（engineの検証に委ねる）。
-        assert!(check_cov_options(CovKind::Cluster, &None).is_ok());
-        assert!(check_cov_options(CovKind::Classical, &None).is_ok());
+        assert!(check_cov_options(CovKind::Cluster, None).is_ok());
     }
 
     #[test]
     fn resolve_cov_type_extracts_cluster_groups_only_for_cluster() {
         let df = df!("g" => [1.0, 2.0, 3.0]).unwrap();
-        let cluster = Some("g".to_string());
-        let Ok(resolved) = resolve_cov_type(&df, CovKind::Cluster, &cluster) else {
+        let Ok(resolved) = resolve_cov_type(&df, CovKind::Cluster, Some("g")) else {
             panic!("expected Ok");
         };
         assert!(matches!(resolved, CovType::Cluster { groups: Some(_) }));
-        let Ok(resolved) = resolve_cov_type(&df, CovKind::Cluster, &None) else {
+        let Ok(resolved) = resolve_cov_type(&df, CovKind::Cluster, None) else {
             panic!("expected Ok");
         };
         assert!(matches!(resolved, CovType::Cluster { groups: None }));
-        let missing = Some("nope".to_string());
-        assert!(resolve_cov_type(&df, CovKind::Cluster, &missing).is_err());
+        assert!(resolve_cov_type(&df, CovKind::Cluster, Some("nope")).is_err());
     }
 
     #[test]
@@ -305,6 +303,10 @@ mod tests {
             assert_eq!(solver_name(solver), expected, "input={input}");
         }
         assert!(parse_solver_type("bogus").is_err());
+        // 別名は無い。
+        for alias in ["l-bfgs", "lbfgs-b", "newton-raphson"] {
+            assert!(parse_solver_type(alias).is_err(), "{alias}");
+        }
     }
 
     #[test]

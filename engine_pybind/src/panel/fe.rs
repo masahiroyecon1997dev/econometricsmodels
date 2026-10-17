@@ -753,7 +753,7 @@ mod tests {
     }
 
     #[test]
-    fn build_fe_input_hac_uses_dk_time_when_time_is_not_set() {
+    fn build_fe_input_dk_uses_dk_time_when_time_is_not_set() {
         // 1-way FE + DK HAC（`time`未指定・`dk_time`のみ指定）の組み合わせ
         // （モジュールdoc「`FEOptions.time`と`FEOptions.dk_time`は別物」参照）。
         let df = well_formed_df();
@@ -786,7 +786,7 @@ mod tests {
     }
 
     #[test]
-    fn build_fe_input_hac_uses_dk_time_independently_of_time_when_both_set() {
+    fn build_fe_input_dk_uses_dk_time_independently_of_time_when_both_set() {
         // 2-way（`time`指定あり）でもDKの時点列は`dk_time`だけから決まり、`FeInput.time_keys()`
         // （固定効果の時間次元）とは独立であることを確認する（モジュールdoc参照）。
         let df = df!(

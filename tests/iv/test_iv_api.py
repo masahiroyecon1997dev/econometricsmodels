@@ -359,7 +359,7 @@ def test_cov_type_is_case_insensitive(
 ):
     """全`cov_type`で、`res.cov_type`が正規形（小文字）で返り、どの大文字小文字の
     綴りでも正規形と同一の推定結果になること（`engine_pybind`側の
-    `parse_iv_cov_type`のRust実装と対になる、Python API境界での確認。
+    `parse_cov_kind`のRust実装と対になる、Python API境界での確認。
     OLS/WLS/Logit/Probit/Tobit/FE/REの`test_cov_type_is_case_insensitive`と同型）。
     clusterは`cluster`列を持つ`clustered_dataset`を使う。
     """
@@ -534,7 +534,7 @@ def test_weight_type_is_case_insensitive(
 ):
     """`estimator="gmm"`の全`gmm_weight_type`で、`res.gmm_weight_type`が正規形
     （小文字）で返り、どの大文字小文字の綴りでも正規形と同一の推定結果で収束
-    すること（`engine_pybind`側の`parse_weight_type`と対になる、Python API
+    すること（`engine_pybind`側の`parse_iv_option_values`と対になる、Python API
     境界での確認。数値照合は`test_iv_gmm_reference.py`）。`cluster`/`hac`は
     `cov_type`と同じ`cluster`フィールドと`hac_lags`フィールドを共用する仕様
     （`engine_pybind/src/iv/CLAUDE.md`参照）。

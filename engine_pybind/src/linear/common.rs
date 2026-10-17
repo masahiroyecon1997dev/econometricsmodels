@@ -128,7 +128,7 @@ pub(crate) fn parse_cov_kind(cov_type: &str) -> PyResult<CovKind> {
 /// 置かない、[`require_hac_time`]）。使われないオプションの検査が先で、必須の欠落が後。
 ///
 /// IVは`gmm_weight_type`も同じ値を使い`cov_type`単独では判定できないため、
-/// この関数ではなくIV自身の検査を使う。
+/// この関数ではなく`iv::common::check_iv_options`を使う。
 ///
 /// # Errors
 /// 使われないオプションが指定されている場合、または`Hac`で`hac_time`が未指定の場合は
@@ -207,21 +207,6 @@ pub(crate) fn resolve_cov_type(
             groups: extract_optional_cluster_groups(df, cluster)?,
         },
     })
-}
-
-/// 値のパースと列の解決を続けて行う（使われないオプションの検査を含まない）。
-/// IVが`gmm_weight_type`と共用する`cluster`/`hac_*`を、自前の検査を済ませたうえで
-/// 渡すための入口。戻り値の2つ目は`*Result.cov_type`に格納する正規形の名前。
-pub(crate) fn build_cov_type(
-    df: &DataFrame,
-    cov_type: &str,
-    cluster: Option<&str>,
-    hac_lags: Option<i64>,
-    hac_time: Option<&str>,
-) -> PyResult<(EngineCovType, String)> {
-    let kind = parse_cov_kind(cov_type)?;
-    let parsed = resolve_cov_type(df, kind, cluster, hac_lags, hac_time)?;
-    Ok((parsed, kind.name().to_string()))
 }
 
 #[cfg(test)]

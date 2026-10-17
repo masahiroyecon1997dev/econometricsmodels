@@ -197,9 +197,8 @@ INVALID_HAC_LAGS = (
     "hac_lags must be in the range [0, n): got {hac_lags}, n={n}"
 )
 
-# cov_type文字列パース。OLS/WLS/IVは文言が完全一致（実装は別々、
-# engine_pybind/src/linear/common.rs::parse_cov_type・
-# engine_pybind/src/iv/common.rs::parse_iv_cov_type）。
+# cov_type文字列パース。OLS/WLS/IVは文言が完全一致（3手法とも
+# engine_pybind/src/linear/common.rs::parse_cov_kindが検査する）。
 UNKNOWN_COV_TYPE_LINEAR = (
     "unknown cov_type: '{other}'. Expected one of 'classical', 'hc0' "
     "through 'hc3', 'hac', or 'cluster'"

@@ -13,10 +13,10 @@
 `docs/performance/ols.md`「最重要の教訓」「計測方法」と共通（releaseビルド必須・`tracemalloc`不採用・サブプロセス隔離・スレッド数を1に固定・polars→pandas変換は計測区間外・ウォームアップ1回＋`repeats`回の中央値・HACのラグ数を`hac_auto_lag(n)`で両ライブラリに揃える）。IV固有の点は以下。
 
 - **DGP**: `generate_iv_dataset("baseline", k_endog=1, k_instruments=2)`。過剰識別（`k_instruments > k_endog`）で回し、engine が常に計算する過剰識別検定（Sargan / Hansen J）を計測範囲に確実に含める。n/k スイープの`k`は外生説明変数`x_exog`の本数（列は `y, x1..xk, endog1, z1, z2`）。
-- **method（2sls / gmm）**: n/k スイープは既定 method の **2SLS**。**GMM は method 軸**として代表点1つ（cov_type=classical, k=5, n=1,000,000）でのみ計測する。正確性検証（`test_iv_reference.py`）も 2SLS 主軸・GMM は代表シナリオのみ、という絞り方に合わせる。GMM × hac は対象外（下記「既知の限界」）。
-- **cov_type**: classical と hac（Newey-West、bartlett kernel）の代表2点。classical/hc1/cluster/hac を n=100,000, k=5 で軽く実測し、OLS/WLS と同じく hac が最重だった（engine 0.129s / linearmodels 0.223s）。engine cov_type ↔ linearmodels `cov_type`/`debiased` の対応は `linearmodels_ref.py` の `_COV_TYPE_MAP` と同じ。`hc2`/`hc3` は linearmodels 側に対応実装が無いため性能比較でも扱わない。
+- **method（2sls / gmm）**: n/k スイープは既定 method の **2SLS**・既定の classical のみ。**GMM は method 軸**として代表点1つ（classical, k=5, n=1,000,000）で計測し、標準誤差・重み行列の違いは cov 軸で見る。正確性検証（`test_iv_reference.py`）も 2SLS 主軸・GMM は代表シナリオのみ、という絞り方に合わせる。GMM × hac は対象外（下記「既知の限界」）。
+- **cov_type**: 標準誤差の種類は **cov軸**（n=100,000・k=5）で全て測る。2SLS は classical・hc0・hc1・hac、cluster の 2×2（G=50 / G=n÷10 × random / sorted）を linearmodels と比較し、`hc2`/`hc3` は linearmodels 側に対応実装が無いため engine 単独で測る。engine cov_type ↔ linearmodels `cov_type`/`debiased` の対応は `linearmodels_ref.py` の `_COV_TYPE_MAP` と同じ。GMM は代表2ケースを同じ軸に載せる（`CovCase.method`/`variant`）: `gmm_cluster_weight`（重み行列も標準誤差もクラスター、G=50 random の2ステップGMM）と `gmm_iterated`（robust の重み行列・hc1 の標準誤差の反復GMM。上限100回・許容誤差1e-6を両ライブラリに同じ数値で指定する。収束判定の尺度は異なる（engine は係数ごとの相対・絶対混合変化、linearmodels は共分散で正規化した二次形式）が、baseline で反復回数が両者とも3回で一致することを確認）。反復GMMで classical の重み行列を使わないのは、等分散の下では2回で収束し2ステップGMMと変わらないため。linearmodels の `IVGMM` は重み行列の既定が robust で engine の既定（classical）と異なるため、method 軸の GMM も含め重み行列を明示して揃えている。以前は classical と hac の2点を実装時の軽い実測で手書き選定していた。
 - **計測範囲の対称性**: engine は係数・標準誤差と同じ `.fit()` の中で R²・調整済みR²・F統計量・過剰識別検定・弱操作変数F統計量・Wu-Hausman検定・第一段階回帰まで**常に一括計算**する。linearmodels の `IVResults` はこれらを遅延評価にしており、特に `first_stage.diagnostics` は**第一段階回帰をフル再fitする**（OLS の `rsquared`、Logit の `llnull` と同じ位置づけ）。`_fit_once_linearmodels` は `.fit()` 直後に `params`/`std_errors`/`tstats`/`pvalues`/`rsquared`/`rsquared_adj`/`f_statistic`/`first_stage.diagnostics`（2SLS は加えて `sargan`・`wu_hausman()`、GMM は `j_stat`）へ明示アクセスし、engine と同じ処理範囲で計測する。
-- **スイープ軸**: n軸（k=5固定、n=1,000〜1,000,000）、k軸（n=10,000固定、k=5・20）、method軸（下記）。
+- **スイープ軸**: n軸（k=5固定、n=10,000 / 100,000 / 1,000,000）、k軸（n=10,000固定、k=5・20）、cov軸（上記）、method軸（下記）。n軸・k軸は既定の classical のみ。
 
 ## 考察（結果表の外に残す、機構・経緯の記録）
 

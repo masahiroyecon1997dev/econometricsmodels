@@ -289,9 +289,9 @@ Test distributions and degrees of freedom for each method are in the
 ## Performance
 
 The computational core is written in Rust. Speed and memory are measured for
-each implemented method at representative settings (sample size, number of
-regressors, and one or two standard-error types), not for every option
-combination.
+each implemented method over sample size and number of regressors with the
+default standard error, and over every standard-error type it supports at one
+sample size, not for every option combination.
 
 **Single-threaded.** The core currently runs its linear algebra on a single
 thread, and the reference packages were pinned to one thread as well, so the

@@ -18,11 +18,12 @@
 `docs/performance/ols.md`「最重要の教訓」「計測方法」・`probit.md` と共通（release ビルド必須・`tracemalloc` 不採用・サブプロセス隔離・スレッド数を1に固定・ウォームアップ1回＋`repeats` 回の中央値）。Tobit 固有の点は以下。
 
 - **engine 単独**（`PerfAdapter.libraries=("engine",)`）。インプロセス計測できるリファレンス実装が無い（主リファレンスの R `AER::tobit` は共通ハーネスのインプロセス計測に乗らず、statsmodels にネイティブ Tobit も無く、代替の py4etrics は上記のとおり撤去）。レポートは相対比較ではなく engine の絶対値・スケーリングの推移になる。
-- **cov_type**: classical と cluster の代表2点。`opg`/`hc0`/`hc1` は省略（Logit/Probit と同じ絞り方）。n=100,000・k=5 で全 cov_type を実測して確認済み（classical 0.138s < opg 0.148s < hc1 0.150s < hc0 0.154s < cluster 0.162s、newton）。cluster の疑似グループ数は 50 固定。
+- **cov_type**: n軸・k軸は既定の classical のみ。標準誤差の種類は **cov軸**（n=100,000・k=5、newton、engine 単独）で全て測る: classical・opg・hc0・hc1、cluster の 2×2（G=50 / G=n÷10 × random / sorted）。以前は classical と cluster の2点だけを測り、`opg`/`hc0`/`hc1` は「classical と cluster の間に収まる」実測（n=100,000・k=5: classical 0.138s < opg 0.148s < hc1 0.150s < hc0 0.154s < cluster 0.162s）を根拠に省いていた。
 - **打ち切りシナリオ**: `moderate_censoring`（左打ち切り ~35%、`benchmark/nonlinear/datasets.py` の `_TOBIT_SCENARIO_CONFIG`。Tobit テストの `BASELINE_SCENARIO` と同じ）。潜在回帰の誤差 SD（真の σ）は `_TOBIT_ERROR_SD`。
 - **スイープ軸**:
-    - n 軸（k=5 固定、newton）: classical / cluster とも n=1,000〜**100,000**。加えて **classical のみ n=200,000 / 1,000,000**（`n_sweep_engine_only`、seed=42 のみ。全 cov_type で大 n を回すと CI 時間がかさむため classical に絞る）。n=1,000,000 が過去の再現点で修正の回帰ガード、n=200,000 は追加のスケーリング点（下記「n 軸の大標本ガード」）。
-    - k 軸（n=10,000 固定、newton）: k=5・20、classical / cluster。
+    - n 軸（k=5 固定、newton）: classical のみ n=10,000〜**100,000**。加えて **n=200,000 / 1,000,000**（`n_sweep_engine_only`、seed=42 のみ）。n=1,000,000 が過去の再現点で修正の回帰ガード、n=200,000 は追加のスケーリング点（下記「n 軸の大標本ガード」）。
+    - k 軸（n=10,000 固定、newton）: k=5・20、classical のみ。
+    - cov 軸（n=100,000・k=5、newton）: 上記「cov_type」。
     - method 軸: `lbfgs` を代表点1つ（classical・k=5・n=100,000）で計測。**`bfgs` は除外**（engine の Tobit BFGS が n>=10,000 で `MoreThuenteLineSearch: NaN or Inf` 発散、#292。解消後に `extra_methods` へ戻す）。
 - **quasi-Newton の劣化ガード**: `compare_tobit.py` の `check_report`（`_check_method_ratios`）が engine の `lbfgs/newton` 実行時間比を計算し、5x を超えたら job summary に `> [!WARNING]` を出す（CI failure にはしない。実時間の絶対値ではなく同一ジョブ内の比なので共有ランナーの速度差に影響されない。同種の過去の劣化と同系統の早期検知）。
 

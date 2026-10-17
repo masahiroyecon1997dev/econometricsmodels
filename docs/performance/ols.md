@@ -19,14 +19,14 @@
 ## 計測方法
 
 - **計測対象**: `OLS(...).fit()`全体（Python API呼び出し、Arrow変換・PyO3オーバーヘッド込みのエンドツーエンド。実際のユーザー体験に近い値にするため）
-- **cov_type**: classical と HAC（Newey-West）の代表2点のみ。`.claude/rules/testing-policy.md`「パフォーマンス比較（ベンチマーク）の方法論」に従い、最も軽いものと最も計算コストの重いものの2点で足りるため（HC1/cluster は classical と同傾向のため省く）。HACのラグ数は両ライブラリで明示的に揃える（`hac_auto_lag(n) = 4*(n/100)^(2/9)`、engineの自動選択式と同じ）
+- **cov_type**: n軸・k軸は既定の classical のみ。標準誤差の種類は **cov軸**（n=100,000・k=5）で全て測る: classical・hc0〜hc3・hac、cluster の 2×2（G=50 / G=n÷10 × クラスターの行が散らばる random / 連続する sorted）。全て statsmodels と比較する。以前は「最も軽い classical と最も重い HAC」の2点だけを実装時の軽い実測で手書き選定していたが、cov_type の順位は実装次第で入れ替わり、選ばなかった HC・cluster の劣化がどこにも現れないため、cov 軸に置き換えた（`.claude/rules/testing-policy.md`「パフォーマンス比較（ベンチマーク）の方法論」）。HACのラグ数は両ライブラリで明示的に揃える（`hac_auto_lag(n) = 4*(n/100)^(2/9)`、engineの自動選択式と同じ）。
 - **計測範囲の対称性**: engine は係数・標準誤差と同じ呼び出しの中で R²・調整済みR²・対数尤度・AIC・BIC・F統計量・F検定のp値まで**常に一括計算**する。statsmodels はこれらを遅延評価（`cached_value`）にしているため、`.fit()`直後に該当プロパティへ明示アクセスして「フルセットの適合度統計量込み」で計測範囲を揃えている
 - **スレッド数を1に固定**: engine・statsmodels（numpy/BLAS）とも`RAYON_NUM_THREADS=1`等でシングルスレッドに固定する（`_perf_harness._SINGLE_THREAD_ENV`）。engine側は faer のグローバル並列度を常時`Par::Seq`にしたため実質的に冗長だが、リファレンス実装と対称にする（両者とも逐次）目的で維持している。この選択がユーザー実環境（マルチスレッドBLAS）とどう乖離するかは下記「マルチスレッド環境での挙動」参照
 - **実行時間**: ウォームアップ1回 + `repeats`回実行（今回`repeats=3`）の中央値（`time.perf_counter()`）
 - **メモリ**: プロセス単位のピークRSS（`resource.getrusage(RUSAGE_SELF).ru_maxrss`）。`tracemalloc`はRust内部（faerの行列確保等）やnumpyバッファのようなネイティブメモリ確保を捕捉できないことを実測で確認したため不採用（設計行列だけで80MB相当のケースで3.8KB程度しか検知しなかった）
 - **サブプロセス隔離**: 1計測点＝1サブプロセス。同一プロセス内で連続測定するとアロケータが解放済みメモリを保持したままになり後続の計測のRSSが汚染されるため
 - **変換コスト除外**: polars→pandas変換（`df.to_pandas()`）は計測区間の外で1回だけ実施し、各試行で使い回す（リファレンス実装本体の処理ではないため）。engine側はArrowゼロコピーでpolarsをそのまま渡す
-- **スイープ軸**: n軸（k=5固定、n=1,000〜1,000,000）、k軸（n=10,000固定、k=5・20）
+- **スイープ軸**: n軸（k=5固定、n=10,000 / 100,000 / 1,000,000）、k軸（n=10,000固定、k=5・20）、cov軸（上記）。n軸・k軸は既定の classical のみ。
 
 ## 既知の限界
 

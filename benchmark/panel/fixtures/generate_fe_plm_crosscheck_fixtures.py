@@ -89,6 +89,7 @@ MAX_BANDWIDTH_SCENARIOS = ["baseline", "unbalanced", "small_panel"]
 _COMMON_BANDWIDTHS = [0, 1, 3]
 DK_EXPLICIT_BANDWIDTHS: dict[str, list[int]] = {
     "baseline": _COMMON_BANDWIDTHS,
+    "autocorrelated": _COMMON_BANDWIDTHS,
     "unbalanced": _COMMON_BANDWIDTHS,
     "cross_sectionally_correlated": [*_COMMON_BANDWIDTHS, 12],
 }

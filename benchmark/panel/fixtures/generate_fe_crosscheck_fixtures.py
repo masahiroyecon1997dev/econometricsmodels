@@ -97,15 +97,17 @@ WAGEPAN_FORMULA_RHS = " + ".join(WAGEPAN_X)
 
 # dkのバンド幅を既定値以外で明示指定して検証するシナリオとバンド幅。既定式
 # `floor(4*(T/100)^(2/9))`はT=6でもT=25でも2になるため、既定より大きい3と、
-# 0（ラグ項なし）を入れる。fixestは`bandwidth == T-1`で最終ラグを落とす
-# （`fe-spec.md`3.3節）ため`T-1`未満に限る（`T-1`はplm側
-# `generate_fe_plm_crosscheck_fixtures.py`が持つ）。T=25の
+# 0（ラグ項なし）・1を入れる。系列相関が最も効くautocorrelatedも対象にする。
+# fixestは`bandwidth == T-1`で最終ラグを落とす（`fe-spec.md`3.3節）ため
+# `T-1`未満に限る（`T-1`はplm側`generate_fe_plm_crosscheck_fixtures.py`が
+# 持つ）。T=25の
 # cross_sectionally_correlatedだけは、T=6では動かないカーネルの3ラグ超の項を
 # 通すため中間の12も加える。2-wayはバランスパネル（TWO_WAY_SCENARIOS）のみ。
 DK_EXPLICIT_BANDWIDTHS: dict[str, list[int]] = {
-    "baseline": [0, 3],
-    "unbalanced": [0, 3],
-    "cross_sectionally_correlated": [0, 3, 12],
+    "baseline": [0, 1, 3],
+    "autocorrelated": [0, 1, 3],
+    "unbalanced": [0, 1, 3],
+    "cross_sectionally_correlated": [0, 1, 3, 12],
 }
 
 # df_resid=1境界で追加検証するロバスト系cov_type（classicalは別キーで既存）。

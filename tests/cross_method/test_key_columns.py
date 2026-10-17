@@ -311,29 +311,87 @@ def test_non_finite_float_key_raises_for_every_method(
             fit(df)
 
 
+# 許可するdtype（役割ごと）× 役割 × 手法。nullの検査はdtypeに依らない共通の経路だが、
+# dtypeごとの抽出（文字列・カテゴリ・日時などの因子化）の前に確実に走ることを、
+# 許可するdtypeすべてで確かめる。手法ごとに別のテストにして、落ちた手法が分かるようにする。
+KEY_ROLES = [
+    ("cluster", CLUSTER_FITS, IDENTITY_OK),
+    ("entity", ENTITY_FITS, IDENTITY_OK),
+    ("t", TIME_FITS, TIME_OK),
+]
+NULL_KEY_CASES = [
+    (column, method, fit, dtype)
+    for column, fits, dtypes in KEY_ROLES
+    for method, fit in fits.items()
+    for dtype in dtypes
+]
+
+
+def _assert_missing_key_raises(fit, df, column, count):
+    with pytest.raises(
+        ValidationError,
+        match=escaped(
+            msgs.COLUMN_HAS_MISSING_VALUES, name=column, count=count
+        ),
+    ):
+        fit(df)
+
+
+@pytest.mark.parametrize("position", ["first", "middle", "last"])
 @pytest.mark.parametrize(
-    ("column", "fits"),
-    [
-        ("cluster", CLUSTER_FITS),
-        ("entity", ENTITY_FITS),
-        ("t", TIME_FITS),
+    ("column", "method", "fit", "dtype"),
+    NULL_KEY_CASES,
+    ids=[
+        f"{column}-{method}-{dtype}"
+        for column, method, _, dtype in NULL_KEY_CASES
     ],
-    ids=["cluster", "entity", "time"],
 )
-def test_null_key_raises_for_every_method(frame, column, fits):
-    """キー列のnullも、全手法・全役割で拒否する。"""
+def test_null_key_raises_for_every_method(
+    frame, column, method, fit, dtype, position
+):
+    """キー列のnullは、全手法・全役割・許可する全dtypeで、行の位置によらず拒否する。"""
+    row = {"first": 0, "middle": 2, "last": frame.height - 1}[position]
+    df = _with_key(frame, column, dtype)
+    df = df.with_columns(df[column].scatter(row, None).alias(column))
+
+    _assert_missing_key_raises(fit, df, column, count=1)
+
+
+@pytest.mark.parametrize("dtype", [pl.Null, pl.Int64, pl.String], ids=str)
+@pytest.mark.parametrize(
+    ("column", "method", "fit"),
+    [
+        (column, method, fit)
+        for column, fits, _ in KEY_ROLES
+        for method, fit in fits.items()
+    ],
+    ids=[
+        f"{column}-{method}"
+        for column, fits, _ in KEY_ROLES
+        for method in fits
+    ],
+)
+def test_all_null_key_column_counts_every_row_as_missing(
+    frame, column, method, fit, dtype
+):
+    """全てnullの列は、`Null`dtypeでも型を持つ列でも、全行が欠損したキー列として拒否する。
+
+    全行がnullなら「グループが2つ未満」のような別の理由より先に欠損を報告する。
+    """
     df = frame.with_columns(
-        frame[column].cast(pl.Int64).scatter(2, None).alias(column)
+        pl.Series(column, [None] * frame.height, dtype=dtype)
     )
 
-    for fit in fits.values():
-        with pytest.raises(
-            ValidationError,
-            match=escaped(
-                msgs.COLUMN_HAS_MISSING_VALUES, name=column, count=1
-            ),
-        ):
-            fit(df)
+    _assert_missing_key_raises(fit, df, column, count=frame.height)
+
+
+def test_null_boolean_cluster_raises_for_every_method(frame):
+    """`Boolean`のクラスター列（2グループとして使える）のnullも拒否する。"""
+    df = frame.with_columns((pl.col("cluster") % 2 == 0).alias("cluster"))
+    df = df.with_columns(df["cluster"].scatter(2, None).alias("cluster"))
+
+    for fit in CLUSTER_FITS.values():
+        _assert_missing_key_raises(fit, df, "cluster", count=1)
 
 
 # ── 時点の順序: 桁が上がる・月や年をまたぐ時点でも、時系列順になる ───────────

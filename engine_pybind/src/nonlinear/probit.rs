@@ -28,8 +28,9 @@ use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
 use super::common::{
-    MarginalEffectsResult, mat_to_nested_vec, mle_error_to_pyerr, parse_cov_type,
-    parse_marginal_effects_at, parse_solver_type, resolve_mle_tol_default,
+    MarginalEffectsResult, check_cov_options, mat_to_nested_vec, mle_error_to_pyerr,
+    parse_cov_kind, parse_marginal_effects_at, parse_solver_type, resolve_cov_type,
+    resolve_mle_tol_default, solver_name,
 };
 use crate::shared::augment::append_predicted_column;
 use crate::shared::column_extraction::{
@@ -422,7 +423,12 @@ pub(crate) fn build_probit_input(
     x: Vec<String>,
     options: &ProbitOptions,
 ) -> PyResult<(ProbitInput, EngineCovType, String, EngineSolverType)> {
-    let solver_lower = options.solver.to_lowercase();
+    // DataFrameを見ない検査を先に行う。報告順は`docs/guide/validation.md`
+    // 「Order in which errors are reported」: オプションの値（`cov_type` → `solver`）→
+    // オプションの組合せ → ロール構造 → `y`/`x`の列 → オプション列 → エンジン。
+    let cov_kind = parse_cov_kind(&options.cov_type)?;
+    let solver = parse_solver_type(&options.solver)?;
+    check_cov_options(cov_kind, &options.cluster)?;
 
     // 完全な多重共線性を早期に、分かりやすいエラーで防ぐ（`validation.rs`に集約、
     // OLS/WLS/Logitと共通、`.claude/rules/rust-style.md`参照）。
@@ -434,13 +440,12 @@ pub(crate) fn build_probit_input(
     // ── x列の抽出 ──────────────────────────────────────────────────────
     let x_slices = extract_f64_columns(df, &x)?;
 
-    let (cov_type, cov_type_lower) = parse_cov_type(df, &options.cov_type, &options.cluster)?;
-    let solver = parse_solver_type(&solver_lower)?;
+    let cov_type = resolve_cov_type(df, cov_kind, &options.cluster)?;
 
     let input = ProbitInput::from_columns(&y_slice, &x_slices, x, options.include_intercept, y)
         .map_err(mle_error_to_pyerr)?;
 
-    Ok((input, cov_type, cov_type_lower, solver))
+    Ok((input, cov_type, cov_kind.name().to_string(), solver))
 }
 
 /// Pythonから渡された `data` / `y` / `x` / `options` を検証し、
@@ -501,7 +506,7 @@ pub(crate) fn fit(
         converged: estimator.converged(),
         n_iter: estimator.n_iter(),
         cov_type: cov_type_lower,
-        solver: options.solver.to_lowercase(),
+        solver: solver_name(solver).to_string(),
         estimator,
         training_data: df,
     })

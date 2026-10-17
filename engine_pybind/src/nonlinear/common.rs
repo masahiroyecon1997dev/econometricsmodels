@@ -78,69 +78,124 @@ pub struct MarginalEffectsResult {
     pub conf_upper: Vec<f64>,
 }
 
-/// `cov_type`文字列（大文字小文字を区別しない）を`engine::nonlinear::common::CovType`に
-/// パースする。`cov_type="cluster"`のときのみ`cluster`で指定された列を
-/// `extract_cluster_groups`で抽出する（他のcov_typeで`cluster`が指定されていれば
-/// `ValidationError`、OLSの`cluster`/`hac_*`の扱いと同じ方針）。
+/// `cov_type`の種類。列名を持たない、文字列だけから決まる値。
 ///
-/// 戻り値の2つ目は`*Result.cov_type`にそのまま格納する正規形の文字列。受け付ける綴りは
-/// 正規形の大文字小文字違いだけ（別名は無い）ため小文字化したものが正規形になるが、
-/// 呼び出し側が自前で小文字化せずここで返す値を使うことで、別名を足したときに結果へ
-/// 別名がそのまま出る事故を防ぐ（`linear::common::build_cov_type`と同じ形）。
+/// `cov_type`の検査は、DataFrameを見ない順に3つに分ける
+/// （`docs/guide/validation.md`「Order in which errors are reported」。
+/// `linear::common::CovKind`と同じ構成）。
+///
+/// - 値: [`parse_cov_kind`]が文字列を`CovKind`にする（未知の値は`ValidationError`）
+/// - 組合せ: [`check_cov_options`]が`cluster`と`CovKind`の矛盾を検査する
+/// - 列: [`resolve_cov_type`]が`cluster`の列を抽出して`engine`の`CovType`にする
 ///
 /// Logit/Probit/Tobit共通（元は`logit.rs`/`probit.rs`/`tobit.rs`に
 /// バイト単位で完全一致するコードとして独立複製されていたが、`CovType`自体が
 /// 元々3手法共有の型であるのに合わせてここに集約した）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CovKind {
+    Classical,
+    Opg,
+    Hc0,
+    Hc1,
+    Cluster,
+}
+
+impl CovKind {
+    /// `*Result.cov_type`に格納する正規形の名前。
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Classical => "classical",
+            Self::Opg => "opg",
+            Self::Hc0 => "hc0",
+            Self::Hc1 => "hc1",
+            Self::Cluster => "cluster",
+        }
+    }
+}
+
+/// `cov_type`文字列（大文字小文字を区別しない）を[`CovKind`]にする。DataFrameは見ない。
+///
+/// 受け付ける綴りは正規形の大文字小文字違いだけで、別名は無い。
 ///
 /// # Errors
-/// - `cov_type`が既知の値のいずれでもない: `ValidationError`
-/// - `cov_type`が`"cluster"`でないのに`cluster`が指定された: `ValidationError`
-///
-/// `cluster`未指定自体はここでは`ValidationError`にせず、`groups=None`のまま
-/// `engine`側の`CommonError::MissingClusterColumn`検証に委ねる（OLSの`fit()`と同じ役割分担）。
-pub(crate) fn parse_cov_type(
-    df: &DataFrame,
-    cov_type: &str,
-    cluster: &Option<String>,
-) -> PyResult<(CovType, String)> {
-    let cov_type_lower = cov_type.to_lowercase();
-    let parsed = match cov_type_lower.as_str() {
-        "classical" => Ok(CovType::Classical),
-        "opg" => Ok(CovType::Opg),
-        "hc0" => Ok(CovType::Hc0),
-        "hc1" => Ok(CovType::Hc1),
-        "cluster" => {
-            let groups = extract_optional_cluster_groups(df, cluster.as_deref())?;
-            Ok(CovType::Cluster { groups })
-        }
+/// 既知の値のいずれでもない場合は`ValidationError`。
+pub(crate) fn parse_cov_kind(cov_type: &str) -> PyResult<CovKind> {
+    match cov_type.to_lowercase().as_str() {
+        "classical" => Ok(CovKind::Classical),
+        "opg" => Ok(CovKind::Opg),
+        "hc0" => Ok(CovKind::Hc0),
+        "hc1" => Ok(CovKind::Hc1),
+        "cluster" => Ok(CovKind::Cluster),
         other => Err(ValidationError::new_err(format!(
             "unknown cov_type: '{other}'. Expected one of 'classical', \
              'opg', 'hc0', 'hc1', or 'cluster'"
         ))),
-    }?;
-    // 未知の`cov_type`は「unknown cov_type」を優先して報告する（上のmatchが先）。
+    }
+}
+
+/// `cluster`が`kind`と矛盾しないことを検査する。DataFrameは見ない。
+///
+/// `cluster`は`Cluster`でなければ使われない。その状態で指定されていれば
+/// `ValidationError`にする（OLSの`cluster`/`hac_*`の扱いと同じ方針）。`Cluster`で
+/// `cluster`が未指定なのはここでは弾かず、`groups=None`のまま`engine`側の
+/// `CommonError::MissingClusterColumn`検証に委ねる（OLSの`fit()`と同じ役割分担）。
+///
+/// # Errors
+/// `kind`が`Cluster`でないのに`cluster`が指定された場合は`ValidationError`。
+pub(crate) fn check_cov_options(kind: CovKind, cluster: &Option<String>) -> PyResult<()> {
     reject_unused_option(
         "cluster",
         cluster.is_some(),
-        cov_type_lower == "cluster",
+        kind == CovKind::Cluster,
         "cov_type=\"cluster\"",
-    )?;
-    Ok((parsed, cov_type_lower))
+    )
+}
+
+/// [`CovKind`]に対応する列（`cluster`）をDataFrameから抽出して
+/// `engine::nonlinear::common::CovType`を組み立てる。使われないオプションの検査は
+/// [`check_cov_options`]の責務。
+///
+/// # Errors
+/// 列の抽出時に発覚する問題（列が存在しない、dtypeが不正、欠損値等）は
+/// `column_extraction`の責務で`ValidationError`。
+pub(crate) fn resolve_cov_type(
+    df: &DataFrame,
+    kind: CovKind,
+    cluster: &Option<String>,
+) -> PyResult<CovType> {
+    Ok(match kind {
+        CovKind::Classical => CovType::Classical,
+        CovKind::Opg => CovType::Opg,
+        CovKind::Hc0 => CovType::Hc0,
+        CovKind::Hc1 => CovType::Hc1,
+        CovKind::Cluster => CovType::Cluster {
+            groups: extract_optional_cluster_groups(df, cluster.as_deref())?,
+        },
+    })
 }
 
 /// `solver`文字列（大文字小文字を区別しない）を`engine::nonlinear::common::SolverType`に
-/// パースする。Logit/Probit/Tobit共通（`parse_cov_type`と同じ理由でここに集約）。
+/// パースする。DataFrameは見ない。Logit/Probit/Tobit共通（`CovKind`と同じ理由でここに集約）。
 ///
 /// # Errors
 /// `solver`が既知の値のいずれでもない: `ValidationError`
-pub(crate) fn parse_solver_type(solver_lower: &str) -> PyResult<SolverType> {
-    match solver_lower {
+pub(crate) fn parse_solver_type(solver: &str) -> PyResult<SolverType> {
+    match solver.to_lowercase().as_str() {
         "newton" => Ok(SolverType::Newton),
         "bfgs" => Ok(SolverType::Bfgs),
         "lbfgs" => Ok(SolverType::Lbfgs),
         other => Err(ValidationError::new_err(format!(
             "unknown solver: '{other}'. Expected one of 'newton', 'bfgs', or 'lbfgs'"
         ))),
+    }
+}
+
+/// `*Result.solver`に格納する、[`SolverType`]の正規形の名前。
+pub(crate) fn solver_name(solver: SolverType) -> &'static str {
+    match solver {
+        SolverType::Newton => "newton",
+        SolverType::Bfgs => "bfgs",
+        SolverType::Lbfgs => "lbfgs",
     }
 }
 
@@ -181,12 +236,11 @@ mod tests {
     use super::*;
     use polars::df;
 
-    /// 大文字小文字の綴りによらず、正規形の文字列を返すこと（`*Result.cov_type`がそのまま
+    /// 大文字小文字の綴りによらず、正規形の名前になること（`*Result.cov_type`がそのまま
     /// 使う値）。`let-else`を使う理由は`linear/common.rs`の同名テストと同じ（`PyErr`の
     /// Debug実装はGIL取得を要求するため、`unwrap()`/`expect()`を避ける）。
     #[test]
-    fn parse_cov_type_is_case_insensitive_and_returns_the_canonical_name() {
-        let df = df!("g" => [1.0, 2.0, 3.0]).unwrap();
+    fn parse_cov_kind_is_case_insensitive_and_has_canonical_names() {
         for (input, expected) in [
             ("classical", "classical"),
             ("CLASSICAL", "classical"),
@@ -196,20 +250,61 @@ mod tests {
             ("HC1", "hc1"),
             ("CLUSTER", "cluster"),
         ] {
-            let cluster = (expected == "cluster").then(|| "g".to_string());
-            let Ok((_, normalized)) = parse_cov_type(&df, input, &cluster) else {
+            let Ok(kind) = parse_cov_kind(input) else {
                 panic!("expected Ok for input={input}");
             };
-            assert_eq!(normalized, expected, "input={input}");
+            assert_eq!(kind.name(), expected, "input={input}");
         }
     }
 
     #[test]
-    fn parse_cov_type_rejects_unknown_value() {
-        let df = df!("g" => [1.0, 2.0, 3.0]).unwrap();
-        assert!(parse_cov_type(&df, "bogus", &None).is_err());
+    fn parse_cov_kind_rejects_unknown_value() {
+        assert!(parse_cov_kind("bogus").is_err());
         // 別名は無い（`"nonrobust"`は`"classical"`の別名として受け付けない）。
-        assert!(parse_cov_type(&df, "nonrobust", &None).is_err());
+        assert!(parse_cov_kind("nonrobust").is_err());
+    }
+
+    #[test]
+    fn check_cov_options_rejects_cluster_unless_kind_is_cluster() {
+        let cluster = Some("g".to_string());
+        assert!(check_cov_options(CovKind::Classical, &cluster).is_err());
+        assert!(check_cov_options(CovKind::Hc1, &cluster).is_err());
+        assert!(check_cov_options(CovKind::Cluster, &cluster).is_ok());
+        // `Cluster`で`cluster`が未指定なのはここでは弾かない（engineの検証に委ねる）。
+        assert!(check_cov_options(CovKind::Cluster, &None).is_ok());
+        assert!(check_cov_options(CovKind::Classical, &None).is_ok());
+    }
+
+    #[test]
+    fn resolve_cov_type_extracts_cluster_groups_only_for_cluster() {
+        let df = df!("g" => [1.0, 2.0, 3.0]).unwrap();
+        let cluster = Some("g".to_string());
+        let Ok(resolved) = resolve_cov_type(&df, CovKind::Cluster, &cluster) else {
+            panic!("expected Ok");
+        };
+        assert!(matches!(resolved, CovType::Cluster { groups: Some(_) }));
+        let Ok(resolved) = resolve_cov_type(&df, CovKind::Cluster, &None) else {
+            panic!("expected Ok");
+        };
+        assert!(matches!(resolved, CovType::Cluster { groups: None }));
+        let missing = Some("nope".to_string());
+        assert!(resolve_cov_type(&df, CovKind::Cluster, &missing).is_err());
+    }
+
+    #[test]
+    fn parse_solver_type_is_case_insensitive_and_has_canonical_names() {
+        for (input, expected) in [
+            ("newton", "newton"),
+            ("NEWTON", "newton"),
+            ("Bfgs", "bfgs"),
+            ("LBFGS", "lbfgs"),
+        ] {
+            let Ok(solver) = parse_solver_type(input) else {
+                panic!("expected Ok for input={input}");
+            };
+            assert_eq!(solver_name(solver), expected, "input={input}");
+        }
+        assert!(parse_solver_type("bogus").is_err());
     }
 
     #[test]
@@ -256,8 +351,8 @@ mod tests {
         assert_eq!(mat_to_nested_vec(&mat), vec![vec![0.0, 1.0]]);
     }
 
-    // `parse_marginal_effects_at`自体は渡された文字列をそのまま照合する（`parse_cov_type`/
-    // `parse_solver_type`と同じ設計）。大文字小文字を区別しない処理は呼び出し側
+    // `parse_marginal_effects_at`自体は渡された文字列をそのまま照合する（`parse_cov_kind`/
+    // `parse_solver_type`と違い自分では小文字化しない）。大文字小文字を区別しない処理は呼び出し側
     // （`LogitResult::marginal_effects`/`ProbitResult::marginal_effects`）が
     // `.to_lowercase()`してから渡すことで実現するため、ここでは小文字化済みの入力を渡す。
     #[test]

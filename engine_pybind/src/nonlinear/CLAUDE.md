@@ -14,7 +14,9 @@ Probit対応は当初「python_packageラッパー実装のみ」というスコ
 
 ## バリデーションの責務分担
 
-`x`が空・yやweight等ロール間の重複・x内重複・`include_intercept=true`時の`"const"`列衝突は`engine_pybind/src/shared/validation.rs`に集約済み（`engine_pybind/src/linear/CLAUDE.md`参照。新しい手法でも独自実装せずこれを使う）。抽出した列同士の行数不一致チェックは理論上到達不能と判明し削除済み（同ファイル参照）。Logit/Probit/Tobit固有の追加バリデーションは`cov_type`/`solver`（`nonlinear/common.rs`の`parse_cov_type`/`parse_method`、元はLogit/Probit/Tobit 3ファイルへのバイト単位の完全複製だったがここに集約した）・`at`（`marginal_effects`用、同ファイルの`parse_marginal_effects_at`）の文字列パースのみ（いずれも`ValidationError`）。
+`x`が空・yやweight等ロール間の重複・x内重複・`include_intercept=true`時の`"const"`列衝突は`engine_pybind/src/shared/validation.rs`に集約済み（`engine_pybind/src/linear/CLAUDE.md`参照。新しい手法でも独自実装せずこれを使う）。抽出した列同士の行数不一致チェックは理論上到達不能と判明し削除済み（同ファイル参照）。Logit/Probit/Tobit固有の追加バリデーションは`cov_type`/`solver`（`nonlinear/common.rs`、元はLogit/Probit/Tobit 3ファイルへのバイト単位の完全複製だったがここに集約した）・`at`（`marginal_effects`用、同ファイルの`parse_marginal_effects_at`）の文字列パースのみ（いずれも`ValidationError`）。
+
+`cov_type`は`parse_cov_kind`（値）→ `check_cov_options`（`cluster`の未使用）→ `resolve_cov_type`（`cluster`列の抽出）の3段に分け、`solver`は`parse_solver_type`（値、DataFrameを見ない）で受ける。`build_*_input`は、DataFrameを見ない検査（`cov_type`の値 → `solver`の値 → 組合せ）→ ロール構造 → `y`/`x`の列 → `cluster`列の順に呼ぶ。`*Result.cov_type`/`solver`に載せる正規形は`CovKind::name()`/`solver_name()`から作り、呼び出し側で小文字化し直さない。この順序は`tests/cross_method/test_validation_order.py`が固定している。
 
 ## `LogitOptions`/`ProbitOptions`/`TobitOptions`のフィールド重複は意図的
 

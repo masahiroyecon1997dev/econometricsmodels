@@ -50,7 +50,22 @@
 #   # （本実装・statsmodelsと同じ定義）で、lr_statisticは負値になりうる。
 #   Rscript run_glm_crosscheck.R data.csv "y ~ x1 + x2 + x3 - 1" hc1 logit
 
+# 参照値を決める設定の単一の情報源。`--settings`で出力し、生成スクリプトが
+# fixtureの`_meta`へ転記する（理由は下の`glm()`・限界効果の各コメント参照）。
+glm_settings <- list(
+  glm_epsilon = 1e-14,
+  glm_maxit = 100,
+  refit_rel_change_tol = 1e-13,
+  max_refit = 100,
+  margeff_eps_sd_factor = 1e-5,
+  margeff_eps_rule = "eps = margeff_eps_sd_factor * sd(x), per variable"
+)
+
 args <- commandArgs(trailingOnly = TRUE)
+if (length(args) == 1 && args[1] == "--settings") {
+  cat(jsonlite::toJSON(glm_settings, auto_unbox = TRUE, digits = NA))
+  quit(status = 0)
+}
 if (length(args) < 2) {
   stop("usage: Rscript run_glm_crosscheck.R <data.csv> <formula> [cov_type=classical] [link=logit] [cluster]")
 }
@@ -83,7 +98,10 @@ library(jsonlite)
 # どちらも、収束した係数を`start`にして再fitを繰り返す（再fitは毎回少なくとも
 # 1回のFisher scoringを行う）ことで解消する。係数の変化が相対1e-13未満になるまで続け、
 # 最後の再fitで作業重み・作業残差が最終係数のものになる。
-glm_control <- glm.control(epsilon = 1e-14, maxit = 100)
+glm_control <- glm.control(
+  epsilon = glm_settings$glm_epsilon,
+  maxit = glm_settings$glm_maxit
+)
 refit <- function(start = NULL) {
   glm(
     as.formula(formula_str),
@@ -95,19 +113,28 @@ refit <- function(start = NULL) {
 }
 model <- refit()
 if (!model$converged) {
-  stop("glm() did not converge with epsilon=1e-14")
+  stop(paste("glm() did not converge with epsilon =", glm_settings$glm_epsilon))
 }
-max_refit <- 100
-for (i in seq_len(max_refit)) {
+# fixtureへ記録する収束の診断値（参照値の再現条件の確認用）:
+# 最初のglm()のIRLS反復数、固定点に達するまでの再fit回数、最後の再fitでの
+# 係数の最大相対変化。
+irls_iterations <- model$iter
+refit_count <- 0
+refit_max_rel_change <- NA_real_
+for (i in seq_len(glm_settings$max_refit)) {
   prev_coef <- coef(model)
   model <- refit(start = prev_coef)
   if (!model$converged) {
     stop("glm() refit from converged coefficients did not converge")
   }
-  if (max(abs(coef(model) - prev_coef) / pmax(abs(coef(model)), 1e-8)) < 1e-13) {
+  refit_count <- i
+  refit_max_rel_change <- max(
+    abs(coef(model) - prev_coef) / pmax(abs(coef(model)), 1e-8)
+  )
+  if (refit_max_rel_change < glm_settings$refit_rel_change_tol) {
     break
   }
-  if (i == max_refit) {
+  if (i == glm_settings$max_refit) {
     stop("glm() refit did not reach a fixed point")
   }
 }
@@ -258,7 +285,7 @@ format_margeff <- function(me_df) {
 # 呼び出す（全シナリオ・全変数で解析解と~1e-11、標準誤差も本実装と~1e-8で一致する。
 # `numderiv=`引数は効果の刻み幅に影響しない）。
 margeff_vars <- setdiff(names(coef(model)), "(Intercept)")
-margeff_eps <- function(v) 1e-5 * sd(df[[v]])
+margeff_eps <- function(v) glm_settings$margeff_eps_sd_factor * sd(df[[v]])
 margeff_by_var <- function(call_fun) {
   do.call(rbind, lapply(margeff_vars, function(v) {
     call_fun(v, margeff_eps(v))
@@ -302,6 +329,9 @@ result <- list(
   lr_statistic = lr_stat,
   lr_p_value = lr_pvalue,
   pseudo_r_squared = prsquared,
+  irls_iterations = irls_iterations,
+  refit_count = refit_count,
+  refit_max_rel_change = refit_max_rel_change,
   margeff = margeff
 )
 cat(toJSON(result, auto_unbox = TRUE, digits = NA))

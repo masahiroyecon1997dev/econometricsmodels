@@ -44,7 +44,10 @@ from benchmark.common import (
 from benchmark.common.load_wooldridge import load as load_wooldridge
 from benchmark.common.load_wooldridge import load_apple_adoption
 from benchmark.nonlinear.constants import NON_CLUSTER_COV_TYPES
-from benchmark.nonlinear.references.r import run_glm_r
+from benchmark.nonlinear.references.r import (
+    glm_reference_settings,
+    run_glm_r,
+)
 
 NUMERIC_SCENARIOS = [
     "baseline",
@@ -216,10 +219,16 @@ def build_fixtures() -> dict:
         "generated_at": datetime.now(UTC).isoformat(),
         "r_version": r_version,
         "marginaleffects_version": marginaleffects_version,
+        # 参照値を決める設定（正本はrun_glm_crosscheck.Rの`glm_settings`）。
+        # 各エントリのirls_iterations・refit_count・refit_max_rel_changeは、
+        # この設定のもとでの実際の収束の様子。
+        "glm_reference_settings": glm_reference_settings(),
         "note": (
             "many_regressors（k=20）とoutlier_regressor（x1の5%が外れ値）を含む。"
             "ロバストSE・クラスターSEの参照値は、収束後の係数から再fitを繰り返した"
             "glmで計算している（run_glm_crosscheck.R参照）。"
+            "その設定は_meta.glm_reference_settings、各エントリのirls_iterations・"
+            "refit_count・refit_max_rel_changeは実際の収束の記録。"
             "perfect_multicollinearityシナリオはここに含まない"
             "（ComputationErrorの発生確認のみ、テストコード側で対応）。"
             "clusterは合成データ（baselineシナリオ、均等疑似グループ・不均衡"

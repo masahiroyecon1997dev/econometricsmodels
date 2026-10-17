@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
 from pathlib import Path
 
 from benchmark.common.reference.normalize import normalize_names
@@ -28,6 +30,11 @@ _GLM_SCALAR_KEYS = (
     "lr_statistic",
     "lr_p_value",
     "pseudo_r_squared",
+    # 参照値の再現条件の確認用（最初のglm()のIRLS反復数、固定点までの再fit回数、
+    # 最後の再fitでの係数の最大相対変化）。
+    "irls_iterations",
+    "refit_count",
+    "refit_max_rel_change",
 )
 
 
@@ -60,6 +67,23 @@ def run_glm_r(
         conf_from_low_high=True,
         fix_margeff=True,
     )
+
+
+def glm_reference_settings() -> dict:
+    """`run_glm_crosscheck.R`が参照値を作るときの設定（`glm()`の収束判定、
+    再fitの打ち切り条件、限界効果の刻み幅規則）を、Rスクリプトの定数から取得する。
+
+    fixtureの`_meta`へ転記するためのもの。設定の正本はRスクリプト側に置き、
+    Python側に二重に持たない。
+
+    Raises:
+        RuntimeError: Rスクリプトが非ゼロ終了した場合（stderr を添えて送出）。
+    """
+    cmd = ["Rscript", str(_R_SCRIPT), "--settings"]
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if proc.returncode != 0:
+        raise RuntimeError(f"Rscript failed ({' '.join(cmd)}):\n{proc.stderr}")
+    return json.loads(proc.stdout)
 
 
 # 名前正規化不要でそのまま通す Tobit のスカラー統計量（出力順を固定）。

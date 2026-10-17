@@ -80,66 +80,19 @@ PANEL_TOLERANCES: dict[str, dict[str, float]] = {
     # REのRクロスチェックはplm（全cov_type、hc2/hc3・cluster/dkとハウスマン検定は
     # 単一参照実装の例外、`benchmark/panel/run_plm_benchmark.R`・
     # `benchmark/panel/fixtures/generate_re_crosscheck_fixtures.py`参照）。
-    # plmの変量効果分散成分推定（Swamy-Arora）がlinearmodelsと僅かに異なる
-    # 実装のため、点推定自体が不均衡パネルで乖離する（実測最大相対誤差:
-    # params 0.18%・std_errors 0.71%・test_stats 0.67%・p_values 0.56%・conf_int 1.05%、
-    # baseline/wagepan等のバランスパネルでは機械精度で一致）。FEのfixest
-    # クロスチェック（機械精度一致）とは精度の前提が異なるため、実測値に
-    # マージンを載せた緩いRTOLを使う。
     "re_crosscheck": {
-        # バランスパネルでは分散成分推定の差が無く機械精度一致するため、
-        # unbalancedシナリオ以外はこちらで厳密に比較する。unbalancedでも、
-        # linearmodelsの分散成分を与えたplmを参照にするdkの明示バンド幅の
-        # 標準誤差・推論統計量・F統計量はこちらで比較する（cluster/dkの
-        # `G/(G-1)`・`T/(T-1)`補正は標準誤差に1%前後しか効かず、`rtol`の
-        # ような緩い許容誤差では補正式の取り違えを検出できない）。
-        "rtol_balanced": RTOL_MACHINE_PRECISION,
-        # unbalancedシナリオのみ、plmとlinearmodels準拠の本実装のSwamy-Arora分散成分の
-        # 差で点推定が約0.18%、標準誤差等がcov_typeに応じてずれる。一律に緩めると
-        # 補正式の取り違え（clusterの`G/(G-1)`欠落はseに約1.3%、`(n-1)/(n-K)`は
-        # 約0.5%）を見逃すため、統計量・cov_type別に実測へマージンを載せる。
-        # 係数（cov_type非依存、実測最大1.8e-3）。
-        "rtol_unbalanced_coef": 5e-3,
-        # F統計量（`plm::pwaldtest(test="F", vcov=...)`、cov_type連動のWald検定）:
-        # 分散成分の差が係数とseの両方に効いてWald二次形式に現れる。cov_type別の実測
-        # 最大相対誤差: classical 3.0e-4・hc1 8.8e-4・hc2 8.7e-4・hc3 8.5e-4・
-        # cluster 1.3e-3・dk 6.7e-3
-        # （dkはseと同様`T-1=5`の短い時系列で増幅される）。実測の2〜3倍のマージンを
-        # 載せる。自由度や補正式の取り違え（`G/(G-1)`欠落など約1%以上）は検出できる幅。
-        "rtol_unbalanced_f": {
-            "classical": 1e-3,
-            "hc1": 2e-3,
-            "hc2": 2e-3,
-            "hc3": 2e-3,
-            "cluster": 4e-3,
-            "dk": 2e-2,
-        },
-        # se・t・p値・信頼区間（実測最大相対誤差）: cluster 2.9e-3（conf_int）・
-        # hc2/hc3 1.1e-2（conf_int）・dk 3.7e-2（conf_int、se 0.9%がt分布の
-        # 自由度`T-1=5`の裾でp値・信頼区間に増幅される）。
-        # classical・hc1（実測最大相対誤差: std_errors 0.71%・conf_int 1.06%）も同水準。
-        # plm自身のREとの乖離の記録（この許容誤差では比べない）: dkで
-        # `dk_bandwidth`を明示した場合の実測（unbalanced、std_errors・
-        # conf_int）: バンド幅0で0.95%・12.3%（信頼区間の端が0に近いx2で
-        # 増幅され、上の5e-2を超える）、2で0.88%・3.7%、3で0.89%・1.2%。
-        # このためunbalancedの明示バンド幅の標準誤差・推論統計量は、
-        # `linearmodels`の分散成分を与えたplmの値と`rtol_balanced`で比べる。ハウスマン検定側（下の`rtol_hausman_unbalanced["dk"]`）の
-        # 許容誤差ではバンド幅2と3の統計量の差（約2.1%）を判別できない。
-        "rtol_unbalanced": {
-            "classical": 2e-2,
-            "hc1": 2e-2,
-            "hc2": 2e-2,
-            "hc3": 2e-2,
-            "cluster": 5e-3,
-            "dk": 5e-2,
-        },
+        # 標準誤差・推論統計量・F統計量は全シナリオ機械精度で比較する。cluster/dkの
+        # `G/(G-1)`・`T/(T-1)`補正は標準誤差に1%前後しか効かず、緩い許容誤差では
+        # 補正式の取り違えを検出できない。unbalancedでは、plmのSwamy-Arora分散成分が
+        # linearmodels準拠の本実装と異なる（plm自身のREとの実測最大相対誤差:
+        # params 0.18%・std_errors 0.71%・test_stats 0.67%・p_values 0.56%・
+        # conf_int 1.05%、dkのバンド幅0ではconf_int 12.3%）ため、参照値は
+        # plm自身のREではなく、linearmodelsの分散成分を与えたplm
+        # （`run_plm_re_given_variance_benchmark.R`）にして揃える。
+        "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_CROSSCHECK_FLOOR,
-        # p値（係数・F統計量）は絶対誤差の下限なし。バランスパネルは相対誤差、
-        # 不均衡パネルは常用対数の差（`test_re_crosscheck.py`の`_assert_p_close`参照）。
+        # p値（係数・F統計量）は絶対誤差の下限なし。
         "rtol_p_value": 1e-6,
-        # 不均衡パネルの実測最大|log10(ours/ref)|は0.03未満（係数・F統計量のp値
-        # 全体、約1e-48〜1e-9の裾を含む）。約3倍のマージン。
-        "p_value_log10_unbalanced": 0.1,
         # ハウスマン検定: 回帰ベース（補助回帰）版の
         # `plm::phtest(method = "aux", effect = "individual")`と比較する
         # （`generate_re_crosscheck_fixtures.py`モジュールdoc参照）。
@@ -147,8 +100,9 @@ PANEL_TOLERANCES: dict[str, dict[str, float]] = {
         "rtol_hausman": RTOL_MACHINE_PRECISION,
         "atol_hausman": ATOL_REFERENCE_FLOOR,
         # unbalancedシナリオのみ、plm/linearmodelsの分散成分（σ_u²）推定の
-        # 差でθが変わり統計量に増幅されるため、専用に緩めたrtolを使う（test_re_crosscheck.pyの`_UNBALANCED_
-        # HAUSMAN_SCENARIO`参照）。
+        # 差でθが変わり統計量に増幅されるため、専用に緩めたrtolを使う。標準誤差と
+        # 違い、補助回帰がphtest内部のθに依存するため、linearmodelsの分散成分を与えた
+        # 参照にはできずplm自身の値と比べる。
         # cov_type別の実測最大相対誤差（統計量）: classical 1.3%・hc1〜hc3 1.5%・
         # dk 1.5%・cluster 0.024%。クラスターはσ_uの差が相殺されやすく桁違いに小さい
         # ため、一律に緩めず実測にマージンを載せて分ける。

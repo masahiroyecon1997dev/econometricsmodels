@@ -1,23 +1,33 @@
 #!/usr/bin/env Rscript
-# 分散成分（σ_ε²・σ_u²）を外から与えたときの、REのDriscoll-Kraay標準誤差の参照値。
+# 分散成分（σ_ε²・σ_u²）を外から与えたときの、REの標準誤差・推論統計量の参照値。
 #
 # plmのSwamy-Arora分散成分は不均衡パネルで本実装（linearmodels準拠）と異なり、
-# plm自身のRE推定に`vcovSCC`を当てると、標準誤差が約1%ずれる（バンド幅0では
-# 信頼区間の端が0に近い係数で相対誤差が10%超に増幅される）。これはバンド幅の
-# 扱いとは無関係なずれなので、分散成分だけを外から与え（呼び出し側が
-# `linearmodels.RandomEffects`の値を渡す）、それ以外はplmの`vcovSCC`で計算する。
+# plm自身のRE推定では係数が約0.2%、標準誤差等がcov_typeに応じて1%前後ずれる
+# （dkのバンド幅0では信頼区間の端が0に近い係数で相対誤差が10%超に増幅される）。
+# これは共分散推定量や小標本補正とは無関係なずれなので、分散成分だけを外から与え
+# （呼び出し側が`linearmodels.RandomEffects`の値を渡す）、それ以外はplmの
+# `vcov`・`vcovHC`・`vcovSCC`で計算する。
 #
 # ## 手順
 #
 # 1. 与えられた分散成分から、個体ごとの準偏差変換の重み
 #    `θ_i = 1 - sqrt(σ_ε² / (σ_ε² + T_i σ_u²))`を計算する。
 # 2. 応答・各説明変数・定数列に`x - θ_i · x̄_i`（定数列は`1 - θ_i`）を当てる。
-# 3. 変換後のデータに対する定数なしのpooling（`plm(model = "pooling")`）に
-#    `vcovSCC(maxlag, type = "sss")`を当てる。変換後のデータのOLSはREのGLS推定量
-#    と一致するため、plm自身の分散成分を与えた場合は`plm(model = "random")`に
-#    対する`vcovSCC`と係数・標準誤差・F統計量が一致する。この等価性は生成側が
-#    フィクスチャを作るたびに確かめる（`generate_re_crosscheck_fixtures.py`の
-#    `_check_given_variance_equivalence`）。
+# 3. 変換後のデータに対する定数なしのpooling（`plm(model = "pooling")`）に、
+#    cov_typeごとの共分散推定量を当てる（`run_plm_benchmark.R`と同じ対応）。
+#    変換後のデータのOLSはREのGLS推定量と一致するため、plm自身の分散成分を
+#    与えた場合は`plm(model = "random")`に対する同じ共分散推定量と係数・標準誤差・
+#    F統計量が一致する。この等価性は生成側がフィクスチャを作るたびに確かめる
+#    （`generate_re_crosscheck_fixtures.py`の`_check_given_variance_equivalence`）。
+#
+#    - classical: `vcov(model)`
+#    - hc1/hc2/hc3: `vcovHC(method = "white1", type = "HC1"/"HC2"/"HC3")`
+#    - cluster（entity）: `vcovHC(method = "arellano", type = "sss")`
+#    - dk: `vcovSCC(maxlag, type = "sss")`
+#
+#    t検定の自由度はclassical・hc*が`df.residual`、clusterが`G-1`、dkが`T-1`
+#    （`run_plm_benchmark.R`と同じ規約）。clusterは`entity`のみ（entity以外の列は
+#    `run_plm_benchmark.R`の`vcovCL`の経路を使い、バランスパネルで比較する）。
 #
 # 回帰式は素の列名の加法（`y ~ x1 + x2`）のみ対応する。`log(x1)`のような変換は
 # `all.vars`で素の列名になり、変換なしのまま走ってしまう。
@@ -34,7 +44,7 @@
 # 分散成分を与えたこのスクリプトの結果とplm自身のREの`pwaldtest`のF統計量を
 # 突き合わせて確かめる。`car::linearHypothesis`は`Dockerfile`で版を固定して
 # いない推移的な依存のため使わない。
-# p値はt検定と同じ分母自由度`T-1`の`pf()`で計算する（`run_plm_benchmark.R`と同じ規約）。
+# p値はt検定と同じ分母自由度の`pf()`で計算する（`run_plm_benchmark.R`と同じ規約）。
 #
 # ## 対象
 #
@@ -43,6 +53,8 @@
 # バランスパネルは`run_plm_benchmark.R`（plm自身の分散成分で機械精度に一致）を使う。
 #
 # 使用例:
+#   Rscript run_plm_re_given_variance_benchmark.R data.csv "y ~ x1 + x2" \
+#       cluster entity time 1.5274426 0.8642969
 #   Rscript run_plm_re_given_variance_benchmark.R data.csv "y ~ x1 + x2" dk \
 #       entity time 1.5274426 0.8642969 3
 
@@ -52,23 +64,20 @@ script_path <- sub("^--file=", "", grep("^--file=", commandArgs(), value = TRUE)
 source(file.path(dirname(script_path), "..", "..", "common", "_common.R"))
 
 args <- commandArgs(trailingOnly = TRUE)
-if (length(args) < 8) {
+if (length(args) < 7) {
   stop(
     "usage: Rscript run_plm_re_given_variance_benchmark.R <data.csv> ",
-    "<formula> <ignored> <entity_col> <time_col> <sigma2_eps> <sigma2_u> ",
-    "<maxlag>"
+    "<formula> <cov_type: classical|hc1|hc2|hc3|cluster|dk> <entity_col> ",
+    "<time_col> <sigma2_eps> <sigma2_u> [maxlag (dk)]"
   )
 }
 data_path <- args[1]
 formula_str <- args[2]
-if (tolower(args[3]) != "dk") {
-  stop("only cov_type 'dk' is supported (the third argument is checked)")
-}
+cov_type <- tolower(args[3])
 entity_col <- args[4]
 time_col <- args[5]
 sigma2_eps <- as.numeric(args[6])
 sigma2_u <- as.numeric(args[7])
-maxlag <- as.integer(args[8])
 
 # check.names=FALSE: run_plm_benchmark.Rと同じ理由。
 df <- read.csv(data_path, check.names = FALSE)
@@ -109,14 +118,39 @@ model <- plm(
   model = "pooling"
 )
 
+n_groups <- length(unique(df[[entity_col]]))
 n_periods <- length(unique(df[[time_col]]))
-t_df <- n_periods - 1
+df_resid <- df.residual(model)
 
-vc <- vcovSCC(model, maxlag = maxlag, type = "sss")
+# cov_typeごとのvcovとt分布の自由度（モジュールコメント参照）。
+if (cov_type == "classical") {
+  vc <- vcov(model)
+  t_df <- df_resid
+} else if (cov_type == "hc1") {
+  vc <- vcovHC(model, method = "white1", type = "HC1")
+  t_df <- df_resid
+} else if (cov_type == "hc2") {
+  vc <- vcovHC(model, method = "white1", type = "HC2")
+  t_df <- df_resid
+} else if (cov_type == "hc3") {
+  vc <- vcovHC(model, method = "white1", type = "HC3")
+  t_df <- df_resid
+} else if (cov_type == "cluster") {
+  vc <- vcovHC(model, method = "arellano", type = "sss")
+  t_df <- n_groups - 1
+} else if (cov_type == "dk") {
+  if (length(args) < 8) {
+    stop("dk requires maxlag as the 8th argument")
+  }
+  vc <- vcovSCC(model, maxlag = as.integer(args[8]), type = "sss")
+  t_df <- n_periods - 1
+} else {
+  stop(paste("unknown cov_type:", cov_type))
+}
 coefs <- coef(model)
 ses <- sqrt(diag(vc))
 
-# t検定への変換（run_plm_benchmark.Rと同じ規約、自由度はT-1、95%信頼区間）。
+# t検定への変換（run_plm_benchmark.Rと同じ規約、95%信頼区間）。
 test_stats <- coefs / ses
 p_values <- 2 * pt(-abs(test_stats), df = t_df)
 crit <- qt(0.975, df = t_df)

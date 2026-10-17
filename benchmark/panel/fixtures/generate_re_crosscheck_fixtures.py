@@ -32,19 +32,21 @@
   ロバスト共分散が構造的に特異になるケース（`_STRUCTURALLY_SINGULAR`）は`null`
   （本実装は`fit()`がエラーになる）。
 
-## unbalancedのdk明示バンド幅（分散成分を与えたplm）
+## unbalancedの参照値（分散成分を与えたplm）
 
 不均衡パネルではplmのSwamy-Arora分散成分が`linearmodels`準拠の本実装と異なり、
-plm自身のREに`vcovSCC`を当てると標準誤差が約1%ずれる（バンド幅0では信頼区間の
-端が0に近い係数で相対誤差が10%超に増幅される。バンド幅の扱いとは無関係）。
-そのため`unbalanced`の`dk_explicit_bandwidth`だけは、`linearmodels`の分散成分
-（本実装と機械精度で一致、`re.json`）をRに渡して準偏差変換し、plmの`vcovSCC`を
-当てた値を参照値にする（`run_plm_re_given_variance_benchmark.R`）。plmが
-検証するのは係数・共分散行列・小標本補正までで、θの式・傾きだけのWald F・t検定
-への変換（自由度`T-1`）は手書き。この方式の根拠は、plm自身の分散成分を与えると
-plm自身のREと係数・標準誤差・F統計量が一致することで、生成のたびに確かめる
-（`_check_given_variance_equivalence`）。`unbalanced`の既定バンド幅のdkと他の
-cov_type、ハウスマン検定はplm自身の値と緩い許容誤差で比べる。
+plm自身のREでは係数が最大0.18%、標準誤差・信頼区間等がcov_typeに応じて1%前後
+ずれる（dkのバンド幅0では信頼区間の端が0に近い係数で相対誤差が10%超に増幅
+される）。共分散推定量や小標本補正とは無関係なずれなので、`unbalanced`の標準誤差・
+推論統計量（全cov_typeと`dk_explicit_bandwidth`）は、`linearmodels`の分散成分
+（本実装と機械精度で一致、`re.json`）をRに渡して準偏差変換し、plmの`vcov`・
+`vcovHC`・`vcovSCC`を当てた値を参照値にする
+（`run_plm_re_given_variance_benchmark.R`）。plmが検証するのは係数・共分散行列・
+小標本補正までで、θの式・傾きだけのWald F・t検定への変換（自由度はcov_type別）は
+手書き。この方式の根拠は、plm自身の分散成分を与えるとplm自身のREと係数・標準誤差・
+F統計量が一致することで、生成のたびにcov_type・バンド幅ごとに確かめる
+（`_check_given_variance_equivalence`）。ハウスマン検定は補助回帰がplmの`phtest`
+内部のθに依存するため、この方式にできずplm自身の値と緩い許容誤差で比べる。
 
 ## entity以外の列でクラスターするケース
 
@@ -69,12 +71,10 @@ classical/hc1は`re.json`側の`linearmodels`の`f_statistic_robust`で検証す
 
 ## 許容誤差について
 
-plmの変量効果分散成分推定（Swamy-Arora）はlinearmodelsと僅かに異なる実装の
-ため、点推定が不均衡パネルで最大0.18%、標準誤差・信頼区間等がcov_typeに応じて
-最大1%台（dkの信頼区間は3.7%）乖離することを実測確認済み（バランスパネルでは
-機械精度で一致）。このためテストコード側では、バランス
-パネルを機械精度、不均衡パネル（`unbalanced`）のみ統計量・cov_type別に緩めた
-許容誤差で比較する（`tests/support/_tolerances_panel.py`の`re_crosscheck`参照）。
+バランスパネルはplm自身のREが、`unbalanced`は上記の分散成分を与えたplmが参照値の
+ため、標準誤差・推論統計量・F統計量は全シナリオ機械精度で比較する。緩い許容誤差を
+使うのはハウスマン検定の`unbalanced`だけ（`tests/support/_tolerances_panel.py`の
+`re_crosscheck`参照）。
 
 ## aic/bic/log_likelihoodを含まない理由
 
@@ -106,6 +106,7 @@ import importlib.metadata
 import subprocess
 import tempfile
 from datetime import UTC, datetime
+from functools import cache
 from pathlib import Path
 
 import polars as pl
@@ -132,7 +133,7 @@ from benchmark.panel.fixtures.generate_fe_fixtures import (
 from benchmark.panel.references.linearmodels_ref import run_re
 from benchmark.panel.references.r import (
     default_dk_bandwidth,
-    run_re_dk_given_variance_plm_r,
+    run_re_given_variance_plm_r,
     run_re_hausman_plm_r,
     run_re_plm_r,
 )
@@ -261,43 +262,52 @@ def _check_given_variance_equivalence(
             )
 
 
-def _run_dk_explicit_bandwidths(scenario: str) -> dict[str, dict]:
-    """`dk_bandwidth`を明示した標準誤差・推論統計量の参照値（バンド幅 -> 値）。
-    balancedはplm自身のRE、unbalancedはlinearmodelsの分散成分を与えたplm
-    （`DK_EXPLICIT_BANDWIDTHS`直後のコメント参照）。"""
-    bandwidths = DK_EXPLICIT_BANDWIDTHS[scenario]
-    if scenario != UNBALANCED_SCENARIO:
-        return {
-            str(bw): _run_effects(scenario, "dk", maxlag=bw)
-            for bw in bandwidths
-        }
+@cache
+def _linearmodels_variance(scenario: str) -> dict:
+    """`linearmodels`のREの分散成分（`sigma2_eps`・`sigma2_u`）。本実装と機械精度で
+    一致する（`re.json`）。分散成分は`cov_type`・バンド幅によらないため1回だけ求める。"""
     x_cols = SCENARIO_X_COLS.get(scenario, ["x1", "x2"])
+    return run_re(scenario, x_cols, "classical", time_col="time")
+
+
+def _run_effects_reference(
+    scenario: str, cov_type: str, *, maxlag: int | None = None
+) -> dict:
+    """標準誤差・推論統計量の参照値。balancedはplm自身のRE、unbalancedは
+    `linearmodels`の分散成分を与えたplm（`UNBALANCED_SCENARIO`直後のコメント参照）。
+    plm自身の分散成分を与えた値がplm自身のREと一致することを、生成のたびに確かめる。"""
+    plm_re = _run_effects(scenario, cov_type, maxlag=maxlag)
+    if scenario != UNBALANCED_SCENARIO:
+        return plm_re
     csv_path = DATA_DIR / f"fe_{scenario}.csv"
+    x_cols = SCENARIO_X_COLS.get(scenario, ["x1", "x2"])
     formula = f"y ~ {' + '.join(x_cols)}"
-    # 分散成分はバンド幅によらないため1回だけ求める。
-    variance = run_re(scenario, x_cols, "classical", time_col="time")
-    references = {}
-    for bw in bandwidths:
-        plm_re = _run_effects(scenario, "dk", maxlag=bw)
-        _check_given_variance_equivalence(
-            run_re_dk_given_variance_plm_r(
-                csv_path,
-                formula,
-                sigma2_eps=plm_re["sigma2_eps"],
-                sigma2_u=plm_re["sigma2_u"],
-                maxlag=bw,
-            ),
-            plm_re,
-            f"{scenario}/bandwidth={bw}",
-        )
-        references[str(bw)] = run_re_dk_given_variance_plm_r(
+    if cov_type == "dk" and maxlag is None:
+        maxlag = default_dk_bandwidth(csv_path)
+    label = f"{scenario}/{cov_type}" + (
+        f"/bandwidth={maxlag}" if cov_type == "dk" else ""
+    )
+    _check_given_variance_equivalence(
+        run_re_given_variance_plm_r(
             csv_path,
             formula,
-            sigma2_eps=variance["sigma2_eps"],
-            sigma2_u=variance["sigma2_u"],
-            maxlag=bw,
-        )
-    return references
+            cov_type,
+            sigma2_eps=plm_re["sigma2_eps"],
+            sigma2_u=plm_re["sigma2_u"],
+            maxlag=maxlag,
+        ),
+        plm_re,
+        label,
+    )
+    variance = _linearmodels_variance(scenario)
+    return run_re_given_variance_plm_r(
+        csv_path,
+        formula,
+        cov_type,
+        sigma2_eps=variance["sigma2_eps"],
+        sigma2_u=variance["sigma2_u"],
+        maxlag=maxlag,
+    )
 
 
 def _run_cluster_case(
@@ -354,16 +364,17 @@ def build_fixtures() -> dict:
 
     for scenario in NUMERIC_SCENARIOS:
         fixtures[scenario] = {
-            cov_type: _run_effects(scenario, cov_type)
+            cov_type: _run_effects_reference(scenario, cov_type)
             for cov_type in SCENARIO_COV_TYPES.get(scenario, COV_TYPES)
         }
         csv_path = DATA_DIR / f"fe_{scenario}.csv"
         x_cols = SCENARIO_X_COLS.get(scenario, ["x1", "x2"])
         if scenario in DK_EXPLICIT_BANDWIDTHS:
             bandwidths = DK_EXPLICIT_BANDWIDTHS[scenario]
-            fixtures[scenario][DK_EXPLICIT_BANDWIDTH_KEY] = (
-                _run_dk_explicit_bandwidths(scenario)
-            )
+            fixtures[scenario][DK_EXPLICIT_BANDWIDTH_KEY] = {
+                str(bw): _run_effects_reference(scenario, "dk", maxlag=bw)
+                for bw in bandwidths
+            }
             fixtures[scenario][HAUSMAN_DK_BANDWIDTH_KEY] = {
                 str(bw): _run_hausman(
                     csv_path,
@@ -464,9 +475,10 @@ def build_fixtures() -> dict:
             "dkの時点数の境界の成功パス。dkの明示バンド幅は各シナリオの"
             "dk_explicit_bandwidth（標準誤差）・"
             "hausman_dk_bandwidth（ハウスマン検定）。unbalancedの"
-            "dk_explicit_bandwidthだけは、linearmodelsの分散成分を与えて"
-            "準偏差変換したデータにplmのvcovSCCを当てた値（傾きだけのWald Fは"
-            "手書き。plm自身の分散成分を与えるとplm自身のREと一致することを"
+            "標準誤差・推論統計量（全cov_typeとdk_explicit_bandwidth）だけは、"
+            "linearmodelsの分散成分を与えて準偏差変換したデータにplmの"
+            "vcov・vcovHC・vcovSCCを当てた値（傾きだけのWald Fは手書き。"
+            "plm自身の分散成分を与えるとplm自身のREと一致することを"
             "生成時に確認済み。モジュールdoc参照）。"
             "baseline.cluster_imbalanced（サイズ[2,3,5,10,30,50]のタイル）・"
             "baseline.cluster_g3（k=1、G=3=2k+1の境界成功パス）は、cluster列が"
@@ -474,11 +486,12 @@ def build_fixtures() -> dict:
             "sandwich::vcovCL(HC1, cadjust)を当てた値（クラスター列は"
             "都度動的付与、バランスパネルのみ）。"
             "plmの変量効果分散成分推定（Swamy-Arora）はlinearmodelsと僅かに"
-            "異なる実装のため、不均衡パネルで点推定が最大0.18%、標準誤差・信頼区間等が"
-            "cov_typeに応じて最大1%台（dkの信頼区間は3.7%）乖離する"
-            "（実測確認済み、実装バグではない）。テストコード側ではバランス"
-            "パネルとunbalancedのdk明示バンド幅を機械精度、unbalancedのその他は"
-            "統計量・cov_type別に緩めた許容誤差で比較すること（tests/support/_tolerances_panel.pyのre_crosscheck参照）。t検定"
+            "異なる実装のため、plm自身のREは不均衡パネルで点推定が最大0.18%、"
+            "標準誤差・信頼区間等がcov_typeに応じて1%前後乖離する"
+            "（実測確認済み、実装バグではない）。テストコード側では標準誤差・"
+            "推論統計量を全シナリオ機械精度で比較し、緩めるのはunbalancedの"
+            "ハウスマン検定だけ（tests/support/_tolerances_panel.pyの"
+            "re_crosscheck参照）。t検定"
             "（test_stats/p_values/conf_int）はplmの既定であるz検定（漸近正規"
             "近似）ではなく、本実装と同じt分布（hc2/hc3はdf_resid、clusterはG-1、"
             "dkはT-1）の式でparams/std_errorsから計算し直している"

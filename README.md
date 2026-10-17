@@ -303,24 +303,25 @@ classical standard errors:
 
 | Method | `fit()` time |
 |---|---|
-| OLS | 0.07 s |
-| WLS | 0.10 s |
-| Logit | 0.70 s |
-| Probit | 0.81 s |
-| Tobit | 1.3 s |
-| IV (2SLS) | 0.49 s |
+| OLS | 0.15 s |
+| WLS | 0.11 s |
+| Logit | 0.48 s |
+| Probit | 1.5 s |
+| Tobit | 2.1 s |
+| IV (2SLS) | 0.32 s |
 | FE | 0.20 s |
-| RE | 0.62 s |
+| RE | 0.33 s |
 
 Execution time and memory are compared against statsmodels and linearmodels
 wherever a comparable Python implementation exists. Some examples at the
 same sample size (reference time divided by ours):
 
-- OLS: about 3.0x faster than statsmodels.
-- IV (2SLS): about 30x faster than linearmodels.
-- FE: about 11x faster than linearmodels.
-- Logit: about 1.4x faster than statsmodels, and about 1.1x with clustered
-  standard errors.
+- OLS: about 1.6x faster than statsmodels.
+- IV (2SLS): about 26x faster than linearmodels.
+- FE: about 19x faster than linearmodels.
+- Logit: about 1.1x faster than statsmodels, and about on par (0.93x to
+  0.97x) at 100,000 observations for every standard-error type, including
+  clustered ones.
 - Tobit has no Python implementation to compare against, so only its own
   time is shown.
 

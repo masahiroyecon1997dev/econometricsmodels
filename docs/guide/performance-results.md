@@ -2,7 +2,7 @@
 
 # Performance results
 
-Measured at release **v0.8.0** (commit `886aa20fd212993ee98805224bb7c90c8d22c185`) by the *Benchmark (performance)* workflow on GitHub Actions (`ubuntu-latest`, shared runner; [run 37182418216](https://github.com/masahiroyecon1997dev/econometricsmodels/actions/runs/37182418216)). Each point is the median of 3 runs after one warm-up run, with the linear-algebra backends pinned to one thread and the extension built in release mode. See [Performance](performance.md) for how to read these numbers.
+Measured at release **v0.9.0** (commit `ac66940`) by the *Benchmark (performance)* workflow on GitHub Actions (`ubuntu-latest`, shared runner; [run 39079803069](https://github.com/masahiroyecon1997dev/econometricsmodels/actions/runs/39079803069)). Each point is the median of 3 runs after one warm-up run, with the linear-algebra backends pinned to one thread and the extension built in release mode. See [Performance](performance.md) for how to read these numbers.
 
 ## OLS
 
@@ -10,43 +10,39 @@ Compared with statsmodels 0.15.0.
 
 ### n-axis (k=5)
 
-Time in seconds (median) / peak RSS in MB.
-
-#### classical
+Standard error: classical. Time in seconds (median) / peak RSS in MB.
 
 | n | econometricsmodels | statsmodels |
 |---|---|---|
-| 1,000 | 0.0001s / 93.1MB | 0.0096s / 254.1MB |
-| 10,000 | 0.0011s / 94.4MB | 0.0119s / 235.7MB |
-| 100,000 | 0.0095s / 112.9MB | 0.0300s / 270.7MB |
-| 1,000,000 | 0.0725s / 320.4MB | 0.2176s / 566.4MB |
-
-#### hac
-
-| n | econometricsmodels | statsmodels |
-|---|---|---|
-| 1,000 | 0.0002s / 93.6MB | 0.0100s / 243.5MB |
-| 10,000 | 0.0019s / 96.3MB | 0.0145s / 236.4MB |
-| 100,000 | 0.0183s / 120.4MB | 0.0598s / 274.5MB |
-| 1,000,000 | 0.2352s / 382.4MB | 0.9347s / 651.5MB |
+| 10,000 | 0.0013s / 95.9MB | 0.0085s / 247.0MB |
+| 100,000 | 0.0131s / 115.6MB | 0.0267s / 271.2MB |
+| 1,000,000 | 0.1478s / 320.8MB | 0.2304s / 567.0MB |
 
 ### k-axis (n=10,000)
 
-Time in seconds (median).
-
-#### classical
+Standard error: classical. Time in seconds (median).
 
 | k | econometricsmodels | statsmodels |
 |---|---|---|
-| 5 | 0.0011s | 0.0122s |
-| 20 | 0.0037s | 0.0376s |
+| 5 | 0.0016s | 0.0092s |
+| 20 | 0.0056s | 0.0273s |
 
-#### hac
+### Standard errors (n=100,000, k=5)
 
-| k | econometricsmodels | statsmodels |
-|---|---|---|
-| 5 | 0.0020s | 0.0142s |
-| 20 | 0.0092s | 0.0457s |
+One row per standard-error type. Time in seconds (median) / peak RSS in MB; speed-up is the reference time divided by the econometricsmodels time (below 1: the reference was faster). A row without a reference time has no equivalent standard error in the reference implementation. Cluster rows give the number of clusters G and whether the rows of a cluster are scattered (random) or contiguous (sorted).
+
+| standard error | econometricsmodels | statsmodels | speed-up |
+|---|---|---|---|
+| classical | 0.0131s / 115.6MB | 0.0263s / 270.9MB | 2.0x |
+| hc0 | 0.0165s / 120.2MB | 0.0280s / 272.6MB | 1.7x |
+| hc1 | 0.0163s / 120.2MB | 0.0274s / 271.4MB | 1.7x |
+| hc2 | 0.0168s / 118.2MB | 0.0301s / 271.5MB | 1.8x |
+| hc3 | 0.0173s / 120.3MB | 0.0300s / 271.2MB | 1.7x |
+| hac | 0.0208s / 116.2MB | 0.0526s / 276.2MB | 2.5x |
+| cluster (G=50, random) | 0.0177s / 120.9MB | 0.0308s / 272.5MB | 1.7x |
+| cluster (G=50, sorted) | 0.0190s / 119.5MB | 0.0324s / 272.5MB | 1.7x |
+| cluster (G=n/10, random) | 0.0203s / 121.3MB | 0.0346s / 275.1MB | 1.7x |
+| cluster (G=n/10, sorted) | 0.0200s / 120.4MB | 0.0324s / 274.9MB | 1.6x |
 
 ## WLS
 
@@ -54,43 +50,39 @@ Compared with statsmodels 0.15.0.
 
 ### n-axis (k=5)
 
-Time in seconds (median) / peak RSS in MB.
-
-#### classical
+Standard error: classical. Time in seconds (median) / peak RSS in MB.
 
 | n | econometricsmodels | statsmodels |
 |---|---|---|
-| 1,000 | 0.0001s / 92.9MB | 0.0096s / 258.1MB |
-| 10,000 | 0.0013s / 94.8MB | 0.0129s / 236.1MB |
-| 100,000 | 0.0145s / 114.5MB | 0.0308s / 269.9MB |
-| 1,000,000 | 0.1037s / 335.6MB | 0.2424s / 612.1MB |
-
-#### hac
-
-| n | econometricsmodels | statsmodels |
-|---|---|---|
-| 1,000 | 0.0002s / 93.6MB | 0.0104s / 246.6MB |
-| 10,000 | 0.0024s / 96.3MB | 0.0153s / 236.6MB |
-| 100,000 | 0.0268s / 122.9MB | 0.0619s / 279.0MB |
-| 1,000,000 | 0.2673s / 390.0MB | 0.9800s / 667.6MB |
+| 10,000 | 0.0016s / 95.3MB | 0.0122s / 247.0MB |
+| 100,000 | 0.0140s / 114.9MB | 0.0317s / 269.9MB |
+| 1,000,000 | 0.1083s / 335.7MB | 0.2516s / 612.5MB |
 
 ### k-axis (n=10,000)
 
-Time in seconds (median).
-
-#### classical
+Standard error: classical. Time in seconds (median).
 
 | k | econometricsmodels | statsmodels |
 |---|---|---|
-| 5 | 0.0013s | 0.0132s |
-| 20 | 0.0043s | 0.0360s |
+| 5 | 0.0015s | 0.0133s |
+| 20 | 0.0051s | 0.0374s |
 
-#### hac
+### Standard errors (n=100,000, k=5)
 
-| k | econometricsmodels | statsmodels |
-|---|---|---|
-| 5 | 0.0024s | 0.0155s |
-| 20 | 0.0088s | 0.0461s |
+One row per standard-error type. Time in seconds (median) / peak RSS in MB; speed-up is the reference time divided by the econometricsmodels time (below 1: the reference was faster). A row without a reference time has no equivalent standard error in the reference implementation. Cluster rows give the number of clusters G and whether the rows of a cluster are scattered (random) or contiguous (sorted).
+
+| standard error | econometricsmodels | statsmodels | speed-up |
+|---|---|---|---|
+| classical | 0.0138s / 116.8MB | 0.0326s / 270.0MB | 2.4x |
+| hc0 | 0.0121s / 121.4MB | 0.0340s / 270.9MB | 2.8x |
+| hc1 | 0.0125s / 121.5MB | 0.0347s / 270.0MB | 2.8x |
+| hc2 | 0.0141s / 123.3MB | 0.0371s / 270.2MB | 2.6x |
+| hc3 | 0.0137s / 121.4MB | 0.0367s / 270.0MB | 2.7x |
+| hac | 0.0251s / 118.7MB | 0.0654s / 279.0MB | 2.6x |
+| cluster (G=50, random) | 0.0153s / 121.2MB | 0.0396s / 271.0MB | 2.6x |
+| cluster (G=50, sorted) | 0.0176s / 120.8MB | 0.0385s / 271.0MB | 2.2x |
+| cluster (G=n/10, random) | 0.0192s / 121.2MB | 0.0402s / 271.4MB | 2.1x |
+| cluster (G=n/10, sorted) | 0.0215s / 120.7MB | 0.0367s / 271.9MB | 1.7x |
 
 ## Logit
 
@@ -98,52 +90,46 @@ Compared with statsmodels 0.15.0.
 
 ### n-axis (k=5)
 
-Time in seconds (median) / peak RSS in MB.
-
-#### classical
+Standard error: classical. Time in seconds (median) / peak RSS in MB.
 
 | n | econometricsmodels | statsmodels |
 |---|---|---|
-| 1,000 | 0.0008s / 151.0MB | 0.0099s / 256.1MB |
-| 10,000 | 0.0071s / 153.1MB | 0.0154s / 240.5MB |
-| 100,000 | 0.0686s / 175.8MB | 0.0890s / 270.9MB |
-| 1,000,000 | 0.7033s / 408.6MB | 0.9501s / 524.1MB |
-
-#### cluster
-
-| n | econometricsmodels | statsmodels |
-|---|---|---|
-| 1,000 | 0.0009s / 151.8MB | 0.0101s / 247.7MB |
-| 10,000 | 0.0090s / 155.2MB | 0.0165s / 241.0MB |
-| 100,000 | 0.0914s / 188.8MB | 0.0999s / 271.4MB |
-| 1,000,000 | 0.9410s / 461.2MB | 1.0482s / 525.5MB |
+| 10,000 | 0.0045s / 153.1MB | 0.0104s / 248.5MB |
+| 100,000 | 0.0479s / 171.0MB | 0.0453s / 268.2MB |
+| 1,000,000 | 0.4786s / 399.9MB | 0.5362s / 511.7MB |
 
 ### k-axis (n=10,000)
 
-Time in seconds (median).
-
-#### classical
+Standard error: classical. Time in seconds (median).
 
 | k | econometricsmodels | statsmodels |
 |---|---|---|
-| 5 | 0.0070s | 0.0157s |
-| 20 | 0.0289s | 0.0391s |
+| 5 | 0.0052s | 0.0111s |
+| 20 | 0.0190s | 0.0259s |
 
-#### cluster
+### Standard errors (n=100,000, k=5)
 
-| k | econometricsmodels | statsmodels |
-|---|---|---|
-| 5 | 0.0091s | 0.0162s |
-| 20 | 0.0379s | 0.0410s |
+One row per standard-error type. Time in seconds (median) / peak RSS in MB; speed-up is the reference time divided by the econometricsmodels time (below 1: the reference was faster). A row without a reference time has no equivalent standard error in the reference implementation. Cluster rows give the number of clusters G and whether the rows of a cluster are scattered (random) or contiguous (sorted).
 
-### Variants (cov_type=classical, k=5, n=1,000,000)
+| standard error | econometricsmodels | statsmodels | speed-up |
+|---|---|---|---|
+| classical | 0.0468s / 175.7MB | 0.0447s / 268.4MB | 0.95x |
+| opg | 0.0498s / 179.4MB | - | - |
+| hc0 | 0.0494s / 178.4MB | 0.0478s / 269.6MB | 0.97x |
+| hc1 | 0.0484s / 179.5MB | - | - |
+| cluster (G=50, random) | 0.0524s / 183.0MB | 0.0500s / 271.3MB | 0.95x |
+| cluster (G=50, sorted) | 0.0533s / 184.3MB | 0.0512s / 271.5MB | 0.96x |
+| cluster (G=n/10, random) | 0.0549s / 176.6MB | 0.0528s / 271.7MB | 0.96x |
+| cluster (G=n/10, sorted) | 0.0555s / 183.4MB | 0.0518s / 271.7MB | 0.93x |
+
+### Variants (classical, k=5, n=1,000,000)
 
 Time in seconds (median). The default variant (`newton`) is the matching row of the n-axis table above.
 
 | variant | econometricsmodels | statsmodels |
 |---|---|---|
-| bfgs | 0.6684s | 0.9683s |
-| lbfgs | 0.7180s | 0.8847s |
+| bfgs | 0.4810s | 0.5503s |
+| lbfgs | 0.4770s | 0.5041s |
 
 ## Probit
 
@@ -151,52 +137,47 @@ Compared with statsmodels 0.15.0.
 
 ### n-axis (k=5)
 
-Time in seconds (median) / peak RSS in MB. Rows for n=200,000, 1,000,000 are measured for classical only, without the reference implementation.
-
-#### classical
+Standard error: classical. Time in seconds (median) / peak RSS in MB. Rows for n=200,000, 1,000,000 are measured without the reference implementation.
 
 | n | econometricsmodels | statsmodels |
 |---|---|---|
-| 1,000 | 0.0008s / 151.1MB | 0.0067s / 259.3MB |
-| 10,000 | 0.0082s / 152.9MB | 0.0140s / 242.5MB |
-| 100,000 | 0.0828s / 175.3MB | 0.0961s / 273.1MB |
-| 200,000 | 0.1632s / 202.5MB | - |
-| 1,000,000 | 0.8059s / 410.9MB | - |
-
-#### cluster
-
-| n | econometricsmodels | statsmodels |
-|---|---|---|
-| 1,000 | 0.0010s / 151.9MB | 0.0068s / 252.4MB |
-| 10,000 | 0.0107s / 155.4MB | 0.0140s / 243.3MB |
-| 100,000 | 0.1063s / 185.2MB | 0.1060s / 273.7MB |
+| 10,000 | 0.0152s / 152.2MB | 0.0321s / 245.7MB |
+| 100,000 | 0.1463s / 174.3MB | 0.1939s / 265.7MB |
+| 200,000 | 0.2966s / 198.4MB | - |
+| 1,000,000 | 1.4610s / 394.5MB | - |
 
 ### k-axis (n=10,000)
 
-Time in seconds (median).
-
-#### classical
+Standard error: classical. Time in seconds (median).
 
 | k | econometricsmodels | statsmodels |
 |---|---|---|
-| 5 | 0.0082s | 0.0138s |
-| 20 | 0.0233s | 0.0278s |
+| 5 | 0.0147s | 0.0311s |
+| 20 | 0.0474s | 0.0625s |
 
-#### cluster
+### Standard errors (n=100,000, k=5)
 
-| k | econometricsmodels | statsmodels |
-|---|---|---|
-| 5 | 0.0174s | 0.0138s |
-| 20 | 0.0320s | 0.0289s |
+One row per standard-error type. Time in seconds (median) / peak RSS in MB; speed-up is the reference time divided by the econometricsmodels time (below 1: the reference was faster). A row without a reference time has no equivalent standard error in the reference implementation. Cluster rows give the number of clusters G and whether the rows of a cluster are scattered (random) or contiguous (sorted).
 
-### Variants (cov_type=classical, k=5, n=100,000)
+| standard error | econometricsmodels | statsmodels | speed-up |
+|---|---|---|---|
+| classical | 0.1514s / 174.2MB | 0.2022s / 266.3MB | 1.3x |
+| opg | 0.1565s / 178.4MB | - | - |
+| hc0 | 0.1576s / 178.7MB | 0.2014s / 266.7MB | 1.3x |
+| hc1 | 0.1566s / 176.5MB | - | - |
+| cluster (G=50, random) | 0.1570s / 184.9MB | 0.2025s / 269.3MB | 1.3x |
+| cluster (G=50, sorted) | 0.1572s / 183.4MB | 0.2042s / 269.2MB | 1.3x |
+| cluster (G=n/10, random) | 0.1600s / 181.1MB | 0.2092s / 269.1MB | 1.3x |
+| cluster (G=n/10, sorted) | 0.1596s / 183.9MB | 0.2058s / 269.1MB | 1.3x |
+
+### Variants (classical, k=5, n=100,000)
 
 Time in seconds (median). The default variant (`newton`) is the matching row of the n-axis table above.
 
 | variant | econometricsmodels | statsmodels |
 |---|---|---|
-| bfgs | 0.1207s | 0.0989s |
-| lbfgs | 0.0973s | 0.0913s |
+| bfgs | 0.1582s | 0.1953s |
+| lbfgs | 0.1584s | 0.1845s |
 
 ## Tobit
 
@@ -204,51 +185,46 @@ econometricsmodels only: there is no in-process reference implementation to time
 
 ### n-axis (k=5)
 
-Time in seconds (median) / peak RSS in MB. Rows for n=200,000, 1,000,000 are measured for classical only, without the reference implementation.
-
-#### classical
+Standard error: classical. Time in seconds (median) / peak RSS in MB. Rows for n=200,000, 1,000,000 are measured without the reference implementation.
 
 | n | econometricsmodels |
 |---|---|
-| 1,000 | 0.0012s / 151.8MB |
-| 10,000 | 0.0115s / 153.5MB |
-| 100,000 | 0.1296s / 178.7MB |
-| 200,000 | 0.2593s / 202.8MB |
-| 1,000,000 | 1.3214s / 401.3MB |
-
-#### cluster
-
-| n | econometricsmodels |
-|---|---|
-| 1,000 | 0.0014s / 152.6MB |
-| 10,000 | 0.0139s / 156.0MB |
-| 100,000 | 0.1552s / 188.5MB |
+| 10,000 | 0.0183s / 153.7MB |
+| 100,000 | 0.2144s / 173.1MB |
+| 200,000 | 0.4238s / 201.1MB |
+| 1,000,000 | 2.1486s / 392.9MB |
 
 ### k-axis (n=10,000)
 
-Time in seconds (median).
-
-#### classical
+Standard error: classical. Time in seconds (median).
 
 | k | econometricsmodels |
 |---|---|
-| 5 | 0.0115s |
-| 20 | 0.0452s |
+| 5 | 0.0189s |
+| 20 | 0.0701s |
 
-#### cluster
+### Standard errors (n=100,000, k=5)
 
-| k | econometricsmodels |
+One row per standard-error type. Time in seconds (median) / peak RSS in MB; speed-up is the reference time divided by the econometricsmodels time (below 1: the reference was faster). A row without a reference time has no equivalent standard error in the reference implementation. Cluster rows give the number of clusters G and whether the rows of a cluster are scattered (random) or contiguous (sorted).
+
+| standard error | econometricsmodels |
 |---|---|
-| 5 | 0.0139s |
-| 20 | 0.0526s |
+| classical | 0.2127s / 174.5MB |
+| opg | 0.2169s / 177.6MB |
+| hc0 | 0.2182s / 179.1MB |
+| hc1 | 0.2180s / 179.8MB |
+| cluster (G=50, random) | 0.2220s / 184.8MB |
+| cluster (G=50, sorted) | 0.2218s / 185.3MB |
+| cluster (G=n/10, random) | 0.2266s / 180.0MB |
+| cluster (G=n/10, sorted) | 0.2248s / 185.3MB |
 
-### Variants (cov_type=classical, k=5, n=100,000)
+### Variants (classical, k=5, n=100,000)
 
 Time in seconds (median). The default variant (`newton`) is the matching row of the n-axis table above.
 
 | variant | econometricsmodels |
 |---|---|
-| lbfgs | 0.1189s |
+| lbfgs | 0.2290s |
 
 ## IV
 
@@ -256,51 +232,49 @@ Compared with linearmodels 7.0.
 
 ### n-axis (k=5)
 
-Time in seconds (median) / peak RSS in MB.
-
-#### classical
+Standard error: classical. Time in seconds (median) / peak RSS in MB.
 
 | n | econometricsmodels | linearmodels |
 |---|---|---|
-| 1,000 | 0.0005s / 231.9MB | 0.0512s / 234.1MB |
-| 10,000 | 0.0056s / 239.4MB | 0.1772s / 267.4MB |
-| 100,000 | 0.0525s / 318.4MB | 1.4585s / 606.3MB |
-| 1,000,000 | 0.4884s / 1122.0MB | 14.5023s / 3999.6MB |
-
-#### hac
-
-| n | econometricsmodels | linearmodels |
-|---|---|---|
-| 1,000 | 0.0007s / 232.7MB | 0.0518s / 233.8MB |
-| 10,000 | 0.0085s / 241.8MB | 0.1803s / 267.4MB |
-| 100,000 | 0.0967s / 330.5MB | 1.4783s / 605.7MB |
-| 1,000,000 | 1.1754s / 1214.9MB | 15.4506s / 3978.6MB |
+| 10,000 | 0.0031s / 243.3MB | 0.0968s / 270.3MB |
+| 100,000 | 0.0406s / 320.7MB | 0.7619s / 609.7MB |
+| 1,000,000 | 0.3249s / 1132.7MB | 8.4819s / 3993.9MB |
 
 ### k-axis (n=10,000)
 
-Time in seconds (median).
-
-#### classical
+Standard error: classical. Time in seconds (median).
 
 | k | econometricsmodels | linearmodels |
 |---|---|---|
-| 5 | 0.0056s | 0.1743s |
-| 20 | 0.0220s | 0.3160s |
+| 5 | 0.0034s | 0.1092s |
+| 20 | 0.0130s | 0.1653s |
 
-#### hac
+### Standard errors (n=100,000, k=5)
 
-| k | econometricsmodels | linearmodels |
-|---|---|---|
-| 5 | 0.0090s | 0.1756s |
-| 20 | 0.0384s | 0.3278s |
+One row per standard-error type. Time in seconds (median) / peak RSS in MB; speed-up is the reference time divided by the econometricsmodels time (below 1: the reference was faster). A row without a reference time has no equivalent standard error in the reference implementation. Cluster rows give the number of clusters G and whether the rows of a cluster are scattered (random) or contiguous (sorted).
 
-### Variants (cov_type=classical, k=5, n=1,000,000)
+| standard error | econometricsmodels | linearmodels | speed-up |
+|---|---|---|---|
+| classical | 0.0392s / 320.6MB | 0.7850s / 609.3MB | 20.0x |
+| hc0 | 0.0422s / 328.8MB | 0.7610s / 607.7MB | 18.0x |
+| hc1 | 0.0339s / 327.5MB | 0.7562s / 609.7MB | 22.3x |
+| hc2 | 0.0483s / 329.4MB | - | - |
+| hc3 | 0.0456s / 328.9MB | - | - |
+| hac | 0.0522s / 331.5MB | 0.8145s / 609.4MB | 15.6x |
+| cluster (G=50, random) | 0.0392s / 328.0MB | 0.7937s / 612.8MB | 20.2x |
+| cluster (G=50, sorted) | 0.0366s / 329.2MB | 0.7977s / 611.2MB | 21.8x |
+| cluster (G=n/10, random) | 0.0414s / 329.9MB | 0.8608s / 611.4MB | 20.8x |
+| cluster (G=n/10, sorted) | 0.0403s / 330.3MB | 0.8439s / 612.4MB | 21.0x |
+| gmm_cluster_weight (G=50, random) | 0.0195s / 290.9MB | 0.6254s / 612.6MB | 32.1x |
+| gmm_iterated | 0.0212s / 288.7MB | 0.5904s / 609.3MB | 27.9x |
+
+### Variants (classical, k=5, n=1,000,000)
 
 Time in seconds (median). The default variant (`2sls`) is the matching row of the n-axis table above.
 
 | variant | econometricsmodels | linearmodels |
 |---|---|---|
-| gmm | 0.2595s | 10.9818s |
+| gmm | 0.1813s | 6.3229s |
 
 ## FE
 
@@ -308,44 +282,43 @@ Compared with linearmodels 7.0.
 
 ### n-axis (k=5)
 
-Time in seconds (median) / peak RSS in MB.
-
-#### classical
+Standard error: classical. Time in seconds (median) / peak RSS in MB.
 
 | n | econometricsmodels | linearmodels |
 |---|---|---|
-| 1,000 | 0.0002s / 231.1MB | 0.0180s / 239.7MB |
-| 10,000 | 0.0015s / 234.0MB | 0.0357s / 247.9MB |
-| 100,000 | 0.0185s / 274.4MB | 0.2306s / 332.7MB |
-| 1,000,000 | 0.1953s / 616.1MB | 2.1864s / 963.1MB |
-
-#### dk
-
-| n | econometricsmodels | linearmodels |
-|---|---|---|
-| 1,000 | 0.0003s / 230.4MB | 0.0216s / 238.0MB |
-| 10,000 | 0.0019s / 234.5MB | 0.0363s / 248.3MB |
-| 100,000 | 0.0238s / 280.6MB | 0.2475s / 335.3MB |
-| 1,000,000 | 0.2675s / 683.7MB | 2.2150s / 963.5MB |
+| 10,000 | 0.0015s / 234.4MB | 0.0658s / 246.1MB |
+| 100,000 | 0.0192s / 264.3MB | 0.3805s / 329.4MB |
+| 1,000,000 | 0.2011s / 540.8MB | 3.7687s / 959.1MB |
 
 ### k-axis (n=10,000)
 
-Time in seconds (median).
-
-#### classical
+Standard error: classical. Time in seconds (median).
 
 | k | econometricsmodels | linearmodels |
 |---|---|---|
-| 5 | 0.0014s | 0.0366s |
-| 20 | 0.0044s | 0.0583s |
+| 5 | 0.0014s | 0.0622s |
+| 20 | 0.0039s | 0.0950s |
 
-### Variants (cov_type=classical, k=5, n=1,000,000)
+### Standard errors (n=100,000, k=5)
+
+One row per standard-error type. Time in seconds (median) / peak RSS in MB; speed-up is the reference time divided by the econometricsmodels time (below 1: the reference was faster). A row without a reference time has no equivalent standard error in the reference implementation. Cluster rows give the number of clusters G and whether the rows of a cluster are scattered (random) or contiguous (sorted).
+
+| standard error | econometricsmodels | linearmodels | speed-up |
+|---|---|---|---|
+| classical | 0.0206s / 263.0MB | 0.3734s / 327.6MB | 18.1x |
+| hc1 | 0.0197s / 266.7MB | 0.3825s / 328.0MB | 19.4x |
+| hc2 | 0.0225s / 269.9MB | - | - |
+| hc3 | 0.0252s / 269.0MB | - | - |
+| cluster | 0.0226s / 263.9MB | 0.4517s / 328.6MB | 20.0x |
+| dk | 0.0252s / 264.3MB | 0.3806s / 328.0MB | 15.1x |
+
+### Variants (classical, k=5, n=1,000,000)
 
 Time in seconds (median). The default variant (`one_way`) is the matching row of the n-axis table above.
 
 | variant | econometricsmodels | linearmodels |
 |---|---|---|
-| two_way | 0.2448s | 2.8215s |
+| two_way | 0.2339s | 4.8459s |
 
 ## RE
 
@@ -353,33 +326,32 @@ Compared with linearmodels 7.0.
 
 ### n-axis (k=5)
 
-Time in seconds (median) / peak RSS in MB.
-
-#### classical
+Standard error: classical. Time in seconds (median) / peak RSS in MB.
 
 | n | econometricsmodels | linearmodels |
 |---|---|---|
-| 1,000 | 0.0007s / 230.7MB | 0.0456s / 236.7MB |
-| 10,000 | 0.0065s / 237.2MB | 0.0931s / 247.1MB |
-| 100,000 | 0.0587s / 312.8MB | 0.5964s / 359.5MB |
-| 1,000,000 | 0.6162s / 1040.1MB | 5.9855s / 1273.6MB |
-
-#### dk
-
-| n | econometricsmodels | linearmodels |
-|---|---|---|
-| 1,000 | 0.0009s / 230.3MB | 0.0461s / 235.3MB |
-| 10,000 | 0.0077s / 237.7MB | 0.0964s / 247.7MB |
-| 100,000 | 0.0697s / 318.6MB | 0.5896s / 358.3MB |
-| 1,000,000 | 0.7399s / 1107.4MB | 5.9611s / 1275.2MB |
+| 10,000 | 0.0029s / 238.3MB | 0.0498s / 250.6MB |
+| 100,000 | 0.0277s / 304.6MB | 0.3190s / 365.7MB |
+| 1,000,000 | 0.3273s / 945.2MB | 3.2518s / 1280.5MB |
 
 ### k-axis (n=10,000)
 
-Time in seconds (median).
-
-#### classical
+Standard error: classical. Time in seconds (median).
 
 | k | econometricsmodels | linearmodels |
 |---|---|---|
-| 5 | 0.0075s | 0.0959s |
-| 20 | 0.0211s | 0.1278s |
+| 5 | 0.0035s | 0.0493s |
+| 20 | 0.0120s | 0.0744s |
+
+### Standard errors (n=100,000, k=5)
+
+One row per standard-error type. Time in seconds (median) / peak RSS in MB; speed-up is the reference time divided by the econometricsmodels time (below 1: the reference was faster). A row without a reference time has no equivalent standard error in the reference implementation. Cluster rows give the number of clusters G and whether the rows of a cluster are scattered (random) or contiguous (sorted).
+
+| standard error | econometricsmodels | linearmodels | speed-up |
+|---|---|---|---|
+| classical | 0.0325s / 305.1MB | 0.3107s / 367.5MB | 9.6x |
+| hc1 | 0.0328s / 313.5MB | 0.3263s / 364.5MB | 9.9x |
+| hc2 | 0.0372s / 315.3MB | - | - |
+| hc3 | 0.0369s / 315.5MB | - | - |
+| cluster | 0.0297s / 304.6MB | 0.3615s / 366.7MB | 12.2x |
+| dk | 0.0304s / 306.2MB | 0.3159s / 363.4MB | 10.4x |

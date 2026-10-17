@@ -55,7 +55,10 @@ from benchmark.linear.constants import COV_TYPES, WIDE_BETA
 
 # predict()のstatsmodels照合は主リファレンス照合と同じ許容誤差
 # （`_tolerances_linear.py`の"wls_reference"）で行う（`test_ols_api.py`と同じ方針、
-# 独自の絶対誤差定数は持たない）。
+# 独自の絶対誤差定数は持たない）。実測の最大相対誤差は、`wide_dataset`の`weight`列
+# （0.5〜1.5の独立な一様乱数）でも、説明変数に依存し範囲の広い重み
+# （`REGRESSOR_WEIGHT`、最大/最小が約35）でも約5e-14の機械精度で、重みの範囲が
+# 広がっても誤差は増えない。
 _assert_close = partial(
     assert_close,
     rtol=TOLERANCES["wls_reference"]["rtol"],

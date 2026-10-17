@@ -33,6 +33,7 @@ from _assertions import (
 )
 from _constants import DATA_DIR, MARGEFF_AT
 from _helpers import load_wooldridge_dataset
+from _nonlinear_helpers import assert_margeff_names, slope_param_names
 from econometricsmodels import Tobit, TobitOptions
 
 from benchmark.common import balanced_cluster_groups, imbalanced_cluster_groups
@@ -168,12 +169,31 @@ def _check_margeff(
     rtol_se: float,
     atol: float,
 ) -> None:
+    """限界効果を`target`×`at`×係数名の全組み合わせで比較する。
+
+    比較の前に、`target`・`at`のキー集合と各組み合わせの変数集合が
+    `res.param_names`由来の期待（切片と`sigma`を除く全係数）と過不足なく
+    一致することを確認する。
+    """
+    assert set(ref_margeff) == set(MARGEFF_TARGETS), (
+        f"{label}/margeff: リファレンスのtargetが{sorted(MARGEFF_TARGETS)}と"
+        f"一致しない（{sorted(ref_margeff)}）"
+    )
+    expected_names = slope_param_names(res, trailing_sigma=True)
     for target in MARGEFF_TARGETS:
+        assert set(ref_margeff[target]) == set(MARGEFF_AT), (
+            f"{label}/margeff/{target}: リファレンスのatが{sorted(MARGEFF_AT)}と"
+            f"一致しない（{sorted(ref_margeff[target])}）"
+        )
         for at in MARGEFF_AT:
-            rows = {
-                row["param_name"]: row
-                for row in res.marginal_effects(at=at, target=target)
-            }
+            result_rows = res.marginal_effects(at=at, target=target)
+            assert_margeff_names(
+                [row["param_name"] for row in result_rows],
+                ref_margeff[target][at],
+                expected_names,
+                f"{label}/margeff/{target}/{at}",
+            )
+            rows = {row["param_name"]: row for row in result_rows}
             for name, ref_stats in ref_margeff[target][at].items():
                 row = rows[name]  # 限界効果は切片を除外済み（rename 不要）
                 lbl = f"{label}/margeff/{target}/{at}/{name}"

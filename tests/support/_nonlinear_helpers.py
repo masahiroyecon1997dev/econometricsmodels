@@ -203,6 +203,43 @@ def single_overlap_binary_dataset(overlap: float) -> pl.DataFrame:
     return pl.DataFrame({"y": y, "x1": x})
 
 
+def slope_param_names(res, *, trailing_sigma: bool = False) -> list[str]:
+    """限界効果の対象になる係数名（`param_names`から切片`const`を除いたもの）。
+
+    限界効果は切片を含まない。`trailing_sigma=True`（Tobit）では、`param_names`の
+    末尾にある`sigma`も係数ではないので位置で除く（名前では除かない。説明変数が
+    たまたま`sigma`という名前でも期待集合から落とさないため）。リファレンスの
+    キーではなくモデル側の`param_names`から導くので、実装とリファレンスの両方で
+    変数が欠けた場合も検出できる。
+    """
+    names = list(res.param_names)
+    if trailing_sigma:
+        names = names[:-1]
+    return [n for n in names if n != "const"]
+
+
+def assert_margeff_names(
+    returned_names: list[str],
+    ref_names,
+    expected_names: list[str],
+    label: str,
+) -> None:
+    """限界効果の変数集合が、返り値・リファレンスとも期待どおりであることを確認する。
+
+    比較ループはリファレンスのキーだけを回るため、キーの過不足はここで別に
+    検査する。返り値は重複・欠落・余分な変数がなく（`expected_names`と過不足なく
+    一致）、リファレンスも同じ集合であること。
+    """
+    assert sorted(returned_names) == sorted(expected_names), (
+        f"{label}: marginal_effects()の変数が期待と一致しない"
+        f"（返り値={sorted(returned_names)}、期待={sorted(expected_names)}）"
+    )
+    assert set(ref_names) == set(expected_names), (
+        f"{label}: リファレンスの変数が期待と一致しない"
+        f"（リファレンス={sorted(ref_names)}、期待={sorted(expected_names)}）"
+    )
+
+
 def check_margeff(
     res,
     ref_margeff: dict,
@@ -211,11 +248,25 @@ def check_margeff(
     rtol: float,
     atol: float,
 ) -> None:
-    """限界効果6統計量を`at`×係数名の全組み合わせでリファレンスと比較する。"""
+    """限界効果6統計量を`at`×係数名の全組み合わせでリファレンスと比較する。
+
+    比較の前に、`at`のキー集合と各`at`の変数集合が`res.param_names`由来の
+    期待（切片を除く全係数）と過不足なく一致することを確認する。
+    """
+    assert set(ref_margeff) == set(MARGEFF_AT), (
+        f"{label}: リファレンスのatが{sorted(MARGEFF_AT)}と一致しない"
+        f"（{sorted(ref_margeff)}）"
+    )
+    expected_names = slope_param_names(res)
     for at in MARGEFF_AT:
-        effects = {
-            row["param_name"]: row for row in res.marginal_effects(at=at)
-        }
+        rows = res.marginal_effects(at=at)
+        assert_margeff_names(
+            [row["param_name"] for row in rows],
+            ref_margeff[at],
+            expected_names,
+            f"{label}/{at}",
+        )
+        effects = {row["param_name"]: row for row in rows}
         for name, ref_stats in ref_margeff[at].items():
             row = effects[name]
             assert_close(

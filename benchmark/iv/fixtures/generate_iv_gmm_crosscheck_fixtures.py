@@ -13,7 +13,7 @@ cov_typeは`benchmark/iv/constants.py`、重みの組み合わせは
 
 ## 対象範囲
 
-- 全10合成シナリオ × classical重み × cov_type（classical/hc0/hc1/hac）。baselineには
+- 全`NUMERIC_SCENARIOS`の合成シナリオ × classical重み × cov_type（classical/hc0/hc1/hac）。baselineには
   追加でcluster/cluster_imbalanced、他の重み（robust/cluster/hac）×classical共分散、
   重みと共分散の型が異なる組み合わせ（cluster重み×hac共分散、hac重み×cluster共分散）、
   hac重み×hac共分散を持つ。複数内生変数（multi_endog）、Wooldridge card（実データ）。
@@ -57,7 +57,9 @@ from benchmark.common import (
 from benchmark.common.load_wooldridge import load as load_wooldridge
 from benchmark.iv.constants import CARD_X_EXOG, LINEARMODELS_COV_TYPES
 from benchmark.iv.datasets import (
+    MULTI_ENDOG_SCENARIOS,
     NUMERIC_SCENARIOS,
+    multi_endog_instruments,
     scenario_instruments,
     scenario_x_exog,
 )
@@ -68,7 +70,9 @@ from benchmark.iv.fixtures.generate_iv_fixtures import NO_INTERCEPT_SCENARIOS
 from benchmark.iv.fixtures.generate_iv_gmm_fixtures import (
     CARD_OTHER_WEIGHT_TYPES,
     CROSS_WEIGHT_COV_COMBINATIONS,
+    MULTI_ENDOG_OTHER_WEIGHT_TYPES,
     OTHER_WEIGHT_TYPES,
+    OVERID_REJECTION_WEIGHT_TYPES,
 )
 from benchmark.iv.references.r import run_momentfit_r
 
@@ -97,6 +101,14 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             fixtures[scenario]["classical"][cov_type] = run_momentfit_r(
                 csv_path, formula, "classical", cov_type
             )
+
+        if scenario == "invalid_instrument":
+            for weight_type in OVERID_REJECTION_WEIGHT_TYPES:
+                fixtures[scenario][weight_type] = {
+                    "classical": run_momentfit_r(
+                        csv_path, formula, weight_type, "classical"
+                    )
+                }
 
         if scenario != "baseline":
             continue
@@ -149,19 +161,45 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
                 pseudo, formula, weight_type, cov_type, cluster="cluster_group"
             )
 
-    # 複数内生変数（k_endog>=2）。generate_iv_gmm_fixtures.pyのmulti_endogと同じ構成。
-    multi_csv = DATA_DIR / "iv_baseline_multi_endog.csv"
-    multi_formula = _ivreg_formula(
-        ["x1"], ["endog1", "endog2"], ["z1", "z2", "z3"]
-    )
-    fixtures["multi_endog"] = {
-        "classical": {
-            cov_type: run_momentfit_r(
-                multi_csv, multi_formula, "classical", cov_type
-            )
-            for cov_type in LINEARMODELS_COV_TYPES
+    # 複数内生変数（k_endog>=2）。generate_iv_gmm_fixtures.pyのmulti_endogと同じ構成
+    # （fixtures["multi_endog"][シナリオ][重み][cov_type]）。
+    fixtures["multi_endog"] = {}
+    for scenario in MULTI_ENDOG_SCENARIOS:
+        multi_csv = DATA_DIR / f"iv_{scenario}_multi_endog.csv"
+        multi_df, _ = load_frozen_dataset("iv", f"{scenario}_multi_endog")
+        multi_formula = _ivreg_formula(
+            ["x1"], ["endog1", "endog2"], multi_endog_instruments(scenario)
+        )
+        entry = {
+            "classical": {
+                cov_type: run_momentfit_r(
+                    multi_csv, multi_formula, "classical", cov_type
+                )
+                for cov_type in LINEARMODELS_COV_TYPES
+            }
         }
-    }
+        for weight_type in MULTI_ENDOG_OTHER_WEIGHT_TYPES[scenario]:
+            use_csv = multi_csv
+            if weight_type == "cluster":
+                use_csv = _with_cluster_csv(
+                    multi_df,
+                    multi_csv,
+                    tmpdir,
+                    balanced_cluster_groups(multi_df.height),
+                    "_cluster",
+                )
+            entry[weight_type] = {
+                "classical": run_momentfit_r(
+                    use_csv,
+                    multi_formula,
+                    weight_type,
+                    "classical",
+                    cluster="cluster_group"
+                    if weight_type == "cluster"
+                    else None,
+                )
+            }
+        fixtures["multi_endog"][scenario] = entry
     fixtures["no_intercept"] = build_no_intercept_fixtures(tmpdir)
     return fixtures
 

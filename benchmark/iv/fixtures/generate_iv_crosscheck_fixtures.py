@@ -64,7 +64,9 @@ from benchmark.iv.constants import (
     NON_CLUSTER_COV_TYPES,
 )
 from benchmark.iv.datasets import (
+    MULTI_ENDOG_SCENARIOS,
     NUMERIC_SCENARIOS,
+    multi_endog_instruments,
     scenario_instruments,
     scenario_x_exog,
 )
@@ -130,15 +132,17 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
 
     # 複数内生変数（k_endog>=2）。generate_iv_fixtures.pyのmulti_endogと
     # 同じ構成。
-    multi_endog_csv = DATA_DIR / "iv_baseline_multi_endog.csv"
-    multi_endog_formula = _ivreg_formula(
-        ["x1"], ["endog1", "endog2"], ["z1", "z2", "z3"]
-    )
     fixtures["multi_endog"] = {}
-    # clusterは別途個別に扱う。
-    for cov_type in NON_CLUSTER_COV_TYPES:
-        entry = run_ivreg_r(multi_endog_csv, multi_endog_formula, cov_type)
-        fixtures["multi_endog"][cov_type] = entry
+    for scenario in MULTI_ENDOG_SCENARIOS:
+        multi_endog_csv = DATA_DIR / f"iv_{scenario}_multi_endog.csv"
+        multi_endog_formula = _ivreg_formula(
+            ["x1"], ["endog1", "endog2"], multi_endog_instruments(scenario)
+        )
+        fixtures["multi_endog"][scenario] = {}
+        # clusterは別途個別に扱う。
+        for cov_type in NON_CLUSTER_COV_TYPES:
+            entry = run_ivreg_r(multi_endog_csv, multi_endog_formula, cov_type)
+            fixtures["multi_endog"][scenario][cov_type] = entry
 
     # 自由度1境界（df_resid=1ちょうど）。generate_iv_fixtures.pyのdf1と
     # 同じ構成。n=3ではHACの自動ラグ選択式（hac_auto_lag）が0を返す可能性が
@@ -321,7 +325,11 @@ def build_fixtures() -> dict:
             "発生確認のみ、テストコード側で対応）。cluster_g2（G=2境界の成功"
             "パス）は`engine/src/iv/CLAUDE.md`「修正済み」に記録の`k_constant`"
             "取り違えバグの修正後にフィクスチャ化した。"
+            "invalid_instrument・many_regressors・outlier_regressorは"
+            "generate_iv_fixtures.pyの同名注記と同じ構成。"
             "multi_endog（複数内生変数、x_endog=['endog1','endog2']）は"
+            "MULTI_ENDOG_SCENARIOS（baseline・just_identified・weak_instruments・"
+            "heteroskedastic）ごとに持つ。"
             "benchmark/iv/datasets.pyの第一段階誤差vが内生変数ごとに独立になる"
             "よう修正した後のデータで生成（"
             "generate_iv_fixtures.pyの同名注記参照）。weak_instrument_fは"

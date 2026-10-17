@@ -78,9 +78,14 @@ from benchmark.iv.constants import (
     NON_CLUSTER_COV_TYPES,
 )
 from benchmark.iv.datasets import (
+    MULTI_ENDOG_SCENARIOS,
+    multi_endog_instruments,
+    scenario_instruments,
+    scenario_x_exog,
+)
+from benchmark.iv.datasets import (
     NUMERIC_SCENARIOS as SCENARIOS,
 )
-from benchmark.iv.datasets import scenario_instruments, scenario_x_exog
 from benchmark.iv.fixtures.generate_iv_crosscheck_fixtures import (
     IVREG_UNSUPPORTED_NO_INTERCEPT,
 )
@@ -330,23 +335,24 @@ def test_cluster_g2_matches_r(crosscheck):
 
 
 @pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
-def test_multi_endog_matches_r(crosscheck, cov_type):
+@pytest.mark.parametrize("scenario", MULTI_ENDOG_SCENARIOS)
+def test_multi_endog_matches_r(crosscheck, scenario, cov_type):
     """複数内生変数（`x_endog=["endog1", "endog2"]`）の成功パス
-    （`test_iv_reference.py`の同名テストと同じ理由）。
+    （`test_iv_reference.py`の同名テストと同じ理由・シナリオ）。
     """
-    df = pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv")
+    df = pl.read_csv(DATA_DIR / f"iv_{scenario}_multi_endog.csv")
     options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
     res = IV(
         with_row_time(df),
         y="y",
         x_exog=["x1"],
         x_endog=["endog1", "endog2"],
-        instruments=["z1", "z2", "z3"],
+        instruments=multi_endog_instruments(scenario),
         options=options,
     ).fit()
 
-    ref = crosscheck["multi_endog"][cov_type]
-    _check_result(res, ref, f"multi_endog/{cov_type}/R")
+    ref = crosscheck["multi_endog"][scenario][cov_type]
+    _check_result(res, ref, f"multi_endog/{scenario}/{cov_type}/R")
 
 
 @pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)

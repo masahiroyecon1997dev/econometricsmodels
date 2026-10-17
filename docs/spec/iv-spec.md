@@ -341,8 +341,10 @@ common.rs`）:
   後継）を使う（`benchmark/iv/references/run_momentfit.R`、フィクスチャ
   `iv_gmm_crosscheck.json`、テスト`tests/iv/test_iv_gmm_crosscheck.py`）。`gmm`パッケージは
   1段階目の重みが単位行列で固定され、linearmodels・本実装の`(Z'Z)⁻¹`と揃えられないため
-  採用しない。`iv_gmm.json`（linearmodels）と同じ構成（10合成シナリオ×classical重み×
-  cov_type、baselineの他の重み・重みと共分散の組み合わせ、複数内生変数、Wooldridge `card`）を、
+  採用しない。`iv_gmm.json`（linearmodels）と同じ構成（`NUMERIC_SCENARIOS`×classical重み×
+  cov_type、baselineの他の重み・重みと共分散の組み合わせ、過剰識別の棄却シナリオ（`invalid_instrument`）の
+  robust重み、複数内生変数（`MULTI_ENDOG_SCENARIOS`、classical以外の重みは`MULTI_ENDOG_OTHER_WEIGHT_TYPES`）、
+  Wooldridge `card`）を、
   係数・標準誤差・z値・p値・信頼区間・`n_obs`/`df_resid`・ロバストWald・Hansen Jで照合する。
   **対象外**: hc2/hc3（linearmodels・momentfitとも非対応で、GMMのHC2/HC3は外部参照なし）、
   反復GMM・1段階GMM（フィクスチャがclassical重みのみで、反復しても2SLSと同じ結果になる。

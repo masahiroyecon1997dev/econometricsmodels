@@ -2,11 +2,13 @@
 テスト。
 
 `tests/fixtures/benchmarks/iv_gmm.json`（`benchmark/iv/fixtures/
-generate_iv_gmm_fixtures.py`で生成）を読み込み、10個の合成データシナリオ×
+generate_iv_gmm_fixtures.py`で生成）を読み込み、`NUMERIC_SCENARIOS`の各合成データシナリオ×
 classical/HC0/HC1/HAC（+クラスター、baselineのみ）を`gmm_weight_type="classical"`
 固定で、加えてbaselineシナリオ×`cov_type="classical"`固定で他の`gmm_weight_type`
 （robust/cluster/kernel）を検証する。`gmm_weight_type`×`cov_type`の全組み合わせ
-（10シナリオ×4weight_type×6cov_type）は規模が大きすぎるため対象にしない。
+（`NUMERIC_SCENARIOS`×4weight_type×6cov_type）は規模が大きすぎるため対象にしない。
+複数内生変数（`MULTI_ENDOG_SCENARIOS`）はclassical重みに加えて、
+`MULTI_ENDOG_OTHER_WEIGHT_TYPES`の重みを検証する。
 
 役割分担（OLS/WLS/Logit/Probit の `test_<手法>_*.py` と同じ4分割。
 IV は主リファレンス数値照合のみ 2SLS/GMM で
@@ -76,14 +78,21 @@ from econometricsmodels import IV, IVOptions
 from benchmark.common import imbalanced_cluster_groups
 from benchmark.iv.constants import CARD_X_EXOG, LINEARMODELS_COV_TYPES
 from benchmark.iv.datasets import (
+    MULTI_ENDOG_SCENARIOS,
+    multi_endog_instruments,
+    scenario_instruments,
+    scenario_x_exog,
+)
+from benchmark.iv.datasets import (
     NUMERIC_SCENARIOS as SCENARIOS,
 )
-from benchmark.iv.datasets import scenario_instruments, scenario_x_exog
 from benchmark.iv.fixtures.generate_iv_fixtures import NO_INTERCEPT_SCENARIOS
 from benchmark.iv.fixtures.generate_iv_gmm_fixtures import (
     CARD_OTHER_WEIGHT_TYPES,
     CROSS_WEIGHT_COV_COMBINATIONS,
+    MULTI_ENDOG_OTHER_WEIGHT_TYPES,
     OTHER_WEIGHT_TYPES,
+    OVERID_REJECTION_WEIGHT_TYPES,
 )
 
 FIXTURE_PATH = (
@@ -260,14 +269,49 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
     )
 
 
-@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
-def test_multi_endog_matches_linearmodels(fixtures, cov_type):
-    """複数内生変数（`x_endog=["endog1", "endog2"]`）の成功パス
-    （`weak_instrument_f_statistics`・`overid_statistic`（Hansen J、過剰識別）が
-    複数内生変数を同時に扱うことをGMMでも確認する。`test_iv_reference.py`の
-    同名テストと同じ理由）。
+@pytest.mark.parametrize("gmm_weight_type", OVERID_REJECTION_WEIGHT_TYPES)
+def test_invalid_instrument_other_weight_types_match_linearmodels(
+    fixtures, gmm_weight_type
+):
+    """過剰識別の棄却シナリオ（`invalid_instrument`）の、classical以外の重み。
+    classical重みのHansen Jは2SLSのSarganと同じ値になる
+    （`test_matches_linearmodels`が検証）。不均一分散に頑健なHansen J
+    （robust重み）も、棄却するp値でlinearmodelsと一致することを確認する。
     """
-    df = pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv")
+    df = pl.read_csv(DATA_DIR / "iv_invalid_instrument.csv")
+    options = IVOptions(
+        estimator="gmm",
+        gmm_weight_type=gmm_weight_type,
+        cov_type="classical",
+        **hac_time_for(gmm_weight_type),
+    )
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1"],
+        instruments=["z1", "z2"],
+        options=options,
+    ).fit()
+
+    _check_result(
+        res,
+        fixtures["synthetic"]["invalid_instrument"][gmm_weight_type][
+            "classical"
+        ],
+        f"invalid_instrument/{gmm_weight_type}/classical",
+    )
+
+
+@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
+@pytest.mark.parametrize("scenario", MULTI_ENDOG_SCENARIOS)
+def test_multi_endog_matches_linearmodels(fixtures, scenario, cov_type):
+    """複数内生変数（`x_endog=["endog1", "endog2"]`）の成功パス
+    （`weak_instrument_f_statistics`・`overid_statistic`（Hansen J、過剰識別。
+    `just_identified`は丁度識別で`None`）が複数内生変数を同時に扱うことをGMMでも
+    確認する。`test_iv_reference.py`の同名テストと同じシナリオ）。
+    """
+    df = pl.read_csv(DATA_DIR / f"iv_{scenario}_multi_endog.csv")
     options = IVOptions(
         estimator="gmm",
         gmm_weight_type="classical",
@@ -279,14 +323,59 @@ def test_multi_endog_matches_linearmodels(fixtures, cov_type):
         y="y",
         x_exog=["x1"],
         x_endog=["endog1", "endog2"],
-        instruments=["z1", "z2", "z3"],
+        instruments=multi_endog_instruments(scenario),
         options=options,
     ).fit()
 
     _check_result(
         res,
-        fixtures["synthetic"]["multi_endog"]["classical"][cov_type],
-        f"multi_endog/classical/{cov_type}",
+        fixtures["synthetic"]["multi_endog"][scenario]["classical"][cov_type],
+        f"multi_endog/{scenario}/classical/{cov_type}",
+    )
+
+
+@pytest.mark.parametrize(
+    ("scenario", "gmm_weight_type"),
+    [
+        (scenario, weight_type)
+        for scenario, weight_types in MULTI_ENDOG_OTHER_WEIGHT_TYPES.items()
+        for weight_type in weight_types
+    ],
+)
+def test_multi_endog_other_weight_types_match_linearmodels(
+    fixtures, scenario, gmm_weight_type
+):
+    """複数内生変数×classical以外の重み（`cov_type="classical"`）。classical重みの
+    点推定は2SLSと同じで、残差から重み行列を作るGMM固有の経路を通るのはこの
+    重みだけ。丁度識別は重みによらず2SLSと同じ点推定のため持たない。
+    """
+    df = pl.read_csv(DATA_DIR / f"iv_{scenario}_multi_endog.csv")
+    kwargs = {}
+    if gmm_weight_type == "cluster":
+        df = with_cluster_groups(df, 10)
+        kwargs["cluster"] = "cluster_group"
+    options = IVOptions(
+        estimator="gmm",
+        gmm_weight_type=gmm_weight_type,
+        cov_type="classical",
+        **kwargs,
+        **hac_time_for(gmm_weight_type),
+    )
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1", "endog2"],
+        instruments=multi_endog_instruments(scenario),
+        options=options,
+    ).fit()
+
+    _check_result(
+        res,
+        fixtures["synthetic"]["multi_endog"][scenario][gmm_weight_type][
+            "classical"
+        ],
+        f"multi_endog/{scenario}/{gmm_weight_type}/classical",
     )
 
 

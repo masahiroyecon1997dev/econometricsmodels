@@ -342,9 +342,7 @@ def run(
         wr_stat = float(res.wooldridge_regression.stat) / n_endog
         wu_hausman_statistic = wr_stat
         wu_hausman_df_denom = (
-            wu_hausman_df_resid_candidate
-            if n_groups is None
-            else n_groups - 1
+            wu_hausman_df_resid_candidate if n_groups is None else n_groups - 1
         )
         wu_hausman_p_value = float(
             scipy_stats.f.sf(wr_stat, n_endog, wu_hausman_df_denom)

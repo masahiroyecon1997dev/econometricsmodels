@@ -1,7 +1,7 @@
 """IV(2SLS)の主リファレンス（linearmodels）による数値比較テスト。
 
 `tests/fixtures/benchmarks/iv.json`（`benchmark/iv/fixtures/
-generate_iv_fixtures.py`で生成）を読み込み、10個の合成データシナリオ×
+generate_iv_fixtures.py`で生成）を読み込み、`NUMERIC_SCENARIOS`の各合成データシナリオ×
 classical/HC0/HC1/HAC（+クラスター、baselineのみ）で、係数・標準誤差・
 検定統計量・適合度統計量・診断統計量を相対誤差1e-8で厳密比較する
 （`.claude/rules/testing-policy.md`「許容誤差」の基本方針）。
@@ -77,9 +77,14 @@ from econometricsmodels import IV, IVOptions
 from benchmark.common import imbalanced_cluster_groups
 from benchmark.iv.constants import CARD_X_EXOG, LINEARMODELS_COV_TYPES
 from benchmark.iv.datasets import (
+    MULTI_ENDOG_SCENARIOS,
+    multi_endog_instruments,
+    scenario_instruments,
+    scenario_x_exog,
+)
+from benchmark.iv.datasets import (
     NUMERIC_SCENARIOS as SCENARIOS,
 )
-from benchmark.iv.datasets import scenario_instruments, scenario_x_exog
 from benchmark.iv.fixtures.generate_iv_fixtures import NO_INTERCEPT_SCENARIOS
 
 FIXTURE_PATH = (
@@ -259,27 +264,29 @@ def test_cluster_g2_matches_linearmodels(fixtures):
 
 
 @pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
-def test_multi_endog_matches_linearmodels(fixtures, cov_type):
+@pytest.mark.parametrize("scenario", MULTI_ENDOG_SCENARIOS)
+def test_multi_endog_matches_linearmodels(fixtures, scenario, cov_type):
     """複数内生変数（`x_endog=["endog1", "endog2"]`）の成功パス。
-    `weak_instrument_f_statistics`・`overid_statistic`（Sargan、過剰識別）・
-    `wu_hausman_statistic`（複数内生変数のジョイント検定）が正しく機能することを
-    確認する。
+    `weak_instrument_f_statistics`（内生変数ごと）・`overid_statistic`（Sargan。
+    `just_identified`は丁度識別で`None`）・`wu_hausman_statistic`（複数内生変数の
+    ジョイント検定）が正しく機能することを、`MULTI_ENDOG_SCENARIOS`（過剰識別の
+    baseline、丁度識別、弱操作変数、不均一分散）で確認する。
     """
-    df = pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv")
+    df = pl.read_csv(DATA_DIR / f"iv_{scenario}_multi_endog.csv")
     options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
     res = IV(
         with_row_time(df),
         y="y",
         x_exog=["x1"],
         x_endog=["endog1", "endog2"],
-        instruments=["z1", "z2", "z3"],
+        instruments=multi_endog_instruments(scenario),
         options=options,
     ).fit()
 
     _check_result(
         res,
-        fixtures["synthetic"]["multi_endog"][cov_type],
-        f"multi_endog/{cov_type}",
+        fixtures["synthetic"]["multi_endog"][scenario][cov_type],
+        f"multi_endog/{scenario}/{cov_type}",
     )
 
 

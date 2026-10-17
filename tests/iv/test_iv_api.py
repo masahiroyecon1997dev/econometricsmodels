@@ -211,6 +211,37 @@ def test_overid_statistic_present_for_gmm_hansen_j(iv_dataset):
     _assert_valid_test_statistic(res.overid_statistic, res.overid_p_value)
 
 
+@pytest.mark.parametrize(
+    "options",
+    [
+        IVOptions(),
+        IVOptions(estimator="gmm", gmm_weight_type="classical"),
+        IVOptions(estimator="gmm", gmm_weight_type="robust"),
+        IVOptions(
+            estimator="gmm", gmm_weight_type="hac", **hac_time_for("hac")
+        ),
+    ],
+    ids=["2sls", "gmm_classical", "gmm_robust", "gmm_hac"],
+)
+def test_overid_test_rejects_only_when_instrument_is_invalid(
+    iv_dataset, options
+):
+    """過剰識別検定（Sargan/Hansen J）が、操作変数が有効なデータ（`iv_baseline`）
+    では棄却せず、最後の操作変数が構造誤差と相関するデータ（`invalid_instrument`）
+    では明確に棄却する（p値が1e-4未満）。`invalid_instrument`の相関の強さを
+    変えて棄却が弱くなった場合に、リファレンス照合が通ったまま過剰識別検定が
+    棄却できることの確認だけが失われるのを防ぐ。
+    """
+    valid = our_fit(iv_dataset, options=options)
+    invalid = our_fit(
+        pl.read_csv(DATA_DIR / "iv_invalid_instrument.csv"), options=options
+    )
+    assert valid.overid_p_value is not None
+    assert invalid.overid_p_value is not None
+    assert valid.overid_p_value > 0.05
+    assert 0.0 < invalid.overid_p_value < 1e-4
+
+
 def test_wu_hausman_is_none_for_gmm(iv_dataset):
     """`wu_hausman_statistic`/`wu_hausman_p_value`は`estimator="gmm"`では常に
     `None`（`GmmEstimator`はWu-Hausman検定を実装しない、

@@ -34,7 +34,9 @@ from benchmark.common import (
 )
 from benchmark.iv.constants import CARD_X_EXOG, LINEARMODELS_COV_TYPES
 from benchmark.iv.datasets import (
+    MULTI_ENDOG_SCENARIOS,
     NUMERIC_SCENARIOS,
+    multi_endog_instruments,
     scenario_instruments,
     scenario_x_exog,
 )
@@ -106,17 +108,20 @@ def build_fixtures() -> dict:
             # `k_constant`取り違え）は判明・修正済み（`engine/src/iv/CLAUDE.md`
             # 「修正済み」参照）。修正後にフィクスチャ化した。
 
-    # 複数内生変数（k_endog>=2）の成功パス確認。x_exog=['x1']・
-    # x_endog=['endog1', 'endog2']・instruments=['z1','z2','z3']（過剰識別）。
+    # 複数内生変数（k_endog>=2）の成功パス確認。fixtures["multi_endog"][シナリオ]
+    # [cov_type]。x_exog=['x1']・x_endog=['endog1', 'endog2']・instruments=
+    # ['z1','z2','z3']（過剰識別。just_identifiedのみ['z1','z2']の丁度識別）。
     fixtures["multi_endog"] = {}
-    for cov_type in LINEARMODELS_COV_TYPES:
-        fixtures["multi_endog"][cov_type] = run(
-            dataset="baseline_multi_endog",
-            x_exog_cols=["x1"],
-            x_endog_cols=["endog1", "endog2"],
-            instrument_cols=["z1", "z2", "z3"],
-            cov_type=cov_type,
-        )
+    for scenario in MULTI_ENDOG_SCENARIOS:
+        fixtures["multi_endog"][scenario] = {}
+        for cov_type in LINEARMODELS_COV_TYPES:
+            fixtures["multi_endog"][scenario][cov_type] = run(
+                dataset=f"{scenario}_multi_endog",
+                x_exog_cols=["x1"],
+                x_endog_cols=["endog1", "endog2"],
+                instrument_cols=multi_endog_instruments(scenario),
+                cov_type=cov_type,
+            )
 
     # 実データセット（Wooldridge card、Card 1995の大学近接操作変数による教育の
     # 収益率推定）。testing-policy.md「テスト用データセット」2.（実データセット）の
@@ -195,7 +200,12 @@ def build_fixtures() -> dict:
             "cluster_g2（G=2境界の成功パス）は、`engine/src/iv/CLAUDE.md`"
             "「修正済み」に記録の`k_constant`取り違えバグの修正後にフィクスチャ化"
             "した。"
-            "multi_endog（複数内生変数、x_endog=['endog1','endog2']）は、"
+            "invalid_instrument（最後の操作変数を構造誤差と相関させ、Sargan検定が"
+            "棄却する）・many_regressors（k_exog=20、列ごとに0.1〜100倍のスケール差）"
+            "・outlier_regressor（x1の5%が外れ値）は他のシナリオと同じ構成。"
+            "multi_endog（複数内生変数、x_endog=['endog1','endog2']）は"
+            "MULTI_ENDOG_SCENARIOS（baseline・just_identified・weak_instruments・"
+            "heteroskedastic）ごとに持つ。"
             "benchmark/iv/datasets.pyの第一段階誤差vが内生変数ごとに独立になる"
             "よう修正した後のデータで生成（修正前はv"
             "が全内生変数で単一列のため第一段階回帰残差が事実上完全共線になり、"

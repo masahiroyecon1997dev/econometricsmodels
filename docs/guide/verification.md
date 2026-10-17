@@ -91,7 +91,7 @@ For the FE and RE cross-checks (coefficient and F-statistic p-values) the absolu
 
 ### IV GMM cross-check with momentfit
 
-`ivreg` has no GMM, so the independent reference for GMM is `momentfit`. A naive call does not match linearmodels or this package. The R script sets the following, and every GMM case (ten synthetic scenarios, several weight × covariance combinations, multiple endogenous variables and the Wooldridge `card` data) then agrees to the tolerance above:
+`ivreg` has no GMM, so the independent reference for GMM is `momentfit`. A naive call does not match linearmodels or this package. The R script sets the following, and every GMM case (the synthetic scenarios, several weight × covariance combinations, multiple endogenous variables and the Wooldridge `card` data) then agrees to the tolerance above:
 
 - **Starting weight and centering.** The first step uses the 2SLS estimate (`initW = "tsls"`; the default is an identity weight) and the moment conditions are not centered, as in linearmodels.
 - **HAC and cluster weights.** `momentfit` 1.0 loses the pivot of the pivoted Cholesky factor it stores for these two weight types, which makes the coefficients wrong (HAC by about `1e-2`). The script therefore builds the weight matrix `S⁻¹` from `momentfit`'s own moment covariance and passes it explicitly.
@@ -163,9 +163,9 @@ All synthetic datasets are generated once, frozen as CSV files in the repository
 - small samples, including the boundary of exactly one residual degree of freedom
 - large error variance, heteroskedasticity, autocorrelation (HAC)
 - moderate multicollinearity, ill-conditioned designs (variables on very different scales, correlations above 0.99)
-- many regressors (`k = 20`), regressors with heavy-tailed outliers
+- many regressors (`k = 20`), regressors with heavy-tailed outliers (for IV only the exogenous regressors are widened or contaminated, so the degree of over-identification does not change)
 - cluster structures with equal group sizes, strongly unequal group sizes (for example 2, 3, 5, 10, 30, 50) and the minimum number of clusters
-- censoring patterns (light, moderate, heavy, right-censored, interval-censored, and interval-censored with a narrow uncensored interval so that observations fall in both tails) for Tobit; weak and multiple instruments for IV; unbalanced panels and cross-sectional dependence for FE / RE
+- censoring patterns (light, moderate, heavy, right-censored, interval-censored, and interval-censored with a narrow uncensored interval so that observations fall in both tails) for Tobit; weak instruments, multiple endogenous variables (over-identified, just-identified, weak instruments, heteroskedastic errors) and an invalid instrument that is correlated with the structural error, so that the Sargan / Hansen J test rejects (p-values between about `1e-8` and `1e-5`), for IV; unbalanced panels and cross-sectional dependence for FE / RE
 - time-invariant regressors for RE: one, or several (a continuous and a dummy), on a balanced panel and on unbalanced panels, including panel lengths from 2 to 10 observations per entity
 - regressors that vary in only one dimension for RE: a regressor that varies over time only (a trend or an absolute year, which one-way RE drops from the between regression) and one that varies across entities only, on balanced panels with five periods, with the column in any position, on a nearly balanced panel (two rows removed) and with every regressor one-dimensional; two-way RE on panels from 5×4 to 15×25, with unequal variance, serial correlation and strongly unequal scales
 

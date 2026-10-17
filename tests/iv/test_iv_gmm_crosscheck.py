@@ -6,7 +6,7 @@ generate_iv_gmm_crosscheck_fixtures.py`で生成）を読み込み、主リフ�
 数値比較する。`ivreg`はGMMに対応していないため、2SLSのRクロスチェック
 （`test_iv_crosscheck.py`）とは別ファイルにしている。
 
-検証範囲は`test_iv_gmm_reference.py`と同じ構成（10合成シナリオ×classical重み×
+検証範囲は`test_iv_gmm_reference.py`と同じ構成（`NUMERIC_SCENARIOS`の各合成シナリオ×classical重み×
 cov_type、baselineの他の重み・重みと共分散の組み合わせ、複数内生変数、Wooldridge
 card）。構成の定義は単一の定義元からimportする（シナリオは`benchmark/iv/datasets.py`、cov_typeと
 Card実データは`benchmark/iv/constants.py`、重みの組み合わせは`generate_iv_gmm_fixtures.py`）。
@@ -56,14 +56,21 @@ from econometricsmodels import IV, IVOptions
 from benchmark.common import imbalanced_cluster_groups
 from benchmark.iv.constants import CARD_X_EXOG, LINEARMODELS_COV_TYPES
 from benchmark.iv.datasets import (
+    MULTI_ENDOG_SCENARIOS,
+    multi_endog_instruments,
+    scenario_instruments,
+    scenario_x_exog,
+)
+from benchmark.iv.datasets import (
     NUMERIC_SCENARIOS as SCENARIOS,
 )
-from benchmark.iv.datasets import scenario_instruments, scenario_x_exog
 from benchmark.iv.fixtures.generate_iv_fixtures import NO_INTERCEPT_SCENARIOS
 from benchmark.iv.fixtures.generate_iv_gmm_fixtures import (
     CARD_OTHER_WEIGHT_TYPES,
     CROSS_WEIGHT_COV_COMBINATIONS,
+    MULTI_ENDOG_OTHER_WEIGHT_TYPES,
     OTHER_WEIGHT_TYPES,
+    OVERID_REJECTION_WEIGHT_TYPES,
 )
 
 FIXTURE_PATH = (
@@ -259,23 +266,81 @@ def test_cross_weight_cov_matches_momentfit(
     )
 
 
+@pytest.mark.parametrize("gmm_weight_type", OVERID_REJECTION_WEIGHT_TYPES)
+def test_invalid_instrument_other_weight_types_match_momentfit(
+    crosscheck, gmm_weight_type
+):
+    """過剰識別の棄却シナリオ（`invalid_instrument`）の、classical以外の重み
+    （`test_iv_gmm_reference.py`の同名テストと同じ理由）。
+    """
+    df = pl.read_csv(DATA_DIR / "iv_invalid_instrument.csv")
+    res = _fit(
+        df,
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1"],
+        instruments=["z1", "z2"],
+        gmm_weight_type=gmm_weight_type,
+        cov_type="classical",
+    )
+    _check_result(
+        res,
+        crosscheck["invalid_instrument"][gmm_weight_type]["classical"],
+        f"invalid_instrument/{gmm_weight_type}/classical",
+    )
+
+
 @pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
-def test_multi_endog_matches_momentfit(crosscheck, cov_type):
+@pytest.mark.parametrize("scenario", MULTI_ENDOG_SCENARIOS)
+def test_multi_endog_matches_momentfit(crosscheck, scenario, cov_type):
     """複数内生変数（`x_endog=["endog1", "endog2"]`）。"""
-    df = pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv")
+    df = pl.read_csv(DATA_DIR / f"iv_{scenario}_multi_endog.csv")
     res = _fit(
         df,
         y="y",
         x_exog=["x1"],
         x_endog=["endog1", "endog2"],
-        instruments=["z1", "z2", "z3"],
+        instruments=multi_endog_instruments(scenario),
         gmm_weight_type="classical",
         cov_type=cov_type,
     )
     _check_result(
         res,
-        crosscheck["multi_endog"]["classical"][cov_type],
-        f"multi_endog/classical/{cov_type}",
+        crosscheck["multi_endog"][scenario]["classical"][cov_type],
+        f"multi_endog/{scenario}/classical/{cov_type}",
+    )
+
+
+@pytest.mark.parametrize(
+    ("scenario", "gmm_weight_type"),
+    [
+        (scenario, weight_type)
+        for scenario, weight_types in MULTI_ENDOG_OTHER_WEIGHT_TYPES.items()
+        for weight_type in weight_types
+    ],
+)
+def test_multi_endog_other_weight_types_match_momentfit(
+    crosscheck, scenario, gmm_weight_type
+):
+    """複数内生変数×classical以外の重み（`cov_type="classical"`、
+    `test_iv_gmm_reference.py`の同名テストと同じ理由）。
+    """
+    df = pl.read_csv(DATA_DIR / f"iv_{scenario}_multi_endog.csv")
+    if gmm_weight_type == "cluster":
+        df = with_cluster_groups(df, 10, col=CLUSTER_COL)
+    res = _fit(
+        df,
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1", "endog2"],
+        instruments=multi_endog_instruments(scenario),
+        gmm_weight_type=gmm_weight_type,
+        cov_type="classical",
+    )
+    _check_result(
+        res,
+        crosscheck["multi_endog"][scenario][gmm_weight_type]["classical"],
+        f"multi_endog/{scenario}/{gmm_weight_type}/classical",
     )
 
 

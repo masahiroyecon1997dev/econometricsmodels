@@ -12,8 +12,8 @@ GMM固有の`weight_type`軸（`cov_type`とは独立、`iv-spec.md`1.2節）が
 既存方針（`ols.json`/`wls.json`）に倣った（ユーザー確認済み）。
 
 検証範囲（ユーザー確認済み、`cov_type`×`weight_type`の全組み合わせ
-（10シナリオ×4weight_type×6cov_type）は規模が大きすぎるため）:
-    - `weight_type="classical"`固定で、全10シナリオ×cov_type（classical/hc0/hc1/
+（`NUMERIC_SCENARIOS`×4weight_type×6cov_type）は規模が大きすぎるため）:
+    - `weight_type="classical"`固定で、全`NUMERIC_SCENARIOS`×cov_type（classical/hc0/hc1/
       hac、baselineのみ追加でcluster/cluster_imbalanced）を検証する
       （2SLSの`iv.json`と同じ組み合わせ）。
     - 他のweight_type（robust/cluster/hac）は、`weight_type`と`cov_type`が
@@ -53,7 +53,9 @@ from benchmark.common import (
 )
 from benchmark.iv.constants import CARD_X_EXOG, LINEARMODELS_COV_TYPES
 from benchmark.iv.datasets import (
+    MULTI_ENDOG_SCENARIOS,
     NUMERIC_SCENARIOS,
+    multi_endog_instruments,
     scenario_instruments,
     scenario_x_exog,
 )
@@ -73,6 +75,20 @@ CROSS_WEIGHT_COV_COMBINATIONS = [("cluster", "hac"), ("hac", "cluster")]
 # cluster共分散は含めない。classical重みは全cov_type、他の重みはclassical
 # 共分散のみ（合成データのbaselineと同じ絞り方）。
 CARD_OTHER_WEIGHT_TYPES = ["robust", "hac"]
+# 過剰識別の棄却シナリオ（invalid_instrument）でclassical重みに加えて持つ重み
+# （cov_type=classical）。classical重みの点推定は2SLSと同じで、Hansen Jが2SLSの
+# Sargan統計量と一致する。robust重みが「不均一分散に頑健なHansen J」という本来の
+# 用途で、これが棄却されることを確認する。
+OVERID_REJECTION_WEIGHT_TYPES = ["robust"]
+# 複数内生変数（MULTI_ENDOG_SCENARIOS）でclassical重み（全cov_type）に加えて持つ重み
+# （cov_type=classical）。丁度識別（just_identified）は重みによらず点推定が2SLSと
+# 同じなので持たない。cluster/hac重みはbaselineの1ケースずつに絞る。
+MULTI_ENDOG_OTHER_WEIGHT_TYPES = {
+    "baseline": ["robust", "cluster", "hac"],
+    "just_identified": [],
+    "weak_instruments": ["robust"],
+    "heteroskedastic": ["robust"],
+}
 # 1-step（iter_limit=1）・iterated GMM（3以上、固定回数モード）の成功パス確認用
 # （既定値2以外）。
 GMM_ITERATIONS_SCENARIOS = [1, 3]
@@ -96,6 +112,19 @@ def build_fixtures() -> dict:
                 cov_type=cov_type,
             )
             fixtures[scenario]["classical"][cov_type] = result
+
+        if scenario == "invalid_instrument":
+            for weight_type in OVERID_REJECTION_WEIGHT_TYPES:
+                fixtures[scenario][weight_type] = {
+                    "classical": run_gmm(
+                        dataset=scenario,
+                        x_exog_cols=x_exog,
+                        x_endog_cols=["endog1"],
+                        instrument_cols=instruments,
+                        weight_type=weight_type,
+                        cov_type="classical",
+                    )
+                }
 
         if scenario == "baseline":
             n = pl.read_csv(DATA_DIR / "iv_baseline.csv").height
@@ -163,18 +192,42 @@ def build_fixtures() -> dict:
             )
         }
 
-    # 複数内生変数（k_endog>=2）。2SLSのiv.jsonと同じ構成。weight_type=
-    # 'classical'固定でcov_typeのみ変える（上記と同じ検証範囲の絞り方）。
-    fixtures["multi_endog"] = {"classical": {}}
-    for cov_type in LINEARMODELS_COV_TYPES:
-        fixtures["multi_endog"]["classical"][cov_type] = run_gmm(
-            dataset="baseline_multi_endog",
-            x_exog_cols=["x1"],
-            x_endog_cols=["endog1", "endog2"],
-            instrument_cols=["z1", "z2", "z3"],
-            weight_type="classical",
-            cov_type=cov_type,
-        )
+    # 複数内生変数（k_endog>=2）。fixtures["multi_endog"][シナリオ][重み][cov_type]。
+    # classical重みは全cov_type、他の重みはMULTI_ENDOG_OTHER_WEIGHT_TYPESに従って
+    # cov_type=classicalのみ（上記と同じ検証範囲の絞り方）。
+    fixtures["multi_endog"] = {}
+    for scenario in MULTI_ENDOG_SCENARIOS:
+        multi_instruments = multi_endog_instruments(scenario)
+        entry = {"classical": {}}
+        for cov_type in LINEARMODELS_COV_TYPES:
+            entry["classical"][cov_type] = run_gmm(
+                dataset=f"{scenario}_multi_endog",
+                x_exog_cols=["x1"],
+                x_endog_cols=["endog1", "endog2"],
+                instrument_cols=multi_instruments,
+                weight_type="classical",
+                cov_type=cov_type,
+            )
+        for weight_type in MULTI_ENDOG_OTHER_WEIGHT_TYPES[scenario]:
+            if weight_type == "cluster":
+                result = _run_cluster_case(
+                    f"{scenario}_multi_endog",
+                    weight_type="cluster",
+                    cov_type="classical",
+                    x_endog_cols=["endog1", "endog2"],
+                    instrument_cols=multi_instruments,
+                )
+            else:
+                result = run_gmm(
+                    dataset=f"{scenario}_multi_endog",
+                    x_exog_cols=["x1"],
+                    x_endog_cols=["endog1", "endog2"],
+                    instrument_cols=multi_instruments,
+                    weight_type=weight_type,
+                    cov_type="classical",
+                )
+            entry[weight_type] = {"classical": result}
+        fixtures["multi_endog"][scenario] = entry
 
     # include_intercept=False（切片なし）。2SLSのiv.jsonと同じシナリオ
     # （NO_INTERCEPT_SCENARIOS）をweight_type='classical'固定で、cov_type別に持つ。
@@ -275,7 +328,7 @@ def build_fixtures() -> dict:
         "primary_reference": "linearmodels",
         "linearmodels_version": linearmodels.__version__,
         "note": (
-            "weight_type='classical'固定で全10シナリオ×cov_type"
+            "weight_type='classical'固定で全NUMERIC_SCENARIOS×cov_type"
             "（classical/hc0/hc1/hac、baselineのみ追加でcluster/"
             "cluster_imbalanced）を検証する。scale_variance_mildは"
             "scale_variance（x1*1e6, x2*1e-3、全cov_typeでComputationError）"
@@ -295,7 +348,13 @@ def build_fixtures() -> dict:
             "perfect_multicollinearity/G=2クラスター境界はここに含まない"
             "（2SLSの`iv.json`と同じ理由、G=2境界は`engine/src/iv/CLAUDE.md`"
             "「修正済み」参照）。"
+            "invalid_instrument（最後の操作変数を構造誤差と相関させ、Hansen Jが"
+            "棄却する）はclassical重みに加えてrobust重み×classical共分散も持つ。"
             "multi_endog（複数内生変数、x_endog=['endog1','endog2']）は"
+            "MULTI_ENDOG_SCENARIOS（baseline・just_identified・weak_instruments・"
+            "heteroskedastic）ごとにclassical重み×全cov_typeを持ち、さらに"
+            "MULTI_ENDOG_OTHER_WEIGHT_TYPESの重み（baselineはrobust/cluster/hac、"
+            "weak_instruments・heteroskedasticはrobust）×classical共分散を持つ。"
             "benchmark/iv/datasets.pyの第一段階誤差vが内生変数ごとに独立になる"
             "よう修正した後のデータで生成（"
             "generate_iv_fixtures.pyの同名注記参照）。"
@@ -328,9 +387,12 @@ def _run_cluster_case(
     cov_type: str = "cluster",
     groups: list | None = None,
     include_intercept: bool = True,
+    x_endog_cols: list[str] | None = None,
+    instrument_cols: list[str] | None = None,
 ) -> dict:
     """クラスターロバストSE確認用に、疑似グループを付けて`run_gmm`を呼ぶ
     （`generate_iv_fixtures.py`の`_run_cluster_case`と同じ発想）。
+    `x_endog_cols`・`instrument_cols`の既定は`["endog1"]`・`["z1", "z2"]`。
     """
     filename = f"iv_{dataset}.csv"
     df = pl.read_csv(DATA_DIR / filename)
@@ -345,8 +407,8 @@ def _run_cluster_case(
         return run_gmm(
             dataset=f"{dataset}_gmm_cluster_tmp",
             x_exog_cols=["x1"],
-            x_endog_cols=["endog1"],
-            instrument_cols=["z1", "z2"],
+            x_endog_cols=x_endog_cols or ["endog1"],
+            instrument_cols=instrument_cols or ["z1", "z2"],
             weight_type=weight_type,
             cov_type=cov_type,
             cluster="cluster_group",

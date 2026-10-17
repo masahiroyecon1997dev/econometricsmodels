@@ -117,6 +117,19 @@ def test_no_intercept_cluster_matches_statsmodels(fixtures):
     _checks.check_no_intercept_cluster_matches_statsmodels(CONFIG, fixtures)
 
 
+@pytest.mark.parametrize("cov_type", CONFIG.cov_types)
+def test_confidence_level_matches_statsmodels(fixtures, cov_type):
+    _checks.check_confidence_level_matches_statsmodels(
+        CONFIG, fixtures, cov_type
+    )
+
+
+def test_confidence_level_cluster_matches_statsmodels(fixtures):
+    _checks.check_confidence_level_cluster_matches_statsmodels(
+        CONFIG, fixtures
+    )
+
+
 @pytest.mark.parametrize("solver", ["bfgs", "lbfgs"])
 def test_solver_matches_statsmodels(fixtures, solver):
     _checks.check_solver_matches_statsmodels(CONFIG, fixtures, solver)

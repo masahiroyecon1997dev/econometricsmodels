@@ -80,8 +80,8 @@ from benchmark.common.reference.normalize import normalize_names
 MARGEFF_AT = ["overall", "mean", "median"]
 
 
-def _margeff_frame(fit_result, at: str) -> dict:
-    sf = fit_result.get_margeff(at=at).summary_frame()
+def _margeff_frame(fit_result, at: str, alpha: float) -> dict:
+    sf = fit_result.get_margeff(at=at).summary_frame(alpha=alpha)
     return {
         str(name): {
             "effect": float(row.iloc[0]),
@@ -215,7 +215,9 @@ def run(
                 str(idx): [float(row[0]), float(row[1])]
                 for idx, row in ci.iterrows()
             },
-            "margeff": {at: _margeff_frame(fitted, at) for at in MARGEFF_AT},
+            "margeff": {
+                at: _margeff_frame(fitted, at, alpha) for at in MARGEFF_AT
+            },
         }
         # patsy（formula API）由来の生の切片名"Intercept"を、生成時点で
         # 本実装の"const"へ正規化する（Rクロスチェック側`normalize_names`と

@@ -63,7 +63,10 @@ from _nonlinear_helpers import (
 from econometricsmodels import ComputationError, ValidationError
 
 from benchmark.common import imbalanced_cluster_groups
-from benchmark.nonlinear.constants import NON_CLUSTER_COV_TYPES
+from benchmark.nonlinear.constants import (
+    CONFIDENCE_LEVEL_NON_DEFAULT,
+    NON_CLUSTER_COV_TYPES,
+)
 
 # ── test_<solver>_api.py: 成功パス・結果型 ──────────────────────────
 
@@ -445,6 +448,40 @@ def check_marginal_effects_at_is_case_insensitive(
     assert_argument_case_insensitive(
         lambda label: res.marginal_effects(at=label), at, spelling
     )
+
+
+def check_marginal_effects_confidence_level_is_independent_of_fit(
+    dataset, estimator_cls, options_cls
+):
+    """`marginal_effects()`の信頼水準は`fit()`の`Options.confidence_level`と独立。
+
+    `Options`の水準を変えても、`marginal_effects()`の既定（0.95）は変わらない。
+    水準は引数でだけ変わり、点推定値と標準誤差は水準によらない。数値の正しさは
+    `_reference`/`_crosscheck`のテストが担い、ここでは配線だけを確かめる。
+    """
+    base = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
+    low_option = estimator_cls(
+        dataset,
+        y="y",
+        x=["x1", "x2"],
+        options=options_cls(confidence_level=0.80),
+    ).fit()
+    assert low_option.marginal_effects() == base.marginal_effects()
+
+    wide = base.marginal_effects(confidence_level=0.99)
+    default = base.marginal_effects()
+    narrow = base.marginal_effects(confidence_level=0.80)
+    for w, d, n in zip(wide, default, narrow, strict=True):
+        assert (
+            n["conf_upper"] - n["conf_lower"]
+            < d["conf_upper"] - d["conf_lower"]
+        )
+        assert (
+            d["conf_upper"] - d["conf_lower"]
+            < w["conf_upper"] - w["conf_lower"]
+        )
+        assert w["effect"] == d["effect"] == n["effect"]
+        assert w["std_error"] == d["std_error"] == n["std_error"]
 
 
 # ── test_<solver>_validation.py: ValidationError（入力データ） ──────
@@ -1286,13 +1323,38 @@ class BinaryChoiceReferenceConfig:
             ours, ref, label, rtol=self.rtol_solver, atol=self.atol
         )
 
-    def check_margeff(self, res, ref_margeff: dict, label: str) -> None:
-        check_margeff(res, ref_margeff, label, rtol=self.rtol, atol=self.atol)
+    def check_margeff(
+        self,
+        res,
+        ref_margeff: dict,
+        label: str,
+        *,
+        confidence_level: float = 0.95,
+    ) -> None:
+        check_margeff(
+            res,
+            ref_margeff,
+            label,
+            rtol=self.rtol,
+            atol=self.atol,
+            confidence_level=confidence_level,
+        )
 
 
 def check_result(
-    config: BinaryChoiceReferenceConfig, res, ref: dict, label: str
+    config: BinaryChoiceReferenceConfig,
+    res,
+    ref: dict,
+    label: str,
+    *,
+    confidence_level: float = 0.95,
 ) -> None:
+    """全統計量をリファレンスと比べる。
+
+    `confidence_level`は限界効果の信頼区間の水準（`marginal_effects()`の引数で、
+    `fit()`の`Options.confidence_level`とは独立）。係数の信頼区間の水準は
+    `res`を推定したときのオプション側で決まる。
+    """
     config.assert_inference_close(res, ref, label)
 
     config.assert_fields_close(
@@ -1330,7 +1392,9 @@ def check_result(
         assert ref["margeff"] is None, f"{label}/margeff"
     else:
         assert ref["margeff"] is not None, f"{label}/margeff"
-        config.check_margeff(res, ref["margeff"], label)
+        config.check_margeff(
+            res, ref["margeff"], label, confidence_level=confidence_level
+        )
 
 
 # ── test_<method>_reference.py: 凍結フィクスチャとの数値照合 ─────────
@@ -1388,6 +1452,45 @@ def check_no_intercept_cluster_matches_statsmodels(
         res,
         fixtures["synthetic"]["baseline"]["no_intercept"]["cluster"],
         "no_intercept/cluster",
+    )
+
+
+def check_confidence_level_matches_statsmodels(
+    config: BinaryChoiceReferenceConfig, fixtures, cov_type
+) -> None:
+    """非既定の`confidence_level`（baseline、`cov_type`別）。
+
+    係数の信頼区間は`Options.confidence_level`、限界効果の信頼区間は独立の
+    `marginal_effects(confidence_level=...)`で水準を指定するため、両方に渡す。
+    臨界値を固定した実装は0.90の区間で外れる。
+    """
+    level = CONFIDENCE_LEVEL_NON_DEFAULT
+    df = pl.read_csv(config.dataset_path("baseline"))
+    options = config.options_cls(cov_type=cov_type, confidence_level=level)
+    res = config.estimator_cls(
+        df, y="y", x=["x1", "x2", "x3"], options=options
+    ).fit()
+    check_result(
+        config,
+        res,
+        fixtures["synthetic"]["baseline"]["confidence_level"][cov_type],
+        f"confidence_level/{cov_type}",
+        confidence_level=level,
+    )
+
+
+def check_confidence_level_cluster_matches_statsmodels(
+    config: BinaryChoiceReferenceConfig, fixtures
+) -> None:
+    """非既定の`confidence_level`×クラスターロバストSE（行番号%10の疑似グループ）。"""
+    level = CONFIDENCE_LEVEL_NON_DEFAULT
+    res = _baseline_cluster_fit(config, "cluster", confidence_level=level)
+    check_result(
+        config,
+        res,
+        fixtures["synthetic"]["baseline"]["confidence_level"]["cluster"],
+        "confidence_level/cluster",
+        confidence_level=level,
     )
 
 

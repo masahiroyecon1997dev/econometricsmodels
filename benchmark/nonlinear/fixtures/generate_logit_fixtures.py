@@ -36,7 +36,10 @@ from benchmark.common import (
     imbalanced_cluster_groups,
     run_fixture_cli,
 )
-from benchmark.nonlinear.constants import STATSMODELS_COV_TYPES
+from benchmark.nonlinear.constants import (
+    CONFIDENCE_LEVEL_NON_DEFAULT,
+    STATSMODELS_COV_TYPES,
+)
 from benchmark.nonlinear.references.statsmodels_ref import run
 
 # perfect_multicollinearityは数値比較の対象外（ComputationErrorの発生確認のみ、
@@ -124,6 +127,29 @@ def build_fixtures() -> dict:
         include_intercept=False,
         groups=balanced_cluster_groups(n),
     )
+    # confidence_level非既定（0.95以外）。係数と限界効果の信頼区間を、全cov_type
+    # （STATSMODELS_COV_TYPES + cluster）で確認する（OLS/WLSと同じ）。opgの限界効果は
+    # statsmodels側では算出しないためnull。
+    fixtures["baseline"]["confidence_level"] = {
+        cov_type: run(
+            dataset_source="synthetic",
+            dataset="baseline",
+            formula=None,
+            cov_type=cov_type,
+            model="logit",
+            confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+        )
+        for cov_type in STATSMODELS_COV_TYPES
+    }
+    fixtures["baseline"]["confidence_level"]["cluster"] = run(
+        dataset_source="synthetic",
+        dataset="baseline",
+        formula=None,
+        cov_type="cluster",
+        model="logit",
+        confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+        groups=balanced_cluster_groups(n),
+    )
     # NOTE: G=2×説明変数3個（cluster_g2）の成功パスフィクスチャは
     # 削除した。`rank(Ŝ)<=G-1`のため`G<=q`（q=3）ではクラスターロバスト共分散が
     # 退化し、`fit()`冒頭のバリデーションが ValidationError で弾く（Logit/Probit
@@ -195,6 +221,8 @@ def build_fixtures() -> dict:
             "ValidationErrorになるため成功パスフィクスチャを持たない。"
             "clusterはbaselineシナリオ（均等・不均衡の疑似グループ）とapple（実データ、"
             "州でG=49）。全統計量・限界効果を持つ。"
+            "baseline.confidence_levelは非既定の信頼水準（0.90）を全cov_type（opgを含む。"
+            "opgのmargeffはnull）とクラスター（均等な疑似グループ）で確認する。"
             "baseline.no_interceptはinclude_intercept=False（切片なし）を"
             "全cov_type（opgを含む。opgのmargeffはnull）とクラスター（均等な疑似グループ）"
             "で確認する。log_likelihood_nullは常に切片のみのモデルを参照するため、"

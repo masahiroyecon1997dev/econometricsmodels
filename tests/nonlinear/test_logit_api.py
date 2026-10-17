@@ -204,3 +204,11 @@ def test_marginal_effects_at_is_case_insensitive(binary_dataset, at, spelling):
     _checks.check_marginal_effects_at_is_case_insensitive(
         binary_dataset, Logit, at, spelling
     )
+
+
+def test_marginal_effects_confidence_level_is_independent_of_fit(
+    binary_dataset,
+):
+    _checks.check_marginal_effects_confidence_level_is_independent_of_fit(
+        binary_dataset, Logit, LogitOptions
+    )

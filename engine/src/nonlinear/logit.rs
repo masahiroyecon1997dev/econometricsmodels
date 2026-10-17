@@ -282,10 +282,12 @@ impl LogitProblem {
     pub fn scores(&self, params: &[f64]) -> Mat<f64> {
         let n = self.x.nrows();
         let k = self.x.ncols();
-        Mat::from_fn(n, k, |i, j| {
-            let p = logistic(self.linear_predictor(i, params));
-            (*self.y.get(i, 0) - p) * (*self.x.get(i, j))
-        })
+        // 行の残差`yᵢ-pᵢ`は`j`によらないため、観測あたり1回だけ計算する
+        // （セルごとに計算すると`linear_predictor`のO(k)が行あたりk回になる）。
+        let residuals: Vec<f64> = (0..n)
+            .map(|i| *self.y.get(i, 0) - logistic(self.linear_predictor(i, params)))
+            .collect();
+        Mat::from_fn(n, k, |i, j| residuals[i] * (*self.x.get(i, j)))
     }
 }
 
@@ -1011,6 +1013,33 @@ mod tests {
         assert!((hessian[0][1] - 2.5).abs() < 1e-12, "{:?}", hessian);
         assert!((hessian[1][0] - 2.5).abs() < 1e-12, "{:?}", hessian);
         assert!((hessian[1][1] - 7.5).abs() < 1e-12, "{:?}", hessian);
+    }
+
+    /// `scores`は行ごとの残差を観測あたり1回だけ計算して行を埋める。セルごとに再計算する
+    /// 素朴な式と、演算の順序まで含めてビット単位で一致することを確認する
+    /// （極端なパラメータ点を含む）。
+    /// 参照式は本体と同じヘルパーを呼ぶため、検出するのは行列に詰める配置・順序の退行で、
+    /// ヘルパー側の式の変更は別のテスト（閉形式・数値微分）が担う。
+    #[test]
+    fn scores_match_per_cell_reference_bit_for_bit() {
+        let input = small_input();
+        let problem = LogitProblem::new(&input);
+        // `[800.0, -1.0]`は`z≥796`で`logistic`が`1.0`に飽和する（`y-p`が`±0.0`・`-1.0`になる）
+        for params in [
+            vec![0.0, 0.0],
+            vec![0.3, -0.7],
+            vec![40.0, -25.0],
+            vec![800.0, -1.0],
+        ] {
+            let scores = problem.scores(&params);
+            for i in 0..scores.nrows() {
+                for j in 0..scores.ncols() {
+                    let p = logistic(problem.linear_predictor(i, &params));
+                    let expected = (*problem.y.get(i, 0) - p) * (*problem.x.get(i, j));
+                    assert_eq!(scores.get(i, j).to_bits(), expected.to_bits(), "({i}, {j})");
+                }
+            }
+        }
     }
 
     #[test]

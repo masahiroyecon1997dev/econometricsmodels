@@ -463,12 +463,20 @@ impl TobitProblem {
         let k = self.k();
         let sigma = params[k].exp();
         let normal = Normal::standard();
-        Mat::from_fn(n, k + 1, |i, col| {
+        // `contribution`（`linear_predictor`・`φ`/`Φ`・打ち切り分岐）は列によらないため、
+        // 観測あたり1回だけ計算する。`Contribution`ごとは保持せず、使う2成分だけ集める。
+        let mut beta_coefs = Vec::with_capacity(n);
+        let mut score_s = Vec::with_capacity(n);
+        for i in 0..n {
             let contribution = self.contribution(i, params, &normal);
+            beta_coefs.push(contribution.score_beta_coef);
+            score_s.push(contribution.score_s);
+        }
+        Mat::from_fn(n, k + 1, |i, col| {
             if col < k {
-                contribution.score_beta_coef * (*self.x.get(i, col)) / sigma
+                beta_coefs[i] * (*self.x.get(i, col)) / sigma
             } else {
-                contribution.score_s
+                score_s[i]
             }
         })
     }
@@ -2533,6 +2541,46 @@ mod tests {
                     analytic[i][j],
                     numeric
                 );
+            }
+        }
+    }
+
+    /// `scores`は`contribution`を観測あたり1回だけ計算して行を埋める。セルごとに再計算する
+    /// 素朴な式と、ビット単位で一致することを確認する（左・右・非打ち切りの観測と、
+    /// `|zeta|`が`U_CLAMP`を超える極端なパラメータ点を含む）。
+    /// 参照式は本体と同じヘルパーを呼ぶため、検出するのは行列に詰める配置・順序の退行で、
+    /// ヘルパー側の式の変更は別のテスト（閉形式・数値微分）が担う。
+    #[test]
+    fn scores_match_per_cell_reference_bit_for_bit() {
+        let input = mixed_censoring_input();
+        let problem = TobitProblem::new(&input);
+        let normal = Normal::standard();
+        // 通常点に加え、`zeta`が両側でクランプされる点（`β₀`の符号違い）と、`σ=e^s`が極小・
+        // 極大の点を含める。
+        for params in [
+            vec![0.5, 0.3, -0.2],
+            vec![-1.0, 2.0, 0.4],
+            vec![30.0, -9.0, -1.5],
+            vec![-30.0, -9.0, -1.5],
+            vec![0.5, 0.3, -6.0],
+            vec![0.5, 0.3, 4.0],
+        ] {
+            let scores = problem.scores(&params);
+            let (k, sigma) = (problem.k(), params[problem.k()].exp());
+            for i in 0..scores.nrows() {
+                for col in 0..=k {
+                    let c = problem.contribution(i, &params, &normal);
+                    let expected = if col < k {
+                        c.score_beta_coef * (*problem.x.get(i, col)) / sigma
+                    } else {
+                        c.score_s
+                    };
+                    assert_eq!(
+                        scores.get(i, col).to_bits(),
+                        expected.to_bits(),
+                        "({i}, {col})"
+                    );
+                }
             }
         }
     }

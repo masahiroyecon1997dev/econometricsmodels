@@ -353,10 +353,12 @@ impl ProbitProblem {
         let n = self.x.nrows();
         let k = self.x.ncols();
         let normal = Normal::standard();
-        Mat::from_fn(n, k, |i, j| {
-            let lambda = self.generalized_residual(i, params, &normal);
-            lambda * (*self.x.get(i, j))
-        })
+        // `λᵢ`は`j`によらないため、観測あたり1回だけ計算する（セルごとに計算すると
+        // `linear_predictor`のO(k)と`φ`/`Φ`の評価が行あたりk回になる）。
+        let lambdas: Vec<f64> = (0..n)
+            .map(|i| self.generalized_residual(i, params, &normal))
+            .collect();
+        Mat::from_fn(n, k, |i, j| lambdas[i] * (*self.x.get(i, j)))
     }
 }
 
@@ -1083,6 +1085,28 @@ mod tests {
         assert!((hessian[0][1] - w * 10.0).abs() < 1e-9, "{:?}", hessian);
         assert!((hessian[1][0] - w * 10.0).abs() < 1e-9, "{:?}", hessian);
         assert!((hessian[1][1] - w * 30.0).abs() < 1e-9, "{:?}", hessian);
+    }
+
+    /// `scores`は行ごとの一般化残差`λᵢ`を観測あたり1回だけ計算して行を埋める。セルごとに
+    /// 再計算する素朴な式と、ビット単位で一致することを確認する（`|z|`が`U_CLAMP`を
+    /// 超える極端なパラメータ点を含む）。
+    /// 参照式は本体と同じヘルパーを呼ぶため、検出するのは行列に詰める配置・順序の退行で、
+    /// ヘルパー側の式の変更は別のテスト（閉形式・数値微分）が担う。
+    #[test]
+    fn scores_match_per_cell_reference_bit_for_bit() {
+        let input = small_input();
+        let problem = ProbitProblem::new(&input);
+        let normal = Normal::standard();
+        for params in [vec![0.0, 0.0], vec![0.3, -0.7], vec![40.0, -25.0]] {
+            let scores = problem.scores(&params);
+            for i in 0..scores.nrows() {
+                for j in 0..scores.ncols() {
+                    let expected =
+                        problem.generalized_residual(i, &params, &normal) * (*problem.x.get(i, j));
+                    assert_eq!(scores.get(i, j).to_bits(), expected.to_bits(), "({i}, {j})");
+                }
+            }
+        }
     }
 
     #[test]

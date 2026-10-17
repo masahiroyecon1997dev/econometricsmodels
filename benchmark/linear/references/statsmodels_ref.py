@@ -34,10 +34,13 @@ from datetime import UTC, datetime
 
 import polars as pl
 
-from benchmark.common import extract_params_std_errors, load_frozen_dataset
+from benchmark.common import (
+    extract_params_std_errors,
+    hac_auto_lag,
+    load_frozen_dataset,
+)
 from benchmark.common.load_wooldridge import load as _load_wooldridge
 from benchmark.common.reference.normalize import normalize_names
-from benchmark.linear.constants import HAC_MAXLAGS
 
 
 def _load_synthetic(dataset: str) -> tuple[pl.DataFrame, list[float]]:
@@ -143,7 +146,10 @@ def run(
     if sm_cov_type == "cluster":
         fit_kwargs["cov_kwds"] = {"groups": pandas_df[cluster]}
     elif sm_cov_type == "hac":
-        fit_kwargs["cov_kwds"] = {"maxlags": HAC_MAXLAGS}
+        # ラグは本実装の自動選択式（`hac_auto_lag(n)`）に合わせ、Rクロスチェック・IVと
+        # 同じラグで照合する。使ったラグは結果の`hac_lag`に残す。
+        hac_lag = hac_auto_lag(len(pandas_df))
+        fit_kwargs["cov_kwds"] = {"maxlags": hac_lag}
 
     if weight_col is not None:
         model = smf.wls(
@@ -155,6 +161,8 @@ def run(
     result = extract_full_fit_stats(model, confidence_level)
     if true_beta is not None:
         result["true_beta"] = true_beta
+    if sm_cov_type == "hac":
+        result["hac_lag"] = hac_lag
 
     import statsmodels
 

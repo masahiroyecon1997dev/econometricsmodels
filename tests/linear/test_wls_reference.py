@@ -57,7 +57,6 @@ from benchmark.common import imbalanced_cluster_groups
 from benchmark.linear.constants import (
     CONFIDENCE_LEVEL_NON_DEFAULT,
     COV_TYPES,
-    HAC_MAXLAGS,
     NON_HAC_COV_TYPES,
 )
 from benchmark.linear.constants import (
@@ -75,10 +74,10 @@ FIXTURE_PATH = (
 RTOL = TOLERANCES["wls_reference"]["rtol"]
 ATOL = TOLERANCES["wls_reference"]["atol"]
 
-# フィクスチャ生成側（benchmark/linear/references/statsmodels_ref.py）と同じ
-# HAC_MAXLAGSを明示的に指定し、自動ラグ選択式の違いを比較対象から除外する
-# （test_ols_reference.pyと同じ理由、単一の定義元
-# `benchmark/linear/constants.py`をimportする）。
+# HACのラグは`hac_lags`を省略して本実装の自動選択に任せる。フィクスチャ生成側
+# （benchmark/linear/references/statsmodels_ref.py）は同じ式（`hac_auto_lag(n)`）で
+# 選んだラグを`hac_lag`に残しており、`_check_result`が`hac_lags_used`との一致を
+# 確認する（Rクロスチェックも同じラグで照合する）。
 
 
 @pytest.fixture(scope="module")
@@ -109,6 +108,8 @@ def _check_result(res, ref: dict, label: str) -> None:
         label,
     )
     assert res.n_obs == ref["nobs"], f"{label}/n_obs"
+    if "hac_lag" in ref:
+        assert res.hac_lags_used == ref["hac_lag"], f"{label}/hac_lags_used"
 
 
 # ── 凍結フィクスチャとの数値照合（合成データ） ────────────────────────
@@ -119,11 +120,7 @@ def _check_result(res, ref: dict, label: str) -> None:
 def test_matches_statsmodels(fixtures, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
     x_cols = [c for c in df.columns if c not in ("y", "weight")]
-    kwargs = (
-        {"hac_lags": HAC_MAXLAGS, "hac_time": ROW_TIME}
-        if cov_type == "hac"
-        else {}
-    )
+    kwargs = {"hac_time": ROW_TIME} if cov_type == "hac" else {}
     options = WLSOptions(cov_type=cov_type, **kwargs)
     res = WLS(
         with_row_time(df), y="y", x=x_cols, weight="weight", options=options
@@ -266,11 +263,7 @@ def test_no_intercept_matches_statsmodels(fixtures, cov_type):
     `test_no_intercept_cluster_matches_statsmodels`で別途確認する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
-    kwargs = (
-        {"hac_lags": HAC_MAXLAGS, "hac_time": ROW_TIME}
-        if cov_type == "hac"
-        else {}
-    )
+    kwargs = {"hac_time": ROW_TIME} if cov_type == "hac" else {}
     options = WLSOptions(include_intercept=False, cov_type=cov_type, **kwargs)
     res = WLS(
         with_row_time(df),
@@ -326,11 +319,7 @@ def test_confidence_level_matches_statsmodels(fixtures, cov_type):
     `test_confidence_level_cluster_matches_statsmodels`で別途確認する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
-    kwargs = (
-        {"hac_lags": HAC_MAXLAGS, "hac_time": ROW_TIME}
-        if cov_type == "hac"
-        else {}
-    )
+    kwargs = {"hac_time": ROW_TIME} if cov_type == "hac" else {}
     options = WLSOptions(
         confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
         cov_type=cov_type,

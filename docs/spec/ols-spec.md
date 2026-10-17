@@ -123,7 +123,9 @@ $$
   `shared::covariance::hac_meat`内でのみ`Par::Seq`を明示指定して回避している。他手法で同様の小さい行列の
   頻繁な積を書く場合も並列化の要否を実測してから決めること。
 - statsmodelsとの照合は`cov_kwds={"maxlags": L}, use_t=True`。`use_correction`（小標本補正）は
-  既定の`False`のままで一致することを確認済み。
+  既定の`False`のままで一致することを確認済み。`L`は主リファレンス（statsmodels）もRクロスチェックも
+  本実装の自動選択式（`benchmark.common.hac_auto_lag(n)`）に揃え、どちらのフィクスチャにも`hac_lag`として残す
+  （テストは`hac_lags`を省略し、`hac_lags_used`が`hac_lag`と一致することも確認する）。
 
 **クラスター**: $\hat S = \sum_g S_g S_g^\top$（$S_g = \sum_{i\in g}\hat\varepsilon_i x_i$）。
 - グループ化は**キーの辞書順に整数コードを振る`GroupCodes`（`BTreeMap`と同じ反復順）を使う
@@ -244,6 +246,8 @@ $$
   HACも同じ`rtol_strict`（R側は`NeweyWest(adjust = FALSE)`。既定の`adjust = TRUE`は共分散に
   `n/(n-k)`を掛けるが本実装・statsmodelsは掛けず、このスカラー倍だけが差の全てで、
   小標本（n=20）・高次元（k=21）を含む全合成シナリオで機械精度一致する）。
+- HACの実データは時系列のWooldridge `prminwge`（`lprepop ~ lmincov + lusgnp`、年次昇順でn=38、
+  行順を`hac_time`にする）でstatsmodels・Rの両方と照合する。横断面の`wage1`/`gpa2`はHACの対象外。
 - `tests/linear/` に4ファイルで役割分担する:
   `test_ols_api.py`（成功パスの構造・API・オプション反映・`predict()`/`augment()`）/
   `test_ols_validation.py`（`ValidationError`/`ComputationError`パス）/

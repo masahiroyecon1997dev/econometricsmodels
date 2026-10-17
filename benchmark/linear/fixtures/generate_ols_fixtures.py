@@ -37,7 +37,6 @@ from benchmark.linear.constants import (
     CLUSTER_ILL_CONDITIONED_SCENARIOS,
     CONFIDENCE_LEVEL_NON_DEFAULT,
     COV_TYPES,
-    HAC_MAXLAGS,
     NON_HAC_COV_TYPES,
     NUMERIC_SCENARIOS,
     PREDICT_NEW_DATA,
@@ -56,6 +55,11 @@ from benchmark.linear.references.statsmodels_ref import (
 WOOLDRIDGE_DATASETS = {
     "wage1": "lwage ~ educ + exper + tenure",
     "gpa2": "colgpa ~ sat + hsperc + tothrs",
+}
+
+# HACの実データ（時系列、年次昇順でn=38）。行順をそのまま時間順として使う。
+WOOLDRIDGE_HAC_DATASETS = {
+    "prminwge": "lprepop ~ lmincov + lusgnp",
 }
 
 
@@ -167,13 +171,21 @@ def build_fixtures() -> dict:
             for cov_type in NON_HAC_COV_TYPES
         }
     fixtures["wage1"]["cluster"] = _run_wage1_region_cluster_case()
+    for name, formula in WOOLDRIDGE_HAC_DATASETS.items():
+        fixtures[name] = {
+            "hac": run(
+                dataset_source="wooldridge",
+                dataset=name,
+                formula=formula,
+                cov_type="hac",
+            )
+        }
 
     fixtures["_meta"] = {
         "method": "ols",
         "generated_at": datetime.now(UTC).isoformat(),
         "primary_reference": "statsmodels",
         "statsmodels_version": statsmodels.__version__,
-        "hac_maxlags": HAC_MAXLAGS,
         "note": (
             "perfect_multicollinearity・scale_varianceシナリオはここに含まない"
             "（いずれもComputationErrorの発生確認のみ、テストコード側で対応。"
@@ -187,6 +199,9 @@ def build_fixtures() -> dict:
             "外れ値に置き換えた成功パス。"
             "wage1/gpa2はWooldridge実データ（classical/HC0-3、HACは"
             "時系列順の無いクロスセクションデータのため対象外）。"
+            "prminwge（時系列、n=38）はHACのみの実データ。HACのラグは全ケース"
+            "本実装の自動選択式（benchmark.common.hac_auto_lag）で、使ったラグは"
+            "各cov_type=hacエントリのhac_lagに残す。"
             "generate_ols_crosscheck_fixtures.pyのbuild_wooldridge_fixtures()と"
             "同じデータセット・回帰式で、従来Rクロスチェック側にしか無かった"
             "実データ検証を主リファレンス側にも追加したもの。wage1.clusterは"
@@ -223,7 +238,9 @@ def build_fixtures() -> dict:
             "よう拡張）。"
         ),
     }
-    return group_by_dataset_source(fixtures, ["wage1", "gpa2"])
+    return group_by_dataset_source(
+        fixtures, [*WOOLDRIDGE_DATASETS, *WOOLDRIDGE_HAC_DATASETS]
+    )
 
 
 def _run_cluster_case(

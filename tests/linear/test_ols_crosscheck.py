@@ -519,3 +519,29 @@ def test_wooldridge_wage1_region_cluster_matches_r(
         res.std_errors, ref["std_errors"], f"{label} std_errors"
     )
     _assert_fit_stats_close(res, ref, label, rtol=RTOL_STRICT)
+
+
+def test_wooldridge_prminwge_hac_matches_r(crosscheck, load_wooldridge):
+    """時系列の実データ（Wooldridge `prminwge`、年次昇順でn=38）でのHAC。
+    ラグはフィクスチャ生成時の自動選択（`hac_lag`）をそのまま使う
+    （`test_hac_matches_r`と同じ方針、statsmodelsとの照合は
+    `test_ols_reference.py::test_wooldridge_prminwge_hac_matches_statsmodels`）。
+    """
+    df = load_wooldridge("prminwge")
+    ref = crosscheck["wooldridge"]["prminwge"]["hac"]
+    options = OLSOptions(
+        cov_type="hac", hac_lags=ref["hac_lag"], hac_time=ROW_TIME
+    )
+    res = OLS(
+        with_row_time(df),
+        y="lprepop",
+        x=["lmincov", "lusgnp"],
+        options=options,
+    ).fit()
+
+    label = "prminwge/hac/R"
+    _assert_dict_close(res.params, ref["params"], f"{label} params")
+    _assert_dict_close(
+        res.std_errors, ref["std_errors"], f"{label} std_errors"
+    )
+    _assert_fit_stats_close(res, ref, label, rtol=RTOL_STRICT)

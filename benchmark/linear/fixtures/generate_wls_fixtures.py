@@ -40,7 +40,6 @@ from benchmark.linear.constants import (
     CLUSTER_ILL_CONDITIONED_SCENARIOS,
     CONFIDENCE_LEVEL_NON_DEFAULT,
     COV_TYPES,
-    HAC_MAXLAGS,
     NON_HAC_COV_TYPES,
     NUMERIC_SCENARIOS,
 )
@@ -163,7 +162,6 @@ def build_fixtures() -> dict:
         "generated_at": datetime.now(UTC).isoformat(),
         "primary_reference": "statsmodels",
         "statsmodels_version": statsmodels.__version__,
-        "hac_maxlags": HAC_MAXLAGS,
         "note": (
             "perfect_multicollinearity・scale_varianceシナリオはここに含まない"
             "（いずれもComputationErrorの発生確認のみ、テストコード側で対応。"

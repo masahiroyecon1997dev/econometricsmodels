@@ -31,7 +31,7 @@ from econometricsmodels import (
     WLSOptions,
 )
 
-from benchmark.linear.constants import COV_TYPES, HAC_MAXLAGS
+from benchmark.linear.constants import COV_TYPES
 
 # ── ValidationError（入力データ: 重み列） ─────────────────────────────
 
@@ -695,11 +695,7 @@ def test_scale_variance_raises_computation_error(cov_type):
     数値比較はせずエラーパスのみ確認する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
-    kwargs = (
-        {"hac_lags": HAC_MAXLAGS, "hac_time": ROW_TIME}
-        if cov_type == "hac"
-        else {}
-    )
+    kwargs = {"hac_time": ROW_TIME} if cov_type == "hac" else {}
     options = WLSOptions(cov_type=cov_type, **kwargs)
     with pytest.raises(ComputationError):
         WLS(

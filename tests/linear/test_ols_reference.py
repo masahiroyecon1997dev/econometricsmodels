@@ -10,7 +10,8 @@
    - クラスターロバストSE: `baseline`の均等・不均衡・G=2グループ、
      `CLUSTER_ILL_CONDITIONED_SCENARIOS`の均等グループ、Wooldridge `wage1`の
      地域クラスター
-   - Wooldridge実データ（`WOOLDRIDGE_DATASETS`×`NON_HAC_COV_TYPES`）
+   - Wooldridge実データ（`WOOLDRIDGE_DATASETS`×`NON_HAC_COV_TYPES`、時系列の
+     `prminwge`はHACのみ）
    - 全シナリオの`predict()`（学習データのfitted値）と、`baseline`のout-of-sample
      `predict()`
    - `include_intercept=False`（切片なし）・`confidence_level`非既定: `baseline`
@@ -73,7 +74,6 @@ from benchmark.common import imbalanced_cluster_groups
 from benchmark.linear.constants import (
     CONFIDENCE_LEVEL_NON_DEFAULT,
     COV_TYPES,
-    HAC_MAXLAGS,
     NON_HAC_COV_TYPES,
     PREDICT_NEW_DATA,
 )
@@ -94,10 +94,10 @@ FIXTURE_PATH = (
 RTOL = TOLERANCES["ols_reference"]["rtol"]
 ATOL = TOLERANCES["ols_reference"]["atol"]
 
-# フィクスチャ生成側（benchmark/linear/references/statsmodels_ref.py）と同じ
-# HAC_MAXLAGSを明示的に指定し、自動ラグ選択式の違いを比較対象から除外する
-# （直書きの複製だと同期漏れリスクがあるため、単一の定義元
-# `benchmark/linear/constants.py`をimportする）。
+# HACのラグは`hac_lags`を省略して本実装の自動選択に任せる。フィクスチャ生成側
+# （benchmark/linear/references/statsmodels_ref.py）は同じ式（`hac_auto_lag(n)`）で
+# 選んだラグを`hac_lag`に残しており、`_check_result`が`hac_lags_used`との一致を
+# 確認する（Rクロスチェックも同じラグで照合する）。
 
 
 @pytest.fixture(scope="module")
@@ -128,6 +128,8 @@ def _check_result(res, ref: dict, label: str) -> None:
         label,
     )
     assert res.n_obs == ref["nobs"], f"{label}/n_obs"
+    if "hac_lag" in ref:
+        assert res.hac_lags_used == ref["hac_lag"], f"{label}/hac_lags_used"
 
 
 # ── 凍結フィクスチャとの数値照合（合成データ） ────────────────────────
@@ -138,11 +140,7 @@ def _check_result(res, ref: dict, label: str) -> None:
 def test_matches_statsmodels(fixtures, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"synthetic_{scenario}.csv")
     x_cols = [c for c in df.columns if c not in ("y", "weight")]
-    kwargs = (
-        {"hac_lags": HAC_MAXLAGS, "hac_time": ROW_TIME}
-        if cov_type == "hac"
-        else {}
-    )
+    kwargs = {"hac_time": ROW_TIME} if cov_type == "hac" else {}
     options = OLSOptions(cov_type=cov_type, **kwargs)
     res = OLS(with_row_time(df), y="y", x=x_cols, options=options).fit()
 
@@ -297,11 +295,7 @@ def test_no_intercept_matches_statsmodels(fixtures, cov_type):
     `test_no_intercept_cluster_matches_statsmodels`で別途確認する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
-    kwargs = (
-        {"hac_lags": HAC_MAXLAGS, "hac_time": ROW_TIME}
-        if cov_type == "hac"
-        else {}
-    )
+    kwargs = {"hac_time": ROW_TIME} if cov_type == "hac" else {}
     options = OLSOptions(include_intercept=False, cov_type=cov_type, **kwargs)
     res = OLS(
         with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
@@ -348,11 +342,7 @@ def test_confidence_level_matches_statsmodels(fixtures, cov_type):
     `test_confidence_level_cluster_matches_statsmodels`で別途確認する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
-    kwargs = (
-        {"hac_lags": HAC_MAXLAGS, "hac_time": ROW_TIME}
-        if cov_type == "hac"
-        else {}
-    )
+    kwargs = {"hac_time": ROW_TIME} if cov_type == "hac" else {}
     options = OLSOptions(
         confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
         cov_type=cov_type,
@@ -465,6 +455,28 @@ def test_wooldridge_wage1_region_cluster_matches_statsmodels(
         res,
         fixtures["wooldridge"]["wage1"]["cluster"],
         "wage1/cluster(region)",
+    )
+
+
+def test_wooldridge_prminwge_hac_matches_statsmodels(
+    fixtures, load_wooldridge
+):
+    """時系列の実データ（Wooldridge `prminwge`、年次昇順でn=38）でのHAC。
+    横断面データ（wage1/gpa2）では検証できないHACを実データで確認する。ラグは
+    自動選択に任せ、行順をそのまま時間順（`hac_time`）にする（Rとの照合は
+    `test_ols_crosscheck.py::test_wooldridge_prminwge_hac_matches_r`）。
+    """
+    df = load_wooldridge("prminwge")
+    options = OLSOptions(cov_type="hac", hac_time=ROW_TIME)
+    res = OLS(
+        with_row_time(df),
+        y="lprepop",
+        x=["lmincov", "lusgnp"],
+        options=options,
+    ).fit()
+
+    _check_result(
+        res, fixtures["wooldridge"]["prminwge"]["hac"], "prminwge/hac"
     )
 
 

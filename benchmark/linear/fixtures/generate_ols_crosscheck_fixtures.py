@@ -14,8 +14,8 @@ pyfixestのHC2/HC3はfixestの仕様ではなく**pyfixest自身の実装バグ*
 ため、性能比較専用に位置づけている。詳細は
 `docs/spec/ols-spec.md`「テスト」参照。
 
-classical/HC0-3/clusterはRとほぼ機械精度で一致するため厳密比較、HACのみ小標本補正の
-慣習差により緩い許容誤差で比較する（`tests/linear/test_ols_crosscheck.py`参照）。
+全cov_type（HACを含む）がRとほぼ機械精度で一致するため厳密比較する（HACはR側を
+`NeweyWest(adjust = FALSE)`にして小標本補正の慣習差を揃える）（`tests/linear/test_ols_crosscheck.py`参照）。
 
 `predict()`（`docs/spec/ols-spec.md`「predict()」）も対象に含める。
 `run_lm_predict_crosscheck.R`を使い、全シナリオで学習データに対する予測値（fitted）を、
@@ -256,6 +256,8 @@ def build_wooldridge_fixtures(tmpdir: Path) -> dict:
         ),
     }
     fixtures: dict = {}
+    # HACの実データ（時系列、年次昇順でn=38）。行順をそのまま時間順として使う。
+    hac_datasets = {"prminwge": "lprepop ~ lmincov + lusgnp"}
     for name, (formula, hc_types) in datasets.items():
         df = load_wooldridge(name)
         csv_path = _write_csv(df, tmpdir, name)
@@ -268,6 +270,9 @@ def build_wooldridge_fixtures(tmpdir: Path) -> dict:
             fixtures[name]["cluster"] = _run_wage1_region_cluster_case(
                 df, csv_path, formula
             )
+    for name, formula in hac_datasets.items():
+        csv_path = _write_csv(load_wooldridge(name), tmpdir, name)
+        fixtures[name] = {"hac": run_lm_r(csv_path, formula, "hac")}
     return fixtures
 
 
@@ -323,8 +328,8 @@ def build_fixtures() -> dict:
             "sandwich/lmtest）によるクロスチェック用。係数・標準誤差・t値・"
             "p値・信頼区間・R²・調整済みR²・AIC・BIC・対数尤度・F統計量・"
             "F検定p値を含む（信頼区間はconfidence_level=0.95固定で計算）。"
-            "classical/HC0-3/clusterは厳密比較、HACのみ緩い許容誤差での比較を"
-            "想定する（testing-policy.md参照）"
+            "全cov_type（HACを含む）を厳密比較する想定"
+            "（testing-policy.md参照）"
         ),
         "generated_at": datetime.now(UTC).isoformat(),
         "r_version": r_version,
@@ -333,7 +338,7 @@ def build_fixtures() -> dict:
         "note": (
             "perfect_multicollinearityシナリオはここに含まない"
             "（ComputationErrorの発生確認のみ、テストコード側で対応）。"
-            "HACはR側のみ（ラグは本実装の自動ラグ式に合わせてRラッパーが決め、`hac_lag`に残す）。"
+            "HACのラグは本実装の自動ラグ式に合わせてRラッパーが決め、`hac_lag`に残す（statsmodels側のols.json/wls.jsonも同じ自動ラグ）。"
             "clusterはR側のみ確認。baselineシナリオで均等疑似グループ（行番号%10）"
             "に加え、不均衡グループ（cluster_imbalanced）・クラスタ数境界G=2"
             "（cluster_g2）、wage1の実カテゴリ列region（northcen/south/west"

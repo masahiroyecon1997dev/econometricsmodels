@@ -10,8 +10,8 @@
   正式なクロスチェック。fixest（≒pyfixestの実装元）とは独立した実装のため採用。
 - pyfixestは正確性検証には使わない（性能比較専用）。
 
-classical/HC0-3/clusterはRとほぼ機械精度で一致するため厳密比較、HACのみ小標本補正の
-慣習差により緩い許容誤差で比較する（`tests/linear/test_wls_crosscheck.py`参照）。
+全cov_type（HACを含む）がRとほぼ機械精度で一致するため厳密比較する（HACはR側を
+`NeweyWest(adjust = FALSE)`にして小標本補正の慣習差を揃える）（`tests/linear/test_wls_crosscheck.py`参照）。
 
 係数・標準誤差に加え、t値・p値・信頼区間・R²・調整済みR²・AIC/BIC/対数尤度・
 F統計量・F検定p値もRクロスチェック対象に含める（`testing-policy.md`
@@ -271,8 +271,8 @@ def build_fixtures() -> dict:
             "lm(weights=) + sandwich/lmtest）によるクロスチェック用。係数・"
             "標準誤差・t値・p値・信頼区間・R²・調整済みR²・AIC・BIC・"
             "対数尤度・F統計量・F検定p値を含む（信頼区間はconfidence_level=0.95"
-            "固定で計算）。classical/HC0-3/clusterは厳密比較、HACのみ緩い"
-            "許容誤差での比較を想定する（testing-policy.md参照）"
+            "固定で計算）。全cov_type（HACを含む）を厳密比較する"
+            "想定（testing-policy.md参照）"
         ),
         "generated_at": datetime.now(UTC).isoformat(),
         "r_version": r_version,
@@ -284,7 +284,7 @@ def build_fixtures() -> dict:
             "scale_varianceはOLSと同じ理由でロバストWald検定の"
             "共分散部分行列が全cov_typeで数値的にほぼ特異になる、"
             "WLSでも実測確認済み）。"
-            "HACはR側のみ（ラグは本実装の自動ラグ式に合わせてRラッパーが決め、`hac_lag`に残す）。"
+            "HACのラグは本実装の自動ラグ式に合わせてRラッパーが決め、`hac_lag`に残す（statsmodels側のols.json/wls.jsonも同じ自動ラグ）。"
             "clusterはR側のみ確認。baselineシナリオで疑似グループ（行番号%10）"
             "に加え、不均衡グループ（cluster_imbalanced）・クラスタ数境界G=2"
             "（cluster_g2）を含む（OLSの同種ケース相当。グルーピングパターンの"

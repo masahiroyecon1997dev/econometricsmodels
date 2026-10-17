@@ -271,6 +271,9 @@ def compose(
     """
     e_args, e_opts = changes(method, early)
     l_args, l_opts = changes(method, late)
+    # 時間順の列が「無い」故障は、同じ列を指定する故障とは両立しない。
+    if early == "missing_time_option" and method.time_option in l_opts:
+        return None
     conflicts = {
         ("args", k) for k in e_args if k in l_args and e_args[k] != l_args[k]
     } | {("opts", k) for k in e_opts if k in l_opts and e_opts[k] != l_opts[k]}

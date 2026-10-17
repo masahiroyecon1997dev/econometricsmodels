@@ -19,7 +19,9 @@ use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
-use super::common::{least_squares_error_to_pyerr, parse_cov_type};
+use super::common::{
+    check_cov_options, least_squares_error_to_pyerr, parse_cov_kind, resolve_cov_type,
+};
 use crate::shared::augment::append_predicted_column;
 use crate::shared::column_extraction::{
     extract_column_list, extract_dataframe, extract_f64_column, extract_f64_columns,
@@ -687,6 +689,17 @@ pub fn fit(
 ) -> PyResult<OLSResult> {
     let df: DataFrame = data.into();
 
+    // DataFrameを見ない検査を先に行う。報告順は`docs/guide/validation.md`
+    // 「Order in which errors are reported」: オプションの値 → オプションの組合せ →
+    // ロール構造 → `y`/`x`の列 → オプション列 → エンジン。
+    let cov_kind = parse_cov_kind(&options.cov_type)?;
+    check_cov_options(
+        cov_kind,
+        options.cluster.as_deref(),
+        options.hac_lags,
+        options.hac_time.as_deref(),
+    )?;
+
     // 完全な多重共線性を早期に、分かりやすいエラーで防ぐ（`validation.rs`に集約、
     // WLS/Logitと共通、`.claude/rules/rust-style.md`参照）。
     validate_common_roles(&y, &x, options.include_intercept)?;
@@ -698,9 +711,9 @@ pub fn fit(
     let x_slices = extract_f64_columns(&df, &x)?;
 
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ）─────────────
-    let (cov_type, cov_type_lower) = parse_cov_type(
+    let cov_type = resolve_cov_type(
         &df,
-        &options.cov_type,
+        cov_kind,
         options.cluster.as_deref(),
         options.hac_lags,
         options.hac_time.as_deref(),
@@ -711,7 +724,7 @@ pub fn fit(
     let estimator = OlsEstimator::fit(input, cov_type, options.confidence_level)
         .map_err(least_squares_error_to_pyerr)?;
 
-    let mut result = ols_estimator_to_result(&estimator, cov_type_lower);
+    let mut result = ols_estimator_to_result(&estimator, cov_kind.name().to_string());
     result.training_data = Some(df);
     Ok(result)
 }

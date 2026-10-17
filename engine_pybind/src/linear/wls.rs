@@ -6,7 +6,7 @@
 //! （`docs/spec/wls-spec.md`「API引数」参照）。`WLSOptions`は`OLSOptions`と
 //! フィールド構成が完全に同一の独立したpyclassである（下記
 //! `WLSOptions`のdocコメント参照）。エラー変換（`least_squares_error_to_pyerr`）・
-//! `cov_type`のパース（`parse_cov_type`）は`super::common`のものをそのまま再利用する
+//! `cov_type`のパース（`parse_cov_kind`・`check_cov_options`・`resolve_cov_type`）は`super::common`のものをそのまま再利用する
 //! （`LeastSquaresError`がOLS・WLS共通のエラー型のため。`.claude/rules/rust-style.md`
 //! 「系統内で共有するロジックはcommon.rsに置く」）。`Mat<f64>`→`Vec<f64>`変換（`mat_to_vec`）は
 //! 系統によらず使うため`crate::shared::mat_conversion`のものを再利用する。
@@ -20,7 +20,9 @@ use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
-use super::common::{least_squares_error_to_pyerr, parse_cov_type};
+use super::common::{
+    check_cov_options, least_squares_error_to_pyerr, parse_cov_kind, resolve_cov_type,
+};
 use crate::shared::augment::append_predicted_column;
 use crate::shared::column_extraction::{
     extract_dataframe, extract_f64_column, extract_f64_columns, extract_model_x_columns,
@@ -363,6 +365,15 @@ pub fn fit(
 ) -> PyResult<WLSResult> {
     let df: DataFrame = data.into();
 
+    // DataFrameを見ない検査を先に行う（報告順は`ols.rs`の`fit`と同じ）。
+    let cov_kind = parse_cov_kind(&options.cov_type)?;
+    check_cov_options(
+        cov_kind,
+        options.cluster.as_deref(),
+        options.hac_lags,
+        options.hac_time.as_deref(),
+    )?;
+
     // 誤って同じ列を複数の役割に指定するミスを、分かりやすいエラーで早期に防ぐ
     // （`docs/spec/wls-spec.md`「API引数」参照）。`weight`と`x`の重複は禁止しない
     // （重みに使った列を説明変数としても含める実務上の利用例があるため。
@@ -386,9 +397,9 @@ pub fn fit(
     let weight_slice = extract_f64_column(&df, &weight)?;
 
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ、OLSと同じ）─────
-    let (cov_type, cov_type_lower) = parse_cov_type(
+    let cov_type = resolve_cov_type(
         &df,
-        &options.cov_type,
+        cov_kind,
         options.cluster.as_deref(),
         options.hac_lags,
         options.hac_time.as_deref(),
@@ -421,7 +432,7 @@ pub fn fit(
         residuals: wls_estimator.residuals().to_vec(),
         dep_var_name: estimator.input().dep_var_name().to_string(),
         n_obs: estimator.input().nobs(),
-        cov_type: cov_type_lower,
+        cov_type: cov_kind.name().to_string(),
         hac_lags_used: estimator.hac_lags_used().map(|lags| lags as i64),
         // r_squared/adj_r_squared/log_likelihood/aic/bicは`estimator`（変換後データに対する
         // OLS）ではなく`wls_estimator`側の値を使う。元の（変換前の）y・weightsを使って

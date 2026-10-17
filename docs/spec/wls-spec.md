@@ -15,12 +15,11 @@ WLS（Weighted Least Squares）の確定済み仕様。`engine/src/linear/wls.rs
   理由: `cluster`/`hac_time`は`cov_type`に応じた条件付き・デフォルトありの「推定方法の設定」
   だが、`weight`はモデルそのものを規定する必須データであり、性質が異なる。この分類はFE
   （`entity_id`）・IV（`instruments`）等、今後の必須データ列にも適用する。
-- 専用の`WLSOptions`型を新設し（2026-09-12）、`OLSOptions`と完全に同一のフィールド
+- 専用の`WLSOptions`型を持ち、`OLSOptions`と完全に同一のフィールド
   構成（`cov_type`/`include_intercept`/`confidence_level`/`cluster`/`hac_lags`/`hac_time`、
-  意味論もOLSと完全に同じ）を持つ独立したpyclassとして実装する。当初は専用型を新設せず
-  `OLSOptions`をそのまま再利用していたが、`WLSResult`が元から独立型だったのと非対称だった
-  ことと、将来WLS固有のオプションが必要になった際に`OLSOptions`/OLS利用者へ影響を与えずに
-  拡張できるようにするため、独立型に変更した。このフィールド重複自体は意図的に共通base
+  意味論もOLSと完全に同じ）を持つ独立したpyclassとして実装する。結果型`WLSResult`が独立型なのと
+  対称にするためと、将来WLS固有のオプションが必要になった際に`OLSOptions`/OLS利用者へ影響を
+  与えずに拡張できるようにするため、`OLSOptions`を再利用せず独立型にしている。このフィールド重複自体は意図的に共通base
   構造体へ切り出さない（PyO3の`#[pyclass]`コンストラクタがフラットなkwargs surface前提の
   ため。`IVOptions`が`OLSOptions`と同種のフィールドを独立再定義している既存precedentとも
   一貫している。`engine_pybind/src/linear/CLAUDE.md`参照）。

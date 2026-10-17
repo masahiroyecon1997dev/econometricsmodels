@@ -52,8 +52,7 @@ def extract_full_fit_stats(model, confidence_level: float = 0.95) -> dict:
     （t値・p値・信頼区間・ロバストWald F検定）・適合度統計量まで含めたフルの
     辞書を取り出す。`run()`本体と、クラスター専用フィクスチャ生成
     （`generate_ols_fixtures.py`の`_run_cluster_case`等）の双方で共有する
-    （従来クラスター側は`params`/`std_errors`のみでt値・p値・信頼区間が未検証だった非対称の
-    解消）。
+    （クラスターでもt値・p値・信頼区間まで検証するため）。
 
     Args:
         model: statsmodelsのfit結果（`use_t=True`でfitしたもの。呼び出し側の

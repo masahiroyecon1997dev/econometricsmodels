@@ -54,7 +54,7 @@ SCENARIOS = [
 ]
 
 # many_regressorsシナリオで固定する説明変数の数（実務でのミクロ計量の
-# 上限規模を想定した値、ユーザー確認済み）。
+# 上限規模を想定した値）。
 MANY_REGRESSORS_K = 20
 
 # many_regressorsシナリオで列ごとに持たせるスケール差の範囲（log10、

@@ -477,8 +477,10 @@ FEの`WithinRegressionFailed`と同じく内側の`LeastSquaresError`の分類�
 - **ハウスマン検定は`plm::phtest(method = "aux", effect = "individual", vcov = ...)`のみを参照値と
   する例外規定**（`linearmodels`のソースに`hausman`という文字列が一切登場せず専用実装が
   無いことを確認済み。通常の「Python主リファレンス＋Rクロスチェック」の2系統検証の例外）。
-  バランスパネルでは機械精度で一致し、不均衡パネルではSwamy-Arora分散成分（σ_u²）の
-  推定式の差で数％ずれるため、シナリオ別の許容誤差で比較する（3.7節）。`cov_type`別
+  バランスパネルでは機械精度で一致する。不均衡パネルではplm自身のSwamy-Arora分散成分
+  （σ_u²）が`linearmodels`準拠の本実装と異なり`phtest`の統計量が1〜2%ずれるため、
+  `linearmodels`の分散成分から補助回帰を組み立ててplmの`vcov`系を当てた値と機械精度で
+  比べる（`run_plm_re_given_variance_hausman_benchmark.R`、3.7節）。`cov_type`別
   （`benchmark/panel/run_plm_hausman_benchmark.R`）に全6種を照合し、ロバスト共分散が構造的に
   特異なシナリオ（`many_regressors`のcluster/dk）は`fit()`が`ValidationError`/`ComputationError`で
   失敗することを確認する。

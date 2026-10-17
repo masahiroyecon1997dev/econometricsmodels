@@ -469,15 +469,15 @@ def run_gmm(
     `params`/`std_errors`が相対誤差1e-10程度以下で一致）。`hc2`/`hc3`が対象外な理由も
     `run()`と同じ（`IVGMMCovariance`が対応する`score_cov_estimator`を持たない）。
 
-    ## `iter_limit`と`iter_limit`/`tol`の対応関係
+    ## `iter_limit`と`tol`の対応関係
 
     `IVGMM.fit()`の反復ループは`while iters < iter_limit and norm > tol`
     （`iters`は1始まり）のため、既定の`iter_limit=2`では`tol`の値に関わらず
     必ず2回目のステップまで実行してから打ち切る（`tol`が効くのは
     `iter_limit>=3`のときのみ）。本実装の既定`gmm_type="two_step"`（`iter_limit=2`相当）
     （`gmm_tol=None`の固定反復モード）と一致するため、`tol`は
-    linearmodelsの既定値のまま渡さず気にしなくてよい。`iter_limit`に
-    `iter_limit`をそのまま渡す。
+    linearmodelsの既定値のまま渡さず気にしなくてよい。`iter_limit`は
+    `IVGMM.fit(iter_limit=...)`へそのまま渡す。
 
     ## 検定分布・F統計量の対応関係
 

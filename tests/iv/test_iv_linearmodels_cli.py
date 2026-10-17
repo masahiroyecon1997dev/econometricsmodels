@@ -155,13 +155,6 @@ def test_2sls_passes_dataset_source_and_y_col(captured):
     assert kwargs["cluster"] == "region"
 
 
-def test_gmm_iterations_option_is_removed():
-    with pytest.raises(SystemExit):
-        ref.build_parser().parse_args(
-            ["--dataset", "baseline", "--gmm-iterations", "3"]
-        )
-
-
 # ── サブプロセスでの実行 ─────────────────────────────────────────
 
 
@@ -184,16 +177,42 @@ def test_2sls_cli_runs_and_prints_json():
     assert out["_meta"]["cov_type_requested"] == "classical"
 
 
-@pytest.mark.parametrize("iter_limit", [2, 3])
-def test_gmm_cli_runs_and_reflects_iter_limit(iter_limit):
+def test_gmm_cli_runs_and_prints_json():
     out = _run_cli(
-        "--dataset",
-        "baseline",
-        "--method",
-        "gmm",
-        "--iter-limit",
-        str(iter_limit),
+        "--dataset", "baseline", "--method", "gmm", "--iter-limit", "3"
     )
 
     assert {"const", "x1", "endog1"} <= set(out["params"])
-    assert out["_meta"]["iter_limit"] == iter_limit
+    assert out["_meta"]["iter_limit"] == 3
+
+
+@pytest.mark.parametrize("iter_limit", [2, 3])
+def test_gmm_cli_passes_iter_limit_to_linearmodels_fit(
+    monkeypatch, capsys, iter_limit
+):
+    """`--iter-limit`が`IVGMM.fit()`まで届くこと（`_meta`への書き戻しとは別）。"""
+    from linearmodels.iv import IVGMM
+
+    fit_kwargs: list[dict] = []
+    real_fit = IVGMM.fit
+
+    def spy_fit(self, *args, **kwargs):
+        fit_kwargs.append(kwargs)
+        return real_fit(self, *args, **kwargs)
+
+    monkeypatch.setattr(IVGMM, "fit", spy_fit)
+
+    ref.main(
+        [
+            "--dataset",
+            "baseline",
+            "--method",
+            "gmm",
+            "--iter-limit",
+            str(iter_limit),
+        ]
+    )
+
+    capsys.readouterr()
+    ((kwargs,)) = fit_kwargs
+    assert kwargs["iter_limit"] == iter_limit

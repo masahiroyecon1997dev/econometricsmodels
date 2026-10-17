@@ -139,10 +139,10 @@ impl WlsEstimator {
 
 /// R²・調整済みR²・対数尤度・AIC・BICを、元の（変換前の）`y`・`weights`から計算し直す。
 ///
-/// 統計量ごとの理由はモジュール冒頭のdocコメント参照。SSR自体は重み付き残差の二乗和
-/// （`Σ w_i (y_i - ŷ_i)²`）で、`estimator`が変換後データに対して計算したSSRと数学的に
-/// 同一の値になる（`sqrt(w_i)(y_i-ŷ_i)`の二乗が`w_i(y_i-ŷ_i)²`のため）ため、
-/// `original_scale_fitted_and_residuals`と`weights`から計算し直しても内部で二重計算にはならない。
+/// 統計量ごとの理由はモジュール冒頭のdocコメント参照。SSRは元スケールの残差と`weights`から
+/// `Σ w_i (y_i - ŷ_i)²`として計算し直す。`estimator`が変換後データに対して計算したSSRと
+/// 数学的に同一の値になる（`sqrt(w_i)(y_i-ŷ_i)`の二乗が`w_i(y_i-ŷ_i)²`のため）が、
+/// `OlsEstimator`はSSRを公開していないため、O(n)の再計算で得ている。
 fn weighted_fit_statistics(
     y: &[f64],
     weights: &[f64],
@@ -623,7 +623,8 @@ mod tests {
         ///
         /// `y`/`x_cols`の生成方針は`ols/estimator.rs`の`ols_case_strategy`と同じ
         /// （`n=k+10..=60`のマージン、独立な連続一様分布）。`weights`は正値
-        /// （`0.1..10.0`）のみ生成する（`WlsInput`が非正の重みを拒否するため）。
+        /// （`0.1..10.0`）のみ生成する（`OlsInput::from_columns_weighted`が非正の重みを
+        /// 拒否するため）。
         fn wls_case_strategy() -> impl Strategy<Value = WlsCase> {
             (1..=MAX_K).prop_flat_map(|k| {
                 (k + 10..=60usize).prop_flat_map(move |n| {

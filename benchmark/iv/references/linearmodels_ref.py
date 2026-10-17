@@ -73,6 +73,17 @@ augmented regression自身の`df_resid`（= 主モデルの`df_resid - n_endog`�
 使用例（リポジトリルートから）:
     python -m benchmark.iv.references.linearmodels_ref \\
         --dataset baseline --cov-type classical
+
+GMM（`--weight-type`は重み行列、`--iter-limit`は`run_gmm()`の`iter_limit`）:
+    python -m benchmark.iv.references.linearmodels_ref \\
+        --dataset baseline --method gmm --weight-type robust \\
+        --cov-type hc1 --iter-limit 3
+
+Wooldridgeの実データ（card）:
+    python -m benchmark.iv.references.linearmodels_ref \\
+        --dataset card --dataset-source wooldridge --y-col lwage \\
+        --x-exog exper expersq --x-endog educ \\
+        --instruments nearc2 nearc4 --cov-type hc1
 """
 
 from __future__ import annotations
@@ -648,25 +659,49 @@ def run_gmm(
     return result
 
 
-if __name__ == "__main__":
+def build_parser() -> argparse.ArgumentParser:
+    """CLIの引数定義。`run()`/`run_gmm()`の引数名に対応させる。"""
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--dataset-source",
+        choices=["synthetic", "wooldridge"],
+        default="synthetic",
+    )
     parser.add_argument("--dataset", required=True)
+    parser.add_argument(
+        "--y-col",
+        default="y",
+        help="被説明変数の列名（Wooldridgeの`card`なら`lwage`）",
+    )
     parser.add_argument("--method", choices=["2sls", "gmm"], default="2sls")
     parser.add_argument("--x-exog", nargs="*", default=["x1"])
     parser.add_argument("--x-endog", nargs="*", default=["endog1"])
     parser.add_argument("--instruments", nargs="*", default=["z1", "z2"])
-    parser.add_argument("--weight-type", default="classical")
+    parser.add_argument(
+        "--weight-type",
+        default="classical",
+        help="`--method gmm`のときのみ使う",
+    )
     parser.add_argument("--cov-type", default="classical")
     parser.add_argument("--cluster", default=None)
     parser.add_argument("--hac-lags", type=int, default=None)
-    parser.add_argument("--gmm-iterations", type=int, default=2)
+    parser.add_argument(
+        "--iter-limit",
+        type=int,
+        default=2,
+        help="`--method gmm`のときのみ使う（`run_gmm()`の`iter_limit`）",
+    )
     parser.add_argument("--confidence-level", type=float, default=0.95)
     parser.add_argument(
         "--no-intercept",
         action="store_true",
         help="`include_intercept=False`相当（式に定数項`1`を含めない）",
     )
-    args = parser.parse_args()
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = build_parser().parse_args(argv)
 
     if args.method == "gmm":
         output = run_gmm(
@@ -676,10 +711,12 @@ if __name__ == "__main__":
             args.instruments,
             args.weight_type,
             args.cov_type,
-            args.cluster,
-            args.hac_lags,
-            args.iter_limit,
-            args.confidence_level,
+            cluster=args.cluster,
+            hac_lags=args.hac_lags,
+            iter_limit=args.iter_limit,
+            confidence_level=args.confidence_level,
+            dataset_source=args.dataset_source,
+            y_col=args.y_col,
             include_intercept=not args.no_intercept,
         )
     else:
@@ -689,9 +726,15 @@ if __name__ == "__main__":
             args.x_endog,
             args.instruments,
             args.cov_type,
-            args.cluster,
-            args.hac_lags,
-            args.confidence_level,
+            cluster=args.cluster,
+            hac_lags=args.hac_lags,
+            confidence_level=args.confidence_level,
+            dataset_source=args.dataset_source,
+            y_col=args.y_col,
             include_intercept=not args.no_intercept,
         )
     print(json.dumps(output, indent=2))
+
+
+if __name__ == "__main__":
+    main()

@@ -147,11 +147,13 @@ HAUSMAN_KEY = "hausman"
 # 確かめる。T=25のcross_sectionally_correlatedだけは、T=6では動かないカーネルの
 # 3ラグ超の項を通すため中間の12も加える。
 DK_EXPLICIT_BANDWIDTH_KEY = "dk_explicit_bandwidth"
+# plmとSwamy-Arora分散成分が異なる（本実装はlinearmodels準拠）不均衡パネル。
+UNBALANCED_SCENARIO = "unbalanced"
 HAUSMAN_DK_BANDWIDTH_KEY = "hausman_dk_bandwidth"
 DK_EXPLICIT_BANDWIDTHS: dict[str, list[int]] = {
     "baseline": [0, 2, 3],
     "autocorrelated": [0, 2, 3],
-    "unbalanced": [0, 2, 3],
+    UNBALANCED_SCENARIO: [0, 2, 3],
     "cross_sectionally_correlated": [0, 2, 3, 12],
 }
 # 標準誤差・推論統計量の比較はバランスパネルのみ。unbalancedはplmとSwamy-Arora
@@ -162,7 +164,7 @@ DK_EXPLICIT_BANDWIDTHS: dict[str, list[int]] = {
 DK_EXPLICIT_BANDWIDTHS_BALANCED: dict[str, list[int]] = {
     scenario: bandwidths
     for scenario, bandwidths in DK_EXPLICIT_BANDWIDTHS.items()
-    if scenario != "unbalanced"
+    if scenario != UNBALANCED_SCENARIO
 }
 
 # 補助回帰の傾き係数`2k`個に対し、クラスター数G（cluster）・時点数T（dk）が少なく

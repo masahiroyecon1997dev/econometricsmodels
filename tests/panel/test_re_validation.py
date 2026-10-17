@@ -43,6 +43,7 @@ import polars as pl
 import pytest
 from _constants import DATA_DIR
 from _error_messages import escaped
+from _panel_helpers import x_columns
 from _re_helpers import our_fit_re
 from econometricsmodels import RE, ComputationError, REOptions, ValidationError
 
@@ -569,7 +570,7 @@ def test_many_regressors_cluster_raises_validation_error():
     （`re-spec.md`3.7節）。このためplmとの標準誤差クロスチェックの対象外
     （`SCENARIO_COV_TYPES`）で、失敗パスだけをここで確認する。"""
     df = pl.read_csv(DATA_DIR / "fe_many_regressors.csv")
-    x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
+    x_cols = x_columns(df)
     with pytest.raises(
         ValidationError,
         match=escaped(msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=40, q=40),
@@ -588,7 +589,7 @@ def test_many_regressors_dk_raises_validation_error():
     `fit()`が`ValidationError`になる。FEの
     `test_many_regressors_dk_raises_validation_error`と対になる。"""
     df = pl.read_csv(DATA_DIR / "fe_many_regressors.csv")
-    x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
+    x_cols = x_columns(df)
     with pytest.raises(
         ValidationError,
         match=escaped(

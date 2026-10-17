@@ -84,13 +84,13 @@ MAX_BANDWIDTH_SCENARIOS = ["baseline", "unbalanced", "small_panel"]
 
 # dkのバンド幅を既定値以外（0=Newey-West補正なしのクロスセクション相関のみ、
 # 1、既定式がT=6でもT=25でも2になるため既定より大きい3）で明示指定する
-# シナリオ。T=25のcross_sectionally_correlatedだけは、T=6では動かない
-# カーネルの3ラグ超の項を通すため中間の12も加える。
-EXPLICIT_BANDWIDTHS = [0, 1, 3]
-EXPLICIT_BANDWIDTH_SCENARIOS = {
-    "baseline": EXPLICIT_BANDWIDTHS,
-    "unbalanced": EXPLICIT_BANDWIDTHS,
-    "cross_sectionally_correlated": [*EXPLICIT_BANDWIDTHS, 12],
+# シナリオとバンド幅。T=25のcross_sectionally_correlatedだけは、T=6では
+# 動かないカーネルの3ラグ超の項を通すため中間の12も加える。
+_COMMON_BANDWIDTHS = [0, 1, 3]
+DK_EXPLICIT_BANDWIDTHS: dict[str, list[int]] = {
+    "baseline": _COMMON_BANDWIDTHS,
+    "unbalanced": _COMMON_BANDWIDTHS,
+    "cross_sectionally_correlated": [*_COMMON_BANDWIDTHS, 12],
 }
 
 # entityあたりの観測数を偏らせる（先頭から数えた期数）。entityごとに循環して
@@ -240,7 +240,7 @@ def build_fixtures() -> dict:
             str(bw): _run_effects(scenario, "dk", maxlag=bw)
             for bw in bandwidths
         }
-        for scenario, bandwidths in EXPLICIT_BANDWIDTH_SCENARIOS.items()
+        for scenario, bandwidths in DK_EXPLICIT_BANDWIDTHS.items()
     }
 
     with tempfile.TemporaryDirectory() as tmp:

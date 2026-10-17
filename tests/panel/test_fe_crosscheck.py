@@ -72,6 +72,7 @@ from _assertions import (
 )
 from _constants import DATA_DIR
 from _helpers import load_wooldridge_dataset
+from _panel_helpers import bandwidth_cases, x_columns
 from _tolerances import TOLERANCES
 from econometricsmodels import FE, FEOptions
 
@@ -173,11 +174,13 @@ def _options(
     two_way: bool,
     dk_bandwidth: int | None = None,
     time: str = "time",
+    dk_time: str = "time",
 ) -> FEOptions:
-    """`dk`は1-way・2-wayとも時点列（`dk_time`）を明示する必要がある。"""
+    """`time`は2-wayの時間列、`dk_time`はdkの時点列（別のオプション）。`dk`は
+    1-way・2-wayとも`dk_time`を明示する必要がある。"""
     kwargs = {"time": time} if two_way else {}
     if cov_type == "dk":
-        kwargs["dk_time"] = time
+        kwargs["dk_time"] = dk_time
         kwargs["dk_bandwidth"] = dk_bandwidth
     return FEOptions(cov_type=cov_type, **kwargs)
 
@@ -188,7 +191,7 @@ def _options(
 @pytest.mark.parametrize("scenario, cov_type", ONE_WAY_CASES)
 def test_matches_fixest_one_way(crosscheck, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
-    x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
+    x_cols = x_columns(df)
     res = FE(
         df,
         y="y",
@@ -207,7 +210,7 @@ def test_matches_fixest_one_way(crosscheck, scenario, cov_type):
 @pytest.mark.parametrize("scenario, cov_type", TWO_WAY_CASES)
 def test_matches_fixest_two_way(crosscheck, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
-    x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
+    x_cols = x_columns(df)
     res = FE(
         df,
         y="y",
@@ -227,11 +230,7 @@ def test_matches_fixest_two_way(crosscheck, scenario, cov_type):
 
 # fixestは`bandwidth == T-1`で最終ラグを落とすためT-1未満のみ
 # （T-1は`test_fe_plm_crosscheck.py`）。
-DK_BANDWIDTH_ONE_WAY_CASES = [
-    (scenario, bandwidth)
-    for scenario, bandwidths in DK_EXPLICIT_BANDWIDTHS.items()
-    for bandwidth in bandwidths
-]
+DK_BANDWIDTH_ONE_WAY_CASES = bandwidth_cases(DK_EXPLICIT_BANDWIDTHS)
 DK_BANDWIDTH_TWO_WAY_CASES = [
     case for case in DK_BANDWIDTH_ONE_WAY_CASES if case[0] in TWO_WAY_SCENARIOS
 ]
@@ -239,7 +238,7 @@ DK_BANDWIDTH_TWO_WAY_CASES = [
 
 def _fit_dk_bandwidth(scenario: str, bandwidth: int, *, two_way: bool):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
-    x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
+    x_cols = x_columns(df)
     options = _options("dk", two_way=two_way, dk_bandwidth=bandwidth)
     return FE(df, y="y", x=x_cols, entity="entity", options=options).fit()
 
@@ -422,7 +421,7 @@ def test_boundary_df1_two_way_matches_fixest(crosscheck):
 @pytest.mark.parametrize("cov_type", WAGEPAN_COV_TYPES)
 def test_wagepan_one_way_matches_fixest(crosscheck, cov_type):
     df = load_wooldridge_dataset("wagepan")
-    options = _options(cov_type, two_way=False, time=WAGEPAN_TIME)
+    options = _options(cov_type, two_way=False, dk_time=WAGEPAN_TIME)
     res = FE(
         df, y=WAGEPAN_Y, x=WAGEPAN_X, entity=WAGEPAN_ENTITY, options=options
     ).fit()
@@ -437,7 +436,9 @@ def test_wagepan_one_way_matches_fixest(crosscheck, cov_type):
 @pytest.mark.parametrize("cov_type", WAGEPAN_COV_TYPES)
 def test_wagepan_two_way_matches_fixest(crosscheck, cov_type):
     df = load_wooldridge_dataset("wagepan")
-    options = _options(cov_type, two_way=True, time=WAGEPAN_TIME)
+    options = _options(
+        cov_type, two_way=True, time=WAGEPAN_TIME, dk_time=WAGEPAN_TIME
+    )
     res = FE(
         df, y=WAGEPAN_Y, x=WAGEPAN_X, entity=WAGEPAN_ENTITY, options=options
     ).fit()

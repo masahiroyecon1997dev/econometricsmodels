@@ -64,6 +64,7 @@ from _assertions import (
 )
 from _constants import DATA_DIR
 from _helpers import load_wooldridge_dataset
+from _panel_helpers import bandwidth_cases, x_columns
 from _tolerances import TOLERANCES
 from econometricsmodels import FE, FEOptions
 
@@ -74,7 +75,7 @@ from benchmark.common import (
     WAGEPAN_Y,
 )
 from benchmark.panel.fixtures.generate_fe_plm_crosscheck_fixtures import (
-    EXPLICIT_BANDWIDTH_SCENARIOS,
+    DK_EXPLICIT_BANDWIDTHS,
     MAX_BANDWIDTH_SCENARIOS,
     NUMERIC_SCENARIOS,
     WAGEPAN_COV_TYPES,
@@ -157,19 +158,28 @@ def _expected_df(
     return df[time].n_unique() - 1
 
 
+def _options(
+    cov_type: str,
+    *,
+    dk_bandwidth: int | None = None,
+    dk_time: str = "time",
+) -> FEOptions:
+    """dkは時点列（`dk_time`）を明示する必要がある。"""
+    if cov_type == "dk":
+        return FEOptions(
+            cov_type="dk", dk_time=dk_time, dk_bandwidth=dk_bandwidth
+        )
+    return FEOptions(cov_type=cov_type)
+
+
 def _fit_frame(
     df: pl.DataFrame,
     cov_type: str,
     *,
     dk_bandwidth: int | None = None,
 ):
-    x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
-    if cov_type == "dk":
-        options = FEOptions(
-            cov_type="dk", dk_time="time", dk_bandwidth=dk_bandwidth
-        )
-    else:
-        options = FEOptions(cov_type=cov_type)
+    x_cols = x_columns(df)
+    options = _options(cov_type, dk_bandwidth=dk_bandwidth)
     return FE(df, y="y", x=x_cols, entity="entity", options=options).fit()
 
 
@@ -217,12 +227,7 @@ def test_dk_max_bandwidth_matches_plm(crosscheck, scenario):
 
 
 @pytest.mark.parametrize(
-    "scenario, bandwidth",
-    [
-        (scenario, bandwidth)
-        for scenario, bandwidths in EXPLICIT_BANDWIDTH_SCENARIOS.items()
-        for bandwidth in bandwidths
-    ],
+    "scenario, bandwidth", bandwidth_cases(DK_EXPLICIT_BANDWIDTHS)
 )
 def test_dk_explicit_bandwidth_matches_plm(crosscheck, scenario, bandwidth):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
@@ -308,12 +313,7 @@ def test_skewed_entity_sizes_cluster_matches_plm(crosscheck):
 @pytest.mark.parametrize("cov_type", WAGEPAN_COV_TYPES)
 def test_wagepan_one_way_matches_plm(crosscheck, cov_type):
     df = load_wooldridge_dataset("wagepan")
-    # dkは時点列（year）を明示する。
-    options = (
-        FEOptions(cov_type="dk", dk_time=WAGEPAN_TIME)
-        if cov_type == "dk"
-        else FEOptions(cov_type=cov_type)
-    )
+    options = _options(cov_type, dk_time=WAGEPAN_TIME)
     res = FE(
         df,
         y=WAGEPAN_Y,

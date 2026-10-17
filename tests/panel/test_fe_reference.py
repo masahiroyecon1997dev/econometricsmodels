@@ -46,6 +46,7 @@ from _assertions import (
 )
 from _constants import DATA_DIR
 from _helpers import load_wooldridge_dataset
+from _panel_helpers import x_columns
 from _tolerances import TOLERANCES
 from econometricsmodels import FE, FEOptions
 
@@ -117,7 +118,7 @@ def _check_result(
 @pytest.mark.parametrize("scenario, cov_type", ONE_WAY_CASES)
 def test_matches_linearmodels_one_way(fixtures, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
-    x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
+    x_cols = x_columns(df)
     options = FEOptions(cov_type=cov_type)
     res = FE(df, y="y", x=x_cols, entity="entity", options=options).fit()
 
@@ -132,7 +133,7 @@ def test_matches_linearmodels_one_way(fixtures, scenario, cov_type):
 @pytest.mark.parametrize("scenario, cov_type", TWO_WAY_CASES)
 def test_matches_linearmodels_two_way(fixtures, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
-    x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
+    x_cols = x_columns(df)
     options = FEOptions(cov_type=cov_type, time="time")
     res = FE(df, y="y", x=x_cols, entity="entity", options=options).fit()
 

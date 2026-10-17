@@ -86,6 +86,7 @@ from _assertions import assert_close, assert_dict_close, assert_inference_close
 from _constants import DATA_DIR
 from _error_messages import escaped
 from _helpers import load_wooldridge_dataset
+from _panel_helpers import bandwidth_cases, x_columns
 from _tolerances import TOLERANCES
 from econometricsmodels import (
     RE,
@@ -113,6 +114,7 @@ from benchmark.panel.fixtures.generate_re_crosscheck_fixtures import (
     HAUSMAN_DK_BANDWIDTH_KEY,
     HAUSMAN_KEY,
     SCENARIO_COV_TYPES,
+    UNBALANCED_SCENARIO,
     WAGEPAN_COV_TYPES,
 )
 
@@ -148,7 +150,7 @@ ATOL_HAUSMAN_P_VALUE = TOLERANCES["re_crosscheck"]["atol_hausman_p_value"]
 # plm/linearmodelsの分散成分（σ_u²）推定の差でθが変わり、ハウスマン統計量への
 # 増幅がparams/std_errorsよりさらに大きくなる唯一のシナリオ（モジュールdoc「許容誤差に
 # ついて」参照）。
-_UNBALANCED_HAUSMAN_SCENARIO = "unbalanced"
+_UNBALANCED_HAUSMAN_SCENARIO = UNBALANCED_SCENARIO
 _ILL_CONDITIONED_HAUSMAN_SCENARIO = "high_condition_number"
 
 
@@ -308,7 +310,7 @@ def _re_options(
 @pytest.mark.parametrize("scenario, cov_type", ALL_CASES)
 def test_matches_plm(crosscheck, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
-    x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
+    x_cols = x_columns(df)
     res = RE(
         df,
         y="y",
@@ -386,18 +388,10 @@ def test_cluster_g3_boundary_matches_plm_based_reference(crosscheck):
 # ── dkの明示バンド幅 ──────────────────────────────────────────────────
 
 
-DK_BANDWIDTH_CASES = [
-    (scenario, bandwidth)
-    for scenario, bandwidths in DK_EXPLICIT_BANDWIDTHS.items()
-    for bandwidth in bandwidths
-]
+DK_BANDWIDTH_CASES = bandwidth_cases(DK_EXPLICIT_BANDWIDTHS)
 # 標準誤差・推論統計量はバランスパネルのみ（unbalancedを除く理由は
 # `generate_re_crosscheck_fixtures.py`の`DK_EXPLICIT_BANDWIDTHS_BALANCED`）。
-DK_BANDWIDTH_SE_CASES = [
-    (scenario, bandwidth)
-    for scenario, bandwidths in DK_EXPLICIT_BANDWIDTHS_BALANCED.items()
-    for bandwidth in bandwidths
-]
+DK_BANDWIDTH_SE_CASES = bandwidth_cases(DK_EXPLICIT_BANDWIDTHS_BALANCED)
 
 
 @pytest.mark.parametrize("scenario, bandwidth", DK_BANDWIDTH_SE_CASES)
@@ -491,7 +485,7 @@ def test_wagepan_matches_plm(crosscheck, cov_type):
 @pytest.mark.parametrize("scenario", NUMERIC_SCENARIOS)
 def test_hausman_matches_plm(crosscheck, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
-    x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
+    x_cols = x_columns(df)
     model = RE(
         df,
         y="y",

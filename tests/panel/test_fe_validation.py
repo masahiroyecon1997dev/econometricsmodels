@@ -36,6 +36,7 @@ import pytest
 from _constants import DATA_DIR
 from _error_messages import escaped
 from _fe_helpers import our_fit
+from _panel_helpers import x_columns
 from econometricsmodels import FE, ComputationError, FEOptions, ValidationError
 
 # `test_scale_variance_raises_computation_error`用（OLS/WLS/IVの同名テストと
@@ -643,7 +644,7 @@ def test_many_regressors_dk_raises_validation_error(two_way):
     `fe_crosscheck.json`がこのシナリオに`dk`を持たない理由の確認でもある。
     """
     df = pl.read_csv(DATA_DIR / "fe_many_regressors.csv")
-    x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
+    x_cols = x_columns(df)
     assert len(x_cols) == 20
     kwargs = {"time": "time"} if two_way else {}
     options = FEOptions(cov_type="dk", dk_time="time", **kwargs)

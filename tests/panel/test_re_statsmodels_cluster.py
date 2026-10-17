@@ -37,6 +37,7 @@ import pytest
 from _assertions import assert_close, assert_dict_close, assert_inference_close
 from _constants import DATA_DIR
 from _helpers import load_wooldridge_dataset
+from _panel_helpers import x_columns
 from _tolerances import TOLERANCES
 from econometricsmodels import RE, REOptions
 
@@ -99,7 +100,7 @@ def _check(res, ref: dict, n_clusters: int, label: str) -> None:
 @pytest.mark.parametrize("scenario", SCENARIOS)
 def test_cluster_matches_statsmodels(reference, scenario):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
-    x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
+    x_cols = x_columns(df)
     res = RE(
         df,
         y="y",

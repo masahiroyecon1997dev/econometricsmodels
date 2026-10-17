@@ -41,10 +41,10 @@ import numpy as np
 import polars as pl
 import pytest
 import statsmodels.api as sm
-from _assertions import assert_close
+from _assertions import assert_close, assert_option_case_insensitive
 from _constants import DATA_DIR
 from _error_messages import escaped
-from _helpers import load_wooldridge_dataset
+from _helpers import CASE_SPELLINGS, load_wooldridge_dataset
 from _re_oracle import (
     CONDITIONING_SENSITIVE_KEYS,
     _Panel,
@@ -470,13 +470,21 @@ def test_the_three_methods_give_different_variance_components(case_name):
     assert len(set(sigma.values())) == 3, sigma
 
 
+@pytest.mark.parametrize("spelling", CASE_SPELLINGS)
 @pytest.mark.parametrize(
-    "value", ["WALLACE_HUSSAIN", "Amemiya", "Swamy_Arora"]
+    "variance_method", ["swamy_arora", "wallace_hussain", "amemiya"]
 )
-def test_variance_method_is_case_insensitive(value):
+def test_variance_method_is_case_insensitive(variance_method, spelling):
+    """`res.variance_method`が正規形（小文字）で返り、どの大文字小文字の綴りでも
+    正規形と同一の推定結果になること。
+    """
     case = CASES[0]
-    res = _fit(case, "classical", value)
-    assert res.variance_method == value.lower()
+    assert_option_case_insensitive(
+        lambda label: _fit(case, "classical", label),
+        "variance_method",
+        variance_method,
+        spelling,
+    )
 
 
 def test_unknown_variance_method_raises_with_the_original_value():

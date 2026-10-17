@@ -545,9 +545,18 @@ def test_gmm_one_step_has_no_weight_type_and_runs_once(iv_dataset):
     assert res.converged
 
 
-def test_gmm_type_is_case_insensitive_and_echoed_lowercase(iv_dataset):
-    options = IVOptions(estimator="gmm", gmm_type="Two_Step")
-    assert our_fit(iv_dataset, options=options).gmm_type == "two_step"
+@pytest.mark.parametrize("spelling", CASE_SPELLINGS)
+@pytest.mark.parametrize("gmm_type", ["one_step", "two_step", "iterated"])
+def test_gmm_type_is_case_insensitive(iv_dataset, gmm_type, spelling):
+    """`res.gmm_type`が正規形（小文字）で返り、どの大文字小文字の綴りでも正規形と
+    同一の推定結果になること。
+    """
+
+    def fit(label):
+        options = IVOptions(estimator="gmm", gmm_type=label)
+        return our_fit(iv_dataset, options=options)
+
+    assert_option_case_insensitive(fit, "gmm_type", gmm_type, spelling)
 
 
 def test_gmm_iterated_uses_effective_defaults(iv_dataset):

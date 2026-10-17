@@ -26,10 +26,11 @@ import numpy as np
 import polars as pl
 import pytest
 import statsmodels.api as sm
-from _assertions import assert_close
+from _assertions import assert_argument_case_insensitive, assert_close
 from _constants import DATA_DIR
 from _error_messages import escaped
 from _helpers import (
+    CASE_SPELLINGS,
     ROW_TIME,
     with_cluster_groups,
     with_row_time,
@@ -148,13 +149,14 @@ def test_detects_serial_correlation_in_ar1_errors(ar1):
     assert res.p_value < 1e-3
 
 
-def test_statistic_argument_is_case_insensitive(ar1):
+@pytest.mark.parametrize("spelling", CASE_SPELLINGS)
+@pytest.mark.parametrize("statistic", ["lm", "f"])
+def test_statistic_argument_is_case_insensitive(ar1, statistic, spelling):
     fitted = OLS(ar1, y="y", x=["x"]).fit()
-    assert fitted.breusch_godfrey_test("t", 2, "LM") == (
-        fitted.breusch_godfrey_test("t", 2, "lm")
-    )
-    assert fitted.breusch_godfrey_test("t", 2, "F") == (
-        fitted.breusch_godfrey_test("t", 2, "f")
+    assert_argument_case_insensitive(
+        lambda label: fitted.breusch_godfrey_test("t", 2, label),
+        statistic,
+        spelling,
     )
 
 

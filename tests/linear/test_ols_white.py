@@ -25,10 +25,11 @@ import numpy as np
 import polars as pl
 import pytest
 import statsmodels.api as sm
-from _assertions import assert_close
+from _assertions import assert_argument_case_insensitive, assert_close
 from _constants import DATA_DIR
 from _error_messages import escaped
 from _helpers import (
+    CASE_SPELLINGS,
     ROW_TIME,
     with_cluster_groups,
     with_row_time,
@@ -145,10 +146,13 @@ def test_f_version_has_f_distribution_and_denominator_degrees_of_freedom(
     assert 0.0 <= res.p_value <= 1.0
 
 
-def test_statistic_argument_is_case_insensitive(baseline):
+@pytest.mark.parametrize("spelling", CASE_SPELLINGS)
+@pytest.mark.parametrize("statistic", ["lm", "f"])
+def test_statistic_argument_is_case_insensitive(baseline, statistic, spelling):
     fitted = baseline.fit()
-    assert fitted.white_test("LM") == fitted.white_test("lm")
-    assert fitted.white_test("F") == fitted.white_test("f")
+    assert_argument_case_insensitive(
+        lambda label: fitted.white_test(label), statistic, spelling
+    )
 
 
 def test_aux_terms_lists_constant_then_variables_squares_and_products(

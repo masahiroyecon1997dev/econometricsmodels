@@ -353,6 +353,7 @@ def check_predictions(
         for row in res.pred_table()
     }
     assert set(ours_table) == {0, 1}, f"{label}/pred_table/actual"
+    assert len(ref["pred_table"]) == 2, f"{label}/pred_table/rows"
     for actual, ref_row in enumerate(ref["pred_table"]):
         assert ours_table[actual] == tuple(ref_row), (
             f"{label}/pred_table/{actual}: ours={ours_table[actual]}, "

@@ -1541,10 +1541,12 @@ def _baseline_cluster_fit(
         df = with_cluster_groups(df, 10)
     elif kind == "cluster_g4":
         df = with_cluster_groups(df, 4)
-    else:
+    elif kind == "cluster_imbalanced":
         df = df.with_columns(
             pl.Series("cluster_group", imbalanced_cluster_groups(df.height))
         )
+    else:
+        raise ValueError(f"unknown cluster kind: {kind!r}")
     options = config.options_cls(
         cov_type="cluster", cluster="cluster_group", **option_kwargs
     )

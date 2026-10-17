@@ -64,6 +64,11 @@ _PLM_FE_R_SCRIPT = Path(__file__).resolve().parent / "run_plm_fe_benchmark.R"
 # 中身のみRE専用に更新済みで、ファイルの移動は行っていない）。
 _PLM_R_SCRIPT = Path(__file__).resolve().parents[1] / "run_plm_benchmark.R"
 
+# 分散成分を外から与えたREのDriscoll-Kraay標準誤差（不均衡パネル用）。
+_PLM_RE_GIVEN_VARIANCE_R_SCRIPT = (
+    Path(__file__).resolve().parent / "run_plm_re_given_variance_benchmark.R"
+)
+
 # plmのRE準偏差変換済みデータの書き出し（statsmodelsクロスチェック用）。
 _PLM_RE_EXPORT_R_SCRIPT = (
     Path(__file__).resolve().parent / "export_plm_re_transformed.R"
@@ -229,6 +234,53 @@ def run_re_plm_r(
         cov_type,
         extra_args=extra,
         env=_random_method_env(random_method),
+    )
+    return normalize_names(
+        raw,
+        stat_key="test_stats",
+        scalar_keys=(*_PLM_SCALAR_KEYS, "sigma2_eps", "sigma2_u"),
+    )
+
+
+def run_re_dk_given_variance_plm_r(
+    csv_path: Path,
+    formula: str,
+    *,
+    sigma2_eps: float,
+    sigma2_u: float,
+    maxlag: int,
+    entity_col: str = "entity",
+    time_col: str = "time",
+) -> dict:
+    """`run_plm_re_given_variance_benchmark.R`を呼び、外から与えた分散成分
+    （`sigma2_eps`・`sigma2_u`）で準偏差変換したデータに対する`plm`の
+    `vcovSCC`の標準誤差・推論統計量（傾きだけのWald F統計量を含む）を得る。
+
+    plm自身のSwamy-Arora分散成分が本実装（linearmodels準拠）と異なる不均衡
+    パネルで、バンド幅の扱いだけを機械精度で比較するための参照値
+    （スクリプトのモジュールコメント参照）。バランスパネルでは使えない。
+
+    Args:
+        csv_path: データCSV（不均衡パネル）。
+        formula: `plm`の回帰式（例: "y ~ x1 + x2"）。
+        sigma2_eps: 特異誤差の分散σ_ε²（呼び出し側が`linearmodels`の値を渡す）。
+        sigma2_u: 個体効果の分散σ_u²。
+        maxlag: `vcovSCC`の`maxlag`（Driscoll-Kraayのバンド幅）。
+        entity_col: エンティティ識別子の列名。
+        time_col: 時点識別子の列名。
+    """
+    raw = run_r(
+        _PLM_RE_GIVEN_VARIANCE_R_SCRIPT,
+        csv_path,
+        formula,
+        "dk",
+        extra_args=[
+            entity_col,
+            time_col,
+            repr(float(sigma2_eps)),
+            repr(float(sigma2_u)),
+            str(maxlag),
+        ],
     )
     return normalize_names(
         raw,

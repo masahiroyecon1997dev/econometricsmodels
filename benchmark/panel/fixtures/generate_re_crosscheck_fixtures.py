@@ -25,7 +25,8 @@
   対応を記載）。比較は常に1-wayで、`REOptions.dk_time`の有無によらない。
   dkのバンド幅は`floor(4*(T/100)^(2/9))`を`maxlag`に明示的に渡す。
   `dk_bandwidth`明示指定は`"hausman_dk_bandwidth"`キー配下（`{バンド幅: 値}`、
-  標準誤差・推論統計量側は`"dk_explicit_bandwidth"`）。dkの時点数の境界
+  標準誤差・推論統計量側は`"dk_explicit_bandwidth"`。`unbalanced`だけは
+  `linearmodels`の分散成分を与えたplmの値）。dkの時点数の境界
   （`T = k+1`）の成功パスは`baseline.dk_three_periods`（標準誤差）・
   `baseline.dk_three_periods_hausman`。
   ロバスト共分散が構造的に特異になるケース（`_STRUCTURALLY_SINGULAR`）は`null`
@@ -113,8 +114,10 @@ from benchmark.panel.fixtures.generate_fe_fixtures import (
     NUMERIC_SCENARIOS,
     SCENARIO_X_COLS,
 )
+from benchmark.panel.references.linearmodels_ref import run_re
 from benchmark.panel.references.r import (
     default_dk_bandwidth,
+    run_re_dk_given_variance_plm_r,
     run_re_hausman_plm_r,
     run_re_plm_r,
 )
@@ -156,16 +159,13 @@ DK_EXPLICIT_BANDWIDTHS: dict[str, list[int]] = {
     UNBALANCED_SCENARIO: [0, 2, 3],
     "cross_sectionally_correlated": [0, 2, 3, 12],
 }
-# 標準誤差・推論統計量の比較はバランスパネルのみ。unbalancedはplmとSwamy-Arora
-# 分散成分が異なる分だけ点推定・標準誤差が約1%ずれ、バンド幅0では信頼区間の
-# 端が0に近くなり相対誤差が10%超に増幅される（バンド幅の扱いとは無関係な
-# ずれ）。バンド幅の処理はバランスパネルで機械精度で確かめ、unbalancedの
-# 明示バンド幅はハウスマン検定側（`HAUSMAN_DK_BANDWIDTH_KEY`）で確かめる。
-DK_EXPLICIT_BANDWIDTHS_BALANCED: dict[str, list[int]] = {
-    scenario: bandwidths
-    for scenario, bandwidths in DK_EXPLICIT_BANDWIDTHS.items()
-    if scenario != UNBALANCED_SCENARIO
-}
+# unbalancedの標準誤差・推論統計量は、plmとSwamy-Arora分散成分が異なる分だけ
+# plm自身のREと約1%ずれる（バンド幅0では信頼区間の端が0に近くなり相対誤差が
+# 10%超に増幅される。バンド幅の扱いとは無関係なずれ）。そのためunbalancedは
+# `linearmodels`のRE（本実装と機械精度で一致、`re.json`）の分散成分をplmに
+# 与えて準偏差変換し、`vcovSCC`を当てた値を参照値にする
+# （`run_plm_re_given_variance_benchmark.R`モジュールコメント参照）。
+# バランスパネルはplm自身のREで機械精度に一致する。
 
 # 補助回帰の傾き係数`2k`個に対し、クラスター数G（cluster）・時点数T（dk）が少なく
 # ロバスト共分散`Ŝ`が`rank(Ŝ) <= G-1`（またはT）で構造的に特異になるケース。
@@ -210,6 +210,23 @@ def _run_effects(
     if cov_type == "dk" and maxlag is None:
         maxlag = default_dk_bandwidth(csv_path)
     return run_re_plm_r(csv_path, formula, cov_type, maxlag=maxlag)
+
+
+def _run_dk_explicit_bandwidth(scenario: str, bandwidth: int) -> dict:
+    """`dk_bandwidth`を明示した標準誤差・推論統計量の参照値。balancedはplm自身の
+    RE、unbalancedはlinearmodelsの分散成分を与えたplm（`DK_EXPLICIT_BANDWIDTHS`
+    直前のコメント参照）。"""
+    if scenario != UNBALANCED_SCENARIO:
+        return _run_effects(scenario, "dk", maxlag=bandwidth)
+    x_cols = SCENARIO_X_COLS.get(scenario, ["x1", "x2"])
+    variance = run_re(scenario, x_cols, "classical", time_col="time")
+    return run_re_dk_given_variance_plm_r(
+        DATA_DIR / f"fe_{scenario}.csv",
+        f"y ~ {' + '.join(x_cols)}",
+        sigma2_eps=variance["sigma2_eps"],
+        sigma2_u=variance["sigma2_u"],
+        maxlag=bandwidth,
+    )
 
 
 def _run_cluster_case(
@@ -271,13 +288,12 @@ def build_fixtures() -> dict:
         }
         csv_path = DATA_DIR / f"fe_{scenario}.csv"
         x_cols = SCENARIO_X_COLS.get(scenario, ["x1", "x2"])
-        if scenario in DK_EXPLICIT_BANDWIDTHS_BALANCED:
-            fixtures[scenario][DK_EXPLICIT_BANDWIDTH_KEY] = {
-                str(bw): _run_effects(scenario, "dk", maxlag=bw)
-                for bw in DK_EXPLICIT_BANDWIDTHS_BALANCED[scenario]
-            }
         if scenario in DK_EXPLICIT_BANDWIDTHS:
             bandwidths = DK_EXPLICIT_BANDWIDTHS[scenario]
+            fixtures[scenario][DK_EXPLICIT_BANDWIDTH_KEY] = {
+                str(bw): _run_dk_explicit_bandwidth(scenario, bw)
+                for bw in bandwidths
+            }
             fixtures[scenario][HAUSMAN_DK_BANDWIDTH_KEY] = {
                 str(bw): _run_hausman(
                     csv_path,

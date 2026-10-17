@@ -30,8 +30,9 @@ fixtures/generate_re_crosscheck_fixtures.py`で生成）を用いて、linearmod
 
 - **明示バンド幅**: 既定式は`T=6`でも`T=25`でも2になるため、`dk_bandwidth`を
   0・2・3（`T=25`のシナリオは12も）で明示して`vcovSCC(maxlag=)`と比べる。
-  標準誤差・推論統計量はバランスパネルのみで、`unbalanced`はハウスマン検定側で
-  比べる（下記「許容誤差について」）。
+  `unbalanced`の標準誤差・推論統計量は、plm自身のREではなく`linearmodels`の
+  分散成分を与えて準偏差変換したデータへの`vcovSCC`と比べる（下記「許容誤差に
+  ついて」）。
 - **時点数の境界**: ハウスマン検定の対象数`k=2`に対し`T=k+1=3`の成功パス
   （`baseline.dk_three_periods`）。`T<=k`は`test_re_validation.py`の
   `ValidationError`。
@@ -55,13 +56,16 @@ plmの変量効果分散成分推定（Swamy-Arora）がlinearmodels準拠の本
 （cluster・dkの`G/(G-1)`・`T/(T-1)`補正は標準誤差に1%前後しか効かず、緩い
 許容誤差では補正式の取り違えを検出できないため、バランスパネルを緩めない）。
 
-`unbalanced`のdk明示バンド幅は、標準誤差・推論統計量の比較から外している
-（ハウスマン検定では比べる）。標準誤差のずれはバンド幅によらず約0.9%だが、
-バンド幅0では信頼区間の端が0に近い`x2`で相対誤差が12%に増幅され、既存の
-許容誤差（dk: 5e-2）を超えるため。ただしハウスマン検定の許容誤差（3%）では
-バンド幅2と3の統計量の差（約2.1%）を判別できず、`unbalanced`で見分けられるのは
-バンド幅0と2の取り違えまでで、バンド幅の取り違えを判別できるのはバランス
-パネルだけである。
+`unbalanced`のdk明示バンド幅の標準誤差・推論統計量は、plm自身のREとは比べない。
+標準誤差のずれがバンド幅によらず約0.9%あり、バンド幅0では信頼区間の端が0に
+近い`x2`で相対誤差が12%に増幅され、既存の許容誤差（dk: 5e-2）を超えるため。
+代わりに`linearmodels`の分散成分をplmに与えて準偏差変換し、`vcovSCC`を当てた
+値と比べると、バランスパネルと同じく機械精度で一致する
+（`run_plm_re_given_variance_benchmark.R`）。傾きだけのWald F統計量はこの
+スクリプトで手書きしている（`pwaldtest`は変換後の定数列も検定に含めるため）。
+一方、`unbalanced`のハウスマン検定はplm自身の`phtest`と比べるため、許容誤差
+（3%）ではバンド幅2と3の統計量の差（約2.1%）を判別できず、見分けられるのは
+バンド幅0と2の取り違えまでである。
 
 役割分担:
     - 構造・API: `test_re_api.py`
@@ -109,7 +113,6 @@ from benchmark.panel.fixtures.generate_re_crosscheck_fixtures import (
     COV_TYPES,
     DK_EXPLICIT_BANDWIDTH_KEY,
     DK_EXPLICIT_BANDWIDTHS,
-    DK_EXPLICIT_BANDWIDTHS_BALANCED,
     HAUSMAN_COV_TYPES,
     HAUSMAN_DK_BANDWIDTH_KEY,
     HAUSMAN_KEY,
@@ -390,15 +393,13 @@ def test_cluster_g3_boundary_matches_plm_based_reference(crosscheck):
 
 
 DK_BANDWIDTH_CASES = bandwidth_cases(DK_EXPLICIT_BANDWIDTHS)
-# 標準誤差・推論統計量はバランスパネルのみ（unbalancedを除く理由は
-# `generate_re_crosscheck_fixtures.py`の`DK_EXPLICIT_BANDWIDTHS_BALANCED`）。
-DK_BANDWIDTH_SE_CASES = bandwidth_cases(DK_EXPLICIT_BANDWIDTHS_BALANCED)
 
 
-@pytest.mark.parametrize("scenario, bandwidth", DK_BANDWIDTH_SE_CASES)
+@pytest.mark.parametrize("scenario, bandwidth", DK_BANDWIDTH_CASES)
 def test_dk_explicit_bandwidth_matches_plm(crosscheck, scenario, bandwidth):
     """`dk_bandwidth`を明示指定した場合の標準誤差・推論統計量も
-    `vcovSCC(maxlag=bandwidth)`と一致する。"""
+    `vcovSCC(maxlag=bandwidth)`と機械精度で一致する。`unbalanced`の参照値は
+    `linearmodels`の分散成分を与えたplm（モジュールdoc参照）。"""
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
     res = RE(
         df,

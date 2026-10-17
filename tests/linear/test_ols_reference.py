@@ -51,7 +51,7 @@ from _assertions import (
     assert_fields_close,
     assert_inference_close,
 )
-from _constants import DATA_DIR
+from _constants import DATA_DIR, MROZ_X
 from _helpers import (
     ROW_TIME,
     with_cluster_groups,
@@ -417,6 +417,7 @@ def test_hac_lags_matches_statsmodels(fixtures, hac_lags):
 WOOLDRIDGE_Y_X = {
     "wage1": ("lwage", ["educ", "exper", "tenure"]),
     "gpa2": ("colgpa", ["sat", "hsperc", "tothrs"]),
+    "mroz": ("inlf", MROZ_X),
 }
 
 
@@ -430,7 +431,7 @@ def load_wooldridge():
 def test_wooldridge_matches_statsmodels(
     fixtures, load_wooldridge, dataset_name, cov_type
 ):
-    """Wooldridge実データ（wage1/gpa2）でのstatsmodels照合
+    """Wooldridge実データ（wage1/gpa2/mroz）でのstatsmodels照合
     （Rとの照合は`test_ols_crosscheck.py::test_wooldridge_matches_r`）。
     """
     y, x = WOOLDRIDGE_Y_X[dataset_name]

@@ -248,7 +248,7 @@ $$
   `n/(n-k)`を掛けるが本実装・statsmodelsは掛けず、このスカラー倍だけが差の全てで、
   小標本（n=20）・高次元（k=21）を含む全合成シナリオで機械精度一致する）。
 - HACの実データは時系列のWooldridge `prminwge`（`lprepop ~ lmincov + lusgnp`、年次昇順でn=38、
-  行順を`hac_time`にする）でstatsmodels・Rの両方と照合する。横断面の`wage1`/`gpa2`はHACの対象外。
+  行順を`hac_time`にする）でstatsmodels・Rの両方と照合する。横断面の`wage1`/`gpa2`/`mroz`はHACの対象外。
 - `tests/linear/` に4ファイルで役割分担する:
   `test_ols_api.py`（成功パスの構造・API・オプション反映・`predict()`/`augment()`）/
   `test_ols_validation.py`（`ValidationError`/`ComputationError`パス）/
@@ -261,10 +261,20 @@ $$
 - pyfixestはOLSの正確性検証には使わない（HC2/HC3にHC1用の小標本補正を誤って適用する既知の
   実装バグがあるため）。性能比較専用（[`../performance/ols.md`](../performance/ols.md)）。
 - 実データセット: `wage1`（`lwage ~ educ + exper + tenure`）・
-  `gpa2`（`colgpa ~ sat + hsperc + tothrs`）のWooldridgeデータセット2つ、
-  classical/HC0-3で主リファレンス（statsmodels、`test_ols_reference.py`）・
+  `gpa2`（`colgpa ~ sat + hsperc + tothrs`）・
+  `mroz`（`inlf ~ nwifeinc + educ + exper + expersq + age + kidslt6 + kidsge6`、Logit/Probitと同じ
+  回帰式。被説明変数が0/1の線形確率モデルで、分散がxに依存するためclassicalとHC0-3の差が大きく出る）の
+  Wooldridgeデータセット3つ、classical/HC0-3で主リファレンス（statsmodels、`test_ols_reference.py`）・
   独立実装（R、`test_ols_crosscheck.py`）の両方と照合する（従来Rクロスチェック側にしか
-  無かった実データ検証をstatsmodels側にも追加）。
+  無かった実データ検証をstatsmodels側にも追加）。`mroz`はクラスターに使える自然なカテゴリ列が
+  無く（`city`はG=2でG<=qのため`ValidationError`）、HACも時系列順が無いため対象外。
+- 列数・列順に依存するapiテスト（`param_names`の並び、`params_table`/`conf_int`のキー、
+  `predict()`/`augment()`の列の扱い、`include_intercept=False`）は、共有の`dataset`（説明変数2列）
+  ではなく凍結済みの`synthetic_baseline_wide.csv`（`wide_dataset`フィクスチャ、n=100・x1..x8、
+  真の係数は全て絶対値の異なる値、`benchmark.linear.constants.WIDE_BETA`）で行う。2列だと
+  列の取り違えは1通りの入れ替えしか起こり得ず、3列以上が絡むバグを検出できないため。真の係数との
+  近さ（標準誤差の5倍以内）でも並びを確認する。WLSの`test_wls_api.py`も同じデータを使う
+  （重みは同CSVの`weight`列）。列数に依存しない`ValidationError`系は小さい`dataset`のまま。
   `wage1`はさらに地域ダミー（northcen/south/west、基準northeast）から合成したregion列
   でのクラスターロバストSE（実データでのグループ列、4グループ・不均衡サイズ）も両方で検証する。
 - `engine`側は上記の固定シナリオ単体テストに加え、property-basedテスト（`proptest`、

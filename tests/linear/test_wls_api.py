@@ -24,6 +24,7 @@ from _assertions import (
     assert_params_table_matches_attributes,
     assert_same_estimates,
 )
+from _constants import WIDE_X
 from _helpers import (
     CASE_SPELLINGS,
     HAC_AUTO_LAG_SAMPLE_SIZES,
@@ -34,7 +35,7 @@ from _helpers import (
     respell,
     with_row_time,
 )
-from _ols_helpers import HAC_REORDER_ORDER, hac_reorder_frame
+from _ols_helpers import HAC_REORDER_ORDER, hac_reorder_frame, wide_new_data
 from _tolerances import TOLERANCES
 from econometricsmodels import (
     OLS,
@@ -45,7 +46,7 @@ from econometricsmodels import (
 )
 
 from benchmark.common import hac_auto_lag
-from benchmark.linear.constants import COV_TYPES
+from benchmark.linear.constants import COV_TYPES, WIDE_BETA
 
 # predict()のstatsmodels照合は主リファレンス照合と同じ許容誤差
 # （`_tolerances_linear.py`の"wls_reference"）で行う（`test_ols_api.py`と同じ方針、
@@ -96,17 +97,32 @@ def test_residuals_are_original_scale_not_weighted(dataset):
         _assert_rounding_close(wls_r, ols_r, f"residuals[{i}]")
 
 
+def test_params_follow_the_column_order_of_the_true_coefficients(
+    wide_dataset,
+):
+    """説明変数8列で、各係数の推定値が自分の列の真の係数に近いこと
+    （`test_ols_api.py`の同名テストと同じ検証。重みは`wide_dataset`の
+    0.5〜1.5の一様乱数で、1ではない）。
+    """
+    res = WLS(wide_dataset, y="y", x=WIDE_X, weight="weight").fit()
+
+    assert res.param_names == ["const", *WIDE_X]
+    for name, true_value in zip(res.param_names, WIDE_BETA):
+        assert abs(res.params[name] - true_value) < 5 * res.std_errors[name], (
+            name
+        )
+
+
 # ── API構造 ───────────────────────────────────────────────────────────
 
 
-def test_params_table_structure(unit_weight_dataset):
-    df = unit_weight_dataset
-    res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
+def test_params_table_structure(wide_dataset):
+    res = WLS(wide_dataset, y="y", x=WIDE_X, weight="weight").fit()
     table = res.params_table()
     assert_params_table_matches_attributes(res)
 
     assert isinstance(table, list)
-    assert len(table) == 3  # const, x1, x2
+    assert len(table) == 1 + len(WIDE_X)  # const, x1..x8
     expected_keys = {
         "param_name",
         "param",
@@ -118,24 +134,22 @@ def test_params_table_structure(unit_weight_dataset):
     }
     for row in table:
         assert set(row.keys()) == expected_keys
-    assert [row["param_name"] for row in table] == ["const", "x1", "x2"]
+    assert [row["param_name"] for row in table] == ["const", *WIDE_X]
 
 
-def test_conf_int_structure(unit_weight_dataset):
-    df = unit_weight_dataset
-    res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
+def test_conf_int_structure(wide_dataset):
+    res = WLS(wide_dataset, y="y", x=WIDE_X, weight="weight").fit()
     ci = res.conf_int
 
     assert isinstance(ci, dict)
-    assert set(ci.keys()) == {"const", "x1", "x2"}
+    assert set(ci.keys()) == {"const", *WIDE_X}
     for lower, upper in ci.values():
         assert lower < upper
 
 
-def test_params_std_errors_test_stats_p_values_share_keys(unit_weight_dataset):
-    df = unit_weight_dataset
-    res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
-    expected_keys = {"const", "x1", "x2"}
+def test_params_std_errors_test_stats_p_values_share_keys(wide_dataset):
+    res = WLS(wide_dataset, y="y", x=WIDE_X, weight="weight").fit()
+    expected_keys = {"const", *WIDE_X}
 
     assert set(res.params.keys()) == expected_keys
     assert set(res.std_errors.keys()) == expected_keys
@@ -177,44 +191,42 @@ def test_cov_type_is_case_insensitive(unit_weight_dataset, cov_type, spelling):
     assert_same_estimates(res, fit(cov_type))
 
 
-def test_confidence_level_changes_interval_width(unit_weight_dataset):
+def test_confidence_level_changes_interval_width(wide_dataset):
     """`confidence_level`を下げると信頼区間が狭くなること（OLSと同じ検証、
     既定の0.95以外の値がengine_pybind経由で実際に反映されることの確認）。
     """
-    df = unit_weight_dataset
     wide = WLS(
-        df,
+        wide_dataset,
         y="y",
-        x=["x1", "x2"],
+        x=WIDE_X,
         weight="weight",
         options=WLSOptions(confidence_level=0.99),
     ).fit()
     narrow = WLS(
-        df,
+        wide_dataset,
         y="y",
-        x=["x1", "x2"],
+        x=WIDE_X,
         weight="weight",
         options=WLSOptions(confidence_level=0.80),
     ).fit()
 
-    for name in ["const", "x1", "x2"]:
+    for name in ["const", *WIDE_X]:
         wide_width = wide.conf_int[name][1] - wide.conf_int[name][0]
         narrow_width = narrow.conf_int[name][1] - narrow.conf_int[name][0]
         assert narrow_width < wide_width, name
 
 
-def test_include_intercept_false_omits_const(unit_weight_dataset):
+def test_include_intercept_false_omits_const(wide_dataset):
     """`include_intercept=False`では`const`が出ず、`df_model`は傾き係数の数
     （切片あり・なしで同じ）になること（数値照合は`test_wls_reference.py`の
     `test_no_intercept_matches_statsmodels`）。
     """
-    df = unit_weight_dataset
     options = WLSOptions(include_intercept=False)
     res = WLS(
-        df, y="y", x=["x1", "x2"], weight="weight", options=options
+        wide_dataset, y="y", x=WIDE_X, weight="weight", options=options
     ).fit()
-    assert res.param_names == ["x1", "x2"]
-    assert res.df_model == 2
+    assert res.param_names == WIDE_X
+    assert res.df_model == len(WIDE_X)
 
 
 def test_hac_auto_lags_runs_and_returns_finite_std_errors(unit_weight_dataset):
@@ -270,28 +282,24 @@ def test_hac_time_reorders_rows_before_computing_lags():
 # statsmodelsとの直接比較で確認する。
 
 
-def _wls_weighted_dataset(dataset: pl.DataFrame) -> pl.DataFrame:
-    """`dataset`に非自明な（1でない）重み列を付加する。"""
-    weight = 1.0 / (1.0 + dataset["x1"].abs())
-    return dataset.with_columns(weight.alias("weight"))
+def _sm_wls_wide(df: pl.DataFrame):
+    """`wide_dataset`（x1..x8、重みは`weight`列）のstatsmodels `sm.WLS`の推定。"""
+    import statsmodels.api as sm
+
+    x = sm.add_constant(df.select(WIDE_X).to_numpy())
+    return sm.WLS(df["y"].to_numpy(), x, weights=df["weight"].to_numpy()).fit(
+        use_t=True
+    )
 
 
-def test_predict_none_matches_statsmodels_fitted_values(dataset):
+def test_predict_none_matches_statsmodels_fitted_values(wide_dataset):
     """`predict(new_data=None)`が学習データに対するstatsmodels `sm.WLS`の
     fittedvaluesと一致すること（重みは1ではない）。
     """
-    import numpy as np
-    import statsmodels.api as sm
+    df = wide_dataset
+    sm_res = _sm_wls_wide(df)
 
-    df = _wls_weighted_dataset(dataset)
-    x = sm.add_constant(
-        np.column_stack([df["x1"].to_numpy(), df["x2"].to_numpy()])
-    )
-    sm_res = sm.WLS(
-        df["y"].to_numpy(), x, weights=df["weight"].to_numpy()
-    ).fit(use_t=True)
-
-    res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
+    res = WLS(df, y="y", x=WIDE_X, weight="weight").fit()
     predicted = res.predict()
 
     assert len(predicted) == len(df)
@@ -299,30 +307,21 @@ def test_predict_none_matches_statsmodels_fitted_values(dataset):
         _assert_close(value, expected, f"predicted/{i}")
 
 
-def test_predict_new_data_matches_statsmodels(dataset):
+def test_predict_new_data_matches_statsmodels(wide_dataset):
     """新規データに対する`predict()`がstatsmodelsの`.predict()`と一致すること
-    （重みは1ではない。列順を学習時と入れ替えて渡し、列名マッチングも
+    （重みは1ではない。列順を学習時（x1..x8）と逆順にして渡し、列名マッチングも
     合わせて確認する）。
     """
-    import numpy as np
     import statsmodels.api as sm
 
-    df = _wls_weighted_dataset(dataset)
-    x = sm.add_constant(
-        np.column_stack([df["x1"].to_numpy(), df["x2"].to_numpy()])
-    )
-    sm_res = sm.WLS(
-        df["y"].to_numpy(), x, weights=df["weight"].to_numpy()
-    ).fit(use_t=True)
+    df = wide_dataset
+    sm_res = _sm_wls_wide(df)
 
-    res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
-    new_data = pl.DataFrame({"x2": [0.5, -1.0, 2.0], "x1": [1.0, 2.0, -0.5]})
-    predicted = res.predict(new_data)
+    res = WLS(df, y="y", x=WIDE_X, weight="weight").fit()
+    new_data = wide_new_data()
+    predicted = res.predict(new_data.select(reversed(WIDE_X)))
 
-    sm_new_x = sm.add_constant(
-        np.column_stack([new_data["x1"].to_numpy(), new_data["x2"].to_numpy()])
-    )
-    expected = sm_res.predict(sm_new_x)
+    expected = sm_res.predict(sm.add_constant(new_data.to_numpy()))
 
     assert len(predicted) == 3
     for i, (value, exp) in enumerate(zip(predicted, expected)):
@@ -381,13 +380,13 @@ def test_predict_returns_list_of_floats(unit_weight_dataset):
 
 
 def test_augment_none_returns_training_data_with_predicted_column(
-    unit_weight_dataset,
+    wide_dataset,
 ):
     """`augment(new_data=None)`が、学習データの全列＋`"predicted"`列を持つ
     DataFrameを、`predict()`と同じ予測値・元データと同じ行順で返すこと。
     """
-    df = unit_weight_dataset
-    res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
+    df = wide_dataset
+    res = WLS(df, y="y", x=WIDE_X, weight="weight").fit()
 
     augmented = res.augment()
 
@@ -402,42 +401,36 @@ def test_augment_none_returns_training_data_with_predicted_column(
 
 
 def test_augment_new_data_returns_new_data_with_predicted_column(
-    unit_weight_dataset,
+    wide_dataset,
 ):
     """`augment(new_data)`が、`new_data`の全列＋`"predicted"`列を持つ
     DataFrameを、`predict(new_data)`と同じ予測値で返すこと。
     """
-    df = unit_weight_dataset
-    res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
-    new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
+    res = WLS(wide_dataset, y="y", x=WIDE_X, weight="weight").fit()
+    new_data = wide_new_data(2)
 
     augmented = res.augment(new_data)
 
     assert isinstance(augmented, pl.DataFrame)
     assert augmented.height == 2
-    assert augmented.columns == ["x1", "x2", "predicted"]
+    assert augmented.columns == [*WIDE_X, "predicted"]
+    for col in WIDE_X:
+        assert augmented[col].to_list() == new_data[col].to_list()
 
     expected = res.predict(new_data)
     assert augmented["predicted"].to_list() == expected
 
 
-def test_augment_new_data_with_extra_column_preserves_it(unit_weight_dataset):
+def test_augment_new_data_with_extra_column_preserves_it(wide_dataset):
     """`new_data`が`x`列以外の余分な列（予測に使わない識別子列等）を含む場合、
     その列もそのまま`"predicted"`列と一緒に返されること。
     """
-    df = unit_weight_dataset
-    res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
-    new_data = pl.DataFrame(
-        {
-            "id": ["a", "b"],
-            "x1": [1.0, 2.0],
-            "x2": [0.5, -0.5],
-        }
-    )
+    res = WLS(wide_dataset, y="y", x=WIDE_X, weight="weight").fit()
+    new_data = wide_new_data(2).insert_column(0, pl.Series("id", ["a", "b"]))
 
     augmented = res.augment(new_data)
 
-    assert augmented.columns == ["id", "x1", "x2", "predicted"]
+    assert augmented.columns == ["id", *WIDE_X, "predicted"]
     assert augmented["id"].to_list() == ["a", "b"]
 
 

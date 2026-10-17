@@ -60,7 +60,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 from _assertions import assert_close, assert_dict_close, assert_fields_close
-from _constants import DATA_DIR
+from _constants import DATA_DIR, MROZ_X
 from _helpers import (
     ROW_TIME,
     with_cluster_groups,
@@ -488,6 +488,7 @@ def test_hac_lags_matches_r(crosscheck, hac_lags):
 WOOLDRIDGE_DATASETS = {
     "wage1": ("lwage", ["educ", "exper", "tenure"]),
     "gpa2": ("colgpa", ["sat", "hsperc", "tothrs"]),
+    "mroz": ("inlf", MROZ_X),
 }
 
 

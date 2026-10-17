@@ -66,6 +66,7 @@ from benchmark.common import (
     load_frozen_dataset,
     run_fixture_cli,
 )
+from benchmark.common.constants import MROZ_FORMULA
 from benchmark.common.load_wooldridge import load as load_wooldridge
 from benchmark.linear.constants import (
     CLUSTER_ILL_CONDITIONED_SCENARIOS,
@@ -266,6 +267,8 @@ def build_wooldridge_fixtures(tmpdir: Path) -> dict:
             "colgpa ~ sat + hsperc + tothrs",
             ["hc0", "hc1", "hc2", "hc3"],
         ),
+        # inlf（0/1）を被説明変数にした線形確率モデル（generate_ols_fixtures.pyと同じ）。
+        "mroz": (MROZ_FORMULA, ["hc0", "hc1", "hc2", "hc3"]),
     }
     fixtures: dict = {}
     # HACの実データ（時系列、年次昇順でn=38）。行順をそのまま時間順として使う。

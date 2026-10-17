@@ -15,17 +15,35 @@ from __future__ import annotations
 import numpy as np
 import polars as pl
 import statsmodels.api as sm
+from _constants import WIDE_X
 from econometricsmodels import OLS, OLSOptions, OLSResults
 
+# 共有`dataset`フィクスチャ（説明変数2列）の説明変数。幅のあるデータ
+# （`wide_dataset`）では`_constants.WIDE_X`を`x`引数で渡す。
+NARROW_X = ["x1", "x2"]
 
-def sm_design(df: pl.DataFrame) -> np.ndarray:
-    """定数列付き設計行列を返す（statsmodelsと同じ列順）。"""
-    return sm.add_constant(
-        np.column_stack([df["x1"].to_numpy(), df["x2"].to_numpy()])
+
+def wide_new_data(n_rows: int = 3) -> pl.DataFrame:
+    """`wide_dataset`の説明変数（x1..x8）に対する予測用データ。列ごとに値の並びが
+    異なる（列`j`の`i`行目は`0.1*(i+1)*(j+1) - 0.35`）ため、列の取り違えがあると
+    予測値が変わる。
+    """
+    return pl.DataFrame(
+        {
+            name: [0.1 * (i + 1) * (j + 1) - 0.35 for i in range(n_rows)]
+            for j, name in enumerate(WIDE_X, start=1)
+        }
     )
 
 
-def sm_fit(df: pl.DataFrame, cov_type: str = "classical"):
+def sm_design(df: pl.DataFrame, x: list[str] = NARROW_X) -> np.ndarray:
+    """定数列付き設計行列を返す（statsmodelsと同じ列順）。"""
+    return sm.add_constant(df.select(x).to_numpy())
+
+
+def sm_fit(
+    df: pl.DataFrame, cov_type: str = "classical", x: list[str] = NARROW_X
+):
     """statsmodelsでの推定。
 
     `use_t=True`を明示指定する（本プロジェクトはcov_typeによらず
@@ -33,8 +51,7 @@ def sm_fit(df: pl.DataFrame, cov_type: str = "classical"):
     以外でuse_t=False。`docs/spec/ols-spec.md`「標準誤差」参照）。
     """
     y = df["y"].to_numpy()
-    x = sm_design(df)
-    model = sm.OLS(y, x)
+    model = sm.OLS(y, sm_design(df, x))
     if cov_type == "classical":
         return model.fit(use_t=True)
     return model.fit(cov_type=cov_type.upper(), use_t=True)
@@ -49,9 +66,11 @@ def sm_fit_cluster(df: pl.DataFrame):
     )
 
 
-def our_fit(df: pl.DataFrame, cov_type: str = "classical") -> OLSResults:
+def our_fit(
+    df: pl.DataFrame, cov_type: str = "classical", x: list[str] = NARROW_X
+) -> OLSResults:
     options = OLSOptions(cov_type=cov_type)
-    return OLS(df, y="y", x=["x1", "x2"], options=options).fit()
+    return OLS(df, y="y", x=x, options=options).fit()
 
 
 def our_fit_cluster(df: pl.DataFrame) -> OLSResults:

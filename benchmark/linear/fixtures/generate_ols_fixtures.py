@@ -32,6 +32,7 @@ from benchmark.common import (
     imbalanced_cluster_groups,
     run_fixture_cli,
 )
+from benchmark.common.constants import MROZ_FORMULA
 from benchmark.common.load_wooldridge import load as load_wooldridge
 from benchmark.linear.constants import (
     CLUSTER_ILL_CONDITIONED_SCENARIOS,
@@ -50,12 +51,17 @@ from benchmark.linear.references.statsmodels_ref import (
 
 # 実データ（Wooldridge）。`generate_ols_crosscheck_fixtures.py`
 # （build_wooldridge_fixtures）と同じデータセット・回帰式・cov_type
-# （wage1/gpa2、classical/HC0-3、HACは横断面データのため対象外）。
+# （wage1/gpa2/mroz、classical/HC0-3、HACは横断面データのため対象外）。
+# mrozは被説明変数がinlf（0/1）の実データの線形確率モデル（Logit/Probitと同じ
+# 回帰式`MROZ_FORMULA`）。誤差の分散がxに依存するため構造的に不均一分散で、
+# classicalとHC0-3の差が大きく出る。クラスターは自然なカテゴリ列が無く（`city`は
+# G=2でG<=qのため弾かれる）、HACは時系列順が無いため、いずれも対象外。
 # 従来Rクロスチェック側にしか無かった実データ検証を主リファレンス
 # （statsmodels）側にも追加する（ユーザー確認済み）。
 WOOLDRIDGE_DATASETS = {
     "wage1": "lwage ~ educ + exper + tenure",
     "gpa2": "colgpa ~ sat + hsperc + tothrs",
+    "mroz": MROZ_FORMULA,
 }
 
 # HACの実データ（時系列、年次昇順でn=38）。行順をそのまま時間順として使う。
@@ -210,8 +216,9 @@ def build_fixtures() -> dict:
             "高次元シナリオ。"
             "outlier_regressorはx1の5%をTukeyの汚染混合モデル（SD20倍）で"
             "外れ値に置き換えた成功パス。"
-            "wage1/gpa2はWooldridge実データ（classical/HC0-3、HACは"
+            "wage1/gpa2/mrozはWooldridge実データ（classical/HC0-3、HACは"
             "時系列順の無いクロスセクションデータのため対象外）。"
+            "mrozはinlf（0/1）を被説明変数にした線形確率モデル。"
             "prminwge（時系列、n=38）はHACのみの実データ。HACのラグは全ケース"
             "本実装の自動選択式（benchmark.common.hac_auto_lag）で、使ったラグは"
             "各cov_type=hacエントリのhac_lagに残す。"

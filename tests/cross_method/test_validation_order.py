@@ -140,7 +140,7 @@ METHODS = [
         {"y": "y", "x": ["x1", "x2"], "entity": "entity"},
         time_cov_type="dk",
         time_option="dk_time",
-        extra_faults=("unused_dk_bandwidth",),
+        extra_faults=("unused_cluster", "unused_dk_bandwidth"),
     ),
     Method(
         "re",
@@ -149,7 +149,7 @@ METHODS = [
         time_cov_type="dk",
         time_option="dk_time",
         value_faults=("unknown_cov_type", "unknown_variance_method"),
-        extra_faults=("unused_dk_bandwidth",),
+        extra_faults=("unused_cluster", "unused_dk_bandwidth"),
     ),
 ]
 
@@ -235,7 +235,10 @@ def changes(method: Method, fault_id: str) -> Changes:
         case "unknown_variance_method":
             return {}, {"variance_method": "bogus"}
         case "unused_cluster":
-            # 既定の`cov_type`が`cluster`でない手法だけ（FE/REは`unused_dk_bandwidth`）。
+            # FE/REの既定の`cov_type`は`cluster`なので、`cluster`が使われなくなるよう
+            # `classical`にする。
+            if method.time_cov_type == "dk":
+                return {}, {"cov_type": "classical", "cluster": "cluster"}
             return {}, {"cluster": "cluster"}
         case "unused_dk_bandwidth":
             return {}, {"dk_bandwidth": 2}
@@ -274,6 +277,17 @@ def compose(
     # 時間順の列が「無い」故障は、同じ列を指定する故障とは両立しない。
     if early == "missing_time_option" and method.time_option in l_opts:
         return None
+    # `dk`では`dk_bandwidth`が使われるので、`dk`を選ぶ故障とは「未使用」にならない。
+    if early == "unused_dk_bandwidth" and l_opts.get("cov_type") == "dk":
+        return None
+    # FE/REの`unused_cluster`は`cov_type`を`classical`にするが、`dk`の故障と混ぜるときは
+    # `dk`のまま`cluster`だけを残す（`dk`では`cluster`は使われない）。
+    if (
+        early == "unused_cluster"
+        and method.time_cov_type == "dk"
+        and late in ("missing_time_option", "missing_time_column")
+    ):
+        return {**method.base_args, **l_args}, {**l_opts, "cluster": "cluster"}
     conflicts = {
         ("args", k) for k in e_args if k in l_args and e_args[k] != l_args[k]
     } | {("opts", k) for k in e_opts if k in l_opts and e_opts[k] != l_opts[k]}

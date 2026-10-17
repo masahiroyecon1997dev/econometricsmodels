@@ -19,7 +19,7 @@
 //!    実装した。
 //! 2. **engine呼び出し段階**: `build_fe_input`を実際に呼び出す`fit`関数を追加し、`lib.rs`に
 //!    `#[pyfunction] fit_fe`を新設して`#[pymodule]`に登録する。`build_fe_input`/
-//!    `parse_fe_cov_type`/`panel_error_to_pyerr`はこの時点で本番経路（`fit_fe`）から
+//!    `parse_panel_cov_kind`/`panel_error_to_pyerr`はこの時点で本番経路（`fit_fe`）から
 //!    実際に呼ばれるようになるため、`#[allow(dead_code)]`はすべて削除する
 //!    （`engine_pybind/src/iv/CLAUDE.md`「実装フェーズの分割方針」の初期実装段階と同じ）。
 //! 3. **`fixed_effects()`メソッド追加段階**: IVの`first_stage()`と同じ
@@ -37,7 +37,7 @@
 //! （ユーザー確認済み、2026-09-12）。**`cov_type="dk"`では`dk_time`が必須**で、`time`
 //! （2-way FEの固定効果の時間次元）を暗黙に借用しない（どの列がDKの時点かを明示させ、
 //! 意図と違う列が選ばれても気づけない状況を避けるため。`dk_time`未指定は
-//! `ValidationError`、`parse_fe_cov_type`参照）。2-wayでも`dk_time`が常にDK計算に使われ、
+//! `ValidationError`、`parse_panel_cov_kind`参照）。2-wayでも`dk_time`が常にDK計算に使われ、
 //! `time`と別の時間粒度（四半期の固定効果に年次のDK等）も指定できる（詳細な経緯・engine側の
 //! 対応する変更は`engine/src/panel/fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）。
 //!
@@ -76,20 +76,21 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3_polars::PyDataFrame;
 
-use super::common::{panel_error_to_pyerr, validate_dk_time_role};
+use super::common::{
+    PanelCovKind, PanelModel, check_panel_cov_options, panel_error_to_pyerr, parse_panel_cov_kind,
+    require_dk_time, validate_dk_time_role,
+};
 use crate::shared::column_extraction::{
     extract_entity_groups, extract_f64_column, extract_f64_columns,
     extract_optional_cluster_groups, extract_time_keys,
 };
-use crate::shared::errors::ValidationError;
 use crate::shared::mat_conversion::mat_to_vec;
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
     extract_strict_float, extract_strict_opt_column, extract_strict_opt_int, extract_strict_text,
 };
 use crate::shared::validation::{
-    RoleValue, reject_unused_option, validate_no_duplicate_roles,
-    validate_no_duplicate_within_role, validate_x_non_empty,
+    RoleValue, validate_no_duplicate_roles, validate_no_duplicate_within_role, validate_x_non_empty,
 };
 
 /// Estimation options for FE (fixed effects panel regression).
@@ -364,80 +365,38 @@ impl FEResult {
     }
 }
 
-/// `FEOptions.cov_type`をパースし、該当する`cov_type`のときのみ`cluster`/`dk_time`を
-/// 抽出したうえで`engine::panel::fe::FeCovType`を組み立てる。
+/// [`PanelCovKind`]に対応する列（`cluster`・`dk_time`）をDataFrameから抽出して
+/// `engine::panel::fe::FeCovType`を組み立てる。
 ///
-/// `linear::common::parse_cov_type`（OLS/WLS用）を流用しない理由はモジュールdoc
+/// `linear::common::resolve_cov_type`（OLS/WLS用）を流用しない理由はモジュールdoc
 /// 「`cov_type`の非対応値」参照（`hc0`が無い・`Dk`の`time`上書きがFE固有のため）。
+/// 使われないオプションの検査は`check_panel_cov_options`の責務。
 ///
 /// # Errors
-/// `cov_type`の文字列が既知の値のいずれでもない場合は`ValidationError`（`hc0`は非対応の
-/// 専用メッセージ、それ以外の未知の値は一般的な「unknown cov_type」メッセージ）。それ以外
-/// （列の抽出時に発覚する問題等）は`column_extraction`の責務で`ValidationError`。
-fn parse_fe_cov_type(df: &DataFrame, options: &FEOptions) -> PyResult<(FeCovType, String)> {
-    let cov_type_lower = options.cov_type.to_lowercase();
-    let cov_type = match cov_type_lower.as_str() {
-        "classical" => FeCovType::Classical,
-        "hc1" => FeCovType::Hc1,
-        "hc2" => FeCovType::Hc2,
-        "hc3" => FeCovType::Hc3,
-        "cluster" => {
-            let groups = extract_optional_cluster_groups(df, options.cluster.as_deref())?;
-            FeCovType::Cluster { groups }
-        }
-        "dk" => {
-            // DKの時点列は`dk_time`で明示する（必須）。2-way FEの`time`（固定効果構造）を
-            // 暗黙に借用すると、意図と違う列が選ばれても気づけないため
-            // （モジュールdoc「`FEOptions.time`と`FEOptions.dk_time`は別物」参照）。
-            let Some(dk_time) = options.dk_time.as_ref() else {
-                return Err(ValidationError::new_err(
-                    "cov_type='dk' requires the `dk_time` option: the column that defines \
-                     the time periods of the Driscoll-Kraay estimator (it is not taken from \
-                     `time`, which only sets the two-way fixed effects)",
-                ));
-            };
-            let time = extract_time_keys(df, dk_time)?;
+/// 列の抽出時に発覚する問題は`column_extraction`の責務で`ValidationError`。`Dk`で
+/// `dk_time`が未指定の場合も`ValidationError`（`check_panel_cov_options`を通していれば
+/// 起きない）。
+fn resolve_fe_cov_type(
+    df: &DataFrame,
+    kind: PanelCovKind,
+    options: &FEOptions,
+) -> PyResult<FeCovType> {
+    Ok(match kind {
+        PanelCovKind::Classical => FeCovType::Classical,
+        PanelCovKind::Hc1 => FeCovType::Hc1,
+        PanelCovKind::Hc2 => FeCovType::Hc2,
+        PanelCovKind::Hc3 => FeCovType::Hc3,
+        PanelCovKind::Cluster => FeCovType::Cluster {
+            groups: extract_optional_cluster_groups(df, options.cluster.as_deref())?,
+        },
+        PanelCovKind::Dk => {
+            let dk_time = require_dk_time(options.dk_time.as_deref(), PanelModel::Fe)?;
             FeCovType::Dk {
                 bandwidth: options.dk_bandwidth,
-                time,
+                time: extract_time_keys(df, dk_time)?,
             }
         }
-        "hc0" => {
-            return Err(ValidationError::new_err(
-                "cov_type='hc0' is not supported for FE (neither linearmodels nor fixest \
-                 offer HC0 for panel/FE regressions); use 'hc1', 'hc2', or 'hc3' instead",
-            ));
-        }
-        other => {
-            return Err(ValidationError::new_err(format!(
-                "unknown cov_type: '{other}'. Expected one of 'classical', 'hc1' through \
-                 'hc3', 'cluster', or 'dk'"
-            )));
-        }
-    };
-
-    // 未知の`cov_type`は「unknown cov_type」を優先して報告する（上のmatchが先）。
-    reject_unused_option(
-        "cluster",
-        options.cluster.is_some(),
-        cov_type_lower == "cluster",
-        "cov_type=\"cluster\"",
-    )?;
-    let is_dk = cov_type_lower == "dk";
-    reject_unused_option(
-        "dk_time",
-        options.dk_time.is_some(),
-        is_dk,
-        "cov_type=\"dk\"",
-    )?;
-    reject_unused_option(
-        "dk_bandwidth",
-        options.dk_bandwidth.is_some(),
-        is_dk,
-        "cov_type=\"dk\"",
-    )?;
-
-    Ok((cov_type, cov_type_lower))
+    })
 }
 
 /// Pythonから渡された `data` / `y` / `x` / `entity` / `options` を検証し、
@@ -455,7 +414,7 @@ fn parse_fe_cov_type(df: &DataFrame, options: &FEOptions) -> PyResult<(FeCovType
 ///   他手法と揃えた——経緯はモジュールdoc「`x`の空リストを許容しない」参照）。
 ///   `y`/`entity`/`time`/`x`間の重複・`x`内部の重複も同じく`validation.rs`の責務で
 ///   `ValidationError`
-/// - `cov_type`の文字列が不正な場合は`ValidationError`（`parse_fe_cov_type`参照）
+/// - `cov_type`の文字列が不正な場合は`ValidationError`（`parse_panel_cov_kind`参照）
 /// - それ以外（`y`/`entity`/`time`間の行数不一致等）は`engine::panel::common::PanelError`
 ///   から`panel_error_to_pyerr`で変換
 pub(crate) fn build_fe_input(
@@ -465,6 +424,18 @@ pub(crate) fn build_fe_input(
     entity: String,
     options: &FEOptions,
 ) -> PyResult<(FeInput, FeEffects, FeCovType, String)> {
+    // DataFrameを見ない検査を先に行う。報告順は`docs/guide/validation.md`
+    // 「Order in which errors are reported」: オプションの値 → オプションの組合せ →
+    // ロール構造 → `y`/`x`の列 → オプション列 → エンジン。
+    let cov_kind = parse_panel_cov_kind(&options.cov_type, PanelModel::Fe)?;
+    check_panel_cov_options(
+        cov_kind,
+        PanelModel::Fe,
+        options.cluster.as_deref(),
+        options.dk_time.as_deref(),
+        options.dk_bandwidth,
+    )?;
+
     // `x`が空リストであることを許容しない（モジュールdoc参照）。
     // OLS/WLS/Logit/Probit/IVと同じ`validate_x_non_empty`を呼ぶ（`.claude/rules/
     // rust-style.md`「バリデーションの責務分担」）。
@@ -501,12 +472,12 @@ pub(crate) fn build_fe_input(
     };
 
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ）─────────────
-    let (cov_type, cov_type_lower) = parse_fe_cov_type(df, options)?;
+    let cov_type = resolve_fe_cov_type(df, cov_kind, options)?;
 
     let input = FeInput::from_group_codes(&y_slice, &x_slices, x, entity_groups, time_keys, y)
         .map_err(panel_error_to_pyerr)?;
 
-    Ok((input, effects, cov_type, cov_type_lower))
+    Ok((input, effects, cov_type, cov_kind.name().to_string()))
 }
 
 /// Pythonから渡された `data` / `y` / `x` / `entity` / `options` を検証し、

@@ -7,7 +7,7 @@
 FEはIVの「データ抽出・pyclass定義」→「engine呼び出し」→「`first_stage()`」と同じ3段階に分けた。
 
 1. **データ抽出・pyclass定義段階（完了）**: `FEOptions`/`FEResult`のpyclass定義、列抽出・バリデーション・`engine::panel::fe::FeInput`構築までを行う`build_fe_input`を`panel/fe.rs`に実装した。この時点では`#[pymodule]`への登録・実際の`FeEstimator::fit`呼び出しは行わなかった。
-2. **engine呼び出し・エラー変換段階（完了）**: `build_fe_input`を実際に呼び出す`fit`関数（`panel/fe.rs`）を追加し、`lib.rs`に`#[pyfunction] fit_fe`を新設して`#[pymodule]`に登録した。`build_fe_input`/`parse_fe_cov_type`/`panel_error_to_pyerr`の`#[allow(dead_code)]`属性はこの時点で全て削除した（本番経路（`fit_fe`）から実際に呼ばれるようになったため、IVの同じ段階と同じ）。`maturin develop --release`でビルドし、fixestリファレンスフィクスチャ（`engine::panel::fe`の`fixest_reference_input`と同じデータ）を使ってPythonから直接`_lib.fit_fe`を呼び出し、engine単体テストの期待値と完全一致することを確認済み（k=0・`cov_type="hc0"`拒否・`dk_time`経由のHACも動作確認済み）。
+2. **engine呼び出し・エラー変換段階（完了）**: `build_fe_input`を実際に呼び出す`fit`関数（`panel/fe.rs`）を追加し、`lib.rs`に`#[pyfunction] fit_fe`を新設して`#[pymodule]`に登録した。`build_fe_input`/`resolve_fe_cov_type`/`panel_error_to_pyerr`の`#[allow(dead_code)]`属性はこの時点で全て削除した（本番経路（`fit_fe`）から実際に呼ばれるようになったため、IVの同じ段階と同じ）。`maturin develop --release`でビルドし、fixestリファレンスフィクスチャ（`engine::panel::fe`の`fixest_reference_input`と同じデータ）を使ってPythonから直接`_lib.fit_fe`を呼び出し、engine単体テストの期待値と完全一致することを確認済み（k=0・`cov_type="hc0"`拒否・`dk_time`経由のHACも動作確認済み）。
 3. **`fixed_effects()`メソッド段階（完了）**: IVの`first_stage()`と同じ「追加結果は別メソッド」方針（`docs/spec/fe-spec.md`3.5節）。`FEResult`に`FeEstimator`本体を保持する非公開フィールド`estimator`を追加し（`IVResult.first_stage`が1段階目ではなく3段階目で追加されたのと同じ段階分割）、`fixed_effects()`pymethodがそこから`FeEstimator::fixed_effects()`をオンデマンドに呼ぶ。詳細は下記「`fixed_effects()`の実装」参照。
 
 ## `fit`の実装
@@ -52,14 +52,14 @@ computation_error`に従うだけ）。他系統（`IvError`・`MleError`等）�
 
 `engine_pybind/src/iv/CLAUDE.md`「踏んだ罠」に記録済みの罠を、既存コード（`panel/common.rs`の`panel_error_to_pyerr`）で実際に踏んだ。初期実装の時点では`panel_error_to_pyerr`はどこからも呼ばれておらず`#[expect(dead_code, ...)]`が付いていたが、後続の実装で`build_fe_input`（`FeInput::from_columns`のエラーを`.map_err(panel_error_to_pyerr)`で変換）がこれを呼ぶようになった。`build_fe_input`自体は`#[cfg(test)] mod tests`からしか呼ばれない（`#[pymodule]`未登録のため）ため、`cargo test`/`clippy --all-targets`では`panel_error_to_pyerr`が到達可能になり`dead_code`が発火しなくなる → `#[expect]`の期待が外れ`unfulfilled_lint_expectations`が`-D warnings`下でエラーになった。`#[allow(dead_code)]`（無条件抑制）に変更して解消した。**「本番未接続だがテストからは呼ばれる」関数を新規に追加するとき、その関数が呼ぶ既存の`#[expect(dead_code)]`付き関数にも同じ変更が波及する**ことに注意（呼び出しグラフを辿って確認すること）。
 
-`build_fe_input`/`parse_fe_cov_type`自身も同じ理由で`#[allow(dead_code, reason = "...")]`を付けている（`build_iv_input`/`parse_iv_cov_type`の1段階目時点と同じパターン）。`fit_fe`が`#[pymodule]`に登録されたら、これらの属性はすべて削除すること。
+`build_fe_input`/`resolve_fe_cov_type`自身も同じ理由で`#[allow(dead_code, reason = "...")]`を付けている（`build_iv_input`/`parse_iv_cov_type`の1段階目時点と同じパターン）。`fit_fe`が`#[pymodule]`に登録されたら、これらの属性はすべて削除すること。
 
 ## RE: engine呼び出し・エラー変換
 
 FEの2段階目（engine呼び出し・エラー変換）と同じ構成: `build_re_input`で`ReInput`/`ReCovType`/`cov_type`（小文字正規化済み
 文字列）を得たあと、`ReEstimator::fit`を呼び、`REResult`を組み立てて返す（`panel/re.rs`の
 `fit`関数）。`lib.rs`に`#[pyfunction] fit_re`を新設して`#[pymodule]`に登録し、
-`build_re_input`の`#[allow(dead_code)]`を削除した（`parse_re_cov_type`は元々属性を付けて
+`build_re_input`の`#[allow(dead_code)]`を削除した（`resolve_re_cov_type`は元々属性を付けて
 いなかった——`build_re_input`から呼ばれる非公開関数のため、`build_re_input`自体が
 dead_code扱いの間も呼び出しグラフ経由で到達可能だった）。
 
@@ -98,12 +98,12 @@ FEの1段階目（データ抽出・pyclass定義）と同じ段階（`REOptions
 
 - **`REOptions.time`と`REOptions.dk_time`（FEと同じ規約）**: `time`は2-way REの時間次元
   （`Some`なら`ReEffects::TwoWay`、`ReInput.time`に渡る）、`dk_time`はDKの時点列で`cov_type="dk"`では
-  必須（未指定は`ValidationError`、`time`は借用しない）。`dk_time`は`parse_re_cov_type`が
+  必須（未指定は`ValidationError`、`time`は借用しない）。`dk_time`は`resolve_re_cov_type`が
   `ReCovType::Dk { time }`に渡し、`ReInput`には渡さない。`build_re_input`は
-  `(ReInput, ReEffects, ReCovType, String)`を返す。`REResult.n_periods`は
+  `(ReInput, ReEffects, ReCovType, String, VarianceMethod)`を返す。`REResult.n_periods`は
   `ReEstimator::n_periods()`をそのまま渡す。2-wayでも`hausman_*`・`r_squared_*`は1-wayと同じ項目に入る
   （`docs/spec/re-spec.md`3.6・3.7節）。`cov_type`が`"dk"`以外で`dk_time`を指定すると
-  `parse_re_cov_type`が`reject_unused_option`で`ValidationError`にする（`cluster`/
+  `check_panel_cov_options`が`ValidationError`にする（`cluster`/
   `dk_bandwidth`と同じ規則）。詳細は`panel/re.rs`モジュールdoc参照。
 - **`x`の空リストを許容しない（ユーザー確認済み、2026-09-20）**: REで`x=[]`は「分散成分
   （ICC）のみを推定するnullモデル」として単独で意味を持つ標準的なユースケースだが、
@@ -111,7 +111,7 @@ FEの1段階目（データ抽出・pyclass定義）と同じ段階（`REOptions
   OLS/WLS/Logit/Probit/IV）と一貫させ`validate_x_non_empty`で拒否する方針を
   選択した。nullモデル・ICC推定のサポート自体は別途検討する。
 - **`cov_type`は`FEOptions`と同じ集合**（`classical`/`hc1`〜`hc3`/`cluster`/`hac`、`hc0`は
-  非対応）。`parse_re_cov_type`は`parse_fe_cov_type`とほぼ同型だが、上記の通り`hac`分岐で
+  非対応）。`resolve_re_cov_type`は`resolve_fe_cov_type`とほぼ同型だが、上記の通り`hac`分岐で
   `dk_time`はengineの`ReCovType`ではなく`ReInput`に渡す点だけが異なる。
 - **`REResult`に`estimator`のような非公開フィールドは無い**: `FEResult`は`fixed_effects()`
   用に`FeEstimator`本体を保持する必要があったが、REのハウスマン検定
@@ -126,15 +126,19 @@ FEの1段階目（データ抽出・pyclass定義）と同じ段階（`REOptions
   そのまま使うこと（REの`df_model`が`OlsInput::k()`と自動的に一致するため、`OlsEstimator`
   委譲時点で既に正しい値になっている、という`engine`側の既存知見）。
 
+## `cov_type`の検査（値・組合せ・列）と報告順
+
+`panel/common.rs`の`PanelCovKind`（FE/RE共通）を、`parse_panel_cov_kind`（値。`hc0`は専用メッセージで弾く）→ `check_panel_cov_options`（`cluster`/`dk_time`/`dk_bandwidth`の未使用 → `dk`での`dk_time`欠落）→ `resolve_fe_cov_type`/`resolve_re_cov_type`（`fe.rs`/`re.rs`、列の抽出）の3段で使う。FE/REで文言が違う部分（`hc0`の理由・`dk_time`が必須と伝えるメッセージ）は`PanelModel`で切り替える。`build_{fe,re}_input`は、DataFrameを見ない検査（`cov_type`の値 →（REは`variance_method`の値）→ 組合せ）→ ロール構造 → `y`/`x`/`entity`/`time`の列 → `cluster`/`dk_time`の列の順に呼ぶ。REの`variance_method`は`build_re_input`の中でパースし、`VarianceMethod`を戻り値に含める（`fit`で別にパースしない）。`*Result.cov_type`の正規形は`PanelCovKind::name()`から作る。この順序は`tests/cross_method/test_validation_order.py`が固定している。
+
 ## `FEOptions`のフィールド設計
 
 - **`include_intercept`は無い**: FEは`within`変換で切片が構造的に消えるため、OLS/WLS/IVと異なりこのオプション自体が意味を持たない（`engine::panel::fe::FeEstimator::fit`が常に`include_intercept=false`でOLSに委譲する設計、`engine/src/panel/fe.rs`モジュールdoc参照）。
 - **【変更済み】`x`は空リストを許容しない**: v1では固定効果のみのモデル（`k=0`）を意図的に許容していたが、独立して吟味された設計記録が無く・因果推論として意味を持たない（説明変数がゼロで「個体・時間固定効果によるyの分解」という別の操作になる）ことがユーザーから指摘され、他手法（OLS/WLS/Logit/Probit/IVの`x_endog`/`instruments`）と同じ`validate_x_non_empty`を`build_fe_input`（`panel/fe.rs`）で呼ぶよう変更した。**`engine`側（`FeInput::from_columns`・`FeEstimator::fit`）はk=0を受理したままで変更していない**——`engine_pybind`層のみの業務バリデーション（`engine/src/panel/fe.rs`の`fe_estimator_fit_with_no_regressors_estimates_fixed_effects_only_model`は引き続きengineレベルの動作を検証する）。
 - **`cov_type`のデフォルトは`"cluster"`**（entity単位）。OLS/WLS/IVの`"classical"`から意図的に逸脱する（`panel-common.md`3.2節、fixestの前例）。
-- **`cov_type`は`hc0`を受け付けない**: `engine::panel::fe::FeCovType`enum自体が`Hc0`を持たない（スコープ外と判明済み、`engine/src/panel/CLAUDE.md`参照）。`parse_fe_cov_type`は`"hc0"`を専用のエラーメッセージで明示的に弾く（他の未知の値と区別する——`hc0`はOLS/WLS/IVでは有効な値のため、ユーザーが混同しやすいと判断した）。
+- **`cov_type`は`hc0`を受け付けない**: `engine::panel::fe::FeCovType`enum自体が`Hc0`を持たない（スコープ外と判明済み、`engine/src/panel/CLAUDE.md`参照）。`parse_panel_cov_kind`は`"hc0"`を専用のエラーメッセージで明示的に弾く（他の未知の値と区別する——`hc0`はOLS/WLS/IVでは有効な値のため、ユーザーが混同しやすいと判断した）。
 - **`time`と`dk_time`は別フィールド（重要な設計判断）**: `time`（bareネーミング、`panel-common.md`1.1節の既存方針通り）は2-way FE（entity+time）の指定に使う——`Some`なら2-way、`None`なら1-way。`dk_time`（OLSの`cluster`/`dk_time`と同じ「補助列」命名規則、新規）はDriscoll-Kraay HAC（`cov_type="dk"`）専用の時系列順序で、`time`とは独立に指定できる。
   - **経緯**: 当初「`time`の有無だけで1-way/2-wayを決める」案を検討したが、DK HAC（`cov_type="dk"`）は1-way FEでも時点列を要求するため、「`time`指定=常に2-way」にすると1-way FE + DK HACという組み合わせを表現できなくなることが判明した（ユーザーとの相談で発見）。ユーザーからは「`time_effects: bool`のような追加フラグは、変数を指定すれば1-way/2-wayが分かるはずなので冗長」という指摘があり、OLSの`dk_time`（HAC専用の補助列という既存の命名規則）を踏襲する分離案を採用した（ユーザー確認済み、2026-09-12）。
-  - **`cov_type="dk"`では`dk_time`が必須で、`time`にフォールバックしない**（`parse_fe_cov_type`、未指定は`ValidationError`。1-way・2-wayとも同じ）。当初は`dk_time`未指定なら2-wayの`time`を暗黙に借用していたが、どの列がDKの時点かを利用者が明示しない設計は、意図と違う列が選ばれても気づけないため廃止した（ユーザー確認済み）。`dk_time`は2-wayでも常にDK計算に使われ、「2-way FEの固定効果構造に使う時点粒度」と「DK HACカーネルに使う時系列粒度」が異なるケース（例: 固定効果は四半期、HACは年次）にも対応する。
+  - **`cov_type="dk"`では`dk_time`が必須で、`time`にフォールバックしない**（`require_dk_time`、未指定は`ValidationError`。1-way・2-wayとも同じ）。当初は`dk_time`未指定なら2-wayの`time`を暗黙に借用していたが、どの列がDKの時点かを利用者が明示しない設計は、意図と違う列が選ばれても気づけないため廃止した（ユーザー確認済み）。`dk_time`は2-wayでも常にDK計算に使われ、「2-way FEの固定効果構造に使う時点粒度」と「DK HACカーネルに使う時系列粒度」が異なるケース（例: 固定効果は四半期、HACは年次）にも対応する。
   - **`dk_time`は`FeInput.time`には一切渡らない**: `FeInput::from_columns`の`time`引数には常に`options.time`由来の値のみを渡す（2-way判定・within変換用）。`dk_time`は`FeCovType::Dk { time: TimeKeys }`（下記、必須）に直接渡す、別経路。
 - **`dk_bandwidth`**（Driscoll-Kraay HACのバンド幅）: OLS/WLS/IVの`hac_lags`と同じ役割だが、DKはNewey-West（観測数`n`ベース）と計算式・意味が異なる（`engine::panel::fe::FeCovType::Dk`の`bandwidth`は時点数`t`ベース）ため、意図的に別名にした（ユーザー確認済み、2026-09-12）。
 

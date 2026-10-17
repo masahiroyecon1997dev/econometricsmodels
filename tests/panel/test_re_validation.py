@@ -143,7 +143,7 @@ def test_x_overlaps_time_raises(fe_dataset):
 
 def test_y_overlaps_dk_time_raises(fe_dataset):
     """`dk_time`ロールは`REOptions.dk_time`設定時のみ存在する。"""
-    options = REOptions(dk_time="y")
+    options = REOptions(cov_type="dk", dk_time="y")
     with pytest.raises(
         ValidationError,
         match=escaped(
@@ -159,7 +159,7 @@ def test_y_overlaps_dk_time_raises(fe_dataset):
 
 
 def test_entity_overlaps_dk_time_raises(fe_dataset):
-    options = REOptions(dk_time="entity")
+    options = REOptions(cov_type="dk", dk_time="entity")
     with pytest.raises(
         ValidationError,
         match=escaped(

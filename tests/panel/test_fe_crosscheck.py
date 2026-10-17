@@ -44,8 +44,9 @@ wagepan（T=8）は`WAGEPAN_X`が3変数で`T-1=7 > q=3`のため対象に含み
 - **dkの明示バンド幅**: `DK_EXPLICIT_BANDWIDTHS`のシナリオで`T-1`未満の値を
   fixestと比べる（`bandwidth == T-1`は最終ラグを落とすfixestと食い違うため
   `test_fe_plm_crosscheck.py`が持つ）。
-- **2-wayでentity以外のcluster列**: 時間効果とネストする`time`と、どちらの
-  固定効果ともネストしない列（`K.fixef="nonnested"`の別々の分岐）。
+- **2-wayでentity以外のcluster列**: 時間効果とネストする`time`、どちらの
+  固定効果ともネストしない列、`G = q+1`の境界、サイズが偏ったクラスター
+  （`K.fixef="nonnested"`の別々の分岐。`TWO_WAY_CLUSTER_CASES`）。
 
 役割分担:
     - 構造・API・`fixed_effects()`: `test_fe_api.py`
@@ -89,7 +90,7 @@ from benchmark.panel.fixtures.generate_fe_crosscheck_fixtures import (
     ONE_WAY_ONLY_SCENARIOS,
     ROBUST_BOUNDARY_COV_TYPES,
     SCENARIO_COV_TYPES,
-    TWO_WAY_CLUSTER_KEYS,
+    TWO_WAY_CLUSTER_CASES,
     TWO_WAY_SCENARIOS,
     WAGEPAN_COV_TYPES,
     dk_three_periods_frame,
@@ -330,21 +331,21 @@ def test_cluster_g3_two_slopes_matches_fixest(crosscheck):
     )
 
 
-@pytest.mark.parametrize("cluster", list(TWO_WAY_CLUSTER_KEYS))
-def test_two_way_cluster_on_non_entity_column_matches_fixest(
-    crosscheck, cluster
-):
-    """2-wayでentity以外の列によるクラスタリング。`time`は時間効果とネスト
-    するクラスター、`cluster_group`（行番号%4）はどちらの固定効果ともネスト
-    しない列で、fixestの`K.fixef="nonnested"`の別々の分岐を踏む。"""
-    df = two_way_cluster_frame(cluster)
+@pytest.mark.parametrize("case", list(TWO_WAY_CLUSTER_CASES))
+def test_two_way_cluster_on_non_entity_column_matches_fixest(crosscheck, case):
+    """2-wayでentity以外の列によるクラスタリング（時間効果とネストする`time`、
+    ネストしない列、`G = q+1`の境界、サイズが偏ったクラスター）。fixestの
+    `K.fixef="nonnested"`の別々の分岐を踏む（`TWO_WAY_CLUSTER_CASES`参照）。"""
+    df, cluster = two_way_cluster_frame(case)
     options = FEOptions(cov_type="cluster", cluster=cluster, time="time")
     res = FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 
+    n_clusters = df[cluster].n_unique()
+    assert res.stat_df == n_clusters - 1
     _check_result(
         res,
-        crosscheck["synthetic"]["baseline"][TWO_WAY_CLUSTER_KEYS[cluster]],
-        f"baseline/two_way/cluster={cluster}",
+        crosscheck["synthetic"]["baseline"][TWO_WAY_CLUSTER_CASES[case][2]],
+        f"baseline/two_way/cluster={case}",
     )
 
 

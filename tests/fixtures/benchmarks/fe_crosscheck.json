@@ -1132,6 +1132,74 @@
         "r_squared_within": 0.710277172460937,
         "f_statistic": 1465.14343016228,
         "f_p_value": 3.27077053599582e-05
+      },
+      "two_way_cluster_g3_boundary": {
+        "params": {
+          "x1": 1.63111396709448,
+          "x2": -0.289459736846722
+        },
+        "std_errors": {
+          "x1": 0.0603007112150107,
+          "x2": 0.0663895282850565
+        },
+        "test_stats": {
+          "x1": 27.0496638303074,
+          "x2": -4.36002099011563
+        },
+        "p_values": {
+          "x1": 0.00136391415800673,
+          "x2": 0.0487869578244832
+        },
+        "conf_int": {
+          "x1": [
+            1.37166094737938,
+            1.89056698680958
+          ],
+          "x2": [
+            -0.5751108219492,
+            -0.00380865174424444
+          ]
+        },
+        "aic": 743.053399870126,
+        "bic": 906.6434292672,
+        "log_likelihood": -324.526699935063,
+        "r_squared_within": 0.710277172460937,
+        "f_statistic": 895.528660341864,
+        "f_p_value": 0.00111541330939569
+      },
+      "two_way_cluster_imbalanced": {
+        "params": {
+          "x1": 1.53960666353409,
+          "x2": -0.302540991878748
+        },
+        "std_errors": {
+          "x1": 0.0622846099271922,
+          "x2": 0.143483140213239
+        },
+        "test_stats": {
+          "x1": 24.7188938862075,
+          "x2": -2.10854732778446
+        },
+        "p_values": {
+          "x1": 5.44983305547204e-11,
+          "x2": 0.0587244883274722
+        },
+        "conf_int": {
+          "x1": [
+            1.40251916138224,
+            1.67669416568594
+          ],
+          "x2": [
+            -0.618345254211435,
+            0.0132632704539394
+          ]
+        },
+        "aic": 616.932110226706,
+        "bic": 719.179948589695,
+        "log_likelihood": -277.466055113353,
+        "r_squared_within": 0.689018259407622,
+        "f_statistic": 701.784654528148,
+        "f_p_value": 2.50741659843286e-12
       }
     },
     "small_panel": {
@@ -7959,10 +8027,10 @@
   },
   "_meta": {
     "method": "fe",
-    "generated_at": "2026-10-17T13:16:24.661085+00:00",
+    "generated_at": "2026-10-17T13:21:29.485661+00:00",
     "reference": "fixest (R)",
     "r_version": "4.5.3",
     "fixest_version": "0.14.2",
-    "note": "hc2/hc3・aic/bic・2-way FEのr_squared_withinは、linearmodelsが提供しない/別定義のためfixestのみが参照値になる単一参照実装の例外（モジュールdoc参照）。cluster/dkも、本実装の小標本補正がfixestのssc()既定（cluster: K.fixef=nonnested・G/(G-1)補正・t分布の自由度G-1、dk: K.fixef=full・G相当は時点数・自由度T-1）に合わせてあり、linearmodelsとは一致しないためfixestのみが参照値になる。全cov_typeで本実装と機械精度で一致する。f_statistic/f_p_valueは全cov_type・1-way/2-wayでfixest::wald(keep=全傾き係数, vcov=同じvcov)の統計量（fitstat(m, 'f')は固定効果ダミーも検定に含む別定義のため使わない）。p値はwald()が分母自由度をmax(df2, df1+1)に切り上げる（G-1<=q・T-1<=q・df_resid<=qの境界でt検定と食い違う）ため使わず、統計量とdegrees_freedom(model, 't', vcov)からpf()で計算し直している。その境界はbaseline.cluster_g2（q=1）・baseline.cluster_g3_two_slopes（G=q+1、q=2）・baseline.dk_three_periods（T=q+1、q=2）・baseline_df1.*_robust（df_resid=1のhc1-hc3）が踏む。dkのバンド幅は本実装の既定floor(4*(T/100)^(2/9))を明示的にDK(lag)に渡している（fixestの既定n_t^0.25とは異なる）。many_regressorsはk>T-1のためdkを含まない。wagepanはmarried/union/expersq・T=8（T-1=7>q=3）でdkも含む（時点列year）。dkの明示バンド幅は各シナリオのdk_explicit_bandwidth（T-1未満のみ、fixestはT-1で最終ラグを落とすため）。baseline.two_way_cluster_time・two_way_cluster_nonnestedは2-wayでentity以外の列でクラスタリングする（K.fixef=nonnestedの分岐）。moderate_multicollinearity/high_condition_number/scale_variance_mild/many_regressors/outlier_regressor/high_variance・baseline.cluster_imbalanced・baseline.cluster_g2・baseline_df1は、同じ固定済みCSV・同じ動的クラスター列生成方針で追加している。"
+    "note": "hc2/hc3・aic/bic・2-way FEのr_squared_withinは、linearmodelsが提供しない/別定義のためfixestのみが参照値になる単一参照実装の例外（モジュールdoc参照）。cluster/dkも、本実装の小標本補正がfixestのssc()既定（cluster: K.fixef=nonnested・G/(G-1)補正・t分布の自由度G-1、dk: K.fixef=full・G相当は時点数・自由度T-1）に合わせてあり、linearmodelsとは一致しないためfixestのみが参照値になる。全cov_typeで本実装と機械精度で一致する。f_statistic/f_p_valueは全cov_type・1-way/2-wayでfixest::wald(keep=全傾き係数, vcov=同じvcov)の統計量（fitstat(m, 'f')は固定効果ダミーも検定に含む別定義のため使わない）。p値はwald()が分母自由度をmax(df2, df1+1)に切り上げる（G-1<=q・T-1<=q・df_resid<=qの境界でt検定と食い違う）ため使わず、統計量とdegrees_freedom(model, 't', vcov)からpf()で計算し直している。その境界はbaseline.cluster_g2（q=1）・baseline.cluster_g3_two_slopes（G=q+1、q=2）・baseline.dk_three_periods（T=q+1、q=2）・baseline_df1.*_robust（df_resid=1のhc1-hc3）が踏む。dkのバンド幅は本実装の既定floor(4*(T/100)^(2/9))を明示的にDK(lag)に渡している（fixestの既定n_t^0.25とは異なる）。many_regressorsはk>T-1のためdkを含まない。wagepanはmarried/union/expersq・T=8（T-1=7>q=3）でdkも含む（時点列year）。dkの明示バンド幅は各シナリオのdk_explicit_bandwidth（T-1未満のみ、fixestはT-1で最終ラグを落とすため）。baseline.two_way_cluster_*は2-wayでentity以外の列でクラスタリングする（K.fixef=nonnestedの分岐。TWO_WAY_CLUSTER_CASES参照）。moderate_multicollinearity/high_condition_number/scale_variance_mild/many_regressors/outlier_regressor/high_variance・baseline.cluster_imbalanced・baseline.cluster_g2・baseline_df1は、同じ固定済みCSV・同じ動的クラスター列生成方針で追加している。"
   }
 }

@@ -367,25 +367,78 @@ def test_non_numeric_dtype_raises(bad_col):
         _fit_all_roles(df)
 
 
-def test_insufficient_observations_raises(iv_dataset):
-    """観測数nが説明変数の数k（定数項込み）以下の場合`ValidationError`。
+_OBSERVATION_COUNT_CASES = [
+    # (include_intercept, n, outcome)。構造方程式は x1・endog1（切片ありk=3）、
+    # 第一段階は x1・z1・z2（切片ありl=4）。切片なしはそれぞれk=2、l=3。
+    pytest.param(True, 2, "structural", id="intercept-n2"),
+    pytest.param(True, 3, "structural", id="intercept-n3"),
+    pytest.param(True, 4, "first_stage", id="intercept-n4"),
+    pytest.param(True, 5, "ok", id="intercept-n5"),
+    pytest.param(False, 2, "structural", id="no_intercept-n2"),
+    pytest.param(False, 3, "first_stage", id="no_intercept-n3"),
+    pytest.param(False, 4, "ok", id="no_intercept-n4"),
+]
 
-    実際に先に失敗するのは構造方程式（`fit()`冒頭、k=3: const, x1, endog1）
-    ではなく第一段階回帰（`endog1 ~ x_exog(x1) + instruments(z1, z2)`、
-    k=4: const, x1, z1, z2）。`engine_pybind::fit()`が弱操作変数診断のため
-    `compute_first_stage`を`TwoSlsEstimator::fit`より先に無条件で呼ぶため
-    （`_error_messages_iv.py`の`FIRST_STAGE_FAILED`のコメント参照）。
+
+@pytest.mark.parametrize("estimator", ["2sls", "gmm"])
+@pytest.mark.parametrize(
+    ("include_intercept", "n", "outcome"), _OBSERVATION_COUNT_CASES
+)
+def test_observation_count_boundaries(
+    iv_dataset, estimator, include_intercept, n, outcome
+):
+    """観測数の境界。構造方程式の`n <= k`は構造方程式の`k`で、`n > k`でも
+    第一段階の回帰変数の数`l`以下（`n <= l`）なら第一段階の観測数不足として
+    `ValidationError`。`n = l + 1`から成功する。構造方程式のチェックが先に走る
+    ため、`n <= k`は第一段階の`l`に隠れない。`estimator`によらず同じ検証。
     """
-    df = iv_dataset.head(2)  # n=2、第一段階回帰はk=4（const, x1, z1, z2）
+    k = 3 if include_intercept else 2
+    l_first = k + 1
+    options = IVOptions(
+        estimator=estimator, include_intercept=include_intercept
+    )
+    df = iv_dataset.head(n)
+    if outcome == "structural":
+        with pytest.raises(
+            ValidationError,
+            match=escaped(msgs.INSUFFICIENT_OBSERVATIONS, n=n, k=k),
+        ):
+            our_fit(df, options=options)
+    elif outcome == "first_stage":
+        with pytest.raises(
+            ValidationError,
+            match=escaped(
+                iv_msgs.INSUFFICIENT_OBSERVATIONS_FOR_FIRST_STAGE,
+                n=n,
+                l=l_first,
+            ),
+        ):
+            our_fit(df, options=options)
+    else:
+        result = our_fit(df, options=options)
+        assert result.n_obs == n
+
+
+@pytest.mark.parametrize("estimator", ["2sls", "gmm"])
+def test_observation_count_is_checked_before_cluster_count(
+    iv_dataset, estimator
+):
+    """観測数の検証は、クラスター数の検証より先に走る。クラスターが1つだけで
+    `n <= l`の入力は、クラスター数ではなく第一段階の観測数不足で拒否される。
+    """
+    df = iv_dataset.head(4).with_columns(pl.lit("a").alias("g"))
     with pytest.raises(
         ValidationError,
         match=escaped(
-            iv_msgs.FIRST_STAGE_FAILED,
-            endog_name="endog1",
-            source=msgs.INSUFFICIENT_OBSERVATIONS.format(n=2, k=4),
+            iv_msgs.INSUFFICIENT_OBSERVATIONS_FOR_FIRST_STAGE, n=4, l=4
         ),
     ):
-        our_fit(df)
+        our_fit(
+            df,
+            options=IVOptions(
+                estimator=estimator, cov_type="cluster", cluster="g"
+            ),
+        )
 
 
 def test_insufficient_instruments_raises(iv_dataset):

@@ -85,6 +85,24 @@ pub enum IvError {
         source: LeastSquaresError,
     },
 
+    /// 観測数`n`が第一段階の回帰変数の数`l`（`x_exog ++ instruments`、定数項を含む）以下。
+    ///
+    /// `n == l`では`Z`が正方で正則になり、第一段階は内生変数を完全に当てはめて`X̂ = X`となる
+    /// ため、2SLSの係数はOLSと一致し操作変数が情報を持たない（GMMの`W₀ = (Z'Z)⁻¹`も同様に
+    /// OLSへ縮退する）。`n < l`では`Z'Z`が特異になる。いずれも弱操作変数診断の残差自由度
+    /// `n - l`が0以下になる。第一段階を診断として`None`へdegradeできる全体F検定
+    /// （`compute_first_stage`参照）とは異なり、`X̂`の元になる推定そのものが成立しない。
+    /// 条件は内生変数ごとに変わらないため、`FirstStageFailed`のように変数名は付けない。
+    /// 構造方程式側の`n <= k`は先に`CommonError::InsufficientObservations`で報告する
+    /// （`validate_observation_counts`）。
+    #[error(
+        "insufficient observations for the first stage: n={n} must be greater than l={l} \
+         (number of instruments, including the intercept and the exogenous regressors); with \
+         n <= l the first stage leaves no residual degrees of freedom (at n = l it fits the \
+         endogenous variables perfectly, so the IV estimate equals OLS)"
+    )]
+    InsufficientObservationsForFirstStage { n: usize, l: usize },
+
     /// 2SLSの第二段階回帰（`y ~ x_exog + x̂_endog`）が`OlsEstimator::fit`で失敗した。
     #[error("second stage regression failed: {source}")]
     SecondStageFailed {
@@ -418,6 +436,33 @@ pub(crate) fn without_baked_in_intercept<'a>(
     } else {
         (x_exog_columns, x_exog_names)
     }
+}
+
+/// 観測数`n`が構造方程式の係数の数`k`（`k_exog + k_endog`）と、第一段階の回帰変数の数`l`
+/// （`k_exog + k_instruments`、いずれも定数項を含む）の両方を上回ることを検証する。
+///
+/// 識別条件`k_instruments >= k_endog`より`l >= k`なので、`n <= l`は`n <= k`を含む。
+/// 先に構造方程式の`n <= k`を`CommonError::InsufficientObservations`として報告するのは、
+/// 第一段階の失敗に隠れて構造方程式の`k`が利用者に伝わらないのを避けるため
+/// （`validate_structural_cluster_count`と同じ層分け）。`n > k`でも`n <= l`なら
+/// `IvError::InsufficientObservationsForFirstStage`（`X̂`が成立しない）で拒否する。
+/// `TwoSlsEstimator::fit`/`GmmEstimator::fit`冒頭と`engine_pybind`の`fit`が同じ判定を
+/// 共有するための単一の実装（`k`・`l`の式をここに集約する）。
+///
+/// # Errors
+/// - `n <= k`: `CommonError::InsufficientObservations`
+/// - `n <= l`（`n > k`のとき）: `IvError::InsufficientObservationsForFirstStage`
+pub fn validate_observation_counts(input: &IvInput) -> Result<(), IvError> {
+    let n = input.nobs();
+    let k = input.k_exog() + input.k_endog();
+    if n <= k {
+        return Err(CommonError::InsufficientObservations { n, k }.into());
+    }
+    let l = input.k_exog() + input.k_instruments();
+    if n <= l {
+        return Err(IvError::InsufficientObservationsForFirstStage { n, l });
+    }
+    Ok(())
 }
 
 /// `cov_type=Cluster`のとき、クラスター数`g`が構造方程式の傾き係数の数`q`
@@ -814,6 +859,13 @@ mod tests {
             IvError::Common(CommonError::InsufficientClusters { g: 1 }).to_string(),
             "cov_type='cluster' requires at least 2 clusters, got 1"
         );
+        assert_eq!(
+            IvError::InsufficientObservationsForFirstStage { n: 4, l: 4 }.to_string(),
+            "insufficient observations for the first stage: n=4 must be greater than l=4 \
+             (number of instruments, including the intercept and the exogenous regressors); with \
+             n <= l the first stage leaves no residual degrees of freedom (at n = l it fits the \
+             endogenous variables perfectly, so the IV estimate equals OLS)"
+        );
     }
 
     /// `n=6`、`x_exog`(1列)・`x_endog`(1列)・`instruments`(2列)の最小入力。構造方程式の
@@ -946,6 +998,147 @@ mod tests {
                 ),
             }
         );
+    }
+
+    /// `n`行の入力。構造方程式は`x1`・`endog1`（切片ありなら`k=3`）、第一段階は
+    /// `x1`・`z1`・`z2`（切片ありなら`l=4`、切片なしなら`k=2`・`l=3`）。
+    fn observation_count_input(n: usize, include_intercept: bool) -> IvInput {
+        let col = |freq: f64, phase: f64| -> Vec<f64> {
+            (0..n).map(|i| (freq * i as f64 + phase).sin()).collect()
+        };
+        IvInput::from_columns(
+            &col(0.9, 0.3),
+            &[col(1.1, 0.7)],
+            vec!["x1".to_string()],
+            &[col(1.7, 0.2)],
+            vec!["endog1".to_string()],
+            &[col(2.3, 0.5), col(2.9, 1.1)],
+            vec!["z1".to_string(), "z2".to_string()],
+            include_intercept,
+            "y".to_string(),
+        )
+        .unwrap()
+    }
+
+    /// 構造方程式の`n <= k`は、第一段階の`n <= l`より先に、構造方程式の`k`で報告される。
+    #[test]
+    fn validate_observation_counts_reports_the_structural_equation_first() {
+        for n in [1, 2, 3] {
+            assert_eq!(
+                validate_observation_counts(&observation_count_input(n, true)),
+                Err(IvError::Common(CommonError::InsufficientObservations {
+                    n,
+                    k: 3
+                })),
+                "n={n}"
+            );
+        }
+    }
+
+    /// 構造方程式は推定できる（`n > k`）が第一段階が推定できない（`n <= l`）窓は、
+    /// 第一段階の回帰変数の数`l`つきの専用エラーになる。`n = l + 1`から成功する。
+    #[test]
+    fn validate_observation_counts_rejects_the_window_between_k_and_l() {
+        assert_eq!(
+            validate_observation_counts(&observation_count_input(4, true)),
+            Err(IvError::InsufficientObservationsForFirstStage { n: 4, l: 4 })
+        );
+        assert_eq!(
+            validate_observation_counts(&observation_count_input(5, true)),
+            Ok(())
+        );
+    }
+
+    /// 切片なしでは`k`・`l`がそれぞれ1小さい（`k=2`、`l=3`）。
+    #[test]
+    fn validate_observation_counts_without_intercept_uses_smaller_counts() {
+        assert_eq!(
+            validate_observation_counts(&observation_count_input(2, false)),
+            Err(IvError::Common(CommonError::InsufficientObservations {
+                n: 2,
+                k: 2
+            }))
+        );
+        assert_eq!(
+            validate_observation_counts(&observation_count_input(3, false)),
+            Err(IvError::InsufficientObservationsForFirstStage { n: 3, l: 3 })
+        );
+        assert_eq!(
+            validate_observation_counts(&observation_count_input(4, false)),
+            Ok(())
+        );
+    }
+
+    /// 丁度識別（`l == k`）では窓`k < n <= l`が空になり、`n <= k`だけが構造方程式の`k`で
+    /// 報告される。`n = k + 1`から成功する。
+    #[test]
+    fn validate_observation_counts_has_no_window_when_just_identified() {
+        let input = |n: usize| {
+            let col = |freq: f64| -> Vec<f64> { (0..n).map(|i| (freq * i as f64).sin()).collect() };
+            IvInput::from_columns(
+                &col(0.9),
+                &[col(1.1)],
+                vec!["x1".to_string()],
+                &[col(1.7)],
+                vec!["endog1".to_string()],
+                &[col(2.3)],
+                vec!["z1".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            validate_observation_counts(&input(3)),
+            Err(IvError::Common(CommonError::InsufficientObservations {
+                n: 3,
+                k: 3
+            }))
+        );
+        assert_eq!(validate_observation_counts(&input(4)), Ok(()));
+    }
+
+    /// 内生変数が2個で過剰識別（`k = 4`、`l = 5`、`l - k = k_instruments - k_endog = 1`）。
+    #[test]
+    fn validate_observation_counts_with_two_endogenous_variables() {
+        let input = |n: usize| {
+            let col = |freq: f64| -> Vec<f64> { (0..n).map(|i| (freq * i as f64).sin()).collect() };
+            IvInput::from_columns(
+                &col(0.9),
+                &[col(1.1)],
+                vec!["x1".to_string()],
+                &[col(1.7), col(1.9)],
+                vec!["endog1".to_string(), "endog2".to_string()],
+                &[col(2.3), col(2.9), col(3.1)],
+                vec!["z1".to_string(), "z2".to_string(), "z3".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            validate_observation_counts(&input(4)),
+            Err(IvError::Common(CommonError::InsufficientObservations {
+                n: 4,
+                k: 4
+            }))
+        );
+        assert_eq!(
+            validate_observation_counts(&input(5)),
+            Err(IvError::InsufficientObservationsForFirstStage { n: 5, l: 5 })
+        );
+        assert_eq!(validate_observation_counts(&input(6)), Ok(()));
+    }
+
+    /// 切片ありの`n = l`では第一段階が完全に当てはまり、2SLSがOLSと一致する（拒否の根拠）。
+    /// 検証関数が通す最小の`n = l + 1`との違いを、第一段階の残差自由度で確かめる。
+    #[test]
+    fn first_stage_has_residual_degrees_of_freedom_at_the_smallest_accepted_n() {
+        let input = observation_count_input(5, true);
+        assert_eq!(validate_observation_counts(&input), Ok(()));
+        let (first_stage, weak) = compute_first_stage(&input, &CovType::Classical, 0.95).unwrap();
+        assert_eq!(first_stage[0].1.df_resid(), 1);
+        assert!(weak[0].1.is_finite());
     }
 
     #[test]

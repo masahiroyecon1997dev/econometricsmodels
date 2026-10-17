@@ -204,7 +204,10 @@ use faer::prelude::Solve;
 use faer::{Accum, Mat, Par, Side};
 use statrs::distribution::{ChiSquared, ContinuousCDF, Normal};
 
-use crate::iv::common::{IvError, IvInput, mat_to_columns, validate_structural_cluster_count};
+use crate::iv::common::{
+    IvError, IvInput, mat_to_columns, validate_observation_counts,
+    validate_structural_cluster_count,
+};
 use crate::linear::ols::CovType;
 use crate::shared::covariance::{cluster_correction, cluster_meat, time_ordering};
 use crate::shared::error::CommonError;
@@ -322,6 +325,8 @@ impl GmmEstimator {
     ///   `IvError::Common(CommonError::InvalidConfidenceLevel)`
     /// - 観測数`n`が`k`（構造方程式の係数の数）以下:
     ///   `IvError::Common(CommonError::InsufficientObservations)`
+    /// - 観測数`n`が全操作変数の数`l`（`x_exog ++ instruments`、定数項込み）以下（`n > k`でも）:
+    ///   `IvError::InsufficientObservationsForFirstStage`（`validate_observation_counts`）
     /// - `Iterated`の`max_iter`が3未満: `IvError::InvalidGmmMaxIter`
     /// - `Iterated`の`tol`が正の有限値でない（0以下・NaN・inf）: `IvError::InvalidGmmTol`
     /// - `raise_on_non_convergence=true`かつ`Iterated`が`max_iter`回
@@ -379,20 +384,14 @@ impl GmmEstimator {
         let n = input.nobs();
         // 観測数`n`が`k`（構造方程式の係数の数）以下だと、後段のサンドイッチSE計算
         // （`df_resid=n-k`による除算、HC1補正`n/(n-k)`等）がNaN/Infinityを静かに生成しうる
-        // （`ols/estimator.rs`のn<=k検証と同じ理由）。`OlsEstimator::fit`/`TwoSlsEstimator::fit`と
-        // 同じ`CommonError::InsufficientObservations`で早期に弾く。
-        //
-        // `l`（全操作変数の数）については、`hc0`〜`hc3`/`cluster`の小標本補正が`l`ではなく
-        // `k`を使う設計（`gmm_hc_omega`のdocコメント参照）に修正した結果、`n<=l`固有の
-        // NaN/Infinityリスクは残っていない——`Z'Z`が特異になるケース（`n<l`ならほぼ確実、
-        // `n=l`でも起こりうる）は、点推定自体（`gmm_point_estimate`）や`gmm_hc_omega`の
-        // レバレッジ計算（`invert_spd`）が`Result`で`ComputationFailed`を返す経路で
-        // 既に保護されている（NaNの静かな伝播ではなく明示的なエラーになる）ため、
-        // 別途`n<=l`を検証する必要はない。
+        // （`ols/estimator.rs`のn<=k検証と同じ理由）。さらに`n`が`l`（全操作変数
+        // `x_exog ++ instruments`の数）以下だと、`n < l`では`Z'Z`が特異、`n == l`では
+        // `Z`が正則になり`W₀ = (Z'Z)⁻¹`のGMMがOLSへ縮退する。`TwoSlsEstimator::fit`・
+        // `engine_pybind`と同じ`validate_observation_counts`で、構造方程式の`n <= k`
+        // （`CommonError::InsufficientObservations`）を先に、次に`n <= l`
+        // （`IvError::InsufficientObservationsForFirstStage`）を弾く。
+        validate_observation_counts(&input)?;
         let k = input.k_exog() + input.k_endog();
-        if n <= k {
-            return Err(CommonError::InsufficientObservations { n, k }.into());
-        }
 
         // `cov_type=Cluster`でクラスター数`g`が構造方程式の傾き係数の数`q`
         // （`k - k_constant`）以下だと、ロバストWald（χ²）検定の`q×q`部分行列が構造的に
@@ -3934,6 +3933,43 @@ mod tests {
         assert_eq!(
             result.unwrap_err(),
             IvError::Common(CommonError::InsufficientObservations { n: 2, k: 2 })
+        );
+    }
+
+    /// 構造方程式は推定できる（`n > k`）が全操作変数の数`l`以下の観測数なら、
+    /// `InsufficientObservationsForFirstStage`で拒否する（`n < l`では`Z'Z`が特異、
+    /// `n = l`では`W₀ = (Z'Z)⁻¹`のGMMがOLSへ縮退する）。`2sls`と同じ検証を共有する。
+    #[test]
+    fn fit_returns_insufficient_observations_for_first_stage_when_n_is_at_most_l() {
+        // n=3、k=2（切片+endog1）、l=3（切片+z1+z2）。
+        let y = vec![1.0, 2.0, 4.0];
+        let x_endog = vec![1.0, 2.5, 2.0];
+        let z = vec![vec![1.0, 2.0, 4.0], vec![2.0, 1.0, 5.0]];
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            std::slice::from_ref(&x_endog),
+            vec!["endog1".to_string()],
+            &z,
+            vec!["z1".to_string(), "z2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = GmmEstimator::fit(
+            input,
+            GmmType::TwoStep {
+                weight: WeightType::Classical,
+            },
+            true,
+            CovType::Classical,
+            0.95,
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::InsufficientObservationsForFirstStage { n: 3, l: 3 }
         );
     }
 

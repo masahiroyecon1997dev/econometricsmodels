@@ -31,6 +31,15 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   誤用も検出できる。
 - **識別の順序条件**（`len(instruments) >= len(x_endog)`）を満たさない場合は`fit()`冒頭
   （第一段階回帰の前）で`IvError::InsufficientInstruments`（`ValidationError`）にする。
+- **観測数**（`engine::iv::common::validate_observation_counts`）は`fit()`冒頭（第一段階回帰の前）で、
+  構造方程式の`n <= k`（`k = k_exog + k_endog`、定数項込み）を共通の`InsufficientObservations`で、
+  次に第一段階の`n <= l`（`l = k_exog + len(instruments)`、定数項込み）を
+  `IvError::InsufficientObservationsForFirstStage`（`ValidationError`）で拒否する。`l >= k`
+  のため構造方程式を先に報告しないと第一段階の`k`に隠れる。`n <= l`は診断のdegradeでは済まない:
+  `n = l`では第一段階が完全に当てはまり`X̂ = X`となって2SLSがOLSと一致し（GMMも
+  `W₀ = (Z'Z)⁻¹`でOLSに縮退）、`n < l`では`Z'Z`が特異になる。クラスター数が第一段階の
+  傾き係数の数以下のとき全体F検定だけを`None`にできる（3.1節）のとは異なり、`X̂`の元になる推定
+  そのものが成立しない。
 - **バリデーション**（`engine_pybind::iv::common::build_iv_input`）:
   - `y`/`x_exog`/`x_endog`/`instruments`間の重複列名は`ValidationError`。
   - 各ロール内部（`x_exog`/`x_endog`/`instruments`それぞれ）の重複列名も`ValidationError`。
@@ -331,7 +340,7 @@ common.rs`）:
 | `IvError` | Python例外 |
 |---|---|
 | `Common(CommonError)` | `common_error_to_pyerr`に委譲 |
-| `InsufficientInstruments` / `InvalidHacLags` / `InvalidGmmMaxIter` / `InvalidGmmTol` / `InsufficientClustersForWeightMatrix` | `ValidationError` |
+| `InsufficientInstruments` / `InsufficientObservationsForFirstStage` / `InvalidHacLags` / `InvalidGmmMaxIter` / `InvalidGmmTol` / `InsufficientClustersForWeightMatrix` | `ValidationError` |
 | `GmmNonConvergence` | `ComputationError`（`MleError::NonConvergence`と同じ分類: パラメータの不正ではなく計算過程で発覚した問題） |
 | `FirstStageFailed` / `SecondStageFailed` / `HausmanRegressionFailed` | 内部の`LeastSquaresError`が`ComputationError`相当かどうかで`ComputationError`/`ValidationError`に分岐（`least_squares_error_is_computation_error`） |
 

@@ -51,9 +51,19 @@ INSUFFICIENT_CLUSTERS_FOR_WEIGHT_MATRIX = (
 # `engine_pybind::fit()`のチェックが`compute_first_stage`より前にラッパー無しで
 # 弾く。第一段階側のクラスター数不足（構造方程式では`G>q`）は失敗にならず、
 # 第一段階の全体F検定が`None`になる。
-# 観測数のチェックは、第一段階の回帰変数の数が識別条件`instruments>=x_endog`により
-# 常に構造方程式以上のため、第一段階側が先に発火する（Python APIからは到達不能）。
+# 観測数のチェック（`validate_observation_counts`）は構造方程式の`n<=k`を先に
+# 共通の`INSUFFICIENT_OBSERVATIONS`で、次に第一段階の`n<=l`を
+# `INSUFFICIENT_OBSERVATIONS_FOR_FIRST_STAGE`で報告する。どちらも`compute_first_stage`
+# より前に弾くため、`FIRST_STAGE_FAILED`でラップされることはない。
 FIRST_STAGE_FAILED = "first stage regression for endogenous variable '{endog_name}' failed: {source}"
+
+INSUFFICIENT_OBSERVATIONS_FOR_FIRST_STAGE = (
+    "insufficient observations for the first stage: n={n} must be greater "
+    "than l={l} (number of instruments, including the intercept and the "
+    "exogenous regressors); with n <= l the first stage leaves no residual "
+    "degrees of freedom (at n = l it fits the endogenous variables "
+    "perfectly, so the IV estimate equals OLS)"
+)
 
 # 設計行列が特異なときの`LeastSquaresError::SingularMatrix`の文言。第一段階では
 # `FIRST_STAGE_FAILED`の`source`、第二段階では`SECOND_STAGE_FAILED`の`source`になる。

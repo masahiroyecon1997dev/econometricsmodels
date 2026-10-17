@@ -63,7 +63,7 @@
 
 use crate::iv::common::{
     IvError, IvInput, compute_first_stage, mat_column_to_vec, mat_to_columns,
-    validate_structural_cluster_count, without_baked_in_intercept,
+    validate_observation_counts, validate_structural_cluster_count, without_baked_in_intercept,
 };
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
@@ -153,6 +153,9 @@ impl TwoSlsEstimator {
     /// # Errors
     /// - 識別の順序条件`len(instruments) >= len(x_endog)`を満たさない:
     ///   `IvError::InsufficientInstruments`
+    /// - 観測数`n`が構造方程式の係数の数`k`以下: `IvError::Common(CommonError::InsufficientObservations)`
+    /// - 観測数`n`が第一段階の回帰変数の数`l`（`x_exog ++ instruments`、定数項込み）以下
+    ///   （`n > k`でも）: `IvError::InsufficientObservationsForFirstStage`（`validate_observation_counts`）
     /// - 第一段階回帰（内生変数ごと）が失敗: `IvError::FirstStageFailed`
     ///   （`cov_type=Cluster`でグループキー未指定・信頼水準が範囲外等、`cov_type`/
     ///   `confidence_level`起因のエラーもここに含まれる）
@@ -187,6 +190,11 @@ impl TwoSlsEstimator {
                 n_endog: input.k_endog(),
             });
         }
+
+        // 観測数`n`が構造方程式の係数の数`k`・第一段階の回帰変数の数`l`以下の入力を、
+        // 第一段階・第二段階の`OlsEstimator::fit`（`FirstStageFailed`/`SecondStageFailed`に
+        // ラップされ、`k`も構造方程式のものと食い違う）より先に弾く。
+        validate_observation_counts(&input)?;
 
         // `cov_type=Cluster`でクラスター数`g`が構造方程式の傾き係数の数`q`
         // （`k - k_constant`）以下だと、ロバストWald/F検定の`q×q`部分行列が構造的に
@@ -2297,10 +2305,11 @@ mod tests {
         );
     }
 
+    /// 観測数が構造方程式の係数の数以下なら、第一段階の`FirstStageFailed`ではなく
+    /// 構造方程式の`n`・`k`で`CommonError::InsufficientObservations`を返す。
     #[test]
-    fn fit_returns_common_error_via_first_stage_failed_source() {
-        // 第一段階の観測数不足（n<=k）はCommonError経由でLeastSquaresErrorに包まれ、
-        // それがさらにFirstStageFailedに包まれることを確認する。
+    fn fit_reports_structural_insufficient_observations_before_the_first_stage() {
+        // n=2、構造方程式は切片+endog1でk=2、第一段階は切片+z1..z3でl=4。
         let y = vec![1.0, 2.0];
         let x_endog = vec![vec![1.0, 2.0]];
         let instruments = vec![vec![1.0, 2.0], vec![2.0, 1.0], vec![3.0, 4.0]];
@@ -2318,15 +2327,38 @@ mod tests {
         .unwrap();
 
         let result = TwoSlsEstimator::fit(input, CovType::Classical, 0.95);
-        assert!(matches!(
-            result,
-            Err(IvError::FirstStageFailed {
-                source: crate::linear::common::LeastSquaresError::Common(
-                    CommonError::InsufficientObservations { .. }
-                ),
-                ..
-            })
-        ));
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::Common(CommonError::InsufficientObservations { n: 2, k: 2 })
+        );
+    }
+
+    /// 構造方程式は推定できる（`n > k`）が第一段階の回帰変数の数`l`以下の観測数なら、
+    /// 第一段階の観測数不足として専用エラーで拒否する（`n = l`では`X̂ = X`で2SLSがOLSに縮退する）。
+    #[test]
+    fn fit_returns_insufficient_observations_for_first_stage_when_n_is_at_most_l() {
+        // n=3、構造方程式は切片+endog1でk=2（n>k）、第一段階は切片+z1+z2でl=3（n=l）。
+        let y = vec![1.0, 2.0, 4.0];
+        let x_endog = vec![vec![1.0, 2.5, 2.0]];
+        let instruments = vec![vec![1.0, 2.0, 4.0], vec![2.0, 1.0, 5.0]];
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            &x_endog,
+            vec!["endog1".to_string()],
+            &instruments,
+            vec!["z1".to_string(), "z2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = TwoSlsEstimator::fit(input, CovType::Classical, 0.95);
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::InsufficientObservationsForFirstStage { n: 3, l: 3 }
+        );
     }
 
     /// 正規方程式`β=(X'X)⁻¹X'y`を`faer`演算で直接解く、SUT（`partial_wald_statistic`・

@@ -53,7 +53,8 @@
 use std::collections::HashMap;
 
 use engine::iv::common::{
-    IvError, IvInput, compute_first_stage, validate_structural_cluster_count,
+    IvError, IvInput, compute_first_stage, validate_observation_counts,
+    validate_structural_cluster_count,
 };
 use engine::iv::gmm::{GmmEstimator, GmmType, WeightType};
 use engine::iv::two_sls::TwoSlsEstimator;
@@ -115,7 +116,10 @@ pub(crate) fn iv_error_to_pyerr(err: IvError) -> PyErr {
         | IvError::InvalidHacLags { .. }
         | IvError::InvalidGmmMaxIter { .. }
         | IvError::InvalidGmmTol { .. }
-        | IvError::InsufficientClustersForWeightMatrix { .. } => ValidationError::new_err(message),
+        | IvError::InsufficientClustersForWeightMatrix { .. }
+        | IvError::InsufficientObservationsForFirstStage { .. } => {
+            ValidationError::new_err(message)
+        }
         // `MleError::NonConvergence`（`nonlinear/common.rs`の`mle_error_to_pyerr`）と同じ
         // 分類: パラメータの不正ではなく、計算過程（反復推定）で発覚した問題のため
         // `ComputationError`（`engine/src/iv/CLAUDE.md`参照）。
@@ -1062,6 +1066,8 @@ pub(crate) fn build_iv_input(
 /// 常に`None`（`GmmEstimator`は実装しない、モジュールdocコメント参照）。
 ///
 /// # Errors
+/// - 観測数が構造方程式の係数の数以下、または第一段階の回帰変数の数以下:
+///   `ValidationError`（`validate_observation_counts`、`compute_first_stage`より前）
 /// - `cov_type="cluster"`でクラスター数が構造方程式の傾き係数の数以下（または2未満）:
 ///   `ValidationError`（`validate_structural_cluster_count`、`compute_first_stage`より前）
 /// - `build_iv_input`が返すエラー（列抽出・y/x_exog/x_endog/instrumentsの重複・
@@ -1098,6 +1104,12 @@ pub(crate) fn fit(
             n_endog: input.k_endog(),
         }));
     }
+
+    // 観測数`n`のチェック（構造方程式の`n <= k`を先に、次に第一段階の`n <= l`）を
+    // `compute_first_stage`より先に行う。第一段階の回帰変数の数は識別条件により構造方程式
+    // 以上のため、先に第一段階を走らせると構造方程式の`n <= k`が第一段階の
+    // `FirstStageFailed`（第一段階の`k`）に隠れて報告されてしまう。
+    validate_observation_counts(&input).map_err(iv_error_to_pyerr)?;
 
     // `cov_type=Cluster`の構造方程式の`G <= q`チェック（`TwoSlsEstimator::fit`/
     // `GmmEstimator::fit`冒頭と同じ実装）を`compute_first_stage`より先に行う。第一段階の

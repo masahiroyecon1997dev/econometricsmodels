@@ -47,7 +47,7 @@ include = ["THIRD-PARTY-LICENSES.html", "LICENSE"]
 
 [dependency-groups]
 # CI（ci_python.yml）が使う: pytest tests / ruff check . / ruff format --check .
-# benchmark_performance.ymlもstatsmodels目的でこのグループを使う。
+# benchmark_performance.ymlも（statsmodels・pyarrow目的で）このグループを使う。
 # statsmodelsはtests/fixtures/benchmarks/のフィクスチャ生成に使った主リファレンス実装のため、
 # `==`で厳密固定する（.claude/rules/testing-policy.md「ベンチマーク値のフィクスチャ化」参照）。
 # バージョンを上げる場合はフィクスチャの再生成とセットで行うこと。
@@ -60,22 +60,17 @@ test = [
     "linearmodels==7.0",
     "ruff==0.16.10",
     # Wooldridge実データでのクロスチェックテスト用（tests/support/_helpers.pyの
-    # wooldridge_loader）。標準CIで確実に実行されるようbenchmarkグループから
-    # ここへ移した。依存はpandasのみで、statsmodels/linearmodels経由で既に
+    # wooldridge_loader）。標準CIで確実に実行されるよう
+    # 専用グループからここへ移した。依存はpandasのみで、statsmodels/linearmodels経由で既に
     # 間接的に入っているため追加コストはwooldridge本体のwheelのみ。実データ
     # 自体はこのパッケージのwheel内に留まりリポジトリへは再配布しないため、
-    # 下記benchmarkグループのpyarrow同様、ライセンス上の制約（実データをCSVとして
+    # 下記pyarrow同様、ライセンス上の制約（実データをCSVとして
     # 固定・再配布しない方針、testing-policy.md参照）とは無関係。
     "wooldridge==0.5.0",
-]
-# benchmark/ 配下のベンチマーク値生成・性能比較スクリプト専用（CLAUDE.md 3章
-# 「benchmark/はtests/とは別ライフサイクル」参照）。ci_python.ymlは使わない
-# （随時実行するツール）が、benchmark_performance.yml（compare_<method>.py実行用）
-# はタグpush/workflow_dispatch時にこのグループを使う。
-benchmark = [
-    # polars.DataFrame.to_pandas()が内部で要求する（各リファレンス実装アダプタ・
-    # performance/compare_*.pyがpandasに変換してリファレンス実装に渡すため）。
-    # pandas側は直接依存に含めない。
+    # polars.DataFrame.to_pandas()が内部で要求する。テストがリファレンス実装
+    # （statsmodels/linearmodels/R）へ渡すためpandasに変換する箇所と、benchmark/・
+    # performance/配下のリファレンス実装アダプタ（compare_*.py）が使う。pandas側は
+    # 直接依存に含めない。
     "pyarrow==25.0.1",
 ]
 dev = [

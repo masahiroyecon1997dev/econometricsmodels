@@ -31,6 +31,7 @@ use engine::nonlinear::common::{
 use engine::nonlinear::tobit::{
     CensoringFitCategory, CensoringFitCheck, MarginalEffectsTarget, TobitEstimator, TobitInput,
 };
+use engine::shared::error_catalog::ErrorCode;
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
@@ -45,7 +46,7 @@ use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
     extract_dataframe, extract_f64_column, extract_f64_columns, extract_model_x_columns,
 };
-use crate::shared::errors::legacy_validation_error;
+use crate::shared::errors::{unknown_option_value, user_error};
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
     extract_strict_float, extract_strict_int, extract_strict_opt_column, extract_strict_opt_float,
@@ -392,7 +393,7 @@ impl TobitResult {
     ///   (same validation as `fit()`'s column extraction, via `extract_f64_column`).
     #[pyo3(signature = (new_data=None, target="expected_observed".to_string()))]
     fn predict(&self, new_data: Option<&Bound<'_, PyAny>>, target: String) -> PyResult<Vec<f64>> {
-        let target = parse_marginal_effects_target(&target.to_lowercase())?;
+        let target = parse_marginal_effects_target(&target)?;
         let Some(new_data) = new_data else {
             return self.estimator.predict(target).map_err(mle_error_to_pyerr);
         };
@@ -425,8 +426,7 @@ impl TobitResult {
         new_data: Option<&Bound<'_, PyAny>>,
         target: String,
     ) -> PyResult<PyDataFrame> {
-        let target_lower = target.to_lowercase();
-        let target_enum = parse_marginal_effects_target(&target_lower)?;
+        let target_enum = parse_marginal_effects_target(&target)?;
 
         let (source, predicted) = match new_data {
             Some(new_data) => {
@@ -442,7 +442,7 @@ impl TobitResult {
             ),
         };
 
-        let column_name = format!("predicted_{target_lower}");
+        let column_name = format!("predicted_{}", target.to_lowercase());
         append_predicted_column(source, &column_name, predicted)
     }
 
@@ -473,8 +473,8 @@ impl TobitResult {
         target: String,
         confidence_level: f64,
     ) -> PyResult<MarginalEffectsResult> {
-        let at = parse_marginal_effects_at(&at.to_lowercase())?;
-        let target = parse_marginal_effects_target(&target.to_lowercase())?;
+        let at = parse_marginal_effects_at(&at)?;
+        let target = parse_marginal_effects_target(&target)?;
         let effects = self
             .estimator
             .marginal_effects(at, target, confidence_level)
@@ -555,16 +555,22 @@ fn censoring_fit_check_to_result(check: CensoringFitCheck) -> CensoringFitCheckR
 ///
 /// # Errors
 /// `target`が既知の値のいずれでもない: `ValidationError`
-fn parse_marginal_effects_target(target_lower: &str) -> PyResult<MarginalEffectsTarget> {
-    match target_lower {
+fn parse_marginal_effects_target(target: &str) -> PyResult<MarginalEffectsTarget> {
+    match target.to_lowercase().as_str() {
         "expected_latent" => Ok(MarginalEffectsTarget::ExpectedLatent),
         "expected_observed" => Ok(MarginalEffectsTarget::ExpectedObserved),
         "prob_uncensored" => Ok(MarginalEffectsTarget::ProbUncensored),
         "expected_uncensored" => Ok(MarginalEffectsTarget::ExpectedUncensored),
-        other => Err(legacy_validation_error(format!(
-            "unknown target: '{other}'. Expected one of 'expected_latent', \
-             'expected_observed', 'prob_uncensored', or 'expected_uncensored'"
-        ))),
+        _ => Err(unknown_option_value(
+            "target",
+            target,
+            &[
+                "expected_latent",
+                "expected_observed",
+                "prob_uncensored",
+                "expected_uncensored",
+            ],
+        )),
     }
 }
 
@@ -580,10 +586,7 @@ fn parse_marginal_effects_target(target_lower: &str) -> PyResult<MarginalEffects
 /// `x`に`"sigma"`という列名が含まれる場合は`ValidationError`
 fn validate_no_sigma_collision(x: &[String]) -> PyResult<()> {
     if x.iter().any(|name| name == "sigma") {
-        return Err(legacy_validation_error(
-            "x cannot contain a column named 'sigma' (it collides with the error term's \
-             standard deviation, which TobitResult appends to param_names/params)",
-        ));
+        return Err(user_error(ErrorCode::TobitSigmaNameCollision, Vec::new()));
     }
     Ok(())
 }

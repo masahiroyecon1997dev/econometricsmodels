@@ -40,9 +40,10 @@ use thiserror::Error;
 
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
-use crate::shared::error::CommonError;
+use crate::shared::error::{CommonError, catalog_display, staged};
+use crate::shared::error_catalog::{ErrorCode, ErrorReport, Stage};
 use crate::shared::validation::{
-    MAX_ITER_LIMIT, validate_cluster_count_covers_slopes, validate_cluster_groups,
+    GMM_MAX_ITER_MIN, MAX_ITER_LIMIT, validate_cluster_count_covers_slopes, validate_cluster_groups,
 };
 
 /// 2SLS/GMMの計算過程で発生しうるエラー。
@@ -114,17 +115,13 @@ pub enum IvError {
     ///
     /// 上限を初回推定を含めて数えるため、2回以下の反復は2段階GMMに収束判定を付けただけに
     /// なり紛らわしい。2段階が欲しい場合は`gmm_type="two_step"`を使う。
-    #[error(
-        "gmm_max_iter must be an integer between 3 (counting the initial estimate) and {}, \
-         got {max_iter}; for fewer than 3 use gmm_type=\"two_step\" for a two-step GMM",
-        MAX_ITER_LIMIT
-    )]
+    #[error("{}", self.catalog_message())]
     InvalidGmmMaxIter { max_iter: i64 },
 
     /// `gmm_type="iterated"`の`gmm_tol`が正の有限値でない（0以下・NaN・inf）。
     ///
     /// 収束判定の許容誤差として意味を持たないため。
-    #[error("gmm_tol must be a positive finite number, got {gmm_tol}")]
+    #[error("{}", self.catalog_message())]
     InvalidGmmTol { gmm_tol: f64 },
 
     /// `estimator="gmm"`かつ`gmm_weight_type=Cluster`で、クラスター数`g`がモーメント条件の重み行列
@@ -177,6 +174,47 @@ pub enum IvError {
         #[source]
         source: LeastSquaresError,
     },
+}
+
+impl IvError {
+    /// カタログの`code`・`params`で表せるバリアントの[`ErrorReport`]。まだ移していないバリアントは`None`。
+    ///
+    /// 全バリアントを移し終えたら、`ErrorInfo`の実装（`report()`）に置き換える。
+    /// `FirstStageFailed`等の段階ごとの包みは、`source`が移行済みなら`source`の`code`（`stage`を付けてよい
+    /// `code`なら`stage`つき）を返す。`source`が未移行なら`None`。
+    #[must_use]
+    pub fn try_report(&self) -> Option<ErrorReport> {
+        match self {
+            Self::Common(common) => common.try_report(),
+            Self::FirstStageFailed { endog_name, source } => staged(
+                source.try_report(),
+                Stage::FirstStage {
+                    endog_name: endog_name.clone(),
+                },
+            ),
+            Self::SecondStageFailed { source } => staged(source.try_report(), Stage::SecondStage),
+            Self::HausmanRegressionFailed { source } => {
+                staged(source.try_report(), Stage::WuHausmanRegression)
+            }
+            Self::InvalidGmmMaxIter { max_iter } => Some(
+                ErrorReport::new(ErrorCode::GmmMaxIterOutOfRange)
+                    .param("value", *max_iter)
+                    .param("min", GMM_MAX_ITER_MIN)
+                    .param("max", MAX_ITER_LIMIT),
+            ),
+            Self::InvalidGmmTol { gmm_tol } => Some(
+                ErrorReport::new(ErrorCode::ToleranceNotPositiveFinite)
+                    .param("option", "gmm_tol")
+                    .param("value", *gmm_tol),
+            ),
+            _ => None,
+        }
+    }
+
+    /// カタログに移したバリアントの`Display`が使う`message`。
+    fn catalog_message(&self) -> String {
+        catalog_display(self.try_report())
+    }
 }
 
 /// IVの被説明変数・3つの設計行列（外生説明変数・内生説明変数・操作変数）を保持する
@@ -833,6 +871,65 @@ pub(crate) mod proptest_support {
 mod tests {
     use super::*;
     use crate::shared::group_codes::GroupCodes;
+
+    #[test]
+    fn iv_cataloged_variants_display_the_catalog_message_and_common_delegates() {
+        let err = IvError::InvalidGmmMaxIter { max_iter: 2 };
+        assert_eq!(
+            err.to_string(),
+            err.try_report().expect("cataloged").message()
+        );
+        let wrapped = IvError::Common(CommonError::InvalidConfidenceLevel {
+            confidence_level: 2.0,
+        });
+        assert_eq!(
+            wrapped.try_report().expect("cataloged").code(),
+            ErrorCode::ConfidenceLevelOutOfRange
+        );
+        // 段階ごとの包みは`source`の`code`を返す。`stage`を付けてよくない`code`には付けない。
+        let first_stage = IvError::FirstStageFailed {
+            endog_name: "x".to_string(),
+            source: LeastSquaresError::InvalidNlags { nlags: 0 },
+        };
+        let report = first_stage.try_report().expect("cataloged");
+        assert_eq!(report.code(), ErrorCode::NlagsNotPositive);
+        assert!(report.stage().is_none());
+        // 移行していない`source`の包みは`None`。
+        let unmigrated = IvError::SecondStageFailed {
+            source: LeastSquaresError::SingularMatrix,
+        };
+        assert!(unmigrated.try_report().is_none());
+    }
+
+    #[test]
+    fn gmm_option_errors_map_to_catalog_codes_with_valid_params() {
+        let max_iter = IvError::InvalidGmmMaxIter { max_iter: 2 }
+            .try_report()
+            .expect("cataloged");
+        assert_eq!(max_iter.code(), ErrorCode::GmmMaxIterOutOfRange);
+        assert!(max_iter.validate().is_ok());
+        assert!(
+            max_iter
+                .message()
+                .starts_with("gmm_max_iter must be an integer from 3 to")
+        );
+
+        let tol = IvError::InvalidGmmTol { gmm_tol: 0.0 }
+            .try_report()
+            .expect("cataloged");
+        assert_eq!(tol.code(), ErrorCode::ToleranceNotPositiveFinite);
+        assert!(tol.validate().is_ok());
+        assert!(tol.message().starts_with("gmm_tol must be"));
+
+        assert!(
+            IvError::InsufficientInstruments {
+                n_instruments: 1,
+                n_endog: 2
+            }
+            .try_report()
+            .is_none()
+        );
+    }
 
     #[test]
     fn iv_error_messages_are_human_readable() {

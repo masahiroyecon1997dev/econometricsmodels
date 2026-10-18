@@ -52,7 +52,7 @@ Probit対応は当初「python_packageラッパー実装のみ」というスコ
 
 ## テストの制約: `PyErr`はGILが無いと`Display`できない
 
-`PyErr::to_string()`（`Display`実装）はPython interpreterのGIL取得を要求し、`#[cfg(test)]`（Python未初期化）で呼ぶとpanicする。エラーメッセージの文言・優先順位そのものを検証したい場合は、`ValidationError::new_err(...)`でラップする前の純粋関数（`validation.rs`の`find_duplicate_role_message`等）を直接テストする設計にする。
+`PyErr::to_string()`（`Display`実装）はPython interpreterのGIL取得を要求し、`#[cfg(test)]`（Python未初期化）で呼ぶとpanicする。エラーメッセージの文言・優先順位そのものを検証したい場合は、`ValidationError::new_err(...)`でラップする前の純粋関数（`validation.rs`の`find_role_overlap`等）を直接テストする設計にする。
 
 ## テストの制約: `PyDataFrame`引数の関数はcargo testから直接呼べない
 

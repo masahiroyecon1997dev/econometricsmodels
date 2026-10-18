@@ -7,33 +7,16 @@ Rust側の送出元: `engine/src/iv/common.rs`・`engine_pybind/src/iv/common.rs
 
 from __future__ import annotations
 
-UNKNOWN_IV_ESTIMATOR = (
-    "unknown estimator: '{estimator}'. Expected one of '2sls' or 'gmm'"
-)
-
-UNKNOWN_WEIGHT_TYPE = (
-    "unknown gmm_weight_type: '{other}'. Expected one of 'classical', "
-    "'robust', 'cluster', or 'hac'"
-)
+# `OPTION_UNKNOWN_VALUE`の`allowed`（受け付ける値の一覧）。
+ALLOWED_ESTIMATORS = ["2sls", "gmm"]
+ALLOWED_GMM_TYPES = ["one_step", "two_step", "iterated"]
+ALLOWED_GMM_WEIGHT_TYPES = ["classical", "robust", "cluster", "hac"]
 
 INSUFFICIENT_INSTRUMENTS = (
     "insufficient instruments for identification: {n_instruments} "
     "instrument(s) provided but {n_endog} endogenous regressor(s) require "
     "at least {n_endog} (order condition: len(instruments) >= len(x_endog))"
 )
-
-INVALID_GMM_MAX_ITER = (
-    "gmm_max_iter must be an integer between 3 (counting the initial "
-    "estimate) and 10000, got {max_iter}; for fewer than 3 use "
-    'gmm_type="two_step" for a two-step GMM'
-)
-
-UNKNOWN_GMM_TYPE = (
-    "unknown gmm_type: '{other}'. Expected one of 'one_step', 'two_step', "
-    "or 'iterated'"
-)
-
-INVALID_GMM_TOL = "gmm_tol must be a positive finite number, got {gmm_tol}"
 
 INSUFFICIENT_CLUSTERS_FOR_WEIGHT_MATRIX = (
     "gmm_weight_type='cluster' requires at least l clusters (l+1 if exactly "

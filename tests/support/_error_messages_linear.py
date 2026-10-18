@@ -9,11 +9,9 @@ from __future__ import annotations
 
 NON_POSITIVE_WEIGHT = "weight at row {row} must be positive, got {weight}"
 
-# White検定（engine/src/linear/common.rs・engine/src/linear/diagnostics.rs・
-# engine_pybind/src/linear/ols.rs）。
-UNKNOWN_DIAGNOSTIC_STATISTIC = (
-    "unknown statistic: '{other}'. Expected 'lm' or 'f'"
-)
+# White・Breusch-Pagan・Breusch-Godfrey検定の未知の`statistic`に対する
+# `OPTION_UNKNOWN_VALUE`の`allowed`。
+ALLOWED_DIAGNOSTIC_STATISTICS = ["lm", "f"]
 
 INSUFFICIENT_OBSERVATIONS_AUX_REGRESSION = (
     "insufficient observations for the auxiliary regression of the diagnostic "
@@ -46,9 +44,6 @@ VARIABLES_NOT_A_LIST = (
 VARIABLES_ELEMENT_NOT_STR = (
     "'variables[{index}]' must be a str column name, got {type_name}"
 )
-
-# Breusch-Godfrey検定。
-INVALID_NLAGS = "nlags must be a positive integer: got {nlags}"
 
 BG_NO_TRAINING_DATA = (
     "breusch_godfrey_test() requires the original training data, which is "

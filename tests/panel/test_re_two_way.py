@@ -783,9 +783,7 @@ def test_one_way_time_only_column_on_unbalanced_panel_is_tested(panel):
 def test_dk_time_is_independent_of_time(panel):
     """2-wayでも`cov_type="dk"`は`dk_time`が必須で、`time`は借用されない。
     `dk_time`が`time`と同じ列でも指定できる。"""
-    with pytest.raises(
-        ValidationError, match=escaped(panel_msgs.DK_REQUIRES_TIME)
-    ):
+    with raises_error(ErrorCode.DK_TIME_REQUIRED):
         _fit(panel, REOptions(cov_type="dk", time="time"), x=("x1", "xi"))
 
     res = _fit(

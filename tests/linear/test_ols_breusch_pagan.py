@@ -23,7 +23,6 @@ import json
 from functools import partial
 from pathlib import Path
 
-import _error_messages as msgs
 import _error_messages_linear as linear_msgs
 import numpy as np
 import polars as pl
@@ -424,24 +423,23 @@ def test_none_statistic_raises_type_error(baseline):
 
 
 def test_unknown_statistic_raises_validation_error(baseline):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(linear_msgs.UNKNOWN_DIAGNOSTIC_STATISTIC, other="chi2"),
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="statistic",
+        value="chi2",
+        allowed=linear_msgs.ALLOWED_DIAGNOSTIC_STATISTICS,
     ):
         baseline.fit().breusch_pagan_test(statistic="chi2")
 
 
 def test_empty_variables_raises_validation_error(baseline):
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.X_EMPTY, role="variables")
-    ):
+    with raises_error(ErrorCode.ROLE_EMPTY, argument="variables"):
         baseline.fit().breusch_pagan_test([])
 
 
 def test_duplicate_variables_raise_validation_error(baseline):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.DUPLICATE_WITHIN_ROLE, name="x1", role="variables"),
+    with raises_error(
+        ErrorCode.ROLE_DUPLICATE_COLUMN, column="x1", argument="variables"
     ):
         baseline.fit().breusch_pagan_test(["x1", "x2", "x1"])
 

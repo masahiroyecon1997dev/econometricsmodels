@@ -66,7 +66,8 @@ use thiserror::Error;
 
 use crate::linear::common::LeastSquaresError;
 use crate::shared::covariance::{cluster_correction, cluster_meat, default_hac_lags};
-use crate::shared::error::CommonError;
+use crate::shared::error::{CommonError, catalog_display, staged};
+use crate::shared::error_catalog::{ErrorCode, ErrorReport, Stage};
 use crate::shared::group_codes::GroupCodes;
 
 /// パネルデータの2つの次元。エラーメッセージ・バリデーションで「どちらの次元の
@@ -238,10 +239,7 @@ pub enum PanelError {
     /// ではなく時点数`t`になる点が異なる（DKのバンド幅は「時点のラグ」であり「観測の
     /// ラグ」ではないため、`engine/src/panel/CLAUDE.md`「Driscoll-Kraay型パネルHAC対応」
     /// 参照）。
-    #[error(
-        "dk_bandwidth must be in the range [0, t), where t is the number of unique time \
-         periods in dk_time: got {bandwidth}, t={t}"
-    )]
+    #[error("{}", self.catalog_message())]
     InvalidDkBandwidth { bandwidth: i64, t: usize },
 
     /// `FeCovType::Dk`/`ReCovType::Dk`でユニークな時点数`t_periods`が1しかない。
@@ -425,6 +423,52 @@ pub enum PanelError {
         #[source]
         source: LeastSquaresError,
     },
+}
+
+impl PanelError {
+    /// カタログの`code`・`params`で表せるバリアントの[`ErrorReport`]。まだ移していないバリアントは`None`。
+    ///
+    /// 全バリアントを移し終えたら、`ErrorInfo`の実装（`report()`）に置き換える。
+    /// `WithinRegressionFailed`等の段階ごとの包みは、`source`が移行済みなら`source`の`code`（`stage`を付けてよい
+    /// `code`なら`stage`つき）を返す。`source`が未移行なら`None`。
+    #[must_use]
+    pub fn try_report(&self) -> Option<ErrorReport> {
+        match self {
+            Self::Common(common) => common.try_report(),
+            Self::WithinRegressionFailed { source } => {
+                staged(source.try_report(), Stage::WithinRegression)
+            }
+            Self::FTestFailed { source } => staged(source.try_report(), Stage::OverallFTest),
+            Self::BetweenRegressionFailed { means, source } => staged(
+                source.try_report(),
+                match means {
+                    BetweenMeans::Entity => Stage::BetweenRegressionEntity,
+                    BetweenMeans::Time => Stage::BetweenRegressionTime,
+                },
+            ),
+            Self::PooledRegressionFailed { source } => {
+                staged(source.try_report(), Stage::PooledRegression)
+            }
+            Self::QuasiDemeanedRegressionFailed { source } => {
+                staged(source.try_report(), Stage::QuasiDemeanedRegression)
+            }
+            Self::HausmanTestFailed { source } => {
+                staged(source.try_report(), Stage::HausmanRegression)
+            }
+            Self::InvalidDkBandwidth { bandwidth, t } => Some(
+                ErrorReport::new(ErrorCode::DkBandwidthOutOfRange)
+                    .param("value", *bandwidth)
+                    .param("n_periods", *t)
+                    .param("max", t.saturating_sub(1)),
+            ),
+            _ => None,
+        }
+    }
+
+    /// カタログに移したバリアントの`Display`が使う`message`。
+    fn catalog_message(&self) -> String {
+        catalog_display(self.try_report())
+    }
 }
 
 /// 時点列のラベルと、その時間順を表すコード。FE/REが時点の順序を使う
@@ -1007,6 +1051,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn panel_cataloged_variants_display_the_catalog_message_and_common_delegates() {
+        let err = PanelError::InvalidDkBandwidth { bandwidth: 6, t: 6 };
+        assert_eq!(
+            err.to_string(),
+            "dk_bandwidth must be from 0 to 5, one less than the number of unique time periods \
+             in dk_time (6), got 6."
+        );
+        let wrapped = PanelError::Common(CommonError::InvalidHacLags { hac_lags: 3, n: 3 });
+        assert_eq!(
+            wrapped.try_report().expect("cataloged").code(),
+            ErrorCode::HacLagsOutOfRange
+        );
+    }
+
+    #[test]
+    fn dk_bandwidth_error_maps_to_the_catalog() {
+        let report = PanelError::InvalidDkBandwidth { bandwidth: 7, t: 6 }
+            .try_report()
+            .expect("cataloged");
+        assert_eq!(report.code(), ErrorCode::DkBandwidthOutOfRange);
+        assert!(report.validate().is_ok());
+        assert!(PanelError::TwoWayRequiresTime.try_report().is_none());
+    }
+
+    #[test]
     fn validate_panel_input_reports_the_first_failing_check_in_order() {
         let y = [1.0, 2.0, 3.0];
         let names = labels(&["x"]);
@@ -1084,8 +1153,8 @@ mod tests {
     fn panel_error_messages_are_human_readable() {
         assert_eq!(
             PanelError::InvalidDkBandwidth { bandwidth: 7, t: 6 }.to_string(),
-            "dk_bandwidth must be in the range [0, t), where t is the number of unique time \
-             periods in dk_time: got 7, t=6"
+            "dk_bandwidth must be from 0 to 5, one less than the number of unique time periods \
+             in dk_time (6), got 7."
         );
         assert!(
             PanelError::DegenerateDkTwoPeriods

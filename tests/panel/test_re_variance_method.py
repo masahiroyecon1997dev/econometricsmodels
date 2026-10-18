@@ -44,6 +44,7 @@ import statsmodels.api as sm
 from _assertions import assert_close, assert_option_case_insensitive
 from _constants import DATA_DIR
 from _error_messages import escaped
+from _errors import raises_error
 from _helpers import CASE_SPELLINGS, load_wooldridge_dataset
 from _re_oracle import (
     CONDITIONING_SENSITIVE_KEYS,
@@ -57,6 +58,7 @@ from _tolerances import TOLERANCES
 from econometricsmodels import (
     RE,
     ComputationError,
+    ErrorCode,
     REOptions,
     ValidationError,
 )
@@ -489,9 +491,11 @@ def test_variance_method_is_case_insensitive(variance_method, spelling):
 
 def test_unknown_variance_method_raises_with_the_original_value():
     """メッセージには小文字化した値ではなく、渡された値をそのまま載せる。"""
-    with pytest.raises(
-        ValidationError,
-        match=escaped(panel_msgs.UNKNOWN_VARIANCE_METHOD, value="Nerlove"),
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="variance_method",
+        value="Nerlove",
+        allowed=panel_msgs.ALLOWED_VARIANCE_METHODS,
     ):
         _fit(CASES[0], "classical", "Nerlove")
 
@@ -499,9 +503,11 @@ def test_unknown_variance_method_raises_with_the_original_value():
 def test_unknown_variance_method_is_reported_before_the_data_is_checked():
     """未知の値は列の検証より前に拒否する（存在しない列があっても未知の値のエラーになる）。"""
     case = CASES[0]
-    with pytest.raises(
-        ValidationError,
-        match=escaped(panel_msgs.UNKNOWN_VARIANCE_METHOD, value="nerlove"),
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="variance_method",
+        value="nerlove",
+        allowed=panel_msgs.ALLOWED_VARIANCE_METHODS,
     ):
         RE(
             _frame(case),

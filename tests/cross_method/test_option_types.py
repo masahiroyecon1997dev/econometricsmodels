@@ -11,21 +11,18 @@ from __future__ import annotations
 
 import re
 
-import _error_messages as msgs
-import _error_messages_iv as iv_msgs
-import _error_messages_nonlinear as nonlinear_msgs
-import _error_messages_panel as panel_msgs
 import numpy as np
 import polars as pl
 import pytest
 from _dtype_helpers import N, make_frame
-from _error_messages import escaped
+from _errors import raises_error
 from econometricsmodels import (
     FE,
     IV,
     OLS,
     RE,
     WLS,
+    ErrorCode,
     FEOptions,
     IVOptions,
     Logit,
@@ -346,13 +343,9 @@ def test_huge_hac_lags_is_validation_error_not_overflow(df, cls, huge, how):
         cls, "hac_lags", huge, how, cov_type="hac", hac_time="row"
     )
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.INVALID_HAC_LAGS,
-            hac_lags=I64_MAX if huge > 0 else I64_MIN,
-            n=N,
-        ),
+    value = I64_MAX if huge > 0 else I64_MIN
+    with raises_error(
+        ErrorCode.HAC_LAGS_OUT_OF_RANGE, value=value, n_obs=N, max=N - 1
     ):
         _fit(options, df)
 
@@ -364,13 +357,11 @@ def test_huge_dk_bandwidth_is_validation_error(df, cls, huge, how):
     kwargs = {"cov_type": "dk", "dk_time": "t"}
     options = _with_value(cls, "dk_bandwidth", huge, how, **kwargs)
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            panel_msgs.INVALID_DK_BANDWIDTH,
-            bandwidth=I64_MAX if huge > 0 else I64_MIN,
-            t=6,
-        ),
+    with raises_error(
+        ErrorCode.DK_BANDWIDTH_OUT_OF_RANGE,
+        value=I64_MAX if huge > 0 else I64_MIN,
+        n_periods=6,
+        max=5,
     ):
         _fit(options, df)
 
@@ -385,9 +376,8 @@ class TestMleOptionValues:
     def test_negative_huge_max_iter_is_validation_error(self, df, cls, how):
         options = _with_value(cls, "max_iter", -(2**70), how)
 
-        with pytest.raises(
-            ValidationError,
-            match=escaped(nonlinear_msgs.INVALID_MAX_ITER, max_iter=I64_MIN),
+        with raises_error(
+            ErrorCode.MAX_ITER_OUT_OF_RANGE, value=I64_MIN, min=1, max=10_000
         ):
             _fit(options, df)
 
@@ -400,11 +390,11 @@ class TestMleOptionValues:
         """
         options = _with_value(cls, "max_iter", above, how)
 
-        with pytest.raises(
-            ValidationError,
-            match=escaped(
-                nonlinear_msgs.INVALID_MAX_ITER, max_iter=min(above, I64_MAX)
-            ),
+        with raises_error(
+            ErrorCode.MAX_ITER_OUT_OF_RANGE,
+            value=min(above, I64_MAX),
+            min=1,
+            max=10_000,
         ):
             _fit(options, df)
 
@@ -420,50 +410,61 @@ class TestMleOptionValues:
         assert _fit(options, df).n_obs == N
 
     @pytest.mark.parametrize(
-        ("tol", "shown"),
+        ("tol", "value"),
         [
-            (float("nan"), "NaN"),
-            (float("inf"), "inf"),
-            (float("-inf"), "-inf"),
-            (0.0, "0"),
-            (-1.0, "-1"),
-            (10**400, "inf"),
+            (float("nan"), float("nan")),
+            (float("inf"), float("inf")),
+            (float("-inf"), float("-inf")),
+            (0.0, 0.0),
+            (-1.0, -1.0),
+            (10**400, float("inf")),
         ],
         ids=["nan", "inf", "-inf", "zero", "negative", "huge_int"],
     )
-    def test_invalid_tol_is_validation_error(self, df, cls, how, tol, shown):
+    def test_invalid_tol_is_validation_error(self, df, cls, how, tol, value):
         """`tol`がNaN・無限大・0以下・巨大な値のときは`ValidationError`（NaNは
-        以前は収束失敗の`ComputationError`になっていた）。
+        以前は収束失敗の`ComputationError`になっていた）。`value`は`f64`に
+        変換された値（`10**400`は`inf`になる）。
         """
         options = _with_value(cls, "tol", tol, how)
 
-        with pytest.raises(
-            ValidationError,
-            match=escaped(nonlinear_msgs.INVALID_TOL, tol=shown),
+        with raises_error(
+            ErrorCode.TOLERANCE_NOT_POSITIVE_FINITE,
+            option="tol",
+            value=pytest.approx(value, nan_ok=True),
         ):
             _fit(options, df)
 
 
 @pytest.mark.parametrize("how", SETTERS)
 @pytest.mark.parametrize(
-    "confidence_level",
-    [float("nan"), float("inf"), 2**70, -(2**70), 10**400, 0, 1],
+    ("confidence_level", "value"),
+    [
+        (float("nan"), float("nan")),
+        (float("inf"), float("inf")),
+        (2**70, float(2**70)),
+        (-(2**70), -float(2**70)),
+        (10**400, float("inf")),
+        (0, 0.0),
+        (1, 1.0),
+    ],
     ids=["nan", "inf", "2^70", "-2^70", "huge_int", "zero", "one"],
 )
 @pytest.mark.parametrize(
     "cls", ALL_OPTION_CLASSES, ids=[c.__name__ for c in ALL_OPTION_CLASSES]
 )
 def test_invalid_confidence_level_is_validation_error_for_every_method(
-    df, cls, confidence_level, how
+    df, cls, confidence_level, value, how
 ):
-    """`confidence_level`の不正な値は、全手法で範囲検査の`ValidationError`になる
+    """`confidence_level`の不正な値は、全手法で同じ`code`の`ValidationError`になる
     （検査は手法ごとに別の箇所にあり、IV・FE・REはエラーを別の文言で包みうる）。
+    `value`は`f64`に変換された値（`10**400`は`inf`になる）。
     """
     options = _with_value(cls, "confidence_level", confidence_level, how)
 
-    with pytest.raises(
-        ValidationError,
-        match=re.escape("confidence_level must be in the range (0, 1)"),
+    with raises_error(
+        ErrorCode.CONFIDENCE_LEVEL_OUT_OF_RANGE,
+        value=pytest.approx(value, nan_ok=True),
     ):
         _fit(options, df)
 
@@ -505,12 +506,11 @@ def test_gmm_max_iter_outside_the_range_is_validation_error(df, invalid, how):
         raise_on_non_convergence=False,
     )
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            iv_msgs.INVALID_GMM_MAX_ITER,
-            max_iter=max(min(invalid, I64_MAX), I64_MIN),
-        ),
+    with raises_error(
+        ErrorCode.GMM_MAX_ITER_OUT_OF_RANGE,
+        value=max(min(invalid, I64_MAX), I64_MIN),
+        min=3,
+        max=10_000,
     ):
         _fit(options, df)
 
@@ -533,11 +533,11 @@ def test_gmm_max_iter_limits_are_accepted(df, limit, how):
 
 @pytest.mark.parametrize("how", SETTERS)
 @pytest.mark.parametrize(
-    ("tol", "shown"),
-    [(float("nan"), "NaN"), (float("inf"), "inf"), (-1.0, "-1")],
+    "tol",
+    [float("nan"), float("inf"), -1.0],
     ids=["nan", "inf", "negative"],
 )
-def test_invalid_gmm_tol_is_validation_error(df, tol, shown, how):
+def test_invalid_gmm_tol_is_validation_error(df, tol, how):
     options = _with_value(
         IVOptions,
         "gmm_tol",
@@ -547,8 +547,10 @@ def test_invalid_gmm_tol_is_validation_error(df, tol, shown, how):
         gmm_type="iterated",
     )
 
-    with pytest.raises(
-        ValidationError, match=escaped(iv_msgs.INVALID_GMM_TOL, gmm_tol=shown)
+    with raises_error(
+        ErrorCode.TOLERANCE_NOT_POSITIVE_FINITE,
+        option="gmm_tol",
+        value=pytest.approx(tol, nan_ok=True),
     ):
         _fit(options, df)
 
@@ -594,9 +596,8 @@ def test_numpy_uint64_beyond_i64_is_validation_error(df, how):
         hac_time="row",
     )
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.INVALID_HAC_LAGS, hac_lags=I64_MAX, n=N),
+    with raises_error(
+        ErrorCode.HAC_LAGS_OUT_OF_RANGE, value=I64_MAX, n_obs=N, max=N - 1
     ):
         _fit(options, df)
 

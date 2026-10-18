@@ -20,7 +20,9 @@ use std::collections::HashSet;
 use polars::prelude::DataFrame;
 use pyo3::PyResult;
 
-use super::errors::legacy_validation_error;
+use engine::shared::error_catalog::{ErrorCode, ParamValue};
+
+use super::errors::user_error;
 
 /// `validate_no_duplicate_roles`に渡す1ロール分の値。単一列（`y`/`weight`等）と
 /// 複数列（`x`/`x_exog`/`instruments`等）の両方を同じ関数で扱えるようにするための
@@ -39,12 +41,13 @@ pub enum RoleValue<'a> {
 /// 元は`x`専用の関数だったが、IVの`x_endog`/`instruments`（`x_exog`とは
 /// 異なり空リストを許容しない）でも同じ検証が必要になったため`validate_no_duplicate_
 /// within_role`と同じ形で汎用化した。既存の呼び出し元（OLS/WLS/Logit/Probit/Tobit）は
-/// `role_name="x"`で呼ぶため、メッセージ文言は変わらない。
+/// `role_name="x"`で呼ぶ。
 pub fn validate_x_non_empty(role_name: &str, x: &[String]) -> PyResult<()> {
     if x.is_empty() {
-        return Err(legacy_validation_error(format!(
-            "{role_name} must contain at least one column name"
-        )));
+        return Err(user_error(
+            ErrorCode::RoleEmpty,
+            vec![("argument", ParamValue::from(role_name))],
+        ));
     }
     Ok(())
 }
@@ -54,15 +57,19 @@ pub fn validate_x_non_empty(role_name: &str, x: &[String]) -> PyResult<()> {
 ///
 /// 元は`validate_no_duplicate_x`という`x`専用の関数だったが、IVの`x_exog`/`x_endog`/
 /// `instruments`という3つの複数列ロールそれぞれで同じ検証が必要になったため汎用化した。
-/// 既存の呼び出し元（OLS/WLS/Logit/Probit）は`role_name="x"`で呼ぶため、
-/// メッセージ文言は変わらない。
+/// 既存の呼び出し元（OLS/WLS/Logit/Probit）は`role_name="x"`で呼ぶ
+/// （`role_name`は`ROLE_*`の`argument`になる）。
 pub fn validate_no_duplicate_within_role(role_name: &str, columns: &[String]) -> PyResult<()> {
     let mut seen = HashSet::new();
     for name in columns {
         if !seen.insert(name) {
-            return Err(legacy_validation_error(format!(
-                "column '{name}' is specified more than once in {role_name}"
-            )));
+            return Err(user_error(
+                ErrorCode::RoleDuplicateColumn,
+                vec![
+                    ("column", ParamValue::from(name.as_str())),
+                    ("argument", ParamValue::from(role_name)),
+                ],
+            ));
         }
     }
     Ok(())
@@ -77,18 +84,17 @@ pub fn validate_no_duplicate_within_role(role_name: &str, columns: &[String]) ->
 /// ため（`first_stage()`/構造方程式本体の`param_names`に`"const"`が重複し、
 /// 後勝ちで真の切片係数が上書きされる）、`validate_x_non_empty`/
 /// `validate_no_duplicate_within_role`と同じ形で`role_name`を引数化した。
-/// 既存の呼び出し元（OLS/WLS/Logit/Probit/Tobit）は`role_name="x"`で呼ぶため、
-/// メッセージ文言は変わらない。
+/// 既存の呼び出し元（OLS/WLS/Logit/Probit/Tobit）は`role_name="x"`で呼ぶ。
 pub fn validate_no_const_collision(
     role_name: &str,
     x: &[String],
     include_intercept: bool,
 ) -> PyResult<()> {
     if include_intercept && x.iter().any(|name| name == "const") {
-        return Err(legacy_validation_error(format!(
-            "when include_intercept=true, {role_name} cannot contain a column named \
-             'const' (it collides with the automatically added intercept)"
-        )));
+        return Err(user_error(
+            ErrorCode::InterceptNameCollision,
+            vec![("argument", ParamValue::from(role_name))],
+        ));
     }
     Ok(())
 }
@@ -123,10 +129,10 @@ pub fn validate_no_existing_column(df: &DataFrame, column_name: &str) -> PyResul
         .iter()
         .any(|name| name.as_str() == column_name)
     {
-        return Err(legacy_validation_error(format!(
-            "the data already has a column named '{column_name}'; augment() would \
-             overwrite it, which is not allowed"
-        )));
+        return Err(user_error(
+            ErrorCode::AugmentColumnExists,
+            vec![("column", ParamValue::from(column_name))],
+        ));
     }
     Ok(())
 }
@@ -144,8 +150,8 @@ pub fn validate_no_existing_column(df: &DataFrame, column_name: &str) -> PyResul
 /// `ValidationError`になることが契約であり、複合違反時にどちらが先に報告されるかは
 /// 実装詳細）。
 ///
-/// **呼び出し側の契約**: 複数列ロール（`Multi`）同士が重複した場合、メッセージの主語には
-/// `roles`のリストで後方に置かれた方が使われる（`duplicate_role_message`参照）。重複時に
+/// **呼び出し側の契約**: 複数列ロール（`Multi`）同士が重複した場合、`argument`には
+/// `roles`のリストで後方に置かれた方が使われる（`overlap_roles`参照）。重複時に
 /// 「こちらの問題として報告したい」ロールは、リストの後ろに置くこと（例:
 /// `instruments`が`x_exog`/`x_endog`と重複していないかを検証する場合、`instruments`を
 /// 最後に置く。IV実装時の呼び出しコードは`docs/spec/iv-spec.md`1.1節の
@@ -153,24 +159,43 @@ pub fn validate_no_existing_column(df: &DataFrame, column_name: &str) -> PyResul
 /// 重複した場合は、リスト内の位置に関わらず常に単一列ロール側が主語になるため、この契約は
 /// 影響しない。
 pub fn validate_no_duplicate_roles(roles: &[(&str, RoleValue)]) -> PyResult<()> {
-    match find_duplicate_role_message(roles) {
-        Some(message) => Err(legacy_validation_error(message)),
+    match find_role_overlap(roles) {
+        Some(overlap) => Err(user_error(
+            ErrorCode::RoleColumnOverlap,
+            vec![
+                ("column", ParamValue::from(overlap.column)),
+                ("argument", ParamValue::from(overlap.argument)),
+                ("other_argument", ParamValue::from(overlap.other_argument)),
+            ],
+        )),
         None => Ok(()),
     }
 }
 
+/// 2つのロールで共有されている列の名前と、そのロールの名前。
+#[derive(Debug, PartialEq, Eq)]
+struct RoleOverlap {
+    column: String,
+    /// 主語にするロール（[`overlap_roles`]の規則で決まる）。
+    argument: String,
+    other_argument: String,
+}
+
 /// `validate_no_duplicate_roles`の判定ロジック本体。`PyErr`（`PyO3`）に依存しない純粋な
-/// Rust関数として切り出すことで、メッセージ文言をGILなしに単体テストできるようにしている
-/// （`PyErr`の`Display`実装はGIL取得を要求し、`#[cfg(test)]`（Python未初期化）では
+/// Rust関数として切り出すことで、どの列・どのロールが報告されるかをGILなしに単体テストできる
+/// ようにしている（`PyErr`の`Display`実装はGIL取得を要求し、`#[cfg(test)]`（Python未初期化）では
 /// 呼び出すとpanicするため）。
-fn find_duplicate_role_message(roles: &[(&str, RoleValue)]) -> Option<String> {
+fn find_role_overlap(roles: &[(&str, RoleValue)]) -> Option<RoleOverlap> {
     for i in 0..roles.len() {
         let (name_i, value_i) = &roles[i];
         for (name_j, value_j) in &roles[..i] {
             if let Some(col) = overlapping_column(value_i, value_j) {
-                return Some(duplicate_role_message(
-                    name_i, value_i, name_j, value_j, col,
-                ));
+                let (argument, other_argument) = overlap_roles(name_i, value_i, name_j, value_j);
+                return Some(RoleOverlap {
+                    column: col.to_string(),
+                    argument: argument.to_string(),
+                    other_argument: other_argument.to_string(),
+                });
             }
         }
     }
@@ -196,43 +221,23 @@ fn role_contains(value: &RoleValue, col: &str) -> bool {
     }
 }
 
-/// 目的語側のロールの言い回し。単一列ロール（`Single`）は「specified as {name}」、
-/// 複数列ロール（`Multi`）は「included in {name}」。
-fn role_phrase(name: &str, value: &RoleValue) -> String {
-    match value {
-        RoleValue::Single(_) => format!("specified as {name}"),
-        RoleValue::Multi(_) => format!("included in {name}"),
-    }
-}
-
-/// 重複が見つかったロールのペアからエラーメッセージを組み立てる。
+/// 重複が見つかったロールのペアから、`(argument, other_argument)`を決める。
 ///
-/// メッセージは「the column '{col}' specified as {主語} is also {目的語の言い回し}」
-/// の形で、主語は常に「specified as」固定、目的語の言い回しは`role_phrase`により
-/// 単一列ロールなら「specified as」、複数列ロールなら「included in」になる。
-///
-/// 主語には単一列ロール（`Single`）を優先する（`(i, j)`のどちらが単一列ロールかに
-/// 関わらず、単一列ロールの方をメッセージの主語にする）。これは旧実装（単一列ロールのみ、
-/// `x`という1つの複数列ロールと必ず対で使われていた）のメッセージ文言をそのまま踏襲する
-/// ための特別扱いで、`y`/`weight`のような単一列ロールの既存の挙動を変えないために
-/// 必要。それ以外（単一列ロール同士、または両方とも複数列ロール。例: IVの`instruments`と
-/// `x_exog`）では、リスト内で後に置かれた方（`i`側、`name_i`）を主語にする
-/// （複数列ロール同士は新規のケースのため文言の踏襲対象が無い）。
-fn duplicate_role_message(
-    name_i: &str,
+/// `argument`には単一列ロール（`Single`）を優先する（`(i, j)`のどちらが単一列ロールかに
+/// 関わらず、単一列ロールの方を先に挙げる）。`y`/`weight`のような単一列ロールの報告を、
+/// リスト内の位置に左右されず安定させるため。それ以外（単一列ロール同士、または両方とも
+/// 複数列ロール。例: IVの`instruments`と`x_exog`）では、リスト内で後に置かれた方
+/// （`i`側、`name_i`）を`argument`にする。
+fn overlap_roles<'a>(
+    name_i: &'a str,
     value_i: &RoleValue,
-    name_j: &str,
+    name_j: &'a str,
     value_j: &RoleValue,
-    col: &str,
-) -> String {
-    let (subject, object_name, object_value) = match (value_i, value_j) {
-        (RoleValue::Multi(_), RoleValue::Single(_)) => (name_j, name_i, value_i),
-        _ => (name_i, name_j, value_j),
-    };
-    format!(
-        "the column '{col}' specified as {subject} is also {}",
-        role_phrase(object_name, object_value)
-    )
+) -> (&'a str, &'a str) {
+    match (value_i, value_j) {
+        (RoleValue::Multi(_), RoleValue::Single(_)) => (name_j, name_i),
+        _ => (name_i, name_j),
+    }
 }
 
 /// モード（`cov_type`・`estimator`・`gmm_type`等）で使われないオプションが明示指定された
@@ -249,10 +254,13 @@ pub fn reject_unused_option(
     condition: &str,
 ) -> PyResult<()> {
     if is_set && !is_used {
-        return Err(legacy_validation_error(format!(
-            "{option} is only used with {condition}, so it would be silently ignored; \
-             set {condition} or remove {option}"
-        )));
+        return Err(user_error(
+            ErrorCode::OptionUnused,
+            vec![
+                ("option", ParamValue::from(option)),
+                ("condition", ParamValue::from(condition)),
+            ],
+        ));
     }
     Ok(())
 }
@@ -483,30 +491,32 @@ mod tests {
         );
     }
 
-    // 以下は`find_duplicate_role_message`（`PyErr`に依存しない純粋関数）を直接呼び、
-    // メッセージ文言をGILなしに検証する。判定順序は`roles`のリスト順の総当たり
+    // 以下は`find_role_overlap`（`PyErr`に依存しない純粋関数）を直接呼び、どの列・どのロールが
+    // 報告されるかをGILなしに検証する。判定順序は`roles`のリスト順の総当たり
     // （各ロールを、それより前の全ロールと照合し、最初に見つかった違反を返す）に
-    // 単純化した（複数列ロール同士の重複検証に対応させるため。単一列
-    // ロールと複数列ロールが同時に絡む複合違反時にどちらが先に報告されるかの優先順位は
-    // 旧実装から変更している。ユーザー確認済み・仕様上の保証はしない）。
-    // ただし個々のペアのメッセージ文言自体は旧実装と完全に同じ形式を維持する:
+    // 単純化した（複数列ロール同士の重複検証に対応させるため。単一列ロールと複数列ロールが
+    // 同時に絡む複合違反時にどちらが先に報告されるかの優先順位は仕様上の保証としない）。
     // 単一列ロール・複数列ロールのペアでは、リスト内の位置に関わらず常に単一列ロール側が
-    // 主語（specified as）、複数列ロール側が「included in」の対象になる。両方とも複数列
-    // ロールの場合のみ、リストで後に置かれた方（新規のケースのため文言の踏襲対象が無い）が
-    // 主語になる（`duplicate_role_message`参照）。
+    // `argument`になる。両方とも複数列ロールの場合のみ、リストで後に置かれた方が`argument`になる
+    // （`overlap_roles`参照）。
+
+    fn overlap(roles: &[(&str, RoleValue)]) -> Option<(String, String, String)> {
+        find_role_overlap(roles).map(|o| (o.column, o.argument, o.other_argument))
+    }
+
+    fn triple(column: &str, argument: &str, other: &str) -> Option<(String, String, String)> {
+        Some((column.to_string(), argument.to_string(), other.to_string()))
+    }
 
     #[test]
-    fn find_duplicate_role_message_returns_none_for_no_duplicates() {
+    fn find_role_overlap_returns_none_for_no_duplicates() {
         let x = ["x1".to_string(), "x2".to_string()];
         assert_eq!(
-            find_duplicate_role_message(&[
-                ("y", RoleValue::Single("y")),
-                ("x", RoleValue::Multi(&x))
-            ]),
+            overlap(&[("y", RoleValue::Single("y")), ("x", RoleValue::Multi(&x))]),
             None
         );
         assert_eq!(
-            find_duplicate_role_message(&[
+            overlap(&[
                 ("y", RoleValue::Single("y")),
                 ("weight", RoleValue::Single("w")),
                 ("x", RoleValue::Multi(&x)),
@@ -516,74 +526,64 @@ mod tests {
     }
 
     #[test]
-    fn find_duplicate_role_message_reports_first_violation_in_list_order() {
+    fn find_role_overlap_reports_first_violation_in_list_order() {
         // `y="y"`・`weight="y"`・`x=["y", "x2"]`という複合違反ケース: `weight == y`と
         // `y`が`x`に含まれることの両方が同時に成立する。リスト順の総当たりのため、
         // より前の位置にある`weight` vs `y`のペアが先に見つかる（`x`との重複は未到達）。
         let x = ["y".to_string(), "x2".to_string()];
-        let message = find_duplicate_role_message(&[
-            ("y", RoleValue::Single("y")),
-            ("weight", RoleValue::Single("y")),
-            ("x", RoleValue::Multi(&x)),
-        ])
-        .expect("must error");
         assert_eq!(
-            message,
-            "the column 'y' specified as weight is also specified as y"
+            overlap(&[
+                ("y", RoleValue::Single("y")),
+                ("weight", RoleValue::Single("y")),
+                ("x", RoleValue::Multi(&x)),
+            ]),
+            triple("y", "weight", "y")
         );
     }
 
     #[test]
-    fn find_duplicate_role_message_reports_weight_equals_y() {
+    fn find_role_overlap_reports_weight_equals_y() {
         let x = ["x1".to_string()];
-        let message = find_duplicate_role_message(&[
-            ("y", RoleValue::Single("weight_col")),
-            ("weight", RoleValue::Single("weight_col")),
-            ("x", RoleValue::Multi(&x)),
-        ])
-        .expect("must error");
         assert_eq!(
-            message,
-            "the column 'weight_col' specified as weight is also specified as y"
+            overlap(&[
+                ("y", RoleValue::Single("weight_col")),
+                ("weight", RoleValue::Single("weight_col")),
+                ("x", RoleValue::Multi(&x)),
+            ]),
+            triple("weight_col", "weight", "y")
         );
     }
 
     #[test]
-    fn find_duplicate_role_message_reports_single_role_as_subject_even_when_multi_role_is_later_in_list()
-     {
+    fn find_role_overlap_reports_single_role_first_even_when_multi_role_is_later_in_list() {
         // 単一列ロール（weight）が複数列ロール（x）にも含まれる場合、xがリストの
-        // 後方にあってもメッセージは常に単一列ロール側を主語にする（旧実装の文言を
-        // そのまま踏襲、`duplicate_role_message`参照）。
+        // 後方にあっても`argument`は常に単一列ロール側（`overlap_roles`参照）。
         let x = ["x1".to_string(), "w".to_string()];
-        let message = find_duplicate_role_message(&[
-            ("y", RoleValue::Single("y")),
-            ("weight", RoleValue::Single("w")),
-            ("x", RoleValue::Multi(&x)),
-        ])
-        .expect("must error");
         assert_eq!(
-            message,
-            "the column 'w' specified as weight is also included in x"
+            overlap(&[
+                ("y", RoleValue::Single("y")),
+                ("weight", RoleValue::Single("w")),
+                ("x", RoleValue::Multi(&x)),
+            ]),
+            triple("w", "weight", "x")
         );
     }
 
     #[test]
-    fn find_duplicate_role_message_reports_multi_vs_multi_overlap_with_later_role_as_subject() {
+    fn find_role_overlap_reports_multi_vs_multi_overlap_with_later_role_first() {
         let x_exog = ["x1".to_string(), "x2".to_string()];
         let instruments = ["z1".to_string(), "x1".to_string()];
-        let message = find_duplicate_role_message(&[
-            ("x_exog", RoleValue::Multi(&x_exog)),
-            ("instruments", RoleValue::Multi(&instruments)),
-        ])
-        .expect("must error");
         assert_eq!(
-            message,
-            "the column 'x1' specified as instruments is also included in x_exog"
+            overlap(&[
+                ("x_exog", RoleValue::Multi(&x_exog)),
+                ("instruments", RoleValue::Multi(&instruments)),
+            ]),
+            triple("x1", "instruments", "x_exog")
         );
     }
 
     #[test]
-    fn find_duplicate_role_message_reports_multi_vs_multi_overlap_deterministically_for_multiple_common_columns()
+    fn find_role_overlap_reports_multi_vs_multi_overlap_deterministically_for_multiple_common_columns()
      {
         // `instruments`と`x_exog`に共通する列名が複数（"x1"・"x2"）ある場合、
         // `instruments`（`a`側）での出現順で最初に見つかった方（"x1"）が使われることを
@@ -591,34 +591,25 @@ mod tests {
         // リグレッション検知用）。
         let x_exog = ["x2".to_string(), "x1".to_string()];
         let instruments = ["x1".to_string(), "x2".to_string(), "z1".to_string()];
-        let message = find_duplicate_role_message(&[
-            ("x_exog", RoleValue::Multi(&x_exog)),
-            ("instruments", RoleValue::Multi(&instruments)),
-        ])
-        .expect("must error");
         assert_eq!(
-            message,
-            "the column 'x1' specified as instruments is also included in x_exog"
+            overlap(&[
+                ("x_exog", RoleValue::Multi(&x_exog)),
+                ("instruments", RoleValue::Multi(&instruments)),
+            ]),
+            triple("x1", "instruments", "x_exog")
         );
     }
 
     #[test]
-    fn find_duplicate_role_message_reports_single_role_as_subject_when_multi_role_is_earlier_in_list()
-     {
-        // `duplicate_role_message`の`(Single, Multi)`アーム（`value_i`が単一列ロール、
-        // `value_j`が複数列ロール）は、既存の全呼び出し側（OLS/WLS/Logit/Probit）が
-        // `x`をrolesリストの末尾に置くため通常は到達しない。将来IVで複数列ロールが
-        // 単一列ロードより前に置かれるケースに備え、対称性（単一列ロールが常に主語になる
-        // こと）を直接検証する。
+    fn find_role_overlap_reports_single_role_first_when_multi_role_is_earlier_in_list() {
+        // `overlap_roles`の`(Multi, Single)`アーム（`value_i`が単一列ロール、`value_j`が
+        // 複数列ロール）は、既存の全呼び出し側（OLS/WLS/Logit/Probit）が`x`をrolesリストの
+        // 末尾に置くため通常は到達しない。将来IVで複数列ロールが単一列ロールより前に置かれる
+        // ケースに備え、対称性（単一列ロールが常に`argument`になること）を直接検証する。
         let x = ["x1".to_string(), "y".to_string()];
-        let message = find_duplicate_role_message(&[
-            ("x", RoleValue::Multi(&x)),
-            ("y", RoleValue::Single("y")),
-        ])
-        .expect("must error");
         assert_eq!(
-            message,
-            "the column 'y' specified as y is also included in x"
+            overlap(&[("x", RoleValue::Multi(&x)), ("y", RoleValue::Single("y"))]),
+            triple("y", "y", "x")
         );
     }
 }

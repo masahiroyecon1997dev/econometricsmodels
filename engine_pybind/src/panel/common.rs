@@ -7,11 +7,13 @@
 //! common_error_to_pyerr`に委譲する（系統ごとに同じ判定ロジックを重複させない）。
 
 use engine::panel::common::PanelError;
+use engine::shared::error_catalog::{ErrorCode, ParamValue};
 use pyo3::{PyErr, PyResult};
 
 use crate::linear::common::least_squares_error_is_computation_error;
 use crate::shared::errors::{
-    common_error_to_pyerr, legacy_computation_error, legacy_validation_error,
+    common_error_to_pyerr, legacy_computation_error, legacy_validation_error, report_to_pyerr,
+    unknown_option_value, user_error,
 };
 use crate::shared::validation::{RoleValue, reject_unused_option, validate_no_duplicate_roles};
 
@@ -29,23 +31,10 @@ impl PanelModel {
             Self::Re => "RE",
         }
     }
-
-    /// 2-wayの効果の呼び名（`dk_time`が必須と伝えるメッセージ用）。
-    fn effects_word(self) -> &'static str {
-        match self {
-            Self::Fe => "fixed",
-            Self::Re => "random",
-        }
-    }
-
-    /// `hc0`が非対応である理由（参照実装の事情）。
-    fn hc0_reason(self) -> &'static str {
-        match self {
-            Self::Fe => "neither linearmodels nor fixest offer HC0 for panel/FE regressions",
-            Self::Re => "no reference implementation offers HC0 for panel/RE regressions",
-        }
-    }
 }
+
+/// FE/REが受け付ける`cov_type`の値（`hc0`は含まない）。
+const PANEL_COV_TYPES: &[&str] = &["classical", "hc1", "hc2", "hc3", "cluster", "dk"];
 
 /// FE/REの`cov_type`の種類。列名や`dk_bandwidth`を持たない、文字列だけから決まる値。
 ///
@@ -96,15 +85,15 @@ pub(crate) fn parse_panel_cov_kind(cov_type: &str, model: PanelModel) -> PyResul
         "hc3" => Ok(PanelCovKind::Hc3),
         "cluster" => Ok(PanelCovKind::Cluster),
         "dk" => Ok(PanelCovKind::Dk),
-        "hc0" => Err(legacy_validation_error(format!(
-            "cov_type='hc0' is not supported for {} ({}); use 'hc1', 'hc2', or 'hc3' instead",
-            model.name(),
-            model.hc0_reason()
-        ))),
-        other => Err(legacy_validation_error(format!(
-            "unknown cov_type: '{other}'. Expected one of 'classical', 'hc1' through \
-             'hc3', 'cluster', or 'dk'"
-        ))),
+        "hc0" => Err(user_error(
+            ErrorCode::CovTypeNotAvailableForModel,
+            vec![
+                ("value", ParamValue::from(cov_type)),
+                ("model", ParamValue::from(model.name())),
+                ("allowed", ParamValue::from(PANEL_COV_TYPES.to_vec())),
+            ],
+        )),
+        _ => Err(unknown_option_value("cov_type", cov_type, PANEL_COV_TYPES)),
     }
 }
 
@@ -115,15 +104,8 @@ pub(crate) fn parse_panel_cov_kind(cov_type: &str, model: PanelModel) -> PyResul
 ///
 /// # Errors
 /// `dk_time`が未指定なら`ValidationError`。
-pub(crate) fn require_dk_time(dk_time: Option<&str>, model: PanelModel) -> PyResult<&str> {
-    dk_time.ok_or_else(|| {
-        legacy_validation_error(format!(
-            "cov_type='dk' requires the `dk_time` option: the column that defines the time \
-             periods of the Driscoll-Kraay estimator (it is not taken from `time`, which \
-             only sets the two-way {} effects)",
-            model.effects_word()
-        ))
-    })
+pub(crate) fn require_dk_time(dk_time: Option<&str>) -> PyResult<&str> {
+    dk_time.ok_or_else(|| user_error(ErrorCode::DkTimeRequired, Vec::new()))
 }
 
 /// `cluster`/`dk_time`/`dk_bandwidth`が`kind`と矛盾しないことを検査する。DataFrameは見ない。
@@ -137,7 +119,6 @@ pub(crate) fn require_dk_time(dk_time: Option<&str>, model: PanelModel) -> PyRes
 /// `ValidationError`。
 pub(crate) fn check_panel_cov_options(
     kind: PanelCovKind,
-    model: PanelModel,
     cluster: Option<&str>,
     dk_time: Option<&str>,
     dk_bandwidth: Option<i64>,
@@ -157,7 +138,7 @@ pub(crate) fn check_panel_cov_options(
         "cov_type=\"dk\"",
     )?;
     if is_dk {
-        require_dk_time(dk_time, model)?;
+        require_dk_time(dk_time)?;
     }
     Ok(())
 }
@@ -220,8 +201,12 @@ pub(crate) fn validate_dk_time_role(y: &str, entity: &str, dk_time: Option<&str>
 /// 記録済みの罠そのもの）。その後`panel::fe::fit`（`fit_fe`が`#[pymodule]`経由で
 /// 呼ぶ本番経路）がこの関数を呼ぶようになったため、`#[allow(dead_code)]`は不要になった。
 pub(crate) fn panel_error_to_pyerr(err: PanelError) -> PyErr {
+    if let Some(report) = err.try_report() {
+        return report_to_pyerr(&report);
+    }
     let message = err.to_string();
     match err {
+        // `try_report()`で処理済みのバリアントは先頭で返るためここには来ない（`_`で受けずに網羅するために残している）。
         PanelError::Common(common) => common_error_to_pyerr(common),
         PanelError::IdentifierDimensionMismatch { .. }
         | PanelError::InsufficientDegreesOfFreedom { .. }
@@ -289,17 +274,14 @@ mod tests {
 
     #[test]
     fn check_panel_cov_options_rejects_options_the_kind_does_not_use() {
-        let m = PanelModel::Fe;
-        assert!(
-            check_panel_cov_options(PanelCovKind::Classical, m, Some("g"), None, None).is_err()
-        );
-        assert!(check_panel_cov_options(PanelCovKind::Cluster, m, None, Some("t"), None).is_err());
-        assert!(check_panel_cov_options(PanelCovKind::Cluster, m, None, None, Some(2)).is_err());
-        assert!(check_panel_cov_options(PanelCovKind::Dk, m, Some("g"), Some("t"), None).is_err());
-        assert!(check_panel_cov_options(PanelCovKind::Cluster, m, Some("g"), None, None).is_ok());
+        assert!(check_panel_cov_options(PanelCovKind::Classical, Some("g"), None, None).is_err());
+        assert!(check_panel_cov_options(PanelCovKind::Cluster, None, Some("t"), None).is_err());
+        assert!(check_panel_cov_options(PanelCovKind::Cluster, None, None, Some(2)).is_err());
+        assert!(check_panel_cov_options(PanelCovKind::Dk, Some("g"), Some("t"), None).is_err());
+        assert!(check_panel_cov_options(PanelCovKind::Cluster, Some("g"), None, None).is_ok());
         // `Cluster`で`cluster`が未指定なのはここでは弾かない（entity列にフォールバックする）。
-        assert!(check_panel_cov_options(PanelCovKind::Cluster, m, None, None, None).is_ok());
-        assert!(check_panel_cov_options(PanelCovKind::Dk, m, None, Some("t"), Some(2)).is_ok());
+        assert!(check_panel_cov_options(PanelCovKind::Cluster, None, None, None).is_ok());
+        assert!(check_panel_cov_options(PanelCovKind::Dk, None, Some("t"), Some(2)).is_ok());
     }
 
     #[test]
@@ -310,31 +292,22 @@ mod tests {
             PanelCovKind::Hc2,
             PanelCovKind::Hc3,
         ] {
-            for model in [PanelModel::Fe, PanelModel::Re] {
-                assert!(check_panel_cov_options(kind, model, Some("g"), None, None).is_err());
-                assert!(check_panel_cov_options(kind, model, None, Some("t"), None).is_err());
-                assert!(check_panel_cov_options(kind, model, None, None, Some(2)).is_err());
-                assert!(check_panel_cov_options(kind, model, None, None, None).is_ok());
-            }
+            assert!(check_panel_cov_options(kind, Some("g"), None, None).is_err());
+            assert!(check_panel_cov_options(kind, None, Some("t"), None).is_err());
+            assert!(check_panel_cov_options(kind, None, None, Some(2)).is_err());
+            assert!(check_panel_cov_options(kind, None, None, None).is_ok());
         }
     }
 
     #[test]
     fn check_panel_cov_options_requires_dk_time_for_dk() {
-        for model in [PanelModel::Fe, PanelModel::Re] {
-            assert!(check_panel_cov_options(PanelCovKind::Dk, model, None, None, None).is_err());
-            assert!(
-                check_panel_cov_options(PanelCovKind::Dk, model, None, Some("t"), None).is_ok()
-            );
-        }
+        assert!(check_panel_cov_options(PanelCovKind::Dk, None, None, None).is_err());
+        assert!(check_panel_cov_options(PanelCovKind::Dk, None, Some("t"), None).is_ok());
     }
 
     #[test]
     fn require_dk_time_returns_column_name_or_errors() {
-        assert!(matches!(
-            require_dk_time(Some("t"), PanelModel::Re),
-            Ok("t")
-        ));
-        assert!(require_dk_time(None, PanelModel::Re).is_err());
+        assert!(matches!(require_dk_time(Some("t")), Ok("t")));
+        assert!(require_dk_time(None).is_err());
     }
 }

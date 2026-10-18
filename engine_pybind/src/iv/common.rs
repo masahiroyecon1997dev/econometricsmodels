@@ -74,7 +74,8 @@ use crate::shared::column_extraction::{
     extract_f64_column, extract_optional_cluster_groups, extract_time_order_ranks,
 };
 use crate::shared::errors::{
-    common_error_to_pyerr, legacy_computation_error, legacy_validation_error,
+    common_error_to_pyerr, legacy_computation_error, legacy_validation_error, report_to_pyerr,
+    unknown_option_value,
 };
 use crate::shared::mat_conversion::mat_to_vec;
 use crate::shared::option_repr::PyRepr;
@@ -112,8 +113,12 @@ use crate::shared::validation::{
 /// `#[allow(dead_code)]`が必要だった（`--all-targets`ビルドでの`#[expect]`の罠、
 /// `engine_pybind/src/iv/CLAUDE.md`参照）が、本番経路から呼ばれるようになった今は不要。
 pub(crate) fn iv_error_to_pyerr(err: IvError) -> PyErr {
+    if let Some(report) = err.try_report() {
+        return report_to_pyerr(&report);
+    }
     let message = err.to_string();
     match err {
+        // `try_report()`で処理済みのバリアントは先頭で返るためここには来ない（`_`で受けずに網羅するために残している）。
         IvError::Common(common) => common_error_to_pyerr(common),
         IvError::InsufficientInstruments { .. }
         | IvError::InvalidGmmMaxIter { .. }
@@ -675,9 +680,11 @@ fn parse_estimator(estimator: &str) -> PyResult<IvEstimator> {
     match estimator.to_lowercase().as_str() {
         "2sls" => Ok(IvEstimator::TwoSls),
         "gmm" => Ok(IvEstimator::Gmm),
-        _ => Err(legacy_validation_error(format!(
-            "unknown estimator: '{estimator}'. Expected one of '2sls' or 'gmm'"
-        ))),
+        _ => Err(unknown_option_value(
+            "estimator",
+            estimator,
+            &["2sls", "gmm"],
+        )),
     }
 }
 
@@ -686,9 +693,11 @@ fn parse_gmm_kind(gmm_type: &str) -> PyResult<GmmKind> {
         "one_step" => Ok(GmmKind::OneStep),
         "two_step" => Ok(GmmKind::TwoStep),
         "iterated" => Ok(GmmKind::Iterated),
-        other => Err(legacy_validation_error(format!(
-            "unknown gmm_type: '{other}'. Expected one of 'one_step', 'two_step', or 'iterated'"
-        ))),
+        _ => Err(unknown_option_value(
+            "gmm_type",
+            gmm_type,
+            &["one_step", "two_step", "iterated"],
+        )),
     }
 }
 
@@ -698,10 +707,11 @@ fn parse_weight_kind(weight_type: &str) -> PyResult<WeightKind> {
         "robust" => Ok(WeightKind::Robust),
         "cluster" => Ok(WeightKind::Cluster),
         "hac" => Ok(WeightKind::Hac),
-        other => Err(legacy_validation_error(format!(
-            "unknown gmm_weight_type: '{other}'. Expected one of 'classical', \
-             'robust', 'cluster', or 'hac'"
-        ))),
+        _ => Err(unknown_option_value(
+            "gmm_weight_type",
+            weight_type,
+            &["classical", "robust", "cluster", "hac"],
+        )),
     }
 }
 

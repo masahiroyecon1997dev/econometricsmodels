@@ -221,17 +221,36 @@ pub(crate) fn to_pyerr(err: &impl ErrorInfo) -> PyErr {
     report_to_pyerr(&err.report())
 }
 
-/// `engine_pybind`自身が検出した入力不正を、カタログの`code`で例外にする。
-#[allow(
-    dead_code,
-    reason = "引数・オプションの検証をカタログへ移す段階から使う"
-)]
-pub(crate) fn user_error(code: ErrorCode, params: Vec<(&'static str, ParamValue)>) -> PyErr {
+/// `code`と`params`から[`ErrorReport`]を組み立てる（`PyErr`を作らないので、Pythonなしで検査できる）。
+fn build_report(code: ErrorCode, params: Vec<(&'static str, ParamValue)>) -> ErrorReport {
     let mut report = ErrorReport::new(code);
     for (name, value) in params {
         report = report.param(name, value);
     }
-    report_to_pyerr(&report)
+    report
+}
+
+/// `engine_pybind`自身が検出した入力不正を、カタログの`code`で例外にする。
+pub(crate) fn user_error(code: ErrorCode, params: Vec<(&'static str, ParamValue)>) -> PyErr {
+    report_to_pyerr(&build_report(code, params))
+}
+
+/// 文字列オプション`option`に、受け付けない値`value`が渡された（`allowed`は受け付ける値の一覧）。
+/// `value`は利用者が渡した文字列そのまま（大文字小文字を変えない）。
+fn unknown_option_report(option: &'static str, value: &str, allowed: &[&str]) -> ErrorReport {
+    build_report(
+        ErrorCode::OptionUnknownValue,
+        vec![
+            ("option", ParamValue::from(option)),
+            ("value", ParamValue::from(value)),
+            ("allowed", ParamValue::from(allowed.to_vec())),
+        ],
+    )
+}
+
+/// 文字列オプションに受け付けない値が渡された場合の例外（[`unknown_option_report`]）。
+pub(crate) fn unknown_option_value(option: &'static str, value: &str, allowed: &[&str]) -> PyErr {
+    report_to_pyerr(&unknown_option_report(option, value, allowed))
 }
 
 /// 移行中: カタログに載せる前の自由文を`ValidationError`にする（`code`は`LEGACY_MESSAGE`）。
@@ -265,7 +284,11 @@ pub(crate) fn legacy_computation_error(message: impl Into<String>) -> PyErr {
 /// 実装する（`least_squares_error_to_pyerr`と同じ理由、`engine_pybind/src/linear/
 /// CLAUDE.md`参照）。
 pub(crate) fn common_error_to_pyerr(err: CommonError) -> PyErr {
+    if let Some(report) = err.try_report() {
+        return report_to_pyerr(&report);
+    }
     match err {
+        // `try_report()`で処理済みのバリアントは先頭で返るためここには来ない（`_`で受けずに網羅するために残している）。
         CommonError::DimensionMismatch { .. }
         | CommonError::InsufficientObservations { .. }
         | CommonError::NoRegressors { .. }
@@ -276,5 +299,34 @@ pub(crate) fn common_error_to_pyerr(err: CommonError) -> PyErr {
         | CommonError::InsufficientClustersForInference { .. }
         | CommonError::InvalidHacLags { .. } => legacy_validation_error(err.to_string()),
         CommonError::ComputationFailed(_) => legacy_computation_error(err.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unknown_option_report_keeps_the_value_as_given_and_matches_the_catalog() {
+        let report = unknown_option_report("at", "BoGuS", &["overall", "mean", "median"]);
+        assert_eq!(report.code(), ErrorCode::OptionUnknownValue);
+        assert!(report.validate().is_ok());
+        assert_eq!(
+            report.full_text(),
+            r#"Unknown value "BoGuS" for at. Use one of: "overall", "mean", "median"."#
+        );
+    }
+
+    #[test]
+    fn build_report_renders_a_role_error() {
+        let report = build_report(
+            ErrorCode::RoleEmpty,
+            vec![("argument", ParamValue::from("x"))],
+        );
+        assert!(report.validate().is_ok());
+        assert_eq!(
+            report.full_text(),
+            r#"x must contain at least one column name. Pass a non-empty list, for example x=["x1"]."#
+        );
     }
 }

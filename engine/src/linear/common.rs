@@ -19,7 +19,8 @@
 
 use thiserror::Error;
 
-use crate::shared::error::CommonError;
+use crate::shared::error::{CommonError, catalog_display};
+use crate::shared::error_catalog::{ErrorCode, ErrorReport};
 
 /// OLS/WLSの計算過程で発生しうるエラー。
 ///
@@ -51,7 +52,7 @@ pub enum LeastSquaresError {
     SingularMatrix,
 
     /// Breusch-Godfrey検定のラグ次数`nlags`が1未満。
-    #[error("nlags must be a positive integer: got {nlags}")]
+    #[error("{}", self.catalog_message())]
     InvalidNlags { nlags: i64 },
 
     /// 事後診断検定（White検定等）の補助回帰に対して観測数が足りない。補助回帰の列数`k`
@@ -65,6 +66,27 @@ pub enum LeastSquaresError {
     InsufficientObservationsForAuxRegression { n: usize, k: usize },
 }
 
+impl LeastSquaresError {
+    /// カタログの`code`・`params`で表せるバリアントの[`ErrorReport`]。まだ移していないバリアントは`None`。
+    ///
+    /// 全バリアントを移し終えたら、`ErrorInfo`の実装（`report()`）に置き換える。
+    #[must_use]
+    pub fn try_report(&self) -> Option<ErrorReport> {
+        match self {
+            Self::Common(common) => common.try_report(),
+            Self::InvalidNlags { nlags } => {
+                Some(ErrorReport::new(ErrorCode::NlagsNotPositive).param("value", *nlags))
+            }
+            _ => None,
+        }
+    }
+
+    /// カタログに移したバリアントの`Display`が使う`message`。
+    fn catalog_message(&self) -> String {
+        catalog_display(self.try_report())
+    }
+}
+
 /// テスト用の`time_order`: 行順をそのまま時系列順とする`[0.0, 1.0, ..., n-1]`。
 #[cfg(test)]
 pub(crate) fn row_time_order(n: usize) -> Vec<f64> {
@@ -74,7 +96,29 @@ pub(crate) fn row_time_order(n: usize) -> Vec<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::error::CommonError;
+
+    #[test]
+    fn nlags_display_is_the_catalog_message() {
+        let err = LeastSquaresError::InvalidNlags { nlags: -3 };
+        assert_eq!(err.to_string(), "nlags must be a positive integer, got -3.");
+    }
+
+    #[test]
+    fn nlags_error_maps_to_the_catalog_and_wrapped_common_errors_delegate() {
+        let report = LeastSquaresError::InvalidNlags { nlags: 0 }
+            .try_report()
+            .expect("cataloged");
+        assert_eq!(report.code(), ErrorCode::NlagsNotPositive);
+        assert!(report.validate().is_ok());
+        assert_eq!(report.message(), "nlags must be a positive integer, got 0.");
+
+        let wrapped = LeastSquaresError::Common(CommonError::InvalidHacLags { hac_lags: -1, n: 5 });
+        assert_eq!(
+            wrapped.try_report().expect("cataloged").code(),
+            ErrorCode::HacLagsOutOfRange
+        );
+        assert!(LeastSquaresError::SingularMatrix.try_report().is_none());
+    }
 
     #[test]
     fn least_squares_error_messages_are_human_readable() {

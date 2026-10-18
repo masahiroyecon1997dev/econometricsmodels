@@ -18,35 +18,23 @@ def format_bound(value: float | None) -> str:
     return "None" if value is None else repr(value)
 
 
-UNKNOWN_COV_TYPE_NONLINEAR = (
-    "unknown cov_type: '{other}'. Expected one of 'classical', 'opg', "
-    "'hc0', 'hc1', or 'cluster'"
-)
-
-UNKNOWN_METHOD_NONLINEAR = (
-    "unknown solver: '{other}'. Expected one of 'newton', 'bfgs', or 'lbfgs'"
-)
-
-INVALID_TOL = "tol must be a positive finite number, got {tol}"
-
-INVALID_MAX_ITER = (
-    "max_iter must be an integer between 1 and 10000, got {max_iter}"
-)
+# `OPTION_UNKNOWN_VALUE`の`allowed`（受け付ける値の一覧）。
+ALLOWED_COV_TYPES_NONLINEAR = ["classical", "opg", "hc0", "hc1", "cluster"]
+ALLOWED_SOLVERS = ["newton", "bfgs", "lbfgs"]
+ALLOWED_MARGINAL_EFFECTS_AT = ["overall", "mean", "median"]
+# Tobitの`marginal_effects()`・`predict()`・`augment()`の`target`。
+ALLOWED_MARGINAL_EFFECTS_TARGET = [
+    "expected_latent",
+    "expected_observed",
+    "prob_uncensored",
+    "expected_uncensored",
+]
 
 INVALID_BINARY_Y = (
     "y at row {row} must be coded as 0.0 or 1.0 (binary outcome), got {value}"
 )
 
-UNKNOWN_MARGINAL_EFFECTS_AT = (
-    "unknown at: '{other}'. Expected one of 'overall', 'mean', or 'median'"
-)
-
 # Tobit固有（engine/src/nonlinear/common.rs・engine_pybind/src/nonlinear/tobit.rs）
-SIGMA_COLLISION = (
-    "x cannot contain a column named 'sigma' (it collides with the error "
-    "term's standard deviation, which TobitResult appends to param_names/params)"
-)
-
 INVALID_CENSORING_BOUNDS = (
     "invalid censoring bounds: lower={lower}, upper={upper} (at least one "
     "bound must be set, and lower must be less than upper when both are set)"
@@ -67,9 +55,4 @@ UNCENSORED_INTERVAL_TOO_NARROW = (
     "interval [{lower}, {upper}] is narrower than 1% of the estimated sigma "
     "({sigma}), so the model puts almost no probability on uncensored values. "
     "Use another target"
-)
-
-UNKNOWN_MARGINAL_EFFECTS_TARGET = (
-    "unknown target: '{other}'. Expected one of 'expected_latent', "
-    "'expected_observed', 'prob_uncensored', or 'expected_uncensored'"
 )

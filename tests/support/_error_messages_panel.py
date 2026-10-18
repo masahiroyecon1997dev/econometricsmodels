@@ -7,6 +7,11 @@ Rust側の送出元: `engine/src/panel/common.rs`・`engine_pybind/src/panel/`�
 
 from __future__ import annotations
 
+# `OPTION_UNKNOWN_VALUE`・`COV_TYPE_NOT_AVAILABLE_FOR_MODEL`の`allowed`
+# （FE/REが受け付ける`cov_type`と`variance_method`。`hc0`は含まない）。
+ALLOWED_COV_TYPES_PANEL = ["classical", "hc1", "hc2", "hc3", "cluster", "dk"]
+ALLOWED_VARIANCE_METHODS = ["swamy_arora", "wallace_hussain", "amemiya"]
+
 # `PanelError::InsufficientDegreesOfFreedom`。1-wayでは`n_periods_clause`が
 # 空文字列、2-wayでは`, n_periods={n}`になる（Rust側の`n_periods_clause`
 # 関数と同じ。`OptionのDebug表記が漏れるのを避けるための専用フォーマット、
@@ -44,12 +49,6 @@ ZERO_VARIANCE_AFTER_DEMEANING = (
     "effects)"
 )
 
-# RE: 未知の`variance_method`。
-UNKNOWN_VARIANCE_METHOD = (
-    "unknown variance_method: '{value}'. Expected one of 'swamy_arora', "
-    "'wallace_hussain', or 'amemiya'"
-)
-
 # RE: `variance_method="amemiya"`でwithin変動の無い列がある
 # （`PanelError::AmemiyaRequiresWithinVariation`）。
 AMEMIYA_NEEDS_WITHIN_VARIATION = (
@@ -73,27 +72,6 @@ NON_POSITIVE_IDIOSYNCRATIC_VARIANCE = (
     "the estimated idiosyncratic variance is not positive ({sigma2_eps}) "
     'with variance_method="{method}"; the weights of the quasi-demeaning '
     "are undefined"
-)
-
-# RE: `cov_type="dk"`で`dk_time`が未指定（`time`は借用されない。1-way・2-wayとも）。
-DK_REQUIRES_TIME = (
-    "cov_type='dk' requires the `dk_time` option: the column that defines the "
-    "time periods of the Driscoll-Kraay estimator (it is not taken from "
-    "`time`, which only sets the two-way random effects)"
-)
-
-# FE: `cov_type="dk"`で`dk_time`が未指定（`time`は借用されない。1-way・2-wayとも）。
-FE_DK_REQUIRES_DK_TIME = (
-    "cov_type='dk' requires the `dk_time` option: the column that defines the "
-    "time periods of the Driscoll-Kraay estimator (it is not taken from "
-    "`time`, which only sets the two-way fixed effects)"
-)
-
-# `PanelError::InvalidDkBandwidth`。`t`は時点数（観測数`n`ではない点に
-# 注意、OLSの`INVALID_HAC_LAGS`とは上限の意味が異なる）。
-INVALID_DK_BANDWIDTH = (
-    "dk_bandwidth must be in the range [0, t), where t is the number of "
-    "unique time periods in dk_time: got {bandwidth}, t={t}"
 )
 
 # `PanelError::InsufficientDkPeriodsForInference`（`INSUFFICIENT_CLUSTERS_FOR_
@@ -124,27 +102,4 @@ DEGENERATE_CLUSTER_TWO_GROUPS = (
     "transformation makes the two cluster scores equal, and they sum to "
     "zero, so the cluster-robust covariance is identically zero. Use more "
     "clusters or another cov_type"
-)
-
-# FE用cov_type文字列パース（engine_pybind/src/panel/common.rs::parse_panel_cov_kind）。
-# OLS/WLS/IVの`UNKNOWN_COV_TYPE_LINEAR`と異なりhc0を含まない一覧になる。
-UNKNOWN_COV_TYPE_FE = (
-    "unknown cov_type: '{other}'. Expected one of 'classical', 'hc1' "
-    "through 'hc3', 'cluster', or 'dk'"
-)
-
-HC0_NOT_SUPPORTED_FE = (
-    "cov_type='hc0' is not supported for FE (neither linearmodels nor "
-    "fixest offer HC0 for panel/FE regressions); use 'hc1', 'hc2', or "
-    "'hc3' instead"
-)
-
-# RE用cov_type文字列パース（engine_pybind/src/panel/common.rs::parse_panel_cov_kind）。
-# 「unknown cov_type」文言自体はFEと一字一句同じ（UNKNOWN_COV_TYPE_FEを流用する）が、
-# hc0専用メッセージはFEと文言が異なる（参照実装の主語が「no reference
-# implementation」でlinearmodels/fixestを個別に挙げない）ため別定数にする。
-HC0_NOT_SUPPORTED_RE = (
-    "cov_type='hc0' is not supported for RE (no reference implementation "
-    "offers HC0 for panel/RE regressions); use 'hc1', 'hc2', or 'hc3' "
-    "instead"
 )

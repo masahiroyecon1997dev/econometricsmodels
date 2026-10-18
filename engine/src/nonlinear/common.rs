@@ -31,11 +31,12 @@ use thiserror::Error;
 
 use crate::shared::covariance::{cluster_correction, cluster_meat, sandwich};
 use crate::shared::design_matrix::design_matrix_element;
-use crate::shared::error::CommonError;
+use crate::shared::error::{CommonError, catalog_display};
+use crate::shared::error_catalog::{ErrorCode, ErrorReport};
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference;
 use crate::shared::linear_algebra::{checked_col_piv_qr, ensure_well_conditioned_symmetric_matrix};
-use crate::shared::validation::MAX_ITER_LIMIT;
+use crate::shared::validation::{MAX_ITER_LIMIT, MAX_ITER_MIN};
 use crate::shared::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 
 /// 打ち切り境界を、エラーメッセージ用にPython側の表記（`None`・`0.0`）で整形する。
@@ -67,18 +68,15 @@ pub enum MleError {
     )]
     NonConvergence { n_iter: usize },
 
-    /// `max_iter`が0以下。
-    #[error(
-        "max_iter must be an integer between 1 and {}, got {max_iter}",
-        MAX_ITER_LIMIT
-    )]
+    /// `max_iter`が`1..=MAX_ITER_LIMIT`の範囲外。
+    #[error("{}", self.catalog_message())]
     InvalidMaxIter { max_iter: i64 },
 
     /// `tol`が0以下、またはNaN・無限大。勾配ノルムに基づく収束判定`‖∇ℓ(θ)‖ < tol`が
     /// 理論上満たされない（NaNは常に偽、`0`以下は到達不能）ため、常に`max_iter`まで反復して
     /// `NonConvergence`（または`converged=false`）になる（`InvalidMaxIter`と同じ形の
     /// 早期バリデーション）。
-    #[error("tol must be a positive finite number, got {tol}")]
+    #[error("{}", self.catalog_message())]
     InvalidTol { tol: f64 },
 
     /// Hessianが特異で逆行列が計算できない。Newton法のステップ求解中（収束前の任意の点）、
@@ -245,6 +243,35 @@ pub enum MleError {
     EvaluationBudgetExceeded { budget: u64 },
 }
 
+impl MleError {
+    /// カタログの`code`・`params`で表せるバリアントの[`ErrorReport`]。まだ移していないバリアントは`None`。
+    ///
+    /// 全バリアントを移し終えたら、`ErrorInfo`の実装（`report()`）に置き換える。
+    #[must_use]
+    pub fn try_report(&self) -> Option<ErrorReport> {
+        match self {
+            Self::Common(common) => common.try_report(),
+            Self::InvalidMaxIter { max_iter } => Some(
+                ErrorReport::new(ErrorCode::MaxIterOutOfRange)
+                    .param("value", *max_iter)
+                    .param("min", MAX_ITER_MIN)
+                    .param("max", MAX_ITER_LIMIT),
+            ),
+            Self::InvalidTol { tol } => Some(
+                ErrorReport::new(ErrorCode::ToleranceNotPositiveFinite)
+                    .param("option", "tol")
+                    .param("value", *tol),
+            ),
+            _ => None,
+        }
+    }
+
+    /// カタログに移したバリアントの`Display`が使う`message`。
+    fn catalog_message(&self) -> String {
+        catalog_display(self.try_report())
+    }
+}
+
 /// `y`が`{0.0, 1.0}`の2値でない値を含む場合にエラーを返す（Logit/Probit専用、
 /// `MleError::InvalidBinaryY`のdocコメント参照）。statsmodelsは`Logit`のコンストラクタ
 /// 時点でこの検証を行うが、本実装では`fit()`冒頭（`LogitInput::from_columns`の
@@ -262,9 +289,9 @@ pub fn validate_binary_y(y: &Mat<f64>) -> Result<(), MleError> {
     Ok(())
 }
 
-/// `max_iter`が`1..=MAX_ITER_LIMIT`の範囲外の場合にエラーを返す。
+/// `max_iter`が`MAX_ITER_MIN..=MAX_ITER_LIMIT`の範囲外の場合にエラーを返す。
 fn validate_max_iter(max_iter: i64) -> Result<(), MleError> {
-    if !(1..=MAX_ITER_LIMIT).contains(&max_iter) {
+    if !(MAX_ITER_MIN..=MAX_ITER_LIMIT).contains(&max_iter) {
         return Err(MleError::InvalidMaxIter { max_iter });
     }
     Ok(())
@@ -3198,6 +3225,52 @@ pub(crate) mod test_support {
 mod tests {
     use super::*;
 
+    #[test]
+    fn mle_cataloged_variants_display_the_catalog_message_and_common_delegates() {
+        let nan_tol = MleError::InvalidTol { tol: f64::NAN };
+        assert_eq!(
+            nan_tol.to_string(),
+            "tol must be a positive finite number, got NaN."
+        );
+        assert_eq!(
+            MleError::InvalidTol { tol: f64::INFINITY }.to_string(),
+            "tol must be a positive finite number, got inf."
+        );
+        let max_iter = MleError::InvalidMaxIter {
+            max_iter: MAX_ITER_LIMIT + 1,
+        };
+        assert_eq!(
+            max_iter.to_string(),
+            max_iter.try_report().expect("cataloged").message()
+        );
+        let wrapped = MleError::Common(CommonError::InvalidHacLags { hac_lags: 9, n: 9 });
+        assert_eq!(
+            wrapped.try_report().expect("cataloged").code(),
+            ErrorCode::HacLagsOutOfRange
+        );
+    }
+
+    #[test]
+    fn option_range_errors_map_to_catalog_codes_with_valid_params() {
+        let max_iter = MleError::InvalidMaxIter { max_iter: 0 }
+            .try_report()
+            .expect("cataloged");
+        assert_eq!(max_iter.code(), ErrorCode::MaxIterOutOfRange);
+        assert!(max_iter.validate().is_ok());
+
+        let tol = MleError::InvalidTol { tol: -1.0 }
+            .try_report()
+            .expect("cataloged");
+        assert_eq!(tol.code(), ErrorCode::ToleranceNotPositiveFinite);
+        assert!(tol.validate().is_ok());
+        assert_eq!(
+            tol.message(),
+            "tol must be a positive finite number, got -1.0."
+        );
+
+        assert!(MleError::SingularHessian.try_report().is_none());
+    }
+
     /// テスト用のダミー目的関数: `f(θ) = 0.5 (θ - target)' A (θ - target)`
     /// （`A`は対角行列、対角成分は正でAは正定値）。最小点は`θ = target`、
     /// そこでのHessianは`A`自身（既知の解析解で検証できる）。
@@ -5377,7 +5450,7 @@ mod tests {
         );
         assert_eq!(
             MleError::InvalidMaxIter { max_iter: 0 }.to_string(),
-            "max_iter must be an integer between 1 and 10000, got 0"
+            "max_iter must be an integer from 1 to 10000, got 0."
         );
         assert_eq!(
             MleError::SingularHessian.to_string(),

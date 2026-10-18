@@ -14,6 +14,13 @@ use super::group_codes::GroupCodes;
 /// 誤りに気づける。
 pub const MAX_ITER_LIMIT: i64 = 10_000;
 
+/// `max_iter`の下限。
+pub const MAX_ITER_MIN: i64 = 1;
+
+/// `gmm_type="iterated"`の`gmm_max_iter`の下限。初回の推定を1回と数えるため、2回以下は
+/// 2段階GMMに収束判定を付けただけになる。
+pub const GMM_MAX_ITER_MIN: i64 = 3;
+
 /// `cov_type="cluster"`の`groups`（各系統の入力データの行と対応する長さ`n`の配列である
 /// という内部契約、および実際のクラスター数が2以上であること）を検証し、成功時はクラスター数
 /// `G`を返す。`G`はOLSではt検定・信頼区間・F検定の自由度（`G-1`）の算出に再利用する

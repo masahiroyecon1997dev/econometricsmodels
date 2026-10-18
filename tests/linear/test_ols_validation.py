@@ -172,23 +172,19 @@ def test_non_numeric_dtype_raises():
 
 def test_y_in_x_raises(dataset):
     """`y`と同じ列名が`x`にも含まれる場合`ValidationError`。"""
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
-            col="y",
-            single_role="y",
-            multi_role="x",
-        ),
+    with raises_error(
+        ErrorCode.ROLE_COLUMN_OVERLAP,
+        column="y",
+        argument="y",
+        other_argument="x",
     ):
         OLS(dataset, y="y", x=["y", "x1"]).fit()
 
 
 def test_duplicate_x_column_raises(dataset):
     """`x`に同じ列名が重複して含まれる場合`ValidationError`。"""
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.DUPLICATE_WITHIN_ROLE, name="x1", role="x"),
+    with raises_error(
+        ErrorCode.ROLE_DUPLICATE_COLUMN, column="x1", argument="x"
     ):
         OLS(dataset, y="y", x=["x1", "x1"]).fit()
 
@@ -199,15 +195,13 @@ def test_const_collision_with_include_intercept_raises():
     自動追加される定数項と衝突し`ValidationError`になること。
     """
     df = name_collision_frame([1.0, 2.0, 3.0])
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.CONST_COLLISION, role="x")
-    ):
+    with raises_error(ErrorCode.INTERCEPT_NAME_COLLISION, argument="x"):
         OLS(df, y="y", x=["const"]).fit()
 
 
 def test_empty_x_raises(dataset):
     """`x`が空リストの場合`ValidationError`。"""
-    with pytest.raises(ValidationError, match=escaped(msgs.X_EMPTY, role="x")):
+    with raises_error(ErrorCode.ROLE_EMPTY, argument="x"):
         OLS(dataset, y="y", x=[]).fit()
 
 
@@ -369,18 +363,12 @@ def test_augment_column_collision_raises(dataset):
     ある場合`ValidationError`（黙って上書きしない）。
     """
     df_with_predicted = dataset.with_columns(pl.lit(0.0).alias("predicted"))
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.EXISTING_COLUMN_COLLISION, name="predicted"),
-    ):
+    with raises_error(ErrorCode.AUGMENT_COLUMN_EXISTS, column="predicted"):
         OLS(df_with_predicted, y="y", x=["x1", "x2"]).fit().augment()
 
     res = our_fit(dataset)
     new_data = pl.DataFrame({"x1": [1.0], "x2": [0.5], "predicted": [0.0]})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.EXISTING_COLUMN_COLLISION, name="predicted"),
-    ):
+    with raises_error(ErrorCode.AUGMENT_COLUMN_EXISTS, column="predicted"):
         res.augment(new_data)
 
 
@@ -409,9 +397,11 @@ def test_invalid_cov_type_raises(dataset, cov_type):
     （空文字列が`.is_empty()`等の特別扱いで`match`の網羅から漏れていないこと）。
     """
     options = OLSOptions(cov_type=cov_type)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.UNKNOWN_COV_TYPE_LINEAR, other=cov_type),
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="cov_type",
+        value=cov_type,
+        allowed=msgs.ALLOWED_COV_TYPES_LINEAR,
     ):
         OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
 
@@ -419,7 +409,12 @@ def test_invalid_cov_type_raises(dataset, cov_type):
 @pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
 def test_nonrobust_is_rejected(dataset, cov_type):
     """`"nonrobust"`は別名として受け付けない（概念ごとに文字列を1つに絞る）。"""
-    with pytest.raises(ValidationError, match="unknown cov_type: 'nonrobust'"):
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="cov_type",
+        value=cov_type,
+        allowed=msgs.ALLOWED_COV_TYPES_LINEAR,
+    ):
         our_fit(dataset, cov_type)
 
 
@@ -459,12 +454,8 @@ def test_insufficient_clusters_raises(dataset):
 def test_invalid_confidence_level_raises(dataset, confidence_level):
     """`confidence_level`が(0, 1)の範囲外（境界値0.0を含む）の場合`ValidationError`。"""
     options = OLSOptions(confidence_level=confidence_level)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.INVALID_CONFIDENCE_LEVEL,
-            confidence_level=msgs.rust_f64(confidence_level),
-        ),
+    with raises_error(
+        ErrorCode.CONFIDENCE_LEVEL_OUT_OF_RANGE, value=confidence_level
     ):
         OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
 
@@ -475,9 +466,8 @@ def test_invalid_confidence_level_raises(dataset, confidence_level):
 def test_invalid_hac_lags_raises(dataset, hac_lags):
     """`hac_lags`が`[0, n)`の範囲外の場合`ValidationError`。"""
     options = OLSOptions(cov_type="hac", hac_lags=hac_lags, hac_time=ROW_TIME)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.INVALID_HAC_LAGS, hac_lags=hac_lags, n=100),
+    with raises_error(
+        ErrorCode.HAC_LAGS_OUT_OF_RANGE, value=hac_lags, n_obs=100, max=99
     ):
         OLS(
             with_row_time(dataset), y="y", x=["x1", "x2"], options=options
@@ -530,9 +520,8 @@ def test_option_unused_by_cov_type_raises(
     書き忘れでclassicalの標準誤差が返るのを防ぐ）。
     """
     options = OLSOptions(cov_type=cov_type, **{option: value})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.UNUSED_OPTION, option=option, condition=condition),
+    with raises_error(
+        ErrorCode.OPTION_UNUSED, option=option, condition=condition
     ):
         OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
 
@@ -559,10 +548,7 @@ def test_hac_requires_hac_time(dataset, cov_type):
     見える誤った結果が黙って返るのを防ぐ）。
     """
     options = OLSOptions(cov_type=cov_type, hac_lags=2)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.HAC_REQUIRES_HAC_TIME, setting="cov_type"),
-    ):
+    with raises_error(ErrorCode.HAC_TIME_REQUIRED, setting="cov_type"):
         OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
@@ -587,18 +573,24 @@ def test_hac_time_with_tied_values_raises(dataset, time_expr, rows):
 
 def test_option_unused_check_is_case_insensitive(dataset):
     options = OLSOptions(cov_type="CLASSICAL", cluster="cluster")
-    with pytest.raises(ValidationError, match="only used with"):
+    with raises_error(
+        ErrorCode.OPTION_UNUSED,
+        option="cluster",
+        condition='cov_type="cluster"',
+    ):
         OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
 def test_unknown_cov_type_is_reported_before_unused_option(dataset):
-    """`cov_type`のtypoは、未使用オプションの指摘ではなく`unknown cov_type`で
+    """`cov_type`のtypoは、未使用オプションの指摘ではなく`OPTION_UNKNOWN_VALUE`で
     報告する（`cluster`を消す方向へ誤誘導しない）。
     """
     options = OLSOptions(cov_type="clusterr", cluster="cluster")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.UNKNOWN_COV_TYPE_LINEAR, other="clusterr"),
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="cov_type",
+        value="clusterr",
+        allowed=msgs.ALLOWED_COV_TYPES_LINEAR,
     ):
         OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
 

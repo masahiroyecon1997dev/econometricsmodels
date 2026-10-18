@@ -28,6 +28,7 @@ import statsmodels.api as sm
 from _assertions import assert_argument_case_insensitive, assert_close
 from _constants import DATA_DIR
 from _error_messages import escaped
+from _errors import raises_error
 from _helpers import (
     CASE_SPELLINGS,
     ROW_TIME,
@@ -40,6 +41,7 @@ from econometricsmodels import (
     OLS,
     ComputationError,
     DiagnosticResult,
+    ErrorCode,
     IVOptions,
     OLSOptions,
     ValidationError,
@@ -349,9 +351,11 @@ def test_non_string_statistic_raises_type_error(baseline):
 
 
 def test_unknown_statistic_raises_validation_error(baseline):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(linear_msgs.UNKNOWN_DIAGNOSTIC_STATISTIC, other="chi2"),
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="statistic",
+        value="chi2",
+        allowed=linear_msgs.ALLOWED_DIAGNOSTIC_STATISTICS,
     ):
         baseline.fit().white_test("chi2")
 

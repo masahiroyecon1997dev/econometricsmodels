@@ -216,8 +216,8 @@ use crate::shared::error::CommonError;
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference;
 use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
-use crate::shared::validation::MAX_ITER_LIMIT;
 use crate::shared::validation::validate_cluster_groups;
+use crate::shared::validation::{GMM_MAX_ITER_MIN, MAX_ITER_LIMIT};
 
 /// GMMの点推定に使う重み行列の種別（`docs/spec/iv-spec.md`1.2節）。
 ///
@@ -367,7 +367,7 @@ impl GmmEstimator {
             return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
         }
         if let GmmType::Iterated { max_iter, tol, .. } = &gmm_type {
-            if *max_iter < 3 || *max_iter as u64 > MAX_ITER_LIMIT as u64 {
+            if *max_iter < GMM_MAX_ITER_MIN as usize || *max_iter as u64 > MAX_ITER_LIMIT as u64 {
                 return Err(IvError::InvalidGmmMaxIter {
                     max_iter: *max_iter as i64,
                 });

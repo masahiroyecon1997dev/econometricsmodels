@@ -489,14 +489,11 @@ def check_marginal_effects_confidence_level_is_independent_of_fit(
 
 
 def check_y_in_x_raises(dataset, estimator_cls):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
-            col="y",
-            single_role="y",
-            multi_role="x",
-        ),
+    with raises_error(
+        ErrorCode.ROLE_COLUMN_OVERLAP,
+        column="y",
+        argument="y",
+        other_argument="x",
     ):
         estimator_cls(dataset, y="y", x=["y", "x1"]).fit()
 
@@ -515,23 +512,20 @@ def check_y_empty_string_raises(dataset, estimator_cls):
 
 
 def check_duplicate_x_column_raises(dataset, estimator_cls):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.DUPLICATE_WITHIN_ROLE, name="x1", role="x"),
+    with raises_error(
+        ErrorCode.ROLE_DUPLICATE_COLUMN, column="x1", argument="x"
     ):
         estimator_cls(dataset, y="y", x=["x1", "x1"]).fit()
 
 
 def check_const_collision_with_include_intercept_raises(estimator_cls):
     df = name_collision_frame([0.0, 1.0, 0.0, 1.0])
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.CONST_COLLISION, role="x")
-    ):
+    with raises_error(ErrorCode.INTERCEPT_NAME_COLLISION, argument="x"):
         estimator_cls(df, y="y", x=["const"]).fit()
 
 
 def check_empty_x_raises(dataset, estimator_cls):
-    with pytest.raises(ValidationError, match=escaped(msgs.X_EMPTY, role="x")):
+    with raises_error(ErrorCode.ROLE_EMPTY, argument="x"):
         estimator_cls(dataset, y="y", x=[]).fit()
 
 
@@ -784,11 +778,8 @@ def check_augment_column_collision_raises(dataset, estimator_cls):
     df_with_probability = dataset.with_columns(
         pl.lit(0.0).alias("predicted_probability")
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.EXISTING_COLUMN_COLLISION, name="predicted_probability"
-        ),
+    with raises_error(
+        ErrorCode.AUGMENT_COLUMN_EXISTS, column="predicted_probability"
     ):
         estimator_cls(
             df_with_probability, y="y", x=["x1", "x2"]
@@ -798,11 +789,8 @@ def check_augment_column_collision_raises(dataset, estimator_cls):
     new_data = pl.DataFrame(
         {"x1": [1.0], "x2": [0.5], "predicted_probability": [0.0]}
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.EXISTING_COLUMN_COLLISION, name="predicted_probability"
-        ),
+    with raises_error(
+        ErrorCode.AUGMENT_COLUMN_EXISTS, column="predicted_probability"
     ):
         res.augment(new_data)
 
@@ -830,11 +818,11 @@ def check_unknown_cov_type_raises(
     dataset, estimator_cls, options_cls, cov_type="bogus"
 ):
     """未知の`cov_type`（空文字列を含む）は`ValidationError`。"""
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            nonlinear_msgs.UNKNOWN_COV_TYPE_NONLINEAR, other=cov_type
-        ),
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="cov_type",
+        value=cov_type,
+        allowed=nonlinear_msgs.ALLOWED_COV_TYPES_NONLINEAR,
     ):
         estimator_cls(
             dataset,
@@ -846,7 +834,12 @@ def check_unknown_cov_type_raises(
 
 def check_nonrobust_is_rejected(dataset, estimator_cls, options_cls, cov_type):
     """`"nonrobust"`は別名として受け付けない（概念ごとに文字列を1つに絞る）。"""
-    with pytest.raises(ValidationError, match="unknown cov_type: 'nonrobust'"):
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="cov_type",
+        value=cov_type,
+        allowed=nonlinear_msgs.ALLOWED_COV_TYPES_NONLINEAR,
+    ):
         estimator_cls(
             dataset,
             y="y",
@@ -859,9 +852,11 @@ def check_unknown_method_raises(
     dataset, estimator_cls, options_cls, solver="bogus"
 ):
     """未知の`solver`（空文字列を含む）は`ValidationError`。"""
-    with pytest.raises(
-        ValidationError,
-        match=escaped(nonlinear_msgs.UNKNOWN_METHOD_NONLINEAR, other=solver),
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="solver",
+        value=solver,
+        allowed=nonlinear_msgs.ALLOWED_SOLVERS,
     ):
         estimator_cls(
             dataset,
@@ -882,12 +877,8 @@ def check_invalid_confidence_level_raises(
     （OLS/WLSの`test_invalid_confidence_level_raises`と同型）。
     """
     options = options_cls(confidence_level=confidence_level)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.INVALID_CONFIDENCE_LEVEL,
-            confidence_level=msgs.rust_f64(confidence_level),
-        ),
+    with raises_error(
+        ErrorCode.CONFIDENCE_LEVEL_OUT_OF_RANGE, value=confidence_level
     ):
         estimator_cls(dataset, y="y", x=["x1", "x2"], options=options).fit()
 
@@ -896,9 +887,8 @@ def check_non_positive_tol_raises(dataset, estimator_cls, options_cls, tol):
     """`tol<=0`は勾配ノルム基準の収束条件が理論上満たされないため
     `ValidationError`（engine側の`MleError::InvalidTol`）。
     """
-    with pytest.raises(
-        ValidationError,
-        match=escaped(nonlinear_msgs.INVALID_TOL, tol=msgs.rust_f64(tol)),
+    with raises_error(
+        ErrorCode.TOLERANCE_NOT_POSITIVE_FINITE, option="tol", value=tol
     ):
         estimator_cls(
             dataset,
@@ -915,9 +905,8 @@ def check_non_positive_max_iter_raises(
 
     `tol<=0`側は`check_non_positive_tol_raises`で確認する。
     """
-    with pytest.raises(
-        ValidationError,
-        match=escaped(nonlinear_msgs.INVALID_MAX_ITER, max_iter=max_iter),
+    with raises_error(
+        ErrorCode.MAX_ITER_OUT_OF_RANGE, value=max_iter, min=1, max=10_000
     ):
         estimator_cls(
             dataset,
@@ -1042,11 +1031,11 @@ def check_cluster_nonexistent_column_raises(
 
 def check_marginal_effects_unknown_at_raises(dataset, estimator_cls):
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            nonlinear_msgs.UNKNOWN_MARGINAL_EFFECTS_AT, other="bogus"
-        ),
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="at",
+        value="bogus",
+        allowed=nonlinear_msgs.ALLOWED_MARGINAL_EFFECTS_AT,
     ):
         res.marginal_effects(at="bogus")
 
@@ -1055,12 +1044,8 @@ def check_marginal_effects_confidence_level_out_of_range_raises(
     dataset, estimator_cls, confidence_level
 ):
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.INVALID_CONFIDENCE_LEVEL,
-            confidence_level=msgs.rust_f64(confidence_level),
-        ),
+    with raises_error(
+        ErrorCode.CONFIDENCE_LEVEL_OUT_OF_RANGE, value=confidence_level
     ):
         res.marginal_effects(confidence_level=confidence_level)
 
@@ -1899,13 +1884,10 @@ def check_cluster_unused_by_cov_type_raises(
     """
     for cov_type in NON_CLUSTER_COV_TYPES:
         options = options_cls(cov_type=cov_type, cluster="cluster")
-        with pytest.raises(
-            ValidationError,
-            match=escaped(
-                msgs.UNUSED_OPTION,
-                option="cluster",
-                condition='cov_type="cluster"',
-            ),
+        with raises_error(
+            ErrorCode.OPTION_UNUSED,
+            option="cluster",
+            condition='cov_type="cluster"',
         ):
             estimator_cls(
                 dataset, y="y", x=["x1", "x2"], options=options

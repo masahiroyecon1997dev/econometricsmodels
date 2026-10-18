@@ -71,7 +71,7 @@ use crate::shared::column_extraction::{
     extract_entity_groups, extract_f64_column, extract_f64_columns,
     extract_optional_cluster_groups, extract_time_keys,
 };
-use crate::shared::errors::legacy_validation_error;
+use crate::shared::errors::unknown_option_value;
 use crate::shared::mat_conversion::mat_to_vec;
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
@@ -440,7 +440,7 @@ fn resolve_re_cov_type(
             )?,
         },
         PanelCovKind::Dk => {
-            let dk_time = require_dk_time(options.dk_time.as_deref(), PanelModel::Re)?;
+            let dk_time = require_dk_time(options.dk_time.as_deref())?;
             ReCovType::Dk {
                 bandwidth: options.dk_bandwidth,
                 time: extract_time_keys(df, dk_time, ColumnSource::new("dk_time", "data"))?,
@@ -458,10 +458,11 @@ fn parse_variance_method(value: &str) -> PyResult<VarianceMethod> {
         "swamy_arora" => Ok(VarianceMethod::SwamyArora),
         "wallace_hussain" => Ok(VarianceMethod::WallaceHussain),
         "amemiya" => Ok(VarianceMethod::Amemiya),
-        _ => Err(legacy_validation_error(format!(
-            "unknown variance_method: '{value}'. Expected one of 'swamy_arora', \
-             'wallace_hussain', or 'amemiya'"
-        ))),
+        _ => Err(unknown_option_value(
+            "variance_method",
+            value,
+            &["swamy_arora", "wallace_hussain", "amemiya"],
+        )),
     }
 }
 
@@ -498,7 +499,6 @@ pub(crate) fn build_re_input(
     let variance_method = parse_variance_method(&options.variance_method)?;
     check_panel_cov_options(
         cov_kind,
-        PanelModel::Re,
         options.cluster.as_deref(),
         options.dk_time.as_deref(),
         options.dk_bandwidth,

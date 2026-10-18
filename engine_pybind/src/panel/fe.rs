@@ -394,7 +394,7 @@ fn resolve_fe_cov_type(
             )?,
         },
         PanelCovKind::Dk => {
-            let dk_time = require_dk_time(options.dk_time.as_deref(), PanelModel::Fe)?;
+            let dk_time = require_dk_time(options.dk_time.as_deref())?;
             FeCovType::Dk {
                 bandwidth: options.dk_bandwidth,
                 time: extract_time_keys(df, dk_time, ColumnSource::new("dk_time", "data"))?,
@@ -434,7 +434,6 @@ pub(crate) fn build_fe_input(
     let cov_kind = parse_panel_cov_kind(&options.cov_type, PanelModel::Fe)?;
     check_panel_cov_options(
         cov_kind,
-        PanelModel::Fe,
         options.cluster.as_deref(),
         options.dk_time.as_deref(),
         options.dk_bandwidth,

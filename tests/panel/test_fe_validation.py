@@ -64,40 +64,31 @@ COV_TYPES = ["classical", "hc1", "hc2", "hc3", "cluster"]
 
 
 def test_y_overlaps_entity_raises(fe_dataset):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.ROLE_OVERLAP_SINGLE_EQUALS_SINGLE,
-            col="y",
-            later_role="entity",
-            earlier_role="y",
-        ),
+    with raises_error(
+        ErrorCode.ROLE_COLUMN_OVERLAP,
+        column="y",
+        argument="entity",
+        other_argument="y",
     ):
         FE(fe_dataset, y="y", x=["x1", "x2"], entity="y").fit()
 
 
 def test_y_overlaps_x_raises(fe_dataset):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
-            col="y",
-            single_role="y",
-            multi_role="x",
-        ),
+    with raises_error(
+        ErrorCode.ROLE_COLUMN_OVERLAP,
+        column="y",
+        argument="y",
+        other_argument="x",
     ):
         FE(fe_dataset, y="y", x=["y", "x2"], entity="entity").fit()
 
 
 def test_entity_overlaps_x_raises(fe_dataset):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
-            col="entity",
-            single_role="entity",
-            multi_role="x",
-        ),
+    with raises_error(
+        ErrorCode.ROLE_COLUMN_OVERLAP,
+        column="entity",
+        argument="entity",
+        other_argument="x",
     ):
         FE(fe_dataset, y="y", x=["entity", "x2"], entity="entity").fit()
 
@@ -105,14 +96,11 @@ def test_entity_overlaps_x_raises(fe_dataset):
 def test_y_overlaps_time_raises(fe_dataset):
     """2-way限定（`time`が設定されているときのみ`time`ロールが存在する）。"""
     options = FEOptions(time="y")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.ROLE_OVERLAP_SINGLE_EQUALS_SINGLE,
-            col="y",
-            later_role="time",
-            earlier_role="y",
-        ),
+    with raises_error(
+        ErrorCode.ROLE_COLUMN_OVERLAP,
+        column="y",
+        argument="time",
+        other_argument="y",
     ):
         FE(
             fe_dataset, y="y", x=["x1", "x2"], entity="entity", options=options
@@ -121,14 +109,11 @@ def test_y_overlaps_time_raises(fe_dataset):
 
 def test_entity_overlaps_time_raises(fe_dataset):
     options = FEOptions(time="entity")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.ROLE_OVERLAP_SINGLE_EQUALS_SINGLE,
-            col="entity",
-            later_role="time",
-            earlier_role="entity",
-        ),
+    with raises_error(
+        ErrorCode.ROLE_COLUMN_OVERLAP,
+        column="entity",
+        argument="time",
+        other_argument="entity",
     ):
         FE(
             fe_dataset, y="y", x=["x1", "x2"], entity="entity", options=options
@@ -141,14 +126,11 @@ def test_entity_overlaps_time_raises(fe_dataset):
 def test_dk_time_overlaps_y_or_entity_raises(fe_dataset, column, earlier_role):
     """`dk_time`が`y`・`entity`と同じ列だと、DKの時点構造が意味を成さない。"""
     options = FEOptions(cov_type="dk", dk_time=column)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.ROLE_OVERLAP_SINGLE_EQUALS_SINGLE,
-            col=column,
-            later_role="dk_time",
-            earlier_role=earlier_role,
-        ),
+    with raises_error(
+        ErrorCode.ROLE_COLUMN_OVERLAP,
+        column=column,
+        argument="dk_time",
+        other_argument=earlier_role,
     ):
         FE(
             fe_dataset, y="y", x=["x1", "x2"], entity="entity", options=options
@@ -173,14 +155,11 @@ def test_dk_time_may_equal_time_or_overlap_x(fe_dataset, time, x):
 
 def test_time_overlaps_x_raises(fe_dataset):
     options = FEOptions(time="time")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
-            col="time",
-            single_role="time",
-            multi_role="x",
-        ),
+    with raises_error(
+        ErrorCode.ROLE_COLUMN_OVERLAP,
+        column="time",
+        argument="time",
+        other_argument="x",
     ):
         FE(
             fe_dataset,
@@ -192,9 +171,8 @@ def test_time_overlaps_x_raises(fe_dataset):
 
 
 def test_duplicate_within_x_raises(fe_dataset):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.DUPLICATE_WITHIN_ROLE, name="x1", role="x"),
+    with raises_error(
+        ErrorCode.ROLE_DUPLICATE_COLUMN, column="x1", argument="x"
     ):
         FE(fe_dataset, y="y", x=["x1", "x1"], entity="entity").fit()
 
@@ -203,7 +181,7 @@ def test_x_empty_raises(fe_dataset):
     """固定効果のみのモデル（`x=[]`）は許容せず、他手法と同じ
     `validate_x_non_empty`を適用する（`engine_pybind/src/panel/fe.rs`モジュールdoc参照）。
     """
-    with pytest.raises(ValidationError, match=escaped(msgs.X_EMPTY, role="x")):
+    with raises_error(ErrorCode.ROLE_EMPTY, argument="x"):
         FE(fe_dataset, y="y", x=[], entity="entity").fit()
 
 
@@ -515,21 +493,26 @@ def test_zero_variance_after_demeaning_raises():
 @pytest.mark.parametrize("cov_type", ["invalid", "", "hac"])
 def test_unknown_cov_type_raises(fe_dataset, cov_type):
     options = FEOptions(cov_type=cov_type)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(panel_msgs.UNKNOWN_COV_TYPE_FE, other=cov_type),
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="cov_type",
+        value=cov_type,
+        allowed=panel_msgs.ALLOWED_COV_TYPES_PANEL,
     ):
         our_fit(fe_dataset, options=options)
 
 
 def test_hc0_not_supported_raises(fe_dataset):
-    """`hc0`はOLS/WLS/IVでは有効な値のため、他の未知の値とは別の専用メッセージ
-    （`UNKNOWN_COV_TYPE_FE`ではなく`HC0_NOT_SUPPORTED_FE`）で弾く
-    （`engine_pybind/src/panel/common.rs::parse_panel_cov_kind`）。
+    """`hc0`はOLS/WLS/IVでは有効な値のため、未知の値（`OPTION_UNKNOWN_VALUE`）
+    ではなく「この手法では使えない」（`COV_TYPE_NOT_AVAILABLE_FOR_MODEL`）で
+    弾く（`engine_pybind/src/panel/common.rs::parse_panel_cov_kind`）。
     """
     options = FEOptions(cov_type="hc0")
-    with pytest.raises(
-        ValidationError, match=escaped(panel_msgs.HC0_NOT_SUPPORTED_FE)
+    with raises_error(
+        ErrorCode.COV_TYPE_NOT_AVAILABLE_FOR_MODEL,
+        value="hc0",
+        model="FE",
+        allowed=panel_msgs.ALLOWED_COV_TYPES_PANEL,
     ):
         our_fit(fe_dataset, options=options)
 
@@ -537,12 +520,8 @@ def test_hc0_not_supported_raises(fe_dataset):
 @pytest.mark.parametrize("confidence_level", [1.5, 0.0, -0.1])
 def test_invalid_confidence_level_raises(fe_dataset, confidence_level):
     options = FEOptions(confidence_level=confidence_level)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.INVALID_CONFIDENCE_LEVEL,
-            confidence_level=msgs.rust_f64(confidence_level),
-        ),
+    with raises_error(
+        ErrorCode.CONFIDENCE_LEVEL_OUT_OF_RANGE, value=confidence_level
     ):
         our_fit(fe_dataset, options=options)
 
@@ -555,9 +534,7 @@ def test_dk_requires_dk_time_raises(fe_dataset, time):
     あっても、それをDKの時点列として借用しない（どの列が時点かを明示させる）。
     """
     options = FEOptions(cov_type="dk", time=time)
-    with pytest.raises(
-        ValidationError, match=escaped(panel_msgs.FE_DK_REQUIRES_DK_TIME)
-    ):
+    with raises_error(ErrorCode.DK_TIME_REQUIRED):
         our_fit(fe_dataset, options=options)
 
 
@@ -567,11 +544,11 @@ def test_invalid_dk_bandwidth_raises(fe_dataset, dk_bandwidth):
     options = FEOptions(
         cov_type="dk", dk_time="time", dk_bandwidth=dk_bandwidth
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            panel_msgs.INVALID_DK_BANDWIDTH, bandwidth=dk_bandwidth, t=6
-        ),
+    with raises_error(
+        ErrorCode.DK_BANDWIDTH_OUT_OF_RANGE,
+        value=dk_bandwidth,
+        n_periods=6,
+        max=5,
     ):
         our_fit(fe_dataset, options=options)
 
@@ -792,9 +769,8 @@ def test_option_unused_by_cov_type_raises(
     # dkは時点列(`dk_time`)が必須なので、他のオプションの検証だけを見るため添える。
     extra = {"dk_time": "time"} if cov_type == "dk" else {}
     options = FEOptions(cov_type=cov_type, **extra, **{option: value})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.UNUSED_OPTION, option=option, condition=condition),
+    with raises_error(
+        ErrorCode.OPTION_UNUSED, option=option, condition=condition
     ):
         our_fit(fe_dataset, options=options)
 
@@ -807,9 +783,11 @@ def test_dk_options_used_by_dk_are_accepted(fe_dataset, cov_type):
 
 def test_unknown_cov_type_is_reported_before_unused_option(fe_dataset):
     options = FEOptions(cov_type="dkk", dk_bandwidth=1)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(panel_msgs.UNKNOWN_COV_TYPE_FE, other="dkk"),
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="cov_type",
+        value="dkk",
+        allowed=panel_msgs.ALLOWED_COV_TYPES_PANEL,
     ):
         our_fit(fe_dataset, options=options)
 

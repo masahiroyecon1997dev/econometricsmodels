@@ -128,7 +128,7 @@ FEの1段階目（データ抽出・pyclass定義）と同じ段階（`REOptions
 
 ## `cov_type`の検査（値・組合せ・列）と報告順
 
-`panel/common.rs`の`PanelCovKind`（FE/RE共通）を、`parse_panel_cov_kind`（値。`hc0`は専用メッセージで弾く）→ `check_panel_cov_options`（`cluster`/`dk_time`/`dk_bandwidth`の未使用 → `dk`での`dk_time`欠落）→ `resolve_fe_cov_type`/`resolve_re_cov_type`（`fe.rs`/`re.rs`、列の抽出）の3段で使う。FE/REで文言が違う部分（`hc0`の理由・`dk_time`が必須と伝えるメッセージ）は`PanelModel`で切り替える。`build_{fe,re}_input`は、DataFrameを見ない検査（`cov_type`の値 →（REは`variance_method`の値）→ 組合せ）→ ロール構造 → `y`/`x`/`entity`/`time`の列 → `cluster`/`dk_time`の列の順に呼ぶ。REの`variance_method`は`build_re_input`の中でパースし、`VarianceMethod`を戻り値に含める（`fit`で別にパースしない）。`*Result.cov_type`の正規形は`PanelCovKind::name()`から作る。この順序は`tests/cross_method/test_validation_order.py`が固定している。
+`panel/common.rs`の`PanelCovKind`（FE/RE共通）を、`parse_panel_cov_kind`（値。`hc0`は専用の`code`で弾く）→ `check_panel_cov_options`（`cluster`/`dk_time`/`dk_bandwidth`の未使用 → `dk`での`dk_time`欠落）→ `resolve_fe_cov_type`/`resolve_re_cov_type`（`fe.rs`/`re.rs`、列の抽出）の3段で使う。FE/REで違うのは`hc0`のエラーに載せるモデル名（`COV_TYPE_NOT_AVAILABLE_FOR_MODEL`の`model`）だけで、`PanelModel`で切り替える。`build_{fe,re}_input`は、DataFrameを見ない検査（`cov_type`の値 →（REは`variance_method`の値）→ 組合せ）→ ロール構造 → `y`/`x`/`entity`/`time`の列 → `cluster`/`dk_time`の列の順に呼ぶ。REの`variance_method`は`build_re_input`の中でパースし、`VarianceMethod`を戻り値に含める（`fit`で別にパースしない）。`*Result.cov_type`の正規形は`PanelCovKind::name()`から作る。この順序は`tests/cross_method/test_validation_order.py`が固定している。
 
 ## `FEOptions`のフィールド設計
 

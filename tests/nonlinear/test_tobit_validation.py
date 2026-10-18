@@ -50,14 +50,11 @@ _TOBIT_CENSORING_BOUNDS = json.loads(
 
 
 def test_y_in_x_raises(censored_dataset):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
-            col="y",
-            single_role="y",
-            multi_role="x",
-        ),
+    with raises_error(
+        ErrorCode.ROLE_COLUMN_OVERLAP,
+        column="y",
+        argument="y",
+        other_argument="x",
     ):
         Tobit(censored_dataset, y="y", x=["y", "x1"]).fit()
 
@@ -76,18 +73,15 @@ def test_y_empty_string_raises(censored_dataset):
 
 
 def test_duplicate_x_column_raises(censored_dataset):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.DUPLICATE_WITHIN_ROLE, name="x1", role="x"),
+    with raises_error(
+        ErrorCode.ROLE_DUPLICATE_COLUMN, column="x1", argument="x"
     ):
         Tobit(censored_dataset, y="y", x=["x1", "x1"]).fit()
 
 
 def test_const_collision_with_include_intercept_raises():
     df = name_collision_frame([0.0, 1.0, 0.0, 1.0])
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.CONST_COLLISION, role="x")
-    ):
+    with raises_error(ErrorCode.INTERCEPT_NAME_COLLISION, argument="x"):
         Tobit(df, y="y", x=["const"]).fit()
 
 
@@ -97,14 +91,12 @@ def test_sigma_collision_raises():
     `engine_pybind`の`validate_no_sigma_collision`のPython API境界での確認）。
     """
     df = name_collision_frame([0.0, 1.0, 0.0, 1.0], "sigma")
-    with pytest.raises(
-        ValidationError, match=escaped(nonlinear_msgs.SIGMA_COLLISION)
-    ):
+    with raises_error(ErrorCode.TOBIT_SIGMA_NAME_COLLISION):
         Tobit(df, y="y", x=["sigma"]).fit()
 
 
 def test_empty_x_raises(censored_dataset):
-    with pytest.raises(ValidationError, match=escaped(msgs.X_EMPTY, role="x")):
+    with raises_error(ErrorCode.ROLE_EMPTY, argument="x"):
         Tobit(censored_dataset, y="y", x=[]).fit()
 
 
@@ -316,11 +308,11 @@ def test_no_uncensored_observations_raises():
 
 def test_predict_unknown_target_raises(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            nonlinear_msgs.UNKNOWN_MARGINAL_EFFECTS_TARGET, other="bogus"
-        ),
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="target",
+        value="bogus",
+        allowed=nonlinear_msgs.ALLOWED_MARGINAL_EFFECTS_TARGET,
     ):
         res.predict(target="bogus")
 
@@ -383,11 +375,11 @@ def test_predict_null_or_non_finite_values_raise(censored_dataset):
 
 def test_augment_unknown_target_raises(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            nonlinear_msgs.UNKNOWN_MARGINAL_EFFECTS_TARGET, other="bogus"
-        ),
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="target",
+        value="bogus",
+        allowed=nonlinear_msgs.ALLOWED_MARGINAL_EFFECTS_TARGET,
     ):
         res.augment(target="bogus")
 
@@ -400,11 +392,8 @@ def test_augment_column_collision_raises(censored_dataset):
     df_with_predicted = censored_dataset.with_columns(
         pl.lit(0.0).alias("predicted_expected_observed")
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.EXISTING_COLUMN_COLLISION, name="predicted_expected_observed"
-        ),
+    with raises_error(
+        ErrorCode.AUGMENT_COLUMN_EXISTS, column="predicted_expected_observed"
     ):
         Tobit(df_with_predicted, y="y", x=["x1", "x2"]).fit().augment()
 
@@ -412,11 +401,8 @@ def test_augment_column_collision_raises(censored_dataset):
     new_data = pl.DataFrame(
         {"x1": [1.0], "x2": [0.5], "predicted_expected_observed": [0.0]}
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.EXISTING_COLUMN_COLLISION, name="predicted_expected_observed"
-        ),
+    with raises_error(
+        ErrorCode.AUGMENT_COLUMN_EXISTS, column="predicted_expected_observed"
     ):
         res.augment(new_data=new_data)
 
@@ -440,11 +426,11 @@ def test_augment_missing_column_raises(censored_dataset):
 @pytest.mark.parametrize("cov_type", ["bogus", ""])
 def test_unknown_cov_type_raises(censored_dataset, cov_type):
     """未知の`cov_type`（空文字列を含む）は`ValidationError`。"""
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            nonlinear_msgs.UNKNOWN_COV_TYPE_NONLINEAR, other=cov_type
-        ),
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="cov_type",
+        value=cov_type,
+        allowed=nonlinear_msgs.ALLOWED_COV_TYPES_NONLINEAR,
     ):
         Tobit(
             censored_dataset,
@@ -457,7 +443,12 @@ def test_unknown_cov_type_raises(censored_dataset, cov_type):
 @pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
 def test_nonrobust_is_rejected(censored_dataset, cov_type):
     """`"nonrobust"`は別名として受け付けない（概念ごとに文字列を1つに絞る）。"""
-    with pytest.raises(ValidationError, match="unknown cov_type: 'nonrobust'"):
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="cov_type",
+        value=cov_type,
+        allowed=nonlinear_msgs.ALLOWED_COV_TYPES_NONLINEAR,
+    ):
         Tobit(
             censored_dataset,
             y="y",
@@ -469,9 +460,11 @@ def test_nonrobust_is_rejected(censored_dataset, cov_type):
 @pytest.mark.parametrize("solver", ["bogus", ""])
 def test_unknown_solver_raises(censored_dataset, solver):
     """未知の`solver`（空文字列を含む）は`ValidationError`。"""
-    with pytest.raises(
-        ValidationError,
-        match=escaped(nonlinear_msgs.UNKNOWN_METHOD_NONLINEAR, other=solver),
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="solver",
+        value=solver,
+        allowed=nonlinear_msgs.ALLOWED_SOLVERS,
     ):
         Tobit(
             censored_dataset,
@@ -484,21 +477,16 @@ def test_unknown_solver_raises(censored_dataset, solver):
 @pytest.mark.parametrize("confidence_level", [1.5, 0.0, -0.1])
 def test_invalid_confidence_level_raises(censored_dataset, confidence_level):
     options = TobitOptions(confidence_level=confidence_level)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.INVALID_CONFIDENCE_LEVEL,
-            confidence_level=msgs.rust_f64(confidence_level),
-        ),
+    with raises_error(
+        ErrorCode.CONFIDENCE_LEVEL_OUT_OF_RANGE, value=confidence_level
     ):
         Tobit(censored_dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
 @pytest.mark.parametrize("tol", [0.0, -1.0])
 def test_non_positive_tol_raises(censored_dataset, tol):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(nonlinear_msgs.INVALID_TOL, tol=msgs.rust_f64(tol)),
+    with raises_error(
+        ErrorCode.TOLERANCE_NOT_POSITIVE_FINITE, option="tol", value=tol
     ):
         Tobit(
             censored_dataset,
@@ -510,9 +498,8 @@ def test_non_positive_tol_raises(censored_dataset, tol):
 
 @pytest.mark.parametrize("max_iter", [0, -1])
 def test_non_positive_max_iter_raises(censored_dataset, max_iter):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(nonlinear_msgs.INVALID_MAX_ITER, max_iter=max_iter),
+    with raises_error(
+        ErrorCode.MAX_ITER_OUT_OF_RANGE, value=max_iter, min=1, max=10_000
     ):
         Tobit(
             censored_dataset,
@@ -633,13 +620,10 @@ def test_cluster_unused_by_cov_type_raises(censored_dataset, cov_type):
     """`cov_type="cluster"`以外で`cluster`が指定されたら黙って無視せず
     `ValidationError`。
     """
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.UNUSED_OPTION,
-            option="cluster",
-            condition='cov_type="cluster"',
-        ),
+    with raises_error(
+        ErrorCode.OPTION_UNUSED,
+        option="cluster",
+        condition='cov_type="cluster"',
     ):
         Tobit(
             censored_dataset,
@@ -654,22 +638,22 @@ def test_cluster_unused_by_cov_type_raises(censored_dataset, cov_type):
 
 def test_marginal_effects_unknown_at_raises(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            nonlinear_msgs.UNKNOWN_MARGINAL_EFFECTS_AT, other="bogus"
-        ),
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="at",
+        value="bogus",
+        allowed=nonlinear_msgs.ALLOWED_MARGINAL_EFFECTS_AT,
     ):
         res.marginal_effects(at="bogus")
 
 
 def test_marginal_effects_unknown_target_raises(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            nonlinear_msgs.UNKNOWN_MARGINAL_EFFECTS_TARGET, other="bogus"
-        ),
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="target",
+        value="bogus",
+        allowed=nonlinear_msgs.ALLOWED_MARGINAL_EFFECTS_TARGET,
     ):
         res.marginal_effects(target="bogus")
 
@@ -679,12 +663,8 @@ def test_marginal_effects_confidence_level_out_of_range_raises(
     censored_dataset, confidence_level
 ):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.INVALID_CONFIDENCE_LEVEL,
-            confidence_level=msgs.rust_f64(confidence_level),
-        ),
+    with raises_error(
+        ErrorCode.CONFIDENCE_LEVEL_OUT_OF_RANGE, value=confidence_level
     ):
         res.marginal_effects(confidence_level=confidence_level)
 

@@ -17,7 +17,7 @@
 //! ここへ集約する設計にはしない）。
 use thiserror::Error;
 
-use crate::shared::error_catalog::ErrorReport;
+use crate::shared::error_catalog::{ErrorCode, ErrorReport, Stage};
 
 /// 利用者向けのエラー内容（`code`・`params`・文面）を返せるエラー型。
 ///
@@ -60,7 +60,7 @@ pub enum CommonError {
     NoRegressors { n: usize },
 
     /// `confidence_level`が`(0, 1)`の範囲外。
-    #[error("confidence_level must be in the range (0, 1): {confidence_level}")]
+    #[error("{}", self.catalog_message())]
     InvalidConfidenceLevel { confidence_level: f64 },
 
     /// `cov_type="cluster"`なのにクラスターのグループキーが渡されていない。
@@ -99,7 +99,7 @@ pub enum CommonError {
     /// OLS/WLS・2SLS・GMMのHACが共有する検証（`shared::covariance::resolve_hac_lags`）。
     /// パネルのDriscoll-Kraay型HACは上限が観測数`n`ではなく時点数`t`なので、同型でも
     /// 別のバリアント（`PanelError::InvalidDkBandwidth`）にしてある。
-    #[error("hac_lags must be in the range [0, n): got {hac_lags}, n={n}")]
+    #[error("{}", self.catalog_message())]
     InvalidHacLags { hac_lags: i64, n: usize },
 
     /// 上記以外の計算過程での失敗（分布のCDF計算等）。
@@ -107,9 +107,128 @@ pub enum CommonError {
     ComputationFailed(String),
 }
 
+/// 移行途中のエラー型の`Display`が使う`message`。`report`が`None`（カタログに移していないバリアント）
+/// なのにこれを呼ぶのは実装の誤りなので、デバッグビルドでは検出する。
+pub(crate) fn catalog_display(report: Option<ErrorReport>) -> String {
+    debug_assert!(report.is_some(), "the variant is not in the catalog yet");
+    report.map(|r| r.message()).unwrap_or_default()
+}
+
+/// 入れ子の回帰（`stage`）の中で起きた`source`のエラーの[`ErrorReport`]。
+///
+/// `source`の`code`が`stage`を付けてよいもの（`stage_allowed`）なら`stage`を付け、そうでなければ
+/// （例: `confidence_level`の範囲違反のように、どの回帰で起きても同じ入力の誤り）`stage`を付けずに
+/// そのまま返す。`source`がまだカタログに移っていなければ`None`。
+pub(crate) fn staged(source: Option<ErrorReport>, stage: Stage) -> Option<ErrorReport> {
+    source.map(|report| {
+        if report.code().spec().stage_allowed {
+            report.with_stage(stage)
+        } else {
+            report
+        }
+    })
+}
+
+impl CommonError {
+    /// カタログの`code`・`params`で表せるバリアントの[`ErrorReport`]。まだカタログに移していないバリアントは`None`。
+    ///
+    /// 全バリアントを移し終えたら、[`ErrorInfo`]の実装（`report()`）に置き換える。その時に`_`を
+    /// 全バリアントの列挙に変える（移行の途中は、移していないバリアントを`_`で受ける）。
+    #[must_use]
+    pub fn try_report(&self) -> Option<ErrorReport> {
+        match self {
+            Self::InvalidConfidenceLevel { confidence_level } => Some(
+                ErrorReport::new(ErrorCode::ConfidenceLevelOutOfRange)
+                    .param("value", *confidence_level),
+            ),
+            Self::InvalidHacLags { hac_lags, n } => Some(
+                ErrorReport::new(ErrorCode::HacLagsOutOfRange)
+                    .param("value", *hac_lags)
+                    .param("n_obs", *n)
+                    .param("max", n.saturating_sub(1)),
+            ),
+            _ => None,
+        }
+    }
+
+    /// カタログに移したバリアントの`Display`が使う`message`。
+    fn catalog_message(&self) -> String {
+        catalog_display(self.try_report())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn staged_adds_the_stage_only_to_codes_that_allow_it() {
+        let allowed = ErrorReport::new(ErrorCode::InsufficientObservations)
+            .param("n_obs", 3_usize)
+            .param("n_params", 4_usize)
+            .param("min_obs", 5_usize);
+        let report = staged(Some(allowed), Stage::SecondStage).expect("some");
+        assert_eq!(report.stage(), Some(&Stage::SecondStage));
+        assert!(report.validate().is_ok());
+
+        let not_allowed =
+            ErrorReport::new(ErrorCode::ConfidenceLevelOutOfRange).param("value", 2.0);
+        let report = staged(Some(not_allowed), Stage::SecondStage).expect("some");
+        assert!(report.stage().is_none());
+
+        assert!(staged(None, Stage::SecondStage).is_none());
+    }
+
+    #[test]
+    fn display_of_cataloged_variants_is_the_catalog_message() {
+        for err in [
+            CommonError::InvalidConfidenceLevel {
+                confidence_level: f64::NAN,
+            },
+            CommonError::InvalidHacLags {
+                hac_lags: usize::MAX as i64,
+                n: usize::MAX,
+            },
+            CommonError::InvalidHacLags { hac_lags: 5, n: 5 },
+        ] {
+            let report = err.try_report().expect("cataloged");
+            assert!(report.validate().is_ok());
+            assert_eq!(err.to_string(), report.message());
+        }
+        assert!(
+            CommonError::InvalidConfidenceLevel {
+                confidence_level: f64::NAN
+            }
+            .to_string()
+            .ends_with("got NaN.")
+        );
+    }
+
+    #[test]
+    fn range_errors_map_to_catalog_codes_with_valid_params() {
+        let level = CommonError::InvalidConfidenceLevel {
+            confidence_level: 1.5,
+        }
+        .try_report()
+        .expect("cataloged");
+        assert_eq!(level.code(), ErrorCode::ConfidenceLevelOutOfRange);
+        assert!(level.validate().is_ok());
+
+        let lags = CommonError::InvalidHacLags {
+            hac_lags: 100,
+            n: 100,
+        }
+        .try_report()
+        .expect("cataloged");
+        assert_eq!(lags.code(), ErrorCode::HacLagsOutOfRange);
+        assert!(lags.validate().is_ok());
+        assert_eq!(
+            lags.message(),
+            "hac_lags must be from 0 to 99, one less than the number of observations (100), got 100."
+        );
+
+        assert!(CommonError::MissingClusterColumn.try_report().is_none());
+    }
 
     #[test]
     fn common_error_messages_are_human_readable() {
@@ -136,7 +255,7 @@ mod tests {
                 confidence_level: 1.5
             }
             .to_string(),
-            "confidence_level must be in the range (0, 1): 1.5"
+            "confidence_level must be strictly between 0 and 1, got 1.5."
         );
         assert_eq!(
             CommonError::ClusterDimensionMismatch {
@@ -167,7 +286,7 @@ mod tests {
                 n: 100
             }
             .to_string(),
-            "hac_lags must be in the range [0, n): got -1, n=100"
+            "hac_lags must be from 0 to 99, one less than the number of observations (100), got -1."
         );
         assert_eq!(
             CommonError::ComputationFailed("t-distribution CDF did not converge".to_string())

@@ -28,7 +28,7 @@ use crate::shared::column_extraction::{
     extract_column_list, extract_dataframe, extract_f64_column, extract_f64_columns,
     extract_model_x_columns, extract_time_order_ranks, x_column_names,
 };
-use crate::shared::errors::legacy_validation_error;
+use crate::shared::errors::{legacy_validation_error, unknown_option_value};
 use crate::shared::mat_conversion::mat_to_vec;
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
@@ -240,9 +240,7 @@ fn parse_statistic_version(statistic: &str) -> PyResult<StatisticVersion> {
     match statistic.to_lowercase().as_str() {
         "lm" => Ok(StatisticVersion::Lm),
         "f" => Ok(StatisticVersion::F),
-        _ => Err(legacy_validation_error(format!(
-            "unknown statistic: '{statistic}'. Expected 'lm' or 'f'"
-        ))),
+        _ => Err(unknown_option_value("statistic", statistic, &["lm", "f"])),
     }
 }
 

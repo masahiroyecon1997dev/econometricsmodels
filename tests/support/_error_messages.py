@@ -17,9 +17,14 @@ Rust側のメッセージ文言が正本であり（`engine/src/shared/error.rs`
 形で使う（`escaped()`は`str.format(**kwargs)`した上で`re.escape`する。メッセージ中の
 `()`・`.`等は正規表現の特殊文字のため、素の文字列を`match=`にそのまま渡すのは誤り）。
 
-列の抽出で出るエラー（列が存在しない・欠損値・非有限値・許可外のdtype・同じ値・
-タイムゾーン付きDatetime）は構造化例外（`code`/`params`）のため、ここにテンプレートを
-置かず、`_errors.raises_error`で`code`と`params`を照合する。
+構造化例外（`code`/`params`）になったエラーは、ここにテンプレートを置かず、
+`_errors.raises_error`で`code`と`params`を照合する。列の抽出で出るエラー（列が存在しない・
+欠損値・非有限値・許可外のdtype・同じ値・タイムゾーン付きDatetime）、ロールの検査
+（空・列の重複・ロール間の重複・`const`との衝突・出力列の衝突）、オプション値の検査
+（未知の値・使われないオプション・`hac_time`/`dk_time`の欠落・パネルで使えない
+`cov_type`・`confidence_level`/`hac_lags`/`dk_bandwidth`/`max_iter`/`gmm_max_iter`/
+`tol`/`gmm_tol`/`nlags`の範囲違反）がこれにあたる。未知の値のエラー（`OPTION_UNKNOWN_VALUE`）が持つ
+`allowed`（受け付ける値の一覧）の期待値だけを、`ALLOWED_*`として各ファイルに置く。
 """
 
 from __future__ import annotations
@@ -79,46 +84,11 @@ NOT_A_POLARS_DATAFRAME_LAZY = (
     NOT_A_POLARS_DATAFRAME + "; call .collect() first"
 )
 
-# HAC(`cov_type="hac"`・IV GMMの`gmm_weight_type="hac"`)で`hac_time`が未指定の場合。
-# 行順を時間順とみなす暗黙の既定は置かない。`{setting}`は`hac_time`を要求している設定名
-# (`cov_type`または`gmm_weight_type`)。
-HAC_REQUIRES_HAC_TIME = (
-    "{setting}='hac' requires the `hac_time` option: the column that gives the "
-    "time order of the observations (the row order of the data is not assumed "
-    'to be the time order; add an explicit index column such as `df.with_row_index("t")` '
-    "if the rows are already in time order)"
-)
-
-# ── validation.rs（全系統共通、y/weight/x/x_exog/x_endog/instruments等の
-#    ロール間検証） ────────────────────────────────────────────────────
-
-X_EMPTY = "{role} must contain at least one column name"
-DUPLICATE_WITHIN_ROLE = "column '{name}' is specified more than once in {role}"
-CONST_COLLISION = (
-    "when include_intercept=true, {role} cannot contain a column named 'const' "
-    "(it collides with the automatically added intercept)"
-)
-EXISTING_COLUMN_COLLISION = (
-    "the data already has a column named '{name}'; augment() would overwrite "
-    "it, which is not allowed"
-)
-
-# `validate_no_duplicate_roles`のメッセージ（engine_pybind/src/shared/validation.rs
-# `duplicate_role_message`）。単一列ロール（y/weight）と複数列ロール（x/x_exog/
-# x_endog/instruments）の組み合わせによって主語が変わるため3パターンに分ける
-# （同ファイルのdocコメント「呼び出し側の契約」参照）。
-ROLE_OVERLAP_SINGLE_IN_MULTI = "the column '{col}' specified as {single_role} is also included in {multi_role}"
-ROLE_OVERLAP_SINGLE_EQUALS_SINGLE = "the column '{col}' specified as {later_role} is also specified as {earlier_role}"
-ROLE_OVERLAP_MULTI_VS_MULTI = "the column '{col}' specified as {later_role} is also included in {earlier_role}"
-
 # ── CommonError（engine/src/shared/error.rs、OLS/WLS/Tobit/Logit/Probit/IV共通） ──
 
 INSUFFICIENT_OBSERVATIONS = (
     "insufficient observations: n={n} must be greater than k={k} (number of "
     "independent variables, including the intercept)"
-)
-INVALID_CONFIDENCE_LEVEL = (
-    "confidence_level must be in the range (0, 1): {confidence_level}"
 )
 MISSING_CLUSTER_COLUMN = (
     "cov_type='cluster' requires cluster identifiers to be provided"
@@ -136,20 +106,14 @@ INSUFFICIENT_CLUSTERS_FOR_INFERENCE = (
 
 # ── 複数系統が使う（系統固有の節に由来するが、系統をまたいで共有） ──
 
-INVALID_HAC_LAGS = (
-    "hac_lags must be in the range [0, n): got {hac_lags}, n={n}"
-)
-
-# cov_type文字列パース。OLS/WLS/IVは文言が完全一致（3手法とも
-# engine_pybind/src/linear/common.rs::parse_cov_kindが検査する）。
-UNKNOWN_COV_TYPE_LINEAR = (
-    "unknown cov_type: '{other}'. Expected one of 'classical', 'hc0' "
-    "through 'hc3', 'hac', or 'cluster'"
-)
-
-# 選んだモードで使われないオプションが明示指定された場合の共通文言
-# （`engine_pybind/src/shared/validation.rs`の`reject_unused_option`）。
-UNUSED_OPTION = (
-    "{option} is only used with {condition}, so it would be silently "
-    "ignored; set {condition} or remove {option}"
-)
+# `OPTION_UNKNOWN_VALUE`の`allowed`（未知の`cov_type`のとき、受け付ける値の一覧）。
+# OLS/WLS/IVは同じ一覧（engine_pybind/src/linear/common.rs::parse_cov_kind）。
+ALLOWED_COV_TYPES_LINEAR = [
+    "classical",
+    "hc0",
+    "hc1",
+    "hc2",
+    "hc3",
+    "hac",
+    "cluster",
+]

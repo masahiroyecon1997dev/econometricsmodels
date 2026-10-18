@@ -242,9 +242,57 @@ METHODS = [
 # ── 故障 ─────────────────────────────────────────────────────────────
 
 
+def _arg_role(method: Method) -> str:
+    """`empty_x`が指摘する、空のリストを渡した引数（IVは`x_endog`）。"""
+    return "x_endog" if method.name.startswith("iv") else "x"
+
+
+def _dup_x(method: Method) -> dict[str, Any]:
+    return {
+        "column": method.base_args[method.x_role][0],
+        "argument": method.x_role,
+    }
+
+
+def _y_in_x(method: Method) -> dict[str, Any]:
+    return {
+        "column": method.base_args["y"],
+        "argument": "y",
+        "other_argument": method.x_role,
+    }
+
+
+def _time_cov_code(method: Method) -> ErrorCode:
+    """`hac`は`HAC_TIME_REQUIRED`、`dk`は`DK_TIME_REQUIRED`。"""
+    if method.time_cov_type == "dk":
+        return ErrorCode.DK_TIME_REQUIRED
+    return ErrorCode.HAC_TIME_REQUIRED
+
+
+def _time_cov_params(method: Method) -> dict[str, Any]:
+    if method.time_cov_type == "dk":
+        return {}
+    return {"setting": "cov_type"}
+
+
+def _unknown(option: str) -> dict[str, Any]:
+    # 入力は常に`bogus`。受け付ける値の一覧（`allowed`）は手法ごとに違い、
+    # 各手法の`*_validation.py`が確かめる。
+    return {"option": option, "value": "bogus"}
+
+
 @dataclass(frozen=True)
 class Fault:
-    """入力に混ぜる誤り1つ。`rank`が小さいほど先に報告される。"""
+    """入力に混ぜる誤り1つ。`rank`が小さいほど先に報告される。
+
+    エラーは次のいずれかで照合する。
+
+    - `code`と`params`（構造化されたエラー。`code`は手法によって変わるなら
+      `Method`から`ErrorCode`を返す関数、`params`は`Method`から`dict`を返す
+      関数でもよい。渡したキーだけ比較する）
+    - `column`（と`argument`）: `COLUMN_NOT_FOUND`
+    - `marker`: まだ構造化していないエラーの文面（正規表現）
+    """
 
     id: str
     rank: tuple[int, int]
@@ -253,11 +301,17 @@ class Fault:
     # 渡した引数`argument`。手法によって引数名が変わる故障は`None`）で照合する。
     column: str | None = None
     argument: str | None = None
+    code: ErrorCode | Callable[[Method], ErrorCode] | None = None
+    params: dict[str, Any] | Callable[[Method], dict[str, Any]] = field(
+        default_factory=dict
+    )
 
     def __post_init__(self) -> None:
-        # 文面も列も指定しない故障は、`match=""`で何にでも一致して検査が空になる。
-        if not self.marker and self.column is None:
-            raise ValueError(f"fault {self.id!r} needs a marker or a column")
+        # 文面も列もコードも指定しない故障は、`match=""`で何にでも一致して検査が空になる。
+        if not self.marker and self.column is None and self.code is None:
+            raise ValueError(
+                f"fault {self.id!r} needs a marker, a column or a code"
+            )
 
 
 # 順位の第1要素が段階、第2要素が段階内の順。段階2の第2要素は仕様の報告順
@@ -268,66 +322,150 @@ class Fault:
 FAULTS = {
     f.id: f
     for f in [
-        Fault("unknown_estimator", (2, 0), r"unknown estimator"),
-        Fault("unknown_cov_type", (2, 1), r"unknown cov_type"),
-        Fault("unknown_gmm_type", (2, 2), r"unknown gmm_type"),
-        Fault("unknown_gmm_weight_type", (2, 3), r"unknown gmm_weight_type"),
-        Fault("unknown_solver", (2, 4), r"unknown solver"),
-        Fault("unknown_variance_method", (2, 5), r"unknown variance_method"),
-        Fault("unused_cluster", (3, 0), r"cluster is only used with"),
-        Fault("unused_hac_lags", (3, 0), r"hac_lags is only used with"),
-        Fault("unused_dk_bandwidth", (3, 0), r"dk_bandwidth is only used"),
-        Fault("unused_dk_time", (3, 0), r"dk_time is only used with"),
-        Fault("unused_gmm_max_iter", (3, 0), r"gmm_max_iter is only used"),
-        Fault("unused_gmm_tol", (3, 0), r"gmm_tol is only used"),
         Fault(
-            "unused_gmm_weight_type", (3, 0), r"gmm_weight_type is only used"
+            "unknown_estimator",
+            (2, 0),
+            code=ErrorCode.OPTION_UNKNOWN_VALUE,
+            params=_unknown("estimator"),
+        ),
+        Fault(
+            "unknown_cov_type",
+            (2, 1),
+            code=ErrorCode.OPTION_UNKNOWN_VALUE,
+            params=_unknown("cov_type"),
+        ),
+        Fault(
+            "unknown_gmm_type",
+            (2, 2),
+            code=ErrorCode.OPTION_UNKNOWN_VALUE,
+            params=_unknown("gmm_type"),
+        ),
+        Fault(
+            "unknown_gmm_weight_type",
+            (2, 3),
+            code=ErrorCode.OPTION_UNKNOWN_VALUE,
+            params=_unknown("gmm_weight_type"),
+        ),
+        Fault(
+            "unknown_solver",
+            (2, 4),
+            code=ErrorCode.OPTION_UNKNOWN_VALUE,
+            params=_unknown("solver"),
+        ),
+        Fault(
+            "unknown_variance_method",
+            (2, 5),
+            code=ErrorCode.OPTION_UNKNOWN_VALUE,
+            params=_unknown("variance_method"),
+        ),
+        Fault(
+            "unused_cluster",
+            (3, 0),
+            code=ErrorCode.OPTION_UNUSED,
+            params={"option": "cluster"},
+        ),
+        Fault(
+            "unused_hac_lags",
+            (3, 0),
+            code=ErrorCode.OPTION_UNUSED,
+            params={"option": "hac_lags"},
+        ),
+        Fault(
+            "unused_dk_bandwidth",
+            (3, 0),
+            code=ErrorCode.OPTION_UNUSED,
+            params={"option": "dk_bandwidth"},
+        ),
+        Fault(
+            "unused_dk_time",
+            (3, 0),
+            code=ErrorCode.OPTION_UNUSED,
+            params={"option": "dk_time"},
+        ),
+        Fault(
+            "unused_gmm_max_iter",
+            (3, 0),
+            code=ErrorCode.OPTION_UNUSED,
+            params={"option": "gmm_max_iter"},
+        ),
+        Fault(
+            "unused_gmm_tol",
+            (3, 0),
+            code=ErrorCode.OPTION_UNUSED,
+            params={"option": "gmm_tol"},
+        ),
+        Fault(
+            "unused_gmm_weight_type",
+            (3, 0),
+            code=ErrorCode.OPTION_UNUSED,
+            params={"option": "gmm_weight_type"},
         ),
         Fault(
             "missing_time_option",
             (3, 1),
-            r"cov_type='(hac|dk)' requires the `(hac_time|dk_time)` option",
+            code=_time_cov_code,
+            params=_time_cov_params,
         ),
         Fault(
             "missing_weight_time_option",
             (3, 2),
-            r"gmm_weight_type='hac' requires the `hac_time` option",
+            code=ErrorCode.HAC_TIME_REQUIRED,
+            params={"setting": "gmm_weight_type"},
         ),
         Fault(
             "duplicate_x",
             (4, 0),
-            r"column '(x1|x2)' is specified more than once in x(_exog)?",
+            code=ErrorCode.ROLE_DUPLICATE_COLUMN,
+            params=_dup_x,
         ),
         Fault(
             "y_in_x",
             (4, 0),
-            r"column '\w+' specified as y is also included in x(_exog)?",
+            code=ErrorCode.ROLE_COLUMN_OVERLAP,
+            params=_y_in_x,
         ),
         Fault(
             "const_in_x",
             (4, 0),
-            r"x(_exog)? cannot contain a column named 'const'",
+            code=ErrorCode.INTERCEPT_NAME_COLLISION,
+            params=lambda m: {"argument": m.x_role},
         ),
         Fault(
-            "empty_x", (4, 0), r"(x|x_endog) must contain at least one column"
+            "empty_x",
+            (4, 0),
+            code=ErrorCode.ROLE_EMPTY,
+            params=lambda m: {"argument": _arg_role(m)},
         ),
         Fault(
             "weight_is_y",
             (4, 0),
-            r"column 'y' specified as weight is also specified as y",
+            code=ErrorCode.ROLE_COLUMN_OVERLAP,
+            params={
+                "column": "y",
+                "argument": "weight",
+                "other_argument": "y",
+            },
         ),
-        Fault(
-            "sigma_in_x", (4, 0), r"x cannot contain a column named 'sigma'"
-        ),
+        Fault("sigma_in_x", (4, 0), code=ErrorCode.TOBIT_SIGMA_NAME_COLLISION),
         Fault(
             "time_is_y",
             (4, 0),
-            r"column 'y' specified as time is also specified as y",
+            code=ErrorCode.ROLE_COLUMN_OVERLAP,
+            params={
+                "column": "y",
+                "argument": "time",
+                "other_argument": "y",
+            },
         ),
         Fault(
             "dk_time_is_y",
             (4, 0),
-            r"column 'y' specified as dk_time is also specified as y",
+            code=ErrorCode.ROLE_COLUMN_OVERLAP,
+            params={
+                "column": "y",
+                "argument": "dk_time",
+                "other_argument": "y",
+            },
         ),
         Fault("missing_y", (5, 0), column="no_such_y", argument="y"),
         Fault("missing_x", (5, 0), column="no_such_x"),
@@ -361,9 +499,15 @@ FAULTS = {
         Fault(
             "bad_confidence_level",
             (7, 0),
-            r"confidence_level must be in the range",
+            code=ErrorCode.CONFIDENCE_LEVEL_OUT_OF_RANGE,
+            params={"value": 2.0},
         ),
-        Fault("bad_max_iter", (7, 0), r"max_iter must be an integer"),
+        Fault(
+            "bad_max_iter",
+            (7, 0),
+            code=ErrorCode.MAX_ITER_OUT_OF_RANGE,
+            params={"value": 0, "min": 1, "max": 10_000},
+        ),
         Fault("non_binary_y", (7, 0), r"must be coded as 0\.0 or 1\.0"),
         Fault("bad_censoring_bounds", (7, 0), r"invalid censoring bounds"),
     ]
@@ -553,8 +697,14 @@ def _single_params():
     ]
 
 
-def raises_fault(fault: Fault) -> Any:
-    """`fault`のエラーが送出されることを検査するコンテキストマネージャ。"""
+def raises_fault(fault: Fault, method: Method) -> Any:
+    """`fault`のエラーが`method`で送出されることを検査するコンテキストマネージャ。"""
+    if fault.code is not None:
+        code = fault.code(method) if callable(fault.code) else fault.code
+        params = (
+            fault.params(method) if callable(fault.params) else fault.params
+        )
+        return raises_error(code, **params)
     if fault.column is None:
         return pytest.raises(ValidationError, match=fault.marker)
     params = {"column": fault.column, "data_argument": "data"}
@@ -591,7 +741,7 @@ def test_each_fault_alone_raises_its_own_error(df, method, fault):
     """故障を1つだけ混ぜると、その故障のエラーが出る（組合せテストの前提）。"""
     args_changes, opts = changes(method, fault)
     args = {**method.base_args, **args_changes}
-    with raises_fault(FAULTS[fault]):
+    with raises_fault(FAULTS[fault], method):
         method.run(df, args, {**method.base_opts, **opts})
 
 
@@ -604,7 +754,7 @@ def test_earlier_error_is_reported_first(df, method, early, late):
     composed = compose(method, early, late)
     assert composed is not None
     args, opts = composed
-    with raises_fault(FAULTS[early]):
+    with raises_fault(FAULTS[early], method):
         method.run(df, args, opts)
 
 

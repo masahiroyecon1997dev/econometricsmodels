@@ -54,67 +54,61 @@ _DEFAULT_ROLE_KWARGS = {
 
 
 @pytest.mark.parametrize(
-    "field, value, match",
+    "field, value, params",
     [
         (
             "x_exog",
             ["y", "x1"],
-            escaped(
-                msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
-                col="y",
-                single_role="y",
-                multi_role="x_exog",
-            ),
+            {
+                "column": "y",
+                "argument": "y",
+                "other_argument": "x_exog",
+            },
         ),
         (
             "x_endog",
             ["y"],
-            escaped(
-                msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
-                col="y",
-                single_role="y",
-                multi_role="x_endog",
-            ),
+            {
+                "column": "y",
+                "argument": "y",
+                "other_argument": "x_endog",
+            },
         ),
         (
             "instruments",
             ["y", "z1"],
-            escaped(
-                msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
-                col="y",
-                single_role="y",
-                multi_role="instruments",
-            ),
+            {
+                "column": "y",
+                "argument": "y",
+                "other_argument": "instruments",
+            },
         ),
         (
             "x_exog",
             ["x1", "endog1"],
-            escaped(
-                msgs.ROLE_OVERLAP_MULTI_VS_MULTI,
-                col="endog1",
-                later_role="x_endog",
-                earlier_role="x_exog",
-            ),
+            {
+                "column": "endog1",
+                "argument": "x_endog",
+                "other_argument": "x_exog",
+            },
         ),
         (
             "instruments",
             ["x1", "z2"],
-            escaped(
-                msgs.ROLE_OVERLAP_MULTI_VS_MULTI,
-                col="x1",
-                later_role="instruments",
-                earlier_role="x_exog",
-            ),
+            {
+                "column": "x1",
+                "argument": "instruments",
+                "other_argument": "x_exog",
+            },
         ),
         (
             "instruments",
             ["endog1", "z2"],
-            escaped(
-                msgs.ROLE_OVERLAP_MULTI_VS_MULTI,
-                col="endog1",
-                later_role="instruments",
-                earlier_role="x_endog",
-            ),
+            {
+                "column": "endog1",
+                "argument": "instruments",
+                "other_argument": "x_endog",
+            },
         ),
     ],
     ids=[
@@ -126,11 +120,11 @@ _DEFAULT_ROLE_KWARGS = {
         "x_endog_overlaps_instruments",
     ],
 )
-def test_variable_role_overlap_raises(iv_dataset, field, value, match):
+def test_variable_role_overlap_raises(iv_dataset, field, value, params):
     """同じ列名が2つの異なるロール（`y`/`x_exog`/`x_endog`/`instruments`）に
     渡された場合、`ValidationError`になること。
     """
-    with pytest.raises(ValidationError, match=match):
+    with raises_error(ErrorCode.ROLE_COLUMN_OVERLAP, **params):
         IV(iv_dataset, **{**_DEFAULT_ROLE_KWARGS, field: value}).fit()
 
 
@@ -151,9 +145,8 @@ def test_duplicate_column_within_role_raises(
     iv_dataset, field, value, name, role
 ):
     """同じロール内で同じ列名を2回渡した場合、`ValidationError`になること。"""
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.DUPLICATE_WITHIN_ROLE, name=name, role=role),
+    with raises_error(
+        ErrorCode.ROLE_DUPLICATE_COLUMN, column=name, argument=role
     ):
         IV(iv_dataset, **{**_DEFAULT_ROLE_KWARGS, field: value}).fit()
 
@@ -163,9 +156,7 @@ def test_const_collision_with_include_intercept_raises():
     自動追加される定数項と衝突し`ValidationError`になること。
     """
     df = iv_name_collision_frame()
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.CONST_COLLISION, role="x_exog")
-    ):
+    with raises_error(ErrorCode.INTERCEPT_NAME_COLLISION, argument="x_exog"):
         IV(
             df, y="y", x_exog=["const"], x_endog=["endog1"], instruments=["z1"]
         ).fit()
@@ -181,9 +172,7 @@ def test_const_collision_in_x_endog_with_include_intercept_raises():
     サイレントに失われていた（前項のテストの背景参照）。
     """
     df = iv_name_collision_frame()
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.CONST_COLLISION, role="x_endog")
-    ):
+    with raises_error(ErrorCode.INTERCEPT_NAME_COLLISION, argument="x_endog"):
         IV(
             df, y="y", x_exog=["x1"], x_endog=["const"], instruments=["z1"]
         ).fit()
@@ -198,9 +187,8 @@ def test_const_collision_in_instruments_with_include_intercept_raises():
     係数が操作変数の係数でサイレントに上書きされていた（前々項のテストの背景参照）。
     """
     df = iv_name_collision_frame()
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.CONST_COLLISION, role="instruments"),
+    with raises_error(
+        ErrorCode.INTERCEPT_NAME_COLLISION, argument="instruments"
     ):
         IV(
             df,
@@ -498,9 +486,7 @@ def test_x_endog_empty_raises(iv_dataset, x_endog, instruments):
     誤りなので弾く。`x_endog=[]`・`instruments`非空（対応する内生変数の無い操作変数
     だけを指定する誤用）も同様に弾く。
     """
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.X_EMPTY, role="x_endog")
-    ):
+    with raises_error(ErrorCode.ROLE_EMPTY, argument="x_endog"):
         IV(
             iv_dataset,
             y="y",
@@ -516,9 +502,7 @@ def test_instruments_empty_raises(iv_dataset):
     `x_endog`は非空にする（空だと`test_x_endog_empty_raises`の`x_endog`側の
     バリデーションが先に発火してしまうため）。
     """
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.X_EMPTY, role="instruments")
-    ):
+    with raises_error(ErrorCode.ROLE_EMPTY, argument="instruments"):
         IV(
             iv_dataset,
             y="y",
@@ -614,9 +598,11 @@ def test_first_stage_augment_none_raises_validation_error(iv_dataset):
 def test_unknown_estimator_raises(iv_dataset, estimator):
     """未知の`estimator`（空文字列を含む）は`ValidationError`。"""
     options = IVOptions(estimator=estimator)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(iv_msgs.UNKNOWN_IV_ESTIMATOR, estimator=estimator),
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="estimator",
+        value=estimator,
+        allowed=iv_msgs.ALLOWED_ESTIMATORS,
     ):
         our_fit(iv_dataset, options=options)
 
@@ -625,9 +611,11 @@ def test_unknown_estimator_raises(iv_dataset, estimator):
 def test_unknown_cov_type_raises(iv_dataset, cov_type):
     """未知の`cov_type`（空文字列を含む）は`ValidationError`。"""
     options = IVOptions(cov_type=cov_type)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.UNKNOWN_COV_TYPE_LINEAR, other=cov_type),
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="cov_type",
+        value=cov_type,
+        allowed=msgs.ALLOWED_COV_TYPES_LINEAR,
     ):
         our_fit(iv_dataset, options=options)
 
@@ -635,7 +623,12 @@ def test_unknown_cov_type_raises(iv_dataset, cov_type):
 @pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
 def test_nonrobust_is_rejected(iv_dataset, cov_type):
     """`"nonrobust"`は別名として受け付けない（概念ごとに文字列を1つに絞る）。"""
-    with pytest.raises(ValidationError, match="unknown cov_type: 'nonrobust'"):
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="cov_type",
+        value=cov_type,
+        allowed=msgs.ALLOWED_COV_TYPES_LINEAR,
+    ):
         our_fit(
             iv_dataset,
             options=IVOptions(cov_type=cov_type, **hac_time_for(cov_type)),
@@ -646,9 +639,11 @@ def test_nonrobust_is_rejected(iv_dataset, cov_type):
 def test_unknown_weight_type_raises(iv_dataset, gmm_weight_type):
     """未知の`gmm_weight_type`（空文字列を含む）は`ValidationError`。"""
     options = IVOptions(estimator="gmm", gmm_weight_type=gmm_weight_type)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(iv_msgs.UNKNOWN_WEIGHT_TYPE, other=gmm_weight_type),
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="gmm_weight_type",
+        value=gmm_weight_type,
+        allowed=iv_msgs.ALLOWED_GMM_WEIGHT_TYPES,
     ):
         our_fit(iv_dataset, options=options)
 
@@ -911,12 +906,8 @@ def test_invalid_confidence_level_raises(iv_dataset, confidence_level):
     `ValidationError`。
     """
     options = IVOptions(confidence_level=confidence_level)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.INVALID_CONFIDENCE_LEVEL,
-            confidence_level=msgs.rust_f64(confidence_level),
-        ),
+    with raises_error(
+        ErrorCode.CONFIDENCE_LEVEL_OUT_OF_RANGE, value=confidence_level
     ):
         our_fit(iv_dataset, options=options)
 
@@ -925,9 +916,8 @@ def test_invalid_confidence_level_raises(iv_dataset, confidence_level):
 def test_invalid_hac_lags_raises(iv_dataset, hac_lags):
     """`hac_lags`が`[0, n)`の範囲外の場合`ValidationError`。"""
     options = IVOptions(cov_type="hac", hac_lags=hac_lags, hac_time=ROW_TIME)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.INVALID_HAC_LAGS, hac_lags=hac_lags, n=500),
+    with raises_error(
+        ErrorCode.HAC_LAGS_OUT_OF_RANGE, value=hac_lags, n_obs=500, max=499
     ):
         our_fit(iv_dataset, options=options)
 
@@ -941,9 +931,11 @@ def test_unknown_gmm_weight_type_raises(iv_dataset, gmm_weight_type):
     受け付けない（`cov_type`と同じ語彙`classical`/`hac`に絞る）。
     """
     options = IVOptions(estimator="gmm", gmm_weight_type=gmm_weight_type)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(iv_msgs.UNKNOWN_WEIGHT_TYPE, other=gmm_weight_type),
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="gmm_weight_type",
+        value=gmm_weight_type,
+        allowed=iv_msgs.ALLOWED_GMM_WEIGHT_TYPES,
     ):
         our_fit(iv_dataset, options=options)
 
@@ -953,18 +945,22 @@ def test_invalid_gmm_max_iter_raises(iv_dataset, gmm_max_iter):
     options = IVOptions(
         estimator="gmm", gmm_type="iterated", gmm_max_iter=gmm_max_iter
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(iv_msgs.INVALID_GMM_MAX_ITER, max_iter=gmm_max_iter),
+    with raises_error(
+        ErrorCode.GMM_MAX_ITER_OUT_OF_RANGE,
+        value=gmm_max_iter,
+        min=3,
+        max=10_000,
     ):
         our_fit(iv_dataset, options=options)
 
 
 def test_unknown_gmm_type_raises(iv_dataset):
     options = IVOptions(estimator="gmm", gmm_type="three_step")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(iv_msgs.UNKNOWN_GMM_TYPE, other="three_step"),
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="gmm_type",
+        value="three_step",
+        allowed=iv_msgs.ALLOWED_GMM_TYPES,
     ):
         our_fit(iv_dataset, options=options)
 
@@ -1016,9 +1012,8 @@ def test_gmm_option_unused_by_mode_raises(
     """
     kwargs = {} if gmm_type is None else {"gmm_type": gmm_type}
     options = IVOptions(estimator=estimator, **kwargs, **{option: value})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.UNUSED_OPTION, option=option, condition=condition),
+    with raises_error(
+        ErrorCode.OPTION_UNUSED, option=option, condition=condition
     ):
         our_fit(iv_dataset, options=options)
 
@@ -1058,9 +1053,8 @@ def test_cov_option_unused_by_mode_raises(
     """
     value = 2 if option == "hac_lags" else "x1"
     options = IVOptions(**options_kwargs, **{option: value})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.UNUSED_OPTION, option=option, condition=condition),
+    with raises_error(
+        ErrorCode.OPTION_UNUSED, option=option, condition=condition
     ):
         our_fit(iv_dataset, options=options)
 
@@ -1081,27 +1075,24 @@ def test_cluster_used_only_by_gmm_weight_type_is_accepted(clustered_dataset):
 @pytest.mark.parametrize("gmm_tol", [0.0, -1.0])
 def test_invalid_gmm_tol_raises(iv_dataset, gmm_tol):
     options = IVOptions(estimator="gmm", gmm_type="iterated", gmm_tol=gmm_tol)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            iv_msgs.INVALID_GMM_TOL,
-            gmm_tol=msgs.rust_f64(gmm_tol),
-        ),
+    with raises_error(
+        ErrorCode.TOLERANCE_NOT_POSITIVE_FINITE,
+        option="gmm_tol",
+        value=gmm_tol,
     ):
         our_fit(iv_dataset, options=options)
 
 
-@pytest.mark.parametrize(
-    ("gmm_tol", "shown"), [(float("nan"), "NaN"), (float("inf"), "inf")]
-)
-def test_non_finite_gmm_tol_raises(iv_dataset, gmm_tol, shown):
+@pytest.mark.parametrize("gmm_tol", [float("nan"), float("inf")])
+def test_non_finite_gmm_tol_raises(iv_dataset, gmm_tol):
     """NaN/infの`gmm_tol`は収束判定として無意味なため、常に未収束になる前に
     `ValidationError`で弾く。
     """
     options = IVOptions(estimator="gmm", gmm_type="iterated", gmm_tol=gmm_tol)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(iv_msgs.INVALID_GMM_TOL, gmm_tol=shown),
+    with raises_error(
+        ErrorCode.TOLERANCE_NOT_POSITIVE_FINITE,
+        option="gmm_tol",
+        value=pytest.approx(gmm_tol, nan_ok=True),
     ):
         our_fit(iv_dataset, options=options)
 
@@ -1139,17 +1130,23 @@ def test_options_used_by_mode_are_accepted(iv_dataset, options_kwargs):
 
 
 @pytest.mark.parametrize(
-    "options_kwargs",
+    ("options_kwargs", "option", "value"),
     [
-        {"cov_type": "clusterr", "cluster": "x1"},
-        {"estimator": "gmm", "gmm_type": "bogus", "gmm_max_iter": 10},
+        ({"cov_type": "clusterr", "cluster": "x1"}, "cov_type", "clusterr"),
+        (
+            {"estimator": "gmm", "gmm_type": "bogus", "gmm_max_iter": 10},
+            "gmm_type",
+            "bogus",
+        ),
     ],
 )
 def test_unknown_value_is_reported_before_unused_option(
-    iv_dataset, options_kwargs
+    iv_dataset, options_kwargs, option, value
 ):
     """未知の値のエラーを優先し、未使用オプションの指摘で埋もれさせない。"""
-    with pytest.raises(ValidationError, match="unknown"):
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE, option=option, value=value
+    ):
         our_fit(iv_dataset, options=IVOptions(**options_kwargs))
 
 
@@ -1190,10 +1187,7 @@ def test_hac_requires_hac_time(iv_dataset, options_kwargs, setting):
     どちらが要求しているかをメッセージで示す。
     """
     options = IVOptions(hac_lags=2, **options_kwargs)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.HAC_REQUIRES_HAC_TIME, setting=setting),
-    ):
+    with raises_error(ErrorCode.HAC_TIME_REQUIRED, setting=setting):
         our_fit(iv_dataset, options=options)
 
 
@@ -1202,10 +1196,7 @@ def test_gmm_one_step_with_hac_cov_type_requires_hac_time(iv_dataset):
     要求する。
     """
     options = IVOptions(estimator="gmm", gmm_type="one_step", cov_type="hac")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.HAC_REQUIRES_HAC_TIME, setting="cov_type"),
-    ):
+    with raises_error(ErrorCode.HAC_TIME_REQUIRED, setting="cov_type"):
         our_fit(iv_dataset, options=options)
 
 

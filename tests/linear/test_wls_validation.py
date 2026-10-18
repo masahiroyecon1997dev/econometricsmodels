@@ -64,14 +64,11 @@ def test_weight_empty_string_raises(unit_weight_dataset):
 
 def test_weight_equals_y_raises(dataset):
     """`weight`に`y`と同じ列名を指定した場合`ValidationError`。"""
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.ROLE_OVERLAP_SINGLE_EQUALS_SINGLE,
-            col="y",
-            later_role="weight",
-            earlier_role="y",
-        ),
+    with raises_error(
+        ErrorCode.ROLE_COLUMN_OVERLAP,
+        column="y",
+        argument="weight",
+        other_argument="y",
     ):
         WLS(dataset, y="y", x=["x1", "x2"], weight="y").fit()
 
@@ -145,14 +142,11 @@ def test_null_weight_raises(dataset):
 def test_y_in_x_raises(unit_weight_dataset):
     """`y`と同じ列名が`x`にも含まれる場合`ValidationError`（OLSと同じ検証）。"""
     df = unit_weight_dataset
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
-            col="y",
-            single_role="y",
-            multi_role="x",
-        ),
+    with raises_error(
+        ErrorCode.ROLE_COLUMN_OVERLAP,
+        column="y",
+        argument="y",
+        other_argument="x",
     ):
         WLS(df, y="y", x=["y", "x1"], weight="weight").fit()
 
@@ -160,9 +154,8 @@ def test_y_in_x_raises(unit_weight_dataset):
 def test_duplicate_x_column_raises(unit_weight_dataset):
     """`x`に同じ列名が重複して含まれる場合`ValidationError`（OLSと同じ検証）。"""
     df = unit_weight_dataset
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.DUPLICATE_WITHIN_ROLE, name="x1", role="x"),
+    with raises_error(
+        ErrorCode.ROLE_DUPLICATE_COLUMN, column="x1", argument="x"
     ):
         WLS(df, y="y", x=["x1", "x1"], weight="weight").fit()
 
@@ -172,16 +165,14 @@ def test_const_collision_with_include_intercept_raises():
     df = name_collision_frame([1.0, 2.0, 3.0]).with_columns(
         pl.lit(1.0).alias("weight")
     )
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.CONST_COLLISION, role="x")
-    ):
+    with raises_error(ErrorCode.INTERCEPT_NAME_COLLISION, argument="x"):
         WLS(df, y="y", x=["const"], weight="weight").fit()
 
 
 def test_empty_x_raises(unit_weight_dataset):
     """`x`が空リストの場合`ValidationError`（OLSと同じ検証）。"""
     df = unit_weight_dataset
-    with pytest.raises(ValidationError, match=escaped(msgs.X_EMPTY, role="x")):
+    with raises_error(ErrorCode.ROLE_EMPTY, argument="x"):
         WLS(df, y="y", x=[], weight="weight").fit()
 
 
@@ -482,20 +473,14 @@ def test_augment_column_collision_raises(unit_weight_dataset):
     """
     df = unit_weight_dataset
     df_with_predicted = df.with_columns(pl.lit(0.0).alias("predicted"))
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.EXISTING_COLUMN_COLLISION, name="predicted"),
-    ):
+    with raises_error(ErrorCode.AUGMENT_COLUMN_EXISTS, column="predicted"):
         WLS(
             df_with_predicted, y="y", x=["x1", "x2"], weight="weight"
         ).fit().augment()
 
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
     new_data = pl.DataFrame({"x1": [1.0], "x2": [0.5], "predicted": [0.0]})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.EXISTING_COLUMN_COLLISION, name="predicted"),
-    ):
+    with raises_error(ErrorCode.AUGMENT_COLUMN_EXISTS, column="predicted"):
         res.augment(new_data)
 
 
@@ -526,9 +511,11 @@ def test_invalid_cov_type_raises(unit_weight_dataset, cov_type):
     """
     df = unit_weight_dataset
     options = WLSOptions(cov_type=cov_type)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.UNKNOWN_COV_TYPE_LINEAR, other=cov_type),
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="cov_type",
+        value=cov_type,
+        allowed=msgs.ALLOWED_COV_TYPES_LINEAR,
     ):
         WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
 
@@ -536,7 +523,12 @@ def test_invalid_cov_type_raises(unit_weight_dataset, cov_type):
 @pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
 def test_nonrobust_is_rejected(unit_weight_dataset, cov_type):
     """`"nonrobust"`は別名として受け付けない（概念ごとに文字列を1つに絞る）。"""
-    with pytest.raises(ValidationError, match="unknown cov_type: 'nonrobust'"):
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="cov_type",
+        value=cov_type,
+        allowed=msgs.ALLOWED_COV_TYPES_LINEAR,
+    ):
         WLS(
             unit_weight_dataset,
             y="y",
@@ -609,12 +601,8 @@ def test_invalid_confidence_level_raises(
     """
     df = unit_weight_dataset
     options = WLSOptions(confidence_level=confidence_level)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.INVALID_CONFIDENCE_LEVEL,
-            confidence_level=msgs.rust_f64(confidence_level),
-        ),
+    with raises_error(
+        ErrorCode.CONFIDENCE_LEVEL_OUT_OF_RANGE, value=confidence_level
     ):
         WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
 
@@ -628,9 +616,8 @@ def test_invalid_hac_lags_raises(unit_weight_dataset, hac_lags):
     """
     df = with_row_time(unit_weight_dataset)
     options = WLSOptions(cov_type="hac", hac_lags=hac_lags, hac_time=ROW_TIME)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.INVALID_HAC_LAGS, hac_lags=hac_lags, n=100),
+    with raises_error(
+        ErrorCode.HAC_LAGS_OUT_OF_RANGE, value=hac_lags, n_obs=100, max=99
     ):
         WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
 
@@ -675,9 +662,8 @@ def test_option_unused_by_cov_type_raises(
     書き忘れでclassicalの標準誤差が返るのを防ぐ）。
     """
     options = WLSOptions(cov_type=cov_type, **{option: value})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.UNUSED_OPTION, option=option, condition=condition),
+    with raises_error(
+        ErrorCode.OPTION_UNUSED, option=option, condition=condition
     ):
         WLS(
             unit_weight_dataset,
@@ -693,10 +679,7 @@ def test_hac_requires_hac_time(unit_weight_dataset, cov_type):
     """`cov_type="hac"`で`hac_time`が未指定だと`ValidationError`（OLSと同じ）。"""
     df = unit_weight_dataset
     options = WLSOptions(cov_type=cov_type, hac_lags=2)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.HAC_REQUIRES_HAC_TIME, setting="cov_type"),
-    ):
+    with raises_error(ErrorCode.HAC_TIME_REQUIRED, setting="cov_type"):
         WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
 
 

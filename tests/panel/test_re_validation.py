@@ -58,59 +58,47 @@ from econometricsmodels import (
 
 
 #
-# `validation.rs`はFE/RE共通のためメッセージ文言も完全に同一
+# `validation.rs`はFE/RE共通のためエラーの`code`・`params`も同一
 # （`test_fe_validation.py`と対照）。
 
 
 def test_y_overlaps_entity_raises(fe_dataset):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.ROLE_OVERLAP_SINGLE_EQUALS_SINGLE,
-            col="y",
-            later_role="entity",
-            earlier_role="y",
-        ),
+    with raises_error(
+        ErrorCode.ROLE_COLUMN_OVERLAP,
+        column="y",
+        argument="entity",
+        other_argument="y",
     ):
         RE(fe_dataset, y="y", x=["x1", "x2"], entity="y").fit()
 
 
 def test_y_overlaps_x_raises(fe_dataset):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
-            col="y",
-            single_role="y",
-            multi_role="x",
-        ),
+    with raises_error(
+        ErrorCode.ROLE_COLUMN_OVERLAP,
+        column="y",
+        argument="y",
+        other_argument="x",
     ):
         RE(fe_dataset, y="y", x=["y", "x2"], entity="entity").fit()
 
 
 def test_entity_overlaps_x_raises(fe_dataset):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
-            col="entity",
-            single_role="entity",
-            multi_role="x",
-        ),
+    with raises_error(
+        ErrorCode.ROLE_COLUMN_OVERLAP,
+        column="entity",
+        argument="entity",
+        other_argument="x",
     ):
         RE(fe_dataset, y="y", x=["entity", "x2"], entity="entity").fit()
 
 
 def test_y_overlaps_time_raises(fe_dataset):
     options = REOptions(time="y")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.ROLE_OVERLAP_SINGLE_EQUALS_SINGLE,
-            col="y",
-            later_role="time",
-            earlier_role="y",
-        ),
+    with raises_error(
+        ErrorCode.ROLE_COLUMN_OVERLAP,
+        column="y",
+        argument="time",
+        other_argument="y",
     ):
         RE(
             fe_dataset, y="y", x=["x1", "x2"], entity="entity", options=options
@@ -119,14 +107,11 @@ def test_y_overlaps_time_raises(fe_dataset):
 
 def test_entity_overlaps_time_raises(fe_dataset):
     options = REOptions(time="entity")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.ROLE_OVERLAP_SINGLE_EQUALS_SINGLE,
-            col="entity",
-            later_role="time",
-            earlier_role="entity",
-        ),
+    with raises_error(
+        ErrorCode.ROLE_COLUMN_OVERLAP,
+        column="entity",
+        argument="time",
+        other_argument="entity",
     ):
         RE(
             fe_dataset, y="y", x=["x1", "x2"], entity="entity", options=options
@@ -135,14 +120,11 @@ def test_entity_overlaps_time_raises(fe_dataset):
 
 def test_x_overlaps_time_raises(fe_dataset):
     options = REOptions(time="x1")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
-            col="x1",
-            single_role="time",
-            multi_role="x",
-        ),
+    with raises_error(
+        ErrorCode.ROLE_COLUMN_OVERLAP,
+        column="x1",
+        argument="time",
+        other_argument="x",
     ):
         RE(
             fe_dataset, y="y", x=["x1", "x2"], entity="entity", options=options
@@ -152,14 +134,11 @@ def test_x_overlaps_time_raises(fe_dataset):
 def test_y_overlaps_dk_time_raises(fe_dataset):
     """`dk_time`ロールは`REOptions.dk_time`設定時のみ存在する。"""
     options = REOptions(cov_type="dk", dk_time="y")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.ROLE_OVERLAP_SINGLE_EQUALS_SINGLE,
-            col="y",
-            later_role="dk_time",
-            earlier_role="y",
-        ),
+    with raises_error(
+        ErrorCode.ROLE_COLUMN_OVERLAP,
+        column="y",
+        argument="dk_time",
+        other_argument="y",
     ):
         RE(
             fe_dataset, y="y", x=["x1", "x2"], entity="entity", options=options
@@ -168,14 +147,11 @@ def test_y_overlaps_dk_time_raises(fe_dataset):
 
 def test_entity_overlaps_dk_time_raises(fe_dataset):
     options = REOptions(cov_type="dk", dk_time="entity")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.ROLE_OVERLAP_SINGLE_EQUALS_SINGLE,
-            col="entity",
-            later_role="dk_time",
-            earlier_role="entity",
-        ),
+    with raises_error(
+        ErrorCode.ROLE_COLUMN_OVERLAP,
+        column="entity",
+        argument="dk_time",
+        other_argument="entity",
     ):
         RE(
             fe_dataset, y="y", x=["x1", "x2"], entity="entity", options=options
@@ -197,9 +173,8 @@ def test_dk_time_may_overlap_x(fe_dataset):
 
 
 def test_duplicate_within_x_raises(fe_dataset):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.DUPLICATE_WITHIN_ROLE, name="x1", role="x"),
+    with raises_error(
+        ErrorCode.ROLE_DUPLICATE_COLUMN, column="x1", argument="x"
     ):
         RE(fe_dataset, y="y", x=["x1", "x1"], entity="entity").fit()
 
@@ -209,7 +184,7 @@ def test_x_empty_raises(fe_dataset):
     持つユースケースだが、他手法との一貫性を優先し拒否する設計判断
     （`engine_pybind/src/panel/re.rs`モジュールdoc参照）。
     """
-    with pytest.raises(ValidationError, match=escaped(msgs.X_EMPTY, role="x")):
+    with raises_error(ErrorCode.ROLE_EMPTY, argument="x"):
         RE(fe_dataset, y="y", x=[], entity="entity").fit()
 
 
@@ -447,21 +422,26 @@ def test_quasi_demeaned_regression_fails_when_sigma2_eps_is_zero():
 
 @pytest.mark.parametrize("cov_type", ["invalid", "", "hac"])
 def test_unknown_cov_type_raises(fe_dataset, cov_type):
-    """`unknown cov_type`の文言はFEと一字一句同じ（`UNKNOWN_COV_TYPE_FE`を
-    流用、`_error_messages_panel.py`のコメント参照）。
+    """未知の`cov_type`で受け付ける値の一覧は、FEと同じ
+    （`ALLOWED_COV_TYPES_PANEL`、`hc0`は含まない）。
     """
     options = REOptions(cov_type=cov_type)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(panel_msgs.UNKNOWN_COV_TYPE_FE, other=cov_type),
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="cov_type",
+        value=cov_type,
+        allowed=panel_msgs.ALLOWED_COV_TYPES_PANEL,
     ):
         our_fit_re(fe_dataset, options=options)
 
 
 def test_hc0_not_supported_raises(fe_dataset):
     options = REOptions(cov_type="hc0")
-    with pytest.raises(
-        ValidationError, match=escaped(panel_msgs.HC0_NOT_SUPPORTED_RE)
+    with raises_error(
+        ErrorCode.COV_TYPE_NOT_AVAILABLE_FOR_MODEL,
+        value="hc0",
+        model="RE",
+        allowed=panel_msgs.ALLOWED_COV_TYPES_PANEL,
     ):
         our_fit_re(fe_dataset, options=options)
 
@@ -469,12 +449,8 @@ def test_hc0_not_supported_raises(fe_dataset):
 @pytest.mark.parametrize("confidence_level", [1.5, 0.0, -0.1])
 def test_invalid_confidence_level_raises(fe_dataset, confidence_level):
     options = REOptions(confidence_level=confidence_level)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.INVALID_CONFIDENCE_LEVEL,
-            confidence_level=msgs.rust_f64(confidence_level),
-        ),
+    with raises_error(
+        ErrorCode.CONFIDENCE_LEVEL_OUT_OF_RANGE, value=confidence_level
     ):
         our_fit_re(fe_dataset, options=options)
 
@@ -485,9 +461,7 @@ def test_dk_requires_dk_time_raises(fe_dataset):
     モジュールdoc「`REOptions.dk_time`」参照）。
     """
     options = REOptions(cov_type="dk")
-    with pytest.raises(
-        ValidationError, match=escaped(panel_msgs.DK_REQUIRES_TIME)
-    ):
+    with raises_error(ErrorCode.DK_TIME_REQUIRED):
         our_fit_re(fe_dataset, options=options)
 
 
@@ -496,11 +470,11 @@ def test_invalid_dk_bandwidth_raises(fe_dataset, dk_bandwidth):
     options = REOptions(
         cov_type="dk", dk_time="time", dk_bandwidth=dk_bandwidth
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            panel_msgs.INVALID_DK_BANDWIDTH, bandwidth=dk_bandwidth, t=6
-        ),
+    with raises_error(
+        ErrorCode.DK_BANDWIDTH_OUT_OF_RANGE,
+        value=dk_bandwidth,
+        n_periods=6,
+        max=5,
     ):
         our_fit_re(fe_dataset, options=options)
 
@@ -652,9 +626,8 @@ def test_option_unused_by_cov_type_raises(
     # dkは時点列(`dk_time`)が必須なので、他のオプションの検証だけを見るため添える。
     extra = {"dk_time": "time"} if cov_type == "dk" else {}
     options = REOptions(cov_type=cov_type, **extra, **{option: value})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.UNUSED_OPTION, option=option, condition=condition),
+    with raises_error(
+        ErrorCode.OPTION_UNUSED, option=option, condition=condition
     ):
         our_fit_re(fe_dataset, options=options)
 

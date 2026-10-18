@@ -320,10 +320,7 @@ def test_nlags_below_one_raises_validation_error(ar1, nlags):
     fitted = OLS(ar1, y="y", x=["x"]).fit()
     # 巨大な負の整数は`i64::MIN`に飽和して報告される。
     expected = max(nlags, -(2**63))
-    with pytest.raises(
-        ValidationError,
-        match=escaped(linear_msgs.INVALID_NLAGS, nlags=expected),
-    ):
+    with raises_error(ErrorCode.NLAGS_NOT_POSITIVE, value=expected):
         fitted.breusch_godfrey_test("t", nlags)
 
 
@@ -359,9 +356,11 @@ def test_time_and_nlags_are_required(ar1):
 
 def test_unknown_statistic_raises_validation_error(ar1):
     fitted = OLS(ar1, y="y", x=["x"]).fit()
-    with pytest.raises(
-        ValidationError,
-        match=escaped(linear_msgs.UNKNOWN_DIAGNOSTIC_STATISTIC, other="chi2"),
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="statistic",
+        value="chi2",
+        allowed=linear_msgs.ALLOWED_DIAGNOSTIC_STATISTICS,
     ):
         fitted.breusch_godfrey_test("t", 1, "chi2")
 

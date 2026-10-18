@@ -400,7 +400,7 @@ impl LogitResult {
         at: String,
         confidence_level: f64,
     ) -> PyResult<MarginalEffectsResult> {
-        let at = parse_marginal_effects_at(&at.to_lowercase())?;
+        let at = parse_marginal_effects_at(&at)?;
         let effects = self
             .estimator
             .marginal_effects(at, confidence_level)

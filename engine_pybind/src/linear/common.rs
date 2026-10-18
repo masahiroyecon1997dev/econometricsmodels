@@ -14,13 +14,15 @@
 
 use engine::linear::common::LeastSquaresError;
 use engine::linear::ols::CovType as EngineCovType;
+use engine::shared::error_catalog::{ErrorCode, ParamValue};
 use polars::prelude::DataFrame;
 use pyo3::{PyErr, PyResult};
 
 use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{extract_optional_cluster_groups, extract_time_order_ranks};
 use crate::shared::errors::{
-    common_error_to_pyerr, legacy_computation_error, legacy_validation_error,
+    common_error_to_pyerr, legacy_computation_error, legacy_validation_error, report_to_pyerr,
+    unknown_option_value, user_error,
 };
 use crate::shared::validation::reject_unused_option;
 
@@ -33,7 +35,11 @@ use crate::shared::validation::reject_unused_option;
 ///
 /// 対応表は`docs/spec/ols-spec.md`「engine/engine_pybind間のデータ受け渡し・エラー変換」参照。
 pub(crate) fn least_squares_error_to_pyerr(err: LeastSquaresError) -> PyErr {
+    if let Some(report) = err.try_report() {
+        return report_to_pyerr(&report);
+    }
     match err {
+        // `try_report()`で処理済みのバリアントは先頭で返るためここには来ない（`_`で受けずに網羅するために残している）。
         LeastSquaresError::Common(common) => common_error_to_pyerr(common),
         LeastSquaresError::WeightDimensionMismatch { .. }
         | LeastSquaresError::NonPositiveWeight { .. }
@@ -115,10 +121,11 @@ pub(crate) fn parse_cov_kind(cov_type: &str) -> PyResult<CovKind> {
         "hc3" => Ok(CovKind::Hc3),
         "hac" => Ok(CovKind::Hac),
         "cluster" => Ok(CovKind::Cluster),
-        other => Err(legacy_validation_error(format!(
-            "unknown cov_type: '{other}'. Expected one of 'classical', 'hc0' through \
-             'hc3', 'hac', or 'cluster'"
-        ))),
+        _ => Err(unknown_option_value(
+            "cov_type",
+            cov_type,
+            &["classical", "hc0", "hc1", "hc2", "hc3", "hac", "cluster"],
+        )),
     }
 }
 
@@ -167,12 +174,10 @@ pub(crate) fn check_cov_options(
 /// `hac_time`が未指定なら`ValidationError`。
 pub(crate) fn require_hac_time<'a>(hac_time: Option<&'a str>, setting: &str) -> PyResult<&'a str> {
     hac_time.ok_or_else(|| {
-        legacy_validation_error(format!(
-            "{setting}='hac' requires the `hac_time` option: the column that gives the time \
-             order of the observations (the row order of the data is not assumed to be the \
-             time order; add an explicit index column such as `df.with_row_index(\"t\")` if \
-             the rows are already in time order)"
-        ))
+        user_error(
+            ErrorCode::HacTimeRequired,
+            vec![("setting", ParamValue::from(setting))],
+        )
     })
 }
 

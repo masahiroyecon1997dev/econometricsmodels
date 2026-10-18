@@ -24,13 +24,16 @@ _MISSING_CODES = pytest.StashKey[list[str]]()
 
 
 def _is_full_run(config: pytest.Config) -> bool:
-    """絞り込み（`-k`・`-m`・`--lf`・ファイル/ノード指定）の無い全体実行か。"""
+    """絞り込み（`-k`・`-m`・`--lf`・`--deselect`・`--collect-only`・`tests`以外の指定）の無い全体実行か。"""
     option = config.option
-    if option.keyword or option.markexpr:
+    if option.keyword or option.markexpr or option.collectonly:
+        return False
+    if option.deselect:
         return False
     if getattr(option, "lf", False) or getattr(option, "failedfirst", False):
         return False
-    return all(Path(arg).is_dir() for arg in config.args)
+    tests_dir = Path(__file__).resolve().parent
+    return all(Path(arg).resolve() == tests_dir for arg in config.args)
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:

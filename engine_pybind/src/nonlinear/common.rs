@@ -14,7 +14,8 @@ use pyo3::prelude::*;
 use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::extract_optional_cluster_groups;
 use crate::shared::errors::{
-    common_error_to_pyerr, legacy_computation_error, legacy_validation_error,
+    common_error_to_pyerr, legacy_computation_error, legacy_validation_error, report_to_pyerr,
+    unknown_option_value,
 };
 use crate::shared::validation::reject_unused_option;
 
@@ -28,7 +29,11 @@ use crate::shared::validation::reject_unused_option;
 ///
 /// 対応表は`docs/spec/nonlinear-common.md`2章「エラー型（`MleError`、共有）」参照。
 pub(crate) fn mle_error_to_pyerr(err: MleError) -> PyErr {
+    if let Some(report) = err.try_report() {
+        return report_to_pyerr(&report);
+    }
     match err {
+        // `try_report()`で処理済みのバリアントは先頭で返るためここには来ない（`_`で受けずに網羅するために残している）。
         MleError::Common(common) => common_error_to_pyerr(common),
         MleError::InvalidMaxIter { .. }
         | MleError::InvalidTol { .. }
@@ -129,10 +134,11 @@ pub(crate) fn parse_cov_kind(cov_type: &str) -> PyResult<CovKind> {
         "hc0" => Ok(CovKind::Hc0),
         "hc1" => Ok(CovKind::Hc1),
         "cluster" => Ok(CovKind::Cluster),
-        other => Err(legacy_validation_error(format!(
-            "unknown cov_type: '{other}'. Expected one of 'classical', \
-             'opg', 'hc0', 'hc1', or 'cluster'"
-        ))),
+        _ => Err(unknown_option_value(
+            "cov_type",
+            cov_type,
+            &["classical", "opg", "hc0", "hc1", "cluster"],
+        )),
     }
 }
 
@@ -191,9 +197,11 @@ pub(crate) fn parse_solver_type(solver: &str) -> PyResult<SolverType> {
         "newton" => Ok(SolverType::Newton),
         "bfgs" => Ok(SolverType::Bfgs),
         "lbfgs" => Ok(SolverType::Lbfgs),
-        other => Err(legacy_validation_error(format!(
-            "unknown solver: '{other}'. Expected one of 'newton', 'bfgs', or 'lbfgs'"
-        ))),
+        _ => Err(unknown_option_value(
+            "solver",
+            solver,
+            &["newton", "bfgs", "lbfgs"],
+        )),
     }
 }
 
@@ -212,14 +220,16 @@ pub(crate) fn solver_name(solver: SolverType) -> &'static str {
 ///
 /// # Errors
 /// `at`が既知の値のいずれでもない: `ValidationError`
-pub(crate) fn parse_marginal_effects_at(at_lower: &str) -> PyResult<MarginalEffectsAt> {
-    match at_lower {
+pub(crate) fn parse_marginal_effects_at(at: &str) -> PyResult<MarginalEffectsAt> {
+    match at.to_lowercase().as_str() {
         "overall" => Ok(MarginalEffectsAt::Overall),
         "mean" => Ok(MarginalEffectsAt::Mean),
         "median" => Ok(MarginalEffectsAt::Median),
-        other => Err(legacy_validation_error(format!(
-            "unknown at: '{other}'. Expected one of 'overall', 'mean', or 'median'"
-        ))),
+        _ => Err(unknown_option_value(
+            "at",
+            at,
+            &["overall", "mean", "median"],
+        )),
     }
 }
 

@@ -24,13 +24,11 @@
 
 use faer::Mat;
 
-use crate::linear::common::LeastSquaresError;
 use crate::panel::common::PanelError;
 use crate::panel::re::{
     EntityMeans, ReEffects, ReInput, VarianceComponents, VarianceMethod, entity_means, internal_fe,
     swamy_arora_variance_components,
 };
-use crate::shared::error::CommonError;
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::least_squares::{LeastSquaresFit, least_squares};
 
@@ -43,7 +41,7 @@ use crate::shared::least_squares::{LeastSquaresFit, least_squares};
 /// - `Amemiya`でwithin変動の無い列があれば`PanelError::AmemiyaRequiresWithinVariation`。
 /// - `WallaceHussain`・`Amemiya`で`σ_ε²`が0以下なら
 ///   `PanelError::NonPositiveIdiosyncraticVariance`、トレース形の連立が特異なら
-///   `CommonError::ComputationFailed`。
+///   `PanelError::VarianceComponentsMomentsSingular`。
 pub(crate) fn variance_components(
     input: &ReInput,
     effects: ReEffects,
@@ -201,9 +199,8 @@ fn pooled_fit(input: &ReInput) -> Result<LeastSquaresFit, PanelError> {
         },
     );
     let y = Mat::from_fn(n, 1, |i, _| input.y()[i]);
-    least_squares(&design, &y).map_err(|_| PanelError::PooledRegressionFailed {
-        source: LeastSquaresError::SingularMatrix,
-    })
+    least_squares(&design, &y)
+        .map_err(|err| PanelError::PooledRegressionFailed { source: err.into() })
 }
 
 /// Amemiyaの1段目の残差: `y - x'β̂_within - (ȳ - x̄'β̂_within)`。内部FEの説明変数は全列
@@ -358,12 +355,9 @@ fn solve_two_by_two(
 ) -> Result<(f64, f64), PanelError> {
     let det = a * d - b * c;
     if !det.is_finite() || det.abs() <= f64::EPSILON * (a * d).abs().max((b * c).abs()) {
-        return Err(CommonError::ComputationFailed(format!(
-            "the moment equations for the variance components are singular with \
-             variance_method=\"{}\"",
-            method.as_str()
-        ))
-        .into());
+        return Err(PanelError::VarianceComponentsMomentsSingular {
+            method: method.as_str(),
+        });
     }
     Ok(((q_w * d - b * q_id) / det, (a * q_id - c * q_w) / det))
 }
@@ -674,7 +668,7 @@ mod tests {
         let result = solve_two_by_two((1.0, 2.0, 2.0, 4.0), (1.0, 1.0), VarianceMethod::Amemiya);
         assert!(matches!(
             result,
-            Err(PanelError::Common(CommonError::ComputationFailed(_)))
+            Err(PanelError::VarianceComponentsMomentsSingular { .. })
         ));
         let (eps, u) =
             solve_two_by_two((2.0, 0.0, 0.0, 3.0), (4.0, 9.0), VarianceMethod::Amemiya).unwrap();

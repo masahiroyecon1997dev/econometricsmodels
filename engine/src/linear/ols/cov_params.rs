@@ -127,6 +127,7 @@ mod tests {
     use super::super::input::OlsInput;
     use super::*;
     use crate::linear::common::row_time_order;
+    use crate::shared::error::MatrixKind;
     use crate::shared::group_codes::GroupCodes;
 
     /// 同じデータセット（x=[1..5], y=[2,4,5,4,5]）でのHC0〜HC3。
@@ -796,7 +797,7 @@ mod tests {
 
     /// `fit_with_optional_f_test`が`None`にするのは`g <= q`だけで、他の失敗は`fit`と同じ
     /// まま伝播する: `groups`未指定（`MissingClusterColumn`）、`groups`の長さが`n`と不一致
-    /// （`ClusterDimensionMismatch`）、`g > q`でのほぼ特異性（`ComputationFailed`）。
+    /// （`ClusterDimensionMismatch`）、`g > q`でのほぼ特異性（`NearSingularMatrix`）。
     #[test]
     fn fit_with_optional_f_test_does_not_hide_other_cluster_errors() {
         let missing = OlsEstimator::fit_with_optional_f_test(
@@ -846,7 +847,9 @@ mod tests {
             OlsEstimator::fit_with_optional_f_test(ill_conditioned, cluster_cov_type(4), 0.95);
         assert!(matches!(
             result.unwrap_err(),
-            LeastSquaresError::Common(CommonError::ComputationFailed(_))
+            LeastSquaresError::Common(CommonError::NearSingularMatrix {
+                matrix: MatrixKind::CoefficientCovariance
+            })
         ));
     }
 
@@ -864,7 +867,7 @@ mod tests {
 
     /// `cov_type=Cluster`かつ`g > q`（`fit()`冒頭のバリデーションを通過）でも、傾き係数
     /// 間のスケールが極端に異なると、ロバストWald/F検定の`q×q`部分行列の条件数が倍精度の
-    /// 限界を超え`ensure_well_conditioned_symmetric_matrix`が`ComputationFailed`で止める
+    /// 限界を超え`ensure_well_conditioned_symmetric_matrix`が`NearSingularMatrix`で止める
     /// （`fit_returns_computation_failed_for_extreme_scale_difference_in_f_test`のcluster版。
     /// `cov_type`によらず傾き部分行列の条件数は同じだが、cluster経路でもこのbackstopが
     /// 生きていることを明示的に固定する）。`x1`は1e6・`x2`は1e-3オーダー、`g=4 > q=3`。
@@ -900,7 +903,9 @@ mod tests {
 
         assert!(matches!(
             result.unwrap_err(),
-            LeastSquaresError::Common(CommonError::ComputationFailed(_))
+            LeastSquaresError::Common(CommonError::NearSingularMatrix {
+                matrix: MatrixKind::CoefficientCovariance
+            })
         ));
     }
 

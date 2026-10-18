@@ -5,7 +5,7 @@ use faer::Side;
 use faer::prelude::Solve;
 use statrs::distribution::{ContinuousCDF, FisherSnedecor};
 
-use crate::shared::error::CommonError;
+use crate::shared::error::{CommonError, MatrixKind};
 use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 
 /// 傾き係数（切片を除く`df_model`個の係数）が全てゼロという帰無仮説のロバストWald検定を行い、
@@ -22,7 +22,7 @@ use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 ///
 /// `Σ`の逆行列はCholesky分解（`Llt`）で求める。classical/HC0-3/HACでは`Σ`は
 /// （`cov_params`全体の）正定値行列の主小行列であり理論上必ず正定値のため、`xtx_inverse`と
-/// 同様、浮動小数点演算の丸めによる境界的な失敗に備えて`ComputationFailed`に変換している。
+/// 同様、浮動小数点演算の丸めによる境界的な失敗に備えて`NearSingularMatrix`に変換している。
 ///
 /// **`CovType::Cluster`の構造的特異性（`g <= q`）は、この関数に到達する前に
 /// `fit()`冒頭のバリデーション（`validate_cluster_count_covers_slopes`、`CommonError::
@@ -39,7 +39,7 @@ use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 /// （`fit_returns_computation_failed_for_extreme_scale_difference_in_f_test`で固定）。
 /// Cholesky分解（非ピボット）は数値的にほぼ特異な行列でも失敗せず桁違いに巨大な
 /// F統計量を黙って返しうるため、`Llt`分解の**前**にこのチェックを置き
-/// `ComputationFailed`で止める。`Llt`分解自体の`map_err`は、両方のチェックを
+/// `NearSingularMatrix`で止める。`Llt`分解自体の`map_err`は、両方のチェックを
 /// すり抜けるごく僅かな境界ケースに備えた防御的なフォールバック。
 ///
 /// `pub(crate)`: `panel::fe::FeEstimator::fit`がFE独自に計算し直した
@@ -69,14 +69,14 @@ pub(crate) fn wald_f_test(
     ensure_well_conditioned_symmetric_matrix(
         &v_slopes,
         df_model,
-        "coefficient covariance submatrix for the F-test",
+        MatrixKind::CoefficientCovariance,
     )?;
 
-    let llt = v_slopes.llt(Side::Lower).map_err(|_| {
-        CommonError::ComputationFailed(
-            "failed to invert coefficient covariance submatrix for the F-test".to_string(),
-        )
-    })?;
+    let llt = v_slopes
+        .llt(Side::Lower)
+        .map_err(|_| CommonError::NearSingularMatrix {
+            matrix: MatrixKind::CoefficientCovariance,
+        })?;
     let v_slopes_inv_beta = llt.solve(&beta_slopes);
 
     let wald: f64 = (0..df_model)
@@ -85,7 +85,7 @@ pub(crate) fn wald_f_test(
     let f_statistic = wald / (df_model as f64);
 
     let f_dist = FisherSnedecor::new(df_model as f64, df_inference as f64)
-        .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+        .map_err(|e| CommonError::internal(e.to_string()))?;
     let f_p_value = f_dist.sf(f_statistic);
 
     Ok((f_statistic, f_p_value))
@@ -171,13 +171,13 @@ mod tests {
         let ill = Mat::from_fn(2, 2, |i, j| if i == j { [1e12, 1e-6][i] } else { 0.0 });
         assert!(matches!(
             wald_f_test(&params, &ill, 0, 2, 30),
-            Err(CommonError::ComputationFailed(_))
+            Err(CommonError::NearSingularMatrix { .. })
         ));
 
         let zero = Mat::<f64>::zeros(2, 2);
         assert!(matches!(
             wald_f_test(&params, &zero, 0, 2, 30),
-            Err(CommonError::ComputationFailed(_))
+            Err(CommonError::NearSingularMatrix { .. })
         ));
     }
 }

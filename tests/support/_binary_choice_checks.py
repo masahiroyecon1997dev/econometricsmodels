@@ -45,7 +45,7 @@ from _assertions import (
 )
 from _constants import APPLE_CLUSTER, APPLE_X, DATA_DIR, MROZ_X
 from _error_messages import escaped
-from _errors import raises_error
+from _errors import raises_error, raises_one_of_errors
 from _helpers import (
     load_wooldridge_dataset,
     name_collision_frame,
@@ -1064,13 +1064,13 @@ def check_perfect_multicollinearity_raises_computation_error(
     estimator_cls, dataset_prefix, options_cls, solver
 ):
     """完全な多重共線性（合成データセット）は数値比較の対象外
-    （`testing-policy.md`「テストの3系統」）。想定エラー（`ComputationError`）が
+    （`testing-policy.md`「テストの3系統」）。想定エラー（`DESIGN_MATRIX_SINGULAR`）が
     発生することのみを確認する。`solver`（newton/bfgs/lbfgs）でparametrizeする。
 
     `engine`内の特異性の検出経路は`fit()`冒頭の列ピボットQRランクチェック
     （`solver`非依存の単一経路、`SingularDesignMatrix`）だが、**`engine_pybind`側の
     solver文字列パース（`"bfgs"`/`"lbfgs"` → `EngineSolverType`）と配線は
-    solver固有**なので、「非既定solverの文字列 × 特異入力 × `ComputationError`」を
+    solver固有**なので、「非既定solverの文字列 × 特異入力 × `DESIGN_MATRIX_SINGULAR`」を
     踏むAPI境界テストが必要になる（`engine`側の`solver`×`cov_type`網羅は
     `fit_returns_singular_design_matrix_error_for_perfectly_collinear_design_matrix`
     1本に集約している）。
@@ -1078,7 +1078,7 @@ def check_perfect_multicollinearity_raises_computation_error(
     df = pl.read_csv(
         DATA_DIR / f"{dataset_prefix}_perfect_multicollinearity.csv"
     )
-    with pytest.raises(ComputationError):
+    with raises_error(ErrorCode.DESIGN_MATRIX_SINGULAR):
         estimator_cls(
             df,
             y="y",
@@ -1087,27 +1087,46 @@ def check_perfect_multicollinearity_raises_computation_error(
         ).fit()
 
 
+# bfgs/lbfgsは分離データで、分離の検出に至る前にソルバー自身が最大反復に達して
+# 失敗することがある（どちらになるかは軌道に依存する）。
+_SEPARATION_OR_NON_CONVERGENCE = {
+    ErrorCode.SEPARATION_DETECTED: {},
+    ErrorCode.NOT_CONVERGED: {"iter_option": "max_iter"},
+}
+
+
+def _raises_separation(solver):
+    """分離データが`solver`で失敗するときの`code`を検査するコンテキスト。
+
+    newtonは常に分離の検出（`SEPARATION_DETECTED`）で失敗する。bfgs/lbfgsは
+    分離の検出か最大反復到達（`NOT_CONVERGED`）のどちらか。
+    """
+    if solver == "newton":
+        return raises_error(ErrorCode.SEPARATION_DETECTED)
+    return raises_one_of_errors(_SEPARATION_OR_NON_CONVERGENCE)
+
+
 def check_separation_raises_computation_error(
     estimator_cls, dataset_prefix, options_cls, solver, scenario
 ):
     """真の分離（合成データセット、有限MLEが存在しない）は数値比較の対象外
-    （`testing-policy.md`「テストの3系統」）。想定エラー（`ComputationError`）が
-    発生することのみを確認する。`solver`（newton/bfgs/lbfgs）でparametrizeする。
+    （`testing-policy.md`「テストの3系統」）。想定エラーが発生することのみを確認する。
+    `solver`（newton/bfgs/lbfgs）でparametrizeする。
 
     `scenario`は`complete_separation`（`y`が`x1`の符号のみで決まる完全分離）または
     `quasi_complete_separation`（2値ダミーが1の観測は全て`y=1`となる準完全分離）。
 
-    実際に発生する例外の**メッセージはsolverによって異なる**（newtonは分離検出、
-    bfgs/lbfgsは分離検出に至る前にソルバー自身が`NonConvergence`等で失敗することがある）
-    ため、基底クラス`ComputationError`のみをアサートする（`check_perfect_
+    実際に発生する`code`は**solverによって異なる**（newtonは`SEPARATION_DETECTED`、
+    bfgs/lbfgsは分離検出に至る前にソルバー自身が最大反復に達して`NOT_CONVERGED`で
+    失敗することがある）ため、bfgs/lbfgsはどちらかを許容する（`check_perfect_
     multicollinearity_raises_computation_error`と同型の設計だが、あちらは
-    `solver`によらず常に`SingularDesignMatrix`である点が異なる）。分離検出自体は
+    `solver`によらず常に`DESIGN_MATRIX_SINGULAR`である点が異なる）。分離検出自体は
     サンプルサイズ・分離の種類によらず厳密（線形計画）なので、無警告の「成功」には
     ならない。
     """
     df = pl.read_csv(DATA_DIR / f"{dataset_prefix}_{scenario}.csv")
     x_cols = [c for c in df.columns if c != "y"]
-    with pytest.raises(ComputationError):
+    with _raises_separation(solver):
         estimator_cls(
             df,
             y="y",
@@ -1119,12 +1138,11 @@ def check_separation_raises_computation_error(
 def check_separation_is_reported_as_separation_by_newton(
     estimator_cls, dataset_prefix, options_cls, scenario
 ):
-    """newtonは分離データで`NonConvergence`ではなく分離検出のメッセージを返す
-    （分離の原因と対処が利用者に伝わる）。`ComputationError`の基底クラスだけでは
-    区別できないため、メッセージで固定する。"""
+    """newtonは分離データで`NOT_CONVERGED`ではなく`SEPARATION_DETECTED`を返す
+    （分離の原因と対処が利用者に伝わる）。"""
     df = pl.read_csv(DATA_DIR / f"{dataset_prefix}_{scenario}.csv")
     x_cols = [c for c in df.columns if c != "y"]
-    with pytest.raises(ComputationError, match="separated"):
+    with raises_error(ErrorCode.SEPARATION_DETECTED):
         estimator_cls(
             df,
             y="y",
@@ -1180,12 +1198,12 @@ def check_small_sample_separation_is_not_reported_as_success(
     estimator_cls, options_cls, solver
 ):
     """自由度が1（`n=k+1`）の極小標本で完全分離になるデータは、無警告の「収束」として
-    返さず`ComputationError`にする。かつては標準化パラメータのノルム基準がこの種の
+    返さず`SEPARATION_DETECTED`にする。かつては標準化パラメータのノルム基準がこの種の
     データを見逃し、`converged=True`のまま標準誤差が数千の結果を返していた。
     `raise_on_non_convergence=False`でも`converged=True`にならない。"""
     df = small_sample_separation_dataset()
     x = ["x1", "x2", "x3"]
-    with pytest.raises(ComputationError):
+    with raises_error(ErrorCode.SEPARATION_DETECTED):
         estimator_cls(df, y="y", x=x, options=options_cls(solver=solver)).fit()
     try:
         res = estimator_cls(
@@ -1203,11 +1221,11 @@ def check_multiple_dummy_separation_raises_computation_error(
     estimator_cls, options_cls, solver
 ):
     """3つのダミーが同時に準完全分離するデータ（分離方向が複数）も、全solverで
-    無警告の「成功」にならず`ComputationError`になる。`raise_on_non_convergence=False`でも
-    結果を返すなら`converged=False`。"""
+    無警告の「成功」にならず、分離の検出（bfgs/lbfgsは`NOT_CONVERGED`のこともある）で
+    失敗する。`raise_on_non_convergence=False`でも結果を返すなら`converged=False`。"""
     df = multi_dummy_separation_dataset()
     x = [c for c in df.columns if c != "y"]
-    with pytest.raises(ComputationError):
+    with _raises_separation(solver):
         estimator_cls(df, y="y", x=x, options=options_cls(solver=solver)).fit()
     try:
         res = estimator_cls(
@@ -1252,10 +1270,10 @@ def check_single_overlap_below_boundary_is_flagged_as_separation(
     estimator_cls, options_cls, solver, overlap
 ):
     """重なりが小さすぎて`1e-6`未満のマージンしか持たないとき、分離として扱う
-    （`ComputationError`）。`raise_on_non_convergence=False`なら`converged=False`の
+    （`SEPARATION_DETECTED`）。`raise_on_non_convergence=False`なら`converged=False`の
     結果を返す。"""
     df = single_overlap_binary_dataset(overlap)
-    with pytest.raises(ComputationError, match="separated"):
+    with raises_error(ErrorCode.SEPARATION_DETECTED):
         estimator_cls(
             df,
             y="y",
@@ -1276,9 +1294,9 @@ def check_single_overlap_below_boundary_is_flagged_as_separation(
 def check_separation_without_intercept_raises_computation_error(
     estimator_cls, options_cls
 ):
-    """切片なし（`include_intercept=False`）でも、完全分離は`ComputationError`になる。"""
+    """切片なし（`include_intercept=False`）でも、完全分離は`SEPARATION_DETECTED`になる。"""
     df = separated_dataset()
-    with pytest.raises(ComputationError, match="separated"):
+    with raises_error(ErrorCode.SEPARATION_DETECTED):
         estimator_cls(
             df,
             y="y",
@@ -1304,17 +1322,17 @@ def check_non_convergence_raises_computation_error_with_tiny_max_iter(
     dataset, estimator_cls, options_cls
 ):
     """`max_iter`を人為的に1に絞ると`raise_on_non_convergence=True`
-    （既定）で`ComputationError`（engine側の`NonConvergence`）。
+    （既定）で`NOT_CONVERGED`（`n_iter=1`、`iter_option="max_iter"`）。
 
-    完全分離等の病理的なデータは`NonConvergence`ではなく専用の
-    `SeparationDetected`（engineの`MleError`の別バリアント。Pythonでは
-    `NonConvergence`と同じ`ComputationError`で、例外クラスでは区別できない。
-    `check_separated_data_raises_computation_error`参照）を返すため、
-    `NonConvergence`自体の発生確認には使えない。そのため
-    `NonConvergence`の発生確認は、専用データセットに頼らずmax_iterを
+    完全分離等の病理的なデータは`NOT_CONVERGED`ではなく専用の
+    `SEPARATION_DETECTED`（`check_separated_data_raises_computation_error`参照）を
+    返すため、`NOT_CONVERGED`自体の発生確認には使えない。そのため
+    `NOT_CONVERGED`の発生確認は、専用データセットに頼らずmax_iterを
     人為的に小さくする方法で行う（`docs/spec/<solver>-spec.md`参照）。
     """
-    with pytest.raises(ComputationError):
+    with raises_error(
+        ErrorCode.NOT_CONVERGED, n_iter=1, iter_option="max_iter"
+    ):
         estimator_cls(
             dataset,
             y="y",
@@ -1325,7 +1343,7 @@ def check_non_convergence_raises_computation_error_with_tiny_max_iter(
 
 def check_separated_data_raises_computation_error(estimator_cls):
     """分離データ（`x1`の真の係数を極端に大きくし、全観測がx1の符号だけで完全に
-    分類できるようにしたDGP）は`ComputationError`（engine側の`SeparationDetected`）。
+    分類できるようにしたDGP）は`SEPARATION_DETECTED`。
 
     分離が、Python API境界を通しても正しく検出されエラーになることを確認する
     （`engine`側のRust単体テスト`fit_returns_separation_detected_error_for_separated_data`
@@ -1333,7 +1351,7 @@ def check_separated_data_raises_computation_error(estimator_cls):
     """
     df = separated_dataset()
 
-    with pytest.raises(ComputationError):
+    with raises_error(ErrorCode.SEPARATION_DETECTED):
         estimator_cls(df, y="y", x=["x1", "x2"]).fit()
 
 

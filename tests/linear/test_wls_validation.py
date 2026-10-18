@@ -27,7 +27,6 @@ from _helpers import (
 )
 from econometricsmodels import (
     WLS,
-    ComputationError,
     ErrorCode,
     ValidationError,
     WLSOptions,
@@ -712,11 +711,11 @@ def test_hac_time_with_tied_values_raises(
 
 def test_perfect_multicollinearity_raises_computation_error():
     """完全な多重共線性は数値比較の対象外（`testing-policy.md`「テストの3系統」）。
-    想定エラー（`ComputationError`）が発生することのみを確認する
-    （OLS・Logitと同じ凍結CSVパターンに統一）。
+    想定エラー（`ComputationError`の`DESIGN_MATRIX_SINGULAR`）が
+    発生することのみを確認する（OLS・Logitと同じ凍結CSVパターンに統一）。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_perfect_multicollinearity.csv")
-    with pytest.raises(ComputationError):
+    with raises_error(ErrorCode.DESIGN_MATRIX_SINGULAR):
         WLS(df, y="y", x=["x1", "x2", "x3"], weight="weight").fit()
 
 
@@ -724,14 +723,17 @@ def test_perfect_multicollinearity_raises_computation_error():
 def test_scale_variance_raises_computation_error(cov_type):
     """変数間のスケールが極端に異なる設計行列（x1を`*1e6`、x2を`*1e-3`）は、
     傾き係数の同時共分散部分行列がスケール比の2乗（≈1e18）相当の条件数を持ち
-    倍精度浮動小数点の限界を超えて数値的に特異になる（OLSと同じ理由、
+    倍精度浮動小数点の限界を超えて数値的に特異になり`ComputationError`
+    （`MATRIX_NEAR_SINGULAR`、`matrix="COEFFICIENT_COVARIANCE"`）になる（OLSと同じ理由、
     `test_ols_validation.py`参照。WLSでも実測確認済み）。
     数値比較はせずエラーパスのみ確認する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
     kwargs = {"hac_time": ROW_TIME} if cov_type == "hac" else {}
     options = WLSOptions(cov_type=cov_type, **kwargs)
-    with pytest.raises(ComputationError):
+    with raises_error(
+        ErrorCode.MATRIX_NEAR_SINGULAR, matrix="COEFFICIENT_COVARIANCE"
+    ):
         WLS(
             with_row_time(df),
             y="y",
@@ -749,12 +751,15 @@ def test_scale_variance_cluster_raises_computation_error():
     （行番号%10、`G=10>q=3`）を使い、クラスター数不足による`ValidationError`
     （`test_cluster_count_at_most_slopes_raises_validation_error`参照）
     ではなく、傾き係数の共分散部分行列の条件数超過による
-    `ComputationError`が発生することを確認する。
+    `ComputationError`（`MATRIX_NEAR_SINGULAR`、
+    `matrix="COEFFICIENT_COVARIANCE"`）が発生することを確認する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
     df = with_cluster_groups(df, 10)
     options = WLSOptions(cov_type="cluster", cluster="cluster_group")
-    with pytest.raises(ComputationError):
+    with raises_error(
+        ErrorCode.MATRIX_NEAR_SINGULAR, matrix="COEFFICIENT_COVARIANCE"
+    ):
         WLS(
             df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
         ).fit()

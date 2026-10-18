@@ -23,7 +23,7 @@ from econometricsmodels import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Mapping
 
 _CATALOG = {c["code"]: c for c in _lib.error_catalog()["codes"]}
 _STAGES = {s["name"]: s for s in _lib.error_catalog()["stages"]}
@@ -69,6 +69,11 @@ MIGRATED_CODES: frozenset[str] = frozenset(
         ErrorCode.CLUSTER_REQUIRED,
         ErrorCode.CLUSTER_COUNT_TOO_SMALL,
         ErrorCode.CLUSTER_COUNT_NOT_ABOVE_SLOPES,
+        ErrorCode.DESIGN_MATRIX_SINGULAR,
+        ErrorCode.MATRIX_NEAR_SINGULAR,
+        ErrorCode.NOT_CONVERGED,
+        ErrorCode.SEPARATION_DETECTED,
+        ErrorCode.UNCENSORED_INTERVAL_TOO_NARROW,
     }
 )
 
@@ -109,29 +114,12 @@ def _type_matches(type_name: str, value: object) -> bool:
     return False
 
 
-@contextmanager
-def raises_error(
-    code: ErrorCode | str, **params: object
-) -> Iterator[pytest.ExceptionInfo[ValidationError | ComputationError]]:
-    """ブロック内で`code`の例外が送出され、`params`が一致することを検査する。
-
-    `code`のカタログ上のクラス（`ValidationError`/`ComputationError`）で
-    あること、`params`のキー集合（`stage`があればその補助値も）と各値の型がカタログと
-    一致すること、`str(e)`が
-    `message`と`hint`の連結で`args`が`(str(e),)`であることも毎回検査する。
-    `params`に渡したキーだけ値を比較する（`pytest.approx`も渡せる）。
-
-    Args:
-        code: 期待する`code`。
-        **params: 期待する`params`の値（一部のキーだけでよい）。
-
-    Yields:
-        送出された例外の`pytest.ExceptionInfo`。
-    """
-    expected = ErrorCode(code)
-    with pytest.raises((ValidationError, ComputationError)) as info:
-        yield info
-    err = info.value
+def _check_error(
+    err: ValidationError | ComputationError,
+    expected: ErrorCode,
+    params: dict[str, object],
+) -> None:
+    """`err`が`expected`の`code`で、`params`・形式がカタログと一致することを検査する。"""
     assert err.code == expected, (
         f"expected code {expected}, got {err.code}: {err}"
     )
@@ -161,3 +149,54 @@ def raises_error(
     assert str(err) == full
     assert err.args == (full,)
     RAISED_CODES.add(str(expected))
+
+
+@contextmanager
+def raises_error(
+    code: ErrorCode | str, **params: object
+) -> Iterator[pytest.ExceptionInfo[ValidationError | ComputationError]]:
+    """ブロック内で`code`の例外が送出され、`params`が一致することを検査する。
+
+    `code`のカタログ上のクラス（`ValidationError`/`ComputationError`）で
+    あること、`params`のキー集合（`stage`があればその補助値も）と各値の型がカタログと
+    一致すること、`str(e)`が
+    `message`と`hint`の連結で`args`が`(str(e),)`であることも毎回検査する。
+    `params`に渡したキーだけ値を比較する（`pytest.approx`も渡せる）。
+
+    Args:
+        code: 期待する`code`。
+        **params: 期待する`params`の値（一部のキーだけでよい）。
+
+    Yields:
+        送出された例外の`pytest.ExceptionInfo`。
+    """
+    expected = ErrorCode(code)
+    with pytest.raises((ValidationError, ComputationError)) as info:
+        yield info
+    _check_error(info.value, expected, params)
+
+
+@contextmanager
+def raises_one_of_errors(
+    expected: Mapping[ErrorCode | str, Mapping[str, object]],
+) -> Iterator[pytest.ExceptionInfo[ValidationError | ComputationError]]:
+    """ブロック内で`expected`のいずれかの`code`の例外が送出されることを検査する。
+
+    solverの軌道によって、同じ入力でも別の`code`で失敗しうる場合（分離データを
+    bfgs/lbfgsに渡すと、分離の検出か最大反復到達のどちらかになる等）に使う。
+    送出された`code`について、`raises_error`と同じ検査（`params`の一致を含む）を行う。
+
+    Args:
+        expected: 許容する`code`から、その`code`で期待する`params`への対応。
+
+    Yields:
+        送出された例外の`pytest.ExceptionInfo`。
+    """
+    allowed = {ErrorCode(code): dict(p) for code, p in expected.items()}
+    with pytest.raises((ValidationError, ComputationError)) as info:
+        yield info
+    err = info.value
+    assert err.code in allowed, (
+        f"expected one of {sorted(map(str, allowed))}, got {err.code}: {err}"
+    )
+    _check_error(err, err.code, allowed[err.code])

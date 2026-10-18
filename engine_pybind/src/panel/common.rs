@@ -220,7 +220,8 @@ pub(crate) fn panel_error_to_pyerr(err: PanelError) -> PyErr {
         | PanelError::DegenerateDkTwoPeriods
         | PanelError::DegenerateClusterTwoGroups
         | PanelError::AmemiyaRequiresWithinVariation { .. } => legacy_validation_error(message),
-        PanelError::NonPositiveIdiosyncraticVariance { .. } => legacy_computation_error(message),
+        PanelError::NonPositiveIdiosyncraticVariance { .. }
+        | PanelError::VarianceComponentsMomentsSingular { .. } => legacy_computation_error(message),
         PanelError::WithinRegressionFailed { source }
         | PanelError::FTestFailed { source }
         | PanelError::BetweenRegressionFailed { source, .. }

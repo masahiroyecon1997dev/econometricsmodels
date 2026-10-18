@@ -31,7 +31,7 @@ use thiserror::Error;
 
 use crate::shared::covariance::{cluster_correction, cluster_meat, sandwich};
 use crate::shared::design_matrix::design_matrix_element;
-use crate::shared::error::{ClusterSetting, CommonError, catalog_display};
+use crate::shared::error::{ClusterSetting, CommonError, MatrixKind, catalog_display};
 use crate::shared::error_catalog::{ErrorCode, ErrorReport};
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference;
@@ -62,10 +62,7 @@ pub enum MleError {
     Common(#[from] CommonError),
 
     /// `raise_on_non_convergence=true`（既定）かつ`max_iter`回で収束しなかった。
-    #[error(
-        "failed to converge after {n_iter} iterations. Set raise_on_non_convergence=False \
-         to receive the result anyway, or increase max_iter"
-    )]
+    #[error("{}", self.catalog_message())]
     NonConvergence { n_iter: usize },
 
     /// `max_iter`が`1..=MAX_ITER_LIMIT`の範囲外。
@@ -82,13 +79,13 @@ pub enum MleError {
     /// Hessianが特異で逆行列が計算できない。Newton法のステップ求解中（収束前の任意の点）、
     /// および収束点での観測情報行列・サンドイッチ型・クラスターロバストSE計算
     /// （いずれもHessianの逆行列を使う）の両方で発生しうる。
-    #[error("the Hessian is singular and cannot be inverted")]
+    #[error("{}", self.catalog_message())]
     SingularHessian,
 
     /// OPG（`Σᵢ sᵢsᵢ'`、outer product of gradients）行列が特異で逆行列が計算できない。
     /// `cov_type="opg"`（BHHH）でのみ発生しうる。Hessianではなくスコアの外積和が
     /// 特異という別の原因のため、`SingularHessian`とは区別する。
-    #[error("the outer-product-of-gradients (OPG) matrix is singular and cannot be inverted")]
+    #[error("{}", self.catalog_message())]
     SingularOpgMatrix,
 
     /// Tobit専用: Newton法の初期値計算（打ち切りを無視した単純なOLS、`ols_initial_params`
@@ -96,9 +93,7 @@ pub enum MleError {
     /// `SingularHessian`（最適化中・収束後のHessianの逆行列計算）とは、Newton法が
     /// 一度も反復していない段階で発生しうる点・Hessianを一切評価していない点が異なるため
     /// 区別する（`SingularOpgMatrix`を`SingularHessian`と区別しているのと同じ考え方）。
-    #[error(
-        "the design matrix used for the initial value estimate is singular and cannot be inverted"
-    )]
+    #[error("{}", self.catalog_message())]
     SingularDesignMatrix,
 
     /// Tobit専用: 打ち切り境界（下限/上限）の指定が不正（下限≧上限等）。
@@ -192,12 +187,7 @@ pub enum MleError {
     /// では分離解を見逃し、強い多重共線性では有限のMLEを誤って棄却していた。
     ///
     /// `Tobit`では発火しない（[`NoUncensoredObservations`](Self::NoUncensoredObservations)参照）。
-    #[error(
-        "the data are completely or quasi-completely separated: some combination of the \
-         regressors perfectly predicts the binary outcome (for all or a subset of observations), \
-         so no finite maximum likelihood estimate exists. Remove or combine the offending \
-         regressors, or add observations that break the separation"
-    )]
+    #[error("{}", self.catalog_message())]
     SeparationDetected,
 
     /// Tobit専用: `target="expected_uncensored"`（`E[y|lower<y<upper,x]`）の非打ち切り区間の幅
@@ -205,11 +195,7 @@ pub enum MleError {
     /// 割る量が桁落ちで信頼できない（`w`の相対誤差が約`12ε/δ⁴`、デルタ法の`s`はさらに悪い）。
     /// 推定済みの`σ̂`で決まる条件で入力そのものは不正ではないため`ComputationError`
     /// （`ValidationError`ではない）。`lower`/`upper`が`None`の片側打ち切りでは発生しない。
-    #[error(
-        "target 'expected_uncensored' cannot be computed reliably: the uncensored interval \
-         [{lower}, {upper}] is narrower than 1% of the estimated sigma ({sigma}), so the \
-         model puts almost no probability on uncensored values. Use another target"
-    )]
+    #[error("{}", self.catalog_message())]
     UncensoredIntervalTooNarrow { lower: f64, upper: f64, sigma: f64 },
 
     /// `bfgs`/`lbfgs`のline search（`MoreThuenteLineSearch`）が、収束判定を一度も満たさない
@@ -235,12 +221,17 @@ pub enum MleError {
     /// 同じ総枠を共有する。`newton`は`MAX_LM_ATTEMPTS`で頭打ちのLMラダーによりこの
     /// バリアントが実質発火しないため、メッセージは主な発火源である`bfgs`/`lbfgs`の
     /// line search（cost/gradient評価）に絞って表現している。
-    #[error(
-        "the optimizer evaluated the objective/gradient {budget} times without satisfying its \
-         convergence criteria (this typically indicates the line search failed to converge for \
-         this input); try a different solver, or adjust max_iter/tol"
-    )]
+    #[error("{}", self.catalog_message())]
     EvaluationBudgetExceeded { budget: u64 },
+
+    /// 1回のline searchが、反復の上限`max_iters`回で収束しなかった（`lbfgs`）。
+    #[error("{}", self.catalog_message())]
+    LineSearchFailed { max_iters: u64 },
+
+    /// 完全分離・準完全分離が無いことを、線形計画が数値的に完了せず確認できなかった。
+    /// `detail`は原因（開発者向け。利用者に見せるメッセージには含めない）。
+    #[error("{}", self.catalog_message())]
+    SeparationCheckFailed { detail: String },
 }
 
 impl MleError {
@@ -262,7 +253,44 @@ impl MleError {
                     .param("option", "tol")
                     .param("value", *tol),
             ),
-            _ => None,
+            Self::NonConvergence { n_iter } => Some(
+                ErrorReport::new(ErrorCode::NotConverged)
+                    .param("n_iter", *n_iter)
+                    .param("iter_option", "max_iter"),
+            ),
+            Self::SingularHessian => Some(
+                ErrorReport::new(ErrorCode::MatrixNearSingular)
+                    .param("matrix", MatrixKind::Hessian.as_str()),
+            ),
+            Self::SingularOpgMatrix => Some(
+                ErrorReport::new(ErrorCode::MatrixNearSingular)
+                    .param("matrix", MatrixKind::Opg.as_str()),
+            ),
+            Self::SingularDesignMatrix => Some(ErrorReport::new(ErrorCode::DesignMatrixSingular)),
+            Self::SeparationDetected => Some(ErrorReport::new(ErrorCode::SeparationDetected)),
+            Self::UncensoredIntervalTooNarrow {
+                lower,
+                upper,
+                sigma,
+            } => Some(
+                ErrorReport::new(ErrorCode::UncensoredIntervalTooNarrow)
+                    .param("lower", *lower)
+                    .param("upper", *upper)
+                    .param("sigma", *sigma),
+            ),
+            Self::EvaluationBudgetExceeded { budget } => {
+                Some(ErrorReport::new(ErrorCode::LineSearchFailed).param("n_evaluations", *budget))
+            }
+            Self::LineSearchFailed { max_iters } => Some(
+                ErrorReport::new(ErrorCode::LineSearchFailed).param("n_evaluations", *max_iters),
+            ),
+            Self::SeparationCheckFailed { .. } => {
+                Some(ErrorReport::new(ErrorCode::SeparationCheckFailed))
+            }
+            Self::InvalidCensoringBounds { .. }
+            | Self::InvalidBinaryY { .. }
+            | Self::YOutOfCensoringBounds { .. }
+            | Self::NoUncensoredObservations { .. } => None,
         }
     }
 
@@ -504,8 +532,8 @@ pub fn goodness_of_fit(
     let lr_p_value = if df_model == 0 {
         f64::NAN
     } else {
-        let chi2 = ChiSquared::new(df_model as f64)
-            .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+        let chi2 =
+            ChiSquared::new(df_model as f64).map_err(|e| CommonError::internal(e.to_string()))?;
         chi2.sf(lr_statistic)
     };
 
@@ -840,8 +868,7 @@ pub fn marginal_effects_from_w_s(
     // `Normal::new(0.0, 1.0)`は標準正規分布であり、標準偏差が正であることを要求する
     // statrsの検証を常に満たすため、この`map_err`分岐は理論上到達不能
     // （`.claude/rules/rust-style.md`「テスト」のカバレッジ方針参照、`fit()`と同じ扱い）。
-    let normal =
-        Normal::new(0.0, 1.0).map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+    let normal = Normal::new(0.0, 1.0).map_err(|e| CommonError::internal(e.to_string()))?;
     let z_crit = inference::critical_value(&normal, confidence_level);
 
     let k_constant = usize::from(has_intercept);
@@ -1313,7 +1340,7 @@ where
 /// - `raise_on_non_convergence=true`かつ`max_iter`回で収束しなかった（`NonConvergence`）
 /// - `bfgs`/`lbfgs`のline searchが収束判定を満たさないまま評価回数の総枠を使い切った
 ///   （`EvaluationBudgetExceeded`、`BudgetedProblem`参照）
-/// - その他ソルバー内部でのエラー（`ComputationFailed`）
+/// - その他ソルバー内部でのエラー（`Internal`）。line searchの失敗は`LineSearchFailed`
 pub fn run_solver<O>(
     problem: O,
     solver: SolverType,
@@ -1409,7 +1436,7 @@ where
     let cost_hessian = model
         .into_inner()
         .hessian(&params)
-        .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+        .map_err(|e| CommonError::internal(e.to_string()))?;
     let hessian: Vec<Vec<f64>> = cost_hessian
         .iter()
         .map(|row| row.iter().map(|v| -v).collect())
@@ -1458,31 +1485,40 @@ where
         Some(TerminationReason::SolverConverged)
     );
     let n_iter = state.get_iter() as usize;
-    let params = state.get_best_param().cloned().ok_or_else(|| {
-        CommonError::ComputationFailed("solver did not produce a parameter estimate".to_string())
-    })?;
-    let model = problem.take_problem().ok_or_else(|| {
-        CommonError::ComputationFailed("failed to recover the optimization problem".to_string())
-    })?;
+    let params = state
+        .get_best_param()
+        .cloned()
+        .ok_or_else(|| CommonError::internal("the solver did not produce a parameter estimate"))?;
+    let model = problem
+        .take_problem()
+        .ok_or_else(|| CommonError::internal("the optimization problem could not be recovered"))?;
     Ok((params, converged, n_iter, model))
 }
 
 /// argminの内部エラー（`anyhow::Error`）を`MleError`に変換する。
 /// `FaerNewton::next_iter`内で`MleError`から`?`により変換された値は`downcast`で復元し、
-/// それ以外（argmin自体の内部エラー等）は`ComputationFailed`にまとめる。
+/// それ以外のうち、argminのline searchが入力（探索方向・目的関数の値）に応じて返す
+/// `ArgminError::ConditionViolated`/`InvalidParameter`（「降下方向でない」「NaN/Infに遭遇した」等）は
+/// `LineSearchFailed`、残り（argmin自体の内部エラー等、実装の誤りでだけ起きるもの）は
+/// `Internal`にする。
 ///
-/// **`Err(other)`分岐は実測ではカバーされていない**（判明済み）:
-/// 本プロジェクトが制御する全てのエラー経路（`FaerNewton`・モデルの`CostFunction`/
-/// `Gradient`/`Hessian`実装）は`MleError`（`?`経由で`anyhow::Error`に変換されたもの）
-/// のみを返すため、`downcast`は常に成功する。この分岐はargmin自体の内部（`Executor`の
-/// 状態管理等）が予期しない`anyhow::Error`を生成した場合に備えた防御的なフォールバックで、
-/// 意図的にargminの内部を破壊するようなテストを書くのは実装の振る舞いというより
-/// argmin内部実装への依存になるため見送っている（`.claude/rules/testing-policy.md`
+/// 前者は`bfgs`/`lbfgs`の退化した目的関数で実際に起こりうる（`MoreThuenteLineSearch`が
+/// `Executor::run()`の`Err`として返す）。後者の`Internal`は、本プロジェクトが制御する全ての
+/// エラー経路が`MleError`を返すため実測ではカバーされていない防御的なフォールバックで、
+/// 意図的にargminの内部を破壊するテストは書かない（`.claude/rules/testing-policy.md`
 /// 「engine（Rust）のカバレッジ方針」の理論上到達不能な防御的エラーパスと同じ性質）。
 fn convert_optimizer_error(e: OptimizerError) -> MleError {
     match e.downcast::<MleError>() {
         Ok(mle_error) => mle_error,
-        Err(other) => CommonError::ComputationFailed(other.to_string()).into(),
+        Err(other) => match other.downcast_ref::<argmin::core::ArgminError>() {
+            Some(
+                argmin::core::ArgminError::ConditionViolated { .. }
+                | argmin::core::ArgminError::InvalidParameter { .. },
+            ) => MleError::LineSearchFailed {
+                max_iters: LINE_SEARCH_MAX_ITERS,
+            },
+            _ => CommonError::internal(other.to_string()).into(),
+        },
     }
 }
 
@@ -2544,10 +2580,9 @@ where
         // 打ち切り時点のパラメータをそのまま`Ok`で返すため、収束判定を明示的に
         // 確認する（`FaerBfgs`には無いチェック）。
         if !line_search_converged(&sub_state) {
-            let mle_error: MleError = CommonError::ComputationFailed(format!(
-                "line search did not converge within {LINE_SEARCH_MAX_ITERS} iterations"
-            ))
-            .into();
+            let mle_error = MleError::LineSearchFailed {
+                max_iters: LINE_SEARCH_MAX_ITERS,
+            };
             return Err(mle_error.into());
         }
 
@@ -2869,7 +2904,7 @@ impl ColumnScale {
         debug_assert_eq!(
             x.ncols(),
             self.stds.len(),
-            "`fit`と同じ列構成の設計行列を渡す"
+            "pass a design matrix with the same columns as `fit`"
         );
         Mat::from_fn(x.nrows(), x.ncols(), |i, j| {
             (*x.get(i, j) - self.means[j]) / self.stds[j]
@@ -3005,11 +3040,9 @@ pub fn destandardize_cov_params(cov_std: &Mat<f64>, scale: &ColumnScale) -> Mat<
 /// 最適化すると、修正前はエラーにならず桁違いに巨大な値を返していた）。
 fn neg_hessian_inverse(hessian: &Mat<f64>, k: usize) -> Result<Mat<f64>, MleError> {
     let neg_h = Mat::from_fn(k, k, |i, j| -(*hessian.get(i, j)));
-    // `context`引数（"negated Hessian"）は`map_err`で`MleError::SingularHessian`に
-    // 潰すため実際には使われない。呼び出し元ごとに専用のエラーバリアントを持つ
-    // 系統（nonlinear）ではこれでよいが、`ensure_well_conditioned_symmetric_matrix`
-    // 自体は`CommonError::ComputationFailed`のメッセージ用に使う汎用引数であることに注意。
-    ensure_well_conditioned_symmetric_matrix(&neg_h, k, "negated Hessian")
+    // `MatrixKind::Hessian`は`map_err`で`MleError::SingularHessian`に潰すため、
+    // 返る`CommonError`自体は使われない（このバリアントも`MATRIX_NEAR_SINGULAR`の`HESSIAN`を返す）。
+    ensure_well_conditioned_symmetric_matrix(&neg_h, k, MatrixKind::Hessian)
         .map_err(|_| MleError::SingularHessian)?;
     let llt = neg_h
         .llt(Side::Lower)
@@ -3039,7 +3072,7 @@ fn opg_matrix(scores: &Mat<f64>) -> Mat<f64> {
 /// symmetric_matrix`による固有値ベースの悪条件検出を行う。
 pub fn opg_cov_params(scores: &Mat<f64>, k: usize) -> Result<Mat<f64>, MleError> {
     let psi = opg_matrix(scores);
-    ensure_well_conditioned_symmetric_matrix(&psi, k, "OPG matrix")
+    ensure_well_conditioned_symmetric_matrix(&psi, k, MatrixKind::Opg)
         .map_err(|_| MleError::SingularOpgMatrix)?;
     let llt = psi
         .llt(Side::Lower)
@@ -3269,8 +3302,73 @@ mod tests {
             tol.message(),
             "tol must be a positive finite number, got -1.0."
         );
+    }
 
-        assert!(MleError::SingularHessian.try_report().is_none());
+    #[test]
+    fn numerical_errors_map_to_catalog_codes_with_valid_params() {
+        let cases = [
+            (
+                MleError::NonConvergence { n_iter: 35 },
+                ErrorCode::NotConverged,
+                "The optimizer did not converge after 35 iterations.",
+            ),
+            (
+                MleError::SingularHessian,
+                ErrorCode::MatrixNearSingular,
+                "A matrix needed to compute the estimates or their covariance is numerically singular.",
+            ),
+            (
+                MleError::SingularOpgMatrix,
+                ErrorCode::MatrixNearSingular,
+                "A matrix needed to compute the estimates or their covariance is numerically singular.",
+            ),
+            (
+                MleError::SingularDesignMatrix,
+                ErrorCode::DesignMatrixSingular,
+                "The design matrix is singular: some columns are perfectly collinear.",
+            ),
+            (
+                MleError::EvaluationBudgetExceeded { budget: 4000 },
+                ErrorCode::LineSearchFailed,
+                "The optimizer's line search did not converge.",
+            ),
+            (
+                MleError::LineSearchFailed { max_iters: 100 },
+                ErrorCode::LineSearchFailed,
+                "The optimizer's line search did not converge.",
+            ),
+            (
+                MleError::SeparationCheckFailed {
+                    detail: "x".to_string(),
+                },
+                ErrorCode::SeparationCheckFailed,
+                "The check for separation in the data could not be completed.",
+            ),
+        ];
+        for (err, code, message) in cases {
+            let report = err.try_report().expect("cataloged");
+            assert_eq!(report.code(), code);
+            assert!(report.validate().is_ok());
+            assert_eq!(report.message(), message);
+            assert_eq!(err.to_string(), message);
+        }
+        let matrices: Vec<_> = [MleError::SingularHessian, MleError::SingularOpgMatrix]
+            .iter()
+            .map(|e| e.try_report().unwrap().all_params())
+            .collect();
+        assert_ne!(matrices[0], matrices[1]);
+        for err in [
+            MleError::SeparationDetected,
+            MleError::UncensoredIntervalTooNarrow {
+                lower: 0.0,
+                upper: 0.001,
+                sigma: 1.0,
+            },
+        ] {
+            let report = err.try_report().expect("cataloged");
+            assert!(report.validate().is_ok());
+            assert_eq!(err.to_string(), report.message());
+        }
     }
 
     /// テスト用のダミー目的関数: `f(θ) = 0.5 (θ - target)' A (θ - target)`
@@ -3467,8 +3565,7 @@ mod tests {
         // search用`Executor`に明示的な`max_iters`（[`LINE_SEARCH_MAX_ITERS`]=100）を
         // 設定しているため、[`BudgetedProblem`]の総枠（このテストでは
         // `(1+1)*2000=4000`評価分）を使い切るより先にこちらの上限に到達し、
-        // `MleError::Common(ComputationFailed(..))`（「line search did not converge
-        // within..」）を返す（`SolverType::Bfgs`、上のテストとは異なり
+        // `MleError::LineSearchFailed`を返す（`SolverType::Bfgs`、上のテストとは異なり
         // `EvaluationBudgetExceeded`という具体的なバリアントにはならない。`FaerBfgs`には
         // この個別チェックが無いため）。
         let result = run_solver(
@@ -3481,10 +3578,9 @@ mod tests {
             true,
         );
 
-        let message = result.unwrap_err().to_string();
-        assert!(
-            message.contains("line search did not converge within 100 iterations"),
-            "unexpected error message: {message}"
+        assert_eq!(
+            result.unwrap_err(),
+            MleError::LineSearchFailed { max_iters: 100 }
         );
     }
 
@@ -5446,17 +5542,8 @@ mod tests {
         // バリアントに加え、`Common`が`CommonError`のDisplayをtransparentに転送する
         // ことだけを確認する。
         assert_eq!(
-            MleError::NonConvergence { n_iter: 35 }.to_string(),
-            "failed to converge after 35 iterations. Set raise_on_non_convergence=False \
-             to receive the result anyway, or increase max_iter"
-        );
-        assert_eq!(
             MleError::InvalidMaxIter { max_iter: 0 }.to_string(),
             "max_iter must be an integer from 1 to 10000, got 0."
-        );
-        assert_eq!(
-            MleError::SingularHessian.to_string(),
-            "the Hessian is singular and cannot be inverted"
         );
         assert_eq!(
             MleError::InvalidCensoringBounds {
@@ -5475,17 +5562,6 @@ mod tests {
             .to_string(),
             "invalid censoring bounds: lower=None, upper=None \
              (at least one bound must be set, and lower must be less than upper when both are set)"
-        );
-        assert_eq!(
-            MleError::SeparationDetected.to_string(),
-            "the data are completely or quasi-completely separated: some combination of the \
-             regressors perfectly predicts the binary outcome (for all or a subset of \
-             observations), so no finite maximum likelihood estimate exists. Remove or combine \
-             the offending regressors, or add observations that break the separation"
-        );
-        assert_eq!(
-            MleError::SingularOpgMatrix.to_string(),
-            "the outer-product-of-gradients (OPG) matrix is singular and cannot be inverted"
         );
         assert_eq!(
             MleError::Common(CommonError::MissingClusterColumn {

@@ -267,7 +267,7 @@ pub fn extract_time_order_ranks(
         .i128()
         .map_err(|e| time_order_error(name, e))?
         .iter()
-        .map(|v| v.expect("null_countチェック済み"))
+        .map(|v| v.expect("null_count was checked to be zero"))
         .collect();
     Ok(strict_ranks(name, &values, source)?)
 }
@@ -313,7 +313,7 @@ fn cast_to_finite_f64_values(
         Err(_) => {
             // 通常はここに来ないはずだが、フォールバックとしてイテレータ経由で構築
             ca.iter()
-                .map(|v| v.expect("null_countチェック済み"))
+                .map(|v| v.expect("null_count was checked to be zero"))
                 .collect()
         }
     };
@@ -664,7 +664,7 @@ pub fn extract_time_keys(
                 .f64()
                 .map_err(|e| time_order_error(name, e))?
                 .iter()
-                .map(|v| v.expect("null_countチェック済み"))
+                .map(|v| v.expect("null_count was checked to be zero"))
                 .collect();
             TimeKeys::by_float_factorized(codes, labels, &values).map_err(panel_error_to_pyerr)
         } else if dtype.is_integer()
@@ -683,7 +683,7 @@ pub fn extract_time_keys(
                 .i128()
                 .map_err(|e| time_order_error(name, e))?
                 .iter()
-                .map(|v| v.expect("null_countチェック済み"))
+                .map(|v| v.expect("null_count was checked to be zero"))
                 .collect();
             TimeKeys::by_integer_factorized(codes, labels, &values).map_err(panel_error_to_pyerr)
         } else {
@@ -747,7 +747,7 @@ fn extract_key_column(
 
     Ok(ca
         .iter()
-        .map(|v| v.expect("null_countチェック済み").to_string())
+        .map(|v| v.expect("null_count was checked to be zero").to_string())
         .collect())
 }
 
@@ -789,13 +789,14 @@ fn factorize_key_column(
         let ca = as_f64.f64().map_err(convert)?;
         return Ok(factorize_keys(
             ca.iter()
-                .map(|v| v.expect("null_countチェック済み").to_bits()),
+                .map(|v| v.expect("null_count was checked to be zero").to_bits()),
         ));
     }
     if matches!(dtype, DataType::String) {
         let ca = series.str().map_err(convert)?;
         return Ok(factorize_keys(
-            ca.iter().map(|v| v.expect("null_countチェック済み")),
+            ca.iter()
+                .map(|v| v.expect("null_count was checked to be zero")),
         ));
     }
     // 整数・真偽値・`Date`・`Datetime`・`Categorical`・`Enum`は、内部表現の整数の等しさで
@@ -806,7 +807,8 @@ fn factorize_key_column(
         .map_err(convert)?;
     let ca = as_i128.i128().map_err(convert)?;
     Ok(factorize_keys(
-        ca.iter().map(|v| v.expect("null_countチェック済み")),
+        ca.iter()
+            .map(|v| v.expect("null_count was checked to be zero")),
     ))
 }
 

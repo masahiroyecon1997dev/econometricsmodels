@@ -27,7 +27,6 @@ from _errors import raises_error
 from _re_oracle import hand_computed
 from econometricsmodels import (
     RE,
-    ComputationError,
     ErrorCode,
     REOptions,
     ValidationError,
@@ -494,7 +493,9 @@ def test_two_way_accepts_regressors_that_vary_in_only_one_dimension(panel, x):
 def test_two_way_constant_column_raises_computation_error(panel):
     """切片と共線な定数列は、between回帰では落ちて最終回帰が特異になる。"""
     df = panel.with_columns(c=pl.lit(2.0))
-    with pytest.raises(ComputationError):
+    with raises_error(
+        ErrorCode.DESIGN_MATRIX_SINGULAR, stage="QUASI_DEMEANED_REGRESSION"
+    ):
         _fit(df, REOptions(time="time"), x=("x1", "c"))
 
 
@@ -508,36 +509,36 @@ def _baseline() -> pl.DataFrame:
 
 
 @pytest.mark.parametrize(
-    ("columns", "x", "path"),
+    ("columns", "x", "stage"),
     [
         # 2-way within変換後に変動する列同士の完全共線（内部の2-way FEが検出）。
         (
             {"x3": 2 * pl.col("x1") + 3 * pl.col("x2")},
             ("x1", "x2", "x3"),
-            "within-transformed",
+            "WITHIN_REGRESSION",
         ),
         (
             {"x3": 1e8 * pl.col("x1")},
             ("x1", "x3"),
-            "within-transformed",
+            "WITHIN_REGRESSION",
         ),
         # 個体間でのみ変わる列同士・時点間でのみ変わる列同士の共線は、between回帰では後ろの列が
         # 別名として落ちて進み、全列を残す最終回帰が検出する。
         (
             {"xi2": 2 * pl.col("xi")},
             ("x1", "xi", "xi2"),
-            "quasi-demeaned",
+            "QUASI_DEMEANED_REGRESSION",
         ),
         (
             {"xt2": 2 * pl.col("xt")},
             ("x1", "xt", "xt2"),
-            "quasi-demeaned",
+            "QUASI_DEMEANED_REGRESSION",
         ),
         # 説明変数のスケール差が極端でF検定の共分散部分行列がほぼ特異になる。
         (
             {"x1": 1e6 * pl.col("x1"), "x2": 1e-3 * pl.col("x2")},
             ("x1", "x2"),
-            "F-test",
+            "OVERALL_F_TEST",
         ),
     ],
     ids=[
@@ -548,12 +549,21 @@ def _baseline() -> pl.DataFrame:
         "extreme_scale",
     ],
 )
-def test_two_way_computation_error_paths(columns, x, path):
+def test_two_way_computation_error_paths(columns, x, stage):
     """2-wayは分散成分に内部の2-way FEと2本のbetween回帰を使うため、失敗する経路が
-    1-wayと別になる。どれも`ComputationError`で、メッセージが失敗した回帰を示す。
-    between回帰は別名の列を落とすため、最終回帰が特異性を検出する。"""
+    1-wayと別になる。どれも`ComputationError`で、`stage`が失敗した回帰を示す
+    （共線は`DESIGN_MATRIX_SINGULAR`、スケール差は全体F検定の
+    `MATRIX_NEAR_SINGULAR`）。between回帰は別名の列を落とすため、最終回帰が
+    特異性を検出する。"""
     df = _baseline().with_columns(**columns)
-    with pytest.raises(ComputationError, match=path):
+    if stage == "OVERALL_F_TEST":
+        expected = {
+            "code": ErrorCode.MATRIX_NEAR_SINGULAR,
+            "matrix": "COEFFICIENT_COVARIANCE",
+        }
+    else:
+        expected = {"code": ErrorCode.DESIGN_MATRIX_SINGULAR}
+    with raises_error(stage=stage, **expected):
         _fit(df, REOptions(time="time"), x=x)
 
 

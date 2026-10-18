@@ -601,13 +601,13 @@ def test_unknown_cov_type_is_reported_before_unused_option(dataset):
 
 def test_perfect_multicollinearity_raises_computation_error():
     """完全な多重共線性（設計行列が特異）は数値比較の対象外
-    （`testing-policy.md`「テストの3系統」）。想定エラー（`ComputationError`）が
-    発生することのみを確認する。
+    （`testing-policy.md`「テストの3系統」）。想定エラー（`ComputationError`の
+    `DESIGN_MATRIX_SINGULAR`）が発生することのみを確認する。
 
     入力は固定済みベンチマーク CSV を使う。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_perfect_multicollinearity.csv")
-    with pytest.raises(ComputationError):
+    with raises_error(ErrorCode.DESIGN_MATRIX_SINGULAR):
         OLS(df, y="y", x=["x1", "x2", "x3"]).fit()
 
 
@@ -616,14 +616,17 @@ def test_scale_variance_raises_computation_error(cov_type):
     """変数間のスケールが極端に異なる設計行列（x1を`*1e6`、x2を`*1e-3`）は、
     傾き係数の同時共分散部分行列がスケール比の2乗（≈1e18）相当の条件数を持ち
     倍精度浮動小数点の限界を超えて数値的に特異になる（発見・原因調査済み）。`wald_f_test`が固有値分解による相対閾値判定で検出し、
-    全cov_typeで`ComputationError`になる（classicalも含む。傾き係数の
+    全cov_typeで`ComputationError`（`MATRIX_NEAR_SINGULAR`、
+    `matrix="COEFFICIENT_COVARIANCE"`）になる（classicalも含む。傾き係数の
     共分散部分行列自体は`cov_type`によらず同じ条件数を持つため）。
     perfect_multicollinearityと同様、数値比較はせずエラーパスのみ確認する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
     kwargs = {"hac_time": ROW_TIME} if cov_type == "hac" else {}
     options = OLSOptions(cov_type=cov_type, **kwargs)
-    with pytest.raises(ComputationError):
+    with raises_error(
+        ErrorCode.MATRIX_NEAR_SINGULAR, matrix="COEFFICIENT_COVARIANCE"
+    ):
         OLS(
             with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
         ).fit()
@@ -637,12 +640,15 @@ def test_scale_variance_cluster_raises_computation_error():
     均等な疑似グループ（行番号%10、
     `G=10>q=3`）を使い、クラスター数不足による`ValidationError`
     ではなく、傾き係数の共分散部分行列の条件数超過による
-    `ComputationError`が発生することを確認する。
+    `ComputationError`（`MATRIX_NEAR_SINGULAR`、
+    `matrix="COEFFICIENT_COVARIANCE"`）が発生することを確認する。
     """
     df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
     df = with_cluster_groups(df, 10)
     options = OLSOptions(cov_type="cluster", cluster="cluster_group")
-    with pytest.raises(ComputationError):
+    with raises_error(
+        ErrorCode.MATRIX_NEAR_SINGULAR, matrix="COEFFICIENT_COVARIANCE"
+    ):
         OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
 

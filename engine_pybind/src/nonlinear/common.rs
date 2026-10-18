@@ -47,7 +47,9 @@ pub(crate) fn mle_error_to_pyerr(err: MleError) -> PyErr {
         | MleError::SingularDesignMatrix
         | MleError::SeparationDetected
         | MleError::UncensoredIntervalTooNarrow { .. }
-        | MleError::EvaluationBudgetExceeded { .. } => legacy_computation_error(err.to_string()),
+        | MleError::EvaluationBudgetExceeded { .. }
+        | MleError::LineSearchFailed { .. }
+        | MleError::SeparationCheckFailed { .. } => legacy_computation_error(err.to_string()),
     }
 }
 

@@ -73,7 +73,7 @@ pub(crate) fn validate_cluster_groups(
 /// `g > q`でも、傾き係数間の悪条件（極端なスケール差・準多重共線性等）で`q×q`部分
 /// 行列が数値的にほぼ特異になるケースは事前判定できないため、従来どおり各手法の
 /// Wald検定内の`ensure_well_conditioned_symmetric_matrix`（`CommonError::
-/// ComputationFailed`）がbackstopとして残る。
+/// NearSingularMatrix`）がbackstopとして残る。
 pub fn validate_cluster_count_covers_slopes(g: usize, q: usize) -> Result<(), CommonError> {
     debug_assert!(
         g >= 2,

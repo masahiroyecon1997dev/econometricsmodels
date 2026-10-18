@@ -614,8 +614,7 @@ impl LogitEstimator {
         // `Normal::new(0.0, 1.0)`は標準正規分布であり、標準偏差が正であることを
         // 要求するstatrsの検証を常に満たすため、この`map_err`分岐は理論上到達不能
         // （`.claude/rules/rust-style.md`「テスト」のカバレッジ方針参照）。
-        let normal =
-            Normal::new(0.0, 1.0).map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+        let normal = Normal::new(0.0, 1.0).map_err(|e| CommonError::internal(e.to_string()))?;
         let z_crit = inference::critical_value(&normal, confidence_level);
 
         let mut std_errors = vec![0.0; k];

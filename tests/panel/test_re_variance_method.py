@@ -652,8 +652,8 @@ def test_wallace_hussain_pooled_regression_failure_is_a_computation_error():
     """時間不変の列とその定数倍（内部のFEには渡らない）でプールドOLSが特異になる。"""
     case = _case("ow_time_invariant_balanced")
     df = _frame(case).with_columns(z2=2.0 * pl.col("x_invariant"))
-    with pytest.raises(
-        ComputationError, match=escaped(panel_msgs.POOLED_REGRESSION_FAILED)
+    with raises_error(
+        ErrorCode.DESIGN_MATRIX_SINGULAR, stage="POOLED_REGRESSION"
     ):
         RE(
             df,
@@ -708,7 +708,9 @@ def test_noiseless_data_is_a_computation_error_when_the_first_stage_is_within(
     exact = df.with_columns(
         y=2.0 * pl.col("x1") - pl.col("x2") + pl.col("entity").rank("dense")
     )
-    with pytest.raises(ComputationError):
+    with raises_error(
+        ErrorCode.DESIGN_MATRIX_SINGULAR, stage="QUASI_DEMEANED_REGRESSION"
+    ):
         _fit(case, "classical", method, exact)
 
 
@@ -719,7 +721,9 @@ def test_perfect_collinearity_is_a_computation_error_for_every_method(method):
     """within変動のある列が完全共線なら、どの推定法でも内部のFE推定が特異になる。"""
     case = _case("ow_baseline")
     df = _frame(case).with_columns(x3=2.0 * pl.col("x1") + 3.0 * pl.col("x2"))
-    with pytest.raises(ComputationError):
+    with raises_error(
+        ErrorCode.DESIGN_MATRIX_SINGULAR, stage="WITHIN_REGRESSION"
+    ):
         RE(
             df,
             y="y",
@@ -741,7 +745,11 @@ def test_extreme_scale_difference_is_a_computation_error_for_every_method(
     df = _frame(case).with_columns(
         x1=pl.col("x1") * 1e6, x2=pl.col("x2") * 1e-3
     )
-    with pytest.raises(ComputationError):
+    with raises_error(
+        ErrorCode.MATRIX_NEAR_SINGULAR,
+        matrix="COEFFICIENT_COVARIANCE",
+        stage="OVERALL_F_TEST",
+    ):
         RE(
             df,
             y="y",

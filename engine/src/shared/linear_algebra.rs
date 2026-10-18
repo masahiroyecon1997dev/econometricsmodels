@@ -1,15 +1,23 @@
 //! 系統（`linear`/`nonlinear`等）をまたいで共有する、統計手法に依存しない純粋な
 //! 線形代数ユーティリティ（`.claude/rules/rust-style.md`「全手法で共有するロジック」参照）。
 
-use super::error::CommonError;
+use super::error::{CommonError, MatrixKind};
 use faer::linalg::solvers::ColPivQr;
 use faer::{Mat, Side};
 
 /// [`checked_col_piv_qr`]がランク落ちを検出したことを表す、系統に依存しないエラー。
 /// 呼び出し側が`map_err`で自系統のエラー（`LeastSquaresError::SingularMatrix`・
 /// `MleError::SingularHessian`・`MleError::SingularDesignMatrix`等）に変換する。
+///
+/// 設計行列の列の完全な多重共線性と、Gram行列`X'X`の分解の失敗（QRのランク判定は通るが、
+/// 列のスケール差が極端）は原因が異なるため、利用者に伝える内容を分けられるよう区別する。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RankDeficient;
+pub enum RankDeficient {
+    /// 列ピボットQRが、行列がフルカラムランクでないと判定した。
+    Columns,
+    /// Gram行列`X'X`のCholesky分解が失敗した。
+    GramMatrix,
+}
 
 /// `a`（m×n）を列ピボットQR分解し、フルカラムランクならそのQR分解を返す。ランク落ちなら
 /// [`RankDeficient`]を返す。OLS/WLSの設計行列、Newton法のHessian、Logit/Probit/Tobitの
@@ -28,7 +36,7 @@ pub struct RankDeficient;
 pub fn checked_col_piv_qr(a: &Mat<f64>) -> Result<ColPivQr<f64>, RankDeficient> {
     let n = a.ncols();
     if a.nrows() < n {
-        return Err(RankDeficient);
+        return Err(RankDeficient::Columns);
     }
     let qr = a.col_piv_qr();
     let r = qr.thin_R();
@@ -37,7 +45,7 @@ pub fn checked_col_piv_qr(a: &Mat<f64>) -> Result<ColPivQr<f64>, RankDeficient> 
     for i in 0..n {
         let diag = (*r.get(i, i)).abs();
         if diag.is_nan() || diag <= threshold {
-            return Err(RankDeficient);
+            return Err(RankDeficient::Columns);
         }
     }
     Ok(qr)
@@ -53,18 +61,16 @@ pub fn checked_col_piv_qr(a: &Mat<f64>) -> Result<ColPivQr<f64>, RankDeficient> 
 /// 観測情報行列の逆行列、OPG行列の逆行列等）にCholesky分解を適用する前は、
 /// この関数で固有値ベースの判定を先に行う必要がある。
 ///
-/// `context`はエラーメッセージに埋め込む説明文字列（例:
-/// `"coefficient covariance submatrix for the F-test"`）。呼び出し元ごとに
-/// 意味のあるメッセージを出せるよう引数化している。
+/// `matrix`はどの行列を検査しているか（エラーの`matrix`パラメータになる）。
 ///
 /// # Errors
 /// 固有値の絶対値が最大固有値に対して相対的に小さすぎる場合（`k * f64::EPSILON *
 /// max_abs_eigenvalue`以下、`checked_col_piv_qr`と同じ相対閾値の考え方）、
-/// `CommonError::ComputationFailed`を返す。
+/// `CommonError::NearSingularMatrix`を返す。
 pub fn ensure_well_conditioned_symmetric_matrix(
     v: &Mat<f64>,
     k: usize,
-    context: &str,
+    matrix: MatrixKind,
 ) -> Result<(), CommonError> {
     debug_assert_eq!(v.nrows(), k, "v must be a k x k matrix (caller contract)");
     debug_assert_eq!(v.ncols(), k, "v must be a k x k matrix (caller contract)");
@@ -72,12 +78,8 @@ pub fn ensure_well_conditioned_symmetric_matrix(
     // `v`は対称正定値のはずのため、理論上`SelfAdjointEigen::new`は失敗しない
     // （呼び出し元の`Llt`失敗と同様、浮動小数点演算の丸めによる境界的な失敗に
     // 備えた防御的な`Result`化）。
-    let eigen =
-        faer::linalg::solvers::SelfAdjointEigen::new(v.as_ref(), Side::Lower).map_err(|_| {
-            CommonError::ComputationFailed(format!(
-                "failed to compute eigendecomposition of {context}"
-            ))
-        })?;
+    let eigen = faer::linalg::solvers::SelfAdjointEigen::new(v.as_ref(), Side::Lower)
+        .map_err(|_| CommonError::NearSingularMatrix { matrix })?;
     let eigenvalues = eigen.S().column_vector();
     let max_abs_eigenvalue = (0..k)
         .map(|i| (*eigenvalues.get(i)).abs())
@@ -86,10 +88,7 @@ pub fn ensure_well_conditioned_symmetric_matrix(
 
     for i in 0..k {
         if (*eigenvalues.get(i)).abs() <= threshold {
-            return Err(CommonError::ComputationFailed(format!(
-                "{context} is near-singular (condition number exceeds double-precision limits, \
-                 e.g. due to extreme scale differences)"
-            )));
+            return Err(CommonError::NearSingularMatrix { matrix });
         }
     }
     Ok(())
@@ -361,7 +360,7 @@ mod tests {
     #[test]
     fn checked_col_piv_qr_rejects_perfectly_collinear_columns() {
         let a = Mat::from_fn(4, 2, |i, j| (i as f64 + 1.0) * (j as f64 + 1.0));
-        assert_eq!(checked_col_piv_qr(&a).unwrap_err(), RankDeficient);
+        assert_eq!(checked_col_piv_qr(&a).unwrap_err(), RankDeficient::Columns);
     }
 
     #[test]
@@ -373,7 +372,10 @@ mod tests {
         let diag = (*zeros.col_piv_qr().thin_R().get(0, 0)).abs();
         assert!(diag.is_nan(), "precondition: expected R diagonal to be NaN");
 
-        assert_eq!(checked_col_piv_qr(&zeros).unwrap_err(), RankDeficient);
+        assert_eq!(
+            checked_col_piv_qr(&zeros).unwrap_err(),
+            RankDeficient::Columns
+        );
     }
 
     #[test]
@@ -386,20 +388,23 @@ mod tests {
     #[test]
     fn checked_col_piv_qr_rejects_matrix_with_fewer_rows_than_columns() {
         let a = Mat::from_fn(2, 3, |i, j| (i * 3 + j) as f64 + 1.0);
-        assert_eq!(checked_col_piv_qr(&a).unwrap_err(), RankDeficient);
+        assert_eq!(checked_col_piv_qr(&a).unwrap_err(), RankDeficient::Columns);
     }
 
     #[test]
     fn ensure_well_conditioned_symmetric_matrix_accepts_well_conditioned_matrix() {
         let v = Mat::from_fn(2, 2, |i, j| if i == j { [2.0, 5.0][i] } else { 0.0 });
-        assert!(ensure_well_conditioned_symmetric_matrix(&v, 2, "test matrix").is_ok());
+        assert!(ensure_well_conditioned_symmetric_matrix(&v, 2, MatrixKind::Hessian).is_ok());
     }
 
     #[test]
     fn ensure_well_conditioned_symmetric_matrix_rejects_exactly_singular_matrix() {
         let v = Mat::<f64>::zeros(2, 2);
-        let result = ensure_well_conditioned_symmetric_matrix(&v, 2, "test matrix");
-        assert!(matches!(result, Err(CommonError::ComputationFailed(_))));
+        let result = ensure_well_conditioned_symmetric_matrix(&v, 2, MatrixKind::Hessian);
+        assert!(matches!(
+            result,
+            Err(CommonError::NearSingularMatrix { .. })
+        ));
     }
 
     #[test]
@@ -408,8 +413,11 @@ mod tests {
         // 検出できないケース（OLSのwald_f_testで実測確認済み）だが、
         // 固有値ベースの判定なら検出できるはず。
         let v = Mat::from_fn(2, 2, |i, j| if i == j { [1e12, 1e-6][i] } else { 0.0 });
-        let result = ensure_well_conditioned_symmetric_matrix(&v, 2, "test matrix");
-        assert!(matches!(result, Err(CommonError::ComputationFailed(_))));
+        let result = ensure_well_conditioned_symmetric_matrix(&v, 2, MatrixKind::Hessian);
+        assert!(matches!(
+            result,
+            Err(CommonError::NearSingularMatrix { .. })
+        ));
     }
 
     /// 返す判定が、ランク（`checked_col_piv_qr`）・張る空間と一致する。

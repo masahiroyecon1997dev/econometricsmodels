@@ -49,10 +49,3 @@ NO_UNCENSORED_OBSERVATIONS = (
     "no uncensored observations: at least one y value strictly between "
     "lower={lower} and upper={upper} is required to identify the model"
 )
-
-UNCENSORED_INTERVAL_TOO_NARROW = (
-    "target 'expected_uncensored' cannot be computed reliably: the uncensored "
-    "interval [{lower}, {upper}] is narrower than 1% of the estimated sigma "
-    "({sigma}), so the model puts almost no probability on uncensored values. "
-    "Use another target"
-)

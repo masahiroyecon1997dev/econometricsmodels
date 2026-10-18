@@ -381,7 +381,6 @@ use std::collections::BTreeMap;
 use faer::Mat;
 use statrs::distribution::StudentsT;
 
-use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::OlsInput;
 use crate::panel::common::{
     PanelDimension, PanelError, PanelHcVariant, TimeKeys, panel_classical_cov_params,
@@ -493,7 +492,7 @@ impl FeInput {
     ///
     /// # Errors
     /// `from_columns`と同じ。加えて、`entity`がキー無しのコードの場合は`PanelError::Common`
-    /// （`CommonError::ComputationFailed`、呼び出し側の実装誤り）。
+    /// （`CommonError::Internal`、呼び出し側の実装誤り）。
     pub fn from_group_codes(
         y: &[f64],
         x_columns: &[Vec<f64>],
@@ -834,11 +833,8 @@ impl FeEstimator {
             params,
             residuals: residual_mat,
             xtx_inv,
-        } = least_squares(within_input.x(), within_input.y()).map_err(|_| {
-            PanelError::WithinRegressionFailed {
-                source: LeastSquaresError::SingularMatrix,
-            }
-        })?;
+        } = least_squares(within_input.x(), within_input.y())
+            .map_err(|err| PanelError::WithinRegressionFailed { source: err.into() })?;
 
         // `cov_type`別の共分散行列の計算に使う共通の材料（within変換後の設計行列、残差・SSR）。
         let x_mat = within_input.x();
@@ -967,7 +963,7 @@ impl FeEstimator {
         // いずれかであり理論上到達不能（`ReEstimator::fit`と同じ「保証済みの不変条件に対する
         // 防御的`Result`化」、`.claude/rules/rust-style.md`「テスト」参照）。
         let t_dist = StudentsT::new(0.0, 1.0, df_inference as f64)
-            .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+            .map_err(|e| CommonError::internal(e.to_string()))?;
         let t_crit = inference::critical_value(&t_dist, confidence_level);
 
         let mut std_errors = Mat::zeros(k, 1);
@@ -1836,6 +1832,7 @@ fn every_level_splits_once_across_two_groups(levels: &GroupCodes, groups: &Group
 mod tests {
     use super::*;
     use crate::linear::common::LeastSquaresError;
+    use crate::shared::error::MatrixKind;
 
     fn strings(values: &[&str]) -> Vec<String> {
         values.iter().map(|s| s.to_string()).collect()
@@ -1920,7 +1917,7 @@ mod tests {
                 None,
                 "y".to_string()
             ),
-            Err(PanelError::Common(CommonError::ComputationFailed(_)))
+            Err(PanelError::Common(CommonError::Internal { .. }))
         ));
         // 行数の食い違いは従来どおり`IdentifierDimensionMismatch`。
         assert!(matches!(
@@ -3208,7 +3205,9 @@ mod tests {
         assert!(matches!(
             result.unwrap_err(),
             PanelError::FTestFailed {
-                source: LeastSquaresError::Common(CommonError::ComputationFailed(_))
+                source: LeastSquaresError::Common(CommonError::NearSingularMatrix {
+                    matrix: MatrixKind::CoefficientCovariance
+                })
             }
         ));
     }

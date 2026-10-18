@@ -110,18 +110,18 @@ mod tests {
         let x = Mat::from_fn(4, 2, |i, j| (i as f64 + 1.0) * (j as f64 + 1.0));
         let y = column(&[1.0, 2.0, 3.0, 4.0]);
 
-        assert_eq!(least_squares(&x, &y).unwrap_err(), RankDeficient);
+        assert_eq!(least_squares(&x, &y).unwrap_err(), RankDeficient::Columns);
     }
 
     #[test]
     fn least_squares_rejects_all_zero_design_matrix() {
         // 全ゼロ行列はランク落ちとして弾かれる。NaN明示チェック単体の検証は
         // `checked_col_piv_qr_detects_nan_diagonal_from_all_zero_matrix`が担う（ここでは
-        // 後段の`xtx_inverse`の失敗でも`RankDeficient`になるため区別できない）。
+        // 後段の`xtx_inverse`の失敗は`RankDeficient::GramMatrix`で区別されるが、ここは列のランク落ちで弾かれる）。
         let x = Mat::<f64>::zeros(4, 2);
         let y = column(&[1.0, 2.0, 3.0, 4.0]);
 
-        assert_eq!(least_squares(&x, &y).unwrap_err(), RankDeficient);
+        assert_eq!(least_squares(&x, &y).unwrap_err(), RankDeficient::Columns);
     }
 
     #[test]

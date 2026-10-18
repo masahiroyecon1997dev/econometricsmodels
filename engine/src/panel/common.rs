@@ -328,7 +328,7 @@ pub enum PanelError {
     /// F統計量のWald検定（`crate::shared::wald::wald_f_test`への委譲）が
     /// 失敗した。`WithinRegressionFailed`とは別バリアント（理由はモジュールdoc参照）。
     ///
-    /// 実際に発生しうるのは`LeastSquaresError::Common(CommonError::ComputationFailed)`
+    /// 実際に発生しうるのは`LeastSquaresError::Common(CommonError::NearSingularMatrix)`
     /// のみ（`wald_f_test`のdocコメント「backstop」参照。傾き係数間の極端なスケール差等で
     /// 共分散部分行列が数値的にほぼ特異な場合）。それでも型は`WithinRegressionFailed`と
     /// 同じ`LeastSquaresError`のまま保持する（`wald_f_test`のエラー型を独自に絞り込む
@@ -397,6 +397,14 @@ pub enum PanelError {
         sigma2_eps: f64,
     },
 
+    /// RE（`variance_method`が`WallaceHussain`・`Amemiya`）の分散成分を決めるモーメント方程式
+    /// （2×2）が特異で解けない。
+    #[error("{}", self.catalog_message())]
+    VarianceComponentsMomentsSingular {
+        /// 推定法の名前（`variance_method`の値）。
+        method: &'static str,
+    },
+
     /// RE（`ReEstimator::fit`、`re-spec.md`3.2節）の準偏差変換済みデータへの
     /// `OlsEstimator::fit(include_intercept=false)`委譲が失敗した。
     ///
@@ -414,7 +422,7 @@ pub enum PanelError {
     ///
     /// 補助回帰のランク落ち、クラスター数`G`が補助回帰の傾き係数の数`2k`以下
     /// （`CommonError::InsufficientClustersForInference`）、DK・ロバスト共分散部分行列の
-    /// ほぼ特異性（`CommonError::ComputationFailed`）等。DKの時点数不足（`T <= k`）は
+    /// ほぼ特異性（`CommonError::NearSingularMatrix`）等。DKの時点数不足（`T <= k`）は
     /// これに包まず、補助回帰の前に`InsufficientDkPeriodsForInference`で弾く。ハウスマン検定はRE本体の付随的な
     /// 診断情報だが、計算自体が成立しない場合は`None`で隠さずエラーにする
     /// （設計行列の多重共線性でエラーにするのと同じ方針）。
@@ -455,6 +463,10 @@ impl PanelError {
             Self::HausmanTestFailed { source } => {
                 staged(source.try_report(), Stage::HausmanRegression)
             }
+            Self::VarianceComponentsMomentsSingular { method } => Some(
+                ErrorReport::new(ErrorCode::VarianceComponentsMomentsSingular)
+                    .param("variance_method", *method),
+            ),
             Self::InvalidDkBandwidth { bandwidth, t } => Some(
                 ErrorReport::new(ErrorCode::DkBandwidthOutOfRange)
                     .param("value", *bandwidth)
@@ -670,10 +682,9 @@ pub(crate) fn validate_panel_input(
 /// キー無しのコード（`GroupCodes::from_*_without_keys`）は受け付けない。
 fn require_entity_keys(entity: &GroupCodes) -> Result<(), PanelError> {
     if !entity.has_keys() {
-        return Err(CommonError::ComputationFailed(
+        return Err(CommonError::internal(
             "entity codes must carry keys (build them with GroupCodes::from_labels or \
-             GroupCodes::from_factorized)"
-                .to_string(),
+             GroupCodes::from_factorized)",
         )
         .into());
     }
@@ -689,10 +700,8 @@ fn require_entity_keys(entity: &GroupCodes) -> Result<(), PanelError> {
 /// 浮動小数点演算の境界的なケースに備えて`Result`化する。
 pub(crate) fn xtx_inverse(x: &Mat<f64>) -> Result<Mat<f64>, PanelError> {
     crate::shared::covariance::xtx_inverse(x).map_err(|_| {
-        CommonError::ComputationFailed(
-            "failed to invert the transformed design matrix's Gram matrix for panel cov_type \
-             computation"
-                .to_string(),
+        CommonError::internal(
+            "the Gram matrix of the transformed design matrix could not be inverted",
         )
         .into()
     })
@@ -725,7 +734,7 @@ pub(crate) enum PanelHcVariant {
 /// `h`の`expect`（`Hc2`/`Hc3`分岐）は、呼び出し元の`fit()`が`variant=Hc2|Hc3`のときは
 /// 必ず`Some(&h)`を渡す構造になっており、`variant`と`h`の組み合わせに呼び出し側のバグ
 /// 以外で不整合が生じることはない（`shared::covariance::hc_cov_params`の同型の
-/// `.expect("Hc2はleverage計算済み")`と同じ「型で表現しきれない呼び出し規約」の防御）。
+/// `.expect("leverage is computed for HC2")`と同じ「型で表現しきれない呼び出し規約」の防御）。
 pub(crate) fn panel_hc_cov_params(
     x: &Mat<f64>,
     residuals: &[f64],
@@ -1140,7 +1149,7 @@ mod tests {
         );
         assert!(matches!(
             validate_panel_input(&y, &[vec![1.0; 3]], &names, &keyless_full, None),
-            Err(PanelError::Common(CommonError::ComputationFailed(_)))
+            Err(PanelError::Common(CommonError::Internal { .. }))
         ));
     }
 
@@ -1266,8 +1275,8 @@ mod tests {
                 source: LeastSquaresError::SingularMatrix,
             }
             .to_string(),
-            "within-transformed least-squares estimation failed: design matrix is \
-             singular (perfect multicollinearity detected)"
+            "within-transformed least-squares estimation failed: The design matrix is \
+             singular: some columns are perfectly collinear."
         );
         // `#[error(transparent)]`: `Common`は内側`CommonError`のメッセージを
         // そのまま透過する（`IvError`/`MleError`のテストと同じ確認）。
@@ -1443,8 +1452,8 @@ mod tests {
         };
         assert_eq!(
             err.to_string(),
-            "quasi-demeaned least-squares estimation for random effects failed: design matrix \
-             is singular (perfect multicollinearity detected)"
+            "quasi-demeaned least-squares estimation for random effects failed: The design matrix \
+             is singular: some columns are perfectly collinear."
         );
         assert_eq!(
             err,
@@ -1461,8 +1470,8 @@ mod tests {
         };
         assert_eq!(
             err.to_string(),
-            "Hausman test auxiliary regression failed: design matrix is singular \
-             (perfect multicollinearity detected)"
+            "Hausman test auxiliary regression failed: The design matrix is singular: \
+             some columns are perfectly collinear."
         );
         assert_eq!(
             err,
@@ -1527,7 +1536,7 @@ mod tests {
         // 範囲外・未使用の仮コード。
         assert!(matches!(
             TimeKeys::lexicographic_factorized(vec![0, 2], &["a", "b"]),
-            Err(PanelError::Common(CommonError::ComputationFailed(_)))
+            Err(PanelError::Common(CommonError::Internal { .. }))
         ));
     }
 
@@ -1548,11 +1557,11 @@ mod tests {
         // 重複するため、黙って受け入れずに`Err`にする（呼び出し側の契約違反）。
         assert!(matches!(
             TimeKeys::by_integer_factorized(vec![0, 1, 2], &["a", "b", "a"], &[1, 2, 3]),
-            Err(PanelError::Common(CommonError::ComputationFailed(_)))
+            Err(PanelError::Common(CommonError::Internal { .. }))
         ));
         assert!(matches!(
             TimeKeys::by_float_factorized(vec![0, 1, 2], &["a", "b", "a"], &[1.0, 2.0, 3.0]),
-            Err(PanelError::Common(CommonError::ComputationFailed(_)))
+            Err(PanelError::Common(CommonError::Internal { .. }))
         ));
     }
 

@@ -69,7 +69,7 @@ use crate::iv::common::{
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use crate::shared::covariance::{cluster_cov_params, resolve_hac_lags, time_ordering};
-use crate::shared::error::{ClusterSetting, CommonError};
+use crate::shared::error::{ClusterSetting, CommonError, MatrixKind};
 use crate::shared::inference;
 use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 use crate::shared::validation::validate_cluster_groups;
@@ -170,7 +170,7 @@ impl TwoSlsEstimator {
     /// - `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下:
     ///   `IvError::Common(CommonError::InsufficientClustersForInference)`（`rank(Ŝ) ≤ g-1`
     ///   のためロバストWald/F検定の`q×q`部分行列が構造的に特異。`g > q`でも
-    ///   悪条件で数値的にほぼ特異なら従来どおり`CommonError::ComputationFailed`が
+    ///   悪条件で数値的にほぼ特異なら従来どおり`CommonError::NearSingularMatrix`が
     ///   backstop）
     ///
     /// Wu-Hausman検定（`wu_hausman_statistic()`/`wu_hausman_p_value()`）の
@@ -338,7 +338,7 @@ impl TwoSlsEstimator {
         }
 
         let t_dist = StudentsT::new(0.0, 1.0, df_inference as f64)
-            .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+            .map_err(|e| CommonError::internal(e.to_string()))?;
         let t_crit = inference::critical_value(&t_dist, confidence_level);
 
         let mut test_stats = Mat::<f64>::zeros(k, 1);
@@ -389,7 +389,7 @@ impl TwoSlsEstimator {
         // 第二段階は成功するが拡張回帰は`InsufficientObservations`になりうる。また
         // 第一段階残差の分散がゼロ（操作変数が内生変数を完全予測する退化ケース等）だと
         // 拡張回帰の設計行列に分散ゼロの列が混入し特異（`SingularMatrix`）、変数間の
-        // スケール差等では`wald_test_last_columns`側が`ComputationFailed`になりうる。
+        // スケール差等では`wald_test_last_columns`側が`NearSingularMatrix`になりうる。
         // さらに`cov_type=Cluster`では、構造式の傾き係数の数`q`が`fit()`冒頭のチェックを
         // 通っていても、拡張回帰は残差列の分だけ`q`が増える（`q_aug = q + k_endog`）ため
         // `g <= q_aug`となり拡張回帰の`OlsEstimator::fit`が`InsufficientClustersForInference`
@@ -455,7 +455,7 @@ impl TwoSlsEstimator {
                 | Err(LeastSquaresError::Common(CommonError::InsufficientClustersForInference {
                     ..
                 }))
-                | Err(LeastSquaresError::Common(CommonError::ComputationFailed(_))) => {
+                | Err(LeastSquaresError::Common(CommonError::NearSingularMatrix { .. })) => {
                     (None, None, None)
                 }
                 Err(source) => return Err(IvError::HausmanRegressionFailed { source }),
@@ -487,10 +487,10 @@ impl TwoSlsEstimator {
             let z = Mat::from_fn(n, l, |i, j| instrument_columns[j][i]);
             let ztz = z.transpose() * &z;
             let zte = z.transpose() * &residuals;
+            // 第一段階が同じ`Z'Z`（`instrument_columns`は第一段階の設計行列と同じ列）を既に分解済み
+            // のため、ここで失敗するのは実装の誤り。
             let llt_ztz = ztz.llt(Side::Lower).map_err(|_| {
-                CommonError::ComputationFailed(
-                    "failed to invert Z'Z for the Sargan overidentification test".to_string(),
-                )
+                CommonError::internal("Z'Z could not be factorized in the Sargan test")
             })?;
             let ztz_inv_zte = llt_ztz.solve(&zte);
             let quad: f64 = (0..l)
@@ -498,8 +498,8 @@ impl TwoSlsEstimator {
                 .sum();
             let sigma2 = ssr / (n as f64);
             let stat = quad / sigma2;
-            let chi2 = ChiSquared::new(df as f64)
-                .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+            let chi2 =
+                ChiSquared::new(df as f64).map_err(|e| CommonError::internal(e.to_string()))?;
             let p_value = chi2.sf(stat);
             (Some(stat), Some(p_value), Some(df))
         };
@@ -696,11 +696,9 @@ impl TwoSlsEstimator {
 /// 防御的な扱い）。
 fn xtx_inverse(x: &Mat<f64>, k: usize) -> Result<Mat<f64>, IvError> {
     let xtx = x.transpose() * x;
-    let llt = xtx.llt(Side::Lower).map_err(|_| {
-        CommonError::ComputationFailed(
-            "failed to invert X̂'X̂ (2SLS second-stage bread matrix)".to_string(),
-        )
-    })?;
+    let llt = xtx
+        .llt(Side::Lower)
+        .map_err(|_| CommonError::internal("the second-stage X̂'X̂ could not be factorized"))?;
     Ok(llt.solve(Mat::<f64>::identity(k, k)))
 }
 
@@ -751,11 +749,11 @@ fn hc_cov_params(
             HcVariant::Hc0 => resid,
             HcVariant::Hc1 => resid * hc1_correction,
             HcVariant::Hc2 => {
-                let h = leverage.as_ref().expect("Hc2はleverage計算済み")[i];
+                let h = leverage.as_ref().expect("leverage is computed for HC2")[i];
                 resid / (1.0 - h).sqrt()
             }
             HcVariant::Hc3 => {
-                let h = leverage.as_ref().expect("Hc3はleverage計算済み")[i];
+                let h = leverage.as_ref().expect("leverage is computed for HC3")[i];
                 resid / (1.0 - h)
             }
         };
@@ -837,14 +835,14 @@ fn wald_f_test(
     ensure_well_conditioned_symmetric_matrix(
         &v_slopes,
         df_model,
-        "coefficient covariance submatrix for the 2SLS F-test",
+        MatrixKind::CoefficientCovariance,
     )?;
 
-    let llt = v_slopes.llt(Side::Lower).map_err(|_| {
-        CommonError::ComputationFailed(
-            "failed to invert coefficient covariance submatrix for the 2SLS F-test".to_string(),
-        )
-    })?;
+    let llt = v_slopes
+        .llt(Side::Lower)
+        .map_err(|_| CommonError::NearSingularMatrix {
+            matrix: MatrixKind::CoefficientCovariance,
+        })?;
     let v_slopes_inv_beta = llt.solve(&beta_slopes);
 
     let wald: f64 = (0..df_model)
@@ -853,7 +851,7 @@ fn wald_f_test(
     let wald_statistic = wald / (df_model as f64);
 
     let f_dist = FisherSnedecor::new(df_model as f64, df_inference as f64)
-        .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+        .map_err(|e| CommonError::internal(e.to_string()))?;
     let wald_p_value = f_dist.sf(wald_statistic);
 
     Ok((wald_statistic, wald_p_value))
@@ -1670,7 +1668,7 @@ mod tests {
     /// クラスターロバストSEのテスト専用データ・グループ。`nontrivial_x_exog_input()`
     /// （操作変数2個）だと第一段階の傾き係数`q=3`（x1, z1, z2）に対しクラスター数`G=4`が
     /// 際どく、`Ŝ`（rank≤G）の傾き部分行列が数値的にほぼ特異になり`fit()`自体が
-    /// `ComputationFailed`で失敗する（`engine/src/linear/CLAUDE.md`「クラスター数`G`と
+    /// `NearSingularMatrix`で失敗する（`engine/src/linear/CLAUDE.md`「クラスター数`G`と
     /// 傾き係数の数`q`の関係」参照、IVの第一段階にも同じ制約が当てはまる）。操作変数を
     /// 1個に減らし（`q=2`）安全な余裕を持たせた専用データを使う。
     fn cluster_test_input_and_groups() -> (IvInput, Vec<String>) {
@@ -2011,7 +2009,7 @@ mod tests {
     /// `g <= q_aug`となり、拡張回帰の`OlsEstimator::fit`が`InsufficientClustersForInference`
     /// を返す。Wu-Hausmanが実際に使うのは末尾`k_endog`列の部分行列（`rank(Ŝ) ≤ g-1 ≥
     /// k_endog`なら計算可能）だが、`OlsEstimator::fit`のoverall F検定がその手前で弾くため、
-    /// 他のdegrade理由（`SingularMatrix`/`InsufficientObservations`/`ComputationFailed`）と
+    /// 他のdegrade理由（`SingularMatrix`/`InsufficientObservations`/`NearSingularMatrix`）と
     /// 同じく`wu_hausman_*`を`None`へdegradeする（`fit()`全体は成功する）。
     /// `cluster_test_input_and_groups`は`[const, x1, endog1]`（`q=2`・`k_endog=1`・
     /// `q_aug=3`）なので`g=3`（`q=2 < g=3 <= q_aug=3`）と組み合わせる。

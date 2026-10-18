@@ -151,10 +151,7 @@ pub enum IvError {
     /// max_iter"）とほぼ揃えているが、`IvError`は2SLS/GMM共有の型のため先頭に"GMM "を
     /// 付けて対象を明示している点のみ意図的な差異（rust-reviewerの指摘で文体差を確認、
     /// この差は意図的と判断）。
-    #[error(
-        "GMM failed to converge after {n_iter} iterations. Set raise_on_non_convergence=False \
-         to receive the result anyway, or increase gmm_max_iter"
-    )]
+    #[error("{}", self.catalog_message())]
     GmmNonConvergence { n_iter: usize },
 
     /// Wu-Hausman内生性検定（回帰ベース、`iv-spec.md`3.6節）のための
@@ -162,7 +159,7 @@ pub enum IvError {
     /// `OlsEstimator::fit`または`OlsEstimator::wald_test_last_columns`で失敗した。
     ///
     /// **設計行列の特異性（`SingularMatrix`）・観測数不足（`InsufficientObservations`）・
-    /// Wald検定側の数値的なほぼ特異性（`ComputationFailed`）は、このバリアントを経由せず
+    /// Wald検定側の数値的なほぼ特異性（`NearSingularMatrix`）は、このバリアントを経由せず
     /// `wu_hausman_statistic`/`wu_hausman_p_value`を`None`にするだけで`fit()`自体は成功
     /// させる**（ユーザー確認済み、`two_sls.rs`の`fit()`実装参照）。このバリアントは
     /// それら以外の（`confidence_level`・`cov_type=Cluster/Hac`の妥当性は`fit()`の
@@ -206,6 +203,11 @@ impl IvError {
                 ErrorReport::new(ErrorCode::ToleranceNotPositiveFinite)
                     .param("option", "gmm_tol")
                     .param("value", *gmm_tol),
+            ),
+            Self::GmmNonConvergence { n_iter } => Some(
+                ErrorReport::new(ErrorCode::NotConverged)
+                    .param("n_iter", *n_iter)
+                    .param("iter_option", "gmm_max_iter"),
             ),
             _ => None,
         }
@@ -894,11 +896,35 @@ mod tests {
         let report = first_stage.try_report().expect("cataloged");
         assert_eq!(report.code(), ErrorCode::NlagsNotPositive);
         assert!(report.stage().is_none());
-        // 移行していない`source`の包みは`None`。
-        let unmigrated = IvError::SecondStageFailed {
+        // 設計行列の特異は、どの回帰で起きたかを`stage`で示す。
+        let second_stage = IvError::SecondStageFailed {
             source: LeastSquaresError::SingularMatrix,
         };
+        let report = second_stage.try_report().expect("cataloged");
+        assert_eq!(report.code(), ErrorCode::DesignMatrixSingular);
+        assert_eq!(report.stage(), Some(&Stage::SecondStage));
+        // 移行していない`source`の包みは`None`。
+        let unmigrated = IvError::SecondStageFailed {
+            source: LeastSquaresError::WeightDimensionMismatch {
+                y_rows: 1,
+                weight_rows: 2,
+            },
+        };
         assert!(unmigrated.try_report().is_none());
+    }
+
+    #[test]
+    fn gmm_non_convergence_maps_to_not_converged_with_gmm_max_iter() {
+        let err = IvError::GmmNonConvergence { n_iter: 3 };
+        let report = err.try_report().expect("cataloged");
+        assert_eq!(report.code(), ErrorCode::NotConverged);
+        assert!(report.validate().is_ok());
+        assert_eq!(err.to_string(), report.message());
+        assert_eq!(
+            report.message(),
+            "The optimizer did not converge after 3 iterations."
+        );
+        assert!(report.full_text().contains("gmm_max_iter"));
     }
 
     #[test]

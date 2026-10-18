@@ -20,7 +20,6 @@ from _errors import raises_error
 from econometricsmodels import (
     FE,
     RE,
-    ComputationError,
     ErrorCode,
     FEOptions,
     REOptions,
@@ -179,12 +178,12 @@ def test_cluster_validation_counts_the_identified_columns():
     [
         pytest.param(
             ["x1", "x2", "x3", "x1_bar"],
-            "within-transformed",
+            "WITHIN_REGRESSION",
             id="within_collinear",
         ),
         pytest.param(
             ["x1", "x2", "x1_bar", "x1_bar2"],
-            "quasi-demeaned",
+            "QUASI_DEMEANED_REGRESSION",
             id="repeated_mean",
         ),
     ],
@@ -197,7 +196,7 @@ def test_collinear_designs_are_still_computation_errors(x, stage):
         x3=2.0 * pl.col("x1") + 3.0 * pl.col("x2"),
         x1_bar2=2.0 * pl.col("x1_bar"),
     )
-    with pytest.raises(ComputationError, match=stage):
+    with raises_error(ErrorCode.DESIGN_MATRIX_SINGULAR, stage=stage):
         _fit(x, df=df)
 
 

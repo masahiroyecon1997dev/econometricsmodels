@@ -30,7 +30,6 @@ use std::borrow::Cow;
 use std::collections::HashSet;
 
 use super::common::{ColumnScale, MleError};
-use crate::shared::error::CommonError;
 use crate::shared::linear_program::{BoxBoundedLp, DenseSimplex, LinearProgramSolver};
 
 /// LPの解が制約を破っているとみなす閾値（単位長にそろえた行との余弦）。
@@ -63,7 +62,7 @@ pub(crate) enum SeparationVerdict {
 ///   `false`なら`converged=false`を返す（結果は呼び出し側がそのまま組み立てる）。
 /// - 判定そのものが数値的に完了しなかったとき（LPの失敗など、実測のデータでは起きていない）は、
 ///   分離が無いと確認できなかったので、`raise_on_non_convergence=true`ならそのエラー
-///   （`ComputationFailed`）を返し、`false`なら`converged=false`を返す。推定結果そのものは
+///   （`SeparationCheckFailed`）を返し、`false`なら`converged=false`を返す。推定結果そのものは
 ///   得られているので、フラグの契約（「結果を`converged=false`で返す」）を保つ。
 ///
 /// `x`は標準化前の設計行列で、`scale`・`y`は`fit()`が最適化に使ったもの。ここでは列を標準偏差で
@@ -229,9 +228,9 @@ impl<'a> SignedRows<'a> {
 }
 
 fn numerical_failure(detail: &str) -> MleError {
-    MleError::Common(CommonError::ComputationFailed(format!(
-        "could not verify that the data are free of separation: {detail}"
-    )))
+    MleError::SeparationCheckFailed {
+        detail: detail.to_string(),
+    }
 }
 
 /// 制約生成でLPを解き、分離がある（解の最大マージンが閾値超）かを返す。
@@ -619,13 +618,10 @@ mod tests {
         let (_, scale) = standardize_columns(&x, true);
         let rows = SignedRows::new(&x, &scale, &y);
         let err = lp_finds_separation(&rows, &ViolatingSolver).unwrap_err();
-        assert!(matches!(
-            err,
-            MleError::Common(CommonError::ComputationFailed(_))
-        ));
+        assert!(matches!(err, MleError::SeparationCheckFailed { .. }));
     }
 
-    /// 常にエラーを返すソルバー（LPの失敗が`ComputationFailed`になることの検証用）。
+    /// 常にエラーを返すソルバー（LPの失敗が`SeparationCheckFailed`になることの検証用）。
     struct FailingSolver;
     impl LinearProgramSolver for FailingSolver {
         fn maximize(&self, _: &BoxBoundedLp<'_>) -> Result<Vec<f64>, LpError> {
@@ -639,8 +635,8 @@ mod tests {
         let (_, scale) = standardize_columns(&x, true);
         let err = detect_separation(&x, &scale, &y, &FailingSolver).unwrap_err();
         match err {
-            MleError::Common(CommonError::ComputationFailed(msg)) => {
-                assert!(msg.contains("could not verify"), "{msg}");
+            MleError::SeparationCheckFailed { detail } => {
+                assert!(!detail.is_empty());
             }
             other => panic!("unexpected error: {other:?}"),
         }
@@ -650,12 +646,9 @@ mod tests {
     fn verify_no_separation_follows_raise_policy_when_the_check_cannot_be_completed() {
         let (x, y) = quasi_complete_dummy_data(60);
         let (_, scale) = standardize_columns(&x, true);
-        // raise=true: 分離が無いと確認できなかったことを`ComputationFailed`で知らせる。
+        // raise=true: 分離が無いと確認できなかったことを`SeparationCheckFailed`で知らせる。
         let err = verify_with_solver(&x, &scale, &y, true, true, &FailingSolver).unwrap_err();
-        assert!(matches!(
-            err,
-            MleError::Common(CommonError::ComputationFailed(_))
-        ));
+        assert!(matches!(err, MleError::SeparationCheckFailed { .. }));
         // raise=false: 推定結果は返し、`converged=false`にする。
         assert!(!verify_with_solver(&x, &scale, &y, true, false, &FailingSolver).unwrap());
     }

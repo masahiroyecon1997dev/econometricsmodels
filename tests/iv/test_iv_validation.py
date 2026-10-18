@@ -1255,11 +1255,16 @@ def test_gmm_one_step_with_hac_cov_type_requires_hac_time(iv_dataset):
 def test_perfect_multicollinearity_raises_computation_error():
     """`x_exog`が完全な多重共線性を持つ場合、第一段階回帰
     （`x_endog[j] ~ x_exog + instruments`）の設計行列が特異になり
-    `ComputationError`（`IvError::FirstStageFailed`）。完全な多重共線性は数値比較の
-    対象外（`testing-policy.md`「テストの3系統」）で、想定エラーの送出のみ確認する。
+    `ComputationError`（`DESIGN_MATRIX_SINGULAR`、`stage="FIRST_STAGE"`）。
+    完全な多重共線性は数値比較の対象外（`testing-policy.md`「テストの3系統」）で、
+    想定エラーの送出のみ確認する。
     """
     df = pl.read_csv(DATA_DIR / "iv_perfect_multicollinearity.csv")
-    with pytest.raises(ComputationError):
+    with raises_error(
+        ErrorCode.DESIGN_MATRIX_SINGULAR,
+        stage="FIRST_STAGE",
+        endog_name="endog1",
+    ):
         IV(
             df,
             y="y",
@@ -1313,18 +1318,16 @@ def test_collinear_instruments_raise_computation_error(
 ):
     """`instruments`同士の共線、`instruments`と`x_exog`の共線（`Z=[const, x_exog,
     instruments]`が列ランク落ち）、定数の操作変数（`const`と共線）は、いずれも第一段階
-    回帰の設計行列が特異になり`ComputationError`（`IvError::FirstStageFailed`）。
-    第一段階は`estimator`によらず先に走るため、2SLSとGMMで同じ経路・同じメッセージに
-    なる。切片に依存しない共線性は`include_intercept=False`でも同じ。
+    回帰の設計行列が特異になり`ComputationError`（`DESIGN_MATRIX_SINGULAR`、
+    `stage="FIRST_STAGE"`）。第一段階は`estimator`によらず先に走るため、2SLSと
+    GMMで同じ経路・同じエラーになる。切片に依存しない共線性は
+    `include_intercept=False`でも同じ。
     """
     df = iv_dataset.with_columns(expr.alias(column))
-    with pytest.raises(
-        ComputationError,
-        match=escaped(
-            iv_msgs.FIRST_STAGE_FAILED,
-            endog_name="endog1",
-            source=iv_msgs.SINGULAR_DESIGN_MATRIX,
-        ),
+    with raises_error(
+        ErrorCode.DESIGN_MATRIX_SINGULAR,
+        stage="FIRST_STAGE",
+        endog_name="endog1",
     ):
         our_fit(
             df,
@@ -1387,18 +1390,23 @@ def test_second_stage_singular_raises_computation_error(
     `x_exog`と共線（`endog1 = 3*x1`）、または操作変数が内生変数と厳密に無相関
     （階数条件の違反）だと、第二段階の設計行列`[const, x_exog, x̂_endog]`が特異になる
     （`second_stage_input`経路）。2SLSは第二段階回帰の`ComputationError`
-    （`IvError::SecondStageFailed`）、GMMは第二段階を持たず`X'ZWZ'X`の逆行列が
-    取れずに`ComputationError`になる。
+    （`DESIGN_MATRIX_SINGULAR`、`stage="SECOND_STAGE"`）、GMMは第二段階を持たず
+    `X'ZWZ'X`の逆行列が取れずに`ComputationError`
+    （`MATRIX_NEAR_SINGULAR`、`matrix="GMM_BREAD"`）になる。
     """
     df, x_exog, x_endog, instruments = _second_stage_singular_frame(label)
-    match = (
-        escaped(
-            iv_msgs.SECOND_STAGE_FAILED, source=iv_msgs.SINGULAR_DESIGN_MATRIX
-        )
+    expected = (
+        {
+            "code": ErrorCode.DESIGN_MATRIX_SINGULAR,
+            "stage": "SECOND_STAGE",
+        }
         if estimator == "2sls"
-        else escaped(iv_msgs.GMM_BREAD_NOT_INVERTIBLE)
+        else {
+            "code": ErrorCode.MATRIX_NEAR_SINGULAR,
+            "matrix": "GMM_BREAD",
+        }
     )
-    with pytest.raises(ComputationError, match=match):
+    with raises_error(**expected):
         our_fit(
             df,
             x_exog=x_exog,
@@ -1415,7 +1423,8 @@ def test_scale_variance_raises_computation_error(cov_type):
     """変数間のスケールが極端に異なる設計行列（x1を`*1e6`、x2を`*1e-3`）は、
     第一段階回帰の傾き係数の同時共分散部分行列がスケール比の2乗相当の
     条件数を持ち倍精度浮動小数点の限界を超えて数値的に特異になり、
-    第一段階の`ComputationError`（`IvError::FirstStageFailed`）になる
+    第一段階の`ComputationError`（`MATRIX_NEAR_SINGULAR`、
+    `matrix="COEFFICIENT_COVARIANCE"`、`stage="FIRST_STAGE"`）になる
     （実測確認済み、OLSの同名テストと同じ原理）。
     `test_perfect_multicollinearity_raises_computation_error`と同様、数値比較は
     せずエラーパスのみ確認する。`cov_type`は`LINEARMODELS_COV_TYPES`（hc2/hc3は
@@ -1423,7 +1432,12 @@ def test_scale_variance_raises_computation_error(cov_type):
     """
     df = pl.read_csv(DATA_DIR / "iv_scale_variance.csv")
     options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
-    with pytest.raises(ComputationError):
+    with raises_error(
+        ErrorCode.MATRIX_NEAR_SINGULAR,
+        matrix="COEFFICIENT_COVARIANCE",
+        stage="FIRST_STAGE",
+        endog_name="endog1",
+    ):
         IV(
             with_row_time(df),
             y="y",
@@ -1446,13 +1460,19 @@ def test_scale_variance_cluster_raises_computation_error():
     `test_cluster_count_at_most_slopes_raises_validation_error`が
     確認するクラスター数不足の`ValidationError`（第一段階の`q=3`〔`x_exog`
     〔x1〕+`instruments`〔z1,z2〕〕相当）ではなく、傾き係数の共分散部分行列の
-    条件数超過による`ComputationError`（第一段階回帰の`FirstStageFailed`）が
-    発生することを確認する。
+    条件数超過による`ComputationError`（`MATRIX_NEAR_SINGULAR`、
+    `matrix="COEFFICIENT_COVARIANCE"`、`stage="FIRST_STAGE"`）が発生することを
+    確認する。
     """
     df = pl.read_csv(DATA_DIR / "iv_scale_variance.csv")
     df = with_cluster_groups(df, 10)
     options = IVOptions(cov_type="cluster", cluster="cluster_group")
-    with pytest.raises(ComputationError):
+    with raises_error(
+        ErrorCode.MATRIX_NEAR_SINGULAR,
+        matrix="COEFFICIENT_COVARIANCE",
+        stage="FIRST_STAGE",
+        endog_name="endog1",
+    ):
         IV(
             df,
             y="y",
@@ -1477,7 +1497,9 @@ def test_gmm_raise_on_non_convergence_true_raises_computation_error(
         gmm_tol=1e-300,
         gmm_max_iter=3,
     )
-    with pytest.raises(ComputationError):
+    with raises_error(
+        ErrorCode.NOT_CONVERGED, n_iter=3, iter_option="gmm_max_iter"
+    ):
         our_fit(iv_dataset, options=options)
 
 

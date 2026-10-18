@@ -19,8 +19,9 @@
 
 use thiserror::Error;
 
-use crate::shared::error::{CommonError, catalog_display};
+use crate::shared::error::{CommonError, MatrixKind, catalog_display};
 use crate::shared::error_catalog::{ErrorCode, ErrorReport};
+use crate::shared::linear_algebra::RankDeficient;
 
 /// OLS/WLSの計算過程で発生しうるエラー。
 ///
@@ -48,7 +49,7 @@ pub enum LeastSquaresError {
     NonPositiveWeight { row: usize, weight: f64 },
 
     /// 設計行列が特異（完全な多重共線性等）。
-    #[error("design matrix is singular (perfect multicollinearity detected)")]
+    #[error("{}", self.catalog_message())]
     SingularMatrix,
 
     /// Breusch-Godfrey検定のラグ次数`nlags`が1未満。
@@ -66,6 +67,19 @@ pub enum LeastSquaresError {
     InsufficientObservationsForAuxRegression { n: usize, k: usize },
 }
 
+impl From<RankDeficient> for LeastSquaresError {
+    /// 列の完全な共線性は`SingularMatrix`、`X'X`の分解の失敗（列のスケール差が極端）は
+    /// 共線性ではなく数値的なほぼ特異性なので`NearSingularMatrix`にする。
+    fn from(err: RankDeficient) -> Self {
+        match err {
+            RankDeficient::Columns => Self::SingularMatrix,
+            RankDeficient::GramMatrix => Self::Common(CommonError::NearSingularMatrix {
+                matrix: MatrixKind::DesignGram,
+            }),
+        }
+    }
+}
+
 impl LeastSquaresError {
     /// カタログの`code`・`params`で表せるバリアントの[`ErrorReport`]。まだ移していないバリアントは`None`。
     ///
@@ -77,6 +91,7 @@ impl LeastSquaresError {
             Self::InvalidNlags { nlags } => {
                 Some(ErrorReport::new(ErrorCode::NlagsNotPositive).param("value", *nlags))
             }
+            Self::SingularMatrix => Some(ErrorReport::new(ErrorCode::DesignMatrixSingular)),
             _ => None,
         }
     }
@@ -118,7 +133,21 @@ mod tests {
             wrapped.try_report().expect("cataloged").code(),
             ErrorCode::HacLagsOutOfRange
         );
-        assert!(LeastSquaresError::SingularMatrix.try_report().is_none());
+        assert_eq!(
+            LeastSquaresError::SingularMatrix
+                .try_report()
+                .expect("cataloged")
+                .code(),
+            ErrorCode::DesignMatrixSingular
+        );
+        assert!(
+            LeastSquaresError::WeightDimensionMismatch {
+                y_rows: 1,
+                weight_rows: 2
+            }
+            .try_report()
+            .is_none()
+        );
     }
 
     #[test]
@@ -145,7 +174,7 @@ mod tests {
         );
         assert_eq!(
             LeastSquaresError::SingularMatrix.to_string(),
-            "design matrix is singular (perfect multicollinearity detected)"
+            "The design matrix is singular: some columns are perfectly collinear."
         );
         assert_eq!(
             LeastSquaresError::Common(CommonError::MissingClusterColumn {

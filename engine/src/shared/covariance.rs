@@ -24,7 +24,9 @@ use crate::shared::linear_algebra::RankDeficient;
 pub(crate) fn xtx_inverse(x: &Mat<f64>) -> Result<Mat<f64>, RankDeficient> {
     let k = x.ncols();
     let xtx = x.transpose() * x;
-    let llt = xtx.llt(Side::Lower).map_err(|_| RankDeficient)?;
+    let llt = xtx
+        .llt(Side::Lower)
+        .map_err(|_| RankDeficient::GramMatrix)?;
     Ok(llt.solve(Mat::<f64>::identity(k, k)))
 }
 
@@ -356,7 +358,7 @@ mod tests {
     fn xtx_inverse_rejects_a_zero_matrix() {
         assert_eq!(
             xtx_inverse(&Mat::<f64>::zeros(3, 2)).unwrap_err(),
-            RankDeficient
+            RankDeficient::GramMatrix
         );
     }
 

@@ -50,6 +50,38 @@ impl ClusterSetting {
     }
 }
 
+/// 数値的にほぼ特異だった行列。エラーの`matrix`パラメータ（開発者・アプリ向けの識別子）になる。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatrixKind {
+    /// 係数の共分散行列のうち、全体F/Wald検定の対象にする傾き係数の部分行列。
+    CoefficientCovariance,
+    /// 設計行列のGram行列`X'X`（QRのランク判定は通ったが、Cholesky分解が失敗した）。
+    DesignGram,
+    /// 最尤推定の（負の）Hessian。
+    Hessian,
+    /// 外積勾配（OPG）行列。
+    Opg,
+    /// GMMのモーメント条件の重み行列（`S`）。
+    GmmWeight,
+    /// GMMの係数の「パン」`X'ZWZ'X`。
+    GmmBread,
+}
+
+impl MatrixKind {
+    /// `matrix`パラメータの値。
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::CoefficientCovariance => "COEFFICIENT_COVARIANCE",
+            Self::DesignGram => "DESIGN_GRAM",
+            Self::Hessian => "HESSIAN",
+            Self::Opg => "OPG",
+            Self::GmmWeight => "GMM_WEIGHT",
+            Self::GmmBread => "GMM_BREAD",
+        }
+    }
+}
+
 /// 系統をまたいで共通のバリデーション・計算エラー。
 ///
 /// `engine`はPyO3を知らないため、Python例外への変換は`engine_pybind`側で行う
@@ -120,7 +152,16 @@ pub enum CommonError {
     #[error("{}", self.catalog_message())]
     InvalidHacLags { hac_lags: i64, n: usize },
 
-    /// 上記以外の計算過程での失敗（分布のCDF計算等）。
+    /// `matrix`が数値的にほぼ特異で、推定量や共分散の計算を続けられない（条件数が倍精度の限界を
+    /// 超える。列のスケール差が極端な場合や、残差が0の完全な当てはまり等）。
+    #[error("{}", self.catalog_message())]
+    NearSingularMatrix { matrix: MatrixKind },
+
+    /// 実装の誤りでだけ起きるはずの状態（不変条件の破れ）。`detail`は開発者向けの英語。
+    #[error("{}", self.catalog_message())]
+    Internal { detail: String },
+
+    /// 診断検定の補助回帰の失敗等、まだカタログに移していない計算過程の失敗。
     #[error("computation failed: {0}")]
     ComputationFailed(String),
 }
@@ -201,7 +242,19 @@ impl CommonError {
             Self::ClusterDimensionMismatch { groups_rows, n } => Some(internal(format!(
                 "cluster identifiers have {groups_rows} rows but the data has {n} rows"
             ))),
+            Self::NearSingularMatrix { matrix } => Some(
+                ErrorReport::new(ErrorCode::MatrixNearSingular).param("matrix", matrix.as_str()),
+            ),
+            Self::Internal { detail } => Some(internal(detail.clone())),
             Self::ComputationFailed(_) => None,
+        }
+    }
+
+    /// 実装の誤りでだけ起きる状態を表すエラー。
+    #[must_use]
+    pub fn internal(detail: impl Into<String>) -> Self {
+        Self::Internal {
+            detail: detail.into().trim_end_matches('.').to_string(),
         }
     }
 
@@ -460,5 +513,42 @@ mod tests {
         )
         .expect("some");
         assert!(report.stage().is_none());
+    }
+
+    #[test]
+    fn near_singular_matrix_reports_every_matrix_kind() {
+        let kinds = [
+            MatrixKind::CoefficientCovariance,
+            MatrixKind::DesignGram,
+            MatrixKind::Hessian,
+            MatrixKind::Opg,
+            MatrixKind::GmmWeight,
+            MatrixKind::GmmBread,
+        ];
+        let mut names = std::collections::HashSet::new();
+        for matrix in kinds {
+            assert!(
+                names.insert(matrix.as_str()),
+                "duplicate {}",
+                matrix.as_str()
+            );
+            let err = CommonError::NearSingularMatrix { matrix };
+            let report = err.try_report().expect("cataloged");
+            assert_eq!(report.code(), ErrorCode::MatrixNearSingular);
+            assert!(report.validate().is_ok());
+            assert_eq!(err.to_string(), report.message());
+        }
+    }
+
+    #[test]
+    fn internal_error_drops_the_trailing_period_of_its_detail() {
+        let err = CommonError::internal("something broke.");
+        let report = err.try_report().expect("cataloged");
+        assert!(report.validate().is_ok());
+        assert_eq!(
+            report.message(),
+            "An internal error occurred: something broke. This should not happen."
+        );
+        assert_eq!(err.to_string(), report.message());
     }
 }

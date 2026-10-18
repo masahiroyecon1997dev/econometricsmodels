@@ -404,10 +404,10 @@ def test_quasi_demeaned_regression_fails_when_sigma2_eps_is_zero():
     """ノイズ無しの線形DGP（`y = 2*x1 + entity固有の切片`、entity間の切片が
     異なるためσ_u²>0）はσ_ε²=0に収束し、θ_i=1（全エンティティ）で切片復元用
     の定数列が恒等的に全ゼロ列になるため`OlsEstimator::fit`が特異行列として
-    失敗する（`PanelError::QuasiDemeanedRegressionFailed`、
+    失敗する（`DESIGN_MATRIX_SINGULAR`、`stage="QUASI_DEMEANED_REGRESSION"`、
     `engine/src/panel/re.rs`の
     `re_estimator_fit_returns_quasi_demeaned_regression_failed_when_sigma2_eps_is_zero`
-    と同じデータ）。RE自身の最終回帰（`QuasiDemeanedRegressionFailed`）に
+    と同じデータ）。RE自身の最終回帰（準偏差変換後の回帰）に
     実際に到達する唯一の現実的な経路——通常の多重共線性・スケール差は
     σ_ε²用の内部1-way FE呼び出しが先に失敗する
     （`test_perfect_multicollinearity_raises_computation_error`と対照）。
@@ -419,7 +419,9 @@ def test_quasi_demeaned_regression_fails_when_sigma2_eps_is_zero():
             "entity": ["a", "a", "a", "b", "b", "c", "c"],
         }
     )
-    with pytest.raises(ComputationError):
+    with raises_error(
+        ErrorCode.DESIGN_MATRIX_SINGULAR, stage="QUASI_DEMEANED_REGRESSION"
+    ):
         RE(df, y="y", x=["x1"], entity="entity").fit()
 
 
@@ -659,14 +661,16 @@ def test_dk_bandwidth_used_by_dk_is_accepted(fe_dataset, cov_type):
 def test_perfect_multicollinearity_raises_computation_error(fe_dataset):
     """`x3 = 2*x1 + 3*x2`は、σ_ε²推定が委譲する内部1-way FE推定
     （`OlsEstimator`への委譲）が特異行列を検出し失敗する
-    （`PanelError::WithinRegressionFailed`、`RE.fit()`自体が失敗する。
+    （`DESIGN_MATRIX_SINGULAR`、`stage="WITHIN_REGRESSION"`、`RE.fit()`自体が失敗する。
     完全な多重共線性は数値比較の対象外（`testing-policy.md`「テストの3系統」）
     で、想定エラーの送出のみ確認する。
     """
     df = fe_dataset.with_columns(
         (2 * pl.col("x1") + 3 * pl.col("x2")).alias("x3")
     )
-    with pytest.raises(ComputationError):
+    with raises_error(
+        ErrorCode.DESIGN_MATRIX_SINGULAR, stage="WITHIN_REGRESSION"
+    ):
         RE(df, y="y", x=["x1", "x2", "x3"], entity="entity").fit()
 
 
@@ -677,14 +681,18 @@ def test_scale_variance_raises_computation_error(fe_dataset, cov_type):
     """変数間のスケールが極端に異なる設計行列（x1を`*1e6`、x2を`*1e-3`）は、
     σ_ε²推定が委譲する内部1-way FE推定自身のF検定
     （`OlsEstimator::fit`が常に計算する）が数値的に特異になり
-    `ComputationError`（`PanelError::WithinRegressionFailed`、FEの同名
-    テストと同じ原理でσ_ε²側が先に失敗する）。
+    `ComputationError`（`MATRIX_NEAR_SINGULAR`、`matrix="COEFFICIENT_COVARIANCE"`、
+    `stage="OVERALL_F_TEST"`、FEの同名テストと同じ原理でσ_ε²側が先に失敗する）。
     """
     df = fe_dataset.with_columns(
         (pl.col("x1") * 1e6).alias("x1"), (pl.col("x2") * 1e-3).alias("x2")
     )
     options = REOptions(cov_type=cov_type)
-    with pytest.raises(ComputationError):
+    with raises_error(
+        ErrorCode.MATRIX_NEAR_SINGULAR,
+        matrix="COEFFICIENT_COVARIANCE",
+        stage="OVERALL_F_TEST",
+    ):
         RE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 
 

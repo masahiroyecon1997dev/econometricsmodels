@@ -12,7 +12,8 @@ from __future__ import annotations
 import numpy as np
 import polars as pl
 import pytest
-from econometricsmodels import RE, ComputationError, REOptions
+from _errors import raises_error
+from econometricsmodels import RE, ErrorCode, REOptions
 
 
 def _panel(
@@ -235,13 +236,18 @@ def test_two_way_without_regressors_that_vary_in_both_dimensions():
 
 def test_tiny_error_variance_gives_theta_close_to_one_or_a_computation_error():
     """誤差分散が極小でも、`θ ≈ 1`で成功する。完全に当てはまる極限
-    （`σ_ε² ≈ 1e-18`）では、変換後の定数列が消えて`ComputationError`になる。"""
+    （`σ_ε² ≈ 1e-18`）では、準偏差変換後の回帰の傾きの共分散が数値的に特異になり
+    `ComputationError`（`MATRIX_NEAR_SINGULAR`）になる。"""
     ok = _fit(
         _panel(1, entity_sd=1.0, time_sd=0.0, noise_sd=1e-6),
         cov_type="classical",
     )
     assert 0.9999 < min(ok.theta.values()) < 1.0
-    with pytest.raises(ComputationError):
+    with raises_error(
+        ErrorCode.MATRIX_NEAR_SINGULAR,
+        matrix="COEFFICIENT_COVARIANCE",
+        stage="QUASI_DEMEANED_REGRESSION",
+    ):
         _fit(
             _panel(1, entity_sd=1.0, time_sd=0.0, noise_sd=1e-9),
             cov_type="classical",

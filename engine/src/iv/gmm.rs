@@ -212,7 +212,7 @@ use crate::linear::ols::CovType;
 use crate::shared::covariance::{
     cluster_correction, cluster_meat, resolve_hac_lags, time_ordering,
 };
-use crate::shared::error::{ClusterSetting, CommonError};
+use crate::shared::error::{ClusterSetting, CommonError, MatrixKind};
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference;
 use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
@@ -345,7 +345,7 @@ impl GmmEstimator {
     ///   特異。`validate_weight_type`で検証する）
     /// - `Z'Z`または`X'WX`型のブレッド行列が（数値的に）特異（上記の`g`と`l`の関係で
     ///   事前に弾けない悪条件のbackstop）:
-    ///   `IvError::Common(CommonError::ComputationFailed)`
+    ///   `IvError::Common(CommonError::NearSingularMatrix)`
     /// - `cov_type=Cluster`でグループキー未指定・クラスター数不足:
     ///   `IvError::Common(CommonError::MissingClusterColumn` /
     ///   `CommonError::InsufficientClusters)`
@@ -559,19 +559,17 @@ impl GmmEstimator {
         } else {
             let df = q - k_endog;
             let zte = z.transpose() * &residuals;
-            let llt_s = s_used.llt(Side::Lower).map_err(|_| {
-                CommonError::ComputationFailed(
-                    "failed to invert GMM weight matrix S for the Hansen J overidentification \
-                     test"
-                        .to_string(),
-                )
-            })?;
+            let llt_s = s_used
+                .llt(Side::Lower)
+                .map_err(|_| CommonError::NearSingularMatrix {
+                    matrix: MatrixKind::GmmWeight,
+                })?;
             let s_inv_zte = llt_s.solve(&zte);
             let stat: f64 = (0..l)
                 .map(|i| (*zte.get(i, 0)) * (*s_inv_zte.get(i, 0)))
                 .sum();
-            let chi2 = ChiSquared::new(df as f64)
-                .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+            let chi2 =
+                ChiSquared::new(df as f64).map_err(|e| CommonError::internal(e.to_string()))?;
             let p_value = chi2.sf(stat);
             (Some(stat), Some(p_value), Some(df))
         };
@@ -589,11 +587,19 @@ impl GmmEstimator {
         let s_inv = invert_spd(
             &s_used,
             l,
-            "GMM weight matrix S for the sandwich covariance",
+            CommonError::NearSingularMatrix {
+                matrix: MatrixKind::GmmWeight,
+            },
         )?;
         let zx = z.transpose() * &x; // (l, k)
         let bread = zx.transpose() * &s_inv * &zx; // (k, k) = X'ZWZ'X
-        let bread_inv = invert_spd(&bread, k, "X'ZWZ'X (GMM sandwich bread matrix)")?;
+        let bread_inv = invert_spd(
+            &bread,
+            k,
+            CommonError::NearSingularMatrix {
+                matrix: MatrixKind::GmmBread,
+            },
+        )?;
 
         let omega_hat = match &cov_type {
             CovType::Classical => {
@@ -642,7 +648,7 @@ impl GmmEstimator {
         }
 
         let normal_dist =
-            Normal::new(0.0, 1.0).map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+            Normal::new(0.0, 1.0).map_err(|e| CommonError::internal(e.to_string()))?;
         let z_crit = inference::critical_value(&normal_dist, confidence_level);
 
         let mut test_stats = Mat::<f64>::zeros(k, 1);
@@ -932,20 +938,22 @@ fn gmm_point_estimate(
     let zx = z.transpose() * x; // (l, k)
     let zy = z.transpose() * y; // (l, 1)
 
-    let llt_s = s.llt(Side::Lower).map_err(|_| {
-        CommonError::ComputationFailed(
-            "failed to invert GMM weight matrix S (Z'Z or moment covariance)".to_string(),
-        )
-    })?;
+    let llt_s = s
+        .llt(Side::Lower)
+        .map_err(|_| CommonError::NearSingularMatrix {
+            matrix: MatrixKind::GmmWeight,
+        })?;
     let s_inv_zx = llt_s.solve(&zx); // (l, k) = S⁻¹Z'X
     let s_inv_zy = llt_s.solve(&zy); // (l, 1) = S⁻¹Z'y
 
     let bread = zx.transpose() * &s_inv_zx; // (k, k) = X'ZS⁻¹Z'X
     let meat = zx.transpose() * &s_inv_zy; // (k, 1) = X'ZS⁻¹Z'y
 
-    let llt_bread = bread.llt(Side::Lower).map_err(|_| {
-        CommonError::ComputationFailed("failed to invert X'ZWZ'X (GMM bread matrix)".to_string())
-    })?;
+    let llt_bread = bread
+        .llt(Side::Lower)
+        .map_err(|_| CommonError::NearSingularMatrix {
+            matrix: MatrixKind::GmmBread,
+        })?;
     Ok(llt_bread.solve(&meat))
 }
 
@@ -1026,10 +1034,8 @@ fn hac_moment_covariance(
 /// 対称正定値行列`mat`（`dim`×`dim`）の逆行列を明示的に構築する。モジュール冒頭の
 /// docコメント「標準誤差・検定統計量（cov_type対応）」参照（`two_sls.rs`の`xtx_inverse`と
 /// 同じ考え方だが、`s_used`・`bread`の2箇所で使い回すため独立したヘルパーにした）。
-fn invert_spd(mat: &Mat<f64>, dim: usize, context: &str) -> Result<Mat<f64>, IvError> {
-    let llt = mat
-        .llt(Side::Lower)
-        .map_err(|_| CommonError::ComputationFailed(format!("failed to invert {context}")))?;
+fn invert_spd(mat: &Mat<f64>, dim: usize, failure: CommonError) -> Result<Mat<f64>, IvError> {
+    let llt = mat.llt(Side::Lower).map_err(|_| failure)?;
     Ok(llt.solve(Mat::<f64>::identity(dim, dim)))
 }
 
@@ -1065,7 +1071,11 @@ fn gmm_hc_omega(
             // 境界的な失敗に備えて`Result`のまま扱う（`two_sls.rs`の`xtx_inverse`と同じ
             // 防御的な扱い、`.claude/rules/rust-style.md`「unwrap/expectはプロトタイプ
             // 段階を除き避ける」）。
-            let ztz_inv = invert_spd(ztz, l, "Z'Z for GMM HC2/HC3 leverage")?;
+            let ztz_inv = invert_spd(
+                ztz,
+                l,
+                CommonError::internal("Z'Z could not be factorized for the HC2/HC3 leverage"),
+            )?;
             let zh = z * &ztz_inv; // (n, l)
             Some(
                 (0..n)
@@ -1084,11 +1094,11 @@ fn gmm_hc_omega(
             HcVariant::Hc0 => resid,
             HcVariant::Hc1 => resid * hc1_correction,
             HcVariant::Hc2 => {
-                let h = leverage.as_ref().expect("Hc2はleverage計算済み")[i];
+                let h = leverage.as_ref().expect("leverage is computed for HC2")[i];
                 resid / (1.0 - h).sqrt()
             }
             HcVariant::Hc3 => {
-                let h = leverage.as_ref().expect("Hc3はleverage計算済み")[i];
+                let h = leverage.as_ref().expect("leverage is computed for HC3")[i];
                 resid / (1.0 - h)
             }
         };
@@ -1149,22 +1159,22 @@ fn gmm_wald_chi2_test(
     ensure_well_conditioned_symmetric_matrix(
         &v_slopes,
         df_model,
-        "coefficient covariance submatrix for the GMM Wald test",
+        MatrixKind::CoefficientCovariance,
     )?;
 
-    let llt = v_slopes.llt(Side::Lower).map_err(|_| {
-        CommonError::ComputationFailed(
-            "failed to invert coefficient covariance submatrix for the GMM Wald test".to_string(),
-        )
-    })?;
+    let llt = v_slopes
+        .llt(Side::Lower)
+        .map_err(|_| CommonError::NearSingularMatrix {
+            matrix: MatrixKind::CoefficientCovariance,
+        })?;
     let v_slopes_inv_beta = llt.solve(&beta_slopes);
 
     let wald: f64 = (0..df_model)
         .map(|i| (*beta_slopes.get(i, 0)) * (*v_slopes_inv_beta.get(i, 0)))
         .sum();
 
-    let chi2 = ChiSquared::new(df_model as f64)
-        .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+    let chi2 =
+        ChiSquared::new(df_model as f64).map_err(|e| CommonError::internal(e.to_string()))?;
     let p_value = chi2.sf(wald);
 
     Ok((wald, p_value))
@@ -1618,9 +1628,9 @@ mod tests {
         );
         assert_eq!(
             result.unwrap_err(),
-            IvError::Common(CommonError::ComputationFailed(
-                "failed to invert GMM weight matrix S (Z'Z or moment covariance)".to_string()
-            ))
+            IvError::Common(CommonError::NearSingularMatrix {
+                matrix: MatrixKind::GmmWeight
+            })
         );
     }
 

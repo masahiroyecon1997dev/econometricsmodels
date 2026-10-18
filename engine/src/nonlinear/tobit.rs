@@ -113,7 +113,7 @@ use crate::nonlinear::common::{
     predict_new_data, run_solver, sandwich_cov_params, validate_cluster_cov_type,
     validate_confidence_level, validate_mle_options, validate_sufficient_observations,
 };
-use crate::shared::error::CommonError;
+use crate::shared::error::{CommonError, MatrixKind};
 use crate::shared::inference;
 use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
@@ -685,7 +685,11 @@ impl TobitScaling {
     /// 掛ける順序によらずビット単位で同じ値になる（構造体docコメント参照）。
     fn destandardize_params(&self, params_std: &[f64]) -> Vec<f64> {
         let k = self.x.stds().len();
-        debug_assert_eq!(params_std.len(), k + 1, "(β̃, s̃)は列数+1個");
+        debug_assert_eq!(
+            params_std.len(),
+            k + 1,
+            "params_std holds the k coefficients and log sigma"
+        );
         let c = self.y_scale;
         let mut out = Vec::with_capacity(k + 1);
         out.extend(
@@ -814,7 +818,7 @@ fn log_likelihood(
 /// Tobitのみ）。
 ///
 /// # Errors
-/// `Σ_slopes`が悪条件・特異な場合は`CommonError::ComputationFailed`
+/// `Σ_slopes`が悪条件・特異な場合は`CommonError::NearSingularMatrix`
 /// （OLSの`wald_f_test`と同じ理由、理論上は正定値のはずだが浮動小数点演算の丸めによる
 /// 境界的な失敗に備えた防御的な扱い）。`ChiSquared::new`の失敗（`df_model<=0`）は
 /// 呼び出し元が`df_model>0`を事前に保証するため理論上到達不能。
@@ -832,22 +836,22 @@ fn wald_chi2_test(
     ensure_well_conditioned_symmetric_matrix(
         &v_slopes,
         df_model,
-        "coefficient covariance submatrix for the Wald test",
+        MatrixKind::CoefficientCovariance,
     )?;
 
-    let llt = v_slopes.llt(Side::Lower).map_err(|_| {
-        CommonError::ComputationFailed(
-            "failed to invert coefficient covariance submatrix for the Wald test".to_string(),
-        )
-    })?;
+    let llt = v_slopes
+        .llt(Side::Lower)
+        .map_err(|_| CommonError::NearSingularMatrix {
+            matrix: MatrixKind::CoefficientCovariance,
+        })?;
     let v_slopes_inv_beta = llt.solve(&beta_slopes);
 
     let wald_statistic: f64 = (0..df_model)
         .map(|i| (*beta_slopes.get(i, 0)) * (*v_slopes_inv_beta.get(i, 0)))
         .sum();
 
-    let chi2 = ChiSquared::new(df_model as f64)
-        .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+    let chi2 =
+        ChiSquared::new(df_model as f64).map_err(|e| CommonError::internal(e.to_string()))?;
     let wald_p_value = chi2.sf(wald_statistic);
 
     Ok((wald_statistic, wald_p_value))
@@ -1364,8 +1368,7 @@ fn marginal_effects_from_tobit_w_s(
     // statrsの検証を常に満たすため、この`map_err`分岐は理論上到達不能
     // （`.claude/rules/rust-style.md`「テスト」のカバレッジ方針参照、`marginal_effects_from_w_s`
     // と同じ扱い）。
-    let normal =
-        Normal::new(0.0, 1.0).map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+    let normal = Normal::new(0.0, 1.0).map_err(|e| CommonError::internal(e.to_string()))?;
     let z_crit = inference::critical_value(&normal, confidence_level);
 
     let k_constant = usize::from(has_intercept);
@@ -1642,7 +1645,7 @@ impl TobitEstimator {
     ///   `MleError::SingularHessian`
     /// - `cov_type=Opg`でOPG行列（`Σᵢ sᵢsᵢ'`）が特異: `MleError::SingularOpgMatrix`
     /// - 傾き係数間の悪条件（極端なスケール差等）でWald検定用の係数分散共分散部分行列が
-    ///   数値的にほぼ特異: `CommonError::ComputationFailed`（`wald_chi2_test`参照。`g > q`
+    ///   数値的にほぼ特異: `CommonError::NearSingularMatrix`（`wald_chi2_test`参照。`g > q`
     ///   でも起こりうるbackstop。`df_model==0`（切片以外の`β`が無い）のときはこの検定自体を
     ///   スキップし`wald_statistic`/`wald_p_value`はNaNになる）
     pub fn fit(input: TobitInput, options: MleFitOptions) -> Result<Self, MleError> {

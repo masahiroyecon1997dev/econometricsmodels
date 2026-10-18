@@ -594,6 +594,14 @@ fn aux_fit_error(test: &str, err: LeastSquaresError) -> LeastSquaresError {
             ))
             .into()
         }
+        // 診断検定の失敗の型付けは診断検定の移行でまとめて行う。それまでは、補助回帰の
+        // 数値的な特異性も従来どおり検定の文脈つきの失敗として返す。
+        LeastSquaresError::Common(err @ CommonError::NearSingularMatrix { .. }) => {
+            CommonError::ComputationFailed(format!(
+                "{test}: the auxiliary regression failed: {err}"
+            ))
+            .into()
+        }
         other => other,
     }
 }
@@ -1495,6 +1503,22 @@ mod tests {
         assert_eq!(
             aux_fit_error("White test", LeastSquaresError::InvalidNlags { nlags: 0 }),
             LeastSquaresError::InvalidNlags { nlags: 0 }
+        );
+
+        // 補助回帰の数値的な特異性も、検定の文脈つきの失敗にする。
+        let near_singular = aux_fit_error(
+            "White test",
+            LeastSquaresError::Common(CommonError::NearSingularMatrix {
+                matrix: crate::shared::error::MatrixKind::CoefficientCovariance,
+            }),
+        );
+        assert!(
+            matches!(
+                &near_singular,
+                LeastSquaresError::Common(CommonError::ComputationFailed(m))
+                    if m.starts_with("White test: the auxiliary regression failed:")
+            ),
+            "{near_singular:?}"
         );
     }
 

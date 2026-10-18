@@ -21,7 +21,7 @@ import pandas as pd
 import polars as pl
 import pytest
 from _constants import DATA_DIR
-from _error_messages import escaped, rust_f64
+from _error_messages import escaped
 from _errors import raises_error
 from _helpers import name_collision_frame, with_cluster_groups
 from _nonlinear_helpers import (
@@ -29,7 +29,6 @@ from _nonlinear_helpers import (
     heavily_censored_tobit_dataset,
 )
 from econometricsmodels import (
-    ComputationError,
     ErrorCode,
     Tobit,
     TobitOptions,
@@ -695,7 +694,8 @@ def _narrow_interval_dataset(n_interior: int) -> pl.DataFrame:
 def test_expected_uncensored_raises_computation_error_for_narrow_interval():
     """非打ち切り区間が`sigma`の1%未満（`sigma`が区間幅の100倍超）だと
     `expected_uncensored`は数値的に信頼できない（`W`で割る量が桁落ち）ため、
-    `predict`・`augment`・`marginal_effects`が`ComputationError`になる。他の
+    `predict`・`augment`・`marginal_effects`が`ComputationError`
+    （`UNCENSORED_INTERVAL_TOO_NARROW`）になる。他の
     3つのtargetは同じ当てはめで通常どおり計算できる（エラーは固有）。
     `new_data`付きの`predict`も同様。"""
     data = _narrow_interval_dataset(n_interior=5)
@@ -703,21 +703,20 @@ def test_expected_uncensored_raises_computation_error_for_narrow_interval():
         data, y="y", x=["x1"], options=TobitOptions(lower=0.0, upper=1.0)
     ).fit()
     assert 1.0 / res.sigma < 0.01
-    message = escaped(
-        nonlinear_msgs.UNCENSORED_INTERVAL_TOO_NARROW,
-        lower=rust_f64(0.0),
-        upper=rust_f64(1.0),
-        sigma=rust_f64(res.sigma),
-    )
+    expected = {
+        "lower": 0.0,
+        "upper": 1.0,
+        "sigma": pytest.approx(res.sigma, rel=1e-12),
+    }
     new_data = pl.DataFrame({"x1": [0.2, 0.8]})
 
-    with pytest.raises(ComputationError, match=message):
+    with raises_error(ErrorCode.UNCENSORED_INTERVAL_TOO_NARROW, **expected):
         res.predict(target="expected_uncensored")
-    with pytest.raises(ComputationError, match=message):
+    with raises_error(ErrorCode.UNCENSORED_INTERVAL_TOO_NARROW, **expected):
         res.predict(target="expected_uncensored", new_data=new_data)
-    with pytest.raises(ComputationError, match=message):
+    with raises_error(ErrorCode.UNCENSORED_INTERVAL_TOO_NARROW, **expected):
         res.augment(target="expected_uncensored")
-    with pytest.raises(ComputationError, match=message):
+    with raises_error(ErrorCode.UNCENSORED_INTERVAL_TOO_NARROW, **expected):
         res.marginal_effects(target="expected_uncensored")
 
     for target in ["expected_latent", "expected_observed", "prob_uncensored"]:
@@ -742,7 +741,7 @@ def test_expected_uncensored_is_computed_when_the_interval_is_wide_enough():
 
 def test_perfect_multicollinearity_raises_computation_error():
     """完全な多重共線性は数値比較の対象外（`testing-policy.md`「テストの3系統」）。
-    想定エラー（`ComputationError`、engine 側の `SingularDesignMatrix`）が発生する
+    想定エラー（`ComputationError`の`DESIGN_MATRIX_SINGULAR`）が発生する
     ことのみを確認する。OLS/WLS/Logit と同じく凍結 CSV
     （`tobit_perfect_multicollinearity.csv`、`x3 = 2·x1 + 3·x2`）を使う。
 
@@ -752,7 +751,7 @@ def test_perfect_multicollinearity_raises_computation_error():
     """
     df = pl.read_csv(DATA_DIR / "tobit_perfect_multicollinearity.csv")
     lower, upper = _TOBIT_CENSORING_BOUNDS["perfect_multicollinearity"]
-    with pytest.raises(ComputationError):
+    with raises_error(ErrorCode.DESIGN_MATRIX_SINGULAR):
         Tobit(
             df,
             y="y",
@@ -769,7 +768,9 @@ def test_scale_variance_raises_computation_error(cov_type):
     凍結 CSV パターン、`test_ols_validation.py` 参照）。
 
     Tobit の全体 Wald 検定が OLS の F 検定と同型でこの部分行列の反転を要求するため、
-    classical を含む全 cov_type で `ComputationError` になる。`scale_variance_mild`
+    classical を含む全 cov_type で `ComputationError`
+    （`MATRIX_NEAR_SINGULAR`、`matrix="COEFFICIENT_COVARIANCE"`）になる。
+    `scale_variance_mild`
     （スケール比 1e3）が数値リグレッション検知用の成功パス
     （`test_tobit_reference.py`）。数値比較はせずエラーパスのみ確認する
     （`TOBIT_ERROR_PATH_SCENARIOS`）。
@@ -777,14 +778,18 @@ def test_scale_variance_raises_computation_error(cov_type):
     df = pl.read_csv(DATA_DIR / "tobit_scale_variance.csv")
     lower, upper = _TOBIT_CENSORING_BOUNDS["scale_variance"]
     options = TobitOptions(cov_type=cov_type, lower=lower, upper=upper)
-    with pytest.raises(ComputationError):
+    with raises_error(
+        ErrorCode.MATRIX_NEAR_SINGULAR, matrix="COEFFICIENT_COVARIANCE"
+    ):
         Tobit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
 
 def test_non_convergence_raises_computation_error_with_tiny_max_iter(
     censored_dataset,
 ):
-    with pytest.raises(ComputationError):
+    with raises_error(
+        ErrorCode.NOT_CONVERGED, n_iter=1, iter_option="max_iter"
+    ):
         Tobit(
             censored_dataset,
             y="y",
@@ -825,24 +830,24 @@ def test_large_true_coefficient_dgp_converges_and_recovers_truth(solver):
 
 @pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
 def test_true_separation_noise_free_dgp_raises_computation_error(solver):
-    """ノイズを除いた完全分離DGP（`y* = 100·x1 + 0.5·x2`）は`ComputationError`。
+    """ノイズを除いた完全分離DGP（`y* = 100·x1 + 0.5·x2`）は`NOT_CONVERGED`。
 
     Tobitの「真の」分離は、Logit/Probitのように係数が±∞へ発散するのではなく
-    `σ→0`退化として現れる。実測ではNewtonは`NonConvergence`（`max_iter`到達）、
-    BFGS/L-BFGSも`ComputationError`になる（変種は問わない）。`max_iter`を
-    35→2000に増やしてもNewton/BFGSは`NonConvergence`のまま。Logit/Probitの分離検出
-    （`SeparationDetected`）はTobitでは呼ばない。
+    `σ→0`退化として現れる。実測では全solver（Newton/BFGS/L-BFGS）が
+    `NOT_CONVERGED`（`max_iter`到達）になる。`max_iter`を
+    35→2000に増やしてもNewton/BFGSは`NOT_CONVERGED`のまま。Logit/Probitの分離検出
+    （`SEPARATION_DETECTED`）はTobitでは呼ばない。
 
     **全件打ち切りとの棲み分け**: 非打ち切り観測が1件も無い（全観測が境界値
     ちょうど）ケースは`fit()`冒頭の`validate_has_uncensored_observations`が
     `ValidationError`（`NoUncensoredObservations`）で先に弾く
     （`test_no_uncensored_observations_raises`）。本ケースは
     非打ち切り観測が存在するため、そのバリデーションは通過し、最適化の
-    非収束＝`ComputationError`（`ValueError`系ではない）として現れる。
+    非収束＝`NOT_CONVERGED`（`ComputationError`、`ValueError`系ではない）として現れる。
     """
     df = censored_separation_dataset(noise_sd=0.0)
 
-    with pytest.raises(ComputationError):
+    with raises_error(ErrorCode.NOT_CONVERGED, iter_option="max_iter"):
         Tobit(
             df, y="y", x=["x1", "x2"], options=TobitOptions(solver=solver)
         ).fit()

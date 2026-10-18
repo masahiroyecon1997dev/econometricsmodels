@@ -298,7 +298,9 @@ pub(crate) fn common_error_to_pyerr(err: CommonError) -> PyErr {
         | CommonError::InsufficientClusters { .. }
         | CommonError::InsufficientClustersForInference { .. }
         | CommonError::InvalidHacLags { .. } => legacy_validation_error(err.to_string()),
-        CommonError::ComputationFailed(_) => legacy_computation_error(err.to_string()),
+        CommonError::NearSingularMatrix { .. }
+        | CommonError::Internal { .. }
+        | CommonError::ComputationFailed(_) => legacy_computation_error(err.to_string()),
     }
 }
 

@@ -120,7 +120,7 @@ impl GroupCodes {
     ///
     /// # Errors
     /// `codes`に`labels.len()`以上の値がある、または使われていない仮コードがある場合
-    /// （呼び出し側の実装誤り。`CommonError::ComputationFailed`）。
+    /// （呼び出し側の実装誤り。`CommonError::Internal`）。
     pub fn from_factorized_without_keys(
         codes: Vec<usize>,
         labels: &[&str],
@@ -164,7 +164,7 @@ impl GroupCodes {
             match used.get_mut(c) {
                 Some(slot) => *slot = true,
                 None => {
-                    return Err(CommonError::ComputationFailed(format!(
+                    return Err(CommonError::internal(format!(
                         "group code {c} is out of range for {} labels",
                         labels.len()
                     )));
@@ -172,7 +172,7 @@ impl GroupCodes {
             }
         }
         if let Some(unused) = used.iter().position(|&u| !u) {
-            return Err(CommonError::ComputationFailed(format!(
+            return Err(CommonError::internal(format!(
                 "group code {unused} is never used by any row"
             )));
         }
@@ -184,7 +184,7 @@ impl GroupCodes {
             let mut seen: std::collections::HashSet<&str> =
                 std::collections::HashSet::with_capacity(keys.len());
             if let Some(duplicate) = keys.iter().find(|k| !seen.insert(k.as_str())) {
-                return Err(CommonError::ComputationFailed(format!(
+                return Err(CommonError::internal(format!(
                     "group label '{duplicate}' appears in more than one group; provisional \
                      groups with the same label must compare as equal"
                 )));
@@ -532,11 +532,11 @@ mod tests {
     fn from_factorized_rejects_out_of_range_and_unused_codes() {
         assert!(matches!(
             GroupCodes::from_factorized_without_keys(vec![0, 2], &["a", "b"]),
-            Err(CommonError::ComputationFailed(_))
+            Err(CommonError::Internal { .. })
         ));
         assert!(matches!(
             GroupCodes::from_factorized_without_keys(vec![0, 0], &["a", "b"]),
-            Err(CommonError::ComputationFailed(_))
+            Err(CommonError::Internal { .. })
         ));
         let empty = GroupCodes::from_factorized_without_keys(vec![], &[]).unwrap();
         assert_eq!(empty.nobs(), 0);

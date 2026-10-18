@@ -370,7 +370,7 @@ impl ReInput {
     ///
     /// # Errors
     /// `from_columns`と同じ。加えて、`entity`がキー無しのコードの場合は`PanelError::Common`
-    /// （`CommonError::ComputationFailed`、呼び出し側の実装誤り）。
+    /// （`CommonError::Internal`、呼び出し側の実装誤り）。
     ///
     /// # パニックについて
     /// `from_columns`と同じ。
@@ -789,12 +789,11 @@ fn between_ssr_and_df(
         if j == 0 { 1.0 } else { means.x[kept[j - 1]][i] }
     });
     let y = Mat::from_fn(n_units, 1, |i, _| means.y[i]);
-    // `least_squares`が返しうるエラーは`RankDeficient`（特異な設計行列）だけのため、
-    // `SingularMatrix`への対応づけは損失が無い。別名の列は上で落としてあり、残りは前の列に対する
+    // 別名の列は上で落としてあり、残りは前の列に対する
     // 相対残差が`1e-7`より大きいので、ここで特異と判定される入力は通常無い（防御的なエラー）。
-    let fit = least_squares(&design, &y).map_err(|_| PanelError::BetweenRegressionFailed {
+    let fit = least_squares(&design, &y).map_err(|err| PanelError::BetweenRegressionFailed {
         means: kind,
-        source: LeastSquaresError::SingularMatrix,
+        source: err.into(),
     })?;
     Ok((residual_sum_of_squares(&fit.residuals), n_units - n_params))
 }
@@ -1213,12 +1212,12 @@ fn re_hausman_test(
     // `wald_f_test`が成功した時点でF統計量は有限（`ensure_well_conditioned_symmetric_matrix`
     // 通過後の二次形式）、`k >= 1`で`ChiSquared::new`も失敗しないため、以下は防御的。
     if !stat.is_finite() {
-        return Err(to_err(LeastSquaresError::Common(
-            CommonError::ComputationFailed("Hausman Wald statistic is not finite".to_string()),
-        )));
+        return Err(to_err(LeastSquaresError::Common(CommonError::internal(
+            "the Hausman Wald statistic is not finite",
+        ))));
     }
     let chi2 = ChiSquared::new(k as f64).map_err(|e| {
-        to_err(LeastSquaresError::Common(CommonError::ComputationFailed(
+        to_err(LeastSquaresError::Common(CommonError::internal(
             e.to_string(),
         )))
     })?;
@@ -1652,7 +1651,7 @@ impl ReEstimator {
         // いずれかであり理論上到達不能（`FeEstimator::fit`と同じ「保証済みの不変
         // 条件に対する防御的`Result`化」、`.claude/rules/rust-style.md`「テスト」参照）。
         let t_dist = StudentsT::new(0.0, 1.0, df_inference as f64)
-            .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+            .map_err(|e| CommonError::internal(e.to_string()))?;
         let t_crit = inference::critical_value(&t_dist, confidence_level);
 
         let mut std_errors = Mat::zeros(df_model, 1);
@@ -2035,7 +2034,7 @@ mod tests {
                 None,
                 "y".to_string()
             ),
-            Err(PanelError::Common(CommonError::ComputationFailed(_)))
+            Err(PanelError::Common(CommonError::Internal { .. }))
         ));
         // 行数の食い違いは従来どおり`IdentifierDimensionMismatch`。
         assert!(matches!(

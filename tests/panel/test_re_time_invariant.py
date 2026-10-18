@@ -48,6 +48,7 @@ import polars as pl
 import pytest
 from _assertions import assert_close
 from _constants import DATA_DIR
+from _errors import raises_error
 from _helpers import load_wooldridge_dataset
 from _re_oracle import (
     CONDITIONING_SENSITIVE_KEYS,
@@ -58,7 +59,7 @@ from _re_oracle import (
     result_stats,
 )
 from _tolerances import TOLERANCES
-from econometricsmodels import RE, ComputationError, REOptions, ValidationError
+from econometricsmodels import RE, ErrorCode, REOptions, ValidationError
 
 from benchmark.panel.fixtures.generate_re_time_invariant_fixtures import (
     COV_TYPES,
@@ -451,13 +452,16 @@ def test_wagepan_hausman_matches_plm(reference, name, x_cols, cov_type):
 )
 def test_collinear_time_invariant_regressor_raises_computation_error(z):
     """定数列（切片と共線）・時間不変変数同士の共線は、準偏差変換した最終回帰の設計行列が
-    特異になるため`ComputationError`（between回帰は後ろの列を落として進み、最終回帰は
+    特異になるため`ComputationError`（`DESIGN_MATRIX_SINGULAR`、
+    `stage="QUASI_DEMEANED_REGRESSION"`。between回帰は後ろの列を落として進み、最終回帰は
     全列を残すため特異性を検出する）。個体平均の列（相関ランダム効果）は別名になるのが
     between回帰・ハウスマン補助回帰だけで、最終回帰は特異にならず推定できる
     （`test_re_variance_method.py`）。
     """
     df = _frame(BALANCED).with_columns(z.alias("z"))
-    with pytest.raises(ComputationError):
+    with raises_error(
+        ErrorCode.DESIGN_MATRIX_SINGULAR, stage="QUASI_DEMEANED_REGRESSION"
+    ):
         _fit(df, ["x1", "x2", "x_invariant", "z"])
 
 

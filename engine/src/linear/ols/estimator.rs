@@ -112,7 +112,7 @@ impl OlsEstimator {
     ///   `CommonError::InsufficientClustersForInference`（`rank(Ŝ) ≤ g - 1`のため
     ///   ロバストWald/F検定の`q×q`部分行列が構造的に特異）
     /// - 傾き係数間の悪条件（極端なスケール差等）でロバストWald/F検定の`q×q`部分行列が
-    ///   数値的にほぼ特異: `CommonError::ComputationFailed`（`g > q`でも起こりうる
+    ///   数値的にほぼ特異: `CommonError::NearSingularMatrix`（`g > q`でも起こりうる
     ///   backstop、`wald_f_test`参照）
     pub fn fit(
         input: OlsInput,
@@ -132,7 +132,7 @@ impl OlsEstimator {
     /// そのまま計算できる。呼び出し元が全体F検定を必須の出力にしない（診断として扱う）場合に
     /// 使う（`engine::iv::common::compute_first_stage`の第一段階回帰）。クラスター数が2未満
     /// （`InsufficientClusters`）・`groups`未指定（`MissingClusterColumn`）は従来どおり失敗し、
-    /// `g > q`でのほぼ特異性（`ComputationFailed`）も`None`へ握りつぶさず失敗のまま伝播する。
+    /// `g > q`でのほぼ特異性（`NearSingularMatrix`）も`None`へ握りつぶさず失敗のまま伝播する。
     ///
     /// # Errors
     /// `g ≤ q`による`InsufficientClustersForInference`を除き[`fit`](Self::fit)と同じ。
@@ -181,7 +181,7 @@ impl OlsEstimator {
             params,
             residuals,
             xtx_inv,
-        } = least_squares(input.x(), input.y()).map_err(|_| LeastSquaresError::SingularMatrix)?;
+        } = least_squares(input.x(), input.y()).map_err(LeastSquaresError::from)?;
 
         let df_resid = n - k;
         let ssr = residual_sum_of_squares(&residuals);
@@ -199,7 +199,7 @@ impl OlsEstimator {
         }
 
         let t_dist = StudentsT::new(0.0, 1.0, df_inference as f64)
-            .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+            .map_err(|e| CommonError::internal(e.to_string()))?;
         let t_crit = inference::critical_value(&t_dist, confidence_level);
 
         let mut test_stats = Mat::zeros(k, 1);
@@ -401,7 +401,7 @@ impl OlsEstimator {
     ///
     /// # Errors
     /// `wald_f_test`と同じ（末尾`q`列に対応する`cov_params`の部分行列が数値的にほぼ特異な
-    /// 場合、`LeastSquaresError::Common(CommonError::ComputationFailed)`）。
+    /// 場合、`LeastSquaresError::Common(CommonError::NearSingularMatrix)`）。
     pub fn wald_test_last_columns(&self, q: usize) -> Result<(f64, f64), LeastSquaresError> {
         let k = self.input.k();
         debug_assert!(
@@ -429,6 +429,7 @@ impl OlsEstimator {
 mod tests {
     use super::*;
     use crate::linear::common::row_time_order;
+    use crate::shared::error::MatrixKind;
 
     #[test]
     fn fit_recovers_known_coefficients_for_exact_fit_data() {
@@ -547,7 +548,9 @@ mod tests {
 
         assert!(matches!(
             result.unwrap_err(),
-            LeastSquaresError::Common(CommonError::ComputationFailed(_))
+            LeastSquaresError::Common(CommonError::NearSingularMatrix {
+                matrix: MatrixKind::CoefficientCovariance
+            })
         ));
     }
 

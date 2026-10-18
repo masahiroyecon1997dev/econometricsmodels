@@ -17,6 +17,16 @@
 //! ここへ集約する設計にはしない）。
 use thiserror::Error;
 
+use crate::shared::error_catalog::ErrorReport;
+
+/// 利用者向けのエラー内容（`code`・`params`・文面）を返せるエラー型。
+///
+/// 文面は[`crate::shared::error_catalog::CATALOG`]のテンプレートから[`ErrorReport`]が描画する。`engine_pybind`は
+/// `report()`の結果から、Pythonの例外（`code`・`message`・`hint`・`params`）を作る。
+pub trait ErrorInfo {
+    fn report(&self) -> ErrorReport;
+}
+
 /// 系統をまたいで共通のバリデーション・計算エラー。
 ///
 /// `engine`はPyO3を知らないため、Python例外への変換は`engine_pybind`側で行う

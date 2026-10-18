@@ -4,10 +4,11 @@
 //! 使うかでは分けない（利用側は手法の追加で変わるため）。各系統の`common.rs`（系統内で共有する
 //! ロジック）とは別。
 //!
-//! `engine_pybind`から使うモジュール（`error`・`group_codes`・`parallelism`）のみ`pub`、engine内部
+//! `engine_pybind`から使うモジュール（`error`・`error_catalog`・`group_codes`・`parallelism`）のみ`pub`、engine内部
 //! だけで使うものは`pub(crate)`。
 
 pub mod error;
+pub mod error_catalog;
 pub mod group_codes;
 pub mod parallelism;
 

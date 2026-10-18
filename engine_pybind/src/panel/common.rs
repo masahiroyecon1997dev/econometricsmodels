@@ -10,7 +10,9 @@ use engine::panel::common::PanelError;
 use pyo3::{PyErr, PyResult};
 
 use crate::linear::common::least_squares_error_is_computation_error;
-use crate::shared::errors::{ComputationError, ValidationError, common_error_to_pyerr};
+use crate::shared::errors::{
+    common_error_to_pyerr, legacy_computation_error, legacy_validation_error,
+};
 use crate::shared::validation::{RoleValue, reject_unused_option, validate_no_duplicate_roles};
 
 /// `cov_type`の検査でFEとREの文言を切り替えるためのモデル種別。
@@ -94,12 +96,12 @@ pub(crate) fn parse_panel_cov_kind(cov_type: &str, model: PanelModel) -> PyResul
         "hc3" => Ok(PanelCovKind::Hc3),
         "cluster" => Ok(PanelCovKind::Cluster),
         "dk" => Ok(PanelCovKind::Dk),
-        "hc0" => Err(ValidationError::new_err(format!(
+        "hc0" => Err(legacy_validation_error(format!(
             "cov_type='hc0' is not supported for {} ({}); use 'hc1', 'hc2', or 'hc3' instead",
             model.name(),
             model.hc0_reason()
         ))),
-        other => Err(ValidationError::new_err(format!(
+        other => Err(legacy_validation_error(format!(
             "unknown cov_type: '{other}'. Expected one of 'classical', 'hc1' through \
              'hc3', 'cluster', or 'dk'"
         ))),
@@ -115,7 +117,7 @@ pub(crate) fn parse_panel_cov_kind(cov_type: &str, model: PanelModel) -> PyResul
 /// `dk_time`が未指定なら`ValidationError`。
 pub(crate) fn require_dk_time(dk_time: Option<&str>, model: PanelModel) -> PyResult<&str> {
     dk_time.ok_or_else(|| {
-        ValidationError::new_err(format!(
+        legacy_validation_error(format!(
             "cov_type='dk' requires the `dk_time` option: the column that defines the time \
              periods of the Driscoll-Kraay estimator (it is not taken from `time`, which \
              only sets the two-way {} effects)",
@@ -232,8 +234,8 @@ pub(crate) fn panel_error_to_pyerr(err: PanelError) -> PyErr {
         | PanelError::InsufficientDkPeriodsForInference { .. }
         | PanelError::DegenerateDkTwoPeriods
         | PanelError::DegenerateClusterTwoGroups
-        | PanelError::AmemiyaRequiresWithinVariation { .. } => ValidationError::new_err(message),
-        PanelError::NonPositiveIdiosyncraticVariance { .. } => ComputationError::new_err(message),
+        | PanelError::AmemiyaRequiresWithinVariation { .. } => legacy_validation_error(message),
+        PanelError::NonPositiveIdiosyncraticVariance { .. } => legacy_computation_error(message),
         PanelError::WithinRegressionFailed { source }
         | PanelError::FTestFailed { source }
         | PanelError::BetweenRegressionFailed { source, .. }
@@ -241,9 +243,9 @@ pub(crate) fn panel_error_to_pyerr(err: PanelError) -> PyErr {
         | PanelError::QuasiDemeanedRegressionFailed { source }
         | PanelError::HausmanTestFailed { source } => {
             if least_squares_error_is_computation_error(&source) {
-                ComputationError::new_err(message)
+                legacy_computation_error(message)
             } else {
-                ValidationError::new_err(message)
+                legacy_validation_error(message)
             }
         }
     }

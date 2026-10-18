@@ -25,7 +25,7 @@ use engine::panel::common::TimeKeys;
 use engine::shared::group_codes::GroupCodes;
 
 use super::column_error::{ColumnExtractionError, ColumnRole};
-use super::errors::{ValidationError, common_error_to_pyerr};
+use super::errors::{common_error_to_pyerr, legacy_validation_error};
 use crate::panel::common::panel_error_to_pyerr;
 
 /// Pythonオブジェクト`ob`をpolars DataFrameとして取り出す。
@@ -50,7 +50,7 @@ pub fn extract_dataframe(ob: &Bound<'_, PyAny>, param_name: &str) -> PyResult<Py
         // `LazyFrame`・`Series`等、他のpolarsオブジェクトは通常の「DataFrameではない」扱い
         // （`polars.`で始まる型名で一括りにすると、内部実装が漏れたメッセージになる）。
         if is_instance_of_polars(ob, "DataFrame") {
-            return ValidationError::new_err(format!(
+            return legacy_validation_error(format!(
                 "failed to read '{param_name}' as a polars.DataFrame: {err}"
             ));
         }
@@ -60,7 +60,7 @@ pub fn extract_dataframe(ob: &Bound<'_, PyAny>, param_name: &str) -> PyResult<Py
         } else {
             ""
         };
-        ValidationError::new_err(format!(
+        legacy_validation_error(format!(
             "'{param_name}' must be a polars.DataFrame, got {type_name}{hint}"
         ))
     })

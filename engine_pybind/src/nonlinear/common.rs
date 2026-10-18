@@ -12,7 +12,9 @@ use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 
 use crate::shared::column_extraction::extract_optional_cluster_groups;
-use crate::shared::errors::{ComputationError, ValidationError, common_error_to_pyerr};
+use crate::shared::errors::{
+    common_error_to_pyerr, legacy_computation_error, legacy_validation_error,
+};
 use crate::shared::validation::reject_unused_option;
 
 /// `engine::nonlinear::common::MleError`をPython例外に変換する。
@@ -32,14 +34,14 @@ pub(crate) fn mle_error_to_pyerr(err: MleError) -> PyErr {
         | MleError::InvalidCensoringBounds { .. }
         | MleError::InvalidBinaryY { .. }
         | MleError::YOutOfCensoringBounds { .. }
-        | MleError::NoUncensoredObservations { .. } => ValidationError::new_err(err.to_string()),
+        | MleError::NoUncensoredObservations { .. } => legacy_validation_error(err.to_string()),
         MleError::NonConvergence { .. }
         | MleError::SingularHessian
         | MleError::SingularOpgMatrix
         | MleError::SingularDesignMatrix
         | MleError::SeparationDetected
         | MleError::UncensoredIntervalTooNarrow { .. }
-        | MleError::EvaluationBudgetExceeded { .. } => ComputationError::new_err(err.to_string()),
+        | MleError::EvaluationBudgetExceeded { .. } => legacy_computation_error(err.to_string()),
     }
 }
 
@@ -126,7 +128,7 @@ pub(crate) fn parse_cov_kind(cov_type: &str) -> PyResult<CovKind> {
         "hc0" => Ok(CovKind::Hc0),
         "hc1" => Ok(CovKind::Hc1),
         "cluster" => Ok(CovKind::Cluster),
-        other => Err(ValidationError::new_err(format!(
+        other => Err(legacy_validation_error(format!(
             "unknown cov_type: '{other}'. Expected one of 'classical', \
              'opg', 'hc0', 'hc1', or 'cluster'"
         ))),
@@ -184,7 +186,7 @@ pub(crate) fn parse_solver_type(solver: &str) -> PyResult<SolverType> {
         "newton" => Ok(SolverType::Newton),
         "bfgs" => Ok(SolverType::Bfgs),
         "lbfgs" => Ok(SolverType::Lbfgs),
-        other => Err(ValidationError::new_err(format!(
+        other => Err(legacy_validation_error(format!(
             "unknown solver: '{other}'. Expected one of 'newton', 'bfgs', or 'lbfgs'"
         ))),
     }
@@ -210,7 +212,7 @@ pub(crate) fn parse_marginal_effects_at(at_lower: &str) -> PyResult<MarginalEffe
         "overall" => Ok(MarginalEffectsAt::Overall),
         "mean" => Ok(MarginalEffectsAt::Mean),
         "median" => Ok(MarginalEffectsAt::Median),
-        other => Err(ValidationError::new_err(format!(
+        other => Err(legacy_validation_error(format!(
             "unknown at: '{other}'. Expected one of 'overall', 'mean', or 'median'"
         ))),
     }

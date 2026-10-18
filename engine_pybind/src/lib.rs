@@ -19,6 +19,7 @@ use nonlinear::tobit::{
 };
 use panel::fe::{FEOptions, FEResult};
 use panel::re::{REOptions, REResult};
+use shared::catalog_export::{error_catalog, raise_error_for_test};
 use shared::column_extraction::{extract_column_list, extract_column_name, extract_dataframe};
 use shared::errors::{ComputationError, ValidationError};
 
@@ -289,6 +290,8 @@ fn _lib(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(fit_re, m)?)?;
     m.add_class::<REOptions>()?;
     m.add_class::<REResult>()?;
+    m.add_function(wrap_pyfunction!(error_catalog, m)?)?;
+    m.add_function(wrap_pyfunction!(raise_error_for_test, m)?)?;
     m.add("ValidationError", m.py().get_type::<ValidationError>())?;
     m.add("ComputationError", m.py().get_type::<ComputationError>())?;
     Ok(())

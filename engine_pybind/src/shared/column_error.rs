@@ -14,7 +14,7 @@
 use pyo3::PyErr;
 use thiserror::Error;
 
-use super::errors::ValidationError;
+use super::errors::legacy_validation_error;
 
 /// 列の使われ方。dtype不許可・タイムゾーン拒否のメッセージで、使い道と代わりに使える
 /// dtypeを示すために使う。
@@ -210,7 +210,7 @@ impl From<ColumnExtractionError> for PyErr {
             | ColumnExtractionError::NonFinite { .. }
             | ColumnExtractionError::UnsupportedDtype { .. }
             | ColumnExtractionError::TimeZoneNotSupported { .. }
-            | ColumnExtractionError::TiedValues { .. } => ValidationError::new_err(err.to_string()),
+            | ColumnExtractionError::TiedValues { .. } => legacy_validation_error(err.to_string()),
         }
     }
 }

@@ -70,7 +70,7 @@ use crate::shared::column_extraction::{
     extract_entity_groups, extract_f64_column, extract_f64_columns,
     extract_optional_cluster_groups, extract_time_keys,
 };
-use crate::shared::errors::ValidationError;
+use crate::shared::errors::legacy_validation_error;
 use crate::shared::mat_conversion::mat_to_vec;
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
@@ -453,7 +453,7 @@ fn parse_variance_method(value: &str) -> PyResult<VarianceMethod> {
         "swamy_arora" => Ok(VarianceMethod::SwamyArora),
         "wallace_hussain" => Ok(VarianceMethod::WallaceHussain),
         "amemiya" => Ok(VarianceMethod::Amemiya),
-        _ => Err(ValidationError::new_err(format!(
+        _ => Err(legacy_validation_error(format!(
             "unknown variance_method: '{value}'. Expected one of 'swamy_arora', \
              'wallace_hussain', or 'amemiya'"
         ))),

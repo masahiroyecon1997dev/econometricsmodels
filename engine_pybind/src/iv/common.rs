@@ -72,7 +72,9 @@ use crate::linear::ols::{OLSResult, ols_estimator_to_result};
 use crate::shared::column_extraction::{
     extract_f64_column, extract_optional_cluster_groups, extract_time_order_ranks,
 };
-use crate::shared::errors::{ComputationError, ValidationError, common_error_to_pyerr};
+use crate::shared::errors::{
+    common_error_to_pyerr, legacy_computation_error, legacy_validation_error,
+};
 use crate::shared::mat_conversion::mat_to_vec;
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
@@ -116,20 +118,18 @@ pub(crate) fn iv_error_to_pyerr(err: IvError) -> PyErr {
         | IvError::InvalidGmmMaxIter { .. }
         | IvError::InvalidGmmTol { .. }
         | IvError::InsufficientClustersForWeightMatrix { .. }
-        | IvError::InsufficientObservationsForFirstStage { .. } => {
-            ValidationError::new_err(message)
-        }
+        | IvError::InsufficientObservationsForFirstStage { .. } => legacy_validation_error(message),
         // `MleError::NonConvergence`（`nonlinear/common.rs`の`mle_error_to_pyerr`）と同じ
         // 分類: パラメータの不正ではなく、計算過程（反復推定）で発覚した問題のため
         // `ComputationError`（`engine/src/iv/CLAUDE.md`参照）。
-        IvError::GmmNonConvergence { .. } => ComputationError::new_err(message),
+        IvError::GmmNonConvergence { .. } => legacy_computation_error(message),
         IvError::FirstStageFailed { source, .. }
         | IvError::SecondStageFailed { source }
         | IvError::HausmanRegressionFailed { source } => {
             if least_squares_error_is_computation_error(&source) {
-                ComputationError::new_err(message)
+                legacy_computation_error(message)
             } else {
-                ValidationError::new_err(message)
+                legacy_validation_error(message)
             }
         }
     }
@@ -674,7 +674,7 @@ fn parse_estimator(estimator: &str) -> PyResult<IvEstimator> {
     match estimator.to_lowercase().as_str() {
         "2sls" => Ok(IvEstimator::TwoSls),
         "gmm" => Ok(IvEstimator::Gmm),
-        _ => Err(ValidationError::new_err(format!(
+        _ => Err(legacy_validation_error(format!(
             "unknown estimator: '{estimator}'. Expected one of '2sls' or 'gmm'"
         ))),
     }
@@ -685,7 +685,7 @@ fn parse_gmm_kind(gmm_type: &str) -> PyResult<GmmKind> {
         "one_step" => Ok(GmmKind::OneStep),
         "two_step" => Ok(GmmKind::TwoStep),
         "iterated" => Ok(GmmKind::Iterated),
-        other => Err(ValidationError::new_err(format!(
+        other => Err(legacy_validation_error(format!(
             "unknown gmm_type: '{other}'. Expected one of 'one_step', 'two_step', or 'iterated'"
         ))),
     }
@@ -697,7 +697,7 @@ fn parse_weight_kind(weight_type: &str) -> PyResult<WeightKind> {
         "robust" => Ok(WeightKind::Robust),
         "cluster" => Ok(WeightKind::Cluster),
         "hac" => Ok(WeightKind::Hac),
-        other => Err(ValidationError::new_err(format!(
+        other => Err(legacy_validation_error(format!(
             "unknown gmm_weight_type: '{other}'. Expected one of 'classical', \
              'robust', 'cluster', or 'hac'"
         ))),

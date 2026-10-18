@@ -20,7 +20,7 @@ use std::collections::HashSet;
 use polars::prelude::DataFrame;
 use pyo3::PyResult;
 
-use super::errors::ValidationError;
+use super::errors::legacy_validation_error;
 
 /// `validate_no_duplicate_roles`に渡す1ロール分の値。単一列（`y`/`weight`等）と
 /// 複数列（`x`/`x_exog`/`instruments`等）の両方を同じ関数で扱えるようにするための
@@ -42,7 +42,7 @@ pub enum RoleValue<'a> {
 /// `role_name="x"`で呼ぶため、メッセージ文言は変わらない。
 pub fn validate_x_non_empty(role_name: &str, x: &[String]) -> PyResult<()> {
     if x.is_empty() {
-        return Err(ValidationError::new_err(format!(
+        return Err(legacy_validation_error(format!(
             "{role_name} must contain at least one column name"
         )));
     }
@@ -60,7 +60,7 @@ pub fn validate_no_duplicate_within_role(role_name: &str, columns: &[String]) ->
     let mut seen = HashSet::new();
     for name in columns {
         if !seen.insert(name) {
-            return Err(ValidationError::new_err(format!(
+            return Err(legacy_validation_error(format!(
                 "column '{name}' is specified more than once in {role_name}"
             )));
         }
@@ -85,7 +85,7 @@ pub fn validate_no_const_collision(
     include_intercept: bool,
 ) -> PyResult<()> {
     if include_intercept && x.iter().any(|name| name == "const") {
-        return Err(ValidationError::new_err(format!(
+        return Err(legacy_validation_error(format!(
             "when include_intercept=true, {role_name} cannot contain a column named \
              'const' (it collides with the automatically added intercept)"
         )));
@@ -123,7 +123,7 @@ pub fn validate_no_existing_column(df: &DataFrame, column_name: &str) -> PyResul
         .iter()
         .any(|name| name.as_str() == column_name)
     {
-        return Err(ValidationError::new_err(format!(
+        return Err(legacy_validation_error(format!(
             "the data already has a column named '{column_name}'; augment() would \
              overwrite it, which is not allowed"
         )));
@@ -154,7 +154,7 @@ pub fn validate_no_existing_column(df: &DataFrame, column_name: &str) -> PyResul
 /// 影響しない。
 pub fn validate_no_duplicate_roles(roles: &[(&str, RoleValue)]) -> PyResult<()> {
     match find_duplicate_role_message(roles) {
-        Some(message) => Err(ValidationError::new_err(message)),
+        Some(message) => Err(legacy_validation_error(message)),
         None => Ok(()),
     }
 }
@@ -249,7 +249,7 @@ pub fn reject_unused_option(
     condition: &str,
 ) -> PyResult<()> {
     if is_set && !is_used {
-        return Err(ValidationError::new_err(format!(
+        return Err(legacy_validation_error(format!(
             "{option} is only used with {condition}, so it would be silently ignored; \
              set {condition} or remove {option}"
         )));

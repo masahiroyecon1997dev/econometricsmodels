@@ -44,7 +44,7 @@ use crate::shared::augment::append_predicted_column;
 use crate::shared::column_extraction::{
     extract_dataframe, extract_f64_column, extract_f64_columns, extract_model_x_columns,
 };
-use crate::shared::errors::ValidationError;
+use crate::shared::errors::legacy_validation_error;
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
     extract_strict_float, extract_strict_int, extract_strict_opt_column, extract_strict_opt_float,
@@ -554,7 +554,7 @@ fn parse_marginal_effects_target(target_lower: &str) -> PyResult<MarginalEffects
         "expected_observed" => Ok(MarginalEffectsTarget::ExpectedObserved),
         "prob_uncensored" => Ok(MarginalEffectsTarget::ProbUncensored),
         "expected_uncensored" => Ok(MarginalEffectsTarget::ExpectedUncensored),
-        other => Err(ValidationError::new_err(format!(
+        other => Err(legacy_validation_error(format!(
             "unknown target: '{other}'. Expected one of 'expected_latent', \
              'expected_observed', 'prob_uncensored', or 'expected_uncensored'"
         ))),
@@ -573,7 +573,7 @@ fn parse_marginal_effects_target(target_lower: &str) -> PyResult<MarginalEffects
 /// `x`に`"sigma"`という列名が含まれる場合は`ValidationError`
 fn validate_no_sigma_collision(x: &[String]) -> PyResult<()> {
     if x.iter().any(|name| name == "sigma") {
-        return Err(ValidationError::new_err(
+        return Err(legacy_validation_error(
             "x cannot contain a column named 'sigma' (it collides with the error term's \
              standard deviation, which TobitResult appends to param_names/params)",
         ));

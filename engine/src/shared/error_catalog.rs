@@ -332,6 +332,28 @@ impl Stage {
         }
     }
 
+    /// 全バリアントの見本（補助値は空文字列と先頭の診断検定）。対照表の書き出しと網羅の検査に使う。
+    #[must_use]
+    pub fn samples() -> Vec<Stage> {
+        vec![
+            Self::FirstStage {
+                endog_name: String::new(),
+            },
+            Self::SecondStage,
+            Self::WuHausmanRegression,
+            Self::WithinRegression,
+            Self::OverallFTest,
+            Self::BetweenRegressionEntity,
+            Self::BetweenRegressionTime,
+            Self::PooledRegression,
+            Self::QuasiDemeanedRegression,
+            Self::HausmanRegression,
+            Self::DiagnosticAuxiliaryRegression {
+                test: TEST_LABELS[0].0.to_string(),
+            },
+        ]
+    }
+
     /// 文脈句が使う補助`params`（`stage`の次に`params`へ並ぶ）。
     #[must_use]
     pub fn aux_params(&self) -> Vec<(&'static str, ParamValue)> {
@@ -355,15 +377,20 @@ impl Stage {
     }
 }
 
+/// 診断検定の識別子と、文に出す英語名の対照表。
+pub const TEST_LABELS: &[(&str, &str)] = &[
+    ("WHITE", "White test"),
+    ("BREUSCH_PAGAN", "Breusch-Pagan test"),
+    ("BREUSCH_GODFREY", "Breusch-Godfrey test"),
+];
+
 /// 診断検定の識別子（`WHITE`等）から、文に出す英語名（`White test`等）を引く。
 #[must_use]
 pub fn test_label(test: &str) -> Option<&'static str> {
-    match test {
-        "WHITE" => Some("White test"),
-        "BREUSCH_PAGAN" => Some("Breusch-Pagan test"),
-        "BREUSCH_GODFREY" => Some("Breusch-Godfrey test"),
-        _ => None,
-    }
+    TEST_LABELS
+        .iter()
+        .find(|(id, _)| *id == test)
+        .map(|(_, label)| *label)
 }
 
 /// `params`の値。
@@ -2048,6 +2075,28 @@ mod tests {
                 test: "BREUSCH_GODFREY".into(),
             },
         ]
+    }
+
+    #[test]
+    fn stage_samples_cover_every_stage_once() {
+        let samples: Vec<&str> = Stage::samples().iter().map(Stage::as_str).collect();
+        let expected: Vec<&str> = all_stages().iter().map(Stage::as_str).collect();
+        assert_eq!(samples, expected);
+        for s in Stage::samples() {
+            for (n, v) in s.aux_params() {
+                if n == "test" {
+                    assert!(matches!(&v, ParamValue::Str(t) if test_label(t).is_some()));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_labels_resolve_every_listed_test() {
+        for (id, label) in TEST_LABELS {
+            assert_eq!(test_label(id), Some(*label));
+        }
+        assert_eq!(test_label("NOPE"), None);
     }
 
     #[test]

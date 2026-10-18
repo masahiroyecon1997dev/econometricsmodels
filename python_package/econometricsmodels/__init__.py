@@ -15,6 +15,7 @@ from .diagnostics import (
     DiagnosticResult,
     WhiteTestResult,
 )
+from .error_codes import ErrorCode
 from .iv.iv import IV, IVOptions, IVResults
 from .linear.ols import OLS, OLSOptions, OLSResults
 from .linear.wls import WLS, WLSOptions, WLSResults
@@ -34,6 +35,7 @@ __all__ = [
     "BreuschPaganTestResult",
     "ComputationError",
     "DiagnosticResult",
+    "ErrorCode",
     "FEOptions",
     "FEResults",
     "IVOptions",

@@ -85,17 +85,17 @@ import json
 from functools import partial
 from pathlib import Path
 
-import _error_messages_panel as panel_msgs
 import polars as pl
 import pytest
 from _assertions import assert_close, assert_dict_close, assert_inference_close
 from _constants import DATA_DIR
-from _error_messages import escaped
+from _errors import raises_error
 from _helpers import load_wooldridge_dataset
 from _panel_helpers import bandwidth_cases, x_columns
 from _tolerances import TOLERANCES
 from econometricsmodels import (
     RE,
+    ErrorCode,
     REOptions,
     ValidationError,
 )
@@ -549,7 +549,13 @@ def test_hausman_cluster_count_equal_to_auxiliary_slopes_raises():
     `G <= 2k`（境界ちょうど）のためfit()が`ValidationError`で失敗する。
     """
     df = _tiny_panel(n_entities=4, n_periods=6)
-    with pytest.raises(ValidationError, match="Hausman"):
+    with raises_error(
+        ErrorCode.CLUSTER_COUNT_NOT_ABOVE_SLOPES,
+        n_clusters=4,
+        n_slopes=4,
+        min_clusters=5,
+        stage="HAUSMAN_REGRESSION",
+    ):
         RE(
             df,
             y="y",
@@ -573,11 +579,11 @@ def test_hausman_dk_too_few_periods_raises():
     fit()が補助回帰を待たず`ValidationError`で失敗する。
     """
     df = _tiny_panel(n_entities=20, n_periods=2)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            panel_msgs.INSUFFICIENT_DK_PERIODS_FOR_INFERENCE, t_periods=2, q=2
-        ),
+    with raises_error(
+        ErrorCode.DK_PERIODS_NOT_ABOVE_COEFFICIENTS,
+        n_periods=2,
+        n_coefficients=2,
+        min_periods=3,
     ):
         RE(
             df,

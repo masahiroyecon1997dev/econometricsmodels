@@ -71,9 +71,8 @@ fn first_stage_variance_components(
     if method == VarianceMethod::Amemiya && time_varying.len() != k {
         let columns = (0..k)
             .filter(|j| !time_varying.contains(j))
-            .map(|j| input.x_names()[j].as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
+            .map(|j| input.x_names()[j].clone())
+            .collect::<Vec<_>>();
         return Err(PanelError::AmemiyaRequiresWithinVariation { columns });
     }
 
@@ -537,7 +536,7 @@ mod tests {
         assert_eq!(
             err,
             PanelError::AmemiyaRequiresWithinVariation {
-                columns: "xi".to_string()
+                columns: vec!["xi".to_string()]
             }
         );
         let two_way = input(&all_rows(), &["x1", "xi", "xt"], true);
@@ -545,7 +544,7 @@ mod tests {
         assert_eq!(
             err,
             PanelError::AmemiyaRequiresWithinVariation {
-                columns: "xi, xt".to_string()
+                columns: vec!["xi".to_string(), "xt".to_string()]
             }
         );
         // 不均衡でも同じ。Wallace-Hussainは受け付ける。

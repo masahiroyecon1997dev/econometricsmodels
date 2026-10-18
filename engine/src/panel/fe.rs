@@ -3016,6 +3016,63 @@ mod tests {
         );
     }
 
+    /// エラーの`min_obs`が`fit`の実際の境界と一致する: 拒否される最大の`n`（`n = df_model`）の
+    /// 次の`n = min_obs`で成功する。1-wayの`n_effects`は個体数（ここでは2）。
+    #[test]
+    fn insufficient_degrees_of_freedom_min_obs_matches_the_fit_boundary() {
+        use crate::shared::error::ErrorInfo;
+        use crate::shared::error_catalog::ParamValue;
+
+        let build = |n: usize, k: usize| {
+            let entity: Vec<String> = (0..n)
+                .map(|i| if i < n.div_ceil(2) { "a" } else { "b" }.to_string())
+                .collect();
+            let y: Vec<f64> = (0..n)
+                .map(|i| (i as f64 * 0.9).sin() + 0.1 * i as f64)
+                .collect();
+            let x: Vec<Vec<f64>> = (0..k)
+                .map(|j| {
+                    (0..n)
+                        .map(|i| ((i * (j + 2) + j) as f64 * 1.3).cos())
+                        .collect()
+                })
+                .collect();
+            let names = (0..k).map(|j| format!("x{j}")).collect();
+            FeInput::from_columns(&y, &x, names, &entity, None, "y".into()).unwrap()
+        };
+        for k in 2..=4_usize {
+            let n_effects = 2;
+            let rejected_n = n_effects + k;
+            let err = FeEstimator::fit(
+                build(rejected_n, k),
+                FeEffects::OneWay,
+                FeCovType::Classical,
+                0.95,
+            )
+            .unwrap_err();
+            let min_obs = err
+                .report()
+                .all_params()
+                .into_iter()
+                .find_map(|(name, value)| match (name.as_str(), value) {
+                    ("min_obs", ParamValue::Int(v)) => Some(v as usize),
+                    _ => None,
+                })
+                .expect("min_obs");
+            assert_eq!(min_obs, rejected_n + 1, "k={k}");
+            assert!(
+                FeEstimator::fit(
+                    build(min_obs, k),
+                    FeEffects::OneWay,
+                    FeCovType::Classical,
+                    0.95
+                )
+                .is_ok(),
+                "k={k}"
+            );
+        }
+    }
+
     /// N=4（id: a,b,c,d）×T=3（t: 1,2,3）のバランスパネル。`fe_estimator_fit_one_way_
     /// matches_fixest_reference`/`fe_estimator_fit_two_way_matches_fixest_reference`の
     /// 両方で共有する（1-way/2-wayを同じデータで比較できるようにするため）。

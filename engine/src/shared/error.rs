@@ -162,23 +162,11 @@ pub enum CommonError {
     Internal { detail: String },
 }
 
-/// 移行途中のエラー型の`Display`が使う`message`。`report`が`None`（カタログに移していないバリアント）
-/// なのにこれを呼ぶのは実装の誤りなので、デバッグビルドでは検出する。
-pub(crate) fn catalog_display(report: Option<ErrorReport>) -> String {
-    debug_assert!(report.is_some(), "the variant is not in the catalog yet");
-    report.map(|r| r.message()).unwrap_or_default()
-}
-
-/// 入れ子の回帰（`stage`）の中で起きた`source`のエラーの[`ErrorReport`]。
+/// 入れ子の回帰（`stage`）の中で起きた失敗の`report`に、必要なら`stage`を付けて返す。
 ///
-/// `source`の`code`が`stage`を付けてよいもの（`stage_allowed`）なら`stage`を付け、そうでなければ
+/// `report`の`code`が`stage`を付けてよいもの（`stage_allowed`）なら`stage`を付け、そうでなければ
 /// （例: `confidence_level`の範囲違反のように、どの回帰で起きても同じ入力の誤り）`stage`を付けずに
-/// そのまま返す。`source`がまだカタログに移っていなければ`None`。
-pub(crate) fn staged(source: Option<ErrorReport>, stage: Stage) -> Option<ErrorReport> {
-    source.map(|report| staged_report(report, stage))
-}
-
-/// [`staged`]の、`source`が必ずカタログに移っているとき用（`Option`を介さない）。
+/// そのまま返す。
 pub(crate) fn staged_report(report: ErrorReport, stage: Stage) -> ErrorReport {
     if report.code().spec().stage_allowed {
         report.with_stage(stage)
@@ -262,21 +250,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn staged_adds_the_stage_only_to_codes_that_allow_it() {
+    fn staged_report_adds_the_stage_only_to_codes_that_allow_it() {
         let allowed = ErrorReport::new(ErrorCode::InsufficientObservations)
             .param("n_obs", 3_usize)
             .param("n_params", 4_usize)
             .param("min_obs", 5_usize);
-        let report = staged(Some(allowed), Stage::SecondStage).expect("some");
+        let report = staged_report(allowed, Stage::SecondStage);
         assert_eq!(report.stage(), Some(&Stage::SecondStage));
         assert!(report.validate().is_ok());
 
         let not_allowed =
             ErrorReport::new(ErrorCode::ConfidenceLevelOutOfRange).param("value", 2.0);
-        let report = staged(Some(not_allowed), Stage::SecondStage).expect("some");
+        let report = staged_report(not_allowed, Stage::SecondStage);
         assert!(report.stage().is_none());
-
-        assert!(staged(None, Stage::SecondStage).is_none());
     }
 
     #[test]
@@ -484,15 +470,13 @@ mod tests {
 
     #[test]
     fn cluster_required_is_not_tagged_with_a_stage() {
-        let report = staged(
+        let report = staged_report(
             CommonError::MissingClusterColumn {
                 setting: ClusterSetting::CovType,
             }
-            .report()
-            .into(),
+            .report(),
             Stage::SecondStage,
-        )
-        .expect("some");
+        );
         assert!(report.stage().is_none());
     }
 

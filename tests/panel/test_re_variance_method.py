@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import json
 import math
-import re
 from pathlib import Path
 
 import _error_messages_panel as panel_msgs
@@ -43,7 +42,6 @@ import pytest
 import statsmodels.api as sm
 from _assertions import assert_close, assert_option_case_insensitive
 from _constants import DATA_DIR
-from _error_messages import escaped
 from _errors import raises_error
 from _helpers import CASE_SPELLINGS, load_wooldridge_dataset
 from _re_oracle import (
@@ -57,10 +55,8 @@ from _re_oracle import (
 from _tolerances import TOLERANCES
 from econometricsmodels import (
     RE,
-    ComputationError,
     ErrorCode,
     REOptions,
-    ValidationError,
 )
 
 from benchmark.panel.fixtures.generate_re_variance_method_fixtures import (
@@ -625,12 +621,9 @@ def test_equal_counts_with_shifted_periods_follow_the_closed_form_unlike_plm(
 def test_amemiya_rejects_regressors_without_within_variation(case):
     """時間不変の列（2-wayでは個体間・時点間でのみ変わる列）があるAmemiyaは、
     バランスパネルでも不均衡でも、全列がそうでも`ValidationError`で、列の名前を示す。"""
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            panel_msgs.AMEMIYA_NEEDS_WITHIN_VARIATION,
-            columns=case.rejected_columns,
-        ),
+    with raises_error(
+        ErrorCode.AMEMIYA_REQUIRES_WITHIN_VARIATION,
+        columns=case.rejected_columns.split(", "),
     ):
         _fit(case, "classical", "amemiya")
 
@@ -685,13 +678,12 @@ def test_non_positive_sigma2_eps_is_a_computation_error():
             options=REOptions(variance_method=method),
         ).fit()
 
-    pattern = re.escape(
-        panel_msgs.NON_POSITIVE_IDIOSYNCRATIC_VARIANCE.format(
-            sigma2_eps="@@", method="wallace_hussain"
-        )
-    ).replace("@@", r"-\d+\.\d+")
-    with pytest.raises(ComputationError, match=pattern):
+    with raises_error(
+        ErrorCode.NON_POSITIVE_IDIOSYNCRATIC_VARIANCE,
+        variance_method="wallace_hussain",
+    ) as info:
         fit("wallace_hussain")
+    assert info.value.params["sigma2_eps"] < 0
     assert math.isfinite(fit("amemiya").sigma2_u)
     assert math.isfinite(fit("swamy_arora").sigma2_u)
 
@@ -810,11 +802,8 @@ def test_singleton_entity_is_a_validation_error_for_every_method(method):
     case = _case("ow_baseline")
     df = _frame(case)
     kept = df.filter((pl.col("entity") != "e00") | (pl.col("time") == "t0"))
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            panel_msgs.SINGLETON_GROUP, dimension="entity", group_id="e00"
-        ),
+    with raises_error(
+        ErrorCode.SINGLETON_GROUP, argument="entity", group="e00"
     ):
         _fit(case, "classical", method, kept)
 
@@ -823,15 +812,12 @@ def test_singleton_entity_is_a_validation_error_for_every_method(method):
 def test_two_way_unbalanced_panel_still_raises(method):
     case = _case("tw_baseline")
     df = _frame(case).slice(1)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            panel_msgs.UNBALANCED_PANEL_FOR_TWO_WAY,
-            n_obs=df.height,
-            n_entities=40,
-            n_periods=6,
-            expected=240,
-        ),
+    with raises_error(
+        ErrorCode.PANEL_NOT_BALANCED_FOR_TWO_WAY,
+        n_obs=df.height,
+        n_entities=40,
+        n_periods=6,
+        expected_obs=240,
     ):
         _fit(case, "classical", method, df)
 

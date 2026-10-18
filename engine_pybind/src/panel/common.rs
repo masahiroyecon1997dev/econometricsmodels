@@ -10,10 +10,7 @@ use engine::panel::common::PanelError;
 use engine::shared::error_catalog::{ErrorCode, ParamValue};
 use pyo3::{PyErr, PyResult};
 
-use crate::shared::errors::{
-    common_error_to_pyerr, legacy_computation_error, legacy_validation_error, report_to_pyerr,
-    unknown_option_value, user_error,
-};
+use crate::shared::errors::{to_pyerr, unknown_option_value, user_error};
 use crate::shared::validation::{RoleValue, reject_unused_option, validate_no_duplicate_roles};
 
 /// `cov_type`の検査でFEとREの文言を切り替えるためのモデル種別。
@@ -169,67 +166,11 @@ pub(crate) fn validate_dk_time_role(y: &str, entity: &str, dk_time: Option<&str>
 /// として実装し、呼び出し側で`.map_err(panel_error_to_pyerr)?`する（`iv_error_to_pyerr`と
 /// 同じ理由、`engine_pybind/src/iv/common.rs`参照）。
 ///
-/// バリアントの分類方針:
-/// - `Common`: `common_error_to_pyerr`へ委譲。
-/// - FE/RE固有のバリデーションエラー（`IdentifierDimensionMismatch`・
-///   `InsufficientDegreesOfFreedom`・`SingletonGroup`・`UnbalancedPanelForTwoWay`・
-///   `ZeroVarianceAfterDemeaning`・`TwoWayRequiresTime`・
-///   `InvalidDkBandwidth`・`InsufficientDkPeriods`・`InsufficientDkPeriodsForInference`）は
-///   いずれも入力・オプションの不正なので`ValidationError`（`InsufficientDkPeriods`・
-///   `InsufficientDkPeriodsForInference`は追加。`InvalidDkBandwidth`と同じ「DKのバンド幅・
-///   時点数に関する入力不正」という分類のため同じ`match`アームに含める。後者は
-///   クラスター版の`InsufficientClustersForInference`が`ValidationError`なのと揃える）。
-///   `DegenerateDkTwoPeriods`・`DegenerateClusterTwoGroups`も入力（パネル構造と時点・
-///   クラスター列）だけから判定できる退化のため同じアームに含める。
-/// - `WithinRegressionFailed`・`FTestFailed`・`BetweenRegressionFailed`・
-///   `QuasiDemeanedRegressionFailed`・`HausmanTestFailed`: 委譲先の`LeastSquaresError`の分類基準
-///   （`least_squares_error_is_computation_error`）にそのまま従う。`IvError::
-///   SecondStageFailed`と同じ扱い。Pythonに渡すメッセージは`source.to_string()`ではなく
-///   `PanelError`自身の`to_string()`（「within変換後の推定で失敗した」等の文脈を含む）を
-///   使うため、`least_squares_error_to_pyerr`自体は呼ばない。`BetweenRegressionFailed`
-///   （RE）・`QuasiDemeanedRegressionFailed`（RE）は対象が
-///   FEのwithin回帰と異なるだけで、分類ロジックは同じため同じ`match`アームでまとめる。
-///
-/// 初期実装の時点ではFE/REの`fit()`本体が未実装で、この関数は`#[cfg(test)] mod tests`
-/// からしか呼び出されなかった。当初は`#[expect(dead_code, ...)]`（`cargo build`では未到達で
-/// 発火するが`cargo test`/`clippy --all-targets`ではテストから到達可能になり発火しない、
-/// という非対称性を前提にした属性）を使っていたが、後の実装で`panel::fe::build_fe_input`
-/// （同じく`#[cfg(test)] mod tests`からのみ呼ばれる）がこの関数を呼ぶようになったことで
-/// `unfulfilled_lint_expectations`（`-D warnings`下でエラー）が発火し、`#[allow(dead_code)]`
-/// （無条件抑制）に変更した経緯がある（`engine_pybind/src/iv/CLAUDE.md`「踏んだ罠」に
-/// 記録済みの罠そのもの）。その後`panel::fe::fit`（`fit_fe`が`#[pymodule]`経由で
-/// 呼ぶ本番経路）がこの関数を呼ぶようになったため、`#[allow(dead_code)]`は不要になった。
+/// `PanelError`の各バリアントは`ErrorInfo::report()`が`code`・`params`に変換する。
+/// `WithinRegressionFailed`等の回帰の包みは原因の`code`に`stage`を付け、`ValidationError`/
+/// `ComputationError`の別もカタログの`code`で決まる。
 pub(crate) fn panel_error_to_pyerr(err: PanelError) -> PyErr {
-    if let Some(report) = err.try_report() {
-        return report_to_pyerr(&report);
-    }
-    let message = err.to_string();
-    match err {
-        // `try_report()`で処理済みのバリアントは先頭で返るためここには来ない（`_`で受けずに網羅するために残している）。
-        PanelError::Common(common) => common_error_to_pyerr(common),
-        PanelError::IdentifierDimensionMismatch { .. }
-        | PanelError::InsufficientDegreesOfFreedom { .. }
-        | PanelError::SingletonGroup { .. }
-        | PanelError::UnbalancedPanelForTwoWay { .. }
-        | PanelError::ZeroVarianceAfterDemeaning { .. }
-        | PanelError::TwoWayRequiresTime
-        | PanelError::InvalidDkBandwidth { .. }
-        | PanelError::InsufficientDkPeriods { .. }
-        | PanelError::InsufficientDkPeriodsForInference { .. }
-        | PanelError::DegenerateDkTwoPeriods
-        | PanelError::DegenerateClusterTwoGroups
-        | PanelError::AmemiyaRequiresWithinVariation { .. } => legacy_validation_error(message),
-        PanelError::NonPositiveIdiosyncraticVariance { .. }
-        | PanelError::VarianceComponentsMomentsSingular { .. } => legacy_computation_error(message),
-        // 回帰の包みは、原因が必ずカタログに移っているため`try_report()`が常に`Some`を返し、
-        // ここには来ない（`_`で受けずに網羅するために残している）。
-        PanelError::WithinRegressionFailed { .. }
-        | PanelError::FTestFailed { .. }
-        | PanelError::BetweenRegressionFailed { .. }
-        | PanelError::PooledRegressionFailed { .. }
-        | PanelError::QuasiDemeanedRegressionFailed { .. }
-        | PanelError::HausmanTestFailed { .. } => legacy_computation_error(message),
-    }
+    to_pyerr(&err)
 }
 
 #[cfg(test)]

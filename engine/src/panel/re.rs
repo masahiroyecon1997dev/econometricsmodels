@@ -4215,9 +4215,9 @@ mod tests {
                 ..
             }
         ));
-        assert!(
-            err.to_string()
-                .starts_with("between-regression on entity means")
+        assert_eq!(
+            crate::shared::error::ErrorInfo::report(&err).stage(),
+            Some(&crate::shared::error_catalog::Stage::BetweenRegressionEntity)
         );
         // 2エンティティ×2時点: 内部の2-way FEの自由度が足りない（`n = 4 <= k + N + T - 1 = 4`）。
         let tiny: Vec<usize> = (0..24).filter(|&r| r / 4 < 2 && r % 4 < 2).collect();

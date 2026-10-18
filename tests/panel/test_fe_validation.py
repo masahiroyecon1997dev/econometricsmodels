@@ -363,15 +363,12 @@ def test_insufficient_degrees_of_freedom_one_way_raises():
             "entity": ["e1", "e1", "e2", "e2", "e3", "e3"],
         }
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            panel_msgs.INSUFFICIENT_DEGREES_OF_FREEDOM_PANEL,
-            n_obs=6,
-            n_entities=3,
-            n_periods_clause=panel_msgs.n_periods_clause(None),
-            k=3,
-        ),
+    with raises_error(
+        ErrorCode.INSUFFICIENT_DEGREES_OF_FREEDOM,
+        n_obs=6,
+        n_params=3,
+        n_effects=3,
+        min_obs=7,
     ):
         FE(df, y="y", x=["x1", "x2", "x3"], entity="entity").fit()
 
@@ -400,15 +397,12 @@ def test_insufficient_degrees_of_freedom_two_way_raises():
         }
     )
     options = FEOptions(time="time")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            panel_msgs.INSUFFICIENT_DEGREES_OF_FREEDOM_PANEL,
-            n_obs=9,
-            n_entities=3,
-            n_periods_clause=panel_msgs.n_periods_clause(3),
-            k=4,
-        ),
+    with raises_error(
+        ErrorCode.INSUFFICIENT_DEGREES_OF_FREEDOM,
+        n_obs=9,
+        n_params=4,
+        n_effects=5,
+        min_obs=10,
     ):
         FE(
             df,
@@ -427,11 +421,8 @@ def test_singleton_entity_raises():
     `PanelError::SingletonGroup`（entity側）を誘発する。
     """
     df = pl.read_csv(DATA_DIR / "fe_singleton_entity.csv")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            panel_msgs.SINGLETON_GROUP, dimension="entity", group_id="e00"
-        ),
+    with raises_error(
+        ErrorCode.SINGLETON_GROUP, argument="entity", group="e00"
     ):
         FE(df, y="y", x=["x1", "x2"], entity="entity").fit()
 
@@ -444,12 +435,7 @@ def test_singleton_time_raises():
     """
     df = pl.read_csv(DATA_DIR / "fe_singleton_time.csv")
     options = FEOptions(time="time")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            panel_msgs.SINGLETON_GROUP, dimension="time", group_id="t5"
-        ),
-    ):
+    with raises_error(ErrorCode.SINGLETON_GROUP, argument="time", group="t5"):
         FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 
 
@@ -459,15 +445,12 @@ def test_unbalanced_two_way_raises():
     """
     df = pl.read_csv(DATA_DIR / "fe_unbalanced_two_way.csv")
     options = FEOptions(time="time")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            panel_msgs.UNBALANCED_PANEL_FOR_TWO_WAY,
-            n_obs=239,
-            n_entities=40,
-            n_periods=6,
-            expected=240,
-        ),
+    with raises_error(
+        ErrorCode.PANEL_NOT_BALANCED_FOR_TWO_WAY,
+        n_obs=239,
+        n_entities=40,
+        n_periods=6,
+        expected_obs=240,
     ):
         FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 
@@ -478,11 +461,8 @@ def test_zero_variance_after_demeaning_raises():
     ZeroVarianceAfterDemeaning`。
     """
     df = pl.read_csv(DATA_DIR / "fe_zero_variance_regressor.csv")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            panel_msgs.ZERO_VARIANCE_AFTER_DEMEANING, column="x_invariant"
-        ),
+    with raises_error(
+        ErrorCode.REGRESSOR_NO_WITHIN_VARIATION, column="x_invariant"
     ):
         FE(df, y="y", x=["x1", "x2", "x_invariant"], entity="entity").fit()
 
@@ -608,6 +588,25 @@ def test_cluster_count_at_most_slopes_raises_validation_error():
         FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 
 
+def test_dk_single_period_raises_validation_error():
+    """`dk_time`が1時点だけだと、傾き係数の数と比べる前にDK共分散が定義できない
+    ため`ValidationError`（時点数は2以上が必要）。
+    """
+    df = pl.DataFrame(
+        {
+            "y": [1.0, 3.0, 2.0, 5.0, 4.0, 7.0, 6.0, 9.0],
+            "x": [1.0, 3.0, 2.0, 5.0, 4.0, 4.5, 0.0, 2.0],
+            "entity": ["a", "a", "b", "b", "c", "c", "d", "d"],
+            "time": ["1"] * 8,
+        }
+    )
+    options = FEOptions(cov_type="dk", dk_time="time")
+    with raises_error(
+        ErrorCode.DK_PERIODS_TOO_FEW, n_periods=1, min_periods=2
+    ):
+        FE(df, y="y", x=["x"], entity="entity", options=options).fit()
+
+
 def test_dk_periods_at_most_slopes_raises_validation_error():
     """時点数t(=3)がF検定の傾き係数の数q(=k=3)以下は`ValidationError`
     （`PanelError::InsufficientDkPeriodsForInference`）。DK共分散のrankは
@@ -627,11 +626,11 @@ def test_dk_periods_at_most_slopes_raises_validation_error():
         }
     )
     options = FEOptions(cov_type="dk", dk_time="time", dk_bandwidth=0)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            panel_msgs.INSUFFICIENT_DK_PERIODS_FOR_INFERENCE, t_periods=3, q=3
-        ),
+    with raises_error(
+        ErrorCode.DK_PERIODS_NOT_ABOVE_COEFFICIENTS,
+        n_periods=3,
+        n_coefficients=3,
+        min_periods=4,
     ):
         FE(
             df,
@@ -654,13 +653,11 @@ def test_many_regressors_dk_raises_validation_error(two_way):
     assert len(x_cols) == 20
     kwargs = {"time": "time"} if two_way else {}
     options = FEOptions(cov_type="dk", dk_time="time", **kwargs)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            panel_msgs.INSUFFICIENT_DK_PERIODS_FOR_INFERENCE,
-            t_periods=6,
-            q=20,
-        ),
+    with raises_error(
+        ErrorCode.DK_PERIODS_NOT_ABOVE_COEFFICIENTS,
+        n_periods=6,
+        n_coefficients=20,
+        min_periods=21,
     ):
         FE(df, y="y", x=x_cols, entity="entity", options=options).fit()
 
@@ -682,26 +679,26 @@ _TWO_PERIOD_PANEL = {
 
 
 @pytest.mark.parametrize(
-    ("options", "message"),
+    ("options", "code"),
     [
         (
             FEOptions(cov_type="dk", dk_time="time", dk_bandwidth=0),
-            panel_msgs.DEGENERATE_DK_TWO_PERIODS,
+            ErrorCode.DK_TWO_PERIODS_DEGENERATE,
         ),
         (
             FEOptions(
                 cov_type="dk", time="time", dk_time="time", dk_bandwidth=0
             ),
-            panel_msgs.DEGENERATE_DK_TWO_PERIODS,
+            ErrorCode.DK_TWO_PERIODS_DEGENERATE,
         ),
         (
             FEOptions(cov_type="cluster", cluster="time"),
-            panel_msgs.DEGENERATE_CLUSTER_TWO_GROUPS,
+            ErrorCode.CLUSTER_TWO_GROUPS_DEGENERATE,
         ),
     ],
     ids=["dk-one_way", "dk-two_way", "cluster_by_time"],
 )
-def test_two_group_split_degeneracy_raises_validation_error(options, message):
+def test_two_group_split_degeneracy_raises_validation_error(options, code):
     """2時点のパネルで全エンティティが各時点に1観測ずつだと、within変換で
     時点（クラスター）スコアが恒等的にゼロになり、DK・timeクラスターの
     共分散がゼロに退化する（`PanelError::DegenerateDkTwoPeriods`/
@@ -709,7 +706,7 @@ def test_two_group_split_degeneracy_raises_validation_error(options, message):
     別に弾く。
     """
     df = pl.DataFrame(_TWO_PERIOD_PANEL)
-    with pytest.raises(ValidationError, match=escaped(message)):
+    with raises_error(code):
         FE(df, y="y", x=["x"], entity="entity", options=options).fit()
 
 
@@ -726,10 +723,7 @@ def test_two_way_two_entity_default_cluster_raises_validation_error():
             "time": ["1", "2", "3", "4", "5"] * 2,
         }
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(panel_msgs.DEGENERATE_CLUSTER_TWO_GROUPS),
-    ):
+    with raises_error(ErrorCode.CLUSTER_TWO_GROUPS_DEGENERATE):
         FE(
             df, y="y", x=["x"], entity="entity", options=FEOptions(time="time")
         ).fit()

@@ -367,11 +367,8 @@ def test_singleton_entity_raises():
     誘発し、そのまま`RE.fit()`自体が失敗する（モジュールdoc参照）。
     """
     df = pl.read_csv(DATA_DIR / "fe_singleton_entity.csv")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            panel_msgs.SINGLETON_GROUP, dimension="entity", group_id="e00"
-        ),
+    with raises_error(
+        ErrorCode.SINGLETON_GROUP, argument="entity", group="e00"
     ):
         RE(df, y="y", x=["x1", "x2"], entity="entity").fit()
 
@@ -550,6 +547,25 @@ def test_cluster_count_at_most_slopes_raises_validation_error():
         RE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 
 
+def test_dk_single_period_raises_validation_error():
+    """`dk_time`が1時点だけだと、ハウスマン検定の対象数と比べる前にDK共分散が
+    定義できないため`ValidationError`（時点数は2以上が必要）。
+    """
+    df = pl.DataFrame(
+        {
+            "y": [1.0, 3.0, 2.0, 5.0, 4.0, 7.0, 6.0, 9.0],
+            "x": [1.0, 3.0, 2.0, 5.0, 4.0, 4.5, 0.0, 2.0],
+            "entity": ["a", "a", "b", "b", "c", "c", "d", "d"],
+            "time": ["1"] * 8,
+        }
+    )
+    options = REOptions(cov_type="dk", dk_time="time")
+    with raises_error(
+        ErrorCode.DK_PERIODS_TOO_FEW, n_periods=1, min_periods=2
+    ):
+        RE(df, y="y", x=["x"], entity="entity", options=options).fit()
+
+
 def test_dk_periods_at_most_hausman_slopes_raises_validation_error():
     """時点数t(=2)がハウスマン検定の対象数q(=k=2)以下は`ValidationError`
     （`PanelError::InsufficientDkPeriodsForInference`）。DK共分散のrankは
@@ -567,11 +583,11 @@ def test_dk_periods_at_most_hausman_slopes_raises_validation_error():
         }
     )
     options = REOptions(cov_type="dk", dk_time="time", dk_bandwidth=0)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            panel_msgs.INSUFFICIENT_DK_PERIODS_FOR_INFERENCE, t_periods=2, q=2
-        ),
+    with raises_error(
+        ErrorCode.DK_PERIODS_NOT_ABOVE_COEFFICIENTS,
+        n_periods=2,
+        n_coefficients=2,
+        min_periods=3,
     ):
         RE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 
@@ -606,13 +622,11 @@ def test_many_regressors_dk_raises_validation_error():
     `test_many_regressors_dk_raises_validation_error`と対になる。"""
     df = pl.read_csv(DATA_DIR / "fe_many_regressors.csv")
     x_cols = x_columns(df)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            panel_msgs.INSUFFICIENT_DK_PERIODS_FOR_INFERENCE,
-            t_periods=6,
-            q=20,
-        ),
+    with raises_error(
+        ErrorCode.DK_PERIODS_NOT_ABOVE_COEFFICIENTS,
+        n_periods=6,
+        n_coefficients=20,
+        min_periods=21,
     ):
         RE(
             df,

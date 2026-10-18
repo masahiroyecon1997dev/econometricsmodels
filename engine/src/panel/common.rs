@@ -66,7 +66,7 @@ use thiserror::Error;
 
 use crate::linear::common::LeastSquaresError;
 use crate::shared::covariance::{cluster_correction, cluster_meat, default_hac_lags};
-use crate::shared::error::{CommonError, ErrorInfo, catalog_display, staged};
+use crate::shared::error::{CommonError, ErrorInfo, staged_report};
 use crate::shared::error_catalog::{ErrorCode, ErrorReport, Stage};
 use crate::shared::group_codes::GroupCodes;
 
@@ -85,23 +85,19 @@ pub enum PanelDimension {
     Time,
 }
 
-impl fmt::Display for PanelDimension {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl PanelDimension {
+    /// エラーの`argument`に入る名前（公開される値のため、`Display`とは独立に固定する）。
+    fn argument_name(self) -> &'static str {
         match self {
-            PanelDimension::Entity => write!(f, "entity"),
-            PanelDimension::Time => write!(f, "time"),
+            PanelDimension::Entity => "entity",
+            PanelDimension::Time => "time",
         }
     }
 }
 
-/// `InsufficientDegreesOfFreedom`のメッセージで、2-way（`n_periods`が`Some`）のときだけ
-/// `, n_periods=<T>`を差し込む。`Option`のDebug表記（`Some(4)`/`None`）がユーザー向け
-/// メッセージに漏れるのを避けるため（`.claude/rules/rust-style.md`「言語方針」——
-/// ユーザー可視文字列は英語かつ実装の内部表現を出さない）。
-fn n_periods_clause(n_periods: &Option<usize>) -> String {
-    match n_periods {
-        Some(n_periods) => format!(", n_periods={n_periods}"),
-        None => String::new(),
+impl fmt::Display for PanelDimension {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.argument_name())
     }
 }
 
@@ -142,7 +138,7 @@ pub enum PanelError {
     /// `PanelDimension`で表す（`SingletonGroup`と同じ使い方）。`engine_pybind`が同じ
     /// polars DataFrameから列抽出する限り実際には起こり得ない（OLSの`y`/`x`長さ不一致
     /// チェックと同じ、`engine_pybind`〜`engine`間の契約に対する防御的な`Result`化）。
-    #[error("dimension mismatch: y has {y_rows} rows but {dimension} has {other_rows} rows")]
+    #[error("{}", self.catalog_message())]
     IdentifierDimensionMismatch {
         dimension: PanelDimension,
         y_rows: usize,
@@ -158,13 +154,8 @@ pub enum PanelError {
     ///
     /// となる。`CommonError::InsufficientObservations`（単純な`n <= k`）とは
     /// 消費する自由度の内訳が異なるため別バリアントにする。`n_periods`は1-wayでは
-    /// `None`（メッセージにも出さない、`n_periods_clause`参照）。
-    #[error(
-        "insufficient degrees of freedom for panel estimation: n_obs={n_obs}, \
-         n_entities={n_entities}{}, k={k} \
-         (the panel-adjusted residual degrees of freedom must be positive)",
-        n_periods_clause(n_periods)
-    )]
+    /// `None`（エラーの`n_effects`は個体数だけになる）。
+    #[error("{}", self.catalog_message())]
     InsufficientDegreesOfFreedom {
         n_obs: usize,
         n_entities: usize,
@@ -178,11 +169,7 @@ pub enum PanelError {
     /// listwise deletion等の自動除外はせず常にエラーとする（欠損値を常にエラーとする
     /// 全体方針の踏襲）。下流の特異行列エラーとして偶発的に検出される形にはせず、
     /// 「観測数1のグループ」を明示的にこのバリアントで弾く。
-    #[error(
-        "singleton {dimension} group detected: {dimension} '{group_id}' has only 1 \
-         observation. Singleton groups are not dropped automatically; remove them from \
-         the input"
-    )]
+    #[error("{}", self.catalog_message())]
     SingletonGroup {
         dimension: PanelDimension,
         group_id: String,
@@ -201,11 +188,7 @@ pub enum PanelError {
     /// 入力もありうる。このエラーを構築する検証（FE実装issue）は、(entity, time)
     /// ペアの一意性・全組合せの充足まで確認する必要がある。`expected`はカウント上の
     /// 期待値（`n_entities * n_periods`）でメッセージ用。
-    #[error(
-        "two-way estimation (fixed or random effects) requires a balanced panel: got \
-         n_obs={n_obs} for n_entities={n_entities} x n_periods={n_periods} \
-         (expected {expected} observations)"
-    )]
+    #[error("{}", self.catalog_message())]
     UnbalancedPanelForTwoWay {
         n_obs: usize,
         n_entities: usize,
@@ -218,10 +201,7 @@ pub enum PanelError {
     /// 時間不変変数（1-way FEで問題になる典型例）だけでなく、2-wayで time FE と
     /// 完全共線な「エンティティ間で変動しない列」も同じチェックで検出できる
     /// （`docs/spec/fe-spec.md`1章。1-way/2-wayで同一ロジックを共有する）。
-    #[error(
-        "regressor '{column}' has zero variance after the within-transformation \
-         (it is time-invariant, or collinear with the fixed effects)"
-    )]
+    #[error("{}", self.catalog_message())]
     ZeroVarianceAfterDemeaning { column: String },
 
     /// 2-way FE（entity + time FE）を要求したのに`time`列が指定されていない。
@@ -230,7 +210,10 @@ pub enum PanelError {
     /// 「条件付き必須」パターン（`panel-common.md`1.1節。`OLSOptions.cluster`が
     /// `cov_type="cluster"`のときだけ必須になるのと同型）。未指定時のバリデーション
     /// エラーとしてここで担保する。
-    #[error("two-way estimation (fixed or random effects) requires the `time` option to be set")]
+    ///
+    /// `engine_pybind`は`time`の有無から1-way/2-wayを決めるため、Python APIからは起こらない
+    /// （起きたら実装の誤りなので`INTERNAL_ERROR`として報告する）。
+    #[error("{}", self.catalog_message())]
     TwoWayRequiresTime,
 
     /// `FeCovType::Dk`の明示的な`bandwidth`が`[0, t)`の範囲外（`t`はユニークな時点数）。
@@ -250,7 +233,7 @@ pub enum PanelError {
     /// `t_periods/(t_periods-1)`が`1/0`に発散し、クラスターの`G=1`が
     /// `validate_cluster_groups`で拒否されるのと同じ理由で計算が成立しない
     /// （`ols::validate_cluster_groups`の`G>=2`要求と同型の前提）。
-    #[error("Driscoll-Kraay panel HAC requires at least 2 unique time periods: got {t_periods}")]
+    #[error("{}", self.catalog_message())]
     InsufficientDkPeriods { t_periods: usize },
 
     /// `FeCovType::Dk`/`ReCovType::Dk`で、ユニークな時点数`t_periods`が同時Wald検定の
@@ -263,12 +246,7 @@ pub enum PanelError {
     /// 数値的な特異性判定（`ensure_well_conditioned_symmetric_matrix`）任せにすると、
     /// 理論上0の固有値に乗る丸め誤差が閾値を超えた場合に巨大な無意味な統計量を
     /// 黙って返しうるため、入力だけから判定できるこの条件を行列計算の前に弾く。
-    #[error(
-        "cov_type='dk' requires more unique time periods than jointly tested coefficients: \
-         got t_periods={t_periods} for q={q} coefficient(s) (the slope F-test for FE, the \
-         Hausman test for RE), but the Driscoll-Kraay covariance has rank at most \
-         t_periods-1, so the q×q Wald submatrix is singular when t_periods <= q"
-    )]
+    #[error("{}", self.catalog_message())]
     InsufficientDkPeriodsForInference { t_periods: usize, q: usize },
 
     /// FEで`FeCovType::Dk`の時点数が2、かつ吸収したFE次元（常にentity、2-wayではtimeも）の
@@ -284,13 +262,7 @@ pub enum PanelError {
     /// 約`1e-16`の標準誤差と巨大なF統計量を黙って返していたため入力から弾く。
     /// 1水準でもこのパターンを崩せば退化しない（その場合は通す）。
     /// REは残差がwithin変換されないため対象外。
-    #[error(
-        "cov_type='dk' with 2 unique time periods is degenerate for fixed effects when every \
-         entity (or, with two-way effects, every time period) is observed exactly once in each \
-         of the two periods: the within transformation makes the two per-period scores equal, \
-         and they sum to zero, so the Driscoll-Kraay covariance is identically zero. Use more \
-         time periods or another cov_type"
-    )]
+    #[error("{}", self.catalog_message())]
     DegenerateDkTwoPeriods,
 
     /// FEで`FeCovType::Cluster`のクラスター数が2、かつ吸収したFE次元（常にentity、2-wayでは
@@ -300,14 +272,7 @@ pub enum PanelError {
     ///
     /// `DegenerateDkTwoPeriods`と同じ理由でクラスタースコアが`s_1 = s_2 = 0`となり、
     /// クラスターロバスト共分散が恒等的にゼロになる。
-    #[error(
-        "cov_type='cluster' with 2 clusters is degenerate for fixed effects when every entity \
-         (or, with two-way effects, every time period) is observed exactly once in each cluster \
-         (e.g. clustering by time with 2 periods, or by entity with 2 entities and two-way \
-         effects): the within transformation makes the two cluster scores equal, and they sum \
-         to zero, so the cluster-robust covariance is identically zero. Use more clusters or \
-         another cov_type"
-    )]
+    #[error("{}", self.catalog_message())]
     DegenerateClusterTwoGroups,
 
     /// within変換済みデータに対する最小二乗推定（`OlsEstimator::fit`への委譲、
@@ -319,7 +284,7 @@ pub enum PanelError {
     /// `CommonError`が`Common`と`WithinRegressionFailed(LeastSquaresError::Common)`の
     /// 2経路で`PanelError`になりうる曖昧さを避け、変換箇所を追跡可能にするため
     /// （`IvError::FirstStageFailed`が`#[from]`を使わない判断と同じ）。
-    #[error("within-transformed least-squares estimation failed: {source}")]
+    #[error("{}", self.catalog_message())]
     WithinRegressionFailed {
         #[source]
         source: LeastSquaresError,
@@ -333,7 +298,7 @@ pub enum PanelError {
     /// 共分散部分行列が数値的にほぼ特異な場合）。それでも型は`WithinRegressionFailed`と
     /// 同じ`LeastSquaresError`のまま保持する（`wald_f_test`のエラー型を独自に絞り込む
     /// メリットが無いため）。
-    #[error("F-test for joint significance of the slope coefficients failed: {source}")]
+    #[error("{}", self.catalog_message())]
     FTestFailed {
         #[source]
         source: LeastSquaresError,
@@ -346,10 +311,7 @@ pub enum PanelError {
     /// ではなくREのbetween回帰のため別バリアントにする（`FTestFailed`と同じ判断、
     /// モジュールdoc参照）。最も起こりやすいのはエンティティ数が説明変数の数以下
     /// （`CommonError::InsufficientObservations`）。
-    #[error(
-        "between-regression on {means} means least-squares estimation for variance component \
-         failed: {source}"
-    )]
+    #[error("{}", self.catalog_message())]
     BetweenRegressionFailed {
         /// どの平均への回帰が失敗したか（2-wayは個体平均・時点平均の2本を推定する）。
         means: BetweenMeans,
@@ -363,7 +325,7 @@ pub enum PanelError {
     /// 残差の二乗和から分散成分を求めるため、設計行列が特異（完全な多重共線性）だと
     /// 推定できない。`WithinRegressionFailed`等と同じ`LeastSquaresError`ラップだが、
     /// 対象が別のため別バリアントにする。
-    #[error("pooled least-squares estimation for the variance component failed: {source}")]
+    #[error("{}", self.catalog_message())]
     PooledRegressionFailed {
         #[source]
         source: LeastSquaresError,
@@ -374,23 +336,15 @@ pub enum PanelError {
     ///
     /// Amemiya法は1段目をwithin推定だけで行うため、within変動の無い列の効果が残差に残り、
     /// σ_u²が偏る。`plm`も不均衡パネルでは同じ理由で推定を拒否する。
-    #[error(
-        "variance_method=\"amemiya\" needs every regressor to vary within the effect (within \
-         each entity; for two-way effects also across entities and across periods), but \
-         these have no within variation: {columns}. Use variance_method=\"swamy_arora\" or \
-         \"wallace_hussain\", which accept such regressors"
-    )]
+    #[error("{}", self.catalog_message())]
     AmemiyaRequiresWithinVariation {
-        /// within変動の無い列の名前（`, `区切り）。
-        columns: String,
+        /// within変動の無い列の名前。
+        columns: Vec<String>,
     },
 
     /// RE（`variance_method`が`WallaceHussain`・`Amemiya`）で推定したσ_ε²が0以下になった
     /// （θが定まらない）。`plm`は0に切り上げてθが`NaN`になる。
-    #[error(
-        "the estimated idiosyncratic variance is not positive ({sigma2_eps}) with \
-         variance_method=\"{method}\"; the weights of the quasi-demeaning are undefined"
-    )]
+    #[error("{}", self.catalog_message())]
     NonPositiveIdiosyncraticVariance {
         /// 推定法の名前（`variance_method`の値）。
         method: &'static str,
@@ -411,7 +365,7 @@ pub enum PanelError {
     /// `WithinRegressionFailed`（FEのwithin変換済みデータ）・`BetweenRegressionFailed`
     /// （REのbetween回帰）とは対象が異なるため別バリアントにする（同じ判断の3件目、
     /// モジュールdoc参照）。
-    #[error("quasi-demeaned least-squares estimation for random effects failed: {source}")]
+    #[error("{}", self.catalog_message())]
     QuasiDemeanedRegressionFailed {
         #[source]
         source: LeastSquaresError,
@@ -426,60 +380,127 @@ pub enum PanelError {
     /// これに包まず、補助回帰の前に`InsufficientDkPeriodsForInference`で弾く。ハウスマン検定はRE本体の付随的な
     /// 診断情報だが、計算自体が成立しない場合は`None`で隠さずエラーにする
     /// （設計行列の多重共線性でエラーにするのと同じ方針）。
-    #[error("Hausman test auxiliary regression failed: {source}")]
+    #[error("{}", self.catalog_message())]
     HausmanTestFailed {
         #[source]
         source: LeastSquaresError,
     },
 }
 
-impl PanelError {
-    /// カタログの`code`・`params`で表せるバリアントの[`ErrorReport`]。まだ移していないバリアントは`None`。
-    ///
-    /// 全バリアントを移し終えたら、`ErrorInfo`の実装（`report()`）に置き換える。
-    /// `WithinRegressionFailed`等の段階ごとの包みは、`source`が移行済みなら`source`の`code`（`stage`を付けてよい
-    /// `code`なら`stage`つき）を返す。`source`が未移行なら`None`。
-    #[must_use]
-    pub fn try_report(&self) -> Option<ErrorReport> {
+impl ErrorInfo for PanelError {
+    /// `WithinRegressionFailed`等の段階ごとの包みは、`source`の`code`（`stage`を付けてよい
+    /// `code`なら`stage`つき）を返す。
+    fn report(&self) -> ErrorReport {
         match self {
-            Self::Common(common) => Some(common.report()),
+            Self::Common(common) => common.report(),
             Self::WithinRegressionFailed { source } => {
-                staged(Some(source.report()), Stage::WithinRegression)
+                staged_report(source.report(), Stage::WithinRegression)
             }
-            Self::FTestFailed { source } => staged(Some(source.report()), Stage::OverallFTest),
-            Self::BetweenRegressionFailed { means, source } => staged(
-                Some(source.report()),
+            Self::FTestFailed { source } => staged_report(source.report(), Stage::OverallFTest),
+            Self::BetweenRegressionFailed { means, source } => staged_report(
+                source.report(),
                 match means {
                     BetweenMeans::Entity => Stage::BetweenRegressionEntity,
                     BetweenMeans::Time => Stage::BetweenRegressionTime,
                 },
             ),
             Self::PooledRegressionFailed { source } => {
-                staged(Some(source.report()), Stage::PooledRegression)
+                staged_report(source.report(), Stage::PooledRegression)
             }
             Self::QuasiDemeanedRegressionFailed { source } => {
-                staged(Some(source.report()), Stage::QuasiDemeanedRegression)
+                staged_report(source.report(), Stage::QuasiDemeanedRegression)
             }
             Self::HausmanTestFailed { source } => {
-                staged(Some(source.report()), Stage::HausmanRegression)
+                staged_report(source.report(), Stage::HausmanRegression)
             }
-            Self::VarianceComponentsMomentsSingular { method } => Some(
-                ErrorReport::new(ErrorCode::VarianceComponentsMomentsSingular)
-                    .param("variance_method", *method),
+            Self::IdentifierDimensionMismatch {
+                dimension,
+                y_rows,
+                other_rows,
+            } => ErrorReport::new(ErrorCode::InternalError).param(
+                "detail",
+                format!("y has {y_rows} rows but {dimension} has {other_rows} rows"),
             ),
-            Self::InvalidDkBandwidth { bandwidth, t } => Some(
+            Self::TwoWayRequiresTime => ErrorReport::new(ErrorCode::InternalError).param(
+                "detail",
+                "two-way effects were requested without a time column",
+            ),
+            Self::InsufficientDegreesOfFreedom {
+                n_obs,
+                n_entities,
+                n_periods,
+                k,
+            } => {
+                // 2-wayは個体ダミーと時点ダミーの間の定数項ぶんを1つ引く。
+                let n_effects = n_entities + n_periods.map_or(0, |t| t.saturating_sub(1));
+                ErrorReport::new(ErrorCode::InsufficientDegreesOfFreedom)
+                    .param("n_obs", *n_obs)
+                    .param("n_params", *k)
+                    .param("n_effects", n_effects)
+                    .param("min_obs", n_effects + k + 1)
+            }
+            Self::SingletonGroup {
+                dimension,
+                group_id,
+            } => ErrorReport::new(ErrorCode::SingletonGroup)
+                .param("argument", dimension.argument_name())
+                .param("group", group_id.as_str()),
+            Self::UnbalancedPanelForTwoWay {
+                n_obs,
+                n_entities,
+                n_periods,
+                expected,
+            } => ErrorReport::new(ErrorCode::PanelNotBalancedForTwoWay)
+                .param("n_obs", *n_obs)
+                .param("n_entities", *n_entities)
+                .param("n_periods", *n_periods)
+                .param("expected_obs", *expected),
+            Self::ZeroVarianceAfterDemeaning { column } => {
+                ErrorReport::new(ErrorCode::RegressorNoWithinVariation)
+                    .param("column", column.as_str())
+            }
+            Self::InvalidDkBandwidth { bandwidth, t } => {
                 ErrorReport::new(ErrorCode::DkBandwidthOutOfRange)
                     .param("value", *bandwidth)
                     .param("n_periods", *t)
-                    .param("max", t.saturating_sub(1)),
-            ),
-            _ => None,
+                    .param("max", t.saturating_sub(1))
+            }
+            Self::InsufficientDkPeriods { t_periods } => {
+                ErrorReport::new(ErrorCode::DkPeriodsTooFew)
+                    .param("n_periods", *t_periods)
+                    .param("min_periods", 2_usize)
+            }
+            Self::InsufficientDkPeriodsForInference { t_periods, q } => {
+                ErrorReport::new(ErrorCode::DkPeriodsNotAboveCoefficients)
+                    .param("n_periods", *t_periods)
+                    .param("n_coefficients", *q)
+                    .param("min_periods", q + 1)
+            }
+            Self::DegenerateDkTwoPeriods => ErrorReport::new(ErrorCode::DkTwoPeriodsDegenerate),
+            Self::DegenerateClusterTwoGroups => {
+                ErrorReport::new(ErrorCode::ClusterTwoGroupsDegenerate)
+            }
+            Self::AmemiyaRequiresWithinVariation { columns } => {
+                ErrorReport::new(ErrorCode::AmemiyaRequiresWithinVariation)
+                    .param("columns", columns.clone())
+            }
+            Self::NonPositiveIdiosyncraticVariance { method, sigma2_eps } => {
+                ErrorReport::new(ErrorCode::NonPositiveIdiosyncraticVariance)
+                    .param("sigma2_eps", *sigma2_eps)
+                    .param("variance_method", *method)
+            }
+            Self::VarianceComponentsMomentsSingular { method } => {
+                ErrorReport::new(ErrorCode::VarianceComponentsMomentsSingular)
+                    .param("variance_method", *method)
+            }
         }
     }
+}
 
-    /// カタログに移したバリアントの`Display`が使う`message`。
+impl PanelError {
+    /// `Display`が使う`message`。
     fn catalog_message(&self) -> String {
-        catalog_display(self.try_report())
+        self.report().message()
     }
 }
 
@@ -1069,20 +1090,127 @@ mod tests {
              in dk_time (6), got 6."
         );
         let wrapped = PanelError::Common(CommonError::InvalidHacLags { hac_lags: 3, n: 3 });
-        assert_eq!(
-            wrapped.try_report().expect("cataloged").code(),
-            ErrorCode::HacLagsOutOfRange
-        );
+        assert_eq!(wrapped.report().code(), ErrorCode::HacLagsOutOfRange);
     }
 
     #[test]
     fn dk_bandwidth_error_maps_to_the_catalog() {
-        let report = PanelError::InvalidDkBandwidth { bandwidth: 7, t: 6 }
-            .try_report()
-            .expect("cataloged");
+        let report = PanelError::InvalidDkBandwidth { bandwidth: 7, t: 6 }.report();
         assert_eq!(report.code(), ErrorCode::DkBandwidthOutOfRange);
         assert!(report.validate().is_ok());
-        assert!(PanelError::TwoWayRequiresTime.try_report().is_none());
+    }
+
+    #[test]
+    fn panel_input_errors_map_to_catalog_codes_with_valid_params() {
+        let cases = [
+            (
+                PanelError::InsufficientDegreesOfFreedom {
+                    n_obs: 10,
+                    n_entities: 5,
+                    n_periods: None,
+                    k: 5,
+                },
+                ErrorCode::InsufficientDegreesOfFreedom,
+                "Not enough observations for the panel model: 10 observations, but 5 coefficients and 5 fixed-effect parameters (entity effects, plus time effects in a two-way model) must be estimated; at least 11 are needed.",
+            ),
+            (
+                PanelError::InsufficientDegreesOfFreedom {
+                    n_obs: 10,
+                    n_entities: 5,
+                    n_periods: Some(2),
+                    k: 1,
+                },
+                ErrorCode::InsufficientDegreesOfFreedom,
+                "Not enough observations for the panel model: 10 observations, but 1 coefficients and 6 fixed-effect parameters (entity effects, plus time effects in a two-way model) must be estimated; at least 8 are needed.",
+            ),
+            (
+                PanelError::SingletonGroup {
+                    dimension: PanelDimension::Entity,
+                    group_id: "a".to_string(),
+                },
+                ErrorCode::SingletonGroup,
+                "The entity group 'a' has only one observation, and singleton groups are not dropped automatically.",
+            ),
+            (
+                PanelError::SingletonGroup {
+                    dimension: PanelDimension::Time,
+                    group_id: "2020".to_string(),
+                },
+                ErrorCode::SingletonGroup,
+                "The time group '2020' has only one observation, and singleton groups are not dropped automatically.",
+            ),
+            (
+                PanelError::UnbalancedPanelForTwoWay {
+                    n_obs: 5,
+                    n_entities: 2,
+                    n_periods: 3,
+                    expected: 6,
+                },
+                ErrorCode::PanelNotBalancedForTwoWay,
+                "Two-way estimation requires a balanced panel: 5 observations for 2 entities and 3 periods, but 6 are expected.",
+            ),
+            (
+                PanelError::ZeroVarianceAfterDemeaning {
+                    column: "x".to_string(),
+                },
+                ErrorCode::RegressorNoWithinVariation,
+                "Regressor 'x' has no variation left after the within transformation: it is time-invariant, or collinear with the fixed effects.",
+            ),
+            (
+                PanelError::InsufficientDkPeriods { t_periods: 1 },
+                ErrorCode::DkPeriodsTooFew,
+                "cov_type=\"dk\" needs at least 2 unique time periods in dk_time, but there are 1.",
+            ),
+            (
+                PanelError::InsufficientDkPeriodsForInference { t_periods: 3, q: 3 },
+                ErrorCode::DkPeriodsNotAboveCoefficients,
+                "cov_type=\"dk\" needs more time periods than jointly tested coefficients: dk_time has 3 periods for 3 coefficient(s); at least 4 are needed.",
+            ),
+            (
+                PanelError::AmemiyaRequiresWithinVariation {
+                    columns: vec!["a".to_string(), "b".to_string()],
+                },
+                ErrorCode::AmemiyaRequiresWithinVariation,
+                "variance_method=\"amemiya\" needs every regressor to vary within the effects, but these do not: 'a', 'b'.",
+            ),
+            (
+                PanelError::NonPositiveIdiosyncraticVariance {
+                    method: "amemiya",
+                    sigma2_eps: -0.5,
+                },
+                ErrorCode::NonPositiveIdiosyncraticVariance,
+                "The estimated idiosyncratic variance is not positive (-0.5) with variance_method=\"amemiya\", so the random-effects weights are undefined.",
+            ),
+        ];
+        for (err, code, message) in cases {
+            let report = err.report();
+            assert_eq!(report.code(), code);
+            assert!(report.validate().is_ok());
+            assert_eq!(report.message(), message);
+            assert_eq!(err.to_string(), message);
+        }
+        for err in [
+            PanelError::DegenerateDkTwoPeriods,
+            PanelError::DegenerateClusterTwoGroups,
+            PanelError::VarianceComponentsMomentsSingular { method: "amemiya" },
+        ] {
+            let report = err.report();
+            assert!(report.validate().is_ok());
+            assert_eq!(err.to_string(), report.message());
+        }
+        // 実装の誤りでだけ起きるものは`INTERNAL_ERROR`になる。
+        for err in [
+            PanelError::TwoWayRequiresTime,
+            PanelError::IdentifierDimensionMismatch {
+                dimension: PanelDimension::Entity,
+                y_rows: 3,
+                other_rows: 2,
+            },
+        ] {
+            let report = err.report();
+            assert_eq!(report.code(), ErrorCode::InternalError);
+            assert!(report.validate().is_ok());
+        }
     }
 
     #[test]
@@ -1169,114 +1297,12 @@ mod tests {
         assert!(
             PanelError::DegenerateDkTwoPeriods
                 .to_string()
-                .starts_with("cov_type='dk' with 2 unique time periods is degenerate")
+                .starts_with("With 2 time periods")
         );
         assert!(
             PanelError::DegenerateClusterTwoGroups
                 .to_string()
-                .starts_with("cov_type='cluster' with 2 clusters is degenerate")
-        );
-        assert_eq!(
-            PanelError::InsufficientDkPeriodsForInference {
-                t_periods: 6,
-                q: 20
-            }
-            .to_string(),
-            "cov_type='dk' requires more unique time periods than jointly tested coefficients: \
-             got t_periods=6 for q=20 coefficient(s) (the slope F-test for FE, the Hausman test \
-             for RE), but the Driscoll-Kraay covariance has rank at most t_periods-1, so the q×q \
-             Wald submatrix is singular when t_periods <= q"
-        );
-        assert_eq!(
-            PanelError::IdentifierDimensionMismatch {
-                dimension: PanelDimension::Entity,
-                y_rows: 10,
-                other_rows: 8,
-            }
-            .to_string(),
-            "dimension mismatch: y has 10 rows but entity has 8 rows"
-        );
-        assert_eq!(
-            PanelError::IdentifierDimensionMismatch {
-                dimension: PanelDimension::Time,
-                y_rows: 10,
-                other_rows: 8,
-            }
-            .to_string(),
-            "dimension mismatch: y has 10 rows but time has 8 rows"
-        );
-        assert_eq!(
-            PanelError::InsufficientDegreesOfFreedom {
-                n_obs: 10,
-                n_entities: 8,
-                n_periods: None,
-                k: 2,
-            }
-            .to_string(),
-            "insufficient degrees of freedom for panel estimation: n_obs=10, \
-             n_entities=8, k=2 \
-             (the panel-adjusted residual degrees of freedom must be positive)"
-        );
-        assert_eq!(
-            PanelError::InsufficientDegreesOfFreedom {
-                n_obs: 20,
-                n_entities: 5,
-                n_periods: Some(4),
-                k: 3,
-            }
-            .to_string(),
-            "insufficient degrees of freedom for panel estimation: n_obs=20, \
-             n_entities=5, n_periods=4, k=3 \
-             (the panel-adjusted residual degrees of freedom must be positive)"
-        );
-        assert_eq!(
-            PanelError::SingletonGroup {
-                dimension: PanelDimension::Entity,
-                group_id: "firm_42".to_string(),
-            }
-            .to_string(),
-            "singleton entity group detected: entity 'firm_42' has only 1 observation. \
-             Singleton groups are not dropped automatically; remove them from the input"
-        );
-        assert_eq!(
-            PanelError::SingletonGroup {
-                dimension: PanelDimension::Time,
-                group_id: "2020".to_string(),
-            }
-            .to_string(),
-            "singleton time group detected: time '2020' has only 1 observation. \
-             Singleton groups are not dropped automatically; remove them from the input"
-        );
-        assert_eq!(
-            PanelError::UnbalancedPanelForTwoWay {
-                n_obs: 39,
-                n_entities: 10,
-                n_periods: 4,
-                expected: 40,
-            }
-            .to_string(),
-            "two-way estimation (fixed or random effects) requires a balanced panel: got \
-             n_obs=39 for n_entities=10 x n_periods=4 (expected 40 observations)"
-        );
-        assert_eq!(
-            PanelError::ZeroVarianceAfterDemeaning {
-                column: "female".to_string(),
-            }
-            .to_string(),
-            "regressor 'female' has zero variance after the within-transformation \
-             (it is time-invariant, or collinear with the fixed effects)"
-        );
-        assert_eq!(
-            PanelError::TwoWayRequiresTime.to_string(),
-            "two-way estimation (fixed or random effects) requires the `time` option to be set"
-        );
-        assert_eq!(
-            PanelError::WithinRegressionFailed {
-                source: LeastSquaresError::SingularMatrix,
-            }
-            .to_string(),
-            "within-transformed least-squares estimation failed: The design matrix is \
-             singular: some columns are perfectly collinear."
+                .starts_with("With 2 clusters")
         );
         // `#[error(transparent)]`: `Common`は内側`CommonError`のメッセージを
         // そのまま透過する（`IvError`/`MleError`のテストと同じ確認）。
@@ -1288,6 +1314,12 @@ mod tests {
             .to_string(),
             r#"cov_type="cluster" needs at least 2 clusters, but the cluster column has 1."#
         );
+        // 回帰の包みは原因のメッセージに、どの回帰かを示す文脈句が付く。
+        let wrapped = PanelError::WithinRegressionFailed {
+            source: LeastSquaresError::SingularMatrix,
+        };
+        assert_eq!(wrapped.to_string(), wrapped.report().message());
+        assert!(wrapped.to_string().contains("design matrix is singular"));
     }
 
     #[test]
@@ -1404,8 +1436,7 @@ mod tests {
             means: BetweenMeans::Time,
             source: LeastSquaresError::Common(CommonError::InsufficientObservations { n: 2, k: 3 }),
         }
-        .try_report()
-        .expect("cataloged");
+        .report();
         assert_eq!(report.code(), ErrorCode::InsufficientObservations);
         assert_eq!(report.stage(), Some(&Stage::BetweenRegressionTime));
         assert!(report.validate().is_ok());
@@ -1415,8 +1446,7 @@ mod tests {
                 setting: ClusterSetting::CovType,
             }),
         }
-        .try_report()
-        .expect("cataloged");
+        .report();
         assert_eq!(report.code(), ErrorCode::ClusterRequired);
         assert!(report.stage().is_none());
     }
@@ -1427,12 +1457,8 @@ mod tests {
             means: BetweenMeans::Time,
             source: LeastSquaresError::Common(CommonError::InsufficientObservations { n: 2, k: 3 }),
         };
-        assert_eq!(
-            err.to_string(),
-            "between-regression on time means least-squares estimation for variance component \
-             failed: Not enough observations: 2 observations for 3 parameters; \
-             at least 4 are needed."
-        );
+        assert_eq!(err.to_string(), err.report().message());
+        assert_eq!(err.report().stage(), Some(&Stage::BetweenRegressionTime));
         assert_eq!(
             err,
             PanelError::BetweenRegressionFailed {
@@ -1450,11 +1476,8 @@ mod tests {
         let err = PanelError::QuasiDemeanedRegressionFailed {
             source: LeastSquaresError::SingularMatrix,
         };
-        assert_eq!(
-            err.to_string(),
-            "quasi-demeaned least-squares estimation for random effects failed: The design matrix \
-             is singular: some columns are perfectly collinear."
-        );
+        assert_eq!(err.to_string(), err.report().message());
+        assert_eq!(err.report().stage(), Some(&Stage::QuasiDemeanedRegression));
         assert_eq!(
             err,
             PanelError::QuasiDemeanedRegressionFailed {
@@ -1468,11 +1491,8 @@ mod tests {
         let err = PanelError::HausmanTestFailed {
             source: LeastSquaresError::SingularMatrix,
         };
-        assert_eq!(
-            err.to_string(),
-            "Hausman test auxiliary regression failed: The design matrix is singular: \
-             some columns are perfectly collinear."
-        );
+        assert_eq!(err.to_string(), err.report().message());
+        assert_eq!(err.report().stage(), Some(&Stage::HausmanRegression));
         assert_eq!(
             err,
             PanelError::HausmanTestFailed {

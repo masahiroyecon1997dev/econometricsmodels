@@ -16,20 +16,17 @@ import json
 import math
 from pathlib import Path
 
-import _error_messages_panel as panel_msgs
 import numpy as np
 import polars as pl
 import pytest
 import statsmodels.api as sm
 from _constants import DATA_DIR
-from _error_messages import escaped
 from _errors import raises_error
 from _re_oracle import hand_computed
 from econometricsmodels import (
     RE,
     ErrorCode,
     REOptions,
-    ValidationError,
 )
 
 _FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "benchmarks"
@@ -177,11 +174,11 @@ def test_two_way_hausman_dk_periods_must_exceed_the_slopes(panel):
     options = REOptions(
         cov_type="dk", time="time", dk_time="dk3", dk_bandwidth=1
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            panel_msgs.INSUFFICIENT_DK_PERIODS_FOR_INFERENCE, t_periods=3, q=3
-        ),
+    with raises_error(
+        ErrorCode.DK_PERIODS_NOT_ABOVE_COEFFICIENTS,
+        n_periods=3,
+        n_coefficients=3,
+        min_periods=4,
     ):
         _fit(panel, options, x=("x1", "xi", "xt"))
     res = _fit(panel, options, x=("x1", "xi"))
@@ -586,8 +583,12 @@ def test_two_way_with_too_few_degrees_of_freedom_for_the_internal_fe_raises(
     df = panel.filter(
         pl.col("entity").is_in(["e1", "e2"]) & (pl.col("time") <= 2)
     )
-    with pytest.raises(
-        ValidationError, match="insufficient degrees of freedom"
+    with raises_error(
+        ErrorCode.INSUFFICIENT_DEGREES_OF_FREEDOM,
+        n_obs=4,
+        n_params=1,
+        n_effects=3,
+        min_obs=5,
     ):
         _fit(df, REOptions(time="time"), x=("x1",))
 
@@ -813,15 +814,12 @@ def test_dk_time_is_independent_of_time(panel):
 
 def test_unbalanced_panel_raises(panel):
     df = panel.slice(1, panel.height - 1)  # 先頭1行を欠く
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            panel_msgs.UNBALANCED_PANEL_FOR_TWO_WAY,
-            n_obs=23,
-            n_entities=6,
-            n_periods=4,
-            expected=24,
-        ),
+    with raises_error(
+        ErrorCode.PANEL_NOT_BALANCED_FOR_TWO_WAY,
+        n_obs=23,
+        n_entities=6,
+        n_periods=4,
+        expected_obs=24,
     ):
         _fit(df, REOptions(time="time"))
 
@@ -834,12 +832,7 @@ def test_unbalanced_panel_is_allowed_for_one_way(panel):
 def test_singleton_time_raises(panel):
     """最後の時点を1観測だけ残すと、時点のsingletonで`ValidationError`。"""
     keep = (pl.col("time") != 4) | (pl.int_range(pl.len()).over("time") == 0)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            panel_msgs.SINGLETON_GROUP, dimension="time", group_id="4"
-        ),
-    ):
+    with raises_error(ErrorCode.SINGLETON_GROUP, argument="time", group="4"):
         _fit(panel.filter(keep), REOptions(time="time"), x=("x1",))
 
 

@@ -282,17 +282,26 @@ demeanしたR²」を3種とも定義すると誤る）:
 
 ### 3.6 engine_pybind: エラー変換
 
-`engine::panel::common::PanelError` → `PyErr`（`panel_error_to_pyerr`、`common.rs`）:
+`engine::panel::common::PanelError` → `PyErr`（`panel_error_to_pyerr`、`common.rs`）。`ErrorInfo::report()`が
+`code`・`params`に変換し、`ValidationError`/`ComputationError`の別はカタログの`class`で決まる:
 
-| `PanelError` | Python例外 |
-|---|---|
-| `Common(CommonError)` | `common_error_to_pyerr`に委譲（`ComputationFailed`のみ`ComputationError`、他は`ValidationError`） |
-| `IdentifierDimensionMismatch` / `InsufficientDegreesOfFreedom` / `SingletonGroup` / `UnbalancedPanelForTwoWay` / `ZeroVarianceAfterDemeaning` / `TwoWayRequiresTime` / `InvalidDkBandwidth` / `InsufficientDkPeriods` / `InsufficientDkPeriodsForInference` / `DegenerateDkTwoPeriods` / `DegenerateClusterTwoGroups` | `ValidationError`（入力・オプション・パネル構造だけから判定できる不正） |
-| `WithinRegressionFailed` / `FTestFailed`（RE: `BetweenRegressionFailed` / `QuasiDemeanedRegressionFailed` / `HausmanTestFailed`） | 内側の`LeastSquaresError`に従う（`SingularMatrix`・`Common(ComputationFailed)`なら`ComputationError`、それ以外は`ValidationError`。`least_squares_error_is_computation_error`）。メッセージは`PanelError`自身の文脈付き文言 |
+| `PanelError` | `code` | 例外 |
+|---|---|---|
+| `Common(CommonError)` | `CommonError`と同じ | `CommonError`と同じ |
+| `InsufficientDegreesOfFreedom` | `INSUFFICIENT_DEGREES_OF_FREEDOM`（`n_effects`は1-wayで個体数、2-wayで個体数+時点数-1） | `ValidationError` |
+| `SingletonGroup` | `SINGLETON_GROUP`（`argument`は`entity`か`time`） | `ValidationError` |
+| `UnbalancedPanelForTwoWay` | `PANEL_NOT_BALANCED_FOR_TWO_WAY` | `ValidationError` |
+| `ZeroVarianceAfterDemeaning` | `REGRESSOR_NO_WITHIN_VARIATION` | `ValidationError` |
+| `InvalidDkBandwidth` / `InsufficientDkPeriods` / `InsufficientDkPeriodsForInference` | `DK_BANDWIDTH_OUT_OF_RANGE` / `DK_PERIODS_TOO_FEW` / `DK_PERIODS_NOT_ABOVE_COEFFICIENTS` | `ValidationError` |
+| `DegenerateDkTwoPeriods` / `DegenerateClusterTwoGroups` | `DK_TWO_PERIODS_DEGENERATE` / `CLUSTER_TWO_GROUPS_DEGENERATE` | `ValidationError` |
+| `AmemiyaRequiresWithinVariation` | `AMEMIYA_REQUIRES_WITHIN_VARIATION` | `ValidationError` |
+| `NonPositiveIdiosyncraticVariance` / `VarianceComponentsMomentsSingular` | `NON_POSITIVE_IDIOSYNCRATIC_VARIANCE` / `VARIANCE_COMPONENTS_MOMENTS_SINGULAR` | `ComputationError` |
+| `IdentifierDimensionMismatch` / `TwoWayRequiresTime` | `INTERNAL_ERROR`（Python APIからは起こらない） | `ComputationError` |
+| `WithinRegressionFailed` / `FTestFailed`（RE: `BetweenRegressionFailed` / `QuasiDemeanedRegressionFailed` / `PooledRegressionFailed` / `HausmanTestFailed`） | 内側の`LeastSquaresError`の`code`に、どの回帰かを示す`stage`を付ける（`stage`を付けてよい`code`のみ） | `code`のクラスで決まる |
 
-`PanelError`はFE/REで共有し、`FeError`/`ReError`は個別に作らない。**engine側に新バリアントを
-追加したら`panel_error_to_pyerr`の網羅的`match`も必ず更新すること**（更新漏れは
-`cargo build --workspace`の`E0004`で検出される。`cargo test -p engine`だけでは検出できない）。
+`PanelError`はFE/REで共有し、`FeError`/`ReError`は個別に作らない。engine側に新バリアントを
+追加したら`ErrorInfo::report()`が対応する`code`を返すようにする（`match`が網羅的なので、
+更新漏れはコンパイルエラーで検出される）。
 
 ## 4. テスト
 

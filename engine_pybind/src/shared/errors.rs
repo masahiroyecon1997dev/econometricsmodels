@@ -264,17 +264,6 @@ pub(crate) fn legacy_validation_error(message: impl Into<String>) -> PyErr {
     )
 }
 
-/// 移行中: カタログに載せる前の自由文を`ComputationError`にする（`code`は`LEGACY_MESSAGE`）。
-pub(crate) fn legacy_computation_error(message: impl Into<String>) -> PyErr {
-    raise_args(
-        ErrorClass::Computation,
-        LEGACY_CODE,
-        message.into(),
-        None,
-        Vec::new(),
-    )
-}
-
 /// `engine::shared::error::CommonError`をPython例外に変換する。
 ///
 /// `engine::linear::common::LeastSquaresError`・`engine::nonlinear::common::MleError`

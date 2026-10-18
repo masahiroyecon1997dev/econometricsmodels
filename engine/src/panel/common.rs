@@ -1049,6 +1049,7 @@ pub(crate) fn quasi_demean_two_way(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared::error::ClusterSetting;
 
     #[test]
     fn panel_cataloged_variants_display_the_catalog_message_and_common_delegates() {
@@ -1271,8 +1272,12 @@ mod tests {
         // `#[error(transparent)]`: `Common`は内側`CommonError`のメッセージを
         // そのまま透過する（`IvError`/`MleError`のテストと同じ確認）。
         assert_eq!(
-            PanelError::Common(CommonError::InsufficientClusters { g: 1 }).to_string(),
-            "cov_type='cluster' requires at least 2 clusters, got 1"
+            PanelError::Common(CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 1
+            })
+            .to_string(),
+            r#"cov_type="cluster" needs at least 2 clusters, but the cluster column has 1."#
         );
     }
 
@@ -1350,7 +1355,10 @@ mod tests {
     #[test]
     fn panel_error_from_operator_propagates_common_error() {
         fn inner() -> Result<(), CommonError> {
-            Err(CommonError::InsufficientClusters { g: 1 })
+            Err(CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 1,
+            })
         }
         fn outer() -> Result<(), PanelError> {
             inner()?;
@@ -1358,7 +1366,10 @@ mod tests {
         }
         assert_eq!(
             outer().unwrap_err(),
-            PanelError::Common(CommonError::InsufficientClusters { g: 1 })
+            PanelError::Common(CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 1
+            })
         );
     }
 
@@ -1379,6 +1390,29 @@ mod tests {
     }
 
     #[test]
+    fn nested_observation_count_error_carries_the_regression_stage() {
+        let report = PanelError::BetweenRegressionFailed {
+            means: BetweenMeans::Time,
+            source: LeastSquaresError::Common(CommonError::InsufficientObservations { n: 2, k: 3 }),
+        }
+        .try_report()
+        .expect("cataloged");
+        assert_eq!(report.code(), ErrorCode::InsufficientObservations);
+        assert_eq!(report.stage(), Some(&Stage::BetweenRegressionTime));
+        assert!(report.validate().is_ok());
+
+        let report = PanelError::WithinRegressionFailed {
+            source: LeastSquaresError::Common(CommonError::MissingClusterColumn {
+                setting: ClusterSetting::CovType,
+            }),
+        }
+        .try_report()
+        .expect("cataloged");
+        assert_eq!(report.code(), ErrorCode::ClusterRequired);
+        assert!(report.stage().is_none());
+    }
+
+    #[test]
     fn between_regression_failed_message_and_equality() {
         let err = PanelError::BetweenRegressionFailed {
             means: BetweenMeans::Time,
@@ -1387,8 +1421,8 @@ mod tests {
         assert_eq!(
             err.to_string(),
             "between-regression on time means least-squares estimation for variance component \
-             failed: insufficient observations: n=2 must be greater than k=3 \
-             (number of independent variables, including the intercept)"
+             failed: Not enough observations: 2 observations for 3 coefficients \
+             (including the intercept); at least 4 are needed."
         );
         assert_eq!(
             err,

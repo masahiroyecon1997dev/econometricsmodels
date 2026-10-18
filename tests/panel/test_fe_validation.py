@@ -15,7 +15,7 @@ n_periods=6）は`tests/panel/conftest.py`、`our_fit`ヘルパー（既定
 `x=["x1","x2"], entity="entity"`）は`tests/support/_fe_helpers.py`。
 
 Note:
-    `MISSING_CLUSTER_COLUMN`（OLS/WLS/IVが持つ「`cov_type='cluster'`なのに
+    `CLUSTER_REQUIRED`（OLS/WLS/IVが持つ「`cov_type='cluster'`なのに
     クラスター列が一切無い」エラー）はFEには存在しない。`cluster=None`
     は常に`entity`引数の列に自動フォールバックするため、この失敗経路が
     構造的に到達不能（`engine_pybind/src/panel/fe.rs::resolve_fe_cov_type`
@@ -568,8 +568,11 @@ def test_insufficient_clusters_raises(fe_dataset):
     """クラスターが1種類しかない場合`CommonError::InsufficientClusters`。"""
     df = fe_dataset.with_columns(pl.lit(0).alias("single_cluster"))
     options = FEOptions(cov_type="cluster", cluster="single_cluster")
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.INSUFFICIENT_CLUSTERS, g=1)
+    with raises_error(
+        ErrorCode.CLUSTER_COUNT_TOO_SMALL,
+        setting="cov_type",
+        n_clusters=1,
+        min_clusters=2,
     ):
         our_fit(df, options=options)
 
@@ -595,9 +598,12 @@ def test_cluster_count_at_most_slopes_raises_validation_error():
         }
     )
     options = FEOptions(cov_type="cluster", cluster="cluster_group")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=2, q=2),
+    with raises_error(
+        ErrorCode.CLUSTER_COUNT_NOT_ABOVE_SLOPES,
+        setting="cov_type",
+        n_clusters=2,
+        n_slopes=2,
+        min_clusters=3,
     ):
         FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 

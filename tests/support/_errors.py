@@ -65,6 +65,10 @@ MIGRATED_CODES: frozenset[str] = frozenset(
         ErrorCode.GMM_MAX_ITER_OUT_OF_RANGE,
         ErrorCode.NLAGS_NOT_POSITIVE,
         ErrorCode.DK_BANDWIDTH_OUT_OF_RANGE,
+        ErrorCode.INSUFFICIENT_OBSERVATIONS,
+        ErrorCode.CLUSTER_REQUIRED,
+        ErrorCode.CLUSTER_COUNT_TOO_SMALL,
+        ErrorCode.CLUSTER_COUNT_NOT_ABOVE_SLOPES,
     }
 )
 

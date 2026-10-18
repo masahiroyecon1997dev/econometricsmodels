@@ -16,7 +16,7 @@ n_periods=6）は`tests/panel/conftest.py`（FEと共用、RE専用の合成デ�
 `tests/support/_re_helpers.py`。
 
 Note:
-    `MISSING_CLUSTER_COLUMN`はFEと同じ理由で構造的に到達不能
+    `CLUSTER_REQUIRED`はFEと同じ理由で構造的に到達不能
     （`cluster=None`は常に`entity`引数の列に自動フォールバックする、
     `engine_pybind/src/panel/re.rs::resolve_re_cov_type`参照）。`x=[]`が
     `ValidationError`になる理由は`engine_pybind/src/panel/re.rs`
@@ -390,7 +390,13 @@ def test_between_regression_insufficient_entities_raises():
             "entity": ["a", "a", "b", "b"],
         }
     )
-    with pytest.raises(ValidationError, match="between-regression"):
+    with raises_error(
+        ErrorCode.INSUFFICIENT_OBSERVATIONS,
+        stage="BETWEEN_REGRESSION_ENTITY",
+        n_obs=2,
+        n_params=2,
+        min_obs=3,
+    ):
         RE(df, y="y", x=["x1"], entity="entity").fit()
 
 
@@ -506,8 +512,11 @@ def test_insufficient_clusters_raises():
         }
     ).with_columns(pl.lit(0).alias("single_cluster"))
     options = REOptions(cov_type="cluster", cluster="single_cluster")
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.INSUFFICIENT_CLUSTERS, g=1)
+    with raises_error(
+        ErrorCode.CLUSTER_COUNT_TOO_SMALL,
+        setting="cov_type",
+        n_clusters=1,
+        min_clusters=2,
     ):
         our_fit_re(df, options=options)
 
@@ -529,9 +538,12 @@ def test_cluster_count_at_most_slopes_raises_validation_error():
         }
     )
     options = REOptions(cov_type="cluster", cluster="cluster_group")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=2, q=2),
+    with raises_error(
+        ErrorCode.CLUSTER_COUNT_NOT_ABOVE_SLOPES,
+        setting="cov_type",
+        n_clusters=2,
+        n_slopes=2,
+        min_clusters=3,
     ):
         RE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 
@@ -570,9 +582,12 @@ def test_many_regressors_cluster_raises_validation_error():
     （`SCENARIO_COV_TYPES`）で、失敗パスだけをここで確認する。"""
     df = pl.read_csv(DATA_DIR / "fe_many_regressors.csv")
     x_cols = x_columns(df)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=40, q=40),
+    with raises_error(
+        ErrorCode.CLUSTER_COUNT_NOT_ABOVE_SLOPES,
+        setting="cov_type",
+        n_clusters=40,
+        n_slopes=40,
+        min_clusters=41,
     ):
         RE(
             df,

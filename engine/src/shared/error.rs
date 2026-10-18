@@ -27,6 +27,29 @@ pub trait ErrorInfo {
     fn report(&self) -> ErrorReport;
 }
 
+/// クラスターのグループキーを要求した設定。エラーの`setting`パラメータになる。
+///
+/// `cov_type="cluster"`と、IVのGMMの`gmm_weight_type="cluster"`は、どちらも同じ`cluster`列を
+/// 使うため、どちらが原因かをエラーが伝える必要がある。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClusterSetting {
+    /// `cov_type="cluster"`（共分散の推定量）。
+    CovType,
+    /// `gmm_weight_type="cluster"`（GMMの重み行列）。
+    GmmWeightType,
+}
+
+impl ClusterSetting {
+    /// 利用者が指定するオプション名。
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::CovType => "cov_type",
+            Self::GmmWeightType => "gmm_weight_type",
+        }
+    }
+}
+
 /// 系統をまたいで共通のバリデーション・計算エラー。
 ///
 /// `engine`はPyO3を知らないため、Python例外への変換は`engine_pybind`側で行う
@@ -35,17 +58,15 @@ pub trait ErrorInfo {
 /// `*_error_to_pyerr`関数はこれに委譲する。
 #[derive(Debug, Error, PartialEq)]
 pub enum CommonError {
-    /// yとxの行数が一致しない。
-    #[error("dimension mismatch: y has {y_rows} rows but x has {x_rows} rows")]
+    /// yとxの行数が一致しない。`engine_pybind`は同じ`DataFrame`の列から作るため、Python APIからは
+    /// 起こらない（起きたら実装の誤りなので`INTERNAL_ERROR`として報告する）。
+    #[error("{}", self.catalog_message())]
     DimensionMismatch { y_rows: usize, x_rows: usize },
 
-    /// 観測数nが説明変数の数k（定数項を含む）以下。`k>=1`であることが前提
+    /// 観測数nが推定するパラメータの数k以下（定数項があれば含む。Tobitは`log σ`も数えた`k+1`を渡す）。`k>=1`であることが前提
     /// （`k=0`は別バリアント`NoRegressors`で扱う。`.claude/rules/rust-style.md`
     /// 「エラーハンドリング」参照）。
-    #[error(
-        "insufficient observations: n={n} must be greater than k={k} \
-         (number of independent variables, including the intercept)"
-    )]
+    #[error("{}", self.catalog_message())]
     InsufficientObservations { n: usize, k: usize },
 
     /// 定数項も説明変数も無い（`include_intercept=false`かつ説明変数0個、`k=0`）。
@@ -53,30 +74,30 @@ pub enum CommonError {
     /// （`k=0`だと`n`の値に関わらず不等式`n>k`は常に成立してしまい、
     /// `InsufficientObservations`のメッセージを流用すると「条件を満たしているのに
     /// エラーになる」という誤解を招くメッセージになっていた）。
-    #[error(
-        "no regressors: k=0 (include_intercept=false and no independent variables). \
-         At least one of the two is required"
-    )]
+    ///
+    /// Python APIは`x=[]`を先に拒否する（`ROLE_EMPTY`）ため、そこからは起こらない。
+    #[error("{}", self.catalog_message())]
     NoRegressors { n: usize },
 
     /// `confidence_level`が`(0, 1)`の範囲外。
     #[error("{}", self.catalog_message())]
     InvalidConfidenceLevel { confidence_level: f64 },
 
-    /// `cov_type="cluster"`なのにクラスターのグループキーが渡されていない。
-    #[error("cov_type='cluster' requires cluster identifiers to be provided")]
-    MissingClusterColumn,
+    /// クラスターが要求されている（`setting`が`"cluster"`）のに、クラスターのグループキーが
+    /// 渡されていない。
+    #[error("{}", self.catalog_message())]
+    MissingClusterColumn { setting: ClusterSetting },
 
     /// `cov_type="cluster"`のクラスターのグループ（整数コード）の行数が、データの行数`n`と
     /// 一致しない。`engine_pybind`は同じ`DataFrame`から作るため起こらないが、`GroupCodes`を
     /// 公開しているので、呼び出し側が別の長さのコードを渡しても誤った標準誤差を返さず
     /// ここで弾く。
-    #[error("cluster identifiers have {groups_rows} rows but the data has {n} rows")]
+    #[error("{}", self.catalog_message())]
     ClusterDimensionMismatch { groups_rows: usize, n: usize },
 
-    /// `cov_type="cluster"`のときのクラスター数が2未満。
-    #[error("cov_type='cluster' requires at least 2 clusters, got {g}")]
-    InsufficientClusters { g: usize },
+    /// クラスターが要求されている（`setting`が`"cluster"`）ときのクラスター数が2未満。
+    #[error("{}", self.catalog_message())]
+    InsufficientClusters { setting: ClusterSetting, g: usize },
 
     /// `cov_type="cluster"`で、クラスター数`g`が全体Wald/F検定の対象となる傾き係数の
     /// 数`q`（= `k - k_constant`）以下。クラスターロバスト共分散`Ŝ = Σ_g S_g S_g'`は、
@@ -86,12 +107,9 @@ pub enum CommonError {
     /// 列数）も入力だけから判定できるため、行列計算を待たず`fit()`冒頭で弾く。
     /// `InsufficientClusters`（`g < 2`）とはメッセージが異なるため
     /// 別バリアントに分ける。
-    #[error(
-        "cov_type='cluster' requires more clusters than slope coefficients for joint \
-         inference: got g={g} clusters for q={q} slope coefficient(s), but the \
-         cluster-robust covariance has rank at most g-1, so the q×q Wald/F submatrix \
-         is singular when g <= q"
-    )]
+    ///
+    /// この検証は共分散の推定量（`cov_type`）だけが受ける。
+    #[error("{}", self.catalog_message())]
     InsufficientClustersForInference { g: usize, q: usize },
 
     /// `cov_type="hac"`（GMMの`weight_type="hac"`を含む）の`hac_lags`が負、または観測数`n`以上（`[0, n)`の範囲外）。
@@ -129,6 +147,11 @@ pub(crate) fn staged(source: Option<ErrorReport>, stage: Stage) -> Option<ErrorR
     })
 }
 
+/// Python APIからは到達しない（実装の誤りでだけ起きる）エラーの[`ErrorReport`]。
+fn internal(detail: String) -> ErrorReport {
+    ErrorReport::new(ErrorCode::InternalError).param("detail", detail)
+}
+
 impl CommonError {
     /// カタログの`code`・`params`で表せるバリアントの[`ErrorReport`]。まだカタログに移していないバリアントは`None`。
     ///
@@ -147,7 +170,38 @@ impl CommonError {
                     .param("n_obs", *n)
                     .param("max", n.saturating_sub(1)),
             ),
-            _ => None,
+            Self::InsufficientObservations { n, k } => Some(
+                ErrorReport::new(ErrorCode::InsufficientObservations)
+                    .param("n_obs", *n)
+                    .param("n_params", *k)
+                    .param("min_obs", k + 1),
+            ),
+            Self::MissingClusterColumn { setting } => {
+                Some(ErrorReport::new(ErrorCode::ClusterRequired).param("setting", setting.name()))
+            }
+            Self::InsufficientClusters { setting, g } => Some(
+                ErrorReport::new(ErrorCode::ClusterCountTooSmall)
+                    .param("setting", setting.name())
+                    .param("n_clusters", *g)
+                    .param("min_clusters", 2_usize),
+            ),
+            Self::InsufficientClustersForInference { g, q } => Some(
+                ErrorReport::new(ErrorCode::ClusterCountNotAboveSlopes)
+                    .param("setting", ClusterSetting::CovType.name())
+                    .param("n_clusters", *g)
+                    .param("n_slopes", *q)
+                    .param("min_clusters", q + 1),
+            ),
+            Self::DimensionMismatch { y_rows, x_rows } => Some(internal(format!(
+                "y has {y_rows} rows but x has {x_rows} rows"
+            ))),
+            Self::NoRegressors { n } => Some(internal(format!(
+                "the design matrix has no columns (n={n})"
+            ))),
+            Self::ClusterDimensionMismatch { groups_rows, n } => Some(internal(format!(
+                "cluster identifiers have {groups_rows} rows but the data has {n} rows"
+            ))),
+            Self::ComputationFailed(_) => None,
         }
     }
 
@@ -226,59 +280,93 @@ mod tests {
             lags.message(),
             "hac_lags must be from 0 to 99, one less than the number of observations (100), got 100."
         );
+    }
 
-        assert!(CommonError::MissingClusterColumn.try_report().is_none());
+    #[test]
+    fn observation_and_cluster_errors_map_to_catalog_codes_with_valid_params() {
+        let cases = [
+            (
+                CommonError::InsufficientObservations { n: 2, k: 3 },
+                ErrorCode::InsufficientObservations,
+                "Not enough observations: 2 observations for 3 coefficients (including the intercept); at least 4 are needed.",
+            ),
+            (
+                CommonError::MissingClusterColumn {
+                    setting: ClusterSetting::GmmWeightType,
+                },
+                ErrorCode::ClusterRequired,
+                r#"gmm_weight_type="cluster" requires the cluster option, the column that identifies the clusters."#,
+            ),
+            (
+                CommonError::InsufficientClusters {
+                    setting: ClusterSetting::CovType,
+                    g: 1,
+                },
+                ErrorCode::ClusterCountTooSmall,
+                r#"cov_type="cluster" needs at least 2 clusters, but the cluster column has 1."#,
+            ),
+            (
+                CommonError::InsufficientClustersForInference { g: 2, q: 3 },
+                ErrorCode::ClusterCountNotAboveSlopes,
+                r#"cov_type="cluster" needs more clusters than slope coefficients for the overall F/Wald test: the cluster column has 2 clusters for 3 slope coefficient(s); at least 4 are needed."#,
+            ),
+        ];
+        for (err, code, message) in cases {
+            let report = err.try_report().expect("cataloged");
+            assert_eq!(report.code(), code);
+            assert!(report.validate().is_ok());
+            assert_eq!(report.message(), message);
+            assert_eq!(err.to_string(), message);
+        }
+    }
+
+    #[test]
+    fn unreachable_errors_map_to_internal_error_with_the_original_text() {
+        let cases = [
+            (
+                CommonError::DimensionMismatch {
+                    y_rows: 10,
+                    x_rows: 8,
+                },
+                "y has 10 rows but x has 8 rows",
+            ),
+            (
+                CommonError::NoRegressors { n: 5 },
+                "the design matrix has no columns (n=5)",
+            ),
+            (
+                CommonError::ClusterDimensionMismatch {
+                    groups_rows: 2,
+                    n: 5,
+                },
+                "cluster identifiers have 2 rows but the data has 5 rows",
+            ),
+        ];
+        for (err, detail) in cases {
+            let report = err.try_report().expect("cataloged");
+            assert_eq!(report.code(), ErrorCode::InternalError);
+            assert!(report.validate().is_ok());
+            assert_eq!(
+                report.message(),
+                format!("An internal error occurred: {detail}. This should not happen.")
+            );
+            assert_eq!(err.to_string(), report.message());
+        }
+        assert!(
+            CommonError::ComputationFailed("x".to_string())
+                .try_report()
+                .is_none()
+        );
     }
 
     #[test]
     fn common_error_messages_are_human_readable() {
-        assert_eq!(
-            CommonError::DimensionMismatch {
-                y_rows: 10,
-                x_rows: 8
-            }
-            .to_string(),
-            "dimension mismatch: y has 10 rows but x has 8 rows"
-        );
-        assert_eq!(
-            CommonError::InsufficientObservations { n: 2, k: 3 }.to_string(),
-            "insufficient observations: n=2 must be greater than k=3 \
-             (number of independent variables, including the intercept)"
-        );
-        assert_eq!(
-            CommonError::NoRegressors { n: 5 }.to_string(),
-            "no regressors: k=0 (include_intercept=false and no independent variables). \
-             At least one of the two is required"
-        );
         assert_eq!(
             CommonError::InvalidConfidenceLevel {
                 confidence_level: 1.5
             }
             .to_string(),
             "confidence_level must be strictly between 0 and 1, got 1.5."
-        );
-        assert_eq!(
-            CommonError::ClusterDimensionMismatch {
-                groups_rows: 2,
-                n: 5
-            }
-            .to_string(),
-            "cluster identifiers have 2 rows but the data has 5 rows"
-        );
-        assert_eq!(
-            CommonError::MissingClusterColumn.to_string(),
-            "cov_type='cluster' requires cluster identifiers to be provided"
-        );
-        assert_eq!(
-            CommonError::InsufficientClusters { g: 1 }.to_string(),
-            "cov_type='cluster' requires at least 2 clusters, got 1"
-        );
-        assert_eq!(
-            CommonError::InsufficientClustersForInference { g: 2, q: 3 }.to_string(),
-            "cov_type='cluster' requires more clusters than slope coefficients for joint \
-             inference: got g=2 clusters for q=3 slope coefficient(s), but the \
-             cluster-robust covariance has rank at most g-1, so the q×q Wald/F submatrix \
-             is singular when g <= q"
         );
         assert_eq!(
             CommonError::InvalidHacLags {
@@ -318,12 +406,24 @@ mod tests {
             }
         );
         assert_eq!(
-            CommonError::InsufficientClusters { g: 1 },
-            CommonError::InsufficientClusters { g: 1 }
+            CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 1
+            },
+            CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 1
+            }
         );
         assert_ne!(
-            CommonError::InsufficientClusters { g: 1 },
-            CommonError::InsufficientClusters { g: 0 }
+            CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 1
+            },
+            CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 0
+            }
         );
         assert_eq!(
             CommonError::InsufficientClustersForInference { g: 2, q: 2 },
@@ -333,5 +433,32 @@ mod tests {
             CommonError::InsufficientClustersForInference { g: 2, q: 2 },
             CommonError::InsufficientClustersForInference { g: 2, q: 3 }
         );
+    }
+
+    #[test]
+    fn insufficient_clusters_report_keeps_the_gmm_weight_setting() {
+        let report = CommonError::InsufficientClusters {
+            setting: ClusterSetting::GmmWeightType,
+            g: 1,
+        }
+        .try_report()
+        .expect("cataloged");
+        assert_eq!(
+            report.message(),
+            r#"gmm_weight_type="cluster" needs at least 2 clusters, but the cluster column has 1."#
+        );
+    }
+
+    #[test]
+    fn cluster_required_is_not_tagged_with_a_stage() {
+        let report = staged(
+            CommonError::MissingClusterColumn {
+                setting: ClusterSetting::CovType,
+            }
+            .try_report(),
+            Stage::SecondStage,
+        )
+        .expect("some");
+        assert!(report.stage().is_none());
     }
 }

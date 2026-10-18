@@ -16,7 +16,6 @@ import json
 import math
 from pathlib import Path
 
-import _error_messages as msgs
 import _error_messages_panel as panel_msgs
 import numpy as np
 import polars as pl
@@ -155,9 +154,12 @@ def test_two_way_hausman_cluster_count_must_cover_the_auxiliary_slopes(panel):
     """時点でクラスタリング（G = 4）。RE本体の傾き3個には足りるが、補助回帰の傾き
     （`x*`の3個と`x̃`の1個）には足りず`ValidationError`になる。`x1 + xi`なら通る。"""
     options = REOptions(cov_type="cluster", time="time", cluster="time")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=4, q=4),
+    with raises_error(
+        ErrorCode.CLUSTER_COUNT_NOT_ABOVE_SLOPES,
+        setting="cov_type",
+        n_clusters=4,
+        n_slopes=4,
+        min_clusters=5,
     ):
         _fit(panel, options, x=("x1", "xi", "xt"))
     res = _fit(panel, options, x=("x1", "xi"))
@@ -583,8 +585,12 @@ def test_two_way_with_too_few_degrees_of_freedom_for_the_internal_fe_raises(
 def test_two_way_with_many_regressors_raises_because_time_means_cannot_be_fitted():
     """`k = 20`・`T = 6`: 時点平均のbetween回帰が`T <= K_b + 1`で失敗する。"""
     many = pl.read_csv(DATA_DIR / "fe_many_regressors.csv")
-    with pytest.raises(
-        ValidationError, match="between-regression on time means"
+    with raises_error(
+        ErrorCode.INSUFFICIENT_OBSERVATIONS,
+        stage="BETWEEN_REGRESSION_TIME",
+        n_obs=6,
+        n_params=6,
+        min_obs=7,
     ):
         _fit(
             many,
@@ -839,9 +845,12 @@ def test_singleton_time_raises(panel):
 def test_between_regression_failure_names_the_regression(panel, keep, means):
     """2-wayは個体平均・時点平均の2本のbetween回帰を推定するため、失敗したメッセージが
     どちらかを示す。"""
-    with pytest.raises(
-        ValidationError,
-        match=f"between-regression on {means} means",
+    with raises_error(
+        ErrorCode.INSUFFICIENT_OBSERVATIONS,
+        stage=f"BETWEEN_REGRESSION_{means.upper()}",
+        n_obs=2,
+        n_params=2,
+        min_obs=3,
     ):
         _fit(panel.filter(keep), REOptions(time="time"), x=("x1",))
 

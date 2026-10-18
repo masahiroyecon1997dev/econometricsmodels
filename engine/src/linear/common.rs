@@ -96,6 +96,7 @@ pub(crate) fn row_time_order(n: usize) -> Vec<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared::error::ClusterSetting;
 
     #[test]
     fn nlags_display_is_the_catalog_message() {
@@ -147,8 +148,11 @@ mod tests {
             "design matrix is singular (perfect multicollinearity detected)"
         );
         assert_eq!(
-            LeastSquaresError::Common(CommonError::MissingClusterColumn).to_string(),
-            "cov_type='cluster' requires cluster identifiers to be provided"
+            LeastSquaresError::Common(CommonError::MissingClusterColumn {
+                setting: ClusterSetting::CovType,
+            })
+            .to_string(),
+            r#"cov_type="cluster" requires the cluster option, the column that identifies the clusters."#
         );
     }
 
@@ -159,8 +163,14 @@ mod tests {
             LeastSquaresError::SingularMatrix
         );
         assert_ne!(
-            LeastSquaresError::Common(CommonError::InsufficientClusters { g: 1 }),
-            LeastSquaresError::Common(CommonError::InsufficientClusters { g: 0 })
+            LeastSquaresError::Common(CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 1
+            }),
+            LeastSquaresError::Common(CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 0
+            })
         );
     }
 }

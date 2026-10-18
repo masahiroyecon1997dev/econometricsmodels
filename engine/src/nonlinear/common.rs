@@ -31,7 +31,7 @@ use thiserror::Error;
 
 use crate::shared::covariance::{cluster_correction, cluster_meat, sandwich};
 use crate::shared::design_matrix::design_matrix_element;
-use crate::shared::error::{CommonError, catalog_display};
+use crate::shared::error::{ClusterSetting, CommonError, catalog_display};
 use crate::shared::error_catalog::{ErrorCode, ErrorReport};
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference;
@@ -361,8 +361,10 @@ pub(crate) fn validate_cluster_cov_type(
     let CovType::Cluster { groups } = cov_type else {
         return Ok(());
     };
-    let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
-    let g = validate_cluster_groups(groups, n)?;
+    let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn {
+        setting: ClusterSetting::CovType,
+    })?;
+    let g = validate_cluster_groups(groups, n, ClusterSetting::CovType)?;
     validate_cluster_count_covers_slopes(g, n_slopes)?;
     Ok(())
 }
@@ -5486,8 +5488,11 @@ mod tests {
             "the outer-product-of-gradients (OPG) matrix is singular and cannot be inverted"
         );
         assert_eq!(
-            MleError::Common(CommonError::MissingClusterColumn).to_string(),
-            "cov_type='cluster' requires cluster identifiers to be provided"
+            MleError::Common(CommonError::MissingClusterColumn {
+                setting: ClusterSetting::CovType,
+            })
+            .to_string(),
+            r#"cov_type="cluster" requires the cluster option, the column that identifies the clusters."#
         );
     }
 
@@ -5496,8 +5501,14 @@ mod tests {
         assert_eq!(MleError::SingularHessian, MleError::SingularHessian);
         assert_ne!(MleError::SingularHessian, MleError::SingularOpgMatrix);
         assert_ne!(
-            MleError::Common(CommonError::InsufficientClusters { g: 1 }),
-            MleError::Common(CommonError::InsufficientClusters { g: 0 })
+            MleError::Common(CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 1
+            }),
+            MleError::Common(CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 0
+            })
         );
         assert_eq!(
             MleError::NonConvergence { n_iter: 35 },
@@ -5852,7 +5863,10 @@ mod tests {
                 true,
                 &CovType::Cluster { groups: None }
             ),
-            Err(CommonError::MissingClusterColumn.into())
+            Err(CommonError::MissingClusterColumn {
+                setting: ClusterSetting::CovType,
+            }
+            .into())
         );
     }
 

@@ -293,7 +293,7 @@ pub(crate) fn common_error_to_pyerr(err: CommonError) -> PyErr {
         | CommonError::InsufficientObservations { .. }
         | CommonError::NoRegressors { .. }
         | CommonError::InvalidConfidenceLevel { .. }
-        | CommonError::MissingClusterColumn
+        | CommonError::MissingClusterColumn { .. }
         | CommonError::ClusterDimensionMismatch { .. }
         | CommonError::InsufficientClusters { .. }
         | CommonError::InsufficientClustersForInference { .. }

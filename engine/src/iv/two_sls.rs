@@ -69,7 +69,7 @@ use crate::iv::common::{
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use crate::shared::covariance::{cluster_cov_params, resolve_hac_lags, time_ordering};
-use crate::shared::error::CommonError;
+use crate::shared::error::{ClusterSetting, CommonError};
 use crate::shared::inference;
 use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 use crate::shared::validation::validate_cluster_groups;
@@ -319,10 +319,12 @@ impl TwoSlsEstimator {
                 )
             }
             CovType::Cluster { groups } => {
-                let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
+                let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn {
+                    setting: ClusterSetting::CovType,
+                })?;
                 // クラスター数 `g <= q`（構造方程式の傾き係数の数）は`fit()`冒頭で
                 // 既に`InsufficientClustersForInference`として弾いている。
-                let n_groups = validate_cluster_groups(groups, n)?;
+                let n_groups = validate_cluster_groups(groups, n, ClusterSetting::CovType)?;
                 // 設計行列に`X̂`、残差に構造残差`e`を使う点のみがOLSとの違い（共有関数は
                 // 設計行列と残差を引数に取る）。
                 let cov = cluster_cov_params(x_hat, &residuals, &xtx_inv, groups);
@@ -1946,7 +1948,9 @@ mod tests {
         );
         assert_eq!(
             result.unwrap_err(),
-            IvError::Common(CommonError::MissingClusterColumn)
+            IvError::Common(CommonError::MissingClusterColumn {
+                setting: ClusterSetting::CovType,
+            })
         );
     }
 
@@ -1962,7 +1966,10 @@ mod tests {
         );
         assert_eq!(
             result.unwrap_err(),
-            IvError::Common(CommonError::InsufficientClusters { g: 1 })
+            IvError::Common(CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 1
+            })
         );
     }
 

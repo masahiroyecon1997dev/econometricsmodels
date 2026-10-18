@@ -16,10 +16,12 @@ import polars as pl
 import pytest
 from _assertions import assert_close
 from _constants import DATA_DIR
+from _errors import raises_error
 from econometricsmodels import (
     FE,
     RE,
     ComputationError,
+    ErrorCode,
     FEOptions,
     REOptions,
     ValidationError,
@@ -249,7 +251,13 @@ def test_entity_count_boundary_uses_the_identified_columns():
             ],
         }
     ).with_columns(x1_bar=pl.col("x1").mean().over("entity"))  # fmt: skip
-    with pytest.raises(ValidationError, match="between-regression"):
+    with raises_error(
+        ErrorCode.INSUFFICIENT_OBSERVATIONS,
+        stage="BETWEEN_REGRESSION_ENTITY",
+        n_obs=3,
+        n_params=3,
+        min_obs=4,
+    ):
         _fit(["x1", "x2", "x1_bar"], df=df)
     res = _fit(["x1", "x1_bar"], df=df)
     assert res.hausman_df is None

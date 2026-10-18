@@ -962,6 +962,7 @@ impl ProbitEstimator {
 mod tests {
     use super::*;
     use crate::nonlinear::common::{SolverType, dydx_and_jacobian};
+    use crate::shared::error::ClusterSetting;
     use crate::shared::group_codes::GroupCodes;
     use statrs::distribution::ChiSquared;
 
@@ -2235,7 +2236,9 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            MleError::Common(CommonError::MissingClusterColumn)
+            MleError::Common(CommonError::MissingClusterColumn {
+                setting: ClusterSetting::CovType,
+            })
         );
     }
 
@@ -2269,7 +2272,10 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            MleError::Common(CommonError::InsufficientClusters { g: 1 })
+            MleError::Common(CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 1
+            })
         );
     }
 

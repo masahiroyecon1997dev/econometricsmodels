@@ -40,7 +40,7 @@ use thiserror::Error;
 
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
-use crate::shared::error::{CommonError, catalog_display, staged};
+use crate::shared::error::{ClusterSetting, CommonError, catalog_display, staged};
 use crate::shared::error_catalog::{ErrorCode, ErrorReport, Stage};
 use crate::shared::validation::{
     GMM_MAX_ITER_MIN, MAX_ITER_LIMIT, validate_cluster_count_covers_slopes, validate_cluster_groups,
@@ -518,7 +518,7 @@ pub fn validate_structural_cluster_count(
     let Some(groups) = cov_type.cluster_groups() else {
         return Ok(());
     };
-    let g = validate_cluster_groups(groups, input.nobs())?;
+    let g = validate_cluster_groups(groups, input.nobs(), ClusterSetting::CovType)?;
     validate_cluster_count_covers_slopes(
         g,
         input.k_exog() + input.k_endog() - usize::from(input.has_intercept()),
@@ -944,8 +944,12 @@ mod tests {
              (order condition: len(instruments) >= len(x_endog))"
         );
         assert_eq!(
-            IvError::Common(CommonError::InsufficientClusters { g: 1 }).to_string(),
-            "cov_type='cluster' requires at least 2 clusters, got 1"
+            IvError::Common(CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 1
+            })
+            .to_string(),
+            r#"cov_type="cluster" needs at least 2 clusters, but the cluster column has 1."#
         );
         assert_eq!(
             IvError::InsufficientObservationsForFirstStage { n: 4, l: 4 }.to_string(),
@@ -1082,7 +1086,10 @@ mod tests {
             IvError::FirstStageFailed {
                 endog_name: "endog1".to_string(),
                 source: crate::linear::common::LeastSquaresError::Common(
-                    CommonError::InsufficientClusters { g: 1 }
+                    CommonError::InsufficientClusters {
+                        setting: ClusterSetting::CovType,
+                        g: 1
+                    }
                 ),
             }
         );
@@ -1284,7 +1291,10 @@ mod tests {
         let input = structural_cluster_test_input(true);
         assert_eq!(
             validate_structural_cluster_count(&input, &cluster_cov(1)),
-            Err(IvError::Common(CommonError::InsufficientClusters { g: 1 }))
+            Err(IvError::Common(CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 1
+            }))
         );
     }
 

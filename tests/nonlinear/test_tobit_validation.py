@@ -242,9 +242,11 @@ def test_insufficient_observations_raises(censored_dataset):
     ここが異なる（実測確認済み）。
     """
     df = censored_dataset.head(2)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.INSUFFICIENT_OBSERVATIONS, n=2, k=4),
+    with raises_error(
+        ErrorCode.INSUFFICIENT_OBSERVATIONS,
+        n_obs=2,
+        n_params=4,
+        min_obs=5,
     ):
         Tobit(df, y="y", x=["x1", "x2"]).fit()
 
@@ -517,8 +519,11 @@ def test_cluster_cov_type_requires_at_least_two_groups():
             "cluster": ["a", "a", "a", "a"],
         }
     )
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.INSUFFICIENT_CLUSTERS, g=1)
+    with raises_error(
+        ErrorCode.CLUSTER_COUNT_TOO_SMALL,
+        setting="cov_type",
+        n_clusters=1,
+        min_clusters=2,
     ):
         Tobit(
             df,
@@ -540,9 +545,12 @@ def test_cluster_count_at_most_slopes_raises_validation_error(
     `hours`クラスターケースがこの経路。`G<q`側はOLSの同名テストで確認）。
     """
     df = with_cluster_groups(censored_dataset, 2, col="cluster")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=2, q=2),
+    with raises_error(
+        ErrorCode.CLUSTER_COUNT_NOT_ABOVE_SLOPES,
+        setting="cov_type",
+        n_clusters=2,
+        n_slopes=2,
+        min_clusters=3,
     ):
         Tobit(
             df,
@@ -567,11 +575,12 @@ def test_mroz_hours_cluster_cov_type_raises_validation_error():
 
     mroz = load_wooldridge_dataset("mroz")
     options = TobitOptions(cov_type="cluster", cluster="city", lower=0.0)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=2, q=len(MROZ_X)
-        ),
+    with raises_error(
+        ErrorCode.CLUSTER_COUNT_NOT_ABOVE_SLOPES,
+        setting="cov_type",
+        n_clusters=2,
+        n_slopes=len(MROZ_X),
+        min_clusters=len(MROZ_X) + 1,
     ):
         Tobit(mroz, y="hours", x=MROZ_X, options=options).fit()
 
@@ -581,9 +590,7 @@ def test_cluster_without_col_raises(censored_dataset):
     （OLS/WLS/IV/Logit/Probitと同じ検証、共通化された経路）。
     """
     options = TobitOptions(cov_type="cluster")
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.MISSING_CLUSTER_COLUMN)
-    ):
+    with raises_error(ErrorCode.CLUSTER_REQUIRED, setting="cov_type"):
         Tobit(censored_dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 

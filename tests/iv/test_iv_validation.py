@@ -406,9 +406,11 @@ def test_observation_count_boundaries(
     )
     df = iv_dataset.head(n)
     if outcome == "structural":
-        with pytest.raises(
-            ValidationError,
-            match=escaped(msgs.INSUFFICIENT_OBSERVATIONS, n=n, k=k),
+        with raises_error(
+            ErrorCode.INSUFFICIENT_OBSERVATIONS,
+            n_obs=n,
+            n_params=k,
+            min_obs=k + 1,
         ):
             our_fit(df, options=options)
     elif outcome == "first_stage":
@@ -650,9 +652,7 @@ def test_unknown_weight_type_raises(iv_dataset, gmm_weight_type):
 
 def test_cluster_without_col_raises(iv_dataset):
     options = IVOptions(cov_type="cluster")
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.MISSING_CLUSTER_COLUMN)
-    ):
+    with raises_error(ErrorCode.CLUSTER_REQUIRED, setting="cov_type"):
         our_fit(iv_dataset, options=options)
 
 
@@ -674,10 +674,53 @@ def test_insufficient_clusters_raises(iv_dataset):
     """クラスターが1種類しかない場合`ValidationError`。"""
     df = iv_dataset.with_columns(pl.lit(0).alias("single_cluster"))
     options = IVOptions(cov_type="cluster", cluster="single_cluster")
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.INSUFFICIENT_CLUSTERS, g=1)
+    with raises_error(
+        ErrorCode.CLUSTER_COUNT_TOO_SMALL,
+        setting="cov_type",
+        n_clusters=1,
+        min_clusters=2,
     ):
         our_fit(df, options=options)
+
+
+def test_gmm_weight_type_cluster_without_col_raises(iv_dataset):
+    """`gmm_weight_type="cluster"`なのに`cluster`未指定なら、エラーは重み行列の
+    設定を指す（`cov_type="cluster"`のときの`setting="cov_type"`とは区別される）。
+    """
+    options = IVOptions(estimator="gmm", gmm_weight_type="cluster")
+    with raises_error(ErrorCode.CLUSTER_REQUIRED, setting="gmm_weight_type"):
+        our_fit(iv_dataset, options=options)
+
+
+def test_gmm_weight_type_cluster_with_single_cluster_raises(iv_dataset):
+    """`cov_type`がclusterでなければ、クラスターが1種類しかない
+    `gmm_weight_type="cluster"`のエラーは重み行列の設定を指す。
+    """
+    df = iv_dataset.with_columns(pl.lit(0).alias("single_cluster"))
+    options = IVOptions(
+        estimator="gmm",
+        gmm_weight_type="cluster",
+        cluster="single_cluster",
+        cov_type="classical",
+    )
+    with raises_error(
+        ErrorCode.CLUSTER_COUNT_TOO_SMALL,
+        setting="gmm_weight_type",
+        n_clusters=1,
+        min_clusters=2,
+    ):
+        our_fit(df, options=options)
+
+
+def test_cov_type_cluster_is_reported_before_gmm_weight_type(iv_dataset):
+    """`cov_type="cluster"`と`gmm_weight_type="cluster"`の両方が`cluster`未指定
+    なら、先に検証される`cov_type`が報告される。
+    """
+    options = IVOptions(
+        estimator="gmm", cov_type="cluster", gmm_weight_type="cluster"
+    )
+    with raises_error(ErrorCode.CLUSTER_REQUIRED, setting="cov_type"):
+        our_fit(iv_dataset, options=options)
 
 
 @pytest.mark.parametrize("estimator", ["2sls", "gmm"])
@@ -700,9 +743,12 @@ def test_cluster_count_at_most_slopes_raises_validation_error(
     options = IVOptions(
         estimator=estimator, cov_type="cluster", cluster="cluster_group"
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=2, q=2),
+    with raises_error(
+        ErrorCode.CLUSTER_COUNT_NOT_ABOVE_SLOPES,
+        setting="cov_type",
+        n_clusters=2,
+        n_slopes=2,
+        min_clusters=3,
     ):
         our_fit(df, options=options)
 
@@ -768,9 +814,12 @@ def test_cluster_count_boundaries(
         cluster="cluster_group",
     )
     if outcome == "structural":
-        with pytest.raises(
-            ValidationError,
-            match=escaped(msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=2, q=2),
+        with raises_error(
+            ErrorCode.CLUSTER_COUNT_NOT_ABOVE_SLOPES,
+            setting="cov_type",
+            n_clusters=2,
+            n_slopes=2,
+            min_clusters=3,
         ):
             our_fit(df, options=options)
         return

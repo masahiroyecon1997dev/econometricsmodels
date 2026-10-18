@@ -84,26 +84,6 @@ NOT_A_POLARS_DATAFRAME_LAZY = (
     NOT_A_POLARS_DATAFRAME + "; call .collect() first"
 )
 
-# ── CommonError（engine/src/shared/error.rs、OLS/WLS/Tobit/Logit/Probit/IV共通） ──
-
-INSUFFICIENT_OBSERVATIONS = (
-    "insufficient observations: n={n} must be greater than k={k} (number of "
-    "independent variables, including the intercept)"
-)
-MISSING_CLUSTER_COLUMN = (
-    "cov_type='cluster' requires cluster identifiers to be provided"
-)
-INSUFFICIENT_CLUSTERS = (
-    "cov_type='cluster' requires at least 2 clusters, got {g}"
-)
-INSUFFICIENT_CLUSTERS_FOR_INFERENCE = (
-    "cov_type='cluster' requires more clusters than slope coefficients for "
-    "joint inference: got g={g} clusters for q={q} slope coefficient(s), but "
-    "the cluster-robust covariance has rank at most g-1, so the q×q "
-    "Wald/F submatrix is singular when g <= q"
-)
-
-
 # ── 複数系統が使う（系統固有の節に由来するが、系統をまたいで共有） ──
 
 # `OPTION_UNKNOWN_VALUE`の`allowed`（未知の`cov_type`のとき、受け付ける値の一覧）。

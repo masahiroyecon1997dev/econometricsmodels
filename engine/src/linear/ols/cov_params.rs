@@ -13,7 +13,7 @@ use crate::shared::covariance::{
     HcVariant, classical_cov_params, cluster_cov_params, hac_cov_params, hc_cov_params,
     resolve_hac_lags, time_ordering,
 };
-use crate::shared::error::CommonError;
+use crate::shared::error::{ClusterSetting, CommonError};
 use crate::shared::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 
 /// [`compute_cov_params`]の結果。
@@ -49,7 +49,7 @@ pub(super) fn validate_cluster_count(
     let Some(groups) = cov_type.cluster_groups() else {
         return Ok(true);
     };
-    let g = validate_cluster_groups(groups, n)?;
+    let g = validate_cluster_groups(groups, n, ClusterSetting::CovType)?;
     match validate_cluster_count_covers_slopes(g, n_slopes) {
         Ok(()) => Ok(true),
         // F検定だけを定義なしにするのは`g <= q`の1種類に限る。将来`validate_cluster_count_
@@ -103,11 +103,13 @@ pub(super) fn compute_cov_params(
             )
         }
         CovType::Cluster { groups } => {
-            let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
+            let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn {
+                setting: ClusterSetting::CovType,
+            })?;
             // クラスター数`g >= 2`・`g > q`（傾き係数の数）は`validate_cluster_count`で
             // 検証済み。ここでは`n_groups - 1`（検定の自由度）に再利用するため
             // コードのユニーク数を引くだけ。
-            let n_groups = validate_cluster_groups(groups, n)?;
+            let n_groups = validate_cluster_groups(groups, n, ClusterSetting::CovType)?;
             let cov = cluster_cov_params(x, residuals, xtx_inv, groups);
             (cov, n_groups - 1)
         }
@@ -596,7 +598,9 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            LeastSquaresError::Common(CommonError::MissingClusterColumn)
+            LeastSquaresError::Common(CommonError::MissingClusterColumn {
+                setting: ClusterSetting::CovType,
+            })
         );
     }
 
@@ -621,7 +625,10 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            LeastSquaresError::Common(CommonError::InsufficientClusters { g: 1 })
+            LeastSquaresError::Common(CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 1
+            })
         );
     }
 
@@ -748,7 +755,10 @@ mod tests {
         );
         assert_eq!(
             result.unwrap_err(),
-            LeastSquaresError::Common(CommonError::InsufficientClusters { g: 1 })
+            LeastSquaresError::Common(CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 1
+            })
         );
     }
 
@@ -796,7 +806,9 @@ mod tests {
         );
         assert_eq!(
             missing.unwrap_err(),
-            LeastSquaresError::Common(CommonError::MissingClusterColumn)
+            LeastSquaresError::Common(CommonError::MissingClusterColumn {
+                setting: ClusterSetting::CovType,
+            })
         );
 
         let short: Vec<String> = (0..7).map(|i| format!("g{}", i % 4)).collect();

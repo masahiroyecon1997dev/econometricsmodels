@@ -778,7 +778,13 @@ def test_entity_count_equal_to_slope_count_plus_one_blocks_only_swamy_arora():
             options=REOptions(cov_type="classical", variance_method=method),
         ).fit()
 
-    with pytest.raises(ValidationError, match="between-regression"):
+    with raises_error(
+        ErrorCode.INSUFFICIENT_OBSERVATIONS,
+        stage="BETWEEN_REGRESSION_ENTITY",
+        n_obs=3,
+        n_params=3,
+        min_obs=4,
+    ):
         fit("swamy_arora")
     panel = _Panel(df, ["x1", "x2"], "entity", "time", "y")
     for method in ("wallace_hussain", "amemiya"):

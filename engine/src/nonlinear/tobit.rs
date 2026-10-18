@@ -2171,6 +2171,7 @@ impl TobitEstimator {
 mod tests {
     use super::*;
     use crate::nonlinear::common::SolverType;
+    use crate::shared::error::ClusterSetting;
     use crate::shared::group_codes::GroupCodes;
 
     #[test]
@@ -3385,9 +3386,16 @@ mod tests {
                 confidence_level: 0.95,
             },
         );
+        let err = result.unwrap_err();
         assert_eq!(
-            result.unwrap_err(),
+            err,
             MleError::Common(CommonError::InsufficientObservations { n: 2, k: 2 })
+        );
+        // `n_params`は`β`の数に`log σ`を足した値になる。
+        let report = err.try_report().expect("cataloged");
+        assert_eq!(
+            report.message(),
+            "Not enough observations: 2 observations for 2 coefficients (including the intercept); at least 3 are needed."
         );
     }
 
@@ -4534,7 +4542,9 @@ mod tests {
         );
         assert_eq!(
             result.unwrap_err(),
-            MleError::Common(CommonError::MissingClusterColumn)
+            MleError::Common(CommonError::MissingClusterColumn {
+                setting: ClusterSetting::CovType,
+            })
         );
     }
 
@@ -4556,7 +4566,10 @@ mod tests {
         );
         assert_eq!(
             result.unwrap_err(),
-            MleError::Common(CommonError::InsufficientClusters { g: 1 })
+            MleError::Common(CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 1
+            })
         );
     }
 

@@ -230,7 +230,7 @@ use crate::panel::fe::{
     validate_balanced_panel,
 };
 use crate::shared::covariance::leverages;
-use crate::shared::error::CommonError;
+use crate::shared::error::{ClusterSetting, CommonError};
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference;
 use crate::shared::least_squares::{least_squares, residual_sum_of_squares};
@@ -1156,7 +1156,7 @@ fn re_hausman_test(
             // `OlsEstimator::fit`の`cov_type=Cluster`と同じ事前検証（`G >= 2`・`G > q`、`q`は
             // 補助回帰の傾き係数の数）を、同じ順序（QR分解より前）で行う。
             let n = aux_input.nobs();
-            let g = validate_cluster_groups(cluster_codes, n)
+            let g = validate_cluster_groups(cluster_codes, n, ClusterSetting::CovType)
                 .map_err(|e| to_err(LeastSquaresError::Common(e)))?;
             validate_cluster_count_covers_slopes(
                 g,
@@ -1592,7 +1592,7 @@ impl ReEstimator {
                 )
             }
             ReCovType::Cluster { .. } => {
-                let n_groups = validate_cluster_groups(cluster_codes, n)?;
+                let n_groups = validate_cluster_groups(cluster_codes, n, ClusterSetting::CovType)?;
                 // `q`（傾き係数の数、切片を除く）は`df_model - 1`（`ols::fit`の
                 // `k - k_constant`と同じ規約、`estimator()`のdocコメント参照）。
                 validate_cluster_count_covers_slopes(n_groups, df_model - 1)?;

@@ -705,9 +705,11 @@ def check_non_binary_y_raises(dataset, estimator_cls, bad_value):
 
 def check_insufficient_observations_raises(dataset, estimator_cls):
     df = dataset.head(2)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.INSUFFICIENT_OBSERVATIONS, n=2, k=3),
+    with raises_error(
+        ErrorCode.INSUFFICIENT_OBSERVATIONS,
+        n_obs=2,
+        n_params=3,
+        min_obs=4,
     ):
         estimator_cls(df, y="y", x=["x1", "x2"]).fit()
 
@@ -929,8 +931,11 @@ def check_cluster_cov_type_requires_at_least_two_groups(
             "cluster": ["a", "a", "a", "a"],
         }
     )
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.INSUFFICIENT_CLUSTERS, g=1)
+    with raises_error(
+        ErrorCode.CLUSTER_COUNT_TOO_SMALL,
+        setting="cov_type",
+        n_clusters=1,
+        min_clusters=2,
     ):
         estimator_cls(
             df,
@@ -955,9 +960,12 @@ def check_cluster_count_at_most_slopes_raises_validation_error(
     """
     df = with_cluster_groups(binary_dataset, 2)
     options = options_cls(cov_type="cluster", cluster="cluster_group")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=2, q=2),
+    with raises_error(
+        ErrorCode.CLUSTER_COUNT_NOT_ABOVE_SLOPES,
+        setting="cov_type",
+        n_clusters=2,
+        n_slopes=2,
+        min_clusters=3,
     ):
         estimator_cls(df, y="y", x=["x1", "x2"], options=options).fit()
 
@@ -974,11 +982,12 @@ def check_cluster_count_at_most_slopes_on_baseline_raises_validation_error(
         pl.read_csv(DATA_DIR / f"{dataset_prefix}_baseline.csv"), n_groups
     )
     options = options_cls(cov_type="cluster", cluster="cluster_group")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=n_groups, q=3
-        ),
+    with raises_error(
+        ErrorCode.CLUSTER_COUNT_NOT_ABOVE_SLOPES,
+        setting="cov_type",
+        n_clusters=n_groups,
+        n_slopes=3,
+        min_clusters=4,
     ):
         estimator_cls(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
@@ -1006,9 +1015,7 @@ def check_cluster_without_col_raises(dataset, estimator_cls, options_cls):
     （OLS/WLS/IVと同じ検証、共通化された経路）。
     """
     options = options_cls(cov_type="cluster")
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.MISSING_CLUSTER_COLUMN)
-    ):
+    with raises_error(ErrorCode.CLUSTER_REQUIRED, setting="cov_type"):
         estimator_cls(dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
@@ -1707,11 +1714,12 @@ def check_mroz_cluster_cov_type_raises_validation_error(
     """
     df = load_wooldridge_dataset("mroz")
     options = options_cls(cov_type="cluster", cluster="city")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=2, q=len(MROZ_X)
-        ),
+    with raises_error(
+        ErrorCode.CLUSTER_COUNT_NOT_ABOVE_SLOPES,
+        setting="cov_type",
+        n_clusters=2,
+        n_slopes=len(MROZ_X),
+        min_clusters=len(MROZ_X) + 1,
     ):
         estimator_cls(df, y="inlf", x=MROZ_X, options=options).fit()
 

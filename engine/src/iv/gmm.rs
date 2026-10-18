@@ -212,7 +212,7 @@ use crate::linear::ols::CovType;
 use crate::shared::covariance::{
     cluster_correction, cluster_meat, resolve_hac_lags, time_ordering,
 };
-use crate::shared::error::CommonError;
+use crate::shared::error::{ClusterSetting, CommonError};
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference;
 use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
@@ -500,7 +500,9 @@ impl GmmEstimator {
                     WeightType::Robust => robust_moment_covariance(&z, &residuals, n, l),
                     WeightType::Cluster { .. } => {
                         let groups =
-                            weight_cluster_codes.ok_or(CommonError::MissingClusterColumn)?;
+                            weight_cluster_codes.ok_or(CommonError::MissingClusterColumn {
+                                setting: ClusterSetting::GmmWeightType,
+                            })?;
                         cluster_moment_covariance(&z, &residuals, l, groups)
                     }
                     WeightType::Hac { .. } => {
@@ -623,7 +625,9 @@ impl GmmEstimator {
             CovType::Cluster { groups } => {
                 // クラスター数 `g >= 2`・`g > df_model`（構造方程式の傾き係数の数）は`fit()`冒頭
                 // （`validate_structural_cluster_count`）で検証済み。
-                let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
+                let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn {
+                    setting: ClusterSetting::CovType,
+                })?;
                 gmm_cluster_omega(&z, &residuals, n, k, l, groups)
             }
         };
@@ -896,8 +900,10 @@ fn validate_weight_type(
     match weight_type {
         WeightType::Classical | WeightType::Robust => {}
         WeightType::Cluster { groups } => {
-            let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
-            let g = validate_cluster_groups(groups, n)?;
+            let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn {
+                setting: ClusterSetting::GmmWeightType,
+            })?;
+            let g = validate_cluster_groups(groups, n, ClusterSetting::GmmWeightType)?;
             let exactly_identified = l == k;
             if g < l || (exactly_identified && g == l) {
                 return Err(IvError::InsufficientClustersForWeightMatrix { g, l });
@@ -1536,7 +1542,9 @@ mod tests {
         );
         assert_eq!(
             result.unwrap_err(),
-            IvError::Common(CommonError::MissingClusterColumn)
+            IvError::Common(CommonError::MissingClusterColumn {
+                setting: ClusterSetting::GmmWeightType,
+            })
         );
     }
 
@@ -1903,7 +1911,9 @@ mod tests {
         );
         assert_eq!(
             result.unwrap_err(),
-            IvError::Common(CommonError::MissingClusterColumn)
+            IvError::Common(CommonError::MissingClusterColumn {
+                setting: ClusterSetting::GmmWeightType,
+            })
         );
     }
 
@@ -1939,7 +1949,10 @@ mod tests {
         );
         assert_eq!(
             result.unwrap_err(),
-            IvError::Common(CommonError::InsufficientClusters { g: 1 })
+            IvError::Common(CommonError::InsufficientClusters {
+                setting: ClusterSetting::GmmWeightType,
+                g: 1
+            })
         );
     }
 
@@ -3639,7 +3652,9 @@ mod tests {
         );
         assert_eq!(
             result.unwrap_err(),
-            IvError::Common(CommonError::MissingClusterColumn)
+            IvError::Common(CommonError::MissingClusterColumn {
+                setting: ClusterSetting::CovType,
+            })
         );
     }
 
@@ -4099,7 +4114,9 @@ mod tests {
 
         assert_eq!(
             fit(CovType::Cluster { groups: None }).unwrap_err(),
-            IvError::Common(CommonError::MissingClusterColumn)
+            IvError::Common(CommonError::MissingClusterColumn {
+                setting: ClusterSetting::CovType,
+            })
         );
         assert_eq!(
             fit(cluster(&groups[..n - 1])).unwrap_err(),

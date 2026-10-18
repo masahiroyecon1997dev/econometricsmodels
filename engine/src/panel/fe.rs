@@ -391,7 +391,7 @@ use crate::panel::common::{
 };
 use crate::panel::re::{ReEffects, ReInput};
 use crate::shared::covariance::leverages;
-use crate::shared::error::CommonError;
+use crate::shared::error::{ClusterSetting, CommonError};
 use crate::shared::goodness_of_fit::gaussian_goodness_of_fit;
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference;
@@ -891,7 +891,7 @@ impl FeEstimator {
                 // 既定（entityクラスター）は`FeInput`のコードを再利用し、明示指定の列は
                 // 渡されたコードをそのまま使う。
                 let group_codes = groups.as_ref().unwrap_or(input.entity_codes());
-                let n_groups = validate_cluster_groups(group_codes, n)?;
+                let n_groups = validate_cluster_groups(group_codes, n, ClusterSetting::CovType)?;
                 validate_cluster_count_covers_slopes(n_groups, k)?;
                 // 直前の`G > k`により、ここで`G=2`なら`k`は高々1。
                 if k >= 1
@@ -3776,7 +3776,10 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            PanelError::Common(CommonError::InsufficientClusters { g: 1 })
+            PanelError::Common(CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 1
+            })
         );
     }
 

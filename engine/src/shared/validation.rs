@@ -5,7 +5,7 @@
 //! **関数**はこちらに置く（`engine::shared::linear_algebra`が数値計算ユーティリティを
 //! 集約しているのと同じ考え方で、こちらは入力検証ユーティリティを集約する）。
 
-use super::error::CommonError;
+use super::error::{ClusterSetting, CommonError};
 use super::group_codes::GroupCodes;
 
 /// 反復回数の上限（`max_iter`・`gmm_max_iter`）。既定値（35・100）の約100倍で、これを超える
@@ -38,7 +38,11 @@ pub const GMM_MAX_ITER_MIN: i64 = 3;
 /// コードを渡せる。この検証が無いと、長すぎると範囲外参照でpanicし、短すぎると先頭の
 /// 行だけで集計した標準誤差を静かに返してしまう（`n`は補正係数に使う）。判定はO(1)。
 /// この関数を通らない集計経路は無い（全手法の`fit()`がクラスター数の検証としてこれを呼ぶ）。
-pub(crate) fn validate_cluster_groups(groups: &GroupCodes, n: usize) -> Result<usize, CommonError> {
+pub(crate) fn validate_cluster_groups(
+    groups: &GroupCodes,
+    n: usize,
+    setting: ClusterSetting,
+) -> Result<usize, CommonError> {
     if groups.nobs() != n {
         return Err(CommonError::ClusterDimensionMismatch {
             groups_rows: groups.nobs(),
@@ -47,7 +51,7 @@ pub(crate) fn validate_cluster_groups(groups: &GroupCodes, n: usize) -> Result<u
     }
     let g = groups.n_groups();
     if g < 2 {
-        return Err(CommonError::InsufficientClusters { g });
+        return Err(CommonError::InsufficientClusters { setting, g });
     }
     Ok(g)
 }
@@ -129,7 +133,7 @@ mod tests {
     #[test]
     fn validate_cluster_groups_returns_distinct_group_count_when_at_least_two() {
         assert_eq!(
-            validate_cluster_groups(&codes(&["a", "a", "b", "c"]), 4),
+            validate_cluster_groups(&codes(&["a", "a", "b", "c"]), 4, ClusterSetting::CovType),
             Ok(3)
         );
     }
@@ -139,7 +143,7 @@ mod tests {
         // 長すぎても短すぎても、集計に進む前に`Err`にする（releaseビルドでも）。
         for n in [3, 5] {
             assert_eq!(
-                validate_cluster_groups(&codes(&["a", "b", "c", "a"]), n),
+                validate_cluster_groups(&codes(&["a", "b", "c", "a"]), n, ClusterSetting::CovType),
                 Err(CommonError::ClusterDimensionMismatch { groups_rows: 4, n })
             );
         }
@@ -148,8 +152,11 @@ mod tests {
     #[test]
     fn validate_cluster_groups_returns_insufficient_clusters_error_when_only_one_group() {
         assert_eq!(
-            validate_cluster_groups(&codes(&["a", "a", "a"]), 3),
-            Err(CommonError::InsufficientClusters { g: 1 })
+            validate_cluster_groups(&codes(&["a", "a", "a"]), 3, ClusterSetting::CovType),
+            Err(CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 1
+            })
         );
     }
 

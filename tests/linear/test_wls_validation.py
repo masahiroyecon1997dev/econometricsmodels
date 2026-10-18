@@ -179,9 +179,11 @@ def test_empty_x_raises(unit_weight_dataset):
 def test_insufficient_observations_raises(unit_weight_dataset):
     """観測数nが説明変数の数k（定数項込み）以下の場合`ValidationError`。"""
     df = unit_weight_dataset.head(2)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.INSUFFICIENT_OBSERVATIONS, n=2, k=3),
+    with raises_error(
+        ErrorCode.INSUFFICIENT_OBSERVATIONS,
+        n_obs=2,
+        n_params=3,
+        min_obs=4,
     ):
         WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
 
@@ -544,9 +546,7 @@ def test_cluster_without_col_raises(unit_weight_dataset):
     """
     df = unit_weight_dataset
     options = WLSOptions(cov_type="cluster")
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.MISSING_CLUSTER_COLUMN)
-    ):
+    with raises_error(ErrorCode.CLUSTER_REQUIRED, setting="cov_type"):
         WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
 
 
@@ -566,7 +566,7 @@ def test_cluster_nonexistent_column_raises(unit_weight_dataset):
 
 
 def test_cluster_empty_string_raises(unit_weight_dataset):
-    """`cluster=""`も「未指定」（`MISSING_CLUSTER_COLUMN`）ではなく、存在しない
+    """`cluster=""`も「未指定」（`CLUSTER_REQUIRED`）ではなく、存在しない
     列名として`ValidationError`になる。
     """
     df = unit_weight_dataset
@@ -586,8 +586,11 @@ def test_insufficient_clusters_raises(unit_weight_dataset):
     """
     df = unit_weight_dataset.with_columns(pl.lit(0).alias("single_cluster"))
     options = WLSOptions(cov_type="cluster", cluster="single_cluster")
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.INSUFFICIENT_CLUSTERS, g=1)
+    with raises_error(
+        ErrorCode.CLUSTER_COUNT_TOO_SMALL,
+        setting="cov_type",
+        n_clusters=1,
+        min_clusters=2,
     ):
         WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
 
@@ -631,11 +634,12 @@ def test_cluster_count_at_most_slopes_raises_validation_error(n_groups):
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df = with_cluster_groups(df, n_groups)
     options = WLSOptions(cov_type="cluster", cluster="cluster_group")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=n_groups, q=3
-        ),
+    with raises_error(
+        ErrorCode.CLUSTER_COUNT_NOT_ABOVE_SLOPES,
+        setting="cov_type",
+        n_clusters=n_groups,
+        n_slopes=3,
+        min_clusters=4,
     ):
         WLS(
             df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options

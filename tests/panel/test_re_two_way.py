@@ -24,10 +24,12 @@ import pytest
 import statsmodels.api as sm
 from _constants import DATA_DIR
 from _error_messages import escaped
+from _errors import raises_error
 from _re_oracle import hand_computed
 from econometricsmodels import (
     RE,
     ComputationError,
+    ErrorCode,
     REOptions,
     ValidationError,
 )
@@ -757,14 +759,13 @@ def test_non_finite_float_group_key_columns_raise(panel, role, bad):
             ),
         },
     }[role]
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE,
-            name="key",
-            value="NaN" if math.isnan(bad) else "inf",
-            row=3,
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column="key",
+        value=pytest.approx(bad, nan_ok=True),
+        row=3,
+        argument=role,
+        data_argument="data",
     ):
         RE(df, y="y", x=["x1"], **kwargs).fit()
 
@@ -854,8 +855,11 @@ def test_time_with_null_values_raises(panel):
         .otherwise(pl.col("time"))
         .alias("time")
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="time", count=1),
+    with raises_error(
+        ErrorCode.COLUMN_CONTAINS_NULL,
+        column="time",
+        count=1,
+        argument="time",
+        data_argument="data",
     ):
         _fit(df, REOptions(time="time"))

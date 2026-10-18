@@ -33,6 +33,7 @@ use super::common::{
     resolve_mle_tol_default, solver_name,
 };
 use crate::shared::augment::append_predicted_column;
+use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
     extract_dataframe, extract_f64_column, extract_f64_columns, extract_model_x_columns,
 };
@@ -308,7 +309,13 @@ impl ProbitResult {
     /// （`x`列の抽出→`predict_new_data`呼び出し）。
     fn predict_for(&self, df: &DataFrame) -> PyResult<Vec<f64>> {
         let has_intercept = self.estimator.input().has_intercept();
-        let x_columns = extract_model_x_columns(df, &self.param_names, has_intercept, 0)?;
+        let x_columns = extract_model_x_columns(
+            df,
+            &self.param_names,
+            has_intercept,
+            0,
+            ColumnSource::new("x", "new_data"),
+        )?;
 
         Ok(self.estimator.predict_new_data(&x_columns))
     }
@@ -435,10 +442,10 @@ pub(crate) fn build_probit_input(
     validate_common_roles(&y, &x, options.include_intercept)?;
 
     // ── y列の抽出 ──────────────────────────────────────────────────────
-    let y_slice = extract_f64_column(df, &y)?;
+    let y_slice = extract_f64_column(df, &y, ColumnSource::new("y", "data"))?;
 
     // ── x列の抽出 ──────────────────────────────────────────────────────
-    let x_slices = extract_f64_columns(df, &x)?;
+    let x_slices = extract_f64_columns(df, &x, ColumnSource::new("x", "data"))?;
 
     let cov_type = resolve_cov_type(df, cov_kind, options.cluster.as_deref())?;
 

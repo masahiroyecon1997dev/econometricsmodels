@@ -41,6 +41,7 @@ use super::common::{
     solver_name,
 };
 use crate::shared::augment::append_predicted_column;
+use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
     extract_dataframe, extract_f64_column, extract_f64_columns, extract_model_x_columns,
 };
@@ -356,7 +357,13 @@ impl TobitResult {
     /// 除いた部分（モジュールdocコメント参照）。
     fn predict_for(&self, target: MarginalEffectsTarget, df: &DataFrame) -> PyResult<Vec<f64>> {
         let has_intercept = self.estimator.input().has_intercept();
-        let x_columns = extract_model_x_columns(df, &self.param_names, has_intercept, 1)?;
+        let x_columns = extract_model_x_columns(
+            df,
+            &self.param_names,
+            has_intercept,
+            1,
+            ColumnSource::new("x", "new_data"),
+        )?;
 
         self.estimator
             .predict_new_data(target, &x_columns)
@@ -618,10 +625,10 @@ pub(crate) fn build_tobit_input(
     validate_no_sigma_collision(&x)?;
 
     // ── y列の抽出 ──────────────────────────────────────────────────────
-    let y_slice = extract_f64_column(df, &y)?;
+    let y_slice = extract_f64_column(df, &y, ColumnSource::new("y", "data"))?;
 
     // ── x列の抽出 ──────────────────────────────────────────────────────
-    let x_slices = extract_f64_columns(df, &x)?;
+    let x_slices = extract_f64_columns(df, &x, ColumnSource::new("x", "data"))?;
 
     let cov_type = resolve_cov_type(df, cov_kind, options.cluster.as_deref())?;
 

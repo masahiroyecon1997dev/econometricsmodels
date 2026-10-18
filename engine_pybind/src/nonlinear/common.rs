@@ -11,6 +11,7 @@ use engine::nonlinear::common::{CovType, MarginalEffectsAt, MleError, SolverType
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 
+use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::extract_optional_cluster_groups;
 use crate::shared::errors::{
     common_error_to_pyerr, legacy_computation_error, legacy_validation_error,
@@ -171,7 +172,11 @@ pub(crate) fn resolve_cov_type(
         CovKind::Hc0 => CovType::Hc0,
         CovKind::Hc1 => CovType::Hc1,
         CovKind::Cluster => CovType::Cluster {
-            groups: extract_optional_cluster_groups(df, cluster)?,
+            groups: extract_optional_cluster_groups(
+                df,
+                cluster,
+                ColumnSource::new("cluster", "data"),
+            )?,
         },
     })
 }

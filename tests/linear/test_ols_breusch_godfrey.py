@@ -20,7 +20,6 @@ import json
 from functools import partial
 from pathlib import Path
 
-import _error_messages as msgs
 import _error_messages_linear as linear_msgs
 import numpy as np
 import polars as pl
@@ -29,6 +28,7 @@ import statsmodels.api as sm
 from _assertions import assert_argument_case_insensitive, assert_close
 from _constants import DATA_DIR
 from _error_messages import escaped
+from _errors import raises_error
 from _helpers import (
     CASE_SPELLINGS,
     ROW_TIME,
@@ -42,6 +42,7 @@ from econometricsmodels import (
     OLS,
     BreuschGodfreyTestResult,
     DiagnosticResult,
+    ErrorCode,
     IVOptions,
     OLSOptions,
     ValidationError,
@@ -367,9 +368,11 @@ def test_unknown_statistic_raises_validation_error(ar1):
 
 def test_missing_time_column_raises_validation_error(ar1):
     fitted = OLS(ar1, y="y", x=["x"]).fit()
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="nope"),
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="nope",
+        argument="time",
+        data_argument="data",
     ):
         fitted.breusch_godfrey_test("nope", 1)
 
@@ -378,11 +381,13 @@ def test_time_column_with_ties_raises_validation_error(ar1):
     """同値があると時間順が定まらない（`hac_time`と同じ扱い）。行順で黙って並べない。"""
     df = ar1.with_columns((pl.col("t") // 2).alias("t"))
     fitted = OLS(df, y="y", x=["x"]).fit()
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_TIED_TIME_ORDER, name="t", first=0, second=1
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_VALUES_TIED,
+        column="t",
+        first_row=0,
+        second_row=1,
+        argument="time",
+        data_argument="data",
     ):
         fitted.breusch_godfrey_test("t", 1)
 
@@ -397,30 +402,34 @@ def test_time_column_with_missing_values_raises_validation_error(ar1, dtype):
     t[5] = None
     df = ar1.with_columns(pl.Series("t", t, dtype=dtype))
     fitted = OLS(df, y="y", x=["x"]).fit()
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="t", count=1),
+    with raises_error(
+        ErrorCode.COLUMN_CONTAINS_NULL,
+        column="t",
+        count=1,
+        argument="time",
+        data_argument="data",
     ):
         fitted.breusch_godfrey_test("t", 1)
 
 
 @pytest.mark.parametrize(
-    ("bad", "shown"),
-    [(float("nan"), "NaN"), (float("inf"), "inf"), (float("-inf"), "-inf")],
+    "bad", [float("nan"), float("inf"), float("-inf")], ids=str
 )
 def test_float_time_column_with_non_finite_values_raises_validation_error(
-    ar1, bad, shown
+    ar1, bad
 ):
     """NaN・無限大は null とは別の検査（`hac_time`と同じ）。順序が定まらないため拒否する。"""
     t = ar1["t"].cast(pl.Float64).to_list()
     t[3] = bad
     df = ar1.with_columns(pl.Series("t", t, dtype=pl.Float64))
     fitted = OLS(df, y="y", x=["x"]).fit()
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="t", value=shown, row=3
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column="t",
+        value=pytest.approx(bad, nan_ok=True),
+        row=3,
+        argument="time",
+        data_argument="data",
     ):
         fitted.breusch_godfrey_test("t", 1)
 
@@ -448,11 +457,12 @@ def test_time_column_may_also_be_a_regressor(ar1):
 def test_time_column_with_an_unsupported_dtype_raises_validation_error(ar1):
     df = ar1.with_columns(pl.col("t").cast(pl.String).alias("label"))
     fitted = OLS(df, y="y", x=["x"]).fit()
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_UNSUPPORTED_ORDER_DTYPE, name="label", dtype="String"
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
+        column="label",
+        dtype="String",
+        argument="time",
+        data_argument="data",
     ):
         fitted.breusch_godfrey_test("label", 1)
 

@@ -217,7 +217,6 @@ pub(crate) fn report_to_pyerr(report: &ErrorReport) -> PyErr {
 }
 
 /// `engine`のエラー型（[`ErrorInfo`]を実装するもの）を例外にする。
-#[allow(dead_code, reason = "エラー型が`ErrorInfo`を実装する段階から使う")]
 pub(crate) fn to_pyerr(err: &impl ErrorInfo) -> PyErr {
     report_to_pyerr(&err.report())
 }

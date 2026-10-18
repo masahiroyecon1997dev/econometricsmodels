@@ -23,6 +23,7 @@ import polars as pl
 import pytest
 from _constants import DATA_DIR
 from _error_messages import escaped
+from _errors import raises_error
 from _helpers import (
     ROW_TIME,
     TIED_TIME_COLUMNS,
@@ -34,6 +35,7 @@ from _iv_helpers import iv_name_collision_frame, our_fit
 from econometricsmodels import (
     IV,
     ComputationError,
+    ErrorCode,
     IVOptions,
     ValidationError,
 )
@@ -221,9 +223,11 @@ def test_missing_column_raises(iv_dataset, role):
         "instruments": ["z1", "z2"],
     }
     args[role] = "nonexistent" if role == "y" else ["nonexistent"]
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="nonexistent"),
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="nonexistent",
+        argument=role,
+        data_argument="data",
     ):
         IV(iv_dataset, **args).fit()
 
@@ -266,8 +270,11 @@ def test_y_empty_string_raises(iv_dataset):
     """`y`に空文字列を渡した場合`ValidationError`
     （`test_ols_validation.py::test_y_empty_string_raises`参照）。
     """
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="")
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="",
+        argument="y",
+        data_argument="data",
     ):
         IV(
             iv_dataset,
@@ -279,6 +286,17 @@ def test_y_empty_string_raises(iv_dataset):
 
 
 _ROLE_COLUMNS = ["y", "x1", "x2", "endog1", "endog2", "z1", "z2"]
+
+# `_fit_all_roles`で各列を渡す引数。
+_ROLE_ARGUMENT = {
+    "y": "y",
+    "x1": "x_exog",
+    "x2": "x_exog",
+    "endog1": "x_endog",
+    "endog2": "x_endog",
+    "z1": "instruments",
+    "z2": "instruments",
+}
 
 
 _ROLE_VALUES: dict[str, list[float]] = {
@@ -313,20 +331,23 @@ def test_null_values_raise(bad_col):
     values: dict[str, list[float | None]] = dict(_ROLE_VALUES)
     values[bad_col] = [values[bad_col][0], None, *values[bad_col][2:]]
     df = pl.DataFrame(values)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name=bad_col, count=1),
+    with raises_error(
+        ErrorCode.COLUMN_CONTAINS_NULL,
+        column=bad_col,
+        count=1,
+        argument=_ROLE_ARGUMENT[bad_col],
+        data_argument="data",
     ):
         _fit_all_roles(df)
 
 
 @pytest.mark.parametrize(
-    "value, display",
-    [(float("nan"), "NaN"), (float("inf"), "inf")],
+    "value",
+    [float("nan"), float("inf")],
     ids=["nan", "inf"],
 )
 @pytest.mark.parametrize("bad_col", _ROLE_COLUMNS)
-def test_non_finite_values_raise(bad_col, value, display):
+def test_non_finite_values_raise(bad_col, value):
     """NaN・無限大は`column_extraction.rs`内でnull（`test_null_values_raise`）
     とは別ロジックのため個別に確認する。`y`列だけでなく`x_exog`/`x_endog`/
     `instruments`側の列でも、リスト引数の2本目以降も含めて検証する
@@ -335,14 +356,13 @@ def test_non_finite_values_raise(bad_col, value, display):
     values: dict[str, list[float]] = dict(_ROLE_VALUES)
     values[bad_col] = [values[bad_col][0], value, *values[bad_col][2:]]
     df = pl.DataFrame(values)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE,
-            name=bad_col,
-            value=display,
-            row=1,
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column=bad_col,
+        value=pytest.approx(value, nan_ok=True),
+        row=1,
+        argument=_ROLE_ARGUMENT[bad_col],
+        data_argument="data",
     ):
         _fit_all_roles(df)
 
@@ -356,13 +376,12 @@ def test_non_numeric_dtype_raises(bad_col):
     values: dict[str, list] = dict(_ROLE_VALUES)
     values[bad_col] = ["a", "b", "c", "d"]
     df = pl.DataFrame(values)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE,
-            name=bad_col,
-            dtype="String",
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
+        column=bad_col,
+        dtype="String",
+        argument=_ROLE_ARGUMENT[bad_col],
+        data_argument="data",
     ):
         _fit_all_roles(df)
 
@@ -557,14 +576,13 @@ def test_hac_time_with_tied_values_raises(
     """
     df = iv_dataset.with_columns(time_expr.alias("t"))
     options = IVOptions(hac_lags=2, hac_time="t", **options_kwargs)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_TIED_TIME_ORDER,
-            name="t",
-            first=rows[0],
-            second=rows[1],
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_VALUES_TIED,
+        column="t",
+        first_row=rows[0],
+        second_row=rows[1],
+        argument="hac_time",
+        data_argument="data",
     ):
         our_fit(df, options=options)
 
@@ -648,9 +666,11 @@ def test_cluster_nonexistent_column_raises(iv_dataset):
     Probitと同じ理由）。
     """
     options = IVOptions(cov_type="cluster", cluster="does_not_exist")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="does_not_exist",
+        argument="cluster",
+        data_argument="data",
     ):
         our_fit(iv_dataset, options=options)
 

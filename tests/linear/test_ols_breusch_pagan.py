@@ -32,6 +32,7 @@ import statsmodels.api as sm
 from _assertions import assert_argument_case_insensitive, assert_close
 from _constants import DATA_DIR
 from _error_messages import escaped, fully_qualified_type_name
+from _errors import raises_error
 from _helpers import (
     CASE_SPELLINGS,
     ROW_TIME,
@@ -45,6 +46,7 @@ from econometricsmodels import (
     BreuschPaganTestResult,
     ComputationError,
     DiagnosticResult,
+    ErrorCode,
     IVOptions,
     OLSOptions,
     ValidationError,
@@ -445,9 +447,11 @@ def test_duplicate_variables_raise_validation_error(baseline):
 
 
 def test_missing_column_raises_validation_error(baseline):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="nope"),
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="nope",
+        argument="variables",
+        data_argument="data",
     ):
         baseline.fit().breusch_pagan_test(["x1", "nope"])
 
@@ -457,11 +461,12 @@ def test_variable_with_an_unsupported_dtype_raises_validation_error():
     df = df.with_columns(pl.lit("a").alias("label"))
     fitted = OLS(df, y="y", x=["x1"]).fit()
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="label", dtype="String"
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
+        column="label",
+        dtype="String",
+        argument="variables",
+        data_argument="data",
     ):
         fitted.breusch_pagan_test(["label"])
 
@@ -478,17 +483,18 @@ def test_variable_with_missing_values_raises_validation_error():
     )
     fitted = OLS(df, y="y", x=["x1"]).fit()
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="z", count=1),
+    with raises_error(
+        ErrorCode.COLUMN_CONTAINS_NULL,
+        column="z",
+        count=1,
+        argument="variables",
+        data_argument="data",
     ):
         fitted.breusch_pagan_test(["z"])
 
 
-@pytest.mark.parametrize(
-    ("value", "kind"), [(float("nan"), "NaN"), (float("inf"), "inf")]
-)
-def test_variable_with_non_finite_values_raises_validation_error(value, kind):
+@pytest.mark.parametrize("value", [float("nan"), float("inf")], ids=str)
+def test_variable_with_non_finite_values_raises_validation_error(value):
     df, _ = _synthetic("baseline")
     bad = df.with_columns(
         pl.when(pl.int_range(pl.len()) == 2)
@@ -499,11 +505,13 @@ def test_variable_with_non_finite_values_raises_validation_error(value, kind):
     # 当てはめは`z`を使わないので通る。`Z`に使うとき初めて拒否される。
     fitted = OLS(bad, y="y", x=["x1"]).fit()
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="z", value=kind, row=2
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column="z",
+        value=pytest.approx(value, nan_ok=True),
+        row=2,
+        argument="variables",
+        data_argument="data",
     ):
         fitted.breusch_pagan_test(["z"])
 

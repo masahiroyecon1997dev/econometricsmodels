@@ -17,6 +17,7 @@ use engine::linear::ols::CovType as EngineCovType;
 use polars::prelude::DataFrame;
 use pyo3::{PyErr, PyResult};
 
+use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{extract_optional_cluster_groups, extract_time_order_ranks};
 use crate::shared::errors::{
     common_error_to_pyerr, legacy_computation_error, legacy_validation_error,
@@ -201,11 +202,19 @@ pub(crate) fn resolve_cov_type(
             let col_name = require_hac_time(hac_time, "cov_type")?;
             EngineCovType::Hac {
                 lags: hac_lags,
-                time_order: extract_time_order_ranks(df, col_name)?,
+                time_order: extract_time_order_ranks(
+                    df,
+                    col_name,
+                    ColumnSource::new("hac_time", "data"),
+                )?,
             }
         }
         CovKind::Cluster => EngineCovType::Cluster {
-            groups: extract_optional_cluster_groups(df, cluster)?,
+            groups: extract_optional_cluster_groups(
+                df,
+                cluster,
+                ColumnSource::new("cluster", "data"),
+            )?,
         },
     })
 }

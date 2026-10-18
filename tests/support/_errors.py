@@ -39,7 +39,16 @@ RAISED_CODES: set[str] = set()
 # 段階で、その`code`をここに足す（全体実行の終了時に、足した全`code`が1度は
 # `raises_error`で検査されたかを調べる）。全`code`の移行が終わったら、カタログの
 # 全`code`を対象にする。
-MIGRATED_CODES: frozenset[str] = frozenset()
+MIGRATED_CODES: frozenset[str] = frozenset(
+    {
+        ErrorCode.COLUMN_NOT_FOUND,
+        ErrorCode.COLUMN_CONTAINS_NULL,
+        ErrorCode.COLUMN_NON_FINITE,
+        ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
+        ErrorCode.COLUMN_TIMEZONE_NOT_SUPPORTED,
+        ErrorCode.COLUMN_VALUES_TIED,
+    }
+)
 
 
 def unraised_migrated_codes() -> list[str]:

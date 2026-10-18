@@ -66,6 +66,7 @@ use super::common::{
     PanelCovKind, PanelModel, check_panel_cov_options, panel_error_to_pyerr, parse_panel_cov_kind,
     require_dk_time, validate_dk_time_role,
 };
+use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
     extract_entity_groups, extract_f64_column, extract_f64_columns,
     extract_optional_cluster_groups, extract_time_keys,
@@ -432,13 +433,17 @@ fn resolve_re_cov_type(
         PanelCovKind::Hc2 => ReCovType::Hc2,
         PanelCovKind::Hc3 => ReCovType::Hc3,
         PanelCovKind::Cluster => ReCovType::Cluster {
-            groups: extract_optional_cluster_groups(df, options.cluster.as_deref())?,
+            groups: extract_optional_cluster_groups(
+                df,
+                options.cluster.as_deref(),
+                ColumnSource::new("cluster", "data"),
+            )?,
         },
         PanelCovKind::Dk => {
             let dk_time = require_dk_time(options.dk_time.as_deref(), PanelModel::Re)?;
             ReCovType::Dk {
                 bandwidth: options.dk_bandwidth,
-                time: extract_time_keys(df, dk_time)?,
+                time: extract_time_keys(df, dk_time, ColumnSource::new("dk_time", "data"))?,
             }
         }
     })
@@ -514,17 +519,17 @@ pub(crate) fn build_re_input(
     validate_dk_time_role(&y, &entity, options.dk_time.as_deref())?;
 
     // ── y/x/entity列の抽出 ─────────────────────────────────────────────
-    let y_slice = extract_f64_column(df, &y)?;
+    let y_slice = extract_f64_column(df, &y, ColumnSource::new("y", "data"))?;
 
-    let x_slices = extract_f64_columns(df, &x)?;
+    let x_slices = extract_f64_columns(df, &x, ColumnSource::new("x", "data"))?;
 
-    let entity_groups = extract_entity_groups(df, &entity)?;
+    let entity_groups = extract_entity_groups(df, &entity, ColumnSource::new("entity", "data"))?;
 
     // ── `time`列の抽出（2-way REを指定した場合のみ）───────────────────────
     let time_keys: Option<TimeKeys> = options
         .time
         .as_ref()
-        .map(|col_name| extract_time_keys(df, col_name))
+        .map(|col_name| extract_time_keys(df, col_name, ColumnSource::new("time", "data")))
         .transpose()?;
     let effects = if time_keys.is_some() {
         ReEffects::TwoWay

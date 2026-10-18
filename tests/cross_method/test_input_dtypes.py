@@ -8,7 +8,6 @@ dtypeごとの許可・拒否の方針は`docs/guide/accepted-data.md`が正本�
 
 from __future__ import annotations
 
-import _error_messages as msgs
 import _error_messages_linear as linear_msgs
 import numpy as np
 import polars as pl
@@ -23,6 +22,7 @@ from _dtype_helpers import (
     unused_column,
 )
 from _error_messages import escaped
+from _errors import raises_error
 from _helpers import ROW_TIME, with_row_time
 from econometricsmodels import (
     FE,
@@ -30,6 +30,7 @@ from econometricsmodels import (
     OLS,
     RE,
     WLS,
+    ErrorCode,
     IVOptions,
     Logit,
     OLSOptions,
@@ -160,13 +161,12 @@ def test_non_numeric_dtype_raises_for_numeric_role(base, dtype, label, role):
         _non_numeric_column(role if role == "y" else "x1", dtype)
     )
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE,
-            name="y" if role == "y" else "x1",
-            dtype=label,
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
+        column="y" if role == "y" else "x1",
+        dtype=label,
+        argument=role,
+        data_argument="data",
     ):
         OLS(df, y="y", x=["x1", "x2"]).fit()
 
@@ -177,11 +177,12 @@ def test_numeric_looking_strings_are_rejected(base):
         pl.col("x1").cast(pl.Float64).cast(pl.String).alias("x1")
     )
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="x1", dtype="String"
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
+        column="x1",
+        dtype="String",
+        argument="x",
+        data_argument="data",
     ):
         OLS(df, y="y", x=["x1", "x2"]).fit()
 
@@ -192,11 +193,12 @@ def test_string_y_is_rejected_for_logit(base):
         {"y": ["0", "1"] * (N // 2), "x1": base["x1"].cast(pl.Float64)}
     )
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="y", dtype="String"
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
+        column="y",
+        dtype="String",
+        argument="y",
+        data_argument="data",
     ):
         Logit(df, y="y", x=["x1"]).fit()
 
@@ -205,11 +207,12 @@ def test_non_numeric_weight_is_rejected(base):
     """WLSの重み列が文字列のときも拒否する。"""
     df = base.with_columns(pl.lit("1").alias("w"))
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="w", dtype="String"
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
+        column="w",
+        dtype="String",
+        argument="weight",
+        data_argument="data",
     ):
         WLS(df, y="y", x=["x1"], weight="w").fit()
 
@@ -220,11 +223,12 @@ def test_non_numeric_instrument_is_rejected(base):
         pl.Series("z", [0] * N, dtype=pl.Int32).cast(pl.Date)
     )
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="z", dtype="Date"
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
+        column="z",
+        dtype="Date",
+        argument="instruments",
+        data_argument="data",
     ):
         IV(df, y="y", x_exog=["x2"], x_endog=["x1"], instruments=["z"]).fit()
 
@@ -289,11 +293,12 @@ def test_hac_time_rejects_non_orderable_dtypes(base, dtype, label):
     df = base.with_columns(_non_numeric_column("t", dtype))
     options = OLSOptions(cov_type="hac", hac_lags=2, hac_time="t")
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_UNSUPPORTED_ORDER_DTYPE, name="t", dtype=label
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
+        column="t",
+        dtype=label,
+        argument="hac_time",
+        data_argument="data",
     ):
         OLS(df, y="y", x=["x1"], options=options).fit()
 
@@ -302,9 +307,12 @@ def test_all_null_column_reports_missing_values(base):
     """全値が欠損の列（`Null`型）は、dtypeではなく欠損値として報告する。"""
     df = base.with_columns(pl.Series("x1", [None] * N, dtype=pl.Null))
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=N),
+    with raises_error(
+        ErrorCode.COLUMN_CONTAINS_NULL,
+        column="x1",
+        count=N,
+        argument="x",
+        data_argument="data",
     ):
         OLS(df, y="y", x=["x1"]).fit()
 
@@ -331,6 +339,11 @@ ROLE_FITS = {
 }
 
 BINARY_Y_ROLES = {"logit.y", "probit.y"}
+
+
+def _role_argument(role: str) -> str:
+    """ロール名（`"iv.x_exog"`等）から、列を渡した引数名（`"x_exog"`）を取り出す。"""
+    return role.split(".", 1)[1]
 
 
 @pytest.fixture(scope="module")
@@ -430,11 +443,12 @@ def test_non_numeric_dtypes_are_rejected_in_every_numeric_role(
     """数値として使えないdtypeは、全ての数値ロールで列名とdtype名入りの`ValidationError`。"""
     df = roles_frame.with_columns(unused_column(dtype).alias("col"))
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="col", dtype=label
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
+        column="col",
+        dtype=label,
+        argument=_role_argument(role),
+        data_argument="data",
     ):
         ROLE_FITS[role](df)
 
@@ -446,19 +460,20 @@ def test_all_null_column_reports_missing_values_in_every_numeric_role(
     """全値が欠損の列（`Null`型）は、どのロールでも欠損値として報告する。"""
     df = roles_frame.with_columns(pl.Series("col", [None] * N, dtype=pl.Null))
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="col", count=N),
+    with raises_error(
+        ErrorCode.COLUMN_CONTAINS_NULL,
+        column="col",
+        count=N,
+        argument=_role_argument(role),
+        data_argument="data",
     ):
         ROLE_FITS[role](df)
 
 
 @pytest.mark.parametrize("dtype", [pl.Float32, pl.Float16], ids=str)
-@pytest.mark.parametrize(
-    ("bad", "shown"), [(float("nan"), "NaN"), (float("inf"), "inf")]
-)
+@pytest.mark.parametrize("bad", [float("nan"), float("inf")])
 def test_non_finite_values_are_rejected_for_narrow_floats(
-    roles_frame, dtype, bad, shown
+    roles_frame, dtype, bad
 ):
     """幅の狭い浮動小数の列のNaN・無限大も、`Float64`と同じメッセージで拒否する。"""
     df = roles_frame.with_columns(
@@ -467,11 +482,13 @@ def test_non_finite_values_are_rejected_for_narrow_floats(
         .scatter(3, bad)
     )
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="col", value=shown, row=3
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column="col",
+        value=pytest.approx(bad, nan_ok=True),
+        row=3,
+        argument="x",
+        data_argument="data",
     ):
         ROLE_FITS["ols.x"](df)
 
@@ -483,9 +500,12 @@ def test_null_in_integer_and_decimal_columns_is_rejected(roles_frame, dtype):
         pl.Series("col", values, dtype=pl.Int64).cast(dtype)
     )
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="col", count=1),
+    with raises_error(
+        ErrorCode.COLUMN_CONTAINS_NULL,
+        column="col",
+        count=1,
+        argument="x",
+        data_argument="data",
     ):
         ROLE_FITS["ols.x"](df)
 
@@ -646,11 +666,12 @@ def test_hac_time_rejects_non_orderable_dtypes_for_every_method(
 ):
     df = roles_frame.with_columns(unused_column(dtype).alias("t"))
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_UNSUPPORTED_ORDER_DTYPE, name="t", dtype=label
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
+        column="t",
+        dtype=label,
+        argument="hac_time",
+        data_argument="data",
     ):
         HAC_FITS[method](df)
 
@@ -660,9 +681,11 @@ def test_hac_time_rejects_non_orderable_dtypes_for_every_method(
 
 @pytest.mark.parametrize("method", list(HAC_FITS))
 def test_hac_time_missing_column_raises(shuffled_time_frame, method):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="absent"),
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="absent",
+        argument="hac_time",
+        data_argument="data",
     ):
         HAC_FITS[method](shuffled_time_frame, hac_time="absent")
 
@@ -676,9 +699,12 @@ def test_hac_time_all_null_column_reports_missing_values(
         pl.Series("t", [None] * N, dtype=pl.Null)
     )
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="t", count=N),
+    with raises_error(
+        ErrorCode.COLUMN_CONTAINS_NULL,
+        column="t",
+        count=N,
+        argument="hac_time",
+        data_argument="data",
     ):
         HAC_FITS[method](df)
 
@@ -707,9 +733,12 @@ def test_hac_time_null_value_raises(shuffled_time_frame, method, dtype):
         pl.Series("t", values, dtype=pl.Int64).cast(dtype)
     )
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="t", count=1),
+    with raises_error(
+        ErrorCode.COLUMN_CONTAINS_NULL,
+        column="t",
+        count=1,
+        argument="hac_time",
+        data_argument="data",
     ):
         HAC_FITS[method](df)
 
@@ -719,15 +748,10 @@ def test_hac_time_null_value_raises(shuffled_time_frame, method, dtype):
     "dtype", [pl.Float64, pl.Float32, pl.Float16], ids=str
 )
 @pytest.mark.parametrize(
-    ("bad", "shown"),
-    [
-        (float("nan"), "NaN"),
-        (float("inf"), "inf"),
-        (float("-inf"), "-inf"),
-    ],
+    "bad", [float("nan"), float("inf"), float("-inf")], ids=str
 )
 def test_hac_time_non_finite_value_raises(
-    shuffled_time_frame, method, dtype, bad, shown
+    shuffled_time_frame, method, dtype, bad
 ):
     df = shuffled_time_frame.with_columns(
         pl.Series("t", np.arange(N), dtype=pl.Int64)
@@ -735,11 +759,13 @@ def test_hac_time_non_finite_value_raises(
         .scatter(3, bad)
     )
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="t", value=shown, row=3
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column="t",
+        value=pytest.approx(bad, nan_ok=True),
+        row=3,
+        argument="hac_time",
+        data_argument="data",
     ):
         HAC_FITS[method](df)
 
@@ -767,11 +793,13 @@ def test_hac_time_tied_values_raise_for_every_orderable_dtype(
     ties = (pl.int_range(pl.len()) // 2).cast(pl.Int64).cast(dtype)
     df = shuffled_time_frame.with_columns(ties.alias("t"))
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_TIED_TIME_ORDER, name="t", first=0, second=1
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_VALUES_TIED,
+        column="t",
+        first_row=0,
+        second_row=1,
+        argument="hac_time",
+        data_argument="data",
     ):
         HAC_FITS[method](df)
 
@@ -795,11 +823,13 @@ def test_hac_time_tied_values_beyond_float64_precision_raise(
     )
     df = shuffled_time_frame.with_columns(ties.cast(dtype).alias("t"))
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_TIED_TIME_ORDER, name="t", first=3, second=5
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_VALUES_TIED,
+        column="t",
+        first_row=3,
+        second_row=5,
+        argument="hac_time",
+        data_argument="data",
     ):
         HAC_FITS[method](df)
 

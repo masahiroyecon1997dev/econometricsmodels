@@ -17,6 +17,7 @@ import polars as pl
 import pytest
 from _constants import DATA_DIR
 from _error_messages import escaped
+from _errors import raises_error
 from _helpers import (
     ROW_TIME,
     TIED_TIME_COLUMNS,
@@ -27,6 +28,7 @@ from _helpers import (
 from econometricsmodels import (
     WLS,
     ComputationError,
+    ErrorCode,
     ValidationError,
     WLSOptions,
 )
@@ -37,9 +39,11 @@ from benchmark.linear.constants import COV_TYPES
 
 
 def test_missing_weight_column_raises(dataset):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="nonexistent"),
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="nonexistent",
+        argument="weight",
+        data_argument="data",
     ):
         WLS(dataset, y="y", x=["x1", "x2"], weight="nonexistent").fit()
 
@@ -49,8 +53,11 @@ def test_weight_empty_string_raises(unit_weight_dataset):
     `ValidationError`になる（空文字列は存在しない列名の一種）。
     """
     df = unit_weight_dataset
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="")
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="",
+        argument="weight",
+        data_argument="data",
     ):
         WLS(df, y="y", x=["x1", "x2"], weight="").fit()
 
@@ -106,14 +113,13 @@ def test_nan_weight_raises(dataset):
     n = dataset.height
     weight = [1.0] * (n - 1) + [float("nan")]
     df = dataset.with_columns(pl.Series("weight", weight))
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE,
-            name="weight",
-            value="NaN",
-            row=n - 1,
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column="weight",
+        value=pytest.approx(float("nan"), nan_ok=True),
+        row=n - 1,
+        argument="weight",
+        data_argument="data",
     ):
         WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
 
@@ -123,9 +129,12 @@ def test_null_weight_raises(dataset):
     n = dataset.height
     weight: list[float | None] = [1.0] * (n - 1) + [None]
     df = dataset.with_columns(pl.Series("weight", weight))
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="weight", count=1),
+    with raises_error(
+        ErrorCode.COLUMN_CONTAINS_NULL,
+        column="weight",
+        count=1,
+        argument="weight",
+        data_argument="data",
     ):
         WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
 
@@ -192,9 +201,11 @@ def test_missing_column_raises(unit_weight_dataset):
     OLSと同じ検証）。
     """
     df = unit_weight_dataset
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="nonexistent"),
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="nonexistent",
+        argument="x",
+        data_argument="data",
     ):
         WLS(df, y="y", x=["x1", "nonexistent"], weight="weight").fit()
 
@@ -203,9 +214,11 @@ def test_missing_y_column_raises(unit_weight_dataset):
     """`y`に存在しない列名を指定した場合`ValidationError`（`x`側の
     `test_missing_column_raises`と対称）。
     """
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="nonexistent"),
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="nonexistent",
+        argument="y",
+        data_argument="data",
     ):
         WLS(
             unit_weight_dataset,
@@ -265,8 +278,11 @@ def test_y_empty_string_raises(unit_weight_dataset):
     `test_ols_validation.py::test_y_empty_string_raises`参照）。
     """
     df = unit_weight_dataset
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="")
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="",
+        argument="y",
+        data_argument="data",
     ):
         WLS(df, y="", x=["x1", "x2"], weight="weight").fit()
 
@@ -278,18 +294,24 @@ def test_null_values_raise():
     df_y = pl.DataFrame(
         {"y": [1.0, None, 3.0], "x1": [1.0, 2.0, 3.0], "weight": [1.0] * 3}
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="y", count=1),
+    with raises_error(
+        ErrorCode.COLUMN_CONTAINS_NULL,
+        column="y",
+        count=1,
+        argument="y",
+        data_argument="data",
     ):
         WLS(df_y, y="y", x=["x1"], weight="weight").fit()
 
     df_x = pl.DataFrame(
         {"y": [1.0, 2.0, 3.0], "x1": [1.0, None, 3.0], "weight": [1.0] * 3}
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=1),
+    with raises_error(
+        ErrorCode.COLUMN_CONTAINS_NULL,
+        column="x1",
+        count=1,
+        argument="x",
+        data_argument="data",
     ):
         WLS(df_x, y="y", x=["x1"], weight="weight").fit()
 
@@ -306,11 +328,13 @@ def test_non_finite_values_raise():
             "weight": [1.0] * 3,
         }
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="y", value="NaN", row=1
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column="y",
+        value=pytest.approx(float("nan"), nan_ok=True),
+        row=1,
+        argument="y",
+        data_argument="data",
     ):
         WLS(df_y_nan, y="y", x=["x1"], weight="weight").fit()
 
@@ -321,11 +345,13 @@ def test_non_finite_values_raise():
             "weight": [1.0] * 3,
         }
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="y", value="inf", row=1
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column="y",
+        value=float("inf"),
+        row=1,
+        argument="y",
+        data_argument="data",
     ):
         WLS(df_y_inf, y="y", x=["x1"], weight="weight").fit()
 
@@ -336,11 +362,13 @@ def test_non_finite_values_raise():
             "weight": [1.0] * 3,
         }
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="x1", value="NaN", row=1
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column="x1",
+        value=pytest.approx(float("nan"), nan_ok=True),
+        row=1,
+        argument="x",
+        data_argument="data",
     ):
         WLS(df_x_nan, y="y", x=["x1"], weight="weight").fit()
 
@@ -351,11 +379,13 @@ def test_non_finite_values_raise():
             "weight": [1.0] * 3,
         }
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="x1", value="inf", row=1
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column="x1",
+        value=float("inf"),
+        row=1,
+        argument="x",
+        data_argument="data",
     ):
         WLS(df_x_inf, y="y", x=["x1"], weight="weight").fit()
 
@@ -367,11 +397,12 @@ def test_non_numeric_dtype_raises():
     df = pl.DataFrame(
         {"y": ["a", "b", "c"], "x1": [1.0, 2.0, 3.0], "weight": [1.0] * 3}
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="y", dtype="String"
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
+        column="y",
+        dtype="String",
+        argument="y",
+        data_argument="data",
     ):
         WLS(df, y="y", x=["x1"], weight="weight").fit()
 
@@ -389,8 +420,11 @@ def test_predict_missing_column_raises(unit_weight_dataset):
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
     new_data = pl.DataFrame({"x1": [1.0, 2.0]})  # x2が無い
 
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="x2")
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="x2",
+        argument="x",
+        data_argument="new_data",
     ):
         res.predict(new_data)
 
@@ -403,11 +437,12 @@ def test_predict_non_numeric_dtype_raises(unit_weight_dataset):
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
     new_data = pl.DataFrame({"x1": ["a", "b"], "x2": [1.0, 2.0]})
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="x1", dtype="String"
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
+        column="x1",
+        dtype="String",
+        argument="x",
+        data_argument="new_data",
     ):
         res.predict(new_data)
 
@@ -417,18 +452,23 @@ def test_predict_null_or_non_finite_values_raise(unit_weight_dataset):
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
 
     new_data_null = pl.DataFrame({"x1": [1.0, None], "x2": [1.0, 2.0]})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=1),
+    with raises_error(
+        ErrorCode.COLUMN_CONTAINS_NULL,
+        column="x1",
+        count=1,
+        argument="x",
+        data_argument="new_data",
     ):
         res.predict(new_data_null)
 
     new_data_inf = pl.DataFrame({"x1": [1.0, float("inf")], "x2": [1.0, 2.0]})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="x1", value="inf", row=1
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column="x1",
+        value=float("inf"),
+        row=1,
+        argument="x",
+        data_argument="new_data",
     ):
         res.predict(new_data_inf)
 
@@ -467,8 +507,11 @@ def test_augment_missing_column_raises(unit_weight_dataset):
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
     new_data = pl.DataFrame({"x1": [1.0, 2.0]})  # x2が無い
 
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="x2")
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="x2",
+        argument="x",
+        data_argument="new_data",
     ):
         res.augment(new_data)
 
@@ -521,9 +564,11 @@ def test_cluster_nonexistent_column_raises(unit_weight_dataset):
     """
     df = unit_weight_dataset
     options = WLSOptions(cov_type="cluster", cluster="does_not_exist")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="does_not_exist",
+        argument="cluster",
+        data_argument="data",
     ):
         WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
 
@@ -534,8 +579,11 @@ def test_cluster_empty_string_raises(unit_weight_dataset):
     """
     df = unit_weight_dataset
     options = WLSOptions(cov_type="cluster", cluster="")
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="")
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="",
+        argument="cluster",
+        data_argument="data",
     ):
         WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
 
@@ -661,14 +709,13 @@ def test_hac_time_with_tied_values_raises(
     """
     df = unit_weight_dataset.with_columns(time_expr.alias("t"))
     options = WLSOptions(cov_type="hac", hac_lags=2, hac_time="t")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_TIED_TIME_ORDER,
-            name="t",
-            first=rows[0],
-            second=rows[1],
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_VALUES_TIED,
+        column="t",
+        first_row=rows[0],
+        second_row=rows[1],
+        argument="hac_time",
+        data_argument="data",
     ):
         WLS(df, y="y", x=["x1", "x2"], weight="weight", options=options).fit()
 

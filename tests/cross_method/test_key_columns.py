@@ -9,18 +9,18 @@ from __future__ import annotations
 
 import datetime as dt
 
-import _error_messages as msgs
 import numpy as np
 import polars as pl
 import pytest
 from _dtype_helpers import make_frame, unused_column
-from _error_messages import escaped
+from _errors import raises_error
 from econometricsmodels import (
     FE,
     IV,
     OLS,
     RE,
     WLS,
+    ErrorCode,
     FEOptions,
     IVOptions,
     Logit,
@@ -31,7 +31,6 @@ from econometricsmodels import (
     REOptions,
     Tobit,
     TobitOptions,
-    ValidationError,
     WLSOptions,
 )
 
@@ -192,13 +191,12 @@ def test_unsupported_dtype_as_cluster_raises(frame, method, dtype, label):
     """`cluster`に使えないdtypeを渡すと、全手法でdtype名入りの`ValidationError`。"""
     df = frame.with_columns(unused_column(dtype).alias("cluster"))
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_UNSUPPORTED_IDENTITY_DTYPE,
-            name="cluster",
-            dtype=label,
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
+        column="cluster",
+        dtype=label,
+        argument="cluster",
+        data_argument="data",
     ):
         CLUSTER_FITS[method](df)
 
@@ -212,13 +210,12 @@ def test_unsupported_dtype_as_cluster_raises(frame, method, dtype, label):
 def test_unsupported_dtype_as_entity_raises(frame, method, dtype, label):
     df = frame.with_columns(unused_column(dtype).alias("entity"))
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_UNSUPPORTED_IDENTITY_DTYPE,
-            name="entity",
-            dtype=label,
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
+        column="entity",
+        dtype=label,
+        argument="entity",
+        data_argument="data",
     ):
         ENTITY_FITS[method](df)
 
@@ -256,11 +253,12 @@ def test_unsupported_dtype_as_time_raises(frame, method, dtype, label):
     """`time`・`dk_time`に使えないdtypeを渡すと、時点列用のメッセージで拒否する。"""
     df = frame.with_columns(unused_column(dtype).alias("t"))
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_UNSUPPORTED_TIME_DTYPE, name="t", dtype=label
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
+        column="t",
+        dtype=label,
+        argument=_key_argument("t", method),
+        data_argument="data",
     ):
         TIME_FITS[method](df)
 
@@ -281,7 +279,7 @@ def _scatter(frame, column, value):
 
 
 @pytest.mark.parametrize(
-    ("bad", "shown"), NON_FINITE, ids=[x[1] for x in NON_FINITE]
+    "bad", [x[0] for x in NON_FINITE], ids=[x[1] for x in NON_FINITE]
 )
 @pytest.mark.parametrize(
     ("column", "fits"),
@@ -293,20 +291,19 @@ def _scatter(frame, column, value):
     ids=["cluster", "entity", "time"],
 )
 def test_non_finite_float_key_raises_for_every_method(
-    frame, column, fits, bad, shown
+    frame, column, fits, bad
 ):
     """浮動小数のキー列のNaN・無限大は、全手法・全役割で数値列と同じメッセージで拒否する。"""
     df = _scatter(frame, column, bad)
 
-    for fit in fits.values():
-        with pytest.raises(
-            ValidationError,
-            match=escaped(
-                msgs.COLUMN_HAS_NON_FINITE_VALUE,
-                name=column,
-                value=shown,
-                row=2,
-            ),
+    for method, fit in fits.items():
+        with raises_error(
+            ErrorCode.COLUMN_NON_FINITE,
+            column=column,
+            value=pytest.approx(bad, nan_ok=True),
+            row=2,
+            argument=_key_argument(column, method),
+            data_argument="data",
         ):
             fit(df)
 
@@ -327,12 +324,20 @@ NULL_KEY_CASES = [
 ]
 
 
-def _assert_missing_key_raises(fit, df, column, count):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_MISSING_VALUES, name=column, count=count
-        ),
+def _key_argument(column, method):
+    """キー列`column`を渡した引数名（時点の列は、手法によって`time`か`dk_time`）。"""
+    if column != "t":
+        return column
+    return "dk_time" if method.endswith("dk_time") else "time"
+
+
+def _assert_missing_key_raises(fit, df, column, method, count):
+    with raises_error(
+        ErrorCode.COLUMN_CONTAINS_NULL,
+        column=column,
+        count=count,
+        argument=_key_argument(column, method),
+        data_argument="data",
     ):
         fit(df)
 
@@ -354,7 +359,7 @@ def test_null_key_raises_for_every_method(
     df = _with_key(frame, column, dtype)
     df = df.with_columns(df[column].scatter(row, None).alias(column))
 
-    _assert_missing_key_raises(fit, df, column, count=1)
+    _assert_missing_key_raises(fit, df, column, method, count=1)
 
 
 @pytest.mark.parametrize("dtype", [pl.Null, pl.Int64, pl.String], ids=str)
@@ -382,7 +387,7 @@ def test_all_null_key_column_counts_every_row_as_missing(
         pl.Series(column, [None] * frame.height, dtype=dtype)
     )
 
-    _assert_missing_key_raises(fit, df, column, count=frame.height)
+    _assert_missing_key_raises(fit, df, column, method, count=frame.height)
 
 
 def test_null_boolean_cluster_raises_for_every_method(frame):
@@ -390,8 +395,8 @@ def test_null_boolean_cluster_raises_for_every_method(frame):
     df = frame.with_columns((pl.col("cluster") % 2 == 0).alias("cluster"))
     df = df.with_columns(df["cluster"].scatter(2, None).alias("cluster"))
 
-    for fit in CLUSTER_FITS.values():
-        _assert_missing_key_raises(fit, df, "cluster", count=1)
+    for method, fit in CLUSTER_FITS.items():
+        _assert_missing_key_raises(fit, df, "cluster", method, count=1)
 
 
 # ── 時点の順序: 桁が上がる・月や年をまたぐ時点でも、時系列順になる ───────────
@@ -487,42 +492,36 @@ def _aware(frame, column):
 @pytest.mark.parametrize("method", list(CLUSTER_FITS))
 def test_datetime_with_time_zone_is_rejected_as_cluster(frame, method):
     """タイムゾーン付きの`Datetime`は、対処法を示すメッセージで拒否する。"""
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_KEY_WITH_TIME_ZONE,
-            name="cluster",
-            time_zone="UTC",
-            role="group identifier",
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_TIMEZONE_NOT_SUPPORTED,
+        column="cluster",
+        time_zone="UTC",
+        argument="cluster",
+        data_argument="data",
     ):
         CLUSTER_FITS[method](_aware(frame, "cluster"))
 
 
 @pytest.mark.parametrize("method", list(ENTITY_FITS))
 def test_datetime_with_time_zone_is_rejected_as_entity(frame, method):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_KEY_WITH_TIME_ZONE,
-            name="entity",
-            time_zone="UTC",
-            role="group identifier",
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_TIMEZONE_NOT_SUPPORTED,
+        column="entity",
+        time_zone="UTC",
+        argument="entity",
+        data_argument="data",
     ):
         ENTITY_FITS[method](_aware(frame, "entity"))
 
 
 @pytest.mark.parametrize("method", list(TIME_FITS))
 def test_datetime_with_time_zone_is_rejected_as_time(frame, method):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_KEY_WITH_TIME_ZONE,
-            name="t",
-            time_zone="UTC",
-            role="time",
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_TIMEZONE_NOT_SUPPORTED,
+        column="t",
+        time_zone="UTC",
+        argument=_key_argument("t", method),
+        data_argument="data",
     ):
         TIME_FITS[method](_aware(frame, "t"))
 

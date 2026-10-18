@@ -18,12 +18,14 @@ from _dtype_helpers import (
     unused_column,
 )
 from _error_messages import escaped
+from _errors import raises_error
 from econometricsmodels import (
     FE,
     IV,
     OLS,
     RE,
     WLS,
+    ErrorCode,
     Logit,
     Probit,
     Tobit,
@@ -214,11 +216,12 @@ def test_new_data_rejects_non_numeric_dtype(frame, method, path, dtype):
         "Categorical": "Categorical",
     }.get(str(dtype), "Struct")
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="x1", dtype=label
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
+        column="x1",
+        dtype=label,
+        argument="x",
+        data_argument="new_data",
     ):
         _call(result, path, new)
 

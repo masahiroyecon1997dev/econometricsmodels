@@ -23,6 +23,7 @@ use super::common::{
     check_cov_options, least_squares_error_to_pyerr, parse_cov_kind, resolve_cov_type,
 };
 use crate::shared::augment::append_predicted_column;
+use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
     extract_column_list, extract_dataframe, extract_f64_column, extract_f64_columns,
     extract_model_x_columns, extract_time_order_ranks, x_column_names,
@@ -414,7 +415,13 @@ impl OLSResult {
     /// （`x`列の抽出→`predict_new_data`呼び出し）。
     fn predict_for(&self, df: &DataFrame) -> PyResult<Vec<f64>> {
         let has_intercept = self.has_intercept;
-        let x_columns = extract_model_x_columns(df, &self.param_names, has_intercept, 0)?;
+        let x_columns = extract_model_x_columns(
+            df,
+            &self.param_names,
+            has_intercept,
+            0,
+            ColumnSource::new("x", "new_data"),
+        )?;
 
         Ok(engine::linear::ols::predict_new_data(
             &self.params,
@@ -513,7 +520,7 @@ impl OLSResult {
         })?;
 
         let x_names = x_column_names(&self.param_names, self.has_intercept, 0);
-        let x_columns = extract_f64_columns(df, x_names)?;
+        let x_columns = extract_f64_columns(df, x_names, ColumnSource::new("x", "data"))?;
         let result = white_test(&x_columns, x_names, &self.residuals)
             .map_err(least_squares_error_to_pyerr)?;
 
@@ -578,7 +585,12 @@ impl OLSResult {
             }
             None => x_column_names(&self.param_names, self.has_intercept, 0),
         };
-        let z_columns = extract_f64_columns(df, z_names)?;
+        let z_argument = if variables.is_some() {
+            "variables"
+        } else {
+            "x"
+        };
+        let z_columns = extract_f64_columns(df, z_names, ColumnSource::new(z_argument, "data"))?;
         let result = breusch_pagan_test(&z_columns, z_names, &self.residuals)
             .map_err(least_squares_error_to_pyerr)?;
 
@@ -640,8 +652,14 @@ impl OLSResult {
             )
         })?;
 
-        let x_columns = extract_model_x_columns(df, &self.param_names, self.has_intercept, 0)?;
-        let time_order = extract_time_order_ranks(df, &time)?;
+        let x_columns = extract_model_x_columns(
+            df,
+            &self.param_names,
+            self.has_intercept,
+            0,
+            ColumnSource::new("x", "data"),
+        )?;
+        let time_order = extract_time_order_ranks(df, &time, ColumnSource::new("time", "data"))?;
         let result = breusch_godfrey_test(
             &x_columns,
             self.has_intercept,
@@ -710,10 +728,10 @@ pub fn fit(
     validate_common_roles(&y, &x, options.include_intercept)?;
 
     // ── y列の抽出 ──────────────────────────────────────────────────────
-    let y_slice = extract_f64_column(&df, &y)?;
+    let y_slice = extract_f64_column(&df, &y, ColumnSource::new("y", "data"))?;
 
     // ── x列の抽出 ──────────────────────────────────────────────────────
-    let x_slices = extract_f64_columns(&df, &x)?;
+    let x_slices = extract_f64_columns(&df, &x, ColumnSource::new("x", "data"))?;
 
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ）─────────────
     let cov_type = resolve_cov_type(

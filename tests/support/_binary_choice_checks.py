@@ -45,6 +45,7 @@ from _assertions import (
 )
 from _constants import APPLE_CLUSTER, APPLE_X, DATA_DIR, MROZ_X
 from _error_messages import escaped
+from _errors import raises_error
 from _helpers import (
     load_wooldridge_dataset,
     name_collision_frame,
@@ -60,7 +61,7 @@ from _nonlinear_helpers import (
     small_sample_separation_dataset,
     strongly_collinear_binary_dataset,
 )
-from econometricsmodels import ComputationError, ValidationError
+from econometricsmodels import ComputationError, ErrorCode, ValidationError
 
 from benchmark.common import imbalanced_cluster_groups
 from benchmark.nonlinear.constants import (
@@ -504,8 +505,11 @@ def check_y_empty_string_raises(dataset, estimator_cls):
     """`y`に空文字列を渡した場合`ValidationError`（`x`側の`check_empty_x_raises`と
     対称。`test_ols_validation.py::test_y_empty_string_raises`参照）。
     """
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="")
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="",
+        argument="y",
+        data_argument="data",
     ):
         estimator_cls(dataset, y="", x=["x1", "x2"]).fit()
 
@@ -532,17 +536,21 @@ def check_empty_x_raises(dataset, estimator_cls):
 
 
 def check_missing_column_raises(dataset, estimator_cls):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="does_not_exist",
+        argument="x",
+        data_argument="data",
     ):
         estimator_cls(dataset, y="y", x=["does_not_exist"]).fit()
 
 
 def check_missing_y_column_raises(dataset, estimator_cls):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="does_not_exist",
+        argument="y",
+        data_argument="data",
     ):
         estimator_cls(dataset, y="does_not_exist", x=["x1", "x2"]).fit()
 
@@ -590,16 +598,22 @@ def check_null_values_raise(estimator_cls):
     `test_null_values_raise`と同型）。
     """
     df_y = pl.DataFrame({"y": [0.0, None, 1.0], "x1": [1.0, 2.0, 3.0]})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="y", count=1),
+    with raises_error(
+        ErrorCode.COLUMN_CONTAINS_NULL,
+        column="y",
+        count=1,
+        argument="y",
+        data_argument="data",
     ):
         estimator_cls(df_y, y="y", x=["x1"]).fit()
 
     df_x = pl.DataFrame({"y": [0.0, 1.0, 0.0], "x1": [1.0, None, 3.0]})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=1),
+    with raises_error(
+        ErrorCode.COLUMN_CONTAINS_NULL,
+        column="x1",
+        count=1,
+        argument="x",
+        data_argument="data",
     ):
         estimator_cls(df_x, y="y", x=["x1"]).fit()
 
@@ -614,44 +628,52 @@ def check_non_finite_values_raise(estimator_cls):
     df_y_nan = pl.DataFrame(
         {"y": [0.0, float("nan"), 1.0], "x1": [1.0, 2.0, 3.0]}
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="y", value="NaN", row=1
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column="y",
+        value=pytest.approx(float("nan"), nan_ok=True),
+        row=1,
+        argument="y",
+        data_argument="data",
     ):
         estimator_cls(df_y_nan, y="y", x=["x1"]).fit()
 
     df_y_inf = pl.DataFrame(
         {"y": [0.0, float("inf"), 1.0], "x1": [1.0, 2.0, 3.0]}
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="y", value="inf", row=1
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column="y",
+        value=float("inf"),
+        row=1,
+        argument="y",
+        data_argument="data",
     ):
         estimator_cls(df_y_inf, y="y", x=["x1"]).fit()
 
     df_x_nan = pl.DataFrame(
         {"y": [0.0, 1.0, 0.0], "x1": [1.0, float("nan"), 3.0]}
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="x1", value="NaN", row=1
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column="x1",
+        value=pytest.approx(float("nan"), nan_ok=True),
+        row=1,
+        argument="x",
+        data_argument="data",
     ):
         estimator_cls(df_x_nan, y="y", x=["x1"]).fit()
 
     df_x_inf = pl.DataFrame(
         {"y": [0.0, 1.0, 0.0], "x1": [1.0, float("inf"), 3.0]}
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="x1", value="inf", row=1
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column="x1",
+        value=float("inf"),
+        row=1,
+        argument="x",
+        data_argument="data",
     ):
         estimator_cls(df_x_inf, y="y", x=["x1"]).fit()
 
@@ -661,11 +683,12 @@ def check_non_numeric_dtype_raises(estimator_cls):
     `test_non_numeric_dtype_raises`と同型）。
     """
     df = pl.DataFrame({"y": ["a", "b", "c"], "x1": [1.0, 2.0, 3.0]})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="y", dtype="String"
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
+        column="y",
+        dtype="String",
+        argument="y",
+        data_argument="data",
     ):
         estimator_cls(df, y="y", x=["x1"]).fit()
 
@@ -704,8 +727,11 @@ def check_predict_missing_column_raises(dataset, estimator_cls):
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
     new_data = pl.DataFrame({"x1": [1.0, 2.0]})  # x2が無い
 
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="x2")
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="x2",
+        argument="x",
+        data_argument="new_data",
     ):
         res.predict(new_data)
 
@@ -715,11 +741,12 @@ def check_predict_non_numeric_dtype_raises(dataset, estimator_cls):
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
     new_data = pl.DataFrame({"x1": ["a", "b"], "x2": [1.0, 2.0]})
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="x1", dtype="String"
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
+        column="x1",
+        dtype="String",
+        argument="x",
+        data_argument="new_data",
     ):
         res.predict(new_data)
 
@@ -728,18 +755,23 @@ def check_predict_null_or_non_finite_values_raise(dataset, estimator_cls):
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
 
     new_data_null = pl.DataFrame({"x1": [1.0, None], "x2": [1.0, 2.0]})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=1),
+    with raises_error(
+        ErrorCode.COLUMN_CONTAINS_NULL,
+        column="x1",
+        count=1,
+        argument="x",
+        data_argument="new_data",
     ):
         res.predict(new_data_null)
 
     new_data_inf = pl.DataFrame({"x1": [1.0, float("inf")], "x2": [1.0, 2.0]})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="x1", value="inf", row=1
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column="x1",
+        value=float("inf"),
+        row=1,
+        argument="x",
+        data_argument="new_data",
     ):
         res.predict(new_data_inf)
 
@@ -782,8 +814,11 @@ def check_augment_missing_column_raises(dataset, estimator_cls):
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
     new_data = pl.DataFrame({"x1": [1.0, 2.0]})  # x2が無い
 
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="x2")
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="x2",
+        argument="x",
+        data_argument="new_data",
     ):
         res.augment(new_data)
 
@@ -993,9 +1028,11 @@ def check_cluster_nonexistent_column_raises(
 ):
     """`cluster`が実在しない列名を指すと`ValidationError`（OLSと同じ理由）。"""
     options = options_cls(cov_type="cluster", cluster="does_not_exist")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="does_not_exist",
+        argument="cluster",
+        data_argument="data",
     ):
         estimator_cls(dataset, y="y", x=["x1", "x2"], options=options).fit()
 

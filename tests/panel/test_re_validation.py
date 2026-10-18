@@ -43,9 +43,16 @@ import polars as pl
 import pytest
 from _constants import DATA_DIR
 from _error_messages import escaped
+from _errors import raises_error
 from _panel_helpers import x_columns
 from _re_helpers import our_fit_re
-from econometricsmodels import RE, ComputationError, REOptions, ValidationError
+from econometricsmodels import (
+    RE,
+    ComputationError,
+    ErrorCode,
+    REOptions,
+    ValidationError,
+)
 
 # ── ValidationError（入力データ: 変数ロールの重複） ───────────────────
 
@@ -230,25 +237,31 @@ def test_data_not_polars_raises():
 
 
 def test_missing_y_column_raises(fe_dataset):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="nonexistent"),
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="nonexistent",
+        argument="y",
+        data_argument="data",
     ):
         RE(fe_dataset, y="nonexistent", x=["x1", "x2"], entity="entity").fit()
 
 
 def test_missing_x_column_raises(fe_dataset):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="nonexistent"),
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="nonexistent",
+        argument="x",
+        data_argument="data",
     ):
         RE(fe_dataset, y="y", x=["nonexistent"], entity="entity").fit()
 
 
 def test_missing_entity_column_raises(fe_dataset):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="nonexistent"),
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="nonexistent",
+        argument="entity",
+        data_argument="data",
     ):
         RE(fe_dataset, y="y", x=["x1", "x2"], entity="nonexistent").fit()
 
@@ -256,9 +269,11 @@ def test_missing_entity_column_raises(fe_dataset):
 def test_missing_time_column_raises(fe_dataset):
     """2-way（`REOptions.time`）の時点列が存在しない場合。"""
     options = REOptions(time="nonexistent")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="nonexistent"),
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="nonexistent",
+        argument="time",
+        data_argument="data",
     ):
         RE(
             fe_dataset, y="y", x=["x1", "x2"], entity="entity", options=options
@@ -267,9 +282,11 @@ def test_missing_time_column_raises(fe_dataset):
 
 def test_missing_dk_time_column_raises(fe_dataset):
     options = REOptions(cov_type="dk", dk_time="nonexistent")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="nonexistent"),
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="nonexistent",
+        argument="dk_time",
+        data_argument="data",
     ):
         RE(
             fe_dataset, y="y", x=["x1", "x2"], entity="entity", options=options
@@ -278,7 +295,7 @@ def test_missing_dk_time_column_raises(fe_dataset):
 
 @pytest.mark.parametrize("bad_col", ["y", "x1"])
 def test_numeric_column_null_values_raise(bad_col):
-    """`y`/`x`（`extract_f64_column`）は`COLUMN_HAS_MISSING_VALUES`。"""
+    """`y`/`x`（`extract_f64_column`）の欠損値は`COLUMN_CONTAINS_NULL`。"""
     values: dict[str, list[float | str | None]] = {
         "y": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
         "x1": [0.5, 1.5, 2.5, 3.5, 4.5, 5.5],
@@ -286,20 +303,21 @@ def test_numeric_column_null_values_raise(bad_col):
     }
     values[bad_col][1] = None
     df = pl.DataFrame(values)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name=bad_col, count=1),
+    with raises_error(
+        ErrorCode.COLUMN_CONTAINS_NULL,
+        column=bad_col,
+        count=1,
+        argument="y" if bad_col == "y" else "x",
+        data_argument="data",
     ):
         RE(df, y="y", x=["x1"], entity="entity").fit()
 
 
 @pytest.mark.parametrize(
-    "value, display",
-    [(float("nan"), "NaN"), (float("inf"), "inf")],
-    ids=["nan", "inf"],
+    "value", [float("nan"), float("inf")], ids=["nan", "inf"]
 )
 @pytest.mark.parametrize("bad_col", ["y", "x1"])
-def test_numeric_column_non_finite_values_raise(bad_col, value, display):
+def test_numeric_column_non_finite_values_raise(bad_col, value):
     values: dict[str, list[float]] = {
         "y": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
         "x1": [0.5, 1.5, 2.5, 3.5, 4.5, 5.5],
@@ -308,14 +326,13 @@ def test_numeric_column_non_finite_values_raise(bad_col, value, display):
     df = pl.DataFrame(values).with_columns(
         pl.Series("entity", ["e1", "e1", "e2", "e2", "e3", "e3"])
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE,
-            name=bad_col,
-            value=display,
-            row=1,
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column=bad_col,
+        value=pytest.approx(value, nan_ok=True),
+        row=1,
+        argument="y" if bad_col == "y" else "x",
+        data_argument="data",
     ):
         RE(df, y="y", x=["x1"], entity="entity").fit()
 
@@ -336,9 +353,12 @@ def test_group_key_column_null_values_raise(bad_col, option):
         if option == "time"
         else REOptions(cov_type="dk", dk_time="time")
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name=bad_col, count=1),
+    with raises_error(
+        ErrorCode.COLUMN_CONTAINS_NULL,
+        column=bad_col,
+        count=1,
+        argument=bad_col if bad_col == "entity" else option,
+        data_argument="data",
     ):
         RE(df, y="y", x=["x1"], entity="entity", options=options).fit()
 
@@ -353,9 +373,12 @@ def test_cluster_null_values_raise():
         }
     )
     options = REOptions(cov_type="cluster", cluster="state")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="state", count=1),
+    with raises_error(
+        ErrorCode.COLUMN_CONTAINS_NULL,
+        column="state",
+        count=1,
+        argument="cluster",
+        data_argument="data",
     ):
         RE(df, y="y", x=["x1"], entity="entity", options=options).fit()
 
@@ -484,9 +507,11 @@ def test_invalid_dk_bandwidth_raises(fe_dataset, dk_bandwidth):
 
 def test_cluster_nonexistent_column_raises(fe_dataset):
     options = REOptions(cov_type="cluster", cluster="does_not_exist")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="does_not_exist",
+        argument="cluster",
+        data_argument="data",
     ):
         our_fit_re(fe_dataset, options=options)
 

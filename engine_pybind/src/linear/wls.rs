@@ -24,6 +24,7 @@ use super::common::{
     check_cov_options, least_squares_error_to_pyerr, parse_cov_kind, resolve_cov_type,
 };
 use crate::shared::augment::append_predicted_column;
+use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
     extract_dataframe, extract_f64_column, extract_f64_columns, extract_model_x_columns,
 };
@@ -281,7 +282,13 @@ impl WLSResult {
     /// （`x`列の抽出→`predict_new_data`呼び出し、`OLSResult`と同じ設計）。
     fn predict_for(&self, df: &DataFrame) -> PyResult<Vec<f64>> {
         let has_intercept = self.has_intercept;
-        let x_columns = extract_model_x_columns(df, &self.param_names, has_intercept, 0)?;
+        let x_columns = extract_model_x_columns(
+            df,
+            &self.param_names,
+            has_intercept,
+            0,
+            ColumnSource::new("x", "new_data"),
+        )?;
 
         Ok(engine::linear::ols::predict_new_data(
             &self.params,
@@ -388,16 +395,16 @@ pub fn fit(
     ])?;
 
     // ── y列の抽出 ──────────────────────────────────────────────────────
-    let y_slice = extract_f64_column(&df, &y)?;
+    let y_slice = extract_f64_column(&df, &y, ColumnSource::new("y", "data"))?;
 
     // ── x列の抽出 ──────────────────────────────────────────────────────
-    let x_slices = extract_f64_columns(&df, &x)?;
+    let x_slices = extract_f64_columns(&df, &x, ColumnSource::new("x", "data"))?;
 
     // ── weight列の抽出 ─────────────────────────────────────────────────
     // NaN/無限大・欠損値の検証はextract_f64_columnがy/xと同じ経路で行う。0以下の値
     // （analytic weightとして不正）の検証はengine側（LeastSquaresError::NonPositiveWeight）に
     // 委ねる（`docs/spec/wls-spec.md`「エラー型」参照）。
-    let weight_slice = extract_f64_column(&df, &weight)?;
+    let weight_slice = extract_f64_column(&df, &weight, ColumnSource::new("weight", "data"))?;
 
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ、OLSと同じ）─────
     let cov_type = resolve_cov_type(

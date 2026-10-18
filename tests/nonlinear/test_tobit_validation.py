@@ -22,6 +22,7 @@ import polars as pl
 import pytest
 from _constants import DATA_DIR
 from _error_messages import escaped, rust_f64
+from _errors import raises_error
 from _helpers import name_collision_frame, with_cluster_groups
 from _nonlinear_helpers import (
     censored_separation_dataset,
@@ -29,6 +30,7 @@ from _nonlinear_helpers import (
 )
 from econometricsmodels import (
     ComputationError,
+    ErrorCode,
     Tobit,
     TobitOptions,
     ValidationError,
@@ -64,8 +66,11 @@ def test_y_empty_string_raises(censored_dataset):
     """`y`に空文字列を渡した場合`ValidationError`
     （`test_ols_validation.py::test_y_empty_string_raises`参照）。
     """
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="")
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="",
+        argument="y",
+        data_argument="data",
     ):
         Tobit(censored_dataset, y="", x=["x1", "x2"]).fit()
 
@@ -104,17 +109,21 @@ def test_empty_x_raises(censored_dataset):
 
 
 def test_missing_column_raises(censored_dataset):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="does_not_exist",
+        argument="x",
+        data_argument="data",
     ):
         Tobit(censored_dataset, y="y", x=["does_not_exist"]).fit()
 
 
 def test_missing_y_column_raises(censored_dataset):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="does_not_exist",
+        argument="y",
+        data_argument="data",
     ):
         Tobit(censored_dataset, y="does_not_exist", x=["x1", "x2"]).fit()
 
@@ -159,9 +168,12 @@ def test_data_not_polars_raises(censored_dataset):
 
 def test_null_values_raise():
     df = pl.DataFrame({"y": [0.0, None, 1.0], "x1": [1.0, 2.0, 3.0]})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="y", count=1),
+    with raises_error(
+        ErrorCode.COLUMN_CONTAINS_NULL,
+        column="y",
+        count=1,
+        argument="y",
+        data_argument="data",
     ):
         Tobit(df, y="y", x=["x1"]).fit()
 
@@ -170,9 +182,12 @@ def test_null_values_in_x_raise():
     """`x` 列に null が含まれる場合も `ValidationError`（`y` だけでなく `x` も
     欠損チェックの対象）。"""
     df = pl.DataFrame({"y": [0.0, 1.0, 2.0, 3.0], "x1": [1.0, None, 3.0, 4.0]})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=1),
+    with raises_error(
+        ErrorCode.COLUMN_CONTAINS_NULL,
+        column="x1",
+        count=1,
+        argument="x",
+        data_argument="data",
     ):
         Tobit(df, y="y", x=["x1"]).fit()
 
@@ -185,26 +200,29 @@ def test_non_finite_values_raise(bad):
     `column_extraction.rs` 内で別ロジックのため個別に確認する（OLS の
     `test_non_finite_values_raise` と同じ）。
     """
-    bad_repr = "NaN" if math.isnan(bad) else "inf"
     df_y = pl.DataFrame(
         {"y": [0.0, bad, 1.0, 2.0], "x1": [1.0, 2.0, 3.0, 4.0]}
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="y", value=bad_repr, row=1
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column="y",
+        value=pytest.approx(bad, nan_ok=True),
+        row=1,
+        argument="y",
+        data_argument="data",
     ):
         Tobit(df_y, y="y", x=["x1"]).fit()
 
     df_x = pl.DataFrame(
         {"y": [0.0, 1.0, 2.0, 3.0], "x1": [1.0, bad, 3.0, 4.0]}
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="x1", value=bad_repr, row=1
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column="x1",
+        value=pytest.approx(bad, nan_ok=True),
+        row=1,
+        argument="x",
+        data_argument="data",
     ):
         Tobit(df_x, y="y", x=["x1"]).fit()
 
@@ -214,11 +232,12 @@ def test_non_numeric_dtype_raises():
     （`test_ols_validation.py::test_non_numeric_dtype_raises`参照）。
     """
     df = pl.DataFrame({"y": ["a", "b", "c"], "x1": [1.0, 2.0, 3.0]})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="y", dtype="String"
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
+        column="y",
+        dtype="String",
+        argument="y",
+        data_argument="data",
     ):
         Tobit(df, y="y", x=["x1"]).fit()
 
@@ -310,8 +329,11 @@ def test_predict_missing_column_raises(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
     new_data = pl.DataFrame({"x1": [1.0, 2.0]})  # x2が無い
 
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="x2")
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="x2",
+        argument="x",
+        data_argument="new_data",
     ):
         res.predict(new_data=new_data)
 
@@ -321,11 +343,12 @@ def test_predict_non_numeric_dtype_raises(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
     new_data = pl.DataFrame({"x1": ["a", "b"], "x2": [1.0, 2.0]})
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="x1", dtype="String"
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
+        column="x1",
+        dtype="String",
+        argument="x",
+        data_argument="new_data",
     ):
         res.predict(new_data=new_data)
 
@@ -334,18 +357,23 @@ def test_predict_null_or_non_finite_values_raise(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
 
     new_data_null = pl.DataFrame({"x1": [1.0, None], "x2": [1.0, 2.0]})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=1),
+    with raises_error(
+        ErrorCode.COLUMN_CONTAINS_NULL,
+        column="x1",
+        count=1,
+        argument="x",
+        data_argument="new_data",
     ):
         res.predict(new_data=new_data_null)
 
     new_data_inf = pl.DataFrame({"x1": [1.0, float("inf")], "x2": [1.0, 2.0]})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="x1", value="inf", row=1
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column="x1",
+        value=float("inf"),
+        row=1,
+        argument="x",
+        data_argument="new_data",
     ):
         res.predict(new_data=new_data_inf)
 
@@ -397,8 +425,11 @@ def test_augment_missing_column_raises(censored_dataset):
     res = Tobit(censored_dataset, y="y", x=["x1", "x2"]).fit()
     new_data = pl.DataFrame({"x1": [1.0, 2.0]})  # x2が無い
 
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="x2")
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="x2",
+        argument="x",
+        data_argument="new_data",
     ):
         res.augment(new_data=new_data)
 
@@ -571,9 +602,11 @@ def test_cluster_without_col_raises(censored_dataset):
 
 def test_cluster_nonexistent_column_raises(censored_dataset):
     options = TobitOptions(cov_type="cluster", cluster="does_not_exist")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="does_not_exist",
+        argument="cluster",
+        data_argument="data",
     ):
         Tobit(censored_dataset, y="y", x=["x1", "x2"], options=options).fit()
 
@@ -585,9 +618,12 @@ def test_cluster_with_null_raises(censored_dataset):
     groups = [None] + [str(i % 5) for i in range(n - 1)]
     df = censored_dataset.with_columns(pl.Series("grp", groups, dtype=pl.Utf8))
     options = TobitOptions(cov_type="cluster", cluster="grp")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="grp", count=1),
+    with raises_error(
+        ErrorCode.COLUMN_CONTAINS_NULL,
+        column="grp",
+        count=1,
+        argument="cluster",
+        data_argument="data",
     ):
         Tobit(df, y="y", x=["x1", "x2"], options=options).fit()
 

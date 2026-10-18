@@ -69,6 +69,7 @@ use crate::linear::common::{
     resolve_cov_type,
 };
 use crate::linear::ols::{OLSResult, ols_estimator_to_result};
+use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
     extract_f64_column, extract_optional_cluster_groups, extract_time_order_ranks,
 };
@@ -830,13 +831,21 @@ fn resolve_weight_type(
         WeightKind::Classical => WeightType::Classical,
         WeightKind::Robust => WeightType::Robust,
         WeightKind::Cluster => WeightType::Cluster {
-            groups: extract_optional_cluster_groups(df, options.cluster.as_deref())?,
+            groups: extract_optional_cluster_groups(
+                df,
+                options.cluster.as_deref(),
+                ColumnSource::new("cluster", "data"),
+            )?,
         },
         WeightKind::Hac => {
             let col_name = require_hac_time(options.hac_time.as_deref(), "gmm_weight_type")?;
             WeightType::Hac {
                 lags: options.hac_lags,
-                time_order: extract_time_order_ranks(df, col_name)?,
+                time_order: extract_time_order_ranks(
+                    df,
+                    col_name,
+                    ColumnSource::new("hac_time", "data"),
+                )?,
             }
         }
     })
@@ -999,20 +1008,32 @@ pub(crate) fn build_iv_input(
     validate_x_non_empty("instruments", &instruments)?;
 
     // ── y列の抽出 ──────────────────────────────────────────────────────
-    let y_slice = extract_f64_column(df, &y)?;
+    let y_slice = extract_f64_column(df, &y, ColumnSource::new("y", "data"))?;
 
     // ── x_exog/x_endog/instruments列の抽出 ─────────────────────────────
     let mut x_exog_columns: Vec<Vec<f64>> = Vec::with_capacity(x_exog.len());
     for col_name in &x_exog {
-        x_exog_columns.push(extract_f64_column(df, col_name)?);
+        x_exog_columns.push(extract_f64_column(
+            df,
+            col_name,
+            ColumnSource::new("x_exog", "data"),
+        )?);
     }
     let mut x_endog_columns: Vec<Vec<f64>> = Vec::with_capacity(x_endog.len());
     for col_name in &x_endog {
-        x_endog_columns.push(extract_f64_column(df, col_name)?);
+        x_endog_columns.push(extract_f64_column(
+            df,
+            col_name,
+            ColumnSource::new("x_endog", "data"),
+        )?);
     }
     let mut instrument_columns: Vec<Vec<f64>> = Vec::with_capacity(instruments.len());
     for col_name in &instruments {
-        instrument_columns.push(extract_f64_column(df, col_name)?);
+        instrument_columns.push(extract_f64_column(
+            df,
+            col_name,
+            ColumnSource::new("instruments", "data"),
+        )?);
     }
 
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ）─────────────

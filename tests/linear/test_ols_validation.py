@@ -15,6 +15,7 @@ import polars as pl
 import pytest
 from _constants import DATA_DIR
 from _error_messages import escaped
+from _errors import raises_error
 from _helpers import (
     ROW_TIME,
     TIED_TIME_COLUMNS,
@@ -26,6 +27,7 @@ from _ols_helpers import our_fit
 from econometricsmodels import (
     OLS,
     ComputationError,
+    ErrorCode,
     OLSOptions,
     ValidationError,
 )
@@ -36,17 +38,21 @@ from benchmark.linear.constants import COV_TYPES
 
 
 def test_missing_column_raises(dataset):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="nonexistent"),
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="nonexistent",
+        argument="x",
+        data_argument="data",
     ):
         OLS(dataset, y="y", x=["x1", "nonexistent"]).fit()
 
 
 def test_missing_y_column_raises(dataset):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="nonexistent"),
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="nonexistent",
+        argument="y",
+        data_argument="data",
     ):
         OLS(dataset, y="nonexistent", x=["x1", "x2"]).fit()
 
@@ -56,24 +62,33 @@ def test_y_empty_string_raises(dataset):
     対称。空文字列は存在しない列名の一種のため、`test_missing_column_raises`と
     同じ`column_extraction`の「列が存在しない」経路を通る）。
     """
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="")
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="",
+        argument="y",
+        data_argument="data",
     ):
         OLS(dataset, y="", x=["x1", "x2"]).fit()
 
 
 def test_null_values_raise():
     df_y = pl.DataFrame({"y": [1.0, None, 3.0], "x1": [1.0, 2.0, 3.0]})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="y", count=1),
+    with raises_error(
+        ErrorCode.COLUMN_CONTAINS_NULL,
+        column="y",
+        count=1,
+        argument="y",
+        data_argument="data",
     ):
         OLS(df_y, y="y", x=["x1"]).fit()
 
     df_x = pl.DataFrame({"y": [1.0, 2.0, 3.0], "x1": [1.0, None, 3.0]})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=1),
+    with raises_error(
+        ErrorCode.COLUMN_CONTAINS_NULL,
+        column="x1",
+        count=1,
+        argument="x",
+        data_argument="data",
     ):
         OLS(df_x, y="y", x=["x1"]).fit()
 
@@ -90,44 +105,52 @@ def test_non_finite_values_raise():
     df_y_nan = pl.DataFrame(
         {"y": [1.0, float("nan"), 3.0], "x1": [1.0, 2.0, 3.0]}
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="y", value="NaN", row=1
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column="y",
+        value=pytest.approx(float("nan"), nan_ok=True),
+        row=1,
+        argument="y",
+        data_argument="data",
     ):
         OLS(df_y_nan, y="y", x=["x1"]).fit()
 
     df_y_inf = pl.DataFrame(
         {"y": [1.0, float("inf"), 3.0], "x1": [1.0, 2.0, 3.0]}
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="y", value="inf", row=1
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column="y",
+        value=float("inf"),
+        row=1,
+        argument="y",
+        data_argument="data",
     ):
         OLS(df_y_inf, y="y", x=["x1"]).fit()
 
     df_x_nan = pl.DataFrame(
         {"y": [1.0, 2.0, 3.0], "x1": [1.0, float("nan"), 3.0]}
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="x1", value="NaN", row=1
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column="x1",
+        value=pytest.approx(float("nan"), nan_ok=True),
+        row=1,
+        argument="x",
+        data_argument="data",
     ):
         OLS(df_x_nan, y="y", x=["x1"]).fit()
 
     df_x_inf = pl.DataFrame(
         {"y": [1.0, 2.0, 3.0], "x1": [1.0, float("inf"), 3.0]}
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="x1", value="inf", row=1
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column="x1",
+        value=float("inf"),
+        row=1,
+        argument="x",
+        data_argument="data",
     ):
         OLS(df_x_inf, y="y", x=["x1"]).fit()
 
@@ -137,11 +160,12 @@ def test_non_numeric_dtype_raises():
     （欠損値のメッセージではなく、dtypeを指摘するメッセージになる）。
     """
     df = pl.DataFrame({"y": ["a", "b", "c"], "x1": [1.0, 2.0, 3.0]})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="y", dtype="String"
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
+        column="y",
+        dtype="String",
+        argument="y",
+        data_argument="data",
     ):
         OLS(df, y="y", x=["x1"]).fit()
 
@@ -286,8 +310,11 @@ def test_predict_missing_column_raises(dataset):
     res = our_fit(dataset)
     new_data = pl.DataFrame({"x1": [1.0, 2.0]})  # x2が無い
 
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="x2")
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="x2",
+        argument="x",
+        data_argument="new_data",
     ):
         res.predict(new_data)
 
@@ -299,11 +326,12 @@ def test_predict_non_numeric_dtype_raises(dataset):
     res = our_fit(dataset)
     new_data = pl.DataFrame({"x1": ["a", "b"], "x2": [1.0, 2.0]})
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="x1", dtype="String"
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
+        column="x1",
+        dtype="String",
+        argument="x",
+        data_argument="new_data",
     ):
         res.predict(new_data)
 
@@ -312,18 +340,23 @@ def test_predict_null_or_non_finite_values_raise(dataset):
     res = our_fit(dataset)
 
     new_data_null = pl.DataFrame({"x1": [1.0, None], "x2": [1.0, 2.0]})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=1),
+    with raises_error(
+        ErrorCode.COLUMN_CONTAINS_NULL,
+        column="x1",
+        count=1,
+        argument="x",
+        data_argument="new_data",
     ):
         res.predict(new_data_null)
 
     new_data_inf = pl.DataFrame({"x1": [1.0, float("inf")], "x2": [1.0, 2.0]})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="x1", value="inf", row=1
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column="x1",
+        value=float("inf"),
+        row=1,
+        argument="x",
+        data_argument="new_data",
     ):
         res.predict(new_data_inf)
 
@@ -358,8 +391,11 @@ def test_augment_missing_column_raises(dataset):
     res = our_fit(dataset)
     new_data = pl.DataFrame({"x1": [1.0, 2.0]})  # x2が無い
 
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="x2")
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="x2",
+        argument="x",
+        data_argument="new_data",
     ):
         res.augment(new_data)
 
@@ -400,9 +436,11 @@ def test_cluster_nonexistent_column_raises(dataset):
     （`column_extraction`の責務）。
     """
     options = OLSOptions(cov_type="cluster", cluster="does_not_exist")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="does_not_exist",
+        argument="cluster",
+        data_argument="data",
     ):
         OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
 
@@ -536,14 +574,13 @@ def test_hac_time_with_tied_values_raises(dataset, time_expr, rows):
     """
     df = dataset.with_columns(time_expr.alias("t"))
     options = OLSOptions(cov_type="hac", hac_lags=2, hac_time="t")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_TIED_TIME_ORDER,
-            name="t",
-            first=rows[0],
-            second=rows[1],
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_VALUES_TIED,
+        column="t",
+        first_row=rows[0],
+        second_row=rows[1],
+        argument="hac_time",
+        data_argument="data",
     ):
         OLS(df, y="y", x=["x1", "x2"], options=options).fit()
 

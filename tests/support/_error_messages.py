@@ -1,21 +1,25 @@
 """全系統で共有する`ValidationError`メッセージのテンプレート文字列。
 
-`engine`（`CommonError`等）・`engine_pybind`（`column_error.rs`の`ColumnExtractionError`・
-`validation.rs`・各系統の`cov_type`/`solver`/`estimator`文字列パース）が実際に送出する
-メッセージの正確な文字列をPythonのフォーマット文字列としてここに集約する。
+`engine`（`CommonError`等）・`engine_pybind`（`validation.rs`・各系統の`cov_type`/`solver`/
+`estimator`文字列パース）が実際に送出するメッセージの正確な文字列をPythonのフォーマット
+文字列としてここに集約する。
 
 系統固有のメッセージは`_error_messages_<系統>.py`（`linear`・`nonlinear`・`iv`・
 `panel`）に置き、ここには全系統（または複数の系統）が共有するものだけを置く。
 テストからは`import _error_messages_<系統> as <系統>_msgs`で参照する。
 
 Rust側のメッセージ文言が正本であり（`engine/src/shared/error.rs`・
-`engine_pybind/src/shared/column_error.rs`・`engine_pybind/src/shared/validation.rs`等）、
-このファイルはそのコピー。Rust側で文言を変更した場合はこのファイルも同時に
-更新すること（複数系統でメッセージが文字通り重複しているため直書きではなく共通化した）。
+`engine_pybind/src/shared/validation.rs`等）、このファイルはそのコピー。Rust側で
+文言を変更した場合はこのファイルも同時に更新すること（複数系統でメッセージが
+文字通り重複しているため直書きではなく共通化した）。
 
 各テストは`pytest.raises(ValidationError, match=escaped(TEMPLATE, name=...))`の
 形で使う（`escaped()`は`str.format(**kwargs)`した上で`re.escape`する。メッセージ中の
 `()`・`.`等は正規表現の特殊文字のため、素の文字列を`match=`にそのまま渡すのは誤り）。
+
+列の抽出で出るエラー（列が存在しない・欠損値・非有限値・許可外のdtype・同じ値・
+タイムゾーン付きDatetime）は構造化例外（`code`/`params`）のため、ここにテンプレートを
+置かず、`_errors.raises_error`で`code`と`params`を照合する。
 """
 
 from __future__ import annotations
@@ -75,36 +79,6 @@ NOT_A_POLARS_DATAFRAME_LAZY = (
     NOT_A_POLARS_DATAFRAME + "; call .collect() first"
 )
 
-# 列の抽出で使う（engine_pybind/src/shared/column_error.rs の`ColumnExtractionError`、
-# 抽出は column_extraction.rs）。y/x/weight/hac_time等の数値列と、entity/time/
-# clusterのキー列で、列が存在しない・欠損値・非有限値の文言は共通。
-
-COLUMN_DOES_NOT_EXIST = "column '{name}' does not exist in the data"
-COLUMN_HAS_MISSING_VALUES = (
-    "column '{name}' contains {count} missing value(s). Missing values are "
-    "not handled automatically; please impute or remove them before calling "
-    "this function"
-)
-COLUMN_HAS_NON_FINITE_VALUE = (
-    "column '{name}' contains a non-finite value ({value}) at row {row}. "
-    "NaN and infinite values are not handled automatically; please impute "
-    "or remove them before calling this function"
-)
-# 数値として使う列（y/x/weight/x_exog/x_endog/instruments）のdtypeが許可外の場合。
-# `{dtype}`はPythonの`pl.String`等と同じ呼び名（`String`・`Date`・`Categorical`等、
-# 時間単位や内側の型は含まない）。`Null`型は後続の欠損値チェックに回るため
-# このメッセージにならない。
-COLUMN_UNSUPPORTED_NUMERIC_DTYPE = (
-    "column '{name}' has dtype {dtype}, which cannot be used as a numeric "
-    "column; use an integer, float, boolean or decimal column (cast it first "
-    "if it holds numbers)"
-)
-# 行の並び順だけに使う列（HACの`hac_time`）のdtypeが許可外の場合。
-COLUMN_UNSUPPORTED_ORDER_DTYPE = (
-    "column '{name}' has dtype {dtype}, which cannot be used as a time-order "
-    "column; use an integer, float, Date or Datetime column"
-)
-
 # HAC(`cov_type="hac"`・IV GMMの`gmm_weight_type="hac"`)で`hac_time`が未指定の場合。
 # 行順を時間順とみなす暗黙の既定は置かない。`{setting}`は`hac_time`を要求している設定名
 # (`cov_type`または`gmm_weight_type`)。
@@ -113,39 +87,6 @@ HAC_REQUIRES_HAC_TIME = (
     "time order of the observations (the row order of the data is not assumed "
     'to be the time order; add an explicit index column such as `df.with_row_index("t")` '
     "if the rows are already in time order)"
-)
-# 行の並び順だけに使う列（HACの`hac_time`）に同じ値が複数ある場合。順序が定まらないため、
-# エンジンが行順で黙って並べる前にここで拒否する。`{first}`/`{second}`は同値の最初の
-# 2行（0始まりの行番号）。
-COLUMN_HAS_TIED_TIME_ORDER = (
-    "column '{name}' has the same value at rows {first} and {second}. A "
-    "time-order column must give every observation a distinct value, because "
-    "tied observations cannot be put in time order. Make the values distinct. "
-    "The row order of the data is never used as the time order, so if the rows "
-    'are already in time order, add an index column such as `df.with_row_index("t")` '
-    "and use that instead"
-)
-
-# キー列のdtypeが許可外の場合。`entity`・`cluster`（同一性だけのキー）と
-# `time`・`dk_time`（時点のキー）で許可するdtypeが異なる。`{dtype}`の呼び名は
-# `COLUMN_UNSUPPORTED_NUMERIC_DTYPE`と同じ。
-COLUMN_UNSUPPORTED_IDENTITY_DTYPE = (
-    "column '{name}' has dtype {dtype}, which cannot be used as a group "
-    "identifier column; use an integer, float, string, categorical, boolean, "
-    "Date or Datetime column"
-)
-# タイムゾーン付きのDatetimeをキー列に使った場合。`{role}`は`group identifier`
-# （entity・cluster）または`time`（time・dk_time）。
-COLUMN_KEY_WITH_TIME_ZONE = (
-    "column '{name}' is a Datetime with time zone '{time_zone}', which cannot "
-    "be used as a {role} column; remove the time zone first, for example "
-    "with .dt.replace_time_zone(None) after converting to the zone you want "
-    "to keep"
-)
-COLUMN_UNSUPPORTED_TIME_DTYPE = (
-    "column '{name}' has dtype {dtype}, which cannot be used as a time "
-    "column; use an integer, float, string, categorical, Date or Datetime "
-    "column"
 )
 
 # ── validation.rs（全系統共通、y/weight/x/x_exog/x_endog/instruments等の

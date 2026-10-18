@@ -9,21 +9,20 @@
 
 from __future__ import annotations
 
-import _error_messages as msgs
 import polars as pl
 import pytest
 from _dtype_helpers import make_frame
-from _error_messages import escaped
+from _errors import raises_error
 from econometricsmodels import (
     FE,
     IV,
     OLS,
     RE,
     WLS,
+    ErrorCode,
     Logit,
     Probit,
     Tobit,
-    ValidationError,
 )
 
 # 壊す行（`fit()`の入力、`new_data`のどちらでも同じ位置で報告される）。
@@ -35,12 +34,12 @@ def frame() -> pl.DataFrame:
     return make_frame()
 
 
-# 壊し方 → メッセージ。nullは件数、NaN・無限大は値と行番号を報告する。
+# 壊し方 → エラー。nullは件数、NaN・無限大は値と行番号を報告する。
 BAD_VALUES = [
-    pytest.param(None, None, id="null"),
-    pytest.param(float("nan"), "NaN", id="NaN"),
-    pytest.param(float("inf"), "inf", id="inf"),
-    pytest.param(float("-inf"), "-inf", id="-inf"),
+    pytest.param(None, id="null"),
+    pytest.param(float("nan"), id="NaN"),
+    pytest.param(float("inf"), id="inf"),
+    pytest.param(float("-inf"), id="-inf"),
 ]
 
 
@@ -51,83 +50,100 @@ def _break(frame: pl.DataFrame, column: str, bad: float | None, row: int):
     )
 
 
-def _assert_rejected(call, column: str, shown: str | None, row: int) -> None:
-    if shown is None:
-        message = escaped(msgs.COLUMN_HAS_MISSING_VALUES, name=column, count=1)
+def _assert_rejected(
+    call,
+    column: str,
+    argument: str,
+    data_argument: str,
+    bad: float | None,
+    row: int,
+) -> None:
+    where = {
+        "column": column,
+        "argument": argument,
+        "data_argument": data_argument,
+    }
+    if bad is None:
+        expected = {"code": ErrorCode.COLUMN_CONTAINS_NULL, "count": 1}
     else:
-        message = escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE,
-            name=column,
-            value=shown,
-            row=row,
-        )
-    with pytest.raises(ValidationError, match=message):
+        expected = {
+            "code": ErrorCode.COLUMN_NON_FINITE,
+            "row": row,
+            "value": pytest.approx(bad, nan_ok=True),
+        }
+    with raises_error(**expected, **where):
         call()
 
 
 # ── fit(): 使う数値列の全て ───────────────────────────────────────────
 
-# 手法 → (`fit()`、使う数値列)。複数の`x`を渡し、後ろの列も確かめる。重み（WLS）は
+# 手法 → (`fit()`、使う数値列と、その列を渡した引数の組)。複数の`x`を渡し、後ろの列も確かめる。重み（WLS）は
 # 0以下・null・NaNを重み専用のメッセージで拒否するため、ここには含めない
 # （`test_wls_validation.py`の`test_non_positive_weight_raises`・`test_nan_weight_raises`・
 # `test_null_weight_raises`が担う）。
 FIT_CASES = {
     "OLS": (
         lambda d: OLS(d, "y", ["x1", "x2"]).fit(),
-        ["y", "x1", "x2"],
+        [("y", "y"), ("x1", "x"), ("x2", "x")],
     ),
     "WLS": (
         lambda d: WLS(d, "y", ["x1", "x2"], "w").fit(),
-        ["y", "x1", "x2"],
+        [("y", "y"), ("x1", "x"), ("x2", "x")],
     ),
     "Logit": (
         lambda d: Logit(d, "y01", ["x1", "x2"]).fit(),
-        ["y01", "x1", "x2"],
+        [("y01", "y"), ("x1", "x"), ("x2", "x")],
     ),
     "Probit": (
         lambda d: Probit(d, "y01", ["x1", "x2"]).fit(),
-        ["y01", "x1", "x2"],
+        [("y01", "y"), ("x1", "x"), ("x2", "x")],
     ),
     "Tobit": (
         lambda d: Tobit(d, "yc", ["x1", "x2"]).fit(),
-        ["yc", "x1", "x2"],
+        [("yc", "y"), ("x1", "x"), ("x2", "x")],
     ),
     # IVは役割ごとに別の抽出箇所を通る（被説明変数・内生・外生・操作変数）。
     "IV": (
         lambda d: IV(d, "y", ["x2"], ["x1"], ["z", "z2"]).fit(),
-        ["y", "x2", "x1", "z", "z2"],
+        [
+            ("y", "y"),
+            ("x2", "x_exog"),
+            ("x1", "x_endog"),
+            ("z", "instruments"),
+            ("z2", "instruments"),
+        ],
     ),
     "FE": (
         lambda d: FE(d, "y", ["x1", "x2"], "entity").fit(),
-        ["y", "x1", "x2"],
+        [("y", "y"), ("x1", "x"), ("x2", "x")],
     ),
     "RE": (
         lambda d: RE(d, "y", ["x1", "x2"], "entity").fit(),
-        ["y", "x1", "x2"],
+        [("y", "y"), ("x1", "x"), ("x2", "x")],
     ),
 }
 
 FIT_COLUMN_CASES = [
-    (method, column)
+    (method, column, argument)
     for method, (_, columns) in FIT_CASES.items()
-    for column in columns
+    for column, argument in columns
 ]
 
 
-@pytest.mark.parametrize(("bad", "shown"), BAD_VALUES)
+@pytest.mark.parametrize("bad", BAD_VALUES)
 @pytest.mark.parametrize(
-    ("method", "column"),
+    ("method", "column", "argument"),
     FIT_COLUMN_CASES,
-    ids=[f"{method}-{column}" for method, column in FIT_COLUMN_CASES],
+    ids=[f"{method}-{column}" for method, column, _ in FIT_COLUMN_CASES],
 )
 def test_bad_value_in_any_used_column_raises_in_fit(
-    frame, method, column, bad, shown
+    frame, method, column, argument, bad
 ):
     """使う数値列のどれにnull・NaN・無限大があっても、その列名で拒否する。"""
     fit, _ = FIT_CASES[method]
     df = _break(frame, column, bad, ROW)
 
-    _assert_rejected(lambda: fit(df), column, shown, ROW)
+    _assert_rejected(lambda: fit(df), column, argument, "data", bad, ROW)
 
 
 @pytest.mark.parametrize("method", list(FIT_CASES))
@@ -157,7 +173,7 @@ NEW_DATA_CASES = [
 ]
 
 
-@pytest.mark.parametrize(("bad", "shown"), BAD_VALUES)
+@pytest.mark.parametrize("bad", BAD_VALUES)
 @pytest.mark.parametrize(
     ("method", "column", "call"),
     NEW_DATA_CASES,
@@ -166,7 +182,7 @@ NEW_DATA_CASES = [
     ],
 )
 def test_bad_value_in_any_new_data_column_raises(
-    frame, method, column, call, bad, shown
+    frame, method, column, call, bad
 ):
     """`new_data`のどの`x`列にnull・NaN・無限大があっても、その列名で拒否する。
 
@@ -176,7 +192,12 @@ def test_bad_value_in_any_new_data_column_raises(
     new_data = _break(frame.select("x1", "x2").head(5), column, bad, ROW)
 
     _assert_rejected(
-        lambda: getattr(res, call)(new_data=new_data), column, shown, ROW
+        lambda: getattr(res, call)(new_data=new_data),
+        column,
+        "x",
+        "new_data",
+        bad,
+        ROW,
     )
 
 

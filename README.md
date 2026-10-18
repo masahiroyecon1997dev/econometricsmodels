@@ -182,9 +182,9 @@ df_missing = df.with_columns(
     .alias("x1")
 )
 OLS(df_missing, y="y", x=["x1", "x2"]).fit()
-# ValidationError: column 'x1' contains 1 missing value(s). Missing values are
-# not handled automatically; please impute or remove them before calling this
-# function
+# ValidationError: Column 'x1' (given as x) in data contains 1 missing value(s)
+# (null), and missing values are never dropped automatically. Drop or impute
+# the missing values first, for example with drop_nulls().
 ```
 
 **Perfectly collinear columns are never removed.** A perfectly collinear

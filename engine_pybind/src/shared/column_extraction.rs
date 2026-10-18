@@ -24,7 +24,7 @@ use pyo3_polars::PyDataFrame;
 use engine::panel::common::TimeKeys;
 use engine::shared::group_codes::GroupCodes;
 
-use super::column_error::{ColumnExtractionError, ColumnRole};
+use super::column_error::{ColumnExtractionError, ColumnRole, ColumnSource};
 use super::errors::{common_error_to_pyerr, legacy_validation_error};
 use crate::panel::common::panel_error_to_pyerr;
 
@@ -171,6 +171,7 @@ fn check_numeric_dtype(
     name: &str,
     dtype: &DataType,
     role: NumericRole,
+    source: ColumnSource<'_>,
 ) -> Result<(), ColumnExtractionError> {
     let is_ordering = role == NumericRole::Ordering;
     // `Boolean`は値が2種類しかなく、3行以上では必ず同値ができて順序が定まらないため、
@@ -192,6 +193,7 @@ fn check_numeric_dtype(
         name,
         dtype_label(dtype),
         column_role,
+        source,
     ))
 }
 
@@ -205,13 +207,17 @@ fn check_numeric_dtype(
 /// - 数値として使えないdtype（文字列・日付・時刻・カテゴリ等）
 /// - 欠損値（null）を含む
 /// - NaN・無限大（infinity）を含む
-pub fn extract_f64_column(df: &DataFrame, name: &str) -> PyResult<Vec<f64>> {
+pub fn extract_f64_column(
+    df: &DataFrame,
+    name: &str,
+    source: ColumnSource<'_>,
+) -> PyResult<Vec<f64>> {
     let series = df
         .column(name)
-        .map_err(|_| ColumnExtractionError::not_found(name))?;
+        .map_err(|_| ColumnExtractionError::not_found(name, source))?;
 
-    check_numeric_dtype(name, series.dtype(), NumericRole::Value)?;
-    Ok(cast_to_finite_f64_values(name, series)?)
+    check_numeric_dtype(name, series.dtype(), NumericRole::Value, source)?;
+    Ok(cast_to_finite_f64_values(name, series, source)?)
 }
 
 /// `df`から`name`列を、行の並び順を決めるための**順位**のVecで取り出す（HACの`hac_time`）。
@@ -233,20 +239,24 @@ pub fn extract_f64_column(df: &DataFrame, name: &str) -> PyResult<Vec<f64>> {
 /// - 欠損値（null）を含む
 /// - 浮動小数の列にNaN・無限大を含む
 /// - 値が重複する
-pub fn extract_time_order_ranks(df: &DataFrame, name: &str) -> PyResult<Vec<f64>> {
+pub fn extract_time_order_ranks(
+    df: &DataFrame,
+    name: &str,
+    source: ColumnSource<'_>,
+) -> PyResult<Vec<f64>> {
     let series = df
         .column(name)
-        .map_err(|_| ColumnExtractionError::not_found(name))?;
+        .map_err(|_| ColumnExtractionError::not_found(name, source))?;
     let dtype = series.dtype();
 
-    check_numeric_dtype(name, dtype, NumericRole::Ordering)?;
+    check_numeric_dtype(name, dtype, NumericRole::Ordering, source)?;
 
     if dtype.is_float() {
-        let values = cast_to_finite_f64_values(name, series)?;
-        return Ok(strict_ranks(name, &values)?);
+        let values = cast_to_finite_f64_values(name, series, source)?;
+        return Ok(strict_ranks(name, &values, source)?);
     }
 
-    reject_missing_values(name, series.null_count())?;
+    reject_missing_values(name, series.null_count(), source)?;
     // 整数は値そのもの、`Date`は日数、`Datetime`は時間単位ごとの経過時間、`Decimal`は
     // 同一列で共通のスケールを掛けた整数が物理表現になっており、その大小がそのまま順序になる（`extract_time_keys`と同じ。タイムゾーンの有無は順序に影響しない）。
     let as_i128 = series
@@ -259,13 +269,19 @@ pub fn extract_time_order_ranks(df: &DataFrame, name: &str) -> PyResult<Vec<f64>
         .iter()
         .map(|v| v.expect("null_countチェック済み"))
         .collect();
-    Ok(strict_ranks(name, &values)?)
+    Ok(strict_ranks(name, &values, source)?)
 }
 
 /// 欠損値（null）が1つでもあれば`ColumnExtractionError::ContainsNull`にする。
-fn reject_missing_values(name: &str, null_count: usize) -> Result<(), ColumnExtractionError> {
+fn reject_missing_values(
+    name: &str,
+    null_count: usize,
+    source: ColumnSource<'_>,
+) -> Result<(), ColumnExtractionError> {
     if null_count > 0 {
-        return Err(ColumnExtractionError::contains_null(name, null_count));
+        return Err(ColumnExtractionError::contains_null(
+            name, null_count, source,
+        ));
     }
     Ok(())
 }
@@ -274,9 +290,10 @@ fn reject_missing_values(name: &str, null_count: usize) -> Result<(), ColumnExtr
 fn cast_to_finite_f64_values(
     name: &str,
     series: &Column,
+    source: ColumnSource<'_>,
 ) -> Result<Vec<f64>, ColumnExtractionError> {
     // 許可したdtypeはすべてf64にキャストできるため、ここでの失敗は想定していない
-    // （防御的に`ValidationError`へ変換する）。
+    // （防御的に内部エラー(`INTERNAL_ERROR`)へ変換する）。
     let series = series
         .cast(&DataType::Float64)
         .map_err(|e| ColumnExtractionError::conversion_failed(name, e))?;
@@ -285,7 +302,7 @@ fn cast_to_finite_f64_values(
         .f64()
         .map_err(|e| ColumnExtractionError::conversion_failed(name, e))?;
 
-    reject_missing_values(name, ca.null_count())?;
+    reject_missing_values(name, ca.null_count(), source)?;
 
     // rechunk: 複数チャンクに分かれている場合に単一チャンクへ統合する。
     // 既に単一チャンクの場合は実質コピーが発生しない（安価な操作）。
@@ -304,7 +321,9 @@ fn cast_to_finite_f64_values(
     // polarsのnull_count()はNaN/無限大を検出しない（値としては存在するため）。
     // IEEE754のNaN・infinityは別途スキャンする必要がある。
     if let Some((row, &bad_value)) = values.iter().enumerate().find(|(_, v)| !v.is_finite()) {
-        return Err(ColumnExtractionError::non_finite(name, row, bad_value));
+        return Err(ColumnExtractionError::non_finite(
+            name, row, bad_value, source,
+        ));
     }
 
     Ok(values)
@@ -314,9 +333,10 @@ fn cast_to_finite_f64_values(
 fn strict_ranks<T: PartialOrd>(
     name: &str,
     values: &[T],
+    source: ColumnSource<'_>,
 ) -> Result<Vec<f64>, ColumnExtractionError> {
     rank_distinct_values(values)
-        .map_err(|(first, second)| ColumnExtractionError::tied_values(name, first, second))
+        .map_err(|(first, second)| ColumnExtractionError::tied_values(name, first, second, source))
 }
 
 /// `values`の昇順での位置（0始まり）を行ごとに返す。同値の組があれば、同値の行のうち
@@ -374,10 +394,14 @@ pub fn x_column_names(
 /// # Errors
 /// 各列につき`extract_f64_column`と同じ（列が存在しない・数値として使えないdtype・
 /// 欠損値/NaN/無限大を含む場合に`ValidationError`）。最初にエラーになった列で打ち切る。
-pub fn extract_f64_columns(df: &DataFrame, names: &[String]) -> PyResult<Vec<Vec<f64>>> {
+pub fn extract_f64_columns(
+    df: &DataFrame,
+    names: &[String],
+    source: ColumnSource<'_>,
+) -> PyResult<Vec<Vec<f64>>> {
     names
         .iter()
-        .map(|name| extract_f64_column(df, name))
+        .map(|name| extract_f64_column(df, name, source))
         .collect()
 }
 
@@ -392,10 +416,12 @@ pub fn extract_model_x_columns(
     param_names: &[String],
     has_intercept: bool,
     exclude_trailing: usize,
+    source: ColumnSource<'_>,
 ) -> PyResult<Vec<Vec<f64>>> {
     extract_f64_columns(
         df,
         x_column_names(param_names, has_intercept, exclude_trailing),
+        source,
     )
 }
 
@@ -416,13 +442,13 @@ enum KeyRole {
 /// 拒否する（組み込んだpolarsが文字列化できず、夏時間の重複する1時間の順序の問題もあるため）。
 /// `Null`型は後続の欠損値チェックに回す。
 ///
-/// 許可するdtypeを変えたら、メッセージの案内文（`ColumnRole::accepted_dtypes_hint`）・
-/// `tests/support/_error_messages.py`・`docs/guide/accepted-data.md`も同時に更新する
-/// （`check_numeric_dtype`も同じ）。
+/// 許可するdtypeを変えたら、`allowed`に出す一覧（`ColumnRole::allowed_dtypes`）と
+/// `docs/guide/accepted-data.md`も同時に更新する（`check_numeric_dtype`も同じ）。
 fn check_key_dtype(
     name: &str,
     dtype: &DataType,
     role: KeyRole,
+    source: ColumnSource<'_>,
 ) -> Result<(), ColumnExtractionError> {
     let column_role = match role {
         KeyRole::Identity => ColumnRole::GroupIdentifier,
@@ -432,9 +458,7 @@ fn check_key_dtype(
     // 文字列化に失敗する。原因の分からないエラーにならないよう、対処法を示して拒否する。
     if let DataType::Datetime(_, Some(time_zone)) = dtype {
         return Err(ColumnExtractionError::time_zone_not_supported(
-            name,
-            time_zone,
-            column_role,
+            name, time_zone, source,
         ));
     }
     let common = dtype.is_integer()
@@ -458,6 +482,7 @@ fn check_key_dtype(
         name,
         dtype_label(dtype),
         column_role,
+        source,
     ))
 }
 
@@ -478,8 +503,12 @@ fn check_key_dtype(
 /// - 欠損値を含む
 /// - 浮動小数の列にNaN・無限大を含む（数値列と同じく自動では扱わない）
 #[cfg(test)]
-pub fn extract_group_key_column(df: &DataFrame, name: &str) -> PyResult<Vec<String>> {
-    extract_key_column(df, name, KeyRole::Identity)
+pub fn extract_group_key_column(
+    df: &DataFrame,
+    name: &str,
+    source: ColumnSource<'_>,
+) -> PyResult<Vec<String>> {
+    extract_key_column(df, name, KeyRole::Identity, source)
 }
 
 /// 検査済みのキー列を、値そのもので分解した結果。
@@ -545,8 +574,12 @@ fn with_group_labels<T>(
 ///
 /// # Errors
 /// [`extract_group_key_column`]と同じ。
-pub fn extract_cluster_groups(df: &DataFrame, name: &str) -> PyResult<GroupCodes> {
-    let column = checked_key_column(df, name, KeyRole::Identity)?;
+pub fn extract_cluster_groups(
+    df: &DataFrame,
+    name: &str,
+    source: ColumnSource<'_>,
+) -> PyResult<GroupCodes> {
+    let column = checked_key_column(df, name, KeyRole::Identity, source)?;
     let FactorizedKey {
         codes,
         representatives,
@@ -566,8 +599,9 @@ pub fn extract_cluster_groups(df: &DataFrame, name: &str) -> PyResult<GroupCodes
 pub fn extract_optional_cluster_groups(
     df: &DataFrame,
     name: Option<&str>,
+    source: ColumnSource<'_>,
 ) -> PyResult<Option<GroupCodes>> {
-    name.map(|name| extract_cluster_groups(df, name))
+    name.map(|name| extract_cluster_groups(df, name, source))
         .transpose()
 }
 
@@ -577,8 +611,12 @@ pub fn extract_optional_cluster_groups(
 ///
 /// # Errors
 /// [`extract_group_key_column`]と同じ。
-pub fn extract_entity_groups(df: &DataFrame, name: &str) -> PyResult<GroupCodes> {
-    let column = checked_key_column(df, name, KeyRole::Identity)?;
+pub fn extract_entity_groups(
+    df: &DataFrame,
+    name: &str,
+    source: ColumnSource<'_>,
+) -> PyResult<GroupCodes> {
+    let column = checked_key_column(df, name, KeyRole::Identity, source)?;
     let FactorizedKey {
         codes,
         representatives,
@@ -605,8 +643,12 @@ pub fn extract_entity_groups(df: &DataFrame, name: &str) -> PyResult<GroupCodes>
 ///
 /// # Errors
 /// [`extract_group_key_column`]と同じ（許可するdtypeだけが異なる）。
-pub fn extract_time_keys(df: &DataFrame, name: &str) -> PyResult<TimeKeys> {
-    let column = checked_key_column(df, name, KeyRole::Time)?;
+pub fn extract_time_keys(
+    df: &DataFrame,
+    name: &str,
+    source: ColumnSource<'_>,
+) -> PyResult<TimeKeys> {
+    let column = checked_key_column(df, name, KeyRole::Time, source)?;
     let FactorizedKey {
         codes,
         representatives,
@@ -656,19 +698,24 @@ fn time_order_error(name: &str, err: PolarsError) -> ColumnExtractionError {
 }
 
 /// キー列`name`の存在・dtype・欠損値・（浮動小数の）非有限値を検査し、問題が無ければその列を返す。
-fn checked_key_column<'a>(df: &'a DataFrame, name: &str, role: KeyRole) -> PyResult<&'a Column> {
+fn checked_key_column<'a>(
+    df: &'a DataFrame,
+    name: &str,
+    role: KeyRole,
+    source: ColumnSource<'_>,
+) -> PyResult<&'a Column> {
     let series = df
         .column(name)
-        .map_err(|_| ColumnExtractionError::not_found(name))?;
+        .map_err(|_| ColumnExtractionError::not_found(name, source))?;
 
-    check_key_dtype(name, series.dtype(), role)?;
+    check_key_dtype(name, series.dtype(), role, source)?;
 
-    reject_missing_values(name, series.null_count())?;
+    reject_missing_values(name, series.null_count(), source)?;
 
     // 浮動小数のキーのNaN・無限大は、nullと違い`null_count`に現れず、文字列化すると
     // `"NaN"`という1つのグループになってしまう。数値列と同じく拒否する。
     if series.dtype().is_float() {
-        reject_non_finite(name, series)?;
+        reject_non_finite(name, series, source)?;
     }
     Ok(series)
 }
@@ -686,8 +733,13 @@ fn cast_series_to_string(name: &str, series: &Series) -> Result<Series, ColumnEx
 }
 
 #[cfg(test)]
-fn extract_key_column(df: &DataFrame, name: &str, role: KeyRole) -> PyResult<Vec<String>> {
-    let series = checked_key_column(df, name, role)?;
+fn extract_key_column(
+    df: &DataFrame,
+    name: &str,
+    role: KeyRole,
+    source: ColumnSource<'_>,
+) -> PyResult<Vec<String>> {
+    let series = checked_key_column(df, name, role, source)?;
     let series = cast_key_column_to_string(name, series)?;
     let ca = series
         .str()
@@ -759,7 +811,11 @@ fn factorize_key_column(
 }
 
 /// 浮動小数の列に非有限値（NaN・無限大）があれば、最初の1件を`ValidationError`にする。
-fn reject_non_finite(name: &str, series: &Column) -> Result<(), ColumnExtractionError> {
+fn reject_non_finite(
+    name: &str,
+    series: &Column,
+    source: ColumnSource<'_>,
+) -> Result<(), ColumnExtractionError> {
     let as_f64 = series
         .cast(&DataType::Float64)
         .map_err(|e| ColumnExtractionError::conversion_failed(name, e))?;
@@ -771,7 +827,9 @@ fn reject_non_finite(name: &str, series: &Column) -> Result<(), ColumnExtraction
         .enumerate()
         .find_map(|(row, v)| v.filter(|v| !v.is_finite()).map(|v| (row, v)))
     {
-        return Err(ColumnExtractionError::non_finite(name, row, bad_value));
+        return Err(ColumnExtractionError::non_finite(
+            name, row, bad_value, source,
+        ));
     }
     Ok(())
 }
@@ -780,6 +838,8 @@ fn reject_non_finite(name: &str, series: &Column) -> Result<(), ColumnExtraction
 mod tests {
     use super::*;
     use polars::df;
+
+    const SRC: ColumnSource<'static> = ColumnSource::new("x", "data");
 
     fn names(values: &[&str]) -> Vec<String> {
         values.iter().map(|v| v.to_string()).collect()
@@ -815,16 +875,16 @@ mod tests {
         ];
         for dtype in &both {
             for role in [KeyRole::Identity, KeyRole::Time] {
-                assert!(check_key_dtype("k", dtype, role).is_ok(), "{dtype}");
+                assert!(check_key_dtype("k", dtype, role, SRC).is_ok(), "{dtype}");
             }
         }
         // Booleanは同一性のキーだけ。DateとDatetimeは両方の役割で許可する。
-        assert!(check_key_dtype("k", &DataType::Boolean, KeyRole::Identity).is_ok());
-        assert!(check_key_dtype("k", &DataType::Boolean, KeyRole::Time).is_err());
+        assert!(check_key_dtype("k", &DataType::Boolean, KeyRole::Identity, SRC).is_ok());
+        assert!(check_key_dtype("k", &DataType::Boolean, KeyRole::Time, SRC).is_err());
         let datetime = DataType::Datetime(TimeUnit::Microseconds, None);
         for role in [KeyRole::Identity, KeyRole::Time] {
-            assert!(check_key_dtype("k", &DataType::Date, role).is_ok());
-            assert!(check_key_dtype("k", &datetime, role).is_ok());
+            assert!(check_key_dtype("k", &DataType::Date, role, SRC).is_ok());
+            assert!(check_key_dtype("k", &datetime, role, SRC).is_ok());
         }
     }
 
@@ -832,23 +892,23 @@ mod tests {
     fn check_key_dtype_rejects_datetime_with_time_zone() {
         let aware = DataType::Datetime(TimeUnit::Microseconds, Some(TimeZone::UTC));
         for role in [KeyRole::Identity, KeyRole::Time] {
-            assert!(check_key_dtype("k", &aware, role).is_err());
+            assert!(check_key_dtype("k", &aware, role, SRC).is_err());
         }
     }
 
     #[test]
-    fn check_key_dtype_reports_the_role_of_the_rejected_column() {
+    fn check_key_dtype_reports_the_role_of_the_rejected_dtype() {
         let aware = DataType::Datetime(TimeUnit::Microseconds, Some(TimeZone::UTC));
         for (key_role, expected) in [
             (KeyRole::Identity, ColumnRole::GroupIdentifier),
             (KeyRole::Time, ColumnRole::Time),
         ] {
             assert!(matches!(
-                check_key_dtype("k", &aware, key_role),
-                Err(ColumnExtractionError::TimeZoneNotSupported { role, .. }) if role == expected
+                check_key_dtype("k", &aware, key_role, SRC),
+                Err(ColumnExtractionError::TimeZoneNotSupported { .. })
             ));
             assert!(matches!(
-                check_key_dtype("k", &DataType::Binary, key_role),
+                check_key_dtype("k", &DataType::Binary, key_role, SRC),
                 Err(ColumnExtractionError::UnsupportedDtype { role, .. }) if role == expected
             ));
         }
@@ -861,7 +921,7 @@ mod tests {
             (NumericRole::Ordering, ColumnRole::TimeOrder),
         ] {
             assert!(matches!(
-                check_numeric_dtype("x", &DataType::String, numeric_role),
+                check_numeric_dtype("x", &DataType::String, numeric_role, SRC),
                 Err(ColumnExtractionError::UnsupportedDtype { role, .. }) if role == expected
             ));
         }
@@ -870,7 +930,7 @@ mod tests {
     #[test]
     fn strict_ranks_reports_the_tied_rows() {
         assert!(matches!(
-            strict_ranks("t", &[4, 9, 4]),
+            strict_ranks("t", &[4, 9, 4], SRC),
             Err(ColumnExtractionError::TiedValues {
                 first_row: 0,
                 second_row: 2,
@@ -878,7 +938,7 @@ mod tests {
             })
         ));
         assert_eq!(
-            strict_ranks("t", &[4, 9, 2]).ok(),
+            strict_ranks("t", &[4, 9, 2], SRC).ok(),
             Some(vec![1.0, 2.0, 0.0])
         );
     }
@@ -894,7 +954,7 @@ mod tests {
         ];
         for dtype in &rejected {
             for role in [KeyRole::Identity, KeyRole::Time] {
-                assert!(check_key_dtype("k", dtype, role).is_err(), "{dtype}");
+                assert!(check_key_dtype("k", dtype, role, SRC).is_err(), "{dtype}");
             }
         }
     }
@@ -904,8 +964,8 @@ mod tests {
         for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
             let df = df!("k" => [1.0, bad, 2.0]).unwrap();
 
-            assert!(extract_group_key_column(&df, "k").is_err(), "{bad}");
-            assert!(extract_time_keys(&df, "k").is_err(), "{bad}");
+            assert!(extract_group_key_column(&df, "k", SRC).is_err(), "{bad}");
+            assert!(extract_time_keys(&df, "k", SRC).is_err(), "{bad}");
         }
     }
 
@@ -913,7 +973,7 @@ mod tests {
     fn extract_group_key_column_accepts_finite_float_keys() {
         let df = df!("k" => [1.0, 2.0, 1.0]).unwrap();
 
-        let keys = extract_group_key_column(&df, "k").unwrap();
+        let keys = extract_group_key_column(&df, "k", SRC).unwrap();
 
         assert_eq!(keys, vec!["1.0", "2.0", "1.0"]);
     }
@@ -923,7 +983,7 @@ mod tests {
         // 整数IDも文字列表現の辞書順（"10" < "9"）でコード化する（旧`BTreeMap<&str, _>`の反復順）。
         let df = df!("k" => [9_i64, 10, 9, 2]).unwrap();
 
-        let groups = extract_cluster_groups(&df, "k").unwrap();
+        let groups = extract_cluster_groups(&df, "k", SRC).unwrap();
 
         // 文字列の辞書順は "10" < "2" < "9"。順序が同じ別ラベル（a < b < c）で作ったコードと等しい。
         let by_string_order = ["c", "a", "c", "b"].map(String::from);
@@ -934,8 +994,8 @@ mod tests {
 
         // 欠損値・存在しない列は`extract_group_key_column`と同じく`Err`。
         let with_null = df!("k" => [Some(1_i64), None]).unwrap();
-        assert!(extract_cluster_groups(&with_null, "k").is_err());
-        assert!(extract_cluster_groups(&df, "missing").is_err());
+        assert!(extract_cluster_groups(&with_null, "k", SRC).is_err());
+        assert!(extract_cluster_groups(&df, "missing", SRC).is_err());
     }
 
     #[test]
@@ -943,20 +1003,20 @@ mod tests {
         let df = df!("k" => [9_i64, 10, 9, 2]).unwrap();
 
         assert!(matches!(
-            extract_optional_cluster_groups(&df, None),
+            extract_optional_cluster_groups(&df, None, SRC),
             Ok(None)
         ));
 
-        let Ok(Some(groups)) = extract_optional_cluster_groups(&df, Some("k")) else {
+        let Ok(Some(groups)) = extract_optional_cluster_groups(&df, Some("k"), SRC) else {
             panic!("a named column must be extracted");
         };
-        let Ok(expected) = extract_cluster_groups(&df, "k") else {
+        let Ok(expected) = extract_cluster_groups(&df, "k", SRC) else {
             panic!("extract_cluster_groups failed");
         };
         assert_eq!(groups, expected);
 
         // 指定した列が無い・不正な場合は`None`にせず`Err`。
-        assert!(extract_optional_cluster_groups(&df, Some("missing")).is_err());
+        assert!(extract_optional_cluster_groups(&df, Some("missing"), SRC).is_err());
     }
 
     /// 行ごとの`String`を経由する`extract_group_key_column`＋`from_labels_without_keys`
@@ -1031,18 +1091,18 @@ mod tests {
     /// `unwrap()`は使わない。
     fn assert_cluster_groups_agree_with_string_labels(label: &str, series: Series) {
         let df = frame_of(series);
-        let Ok(labels) = extract_group_key_column(&df, "k") else {
+        let Ok(labels) = extract_group_key_column(&df, "k", SRC) else {
             panic!("{label}: extract_group_key_column failed");
         };
         let expected = GroupCodes::from_labels_without_keys(&labels);
-        let Ok(actual) = extract_cluster_groups(&df, "k") else {
+        let Ok(actual) = extract_cluster_groups(&df, "k", SRC) else {
             panic!("{label}: extract_cluster_groups failed");
         };
         assert_eq!(actual, expected, "{label}");
 
         // エンティティ列用（キー付き）も、旧経路の`from_labels`と同じコード・同じキーになる。
         let expected_keyed = GroupCodes::from_labels(&labels);
-        let Ok(actual_keyed) = extract_entity_groups(&df, "k") else {
+        let Ok(actual_keyed) = extract_entity_groups(&df, "k", SRC) else {
             panic!("{label}: extract_entity_groups failed");
         };
         assert_eq!(actual_keyed, expected_keyed, "{label}");
@@ -1071,7 +1131,7 @@ mod tests {
 
     /// 行ごとの`String`を経由する旧経路の`extract_time_keys`（比較対象のオラクル）。
     fn extract_time_keys_via_row_strings(df: &DataFrame, name: &str) -> PyResult<TimeKeys> {
-        let ids = extract_key_column(df, name, KeyRole::Time)?;
+        let ids = extract_key_column(df, name, KeyRole::Time, SRC)?;
         let series = df.column(name).unwrap();
         let dtype = series.dtype();
         if dtype.is_float() {
@@ -1160,7 +1220,7 @@ mod tests {
             let Ok(expected) = extract_time_keys_via_row_strings(&df, "k") else {
                 panic!("{label}: row string path failed");
             };
-            let Ok(actual) = extract_time_keys(&df, "k") else {
+            let Ok(actual) = extract_time_keys(&df, "k", SRC) else {
                 panic!("{label}: extract_time_keys failed");
             };
             assert_eq!(actual, expected, "{label}");
@@ -1284,7 +1344,7 @@ mod tests {
     }
 
     fn periods_of(df: &DataFrame) -> Vec<String> {
-        extract_time_keys(df, "t").unwrap().periods().to_vec()
+        extract_time_keys(df, "t", SRC).unwrap().periods().to_vec()
     }
 
     #[test]
@@ -1358,10 +1418,10 @@ mod tests {
     #[test]
     fn extract_time_keys_rejects_unusable_columns_like_the_key_column() {
         let df = df!("t" => [1.0, f64::NAN]).unwrap();
-        assert!(extract_time_keys(&df, "t").is_err());
+        assert!(extract_time_keys(&df, "t", SRC).is_err());
         let df = df!("t" => [true, false]).unwrap();
-        assert!(extract_time_keys(&df, "t").is_err());
-        assert!(extract_time_keys(&df, "missing").is_err());
+        assert!(extract_time_keys(&df, "t", SRC).is_err());
+        assert!(extract_time_keys(&df, "missing", SRC).is_err());
     }
 
     fn numeric_dtypes() -> Vec<DataType> {
@@ -1387,7 +1447,7 @@ mod tests {
         for dtype in numeric_dtypes() {
             for role in [NumericRole::Value, NumericRole::Ordering] {
                 assert!(
-                    check_numeric_dtype("x", &dtype, role).is_ok(),
+                    check_numeric_dtype("x", &dtype, role, SRC).is_ok(),
                     "{dtype} should be accepted"
                 );
             }
@@ -1397,8 +1457,8 @@ mod tests {
     #[test]
     fn check_numeric_dtype_accepts_boolean_only_for_value_role() {
         // 順序づけの列としては、値が2種類しかなく順序が定まらないため拒否する。
-        assert!(check_numeric_dtype("x", &DataType::Boolean, NumericRole::Value).is_ok());
-        assert!(check_numeric_dtype("x", &DataType::Boolean, NumericRole::Ordering).is_err());
+        assert!(check_numeric_dtype("x", &DataType::Boolean, NumericRole::Value, SRC).is_ok());
+        assert!(check_numeric_dtype("x", &DataType::Boolean, NumericRole::Ordering, SRC).is_err());
     }
 
     #[test]
@@ -1414,7 +1474,7 @@ mod tests {
         ];
         for dtype in rejected {
             assert!(
-                check_numeric_dtype("x", &dtype, NumericRole::Value).is_err(),
+                check_numeric_dtype("x", &dtype, NumericRole::Value, SRC).is_err(),
                 "{dtype} should be rejected"
             );
         }
@@ -1427,8 +1487,8 @@ mod tests {
             DataType::Datetime(TimeUnit::Microseconds, None),
         ];
         for dtype in &date_like {
-            assert!(check_numeric_dtype("t", dtype, NumericRole::Ordering).is_ok());
-            assert!(check_numeric_dtype("t", dtype, NumericRole::Value).is_err());
+            assert!(check_numeric_dtype("t", dtype, NumericRole::Ordering, SRC).is_ok());
+            assert!(check_numeric_dtype("t", dtype, NumericRole::Value, SRC).is_err());
         }
         // 時刻・期間・文字列は順序用でも拒否する。
         for dtype in [
@@ -1436,7 +1496,7 @@ mod tests {
             DataType::Duration(TimeUnit::Microseconds),
             DataType::String,
         ] {
-            assert!(check_numeric_dtype("t", &dtype, NumericRole::Ordering).is_err());
+            assert!(check_numeric_dtype("t", &dtype, NumericRole::Ordering, SRC).is_err());
         }
     }
 
@@ -1444,7 +1504,7 @@ mod tests {
     fn extract_f64_column_rejects_string_column_even_if_values_look_numeric() {
         let df = df!("a" => ["1.0", "2.0"]).unwrap();
 
-        assert!(extract_f64_column(&df, "a").is_err());
+        assert!(extract_f64_column(&df, "a", SRC).is_err());
     }
 
     /// `values`を`dtype`にキャストした`t`列だけを持つ`DataFrame`。
@@ -1459,7 +1519,7 @@ mod tests {
     fn extract_time_order_ranks_returns_positions_in_ascending_order() {
         let df = frame_with_t_as(vec![30_i64, 10, 20], DataType::Int64);
 
-        let ranks = extract_time_order_ranks(&df, "t").unwrap();
+        let ranks = extract_time_order_ranks(&df, "t", SRC).unwrap();
 
         assert_eq!(ranks, vec![2.0, 0.0, 1.0]);
     }
@@ -1468,7 +1528,7 @@ mod tests {
     fn extract_time_order_ranks_keeps_date_order() {
         let df = frame_with_t_as(vec![3, 1, 2], DataType::Date);
 
-        let ranks = extract_time_order_ranks(&df, "t").unwrap();
+        let ranks = extract_time_order_ranks(&df, "t", SRC).unwrap();
 
         assert_eq!(ranks, vec![2.0, 0.0, 1.0]);
     }
@@ -1484,7 +1544,7 @@ mod tests {
         ] {
             let df = frame_with_t_as(vec![5_i64, 1, 3], dtype.clone());
 
-            let ranks = extract_time_order_ranks(&df, "t").unwrap();
+            let ranks = extract_time_order_ranks(&df, "t", SRC).unwrap();
 
             assert_eq!(ranks, vec![2.0, 0.0, 1.0], "{dtype}");
         }
@@ -1503,7 +1563,7 @@ mod tests {
         ] {
             let df = frame_with_t_as(values.clone(), dtype.clone());
 
-            let ranks = extract_time_order_ranks(&df, "t").unwrap();
+            let ranks = extract_time_order_ranks(&df, "t", SRC).unwrap();
 
             assert_eq!(ranks, vec![2.0, 0.0, 1.0], "{dtype}");
         }
@@ -1524,7 +1584,7 @@ mod tests {
             // 行0と行2が同値（間に別の値を挟む）。
             let df = frame_with_t_as(vec![4, 9, 4, 7], dtype.clone());
 
-            assert!(extract_time_order_ranks(&df, "t").is_err(), "{dtype}");
+            assert!(extract_time_order_ranks(&df, "t", SRC).is_err(), "{dtype}");
         }
     }
 
@@ -1543,20 +1603,20 @@ mod tests {
     #[test]
     fn extract_time_order_ranks_rejects_fully_tied_columns() {
         let tied = frame_with_t_as(vec![1_i64; 5], DataType::Int64);
-        assert!(extract_time_order_ranks(&tied, "t").is_err());
+        assert!(extract_time_order_ranks(&tied, "t", SRC).is_err());
     }
 
     #[test]
     fn extract_time_order_ranks_rejects_boolean_columns_by_dtype() {
         let boolean = frame_with_t_as(vec![0_i64, 1], DataType::Boolean);
-        assert!(extract_time_order_ranks(&boolean, "t").is_err());
+        assert!(extract_time_order_ranks(&boolean, "t", SRC).is_err());
     }
 
     #[test]
     fn extract_time_order_ranks_treats_negative_zero_as_tied_with_zero() {
         let df = DataFrame::new(2, vec![Column::new("t".into(), vec![0.0_f64, -0.0])]).unwrap();
 
-        assert!(extract_time_order_ranks(&df, "t").is_err());
+        assert!(extract_time_order_ranks(&df, "t", SRC).is_err());
     }
 
     #[test]
@@ -1566,14 +1626,14 @@ mod tests {
             vec![Column::new("t".into(), vec![Some(1_i64), None, Some(3)])],
         )
         .unwrap();
-        assert!(extract_time_order_ranks(&with_null, "t").is_err());
+        assert!(extract_time_order_ranks(&with_null, "t", SRC).is_err());
 
         let with_nan = DataFrame::new(
             3,
             vec![Column::new("t".into(), vec![1.0_f64, f64::NAN, 3.0])],
         )
         .unwrap();
-        assert!(extract_time_order_ranks(&with_nan, "t").is_err());
+        assert!(extract_time_order_ranks(&with_nan, "t", SRC).is_err());
     }
 
     #[test]
@@ -1596,7 +1656,7 @@ mod tests {
             let cast = df.column("t").unwrap().cast(&dtype).unwrap();
             df.with_column(cast).unwrap();
 
-            assert!(extract_time_order_ranks(&df, "t").is_err(), "{dtype}");
+            assert!(extract_time_order_ranks(&df, "t", SRC).is_err(), "{dtype}");
         }
     }
 
@@ -1611,7 +1671,7 @@ mod tests {
             ],
         )
         .unwrap();
-        assert!(extract_time_order_ranks(&all_null, "t").is_err());
+        assert!(extract_time_order_ranks(&all_null, "t", SRC).is_err());
 
         for bad in [f64::INFINITY, f64::NEG_INFINITY] {
             for dtype in [DataType::Float32, DataType::Float64] {
@@ -1621,7 +1681,10 @@ mod tests {
                 let cast = df.column("t").unwrap().cast(&dtype).unwrap();
                 df.with_column(cast).unwrap();
 
-                assert!(extract_time_order_ranks(&df, "t").is_err(), "{dtype} {bad}");
+                assert!(
+                    extract_time_order_ranks(&df, "t", SRC).is_err(),
+                    "{dtype} {bad}"
+                );
             }
         }
     }
@@ -1629,8 +1692,8 @@ mod tests {
     #[test]
     fn extract_time_order_ranks_rejects_non_orderable_dtype_and_missing_column() {
         let strings = df!("t" => ["a", "b"]).unwrap();
-        assert!(extract_time_order_ranks(&strings, "t").is_err());
-        assert!(extract_time_order_ranks(&strings, "absent").is_err());
+        assert!(extract_time_order_ranks(&strings, "t", SRC).is_err());
+        assert!(extract_time_order_ranks(&strings, "absent", SRC).is_err());
     }
 
     #[test]
@@ -1641,7 +1704,7 @@ mod tests {
         )
         .unwrap();
 
-        let columns = extract_f64_columns(&df, &["b".to_string(), "a".to_string()]).unwrap();
+        let columns = extract_f64_columns(&df, &["b".to_string(), "a".to_string()], SRC).unwrap();
         assert_eq!(columns, vec![vec![10.0, 20.0], vec![1.0, 2.0]]);
     }
 
@@ -1649,7 +1712,7 @@ mod tests {
     fn extract_model_x_columns_skips_const_and_trailing_names() {
         let df = df!("a" => [1.0, 2.0], "b" => [3.0, 4.0]).unwrap();
         let param_names = ["const", "b", "a", "sigma"].map(String::from);
-        let columns = extract_model_x_columns(&df, &param_names, true, 1).unwrap();
+        let columns = extract_model_x_columns(&df, &param_names, true, 1, SRC).unwrap();
         assert_eq!(columns, vec![vec![3.0, 4.0], vec![1.0, 2.0]]);
     }
 
@@ -1657,7 +1720,7 @@ mod tests {
     fn extract_model_x_columns_keeps_all_names_without_intercept() {
         let df = df!("a" => [1.0, 2.0]).unwrap();
         let param_names = ["a".to_string()];
-        let columns = extract_model_x_columns(&df, &param_names, false, 0).unwrap();
+        let columns = extract_model_x_columns(&df, &param_names, false, 0, SRC).unwrap();
         assert_eq!(columns, vec![vec![1.0, 2.0]]);
     }
 
@@ -1665,7 +1728,7 @@ mod tests {
     fn extract_f64_columns_returns_empty_vec_for_empty_names() {
         let df = df!("a" => [1.0, 2.0]).unwrap();
 
-        let columns = extract_f64_columns(&df, &[]).unwrap();
+        let columns = extract_f64_columns(&df, &[], SRC).unwrap();
         assert!(columns.is_empty());
     }
 
@@ -1673,7 +1736,85 @@ mod tests {
     fn extract_f64_columns_returns_error_when_a_column_is_missing() {
         let df = df!("a" => [1.0, 2.0]).unwrap();
 
-        let result = extract_f64_columns(&df, &["a".to_string(), "does_not_exist".to_string()]);
+        let result =
+            extract_f64_columns(&df, &["a".to_string(), "does_not_exist".to_string()], SRC);
         assert!(result.is_err());
+    }
+
+    /// 一覧に出す呼び名（`allowed`）の側に寄せた、dtypeの総称（整数・浮動小数は1つにまとめる）。
+    fn family(dtype: &DataType) -> String {
+        if dtype.is_integer() {
+            "integer".to_string()
+        } else if dtype.is_float() {
+            "float".to_string()
+        } else {
+            dtype_label(dtype)
+        }
+    }
+
+    fn sample_dtypes() -> Vec<DataType> {
+        vec![
+            DataType::Int8,
+            DataType::UInt64,
+            DataType::Float32,
+            DataType::Float64,
+            DataType::Boolean,
+            DataType::Decimal(10, 2),
+            DataType::String,
+            DataType::Categorical(Categories::global(), Categories::global().mapping()),
+            DataType::Date,
+            DataType::Datetime(TimeUnit::Microseconds, None),
+            DataType::Time,
+            DataType::Duration(TimeUnit::Microseconds),
+            DataType::Binary,
+        ]
+    }
+
+    #[test]
+    fn allowed_dtype_names_match_what_the_numeric_check_accepts() {
+        for (numeric_role, column_role) in [
+            (NumericRole::Value, ColumnRole::Numeric),
+            (NumericRole::Ordering, ColumnRole::TimeOrder),
+        ] {
+            let accepted: std::collections::BTreeSet<String> = sample_dtypes()
+                .iter()
+                .filter(|d| check_numeric_dtype("c", d, numeric_role, SRC).is_ok())
+                .map(family)
+                .collect();
+            let listed: std::collections::BTreeSet<String> = column_role
+                .allowed_dtypes()
+                .into_iter()
+                .filter(|name| sample_dtypes().iter().any(|d| family(d) == *name))
+                .map(str::to_string)
+                .collect();
+            assert_eq!(accepted, listed, "{column_role:?}");
+        }
+    }
+
+    #[test]
+    fn allowed_dtype_names_match_what_the_key_check_accepts() {
+        let mut dtypes = sample_dtypes();
+        let categories = FrozenCategories::new(["a"]).unwrap();
+        dtypes.push(DataType::Enum(
+            categories.clone(),
+            categories.mapping().clone(),
+        ));
+        for (key_role, column_role) in [
+            (KeyRole::Identity, ColumnRole::GroupIdentifier),
+            (KeyRole::Time, ColumnRole::Time),
+        ] {
+            let accepted: std::collections::BTreeSet<String> = dtypes
+                .iter()
+                .filter(|d| check_key_dtype("c", d, key_role, SRC).is_ok())
+                .map(family)
+                .collect();
+            let listed: std::collections::BTreeSet<String> = column_role
+                .allowed_dtypes()
+                .into_iter()
+                .filter(|name| dtypes.iter().any(|d| family(d) == *name))
+                .map(str::to_string)
+                .collect();
+            assert_eq!(accepted, listed, "{column_role:?}");
+        }
     }
 }

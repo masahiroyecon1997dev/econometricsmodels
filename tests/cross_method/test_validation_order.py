@@ -31,12 +31,14 @@ from typing import Any
 import polars as pl
 import pytest
 from _dtype_helpers import make_frame
+from _errors import raises_error
 from econometricsmodels import (
     FE,
     IV,
     OLS,
     RE,
     WLS,
+    ErrorCode,
     FEOptions,
     IVOptions,
     Logit,
@@ -246,7 +248,16 @@ class Fault:
 
     id: str
     rank: tuple[int, int]
-    marker: str
+    marker: str = ""
+    # 列が存在しない故障は、文面ではなく`COLUMN_NOT_FOUND`の`column`（と、その列を
+    # 渡した引数`argument`。手法によって引数名が変わる故障は`None`）で照合する。
+    column: str | None = None
+    argument: str | None = None
+
+    def __post_init__(self) -> None:
+        # 文面も列も指定しない故障は、`match=""`で何にでも一致して検査が空になる。
+        if not self.marker and self.column is None:
+            raise ValueError(f"fault {self.id!r} needs a marker or a column")
 
 
 # 順位の第1要素が段階、第2要素が段階内の順。段階2の第2要素は仕様の報告順
@@ -318,32 +329,34 @@ FAULTS = {
             (4, 0),
             r"column 'y' specified as dk_time is also specified as y",
         ),
-        Fault("missing_y", (5, 0), r"column 'no_such_y' does not exist"),
-        Fault("missing_x", (5, 0), r"column 'no_such_x' does not exist"),
+        Fault("missing_y", (5, 0), column="no_such_y", argument="y"),
+        Fault("missing_x", (5, 0), column="no_such_x"),
         Fault(
             "missing_weight",
             (5, 0),
-            r"column 'no_such_weight' does not exist",
+            column="no_such_weight",
+            argument="weight",
         ),
         Fault(
-            "missing_instrument", (5, 0), r"column 'no_such_z' does not exist"
+            "missing_instrument",
+            (5, 0),
+            column="no_such_z",
+            argument="instruments",
         ),
-        Fault("missing_entity", (5, 0), r"column 'no_such_e' does not exist"),
-        Fault("missing_time", (5, 0), r"column 'no_such_t' does not exist"),
+        Fault("missing_entity", (5, 0), column="no_such_e", argument="entity"),
+        Fault("missing_time", (5, 0), column="no_such_t", argument="time"),
         Fault(
             "missing_cluster_column",
             (6, 0),
-            r"column 'no_such_cluster' does not exist",
+            column="no_such_cluster",
+            argument="cluster",
         ),
-        Fault(
-            "missing_time_column",
-            (6, 1),
-            r"column 'no_such_time' does not exist",
-        ),
+        Fault("missing_time_column", (6, 1), column="no_such_time"),
         Fault(
             "missing_weight_cluster_column",
             (6, 2),
-            r"column 'no_such_cluster' does not exist",
+            column="no_such_cluster",
+            argument="cluster",
         ),
         Fault(
             "bad_confidence_level",
@@ -540,6 +553,16 @@ def _single_params():
     ]
 
 
+def raises_fault(fault: Fault) -> Any:
+    """`fault`のエラーが送出されることを検査するコンテキストマネージャ。"""
+    if fault.column is None:
+        return pytest.raises(ValidationError, match=fault.marker)
+    params = {"column": fault.column, "data_argument": "data"}
+    if fault.argument is not None:
+        params["argument"] = fault.argument
+    return raises_error(ErrorCode.COLUMN_NOT_FOUND, **params)
+
+
 @pytest.fixture(scope="module")
 def df() -> pl.DataFrame:
     return make_frame(11)
@@ -568,7 +591,7 @@ def test_each_fault_alone_raises_its_own_error(df, method, fault):
     """故障を1つだけ混ぜると、その故障のエラーが出る（組合せテストの前提）。"""
     args_changes, opts = changes(method, fault)
     args = {**method.base_args, **args_changes}
-    with pytest.raises(ValidationError, match=FAULTS[fault].marker):
+    with raises_fault(FAULTS[fault]):
         method.run(df, args, {**method.base_opts, **opts})
 
 
@@ -581,7 +604,7 @@ def test_earlier_error_is_reported_first(df, method, early, late):
     composed = compose(method, early, late)
     assert composed is not None
     args, opts = composed
-    with pytest.raises(ValidationError, match=FAULTS[early].marker):
+    with raises_fault(FAULTS[early]):
         method.run(df, args, opts)
 
 

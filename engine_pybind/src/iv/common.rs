@@ -8,8 +8,9 @@
 //! 置き場所という位置づけに素直に合致する（`two_sls.rs`/`gmm.rs`のような手法ごとの
 //! ファイル分割はしない）。
 //!
-//! `IvError`の`Common`バリアント（`engine::shared::error::CommonError`）は`crate::shared::errors::
-//! common_error_to_pyerr`に委譲する（系統ごとに同じ判定ロジックを重複させない）。
+//! `IvError`の`Common`バリアント（`engine::shared::error::CommonError`）も、`IvError`の
+//! `ErrorInfo::report()`が同じ`code`・`params`に変換する（系統ごとに同じ判定ロジックを
+//! 重複させない）。
 //!
 //! ## 実装の経緯（要点のみ、詳細は各コミット・`engine/src/iv/CLAUDE.md`参照）
 //!
@@ -70,10 +71,7 @@ use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
     extract_f64_column, extract_optional_cluster_groups, extract_time_order_ranks,
 };
-use crate::shared::errors::{
-    common_error_to_pyerr, legacy_computation_error, legacy_validation_error, report_to_pyerr,
-    unknown_option_value,
-};
+use crate::shared::errors::{to_pyerr, unknown_option_value};
 use crate::shared::mat_conversion::mat_to_vec;
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
@@ -93,45 +91,11 @@ use crate::shared::validation::{
 /// 実装し、呼び出し側で`.map_err(iv_error_to_pyerr)?`する（`least_squares_error_to_pyerr`と
 /// 同じ理由、`engine_pybind/src/linear/common.rs`参照）。
 ///
-/// `FirstStageFailed`/`SecondStageFailed`は2SLS（`engine::iv::two_sls`）が内部で委譲する
-/// `OlsEstimator::fit`の失敗を包んだもの。`HausmanRegressionFailed`
-/// も同型だが、Wu-Hausman検定の拡張回帰が理論上到達不能な理由で失敗した
-/// 場合のみ構築される防御的なバリアント（想定内の失敗——設計行列の特異性・観測数不足等
-/// ——は`wu_hausman_statistic`が`None`になるだけで`IvError`自体は発生しない、
-/// `engine/src/iv/CLAUDE.md`参照）。`ValidationError`/`ComputationError`の
-/// 判定は`least_squares_error_is_computation_error`（`engine_pybind/src/linear/common.rs`）に
-/// 委譲し、`least_squares_error_to_pyerr`と同じ基準を保つ（分類ロジックを重複させない）。
-/// Pythonに渡すメッセージは`source.to_string()`ではなく`IvError`自身の`to_string()`
-/// （「第一段階/第二段階のどの内生変数で失敗したか」という文脈を含む）を使うため、
-/// `least_squares_error_to_pyerr`自体はそのまま呼ばない。
-///
-/// 現在は`fit`（本ファイル）が実際に`#[pymodule]`経路（`fit_iv`）から呼び出すように
-/// なっている。当初は`#[cfg(test)] mod tests`からしか呼ばれておらず
-/// `#[allow(dead_code)]`が必要だった（`--all-targets`ビルドでの`#[expect]`の罠、
-/// `engine_pybind/src/iv/CLAUDE.md`参照）が、本番経路から呼ばれるようになった今は不要。
+/// `FirstStageFailed`/`SecondStageFailed`/`HausmanRegressionFailed`は、内部で委譲する
+/// `OlsEstimator::fit`の失敗を包んだもの。`report()`が原因の`code`に`stage`を付けて返すので、
+/// ここでは分岐しない（`ValidationError`/`ComputationError`もカタログの`code`で決まる）。
 pub(crate) fn iv_error_to_pyerr(err: IvError) -> PyErr {
-    if let Some(report) = err.try_report() {
-        return report_to_pyerr(&report);
-    }
-    let message = err.to_string();
-    match err {
-        // `try_report()`で処理済みのバリアントは先頭で返るためここには来ない（`_`で受けずに網羅するために残している）。
-        IvError::Common(common) => common_error_to_pyerr(common),
-        IvError::InsufficientInstruments { .. }
-        | IvError::InvalidGmmMaxIter { .. }
-        | IvError::InvalidGmmTol { .. }
-        | IvError::InsufficientClustersForWeightMatrix { .. }
-        | IvError::InsufficientObservationsForFirstStage { .. } => legacy_validation_error(message),
-        // `MleError::NonConvergence`（`nonlinear/common.rs`の`mle_error_to_pyerr`）と同じ
-        // 分類: パラメータの不正ではなく、計算過程（反復推定）で発覚した問題のため
-        // `ComputationError`（`engine/src/iv/CLAUDE.md`参照）。
-        IvError::GmmNonConvergence { .. } => legacy_computation_error(message),
-        // 段階ごとの包みは、原因が必ずカタログに移っているため`try_report()`が常に`Some`を返し、
-        // ここには来ない（`_`で受けずに網羅するために残している）。
-        IvError::FirstStageFailed { .. }
-        | IvError::SecondStageFailed { .. }
-        | IvError::HausmanRegressionFailed { .. } => legacy_computation_error(message),
-    }
+    to_pyerr(&err)
 }
 
 /// Estimation options for IV (2SLS/GMM).
@@ -752,10 +716,11 @@ pub(crate) fn parse_iv_option_values(options: &IVOptions) -> PyResult<IvOptionVa
 /// `ValidationError`。
 pub(crate) fn check_iv_options(options: &IVOptions, values: &IvOptionValues) -> PyResult<()> {
     const GMM: &str = "estimator=\"gmm\"";
-    const GMM_WEIGHTED: &str = "estimator=\"gmm\" with gmm_type=\"two_step\" or \"iterated\"";
-    const GMM_ITERATED: &str = "estimator=\"gmm\" with gmm_type=\"iterated\"";
-    const HAC_CONDITION: &str =
-        "cov_type=\"hac\" (or gmm_weight_type=\"hac\" with estimator=\"gmm\")";
+    const GMM_WEIGHTED: &str = "estimator=\"gmm\" and gmm_type in (\"two_step\", \"iterated\")";
+    const GMM_ITERATED: &str = "estimator=\"gmm\" and gmm_type=\"iterated\"";
+    // 重み行列は`gmm_type`が`two_step`/`iterated`のときだけ使われる（`GMM_WEIGHTED`）。
+    const CLUSTER_CONDITION: &str = "cov_type=\"cluster\" or (estimator=\"gmm\" and gmm_type in (\"two_step\", \"iterated\") and gmm_weight_type=\"cluster\")";
+    const HAC_CONDITION: &str = "cov_type=\"hac\" or (estimator=\"gmm\" and gmm_type in (\"two_step\", \"iterated\") and gmm_weight_type=\"hac\")";
 
     let uses_weight = values.uses_weight();
     let is_iterated = values.is_iterated();
@@ -789,7 +754,7 @@ pub(crate) fn check_iv_options(options: &IVOptions, values: &IvOptionValues) -> 
         "cluster",
         options.cluster.is_some(),
         values.cov == CovKind::Cluster || (uses_weight && values.weight == WeightKind::Cluster),
-        "cov_type=\"cluster\" (or gmm_weight_type=\"cluster\" with estimator=\"gmm\")",
+        CLUSTER_CONDITION,
     )?;
     let hac_used = values.cov == CovKind::Hac || (uses_weight && values.weight == WeightKind::Hac);
     reject_unused_option(

@@ -910,9 +910,10 @@ fn validate_weight_type(
                 setting: ClusterSetting::GmmWeightType,
             })?;
             let g = validate_cluster_groups(groups, n, ClusterSetting::GmmWeightType)?;
-            let exactly_identified = l == k;
-            if g < l || (exactly_identified && g == l) {
-                return Err(IvError::InsufficientClustersForWeightMatrix { g, l });
+            // 丁度識別は`G <= l`、過剰識別は`G < l`で`S`が特異になる。
+            let min_clusters = if l == k { l + 1 } else { l };
+            if g < min_clusters {
+                return Err(IvError::InsufficientClustersForWeightMatrix { g, l, min_clusters });
             }
             return Ok(Some(groups));
         }
@@ -1680,7 +1681,11 @@ mod tests {
         let result = fit_cluster_weighted(2, 2);
         assert_eq!(
             result.unwrap_err(),
-            IvError::InsufficientClustersForWeightMatrix { g: 2, l: 3 }
+            IvError::InsufficientClustersForWeightMatrix {
+                g: 2,
+                l: 3,
+                min_clusters: 3
+            }
         );
     }
 
@@ -1698,7 +1703,11 @@ mod tests {
         let result = fit_cluster_weighted(1, 2);
         assert_eq!(
             result.unwrap_err(),
-            IvError::InsufficientClustersForWeightMatrix { g: 2, l: 2 }
+            IvError::InsufficientClustersForWeightMatrix {
+                g: 2,
+                l: 2,
+                min_clusters: 3
+            }
         );
     }
 

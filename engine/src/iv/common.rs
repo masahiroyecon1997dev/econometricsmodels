@@ -40,7 +40,7 @@ use thiserror::Error;
 
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
-use crate::shared::error::{ClusterSetting, CommonError, ErrorInfo, catalog_display, staged};
+use crate::shared::error::{ClusterSetting, CommonError, ErrorInfo, staged_report};
 use crate::shared::error_catalog::{ErrorCode, ErrorReport, Stage};
 use crate::shared::validation::{
     GMM_MAX_ITER_MIN, MAX_ITER_LIMIT, validate_cluster_count_covers_slopes, validate_cluster_groups,
@@ -62,11 +62,7 @@ pub enum IvError {
     /// `instruments`は除外操作変数のみを指す（`docs/spec/iv-spec.md`
     /// 1.1節）。順序条件は必要条件に過ぎず、階数条件（rank condition）はこの時点の
     /// 列数チェックでは検出できない（実際の推定計算時に特異行列として顕在化する）。
-    #[error(
-        "insufficient instruments for identification: {n_instruments} instrument(s) provided \
-         but {n_endog} endogenous regressor(s) require at least {n_endog} \
-         (order condition: len(instruments) >= len(x_endog))"
-    )]
+    #[error("{}", self.catalog_message())]
     InsufficientInstruments {
         n_instruments: usize,
         n_endog: usize,
@@ -79,7 +75,7 @@ pub enum IvError {
     /// 内生変数が複数ある場合にどの変数の第一段階回帰が失敗したかをエラーメッセージから
     /// 判別できるようにするため（`CommonError::NoRegressors`をUXの観点で`Insufficient
     /// Observations`と分離したのと同じ考え方）。
-    #[error("first stage regression for endogenous variable '{endog_name}' failed: {source}")]
+    #[error("{}", self.catalog_message())]
     FirstStageFailed {
         endog_name: String,
         #[source]
@@ -96,16 +92,11 @@ pub enum IvError {
     /// 条件は内生変数ごとに変わらないため、`FirstStageFailed`のように変数名は付けない。
     /// 構造方程式側の`n <= k`は先に`CommonError::InsufficientObservations`で報告する
     /// （`validate_observation_counts`）。
-    #[error(
-        "insufficient observations for the first stage: n={n} must be greater than l={l} \
-         (number of instruments, including the intercept and the exogenous regressors); with \
-         n <= l the first stage leaves no residual degrees of freedom (at n = l it fits the \
-         endogenous variables perfectly, so the IV estimate equals OLS)"
-    )]
+    #[error("{}", self.catalog_message())]
     InsufficientObservationsForFirstStage { n: usize, l: usize },
 
     /// 2SLSの第二段階回帰（`y ~ x_exog + x̂_endog`）が`OlsEstimator::fit`で失敗した。
-    #[error("second stage regression failed: {source}")]
+    #[error("{}", self.catalog_message())]
     SecondStageFailed {
         #[source]
         source: LeastSquaresError,
@@ -133,13 +124,13 @@ pub enum IvError {
     /// `cov_type=Cluster`の`CommonError::InsufficientClustersForInference`（係数共分散の
     /// Wald部分行列、閾値は`q`）とは対象・閾値が異なる別軸のためGMM固有のバリアントとする。
     /// `g`・`l`は入力だけから判定できるため、行列計算を待たず`fit()`冒頭で弾く。
-    #[error(
-        "gmm_weight_type='cluster' requires at least l clusters (l+1 if exactly identified) for \
-         the moment weight matrix: got g={g} clusters for l={l} instruments (including \
-         exogenous regressors), but the cluster moment covariance has rank at most g \
-         (g-1 if exactly identified), so it is singular"
-    )]
-    InsufficientClustersForWeightMatrix { g: usize, l: usize },
+    #[error("{}", self.catalog_message())]
+    InsufficientClustersForWeightMatrix {
+        g: usize,
+        l: usize,
+        /// 必要なクラスター数の下限（過剰識別は`l`、丁度識別は`l + 1`）。
+        min_clusters: usize,
+    },
 
     /// `raise_on_non_convergence=true`（既定）かつ`gmm_type="iterated"`で、`gmm_max_iter`回
     /// （初回推定を含む上限回数）以内に係数が収束しなかった。
@@ -166,56 +157,71 @@ pub enum IvError {
     /// 第二段階側で既に検証済みのため）理論上到達不能な失敗を防御的に伝播するためだけに
     /// 存在する（`FirstStageFailed`/`SecondStageFailed`と同じ理由で`LeastSquaresError`を
     /// そのまま透過させず専用バリアントにする）。
-    #[error("Wu-Hausman regression-based exogeneity test failed: {source}")]
+    #[error("{}", self.catalog_message())]
     HausmanRegressionFailed {
         #[source]
         source: LeastSquaresError,
     },
 }
 
-impl IvError {
-    /// カタログの`code`・`params`で表せるバリアントの[`ErrorReport`]。まだ移していないバリアントは`None`。
-    ///
-    /// 全バリアントを移し終えたら、`ErrorInfo`の実装（`report()`）に置き換える。
-    /// `FirstStageFailed`等の段階ごとの包みは、`source`が移行済みなら`source`の`code`（`stage`を付けてよい
-    /// `code`なら`stage`つき）を返す。`source`が未移行なら`None`。
-    #[must_use]
-    pub fn try_report(&self) -> Option<ErrorReport> {
+impl ErrorInfo for IvError {
+    /// `FirstStageFailed`等の段階ごとの包みは、`source`の`code`（`stage`を付けてよい`code`なら
+    /// `stage`つき）を返す。
+    fn report(&self) -> ErrorReport {
         match self {
-            Self::Common(common) => Some(common.report()),
-            Self::FirstStageFailed { endog_name, source } => staged(
-                Some(source.report()),
+            Self::Common(common) => common.report(),
+            Self::FirstStageFailed { endog_name, source } => staged_report(
+                source.report(),
                 Stage::FirstStage {
                     endog_name: endog_name.clone(),
                 },
             ),
-            Self::SecondStageFailed { source } => staged(Some(source.report()), Stage::SecondStage),
-            Self::HausmanRegressionFailed { source } => {
-                staged(Some(source.report()), Stage::WuHausmanRegression)
+            Self::SecondStageFailed { source } => {
+                staged_report(source.report(), Stage::SecondStage)
             }
-            Self::InvalidGmmMaxIter { max_iter } => Some(
+            Self::HausmanRegressionFailed { source } => {
+                staged_report(source.report(), Stage::WuHausmanRegression)
+            }
+            Self::InsufficientInstruments {
+                n_instruments,
+                n_endog,
+            } => ErrorReport::new(ErrorCode::InsufficientInstruments)
+                .param("n_instruments", *n_instruments)
+                .param("n_endog", *n_endog),
+            Self::InsufficientObservationsForFirstStage { n, l } => {
+                ErrorReport::new(ErrorCode::InsufficientObservationsForFirstStage)
+                    .param("n_obs", *n)
+                    .param("n_params", *l)
+                    .param("min_obs", l + 1)
+            }
+            Self::InsufficientClustersForWeightMatrix { g, l, min_clusters } => {
+                ErrorReport::new(ErrorCode::GmmWeightClusterCountTooSmall)
+                    .param("n_clusters", *g)
+                    .param("n_instruments", *l)
+                    .param("min_clusters", *min_clusters)
+            }
+            Self::InvalidGmmMaxIter { max_iter } => {
                 ErrorReport::new(ErrorCode::GmmMaxIterOutOfRange)
                     .param("value", *max_iter)
                     .param("min", GMM_MAX_ITER_MIN)
-                    .param("max", MAX_ITER_LIMIT),
-            ),
-            Self::InvalidGmmTol { gmm_tol } => Some(
+                    .param("max", MAX_ITER_LIMIT)
+            }
+            Self::InvalidGmmTol { gmm_tol } => {
                 ErrorReport::new(ErrorCode::ToleranceNotPositiveFinite)
                     .param("option", "gmm_tol")
-                    .param("value", *gmm_tol),
-            ),
-            Self::GmmNonConvergence { n_iter } => Some(
-                ErrorReport::new(ErrorCode::NotConverged)
-                    .param("n_iter", *n_iter)
-                    .param("iter_option", "gmm_max_iter"),
-            ),
-            _ => None,
+                    .param("value", *gmm_tol)
+            }
+            Self::GmmNonConvergence { n_iter } => ErrorReport::new(ErrorCode::NotConverged)
+                .param("n_iter", *n_iter)
+                .param("iter_option", "gmm_max_iter"),
         }
     }
+}
 
-    /// カタログに移したバリアントの`Display`が使う`message`。
+impl IvError {
+    /// `Display`が使う`message`。
     fn catalog_message(&self) -> String {
-        catalog_display(self.try_report())
+        self.report().message()
     }
 }
 
@@ -877,15 +883,12 @@ mod tests {
     #[test]
     fn iv_cataloged_variants_display_the_catalog_message_and_common_delegates() {
         let err = IvError::InvalidGmmMaxIter { max_iter: 2 };
-        assert_eq!(
-            err.to_string(),
-            err.try_report().expect("cataloged").message()
-        );
+        assert_eq!(err.to_string(), err.report().message());
         let wrapped = IvError::Common(CommonError::InvalidConfidenceLevel {
             confidence_level: 2.0,
         });
         assert_eq!(
-            wrapped.try_report().expect("cataloged").code(),
+            wrapped.report().code(),
             ErrorCode::ConfidenceLevelOutOfRange
         );
         // 段階ごとの包みは`source`の`code`を返す。`stage`を付けてよくない`code`には付けない。
@@ -893,14 +896,32 @@ mod tests {
             endog_name: "x".to_string(),
             source: LeastSquaresError::InvalidNlags { nlags: 0 },
         };
-        let report = first_stage.try_report().expect("cataloged");
+        let report = first_stage.report();
         assert_eq!(report.code(), ErrorCode::NlagsNotPositive);
         assert!(report.stage().is_none());
+        // `stage`を付けてよい`code`には、どの回帰かを示す`stage`が付く。
+        let singular = IvError::FirstStageFailed {
+            endog_name: "x".to_string(),
+            source: LeastSquaresError::SingularMatrix,
+        }
+        .report();
+        assert_eq!(singular.code(), ErrorCode::DesignMatrixSingular);
+        assert_eq!(
+            singular.stage(),
+            Some(&Stage::FirstStage {
+                endog_name: "x".to_string()
+            })
+        );
+        let hausman = IvError::HausmanRegressionFailed {
+            source: LeastSquaresError::SingularMatrix,
+        }
+        .report();
+        assert_eq!(hausman.stage(), Some(&Stage::WuHausmanRegression));
         // 設計行列の特異は、どの回帰で起きたかを`stage`で示す。
         let second_stage = IvError::SecondStageFailed {
             source: LeastSquaresError::SingularMatrix,
         };
-        let report = second_stage.try_report().expect("cataloged");
+        let report = second_stage.report();
         assert_eq!(report.code(), ErrorCode::DesignMatrixSingular);
         assert_eq!(report.stage(), Some(&Stage::SecondStage));
     }
@@ -908,7 +929,7 @@ mod tests {
     #[test]
     fn gmm_non_convergence_maps_to_not_converged_with_gmm_max_iter() {
         let err = IvError::GmmNonConvergence { n_iter: 3 };
-        let report = err.try_report().expect("cataloged");
+        let report = err.report();
         assert_eq!(report.code(), ErrorCode::NotConverged);
         assert!(report.validate().is_ok());
         assert_eq!(err.to_string(), report.message());
@@ -921,9 +942,7 @@ mod tests {
 
     #[test]
     fn gmm_option_errors_map_to_catalog_codes_with_valid_params() {
-        let max_iter = IvError::InvalidGmmMaxIter { max_iter: 2 }
-            .try_report()
-            .expect("cataloged");
+        let max_iter = IvError::InvalidGmmMaxIter { max_iter: 2 }.report();
         assert_eq!(max_iter.code(), ErrorCode::GmmMaxIterOutOfRange);
         assert!(max_iter.validate().is_ok());
         assert!(
@@ -932,35 +951,49 @@ mod tests {
                 .starts_with("gmm_max_iter must be an integer from 3 to")
         );
 
-        let tol = IvError::InvalidGmmTol { gmm_tol: 0.0 }
-            .try_report()
-            .expect("cataloged");
+        let tol = IvError::InvalidGmmTol { gmm_tol: 0.0 }.report();
         assert_eq!(tol.code(), ErrorCode::ToleranceNotPositiveFinite);
         assert!(tol.validate().is_ok());
         assert!(tol.message().starts_with("gmm_tol must be"));
-
-        assert!(
-            IvError::InsufficientInstruments {
-                n_instruments: 1,
-                n_endog: 2
-            }
-            .try_report()
-            .is_none()
-        );
     }
 
     #[test]
-    fn iv_error_messages_are_human_readable() {
-        assert_eq!(
-            IvError::InsufficientInstruments {
-                n_instruments: 1,
-                n_endog: 2,
-            }
-            .to_string(),
-            "insufficient instruments for identification: 1 instrument(s) provided but 2 \
-             endogenous regressor(s) require at least 2 \
-             (order condition: len(instruments) >= len(x_endog))"
-        );
+    fn identification_errors_map_to_catalog_codes_with_valid_params() {
+        let cases = [
+            (
+                IvError::InsufficientInstruments {
+                    n_instruments: 1,
+                    n_endog: 2,
+                },
+                ErrorCode::InsufficientInstruments,
+                "The model has 2 endogenous regressor(s) but only 1 instrument(s); it needs at least as many instruments as endogenous regressors (order condition).",
+            ),
+            (
+                IvError::InsufficientObservationsForFirstStage { n: 4, l: 4 },
+                ErrorCode::InsufficientObservationsForFirstStage,
+                "The first stage needs more observations than its 4 coefficients (instruments, exogenous regressors and the intercept): 4 observations, at least 5 needed.",
+            ),
+            (
+                IvError::InsufficientClustersForWeightMatrix {
+                    g: 2,
+                    l: 3,
+                    min_clusters: 3,
+                },
+                ErrorCode::GmmWeightClusterCountTooSmall,
+                "gmm_weight_type=\"cluster\" needs at least 3 clusters for 3 instruments (including exogenous regressors), but the cluster column has 2.",
+            ),
+        ];
+        for (err, code, message) in cases {
+            let report = err.report();
+            assert_eq!(report.code(), code);
+            assert!(report.validate().is_ok());
+            assert_eq!(report.message(), message);
+            assert_eq!(err.to_string(), message);
+        }
+    }
+
+    #[test]
+    fn common_errors_display_the_catalog_message() {
         assert_eq!(
             IvError::Common(CommonError::InsufficientClusters {
                 setting: ClusterSetting::CovType,
@@ -968,13 +1001,6 @@ mod tests {
             })
             .to_string(),
             r#"cov_type="cluster" needs at least 2 clusters, but the cluster column has 1."#
-        );
-        assert_eq!(
-            IvError::InsufficientObservationsForFirstStage { n: 4, l: 4 }.to_string(),
-            "insufficient observations for the first stage: n=4 must be greater than l=4 \
-             (number of instruments, including the intercept and the exogenous regressors); with \
-             n <= l the first stage leaves no residual degrees of freedom (at n = l it fits the \
-             endogenous variables perfectly, so the IV estimate equals OLS)"
         );
     }
 

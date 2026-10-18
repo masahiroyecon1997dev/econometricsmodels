@@ -414,13 +414,11 @@ def test_observation_count_boundaries(
         ):
             our_fit(df, options=options)
     elif outcome == "first_stage":
-        with pytest.raises(
-            ValidationError,
-            match=escaped(
-                iv_msgs.INSUFFICIENT_OBSERVATIONS_FOR_FIRST_STAGE,
-                n=n,
-                l=l_first,
-            ),
+        with raises_error(
+            ErrorCode.INSUFFICIENT_OBSERVATIONS_FOR_FIRST_STAGE,
+            n_obs=n,
+            n_params=l_first,
+            min_obs=l_first + 1,
         ):
             our_fit(df, options=options)
     else:
@@ -436,11 +434,11 @@ def test_observation_count_is_checked_before_cluster_count(
     `n <= l`の入力は、クラスター数ではなく第一段階の観測数不足で拒否される。
     """
     df = iv_dataset.head(4).with_columns(pl.lit("a").alias("g"))
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            iv_msgs.INSUFFICIENT_OBSERVATIONS_FOR_FIRST_STAGE, n=4, l=4
-        ),
+    with raises_error(
+        ErrorCode.INSUFFICIENT_OBSERVATIONS_FOR_FIRST_STAGE,
+        n_obs=4,
+        n_params=4,
+        min_obs=5,
     ):
         our_fit(
             df,
@@ -459,11 +457,8 @@ def test_insufficient_instruments_raises(iv_dataset):
     `instruments`の数が`x_endog`に足りない組み合わせにする必要がある
     （空リスト検証対応時に必須の修正）。
     """
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            iv_msgs.INSUFFICIENT_INSTRUMENTS, n_instruments=1, n_endog=2
-        ),
+    with raises_error(
+        ErrorCode.INSUFFICIENT_INSTRUMENTS, n_instruments=1, n_endog=2
     ):
         IV(
             iv_dataset,
@@ -864,11 +859,11 @@ def test_gmm_cluster_weight_type_raises_validation_error_when_cluster_count_is_l
         cov_type="classical",
         gmm_type=gmm_type,
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            iv_msgs.INSUFFICIENT_CLUSTERS_FOR_WEIGHT_MATRIX, g=2, l=3
-        ),
+    with raises_error(
+        ErrorCode.GMM_WEIGHT_CLUSTER_COUNT_TOO_SMALL,
+        n_clusters=2,
+        n_instruments=3,
+        min_clusters=3,
     ):
         IV(
             df,
@@ -934,13 +929,12 @@ def test_gmm_cluster_weight_type_cluster_count_boundaries(
         ).fit()
 
     if outcome == "raises":
-        with pytest.raises(
-            ValidationError,
-            match=escaped(
-                iv_msgs.INSUFFICIENT_CLUSTERS_FOR_WEIGHT_MATRIX,
-                g=n_groups,
-                l=l,
-            ),
+        # 丁度識別（`instruments`が1つ）は`l + 1`、過剰識別は`l`が下限。
+        with raises_error(
+            ErrorCode.GMM_WEIGHT_CLUSTER_COUNT_TOO_SMALL,
+            n_clusters=n_groups,
+            n_instruments=l,
+            min_clusters=l + 1,
         ):
             fit()
     else:
@@ -965,6 +959,23 @@ def test_invalid_confidence_level_raises(iv_dataset, confidence_level):
 def test_invalid_hac_lags_raises(iv_dataset, hac_lags):
     """`hac_lags`が`[0, n)`の範囲外の場合`ValidationError`。"""
     options = IVOptions(cov_type="hac", hac_lags=hac_lags, hac_time=ROW_TIME)
+    with raises_error(
+        ErrorCode.HAC_LAGS_OUT_OF_RANGE, value=hac_lags, n_obs=500, max=499
+    ):
+        our_fit(iv_dataset, options=options)
+
+
+@pytest.mark.parametrize("hac_lags", [-1, 500])  # 500 == iv_dataset の n_obs
+def test_invalid_gmm_weight_hac_lags_raises(iv_dataset, hac_lags):
+    """`gmm_weight_type="hac"`の`hac_lags`が`[0, n)`の範囲外の場合も
+    `cov_type="hac"`と同じ`HAC_LAGS_OUT_OF_RANGE`の`ValidationError`。
+    """
+    options = IVOptions(
+        estimator="gmm",
+        gmm_weight_type="hac",
+        hac_lags=hac_lags,
+        hac_time=ROW_TIME,
+    )
     with raises_error(
         ErrorCode.HAC_LAGS_OUT_OF_RANGE, value=hac_lags, n_obs=500, max=499
     ):
@@ -1017,19 +1028,21 @@ def test_unknown_gmm_type_raises(iv_dataset):
 _GMM = 'estimator="gmm"'
 
 
-_GMM_WEIGHTED = 'estimator="gmm" with gmm_type="two_step" or "iterated"'
+_GMM_WEIGHTED = 'estimator="gmm" and gmm_type in ("two_step", "iterated")'
 
 
-_GMM_ITERATED = 'estimator="gmm" with gmm_type="iterated"'
+_GMM_ITERATED = 'estimator="gmm" and gmm_type="iterated"'
 
 
 _CLUSTER_CONDITION = (
-    'cov_type="cluster" (or gmm_weight_type="cluster" with estimator="gmm")'
+    'cov_type="cluster" or (estimator="gmm" and '
+    'gmm_type in ("two_step", "iterated") and gmm_weight_type="cluster")'
 )
 
 
 _HAC_CONDITION = (
-    'cov_type="hac" (or gmm_weight_type="hac" with estimator="gmm")'
+    'cov_type="hac" or (estimator="gmm" and '
+    'gmm_type in ("two_step", "iterated") and gmm_weight_type="hac")'
 )
 
 
@@ -1092,6 +1105,17 @@ def test_gmm_option_unused_by_mode_raises(
         ),
         ({"cov_type": "cluster"}, "hac_lags", _HAC_CONDITION),
         ({"cov_type": "cluster"}, "hac_time", _HAC_CONDITION),
+        # gmm_type="one_step"はgmm_weight_typeを使わないため、hacも使われない
+        (
+            {"estimator": "gmm", "gmm_type": "one_step"},
+            "hac_lags",
+            _HAC_CONDITION,
+        ),
+        (
+            {"estimator": "gmm", "gmm_type": "one_step"},
+            "hac_time",
+            _HAC_CONDITION,
+        ),
     ],
 )
 def test_cov_option_unused_by_mode_raises(

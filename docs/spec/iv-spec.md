@@ -340,13 +340,19 @@ common.rs`）:
 
 | `IvError` | Python例外 |
 |---|---|
-| `Common(CommonError)`（`InvalidHacLags`を含む） | `common_error_to_pyerr`に委譲 |
-| `InsufficientInstruments` / `InsufficientObservationsForFirstStage` / `InvalidGmmMaxIter` / `InvalidGmmTol` / `InsufficientClustersForWeightMatrix` | `ValidationError` |
-| `GmmNonConvergence` | `ComputationError`（`MleError::NonConvergence`と同じ分類: パラメータの不正ではなく計算過程で発覚した問題） |
-| `FirstStageFailed` / `SecondStageFailed` / `HausmanRegressionFailed` | 内部の`LeastSquaresError`が`ComputationError`相当かどうかで`ComputationError`/`ValidationError`に分岐（`least_squares_error_is_computation_error`） |
+| `IvError` | `code`（カタログ） | 例外 |
+|---|---|---|
+| `Common(CommonError)`（`InvalidHacLags`を含む） | `CommonError`と同じ | `CommonError`と同じ |
+| `InsufficientInstruments` | `INSUFFICIENT_INSTRUMENTS` | `ValidationError` |
+| `InsufficientObservationsForFirstStage` | `INSUFFICIENT_OBSERVATIONS_FOR_FIRST_STAGE` | `ValidationError` |
+| `InsufficientClustersForWeightMatrix` | `GMM_WEIGHT_CLUSTER_COUNT_TOO_SMALL`（`min_clusters`は丁度識別で`l+1`、過剰識別で`l`） | `ValidationError` |
+| `InvalidGmmMaxIter` / `InvalidGmmTol` | `GMM_MAX_ITER_OUT_OF_RANGE` / `TOLERANCE_NOT_POSITIVE_FINITE` | `ValidationError` |
+| `GmmNonConvergence` | `NOT_CONVERGED`（`iter_option="gmm_max_iter"`。`MleError::NonConvergence`と同じ分類: パラメータの不正ではなく計算過程で発覚した問題） | `ComputationError` |
+| `FirstStageFailed` / `SecondStageFailed` / `HausmanRegressionFailed` | 内部の`LeastSquaresError`の`code`に`stage`（`FIRST_STAGE`・`SECOND_STAGE`・`WU_HAUSMAN_REGRESSION`）を付ける（`stage`を付けてよい`code`のみ） | `code`のクラスで決まる |
 
 `IvError`（`engine`）・`PyErr`（`pyo3`）はどちらもこのクレート外定義の型のためorphan ruleに
-より`impl From`は書けず、関数として実装し`.map_err(iv_error_to_pyerr)?`で変換する。
+より`impl From`は書けず、関数として実装し`.map_err(iv_error_to_pyerr)?`で変換する
+（`ErrorInfo::report()`の`code`・`params`から例外を作る）。
 
 ## 4. テスト
 

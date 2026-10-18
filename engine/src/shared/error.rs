@@ -160,10 +160,6 @@ pub enum CommonError {
     /// 実装の誤りでだけ起きるはずの状態（不変条件の破れ）。`detail`は開発者向けの英語。
     #[error("{}", self.catalog_message())]
     Internal { detail: String },
-
-    /// 診断検定の補助回帰の失敗等、まだカタログに移していない計算過程の失敗。
-    #[error("computation failed: {0}")]
-    ComputationFailed(String),
 }
 
 /// 移行途中のエラー型の`Display`が使う`message`。`report`が`None`（カタログに移していないバリアント）
@@ -179,13 +175,16 @@ pub(crate) fn catalog_display(report: Option<ErrorReport>) -> String {
 /// （例: `confidence_level`の範囲違反のように、どの回帰で起きても同じ入力の誤り）`stage`を付けずに
 /// そのまま返す。`source`がまだカタログに移っていなければ`None`。
 pub(crate) fn staged(source: Option<ErrorReport>, stage: Stage) -> Option<ErrorReport> {
-    source.map(|report| {
-        if report.code().spec().stage_allowed {
-            report.with_stage(stage)
-        } else {
-            report
-        }
-    })
+    source.map(|report| staged_report(report, stage))
+}
+
+/// [`staged`]の、`source`が必ずカタログに移っているとき用（`Option`を介さない）。
+pub(crate) fn staged_report(report: ErrorReport, stage: Stage) -> ErrorReport {
+    if report.code().spec().stage_allowed {
+        report.with_stage(stage)
+    } else {
+        report
+    }
 }
 
 /// Python APIからは到達しない（実装の誤りでだけ起きる）エラーの[`ErrorReport`]。
@@ -193,63 +192,57 @@ fn internal(detail: String) -> ErrorReport {
     ErrorReport::new(ErrorCode::InternalError).param("detail", detail)
 }
 
-impl CommonError {
-    /// カタログの`code`・`params`で表せるバリアントの[`ErrorReport`]。まだカタログに移していないバリアントは`None`。
-    ///
-    /// 全バリアントを移し終えたら、[`ErrorInfo`]の実装（`report()`）に置き換える。その時に`_`を
-    /// 全バリアントの列挙に変える（移行の途中は、移していないバリアントを`_`で受ける）。
-    #[must_use]
-    pub fn try_report(&self) -> Option<ErrorReport> {
+impl ErrorInfo for CommonError {
+    fn report(&self) -> ErrorReport {
         match self {
-            Self::InvalidConfidenceLevel { confidence_level } => Some(
+            Self::InvalidConfidenceLevel { confidence_level } => {
                 ErrorReport::new(ErrorCode::ConfidenceLevelOutOfRange)
-                    .param("value", *confidence_level),
-            ),
-            Self::InvalidHacLags { hac_lags, n } => Some(
-                ErrorReport::new(ErrorCode::HacLagsOutOfRange)
-                    .param("value", *hac_lags)
-                    .param("n_obs", *n)
-                    .param("max", n.saturating_sub(1)),
-            ),
-            Self::InsufficientObservations { n, k } => Some(
+                    .param("value", *confidence_level)
+            }
+            Self::InvalidHacLags { hac_lags, n } => ErrorReport::new(ErrorCode::HacLagsOutOfRange)
+                .param("value", *hac_lags)
+                .param("n_obs", *n)
+                .param("max", n.saturating_sub(1)),
+            Self::InsufficientObservations { n, k } => {
                 ErrorReport::new(ErrorCode::InsufficientObservations)
                     .param("n_obs", *n)
                     .param("n_params", *k)
-                    .param("min_obs", k + 1),
-            ),
-            Self::MissingClusterColumn { setting } => {
-                Some(ErrorReport::new(ErrorCode::ClusterRequired).param("setting", setting.name()))
+                    .param("min_obs", k + 1)
             }
-            Self::InsufficientClusters { setting, g } => Some(
+            Self::MissingClusterColumn { setting } => {
+                ErrorReport::new(ErrorCode::ClusterRequired).param("setting", setting.name())
+            }
+            Self::InsufficientClusters { setting, g } => {
                 ErrorReport::new(ErrorCode::ClusterCountTooSmall)
                     .param("setting", setting.name())
                     .param("n_clusters", *g)
-                    .param("min_clusters", 2_usize),
-            ),
-            Self::InsufficientClustersForInference { g, q } => Some(
+                    .param("min_clusters", 2_usize)
+            }
+            Self::InsufficientClustersForInference { g, q } => {
                 ErrorReport::new(ErrorCode::ClusterCountNotAboveSlopes)
                     .param("setting", ClusterSetting::CovType.name())
                     .param("n_clusters", *g)
                     .param("n_slopes", *q)
-                    .param("min_clusters", q + 1),
-            ),
-            Self::DimensionMismatch { y_rows, x_rows } => Some(internal(format!(
-                "y has {y_rows} rows but x has {x_rows} rows"
-            ))),
-            Self::NoRegressors { n } => Some(internal(format!(
-                "the design matrix has no columns (n={n})"
-            ))),
-            Self::ClusterDimensionMismatch { groups_rows, n } => Some(internal(format!(
+                    .param("min_clusters", q + 1)
+            }
+            Self::DimensionMismatch { y_rows, x_rows } => {
+                internal(format!("y has {y_rows} rows but x has {x_rows} rows"))
+            }
+            Self::NoRegressors { n } => {
+                internal(format!("the design matrix has no columns (n={n})"))
+            }
+            Self::ClusterDimensionMismatch { groups_rows, n } => internal(format!(
                 "cluster identifiers have {groups_rows} rows but the data has {n} rows"
-            ))),
-            Self::NearSingularMatrix { matrix } => Some(
-                ErrorReport::new(ErrorCode::MatrixNearSingular).param("matrix", matrix.as_str()),
-            ),
-            Self::Internal { detail } => Some(internal(detail.clone())),
-            Self::ComputationFailed(_) => None,
+            )),
+            Self::NearSingularMatrix { matrix } => {
+                ErrorReport::new(ErrorCode::MatrixNearSingular).param("matrix", matrix.as_str())
+            }
+            Self::Internal { detail } => internal(detail.clone()),
         }
     }
+}
 
+impl CommonError {
     /// 実装の誤りでだけ起きる状態を表すエラー。
     #[must_use]
     pub fn internal(detail: impl Into<String>) -> Self {
@@ -258,9 +251,9 @@ impl CommonError {
         }
     }
 
-    /// カタログに移したバリアントの`Display`が使う`message`。
+    /// `Display`が使う`message`。
     fn catalog_message(&self) -> String {
-        catalog_display(self.try_report())
+        self.report().message()
     }
 }
 
@@ -298,7 +291,7 @@ mod tests {
             },
             CommonError::InvalidHacLags { hac_lags: 5, n: 5 },
         ] {
-            let report = err.try_report().expect("cataloged");
+            let report = err.report();
             assert!(report.validate().is_ok());
             assert_eq!(err.to_string(), report.message());
         }
@@ -316,8 +309,7 @@ mod tests {
         let level = CommonError::InvalidConfidenceLevel {
             confidence_level: 1.5,
         }
-        .try_report()
-        .expect("cataloged");
+        .report();
         assert_eq!(level.code(), ErrorCode::ConfidenceLevelOutOfRange);
         assert!(level.validate().is_ok());
 
@@ -325,8 +317,7 @@ mod tests {
             hac_lags: 100,
             n: 100,
         }
-        .try_report()
-        .expect("cataloged");
+        .report();
         assert_eq!(lags.code(), ErrorCode::HacLagsOutOfRange);
         assert!(lags.validate().is_ok());
         assert_eq!(
@@ -365,7 +356,7 @@ mod tests {
             ),
         ];
         for (err, code, message) in cases {
-            let report = err.try_report().expect("cataloged");
+            let report = err.report();
             assert_eq!(report.code(), code);
             assert!(report.validate().is_ok());
             assert_eq!(report.message(), message);
@@ -396,7 +387,7 @@ mod tests {
             ),
         ];
         for (err, detail) in cases {
-            let report = err.try_report().expect("cataloged");
+            let report = err.report();
             assert_eq!(report.code(), ErrorCode::InternalError);
             assert!(report.validate().is_ok());
             assert_eq!(
@@ -405,11 +396,6 @@ mod tests {
             );
             assert_eq!(err.to_string(), report.message());
         }
-        assert!(
-            CommonError::ComputationFailed("x".to_string())
-                .try_report()
-                .is_none()
-        );
     }
 
     #[test]
@@ -428,11 +414,6 @@ mod tests {
             }
             .to_string(),
             "hac_lags must be from 0 to 99, one less than the number of observations (100), got -1."
-        );
-        assert_eq!(
-            CommonError::ComputationFailed("t-distribution CDF did not converge".to_string())
-                .to_string(),
-            "computation failed: t-distribution CDF did not converge"
         );
     }
 
@@ -494,8 +475,7 @@ mod tests {
             setting: ClusterSetting::GmmWeightType,
             g: 1,
         }
-        .try_report()
-        .expect("cataloged");
+        .report();
         assert_eq!(
             report.message(),
             r#"gmm_weight_type="cluster" needs at least 2 clusters, but the cluster column has 1."#
@@ -508,7 +488,8 @@ mod tests {
             CommonError::MissingClusterColumn {
                 setting: ClusterSetting::CovType,
             }
-            .try_report(),
+            .report()
+            .into(),
             Stage::SecondStage,
         )
         .expect("some");
@@ -533,7 +514,7 @@ mod tests {
                 matrix.as_str()
             );
             let err = CommonError::NearSingularMatrix { matrix };
-            let report = err.try_report().expect("cataloged");
+            let report = err.report();
             assert_eq!(report.code(), ErrorCode::MatrixNearSingular);
             assert!(report.validate().is_ok());
             assert_eq!(err.to_string(), report.message());
@@ -543,7 +524,7 @@ mod tests {
     #[test]
     fn internal_error_drops_the_trailing_period_of_its_detail() {
         let err = CommonError::internal("something broke.");
-        let report = err.try_report().expect("cataloged");
+        let report = err.report();
         assert!(report.validate().is_ok());
         assert_eq!(
             report.message(),

@@ -66,7 +66,7 @@ use thiserror::Error;
 
 use crate::linear::common::LeastSquaresError;
 use crate::shared::covariance::{cluster_correction, cluster_meat, default_hac_lags};
-use crate::shared::error::{CommonError, catalog_display, staged};
+use crate::shared::error::{CommonError, ErrorInfo, catalog_display, staged};
 use crate::shared::error_catalog::{ErrorCode, ErrorReport, Stage};
 use crate::shared::group_codes::GroupCodes;
 
@@ -442,26 +442,26 @@ impl PanelError {
     #[must_use]
     pub fn try_report(&self) -> Option<ErrorReport> {
         match self {
-            Self::Common(common) => common.try_report(),
+            Self::Common(common) => Some(common.report()),
             Self::WithinRegressionFailed { source } => {
-                staged(source.try_report(), Stage::WithinRegression)
+                staged(Some(source.report()), Stage::WithinRegression)
             }
-            Self::FTestFailed { source } => staged(source.try_report(), Stage::OverallFTest),
+            Self::FTestFailed { source } => staged(Some(source.report()), Stage::OverallFTest),
             Self::BetweenRegressionFailed { means, source } => staged(
-                source.try_report(),
+                Some(source.report()),
                 match means {
                     BetweenMeans::Entity => Stage::BetweenRegressionEntity,
                     BetweenMeans::Time => Stage::BetweenRegressionTime,
                 },
             ),
             Self::PooledRegressionFailed { source } => {
-                staged(source.try_report(), Stage::PooledRegression)
+                staged(Some(source.report()), Stage::PooledRegression)
             }
             Self::QuasiDemeanedRegressionFailed { source } => {
-                staged(source.try_report(), Stage::QuasiDemeanedRegression)
+                staged(Some(source.report()), Stage::QuasiDemeanedRegression)
             }
             Self::HausmanTestFailed { source } => {
-                staged(source.try_report(), Stage::HausmanRegression)
+                staged(Some(source.report()), Stage::HausmanRegression)
             }
             Self::VarianceComponentsMomentsSingular { method } => Some(
                 ErrorReport::new(ErrorCode::VarianceComponentsMomentsSingular)

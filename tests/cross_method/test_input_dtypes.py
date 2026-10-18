@@ -8,7 +8,6 @@ dtypeごとの許可・拒否の方針は`docs/guide/accepted-data.md`が正本�
 
 from __future__ import annotations
 
-import _error_messages_linear as linear_msgs
 import numpy as np
 import polars as pl
 import pytest
@@ -21,7 +20,6 @@ from _dtype_helpers import (
     make_frame,
     unused_column,
 )
-from _error_messages import escaped
 from _errors import raises_error
 from _helpers import ROW_TIME, with_row_time
 from econometricsmodels import (
@@ -36,7 +34,6 @@ from econometricsmodels import (
     OLSOptions,
     Probit,
     Tobit,
-    ValidationError,
     WLSOptions,
 )
 
@@ -424,10 +421,7 @@ def test_boolean_weight_is_accepted_when_all_true_and_rejected_with_false(
     with_false = roles_frame.with_columns(
         (pl.int_range(pl.len()) > 0).alias("col")
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(linear_msgs.NON_POSITIVE_WEIGHT, row=0, weight="0"),
-    ):
+    with raises_error(ErrorCode.WEIGHT_NOT_POSITIVE, row=0, value=0.0):
         ROLE_FITS["wls.weight"](with_false)
 
 

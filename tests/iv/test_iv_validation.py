@@ -585,7 +585,7 @@ def test_first_stage_augment_none_raises_validation_error(iv_dataset):
     res = our_fit(iv_dataset)
     first_stage = res.first_stage()["endog1"]
 
-    with pytest.raises(ValidationError, match="augment.*training data"):
+    with raises_error(ErrorCode.AUGMENT_REQUIRES_NEW_DATA):
         first_stage.augment()
 
     new_data = pl.DataFrame({"x1": [1.0], "z1": [0.5], "z2": [0.2]})

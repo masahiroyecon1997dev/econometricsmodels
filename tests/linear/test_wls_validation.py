@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import _error_messages as msgs
-import _error_messages_linear as linear_msgs
 import pandas as pd
 import polars as pl
 import pytest
@@ -93,13 +92,8 @@ def test_non_positive_weight_raises(dataset, bad_weight):
     n = dataset.height
     weight = [1.0] * (n - 1) + [bad_weight]
     df = dataset.with_columns(pl.Series("weight", weight))
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            linear_msgs.NON_POSITIVE_WEIGHT,
-            row=n - 1,
-            weight=msgs.rust_f64(bad_weight),
-        ),
+    with raises_error(
+        ErrorCode.WEIGHT_NOT_POSITIVE, row=n - 1, value=bad_weight
     ):
         WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
 

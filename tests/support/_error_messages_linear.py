@@ -7,35 +7,11 @@ Rust側の送出元: `engine/src/linear/common.rs`（OLS/WLS）。
 
 from __future__ import annotations
 
-NON_POSITIVE_WEIGHT = "weight at row {row} must be positive, got {weight}"
-
 # White・Breusch-Pagan・Breusch-Godfrey検定の未知の`statistic`に対する
 # `OPTION_UNKNOWN_VALUE`の`allowed`。
 ALLOWED_DIAGNOSTIC_STATISTICS = ["lm", "f"]
 
-INSUFFICIENT_OBSERVATIONS_AUX_REGRESSION = (
-    "insufficient observations for the auxiliary regression of the diagnostic "
-    "test: n={n} must be greater than the number of auxiliary regressors "
-    "including the intercept (k={k})"
-)
-
-WHITE_NO_TRAINING_DATA = (
-    "white_test() requires the original training data, which is not "
-    "retained for this result"
-)
-
-# 補助回帰が除外後も特異・推定不能など、`fit()`は通ったがWhite検定の補助回帰で
-# 失敗した場合のメッセージの先頭（原因の文言は状況で変わるため先頭のみ固定）。
-WHITE_AUX_REGRESSION_PREFIX = "computation failed: White test:"
-
 # Breusch-Pagan検定。`variables`の型の誤りは`TypeError`（`extract_column_list`）。
-BP_NO_TRAINING_DATA = (
-    "breusch_pagan_test() requires the original training data, which is not "
-    "retained for this result"
-)
-
-BP_AUX_REGRESSION_PREFIX = "computation failed: Breusch-Pagan test:"
-
 VARIABLES_NOT_A_LIST = (
     "'variables' must be a list of column names (e.g. variables=[\"x1\"]), "
     "got {type_name}"
@@ -43,9 +19,4 @@ VARIABLES_NOT_A_LIST = (
 
 VARIABLES_ELEMENT_NOT_STR = (
     "'variables[{index}]' must be a str column name, got {type_name}"
-)
-
-BG_NO_TRAINING_DATA = (
-    "breusch_godfrey_test() requires the original training data, which is "
-    "not retained for this result"
 )

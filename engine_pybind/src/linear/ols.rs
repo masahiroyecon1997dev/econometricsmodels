@@ -28,7 +28,7 @@ use crate::shared::column_extraction::{
     extract_column_list, extract_dataframe, extract_f64_column, extract_f64_columns,
     extract_model_x_columns, extract_time_order_ranks, x_column_names,
 };
-use crate::shared::errors::{legacy_validation_error, unknown_option_value};
+use crate::shared::errors::{unknown_option_value, user_error};
 use crate::shared::mat_conversion::mat_to_vec;
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
@@ -38,6 +38,7 @@ use crate::shared::option_values::{
 use crate::shared::validation::{
     validate_common_roles, validate_no_duplicate_within_role, validate_x_non_empty,
 };
+use engine::shared::error_catalog::{ErrorCode, ParamValue};
 
 /// Estimation options for OLS.
 ///
@@ -477,12 +478,10 @@ impl OLSResult {
                 (df, predicted)
             }
             None => {
-                let source = self.training_data.clone().ok_or_else(|| {
-                    legacy_validation_error(
-                        "augment(new_data=None) requires the original training data, which \
-                         is not retained for this result",
-                    )
-                })?;
+                let source = self
+                    .training_data
+                    .clone()
+                    .ok_or_else(|| user_error(ErrorCode::AugmentRequiresNewData, Vec::new()))?;
                 (source, self.fitted_values.clone())
             }
         };
@@ -511,9 +510,9 @@ impl OLSResult {
     fn white_test(&self, statistic: &str) -> PyResult<WhiteTestOutput> {
         let version = parse_statistic_version(statistic)?;
         let df = self.training_data.as_ref().ok_or_else(|| {
-            legacy_validation_error(
-                "white_test() requires the original training data, which is not retained \
-                 for this result",
+            user_error(
+                ErrorCode::TrainingDataNotRetained,
+                vec![("method", ParamValue::from("white_test"))],
             )
         })?;
 
@@ -569,9 +568,9 @@ impl OLSResult {
             .map(|ob| extract_column_list(ob, "variables"))
             .transpose()?;
         let df = self.training_data.as_ref().ok_or_else(|| {
-            legacy_validation_error(
-                "breusch_pagan_test() requires the original training data, which is not \
-                 retained for this result",
+            user_error(
+                ErrorCode::TrainingDataNotRetained,
+                vec![("method", ParamValue::from("breusch_pagan_test"))],
             )
         })?;
 
@@ -644,9 +643,9 @@ impl OLSResult {
         };
         let version = parse_statistic_version(&statistic)?;
         let df = self.training_data.as_ref().ok_or_else(|| {
-            legacy_validation_error(
-                "breusch_godfrey_test() requires the original training data, which is not \
-                 retained for this result",
+            user_error(
+                ErrorCode::TrainingDataNotRetained,
+                vec![("method", ParamValue::from("breusch_godfrey_test"))],
             )
         })?;
 

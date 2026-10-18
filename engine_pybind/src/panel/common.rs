@@ -10,7 +10,6 @@ use engine::panel::common::PanelError;
 use engine::shared::error_catalog::{ErrorCode, ParamValue};
 use pyo3::{PyErr, PyResult};
 
-use crate::linear::common::least_squares_error_is_computation_error;
 use crate::shared::errors::{
     common_error_to_pyerr, legacy_computation_error, legacy_validation_error, report_to_pyerr,
     unknown_option_value, user_error,
@@ -222,18 +221,14 @@ pub(crate) fn panel_error_to_pyerr(err: PanelError) -> PyErr {
         | PanelError::AmemiyaRequiresWithinVariation { .. } => legacy_validation_error(message),
         PanelError::NonPositiveIdiosyncraticVariance { .. }
         | PanelError::VarianceComponentsMomentsSingular { .. } => legacy_computation_error(message),
-        PanelError::WithinRegressionFailed { source }
-        | PanelError::FTestFailed { source }
-        | PanelError::BetweenRegressionFailed { source, .. }
-        | PanelError::PooledRegressionFailed { source }
-        | PanelError::QuasiDemeanedRegressionFailed { source }
-        | PanelError::HausmanTestFailed { source } => {
-            if least_squares_error_is_computation_error(&source) {
-                legacy_computation_error(message)
-            } else {
-                legacy_validation_error(message)
-            }
-        }
+        // 回帰の包みは、原因が必ずカタログに移っているため`try_report()`が常に`Some`を返し、
+        // ここには来ない（`_`で受けずに網羅するために残している）。
+        PanelError::WithinRegressionFailed { .. }
+        | PanelError::FTestFailed { .. }
+        | PanelError::BetweenRegressionFailed { .. }
+        | PanelError::PooledRegressionFailed { .. }
+        | PanelError::QuasiDemeanedRegressionFailed { .. }
+        | PanelError::HausmanTestFailed { .. } => legacy_computation_error(message),
     }
 }
 

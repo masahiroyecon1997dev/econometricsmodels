@@ -27,7 +27,6 @@ import pytest
 import statsmodels.api as sm
 from _assertions import assert_argument_case_insensitive, assert_close
 from _constants import DATA_DIR
-from _error_messages import escaped
 from _errors import raises_error
 from _helpers import (
     CASE_SPELLINGS,
@@ -45,7 +44,6 @@ from econometricsmodels import (
     ErrorCode,
     IVOptions,
     OLSOptions,
-    ValidationError,
 )
 from statsmodels.stats.diagnostic import acorr_breusch_godfrey
 
@@ -487,11 +485,12 @@ def test_observation_count_at_the_boundary():
     _ref_close(lm.statistic, sm_lm, "n=k+m+1/lm")
     _ref_close_p(lm.p_value, sm_lm_p, "n=k+m+1/lm_p_value")
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            linear_msgs.INSUFFICIENT_OBSERVATIONS_AUX_REGRESSION, n=10, k=10
-        ),
+    with raises_error(
+        ErrorCode.INSUFFICIENT_OBSERVATIONS_FOR_DIAGNOSTIC,
+        test="BREUSCH_GODFREY",
+        n_obs=10,
+        n_params=10,
+        min_obs=11,
     ):
         fitted.breusch_godfrey_test("t", 8)
 
@@ -499,7 +498,13 @@ def test_observation_count_at_the_boundary():
 def test_huge_nlags_is_reported_as_too_few_observations(ar1):
     """巨大な`nlags`でもオーバーフローせず観測数不足として報告される。"""
     fitted = OLS(ar1, y="y", x=["x"]).fit()
-    with pytest.raises(ValidationError, match="insufficient observations"):
+    with raises_error(
+        ErrorCode.INSUFFICIENT_OBSERVATIONS_FOR_DIAGNOSTIC,
+        test="BREUSCH_GODFREY",
+        n_obs=ar1.height,
+        n_params=2**62 + 2,
+        min_obs=2**62 + 3,
+    ):
         fitted.breusch_godfrey_test("t", 2**62)
 
 
@@ -524,8 +529,8 @@ def test_result_without_training_data_raises_validation_error():
     ).fit()
     first_stage = res.first_stage()["endog1"]
 
-    with pytest.raises(
-        ValidationError, match=escaped(linear_msgs.BG_NO_TRAINING_DATA)
+    with raises_error(
+        ErrorCode.TRAINING_DATA_NOT_RETAINED, method="breusch_godfrey_test"
     ):
         first_stage.breusch_godfrey_test("t", 1)
 

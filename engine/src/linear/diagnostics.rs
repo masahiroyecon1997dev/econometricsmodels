@@ -16,7 +16,7 @@ use faer::Mat;
 use faer::prelude::SolveLstsq;
 use statrs::distribution::{ChiSquared, ContinuousCDF, FisherSnedecor};
 
-use super::common::LeastSquaresError;
+use super::common::{DiagnosticTest, LeastSquaresError};
 use super::ols::{CovType, OlsEstimator, OlsInput};
 use crate::shared::covariance::time_ordering;
 use crate::shared::error::CommonError;
@@ -80,15 +80,15 @@ pub type BreuschPaganTest = AuxRegressionTest;
 /// # Errors
 /// - いずれかの列の長さが`residuals`と一致しない: `CommonError::DimensionMismatch`
 /// - 除外後に定数以外の補助回帰の項が1つも残らない（全ての`x`が定数）:
-///   `CommonError::ComputationFailed`
+///   `LeastSquaresError`の診断系バリアント
 /// - 観測数`n`が補助回帰の列数（定数を含む`q + 1`）以下:
 ///   `LeastSquaresError::InsufficientObservationsForAuxRegression`
 /// - 補助回帰の設計行列が除外後も特異（全カテゴリのダミーと定数の組み合わせ等）、
-///   または条件数が悪く推定できない: `CommonError::ComputationFailed`
+///   または条件数が悪く推定できない: `LeastSquaresError`の診断系バリアント
 ///   （元のモデルの`SingularMatrix`と区別するため、White検定の補助回帰であることを
 ///   メッセージに含める）
 /// - 補助回帰の`R²`が非有限、または1（残差の二乗が定数、または補助回帰で完全に説明され
-///   てF統計量が定義できない）: `CommonError::ComputationFailed`
+///   てF統計量が定義できない）: `LeastSquaresError`の診断系バリアント
 ///
 /// # パニックについて
 /// `x_names.len() != x_columns.len()`は`engine_pybind`の実装バグでしか起こらない内部契約
@@ -102,7 +102,7 @@ pub fn white_test(
     check_column_lengths(x_columns, residuals.len())?;
 
     let (kept, dropped_terms) = build_white_aux_terms(x_columns, x_names);
-    squared_residual_aux_test("White test", kept, dropped_terms, residuals)
+    squared_residual_aux_test(DiagnosticTest::White, kept, dropped_terms, residuals)
 }
 
 /// Breusch-Pagan検定（不均一分散の検定、Koenkerの標準化版）。残差の二乗を、利用者が選んだ
@@ -136,7 +136,7 @@ pub fn breusch_pagan_test(
         .zip(z_columns.iter().cloned())
         .collect();
     let (kept, dropped_terms) = select_aux_terms(candidates, |_| false);
-    squared_residual_aux_test("Breusch-Pagan test", kept, dropped_terms, residuals)
+    squared_residual_aux_test(DiagnosticTest::BreuschPagan, kept, dropped_terms, residuals)
 }
 
 /// いずれかの列の長さが`n`と一致しない場合に`DimensionMismatch`を返す。
@@ -160,7 +160,7 @@ fn check_column_lengths(columns: &[Vec<f64>], n: usize) -> Result<(), LeastSquar
 /// 補助回帰の各列は標準化してから回帰する（`R²`は変わらず、列のスケールや平均の大きさによる
 /// 誤った失敗を避けるため）。
 fn squared_residual_aux_test(
-    test: &str,
+    test: DiagnosticTest,
     kept: Vec<(String, Vec<f64>)>,
     dropped_terms: Vec<String>,
     residuals: &[f64],
@@ -168,14 +168,12 @@ fn squared_residual_aux_test(
     let n = residuals.len();
     let q = kept.len();
     if q == 0 {
-        return Err(CommonError::ComputationFailed(format!(
-            "{test}: no non-constant auxiliary regressors remain (all of the variables are \
-             constant)"
-        ))
-        .into());
+        return Err(LeastSquaresError::DiagnosticVariablesConstant { test });
     }
     if n <= q + 1 {
-        return Err(LeastSquaresError::InsufficientObservationsForAuxRegression { n, k: q + 1 });
+        return Err(
+            LeastSquaresError::InsufficientObservationsForAuxRegression { test, n, k: q + 1 },
+        );
     }
 
     let (aux_names, aux_columns): (Vec<String>, Vec<Vec<f64>>) = kept.into_iter().unzip();
@@ -186,7 +184,15 @@ fn squared_residual_aux_test(
         .iter()
         .map(|column| standardize(column, test))
         .collect::<Result<Vec<_>, _>>()?;
+    // 非有限の残差（または二乗がオーバーフローする大きな残差）のまま補助回帰に渡すと、
+    // 共線性とは無関係に係数の共分散が数値的に特異と判定され、原因を取り違えるエラーになる。
+    if residuals.iter().any(|u| !u.is_finite()) {
+        return Err(LeastSquaresError::DiagnosticStatisticUndefined { test });
+    }
     let squared_residuals: Vec<f64> = residuals.iter().map(|u| u * u).collect();
+    if squared_residuals.iter().any(|v| !v.is_finite()) {
+        return Err(LeastSquaresError::DiagnosticVariableDegenerate { test });
+    }
     let input = OlsInput::from_columns(
         &squared_residuals,
         &aux_columns,
@@ -210,10 +216,10 @@ fn squared_residual_aux_test(
     // ときだけ。`q >= 1`と`n > q + 1`（`f_df_denom >= 1`）は上で検証済みのため到達不能で、
     // `unwrap`を避けるための`Result`化に過ぎない。
     let lm_p_value = ChiSquared::new(q_f)
-        .map_err(|e| CommonError::ComputationFailed(e.to_string()))?
+        .map_err(|e| CommonError::internal(e.to_string()))?
         .sf(lm_statistic);
     let f_p_value = FisherSnedecor::new(q_f, f_df_denom as f64)
-        .map_err(|e| CommonError::ComputationFailed(e.to_string()))?
+        .map_err(|e| CommonError::internal(e.to_string()))?
         .sf(f_statistic);
 
     let mut aux_terms = Vec::with_capacity(q + 1);
@@ -273,10 +279,10 @@ pub struct BreuschGodfreyTest {
 /// - いずれかの列・`time_order`の長さが`residuals`と一致しない: `CommonError::DimensionMismatch`
 /// - 観測数`n`が補助回帰の列数`k + nlags`以下:
 ///   `LeastSquaresError::InsufficientObservationsForAuxRegression`
-/// - 補助回帰の設計行列が特異（ラグが`X`と共線等）: `CommonError::ComputationFailed`
+/// - 補助回帰の設計行列が特異（ラグが`X`と共線等）: `LeastSquaresError`の診断系バリアント
 ///   （元のモデルの`SingularMatrix`と区別するため、補助回帰であることをメッセージに含める）
 /// - 残差が全て0、補助回帰が残差を完全に説明する、または統計量が非有限:
-///   `CommonError::ComputationFailed`
+///   `LeastSquaresError`の診断系バリアント
 ///
 /// # パニックについて
 /// `time_order`に`NaN`が無いことが前提（`engine_pybind`が順位に変換済み）。
@@ -306,17 +312,22 @@ pub fn breusch_godfrey_test(
     let m = usize::try_from(nlags).unwrap_or(usize::MAX);
     let k_aux = k.saturating_add(m);
     if n <= k_aux {
-        return Err(LeastSquaresError::InsufficientObservationsForAuxRegression { n, k: k_aux });
+        return Err(
+            LeastSquaresError::InsufficientObservationsForAuxRegression {
+                test: DiagnosticTest::BreuschGodfrey,
+                n,
+                k: k_aux,
+            },
+        );
     }
 
     let order = time_ordering(time_order, n);
     let sorted_resid: Vec<f64> = order.iter().map(|&i| residuals[i]).collect();
     let ssr_restricted: f64 = sorted_resid.iter().map(|u| u * u).sum();
     if !ssr_restricted.is_finite() || ssr_restricted <= 0.0 {
-        return Err(CommonError::ComputationFailed(
-            "Breusch-Godfrey test: the residuals are all zero or not finite".to_string(),
-        )
-        .into());
+        return Err(LeastSquaresError::DiagnosticStatisticUndefined {
+            test: DiagnosticTest::BreuschGodfrey,
+        });
     }
 
     let mut aux = allocate_aux_matrix(n, k_aux)?;
@@ -334,8 +345,12 @@ pub fn breusch_godfrey_test(
     scale_columns_by_norm(&mut aux)?;
 
     crate::shared::parallelism::ensure_serial();
-    let qr = checked_col_piv_qr(&aux)
-        .map_err(|_| aux_fit_error("Breusch-Godfrey test", LeastSquaresError::SingularMatrix))?;
+    let qr = checked_col_piv_qr(&aux).map_err(|_| {
+        aux_fit_error(
+            DiagnosticTest::BreuschGodfrey,
+            LeastSquaresError::SingularMatrix,
+        )
+    })?;
     let params = qr.solve_lstsq(Mat::from_fn(n, 1, |t, _| sorted_resid[t]));
     let fitted = &aux * &params;
     let ssr_unrestricted: f64 = (0..n)
@@ -346,12 +361,9 @@ pub fn breusch_godfrey_test(
     if !ssr_unrestricted.is_finite()
         || ssr_unrestricted <= (k_aux as f64) * f64::EPSILON * ssr_restricted
     {
-        return Err(CommonError::ComputationFailed(
-            "Breusch-Godfrey test: the auxiliary regression fits the residuals exactly or is \
-             not finite, so the test statistic is undefined"
-                .to_string(),
-        )
-        .into());
+        return Err(LeastSquaresError::DiagnosticStatisticUndefined {
+            test: DiagnosticTest::BreuschGodfrey,
+        });
     }
 
     let n_f = n as f64;
@@ -365,10 +377,10 @@ pub fn breusch_godfrey_test(
     // `ChiSquared::new`・`FisherSnedecor::new`が失敗するのは自由度が0以下（または非有限）の
     // ときだけ。`m >= 1`と`n > k + m`（`f_df_denom >= 1`）は上で検証済みのため到達不能。
     let lm_p_value = ChiSquared::new(m_f)
-        .map_err(|e| CommonError::ComputationFailed(e.to_string()))?
+        .map_err(|e| CommonError::internal(e.to_string()))?
         .sf(lm_statistic);
     let f_p_value = FisherSnedecor::new(m_f, f_df_denom as f64)
-        .map_err(|e| CommonError::ComputationFailed(e.to_string()))?
+        .map_err(|e| CommonError::internal(e.to_string()))?
         .sf(f_statistic);
 
     Ok(BreuschGodfreyTest {
@@ -390,13 +402,11 @@ pub fn breusch_godfrey_test(
 /// 複製を内部で確保する（失敗を検知できない）ため、その分もここで確保できるか試す。
 ///
 /// # Errors
-/// 要素数がオーバーフローする、または確保できない: `CommonError::ComputationFailed`
+/// 要素数がオーバーフローする、または確保できない: `LeastSquaresError`の診断系バリアント
 fn allocate_aux_matrix(n: usize, k_aux: usize) -> Result<Mat<f64>, LeastSquaresError> {
-    let too_large = || {
-        LeastSquaresError::from(CommonError::ComputationFailed(format!(
-            "Breusch-Godfrey test: cannot allocate the auxiliary regression matrix \
-             ({n} rows x {k_aux} columns); use a smaller nlags"
-        )))
+    let too_large = || LeastSquaresError::BreuschGodfreyMatrixTooLarge {
+        n_obs: n,
+        n_columns: k_aux,
     };
     let cells = n.checked_mul(k_aux).ok_or_else(too_large)?;
     let mut matrix = Mat::<f64>::new();
@@ -413,7 +423,7 @@ fn allocate_aux_matrix(n: usize, k_aux: usize) -> Result<Mat<f64>, LeastSquaresE
 /// 追加の確保を避けるためその場で書き換える。
 ///
 /// # Errors
-/// 行列に非有限の値が含まれる: `CommonError::ComputationFailed`
+/// 行列に非有限の値が含まれる: `LeastSquaresError`の診断系バリアント
 fn scale_columns_by_norm(matrix: &mut Mat<f64>) -> Result<(), LeastSquaresError> {
     let (n, k) = (matrix.nrows(), matrix.ncols());
     // 最大絶対値で先に割ってからノルムを取る（要素が1e154超・1e-162未満でも二乗和が
@@ -433,10 +443,9 @@ fn scale_columns_by_norm(matrix: &mut Mat<f64>) -> Result<(), LeastSquaresError>
         })
         .collect();
     if norms.iter().any(|v| !v.is_finite()) {
-        return Err(CommonError::ComputationFailed(
-            "Breusch-Godfrey test: the auxiliary regression contains non-finite values".to_string(),
-        )
-        .into());
+        return Err(LeastSquaresError::DiagnosticVariableDegenerate {
+            test: DiagnosticTest::BreuschGodfrey,
+        });
     }
     for (j, &norm) in norms.iter().enumerate() {
         if norm > 0.0 {
@@ -543,18 +552,14 @@ fn term_uses_variable(label: &str, var: &str) -> bool {
 ///
 /// # Errors
 /// 標準偏差が0または非有限（二乗項のオーバーフロー等）で標準化できない:
-/// `CommonError::ComputationFailed`
-fn standardize(column: &[f64], test: &str) -> Result<Vec<f64>, LeastSquaresError> {
+/// `LeastSquaresError`の診断系バリアント
+fn standardize(column: &[f64], test: DiagnosticTest) -> Result<Vec<f64>, LeastSquaresError> {
     let n = column.len() as f64;
     let mean = column.iter().sum::<f64>() / n;
     let variance = column.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n;
     let sd = variance.sqrt();
     if !(sd.is_finite() && sd > 0.0) {
-        return Err(CommonError::ComputationFailed(format!(
-            "{test}: an auxiliary regressor has zero or non-finite variance (the values may \
-             be too large or too close to constant)"
-        ))
-        .into());
+        return Err(LeastSquaresError::DiagnosticVariableDegenerate { test });
     }
     Ok(column.iter().map(|v| (v - mean) / sd).collect())
 }
@@ -566,43 +571,25 @@ fn standardize(column: &[f64], test: &str) -> Result<Vec<f64>, LeastSquaresError
 /// `R²`は理論上`[0, 1]`だが、丸め誤差で`-ε`になりうるため下側だけ`0.0`に丸める。
 ///
 /// # Errors
-/// `raw`が非有限または`>= 1.0`: `CommonError::ComputationFailed`
-fn validate_aux_r_squared(raw: f64, test: &str) -> Result<f64, LeastSquaresError> {
+/// `raw`が非有限または`>= 1.0`: `LeastSquaresError`の診断系バリアント
+fn validate_aux_r_squared(raw: f64, test: DiagnosticTest) -> Result<f64, LeastSquaresError> {
     if !raw.is_finite() || raw >= 1.0 {
-        return Err(CommonError::ComputationFailed(format!(
-            "{test}: auxiliary regression R-squared is {raw}, so the test statistic is \
-             undefined"
-        ))
-        .into());
+        return Err(LeastSquaresError::DiagnosticStatisticUndefined { test });
     }
     Ok(raw.max(0.0))
 }
 
-/// 補助回帰の`fit`・ランク判定が返したエラーを、診断検定（`test`: 検定名）の文脈が分かる
-/// メッセージに言い換える。元のモデルの`fit()`は通過済みなので、そのままだと「利用者の
-/// モデルが共線」と誤解される。
-fn aux_fit_error(test: &str, err: LeastSquaresError) -> LeastSquaresError {
+/// 補助回帰の`fit`・ランク判定が返したエラーを、診断検定（`test`）の補助回帰の失敗として包む。
+/// 元のモデルの`fit()`は通過済みなので、そのまま返すと「利用者のモデルが原因」と誤解されるため、
+/// `stage`（補助回帰）を付けて報告する。実装の誤りを表す`Internal`だけは、利用者の入力と
+/// 無関係なので包まずそのまま返す。
+fn aux_fit_error(test: DiagnosticTest, err: LeastSquaresError) -> LeastSquaresError {
     match err {
-        LeastSquaresError::SingularMatrix => CommonError::ComputationFailed(format!(
-            "{test}: the auxiliary regression design matrix is singular (its regressors are \
-             linearly dependent)"
-        ))
-        .into(),
-        LeastSquaresError::Common(CommonError::ComputationFailed(message)) => {
-            CommonError::ComputationFailed(format!(
-                "{test}: the auxiliary regression failed: {message}"
-            ))
-            .into()
-        }
-        // 診断検定の失敗の型付けは診断検定の移行でまとめて行う。それまでは、補助回帰の
-        // 数値的な特異性も従来どおり検定の文脈つきの失敗として返す。
-        LeastSquaresError::Common(err @ CommonError::NearSingularMatrix { .. }) => {
-            CommonError::ComputationFailed(format!(
-                "{test}: the auxiliary regression failed: {err}"
-            ))
-            .into()
-        }
-        other => other,
+        err @ LeastSquaresError::Common(CommonError::Internal { .. }) => err,
+        err => LeastSquaresError::AuxiliaryRegressionFailed {
+            test,
+            source: Box::new(err),
+        },
     }
 }
 
@@ -631,6 +618,8 @@ fn columns_equal(a: &[f64], b: &[f64], scale: f64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared::error::ErrorInfo;
+    use crate::shared::error_catalog::{ErrorCode, Stage};
 
     // 15観測。`x1`・`x2`は連続、`d`は0/1のダミー。`resid_*`は`y = 1 + 0.8*x1 - 0.5*x2 +
     // 0.6*d + e*(1 + 0.5*|x1|)`をOLSした残差（ケースCは定数なしのモデル）。期待値は
@@ -890,7 +879,11 @@ mod tests {
         let err = breusch_godfrey_test(&x, true, &RESID_TIME_ORDER, &time, 12).unwrap_err();
         assert_eq!(
             err,
-            LeastSquaresError::InsufficientObservationsForAuxRegression { n: 15, k: 15 }
+            LeastSquaresError::InsufficientObservationsForAuxRegression {
+                test: DiagnosticTest::BreuschGodfrey,
+                n: 15,
+                k: 15
+            }
         );
     }
 
@@ -919,10 +912,12 @@ mod tests {
             1,
         )
         .unwrap_err();
-        assert!(matches!(
+        assert_eq!(
             err,
-            LeastSquaresError::Common(CommonError::ComputationFailed(_))
-        ));
+            LeastSquaresError::DiagnosticStatisticUndefined {
+                test: DiagnosticTest::BreuschGodfrey
+            }
+        );
     }
 
     #[test]
@@ -984,10 +979,20 @@ mod tests {
         assert!(
             matches!(
                 &err,
-                LeastSquaresError::Common(CommonError::ComputationFailed(m))
-                    if m.starts_with("Breusch-Godfrey test:")
+                LeastSquaresError::AuxiliaryRegressionFailed {
+                    test: DiagnosticTest::BreuschGodfrey,
+                    ..
+                }
             ),
             "{err:?}"
+        );
+        let report = err.report();
+        assert_eq!(report.code(), ErrorCode::DesignMatrixSingular);
+        assert_eq!(
+            report.stage(),
+            Some(&Stage::DiagnosticAuxiliaryRegression {
+                test: "BREUSCH_GODFREY".to_string()
+            })
         );
     }
 
@@ -1000,10 +1005,12 @@ mod tests {
             r[4] = f64::NAN;
             r
         }] {
-            assert!(matches!(
+            assert_eq!(
                 breusch_godfrey_test(&x, true, &resid, &time, 1).unwrap_err(),
-                LeastSquaresError::Common(CommonError::ComputationFailed(_))
-            ));
+                LeastSquaresError::DiagnosticStatisticUndefined {
+                    test: DiagnosticTest::BreuschGodfrey
+                }
+            );
         }
     }
 
@@ -1023,16 +1030,18 @@ mod tests {
     fn allocate_aux_matrix_returns_computation_error_instead_of_aborting() {
         // 要素数のオーバーフロー。
         let err = allocate_aux_matrix(usize::MAX / 2, 4).unwrap_err();
-        assert!(matches!(
+        assert_eq!(
             err,
-            LeastSquaresError::Common(CommonError::ComputationFailed(ref m))
-                if m.contains("cannot allocate") && m.contains("smaller nlags")
-        ));
+            LeastSquaresError::BreuschGodfreyMatrixTooLarge {
+                n_obs: usize::MAX / 2,
+                n_columns: 4
+            }
+        );
         // オーバーフローしないが、アドレス空間を超えて確保できないサイズ（2^55バイト）。
         let err = allocate_aux_matrix(1 << 40, 1 << 12).unwrap_err();
         assert!(matches!(
             err,
-            LeastSquaresError::Common(CommonError::ComputationFailed(_))
+            LeastSquaresError::BreuschGodfreyMatrixTooLarge { .. }
         ));
     }
 
@@ -1139,12 +1148,12 @@ mod tests {
     fn breusch_pagan_fails_when_every_variable_is_constant_or_none_is_given() {
         let ones = [1.0_f64; 15];
         for (z, z_names) in [(cols(&[&ones]), names(&["one"])), (Vec::new(), Vec::new())] {
-            match breusch_pagan_test(&z, &z_names, &RESID_A).unwrap_err() {
-                LeastSquaresError::Common(CommonError::ComputationFailed(message)) => {
-                    assert!(message.starts_with("Breusch-Pagan test:"), "{message}");
+            assert_eq!(
+                breusch_pagan_test(&z, &z_names, &RESID_A).unwrap_err(),
+                LeastSquaresError::DiagnosticVariablesConstant {
+                    test: DiagnosticTest::BreuschPagan
                 }
-                other => panic!("unexpected error: {other:?}"),
-            }
+            );
         }
     }
 
@@ -1168,7 +1177,11 @@ mod tests {
         let z_names = names(&["x1", "x2"]);
         assert_eq!(
             breusch_pagan_test(&z, &z_names, &RESID_A[..3]).unwrap_err(),
-            LeastSquaresError::InsufficientObservationsForAuxRegression { n: 3, k: 3 }
+            LeastSquaresError::InsufficientObservationsForAuxRegression {
+                test: DiagnosticTest::BreuschPagan,
+                n: 3,
+                k: 3
+            }
         );
 
         let z = cols(&[&X1[..4], &X2[..4]]);
@@ -1186,13 +1199,13 @@ mod tests {
             &RESID_A,
         )
         .unwrap_err();
-        match err {
-            LeastSquaresError::Common(CommonError::ComputationFailed(message)) => {
-                assert!(message.starts_with("Breusch-Pagan test:"), "{message}");
-                assert!(message.contains("auxiliary regression"), "{message}");
+        assert_eq!(
+            err,
+            LeastSquaresError::AuxiliaryRegressionFailed {
+                test: DiagnosticTest::BreuschPagan,
+                source: Box::new(LeastSquaresError::SingularMatrix),
             }
-            other => panic!("unexpected error: {other:?}"),
-        }
+        );
     }
 
     #[test]
@@ -1201,14 +1214,21 @@ mod tests {
         let signs: Vec<f64> = (0..15)
             .map(|i| if i % 2 == 0 { 1.0 } else { -1.0 })
             .collect();
-        assert!(matches!(
+        assert_eq!(
             breusch_pagan_test(&cols(&[&X1]), &names(&["x1"]), &signs).unwrap_err(),
-            LeastSquaresError::Common(CommonError::ComputationFailed(_))
-        ));
+            LeastSquaresError::DiagnosticStatisticUndefined {
+                test: DiagnosticTest::BreuschPagan
+            }
+        );
 
         let mut resid = RESID_A;
         resid[3] = f64::NAN;
-        assert!(breusch_pagan_test(&cols(&[&X1]), &names(&["x1"]), &resid).is_err());
+        assert_eq!(
+            breusch_pagan_test(&cols(&[&X1]), &names(&["x1"]), &resid).unwrap_err(),
+            LeastSquaresError::DiagnosticStatisticUndefined {
+                test: DiagnosticTest::BreuschPagan
+            }
+        );
     }
 
     #[test]
@@ -1284,10 +1304,12 @@ mod tests {
     fn white_fails_when_all_independent_variables_are_constant() {
         let ones = [1.0_f64; 15];
         let err = white_test(&cols(&[&ones]), &names(&["one"]), &RESID_A).unwrap_err();
-        assert!(matches!(
+        assert_eq!(
             err,
-            LeastSquaresError::Common(CommonError::ComputationFailed(_))
-        ));
+            LeastSquaresError::DiagnosticVariablesConstant {
+                test: DiagnosticTest::White
+            }
+        );
     }
 
     #[test]
@@ -1311,7 +1333,11 @@ mod tests {
         let err = white_test(&cols(&[x1, x2]), &names(&["x1", "x2"]), &RESID_A[..6]).unwrap_err();
         assert_eq!(
             err,
-            LeastSquaresError::InsufficientObservationsForAuxRegression { n: 6, k: 6 }
+            LeastSquaresError::InsufficientObservationsForAuxRegression {
+                test: DiagnosticTest::White,
+                n: 6,
+                k: 6
+            }
         );
     }
 
@@ -1324,8 +1350,10 @@ mod tests {
         assert!(
             matches!(
                 &err,
-                LeastSquaresError::Common(CommonError::ComputationFailed(message))
-                    if message.starts_with("White test:")
+                LeastSquaresError::AuxiliaryRegressionFailed {
+                    test: DiagnosticTest::White,
+                    ..
+                }
             ),
             "{err:?}"
         );
@@ -1337,10 +1365,12 @@ mod tests {
         let resid = [1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0];
         let x1 = &X1[..10];
         let err = white_test(&cols(&[x1]), &names(&["x1"]), &resid).unwrap_err();
-        assert!(matches!(
+        assert_eq!(
             err,
-            LeastSquaresError::Common(CommonError::ComputationFailed(_))
-        ));
+            LeastSquaresError::DiagnosticStatisticUndefined {
+                test: DiagnosticTest::White
+            }
+        );
     }
 
     #[test]
@@ -1402,10 +1432,12 @@ mod tests {
         let mut resid = RESID_A;
         resid[3] = f64::NAN;
         let err = white_test(&cols(&[&X1, &X2]), &names(&["x1", "x2"]), &resid).unwrap_err();
-        assert!(matches!(
+        assert_eq!(
             err,
-            LeastSquaresError::Common(CommonError::ComputationFailed(_))
-        ));
+            LeastSquaresError::DiagnosticStatisticUndefined {
+                test: DiagnosticTest::White
+            }
+        );
     }
 
     #[test]
@@ -1442,30 +1474,49 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             err,
-            LeastSquaresError::InsufficientObservationsForAuxRegression { n: 5, k: 5 }
+            LeastSquaresError::InsufficientObservationsForAuxRegression {
+                test: DiagnosticTest::White,
+                n: 5,
+                k: 5
+            }
         );
     }
 
     #[test]
     fn validate_aux_r_squared_rejects_undefined_values_and_clamps_rounding_noise() {
         for raw in [1.0, 1.5, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-            assert!(
-                matches!(
-                    validate_aux_r_squared(raw, "White test"),
-                    Err(LeastSquaresError::Common(CommonError::ComputationFailed(_)))
-                ),
+            assert_eq!(
+                validate_aux_r_squared(raw, DiagnosticTest::White),
+                Err(LeastSquaresError::DiagnosticStatisticUndefined {
+                    test: DiagnosticTest::White
+                }),
                 "raw={raw}"
             );
         }
-        assert_eq!(validate_aux_r_squared(0.25, "White test").unwrap(), 0.25);
-        assert_eq!(validate_aux_r_squared(-1e-17, "White test").unwrap(), 0.0);
+        assert_eq!(
+            validate_aux_r_squared(0.25, DiagnosticTest::White).unwrap(),
+            0.25
+        );
+        assert_eq!(
+            validate_aux_r_squared(-1e-17, DiagnosticTest::White).unwrap(),
+            0.0
+        );
     }
 
     #[test]
     fn standardize_rejects_zero_and_non_finite_variance() {
-        assert!(standardize(&[2.0, 2.0, 2.0], "White test").is_err());
-        assert!(standardize(&[1.0, f64::INFINITY, 3.0], "White test").is_err());
-        let z = standardize(&[1.0, 2.0, 3.0], "White test").unwrap();
+        let degenerate = LeastSquaresError::DiagnosticVariableDegenerate {
+            test: DiagnosticTest::White,
+        };
+        assert_eq!(
+            standardize(&[2.0, 2.0, 2.0], DiagnosticTest::White).unwrap_err(),
+            degenerate
+        );
+        assert_eq!(
+            standardize(&[1.0, f64::INFINITY, 3.0], DiagnosticTest::White).unwrap_err(),
+            degenerate
+        );
+        let z = standardize(&[1.0, 2.0, 3.0], DiagnosticTest::White).unwrap();
         assert!((z.iter().sum::<f64>()).abs() < 1e-12);
         assert!((z.iter().map(|v| v * v).sum::<f64>() / 3.0 - 1.0).abs() < 1e-12);
     }
@@ -1475,50 +1526,50 @@ mod tests {
         // |x| > 1e154だと二乗が`inf`になり標準化できない。
         let huge: Vec<f64> = X1.iter().map(|v| v * 1e200).collect();
         let err = white_test(&cols(&[&huge]), &names(&["x1"]), &RESID_A).unwrap_err();
-        assert!(matches!(
+        assert_eq!(
             err,
-            LeastSquaresError::Common(CommonError::ComputationFailed(_))
-        ));
+            LeastSquaresError::DiagnosticVariableDegenerate {
+                test: DiagnosticTest::White
+            }
+        );
     }
 
     #[test]
-    fn aux_fit_error_adds_the_diagnostic_context_to_computation_failures_only() {
-        let singular = aux_fit_error("White test", LeastSquaresError::SingularMatrix);
-        assert!(matches!(
-            &singular,
-            LeastSquaresError::Common(CommonError::ComputationFailed(m)) if m.starts_with("White test:")
-        ));
-
-        let wrapped = aux_fit_error(
-            "White test",
-            CommonError::ComputationFailed("near-singular".into()).into(),
-        );
-        assert!(matches!(
-            &wrapped,
-            LeastSquaresError::Common(CommonError::ComputationFailed(m))
-                if m.starts_with("White test:") && m.contains("near-singular")
-        ));
-
-        // 他のエラーはそのまま通す。
+    fn aux_fit_error_wraps_numerical_singularity_of_the_auxiliary_regression_only() {
+        let singular = aux_fit_error(DiagnosticTest::White, LeastSquaresError::SingularMatrix);
         assert_eq!(
-            aux_fit_error("White test", LeastSquaresError::InvalidNlags { nlags: 0 }),
-            LeastSquaresError::InvalidNlags { nlags: 0 }
+            singular,
+            LeastSquaresError::AuxiliaryRegressionFailed {
+                test: DiagnosticTest::White,
+                source: Box::new(LeastSquaresError::SingularMatrix),
+            }
         );
+        let report = singular.report();
+        assert_eq!(report.code(), ErrorCode::DesignMatrixSingular);
+        assert_eq!(
+            report.stage(),
+            Some(&Stage::DiagnosticAuxiliaryRegression {
+                test: "WHITE".to_string()
+            })
+        );
+        assert!(report.validate().is_ok());
 
-        // 補助回帰の数値的な特異性も、検定の文脈つきの失敗にする。
         let near_singular = aux_fit_error(
-            "White test",
+            DiagnosticTest::BreuschPagan,
             LeastSquaresError::Common(CommonError::NearSingularMatrix {
                 matrix: crate::shared::error::MatrixKind::CoefficientCovariance,
             }),
         );
-        assert!(
-            matches!(
-                &near_singular,
-                LeastSquaresError::Common(CommonError::ComputationFailed(m))
-                    if m.starts_with("White test: the auxiliary regression failed:")
-            ),
-            "{near_singular:?}"
+        let report = near_singular.report();
+        assert_eq!(report.code(), ErrorCode::MatrixNearSingular);
+        assert!(report.stage().is_some());
+        assert!(report.validate().is_ok());
+
+        // 実装の誤り（`Internal`）は利用者の入力と無関係なので、包まずそのまま通す。
+        let internal = LeastSquaresError::Common(CommonError::internal("bug"));
+        assert_eq!(
+            aux_fit_error(DiagnosticTest::White, internal),
+            LeastSquaresError::Common(CommonError::internal("bug"))
         );
     }
 

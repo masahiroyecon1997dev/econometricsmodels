@@ -64,10 +64,7 @@ use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
-use crate::linear::common::{
-    CovKind, least_squares_error_is_computation_error, parse_cov_kind, require_hac_time,
-    resolve_cov_type,
-};
+use crate::linear::common::{CovKind, parse_cov_kind, require_hac_time, resolve_cov_type};
 use crate::linear::ols::{OLSResult, ols_estimator_to_result};
 use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
@@ -129,15 +126,11 @@ pub(crate) fn iv_error_to_pyerr(err: IvError) -> PyErr {
         // 分類: パラメータの不正ではなく、計算過程（反復推定）で発覚した問題のため
         // `ComputationError`（`engine/src/iv/CLAUDE.md`参照）。
         IvError::GmmNonConvergence { .. } => legacy_computation_error(message),
-        IvError::FirstStageFailed { source, .. }
-        | IvError::SecondStageFailed { source }
-        | IvError::HausmanRegressionFailed { source } => {
-            if least_squares_error_is_computation_error(&source) {
-                legacy_computation_error(message)
-            } else {
-                legacy_validation_error(message)
-            }
-        }
+        // 段階ごとの包みは、原因が必ずカタログに移っているため`try_report()`が常に`Some`を返し、
+        // ここには来ない（`_`で受けずに網羅するために残している）。
+        IvError::FirstStageFailed { .. }
+        | IvError::SecondStageFailed { .. }
+        | IvError::HausmanRegressionFailed { .. } => legacy_computation_error(message),
     }
 }
 

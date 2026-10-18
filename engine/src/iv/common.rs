@@ -40,7 +40,7 @@ use thiserror::Error;
 
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
-use crate::shared::error::{ClusterSetting, CommonError, catalog_display, staged};
+use crate::shared::error::{ClusterSetting, CommonError, ErrorInfo, catalog_display, staged};
 use crate::shared::error_catalog::{ErrorCode, ErrorReport, Stage};
 use crate::shared::validation::{
     GMM_MAX_ITER_MIN, MAX_ITER_LIMIT, validate_cluster_count_covers_slopes, validate_cluster_groups,
@@ -182,16 +182,16 @@ impl IvError {
     #[must_use]
     pub fn try_report(&self) -> Option<ErrorReport> {
         match self {
-            Self::Common(common) => common.try_report(),
+            Self::Common(common) => Some(common.report()),
             Self::FirstStageFailed { endog_name, source } => staged(
-                source.try_report(),
+                Some(source.report()),
                 Stage::FirstStage {
                     endog_name: endog_name.clone(),
                 },
             ),
-            Self::SecondStageFailed { source } => staged(source.try_report(), Stage::SecondStage),
+            Self::SecondStageFailed { source } => staged(Some(source.report()), Stage::SecondStage),
             Self::HausmanRegressionFailed { source } => {
-                staged(source.try_report(), Stage::WuHausmanRegression)
+                staged(Some(source.report()), Stage::WuHausmanRegression)
             }
             Self::InvalidGmmMaxIter { max_iter } => Some(
                 ErrorReport::new(ErrorCode::GmmMaxIterOutOfRange)
@@ -903,14 +903,6 @@ mod tests {
         let report = second_stage.try_report().expect("cataloged");
         assert_eq!(report.code(), ErrorCode::DesignMatrixSingular);
         assert_eq!(report.stage(), Some(&Stage::SecondStage));
-        // 移行していない`source`の包みは`None`。
-        let unmigrated = IvError::SecondStageFailed {
-            source: LeastSquaresError::WeightDimensionMismatch {
-                y_rows: 1,
-                weight_rows: 2,
-            },
-        };
-        assert!(unmigrated.try_report().is_none());
     }
 
     #[test]

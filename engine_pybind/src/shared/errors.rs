@@ -284,24 +284,16 @@ pub(crate) fn legacy_computation_error(message: impl Into<String>) -> PyErr {
 /// 実装する（`least_squares_error_to_pyerr`と同じ理由、`engine_pybind/src/linear/
 /// CLAUDE.md`参照）。
 pub(crate) fn common_error_to_pyerr(err: CommonError) -> PyErr {
-    if let Some(report) = err.try_report() {
-        return report_to_pyerr(&report);
-    }
-    match err {
-        // `try_report()`で処理済みのバリアントは先頭で返るためここには来ない（`_`で受けずに網羅するために残している）。
-        CommonError::DimensionMismatch { .. }
-        | CommonError::InsufficientObservations { .. }
-        | CommonError::NoRegressors { .. }
-        | CommonError::InvalidConfidenceLevel { .. }
-        | CommonError::MissingClusterColumn { .. }
-        | CommonError::ClusterDimensionMismatch { .. }
-        | CommonError::InsufficientClusters { .. }
-        | CommonError::InsufficientClustersForInference { .. }
-        | CommonError::InvalidHacLags { .. } => legacy_validation_error(err.to_string()),
-        CommonError::NearSingularMatrix { .. }
-        | CommonError::Internal { .. }
-        | CommonError::ComputationFailed(_) => legacy_computation_error(err.to_string()),
-    }
+    to_pyerr(&err)
+}
+
+/// `engine_pybind`自身が検出した、実装の誤りでだけ起きる状態を`INTERNAL_ERROR`にする。
+pub(crate) fn internal_error(detail: impl Into<String>) -> PyErr {
+    let detail: String = detail.into();
+    user_error(
+        ErrorCode::InternalError,
+        vec![("detail", ParamValue::from(detail.trim_end_matches('.')))],
+    )
 }
 
 #[cfg(test)]

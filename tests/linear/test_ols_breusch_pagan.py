@@ -43,12 +43,10 @@ from _tolerances import TOLERANCES
 from econometricsmodels import (
     OLS,
     BreuschPaganTestResult,
-    ComputationError,
     DiagnosticResult,
     ErrorCode,
     IVOptions,
     OLSOptions,
-    ValidationError,
 )
 from statsmodels.stats.diagnostic import het_breuschpagan
 
@@ -526,11 +524,12 @@ def test_too_few_observations_for_the_auxiliary_regression_raises():
         pl.DataFrame({"y": y, "x1": x1, "x2": x2}), y="y", x=["x1"]
     ).fit()
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            linear_msgs.INSUFFICIENT_OBSERVATIONS_AUX_REGRESSION, n=3, k=3
-        ),
+    with raises_error(
+        ErrorCode.INSUFFICIENT_OBSERVATIONS_FOR_DIAGNOSTIC,
+        test="BREUSCH_PAGAN",
+        n_obs=3,
+        n_params=3,
+        min_obs=4,
     ):
         fitted.breusch_pagan_test(["x1", "x2"])
 
@@ -549,11 +548,12 @@ def test_sample_size_is_checked_against_the_variables_that_remain_after_dropping
     assert ok.df == 2
     assert ok.df_denom == 1
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            linear_msgs.INSUFFICIENT_OBSERVATIONS_AUX_REGRESSION, n=3, k=3
-        ),
+    with raises_error(
+        ErrorCode.INSUFFICIENT_OBSERVATIONS_FOR_DIAGNOSTIC,
+        test="BREUSCH_PAGAN",
+        n_obs=3,
+        n_params=3,
+        min_obs=4,
     ):
         OLS(df.head(3), y="y", x=["x1"]).fit().breusch_pagan_test(
             ["one", "x1", "x2"]
@@ -581,8 +581,8 @@ def test_result_without_training_data_raises_validation_error():
     ).fit()
     first_stage = res.first_stage()["endog1"]
 
-    with pytest.raises(
-        ValidationError, match=escaped(linear_msgs.BP_NO_TRAINING_DATA)
+    with raises_error(
+        ErrorCode.TRAINING_DATA_NOT_RETAINED, method="breusch_pagan_test"
     ):
         first_stage.breusch_pagan_test()
 
@@ -592,10 +592,26 @@ def test_all_constant_variables_raise_computation_error():
     df = df.with_columns(pl.lit(3.0).alias("c"))
     fitted = OLS(df, y="y", x=["x1"]).fit()
 
-    with pytest.raises(
-        ComputationError, match=escaped(linear_msgs.BP_AUX_REGRESSION_PREFIX)
+    with raises_error(
+        ErrorCode.DIAGNOSTIC_VARIABLES_CONSTANT, test="BREUSCH_PAGAN"
     ):
         fitted.breusch_pagan_test(["c"])
+
+
+def test_auxiliary_regression_that_fits_exactly_raises_computation_error():
+    """`variables`に残差の二乗そのものを渡すと補助回帰は完全適合（`R²=1`）になり、
+    検定統計量が定義できない。"""
+    df, _ = _synthetic("baseline")
+    fitted = OLS(df, y="y", x=["x1"]).fit()
+    augmented = fitted.augment(df)
+    residual = (augmented["y"] - augmented["predicted"]).to_numpy()
+    df = df.with_columns(pl.Series("e2", residual**2))
+    fitted = OLS(df, y="y", x=["x1"]).fit()
+
+    with raises_error(
+        ErrorCode.DIAGNOSTIC_STATISTIC_UNDEFINED, test="BREUSCH_PAGAN"
+    ):
+        fitted.breusch_pagan_test(["e2"])
 
 
 def test_collinear_but_not_identical_variables_raise_computation_error():
@@ -605,8 +621,10 @@ def test_collinear_but_not_identical_variables_raise_computation_error():
     df = df.with_columns((pl.col("x1") * 2.0).alias("x1_double"))
     fitted = OLS(df, y="y", x=["x1"]).fit()
 
-    with pytest.raises(
-        ComputationError, match=escaped(linear_msgs.BP_AUX_REGRESSION_PREFIX)
+    with raises_error(
+        ErrorCode.DESIGN_MATRIX_SINGULAR,
+        stage="DIAGNOSTIC_AUXILIARY_REGRESSION",
+        test="BREUSCH_PAGAN",
     ):
         fitted.breusch_pagan_test(["x1", "x1_double"])
 
@@ -628,8 +646,10 @@ def test_full_set_of_dummies_without_intercept_raises_computation_error():
     )
     fitted = OLS(df, y="y", x=["x1"]).fit()
 
-    with pytest.raises(
-        ComputationError, match=escaped(linear_msgs.BP_AUX_REGRESSION_PREFIX)
+    with raises_error(
+        ErrorCode.DESIGN_MATRIX_SINGULAR,
+        stage="DIAGNOSTIC_AUXILIARY_REGRESSION",
+        test="BREUSCH_PAGAN",
     ):
         fitted.breusch_pagan_test(["d1", "d2", "d3"])
 

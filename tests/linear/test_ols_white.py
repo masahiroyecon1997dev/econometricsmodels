@@ -27,7 +27,6 @@ import pytest
 import statsmodels.api as sm
 from _assertions import assert_argument_case_insensitive, assert_close
 from _constants import DATA_DIR
-from _error_messages import escaped
 from _errors import raises_error
 from _helpers import (
     CASE_SPELLINGS,
@@ -39,12 +38,10 @@ from _helpers import (
 from _tolerances import TOLERANCES
 from econometricsmodels import (
     OLS,
-    ComputationError,
     DiagnosticResult,
     ErrorCode,
     IVOptions,
     OLSOptions,
-    ValidationError,
     WhiteTestResult,
 )
 from statsmodels.stats.diagnostic import het_white
@@ -366,11 +363,12 @@ def test_too_few_observations_for_the_auxiliary_regression_raises():
     df, x_cols = _synthetic("baseline_df1")
     fitted = OLS(df, y="y", x=x_cols).fit()
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            linear_msgs.INSUFFICIENT_OBSERVATIONS_AUX_REGRESSION, n=5, k=10
-        ),
+    with raises_error(
+        ErrorCode.INSUFFICIENT_OBSERVATIONS_FOR_DIAGNOSTIC,
+        test="WHITE",
+        n_obs=5,
+        n_params=10,
+        min_obs=11,
     ):
         fitted.white_test()
 
@@ -387,11 +385,12 @@ def test_observation_count_equal_to_the_auxiliary_columns_raises():
         pl.DataFrame({"y": y, "x1": x1, "x2": x2}), y="y", x=["x1", "x2"]
     ).fit()
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            linear_msgs.INSUFFICIENT_OBSERVATIONS_AUX_REGRESSION, n=6, k=6
-        ),
+    with raises_error(
+        ErrorCode.INSUFFICIENT_OBSERVATIONS_FOR_DIAGNOSTIC,
+        test="WHITE",
+        n_obs=6,
+        n_params=6,
+        min_obs=7,
     ):
         fitted.white_test()
 
@@ -408,11 +407,12 @@ def test_sample_size_is_checked_against_the_terms_that_remain_after_dropping():
     assert ok.df == 4
     assert ok.df_denom == 1
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            linear_msgs.INSUFFICIENT_OBSERVATIONS_AUX_REGRESSION, n=5, k=5
-        ),
+    with raises_error(
+        ErrorCode.INSUFFICIENT_OBSERVATIONS_FOR_DIAGNOSTIC,
+        test="WHITE",
+        n_obs=5,
+        n_params=5,
+        min_obs=6,
     ):
         OLS(df.head(5), y="y", x=["x1", "d"]).fit().white_test()
 
@@ -438,8 +438,8 @@ def test_result_without_training_data_raises_validation_error():
     ).fit()
     first_stage = res.first_stage()["endog1"]
 
-    with pytest.raises(
-        ValidationError, match=escaped(linear_msgs.WHITE_NO_TRAINING_DATA)
+    with raises_error(
+        ErrorCode.TRAINING_DATA_NOT_RETAINED, method="white_test"
     ):
         first_stage.white_test()
 
@@ -450,7 +450,21 @@ def test_all_constant_regressors_raise_computation_error():
     options = OLSOptions(include_intercept=False)
     fitted = OLS(df, y="y", x=["c"], options=options).fit()
 
-    with pytest.raises(ComputationError, match="White test"):
+    with raises_error(ErrorCode.DIAGNOSTIC_VARIABLES_CONSTANT, test="WHITE"):
+        fitted.white_test()
+
+
+def test_squaring_overflow_raises_computation_error():
+    """説明変数が極端に大きいと、補助回帰の二乗項の標準化で分散が非有限になる
+    （`fit()`自体は通る。定数項があると`fit()`が先に特異と判定するため切片なし）。"""
+    rng = np.random.default_rng(1)
+    n = 60
+    x = rng.normal(size=n)
+    df = pl.DataFrame({"y": 1.0 + x + rng.normal(size=n), "x": x * 1e100})
+    options = OLSOptions(include_intercept=False)
+    fitted = OLS(df, y="y", x=["x"], options=options).fit()
+
+    with raises_error(ErrorCode.DIAGNOSTIC_VARIABLE_DEGENERATE, test="WHITE"):
         fitted.white_test()
 
 
@@ -472,9 +486,10 @@ def test_full_set_of_dummies_without_intercept_raises_computation_error():
     options = OLSOptions(include_intercept=False)
     fitted = OLS(df, y="y", x=["d1", "d2", "d3"], options=options).fit()
 
-    with pytest.raises(
-        ComputationError,
-        match=escaped(linear_msgs.WHITE_AUX_REGRESSION_PREFIX),
+    with raises_error(
+        ErrorCode.DESIGN_MATRIX_SINGULAR,
+        stage="DIAGNOSTIC_AUXILIARY_REGRESSION",
+        test="WHITE",
     ):
         fitted.white_test()
 

@@ -7,7 +7,7 @@ use polars::prelude::{Column, DataFrame};
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
-use super::errors::legacy_computation_error;
+use super::errors::internal_error;
 use super::validation::validate_no_existing_column;
 
 /// `source`に`values`を`column_name`という名前の新しい列として付加して返す。元の列と行の順序は
@@ -29,16 +29,15 @@ pub fn append_predicted_column(
 ) -> PyResult<PyDataFrame> {
     validate_no_existing_column(&source, column_name)?;
     if values.len() != source.height() {
-        return Err(legacy_computation_error(format!(
-            "internal error: cannot append column '{column_name}' with {} values to data with \
-             {} rows",
+        return Err(internal_error(format!(
+            "cannot append column '{column_name}' with {} values to data with {} rows",
             values.len(),
             source.height()
         )));
     }
     source
         .with_column(Column::new(column_name.into(), values))
-        .map_err(|err| legacy_computation_error(err.to_string()))?;
+        .map_err(|err| internal_error(err.to_string()))?;
     Ok(PyDataFrame(source))
 }
 

@@ -20,10 +20,7 @@ use pyo3::{PyErr, PyResult};
 
 use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{extract_optional_cluster_groups, extract_time_order_ranks};
-use crate::shared::errors::{
-    common_error_to_pyerr, legacy_computation_error, legacy_validation_error, report_to_pyerr,
-    unknown_option_value, user_error,
-};
+use crate::shared::errors::{to_pyerr, unknown_option_value, user_error};
 use crate::shared::validation::reject_unused_option;
 
 /// `engine::linear::common::LeastSquaresError`をPython例外に変換する。
@@ -35,41 +32,7 @@ use crate::shared::validation::reject_unused_option;
 ///
 /// 対応表は`docs/spec/ols-spec.md`「engine/engine_pybind間のデータ受け渡し・エラー変換」参照。
 pub(crate) fn least_squares_error_to_pyerr(err: LeastSquaresError) -> PyErr {
-    if let Some(report) = err.try_report() {
-        return report_to_pyerr(&report);
-    }
-    match err {
-        // `try_report()`で処理済みのバリアントは先頭で返るためここには来ない（`_`で受けずに網羅するために残している）。
-        LeastSquaresError::Common(common) => common_error_to_pyerr(common),
-        LeastSquaresError::WeightDimensionMismatch { .. }
-        | LeastSquaresError::NonPositiveWeight { .. }
-        | LeastSquaresError::InvalidNlags { .. }
-        | LeastSquaresError::InsufficientObservationsForAuxRegression { .. } => {
-            legacy_validation_error(err.to_string())
-        }
-        LeastSquaresError::SingularMatrix => legacy_computation_error(err.to_string()),
-    }
-}
-
-/// `LeastSquaresError`が`ComputationError`（計算過程で発覚した問題）に分類されるか。
-/// `ValidationError`（入力・パラメータが不正）との判定基準は[`least_squares_error_to_pyerr`]と
-/// 同一にする（`SingularMatrix`、または`CommonError`の計算系`ComputationFailed`・`NearSingularMatrix`・`Internal`のみ`true`）。
-///
-/// `least_squares_error_to_pyerr`自体を呼ばずこの判定だけを独立させているのは、
-/// `IvError::FirstStageFailed`/`SecondStageFailed`（`engine_pybind/src/iv/common.rs`）が
-/// 内側の`LeastSquaresError`から分類だけを借りつつ、Pythonに渡すメッセージは
-/// `IvError`自身の`to_string()`（文脈付き）を使いたいため（`source.to_string()`を
-/// 使う`least_squares_error_to_pyerr`をそのまま呼ぶとメッセージの文脈が失われる）。
-pub(crate) fn least_squares_error_is_computation_error(err: &LeastSquaresError) -> bool {
-    matches!(
-        err,
-        LeastSquaresError::SingularMatrix
-            | LeastSquaresError::Common(
-                engine::shared::error::CommonError::ComputationFailed(_)
-                    | engine::shared::error::CommonError::NearSingularMatrix { .. }
-                    | engine::shared::error::CommonError::Internal { .. },
-            )
-    )
+    to_pyerr(&err)
 }
 
 /// `cov_type`の種類。列名や`hac_lags`を持たない、文字列だけから決まる値。

@@ -31,7 +31,7 @@ use thiserror::Error;
 
 use crate::shared::covariance::{cluster_correction, cluster_meat, sandwich};
 use crate::shared::design_matrix::design_matrix_element;
-use crate::shared::error::{ClusterSetting, CommonError, MatrixKind, catalog_display};
+use crate::shared::error::{ClusterSetting, CommonError, ErrorInfo, MatrixKind, catalog_display};
 use crate::shared::error_catalog::{ErrorCode, ErrorReport};
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference;
@@ -241,7 +241,7 @@ impl MleError {
     #[must_use]
     pub fn try_report(&self) -> Option<ErrorReport> {
         match self {
-            Self::Common(common) => common.try_report(),
+            Self::Common(common) => Some(common.report()),
             Self::InvalidMaxIter { max_iter } => Some(
                 ErrorReport::new(ErrorCode::MaxIterOutOfRange)
                     .param("value", *max_iter)

@@ -19,8 +19,8 @@
 
 use thiserror::Error;
 
-use crate::shared::error::{CommonError, MatrixKind, catalog_display};
-use crate::shared::error_catalog::{ErrorCode, ErrorReport};
+use crate::shared::error::{CommonError, ErrorInfo, MatrixKind, staged_report};
+use crate::shared::error_catalog::{ErrorCode, ErrorReport, Stage};
 use crate::shared::linear_algebra::RankDeficient;
 
 /// OLS/WLSの計算過程で発生しうるエラー。
@@ -39,13 +39,14 @@ pub enum LeastSquaresError {
     #[error(transparent)]
     Common(#[from] CommonError),
 
-    /// WLSの重み配列とyの行数が一致しない。
-    #[error("dimension mismatch: y has {y_rows} rows but weight has {weight_rows} rows")]
+    /// WLSの重み配列とyの行数が一致しない。`engine_pybind`は同じ`DataFrame`の列から作るため、
+    /// Python APIからは起こらない（起きたら実装の誤りなので`INTERNAL_ERROR`として報告する）。
+    #[error("{}", self.catalog_message())]
     WeightDimensionMismatch { y_rows: usize, weight_rows: usize },
 
     /// WLSの重みが0以下（NaNを含む）。analytic weightとして扱うため正の値のみ許容する
     /// （`docs/spec/wls-spec.md`「API引数」参照）。
-    #[error("weight at row {row} must be positive, got {weight}")]
+    #[error("{}", self.catalog_message())]
     NonPositiveWeight { row: usize, weight: f64 },
 
     /// 設計行列が特異（完全な多重共線性等）。
@@ -58,13 +59,57 @@ pub enum LeastSquaresError {
 
     /// 事後診断検定（White検定等）の補助回帰に対して観測数が足りない。補助回帰の列数`k`
     /// （定数を含む）は元のモデルの説明変数の数から決まり、元のモデルの`n > k`より大きく
-    /// なりうるため、`CommonError::InsufficientObservations`とは別のメッセージにする。
-    #[error(
-        "insufficient observations for the auxiliary regression of the diagnostic test: \
-         n={n} must be greater than the number of auxiliary regressors including the \
-         intercept (k={k})"
-    )]
-    InsufficientObservationsForAuxRegression { n: usize, k: usize },
+    /// なりうるため、`CommonError::InsufficientObservations`とは別のエラーにする。
+    #[error("{}", self.catalog_message())]
+    InsufficientObservationsForAuxRegression {
+        test: DiagnosticTest,
+        n: usize,
+        k: usize,
+    },
+
+    /// 診断検定の補助回帰の変数がすべて定数（定数を除くと回帰変数が残らない）。
+    #[error("{}", self.catalog_message())]
+    DiagnosticVariablesConstant { test: DiagnosticTest },
+
+    /// 診断検定の補助回帰の変数の分散が0または非有限（値が大きすぎる、または定数に近すぎる）。
+    #[error("{}", self.catalog_message())]
+    DiagnosticVariableDegenerate { test: DiagnosticTest },
+
+    /// 診断検定の統計量が定義できない（補助回帰が完全に当てはまる、残差が0、非有限の値等）。
+    #[error("{}", self.catalog_message())]
+    DiagnosticStatisticUndefined { test: DiagnosticTest },
+
+    /// Breusch-Godfrey検定の補助回帰の行列（`n_obs`行`n_columns`列）が大きすぎて確保できない。
+    #[error("{}", self.catalog_message())]
+    BreuschGodfreyMatrixTooLarge { n_obs: usize, n_columns: usize },
+
+    /// 診断検定の補助回帰が失敗した。元のモデルの`fit()`は通過済みのため、`source`の原因に
+    /// 補助回帰であることを示す`stage`を付けて報告する。
+    #[error("{}", self.catalog_message())]
+    AuxiliaryRegressionFailed {
+        test: DiagnosticTest,
+        source: Box<LeastSquaresError>,
+    },
+}
+
+/// 事後診断検定の種類。エラーの`test`パラメータ（`stage`の補助値を含む）になる。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiagnosticTest {
+    White,
+    BreuschPagan,
+    BreuschGodfrey,
+}
+
+impl DiagnosticTest {
+    /// `test`パラメータの値。
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::White => "WHITE",
+            Self::BreuschPagan => "BREUSCH_PAGAN",
+            Self::BreuschGodfrey => "BREUSCH_GODFREY",
+        }
+    }
 }
 
 impl From<RankDeficient> for LeastSquaresError {
@@ -80,25 +125,64 @@ impl From<RankDeficient> for LeastSquaresError {
     }
 }
 
-impl LeastSquaresError {
-    /// カタログの`code`・`params`で表せるバリアントの[`ErrorReport`]。まだ移していないバリアントは`None`。
-    ///
-    /// 全バリアントを移し終えたら、`ErrorInfo`の実装（`report()`）に置き換える。
-    #[must_use]
-    pub fn try_report(&self) -> Option<ErrorReport> {
+impl ErrorInfo for LeastSquaresError {
+    fn report(&self) -> ErrorReport {
         match self {
-            Self::Common(common) => common.try_report(),
-            Self::InvalidNlags { nlags } => {
-                Some(ErrorReport::new(ErrorCode::NlagsNotPositive).param("value", *nlags))
+            Self::Common(common) => common.report(),
+            Self::WeightDimensionMismatch {
+                y_rows,
+                weight_rows,
+            } => ErrorReport::new(ErrorCode::InternalError).param(
+                "detail",
+                format!("y has {y_rows} rows but weight has {weight_rows} rows"),
+            ),
+            Self::NonPositiveWeight { row, weight } => {
+                ErrorReport::new(ErrorCode::WeightNotPositive)
+                    .param("row", *row)
+                    .param("value", *weight)
             }
-            Self::SingularMatrix => Some(ErrorReport::new(ErrorCode::DesignMatrixSingular)),
-            _ => None,
+            Self::SingularMatrix => ErrorReport::new(ErrorCode::DesignMatrixSingular),
+            Self::InvalidNlags { nlags } => {
+                ErrorReport::new(ErrorCode::NlagsNotPositive).param("value", *nlags)
+            }
+            Self::InsufficientObservationsForAuxRegression { test, n, k } => {
+                ErrorReport::new(ErrorCode::InsufficientObservationsForDiagnostic)
+                    .param("test", test.as_str())
+                    .param("n_obs", *n)
+                    .param("n_params", *k)
+                    .param("min_obs", k + 1)
+            }
+            Self::DiagnosticVariablesConstant { test } => {
+                ErrorReport::new(ErrorCode::DiagnosticVariablesConstant)
+                    .param("test", test.as_str())
+            }
+            Self::DiagnosticVariableDegenerate { test } => {
+                ErrorReport::new(ErrorCode::DiagnosticVariableDegenerate)
+                    .param("test", test.as_str())
+            }
+            Self::DiagnosticStatisticUndefined { test } => {
+                ErrorReport::new(ErrorCode::DiagnosticStatisticUndefined)
+                    .param("test", test.as_str())
+            }
+            Self::BreuschGodfreyMatrixTooLarge { n_obs, n_columns } => {
+                ErrorReport::new(ErrorCode::BreuschGodfreyMatrixTooLarge)
+                    .param("n_obs", *n_obs)
+                    .param("n_columns", *n_columns)
+            }
+            Self::AuxiliaryRegressionFailed { test, source } => staged_report(
+                source.report(),
+                Stage::DiagnosticAuxiliaryRegression {
+                    test: test.as_str().to_string(),
+                },
+            ),
         }
     }
+}
 
-    /// カタログに移したバリアントの`Display`が使う`message`。
+impl LeastSquaresError {
+    /// `Display`が使う`message`。
     fn catalog_message(&self) -> String {
-        catalog_display(self.try_report())
+        self.report().message()
     }
 }
 
@@ -121,33 +205,90 @@ mod tests {
 
     #[test]
     fn nlags_error_maps_to_the_catalog_and_wrapped_common_errors_delegate() {
-        let report = LeastSquaresError::InvalidNlags { nlags: 0 }
-            .try_report()
-            .expect("cataloged");
+        let report = LeastSquaresError::InvalidNlags { nlags: 0 }.report();
         assert_eq!(report.code(), ErrorCode::NlagsNotPositive);
         assert!(report.validate().is_ok());
         assert_eq!(report.message(), "nlags must be a positive integer, got 0.");
 
         let wrapped = LeastSquaresError::Common(CommonError::InvalidHacLags { hac_lags: -1, n: 5 });
+        assert_eq!(wrapped.report().code(), ErrorCode::HacLagsOutOfRange);
         assert_eq!(
-            wrapped.try_report().expect("cataloged").code(),
-            ErrorCode::HacLagsOutOfRange
-        );
-        assert_eq!(
-            LeastSquaresError::SingularMatrix
-                .try_report()
-                .expect("cataloged")
-                .code(),
+            LeastSquaresError::SingularMatrix.report().code(),
             ErrorCode::DesignMatrixSingular
         );
-        assert!(
-            LeastSquaresError::WeightDimensionMismatch {
-                y_rows: 1,
-                weight_rows: 2
-            }
-            .try_report()
-            .is_none()
+    }
+
+    #[test]
+    fn every_variant_maps_to_a_valid_catalog_report() {
+        let cases = [
+            (
+                LeastSquaresError::WeightDimensionMismatch {
+                    y_rows: 1,
+                    weight_rows: 2,
+                },
+                ErrorCode::InternalError,
+            ),
+            (
+                LeastSquaresError::NonPositiveWeight {
+                    row: 3,
+                    weight: 0.0,
+                },
+                ErrorCode::WeightNotPositive,
+            ),
+            (
+                LeastSquaresError::InsufficientObservationsForAuxRegression {
+                    test: DiagnosticTest::White,
+                    n: 5,
+                    k: 6,
+                },
+                ErrorCode::InsufficientObservationsForDiagnostic,
+            ),
+            (
+                LeastSquaresError::DiagnosticVariablesConstant {
+                    test: DiagnosticTest::BreuschPagan,
+                },
+                ErrorCode::DiagnosticVariablesConstant,
+            ),
+            (
+                LeastSquaresError::DiagnosticVariableDegenerate {
+                    test: DiagnosticTest::White,
+                },
+                ErrorCode::DiagnosticVariableDegenerate,
+            ),
+            (
+                LeastSquaresError::DiagnosticStatisticUndefined {
+                    test: DiagnosticTest::BreuschGodfrey,
+                },
+                ErrorCode::DiagnosticStatisticUndefined,
+            ),
+            (
+                LeastSquaresError::BreuschGodfreyMatrixTooLarge {
+                    n_obs: 1_000_000,
+                    n_columns: 999_999,
+                },
+                ErrorCode::BreuschGodfreyMatrixTooLarge,
+            ),
+        ];
+        for (err, code) in cases {
+            let report = err.report();
+            assert_eq!(report.code(), code);
+            assert!(report.validate().is_ok(), "{code:?}");
+            assert_eq!(err.to_string(), report.message());
+        }
+        // 診断の補助回帰の失敗は、原因の`code`に補助回帰の`stage`を付ける。
+        let err = LeastSquaresError::AuxiliaryRegressionFailed {
+            test: DiagnosticTest::BreuschGodfrey,
+            source: Box::new(LeastSquaresError::SingularMatrix),
+        };
+        let report = err.report();
+        assert_eq!(report.code(), ErrorCode::DesignMatrixSingular);
+        assert_eq!(
+            report.stage(),
+            Some(&Stage::DiagnosticAuxiliaryRegression {
+                test: "BREUSCH_GODFREY".to_string()
+            })
         );
+        assert!(report.validate().is_ok());
     }
 
     #[test]
@@ -162,7 +303,7 @@ mod tests {
                 weight_rows: 8
             }
             .to_string(),
-            "dimension mismatch: y has 10 rows but weight has 8 rows"
+            "An internal error occurred: y has 10 rows but weight has 8 rows. This should not happen."
         );
         assert_eq!(
             LeastSquaresError::NonPositiveWeight {
@@ -170,7 +311,7 @@ mod tests {
                 weight: 0.0
             }
             .to_string(),
-            "weight at row 3 must be positive, got 0"
+            "The weight at row 3 (0-based) must be positive, got 0.0."
         );
         assert_eq!(
             LeastSquaresError::SingularMatrix.to_string(),

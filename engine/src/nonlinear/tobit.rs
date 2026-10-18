@@ -3395,7 +3395,7 @@ mod tests {
         let report = err.try_report().expect("cataloged");
         assert_eq!(
             report.message(),
-            "Not enough observations: 2 observations for 2 coefficients (including the intercept); at least 3 are needed."
+            "Not enough observations: 2 observations for 2 parameters; at least 3 are needed."
         );
     }
 

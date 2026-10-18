@@ -1286,7 +1286,7 @@ pub static CATALOG: &[ErrorSpec] = &[
                 in_text: true,
             },
         ],
-        message: r#"Not enough observations: {n_obs} observations for {n_params} coefficients (including the intercept); at least {min_obs} are needed."#,
+        message: r#"Not enough observations: {n_obs} observations for {n_params} parameters; at least {min_obs} are needed."#,
         hint: Some(r#"Add observations or remove regressors."#),
         stage_allowed: true,
     },

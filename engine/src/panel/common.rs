@@ -1421,8 +1421,8 @@ mod tests {
         assert_eq!(
             err.to_string(),
             "between-regression on time means least-squares estimation for variance component \
-             failed: Not enough observations: 2 observations for 3 coefficients \
-             (including the intercept); at least 4 are needed."
+             failed: Not enough observations: 2 observations for 3 parameters; \
+             at least 4 are needed."
         );
         assert_eq!(
             err,

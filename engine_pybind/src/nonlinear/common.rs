@@ -4,8 +4,8 @@
 //! `<系統>/common.rs`に置く（`engine_pybind/src/linear/common.rs`と同じ位置づけ）。
 //!
 //! `MleError`の`Common`バリアント（`engine::shared::error::CommonError`、`linear`系統の
-//! `LeastSquaresError`と共有する6種のバリデーションエラー）は`crate::shared::errors::
-//! common_error_to_pyerr`に委譲する（系統ごとに同じ判定ロジックを重複させない）。
+//! `LeastSquaresError`と共有するエラー）も、`MleError`の`ErrorInfo::report()`が同じ`code`・
+//! `params`に変換するため、系統ごとに同じ判定ロジックを重複させない。
 
 use engine::nonlinear::common::{CovType, MarginalEffectsAt, MleError, SolverType};
 use polars::prelude::DataFrame;
@@ -13,10 +13,7 @@ use pyo3::prelude::*;
 
 use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::extract_optional_cluster_groups;
-use crate::shared::errors::{
-    common_error_to_pyerr, legacy_computation_error, legacy_validation_error, report_to_pyerr,
-    unknown_option_value,
-};
+use crate::shared::errors::{to_pyerr, unknown_option_value};
 use crate::shared::validation::reject_unused_option;
 
 /// `engine::nonlinear::common::MleError`をPython例外に変換する。
@@ -29,28 +26,7 @@ use crate::shared::validation::reject_unused_option;
 ///
 /// 対応表は`docs/spec/nonlinear-common.md`2章「エラー型（`MleError`、共有）」参照。
 pub(crate) fn mle_error_to_pyerr(err: MleError) -> PyErr {
-    if let Some(report) = err.try_report() {
-        return report_to_pyerr(&report);
-    }
-    match err {
-        // `try_report()`で処理済みのバリアントは先頭で返るためここには来ない（`_`で受けずに網羅するために残している）。
-        MleError::Common(common) => common_error_to_pyerr(common),
-        MleError::InvalidMaxIter { .. }
-        | MleError::InvalidTol { .. }
-        | MleError::InvalidCensoringBounds { .. }
-        | MleError::InvalidBinaryY { .. }
-        | MleError::YOutOfCensoringBounds { .. }
-        | MleError::NoUncensoredObservations { .. } => legacy_validation_error(err.to_string()),
-        MleError::NonConvergence { .. }
-        | MleError::SingularHessian
-        | MleError::SingularOpgMatrix
-        | MleError::SingularDesignMatrix
-        | MleError::SeparationDetected
-        | MleError::UncensoredIntervalTooNarrow { .. }
-        | MleError::EvaluationBudgetExceeded { .. }
-        | MleError::LineSearchFailed { .. }
-        | MleError::SeparationCheckFailed { .. } => legacy_computation_error(err.to_string()),
-    }
+    to_pyerr(&err)
 }
 
 /// `faer::Mat<f64>`を行指向の`Vec<Vec<f64>>`に変換する（`pred_table`のような小さい

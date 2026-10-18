@@ -689,16 +689,11 @@ def check_non_numeric_dtype_raises(estimator_cls):
 
 def check_non_binary_y_raises(dataset, estimator_cls, bad_value):
     """`y`が`{0.0, 1.0}`以外の値を含む場合は`ValidationError`
-    （engine側の`MleError::InvalidBinaryY`）。
+    （`OUTCOME_NOT_BINARY`）。
     """
     df = dataset.with_columns(dataset["y"].scatter(0, bad_value))
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            nonlinear_msgs.INVALID_BINARY_Y,
-            row=0,
-            value=msgs.rust_f64(bad_value),
-        ),
+    with raises_error(
+        ErrorCode.OUTCOME_NOT_BINARY, row=0, value=float(bad_value)
     ):
         estimator_cls(df, y="y", x=["x1", "x2"]).fit()
 

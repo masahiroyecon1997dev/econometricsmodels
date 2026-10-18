@@ -250,18 +250,9 @@ def test_insufficient_observations_raises(censored_dataset):
         Tobit(df, y="y", x=["x1", "x2"]).fit()
 
 
-def test_invalid_censoring_bounds_raises(censored_dataset):
-    """`lower`/`upper`が両方`None`は`ValidationError`（engine側の
-    `InvalidCensoringBounds`）。
-    """
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            nonlinear_msgs.INVALID_CENSORING_BOUNDS,
-            lower=nonlinear_msgs.format_bound(None),
-            upper=nonlinear_msgs.format_bound(None),
-        ),
-    ):
+def test_censoring_bounds_missing_raises(censored_dataset):
+    """`lower`/`upper`が両方`None`は`ValidationError`（`CENSORING_BOUNDS_MISSING`）。"""
+    with raises_error(ErrorCode.CENSORING_BOUNDS_MISSING):
         Tobit(
             censored_dataset,
             y="y",
@@ -270,36 +261,73 @@ def test_invalid_censoring_bounds_raises(censored_dataset):
         ).fit()
 
 
+@pytest.mark.parametrize("bounds", [(5.0, 5.0), (10.0, 5.0)])
+def test_censoring_bounds_not_ordered_raises(censored_dataset, bounds):
+    """`lower >= upper`は`ValidationError`（`CENSORING_BOUNDS_NOT_ORDERED`）。"""
+    lower, upper = bounds
+    with raises_error(
+        ErrorCode.CENSORING_BOUNDS_NOT_ORDERED, lower=lower, upper=upper
+    ):
+        Tobit(
+            censored_dataset,
+            y="y",
+            x=["x1", "x2"],
+            options=TobitOptions(lower=lower, upper=upper),
+        ).fit()
+
+
+def test_censoring_bound_not_finite_reports_both_bounds(censored_dataset):
+    """片側が`inf`のとき、`params`はもう片側の値を`None`も含めてそのまま返す。
+    （全パターンは`tests/cross_method/test_option_types.py`）
+    """
+    with raises_error(
+        ErrorCode.CENSORING_BOUND_NOT_FINITE, lower=float("-inf"), upper=None
+    ):
+        Tobit(
+            censored_dataset,
+            y="y",
+            x=["x1", "x2"],
+            options=TobitOptions(lower=float("-inf"), upper=None),
+        ).fit()
+
+
 def test_y_out_of_censoring_bounds_raises():
     """`y`が指定した打ち切り境界の範囲外の値を含む場合`ValidationError`
-    （engine側の`YOutOfCensoringBounds`）。
+    （`OUTCOME_OUTSIDE_CENSORING_BOUNDS`）。
     """
     df = pl.DataFrame({"y": [-1.0, 0.0, 1.0, 2.0], "x1": [1.0, 2.0, 3.0, 4.0]})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            nonlinear_msgs.Y_OUT_OF_CENSORING_BOUNDS,
-            row=0,
-            value=msgs.rust_f64(-1.0),
-            lower=nonlinear_msgs.format_bound(0.0),
-            upper=nonlinear_msgs.format_bound(None),
-        ),
+    with raises_error(
+        ErrorCode.OUTCOME_OUTSIDE_CENSORING_BOUNDS,
+        row=0,
+        value=-1.0,
+        lower=0.0,
+        upper=None,
     ):
         Tobit(df, y="y", x=["x1"], options=TobitOptions(lower=0.0)).fit()
 
 
+def test_y_above_upper_bound_raises():
+    """`upper`側の違反でも`OUTCOME_OUTSIDE_CENSORING_BOUNDS`になる。"""
+    df = pl.DataFrame({"y": [0.0, 1.0, 2.0, 5.0], "x1": [1.0, 2.0, 3.0, 4.0]})
+    with raises_error(
+        ErrorCode.OUTCOME_OUTSIDE_CENSORING_BOUNDS,
+        row=3,
+        value=5.0,
+        lower=None,
+        upper=2.0,
+    ):
+        Tobit(
+            df, y="y", x=["x1"], options=TobitOptions(lower=None, upper=2.0)
+        ).fit()
+
+
 def test_no_uncensored_observations_raises():
     """非打ち切り観測が1件も無い（全観測が`lower`ちょうど）場合`ValidationError`
-    （engine側の`NoUncensoredObservations`）。
+    （`NO_UNCENSORED_OBSERVATIONS`）。
     """
     df = pl.DataFrame({"y": [0.0, 0.0, 0.0, 0.0], "x1": [1.0, 2.0, 3.0, 4.0]})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            nonlinear_msgs.NO_UNCENSORED_OBSERVATIONS,
-            lower=nonlinear_msgs.format_bound(0.0),
-            upper=nonlinear_msgs.format_bound(None),
-        ),
+    with raises_error(
+        ErrorCode.NO_UNCENSORED_OBSERVATIONS, lower=0.0, upper=None
     ):
         Tobit(df, y="y", x=["x1"]).fit()
 

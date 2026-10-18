@@ -29,7 +29,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 - デフォルト（`lower=0.0, upper=None`）は標準的な左打ち切り0のTobit。右打ち切りのみにしたい場合は
   `lower=None`を明示的に渡す（Pythonのキーワード引数デフォルトと明示的`None`渡しの区別を利用）。
 - **打ち切り境界のバリデーション**（engine層 `TobitInput::from_columns`）:
-  - `lower`/`upper`が両方`None`、または両方`Some`で`lower >= upper`は`InvalidCensoringBounds`
+  - `lower`/`upper`が両方`None`は`CensoringBoundsMissing`、両方`Some`で`lower >= upper`は`CensoringBoundsNotOrdered`、NaN・無限大は`CensoringBoundNotFinite`
     （「境界設定自体が不正」、`ValidationError`）。
   - `y`の実測値が指定境界と矛盾する場合（`lower`指定時に`y < lower`の行、または`upper`指定時に
     `y > upper`の行がある）は`YOutOfCensoringBounds { row, value }`（「境界設定は妥当だがデータと
@@ -328,7 +328,7 @@ Tobit固有の差分:
 
 | `MleError` | Python例外 |
 |---|---|
-| `NoUncensoredObservations` / `InvalidCensoringBounds` / `YOutOfCensoringBounds` | `ValidationError` |
+| `NoUncensoredObservations` / `CensoringBoundsMissing` / `CensoringBoundsNotOrdered` / `CensoringBoundNotFinite` / `YOutOfCensoringBounds` | `ValidationError` |
 | `UncensoredIntervalTooNarrow`（`expected_uncensored`の非打ち切り区間が`σ̂`の1%未満） | `ComputationError` |
 
 - `predict()`/`marginal_effects()`の`target`引数のPython文字列は`"expected_latent"` /

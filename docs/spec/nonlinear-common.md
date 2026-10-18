@@ -236,10 +236,13 @@ Tobit固有のバリアント（打ち切り境界の検証等）も同じ`MleEr
 | `SingularOpgMatrix` | `ComputationError` | OPG行列（`Σsᵢsᵢ'`、`cov_type="opg"`）が特異。`SingularHessian`と原因が異なるため別バリアントに分離 |
 | `SeparationDetected` | `ComputationError` | 完全分離・準完全分離（有限のMLEが存在しない）を収束後に線形計画で厳密に検出（Logit/Probitのみ。`engine/src/nonlinear/separation.rs`、`logit-spec.md`3.2節） |
 | `EvaluationBudgetExceeded { budget }` | `ComputationError` | line searchの評価回数バジェット超過（1.2節） |
-| `InvalidCensoringBounds` 等（Tobit専用） | `ValidationError` | 下限≧上限等の不正な指定 |
+| `CensoringBoundsMissing`・`CensoringBoundsNotOrdered`・`CensoringBoundNotFinite`（Tobit専用） | `ValidationError` | 境界が両方`None`・下限≧上限・NaN/無限大 |
+| `InvalidBinaryY { row, value }`（Logit/Probit専用） | `ValidationError` | `y`が`{0.0, 1.0}`以外 |
+| `YOutOfCensoringBounds { row, value, lower, upper }`（Tobit専用） | `ValidationError` | `y`が打ち切り境界の外 |
+| `NoUncensoredObservations { lower, upper }`（Tobit専用） | `ValidationError` | 境界の内側に観測が1件も無い |
 
-`Common`以外の各バリアントは`engine_pybind`側で`MleError` → `PyErr`変換
-（`mle_error_to_pyerr`、`common_error_to_pyerr`に委譲）を行う。
+各バリアントは`ErrorInfo::report()`で`code`・`params`に変換され、`engine_pybind`側の
+`mle_error_to_pyerr`（`to_pyerr`）が`ValidationError`/`ComputationError`にする。
 
 ## 3. `cov_type`共通行列演算
 
@@ -358,7 +361,7 @@ MLEベースの非線形モデルは漸近理論が正規分布に基づいて�
 | モデル | オプション | 状態 |
 |---|---|---|
 | Logit / Probit | `start_params: Option<Vec<f64>>`（ユーザー指定初期値） | 未実装（見送り）。`None`時の内部初期値は1.4節のwarm start |
-| Tobit | 打ち切り方向（左/右/両側）・下限/上限値 | 確定（`TobitOptions.lower: Option<f64>`既定`Some(0.0)`・`upper: Option<f64>`既定`None`。両方`None`・`lower>=upper`は`InvalidCensoringBounds`、`y`が境界と矛盾する場合は`YOutOfCensoringBounds`） |
+| Tobit | 打ち切り方向（左/右/両側）・下限/上限値 | 確定（`TobitOptions.lower: Option<f64>`既定`Some(0.0)`・`upper: Option<f64>`既定`None`。両方`None`は`CensoringBoundsMissing`、`lower>=upper`は`CensoringBoundsNotOrdered`、NaN・無限大は`CensoringBoundNotFinite`、`y`が境界と矛盾する場合は`YOutOfCensoringBounds`） |
 | Tobit | `dist`（誤差分布） | Gaussian固定。他分布はv1では対象外 |
 | 多項ロジット | 参照カテゴリ（`base_category`等） | 着手時に決定 |
 | 順序ロジット/プロビット | 閾値パラメータ数 | オプション化しない。yのカテゴリ数（K個）から`K-1`個を自動導出する |

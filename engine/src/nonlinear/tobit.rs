@@ -157,8 +157,9 @@ impl TobitInput {
     ///
     /// # Errors
     /// - `y`といずれかの`x_columns`の長さが一致しない: `CommonError::DimensionMismatch`
-    /// - `lower`/`upper`が両方`None`、いずれかが`NaN`または無限大、または両方`Some`で
-    ///   `lower >= upper`: `MleError::InvalidCensoringBounds`
+    /// - `lower`/`upper`が両方`None`: `MleError::CensoringBoundsMissing`
+    /// - `lower`/`upper`のいずれかが`NaN`または無限大: `MleError::CensoringBoundNotFinite`
+    /// - 両方`Some`で`lower >= upper`: `MleError::CensoringBoundsNotOrdered`
     /// - `y`が指定された境界の範囲外の値を含む: `MleError::YOutOfCensoringBounds`
     ///
     /// # パニックについて
@@ -191,18 +192,18 @@ impl TobitInput {
             }
         }
 
-        // 肯定形の妥当性条件を`!`で囲み、NaNを自動的に弾く書き方
-        // （`validate_fit_preconditions`の`confidence_level`検証と同じパターン。
-        // `l >= u`のような否定形の直接比較だとNaNに対して常に`false`になり
-        // すり抜けてしまう。`is_finite()`で無限大も合わせて弾く）。
-        let bounds_valid = match (lower, upper) {
-            (None, None) => false,
-            (Some(l), None) => l.is_finite(),
-            (None, Some(u)) => u.is_finite(),
-            (Some(l), Some(u)) => l.is_finite() && u.is_finite() && l < u,
-        };
-        if !bounds_valid {
-            return Err(MleError::InvalidCensoringBounds { lower, upper });
+        // 有限性（NaN・無限大）を先に確かめ、順序の比較は有限値だけに行う
+        // （NaNは`l >= u`が常に`false`になり、順序の検査をすり抜けるため）。
+        if lower.is_none() && upper.is_none() {
+            return Err(MleError::CensoringBoundsMissing);
+        }
+        if !(lower.is_none_or(f64::is_finite) && upper.is_none_or(f64::is_finite)) {
+            return Err(MleError::CensoringBoundNotFinite { lower, upper });
+        }
+        if let (Some(l), Some(u)) = (lower, upper)
+            && l >= u
+        {
+            return Err(MleError::CensoringBoundsNotOrdered { lower: l, upper: u });
         }
 
         for (i, &value) in y.iter().enumerate() {
@@ -1608,7 +1609,7 @@ impl TobitEstimator {
     /// （`logσ`が常に存在するため対応するケースが生じない、同関数のdocコメント参照）。
     /// 推定オプションの検証は3手法共通の`validate_mle_options`を使い、Logit/Probit用の
     /// `validate_fit_preconditions`は呼ばない（手法ごとの違いは同関数のdocコメント参照）。
-    /// 打ち切り境界の検証（`MleError::InvalidCensoringBounds`/`YOutOfCensoringBounds`）は
+    /// 打ち切り境界の検証（`MleError::CensoringBoundsMissing`等・`YOutOfCensoringBounds`）は
     /// `fit()`ではなく`TobitInput::from_columns`で完了済み（モジュール冒頭のdocコメント参照）。
     ///
     /// ## `σ`のSE（デルタ法）
@@ -2174,7 +2175,7 @@ impl TobitEstimator {
 mod tests {
     use super::*;
     use crate::nonlinear::common::SolverType;
-    use crate::shared::error::ClusterSetting;
+    use crate::shared::error::{ClusterSetting, ErrorInfo};
     use crate::shared::group_codes::GroupCodes;
 
     #[test]
@@ -2271,7 +2272,7 @@ mod tests {
     }
 
     #[test]
-    fn from_columns_returns_invalid_censoring_bounds_when_lower_is_nan() {
+    fn from_columns_returns_censoring_bound_not_finite_when_lower_is_nan() {
         let y = vec![0.0, 1.0, 2.0];
         let result = TobitInput::from_columns(
             &y,
@@ -2285,7 +2286,7 @@ mod tests {
 
         assert!(matches!(
             result.unwrap_err(),
-            MleError::InvalidCensoringBounds {
+            MleError::CensoringBoundNotFinite {
                 lower: Some(l),
                 upper: Some(u)
             } if l.is_nan() && u == 10.0
@@ -2293,7 +2294,7 @@ mod tests {
     }
 
     #[test]
-    fn from_columns_returns_invalid_censoring_bounds_when_upper_is_nan() {
+    fn from_columns_returns_censoring_bound_not_finite_when_upper_is_nan() {
         let y = vec![0.0, 1.0, 2.0];
         let result = TobitInput::from_columns(
             &y,
@@ -2307,7 +2308,7 @@ mod tests {
 
         assert!(matches!(
             result.unwrap_err(),
-            MleError::InvalidCensoringBounds {
+            MleError::CensoringBoundNotFinite {
                 lower: Some(l),
                 upper: Some(u)
             } if l == 0.0 && u.is_nan()
@@ -2315,7 +2316,7 @@ mod tests {
     }
 
     #[test]
-    fn from_columns_returns_invalid_censoring_bounds_when_only_bound_is_nan() {
+    fn from_columns_returns_censoring_bound_not_finite_when_only_bound_is_nan() {
         // 片側のみ指定（upper=None）でも、`lower`単体がNaNなら弾かれることを確認する
         // （`(Some(l), None) => l.is_finite()`分岐、両方Someのケースとは別分岐）。
         let y = vec![0.0, 1.0, 2.0];
@@ -2324,11 +2325,83 @@ mod tests {
 
         assert!(matches!(
             result.unwrap_err(),
-            MleError::InvalidCensoringBounds {
+            MleError::CensoringBoundNotFinite {
                 lower: Some(l),
                 upper: None
             } if l.is_nan()
         ));
+    }
+
+    #[test]
+    fn from_columns_returns_censoring_bound_not_finite_for_infinite_bounds() {
+        let y = vec![0.0, 1.0, 2.0];
+        for (lower, upper) in [
+            (Some(f64::NEG_INFINITY), None),
+            (None, Some(f64::INFINITY)),
+            (Some(0.0), Some(f64::INFINITY)),
+            (Some(f64::NEG_INFINITY), Some(10.0)),
+        ] {
+            let result =
+                TobitInput::from_columns(&y, &[], vec![], true, "y".to_string(), lower, upper);
+
+            assert_eq!(
+                result.unwrap_err(),
+                MleError::CensoringBoundNotFinite { lower, upper },
+                "lower={lower:?}, upper={upper:?}"
+            );
+        }
+    }
+
+    /// 判定順は Missing → NotFinite → NotOrdered。逆順に判定すると、順序が逆転した
+    /// 非有限の境界が`CensoringBoundsNotOrdered`になる。
+    #[test]
+    fn from_columns_reports_not_finite_before_not_ordered() {
+        let y = vec![0.0, 1.0, 2.0];
+        for (lower, upper) in [
+            (f64::INFINITY, f64::NEG_INFINITY),
+            (5.0, f64::NAN),
+            (f64::NAN, -1.0),
+        ] {
+            let result = TobitInput::from_columns(
+                &y,
+                &[],
+                vec![],
+                true,
+                "y".to_string(),
+                Some(lower),
+                Some(upper),
+            );
+
+            assert!(
+                matches!(
+                    result.unwrap_err(),
+                    MleError::CensoringBoundNotFinite { .. }
+                ),
+                "lower={lower}, upper={upper}"
+            );
+        }
+    }
+
+    #[test]
+    fn from_columns_returns_censoring_bounds_not_ordered_when_lower_gt_upper() {
+        let y = vec![0.0, 1.0, 2.0];
+        let result = TobitInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            true,
+            "y".to_string(),
+            Some(10.0),
+            Some(5.0),
+        );
+
+        assert_eq!(
+            result.unwrap_err(),
+            MleError::CensoringBoundsNotOrdered {
+                lower: 10.0,
+                upper: 5.0
+            }
+        );
     }
 
     #[test]
@@ -2393,30 +2466,24 @@ mod tests {
     }
 
     #[test]
-    fn from_columns_returns_invalid_censoring_bounds_when_both_none() {
+    fn from_columns_returns_censoring_bounds_missing_when_both_none() {
         let y = vec![0.0, 1.0, 2.0];
         let result = TobitInput::from_columns(&y, &[], vec![], true, "y".to_string(), None, None);
 
-        assert_eq!(
-            result.unwrap_err(),
-            MleError::InvalidCensoringBounds {
-                lower: None,
-                upper: None
-            }
-        );
+        assert_eq!(result.unwrap_err(), MleError::CensoringBoundsMissing);
     }
 
     #[test]
-    fn from_columns_returns_invalid_censoring_bounds_when_lower_ge_upper() {
+    fn from_columns_returns_censoring_bounds_not_ordered_when_lower_ge_upper() {
         let y = vec![0.0, 1.0, 2.0];
         let result =
             TobitInput::from_columns(&y, &[], vec![], true, "y".to_string(), Some(5.0), Some(5.0));
 
         assert_eq!(
             result.unwrap_err(),
-            MleError::InvalidCensoringBounds {
-                lower: Some(5.0),
-                upper: Some(5.0)
+            MleError::CensoringBoundsNotOrdered {
+                lower: 5.0,
+                upper: 5.0
             }
         );
     }
@@ -3395,7 +3462,7 @@ mod tests {
             MleError::Common(CommonError::InsufficientObservations { n: 2, k: 2 })
         );
         // `n_params`は`β`の数に`log σ`を足した値になる。
-        let report = err.try_report().expect("cataloged");
+        let report = err.report();
         assert_eq!(
             report.message(),
             "Not enough observations: 2 observations for 2 parameters; at least 3 are needed."

@@ -3,7 +3,7 @@
 //! OLSは1手法1エラー型（`LeastSquaresError`、旧`OlsError`）だったが、nonlinear系統は`raise_on_non_convergence`
 //! 未収束・観測数不足・`confidence_level`範囲外等、3手法でほぼ共通のバリアントが多いため、
 //! `<系統>/common.rs`に共有型として定義する（`.claude/rules/rust-style.md`「ファイル・
-//! ディレクトリ構成」参照）。Tobit専用のバリアント（`InvalidCensoringBounds`）も、別のenumに
+//! ディレクトリ構成」参照）。Tobit専用のバリアント（`CensoringBoundsMissing`等）も、別のenumに
 //! 分離せず同じ`MleError`に含める（Logit/Probitの`fit()`はそのバリアントを構築しないだけで、
 //! 型を分ける必要はない。OLSの`CovType::Hac`/`CovType::Cluster`がフィールド付きバリアントとして
 //! 共存しているのと同じ考え方）。
@@ -31,25 +31,13 @@ use thiserror::Error;
 
 use crate::shared::covariance::{cluster_correction, cluster_meat, sandwich};
 use crate::shared::design_matrix::design_matrix_element;
-use crate::shared::error::{ClusterSetting, CommonError, ErrorInfo, MatrixKind, catalog_display};
+use crate::shared::error::{ClusterSetting, CommonError, ErrorInfo, MatrixKind};
 use crate::shared::error_catalog::{ErrorCode, ErrorReport};
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference;
 use crate::shared::linear_algebra::{checked_col_piv_qr, ensure_well_conditioned_symmetric_matrix};
 use crate::shared::validation::{MAX_ITER_LIMIT, MAX_ITER_MIN};
 use crate::shared::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
-
-/// 打ち切り境界を、エラーメッセージ用にPython側の表記（`None`・`0.0`）で整形する。
-///
-/// `Option<f64>`の`{:?}`だと`Some(0.0)`とRust固有の形で利用者に見えてしまうため、
-/// 設定されていない境界は`None`、設定されている境界は`{:?}`（`0.0`・`1.5`のように
-/// 整数値でも小数点付き）で表す。
-fn format_bound(bound: Option<f64>) -> String {
-    match bound {
-        Some(value) => format!("{value:?}"),
-        None => "None".to_string(),
-    }
-}
 
 /// Logit/Probit/Tobitの計算過程で発生しうるエラー。
 ///
@@ -96,14 +84,17 @@ pub enum MleError {
     #[error("{}", self.catalog_message())]
     SingularDesignMatrix,
 
-    /// Tobit専用: 打ち切り境界（下限/上限）の指定が不正（下限≧上限等）。
-    #[error(
-        "invalid censoring bounds: lower={}, upper={} \
-         (at least one bound must be set, and lower must be less than upper when both are set)",
-        format_bound(*.lower),
-        format_bound(*.upper)
-    )]
-    InvalidCensoringBounds {
+    /// Tobit専用: 打ち切り境界が両方とも`None`（少なくとも片側の指定が必要）。
+    #[error("{}", self.catalog_message())]
+    CensoringBoundsMissing,
+
+    /// Tobit専用: 両側の境界が有限で、下限が上限以上（`lower >= upper`）。
+    #[error("{}", self.catalog_message())]
+    CensoringBoundsNotOrdered { lower: f64, upper: f64 },
+
+    /// Tobit専用: 指定された境界にNaNまたは無限大が含まれる。
+    #[error("{}", self.catalog_message())]
+    CensoringBoundNotFinite {
         lower: Option<f64>,
         upper: Option<f64>,
     },
@@ -113,25 +104,21 @@ pub enum MleError {
     /// statsmodelsの`Logit`はコンストラクタ時点で単位区間`[0,1]`を要求する
     /// （比率データ／frequency weights的な用途も許容する設計）が、本実装は
     /// 常に真の2値アウトカムのみを想定するため、より厳格に`{0.0, 1.0}`の完全一致を
-    /// 要求する（ユーザー確認済み）。`InvalidCensoringBounds`（Tobit専用）
+    /// 要求する（ユーザー確認済み）。Tobit専用の境界エラー（`CensoringBoundsMissing`等）
     /// と対称的に、Tobit（連続な打ち切り被説明変数）の`fit()`はこのバリアントを
     /// 構築しない（`MleError`モジュールdocコメント「別のenumに分離せず同じ`MleError`に
     /// 含める」の方針通り）。
-    #[error("y at row {row} must be coded as 0.0 or 1.0 (binary outcome), got {value}")]
+    #[error("{}", self.catalog_message())]
     InvalidBinaryY { row: usize, value: f64 },
 
     /// Tobit専用: `y`の実測値が、指定された打ち切り境界の範囲外にある行を含む。
     ///
-    /// `InvalidCensoringBounds`（境界の指定自体が不正）とは異なり、境界の指定自体は
+    /// `CensoringBoundsMissing`/`CensoringBoundsNotOrdered`/`CensoringBoundNotFinite`（境界の指定自体が不正）とは異なり、境界の指定自体は
     /// 妥当だが実測`y`との整合性が取れないケース（`lower`指定時に`y < lower`の行がある、
     /// または`upper`指定時に`y > upper`の行がある）。`InvalidBinaryY`と同型の
     /// 「行番号+値」パターンで、`TobitInput::from_columns`が構築する
     /// （`engine/src/nonlinear/tobit.rs`参照）。
-    #[error(
-        "y at row {row} is out of the censoring bounds (lower={}, upper={}): got {value}",
-        format_bound(*.lower),
-        format_bound(*.upper)
-    )]
+    #[error("{}", self.catalog_message())]
     YOutOfCensoringBounds {
         row: usize,
         value: f64,
@@ -163,12 +150,7 @@ pub enum MleError {
     /// `survival::survreg`（`AER::tobit`のエンジン）は同種のデータで初期反復に失敗し
     /// エラーを返す（"initial iteration failed"）。`fit()`冒頭でのバリデーションとして
     /// 早期に検出する（`docs/spec/tobit-spec.md`1章「非識別データの検出」参照）。
-    #[error(
-        "no uncensored observations: at least one y value strictly between lower={} and \
-         upper={} is required to identify the model",
-        format_bound(*.lower),
-        format_bound(*.upper)
-    )]
+    #[error("{}", self.catalog_message())]
     NoUncensoredObservations {
         lower: Option<f64>,
         upper: Option<f64>,
@@ -234,69 +216,80 @@ pub enum MleError {
     SeparationCheckFailed { detail: String },
 }
 
-impl MleError {
-    /// カタログの`code`・`params`で表せるバリアントの[`ErrorReport`]。まだ移していないバリアントは`None`。
-    ///
-    /// 全バリアントを移し終えたら、`ErrorInfo`の実装（`report()`）に置き換える。
-    #[must_use]
-    pub fn try_report(&self) -> Option<ErrorReport> {
+impl ErrorInfo for MleError {
+    fn report(&self) -> ErrorReport {
         match self {
-            Self::Common(common) => Some(common.report()),
-            Self::InvalidMaxIter { max_iter } => Some(
-                ErrorReport::new(ErrorCode::MaxIterOutOfRange)
-                    .param("value", *max_iter)
-                    .param("min", MAX_ITER_MIN)
-                    .param("max", MAX_ITER_LIMIT),
-            ),
-            Self::InvalidTol { tol } => Some(
-                ErrorReport::new(ErrorCode::ToleranceNotPositiveFinite)
-                    .param("option", "tol")
-                    .param("value", *tol),
-            ),
-            Self::NonConvergence { n_iter } => Some(
-                ErrorReport::new(ErrorCode::NotConverged)
-                    .param("n_iter", *n_iter)
-                    .param("iter_option", "max_iter"),
-            ),
-            Self::SingularHessian => Some(
-                ErrorReport::new(ErrorCode::MatrixNearSingular)
-                    .param("matrix", MatrixKind::Hessian.as_str()),
-            ),
-            Self::SingularOpgMatrix => Some(
-                ErrorReport::new(ErrorCode::MatrixNearSingular)
-                    .param("matrix", MatrixKind::Opg.as_str()),
-            ),
-            Self::SingularDesignMatrix => Some(ErrorReport::new(ErrorCode::DesignMatrixSingular)),
-            Self::SeparationDetected => Some(ErrorReport::new(ErrorCode::SeparationDetected)),
+            Self::Common(common) => common.report(),
+            Self::InvalidMaxIter { max_iter } => ErrorReport::new(ErrorCode::MaxIterOutOfRange)
+                .param("value", *max_iter)
+                .param("min", MAX_ITER_MIN)
+                .param("max", MAX_ITER_LIMIT),
+            Self::InvalidTol { tol } => ErrorReport::new(ErrorCode::ToleranceNotPositiveFinite)
+                .param("option", "tol")
+                .param("value", *tol),
+            Self::NonConvergence { n_iter } => ErrorReport::new(ErrorCode::NotConverged)
+                .param("n_iter", *n_iter)
+                .param("iter_option", "max_iter"),
+            Self::SingularHessian => ErrorReport::new(ErrorCode::MatrixNearSingular)
+                .param("matrix", MatrixKind::Hessian.as_str()),
+            Self::SingularOpgMatrix => ErrorReport::new(ErrorCode::MatrixNearSingular)
+                .param("matrix", MatrixKind::Opg.as_str()),
+            Self::SingularDesignMatrix => ErrorReport::new(ErrorCode::DesignMatrixSingular),
+            Self::SeparationDetected => ErrorReport::new(ErrorCode::SeparationDetected),
             Self::UncensoredIntervalTooNarrow {
                 lower,
                 upper,
                 sigma,
-            } => Some(
-                ErrorReport::new(ErrorCode::UncensoredIntervalTooNarrow)
+            } => ErrorReport::new(ErrorCode::UncensoredIntervalTooNarrow)
+                .param("lower", *lower)
+                .param("upper", *upper)
+                .param("sigma", *sigma),
+            Self::EvaluationBudgetExceeded { budget } => {
+                ErrorReport::new(ErrorCode::LineSearchFailed).param("n_evaluations", *budget)
+            }
+            Self::LineSearchFailed { max_iters } => {
+                ErrorReport::new(ErrorCode::LineSearchFailed).param("n_evaluations", *max_iters)
+            }
+            Self::SeparationCheckFailed { .. } => {
+                ErrorReport::new(ErrorCode::SeparationCheckFailed)
+            }
+            Self::CensoringBoundsMissing => ErrorReport::new(ErrorCode::CensoringBoundsMissing),
+            Self::CensoringBoundsNotOrdered { lower, upper } => {
+                ErrorReport::new(ErrorCode::CensoringBoundsNotOrdered)
                     .param("lower", *lower)
                     .param("upper", *upper)
-                    .param("sigma", *sigma),
-            ),
-            Self::EvaluationBudgetExceeded { budget } => {
-                Some(ErrorReport::new(ErrorCode::LineSearchFailed).param("n_evaluations", *budget))
             }
-            Self::LineSearchFailed { max_iters } => Some(
-                ErrorReport::new(ErrorCode::LineSearchFailed).param("n_evaluations", *max_iters),
-            ),
-            Self::SeparationCheckFailed { .. } => {
-                Some(ErrorReport::new(ErrorCode::SeparationCheckFailed))
+            Self::CensoringBoundNotFinite { lower, upper } => {
+                ErrorReport::new(ErrorCode::CensoringBoundNotFinite)
+                    .param("lower", *lower)
+                    .param("upper", *upper)
             }
-            Self::InvalidCensoringBounds { .. }
-            | Self::InvalidBinaryY { .. }
-            | Self::YOutOfCensoringBounds { .. }
-            | Self::NoUncensoredObservations { .. } => None,
+            Self::InvalidBinaryY { row, value } => ErrorReport::new(ErrorCode::OutcomeNotBinary)
+                .param("row", *row)
+                .param("value", *value),
+            Self::YOutOfCensoringBounds {
+                row,
+                value,
+                lower,
+                upper,
+            } => ErrorReport::new(ErrorCode::OutcomeOutsideCensoringBounds)
+                .param("row", *row)
+                .param("value", *value)
+                .param("lower", *lower)
+                .param("upper", *upper),
+            Self::NoUncensoredObservations { lower, upper } => {
+                ErrorReport::new(ErrorCode::NoUncensoredObservations)
+                    .param("lower", *lower)
+                    .param("upper", *upper)
+            }
         }
     }
+}
 
-    /// カタログに移したバリアントの`Display`が使う`message`。
+impl MleError {
+    /// `Display`が使う`message`。
     fn catalog_message(&self) -> String {
-        catalog_display(self.try_report())
+        self.report().message()
     }
 }
 
@@ -433,7 +426,7 @@ pub fn validate_mle_options(
 /// - Tobit固有の検証として、非打ち切り観測が1件以上あること
 ///   （`tobit.rs`の`validate_has_uncensored_observations`）を最後に追加で行う
 ///
-/// Tobit固有の打ち切り境界の検証（境界指定自体の妥当性＝`MleError::InvalidCensoringBounds`、
+/// Tobit固有の打ち切り境界の検証（境界指定自体の妥当性＝`MleError::CensoringBoundsMissing`等、
 /// `y`と境界の整合性＝`MleError::YOutOfCensoringBounds`）は`fit()`ではなく
 /// `TobitInput::from_columns`で行う（`tobit.rs`冒頭のdocコメント参照）。
 ///
@@ -3274,28 +3267,18 @@ mod tests {
         let max_iter = MleError::InvalidMaxIter {
             max_iter: MAX_ITER_LIMIT + 1,
         };
-        assert_eq!(
-            max_iter.to_string(),
-            max_iter.try_report().expect("cataloged").message()
-        );
+        assert_eq!(max_iter.to_string(), max_iter.report().message());
         let wrapped = MleError::Common(CommonError::InvalidHacLags { hac_lags: 9, n: 9 });
-        assert_eq!(
-            wrapped.try_report().expect("cataloged").code(),
-            ErrorCode::HacLagsOutOfRange
-        );
+        assert_eq!(wrapped.report().code(), ErrorCode::HacLagsOutOfRange);
     }
 
     #[test]
     fn option_range_errors_map_to_catalog_codes_with_valid_params() {
-        let max_iter = MleError::InvalidMaxIter { max_iter: 0 }
-            .try_report()
-            .expect("cataloged");
+        let max_iter = MleError::InvalidMaxIter { max_iter: 0 }.report();
         assert_eq!(max_iter.code(), ErrorCode::MaxIterOutOfRange);
         assert!(max_iter.validate().is_ok());
 
-        let tol = MleError::InvalidTol { tol: -1.0 }
-            .try_report()
-            .expect("cataloged");
+        let tol = MleError::InvalidTol { tol: -1.0 }.report();
         assert_eq!(tol.code(), ErrorCode::ToleranceNotPositiveFinite);
         assert!(tol.validate().is_ok());
         assert_eq!(
@@ -3346,7 +3329,7 @@ mod tests {
             ),
         ];
         for (err, code, message) in cases {
-            let report = err.try_report().expect("cataloged");
+            let report = err.report();
             assert_eq!(report.code(), code);
             assert!(report.validate().is_ok());
             assert_eq!(report.message(), message);
@@ -3354,7 +3337,7 @@ mod tests {
         }
         let matrices: Vec<_> = [MleError::SingularHessian, MleError::SingularOpgMatrix]
             .iter()
-            .map(|e| e.try_report().unwrap().all_params())
+            .map(|e| e.report().all_params())
             .collect();
         assert_ne!(matrices[0], matrices[1]);
         for err in [
@@ -3365,9 +3348,66 @@ mod tests {
                 sigma: 1.0,
             },
         ] {
-            let report = err.try_report().expect("cataloged");
+            let report = err.report();
             assert!(report.validate().is_ok());
             assert_eq!(err.to_string(), report.message());
+        }
+    }
+
+    #[test]
+    fn outcome_and_censoring_errors_map_to_catalog_codes_with_valid_params() {
+        let cases = [
+            (
+                MleError::InvalidBinaryY { row: 3, value: 1.5 },
+                ErrorCode::OutcomeNotBinary,
+                "The outcome y at row 3 (0-based) must be 0 or 1, got 1.5.",
+            ),
+            (
+                MleError::CensoringBoundsMissing,
+                ErrorCode::CensoringBoundsMissing,
+                "Both censoring bounds are None.",
+            ),
+            (
+                MleError::CensoringBoundsNotOrdered {
+                    lower: 2.0,
+                    upper: 1.0,
+                },
+                ErrorCode::CensoringBoundsNotOrdered,
+                "lower (2.0) must be less than upper (1.0).",
+            ),
+            (
+                MleError::CensoringBoundNotFinite {
+                    lower: Some(f64::NAN),
+                    upper: None,
+                },
+                ErrorCode::CensoringBoundNotFinite,
+                "The censoring bounds must be finite numbers or None, got lower=NaN, upper=None.",
+            ),
+            (
+                MleError::YOutOfCensoringBounds {
+                    row: 1,
+                    value: -1.0,
+                    lower: Some(0.0),
+                    upper: None,
+                },
+                ErrorCode::OutcomeOutsideCensoringBounds,
+                "The outcome y at row 1 (0-based) is -1.0, outside the censoring bounds (lower=0.0, upper=None).",
+            ),
+            (
+                MleError::NoUncensoredObservations {
+                    lower: Some(0.0),
+                    upper: Some(1.0),
+                },
+                ErrorCode::NoUncensoredObservations,
+                "No observation lies strictly between the censoring bounds (lower=0.0, upper=1.0), so the model cannot be identified.",
+            ),
+        ];
+        for (err, code, message) in cases {
+            let report = err.report();
+            assert_eq!(report.code(), code);
+            assert!(report.validate().is_ok());
+            assert_eq!(report.message(), message);
+            assert_eq!(err.to_string(), message);
         }
     }
 
@@ -5546,22 +5586,12 @@ mod tests {
             "max_iter must be an integer from 1 to 10000, got 0."
         );
         assert_eq!(
-            MleError::InvalidCensoringBounds {
-                lower: Some(10.0),
-                upper: Some(5.0),
+            MleError::CensoringBoundsNotOrdered {
+                lower: 10.0,
+                upper: 5.0,
             }
             .to_string(),
-            "invalid censoring bounds: lower=10.0, upper=5.0 \
-             (at least one bound must be set, and lower must be less than upper when both are set)"
-        );
-        assert_eq!(
-            MleError::InvalidCensoringBounds {
-                lower: None,
-                upper: None,
-            }
-            .to_string(),
-            "invalid censoring bounds: lower=None, upper=None \
-             (at least one bound must be set, and lower must be less than upper when both are set)"
+            "lower (10.0) must be less than upper (5.0)."
         );
         assert_eq!(
             MleError::Common(CommonError::MissingClusterColumn {

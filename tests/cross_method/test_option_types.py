@@ -33,7 +33,6 @@ from econometricsmodels import (
     REOptions,
     Tobit,
     TobitOptions,
-    ValidationError,
     WLSOptions,
 )
 
@@ -477,11 +476,15 @@ def test_invalid_confidence_level_is_validation_error_for_every_method(
 )
 @pytest.mark.parametrize("field", ["lower", "upper"])
 def test_invalid_tobit_bound_is_validation_error(df, field, bad, how):
-    """Tobitの打ち切り境界がNaN・無限大・巨大な値のときは`ValidationError`。"""
+    """Tobitの打ち切り境界がNaN・無限大・巨大な値のときは`ValidationError`。
+    `bad`は`f64`に変換された値（`10**400`は`inf`になる）。
+    """
     options = _with_value(TobitOptions, field, bad, how)
+    expected = float("inf") if isinstance(bad, int) else bad
 
-    with pytest.raises(
-        ValidationError, match=re.escape("invalid censoring bounds")
+    with raises_error(
+        ErrorCode.CENSORING_BOUND_NOT_FINITE,
+        **{field: pytest.approx(expected, nan_ok=True)},
     ):
         _fit(options, df)
 

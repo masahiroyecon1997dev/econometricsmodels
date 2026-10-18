@@ -508,8 +508,17 @@ FAULTS = {
             code=ErrorCode.MAX_ITER_OUT_OF_RANGE,
             params={"value": 0, "min": 1, "max": 10_000},
         ),
-        Fault("non_binary_y", (7, 0), r"must be coded as 0\.0 or 1\.0"),
-        Fault("bad_censoring_bounds", (7, 0), r"invalid censoring bounds"),
+        Fault(
+            "non_binary_y",
+            (7, 0),
+            code=ErrorCode.OUTCOME_NOT_BINARY,
+        ),
+        Fault(
+            "bad_censoring_bounds",
+            (7, 0),
+            code=ErrorCode.CENSORING_BOUNDS_NOT_ORDERED,
+            params={"lower": 1.0, "upper": 0.0},
+        ),
     ]
 }
 

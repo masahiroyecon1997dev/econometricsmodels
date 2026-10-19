@@ -11,14 +11,14 @@
 - `ChunkedArray::rechunk()`は`Cow<'_, ChunkedArray<T>>`を返す。`Cow`は`IntoIterator`非実装のため`.into_iter()`ではなく`.iter()`を使う（`Cow`はDerefで透過的に呼べる）。
 - pyo3 0.28では`PyObject`型エイリアスがpreludeから削除済み。`Py<PyAny>`を直接使う。
 - pyo3 0.28以降、`Clone`実装`#[pyclass]`の`FromPyObject`自動導出はopt-in。Python側インスタンスを引数で受け取るオプション型（`OLSOptions`等）には`#[pyclass(from_py_object)]`を明示する。
-- `DataFrame::new`は`(height: usize, columns: Vec<Column>)`という2引数シグネチャ（`Vec<Column>`のみを渡す旧APIではない）。列を追加するには`polars::prelude::Column::new(name.into(), values)`で構築し、既存の`DataFrame`には`.with_column(column)`（`PolarsResult<&mut Self>`）で付加する（`shared/augment.rs`の`append_predicted_column`が`OLSResult::augment()`/`WLSResult::augment()`等のために使う）。
+- `DataFrame::new`は`(height: usize, columns: Vec<Column>)`という2引数シグネチャ（`Vec<Column>`のみを渡す旧APIではない）。列を追加するには`polars::prelude::Column::new(name.into(), values)`で構築し、既存の`DataFrame`には`.with_column(column)`（`PolarsResult<&mut Self>`）で付加する（`DataFrame::new`は`select_columns`が取り込んだ列の組み立てに使う）。
 
 ## `white_test()`（事後診断）の配線
 
 `OLSResult`は`OlsEstimator`を保持しないため、`white_test()`は`x_column_names` → `extract_f64_columns`（`predict_for`は両者を
 束ねた`extract_model_x_columns`を使うが、`white_test()`は列名自体も`engine`に渡すため
-分けて呼ぶ）で`training_data`と`param_names`から`x`を再抽出し、保持している`residuals`と
-合わせて`engine::linear::diagnostics::white_test`に渡す。`training_data`が`None`（`IVResult.first_stage()`
+分けて呼ぶ）で元のデータ（`source_data`）と`param_names`から`x`の列だけを`select_columns`で取り込み、保持している`residuals`と
+合わせて`engine::linear::diagnostics::white_test`に渡す。`source_data`が`None`（`IVResult.first_stage()`
 由来）なら`augment(new_data=None)`と同じく`ValidationError`。`has_intercept`は`param_names[0] == "const"`で
 推定せず保持フィールドを使う（`include_intercept=false`で`x`に`"const"`列がありうるため）。LM/Fの両方を
 engineが計算し、`statistic`引数（`StatisticVersion`、大文字小文字を区別しない）で`WhiteTestOutput`の
@@ -33,20 +33,34 @@ engineが計算し、`statistic`引数（`StatisticVersion`、大文字小文字
 `extract_column_list`（`list`以外・`str`以外の要素は`TypeError`）で受け、`None`なら
 `x_column_names`でモデルの`x`を使う。空リスト・重複は`validate_x_non_empty`/
 `validate_no_duplicate_within_role`（ロール名`variables`）で`ValidationError`。モデルの`x`や`y`との
-重複は検査しない（モデル外の列・`y`列も`Z`にできる仕様）。`training_data`の有無は`variables`の
+重複は検査しない（モデル外の列・`y`列も`Z`にできる仕様）。元のデータの有無は`variables`の
 型検査より後（型の誤りは学習データが無い結果でも`TypeError`）。
+
+## 使う列だけ取り込む（`select_columns`）
+
+`fit_*`と`predict()`/`augment()`の`new_data`は、`PyDataFrame`への変換（`pyo3-polars`が全列をArrow経由で取り込む）を直接行わない。
+`shared/column_extraction.rs`の`check_dataframe`で`polars.DataFrame`かを調べ（`TypeError`）、
+`select_columns`で**推定に指名された列だけ**を取り込んだ`DataFrame`（`SelectedData.frame`）と、元のPythonオブジェクト（`SelectedData.source`）を得る。
+指名されない列は読まない。未使用の`UInt128`列がpolars-coreのpanicを起こす（取り込めないdtype。`UNREADABLE_DTYPES`）のを避けるため。
+指名される列は`fit_*`（`lib.rs`）が`y`・`x`等と各`*Options::data_columns()`（`cluster`・`hac_time`・`time`・`dk_time`）から組み立てる。
+**オプションに列名を持つフィールドを足したら、`data_columns()`に足す**（足さないと、その列が取り込まれず`COLUMN_NOT_FOUND`になる）。
+存在しない列は選ばず、列を引く側（`extract_f64_column`等）が`COLUMN_NOT_FOUND`にする。取り込めないdtypeの列は、`Null`型の目印の列
+（名前に（dtype、元の列名）を符号化）に置き換え、列を引く側（`missing_column_error`）が`COLUMN_UNSUPPORTED_DTYPE`にする。
+こうして検査の順序は、列を引く位置で決まる（`tests/cross_method/test_validation_order.py`）。
+`LogitResult`等の`predict_for`は、`new_data`から`x`列だけを`select_model_x_columns`で取り込む。
 
 ## DataFrameを構築して返す（`augment()`）
 
 `predict()`までは全メソッドが`Vec<f64>`等のフラットな値を返すだけだったが、`augment()`は
-`OLSResult`/`WLSResult`が`fit()`時の元`PyDataFrame`を非公開の`training_data`フィールド
-（`OLSResult`は`Option<DataFrame>`、`IVResult.first_stage()`という別経路の構築元を持つため。
-`WLSResult`はこの経路がなく常に`DataFrame`）として保持し、`new_data=None`時にそれへ予測値の列を
-付加して返す設計にした。polarsの列は内部で参照カウント方式のため、`DataFrame`を`clone()`しても
-実際のデータはコピーされない（Arrowゼロコピー方針、CLAUDE.md 2章と整合）。列名衝突
-（ソースデータに既に`"predicted"`列がある場合）は`shared/augment.rs`の
-`append_predicted_column`（OLS/WLS/Logit/Probit/Tobit共通。内部で`validate_no_existing_column`を呼ぶ）で
-`ValidationError`にする（黙って上書きしない）。詳細な設計判断は
+結果が`fit()`に渡された元の`polars.DataFrame`（Pythonオブジェクト）を非公開の`source_data`フィールド
+（`OLSResult`は`Option<Py<PyAny>>`、`IVResult.first_stage()`という別経路の構築元を持つため。
+他の結果型はこの経路がなく常に保持）として持ち、`new_data=None`時にそれへ予測値の列を足して返す。
+足すのは`shared/augment.rs`の`append_predicted_column`で、Python側の`DataFrame.with_columns`に`PySeries`を渡す。
+取り込んだ`DataFrame`ではなく元のオブジェクトに足すので、推定に使わない列（取り込めないdtypeの列を含む）が出力に残る。
+参照を持つだけでデータはコピーしない（Arrowゼロコピー方針、CLAUDE.md 2章と整合）。列名衝突
+（ソースデータに既に`"predicted"`列がある場合）は`append_predicted_column`が元の`columns`を調べて
+`ValidationError`にする（黙って上書きしない）。OLSの事後診断（White・Breusch-Pagan・Breusch-Godfrey）も、必要な列を
+`source_data`から都度`select_columns`で取り込む。詳細な設計判断は
 `docs/spec/ols-spec.md`「augment()」参照。
 
 ## バリデーションの責務分担（`engine`と重複させない）

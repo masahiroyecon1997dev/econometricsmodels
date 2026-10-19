@@ -52,9 +52,8 @@ def base() -> pl.DataFrame:
 def test_unused_column_of_any_dtype_does_not_break_fit(base, dtype):
     """推定に使わない列がどのdtypeでも、`fit()`は未使用列を無視して成功する。
 
-    以前は`Int8`/`Int16`/`UInt8`/`UInt16`/`Float16`/`Array`/`Struct`の列が
-    あるだけで`DataFrame`の読み込みに失敗し、`Decimal`/`Int128`はRustのpanicに
-    なった。
+    指名されない列は読まないので、推定に使えないdtype（`UInt128`、中に`UInt128`を持つ
+    ネスト型を含む）の列があっても失敗しない。
     """
     df = base.with_columns(unused_column(dtype))
 
@@ -642,6 +641,7 @@ def test_hac_time_keeps_order_of_values_that_collapse_in_float64(
 @pytest.mark.parametrize(
     ("dtype", "label"),
     [
+        (pl.UInt128, "UInt128"),
         (pl.String, "String"),
         (pl.Categorical, "Categorical"),
         (pl.Enum(["a", "b"]), "Enum"),
@@ -652,6 +652,9 @@ def test_hac_time_keeps_order_of_values_that_collapse_in_float64(
         (pl.List(pl.Int64), "List"),
         (pl.Array(pl.Int64, 2), "Array"),
         (pl.Struct({"a": pl.Int64}), "Struct"),
+        (pl.List(pl.UInt128), "List"),
+        (pl.Array(pl.UInt128, 2), "Array"),
+        (pl.Struct({"a": pl.UInt128}), "Struct"),
     ],
     ids=lambda v: v if isinstance(v, str) else None,
 )

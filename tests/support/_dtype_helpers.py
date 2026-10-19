@@ -30,6 +30,7 @@ NUMERIC_DTYPES = [
 # 推定に使わない列に置いても`fit()`を壊してはいけないdtype。
 UNUSED_COLUMN_DTYPES = [
     *NUMERIC_DTYPES,
+    pl.UInt128,
     pl.Boolean,
     pl.String,
     pl.Categorical,
@@ -42,11 +43,15 @@ UNUSED_COLUMN_DTYPES = [
     pl.List(pl.Int64),
     pl.Array(pl.Int64, 2),
     pl.Struct({"a": pl.Int64}),
+    pl.List(pl.UInt128),
+    pl.Array(pl.UInt128, 2),
+    pl.Struct({"a": pl.UInt128}),
     pl.Null,
 ]
 
 # 数値として使えないdtypeと、メッセージに出るdtype名。
 NON_NUMERIC_DTYPES = [
+    (pl.UInt128, "UInt128"),
     (pl.String, "String"),
     (pl.Categorical, "Categorical"),
     (pl.Enum(["a", "b"]), "Enum"),
@@ -58,6 +63,9 @@ NON_NUMERIC_DTYPES = [
     (pl.List(pl.Int64), "List"),
     (pl.Array(pl.Int64, 2), "Array"),
     (pl.Struct({"a": pl.Int64}), "Struct"),
+    (pl.List(pl.UInt128), "List"),
+    (pl.Array(pl.UInt128, 2), "Array"),
+    (pl.Struct({"a": pl.UInt128}), "Struct"),
 ]
 
 
@@ -93,6 +101,12 @@ def unused_column(dtype: pl.DataType) -> pl.Series:
         return pl.Series("unused", [[1, 2]] * N, dtype=dtype)
     if dtype == pl.Struct({"a": pl.Int64}):
         return pl.Series("unused", [{"a": 1}] * N)
+    if dtype == pl.List(pl.UInt128):
+        return pl.Series("unused", [[1, 2]] * N, dtype=dtype)
+    if dtype == pl.Array(pl.UInt128, 2):
+        return pl.Series("unused", [[1, 2]] * N, dtype=dtype)
+    if dtype == pl.Struct({"a": pl.UInt128}):
+        return pl.Series("unused", [{"a": 1}] * N, dtype=dtype)
     return pl.Series("unused", np.arange(N) % 100, dtype=pl.Int64).cast(dtype)
 
 

@@ -20,7 +20,9 @@ use nonlinear::tobit::{
 use panel::fe::{FEOptions, FEResult};
 use panel::re::{REOptions, REResult};
 use shared::catalog_export::{error_catalog, panic_for_test, raise_error_for_test};
-use shared::column_extraction::{extract_column_list, extract_column_name, extract_dataframe};
+use shared::column_extraction::{
+    check_dataframe, extract_column_list, extract_column_name, select_columns,
+};
 use shared::errors::{ComputationError, ValidationError, guard};
 use shared::option_values::extract_options;
 
@@ -44,10 +46,14 @@ fn fit_ols(
     options: &Bound<'_, PyAny>,
 ) -> PyResult<OLSResult> {
     guard(|| {
-        let data = extract_dataframe(data, "data")?;
+        check_dataframe(data, "data")?;
         let y = extract_column_name(y, "y")?;
         let x = extract_column_list(x, "x")?;
         let options: OLSOptions = extract_options(options, "options")?;
+        let mut columns: Vec<String> = vec![y.clone()];
+        columns.extend(x.iter().cloned());
+        columns.extend(options.data_columns());
+        let data = select_columns(data, "data", &columns)?;
         linear::ols::fit(data, y, x, &options)
     })
 }
@@ -76,11 +82,15 @@ fn fit_wls(
     options: &Bound<'_, PyAny>,
 ) -> PyResult<WLSResult> {
     guard(|| {
-        let data = extract_dataframe(data, "data")?;
+        check_dataframe(data, "data")?;
         let y = extract_column_name(y, "y")?;
         let x = extract_column_list(x, "x")?;
         let weight = extract_column_name(weight, "weight")?;
         let options: WLSOptions = extract_options(options, "options")?;
+        let mut columns: Vec<String> = vec![y.clone(), weight.clone()];
+        columns.extend(x.iter().cloned());
+        columns.extend(options.data_columns());
+        let data = select_columns(data, "data", &columns)?;
         linear::wls::fit(data, y, x, weight, &options)
     })
 }
@@ -106,10 +116,14 @@ fn fit_logit(
     options: &Bound<'_, PyAny>,
 ) -> PyResult<LogitResult> {
     guard(|| {
-        let data = extract_dataframe(data, "data")?;
+        check_dataframe(data, "data")?;
         let y = extract_column_name(y, "y")?;
         let x = extract_column_list(x, "x")?;
         let options: LogitOptions = extract_options(options, "options")?;
+        let mut columns: Vec<String> = vec![y.clone()];
+        columns.extend(x.iter().cloned());
+        columns.extend(options.data_columns());
+        let data = select_columns(data, "data", &columns)?;
         nonlinear::logit::fit(data, y, x, &options)
     })
 }
@@ -135,10 +149,14 @@ fn fit_probit(
     options: &Bound<'_, PyAny>,
 ) -> PyResult<ProbitResult> {
     guard(|| {
-        let data = extract_dataframe(data, "data")?;
+        check_dataframe(data, "data")?;
         let y = extract_column_name(y, "y")?;
         let x = extract_column_list(x, "x")?;
         let options: ProbitOptions = extract_options(options, "options")?;
+        let mut columns: Vec<String> = vec![y.clone()];
+        columns.extend(x.iter().cloned());
+        columns.extend(options.data_columns());
+        let data = select_columns(data, "data", &columns)?;
         nonlinear::probit::fit(data, y, x, &options)
     })
 }
@@ -164,10 +182,14 @@ fn fit_tobit(
     options: &Bound<'_, PyAny>,
 ) -> PyResult<TobitResult> {
     guard(|| {
-        let data = extract_dataframe(data, "data")?;
+        check_dataframe(data, "data")?;
         let y = extract_column_name(y, "y")?;
         let x = extract_column_list(x, "x")?;
         let options: TobitOptions = extract_options(options, "options")?;
+        let mut columns: Vec<String> = vec![y.clone()];
+        columns.extend(x.iter().cloned());
+        columns.extend(options.data_columns());
+        let data = select_columns(data, "data", &columns)?;
         nonlinear::tobit::fit(data, y, x, &options)
     })
 }
@@ -199,12 +221,18 @@ fn fit_iv(
     options: &Bound<'_, PyAny>,
 ) -> PyResult<IVResult> {
     guard(|| {
-        let data = extract_dataframe(data, "data")?;
+        check_dataframe(data, "data")?;
         let y = extract_column_name(y, "y")?;
         let x_exog = extract_column_list(x_exog, "x_exog")?;
         let x_endog = extract_column_list(x_endog, "x_endog")?;
         let instruments = extract_column_list(instruments, "instruments")?;
         let options: IVOptions = extract_options(options, "options")?;
+        let mut columns: Vec<String> = vec![y.clone()];
+        columns.extend(x_exog.iter().cloned());
+        columns.extend(x_endog.iter().cloned());
+        columns.extend(instruments.iter().cloned());
+        columns.extend(options.data_columns());
+        let data = select_columns(data, "data", &columns)?;
         iv::common::fit(data, y, x_exog, x_endog, instruments, &options)
     })
 }
@@ -234,11 +262,15 @@ fn fit_fe(
     options: &Bound<'_, PyAny>,
 ) -> PyResult<FEResult> {
     guard(|| {
-        let data = extract_dataframe(data, "data")?;
+        check_dataframe(data, "data")?;
         let y = extract_column_name(y, "y")?;
         let x = extract_column_list(x, "x")?;
         let entity = extract_column_name(entity, "entity")?;
         let options: FEOptions = extract_options(options, "options")?;
+        let mut columns: Vec<String> = vec![y.clone(), entity.clone()];
+        columns.extend(x.iter().cloned());
+        columns.extend(options.data_columns());
+        let data = select_columns(data, "data", &columns)?;
         panel::fe::fit(data, y, x, entity, &options)
     })
 }
@@ -268,11 +300,15 @@ fn fit_re(
     options: &Bound<'_, PyAny>,
 ) -> PyResult<REResult> {
     guard(|| {
-        let data = extract_dataframe(data, "data")?;
+        check_dataframe(data, "data")?;
         let y = extract_column_name(y, "y")?;
         let x = extract_column_list(x, "x")?;
         let entity = extract_column_name(entity, "entity")?;
         let options: REOptions = extract_options(options, "options")?;
+        let mut columns: Vec<String> = vec![y.clone(), entity.clone()];
+        columns.extend(x.iter().cloned());
+        columns.extend(options.data_columns());
+        let data = select_columns(data, "data", &columns)?;
         panel::re::fit(data, y, x, entity, &options)
     })
 }

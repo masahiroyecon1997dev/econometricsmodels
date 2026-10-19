@@ -63,13 +63,12 @@ use engine::linear::ols::CovType as EngineCovType;
 use engine::linear::ols::OlsEstimator;
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
-use pyo3_polars::PyDataFrame;
 
 use crate::linear::common::{CovKind, parse_cov_kind, require_hac_time, resolve_cov_type};
 use crate::linear::ols::{OLSResult, ols_estimator_to_result};
 use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
-    extract_f64_column, extract_optional_cluster_groups, extract_time_order_ranks,
+    SelectedData, extract_f64_column, extract_optional_cluster_groups, extract_time_order_ranks,
 };
 use crate::shared::errors::{guard, to_pyerr, unknown_option_value};
 use crate::shared::mat_conversion::mat_to_vec;
@@ -186,6 +185,14 @@ pub struct IVOptions {
     /// `ValidationError`.
     #[pyo3(get, set)]
     pub raise_on_non_convergence: Option<bool>,
+}
+
+impl IVOptions {
+    /// このオプションが指名するデータの列（`cluster`・`hac_time`）。使われるかどうか（`cov_type`等）には
+    /// よらず、指名されたものを全て返す。`fit()`はこれらと`y`・`x`等だけをデータから取り込む。
+    pub(crate) fn data_columns(&self) -> Vec<String> {
+        self.cluster.iter().chain(&self.hac_time).cloned().collect()
+    }
 }
 
 #[pymethods]
@@ -1070,14 +1077,14 @@ pub(crate) fn build_iv_input(
 ///   `engine::iv::common::IvError`（識別の順序条件・第一段階回帰の失敗・`cov_type`起因の
 ///   エラー・GMM固有のエラー等）は`iv_error_to_pyerr`で変換
 pub(crate) fn fit(
-    data: PyDataFrame,
+    data: SelectedData,
     y: String,
     x_exog: Vec<String>,
     x_endog: Vec<String>,
     instruments: Vec<String>,
     options: &IVOptions,
 ) -> PyResult<IVResult> {
-    let df: DataFrame = data.into();
+    let df: DataFrame = data.frame;
     let (input, cov_type, cov_type_lower, plan) =
         build_iv_input(&df, y, x_exog, x_endog, instruments, options)?;
 

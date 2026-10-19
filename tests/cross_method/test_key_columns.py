@@ -98,6 +98,7 @@ TIME_FITS = {
 
 # 同一性だけのキーに使えないdtype / 時点のキーに使えないdtypeと、メッセージ中の呼び名。
 UNSUPPORTED_IDENTITY_DTYPES = [
+    (pl.UInt128, "UInt128"),
     (pl.Duration, "Duration"),
     (pl.Time, "Time"),
     (pl.Decimal(18, 0), "Decimal"),
@@ -105,6 +106,9 @@ UNSUPPORTED_IDENTITY_DTYPES = [
     (pl.List(pl.Int64), "List"),
     (pl.Array(pl.Int64, 2), "Array"),
     (pl.Struct({"a": pl.Int64}), "Struct"),
+    (pl.List(pl.UInt128), "List"),
+    (pl.Array(pl.UInt128, 2), "Array"),
+    (pl.Struct({"a": pl.UInt128}), "Struct"),
 ]
 UNSUPPORTED_TIME_DTYPES = [
     (pl.Boolean, "Boolean"),

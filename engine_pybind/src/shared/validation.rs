@@ -17,7 +17,6 @@
 
 use std::collections::HashSet;
 
-use polars::prelude::DataFrame;
 use pyo3::PyResult;
 
 use engine::shared::error_catalog::{ErrorCode, ParamValue};
@@ -118,22 +117,6 @@ pub fn validate_common_roles(y: &str, x: &[String], include_intercept: bool) -> 
     validate_no_duplicate_roles(&[("y", RoleValue::Single(y)), ("x", RoleValue::Multi(x))])?;
     validate_no_duplicate_within_role("x", x)?;
     validate_no_const_collision("x", x, include_intercept)?;
-    Ok(())
-}
-
-/// `df`が`column_name`という名前の列をまだ持っていないことを検証する（`augment()`が
-/// 予測値を新しい列として追加する際、既存の同名列を黙って上書きしないため）。
-pub fn validate_no_existing_column(df: &DataFrame, column_name: &str) -> PyResult<()> {
-    if df
-        .get_column_names()
-        .iter()
-        .any(|name| name.as_str() == column_name)
-    {
-        return Err(user_error(
-            ErrorCode::AugmentColumnExists,
-            vec![("column", ParamValue::from(column_name))],
-        ));
-    }
     Ok(())
 }
 
@@ -267,8 +250,6 @@ pub fn reject_unused_option(
 
 #[cfg(test)]
 mod tests {
-    use polars::prelude::Column;
-
     use super::*;
 
     #[test]
@@ -382,25 +363,6 @@ mod tests {
     fn validate_common_roles_ok_for_const_column_when_include_intercept_is_false() {
         let x = ["const".to_string()];
         assert!(validate_common_roles("y", &x, false).is_ok());
-    }
-
-    #[test]
-    fn validate_no_existing_column_ok_when_column_absent() {
-        let df = DataFrame::new(2, vec![Column::new("x1".into(), &[1.0, 2.0])]).unwrap();
-        assert!(validate_no_existing_column(&df, "predicted").is_ok());
-    }
-
-    #[test]
-    fn validate_no_existing_column_returns_error_when_column_present() {
-        let df = DataFrame::new(
-            2,
-            vec![
-                Column::new("x1".into(), &[1.0, 2.0]),
-                Column::new("predicted".into(), &[1.0, 2.0]),
-            ],
-        )
-        .unwrap();
-        assert!(validate_no_existing_column(&df, "predicted").is_err());
     }
 
     #[test]

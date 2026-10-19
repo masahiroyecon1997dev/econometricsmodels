@@ -213,13 +213,14 @@ $$
 - **スコープは予測列のみ**（残差列の同時付加は見送り、必要になれば別issueで拡張検討）。
 - **実装層は`engine_pybind`**（`python_package`側で`predict()`の結果を`with_columns()`するだけでも
   実現できるが、列名衝突のエラー送出のしやすさを優先しユーザー判断でRust側に置いた）。
-  `OLSResult`（Rust）に`fit()`時の元DataFrameを`training_data: Option<DataFrame>`として非公開保持する
-  （polarsの列は内部で参照カウント方式のため、このクローン自体は実質コピーを伴わない）。
-  `new_data`指定時は`predict()`と同じ`x`列抽出＋`engine::linear::ols::predict_new_data`を再利用し、
-  `new_data`自体をソースにする。
+  `OLSResult`（Rust）に`fit()`に渡された元の`polars.DataFrame`を`source_data: Option<Py<PyAny>>`として
+  非公開保持し（参照を持つだけでコピーしない）、`new_data=None`ではそれに予測値の列を足して返す。
+  推定に使わない列（取り込めないdtypeの列を含む）もそのまま残る。`new_data`指定時は`predict()`と同じ
+  `x`列抽出＋`engine::linear::ols::predict_new_data`を再利用し、`new_data`自体をソースにする
+  （`x`列だけを取り込み、予測値の列は`new_data`の`polars.DataFrame`に足す）。
 - **列名衝突は`ValidationError`**（ソースデータに既に`"predicted"`列がある場合、`include_intercept=True`
   時の`"const"`列衝突と同じ発想で黙って上書きしない。`engine_pybind::shared::augment::append_predicted_column`）。
-- `training_data`が`None`（`IVResult.first_stage()`が`OLSResult`を構築する経路——各内生変数の
+- `source_data`が`None`（`IVResult.first_stage()`が`OLSResult`を構築する経路——各内生変数の
   第一段階回帰は単一のソースDataFrameを持たないため）の`OLSResults`に対して`augment(new_data=None)`を
   呼ぶと`ValidationError`になる（`new_data`を指定した呼び出しは通常どおり動作する）。
 
@@ -355,15 +356,15 @@ faerのグローバル並列度は`engine::shared::parallelism::ensure_serial()`
   （`f64::max`はNaNを無視して0.0を返すため、丸める前に非有限を判定する）。
 - **エラー**: `statistic`が不正・観測数が補助回帰の列数（定数込み）以下
   （`LeastSquaresError::InsufficientObservationsForAuxRegression`、`CommonError::
-  InsufficientObservations`は元のモデルの`k`を指すためメッセージを分けた）・`training_data`が
+  InsufficientObservations`は元のモデルの`k`を指すためメッセージを分けた）・元のデータが
   無い結果（`IVResults.first_stage()`由来）・全ての`x`が定数は`ValidationError`。補助回帰が除外後も
   特異（既知の制限: 全カテゴリのダミーを`include_intercept=False`で入れると補助回帰の定数と
   共線になる）、または補助回帰が推定できない場合は`ComputationError`（メッセージに
   `White test`と補助回帰であることを含め、元のモデルの共線性と取り違えないようにする）。
 - **実装**: engineの`linear::diagnostics::white_test`（`x`の列・列名・残差を受け取り、補助回帰に
   `OlsEstimator::fit`〔`CovType::Classical`〕を再利用）。`OLSResult`は`OlsEstimator`を保持しないため
-  `engine_pybind`が`training_data`と`param_names`から`x`を再抽出して渡す（`predict_for`と同じ経路、
-  `augment()`と同様`training_data`が無ければ`ValidationError`）。LM/Fの両方をengineが計算し、
+  `engine_pybind`が元のデータと`param_names`から`x`の列だけを取り込んで渡す（`predict_for`と同じ経路、
+  `augment()`と同様に元のデータが無ければ`ValidationError`）。LM/Fの両方をengineが計算し、
   `statistic`の選択は`engine_pybind`。p値は`statrs`の`sf`（`1 - cdf`は裾で潰れるため使わない）。
 - **リファレンスとの関係**: statsmodels `het_white`は補助回帰の項の重複を除かないが、補助回帰を`OLS`で
   当てはめ自由度をランク（`df_model = rank - k_constant`）で数えるため、ダミーの二乗のような重複列
@@ -410,15 +411,15 @@ faerのグローバル並列度は`engine::shared::parallelism::ensure_serial()`
   モデルを元の`X`のまま扱うため中心化すると列空間が変わるから（`SSR_u`は列の正のスケールでは変わらない）。
   完全適合（`SSR_u`が`k_aux·ε·Σû²`以下）はFの分母が0になるため`ComputationError`。
 - **エラー**: `statistic`不正・`nlags < 1`・観測数が補助回帰の列数`k + nlags`以下
-  （`InsufficientObservationsForAuxRegression`）・`time`列の不備・`training_data`が無い結果は
+  （`InsufficientObservationsForAuxRegression`）・`time`列の不備・元のデータが無い結果は
   `ValidationError`、型違い（`time`/`statistic`が`str`でない・`nlags`が`int`でない）は`TypeError`。
   補助回帰が特異（ラグが`X`と共線）・残差が全て0・完全適合・非有限は`ComputationError`
   （メッセージに`Breusch-Godfrey test`を含め、元のモデルの共線性と取り違えないようにする）。
   残差が全て0・完全適合は元の`fit()`が先に`ComputationError`にするためPython経由では
   到達しにくく、Rustの単体テストで担保する。
 - **実装**: engineの`linear::diagnostics::breusch_godfrey_test`（説明変数の列・`has_intercept`・残差・
-  時間の順位・`nlags`）。`engine_pybind`が`training_data`から`x`と時間列を再抽出して渡す
-  （`white_test()`と同じ経路、`training_data`が無ければ`ValidationError`）。LM/Fの両方をengineが
+  時間の順位・`nlags`）。`engine_pybind`が元のデータから`x`と時間列だけを取り込んで渡す
+  （`white_test()`と同じ経路、元のデータが無ければ`ValidationError`）。LM/Fの両方をengineが
   計算し、`statistic`の選択は`engine_pybind`。
 - **リファレンス**: 切片ありはstatsmodels `acorr_breusch_godfrey`（主）とR `bgtest`（`type = "Chisq"/"F"`、
   `fill = 0`）、切片なしはR `bgtest`のみ。
@@ -459,14 +460,14 @@ faerのグローバル並列度は`engine::shared::parallelism::ensure_serial()`
   除くのは定数と完全に同一な列だけで、`2 * x1`のような同一ではない共線列は除かず`ComputationError`
   （全カテゴリのダミーと定数の組み合わせも同様。`white_test()`と同じ制限）。補助回帰の各列は標準化して
   から回帰する（`R²`は変わらず、平均の大きい変数でも失敗しない）。
-- **エラー**: `statistic`が不正・観測数が補助回帰の列数（定数込み`q + 1`）以下・`training_data`が無い結果
+- **エラー**: `statistic`が不正・観測数が補助回帰の列数（定数込み`q + 1`）以下・元のデータが無い結果
   （`IVResults.first_stage()`由来）・全ての`variables`が定数は`ValidationError`。補助回帰が除外後も特異、
   または`R²`が定義できない（残差の二乗が定数等）場合は`ComputationError`（メッセージに
   `Breusch-Pagan test`と補助回帰であることを含める）。
 - **実装**: engineの`linear::diagnostics::breusch_pagan_test`（`z`の列・列名・残差を受け取る）。
   `white_test`と補助回帰以降の処理（項の除外・標準化・統計量・p値、`squared_residual_aux_test`）を共有し、
   違いは補助回帰の説明変数（`x`・二乗・交差項か、`variables`そのものか）だけ。`engine_pybind`が
-  `training_data`から`variables`（既定は`param_names`から取り出した`x`）の列を再抽出して渡す。
+  元のデータから`variables`（既定は`param_names`から取り出した`x`）の列だけを取り込んで渡す。
   p値は`statrs`の`sf`。
 - **リファレンスとの関係**: 主リファレンスはstatsmodels `het_breuschpagan(robust=True)`。`exog_het`に
   定数が無いと補助回帰に定数を入れないため、常に定数列を足して渡す。**LMのp値の自由度を列数-1で数え

@@ -17,7 +17,7 @@ FEはIVの「データ抽出・pyclass定義」→「engine呼び出し」→「
 - **`n_periods`はengine側のgetter（`FeEstimator::n_periods()`）をそのまま`FEResult.n_periods`に渡す**（2-wayのみ`Some`、1-wayは`None`）。`fit`内で計算済みの値を保持しただけで二重計算はしない。REには無い。
 - **`n_entities`はengine側のgetter（`FeEstimator::input().n_entities()`）をそのまま`FEResult.n_entities`に渡す**（`FeInput`が構築時に一度だけ作ったエンティティコードのユニーク数。`fit`の前に`input`から数え直さない）。
 - **`FeEstimator`のgetterを使い分ける**: `params`/`residuals`/`log_likelihood`はwithin変換後の最小二乗そのままの値、`param_names`/`dep_var_name`/`n_obs`は`within_input()`（within変換済みの`OlsInput`）から取得する。`std_errors`/`test_stats`/`p_values`/`conf_lower`/`conf_upper`/`df_model`/`df_resid`/`f_statistic`/`f_p_value`/`aic`/`bic`/`r_squared_*`はFEが`cov_type`・パネル自由度調整を反映して計算し直した値。`FeEstimator`は`OlsEstimator`を保持しない（以前の`estimator()`は廃止、`engine/src/panel/CLAUDE.md`参照）ため、cov_type非対応の内部OLSの値を取り違える余地は無い。
-- **`fit`自体は`#[cfg(test)] mod tests`から直接呼べない**（`PyDataFrame`引数がGILを要求するため、`engine_pybind/src/nonlinear/CLAUDE.md`「テストの制約」に記録済みの既知の制約と同じ）。検証は`maturin develop`後のPythonからの数値照合で行った（IVの`iv/common.rs::fit`も同様、専用のRustユニットテストは追加していない）。
+- **`fit`自体は`#[cfg(test)] mod tests`から直接呼べない**（`SelectedData`引数がGILを要求するため、`engine_pybind/src/nonlinear/CLAUDE.md`「テストの制約」に記録済みの既知の制約と同じ）。検証は`maturin develop`後のPythonからの数値照合で行った（IVの`iv/common.rs::fit`も同様、専用のRustユニットテストは追加していない）。
 
 `FEOptions`/`FEResult`/`build_fe_input`は`panel/fe.rs`に置く（`panel/common.rs`はFE/RE間で共有するエラー変換専用、`panel/mod.rs`のコメント参照）。
 
@@ -27,7 +27,7 @@ FEはIVの「データ抽出・pyclass定義」→「engine呼び出し」→「
 
 `fixed_effects()`本体は`self.estimator.fixed_effects()`（`engine::panel::fe::FeEstimator::fixed_effects`、実装済み・今回変更なし）が返す`FixedEffects`（`OneWay(BTreeMap<String,f64>)`/`TwoWay{entity, time}`）を`match`し、Pythonの`dict`に変換して返す。pyo3 0.29.2は`BTreeMap<K,V>`/`HashMap<K,V,H>`に対し`IntoPyObject`（`Target = PyDict`）を標準で実装しているため、`effects.into_pyobject(py)?.unbind()`で`Py<PyDict>`に変換できる。2-wayは`HashMap<&str, BTreeMap<String,f64>>`（キー`"entity"`/`"time"`）を組み立てて同様に変換する——両分岐とも`Target`が`PyDict`で揃うため、メソッドの戻り値型を`PyResult<Py<PyDict>>`という単一の型にできる（1-way/2-wayでPython側の形状が違う——`dict[str,float]` vs `dict[str,dict[str,float]]`——ことと、Rust側の戻り値型が単一固定なこととは矛盾しない、`PyDict`という同じRust型の中身が違うだけ）。
 
-`fixed_effects()`自体は`fit`と同じ理由（`PyDataFrame`を経由する`fit`が構築した`FEResult`のメソッドであり、独立に`#[cfg(test)]`から呼べるテスト用コンストラクタが無い）でRustユニットテストを追加していない。検証は`maturin develop`後のPythonからの数値照合で行った（fixestリファレンスフィクスチャで1-way/2-way双方がengine単体テスト`fe_estimator_fit_one_way_fixed_effects_matches_fixest_reference`/`fe_estimator_fit_two_way_fixed_effects_matches_fixest_reference`の期待値と完全一致することを確認済み）。
+`fixed_effects()`自体は`fit`と同じ理由（`SelectedData`を経由する`fit`が構築した`FEResult`のメソッドであり、独立に`#[cfg(test)]`から呼べるテスト用コンストラクタが無い）でRustユニットテストを追加していない。検証は`maturin develop`後のPythonからの数値照合で行った（fixestリファレンスフィクスチャで1-way/2-way双方がengine単体テスト`fe_estimator_fit_one_way_fixed_effects_matches_fixest_reference`/`fe_estimator_fit_two_way_fixed_effects_matches_fixest_reference`の期待値と完全一致することを確認済み）。
 
 ## 踏んだ罠: `engine`側で`PanelError`に新バリアントを追加するとき
 
@@ -73,7 +73,7 @@ dead_code扱いの間も呼び出しグラフ経由で到達可能だった）�
   `cov_type`・`cov_type="hc0"`・singletonエンティティ・`cov_type="cluster"`
   （`cluster`指定）・`cov_type="dk"`で`dk_time`未指定（FE・REとも`ValidationError`）の各エラー
   経路が`ValidationError`として正しく変換されることも確認済み。`fit`自体はFEと同じ理由
-  （`PyDataFrame`がGILを要求）で`#[cfg(test)] mod tests`から直接呼べないため、専用の
+  （`SelectedData`がGILを要求）で`#[cfg(test)] mod tests`から直接呼べないため、専用の
   Rustユニットテストは追加していない。
 - RE自身に`fixed_effects()`のような追加メソッドは無いため（`panel-common.md`2.4節、
   `panel/re.rs`モジュールdoc参照）、FEの`fixed_effects()`段階に相当する3段目は無く、

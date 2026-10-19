@@ -60,7 +60,6 @@ use engine::panel::common::TimeKeys;
 use engine::panel::re::{ReCovType, ReEffects, ReEstimator, ReInput, VarianceMethod};
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
-use pyo3_polars::PyDataFrame;
 
 use super::common::{
     PanelCovKind, PanelModel, check_panel_cov_options, panel_error_to_pyerr, parse_panel_cov_kind,
@@ -68,7 +67,7 @@ use super::common::{
 };
 use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
-    extract_entity_groups, extract_f64_column, extract_f64_columns,
+    SelectedData, extract_entity_groups, extract_f64_column, extract_f64_columns,
     extract_optional_cluster_groups, extract_time_keys,
 };
 use crate::shared::errors::unknown_option_value;
@@ -141,6 +140,19 @@ pub struct REOptions {
     /// (time-invariant; for two-way effects, varying in at most one dimension).
     #[pyo3(get)]
     pub variance_method: String,
+}
+
+impl REOptions {
+    /// このオプションが指名するデータの列（`time`・`cluster`・`dk_time`）。使われるかどうか（`cov_type`等）には
+    /// よらず、指名されたものを全て返す。`fit()`はこれらと`y`・`x`等だけをデータから取り込む。
+    pub(crate) fn data_columns(&self) -> Vec<String> {
+        self.time
+            .iter()
+            .chain(&self.cluster)
+            .chain(&self.dk_time)
+            .cloned()
+            .collect()
+    }
 }
 
 #[pymethods]
@@ -579,13 +591,13 @@ pub(crate) fn build_re_input(
 ///   準偏差変換済みデータへの委譲失敗、クラスター数不足、HAC関連のバリデーション等）は
 ///   `panel_error_to_pyerr`で変換
 pub(crate) fn fit(
-    data: PyDataFrame,
+    data: SelectedData,
     y: String,
     x: Vec<String>,
     entity: String,
     options: &REOptions,
 ) -> PyResult<REResult> {
-    let df: DataFrame = data.into();
+    let df: DataFrame = data.frame;
     let (input, effects, cov_type, cov_type_lower, variance_method) =
         build_re_input(&df, y, x, entity, options)?;
 

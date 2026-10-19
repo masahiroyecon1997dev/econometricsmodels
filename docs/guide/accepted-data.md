@@ -7,7 +7,7 @@ This page describes what kind of data and arguments the estimators accept: the i
 The data must be an eager `polars.DataFrame`. Nothing else is accepted: not pandas, not a `polars.LazyFrame`, not a `polars.Series`, not a dictionary or a NumPy array.
 
 - Anything else raises `TypeError` (see [Argument types](#argument-types)). The message for a pandas DataFrame shows how to convert it with `polars.from_pandas(df)`, and the message for a `LazyFrame` tells you to call `.collect()` first.
-- Only the columns you name are read. Every other column is ignored, whatever its dtype, including nested columns (`List`, `Array`, `Struct`) and columns of types the estimators cannot use.
+- Only the columns you name are read. Every other column is ignored, whatever its dtype, including nested columns (`List`, `Array`, `Struct`) and columns of types the estimators cannot use (for example `UInt128`). `augment()` returns the data you passed with the prediction column added, so the columns that were not read are kept.
 
 ## Column types by role
 
@@ -15,7 +15,7 @@ A column is read in one of four roles, and each role accepts different dtypes. A
 
 | Role | Arguments | Accepted dtypes |
 |---|---|---|
-| Numeric value | `y`, `x`, `weight`, `x_exog`, `x_endog`, `instruments` | Integers (`Int8` to `Int128`, `UInt8` to `UInt64`), floats (`Float16`, `Float32`, `Float64`), `Boolean`, `Decimal` |
+| Numeric value | `y`, `x`, `weight`, `x_exog`, `x_endog`, `instruments` | Integers (`Int8` to `Int128`, `UInt8` to `UInt64`; `UInt128` is not accepted in any role), floats (`Float16`, `Float32`, `Float64`), `Boolean`, `Decimal` |
 | Group identity | `entity`, `cluster` | Integers, floats, `String`, `Categorical`, `Enum`, `Boolean`, `Date`, `Datetime` (no time zone) |
 | Time period (panel) | `time` (FE, RE), `dk_time` | Integers, floats, `String`, `Categorical`, `Enum`, `Date`, `Datetime` (no time zone) |
 | Time order (HAC) | `hac_time` | Integers, floats, `Decimal`, `Date`, `Datetime` (with or without a time zone). Not `Boolean`, which has at most two distinct values |

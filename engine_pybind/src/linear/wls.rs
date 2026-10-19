@@ -19,7 +19,6 @@ use crate::shared::errors::guard;
 use engine::linear::wls::WlsEstimator;
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
-use pyo3_polars::PyDataFrame;
 
 use super::common::{
     check_cov_options, least_squares_error_to_pyerr, parse_cov_kind, resolve_cov_type,
@@ -27,7 +26,8 @@ use super::common::{
 use crate::shared::augment::append_predicted_column;
 use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
-    extract_dataframe, extract_f64_column, extract_f64_columns, extract_model_x_columns,
+    SelectedData, extract_f64_column, extract_f64_columns, extract_model_x_columns,
+    select_model_x_columns,
 };
 use crate::shared::mat_conversion::mat_to_vec;
 use crate::shared::option_repr::PyRepr;
@@ -106,6 +106,14 @@ pub struct WLSOptions {
     /// any other `cov_type` raises `ValidationError`.
     #[pyo3(get)]
     pub hac_time: Option<String>,
+}
+
+impl WLSOptions {
+    /// このオプションが指名するデータの列（`cluster` ・`hac_time`）。使われるかどうか（`cov_type`等）には
+    /// よらず、指名されたものを全て返す。`fit()`はこれらと`y`・`x`等だけをデータから取り込む。
+    pub(crate) fn data_columns(&self) -> Vec<String> {
+        self.cluster.iter().chain(&self.hac_time).cloned().collect()
+    }
 }
 
 #[pymethods]
@@ -190,7 +198,7 @@ impl WLSOptions {
 // `get_all`ではなく個別`#[pyo3(get)]`にしている理由は`OLSResult`と同じ
 // （`fitted_values`/`has_intercept`をPython側に公開しないため）。
 #[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct WLSResult {
     #[pyo3(get)]
     pub params: Vec<f64>,
@@ -269,12 +277,10 @@ pub struct WLSResult {
     /// Python; only `predict()` reads it to decide whether to auto-prepend a
     /// constant column for out-of-sample data (same reasoning as `OLSResult`).
     has_intercept: bool,
-    /// The original polars DataFrame passed to `fit()`, cached for
-    /// `augment(new_data=None)`. A cheap clone (polars columns are
-    /// internally reference-counted). Unlike `OLSResult` (shared with
-    /// `IVResult.first_stage()`, which has no single source DataFrame), `WLSResult`
-    /// is only ever built from this file's `fit()`, so this is never `None`.
-    training_data: DataFrame,
+    /// The `polars.DataFrame` passed to `fit()`, as given. `augment(new_data=None)` appends
+    /// the predicted column to it, so every column is kept, including the ones the model
+    /// does not read.
+    source_data: Py<PyAny>,
 }
 
 // `#[pymethods]`ブロックの外に置く非公開実装（`OLSResult`と同じ理由）。
@@ -325,8 +331,14 @@ impl WLSResult {
                 return Ok(self.fitted_values.clone());
             };
 
-            let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
-            self.predict_for(&df)
+            let selected = select_model_x_columns(
+                new_data,
+                "new_data",
+                &self.param_names,
+                self.has_intercept,
+                0,
+            )?;
+            self.predict_for(&selected.frame)
         })
     }
 
@@ -342,18 +354,27 @@ impl WLSResult {
     /// - The source data already has a column named `"predicted"`:
     ///   `ValidationError` (would otherwise silently overwrite it).
     #[pyo3(signature = (new_data=None))]
-    fn augment(&self, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<PyDataFrame> {
+    fn augment(&self, py: Python<'_>, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<Py<PyAny>> {
         guard(|| {
             let (source, predicted) = match new_data {
                 Some(new_data) => {
-                    let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
-                    let predicted = self.predict_for(&df)?;
-                    (df, predicted)
+                    let selected = select_model_x_columns(
+                        new_data,
+                        "new_data",
+                        &self.param_names,
+                        self.has_intercept,
+                        0,
+                    )?;
+                    let predicted = self.predict_for(&selected.frame)?;
+                    (new_data.clone(), predicted)
                 }
-                None => (self.training_data.clone(), self.fitted_values.clone()),
+                None => (
+                    self.source_data.bind(py).clone(),
+                    self.fitted_values.clone(),
+                ),
             };
 
-            append_predicted_column(source, "predicted", predicted)
+            append_predicted_column(&source, "predicted", predicted)
         })
     }
 }
@@ -372,13 +393,13 @@ impl WLSResult {
 ///   `hac_lags`の範囲外・クラスターキー未指定・重みの次元不一致・非正の重み等）は
 ///   `engine::linear::common::LeastSquaresError`から`least_squares_error_to_pyerr`で変換
 pub fn fit(
-    data: PyDataFrame,
+    data: SelectedData,
     y: String,
     x: Vec<String>,
     weight: String,
     options: &WLSOptions,
 ) -> PyResult<WLSResult> {
-    let df: DataFrame = data.into();
+    let SelectedData { source, frame: df } = data;
 
     // DataFrameを見ない検査を先に行う（報告順は`ols.rs`の`fit`と同じ）。
     let cov_kind = parse_cov_kind(&options.cov_type)?;
@@ -466,6 +487,6 @@ pub fn fit(
         bic: wls_estimator.bic(),
         fitted_values: wls_estimator.fitted_values().to_vec(),
         has_intercept: estimator.input().has_intercept(),
-        training_data: df,
+        source_data: source,
     })
 }

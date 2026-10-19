@@ -17,7 +17,6 @@ use engine::linear::diagnostics::{
 use engine::linear::ols::{OlsEstimator, OlsInput};
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
-use pyo3_polars::PyDataFrame;
 
 use super::common::{
     check_cov_options, least_squares_error_to_pyerr, parse_cov_kind, resolve_cov_type,
@@ -25,8 +24,9 @@ use super::common::{
 use crate::shared::augment::append_predicted_column;
 use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
-    extract_column_list, extract_dataframe, extract_f64_column, extract_f64_columns,
-    extract_model_x_columns, extract_time_order_ranks, x_column_names,
+    SelectedData, extract_column_list, extract_f64_column, extract_f64_columns,
+    extract_model_x_columns, extract_time_order_ranks, select_columns, select_model_x_columns,
+    x_column_names,
 };
 use crate::shared::errors::{guard, unknown_option_value, user_error};
 use crate::shared::mat_conversion::mat_to_vec;
@@ -89,6 +89,14 @@ pub struct OLSOptions {
     /// any other `cov_type` raises `ValidationError`.
     #[pyo3(get)]
     pub hac_time: Option<String>,
+}
+
+impl OLSOptions {
+    /// このオプションが指名するデータの列（`cluster`・`hac_time`）。使われるかどうか（`cov_type`）には
+    /// よらず、指名されたものを全て返す。`fit()`はこれらと`y`・`x`だけをデータから取り込む。
+    pub(crate) fn data_columns(&self) -> Vec<String> {
+        self.cluster.iter().chain(&self.hac_time).cloned().collect()
+    }
 }
 
 #[pymethods]
@@ -308,7 +316,7 @@ pub struct BreuschGodfreyTestOutput {
 // 返す値のキャッシュ、`docs/spec/ols-spec.md`「predict()」）はPython側に独立したプロパティとして
 // 公開しない設計上の決定のため、この1フィールドだけ`#[pyo3(get)]`を付けずに残す必要がある。
 #[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct OLSResult {
     #[pyo3(get)]
     pub params: Vec<f64>,
@@ -393,23 +401,36 @@ pub struct OLSResult {
     /// `include_intercept=True`), which would make such an inference silently
     /// wrong instead of erroring.
     has_intercept: bool,
-    /// The original polars DataFrame passed to `fit()`, cached for
-    /// `augment(new_data=None)`. A cheap clone (polars columns are
-    /// internally reference-counted, `docs/spec/ols-spec.md` "predict()" — same
-    /// zero-copy reasoning applies here).
+    /// The `polars.DataFrame` passed to `fit()`, as given. `augment(new_data=None)` appends
+    /// the predicted column to it (so every column is kept), and the diagnostic tests read the
+    /// columns they need from it on demand.
     ///
     /// `None` for `OLSResult`s built by `ols_estimator_to_result` without going
     /// through this file's `fit()` (currently only `IVResult.first_stage()`,
     /// `engine_pybind/src/iv/common.rs`): those per-equation regressions have no
-    /// single source DataFrame to attach a column to, so `augment(new_data=None)`
-    /// on such a result raises `ValidationError` instead.
-    training_data: Option<DataFrame>,
+    /// single source DataFrame, so `augment(new_data=None)` and the diagnostic tests
+    /// on such a result raise `ValidationError` instead.
+    source_data: Option<Py<PyAny>>,
 }
 
 // `#[pymethods]`ブロックの外に置く非公開実装（pyo3は`#[pymethods]`内の全メソッドを
 // Python公開シグネチャとして扱おうとするため、`&DataFrame`のような`FromPyObject`
 // 未実装の型を引数に取るヘルパーはこちらに置く必要がある）。
 impl OLSResult {
+    /// 元のデータ（`fit()`に渡された`polars.DataFrame`）。保持していない結果（`IVResult.first_stage()`）は
+    /// `TRAINING_DATA_NOT_RETAINED`。
+    fn retained_source<'py>(&self, py: Python<'py>, method: &str) -> PyResult<Bound<'py, PyAny>> {
+        self.source_data
+            .as_ref()
+            .map(|source| source.bind(py).clone())
+            .ok_or_else(|| {
+                user_error(
+                    ErrorCode::TrainingDataNotRetained,
+                    vec![("method", ParamValue::from(method))],
+                )
+            })
+    }
+
     /// `predict()`/`augment()`のSome分岐で共有する、`df`に対するout-of-sample予測
     /// （`x`列の抽出→`predict_new_data`呼び出し）。
     fn predict_for(&self, df: &DataFrame) -> PyResult<Vec<f64>> {
@@ -452,8 +473,14 @@ impl OLSResult {
                 return Ok(self.fitted_values.clone());
             };
 
-            let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
-            self.predict_for(&df)
+            let selected = select_model_x_columns(
+                new_data,
+                "new_data",
+                &self.param_names,
+                self.has_intercept,
+                0,
+            )?;
+            self.predict_for(&selected.frame)
         })
     }
 
@@ -469,27 +496,33 @@ impl OLSResult {
     ///   non-numeric, or containing missing/NaN/infinite values: `ValidationError`.
     /// - The source data already has a column named `"predicted"`:
     ///   `ValidationError` (would otherwise silently overwrite it).
-    /// - `new_data=None` and this result has no cached training data (currently
+    /// - `new_data=None` and this result has no retained source data (currently
     ///   only possible for `IVResult.first_stage()` results): `ValidationError`.
     #[pyo3(signature = (new_data=None))]
-    fn augment(&self, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<PyDataFrame> {
+    fn augment(&self, py: Python<'_>, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<Py<PyAny>> {
         guard(|| {
             let (source, predicted) = match new_data {
                 Some(new_data) => {
-                    let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
-                    let predicted = self.predict_for(&df)?;
-                    (df, predicted)
+                    let selected = select_model_x_columns(
+                        new_data,
+                        "new_data",
+                        &self.param_names,
+                        self.has_intercept,
+                        0,
+                    )?;
+                    let predicted = self.predict_for(&selected.frame)?;
+                    (new_data.clone(), predicted)
                 }
                 None => {
                     let source = self
-                        .training_data
-                        .clone()
+                        .source_data
+                        .as_ref()
                         .ok_or_else(|| user_error(ErrorCode::AugmentRequiresNewData, Vec::new()))?;
-                    (source, self.fitted_values.clone())
+                    (source.bind(py).clone(), self.fitted_values.clone())
                 }
             };
 
-            append_predicted_column(source, "predicted", predicted)
+            append_predicted_column(&source, "predicted", predicted)
         })
     }
 
@@ -505,25 +538,21 @@ impl OLSResult {
     ///
     /// # Errors
     /// - `statistic` is not `"lm"` or `"f"`: `ValidationError`.
-    /// - This result has no cached training data (currently only `IVResult.first_stage()`
+    /// - This result has no retained source data (currently only `IVResult.first_stage()`
     ///   results): `ValidationError`.
     /// - Every regressor is constant: `ValidationError`.
     /// - Too few observations for the auxiliary regression: `ValidationError`.
     /// - The auxiliary design matrix is still singular after dropping, or its R-squared
     ///   is undefined: `ComputationError`.
     #[pyo3(signature = (statistic="lm"))]
-    fn white_test(&self, statistic: &str) -> PyResult<WhiteTestOutput> {
+    fn white_test(&self, py: Python<'_>, statistic: &str) -> PyResult<WhiteTestOutput> {
         guard(|| {
             let version = parse_statistic_version(statistic)?;
-            let df = self.training_data.as_ref().ok_or_else(|| {
-                user_error(
-                    ErrorCode::TrainingDataNotRetained,
-                    vec![("method", ParamValue::from("white_test"))],
-                )
-            })?;
+            let source = self.retained_source(py, "white_test")?;
 
             let x_names = x_column_names(&self.param_names, self.has_intercept, 0);
-            let x_columns = extract_f64_columns(df, x_names, ColumnSource::new("x", "data"))?;
+            let df = select_columns(&source, "data", x_names)?.frame;
+            let x_columns = extract_f64_columns(&df, x_names, ColumnSource::new("x", "data"))?;
             let result = white_test(&x_columns, x_names, &self.residuals)
                 .map_err(least_squares_error_to_pyerr)?;
 
@@ -561,13 +590,14 @@ impl OLSResult {
     ///   column does not exist, has an unsupported dtype or contains missing values, NaN or
     ///   infinity, every variable is constant, or too few observations for the auxiliary
     ///   regression: `ValidationError`.
-    /// - This result has no cached training data (currently only `IVResult.first_stage()`
+    /// - This result has no retained source data (currently only `IVResult.first_stage()`
     ///   results): `ValidationError`.
     /// - The auxiliary design matrix is still singular after dropping, or its R-squared
     ///   is undefined: `ComputationError`.
     #[pyo3(signature = (variables=None, statistic="lm"))]
     fn breusch_pagan_test(
         &self,
+        py: Python<'_>,
         variables: Option<&Bound<'_, PyAny>>,
         statistic: &str,
     ) -> PyResult<BreuschPaganTestOutput> {
@@ -576,12 +606,7 @@ impl OLSResult {
             let variables = variables
                 .map(|ob| extract_column_list(ob, "variables"))
                 .transpose()?;
-            let df = self.training_data.as_ref().ok_or_else(|| {
-                user_error(
-                    ErrorCode::TrainingDataNotRetained,
-                    vec![("method", ParamValue::from("breusch_pagan_test"))],
-                )
-            })?;
+            let source = self.retained_source(py, "breusch_pagan_test")?;
 
             let z_names = match variables.as_deref() {
                 Some(names) => {
@@ -596,8 +621,9 @@ impl OLSResult {
             } else {
                 "x"
             };
+            let df = select_columns(&source, "data", z_names)?.frame;
             let z_columns =
-                extract_f64_columns(df, z_names, ColumnSource::new(z_argument, "data"))?;
+                extract_f64_columns(&df, z_names, ColumnSource::new(z_argument, "data"))?;
             let result = breusch_pagan_test(&z_columns, z_names, &self.residuals)
                 .map_err(least_squares_error_to_pyerr)?;
 
@@ -635,13 +661,14 @@ impl OLSResult {
     ///   auxiliary regression (`n <= k + nlags`): `ValidationError`.
     /// - `time` does not exist, has an unsupported dtype, or contains missing values, NaN,
     ///   infinity or duplicates: `ValidationError`.
-    /// - This result has no cached training data (currently only `IVResult.first_stage()`
+    /// - This result has no retained source data (currently only `IVResult.first_stage()`
     ///   results): `ValidationError`.
     /// - The auxiliary design matrix is singular, or the residuals are all zero / fitted
     ///   exactly by the auxiliary regression: `ComputationError`.
     #[pyo3(signature = (time, nlags, statistic=None))]
     fn breusch_godfrey_test(
         &self,
+        py: Python<'_>,
         time: &Bound<'_, PyAny>,
         nlags: &Bound<'_, PyAny>,
         statistic: Option<&Bound<'_, PyAny>>,
@@ -654,22 +681,21 @@ impl OLSResult {
                 None => "lm".to_string(),
             };
             let version = parse_statistic_version(&statistic)?;
-            let df = self.training_data.as_ref().ok_or_else(|| {
-                user_error(
-                    ErrorCode::TrainingDataNotRetained,
-                    vec![("method", ParamValue::from("breusch_godfrey_test"))],
-                )
-            })?;
+            let source = self.retained_source(py, "breusch_godfrey_test")?;
 
+            let mut needed: Vec<String> =
+                x_column_names(&self.param_names, self.has_intercept, 0).to_vec();
+            needed.push(time.clone());
+            let df = select_columns(&source, "data", &needed)?.frame;
             let x_columns = extract_model_x_columns(
-                df,
+                &df,
                 &self.param_names,
                 self.has_intercept,
                 0,
                 ColumnSource::new("x", "data"),
             )?;
             let time_order =
-                extract_time_order_ranks(df, &time, ColumnSource::new("time", "data"))?;
+                extract_time_order_ranks(&df, &time, ColumnSource::new("time", "data"))?;
             let result = breusch_godfrey_test(
                 &x_columns,
                 self.has_intercept,
@@ -716,12 +742,12 @@ impl OLSResult {
 ///   `hac_lags`の範囲外・クラスターキー未指定等）は`engine::linear::common::LeastSquaresError`から
 ///   `least_squares_error_to_pyerr`で変換
 pub fn fit(
-    data: PyDataFrame,
+    data: SelectedData,
     y: String,
     x: Vec<String>,
     options: &OLSOptions,
 ) -> PyResult<OLSResult> {
-    let df: DataFrame = data.into();
+    let SelectedData { source, frame: df } = data;
 
     // DataFrameを見ない検査を先に行う。報告順は`docs/guide/validation.md`
     // 「Order in which errors are reported」: オプションの値 → オプションの組合せ →
@@ -759,7 +785,7 @@ pub fn fit(
         .map_err(least_squares_error_to_pyerr)?;
 
     let mut result = ols_estimator_to_result(&estimator, cov_kind.name().to_string());
-    result.training_data = Some(df);
+    result.source_data = Some(source);
     Ok(result)
 }
 
@@ -816,7 +842,7 @@ pub(crate) fn ols_estimator_to_result(
         // `fit()`（本ファイル）が呼び出し後に`Some(df)`で上書きする。この関数の
         // もう一つの呼び出し元`iv::common::first_stage()`は単一のソースDataFrameを
         // 持たないため`None`のまま（`OLSResult`のdocコメント参照）。
-        training_data: None,
+        source_data: None,
     }
 }
 

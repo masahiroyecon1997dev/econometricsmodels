@@ -145,9 +145,10 @@ OLSの`predict()`（`ols-spec.md`「predict()」）と完全に同じ設計・�
 
 `WLSResults.augment(new_data: pl.DataFrame | None = None) -> pl.DataFrame`。
 OLSの`augment()`（`ols-spec.md`「augment()」）と完全に同じ設計・シグネチャを適用する。
-`predict()`と同様、重みは計算に一切関与しない。`WLSResult`（Rust）は`fit()`時の元DataFrameを
-`training_data: DataFrame`として非公開保持する（`OLSResult`と異なり`IVResult.first_stage()`の
-ような別経路の構築元が無いため`Option`にせず常に保持する）。
+`predict()`と同様、重みは計算に一切関与しない。`WLSResult`（Rust）は`fit()`に渡された元の
+`polars.DataFrame`を非公開保持し（`OLSResult`と異なり`IVResult.first_stage()`のような別経路の構築元が
+無いため`Option`にせず常に保持する）、`augment(new_data=None)`はそれに予測値の列を足して返す
+（推定に使わない列も残る。`ols-spec.md`「augment()」）。
 
 ### 3.7 テスト
 

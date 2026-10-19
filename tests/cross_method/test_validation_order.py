@@ -86,6 +86,9 @@ def _simple(model_cls, options_cls):
 
 _X = ["x1", "x2"]
 _LINEAR_FAULTS = (
+    "uint128_y",
+    "uint128_x",
+    "uint128_cluster",
     "unknown_cov_type",
     "unused_cluster",
     "unused_hac_lags",
@@ -101,6 +104,9 @@ _LINEAR_FAULTS = (
     "bad_confidence_level",
 )
 _NONLINEAR_FAULTS = (
+    "uint128_y",
+    "uint128_x",
+    "uint128_cluster",
     "unknown_cov_type",
     "unknown_solver",
     "unused_cluster",
@@ -115,6 +121,9 @@ _NONLINEAR_FAULTS = (
     "bad_max_iter",
 )
 _IV_FAULTS = (
+    "uint128_y",
+    "uint128_x",
+    "uint128_cluster",
     "unknown_estimator",
     "unknown_cov_type",
     "unknown_gmm_type",
@@ -136,6 +145,9 @@ _IV_FAULTS = (
     "bad_confidence_level",
 )
 _PANEL_FAULTS = (
+    "uint128_y",
+    "uint128_x",
+    "uint128_cluster",
     "unknown_cov_type",
     "unused_cluster",
     "unused_dk_bandwidth",
@@ -467,6 +479,22 @@ FAULTS = {
                 "other_argument": "y",
             },
         ),
+        Fault(
+            "uint128_y",
+            (5, 0),
+            code=ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
+            params={"column": "u128", "dtype": "UInt128", "argument": "y"},
+        ),
+        Fault(
+            "uint128_x",
+            (5, 0),
+            code=ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
+            params=lambda m: {
+                "column": "u128",
+                "dtype": "UInt128",
+                "argument": m.x_role,
+            },
+        ),
         Fault("missing_y", (5, 0), column="no_such_y", argument="y"),
         Fault("missing_x", (5, 0), column="no_such_x"),
         Fault(
@@ -488,6 +516,16 @@ FAULTS = {
             (6, 0),
             column="no_such_cluster",
             argument="cluster",
+        ),
+        Fault(
+            "uint128_cluster",
+            (6, 0),
+            code=ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
+            params={
+                "column": "u128",
+                "dtype": "UInt128",
+                "argument": "cluster",
+            },
         ),
         Fault("missing_time_column", (6, 1), column="no_such_time"),
         Fault(
@@ -524,7 +562,7 @@ FAULTS = {
 
 # `y`の列名を使う故障。`y`を別の列名に変える故障と混ぜると、成立しなくなる。
 _Y_FAULTS = frozenset({"y_in_x", "weight_is_y", "time_is_y", "dk_time_is_y"})
-_Y_CHANGERS = frozenset({"missing_y", "non_binary_y"})
+_Y_CHANGERS = frozenset({"missing_y", "non_binary_y", "uint128_y"})
 # `hac`/`dk`を選ぶと使われてしまう、`hac_lags`/`dk_*`の未使用の故障。
 _UNUSED_WITHOUT_TIME_COV = frozenset(
     {"unused_hac_lags", "unused_dk_bandwidth", "unused_dk_time"}
@@ -588,6 +626,12 @@ def changes(method: Method, fault_id: str) -> Changes:
             return {}, {"time": method.base_args["y"]}
         case "dk_time_is_y":
             return {}, {"cov_type": "dk", "dk_time": method.base_args["y"]}
+        case "uint128_y":
+            return {"y": "u128"}, {}
+        case "uint128_x":
+            return {x_role: [*base_x, "u128"]}, {}
+        case "uint128_cluster":
+            return {}, {"cov_type": "cluster", "cluster": "u128"}
         case "missing_y":
             return {"y": "no_such_y"}, {}
         case "missing_x":
@@ -724,7 +768,12 @@ def raises_fault(fault: Fault, method: Method) -> Any:
 
 @pytest.fixture(scope="module")
 def df() -> pl.DataFrame:
-    return make_frame(11)
+    frame = make_frame(11)
+    # 取り込めないdtypeの列。指名されたときの報告順を確かめるための故障が使う。
+    u128 = pl.Series("u128", range(frame.height), dtype=pl.Int64).cast(
+        pl.UInt128
+    )
+    return frame.with_columns(u128)
 
 
 # ── 前提（故障の定義と単独の故障）────────────────────────────────────

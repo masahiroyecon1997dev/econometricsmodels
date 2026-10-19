@@ -300,9 +300,10 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   `new_data`）に予測確率の列（`"predicted_probability"`）を1列付加したpolars DataFrameを返す（OLSの
   `augment()`と同型）。列名衝突（ソースデータに既に`"predicted_probability"`列が
   ある場合）は`ValidationError`（`engine_pybind::shared::augment::append_predicted_column`）。
-  `LogitResult`は`fit()`時の元DataFrameを非公開`training_data: DataFrame`として保持する
-  （`IVResult.first_stage()`のような単一DataFrameを持たない構築経路が無いため、OLSと異なり
-  `Option`にせず常に`DataFrame`、`WLSResult`と同じ設計）。
+  `LogitResult`は`fit()`に渡された元の`polars.DataFrame`を非公開で保持し、
+  `augment(new_data=None)`はそれに予測値の列を足して返す（推定に使わない列も残る。
+  `IVResult.first_stage()`のような単一DataFrameを持たない構築経路が無いため、OLSと異なり
+  `Option`にせず常に保持する。`WLSResult`と同じ設計）。
 
 ### 3.7 engine_pybind: エラー変換
 

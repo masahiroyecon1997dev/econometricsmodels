@@ -42,6 +42,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Logit / Probit / Tobit: `solver="lbfgs"` now starts from the inverse Hessian at the starting point (when it is positive definite, otherwise as before), so it no longer needs many more iterations than `newton` and `bfgs` when the regressors are strongly correlated. For example, with 20 equicorrelated regressors (correlation 0.9) it needed 44 iterations and failed at the default `max_iter=35`; it now converges in 4. Estimates are unchanged within the convergence tolerance. For Tobit, `lbfgs` with `max_iter=1` and `raise_on_non_convergence=False` no longer raises a singular-Hessian `ComputationError` for the Hessian-based `cov_type`s on a heavily censored sample; like `newton` and `bfgs` it returns the unconverged result
 - FE: for a perfect fit or extreme scale differences between slope coefficients, the F-test failure is now reported by FE's own F-test (still `ComputationError`, with a different message) instead of by the internal OLS fit. With a robust `cov_type` an input that failed before can now succeed. Results of every other input are bit-for-bit unchanged
 
+### Fixed
+
+- A column of dtype `UInt128` that the model does not use no longer makes `fit()`, `predict()` or `augment()` fail (it used to end in a Rust panic). The data is now read column by column: only the columns you name are converted, as `Accepted data` already said, and `augment()` returns your data with the prediction column added, so unused columns are kept. A `UInt128` column that you do name (as `y`, `x`, a weight, a cluster, an entity, a time or an instrument) raises `ValidationError` with the code `COLUMN_UNSUPPORTED_DTYPE`
+
 ## [0.8.0] - 2026-10-04
 
 Input-validation and API-consistency release. No new estimation method is added: accepted input types and option values are now checked strictly, names are unified across methods, and FE / RE inference follows fixest / plm conventions. Many changes are breaking (permitted during the `0.x.x` pre-release period).

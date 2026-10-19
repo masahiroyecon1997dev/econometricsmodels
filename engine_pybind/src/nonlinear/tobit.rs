@@ -22,8 +22,8 @@
 //! 【責務分離】【言語方針】は`logit.rs`のモジュールdocコメントと同じ
 //! （`.claude/rules/rust-style.md`参照）。
 //!
-//! `build_tobit_input`が`PyDataFrame`ではなく`polars::DataFrame`を受け取る設計にしている
-//! 理由も`logit.rs`と同じ（GILなしで`cargo test`から直接ユニットテストできるようにするため）。
+//! `build_tobit_input`が`polars::DataFrame`を受け取る設計にしている理由も`logit.rs`と同じ
+//! （GILなしで`cargo test`から直接ユニットテストできるようにするため）。
 
 use engine::nonlinear::common::{
     CovType as EngineCovType, MleFitOptions, SolverType as EngineSolverType,
@@ -34,7 +34,6 @@ use engine::nonlinear::tobit::{
 use engine::shared::error_catalog::ErrorCode;
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
-use pyo3_polars::PyDataFrame;
 
 use super::common::{
     MarginalEffectsResult, check_cov_options, mle_error_to_pyerr, parse_cov_kind,
@@ -44,7 +43,8 @@ use super::common::{
 use crate::shared::augment::append_predicted_column;
 use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
-    extract_dataframe, extract_f64_column, extract_f64_columns, extract_model_x_columns,
+    SelectedData, extract_f64_column, extract_f64_columns, extract_model_x_columns,
+    select_model_x_columns,
 };
 use crate::shared::errors::{guard, unknown_option_value, user_error};
 use crate::shared::option_repr::PyRepr;
@@ -133,6 +133,14 @@ pub struct TobitOptions {
     /// Upper censoring bound. `None` (default) means "no censoring from above".
     #[pyo3(get)]
     pub upper: Option<f64>,
+}
+
+impl TobitOptions {
+    /// このオプションが指名するデータの列（`cluster`）。使われるかどうか（`cov_type`等）には
+    /// よらず、指名されたものを全て返す。`fit()`はこれらと`y`・`x`等だけをデータから取り込む。
+    pub(crate) fn data_columns(&self) -> Vec<String> {
+        self.cluster.iter().cloned().collect()
+    }
 }
 
 #[pymethods]
@@ -344,14 +352,25 @@ pub struct TobitResult {
     /// Not exposed to Python; only `predict`/`marginal_effects`/`censoring_fit_check`
     /// read it (`LogitResult`の`estimator`と同じ位置づけ)。
     estimator: TobitEstimator,
-    /// The original polars DataFrame passed to `fit()`, cached for
-    /// `augment(new_data=None)` (`LogitResult`の`training_data`と同じ
-    /// 位置づけ)。
-    training_data: DataFrame,
+    /// The `polars.DataFrame` passed to `fit()`, as given. `augment(new_data=None)` appends
+    /// the predicted column to it, so every column is kept, including the ones the model
+    /// does not read.
+    source_data: Py<PyAny>,
 }
 
 // `#[pymethods]`ブロックの外に置く非公開実装（`LogitResult`と同じ理由）。
 impl TobitResult {
+    /// `new_data`から`predict()`/`augment()`が使う`x`列だけを取り込む。
+    fn select_new_data(&self, new_data: &Bound<'_, PyAny>) -> PyResult<SelectedData> {
+        select_model_x_columns(
+            new_data,
+            "new_data",
+            &self.param_names,
+            self.estimator.input().has_intercept(),
+            1,
+        )
+    }
+
     /// `predict()`/`augment()`のSome分岐で共有する、`df`に対するout-of-sample予測
     /// （`x`列の抽出→`predict_new_data`呼び出し）。`x`の列名はLogit/Probitと異なり
     /// `param_names`の先頭`"const"`（`has_intercept`時）と末尾`"sigma"`の両方を
@@ -399,8 +418,8 @@ impl TobitResult {
                 return self.estimator.predict(target).map_err(mle_error_to_pyerr);
             };
 
-            let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
-            self.predict_for(target, &df)
+            let selected = self.select_new_data(new_data)?;
+            self.predict_for(target, &selected.frame)
         })
     }
 
@@ -425,20 +444,21 @@ impl TobitResult {
     #[pyo3(signature = (new_data=None, target="expected_observed".to_string()))]
     fn augment(
         &self,
+        py: Python<'_>,
         new_data: Option<&Bound<'_, PyAny>>,
         target: String,
-    ) -> PyResult<PyDataFrame> {
+    ) -> PyResult<Py<PyAny>> {
         guard(|| {
             let target_enum = parse_marginal_effects_target(&target)?;
 
             let (source, predicted) = match new_data {
                 Some(new_data) => {
-                    let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
-                    let predicted = self.predict_for(target_enum, &df)?;
-                    (df, predicted)
+                    let selected = self.select_new_data(new_data)?;
+                    let predicted = self.predict_for(target_enum, &selected.frame)?;
+                    (new_data.clone(), predicted)
                 }
                 None => (
-                    self.training_data.clone(),
+                    self.source_data.bind(py).clone(),
                     self.estimator
                         .predict(target_enum)
                         .map_err(mle_error_to_pyerr)?,
@@ -446,7 +466,7 @@ impl TobitResult {
             };
 
             let column_name = format!("predicted_{}", target.to_lowercase());
-            append_predicted_column(source, &column_name, predicted)
+            append_predicted_column(&source, &column_name, predicted)
         })
     }
 
@@ -671,12 +691,12 @@ pub(crate) fn build_tobit_input(
 ///   特異設計行列・クラスターキー未指定・クラスター数不足等）は`mle_error_to_pyerr`で
 ///   変換（詳細は`engine::nonlinear::tobit::TobitEstimator::fit`のdocコメント参照）
 pub(crate) fn fit(
-    data: PyDataFrame,
+    data: SelectedData,
     y: String,
     x: Vec<String>,
     options: &TobitOptions,
 ) -> PyResult<TobitResult> {
-    let df: DataFrame = data.into();
+    let SelectedData { source, frame: df } = data;
     let (input, cov_type, cov_type_lower, solver) = build_tobit_input(&df, y, x, options)?;
 
     let estimator = TobitEstimator::fit(
@@ -728,7 +748,7 @@ pub(crate) fn fit(
         lower: options.lower,
         upper: options.upper,
         estimator,
-        training_data: df,
+        source_data: source,
     })
 }
 
@@ -1136,9 +1156,9 @@ mod tests {
     /// `censoring_fit_category_to_result`/`censoring_fit_check_to_result`（`CensoringFitCategory`/
     /// `CensoringFitCheck`のprivateフィールドをPython向けpyclassに詰め替えるだけの変換）は
     /// これまで検証されていなかった（フィールドの取り違え・`Option`ラップ漏れ等を検出でき
-    /// ない状態だった、rust-reviewer指摘）。`TobitEstimator::fit`は`PyDataFrame`を経由しない
+    /// ない状態だった、rust-reviewer指摘）。`TobitEstimator::fit`は`SelectedData`を経由しない
     /// ため（`engine_pybind/src/nonlinear/CLAUDE.md`の既知の制約通り、`fit`本体はGILが
-    /// 必要な`PyDataFrame`引数のため`cargo test`から直接呼べないが、`TobitEstimator::fit`
+    /// 必要な`SelectedData`引数のため`cargo test`から直接呼べないが、`TobitEstimator::fit`
     /// 自体はengine層の関数でGIL不要）、`build_tobit_input`が返す`TobitInput`にそのまま
     /// 適用してこの変換ロジックを独立に検証する。
     #[test]

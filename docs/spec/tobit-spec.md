@@ -311,7 +311,7 @@ Tobit固有の差分:
   `"predicted_expected_observed"`）にした。理由: Tobitは`target`によって`predict()`の意味が
   変わるため、固定名だと同じDataFrameに複数の`target`を積み上げようとした2回目の`augment()`が
   列名衝突で失敗する（`target`ごとに別の列名にすればこれを避けられる、ユーザー確認済み・提案）。
-  `TobitResult`も`LogitResult`と同じく`training_data: DataFrame`を保持する。
+  `TobitResult`も`LogitResult`と同じく、`fit()`に渡された元の`polars.DataFrame`を保持する。
 - **`pred_table()`は廃止し`censoring_fit_check()`に置き換える**。単一集約値ではなく`lower` /
   `uncensored` / `upper`の**方向別内訳**（`CensoringFitCheck`、該当方向の打ち切りが無ければその
   カテゴリは出力されない）。各カテゴリは`observed_rate`（`y`がちょうど境界値に一致する観測の割合）と

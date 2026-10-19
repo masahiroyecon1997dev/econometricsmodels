@@ -11,13 +11,12 @@
 //! 公開API（`LogitOptions`/`LogitResult`）のdocコメントと、`ValidationError`のメッセージ
 //! 文字列は英語。それ以外（このファイルの説明・非公開関数のdocコメント等）は日本語のまま。
 //!
-//! `build_logit_input`が`PyDataFrame`ではなく`polars::DataFrame`（プレーンなpolars型）を
-//! 受け取る設計にしているのは、`column_extraction::extract_f64_column`等が既に同じ
-//! シグネチャ（`&DataFrame`）を使っているため、およびPythonインタプリタ（GIL）を
-//! 起動せずに`cargo test`で直接ユニットテストできるようにするため。
+//! `build_logit_input`が`polars::DataFrame`（プレーンなpolars型）を受け取る設計にしているのは、
+//! `column_extraction::extract_f64_column`等が既に同じシグネチャ（`&DataFrame`）を使っているため、
+//! およびPythonインタプリタ（GIL）を起動せずに`cargo test`で直接ユニットテストできるようにするため。
 //! `fit`（本ファイルの`pub(crate)`関数、`#[pyfunction] fit_logit`本体は`lib.rs`側にあり
-//! これに委譲する）が`PyDataFrame`を受け取り、`.into()`で`DataFrame`に変換して
-//! から`build_logit_input`を呼ぶ（`ols.rs`の`fit`関数と同じ変換パターン）。
+//! これに委譲する）は、推定に使う列だけを取り込んだ`SelectedData`を受け取り、その`frame`から
+//! `build_logit_input`を呼ぶ（`ols.rs`の`fit`関数と同じパターン）。
 
 use crate::shared::errors::guard;
 use engine::nonlinear::common::{
@@ -26,7 +25,6 @@ use engine::nonlinear::common::{
 use engine::nonlinear::logit::{LogitEstimator, LogitInput};
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
-use pyo3_polars::PyDataFrame;
 
 use super::common::{
     MarginalEffectsResult, check_cov_options, mat_to_nested_vec, mle_error_to_pyerr,
@@ -36,7 +34,8 @@ use super::common::{
 use crate::shared::augment::append_predicted_column;
 use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
-    extract_dataframe, extract_f64_column, extract_f64_columns, extract_model_x_columns,
+    SelectedData, extract_f64_column, extract_f64_columns, extract_model_x_columns,
+    select_model_x_columns,
 };
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
@@ -122,6 +121,14 @@ pub struct LogitOptions {
     /// final iterate instead (with `converged=False`).
     #[pyo3(get, set)]
     pub raise_on_non_convergence: bool,
+}
+
+impl LogitOptions {
+    /// このオプションが指名するデータの列（`cluster`）。使われるかどうか（`cov_type`等）には
+    /// よらず、指名されたものを全て返す。`fit()`はこれらと`y`・`x`等だけをデータから取り込む。
+    pub(crate) fn data_columns(&self) -> Vec<String> {
+        self.cluster.iter().cloned().collect()
+    }
 }
 
 #[pymethods]
@@ -300,18 +307,27 @@ pub struct LogitResult {
     /// Not exposed to Python; only `predict`/`pred_table`/`marginal_effects` read it
     /// (`OLSResult`の`fitted_values`/`has_intercept`と同じ位置づけ、コメント参照)。
     estimator: LogitEstimator,
-    /// The original polars DataFrame passed to `fit()`, cached for
-    /// `augment(new_data=None)`. A cheap clone (polars columns are
-    /// internally reference-counted). `LogitResult` is only ever built from this
-    /// file's `fit()` (unlike `OLSResult`, shared with `IVResult.first_stage()`), so
-    /// this is never absent (`WLSResult`と同じ理由、`DataFrame`のまま`Option`にしない)。
-    training_data: DataFrame,
+    /// The `polars.DataFrame` passed to `fit()`, as given. `augment(new_data=None)` appends
+    /// the predicted column to it, so every column is kept, including the ones the model
+    /// does not read.
+    source_data: Py<PyAny>,
 }
 
 // `#[pymethods]`ブロックの外に置く非公開実装（`&DataFrame`が`FromPyObject`未実装の
 // ため、`#[pymethods]`内に置くとpyo3がPython公開シグネチャとして解釈しようとして
 // ビルドエラーになる）。
 impl LogitResult {
+    /// `new_data`から`predict()`/`augment()`が使う`x`列だけを取り込む。
+    fn select_new_data(&self, new_data: &Bound<'_, PyAny>) -> PyResult<SelectedData> {
+        select_model_x_columns(
+            new_data,
+            "new_data",
+            &self.param_names,
+            self.estimator.input().has_intercept(),
+            0,
+        )
+    }
+
     /// `predict()`/`augment()`のSome分岐で共有する、`df`に対するout-of-sample予測
     /// （`x`列の抽出→`predict_new_data`呼び出し）。
     fn predict_for(&self, df: &DataFrame) -> PyResult<Vec<f64>> {
@@ -344,8 +360,8 @@ impl LogitResult {
                 return Ok(self.estimator.predict());
             };
 
-            let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
-            self.predict_for(&df)
+            let selected = self.select_new_data(new_data)?;
+            self.predict_for(&selected.frame)
         })
     }
 
@@ -362,18 +378,18 @@ impl LogitResult {
     /// - The source data already has a column named `"predicted_probability"`:
     ///   `ValidationError` (would otherwise silently overwrite it).
     #[pyo3(signature = (new_data=None))]
-    fn augment(&self, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<PyDataFrame> {
+    fn augment(&self, py: Python<'_>, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<Py<PyAny>> {
         guard(|| {
             let (source, probability) = match new_data {
                 Some(new_data) => {
-                    let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
-                    let probability = self.predict_for(&df)?;
-                    (df, probability)
+                    let selected = self.select_new_data(new_data)?;
+                    let probability = self.predict_for(&selected.frame)?;
+                    (new_data.clone(), probability)
                 }
-                None => (self.training_data.clone(), self.estimator.predict()),
+                None => (self.source_data.bind(py).clone(), self.estimator.predict()),
             };
 
-            append_predicted_column(source, "predicted_probability", probability)
+            append_predicted_column(&source, "predicted_probability", probability)
         })
     }
 
@@ -480,12 +496,12 @@ pub(crate) fn build_logit_input(
 ///   クラスター数不足等）は`mle_error_to_pyerr`で変換（詳細は
 ///   `engine::nonlinear::logit::LogitEstimator::fit`のdocコメント参照）
 pub(crate) fn fit(
-    data: PyDataFrame,
+    data: SelectedData,
     y: String,
     x: Vec<String>,
     options: &LogitOptions,
 ) -> PyResult<LogitResult> {
-    let df: DataFrame = data.into();
+    let SelectedData { source, frame: df } = data;
     let (input, cov_type, cov_type_lower, solver) = build_logit_input(&df, y, x, options)?;
 
     let estimator = LogitEstimator::fit(
@@ -528,7 +544,7 @@ pub(crate) fn fit(
         cov_type: cov_type_lower,
         solver: solver_name(solver).to_string(),
         estimator,
-        training_data: df,
+        source_data: source,
     })
 }
 

@@ -28,7 +28,7 @@ use super::column_extraction::{extract_column_name, type_name_of};
 ///
 /// 別の手法の`*Options`や`int`等を渡す誤りは、PyO3の自動の抽出に任せると引数名を含まない
 /// メッセージになるため、他の引数と同じ形式の`TypeError`にする（`#[pyfunction]`の引数型を
-/// `&Bound<PyAny>`にしてこの関数で取り出す。`extract_dataframe`と同じ構成）。
+/// `&Bound<PyAny>`にしてこの関数で取り出す。`check_dataframe`と同じ構成）。
 ///
 /// # Errors
 /// `T`のインスタンスでなければ`TypeError`（引数名・期待するクラス・実際の型を含む）。

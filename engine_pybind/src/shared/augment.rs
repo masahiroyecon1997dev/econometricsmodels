@@ -1,86 +1,47 @@
 //! `augment()`（ソースデータに予測値の列を1列付加したDataFrameを返す）の共通処理。
 //!
-//! OLS/WLS/Logit/Probit/Tobitの`augment()`が、列名衝突の検査→列の付加→`PyDataFrame`化を
+//! OLS/WLS/Logit/Probit/Tobitの`augment()`が、列名衝突の検査→列の付加→`DataFrame`化を
 //! 同じ手順で重複して書いていたため、ここに集約した。
 
-use polars::prelude::{Column, DataFrame};
+use engine::shared::error_catalog::{ErrorCode, ParamValue};
+use polars::prelude::{NamedFrom, Series};
 use pyo3::prelude::*;
-use pyo3_polars::PyDataFrame;
+use pyo3_polars::PySeries;
 
-use super::errors::internal_error;
-use super::validation::validate_no_existing_column;
+use super::errors::{internal_error, user_error};
 
-/// `source`に`values`を`column_name`という名前の新しい列として付加して返す。元の列と行の順序は
-/// 保たれる。
+/// `source`（Pythonの`polars.DataFrame`）に`values`を`column_name`という名前の新しい列として
+/// 付加した、新しい`polars.DataFrame`を返す。元の列と行の順序は保たれる。
 ///
-/// 呼び出し側は、`values`を`source`自身から計算した値（`new_data`指定時）か、`source`と同じ
-/// `fit()`呼び出しの同じ観測数に由来するペア（学習データと適合値・予測値、`new_data=None`時）
-/// として渡す。どちらも長さが一致することが構築上保証されるため、長さの不一致は
-/// 呼び出し側の不具合を意味し、入力の誤りではない。
+/// `source`はユーザーが渡した元のデータで、推定に使わない列（取り込めないdtypeの列を含む）も
+/// そのまま残る。呼び出し側は、`values`を`source`自身から計算した値（`new_data`指定時）か、
+/// `source`と同じ`fit()`呼び出しの同じ観測数に由来するペア（学習データと適合値・予測値、
+/// `new_data=None`時）として渡す。どちらも長さが一致することが構築上保証されるため、長さの
+/// 不一致は呼び出し側の不具合を意味し、入力の誤りではない。
 ///
 /// # Errors
 /// - `source`が既に`column_name`という列を持つ場合は`ValidationError`（黙って上書きしない）。
-/// - `values.len() != source.height()`の場合は`ComputationError`（上記の通り通常は到達しない。
+/// - `values.len() != source.height`の場合は`ComputationError`（上記の通り通常は到達しない。
 ///   Pythonの`PanicException`にせず通常の例外として返すため`Result`にしている）。
 pub fn append_predicted_column(
-    mut source: DataFrame,
+    source: &Bound<'_, PyAny>,
     column_name: &str,
     values: Vec<f64>,
-) -> PyResult<PyDataFrame> {
-    validate_no_existing_column(&source, column_name)?;
-    if values.len() != source.height() {
+) -> PyResult<Py<PyAny>> {
+    let columns: Vec<String> = source.getattr("columns")?.extract()?;
+    if columns.iter().any(|name| name == column_name) {
+        return Err(user_error(
+            ErrorCode::AugmentColumnExists,
+            vec![("column", ParamValue::from(column_name))],
+        ));
+    }
+    let height: usize = source.getattr("height")?.extract()?;
+    if values.len() != height {
         return Err(internal_error(format!(
-            "cannot append column '{column_name}' with {} values to data with {} rows",
+            "cannot append column '{column_name}' with {} values to data with {height} rows",
             values.len(),
-            source.height()
         )));
     }
-    source
-        .with_column(Column::new(column_name.into(), values))
-        .map_err(|err| internal_error(err.to_string()))?;
-    Ok(PyDataFrame(source))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn source() -> DataFrame {
-        DataFrame::new(2, vec![Column::new("x1".into(), &[1.0, 2.0])]).unwrap()
-    }
-
-    #[test]
-    fn appends_the_column_after_the_original_columns() {
-        let PyDataFrame(df) =
-            append_predicted_column(source(), "predicted", vec![0.5, 0.25]).unwrap();
-        let names: Vec<&str> = df.get_column_names().iter().map(|n| n.as_str()).collect();
-        assert_eq!(names, ["x1", "predicted"]);
-        let predicted: Vec<f64> = df
-            .column("predicted")
-            .unwrap()
-            .f64()
-            .unwrap()
-            .into_no_null_iter()
-            .collect();
-        assert_eq!(predicted, [0.5, 0.25]);
-    }
-
-    #[test]
-    fn returns_error_when_the_column_already_exists() {
-        let df = DataFrame::new(
-            2,
-            vec![
-                Column::new("x1".into(), &[1.0, 2.0]),
-                Column::new("predicted".into(), &[9.0, 9.0]),
-            ],
-        )
-        .unwrap();
-        assert!(append_predicted_column(df, "predicted", vec![0.5, 0.25]).is_err());
-    }
-
-    #[test]
-    fn returns_error_when_the_length_does_not_match_the_rows() {
-        assert!(append_predicted_column(source(), "predicted", vec![0.5]).is_err());
-        assert!(append_predicted_column(source(), "predicted", vec![0.5, 0.25, 0.1]).is_err());
-    }
+    let series = PySeries(Series::new(column_name.into(), values));
+    Ok(source.call_method1("with_columns", (series,))?.unbind())
 }

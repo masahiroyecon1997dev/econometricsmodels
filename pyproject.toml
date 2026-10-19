@@ -14,7 +14,7 @@ authors = [
 ]
 keywords = ["econometrics", "statistics", "regression", "ols", "logit", "probit", "tobit", "instrumental-variables", "panel-data", "polars"]
 dependencies = [
-    "polars==1.44.2",
+    "polars==2.0.0",
 ]
 classifiers = [
     "Programming Language :: Rust",

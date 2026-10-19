@@ -36,7 +36,8 @@ use crate::shared::error_catalog::{ErrorCode, ErrorReport};
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference;
 use crate::shared::linear_algebra::{
-    RankDeficient, checked_col_piv_qr, column_names, ensure_well_conditioned_symmetric_matrix,
+    RankDeficient, checked_col_piv_qr, collinear_columns, column_names,
+    ensure_well_conditioned_symmetric_matrix,
 };
 use crate::shared::validation::{MAX_ITER_LIMIT, MAX_ITER_MIN};
 use crate::shared::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
@@ -2750,15 +2751,19 @@ fn two_loop_recursion(
     r.iter().map(|v| -v).collect()
 }
 
-/// 設計行列`x`を列ピボットQR分解し、ランク落ちが無ければQR分解をそのまま返す
-/// （呼び出し側が`solve_lstsq`で最小二乗解＝反復最適化の初期値を、再分解せずに
+/// 標準化済みの設計行列`x_std`を列ピボットQR分解し、ランク落ちが無ければQR分解をそのまま
+/// 返す（呼び出し側が`solve_lstsq`で最小二乗解＝反復最適化の初期値を、再分解せずに
 /// 取り出せるようにするため）。
 ///
-/// `x`は標準化済み（Logit/Probitの`ols_based_initial_params`）でも生スケール
-/// （`tobit::ols_initial_params`）でもよい。特異性判定は`linear_algebra::checked_col_piv_qr`
+/// 特異性判定は`linear_algebra::checked_col_piv_qr`
 /// （OLS・`newton_step`と共通。`R`の対角成分に対する相対閾値`k·ε·max|R_ii|`とNaNの明示チェック、
 /// `.claude/rules/rust-style.md`「線形代数」）で、列ごとの一様スケーリングに対して
 /// 不変なため、標準化の有無で判定結果は変わらない。
+///
+/// **共線な列は標準化前の`x`で特定する**: 切片ありの標準化は非切片列の平均を引くので、
+/// 標準化後の行列では切片との共線性（定数列・ダミー変数の罠）が切片を含まない形に見えてしまう。
+/// 利用者に報告するのは元の設計の列なので、判定は`x_std`、列の特定は`x`で行う（`x`と`x_std`は
+/// 同じ列名`names`を共有する）。
 ///
 /// Logit/Probit（`ols_based_initial_params`）とTobit（`tobit::ols_initial_params`）が
 /// `fit()`冒頭で共有する。Newton法が一度も反復していない段階での検出のため、エラーは
@@ -2767,18 +2772,22 @@ fn two_loop_recursion(
 /// 多重共線性を検出するのが本関数を共有する目的）。
 ///
 /// # Errors
-/// `x`がランク落ち（完全な多重共線性等）: `MleError::SingularDesignMatrix`
-/// （`names`は設計の列名で、共線な列の添字を名前に直す）。
+/// `x_std`がランク落ち（完全な多重共線性等）: `MleError::SingularDesignMatrix`
+/// （`names`は設計の列名で、共線な列を`x`から求めて名前に直す）。
 pub fn checked_design_matrix_qr(
+    x_std: &Mat<f64>,
     x: &Mat<f64>,
     names: &[String],
 ) -> Result<faer::linalg::solvers::ColPivQr<f64>, MleError> {
-    checked_col_piv_qr(x).map_err(|err| MleError::SingularDesignMatrix {
-        columns: match err {
-            RankDeficient::Columns { columns } => column_names(&columns, names),
-            // `checked_col_piv_qr`は`GramMatrix`を返さない（`xtx_inverse`だけが返す）。
-            RankDeficient::GramMatrix => Vec::new(),
-        },
+    checked_col_piv_qr(x_std).map_err(|err| {
+        debug_assert_eq!(
+            err,
+            RankDeficient::Columns,
+            "checked_col_piv_qr only reports rank deficiency of the columns"
+        );
+        MleError::SingularDesignMatrix {
+            columns: column_names(&collinear_columns(x), names),
+        }
     })
 }
 
@@ -2807,15 +2816,17 @@ pub fn checked_design_matrix_qr(
 /// 異なるためクロージャで受ける、`predict_from_link`と同じ方針）。
 ///
 /// # Errors
-/// `x_std`がランク落ち: `MleError::SingularDesignMatrix`（`checked_design_matrix_qr`）
+/// `x_std`がランク落ち: `MleError::SingularDesignMatrix`（`checked_design_matrix_qr`。
+/// `x`は標準化前の設計行列で、共線な列の特定に使う）
 pub fn ols_based_initial_params(
     x_std: &Mat<f64>,
+    x: &Mat<f64>,
     y: &Mat<f64>,
     has_intercept: bool,
     names: &[String],
     link_terms: impl Fn(f64) -> (f64, f64),
 ) -> Result<Vec<f64>, MleError> {
-    let qr = checked_design_matrix_qr(x_std, names)?;
+    let qr = checked_design_matrix_qr(x_std, x, names)?;
     let k = x_std.ncols();
     let n = y.nrows();
     let beta_lpm = qr.solve_lstsq(y);
@@ -5263,8 +5274,8 @@ mod tests {
         });
         let y = Mat::from_fn(5, 1, |i, _| [1.0, 2.0, 2.0, 4.0, 5.0][i]);
 
-        let qr =
-            checked_design_matrix_qr(&x, &[]).expect("full-rank design matrix must be accepted");
+        let qr = checked_design_matrix_qr(&x, &x, &[])
+            .expect("full-rank design matrix must be accepted");
         let beta = qr.solve_lstsq(&y);
         // 正規方程式 X'Xβ = X'y を満たすはず（残差が設計行列と直交）。
         let resid = &y - &x * &beta;
@@ -5288,7 +5299,7 @@ mod tests {
         let names = ["const".to_string(), "t".to_string(), "t2".to_string()];
         // 従属になるのは3列目と、それを表す2列目（切片は関わらない）。
         assert_eq!(
-            checked_design_matrix_qr(&x, &names).unwrap_err(),
+            checked_design_matrix_qr(&x, &x, &names).unwrap_err(),
             MleError::SingularDesignMatrix {
                 columns: vec!["t".to_string(), "t2".to_string()]
             }
@@ -5301,7 +5312,7 @@ mod tests {
         let x = Mat::from_fn(4, 2, |_, _| 0.0);
         // 全ゼロの先頭列はそれ単独で従属。
         assert_eq!(
-            checked_design_matrix_qr(&x, &["a".to_string(), "b".to_string()]).unwrap_err(),
+            checked_design_matrix_qr(&x, &x, &["a".to_string(), "b".to_string()]).unwrap_err(),
             MleError::SingularDesignMatrix {
                 columns: vec!["a".to_string()]
             }
@@ -5314,7 +5325,7 @@ mod tests {
         // `β⁽¹⁾[0] = p̄/w + (η₀ - p̄/w) = η₀ = ln(p̄/(1-p̄))`（切片のみモデルの厳密なMLE）。
         let y = Mat::from_fn(7, 1, |i, _| if i < 4 { 1.0 } else { 0.0 });
         let x = Mat::from_fn(7, 1, |_, _| 1.0);
-        let params = ols_based_initial_params(&x, &y, true, &[], |p_bar| {
+        let params = ols_based_initial_params(&x, &x, &y, true, &[], |p_bar| {
             (p_bar * (1.0 - p_bar), (p_bar / (1.0 - p_bar)).ln())
         })
         .unwrap();
@@ -5331,8 +5342,8 @@ mod tests {
         let x = Mat::from_fn(4, 1, |i, _| [1.0, 2.0, 3.0, 4.0][i]);
         let y = Mat::from_fn(4, 1, |i, _| [0.0, 0.0, 1.0, 1.0][i]);
 
-        let raw = ols_based_initial_params(&x, &y, false, &[], |_| (1.0, 0.0)).unwrap();
-        let scaled = ols_based_initial_params(&x, &y, false, &[], |_| (0.25, 0.0)).unwrap();
+        let raw = ols_based_initial_params(&x, &x, &y, false, &[], |_| (1.0, 0.0)).unwrap();
+        let scaled = ols_based_initial_params(&x, &x, &y, false, &[], |_| (0.25, 0.0)).unwrap();
         assert!(
             (scaled[0] - raw[0] / 0.25).abs() < 1e-12,
             "{scaled:?} {raw:?}"
@@ -5349,7 +5360,7 @@ mod tests {
             |i, j| if j == 0 { 1.0 } else { [1.0, 2.0, 3.0, 4.0][i] },
         );
         let y = Mat::from_fn(4, 1, |_, _| 1.0);
-        let params = ols_based_initial_params(&x, &y, true, &[], |_| {
+        let params = ols_based_initial_params(&x, &x, &y, true, &[], |_| {
             panic!("link_terms must not be called for a degenerate p_bar")
         })
         .unwrap();
@@ -5368,9 +5379,44 @@ mod tests {
         });
         let y = Mat::from_fn(5, 1, |i, _| [0.0, 1.0, 0.0, 1.0, 1.0][i]);
         assert_eq!(
-            ols_based_initial_params(&x, &y, true, &[], |p| (p * (1.0 - p), 0.0)).unwrap_err(),
+            ols_based_initial_params(&x, &x, &y, true, &[], |p| (p * (1.0 - p), 0.0)).unwrap_err(),
             MleError::SingularDesignMatrix {
                 columns: vec!["column 1".to_string(), "column 2".to_string()]
+            }
+        );
+    }
+
+    #[test]
+    fn checked_design_matrix_qr_reports_the_intercept_for_collinearity_hidden_by_centering() {
+        // 標準化（切片ありでは非切片列の平均を引く）後の行列では、切片との共線性が切片を含まない形に
+        // 見える。共線な列は標準化前の設計行列から特定するので、切片も報告に含まれる。
+        let names = ["const".to_string(), "d1".to_string(), "d2".to_string()];
+        // ダミー変数の罠: `d1 + d2 = const`。
+        let trap = Mat::from_fn(6, 3, |i, j| match j {
+            0 => 1.0,
+            1 => [1.0, 0.0, 1.0, 0.0, 1.0, 0.0][i],
+            _ => [0.0, 1.0, 0.0, 1.0, 0.0, 1.0][i],
+        });
+        let (trap_std, _) = standardize_columns(&trap, true);
+        assert_eq!(
+            checked_design_matrix_qr(&trap_std, &trap, &names).unwrap_err(),
+            MleError::SingularDesignMatrix {
+                columns: names.to_vec()
+            }
+        );
+
+        // 定数列は切片と共線（標準化後は全ゼロ列になる）。
+        let constant = Mat::from_fn(6, 3, |i, j| match j {
+            0 => 1.0,
+            1 => [1.0, 2.0, 4.0, 3.0, 6.0, 5.0][i],
+            _ => 3.0,
+        });
+        let (constant_std, _) = standardize_columns(&constant, true);
+        let names = ["const".to_string(), "x".to_string(), "c".to_string()];
+        assert_eq!(
+            checked_design_matrix_qr(&constant_std, &constant, &names).unwrap_err(),
+            MleError::SingularDesignMatrix {
+                columns: vec!["const".to_string(), "c".to_string()]
             }
         );
     }

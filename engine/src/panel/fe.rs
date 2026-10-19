@@ -837,7 +837,11 @@ impl FeEstimator {
             xtx_inv,
         } = least_squares(within_input.x(), within_input.y()).map_err(|err| {
             PanelError::WithinRegressionFailed {
-                source: LeastSquaresError::from_rank_deficient(err, within_input.param_names()),
+                source: LeastSquaresError::from_rank_deficient(
+                    err,
+                    within_input.x(),
+                    within_input.param_names(),
+                ),
             }
         })?;
 

@@ -517,6 +517,7 @@ impl LogitEstimator {
         // 別経路に分かれていた）。
         let initial_params = ols_based_initial_params(
             &x_std,
+            input.x(),
             input.y(),
             input.has_intercept(),
             input.param_names(),

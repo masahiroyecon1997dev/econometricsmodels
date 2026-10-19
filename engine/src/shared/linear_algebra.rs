@@ -11,11 +11,13 @@ use faer::{Mat, Side};
 ///
 /// 設計行列の列の完全な多重共線性と、Gram行列`X'X`の分解の失敗（QRのランク判定は通るが、
 /// 列のスケール差が極端）は原因が異なるため、利用者に伝える内容を分けられるよう区別する。
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// 判定結果だけを持つ。どの列が共線かは、列名が要る呼び出し側が[`collinear_columns`]で
+/// 求める（エラーを捨てる経路で余計な計算をしないため）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RankDeficient {
-    /// 列ピボットQRが、行列がフルカラムランクでないと判定した。`columns`は1つの線形従属に
-    /// 関わる列の添字（[`collinear_columns`]。昇順で空ではない）。
-    Columns { columns: Vec<usize> },
+    /// 列ピボットQRが、行列がフルカラムランクでないと判定した。
+    Columns,
     /// Gram行列`X'X`のCholesky分解が失敗した。
     GramMatrix,
 }
@@ -37,9 +39,7 @@ pub enum RankDeficient {
 pub fn checked_col_piv_qr(a: &Mat<f64>) -> Result<ColPivQr<f64>, RankDeficient> {
     let n = a.ncols();
     if a.nrows() < n {
-        return Err(RankDeficient::Columns {
-            columns: collinear_columns(a),
-        });
+        return Err(RankDeficient::Columns);
     }
     let qr = a.col_piv_qr();
     let r = qr.thin_R();
@@ -48,9 +48,7 @@ pub fn checked_col_piv_qr(a: &Mat<f64>) -> Result<ColPivQr<f64>, RankDeficient> 
     for i in 0..n {
         let diag = (*r.get(i, i)).abs();
         if diag.is_nan() || diag <= threshold {
-            return Err(RankDeficient::Columns {
-                columns: collinear_columns(a),
-            });
+            return Err(RankDeficient::Columns);
         }
     }
     Ok(qr)
@@ -72,7 +70,8 @@ pub(crate) fn column_names(indices: &[usize], names: &[String]) -> Vec<String> {
 
 /// フルカラムランクでないと判定された設計行列`a`について、**1つの線形従属に関わる列の添字**
 /// （昇順）を返す。利用者に「どの列とどの列が共線か」を伝えるための説明用で、判定そのもの
-/// （[`checked_col_piv_qr`]）には影響しない。失敗経路でしか呼ばれない。
+/// （[`checked_col_piv_qr`]）には影響しない。列名が要る呼び出し側が、ランク落ちの報告を作る
+/// ときにだけ呼ぶ（成功経路や、エラーを捨てる経路では呼ばない）。
 ///
 /// 列を設計の並び順に見て、それより前の独立な列の線形結合で表せる**最初の列**`x_j`を見つけ、
 /// `x_j`をそれらの列で表したときに係数が無視できない列を合わせて返す（前の独立な列で表す
@@ -499,12 +498,7 @@ mod tests {
     #[test]
     fn checked_col_piv_qr_rejects_perfectly_collinear_columns() {
         let a = Mat::from_fn(4, 2, |i, j| (i as f64 + 1.0) * (j as f64 + 1.0));
-        assert_eq!(
-            checked_col_piv_qr(&a).unwrap_err(),
-            RankDeficient::Columns {
-                columns: vec![0, 1]
-            }
-        );
+        assert_eq!(checked_col_piv_qr(&a).unwrap_err(), RankDeficient::Columns);
     }
 
     #[test]
@@ -518,7 +512,7 @@ mod tests {
 
         assert_eq!(
             checked_col_piv_qr(&zeros).unwrap_err(),
-            RankDeficient::Columns { columns: vec![0] }
+            RankDeficient::Columns
         );
     }
 
@@ -532,13 +526,9 @@ mod tests {
     #[test]
     fn checked_col_piv_qr_rejects_matrix_with_fewer_rows_than_columns() {
         let a = Mat::from_fn(2, 3, |i, j| (i * 3 + j) as f64 + 1.0);
+        assert_eq!(checked_col_piv_qr(&a).unwrap_err(), RankDeficient::Columns);
         // 3列目は前の2列の線形結合（`2·c1 - c0`）なので、3列すべてが従属に関わる。
-        assert_eq!(
-            checked_col_piv_qr(&a).unwrap_err(),
-            RankDeficient::Columns {
-                columns: vec![0, 1, 2]
-            }
-        );
+        assert_eq!(collinear_columns(&a), vec![0, 1, 2]);
     }
 
     fn matrix_from_columns(columns: &[Vec<f64>]) -> Mat<f64> {
@@ -560,7 +550,7 @@ mod tests {
         let z = vec![3.0, -1.0, 0.5, 2.0, 7.0, 4.0];
         let unrelated = vec![2.0, 9.0, 1.0, 6.0, 3.0, 5.5];
         let combo: Vec<f64> = (0..6).map(|i| 2.0 * x[i] - 3.0 * z[i]).collect();
-        // 切片と無関係な列は従属に関わらない。無関係な列は、従属の列より前でも後ろでも含まれない。
+        // 従属に関わらない列（`unrelated`）は、従属の列より前にあっても報告に含まれない。
         let a = matrix_from_columns(&[ones, unrelated, x, z, combo]);
         assert_eq!(collinear_columns(&a), vec![2, 3, 4]);
     }
@@ -591,6 +581,64 @@ mod tests {
         // 定数列が2つ（切片と定数列）は、その2列。
         let b = matrix_from_columns(&[vec![1.0; 4], x, vec![3.0; 4]]);
         assert_eq!(collinear_columns(&b), vec![0, 2]);
+    }
+
+    #[test]
+    fn collinear_columns_follows_the_design_order_not_the_order_of_the_pairs() {
+        let x1 = vec![1.0, 4.0, 2.0, 8.0, 5.0];
+        let x2 = vec![3.0, -1.0, 0.5, 2.0, 7.0];
+        let x3 = vec![2.0, 9.0, 1.0, 6.0, 3.0];
+        // 先に完結するのは2列目と3列目の組（1列目の複製は最後）。
+        let a = matrix_from_columns(&[x1.clone(), x2.clone(), x2.clone(), x1.clone()]);
+        assert_eq!(collinear_columns(&a), vec![1, 2]);
+        // 複製元が後ろにあっても、報告は設計の並び順。
+        let b = matrix_from_columns(&[x1.clone(), x1.clone()]);
+        assert_eq!(collinear_columns(&b), vec![0, 1]);
+        // 従属の列の間に無関係な列が挟まっても含まれない。
+        let c = matrix_from_columns(&[x1.clone(), x3, x1]);
+        assert_eq!(collinear_columns(&c), vec![0, 2]);
+    }
+
+    #[test]
+    fn collinear_columns_reports_the_dependent_column_with_the_earlier_columns_it_is_made_of() {
+        let x1 = vec![1.0, 4.0, 2.0, 8.0, 5.0];
+        let x2 = vec![3.0, -1.0, 0.5, 2.0, 7.0];
+        let combo: Vec<f64> = (0..5).map(|i| 2.0 * x1[i] - 3.0 * x2[i]).collect();
+        // 従属の列が先頭側にあっても、「前の列で表せる最初の列」は`x2`。
+        let a = matrix_from_columns(&[combo, x1, x2]);
+        assert_eq!(collinear_columns(&a), vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn collinear_columns_leaves_out_columns_whose_contribution_is_negligible() {
+        let x1 = vec![1.0, 4.0, 2.0, 8.0, 5.0];
+        let x2 = vec![3.0, -1.0, 0.5, 2.0, 7.0];
+        // `mix`は相対1e-7より小さい寄与しか`x2`を含まない（実質`x1`の複製）。
+        let mix: Vec<f64> = (0..5).map(|i| x1[i] + 1e-12 * x2[i]).collect();
+        let a = matrix_from_columns(&[x1, x2, mix]);
+        assert_eq!(collinear_columns(&a), vec![0, 2]);
+    }
+
+    #[test]
+    fn collinear_columns_reports_a_non_finite_column_on_its_own() {
+        let x = vec![1.0, 4.0, 2.0, 8.0];
+        let nan = vec![1.0, f64::NAN, 2.0, 3.0];
+        let inf = vec![1.0, f64::INFINITY, 2.0, 3.0];
+        let a = matrix_from_columns(&[x.clone(), nan]);
+        assert_eq!(collinear_columns(&a), vec![1]);
+        let b = matrix_from_columns(&[inf, x]);
+        assert_eq!(collinear_columns(&b), vec![0]);
+    }
+
+    #[test]
+    fn collinear_columns_falls_back_to_the_columns_flagged_by_the_pivoted_qr() {
+        // 列ごとのスケールに対して不変な順序つき探索は全列を独立と見るが、列ピボットQRは極端に
+        // 小さい列（他の列の`ε`倍より小さい）を落とす。その列（中ほどにある）だけを報告する。
+        let x = vec![1.0, 4.0, 2.0, 8.0, 5.0];
+        let tiny = vec![1e-20, -3e-20, 2e-20, 5e-20, -1e-20];
+        let z = vec![3.0, -1.0, 0.5, 2.0, 7.0];
+        let a = matrix_from_columns(&[x, tiny, z]);
+        assert_eq!(collinear_columns(&a), vec![1]);
     }
 
     #[test]

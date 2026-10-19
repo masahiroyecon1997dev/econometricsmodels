@@ -181,8 +181,9 @@ impl OlsEstimator {
             params,
             residuals,
             xtx_inv,
-        } = least_squares(input.x(), input.y())
-            .map_err(|err| LeastSquaresError::from_rank_deficient(err, input.param_names()))?;
+        } = least_squares(input.x(), input.y()).map_err(|err| {
+            LeastSquaresError::from_rank_deficient(err, input.x(), input.param_names())
+        })?;
 
         let df_resid = n - k;
         let ssr = residual_sum_of_squares(&residuals);

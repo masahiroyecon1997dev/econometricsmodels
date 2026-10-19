@@ -806,7 +806,7 @@ fn between_ssr_and_df(
             .collect();
         PanelError::BetweenRegressionFailed {
             means: kind,
-            source: LeastSquaresError::from_rank_deficient(err, &names),
+            source: LeastSquaresError::from_rank_deficient(err, &design, &names),
         }
     })?;
     Ok((residual_sum_of_squares(&fit.residuals), n_units - n_params))

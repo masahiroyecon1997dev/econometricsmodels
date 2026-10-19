@@ -355,7 +355,7 @@ pub fn breusch_godfrey_test(
         names.extend((1..=m).map(|lag| format!("residual_lag_{lag}")));
         aux_fit_error(
             DiagnosticTest::BreuschGodfrey,
-            LeastSquaresError::from_rank_deficient(err, &names),
+            LeastSquaresError::from_rank_deficient(err, &aux, &names),
         )
     })?;
     let params = qr.solve_lstsq(Mat::from_fn(n, 1, |t, _| sorted_resid[t]));

@@ -204,7 +204,7 @@ fn pooled_fit(input: &ReInput) -> Result<LeastSquaresFit, PanelError> {
             .chain(input.x_names().iter().cloned())
             .collect();
         PanelError::PooledRegressionFailed {
-            source: LeastSquaresError::from_rank_deficient(err, &names),
+            source: LeastSquaresError::from_rank_deficient(err, &design, &names),
         }
     })
 }

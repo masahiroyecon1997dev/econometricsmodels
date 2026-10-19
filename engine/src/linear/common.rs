@@ -17,11 +17,12 @@
 //! 完全に重複していたため`engine::shared::error::CommonError`に切り出し、`Common`バリアント
 //! 経由で保持する（数値的なほぼ特異性は`CommonError::NearSingularMatrix`）。
 
+use faer::Mat;
 use thiserror::Error;
 
 use crate::shared::error::{CommonError, ErrorInfo, MatrixKind, staged_report};
 use crate::shared::error_catalog::{ErrorCode, ErrorReport, Stage};
-use crate::shared::linear_algebra::{RankDeficient, column_names};
+use crate::shared::linear_algebra::{RankDeficient, collinear_columns, column_names};
 
 /// OLS/WLSの計算過程で発生しうるエラー。
 ///
@@ -114,14 +115,15 @@ impl DiagnosticTest {
 }
 
 impl LeastSquaresError {
-    /// 設計行列のランク落ちをエラーにする。列の完全な共線性は`SingularMatrix`（`names`は設計の
-    /// 列名で、共線な列の添字を名前に直す）、`X'X`の分解の失敗（列のスケール差が極端）は
-    /// 共線性ではなく数値的なほぼ特異性なので`NearSingularMatrix`にする。
+    /// 設計行列`x`のランク落ちをエラーにする。列の完全な共線性は`SingularMatrix`（`names`は
+    /// `x`の列名で、共線な列を[`collinear_columns`]で求めて名前に直す）、`X'X`の分解の失敗
+    /// （列のスケール差が極端）は共線性ではなく数値的なほぼ特異性なので`NearSingularMatrix`に
+    /// する。
     #[must_use]
-    pub fn from_rank_deficient(err: RankDeficient, names: &[String]) -> Self {
+    pub fn from_rank_deficient(err: RankDeficient, x: &Mat<f64>, names: &[String]) -> Self {
         match err {
-            RankDeficient::Columns { columns } => Self::SingularMatrix {
-                columns: column_names(&columns, names),
+            RankDeficient::Columns => Self::SingularMatrix {
+                columns: column_names(&collinear_columns(x), names),
             },
             RankDeficient::GramMatrix => Self::Common(CommonError::NearSingularMatrix {
                 matrix: MatrixKind::DesignGram,

@@ -742,15 +742,23 @@ impl TobitScaling {
 /// 同じ関数のQR解に加えてリンクのスケール補正を施すが、Tobitの`β`はOLSと同一スケールの
 /// ため補正は不要で、QR解をそのまま`β`初期値に使い、`σ`初期値だけ残差から別途求める）。
 ///
+/// `x`は標準化済みの設計行列、`x_original`は標準化前の設計行列（共線な列の特定に使う。
+/// `checked_design_matrix_qr`参照）。
+///
 /// # Errors
 /// `x`が特異（完全な多重共線性等）な場合は`MleError::SingularDesignMatrix`を返す
 /// （`MleError::SingularDesignMatrix`のdocコメント参照。Newton法が一度も反復していない
 /// 段階で発生しうるため`SingularHessian`とは区別する）。
-fn ols_initial_params(x: &Mat<f64>, y: &Mat<f64>, names: &[String]) -> Result<Vec<f64>, MleError> {
+fn ols_initial_params(
+    x: &Mat<f64>,
+    x_original: &Mat<f64>,
+    y: &Mat<f64>,
+    names: &[String],
+) -> Result<Vec<f64>, MleError> {
     let n = x.nrows();
     let k = x.ncols();
 
-    let qr = checked_design_matrix_qr(x, names)?;
+    let qr = checked_design_matrix_qr(x, x_original, names)?;
     let beta_mat = qr.solve_lstsq(y);
     let beta: Vec<f64> = (0..k).map(|i| *beta_mat.get(i, 0)).collect();
 
@@ -1679,7 +1687,7 @@ impl TobitEstimator {
         let y_std = scaling.standardize_y(input.y());
         let lower_std = scaling.standardize_bound(input.lower());
         let upper_std = scaling.standardize_bound(input.upper());
-        let initial_params = ols_initial_params(&x_std, &y_std, input.param_names())?;
+        let initial_params = ols_initial_params(&x_std, input.x(), &y_std, input.param_names())?;
         let problem = TobitProblem::from_standardized(x_std, y_std, lower_std, upper_std);
         // `cov_type`がOPG/サンドイッチ型/クラスターの場合、収束点でのスコア評価に
         // 標準化空間の`TobitProblem`が必要になる。`run_solver`は`problem`の所有権を
@@ -3477,7 +3485,7 @@ mod tests {
         let x = Mat::from_fn(4, 2, |i, j| if j == 0 { 1.0 } else { xs[i] });
         let y = Mat::from_fn(4, 1, |i, _| 2.0 * xs[i] + 1.0); // y=2x+1、完全に当てはまる
 
-        let params = ols_initial_params(&x, &y, &[]).unwrap();
+        let params = ols_initial_params(&x, &x, &y, &[]).unwrap();
 
         assert_eq!(params.len(), 3);
         assert!((params[0] - 1.0).abs() < 1e-9, "intercept={}", params[0]);

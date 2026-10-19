@@ -61,6 +61,10 @@ def df() -> pl.DataFrame:
             "level": level,
             "level_copy": level,
             "const_col": np.ones(N),
+            "x1_shift": x1 + 5.0,
+            "x1_plus_level": x1 + level,
+            "年齢": x1,
+            "年齢コピー": x1,
             "zeros": np.zeros(N),
             "d1": d1,
             "d2": 1.0 - d1,
@@ -131,28 +135,137 @@ class TestLinearDesign:
         with raises_error(ErrorCode.DESIGN_MATRIX_SINGULAR, columns=["zeros"]):
             _ols(df, ["x1", "zeros"])
 
+    def test_a_dependent_column_at_the_head_is_reported_with_the_columns_after_it(
+        self, df
+    ):
+        # 「前の列で表せる最初の列」は`x2`なので、先頭の`combo`も含まれる。
+        with raises_error(
+            ErrorCode.DESIGN_MATRIX_SINGULAR, columns=["combo", "x1", "x2"]
+        ):
+            _ols(df, ["combo", "x1", "x2"])
+
+    def test_the_first_dependency_follows_the_design_order(self, df):
+        # 先に完結するのは2列目と3列目の組。1列目の複製は最後。
+        with raises_error(
+            ErrorCode.DESIGN_MATRIX_SINGULAR, columns=["x2", "x2_copy"]
+        ):
+            _ols(df, ["x1", "x2", "x2_copy", "x1_copy"])
+
+    def test_columns_are_reported_in_the_design_order(self, df):
+        with raises_error(
+            ErrorCode.DESIGN_MATRIX_SINGULAR, columns=["x1_copy", "x1"]
+        ):
+            _ols(df, ["x1_copy", "x1"])
+
+    def test_an_unrelated_column_between_the_pair_is_not_reported(self, df):
+        with raises_error(
+            ErrorCode.DESIGN_MATRIX_SINGULAR, columns=["x1", "x1_copy"]
+        ):
+            _ols(df, ["x1", "x3", "x1_copy"])
+
+    def test_a_shifted_copy_is_collinear_with_the_intercept(self, df):
+        with raises_error(
+            ErrorCode.DESIGN_MATRIX_SINGULAR,
+            columns=["const", "x1", "x1_shift"],
+        ):
+            _ols(df, ["x1", "x1_shift"])
+
+    def test_non_ascii_column_names(self, df):
+        with raises_error(
+            ErrorCode.DESIGN_MATRIX_SINGULAR, columns=["年齢", "年齢コピー"]
+        ):
+            _ols(df, ["年齢", "年齢コピー"])
+
     def test_wls_reports_the_columns(self, df):
         with raises_error(
             ErrorCode.DESIGN_MATRIX_SINGULAR, columns=["x1", "x1_copy"]
         ):
             WLS(df, "y", ["x1", "x1_copy"], "w", options=WLSOptions()).fit()
 
+    def test_wls_reports_a_constant_column_with_the_intercept(self, df):
+        with raises_error(
+            ErrorCode.DESIGN_MATRIX_SINGULAR, columns=["const", "const_col"]
+        ):
+            WLS(df, "y", ["x1", "const_col"], "w", options=WLSOptions()).fit()
 
+
+class TestDiagnosticAuxiliaryRegression:
+    """事後診断の補助回帰。補助回帰の列は標準化（中心化）してからあてはめるので、
+    切片との共線性は切片を含まない形で報告される。"""
+
+    def test_breusch_pagan_reports_the_variables_of_the_dependency(self, df):
+        fitted = _ols(df, ["x3"])
+        with raises_error(
+            ErrorCode.DESIGN_MATRIX_SINGULAR,
+            stage="DIAGNOSTIC_AUXILIARY_REGRESSION",
+            test="BREUSCH_PAGAN",
+            columns=["x1", "x2", "combo"],
+        ):
+            fitted.breusch_pagan_test(["x1", "x2", "combo"])
+
+    def test_white_reports_the_variables_of_the_dependency(self, df):
+        fitted = _ols(df, ["d1", "d2"], include_intercept=False)
+        with raises_error(
+            ErrorCode.DESIGN_MATRIX_SINGULAR,
+            stage="DIAGNOSTIC_AUXILIARY_REGRESSION",
+            test="WHITE",
+            columns=["d1", "d2"],
+        ):
+            fitted.white_test()
+
+    def test_dummy_trap_is_reported_without_the_intercept(self, df):
+        fitted = _ols(df, ["x3"])
+        with raises_error(
+            ErrorCode.DESIGN_MATRIX_SINGULAR,
+            stage="DIAGNOSTIC_AUXILIARY_REGRESSION",
+            test="BREUSCH_PAGAN",
+            columns=["d1", "d2"],
+        ):
+            fitted.breusch_pagan_test(["d1", "d2"])
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda d, x: Logit(d, "y01", x),
+        lambda d, x: Probit(d, "y01", x),
+        lambda d, x: Tobit(d, "y_pos", x),
+    ],
+    ids=["Logit", "Probit", "Tobit"],
+)
 class TestNonlinearDesign:
-    @pytest.mark.parametrize(
-        "build",
-        [
-            lambda d, x: Logit(d, "y01", x),
-            lambda d, x: Probit(d, "y01", x),
-            lambda d, x: Tobit(d, "y_pos", x),
-        ],
-        ids=["Logit", "Probit", "Tobit"],
-    )
+    """Logit/Probit/Tobitは列を標準化（切片ありでは平均も引く）してから最適化するが、
+    共線な列の報告は標準化前の設計で行うので、線形の手法と同じ形になる。"""
+
     def test_duplicate_column_reports_the_pair(self, df, build):
         with raises_error(
             ErrorCode.DESIGN_MATRIX_SINGULAR, columns=["x1", "x1_copy"]
         ):
             build(df, ["x1", "x1_copy"]).fit()
+
+    def test_constant_column_is_reported_with_the_intercept(self, df, build):
+        with raises_error(
+            ErrorCode.DESIGN_MATRIX_SINGULAR, columns=["const", "const_col"]
+        ):
+            build(df, ["x1", "const_col"]).fit()
+
+    def test_dummy_variable_trap_includes_the_intercept(self, df, build):
+        with raises_error(
+            ErrorCode.DESIGN_MATRIX_SINGULAR, columns=["const", "d1", "d2"]
+        ):
+            build(df, ["d1", "d2"]).fit()
+
+    def test_all_zero_column_is_reported_on_its_own(self, df, build):
+        with raises_error(ErrorCode.DESIGN_MATRIX_SINGULAR, columns=["zeros"]):
+            build(df, ["x1", "zeros"]).fit()
+
+    def test_a_combination_reports_only_the_columns_it_involves(
+        self, df, build
+    ):
+        with raises_error(
+            ErrorCode.DESIGN_MATRIX_SINGULAR, columns=["x1", "x2", "combo"]
+        ):
+            build(df, ["x3", "x1", "x2", "combo"]).fit()
 
 
 class TestIvDesign:
@@ -189,6 +302,31 @@ class TestIvDesign:
                 ["endog"],
                 ["z1", "z1_copy", "z2"],
                 options=IVOptions(estimator="gmm"),
+            ).fit()
+
+    def test_a_constant_exogenous_column_is_reported_with_the_intercept(
+        self, df
+    ):
+        with raises_error(
+            ErrorCode.DESIGN_MATRIX_SINGULAR,
+            stage="FIRST_STAGE",
+            columns=["const", "const_col"],
+        ):
+            IV(df, "y", ["x1", "const_col"], ["endog"], ["z1", "z2"]).fit()
+
+    def test_without_an_intercept_the_constant_is_not_reported(self, df):
+        with raises_error(
+            ErrorCode.DESIGN_MATRIX_SINGULAR,
+            stage="FIRST_STAGE",
+            columns=["const_col", "const_col2"],
+        ):
+            IV(
+                df.with_columns(pl.lit(3.0).alias("const_col2")),
+                "y",
+                ["const_col", "const_col2"],
+                ["endog"],
+                ["z1", "z2"],
+                options=IVOptions(include_intercept=False),
             ).fit()
 
     def test_collinear_endogenous_variables_are_reported_in_the_second_stage(
@@ -247,4 +385,29 @@ class TestPanelDesign:
                 ["x1", "level", "level_copy"],
                 "entity",
                 options=REOptions(variance_method="wallace_hussain"),
+            ).fit()
+
+    def test_fe_reports_columns_that_are_collinear_only_after_demeaning(
+        self, df
+    ):
+        # `x1_plus_level`は`x1`との差が個体ごとに一定なので、個体内変換後に同一になる。
+        with raises_error(
+            ErrorCode.DESIGN_MATRIX_SINGULAR,
+            stage="WITHIN_REGRESSION",
+            columns=["x1", "x1_plus_level"],
+        ):
+            FE(df, "y", ["x1", "x1_plus_level"], "entity").fit()
+
+    def test_re_amemiya_reports_the_variance_component_regression(self, df):
+        with raises_error(
+            ErrorCode.DESIGN_MATRIX_SINGULAR,
+            stage="VARIANCE_COMPONENT_WITHIN_REGRESSION",
+            columns=["x1", "x1_copy"],
+        ):
+            RE(
+                df,
+                "y",
+                ["x1", "x1_copy"],
+                "entity",
+                options=REOptions(variance_method="amemiya"),
             ).fit()

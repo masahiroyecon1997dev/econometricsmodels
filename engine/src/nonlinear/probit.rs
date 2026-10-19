@@ -589,6 +589,7 @@ impl ProbitEstimator {
             let normal = Normal::standard();
             ols_based_initial_params(
                 &x_std,
+                input.x(),
                 input.y(),
                 input.has_intercept(),
                 input.param_names(),
@@ -1389,12 +1390,18 @@ mod tests {
             ProbitInput::from_columns(&y, &[x1], vec!["x1".to_string()], true, "y".to_string())
                 .unwrap();
         let (x_std, scale) = standardize_columns(input.x(), input.has_intercept());
-        let initial_params =
-            ols_based_initial_params(&x_std, input.y(), input.has_intercept(), &[], |p_bar| {
+        let initial_params = ols_based_initial_params(
+            &x_std,
+            input.x(),
+            input.y(),
+            input.has_intercept(),
+            &[],
+            |p_bar| {
                 let eta0 = normal.inverse_cdf(p_bar);
                 (normal.pdf(eta0), eta0)
-            })
-            .unwrap();
+            },
+        )
+        .unwrap();
 
         let run = |solver: SolverType| {
             let inner = ProbitProblem::from_standardized(x_std.clone(), input.y().clone());

@@ -13,9 +13,9 @@
 //! 改名した。
 //!
 //! `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/
-//! `MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`は、nonlinear系統の
-//! `MleError`と文言まで完全に重複していたため`engine::shared::error::CommonError`に切り出し、
-//! `Common`バリアント経由で保持する。
+//! `MissingClusterColumn`/`InsufficientClusters`等は、nonlinear系統の`MleError`と文言まで
+//! 完全に重複していたため`engine::shared::error::CommonError`に切り出し、`Common`バリアント
+//! 経由で保持する（数値的なほぼ特異性は`CommonError::NearSingularMatrix`）。
 
 use thiserror::Error;
 

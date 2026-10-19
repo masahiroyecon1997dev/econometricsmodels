@@ -2707,7 +2707,7 @@ mod tests {
         // 2-way within変換後、x1_out ≈ 2 * y_out がほぼ成り立つため、切片なしOLSの
         // スロープは0.5にほぼ一致するはず。x1はy*2からごくわずかに擾乱を入れる
         // （厳密にx1=2*yだと残差が全行ゼロになり、F検定
-        // （`wald_f_test`）が分散ゼロによる特異行列で`ComputationFailed`を返してしまう
+        // （`wald_f_test`）が分散ゼロによる特異行列で`NearSingularMatrix`を返してしまう
         // 退化ケースを踏むため。既存の`WlsEstimator`のテストコメント
         // `fit_without_intercept_uses_uncentered_r_squared_and_omits_const`と同じ理由）。
         let entity = strings(&["a", "a", "a", "b", "b", "b", "c", "c", "c"]);

@@ -35,7 +35,7 @@ import json
 import math
 from pathlib import Path
 
-import _error_messages_panel as panel_msgs
+import _error_expectations as msgs
 import numpy as np
 import polars as pl
 import pytest
@@ -491,7 +491,7 @@ def test_unknown_variance_method_raises_with_the_original_value():
         ErrorCode.OPTION_UNKNOWN_VALUE,
         option="variance_method",
         value="Nerlove",
-        allowed=panel_msgs.ALLOWED_VARIANCE_METHODS,
+        allowed=msgs.ALLOWED_VARIANCE_METHODS,
     ):
         _fit(CASES[0], "classical", "Nerlove")
 
@@ -503,7 +503,7 @@ def test_unknown_variance_method_is_reported_before_the_data_is_checked():
         ErrorCode.OPTION_UNKNOWN_VALUE,
         option="variance_method",
         value="nerlove",
-        allowed=panel_msgs.ALLOWED_VARIANCE_METHODS,
+        allowed=msgs.ALLOWED_VARIANCE_METHODS,
     ):
         RE(
             _frame(case),

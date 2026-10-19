@@ -2,12 +2,15 @@
 //!
 //! `engine::linear::common::LeastSquaresError`と`engine::nonlinear::common::MleError`で、
 //! `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/
-//! `MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`の6バリアントが
-//! エラーメッセージの文言まで完全に重複していた（その後、OLS/2SLS/GMMで重複していた
-//! `InvalidHacLags`等も加えている）。IV/panel/causal/io/
-//! time_series等、今後7系統・20〜30手法に増える前提のため、系統をまたぐ共通バリデーション
-//! エラーをここに集約し、各系統のエラー型はthiserrorの
+//! `MissingClusterColumn`/`InsufficientClusters`等のバリアントがエラーメッセージの文言まで
+//! 完全に重複していた（その後、OLS/2SLS/GMMで重複していた`InvalidHacLags`や、数値的な
+//! ほぼ特異性を表す`NearSingularMatrix`、実装の誤りを表す`Internal`も加えている）。
+//! IV/panel/causal/io/time_series等、今後7系統・20〜30手法に増える前提のため、
+//! 系統をまたぐ共通バリデーション・計算エラーをここに集約し、各系統のエラー型はthiserrorの
 //! `#[error(transparent)] Common(#[from] CommonError)`で包む設計にする。
+//!
+//! 文面と`ValidationError`/`ComputationError`の別は、各バリアントの[`ErrorInfo::report()`]が返す
+//! `code`を引いてカタログ（`shared::error_catalog`）が決める。
 //!
 //! 各系統固有の追加バリアント（例: OLSの`WeightDimensionMismatch`、nonlinearの
 //! `SingularHessian`）はこの型に含めず、従来通り各系統のエラー型に直接定義する。
@@ -85,9 +88,9 @@ impl MatrixKind {
 /// 系統をまたいで共通のバリデーション・計算エラー。
 ///
 /// `engine`はPyO3を知らないため、Python例外への変換は`engine_pybind`側で行う
-/// （`.claude/rules/rust-style.md`「エラーハンドリング」参照）。`engine_pybind`側の
-/// 変換は`engine_pybind::errors::common_error_to_pyerr`に集約し、各系統の
-/// `*_error_to_pyerr`関数はこれに委譲する。
+/// （`.claude/rules/rust-style.md`「エラーハンドリング」参照）。`engine_pybind`側は
+/// [`ErrorInfo::report()`]の結果（`code`・`params`）を`to_pyerr`で例外にするだけで、
+/// バリアントごとの分岐は持たない。
 #[derive(Debug, Error, PartialEq)]
 pub enum CommonError {
     /// yとxの行数が一致しない。`engine_pybind`は同じ`DataFrame`の列から作るため、Python APIからは

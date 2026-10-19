@@ -225,7 +225,8 @@ Tobit固有の差分:
   数学的に常に特異になる。`G`・`q`は入力だけから判定できるため`fit()`冒頭の
   `InsufficientClustersForInference`（`ValidationError`）で弾く（OLS/WLS/Logit/Probit/Tobit/IV
   横断で統一）。`G > q`でも傾き係数間の悪条件で`q×q`部分行列が数値的にほぼ特異になる
-  ケースは`wald_chi2_test`内の`ensure_well_conditioned_symmetric_matrix`（`ComputationFailed`）が
+  ケースは`wald_chi2_test`内の`ensure_well_conditioned_symmetric_matrix`（`CommonError::NearSingularMatrix`、
+  `MATRIX_NEAR_SINGULAR`）が
   backstop。
 
 ### 3.5 限界効果
@@ -326,10 +327,10 @@ Tobit固有の差分:
 `MleError` → `PyErr`は[`logit-spec.md`](./logit-spec.md)3.7節のマッピング表と同一
 （`mle_error_to_pyerr`はLogit/Probit/Tobit共通）。Tobit固有バリアントの追加:
 
-| `MleError` | Python例外 |
-|---|---|
-| `NoUncensoredObservations` / `CensoringBoundsMissing` / `CensoringBoundsNotOrdered` / `CensoringBoundNotFinite` / `YOutOfCensoringBounds` | `ValidationError` |
-| `UncensoredIntervalTooNarrow`（`expected_uncensored`の非打ち切り区間が`σ̂`の1%未満） | `ComputationError` |
+| `MleError` | `code` | Python例外 |
+|---|---|---|
+| `NoUncensoredObservations` / `CensoringBoundsMissing` / `CensoringBoundsNotOrdered` / `CensoringBoundNotFinite` / `YOutOfCensoringBounds` | `NO_UNCENSORED_OBSERVATIONS` / `CENSORING_BOUNDS_MISSING` / `CENSORING_BOUNDS_NOT_ORDERED` / `CENSORING_BOUND_NOT_FINITE` / `OUTCOME_OUTSIDE_CENSORING_BOUNDS` | `ValidationError` |
+| `UncensoredIntervalTooNarrow`（`expected_uncensored`の非打ち切り区間が`σ̂`の1%未満） | `UNCENSORED_INTERVAL_TOO_NARROW` | `ComputationError` |
 
 - `predict()`/`marginal_effects()`の`target`引数のPython文字列は`"expected_latent"` /
   `"expected_observed"` / `"prob_uncensored"` / `"expected_uncensored"`（Rust enum名のsnake_case版。`at`のような単語1つの

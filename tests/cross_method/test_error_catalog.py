@@ -16,7 +16,12 @@ from typing import TYPE_CHECKING, Any
 
 import econometricsmodels
 import pytest
-from _errors import RAISED_CODES, raises_error
+from _errors import (
+    MIGRATED_CODES,
+    RAISED_CODES,
+    UNREACHABLE_CODES,
+    raises_error,
+)
 from econometricsmodels import (
     ComputationError,
     ErrorCode,
@@ -186,6 +191,21 @@ def test_stage_phrase_renders_the_same_in_rust_and_from_the_table() -> None:
             stage["prefix"], aux | {"test": "WHITE"}, dict.fromkeys(aux, "str")
         )
         assert info.value.message == phrase + body, stage["name"]
+
+
+def test_every_catalog_code_is_either_tested_or_listed_as_unreachable() -> (
+    None
+):
+    """新しい`code`を足したら、実経路のテスト（`MIGRATED_CODES`）か、構成できない
+    理由つきの許可（`UNREACHABLE_CODES`）のどちらかに必ず分類する。
+    """
+    codes = {entry["code"] for entry in CATALOG["codes"]}
+    migrated = {str(c) for c in MIGRATED_CODES}
+    unreachable = {str(c) for c in UNREACHABLE_CODES}
+
+    assert migrated | unreachable == codes
+    assert not migrated & unreachable
+    assert all(reason.strip() for reason in UNREACHABLE_CODES.values())
 
 
 NOT_FOUND_ARGS = {"column": "x1", "argument": "x", "data_argument": "data"}

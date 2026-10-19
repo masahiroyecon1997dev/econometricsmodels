@@ -23,14 +23,14 @@ import json
 from functools import partial
 from pathlib import Path
 
-import _error_messages_linear as linear_msgs
+import _error_expectations as msgs
 import numpy as np
 import polars as pl
 import pytest
 import statsmodels.api as sm
 from _assertions import assert_argument_case_insensitive, assert_close
 from _constants import DATA_DIR
-from _error_messages import escaped, fully_qualified_type_name
+from _error_expectations import escaped, fully_qualified_type_name
 from _errors import raises_error
 from _helpers import (
     CASE_SPELLINGS,
@@ -392,7 +392,7 @@ def test_variables_that_is_not_a_list_raises_type_error(baseline, variables):
     with pytest.raises(
         TypeError,
         match=escaped(
-            linear_msgs.VARIABLES_NOT_A_LIST,
+            msgs.VARIABLES_NOT_A_LIST,
             type_name=fully_qualified_type_name(variables),
         ),
     ):
@@ -403,7 +403,7 @@ def test_variables_element_that_is_not_a_str_raises_type_error(baseline):
     with pytest.raises(
         TypeError,
         match=escaped(
-            linear_msgs.VARIABLES_ELEMENT_NOT_STR, index=1, type_name="int"
+            msgs.VARIABLES_ELEMENT_NOT_STR, index=1, type_name="int"
         ),
     ):
         baseline.fit().breusch_pagan_test(["x1", 2])
@@ -425,7 +425,7 @@ def test_unknown_statistic_raises_validation_error(baseline):
         ErrorCode.OPTION_UNKNOWN_VALUE,
         option="statistic",
         value="chi2",
-        allowed=linear_msgs.ALLOWED_DIAGNOSTIC_STATISTICS,
+        allowed=msgs.ALLOWED_DIAGNOSTIC_STATISTICS,
     ):
         baseline.fit().breusch_pagan_test(statistic="chi2")
 

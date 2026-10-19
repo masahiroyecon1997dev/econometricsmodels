@@ -26,6 +26,7 @@ nav:
   - Guides:
       - Accepted data: guide/accepted-data.md
       - Validation and errors: guide/validation.md
+      - Error codes: guide/error-codes.md
       - Inference conventions: guide/inference-conventions.md
       - Verification: guide/verification.md
       - Performance: guide/performance.md

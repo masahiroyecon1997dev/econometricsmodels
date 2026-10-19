@@ -24,7 +24,7 @@ paths:
 - **手法＝最初は1ファイル**（例: `linear/wls.rs`）。ファイルが肥大化したら`ols/`のようにディレクトリに昇格し、責務ごとに分割する（`linear/ols/`は`mod.rs`（`pub use`の再エクスポートのみ）・`cov_type.rs`・`cov_params.rs`・`input.rs`・`estimator.rs`・`predict.rs`）。型とその`impl`は同じファイルに置き（「型だけ」「関数だけ」で分けない）、`mod tests`も対象コードと同じファイルに置く。公開パスは`mod.rs`の再エクスポートで保ち、呼び出し側を変えない。全手法に最初から複数ファイルを強制しない。
 - **系統内で共有するロジック**は`<系統>/common.rs`に置く。
 - **全手法で共有するロジック**（DataFrameからの列抽出等、統計手法に依存しない処理）は系統ディレクトリの外、`shared/`（例: `engine_pybind/src/shared/column_extraction.rs`）に置く。
-- **複数の系統が使う計算部品**（共分散行列のmeat/sandwich・Wald検定・最小二乗・適合度統計量・クラスターのグループ化）は`engine/src/shared/`に置く。各系統は他系統の内部ではなく`shared/`に依存する。`shared/`は**何をするコードか**（線形代数・共分散・推論等）で分け、どの系統が使うかでは分けない（利用側は手法の追加で変わり、利用者別にするとファイルの移動が繰り返し起きるため）。系統の`common.rs`（系統内で共有するロジック・エラー型）とは別物で、`shared/`の関数は特定系統のエラー型を返さない（`CommonError`か、`linear_algebra::RankDeficient`のような系統非依存の型を返し、呼び出し側が自系統のエラーへ`map_err`する）。`error.rs`（`CommonError`）・`inference.rs`・`linear_algebra.rs`・`parallelism.rs`・`validation.rs`・`design_matrix.rs`も`shared/`に置く（engineのクレート直下に残るのは`lib.rs`と`shared/`・系統ディレクトリだけ）。`shared/mod.rs`では、`engine_pybind`から名前で参照するモジュール（`error`・`group_codes`・`parallelism`）のみ`pub mod`、それ以外は`pub(crate) mod`にする。直下への再エクスポート（`pub use shared::error;`等）は置かない。
+- **複数の系統が使う計算部品**（共分散行列のmeat/sandwich・Wald検定・最小二乗・適合度統計量・クラスターのグループ化）は`engine/src/shared/`に置く。各系統は他系統の内部ではなく`shared/`に依存する。`shared/`は**何をするコードか**（線形代数・共分散・推論等）で分け、どの系統が使うかでは分けない（利用側は手法の追加で変わり、利用者別にするとファイルの移動が繰り返し起きるため）。系統の`common.rs`（系統内で共有するロジック・エラー型）とは別物で、`shared/`の関数は特定系統のエラー型を返さない（`CommonError`か、`linear_algebra::RankDeficient`のような系統非依存の型を返し、呼び出し側が自系統のエラーへ`map_err`する）。`error.rs`（`CommonError`・`ErrorInfo`）・`error_catalog.rs`（エラーのカタログ）・`inference.rs`・`linear_algebra.rs`・`parallelism.rs`・`validation.rs`・`design_matrix.rs`も`shared/`に置く（engineのクレート直下に残るのは`lib.rs`と`shared/`・系統ディレクトリだけ）。`shared/mod.rs`では、`engine_pybind`から名前で参照するモジュール（`error`・`error_catalog`・`group_codes`・`parallelism`）のみ`pub mod`、それ以外は`pub(crate) mod`にする。直下への再エクスポート（`pub use shared::error;`等）は置かない。
 - `engine`と`engine_pybind`で同じ系統名・ディレクトリ構成を揃える（`engine/src/linear/ols/` ⇔ `engine_pybind/src/linear/ols.rs`のように対応させる。手法の中のファイル分割はengine側だけでよい）。共有コードも同じく、両クレートとも`shared/`に置く（`engine/src/shared/` ⇔ `engine_pybind/src/shared/`。中身は別で、engine_pybind側は列抽出・入力検証・オプション値・例外クラス・結果DataFrameの構築・`Mat<f64>`から`Vec`への変換）。
 
 ## 言語方針
@@ -71,12 +71,22 @@ Issue番号・内部管理ドキュメント（`docs/planning/specs/`配下の�
 - 独自エラー型は **thiserror** で定義する。
 - `engine_pybind`（PyO3境界）で、thiserrorのエラー型を`PyErr`に変換する。
 - `unwrap` / `expect` はプロトタイプ段階を除き避ける。避けられない場合は理由をコメントで明記する。
-- **Python側の例外はカテゴリ別に分ける**（全て`PyValueError`にまとめない）。最低限、以下の2階層を`pyo3::create_exception!`で定義し、`engine_pybind`側でエラー変換時にどちらに属するか判断して使い分ける。
-  - `ValidationError`: 入力・パラメータが不正（次元不一致、欠損値、観測数不足、クラスター数不足、`confidence_level`の範囲外等）。Python側の`ValueError`も継承させ、素の`except ValueError`でも捕まえられるようにする。
-  - `ComputationError`: 計算過程で発覚した問題（特異行列等）。Python側の`RuntimeError`を継承させる。
+- **Python側の例外はカテゴリ別に分ける**（全て`PyValueError`にまとめない）。`engine_pybind/src/shared/errors.rs`の`#[pyclass]`で、次の2クラスを定義する（`module = "econometricsmodels._lib"`）。どちらに属するかは**カタログの`code`ごとに決まる**。
+  - `ValidationError`: 入力・パラメータが不正（欠損値、観測数不足、クラスター数不足、`confidence_level`の範囲外等）。Python側の`ValueError`を継承させ、素の`except ValueError`でも捕まえられるようにする。
+  - `ComputationError`: 計算過程で発覚した問題（特異行列、収束しない等）。Python側の`RuntimeError`を継承させる。
+  - 引数・オプションの**型**の誤りは構造化せず、組み込みの`TypeError`にする（`column_extraction.rs`・`option_values.rs`が作る文面は、引数名を引用符で囲まず`{argument} must be a ..., got {type}.`の形にする。`options`のクラス違い・未知のキーワードなど、PyO3が自動生成する`TypeError`は対象外）。
   - メモリ不足等は専用の例外クラスを設けない（Rust/Pythonのメモリ確保失敗は通常このレイヤーで綺麗に変換できるものではないため）。
-- **系統をまたいで同じ意味・同じメッセージのバリアントが複数の系統のエラー型に重複する場合は`engine::shared::error::CommonError`に切り出す**（`DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/`MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`がOLS/WLSとnonlinearで重複していたことから導入）。各系統のエラー型（`LeastSquaresError`/`MleError`等）はthiserrorの`#[error(transparent)] Common(#[from] CommonError)`バリアントでこれを包む。`?`演算子は`#[from]`により自動変換されるため、`CommonError`のバリアントを直接構築する箇所（`return Err(...)`等`?`を経由しない箇所）でのみ`.into()`を明示する。系統固有の追加バリアント（`SingularHessian`等）や、将来「意味は同じだが系統固有の追加フィールドが要る」ケースは`CommonError`に含めず、各系統のエラー型に直接定義してよい（`CommonError`を使うかどうかは系統ごとに選べる）。`engine_pybind`側の変換は`engine_pybind/src/shared/errors.rs`の`common_error_to_pyerr`に集約し、各系統の`*_error_to_pyerr`関数はこれに委譲する。
-- **`PyErr`への変換は、エラー型が自クレート（`engine_pybind`）の型なら`impl From<E> for PyErr`、外部クレート（`engine`）の型なら関数形式（`common_error_to_pyerr`等）にする**。外部クレートの型には、orphan ruleにより`engine_pybind`側で`impl From<EngineError> for PyErr`を書けないため。自クレートの型は`?`で`PyErr`に変換できる。例: `engine_pybind/src/shared/column_error.rs`の`ColumnExtractionError`（列抽出で起きる入力不正。`engine`由来の`CommonError`・`PanelError`は包まず従来どおり`*_error_to_pyerr`で変換する）。変換の`match`は`_`で受けず全バリアントを列挙し、バリアントを足したときに`ValidationError`と`ComputationError`のどちらにするかを決め忘れないようにする。メッセージ文言の単体テストは、`PyErr::to_string()`がPythonインタプリタを要求しpanicするため、`PyErr`に変換する前のエラー型の`to_string()`で行う。
+- **例外は構造化する**: `code`（UPPER_SNAKE_CASE）・`message`・`hint`・`params`を持つ。文面は`engine/src/shared/error_catalog.rs`の`CATALOG`（`code`ごとのクラス・`params`の型・`message`/`hint`のテンプレート）が正本で、手で保守する。文面の規則（英語のみ・記号を使わず単語で書く・`hint`は機械的な対処だけ等）は`error_catalog.rs`のテストが強制する。エラー型にはカタログを直接書かず、`engine::shared::error::ErrorInfo::report()`で`ErrorReport`（`code`＋`params`）を返す。
+- **エラーを足す・変えるとき**:
+  1. 既存の`code`で表せないかを先に確認する（`message`・`hint`・クラス・`params`のキー集合が同じなら再利用する。同じ`code`はいつでも同じ`hint`）。
+  2. `error_catalog.rs`に`code`を足す（名前は「何の値か＋どういう状況か」）。`UPDATE_ERROR_CATALOG_GOLDEN=1 cargo test -p engine error_catalog`でゴールデンを更新する。
+  3. エラー型のバリアントを足し、`ErrorInfo::report()`の`match`に追加する（`_`で受けず全バリアントを列挙し、足し忘れをコンパイルエラーにする）。エンジンが計算した量（`min_obs`・`min_clusters`等）は`params`で渡す。
+  4. `maturin develop`の後、`python tools/render_error_catalog.py`で`python_package/econometricsmodels/error_codes.py`と`docs/guide/error-codes.md`を生成し直す（CIは`--check`で食い違いを検出する）。
+  5. Pythonのテストは文面ではなく`tests/support/_errors.py`の`raises_error(code, **params)`で照合する。`MIGRATED_CODES`に足す（全体実行の`--check-error-coverage`が、足した`code`が1度は実際に送出されることを検査する）。Pythonから構成できない`code`の扱いは同ファイルの`UNREACHABLE_CODES`を参照。
+- **入れ子の回帰で起きたエラーは、ラッパーの`code`を作らず、原因の`code`に`Stage`を足して表す**（第一段階・within回帰・補助回帰等。Rust側に段階ごとの包みのバリアントがあってもよいが、`report()`は原因の`code`に`stage`（と補助の`params`）を足して返す）。文頭に`In the first stage regression for 'x1': `のような前置きが付く。`stage`を付けられる`code`はカタログの`stage_allowed`で決まり、付けられない`code`（`confidence_level`の範囲違反等）は包まずそのまま返す。パネルは`PanelError::InStage{stage, source}`と`in_stage()`で包む。
+- **到達不能な状態は`INTERNAL_ERROR`**（`detail`に元の文）にする。`unwrap`/`expect`の代わりに、`CommonError::internal`や`engine_pybind`の`internal_error`を使う。
+- **系統をまたいで同じ意味のバリアントが複数の系統のエラー型に重複する場合は`engine::shared::error::CommonError`に切り出す**。各系統のエラー型（`LeastSquaresError`/`MleError`/`IvError`/`PanelError`）はthiserrorの`#[error(transparent)] Common(#[from] CommonError)`バリアントでこれを包み、`report()`は`Common`アームで委譲する。`?`は`#[from]`で自動変換されるため、`CommonError`のバリアントを直接構築する箇所（`?`を経由しない`return Err(...)`等）でのみ`.into()`を明示する。系統固有のバリアントや、「意味は同じだが系統固有の追加フィールドが要る」ケースは各系統のエラー型に直接定義してよい。
+- **`PyErr`への変換は`to_pyerr(&err)`の1関数に集約する**（`engine_pybind/src/shared/errors.rs`。`ErrorInfo`を実装した型なら何でも渡せる）。各系統の`*_error_to_pyerr`はこれを呼ぶだけの1行にする。外部クレート（`engine`）の型には、orphan ruleにより`impl From<EngineError> for PyErr`を`engine_pybind`側で書けないため関数形式にする。自クレートの型（`ColumnExtractionError`）は`impl From<E> for PyErr`でよい。メッセージ文言の単体テストは、`PyErr::to_string()`がPythonインタプリタを要求しpanicするため、`PyErr`に変換する前の`ErrorReport::full_text()`で行う。
 
 ## Lint / フォーマット
 

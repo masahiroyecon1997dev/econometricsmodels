@@ -28,8 +28,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-import _error_messages as msgs
-import _error_messages_nonlinear as nonlinear_msgs
+import _error_expectations as msgs
 import pandas as pd
 import polars as pl
 import pytest
@@ -44,7 +43,7 @@ from _assertions import (
     assert_same_estimates,
 )
 from _constants import APPLE_CLUSTER, APPLE_X, DATA_DIR, MROZ_X
-from _error_messages import escaped
+from _error_expectations import escaped
 from _errors import raises_error, raises_one_of_errors
 from _helpers import (
     load_wooldridge_dataset,
@@ -552,7 +551,7 @@ def check_missing_y_column_raises(dataset, estimator_cls):
 def check_data_not_polars_raises(dataset, estimator_cls):
     """`data`/`new_data`にpolars以外のDataFrame（pandas等）を渡すと、内部実装
     （`pyo3-polars`の`get_columns`呼び出し）が漏れた`AttributeError`ではなく
-    `ValidationError`になること（`test_ols_validation.py`と同じ検証）。
+    `TypeError`になること（`test_ols_validation.py`と同じ検証）。
     """
     bad = pd.DataFrame({"y": [0.0, 1.0, 0.0], "x1": [1.0, 2.0, 3.0]})
     with pytest.raises(
@@ -816,7 +815,7 @@ def check_unknown_cov_type_raises(
         ErrorCode.OPTION_UNKNOWN_VALUE,
         option="cov_type",
         value=cov_type,
-        allowed=nonlinear_msgs.ALLOWED_COV_TYPES_NONLINEAR,
+        allowed=msgs.ALLOWED_COV_TYPES_NONLINEAR,
     ):
         estimator_cls(
             dataset,
@@ -832,7 +831,7 @@ def check_nonrobust_is_rejected(dataset, estimator_cls, options_cls, cov_type):
         ErrorCode.OPTION_UNKNOWN_VALUE,
         option="cov_type",
         value=cov_type,
-        allowed=nonlinear_msgs.ALLOWED_COV_TYPES_NONLINEAR,
+        allowed=msgs.ALLOWED_COV_TYPES_NONLINEAR,
     ):
         estimator_cls(
             dataset,
@@ -850,7 +849,7 @@ def check_unknown_method_raises(
         ErrorCode.OPTION_UNKNOWN_VALUE,
         option="solver",
         value=solver,
-        allowed=nonlinear_msgs.ALLOWED_SOLVERS,
+        allowed=msgs.ALLOWED_SOLVERS,
     ):
         estimator_cls(
             dataset,
@@ -1034,7 +1033,7 @@ def check_marginal_effects_unknown_at_raises(dataset, estimator_cls):
         ErrorCode.OPTION_UNKNOWN_VALUE,
         option="at",
         value="bogus",
-        allowed=nonlinear_msgs.ALLOWED_MARGINAL_EFFECTS_AT,
+        allowed=msgs.ALLOWED_MARGINAL_EFFECTS_AT,
     ):
         res.marginal_effects(at="bogus")
 

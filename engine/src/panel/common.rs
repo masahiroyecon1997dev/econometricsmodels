@@ -5,7 +5,7 @@
 //! `PanelError`を共有する（`docs/spec/panel-common.md`4.4節）。
 //!
 //! `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/
-//! `MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`は`engine::shared::error::
+//! `MissingClusterColumn`/`InsufficientClusters`/`NearSingularMatrix`等は`engine::shared::error::
 //! CommonError`に切り出し済みのため、ここでは`Common`バリアント経由で保持する。
 //!
 //! FE/RE固有バリアントは、`docs/spec/fe-spec.md`（FE固有論点）・`docs/spec/re-spec.md`

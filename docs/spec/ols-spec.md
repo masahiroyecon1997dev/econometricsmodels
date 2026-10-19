@@ -175,7 +175,8 @@ $$
   倍精度の限界を超えるが非ピボットCholesky分解自体は失敗せず無意味なF統計量を返しうる
   （実測でstatsmodelsとの相対誤差5e10程度）。`ensure_well_conditioned_symmetric_matrix`
   （`crate::shared::linear_algebra`、nonlinear系統とも共有）が`SelfAdjointEigen`で実際の固有値を求め、
-  最大固有値との相対比で判定しCholesky分解前に`ComputationFailed`で止める。
+  最大固有値との相対比で判定しCholesky分解前に`CommonError::NearSingularMatrix`
+  （`matrix=COEFFICIENT_COVARIANCE`、`code`は`MATRIX_NEAR_SINGULAR`、`ComputationError`）で止める。
 
 ### 3.4 `predict()`
 
@@ -231,18 +232,30 @@ $$
 - `engine`はpolars/PyO3を知らない。列名が要る検証（`y`/`x`重複、`"const"`衝突、`x`空リスト）は
   `engine_pybind`側の責務。`confidence_level`範囲・`cluster`未指定は`engine`側が検知するため
   `engine_pybind`側で重複チェックしない。
-- `engine::linear::common::LeastSquaresError` → `PyErr`対応表:
+- `engine::linear::common::LeastSquaresError` → `PyErr`対応表。各バリアントは`ErrorInfo::report()`で
+  カタログ（`engine/src/shared/error_catalog.rs`）の`code`と`params`になり、Python例外のクラスは
+  `code`ごとのカタログのクラスで決まる（`code`ごとの文面・`params`は`docs/guide/error-codes.md`）:
 
-  | `LeastSquaresError` | Python例外 |
-  |---|---|
-  | `Common(DimensionMismatch \| InsufficientObservations \| MissingClusterColumn \| InvalidConfidenceLevel \| InsufficientClusters \| InsufficientClustersForInference \| NoRegressors \| InvalidHacLags)` | `ValidationError` |
-  | `WeightDimensionMismatch \| NonPositiveWeight`（WLS） | `ValidationError` |
-  | `SingularMatrix` | `ComputationError` |
-  | `Common(ComputationFailed)` | `ComputationError` |
+  | `LeastSquaresError` | `code` | Python例外 |
+  |---|---|---|
+  | `Common(InsufficientObservations)` | `INSUFFICIENT_OBSERVATIONS` | `ValidationError` |
+  | `Common(MissingClusterColumn)` | `CLUSTER_REQUIRED` | `ValidationError` |
+  | `Common(InsufficientClusters)` | `CLUSTER_COUNT_TOO_SMALL` | `ValidationError` |
+  | `Common(InsufficientClustersForInference)` | `CLUSTER_COUNT_NOT_ABOVE_SLOPES` | `ValidationError` |
+  | `Common(InvalidConfidenceLevel)` | `CONFIDENCE_LEVEL_OUT_OF_RANGE` | `ValidationError` |
+  | `Common(InvalidHacLags)` | `HAC_LAGS_OUT_OF_RANGE` | `ValidationError` |
+  | `NonPositiveWeight`（WLS） | `WEIGHT_NOT_POSITIVE` | `ValidationError` |
+  | `SingularMatrix` | `DESIGN_MATRIX_SINGULAR` | `ComputationError` |
+  | `Common(NearSingularMatrix { matrix })` | `MATRIX_NEAR_SINGULAR` | `ComputationError` |
+  | `Common(DimensionMismatch \| ClusterDimensionMismatch \| NoRegressors \| Internal)`・`WeightDimensionMismatch` | `INTERNAL_ERROR` | `ComputationError` |
+
+  `engine_pybind`が同じ`DataFrame`の列から`y`・`x`・`weight`を作るため、`INTERNAL_ERROR`の行は
+  Python APIからは起こらない（起きたら実装の誤り）。事後診断検定のバリアント（`InvalidNlags`等）の
+  対応は`error-codes.md`を参照。
 
   `impl From<LeastSquaresError> for PyErr`は書けない（`LeastSquaresError`・`PyErr`ともこのクレート
-  外定義の型でorphan ruleに抵触）。関数`least_squares_error_to_pyerr`として実装し
-  `.map_err(...)?`で変換する。
+  外定義の型でorphan ruleに抵触）。関数`least_squares_error_to_pyerr`（`to_pyerr(&err)`を呼ぶだけ）として
+  実装し`.map_err(...)?`で変換する。
 - バージョン固定: `pyo3=0.29.2` / `polars=0.55.2` / `pyo3-polars=0.28.0`（すべて`=`固定）。
   `pyo3-polars=0.28.0`が`pyo3="^0.29"`・`polars="^0.55.1"`を要求するための組み合わせ。互換性は数字ではなく
   `pyo3-polars`が使う`polars_ffi::version_0`という安定版FFIプロトコルで担保される。

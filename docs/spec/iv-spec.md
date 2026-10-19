@@ -338,8 +338,6 @@ Sargan検定（2SLS）／Hansen J検定（GMM）を`fit()`の結果本体に含�
 `engine::iv::common::IvError` → `PyErr`対応（`iv_error_to_pyerr`、`engine_pybind/src/iv/
 common.rs`）:
 
-| `IvError` | Python例外 |
-|---|---|
 | `IvError` | `code`（カタログ） | 例外 |
 |---|---|---|
 | `Common(CommonError)`（`InvalidHacLags`を含む） | `CommonError`と同じ | `CommonError`と同じ |

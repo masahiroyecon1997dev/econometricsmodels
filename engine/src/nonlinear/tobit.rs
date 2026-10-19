@@ -1637,8 +1637,8 @@ impl TobitEstimator {
     /// - `cov_type=Cluster`でクラスター数が2未満: `CommonError::InsufficientClusters`
     /// - `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下:
     ///   `CommonError::InsufficientClustersForInference`（`rank(Ŝ) ≤ g - 1`のため全体
-    ///   Wald検定の`q×q`部分行列が構造的に特異。従来は`wald_chi2_test`内の
-    ///   `ComputationFailed`だったものを`fit()`冒頭のバリデーションへ前倒し）
+    ///   Wald検定の`q×q`部分行列が構造的に特異。`wald_chi2_test`内の
+    ///   `NearSingularMatrix`（`ComputationError`）に任せず`fit()`冒頭のバリデーションで弾く）
     /// - OLS初期値計算時に`x`が特異（完全な多重共線性等）: `MleError::SingularDesignMatrix`
     ///   （`ols_initial_params`参照）
     /// - `raise_on_non_convergence=true`かつ`max_iter`回で未収束: `MleError::NonConvergence`
@@ -3123,7 +3123,7 @@ mod tests {
     /// 入力だけから判定できるため、`fit()`冒頭のバリデーション
     /// （`validate_cluster_cov_type` → `validate_cluster_count_covers_slopes`）が
     /// `CommonError::InsufficientClustersForInference`で弾く（
-    /// 従来は`wald_chi2_test`内の`ComputationFailed`だった）。`wald_chi2_test`の
+    /// 検証が無ければ`wald_chi2_test`内の`NearSingularMatrix`になる）。`wald_chi2_test`の
     /// `ensure_well_conditioned_symmetric_matrix`側のbackstop（`g > q`だが悪条件で
     /// 数値的にほぼ特異なケース）は、`wald_f_test`と共有する純粋な線形代数
     /// ユーティリティであり`shared/linear_algebra.rs`の単体テスト・OLSの
@@ -4403,7 +4403,8 @@ mod tests {
     /// 常時組み込まれたことで、クラスターロバスト共分散`Ŝ=Σ_g S_gS_g'`の構造的な制約
     /// （`rank(Ŝ)≤G`、`engine/src/linear/CLAUDE.md`「クラスター数`G`と傾き係数の数`q`の
     /// 関係」参照）がWald検定の`q×q`部分行列にも及ぶことが判明した。`G=2`（`q`と同数）
-    /// では実測でこの部分行列が特異になり`fit()`全体が`ComputationFailed`になったため、
+    /// では実測でこの部分行列が特異になり`fit()`全体が`NearSingularMatrix`
+    /// （`ComputationError`）になったため、
     /// `G>q`を満たす`G=4`に変更した（OLSの既存ガイドライン「境界の成功パスのテストでは
     /// `q`を`G`以下に保つ」をTobitでも踏襲）。
     #[test]
@@ -4471,8 +4472,8 @@ mod tests {
     /// `engine/src/linear/CLAUDE.md`「クラスター数`G`と傾き係数の数`q`の関係」参照）が
     /// Wald検定の`q×q`部分行列にも及ぶことが判明した。`multivariate_censored_input`
     /// （`q=2`）に対し`G=2`（G=2の境界値）を組み合わせると`q`と
-    /// 同数になり、実測でこの部分行列が特異になり`fit()`全体が`ComputationFailed`に
-    /// なった。`q=1`のデータセットなら`G=2>q=1`を満たしたまま「G=2の境界値」を検証できる
+    /// 同数になり、実測でこの部分行列が特異になり`fit()`全体が`NearSingularMatrix`
+    /// （`ComputationError`）になった。`q=1`のデータセットなら`G=2>q=1`を満たしたまま「G=2の境界値」を検証できる
     /// ため、こちらに切り替えた（OLSの既存ガイドライン「境界の成功パスのテストでは`q`を
     /// `G`以下に保つ」をTobitでも踏襲）。
     #[test]
@@ -7270,7 +7271,7 @@ mod tests {
         ///
         /// **判明した事実（当時）**: 30万試行中8件が`MleError::EvaluationBudgetExceeded`
         /// 相当のエラー（`SolverType::Lbfgs`は当時のargmin組み込みLBFGSの`SolverExit`経由で
-        /// 同じメッセージを含む`ComputationFailed`になっていた）を引き起こした。**8件
+        /// 同じメッセージを含む計算エラーになっていた）を引き起こした。**8件
         /// 全てが`solver=Lbfgs`**で、`solver=Bfgs`・`solver=Newton`は1件もヒットしな
         /// かった。打ち切り割合（`n_uncensored/n`）は0.38〜0.80、`n`は41〜75、`k`は
         /// 1〜3、`sigma`は0.53〜1.85とヒット全体に幅広く分布しており、「極端な打ち切り・

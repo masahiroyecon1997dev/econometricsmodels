@@ -252,12 +252,10 @@ pub(crate) fn unknown_option_value(option: &'static str, value: &str, allowed: &
 
 /// `engine::shared::error::CommonError`をPython例外に変換する。
 ///
-/// `engine::linear::common::LeastSquaresError`・`engine::nonlinear::common::MleError`
-/// 等、`CommonError`を`#[error(transparent)] Common(#[from] CommonError)`で包む
-/// 各系統のエラー型は、`Common`アームでこの関数に委譲する（系統ごとに
-/// 同じ判定ロジックを重複させない）。orphan ruleにより`impl From`ではなく関数として
-/// 実装する（`least_squares_error_to_pyerr`と同じ理由、`engine_pybind/src/linear/
-/// CLAUDE.md`参照）。
+/// `CommonError`をそのまま返す箇所（グループ化の失敗など）で使う。各系統のエラー型
+/// （`LeastSquaresError`等）は`CommonError`を包んでいても`Common`アームの`report()`が委譲する
+/// ため、`to_pyerr(&err)`を呼べばよい。orphan ruleにより`impl From`ではなく関数として
+/// 実装する。
 pub(crate) fn common_error_to_pyerr(err: CommonError) -> PyErr {
     to_pyerr(&err)
 }

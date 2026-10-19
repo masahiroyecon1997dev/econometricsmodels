@@ -20,7 +20,7 @@ import json
 from functools import partial
 from pathlib import Path
 
-import _error_messages_linear as linear_msgs
+import _error_expectations as msgs
 import numpy as np
 import polars as pl
 import pytest
@@ -358,7 +358,7 @@ def test_unknown_statistic_raises_validation_error(ar1):
         ErrorCode.OPTION_UNKNOWN_VALUE,
         option="statistic",
         value="chi2",
-        allowed=linear_msgs.ALLOWED_DIAGNOSTIC_STATISTICS,
+        allowed=msgs.ALLOWED_DIAGNOSTIC_STATISTICS,
     ):
         fitted.breusch_godfrey_test("t", 1, "chi2")
 

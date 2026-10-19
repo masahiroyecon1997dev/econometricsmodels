@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use polars::prelude::*;
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
-use pyo3::types::PyList;
+use pyo3::types::{PyList, PyType};
 use pyo3_polars::PyDataFrame;
 
 use engine::panel::common::TimeKeys;
@@ -63,7 +63,7 @@ pub fn extract_dataframe(ob: &Bound<'_, PyAny>, param_name: &str) -> PyResult<Py
         let type_name = type_name_of(ob);
         let (shown_type, advice) = if is_instance_of_polars(ob, "LazyFrame") {
             ("LazyFrame".to_string(), " Call .collect() first.")
-        } else if is_pandas_dataframe(&type_name) {
+        } else if is_pandas_dataframe(ob) {
             (
                 "pandas.DataFrame".to_string(),
                 " Convert it with polars.from_pandas(df).",
@@ -77,18 +77,40 @@ pub fn extract_dataframe(ob: &Bound<'_, PyAny>, param_name: &str) -> PyResult<Py
     })
 }
 
-/// 完全修飾名`type_name`がpandasの`DataFrame`（サブクラスは対象外）か。pandasをimportせずに
-/// 型名だけで判定する（pandasは依存に含まれない）。
-fn is_pandas_dataframe(type_name: &str) -> bool {
+/// `ob`がpandasの`DataFrame`（サブクラスを含む）か。pandasをimportせずに、型の継承順
+/// （MRO）にある型の完全修飾名だけで判定する（pandasは依存に含まれない）。
+fn is_pandas_dataframe(ob: &Bound<'_, PyAny>) -> bool {
+    let Ok(mro) = ob.get_type().getattr("__mro__") else {
+        return false;
+    };
+    let Ok(classes) = mro.try_iter() else {
+        return false;
+    };
+    classes
+        .flatten()
+        .filter_map(|class| class.cast_into::<PyType>().ok())
+        .filter_map(|class| class.fully_qualified_name().ok())
+        .any(|name| is_pandas_dataframe_name(&name.to_string_lossy()))
+}
+
+/// 完全修飾名`type_name`がpandasの`DataFrame`クラスそのものか。
+fn is_pandas_dataframe_name(type_name: &str) -> bool {
     type_name.starts_with("pandas.") && type_name.ends_with(".DataFrame")
 }
 
-/// `ob`の型の完全修飾名（`str`・`pandas.core.frame.DataFrame`等）。エラーメッセージ用。
+/// `ob`の型の完全修飾名（`str`・`numpy.ndarray`等）。エラーメッセージ用。
+///
+/// polarsの型は内部のモジュール経路（`polars.series.series.Series`）を隠し、クラス名
+/// （`Series`）で示す。
 pub(crate) fn type_name_of(ob: &Bound<'_, PyAny>) -> String {
-    ob.get_type()
-        .fully_qualified_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| "unknown type".to_string())
+    let Ok(class) = ob.get_type().fully_qualified_name() else {
+        return "unknown type".to_string();
+    };
+    let name = class.to_string_lossy();
+    match name.strip_prefix("polars.") {
+        Some(rest) => rest.rsplit('.').next().unwrap_or(rest).to_string(),
+        None => name.into_owned(),
+    }
 }
 
 /// 単一の列名を受け取る引数（`y`・`entity`・`weight`等）を`String`として取り出す。
@@ -866,12 +888,14 @@ mod tests {
     }
 
     #[test]
-    fn is_pandas_dataframe_matches_only_the_pandas_dataframe_class() {
-        assert!(is_pandas_dataframe("pandas.core.frame.DataFrame"));
-        assert!(is_pandas_dataframe("pandas.DataFrame"));
-        assert!(!is_pandas_dataframe("pandas.core.series.Series"));
-        assert!(!is_pandas_dataframe("polars.dataframe.frame.DataFrame"));
-        assert!(!is_pandas_dataframe("dict"));
+    fn is_pandas_dataframe_name_matches_only_the_pandas_dataframe_class() {
+        assert!(is_pandas_dataframe_name("pandas.core.frame.DataFrame"));
+        assert!(is_pandas_dataframe_name("pandas.DataFrame"));
+        assert!(!is_pandas_dataframe_name("pandas.core.series.Series"));
+        assert!(!is_pandas_dataframe_name(
+            "polars.dataframe.frame.DataFrame"
+        ));
+        assert!(!is_pandas_dataframe_name("dict"));
     }
 
     #[test]

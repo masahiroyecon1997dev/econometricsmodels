@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 import pytest
-from _errors import unraised_migrated_codes
+from _errors import RAISED_CODES, UNREACHABLE_CODES, unraised_migrated_codes
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -43,6 +43,13 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     if exitstatus != 0 or not _is_full_run(config):
         return
     missing = unraised_migrated_codes()
+    stale = sorted(RAISED_CODES & {str(c) for c in UNREACHABLE_CODES})
+    if stale:
+        # 実経路から送出できるようになった`code`は`MIGRATED_CODES`へ移す。
+        missing = [
+            *missing,
+            *(f"{c} (listed in UNREACHABLE_CODES)" for c in stale),
+        ]
     if missing:
         config.stash[_MISSING_CODES] = missing
         session.exitstatus = pytest.ExitCode.TESTS_FAILED

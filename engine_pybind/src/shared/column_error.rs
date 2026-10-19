@@ -9,11 +9,10 @@
 //! どの引数のどのデータか（`argument`・`data_argument`）は、アプリが利用者に「どこでエラーが
 //! 出たか」を示せるよう、すべての抽出関数が呼び出し元から受け取る（[`ColumnSource`]）。
 //!
-//! `PyErr`への変換は`impl From<ColumnExtractionError> for PyErr`で行う。`CommonError`等は
-//! `engine`の型でorphan ruleにより`impl From`を書けず関数（`common_error_to_pyerr`）に
-//! しているが、この型は`engine_pybind`自身の型なので`?`で変換できる。
-//! `engine`由来のエラー（`CommonError`・`PanelError`）はここに包まず、従来どおり
-//! `*_error_to_pyerr`で`PyErr`にする。
+//! `PyErr`への変換は`impl From<ColumnExtractionError> for PyErr`で行う。`engine`の型
+//! （`CommonError`・`PanelError`等）はorphan ruleにより`impl From`を書けず、`to_pyerr(&err)`
+//! （各系統の`*_error_to_pyerr`はこれを呼ぶだけ）で変換するが、この型は`engine_pybind`
+//! 自身の型なので`?`で変換できる。`engine`由来のエラーはここに包まない。
 
 use std::fmt;
 

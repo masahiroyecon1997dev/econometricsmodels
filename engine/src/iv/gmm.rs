@@ -1596,7 +1596,8 @@ mod tests {
         );
     }
 
-    /// 操作変数が完全な線形従属（`z2 = 2*z1`）だと`Z'Z`が特異になり`ComputationFailed`
+    /// 操作変数が完全な線形従属（`z2 = 2*z1`）だと`Z'Z`が特異になり
+    /// `CommonError::NearSingularMatrix { matrix: GmmWeight }`（`MATRIX_NEAR_SINGULAR`）
     /// になることを確認する（`.claude/rules/testing-policy.md`「テストの3系統」の
     /// `ComputationError`パス）。
     #[test]
@@ -1674,7 +1675,8 @@ mod tests {
 
     /// 過剰識別（l=3: const, z1, z2、k=2）では`S`は`rank(S) <= G`のため`G < l`で構造的に
     /// 特異になり、`fit()`冒頭で`InsufficientClustersForWeightMatrix`
-    /// （`ValidationError`）として弾く（従来は`ComputationFailed`。
+    /// （`ValidationError`）として弾く（行列計算に入ると`NearSingularMatrix`の
+    /// `ComputationError`になる。
     /// `fit_computes_cluster_weighted_estimate_matching_manual_formula`のdocコメント参照）。
     #[test]
     fn fit_returns_insufficient_clusters_for_weight_matrix_when_overidentified_and_g_less_than_l() {
@@ -3993,8 +3995,8 @@ mod tests {
         );
     }
 
-    /// `n < l`（`k < n`）でも同じ専用エラーで拒否する（以前は`Z'Z`が特異になり
-    /// `ComputationFailed`だった経路）。
+    /// `n < l`（`k < n`）でも同じ専用エラーで拒否する（検証が無ければ`Z'Z`が特異になり
+    /// `NearSingularMatrix`の`ComputationError`になる経路）。
     #[test]
     fn fit_returns_insufficient_observations_for_first_stage_when_n_is_below_l() {
         // n=3、k=2（切片+endog1）、l=4（切片+z1..z3）。

@@ -10,12 +10,12 @@
 
 from __future__ import annotations
 
-import _error_messages as msgs
+import _error_expectations as msgs
 import pandas as pd
 import polars as pl
 import pytest
 from _constants import DATA_DIR
-from _error_messages import escaped
+from _error_expectations import escaped
 from _errors import raises_error
 from _helpers import (
     ROW_TIME,

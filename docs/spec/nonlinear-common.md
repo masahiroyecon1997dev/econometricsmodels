@@ -85,8 +85,8 @@ Logit/Probit/Tobit（最尤推定ベースの非線形モデル）が共有す�
   条件数約235）で`lbfgs`が44反復かかり既定の`max_iter=35`を超えた（`newton`3・`bfgs`4反復）。
   `H₀⁻¹`を再スケールせず使うと、warm start点と収束点でHessianが大きく違うデータ
   （Logit `near_separation`・Tobit `heavy_censoring`）で`γI`より悪化するため再スケールする。line search内側`Executor`に
-  明示的な`max_iters`（`LINE_SEARCH_MAX_ITERS=100`）を設定し、到達時は`ComputationFailed`
-  として明示的にエラー化する（`FaerBfgs`には無い追加ガード）。`two_loop_recursion`の
+  明示的な`max_iters`（`LINE_SEARCH_MAX_ITERS=100`）を設定し、到達時は`MleError::LineSearchFailed`
+  （`code`は`LINE_SEARCH_FAILED`、`ComputationError`）として明示的にエラー化する（`FaerBfgs`には無い追加ガード）。`two_loop_recursion`の
   逆向きループには`yᵀs<=f64::EPSILON`のペアをゼロ除算回避のため無視するガードを持つが、
   secant条件によるhistory admissionガード自体は**不採用**（履歴凍結による収束の悪化を実測で
   確認したため。`MoreThuenteLineSearch`のstrong Wolfe条件により受理されたペアは理論上
@@ -226,23 +226,27 @@ Logit/Probit/Tobit共有の1つのエラー型を`engine/src/nonlinear/common.rs
 Tobit固有のバリアント（打ち切り境界の検証等）も同じ`MleError`にバリアントとして追加する
 （型を分けない）。
 
-| バリアント | Python例外 | 由来 |
+| バリアント | `code`（Python例外） | 由来 |
 |---|---|---|
-| `Common(CommonError)` | `ComputationFailed`のみ`ComputationError`、他は`ValidationError` | `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/`MissingClusterColumn`/`InsufficientClusters`/`InsufficientClustersForInference`/`NoRegressors`/`ComputationFailed`。系統横断で重複するバリアントは`CommonError`（`engine::shared::error`）に切り出し、`MleError`は`#[error(transparent)] Common(#[from] CommonError)`で包む |
-| `InvalidMaxIter` / `InvalidTol` | `ValidationError` | `max_iter<=0`等 |
-| `NonConvergence { n_iter }` | `ComputationError` | `raise_on_non_convergence=true`かつ`max_iter`到達 |
-| `SingularDesignMatrix` | `ComputationError` | 最適化前の列ピボットQRランクチェックでのランク落ち（1.4節） |
-| `SingularHessian` | `ComputationError` | 収束点のHessianが特異で観測情報行列の逆行列が計算できない |
-| `SingularOpgMatrix` | `ComputationError` | OPG行列（`Σsᵢsᵢ'`、`cov_type="opg"`）が特異。`SingularHessian`と原因が異なるため別バリアントに分離 |
-| `SeparationDetected` | `ComputationError` | 完全分離・準完全分離（有限のMLEが存在しない）を収束後に線形計画で厳密に検出（Logit/Probitのみ。`engine/src/nonlinear/separation.rs`、`logit-spec.md`3.2節） |
-| `EvaluationBudgetExceeded { budget }` | `ComputationError` | line searchの評価回数バジェット超過（1.2節） |
-| `CensoringBoundsMissing`・`CensoringBoundsNotOrdered`・`CensoringBoundNotFinite`（Tobit専用） | `ValidationError` | 境界が両方`None`・下限≧上限・NaN/無限大 |
-| `InvalidBinaryY { row, value }`（Logit/Probit専用） | `ValidationError` | `y`が`{0.0, 1.0}`以外 |
-| `YOutOfCensoringBounds { row, value, lower, upper }`（Tobit専用） | `ValidationError` | `y`が打ち切り境界の外 |
-| `NoUncensoredObservations { lower, upper }`（Tobit専用） | `ValidationError` | 境界の内側に観測が1件も無い |
+| `Common(CommonError)` | `CommonError`のバリアントごとの`code`（`ols-spec.md`3.6節の対応表と同じ。`NearSingularMatrix`は`MATRIX_NEAR_SINGULAR`の`ComputationError`、`INSUFFICIENT_OBSERVATIONS`等は`ValidationError`、到達不能な状態は`INTERNAL_ERROR`の`ComputationError`） | 系統横断で重複するバリアントは`CommonError`（`engine::shared::error`）に切り出し、`MleError`は`#[error(transparent)] Common(#[from] CommonError)`で包む |
+| `InvalidMaxIter` | `MAX_ITER_OUT_OF_RANGE`（`ValidationError`） | `max_iter`が範囲外 |
+| `InvalidTol` | `TOLERANCE_NOT_POSITIVE_FINITE`（`ValidationError`） | `tol`が0以下・NaN・無限大 |
+| `NonConvergence { n_iter }` | `NOT_CONVERGED`（`ComputationError`） | `raise_on_non_convergence=true`かつ`max_iter`到達 |
+| `SingularDesignMatrix` | `DESIGN_MATRIX_SINGULAR`（`ComputationError`） | 最適化前の列ピボットQRランクチェックでのランク落ち（1.4節） |
+| `SingularHessian` | `MATRIX_NEAR_SINGULAR`（`matrix=HESSIAN`、`ComputationError`） | 収束点のHessianが特異で観測情報行列の逆行列が計算できない |
+| `SingularOpgMatrix` | `MATRIX_NEAR_SINGULAR`（`matrix=OPG`、`ComputationError`） | OPG行列（`Σsᵢsᵢ'`、`cov_type="opg"`）が特異。`SingularHessian`と原因が異なるため別バリアントに分離 |
+| `SeparationDetected` | `SEPARATION_DETECTED`（`ComputationError`） | 完全分離・準完全分離（有限のMLEが存在しない）を収束後に線形計画で厳密に検出（Logit/Probitのみ。`engine/src/nonlinear/separation.rs`、`logit-spec.md`3.2節） |
+| `SeparationCheckFailed { detail }` | `SEPARATION_CHECK_FAILED`（`ComputationError`） | 分離が無いことを線形計画が数値的に完了せず確認できなかった（`raise_on_non_convergence=true`のとき） |
+| `EvaluationBudgetExceeded { budget }`・`LineSearchFailed { max_iters }` | `LINE_SEARCH_FAILED`（`ComputationError`） | line searchの評価回数バジェット超過（1.2節）・line searchの反復上限到達（`lbfgs`） |
+| `UncensoredIntervalTooNarrow { lower, upper, sigma }`（Tobit専用） | `UNCENSORED_INTERVAL_TOO_NARROW`（`ComputationError`） | `expected_uncensored`の非打ち切り区間が`σ̂`の1%未満（`tobit-spec.md`3.5節） |
+| `CensoringBoundsMissing`・`CensoringBoundsNotOrdered`・`CensoringBoundNotFinite`（Tobit専用） | `CENSORING_BOUNDS_MISSING`・`CENSORING_BOUNDS_NOT_ORDERED`・`CENSORING_BOUND_NOT_FINITE`（`ValidationError`） | 境界が両方`None`・下限≧上限・NaN/無限大 |
+| `InvalidBinaryY { row, value }`（Logit/Probit専用） | `OUTCOME_NOT_BINARY`（`ValidationError`） | `y`が`{0.0, 1.0}`以外 |
+| `YOutOfCensoringBounds { row, value, lower, upper }`（Tobit専用） | `OUTCOME_OUTSIDE_CENSORING_BOUNDS`（`ValidationError`） | `y`が打ち切り境界の外 |
+| `NoUncensoredObservations { lower, upper }`（Tobit専用） | `NO_UNCENSORED_OBSERVATIONS`（`ValidationError`） | 境界の内側に観測が1件も無い |
 
 各バリアントは`ErrorInfo::report()`で`code`・`params`に変換され、`engine_pybind`側の
-`mle_error_to_pyerr`（`to_pyerr`）が`ValidationError`/`ComputationError`にする。
+`mle_error_to_pyerr`（`to_pyerr`を呼ぶだけの1行）が`ValidationError`/`ComputationError`にする。
+`code`ごとの文面・`params`は`docs/guide/error-codes.md`（カタログから生成）を参照。
 
 ## 3. `cov_type`共通行列演算
 

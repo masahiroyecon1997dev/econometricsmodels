@@ -16,13 +16,12 @@ from __future__ import annotations
 
 import math
 
-import _error_messages as msgs
-import _error_messages_iv as iv_msgs
+import _error_expectations as msgs
 import pandas as pd
 import polars as pl
 import pytest
 from _constants import DATA_DIR
-from _error_messages import escaped
+from _error_expectations import escaped
 from _errors import raises_error
 from _helpers import (
     ROW_TIME,
@@ -598,7 +597,7 @@ def test_unknown_estimator_raises(iv_dataset, estimator):
         ErrorCode.OPTION_UNKNOWN_VALUE,
         option="estimator",
         value=estimator,
-        allowed=iv_msgs.ALLOWED_ESTIMATORS,
+        allowed=msgs.ALLOWED_ESTIMATORS,
     ):
         our_fit(iv_dataset, options=options)
 
@@ -639,7 +638,7 @@ def test_unknown_weight_type_raises(iv_dataset, gmm_weight_type):
         ErrorCode.OPTION_UNKNOWN_VALUE,
         option="gmm_weight_type",
         value=gmm_weight_type,
-        allowed=iv_msgs.ALLOWED_GMM_WEIGHT_TYPES,
+        allowed=msgs.ALLOWED_GMM_WEIGHT_TYPES,
     ):
         our_fit(iv_dataset, options=options)
 
@@ -994,7 +993,7 @@ def test_unknown_gmm_weight_type_raises(iv_dataset, gmm_weight_type):
         ErrorCode.OPTION_UNKNOWN_VALUE,
         option="gmm_weight_type",
         value=gmm_weight_type,
-        allowed=iv_msgs.ALLOWED_GMM_WEIGHT_TYPES,
+        allowed=msgs.ALLOWED_GMM_WEIGHT_TYPES,
     ):
         our_fit(iv_dataset, options=options)
 
@@ -1019,7 +1018,7 @@ def test_unknown_gmm_type_raises(iv_dataset):
         ErrorCode.OPTION_UNKNOWN_VALUE,
         option="gmm_type",
         value="three_step",
-        allowed=iv_msgs.ALLOWED_GMM_TYPES,
+        allowed=msgs.ALLOWED_GMM_TYPES,
     ):
         our_fit(iv_dataset, options=options)
 

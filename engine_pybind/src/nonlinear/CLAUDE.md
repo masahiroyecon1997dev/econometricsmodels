@@ -34,7 +34,7 @@ Probit対応は当初「python_packageラッパー実装のみ」というスコ
 
 ## エラー変換
 
-`engine::nonlinear::common::MleError` → `PyErr`は`mle_error_to_pyerr`（`nonlinear/common.rs`）。`MleError::Common`は`crate::shared::errors::common_error_to_pyerr`に委譲する（`linear`系統の`LeastSquaresError`と同じ`CommonError`を共有、`.claude/rules/rust-style.md`参照）。
+`engine::nonlinear::common::MleError` → `PyErr`は`mle_error_to_pyerr`（`nonlinear/common.rs`）。`to_pyerr(&err)`を呼ぶだけの1行で、`code`・`params`と`ValidationError`/`ComputationError`の別は`engine`側の`ErrorInfo::report()`（`Common`バリアントは`CommonError`の`report()`に委譲。`linear`系統の`LeastSquaresError`と同じ`CommonError`を共有、`.claude/rules/rust-style.md`参照）とカタログが決める。
 
 ## `LogitResult`/`ProbitResult`/`TobitResult`の設計: `estimator`フィールド
 

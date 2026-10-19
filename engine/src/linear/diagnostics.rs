@@ -398,7 +398,7 @@ pub fn breusch_godfrey_test(
 ///
 /// `nlags`が`n`に近いと行列が`n × n`に近づき、`n`が大きいと確保できずプロセスが異常終了
 /// しうる。`nlags`に割合や固定値の上限を置くと統計的に正当化できないため、サイズの計算
-/// （オーバーフロー）と確保の失敗だけを`ComputationFailed`にする。QR分解は同サイズの
+/// （オーバーフロー）と確保の失敗だけを`BreuschGodfreyMatrixTooLarge`にする。QR分解は同サイズの
 /// 複製を内部で確保する（失敗を検知できない）ため、その分もここで確保できるか試す。
 ///
 /// # Errors
@@ -1344,7 +1344,8 @@ mod tests {
     #[test]
     fn white_reports_singular_when_auxiliary_columns_are_still_collinear() {
         // `x2 = x1 + 1`だと`x2^2`・`x1:x2`が`1`・`x1`・`x1^2`の線形結合になり、重複でも
-        // 定数でもないままランク落ちする。White検定の補助回帰であることが分かる`ComputationFailed`にする。
+        // 定数でもないままランク落ちする。White検定の補助回帰であることが分かる
+        // `AuxiliaryRegressionFailed`（`DESIGN_MATRIX_SINGULAR`に`stage`が付く）にする。
         let x2: Vec<f64> = X1.iter().map(|v| v + 1.0).collect();
         let err = white_test(&cols(&[&X1, &x2]), &names(&["x1", "x2"]), &RESID_A).unwrap_err();
         assert!(
@@ -1385,7 +1386,7 @@ mod tests {
     fn white_does_not_depend_on_the_scale_or_location_of_the_variables() {
         // 平均が標準偏差より桁違いに大きい列（賃金・人口等）でも、補助回帰の`R²`は
         // スケール・平行移動で変わらないため同じ結果になる。標準化しないと二乗項が
-        // 元の列とほぼ共線になり`ComputationFailed`で誤って失敗する。
+        // 元の列とほぼ共線になり`AuxiliaryRegressionFailed`で誤って失敗する。
         let base = white_test(&cols(&[&X1, &X2]), &names(&["x1", "x2"]), &RESID_A).unwrap();
         let big1: Vec<f64> = X1.iter().map(|v| 5.0e3 + 1.0e3 * v).collect();
         let big2: Vec<f64> = X2.iter().map(|v| 4.0e4 + 10.0 * v).collect();

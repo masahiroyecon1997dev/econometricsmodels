@@ -8,9 +8,10 @@
 //! 含む`linear`系統共通のエラー型であることを名前に反映するため、`engine`側で
 //! `engine::linear::common::LeastSquaresError`に改名・移動した。
 //!
-//! `LeastSquaresError`の`Common`バリアント（`engine::shared::error::CommonError`、nonlinear系統の
-//! `MleError`と共有する6種のバリデーションエラー）は`crate::shared::errors::common_error_to_pyerr`
-//! に委譲する（系統ごとに同じ判定ロジックを重複させない）。
+//! `LeastSquaresError`は`engine::shared::error::ErrorInfo`を実装しており、`code`・`params`
+//! （`Common`バリアントの`CommonError`も、nonlinear系統の`MleError`と同じ`report()`の経路）は
+//! `engine`側の`report()`が決める。ここでは`crate::shared::errors::to_pyerr`に渡すだけで、
+//! バリアントごとの分岐は持たない。
 
 use engine::linear::common::LeastSquaresError;
 use engine::linear::ols::CovType as EngineCovType;

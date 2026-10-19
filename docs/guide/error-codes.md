@@ -23,6 +23,14 @@ An exception has these attributes:
 
 `str(e)` is `message` and `hint` joined by a space.
 
+## What is stable
+
+- The `code`, the class (`ValidationError` or `ComputationError`) of a `code`, and the keys and types of its `params` are the stable interface: a change to them is listed as breaking in the changelog. New codes can be added, so keep a fallback for an unknown `code` (for example, show `str(e)`).
+- The wording of `message` and `hint` can be improved at any time. Do not parse it.
+- `ErrorCode` (exported at the top level) is a `StrEnum` of all codes, so `e.code == ErrorCode.COLUMN_NOT_FOUND` and `e.code == "COLUMN_NOT_FOUND"` are both true.
+- The exceptions can be constructed (`ValidationError(code, message, hint=None, params=None)`), copied and pickled, so an application can raise the same kind of exception from its own checks and pass it between processes.
+- A wrong argument or option *type* raises the built-in `TypeError`, which has no `code`. See [Validation and errors](validation.md#the-two-exception-classes).
+
 The catalog below lists, for every `code`, the exception class, the keys and types of `params`, and the English templates of `message` and `hint` (`{name}` is replaced by the value of the parameter `name`).
 
 ## Rendering the templates yourself

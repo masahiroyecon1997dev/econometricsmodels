@@ -100,8 +100,36 @@ MIGRATED_CODES: frozenset[str] = frozenset(
         ErrorCode.CLUSTER_TWO_GROUPS_DEGENERATE,
         ErrorCode.AMEMIYA_REQUIRES_WITHIN_VARIATION,
         ErrorCode.NON_POSITIVE_IDIOSYNCRATIC_VARIANCE,
+        ErrorCode.INTERNAL_ERROR,
     }
 )
+
+
+# 実際のエラー経路から構成できない`code`と、その理由。カタログの`code`は
+# `MIGRATED_CODES`（送出をテストで保証）か、ここ（構成できない理由を添えて許可）の
+# どちらかに入っていなければならない（`tests/cross_method/test_error_catalog.py`が検査する）。
+# 文面・形式はカタログ全体の検査（`_lib.raise_error_for_test`）とRustの単体テストが固定する。
+# `MATRIX_NEAR_SINGULAR`の`matrix`のうち、Pythonから構成できているのは
+# `COEFFICIENT_COVARIANCE`だけ（`DESIGN_GRAM`・`HESSIAN`・`OPG`・`GMM_WEIGHT`は、前段の
+# 検査や分解が先に失敗するため、極端なスケール差のデータでも構成できていない）。
+UNREACHABLE_CODES: dict[str, str] = {
+    ErrorCode.BREUSCH_GODFREY_MATRIX_TOO_LARGE: (
+        "補助回帰の行列を確保できない大きさのときだけ。`n <= k_aux`の検査が先に"
+        "働き、確保の失敗を起こせる入力はテストでは作れない"
+    ),
+    ErrorCode.VARIANCE_COMPONENTS_MOMENTS_SINGULAR: (
+        "Amemiyaの不均衡1-wayのモーメント連立の行列式は、通常の入力では正になる。"
+        "特異になる実入力は見つかっていない（防御として残している）"
+    ),
+    ErrorCode.LINE_SEARCH_FAILED: (
+        "最適化の直線探索が上限回数で収束しないときだけ。病的な尤度でないと起きず、"
+        "再現できる入力が作れない"
+    ),
+    ErrorCode.SEPARATION_CHECK_FAILED: (
+        "分離の判定の線形計画が数値的に完了しないときだけ。病的なデータでないと"
+        "起きず、再現できる入力が作れない"
+    ),
+}
 
 
 def unraised_migrated_codes() -> list[str]:

@@ -61,11 +61,11 @@ except ComputationError as e:
     print("The data do not support this model:", e)
 ```
 
-The exception class is the stable interface. The message text can change between versions, so do not parse it. `ComputationError` has no subclasses: the cause is in the message only.
+The exception class and the `code` are the stable interface. Every exception has a `code` (for example `COLUMN_NOT_FOUND`), a `params` dictionary with the values that appear in the text, a `message` that says what is wrong and a `hint` that says what to do next; `str(e)` is the two joined. The wording of `message` and `hint` can change between versions, so do not parse it: branch on `code` and read `params`. All codes, their parameters and their English templates are listed in [Error codes](error-codes.md), which also shows how to write your own messages, for example in another language. `ComputationError` has no subclasses: the cause is the `code`.
 
 The boundary is simple in principle: if the problem is visible without doing matrix algebra, it is a `ValidationError`, and if it only shows up while computing, it is a `ComputationError`. Some conditions have been moved from the second class to the first once they turned out to be decidable up front, for example too few clusters for a joint test. Where a case sits close to the boundary, it is listed below under the class that is raised today.
 
-A wrong argument *type*, as opposed to a wrong value, raises the built-in `TypeError`, not `ValidationError`, following the Python convention. The message names the argument and the type it got: passing a pandas DataFrame or a `polars.LazyFrame` as `data`, passing `x="x1"` instead of `x=["x1"]`, a `bool` or a non-integer for an integer option such as `hac_lags`, or an options object of the wrong class are all `TypeError`. An unknown option name is a `TypeError` as well. The types each argument accepts are listed in [Accepted data](accepted-data.md#argument-types).
+A wrong argument *type*, as opposed to a wrong value, raises the built-in `TypeError`, not `ValidationError`, following the Python convention. The message says which type was expected and which type it got: passing a pandas DataFrame or a `polars.LazyFrame` as `data`, passing `x="x1"` instead of `x=["x1"]`, a `bool` or a non-integer for an integer option such as `hac_lags`, or an options object of the wrong class are all `TypeError`. An unknown option name is a `TypeError` as well. The types each argument accepts are listed in [Accepted data](accepted-data.md#argument-types).
 
 ## When `ValidationError` is raised
 
@@ -144,6 +144,7 @@ The absence of an error says nothing about the following. They are your responsi
 
 ## Where to look next
 
+- [Error codes](error-codes.md): every `code`, its parameters and the English message and hint templates.
 - [Accepted data](accepted-data.md): the input type, the column types accepted in each role, and the argument types.
 - [Inference conventions](inference-conventions.md): the distributions and degrees of freedom behind the reported statistics.
 - [Verification](verification.md): which reference implementations the results are compared with, including the error paths.

@@ -14,14 +14,13 @@ from __future__ import annotations
 import json
 import math
 
-import _error_messages as msgs
-import _error_messages_nonlinear as nonlinear_msgs
+import _error_expectations as msgs
 import numpy as np
 import pandas as pd
 import polars as pl
 import pytest
 from _constants import DATA_DIR
-from _error_messages import escaped
+from _error_expectations import escaped
 from _errors import raises_error
 from _helpers import name_collision_frame, with_cluster_groups
 from _nonlinear_helpers import (
@@ -337,7 +336,7 @@ def test_predict_unknown_target_raises(censored_dataset):
         ErrorCode.OPTION_UNKNOWN_VALUE,
         option="target",
         value="bogus",
-        allowed=nonlinear_msgs.ALLOWED_MARGINAL_EFFECTS_TARGET,
+        allowed=msgs.ALLOWED_MARGINAL_EFFECTS_TARGET,
     ):
         res.predict(target="bogus")
 
@@ -404,7 +403,7 @@ def test_augment_unknown_target_raises(censored_dataset):
         ErrorCode.OPTION_UNKNOWN_VALUE,
         option="target",
         value="bogus",
-        allowed=nonlinear_msgs.ALLOWED_MARGINAL_EFFECTS_TARGET,
+        allowed=msgs.ALLOWED_MARGINAL_EFFECTS_TARGET,
     ):
         res.augment(target="bogus")
 
@@ -455,7 +454,7 @@ def test_unknown_cov_type_raises(censored_dataset, cov_type):
         ErrorCode.OPTION_UNKNOWN_VALUE,
         option="cov_type",
         value=cov_type,
-        allowed=nonlinear_msgs.ALLOWED_COV_TYPES_NONLINEAR,
+        allowed=msgs.ALLOWED_COV_TYPES_NONLINEAR,
     ):
         Tobit(
             censored_dataset,
@@ -472,7 +471,7 @@ def test_nonrobust_is_rejected(censored_dataset, cov_type):
         ErrorCode.OPTION_UNKNOWN_VALUE,
         option="cov_type",
         value=cov_type,
-        allowed=nonlinear_msgs.ALLOWED_COV_TYPES_NONLINEAR,
+        allowed=msgs.ALLOWED_COV_TYPES_NONLINEAR,
     ):
         Tobit(
             censored_dataset,
@@ -489,7 +488,7 @@ def test_unknown_solver_raises(censored_dataset, solver):
         ErrorCode.OPTION_UNKNOWN_VALUE,
         option="solver",
         value=solver,
-        allowed=nonlinear_msgs.ALLOWED_SOLVERS,
+        allowed=msgs.ALLOWED_SOLVERS,
     ):
         Tobit(
             censored_dataset,
@@ -672,7 +671,7 @@ def test_marginal_effects_unknown_at_raises(censored_dataset):
         ErrorCode.OPTION_UNKNOWN_VALUE,
         option="at",
         value="bogus",
-        allowed=nonlinear_msgs.ALLOWED_MARGINAL_EFFECTS_AT,
+        allowed=msgs.ALLOWED_MARGINAL_EFFECTS_AT,
     ):
         res.marginal_effects(at="bogus")
 
@@ -683,7 +682,7 @@ def test_marginal_effects_unknown_target_raises(censored_dataset):
         ErrorCode.OPTION_UNKNOWN_VALUE,
         option="target",
         value="bogus",
-        allowed=nonlinear_msgs.ALLOWED_MARGINAL_EFFECTS_TARGET,
+        allowed=msgs.ALLOWED_MARGINAL_EFFECTS_TARGET,
     ):
         res.marginal_effects(target="bogus")
 

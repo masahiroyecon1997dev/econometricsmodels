@@ -9,12 +9,12 @@
 
 from __future__ import annotations
 
-import re
-
+import _error_expectations as msgs
 import numpy as np
 import polars as pl
 import pytest
 from _dtype_helpers import N, make_frame
+from _error_expectations import escaped
 from _errors import raises_error
 from econometricsmodels import (
     FE,
@@ -89,8 +89,8 @@ FIELD_IDS = [f"{cls.__name__}.{name}" for cls, name, _ in FIELDS]
 
 
 def _expected(name: str, kind: str, got: str) -> str:
-    article = "an int" if kind == "int" else "a real number"
-    return re.escape(f"{name} must be {article}, got {got}.")
+    template = msgs.OPTION_NOT_INT if kind == "int" else msgs.OPTION_NOT_REAL
+    return escaped(template, name=name, type_name=got)
 
 
 # ── コンストラクタ引数（型の誤りと受理） ──────────────────────────────
@@ -567,8 +567,8 @@ def test_numpy_bool_is_rejected_like_bool(cls, name, kind, value):
     """`numpy.bool_`も`bool`と同じく`TypeError`（実数のoptionに`__float__`経由で
     通り抜け、`tol=np.True_`が1.0になっていた）。コンストラクタ・属性代入とも。
     """
-    article = "an int" if kind == "int" else "a real number"
-    pattern = re.escape(f"{name} must be {article}, got numpy.bool.")
+    template = msgs.OPTION_NOT_INT if kind == "int" else msgs.OPTION_NOT_REAL
+    pattern = escaped(template, name=name, type_name="numpy.bool")
     with pytest.raises(TypeError, match=pattern):
         cls(**{name: value})
 
@@ -646,8 +646,10 @@ STRING_IDS = [f"{c.__name__}.{n}" for c, n, _, _ in STRING_FIELDS]
 
 
 def _string_message(name: str, kind: str, got: str) -> str:
-    noun = "a str column name" if kind == "column" else "a str"
-    return re.escape(f"{name} must be {noun}, got {got}.")
+    template = (
+        msgs.COLUMN_NAME_NOT_STR if kind == "column" else msgs.OPTION_NOT_STR
+    )
+    return escaped(template, name=name, type_name=got)
 
 
 @pytest.mark.parametrize(

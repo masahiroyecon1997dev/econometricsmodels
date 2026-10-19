@@ -66,7 +66,7 @@ engineが計算し、`statistic`引数（`StatisticVersion`、大文字小文字
 
 ## エラー変換
 
-`engine::linear::common::LeastSquaresError`（OLS/WLS共通のエラー型。元々`OlsError`という名前だったがWLSも含む実態に合わせて改名・`linear/common.rs`に移動）→ `PyErr`は`impl From`ではなく`fn least_squares_error_to_pyerr(err: LeastSquaresError) -> PyErr`という関数として実装する（`LeastSquaresError`・`PyErr`ともにこのクレート外定義の型でorphan ruleに抵触するため）。呼び出し側で`.map_err(least_squares_error_to_pyerr)?`する。WLSも同型のパターンを踏襲する。
+`engine::linear::common::LeastSquaresError`（OLS/WLS共通のエラー型。元々`OlsError`という名前だったがWLSも含む実態に合わせて改名・`linear/common.rs`に移動）→ `PyErr`は`impl From`ではなく`fn least_squares_error_to_pyerr(err: LeastSquaresError) -> PyErr`という関数として実装する（`LeastSquaresError`・`PyErr`ともにこのクレート外定義の型でorphan ruleに抵触するため）。呼び出し側で`.map_err(least_squares_error_to_pyerr)?`する。中身は`to_pyerr(&err)`を呼ぶだけで、バリアントごとの分岐は持たない（`code`・`params`と例外クラスの別は`engine`側の`ErrorInfo::report()`とカタログが決める）。WLSも同型のパターンを踏襲する。
 
 ## `cov_type`固有の追加列
 

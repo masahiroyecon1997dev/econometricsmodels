@@ -6,7 +6,7 @@ OLS/WLS/Logit/Probit/Tobitがそれぞれ持つため、全手法・全経路で
 
 from __future__ import annotations
 
-import _error_messages as msgs
+import _error_expectations as msgs
 import numpy as np
 import polars as pl
 import pytest
@@ -17,7 +17,7 @@ from _dtype_helpers import (
     make_frame,
     unused_column,
 )
-from _error_messages import escaped
+from _error_expectations import escaped
 from _errors import raises_error
 from econometricsmodels import (
     FE,
@@ -87,6 +87,76 @@ def test_series_data_raises_for_every_method(frame, method):
 
 
 @pytest.mark.parametrize("method", list(FITS))
+def test_pandas_data_raises_with_conversion_hint_for_every_method(
+    frame, method
+):
+    bad = frame.to_pandas()
+
+    with pytest.raises(
+        TypeError,
+        match=escaped(msgs.NOT_A_POLARS_DATAFRAME_PANDAS, param_name="data"),
+    ):
+        FITS[method](bad)
+
+
+def test_pandas_dataframe_subclass_gets_the_conversion_hint(frame):
+    import pandas as pd
+
+    class MyPandas(pd.DataFrame):
+        pass
+
+    with pytest.raises(
+        TypeError,
+        match=escaped(msgs.NOT_A_POLARS_DATAFRAME_PANDAS, param_name="data"),
+    ):
+        OLS(MyPandas(frame.to_pandas()), "y", ["x1"]).fit()
+
+
+@pytest.mark.parametrize("method", list(FITS))
+@pytest.mark.parametrize(
+    "bad",
+    [None, {"y": [1.0, 2.0]}, [1.0, 2.0], np.array([1.0, 2.0]), 3.5],
+    ids=["none", "dict", "list", "ndarray", "float"],
+)
+def test_other_non_polars_data_raises_for_every_method(method, bad):
+    with pytest.raises(
+        TypeError,
+        match=escaped(
+            msgs.NOT_A_POLARS_DATAFRAME,
+            param_name="data",
+            type_name=msgs.fully_qualified_type_name(bad),
+        ),
+    ):
+        FITS[method](bad)
+
+
+def test_data_type_is_checked_before_the_column_arguments(frame):
+    """`data`が`polars.DataFrame`でなければ、`y`の型の誤りより先にそれを報告する。"""
+    with pytest.raises(TypeError, match="data must be a polars.DataFrame"):
+        OLS(frame.lazy(), 1, ["x1"]).fit()
+
+
+class _UnreadableFrame(pl.DataFrame):
+    """本物の`polars.DataFrame`だが、列の読み取りに失敗する（内部の不整合を模す）。"""
+
+    def get_columns(self):
+        raise RuntimeError("boom")
+
+
+@pytest.mark.parametrize("method", list(FITS))
+def test_unreadable_real_dataframe_data_is_an_internal_error(frame, method):
+    """本物の`polars.DataFrame`の読み取り失敗は、利用者の入力の誤りではなく
+    `INTERNAL_ERROR`になる（`TypeError`ではない）。
+    """
+    broken = _UnreadableFrame(frame)
+
+    with raises_error(ErrorCode.INTERNAL_ERROR) as info:
+        FITS[method](broken)
+
+    assert "data" in info.value.params["detail"]
+
+
+@pytest.mark.parametrize("method", list(FITS))
 def test_dataframe_subclass_is_accepted(frame, method):
     """`polars.DataFrame`のサブクラスも本物のDataFrameとして扱い、同じ結果になる。"""
 
@@ -150,6 +220,34 @@ def test_series_new_data_raises(frame, method, path):
         ),
     ):
         _call(result, path, series)
+
+
+@pytest.mark.parametrize("path", PATHS)
+@pytest.mark.parametrize("method", list(NEW_DATA_METHODS))
+def test_pandas_new_data_raises_with_conversion_hint(frame, method, path):
+    result = NEW_DATA_METHODS[method](frame)
+    bad = _new_data().to_pandas()
+
+    with pytest.raises(
+        TypeError,
+        match=escaped(
+            msgs.NOT_A_POLARS_DATAFRAME_PANDAS, param_name="new_data"
+        ),
+    ):
+        _call(result, path, bad)
+
+
+@pytest.mark.parametrize("path", PATHS)
+@pytest.mark.parametrize("method", list(NEW_DATA_METHODS))
+def test_unreadable_real_dataframe_new_data_is_an_internal_error(
+    frame, method, path
+):
+    result = NEW_DATA_METHODS[method](frame)
+
+    with raises_error(ErrorCode.INTERNAL_ERROR) as info:
+        _call(result, path, _UnreadableFrame(_new_data()))
+
+    assert "new_data" in info.value.params["detail"]
 
 
 @pytest.mark.parametrize("path", PATHS)

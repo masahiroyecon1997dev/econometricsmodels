@@ -12,9 +12,9 @@
 //! 「エラー型（`MleError`、共有）」を参照。
 //!
 //! `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/
-//! `MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`は、linear系統の
-//! `LeastSquaresError`と文言まで完全に重複していたため`engine::shared::error::CommonError`に
-//! 切り出し、`Common`バリアント経由で保持する。
+//! `MissingClusterColumn`/`InsufficientClusters`等は、linear系統の`LeastSquaresError`と
+//! 文言まで完全に重複していたため`engine::shared::error::CommonError`に切り出し、
+//! `Common`バリアント経由で保持する（数値的なほぼ特異性は`CommonError::NearSingularMatrix`）。
 
 use argmin::core::TerminationStatus;
 use argmin::core::{
@@ -1333,7 +1333,7 @@ where
 /// - `raise_on_non_convergence=true`かつ`max_iter`回で収束しなかった（`NonConvergence`）
 /// - `bfgs`/`lbfgs`のline searchが収束判定を満たさないまま評価回数の総枠を使い切った
 ///   （`EvaluationBudgetExceeded`、`BudgetedProblem`参照）
-/// - その他ソルバー内部でのエラー（`Internal`）。line searchの失敗は`LineSearchFailed`
+/// - その他ソルバー内部でのエラー（`CommonError::Internal`）。line searchの失敗は`LineSearchFailed`
 pub fn run_solver<O>(
     problem: O,
     solver: SolverType,

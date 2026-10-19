@@ -11,13 +11,12 @@
 //! （`docs/spec/iv-spec.md`3.8節）。
 //!
 //! `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/
-//! `MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`は`engine::shared::error::
+//! `MissingClusterColumn`/`InsufficientClusters`/`NearSingularMatrix`等は`engine::shared::error::
 //! CommonError`に切り出し済みのため、ここでは含めない。
 //!
-//! 現時点ではIV固有バリアントとして識別に関わる`InsufficientInstruments`のみ定義する
-//! （本Issueは型の土台を用意するスコープで、2SLS/GMMの実装issueで実際に計算コードを
-//! 書く過程で追加のバリアント（特異行列等）が必要になった時点で随時追加する。
-//! `LeastSquaresError`のdocコメントと同じ方針）。
+//! IV固有のバリアント（識別に関わる`InsufficientInstruments`、第一段階・第二段階の
+//! 包み、GMMの重み行列のクラスター数不足など）は`IvError`に定義する。バリアントは
+//! 計算コードを書く過程で必要になった時点で足す（`LeastSquaresError`のdocコメントと同じ方針）。
 //!
 //! ## 入力データ構造（`IvInput`）
 //!

@@ -36,13 +36,12 @@ Note:
 
 from __future__ import annotations
 
-import _error_messages as msgs
-import _error_messages_panel as panel_msgs
+import _error_expectations as msgs
 import pandas as pd
 import polars as pl
 import pytest
 from _constants import DATA_DIR
-from _error_messages import escaped
+from _error_expectations import escaped
 from _errors import raises_error
 from _panel_helpers import x_columns
 from _re_helpers import our_fit_re
@@ -459,7 +458,7 @@ def test_unknown_cov_type_raises(fe_dataset, cov_type):
         ErrorCode.OPTION_UNKNOWN_VALUE,
         option="cov_type",
         value=cov_type,
-        allowed=panel_msgs.ALLOWED_COV_TYPES_PANEL,
+        allowed=msgs.ALLOWED_COV_TYPES_PANEL,
     ):
         our_fit_re(fe_dataset, options=options)
 
@@ -470,7 +469,7 @@ def test_hc0_not_supported_raises(fe_dataset):
         ErrorCode.COV_TYPE_NOT_AVAILABLE_FOR_MODEL,
         value="hc0",
         model="RE",
-        allowed=panel_msgs.ALLOWED_COV_TYPES_PANEL,
+        allowed=msgs.ALLOWED_COV_TYPES_PANEL,
     ):
         our_fit_re(fe_dataset, options=options)
 

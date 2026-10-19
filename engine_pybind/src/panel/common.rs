@@ -3,8 +3,9 @@
 //! `.claude/rules/rust-style.md`「ファイル・ディレクトリ構成」: 系統内で共有するロジックは
 //! `<系統>/common.rs`に置く（`engine_pybind/src/iv/common.rs`と同じ位置づけ）。
 //!
-//! `PanelError`の`Common`バリアント（`engine::shared::error::CommonError`）は`crate::shared::errors::
-//! common_error_to_pyerr`に委譲する（系統ごとに同じ判定ロジックを重複させない）。
+//! `PanelError`は`engine::shared::error::ErrorInfo`を実装しており、`code`・`params`
+//! （`Common`バリアントの`CommonError`は`report()`が委譲する）は`engine`側が決める。
+//! ここでは`crate::shared::errors::to_pyerr`に渡すだけで、バリアントごとの分岐は持たない。
 
 use engine::panel::common::PanelError;
 use engine::shared::error_catalog::{ErrorCode, ParamValue};

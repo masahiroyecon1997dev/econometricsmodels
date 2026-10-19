@@ -15,7 +15,7 @@ Issue番号・内部管理ドキュメント（`docs/planning/specs/`配下の�
 ## テストの分離
 
 - `engine`の純粋ロジックの単体テストは、対象コードと同じファイル内の`#[cfg(test)] mod tests`に置く（`cargo test -p engine`）。
-- `tests/`: リファレンス実装との答え合わせテスト（`pytest`）。系統別サブディレクトリ（`tests/linear/`・`tests/nonlinear/`・`tests/iv/`・`tests/panel/`。`benchmark/` と同じ grain）に手法別ファイル `test_<手法>*.py` を置く。全手法を横断するテスト（入力の型・オプションの型・`stat_dist`/自由度の整合等）は `tests/cross_method/` に置く。テストではないヘルパー（共有の `_assertions.py`・`_helpers.py`・`_tolerances.py`・`_error_messages.py` 等と、系統別の `_ols_helpers.py`・`_binary_choice_checks.py` 等）は `tests/support/` 一箇所に集約する。`conftest.py` は `tests/` 直下（共有フィクスチャ）、各系統ディレクトリ（系統固有のフィクスチャ）、`tests/cross_method/`（横断テスト用のパネルデータ `panel_df` 等。60行の小さなデータは `_dtype_helpers.make_frame`）に置く。どのディレクトリからでも `from _helpers import ...` 等の裸importが通るのは `pyproject.toml` の `pythonpath = [".", "tests/support"]` による。
+- `tests/`: リファレンス実装との答え合わせテスト（`pytest`）。系統別サブディレクトリ（`tests/linear/`・`tests/nonlinear/`・`tests/iv/`・`tests/panel/`。`benchmark/` と同じ grain）に手法別ファイル `test_<手法>*.py` を置く。全手法を横断するテスト（入力の型・オプションの型・`stat_dist`/自由度の整合等）は `tests/cross_method/` に置く。テストではないヘルパー（共有の `_assertions.py`・`_helpers.py`・`_tolerances.py`・`_errors.py`・`_error_expectations.py` 等と、系統別の `_ols_helpers.py`・`_binary_choice_checks.py` 等）は `tests/support/` 一箇所に集約する。`conftest.py` は `tests/` 直下（共有フィクスチャ）、各系統ディレクトリ（系統固有のフィクスチャ）、`tests/cross_method/`（横断テスト用のパネルデータ `panel_df` 等。60行の小さなデータは `_dtype_helpers.make_frame`）に置く。どのディレクトリからでも `from _helpers import ...` 等の裸importが通るのは `pyproject.toml` の `pythonpath = [".", "tests/support"]` による。
 
 ## リファレンス実装
 
@@ -56,8 +56,8 @@ Issue番号・内部管理ドキュメント（`docs/planning/specs/`配下の�
 ## テストの3系統
 
 1. **成功パス**: 数値比較（フィクスチャJSONとの一致、下記参照）
-2. **`ValidationError`パス**: 入力起因のエラー（欠損値、列の重複、観測数不足、`confidence_level`範囲外等）。想定した例外クラスが発生することを確認する（数値比較はしない）
-3. **`ComputationError`パス**: 計算過程で発覚する問題（完全な多重共線性等）。同じく例外クラスの発生のみを確認する
+2. **`ValidationError`パス**: 入力起因のエラー（欠損値、列の重複、観測数不足、`confidence_level`範囲外等）。想定した`code`と`params`で例外が発生することを`tests/support/_errors.py`の`raises_error(code, **params)`で確認する（数値比較はしない。文面は照合しない: 文面はRust側の単体テストと`tests/cross_method/test_error_catalog.py`が固定する）。引数・オプションの型違いは構造化されない`TypeError`で、文面を`_error_expectations.py`のテンプレートで照合する
+3. **`ComputationError`パス**: 計算過程で発覚する問題（完全な多重共線性等）。同じく`raises_error`で`code`と`params`を確認する。カタログの`code`はすべて`MIGRATED_CODES`（実際のエラー経路から送出されることをテストで保証済み）か`UNREACHABLE_CODES`（Pythonから構成できない`code`。理由を添える）のどちらかに入れる（通常のテストが検査する）。全体実行（`pytest tests --check-error-coverage`）は、`MIGRATED_CODES`の全`code`が1度は送出されること、`UNREACHABLE_CODES`の`code`が送出されていないことを検査する
 
 ## テストファイルの構成規約
 

@@ -126,8 +126,8 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
     逆の行対のようにDantzig/Blandでも終了しない入力（`k=30`）があった。将来LPクレートに替える場合は、
     トレイトの実装を1つ足して`verify_no_separation`の既定実装を切り替えるだけでよい。
   - **LPが数値的に完了しないとき**（ピボット上限・作業集合の肥大・解が自分の制約を大きく破る）:
-    分離が無いと確認できなかったので、`raise_on_non_convergence=true`なら`ComputationFailed`
-    （メッセージは「分離が無いことを確認できなかった」旨）、`false`なら推定結果は返して
+    分離が無いと確認できなかったので、`raise_on_non_convergence=true`なら`MleError::SeparationCheckFailed`
+    （`code`は`SEPARATION_CHECK_FAILED`、`ComputationError`）、`false`なら推定結果は返して
     `converged=false`にする。実測のデータでは発生していない。
   - **実測（合成データ、scipy/HiGHSの全制約LPを正解とする）**: 分離データ883件（`n=5〜2000`・
     Logit/Probit・完全/準完全分離）を`newton`で全件検出、見逃し0・誤検知0。`bfgs`/`lbfgs`は
@@ -306,14 +306,18 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 
 ### 3.7 engine_pybind: エラー変換
 
-`engine::nonlinear::common::MleError` → `PyErr`:
+`engine::nonlinear::common::MleError` → `PyErr`（バリアントごとの`code`・Python例外は
+[`nonlinear-common.md`](./nonlinear-common.md)2章の表が正本。`MleError::report()`が`code`を決め、
+クラスはカタログの`code`で決まる）。Logit/Probitに関わるバリアントの要点:
 
-| `MleError` | Python例外 |
-|---|---|
-| `Common(DimensionMismatch \| InsufficientObservations \| InvalidConfidenceLevel \| MissingClusterColumn \| InsufficientClusters \| InsufficientClustersForInference \| NoRegressors)` | `ValidationError` |
-| `Common(ComputationFailed)` | `ComputationError` |
-| `InvalidMaxIter` / `InvalidTol` / `InvalidBinaryY` | `ValidationError` |
-| `NonConvergence` / `SingularDesignMatrix` / `SingularHessian` / `SingularOpgMatrix` / `SeparationDetected` / `EvaluationBudgetExceeded` | `ComputationError` |
+| `MleError` | `code` | Python例外 |
+|---|---|---|
+| `Common(InsufficientObservations \| InvalidConfidenceLevel \| MissingClusterColumn \| InsufficientClusters \| InsufficientClustersForInference)`・`InvalidMaxIter` / `InvalidTol` / `InvalidBinaryY` | `INSUFFICIENT_OBSERVATIONS`・`CONFIDENCE_LEVEL_OUT_OF_RANGE`・`CLUSTER_REQUIRED`・`CLUSTER_COUNT_TOO_SMALL`・`CLUSTER_COUNT_NOT_ABOVE_SLOPES`・`MAX_ITER_OUT_OF_RANGE`・`TOLERANCE_NOT_POSITIVE_FINITE`・`OUTCOME_NOT_BINARY` | `ValidationError` |
+| `Common(NearSingularMatrix { matrix })`・`SingularHessian` / `SingularOpgMatrix` | `MATRIX_NEAR_SINGULAR`（`matrix`が`COEFFICIENT_COVARIANCE` / `HESSIAN` / `OPG`） | `ComputationError` |
+| `SingularDesignMatrix` | `DESIGN_MATRIX_SINGULAR` | `ComputationError` |
+| `NonConvergence` | `NOT_CONVERGED` | `ComputationError` |
+| `SeparationDetected` / `SeparationCheckFailed` | `SEPARATION_DETECTED` / `SEPARATION_CHECK_FAILED` | `ComputationError` |
+| `EvaluationBudgetExceeded` / `LineSearchFailed` | `LINE_SEARCH_FAILED` | `ComputationError` |
 
 ### 3.8 テスト
 
@@ -370,7 +374,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 - **分離検出の既知の限界**: (1)`bfgs`/`lbfgs`は分離データで分離検出に至る前にソルバー自身が
   `NonConvergence`や`SingularHessian`で失敗することがある（いずれも`ComputationError`で、無警告の
   「成功」にはならない）。(2)LPが数値的に完了しない異常（実測のデータでは発生していない）は
-  `ComputationFailed`または`converged=false`になる。(3)判定は単位長にそろえた行の余弦で、`1e-6`程度の許容を持って「全制約を満たす非自明な方向」の有無を
+  `SEPARATION_CHECK_FAILED`の`ComputationError`または`converged=false`になる。(3)判定は単位長にそろえた行の余弦で、`1e-6`程度の許容を持って「全制約を満たす非自明な方向」の有無を
   見る。そのため重なりが十分小さい「ほぼ分離」は有限のMLEが存在しても分離と扱われ、境界は重なりの
   大きさ（1観測だけが分離を壊すデータで`1e-5`前後、3.2節の実測）と標準化後の行の幾何で決まる。
   境界の外側（重なりが大きい）では分離とみなさず推定が進み、標準誤差が大きくなる。

@@ -344,7 +344,7 @@ def test_non_string_statistic_raises_type_error(baseline):
         baseline.fit().white_test(1)  # type: ignore[arg-type]
 
 
-# ── ValidationError / ComputationError ──────────────────────────────
+# ── ValidationError ─────────────────────────────────────────────────
 
 
 def test_unknown_statistic_raises_validation_error(baseline):
@@ -444,14 +444,24 @@ def test_result_without_training_data_raises_validation_error():
         first_stage.white_test()
 
 
-def test_all_constant_regressors_raise_computation_error():
+def test_all_constant_regressors_raise_validation_error():
+    """全ての説明変数が定数かは列の統計量だけで決まるので`ValidationError`
+    （`RuntimeError`ではなく`ValueError`の系統）。切片ありだと`fit()`が先に特異と
+    判定するため、切片なしのモデルで到達する。"""
     df, _ = _synthetic("baseline")
     df = df.with_columns(pl.lit(3.0).alias("c"))
     options = OLSOptions(include_intercept=False)
     fitted = OLS(df, y="y", x=["c"], options=options).fit()
 
-    with raises_error(ErrorCode.DIAGNOSTIC_VARIABLES_CONSTANT, test="WHITE"):
+    with raises_error(
+        ErrorCode.DIAGNOSTIC_VARIABLES_CONSTANT, test="WHITE"
+    ) as info:
         fitted.white_test()
+    assert isinstance(info.value, ValueError)
+    assert not isinstance(info.value, RuntimeError)
+
+
+# ── ComputationError ────────────────────────────────────────────────
 
 
 def test_squaring_overflow_raises_computation_error():

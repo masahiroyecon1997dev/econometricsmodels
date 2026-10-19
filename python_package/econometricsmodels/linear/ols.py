@@ -357,10 +357,11 @@ class OLSResults:
             the constant) and the dropped ones (`dropped_terms`).
 
         Raises:
-            ValidationError: `statistic` is not `"lm"` or `"f"`; there are
-                too few observations for the auxiliary regression; or
-                this result has no retained training data (currently only
-                the `OLSResults` returned by `IVResult.first_stage()`).
+            ValidationError: `statistic` is not `"lm"` or `"f"`; every
+                regressor is constant; there are too few observations for
+                the auxiliary regression; or this result has no retained
+                training data (currently only the `OLSResults` returned
+                by `IVResult.first_stage()`).
             ComputationError: The auxiliary design matrix is still
                 singular after dropping terms, or the auxiliary
                 regression's R² is undefined (for example the squared
@@ -426,14 +427,15 @@ class OLSResults:
             ValidationError: `statistic` is not `"lm"` or `"f"`;
                 `variables` is empty or names a column more than once; a
                 column does not exist, has an unsupported dtype or
-                contains missing values, NaN or infinity; there are too
-                few observations for the auxiliary regression; or this
-                result has no retained training data (currently only the
-                `OLSResults` returned by `IVResult.first_stage()`).
-            ComputationError: Every variable is constant, the auxiliary
-                design matrix is still singular after dropping variables,
-                or the auxiliary regression's R² is undefined (for
-                example the squared residuals are constant).
+                contains missing values, NaN or infinity; every variable
+                is constant; there are too few observations for the
+                auxiliary regression; or this result has no retained
+                training data (currently only the `OLSResults` returned
+                by `IVResult.first_stage()`).
+            ComputationError: The auxiliary design matrix is still
+                singular after dropping variables, or the auxiliary
+                regression's R² is undefined (for example the squared
+                residuals are constant).
         """
         raw = self._raw.breusch_pagan_test(variables, statistic)
         return BreuschPaganTestResult(

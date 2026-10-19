@@ -380,7 +380,7 @@ def test_regressor_named_const_gets_an_unambiguous_first_constant():
     assert res.aux_terms == ["const", "const", "x2"]
 
 
-# ── TypeError / ValidationError / ComputationError ──────────────────
+# ── TypeError / ValidationError ─────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -433,6 +433,33 @@ def test_unknown_statistic_raises_validation_error(baseline):
 def test_empty_variables_raises_validation_error(baseline):
     with raises_error(ErrorCode.ROLE_EMPTY, argument="variables"):
         baseline.fit().breusch_pagan_test([])
+
+
+def test_all_constant_variables_raise_validation_error():
+    """全ての`variables`が定数かは列の統計量だけで決まるので`ValidationError`
+    （`RuntimeError`ではなく`ValueError`の系統）。空の`variables`と同じ側。"""
+    df, _ = _synthetic("baseline")
+    df = df.with_columns(pl.lit(3.0).alias("c"))
+    fitted = OLS(df, y="y", x=["x1"]).fit()
+
+    with raises_error(
+        ErrorCode.DIAGNOSTIC_VARIABLES_CONSTANT, test="BREUSCH_PAGAN"
+    ) as info:
+        fitted.breusch_pagan_test(["c"])
+    assert isinstance(info.value, ValueError)
+    assert not isinstance(info.value, RuntimeError)
+
+
+def test_constant_variables_with_different_values_raise_validation_error():
+    """値の異なる定数列が複数あっても、2本目は重複ではなく定数として落ちる。"""
+    df, _ = _synthetic("baseline")
+    df = df.with_columns(pl.lit(3.0).alias("c1"), pl.lit(5.0).alias("c2"))
+    fitted = OLS(df, y="y", x=["x1"]).fit()
+
+    with raises_error(
+        ErrorCode.DIAGNOSTIC_VARIABLES_CONSTANT, test="BREUSCH_PAGAN"
+    ):
+        fitted.breusch_pagan_test(["c1", "c2"])
 
 
 def test_duplicate_variables_raise_validation_error(baseline):
@@ -587,15 +614,33 @@ def test_result_without_training_data_raises_validation_error():
         first_stage.breusch_pagan_test()
 
 
-def test_all_constant_variables_raise_computation_error():
-    df, _ = _synthetic("baseline")
-    df = df.with_columns(pl.lit(3.0).alias("c"))
-    fitted = OLS(df, y="y", x=["x1"]).fit()
+# ── ComputationError ────────────────────────────────────────────────
 
+
+def test_variable_that_overflows_when_scaled_raises_computation_error():
+    """定数ではない列でも、標準化で分散が非有限になると`ComputationError`。
+    同じ大きさの定数列は`ValidationError`（定数かどうかが境界）。"""
+    rng = np.random.default_rng(1)
+    n = 60
+    x = rng.normal(size=n)
+    df = pl.DataFrame(
+        {
+            "y": 1.0 + x + rng.normal(size=n),
+            "x": x,
+            "big": x * 1e200,
+            "big_const": np.full(n, 1e200),
+        }
+    )
+    fitted = OLS(df, y="y", x=["x"]).fit()
+
+    with raises_error(
+        ErrorCode.DIAGNOSTIC_VARIABLE_DEGENERATE, test="BREUSCH_PAGAN"
+    ):
+        fitted.breusch_pagan_test(["big"])
     with raises_error(
         ErrorCode.DIAGNOSTIC_VARIABLES_CONSTANT, test="BREUSCH_PAGAN"
     ):
-        fitted.breusch_pagan_test(["c"])
+        fitted.breusch_pagan_test(["big_const"])
 
 
 def test_auxiliary_regression_that_fits_exactly_raises_computation_error():

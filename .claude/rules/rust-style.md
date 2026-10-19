@@ -78,7 +78,7 @@ Issue番号・内部管理ドキュメント（`docs/planning/specs/`配下の�
   - メモリ不足等は専用の例外クラスを設けない（Rust/Pythonのメモリ確保失敗は通常このレイヤーで綺麗に変換できるものではないため）。
 - **例外は構造化する**: `code`（UPPER_SNAKE_CASE）・`message`・`hint`・`params`を持つ。文面は`engine/src/shared/error_catalog.rs`の`CATALOG`（`code`ごとのクラス・`params`の型・`message`/`hint`のテンプレート）が正本で、手で保守する。文面の規則（英語のみ・記号を使わず単語で書く・`hint`は機械的な対処だけ等）は`error_catalog.rs`のテストが強制する。エラー型にはカタログを直接書かず、`engine::shared::error::ErrorInfo::report()`で`ErrorReport`（`code`＋`params`）を返す。
 - **エラーを足す・変えるとき**:
-  1. 既存の`code`で表せないかを先に確認する（`message`・`hint`・クラス・`params`のキー集合が同じなら再利用する。同じ`code`はいつでも同じ`hint`）。
+  1. 既存の`code`で表せないかを先に確認する（`message`・`hint`・クラス・`params`のキー集合が同じなら再利用する。同じ`code`はいつでも同じ`hint`）。クラスは「推定を走らせずに、入力を見るだけで分かるか」で決める（分かれば`ValidationError`、分からなければ`ComputationError`。分解などの数値ルーチンが要るものは後者。検査の性質で決め、`fit()`のどこで実装するかでは決めない。`docs/spec/error-handling.md`3.1章）。
   2. `error_catalog.rs`に`code`を足す（名前は「何の値か＋どういう状況か」）。`UPDATE_ERROR_CATALOG_GOLDEN=1 cargo test -p engine error_catalog`でゴールデンを更新する。
   3. エラー型のバリアントを足し、`ErrorInfo::report()`の`match`に追加する（`_`で受けず全バリアントを列挙し、足し忘れをコンパイルエラーにする）。エンジンが計算した量（`min_obs`・`min_clusters`等）は`params`で渡す。
   4. `maturin develop`の後、`python tools/render_error_catalog.py`で`python_package/econometricsmodels/error_codes.py`と`docs/guide/error-codes.md`を生成し直す（CIは`--check`で食い違いを検出する）。

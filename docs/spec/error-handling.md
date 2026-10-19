@@ -32,7 +32,33 @@
 
 - `hint`が状況で変わるなら別の`code`にする（`hint`の有無も`code`で決まる）。
 - これにより「`code`＋`params`から文面を再構成できる」ことが保証され、アプリ側の翻訳テンプレートが書ける。
-- 分類（`ValidationError`/`ComputationError`）も`code`の属性。分類の原則そのものの議論は別扱いで、移行時は現行のクラスを保った。
+- 分類（`ValidationError`/`ComputationError`）も`code`の属性。原則は3.1章。
+
+## 3.1 分類の原則（`ValidationError`か`ComputationError`か）
+
+- **`ValidationError`**: 引数・オプション・データだけで決まる検査。個数・範囲・重複・パネルの構造・列の単純な統計量。数値ルーチンは要らない。
+- **`ComputationError`**: 数値ルーチン（行列の分解・逆行列、最適化、分布関数の評価、行列の確保など資源を要する処理）の実行中か実行後に分かるもの。推定値に依存する条件も含む。実装側の失敗（`INTERNAL_ERROR`）もここ。
+- **クラスは検査の性質で決め、実装されている位置では決めない**。検査を`fit()`の前の方へ移しても（クラスター数不足がその例）、クラスは変わらない。
+- **新しい`code`のクラスを決める問い**: 「推定を走らせずに、入力を見るだけで分かるか」。分かれば`ValidationError`、分からなければ`ComputationError`。設計行列のランクのように、分解などの数値ルーチンが要るものは「分からない」側に数える。
+- クラスは粗い区別（「入力かオプションを直す」と「このデータではこのモデルを推定できない」）にとどめ、それ以上は`code`で分岐する。`ComputationError`の`code`にも、共線な列を除く・変数をリスケールするなど、入力を直す`hint`を持つものはある。1つの`code`は常に同じクラス（3章）なので、ラッパーのエラーは作らず、原因の`code`のクラスがそのまま例外のクラスになる（5章）。
+- 利用者向けの説明は`docs/guide/validation.md`。
+
+境界にある`code`と、現行のクラスの理由:
+
+| `code` | クラス | 理由 |
+|---|---|---|
+| `REGRESSOR_NO_WITHIN_VARIATION`（FE） | `ValidationError` | 個体内変換後の列の単純な統計量。他の手法の`DESIGN_MATRIX_SINGULAR`は分解（ランクの判定）で分かるので`ComputationError` |
+| `AMEMIYA_REQUIRES_WITHIN_VARIATION` | `ValidationError` | 同上 |
+| `DK_TWO_PERIODS_DEGENERATE`・`CLUSTER_TWO_GROUPS_DEGENERATE` | `ValidationError` | パネルの構造だけで決まる |
+| `NO_UNCENSORED_OBSERVATIONS`（Tobit） | `ValidationError` | 打ち切り境界と`y`の個数だけで決まる |
+| `DIAGNOSTIC_VARIABLES_CONSTANT` | `ValidationError` | 診断検定の変数がすべて定数かは、列の統計量だけで決まる |
+| `DIAGNOSTIC_VARIABLE_DEGENERATE` | `ComputationError` | 列は定数でないのに、二乗や標準化の計算が桁あふれ（非有限）になる。数値計算上の失敗で、列の統計量では決まらない（同じ大きさの定数列は`DIAGNOSTIC_VARIABLES_CONSTANT`） |
+| `DIAGNOSTIC_STATISTIC_UNDEFINED` | `ComputationError` | 補助回帰の結果（残差・あてはめ）で決まる |
+| `SEPARATION_DETECTED`・`SEPARATION_CHECK_FAILED`（Logit/Probit） | `ComputationError` | 判定に線形計画法（数値ルーチン）が要る。対処はデータの変更 |
+| `UNCENSORED_INTERVAL_TOO_NARROW`（Tobit） | `ComputationError` | 推定した`sigma`に依存する |
+| `NON_POSITIVE_IDIOSYNCRATIC_VARIANCE`・`VARIANCE_COMPONENTS_MOMENTS_SINGULAR`（RE） | `ComputationError` | 推定した分散成分・モーメント方程式に依存する |
+| `NOT_CONVERGED`・`LINE_SEARCH_FAILED` | `ComputationError` | 最適化の結果 |
+| `BREUSCH_GODFREY_MATRIX_TOO_LARGE` | `ComputationError` | 行列を確保できるかで決まる（資源の問題。入力の大きさだけでは決まらない） |
 
 ## 4. `code`と`params`の規約
 
@@ -95,4 +121,3 @@
 ## 8. 既知の制限
 
 - `UNREACHABLE_CODES`の`code`（`BREUSCH_GODFREY_MATRIX_TOO_LARGE`・`VARIANCE_COMPONENTS_MOMENTS_SINGULAR`・`LINE_SEARCH_FAILED`・`SEPARATION_CHECK_FAILED`）と、`MATRIX_NEAR_SINGULAR`の`matrix`のうち`DESIGN_GRAM`・`HESSIAN`・`OPG`・`GMM_WEIGHT`は、実データから再現できていない（防御として残している）。再現できる入力が見つかったら`MIGRATED_CODES`へ移す。
-- 分類（どの状況を`ValidationError`にし、どれを`ComputationError`にするか）の原則の見直しは、このシリーズの範囲外。移行時は現行のクラスを保った。

@@ -1521,7 +1521,7 @@ pub static CATALOG: &[ErrorSpec] = &[
     },
     ErrorSpec {
         code: ErrorCode::DiagnosticVariablesConstant,
-        class: ErrorClass::Computation,
+        class: ErrorClass::Validation,
         params: &[ParamSpec {
             name: "test",
             ty: ParamType::Str,
@@ -2437,14 +2437,14 @@ mod tests {
         assert_eq!(render_template("{", &|_| None), "{");
     }
 
-    /// 全`code`の文面（既定値で描画）を固定する。文面を意図して変えたときは、環境変数
+    /// 全`code`のクラス（`[Validation]`/`[Computation]`）と文面（既定値で描画）を固定する。文面を意図して変えたときは、環境変数
     /// `UPDATE_ERROR_CATALOG_GOLDEN=1`を付けてこのテストを実行すると`error_catalog_golden.txt`が更新される。
     #[test]
     fn rendered_texts_match_the_golden_file() {
         let mut current = String::new();
         for spec in CATALOG {
             current.push_str(spec.code.as_str());
-            current.push_str(": ");
+            current.push_str(&format!(" [{:?}]: ", spec.class));
             current.push_str(&sample(spec).full_text());
             current.push('\n');
         }

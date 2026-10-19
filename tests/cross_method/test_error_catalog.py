@@ -193,6 +193,39 @@ def test_stage_phrase_renders_the_same_in_rust_and_from_the_table() -> None:
         assert info.value.message == phrase + body, stage["name"]
 
 
+# 分類の原則（`docs/spec/error-handling.md` 3.1章）の境界ケース。クラスは
+# 「推定を走らせずに、入力を見るだけで分かるか」で決まる。表を変えるときは仕様も直す。
+BORDERLINE_CLASSES = {
+    "REGRESSOR_NO_WITHIN_VARIATION": "ValidationError",
+    "AMEMIYA_REQUIRES_WITHIN_VARIATION": "ValidationError",
+    "DK_TWO_PERIODS_DEGENERATE": "ValidationError",
+    "CLUSTER_TWO_GROUPS_DEGENERATE": "ValidationError",
+    "NO_UNCENSORED_OBSERVATIONS": "ValidationError",
+    "DIAGNOSTIC_VARIABLES_CONSTANT": "ValidationError",
+    "DIAGNOSTIC_VARIABLE_DEGENERATE": "ComputationError",
+    "DIAGNOSTIC_STATISTIC_UNDEFINED": "ComputationError",
+    "SEPARATION_DETECTED": "ComputationError",
+    "SEPARATION_CHECK_FAILED": "ComputationError",
+    "UNCENSORED_INTERVAL_TOO_NARROW": "ComputationError",
+    "NON_POSITIVE_IDIOSYNCRATIC_VARIANCE": "ComputationError",
+    "VARIANCE_COMPONENTS_MOMENTS_SINGULAR": "ComputationError",
+    "NOT_CONVERGED": "ComputationError",
+    "LINE_SEARCH_FAILED": "ComputationError",
+    "BREUSCH_GODFREY_MATRIX_TOO_LARGE": "ComputationError",
+    "DESIGN_MATRIX_SINGULAR": "ComputationError",
+    "INTERNAL_ERROR": "ComputationError",
+}
+
+
+def test_borderline_codes_have_the_class_the_classification_rule_gives() -> (
+    None
+):
+    classes = {c["code"]: c["class"] for c in CATALOG["codes"]}
+    for code, expected in BORDERLINE_CLASSES.items():
+        assert code in classes, f"{code} is not in the catalog"
+        assert classes[code] == expected, code
+
+
 def test_every_catalog_code_is_either_tested_or_listed_as_unreachable() -> (
     None
 ):

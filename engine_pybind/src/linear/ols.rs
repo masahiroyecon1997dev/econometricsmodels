@@ -503,6 +503,7 @@ impl OLSResult {
     /// - `statistic` is not `"lm"` or `"f"`: `ValidationError`.
     /// - This result has no cached training data (currently only `IVResult.first_stage()`
     ///   results): `ValidationError`.
+    /// - Every regressor is constant: `ValidationError`.
     /// - Too few observations for the auxiliary regression: `ValidationError`.
     /// - The auxiliary design matrix is still singular after dropping, or its R-squared
     ///   is undefined: `ComputationError`.
@@ -552,11 +553,12 @@ impl OLSResult {
     ///   `TypeError`.
     /// - `statistic` is not `"lm"` or `"f"`, `variables` is empty or names a column twice, a
     ///   column does not exist, has an unsupported dtype or contains missing values, NaN or
-    ///   infinity, or too few observations for the auxiliary regression: `ValidationError`.
+    ///   infinity, every variable is constant, or too few observations for the auxiliary
+    ///   regression: `ValidationError`.
     /// - This result has no cached training data (currently only `IVResult.first_stage()`
     ///   results): `ValidationError`.
-    /// - Every variable is constant, the auxiliary design matrix is still singular after
-    ///   dropping, or its R-squared is undefined: `ComputationError`.
+    /// - The auxiliary design matrix is still singular after dropping, or its R-squared
+    ///   is undefined: `ComputationError`.
     #[pyo3(signature = (variables=None, statistic="lm"))]
     fn breusch_pagan_test(
         &self,

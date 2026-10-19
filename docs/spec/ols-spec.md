@@ -356,7 +356,7 @@ faerのグローバル並列度は`engine::shared::parallelism::ensure_serial()`
 - **エラー**: `statistic`が不正・観測数が補助回帰の列数（定数込み）以下
   （`LeastSquaresError::InsufficientObservationsForAuxRegression`、`CommonError::
   InsufficientObservations`は元のモデルの`k`を指すためメッセージを分けた）・`training_data`が
-  無い結果（`IVResults.first_stage()`由来）は`ValidationError`。全ての`x`が定数、補助回帰が除外後も
+  無い結果（`IVResults.first_stage()`由来）・全ての`x`が定数は`ValidationError`。補助回帰が除外後も
   特異（既知の制限: 全カテゴリのダミーを`include_intercept=False`で入れると補助回帰の定数と
   共線になる）、または補助回帰が推定できない場合は`ComputationError`（メッセージに
   `White test`と補助回帰であることを含め、元のモデルの共線性と取り違えないようにする）。
@@ -460,7 +460,7 @@ faerのグローバル並列度は`engine::shared::parallelism::ensure_serial()`
   （全カテゴリのダミーと定数の組み合わせも同様。`white_test()`と同じ制限）。補助回帰の各列は標準化して
   から回帰する（`R²`は変わらず、平均の大きい変数でも失敗しない）。
 - **エラー**: `statistic`が不正・観測数が補助回帰の列数（定数込み`q + 1`）以下・`training_data`が無い結果
-  （`IVResults.first_stage()`由来）は`ValidationError`。全ての`variables`が定数、補助回帰が除外後も特異、
+  （`IVResults.first_stage()`由来）・全ての`variables`が定数は`ValidationError`。補助回帰が除外後も特異、
   または`R²`が定義できない（残差の二乗が定数等）場合は`ComputationError`（メッセージに
   `Breusch-Pagan test`と補助回帰であることを含める）。
 - **実装**: engineの`linear::diagnostics::breusch_pagan_test`（`z`の列・列名・残差を受け取る）。

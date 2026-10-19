@@ -33,6 +33,10 @@ An exception has these attributes:
 
 The catalog below lists, for every `code`, the exception class, the keys and types of `params`, and the English templates of `message` and `hint` (`{name}` is replaced by the value of the parameter `name`).
 
+## Collinear columns
+
+`DESIGN_MATRIX_SINGULAR` carries `columns`, the names of the columns that take part in one linear dependency of the design matrix, in the order of the design (the intercept is called `const`). It does not decide which column to drop: removing any one of them resolves that dependency. If the design has more than one dependency, only the first one is reported (the first column, in the design order, that can be written with the columns before it, together with those columns); fix it and run again to see the next. A column that is zero in every observation is reported on its own. In a nested regression, the names are those of that regression (see `stage`).
+
 ## Rendering the templates yourself
 
 To build a message in your own language, keep one template per `code` and replace each `{name}` with the value of `params["name"]` written as follows:
@@ -111,7 +115,7 @@ Quotation marks around single values (such as `'{column}'`) are part of the temp
 
 | Code | Parameters | Message | Hint |
 |---|---|---|---|
-| `DESIGN_MATRIX_SINGULAR` | `stage` (optional, see Stages) | The design matrix is singular: some columns are perfectly collinear. | Remove or combine the collinear columns, for example duplicated columns or a constant column together with the intercept. |
+| `DESIGN_MATRIX_SINGULAR` | `columns` (list of str (column names))<br>`stage` (optional, see Stages) | The design matrix is singular: the columns {columns} are perfectly collinear. | Remove or combine the collinear columns, for example duplicated columns or a constant column together with the intercept. |
 | `MATRIX_NEAR_SINGULAR` | `matrix` (str, not shown in the text)<br>`stage` (optional, see Stages) | A matrix needed to compute the estimates or their covariance is numerically singular. | Rescale the variables so that they are on similar scales, or remove nearly collinear regressors. |
 | `NOT_CONVERGED` | `n_iter` (int)<br>`iter_option` (str) | The optimizer did not converge after {n_iter} iteration(s). | Increase {iter_option}, or pass raise_on_non_convergence=False to receive the last iteration (check converged before using it). |
 | `LINE_SEARCH_FAILED` | `n_evaluations` (int, not shown in the text) | The optimizer's line search did not converge. | Try a different solver, or rescale the regressors. |

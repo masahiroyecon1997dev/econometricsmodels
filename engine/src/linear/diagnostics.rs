@@ -345,10 +345,17 @@ pub fn breusch_godfrey_test(
     scale_columns_by_norm(&mut aux)?;
 
     crate::shared::parallelism::ensure_serial();
-    let qr = checked_col_piv_qr(&aux).map_err(|_| {
+    let qr = checked_col_piv_qr(&aux).map_err(|err| {
+        // 補助回帰の列は元のモデルの列名を持たないため、位置で名前を付ける。
+        let mut names: Vec<String> = Vec::with_capacity(k_aux);
+        if has_intercept {
+            names.push("const".to_string());
+        }
+        names.extend((0..x_columns.len()).map(|j| format!("x[{j}]")));
+        names.extend((1..=m).map(|lag| format!("residual_lag_{lag}")));
         aux_fit_error(
             DiagnosticTest::BreuschGodfrey,
-            LeastSquaresError::SingularMatrix,
+            LeastSquaresError::from_rank_deficient(err, &names),
         )
     })?;
     let params = qr.solve_lstsq(Mat::from_fn(n, 1, |t, _| sorted_resid[t]));
@@ -1203,7 +1210,9 @@ mod tests {
             err,
             LeastSquaresError::AuxiliaryRegressionFailed {
                 test: DiagnosticTest::BreuschPagan,
-                source: Box::new(LeastSquaresError::SingularMatrix),
+                source: Box::new(LeastSquaresError::SingularMatrix {
+                    columns: vec!["x1".to_string(), "x1_doubled".to_string()]
+                }),
             }
         );
     }
@@ -1537,12 +1546,19 @@ mod tests {
 
     #[test]
     fn aux_fit_error_wraps_numerical_singularity_of_the_auxiliary_regression_only() {
-        let singular = aux_fit_error(DiagnosticTest::White, LeastSquaresError::SingularMatrix);
+        let singular = aux_fit_error(
+            DiagnosticTest::White,
+            LeastSquaresError::SingularMatrix {
+                columns: vec!["x1".to_string(), "x1_doubled".to_string()],
+            },
+        );
         assert_eq!(
             singular,
             LeastSquaresError::AuxiliaryRegressionFailed {
                 test: DiagnosticTest::White,
-                source: Box::new(LeastSquaresError::SingularMatrix),
+                source: Box::new(LeastSquaresError::SingularMatrix {
+                    columns: vec!["x1".to_string(), "x1_doubled".to_string()]
+                }),
             }
         );
         let report = singular.report();

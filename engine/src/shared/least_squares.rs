@@ -110,7 +110,12 @@ mod tests {
         let x = Mat::from_fn(4, 2, |i, j| (i as f64 + 1.0) * (j as f64 + 1.0));
         let y = column(&[1.0, 2.0, 3.0, 4.0]);
 
-        assert_eq!(least_squares(&x, &y).unwrap_err(), RankDeficient::Columns);
+        assert_eq!(
+            least_squares(&x, &y).unwrap_err(),
+            RankDeficient::Columns {
+                columns: vec![0, 1]
+            }
+        );
     }
 
     #[test]
@@ -121,7 +126,11 @@ mod tests {
         let x = Mat::<f64>::zeros(4, 2);
         let y = column(&[1.0, 2.0, 3.0, 4.0]);
 
-        assert_eq!(least_squares(&x, &y).unwrap_err(), RankDeficient::Columns);
+        // 全ゼロの先頭列はそれ単独で従属。
+        assert_eq!(
+            least_squares(&x, &y).unwrap_err(),
+            RankDeficient::Columns { columns: vec![0] }
+        );
     }
 
     #[test]

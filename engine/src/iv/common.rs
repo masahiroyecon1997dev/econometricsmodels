@@ -901,7 +901,9 @@ mod tests {
         // `stage`を付けてよい`code`には、どの回帰かを示す`stage`が付く。
         let singular = IvError::FirstStageFailed {
             endog_name: "x".to_string(),
-            source: LeastSquaresError::SingularMatrix,
+            source: LeastSquaresError::SingularMatrix {
+                columns: vec!["x".to_string()],
+            },
         }
         .report();
         assert_eq!(singular.code(), ErrorCode::DesignMatrixSingular);
@@ -912,13 +914,17 @@ mod tests {
             })
         );
         let hausman = IvError::HausmanRegressionFailed {
-            source: LeastSquaresError::SingularMatrix,
+            source: LeastSquaresError::SingularMatrix {
+                columns: vec!["x".to_string()],
+            },
         }
         .report();
         assert_eq!(hausman.stage(), Some(&Stage::WuHausmanRegression));
         // 設計行列の特異は、どの回帰で起きたかを`stage`で示す。
         let second_stage = IvError::SecondStageFailed {
-            source: LeastSquaresError::SingularMatrix,
+            source: LeastSquaresError::SingularMatrix {
+                columns: vec!["x".to_string()],
+            },
         };
         let report = second_stage.report();
         assert_eq!(report.code(), ErrorCode::DesignMatrixSingular);

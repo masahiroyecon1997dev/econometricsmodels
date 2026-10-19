@@ -381,6 +381,7 @@ use std::collections::BTreeMap;
 use faer::Mat;
 use statrs::distribution::StudentsT;
 
+use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::OlsInput;
 use crate::panel::common::{
     PanelDimension, PanelError, PanelHcVariant, TimeKeys, panel_classical_cov_params,
@@ -834,8 +835,11 @@ impl FeEstimator {
             params,
             residuals: residual_mat,
             xtx_inv,
-        } = least_squares(within_input.x(), within_input.y())
-            .map_err(|err| PanelError::WithinRegressionFailed { source: err.into() })?;
+        } = least_squares(within_input.x(), within_input.y()).map_err(|err| {
+            PanelError::WithinRegressionFailed {
+                source: LeastSquaresError::from_rank_deficient(err, within_input.param_names()),
+            }
+        })?;
 
         // `cov_type`別の共分散行列の計算に使う共通の材料（within変換後の設計行列、残差・SSR）。
         let x_mat = within_input.x();

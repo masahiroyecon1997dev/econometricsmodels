@@ -21,7 +21,7 @@ use thiserror::Error;
 
 use crate::shared::error::{CommonError, ErrorInfo, MatrixKind, staged_report};
 use crate::shared::error_catalog::{ErrorCode, ErrorReport, Stage};
-use crate::shared::linear_algebra::RankDeficient;
+use crate::shared::linear_algebra::{RankDeficient, column_names};
 
 /// OLS/WLSの計算過程で発生しうるエラー。
 ///
@@ -49,9 +49,10 @@ pub enum LeastSquaresError {
     #[error("{}", self.catalog_message())]
     NonPositiveWeight { row: usize, weight: f64 },
 
-    /// 設計行列が特異（完全な多重共線性等）。
+    /// 設計行列が特異（完全な多重共線性等）。`columns`は1つの線形従属に関わる列の名前
+    /// （設計の並び順。[`crate::shared::linear_algebra::collinear_columns`]）。
     #[error("{}", self.catalog_message())]
-    SingularMatrix,
+    SingularMatrix { columns: Vec<String> },
 
     /// Breusch-Godfrey検定のラグ次数`nlags`が1未満。
     #[error("{}", self.catalog_message())]
@@ -112,12 +113,16 @@ impl DiagnosticTest {
     }
 }
 
-impl From<RankDeficient> for LeastSquaresError {
-    /// 列の完全な共線性は`SingularMatrix`、`X'X`の分解の失敗（列のスケール差が極端）は
+impl LeastSquaresError {
+    /// 設計行列のランク落ちをエラーにする。列の完全な共線性は`SingularMatrix`（`names`は設計の
+    /// 列名で、共線な列の添字を名前に直す）、`X'X`の分解の失敗（列のスケール差が極端）は
     /// 共線性ではなく数値的なほぼ特異性なので`NearSingularMatrix`にする。
-    fn from(err: RankDeficient) -> Self {
+    #[must_use]
+    pub fn from_rank_deficient(err: RankDeficient, names: &[String]) -> Self {
         match err {
-            RankDeficient::Columns => Self::SingularMatrix,
+            RankDeficient::Columns { columns } => Self::SingularMatrix {
+                columns: column_names(&columns, names),
+            },
             RankDeficient::GramMatrix => Self::Common(CommonError::NearSingularMatrix {
                 matrix: MatrixKind::DesignGram,
             }),
@@ -141,7 +146,9 @@ impl ErrorInfo for LeastSquaresError {
                     .param("row", *row)
                     .param("value", *weight)
             }
-            Self::SingularMatrix => ErrorReport::new(ErrorCode::DesignMatrixSingular),
+            Self::SingularMatrix { columns } => {
+                ErrorReport::new(ErrorCode::DesignMatrixSingular).param("columns", columns.clone())
+            }
             Self::InvalidNlags { nlags } => {
                 ErrorReport::new(ErrorCode::NlagsNotPositive).param("value", *nlags)
             }
@@ -213,7 +220,11 @@ mod tests {
         let wrapped = LeastSquaresError::Common(CommonError::InvalidHacLags { hac_lags: -1, n: 5 });
         assert_eq!(wrapped.report().code(), ErrorCode::HacLagsOutOfRange);
         assert_eq!(
-            LeastSquaresError::SingularMatrix.report().code(),
+            LeastSquaresError::SingularMatrix {
+                columns: vec!["x".to_string()]
+            }
+            .report()
+            .code(),
             ErrorCode::DesignMatrixSingular
         );
     }
@@ -278,7 +289,9 @@ mod tests {
         // 診断の補助回帰の失敗は、原因の`code`に補助回帰の`stage`を付ける。
         let err = LeastSquaresError::AuxiliaryRegressionFailed {
             test: DiagnosticTest::BreuschGodfrey,
-            source: Box::new(LeastSquaresError::SingularMatrix),
+            source: Box::new(LeastSquaresError::SingularMatrix {
+                columns: vec!["x".to_string()],
+            }),
         };
         let report = err.report();
         assert_eq!(report.code(), ErrorCode::DesignMatrixSingular);
@@ -314,8 +327,11 @@ mod tests {
             "The weight at row 3 (0-based) must be positive, got 0.0."
         );
         assert_eq!(
-            LeastSquaresError::SingularMatrix.to_string(),
-            "The design matrix is singular: some columns are perfectly collinear."
+            LeastSquaresError::SingularMatrix {
+                columns: vec!["x1".to_string(), "x2".to_string()]
+            }
+            .to_string(),
+            "The design matrix is singular: the columns 'x1', 'x2' are perfectly collinear."
         );
         assert_eq!(
             LeastSquaresError::Common(CommonError::MissingClusterColumn {
@@ -329,8 +345,12 @@ mod tests {
     #[test]
     fn least_squares_error_implements_partial_eq() {
         assert_eq!(
-            LeastSquaresError::SingularMatrix,
-            LeastSquaresError::SingularMatrix
+            LeastSquaresError::SingularMatrix {
+                columns: vec!["x".to_string()]
+            },
+            LeastSquaresError::SingularMatrix {
+                columns: vec!["x".to_string()]
+            }
         );
         assert_ne!(
             LeastSquaresError::Common(CommonError::InsufficientClusters {

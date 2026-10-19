@@ -723,9 +723,14 @@ fn two_way_variance_components(
     let entity_mean_stats = entity_means(input.y(), input.x(), entity);
     let time_means = entity_means(input.y(), input.x(), time);
     let x_scales = column_max_abs(input.x());
-    let (ssr_entity, df_entity) =
-        between_ssr_and_df(&entity_mean_stats, &x_scales, BetweenMeans::Entity)?;
-    let (ssr_time, df_time) = between_ssr_and_df(&time_means, &x_scales, BetweenMeans::Time)?;
+    let (ssr_entity, df_entity) = between_ssr_and_df(
+        &entity_mean_stats,
+        &x_scales,
+        input.x_names(),
+        BetweenMeans::Entity,
+    )?;
+    let (ssr_time, df_time) =
+        between_ssr_and_df(&time_means, &x_scales, input.x_names(), BetweenMeans::Time)?;
     let n_periods = time.n_groups() as f64;
     let n_entities = entity.n_groups() as f64;
     let sigma2_u = (ssr_entity / df_entity as f64 - sigma2_eps / n_periods).max(0.0);
@@ -762,6 +767,7 @@ fn two_way_variance_components(
 fn between_ssr_and_df(
     means: &EntityMeans,
     x_scales: &[f64],
+    x_names: &[String],
     kind: BetweenMeans,
 ) -> Result<(f64, usize), PanelError> {
     let n_units = means.y.len();
@@ -794,9 +800,14 @@ fn between_ssr_and_df(
     let y = Mat::from_fn(n_units, 1, |i, _| means.y[i]);
     // 別名の列は上で落としてあり、残りは前の列に対する
     // 相対残差が`1e-7`より大きいので、ここで特異と判定される入力は通常無い（防御的なエラー）。
-    let fit = least_squares(&design, &y).map_err(|err| PanelError::BetweenRegressionFailed {
-        means: kind,
-        source: err.into(),
+    let fit = least_squares(&design, &y).map_err(|err| {
+        let names: Vec<String> = std::iter::once("const".to_string())
+            .chain(kept.iter().map(|&j| x_names[j].clone()))
+            .collect();
+        PanelError::BetweenRegressionFailed {
+            means: kind,
+            source: LeastSquaresError::from_rank_deficient(err, &names),
+        }
     })?;
     Ok((residual_sum_of_squares(&fit.residuals), n_units - n_params))
 }
@@ -906,8 +917,12 @@ fn one_way_variance_components(
     // （`between_ssr_and_df`、`plm`と同じ）。
     let means = entity_means(input.y(), input.x(), input.entity_codes());
     let n_entities = means.y.len();
-    let (ssr_between, df_resid_between) =
-        between_ssr_and_df(&means, &column_max_abs(input.x()), BetweenMeans::Entity)?;
+    let (ssr_between, df_resid_between) = between_ssr_and_df(
+        &means,
+        &column_max_abs(input.x()),
+        input.x_names(),
+        BetweenMeans::Entity,
+    )?;
 
     let t_bar = n_entities as f64 / means.t.iter().map(|t_i| 1.0 / t_i).sum::<f64>();
     let sigma2_u = (ssr_between / df_resid_between as f64 - sigma2_eps / t_bar).max(0.0);
@@ -2880,7 +2895,13 @@ mod tests {
         let without = mundlak_input(&["x1", "x2"], false);
         let stats = |input: &ReInput| {
             let means = entity_means(input.y(), input.x(), input.entity_codes());
-            between_ssr_and_df(&means, &column_max_abs(input.x()), BetweenMeans::Entity).unwrap()
+            between_ssr_and_df(
+                &means,
+                &column_max_abs(input.x()),
+                input.x_names(),
+                BetweenMeans::Entity,
+            )
+            .unwrap()
         };
         let (ssr_bar, df_bar) = stats(&with_bar);
         let (ssr, df) = stats(&without);
@@ -4069,9 +4090,14 @@ mod tests {
         let balanced = subset_input(&(0..24).collect::<Vec<_>>(), &["x1", "xt"], false);
         let df = |input: &ReInput| {
             let means = entity_means(input.y(), input.x(), input.entity_codes());
-            between_ssr_and_df(&means, &column_max_abs(input.x()), BetweenMeans::Entity)
-                .unwrap()
-                .1
+            between_ssr_and_df(
+                &means,
+                &column_max_abs(input.x()),
+                input.x_names(),
+                BetweenMeans::Entity,
+            )
+            .unwrap()
+            .1
         };
         assert_eq!(df(&balanced), 4);
         assert_eq!(df(&unbalanced), 3);
@@ -5200,7 +5226,9 @@ mod tests {
                 k: 3,
             },
             || PanelError::WithinRegressionFailed {
-                source: LeastSquaresError::SingularMatrix,
+                source: LeastSquaresError::SingularMatrix {
+                    columns: vec!["const".to_string()],
+                },
             },
             || PanelError::FTestFailed {
                 source: LeastSquaresError::Common(CommonError::NearSingularMatrix {
@@ -5310,7 +5338,9 @@ mod tests {
         assert_eq!(
             result.unwrap_err(),
             PanelError::QuasiDemeanedRegressionFailed {
-                source: crate::linear::common::LeastSquaresError::SingularMatrix,
+                source: crate::linear::common::LeastSquaresError::SingularMatrix {
+                    columns: vec!["const".to_string()]
+                },
             }
         );
     }

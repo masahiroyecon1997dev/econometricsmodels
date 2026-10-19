@@ -35,7 +35,9 @@ use crate::shared::error::{ClusterSetting, CommonError, ErrorInfo, MatrixKind};
 use crate::shared::error_catalog::{ErrorCode, ErrorReport};
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference;
-use crate::shared::linear_algebra::{checked_col_piv_qr, ensure_well_conditioned_symmetric_matrix};
+use crate::shared::linear_algebra::{
+    RankDeficient, checked_col_piv_qr, column_names, ensure_well_conditioned_symmetric_matrix,
+};
 use crate::shared::validation::{MAX_ITER_LIMIT, MAX_ITER_MIN};
 use crate::shared::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 
@@ -82,7 +84,7 @@ pub enum MleError {
     /// 一度も反復していない段階で発生しうる点・Hessianを一切評価していない点が異なるため
     /// 区別する（`SingularOpgMatrix`を`SingularHessian`と区別しているのと同じ考え方）。
     #[error("{}", self.catalog_message())]
-    SingularDesignMatrix,
+    SingularDesignMatrix { columns: Vec<String> },
 
     /// Tobit専用: 打ち切り境界が両方とも`None`（少なくとも片側の指定が必要）。
     #[error("{}", self.catalog_message())]
@@ -234,7 +236,9 @@ impl ErrorInfo for MleError {
                 .param("matrix", MatrixKind::Hessian.as_str()),
             Self::SingularOpgMatrix => ErrorReport::new(ErrorCode::MatrixNearSingular)
                 .param("matrix", MatrixKind::Opg.as_str()),
-            Self::SingularDesignMatrix => ErrorReport::new(ErrorCode::DesignMatrixSingular),
+            Self::SingularDesignMatrix { columns } => {
+                ErrorReport::new(ErrorCode::DesignMatrixSingular).param("columns", columns.clone())
+            }
             Self::SeparationDetected => ErrorReport::new(ErrorCode::SeparationDetected),
             Self::UncensoredIntervalTooNarrow {
                 lower,
@@ -2764,10 +2768,18 @@ fn two_loop_recursion(
 ///
 /// # Errors
 /// `x`がランク落ち（完全な多重共線性等）: `MleError::SingularDesignMatrix`
+/// （`names`は設計の列名で、共線な列の添字を名前に直す）。
 pub fn checked_design_matrix_qr(
     x: &Mat<f64>,
+    names: &[String],
 ) -> Result<faer::linalg::solvers::ColPivQr<f64>, MleError> {
-    checked_col_piv_qr(x).map_err(|_| MleError::SingularDesignMatrix)
+    checked_col_piv_qr(x).map_err(|err| MleError::SingularDesignMatrix {
+        columns: match err {
+            RankDeficient::Columns { columns } => column_names(&columns, names),
+            // `checked_col_piv_qr`は`GramMatrix`を返さない（`xtx_inverse`だけが返す）。
+            RankDeficient::GramMatrix => Vec::new(),
+        },
+    })
 }
 
 /// 標準化空間での線形確率モデル（LPM）最小二乗解を、リンク関数のIRLS 1ステップ相当の
@@ -2800,9 +2812,10 @@ pub fn ols_based_initial_params(
     x_std: &Mat<f64>,
     y: &Mat<f64>,
     has_intercept: bool,
+    names: &[String],
     link_terms: impl Fn(f64) -> (f64, f64),
 ) -> Result<Vec<f64>, MleError> {
-    let qr = checked_design_matrix_qr(x_std)?;
+    let qr = checked_design_matrix_qr(x_std, names)?;
     let k = x_std.ncols();
     let n = y.nrows();
     let beta_lpm = qr.solve_lstsq(y);
@@ -3306,9 +3319,11 @@ mod tests {
                 "A matrix needed to compute the estimates or their covariance is numerically singular.",
             ),
             (
-                MleError::SingularDesignMatrix,
+                MleError::SingularDesignMatrix {
+                    columns: vec!["x1".to_string(), "x2".to_string()],
+                },
                 ErrorCode::DesignMatrixSingular,
-                "The design matrix is singular: some columns are perfectly collinear.",
+                "The design matrix is singular: the columns 'x1', 'x2' are perfectly collinear.",
             ),
             (
                 MleError::EvaluationBudgetExceeded { budget: 4000 },
@@ -5248,7 +5263,8 @@ mod tests {
         });
         let y = Mat::from_fn(5, 1, |i, _| [1.0, 2.0, 2.0, 4.0, 5.0][i]);
 
-        let qr = checked_design_matrix_qr(&x).expect("full-rank design matrix must be accepted");
+        let qr =
+            checked_design_matrix_qr(&x, &[]).expect("full-rank design matrix must be accepted");
         let beta = qr.solve_lstsq(&y);
         // 正規方程式 X'Xβ = X'y を満たすはず（残差が設計行列と直交）。
         let resid = &y - &x * &beta;
@@ -5269,9 +5285,13 @@ mod tests {
             1 => [1.0, 2.0, 3.0, 4.0, 5.0][i],
             _ => 2.0 * [1.0, 2.0, 3.0, 4.0, 5.0][i],
         });
+        let names = ["const".to_string(), "t".to_string(), "t2".to_string()];
+        // 従属になるのは3列目と、それを表す2列目（切片は関わらない）。
         assert_eq!(
-            checked_design_matrix_qr(&x).unwrap_err(),
-            MleError::SingularDesignMatrix
+            checked_design_matrix_qr(&x, &names).unwrap_err(),
+            MleError::SingularDesignMatrix {
+                columns: vec!["t".to_string(), "t2".to_string()]
+            }
         );
     }
 
@@ -5279,9 +5299,12 @@ mod tests {
     fn checked_design_matrix_qr_rejects_all_zero_design_matrix_via_nan_guard() {
         // 全ゼロ列の`col_piv_qr`は`R`の対角にNaNを生じうる（`newton_step`と同じ罠）。
         let x = Mat::from_fn(4, 2, |_, _| 0.0);
+        // 全ゼロの先頭列はそれ単独で従属。
         assert_eq!(
-            checked_design_matrix_qr(&x).unwrap_err(),
-            MleError::SingularDesignMatrix
+            checked_design_matrix_qr(&x, &["a".to_string(), "b".to_string()]).unwrap_err(),
+            MleError::SingularDesignMatrix {
+                columns: vec!["a".to_string()]
+            }
         );
     }
 
@@ -5291,7 +5314,7 @@ mod tests {
         // `β⁽¹⁾[0] = p̄/w + (η₀ - p̄/w) = η₀ = ln(p̄/(1-p̄))`（切片のみモデルの厳密なMLE）。
         let y = Mat::from_fn(7, 1, |i, _| if i < 4 { 1.0 } else { 0.0 });
         let x = Mat::from_fn(7, 1, |_, _| 1.0);
-        let params = ols_based_initial_params(&x, &y, true, |p_bar| {
+        let params = ols_based_initial_params(&x, &y, true, &[], |p_bar| {
             (p_bar * (1.0 - p_bar), (p_bar / (1.0 - p_bar)).ln())
         })
         .unwrap();
@@ -5308,8 +5331,8 @@ mod tests {
         let x = Mat::from_fn(4, 1, |i, _| [1.0, 2.0, 3.0, 4.0][i]);
         let y = Mat::from_fn(4, 1, |i, _| [0.0, 0.0, 1.0, 1.0][i]);
 
-        let raw = ols_based_initial_params(&x, &y, false, |_| (1.0, 0.0)).unwrap();
-        let scaled = ols_based_initial_params(&x, &y, false, |_| (0.25, 0.0)).unwrap();
+        let raw = ols_based_initial_params(&x, &y, false, &[], |_| (1.0, 0.0)).unwrap();
+        let scaled = ols_based_initial_params(&x, &y, false, &[], |_| (0.25, 0.0)).unwrap();
         assert!(
             (scaled[0] - raw[0] / 0.25).abs() < 1e-12,
             "{scaled:?} {raw:?}"
@@ -5326,7 +5349,7 @@ mod tests {
             |i, j| if j == 0 { 1.0 } else { [1.0, 2.0, 3.0, 4.0][i] },
         );
         let y = Mat::from_fn(4, 1, |_, _| 1.0);
-        let params = ols_based_initial_params(&x, &y, true, |_| {
+        let params = ols_based_initial_params(&x, &y, true, &[], |_| {
             panic!("link_terms must not be called for a degenerate p_bar")
         })
         .unwrap();
@@ -5345,8 +5368,10 @@ mod tests {
         });
         let y = Mat::from_fn(5, 1, |i, _| [0.0, 1.0, 0.0, 1.0, 1.0][i]);
         assert_eq!(
-            ols_based_initial_params(&x, &y, true, |p| (p * (1.0 - p), 0.0)).unwrap_err(),
-            MleError::SingularDesignMatrix
+            ols_based_initial_params(&x, &y, true, &[], |p| (p * (1.0 - p), 0.0)).unwrap_err(),
+            MleError::SingularDesignMatrix {
+                columns: vec!["column 1".to_string(), "column 2".to_string()]
+            }
         );
     }
 

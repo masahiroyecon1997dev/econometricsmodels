@@ -26,7 +26,7 @@ COV_TYPE_NOT_AVAILABLE_FOR_MODEL: cov_type="abc" is not available for abc. Use o
 INSUFFICIENT_OBSERVATIONS: Not enough observations: 3 observation(s) for 3 parameter(s); at least 3 are needed. Add observations or remove regressors.
 CLUSTER_COUNT_TOO_SMALL: abc="cluster" needs at least 3 clusters, but the cluster column has 3. Use a cluster column with more distinct values, or set a different abc.
 CLUSTER_COUNT_NOT_ABOVE_SLOPES: abc="cluster" needs more clusters than slope coefficients for the overall F/Wald test: the cluster column has 3 clusters for 3 slope coefficient(s); at least 3 are needed. Use a cluster column with more distinct values, remove regressors, or set a different abc.
-DESIGN_MATRIX_SINGULAR: The design matrix is singular: some columns are perfectly collinear. Remove or combine the collinear columns, for example duplicated columns or a constant column together with the intercept.
+DESIGN_MATRIX_SINGULAR: The design matrix is singular: the columns 'a', 'b' are perfectly collinear. Remove or combine the collinear columns, for example duplicated columns or a constant column together with the intercept.
 MATRIX_NEAR_SINGULAR: A matrix needed to compute the estimates or their covariance is numerically singular. Rescale the variables so that they are on similar scales, or remove nearly collinear regressors.
 NOT_CONVERGED: The optimizer did not converge after 3 iteration(s). Increase abc, or pass raise_on_non_convergence=False to receive the last iteration (check converged before using it).
 LINE_SEARCH_FAILED: The optimizer's line search did not converge. Try a different solver, or rescale the regressors.

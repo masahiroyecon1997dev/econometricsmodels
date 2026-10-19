@@ -24,6 +24,7 @@
 
 use faer::Mat;
 
+use crate::linear::common::LeastSquaresError;
 use crate::panel::common::PanelError;
 use crate::panel::re::{
     EntityMeans, ReEffects, ReInput, VarianceComponents, VarianceMethod, entity_means, internal_fe,
@@ -198,8 +199,14 @@ fn pooled_fit(input: &ReInput) -> Result<LeastSquaresFit, PanelError> {
         },
     );
     let y = Mat::from_fn(n, 1, |i, _| input.y()[i]);
-    least_squares(&design, &y)
-        .map_err(|err| PanelError::PooledRegressionFailed { source: err.into() })
+    least_squares(&design, &y).map_err(|err| {
+        let names: Vec<String> = std::iter::once("const".to_string())
+            .chain(input.x_names().iter().cloned())
+            .collect();
+        PanelError::PooledRegressionFailed {
+            source: LeastSquaresError::from_rank_deficient(err, &names),
+        }
+    })
 }
 
 /// Amemiyaの1段目の残差: `y - x'β̂_within - (ȳ - x̄'β̂_within)`。内部FEの説明変数は全列

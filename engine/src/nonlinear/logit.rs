@@ -519,6 +519,7 @@ impl LogitEstimator {
             &x_std,
             input.y(),
             input.has_intercept(),
+            input.param_names(),
             // logit: IRLS重み `w = p̄(1-p̄)`、リンク値 `η₀ = ln(p̄/(1-p̄))`。
             |p_bar| (p_bar * (1.0 - p_bar), (p_bar / (1.0 - p_bar)).ln()),
         )?;
@@ -2244,7 +2245,7 @@ mod tests {
                 },
             );
             assert!(
-                matches!(result, Err(MleError::SingularDesignMatrix)),
+                matches!(result, Err(MleError::SingularDesignMatrix { .. })),
                 "solver={solver:?}, result={result:?}"
             );
         }
@@ -2320,7 +2321,7 @@ mod tests {
                     },
                 );
                 assert!(
-                    matches!(result, Err(MleError::SingularDesignMatrix)),
+                    matches!(result, Err(MleError::SingularDesignMatrix { .. })),
                     "solver={solver:?}, cov_type={cov_type:?}, result={result:?}"
                 );
             }

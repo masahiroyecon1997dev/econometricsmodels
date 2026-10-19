@@ -1339,7 +1339,9 @@ mod tests {
         );
         // 内側の`stage`は外側に置き換わる。
         let inner = PanelError::WithinRegressionFailed {
-            source: LeastSquaresError::SingularMatrix,
+            source: LeastSquaresError::SingularMatrix {
+                columns: vec!["x".to_string()],
+            },
         };
         assert_eq!(inner.report().stage(), Some(&Stage::WithinRegression));
         let outer = inner.in_stage(Stage::VarianceComponentWithinRegression);
@@ -1378,7 +1380,9 @@ mod tests {
         );
         // 回帰の包みは原因のメッセージに、どの回帰かを示す文脈句が付く。
         let wrapped = PanelError::WithinRegressionFailed {
-            source: LeastSquaresError::SingularMatrix,
+            source: LeastSquaresError::SingularMatrix {
+                columns: vec!["x".to_string()],
+            },
         };
         assert_eq!(wrapped.to_string(), wrapped.report().message());
         assert!(wrapped.to_string().contains("design matrix is singular"));
@@ -1536,14 +1540,18 @@ mod tests {
     #[test]
     fn quasi_demeaned_regression_failed_message_and_equality() {
         let err = PanelError::QuasiDemeanedRegressionFailed {
-            source: LeastSquaresError::SingularMatrix,
+            source: LeastSquaresError::SingularMatrix {
+                columns: vec!["x".to_string()],
+            },
         };
         assert_eq!(err.to_string(), err.report().message());
         assert_eq!(err.report().stage(), Some(&Stage::QuasiDemeanedRegression));
         assert_eq!(
             err,
             PanelError::QuasiDemeanedRegressionFailed {
-                source: LeastSquaresError::SingularMatrix,
+                source: LeastSquaresError::SingularMatrix {
+                    columns: vec!["x".to_string()]
+                },
             }
         );
     }
@@ -1551,14 +1559,18 @@ mod tests {
     #[test]
     fn hausman_test_failed_message_and_equality() {
         let err = PanelError::HausmanTestFailed {
-            source: LeastSquaresError::SingularMatrix,
+            source: LeastSquaresError::SingularMatrix {
+                columns: vec!["x".to_string()],
+            },
         };
         assert_eq!(err.to_string(), err.report().message());
         assert_eq!(err.report().stage(), Some(&Stage::HausmanRegression));
         assert_eq!(
             err,
             PanelError::HausmanTestFailed {
-                source: LeastSquaresError::SingularMatrix,
+                source: LeastSquaresError::SingularMatrix {
+                    columns: vec!["x".to_string()]
+                },
             }
         );
     }

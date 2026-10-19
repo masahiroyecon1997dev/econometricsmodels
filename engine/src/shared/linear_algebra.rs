@@ -11,10 +11,11 @@ use faer::{Mat, Side};
 ///
 /// 設計行列の列の完全な多重共線性と、Gram行列`X'X`の分解の失敗（QRのランク判定は通るが、
 /// 列のスケール差が極端）は原因が異なるため、利用者に伝える内容を分けられるよう区別する。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RankDeficient {
-    /// 列ピボットQRが、行列がフルカラムランクでないと判定した。
-    Columns,
+    /// 列ピボットQRが、行列がフルカラムランクでないと判定した。`columns`は1つの線形従属に
+    /// 関わる列の添字（[`collinear_columns`]。昇順で空ではない）。
+    Columns { columns: Vec<usize> },
     /// Gram行列`X'X`のCholesky分解が失敗した。
     GramMatrix,
 }
@@ -36,7 +37,9 @@ pub enum RankDeficient {
 pub fn checked_col_piv_qr(a: &Mat<f64>) -> Result<ColPivQr<f64>, RankDeficient> {
     let n = a.ncols();
     if a.nrows() < n {
-        return Err(RankDeficient::Columns);
+        return Err(RankDeficient::Columns {
+            columns: collinear_columns(a),
+        });
     }
     let qr = a.col_piv_qr();
     let r = qr.thin_R();
@@ -45,10 +48,146 @@ pub fn checked_col_piv_qr(a: &Mat<f64>) -> Result<ColPivQr<f64>, RankDeficient> 
     for i in 0..n {
         let diag = (*r.get(i, i)).abs();
         if diag.is_nan() || diag <= threshold {
-            return Err(RankDeficient::Columns);
+            return Err(RankDeficient::Columns {
+                columns: collinear_columns(a),
+            });
         }
     }
     Ok(qr)
+}
+
+/// 列の添字を設計の列名に直す。名前が足りない（呼び出し側の契約違反）場合は添字で示す。
+#[must_use]
+pub(crate) fn column_names(indices: &[usize], names: &[String]) -> Vec<String> {
+    indices
+        .iter()
+        .map(|&i| {
+            names
+                .get(i)
+                .cloned()
+                .unwrap_or_else(|| format!("column {i}"))
+        })
+        .collect()
+}
+
+/// フルカラムランクでないと判定された設計行列`a`について、**1つの線形従属に関わる列の添字**
+/// （昇順）を返す。利用者に「どの列とどの列が共線か」を伝えるための説明用で、判定そのもの
+/// （[`checked_col_piv_qr`]）には影響しない。失敗経路でしか呼ばれない。
+///
+/// 列を設計の並び順に見て、それより前の独立な列の線形結合で表せる**最初の列**`x_j`を見つけ、
+/// `x_j`をそれらの列で表したときに係数が無視できない列を合わせて返す（前の独立な列で表す
+/// 表現は一意なので、結果は`x_j`について一意に決まる）。どれを落とすかは決めない。従属が
+/// 複数あっても最初の1組だけを返す（直して再実行すると次の組が出る）。ゼロ列や非有限値を
+/// 含む列は、それ単独で1列の従属になる。
+///
+/// **失敗しない**: 診断が本来のエラーを隠してはならないため`Result`を返さず、必ず空でない
+/// 添字を返す。順序つきの探索で従属が見つからない場合（許容誤差の違い）は、列ピボットQRが
+/// 小さいと判定した列に、それも無ければ全列にフォールバックする。
+///
+/// 計算量は`O(n·j²)`（`j`は最初の従属の位置。そこで打ち切る）で、元のQRと同じ次数。
+pub fn collinear_columns(a: &Mat<f64>) -> Vec<usize> {
+    let n_rows = a.nrows();
+    let columns: Vec<Vec<f64>> = (0..a.ncols())
+        .map(|j| (0..n_rows).map(|i| *a.get(i, j)).collect())
+        .collect();
+    first_dependency(&columns, COLLINEARITY_TOLERANCE)
+        .or_else(|| qr_flagged_columns(a))
+        .unwrap_or_else(|| (0..a.ncols()).collect())
+}
+
+/// 列を与えられた順に直交化し、最初に従属になる列とその線形従属に関わる列の添字（昇順）を返す。
+/// 従属が無ければ`None`。
+fn first_dependency(columns: &[Vec<f64>], tolerance: f64) -> Option<Vec<usize>> {
+    const REORTHOGONALIZE_BELOW: f64 = 0.7;
+    // 直交化した基底と、採用した列の元の添字・ノルム・基底に対する係数（R因子の列）。
+    let mut basis: Vec<Vec<f64>> = Vec::with_capacity(columns.len());
+    let mut kept: Vec<usize> = Vec::with_capacity(columns.len());
+    let mut kept_norms: Vec<f64> = Vec::with_capacity(columns.len());
+    let mut r_columns: Vec<Vec<f64>> = Vec::with_capacity(columns.len());
+    for (j, col) in columns.iter().enumerate() {
+        let norm = dot(col, col).sqrt();
+        if !norm.is_finite() || norm == 0.0 {
+            return Some(vec![j]);
+        }
+        let mut residual = col.clone();
+        let mut coefficients = vec![0.0_f64; basis.len()];
+        let mut before = norm;
+        for _ in 0..2 {
+            for (c, q) in coefficients.iter_mut().zip(&basis) {
+                let projection = dot(&residual, q);
+                *c += projection;
+                for (r, b) in residual.iter_mut().zip(q) {
+                    *r -= projection * b;
+                }
+            }
+            let after = dot(&residual, &residual).sqrt();
+            let settled = after >= REORTHOGONALIZE_BELOW * before || after <= tolerance * norm;
+            before = after;
+            if settled {
+                break;
+            }
+        }
+        if before <= tolerance * norm {
+            // `col = Σ_m c_m · x_kept[m]`のうち、寄与が無視できない列を従属に関わる列とする。
+            let weights = express_in_kept_columns(&r_columns, &coefficients);
+            let mut involved: Vec<usize> = kept
+                .iter()
+                .zip(&weights)
+                .zip(&kept_norms)
+                .filter(|((_, w), kept_norm)| w.abs() * **kept_norm > tolerance * norm)
+                .map(|((idx, _), _)| *idx)
+                .collect();
+            involved.push(j);
+            return Some(involved);
+        }
+        let scale = 1.0 / before;
+        for r in &mut residual {
+            *r *= scale;
+        }
+        basis.push(residual);
+        coefficients.push(before);
+        r_columns.push(coefficients);
+        kept.push(j);
+        kept_norms.push(norm);
+    }
+    None
+}
+
+/// 採用した列のR因子（`r_columns[m][i]`が`R[i][m]`、上三角）で`R·w = coefficients`を解き、
+/// 列を採用した元の列の線形結合で表す係数`w`を返す（後退代入）。
+fn express_in_kept_columns(r_columns: &[Vec<f64>], coefficients: &[f64]) -> Vec<f64> {
+    let k = r_columns.len();
+    let mut weights = vec![0.0_f64; k];
+    for m in (0..k).rev() {
+        let tail: f64 = (m + 1..k).map(|l| r_columns[l][m] * weights[l]).sum();
+        let diagonal = r_columns[m][m];
+        // 採用した列の対角成分は残差のノルム（許容誤差より大きい）なので0にならない。
+        weights[m] = (coefficients[m] - tail) / diagonal;
+    }
+    weights
+}
+
+/// 列ピボットQRが小さい（またはNaN）と判定した対角成分に対応する、元の列の添字（昇順）。
+/// 行数が列数に満たない行列、または該当が無いときは`None`。
+fn qr_flagged_columns(a: &Mat<f64>) -> Option<Vec<usize>> {
+    let n = a.ncols();
+    if a.nrows() < n {
+        return None;
+    }
+    let qr = a.col_piv_qr();
+    let r = qr.thin_R();
+    let max_abs_diag = (0..n).map(|i| (*r.get(i, i)).abs()).fold(0.0_f64, f64::max);
+    let threshold = (n as f64) * f64::EPSILON * max_abs_diag;
+    let permutation = qr.P().arrays().0;
+    let mut flagged: Vec<usize> = (0..n)
+        .filter(|&i| {
+            let diag = (*r.get(i, i)).abs();
+            diag.is_nan() || diag <= threshold
+        })
+        .map(|i| permutation[i])
+        .collect();
+    flagged.sort_unstable();
+    (!flagged.is_empty()).then_some(flagged)
 }
 
 /// 対称正定値のはずの行列`v`（k×k）が数値的にほぼ特異でないことを、固有値分解
@@ -360,7 +499,12 @@ mod tests {
     #[test]
     fn checked_col_piv_qr_rejects_perfectly_collinear_columns() {
         let a = Mat::from_fn(4, 2, |i, j| (i as f64 + 1.0) * (j as f64 + 1.0));
-        assert_eq!(checked_col_piv_qr(&a).unwrap_err(), RankDeficient::Columns);
+        assert_eq!(
+            checked_col_piv_qr(&a).unwrap_err(),
+            RankDeficient::Columns {
+                columns: vec![0, 1]
+            }
+        );
     }
 
     #[test]
@@ -374,7 +518,7 @@ mod tests {
 
         assert_eq!(
             checked_col_piv_qr(&zeros).unwrap_err(),
-            RankDeficient::Columns
+            RankDeficient::Columns { columns: vec![0] }
         );
     }
 
@@ -388,7 +532,73 @@ mod tests {
     #[test]
     fn checked_col_piv_qr_rejects_matrix_with_fewer_rows_than_columns() {
         let a = Mat::from_fn(2, 3, |i, j| (i * 3 + j) as f64 + 1.0);
-        assert_eq!(checked_col_piv_qr(&a).unwrap_err(), RankDeficient::Columns);
+        // 3列目は前の2列の線形結合（`2·c1 - c0`）なので、3列すべてが従属に関わる。
+        assert_eq!(
+            checked_col_piv_qr(&a).unwrap_err(),
+            RankDeficient::Columns {
+                columns: vec![0, 1, 2]
+            }
+        );
+    }
+
+    fn matrix_from_columns(columns: &[Vec<f64>]) -> Mat<f64> {
+        Mat::from_fn(columns[0].len(), columns.len(), |i, j| columns[j][i])
+    }
+
+    #[test]
+    fn collinear_columns_reports_the_later_duplicate_with_the_column_it_copies() {
+        let ones = vec![1.0; 5];
+        let x = vec![1.0, 4.0, 2.0, 8.0, 5.0];
+        let a = matrix_from_columns(&[ones, x.clone(), x]);
+        assert_eq!(collinear_columns(&a), vec![1, 2]);
+    }
+
+    #[test]
+    fn collinear_columns_reports_a_combination_with_only_the_columns_it_involves() {
+        let ones = vec![1.0; 6];
+        let x = vec![1.0, 4.0, 2.0, 8.0, 5.0, 3.0];
+        let z = vec![3.0, -1.0, 0.5, 2.0, 7.0, 4.0];
+        let unrelated = vec![2.0, 9.0, 1.0, 6.0, 3.0, 5.5];
+        let combo: Vec<f64> = (0..6).map(|i| 2.0 * x[i] - 3.0 * z[i]).collect();
+        // 切片と無関係な列は従属に関わらない。無関係な列は、従属の列より前でも後ろでも含まれない。
+        let a = matrix_from_columns(&[ones, unrelated, x, z, combo]);
+        assert_eq!(collinear_columns(&a), vec![2, 3, 4]);
+    }
+
+    #[test]
+    fn collinear_columns_includes_the_intercept_for_the_dummy_variable_trap() {
+        let ones = vec![1.0; 6];
+        let d1 = vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0];
+        let d2: Vec<f64> = d1.iter().map(|v| 1.0 - v).collect();
+        let a = matrix_from_columns(&[ones, d1, d2]);
+        assert_eq!(collinear_columns(&a), vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn collinear_columns_reports_only_the_first_of_several_dependencies() {
+        let x1 = vec![1.0, 4.0, 2.0, 8.0, 5.0];
+        let x3 = vec![3.0, -1.0, 0.5, 2.0, 7.0];
+        let a = matrix_from_columns(&[x1.clone(), x1, x3.clone(), x3]);
+        assert_eq!(collinear_columns(&a), vec![0, 1]);
+    }
+
+    #[test]
+    fn collinear_columns_reports_a_zero_or_constant_pair_on_their_own() {
+        let x = vec![1.0, 4.0, 2.0, 8.0];
+        let zero = vec![0.0; 4];
+        let a = matrix_from_columns(&[x.clone(), zero]);
+        assert_eq!(collinear_columns(&a), vec![1]);
+        // 定数列が2つ（切片と定数列）は、その2列。
+        let b = matrix_from_columns(&[vec![1.0; 4], x, vec![3.0; 4]]);
+        assert_eq!(collinear_columns(&b), vec![0, 2]);
+    }
+
+    #[test]
+    fn collinear_columns_is_never_empty_even_for_full_rank_input() {
+        // 呼び出し側の契約では特異な行列だけを渡すが、診断が空を返して本来のエラーの説明を
+        // 失わないよう、全列にフォールバックする。
+        let a = matrix_from_columns(&[vec![1.0, 2.0, 3.0], vec![0.5, -1.0, 4.0]]);
+        assert_eq!(collinear_columns(&a), vec![0, 1]);
     }
 
     #[test]

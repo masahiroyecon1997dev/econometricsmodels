@@ -181,7 +181,8 @@ impl OlsEstimator {
             params,
             residuals,
             xtx_inv,
-        } = least_squares(input.x(), input.y()).map_err(LeastSquaresError::from)?;
+        } = least_squares(input.x(), input.y())
+            .map_err(|err| LeastSquaresError::from_rank_deficient(err, input.param_names()))?;
 
         let df_resid = n - k;
         let ssr = residual_sum_of_squares(&residuals);
@@ -513,7 +514,12 @@ mod tests {
 
         let result = OlsEstimator::fit(input, CovType::Classical, 0.95);
 
-        assert_eq!(result.unwrap_err(), LeastSquaresError::SingularMatrix);
+        assert_eq!(
+            result.unwrap_err(),
+            LeastSquaresError::SingularMatrix {
+                columns: vec!["x1".to_string(), "x2".to_string()]
+            }
+        );
     }
 
     #[test]

@@ -1357,8 +1357,12 @@ pub static CATALOG: &[ErrorSpec] = &[
     ErrorSpec {
         code: ErrorCode::DesignMatrixSingular,
         class: ErrorClass::Computation,
-        params: &[],
-        message: r#"The design matrix is singular: some columns are perfectly collinear."#,
+        params: &[ParamSpec {
+            name: "columns",
+            ty: ParamType::ColumnList,
+            in_text: true,
+        }],
+        message: r#"The design matrix is singular: the columns {columns} are perfectly collinear."#,
         hint: Some(
             r#"Remove or combine the collinear columns, for example duplicated columns or a constant column together with the intercept."#,
         ),
@@ -2283,19 +2287,21 @@ mod tests {
 
     #[test]
     fn stage_messages_have_the_documented_shape() {
-        let r = ErrorReport::new(ErrorCode::DesignMatrixSingular).with_stage(Stage::FirstStage {
-            endog_name: "educ".into(),
-        });
+        let r = ErrorReport::new(ErrorCode::DesignMatrixSingular)
+            .param("columns", vec!["x1", "x2"])
+            .with_stage(Stage::FirstStage {
+                endog_name: "educ".into(),
+            });
         r.validate().unwrap();
         assert_eq!(
             r.message(),
-            "In the first stage regression for 'educ': The design matrix is singular: some columns are perfectly collinear."
+            "In the first stage regression for 'educ': The design matrix is singular: the columns 'x1', 'x2' are perfectly collinear."
         );
-        let r = ErrorReport::new(ErrorCode::DesignMatrixSingular).with_stage(
-            Stage::DiagnosticAuxiliaryRegression {
+        let r = ErrorReport::new(ErrorCode::DesignMatrixSingular)
+            .param("columns", vec!["x1", "x2"])
+            .with_stage(Stage::DiagnosticAuxiliaryRegression {
                 test: "BREUSCH_GODFREY".into(),
-            },
-        );
+            });
         assert!(
             r.message()
                 .starts_with("In the auxiliary regression of the Breusch-Godfrey test: ")

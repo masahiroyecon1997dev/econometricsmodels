@@ -448,7 +448,7 @@ impl TwoSlsEstimator {
 
             match hausman_result {
                 Ok((stat, p_value, df)) => (Some(stat), Some(p_value), Some(df)),
-                Err(LeastSquaresError::SingularMatrix)
+                Err(LeastSquaresError::SingularMatrix { .. })
                 | Err(LeastSquaresError::Common(CommonError::InsufficientObservations {
                     ..
                 }))
@@ -2261,7 +2261,9 @@ mod tests {
         assert_eq!(
             result.unwrap_err(),
             IvError::SecondStageFailed {
-                source: crate::linear::common::LeastSquaresError::SingularMatrix,
+                source: crate::linear::common::LeastSquaresError::SingularMatrix {
+                    columns: vec!["const".to_string(), "endog1".to_string()]
+                },
             }
         );
     }
@@ -2291,7 +2293,9 @@ mod tests {
             result.unwrap_err(),
             IvError::FirstStageFailed {
                 endog_name: "endog1".to_string(),
-                source: crate::linear::common::LeastSquaresError::SingularMatrix,
+                source: crate::linear::common::LeastSquaresError::SingularMatrix {
+                    columns: vec!["const".to_string(), "z1".to_string()]
+                },
             }
         );
     }

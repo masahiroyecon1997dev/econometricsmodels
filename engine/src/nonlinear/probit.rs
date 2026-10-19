@@ -591,6 +591,7 @@ impl ProbitEstimator {
                 &x_std,
                 input.y(),
                 input.has_intercept(),
+                input.param_names(),
                 // probit: IRLS重み `w = φ(Φ⁻¹(p̄))`、リンク値 `η₀ = Φ⁻¹(p̄)`。
                 |p_bar| {
                     let eta0 = normal.inverse_cdf(p_bar);
@@ -1389,7 +1390,7 @@ mod tests {
                 .unwrap();
         let (x_std, scale) = standardize_columns(input.x(), input.has_intercept());
         let initial_params =
-            ols_based_initial_params(&x_std, input.y(), input.has_intercept(), |p_bar| {
+            ols_based_initial_params(&x_std, input.y(), input.has_intercept(), &[], |p_bar| {
                 let eta0 = normal.inverse_cdf(p_bar);
                 (normal.pdf(eta0), eta0)
             })
@@ -2673,7 +2674,7 @@ mod tests {
                 },
             );
             assert!(
-                matches!(result, Err(MleError::SingularDesignMatrix)),
+                matches!(result, Err(MleError::SingularDesignMatrix { .. })),
                 "solver={solver:?}, result={result:?}"
             );
         }
@@ -2739,7 +2740,7 @@ mod tests {
                     },
                 );
                 assert!(
-                    matches!(result, Err(MleError::SingularDesignMatrix)),
+                    matches!(result, Err(MleError::SingularDesignMatrix { .. })),
                     "solver={solver:?}, cov_type={cov_type:?}, result={result:?}"
                 );
             }

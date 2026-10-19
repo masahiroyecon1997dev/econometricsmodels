@@ -269,6 +269,56 @@ pub(crate) fn internal_error(detail: impl Into<String>) -> PyErr {
     )
 }
 
+// `panic = "abort"`だと`catch_unwind`が何も捕まえず、`guard`が黙って無効になる。ビルドを止める。
+#[cfg(panic = "abort")]
+compile_error!("engine_pybind needs panic = \"unwind\": the boundary guard relies on catch_unwind");
+
+/// panicのメッセージ（`&str`・`String`のpayload）の最初の空でない行を、長さを抑えて`panic: `に続けたもの。
+/// それ以外のpayloadは固定の文言、メッセージが空なら`(no message)`。
+fn panic_detail(payload: &(dyn std::any::Any + Send)) -> String {
+    const MAX_CHARS: usize = 200;
+    let message = payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("a panic with a payload that is not text");
+    let first_line = message
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("(no message)");
+    let mut detail: String = first_line.chars().take(MAX_CHARS).collect();
+    if first_line.chars().count() > MAX_CHARS {
+        // `internal_error`が末尾の`.`を落とし、テンプレートが`.`を足すので、記号ではなく語で示す。
+        detail.push_str(" (truncated)");
+    }
+    format!("panic: {detail}")
+}
+
+/// 境界（`#[pyfunction]`・`#[pymethods]`）の本体を包み、Rustのpanicを`INTERNAL_ERROR`にする。
+///
+/// panicはそのままだとPyO3が`PanicException`（`BaseException`の子）にして、`except Exception`で
+/// 捕まえられない。ここで`ComputationError`にして、アプリが通常のエラーとして扱えるようにする。
+/// panicの場所（ファイルと行）は既定のpanicフックがstderrに出すので、`detail`には文言だけを入れる。
+///
+/// `AssertUnwindSafe`が妥当なのは、panicした呼び出しの結果を使わず、境界の関数は呼び出しをまたぐ
+/// 可変な状態（`&mut self`・グローバル）を持たないため。包むのは本体だけで、戻り値のPythonオブジェクトへの
+/// 変換はPyO3が`guard`の外で行う。PyO3の`#[pyfunction]`の外側には、包み忘れた関数や変換のために
+/// PyO3自身のpanic捕捉（`PanicException`）が残る。abort・スタックオーバーフロー・メモリ不足は
+/// `catch_unwind`では捕まえられない。**新しい境界の関数を足したら、本体をこの関数で包む。**
+pub(crate) fn guard<T>(f: impl FnOnce() -> PyResult<T>) -> PyResult<T> {
+    match catch_panic(f) {
+        Ok(result) => result,
+        Err(detail) => Err(internal_error(detail)),
+    }
+}
+
+/// `f`を実行し、panicしたら`INTERNAL_ERROR`の`detail`にする文字列を返す（[`guard`]の中身。Python不要）。
+fn catch_panic<T>(f: impl FnOnce() -> T) -> Result<T, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
+        .map_err(|payload| panic_detail(payload.as_ref()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -294,6 +344,90 @@ mod tests {
         assert_eq!(
             report.full_text(),
             r#"x must contain at least one column name. Pass a non-empty list, for example x=["x1"]."#
+        );
+    }
+
+    #[test]
+    fn panic_detail_uses_the_message_of_str_and_string_payloads() {
+        assert_eq!(panic_detail(&"boom"), "panic: boom");
+        assert_eq!(
+            panic_detail(&String::from("index 3 out of range")),
+            "panic: index 3 out of range"
+        );
+    }
+
+    #[test]
+    fn panic_detail_keeps_the_first_non_empty_line_trimmed() {
+        assert_eq!(panic_detail(&"first\nsecond"), "panic: first");
+        assert_eq!(panic_detail(&"a\r\nb"), "panic: a");
+        assert_eq!(panic_detail(&"\nreal message\nmore"), "panic: real message");
+        assert_eq!(panic_detail(&"\n\n  spaced  \n"), "panic: spaced");
+        assert_eq!(panic_detail(&"  x  "), "panic: x");
+    }
+
+    #[test]
+    fn panic_detail_says_so_when_there_is_no_message() {
+        assert_eq!(panic_detail(&""), "panic: (no message)");
+        assert_eq!(panic_detail(&"\n"), "panic: (no message)");
+        assert_eq!(panic_detail(&"  \n \t"), "panic: (no message)");
+    }
+
+    #[test]
+    fn panic_detail_cuts_at_200_characters_and_marks_the_cut() {
+        for (len, cut) in [(199, false), (200, false), (201, true)] {
+            let message = "x".repeat(len);
+            let expected = if cut {
+                format!("panic: {} (truncated)", "x".repeat(200))
+            } else {
+                format!("panic: {message}")
+            };
+            assert_eq!(panic_detail(&message), expected, "len={len}");
+        }
+    }
+
+    #[test]
+    fn panic_detail_cuts_multibyte_text_at_a_character_boundary() {
+        for (len, cut) in [(200, false), (201, true), (300, true)] {
+            let message = "あ".repeat(len);
+            let expected = if cut {
+                format!("panic: {} (truncated)", "あ".repeat(200))
+            } else {
+                format!("panic: {message}")
+            };
+            assert_eq!(panic_detail(&message), expected, "len={len}");
+        }
+        // ASCIIとの混在でも、数えるのは文字（バイトではない）。
+        let mixed = format!("{}{}", "a".repeat(199), "あ".repeat(5));
+        assert_eq!(
+            panic_detail(&mixed),
+            format!("panic: {}あ (truncated)", "a".repeat(199))
+        );
+        // 4バイトの文字。
+        assert_eq!(panic_detail(&"😀".repeat(3)), "panic: 😀😀😀");
+    }
+
+    #[test]
+    fn panic_detail_describes_a_payload_that_is_not_text() {
+        assert_eq!(
+            panic_detail(&42_i32),
+            "panic: a panic with a payload that is not text"
+        );
+    }
+
+    #[test]
+    fn catch_panic_passes_through_the_value_of_a_closure_that_does_not_panic() {
+        assert_eq!(catch_panic(|| 7), Ok(7));
+    }
+
+    #[test]
+    fn catch_panic_returns_the_detail_of_a_panic() {
+        assert_eq!(
+            catch_panic(|| -> i32 { panic!("boom") }),
+            Err("panic: boom".to_string())
+        );
+        assert_eq!(
+            catch_panic(|| -> i32 { std::panic::panic_any(42_i32) }),
+            Err("panic: a panic with a payload that is not text".to_string())
         );
     }
 }

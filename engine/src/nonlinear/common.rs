@@ -657,17 +657,16 @@ pub fn column_means(x: &Mat<f64>) -> Vec<f64> {
 /// 説明変数ごとの標本中央値（列ごと、`marginal_effects`の`at="median"`用）。`n`が偶数の
 /// 場合は中央2値の平均。元はLogitの`column_medians`（`common.rs`へ移設）。
 ///
-/// `partial_cmp().unwrap()`について: `x`の値はNaN/無限大を含まないことが
-/// `engine_pybind::column_extraction`側で既に保証されている前提（`engine`の責務境界の
-/// 内側であり、クリーンな値しか受け取らない。OLSの`time_ordering`（`shared/covariance.rs`）と
-/// 同じ扱い）。
+/// 並べ替えは`total_cmp`で行い、`x`にNaNが紛れてもpanicしない。`x`の値はNaN/無限大を含まない
+/// ことが`engine_pybind::column_extraction`側で既に保証されている前提（`engine`の責務境界の
+/// 内側であり、クリーンな値しか受け取らない）。
 pub fn column_medians(x: &Mat<f64>) -> Vec<f64> {
     let n = x.nrows();
     let k = x.ncols();
     (0..k)
         .map(|j| {
             let mut col: Vec<f64> = (0..n).map(|i| *x.get(i, j)).collect();
-            col.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            col.sort_by(f64::total_cmp);
             if n % 2 == 1 {
                 col[n / 2]
             } else {

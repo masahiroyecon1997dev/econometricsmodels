@@ -10,7 +10,7 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
-use super::errors::report_to_pyerr;
+use super::errors::{guard, report_to_pyerr};
 
 fn param_type_name(ty: ParamType) -> &'static str {
     match ty {
@@ -32,52 +32,54 @@ fn param_type_name(ty: ParamType) -> &'static str {
 /// `test_labels`は診断検定の識別子から英語名への対応。
 #[pyfunction]
 pub(crate) fn error_catalog(py: Python<'_>) -> PyResult<Bound<'_, PyDict>> {
-    let codes = PyList::empty(py);
-    for spec in CATALOG {
-        let entry = PyDict::new(py);
-        entry.set_item("code", spec.code.as_str())?;
-        entry.set_item(
-            "class",
-            match spec.class {
-                ErrorClass::Validation => "ValidationError",
-                ErrorClass::Computation => "ComputationError",
-            },
-        )?;
-        let params = PyList::empty(py);
-        for p in spec.params {
-            let item = PyDict::new(py);
-            item.set_item("name", p.name)?;
-            item.set_item("type", param_type_name(p.ty))?;
-            item.set_item("in_text", p.in_text)?;
-            params.append(item)?;
+    guard(|| {
+        let codes = PyList::empty(py);
+        for spec in CATALOG {
+            let entry = PyDict::new(py);
+            entry.set_item("code", spec.code.as_str())?;
+            entry.set_item(
+                "class",
+                match spec.class {
+                    ErrorClass::Validation => "ValidationError",
+                    ErrorClass::Computation => "ComputationError",
+                },
+            )?;
+            let params = PyList::empty(py);
+            for p in spec.params {
+                let item = PyDict::new(py);
+                item.set_item("name", p.name)?;
+                item.set_item("type", param_type_name(p.ty))?;
+                item.set_item("in_text", p.in_text)?;
+                params.append(item)?;
+            }
+            entry.set_item("params", params)?;
+            entry.set_item("message", spec.message)?;
+            entry.set_item("hint", spec.hint)?;
+            entry.set_item("stage_allowed", spec.stage_allowed)?;
+            codes.append(entry)?;
         }
-        entry.set_item("params", params)?;
-        entry.set_item("message", spec.message)?;
-        entry.set_item("hint", spec.hint)?;
-        entry.set_item("stage_allowed", spec.stage_allowed)?;
-        codes.append(entry)?;
-    }
 
-    let stages = PyList::empty(py);
-    for stage in Stage::samples() {
-        let entry = PyDict::new(py);
-        entry.set_item("name", stage.as_str())?;
-        entry.set_item("prefix", stage.prefix())?;
-        let aux: Vec<&str> = stage.aux_params().iter().map(|(n, _)| *n).collect();
-        entry.set_item("params", aux)?;
-        stages.append(entry)?;
-    }
+        let stages = PyList::empty(py);
+        for stage in Stage::samples() {
+            let entry = PyDict::new(py);
+            entry.set_item("name", stage.as_str())?;
+            entry.set_item("prefix", stage.prefix())?;
+            let aux: Vec<&str> = stage.aux_params().iter().map(|(n, _)| *n).collect();
+            entry.set_item("params", aux)?;
+            stages.append(entry)?;
+        }
 
-    let test_labels = PyDict::new(py);
-    for (id, label) in TEST_LABELS {
-        test_labels.set_item(id, label)?;
-    }
+        let test_labels = PyDict::new(py);
+        for (id, label) in TEST_LABELS {
+            test_labels.set_item(id, label)?;
+        }
 
-    let out = PyDict::new(py);
-    out.set_item("codes", codes)?;
-    out.set_item("stages", stages)?;
-    out.set_item("test_labels", test_labels)?;
-    Ok(out)
+        let out = PyDict::new(py);
+        out.set_item("codes", codes)?;
+        out.set_item("stages", stages)?;
+        out.set_item("test_labels", test_labels)?;
+        Ok(out)
+    })
 }
 
 fn to_param_value(ty: ParamType, value: &Bound<'_, PyAny>) -> PyResult<ParamValue> {
@@ -119,24 +121,43 @@ fn stage_from_params(name: &str, params: &Bound<'_, PyDict>) -> PyResult<Stage> 
 /// カタログの文面がRust側でどう描画されるかを、Pythonのテストが生成物と突き合わせるために使う。
 #[pyfunction]
 pub(crate) fn raise_error_for_test(code: &str, params: &Bound<'_, PyDict>) -> PyResult<()> {
-    let code = ErrorCode::ALL
-        .iter()
-        .copied()
-        .find(|c| c.as_str() == code)
-        .ok_or_else(|| PyValueError::new_err(format!("unknown code {code:?}")))?;
-    let spec = code.spec();
-    let mut report = ErrorReport::new(code);
-    for p in spec.params {
-        let value = params
-            .get_item(p.name)?
-            .ok_or_else(|| PyValueError::new_err(format!("missing param {}", p.name)))?;
-        report = report.param(p.name, to_param_value(p.ty, &value)?);
-    }
-    if let Some(stage) = params.get_item("stage")? {
-        report = report.with_stage(stage_from_params(&stage.extract::<String>()?, params)?);
-    }
-    report
-        .validate()
-        .map_err(|e| PyValueError::new_err(e.to_string()))?;
-    Err(report_to_pyerr(&report))
+    guard(|| {
+        let code = ErrorCode::ALL
+            .iter()
+            .copied()
+            .find(|c| c.as_str() == code)
+            .ok_or_else(|| PyValueError::new_err(format!("unknown code {code:?}")))?;
+        let spec = code.spec();
+        let mut report = ErrorReport::new(code);
+        for p in spec.params {
+            let value = params
+                .get_item(p.name)?
+                .ok_or_else(|| PyValueError::new_err(format!("missing param {}", p.name)))?;
+            report = report.param(p.name, to_param_value(p.ty, &value)?);
+        }
+        if let Some(stage) = params.get_item("stage")? {
+            report = report.with_stage(stage_from_params(&stage.extract::<String>()?, params)?);
+        }
+        report
+            .validate()
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        Err(report_to_pyerr(&report))
+    })
+}
+
+/// テスト用: 境界の`guard`の中でpanicを起こし、`INTERNAL_ERROR`に変わることを確かめる。
+///
+/// `kind`は`"str"`（`&str`のpayload）・`"string"`（`String`のpayload）・`"other"`（文字列でないpayload）・
+/// `"long"`（300文字のメッセージ。`detail`の切り詰めを見る）。
+/// 実際の境界の関数と同じ`guard`を通る。
+#[pyfunction]
+pub(crate) fn panic_for_test(kind: &str) -> PyResult<()> {
+    let kind = kind.to_owned();
+    guard(move || match kind.as_str() {
+        "str" => panic!("deliberate panic for a test"),
+        "string" => panic!("deliberate panic for a test: {}", kind.len()),
+        "other" => std::panic::panic_any(42_i32),
+        "long" => panic!("{}", "x".repeat(300)),
+        _ => Err(PyValueError::new_err(format!("unknown kind {kind:?}"))),
+    })
 }

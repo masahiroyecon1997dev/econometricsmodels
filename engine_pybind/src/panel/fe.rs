@@ -65,6 +65,7 @@
 //! （OLS自身も`engine::linear::ols::OlsEstimator::fit`自体はk=0をpanicなく受理するが
 //! Python APIの`validate_x_non_empty`が弾く、という既存の非対称性と同じ構図）。
 
+use crate::shared::errors::guard;
 use engine::panel::common::TimeKeys;
 use engine::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput, FixedEffects};
 use polars::prelude::DataFrame;
@@ -348,20 +349,22 @@ impl FEResult {
     /// observation order, so numerical agreement with `fixest` for two-way effects
     /// only holds when those two choices of `t_ref` coincide for the given data.
     fn fixed_effects(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
-        match self.estimator.fixed_effects() {
-            FixedEffects::OneWay(effects) => Ok(effects.into_pyobject(py)?.unbind()),
-            FixedEffects::TwoWay { entity, time } => {
-                // 時点は時間順に並べた`dict`にする（Pythonの`dict`は挿入順を保つ）。
-                let time_effects = PyDict::new(py);
-                for (period, effect) in time {
-                    time_effects.set_item(period, effect)?;
+        guard(|| {
+            match self.estimator.fixed_effects() {
+                FixedEffects::OneWay(effects) => Ok(effects.into_pyobject(py)?.unbind()),
+                FixedEffects::TwoWay { entity, time } => {
+                    // 時点は時間順に並べた`dict`にする（Pythonの`dict`は挿入順を保つ）。
+                    let time_effects = PyDict::new(py);
+                    for (period, effect) in time {
+                        time_effects.set_item(period, effect)?;
+                    }
+                    let outer = PyDict::new(py);
+                    outer.set_item("entity", entity)?;
+                    outer.set_item("time", time_effects)?;
+                    Ok(outer.unbind())
                 }
-                let outer = PyDict::new(py);
-                outer.set_item("entity", entity)?;
-                outer.set_item("time", time_effects)?;
-                Ok(outer.unbind())
             }
-        }
+        })
     }
 }
 

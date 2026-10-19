@@ -19,9 +19,9 @@ use nonlinear::tobit::{
 };
 use panel::fe::{FEOptions, FEResult};
 use panel::re::{REOptions, REResult};
-use shared::catalog_export::{error_catalog, raise_error_for_test};
+use shared::catalog_export::{error_catalog, panic_for_test, raise_error_for_test};
 use shared::column_extraction::{extract_column_list, extract_column_name, extract_dataframe};
-use shared::errors::{ComputationError, ValidationError};
+use shared::errors::{ComputationError, ValidationError, guard};
 use shared::option_values::extract_options;
 
 /// Entry point for OLS estimation.
@@ -43,11 +43,13 @@ fn fit_ols(
     x: &Bound<'_, PyAny>,
     options: &Bound<'_, PyAny>,
 ) -> PyResult<OLSResult> {
-    let data = extract_dataframe(data, "data")?;
-    let y = extract_column_name(y, "y")?;
-    let x = extract_column_list(x, "x")?;
-    let options: OLSOptions = extract_options(options, "options")?;
-    linear::ols::fit(data, y, x, &options)
+    guard(|| {
+        let data = extract_dataframe(data, "data")?;
+        let y = extract_column_name(y, "y")?;
+        let x = extract_column_list(x, "x")?;
+        let options: OLSOptions = extract_options(options, "options")?;
+        linear::ols::fit(data, y, x, &options)
+    })
 }
 
 /// Entry point for WLS estimation.
@@ -73,12 +75,14 @@ fn fit_wls(
     weight: &Bound<'_, PyAny>,
     options: &Bound<'_, PyAny>,
 ) -> PyResult<WLSResult> {
-    let data = extract_dataframe(data, "data")?;
-    let y = extract_column_name(y, "y")?;
-    let x = extract_column_list(x, "x")?;
-    let weight = extract_column_name(weight, "weight")?;
-    let options: WLSOptions = extract_options(options, "options")?;
-    linear::wls::fit(data, y, x, weight, &options)
+    guard(|| {
+        let data = extract_dataframe(data, "data")?;
+        let y = extract_column_name(y, "y")?;
+        let x = extract_column_list(x, "x")?;
+        let weight = extract_column_name(weight, "weight")?;
+        let options: WLSOptions = extract_options(options, "options")?;
+        linear::wls::fit(data, y, x, weight, &options)
+    })
 }
 
 /// Entry point for Logit estimation.
@@ -101,11 +105,13 @@ fn fit_logit(
     x: &Bound<'_, PyAny>,
     options: &Bound<'_, PyAny>,
 ) -> PyResult<LogitResult> {
-    let data = extract_dataframe(data, "data")?;
-    let y = extract_column_name(y, "y")?;
-    let x = extract_column_list(x, "x")?;
-    let options: LogitOptions = extract_options(options, "options")?;
-    nonlinear::logit::fit(data, y, x, &options)
+    guard(|| {
+        let data = extract_dataframe(data, "data")?;
+        let y = extract_column_name(y, "y")?;
+        let x = extract_column_list(x, "x")?;
+        let options: LogitOptions = extract_options(options, "options")?;
+        nonlinear::logit::fit(data, y, x, &options)
+    })
 }
 
 /// Entry point for Probit estimation.
@@ -128,11 +134,13 @@ fn fit_probit(
     x: &Bound<'_, PyAny>,
     options: &Bound<'_, PyAny>,
 ) -> PyResult<ProbitResult> {
-    let data = extract_dataframe(data, "data")?;
-    let y = extract_column_name(y, "y")?;
-    let x = extract_column_list(x, "x")?;
-    let options: ProbitOptions = extract_options(options, "options")?;
-    nonlinear::probit::fit(data, y, x, &options)
+    guard(|| {
+        let data = extract_dataframe(data, "data")?;
+        let y = extract_column_name(y, "y")?;
+        let x = extract_column_list(x, "x")?;
+        let options: ProbitOptions = extract_options(options, "options")?;
+        nonlinear::probit::fit(data, y, x, &options)
+    })
 }
 
 /// Entry point for Tobit estimation.
@@ -155,11 +163,13 @@ fn fit_tobit(
     x: &Bound<'_, PyAny>,
     options: &Bound<'_, PyAny>,
 ) -> PyResult<TobitResult> {
-    let data = extract_dataframe(data, "data")?;
-    let y = extract_column_name(y, "y")?;
-    let x = extract_column_list(x, "x")?;
-    let options: TobitOptions = extract_options(options, "options")?;
-    nonlinear::tobit::fit(data, y, x, &options)
+    guard(|| {
+        let data = extract_dataframe(data, "data")?;
+        let y = extract_column_name(y, "y")?;
+        let x = extract_column_list(x, "x")?;
+        let options: TobitOptions = extract_options(options, "options")?;
+        nonlinear::tobit::fit(data, y, x, &options)
+    })
 }
 
 /// Entry point for IV estimation (2SLS/GMM).
@@ -188,13 +198,15 @@ fn fit_iv(
     instruments: &Bound<'_, PyAny>,
     options: &Bound<'_, PyAny>,
 ) -> PyResult<IVResult> {
-    let data = extract_dataframe(data, "data")?;
-    let y = extract_column_name(y, "y")?;
-    let x_exog = extract_column_list(x_exog, "x_exog")?;
-    let x_endog = extract_column_list(x_endog, "x_endog")?;
-    let instruments = extract_column_list(instruments, "instruments")?;
-    let options: IVOptions = extract_options(options, "options")?;
-    iv::common::fit(data, y, x_exog, x_endog, instruments, &options)
+    guard(|| {
+        let data = extract_dataframe(data, "data")?;
+        let y = extract_column_name(y, "y")?;
+        let x_exog = extract_column_list(x_exog, "x_exog")?;
+        let x_endog = extract_column_list(x_endog, "x_endog")?;
+        let instruments = extract_column_list(instruments, "instruments")?;
+        let options: IVOptions = extract_options(options, "options")?;
+        iv::common::fit(data, y, x_exog, x_endog, instruments, &options)
+    })
 }
 
 /// Entry point for FE (fixed effects panel regression) estimation.
@@ -221,12 +233,14 @@ fn fit_fe(
     entity: &Bound<'_, PyAny>,
     options: &Bound<'_, PyAny>,
 ) -> PyResult<FEResult> {
-    let data = extract_dataframe(data, "data")?;
-    let y = extract_column_name(y, "y")?;
-    let x = extract_column_list(x, "x")?;
-    let entity = extract_column_name(entity, "entity")?;
-    let options: FEOptions = extract_options(options, "options")?;
-    panel::fe::fit(data, y, x, entity, &options)
+    guard(|| {
+        let data = extract_dataframe(data, "data")?;
+        let y = extract_column_name(y, "y")?;
+        let x = extract_column_list(x, "x")?;
+        let entity = extract_column_name(entity, "entity")?;
+        let options: FEOptions = extract_options(options, "options")?;
+        panel::fe::fit(data, y, x, entity, &options)
+    })
 }
 
 /// Entry point for RE (random effects panel regression) estimation.
@@ -253,12 +267,14 @@ fn fit_re(
     entity: &Bound<'_, PyAny>,
     options: &Bound<'_, PyAny>,
 ) -> PyResult<REResult> {
-    let data = extract_dataframe(data, "data")?;
-    let y = extract_column_name(y, "y")?;
-    let x = extract_column_list(x, "x")?;
-    let entity = extract_column_name(entity, "entity")?;
-    let options: REOptions = extract_options(options, "options")?;
-    panel::re::fit(data, y, x, entity, &options)
+    guard(|| {
+        let data = extract_dataframe(data, "data")?;
+        let y = extract_column_name(y, "y")?;
+        let x = extract_column_list(x, "x")?;
+        let entity = extract_column_name(entity, "entity")?;
+        let options: REOptions = extract_options(options, "options")?;
+        panel::re::fit(data, y, x, entity, &options)
+    })
 }
 
 #[pymodule]
@@ -301,6 +317,7 @@ fn _lib(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<REResult>()?;
     m.add_function(wrap_pyfunction!(error_catalog, m)?)?;
     m.add_function(wrap_pyfunction!(raise_error_for_test, m)?)?;
+    m.add_function(wrap_pyfunction!(panic_for_test, m)?)?;
     m.add("ValidationError", m.py().get_type::<ValidationError>())?;
     m.add("ComputationError", m.py().get_type::<ComputationError>())?;
     Ok(())

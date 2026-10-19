@@ -19,6 +19,7 @@
 //! これに委譲する）が`PyDataFrame`を受け取り、`.into()`で`DataFrame`に変換して
 //! から`build_probit_input`を呼ぶ（`logit.rs`の`fit`関数と同じ変換パターン）。
 
+use crate::shared::errors::guard;
 use engine::nonlinear::common::{
     CovType as EngineCovType, MleFitOptions, SolverType as EngineSolverType,
 };
@@ -332,12 +333,14 @@ impl ProbitResult {
     ///   (same validation as `fit()`'s column extraction, via `extract_f64_column`).
     #[pyo3(signature = (new_data=None))]
     fn predict(&self, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<f64>> {
-        let Some(new_data) = new_data else {
-            return Ok(self.estimator.predict());
-        };
+        guard(|| {
+            let Some(new_data) = new_data else {
+                return Ok(self.estimator.predict());
+            };
 
-        let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
-        self.predict_for(&df)
+            let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
+            self.predict_for(&df)
+        })
     }
 
     /// The source data (training data, or `new_data` when given) with the predicted
@@ -354,16 +357,18 @@ impl ProbitResult {
     ///   `ValidationError` (would otherwise silently overwrite it).
     #[pyo3(signature = (new_data=None))]
     fn augment(&self, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<PyDataFrame> {
-        let (source, probability) = match new_data {
-            Some(new_data) => {
-                let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
-                let probability = self.predict_for(&df)?;
-                (df, probability)
-            }
-            None => (self.training_data.clone(), self.estimator.predict()),
-        };
+        guard(|| {
+            let (source, probability) = match new_data {
+                Some(new_data) => {
+                    let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
+                    let probability = self.predict_for(&df)?;
+                    (df, probability)
+                }
+                None => (self.training_data.clone(), self.estimator.predict()),
+            };
 
-        append_predicted_column(source, "predicted_probability", probability)
+            append_predicted_column(source, "predicted_probability", probability)
+        })
     }
 
     /// 2x2 classification table as `[[row0], [row1]]`, where row/column index 0 is the
@@ -374,8 +379,8 @@ impl ProbitResult {
     /// `engine::nonlinear::probit::ProbitEstimator::pred_table` for the exact semantics).
     /// Out-of-sample data is not yet supported (same limitation as `predict()`).
     #[pyo3(signature = (threshold=0.5))]
-    fn pred_table(&self, threshold: f64) -> Vec<Vec<f64>> {
-        mat_to_nested_vec(&self.estimator.pred_table(threshold))
+    fn pred_table(&self, threshold: f64) -> PyResult<Vec<Vec<f64>>> {
+        guard(|| Ok(mat_to_nested_vec(&self.estimator.pred_table(threshold))))
     }
 
     /// Marginal effects (`dy/dx`) with delta-method standard errors.
@@ -394,20 +399,22 @@ impl ProbitResult {
         at: String,
         confidence_level: f64,
     ) -> PyResult<MarginalEffectsResult> {
-        let at = parse_marginal_effects_at(&at)?;
-        let effects = self
-            .estimator
-            .marginal_effects(at, confidence_level)
-            .map_err(mle_error_to_pyerr)?;
+        guard(|| {
+            let at = parse_marginal_effects_at(&at)?;
+            let effects = self
+                .estimator
+                .marginal_effects(at, confidence_level)
+                .map_err(mle_error_to_pyerr)?;
 
-        Ok(MarginalEffectsResult {
-            param_names: effects.param_names().to_vec(),
-            effect: effects.effect().to_vec(),
-            std_errors: effects.std_errors().to_vec(),
-            test_stats: effects.test_stats().to_vec(),
-            p_values: effects.p_values().to_vec(),
-            conf_lower: effects.conf_lower().to_vec(),
-            conf_upper: effects.conf_upper().to_vec(),
+            Ok(MarginalEffectsResult {
+                param_names: effects.param_names().to_vec(),
+                effect: effects.effect().to_vec(),
+                std_errors: effects.std_errors().to_vec(),
+                test_stats: effects.test_stats().to_vec(),
+                p_values: effects.p_values().to_vec(),
+                conf_lower: effects.conf_lower().to_vec(),
+                conf_upper: effects.conf_upper().to_vec(),
+            })
         })
     }
 }

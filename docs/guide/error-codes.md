@@ -37,6 +37,10 @@ The catalog below lists, for every `code`, the exception class, the keys and typ
 
 `DESIGN_MATRIX_SINGULAR` carries `columns`, the names of the columns that take part in one linear dependency of the design matrix, in the order of the design (the intercept is called `const`). It does not decide which column to drop: removing any one of them resolves that dependency. If the design has more than one dependency, only the first one is reported (the first column, in the design order, that can be written with the columns before it, together with those columns); fix it and run again to see the next. A column that is zero in every observation is reported on its own. In a nested regression, the names are those of that regression (see `stage`).
 
+## Internal errors
+
+`INTERNAL_ERROR` means that the package itself failed, not your input. It is raised as a `ComputationError`, including when the Rust code panics: a panic does not escape as a `pyo3_runtime.PanicException` (which is not an `Exception` and is not caught by `except Exception`). The `detail` parameter starts with `panic: ` and then gives the panic message. The location of the panic is printed to standard error by Rust's default hook. If you get this error, please report it as a bug with the data or a minimal example that reproduces it.
+
 ## Rendering the templates yourself
 
 To build a message in your own language, keep one template per `code` and replace each `{name}` with the value of `params["name"]` written as follows:

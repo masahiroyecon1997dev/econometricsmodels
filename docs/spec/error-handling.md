@@ -106,6 +106,16 @@
 - 変換は`to_pyerr(&err)`の1関数。各系統の`*_error_to_pyerr`はこれを呼ぶだけ。`engine_pybind`発の入力不正（`ColumnExtractionError`・オプション検査）も同じ組み立て関数を通す。
 - `_lib.error_catalog()`でカタログをPythonへ渡す（生成スクリプトとテストが読む）。`_lib.raise_error_for_test(code, params)`で任意の`code`を送出できる（カタログ全体の描画検査用）。
 
+### panicの境界変換（`guard`）
+
+- Rustのpanicは、そのままだとPyO3が`pyo3_runtime.PanicException`にする。これは`BaseException`の子で、`except Exception`で捕まらず、アプリ（GUI・BIツールのバックエンド・バッチ）のワーカーが落ちうる。
+- `engine_pybind/src/shared/errors.rs`の`guard`が`catch_unwind`でpanicを捕まえ、`INTERNAL_ERROR`（`ComputationError`）にする。`detail`は`panic: `に続けてpanicの文言（最初の空でない行、200文字まで。超えたら` (truncated)`を付ける。文字列でないpayloadは固定の文言、空なら`(no message)`）。場所（ファイルと行）は既定のpanicフックがstderrに出すので`detail`には入れない。
+- 境界の`#[pyfunction]`（非公開の`error_catalog`・`raise_error_for_test`を含む）と、処理を持つ`#[pymethods]`（`fit_*`・`predict`・`augment`・診断検定・`marginal_effects`等）の本体を`guard(|| { ... })`で包む。オプション・例外クラスのコンストラクタ・`__init__`・`__str__`・`__reduce__`・setter・`__repr__`・`get_all`のgetterは対象外（panicしうる処理を持たない）。包むのは本体だけで、戻り値のPythonオブジェクトへの変換はPyO3が`guard`の外で行う。**新しい境界の関数を足したら包む**（強制するテストは置かず、手順とレビューで担保する）。
+- 正常系のコストはない（`catch_unwind`は正常終了のときは何もしない）。`AssertUnwindSafe`が妥当なのは、panicした呼び出しの結果を使わず、境界の関数が呼び出しをまたぐ可変な状態を持たないため。
+- 前提は`panic = "unwind"`（ワークスペースの`[profile.release]`で明示）。`abort`にすると捕まえられずプロセスごと落ちるので変えない（`engine_pybind`は`cfg(panic = "abort")`でビルドエラーにする）。捕まえられないのは、abort・スタックオーバーフロー・メモリ不足・panic中のpanic。外部クレートの内部状態（例えばpyo3-polarsの初期化）は保証しない。
+- 理由コメント付きの`expect`/`assert`は残す。`guard`が最後の受け皿になる（上に挙げた捕まえられないものを除く）。
+- テストの入口は非公開の`_lib.panic_for_test(kind)`（`raise_error_for_test`と同じ扱いで、`python_package`からは再エクスポートしない）。本番の境界と同じ`guard`を通る。
+
 ### 生成物
 
 `python tools/render_error_catalog.py`が`python_package/econometricsmodels/error_codes.py`（`ErrorCode`）と`docs/guide/error-codes.md`の生成ブロックを作る。`--check`で再生成との差分を検出し、CI（`ci_python.yml`）で実行する。説明文はブロックの外に手書きする。生成にした理由は、手書き＋検査だとmdの表をパースする検査コードが要り、`ErrorCode`の生成のためにどのみち作るスクリプトより重くなるため。

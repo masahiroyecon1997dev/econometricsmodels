@@ -15,6 +15,7 @@
 //! 公開API（`WLSOptions`/`WLSResult`）のdocコメントは英語。それ以外（このファイルの
 //! 説明・非公開関数のdocコメント等）は日本語のまま。
 
+use crate::shared::errors::guard;
 use engine::linear::wls::WlsEstimator;
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
@@ -319,12 +320,14 @@ impl WLSResult {
     ///   (same validation as `fit()`'s column extraction, via `extract_f64_column`).
     #[pyo3(signature = (new_data=None))]
     fn predict(&self, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<f64>> {
-        let Some(new_data) = new_data else {
-            return Ok(self.fitted_values.clone());
-        };
+        guard(|| {
+            let Some(new_data) = new_data else {
+                return Ok(self.fitted_values.clone());
+            };
 
-        let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
-        self.predict_for(&df)
+            let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
+            self.predict_for(&df)
+        })
     }
 
     /// The source data (training data, or `new_data` when given) with the
@@ -340,16 +343,18 @@ impl WLSResult {
     ///   `ValidationError` (would otherwise silently overwrite it).
     #[pyo3(signature = (new_data=None))]
     fn augment(&self, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<PyDataFrame> {
-        let (source, predicted) = match new_data {
-            Some(new_data) => {
-                let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
-                let predicted = self.predict_for(&df)?;
-                (df, predicted)
-            }
-            None => (self.training_data.clone(), self.fitted_values.clone()),
-        };
+        guard(|| {
+            let (source, predicted) = match new_data {
+                Some(new_data) => {
+                    let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
+                    let predicted = self.predict_for(&df)?;
+                    (df, predicted)
+                }
+                None => (self.training_data.clone(), self.fitted_values.clone()),
+            };
 
-        append_predicted_column(source, "predicted", predicted)
+            append_predicted_column(source, "predicted", predicted)
+        })
     }
 }
 

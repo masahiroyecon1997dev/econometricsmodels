@@ -28,7 +28,7 @@ use crate::shared::column_extraction::{
     extract_column_list, extract_dataframe, extract_f64_column, extract_f64_columns,
     extract_model_x_columns, extract_time_order_ranks, x_column_names,
 };
-use crate::shared::errors::{unknown_option_value, user_error};
+use crate::shared::errors::{guard, unknown_option_value, user_error};
 use crate::shared::mat_conversion::mat_to_vec;
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
@@ -447,12 +447,14 @@ impl OLSResult {
     ///   (same validation as `fit()`'s column extraction, via `extract_f64_column`).
     #[pyo3(signature = (new_data=None))]
     fn predict(&self, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<f64>> {
-        let Some(new_data) = new_data else {
-            return Ok(self.fitted_values.clone());
-        };
+        guard(|| {
+            let Some(new_data) = new_data else {
+                return Ok(self.fitted_values.clone());
+            };
 
-        let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
-        self.predict_for(&df)
+            let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
+            self.predict_for(&df)
+        })
     }
 
     /// The source data (training data, or `new_data` when given) with the
@@ -471,22 +473,24 @@ impl OLSResult {
     ///   only possible for `IVResult.first_stage()` results): `ValidationError`.
     #[pyo3(signature = (new_data=None))]
     fn augment(&self, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<PyDataFrame> {
-        let (source, predicted) = match new_data {
-            Some(new_data) => {
-                let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
-                let predicted = self.predict_for(&df)?;
-                (df, predicted)
-            }
-            None => {
-                let source = self
-                    .training_data
-                    .clone()
-                    .ok_or_else(|| user_error(ErrorCode::AugmentRequiresNewData, Vec::new()))?;
-                (source, self.fitted_values.clone())
-            }
-        };
+        guard(|| {
+            let (source, predicted) = match new_data {
+                Some(new_data) => {
+                    let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
+                    let predicted = self.predict_for(&df)?;
+                    (df, predicted)
+                }
+                None => {
+                    let source = self
+                        .training_data
+                        .clone()
+                        .ok_or_else(|| user_error(ErrorCode::AugmentRequiresNewData, Vec::new()))?;
+                    (source, self.fitted_values.clone())
+                }
+            };
 
-        append_predicted_column(source, "predicted", predicted)
+            append_predicted_column(source, "predicted", predicted)
+        })
     }
 
     /// White test for heteroskedasticity.
@@ -509,28 +513,30 @@ impl OLSResult {
     ///   is undefined: `ComputationError`.
     #[pyo3(signature = (statistic="lm"))]
     fn white_test(&self, statistic: &str) -> PyResult<WhiteTestOutput> {
-        let version = parse_statistic_version(statistic)?;
-        let df = self.training_data.as_ref().ok_or_else(|| {
-            user_error(
-                ErrorCode::TrainingDataNotRetained,
-                vec![("method", ParamValue::from("white_test"))],
-            )
-        })?;
+        guard(|| {
+            let version = parse_statistic_version(statistic)?;
+            let df = self.training_data.as_ref().ok_or_else(|| {
+                user_error(
+                    ErrorCode::TrainingDataNotRetained,
+                    vec![("method", ParamValue::from("white_test"))],
+                )
+            })?;
 
-        let x_names = x_column_names(&self.param_names, self.has_intercept, 0);
-        let x_columns = extract_f64_columns(df, x_names, ColumnSource::new("x", "data"))?;
-        let result = white_test(&x_columns, x_names, &self.residuals)
-            .map_err(least_squares_error_to_pyerr)?;
+            let x_names = x_column_names(&self.param_names, self.has_intercept, 0);
+            let x_columns = extract_f64_columns(df, x_names, ColumnSource::new("x", "data"))?;
+            let result = white_test(&x_columns, x_names, &self.residuals)
+                .map_err(least_squares_error_to_pyerr)?;
 
-        let (statistic, p_value, df_denom, distribution) = select_statistic(&result, version);
-        Ok(WhiteTestOutput {
-            statistic,
-            p_value,
-            df: result.df,
-            df_denom,
-            distribution,
-            aux_terms: result.aux_terms,
-            dropped_terms: result.dropped_terms,
+            let (statistic, p_value, df_denom, distribution) = select_statistic(&result, version);
+            Ok(WhiteTestOutput {
+                statistic,
+                p_value,
+                df: result.df,
+                df_denom,
+                distribution,
+                aux_terms: result.aux_terms,
+                dropped_terms: result.dropped_terms,
+            })
         })
     }
 
@@ -565,43 +571,46 @@ impl OLSResult {
         variables: Option<&Bound<'_, PyAny>>,
         statistic: &str,
     ) -> PyResult<BreuschPaganTestOutput> {
-        let version = parse_statistic_version(statistic)?;
-        let variables = variables
-            .map(|ob| extract_column_list(ob, "variables"))
-            .transpose()?;
-        let df = self.training_data.as_ref().ok_or_else(|| {
-            user_error(
-                ErrorCode::TrainingDataNotRetained,
-                vec![("method", ParamValue::from("breusch_pagan_test"))],
-            )
-        })?;
+        guard(|| {
+            let version = parse_statistic_version(statistic)?;
+            let variables = variables
+                .map(|ob| extract_column_list(ob, "variables"))
+                .transpose()?;
+            let df = self.training_data.as_ref().ok_or_else(|| {
+                user_error(
+                    ErrorCode::TrainingDataNotRetained,
+                    vec![("method", ParamValue::from("breusch_pagan_test"))],
+                )
+            })?;
 
-        let z_names = match variables.as_deref() {
-            Some(names) => {
-                validate_x_non_empty("variables", names)?;
-                validate_no_duplicate_within_role("variables", names)?;
-                names
-            }
-            None => x_column_names(&self.param_names, self.has_intercept, 0),
-        };
-        let z_argument = if variables.is_some() {
-            "variables"
-        } else {
-            "x"
-        };
-        let z_columns = extract_f64_columns(df, z_names, ColumnSource::new(z_argument, "data"))?;
-        let result = breusch_pagan_test(&z_columns, z_names, &self.residuals)
-            .map_err(least_squares_error_to_pyerr)?;
+            let z_names = match variables.as_deref() {
+                Some(names) => {
+                    validate_x_non_empty("variables", names)?;
+                    validate_no_duplicate_within_role("variables", names)?;
+                    names
+                }
+                None => x_column_names(&self.param_names, self.has_intercept, 0),
+            };
+            let z_argument = if variables.is_some() {
+                "variables"
+            } else {
+                "x"
+            };
+            let z_columns =
+                extract_f64_columns(df, z_names, ColumnSource::new(z_argument, "data"))?;
+            let result = breusch_pagan_test(&z_columns, z_names, &self.residuals)
+                .map_err(least_squares_error_to_pyerr)?;
 
-        let (statistic, p_value, df_denom, distribution) = select_statistic(&result, version);
-        Ok(BreuschPaganTestOutput {
-            statistic,
-            p_value,
-            df: result.df,
-            df_denom,
-            distribution,
-            aux_terms: result.aux_terms,
-            dropped_terms: result.dropped_terms,
+            let (statistic, p_value, df_denom, distribution) = select_statistic(&result, version);
+            Ok(BreuschPaganTestOutput {
+                statistic,
+                p_value,
+                df: result.df,
+                df_denom,
+                distribution,
+                aux_terms: result.aux_terms,
+                dropped_terms: result.dropped_terms,
+            })
         })
     }
 
@@ -637,54 +646,57 @@ impl OLSResult {
         nlags: &Bound<'_, PyAny>,
         statistic: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<BreuschGodfreyTestOutput> {
-        let time = extract_strict_text(time, "time")?;
-        let nlags = extract_strict_int(nlags, "nlags")?;
-        let statistic = match statistic {
-            Some(value) => extract_strict_text(value, "statistic")?,
-            None => "lm".to_string(),
-        };
-        let version = parse_statistic_version(&statistic)?;
-        let df = self.training_data.as_ref().ok_or_else(|| {
-            user_error(
-                ErrorCode::TrainingDataNotRetained,
-                vec![("method", ParamValue::from("breusch_godfrey_test"))],
+        guard(|| {
+            let time = extract_strict_text(time, "time")?;
+            let nlags = extract_strict_int(nlags, "nlags")?;
+            let statistic = match statistic {
+                Some(value) => extract_strict_text(value, "statistic")?,
+                None => "lm".to_string(),
+            };
+            let version = parse_statistic_version(&statistic)?;
+            let df = self.training_data.as_ref().ok_or_else(|| {
+                user_error(
+                    ErrorCode::TrainingDataNotRetained,
+                    vec![("method", ParamValue::from("breusch_godfrey_test"))],
+                )
+            })?;
+
+            let x_columns = extract_model_x_columns(
+                df,
+                &self.param_names,
+                self.has_intercept,
+                0,
+                ColumnSource::new("x", "data"),
+            )?;
+            let time_order =
+                extract_time_order_ranks(df, &time, ColumnSource::new("time", "data"))?;
+            let result = breusch_godfrey_test(
+                &x_columns,
+                self.has_intercept,
+                &self.residuals,
+                &time_order,
+                nlags,
             )
-        })?;
+            .map_err(least_squares_error_to_pyerr)?;
 
-        let x_columns = extract_model_x_columns(
-            df,
-            &self.param_names,
-            self.has_intercept,
-            0,
-            ColumnSource::new("x", "data"),
-        )?;
-        let time_order = extract_time_order_ranks(df, &time, ColumnSource::new("time", "data"))?;
-        let result = breusch_godfrey_test(
-            &x_columns,
-            self.has_intercept,
-            &self.residuals,
-            &time_order,
-            nlags,
-        )
-        .map_err(least_squares_error_to_pyerr)?;
-
-        Ok(match version {
-            StatisticVersion::F => BreuschGodfreyTestOutput {
-                statistic: result.f_statistic,
-                p_value: result.f_p_value,
-                df: result.df,
-                df_denom: Some(result.f_df_denom),
-                distribution: "f".to_string(),
-                nlags: result.df,
-            },
-            StatisticVersion::Lm => BreuschGodfreyTestOutput {
-                statistic: result.lm_statistic,
-                p_value: result.lm_p_value,
-                df: result.df,
-                df_denom: None,
-                distribution: "chi2".to_string(),
-                nlags: result.df,
-            },
+            Ok(match version {
+                StatisticVersion::F => BreuschGodfreyTestOutput {
+                    statistic: result.f_statistic,
+                    p_value: result.f_p_value,
+                    df: result.df,
+                    df_denom: Some(result.f_df_denom),
+                    distribution: "f".to_string(),
+                    nlags: result.df,
+                },
+                StatisticVersion::Lm => BreuschGodfreyTestOutput {
+                    statistic: result.lm_statistic,
+                    p_value: result.lm_p_value,
+                    df: result.df,
+                    df_denom: None,
+                    distribution: "chi2".to_string(),
+                    nlags: result.df,
+                },
+            })
         })
     }
 }

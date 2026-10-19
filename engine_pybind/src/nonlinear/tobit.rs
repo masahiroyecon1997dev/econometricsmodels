@@ -46,7 +46,7 @@ use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
     extract_dataframe, extract_f64_column, extract_f64_columns, extract_model_x_columns,
 };
-use crate::shared::errors::{unknown_option_value, user_error};
+use crate::shared::errors::{guard, unknown_option_value, user_error};
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
     extract_strict_float, extract_strict_int, extract_strict_opt_column, extract_strict_opt_float,
@@ -393,13 +393,15 @@ impl TobitResult {
     ///   (same validation as `fit()`'s column extraction, via `extract_f64_column`).
     #[pyo3(signature = (new_data=None, target="expected_observed".to_string()))]
     fn predict(&self, new_data: Option<&Bound<'_, PyAny>>, target: String) -> PyResult<Vec<f64>> {
-        let target = parse_marginal_effects_target(&target)?;
-        let Some(new_data) = new_data else {
-            return self.estimator.predict(target).map_err(mle_error_to_pyerr);
-        };
+        guard(|| {
+            let target = parse_marginal_effects_target(&target)?;
+            let Some(new_data) = new_data else {
+                return self.estimator.predict(target).map_err(mle_error_to_pyerr);
+            };
 
-        let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
-        self.predict_for(target, &df)
+            let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
+            self.predict_for(target, &df)
+        })
     }
 
     /// The source data (training data, or `new_data` when given) with the predicted
@@ -426,24 +428,26 @@ impl TobitResult {
         new_data: Option<&Bound<'_, PyAny>>,
         target: String,
     ) -> PyResult<PyDataFrame> {
-        let target_enum = parse_marginal_effects_target(&target)?;
+        guard(|| {
+            let target_enum = parse_marginal_effects_target(&target)?;
 
-        let (source, predicted) = match new_data {
-            Some(new_data) => {
-                let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
-                let predicted = self.predict_for(target_enum, &df)?;
-                (df, predicted)
-            }
-            None => (
-                self.training_data.clone(),
-                self.estimator
-                    .predict(target_enum)
-                    .map_err(mle_error_to_pyerr)?,
-            ),
-        };
+            let (source, predicted) = match new_data {
+                Some(new_data) => {
+                    let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
+                    let predicted = self.predict_for(target_enum, &df)?;
+                    (df, predicted)
+                }
+                None => (
+                    self.training_data.clone(),
+                    self.estimator
+                        .predict(target_enum)
+                        .map_err(mle_error_to_pyerr)?,
+                ),
+            };
 
-        let column_name = format!("predicted_{}", target.to_lowercase());
-        append_predicted_column(source, &column_name, predicted)
+            let column_name = format!("predicted_{}", target.to_lowercase());
+            append_predicted_column(source, &column_name, predicted)
+        })
     }
 
     /// Marginal effects (`dy/dx`) with delta-method standard errors.
@@ -473,21 +477,23 @@ impl TobitResult {
         target: String,
         confidence_level: f64,
     ) -> PyResult<MarginalEffectsResult> {
-        let at = parse_marginal_effects_at(&at)?;
-        let target = parse_marginal_effects_target(&target)?;
-        let effects = self
-            .estimator
-            .marginal_effects(at, target, confidence_level)
-            .map_err(mle_error_to_pyerr)?;
+        guard(|| {
+            let at = parse_marginal_effects_at(&at)?;
+            let target = parse_marginal_effects_target(&target)?;
+            let effects = self
+                .estimator
+                .marginal_effects(at, target, confidence_level)
+                .map_err(mle_error_to_pyerr)?;
 
-        Ok(MarginalEffectsResult {
-            param_names: effects.param_names().to_vec(),
-            effect: effects.effect().to_vec(),
-            std_errors: effects.std_errors().to_vec(),
-            test_stats: effects.test_stats().to_vec(),
-            p_values: effects.p_values().to_vec(),
-            conf_lower: effects.conf_lower().to_vec(),
-            conf_upper: effects.conf_upper().to_vec(),
+            Ok(MarginalEffectsResult {
+                param_names: effects.param_names().to_vec(),
+                effect: effects.effect().to_vec(),
+                std_errors: effects.std_errors().to_vec(),
+                test_stats: effects.test_stats().to_vec(),
+                p_values: effects.p_values().to_vec(),
+                conf_lower: effects.conf_lower().to_vec(),
+                conf_upper: effects.conf_upper().to_vec(),
+            })
         })
     }
 
@@ -500,8 +506,12 @@ impl TobitResult {
     /// `lower`/`upper` in the returned `CensoringFitCheckResult` are `None` when the
     /// corresponding `TobitOptions.lower`/`upper` was `None` (that direction has no
     /// censoring).
-    fn censoring_fit_check(&self) -> CensoringFitCheckResult {
-        censoring_fit_check_to_result(self.estimator.censoring_fit_check())
+    fn censoring_fit_check(&self) -> PyResult<CensoringFitCheckResult> {
+        guard(|| {
+            Ok(censoring_fit_check_to_result(
+                self.estimator.censoring_fit_check(),
+            ))
+        })
     }
 }
 

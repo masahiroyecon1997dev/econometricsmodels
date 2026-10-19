@@ -71,7 +71,7 @@ use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
     extract_f64_column, extract_optional_cluster_groups, extract_time_order_ranks,
 };
-use crate::shared::errors::{to_pyerr, unknown_option_value};
+use crate::shared::errors::{guard, to_pyerr, unknown_option_value};
 use crate::shared::mat_conversion::mat_to_vec;
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
@@ -524,16 +524,19 @@ impl IVResult {
     /// F-statistic (`weak_instrument_f_statistics`, computed separately).
     /// Computed the same way for both `estimator="2sls"` and `estimator="gmm"` (module
     /// docstring参照).
-    fn first_stage(&self) -> HashMap<String, OLSResult> {
-        self.first_stage
-            .iter()
-            .map(|(name, estimator)| {
-                (
-                    name.clone(),
-                    ols_estimator_to_result(estimator, self.cov_type.clone()),
-                )
-            })
-            .collect()
+    fn first_stage(&self) -> PyResult<HashMap<String, OLSResult>> {
+        guard(|| {
+            Ok(self
+                .first_stage
+                .iter()
+                .map(|(name, estimator)| {
+                    (
+                        name.clone(),
+                        ols_estimator_to_result(estimator, self.cov_type.clone()),
+                    )
+                })
+                .collect())
+        })
     }
 }
 

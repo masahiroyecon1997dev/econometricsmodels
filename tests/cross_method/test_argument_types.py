@@ -19,10 +19,17 @@ from econometricsmodels import (
     RE,
     WLS,
     FEOptions,
+    IVOptions,
     Logit,
+    LogitOptions,
+    OLSOptions,
     Probit,
+    ProbitOptions,
+    REOptions,
     Tobit,
+    TobitOptions,
     ValidationError,
+    WLSOptions,
 )
 
 
@@ -266,3 +273,66 @@ def test_list_arguments_still_work(df):
         == N
     )
     assert RE(df, y="y", x=["x1"], entity="entity").fit().n_obs == N
+
+
+# ── options ──────────────────────────────────────────────────────────
+
+# 手法ごとに、`options`を差し替えて構築する関数と、その手法の`*Options`クラス。
+OPTIONS_METHODS = {
+    "OLS": (lambda d, o: OLS(d, "y", ["x1"], options=o), OLSOptions),
+    "WLS": (lambda d, o: WLS(d, "y", ["x1"], "w", options=o), WLSOptions),
+    "Logit": (lambda d, o: Logit(d, "y01", ["x1"], options=o), LogitOptions),
+    "Probit": (
+        lambda d, o: Probit(d, "y01", ["x1"], options=o),
+        ProbitOptions,
+    ),
+    "Tobit": (lambda d, o: Tobit(d, "y", ["x1"], options=o), TobitOptions),
+    "IV": (
+        lambda d, o: IV(d, "y", ["x2"], ["x1"], ["z"], options=o),
+        IVOptions,
+    ),
+    "FE": (lambda d, o: FE(d, "y", ["x1"], "entity", options=o), FEOptions),
+    "RE": (lambda d, o: RE(d, "y", ["x1"], "entity", options=o), REOptions),
+}
+
+
+@pytest.mark.parametrize("method", list(OPTIONS_METHODS))
+@pytest.mark.parametrize(
+    ("value", "got"),
+    [(3, "int"), ("hc1", "str"), ({"cov_type": "hc1"}, "dict")],
+    ids=["int", "str", "dict"],
+)
+def test_options_must_be_the_options_class_of_the_method(
+    df, method, value, got
+):
+    """`options`が手法の`*Options`でないと、引数名・期待するクラス・実際の型を含む
+    `TypeError`になる（構築は成功し、`fit()`が送出する）。
+    """
+    build, options_cls = OPTIONS_METHODS[method]
+
+    _assert_type_error_at_fit(
+        lambda: build(df, value),
+        escaped(
+            msgs.OPTIONS_NOT_INSTANCE,
+            name="options",
+            class_name=options_cls.__name__,
+            type_name=got,
+        ),
+    )
+
+
+@pytest.mark.parametrize("method", list(OPTIONS_METHODS))
+def test_options_of_another_method_is_rejected(df, method):
+    """別の手法の`*Options`（`OLS`に`WLSOptions`等）は、型の名前だけで示して拒否する。"""
+    build, options_cls = OPTIONS_METHODS[method]
+    other = WLSOptions() if options_cls is not WLSOptions else OLSOptions()
+
+    _assert_type_error_at_fit(
+        lambda: build(df, other),
+        escaped(
+            msgs.OPTIONS_NOT_INSTANCE,
+            name="options",
+            class_name=options_cls.__name__,
+            type_name=type(other).__name__,
+        ),
+    )

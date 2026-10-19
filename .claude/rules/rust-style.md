@@ -74,7 +74,7 @@ Issue番号・内部管理ドキュメント（`docs/planning/specs/`配下の�
 - **Python側の例外はカテゴリ別に分ける**（全て`PyValueError`にまとめない）。`engine_pybind/src/shared/errors.rs`の`#[pyclass]`で、次の2クラスを定義する（`module = "econometricsmodels._lib"`）。どちらに属するかは**カタログの`code`ごとに決まる**。
   - `ValidationError`: 入力・パラメータが不正（欠損値、観測数不足、クラスター数不足、`confidence_level`の範囲外等）。Python側の`ValueError`を継承させ、素の`except ValueError`でも捕まえられるようにする。
   - `ComputationError`: 計算過程で発覚した問題（特異行列、収束しない等）。Python側の`RuntimeError`を継承させる。
-  - 引数・オプションの**型**の誤りは構造化せず、組み込みの`TypeError`にする（`column_extraction.rs`・`option_values.rs`が作る文面は、引数名を引用符で囲まず`{argument} must be a ..., got {type}.`の形にする。`options`のクラス違い・未知のキーワードなど、PyO3が自動生成する`TypeError`は対象外）。
+  - 引数・オプションの**型**の誤りは構造化せず、組み込みの`TypeError`にする（`column_extraction.rs`・`option_values.rs`が作る文面は、引数名を引用符で囲まず`{argument} must be a ..., got {type}.`の形にする。`options`は`extract_options`で取り出し、`options must be an instance of OLSOptions, got WLSOptions.`の形にする。未知のキーワード引数など、Python本来の`TypeError`は対象外）。
   - メモリ不足等は専用の例外クラスを設けない（Rust/Pythonのメモリ確保失敗は通常このレイヤーで綺麗に変換できるものではないため）。
 - **例外は構造化する**: `code`（UPPER_SNAKE_CASE）・`message`・`hint`・`params`を持つ。文面は`engine/src/shared/error_catalog.rs`の`CATALOG`（`code`ごとのクラス・`params`の型・`message`/`hint`のテンプレート）が正本で、手で保守する。文面の規則（英語のみ・記号を使わず単語で書く・`hint`は機械的な対処だけ等）は`error_catalog.rs`のテストが強制する。エラー型にはカタログを直接書かず、`engine::shared::error::ErrorInfo::report()`で`ErrorReport`（`code`＋`params`）を返す。
 - **エラーを足す・変えるとき**:

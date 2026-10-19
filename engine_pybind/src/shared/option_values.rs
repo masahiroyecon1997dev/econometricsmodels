@@ -17,11 +17,34 @@
 //! setterは標準の抽出を使うため）。メッセージに引数名を含めるため、フィールドごとの
 //! 名前付きラッパー（`*_arg`）を`arg_extractors!`で生成している。
 
+use pyo3::PyClass;
 use pyo3::exceptions::{PyOverflowError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::PyBool;
 
 use super::column_extraction::{extract_column_name, type_name_of};
+
+/// 手法の`*Options`オブジェクト（`OLSOptions`等）を取り出す。
+///
+/// 別の手法の`*Options`や`int`等を渡す誤りは、PyO3の自動の抽出に任せると引数名を含まない
+/// メッセージになるため、他の引数と同じ形式の`TypeError`にする（`#[pyfunction]`の引数型を
+/// `&Bound<PyAny>`にしてこの関数で取り出す。`extract_dataframe`と同じ構成）。
+///
+/// # Errors
+/// `T`のインスタンスでなければ`TypeError`（引数名・期待するクラス・実際の型を含む）。
+pub fn extract_options<T>(ob: &Bound<'_, PyAny>, name: &str) -> PyResult<T>
+where
+    T: PyClass + Clone,
+{
+    match ob.cast::<T>() {
+        Ok(options) => Ok(options.borrow().clone()),
+        Err(_) => Err(PyTypeError::new_err(format!(
+            "{name} must be an instance of {}, got {}.",
+            <T as PyClass>::NAME,
+            type_name_of(ob)
+        ))),
+    }
+}
 
 /// `ob`が真偽値（Pythonの`bool`、またはNumPyの`numpy.bool_`）なら`TypeError`にする。
 ///

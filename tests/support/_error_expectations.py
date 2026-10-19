@@ -78,6 +78,9 @@ COLUMN_LIST_ELEMENT_NOT_STR = (
 OPTION_NOT_INT = "{name} must be an int, got {type_name}."
 OPTION_NOT_REAL = "{name} must be a real number, got {type_name}."
 OPTION_NOT_STR = "{name} must be a str, got {type_name}."
+OPTIONS_NOT_INSTANCE = (
+    "{name} must be an instance of {class_name}, got {type_name}."
+)
 
 # ── 受け付ける値の一覧（`allowed`の期待値） ──
 

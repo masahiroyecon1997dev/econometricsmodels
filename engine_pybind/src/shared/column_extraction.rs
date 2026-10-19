@@ -101,12 +101,16 @@ fn is_pandas_dataframe_name(type_name: &str) -> bool {
 /// `ob`の型の完全修飾名（`str`・`numpy.ndarray`等）。エラーメッセージ用。
 ///
 /// polarsの型は内部のモジュール経路（`polars.series.series.Series`）を隠し、クラス名
-/// （`Series`）で示す。
+/// （`Series`）で示す。本パッケージの型（`WLSOptions`等）も同様。
 pub(crate) fn type_name_of(ob: &Bound<'_, PyAny>) -> String {
     let Ok(class) = ob.get_type().fully_qualified_name() else {
         return "unknown type".to_string();
     };
     let name = class.to_string_lossy();
+    // 本パッケージの型（`*Options`等）は内部のモジュール（`econometricsmodels._lib`）を隠す。
+    if let Some(rest) = name.strip_prefix("econometricsmodels._lib.") {
+        return rest.to_string();
+    }
     match name.strip_prefix("polars.") {
         Some(rest) => rest.rsplit('.').next().unwrap_or(rest).to_string(),
         None => name.into_owned(),

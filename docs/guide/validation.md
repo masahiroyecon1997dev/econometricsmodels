@@ -65,7 +65,7 @@ The exception class and the `code` are the stable interface. Every exception has
 
 The boundary is simple in principle: if the problem is visible without doing matrix algebra, it is a `ValidationError`, and if it only shows up while computing, it is a `ComputationError`. Some conditions have been moved from the second class to the first once they turned out to be decidable up front, for example too few clusters for a joint test. Where a case sits close to the boundary, it is listed below under the class that is raised today.
 
-A wrong argument *type*, as opposed to a wrong value, raises the built-in `TypeError`, not `ValidationError`, following the Python convention. The message says which type was expected and which type it got: passing a pandas DataFrame or a `polars.LazyFrame` as `data`, passing `x="x1"` instead of `x=["x1"]`, a `bool` or a non-integer for an integer option such as `hac_lags`, or an options object of the wrong class are all `TypeError`. An unknown option name is a `TypeError` as well. The types each argument accepts are listed in [Accepted data](accepted-data.md#argument-types).
+A wrong argument *type*, as opposed to a wrong value, raises the built-in `TypeError`, not `ValidationError`, following the Python convention. The message names the argument, the type it expected and the type it got: passing a pandas DataFrame or a `polars.LazyFrame` as `data`, passing `x="x1"` instead of `x=["x1"]`, a `bool` or a non-integer for an integer option such as `hac_lags`, or an options object of the wrong class are all `TypeError`. An unknown option name is a `TypeError` as well. The types each argument accepts are listed in [Accepted data](accepted-data.md#argument-types).
 
 ## When `ValidationError` is raised
 

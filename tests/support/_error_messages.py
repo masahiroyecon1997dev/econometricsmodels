@@ -77,11 +77,17 @@ def fully_qualified_type_name(obj: object) -> str:
 # を渡す。`type_name`はPythonオブジェクトの完全修飾クラス名
 # （`type(obj).__module__ + "." + type(obj).__qualname__`相当）。
 NOT_A_POLARS_DATAFRAME = (
-    "'{param_name}' must be a polars.DataFrame, got {type_name}"
+    "{param_name} must be a polars.DataFrame, got {type_name}."
 )
-# `polars.LazyFrame`を渡した場合は、`NOT_A_POLARS_DATAFRAME`に`.collect()`の案内が付く。
+# pandasの`DataFrame`は`{type_name}`を使わず、変換方法の案内が付く。
+NOT_A_POLARS_DATAFRAME_PANDAS = (
+    "{param_name} must be a polars.DataFrame, got pandas.DataFrame. "
+    "Convert it with polars.from_pandas(df)."
+)
+# `polars.LazyFrame`には`.collect()`の案内が付く。
 NOT_A_POLARS_DATAFRAME_LAZY = (
-    NOT_A_POLARS_DATAFRAME + "; call .collect() first"
+    "{param_name} must be a polars.DataFrame, got LazyFrame. "
+    "Call .collect() first."
 )
 
 # ── 複数系統が使う（系統固有の節に由来するが、系統をまたいで共有） ──

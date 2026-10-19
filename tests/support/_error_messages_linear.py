@@ -13,10 +13,10 @@ ALLOWED_DIAGNOSTIC_STATISTICS = ["lm", "f"]
 
 # Breusch-Pagan検定。`variables`の型の誤りは`TypeError`（`extract_column_list`）。
 VARIABLES_NOT_A_LIST = (
-    "'variables' must be a list of column names (e.g. variables=[\"x1\"]), "
-    "got {type_name}"
+    "variables must be a list of column names, got {type_name}. "
+    'Pass a list, for example variables=["x1"].'
 )
 
 VARIABLES_ELEMENT_NOT_STR = (
-    "'variables[{index}]' must be a str column name, got {type_name}"
+    "variables[{index}] must be a str column name, got {type_name}."
 )

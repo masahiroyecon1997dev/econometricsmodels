@@ -29,7 +29,6 @@ from econometricsmodels import (
     Logit,
     Probit,
     Tobit,
-    ValidationError,
 )
 
 
@@ -58,16 +57,15 @@ def test_lazyframe_data_raises_with_collect_hint_for_every_method(
     frame, method
 ):
     """`LazyFrame`は全手法で、内部実装が漏れたメッセージではなく`.collect()`の案内付きの
-    `ValidationError`になる。
+    `TypeError`になる。
     """
     lazy = frame.lazy()
 
     with pytest.raises(
-        ValidationError,
+        TypeError,
         match=escaped(
             msgs.NOT_A_POLARS_DATAFRAME_LAZY,
             param_name="data",
-            type_name=msgs.fully_qualified_type_name(lazy),
         ),
     ):
         FITS[method](lazy)
@@ -78,7 +76,7 @@ def test_series_data_raises_for_every_method(frame, method):
     series = frame["y"]
 
     with pytest.raises(
-        ValidationError,
+        TypeError,
         match=escaped(
             msgs.NOT_A_POLARS_DATAFRAME,
             param_name="data",
@@ -128,11 +126,10 @@ def test_lazyframe_new_data_raises_with_collect_hint(frame, method, path):
     lazy = _new_data().lazy()
 
     with pytest.raises(
-        ValidationError,
+        TypeError,
         match=escaped(
             msgs.NOT_A_POLARS_DATAFRAME_LAZY,
             param_name="new_data",
-            type_name=msgs.fully_qualified_type_name(lazy),
         ),
     ):
         _call(result, path, lazy)
@@ -145,7 +142,7 @@ def test_series_new_data_raises(frame, method, path):
     series = pl.Series("x1", [0.5, -0.2])
 
     with pytest.raises(
-        ValidationError,
+        TypeError,
         match=escaped(
             msgs.NOT_A_POLARS_DATAFRAME,
             param_name="new_data",

@@ -101,13 +101,13 @@ def x_method(request):
 
 def _msg_list(name: str, got: str) -> str:
     return re.escape(
-        f"'{name}' must be a list of column names (e.g. {name}=[\"x1\"]), "
-        f"got {got}"
+        f"{name} must be a list of column names, got {got}. "
+        f'Pass a list, for example {name}=["x1"].'
     )
 
 
 def _msg_name(name: str, got: str) -> str:
-    return re.escape(f"'{name}' must be a str column name, got {got}")
+    return re.escape(f"{name} must be a str column name, got {got}.")
 
 
 def _assert_type_error_at_fit(build, match):
@@ -162,7 +162,7 @@ def test_x_elements_must_be_str(df, x_method, value, position, got):
     _assert_type_error_at_fit(
         lambda: builder(df, x=value),
         re.escape(
-            f"'{arg_name}[{position}]' must be a str column name, got {got}"
+            f"{arg_name}[{position}] must be a str column name, got {got}."
         ),
     )
 
@@ -235,9 +235,7 @@ def test_iv_column_lists_must_be_lists(df, name, value, got):
 def test_iv_column_list_elements_must_be_str(df, name, value, position, got):
     _assert_type_error_at_fit(
         lambda: _build_iv(df, **{name: value}),
-        re.escape(
-            f"'{name}[{position}]' must be a str column name, got {got}"
-        ),
+        re.escape(f"{name}[{position}] must be a str column name, got {got}."),
     )
 
 

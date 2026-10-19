@@ -33,7 +33,7 @@ fn reject_bool(ob: &Bound<'_, PyAny>, name: &str, expected: &str) -> PyResult<()
     let type_name = type_name_of(ob);
     if ob.is_instance_of::<PyBool>() || matches!(type_name.as_str(), "numpy.bool" | "numpy.bool_") {
         return Err(PyTypeError::new_err(format!(
-            "'{name}' must be {expected}, got {type_name}"
+            "{name} must be {expected}, got {type_name}."
         )));
     }
     Ok(())
@@ -57,7 +57,7 @@ pub fn extract_strict_int(ob: &Bound<'_, PyAny>, name: &str) -> PyResult<i64> {
             }
         }
         Err(_) => Err(PyTypeError::new_err(format!(
-            "'{name}' must be an int, got {}",
+            "{name} must be an int, got {}.",
             type_name_of(ob)
         ))),
     }
@@ -80,7 +80,7 @@ pub fn extract_strict_float(ob: &Bound<'_, PyAny>, name: &str) -> PyResult<f64> 
             }
         }
         Err(_) => Err(PyTypeError::new_err(format!(
-            "'{name}' must be a real number, got {}",
+            "{name} must be a real number, got {}.",
             type_name_of(ob)
         ))),
     }
@@ -110,7 +110,7 @@ pub fn extract_strict_opt_float(ob: &Bound<'_, PyAny>, name: &str) -> PyResult<O
 /// `str`でなければ`TypeError`（引数名・実際の型を含む）。
 pub fn extract_strict_text(ob: &Bound<'_, PyAny>, name: &str) -> PyResult<String> {
     ob.extract::<String>().map_err(|_| {
-        PyTypeError::new_err(format!("'{name}' must be a str, got {}", type_name_of(ob)))
+        PyTypeError::new_err(format!("{name} must be a str, got {}.", type_name_of(ob)))
     })
 }
 

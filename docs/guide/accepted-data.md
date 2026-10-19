@@ -6,7 +6,7 @@ This page describes what kind of data and arguments the estimators accept: the i
 
 The data must be an eager `polars.DataFrame`. Nothing else is accepted: not pandas, not a `polars.LazyFrame`, not a `polars.Series`, not a dictionary or a NumPy array.
 
-- A `LazyFrame` raises a `ValidationError` that tells you to call `.collect()` first.
+- Anything else raises `TypeError` (see [Argument types](#argument-types)). The message for a pandas DataFrame shows how to convert it with `polars.from_pandas(df)`, and the message for a `LazyFrame` tells you to call `.collect()` first.
 - Only the columns you name are read. Every other column is ignored, whatever its dtype, including nested columns (`List`, `Array`, `Struct`) and columns of types the estimators cannot use.
 
 ## Column types by role
@@ -67,12 +67,13 @@ Arguments that name columns must have the expected Python type. A mistake in the
 
 | Argument | Type |
 |---|---|
+| `data`, `new_data` | `polars.DataFrame` |
 | `y`, `entity`, `weight` | `str` |
 | `x`, `x_exog`, `x_endog`, `instruments` | `list` of `str` (not a `str`, a tuple, or a `polars.Series`) |
 | `options` | The options class of the method (for example `OLSOptions`), or omitted |
 
 ```python
-# TypeError: 'x' must be a list of column names (e.g. x=["x1"]), got str
+# TypeError: x must be a list of column names, got str. Pass a list, for example x=["x1"].
 OLS(df, y="y", x="x1")
 
 OLS(df, y="y", x=["x1"])  # correct

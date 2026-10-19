@@ -90,7 +90,7 @@ FIELD_IDS = [f"{cls.__name__}.{name}" for cls, name, _ in FIELDS]
 
 def _expected(name: str, kind: str, got: str) -> str:
     article = "an int" if kind == "int" else "a real number"
-    return re.escape(f"'{name}' must be {article}, got {got}")
+    return re.escape(f"{name} must be {article}, got {got}.")
 
 
 # ── コンストラクタ引数（型の誤りと受理） ──────────────────────────────
@@ -568,7 +568,7 @@ def test_numpy_bool_is_rejected_like_bool(cls, name, kind, value):
     通り抜け、`tol=np.True_`が1.0になっていた）。コンストラクタ・属性代入とも。
     """
     article = "an int" if kind == "int" else "a real number"
-    pattern = re.escape(f"'{name}' must be {article}, got numpy.bool")
+    pattern = re.escape(f"{name} must be {article}, got numpy.bool.")
     with pytest.raises(TypeError, match=pattern):
         cls(**{name: value})
 
@@ -647,7 +647,7 @@ STRING_IDS = [f"{c.__name__}.{n}" for c, n, _, _ in STRING_FIELDS]
 
 def _string_message(name: str, kind: str, got: str) -> str:
     noun = "a str column name" if kind == "column" else "a str"
-    return re.escape(f"'{name}' must be {noun}, got {got}")
+    return re.escape(f"{name} must be {noun}, got {got}.")
 
 
 @pytest.mark.parametrize(

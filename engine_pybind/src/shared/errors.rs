@@ -28,9 +28,6 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyString, PyTuple};
 
-/// 移行中の内部限定の`code`。カタログに載せる前の文面（自由文）を包むのに使い、載せ終えたら撤去する。
-const LEGACY_CODE: &str = "LEGACY_MESSAGE";
-
 /// 構造化例外のクラスを1つ生成する。`ValidationError`と`ComputationError`は継承元以外が同じ。
 ///
 /// 属性は`code`・`message`・`hint`（無ければ`None`）・`params`（`dict`）。`str(e)`は`message`と`hint`を空白1つでつないだ全文。
@@ -251,17 +248,6 @@ fn unknown_option_report(option: &'static str, value: &str, allowed: &[&str]) ->
 /// 文字列オプションに受け付けない値が渡された場合の例外（[`unknown_option_report`]）。
 pub(crate) fn unknown_option_value(option: &'static str, value: &str, allowed: &[&str]) -> PyErr {
     report_to_pyerr(&unknown_option_report(option, value, allowed))
-}
-
-/// 移行中: カタログに載せる前の自由文を`ValidationError`にする（`code`は`LEGACY_MESSAGE`）。
-pub(crate) fn legacy_validation_error(message: impl Into<String>) -> PyErr {
-    raise_args(
-        ErrorClass::Validation,
-        LEGACY_CODE,
-        message.into(),
-        None,
-        Vec::new(),
-    )
 }
 
 /// `engine::shared::error::CommonError`をPython例外に変換する。

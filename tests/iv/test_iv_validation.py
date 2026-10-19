@@ -223,7 +223,7 @@ def test_missing_column_raises(iv_dataset, role):
 def test_data_not_polars_raises():
     """`data`にpolars以外のDataFrame（pandas等）を渡すと、内部実装
     （`pyo3-polars`の`get_columns`呼び出し）が漏れた`AttributeError`ではなく
-    `ValidationError`になること（`test_ols_validation.py`と同じ検証。
+    `TypeError`になること（`test_ols_validation.py`と同じ検証。
     `IVResult`自体には`predict()`/`augment()`が無く、`first_stage()`が
     返す`OLSResults`側の検証は`test_ols_validation.py`でカバー済みのため
     `data`のみ確認する）。
@@ -238,11 +238,10 @@ def test_data_not_polars_raises():
         }
     )
     with pytest.raises(
-        ValidationError,
+        TypeError,
         match=escaped(
-            msgs.NOT_A_POLARS_DATAFRAME,
+            msgs.NOT_A_POLARS_DATAFRAME_PANDAS,
             param_name="data",
-            type_name=msgs.fully_qualified_type_name(bad),
         ),
     ):
         IV(

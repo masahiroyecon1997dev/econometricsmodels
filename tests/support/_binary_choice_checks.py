@@ -61,7 +61,7 @@ from _nonlinear_helpers import (
     small_sample_separation_dataset,
     strongly_collinear_binary_dataset,
 )
-from econometricsmodels import ComputationError, ErrorCode, ValidationError
+from econometricsmodels import ComputationError, ErrorCode
 
 from benchmark.common import imbalanced_cluster_groups
 from benchmark.nonlinear.constants import (
@@ -556,11 +556,10 @@ def check_data_not_polars_raises(dataset, estimator_cls):
     """
     bad = pd.DataFrame({"y": [0.0, 1.0, 0.0], "x1": [1.0, 2.0, 3.0]})
     with pytest.raises(
-        ValidationError,
+        TypeError,
         match=escaped(
-            msgs.NOT_A_POLARS_DATAFRAME,
+            msgs.NOT_A_POLARS_DATAFRAME_PANDAS,
             param_name="data",
-            type_name=msgs.fully_qualified_type_name(bad),
         ),
     ):
         estimator_cls(bad, y="y", x=["x1"]).fit()
@@ -568,20 +567,18 @@ def check_data_not_polars_raises(dataset, estimator_cls):
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
     bad_new_data = pd.DataFrame({"x1": [1.0], "x2": [0.5]})
     with pytest.raises(
-        ValidationError,
+        TypeError,
         match=escaped(
-            msgs.NOT_A_POLARS_DATAFRAME,
+            msgs.NOT_A_POLARS_DATAFRAME_PANDAS,
             param_name="new_data",
-            type_name=msgs.fully_qualified_type_name(bad_new_data),
         ),
     ):
         res.predict(bad_new_data)
     with pytest.raises(
-        ValidationError,
+        TypeError,
         match=escaped(
-            msgs.NOT_A_POLARS_DATAFRAME,
+            msgs.NOT_A_POLARS_DATAFRAME_PANDAS,
             param_name="new_data",
-            type_name=msgs.fully_qualified_type_name(bad_new_data),
         ),
     ):
         res.augment(bad_new_data)

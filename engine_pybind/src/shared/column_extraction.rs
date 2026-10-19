@@ -25,7 +25,7 @@ use engine::panel::common::TimeKeys;
 use engine::shared::group_codes::GroupCodes;
 
 use super::column_error::{ColumnExtractionError, ColumnRole, ColumnSource};
-use super::errors::{common_error_to_pyerr, legacy_validation_error};
+use super::errors::{common_error_to_pyerr, internal_error};
 use crate::panel::common::panel_error_to_pyerr;
 
 /// Pythonオブジェクト`ob`をpolars DataFrameとして取り出す。
@@ -34,36 +34,53 @@ use crate::panel::common::panel_error_to_pyerr;
 /// 無条件に呼ぶだけで型検証を行わないため、polars以外のDataFrame（pandas等）を
 /// 渡すと内部実装が漏れた`AttributeError`がそのまま送出されてしまう
 /// （`ob.call_method0("get_columns")`がpandas.DataFrameには存在しないメソッドで
-/// 失敗するため）。この関数を経由することで、その失敗を`ValidationError`に
+/// 失敗するため）。この関数を経由することで、その失敗を`TypeError`に
 /// 変換して隠蔽する。`data`/`new_data`いずれのパラメータもこの関数を通す
 /// （`#[pyfunction]`/`#[pymethods]`の引数型を`PyDataFrame`ではなく
 /// `Bound<'_, PyAny>`にし、関数本体の先頭でこれを呼ぶ設計にする必要がある。
 /// pyo3が引数抽出をパラメータの型から自動生成する関係上、`PyDataFrame`を
 /// 引数型のまま使うと関数本体に入る前に`FromPyObject`が走ってしまい、
 /// 本体内でこの変換を挟めないため）。
+///
+/// # Errors
+/// - `polars.DataFrame`でなければ`TypeError`（引数名・実際の型を含む。pandasと`LazyFrame`には
+///   変換・実行の方法を添える）
+/// - 本物の`polars.DataFrame`なのに抽出が失敗した場合は`INTERNAL_ERROR`
 pub fn extract_dataframe(ob: &Bound<'_, PyAny>, param_name: &str) -> PyResult<PyDataFrame> {
     ob.extract::<PyDataFrame>().map_err(|err| {
         // 渡されたオブジェクト自体が本物の`polars.DataFrame`なのに抽出が失敗している場合
         // （`pyo3`/`polars`/`pyo3-polars`のバージョンの組み合わせによるABI不整合等、
         // `.claude/rules/rust-style.md`「既知のリスク」参照）は、「polars.DataFrameではない」
-        // という文言が事実に反し診断の妨げになるため、元のエラーを含めた別文言にする。
-        // `LazyFrame`・`Series`等、他のpolarsオブジェクトは通常の「DataFrameではない」扱い
+        // という文言が事実に反し診断の妨げになるため、利用者の入力の誤りではなく内部の
+        // 不整合として扱い、元のエラーを`detail`に残す。`LazyFrame`・`Series`等、他の
+        // polarsオブジェクトは通常の「DataFrameではない」扱い
         // （`polars.`で始まる型名で一括りにすると、内部実装が漏れたメッセージになる）。
         if is_instance_of_polars(ob, "DataFrame") {
-            return legacy_validation_error(format!(
-                "failed to read '{param_name}' as a polars.DataFrame: {err}"
+            return internal_error(format!(
+                "failed to read {param_name} as a polars.DataFrame: {err}"
             ));
         }
         let type_name = type_name_of(ob);
-        let hint = if is_instance_of_polars(ob, "LazyFrame") {
-            "; call .collect() first"
+        let (shown_type, advice) = if is_instance_of_polars(ob, "LazyFrame") {
+            ("LazyFrame".to_string(), " Call .collect() first.")
+        } else if is_pandas_dataframe(&type_name) {
+            (
+                "pandas.DataFrame".to_string(),
+                " Convert it with polars.from_pandas(df).",
+            )
         } else {
-            ""
+            (type_name, "")
         };
-        legacy_validation_error(format!(
-            "'{param_name}' must be a polars.DataFrame, got {type_name}{hint}"
+        PyTypeError::new_err(format!(
+            "{param_name} must be a polars.DataFrame, got {shown_type}.{advice}"
         ))
     })
+}
+
+/// 完全修飾名`type_name`がpandasの`DataFrame`（サブクラスは対象外）か。pandasをimportせずに
+/// 型名だけで判定する（pandasは依存に含まれない）。
+fn is_pandas_dataframe(type_name: &str) -> bool {
+    type_name.starts_with("pandas.") && type_name.ends_with(".DataFrame")
 }
 
 /// `ob`の型の完全修飾名（`str`・`pandas.core.frame.DataFrame`等）。エラーメッセージ用。
@@ -85,7 +102,7 @@ pub(crate) fn type_name_of(ob: &Bound<'_, PyAny>) -> String {
 pub fn extract_column_name(ob: &Bound<'_, PyAny>, param_name: &str) -> PyResult<String> {
     ob.extract::<String>().map_err(|_| {
         PyTypeError::new_err(format!(
-            "'{param_name}' must be a str column name, got {}",
+            "{param_name} must be a str column name, got {}.",
             type_name_of(ob)
         ))
     })
@@ -103,7 +120,8 @@ pub fn extract_column_name(ob: &Bound<'_, PyAny>, param_name: &str) -> PyResult<
 pub fn extract_column_list(ob: &Bound<'_, PyAny>, param_name: &str) -> PyResult<Vec<String>> {
     let list = ob.cast::<PyList>().map_err(|_| {
         PyTypeError::new_err(format!(
-            "'{param_name}' must be a list of column names (e.g. {param_name}=[\"x1\"]), got {}",
+            "{param_name} must be a list of column names, got {}. \
+             Pass a list, for example {param_name}=[\"x1\"].",
             type_name_of(ob)
         ))
     })?;
@@ -112,7 +130,7 @@ pub fn extract_column_list(ob: &Bound<'_, PyAny>, param_name: &str) -> PyResult<
         .map(|(i, item)| {
             item.extract::<String>().map_err(|_| {
                 PyTypeError::new_err(format!(
-                    "'{param_name}[{i}]' must be a str column name, got {}",
+                    "{param_name}[{i}] must be a str column name, got {}.",
                     type_name_of(&item)
                 ))
             })
@@ -845,6 +863,15 @@ mod tests {
 
     fn names(values: &[&str]) -> Vec<String> {
         values.iter().map(|v| v.to_string()).collect()
+    }
+
+    #[test]
+    fn is_pandas_dataframe_matches_only_the_pandas_dataframe_class() {
+        assert!(is_pandas_dataframe("pandas.core.frame.DataFrame"));
+        assert!(is_pandas_dataframe("pandas.DataFrame"));
+        assert!(!is_pandas_dataframe("pandas.core.series.Series"));
+        assert!(!is_pandas_dataframe("polars.dataframe.frame.DataFrame"));
+        assert!(!is_pandas_dataframe("dict"));
     }
 
     #[test]

@@ -27,7 +27,6 @@ from _helpers import (
 from econometricsmodels import (
     WLS,
     ErrorCode,
-    ValidationError,
     WLSOptions,
 )
 
@@ -217,7 +216,7 @@ def test_missing_y_column_raises(unit_weight_dataset):
 def test_data_not_polars_raises(unit_weight_dataset):
     """`data`/`new_data`にpolars以外のDataFrame（pandas等）を渡すと、内部実装
     （`pyo3-polars`の`get_columns`呼び出し）が漏れた`AttributeError`ではなく
-    `ValidationError`になること（`test_ols_validation.py`と同じ検証）。
+    `TypeError`になること（`test_ols_validation.py`と同じ検証）。
     """
     bad = pd.DataFrame(
         {
@@ -227,11 +226,10 @@ def test_data_not_polars_raises(unit_weight_dataset):
         }
     )
     with pytest.raises(
-        ValidationError,
+        TypeError,
         match=escaped(
-            msgs.NOT_A_POLARS_DATAFRAME,
+            msgs.NOT_A_POLARS_DATAFRAME_PANDAS,
             param_name="data",
-            type_name=msgs.fully_qualified_type_name(bad),
         ),
     ):
         WLS(bad, y="y", x=["x1"], weight="weight").fit()
@@ -240,20 +238,18 @@ def test_data_not_polars_raises(unit_weight_dataset):
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
     bad_new_data = pd.DataFrame({"x1": [1.0], "x2": [0.5]})
     with pytest.raises(
-        ValidationError,
+        TypeError,
         match=escaped(
-            msgs.NOT_A_POLARS_DATAFRAME,
+            msgs.NOT_A_POLARS_DATAFRAME_PANDAS,
             param_name="new_data",
-            type_name=msgs.fully_qualified_type_name(bad_new_data),
         ),
     ):
         res.predict(bad_new_data)
     with pytest.raises(
-        ValidationError,
+        TypeError,
         match=escaped(
-            msgs.NOT_A_POLARS_DATAFRAME,
+            msgs.NOT_A_POLARS_DATAFRAME_PANDAS,
             param_name="new_data",
-            type_name=msgs.fully_qualified_type_name(bad_new_data),
         ),
     ):
         res.augment(bad_new_data)

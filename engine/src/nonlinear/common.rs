@@ -3293,7 +3293,7 @@ mod tests {
             (
                 MleError::NonConvergence { n_iter: 35 },
                 ErrorCode::NotConverged,
-                "The optimizer did not converge after 35 iterations.",
+                "The optimizer did not converge after 35 iteration(s).",
             ),
             (
                 MleError::SingularHessian,

@@ -3465,7 +3465,7 @@ mod tests {
         let report = err.report();
         assert_eq!(
             report.message(),
-            "Not enough observations: 2 observations for 2 parameters; at least 3 are needed."
+            "Not enough observations: 2 observation(s) for 2 parameter(s); at least 3 are needed."
         );
     }
 

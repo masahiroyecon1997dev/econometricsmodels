@@ -24,6 +24,8 @@
 //! - `InsufficientDkPeriodsForInference`: DK指定時に時点数`t`が同時Wald検定の対象係数の
 //!   数`q`以下（`rank(S) ≤ t-1`のため検定の部分行列が構造的に特異。
 //!   `CommonError::InsufficientClustersForInference`のDK版）
+//! - `InStage`: 別のバリアントを、起きた計算の文脈（`stage`）つきで包む（REの内部FE推定、
+//!   FE・REのDK時点数不足の全体F検定）
 //! - `DegenerateDkTwoPeriods`/`DegenerateClusterTwoGroups`: FEで時点数（DK）・クラスター数が
 //!   2かつ吸収したFE次元（entity、2-wayではtimeも）のいずれかで全水準が2グループに1観測ずつの
 //!   とき、within変換によりスコアが恒等的にゼロになり共分散がゼロに退化する
@@ -376,14 +378,27 @@ pub enum PanelError {
     ///
     /// 補助回帰のランク落ち、クラスター数`G`が補助回帰の傾き係数の数`2k`以下
     /// （`CommonError::InsufficientClustersForInference`）、DK・ロバスト共分散部分行列の
-    /// ほぼ特異性（`CommonError::NearSingularMatrix`）等。DKの時点数不足（`T <= k`）は
-    /// これに包まず、補助回帰の前に`InsufficientDkPeriodsForInference`で弾く。ハウスマン検定はRE本体の付随的な
+    /// ほぼ特異性（`CommonError::NearSingularMatrix`）等。DKの時点数不足（`T <= q`、`q`はRE本体の
+    /// 傾き係数の数）はこれに包まず、補助回帰の前に`InsufficientDkPeriodsForInference`で弾く。ハウスマン検定はRE本体の付随的な
     /// 診断情報だが、計算自体が成立しない場合は`None`で隠さずエラーにする
     /// （設計行列の多重共線性でエラーにするのと同じ方針）。
     #[error("{}", self.catalog_message())]
     HausmanTestFailed {
         #[source]
         source: LeastSquaresError,
+    },
+
+    /// `source`のエラーを、起きた計算の文脈（`stage`）つきで報告する。
+    ///
+    /// 同じ検証や計算が複数の文脈で呼ばれ、文面だけでは何の計算で失敗したか分からないときに使う
+    /// （REの分散成分の推定に使う内部FEの自由度不足、FE・REの全体F検定のDK時点数不足）。
+    /// `report()`は`source`の`code`に`stage`を付ける（`stage`を付けてよい`code`のみ。`source`が
+    /// すでに別の`stage`を持つときは置き換える）。
+    #[error("{}", self.catalog_message())]
+    InStage {
+        stage: Stage,
+        #[source]
+        source: Box<PanelError>,
     },
 }
 
@@ -413,6 +428,7 @@ impl ErrorInfo for PanelError {
             Self::HausmanTestFailed { source } => {
                 staged_report(source.report(), Stage::HausmanRegression)
             }
+            Self::InStage { stage, source } => staged_report(source.report(), stage.clone()),
             Self::IdentifierDimensionMismatch {
                 dimension,
                 y_rows,
@@ -498,6 +514,18 @@ impl ErrorInfo for PanelError {
 }
 
 impl PanelError {
+    /// このエラーを、起きた計算の文脈（`stage`）つきで包む（[`PanelError::InStage`]）。
+    pub(crate) fn in_stage(self, stage: Stage) -> Self {
+        debug_assert!(
+            self.report().code().spec().stage_allowed,
+            "the code of {self:?} does not carry a stage"
+        );
+        Self::InStage {
+            stage,
+            source: Box::new(self),
+        }
+    }
+
     /// `Display`が使う`message`。
     fn catalog_message(&self) -> String {
         self.report().message()
@@ -1111,7 +1139,7 @@ mod tests {
                     k: 5,
                 },
                 ErrorCode::InsufficientDegreesOfFreedom,
-                "Not enough observations for the panel model: 10 observations, but 5 coefficients and 5 fixed-effect parameters (entity effects, plus time effects in a two-way model) must be estimated; at least 11 are needed.",
+                "Not enough observations for the panel model: 10 observation(s), but 5 coefficient(s) and 5 fixed-effect parameter(s) (entity effects, plus time effects in a two-way model) must be estimated; at least 11 are needed.",
             ),
             (
                 PanelError::InsufficientDegreesOfFreedom {
@@ -1121,7 +1149,7 @@ mod tests {
                     k: 1,
                 },
                 ErrorCode::InsufficientDegreesOfFreedom,
-                "Not enough observations for the panel model: 10 observations, but 1 coefficients and 6 fixed-effect parameters (entity effects, plus time effects in a two-way model) must be estimated; at least 8 are needed.",
+                "Not enough observations for the panel model: 10 observation(s), but 1 coefficient(s) and 6 fixed-effect parameter(s) (entity effects, plus time effects in a two-way model) must be estimated; at least 8 are needed.",
             ),
             (
                 PanelError::SingletonGroup {
@@ -1147,7 +1175,7 @@ mod tests {
                     expected: 6,
                 },
                 ErrorCode::PanelNotBalancedForTwoWay,
-                "Two-way estimation requires a balanced panel: 5 observations for 2 entities and 3 periods, but 6 are expected.",
+                "Two-way estimation requires a balanced panel: 5 observation(s) for 2 entities and 3 periods, but 6 are expected.",
             ),
             (
                 PanelError::ZeroVarianceAfterDemeaning {
@@ -1285,6 +1313,40 @@ mod tests {
     fn panel_dimension_displays_lowercase_name() {
         assert_eq!(PanelDimension::Entity.to_string(), "entity");
         assert_eq!(PanelDimension::Time.to_string(), "time");
+    }
+
+    #[test]
+    fn in_stage_adds_a_stage_to_the_wrapped_code_and_replaces_an_inner_stage() {
+        let dof = PanelError::InsufficientDegreesOfFreedom {
+            n_obs: 10,
+            n_entities: 5,
+            n_periods: None,
+            k: 5,
+        };
+        let wrapped = dof.in_stage(Stage::VarianceComponentWithinRegression);
+        let report = wrapped.report();
+        assert_eq!(report.code(), ErrorCode::InsufficientDegreesOfFreedom);
+        assert_eq!(
+            report.stage(),
+            Some(&Stage::VarianceComponentWithinRegression)
+        );
+        assert!(report.validate().is_ok());
+        assert_eq!(wrapped.to_string(), report.message());
+        assert!(
+            wrapped
+                .to_string()
+                .starts_with("In the within regression used to estimate a variance component: ")
+        );
+        // 内側の`stage`は外側に置き換わる。
+        let inner = PanelError::WithinRegressionFailed {
+            source: LeastSquaresError::SingularMatrix,
+        };
+        assert_eq!(inner.report().stage(), Some(&Stage::WithinRegression));
+        let outer = inner.in_stage(Stage::VarianceComponentWithinRegression);
+        assert_eq!(
+            outer.report().stage(),
+            Some(&Stage::VarianceComponentWithinRegression)
+        );
     }
 
     #[test]

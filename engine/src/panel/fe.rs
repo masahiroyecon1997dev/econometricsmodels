@@ -391,6 +391,7 @@ use crate::panel::common::{
 use crate::panel::re::{ReEffects, ReInput};
 use crate::shared::covariance::leverages;
 use crate::shared::error::{ClusterSetting, CommonError};
+use crate::shared::error_catalog::Stage;
 use crate::shared::goodness_of_fit::gaussian_goodness_of_fit;
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference;
@@ -937,7 +938,8 @@ impl FeEstimator {
                 let t_periods = time_codes.n_groups();
                 let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
                 dk_bandwidth_used = Some(bw);
-                validate_dk_periods_cover_tested_coefficients(t_periods, k)?;
+                validate_dk_periods_cover_tested_coefficients(t_periods, k)
+                    .map_err(|e| e.in_stage(Stage::OverallFTest))?;
                 // 直前の`t_periods > k`により、ここで`t_periods=2`なら`k`は高々1。
                 if k >= 1
                     && t_periods == 2
@@ -4312,6 +4314,7 @@ mod tests {
         assert_eq!(
             result.unwrap_err(),
             PanelError::InsufficientDkPeriodsForInference { t_periods: 3, q: 3 }
+                .in_stage(Stage::OverallFTest)
         );
     }
 
@@ -4350,6 +4353,7 @@ mod tests {
         assert_eq!(
             result.unwrap_err(),
             PanelError::InsufficientDkPeriodsForInference { t_periods: 3, q: 3 }
+                .in_stage(Stage::OverallFTest)
         );
     }
 

@@ -935,7 +935,7 @@ mod tests {
         assert_eq!(err.to_string(), report.message());
         assert_eq!(
             report.message(),
-            "The optimizer did not converge after 3 iterations."
+            "The optimizer did not converge after 3 iteration(s)."
         );
         assert!(report.full_text().contains("gmm_max_iter"));
     }
@@ -971,7 +971,7 @@ mod tests {
             (
                 IvError::InsufficientObservationsForFirstStage { n: 4, l: 4 },
                 ErrorCode::InsufficientObservationsForFirstStage,
-                "The first stage needs more observations than its 4 coefficients (instruments, exogenous regressors and the intercept): 4 observations, at least 5 needed.",
+                "The first stage needs more observations than its 4 coefficient(s) (instruments, exogenous regressors and the intercept): 4 observation(s), at least 5 needed.",
             ),
             (
                 IvError::InsufficientClustersForWeightMatrix {
@@ -980,7 +980,7 @@ mod tests {
                     min_clusters: 3,
                 },
                 ErrorCode::GmmWeightClusterCountTooSmall,
-                "gmm_weight_type=\"cluster\" needs at least 3 clusters for 3 instruments (including exogenous regressors), but the cluster column has 2.",
+                "gmm_weight_type=\"cluster\" needs at least 3 clusters for 3 instrument(s) (including exogenous regressors), but the cluster column has 2.",
             ),
         ];
         for (err, code, message) in cases {

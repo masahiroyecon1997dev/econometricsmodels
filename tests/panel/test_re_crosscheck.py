@@ -584,6 +584,7 @@ def test_hausman_dk_too_few_periods_raises():
         n_periods=2,
         n_coefficients=2,
         min_periods=3,
+        stage="OVERALL_F_TEST",
     ):
         RE(
             df,

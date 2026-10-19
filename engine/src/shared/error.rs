@@ -318,7 +318,7 @@ mod tests {
             (
                 CommonError::InsufficientObservations { n: 2, k: 3 },
                 ErrorCode::InsufficientObservations,
-                "Not enough observations: 2 observations for 3 parameters; at least 4 are needed.",
+                "Not enough observations: 2 observation(s) for 3 parameter(s); at least 4 are needed.",
             ),
             (
                 CommonError::MissingClusterColumn {

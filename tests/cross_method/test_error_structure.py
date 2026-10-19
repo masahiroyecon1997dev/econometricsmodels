@@ -286,7 +286,7 @@ def test_param_types_use_the_documented_vocabulary(catalog: dict) -> None:
 
 def test_stage_table_and_test_labels(catalog: dict) -> None:
     names = [s["name"] for s in catalog["stages"]]
-    assert len(names) == len(set(names)) == 11
+    assert len(names) == len(set(names)) == 12
     by_name = {s["name"]: s for s in catalog["stages"]}
     assert by_name["FIRST_STAGE"]["params"] == ["endog_name"]
     assert "{endog_name}" in by_name["FIRST_STAGE"]["prefix"]

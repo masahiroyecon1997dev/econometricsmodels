@@ -179,6 +179,7 @@ def test_two_way_hausman_dk_periods_must_exceed_the_slopes(panel):
         n_periods=3,
         n_coefficients=3,
         min_periods=4,
+        stage="OVERALL_F_TEST",
     ):
         _fit(panel, options, x=("x1", "xi", "xt"))
     res = _fit(panel, options, x=("x1", "xi"))
@@ -512,12 +513,12 @@ def _baseline() -> pl.DataFrame:
         (
             {"x3": 2 * pl.col("x1") + 3 * pl.col("x2")},
             ("x1", "x2", "x3"),
-            "WITHIN_REGRESSION",
+            "VARIANCE_COMPONENT_WITHIN_REGRESSION",
         ),
         (
             {"x3": 1e8 * pl.col("x1")},
             ("x1", "x3"),
-            "WITHIN_REGRESSION",
+            "VARIANCE_COMPONENT_WITHIN_REGRESSION",
         ),
         # 個体間でのみ変わる列同士・時点間でのみ変わる列同士の共線は、between回帰では後ろの列が
         # 別名として落ちて進み、全列を残す最終回帰が検出する。
@@ -535,7 +536,7 @@ def _baseline() -> pl.DataFrame:
         (
             {"x1": 1e6 * pl.col("x1"), "x2": 1e-3 * pl.col("x2")},
             ("x1", "x2"),
-            "OVERALL_F_TEST",
+            "VARIANCE_COMPONENT_WITHIN_REGRESSION",
         ),
     ],
     ids=[
@@ -549,11 +550,11 @@ def _baseline() -> pl.DataFrame:
 def test_two_way_computation_error_paths(columns, x, stage):
     """2-wayは分散成分に内部の2-way FEと2本のbetween回帰を使うため、失敗する経路が
     1-wayと別になる。どれも`ComputationError`で、`stage`が失敗した回帰を示す
-    （共線は`DESIGN_MATRIX_SINGULAR`、スケール差は全体F検定の
+    （共線は`DESIGN_MATRIX_SINGULAR`、スケール差は内部FEの全体F検定で起きる
     `MATRIX_NEAR_SINGULAR`）。between回帰は別名の列を落とすため、最終回帰が
     特異性を検出する。"""
     df = _baseline().with_columns(**columns)
-    if stage == "OVERALL_F_TEST":
+    if x == ("x1", "x2"):
         expected = {
             "code": ErrorCode.MATRIX_NEAR_SINGULAR,
             "matrix": "COEFFICIENT_COVARIANCE",
@@ -589,6 +590,7 @@ def test_two_way_with_too_few_degrees_of_freedom_for_the_internal_fe_raises(
         n_params=1,
         n_effects=3,
         min_obs=5,
+        stage="VARIANCE_COMPONENT_WITHIN_REGRESSION",
     ):
         _fit(df, REOptions(time="time"), x=("x1",))
 

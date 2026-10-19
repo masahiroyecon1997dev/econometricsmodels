@@ -426,7 +426,8 @@ FEの`r_squared_between`/`r_squared_overall`をそのまま流用できず、RE�
   同じ方針）。ロバスト共分散が構造的に特異になる場合が典型で、`cluster`ではクラスター数`G`が
   補助回帰の傾き係数の数（`X*`の全傾きと、別名を除いた`X̃`の和。時間不変の列も別名も無ければ`2k`）以下
   （`ValidationError`、OLSの`InsufficientClustersForInference`と
-  同じ事前検証）、`dk`では時点数`T`が検定対象の`k`個以下（`T <= k`、`ValidationError`。
+  同じ事前検証）、`dk`では時点数`T`がRE本体の傾き係数の数`q`（時間不変の列も数える。ハウスマン検定の対象より
+  多いか同数）以下（`T <= q`、`ValidationError`、全体F検定の条件。
   DK共分散のrankは`T-1`以下のため。FEのF検定と同じ事前検証
   `PanelError::InsufficientDkPeriodsForInference`）。RE本体は成功する入力でも、`cov_type="cluster"`（既定）で
   `G <= 2k`の場合はfitが失敗するため、`cov_type="classical"`等を指定するか

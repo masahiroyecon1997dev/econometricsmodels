@@ -296,6 +296,7 @@ demeanしたR²」を3種とも定義すると誤る）:
 | `DegenerateDkTwoPeriods` / `DegenerateClusterTwoGroups` | `DK_TWO_PERIODS_DEGENERATE` / `CLUSTER_TWO_GROUPS_DEGENERATE` | `ValidationError` |
 | `AmemiyaRequiresWithinVariation` | `AMEMIYA_REQUIRES_WITHIN_VARIATION` | `ValidationError` |
 | `NonPositiveIdiosyncraticVariance` / `VarianceComponentsMomentsSingular` | `NON_POSITIVE_IDIOSYNCRATIC_VARIANCE` / `VARIANCE_COMPONENTS_MOMENTS_SINGULAR` | `ComputationError` |
+| `InStage` | 包んだ`source`の`code`に、起きた計算の`stage`を付ける。REの内部FE（分散成分の推定）の自由度不足・最小二乗・F検定の失敗は`VARIANCE_COMPONENT_WITHIN_REGRESSION`、FE・REのDK時点数不足は`OVERALL_F_TEST` | `source`と同じ |
 | `IdentifierDimensionMismatch` / `TwoWayRequiresTime` | `INTERNAL_ERROR`（Python APIからは起こらない） | `ComputationError` |
 | `WithinRegressionFailed` / `FTestFailed`（RE: `BetweenRegressionFailed` / `QuasiDemeanedRegressionFailed` / `PooledRegressionFailed` / `HausmanTestFailed`） | 内側の`LeastSquaresError`の`code`に、どの回帰かを示す`stage`を付ける（`stage`を付けてよい`code`のみ） | `code`のクラスで決まる |
 

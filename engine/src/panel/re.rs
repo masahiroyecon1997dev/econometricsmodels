@@ -205,9 +205,11 @@
 //!   別名を除いた補助回帰の傾き係数の数）・DK/ロバスト共分散部分行列の
 //!   ほぼ特異性など、計算自体が成立しない
 //!   場合は`PanelError::HausmanTestFailed`として`fit()`全体を失敗させる（設計行列の多重共線性でエラーにするのと同じ方針）。
-//!   DKの時点数不足（`T <= k`）だけは入力から判定できるため、補助回帰の前に`fit()`のDkアームが
+//!   DKの時点数不足（`T <= q`、`q`はRE本体の傾き係数の数`df_model - 1`で時間不変の列も数える。
+//!   ハウスマン検定の対象`X̃`は`q`以下なので、全体F検定の条件がより厳しい）だけは入力から判定できる
+//!   ため、補助回帰の前に`fit()`のDkアームが`stage`つき（`OVERALL_F_TEST`）の
 //!   `PanelError::InsufficientDkPeriodsForInference`で弾く: DK共分散のrankは`T-1`以下で、
-//!   `X̃`の`k×k`ブロックが構造的に特異になる。数値的な特異性判定に任せると、理論上0の固有値に
+//!   全体F検定の`q×q`ブロックが構造的に特異になる。数値的な特異性判定に任せると、理論上0の固有値に
 //!   乗る丸め誤差が閾値（`k·ε·λ_max`）を超えた場合に巨大な無意味な統計量を黙って返していた
 //!   （`T=6`・`k=6`で約3回に2回すり抜けることを実測）。
 //!   内部FE推定の失敗（singleton等。時間不変変数は内部FEに渡さないため原因にならない）は`swamy_arora_variance_components`が
@@ -230,7 +232,8 @@ use crate::panel::fe::{
     validate_balanced_panel,
 };
 use crate::shared::covariance::leverages;
-use crate::shared::error::{ClusterSetting, CommonError};
+use crate::shared::error::{ClusterSetting, CommonError, ErrorInfo};
+use crate::shared::error_catalog::Stage;
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference;
 use crate::shared::least_squares::{least_squares, residual_sum_of_squares};
@@ -840,7 +843,8 @@ pub(crate) fn internal_fe(
                 FeEffects::OneWay,
                 FeCovType::Classical,
                 confidence_level,
-            )?;
+            )
+            .map_err(within_for_variance_component)?;
             Ok((fe, time_varying))
         }
         ReEffects::TwoWay => {
@@ -855,9 +859,28 @@ pub(crate) fn internal_fe(
                 FeEffects::TwoWay,
                 FeCovType::Classical,
                 confidence_level,
-            )?;
+            )
+            .map_err(within_for_variance_component)?;
             Ok((fe, time_varying))
         }
+    }
+}
+
+/// 内部FE推定の失敗のうち、REの利用者に「何の計算か」が伝わらないもの（自由度不足と、
+/// 内部の最小二乗・F検定の失敗）に、分散成分を推定するwithin回帰の文脈を付ける。
+/// singletonや不均衡な2-wayは、REにも通じるデータの事実を述べるのでそのまま返す。
+fn within_for_variance_component(err: PanelError) -> PanelError {
+    let wrappable = matches!(
+        err,
+        PanelError::InsufficientDegreesOfFreedom { .. }
+            | PanelError::WithinRegressionFailed { .. }
+            | PanelError::FTestFailed { .. }
+    );
+    // `confidence_level`の範囲違反のように、どの計算で起きても同じ入力の誤りは包まない。
+    if wrappable && err.report().code().spec().stage_allowed {
+        err.in_stage(Stage::VarianceComponentWithinRegression)
+    } else {
+        err
     }
 }
 
@@ -1627,13 +1650,14 @@ impl ReEstimator {
                 let t_periods = time.n_groups();
                 let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
                 dk_bandwidth_used = Some(bw);
-                // F統計量（傾き`q = df_model - 1`個の同時検定、分母自由度`t_periods - 1`）と
-                // ハウスマン検定（同じ時点構造のDKで`X̃`の傾き`q`個を同時検定）は、ともに
-                // `t_periods > q`が成り立たないと共分散部分行列が特異になる。
+                // F統計量（傾き`q = df_model - 1`個の同時検定、分母自由度`t_periods - 1`）は
+                // `t_periods > q`が成り立たないと共分散部分行列が特異になる（ハウスマン検定の
+                // 対象`X̃`は`q`以下なので、この条件がより厳しい）。
                 // 補助回帰・`wald_f_test`を待たずここで弾く（Clusterアームの`q`と同じ規約。
                 // `wald_f_test`が`FisherSnedecor::new`に渡す自由度が`>= q >= 1`になる前提も
                 // この事前検証に依存する）。
-                validate_dk_periods_cover_tested_coefficients(t_periods, df_model - 1)?;
+                validate_dk_periods_cover_tested_coefficients(t_periods, df_model - 1)
+                    .map_err(|e| e.in_stage(Stage::OverallFTest))?;
                 // FEのDKと同じくfixestは`K.fixef="full"`が既定（クラスター変数が無く
                 // ネスト判定自体が発生しない）ため`K=df_model`をそのまま使う。
                 let cov = panel_driscoll_kraay_cov_params(
@@ -3621,8 +3645,11 @@ mod tests {
         .unwrap_err();
         assert!(
             matches!(
-                err,
-                PanelError::InsufficientDkPeriodsForInference { t_periods: 3, q: 3 }
+                &err,
+                PanelError::InStage {
+                    stage: Stage::OverallFTest,
+                    source,
+                } if **source == PanelError::InsufficientDkPeriodsForInference { t_periods: 3, q: 3 }
             ),
             "{err:?}"
         );
@@ -4221,10 +4248,18 @@ mod tests {
         );
         // 2エンティティ×2時点: 内部の2-way FEの自由度が足りない（`n = 4 <= k + N + T - 1 = 4`）。
         let tiny: Vec<usize> = (0..24).filter(|&r| r / 4 < 2 && r % 4 < 2).collect();
+        let err = fit(&tiny, &["x1"]).unwrap_err();
         assert!(matches!(
-            fit(&tiny, &["x1"]),
-            Err(PanelError::InsufficientDegreesOfFreedom { .. })
+            &err,
+            PanelError::InStage {
+                stage: Stage::VarianceComponentWithinRegression,
+                source,
+            } if matches!(**source, PanelError::InsufficientDegreesOfFreedom { .. })
         ));
+        assert_eq!(
+            crate::shared::error::ErrorInfo::report(&err).stage(),
+            Some(&Stage::VarianceComponentWithinRegression)
+        );
         // 3エンティティ×3時点（`df_resid = 3`）は最小規模で成功する。
         let small: Vec<usize> = (0..24).filter(|&r| r / 4 < 3 && r % 4 < 3).collect();
         let re = fit(&small, &["x1"]).unwrap();
@@ -5150,6 +5185,57 @@ mod tests {
         ));
     }
 
+    /// 内部FEの失敗のうち、REの利用者に文脈が伝わらない3種だけが「分散成分を推定するwithin回帰」の
+    /// `stage`で包まれる。データの事実を述べるもの、`stage`を付けてはいけない`code`は包まない。
+    #[test]
+    fn within_for_variance_component_wraps_only_stage_capable_internal_fe_errors() {
+        use crate::linear::common::LeastSquaresError;
+
+        let stage = Stage::VarianceComponentWithinRegression;
+        let wrapped: [fn() -> PanelError; 3] = [
+            || PanelError::InsufficientDegreesOfFreedom {
+                n_obs: 6,
+                n_entities: 3,
+                n_periods: None,
+                k: 3,
+            },
+            || PanelError::WithinRegressionFailed {
+                source: LeastSquaresError::SingularMatrix,
+            },
+            || PanelError::FTestFailed {
+                source: LeastSquaresError::Common(CommonError::NearSingularMatrix {
+                    matrix: crate::shared::error::MatrixKind::CoefficientCovariance,
+                }),
+            },
+        ];
+        for make in wrapped {
+            let result = within_for_variance_component(make());
+            assert_eq!(result, make().in_stage(stage.clone()));
+            assert_eq!(result.report().stage(), Some(&stage));
+        }
+        let untouched: [fn() -> PanelError; 3] = [
+            || PanelError::SingletonGroup {
+                dimension: PanelDimension::Entity,
+                group_id: "a".to_string(),
+            },
+            || PanelError::UnbalancedPanelForTwoWay {
+                n_obs: 5,
+                n_entities: 2,
+                n_periods: 3,
+                expected: 6,
+            },
+            // どの計算で起きても同じ入力の誤り（`stage`を付けない`code`）。
+            || PanelError::WithinRegressionFailed {
+                source: LeastSquaresError::Common(CommonError::InvalidConfidenceLevel {
+                    confidence_level: 1.5,
+                }),
+            },
+        ];
+        for make in untouched {
+            assert_eq!(within_for_variance_component(make()), make());
+        }
+    }
+
     #[test]
     fn re_estimator_fit_propagates_invalid_confidence_level_error() {
         // `confidence_level`の範囲チェック（`(0, 1)`の範囲外）は、
@@ -5678,7 +5764,7 @@ mod tests {
 
     #[test]
     fn re_estimator_fit_returns_error_when_dk_periods_do_not_cover_hausman_slopes() {
-        // 時点数`T=2`ではDK共分散のrankが`T-1=1`で、ハウスマン検定の`X̃`係数`k=2`個の
+        // 時点数`T=2`ではDK共分散のrankが`T-1=1`で、全体F検定の傾き係数`q=2`個の
         // 部分行列が構造的に特異になる。補助回帰の数値的な特異性判定を待たず、入力から
         // 判定できる`InsufficientDkPeriodsForInference`で弾く（`T=3 > k=2`で成功する
         // 境界は`re_estimator_fit_hausman_dk_default_bandwidth_matches_auto_resolved_value`）。
@@ -5695,6 +5781,7 @@ mod tests {
         assert_eq!(
             result.unwrap_err(),
             PanelError::InsufficientDkPeriodsForInference { t_periods: 2, q: 2 }
+                .in_stage(Stage::OverallFTest)
         );
     }
 

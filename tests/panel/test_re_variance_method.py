@@ -714,7 +714,8 @@ def test_perfect_collinearity_is_a_computation_error_for_every_method(method):
     case = _case("ow_baseline")
     df = _frame(case).with_columns(x3=2.0 * pl.col("x1") + 3.0 * pl.col("x2"))
     with raises_error(
-        ErrorCode.DESIGN_MATRIX_SINGULAR, stage="WITHIN_REGRESSION"
+        ErrorCode.DESIGN_MATRIX_SINGULAR,
+        stage="VARIANCE_COMPONENT_WITHIN_REGRESSION",
     ):
         RE(
             df,
@@ -740,7 +741,7 @@ def test_extreme_scale_difference_is_a_computation_error_for_every_method(
     with raises_error(
         ErrorCode.MATRIX_NEAR_SINGULAR,
         matrix="COEFFICIENT_COVARIANCE",
-        stage="OVERALL_F_TEST",
+        stage="VARIANCE_COMPONENT_WITHIN_REGRESSION",
     ):
         RE(
             df,

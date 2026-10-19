@@ -178,7 +178,7 @@ def test_cluster_validation_counts_the_identified_columns():
     [
         pytest.param(
             ["x1", "x2", "x3", "x1_bar"],
-            "WITHIN_REGRESSION",
+            "VARIANCE_COMPONENT_WITHIN_REGRESSION",
             id="within_collinear",
         ),
         pytest.param(

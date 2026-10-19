@@ -278,6 +278,7 @@ pub enum Stage {
     SecondStage,
     WuHausmanRegression,
     WithinRegression,
+    VarianceComponentWithinRegression,
     OverallFTest,
     BetweenRegressionEntity,
     BetweenRegressionTime,
@@ -296,6 +297,7 @@ impl Stage {
             Self::SecondStage => "SECOND_STAGE",
             Self::WuHausmanRegression => "WU_HAUSMAN_REGRESSION",
             Self::WithinRegression => "WITHIN_REGRESSION",
+            Self::VarianceComponentWithinRegression => "VARIANCE_COMPONENT_WITHIN_REGRESSION",
             Self::OverallFTest => "OVERALL_F_TEST",
             Self::BetweenRegressionEntity => "BETWEEN_REGRESSION_ENTITY",
             Self::BetweenRegressionTime => "BETWEEN_REGRESSION_TIME",
@@ -314,6 +316,9 @@ impl Stage {
             Self::SecondStage => r#"In the second stage regression: "#,
             Self::WuHausmanRegression => r#"In the Wu-Hausman test regression: "#,
             Self::WithinRegression => r#"In the within-transformed regression: "#,
+            Self::VarianceComponentWithinRegression => {
+                r#"In the within regression used to estimate a variance component: "#
+            }
             Self::OverallFTest => r#"In the overall F test of the slope coefficients: "#,
             Self::BetweenRegressionEntity => {
                 r#"In the between regression on entity means used to estimate a variance component: "#
@@ -342,6 +347,7 @@ impl Stage {
             Self::SecondStage,
             Self::WuHausmanRegression,
             Self::WithinRegression,
+            Self::VarianceComponentWithinRegression,
             Self::OverallFTest,
             Self::BetweenRegressionEntity,
             Self::BetweenRegressionTime,
@@ -364,6 +370,7 @@ impl Stage {
             Self::SecondStage => Vec::new(),
             Self::WuHausmanRegression => Vec::new(),
             Self::WithinRegression => Vec::new(),
+            Self::VarianceComponentWithinRegression => Vec::new(),
             Self::OverallFTest => Vec::new(),
             Self::BetweenRegressionEntity => Vec::new(),
             Self::BetweenRegressionTime => Vec::new(),
@@ -1286,7 +1293,7 @@ pub static CATALOG: &[ErrorSpec] = &[
                 in_text: true,
             },
         ],
-        message: r#"Not enough observations: {n_obs} observations for {n_params} parameters; at least {min_obs} are needed."#,
+        message: r#"Not enough observations: {n_obs} observation(s) for {n_params} parameter(s); at least {min_obs} are needed."#,
         hint: Some(r#"Add observations or remove regressors."#),
         stage_allowed: true,
     },
@@ -1386,7 +1393,7 @@ pub static CATALOG: &[ErrorSpec] = &[
                 in_text: true,
             },
         ],
-        message: r#"The optimizer did not converge after {n_iter} iterations."#,
+        message: r#"The optimizer did not converge after {n_iter} iteration(s)."#,
         hint: Some(
             r#"Increase {iter_option}, or pass raise_on_non_convergence=False to receive the last iteration (check converged before using it)."#,
         ),
@@ -1504,7 +1511,7 @@ pub static CATALOG: &[ErrorSpec] = &[
                 in_text: true,
             },
         ],
-        message: r#"The {test_label} needs at least {min_obs} observations for its auxiliary regression ({n_params} coefficients), but there are {n_obs}."#,
+        message: r#"The {test_label} needs at least {min_obs} observations for its auxiliary regression ({n_params} coefficient(s)), but there are {n_obs}."#,
         hint: Some(r#"Add observations, or reduce the number of variables or lags."#),
         stage_allowed: false,
     },
@@ -1739,7 +1746,7 @@ pub static CATALOG: &[ErrorSpec] = &[
                 in_text: true,
             },
         ],
-        message: r#"The first stage needs more observations than its {n_params} coefficients (instruments, exogenous regressors and the intercept): {n_obs} observations, at least {min_obs} needed."#,
+        message: r#"The first stage needs more observations than its {n_params} coefficient(s) (instruments, exogenous regressors and the intercept): {n_obs} observation(s), at least {min_obs} needed."#,
         hint: Some(r#"Add observations, or remove instruments or exogenous regressors."#),
         stage_allowed: false,
     },
@@ -1763,7 +1770,7 @@ pub static CATALOG: &[ErrorSpec] = &[
                 in_text: true,
             },
         ],
-        message: r#"gmm_weight_type="cluster" needs at least {min_clusters} clusters for {n_instruments} instruments (including exogenous regressors), but the cluster column has {n_clusters}."#,
+        message: r#"gmm_weight_type="cluster" needs at least {min_clusters} clusters for {n_instruments} instrument(s) (including exogenous regressors), but the cluster column has {n_clusters}."#,
         hint: Some(
             r#"Use a cluster column with more distinct values, or set a different gmm_weight_type."#,
         ),
@@ -1794,7 +1801,7 @@ pub static CATALOG: &[ErrorSpec] = &[
                 in_text: true,
             },
         ],
-        message: r#"Not enough observations for the panel model: {n_obs} observations, but {n_params} coefficients and {n_effects} fixed-effect parameters (entity effects, plus time effects in a two-way model) must be estimated; at least {min_obs} are needed."#,
+        message: r#"Not enough observations for the panel model: {n_obs} observation(s), but {n_params} coefficient(s) and {n_effects} fixed-effect parameter(s) (entity effects, plus time effects in a two-way model) must be estimated; at least {min_obs} are needed."#,
         hint: Some(r#"Add observations, or remove regressors."#),
         stage_allowed: true,
     },
@@ -1842,7 +1849,7 @@ pub static CATALOG: &[ErrorSpec] = &[
                 in_text: true,
             },
         ],
-        message: r#"Two-way estimation requires a balanced panel: {n_obs} observations for {n_entities} entities and {n_periods} periods, but {expected_obs} are expected."#,
+        message: r#"Two-way estimation requires a balanced panel: {n_obs} observation(s) for {n_entities} entities and {n_periods} periods, but {expected_obs} are expected."#,
         hint: Some(
             r#"Make every entity observed in every period, or estimate one-way effects by omitting the time option."#,
         ),
@@ -2065,6 +2072,7 @@ mod tests {
             Stage::SecondStage,
             Stage::WuHausmanRegression,
             Stage::WithinRegression,
+            Stage::VarianceComponentWithinRegression,
             Stage::OverallFTest,
             Stage::BetweenRegressionEntity,
             Stage::BetweenRegressionTime,
@@ -2141,7 +2149,7 @@ mod tests {
                 "as_str does not match the variant name"
             );
         }
-        assert_eq!(all_stages().len(), 11, "all_stages() must list every Stage");
+        assert_eq!(all_stages().len(), 12, "all_stages() must list every Stage");
         for stage in all_stages() {
             let debug = format!("{stage:?}");
             let name = debug.split([' ', '{']).next().unwrap_or("");

@@ -23,19 +23,19 @@ HAC_LAGS_OUT_OF_RANGE: hac_lags must be from 0 to 3, one less than the number of
 DK_BANDWIDTH_OUT_OF_RANGE: dk_bandwidth must be from 0 to 3, one less than the number of unique time periods in dk_time (3), got 3. Pass a smaller dk_bandwidth, or omit it to use the default.
 NLAGS_NOT_POSITIVE: nlags must be a positive integer, got 3. Pass nlags of 1 or more.
 COV_TYPE_NOT_AVAILABLE_FOR_MODEL: cov_type="abc" is not available for abc. Use one of: "a", "b".
-INSUFFICIENT_OBSERVATIONS: Not enough observations: 3 observations for 3 parameters; at least 3 are needed. Add observations or remove regressors.
+INSUFFICIENT_OBSERVATIONS: Not enough observations: 3 observation(s) for 3 parameter(s); at least 3 are needed. Add observations or remove regressors.
 CLUSTER_COUNT_TOO_SMALL: abc="cluster" needs at least 3 clusters, but the cluster column has 3. Use a cluster column with more distinct values, or set a different abc.
 CLUSTER_COUNT_NOT_ABOVE_SLOPES: abc="cluster" needs more clusters than slope coefficients for the overall F/Wald test: the cluster column has 3 clusters for 3 slope coefficient(s); at least 3 are needed. Use a cluster column with more distinct values, remove regressors, or set a different abc.
 DESIGN_MATRIX_SINGULAR: The design matrix is singular: some columns are perfectly collinear. Remove or combine the collinear columns, for example duplicated columns or a constant column together with the intercept.
 MATRIX_NEAR_SINGULAR: A matrix needed to compute the estimates or their covariance is numerically singular. Rescale the variables so that they are on similar scales, or remove nearly collinear regressors.
-NOT_CONVERGED: The optimizer did not converge after 3 iterations. Increase abc, or pass raise_on_non_convergence=False to receive the last iteration (check converged before using it).
+NOT_CONVERGED: The optimizer did not converge after 3 iteration(s). Increase abc, or pass raise_on_non_convergence=False to receive the last iteration (check converged before using it).
 LINE_SEARCH_FAILED: The optimizer's line search did not converge. Try a different solver, or rescale the regressors.
 SEPARATION_DETECTED: The outcome is perfectly predicted by some combination of the regressors (complete or quasi-complete separation), so no finite maximum likelihood estimate exists. Remove or combine the offending regressors, or add observations that break the separation.
 SEPARATION_CHECK_FAILED: The check for separation in the data could not be completed. Rescale the regressors so that they are on similar scales, or remove nearly collinear regressors.
 UNCENSORED_INTERVAL_TOO_NARROW: The uncensored interval [1.5, 1.5] is narrower than 1% of the estimated sigma (1.5), so the expected value among uncensored observations cannot be computed reliably. Use another target.
 INTERNAL_ERROR: An internal error occurred: abc. This should not happen. Report it as a bug, with the data or a minimal example that reproduces it.
 WEIGHT_NOT_POSITIVE: The weight at row 3 (0-based) must be positive, got 1.5. Drop or correct the rows with zero or negative weights.
-INSUFFICIENT_OBSERVATIONS_FOR_DIAGNOSTIC: The White test needs at least 3 observations for its auxiliary regression (3 coefficients), but there are 3. Add observations, or reduce the number of variables or lags.
+INSUFFICIENT_OBSERVATIONS_FOR_DIAGNOSTIC: The White test needs at least 3 observations for its auxiliary regression (3 coefficient(s)), but there are 3. Add observations, or reduce the number of variables or lags.
 DIAGNOSTIC_VARIABLES_CONSTANT: The White test cannot be computed: all of its variables are constant. Use variables that vary across observations.
 DIAGNOSTIC_VARIABLE_DEGENERATE: The White test cannot be computed: a variable has zero or non-finite variance after scaling. Rescale the variables so that they are on similar scales.
 DIAGNOSTIC_STATISTIC_UNDEFINED: The White test statistic is undefined: the auxiliary regression is degenerate (zero residuals, a perfect fit or non-finite values). Check the model for a perfect fit or non-finite values.
@@ -49,11 +49,11 @@ CENSORING_BOUND_NOT_FINITE: The censoring bounds must be finite numbers or None,
 OUTCOME_OUTSIDE_CENSORING_BOUNDS: The outcome y at row 3 (0-based) is 1.5, outside the censoring bounds (lower=0.5, upper=0.5). Correct the outcome, or set lower and upper to the actual censoring points.
 NO_UNCENSORED_OBSERVATIONS: No observation lies strictly between the censoring bounds (lower=0.5, upper=0.5), so the model cannot be identified. Check the bounds: at least one y must be strictly between them.
 INSUFFICIENT_INSTRUMENTS: The model has 3 endogenous regressor(s) but only 3 instrument(s); it needs at least as many instruments as endogenous regressors (order condition). Add instruments, or reduce the number of endogenous regressors.
-INSUFFICIENT_OBSERVATIONS_FOR_FIRST_STAGE: The first stage needs more observations than its 3 coefficients (instruments, exogenous regressors and the intercept): 3 observations, at least 3 needed. Add observations, or remove instruments or exogenous regressors.
-GMM_WEIGHT_CLUSTER_COUNT_TOO_SMALL: gmm_weight_type="cluster" needs at least 3 clusters for 3 instruments (including exogenous regressors), but the cluster column has 3. Use a cluster column with more distinct values, or set a different gmm_weight_type.
-INSUFFICIENT_DEGREES_OF_FREEDOM: Not enough observations for the panel model: 3 observations, but 3 coefficients and 3 fixed-effect parameters (entity effects, plus time effects in a two-way model) must be estimated; at least 3 are needed. Add observations, or remove regressors.
+INSUFFICIENT_OBSERVATIONS_FOR_FIRST_STAGE: The first stage needs more observations than its 3 coefficient(s) (instruments, exogenous regressors and the intercept): 3 observation(s), at least 3 needed. Add observations, or remove instruments or exogenous regressors.
+GMM_WEIGHT_CLUSTER_COUNT_TOO_SMALL: gmm_weight_type="cluster" needs at least 3 clusters for 3 instrument(s) (including exogenous regressors), but the cluster column has 3. Use a cluster column with more distinct values, or set a different gmm_weight_type.
+INSUFFICIENT_DEGREES_OF_FREEDOM: Not enough observations for the panel model: 3 observation(s), but 3 coefficient(s) and 3 fixed-effect parameter(s) (entity effects, plus time effects in a two-way model) must be estimated; at least 3 are needed. Add observations, or remove regressors.
 SINGLETON_GROUP: The abc group 'abc' has only one observation, and singleton groups are not dropped automatically. Remove its rows from the input.
-PANEL_NOT_BALANCED_FOR_TWO_WAY: Two-way estimation requires a balanced panel: 3 observations for 3 entities and 3 periods, but 3 are expected. Make every entity observed in every period, or estimate one-way effects by omitting the time option.
+PANEL_NOT_BALANCED_FOR_TWO_WAY: Two-way estimation requires a balanced panel: 3 observation(s) for 3 entities and 3 periods, but 3 are expected. Make every entity observed in every period, or estimate one-way effects by omitting the time option.
 REGRESSOR_NO_WITHIN_VARIATION: Regressor 'abc' has no variation left after the within transformation: it is time-invariant, or collinear with the fixed effects. Remove the regressor from x.
 DK_PERIODS_TOO_FEW: cov_type="dk" needs at least 3 unique time periods in dk_time, but there are 3. Use a dk_time column with more distinct periods, or set a different cov_type.
 DK_PERIODS_NOT_ABOVE_COEFFICIENTS: cov_type="dk" needs more time periods than jointly tested coefficients: dk_time has 3 periods for 3 coefficient(s); at least 3 are needed. Use a dk_time column with more distinct periods, remove regressors, or set a different cov_type.

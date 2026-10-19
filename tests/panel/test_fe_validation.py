@@ -631,6 +631,7 @@ def test_dk_periods_at_most_slopes_raises_validation_error():
         n_periods=3,
         n_coefficients=3,
         min_periods=4,
+        stage="OVERALL_F_TEST",
     ):
         FE(
             df,
@@ -658,6 +659,7 @@ def test_many_regressors_dk_raises_validation_error(two_way):
         n_periods=6,
         n_coefficients=20,
         min_periods=21,
+        stage="OVERALL_F_TEST",
     ):
         FE(df, y="y", x=x_cols, entity="entity", options=options).fit()
 

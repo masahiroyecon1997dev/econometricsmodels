@@ -373,6 +373,31 @@ def test_singleton_entity_raises():
         RE(df, y="y", x=["x1", "x2"], entity="entity").fit()
 
 
+def test_insufficient_degrees_of_freedom_in_internal_within_regression_raises():
+    """σ_ε²の推定に使う内部FEの残差自由度が正にならない入力では、REの利用者に分かるよう
+    `stage="VARIANCE_COMPONENT_WITHIN_REGRESSION"`が付く。3個体×2時点で傾き3個は
+    `n = 6 <= 個体数 3 + 傾き 3`。
+    """
+    df = pl.DataFrame(
+        {
+            "entity": [0, 0, 1, 1, 2, 2],
+            "x1": [1.0, 2.0, 4.0, 3.0, 6.0, 9.0],
+            "x2": [2.0, 1.0, 5.0, 9.0, 3.0, 4.0],
+            "x3": [5.0, 3.0, 1.0, 8.0, 2.0, 7.0],
+            "y": [1.0, 3.0, 2.0, 5.0, 4.0, 8.0],
+        }
+    )
+    with raises_error(
+        ErrorCode.INSUFFICIENT_DEGREES_OF_FREEDOM,
+        n_obs=6,
+        n_params=3,
+        n_effects=3,
+        min_obs=7,
+        stage="VARIANCE_COMPONENT_WITHIN_REGRESSION",
+    ):
+        RE(df, y="y", x=["x1", "x2", "x3"], entity="entity").fit()
+
+
 def test_between_regression_insufficient_entities_raises():
     """between回帰は切片+傾き`k`個で`k+1`パラメータのため、
     `n_entities <= k+1`だと`OlsEstimator::fit`自身の`n<=k`検証で
@@ -588,6 +613,7 @@ def test_dk_periods_at_most_hausman_slopes_raises_validation_error():
         n_periods=2,
         n_coefficients=2,
         min_periods=3,
+        stage="OVERALL_F_TEST",
     ):
         RE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 
@@ -627,6 +653,7 @@ def test_many_regressors_dk_raises_validation_error():
         n_periods=6,
         n_coefficients=20,
         min_periods=21,
+        stage="OVERALL_F_TEST",
     ):
         RE(
             df,
@@ -675,7 +702,7 @@ def test_dk_bandwidth_used_by_dk_is_accepted(fe_dataset, cov_type):
 def test_perfect_multicollinearity_raises_computation_error(fe_dataset):
     """`x3 = 2*x1 + 3*x2`は、σ_ε²推定が委譲する内部1-way FE推定
     （`OlsEstimator`への委譲）が特異行列を検出し失敗する
-    （`DESIGN_MATRIX_SINGULAR`、`stage="WITHIN_REGRESSION"`、`RE.fit()`自体が失敗する。
+    （`DESIGN_MATRIX_SINGULAR`、`stage="VARIANCE_COMPONENT_WITHIN_REGRESSION"`、`RE.fit()`自体が失敗する。
     完全な多重共線性は数値比較の対象外（`testing-policy.md`「テストの3系統」）
     で、想定エラーの送出のみ確認する。
     """
@@ -683,7 +710,8 @@ def test_perfect_multicollinearity_raises_computation_error(fe_dataset):
         (2 * pl.col("x1") + 3 * pl.col("x2")).alias("x3")
     )
     with raises_error(
-        ErrorCode.DESIGN_MATRIX_SINGULAR, stage="WITHIN_REGRESSION"
+        ErrorCode.DESIGN_MATRIX_SINGULAR,
+        stage="VARIANCE_COMPONENT_WITHIN_REGRESSION",
     ):
         RE(df, y="y", x=["x1", "x2", "x3"], entity="entity").fit()
 
@@ -696,7 +724,8 @@ def test_scale_variance_raises_computation_error(fe_dataset, cov_type):
     σ_ε²推定が委譲する内部1-way FE推定自身のF検定
     （`OlsEstimator::fit`が常に計算する）が数値的に特異になり
     `ComputationError`（`MATRIX_NEAR_SINGULAR`、`matrix="COEFFICIENT_COVARIANCE"`、
-    `stage="OVERALL_F_TEST"`、FEの同名テストと同じ原理でσ_ε²側が先に失敗する）。
+    `stage="VARIANCE_COMPONENT_WITHIN_REGRESSION"`、FEの同名テストと同じ原理で
+    σ_ε²側が先に失敗する）。
     """
     df = fe_dataset.with_columns(
         (pl.col("x1") * 1e6).alias("x1"), (pl.col("x2") * 1e-3).alias("x2")
@@ -705,7 +734,7 @@ def test_scale_variance_raises_computation_error(fe_dataset, cov_type):
     with raises_error(
         ErrorCode.MATRIX_NEAR_SINGULAR,
         matrix="COEFFICIENT_COVARIANCE",
-        stage="OVERALL_F_TEST",
+        stage="VARIANCE_COMPONENT_WITHIN_REGRESSION",
     ):
         RE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 

@@ -5,8 +5,9 @@ iv_crosscheck.json）を生成するスクリプト。
 別に、独立実装（R: ivreg + sandwich/lmtest）によるクロスチェック値を生成する
 （`docs/spec/iv-spec.md`4章参照）。
 
-シナリオ・cov_type・クラスタケースの構成は`generate_iv_fixtures.py`
-（linearmodelsクロスチェック）と揃える（ユーザー確認済み）。
+シナリオ・クラスタケースの構成は`generate_iv_fixtures.py`（linearmodels）と揃える
+（ユーザー確認済み）。シナリオは`benchmark/iv/datasets.py`、cov_typeは
+`benchmark/iv/constants.py`が定義元で、linearmodelsに無いhc2/hc3も含む。
 
 ## 対象範囲
 
@@ -50,40 +51,39 @@ import polars as pl
 from benchmark.common import (
     BENCHMARKS_DIR,
     DATA_DIR,
-    hac_auto_lag,
+    balanced_cluster_groups,
     imbalanced_cluster_groups,
     load_frozen_dataset,
     run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
+from benchmark.iv.constants import (
+    CARD_REGION_COLUMN,
+    CARD_X_EXOG,
+    CLUSTER_ILL_CONDITIONED_SCENARIOS,
+    IVREG_ONLY_COV_TYPES,
+    LINEARMODELS_COV_TYPES,
+    NON_CLUSTER_COV_TYPES,
+)
+from benchmark.iv.datasets import (
+    MULTI_ENDOG_SCENARIOS,
+    NUMERIC_SCENARIOS,
+    THREE_ENDOG_INSTRUMENTS,
+    THREE_ENDOG_X_ENDOG,
+    multi_endog_instruments,
+    scenario_instruments,
+    scenario_x_exog,
+    with_card_region,
+)
+from benchmark.iv.fixtures.generate_iv_fixtures import NO_INTERCEPT_SCENARIOS
 from benchmark.iv.references.r import run_ivreg_r
 
-# generate_iv_fixtures.pyのCARD_X_EXOGと同じ（Wooldridge card実データ）。
-CARD_X_EXOG = ["exper", "expersq", "black", "smsa", "south"]
-
-# generate_iv_fixtures.pyと同じシナリオ・構成（ユーザー確認済み）。
-NUMERIC_SCENARIOS = [
-    "baseline",
-    "just_identified",
-    "weak_instruments",
-    "small_n",
-    "high_variance",
-    "heteroskedastic",
-    "autocorrelated",
-    "moderate_multicollinearity",
-    "high_condition_number",
-    # scale_variance（x1*1e6, x2*1e-3、全cov_typeでComputationError）より
-    # 緩いスケール差（x1*1e2, x2*1e-1）の成功パス
-    # （generate_iv_fixtures.pyと同じ構成、ユーザー確認済み）。
-    "scale_variance_mild",
-]
-INSTRUMENTS_BY_SCENARIO = {"just_identified": ["z1"]}
-X_EXOG_BY_SCENARIO = {
-    "moderate_multicollinearity": ["x1", "x2"],
-    "high_condition_number": ["x1", "x2"],
-    "scale_variance_mild": ["x1", "x2"],
-}
-COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac", "cluster"]
+# ivregが切片なしでfitできないシナリオ。回帰変数が1列だけ（`x_exog=[]`かつ
+# 切片なし）だと`ivreg.fit`が`coef(auxreg)`を行列として扱えず
+# "incorrect number of dimensions"で失敗する（ivreg 0.6.8で実測、切片ありの
+# `y ~ endog1 | z1 + z2`は通る）。この退化ケースはlinearmodelsのfixtureと
+# `first_stage()`の直接比較テストで検証する。
+IVREG_UNSUPPORTED_NO_INTERCEPT = {"x_exog_empty"}
 
 
 def _ivreg_formula(
@@ -91,18 +91,24 @@ def _ivreg_formula(
     x_endog_cols: list[str],
     instrument_cols: list[str],
     y_col: str = "y",
+    include_intercept: bool = True,
 ) -> str:
+    """`ivreg`の式。`include_intercept=False`は両辺に`0 +`を付けて切片を除く
+    （`ivreg`は`|`の左右それぞれに切片の有無を持つため、片側だけだと
+    第一段階と構造式の定義が食い違う）。
+    """
+    prefix = "" if include_intercept else "0 + "
     lhs = " + ".join(x_exog_cols + x_endog_cols)
     instruments = " + ".join(x_exog_cols + instrument_cols)
-    return f"{y_col} ~ {lhs} | {instruments}"
+    return f"{y_col} ~ {prefix}{lhs} | {prefix}{instruments}"
 
 
 def build_synthetic_fixtures(tmpdir: Path) -> dict:
     fixtures: dict = {}
 
     for scenario in NUMERIC_SCENARIOS:
-        x_exog = X_EXOG_BY_SCENARIO.get(scenario, ["x1"])
-        instruments = INSTRUMENTS_BY_SCENARIO.get(scenario, ["z1", "z2"])
+        x_exog = scenario_x_exog(scenario)
+        instruments = scenario_instruments(scenario)
         x_endog = ["endog1"]
         formula = _ivreg_formula(x_exog, x_endog, instruments)
         csv_path = DATA_DIR / f"iv_{scenario}.csv"
@@ -110,16 +116,16 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
         n = df.height
 
         fixtures[scenario] = {}
-        for cov_type in COV_TYPES:
-            if cov_type == "cluster":
-                continue  # baselineのみ別途複数パターンで確認（下記）
-            if cov_type == "hac":
-                lag = hac_auto_lag(n)
-                entry = run_ivreg_r(csv_path, formula, cov_type, hac_lag=lag)
-                entry["hac_lag"] = lag
-            else:
-                entry = run_ivreg_r(csv_path, formula, cov_type)
+        # clusterは別途個別に扱う。baselineのみ別途複数パターンで確認（下記）。
+        for cov_type in NON_CLUSTER_COV_TYPES:
+            entry = run_ivreg_r(csv_path, formula, cov_type)
             fixtures[scenario][cov_type] = entry
+
+        if scenario in CLUSTER_ILL_CONDITIONED_SCENARIOS:
+            # 悪条件・多重共線性×クラスターロバストSE（均等な疑似グループ）。
+            fixtures[scenario]["cluster"] = _run_cluster_case(
+                df, csv_path, formula, tmpdir
+            )
 
         if scenario == "baseline":
             fixtures[scenario]["cluster"] = _run_cluster_case(
@@ -137,45 +143,93 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
 
     # 複数内生変数（k_endog>=2）。generate_iv_fixtures.pyのmulti_endogと
     # 同じ構成。
-    multi_endog_csv = DATA_DIR / "iv_baseline_multi_endog.csv"
-    multi_endog_formula = _ivreg_formula(
-        ["x1"], ["endog1", "endog2"], ["z1", "z2", "z3"]
-    )
-    multi_endog_df, _ = load_frozen_dataset("iv", "baseline_multi_endog")
-    multi_endog_n = multi_endog_df.height
     fixtures["multi_endog"] = {}
-    for cov_type in COV_TYPES:
-        if cov_type == "cluster":
-            continue
-        if cov_type == "hac":
-            lag = hac_auto_lag(multi_endog_n)
-            entry = run_ivreg_r(
-                multi_endog_csv, multi_endog_formula, cov_type, hac_lag=lag
-            )
-            entry["hac_lag"] = lag
-        else:
+    for scenario in MULTI_ENDOG_SCENARIOS:
+        multi_endog_csv = DATA_DIR / f"iv_{scenario}_multi_endog.csv"
+        multi_endog_formula = _ivreg_formula(
+            ["x1"], ["endog1", "endog2"], multi_endog_instruments(scenario)
+        )
+        fixtures["multi_endog"][scenario] = {}
+        # clusterは別途個別に扱う。
+        for cov_type in NON_CLUSTER_COV_TYPES:
             entry = run_ivreg_r(multi_endog_csv, multi_endog_formula, cov_type)
-        fixtures["multi_endog"][cov_type] = entry
+            fixtures["multi_endog"][scenario][cov_type] = entry
+        if scenario == "baseline":
+            # 複数内生変数×クラスターロバストSE（Wu-Hausmanの自由度が(2, G-1)に
+            # なる経路。generate_iv_fixtures.pyと同じ構成）。
+            multi_endog_df, _ = load_frozen_dataset(
+                "iv", f"{scenario}_multi_endog"
+            )
+            fixtures["multi_endog"][scenario]["cluster"] = _run_cluster_case(
+                multi_endog_df, multi_endog_csv, multi_endog_formula, tmpdir
+            )
+
+    # 内生変数3本（k_endog=3）。generate_iv_fixtures.pyのthree_endogと同じ構成。
+    three_endog_csv = DATA_DIR / "iv_baseline_three_endog.csv"
+    three_endog_formula = _ivreg_formula(
+        ["x1"], THREE_ENDOG_X_ENDOG, THREE_ENDOG_INSTRUMENTS
+    )
+    fixtures["three_endog"] = {
+        cov_type: run_ivreg_r(three_endog_csv, three_endog_formula, cov_type)
+        for cov_type in NON_CLUSTER_COV_TYPES
+    }
 
     # 自由度1境界（df_resid=1ちょうど）。generate_iv_fixtures.pyのdf1と
     # 同じ構成。n=3ではHACの自動ラグ選択式（hac_auto_lag）が0を返す可能性が
-    # あるため、他シナリオと同じくその値をそのまま使う。
+    # あるが、Rラッパー（resolve_hac_lag）が他シナリオと同じくその値をそのまま使う。
     df1_csv = DATA_DIR / "iv_baseline_df1.csv"
     df1_formula = _ivreg_formula([], ["endog1"], ["z1"])
-    df1_df, _ = load_frozen_dataset("iv", "baseline_df1")
-    df1_n = df1_df.height
     fixtures["df1"] = {}
-    for cov_type in COV_TYPES:
-        if cov_type == "cluster":
-            continue  # n=3では意味のあるクラスタ数を確保できないため対象外
-        if cov_type == "hac":
-            lag = hac_auto_lag(df1_n)
-            entry = run_ivreg_r(df1_csv, df1_formula, cov_type, hac_lag=lag)
-            entry["hac_lag"] = lag
-        else:
-            entry = run_ivreg_r(df1_csv, df1_formula, cov_type)
+    # clusterは別途個別に扱う。n=3では意味のあるクラスタ数を確保できないため対象外。
+    for cov_type in NON_CLUSTER_COV_TYPES:
+        entry = run_ivreg_r(df1_csv, df1_formula, cov_type)
         fixtures["df1"][cov_type] = entry
 
+    fixtures["no_intercept"] = build_no_intercept_fixtures(tmpdir)
+    return fixtures
+
+
+def build_no_intercept_fixtures(tmpdir: Path) -> dict:
+    """include_intercept=False（切片なし）。`generate_iv_fixtures.py`の
+    `NO_INTERCEPT_SCENARIOS`と同じシナリオ。cov_typeはlinearmodelsと同じ
+    classical/hc0/hc1/hac、ivregだけの参照としてhc2/hc3、baselineのみcluster。
+
+    - `IVREG_UNSUPPORTED_NO_INTERCEPT`のシナリオはivregが失敗するため含めない。
+    - `sargan_statistic`/`sargan_p_value`はnullにする。ivregのSarganは補助回帰の
+      残差平方和を残差の**中心化**TSS（`sum((r - mean(r))^2)`）で割る式で、
+      Zに定数項が入っている前提のため、切片なしでは統計量が負になりうる
+      （実測: baselineで-317、linearmodelsは0.19）。他の統計量（係数・SE・
+      R²・Wald F・Wu-Hausman・弱操作変数F）は一致を確認済み。
+    """
+    fixtures: dict = {}
+    for name, spec in NO_INTERCEPT_SCENARIOS.items():
+        if name in IVREG_UNSUPPORTED_NO_INTERCEPT:
+            continue
+        csv_path = DATA_DIR / f"iv_{spec['dataset']}.csv"
+        df, _ = load_frozen_dataset("iv", spec["dataset"])
+        formula = _ivreg_formula(
+            spec["x_exog"],
+            spec["x_endog"],
+            spec["instruments"],
+            include_intercept=False,
+        )
+        fixtures[name] = {}
+        # hc2/hc3はlinearmodelsに無くivregだけが参照になる（切片ありと同じ）。
+        # レバレッジは射影行列に依存し、切片の有無で値が変わる。
+        for cov_type in LINEARMODELS_COV_TYPES + IVREG_ONLY_COV_TYPES:
+            entry = run_ivreg_r(csv_path, formula, cov_type)
+            entry["sargan_statistic"] = None
+            entry["sargan_p_value"] = None
+            fixtures[name][cov_type] = entry
+
+        if name == "baseline":
+            # 切片なし×クラスターロバストSE（`generate_iv_fixtures.py`と同じ
+            # 疑似グループ）。cluster cov_typeのWu-Hausman p値はivregの既知の制約で
+            # null（切片ありと同じ）。
+            entry = _run_cluster_case(df, csv_path, formula, tmpdir)
+            entry["sargan_statistic"] = None
+            entry["sargan_p_value"] = None
+            fixtures[name]["cluster"] = entry
     return fixtures
 
 
@@ -192,7 +246,7 @@ def _run_cluster_case(
     """
     n = df.height
     cluster_group = (
-        groups if groups is not None else [i % 10 for i in range(n)]
+        groups if groups is not None else balanced_cluster_groups(n)
     )
     grouped = df.with_columns(pl.Series("cluster_group", cluster_group))
     tmp_path = tmpdir / (csv_path.stem + suffix + ".csv")
@@ -218,28 +272,26 @@ def _run_cluster_g2_case(tmpdir: Path) -> dict:
 
 
 def build_wooldridge_fixtures(tmpdir: Path) -> dict:
-    """実データセット（card、`generate_iv_fixtures.py`のCARD_X_EXOGと同じ構成）の
+    """実データセット（card、`benchmark/iv/constants.py`のCARD_X_EXOG）の
     Rクロスチェック。
     """
-    df = load_wooldridge("card")
+    df = with_card_region(load_wooldridge("card"))
     csv_path = tmpdir / "card.csv"
     df.write_csv(csv_path)
     formula = _ivreg_formula(
         CARD_X_EXOG, ["educ"], ["nearc2", "nearc4"], y_col="lwage"
     )
-    n = df.height
 
     fixtures: dict = {}
-    for cov_type in COV_TYPES:
-        if cov_type == "cluster":
-            continue  # 対応する自然なカテゴリ列が無いため対象外（generate_iv_fixtures.py参照）。
-        if cov_type == "hac":
-            lag = hac_auto_lag(n)
-            entry = run_ivreg_r(csv_path, formula, cov_type, hac_lag=lag)
-            entry["hac_lag"] = lag
-        else:
-            entry = run_ivreg_r(csv_path, formula, cov_type)
+    # clusterは別途個別に扱う。対応する自然なカテゴリ列が無いため対象外（generate_iv_fixtures.py参照）。
+    for cov_type in NON_CLUSTER_COV_TYPES:
+        entry = run_ivreg_r(csv_path, formula, cov_type)
         fixtures[cov_type] = entry
+    # 実データのグループ列（居住地域、9グループ・不均衡）でのクラスターロバストSE。
+    # Wu-Hausman p値はivregの既知の制約でnull（テスト側で再計算して比較する）。
+    fixtures["cluster"] = run_ivreg_r(
+        csv_path, formula, "cluster", cluster=CARD_REGION_COLUMN
+    )
     return fixtures
 
 
@@ -268,6 +320,16 @@ def build_fixtures() -> dict:
         check=True,
     ).stdout
 
+    sandwich_version, lmtest_version = (
+        subprocess.run(
+            ["Rscript", "-e", f'cat(as.character(packageVersion("{pkg}")))'],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        for pkg in ("sandwich", "lmtest")
+    )
+
     fixtures["_meta"] = {
         "method": "2sls",
         "purpose": (
@@ -281,10 +343,13 @@ def build_fixtures() -> dict:
         "generated_at": datetime.now(UTC).isoformat(),
         "r_version": r_version,
         "ivreg_version": ivreg_version,
+        "sandwich_version": sandwich_version,
+        "lmtest_version": lmtest_version,
         "note": (
             'hc2/hc3も`vcovHC(type="HC2"/"HC3")`で計算し含める（本実装と数値'
             "一致することを実機確認済み、iv-spec.md 3.1節）。GMMはivregが"
-            "対応していないため対象外（iv-spec.md4章、Rクロスチェック省略の例外規定）。"
+            "対応していないため対象外（R momentfitによるクロスチェックは"
+            "`iv_gmm_crosscheck.json`、iv-spec.md4章）。"
             "weak_instrument_f・sargan_statistic/sargan_p_valueはivregの"
             "summary(diagnostics=TRUE)が常にclassical vcovで計算する仕様のため、"
             "全cov_typeエントリで同じ値になる（実測確認済み）。just_identified"
@@ -307,7 +372,14 @@ def build_fixtures() -> dict:
             "発生確認のみ、テストコード側で対応）。cluster_g2（G=2境界の成功"
             "パス）は`engine/src/iv/CLAUDE.md`「修正済み」に記録の`k_constant`"
             "取り違えバグの修正後にフィクスチャ化した。"
+            "high_condition_number・moderate_multicollinearityはclusterも持つ。"
+            "cardはクラスター（居住地域から作った9グループ）も持つ。three_endogは"
+            "内生変数3本（k_instruments=4）。"
+            "invalid_instrument・many_regressors・outlier_regressorは"
+            "generate_iv_fixtures.pyの同名注記と同じ構成。"
             "multi_endog（複数内生変数、x_endog=['endog1','endog2']）は"
+            "MULTI_ENDOG_SCENARIOS（baseline・just_identified・weak_instruments・"
+            "heteroskedastic）ごとに持つ。"
             "benchmark/iv/datasets.pyの第一段階誤差vが内生変数ごとに独立になる"
             "よう修正した後のデータで生成（"
             "generate_iv_fixtures.pyの同名注記参照）。weak_instrument_fは"
@@ -317,6 +389,14 @@ def build_fixtures() -> dict:
             "instruments=['z1']）は境界値・悪条件シナリオの一環。"
             "cluster cov_typeはn=3では意味のあるクラスタ数を確保できないため"
             "対象外。"
+            "no_intercept（`include_intercept=False`、式の両辺に`0 +`）は"
+            "baseline・just_identified・multi_endogのclassical/hc0/hc1/hac。"
+            "切片なしはbaselineのみ追加でcluster、全3シナリオに追加でhc2/hc3"
+            "（linearmodelsには無くivregだけの参照）。"
+            "x_exog_empty（`x_exog=[]`かつ切片なし）はivregが"
+            "`incorrect number of dimensions`で失敗するため含めない。"
+            "no_interceptのsargan_statistic/sargan_p_valueはivregが残差の中心化TSSを"
+            "使う式で切片なしだと負になりうるためnull。"
             "wooldridge.card（Wooldridge実データ、Card 1995、`generate_iv_fixtures.py`"
             "のCARD_X_EXOGと同じ構成）はcluster cov_typeを除く4種のみ（対応する"
             "自然なカテゴリ列が無いため）。"

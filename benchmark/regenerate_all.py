@@ -14,7 +14,7 @@
 - 既定: 両方（CSV → JSON の順。JSONはCSVを読むため）
 
 **クロスチェック用フィクスチャ（`*_crosscheck.json`）の生成には `Rscript` が
-必要**（`sandwich` / `lmtest` / `ivreg` / `marginaleffects` 等）。Rが無い環境
+必要**（`sandwich` / `lmtest` / `ivreg` / `momentfit` / `marginaleffects` 等）。Rが無い環境
 ではそのステップのみ FAILED になり、他のステップは続行する。
 
 使用例（リポジトリルートから）:
@@ -42,6 +42,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 # `Rscript` 必須（Tobit は主・交差検証とも R、以降の *_crosscheck も R）。
 _FIXTURE_MODULES = [
     "benchmark.linear.fixtures.generate_ols_fixtures",
+    "benchmark.linear.fixtures.generate_ols_white_fixtures",
+    "benchmark.linear.fixtures.generate_ols_breusch_pagan_fixtures",
+    "benchmark.linear.fixtures.generate_ols_breusch_godfrey_fixtures",
     "benchmark.linear.fixtures.generate_wls_fixtures",
     "benchmark.nonlinear.fixtures.generate_logit_fixtures",
     "benchmark.nonlinear.fixtures.generate_probit_fixtures",
@@ -53,14 +56,21 @@ _FIXTURE_MODULES = [
     # 両方 Rscript 必須。
     "benchmark.nonlinear.fixtures.generate_tobit_fixtures",
     "benchmark.linear.fixtures.generate_ols_crosscheck_fixtures",
+    "benchmark.linear.fixtures.generate_ols_white_crosscheck_fixtures",
+    "benchmark.linear.fixtures.generate_ols_breusch_pagan_crosscheck_fixtures",
+    "benchmark.linear.fixtures.generate_ols_breusch_godfrey_crosscheck_fixtures",
     "benchmark.linear.fixtures.generate_wls_crosscheck_fixtures",
     "benchmark.nonlinear.fixtures.generate_logit_crosscheck_fixtures",
     "benchmark.nonlinear.fixtures.generate_probit_crosscheck_fixtures",
     "benchmark.nonlinear.fixtures.generate_tobit_crosscheck_fixtures",
     "benchmark.iv.fixtures.generate_iv_crosscheck_fixtures",
+    "benchmark.iv.fixtures.generate_iv_gmm_crosscheck_fixtures",
     "benchmark.panel.fixtures.generate_fe_crosscheck_fixtures",
     "benchmark.panel.fixtures.generate_fe_plm_crosscheck_fixtures",
     "benchmark.panel.fixtures.generate_re_crosscheck_fixtures",
+    "benchmark.panel.fixtures.generate_re_time_invariant_fixtures",
+    "benchmark.panel.fixtures.generate_re_two_way_fixtures",
+    "benchmark.panel.fixtures.generate_re_variance_method_fixtures",
     "benchmark.panel.fixtures.generate_re_statsmodels_cluster_fixtures",
 ]
 

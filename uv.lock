@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
@@ -135,9 +135,6 @@ dependencies = [
 ]
 
 [package.dev-dependencies]
-benchmark = [
-    { name = "pyarrow" },
-]
 dev = [
     { name = "maturin" },
 ]
@@ -149,6 +146,7 @@ docs = [
 test = [
     { name = "linearmodels" },
     { name = "numpy" },
+    { name = "pyarrow" },
     { name = "pytest" },
     { name = "ruff" },
     { name = "statsmodels" },
@@ -159,7 +157,6 @@ test = [
 requires-dist = [{ name = "polars", specifier = "==1.44.2" }]
 
 [package.metadata.requires-dev]
-benchmark = [{ name = "pyarrow", specifier = "==25.0.1" }]
 dev = [{ name = "maturin", specifier = "==1.15.0" }]
 docs = [
     { name = "mkdocs", specifier = "==1.6.1" },
@@ -169,6 +166,7 @@ docs = [
 test = [
     { name = "linearmodels", specifier = "==7.0" },
     { name = "numpy", specifier = "==2.5.3" },
+    { name = "pyarrow", specifier = "==25.0.1" },
     { name = "pytest", specifier = "==9.1.1" },
     { name = "ruff", specifier = "==0.16.10" },
     { name = "statsmodels", specifier = "==0.15.0" },

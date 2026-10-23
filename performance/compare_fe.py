@@ -27,13 +27,19 @@ baselineシナリオの既定値`_DEFAULT_N_PERIODS=6`と同値に揃えてい�
 n=1,000 → n_entities=166 → 実際は996観測）。性能比較の目的はスケーリング傾向の
 把握であり、この程度のずれは許容する。
 
-## cov_type の範囲
+## 軸と cov_type の範囲
 
-`.claude/rules/testing-policy.md`「パフォーマンス比較（ベンチマーク）の方法論」に
-従い、代表2点のみ計測する。FEの`classical`/`hc1`/`hc2`/`hc3`/`cluster`/`dk`を
-n_entities=16,666・n_periods=6・k=5で実測した結果、`dk`（Driscoll-Kraay）が
-最重量（中央値91.6ms、classicalの82.3msに対し+11%）だったため、`classical`と
-`dk`を採用する（OLS/WLS/IVと同じ組み合わせ）。DKのバンド幅は時点数`T`ベース
+n 軸（10,000 / 100,000 / 1,000,000、k=5）と k 軸（n=10,000）は既定の標準誤差
+（classical）だけを回し、標準誤差の種類は **cov 軸**（n=100,000・k=5）で全て回す:
+`classical`・`hc1`・`hc2`・`hc3`・`cluster`・`dk`。`hc2`/`hc3` は linearmodels
+（`PanelOLS`）に対応が無いため engine 単独で測る。`hc0` は FE が対応しない。
+
+`cluster` は entity クラスター（G = N = n / T、データは entity 順）の1ケース
+だけで、`cluster_cases()` の G・レイアウトの 2×2 は使わない。パネルの
+クラスターは entity で決まり、G を変えると N×T の構成が変わってしまうため。
+linearmodels 側は `cluster_entity=True`。
+
+DKのバンド幅は時点数`T`ベース
 （`engine::panel::fe::resolve_dk_bandwidth`）であり、ハーネスの`ctx.hac_lags`は
 総観測数`n`ベース（Newey-West用）で基準が異なるため使わない——
 `hac_auto_lag(_N_PERIODS_FIXED)`をモジュール定数として別途計算し、engine・
@@ -42,26 +48,24 @@ linearmodels双方のバンド幅指定に使う。
 ## 2-way固定効果の計測（method軸の流用）
 
 2-way FE（entity+time）はIVのgmm・Logit/Probitのbfgs/lbfgsと同じ`extra_methods`
-仕組みを流用し、代表点1つ（cov_type=classical・k=n_sweep_fixed_k・
+仕組みを流用し、代表点1つ（既定の標準誤差・k=n_sweep_fixed_k・
 n=n_sweep[-1]）だけ追加計測する（`default_method="one_way"`,
 `extra_methods=("two_way",)`。ユーザー確認済み・2026-09-21）。`FitContext.method`
 の意味が他手法の推定アルゴリズム選択（newton等）からFEの固定効果構造選択に
 変わる点で既存パターンからの意図的な逸脱だが、「cov_type・n・k軸を共有し代表点
 1つだけ追加計測する」という構造自体はIV/Logit/Probitと同型。
 
-## k軸はclassicalのみ計測する（`k_sweep_cov_types`）
+## dk は k=5 < T=6 の境界に依存する
 
 k軸スイープの`k=20`（`k_sweep=(5, 20)`は全手法共通の既定値）は
-`T=6`（`_N_PERIODS_FIXED`）に対して次元過多で、engineは`ValidationError`
-（`PanelError::InsufficientDkPeriodsForInference`）で`fit()`を拒否する——DKの
-`S`行列は時点ごとのスコアの外積の和でrankが`T-1`以下のため、F検定の`k×k`
-部分行列が`k >= T`で構造的に特異になる。REもハウスマン検定（`X̃`の`k`個の
-同時Wald検定）が同じ制約を受けるため、同じ設定にしている（`compare_re.py`）。
-`k_sweep_cov_types=("classical",)`でk軸のcov_typeをclassicalに絞る
-（n軸はk=5固定のため`dk`込みで計測できる。ただし`k=5 < T=6`の境界ちょうどに
+`T=6`（`_N_PERIODS_FIXED`）に対して次元過多で、`cov_type="dk"`だと engineは
+`ValidationError`（`PanelError::InsufficientDkPeriodsForInference`）で`fit()`を
+拒否する——DKの`S`行列は時点ごとのスコアの外積の和でrankが`T-1`以下のため、
+F検定の`k×k`部分行列が`k >= T`で構造的に特異になる。REもハウスマン検定（`X̃`の
+`k`個の同時Wald検定）が同じ制約を受ける（`compare_re.py`）。k軸は既定の
+classicalだけを回すので影響しないが、cov軸の`dk`は`k=5 < T=6`の境界ちょうどに
 依存しており、`n_sweep_fixed_k`を6以上にするか`_N_PERIODS_FIXED`を5以下にすると
-n軸のdkも同じ`ValidationError`で失敗する。`_perf_harness.py`の
-`PerfAdapter.k_sweep_cov_types`参照）。
+cov軸のdkが同じ`ValidationError`で失敗する。
 
 ## MultiIndex構築は計測区間の外（ハーネス拡張）
 
@@ -83,6 +87,15 @@ n軸のdkも同じ`ValidationError`で失敗する。`_perf_harness.py`の
 `f_statistic`と対応しない）。`aic`/`bic`はlinearmodelsが提供しないため対称性を
 取る対象に含めない（同ファイル参照）。
 
+## 非対称な点: cluster と dk の小標本補正
+
+FE の `cluster` と `dk` は、engine が fixest/Stata 型の小標本補正と自由度を
+意図的に使う（cluster は `G/(G-1)·(n-1)/(n-K)` と t(G-1)、dk は
+`T/(T-1)·(n-1)/(n-K)` と t(T-1)）ため、linearmodels（`df_resid`）と標準誤差が
+一致しない（n=3,000 で cluster は 1e-3 程度、dk は `sqrt(T/(T-1))` ≒ 9.5%）。
+差は補正のスカラーで計算量は同等なので両ライブラリで測るが、数値の一致は
+前提にしない。`classical` と `hc1` は機械精度で一致する。
+
 使用例（リポジトリルートから）:
     python -m performance.compare_fe \\
         --output docs/performance/results/fe.json
@@ -90,7 +103,7 @@ n軸のdkも同じ`ValidationError`で失敗する。`_perf_harness.py`の
     # 単体計測（デバッグ用）。一括実行と条件を揃えるにはスレッド数を1に固定する。
     RAYON_NUM_THREADS=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \\
         python -m performance.compare_fe \\
-        --worker --library engine --cov-type dk --n 10000 --k 5 --method one_way
+        --worker --library engine --cov-case dk --n 10000 --k 5 --method one_way
 """
 
 from __future__ import annotations
@@ -101,7 +114,12 @@ import polars as pl
 
 from benchmark.common import hac_auto_lag
 from benchmark.panel.datasets import generate_fe_dataset
-from performance._perf_harness import FitContext, PerfAdapter, run_cli
+from performance._perf_harness import (
+    CovCase,
+    FitContext,
+    PerfAdapter,
+    run_cli,
+)
 
 _ENTITY_COL = "entity"
 _TIME_COL = "time"
@@ -113,6 +131,21 @@ _N_PERIODS_FIXED = 6
 # DKバンド幅は時点数Tベース（ハーネスの`ctx.hac_lags`は総観測数nベースで基準が
 # 異なるため使わない、モジュールdocstring「cov_typeの範囲」参照）。
 _DK_BANDWIDTH = hac_auto_lag(_N_PERIODS_FIXED)
+
+
+_ENGINE_COV_TYPES = ("classical", "hc1", "hc2", "hc3", "cluster")
+
+_COV_CASES = (
+    CovCase("classical", "classical"),
+    CovCase("hc1", "hc1"),
+    # linearmodels に対応する HC2/HC3 が無いため engine 単独。
+    CovCase("hc2", "hc2", libraries=("engine",)),
+    CovCase("hc3", "hc3", libraries=("engine",)),
+    # entity クラスター（モジュール docstring 参照）。クラスター列はハーネスが
+    # 作らず、engine は entity 列を既定で使う。
+    CovCase("cluster", "cluster"),
+    CovCase("dk", "dk"),
+)
 
 
 def _build_dataframe(n: int, k: int, seed: int) -> pl.DataFrame:
@@ -145,19 +178,15 @@ def _fit_once_engine(ctx: FitContext):
     from econometricsmodels import FE, FEOptions
 
     two_way = ctx.method == "two_way"
-    if ctx.cov_type == "classical":
-        options = FEOptions(
-            cov_type="classical", time=_TIME_COL if two_way else None
-        )
-    elif ctx.cov_type == "dk":
-        options = FEOptions(
-            cov_type="dk",
-            time=_TIME_COL if two_way else None,
-            dk_time=_TIME_COL,
-            dk_bandwidth=_DK_BANDWIDTH,
-        )
-    else:
+    kwargs: dict = {
+        "cov_type": ctx.cov_type,
+        "time": _TIME_COL if two_way else None,
+    }
+    if ctx.cov_type == "dk":
+        kwargs.update(dk_time=_TIME_COL, dk_bandwidth=_DK_BANDWIDTH)
+    elif ctx.cov_type not in _ENGINE_COV_TYPES:
         raise ValueError(f"unknown cov_type: {ctx.cov_type!r}")
+    options = FEOptions(**kwargs)
     return FE(
         ctx.df, y=ctx.y_col, x=ctx.x_cols, entity=_ENTITY_COL, options=options
     ).fit()
@@ -175,6 +204,14 @@ def _fit_once_linearmodels(ctx: FitContext):
     )
     if ctx.cov_type == "classical":
         lm_cov_type, cov_config = "unadjusted", {"debiased": True}
+    elif ctx.cov_type == "hc1":
+        lm_cov_type, cov_config = "robust", {"debiased": True}
+    elif ctx.cov_type == "cluster":
+        # engine の既定（entity クラスター）に対応する。
+        lm_cov_type, cov_config = (
+            "clustered",
+            {"debiased": True, "cluster_entity": True},
+        )
     elif ctx.cov_type == "dk":
         lm_cov_type, cov_config = (
             "kernel",
@@ -215,7 +252,7 @@ FE_ADAPTER = PerfAdapter(
     method="fe",
     module="performance.compare_fe",
     libraries=("engine", "linearmodels"),
-    cov_types=("classical", "dk"),
+    cov_cases=_COV_CASES,
     reference_versions=lambda: {
         "linearmodels_version": linearmodels.__version__
     },
@@ -224,8 +261,13 @@ FE_ADAPTER = PerfAdapter(
     fit_once=_fit_once,
     default_method="one_way",
     extra_methods=("two_way",),
-    k_sweep_cov_types=("classical",),
 )
+
+
+# cov 軸の dk は k < T（時点数）が前提（モジュール docstring 参照）。設定変更で
+# 崩れたら、計測の途中で engine の ValidationError になる前にここで気づく。
+if FE_ADAPTER.n_sweep_fixed_k >= _N_PERIODS_FIXED:
+    raise ValueError("cov-sweep dk needs n_sweep_fixed_k < _N_PERIODS_FIXED")
 
 
 if __name__ == "__main__":

@@ -20,9 +20,9 @@ t統計量・p値・信頼区間・F統計量・F p値・within R²（AIC/BIC等
 
 fixest側（`test_fe_crosscheck.py`）の境界ケースのうちplmで再現できるものを持つ:
 クラスター数`G = q+1`・`G = 2`（plmのクラスターはentity単位のため先頭3・2
-entityに絞って作る）、dkの`T = q+1`、dkのバンド幅0・1、entityあたりの観測数が
-偏った不均衡（クラスターサイズの偏りの代用）。いずれもplm側で`wald()`のような
-分母自由度の切り上げはなく、手計算した自由度`G-1`/`T-1`で比較する。
+entityに絞って作る）、dkの`T = q+1`、dkのバンド幅0・1・3（T=25は12も）、
+entityあたりの観測数が偏った不均衡（クラスターサイズの偏りの代用）。
+いずれもplm側で`wald()`のような分母自由度の切り上げはなく、手計算した自由度`G-1`/`T-1`で比較する。
 
 ## 独立性の限界
 
@@ -37,9 +37,10 @@ entityに絞って作る）、dkの`T = q+1`、dkのバンド幅0・1、entity�
 
 ## `bandwidth == T-1`
 
-fixestは`bandwidth == T-1`で最終ラグ項を落とすため本実装と一致しない。plmは
-最終ラグを落とさず標準のBartlettカーネルと一致するので、この境界の参照値は
-このファイルだけが持つ（`dk_max_bandwidth`）。
+fixestは内部実装（`cpp_driscoll_kraay`）のoff-by-oneで`bandwidth == T-1`の最終ラグ項を
+落とすため、標準のBartlettカーネルの本実装と一致しない（`fe-spec.md`3.3節7.）。plmは
+最終ラグを落とさず本実装と一致するので、この境界の参照値はこのファイルだけが持つ
+（`dk_max_bandwidth`）。
 
 役割分担:
     - 主リファレンス（linearmodels、classical/hc1）: `test_fe_reference.py`
@@ -55,20 +56,27 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-from _assertions import assert_close, assert_dict_close
+from _assertions import (
+    assert_close,
+    assert_dict_close,
+    assert_fields_close,
+    assert_inference_close,
+)
 from _constants import DATA_DIR
 from _helpers import load_wooldridge_dataset
+from _panel_helpers import bandwidth_cases, x_columns
 from _tolerances import TOLERANCES
 from econometricsmodels import FE, FEOptions
 
 from benchmark.common import (
     WAGEPAN_ENTITY,
+    WAGEPAN_TIME,
     WAGEPAN_X,
     WAGEPAN_Y,
 )
+from benchmark.panel.cluster_cases import K1_CSV
 from benchmark.panel.fixtures.generate_fe_plm_crosscheck_fixtures import (
-    EXPLICIT_BANDWIDTH_SCENARIOS,
-    EXPLICIT_BANDWIDTHS,
+    DK_EXPLICIT_BANDWIDTHS,
     MAX_BANDWIDTH_SCENARIOS,
     NUMERIC_SCENARIOS,
     WAGEPAN_COV_TYPES,
@@ -104,6 +112,7 @@ def crosscheck() -> dict:
 
 _assert_close = partial(assert_close, rtol=RTOL, atol=ATOL)
 _assert_dict_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
+_assert_fields_close = partial(assert_fields_close, rtol=RTOL, atol=ATOL)
 # p値は絶対誤差の下限を設けず相対誤差だけで比較する（`test_fe_crosscheck.py`と
 # 同じ理由）。
 _assert_p_close = partial(assert_close, rtol=RTOL_P_VALUE, atol=ATOL_P_VALUE)
@@ -123,34 +132,45 @@ def _check_result(
     """
     assert res.stat_df == expected_df, label
     assert (res.f_df_num, res.f_df_denom) == (n_slopes, expected_df), label
-    _assert_dict_close(res.params, ref["coef"], f"{label}/coef")
-    _assert_dict_close(res.std_errors, ref["se"], f"{label}/se")
-    _assert_dict_close(
-        res.test_stats, ref["test_stats"], f"{label}/test_stats"
+    assert_inference_close(
+        res,
+        ref,
+        label,
+        rtol=RTOL,
+        atol=ATOL,
+        p_value_check=_assert_p_dict_close,
     )
-    _assert_p_dict_close(res.p_values, ref["p_values"], f"{label}/p_values")
-    for name, (ref_lower, ref_upper) in ref["conf_int"].items():
-        our_lower, our_upper = res.conf_int[name]
-        _assert_close(our_lower, ref_lower, f"{label}/conf_lower/{name}")
-        _assert_close(our_upper, ref_upper, f"{label}/conf_upper/{name}")
 
-    _assert_close(res.f_statistic, ref["f_statistic"], f"{label}/f_statistic")
     _assert_p_close(res.f_p_value, ref["f_p_value"], f"{label}/f_p_value")
     # within R²はcov_typeに依存しない（plmのsummary(model)$r.squared）。
-    _assert_close(
-        res.r_squared_within,
-        ref["r_squared_within"],
-        f"{label}/r_squared_within",
-    )
+    _assert_fields_close(res, ref, ("f_statistic", "r_squared_within"), label)
 
 
 def _expected_df(
-    df: pl.DataFrame, cov_type: str, *, entity: str = "entity"
+    df: pl.DataFrame,
+    cov_type: str,
+    *,
+    entity: str = "entity",
+    time: str = "time",
 ) -> int:
     """clusterは`G-1`（entity数）、dkは`T-1`（ユニークな時点数）。"""
     if cov_type == "cluster":
         return df[entity].n_unique() - 1
-    return df["time"].n_unique() - 1
+    return df[time].n_unique() - 1
+
+
+def _options(
+    cov_type: str,
+    *,
+    dk_bandwidth: int | None = None,
+    dk_time: str = "time",
+) -> FEOptions:
+    """dkは時点列（`dk_time`）を明示する必要がある。"""
+    if cov_type == "dk":
+        return FEOptions(
+            cov_type="dk", dk_time=dk_time, dk_bandwidth=dk_bandwidth
+        )
+    return FEOptions(cov_type=cov_type)
 
 
 def _fit_frame(
@@ -159,13 +179,8 @@ def _fit_frame(
     *,
     dk_bandwidth: int | None = None,
 ):
-    x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
-    if cov_type == "dk":
-        options = FEOptions(
-            cov_type="dk", dk_time="time", dk_bandwidth=dk_bandwidth
-        )
-    else:
-        options = FEOptions(cov_type=cov_type)
+    x_cols = x_columns(df)
+    options = _options(cov_type, dk_bandwidth=dk_bandwidth)
     return FE(df, y="y", x=x_cols, entity="entity", options=options).fit()
 
 
@@ -178,18 +193,18 @@ def _fit(scenario: str, cov_type: str, *, dk_bandwidth: int | None = None):
 
 
 @pytest.mark.parametrize("scenario, cov_type", ONE_WAY_CASES)
-def test_synthetic_one_way_matches_plm(crosscheck, scenario, cov_type):
+def test_matches_plm_one_way(crosscheck, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
     _check_result(
         _fit(scenario, cov_type),
-        crosscheck[scenario]["one_way"][cov_type],
+        crosscheck["synthetic"][scenario]["one_way"][cov_type],
         f"{scenario}/one_way/{cov_type}",
         expected_df=_expected_df(df, cov_type),
         n_slopes=df.width - 3,
     )
 
 
-# ── bandwidth == T-1（fixestが最終ラグを落とす境界、plmのみが参照値） ─────
+# ── bandwidth == T-1（fixestのoff-by-oneで最終ラグが落ちる境界、plmのみが参照値） ──
 
 
 @pytest.mark.parametrize("scenario", MAX_BANDWIDTH_SCENARIOS)
@@ -200,25 +215,31 @@ def test_dk_max_bandwidth_matches_plm(crosscheck, scenario):
 
     _check_result(
         res,
-        crosscheck["dk_max_bandwidth"][scenario],
+        crosscheck["synthetic"]["dk_max_bandwidth"][scenario],
         f"{scenario}/one_way/dk_max_bandwidth",
         expected_df=n_periods - 1,
         n_slopes=df.width - 3,
     )
 
 
-# ── dkのバンド幅を既定値以外で明示指定（0, 1） ─────────────────────────
+# ── dkの明示バンド幅 ──────────────────────────────────────────────────
+
+# 既定値以外の0・1・3（T=25は12も）。
 
 
-@pytest.mark.parametrize("bandwidth", EXPLICIT_BANDWIDTHS)
-@pytest.mark.parametrize("scenario", EXPLICIT_BANDWIDTH_SCENARIOS)
+@pytest.mark.parametrize(
+    "scenario, bandwidth", bandwidth_cases(DK_EXPLICIT_BANDWIDTHS)
+)
 def test_dk_explicit_bandwidth_matches_plm(crosscheck, scenario, bandwidth):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
     res = _fit_frame(df, "dk", dk_bandwidth=bandwidth)
 
+    assert res.dk_bandwidth_used == bandwidth
     _check_result(
         res,
-        crosscheck["dk_explicit_bandwidth"][scenario][str(bandwidth)],
+        crosscheck["synthetic"]["dk_explicit_bandwidth"][scenario][
+            str(bandwidth)
+        ],
         f"{scenario}/one_way/dk_bandwidth_{bandwidth}",
         expected_df=df["time"].n_unique() - 1,
         n_slopes=df.width - 3,
@@ -235,7 +256,7 @@ def test_dk_three_periods_matches_plm(crosscheck):
 
     _check_result(
         res,
-        crosscheck["boundary"]["dk_three_periods"],
+        crosscheck["synthetic"]["boundary"]["dk_three_periods"],
         "boundary/dk_three_periods",
         expected_df=2,
         n_slopes=2,
@@ -250,7 +271,7 @@ def test_cluster_g3_two_slopes_matches_plm(crosscheck):
 
     _check_result(
         res,
-        crosscheck["boundary"]["cluster_g3_two_slopes"],
+        crosscheck["synthetic"]["boundary"]["cluster_g3_two_slopes"],
         "boundary/cluster_g3_two_slopes",
         expected_df=2,
         n_slopes=2,
@@ -259,12 +280,12 @@ def test_cluster_g3_two_slopes_matches_plm(crosscheck):
 
 def test_cluster_g2_matches_plm(crosscheck):
     """クラスタ数境界（G=2、q=1でG>q）。先頭2 entityだけ残して作る。"""
-    df = first_entities_frame("fe_baseline_k1.csv", 2)
+    df = first_entities_frame(K1_CSV, 2)
     res = _fit_frame(df, "cluster")
 
     _check_result(
         res,
-        crosscheck["boundary"]["cluster_g2"],
+        crosscheck["synthetic"]["boundary"]["cluster_g2"],
         "boundary/cluster_g2",
         expected_df=1,
         n_slopes=1,
@@ -280,7 +301,7 @@ def test_skewed_entity_sizes_cluster_matches_plm(crosscheck):
 
     _check_result(
         res,
-        crosscheck["boundary"]["skewed_entity_sizes"],
+        crosscheck["synthetic"]["boundary"]["skewed_entity_sizes"],
         "boundary/skewed_entity_sizes",
         expected_df=df["entity"].n_unique() - 1,
         n_slopes=2,
@@ -293,18 +314,21 @@ def test_skewed_entity_sizes_cluster_matches_plm(crosscheck):
 @pytest.mark.parametrize("cov_type", WAGEPAN_COV_TYPES)
 def test_wagepan_one_way_matches_plm(crosscheck, cov_type):
     df = load_wooldridge_dataset("wagepan")
+    options = _options(cov_type, dk_time=WAGEPAN_TIME)
     res = FE(
         df,
         y=WAGEPAN_Y,
         x=WAGEPAN_X,
         entity=WAGEPAN_ENTITY,
-        options=FEOptions(cov_type=cov_type),
+        options=options,
     ).fit()
 
     _check_result(
         res,
-        crosscheck["wagepan"]["one_way"][cov_type],
+        crosscheck["wooldridge"]["wagepan"]["one_way"][cov_type],
         f"wagepan/one_way/{cov_type}",
-        expected_df=_expected_df(df, cov_type, entity=WAGEPAN_ENTITY),
+        expected_df=_expected_df(
+            df, cov_type, entity=WAGEPAN_ENTITY, time=WAGEPAN_TIME
+        ),
         n_slopes=len(WAGEPAN_X),
     )

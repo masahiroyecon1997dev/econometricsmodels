@@ -19,25 +19,30 @@
 //! これに委譲する）が`PyDataFrame`を受け取り、`.into()`で`DataFrame`に変換して
 //! から`build_probit_input`を呼ぶ（`logit.rs`の`fit`関数と同じ変換パターン）。
 
+use crate::shared::errors::guard;
 use engine::nonlinear::common::{
     CovType as EngineCovType, MleFitOptions, SolverType as EngineSolverType,
 };
 use engine::nonlinear::probit::{ProbitEstimator, ProbitInput};
-use polars::prelude::{Column, DataFrame};
+use polars::prelude::DataFrame;
 use pyo3::prelude::*;
-use pyo3_polars::PyDataFrame;
 
 use super::common::{
-    MarginalEffectsResult, mat_to_nested_vec, mle_error_to_pyerr, parse_cov_type,
-    parse_marginal_effects_at, parse_solver_type,
+    MarginalEffectsResult, check_cov_options, mat_to_nested_vec, mle_error_to_pyerr,
+    parse_cov_kind, parse_marginal_effects_at, parse_solver_type, resolve_cov_type,
+    resolve_mle_tol_default, solver_name,
 };
-use crate::column_extraction::{
-    extract_dataframe, extract_f64_column, extract_f64_columns, x_column_names,
+use crate::shared::augment::append_predicted_column;
+use crate::shared::column_error::ColumnSource;
+use crate::shared::column_extraction::{
+    SelectedData, extract_f64_column, extract_f64_columns, extract_model_x_columns,
+    select_model_x_columns,
 };
-use crate::option_values::{
+use crate::shared::option_repr::PyRepr;
+use crate::shared::option_values::{
     extract_strict_float, extract_strict_int, extract_strict_opt_column, extract_strict_text,
 };
-use crate::validation::{validate_common_roles, validate_no_existing_column};
+use crate::shared::validation::validate_common_roles;
 
 /// Estimation options for Probit.
 ///
@@ -119,6 +124,14 @@ pub struct ProbitOptions {
     pub raise_on_non_convergence: bool,
 }
 
+impl ProbitOptions {
+    /// このオプションが指名するデータの列（`cluster`）。使われるかどうか（`cov_type`等）には
+    /// よらず、指名されたものを全て返す。`fit()`はこれらと`y`・`x`等だけをデータから取り込む。
+    pub(crate) fn data_columns(&self) -> Vec<String> {
+        self.cluster.iter().cloned().collect()
+    }
+}
+
 #[pymethods]
 impl ProbitOptions {
     #[new]
@@ -134,22 +147,17 @@ impl ProbitOptions {
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
-        #[pyo3(from_py_with = crate::option_values::cov_type_arg)] cov_type: String,
+        #[pyo3(from_py_with = crate::shared::option_values::cov_type_arg)] cov_type: String,
         include_intercept: bool,
-        #[pyo3(from_py_with = crate::option_values::confidence_level_arg)] confidence_level: f64,
-        #[pyo3(from_py_with = crate::option_values::cluster_arg)] cluster: Option<String>,
-        #[pyo3(from_py_with = crate::option_values::solver_arg)] solver: String,
-        #[pyo3(from_py_with = crate::option_values::max_iter_arg)] max_iter: i64,
-        #[pyo3(from_py_with = crate::option_values::tol_arg)] tol: Option<f64>,
+        #[pyo3(from_py_with = crate::shared::option_values::confidence_level_arg)] confidence_level: f64,
+        #[pyo3(from_py_with = crate::shared::option_values::cluster_arg)] cluster: Option<String>,
+        #[pyo3(from_py_with = crate::shared::option_values::solver_arg)] solver: String,
+        #[pyo3(from_py_with = crate::shared::option_values::max_iter_arg)] max_iter: i64,
+        #[pyo3(from_py_with = crate::shared::option_values::tol_arg)] tol: Option<f64>,
         raise_on_non_convergence: bool,
     ) -> Self {
-        // `tol`の既定値のsolver依存分岐は`LogitOptions::new`と同じ理由
-        // （`tol`フィールドのdocコメント参照）。
-        let tol = tol.unwrap_or(if solver.eq_ignore_ascii_case("newton") {
-            1e-6
-        } else {
-            1e-8
-        });
+        // `tol`の既定値はsolver依存（理由は`resolve_mle_tol_default`参照）。
+        let tol = resolve_mle_tol_default(&solver, tol);
         Self {
             cov_type,
             include_intercept,
@@ -200,16 +208,16 @@ impl ProbitOptions {
 
     fn __repr__(&self) -> String {
         format!(
-            "ProbitOptions(cov_type={:?}, include_intercept={}, confidence_level={}, \
-             cluster={:?}, solver={:?}, max_iter={}, tol={}, raise_on_non_convergence={})",
-            self.cov_type,
-            self.include_intercept,
-            self.confidence_level,
-            self.cluster,
-            self.solver,
-            self.max_iter,
-            self.tol,
-            self.raise_on_non_convergence
+            "ProbitOptions(cov_type={}, include_intercept={}, confidence_level={}, \
+             cluster={}, solver={}, max_iter={}, tol={}, raise_on_non_convergence={})",
+            self.cov_type.py_repr(),
+            self.include_intercept.py_repr(),
+            self.confidence_level.py_repr(),
+            self.cluster.py_repr(),
+            self.solver.py_repr(),
+            self.max_iter.py_repr(),
+            self.tol.py_repr(),
+            self.raise_on_non_convergence.py_repr()
         )
     }
 }
@@ -217,7 +225,7 @@ impl ProbitOptions {
 /// Estimation results for Probit.
 ///
 /// Structured data only (no `summary()`); see `docs/spec/nonlinear-common.md`
-/// section 5. Row-oriented table construction (e.g. a `coef_table`) is left to
+/// section 5. Row-oriented table construction (e.g. a `params_table`) is left to
 /// `python_package`. All array-valued fields (`params`, `std_errors`, etc.) share the
 /// same order as `param_names`.
 ///
@@ -298,20 +306,36 @@ pub struct ProbitResult {
     /// Not exposed to Python; only `predict`/`pred_table`/`marginal_effects` read it
     /// (`LogitResult`の`estimator`と同じ位置づけ、コメント参照)。
     estimator: ProbitEstimator,
-    /// The original polars DataFrame passed to `fit()`, cached for
-    /// `augment(new_data=None)` (`LogitResult`の`training_data`と同じ
-    /// 位置づけ)。
-    training_data: DataFrame,
+    /// The `polars.DataFrame` passed to `fit()`, as given. `augment(new_data=None)` appends
+    /// the predicted column to it, so every column is kept, including the ones the model
+    /// does not read.
+    source_data: Py<PyAny>,
 }
 
 // `#[pymethods]`ブロックの外に置く非公開実装（`LogitResult`と同じ理由）。
 impl ProbitResult {
+    /// `new_data`から`predict()`/`augment()`が使う`x`列だけを取り込む。
+    fn select_new_data(&self, new_data: &Bound<'_, PyAny>) -> PyResult<SelectedData> {
+        select_model_x_columns(
+            new_data,
+            "new_data",
+            &self.param_names,
+            self.estimator.input().has_intercept(),
+            0,
+        )
+    }
+
     /// `predict()`/`augment()`のSome分岐で共有する、`df`に対するout-of-sample予測
     /// （`x`列の抽出→`predict_new_data`呼び出し）。
     fn predict_for(&self, df: &DataFrame) -> PyResult<Vec<f64>> {
         let has_intercept = self.estimator.input().has_intercept();
-        let x_names = x_column_names(&self.param_names, has_intercept, 0);
-        let x_columns = extract_f64_columns(df, x_names)?;
+        let x_columns = extract_model_x_columns(
+            df,
+            &self.param_names,
+            has_intercept,
+            0,
+            ColumnSource::new("x", "new_data"),
+        )?;
 
         Ok(self.estimator.predict_new_data(&x_columns))
     }
@@ -328,12 +352,14 @@ impl ProbitResult {
     ///   (same validation as `fit()`'s column extraction, via `extract_f64_column`).
     #[pyo3(signature = (new_data=None))]
     fn predict(&self, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<f64>> {
-        let Some(new_data) = new_data else {
-            return Ok(self.estimator.predict());
-        };
+        guard(|| {
+            let Some(new_data) = new_data else {
+                return Ok(self.estimator.predict());
+            };
 
-        let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
-        self.predict_for(&df)
+            let selected = self.select_new_data(new_data)?;
+            self.predict_for(&selected.frame)
+        })
     }
 
     /// The source data (training data, or `new_data` when given) with the predicted
@@ -349,24 +375,19 @@ impl ProbitResult {
     /// - The source data already has a column named `"predicted_probability"`:
     ///   `ValidationError` (would otherwise silently overwrite it).
     #[pyo3(signature = (new_data=None))]
-    fn augment(&self, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<PyDataFrame> {
-        let (mut source, probability) = match new_data {
-            Some(new_data) => {
-                let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
-                let probability = self.predict_for(&df)?;
-                (df, probability)
-            }
-            None => (self.training_data.clone(), self.estimator.predict()),
-        };
+    fn augment(&self, py: Python<'_>, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<Py<PyAny>> {
+        guard(|| {
+            let (source, probability) = match new_data {
+                Some(new_data) => {
+                    let selected = self.select_new_data(new_data)?;
+                    let probability = self.predict_for(&selected.frame)?;
+                    (new_data.clone(), probability)
+                }
+                None => (self.source_data.bind(py).clone(), self.estimator.predict()),
+            };
 
-        validate_no_existing_column(&source, "predicted_probability")?;
-
-        // `with_column`の唯一の失敗条件（`ShapeMismatch`）はここでは理論上到達不能
-        // （`LogitResult::augment()`と同じ理由）。
-        source
-            .with_column(Column::new("predicted_probability".into(), probability))
-            .expect("probability.len() matches source.height() by construction");
-        Ok(PyDataFrame(source))
+            append_predicted_column(&source, "predicted_probability", probability)
+        })
     }
 
     /// 2x2 classification table as `[[row0], [row1]]`, where row/column index 0 is the
@@ -377,8 +398,8 @@ impl ProbitResult {
     /// `engine::nonlinear::probit::ProbitEstimator::pred_table` for the exact semantics).
     /// Out-of-sample data is not yet supported (same limitation as `predict()`).
     #[pyo3(signature = (threshold=0.5))]
-    fn pred_table(&self, threshold: f64) -> Vec<Vec<f64>> {
-        mat_to_nested_vec(&self.estimator.pred_table(threshold))
+    fn pred_table(&self, threshold: f64) -> PyResult<Vec<Vec<f64>>> {
+        guard(|| Ok(mat_to_nested_vec(&self.estimator.pred_table(threshold))))
     }
 
     /// Marginal effects (`dy/dx`) with delta-method standard errors.
@@ -397,20 +418,22 @@ impl ProbitResult {
         at: String,
         confidence_level: f64,
     ) -> PyResult<MarginalEffectsResult> {
-        let at = parse_marginal_effects_at(&at.to_lowercase())?;
-        let effects = self
-            .estimator
-            .marginal_effects(at, confidence_level)
-            .map_err(mle_error_to_pyerr)?;
+        guard(|| {
+            let at = parse_marginal_effects_at(&at)?;
+            let effects = self
+                .estimator
+                .marginal_effects(at, confidence_level)
+                .map_err(mle_error_to_pyerr)?;
 
-        Ok(MarginalEffectsResult {
-            param_names: effects.param_names().to_vec(),
-            effect: effects.effect().to_vec(),
-            std_errors: effects.std_errors().to_vec(),
-            test_stats: effects.test_stats().to_vec(),
-            p_values: effects.p_values().to_vec(),
-            conf_lower: effects.conf_lower().to_vec(),
-            conf_upper: effects.conf_upper().to_vec(),
+            Ok(MarginalEffectsResult {
+                param_names: effects.param_names().to_vec(),
+                effect: effects.effect().to_vec(),
+                std_errors: effects.std_errors().to_vec(),
+                test_stats: effects.test_stats().to_vec(),
+                p_values: effects.p_values().to_vec(),
+                conf_lower: effects.conf_lower().to_vec(),
+                conf_upper: effects.conf_upper().to_vec(),
+            })
         })
     }
 }
@@ -432,27 +455,30 @@ pub(crate) fn build_probit_input(
     y: String,
     x: Vec<String>,
     options: &ProbitOptions,
-) -> PyResult<(ProbitInput, EngineCovType, EngineSolverType)> {
-    let cov_type_lower = options.cov_type.to_lowercase();
-    let solver_lower = options.solver.to_lowercase();
+) -> PyResult<(ProbitInput, EngineCovType, String, EngineSolverType)> {
+    // DataFrameを見ない検査を先に行う。報告順は`docs/guide/validation.md`
+    // 「Order in which errors are reported」: オプションの値（`cov_type` → `solver`）→
+    // オプションの組合せ → ロール構造 → `y`/`x`の列 → オプション列 → エンジン。
+    let cov_kind = parse_cov_kind(&options.cov_type)?;
+    let solver = parse_solver_type(&options.solver)?;
+    check_cov_options(cov_kind, options.cluster.as_deref())?;
 
     // 完全な多重共線性を早期に、分かりやすいエラーで防ぐ（`validation.rs`に集約、
     // OLS/WLS/Logitと共通、`.claude/rules/rust-style.md`参照）。
     validate_common_roles(&y, &x, options.include_intercept)?;
 
     // ── y列の抽出 ──────────────────────────────────────────────────────
-    let y_slice = extract_f64_column(df, &y)?;
+    let y_slice = extract_f64_column(df, &y, ColumnSource::new("y", "data"))?;
 
     // ── x列の抽出 ──────────────────────────────────────────────────────
-    let x_slices = extract_f64_columns(df, &x)?;
+    let x_slices = extract_f64_columns(df, &x, ColumnSource::new("x", "data"))?;
 
-    let cov_type = parse_cov_type(df, &cov_type_lower, &options.cluster)?;
-    let solver = parse_solver_type(&solver_lower)?;
+    let cov_type = resolve_cov_type(df, cov_kind, options.cluster.as_deref())?;
 
     let input = ProbitInput::from_columns(&y_slice, &x_slices, x, options.include_intercept, y)
         .map_err(mle_error_to_pyerr)?;
 
-    Ok((input, cov_type, solver))
+    Ok((input, cov_type, cov_kind.name().to_string(), solver))
 }
 
 /// Pythonから渡された `data` / `y` / `x` / `options` を検証し、
@@ -467,13 +493,13 @@ pub(crate) fn build_probit_input(
 ///   クラスター数不足等）は`mle_error_to_pyerr`で変換（詳細は
 ///   `engine::nonlinear::probit::ProbitEstimator::fit`のdocコメント参照）
 pub(crate) fn fit(
-    data: PyDataFrame,
+    data: SelectedData,
     y: String,
     x: Vec<String>,
     options: &ProbitOptions,
 ) -> PyResult<ProbitResult> {
-    let df: DataFrame = data.into();
-    let (input, cov_type, solver) = build_probit_input(&df, y, x, options)?;
+    let SelectedData { source, frame: df } = data;
+    let (input, cov_type, cov_type_lower, solver) = build_probit_input(&df, y, x, options)?;
 
     let estimator = ProbitEstimator::fit(
         input,
@@ -512,16 +538,17 @@ pub(crate) fn fit(
         df_resid: estimator.df_resid(),
         converged: estimator.converged(),
         n_iter: estimator.n_iter(),
-        cov_type: options.cov_type.to_lowercase(),
-        solver: options.solver.to_lowercase(),
+        cov_type: cov_type_lower,
+        solver: solver_name(solver).to_string(),
         estimator,
-        training_data: df,
+        source_data: source,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use engine::shared::group_codes::GroupCodes;
     use polars::df;
 
     /// `build_probit_input`のテスト全体で使う既定の`ProbitOptions`（`cov_type="classical"`・
@@ -595,7 +622,7 @@ mod tests {
         let df = well_formed_df();
         let options = default_options();
 
-        let Ok((input, cov_type, solver)) = build_probit_input(
+        let Ok((input, cov_type, _, solver)) = build_probit_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string(), "x2".to_string()],
@@ -621,7 +648,7 @@ mod tests {
         let mut options = default_options();
         options.include_intercept = false;
 
-        let Ok((input, _, _)) =
+        let Ok((input, _, _, _)) =
             build_probit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
         else {
             panic!("expected Ok");
@@ -741,7 +768,7 @@ mod tests {
         options.cov_type = "cluster".to_string();
         options.cluster = Some("cluster".to_string());
 
-        let Ok((_, cov_type, _)) =
+        let Ok((_, cov_type, _, _)) =
             build_probit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
         else {
             panic!("expected Ok");
@@ -751,12 +778,12 @@ mod tests {
             EngineCovType::Cluster { groups } => {
                 assert_eq!(
                     groups,
-                    Some(vec![
+                    Some(GroupCodes::from_labels_without_keys(&[
                         "g1".to_string(),
                         "g1".to_string(),
                         "g2".to_string(),
                         "g2".to_string()
-                    ])
+                    ]))
                 );
             }
             other => panic!("expected Cluster, got {other:?}"),
@@ -772,7 +799,7 @@ mod tests {
         let mut options = default_options();
         options.cov_type = "cluster".to_string();
 
-        let Ok((_, cov_type, _)) =
+        let Ok((_, cov_type, _, _)) =
             build_probit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
         else {
             panic!("expected Ok");
@@ -785,8 +812,8 @@ mod tests {
     }
 
     /// `build_probit_input`（Python境界から渡された文字列を受ける入口）を通した
-    /// 大文字小文字非依存性の検証（`build_logit_input`の同名テストと同じ理由、
-    /// `testing-completeness-reviewer`指摘）。
+    /// 大文字小文字非依存性と、戻り値の正規形の文字列（`ProbitResult.cov_type`に格納する値）の
+    /// 検証（`build_logit_input`の同名テストと同じ理由、`testing-completeness-reviewer`指摘）。
     #[test]
     fn build_probit_input_cov_type_is_case_insensitive() {
         let df = well_formed_df();
@@ -805,7 +832,7 @@ mod tests {
         ] {
             let mut options = default_options();
             options.cov_type = input.to_string();
-            let Ok((_, cov_type, _)) = build_probit_input(
+            let Ok((_, cov_type, cov_type_name, _)) = build_probit_input(
                 &df,
                 "y".to_string(),
                 vec!["x1".to_string(), "x2".to_string()],
@@ -814,6 +841,7 @@ mod tests {
                 panic!("expected Ok for cov_type={input}");
             };
             assert!(is_expected(&cov_type), "input={input}, got={cov_type:?}");
+            assert_eq!(cov_type_name, input.to_lowercase(), "input={input}");
         }
     }
 }

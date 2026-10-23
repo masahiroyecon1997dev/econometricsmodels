@@ -15,12 +15,11 @@ WLS（Weighted Least Squares）の確定済み仕様。`engine/src/linear/wls.rs
   理由: `cluster`/`hac_time`は`cov_type`に応じた条件付き・デフォルトありの「推定方法の設定」
   だが、`weight`はモデルそのものを規定する必須データであり、性質が異なる。この分類はFE
   （`entity_id`）・IV（`instruments`）等、今後の必須データ列にも適用する。
-- 専用の`WLSOptions`型を新設し（2026-09-12）、`OLSOptions`と完全に同一のフィールド
+- 専用の`WLSOptions`型を持ち、`OLSOptions`と完全に同一のフィールド
   構成（`cov_type`/`include_intercept`/`confidence_level`/`cluster`/`hac_lags`/`hac_time`、
-  意味論もOLSと完全に同じ）を持つ独立したpyclassとして実装する。当初は専用型を新設せず
-  `OLSOptions`をそのまま再利用していたが、`WLSResult`が元から独立型だったのと非対称だった
-  ことと、将来WLS固有のオプションが必要になった際に`OLSOptions`/OLS利用者へ影響を与えずに
-  拡張できるようにするため、独立型に変更した。このフィールド重複自体は意図的に共通base
+  意味論もOLSと完全に同じ）を持つ独立したpyclassとして実装する。結果型`WLSResult`が独立型なのと
+  対称にするためと、将来WLS固有のオプションが必要になった際に`OLSOptions`/OLS利用者へ影響を
+  与えずに拡張できるようにするため、`OLSOptions`を再利用せず独立型にしている。このフィールド重複自体は意図的に共通base
   構造体へ切り出さない（PyO3の`#[pyclass]`コンストラクタがフラットなkwargs surface前提の
   ため。`IVOptions`が`OLSOptions`と同種のフィールドを独立再定義している既存precedentとも
   一貫している。`engine_pybind/src/linear/CLAUDE.md`参照）。
@@ -124,7 +123,7 @@ $$
 
 ### 3.5 `predict()`
 
-`WLSResults.predict(new_data: pl.DataFrame | None = None) -> list[dict[str, float]]`。
+`WLSResults.predict(new_data: pl.DataFrame | None = None) -> list[float]`。
 OLSの`predict()`（`ols-spec.md`「predict()」）と完全に同じ設計・シグネチャを適用する。
 
 - **重みは予測値の計算に一切関与しない**。「学習データに対する重み付き予測値」という概念自体が
@@ -140,21 +139,23 @@ OLSの`predict()`（`ols-spec.md`「predict()」）と完全に同じ設計・�
   純粋関数、係数と設計行列だけから予測値を計算し重みの概念を持たない）をそのまま再利用する
   （`WlsEstimator`が内部で`OlsEstimator`をラップする設計のため、この関数はWLS/OLSのどちらで
   推定した係数にも同じように使える）。
-- 戻り値のキー名は`"predicted"`（OLSと統一）。
+- 戻り値は観測順の`list[float]`（OLSと統一）。
 
 ### 3.6 `augment()`
 
 `WLSResults.augment(new_data: pl.DataFrame | None = None) -> pl.DataFrame`。
 OLSの`augment()`（`ols-spec.md`「augment()」）と完全に同じ設計・シグネチャを適用する。
-`predict()`と同様、重みは計算に一切関与しない。`WLSResult`（Rust）は`fit()`時の元DataFrameを
-`training_data: DataFrame`として非公開保持する（`OLSResult`と異なり`IVResult.first_stage()`の
-ような別経路の構築元が無いため`Option`にせず常に保持する）。
+`predict()`と同様、重みは計算に一切関与しない。`WLSResult`（Rust）は`fit()`に渡された元の
+`polars.DataFrame`を非公開保持し（`OLSResult`と異なり`IVResult.first_stage()`のような別経路の構築元が
+無いため`Option`にせず常に保持する）、`augment(new_data=None)`はそれに予測値の列を足して返す
+（推定に使わない列も残る。`ols-spec.md`「augment()」）。
 
 ### 3.7 テスト
 
-- 許容誤差: classical/HC0-3/clusterはOLSと同じ`rtol_strict=1e-8`（`tests/_tolerances.py`の`wls_crosscheck`）（Rとの実測でほぼ機械精度）。
-  **HACのみOLSより緩い`rtol_hac=5e-2`**（OLSは1e-2。実測最大相対誤差約4.3%、重み付けによる
-  小標本補正の慣習差の増幅が原因と推測、未調査）。
+- 許容誤差: classical/HC0-3/clusterはOLSと同じ`rtol_strict=1e-8`（`tests/support/_tolerances_linear.py`の`wls_crosscheck`）（Rとの実測でほぼ機械精度）。
+  HACもOLSと同じ`rtol_strict`（R側は`NeweyWest(adjust = FALSE)`。既定の`adjust = TRUE`は共分散に
+  `n/(n-k)`を掛けるが本実装・statsmodelsは掛けず、WLSでもこのスカラー倍だけが差の全てで、
+  OLSと同じ値になる。以前の`rtol_hac=5e-2`（実測約4.3%）は現在の入力では再現しない）。
 - 実データセット: `401ksubs`（`fsize==1`の単身世帯サブサンプル、n=2017）、Wooldridge Example
   8.5・8.6と同じ変数構成`nettfa ~ inc + incsq + age + agesq + male + e401k`、重みは`1/inc`
   （`inv_inc`列）。Example 8.6のfeasible GLS（分散モデル自体の推定）は本実装のスコープ外のため

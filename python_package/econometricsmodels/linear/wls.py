@@ -27,6 +27,11 @@ import polars as pl
 
 from .. import _lib
 from .._lib import WLSOptions
+from .._results_utils import (
+    by_param,
+    conf_int_by_param,
+    params_table_rows,
+)
 
 __all__ = ["WLS", "WLSOptions", "WLSResults"]
 
@@ -102,7 +107,7 @@ class WLSResults:
 
     Array-valued properties (`params`, `std_errors`, etc.) are exposed
     as dictionaries keyed by coefficient name (for O(1) lookup of a
-    single parameter). Use `coef_table()` for a row-oriented listing
+    single parameter). Use `params_table()` for a row-oriented listing
     (same shape as `OLSResults`; see
     `docs/spec/ols-spec.md`, "結果構造体").
 
@@ -129,18 +134,18 @@ class WLSResults:
     @property
     def params(self) -> dict[str, float]:
         """Coefficient name to coefficient value."""
-        return dict(zip(self._raw.param_names, self._raw.params))
+        return by_param(self._raw.param_names, self._raw.params)
 
     @property
     def std_errors(self) -> dict[str, float]:
         """Coefficient name to standard error."""
-        return dict(zip(self._raw.param_names, self._raw.std_errors))
+        return by_param(self._raw.param_names, self._raw.std_errors)
 
     @property
     def test_stats(self) -> dict[str, float]:
         """Coefficient name to test statistic (t-statistic; see
         `stat_dist`)."""
-        return dict(zip(self._raw.param_names, self._raw.test_stats))
+        return by_param(self._raw.param_names, self._raw.test_stats)
 
     @property
     def stat_dist(self) -> Literal["t", "normal"]:
@@ -159,19 +164,12 @@ class WLSResults:
     @property
     def p_values(self) -> dict[str, float]:
         """Coefficient name to two-sided p-value."""
-        return dict(zip(self._raw.param_names, self._raw.p_values))
+        return by_param(self._raw.param_names, self._raw.p_values)
 
     @property
     def conf_int(self) -> dict[str, tuple[float, float]]:
         """Coefficient name to confidence interval `(lower, upper)`."""
-        return {
-            name: (lower, upper)
-            for name, lower, upper in zip(
-                self._raw.param_names,
-                self._raw.conf_lower,
-                self._raw.conf_upper,
-            )
-        }
+        return conf_int_by_param(self._raw)
 
     @property
     def residuals(self) -> list[float]:
@@ -212,26 +210,28 @@ class WLSResults:
         return self._raw.adj_r_squared
 
     @property
-    def f_statistic(self) -> float:
-        """F-statistic."""
+    def f_statistic(self) -> float | None:
+        """F-statistic of the overall test that all slope coefficients are
+        zero (`None` when there are no slope coefficients)."""
         return self._raw.f_statistic
 
     @property
-    def f_p_value(self) -> float:
-        """P-value of the F-statistic."""
+    def f_p_value(self) -> float | None:
+        """P-value of the F-statistic (`None` when `f_statistic` is
+        `None`)."""
         return self._raw.f_p_value
 
     @property
     def f_df_num(self) -> int | None:
-        """Numerator degrees of freedom of `f_statistic` (`None` when it
-        is NaN, i.e. there are no slope coefficients)."""
+        """Numerator degrees of freedom of `f_statistic` (`None` when
+        `f_statistic` is `None`)."""
         return self._raw.f_df_num
 
     @property
     def f_df_denom(self) -> int | None:
-        """Denominator degrees of freedom of `f_statistic` (`None` when it
-        is NaN). May differ from `df_resid`, so use this to recompute the
-        p-value from `f_statistic`."""
+        """Denominator degrees of freedom of `f_statistic` (`None` when
+        `f_statistic` is `None`). May differ from `df_resid`, so use this to recompute
+        the p-value from `f_statistic`."""
         return self._raw.f_df_denom
 
     @property
@@ -260,7 +260,7 @@ class WLSResults:
         """Bayesian Information Criterion (BIC)."""
         return self._raw.bic
 
-    def coef_table(self) -> list[dict[str, float | str]]:
+    def params_table(self) -> list[dict[str, float | str]]:
         """Row-oriented summary table of the coefficients.
 
         Shaped to be usable almost as-is in a REST API response (see
@@ -271,33 +271,12 @@ class WLSResults:
 
         Returns:
             A list of dictionaries, one per coefficient. Keys are
-            `param`, `coef`, `std_err`, `test_stat`, `p_value`,
+            `param_name`, `param`, `std_error`, `test_stat`, `p_value`,
             `conf_lower`, `conf_upper`.
         """
-        return [
-            {
-                "param": name,
-                "coef": coef,
-                "std_err": se,
-                "test_stat": t,
-                "p_value": p,
-                "conf_lower": lower,
-                "conf_upper": upper,
-            }
-            for name, coef, se, t, p, lower, upper in zip(
-                self._raw.param_names,
-                self._raw.params,
-                self._raw.std_errors,
-                self._raw.test_stats,
-                self._raw.p_values,
-                self._raw.conf_lower,
-                self._raw.conf_upper,
-            )
-        ]
+        return params_table_rows(self._raw)
 
-    def predict(
-        self, new_data: pl.DataFrame | None = None
-    ) -> list[dict[str, float]]:
+    def predict(self, new_data: pl.DataFrame | None = None) -> list[float]:
         """Predicted values.
 
         Same design as `OLSResults.predict()`: unified into a single
@@ -318,16 +297,15 @@ class WLSResults:
                 same original (unweighted) scale as `residuals`.
 
         Returns:
-            Row-oriented predictions, one dict per observation. Each
-            dict currently has a single key, `"predicted"`.
+            Predicted values, one per observation, in row order (like
+            `residuals`).
 
         Raises:
             ValidationError: `new_data` is missing a required `x`
                 column, or a column contains missing/NaN/infinite
                 values.
         """
-        raw = self._raw.predict(new_data)
-        return [{"predicted": value} for value in raw]
+        return self._raw.predict(new_data)
 
     def augment(self, new_data: pl.DataFrame | None = None) -> pl.DataFrame:
         """Source data with the predicted values appended as a column.

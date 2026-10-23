@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from benchmark.common.reference.normalize import normalize_names
-from benchmark.common.reference.r import run_r
+from benchmark.common.reference.r import resolve_hac_lag, run_r
 
 _R_SCRIPT = Path(__file__).resolve().parent / "run_lm_crosscheck.R"
 
@@ -46,7 +46,9 @@ def run_lm_r(
             対応するため、スクリプト側の引数追加は不要）。
         cov_type: classical / hc0-3 / cluster / hac。
         cluster: `cov_type="cluster"` のときのグループ列名。
-        hac_lag: `cov_type="hac"` のときのラグ数。
+        hac_lag: `cov_type="hac"` のときのラグ数。未指定なら本実装の自動選択式
+            （`hac_auto_lag(n)`、`n`はCSVの行数）。使ったラグは結果の`hac_lag`に
+            残る。
         weight_col: 指定すると WLS（`lm(weights=)`）。None なら OLS。
         confidence_level: 信頼区間の信頼水準。既定0.95以外を指定すると
             `--confidence-level=`フラグとして渡す（cov_type依存の位置引数
@@ -54,16 +56,21 @@ def run_lm_r(
             抜き出すため、位置には依存しない）。
     """
     extra: list[str] = []
+    lag = None
     if cov_type == "cluster":
         extra.append(cluster or "")
     elif cov_type == "hac":
-        extra.append(str(hac_lag))
+        lag = resolve_hac_lag(csv_path, hac_lag)
+        extra.append(str(lag))
     if weight_col is not None:
         extra.append(weight_col or "")
     if confidence_level != 0.95:
         extra.append(f"--confidence-level={confidence_level}")
 
     raw = run_r(_R_SCRIPT, csv_path, formula, cov_type, extra_args=extra)
-    return normalize_names(
+    result = normalize_names(
         raw, stat_key="test_stats", scalar_keys=_LM_SCALAR_KEYS
     )
+    if lag is not None:
+        result["hac_lag"] = lag
+    return result

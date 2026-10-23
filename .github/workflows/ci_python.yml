@@ -12,6 +12,8 @@ on:
       # benchmark/配下のフィクスチャ生成モジュールは pytest が import 時に読み込む
       # （定数・ヘルパーの単一定義元）。壊れると pytest も落ちるため CI をトリガーする。
       - "benchmark/**"
+      # エラーカタログからErrorCode・公開ドキュメントを生成するスクリプト（--checkをCIで回す）。
+      - "tools/**"
       # testジョブが import 時間チェック（performance/check_import_time.py）を回す。
       - "performance/**"
       - ".github/workflows/ci_python.yml"
@@ -61,8 +63,16 @@ jobs:
       - name: import time check (package health)
         run: uv run --locked --group test python -m performance.check_import_time
 
+      # エラーカタログ（Rustの正本）から生成したErrorCodeと公開ドキュメントの表が
+      # 最新であること。カタログを変えたら `python tools/render_error_catalog.py`
+      # で再生成してコミットする。
+      - name: error catalog outputs (--check)
+        run: uv run --locked --group test python tools/render_error_catalog.py --check
+
+      # --check-error-coverage: 全体実行の終了時に、移行済みのエラー`code`が
+      # すべて一度はテストで送出されたこと（tests/support/_errors.py）を確認する。
       - name: pytest
-        run: uv run --locked --group test pytest tests
+        run: uv run --locked --group test pytest tests --check-error-coverage
 
       - name: ruff check
         run: uv run --locked --group test ruff check .

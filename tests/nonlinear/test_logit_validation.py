@@ -18,7 +18,7 @@ import _binary_choice_checks as _checks
 import pytest
 from econometricsmodels import Logit, LogitOptions
 
-# ── ValidationError（入力データ） ───────────────────────────────────
+# ── ValidationError（入力データ） ─────────────────────────────────────
 
 
 def test_y_in_x_raises(binary_dataset):
@@ -43,6 +43,10 @@ def test_empty_x_raises(binary_dataset):
 
 def test_missing_column_raises(binary_dataset):
     _checks.check_missing_column_raises(binary_dataset, Logit)
+
+
+def test_missing_y_column_raises(binary_dataset):
+    _checks.check_missing_y_column_raises(binary_dataset, Logit)
 
 
 def test_data_not_polars_raises(binary_dataset):
@@ -70,7 +74,7 @@ def test_insufficient_observations_raises(binary_dataset):
     _checks.check_insufficient_observations_raises(binary_dataset, Logit)
 
 
-# ── ValidationError（predict()のnew_data） ─────────────────────────
+# ── ValidationError（predict()のnew_data） ────────────────────────────
 
 
 def test_predict_missing_column_raises(binary_dataset):
@@ -87,7 +91,7 @@ def test_predict_null_or_non_finite_values_raise(binary_dataset):
     )
 
 
-# ── ValidationError（augment()） ────────────────────────────────────
+# ── ValidationError（augment()） ──────────────────────────────────────
 
 
 def test_augment_column_collision_raises(binary_dataset):
@@ -98,12 +102,19 @@ def test_augment_missing_column_raises(binary_dataset):
     _checks.check_augment_missing_column_raises(binary_dataset, Logit)
 
 
-# ── ValidationError（オプション） ──────────────────────────────────
+# ── ValidationError（オプション） ─────────────────────────────────────
 
 
 @pytest.mark.parametrize("cov_type", ["bogus", ""])
 def test_unknown_cov_type_raises(binary_dataset, cov_type):
     _checks.check_unknown_cov_type_raises(
+        binary_dataset, Logit, LogitOptions, cov_type
+    )
+
+
+@pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
+def test_nonrobust_is_rejected(binary_dataset, cov_type):
+    _checks.check_nonrobust_is_rejected(
         binary_dataset, Logit, LogitOptions, cov_type
     )
 
@@ -148,6 +159,21 @@ def test_cluster_count_at_most_slopes_raises_validation_error(binary_dataset):
     )
 
 
+@pytest.mark.parametrize("n_groups", [2, 3])
+def test_cluster_count_at_most_slopes_on_baseline_raises_validation_error(
+    n_groups,
+):
+    _checks.check_cluster_count_at_most_slopes_on_baseline_raises_validation_error(
+        Logit, "logit", LogitOptions, n_groups
+    )
+
+
+def test_cluster_count_just_above_slopes_succeeds():
+    _checks.check_cluster_count_just_above_slopes_succeeds(
+        Logit, "logit", LogitOptions
+    )
+
+
 def test_mroz_cluster_cov_type_raises_validation_error():
     _checks.check_mroz_cluster_cov_type_raises_validation_error(
         Logit, LogitOptions
@@ -166,22 +192,23 @@ def test_cluster_nonexistent_column_raises(binary_dataset):
     )
 
 
-# ── ValidationError（marginal_effects()） ─────────────────────────
+# ── ValidationError（marginal_effects()） ─────────────────────────────
 
 
 def test_marginal_effects_unknown_at_raises(binary_dataset):
     _checks.check_marginal_effects_unknown_at_raises(binary_dataset, Logit)
 
 
+@pytest.mark.parametrize("confidence_level", [1.5, 0.0, -0.1])
 def test_marginal_effects_confidence_level_out_of_range_raises(
-    binary_dataset,
+    binary_dataset, confidence_level
 ):
     _checks.check_marginal_effects_confidence_level_out_of_range_raises(
-        binary_dataset, Logit
+        binary_dataset, Logit, confidence_level
     )
 
 
-# ── ComputationError ──────────────────────────────────────────────
+# ── ComputationError ──────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
@@ -191,17 +218,83 @@ def test_perfect_multicollinearity_raises_computation_error(solver):
     )
 
 
+_SEPARATION_SCENARIOS = ["complete_separation", "quasi_complete_separation"]
+
+
+@pytest.mark.parametrize("scenario", _SEPARATION_SCENARIOS)
 @pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
-def test_complete_separation_raises_computation_error(solver):
-    _checks.check_complete_separation_raises_computation_error(
-        Logit, "logit", LogitOptions, solver
+def test_separation_raises_computation_error(solver, scenario):
+    _checks.check_separation_raises_computation_error(
+        Logit, "logit", LogitOptions, solver, scenario
+    )
+
+
+@pytest.mark.parametrize("scenario", _SEPARATION_SCENARIOS)
+def test_separation_is_reported_as_separation_by_newton(scenario):
+    _checks.check_separation_is_reported_as_separation_by_newton(
+        Logit, "logit", LogitOptions, scenario
+    )
+
+
+@pytest.mark.parametrize("scenario", _SEPARATION_SCENARIOS)
+@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
+def test_separation_with_raise_on_non_convergence_false(solver, scenario):
+    _checks.check_separation_with_raise_on_non_convergence_false(
+        Logit, "logit", LogitOptions, solver, scenario
+    )
+
+
+@pytest.mark.parametrize("scenario", _SEPARATION_SCENARIOS)
+def test_separation_returns_unconverged_result_for_newton(scenario):
+    _checks.check_separation_returns_unconverged_result_for_newton(
+        Logit, "logit", LogitOptions, scenario
     )
 
 
 @pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
-def test_complete_separation_with_raise_on_non_convergence_false(solver):
-    _checks.check_complete_separation_with_raise_on_non_convergence_false(
-        Logit, "logit", LogitOptions, solver
+def test_small_sample_separation_is_not_reported_as_success(solver):
+    _checks.check_small_sample_separation_is_not_reported_as_success(
+        Logit, LogitOptions, solver
+    )
+
+
+@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
+def test_multiple_dummy_separation_raises_computation_error(solver):
+    _checks.check_multiple_dummy_separation_raises_computation_error(
+        Logit, LogitOptions, solver
+    )
+
+
+@pytest.mark.parametrize("overlap", _checks.OVERLAP_ABOVE_BOUNDARY)
+@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
+def test_single_overlap_above_boundary_is_not_flagged_as_separation(
+    solver, overlap
+):
+    _checks.check_single_overlap_above_boundary_is_not_flagged_as_separation(
+        Logit, LogitOptions, solver, overlap, min_slope=250.0
+    )
+
+
+@pytest.mark.parametrize("overlap", _checks.OVERLAP_BELOW_BOUNDARY)
+@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
+def test_single_overlap_below_boundary_is_flagged_as_separation(
+    solver, overlap
+):
+    _checks.check_single_overlap_below_boundary_is_flagged_as_separation(
+        Logit, LogitOptions, solver, overlap
+    )
+
+
+def test_separation_without_intercept_raises_computation_error():
+    _checks.check_separation_without_intercept_raises_computation_error(
+        Logit, LogitOptions
+    )
+
+
+@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
+def test_strongly_collinear_regressors_are_not_rejected_as_separation(solver):
+    _checks.check_strongly_collinear_regressors_are_not_rejected_as_separation(
+        Logit, LogitOptions, "logit", solver
     )
 
 
@@ -213,10 +306,8 @@ def test_non_convergence_raises_computation_error_with_tiny_max_iter(
     )
 
 
-def test_separation_suspected_raises_computation_error_for_near_separation_data():
-    _checks.check_separation_suspected_raises_computation_error_for_near_separation_data(
-        Logit
-    )
+def test_separated_data_raises_computation_error():
+    _checks.check_separated_data_raises_computation_error(Logit)
 
 
 def test_cluster_unused_by_cov_type_raises(binary_dataset):

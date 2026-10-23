@@ -1,10 +1,12 @@
 # RE
 
-`RE` estimates a random effects (Swamy-Arora GLS) panel regression. It shares the general API
+`RE` estimates a random effects (GLS) panel regression. The variance components are estimated
+by Swamy-Arora (the default), Wallace-Hussain or Amemiya (see [Variance components](#variance-components)). It shares the general API
 shape with [OLS](ols.md) (`data`/`y`/`x`/`options` constructor, `.fit()`), but — like
 [FE](fe.md) — `entity` is a required argument, since the model has no meaning without a panel
 structure. Unlike FE, RE keeps an intercept (`REResults.param_names[0]` is always `"const"`) and
-supports entity-direction random effects only; two-way RE is not implemented.
+estimates entity-direction random effects, or entity and time random effects on a balanced panel when
+`REOptions.time` is set.
 
 ## Standard error types
 
@@ -14,7 +16,7 @@ reason. Supported values are `"classical"`, `"hc1"`, `"hc2"`, `"hc3"`, `"cluster
 `"hc0"` is not supported. `"dk"` is the same Driscoll-Kraay panel estimator FE uses, and it
 requires `REOptions.dk_time`, the column that defines the time periods (the same option as
 `FEOptions.dk_time`). The bandwidth actually used is reported as `REResults.dk_bandwidth_used`
-(`None` unless `cov_type="dk"`). RE has no `time` option, since it has no two-way structure.
+(`None` unless `cov_type="dk"`). `REOptions.time` selects two-way random effects and is a different option from `dk_time`.
 
 The small-sample corrections and the degrees of freedom of the t tests follow the same Stata/R
 convention as FE (`fixest`'s `ssc()` defaults; `plm::vcovHC(type = "sss")` for `"cluster"`):
@@ -23,6 +25,26 @@ convention as FE (`fixest`'s `ssc()` defaults; `plm::vcovHC(type = "sss")` for `
 the other types use `df_resid`. These differ from `linearmodels`, which does not apply the
 `G/(G-1)` factor. The F statistic is the exception: it does not depend on `cov_type`, so `f_df_denom` is always `df_resid` even when `stat_df` is `G - 1` or `T - 1`. See
 [Inference conventions](../guide/inference-conventions.md) for the full table.
+
+## Variance components
+
+`REOptions.variance_method` selects how the variance components `σ_ε²`, `σ_u²` (and `σ_λ²` for
+two-way effects) are estimated, and therefore the quasi-demeaning weights and the GLS estimates:
+
+- `"swamy_arora"` (default): the within and between regressions.
+- `"wallace_hussain"`: the residuals of the pooled OLS of `y` on a constant and the regressors.
+- `"amemiya"`: the residuals of the within estimator. A regressor without within variation (a
+  time-invariant regressor; in a two-way model, one that varies in at most one dimension) raises
+  `ValidationError`.
+
+Wallace-Hussain and Amemiya follow R's `plm` (`random.method = "walhus"` and `"amemiya"`): closed
+forms on a balanced panel (a one-way panel whose entities all have the same number of
+observations; two-way panels are always balanced), and trace-term forms on an unbalanced one-way
+panel. The two forms give different values on the same balanced panel, as in `plm`. If the
+estimated `σ_ε²` is not positive, `fit()` raises `ComputationError` (`plm` sets it to 0 and
+returns `NaN` weights). The method actually used is reported as `REResults.variance_method`. See
+[Inference conventions](../guide/inference-conventions.md) for the differences from `plm` and
+`linearmodels`.
 
 ## The Hausman test
 
@@ -37,8 +59,8 @@ within-transformed regressors, and the within-transformed coefficients are teste
 zero. Its properties:
 
 - The statistic is always non-negative (no indefinite variance-difference problem).
-- The comparison is always against **one-way** (entity) fixed effects, the same structure as RE
-  itself. `REOptions.dk_time` is used only as the Driscoll-Kraay time periods (`cov_type="dk"`)
+- The comparison is always against fixed effects with the same structure as RE itself (one-way
+  entity effects, or entity and time effects when `REOptions.time` is set). `REOptions.dk_time` is used only as the Driscoll-Kraay time periods (`cov_type="dk"`)
   and does not affect the test; specifying it with any other `cov_type` raises
   `ValidationError`.
 - The Wald test uses the covariance matching `REOptions.cov_type` (classical, `hc1`–`hc3`,
@@ -48,10 +70,18 @@ zero. Its properties:
   Stata/R-style small-sample corrections as RE's own standard errors.
 - All three are `None` only when there are no slope coefficients to compare. If the auxiliary
   regression cannot be computed (rank-deficient design, or a robust covariance that is
-  structurally singular such as `cov_type="cluster"` with no more clusters than the `2k`
-  auxiliary slopes, or `"dk"` with too few periods), `fit()` raises `ValidationError` /
-  `ComputationError` instead, like a multicollinear design matrix. Use `cov_type="classical"`
-  or more clusters in that case. See `REResults`'s docstring.
+  structurally singular such as `cov_type="cluster"` with no more clusters than the
+  identified auxiliary slopes (`2k` at most), or `"dk"` with too few periods), `fit()` raises
+  `ValidationError` / `ComputationError` instead, like a multicollinear design matrix. Use
+  `cov_type="classical"` or more clusters in that case. See `REResults`'s docstring.
+- Correlated random effects (Mundlak): a regressor may be included together with its entity
+  mean (and, for two-way effects, its time mean). The between regressions and the Hausman
+  auxiliary regression drop aliased columns by rank, like R's `lm` (the later column, relative
+  tolerance `1e-7`), so the within-transformed copy of such a regressor is not tested and
+  `hausman_df` counts only the identified copies; all three values are `None` when every
+  time-varying regressor's mean is included. The final regression keeps every column, so a
+  perfectly collinear design still raises `ComputationError`. `variance_method="amemiya"`
+  rejects the time-invariant mean columns.
 
 ## Panel R² and `df_resid`
 

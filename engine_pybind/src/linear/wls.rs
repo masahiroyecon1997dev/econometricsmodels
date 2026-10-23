@@ -6,30 +6,35 @@
 //! （`docs/spec/wls-spec.md`「API引数」参照）。`WLSOptions`は`OLSOptions`と
 //! フィールド構成が完全に同一の独立したpyclassである（下記
 //! `WLSOptions`のdocコメント参照）。エラー変換（`least_squares_error_to_pyerr`）・
-//! `Mat<f64>`→`Vec<f64>`変換（`mat_to_vec`）・`cov_type`のパース（`parse_cov_type`）は
-//! `super::common`のものをそのまま再利用する（`LeastSquaresError`がOLS・WLS共通の
-//! エラー型のため。`.claude/rules/rust-style.md`「系統内で共有するロジックは
-//! common.rsに置く」）。
+//! `cov_type`のパース（`parse_cov_kind`・`check_cov_options`・`resolve_cov_type`）は`super::common`のものをそのまま再利用する
+//! （`LeastSquaresError`がOLS・WLS共通のエラー型のため。`.claude/rules/rust-style.md`
+//! 「系統内で共有するロジックはcommon.rsに置く」）。`Mat<f64>`→`Vec<f64>`変換（`mat_to_vec`）は
+//! 系統によらず使うため`crate::shared::mat_conversion`のものを再利用する。
 //!
 //! 【言語方針】`.claude/rules/rust-style.md`「言語方針」参照。
 //! 公開API（`WLSOptions`/`WLSResult`）のdocコメントは英語。それ以外（このファイルの
 //! 説明・非公開関数のdocコメント等）は日本語のまま。
 
+use crate::shared::errors::guard;
 use engine::linear::wls::WlsEstimator;
-use polars::prelude::{Column, DataFrame};
+use polars::prelude::DataFrame;
 use pyo3::prelude::*;
-use pyo3_polars::PyDataFrame;
 
-use super::common::{least_squares_error_to_pyerr, mat_to_vec, parse_cov_type};
-use crate::column_extraction::{
-    extract_dataframe, extract_f64_column, extract_f64_columns, x_column_names,
+use super::common::{
+    check_cov_options, least_squares_error_to_pyerr, parse_cov_kind, resolve_cov_type,
 };
-use crate::option_values::{
+use crate::shared::augment::append_predicted_column;
+use crate::shared::column_error::ColumnSource;
+use crate::shared::column_extraction::{
+    SelectedData, extract_f64_column, extract_f64_columns, extract_model_x_columns,
+    select_model_x_columns,
+};
+use crate::shared::mat_conversion::mat_to_vec;
+use crate::shared::option_repr::PyRepr;
+use crate::shared::option_values::{
     extract_strict_float, extract_strict_opt_column, extract_strict_opt_int, extract_strict_text,
 };
-use crate::validation::{
-    RoleValue, validate_common_roles, validate_no_duplicate_roles, validate_no_existing_column,
-};
+use crate::shared::validation::{RoleValue, validate_common_roles, validate_no_duplicate_roles};
 
 /// Estimation options for WLS.
 ///
@@ -103,6 +108,14 @@ pub struct WLSOptions {
     pub hac_time: Option<String>,
 }
 
+impl WLSOptions {
+    /// このオプションが指名するデータの列（`cluster` ・`hac_time`）。使われるかどうか（`cov_type`等）には
+    /// よらず、指名されたものを全て返す。`fit()`はこれらと`y`・`x`等だけをデータから取り込む。
+    pub(crate) fn data_columns(&self) -> Vec<String> {
+        self.cluster.iter().chain(&self.hac_time).cloned().collect()
+    }
+}
+
 #[pymethods]
 impl WLSOptions {
     #[new]
@@ -116,12 +129,12 @@ impl WLSOptions {
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
-        #[pyo3(from_py_with = crate::option_values::cov_type_arg)] cov_type: String,
+        #[pyo3(from_py_with = crate::shared::option_values::cov_type_arg)] cov_type: String,
         include_intercept: bool,
-        #[pyo3(from_py_with = crate::option_values::confidence_level_arg)] confidence_level: f64,
-        #[pyo3(from_py_with = crate::option_values::cluster_arg)] cluster: Option<String>,
-        #[pyo3(from_py_with = crate::option_values::hac_lags_arg)] hac_lags: Option<i64>,
-        #[pyo3(from_py_with = crate::option_values::hac_time_arg)] hac_time: Option<String>,
+        #[pyo3(from_py_with = crate::shared::option_values::confidence_level_arg)] confidence_level: f64,
+        #[pyo3(from_py_with = crate::shared::option_values::cluster_arg)] cluster: Option<String>,
+        #[pyo3(from_py_with = crate::shared::option_values::hac_lags_arg)] hac_lags: Option<i64>,
+        #[pyo3(from_py_with = crate::shared::option_values::hac_time_arg)] hac_time: Option<String>,
     ) -> Self {
         Self {
             cov_type,
@@ -165,14 +178,14 @@ impl WLSOptions {
 
     fn __repr__(&self) -> String {
         format!(
-            "WLSOptions(cov_type={:?}, include_intercept={}, confidence_level={}, \
-             cluster={:?}, hac_lags={:?}, hac_time={:?})",
-            self.cov_type,
-            self.include_intercept,
-            self.confidence_level,
-            self.cluster,
-            self.hac_lags,
-            self.hac_time
+            "WLSOptions(cov_type={}, include_intercept={}, confidence_level={}, \
+             cluster={}, hac_lags={}, hac_time={})",
+            self.cov_type.py_repr(),
+            self.include_intercept.py_repr(),
+            self.confidence_level.py_repr(),
+            self.cluster.py_repr(),
+            self.hac_lags.py_repr(),
+            self.hac_time.py_repr()
         )
     }
 }
@@ -185,7 +198,7 @@ impl WLSOptions {
 // `get_all`ではなく個別`#[pyo3(get)]`にしている理由は`OLSResult`と同じ
 // （`fitted_values`/`has_intercept`をPython側に公開しないため）。
 #[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct WLSResult {
     #[pyo3(get)]
     pub params: Vec<f64>,
@@ -230,14 +243,17 @@ pub struct WLSResult {
     pub r_squared: f64,
     #[pyo3(get)]
     pub adj_r_squared: f64,
+    /// Overall F-test statistic of the slope coefficients. `None` when the test is not
+    /// defined: there are no slope coefficients.
     #[pyo3(get)]
-    pub f_statistic: f64,
+    pub f_statistic: Option<f64>,
+    /// P-value of `f_statistic` (`None` exactly when `f_statistic` is `None`).
     #[pyo3(get)]
-    pub f_p_value: f64,
-    /// Numerator degrees of freedom of `f_statistic` (`None` when it is NaN).
+    pub f_p_value: Option<f64>,
+    /// Numerator degrees of freedom of `f_statistic` (`None` when `f_statistic` is `None`).
     #[pyo3(get)]
     pub f_df_num: Option<usize>,
-    /// Denominator degrees of freedom of `f_statistic` (`None` when it is NaN). May differ
+    /// Denominator degrees of freedom of `f_statistic` (`None` when `f_statistic` is `None`). May differ
     /// from `df_resid` (e.g. OLS/WLS with cluster-robust inference uses `G - 1`).
     #[pyo3(get)]
     pub f_df_denom: Option<usize>,
@@ -261,12 +277,10 @@ pub struct WLSResult {
     /// Python; only `predict()` reads it to decide whether to auto-prepend a
     /// constant column for out-of-sample data (same reasoning as `OLSResult`).
     has_intercept: bool,
-    /// The original polars DataFrame passed to `fit()`, cached for
-    /// `augment(new_data=None)`. A cheap clone (polars columns are
-    /// internally reference-counted). Unlike `OLSResult` (shared with
-    /// `IVResult.first_stage()`, which has no single source DataFrame), `WLSResult`
-    /// is only ever built from this file's `fit()`, so this is never `None`.
-    training_data: DataFrame,
+    /// The `polars.DataFrame` passed to `fit()`, as given. `augment(new_data=None)` appends
+    /// the predicted column to it, so every column is kept, including the ones the model
+    /// does not read.
+    source_data: Py<PyAny>,
 }
 
 // `#[pymethods]`ブロックの外に置く非公開実装（`OLSResult`と同じ理由）。
@@ -275,8 +289,13 @@ impl WLSResult {
     /// （`x`列の抽出→`predict_new_data`呼び出し、`OLSResult`と同じ設計）。
     fn predict_for(&self, df: &DataFrame) -> PyResult<Vec<f64>> {
         let has_intercept = self.has_intercept;
-        let x_names = x_column_names(&self.param_names, has_intercept, 0);
-        let x_columns = extract_f64_columns(df, x_names)?;
+        let x_columns = extract_model_x_columns(
+            df,
+            &self.param_names,
+            has_intercept,
+            0,
+            ColumnSource::new("x", "new_data"),
+        )?;
 
         Ok(engine::linear::ols::predict_new_data(
             &self.params,
@@ -307,12 +326,20 @@ impl WLSResult {
     ///   (same validation as `fit()`'s column extraction, via `extract_f64_column`).
     #[pyo3(signature = (new_data=None))]
     fn predict(&self, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<f64>> {
-        let Some(new_data) = new_data else {
-            return Ok(self.fitted_values.clone());
-        };
+        guard(|| {
+            let Some(new_data) = new_data else {
+                return Ok(self.fitted_values.clone());
+            };
 
-        let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
-        self.predict_for(&df)
+            let selected = select_model_x_columns(
+                new_data,
+                "new_data",
+                &self.param_names,
+                self.has_intercept,
+                0,
+            )?;
+            self.predict_for(&selected.frame)
+        })
     }
 
     /// The source data (training data, or `new_data` when given) with the
@@ -327,26 +354,28 @@ impl WLSResult {
     /// - The source data already has a column named `"predicted"`:
     ///   `ValidationError` (would otherwise silently overwrite it).
     #[pyo3(signature = (new_data=None))]
-    fn augment(&self, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<PyDataFrame> {
-        let (mut source, predicted) = match new_data {
-            Some(new_data) => {
-                let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
-                let predicted = self.predict_for(&df)?;
-                (df, predicted)
-            }
-            None => (self.training_data.clone(), self.fitted_values.clone()),
-        };
+    fn augment(&self, py: Python<'_>, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<Py<PyAny>> {
+        guard(|| {
+            let (source, predicted) = match new_data {
+                Some(new_data) => {
+                    let selected = select_model_x_columns(
+                        new_data,
+                        "new_data",
+                        &self.param_names,
+                        self.has_intercept,
+                        0,
+                    )?;
+                    let predicted = self.predict_for(&selected.frame)?;
+                    (new_data.clone(), predicted)
+                }
+                None => (
+                    self.source_data.bind(py).clone(),
+                    self.fitted_values.clone(),
+                ),
+            };
 
-        validate_no_existing_column(&source, "predicted")?;
-
-        // `with_column`の唯一の失敗条件（`ShapeMismatch`）はここでは理論上到達不能
-        // （`OLSResult::augment()`と同じ理由: `new_data`指定時は`source`自身から
-        // 抽出した列と同じ観測数から`predicted`を計算し、`None`時は`fitted_values`と
-        // `training_data`が同じ`fit()`呼び出しの同じ`n`に由来するペアのため）。
-        source
-            .with_column(Column::new("predicted".into(), predicted))
-            .expect("predicted.len() matches source.height() by construction");
-        Ok(PyDataFrame(source))
+            append_predicted_column(&source, "predicted", predicted)
+        })
     }
 }
 
@@ -364,13 +393,22 @@ impl WLSResult {
 ///   `hac_lags`の範囲外・クラスターキー未指定・重みの次元不一致・非正の重み等）は
 ///   `engine::linear::common::LeastSquaresError`から`least_squares_error_to_pyerr`で変換
 pub fn fit(
-    data: PyDataFrame,
+    data: SelectedData,
     y: String,
     x: Vec<String>,
     weight: String,
     options: &WLSOptions,
 ) -> PyResult<WLSResult> {
-    let df: DataFrame = data.into();
+    let SelectedData { source, frame: df } = data;
+
+    // DataFrameを見ない検査を先に行う（報告順は`ols.rs`の`fit`と同じ）。
+    let cov_kind = parse_cov_kind(&options.cov_type)?;
+    check_cov_options(
+        cov_kind,
+        options.cluster.as_deref(),
+        options.hac_lags,
+        options.hac_time.as_deref(),
+    )?;
 
     // 誤って同じ列を複数の役割に指定するミスを、分かりやすいエラーで早期に防ぐ
     // （`docs/spec/wls-spec.md`「API引数」参照）。`weight`と`x`の重複は禁止しない
@@ -383,21 +421,21 @@ pub fn fit(
     ])?;
 
     // ── y列の抽出 ──────────────────────────────────────────────────────
-    let y_slice = extract_f64_column(&df, &y)?;
+    let y_slice = extract_f64_column(&df, &y, ColumnSource::new("y", "data"))?;
 
     // ── x列の抽出 ──────────────────────────────────────────────────────
-    let x_slices = extract_f64_columns(&df, &x)?;
+    let x_slices = extract_f64_columns(&df, &x, ColumnSource::new("x", "data"))?;
 
     // ── weight列の抽出 ─────────────────────────────────────────────────
     // NaN/無限大・欠損値の検証はextract_f64_columnがy/xと同じ経路で行う。0以下の値
     // （analytic weightとして不正）の検証はengine側（LeastSquaresError::NonPositiveWeight）に
     // 委ねる（`docs/spec/wls-spec.md`「エラー型」参照）。
-    let weight_slice = extract_f64_column(&df, &weight)?;
+    let weight_slice = extract_f64_column(&df, &weight, ColumnSource::new("weight", "data"))?;
 
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ、OLSと同じ）─────
-    let (cov_type, cov_type_lower) = parse_cov_type(
+    let cov_type = resolve_cov_type(
         &df,
-        &options.cov_type,
+        cov_kind,
         options.cluster.as_deref(),
         options.hac_lags,
         options.hac_time.as_deref(),
@@ -430,7 +468,7 @@ pub fn fit(
         residuals: wls_estimator.residuals().to_vec(),
         dep_var_name: estimator.input().dep_var_name().to_string(),
         n_obs: estimator.input().nobs(),
-        cov_type: cov_type_lower,
+        cov_type: cov_kind.name().to_string(),
         hac_lags_used: estimator.hac_lags_used().map(|lags| lags as i64),
         // r_squared/adj_r_squared/log_likelihood/aic/bicは`estimator`（変換後データに対する
         // OLS）ではなく`wls_estimator`側の値を使う。元の（変換前の）y・weightsを使って
@@ -449,6 +487,6 @@ pub fn fit(
         bic: wls_estimator.bic(),
         fitted_values: wls_estimator.fitted_values().to_vec(),
         has_intercept: estimator.input().has_intercept(),
-        training_data: df,
+        source_data: source,
     })
 }

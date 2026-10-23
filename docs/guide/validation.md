@@ -9,7 +9,7 @@ This page explains how econometricsmodels treats invalid input, which exceptions
 Where the data or the options cannot be used as given, the package stops with an error rather than quietly fixing the problem. It never changes the estimation sample or the model on its own:
 
 - **Missing values are never dropped.** A null, a NaN or an infinite value in any column used by the model raises an error. There is no listwise deletion.
-- **Collinear columns are never removed.** A perfectly collinear design raises an error instead of estimating on a reduced set of regressors.
+- **Collinear columns are never removed.** A perfectly collinear design raises an error instead of estimating on a reduced set of regressors. The one exception is RE's internal regressions that only estimate variance components or run the Hausman test (the between regression and the Hausman auxiliary regression), which drop aliased columns like R `lm` so that a correlated-random-effects specification (a regressor together with its entity mean) can be estimated; the final regression keeps every column.
 - **Small groups are never discarded.** Singleton entities in a panel are reported, not dropped.
 - **Options that would have no effect are rejected.** For example, passing `cluster` while `cov_type` is not `"cluster"` raises an error instead of being ignored.
 
@@ -47,8 +47,8 @@ The checks cover whether the input and the numerical computation are well define
 
 | Exception | Base class | Meaning |
 |---|---|---|
-| `ValidationError` | `ValueError` | The input or an option is invalid. It can be decided from the inputs alone, before any estimation work. |
-| `ComputationError` | `RuntimeError` | The inputs are acceptable on their face, but the numerical computation fails or cannot be trusted. |
+| `ValidationError` | `ValueError` | The input or an option is invalid. It can be decided from the inputs alone (counts, ranges, uniqueness, the structure of a panel, simple statistics of a column), before any estimation work. |
+| `ComputationError` | `RuntimeError` | The inputs are acceptable on their face, but a numerical routine fails or cannot be trusted: a matrix factorization or inversion, an optimization, an estimated quantity that turns out to be unusable. An internal error (a bug) is raised as a `ComputationError` too, with the code `INTERNAL_ERROR`. |
 
 ```python
 from econometricsmodels import ComputationError, ValidationError
@@ -61,24 +61,37 @@ except ComputationError as e:
     print("The data do not support this model:", e)
 ```
 
-The exception class is the stable interface. The message text can change between versions, so do not parse it. `ComputationError` has no subclasses: the cause is in the message only.
+The exception class and the `code` are the stable interface. Every exception has a `code` (for example `COLUMN_NOT_FOUND`), a `params` dictionary with the values that appear in the text, a `message` that says what is wrong and a `hint` that says what to do next; `str(e)` is the two joined. The wording of `message` and `hint` can change between versions, so do not parse it: branch on `code` and read `params`. All codes, their parameters and their English templates are listed in [Error codes](error-codes.md), which also shows how to write your own messages, for example in another language. `ComputationError` has no subclasses: the cause is the `code`.
 
-The boundary is simple in principle: if the problem is visible without doing matrix algebra, it is a `ValidationError`, and if it only shows up while computing, it is a `ComputationError`. Some conditions have been moved from the second class to the first once they turned out to be decidable up front, for example too few clusters for a joint test. Where a case sits close to the boundary, it is listed below under the class that is raised today.
+The boundary follows the nature of the check: could you see the problem by looking at the inputs, without running the estimator? If so it is a `ValidationError`; if it needs a numerical routine such as a matrix factorization, or only shows up in an estimated quantity, it is a `ComputationError`. The class does not depend on where in `fit()` the check happens to run, so moving a check earlier does not change it. The class is a coarse distinction between "fix the input or the options" and "the data do not support this model", although some `ComputationError` codes also suggest a change to the input, such as removing a collinear column or rescaling a variable. For anything finer, branch on the `code`: a code always has the same class. Where a case sits close to the boundary, it is listed below under its class. For example, a regressor with no variation left after the within transformation is a `ValidationError` (a simple statistic of a column), while a singular design matrix found by the factorization is a `ComputationError`.
 
-A wrong argument *type*, as opposed to a wrong value, raises the built-in `TypeError`, not `ValidationError`, following the Python convention. The message names the argument and the type it got: passing `x="x1"` instead of `x=["x1"]`, a `bool` or a non-integer for an integer option such as `hac_lags`, or an options object of the wrong class are all `TypeError`. An unknown option name is a `TypeError` as well. The types each argument accepts are listed in [Accepted data](accepted-data.md#argument-types).
+A wrong argument *type*, as opposed to a wrong value, raises the built-in `TypeError`, not `ValidationError`, following the Python convention. The message names the argument, the type it expected and the type it got: passing a pandas DataFrame or a `polars.LazyFrame` as `data`, passing `x="x1"` instead of `x=["x1"]`, a `bool` or a non-integer for an integer option such as `hac_lags`, or an options object of the wrong class are all `TypeError`. An unknown option name is a `TypeError` as well. The types each argument accepts are listed in [Accepted data](accepted-data.md#argument-types).
 
 ## When `ValidationError` is raised
+
+### Order in which errors are reported
+
+A call is checked in a fixed order, the same for every method, and the **first** problem found is the one reported. If an input has several problems, fixing the error you see can reveal the next one. The order is:
+
+1. **Argument types.** A wrong type raises `TypeError` (see above), before anything else.
+2. **Option values.** An unknown string for `estimator`, `cov_type`, `gmm_type`, `gmm_weight_type`, `solver` or `variance_method`, checked in this order (a method without the option skips it). An unknown value is reported even if the option would not be used, for example `gmm_type="bogus"` with `estimator="2sls"`.
+3. **Option combinations.** An option that the chosen `cov_type` or estimator does not use (for example `cluster` with `cov_type="classical"`), and then a required option that is missing (for example `hac_time` with `cov_type="hac"`, or `dk_time` with `cov_type="dk"`).
+4. **Roles.** The same column used in two roles, a column named twice, an empty `x`, `"const"` in `x` when an intercept is added.
+5. **The `y`, `x` and other model columns.** A column that does not exist, has an unsupported dtype or contains missing values.
+6. **The columns named by options.** `cluster`, `hac_time` and `dk_time`, with the same checks as in step 5.
+7. **The estimation itself.** Checks that need the sizes of the problem, such as `confidence_level`, `max_iter`, the number of observations or clusters, and singular matrices.
+
+Steps 2 to 4 look only at the arguments and options, never at the data. So a typo in `cov_type` is reported even if a column name is also wrong, and an option that the chosen `cov_type` ignores is reported before a column it names is looked up. `ComputationError` can only come from step 7. One detail of step 7: a negative `gmm_max_iter` cannot be converted to a count, so it is rejected together with the columns of step 6, before the other checks of step 7; a positive value outside 3 to 10,000 is checked in step 7 itself.
 
 ### In every method
 
 | Category | Situation |
 |---|---|
-| Data type | `data` (or `new_data`) is not a `polars.DataFrame`, for example a pandas DataFrame, a `polars.Series` or a `polars.LazyFrame` (call `.collect()` first). |
 | Columns | A named column does not exist. The same column is used in two roles (for example `y` also in `x`, or the weight column as `y`). For the Driscoll–Kraay `dk_time` column only `y` and `entity` are checked: it may also be one of the regressors, or the same column as FE's `time`. `x` is empty, or names a column twice. With an intercept, `x` contains a column called `"const"`. A column has a dtype that its role does not accept, such as a string, date or categorical column used as a number (see [Accepted data](accepted-data.md#column-types-by-role)). The `hac_time` column has the same value in two or more rows, including a constant column, so the observations have no time order (see [Order of observations](accepted-data.md#order-of-observations-for-hac)). |
 | Missing values | A null in any used column, or a NaN or infinite value in a numeric column or in a float entity, cluster or time column. A column of the `Null` dtype counts as all missing. |
-| Sample size | There are not enough observations: `n <= k`. There are no regressors. |
+| Sample size | There are not enough observations: `n <= k`. There are no regressors. In IV the structural equation is checked first (`n` must exceed its number of coefficients, including the intercept), then the first stage (`n` must exceed the number of instruments including the intercept and the exogenous regressors). At `n` equal to that number the first stage fits perfectly and the 2SLS estimate equals OLS; below it the instruments are singular. |
 | Options | `confidence_level` is outside (0, 1) or NaN. An unknown `cov_type` or other option value. `hac_lags` is outside `[0, n)`, including a very large integer. `tol` or `gmm_tol` is not a positive finite number. An option is set that the chosen `cov_type` or estimator does not use. `cov_type="hac"` (or IV's `gmm_weight_type="hac"`) without `hac_time`. |
-| Clustering | `cov_type="cluster"` without a `cluster` column. Fewer than two clusters, or no more clusters than slope coefficients, so that the joint test is impossible. |
+| Clustering | `cov_type="cluster"` without a `cluster` column. Fewer than two clusters, or no more clusters than slope coefficients, so that the joint test is impossible. In IV the slope coefficients of the structural equation are counted. A first-stage regression with more slope coefficients than clusters does not fail: its overall F statistic is `None` (see [Inference conventions](inference-conventions.md#weak-instruments)). |
 | Prediction | Columns of `new_data` are missing, null or non-finite. |
 
 ### Method-specific
@@ -86,28 +99,35 @@ A wrong argument *type*, as opposed to a wrong value, raises the built-in `TypeE
 | Method | Situation |
 |---|---|
 | WLS | A weight is zero, negative, null or NaN. The weight column is missing. |
+| OLS (`breusch_godfrey_test()`) | `statistic` is not `"lm"` or `"f"`. `nlags` is below 1, or too large for the number of observations (`n <= k + nlags`). The `time` column does not exist, has an unsupported dtype, or contains missing values, NaN, infinity or duplicates (the row order is never used as the time order). The result has no retained training data (the `OLSResults` returned by `IVResults.first_stage()`). `time` or `statistic` that is not a `str`, or `nlags` that is not an `int` (a `bool` or `float` too), raises `TypeError`. |
+| OLS (`breusch_pagan_test()`) | `statistic` is not `"lm"` or `"f"`. `variables` is empty, names a column twice, or names a column that does not exist, has an unsupported dtype or contains missing values, NaN or infinity (a column that is not in the model is checked too). Every variable is constant. Too few observations for the auxiliary regression. The result has no retained training data (the `OLSResults` returned by `IVResults.first_stage()`). `variables` that is not a `list` of `str`, or `statistic` that is not a `str`, raises `TypeError`. |
+| OLS (`white_test()`) | `statistic` is not `"lm"` or `"f"`. Every regressor is constant. Too few observations for the auxiliary regression, which has far more columns than the model (all squares and products of the regressors). The result has no retained training data (the `OLSResults` returned by `IVResults.first_stage()`). |
 | Logit, Probit | `y` is not coded exactly 0 or 1. `max_iter` is not an integer from 1 to 10,000, or `tol` is not a positive finite number. |
 | Tobit | `max_iter` is not an integer from 1 to 10,000, or `tol` is not a positive finite number. Both censoring bounds are `None`, or the lower bound is not below the upper bound. `y` lies outside the bounds. There is no uncensored observation. `x` contains a column named `"sigma"`. |
 | IV | Fewer instruments than endogenous regressors (the order condition). `x_endog` or `instruments` is empty. GMM options are set for an estimator that does not use them, or are out of range (`gmm_max_iter` outside 3 to 10,000, or `gmm_tol` not a positive finite number). With `gmm_weight_type="cluster"`, there are too few clusters for the weight matrix. |
 | FE | A singleton entity, or in a two-way model a singleton time period. A two-way model on an unbalanced panel, or without `time`. A regressor with no within-variation (constant over time within every entity). Too few degrees of freedom. |
-| RE | With `cov_type="cluster"`, too few clusters for the Hausman auxiliary regression. |
-| FE, RE | `cov_type="dk"` without `dk_time` (FE does not borrow `time` for it), with an invalid `dk_bandwidth`, with too few time periods for the number of coefficients tested, or with a degenerate two-period structure. |
+| RE | A singleton entity, or in a two-way model (`time` set) a singleton time period. A two-way model on an unbalanced panel. With `cov_type="cluster"`, too few clusters for the Hausman auxiliary regression (counting only the identified columns). A time-invariant regressor is allowed, unlike in FE, and so is a regressor together with its entity or time mean (correlated random effects, Mundlak): the aliased columns of the between and Hausman auxiliary regressions are dropped and `hausman_df` counts the identified ones. An unknown `variance_method`, or `variance_method="amemiya"` with a regressor that has no within variation (time-invariant; in a two-way model, varying in at most one dimension): use `"swamy_arora"` or `"wallace_hussain"`. |
+| FE, RE | `cov_type="dk"` without `dk_time` (neither borrows `time` for it), with an invalid `dk_bandwidth`, with too few time periods for the number of coefficients tested, or with a degenerate two-period structure. |
 
 ## When `ComputationError` is raised
 
 | Cause | Where | What it means |
 |---|---|---|
-| Perfect multicollinearity | All methods | The design matrix is singular, for example one regressor is a multiple of another, or a constant column is combined with an intercept. In IV the first stage fails, and in FE and RE the within transformation leaves a singular design. |
+| Perfect multicollinearity | All methods | The design matrix is singular and the error names the columns that take part in one dependency (`columns`; only the first dependency is reported, see [Error codes](error-codes.md#collinear-columns)), for example one regressor is a multiple of another, or a constant column is combined with an intercept. In IV the first stage fails (collinear instruments, an instrument collinear with an exogenous regressor, or a constant instrument), or, when the first stages succeed but the endogenous variables are collinear with each other or with an exogenous regressor, the second stage fails (2SLS) or `X'ZWZ'X` cannot be inverted (GMM); in FE and RE the within transformation leaves a singular design. In RE, a time-invariant regressor that is constant across entities (collinear with the intercept) or collinear with another time-invariant regressor also gives a singular design. |
 | Near-singular matrices | All methods | A matrix needed for the covariance or a joint test is numerically singular, typically because regressors are on extremely different scales (for example `1e6` and `1e-3`) or because of an almost perfect linear dependence. Rescale the variables. |
 | Non-convergence | Logit, Probit, Tobit | The optimizer did not converge within `max_iter`. |
 | Singular Hessian or OPG matrix | Logit, Probit, Tobit | The information matrix cannot be inverted. |
-| Suspected separation | Logit, Probit | The gradient is near zero but the coefficients are implausibly large, which is the signature of a (quasi-)complete separation of the outcome. |
+| Uncensored interval too narrow | Tobit (`predict()`, `augment()`, `marginal_effects()` with `target="expected_uncensored"`) | With two-sided censoring, the interval between the bounds is narrower than 1% of the estimated `sigma`, so the model puts almost no probability on uncensored values and the expected value among them cannot be computed reliably. Use another `target`. |
+| Separation | Logit, Probit | Some combination of the regressors perfectly predicts the binary outcome, either for all observations (complete separation) or for a subset (quasi-complete separation, for example a dummy variable that equals 1 only when the outcome is 1). No finite maximum likelihood estimate exists, so the coefficients would diverge. It is detected exactly after the optimizer converges, whatever the sample size. Remove or combine the offending regressors, or add observations that break the separation. |
 | Non-convergence | IV (GMM) | The iterated GMM did not converge. |
 | Degenerate variance components | RE | For example, no remaining idiosyncratic variance in noise-free data. |
+| Singular pooled regression, non-positive idiosyncratic variance | RE (`variance_method="wallace_hussain"` or `"amemiya"`) | The first-stage pooled regression of Wallace-Hussain is singular (for example a time-invariant regressor and a multiple of it), the estimated `σ_ε²` is not positive so the quasi-demeaning weights are undefined (plm sets it to 0 and returns `NaN` weights), or the moment equations of an unbalanced one-way panel are singular. |
+| Auxiliary matrix too large | OLS (`breusch_godfrey_test()`) | The auxiliary regression matrix (`n` rows by the number of regressors plus `nlags` columns) cannot be allocated, which happens only when `nlags` is close to `n` and `n` is large. Use a smaller `nlags`. |
+| Singular auxiliary regression | OLS (`white_test()`, `breusch_pagan_test()`, `breusch_godfrey_test()`) | The auxiliary design stays linearly dependent after constant and duplicate terms are dropped (for example a full set of dummies in a model fitted with `include_intercept=False`), or the auxiliary R² is undefined. For `breusch_godfrey_test()` it also covers residuals that are all zero or fitted exactly by the auxiliary regression. Only columns identical to a constant or to an earlier column are dropped; a column that is a multiple of another (for example `2 * x1`) is not, and makes the auxiliary regression singular. The message names the test (`White test`, `Breusch-Pagan test` or `Breusch-Godfrey test`), so it is not confused with the model's own collinearity. |
 
-How the cause is reported can depend on the estimator and on the solver. For instance, completely separated data in a binary-choice model may surface as suspected separation, as non-convergence or as a singular Hessian.
+How the cause is reported can depend on the estimator and on the solver. For instance, separated data in a binary-choice model may surface as detected separation, as non-convergence or as a singular Hessian, because the optimizer can fail before the separation check runs.
 
-For Logit, Probit, Tobit and IV (GMM), `raise_on_non_convergence=False` returns the result of the last iteration with `converged=False` instead of raising when the optimizer does not converge. Other failures, such as a singular Hessian, are still raised, so inspect `converged` before using a result obtained this way.
+For Logit, Probit, Tobit and IV (GMM), `raise_on_non_convergence=False` returns the result of the last iteration with `converged=False` instead of raising when the optimizer does not converge. Other failures, such as a singular Hessian, are still raised, so inspect `converged` before using a result obtained this way. Detected separation is treated like non-convergence: with `raise_on_non_convergence=False` the result is returned with `converged=False`.
 
 ## What is not checked
 
@@ -118,12 +138,13 @@ The absence of an error says nothing about the following. They are your responsi
 - **Endogeneity.** For OLS, FE and RE nothing tests whether regressors are correlated with the error term. The Hausman test for RE and the Wu–Hausman test for IV are reported as statistics, not used to stop the estimation.
 - **Instrument validity and strength.** In IV only the order condition (at least as many instruments as endogenous regressors) is checked up front. The rank condition is not, so irrelevant instruments may surface later as a singular first stage. The weak-instrument F statistic is reported without a verdict, and the over-identification test is `None` when the model is just identified.
 - **Stationarity, outliers and influential observations.**
-- **Near-separation.** Data that are close to, but not at, separation estimate without an error. Only the detected pathology above is an error, using a heuristic threshold, and very small samples can still be misclassified.
-- **Panel structure beyond what the estimator needs.** A one-way FE model does not complain about unbalanced panels or about repeated (entity, time) pairs. Only the two-way model requires a balanced panel.
+- **Near-separation.** Data that are close to, but not at, separation have a finite estimate, so they estimate without an error, although the standard errors can be very large. Only exact separation is an error.
+- **Panel structure beyond what the estimator needs.** A one-way FE model does not complain about unbalanced panels or about repeated (entity, time) pairs. Only the two-way models (FE, and RE with `time`) require a balanced panel.
 - **Numeric precision.** Numeric columns are converted to 64-bit floating point without a warning, so integers beyond 2^53 and decimals with many digits can lose precision. See [Accepted data](accepted-data.md#how-values-are-converted).
 
 ## Where to look next
 
+- [Error codes](error-codes.md): every `code`, its parameters and the English message and hint templates.
 - [Accepted data](accepted-data.md): the input type, the column types accepted in each role, and the argument types.
 - [Inference conventions](inference-conventions.md): the distributions and degrees of freedom behind the reported statistics.
 - [Verification](verification.md): which reference implementations the results are compared with, including the error paths.

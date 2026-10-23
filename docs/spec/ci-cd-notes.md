@@ -13,6 +13,10 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
   - `audit`ジョブ: workspace全体の`Cargo.lock`を`cargo-audit`で検証する。`rustsec/audit-check`
     アクションは不採用（`cargo audit --json`の出力にANSI制御文字が混ざると`JSON.parse()`が
     失敗する既知の不具合が長期未解決のため）。テキスト出力のまま`cargo audit`を直接実行する。
+    `cargo-audit`はバージョンを固定する（サプライチェーン攻撃対策）。devcontainerの
+    `.devcontainer/Dockerfile`（`ARG CARGO_AUDIT_VERSION`、`cargo install --locked`でソースビルド）と
+    `ci_engine.yml`の`tool: cargo-audit@<版>`は同じ版に揃える（食い違いは
+    `check_cargo_tool_updates.yml`が検出する）。
 - **`ci_python.yml`**（`python_package`/`engine_pybind`の品質検証、3ジョブ、
   `python_package/**`・`engine_pybind/**`・`pyproject.toml`・`uv.lock`・`tests/**`を
   トリガー。`engine/**`は含めない）:
@@ -67,6 +71,22 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
     `python -m benchmark.regenerate_all --fixtures-only` → フィクスチャ差分確認・`pytest tests`。
     メジャー更新は数値が変わりうる（例: marginaleffects 1.0.0はデルタ法の`std_err`の数値微分が
     変わり、旧版との相対差が最大1.8e-3動いた）ため、機械的にマージしない。
+- **`check_cargo_tool_updates.yml`**（毎週月曜 + `workflow_dispatch`）: Dependabotは
+  `.devcontainer/Dockerfile`の`cargo install`行・`ARG`値や、ワークフローの`tool: <crate>@<版>`
+  （`taiki-e/install-action`の入力値）を扱えないため、ピン留めしたcargo開発ツール
+  （`cargo-audit`・`cargo-about`・`cargo-llvm-cov`）の更新を確認する
+  （ロジックは標準ライブラリのみの`.github/scripts/check_cargo_tool_updates.py`）。
+  - 新版: ピン留め版 vs crates.io APIの最新版。**yankedとプレリリースは除く**。
+    Dependabotの`cooldown`相当の待機は設けていない（通知のみで、更新は人が判断するため）。
+  - 食い違い: DockerfileのARG（`cargo install`行の`<crate>@${ARG}`から対応付け）と
+    `.github/workflows/*.yml`の`tool:`で同じcrateの版が異なれば報告する（現状は`cargo-audit`）。
+    CIにだけあるピンも最新版の確認対象に含める。
+  - 更新・食い違いがあれば固定タイトルのIssue（`dependencies`/`setup`ラベル）を自動起票し、
+    未クローズの同名Issueがあれば本文を更新する。解消すれば自動クローズする。
+    `check_r_updates.yml`とはIssueを分けている（更新手順が異なるため）。
+  - 更新時の手順: DockerfileのARGを上げる（`cargo-audit`は`ci_engine.yml`の`tool:`も同じ版に）
+    → devcontainer再構築 → `cargo audit`再実行（`cargo-llvm-cov`/`cargo-about`が対象なら
+    `cargo llvm-cov -p engine`等で動作確認）。
 - **`benchmark_performance.yml`**: `performance/compare_<method>.py`（手法非依存の
   計測ハーネス `performance/_perf_harness.py`＋手法固有アダプタ）を手法ごとの
   matrixジョブ（`method: [ols, wls, ...]`、`fail-fast: false`）で定期実行
@@ -117,7 +137,13 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
   有効化していない。`cargo build`のログに一度もコンパイルが出現せず、`cargo tree -p object_store`
   も空を返すことを確認済み）。`cargo audit`は機能フラグを考慮せず`Cargo.lock`を丸ごとスキャンする
   ため、実際にコンパイルされない依存でも警告に含まれる。
-- **`bincode`/`paste`（unmaintained警告）**: それぞれ`polars`/`faer`待ち。
+- **`bincode`（RUSTSEC-2025-0141、unmaintained）**: 経路は`polars-utils`のserde機能（optional依存）。
+  `cargo tree`は空で実際にはビルドされない。`polars-utils`が`bincode`を`<3`で要求するため`polars`の新版待ち。
+- **`paste`（RUSTSEC-2024-0436、unmaintained）**: 経路は`faer → gemm/pulp`と`argmin`の2系統。
+  proc-macroとして**実際にビルドされる**が、コンパイル時のみで実行時には含まれない。
+  `faer`・`argmin`の両方が`paste`を外すまで解消できない。
+- **`event-listener`（RUSTSEC-2026-0221、unsound）**: 経路は`polars-lazy → polars-stream → async-channel`
+  （ビルドされない）。パッチ版5.4.2へ`Cargo.lock`を更新して解消済みのため、ignore listには登録しない。
 
 ## 参照
 

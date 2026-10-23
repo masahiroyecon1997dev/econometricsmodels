@@ -18,24 +18,24 @@ AIC・BIC までを**常に一括計算**する。一方 statsmodels の `LogitR
 計算される**。そのため `_fit_once_statsmodels` では `.fit()` 直後にこれらの
 プロパティへ明示的にアクセスし、engine と同じ処理範囲で計測する。
 
-## cov_type の範囲
+## 軸と cov_type の範囲
 
-`.claude/rules/testing-policy.md`「パフォーマンス比較（ベンチマーク）の方法論」に
-従い、代表2点のみ計測する: 最も軽い `classical` と、最も計算コストの重い
-`cluster`。Logit/Probit は OLS/WLS と違い HAC を持たず、classical/hc0/cluster を
-n=100,000 で軽く実測したところ cluster が最重だった
-（`docs/performance/logit.md`「計測方法」）。
+n 軸（10,000 / 100,000 / 1,000,000、k=5）と k 軸（n=10,000）は既定の標準誤差
+（classical）だけを回し、標準誤差の種類は **cov 軸**（n=100,000・k=5、newton）で
+全て回す: `classical`・`opg`・`hc0`・`hc1`、cluster の 2×2（G=50 / G=n/10 ×
+random / sorted）。Logit/Probit は OLS/WLS と違い HAC を持たない。
 
-**`opg` は計測対象外**: statsmodels の discrete model（`Logit.fit`）は `opg` を
-`cov_type` 引数としてネイティブに受け付けず、`score_obs` からの手計算
-（`benchmark/nonlinear/references/statsmodels_ref.py` 参照）になる。engine の
-ネイティブ OPG との比較は「計測対象の処理範囲を対称に揃える」方針に反するため
-除外する。
+**`opg` と `hc1` は engine 単独で測る**: statsmodels の discrete model
+（`Logit.fit`）は `opg` を `cov_type` 引数としてネイティブに受け付けず
+（`score_obs` からの手計算）、`hc1` は暗黙に `hc0` へフォールバックして実体が
+`hc0` と同じになる（どちらも `benchmark/nonlinear/references/statsmodels_ref.py`
+参照）。同等のリファレンスが無いため、`hc0` と cluster だけを statsmodels と
+比較する。
 
 ## method（オプティマイザ）の範囲
 
 engine・statsmodels とも既定は Newton-Raphson で、n/k スイープは newton で回す。
-加えて `bfgs`/`lbfgs` を **method 軸**として代表点1つ（cov_type=classical・
+加えて `bfgs`/`lbfgs` を **method 軸**として代表点1つ（classical・
 k=5・n=1,000,000）で計測する（`PerfAdapter.extra_methods`）。正確性検証
 （`test_logit_reference.py`）も newton を主軸に bfgs/lbfgs は代表ケースのみ、
 という絞り方に合わせている。
@@ -49,36 +49,49 @@ k=5・n=1,000,000）で計測する（`PerfAdapter.extra_methods`）。正確性
     # （一括実行では `_perf_harness._run_isolated` が自動で設定する）。
     RAYON_NUM_THREADS=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \\
         python -m performance.compare_logit \\
-        --worker --library engine --cov-type cluster --n 1000 --k 5
+        --worker --library engine --cov-case cluster_g50_random --n 1000 --k 5
 """
 
 from __future__ import annotations
 
-import polars as pl
 import statsmodels
 
 from benchmark.nonlinear.datasets import generate_binary_choice_dataset
-from performance._perf_harness import FitContext, PerfAdapter, run_cli
+from performance._perf_harness import (
+    CovCase,
+    FitContext,
+    PerfAdapter,
+    cluster_cases,
+    run_cli,
+)
 
-# クラスターロバストSE計測用の疑似グループ数（旧 compare_performance.py と同じ）。
-_N_CLUSTERS = 50
+_ENGINE_COV_TYPES = ("classical", "opg", "hc0", "hc1")
+
+_COV_CASES = (
+    CovCase("classical", "classical"),
+    # statsmodels の discrete model は opg をネイティブに受け付けず（score_obs
+    # からの手計算）、hc1 は暗黙に hc0 へフォールバックして実体が hc0 と同じに
+    # なるため（`benchmark/nonlinear/references/statsmodels_ref.py` 参照）、
+    # 同等のリファレンスが無いこの2つは engine 単独で測る。
+    CovCase("opg", "opg", libraries=("engine",)),
+    CovCase("hc0", "hc0"),
+    CovCase("hc1", "hc1", libraries=("engine",)),
+    *cluster_cases(),
+)
 
 
 def _build_dataframe(n: int, k: int, seed: int):
     df, _ = generate_binary_choice_dataset(
         "baseline", link="logit", n=n, k=k, seed=seed
     )
-    # cluster cov_type 用に行番号ベースの疑似グループ列を付ける。
-    return df.with_columns(
-        (pl.int_range(pl.len()) % _N_CLUSTERS).alias("cluster_group")
-    )
+    return df
 
 
 def _fit_once_engine(ctx: FitContext):
     from econometricsmodels import Logit, LogitOptions
 
-    if ctx.cov_type == "classical":
-        options = LogitOptions(cov_type="classical", solver=ctx.method)
+    if ctx.cov_type in _ENGINE_COV_TYPES:
+        options = LogitOptions(cov_type=ctx.cov_type, solver=ctx.method)
     elif ctx.cov_type == "cluster":
         options = LogitOptions(
             cov_type="cluster",
@@ -97,7 +110,7 @@ def _fit_once_statsmodels(ctx: FitContext):
     fit_kwargs: dict = {
         "disp": 0,
         "method": ctx.method,
-        "cov_type": "nonrobust" if ctx.cov_type == "classical" else "cluster",
+        "cov_type": {"classical": "nonrobust"}.get(ctx.cov_type, ctx.cov_type),
     }
     if ctx.cov_type == "cluster":
         fit_kwargs["cov_kwds"] = {"groups": ctx.pandas_df[ctx.cluster]}
@@ -128,13 +141,12 @@ LOGIT_ADAPTER = PerfAdapter(
     method="logit",
     module="performance.compare_logit",
     libraries=("engine", "statsmodels"),
-    cov_types=("classical", "cluster"),
+    cov_cases=_COV_CASES,
     reference_versions=lambda: {
         "statsmodels_version": statsmodels.__version__
     },
     build_dataframe=_build_dataframe,
     fit_once=_fit_once,
-    cluster="cluster_group",
     # method 軸: bfgs/lbfgs を代表点（classical・k=5・n=1,000,000）で計測する。
     # 既定の newton は n/k スイープに含まれる。
     extra_methods=("bfgs", "lbfgs"),

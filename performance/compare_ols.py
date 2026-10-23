@@ -17,22 +17,28 @@ CLAUDE.md 1章「計算コアはRustで実装し高速化」の狙いを定量�
 `_fit_once_statsmodels` では `.fit()` 直後にこれらのプロパティへ明示的にアクセスし、
 engine と同じ「フルセットの適合度統計量込み」で計測する。
 
-## cov_type の範囲
+## 軸と cov_type の範囲
 
-`.claude/rules/testing-policy.md`「パフォーマンス比較（ベンチマーク）の方法論」に
-従い、代表2点のみ計測する: 最も軽い `classical` と、最も計算コストの重い `hac`
-（Newey-West、三重ループ）。HC1/cluster は classical と同じ挙動傾向のため省く。
+n 軸（10,000 / 100,000 / 1,000,000、k=5）と k 軸（n=10,000）は既定の標準誤差
+（classical）だけを回す。標準誤差の種類は **cov 軸**（n=100,000・k=5）で全て回す:
+classical・hc0・hc1・hc2・hc3・hac、および cluster の 2×2（G=50 / G=n/10 ×
+クラスターの行が散らばる random / クラスターごとに連続する sorted）。statsmodels に
+全て同等のものがあるので、全ケースを両ライブラリで測る。
 
 使用例（リポジトリルートから）:
-    # 一括実行（n軸・k軸両方、結果をJSONに保存）
+    # 一括実行（n軸・k軸・cov軸、結果をJSONに保存）
     python -m performance.compare_ols \\
         --output docs/performance/results/ols.json
+
+    # 絞って回す（ローカルで素早く確認する用。出力形式は一括実行と同じ）
+    python -m performance.compare_ols --axes cov --cov-sweep-n 20000 \\
+        --cov-filter hc1,cluster_g50_random --libraries engine
 
     # 単体計測（デバッグ用）。一括実行と条件を揃えるにはスレッド数を1に固定する
     # （一括実行では `_perf_harness._run_isolated` が自動で設定する）。
     RAYON_NUM_THREADS=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \\
         python -m performance.compare_ols \\
-        --worker --library engine --cov-type hac --n 1000 --k 5
+        --worker --library engine --cov-case hac --n 1000 --k 5
 """
 
 from __future__ import annotations
@@ -40,7 +46,15 @@ from __future__ import annotations
 import statsmodels
 
 from benchmark.linear.datasets import generate_linear_dataset
-from performance._perf_harness import FitContext, PerfAdapter, run_cli
+from performance._perf_harness import (
+    CovCase,
+    FitContext,
+    PerfAdapter,
+    cluster_cases,
+    run_cli,
+)
+
+_HC_TYPES = ("hc0", "hc1", "hc2", "hc3")
 
 
 def _build_dataframe(n: int, k: int, seed: int):
@@ -51,12 +65,14 @@ def _build_dataframe(n: int, k: int, seed: int):
 def _fit_once_engine(ctx: FitContext):
     from econometricsmodels import OLS, OLSOptions
 
-    if ctx.cov_type == "classical":
-        options = OLSOptions(cov_type="classical")
+    if ctx.cov_type == "classical" or ctx.cov_type in _HC_TYPES:
+        options = OLSOptions(cov_type=ctx.cov_type)
     elif ctx.cov_type == "hac":
         options = OLSOptions(
             cov_type="hac", hac_lags=ctx.hac_lags, hac_time=ctx.hac_time
         )
+    elif ctx.cov_type == "cluster":
+        options = OLSOptions(cov_type="cluster", cluster=ctx.cluster)
     else:
         raise ValueError(f"unknown cov_type: {ctx.cov_type!r}")
     return OLS(ctx.df, y=ctx.y_col, x=ctx.x_cols, options=options).fit()
@@ -66,10 +82,12 @@ def _fit_once_statsmodels(ctx: FitContext):
     import statsmodels.formula.api as smf
 
     formula = f"{ctx.y_col} ~ " + " + ".join(ctx.x_cols)
-    sm_cov_type = {"classical": "nonrobust", "hac": "hac"}[ctx.cov_type]
+    sm_cov_type = {"classical": "nonrobust"}.get(ctx.cov_type, ctx.cov_type)
     fit_kwargs: dict = {"cov_type": sm_cov_type, "use_t": True}
     if ctx.cov_type == "hac":
         fit_kwargs["cov_kwds"] = {"maxlags": ctx.hac_lags}
+    elif ctx.cov_type == "cluster":
+        fit_kwargs["cov_kwds"] = {"groups": ctx.pandas_df[ctx.cluster]}
     res = smf.ols(formula, data=ctx.pandas_df).fit(**fit_kwargs)
     # engine と計測範囲を揃えるため、遅延評価プロパティを明示的に確定させる
     # （モジュール docstring「計測範囲の対称性」参照）。
@@ -97,7 +115,12 @@ OLS_ADAPTER = PerfAdapter(
     method="ols",
     module="performance.compare_ols",
     libraries=("engine", "statsmodels"),
-    cov_types=("classical", "hac"),
+    cov_cases=(
+        CovCase("classical", "classical"),
+        *(CovCase(t, t) for t in _HC_TYPES),
+        CovCase("hac", "hac"),
+        *cluster_cases(),
+    ),
     reference_versions=lambda: {
         "statsmodels_version": statsmodels.__version__
     },

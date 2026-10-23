@@ -11,13 +11,12 @@
 //! （`docs/spec/iv-spec.md`3.8節）。
 //!
 //! `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/
-//! `MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`は`engine::error::
+//! `MissingClusterColumn`/`InsufficientClusters`/`NearSingularMatrix`等は`engine::shared::error::
 //! CommonError`に切り出し済みのため、ここでは含めない。
 //!
-//! 現時点ではIV固有バリアントとして識別に関わる`InsufficientInstruments`のみ定義する
-//! （本Issueは型の土台を用意するスコープで、2SLS/GMMの実装issueで実際に計算コードを
-//! 書く過程で追加のバリアント（特異行列等）が必要になった時点で随時追加する。
-//! `LeastSquaresError`のdocコメントと同じ方針）。
+//! IV固有のバリアント（識別に関わる`InsufficientInstruments`、第一段階・第二段階の
+//! 包み、GMMの重み行列のクラスター数不足など）は`IvError`に定義する。バリアントは
+//! 計算コードを書く過程で必要になった時点で足す（`LeastSquaresError`のdocコメントと同じ方針）。
 //!
 //! ## 入力データ構造（`IvInput`）
 //!
@@ -26,7 +25,7 @@
 //! 4つのロールを持つため単一の`x`ではなく3つの設計行列を個別に保持する
 //! （`docs/spec/iv-spec.md`1章）。
 //!
-//! **配置場所の判断**: 既存の`OlsInput`/`WlsEstimator`の前例は、`OlsInput`をols.rsに
+//! **配置場所の判断**: 既存の`OlsInput`/`WlsEstimator`の前例は、`OlsInput`をols/input.rsに
 //! 定義したまま`WlsEstimator`（wls.rs）が`super::ols::OlsInput`をそのままimportして使う
 //! （`linear/common.rs`へは移動しない）というものだった。これはWLSがOLSに「乗る」非対称な
 //! 依存関係（`WlsEstimator::fit`が内部で`OlsEstimator::fit`を呼ぶ）だったため、依存の
@@ -38,10 +37,13 @@
 use faer::Mat;
 use thiserror::Error;
 
-use crate::error::CommonError;
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
-use crate::validation::MAX_ITER_LIMIT;
+use crate::shared::error::{ClusterSetting, CommonError, ErrorInfo, staged_report};
+use crate::shared::error_catalog::{ErrorCode, ErrorReport, Stage};
+use crate::shared::validation::{
+    GMM_MAX_ITER_MIN, MAX_ITER_LIMIT, validate_cluster_count_covers_slopes, validate_cluster_groups,
+};
 
 /// 2SLS/GMMの計算過程で発生しうるエラー。
 ///
@@ -59,11 +61,7 @@ pub enum IvError {
     /// `instruments`は除外操作変数のみを指す（`docs/spec/iv-spec.md`
     /// 1.1節）。順序条件は必要条件に過ぎず、階数条件（rank condition）はこの時点の
     /// 列数チェックでは検出できない（実際の推定計算時に特異行列として顕在化する）。
-    #[error(
-        "insufficient instruments for identification: {n_instruments} instrument(s) provided \
-         but {n_endog} endogenous regressor(s) require at least {n_endog} \
-         (order condition: len(instruments) >= len(x_endog))"
-    )]
+    #[error("{}", self.catalog_message())]
     InsufficientInstruments {
         n_instruments: usize,
         n_endog: usize,
@@ -76,44 +74,44 @@ pub enum IvError {
     /// 内生変数が複数ある場合にどの変数の第一段階回帰が失敗したかをエラーメッセージから
     /// 判別できるようにするため（`CommonError::NoRegressors`をUXの観点で`Insufficient
     /// Observations`と分離したのと同じ考え方）。
-    #[error("first stage regression for endogenous variable '{endog_name}' failed: {source}")]
+    #[error("{}", self.catalog_message())]
     FirstStageFailed {
         endog_name: String,
         #[source]
         source: LeastSquaresError,
     },
 
+    /// 観測数`n`が第一段階の回帰変数の数`l`（`x_exog ++ instruments`、定数項を含む）以下。
+    ///
+    /// `n == l`では`Z`が正方で正則になり、第一段階は内生変数を完全に当てはめて`X̂ = X`となる
+    /// ため、2SLSの係数はOLSと一致し操作変数が情報を持たない（GMMの`W₀ = (Z'Z)⁻¹`も同様に
+    /// OLSへ縮退する）。`n < l`では`Z'Z`が特異になる。いずれも弱操作変数診断の残差自由度
+    /// `n - l`が0以下になる。第一段階を診断として`None`へdegradeできる全体F検定
+    /// （`compute_first_stage`参照）とは異なり、`X̂`の元になる推定そのものが成立しない。
+    /// 条件は内生変数ごとに変わらないため、`FirstStageFailed`のように変数名は付けない。
+    /// 構造方程式側の`n <= k`は先に`CommonError::InsufficientObservations`で報告する
+    /// （`validate_observation_counts`）。
+    #[error("{}", self.catalog_message())]
+    InsufficientObservationsForFirstStage { n: usize, l: usize },
+
     /// 2SLSの第二段階回帰（`y ~ x_exog + x̂_endog`）が`OlsEstimator::fit`で失敗した。
-    #[error("second stage regression failed: {source}")]
+    #[error("{}", self.catalog_message())]
     SecondStageFailed {
         #[source]
         source: LeastSquaresError,
     },
 
-    /// `cov_type=Hac`の`hac_lags`が負、または観測数`n`以上。
-    ///
-    /// `LeastSquaresError::InvalidHacLags`と同じ検証だが、2SLSのサンドイッチ型分散計算は
-    /// OLS/nonlinearどちらの既存計算にも寄せない独立実装のため（`docs/spec/
-    /// iv-spec.md`3.1節）、`CommonError`にもなく、`LeastSquaresError`をそのまま
-    /// 再利用もしない。2SLSの`cov_type`対応実装時に追加した（`engine/src/iv/two_sls.rs`参照）。
-    #[error("hac_lags must be in the range [0, n): got {hac_lags}, n={n}")]
-    InvalidHacLags { hac_lags: i64, n: usize },
-
     /// `gmm_type="iterated"`の`gmm_max_iter`が3未満。
     ///
     /// 上限を初回推定を含めて数えるため、2回以下の反復は2段階GMMに収束判定を付けただけに
     /// なり紛らわしい。2段階が欲しい場合は`gmm_type="two_step"`を使う。
-    #[error(
-        "gmm_max_iter must be an integer between 3 (counting the initial estimate) and {}, \
-         got {max_iter}; for fewer than 3 use gmm_type=\"two_step\" for a two-step GMM",
-        MAX_ITER_LIMIT
-    )]
+    #[error("{}", self.catalog_message())]
     InvalidGmmMaxIter { max_iter: i64 },
 
     /// `gmm_type="iterated"`の`gmm_tol`が正の有限値でない（0以下・NaN・inf）。
     ///
     /// 収束判定の許容誤差として意味を持たないため。
-    #[error("gmm_tol must be a positive finite number, got {gmm_tol}")]
+    #[error("{}", self.catalog_message())]
     InvalidGmmTol { gmm_tol: f64 },
 
     /// `estimator="gmm"`かつ`gmm_weight_type=Cluster`で、クラスター数`g`がモーメント条件の重み行列
@@ -125,13 +123,13 @@ pub enum IvError {
     /// `cov_type=Cluster`の`CommonError::InsufficientClustersForInference`（係数共分散の
     /// Wald部分行列、閾値は`q`）とは対象・閾値が異なる別軸のためGMM固有のバリアントとする。
     /// `g`・`l`は入力だけから判定できるため、行列計算を待たず`fit()`冒頭で弾く。
-    #[error(
-        "gmm_weight_type='cluster' requires at least l clusters (l+1 if exactly identified) for \
-         the moment weight matrix: got g={g} clusters for l={l} instruments (including \
-         exogenous regressors), but the cluster moment covariance has rank at most g \
-         (g-1 if exactly identified), so it is singular"
-    )]
-    InsufficientClustersForWeightMatrix { g: usize, l: usize },
+    #[error("{}", self.catalog_message())]
+    InsufficientClustersForWeightMatrix {
+        g: usize,
+        l: usize,
+        /// 必要なクラスター数の下限（過剰識別は`l`、丁度識別は`l + 1`）。
+        min_clusters: usize,
+    },
 
     /// `raise_on_non_convergence=true`（既定）かつ`gmm_type="iterated"`で、`gmm_max_iter`回
     /// （初回推定を含む上限回数）以内に係数が収束しなかった。
@@ -143,10 +141,7 @@ pub enum IvError {
     /// max_iter"）とほぼ揃えているが、`IvError`は2SLS/GMM共有の型のため先頭に"GMM "を
     /// 付けて対象を明示している点のみ意図的な差異（rust-reviewerの指摘で文体差を確認、
     /// この差は意図的と判断）。
-    #[error(
-        "GMM failed to converge after {n_iter} iterations. Set raise_on_non_convergence=False \
-         to receive the result anyway, or increase gmm_max_iter"
-    )]
+    #[error("{}", self.catalog_message())]
     GmmNonConvergence { n_iter: usize },
 
     /// Wu-Hausman内生性検定（回帰ベース、`iv-spec.md`3.6節）のための
@@ -154,18 +149,79 @@ pub enum IvError {
     /// `OlsEstimator::fit`または`OlsEstimator::wald_test_last_columns`で失敗した。
     ///
     /// **設計行列の特異性（`SingularMatrix`）・観測数不足（`InsufficientObservations`）・
-    /// Wald検定側の数値的なほぼ特異性（`ComputationFailed`）は、このバリアントを経由せず
+    /// Wald検定側の数値的なほぼ特異性（`NearSingularMatrix`）は、このバリアントを経由せず
     /// `wu_hausman_statistic`/`wu_hausman_p_value`を`None`にするだけで`fit()`自体は成功
     /// させる**（ユーザー確認済み、`two_sls.rs`の`fit()`実装参照）。このバリアントは
     /// それら以外の（`confidence_level`・`cov_type=Cluster/Hac`の妥当性は`fit()`の
     /// 第二段階側で既に検証済みのため）理論上到達不能な失敗を防御的に伝播するためだけに
     /// 存在する（`FirstStageFailed`/`SecondStageFailed`と同じ理由で`LeastSquaresError`を
     /// そのまま透過させず専用バリアントにする）。
-    #[error("Wu-Hausman regression-based exogeneity test failed: {source}")]
+    #[error("{}", self.catalog_message())]
     HausmanRegressionFailed {
         #[source]
         source: LeastSquaresError,
     },
+}
+
+impl ErrorInfo for IvError {
+    /// `FirstStageFailed`等の段階ごとの包みは、`source`の`code`（`stage`を付けてよい`code`なら
+    /// `stage`つき）を返す。
+    fn report(&self) -> ErrorReport {
+        match self {
+            Self::Common(common) => common.report(),
+            Self::FirstStageFailed { endog_name, source } => staged_report(
+                source.report(),
+                Stage::FirstStage {
+                    endog_name: endog_name.clone(),
+                },
+            ),
+            Self::SecondStageFailed { source } => {
+                staged_report(source.report(), Stage::SecondStage)
+            }
+            Self::HausmanRegressionFailed { source } => {
+                staged_report(source.report(), Stage::WuHausmanRegression)
+            }
+            Self::InsufficientInstruments {
+                n_instruments,
+                n_endog,
+            } => ErrorReport::new(ErrorCode::InsufficientInstruments)
+                .param("n_instruments", *n_instruments)
+                .param("n_endog", *n_endog),
+            Self::InsufficientObservationsForFirstStage { n, l } => {
+                ErrorReport::new(ErrorCode::InsufficientObservationsForFirstStage)
+                    .param("n_obs", *n)
+                    .param("n_params", *l)
+                    .param("min_obs", l + 1)
+            }
+            Self::InsufficientClustersForWeightMatrix { g, l, min_clusters } => {
+                ErrorReport::new(ErrorCode::GmmWeightClusterCountTooSmall)
+                    .param("n_clusters", *g)
+                    .param("n_instruments", *l)
+                    .param("min_clusters", *min_clusters)
+            }
+            Self::InvalidGmmMaxIter { max_iter } => {
+                ErrorReport::new(ErrorCode::GmmMaxIterOutOfRange)
+                    .param("value", *max_iter)
+                    .param("min", GMM_MAX_ITER_MIN)
+                    .param("max", MAX_ITER_LIMIT)
+            }
+            Self::InvalidGmmTol { gmm_tol } => {
+                ErrorReport::new(ErrorCode::ToleranceNotPositiveFinite)
+                    .param("option", "gmm_tol")
+                    .param("value", *gmm_tol)
+            }
+            Self::GmmNonConvergence { n_iter } => ErrorReport::new(ErrorCode::NotConverged)
+                .param("n_iter", *n_iter)
+                .param("iter_option", "gmm_max_iter"),
+        }
+    }
+}
+
+impl IvError {
+    /// `Display`が使う`message`。
+    fn catalog_message(&self) -> String {
+        self.report().message()
+    }
 }
 
 /// IVの被説明変数・3つの設計行列（外生説明変数・内生説明変数・操作変数）を保持する
@@ -418,6 +474,65 @@ pub(crate) fn without_baked_in_intercept<'a>(
     }
 }
 
+/// 観測数`n`が構造方程式の係数の数`k`（`k_exog + k_endog`）と、第一段階の回帰変数の数`l`
+/// （`k_exog + k_instruments`、いずれも定数項を含む）の両方を上回ることを検証する。
+///
+/// 識別条件`k_instruments >= k_endog`より`l >= k`なので、`n <= l`は`n <= k`を含む。
+/// 先に構造方程式の`n <= k`を`CommonError::InsufficientObservations`として報告するのは、
+/// 第一段階の失敗に隠れて構造方程式の`k`が利用者に伝わらないのを避けるため
+/// （`validate_structural_cluster_count`と同じ層分け）。`n > k`でも`n <= l`なら
+/// `IvError::InsufficientObservationsForFirstStage`（`X̂`が成立しない）で拒否する。
+/// `TwoSlsEstimator::fit`/`GmmEstimator::fit`冒頭と`engine_pybind`の`fit`が同じ判定を
+/// 共有するための単一の実装（`k`・`l`の式をここに集約する）。
+///
+/// # Errors
+/// - `n <= k`: `CommonError::InsufficientObservations`
+/// - `n <= l`（`n > k`のとき）: `IvError::InsufficientObservationsForFirstStage`
+pub fn validate_observation_counts(input: &IvInput) -> Result<(), IvError> {
+    let n = input.nobs();
+    let k = input.k_exog() + input.k_endog();
+    if n <= k {
+        return Err(CommonError::InsufficientObservations { n, k }.into());
+    }
+    let l = input.k_exog() + input.k_instruments();
+    if n <= l {
+        return Err(IvError::InsufficientObservationsForFirstStage { n, l });
+    }
+    Ok(())
+}
+
+/// `cov_type=Cluster`のとき、クラスター数`g`が構造方程式の傾き係数の数`q`
+/// （`k_exog + k_endog - k_constant`）より多いことを検証する。それ以外の`cov_type`・
+/// `groups=None`（`MissingClusterColumn`は呼び出し側が別途扱う）では何もしない。
+///
+/// `rank(Ŝ) ≤ g - 1`のため`g <= q`でロバストWald/F（χ²）検定の`q×q`部分行列が構造的に
+/// 特異になる（`validate_cluster_count_covers_slopes`参照）。構造方程式の結果は全体Wald
+/// 検定を必須の出力に持つため拒否する（第一段階は全体F検定が診断なので、`g <= q_first`でも
+/// 失敗させず`None`にする。`compute_first_stage`参照）。第一段階の傾き係数の数は識別条件に
+/// より構造方程式以上のため、`compute_first_stage`より先にこのチェックを行わないと、
+/// 構造方程式側で`g <= q`の入力が第一段階の処理を無駄に走らせてから初めて弾かれる。
+/// `TwoSlsEstimator::fit`/`GmmEstimator::fit`冒頭と`engine_pybind`の`fit`が
+/// 同じ判定を共有するための単一の実装（`q`の式をここに集約する）。
+///
+/// # Errors
+/// - `groups`の長さが`n`と不一致、または`g < 2`: `CommonError::InsufficientClusters`等
+///   （`validate_cluster_groups`）
+/// - `g <= q`: `CommonError::InsufficientClustersForInference`
+pub fn validate_structural_cluster_count(
+    input: &IvInput,
+    cov_type: &CovType,
+) -> Result<(), IvError> {
+    let Some(groups) = cov_type.cluster_groups() else {
+        return Ok(());
+    };
+    let g = validate_cluster_groups(groups, input.nobs(), ClusterSetting::CovType)?;
+    validate_cluster_count_covers_slopes(
+        g,
+        input.k_exog() + input.k_endog() - usize::from(input.has_intercept()),
+    )?;
+    Ok(())
+}
+
 /// [`compute_first_stage`]の戻り値: 内生変数ごとの第一段階回帰（`x_endog_names`と同じ順序）、
 /// 弱操作変数診断（部分F統計量、同じく`x_endog_names`と同じ順序）。
 pub type FirstStageResult = (Vec<(String, OlsEstimator)>, Vec<(String, f64)>);
@@ -433,10 +548,17 @@ pub type FirstStageResult = (Vec<(String, OlsEstimator)>, Vec<(String, f64)>);
 /// 自体は`estimator`に依存しない、素の（第二段階の推定方式によらない）診断情報のため、
 /// SEサンドイッチ計算（2SLS/GMMで数式が異なるため独立実装が必要）とは性質が異なる）。
 ///
-/// `cov_type`は第一段階`OlsEstimator::fit`にそのまま渡す（`two_sls.rs`の`fit()`冒頭
+/// `cov_type`は第一段階の推定にそのまま渡す（`two_sls.rs`の`fit()`冒頭
 /// コメント「第一段階・第二段階での`cov_type`/`confidence_level`の扱い」と同じ）。
 /// 弱操作変数診断自体は常に等分散前提で`cov_type`に依存しない（`partial_f_statistic`の
 /// docコメント参照）。
+///
+/// **`cov_type=Cluster`で`G`が第一段階の傾き係数の数`q_first`以下でも失敗させない**
+/// （`OlsEstimator::fit_with_optional_f_test`）。第一段階の全体F検定は`rank(Ŝ) ≤ G-1 <
+/// q_first`で計算できないが、診断でしかなく、係数・標準誤差・弱操作変数診断（SSRだけで
+/// 決まる部分F統計量）は有効なため、各第一段階の`f_statistic()`/`f_p_value()`が`None`に
+/// なるだけで続行する。構造方程式の`G <= q_struct`（`q_struct <= q_first`）は呼び出し元が
+/// 先に`validate_structural_cluster_count`で弾く前提。
 ///
 /// # Errors
 /// - 第一段階回帰が失敗: `IvError::FirstStageFailed`
@@ -476,11 +598,10 @@ pub fn compute_first_stage(
             source,
         })?;
         let estimator =
-            OlsEstimator::fit(ols_input, cov_type.clone(), confidence_level).map_err(|source| {
-                IvError::FirstStageFailed {
-                    endog_name: endog_name.clone(),
-                    source,
-                }
+            OlsEstimator::fit_with_optional_f_test(ols_input, cov_type.clone(), confidence_level)
+                .map_err(|source| IvError::FirstStageFailed {
+                endog_name: endog_name.clone(),
+                source,
             })?;
         first_stage.push((endog_name.clone(), estimator));
     }
@@ -593,7 +714,7 @@ fn partial_f_statistic(
 }
 
 /// `two_sls.rs`/`gmm.rs`の`mod proptests`が共有する、property-basedテスト用のケース生成器と
-/// 補助関数。`ols.rs`の`mod proptests`は手法ごとに生成器を持つが、IVは2SLSとGMMで同一の
+/// 補助関数。`ols/estimator.rs`の`mod proptests`は手法ごとに生成器を持つが、IVは2SLSとGMMで同一の
 /// データ構造（内生変数・操作変数・構造誤差）を要するため、ここに一本化して二重定義を避ける。
 #[cfg(test)]
 pub(crate) mod proptest_support {
@@ -742,7 +863,7 @@ pub(crate) mod proptest_support {
         }
     }
 
-    /// 相対誤差ベース＋絶対誤差フロア（`ols.rs`の`assert_approx_eq`と同じ`RTOL=1e-6`）。
+    /// 相対誤差ベース＋絶対誤差フロア（`ols/estimator.rs`の`assert_approx_eq`と同じ`RTOL=1e-6`）。
     pub(crate) fn assert_approx_eq(actual: f64, expected: f64, msg: &str) {
         let tol = 1e-6 * expected.abs().max(1.0);
         let diff = (actual - expected).abs();
@@ -756,22 +877,473 @@ pub(crate) mod proptest_support {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared::group_codes::GroupCodes;
 
     #[test]
-    fn iv_error_messages_are_human_readable() {
+    fn iv_cataloged_variants_display_the_catalog_message_and_common_delegates() {
+        let err = IvError::InvalidGmmMaxIter { max_iter: 2 };
+        assert_eq!(err.to_string(), err.report().message());
+        let wrapped = IvError::Common(CommonError::InvalidConfidenceLevel {
+            confidence_level: 2.0,
+        });
         assert_eq!(
-            IvError::InsufficientInstruments {
-                n_instruments: 1,
-                n_endog: 2,
-            }
+            wrapped.report().code(),
+            ErrorCode::ConfidenceLevelOutOfRange
+        );
+        // 段階ごとの包みは`source`の`code`を返す。`stage`を付けてよくない`code`には付けない。
+        let first_stage = IvError::FirstStageFailed {
+            endog_name: "x".to_string(),
+            source: LeastSquaresError::InvalidNlags { nlags: 0 },
+        };
+        let report = first_stage.report();
+        assert_eq!(report.code(), ErrorCode::NlagsNotPositive);
+        assert!(report.stage().is_none());
+        // `stage`を付けてよい`code`には、どの回帰かを示す`stage`が付く。
+        let singular = IvError::FirstStageFailed {
+            endog_name: "x".to_string(),
+            source: LeastSquaresError::SingularMatrix {
+                columns: vec!["x".to_string()],
+            },
+        }
+        .report();
+        assert_eq!(singular.code(), ErrorCode::DesignMatrixSingular);
+        assert_eq!(
+            singular.stage(),
+            Some(&Stage::FirstStage {
+                endog_name: "x".to_string()
+            })
+        );
+        let hausman = IvError::HausmanRegressionFailed {
+            source: LeastSquaresError::SingularMatrix {
+                columns: vec!["x".to_string()],
+            },
+        }
+        .report();
+        assert_eq!(hausman.stage(), Some(&Stage::WuHausmanRegression));
+        // 設計行列の特異は、どの回帰で起きたかを`stage`で示す。
+        let second_stage = IvError::SecondStageFailed {
+            source: LeastSquaresError::SingularMatrix {
+                columns: vec!["x".to_string()],
+            },
+        };
+        let report = second_stage.report();
+        assert_eq!(report.code(), ErrorCode::DesignMatrixSingular);
+        assert_eq!(report.stage(), Some(&Stage::SecondStage));
+    }
+
+    #[test]
+    fn gmm_non_convergence_maps_to_not_converged_with_gmm_max_iter() {
+        let err = IvError::GmmNonConvergence { n_iter: 3 };
+        let report = err.report();
+        assert_eq!(report.code(), ErrorCode::NotConverged);
+        assert!(report.validate().is_ok());
+        assert_eq!(err.to_string(), report.message());
+        assert_eq!(
+            report.message(),
+            "The optimizer did not converge after 3 iteration(s)."
+        );
+        assert!(report.full_text().contains("gmm_max_iter"));
+    }
+
+    #[test]
+    fn gmm_option_errors_map_to_catalog_codes_with_valid_params() {
+        let max_iter = IvError::InvalidGmmMaxIter { max_iter: 2 }.report();
+        assert_eq!(max_iter.code(), ErrorCode::GmmMaxIterOutOfRange);
+        assert!(max_iter.validate().is_ok());
+        assert!(
+            max_iter
+                .message()
+                .starts_with("gmm_max_iter must be an integer from 3 to")
+        );
+
+        let tol = IvError::InvalidGmmTol { gmm_tol: 0.0 }.report();
+        assert_eq!(tol.code(), ErrorCode::ToleranceNotPositiveFinite);
+        assert!(tol.validate().is_ok());
+        assert!(tol.message().starts_with("gmm_tol must be"));
+    }
+
+    #[test]
+    fn identification_errors_map_to_catalog_codes_with_valid_params() {
+        let cases = [
+            (
+                IvError::InsufficientInstruments {
+                    n_instruments: 1,
+                    n_endog: 2,
+                },
+                ErrorCode::InsufficientInstruments,
+                "The model has 2 endogenous regressor(s) but only 1 instrument(s); it needs at least as many instruments as endogenous regressors (order condition).",
+            ),
+            (
+                IvError::InsufficientObservationsForFirstStage { n: 4, l: 4 },
+                ErrorCode::InsufficientObservationsForFirstStage,
+                "The first stage needs more observations than its 4 coefficient(s) (instruments, exogenous regressors and the intercept): 4 observation(s), at least 5 needed.",
+            ),
+            (
+                IvError::InsufficientClustersForWeightMatrix {
+                    g: 2,
+                    l: 3,
+                    min_clusters: 3,
+                },
+                ErrorCode::GmmWeightClusterCountTooSmall,
+                "gmm_weight_type=\"cluster\" needs at least 3 clusters for 3 instrument(s) (including exogenous regressors), but the cluster column has 2.",
+            ),
+        ];
+        for (err, code, message) in cases {
+            let report = err.report();
+            assert_eq!(report.code(), code);
+            assert!(report.validate().is_ok());
+            assert_eq!(report.message(), message);
+            assert_eq!(err.to_string(), message);
+        }
+    }
+
+    #[test]
+    fn common_errors_display_the_catalog_message() {
+        assert_eq!(
+            IvError::Common(CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 1
+            })
             .to_string(),
-            "insufficient instruments for identification: 1 instrument(s) provided but 2 \
-             endogenous regressor(s) require at least 2 \
-             (order condition: len(instruments) >= len(x_endog))"
+            r#"cov_type="cluster" needs at least 2 clusters, but the cluster column has 1."#
+        );
+    }
+
+    /// `n=6`、`x_exog`(1列)・`x_endog`(1列)・`instruments`(2列)の最小入力。構造方程式の
+    /// 傾き係数の数は定数項の有無によらず`q=2`（あり: `k_exog=2`（const含む）`+ 1 - 1`、
+    /// なし: `k_exog=1 + 1 - 0`）。「常に1を引く」「引かない」のどちらの誤実装でも
+    /// `g=2`/`g=3`の境界テストが失敗する。
+    fn structural_cluster_test_input(include_intercept: bool) -> IvInput {
+        let col = |offset: f64| -> Vec<f64> { (0..6).map(|i| (i as f64) * 0.7 + offset).collect() };
+        IvInput::from_columns(
+            &col(0.0),
+            &[col(1.0)],
+            vec!["x1".to_string()],
+            &[col(2.0)],
+            vec!["endog1".to_string()],
+            &[col(3.0), col(4.0)],
+            vec!["z1".to_string(), "z2".to_string()],
+            include_intercept,
+            "y".to_string(),
+        )
+        .unwrap()
+    }
+
+    fn cluster_cov(n_groups: usize) -> CovType {
+        CovType::Cluster {
+            groups: Some(GroupCodes::from_labels_without_keys(
+                &(0..6)
+                    .map(|i| format!("g{}", i % n_groups))
+                    .collect::<Vec<String>>(),
+            )),
+        }
+    }
+
+    /// 12観測の`x_exog`(1列)・`x_endog`(1列)・`instruments`(2列)。互いに線形独立なので第一段階
+    /// （`endog1 ~ x1 + z1 + z2`）がフルランクになる。構造方程式の傾き係数の数は`q_struct=2`、
+    /// 第一段階の傾き係数の数は定数項の有無によらず`q_first=3`（`x1`・`z1`・`z2`）。
+    fn first_stage_boundary_input(include_intercept: bool) -> IvInput {
+        let col = |freq: f64, phase: f64| -> Vec<f64> {
+            (0..12).map(|i| (freq * i as f64 + phase).sin()).collect()
+        };
+        IvInput::from_columns(
+            &col(0.9, 0.3),
+            &[col(1.1, 0.7)],
+            vec!["x1".to_string()],
+            &[col(1.7, 0.2)],
+            vec!["endog1".to_string()],
+            &[col(2.3, 0.5), col(2.9, 1.1)],
+            vec!["z1".to_string(), "z2".to_string()],
+            include_intercept,
+            "y".to_string(),
+        )
+        .unwrap()
+    }
+
+    fn first_stage_cluster_cov(n_groups: usize) -> CovType {
+        CovType::Cluster {
+            groups: Some(GroupCodes::from_labels_without_keys(
+                &(0..12)
+                    .map(|i| format!("g{}", i % n_groups))
+                    .collect::<Vec<String>>(),
+            )),
+        }
+    }
+
+    /// 構造方程式では`G > q_struct`でも、第一段階の傾き係数の数`q_first`以下のクラスター数
+    /// （`G == q_first`）では第一段階の全体F検定だけが定義なし（`None`）になり、
+    /// `compute_first_stage`は失敗しない。係数の標準誤差と弱操作変数診断は有効なまま。
+    #[test]
+    fn compute_first_stage_leaves_overall_f_undefined_when_g_equals_first_stage_slopes() {
+        for include_intercept in [true, false] {
+            let input = first_stage_boundary_input(include_intercept);
+            assert!(validate_structural_cluster_count(&input, &first_stage_cluster_cov(3)).is_ok());
+
+            let (first_stage, weak_f) =
+                compute_first_stage(&input, &first_stage_cluster_cov(3), 0.95).unwrap();
+            let (_, estimator) = &first_stage[0];
+            let label = format!("include_intercept={include_intercept}");
+            assert_eq!(estimator.f_statistic(), None, "{label}");
+            assert_eq!(estimator.f_p_value(), None, "{label}");
+            assert_eq!(estimator.f_df(), None, "{label}");
+            for j in 0..estimator.input().k() {
+                let se = *estimator.std_errors().get(j, 0);
+                assert!(se.is_finite() && se > 0.0, "{label} j={j} se={se}");
+            }
+            assert!(weak_f[0].1.is_finite() && weak_f[0].1 > 0.0, "{label}");
+        }
+    }
+
+    /// 境界の反対側（`G == q_first + 1`）では第一段階の全体F検定が定義でき、自由度は
+    /// `(q_first, G - 1)`。
+    #[test]
+    fn compute_first_stage_computes_overall_f_when_g_exceeds_first_stage_slopes() {
+        for include_intercept in [true, false] {
+            let input = first_stage_boundary_input(include_intercept);
+            let (first_stage, _) =
+                compute_first_stage(&input, &first_stage_cluster_cov(4), 0.95).unwrap();
+            let (_, estimator) = &first_stage[0];
+            let label = format!("include_intercept={include_intercept}");
+            assert!(estimator.f_statistic().is_some(), "{label}");
+            assert!(estimator.f_p_value().is_some(), "{label}");
+            assert_eq!(estimator.f_df(), Some((3, 3)), "{label}");
+        }
+    }
+
+    /// 弱操作変数診断（古典的ネストF）と第一段階の係数は`cov_type`と`G`に依存しないため、
+    /// 全体Fが定義なしになるクラスター数でも定義ありのクラスター数と同じ値になる。
+    #[test]
+    fn compute_first_stage_weak_instrument_f_and_params_do_not_depend_on_cluster_count() {
+        let input = first_stage_boundary_input(true);
+        let (undefined, weak_undefined) =
+            compute_first_stage(&input, &first_stage_cluster_cov(3), 0.95).unwrap();
+        let (defined, weak_defined) =
+            compute_first_stage(&input, &first_stage_cluster_cov(4), 0.95).unwrap();
+        assert_eq!(weak_undefined, weak_defined);
+        let params = |e: &OlsEstimator| mat_to_columns(e.params());
+        assert_eq!(params(&undefined[0].1), params(&defined[0].1));
+    }
+
+    /// クラスターが1つだけの入力は、全体F検定を飛ばす第一段階でも従来どおり
+    /// `FirstStageFailed`（`InsufficientClusters`）で失敗する。
+    #[test]
+    fn compute_first_stage_still_rejects_a_single_cluster() {
+        let input = first_stage_boundary_input(true);
+        let err = compute_first_stage(&input, &first_stage_cluster_cov(1), 0.95).unwrap_err();
+        assert_eq!(
+            err,
+            IvError::FirstStageFailed {
+                endog_name: "endog1".to_string(),
+                source: crate::linear::common::LeastSquaresError::Common(
+                    CommonError::InsufficientClusters {
+                        setting: ClusterSetting::CovType,
+                        g: 1
+                    }
+                ),
+            }
+        );
+    }
+
+    /// `n`行の入力。構造方程式は`x1`・`endog1`（切片ありなら`k=3`）、第一段階は
+    /// `x1`・`z1`・`z2`（切片ありなら`l=4`、切片なしなら`k=2`・`l=3`）。
+    fn observation_count_input(n: usize, include_intercept: bool) -> IvInput {
+        let col = |freq: f64, phase: f64| -> Vec<f64> {
+            (0..n).map(|i| (freq * i as f64 + phase).sin()).collect()
+        };
+        IvInput::from_columns(
+            &col(0.9, 0.3),
+            &[col(1.1, 0.7)],
+            vec!["x1".to_string()],
+            &[col(1.7, 0.2)],
+            vec!["endog1".to_string()],
+            &[col(2.3, 0.5), col(2.9, 1.1)],
+            vec!["z1".to_string(), "z2".to_string()],
+            include_intercept,
+            "y".to_string(),
+        )
+        .unwrap()
+    }
+
+    /// 構造方程式の`n <= k`は、第一段階の`n <= l`より先に、構造方程式の`k`で報告される。
+    #[test]
+    fn validate_observation_counts_reports_the_structural_equation_first() {
+        for n in [1, 2, 3] {
+            assert_eq!(
+                validate_observation_counts(&observation_count_input(n, true)),
+                Err(IvError::Common(CommonError::InsufficientObservations {
+                    n,
+                    k: 3
+                })),
+                "n={n}"
+            );
+        }
+    }
+
+    /// 構造方程式は推定できる（`n > k`）が第一段階が推定できない（`n <= l`）窓は、
+    /// 第一段階の回帰変数の数`l`つきの専用エラーになる。`n = l + 1`から成功する。
+    #[test]
+    fn validate_observation_counts_rejects_the_window_between_k_and_l() {
+        assert_eq!(
+            validate_observation_counts(&observation_count_input(4, true)),
+            Err(IvError::InsufficientObservationsForFirstStage { n: 4, l: 4 })
         );
         assert_eq!(
-            IvError::Common(CommonError::InsufficientClusters { g: 1 }).to_string(),
-            "cov_type='cluster' requires at least 2 clusters, got 1"
+            validate_observation_counts(&observation_count_input(5, true)),
+            Ok(())
+        );
+    }
+
+    /// 切片なしでは`k`・`l`がそれぞれ1小さい（`k=2`、`l=3`）。
+    #[test]
+    fn validate_observation_counts_without_intercept_uses_smaller_counts() {
+        assert_eq!(
+            validate_observation_counts(&observation_count_input(2, false)),
+            Err(IvError::Common(CommonError::InsufficientObservations {
+                n: 2,
+                k: 2
+            }))
+        );
+        assert_eq!(
+            validate_observation_counts(&observation_count_input(3, false)),
+            Err(IvError::InsufficientObservationsForFirstStage { n: 3, l: 3 })
+        );
+        assert_eq!(
+            validate_observation_counts(&observation_count_input(4, false)),
+            Ok(())
+        );
+    }
+
+    /// 丁度識別（`l == k`）では窓`k < n <= l`が空になり、`n <= k`だけが構造方程式の`k`で
+    /// 報告される。`n = k + 1`から成功する。
+    #[test]
+    fn validate_observation_counts_has_no_window_when_just_identified() {
+        let input = |n: usize| {
+            let col = |freq: f64| -> Vec<f64> { (0..n).map(|i| (freq * i as f64).sin()).collect() };
+            IvInput::from_columns(
+                &col(0.9),
+                &[col(1.1)],
+                vec!["x1".to_string()],
+                &[col(1.7)],
+                vec!["endog1".to_string()],
+                &[col(2.3)],
+                vec!["z1".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            validate_observation_counts(&input(3)),
+            Err(IvError::Common(CommonError::InsufficientObservations {
+                n: 3,
+                k: 3
+            }))
+        );
+        assert_eq!(validate_observation_counts(&input(4)), Ok(()));
+    }
+
+    /// 内生変数が2個で過剰識別（`k = 4`、`l = 5`、`l - k = k_instruments - k_endog = 1`）。
+    #[test]
+    fn validate_observation_counts_with_two_endogenous_variables() {
+        let input = |n: usize| {
+            let col = |freq: f64| -> Vec<f64> { (0..n).map(|i| (freq * i as f64).sin()).collect() };
+            IvInput::from_columns(
+                &col(0.9),
+                &[col(1.1)],
+                vec!["x1".to_string()],
+                &[col(1.7), col(1.9)],
+                vec!["endog1".to_string(), "endog2".to_string()],
+                &[col(2.3), col(2.9), col(3.1)],
+                vec!["z1".to_string(), "z2".to_string(), "z3".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            validate_observation_counts(&input(4)),
+            Err(IvError::Common(CommonError::InsufficientObservations {
+                n: 4,
+                k: 4
+            }))
+        );
+        assert_eq!(
+            validate_observation_counts(&input(5)),
+            Err(IvError::InsufficientObservationsForFirstStage { n: 5, l: 5 })
+        );
+        assert_eq!(validate_observation_counts(&input(6)), Ok(()));
+    }
+
+    /// 切片ありの`n = l`では第一段階が完全に当てはまり、2SLSがOLSと一致する（拒否の根拠）。
+    /// 検証関数が通す最小の`n = l + 1`との違いを、第一段階の残差自由度で確かめる。
+    #[test]
+    fn first_stage_has_residual_degrees_of_freedom_at_the_smallest_accepted_n() {
+        let input = observation_count_input(5, true);
+        assert_eq!(validate_observation_counts(&input), Ok(()));
+        let (first_stage, weak) = compute_first_stage(&input, &CovType::Classical, 0.95).unwrap();
+        assert_eq!(first_stage[0].1.df_resid(), 1);
+        assert!(weak[0].1.is_finite());
+    }
+
+    #[test]
+    fn validate_structural_cluster_count_rejects_when_g_equals_q_with_intercept() {
+        let input = structural_cluster_test_input(true);
+        assert_eq!(
+            validate_structural_cluster_count(&input, &cluster_cov(2)),
+            Err(IvError::Common(
+                CommonError::InsufficientClustersForInference { g: 2, q: 2 }
+            ))
+        );
+    }
+
+    #[test]
+    fn validate_structural_cluster_count_accepts_when_g_exceeds_q_with_intercept() {
+        let input = structural_cluster_test_input(true);
+        assert_eq!(
+            validate_structural_cluster_count(&input, &cluster_cov(3)),
+            Ok(())
+        );
+    }
+
+    /// 定数項なしでは`k_constant=0`のため`q = k_exog + k_endog = 2`。
+    #[test]
+    fn validate_structural_cluster_count_uses_k_constant_zero_without_intercept() {
+        let input = structural_cluster_test_input(false);
+        assert_eq!(input.k_exog() + input.k_endog(), 2);
+        assert_eq!(
+            validate_structural_cluster_count(&input, &cluster_cov(2)),
+            Err(IvError::Common(
+                CommonError::InsufficientClustersForInference { g: 2, q: 2 }
+            ))
+        );
+        assert_eq!(
+            validate_structural_cluster_count(&input, &cluster_cov(3)),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn validate_structural_cluster_count_ignores_non_cluster_cov_types() {
+        let input = structural_cluster_test_input(true);
+        assert_eq!(
+            validate_structural_cluster_count(&input, &CovType::Classical),
+            Ok(())
+        );
+        assert_eq!(
+            validate_structural_cluster_count(&input, &CovType::Cluster { groups: None }),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn validate_structural_cluster_count_rejects_single_cluster() {
+        let input = structural_cluster_test_input(true);
+        assert_eq!(
+            validate_structural_cluster_count(&input, &cluster_cov(1)),
+            Err(IvError::Common(CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 1
+            }))
         );
     }
 
@@ -1070,5 +1642,19 @@ mod tests {
     fn mat_to_columns_returns_empty_vec_for_zero_column_matrix() {
         let m: Mat<f64> = Mat::from_fn(3, 0, |_, _| 0.0);
         assert_eq!(mat_to_columns(&m), Vec::<Vec<f64>>::new());
+    }
+
+    #[test]
+    fn validate_structural_cluster_count_accepts_non_cluster_or_missing_groups() {
+        // `MissingClusterColumn`は呼び出し側が別途扱うため、ここでは何も検証しない。
+        let input = structural_cluster_test_input(true);
+        assert_eq!(
+            validate_structural_cluster_count(&input, &CovType::Classical),
+            Ok(())
+        );
+        assert_eq!(
+            validate_structural_cluster_count(&input, &CovType::Cluster { groups: None }),
+            Ok(())
+        );
     }
 }

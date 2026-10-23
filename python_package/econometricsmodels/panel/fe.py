@@ -29,6 +29,11 @@ import polars as pl
 
 from .. import _lib
 from .._lib import FEOptions
+from .._results_utils import (
+    by_param,
+    conf_int_by_param,
+    params_table_rows,
+)
 
 __all__ = ["FE", "FEOptions", "FEResults"]
 
@@ -124,7 +129,7 @@ class FEResults:
 
     Array-valued properties (`params`, `std_errors`, etc.) are exposed
     as dictionaries keyed by coefficient name (for O(1) lookup of a
-    single parameter). Use `coef_table()` for a row-oriented listing.
+    single parameter). Use `params_table()` for a row-oriented listing.
 
     `fixed_effects()` (the fixed effects themselves) is provided as a
     separate method rather than a field on this class
@@ -151,18 +156,18 @@ class FEResults:
     @property
     def params(self) -> dict[str, float]:
         """Coefficient name to coefficient value."""
-        return dict(zip(self._raw.param_names, self._raw.params))
+        return by_param(self._raw.param_names, self._raw.params)
 
     @property
     def std_errors(self) -> dict[str, float]:
         """Coefficient name to standard error."""
-        return dict(zip(self._raw.param_names, self._raw.std_errors))
+        return by_param(self._raw.param_names, self._raw.std_errors)
 
     @property
     def test_stats(self) -> dict[str, float]:
         """Coefficient name to test statistic (t-statistic; see
         `stat_dist`)."""
-        return dict(zip(self._raw.param_names, self._raw.test_stats))
+        return by_param(self._raw.param_names, self._raw.test_stats)
 
     @property
     def stat_dist(self) -> Literal["t", "normal"]:
@@ -181,19 +186,12 @@ class FEResults:
     @property
     def p_values(self) -> dict[str, float]:
         """Coefficient name to two-sided p-value."""
-        return dict(zip(self._raw.param_names, self._raw.p_values))
+        return by_param(self._raw.param_names, self._raw.p_values)
 
     @property
     def conf_int(self) -> dict[str, tuple[float, float]]:
         """Coefficient name to confidence interval `(lower, upper)`."""
-        return {
-            name: (lower, upper)
-            for name, lower, upper in zip(
-                self._raw.param_names,
-                self._raw.conf_lower,
-                self._raw.conf_upper,
-            )
-        }
+        return conf_int_by_param(self._raw)
 
     @property
     def residuals(self) -> list[float]:
@@ -249,30 +247,32 @@ class FEResults:
         return self._raw.dk_bandwidth_used
 
     @property
-    def f_statistic(self) -> float:
+    def f_statistic(self) -> float | None:
         """F-statistic for the joint significance of the slope
         coefficients (classical F-test when `cov_type="classical"`, a
-        robust Wald test otherwise)."""
+        robust Wald test otherwise). `None` when there are no slope
+        coefficients."""
         return self._raw.f_statistic
 
     @property
-    def f_p_value(self) -> float:
-        """P-value of the F-statistic."""
+    def f_p_value(self) -> float | None:
+        """P-value of the F-statistic (`None` when `f_statistic` is
+        `None`)."""
         return self._raw.f_p_value
 
     @property
     def f_df_num(self) -> int | None:
-        """Numerator degrees of freedom of `f_statistic` (`None` when it
-        is NaN, i.e. there are no slope coefficients)."""
+        """Numerator degrees of freedom of `f_statistic` (`None` when
+        `f_statistic` is `None`)."""
         return self._raw.f_df_num
 
     @property
     def f_df_denom(self) -> int | None:
-        """Denominator degrees of freedom of `f_statistic` (`None` when it
-        is NaN). Follows `cov_type` like the t-tests (`G - 1` for
+        """Denominator degrees of freedom of `f_statistic` (`None` when
+        `f_statistic` is `None`). Follows `cov_type` like the t-tests (`G - 1` for
         `cov_type="cluster"`, `T - 1` for `"dk"`, `df_resid` otherwise),
-        so it equals `stat_df` whenever `f_statistic` is not NaN. Use this
-        to recompute the p-value from `f_statistic`."""
+        so it equals `stat_df` whenever `f_statistic` is not `None`. Use
+        this to recompute the p-value from `f_statistic`."""
         return self._raw.f_df_denom
 
     @property
@@ -305,39 +305,20 @@ class FEResults:
         """Overall R² (based on the untransformed variables)."""
         return self._raw.r_squared_overall
 
-    def coef_table(self) -> list[dict[str, float | str]]:
+    def params_table(self) -> list[dict[str, float | str]]:
         """Row-oriented summary table of the coefficients.
 
         Shaped to be usable almost as-is in a REST API response (same
-        policy as `OLSResults.coef_table()`). Returned as `list[dict]`
+        policy as `OLSResults.params_table()`). Returned as `list[dict]`
         rather than a polars DataFrame, per the project's policy of
-        not using DataFrames for the coefficient table itself.
+        not using DataFrames for the parameter table itself.
 
         Returns:
             A list of dictionaries, one per coefficient. Keys are
-            `param`, `coef`, `std_err`, `test_stat`, `p_value`,
+            `param_name`, `param`, `std_error`, `test_stat`, `p_value`,
             `conf_lower`, `conf_upper`.
         """
-        return [
-            {
-                "param": name,
-                "coef": coef,
-                "std_err": se,
-                "test_stat": t,
-                "p_value": p,
-                "conf_lower": lower,
-                "conf_upper": upper,
-            }
-            for name, coef, se, t, p, lower, upper in zip(
-                self._raw.param_names,
-                self._raw.params,
-                self._raw.std_errors,
-                self._raw.test_stats,
-                self._raw.p_values,
-                self._raw.conf_lower,
-                self._raw.conf_upper,
-            )
-        ]
+        return params_table_rows(self._raw)
 
     def fixed_effects(
         self,

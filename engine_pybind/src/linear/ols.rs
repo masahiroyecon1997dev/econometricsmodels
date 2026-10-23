@@ -11,20 +11,34 @@
 //! 公開API（`OLSOptions`/`OLSResult`）のdocコメントと、`ValidationError`のメッセージ文字列は英語。
 //! それ以外（このファイルの説明・非公開関数のdocコメント等）は日本語のまま。
 
+use engine::linear::diagnostics::{
+    AuxRegressionTest, breusch_godfrey_test, breusch_pagan_test, white_test,
+};
 use engine::linear::ols::{OlsEstimator, OlsInput};
-use polars::prelude::{Column, DataFrame};
+use polars::prelude::DataFrame;
 use pyo3::prelude::*;
-use pyo3_polars::PyDataFrame;
 
-use super::common::{least_squares_error_to_pyerr, mat_to_vec, parse_cov_type};
-use crate::column_extraction::{
-    extract_dataframe, extract_f64_column, extract_f64_columns, x_column_names,
+use super::common::{
+    check_cov_options, least_squares_error_to_pyerr, parse_cov_kind, resolve_cov_type,
 };
-use crate::errors::ValidationError;
-use crate::option_values::{
-    extract_strict_float, extract_strict_opt_column, extract_strict_opt_int, extract_strict_text,
+use crate::shared::augment::append_predicted_column;
+use crate::shared::column_error::ColumnSource;
+use crate::shared::column_extraction::{
+    SelectedData, extract_column_list, extract_f64_column, extract_f64_columns,
+    extract_model_x_columns, extract_time_order_ranks, select_columns, select_model_x_columns,
+    x_column_names,
 };
-use crate::validation::{validate_common_roles, validate_no_existing_column};
+use crate::shared::errors::{guard, unknown_option_value, user_error};
+use crate::shared::mat_conversion::mat_to_vec;
+use crate::shared::option_repr::PyRepr;
+use crate::shared::option_values::{
+    extract_strict_float, extract_strict_int, extract_strict_opt_column, extract_strict_opt_int,
+    extract_strict_text,
+};
+use crate::shared::validation::{
+    validate_common_roles, validate_no_duplicate_within_role, validate_x_non_empty,
+};
+use engine::shared::error_catalog::{ErrorCode, ParamValue};
 
 /// Estimation options for OLS.
 ///
@@ -77,6 +91,14 @@ pub struct OLSOptions {
     pub hac_time: Option<String>,
 }
 
+impl OLSOptions {
+    /// このオプションが指名するデータの列（`cluster`・`hac_time`）。使われるかどうか（`cov_type`）には
+    /// よらず、指名されたものを全て返す。`fit()`はこれらと`y`・`x`だけをデータから取り込む。
+    pub(crate) fn data_columns(&self) -> Vec<String> {
+        self.cluster.iter().chain(&self.hac_time).cloned().collect()
+    }
+}
+
 #[pymethods]
 impl OLSOptions {
     #[new]
@@ -90,12 +112,12 @@ impl OLSOptions {
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
-        #[pyo3(from_py_with = crate::option_values::cov_type_arg)] cov_type: String,
+        #[pyo3(from_py_with = crate::shared::option_values::cov_type_arg)] cov_type: String,
         include_intercept: bool,
-        #[pyo3(from_py_with = crate::option_values::confidence_level_arg)] confidence_level: f64,
-        #[pyo3(from_py_with = crate::option_values::cluster_arg)] cluster: Option<String>,
-        #[pyo3(from_py_with = crate::option_values::hac_lags_arg)] hac_lags: Option<i64>,
-        #[pyo3(from_py_with = crate::option_values::hac_time_arg)] hac_time: Option<String>,
+        #[pyo3(from_py_with = crate::shared::option_values::confidence_level_arg)] confidence_level: f64,
+        #[pyo3(from_py_with = crate::shared::option_values::cluster_arg)] cluster: Option<String>,
+        #[pyo3(from_py_with = crate::shared::option_values::hac_lags_arg)] hac_lags: Option<i64>,
+        #[pyo3(from_py_with = crate::shared::option_values::hac_time_arg)] hac_time: Option<String>,
     ) -> Self {
         Self {
             cov_type,
@@ -139,22 +161,150 @@ impl OLSOptions {
 
     fn __repr__(&self) -> String {
         format!(
-            "OLSOptions(cov_type={:?}, include_intercept={}, confidence_level={}, \
-             cluster={:?}, hac_lags={:?}, hac_time={:?})",
-            self.cov_type,
-            self.include_intercept,
-            self.confidence_level,
-            self.cluster,
-            self.hac_lags,
-            self.hac_time
+            "OLSOptions(cov_type={}, include_intercept={}, confidence_level={}, \
+             cluster={}, hac_lags={}, hac_time={})",
+            self.cov_type.py_repr(),
+            self.include_intercept.py_repr(),
+            self.confidence_level.py_repr(),
+            self.cluster.py_repr(),
+            self.hac_lags.py_repr(),
+            self.hac_time.py_repr()
         )
     }
+}
+
+/// Raw result of `OLSResult.white_test()`; the Python package wraps it in its
+/// `WhiteTestResult` dataclass.
+///
+/// `statistic`/`p_value`/`df`/`df_denom`/`distribution` describe the selected version
+/// (`"lm"` or `"f"`). `aux_terms` lists the auxiliary-regression terms actually used (the
+/// first entry is always the auxiliary regression's constant, `"const"`), `dropped_terms`
+/// the terms removed because they were constant or numerically identical to an earlier term.
+#[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
+#[derive(Debug, Clone)]
+pub struct WhiteTestOutput {
+    #[pyo3(get)]
+    pub statistic: f64,
+    #[pyo3(get)]
+    pub p_value: f64,
+    /// Degrees of freedom of the LM test (chi-squared), or the numerator degrees of
+    /// freedom of the F test.
+    #[pyo3(get)]
+    pub df: usize,
+    /// Denominator degrees of freedom of the F test (`None` for the LM version).
+    #[pyo3(get)]
+    pub df_denom: Option<usize>,
+    /// `"chi2"` for the LM version, `"f"` for the F version.
+    #[pyo3(get)]
+    pub distribution: String,
+    #[pyo3(get)]
+    pub aux_terms: Vec<String>,
+    #[pyo3(get)]
+    pub dropped_terms: Vec<String>,
+}
+
+/// Raw result of `OLSResult.breusch_pagan_test()`; the Python package wraps it in its
+/// `BreuschPaganTestResult` dataclass.
+///
+/// `statistic`/`p_value`/`df`/`df_denom`/`distribution` describe the selected version
+/// (`"lm"` or `"f"`). `aux_terms` lists the auxiliary-regression terms actually used (the
+/// first entry is always the auxiliary regression's constant, `"const"`), `dropped_terms`
+/// the variables removed because they were constant or numerically identical to an earlier
+/// one.
+#[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
+#[derive(Debug, Clone)]
+pub struct BreuschPaganTestOutput {
+    #[pyo3(get)]
+    pub statistic: f64,
+    #[pyo3(get)]
+    pub p_value: f64,
+    /// Degrees of freedom of the LM test (chi-squared), or the numerator degrees of
+    /// freedom of the F test.
+    #[pyo3(get)]
+    pub df: usize,
+    /// Denominator degrees of freedom of the F test (`None` for the LM version).
+    #[pyo3(get)]
+    pub df_denom: Option<usize>,
+    /// `"chi2"` for the LM version, `"f"` for the F version.
+    #[pyo3(get)]
+    pub distribution: String,
+    #[pyo3(get)]
+    pub aux_terms: Vec<String>,
+    #[pyo3(get)]
+    pub dropped_terms: Vec<String>,
+}
+
+/// 診断検定（`white_test`・`breusch_pagan_test`・`breusch_godfrey_test`）の`statistic`引数で選ぶ検定統計量の版。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StatisticVersion {
+    Lm,
+    F,
+}
+
+/// 診断検定の`statistic`引数（`"lm"`/`"f"`、大文字小文字を区別しない）をパースする。
+///
+/// # Errors
+/// `statistic`が`"lm"`でも`"f"`でもない: `ValidationError`
+fn parse_statistic_version(statistic: &str) -> PyResult<StatisticVersion> {
+    match statistic.to_lowercase().as_str() {
+        "lm" => Ok(StatisticVersion::Lm),
+        "f" => Ok(StatisticVersion::F),
+        _ => Err(unknown_option_value("statistic", statistic, &["lm", "f"])),
+    }
+}
+
+/// 選んだ版（LM/F）の統計量・p値・分母自由度・分布名を取り出す（White検定・Breusch-Pagan検定
+/// の結果の詰め替えで共通）。
+fn select_statistic(
+    result: &AuxRegressionTest,
+    version: StatisticVersion,
+) -> (f64, f64, Option<usize>, String) {
+    match version {
+        StatisticVersion::F => (
+            result.f_statistic,
+            result.f_p_value,
+            Some(result.f_df_denom),
+            "f".to_string(),
+        ),
+        StatisticVersion::Lm => (
+            result.lm_statistic,
+            result.lm_p_value,
+            None,
+            "chi2".to_string(),
+        ),
+    }
+}
+
+/// Raw result of `OLSResult.breusch_godfrey_test()`; the Python package wraps it in its
+/// `BreuschGodfreyTestResult` dataclass.
+///
+/// `statistic`/`p_value`/`df`/`df_denom`/`distribution` describe the selected version
+/// (`"lm"` or `"f"`); `nlags` is the number of residual lags used.
+#[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
+#[derive(Debug, Clone)]
+pub struct BreuschGodfreyTestOutput {
+    #[pyo3(get)]
+    pub statistic: f64,
+    #[pyo3(get)]
+    pub p_value: f64,
+    /// Degrees of freedom of the LM test (chi-squared), or the numerator degrees of
+    /// freedom of the F test. Equal to `nlags`.
+    #[pyo3(get)]
+    pub df: usize,
+    /// Denominator degrees of freedom of the F test (`None` for the LM version).
+    #[pyo3(get)]
+    pub df_denom: Option<usize>,
+    /// `"chi2"` for the LM version, `"f"` for the F version.
+    #[pyo3(get)]
+    pub distribution: String,
+    #[pyo3(get)]
+    pub nlags: usize,
 }
 
 /// Estimation results for OLS.
 ///
 /// Structured data only (no `summary()`); see `docs/spec/ols-spec.md`
-/// ("結果構造体"). Row-oriented table construction (e.g. a `coef_table`) is left to
+/// ("結果構造体"). Row-oriented table construction (e.g. a `params_table`) is left to
 /// `python_package`. All array-valued fields (`params`, `std_errors`, etc.) share the
 /// same order as `param_names`.
 // `OLSResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
@@ -166,7 +316,7 @@ impl OLSOptions {
 // 返す値のキャッシュ、`docs/spec/ols-spec.md`「predict()」）はPython側に独立したプロパティとして
 // 公開しない設計上の決定のため、この1フィールドだけ`#[pyo3(get)]`を付けずに残す必要がある。
 #[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct OLSResult {
     #[pyo3(get)]
     pub params: Vec<f64>,
@@ -208,14 +358,19 @@ pub struct OLSResult {
     pub r_squared: f64,
     #[pyo3(get)]
     pub adj_r_squared: f64,
+    /// Overall F-test statistic of the slope coefficients. `None` when the test is not
+    /// defined: there are no slope coefficients (intercept only), or, for a first-stage regression of
+    /// `IVResults.first_stage()` with `cov_type="cluster"`, the number of clusters is not larger
+    /// than the number of slope coefficients.
     #[pyo3(get)]
-    pub f_statistic: f64,
+    pub f_statistic: Option<f64>,
+    /// P-value of `f_statistic` (`None` exactly when `f_statistic` is `None`).
     #[pyo3(get)]
-    pub f_p_value: f64,
-    /// Numerator degrees of freedom of `f_statistic` (`None` when it is NaN).
+    pub f_p_value: Option<f64>,
+    /// Numerator degrees of freedom of `f_statistic` (`None` when `f_statistic` is `None`).
     #[pyo3(get)]
     pub f_df_num: Option<usize>,
-    /// Denominator degrees of freedom of `f_statistic` (`None` when it is NaN). May differ
+    /// Denominator degrees of freedom of `f_statistic` (`None` when `f_statistic` is `None`). May differ
     /// from `df_resid` (e.g. OLS/WLS with cluster-robust inference uses `G - 1`).
     #[pyo3(get)]
     pub f_df_denom: Option<usize>,
@@ -246,29 +401,47 @@ pub struct OLSResult {
     /// `include_intercept=True`), which would make such an inference silently
     /// wrong instead of erroring.
     has_intercept: bool,
-    /// The original polars DataFrame passed to `fit()`, cached for
-    /// `augment(new_data=None)`. A cheap clone (polars columns are
-    /// internally reference-counted, `docs/spec/ols-spec.md` "predict()" — same
-    /// zero-copy reasoning applies here).
+    /// The `polars.DataFrame` passed to `fit()`, as given. `augment(new_data=None)` appends
+    /// the predicted column to it (so every column is kept), and the diagnostic tests read the
+    /// columns they need from it on demand.
     ///
     /// `None` for `OLSResult`s built by `ols_estimator_to_result` without going
     /// through this file's `fit()` (currently only `IVResult.first_stage()`,
     /// `engine_pybind/src/iv/common.rs`): those per-equation regressions have no
-    /// single source DataFrame to attach a column to, so `augment(new_data=None)`
-    /// on such a result raises `ValidationError` instead.
-    training_data: Option<DataFrame>,
+    /// single source DataFrame, so `augment(new_data=None)` and the diagnostic tests
+    /// on such a result raise `ValidationError` instead.
+    source_data: Option<Py<PyAny>>,
 }
 
 // `#[pymethods]`ブロックの外に置く非公開実装（pyo3は`#[pymethods]`内の全メソッドを
 // Python公開シグネチャとして扱おうとするため、`&DataFrame`のような`FromPyObject`
 // 未実装の型を引数に取るヘルパーはこちらに置く必要がある）。
 impl OLSResult {
+    /// 元のデータ（`fit()`に渡された`polars.DataFrame`）。保持していない結果（`IVResult.first_stage()`）は
+    /// `TRAINING_DATA_NOT_RETAINED`。
+    fn retained_source<'py>(&self, py: Python<'py>, method: &str) -> PyResult<Bound<'py, PyAny>> {
+        self.source_data
+            .as_ref()
+            .map(|source| source.bind(py).clone())
+            .ok_or_else(|| {
+                user_error(
+                    ErrorCode::TrainingDataNotRetained,
+                    vec![("method", ParamValue::from(method))],
+                )
+            })
+    }
+
     /// `predict()`/`augment()`のSome分岐で共有する、`df`に対するout-of-sample予測
     /// （`x`列の抽出→`predict_new_data`呼び出し）。
     fn predict_for(&self, df: &DataFrame) -> PyResult<Vec<f64>> {
         let has_intercept = self.has_intercept;
-        let x_names = x_column_names(&self.param_names, has_intercept, 0);
-        let x_columns = extract_f64_columns(df, x_names)?;
+        let x_columns = extract_model_x_columns(
+            df,
+            &self.param_names,
+            has_intercept,
+            0,
+            ColumnSource::new("x", "new_data"),
+        )?;
 
         Ok(engine::linear::ols::predict_new_data(
             &self.params,
@@ -295,12 +468,20 @@ impl OLSResult {
     ///   (same validation as `fit()`'s column extraction, via `extract_f64_column`).
     #[pyo3(signature = (new_data=None))]
     fn predict(&self, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<f64>> {
-        let Some(new_data) = new_data else {
-            return Ok(self.fitted_values.clone());
-        };
+        guard(|| {
+            let Some(new_data) = new_data else {
+                return Ok(self.fitted_values.clone());
+            };
 
-        let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
-        self.predict_for(&df)
+            let selected = select_model_x_columns(
+                new_data,
+                "new_data",
+                &self.param_names,
+                self.has_intercept,
+                0,
+            )?;
+            self.predict_for(&selected.frame)
+        })
     }
 
     /// The source data (training data, or `new_data` when given) with the
@@ -315,40 +496,234 @@ impl OLSResult {
     ///   non-numeric, or containing missing/NaN/infinite values: `ValidationError`.
     /// - The source data already has a column named `"predicted"`:
     ///   `ValidationError` (would otherwise silently overwrite it).
-    /// - `new_data=None` and this result has no cached training data (currently
+    /// - `new_data=None` and this result has no retained source data (currently
     ///   only possible for `IVResult.first_stage()` results): `ValidationError`.
     #[pyo3(signature = (new_data=None))]
-    fn augment(&self, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<PyDataFrame> {
-        let (mut source, predicted) = match new_data {
-            Some(new_data) => {
-                let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
-                let predicted = self.predict_for(&df)?;
-                (df, predicted)
-            }
-            None => {
-                let source = self.training_data.clone().ok_or_else(|| {
-                    ValidationError::new_err(
-                        "augment(new_data=None) requires the original training data, which \
-                         is not retained for this result",
-                    )
-                })?;
-                (source, self.fitted_values.clone())
-            }
-        };
+    fn augment(&self, py: Python<'_>, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<Py<PyAny>> {
+        guard(|| {
+            let (source, predicted) = match new_data {
+                Some(new_data) => {
+                    let selected = select_model_x_columns(
+                        new_data,
+                        "new_data",
+                        &self.param_names,
+                        self.has_intercept,
+                        0,
+                    )?;
+                    let predicted = self.predict_for(&selected.frame)?;
+                    (new_data.clone(), predicted)
+                }
+                None => {
+                    let source = self
+                        .source_data
+                        .as_ref()
+                        .ok_or_else(|| user_error(ErrorCode::AugmentRequiresNewData, Vec::new()))?;
+                    (source.bind(py).clone(), self.fitted_values.clone())
+                }
+            };
 
-        validate_no_existing_column(&source, "predicted")?;
+            append_predicted_column(&source, "predicted", predicted)
+        })
+    }
 
-        // `with_column`の唯一の失敗条件（`ShapeMismatch`、追加する列の長さが
-        // DataFrameの高さと食い違う場合）はここでは理論上到達不能。
-        // `new_data`指定時: `predicted`は`predict_for`が`source`自身から抽出した
-        // `x_columns`と同じ観測数`n`から計算するため、`predicted.len() == source.height()`。
-        // `None`時: `fitted_values`と`training_data`はどちらも同じ`fit()`呼び出しで
-        // 同じ`n`から作られたペア（`ols_estimator_to_result`／この関数の
-        // `training_data = Some(df)`代入）であり、以降どちらも独立に変更されない。
-        source
-            .with_column(Column::new("predicted".into(), predicted))
-            .expect("predicted.len() matches source.height() by construction");
-        Ok(PyDataFrame(source))
+    /// White test for heteroskedasticity.
+    ///
+    /// Regresses the squared residuals on the independent variables, their squares and
+    /// their pairwise products (always with a constant, even when the model was fitted
+    /// with `include_intercept=False`) and returns either the LM version
+    /// (`statistic="lm"`, `n * R^2`, chi-squared) or the F version (`statistic="f"`).
+    /// Terms that are constant or numerically identical to an earlier term (for example
+    /// the square of a 0/1 dummy) are dropped, and the degrees of freedom count the terms
+    /// that remain. The test does not depend on `cov_type`.
+    ///
+    /// # Errors
+    /// - `statistic` is not `"lm"` or `"f"`: `ValidationError`.
+    /// - This result has no retained source data (currently only `IVResult.first_stage()`
+    ///   results): `ValidationError`.
+    /// - Every regressor is constant: `ValidationError`.
+    /// - Too few observations for the auxiliary regression: `ValidationError`.
+    /// - The auxiliary design matrix is still singular after dropping, or its R-squared
+    ///   is undefined: `ComputationError`.
+    #[pyo3(signature = (statistic="lm"))]
+    fn white_test(&self, py: Python<'_>, statistic: &str) -> PyResult<WhiteTestOutput> {
+        guard(|| {
+            let version = parse_statistic_version(statistic)?;
+            let source = self.retained_source(py, "white_test")?;
+
+            let x_names = x_column_names(&self.param_names, self.has_intercept, 0);
+            let df = select_columns(&source, "data", x_names)?.frame;
+            let x_columns = extract_f64_columns(&df, x_names, ColumnSource::new("x", "data"))?;
+            let result = white_test(&x_columns, x_names, &self.residuals)
+                .map_err(least_squares_error_to_pyerr)?;
+
+            let (statistic, p_value, df_denom, distribution) = select_statistic(&result, version);
+            Ok(WhiteTestOutput {
+                statistic,
+                p_value,
+                df: result.df,
+                df_denom,
+                distribution,
+                aux_terms: result.aux_terms,
+                dropped_terms: result.dropped_terms,
+            })
+        })
+    }
+
+    /// Breusch-Pagan test for heteroskedasticity (Koenker's studentized version).
+    ///
+    /// Regresses the squared residuals on a constant and the columns named in `variables`
+    /// (always with a constant, even when the model was fitted with `include_intercept=False`)
+    /// and returns either the LM version (`statistic="lm"`, `n * R^2`, chi-squared) or the
+    /// F version (`statistic="f"`). It does not assume normal errors.
+    ///
+    /// `variables` is a list of column names of the data passed to `fit()`. It need not be
+    /// the model's independent variables: any numeric column may be used, including one
+    /// that is not in the model. When it is `None`, the independent variables of the model
+    /// are used. Variables that are constant or numerically identical to an earlier one
+    /// (for example a copy of a dummy) are dropped, and the degrees of freedom count the
+    /// variables that remain. The test does not depend on `cov_type`.
+    ///
+    /// # Errors
+    /// - `variables` is not a `list` of `str`: `TypeError`. `statistic` is not a `str`:
+    ///   `TypeError`.
+    /// - `statistic` is not `"lm"` or `"f"`, `variables` is empty or names a column twice, a
+    ///   column does not exist, has an unsupported dtype or contains missing values, NaN or
+    ///   infinity, every variable is constant, or too few observations for the auxiliary
+    ///   regression: `ValidationError`.
+    /// - This result has no retained source data (currently only `IVResult.first_stage()`
+    ///   results): `ValidationError`.
+    /// - The auxiliary design matrix is still singular after dropping, or its R-squared
+    ///   is undefined: `ComputationError`.
+    #[pyo3(signature = (variables=None, statistic="lm"))]
+    fn breusch_pagan_test(
+        &self,
+        py: Python<'_>,
+        variables: Option<&Bound<'_, PyAny>>,
+        statistic: &str,
+    ) -> PyResult<BreuschPaganTestOutput> {
+        guard(|| {
+            let version = parse_statistic_version(statistic)?;
+            let variables = variables
+                .map(|ob| extract_column_list(ob, "variables"))
+                .transpose()?;
+            let source = self.retained_source(py, "breusch_pagan_test")?;
+
+            let z_names = match variables.as_deref() {
+                Some(names) => {
+                    validate_x_non_empty("variables", names)?;
+                    validate_no_duplicate_within_role("variables", names)?;
+                    names
+                }
+                None => x_column_names(&self.param_names, self.has_intercept, 0),
+            };
+            let z_argument = if variables.is_some() {
+                "variables"
+            } else {
+                "x"
+            };
+            let df = select_columns(&source, "data", z_names)?.frame;
+            let z_columns =
+                extract_f64_columns(&df, z_names, ColumnSource::new(z_argument, "data"))?;
+            let result = breusch_pagan_test(&z_columns, z_names, &self.residuals)
+                .map_err(least_squares_error_to_pyerr)?;
+
+            let (statistic, p_value, df_denom, distribution) = select_statistic(&result, version);
+            Ok(BreuschPaganTestOutput {
+                statistic,
+                p_value,
+                df: result.df,
+                df_denom,
+                distribution,
+                aux_terms: result.aux_terms,
+                dropped_terms: result.dropped_terms,
+            })
+        })
+    }
+
+    /// Breusch-Godfrey test for serial correlation of the errors.
+    ///
+    /// Regresses the residuals on the model's independent variables and their own lags
+    /// 1 to `nlags` (in the order given by the `time` column; lags before the first
+    /// observation are 0), and tests that the lag coefficients are zero. The auxiliary
+    /// regression uses the model's regressors as they are: no constant is added to a
+    /// model fitted with `include_intercept=False`. Returns the LM version
+    /// (`statistic="lm"`, `n * R^2`, chi-squared) or the F version (`statistic="f"`).
+    /// The test does not depend on `cov_type`.
+    ///
+    /// `time` names a column of the data passed to `fit()`; the row order is never
+    /// assumed to be the time order. The values only give the order (no gaps are
+    /// checked): lags are taken in that order.
+    ///
+    /// # Errors
+    /// - `time` or `statistic` is not a `str`, or `nlags` is not an `int` (`bool` and `float`
+    ///   included): `TypeError`.
+    /// - `statistic` is not `"lm"` or `"f"`, `nlags < 1`, or too few observations for the
+    ///   auxiliary regression (`n <= k + nlags`): `ValidationError`.
+    /// - `time` does not exist, has an unsupported dtype, or contains missing values, NaN,
+    ///   infinity or duplicates: `ValidationError`.
+    /// - This result has no retained source data (currently only `IVResult.first_stage()`
+    ///   results): `ValidationError`.
+    /// - The auxiliary design matrix is singular, or the residuals are all zero / fitted
+    ///   exactly by the auxiliary regression: `ComputationError`.
+    #[pyo3(signature = (time, nlags, statistic=None))]
+    fn breusch_godfrey_test(
+        &self,
+        py: Python<'_>,
+        time: &Bound<'_, PyAny>,
+        nlags: &Bound<'_, PyAny>,
+        statistic: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<BreuschGodfreyTestOutput> {
+        guard(|| {
+            let time = extract_strict_text(time, "time")?;
+            let nlags = extract_strict_int(nlags, "nlags")?;
+            let statistic = match statistic {
+                Some(value) => extract_strict_text(value, "statistic")?,
+                None => "lm".to_string(),
+            };
+            let version = parse_statistic_version(&statistic)?;
+            let source = self.retained_source(py, "breusch_godfrey_test")?;
+
+            let mut needed: Vec<String> =
+                x_column_names(&self.param_names, self.has_intercept, 0).to_vec();
+            needed.push(time.clone());
+            let df = select_columns(&source, "data", &needed)?.frame;
+            let x_columns = extract_model_x_columns(
+                &df,
+                &self.param_names,
+                self.has_intercept,
+                0,
+                ColumnSource::new("x", "data"),
+            )?;
+            let time_order =
+                extract_time_order_ranks(&df, &time, ColumnSource::new("time", "data"))?;
+            let result = breusch_godfrey_test(
+                &x_columns,
+                self.has_intercept,
+                &self.residuals,
+                &time_order,
+                nlags,
+            )
+            .map_err(least_squares_error_to_pyerr)?;
+
+            Ok(match version {
+                StatisticVersion::F => BreuschGodfreyTestOutput {
+                    statistic: result.f_statistic,
+                    p_value: result.f_p_value,
+                    df: result.df,
+                    df_denom: Some(result.f_df_denom),
+                    distribution: "f".to_string(),
+                    nlags: result.df,
+                },
+                StatisticVersion::Lm => BreuschGodfreyTestOutput {
+                    statistic: result.lm_statistic,
+                    p_value: result.lm_p_value,
+                    df: result.df,
+                    df_denom: None,
+                    distribution: "chi2".to_string(),
+                    nlags: result.df,
+                },
+            })
+        })
     }
 }
 
@@ -367,27 +742,38 @@ impl OLSResult {
 ///   `hac_lags`の範囲外・クラスターキー未指定等）は`engine::linear::common::LeastSquaresError`から
 ///   `least_squares_error_to_pyerr`で変換
 pub fn fit(
-    data: PyDataFrame,
+    data: SelectedData,
     y: String,
     x: Vec<String>,
     options: &OLSOptions,
 ) -> PyResult<OLSResult> {
-    let df: DataFrame = data.into();
+    let SelectedData { source, frame: df } = data;
+
+    // DataFrameを見ない検査を先に行う。報告順は`docs/guide/validation.md`
+    // 「Order in which errors are reported」: オプションの値 → オプションの組合せ →
+    // ロール構造 → `y`/`x`の列 → オプション列 → エンジン。
+    let cov_kind = parse_cov_kind(&options.cov_type)?;
+    check_cov_options(
+        cov_kind,
+        options.cluster.as_deref(),
+        options.hac_lags,
+        options.hac_time.as_deref(),
+    )?;
 
     // 完全な多重共線性を早期に、分かりやすいエラーで防ぐ（`validation.rs`に集約、
     // WLS/Logitと共通、`.claude/rules/rust-style.md`参照）。
     validate_common_roles(&y, &x, options.include_intercept)?;
 
     // ── y列の抽出 ──────────────────────────────────────────────────────
-    let y_slice = extract_f64_column(&df, &y)?;
+    let y_slice = extract_f64_column(&df, &y, ColumnSource::new("y", "data"))?;
 
     // ── x列の抽出 ──────────────────────────────────────────────────────
-    let x_slices = extract_f64_columns(&df, &x)?;
+    let x_slices = extract_f64_columns(&df, &x, ColumnSource::new("x", "data"))?;
 
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ）─────────────
-    let (cov_type, cov_type_lower) = parse_cov_type(
+    let cov_type = resolve_cov_type(
         &df,
-        &options.cov_type,
+        cov_kind,
         options.cluster.as_deref(),
         options.hac_lags,
         options.hac_time.as_deref(),
@@ -398,8 +784,8 @@ pub fn fit(
     let estimator = OlsEstimator::fit(input, cov_type, options.confidence_level)
         .map_err(least_squares_error_to_pyerr)?;
 
-    let mut result = ols_estimator_to_result(&estimator, cov_type_lower);
-    result.training_data = Some(df);
+    let mut result = ols_estimator_to_result(&estimator, cov_kind.name().to_string());
+    result.source_data = Some(source);
     Ok(result)
 }
 
@@ -414,11 +800,11 @@ pub fn fit(
 /// 非公開フィールド`fitted_values`/`has_intercept`にアクセスする都合上、`OLSResult`と
 /// 同じ`linear::ols`モジュール内に置く）。
 ///
-/// `cov_type_lower`を引数で受け取るのは、`fit`ではPythonから渡された`OLSOptions.cov_type`
-/// をパース時に一度だけ小文字化した値、`first_stage()`では`IVResult.cov_type`
+/// `cov_type_lower`を引数で受け取るのは、`fit`では`CovKind::name()`で作った正規形の名前、
+/// `first_stage()`では`IVResult.cov_type`
 /// （呼び出し元が指定した`cov_type`、第一段階にもそのまま使われる、`iv::two_sls`の
 /// モジュールdocコメント参照）と、呼び出し元ごとに文字列の出どころが異なるため。
-/// **呼び出し元が正規化済み（`to_lowercase()`済み）の値を渡す責任を持つ**（この関数自体は
+/// **呼び出し元が正規形の値を渡す責任を持つ**（この関数自体は
 /// 正規化・妥当性検証を行わない。`OlsEstimator`が実際に使った`cov_type`と一致する文字列を
 /// 呼び出し元の責任で渡す契約）。
 pub(crate) fn ols_estimator_to_result(
@@ -456,6 +842,47 @@ pub(crate) fn ols_estimator_to_result(
         // `fit()`（本ファイル）が呼び出し後に`Some(df)`で上書きする。この関数の
         // もう一つの呼び出し元`iv::common::first_stage()`は単一のソースDataFrameを
         // 持たないため`None`のまま（`OLSResult`のdocコメント参照）。
-        training_data: None,
+        source_data: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_statistic_version_accepts_lm_and_f_case_insensitively() {
+        assert_eq!(parse_statistic_version("lm").unwrap(), StatisticVersion::Lm);
+        assert_eq!(parse_statistic_version("LM").unwrap(), StatisticVersion::Lm);
+        assert_eq!(parse_statistic_version("f").unwrap(), StatisticVersion::F);
+        assert_eq!(parse_statistic_version("F").unwrap(), StatisticVersion::F);
+    }
+
+    #[test]
+    fn parse_statistic_version_rejects_unknown_value() {
+        assert!(parse_statistic_version("chi2").is_err());
+        assert!(parse_statistic_version("").is_err());
+    }
+
+    #[test]
+    fn select_statistic_picks_the_requested_version() {
+        let result = AuxRegressionTest {
+            lm_statistic: 1.0,
+            lm_p_value: 0.1,
+            f_statistic: 2.0,
+            f_p_value: 0.2,
+            df: 3,
+            f_df_denom: 11,
+            aux_terms: vec!["const".to_string()],
+            dropped_terms: Vec::new(),
+        };
+        assert_eq!(
+            select_statistic(&result, StatisticVersion::Lm),
+            (1.0, 0.1, None, "chi2".to_string())
+        );
+        assert_eq!(
+            select_statistic(&result, StatisticVersion::F),
+            (2.0, 0.2, Some(11), "f".to_string())
+        );
     }
 }

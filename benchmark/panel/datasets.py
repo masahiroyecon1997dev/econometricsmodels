@@ -55,6 +55,11 @@ SCENARIOS = [
     "singleton_time",
     "unbalanced_two_way",
     "zero_variance_regressor",
+    "time_invariant_unbalanced",
+    "time_invariant_multi_unbalanced",
+    "one_dimensional_regressors",
+    "absolute_year_regressor",
+    "time_only_nearly_balanced",
 ]
 
 # baseline系シナリオの既定パネル規模（entities=40, periods=6, n=240）。
@@ -119,6 +124,42 @@ def _require_min_k(scenario: str, k: int, minimum: int) -> None:
     """シナリオが要求する`k`（説明変数の数）の下限を満たさなければ`ValueError`。"""
     if k < minimum:
         raise ValueError(f"{scenario} requires k >= {minimum}")
+
+
+# "time_invariant_multi_unbalanced"の規模。エンティティ数30・最大10時点・説明変数3本。
+_MULTI_INVARIANT_N_ENTITIES = 30
+_MULTI_INVARIANT_N_PERIODS = 10
+_MULTI_INVARIANT_K = 3
+# エンティティごとの観測数`T_i`（順に繰り返し割り当てる）。2〜10に偏らせる。
+_MULTI_INVARIANT_COUNTS = [2, 2, 3, 5, 7, 10]
+
+
+# 一次元でしか変わらない列を含むシナリオ（"one_dimensional_regressors"・
+# "absolute_year_regressor"・"time_only_nearly_balanced"）の規模。T=5の小さな
+# バランスパネルで、2-way REのtime平均へのbetween回帰（`[1, x̄.ₜ]`）の自由度が
+# 小さくなる境界を含める。
+_ONE_DIM_N_ENTITIES = 30
+_ONE_DIM_N_PERIODS = 5
+# 一次元の列が`y`に与える係数（xi: entityのみ、xt: 時点のみ、year: 絶対年）。
+_ONE_DIM_XI_COEF = 0.8
+_ONE_DIM_XT_COEF = -0.6
+_ABSOLUTE_YEAR_COEF = 0.05
+_ABSOLUTE_YEAR_BASE = 1990
+# "time_only_nearly_balanced"で落とす行（異なるエンティティから1行ずつ）。
+_NEARLY_BALANCED_DROP_ROWS = (7, 63)
+
+
+def _thin_to_skewed_counts(
+    df: pl.DataFrame, rng: np.random.Generator, counts: list[int]
+) -> pl.DataFrame:
+    """エンティティi番目の観測数が`counts[i % len(counts)]`になるよう、
+    そのエンティティの行をランダムに間引く（元の行順は保つ）。"""
+    parts = []
+    for i, (_, group) in enumerate(df.group_by("entity", maintain_order=True)):
+        keep = min(counts[i % len(counts)], group.height)
+        idx = np.sort(rng.choice(group.height, size=keep, replace=False))
+        parts.append(group[idx.tolist()])
+    return pl.concat(parts)
 
 
 def _entity_time_ids(
@@ -246,9 +287,10 @@ def generate_fe_dataset(
     Args:
         scenario: SCENARIOSのいずれか。
         n_entities: エンティティ数（"small_panel"は5、
-            "cross_sectionally_correlated"は15に強制される）。
+            "cross_sectionally_correlated"は15、一次元の列を含む3シナリオは
+            30に強制される）。
         n_periods: 時点数（"small_panel"は4、"cross_sectionally_correlated"は
-            25に強制される）。
+            25、一次元の列を含む3シナリオは5に強制される）。
         k: 説明変数の数（x1..xk）。
         seed: 乱数シード。
         beta: 真の傾き係数ベクトル（**切片を含まない**、長さk。FEはwithin
@@ -258,7 +300,11 @@ def generate_fe_dataset(
 
     Returns:
         (df, true_beta)のタプル。dfは列 entity, time, y, x1..xk を持つ
-        polars DataFrame（"zero_variance_regressor"はx_invariantも追加）。
+        polars DataFrame（"zero_variance_regressor"・
+        "time_invariant_unbalanced"はx_invariantも、
+        "time_invariant_multi_unbalanced"はz1・z2、
+        "one_dimensional_regressors"はxi・xt、"absolute_year_regressor"はyearと中心化したyear_c、
+        "time_only_nearly_balanced"はtrendを追加）。
 
     Raises:
         ValueError: 未知のscenarioの場合。
@@ -273,6 +319,18 @@ def generate_fe_dataset(
         n_entities, n_periods = _DK_N_ENTITIES, _DK_N_PERIODS
     elif scenario == "many_regressors":
         k = _MANY_REGRESSORS_K
+    elif scenario in (
+        "one_dimensional_regressors",
+        "absolute_year_regressor",
+        "time_only_nearly_balanced",
+    ):
+        n_entities, n_periods = _ONE_DIM_N_ENTITIES, _ONE_DIM_N_PERIODS
+    elif scenario == "time_invariant_multi_unbalanced":
+        n_entities, n_periods = (
+            _MULTI_INVARIANT_N_ENTITIES,
+            _MULTI_INVARIANT_N_PERIODS,
+        )
+        k = _MULTI_INVARIANT_K
 
     if beta is None:
         if scenario == "many_regressors":
@@ -326,7 +384,34 @@ def generate_fe_dataset(
         errors = rng.normal(size=n)
 
     y = alpha[entity_idx] + gamma[time_idx] + X @ beta + errors
+    extra_columns: dict[str, np.ndarray] = {}
+    if scenario == "one_dimensional_regressors":
+        # entityだけで変わる`xi`と時点だけで変わる`xt`（どちらもwithin変換後に
+        # 全ゼロ）。2-way REは両方を許容する（`re-spec.md`5章）。
+        xi = rng.normal(size=n_entities)[entity_idx]
+        xt = rng.normal(size=n_periods)[time_idx]
+        y = y + _ONE_DIM_XI_COEF * xi + _ONE_DIM_XT_COEF * xt
+        extra_columns = {"xi": xi, "xt": xt}
+    elif scenario == "absolute_year_regressor":
+        # 絶対年（1990〜）の時点だけで変わる列。他の列とスケールが3桁異なり、
+        # between回帰の定数判定（生スケール基準の閾値）を検証する。
+        year = (_ABSOLUTE_YEAR_BASE + time_idx).astype(float)
+        y = y + _ABSOLUTE_YEAR_COEF * (year - _ABSOLUTE_YEAR_BASE)
+        # 平均で中心化した同じ列。絶対年との差が丸め誤差の拡大だけであること
+        # （中心化した列ではplmと機械精度で一致する）を確かめるために持つ。
+        extra_columns = {"year": year, "year_c": year - year.mean()}
+    elif scenario == "time_only_nearly_balanced":
+        # 時点トレンド（0〜）の時点だけで変わる列。絶対年にしないのは、plmが
+        # 準バランスのbetween回帰（`solve(crossprod(Z))`）で絶対年の列を数値的に
+        # 特異と判定して失敗するため（スケール問題は`absolute_year_regressor`が担う）。
+        trend = time_idx.astype(float)
+        y = y + _ABSOLUTE_YEAR_COEF * trend
+        extra_columns = {"trend": trend}
     df = _assemble_frame(entity_ids, time_ids, entity_idx, time_idx, y, X)
+    if extra_columns:
+        df = df.with_columns(
+            pl.Series(name, values) for name, values in extra_columns.items()
+        )
 
     if scenario == "unbalanced":
         # 不均衡だが各エンティティT_i>=2を保つ「成功パス」
@@ -357,17 +442,186 @@ def generate_fe_dataset(
             pl.int_range(pl.len()).over("time") == 0
         )
         df = df.filter(keep)
-    elif scenario == "zero_variance_regressor":
-        # エンティティ内で時間不変な列を追加する（within変換後に分散ゼロ、
-        # `fe-spec.md`1章のValidationErrorを誘発。エラーパス専用）。
+    elif scenario == "time_only_nearly_balanced":
+        # バランスパネルから2行だけ（別々のエンティティから）落とす。時点だけで変わる
+        # `trend`の個体平均が、落とした2エンティティでだけ一定でなくなる
+        # （1-wayのbetween回帰が列を落とすかどうかの境界、`re-spec.md`3.1節）。
+        df = (
+            df.with_row_index("_row")
+            .filter(~pl.col("_row").is_in(_NEARLY_BALANCED_DROP_ROWS))
+            .drop("_row")
+        )
+    elif scenario == "time_invariant_multi_unbalanced":
+        # 時間変化のある列x1..x3に加え、エンティティ内で一定の列を2本足す
+        # （z1: 連続、z2: 0/1ダミー）。観測数`T_i`を2〜10に偏らせた不均衡パネル
+        # （RE: 時間不変の説明変数の複数列・`k_tv`と`k`の添字対応・σ_u²の差が
+        # 増幅される極端な不均衡の検証用、FEには使えない）。
+        z1 = dict(zip(entity_ids, rng.normal(size=n_entities)))
+        z2 = dict(
+            zip(entity_ids, rng.integers(0, 2, size=n_entities).astype(float))
+        )
+        df = df.with_columns(
+            pl.col("entity")
+            .replace_strict(z1, return_dtype=pl.Float64)
+            .alias("z1"),
+            pl.col("entity")
+            .replace_strict(z2, return_dtype=pl.Float64)
+            .alias("z2"),
+        )
+        df = _thin_to_skewed_counts(df, rng, _MULTI_INVARIANT_COUNTS)
+    elif scenario in ("zero_variance_regressor", "time_invariant_unbalanced"):
+        # エンティティ内で時間不変な列を追加する（within変換後に分散ゼロ）。
+        # FEは`fe-spec.md`1章のValidationErrorで拒否する（エラーパス専用）が、
+        # REは時間不変の説明変数を許容するため、RE側では数値比較に使う
+        # （`zero_variance_regressor`はバランス、`time_invariant_unbalanced`は
+        # `unbalanced`と同じ間引きをかけた不均衡パネル）。
         entity_to_const = dict(zip(entity_ids, rng.normal(size=n_entities)))
         df = df.with_columns(
             pl.col("entity")
             .replace_strict(entity_to_const, return_dtype=pl.Float64)
             .alias("x_invariant")
         )
+        if scenario == "time_invariant_unbalanced":
+            df = _drop_rows_keep_min_count(
+                df, rng, _UNBALANCED_DROP_PROB, min_count=2
+            )
 
     return df, beta
+
+
+# 2-way REの手計算・plmとの照合に使う小さなバランスパネル（6エンティティ×4時点）。
+# 乱数ではなく3桁に丸めた固定値で、`xi`は個体間でのみ、`xt`は時点間でのみ変わる
+# （どちらもRE（2-way）で許容される）。`benchmark/panel/freeze.py`が
+# `re_two_way_small.csv`に固定する。
+RE_TWO_WAY_SMALL_Y = [
+    2.973, 0.102, -4.005, -1.69, 4.512, 2.697,
+    1.044, 0.361, 0.457, -1.063, -3.188, -3.244,
+    2.213, 0.875, -0.479, -2.389, 5.936, 5.314,
+    2.163, -0.585, 2.081, 0.631, -1.679, -4.541,
+]  # fmt: skip
+RE_TWO_WAY_SMALL_X1 = [
+    -0.828, -0.348, -1.538, -0.256, -1.15, 0.012,
+    -0.223, 0.888, -0.592, -0.656, -0.683, -0.016,
+    -0.443, 0.353, 0.073, 0.007, -0.188, -0.766,
+    -0.221, -0.984, -1.104, -0.938, 0.679, -1.577,
+]  # fmt: skip
+RE_TWO_WAY_SMALL_X2 = [
+    -0.256, 0.511, -0.226, -0.315, -0.93, -0.213,
+    1.112, 0.424, 1.037, 0.249, 0.395, 0.185,
+    -1.666, 0.855, 0.506, 0.499, -1.691, -1.744,
+    -0.89, -0.468, 0.305, -0.046, 0.521, -0.642,
+]  # fmt: skip
+RE_TWO_WAY_SMALL_XI = [-0.87, 0.485, -0.186, 1.546, -0.611, -0.348]
+RE_TWO_WAY_SMALL_XT = [-1.637, 0.02, 0.892, -0.873]
+
+
+def re_two_way_small_panel() -> pl.DataFrame:
+    """6エンティティ×4時点のバランスパネル（列: entity, time, y, x1, xi, xt, x2）。"""
+    n_periods = len(RE_TWO_WAY_SMALL_XT)
+    return pl.DataFrame(
+        {
+            "entity": [f"e{r // n_periods + 1}" for r in range(24)],
+            "time": [r % n_periods + 1 for r in range(24)],
+            "y": RE_TWO_WAY_SMALL_Y,
+            "x1": RE_TWO_WAY_SMALL_X1,
+            "xi": [RE_TWO_WAY_SMALL_XI[r // n_periods] for r in range(24)],
+            "xt": [RE_TWO_WAY_SMALL_XT[r % n_periods] for r in range(24)],
+            "x2": RE_TWO_WAY_SMALL_X2,
+        }
+    )
+
+
+# 分散成分が0に切り上げられる合成パネル（RE。`variance_method`のplm照合用）。個体効果または
+# 時点効果を持たないDGPで、推定した`σ_u²`・`σ_λ²`が負になり0に切り上げられる（θ=0、GLSが
+# 切り上げた成分について退化する）。8エンティティ×5時点、`y = 1 + 0.5 x1 - 0.3 x2 + α_i + λ_t + ε`。
+# 切り上げが起きる乱数シードは、`variance_method`の3法で確認して固定した。
+_ZERO_COMPONENT_N_ENTITIES = 8
+_ZERO_COMPONENT_N_PERIODS = 5
+_ZERO_COMPONENT_EFFECT_SD = 1.5
+# 不均衡版で落とす行（0始まり。どのエンティティにも2行以上残る）。
+_ZERO_COMPONENT_DROP_ROWS = (3, 4, 11, 17, 18, 19, 26, 30)
+# DGPごとの（個体効果の標準偏差、時点効果の標準偏差、シード）。
+_ZERO_COMPONENT_DGPS = {
+    "re_no_entity_effect": (0.0, _ZERO_COMPONENT_EFFECT_SD, 0),
+    "re_no_time_effect": (_ZERO_COMPONENT_EFFECT_SD, 0.0, 1),
+}
+
+
+def _zero_component_panel(
+    entity_sd: float, time_sd: float, seed: int
+) -> pl.DataFrame:
+    rng = np.random.default_rng(seed)
+    n, t = _ZERO_COMPONENT_N_ENTITIES, _ZERO_COMPONENT_N_PERIODS
+    entity_effect = rng.normal(0.0, entity_sd, n) if entity_sd else np.zeros(n)
+    time_effect = rng.normal(0.0, time_sd, t) if time_sd else np.zeros(t)
+    rows = []
+    for i in range(n):
+        for j in range(t):
+            x1, x2 = rng.normal(), rng.normal()
+            y = (
+                1.0
+                + 0.5 * x1
+                - 0.3 * x2
+                + entity_effect[i]
+                + time_effect[j]
+                + rng.normal()
+            )
+            rows.append(
+                (
+                    f"e{i + 1:02d}",
+                    j + 1,
+                    round(y, 3),
+                    round(x1, 3),
+                    round(x2, 3),
+                )
+            )
+    return pl.DataFrame(
+        rows, schema=["entity", "time", "y", "x1", "x2"], orient="row"
+    )
+
+
+def re_zero_variance_component_panels() -> dict[str, pl.DataFrame]:
+    """分散成分が0に切り上げられるパネル（ファイル名（拡張子なし）→データ）。
+
+    `re_no_entity_effect`（個体効果なし。1-wayの`σ_u²`・2-wayの`σ_u²`が0）、
+    `re_no_entity_effect_unbalanced`（同じデータから`_ZERO_COMPONENT_DROP_ROWS`の行を
+    落とした1-wayの不均衡パネル）、`re_no_time_effect`（時点効果なし。2-wayの`σ_λ²`が0）。
+    """
+    panels = {
+        name: _zero_component_panel(*dgp)
+        for name, dgp in _ZERO_COMPONENT_DGPS.items()
+    }
+    panels["re_no_entity_effect_unbalanced"] = (
+        panels["re_no_entity_effect"]
+        .with_row_index("_row")
+        .filter(~pl.col("_row").is_in(_ZERO_COMPONENT_DROP_ROWS))
+        .drop("_row")
+    )
+    return panels
+
+
+# 全個体の観測数は同じだが、時点がずれたパネル（RE。`variance_method`の1-wayは観測数でバランスを
+# 判定するため閉形式を使うが、plmは時点集合も同じことを要求してトレース形を使う。値が異なる既知の
+# 差の固定用）。20エンティティ×6時点で、奇数番目のエンティティの時点を1つずらす（`t1`〜`t6`）。
+_SHIFTED_TIME_N_ENTITIES = 20
+_SHIFTED_TIME_SEED = 11
+
+
+def re_equal_counts_shifted_time_panel() -> pl.DataFrame:
+    """全個体の観測数が同じで、奇数番目の個体だけ時点が1つずれたパネル。"""
+    df, _ = generate_fe_dataset(
+        "baseline",
+        n_entities=_SHIFTED_TIME_N_ENTITIES,
+        seed=_SHIFTED_TIME_SEED,
+    )
+    shifted = df["entity"].str.slice(1).cast(pl.Int64) % 2 == 1
+    shifted_time = (df["time"].str.slice(1).cast(pl.Int64) + 1).cast(pl.String)
+    return df.with_columns(
+        pl.when(shifted)
+        .then(pl.lit("t") + shifted_time)
+        .otherwise(pl.col("time"))
+        .alias("time")
+    )
 
 
 if __name__ == "__main__":

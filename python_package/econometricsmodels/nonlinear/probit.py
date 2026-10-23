@@ -24,6 +24,12 @@ import polars as pl
 
 from .. import _lib
 from .._lib import ProbitOptions
+from .._results_utils import (
+    by_param,
+    conf_int_by_param,
+    marginal_effect_rows,
+    params_table_rows,
+)
 
 __all__ = ["Probit", "ProbitOptions", "ProbitResults"]
 
@@ -78,7 +84,10 @@ class Probit:
                 A subclass of `ValueError`.
             ComputationError: A problem was detected during
                 computation (e.g. non-convergence, a singular
-                Hessian/OPG matrix). A subclass of `RuntimeError`.
+                Hessian/OPG matrix, or complete or quasi-complete
+                separation of the outcome, for which no finite
+                maximum likelihood estimate exists). A subclass of
+                `RuntimeError`.
         """
         raw = _lib.fit_probit(self._data, self._y, self._x, self._options)
         return ProbitResults(raw)
@@ -89,7 +98,7 @@ class ProbitResults:
 
     Array-valued properties (`params`, `std_errors`, etc.) are exposed
     as dictionaries keyed by coefficient name (for O(1) lookup of a
-    single parameter). Use `coef_table()` for a row-oriented listing
+    single parameter). Use `params_table()` for a row-oriented listing
     (`docs/spec/nonlinear-common.md` section 5).
 
     `marginal_effects()`, `predict()`, and `pred_table()` are provided
@@ -123,12 +132,12 @@ class ProbitResults:
     @property
     def params(self) -> dict[str, float]:
         """Coefficient name to coefficient value."""
-        return dict(zip(self._raw.param_names, self._raw.params))
+        return by_param(self._raw.param_names, self._raw.params)
 
     @property
     def std_errors(self) -> dict[str, float]:
         """Coefficient name to standard error."""
-        return dict(zip(self._raw.param_names, self._raw.std_errors))
+        return by_param(self._raw.param_names, self._raw.std_errors)
 
     @property
     def test_stats(self) -> dict[str, float]:
@@ -137,7 +146,7 @@ class ProbitResults:
         Probit uses a z-test (standard normal), not a t-test (see
         `docs/spec/nonlinear-common.md` section 4).
         """
-        return dict(zip(self._raw.param_names, self._raw.test_stats))
+        return by_param(self._raw.param_names, self._raw.test_stats)
 
     @property
     def stat_dist(self) -> Literal["t", "normal"]:
@@ -156,19 +165,12 @@ class ProbitResults:
     @property
     def p_values(self) -> dict[str, float]:
         """Coefficient name to two-sided p-value."""
-        return dict(zip(self._raw.param_names, self._raw.p_values))
+        return by_param(self._raw.param_names, self._raw.p_values)
 
     @property
     def conf_int(self) -> dict[str, tuple[float, float]]:
         """Coefficient name to confidence interval `(lower, upper)`."""
-        return {
-            name: (lower, upper)
-            for name, lower, upper in zip(
-                self._raw.param_names,
-                self._raw.conf_lower,
-                self._raw.conf_upper,
-            )
-        }
+        return conf_int_by_param(self._raw)
 
     @property
     def log_likelihood(self) -> float:
@@ -247,48 +249,27 @@ class ProbitResults:
         """Optimization solver actually used (normalized to lowercase)."""
         return self._raw.solver
 
-    def coef_table(self) -> list[dict[str, float | str]]:
+    def params_table(self) -> list[dict[str, float | str]]:
         """Row-oriented summary table of the coefficients.
 
         Shaped to be usable almost as-is in a REST API response. Same
-        shape as `OLSResults.coef_table()`; `test_stat` is a z-statistic
+        shape as `OLSResults.params_table()`; `test_stat` is a z-statistic
         here (see `stat_dist`).
 
         Returns:
             A list of dictionaries, one per coefficient. Keys are
-            `param`, `coef`, `std_err`, `test_stat`, `p_value`,
+            `param_name`, `param`, `std_error`, `test_stat`, `p_value`,
             `conf_lower`, `conf_upper`.
         """
-        return [
-            {
-                "param": name,
-                "coef": coef,
-                "std_err": se,
-                "test_stat": z,
-                "p_value": p,
-                "conf_lower": lower,
-                "conf_upper": upper,
-            }
-            for name, coef, se, z, p, lower, upper in zip(
-                self._raw.param_names,
-                self._raw.params,
-                self._raw.std_errors,
-                self._raw.test_stats,
-                self._raw.p_values,
-                self._raw.conf_lower,
-                self._raw.conf_upper,
-            )
-        ]
+        return params_table_rows(self._raw)
 
-    def predict(
-        self, new_data: pl.DataFrame | None = None
-    ) -> list[dict[str, float]]:
+    def predict(self, new_data: pl.DataFrame | None = None) -> list[float]:
         """Predicted probabilities `p_i = Φ(x_i'β̂)`.
 
         Note:
             Returns a probability in `[0, 1]`, not a 0/1 class
-            prediction — unlike `OLSResults.predict()`, whose
-            `"predicted"` key is a point prediction of `y` itself.
+            prediction — unlike `OLSResults.predict()`, which
+            returns a point prediction of `y` itself.
             This is the standard statsmodels convention. To get a
             classification, apply a threshold to this output
             yourself, or use `pred_table()` (training data only).
@@ -304,15 +285,15 @@ class ProbitResults:
                 `fit()`.
 
         Returns:
-            Row-oriented predictions, one dict per observation. Each
-            dict currently has a single key, `"probability"`.
+            Predicted probabilities, one per observation, in row
+            order.
 
         Raises:
             ValidationError: `new_data` is missing a required `x`
                 column, or a column contains missing/NaN/infinite
                 values.
         """
-        return [{"probability": p} for p in self._raw.predict(new_data)]
+        return self._raw.predict(new_data)
 
     def augment(self, new_data: pl.DataFrame | None = None) -> pl.DataFrame:
         """Source data with the predicted probabilities appended as a
@@ -320,7 +301,7 @@ class ProbitResults:
 
         Same `new_data` semantics as `predict()`, but returns a polars
         DataFrame (the training data, or `new_data` when given, plus a
-        new `"predicted_probability"` column) instead of a row-oriented list.
+        new `"predicted_probability"` column) instead of a plain list.
         See `OLSResults.augment()` for the project's general policy on
         this DataFrame-returning exception.
 
@@ -385,8 +366,8 @@ class ProbitResults:
 
         Returns:
             A list of dictionaries, one per explanatory variable
-            (excluding the intercept). Keys are `param`, `effect`,
-            `std_err`, `test_stat`, `p_value`, `conf_lower`, `conf_upper` (see
+            (excluding the intercept). Keys are `param_name`, `effect`,
+            `std_error`, `test_stat`, `p_value`, `conf_lower`, `conf_upper` (see
             `docs/spec/nonlinear-common.md` section 6). `test_stat` is
             always a z-statistic (normal distribution). `effect` is
             the marginal effect estimate (corresponds to `dy/dx` in
@@ -398,23 +379,4 @@ class ProbitResults:
                 subclass of `ValueError`.
         """
         raw = self._raw.marginal_effects(at, confidence_level)
-        return [
-            {
-                "param": name,
-                "effect": effect,
-                "std_err": se,
-                "test_stat": z,
-                "p_value": p,
-                "conf_lower": lower,
-                "conf_upper": upper,
-            }
-            for name, effect, se, z, p, lower, upper in zip(
-                raw.param_names,
-                raw.effect,
-                raw.std_errors,
-                raw.test_stats,
-                raw.p_values,
-                raw.conf_lower,
-                raw.conf_upper,
-            )
-        ]
+        return marginal_effect_rows(raw)

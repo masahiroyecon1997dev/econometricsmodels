@@ -51,11 +51,11 @@ See the [API Reference](api/ols.md) for the full list of available options.
 
 ## Retrieving results
 
-`OLSResults` exposes coefficients, standard errors, etc. as dictionaries keyed by coefficient name (`str`). If you need a row-oriented listing — e.g. for a REST API response — use `coef_table()`.
+`OLSResults` exposes coefficients, standard errors, etc. as dictionaries keyed by coefficient name (`str`). If you need a row-oriented listing — e.g. for a REST API response — use `params_table()`.
 
 ```python
-for row in result.coef_table():
-    print(row["param"], row["coef"], row["std_err"], row["p_value"])
+for row in result.params_table():
+    print(row["param_name"], row["param"], row["std_error"], row["p_value"])
 ```
 
 ## Predicted values
@@ -72,15 +72,59 @@ fitted = result.predict()
 new_data = pl.DataFrame({"x1": [6.0, 7.0]})
 predicted = result.predict(new_data)
 
-print(predicted)  # [{"predicted": ...}, {"predicted": ...}]
+print(predicted)  # [..., ...] (a plain list of floats)
 ```
 
-`OLSResults.augment()` takes the same `new_data` argument, but instead returns the source data (the training data, or `new_data` when given) with the predicted values appended as a `"predicted"` column — a polars DataFrame rather than a row-oriented list. This is the one exception to the library's general policy of not returning DataFrames.
+`OLSResults.augment()` takes the same `new_data` argument, but instead returns the source data (the training data, or `new_data` when given) with the predicted values appended as a `"predicted"` column — a polars DataFrame rather than a plain list. This is the one exception to the library's general policy of not returning DataFrames.
 
 ```python
 augmented = result.augment(new_data)
 print(augmented)  # original `new_data` columns, plus a "predicted" column
 ```
+
+## Diagnostics: White test for heteroskedasticity
+
+`OLSResults.white_test()` is a post-estimation diagnostic: it is never computed by `fit()`, and you call it when you want it. It regresses the squared residuals on the independent variables, their squares and their pairwise products. `statistic="lm"` (default) returns the LM version `n * R²` (chi-squared); `statistic="f"` returns the F version of the same auxiliary regression.
+
+```python
+white = result.white_test()
+print(white.statistic, white.p_value, white.df)  # attribute access
+print(white.aux_terms)  # ["const", "x1", "x2", "x1^2", "x2^2", "x1:x2"]
+print(white.dropped_terms)  # terms left out, e.g. ["d^2"] for a 0/1 dummy d
+
+white.to_dict()  # a JSON-ready dict
+white_f = result.white_test("f")
+```
+
+The auxiliary regression always includes a constant, even when the model was fitted with `include_intercept=False`, so the first element of `aux_terms` is always `"const"`. Terms that are constant or numerically identical to an earlier term (the square of a 0/1 dummy equals the dummy itself) are dropped, and the degrees of freedom count the terms that remain. The term labels only describe what was used; they are not a formula and are never parsed. The test does not depend on `cov_type`.
+
+### Diagnostics: Breusch-Pagan test for heteroskedasticity
+
+`OLSResults.breusch_pagan_test(variables=None, statistic="lm")` is another post-estimation test for heteroskedasticity, never computed by `fit()`. It regresses the squared residuals on a constant and the columns you name in `variables`; with no `variables` it uses the model's regressors. Unlike the White test you choose which variables may drive the error variance, and they need not be in the model.
+
+```python
+bp = result.breusch_pagan_test()  # the model's regressors
+print(bp.statistic, bp.p_value, bp.df)
+print(bp.aux_terms)  # ["const", "x1", "x2"]
+
+bp_size = result.breusch_pagan_test(["firm_size"])  # any numeric column
+bp_f = result.breusch_pagan_test(["x1"], "f")  # F version
+```
+
+This is the studentized (Koenker) version, which does not assume normal errors. The auxiliary regression always includes a constant, constant or duplicate columns are dropped (`dropped_terms` shows them), and the test does not depend on `cov_type`.
+
+### Diagnostics: Breusch-Godfrey test for serial correlation
+
+`OLSResults.breusch_godfrey_test(time, nlags, statistic="lm")` tests for serial correlation of the errors by regressing the residuals on the regressors and their own lags. It is a post-estimation diagnostic, never computed by `fit()`. `time` is the column that gives the time order and `nlags` the number of lags; both are required, because the row order is never assumed to be the time order and there is no natural default lag.
+
+```python
+bg = result.breusch_godfrey_test("year", 2)  # LM version (chi-squared)
+print(bg.statistic, bg.p_value, bg.df, bg.nlags)
+bg_f = result.breusch_godfrey_test("year", 2, "f")  # F version
+bg.to_dict()  # a JSON-ready dict
+```
+
+The rows may be in any order: they are sorted by `time` before the lags are taken. Only the order of the `time` values is used (gaps between periods are not checked), and the values must be distinct. Lags before the first observation are filled with zero. The test is meaningless for cross-sectional data.
 
 ## WLS (Weighted Least Squares)
 
@@ -127,22 +171,22 @@ print(result.pseudo_r_squared)
 
 ### Predicted values and classification table
 
-`LogitResults.predict()` returns predicted probabilities (not a 0/1 class prediction, unlike `OLSResults.predict()`'s `"predicted"` — this is the standard statsmodels convention). With no arguments, it returns fitted probabilities for the training data; passing `new_data` returns out-of-sample predictions for new data instead (same `new_data` semantics as `OLSResults.predict()`). `pred_table()` returns a 2x2 classification (confusion) table for a given probability threshold (default 0.5), for the training data only.
+`LogitResults.predict()` returns predicted probabilities (not a 0/1 class prediction, unlike `OLSResults.predict()`, which returns a point prediction of `y` — this is the standard statsmodels convention). With no arguments, it returns fitted probabilities for the training data; passing `new_data` returns out-of-sample predictions for new data instead (same `new_data` semantics as `OLSResults.predict()`). `pred_table()` returns a 2x2 classification (confusion) table for a given probability threshold (default 0.5), for the training data only.
 
 ```python
 predicted = result.predict()
-print(predicted)  # [{"probability": ...}, ...]
+print(predicted)  # [0.83, 0.12, ...] (a plain list of probabilities)
 
 new_data = pl.DataFrame({"x1": [1.0, 2.0]})
 predicted = result.predict(new_data)
-print(predicted)  # [{"probability": ...}, {"probability": ...}]
+print(predicted)  # [..., ...]
 
 table = result.pred_table()
 for row in table:
     print(row["actual"], row["predicted_0"], row["predicted_1"])
 ```
 
-`LogitResults.augment()` takes the same `new_data` argument as `predict()`, but returns a polars DataFrame (the source data plus a new `"predicted_probability"` column) instead of a row-oriented list, mirroring `OLSResults.augment()`.
+`LogitResults.augment()` takes the same `new_data` argument as `predict()`, but returns a polars DataFrame (the source data plus a new `"predicted_probability"` column) instead of a plain list, mirroring `OLSResults.augment()`.
 
 ```python
 augmented = result.augment(new_data)
@@ -157,7 +201,7 @@ print(
 
 ```python
 for row in result.marginal_effects():
-    print(row["param"], row["effect"], row["std_err"], row["p_value"])
+    print(row["param_name"], row["effect"], row["std_error"], row["p_value"])
 
 # Marginal effects evaluated at the mean of the explanatory variables
 mean_effects = result.marginal_effects(at="mean")
@@ -213,13 +257,13 @@ print(result.wald_statistic, result.wald_p_value)
 
 ### Predictions and marginal effects
 
-`predict()` and `marginal_effects()` take a `target`: `"expected_latent"` (`E[y*|x] = x'β`), `"expected_observed"` (the default, the censoring-adjusted mean `E[y|x]`), or `"prob_uncensored"`. `marginal_effects()` also takes `at` (`"overall"`, `"mean"`, `"median"`) and excludes the constant term.
+`predict()` and `marginal_effects()` take a `target`: `"expected_latent"` (`E[y*|x] = x'β`), `"expected_observed"` (the default, the censoring-adjusted mean `E[y|x]`), `"prob_uncensored"` (`P(uncensored|x)`), or `"expected_uncensored"` (`E[y|lower<y<upper,x]`, the mean among uncensored observations; `E[y|y>0,x]` for a lower bound of 0). `marginal_effects()` also takes `at` (`"overall"`, `"mean"`, `"median"`) and excludes the constant term.
 
 ```python
 for row in result.marginal_effects(target="expected_observed"):
-    print(row["param"], row["effect"], row["std_err"])
+    print(row["param_name"], row["effect"], row["std_error"])
 
-# predict() returns a list of {"predicted": ...} dicts
+# predict() returns a plain list of floats
 fitted = result.predict(target="expected_observed")
 
 # new_data (out-of-sample) works the same way as OLS/Logit/Probit
@@ -227,7 +271,7 @@ new_data = pl.DataFrame({"x1": [1.0, 2.0]})
 predicted = result.predict(new_data, target="expected_observed")
 ```
 
-`augment()` takes the same `target`/`new_data` arguments as `predict()`, but returns a polars DataFrame instead of a row-oriented list. Like Logit/Probit's `"predicted_probability"` column, the appended column has a `predicted_` prefix; here it is named `"predicted_{target}"` (e.g. `"predicted_expected_observed"`), since `predict()`'s meaning depends on `target` — this also lets you call `augment()` once per `target` on the same DataFrame without a column name collision.
+`augment()` takes the same `target`/`new_data` arguments as `predict()`, but returns a polars DataFrame instead of a plain list. Like Logit/Probit's `"predicted_probability"` column, the appended column has a `predicted_` prefix; here it is named `"predicted_{target}"` (e.g. `"predicted_expected_observed"`), since `predict()`'s meaning depends on `target` — this also lets you call `augment()` once per `target` on the same DataFrame without a column name collision.
 
 ```python
 augmented = result.augment(target="expected_observed")
@@ -327,7 +371,7 @@ FE has no `predict()`, `augment()`, or `summary()`.
 
 ## RE (random effects panel regression)
 
-`RE` estimates a random effects (Swamy-Arora GLS) panel regression, entity-direction only (unlike FE, two-way random effects are out of scope). Unlike FE, RE has an intercept, and a Hausman test comparing against the equivalent one-way FE specification is computed automatically as part of `fit()`.
+`RE` estimates a random effects (GLS) panel regression: entity-direction effects, or entity and time effects on a balanced panel when `REOptions.time` is set. The variance components are estimated by Swamy-Arora by default; `REOptions(variance_method="wallace_hussain")` or `"amemiya"` selects the other estimators. Unlike FE, RE has an intercept, and a Hausman test comparing against the equivalent FE specification is computed automatically as part of `fit()`.
 
 ```python
 from econometricsmodels import RE

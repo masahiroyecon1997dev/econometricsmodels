@@ -1,6 +1,7 @@
 pub mod common;
 pub mod fe;
 pub mod re;
+mod re_variance_method;
 
 // common.rs: FE/REで共有するエラー型（`PanelError`）・ハウスマン統計量の計算関数
 // （`docs/spec/re-spec.md`3.7節）・θでパラメータ化した準偏差変換関数

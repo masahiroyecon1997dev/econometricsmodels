@@ -29,7 +29,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 - デフォルト（`lower=0.0, upper=None`）は標準的な左打ち切り0のTobit。右打ち切りのみにしたい場合は
   `lower=None`を明示的に渡す（Pythonのキーワード引数デフォルトと明示的`None`渡しの区別を利用）。
 - **打ち切り境界のバリデーション**（engine層 `TobitInput::from_columns`）:
-  - `lower`/`upper`が両方`None`、または両方`Some`で`lower >= upper`は`InvalidCensoringBounds`
+  - `lower`/`upper`が両方`None`は`CensoringBoundsMissing`、両方`Some`で`lower >= upper`は`CensoringBoundsNotOrdered`、NaN・無限大は`CensoringBoundNotFinite`
     （「境界設定自体が不正」、`ValidationError`）。
   - `y`の実測値が指定境界と矛盾する場合（`lower`指定時に`y < lower`の行、または`upper`指定時に
     `y > upper`の行がある）は`YOutOfCensoringBounds { row, value }`（「境界設定は妥当だがデータと
@@ -38,7 +38,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
     無視できる）。
 - **非識別データの検出**: `y`が`lower`/`upper`いずれの境界にも一致しない観測（厳密に内部の観測）が
   1件も無い場合は`NoUncensoredObservations { lower, upper }`（`ValidationError`）。Tobitのこの退化は
-  `β`が発散するのではなく`σ→0`収束として現れ、標準化パラメータノルム基準の`SeparationSuspected`
+  `β`が発散するのではなく`σ→0`収束として現れ、Logit/Probitの分離検出（`nonlinear::separation`）
   では捕捉できないため、事後検知ではなく決定的な入力バリデーションを採用した（打ち切り判定は
   `y==lower`/`y==upper`の完全一致比較、`censoring_fit_check`と同じ規約）。「非打ち切り観測0件」は
   非識別の十分条件であり必要条件ではない（厳密には「打ち切りカテゴリが`x`の線形結合で完全分離
@@ -75,8 +75,8 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 - `cov_params`（`(k+1)×(k+1)`）はPython側に公開しないが、`predict()`/`marginal_effects()`/
   `censoring_fit_check()`用に非公開フィールド`estimator: TobitEstimator`として保持する。
 - python_package層（`TobitResults`）: `params`/`std_errors`/`test_stats`/`p_values`/`conf_int`は
-  係数名→値の`dict`。`coef_table()`は行指向`list[dict]`（`param`/`coef`/`std_err`/`test_stat`/
-  `p_value`/`conf_lower`/`conf_upper`）。`summary()`は作らない。
+  係数名→値の`dict`。`params_table()`は行指向`list[dict]`（`param_name`/`param`/`std_error`/`test_stat`/
+  `p_value`/`conf_lower`/`conf_upper`）。`sigma`の行も同じキーで、値のキーが`param`のため係数でなくても正確に表せる。`summary()`は作らない。
 
 ## 3. 内部実装の計算仕様
 
@@ -112,18 +112,21 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   あったため。`ols_initial_params`のQRベースの階数検定が`solver`に関わらず最初に走るため、完全な
   多重共線性は最適化前に`SingularDesignMatrix`（`ComputationError`）で検出される
   （`solver`をparametrizeする必要が無い）。
-- **`TobitScaling`（`tobit.rs`局所の標準化。共有`standardize_columns`は未使用）**: Logit/Probitが
-  使う`common.rs`の`standardize_columns`は`x`列を分散1へスケーリングするだけで`y`をスケーリング
+- **`TobitScaling`（`tobit.rs`の標準化。`x`側は共有の`ColumnScale`、`y`のスケーリングと`logσ`の扱いがTobit固有）**: Logit/Probitが
+  使う`common.rs`の`standardize_columns`は`x`列だけを標準化し`y`をスケーリング
   しないため、`y`のスケールが大きいデータ（例: Wooldridge mroz `hours`、`σ̂≈1122`）で健全なMLE解
-  でも標準化係数のノルムが大きくなり、勾配ノルム基準の収束判定や分離ヒューリスティックが不安定に
-  なる。対策として`y`のスケーリングと`x`の平均センタリングを行う`TobitScaling`を新設した:
+  でも標準化係数のノルムが大きくなり、勾配ノルム基準の収束判定や（当時あった標準化パラメータの
+  ノルムによる）分離ヒューリスティックが不安定になる。対策として`y`のスケーリングと`x`の平均センタリングを行う`TobitScaling`を新設した
+  （`x`側の平均センタリングは後にLogit/Probitにも広げ、`ColumnScale`として共通化した。
+  [`nonlinear-common.md`](./nonlinear-common.md)1.3節）:
   - `y`・打ち切り境界を`y_scale = 2^round(log2(母集団std(y)))`（**2の冪に丸める**）で一律
     スケーリング。2の冪での除算は倍精度で仮数部不変＝厳密なので、程よいスケールの`y`
     （`std ∈ [1/√2, √2)`）では`y_scale=1`の完全恒等変換になり、反復軌道がスケーリング前と厳密に
     相似に保たれる（生のstdで割ると丸め誤差だけで打ち切り率の高い悪条件データが`SingularHessian`
     に倒れることを実測確認したため丸める）。
   - `x`列は切片ありのとき`(x-x̄)/std`とセンタリング、切片なしのとき`x/std`のみ（吸収先の切片が
-    無いと逆変換が壊れるため）。
+    無いと逆変換が壊れるため）。この部分は`ColumnScale`（`fit`/`standardize`/`param_jacobian`、
+    `destandardize_params`）が行い、`y_scale`が2の冪なので`c`を掛けても丸め誤差が出ない。
   - 逆変換: `βⱼ = c·β̃ⱼ/stdⱼ`（`j≥1`）、`β₀ = c·β̃₀ - Σ_{j≥1} x̄ⱼ·βⱼ`、`σ = c·exp(s̃)`。
     `cov_params`は`Cov(β,σ) = J·Cov(β̃,s̃)·Jᵀ`（`J`は上記線形部分の微分に`∂σ/∂s̃=σ`のデルタ法を
     末尾行へ折り込んだもの、`TobitScaling::param_jacobian`）。
@@ -151,6 +154,21 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
     反復継続し、`max_iter`到達で`NonConvergence`。勾配の評価誤差の床が本当に`tol`を上回る
     ほど大きな標本向けの安全網で、上記の再現データでは現状発火しない。真の特異性（完全な
     多重共線性等、`λ=0`のHessianが可逆でない）は従来どおり`SingularHessian`。
+  - **未収束の打ち切り点でのSingularHessian（`raise_on_non_convergence=false`）**: `fit`は
+    未収束でも最終（打ち切り）点のHessianから`cov_params`を計算する。`(β, log σ)`尤度は凹でない
+    領域を持つため、打ち切り点がそこに着地するとHessianの逆行列を使う`cov_type`
+    （classical/hc0/hc1/cluster）は`SingularHessian`（`ComputationError`）を返す。負の分散を
+    返さないための設計で、`raise_on_non_convergence`とは独立。Hessianを使わない`opg`は成功する。
+    solverによる違い: `newton`はLM減衰で凹な領域に留まり、`bfgs`と`lbfgs`は初期点のHessianが
+    正定値ならその厳密な逆行列から出発して1手目が`newton`と一致する。かつて`lbfgs`は初期点の
+    Hessianを使わず勾配方向の1手目で凹でない領域に入りえたため（実測: `max_iter=1`、打ち切り率85%・
+    n=60の合成データで打ち切り点の費用関数Hessianの最小固有値が約-0.6、`newton`/`bfgs`は全て
+    正で最小約76）、この`SingularHessian`は`lbfgs`だけの挙動だった。今は全solverが未収束の結果を
+    返す。初期点のHessianが正定値でない場合は`lbfgs`も従来の`γI`初期化に戻るので、そこでは
+    凹でない領域に入る可能性が残る。
+    Rust（`tobit.rs`の`fit_returns_unconverged_result_for_every_solver_and_cov_type_at_truncated_point`）
+    とPython（`test_tobit_validation.py`の`test_truncated_point_returns_unconverged_result_for_every_solver`）
+    で同じ入力に対して固定している。
   - **`bfgs`/`lbfgs`は`tol`を観測数`n`で正規化した基準を使う（実装済み）**:
     `newton`は絶対閾値のまま（既定`tol=1e-6`、Tobitでも反復回数は`n`によらずほぼ一定でこの
     影響をほぼ無償で吸収する）だが、`bfgs`/`lbfgs`は観測あたり平均勾配基準（既定`tol=1e-8`）を
@@ -161,10 +179,8 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
     proptests`で発覚。devビルドで80分超のCPU時間を消費し続けるケースを実測で確認済み）。
     詳細は[`logit-spec.md`](./logit-spec.md)3.2節参照。
 - **Tobitの「真の」分離は`σ→0`退化として現れる**（Logit/Probitの「係数が±∞へ発散」とは異なる）。
-  そのため`run_solver`共有の`SeparationSuspected`（標準化パラメータノルム基準、`y∈{0,1}`で較正）は
-  `run_solver`の`separation_norm_check: SeparationNormCheck`引数で**Tobitは`Disabled`**にし、この
-  事後チェック自体を通らないようにする（スケール由来偽陽性を回避。多変量モデルでノルムが
-  `√k`オーダーに増える偽陽性の潜在リスクも排除）。Tobitの分離の現れ方:
+  そのためLogit/Probitの分離検出（`nonlinear::separation`、`zᵢ=(2yᵢ-1)xᵢ`の符号条件に基づく
+  線形計画で、`y∈{0,1}`が前提）はTobitの`fit()`では呼ばない。Tobitの分離の現れ方:
   - 非打ち切り観測ゼロ（`σ→0`）→ `fit()`冒頭の`NoUncensoredObservations`（`ValidationError`）で
     先に弾く（1章）。
   - 部分的な準完全分離 → `NonConvergence`（`max_iter`到達、`ComputationError`）。BFGS/L-BFGSも
@@ -209,29 +225,71 @@ Tobit固有の差分:
   数学的に常に特異になる。`G`・`q`は入力だけから判定できるため`fit()`冒頭の
   `InsufficientClustersForInference`（`ValidationError`）で弾く（OLS/WLS/Logit/Probit/Tobit/IV
   横断で統一）。`G > q`でも傾き係数間の悪条件で`q×q`部分行列が数値的にほぼ特異になる
-  ケースは`wald_chi2_test`内の`ensure_well_conditioned_symmetric_matrix`（`ComputationFailed`）が
+  ケースは`wald_chi2_test`内の`ensure_well_conditioned_symmetric_matrix`（`CommonError::NearSingularMatrix`、
+  `MATRIX_NEAR_SINGULAR`）が
   backstop。
 
 ### 3.5 限界効果
 
 `marginal_effects(at, target, confidence_level)`は`fit()`とは独立したメソッド。`at`は
-`"overall"`（既定、AME）/`"mean"`/`"median"`。`target`は3種:
+`"overall"`（既定、AME）/`"mean"`/`"median"`。`target`は4種:
 
 | `target` | 予測量 | 重み `w`（`dydx_j = w·βⱼ`） |
 |---|---|---|
 | `expected_latent` | `E[y*\|x] = x'β` | `w = 1`（`s_beta = 0`, `s_sigma = 0`の自明形） |
 | `expected_observed`（既定） | `E[y\|x]`（打ち切り考慮の条件付き期待値） | `w = Φ(z_b) - Φ(z_a)`（McDonald-Moffitt 1980） |
 | `prob_uncensored` | `P(uncensored\|x) = Φ(z_b) - Φ(z_a)` | `w = (φ(z_a) - φ(z_b))/σ` |
+| `expected_uncensored` | `E[y\|lower<y<upper,x] = μ + σ(Pa - Pb)`（非打ち切り領域での条件付き期待値。下限0のみなら`E[y\|y>0,x]`） | `w = 1 - Pa·A - Pb·B + 2·Pa·Pb`（下記） |
 
 （`z_a = (lower - x'β)/σ`、`z_b = (upper - x'β)/σ`。左のみ・右のみ・両側いずれでも`boundary_terms`
 経由で同一の式が正しい値を返す。右打ち切りのみの場合`prob_uncensored`の限界効果は符号が反転する。）
 
-- 3対象とも`dydx_j = w(θ)·βⱼ`という同一の形（Logit/Probitと同じ骨格、`w`の中身のみ異なる）に帰着
+**`expected_uncensored`**（`E[y|lower<y<upper,x]`、切断正規分布の平均）は、`E[y|x]`との間に
+`E[y|x] = lower·P(下限) + upper·P(上限) + P(uncensored|x)·E[y|lower<y<upper,x]`
+という分解の関係を持つ（下限0のみの左打ち切りなら`E[y|x] = P(y>0|x)·E[y|y>0,x]`。McDonald-Moffitt
+1980の分解の「打ち切られなかった集団に限定した」側）。左のみ・右のみ・両側すべてを`E[y|lower<y<upper,x]`
+として一般化している。「打ち切りを受けなかった世帯に限定すると平均支出額はどう変わるか」のような
+解釈に使う。
+
+- 記号: `W = Φ(z_b) - Φ(z_a)`、`Pa = φ(z_a)/W`、`Pb = φ(z_b)/W`（境界が無い方向は0）、`ρ1 = Pa - Pb`、
+  `ρ2 = z_a·Pa - z_b·Pb`。`m = μ + σ·ρ1`は`x`に`μ = x'β`を通してしか依存しないので
+  `dydx_j = w·βⱼ`、`w = ∂m/∂μ = 1 + ρ2 - ρ1²`（切断正規分布の分散を`σ²`で割った値、`(0,1)`に入る。
+  左のみなら`1 + z_a·λ - λ²`、`λ`は逆ミルズ比）。
+- 勾配: `∂ρ1/∂z_a = Pa(ρ1 - z_a)`・`∂ρ1/∂z_b = Pb(z_b - ρ1)`・`∂ρ2/∂z_a = Pa(1 - z_a² + ρ2)`・
+  `∂ρ2/∂z_b = Pb(z_b² - 1 - ρ2)`から`w_a = ∂ρ2/∂z_a - 2ρ1∂ρ1/∂z_a`、`w_b`も同様に得て、
+  `s_beta = -(w_a + w_b)/σ · x`、`s_sigma = -(z_a·w_a + z_b·w_b)/σ`。
+- **数値安定性**（実装は`engine/src/nonlinear/tobit.rs`の`truncation_pdf_ratios`・`uncensored_w_and_s`）:
+  `W`で割るため、`μ`が境界から遠い観測（重い打ち切りの標本や外れた`x`で`z`が数十〜）で`W→0`になる。
+  既存の3 targetは`W`で割らないので、この問題は新target固有。(1)`Pa`・`Pb`は`W`を作らずに直接計算する
+  （片側は逆ミルズ比`λ(a)=φ(a)/Φ(-a)`、`a>=3`は連分数`a+1/(a+2/(a+3/(a+…)))`、`a<3`は`Φ(-a)`を
+  テイラー級数で。両側は`0<=z_a`の上側の裾と`z_b<=0`の下側の裾を`W/Φ(-z_a)=1-r·p/q`の比
+  （`p=λ(z_a)`・`q=λ(z_b)`・`r=φ(z_b)/φ(z_a)`）で、`z_a<0<z_b`は正の項の和で）。
+  (2)`A = Pa - z_a`・`B = z_b + Pb`を引き算せず直接計算し、`w`・`w_a`・`w_b`を
+  `w = 1 - Pa·A - Pb·B + 2·Pa·Pb`・`w_a = Pa[1 + z_a·A - z_b·Pb - 2ρ1(A - Pb)]`・
+  `w_b = Pb[-1 + z_b·B - z_a·Pa - 2ρ1(B - Pa)]`で評価する。整理前の式は`z_a²`と`z_a·Pa`の
+  引き算で絶対誤差が`ε·z³`になり、`z=72`の観測を含む実データ（`many_regressors`）で標準誤差が`1e-8`
+  ずれた。(3)`statrs`の`Normal::cdf`は絶対誤差が約`1.4e-11`あり、`W`の逆数にかかるこの量では標準誤差へ
+  増幅されるため、`Φ(x)-1/2`を自前のテイラー級数・連分数で計算する。`w`は`[0,1]`にクランプする。
+- **限界**: (a)遠い裾（`|z|≳1e3`）では`w`・`w_a`・`w_b`の相対精度が落ちる（絶対誤差は`ε`級で、
+  `w≈1/z²`自体が無視できるため全観測の平均には影響しない）。(b)非打ち切り区間が`σ̂`に比べて
+  狭いと`q-r·p`・`W`が桁落ちする。区間幅`δ=(upper-lower)/σ̂`に対して`w`の絶対誤差は約`ε/δ²`、
+  真値は`≈δ²/12`なので相対誤差は約`12ε/δ⁴`で、デルタ法に使う`∂w/∂μ`・`∂w/∂σ`の誤差はさらに
+  大きい（`ε/δ³`級）。80桁参照の実測（`za∈[-10,10]`）は、`δ=1e-2`で`w`の相対誤差が最大`6e-7`、
+  `δ=1e-3`で`3e-3`〜`2e-4`かつ`s`が`w`の1%超、`δ≲1e-4`で`w`の相対誤差が100%超、`δ`が丸め誤差の
+  レベルでは`NaN`。**`δ<MIN_UNCENSORED_WIDTH_RATIO=1e-2`（`σ̂`が区間幅の100倍超、非打ち切りの
+  確率が約0.4%未満）のときは`MleError::UncensoredIntervalTooNarrow`（Pythonでは
+  `ComputationError`）にする**（`predict`・`predict_new_data`・`augment`・`marginal_effects`の
+  `target="expected_uncensored"`のみ。片側打ち切りと他の3 targetは対象外）。`ValidationError`
+  にしないのは、入力が不正なのではなく推定した`σ̂`で決まる条件で、`σ̂`が分かるまで判定できない
+  から。級数への内部切り替え（近似へ黙って変わる）は採らない。`δ`は観測に依存せずモデルで
+  1つに決まるので、呼び出しごとに1回だけ検査する。
+
+- 4対象とも`dydx_j = w(θ)·βⱼ`という同一の形（Logit/Probitと同じ骨格、`w`の中身のみ異なる）に帰着
   するため、`target_w_and_s`（`w`とその勾配`(s_beta, s_sigma)`を計算）→
   `marginal_effects_from_tobit_w_s`という2段構成で実装する。ただしパラメータ次元が`k`ではなく
   `k+1`（`β∪{σ}`）である点が`common.rs`の`dydx_and_jacobian`と異なるため**Logit/Probitとは共有
   せず独立実装する**（`w`/`s`の計算式そのものが共有できないため）。
-- デルタ法のヤコビアン: `∂g_j/∂β_m = βⱼ·s_beta[m] + [j==m]·w`、`∂g_j/∂σ = βⱼ·s_sigma`。分散は
+- デルタ法のヤコビアン（4対象共通）: `∂g_j/∂β_m = βⱼ·s_beta[m] + [j==m]·w`、`∂g_j/∂σ = βⱼ·s_sigma`。分散は
   `jac_j·cov_params·jac_j'`（`(k+1)`次元の二次形式）、標準誤差はその平方根、検定分布は標準正規分布。
   `fit()`時の`cov_params`をそのまま再利用し再最適化しない。
 - 定数項は出力から除外する。
@@ -239,11 +297,12 @@ Tobit固有の差分:
 ### 3.6 predict() / augment() / censoring_fit_check()
 
 - `predict(target, new_data=None)`は`marginal_effects`と同じ`MarginalEffectsTarget`を再利用し、
-  `E[y*|x]=x'β`・`E[y|x]`（既定）・`P(uncensored|x)`の3種を返す。値の計算は`predicted_value`
-  （`target_w_and_s`と同じ`boundary_terms`を再利用、左/右/両側いずれでも単一の式）。`new_data`が
+  `E[y*|x]=x'β`・`E[y|x]`（既定）・`P(uncensored|x)`・`E[y|lower<y<upper,x]`の4種を返す。値の計算は
+  `predicted_value`（`target_w_and_s`と同じ`boundary_terms`を再利用、左/右/両側いずれでも単一の式。
+  `expected_uncensored`のみ`truncation_pdf_ratios`で`μ + σ(Pa - Pb)`）。`new_data`が
   `None`（既定）なら学習データ、指定すれば新規データ（out-of-sample）に対する予測値を返す
   （`x`列名マッチング・`include_intercept`時の定数項自動付加はOLS/Logit/Probitの`predict(new_data)`
-  と同じ規約）。engine側の`predict_new_data`は`nonlinear::common::predict_new_data`に
+  と同じ規約）。戻り値は観測順の`list[float]`（OLS/WLS/Logit/Probitと同じ形）。engine側の`predict_new_data`は`nonlinear::common::predict_new_data`に
   `predicted_value`（`target`・`sigma`・打ち切り境界を閉じ込めたクロージャ）を`link`として渡す
   だけの薄いラッパー。`censoring_fit_check()`のout-of-sample対応は引き続き未対応（4章）。
 - **`augment(target="expected_observed", new_data=None)`は`predict()`と同じ`target`/`new_data`
@@ -252,7 +311,7 @@ Tobit固有の差分:
   `"predicted_expected_observed"`）にした。理由: Tobitは`target`によって`predict()`の意味が
   変わるため、固定名だと同じDataFrameに複数の`target`を積み上げようとした2回目の`augment()`が
   列名衝突で失敗する（`target`ごとに別の列名にすればこれを避けられる、ユーザー確認済み・提案）。
-  `TobitResult`も`LogitResult`と同じく`training_data: DataFrame`を保持する。
+  `TobitResult`も`LogitResult`と同じく、`fit()`に渡された元の`polars.DataFrame`を保持する。
 - **`pred_table()`は廃止し`censoring_fit_check()`に置き換える**。単一集約値ではなく`lower` /
   `uncensored` / `upper`の**方向別内訳**（`CensoringFitCheck`、該当方向の打ち切りが無ければその
   カテゴリは出力されない）。各カテゴリは`observed_rate`（`y`がちょうど境界値に一致する観測の割合）と
@@ -268,12 +327,13 @@ Tobit固有の差分:
 `MleError` → `PyErr`は[`logit-spec.md`](./logit-spec.md)3.7節のマッピング表と同一
 （`mle_error_to_pyerr`はLogit/Probit/Tobit共通）。Tobit固有バリアントの追加:
 
-| `MleError` | Python例外 |
-|---|---|
-| `NoUncensoredObservations` / `InvalidCensoringBounds` / `YOutOfCensoringBounds` | `ValidationError` |
+| `MleError` | `code` | Python例外 |
+|---|---|---|
+| `NoUncensoredObservations` / `CensoringBoundsMissing` / `CensoringBoundsNotOrdered` / `CensoringBoundNotFinite` / `YOutOfCensoringBounds` | `NO_UNCENSORED_OBSERVATIONS` / `CENSORING_BOUNDS_MISSING` / `CENSORING_BOUNDS_NOT_ORDERED` / `CENSORING_BOUND_NOT_FINITE` / `OUTCOME_OUTSIDE_CENSORING_BOUNDS` | `ValidationError` |
+| `UncensoredIntervalTooNarrow`（`expected_uncensored`の非打ち切り区間が`σ̂`の1%未満） | `UNCENSORED_INTERVAL_TOO_NARROW` | `ComputationError` |
 
 - `predict()`/`marginal_effects()`の`target`引数のPython文字列は`"expected_latent"` /
-  `"expected_observed"` / `"prob_uncensored"`（Rust enum名のsnake_case版。`at`のような単語1つの
+  `"expected_observed"` / `"prob_uncensored"` / `"expected_uncensored"`（Rust enum名のsnake_case版。`at`のような単語1つの
   慣習が無いためenum名との対応を優先）。パース関数`parse_marginal_effects_target`はTobit専用
   （`tobit.rs`）。
 
@@ -285,7 +345,7 @@ Tobit固有の差分:
 - **交差検証**: R `censReg`（`maxLik`エンジン）。`survreg`と`maxLik`は最適化実装が完全に独立。
   `censReg`側の`maxLik`収束を`reltol=1e-14 / gradtol=1e-10`まで詰めた上で、合成シナリオは点推定・
   SE・限界効果とも ~2e-9 で一致し`rtol=1e-8`（`tobit_crosscheck`）。実測乖離に基づき個別に緩めた項目
-  （`tests/_tolerances.py`）:
+  （`tests/support/_tolerances.py`）:
   - `high_condition_number`（x1,x2 相関 0.999）の hc0/hc1: SE・z・信頼区間・限界効果SEが ~1.9e-8
     まで増幅するため`5e-8`。
   - `mroz`（`hours`生スケール）: `censReg`の`maxLik`が`survreg`ほど収束が詰まらず、SE系・Wald・
@@ -296,18 +356,34 @@ Tobit固有の差分:
     ずれた点に収束するため全フィールドに緩めた`rtol_solver`を使う。`tobit_crosscheck`は`1e-7`
     （実測は変わらず）、主リファレンス`tobit_reference`は`2e-7`（`FaerLbfgs`導入後、
     `predict/expected_latent`の1点が実測1.055e-7で`1e-7`を超えたため）。
+- **`expected_uncensored`の第三者実装による照合**: `AER::tobit`・`censReg`にこの量のネイティブな
+  実装が無く、Rの値は手書きの閉形式（下記の`numDeriv`・数値積分・分解恒等式で検証）。独立な
+  第三者実装として`scipy.stats.truncnorm`（切断正規分布の平均・分散。`w`は`var/σ²`）を使い、
+  Rの推定した`(β,σ)`から計算した予測値（先頭10行・新規データ）と限界効果`w·β_j`
+  （`overall`/`mean`/`median`）を生成時にフィクスチャ（`third_party_expected_uncensored`）へ固定する
+  （`scipy`のバージョン更新で値が変わってもテストが意図せず壊れないよう、生成時の値をコミットする。
+  `scipy`のバージョンは`_meta.scipy_version`）。標準誤差は`scipy`に対応物が無く対象外。
+  実測は`z`が約100の裾（`many_regressors`）でも`3e-11`で一致。
+- **`survreg`の収束打ち切りを締める**: `run_tobit_crosscheck.R`は`AER::tobit`に
+  `survreg.control(rel.tolerance=1e-13)`を渡す（既定は`1e-9`）。`interval_wide_spread`で既定のままだと
+  `survreg`の解が本実装・`censReg`から相対`1.3e-8`ずれ（本実装と`censReg`は`3e-11`で一致）、
+  `RTOL=1e-8`を割ったため。締めると本実装と`6e-10`で一致する。`censReg`を`reltol=1e-14`まで締めた
+  のと同じ扱いで、既存シナリオの`survreg`の値は最大`6e-10`（相対）しか動かない。
 - **手計算箇所のformula非依存検証**（主・交差ともR実装で第三者三角測量が効かないため、
   `.claude/rules/testing-policy.md`「リファレンス実装」2.）: `run_tobit_crosscheck.R`内で
   `stopifnot`により以下を検証する — スコア（`estfun`）↔ Tobit対数尤度の`numDeriv::grad`、
   McDonald-Moffitt閉形式（重み`w = dE[y|x]/dμ`・デルタ法ヤコビアン）↔ `numDeriv::grad`および
-  `boundary_terms`を使わない独立実装、AIC/BIC ↔ R標準の`AIC()`/`BIC()`ジェネリック、classicalの
+  `boundary_terms`を使わない独立実装（`expected_uncensored`は対数空間の`Pa`・`Pb`、整理前の
+  教科書形との一致（`|z|<=6`）、素の`φ/W`閉形式、打ち切り領域上の数値積分、`E[y|x]`との分解恒等式）、AIC/BIC ↔ R標準の`AIC()`/`BIC()`ジェネリック、classicalの
   全体Wald ↔ `AER:::summary.tobit(fit)$wald`。ロバスト共分散の meat（`sandwich::estfun`）と bread
   （`sandwich::bread`）は`sandwich`パッケージ由来で本実装から独立だが、`(β,logσ)→(β,σ)`ヤコビアン
   変換と hc1 小標本補正は本スクリプトの手書きで、`clubSandwich`等との三角測量は行っていない
   （`estfun`自体は`numDeriv`検証済みのため共有の手書き部分は変換のみに限定される）。
 - **合成データセット**（`benchmark/nonlinear/datasets.py`、
   `generate_censored_regression_dataset`）: 打ち切り比率違い（light/moderate/heavy ≈ 左打ち切り
-  15/35/60%）、`right_censoring`、`interval_censoring`、誤差構造（`high_variance`＝`ε~N(0,10²)`、
+  15/35/60%）、`right_censoring`、`interval_censoring`、`interval_wide_spread`（両側90%打ち切りで非打ち切り
+  区間が線形予測子の散らばりよりずっと狭く、`za>=3`かつ`zb`有限・`zb<=-3`かつ`za`有限の観測を含む。
+  `expected_uncensored`の両側の裾を通す）、誤差構造（`high_variance`＝`ε~N(0,10²)`、
   `heteroskedastic`＝`σ_i = exp(0.5·x1)`の乗法的不均一分散で Tobit MLE の等分散仮定に対する誤設定
   → ロバスト共分散 opg/hc0/hc1 と classical が乖離、点推定は擬似真値に一致）、悪条件
   （`small_n`、`moderate_multicollinearity`、`high_condition_number`、`scale_variance_mild`）。
@@ -318,13 +394,20 @@ Tobit固有の差分:
 - **実データ**: Wooldridge `mroz`の`hours`（生スケール、左打ち切り約43%、Example 17.2）。非クラスターの
   4 cov_type で数値照合する。`TOBIT_MROZ_FORMULA`は RHS 7変数で`G=2 <= q=7`のためクラスターケース
   （`city`列）は`InsufficientClustersForInference`（`ValidationError`）になり成功パスを持たない。
+- **`solver`の組み合わせ**: リファレンス（`survreg`/`censReg`）は`solver`非依存のため、`bfgs`/`lbfgs`は
+  newton用の全シナリオ×`cov_type`フィクスチャをそのまま使い、代表的な組み合わせ（`heavy_censoring`×
+  classical/opg/hc0、`interval_censoring`×hc1、cluster・cluster_imbalanced）を全統計量で照合する
+  （`rtol_solver_combination=2e-6`、実測最大~5e-7）。主リファレンスのみ`mroz`×classical/hc0も照合する
+  （点推定`rtol_mroz_solver_point=3e-6`・実測最大~1e-6、推論`rtol_mroz_solver_inference=3e-4`・実測最大~1e-4）。`tol`を1e-10まで締めても`bfgs`/`lbfgs`はline searchの
+  停滞で打ち切られ`newton`との差が縮まない（`lbfgs`×hc0のSE系が最大）ため、許容誤差で受ける。
+  交差検証は`censReg`が`mroz`で`survreg`と~1e-4乖離するため`mroz`×`solver`を掛け合わせない。
 - **フィクスチャ**（`tobit.json` / `tobit_crosscheck.json`）は`run_tobit_crosscheck.R`の`engine`
   引数（`survreg` / `censReg`）違いで構造が完全に同一のため、pytest本体は`_tobit_checks.py`に
   集約している。
 - **新規データ（out-of-sample）予測値の数値照合**: `run_tobit_crosscheck.R`が学習
   データの各スロープ列の「平均±1標準偏差」を新規x値とする2行を組み立て（切片列は`model.matrix`の
   規約通り常に1.0）、`predicted_value`（上記のformula非依存検証で既に正しさを確認済みの閉形式）で
-  target3種を計算した`predict_new_data`と、その新規x値自体（`new_x`）をフィクスチャに含める。
+  target4種を計算した`predict_new_data`と、その新規x値自体（`new_x`）をフィクスチャに含める。
   `predicted_value`の数式そのものは検証済みのため、この照合が対象とするのは新規データの設計行列
   組み立て（切片自動付加・列の対応付け）がRust側（`predict_new_data`/`design_matrix_element`）と
   Rの`model.matrix`規約とで一致するかであり、`new_mm %*% beta`という単純な行列積で十分（`numDeriv`
@@ -342,7 +425,7 @@ Tobit固有の差分:
 - `dist`（誤差分布）は**Gaussian固定**。`survival::survreg`が選べるlogistic/extreme value等は対象外。
 - `censoring_fit_check`の許容誤差付き打ち切り判定（現状は浮動小数点完全一致）。実データで丸め誤差に
   よる誤分類が問題になった時点で検討する。
-- **`SeparationNormCheck`を無効化したことによる「有限だが統計的に無意味なほど巨大な`β̂`」の検知**:
+- **「有限だが統計的に無意味なほど巨大な`β̂`」の検知**（Tobitは分離検出を持たない）:
   標準化ノルムとは別の指標（Hessianの条件数、SEの発散、`σ̂/σ_y`比の下限等）は未着手。実データで
   問題が顕在化した時点で再検討する。
 - **`censored_contribution`のHessian項がクランプ済み`λ`と生の`zeta`を混在させるバグは
@@ -354,7 +437,7 @@ Tobit固有の差分:
   よう修正した（`zeta_for_hessian = zeta.clamp(-U_CLAMP, U_CLAMP)`）。この修正により、
   境界レジーム（軽度の準完全分離＋ごく小さいノイズ、「中間レジーム」）で
   以前は`NonConvergence`になっていたケースが正しく収束するようになったことを実測で確認した
-  （`tests/nonlinear/test_tobit.py`の`test_quasi_separation_tiny_noise_converges_to_true_values`
+  （`tests/nonlinear/test_tobit_validation.py`の`test_quasi_separation_tiny_noise_converges_to_true_values`
   参照）。`score_s`（勾配）は今回のスコープ外（`U_CLAMP`領域でのcost/gradientの数学的非整合は
   別の既知の課題、[`probit-spec.md`](./probit-spec.md)4章参照）のため変更していない。
 - **`wald_chi2_test`とOLSの`wald_f_test`の重複**: 部分行列抽出→悪条件検出→Cholesky→二次形式の

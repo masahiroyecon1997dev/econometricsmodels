@@ -9,15 +9,17 @@ R クロスチェックは `test_ols_crosscheck.py`。
 
 from __future__ import annotations
 
-import _error_messages as msgs
+import _error_expectations as msgs
 import pandas as pd
 import polars as pl
 import pytest
 from _constants import DATA_DIR
-from _error_messages import escaped
+from _error_expectations import escaped
+from _errors import raises_error
 from _helpers import (
     ROW_TIME,
     TIED_TIME_COLUMNS,
+    name_collision_frame,
     with_cluster_groups,
     with_row_time,
 )
@@ -25,22 +27,34 @@ from _ols_helpers import our_fit
 from econometricsmodels import (
     OLS,
     ComputationError,
+    ErrorCode,
     OLSOptions,
     ValidationError,
 )
 
-from benchmark.linear.constants import HAC_MAXLAGS
-from benchmark.linear.fixtures.generate_ols_fixtures import COV_TYPES
+from benchmark.linear.constants import COV_TYPES
 
-# ── ValidationError（入力データ） ───────────────────────────────────
+# ── ValidationError（入力データ） ─────────────────────────────────────
 
 
 def test_missing_column_raises(dataset):
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="nonexistent"),
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="nonexistent",
+        argument="x",
+        data_argument="data",
     ):
         OLS(dataset, y="y", x=["x1", "nonexistent"]).fit()
+
+
+def test_missing_y_column_raises(dataset):
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="nonexistent",
+        argument="y",
+        data_argument="data",
+    ):
+        OLS(dataset, y="nonexistent", x=["x1", "x2"]).fit()
 
 
 def test_y_empty_string_raises(dataset):
@@ -48,24 +62,33 @@ def test_y_empty_string_raises(dataset):
     対称。空文字列は存在しない列名の一種のため、`test_missing_column_raises`と
     同じ`column_extraction`の「列が存在しない」経路を通る）。
     """
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="")
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="",
+        argument="y",
+        data_argument="data",
     ):
         OLS(dataset, y="", x=["x1", "x2"]).fit()
 
 
 def test_null_values_raise():
     df_y = pl.DataFrame({"y": [1.0, None, 3.0], "x1": [1.0, 2.0, 3.0]})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="y", count=1),
+    with raises_error(
+        ErrorCode.COLUMN_CONTAINS_NULL,
+        column="y",
+        count=1,
+        argument="y",
+        data_argument="data",
     ):
         OLS(df_y, y="y", x=["x1"]).fit()
 
     df_x = pl.DataFrame({"y": [1.0, 2.0, 3.0], "x1": [1.0, None, 3.0]})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=1),
+    with raises_error(
+        ErrorCode.COLUMN_CONTAINS_NULL,
+        column="x1",
+        count=1,
+        argument="x",
+        data_argument="data",
     ):
         OLS(df_x, y="y", x=["x1"]).fit()
 
@@ -74,7 +97,7 @@ def test_non_finite_values_raise():
     """`y`/`x`にNaN・無限大が含まれる場合`ValidationError`。
 
     null（`test_null_values_raise`）とNaN/無限大は`column_extraction.rs`内で
-    別ロジックのため個別に確認する（テスト網羅性レビューで判明した抜け）。
+    別ロジックのため個別に確認する。
     `x`側も`y`側と同じ`extract_f64_column`を通るため対称に確認する
     （predict()側の`test_predict_null_or_non_finite_values_raise`との
     非対称を解消）。
@@ -82,44 +105,52 @@ def test_non_finite_values_raise():
     df_y_nan = pl.DataFrame(
         {"y": [1.0, float("nan"), 3.0], "x1": [1.0, 2.0, 3.0]}
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="y", value="NaN", row=1
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column="y",
+        value=pytest.approx(float("nan"), nan_ok=True),
+        row=1,
+        argument="y",
+        data_argument="data",
     ):
         OLS(df_y_nan, y="y", x=["x1"]).fit()
 
     df_y_inf = pl.DataFrame(
         {"y": [1.0, float("inf"), 3.0], "x1": [1.0, 2.0, 3.0]}
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="y", value="inf", row=1
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column="y",
+        value=float("inf"),
+        row=1,
+        argument="y",
+        data_argument="data",
     ):
         OLS(df_y_inf, y="y", x=["x1"]).fit()
 
     df_x_nan = pl.DataFrame(
         {"y": [1.0, 2.0, 3.0], "x1": [1.0, float("nan"), 3.0]}
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="x1", value="NaN", row=1
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column="x1",
+        value=pytest.approx(float("nan"), nan_ok=True),
+        row=1,
+        argument="x",
+        data_argument="data",
     ):
         OLS(df_x_nan, y="y", x=["x1"]).fit()
 
     df_x_inf = pl.DataFrame(
         {"y": [1.0, 2.0, 3.0], "x1": [1.0, float("inf"), 3.0]}
     )
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="x1", value="inf", row=1
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column="x1",
+        value=float("inf"),
+        row=1,
+        argument="x",
+        data_argument="data",
     ):
         OLS(df_x_inf, y="y", x=["x1"]).fit()
 
@@ -129,34 +160,31 @@ def test_non_numeric_dtype_raises():
     （欠損値のメッセージではなく、dtypeを指摘するメッセージになる）。
     """
     df = pl.DataFrame({"y": ["a", "b", "c"], "x1": [1.0, 2.0, 3.0]})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="y", dtype="String"
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
+        column="y",
+        dtype="String",
+        argument="y",
+        data_argument="data",
     ):
         OLS(df, y="y", x=["x1"]).fit()
 
 
 def test_y_in_x_raises(dataset):
     """`y`と同じ列名が`x`にも含まれる場合`ValidationError`。"""
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.ROLE_OVERLAP_SINGLE_IN_MULTI,
-            col="y",
-            single_role="y",
-            multi_role="x",
-        ),
+    with raises_error(
+        ErrorCode.ROLE_COLUMN_OVERLAP,
+        column="y",
+        argument="y",
+        other_argument="x",
     ):
         OLS(dataset, y="y", x=["y", "x1"]).fit()
 
 
 def test_duplicate_x_column_raises(dataset):
     """`x`に同じ列名が重複して含まれる場合`ValidationError`。"""
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.DUPLICATE_WITHIN_ROLE, name="x1", role="x"),
+    with raises_error(
+        ErrorCode.ROLE_DUPLICATE_COLUMN, column="x1", argument="x"
     ):
         OLS(dataset, y="y", x=["x1", "x1"]).fit()
 
@@ -166,25 +194,22 @@ def test_const_collision_with_include_intercept_raises():
 
     自動追加される定数項と衝突し`ValidationError`になること。
     """
-    df = pl.DataFrame({"y": [1.0, 2.0, 3.0], "const": [1.0, 2.0, 3.5]})
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.CONST_COLLISION, role="x")
-    ):
+    df = name_collision_frame([1.0, 2.0, 3.0])
+    with raises_error(ErrorCode.INTERCEPT_NAME_COLLISION, argument="x"):
         OLS(df, y="y", x=["const"]).fit()
 
 
 def test_empty_x_raises(dataset):
     """`x`が空リストの場合`ValidationError`。"""
-    with pytest.raises(ValidationError, match=escaped(msgs.X_EMPTY, role="x")):
+    with raises_error(ErrorCode.ROLE_EMPTY, argument="x"):
         OLS(dataset, y="y", x=[]).fit()
 
 
 def test_insufficient_observations_raises(dataset):
     """観測数nが説明変数の数k（定数項込み）以下の場合`ValidationError`。"""
     df = dataset.head(2)  # n=2、include_intercept=trueでk=3（const, x1, x2）
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.INSUFFICIENT_OBSERVATIONS, n=2, k=3),
+    with raises_error(
+        ErrorCode.INSUFFICIENT_OBSERVATIONS, n_obs=2, n_params=3, min_obs=4
     ):
         OLS(df, y="y", x=["x1", "x2"]).fit()
 
@@ -192,15 +217,14 @@ def test_insufficient_observations_raises(dataset):
 def test_data_not_polars_raises(dataset):
     """`data`/`new_data`にpolars以外のDataFrame（pandas等）を渡すと、内部実装
     （`pyo3-polars`の`get_columns`呼び出し）が漏れた`AttributeError`ではなく
-    `ValidationError`になること。
+    `TypeError`になること。
     """
     bad = pd.DataFrame({"y": [1.0, 2.0, 3.0], "x1": [1.0, 2.0, 3.0]})
     with pytest.raises(
-        ValidationError,
+        TypeError,
         match=escaped(
-            msgs.NOT_A_POLARS_DATAFRAME,
+            msgs.NOT_A_POLARS_DATAFRAME_PANDAS,
             param_name="data",
-            type_name=msgs.fully_qualified_type_name(bad),
         ),
     ):
         OLS(bad, y="y", x=["x1"]).fit()
@@ -208,20 +232,18 @@ def test_data_not_polars_raises(dataset):
     res = our_fit(dataset)
     bad_new_data = pd.DataFrame({"x1": [1.0], "x2": [0.5]})
     with pytest.raises(
-        ValidationError,
+        TypeError,
         match=escaped(
-            msgs.NOT_A_POLARS_DATAFRAME,
+            msgs.NOT_A_POLARS_DATAFRAME_PANDAS,
             param_name="new_data",
-            type_name=msgs.fully_qualified_type_name(bad_new_data),
         ),
     ):
         res.predict(bad_new_data)
     with pytest.raises(
-        ValidationError,
+        TypeError,
         match=escaped(
-            msgs.NOT_A_POLARS_DATAFRAME,
+            msgs.NOT_A_POLARS_DATAFRAME_PANDAS,
             param_name="new_data",
-            type_name=msgs.fully_qualified_type_name(bad_new_data),
         ),
     ):
         res.augment(bad_new_data)
@@ -229,15 +251,14 @@ def test_data_not_polars_raises(dataset):
 
 def test_lazyframe_data_raises_with_collect_hint(dataset):
     """`LazyFrame`は内部実装が漏れたメッセージではなく、`.collect()`の案内付きの
-    `ValidationError`になること（`data`・`new_data`とも）。
+    `TypeError`になること（`data`・`new_data`とも）。
     """
     lazy = pl.DataFrame({"y": [1.0, 2.0, 3.0], "x1": [1.0, 2.0, 3.0]}).lazy()
     with pytest.raises(
-        ValidationError,
+        TypeError,
         match=escaped(
             msgs.NOT_A_POLARS_DATAFRAME_LAZY,
             param_name="data",
-            type_name=msgs.fully_qualified_type_name(lazy),
         ),
     ):
         OLS(lazy, y="y", x=["x1"]).fit()
@@ -245,11 +266,10 @@ def test_lazyframe_data_raises_with_collect_hint(dataset):
     res = our_fit(dataset)
     lazy_new = pl.DataFrame({"x1": [1.0], "x2": [0.5]}).lazy()
     with pytest.raises(
-        ValidationError,
+        TypeError,
         match=escaped(
             msgs.NOT_A_POLARS_DATAFRAME_LAZY,
             param_name="new_data",
-            type_name=msgs.fully_qualified_type_name(lazy_new),
         ),
     ):
         res.predict(lazy_new)
@@ -257,11 +277,11 @@ def test_lazyframe_data_raises_with_collect_hint(dataset):
 
 def test_series_data_raises(dataset):
     """`polars.Series`も、内部実装が漏れたメッセージではなく通常の
-    「DataFrameではない」`ValidationError`になること。
+    「DataFrameではない」`TypeError`になること。
     """
     series = pl.Series("y", [1.0, 2.0, 3.0])
     with pytest.raises(
-        ValidationError,
+        TypeError,
         match=escaped(
             msgs.NOT_A_POLARS_DATAFRAME,
             param_name="data",
@@ -271,92 +291,18 @@ def test_series_data_raises(dataset):
         OLS(series, y="y", x=["x1"]).fit()
 
 
-# ── ValidationError（オプション） ──────────────────────────────────
-
-
-@pytest.mark.parametrize("cov_type", ["invalid", ""])
-def test_invalid_cov_type_raises(dataset, cov_type):
-    """未知の文字列（空文字列を含む）は`ValidationError`（テスト網羅性
-    候補・項目46、空文字列は`.is_empty()`等の特別扱いで`match`の網羅から
-    漏れていないことのロックイン）。
-    """
-    options = OLSOptions(cov_type=cov_type)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.UNKNOWN_COV_TYPE_LINEAR, other=cov_type),
-    ):
-        OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
-
-
-def test_cluster_without_col_raises(dataset):
-    options = OLSOptions(cov_type="cluster")
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.MISSING_CLUSTER_COLUMN)
-    ):
-        OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
-
-
-def test_cluster_nonexistent_column_raises(dataset):
-    """`cluster`が実在しない列名を指すと`ValidationError`
-    （`column_extraction`の責務、既存の欠落を確認するテストが無かった、
-    `testing-completeness-reviewer`指摘）。
-    """
-    options = OLSOptions(cov_type="cluster", cluster="does_not_exist")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="does_not_exist"),
-    ):
-        OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
-
-
-def test_insufficient_clusters_raises(dataset):
-    """クラスターが1種類しかない場合`ValidationError`。"""
-    df = dataset.with_columns(pl.lit(0).alias("single_cluster"))
-    options = OLSOptions(cov_type="cluster", cluster="single_cluster")
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.INSUFFICIENT_CLUSTERS, g=1)
-    ):
-        OLS(df, y="y", x=["x1", "x2"], options=options).fit()
-
-
-@pytest.mark.parametrize("confidence_level", [1.5, 0.0, -0.1])
-def test_invalid_confidence_level_raises(dataset, confidence_level):
-    """`confidence_level`が(0, 1)の範囲外（境界値0.0を含む）の場合`ValidationError`。"""
-    options = OLSOptions(confidence_level=confidence_level)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.INVALID_CONFIDENCE_LEVEL,
-            confidence_level=msgs.rust_f64(confidence_level),
-        ),
-    ):
-        OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
-
-
-@pytest.mark.parametrize(
-    "hac_lags", [-1, 100]
-)  # 100 == dataset の n_obs（上限側境界）
-def test_invalid_hac_lags_raises(dataset, hac_lags):
-    """`hac_lags`が`[0, n)`の範囲外の場合`ValidationError`。"""
-    options = OLSOptions(cov_type="hac", hac_lags=hac_lags, hac_time=ROW_TIME)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.INVALID_HAC_LAGS, hac_lags=hac_lags, n=100),
-    ):
-        OLS(
-            with_row_time(dataset), y="y", x=["x1", "x2"], options=options
-        ).fit()
-
-
-# ── ValidationError（predict()） ──────────────────────────────────
+# ── ValidationError（predict()のnew_data） ────────────────────────────
 
 
 def test_predict_missing_column_raises(dataset):
     res = our_fit(dataset)
     new_data = pl.DataFrame({"x1": [1.0, 2.0]})  # x2が無い
 
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="x2")
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="x2",
+        argument="x",
+        data_argument="new_data",
     ):
         res.predict(new_data)
 
@@ -368,11 +314,12 @@ def test_predict_non_numeric_dtype_raises(dataset):
     res = our_fit(dataset)
     new_data = pl.DataFrame({"x1": ["a", "b"], "x2": [1.0, 2.0]})
 
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_UNSUPPORTED_NUMERIC_DTYPE, name="x1", dtype="String"
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
+        column="x1",
+        dtype="String",
+        argument="x",
+        data_argument="new_data",
     ):
         res.predict(new_data)
 
@@ -381,20 +328,28 @@ def test_predict_null_or_non_finite_values_raise(dataset):
     res = our_fit(dataset)
 
     new_data_null = pl.DataFrame({"x1": [1.0, None], "x2": [1.0, 2.0]})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.COLUMN_HAS_MISSING_VALUES, name="x1", count=1),
+    with raises_error(
+        ErrorCode.COLUMN_CONTAINS_NULL,
+        column="x1",
+        count=1,
+        argument="x",
+        data_argument="new_data",
     ):
         res.predict(new_data_null)
 
     new_data_inf = pl.DataFrame({"x1": [1.0, float("inf")], "x2": [1.0, 2.0]})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_NON_FINITE_VALUE, name="x1", value="inf", row=1
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_NON_FINITE,
+        column="x1",
+        value=float("inf"),
+        row=1,
+        argument="x",
+        data_argument="new_data",
     ):
         res.predict(new_data_inf)
+
+
+# ── ValidationError（augment()） ──────────────────────────────────────
 
 
 def test_augment_column_collision_raises(dataset):
@@ -402,18 +357,12 @@ def test_augment_column_collision_raises(dataset):
     ある場合`ValidationError`（黙って上書きしない）。
     """
     df_with_predicted = dataset.with_columns(pl.lit(0.0).alias("predicted"))
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.EXISTING_COLUMN_COLLISION, name="predicted"),
-    ):
+    with raises_error(ErrorCode.AUGMENT_COLUMN_EXISTS, column="predicted"):
         OLS(df_with_predicted, y="y", x=["x1", "x2"]).fit().augment()
 
     res = our_fit(dataset)
     new_data = pl.DataFrame({"x1": [1.0], "x2": [0.5], "predicted": [0.0]})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.EXISTING_COLUMN_COLLISION, name="predicted"),
-    ):
+    with raises_error(ErrorCode.AUGMENT_COLUMN_EXISTS, column="predicted"):
         res.augment(new_data)
 
 
@@ -424,10 +373,100 @@ def test_augment_missing_column_raises(dataset):
     res = our_fit(dataset)
     new_data = pl.DataFrame({"x1": [1.0, 2.0]})  # x2が無い
 
-    with pytest.raises(
-        ValidationError, match=escaped(msgs.COLUMN_DOES_NOT_EXIST, name="x2")
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="x2",
+        argument="x",
+        data_argument="new_data",
     ):
         res.augment(new_data)
+
+
+# ── ValidationError（オプション） ─────────────────────────────────────
+
+
+@pytest.mark.parametrize("cov_type", ["invalid", ""])
+def test_invalid_cov_type_raises(dataset, cov_type):
+    """未知の文字列（空文字列を含む）は`ValidationError`
+    （空文字列が`.is_empty()`等の特別扱いで`match`の網羅から漏れていないこと）。
+    """
+    options = OLSOptions(cov_type=cov_type)
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="cov_type",
+        value=cov_type,
+        allowed=msgs.ALLOWED_COV_TYPES_LINEAR,
+    ):
+        OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
+
+
+@pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
+def test_nonrobust_is_rejected(dataset, cov_type):
+    """`"nonrobust"`は別名として受け付けない（概念ごとに文字列を1つに絞る）。"""
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="cov_type",
+        value=cov_type,
+        allowed=msgs.ALLOWED_COV_TYPES_LINEAR,
+    ):
+        our_fit(dataset, cov_type)
+
+
+def test_cluster_without_col_raises(dataset):
+    options = OLSOptions(cov_type="cluster")
+    with raises_error(ErrorCode.CLUSTER_REQUIRED, setting="cov_type"):
+        OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
+
+
+def test_cluster_nonexistent_column_raises(dataset):
+    """`cluster`が実在しない列名を指すと`ValidationError`
+    （`column_extraction`の責務）。
+    """
+    options = OLSOptions(cov_type="cluster", cluster="does_not_exist")
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND,
+        column="does_not_exist",
+        argument="cluster",
+        data_argument="data",
+    ):
+        OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
+
+
+def test_insufficient_clusters_raises(dataset):
+    """クラスターが1種類しかない場合`ValidationError`。"""
+    df = dataset.with_columns(pl.lit(0).alias("single_cluster"))
+    options = OLSOptions(cov_type="cluster", cluster="single_cluster")
+    with raises_error(
+        ErrorCode.CLUSTER_COUNT_TOO_SMALL,
+        setting="cov_type",
+        n_clusters=1,
+        min_clusters=2,
+    ):
+        OLS(df, y="y", x=["x1", "x2"], options=options).fit()
+
+
+@pytest.mark.parametrize("confidence_level", [1.5, 0.0, -0.1])
+def test_invalid_confidence_level_raises(dataset, confidence_level):
+    """`confidence_level`が(0, 1)の範囲外（境界値0.0を含む）の場合`ValidationError`。"""
+    options = OLSOptions(confidence_level=confidence_level)
+    with raises_error(
+        ErrorCode.CONFIDENCE_LEVEL_OUT_OF_RANGE, value=confidence_level
+    ):
+        OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
+
+
+@pytest.mark.parametrize(
+    "hac_lags", [-1, 100]
+)  # 100 == dataset の n_obs（上限側境界）
+def test_invalid_hac_lags_raises(dataset, hac_lags):
+    """`hac_lags`が`[0, n)`の範囲外の場合`ValidationError`。"""
+    options = OLSOptions(cov_type="hac", hac_lags=hac_lags, hac_time=ROW_TIME)
+    with raises_error(
+        ErrorCode.HAC_LAGS_OUT_OF_RANGE, value=hac_lags, n_obs=100, max=99
+    ):
+        OLS(
+            with_row_time(dataset), y="y", x=["x1", "x2"], options=options
+        ).fit()
 
 
 @pytest.mark.parametrize("n_groups", [2, 3])
@@ -439,7 +478,7 @@ def test_cluster_count_at_most_slopes_raises_validation_error(n_groups):
     構造的に特異になる。GもqもデータからR行列計算なしで即座に判定できるため、
     `fit()`冒頭で`ValidationError`（`CommonError::InsufficientClustersForInference`）。
     G=2（G<q）とG=3（G==q、`rank(Ŝ)≤2<3`で依然特異）の両方を確認する。
-    G>qでも悪条件で数値的にほぼ特異なケースは従来どおり`ComputationError`が
+    G>qでも悪条件で数値的にほぼ特異なケースは`ComputationError`が
     backstop（`cov_type="cluster"`は`cluster`列の指定が別途必要なため専用の
     `test_scale_variance_cluster_raises_computation_error`で確認、
     他のcov_typeは`test_scale_variance_raises_computation_error`）。
@@ -447,90 +486,14 @@ def test_cluster_count_at_most_slopes_raises_validation_error(n_groups):
     df = pl.read_csv(DATA_DIR / "synthetic_baseline.csv")
     df = with_cluster_groups(df, n_groups)
     options = OLSOptions(cov_type="cluster", cluster="cluster_group")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.INSUFFICIENT_CLUSTERS_FOR_INFERENCE, g=n_groups, q=3
-        ),
+    with raises_error(
+        ErrorCode.CLUSTER_COUNT_NOT_ABOVE_SLOPES,
+        setting="cov_type",
+        n_clusters=n_groups,
+        n_slopes=3,
+        min_clusters=4,
     ):
         OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
-
-
-# ── ComputationError ──────────────────────────────────────────────
-
-
-def test_perfect_multicollinearity_raises_computation_error():
-    """完全な多重共線性（設計行列が特異）は数値比較の対象外
-    （`testing-policy.md`「テストの3系統」）。想定エラー（`ComputationError`）が
-    発生することのみを確認する。
-
-    以前は手書きの極小 df（`x2 = 2*x1`）による `test_singular_matrix_raises_
-    computation_error` も併存していたが、同じ経路の確認で追加検証が無かったため、
-    固定済みベンチマーク CSV を使うこのテストへ一本化した。
-    """
-    df = pl.read_csv(DATA_DIR / "synthetic_perfect_multicollinearity.csv")
-    with pytest.raises(ComputationError):
-        OLS(df, y="y", x=["x1", "x2", "x3"]).fit()
-
-
-@pytest.mark.parametrize("cov_type", COV_TYPES)
-def test_scale_variance_raises_computation_error(cov_type):
-    """変数間のスケールが極端に異なる設計行列（x1を`*1e6`、x2を`*1e-3`）は、
-    傾き係数の同時共分散部分行列がスケール比の2乗（≈1e18）相当の条件数を持ち
-    倍精度浮動小数点の限界を超えて数値的に特異になる（発見・原因調査済み）。`wald_f_test`が固有値分解による相対閾値判定で検出し、
-    全cov_typeで`ComputationError`になる（classicalも含む。傾き係数の
-    共分散部分行列自体は`cov_type`によらず同じ条件数を持つため）。
-    perfect_multicollinearityと同様、数値比較はせずエラーパスのみ確認する。
-    """
-    df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
-    kwargs = (
-        {"hac_lags": HAC_MAXLAGS, "hac_time": ROW_TIME}
-        if cov_type == "hac"
-        else {}
-    )
-    options = OLSOptions(cov_type=cov_type, **kwargs)
-    with pytest.raises(ComputationError):
-        OLS(
-            with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
-        ).fit()
-
-
-def test_scale_variance_cluster_raises_computation_error():
-    """`cluster`も上記`test_scale_variance_raises_computation_error`と同じ
-    backstopの対象（`test_cluster_count_at_most_slopes_raises_validation_error`
-    のdocstring参照）。`cov_type="cluster"`は`cluster`列の指定が別途必要なため
-    `COV_TYPES`パラメトライズには含められず、専用テストとして確認する
-    （従来docstringの主張のみで自動テストが無かった非対称の解消）。
-    均等な疑似グループ（行番号%10、
-    `G=10>q=3`）を使い、クラスター数不足による`ValidationError`
-    ではなく、傾き係数の共分散部分行列の条件数超過による
-    `ComputationError`が発生することを確認する。
-    """
-    df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
-    df = with_cluster_groups(df, 10)
-    options = OLSOptions(cov_type="cluster", cluster="cluster_group")
-    with pytest.raises(ComputationError):
-        OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
-
-
-# ── 例外クラスの継承 ──────────────────────────────────────────────
-
-
-def test_validation_error_is_value_error():
-    """ValidationErrorがValueErrorのサブクラスであること。
-
-    素の`except ValueError`でも捕まえられる
-    （`.claude/rules/rust-style.md`「エラーハンドリング」参照）。
-    """
-    assert issubclass(ValidationError, ValueError)
-
-
-def test_computation_error_is_runtime_error():
-    """ComputationErrorがRuntimeErrorのサブクラスであること。"""
-    assert issubclass(ComputationError, RuntimeError)
-
-
-# ── ValidationError（使われないオプション） ─────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -553,9 +516,8 @@ def test_option_unused_by_cov_type_raises(
     書き忘れでclassicalの標準誤差が返るのを防ぐ）。
     """
     options = OLSOptions(cov_type=cov_type, **{option: value})
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.UNUSED_OPTION, option=option, condition=condition),
+    with raises_error(
+        ErrorCode.OPTION_UNUSED, option=option, condition=condition
     ):
         OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
 
@@ -582,10 +544,7 @@ def test_hac_requires_hac_time(dataset, cov_type):
     見える誤った結果が黙って返るのを防ぐ）。
     """
     options = OLSOptions(cov_type=cov_type, hac_lags=2)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.HAC_REQUIRES_HAC_TIME, setting="cov_type"),
-    ):
+    with raises_error(ErrorCode.HAC_TIME_REQUIRED, setting="cov_type"):
         OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
@@ -597,31 +556,109 @@ def test_hac_time_with_tied_values_raises(dataset, time_expr, rows):
     """
     df = dataset.with_columns(time_expr.alias("t"))
     options = OLSOptions(cov_type="hac", hac_lags=2, hac_time="t")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.COLUMN_HAS_TIED_TIME_ORDER,
-            name="t",
-            first=rows[0],
-            second=rows[1],
-        ),
+    with raises_error(
+        ErrorCode.COLUMN_VALUES_TIED,
+        column="t",
+        first_row=rows[0],
+        second_row=rows[1],
+        argument="hac_time",
+        data_argument="data",
     ):
         OLS(df, y="y", x=["x1", "x2"], options=options).fit()
 
 
 def test_option_unused_check_is_case_insensitive(dataset):
     options = OLSOptions(cov_type="CLASSICAL", cluster="cluster")
-    with pytest.raises(ValidationError, match="only used with"):
+    with raises_error(
+        ErrorCode.OPTION_UNUSED,
+        option="cluster",
+        condition='cov_type="cluster"',
+    ):
         OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
 
 
 def test_unknown_cov_type_is_reported_before_unused_option(dataset):
-    """`cov_type`のtypoは、未使用オプションの指摘ではなく`unknown cov_type`で
+    """`cov_type`のtypoは、未使用オプションの指摘ではなく`OPTION_UNKNOWN_VALUE`で
     報告する（`cluster`を消す方向へ誤誘導しない）。
     """
     options = OLSOptions(cov_type="clusterr", cluster="cluster")
-    with pytest.raises(
-        ValidationError,
-        match=escaped(msgs.UNKNOWN_COV_TYPE_LINEAR, other="clusterr"),
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE,
+        option="cov_type",
+        value="clusterr",
+        allowed=msgs.ALLOWED_COV_TYPES_LINEAR,
     ):
         OLS(dataset, y="y", x=["x1", "x2"], options=options).fit()
+
+
+# ── ComputationError ──────────────────────────────────────────────────
+
+
+def test_perfect_multicollinearity_raises_computation_error():
+    """完全な多重共線性（設計行列が特異）は数値比較の対象外
+    （`testing-policy.md`「テストの3系統」）。想定エラー（`ComputationError`の
+    `DESIGN_MATRIX_SINGULAR`）が発生することのみを確認する。
+
+    入力は固定済みベンチマーク CSV を使う。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_perfect_multicollinearity.csv")
+    with raises_error(ErrorCode.DESIGN_MATRIX_SINGULAR):
+        OLS(df, y="y", x=["x1", "x2", "x3"]).fit()
+
+
+@pytest.mark.parametrize("cov_type", COV_TYPES)
+def test_scale_variance_raises_computation_error(cov_type):
+    """変数間のスケールが極端に異なる設計行列（x1を`*1e6`、x2を`*1e-3`）は、
+    傾き係数の同時共分散部分行列がスケール比の2乗（≈1e18）相当の条件数を持ち
+    倍精度浮動小数点の限界を超えて数値的に特異になる（発見・原因調査済み）。`wald_f_test`が固有値分解による相対閾値判定で検出し、
+    全cov_typeで`ComputationError`（`MATRIX_NEAR_SINGULAR`、
+    `matrix="COEFFICIENT_COVARIANCE"`）になる（classicalも含む。傾き係数の
+    共分散部分行列自体は`cov_type`によらず同じ条件数を持つため）。
+    perfect_multicollinearityと同様、数値比較はせずエラーパスのみ確認する。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
+    kwargs = {"hac_time": ROW_TIME} if cov_type == "hac" else {}
+    options = OLSOptions(cov_type=cov_type, **kwargs)
+    with raises_error(
+        ErrorCode.MATRIX_NEAR_SINGULAR, matrix="COEFFICIENT_COVARIANCE"
+    ):
+        OLS(
+            with_row_time(df), y="y", x=["x1", "x2", "x3"], options=options
+        ).fit()
+
+
+def test_scale_variance_cluster_raises_computation_error():
+    """`cluster`も上記`test_scale_variance_raises_computation_error`と同じ
+    backstopの対象（`test_cluster_count_at_most_slopes_raises_validation_error`
+    のdocstring参照）。`cov_type="cluster"`は`cluster`列の指定が別途必要なため
+    `COV_TYPES`パラメトライズには含められず、専用テストとして確認する
+    均等な疑似グループ（行番号%10、
+    `G=10>q=3`）を使い、クラスター数不足による`ValidationError`
+    ではなく、傾き係数の共分散部分行列の条件数超過による
+    `ComputationError`（`MATRIX_NEAR_SINGULAR`、
+    `matrix="COEFFICIENT_COVARIANCE"`）が発生することを確認する。
+    """
+    df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
+    df = with_cluster_groups(df, 10)
+    options = OLSOptions(cov_type="cluster", cluster="cluster_group")
+    with raises_error(
+        ErrorCode.MATRIX_NEAR_SINGULAR, matrix="COEFFICIENT_COVARIANCE"
+    ):
+        OLS(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+
+# ── 例外クラスの継承 ──────────────────────────────────────────────────
+
+
+def test_validation_error_is_value_error():
+    """ValidationErrorがValueErrorのサブクラスであること。
+
+    素の`except ValueError`でも捕まえられる
+    （`.claude/rules/rust-style.md`「エラーハンドリング」参照）。
+    """
+    assert issubclass(ValidationError, ValueError)
+
+
+def test_computation_error_is_runtime_error():
+    """ComputationErrorがRuntimeErrorのサブクラスであること。"""
+    assert issubclass(ComputationError, RuntimeError)

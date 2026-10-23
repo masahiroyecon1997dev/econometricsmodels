@@ -12,8 +12,8 @@
 //!   `param_names`の末尾に`"sigma"`を追加して`params`に`sigma()`の値を追加し、全フィールドを
 //!   `(k+1)`長に揃えてzipできるようにする。ユーザー確認済み）
 //! - `predict()`/`marginal_effects()`は`target`引数（`"expected_latent"`/
-//!   `"expected_observed"`/`"prob_uncensored"`、Rust側`MarginalEffectsTarget`の
-//!   snake_case版、ユーザー確認済み）を追加で受け取る
+//!   `"expected_observed"`/`"prob_uncensored"`/`"expected_uncensored"`、Rust側
+//!   `MarginalEffectsTarget`のsnake_case版、ユーザー確認済み）を追加で受け取る
 //! - `pred_table()`の代わりに`censoring_fit_check()`を提供する（`y`が連続変数のため
 //!   分類の的中表は意味を持たない、`docs/spec/nonlinear-common.md`6章）
 //! - `log_likelihood_null`/`lr_statistic`/`lr_p_value`/`pseudo_r_squared`は無い
@@ -22,8 +22,8 @@
 //! 【責務分離】【言語方針】は`logit.rs`のモジュールdocコメントと同じ
 //! （`.claude/rules/rust-style.md`参照）。
 //!
-//! `build_tobit_input`が`PyDataFrame`ではなく`polars::DataFrame`を受け取る設計にしている
-//! 理由も`logit.rs`と同じ（GILなしで`cargo test`から直接ユニットテストできるようにするため）。
+//! `build_tobit_input`が`polars::DataFrame`を受け取る設計にしている理由も`logit.rs`と同じ
+//! （GILなしで`cargo test`から直接ユニットテストできるようにするため）。
 
 use engine::nonlinear::common::{
     CovType as EngineCovType, MleFitOptions, SolverType as EngineSolverType,
@@ -31,23 +31,28 @@ use engine::nonlinear::common::{
 use engine::nonlinear::tobit::{
     CensoringFitCategory, CensoringFitCheck, MarginalEffectsTarget, TobitEstimator, TobitInput,
 };
-use polars::prelude::{Column, DataFrame};
+use engine::shared::error_catalog::ErrorCode;
+use polars::prelude::DataFrame;
 use pyo3::prelude::*;
-use pyo3_polars::PyDataFrame;
 
 use super::common::{
-    MarginalEffectsResult, mle_error_to_pyerr, parse_cov_type, parse_marginal_effects_at,
-    parse_solver_type,
+    MarginalEffectsResult, check_cov_options, mle_error_to_pyerr, parse_cov_kind,
+    parse_marginal_effects_at, parse_solver_type, resolve_cov_type, resolve_mle_tol_default,
+    solver_name,
 };
-use crate::column_extraction::{
-    extract_dataframe, extract_f64_column, extract_f64_columns, x_column_names,
+use crate::shared::augment::append_predicted_column;
+use crate::shared::column_error::ColumnSource;
+use crate::shared::column_extraction::{
+    SelectedData, extract_f64_column, extract_f64_columns, extract_model_x_columns,
+    select_model_x_columns,
 };
-use crate::errors::ValidationError;
-use crate::option_values::{
+use crate::shared::errors::{guard, unknown_option_value, user_error};
+use crate::shared::option_repr::PyRepr;
+use crate::shared::option_values::{
     extract_strict_float, extract_strict_int, extract_strict_opt_column, extract_strict_opt_float,
     extract_strict_text,
 };
-use crate::validation::{validate_common_roles, validate_no_existing_column};
+use crate::shared::validation::validate_common_roles;
 
 /// Estimation options for Tobit.
 ///
@@ -130,6 +135,14 @@ pub struct TobitOptions {
     pub upper: Option<f64>,
 }
 
+impl TobitOptions {
+    /// このオプションが指名するデータの列（`cluster`）。使われるかどうか（`cov_type`等）には
+    /// よらず、指名されたものを全て返す。`fit()`はこれらと`y`・`x`等だけをデータから取り込む。
+    pub(crate) fn data_columns(&self) -> Vec<String> {
+        self.cluster.iter().cloned().collect()
+    }
+}
+
 #[pymethods]
 impl TobitOptions {
     #[new]
@@ -147,24 +160,19 @@ impl TobitOptions {
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
-        #[pyo3(from_py_with = crate::option_values::cov_type_arg)] cov_type: String,
+        #[pyo3(from_py_with = crate::shared::option_values::cov_type_arg)] cov_type: String,
         include_intercept: bool,
-        #[pyo3(from_py_with = crate::option_values::confidence_level_arg)] confidence_level: f64,
-        #[pyo3(from_py_with = crate::option_values::cluster_arg)] cluster: Option<String>,
-        #[pyo3(from_py_with = crate::option_values::solver_arg)] solver: String,
-        #[pyo3(from_py_with = crate::option_values::max_iter_arg)] max_iter: i64,
-        #[pyo3(from_py_with = crate::option_values::tol_arg)] tol: Option<f64>,
+        #[pyo3(from_py_with = crate::shared::option_values::confidence_level_arg)] confidence_level: f64,
+        #[pyo3(from_py_with = crate::shared::option_values::cluster_arg)] cluster: Option<String>,
+        #[pyo3(from_py_with = crate::shared::option_values::solver_arg)] solver: String,
+        #[pyo3(from_py_with = crate::shared::option_values::max_iter_arg)] max_iter: i64,
+        #[pyo3(from_py_with = crate::shared::option_values::tol_arg)] tol: Option<f64>,
         raise_on_non_convergence: bool,
-        #[pyo3(from_py_with = crate::option_values::lower_arg)] lower: Option<f64>,
-        #[pyo3(from_py_with = crate::option_values::upper_arg)] upper: Option<f64>,
+        #[pyo3(from_py_with = crate::shared::option_values::lower_arg)] lower: Option<f64>,
+        #[pyo3(from_py_with = crate::shared::option_values::upper_arg)] upper: Option<f64>,
     ) -> Self {
-        // `tol`の既定値のsolver依存分岐は`LogitOptions::new`と同じ理由
-        // （`tol`フィールドのdocコメント参照）。
-        let tol = tol.unwrap_or(if solver.eq_ignore_ascii_case("newton") {
-            1e-6
-        } else {
-            1e-8
-        });
+        // `tol`の既定値はsolver依存（理由は`resolve_mle_tol_default`参照）。
+        let tol = resolve_mle_tol_default(&solver, tol);
         Self {
             cov_type,
             include_intercept,
@@ -229,19 +237,19 @@ impl TobitOptions {
 
     fn __repr__(&self) -> String {
         format!(
-            "TobitOptions(cov_type={:?}, include_intercept={}, confidence_level={}, \
-             cluster={:?}, solver={:?}, max_iter={}, tol={}, raise_on_non_convergence={}, \
-             lower={:?}, upper={:?})",
-            self.cov_type,
-            self.include_intercept,
-            self.confidence_level,
-            self.cluster,
-            self.solver,
-            self.max_iter,
-            self.tol,
-            self.raise_on_non_convergence,
-            self.lower,
-            self.upper
+            "TobitOptions(cov_type={}, include_intercept={}, confidence_level={}, \
+             cluster={}, solver={}, max_iter={}, tol={}, raise_on_non_convergence={}, \
+             lower={}, upper={})",
+            self.cov_type.py_repr(),
+            self.include_intercept.py_repr(),
+            self.confidence_level.py_repr(),
+            self.cluster.py_repr(),
+            self.solver.py_repr(),
+            self.max_iter.py_repr(),
+            self.tol.py_repr(),
+            self.raise_on_non_convergence.py_repr(),
+            self.lower.py_repr(),
+            self.upper.py_repr()
         )
     }
 }
@@ -344,24 +352,42 @@ pub struct TobitResult {
     /// Not exposed to Python; only `predict`/`marginal_effects`/`censoring_fit_check`
     /// read it (`LogitResult`の`estimator`と同じ位置づけ)。
     estimator: TobitEstimator,
-    /// The original polars DataFrame passed to `fit()`, cached for
-    /// `augment(new_data=None)` (`LogitResult`の`training_data`と同じ
-    /// 位置づけ)。
-    training_data: DataFrame,
+    /// The `polars.DataFrame` passed to `fit()`, as given. `augment(new_data=None)` appends
+    /// the predicted column to it, so every column is kept, including the ones the model
+    /// does not read.
+    source_data: Py<PyAny>,
 }
 
 // `#[pymethods]`ブロックの外に置く非公開実装（`LogitResult`と同じ理由）。
 impl TobitResult {
+    /// `new_data`から`predict()`/`augment()`が使う`x`列だけを取り込む。
+    fn select_new_data(&self, new_data: &Bound<'_, PyAny>) -> PyResult<SelectedData> {
+        select_model_x_columns(
+            new_data,
+            "new_data",
+            &self.param_names,
+            self.estimator.input().has_intercept(),
+            1,
+        )
+    }
+
     /// `predict()`/`augment()`のSome分岐で共有する、`df`に対するout-of-sample予測
     /// （`x`列の抽出→`predict_new_data`呼び出し）。`x`の列名はLogit/Probitと異なり
     /// `param_names`の先頭`"const"`（`has_intercept`時）と末尾`"sigma"`の両方を
     /// 除いた部分（モジュールdocコメント参照）。
     fn predict_for(&self, target: MarginalEffectsTarget, df: &DataFrame) -> PyResult<Vec<f64>> {
         let has_intercept = self.estimator.input().has_intercept();
-        let x_names = x_column_names(&self.param_names, has_intercept, 1);
-        let x_columns = extract_f64_columns(df, x_names)?;
+        let x_columns = extract_model_x_columns(
+            df,
+            &self.param_names,
+            has_intercept,
+            1,
+            ColumnSource::new("x", "new_data"),
+        )?;
 
-        Ok(self.estimator.predict_new_data(target, &x_columns))
+        self.estimator
+            .predict_new_data(target, &x_columns)
+            .map_err(mle_error_to_pyerr)
     }
 }
 
@@ -372,25 +398,29 @@ impl TobitResult {
     ///
     /// `target` selects which quantity to predict: `"expected_latent"` (`E[y*|x]=x'β`),
     /// `"expected_observed"` (`E[y|x]`, the censoring-adjusted conditional expectation;
-    /// default, directly comparable to the observed `y`), or `"prob_uncensored"`
-    /// (`P(uncensored|x)`). Independent of `new_data`: the same three targets are
+    /// default, directly comparable to the observed `y`), `"prob_uncensored"`
+    /// (`P(uncensored|x)`), or `"expected_uncensored"` (`E[y|lower<y<upper,x]`, the
+    /// expectation restricted to the uncensored region; `E[y|y>0,x]` for a single
+    /// lower bound of 0). Independent of `new_data`: the same four targets are
     /// available whether predicting on the training data or new data.
     ///
     /// # Errors
-    /// - `target` is not one of the three known values (case-insensitive):
+    /// - `target` is not one of the four known values (case-insensitive):
     ///   `ValidationError`
     /// - A required `x` column is missing from `new_data`, cannot be cast to a
     ///   numeric type, or contains missing/NaN/infinite values: `ValidationError`
     ///   (same validation as `fit()`'s column extraction, via `extract_f64_column`).
     #[pyo3(signature = (new_data=None, target="expected_observed".to_string()))]
     fn predict(&self, new_data: Option<&Bound<'_, PyAny>>, target: String) -> PyResult<Vec<f64>> {
-        let target = parse_marginal_effects_target(&target.to_lowercase())?;
-        let Some(new_data) = new_data else {
-            return Ok(self.estimator.predict(target));
-        };
+        guard(|| {
+            let target = parse_marginal_effects_target(&target)?;
+            let Some(new_data) = new_data else {
+                return self.estimator.predict(target).map_err(mle_error_to_pyerr);
+            };
 
-        let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
-        self.predict_for(target, &df)
+            let selected = self.select_new_data(new_data)?;
+            self.predict_for(target, &selected.frame)
+        })
     }
 
     /// The source data (training data, or `new_data` when given) with the predicted
@@ -414,38 +444,35 @@ impl TobitResult {
     #[pyo3(signature = (new_data=None, target="expected_observed".to_string()))]
     fn augment(
         &self,
+        py: Python<'_>,
         new_data: Option<&Bound<'_, PyAny>>,
         target: String,
-    ) -> PyResult<PyDataFrame> {
-        let target_lower = target.to_lowercase();
-        let target_enum = parse_marginal_effects_target(&target_lower)?;
+    ) -> PyResult<Py<PyAny>> {
+        guard(|| {
+            let target_enum = parse_marginal_effects_target(&target)?;
 
-        let (mut source, predicted) = match new_data {
-            Some(new_data) => {
-                let df: DataFrame = extract_dataframe(new_data, "new_data")?.into();
-                let predicted = self.predict_for(target_enum, &df)?;
-                (df, predicted)
-            }
-            None => (
-                self.training_data.clone(),
-                self.estimator.predict(target_enum),
-            ),
-        };
+            let (source, predicted) = match new_data {
+                Some(new_data) => {
+                    let selected = self.select_new_data(new_data)?;
+                    let predicted = self.predict_for(target_enum, &selected.frame)?;
+                    (new_data.clone(), predicted)
+                }
+                None => (
+                    self.source_data.bind(py).clone(),
+                    self.estimator
+                        .predict(target_enum)
+                        .map_err(mle_error_to_pyerr)?,
+                ),
+            };
 
-        let column_name = format!("predicted_{target_lower}");
-        validate_no_existing_column(&source, &column_name)?;
-
-        // `with_column`の唯一の失敗条件（`ShapeMismatch`）はここでは理論上到達不能
-        // （`LogitResult::augment()`と同じ理由）。
-        source
-            .with_column(Column::new(column_name.into(), predicted))
-            .expect("predicted.len() matches source.height() by construction");
-        Ok(PyDataFrame(source))
+            let column_name = format!("predicted_{}", target.to_lowercase());
+            append_predicted_column(&source, &column_name, predicted)
+        })
     }
 
     /// Marginal effects (`dy/dx`) with delta-method standard errors.
     ///
-    /// `target` selects the same three quantities as `predict()` (see its doc). Unlike
+    /// `target` selects the same four quantities as `predict()` (see its doc). Unlike
     /// Logit/Probit, this is an independent implementation (not the shared
     /// `dydx_and_jacobian` pattern) because the formula differs per `target`
     /// (`docs/spec/nonlinear-common.md` section 6).
@@ -456,7 +483,7 @@ impl TobitResult {
     /// # Errors
     /// - `at` is not one of `"overall"`, `"mean"`, `"median"` (case-insensitive):
     ///   `ValidationError`
-    /// - `target` is not one of the three known values (case-insensitive):
+    /// - `target` is not one of the four known values (case-insensitive):
     ///   `ValidationError`
     /// - `confidence_level` is outside `(0, 1)`: `ValidationError`
     #[pyo3(signature = (
@@ -470,21 +497,23 @@ impl TobitResult {
         target: String,
         confidence_level: f64,
     ) -> PyResult<MarginalEffectsResult> {
-        let at = parse_marginal_effects_at(&at.to_lowercase())?;
-        let target = parse_marginal_effects_target(&target.to_lowercase())?;
-        let effects = self
-            .estimator
-            .marginal_effects(at, target, confidence_level)
-            .map_err(mle_error_to_pyerr)?;
+        guard(|| {
+            let at = parse_marginal_effects_at(&at)?;
+            let target = parse_marginal_effects_target(&target)?;
+            let effects = self
+                .estimator
+                .marginal_effects(at, target, confidence_level)
+                .map_err(mle_error_to_pyerr)?;
 
-        Ok(MarginalEffectsResult {
-            param_names: effects.param_names().to_vec(),
-            effect: effects.effect().to_vec(),
-            std_errors: effects.std_errors().to_vec(),
-            test_stats: effects.test_stats().to_vec(),
-            p_values: effects.p_values().to_vec(),
-            conf_lower: effects.conf_lower().to_vec(),
-            conf_upper: effects.conf_upper().to_vec(),
+            Ok(MarginalEffectsResult {
+                param_names: effects.param_names().to_vec(),
+                effect: effects.effect().to_vec(),
+                std_errors: effects.std_errors().to_vec(),
+                test_stats: effects.test_stats().to_vec(),
+                p_values: effects.p_values().to_vec(),
+                conf_lower: effects.conf_lower().to_vec(),
+                conf_upper: effects.conf_upper().to_vec(),
+            })
         })
     }
 
@@ -497,8 +526,12 @@ impl TobitResult {
     /// `lower`/`upper` in the returned `CensoringFitCheckResult` are `None` when the
     /// corresponding `TobitOptions.lower`/`upper` was `None` (that direction has no
     /// censoring).
-    fn censoring_fit_check(&self) -> CensoringFitCheckResult {
-        censoring_fit_check_to_result(self.estimator.censoring_fit_check())
+    fn censoring_fit_check(&self) -> PyResult<CensoringFitCheckResult> {
+        guard(|| {
+            Ok(censoring_fit_check_to_result(
+                self.estimator.censoring_fit_check(),
+            ))
+        })
     }
 }
 
@@ -552,15 +585,22 @@ fn censoring_fit_check_to_result(check: CensoringFitCheck) -> CensoringFitCheckR
 ///
 /// # Errors
 /// `target`が既知の値のいずれでもない: `ValidationError`
-fn parse_marginal_effects_target(target_lower: &str) -> PyResult<MarginalEffectsTarget> {
-    match target_lower {
+fn parse_marginal_effects_target(target: &str) -> PyResult<MarginalEffectsTarget> {
+    match target.to_lowercase().as_str() {
         "expected_latent" => Ok(MarginalEffectsTarget::ExpectedLatent),
         "expected_observed" => Ok(MarginalEffectsTarget::ExpectedObserved),
         "prob_uncensored" => Ok(MarginalEffectsTarget::ProbUncensored),
-        other => Err(ValidationError::new_err(format!(
-            "unknown target: '{other}'. Expected one of 'expected_latent', \
-             'expected_observed', or 'prob_uncensored'"
-        ))),
+        "expected_uncensored" => Ok(MarginalEffectsTarget::ExpectedUncensored),
+        _ => Err(unknown_option_value(
+            "target",
+            target,
+            &[
+                "expected_latent",
+                "expected_observed",
+                "prob_uncensored",
+                "expected_uncensored",
+            ],
+        )),
     }
 }
 
@@ -576,10 +616,7 @@ fn parse_marginal_effects_target(target_lower: &str) -> PyResult<MarginalEffects
 /// `x`に`"sigma"`という列名が含まれる場合は`ValidationError`
 fn validate_no_sigma_collision(x: &[String]) -> PyResult<()> {
     if x.iter().any(|name| name == "sigma") {
-        return Err(ValidationError::new_err(
-            "x cannot contain a column named 'sigma' (it collides with the error term's \
-             standard deviation, which TobitResult appends to param_names/params)",
-        ));
+        return Err(user_error(ErrorCode::TobitSigmaNameCollision, Vec::new()));
     }
     Ok(())
 }
@@ -609,21 +646,24 @@ pub(crate) fn build_tobit_input(
     y: String,
     x: Vec<String>,
     options: &TobitOptions,
-) -> PyResult<(TobitInput, EngineCovType, EngineSolverType)> {
-    let cov_type_lower = options.cov_type.to_lowercase();
-    let solver_lower = options.solver.to_lowercase();
+) -> PyResult<(TobitInput, EngineCovType, String, EngineSolverType)> {
+    // DataFrameを見ない検査を先に行う。報告順は`docs/guide/validation.md`
+    // 「Order in which errors are reported」: オプションの値（`cov_type` → `solver`）→
+    // オプションの組合せ → ロール構造 → `y`/`x`の列 → オプション列 → エンジン。
+    let cov_kind = parse_cov_kind(&options.cov_type)?;
+    let solver = parse_solver_type(&options.solver)?;
+    check_cov_options(cov_kind, options.cluster.as_deref())?;
 
     validate_common_roles(&y, &x, options.include_intercept)?;
     validate_no_sigma_collision(&x)?;
 
     // ── y列の抽出 ──────────────────────────────────────────────────────
-    let y_slice = extract_f64_column(df, &y)?;
+    let y_slice = extract_f64_column(df, &y, ColumnSource::new("y", "data"))?;
 
     // ── x列の抽出 ──────────────────────────────────────────────────────
-    let x_slices = extract_f64_columns(df, &x)?;
+    let x_slices = extract_f64_columns(df, &x, ColumnSource::new("x", "data"))?;
 
-    let cov_type = parse_cov_type(df, &cov_type_lower, &options.cluster)?;
-    let solver = parse_solver_type(&solver_lower)?;
+    let cov_type = resolve_cov_type(df, cov_kind, options.cluster.as_deref())?;
 
     let input = TobitInput::from_columns(
         &y_slice,
@@ -636,7 +676,7 @@ pub(crate) fn build_tobit_input(
     )
     .map_err(mle_error_to_pyerr)?;
 
-    Ok((input, cov_type, solver))
+    Ok((input, cov_type, cov_kind.name().to_string(), solver))
 }
 
 /// Pythonから渡された `data` / `y` / `x` / `options` を検証し、
@@ -651,13 +691,13 @@ pub(crate) fn build_tobit_input(
 ///   特異設計行列・クラスターキー未指定・クラスター数不足等）は`mle_error_to_pyerr`で
 ///   変換（詳細は`engine::nonlinear::tobit::TobitEstimator::fit`のdocコメント参照）
 pub(crate) fn fit(
-    data: PyDataFrame,
+    data: SelectedData,
     y: String,
     x: Vec<String>,
     options: &TobitOptions,
 ) -> PyResult<TobitResult> {
-    let df: DataFrame = data.into();
-    let (input, cov_type, solver) = build_tobit_input(&df, y, x, options)?;
+    let SelectedData { source, frame: df } = data;
+    let (input, cov_type, cov_type_lower, solver) = build_tobit_input(&df, y, x, options)?;
 
     let estimator = TobitEstimator::fit(
         input,
@@ -703,18 +743,19 @@ pub(crate) fn fit(
         wald_df: estimator.wald_df(),
         converged: estimator.converged(),
         n_iter: estimator.n_iter(),
-        cov_type: options.cov_type.to_lowercase(),
-        solver: options.solver.to_lowercase(),
+        cov_type: cov_type_lower,
+        solver: solver_name(solver).to_string(),
         lower: options.lower,
         upper: options.upper,
         estimator,
-        training_data: df,
+        source_data: source,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use engine::shared::group_codes::GroupCodes;
     use polars::df;
 
     /// `build_tobit_input`のテスト全体で使う既定の`TobitOptions`（`cov_type="classical"`・
@@ -799,7 +840,7 @@ mod tests {
         let df = well_formed_df();
         let options = default_options();
 
-        let Ok((input, cov_type, solver)) = build_tobit_input(
+        let Ok((input, cov_type, _, solver)) = build_tobit_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string(), "x2".to_string()],
@@ -827,7 +868,7 @@ mod tests {
         let mut options = default_options();
         options.include_intercept = false;
 
-        let Ok((input, _, _)) =
+        let Ok((input, _, _, _)) =
             build_tobit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
         else {
             panic!("expected Ok");
@@ -963,7 +1004,7 @@ mod tests {
         options.cov_type = "cluster".to_string();
         options.cluster = Some("cluster".to_string());
 
-        let Ok((_, cov_type, _)) =
+        let Ok((_, cov_type, _, _)) =
             build_tobit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
         else {
             panic!("expected Ok");
@@ -973,12 +1014,12 @@ mod tests {
             EngineCovType::Cluster { groups } => {
                 assert_eq!(
                     groups,
-                    Some(vec![
+                    Some(GroupCodes::from_labels_without_keys(&[
                         "g1".to_string(),
                         "g1".to_string(),
                         "g2".to_string(),
                         "g2".to_string()
-                    ])
+                    ]))
                 );
             }
             other => panic!("expected Cluster, got {other:?}"),
@@ -991,7 +1032,7 @@ mod tests {
         let mut options = default_options();
         options.cov_type = "cluster".to_string();
 
-        let Ok((_, cov_type, _)) =
+        let Ok((_, cov_type, _, _)) =
             build_tobit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
         else {
             panic!("expected Ok");
@@ -1004,11 +1045,8 @@ mod tests {
     }
 
     #[test]
-    // `parse_cov_type`自体は前処理済みの小文字文字列を受け取る想定
-    // （`parse_cov_type`のdocコメント参照）で、大文字小文字を区別しない処理は
-    // 呼び出し元の`build_tobit_input`が`options.cov_type.to_lowercase()`してから渡す
-    // ことで実現している。そのため、この不変条件は`parse_cov_type`単体ではなく
-    // `build_tobit_input`（実際にPythonから渡される文字列を受ける入口）を通して検証する
+    // `build_tobit_input`（実際にPythonから渡される文字列を受ける入口）を通した大文字小文字
+    // 非依存性と、戻り値の正規形の文字列（`TobitResult.cov_type`に格納する値）の検証
     // （Logitの`build_logit_input_cov_type_is_case_insensitive`と同じ理由）。
     fn build_tobit_input_cov_type_is_case_insensitive() {
         let df = well_formed_df();
@@ -1027,7 +1065,7 @@ mod tests {
         ] {
             let mut options = default_options();
             options.cov_type = input.to_string();
-            let Ok((_, cov_type, _)) = build_tobit_input(
+            let Ok((_, cov_type, cov_type_name, _)) = build_tobit_input(
                 &df,
                 "y".to_string(),
                 vec!["x1".to_string(), "x2".to_string()],
@@ -1036,6 +1074,7 @@ mod tests {
                 panic!("expected Ok for cov_type={input}");
             };
             assert!(is_expected(&cov_type), "input={input}, got={cov_type:?}");
+            assert_eq!(cov_type_name, input.to_lowercase(), "input={input}");
         }
     }
 
@@ -1050,7 +1089,7 @@ mod tests {
         options.lower = Some(0.0);
         options.upper = Some(6.0);
 
-        let Ok((input, _, _)) =
+        let Ok((input, _, _, _)) =
             build_tobit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
         else {
             panic!("expected Ok");
@@ -1066,7 +1105,7 @@ mod tests {
         options.lower = None;
         options.upper = Some(100.0);
 
-        let Ok((input, _, _)) =
+        let Ok((input, _, _, _)) =
             build_tobit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
         else {
             panic!("expected Ok");
@@ -1103,6 +1142,10 @@ mod tests {
             parse_marginal_effects_target("prob_uncensored"),
             Ok(MarginalEffectsTarget::ProbUncensored)
         ));
+        assert!(matches!(
+            parse_marginal_effects_target("expected_uncensored"),
+            Ok(MarginalEffectsTarget::ExpectedUncensored)
+        ));
     }
 
     #[test]
@@ -1113,9 +1156,9 @@ mod tests {
     /// `censoring_fit_category_to_result`/`censoring_fit_check_to_result`（`CensoringFitCategory`/
     /// `CensoringFitCheck`のprivateフィールドをPython向けpyclassに詰め替えるだけの変換）は
     /// これまで検証されていなかった（フィールドの取り違え・`Option`ラップ漏れ等を検出でき
-    /// ない状態だった、rust-reviewer指摘）。`TobitEstimator::fit`は`PyDataFrame`を経由しない
+    /// ない状態だった、rust-reviewer指摘）。`TobitEstimator::fit`は`SelectedData`を経由しない
     /// ため（`engine_pybind/src/nonlinear/CLAUDE.md`の既知の制約通り、`fit`本体はGILが
-    /// 必要な`PyDataFrame`引数のため`cargo test`から直接呼べないが、`TobitEstimator::fit`
+    /// 必要な`SelectedData`引数のため`cargo test`から直接呼べないが、`TobitEstimator::fit`
     /// 自体はengine層の関数でGIL不要）、`build_tobit_input`が返す`TobitInput`にそのまま
     /// 適用してこの変換ロジックを独立に検証する。
     #[test]
@@ -1126,7 +1169,7 @@ mod tests {
         )
         .unwrap();
         let options = default_options();
-        let (input, cov_type, solver) =
+        let (input, cov_type, _, solver) =
             build_tobit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
                 .expect("expected Ok");
         let estimator = TobitEstimator::fit(

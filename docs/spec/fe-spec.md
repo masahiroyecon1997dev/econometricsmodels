@@ -34,8 +34,8 @@ FE固有の内容のみを記載する。
   （個体・時間固定効果によるyの分解という別の操作になる）ためユーザー指摘を受けて拒否に
   変更した。**この検証は`engine_pybind`層のみ**（`build_fe_input`の`validate_x_non_empty`）。
   `engine`側（`FeInput::from_columns`・`FeEstimator::fit`）はk=0を引き続き受理する設計を
-  維持している（`OlsEstimator::fit_allowing_no_regressors`という、通常の`fit`からk=0拒否
-  ガードだけを外した別関数への切り替えで実現。RE自身の内部`OlsEstimator::fit`呼び出しは
+  維持している（`FeEstimator::fit`は`OlsEstimator`を経由せず、0列も受理する
+  `shared::least_squares::least_squares`を直接呼ぶ。RE自身の内部`OlsEstimator::fit`呼び出しは
   between回帰・最終回帰どちらも構造的にk=0にならないため無変更）。
 - 列名を受け取る引数は`entity`/`time`/`cluster`/`dk_time`のいずれも`_col`サフィックスを
   付けない（`y`/`x`と同じ規約）。`dk_time`は`cov_type="dk"`の値を接頭辞にした名前。
@@ -64,7 +64,7 @@ FE固有の内容のみを記載する。
 `FEResult`（`#[pyclass]`）が公開する項目: `params` / `std_errors` / `test_stats`（**t検定**） /
 `p_values` / `conf_lower` / `conf_upper` / `param_names`（切片なし） / `residuals` /
 `dep_var_name` / `n_obs` / `df_resid` / `df_model` / `n_entities` / `n_periods`（2-wayのみ、1-wayは`None`） / `cov_type` / `dk_bandwidth_used` / `f_statistic` /
-`f_p_value` / `f_df_num` / `f_df_denom`（`(k, df_resid)`、`k=0`で`None`） / `log_likelihood` / `aic` / `bic` / `r_squared_within` / `r_squared_between` /
+`f_p_value` / `f_df_num` / `f_df_denom`（`(k, df_resid)`、`k=0`で`f_statistic`/`f_p_value`ともども`None`） / `log_likelihood` / `aic` / `bic` / `r_squared_within` / `r_squared_between` /
 `r_squared_overall`。
 
 - **`dk_bandwidth_used`**: `cov_type="dk"`のとき実際に使われたバンド幅（`dk_bandwidth`明示指定ならその値、
@@ -77,7 +77,7 @@ FE固有の内容のみを記載する。
   計算のために既に求めている`time`のユニーク数をそのまま保持して公開する（二重計算しない）。
   2-wayのみ`Some`、1-way（`dk_time`のみ指定した場合を含む）は`None`。2-wayはバランスパネル
   必須のため、ユニーク時点数と各entityの観測数は一致する（将来2-wayの不均衡パネルに対応する
-  場合は定義を再検討する）。REには追加しない（REの`time`は2-way構造ではないため）。
+  場合は定義を再検討する）。REの`n_periods`も同じ定義（2-way REのときだけ`Some`、`re-spec.md`2章）。
 - **`estimator()`（内部委譲した`OlsEstimator`）とFE自身のgetterの使い分け**: `params`/
   `param_names`/`residuals`/`dep_var_name`/`n_obs`/`log_likelihood`は`estimator()`から、
   `std_errors`/`test_stats`/`p_values`/`conf_lower`/`conf_upper`/`df_model`/`df_resid`/
@@ -92,7 +92,7 @@ FE固有の内容のみを記載する。
   `#[derive(Clone)]`は外している）。
 - `summary()`は実装しない（structured-data-only出力方針）。
 - python_package層（`FEResults`）: `params`/`std_errors`/`test_stats`/`p_values`/`conf_int`は
-  係数名→値の`dict`。`coef_table()`は行指向`list[dict]`（キーは`param`/`coef`/`std_err`/
+  係数名→値の`dict`。`params_table()`は行指向`list[dict]`（キーは`param_name`/`param`/`std_error`/
   `test_stat`/`p_value`/`conf_lower`/`conf_upper`、OLSと同じ）。
 
 ## 3. 内部実装の計算仕様
@@ -212,17 +212,32 @@ polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）�
    （fixestの`ssc()`は時点数`t_periods`をクラスターの`G`と同じ役割で使う。`K`は
    fixestの既定`K.fixef="full"`——DKにはクラスター変数という概念が無くネスト判定
    自体が発生しないため——により常に`K=df_model`）。
-6. **`FeCovType::Dk.time`は必須で、`FeInput.time()`にはフォールバックしない**: 当初は
+6. **`FeCovType::Dk.time`は必須で、`FeInput.time_keys()`にはフォールバックしない**: 当初は
    `Option`で、`None`なら2-wayの`time`を暗黙に借用していたが、どの列がDKの時点かを利用者が
-   明示しない設計は、意図と違う列が選ばれても気づけないため廃止した。`FeInput.time()`は
+   明示しない設計は、意図と違う列が選ばれても気づけないため廃止した。`FeInput.time_keys()`は
    2-wayの固定効果の時間次元専用で、DKの時点列とは独立。
-7. **既知の制約**: `bandwidth`が許容範囲`[0, t_periods)`の上限ちょうど（`bandwidth ==
-   t_periods - 1`）のとき、fixestの内部C++実装（`cpp_driscoll_kraay`）が最後のラグ項を
-   切り捨てるらしいことが実地確認で判明しており、本実装（標準的なBartlett核、最後の
-   ラグ項まで含める）とはこの境界値でのみ数値が一致しない（`bandwidth < t_periods - 1`
-   では一致する）。原因未特定のため別issueで追跡する。なお`plm::vcovSCC(maxlag = T-1)`は
-   最後のラグ項を落とさず、補正係数を除いて本実装と一致する（第2リファレンスとして
-   `fe_plm_crosscheck.json`が検証する）。
+7. **`bandwidth == t_periods - 1`ではfixestと一致しない（fixest側の実装誤り、本実装は
+   標準のBartlettカーネルを維持）**: `bandwidth`が許容範囲`[0, t_periods)`の上限ちょうど
+   のとき、fixest 0.14.2の`vcov="DK"`は最後のラグ項（`l = bandwidth`）を落とした値を
+   返し、本実装（最後のラグ項まで含める）とこの境界値でのみ数値が一致する。
+   `bandwidth <= t_periods - 2`では一致する。
+   - **原因**: fixestのC++実装`cpp_driscoll_kraay`（`src/vcov_related.cpp`）の
+     off-by-one。R側はBartlett重みの長さ`bandwidth + 2`のベクトル（末尾は0）を渡し、
+     C++側は末尾の0を除いた「ラグ`0..=bandwidth`の個数」`L = bandwidth + 1`を数える。
+     続けて`if (L > T - 1) L = T - 1;`で上限を課すが、`L`は最大ラグではなく個数なので、
+     ラグの上限`T - 1`に対応する上限は`L <= T`でなければならない。`T - 1`と書かれて
+     いるため`bandwidth == T - 1`（`L = T`）だけ`L = T - 1`に切り詰められ、最大ラグが
+     `T - 2`になる。内側のループが`t < T - l`で境界を自前で処理しているためこの上限は
+     不要で、意図的な切り捨てとは考えにくい。`l = T - 1`の項`Γ_{T-1} = ξ_{T-1}'ξ_0`は
+     一般に非ゼロで、落とす数学的根拠もない。T=5の乱数スコアで`cpp_driscoll_kraay`を
+     直接呼ぶと、`bandwidth = 0..=3`は標準カーネルと機械精度で一致し、`bandwidth = 4`だけ
+     「`l = 4`の項を除いた標準カーネル」と機械精度で一致した（標準カーネルとの差は約0.3）。
+   - **方針**: fixestのこの挙動は再現しない。標準のBartlettカーネル（linearmodelsの
+     `DriscollKraay`・`plm::vcovSCC(maxlag = T-1)`と同じ）を維持する。`plm::vcovSCC`は
+     最後のラグ項を落とさず、補正係数を除いて本実装と一致する（第2リファレンスとして
+     `fe_plm_crosscheck.json`の`dk_max_bandwidth`が検証する）。エンジンの
+     `panel_driscoll_kraay_cov_params`の単体テストは、境界を含む全バンド幅を定義式の
+     手計算と照合する。fixestの`DK(lag)`とは`lag <= T - 2`で比較すること。
 
 ### 3.4 パネル固有R²（`r_squared_within`/`between`/`overall`）
 
@@ -267,17 +282,27 @@ demeanしたR²」を3種とも定義すると誤る）:
 
 ### 3.6 engine_pybind: エラー変換
 
-`engine::panel::common::PanelError` → `PyErr`（`panel_error_to_pyerr`、`common.rs`）:
+`engine::panel::common::PanelError` → `PyErr`（`panel_error_to_pyerr`、`common.rs`）。`ErrorInfo::report()`が
+`code`・`params`に変換し、`ValidationError`/`ComputationError`の別はカタログの`class`で決まる:
 
-| `PanelError` | Python例外 |
-|---|---|
-| `Common(CommonError)` | `common_error_to_pyerr`に委譲（`ComputationFailed`のみ`ComputationError`、他は`ValidationError`） |
-| `IdentifierDimensionMismatch` / `InsufficientDegreesOfFreedom` / `SingletonGroup` / `UnbalancedPanelForTwoWay` / `ZeroVarianceAfterDemeaning` / `TwoWayRequiresTime` / `DkRequiresTime` / `InvalidDkBandwidth` / `InsufficientDkPeriods` / `InsufficientDkPeriodsForInference` / `DegenerateDkTwoPeriods` / `DegenerateClusterTwoGroups` | `ValidationError`（入力・オプション・パネル構造だけから判定できる不正） |
-| `WithinRegressionFailed` / `FTestFailed`（RE: `BetweenRegressionFailed` / `QuasiDemeanedRegressionFailed` / `HausmanTestFailed`） | 内側の`LeastSquaresError`に従う（`SingularMatrix`・`Common(ComputationFailed)`なら`ComputationError`、それ以外は`ValidationError`。`least_squares_error_is_computation_error`）。メッセージは`PanelError`自身の文脈付き文言 |
+| `PanelError` | `code` | 例外 |
+|---|---|---|
+| `Common(CommonError)` | `CommonError`と同じ | `CommonError`と同じ |
+| `InsufficientDegreesOfFreedom` | `INSUFFICIENT_DEGREES_OF_FREEDOM`（`n_effects`は1-wayで個体数、2-wayで個体数+時点数-1） | `ValidationError` |
+| `SingletonGroup` | `SINGLETON_GROUP`（`argument`は`entity`か`time`） | `ValidationError` |
+| `UnbalancedPanelForTwoWay` | `PANEL_NOT_BALANCED_FOR_TWO_WAY` | `ValidationError` |
+| `ZeroVarianceAfterDemeaning` | `REGRESSOR_NO_WITHIN_VARIATION` | `ValidationError` |
+| `InvalidDkBandwidth` / `InsufficientDkPeriods` / `InsufficientDkPeriodsForInference` | `DK_BANDWIDTH_OUT_OF_RANGE` / `DK_PERIODS_TOO_FEW` / `DK_PERIODS_NOT_ABOVE_COEFFICIENTS` | `ValidationError` |
+| `DegenerateDkTwoPeriods` / `DegenerateClusterTwoGroups` | `DK_TWO_PERIODS_DEGENERATE` / `CLUSTER_TWO_GROUPS_DEGENERATE` | `ValidationError` |
+| `AmemiyaRequiresWithinVariation` | `AMEMIYA_REQUIRES_WITHIN_VARIATION` | `ValidationError` |
+| `NonPositiveIdiosyncraticVariance` / `VarianceComponentsMomentsSingular` | `NON_POSITIVE_IDIOSYNCRATIC_VARIANCE` / `VARIANCE_COMPONENTS_MOMENTS_SINGULAR` | `ComputationError` |
+| `InStage` | 包んだ`source`の`code`に、起きた計算の`stage`を付ける。REの内部FE（分散成分の推定）の自由度不足・最小二乗・F検定の失敗は`VARIANCE_COMPONENT_WITHIN_REGRESSION`、FE・REのDK時点数不足は`OVERALL_F_TEST` | `source`と同じ |
+| `IdentifierDimensionMismatch` / `TwoWayRequiresTime` | `INTERNAL_ERROR`（Python APIからは起こらない） | `ComputationError` |
+| `WithinRegressionFailed` / `FTestFailed`（RE: `BetweenRegressionFailed` / `QuasiDemeanedRegressionFailed` / `PooledRegressionFailed` / `HausmanTestFailed`） | 内側の`LeastSquaresError`の`code`に、どの回帰かを示す`stage`を付ける（`stage`を付けてよい`code`のみ） | `code`のクラスで決まる |
 
-`PanelError`はFE/REで共有し、`FeError`/`ReError`は個別に作らない。**engine側に新バリアントを
-追加したら`panel_error_to_pyerr`の網羅的`match`も必ず更新すること**（更新漏れは
-`cargo build --workspace`の`E0004`で検出される。`cargo test -p engine`だけでは検出できない）。
+`PanelError`はFE/REで共有し、`FeError`/`ReError`は個別に作らない。engine側に新バリアントを
+追加したら`ErrorInfo::report()`が対応する`code`を返すようにする（`match`が網羅的なので、
+更新漏れはコンパイルエラーで検出される）。
 
 ## 4. テスト
 
@@ -292,7 +317,7 @@ demeanしたR²」を3種とも定義すると誤る）:
   本実装と異なるため、本実装の既定式`floor(4*(T/100)^(2/9))`で求めた値を`DK(lag)`へ明示的に
   渡す。`linearmodels`との比較は`classical`（`unadjusted`）・`hc1`（`robust`）のみ、
   `hc2`/`hc3`は`linearmodels`に無いためfixestのみ。
-- 許容誤差: 相対誤差`1e-8`（`tests/_tolerances.py`の`fe_reference`・`fe_crosscheck`、
+- 許容誤差: 相対誤差`1e-8`（`tests/support/_tolerances_panel.py`の`fe_reference`・`fe_crosscheck`、
   `.claude/rules/testing-policy.md`の基本方針通り）。実測の一致は`1e-14`程度で、許容誤差は
   それにマージンを載せた基本値のまま。
 - **`aic`/`bic`はRクロスチェック（`fixest`）のみで検証する**: `linearmodels.PanelOLS`は
@@ -319,4 +344,5 @@ demeanしたR²」を3種とも定義すると誤る）:
 - **2-way clustering（entity+time同時）**: v1スコープ外。
 - **Driscoll-Kraay HACのカーネル拡張**: Parzen/QSカーネルへの拡張は別issue。
 - **DKの`bandwidth == t_periods - 1`（許容範囲の上限ちょうど）でfixestと数値不一致**:
-  3.3節7.参照。原因未特定のため別issueで追跡する。
+  fixestの`cpp_driscoll_kraay`のoff-by-oneが原因で、本実装は標準カーネルを維持する
+  （3.3節7.参照）。未対応ではなく意図した差異。

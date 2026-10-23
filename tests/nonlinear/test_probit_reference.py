@@ -13,9 +13,9 @@ Wooldridge実データ（mroz）で、係数・標準誤差・検定統計量・
     - 主リファレンス（statsmodels）との厳密な数値一致: このファイル
     - 独立実装（R）とのクロスチェック: `test_probit_crosscheck.py`
 
-このファイルは凍結フィクスチャ（`probit.json`）との厳密比較を主軸としつつ、
-凍結フィクスチャが対象にしない `include_intercept=False` はライブ statsmodels
-との直接照合で確認する（`test_ols_reference.py` と同じ構成）。
+このファイルは凍結フィクスチャ（`probit.json`、`include_intercept=False` を含む）
+との厳密比較を主軸としつつ、凍結フィクスチャが対象にしない `predict()` の分岐は
+ライブ statsmodels との直接照合で確認する（`test_ols_reference.py` と同じ構成）。
 
 Note:
     `cov_type="hc1"`はここに含めない（statsmodelsのdiscrete modelがn/(n-k)
@@ -42,6 +42,7 @@ import statsmodels.api as sm
 from _tolerances import TOLERANCES
 from econometricsmodels import Probit, ProbitOptions
 
+from benchmark.nonlinear.constants import STATSMODELS_COV_TYPES
 from benchmark.nonlinear.fixtures.generate_probit_fixtures import (
     NUMERIC_SCENARIOS as SCENARIOS,
 )
@@ -68,13 +69,16 @@ CONFIG = _checks.BinaryChoiceReferenceConfig(
     dataset_prefix="probit",
     fixture_path=FIXTURE_PATH,
     scenarios=SCENARIOS,
-    cov_types=["classical", "opg", "hc0"],
+    cov_types=STATSMODELS_COV_TYPES,
     rtol=TOLERANCES["probit_reference"]["rtol"],
     atol=TOLERANCES["probit_reference"]["atol"],
     # solver="bfgs"/"lbfgs"はnewtonと異なる最適化経路で収束するため、既定の
-    # RTOLより緩めた許容誤差を使う（tests/_tolerances.py参照、
+    # RTOLより緩めた許容誤差を使う（tests/support/_tolerances.py参照、
     # test_logit_reference.pyと同じ方針）。
     rtol_solver=TOLERANCES["probit_reference"]["rtol_solver"],
+    rtol_solver_vs_newton=TOLERANCES["probit_reference"][
+        "rtol_solver_vs_newton"
+    ],
     near_separation_tol=1e-8,
 )
 
@@ -84,7 +88,7 @@ def fixtures() -> dict:
     return CONFIG.load_fixtures()
 
 
-# ── 凍結フィクスチャとの数値照合 ───────────────────────────────────
+# ── 凍結フィクスチャとの数値照合（合成データ） ────────────────────────
 
 
 @pytest.mark.parametrize("cov_type", CONFIG.cov_types)
@@ -101,9 +105,53 @@ def test_cluster_imbalanced_matches_statsmodels(fixtures):
     _checks.check_cluster_imbalanced_matches_statsmodels(CONFIG, fixtures)
 
 
+def test_cluster_g4_boundary_matches_statsmodels(fixtures):
+    _checks.check_cluster_g4_matches_statsmodels(CONFIG, fixtures)
+
+
+# ── 凍結フィクスチャとの数値照合（オプション） ────────────────────────
+
+
+@pytest.mark.parametrize("cov_type", CONFIG.cov_types)
+def test_no_intercept_matches_statsmodels(fixtures, cov_type):
+    _checks.check_no_intercept_matches_statsmodels(CONFIG, fixtures, cov_type)
+
+
+def test_no_intercept_cluster_matches_statsmodels(fixtures):
+    _checks.check_no_intercept_cluster_matches_statsmodels(CONFIG, fixtures)
+
+
+@pytest.mark.parametrize("cov_type", CONFIG.cov_types)
+def test_confidence_level_matches_statsmodels(fixtures, cov_type):
+    _checks.check_confidence_level_matches_statsmodels(
+        CONFIG, fixtures, cov_type
+    )
+
+
+def test_confidence_level_cluster_matches_statsmodels(fixtures):
+    _checks.check_confidence_level_cluster_matches_statsmodels(
+        CONFIG, fixtures
+    )
+
+
 @pytest.mark.parametrize("solver", ["bfgs", "lbfgs"])
 def test_solver_matches_statsmodels(fixtures, solver):
     _checks.check_solver_matches_statsmodels(CONFIG, fixtures, solver)
+
+
+@pytest.mark.parametrize("solver", ["bfgs", "lbfgs"])
+@pytest.mark.parametrize("case", _checks.SOLVER_COMBINATION_CASES)
+def test_solver_combination_matches_statsmodels_newton(fixtures, case, solver):
+    _checks.check_solver_combination_matches_newton_reference(
+        CONFIG, fixtures, case, solver
+    )
+
+
+# ── 凍結フィクスチャとの数値照合（実データ） ──────────────────────────
+
+
+def test_apple_cluster_matches_statsmodels(fixtures):
+    _checks.check_apple_cluster_matches_statsmodels(CONFIG, fixtures)
 
 
 @pytest.mark.parametrize("cov_type", CONFIG.cov_types)
@@ -111,14 +159,7 @@ def test_mroz_matches_statsmodels(fixtures, cov_type):
     _checks.check_mroz_matches_statsmodels(CONFIG, fixtures, cov_type)
 
 
-# ── ライブ statsmodels との照合（凍結フィクスチャ対象外の分岐） ─────
-
-
-@pytest.mark.parametrize("cov_type", CONFIG.cov_types)
-def test_include_intercept_false_matches_statsmodels(cov_type):
-    _checks.check_include_intercept_false_matches_statsmodels(
-        CONFIG, sm.Probit, cov_type
-    )
+# ── ライブ statsmodels との照合（凍結フィクスチャ対象外の分岐） ───────
 
 
 def test_predict_new_data_matches_statsmodels():

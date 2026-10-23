@@ -1,0 +1,406 @@
+"""`tests/nonlinear/`（Logit/Probit/Tobit）が共有するテストデータとアサーション。
+
+- 分離・準分離・打ち切りの境界を作る合成データ（`separated_dataset`等）と、
+  Wooldridge `apple`のロード（`load_apple_adoption_dataset`）。
+- `check_margeff`: 限界効果6統計量を`at`×係数名の全組み合わせで比較する。
+- `check_predictions`: `pred_table()`・`predict()`・`augment()`（標本内と新規データ）を
+  Rの参照値と比較する（Logit/Probit。Tobitは`_tobit_checks.py`に別途ある）。
+
+全系統で共通のデータ生成は`_helpers.py`、アサーションは`_assertions.py`を参照。
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import polars as pl
+import pytest
+from _assertions import assert_close
+from _constants import MARGEFF_AT
+from scipy.stats import norm
+
+
+def separated_dataset() -> pl.DataFrame:
+    """分離データ（`x1`の真の係数を極端に大きくし、全観測がx1の符号だけで
+    完全に分類できるようにしたDGP）を生成する。
+
+    `Logit`/`Probit`いずれの`ComputationError`（分離検出）テストにも
+    使う（Probit側もsigmoidベースのDGPをそのまま流用する。
+    `test_logit_validation.py`のLogit版のProbit版という位置づけ、DGP自体の
+    正確なProbitリンクである必要はない）。
+
+    `benchmark/`側のDGP（`benchmark/nonlinear/datasets.py`等）と同じ
+    `numpy`（`np.random.default_rng`）ベースのベクトル化演算で書く。
+    """
+    rng = np.random.default_rng(42)
+    n = 200
+    beta = (0.0, 100.0, 0.5)
+    x1 = rng.uniform(-2.0, 2.0, size=n)
+    x2 = rng.uniform(-1.0, 1.0, size=n)
+    z = beta[0] + beta[1] * x1 + beta[2] * x2
+    p = 1.0 / (1.0 + np.exp(-z))
+    y = rng.binomial(1, p).astype(np.float64)
+    return pl.DataFrame({"y": y, "x1": x1, "x2": x2})
+
+
+def censored_separation_dataset(
+    noise_sd: float, seed: int = 42, n: int = 200
+) -> pl.DataFrame:
+    """`separated_dataset`の左打ち切り版（Tobit用）。`x1`の真の係数が100と極端に大きい。
+
+    `y* = 100·x1 + 0.5·x2 + N(0, noise_sd²)`（`x1`~U(-2, 2)、`x2`~U(-1, 1)）を0で
+    左打ち切りする（`noise_sd=1`、`seed=42`で約52%が打ち切り）。`noise_sd=0`は`x1`の符号だけで
+    `y`が決まる完全分離で、Tobitでは係数の発散ではなく`σ→0`の退化として現れる。
+    ノイズがあれば識別可能で、真値を回復できる。
+
+    外部のデータファイルは持たず、numpyの`default_rng(seed)`で作る。数値照合を
+    しない（エラーパスと収束の確認だけ）ため、ベンチマークCSVとしては固定しない。
+    """
+    rng = np.random.default_rng(seed)
+    x1 = rng.uniform(-2.0, 2.0, size=n)
+    x2 = rng.uniform(-1.0, 1.0, size=n)
+    y_star = 100.0 * x1 + 0.5 * x2
+    if noise_sd > 0.0:
+        y_star = y_star + rng.normal(0.0, noise_sd, size=n)
+    return pl.DataFrame({"y": np.maximum(y_star, 0.0), "x1": x1, "x2": x2})
+
+
+def small_sample_separation_dataset() -> pl.DataFrame:
+    """自由度が1（`n=k+1`、`k`は定数項を含む4）で完全分離になる5行のデータ。
+
+    `benchmark.nonlinear.datasets.generate_binary_choice_dataset("baseline", n=5, k=3,
+    seed=42)`の出力を固定した値（Logit/Probitで同じ`y`になる）。極小標本では
+    パラメータの数と観測数がほぼ等しく、ほぼ必ず完全分離になる。標準化パラメータの
+    ノルムによる旧来の検出は、この種のデータを無警告の「成功」として返していた
+    （係数は有限だが標準誤差が数千になる）。
+    """
+    return pl.DataFrame(
+        {
+            "y": [1.0, 0.0, 1.0, 0.0, 0.0],
+            "x1": [
+                -1.9510351886538364,
+                -0.3162425923435822,
+                0.8793979748628286,
+                1.1272412069680329,
+                0.36875078408249884,
+            ],
+            "x2": [
+                -1.302179506862318,
+                -0.016801157504288795,
+                0.7777919354289483,
+                0.4675093422520456,
+                -0.9588826008289989,
+            ],
+            "x3": [
+                0.12784040316728537,
+                -0.85304392757358,
+                0.06603069756121605,
+                -0.8592924628832382,
+                0.8784503013072725,
+            ],
+        }
+    )
+
+
+def multi_dummy_separation_dataset(seed: int = 58) -> pl.DataFrame:
+    """3つのダミーが同時に準完全分離するデータ（`n=600`、連続変数5本）。
+
+    d0・d2が1なら必ず`y=1`、d1が1なら必ず`y=0`。分離方向が複数ある（錐の次元が2以上）ので、
+    情報行列の近零固有空間が多次元になる。収束点の係数方向や最小固有ベクトルの方向だけで
+    分離を判定する方式は、この種のデータを取りこぼす（lbfgsで実測）。
+    """
+    rng = np.random.default_rng(seed)
+    n = 600
+    d0 = (rng.random(n) > 0.8).astype(np.float64)
+    d1 = (rng.random(n) > 0.8).astype(np.float64)
+    d2 = (rng.random(n) > 0.9).astype(np.float64)
+    c = rng.normal(size=(n, 5))
+    base = (
+        rng.random(n)
+        < 1.0 / (1.0 + np.exp(-c @ np.array([0.5, -0.4, 0.3, 0.2, -0.3])))
+    ).astype(np.float64)
+    y = np.where((d0 == 1) | (d2 == 1), 1.0, np.where(d1 == 1, 0.0, base))
+    data = {"y": y, "d0": d0, "d1": d1, "d2": d2}
+    for j in range(5):
+        data[f"c{j}"] = c[:, j]
+    return pl.DataFrame(data)
+
+
+def strongly_collinear_binary_dataset(
+    link: str, seed: int = 6
+) -> pl.DataFrame:
+    """`x2 = x1 + 1e-3·ε`（相関がほぼ1）で、分離していない2値データを生成する。
+
+    有限の最尤推定量が存在する（係数は`x1`と`x2`で符号が逆に大きく振れうるが、
+    線形予測子への寄与は打ち消し合う）。標準化パラメータのノルムによる旧来の
+    分離検出はこの種のデータを誤って棄却していた（`seed=6`のProbitで再現）。
+    `link`は`"logit"`または`"probit"`。
+    """
+    rng = np.random.default_rng(seed)
+    n = 400
+    x1 = rng.normal(size=n)
+    x2 = x1 + 1e-3 * rng.normal(size=n)
+    x3 = rng.normal(size=n)
+    z = 0.5 * x1 + 0.5 * x2 + 0.5 * x3
+    p = 1.0 / (1.0 + np.exp(-z)) if link == "logit" else norm.cdf(z)
+    y = (rng.random(n) < p).astype(np.float64)
+    return pl.DataFrame({"y": y, "x1": x1, "x2": x2, "x3": x3})
+
+
+def load_apple_adoption_dataset() -> pl.DataFrame:
+    """Wooldridge `apple`に`ecolbs > 0`の2値`y`を足したDataFrameをロードする。
+
+    `wooldridge_loader`と同じ理由でCSVとして固定せず都度ロードする。
+    """
+    pytest.importorskip("wooldridge")
+    from benchmark.common.load_wooldridge import load_apple_adoption
+
+    return load_apple_adoption()
+
+
+def heavily_censored_tobit_dataset() -> pl.DataFrame:
+    """打ち切りが重い（60観測中51観測＝85%が0で左打ち切り）Tobit用の合成データ。
+
+    外部の乱数に依存しない線形合同法で作る。Rust側
+    （`engine/src/nonlinear/tobit.rs`の`heavily_censored_input`）と同じ手順・同じ値で、
+    `max_iter=1`の打ち切り点が全solver（newton/bfgs/lbfgs）で未収束の結果になる挙動を
+    両側で同じ入力に対して固定するために使う（かつて`solver="lbfgs"`だけ`SingularHessian`だった）。潜在変数は
+    `y* = -1.8 + x1 + 0.5*x2 + e`（`x1`・`x2`・`e`は12個の一様乱数の和-6で近似した
+    正規乱数）。`g`は4グループのクラスター列。
+    """
+    mask = (1 << 64) - 1
+    state = 167
+
+    def unit() -> float:
+        nonlocal state
+        state = (state * 6364136223846793005 + 1442695040888963407) & mask
+        return (state >> 11) / float(1 << 53)
+
+    def normal() -> float:
+        return sum(unit() for _ in range(12)) - 6.0
+
+    n = 60
+    x1 = [normal() for _ in range(n)]
+    x2 = [normal() for _ in range(n)]
+    e = [normal() for _ in range(n)]
+    y = [max(-1.8 + a + 0.5 * b + d, 0.0) for a, b, d in zip(x1, x2, e)]
+    # Rust側（`heavily_censored_input`）と同じ値になっていることの確認。
+    assert sum(v == 0.0 for v in y) == 51
+    return pl.DataFrame(
+        {"y": y, "x1": x1, "x2": x2, "g": [str(i % 4) for i in range(n)]}
+    )
+
+
+def single_overlap_binary_dataset(overlap: float) -> pl.DataFrame:
+    """完全分離データに`y=1`の観測を1つ足して、分離を壊す（または壊しかける）データ。
+
+    `x`は`±0.01〜±1.00`の0.01刻み（`x>0`なら`y=1`の完全分離）で、`y=1`の観測を1つ
+    `x=-0.01-overlap`に足す。`y=0`で最も`x=0`に近い観測（`x=-0.01`）より左に`y=1`が
+    1つあるため、`overlap>0`ならちょうど1観測が分離を壊し、有限のMLEが存在する。
+    Rust側（`engine/src/nonlinear/separation.rs`の`single_overlap_data`）と同じデータ。
+    説明変数は`x1`1列（`include_intercept=True`）。
+    """
+    grid = [0.01 * i for i in range(1, 101)]
+    x = [-g for g in grid] + grid + [-0.01 - overlap]
+    y = [0.0] * 100 + [1.0] * 101
+    return pl.DataFrame({"y": y, "x1": x})
+
+
+def slope_param_names(res, *, trailing_sigma: bool = False) -> list[str]:
+    """限界効果の対象になる係数名（`param_names`から切片`const`を除いたもの）。
+
+    限界効果は切片を含まない。`trailing_sigma=True`（Tobit）では、`param_names`の
+    末尾にある`sigma`も係数ではないので位置で除く（名前では除かない。説明変数が
+    たまたま`sigma`という名前でも期待集合から落とさないため）。リファレンスの
+    キーではなくモデル側の`param_names`から導くので、実装とリファレンスの両方で
+    変数が欠けた場合も検出できる。
+    """
+    names = list(res.param_names)
+    if trailing_sigma:
+        names = names[:-1]
+    return [n for n in names if n != "const"]
+
+
+def assert_margeff_names(
+    returned_names: list[str],
+    ref_names,
+    expected_names: list[str],
+    label: str,
+) -> None:
+    """限界効果の変数集合が、返り値・リファレンスとも期待どおりであることを確認する。
+
+    比較ループはリファレンスのキーだけを回るため、キーの過不足はここで別に
+    検査する。返り値は重複・欠落・余分な変数がなく（`expected_names`と過不足なく
+    一致）、リファレンスも同じ集合であること。
+    """
+    assert sorted(returned_names) == sorted(expected_names), (
+        f"{label}: marginal_effects()の変数が期待と一致しない"
+        f"（返り値={sorted(returned_names)}、期待={sorted(expected_names)}）"
+    )
+    assert set(ref_names) == set(expected_names), (
+        f"{label}: リファレンスの変数が期待と一致しない"
+        f"（リファレンス={sorted(ref_names)}、期待={sorted(expected_names)}）"
+    )
+
+
+def check_margeff(
+    res,
+    ref_margeff: dict,
+    label: str,
+    *,
+    rtol: float,
+    atol: float,
+    confidence_level: float = 0.95,
+) -> None:
+    """限界効果6統計量を`at`×係数名の全組み合わせでリファレンスと比較する。
+
+    比較の前に、`at`のキー集合と各`at`の変数集合が`res.param_names`由来の
+    期待（切片を除く全係数）と過不足なく一致することを確認する。
+
+    `confidence_level`は`marginal_effects()`に渡す信頼水準で、`fit()`の
+    `Options.confidence_level`とは独立（リファレンスの信頼区間の水準に合わせる）。
+    """
+    assert set(ref_margeff) == set(MARGEFF_AT), (
+        f"{label}: リファレンスのatが{sorted(MARGEFF_AT)}と一致しない"
+        f"（{sorted(ref_margeff)}）"
+    )
+    expected_names = slope_param_names(res)
+    for at in MARGEFF_AT:
+        rows = res.marginal_effects(at=at, confidence_level=confidence_level)
+        assert_margeff_names(
+            [row["param_name"] for row in rows],
+            ref_margeff[at],
+            expected_names,
+            f"{label}/{at}",
+        )
+        effects = {row["param_name"]: row for row in rows}
+        for name, ref_stats in ref_margeff[at].items():
+            row = effects[name]
+            assert_close(
+                row["effect"],
+                ref_stats["effect"],
+                f"{label}/{at}/{name}/effect",
+                rtol=rtol,
+                atol=atol,
+            )
+            assert_close(
+                row["std_error"],
+                ref_stats["std_error"],
+                f"{label}/{at}/{name}/std_error",
+                rtol=rtol,
+                atol=atol,
+            )
+            assert_close(
+                row["test_stat"],
+                ref_stats["test_stat"],
+                f"{label}/{at}/{name}/test_stat",
+                rtol=rtol,
+                atol=atol,
+            )
+            assert_close(
+                row["p_value"],
+                ref_stats["p_value"],
+                f"{label}/{at}/{name}/p_value",
+                rtol=rtol,
+                atol=atol,
+            )
+            assert_close(
+                row["conf_lower"],
+                ref_stats["conf_lower"],
+                f"{label}/{at}/{name}/conf_lower",
+                rtol=rtol,
+                atol=atol,
+            )
+            assert_close(
+                row["conf_upper"],
+                ref_stats["conf_upper"],
+                f"{label}/{at}/{name}/conf_upper",
+                rtol=rtol,
+                atol=atol,
+            )
+
+
+# `run_glm_crosscheck.R`の`PRED_HEAD`（標本内予測の先頭の行数）と同じ値。
+PREDICT_HEAD_ROWS = 10
+
+# 分類表を整数で比べるときに、確率が0.5から離れていなければならない最小の距離。
+# 実装とRの確率の差（~1e-7）より十分大きい。
+PRED_TABLE_MIN_MARGIN = 1e-6
+
+
+def check_predictions(
+    res, ref: dict, label: str, *, rtol: float, atol: float
+) -> None:
+    """`pred_table()`・`predict()`・`augment()`をRの参照値と比較する。
+
+    参照値は`run_glm_crosscheck.R`の出力: 分類表`pred_table`（行=実際のクラス、
+    列=予測クラス、確率>0.5で1）、標本内の予測確率の先頭`predict_head`と全行の合計
+    `predict_sum`、新規データ`new_x`（学習データの各傾きの平均±1標準偏差の2行）に対する
+    予測確率`predict_new_data`。`augment()`は`predict()`と同じ確率を
+    `predicted_probability`列に付けた表なので、同じ参照値で比べる。
+    """
+    predicted = res.predict()
+    # 分類表は整数の一致で比べるため、0.5のごく近くに確率を持つ観測があると、
+    # 実装とRの確率の微小なずれ（~1e-7）で分類が分かれて誤って落ちる。データに
+    # その余裕があることを先に確かめ、無ければ原因が分かる形で落とす
+    # （既存のフィクスチャの最小の余裕は~3e-5）。
+    margin = min(abs(p - 0.5) for p in predicted)
+    assert margin > PRED_TABLE_MIN_MARGIN, (
+        f"{label}/pred_table: a probability lies within {margin!r} of the "
+        "threshold 0.5, so the classification table cannot be compared"
+    )
+    ours_table = {
+        row["actual"]: (row["predicted_0"], row["predicted_1"])
+        for row in res.pred_table()
+    }
+    assert set(ours_table) == {0, 1}, f"{label}/pred_table/actual"
+    assert len(ref["pred_table"]) == 2, f"{label}/pred_table/rows"
+    for actual, ref_row in enumerate(ref["pred_table"]):
+        assert ours_table[actual] == tuple(ref_row), (
+            f"{label}/pred_table/{actual}: ours={ours_table[actual]}, "
+            f"ref={tuple(ref_row)}"
+        )
+
+    assert len(predicted) == res.n_obs, f"{label}/predict/length"
+    head = ref["predict_head"]
+    assert len(head) == min(PREDICT_HEAD_ROWS, len(predicted)), (
+        f"{label}/predict/head_length"
+    )
+    for i, ref_value in enumerate(head):
+        assert_close(
+            predicted[i],
+            ref_value,
+            f"{label}/predict/[{i}]",
+            rtol=rtol,
+            atol=atol,
+        )
+    assert_close(
+        sum(predicted),
+        ref["predict_sum"],
+        f"{label}/predict/sum",
+        rtol=rtol,
+        atol=atol,
+    )
+    augmented = res.augment()
+    assert augmented["predicted_probability"].to_list() == predicted, (
+        f"{label}/augment/in_sample"
+    )
+
+    new_data = pl.DataFrame(ref["new_x"])
+    ref_new = ref["predict_new_data"]
+    predicted_new = res.predict(new_data)
+    assert len(predicted_new) == len(ref_new), f"{label}/predict_new/length"
+    augmented_new = res.augment(new_data)
+    assert augmented_new["predicted_probability"].to_list() == predicted_new, (
+        f"{label}/augment/new_data"
+    )
+    assert augmented_new.select(new_data.columns).equals(new_data), (
+        f"{label}/augment/new_data_columns"
+    )
+    for i, ref_value in enumerate(ref_new):
+        assert_close(
+            predicted_new[i],
+            ref_value,
+            f"{label}/predict_new/[{i}]",
+            rtol=rtol,
+            atol=atol,
+        )

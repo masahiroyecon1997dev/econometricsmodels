@@ -12,7 +12,7 @@ For `estimator="gmm"`, `IVOptions.gmm_weight_type` selects the weight matrix use
 
 ## Diagnostics
 
-`IVResults` exposes three diagnostics in addition to the coefficient table:
+`IVResults` exposes three diagnostics in addition to the parameter table (`params_table()`):
 
 - `weak_instrument_f_statistics`: partial F-statistic per endogenous variable, testing the excluded instruments' joint significance after partialling out `x_exog` (always under the classical formula, regardless of `cov_type`).
 - `overid_statistic`/`overid_p_value`: the overidentification test — Sargan (`estimator="2sls"`) or Hansen J (`estimator="gmm"`). `None` when just-identified (`len(instruments) == len(x_endog)`).

@@ -21,10 +21,11 @@ paths:
   - `io/`: IO構造推定（Nested Logit, Random Coefficient Logit, 単一エージェントモデル, 静学/動学ゲーム等）
   - `time_series/`: ARCH, GARCH, VAR（Phase7）
   - 系統名・手法の割り当ては上記を初期案とし、実装時に見直してよい（例: Phase2の"Logit"とPhase6の"Logit"は別系統ディレクトリに属するため衝突しない）
-- **手法＝最初は1ファイル**（例: `linear/ols.rs`）。ファイルが肥大化したら`ols/`ディレクトリに昇格し`mod.rs`+`data.rs`+`options.rs`等に分割する。全手法に最初から複数ファイルを強制しない。
+- **手法＝最初は1ファイル**（例: `linear/wls.rs`）。ファイルが肥大化したら`ols/`のようにディレクトリに昇格し、責務ごとに分割する（`linear/ols/`は`mod.rs`（`pub use`の再エクスポートのみ）・`cov_type.rs`・`cov_params.rs`・`input.rs`・`estimator.rs`・`predict.rs`）。型とその`impl`は同じファイルに置き（「型だけ」「関数だけ」で分けない）、`mod tests`も対象コードと同じファイルに置く。公開パスは`mod.rs`の再エクスポートで保ち、呼び出し側を変えない。全手法に最初から複数ファイルを強制しない。
 - **系統内で共有するロジック**は`<系統>/common.rs`に置く。
-- **全手法で共有するロジック**（DataFrameからの列抽出等、統計手法に依存しない処理）は系統ディレクトリの外、クレート直下（例: `column_extraction.rs`）に置く。
-- `engine`と`engine_pybind`で同じ系統名・ディレクトリ構成を揃える（`engine/src/linear/ols.rs` ⇔ `engine_pybind/src/linear/ols.rs`のように対応させる）。
+- **全手法で共有するロジック**（DataFrameからの列抽出等、統計手法に依存しない処理）は系統ディレクトリの外、`shared/`（例: `engine_pybind/src/shared/column_extraction.rs`）に置く。
+- **複数の系統が使う計算部品**（共分散行列のmeat/sandwich・Wald検定・最小二乗・適合度統計量・クラスターのグループ化）は`engine/src/shared/`に置く。各系統は他系統の内部ではなく`shared/`に依存する。`shared/`は**何をするコードか**（線形代数・共分散・推論等）で分け、どの系統が使うかでは分けない（利用側は手法の追加で変わり、利用者別にするとファイルの移動が繰り返し起きるため）。系統の`common.rs`（系統内で共有するロジック・エラー型）とは別物で、`shared/`の関数は特定系統のエラー型を返さない（`CommonError`か、`linear_algebra::RankDeficient`のような系統非依存の型を返し、呼び出し側が自系統のエラーへ`map_err`する）。`error.rs`（`CommonError`・`ErrorInfo`）・`error_catalog.rs`（エラーのカタログ）・`inference.rs`・`linear_algebra.rs`・`parallelism.rs`・`validation.rs`・`design_matrix.rs`も`shared/`に置く（engineのクレート直下に残るのは`lib.rs`と`shared/`・系統ディレクトリだけ）。`shared/mod.rs`では、`engine_pybind`から名前で参照するモジュール（`error`・`error_catalog`・`group_codes`・`parallelism`）のみ`pub mod`、それ以外は`pub(crate) mod`にする。直下への再エクスポート（`pub use shared::error;`等）は置かない。
+- `engine`と`engine_pybind`で同じ系統名・ディレクトリ構成を揃える（`engine/src/linear/ols/` ⇔ `engine_pybind/src/linear/ols.rs`のように対応させる。手法の中のファイル分割はengine側だけでよい）。共有コードも同じく、両クレートとも`shared/`に置く（`engine/src/shared/` ⇔ `engine_pybind/src/shared/`。中身は別で、engine_pybind側は列抽出・入力検証・オプション値・例外クラス・結果DataFrameの構築・`Mat<f64>`から`Vec`への変換）。
 
 ## 言語方針
 
@@ -35,7 +36,7 @@ paths:
 
 ## コメント運用
 
-Issue番号・内部管理ドキュメント（`refactoring-candidates.md`等）への参照可否は、CLAUDE.md 6章「コメント・ドキュメントでの参照方針」に準じる（`engine`/`engine_pybind`固有の追加規約はない）。
+Issue番号・内部管理ドキュメント（`docs/planning/specs/`配下の設計ノート等）への参照可否は、CLAUDE.md 6章「コメント・ドキュメントでの参照方針」に準じる（`engine`/`engine_pybind`固有の追加規約はない）。
 
 ## 責務分離
 
@@ -59,7 +60,7 @@ Issue番号・内部管理ドキュメント（`refactoring-candidates.md`等）
 - polars DataFrameの受け取りには**pyo3-polars**（`PyDataFrame`）を使う。
 - **既知のリスク**: `pyo3-polars`の単体リポジトリ（`pola-rs/pyo3-polars`）は2025年7月にアーカイブ済みで、本体`pola-rs/polars`リポジトリに統合されている。crates.io版`pyo3-polars`とpolars本体リポジトリ内のバージョンにズレがあり、`pyo3`自体のバージョンとの組み合わせでビルドが失敗する事例が報告されている（2026年1月時点）。現在は`engine_pybind/Cargo.toml`で`pyo3-polars = "=0.28.0"`（`pyo3 = "=0.29.2"`・`polars = "=0.55.2"`と組み合わせ）に固定して`cargo build`が通ることを確認済み（詳細は同ファイルのコメント参照）。バージョンを上げる際は同様の確認を行うこと。詰まる場合は、`pyo3-polars`を経由せずpolars本体のArrow C Data Interface相当の機能を薄く自前で使う代替案を検討する。
 - `engine`はpolars/PyO3を一切知らない設計を維持する（責務分離の原則通り）。`polars DataFrame → faer::Mat<f64>`の変換は2段階に分かれる。
-  1. `engine_pybind`: polars DataFrameから列ごとに`Vec<f64>`へ抽出する（`column_extraction::extract_f64_column`）。
+  1. `engine_pybind`: polars DataFrameから列ごとに`Vec<f64>`へ抽出する（`shared::column_extraction::extract_f64_column`）。
   2. `engine`: 抽出済みの列（`&[f64]`/`&[Vec<f64>]`）から`faer::Mat`を組み立てる（例: `engine::linear::ols::OlsInput::from_columns`）。切片列の自動追加等、設計行列の組み立てに関わるロジックはここに置く（「計算ロジックをengine_pybindに書かない」原則、`docs/spec/ols-spec.md`参照）。
 - 変換時、列ごとに`Vec<f64>`へ抽出してから`faer::Mat`に詰め直す（2回のコピーが発生する）。より少ないコピー（polarsの`&[f64]`を直接借用してengine側で詰める等）も技術的には可能だが、`engine`の関数シグネチャにライフタイムが入り込み「pure Rustロジック、polars非依存」の独立性が損なわれるため、**採用しない**。このプロジェクトの想定データ規模では、この2回のコピーのコストはQR分解本体（O(n×k²)）に対して無視できるレベルであるため。
 - 欠損値（null）は`.rechunk()` + `null_count()`チェックで検出し、常にエラーとする（`testing-policy.md`・`docs/spec/ols-spec.md`の欠損値方針を参照）。サンプルの自動除外は行わない。
@@ -70,11 +71,23 @@ Issue番号・内部管理ドキュメント（`refactoring-candidates.md`等）
 - 独自エラー型は **thiserror** で定義する。
 - `engine_pybind`（PyO3境界）で、thiserrorのエラー型を`PyErr`に変換する。
 - `unwrap` / `expect` はプロトタイプ段階を除き避ける。避けられない場合は理由をコメントで明記する。
-- **Python側の例外はカテゴリ別に分ける**（全て`PyValueError`にまとめない）。最低限、以下の2階層を`pyo3::create_exception!`で定義し、`engine_pybind`側でエラー変換時にどちらに属するか判断して使い分ける。
-  - `ValidationError`: 入力・パラメータが不正（次元不一致、欠損値、観測数不足、クラスター数不足、`confidence_level`の範囲外等）。Python側の`ValueError`も継承させ、素の`except ValueError`でも捕まえられるようにする。
-  - `ComputationError`: 計算過程で発覚した問題（特異行列等）。Python側の`RuntimeError`を継承させる。
+- **Python側の例外はカテゴリ別に分ける**（全て`PyValueError`にまとめない）。`engine_pybind/src/shared/errors.rs`の`#[pyclass]`で、次の2クラスを定義する（`module = "econometricsmodels._lib"`）。どちらに属するかは**カタログの`code`ごとに決まる**。
+  - `ValidationError`: 入力・パラメータが不正（欠損値、観測数不足、クラスター数不足、`confidence_level`の範囲外等）。Python側の`ValueError`を継承させ、素の`except ValueError`でも捕まえられるようにする。
+  - `ComputationError`: 計算過程で発覚した問題（特異行列、収束しない等）。Python側の`RuntimeError`を継承させる。
+  - 引数・オプションの**型**の誤りは構造化せず、組み込みの`TypeError`にする（`column_extraction.rs`・`option_values.rs`が作る文面は、引数名を引用符で囲まず`{argument} must be a ..., got {type}.`の形にする。`options`は`extract_options`で取り出し、`options must be an instance of OLSOptions, got WLSOptions.`の形にする。未知のキーワード引数など、Python本来の`TypeError`は対象外）。
   - メモリ不足等は専用の例外クラスを設けない（Rust/Pythonのメモリ確保失敗は通常このレイヤーで綺麗に変換できるものではないため）。
-- **系統をまたいで同じ意味・同じメッセージのバリアントが複数の系統のエラー型に重複する場合は`engine::error::CommonError`に切り出す**（`DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/`MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`がOLS/WLSとnonlinearで重複していたことから導入）。各系統のエラー型（`LeastSquaresError`/`MleError`等）はthiserrorの`#[error(transparent)] Common(#[from] CommonError)`バリアントでこれを包む。`?`演算子は`#[from]`により自動変換されるため、`CommonError`のバリアントを直接構築する箇所（`return Err(...)`等`?`を経由しない箇所）でのみ`.into()`を明示する。系統固有の追加バリアント（`SingularHessian`等）や、将来「意味は同じだが系統固有の追加フィールドが要る」ケースは`CommonError`に含めず、各系統のエラー型に直接定義してよい（`CommonError`を使うかどうかは系統ごとに選べる）。`engine_pybind`側の変換は`engine_pybind/src/errors.rs`の`common_error_to_pyerr`に集約し、各系統の`*_error_to_pyerr`関数はこれに委譲する。
+- **例外は構造化する**: `code`（UPPER_SNAKE_CASE）・`message`・`hint`・`params`を持つ。文面は`engine/src/shared/error_catalog.rs`の`CATALOG`（`code`ごとのクラス・`params`の型・`message`/`hint`のテンプレート）が正本で、手で保守する。文面の規則（英語のみ・記号を使わず単語で書く・`hint`は機械的な対処だけ等）は`error_catalog.rs`のテストが強制する。エラー型にはカタログを直接書かず、`engine::shared::error::ErrorInfo::report()`で`ErrorReport`（`code`＋`params`）を返す。
+- **エラーを足す・変えるとき**:
+  1. 既存の`code`で表せないかを先に確認する（`message`・`hint`・クラス・`params`のキー集合が同じなら再利用する。同じ`code`はいつでも同じ`hint`）。クラスは「推定を走らせずに、入力を見るだけで分かるか」で決める（分かれば`ValidationError`、分からなければ`ComputationError`。分解などの数値ルーチンが要るものは後者。検査の性質で決め、`fit()`のどこで実装するかでは決めない。`docs/spec/error-handling.md`3.1章）。
+  2. `error_catalog.rs`に`code`を足す（名前は「何の値か＋どういう状況か」）。`UPDATE_ERROR_CATALOG_GOLDEN=1 cargo test -p engine error_catalog`でゴールデンを更新する。
+  3. エラー型のバリアントを足し、`ErrorInfo::report()`の`match`に追加する（`_`で受けず全バリアントを列挙し、足し忘れをコンパイルエラーにする）。エンジンが計算した量（`min_obs`・`min_clusters`等）は`params`で渡す。
+  4. `maturin develop`の後、`python tools/render_error_catalog.py`で`python_package/econometricsmodels/error_codes.py`と`docs/guide/error-codes.md`を生成し直す（CIは`--check`で食い違いを検出する）。
+  5. Pythonのテストは文面ではなく`tests/support/_errors.py`の`raises_error(code, **params)`で照合する。`MIGRATED_CODES`に足す（全体実行の`--check-error-coverage`が、足した`code`が1度は実際に送出されることを検査する）。Pythonから構成できない`code`の扱いは同ファイルの`UNREACHABLE_CODES`を参照。
+- **入れ子の回帰で起きたエラーは、ラッパーの`code`を作らず、原因の`code`に`Stage`を足して表す**（第一段階・within回帰・補助回帰等。Rust側に段階ごとの包みのバリアントがあってもよいが、`report()`は原因の`code`に`stage`（と補助の`params`）を足して返す）。文頭に`In the first stage regression for 'x1': `のような前置きが付く。`stage`を付けられる`code`はカタログの`stage_allowed`で決まり、付けられない`code`（`confidence_level`の範囲違反等）は包まずそのまま返す。パネルは`PanelError::InStage{stage, source}`と`in_stage()`で包む。
+- **境界の関数は`guard`で包む**: `engine_pybind`の`#[pyfunction]`と、処理を持つ`#[pymethods]`の本体は`crate::shared::errors::guard(|| { ... })`で包み、Rustのpanicを`INTERNAL_ERROR`（`ComputationError`）にする。包まないと`PanicException`（`BaseException`の子）になり、`except Exception`で捕まらない。戻り値は`PyResult`にする。コンストラクタ・setter・`__repr__`は対象外。`[profile.release]`は`panic = "unwind"`のままにする（`abort`だと捕まえられない）。`docs/spec/error-handling.md`「panicの境界変換」。
+- **到達不能な状態は`INTERNAL_ERROR`**（`detail`に元の文）にする。`unwrap`/`expect`の代わりに、`CommonError::internal`や`engine_pybind`の`internal_error`を使う。
+- **系統をまたいで同じ意味のバリアントが複数の系統のエラー型に重複する場合は`engine::shared::error::CommonError`に切り出す**。各系統のエラー型（`LeastSquaresError`/`MleError`/`IvError`/`PanelError`）はthiserrorの`#[error(transparent)] Common(#[from] CommonError)`バリアントでこれを包み、`report()`は`Common`アームで委譲する。`?`は`#[from]`で自動変換されるため、`CommonError`のバリアントを直接構築する箇所（`?`を経由しない`return Err(...)`等）でのみ`.into()`を明示する。系統固有のバリアントや、「意味は同じだが系統固有の追加フィールドが要る」ケースは各系統のエラー型に直接定義してよい。
+- **`PyErr`への変換は`to_pyerr(&err)`の1関数に集約する**（`engine_pybind/src/shared/errors.rs`。`ErrorInfo`を実装した型なら何でも渡せる）。各系統の`*_error_to_pyerr`はこれを呼ぶだけの1行にする。外部クレート（`engine`）の型には、orphan ruleにより`impl From<EngineError> for PyErr`を`engine_pybind`側で書けないため関数形式にする。自クレートの型（`ColumnExtractionError`）は`impl From<E> for PyErr`でよい。メッセージ文言の単体テストは、`PyErr::to_string()`がPythonインタプリタを要求しpanicするため、`PyErr`に変換する前の`ErrorReport::full_text()`で行う。
 
 ## Lint / フォーマット
 
@@ -86,7 +99,7 @@ Issue番号・内部管理ドキュメント（`refactoring-candidates.md`等）
 
 - Arrowのゼロコピー原則（CLAUDE.md 2章）を壊す不要な`clone`・コピーを避ける。
 - 大きなデータに対する計算量・メモリ使用量に注意する。
-- **faerのグローバル並列度は`Par::Seq`固定**: `faer`は`rayon` feature既定ONで、グローバル並列度の既定が`Par::Rayon(0)`（全論理コア）。`col_piv_qr`/行列積/Choleskyの高レベルAPIは全て`get_global_parallelism()`を参照するため、放置すると全線形代数が暗黙に全コア並列で走る。OLS/WLS/IV等の設計行列はtall-skinny（n大・k小）中心で、この形の暗黙並列化は高速化せず多コア機・負荷下でシングルスレッド比20〜200倍遅く不安定になることを実測（classical n=1,000,000 で全コア＋背景負荷下 中央値24.9秒→対策後0.39秒、無負荷でも0.24秒→0.14秒＋分散1/14）。`engine::parallelism::ensure_serial()`（`faer::set_global_parallelism(Par::Seq)`を呼ぶだけの冪等関数）を全`Estimator::fit()`冒頭と`engine_pybind`の`#[pymodule]`初期化で呼び、faerを常に逐次にする。**新しい手法の`fit()`を追加したら`ensure_serial()`呼び出しを忘れない**（`engine/src/linear/CLAUDE.md`「faerのグローバル並列度」・各系統CLAUDE.md参照）。並列化はグローバル設定に頼らず、実測で有効な箇所だけ`Par::Rayon`（スレッド数指定は`Par::rayon(n)`、`n=0`で現在のrayonスレッド数に解決）を対象APIへ明示的に渡してopt-inする。
+- **faerのグローバル並列度は`Par::Seq`固定**: `faer`は`rayon` feature既定ONで、グローバル並列度の既定が`Par::Rayon(0)`（全論理コア）。`col_piv_qr`/行列積/Choleskyの高レベルAPIは全て`get_global_parallelism()`を参照するため、放置すると全線形代数が暗黙に全コア並列で走る。OLS/WLS/IV等の設計行列はtall-skinny（n大・k小）中心で、この形の暗黙並列化は高速化せず多コア機・負荷下でシングルスレッド比20〜200倍遅く不安定になることを実測（classical n=1,000,000 で全コア＋背景負荷下 中央値24.9秒→対策後0.39秒、無負荷でも0.24秒→0.14秒＋分散1/14）。`engine::shared::parallelism::ensure_serial()`（`faer::set_global_parallelism(Par::Seq)`を呼ぶだけの冪等関数）を全`Estimator::fit()`冒頭と`engine_pybind`の`#[pymodule]`初期化で呼び、faerを常に逐次にする。**新しい手法の`fit()`を追加したら`ensure_serial()`呼び出しを忘れない**（`engine/src/linear/CLAUDE.md`「faerのグローバル並列度」・各系統CLAUDE.md参照）。並列化はグローバル設定に頼らず、実測で有効な箇所だけ`Par::Rayon`（スレッド数指定は`Par::rayon(n)`、`n=0`で現在のrayonスレッド数に解決）を対象APIへ明示的に渡してopt-inする。
 - **並列化（`rayon`）の採用検討**: 現時点で`rayon`はどのクレートの直接の依存にも含まれていない（`faer`が内部依存として持つのみ、上記のとおりグローバルには`Par::Seq`で無効化）。以下のような「独立した単位の処理を大量に繰り返す」箇所は将来の候補になりうるが、**採用するかどうかは実測してから決める**（`hac_cov_params`で`Par::Seq`を明示指定した教訓——k×kの小さい出力サイズではfaer既定の並列ディスパッチのオーバーヘッドが計算本体を上回り逐次より遅くなった、実測n=10,000,k=2で6倍悪化——と同じ姿勢。並列化＝常に速いとは限らない）。
   - **MLEベースの手法**（Logit/Probit/Tobit等）の`CostFunction`/`Gradient`/`Hessian`・観測ごとのスコア計算: Newton/BFGS/L-BFGSの反復ごとに観測数`n`に比例する和を取る処理が繰り返し呼ばれるため、`n`が大きいデータセットでは最適化全体の支配的なコストになりうる（`engine/src/nonlinear/logit.rs`の`LogitProblem`が該当。Probit/Tobitも同型の構造になる見込み）。
   - **パネルデータ（FE/RE）の個体（グループ）ごとの計算、クラスターロバストSEのクラスターごとの計算**。ただしOLSの`cluster_cov_params`は計算量がO(G·k²)（`G`はクラスター数、通常`n`よりずっと小さい）で実測上ボトルネックにならないことを確認済み（`docs/spec/ols-spec.md`「パフォーマンス」）。クラスター数`G`が非常に大きいケース等、前提が変わる場合は再検討する。

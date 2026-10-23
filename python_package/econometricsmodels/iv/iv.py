@@ -26,6 +26,11 @@ import polars as pl
 
 from .. import _lib
 from .._lib import IVOptions
+from .._results_utils import (
+    by_param,
+    conf_int_by_param,
+    params_table_rows,
+)
 from ..linear.ols import OLSResults
 
 __all__ = ["IV", "IVOptions", "IVResults"]
@@ -124,7 +129,7 @@ class IVResults:
 
     Array-valued properties (`params`, `std_errors`, etc.) are exposed
     as dictionaries keyed by coefficient name (for O(1) lookup of a
-    single parameter). Use `coef_table()` for a row-oriented listing.
+    single parameter). Use `params_table()` for a row-oriented listing.
 
     `first_stage()` (per-endogenous-variable first-stage regression
     results) is provided as a separate method rather than a field on
@@ -151,12 +156,12 @@ class IVResults:
     @property
     def params(self) -> dict[str, float]:
         """Coefficient name to coefficient value."""
-        return dict(zip(self._raw.param_names, self._raw.params))
+        return by_param(self._raw.param_names, self._raw.params)
 
     @property
     def std_errors(self) -> dict[str, float]:
         """Coefficient name to standard error."""
-        return dict(zip(self._raw.param_names, self._raw.std_errors))
+        return by_param(self._raw.param_names, self._raw.std_errors)
 
     @property
     def test_stats(self) -> dict[str, float]:
@@ -165,7 +170,7 @@ class IVResults:
         t-statistic for `estimator="2sls"`, z-statistic for
         `estimator="gmm"`; `stat_dist` tells which.
         """
-        return dict(zip(self._raw.param_names, self._raw.test_stats))
+        return by_param(self._raw.param_names, self._raw.test_stats)
 
     @property
     def stat_dist(self) -> Literal["t", "normal"]:
@@ -184,19 +189,12 @@ class IVResults:
     @property
     def p_values(self) -> dict[str, float]:
         """Coefficient name to two-sided p-value."""
-        return dict(zip(self._raw.param_names, self._raw.p_values))
+        return by_param(self._raw.param_names, self._raw.p_values)
 
     @property
     def conf_int(self) -> dict[str, tuple[float, float]]:
         """Coefficient name to confidence interval `(lower, upper)`."""
-        return {
-            name: (lower, upper)
-            for name, lower, upper in zip(
-                self._raw.param_names,
-                self._raw.conf_lower,
-                self._raw.conf_upper,
-            )
-        }
+        return conf_int_by_param(self._raw)
 
     @property
     def residuals(self) -> list[float]:
@@ -429,39 +427,20 @@ class IVResults:
         """
         return self._raw.wu_hausman_p_value
 
-    def coef_table(self) -> list[dict[str, float | str]]:
+    def params_table(self) -> list[dict[str, float | str]]:
         """Row-oriented summary table of the coefficients.
 
         Shaped to be usable almost as-is in a REST API response (same
-        policy as `OLSResults.coef_table()`). Returned as `list[dict]`
+        policy as `OLSResults.params_table()`). Returned as `list[dict]`
         rather than a polars DataFrame, per the project's policy of
-        not using DataFrames for the coefficient table itself.
+        not using DataFrames for the parameter table itself.
 
         Returns:
             A list of dictionaries, one per coefficient. Keys are
-            `param`, `coef`, `std_err`, `test_stat`, `p_value`,
+            `param_name`, `param`, `std_error`, `test_stat`, `p_value`,
             `conf_lower`, `conf_upper`.
         """
-        return [
-            {
-                "param": name,
-                "coef": coef,
-                "std_err": se,
-                "test_stat": test_stat,
-                "p_value": p,
-                "conf_lower": lower,
-                "conf_upper": upper,
-            }
-            for name, coef, se, test_stat, p, lower, upper in zip(
-                self._raw.param_names,
-                self._raw.params,
-                self._raw.std_errors,
-                self._raw.test_stats,
-                self._raw.p_values,
-                self._raw.conf_lower,
-                self._raw.conf_upper,
-            )
-        ]
+        return params_table_rows(self._raw)
 
     def first_stage(self) -> dict[str, OLSResults]:
         """Per-endogenous-variable first-stage regression results.
@@ -474,6 +453,17 @@ class IVResults:
         right. Its `f_statistic`/`f_p_value` include `x_exog`'s
         contribution and are **not** the weak-instrument partial
         F-statistic (`weak_instrument_f_statistics`).
+
+        With `cov_type="cluster"` and a number of clusters that is larger
+        than the slope coefficients of the structural equation but not
+        larger than those of a first-stage regression, the cluster-robust
+        covariance of the first-stage slopes is singular and the overall
+        F-test cannot be computed: that regression's `f_statistic`,
+        `f_p_value`, `f_df_num` and `f_df_denom` are `None`. Its
+        coefficients, standard errors and the weak-instrument F-statistic
+        are unaffected (the latter is the classical nested F-test, not
+        cluster-robust, so with few clusters it is not cluster-robust
+        evidence of instrument relevance).
 
         Returns:
             A dictionary keyed by endogenous variable name (matching

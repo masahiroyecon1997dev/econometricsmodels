@@ -87,6 +87,8 @@ RUN apt update && apt install -y --no-install-recommends \
 # Tobit交差検証）を追加。両者はsandwich等を引き込むため、最終ピン留めの前に
 # upgrade="never"で導入する。numDeriv はTobit限界効果のデルタ法SEをformula非依存に検証する
 # （testing-policy.md「リファレンス実装」）ために追加。
+# momentfit はIV-GMMの独立実装によるクロスチェック（ivregはGMM非対応）。sandwichに依存する
+# ため、最終ピン留めの前にupgrade="never"で導入する。
 # maxLik（censRegの依存先、Tobit交差検証の最適化エンジン）は、censRegが依存として引き込む
 # バージョンが導入時期で変わる（フィクスチャ記録では1.5.2.2→1.6.10）ため、censRegより前に
 # 明示的にピン留めする。
@@ -100,6 +102,7 @@ RUN Rscript -e 'install.packages("remotes", repos = "https://cloud.r-project.org
     && Rscript -e 'remotes::install_version("maxLik", version = "1.6-10", upgrade = "never", repos = "https://cloud.r-project.org")' \
     && Rscript -e 'remotes::install_version("AER", version = "1.2-17", upgrade = "never", repos = "https://cloud.r-project.org")' \
     && Rscript -e 'remotes::install_version("censReg", version = "0.5-40", upgrade = "never", repos = "https://cloud.r-project.org")' \
+    && Rscript -e 'remotes::install_version("momentfit", version = "1.0", upgrade = "never", repos = "https://cloud.r-project.org")' \
     && Rscript -e 'remotes::install_version("sandwich", version = "3.1.3", repos = "https://cloud.r-project.org")' \
     && Rscript -e 'remotes::install_version("lmtest", version = "0.9.40", repos = "https://cloud.r-project.org")' \
     && Rscript -e 'install.packages("languageserver", repos = "https://cloud.r-project.org")'
@@ -133,7 +136,19 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
 
 ENV PATH="${CARGO_HOME}/bin:${PATH}"
 
-RUN cargo install cargo-llvm-cov --locked
+# サプライチェーン攻撃対策として、cargo経由で入れる開発ツールはバージョンを固定し、
+# ソースからビルドする（`--locked`でツール自身の依存もそのクレートのCargo.lockで固定）。
+# cargo-auditのバージョンはCIの`ci_engine.yml`（`tool: cargo-audit@...`）と揃えること。
+# 新版の有無と両者の食い違いは.github/workflows/check_cargo_tool_updates.ymlが週次で確認し、
+# Issueで通知する（`ARG`名と`cargo install`行の`<crate>@${ARG}`の書式を変えると解析できなくなる）。
+ARG CARGO_AUDIT_VERSION=0.22.2
+ARG CARGO_ABOUT_VERSION=0.9.2
+ARG CARGO_LLVM_COV_VERSION=0.9.1
+
+RUN cargo install --locked \
+        cargo-audit@${CARGO_AUDIT_VERSION} \
+        cargo-about@${CARGO_ABOUT_VERSION} \
+        cargo-llvm-cov@${CARGO_LLVM_COV_VERSION}
 
 # -------------------------
 # uv インストール (Python パッケージ管理)

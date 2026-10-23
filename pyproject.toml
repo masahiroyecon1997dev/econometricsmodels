@@ -14,7 +14,7 @@ authors = [
 ]
 keywords = ["econometrics", "statistics", "regression", "ols", "logit", "probit", "tobit", "instrumental-variables", "panel-data", "polars"]
 dependencies = [
-    "polars==1.44.2",
+    "polars==2.0.0",
 ]
 classifiers = [
     "Programming Language :: Rust",
@@ -71,7 +71,7 @@ test = [
     # （statsmodels/linearmodels/R）へ渡すためpandasに変換する箇所と、benchmark/・
     # performance/配下のリファレンス実装アダプタ（compare_*.py）が使う。pandas側は
     # 直接依存に含めない。
-    "pyarrow==25.0.1",
+    "pyarrow==26.0.0",
 ]
 dev = [
     "maturin==1.15.0",

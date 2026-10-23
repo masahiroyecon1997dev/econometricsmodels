@@ -76,7 +76,7 @@ benchmark = [
     # polars.DataFrame.to_pandas()が内部で要求する（各リファレンス実装アダプタ・
     # performance/compare_*.pyがpandasに変換してリファレンス実装に渡すため）。
     # pandas側は直接依存に含めない。
-    "pyarrow==25.0.1",
+    "pyarrow==26.0.0",
 ]
 dev = [
     "maturin==1.15.0",

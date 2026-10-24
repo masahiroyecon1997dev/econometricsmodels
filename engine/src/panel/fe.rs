@@ -397,7 +397,9 @@ use crate::shared::goodness_of_fit::{gaussian_goodness_of_fit, is_perfect_fit};
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference;
 use crate::shared::least_squares::{LeastSquaresFit, least_squares};
-use crate::shared::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
+use crate::shared::validation::{
+    column_is_zero_variance, validate_cluster_count_covers_slopes, validate_cluster_groups,
+};
 use crate::shared::wald::wald_f_test;
 
 /// FEの被説明変数・説明変数・パネル識別子を保持する入力データ。
@@ -1699,44 +1701,6 @@ pub(crate) fn time_varying_regressor_indices(x: &[Vec<f64>], entity: &GroupCodes
         })
         .map(|(j, _)| j)
         .collect()
-}
-
-/// `transformed`（within変換後の1列）の分散が、`original`（変換前の同じ列）のスケールに
-/// 対して無視できるほど小さいかを判定する。
-///
-/// **絶対閾値ではなく相対閾値を使う**（`.claude/rules/rust-style.md`「線形代数」の特異性
-/// 判定の方針と同じ。データのスケールに依存しないようにするため）。`original`の最大絶対値を
-/// スケールの目安にする理由: 真に分散ゼロの列（時間不変・完全共線）は、within変換後の値が
-/// 数学的には厳密に0だが浮動小数点演算では丸め誤差の残差（`original`のスケールに比例する
-/// 大きさ）が残る。`transformed`自身の最大絶対値をスケールに使うと、この残差自身を基準に
-/// 残差を判定する自己参照になり閾値が機能しないため、変換前の値を基準にする。
-///
-/// 閾値の乗数`n`（観測数）は、`shared::covariance::xtx_inverse`の特異性判定
-/// （`(k as f64) * f64::EPSILON * max_abs_diag`、分解に関わる次元数を乗数にする）と同じ
-/// 発想: グループ平均の集約（`quasi_demean_column`、観測数`n`項の和）→差分の丸め誤差の
-/// 蓄積が観測数に比例しうることを踏まえた選択。2-wayは「entityでdemean→timeでdemean」の
-/// 2段階適用（モジュールdoc参照）で丸め誤差が2回蓄積しうるが、閾値はこの2段階分を明示的に
-/// 倍にはしていない（実測上、時間不変・完全共線変数の残差は乗数`2`の差では閾値を跨がない
-/// 桁数——原点`scale`比`~1e-16`——であることを想定した割り切り。将来1-wayと2-wayで
-/// 誤検出/見逃しの傾向差が実際に問題になったら、2-way用の乗数を分けることを検討する）。
-fn column_is_zero_variance(original: &[f64], transformed: &[f64]) -> bool {
-    let n = transformed.len();
-    if n == 0 {
-        // n=0は`FeInput::from_columns`が許容する境界ケース（`from_columns_with_zero_
-        // observations_succeeds`）。分散の定義自体が意味を持たないため、ゼロ分散とは
-        // 判定しない（呼び出し側の`fit()`は別途`InsufficientDegreesOfFreedom`等で
-        // n=0を弾く想定、`fe-spec.md`1章はあくまで「デミーニング後の分散」の検証に限定する）。
-        return false;
-    }
-
-    let mean: f64 = transformed.iter().sum::<f64>() / n as f64;
-    let variance: f64 = transformed.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n as f64;
-    let std_dev = variance.sqrt();
-
-    let scale = original.iter().fold(0.0_f64, |acc, v| acc.max(v.abs()));
-    let threshold = n as f64 * f64::EPSILON * scale;
-
-    std_dev <= threshold
 }
 
 /// 2-way FEがバランスパネル（`entity` × `time`の全組合せが過不足なく1回ずつ存在する）

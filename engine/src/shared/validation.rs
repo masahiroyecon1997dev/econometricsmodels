@@ -108,14 +108,55 @@ pub fn validate_has_regressors(n: usize, k: usize) -> Result<(), CommonError> {
     Ok(())
 }
 
-/// 値がすべて等しいか（要素が0個、1個なら真）。被説明変数が定数かの判定に使う
-/// （丸め誤差の許容は設けず、全行が同じ`f64`であることだけを見る）。
-pub(crate) fn all_values_equal(values: impl IntoIterator<Item = f64>) -> bool {
-    let mut values = values.into_iter();
-    match values.next() {
-        None => true,
-        Some(first) => values.all(|v| v == first),
+/// `transformed`（within変換後の1列）の分散が、`original`（変換前の同じ列）のスケールに
+/// 対して無視できるほど小さいかを判定する。
+///
+/// **絶対閾値ではなく相対閾値を使う**（`.claude/rules/rust-style.md`「線形代数」の特異性
+/// 判定の方針と同じ。データのスケールに依存しないようにするため）。`original`の最大絶対値を
+/// スケールの目安にする理由: 真に分散ゼロの列（時間不変・完全共線）は、within変換後の値が
+/// 数学的には厳密に0だが浮動小数点演算では丸め誤差の残差（`original`のスケールに比例する
+/// 大きさ）が残る。`transformed`自身の最大絶対値をスケールに使うと、この残差自身を基準に
+/// 残差を判定する自己参照になり閾値が機能しないため、変換前の値を基準にする。
+///
+/// 閾値の乗数`n`（観測数）は、`shared::covariance::xtx_inverse`の特異性判定
+/// （`(k as f64) * f64::EPSILON * max_abs_diag`、分解に関わる次元数を乗数にする）と同じ
+/// 発想: グループ平均の集約（`quasi_demean_column`、観測数`n`項の和）→差分の丸め誤差の
+/// 蓄積が観測数に比例しうることを踏まえた選択。2-wayは「entityでdemean→timeでdemean」の
+/// 2段階適用（モジュールdoc参照）で丸め誤差が2回蓄積しうるが、閾値はこの2段階分を明示的に
+/// 倍にはしていない（実測上、時間不変・完全共線変数の残差は乗数`2`の差では閾値を跨がない
+/// 桁数——原点`scale`比`~1e-16`——であることを想定した割り切り。将来1-wayと2-wayで
+/// 誤検出/見逃しの傾向差が実際に問題になったら、2-way用の乗数を分けることを検討する）。
+pub(crate) fn column_is_zero_variance(original: &[f64], transformed: &[f64]) -> bool {
+    let n = transformed.len();
+    if n == 0 {
+        // n=0は`FeInput::from_columns`が許容する境界ケース（`from_columns_with_zero_
+        // observations_succeeds`）。分散の定義自体が意味を持たないため、ゼロ分散とは
+        // 判定しない（呼び出し側の`fit()`は別途`InsufficientDegreesOfFreedom`等で
+        // n=0を弾く想定、`fe-spec.md`1章はあくまで「デミーニング後の分散」の検証に限定する）。
+        return false;
     }
+
+    let mean: f64 = transformed.iter().sum::<f64>() / n as f64;
+    let variance: f64 = transformed.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n as f64;
+    let std_dev = variance.sqrt();
+
+    let scale = original.iter().fold(0.0_f64, |acc, v| acc.max(v.abs()));
+    let threshold = n as f64 * f64::EPSILON * scale;
+
+    std_dev <= threshold
+}
+
+/// 被説明変数が（丸め誤差の範囲で）全行で同じ値か。平均で中心化した値の標準偏差を、
+/// 元の値の最大絶対値×観測数×`f64::EPSILON`と比較する（[`column_is_zero_variance`]と同じ
+/// 相対閾値。`0.1 + 0.2`と`0.3`のような1 ulpの違いも定数とみなす）。OLS・WLS・IVの
+/// `OUTCOME_CONSTANT`とFE・REの分散ゼロ検出で、手法間の判定を揃える。
+pub(crate) fn has_no_variation(values: &[f64]) -> bool {
+    if values.is_empty() {
+        return false;
+    }
+    let mean = values.iter().sum::<f64>() / values.len() as f64;
+    let centered: Vec<f64> = values.iter().map(|v| v - mean).collect();
+    column_is_zero_variance(values, &centered)
 }
 
 #[cfg(test)]
@@ -123,15 +164,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn all_values_equal_is_true_only_when_every_value_is_identical() {
-        assert!(all_values_equal([]));
-        assert!(all_values_equal([2.5]));
-        assert!(all_values_equal([3.0, 3.0, 3.0]));
-        assert!(!all_values_equal([3.0, 3.0, 3.000_000_000_000_001]));
-        // 丸め誤差を許容しない: 0.1を3回足した値は0.3と等しくない。
-        assert!(!all_values_equal([0.1 + 0.1 + 0.1, 0.3]));
-        // NaNは自分自身と等しくない。
-        assert!(!all_values_equal([f64::NAN, f64::NAN]));
+    fn has_no_variation_is_judged_relative_to_the_scale_of_the_values() {
+        assert!(has_no_variation(&[3.0, 3.0, 3.0]));
+        assert!(has_no_variation(&[0.0, 0.0]));
+        // 1 ulpの違いは定数とみなす。
+        assert!(has_no_variation(&[0.1 + 0.2, 0.3, 0.3]));
+        // 値の大きさに対する相対的な変動が`n * epsilon`を超えれば定数ではない。
+        assert!(!has_no_variation(&[3.0, 3.0, 3.000_001]));
+        assert!(!has_no_variation(&[1.0, 2.0, 3.0]));
+        // 絶対的な大きさに依らない（小さな値でも、相対的に十分な変動は定数ではない）。
+        assert!(!has_no_variation(&[1e-12, 2e-12, 3e-12]));
+        assert!(has_no_variation(&[1e12, 1e12, 1e12 + 1e-4]));
+        // 観測が無ければ定数とは判定しない。
+        assert!(!has_no_variation(&[]));
     }
 
     #[test]

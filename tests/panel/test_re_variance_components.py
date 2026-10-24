@@ -253,6 +253,35 @@ def test_tiny_error_variance_gives_theta_close_to_one_or_a_perfect_fit():
         )
 
 
+def test_noise_just_above_the_perfect_fit_threshold_is_a_near_singular_final_regression():
+    """完全フィットの閾値（残差の標準偏差が個体内のyの約`3e-8`倍）のすぐ上では、`σ_ε²`が
+    極小で`θ ≈ 1`となり、最終回帰の準偏差変換した定数列`1 - θ`がほぼ0になる。この設計行列は
+    実際に悪条件なので`MATRIX_NEAR_SINGULAR`のままにする（最終回帰は被説明変数が準偏差変換後の
+    値で、元のモデルの総平方和が当てはまらないため完全フィットの判定を足さない）。この帯は
+    狭く、下は`PERFECT_FIT`、上（`1e-7`以上）は通常どおり推定できる。"""
+    for seed in (1, 2, 3, 4):
+        with raises_error(
+            ErrorCode.MATRIX_NEAR_SINGULAR,
+            matrix="COEFFICIENT_COVARIANCE",
+            stage="QUASI_DEMEANED_REGRESSION",
+        ):
+            _fit(
+                _panel(seed, entity_sd=1.0, time_sd=0.0, noise_sd=3e-8),
+                cov_type="classical",
+            )
+    with raises_error(
+        ErrorCode.PERFECT_FIT, stage="VARIANCE_COMPONENT_WITHIN_REGRESSION"
+    ):
+        _fit(
+            _panel(1, entity_sd=1.0, time_sd=0.0, noise_sd=1e-8),
+            cov_type="classical",
+        )
+    _fit(
+        _panel(1, entity_sd=1.0, time_sd=0.0, noise_sd=1e-7),
+        cov_type="classical",
+    )
+
+
 def test_theta_is_computed_once_per_result():
     """`theta`は個体数に比例する辞書のため、同じ結果オブジェクトでは同じ辞書を返す
     （参照のたびに作り直さない）。"""

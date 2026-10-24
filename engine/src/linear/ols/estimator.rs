@@ -128,10 +128,11 @@ impl OlsEstimator {
     /// 完全フィット（`CommonError::PerfectFit`）かを調べない。
     ///
     /// モデルの結果として利用者に見せる回帰ではなく、別の統計量の部品として使う補助的な回帰
-    /// （診断検定の補助回帰、IVの第二段階とWu-Hausman拡張回帰、REの準偏差変換後の回帰とハウスマンの
-    /// 補助回帰）に使う。これらの被説明変数は元のモデルの被説明変数ではない（残差の二乗、
-    /// 変換後の値、拡張回帰の列）ため、定数や完全フィットの判定の基準（元のモデルの総平方和）が
-    /// 当てはまらず、完全フィットは元のモデルの回帰が先に検出する。
+    /// （診断検定の補助回帰、IVの第二段階、REの準偏差変換後の回帰とハウスマンの補助回帰）に使う。
+    /// 診断検定の補助回帰・REの回帰の被説明変数は元のモデルの被説明変数ではない（残差の二乗、
+    /// 変換後の値）ため、IVの第二段階は`X̂`への回帰で残差が構造残差ではないため、定数や完全フィットの
+    /// 判定の基準（元のモデルの総平方和・残差）が当てはまらない。完全フィットは元のモデルの回帰
+    /// （構造残差、内部のFE、OLS）が先に検出する。
     ///
     /// # Errors
     /// 被説明変数に関する2つを除き[`fit`](Self::fit)と同じ。
@@ -547,6 +548,42 @@ mod tests {
             result.unwrap_err(),
             LeastSquaresError::Common(CommonError::OutcomeConstant)
         );
+    }
+
+    #[test]
+    fn fit_treats_an_outcome_that_differs_by_one_ulp_as_constant() {
+        // 計算で作った定数（`0.1 + 0.2`と`0.3`）は1 ulp違うが、定数として扱う。
+        let y = [0.1 + 0.2, 0.3, 0.3, 0.1 + 0.2, 0.3];
+        let input = OlsInput::from_columns(
+            &y,
+            &[vec![0.0, 1.0, 2.0, 3.0, 5.0]],
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = OlsEstimator::fit(input, CovType::Classical, 0.95);
+
+        assert_eq!(
+            result.unwrap_err(),
+            LeastSquaresError::Common(CommonError::OutcomeConstant)
+        );
+    }
+
+    #[test]
+    fn fit_does_not_treat_a_small_but_real_variation_as_constant() {
+        let y = [3.0, 3.000_001, 3.0, 3.000_002, 3.000_001];
+        let input = OlsInput::from_columns(
+            &y,
+            &[vec![0.0, 1.0, 2.0, 3.0, 5.0]],
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        assert!(OlsEstimator::fit(input, CovType::Classical, 0.95).is_ok());
     }
 
     #[test]

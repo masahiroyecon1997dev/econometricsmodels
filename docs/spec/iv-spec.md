@@ -47,8 +47,10 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   重み行列`S`が0になって逆行列が特異になる前に、初期推定（2SLSと同じ点推定）の構造残差で判定する。
   第一段階は内生変数ごとの`OlsEstimator::fit_with_optional_f_test`なので、操作変数が内生変数を
   完全に予測する（第一段階の残差が0）と、その内生変数の文脈（`stage=FIRST_STAGE`）で
-  `PERFECT_FIT`になる。第二段階・Wu-Hausman拡張回帰・部分F統計量の制限モデルは判定しない
-  （`fit_auxiliary`）。
+  `PERFECT_FIT`になる（診断ではなく`fit()`全体を拒否する。2SLSがOLSに一致する退化も含め、
+  標準誤差が定義できない回帰を結果に残さない）。第二段階・部分F統計量の制限モデルは判定しない
+  （`fit_auxiliary`。第二段階は`X̂`への回帰で、判定は構造残差で行う）。Wu-Hausman拡張回帰は
+  元の`y`の回帰なので判定し、完全フィットなら3.6節のとおり検定統計量だけ`None`にする。
 - **バリデーション**（`engine_pybind::iv::common::build_iv_input`）:
   - `y`/`x_exog`/`x_endog`/`instruments`間の重複列名は`ValidationError`。
   - 各ロール内部（`x_exog`/`x_endog`/`instruments`それぞれ）の重複列名も`ValidationError`。
@@ -312,9 +314,10 @@ Sargan検定（2SLS）／Hansen J検定（GMM）を`fit()`の結果本体に含�
 - **`estimator="gmm"`では常に`None`**（`GmmEstimator`はWu-Hausman検定を実装しない）。
 - **想定内の理由で失敗した場合は`fit()`全体を失敗させず`None`にする**（`FirstStageFailed`/
   `SecondStageFailed`の"all-or-nothing"方針とは意図的に異なる）。想定内の理由は2つ:
-  (1) 第一段階残差が第二段階の列と共線になり拡張回帰の設計行列が特異になる（第一段階の残差が
-  0になる退化ケースは、第一段階が`PERFECT_FIT`で先に止めるので、この経路には来ない）、
-  (2) 拡張回帰は第二段階より内生変数の数だけ
+  (1) 拡張回帰が完全フィット（`y`が第二段階の説明変数と第一段階残差で丸め誤差の範囲で
+  厳密に説明される。`sigma^2 = 0`でワルド統計量が定義できない）、第一段階残差が他の列と共線に
+  なり設計行列が特異になる（第一段階の残差が0になる退化ケースは第一段階が`PERFECT_FIT`で
+  先に止めるので、この経路には来ない）、(2) 拡張回帰は第二段階より内生変数の数だけ
   列が多い（`k_exog+2*k_endog`列）ため、境界的なサンプルサイズでは第二段階は成功するが
   拡張回帰は観測数不足になりうる。**それ以外の失敗（数値的なほぼ特異性等）は`None`へ
   握りつぶさず`IvError::HausmanRegressionFailed`として伝播する**（広すぎる`Err(_)`

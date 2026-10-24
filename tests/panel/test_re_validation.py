@@ -423,7 +423,7 @@ def test_between_regression_insufficient_entities_raises():
 def test_noiseless_data_is_a_perfect_fit_in_the_variance_component_regression():
     """ノイズ無しの線形DGP（`y = 2*x1 + entity固有の切片`、entity間の切片が
     異なるためσ_u²>0）はσ_ε²=0に収束し、θ_i=1（全エンティティ）で切片復元用
-    の定数列が恒等的に全ゼロ列になる。最終回帰の特異性に落ちる前に、σ_ε²を求める
+    の定数列が恒等的に全ゼロ列になる。最終回帰に至る前に、σ_ε²を求める
     内部のwithin回帰が完全フィット（`PERFECT_FIT`、
     `stage="VARIANCE_COMPONENT_WITHIN_REGRESSION"`）として止まる
     （`engine/src/panel/re.rs`の

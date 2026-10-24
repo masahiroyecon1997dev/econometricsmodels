@@ -160,8 +160,9 @@ pub enum CommonError {
     #[error("{}", self.catalog_message())]
     NearSingularMatrix { matrix: MatrixKind },
 
-    /// 被説明変数が全行で同じ値で、切片のあるモデルが説明するものを持たない（総平方和が0で、
-    /// R-squaredが定義できない）。推定を走らせずに入力だけから分かるため`ValidationError`。
+    /// 被説明変数が（丸め誤差の範囲で）全行で同じ値で、切片のあるモデルが説明するものを持たない
+    /// （総平方和が0で、R-squaredが定義できない）。判定は
+    /// [`crate::shared::validation::has_no_variation`]。推定を走らせずに入力だけから分かるため`ValidationError`。
     /// 切片なしのモデルでは定数でも非中心化の総平方和が正なので対象外。
     #[error("{}", self.catalog_message())]
     OutcomeConstant,

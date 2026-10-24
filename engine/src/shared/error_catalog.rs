@@ -1615,7 +1615,7 @@ pub static CATALOG: &[ErrorSpec] = &[
         code: ErrorCode::OutcomeConstant,
         class: ErrorClass::Validation,
         params: &[],
-        message: r#"The outcome has the same value in every row, so a model with an intercept has nothing to explain."#,
+        message: r#"The outcome has the same value in every row up to rounding, so a model with an intercept has nothing to explain."#,
         hint: Some(r#"Use an outcome that varies across observations."#),
         stage_allowed: true,
     },

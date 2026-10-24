@@ -42,7 +42,7 @@ use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use crate::shared::error::{ClusterSetting, CommonError, ErrorInfo, staged_report};
 use crate::shared::error_catalog::{ErrorCode, ErrorReport, Stage};
 use crate::shared::validation::{
-    GMM_MAX_ITER_MIN, MAX_ITER_LIMIT, all_values_equal, validate_cluster_count_covers_slopes,
+    GMM_MAX_ITER_MIN, MAX_ITER_LIMIT, has_no_variation, validate_cluster_count_covers_slopes,
     validate_cluster_groups,
 };
 
@@ -543,7 +543,7 @@ pub fn validate_structural_cluster_count(
 /// 切片があり、被説明変数がすべて同じ値: `CommonError::OutcomeConstant`
 pub fn validate_outcome_not_constant(input: &IvInput) -> Result<(), CommonError> {
     let y = input.y();
-    if input.has_intercept() && all_values_equal((0..y.nrows()).map(|i| *y.get(i, 0))) {
+    if input.has_intercept() && has_no_variation(&mat_column_to_vec(y, 0)) {
         return Err(CommonError::OutcomeConstant);
     }
     Ok(())

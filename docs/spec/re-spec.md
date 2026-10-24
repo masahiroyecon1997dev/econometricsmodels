@@ -117,6 +117,12 @@ Python `linearmodels.RandomEffects`の実装（Swamy-Arora）に準拠する。R
     最終回帰の定数列が0になる）なら`PERFECT_FIT`（`ComputationError`、`stage`は
     `VARIANCE_COMPONENT_WITHIN_REGRESSION`）。以前は最終回帰の特異性（`DESIGN_MATRIX_SINGULAR`）に
     落ちていた。
+    **閾値のすぐ上の狭い帯**（σ_ε²を求めるwithin回帰の相対ノイズが約`3e-8`付近。下は`PERFECT_FIT`、約`1e-7`以上は通常どおり推定できる）は完全フィットではないが、
+    σ_ε²が極小で`θ ≈ 1`となり、最終回帰の準偏差変換した定数列`1 - θ_i`がほぼ0になる。この
+    最終回帰の設計行列は実際に悪条件なので、`MATRIX_NEAR_SINGULAR`（`stage=QUASI_DEMEANED_REGRESSION`、
+    `cov_type="hc1"`ではハウスマンの補助回帰で`HAUSMAN_REGRESSION`）のままにする。最終回帰は
+    被説明変数が準偏差変換後の値で元のモデルの総平方和が当てはまらないため、完全フィットの
+    判定は足さない（`test_re_variance_components.py`の`test_noise_just_above_the_perfect_fit_threshold_is_a_near_singular_final_regression`で固定）。
 - **σ_u²（individual variance）**: between回帰（エンティティ平均`[1, x̄ᵢ.]`への最小二乗）のSSR、
   調和平均`t_bar = n_entities / Σ(1/T_i)`を使う標準式`max(0, ssr/df_resid - σ_ε²/t_bar)`。
   `df_resid = n_entities - K_b - 1`。平均が個体間で一定の列（バランスパネルで時点間でのみ変わる

@@ -366,8 +366,21 @@ mod tests {
         )
         .unwrap();
 
+        // 重み付き正規方程式の閉形式解（単回帰）: b1 = Sxy / Sxx（重み付き偏差）、b0 = ȳ_w - b1*x̄_w。
+        let x = &x_columns[0];
+        let sw: f64 = weights.iter().sum();
+        let xbar = x.iter().zip(&weights).map(|(a, w)| a * w).sum::<f64>() / sw;
+        let ybar = y.iter().zip(&weights).map(|(a, w)| a * w).sum::<f64>() / sw;
+        let sxy: f64 = (0..5)
+            .map(|i| weights[i] * (x[i] - xbar) * (y[i] - ybar))
+            .sum();
+        let sxx: f64 = (0..5).map(|i| weights[i] * (x[i] - xbar).powi(2)).sum();
+        let (want_b1, want_b0) = (sxy / sxx, ybar - sxy / sxx * xbar);
+
         let b0 = *wls.estimator().params().get(0, 0);
         let b1 = *wls.estimator().params().get(1, 0);
+        assert!((b0 - want_b0).abs() < 1e-9);
+        assert!((b1 - want_b1).abs() < 1e-9);
         assert!((b0 - 1.0).abs() < 0.3);
         assert!((b1 - 2.0).abs() < 0.15);
         for (i, r) in wls.residuals().iter().enumerate() {

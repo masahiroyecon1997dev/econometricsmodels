@@ -28,7 +28,8 @@ pub(crate) fn is_perfect_fit(ssr: f64, sst: f64, k: usize) -> bool {
 }
 
 /// 被説明変数の総平方和。`has_intercept`なら`sum (y - mean)^2`、なければ`sum y^2`
-/// （重みがあれば`w`を掛け、平均は重み付き平均）。R-squaredと完全フィットの判定が共有する。
+/// （重みがあれば`w`を掛け、平均は重み付き平均）。重みなしの値は[`gaussian_goodness_of_fit`]がR-squaredに使う
+/// 総平方和と同じ定義（あちらは`Mat`を受け取るため式を別に持つ）で、完全フィットの判定の基準になる。
 pub(crate) fn total_sum_of_squares(y: &[f64], weights: Option<&[f64]>, has_intercept: bool) -> f64 {
     let w = |i: usize| weights.map_or(1.0, |w| w[i]);
     if has_intercept {

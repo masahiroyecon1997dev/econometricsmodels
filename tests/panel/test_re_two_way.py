@@ -567,8 +567,8 @@ def test_two_way_computation_error_paths(columns, x, stage):
 
 def test_two_way_noiseless_data_is_a_perfect_fit():
     """誤差の無いデータ（`σ_ε² = 0`）は、分散成分を求める内部の2-way within回帰が
-    完全フィット（`PERFECT_FIT`）として止まる。以前は成功して真の係数を返したが、標準誤差が
-    定義できない（残差が丸め誤差の範囲で0）ため、OLS・FEと同じく拒否する。"""
+    完全フィット（`PERFECT_FIT`）として止まる。標準誤差が定義できない（残差が丸め誤差の
+    範囲で0）ため、OLS・FEと同じく拒否する。"""
     df = _baseline().with_columns(
         y=1.0 + 2.0 * pl.col("x1") - 1.0 * pl.col("x2")
     )

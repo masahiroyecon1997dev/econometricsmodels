@@ -395,9 +395,11 @@ impl TwoSlsEstimator {
         // 拡張回帰は元の第二段階（k_exog+k_endog列）より内生変数の数だけ列が多い
         // （k_exog+2*k_endog列、残差列が追加分）ため、境界的なサンプルサイズでは
         // 第二段階は成功するが拡張回帰は`InsufficientObservations`になりうる。また
-        // 第一段階残差の分散がゼロ（操作変数が内生変数を完全予測する退化ケース等）だと
-        // 拡張回帰の設計行列に分散ゼロの列が混入し特異（`SingularMatrix`）、変数間の
-        // スケール差等では`wald_test_last_columns`側が`NearSingularMatrix`になりうる。
+        // 構造式の`y`が第二段階の説明変数と第一段階残差で（丸め誤差の範囲で）厳密に
+        // 説明される入力は、拡張回帰が完全フィット（`PerfectFit`）になり、`sigma^2`が0で
+        // ワルド統計量が定義できない。変数間のスケール差等では`wald_test_last_columns`側が
+        // `NearSingularMatrix`になりうる。`SingularMatrix`（残差列が他の列と共線）は、第一段階が
+        // 完全フィットで先に止まり第二段階の列も独立なため通常は起きないが、防御として同じ扱いにする。
         // さらに`cov_type=Cluster`では、構造式の傾き係数の数`q`が`fit()`冒頭のチェックを
         // 通っていても、拡張回帰は残差列の分だけ`q`が増える（`q_aug = q + k_endog`）ため
         // `g <= q_aug`となり拡張回帰の`OlsEstimator::fit`が`InsufficientClustersForInference`
@@ -443,8 +445,10 @@ impl TwoSlsEstimator {
                     input.has_intercept(),
                     input.dep_var_name().to_string(),
                 )?;
+                // 被説明変数は元の構造式の`y`（説明変数側に第一段階残差が加わるだけ）なので、
+                // 完全フィットの判定は元の`y`の総平方和で行う（`fit_auxiliary`ではなく`fit`）。
                 let hausman_estimator =
-                    OlsEstimator::fit_auxiliary(hausman_input, cov_type.clone(), confidence_level)?;
+                    OlsEstimator::fit(hausman_input, cov_type.clone(), confidence_level)?;
                 let (stat, p_value) = hausman_estimator.wald_test_last_columns(input.k_endog())?;
                 Ok((
                     stat,
@@ -457,6 +461,7 @@ impl TwoSlsEstimator {
             match hausman_result {
                 Ok((stat, p_value, df)) => (Some(stat), Some(p_value), Some(df)),
                 Err(LeastSquaresError::SingularMatrix { .. })
+                | Err(LeastSquaresError::Common(CommonError::PerfectFit))
                 | Err(LeastSquaresError::Common(CommonError::InsufficientObservations {
                     ..
                 }))
@@ -995,6 +1000,95 @@ mod tests {
         assert_eq!(
             result.unwrap_err(),
             IvError::Common(CommonError::PerfectFit)
+        );
+    }
+
+    #[test]
+    fn fit_does_not_judge_the_second_stage_regression_for_a_perfect_fit() {
+        // y = 1 + 2*x̂（x̂は第一段階の当てはめ値）は、第二段階の回帰`y ~ const + x̂`が厳密に成り立つ
+        // が、構造残差`y - 1 - 2*x_endog = -2v`は0ではない。標準誤差の基準は構造残差なので、
+        // 第二段階の回帰は完全フィットの判定をしない（`fit_auxiliary`）。
+        let base = TwoSlsEstimator::fit(just_identified_input(), CovType::Classical, 0.95).unwrap();
+        let v = base.first_stage_estimators()[0].1.residuals();
+        let (_, x_endog, z) = just_identified_data();
+        let y: Vec<f64> = (0..5)
+            .map(|i| 1.0 + 2.0 * (x_endog[i] - *v.get(i, 0)))
+            .collect();
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            &[x_endog],
+            vec!["x_endog".to_string()],
+            &[z],
+            vec!["z".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let estimator = TwoSlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
+
+        assert!((*estimator.params().get(1, 0) - 2.0).abs() < 1e-8);
+        assert!((0..2).all(|j| estimator.std_errors().get(j, 0).is_finite()));
+    }
+
+    #[test]
+    fn fit_sets_wu_hausman_statistics_to_none_when_the_augmented_regression_is_exact() {
+        // y = 1 + 2*x_endog + 3*v（vは第一段階残差）は、構造残差(= 3v)も第一段階も完全フィット
+        // ではないが、Wu-Hausmanの拡張回帰`y ~ const + x_endog + v`は厳密に成り立つ。
+        // sigma^2が0でワルド統計量が定義できないので、`fit()`は成功し、検定統計量だけ`None`にする。
+        let base = TwoSlsEstimator::fit(just_identified_input(), CovType::Classical, 0.95).unwrap();
+        let v = base.first_stage_estimators()[0].1.residuals();
+        let (_, x_endog, z) = just_identified_data();
+        let y: Vec<f64> = (0..5)
+            .map(|i| 1.0 + 2.0 * x_endog[i] + 3.0 * *v.get(i, 0))
+            .collect();
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            &[x_endog],
+            vec!["x_endog".to_string()],
+            &[z],
+            vec!["z".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let estimator = TwoSlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
+
+        assert!((*estimator.params().get(1, 0) - 2.0).abs() < 1e-8);
+        assert_eq!(estimator.wu_hausman_statistic(), None);
+        assert_eq!(estimator.wu_hausman_p_value(), None);
+    }
+
+    #[test]
+    fn fit_returns_outcome_constant_for_a_constant_endogenous_regressor_in_its_first_stage() {
+        // 定数の内生変数は、その第一段階の被説明変数が定数。第一段階の文脈つきで報告する。
+        let (y, _, z) = just_identified_data();
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            &[vec![2.0; 5]],
+            vec!["x_endog".to_string()],
+            &[z],
+            vec!["z".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = TwoSlsEstimator::fit(input, CovType::Classical, 0.95);
+
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::FirstStageFailed {
+                endog_name: "x_endog".to_string(),
+                source: CommonError::OutcomeConstant.into(),
+            }
         );
     }
 

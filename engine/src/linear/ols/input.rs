@@ -4,7 +4,7 @@ use crate::linear::common::LeastSquaresError;
 use crate::shared::design_matrix::design_matrix_element;
 use crate::shared::error::CommonError;
 use crate::shared::goodness_of_fit::total_sum_of_squares;
-use crate::shared::validation::all_values_equal;
+use crate::shared::validation::has_no_variation;
 
 /// OLSの被説明変数・設計行列を保持する入力データ。
 ///
@@ -26,7 +26,7 @@ pub struct OlsInput {
     /// なければ非中心化）。完全フィットの判定（`is_perfect_fit`）の基準で、WLSでも元の`y`と
     /// 重みで決まる（`y`は`sqrt(w)`倍に変換済みで、そこから計算すると別の量になる）
     outcome_sst: f64,
-    /// 変換前の`y`が全行で同じ値か（`has_intercept`のモデルでは説明するものが無い）
+    /// 変換前の`y`が（丸め誤差の範囲で）全行で同じ値か（`has_intercept`のモデルでは説明するものが無い）
     outcome_constant: bool,
 }
 
@@ -156,7 +156,7 @@ impl OlsInput {
         param_names.extend(x_names);
 
         let outcome_sst = total_sum_of_squares(y, weights, include_intercept);
-        let outcome_constant = all_values_equal(y.iter().copied());
+        let outcome_constant = has_no_variation(y);
 
         Ok(Self {
             y: y_mat,

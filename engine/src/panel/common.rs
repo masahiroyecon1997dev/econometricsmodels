@@ -209,7 +209,7 @@ pub enum PanelError {
     /// 被説明変数がwithin変換後に分散ゼロ（個体内で定数、2-wayなら個体効果と時点効果だけで
     /// 説明される）。固定効果が説明するものが残らず、within回帰のR-squaredが定義できない。
     /// 説明変数の`ZeroVarianceAfterDemeaning`と同じ相対閾値で判定する
-    /// （[`crate::panel::fe::column_is_zero_variance`]）。
+    /// （[`crate::shared::validation::column_is_zero_variance`]）。
     #[error("{}", self.catalog_message())]
     OutcomeConstantWithinEntity,
 

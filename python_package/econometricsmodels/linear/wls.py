@@ -90,11 +90,13 @@ class WLS:
                 column is missing, contains missing values or
                 NaN/infinity, a weight is non-positive, `weight`
                 duplicates `y`/`x`, insufficient observations,
-                `confidence_level` out of range, etc.). A subclass of
-                `ValueError`.
+                `confidence_level` out of range, `y` constant with an
+                intercept, etc.). A subclass of `ValueError`.
             ComputationError: A problem was detected during
-                computation (e.g. a singular design matrix). A
-                subclass of `RuntimeError`.
+                computation (e.g. a singular design matrix, or a
+                perfect fit: residuals zero up to rounding, so the
+                standard errors are undefined). A subclass of
+                `RuntimeError`.
         """
         raw = _lib.fit_wls(
             self._data, self._y, self._x, self._weight, self._options

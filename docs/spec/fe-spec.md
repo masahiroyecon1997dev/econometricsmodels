@@ -56,6 +56,15 @@ FE固有の内容のみを記載する。
 - **within変換後に分散ゼロになる説明変数は`ValidationError`**（`validate_no_zero_variance_
   regressors`。時間不変変数（1-way）・2-wayでtime FEと完全共線な列を同じロジックで検出する。
   閾値は絶対値ではなく相対値: 変換前の元の列の最大絶対値×観測数×`f64::EPSILON`と比較する）。
+- **被説明変数にwithin変動が残らなければ`ValidationError`（`OUTCOME_CONSTANT_WITHIN_ENTITY`）**:
+  `y`がどの個体内でも定数（1-way）、または個体効果と時点効果だけで説明される（2-way）と、
+  within変換後の`y`は0になり固定効果が説明するものが残らない。説明変数と同じ
+  `column_is_zero_variance`の相対閾値（変換前の`y`の最大絶対値×観測数×`f64::EPSILON`）で判定する
+  （`0.1`を3回足して3で割ると丸め誤差が残るため、厳密な等値では見逃す）。説明変数の検査の後に行う。
+- **完全フィットは`ComputationError`（`PERFECT_FIT`）**: within回帰の残差平方和が、within変換後の
+  `y`の総平方和（非中心化の$\sum\tilde y^2$）の`k·ε`倍以下だと、標準誤差とF検定が定義できない
+  （`ols-spec.md`3.3節と同じ判定、`is_perfect_fit`）。`PanelError::WithinRegressionFailed`に包んで
+  共分散・F検定より前に止める（`stage`は`WITHIN_REGRESSION`）。
 - 欠損値（null・NaN/無限大）は常にエラー（方針は[`docs/guide/validation.md`](../guide/validation.md)）。`include_intercept`が無いため`"const"`列との衝突検証も
   無い。
 
@@ -292,6 +301,8 @@ demeanしたR²」を3種とも定義すると誤る）:
 | `SingletonGroup` | `SINGLETON_GROUP`（`argument`は`entity`か`time`） | `ValidationError` |
 | `UnbalancedPanelForTwoWay` | `PANEL_NOT_BALANCED_FOR_TWO_WAY` | `ValidationError` |
 | `ZeroVarianceAfterDemeaning` | `REGRESSOR_NO_WITHIN_VARIATION` | `ValidationError` |
+| `OutcomeConstantWithinEntity` | `OUTCOME_CONSTANT_WITHIN_ENTITY` | `ValidationError` |
+| `WithinRegressionFailed { source: Common(PerfectFit) }` | `PERFECT_FIT`（`stage`は`WITHIN_REGRESSION`） | `ComputationError` |
 | `InvalidDkBandwidth` / `InsufficientDkPeriods` / `InsufficientDkPeriodsForInference` | `DK_BANDWIDTH_OUT_OF_RANGE` / `DK_PERIODS_TOO_FEW` / `DK_PERIODS_NOT_ABOVE_COEFFICIENTS` | `ValidationError` |
 | `DegenerateDkTwoPeriods` / `DegenerateClusterTwoGroups` | `DK_TWO_PERIODS_DEGENERATE` / `CLUSTER_TWO_GROUPS_DEGENERATE` | `ValidationError` |
 | `AmemiyaRequiresWithinVariation` | `AMEMIYA_REQUIRES_WITHIN_VARIATION` | `ValidationError` |

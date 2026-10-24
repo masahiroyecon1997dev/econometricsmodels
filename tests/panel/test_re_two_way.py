@@ -565,16 +565,17 @@ def test_two_way_computation_error_paths(columns, x, stage):
         _fit(df, REOptions(time="time"), x=x)
 
 
-def test_two_way_noiseless_data_fits_with_zero_idiosyncratic_variance():
-    """誤差の無いデータ（`σ_ε² = 0`）でも失敗せず、真の係数を返す。"""
+def test_two_way_noiseless_data_is_a_perfect_fit():
+    """誤差の無いデータ（`σ_ε² = 0`）は、分散成分を求める内部の2-way within回帰が
+    完全フィット（`PERFECT_FIT`）として止まる。以前は成功して真の係数を返したが、標準誤差が
+    定義できない（残差が丸め誤差の範囲で0）ため、OLS・FEと同じく拒否する。"""
     df = _baseline().with_columns(
         y=1.0 + 2.0 * pl.col("x1") - 1.0 * pl.col("x2")
     )
-    res = _fit(df, REOptions(time="time"), x=("x1", "x2"))
-    assert res.sigma2_eps == pytest.approx(0.0, abs=1e-20)
-    assert [res.params[n] for n in ("const", "x1", "x2")] == pytest.approx(
-        [1.0, 2.0, -1.0], abs=1e-8
-    )
+    with raises_error(
+        ErrorCode.PERFECT_FIT, stage="VARIANCE_COMPONENT_WITHIN_REGRESSION"
+    ):
+        _fit(df, REOptions(time="time"), x=("x1", "x2"))
 
 
 def test_two_way_with_too_few_degrees_of_freedom_for_the_internal_fe_raises(

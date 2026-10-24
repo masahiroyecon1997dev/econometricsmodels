@@ -108,9 +108,31 @@ pub fn validate_has_regressors(n: usize, k: usize) -> Result<(), CommonError> {
     Ok(())
 }
 
+/// 値がすべて等しいか（要素が0個、1個なら真）。被説明変数が定数かの判定に使う
+/// （丸め誤差の許容は設けず、全行が同じ`f64`であることだけを見る）。
+pub(crate) fn all_values_equal(values: impl IntoIterator<Item = f64>) -> bool {
+    let mut values = values.into_iter();
+    match values.next() {
+        None => true,
+        Some(first) => values.all(|v| v == first),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn all_values_equal_is_true_only_when_every_value_is_identical() {
+        assert!(all_values_equal([]));
+        assert!(all_values_equal([2.5]));
+        assert!(all_values_equal([3.0, 3.0, 3.0]));
+        assert!(!all_values_equal([3.0, 3.0, 3.000_000_000_000_001]));
+        // 丸め誤差を許容しない: 0.1を3回足した値は0.3と等しくない。
+        assert!(!all_values_equal([0.1 + 0.1 + 0.1, 0.3]));
+        // NaNは自分自身と等しくない。
+        assert!(!all_values_equal([f64::NAN, f64::NAN]));
+    }
 
     #[test]
     fn validate_has_regressors_accepts_positive_k() {

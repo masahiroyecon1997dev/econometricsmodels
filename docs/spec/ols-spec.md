@@ -177,6 +177,31 @@ $$
   （`crate::shared::linear_algebra`、nonlinear系統とも共有）が`SelfAdjointEigen`で実際の固有値を求め、
   最大固有値との相対比で判定しCholesky分解前に`CommonError::NearSingularMatrix`
   （`matrix=COEFFICIENT_COVARIANCE`、`code`は`MATRIX_NEAR_SINGULAR`、`ComputationError`）で止める。
+- **被説明変数が定数（`OUTCOME_CONSTANT`）**: 切片のあるモデルで`y`が全行で同じ値（`f64`として
+  厳密に等しい）だと、中心化した総平方和が0でR²が定義できない（以前は`R² = -inf`で成功していた）。
+  入力だけから分かるので、QR分解より前に`ValidationError`にする。切片なしのモデルでは定数でも
+  非中心化の総平方和が正なので対象外。丸め誤差を許容しない（`0.1 + 0.2`と`0.3`のような差は定数と
+  みなさない）。
+- **完全フィット（`PERFECT_FIT`）**: 残差平方和が総平方和の`k·ε`倍以下（`SSR <= k·ε·SST`、
+  `1 - R² <= k·ε`と同じ。`ε = f64::EPSILON`、`k`は係数の数、`SST`はモデルのR²の総平方和）だと、
+  `σ̂² = 0`で標準誤差とF検定が定義できない。残差が厳密に0にならず丸め誤差が残るデータで、
+  成功してF統計量が`1e35`のような無意味な値になったり、クラスターのときだけ`MATRIX_NEAR_SINGULAR`
+  になったり、と結果がデータの丸め誤差で変わっていたため、共分散・F検定を計算する前（係数の計算の
+  直後）に、総平方和に対する相対閾値で`ComputationError`にする。判定は
+  `shared::goodness_of_fit::is_perfect_fit`の1か所で、OLS・WLS・FE・IVが共有する。**閾値は残差の
+  大きさではなく平方和の比に対するもので、残差の標準偏差が`y`の標準偏差の約`1e-8`倍以下
+  （`R² > 1 - 1e-15`程度）のデータが対象になる**（実データの当てはまりではまず起きず、合成データで
+  式どおりに`y`を作ったときに起きる）。会計恒等式のように`y`が説明変数の厳密な関数のデータは
+  推定できなくなる（残差が0の回帰には標準誤差が無い）。
+  - 総平方和は平均で中心化するため、平均が標準偏差より桁違いに大きい`y`でも、丸め誤差の残差を
+    検出できる（平均が標準偏差の`1e8`倍までは、丸め誤差だけの`y`を全て検出することを実測した。
+    `1e10`倍を超えると丸め誤差が信号に近づき、F統計量が`1e14`程度の有限値で成功する。そこまで
+    精度が落ちたデータは、完全フィットかどうかを判別できる情報自体が残っていない）。
+  - `SST`は元の`y`から計算する（`OlsInput`が保持する）。WLSは変換後の`sqrt(w)y`ではなく重み付き平均で
+    中心化した`Σw(y-ȳ_w)²`（切片なしは`Σwy²`）。
+  - 診断検定の補助回帰、IVの第二段階とWu-Hausman拡張回帰、REの準偏差変換後の回帰とハウスマンの
+    補助回帰は、被説明変数が元のモデルの`y`ではないので判定しない
+    （`OlsEstimator::fit_auxiliary`。完全フィットは元のモデルの回帰が先に検出する）。
 
 ### 3.4 `predict()`
 
@@ -248,6 +273,8 @@ $$
   | `NonPositiveWeight`（WLS） | `WEIGHT_NOT_POSITIVE` | `ValidationError` |
   | `SingularMatrix` | `DESIGN_MATRIX_SINGULAR` | `ComputationError` |
   | `Common(NearSingularMatrix { matrix })` | `MATRIX_NEAR_SINGULAR` | `ComputationError` |
+  | `Common(OutcomeConstant)` | `OUTCOME_CONSTANT` | `ValidationError` |
+  | `Common(PerfectFit)` | `PERFECT_FIT` | `ComputationError` |
   | `Common(DimensionMismatch \| ClusterDimensionMismatch \| NoRegressors \| Internal)`・`WeightDimensionMismatch` | `INTERNAL_ERROR` | `ComputationError` |
 
   `engine_pybind`が同じ`DataFrame`の列から`y`・`x`・`weight`を作るため、`INTERNAL_ERROR`の行は

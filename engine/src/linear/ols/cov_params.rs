@@ -287,10 +287,10 @@ mod tests {
         assert!((*se.get(1, 0) - 0.164_924_225_024_705_75).abs() < 1e-6);
     }
 
-    /// `n`行の単純回帰（`y = x + (i % 7)`）を`cov_type`で推定し`hac_lags_used`を返す補助関数。
+    /// `n`行の単純回帰（`y = x + (i * i % 7)`）を`cov_type`で推定し`hac_lags_used`を返す補助関数。
     fn hac_lags_used_for(n: usize, cov_type: CovType) -> Option<usize> {
         let x: Vec<f64> = (0..n).map(|i| i as f64).collect();
-        let y: Vec<f64> = (0..n).map(|i| i as f64 + (i % 7) as f64).collect();
+        let y: Vec<f64> = (0..n).map(|i| i as f64 + (i * i % 7) as f64).collect();
         let input = OlsInput::from_columns(&y, &[x], vec!["x1".to_string()], true, "y".to_string())
             .unwrap();
         OlsEstimator::fit(input, cov_type, 0.95)
@@ -681,7 +681,15 @@ mod tests {
     /// 切片＋説明変数3個（`q = 3`）の12観測。`fit_with_optional_f_test`の境界テスト用。
     fn cluster_boundary_input() -> OlsInput {
         let n = 12;
-        let y: Vec<f64> = (0..n).map(|i| 1.0 + 0.5 * i as f64).collect();
+        let y: Vec<f64> = (0..n)
+            .map(|i| {
+                // クラスター（`i % g`）と周期が揃わない不規則なノイズ
+                let noise = [
+                    0.3, -0.2, 0.1, -0.4, 0.25, -0.15, 0.05, 0.35, -0.3, 0.2, -0.1, 0.4,
+                ];
+                1.0 + 0.5 * i as f64 + noise[i]
+            })
+            .collect();
         let x_columns = vec![
             (0..n).map(|i| i as f64).collect::<Vec<f64>>(),
             (0..n).map(|i| (i * i) as f64).collect::<Vec<f64>>(),
@@ -831,7 +839,7 @@ mod tests {
         let x3: Vec<f64> = (0..n).map(|i| (i % 3) as f64).collect();
         let y: Vec<f64> = (0..n)
             .map(|i| {
-                let noise = if i % 2 == 0 { 0.1 } else { -0.1 };
+                let noise = if i % 2 == 0 { 1e3 } else { -1e3 };
                 1.0 + 2.0 * x1[i] + 3.0 * x2[i] + 0.5 * x3[i] + noise
             })
             .collect();
@@ -879,7 +887,7 @@ mod tests {
         let x3: Vec<f64> = (0..n).map(|i| (i % 3) as f64).collect();
         let y: Vec<f64> = (0..n)
             .map(|i| {
-                let noise = if i % 2 == 0 { 0.1 } else { -0.1 };
+                let noise = if i % 2 == 0 { 1e3 } else { -1e3 };
                 1.0 + 2.0 * x1[i] + 3.0 * x2[i] + 0.5 * x3[i] + noise
             })
             .collect();

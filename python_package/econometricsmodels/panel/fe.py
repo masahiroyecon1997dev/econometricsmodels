@@ -104,7 +104,9 @@ class FE:
                 unsupported for FE), an unbalanced panel with two-way
                 effects, a singleton entity/time group, or an
                 explanatory variable with zero variance after the
-                within transformation, `cov_type="dk"` without `dk_time` (the Driscoll-Kraay
+                within transformation, an outcome with no variation
+                left after the fixed effects are removed,
+                `cov_type="dk"` without `dk_time` (the Driscoll-Kraay
                 time periods are never taken from `time`), `cov_type="dk"` with no more
                 unique time periods than regressors: the
                 Driscoll-Kraay covariance has rank at most T-1, so the
@@ -116,7 +118,9 @@ class FE:
                 `ValueError`.
             ComputationError: A problem was detected during
                 computation (e.g. a singular within-transformed design
-                matrix). A subclass of `RuntimeError`.
+                matrix, or a perfect fit of the within regression:
+                residuals zero up to rounding). A subclass of
+                `RuntimeError`.
         """
         raw = _lib.fit_fe(
             self._data, self._y, self._x, self._entity, self._options

@@ -205,14 +205,15 @@ use faer::{Accum, Mat, Par, Side};
 use statrs::distribution::{ChiSquared, ContinuousCDF, Normal};
 
 use crate::iv::common::{
-    IvError, IvInput, mat_to_columns, validate_observation_counts,
-    validate_structural_cluster_count,
+    IvError, IvInput, mat_column_to_vec, mat_to_columns, validate_observation_counts,
+    validate_outcome_not_constant, validate_structural_cluster_count,
 };
 use crate::linear::ols::CovType;
 use crate::shared::covariance::{
     cluster_correction, cluster_meat, resolve_hac_lags, time_ordering,
 };
 use crate::shared::error::{ClusterSetting, CommonError, MatrixKind};
+use crate::shared::goodness_of_fit::{is_perfect_fit, total_sum_of_squares};
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference;
 use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
@@ -403,6 +404,9 @@ impl GmmEstimator {
         // `validate_weight_type`側で検証する。
         validate_structural_cluster_count(&input, &cov_type)?;
 
+        // 被説明変数が定数（切片あり）のモデルは説明するものが無い（`TwoSlsEstimator::fit`と同じ）。
+        validate_outcome_not_constant(&input)?;
+
         // 1段階GMMは`weight_type`を持たない（点推定・Hansen Jとも`(Z'Z)⁻¹`のみで計算する）
         // ため検証もしない。2段階・反復では点推定に使う重みの妥当性を検証する。
         let weight_type: Option<&WeightType> = match &gmm_type {
@@ -441,6 +445,14 @@ impl GmmEstimator {
         let ztz = z.transpose() * &z;
         let beta0 = gmm_point_estimate(&z, &x, y, &ztz)?;
         let residuals0 = y - &x * &beta0;
+
+        // 初期推定の残差が丸め誤差の範囲で0なら完全フィット。重み行列`S`が0になって後段の逆行列が
+        // 特異になる前に、原因が分かるエラーで止める（`TwoSlsEstimator::fit`と同じ判定）。
+        let sst = total_sum_of_squares(&mat_column_to_vec(y, 0), None, input.has_intercept());
+        let ssr0: f64 = (0..n).map(|i| (*residuals0.get(i, 0)).powi(2)).sum();
+        if is_perfect_fit(ssr0, sst, k) {
+            return Err(CommonError::PerfectFit.into());
+        }
 
         // weight_type=ClassicalのHansen J検定専用の重み行列`σ̂²₀・Z'Z`（モジュール冒頭の
         // docコメント「Hansen J過剰識別検定」参照。`σ̂²`によるスケーリングは点推定には
@@ -666,12 +678,6 @@ impl GmmEstimator {
             *conf_upper.get_mut(j, 0) = stat.conf_high;
         }
 
-        let sst: f64 = if input.has_intercept() {
-            let y_mean: f64 = (0..n).map(|i| *y.get(i, 0)).sum::<f64>() / (n as f64);
-            (0..n).map(|i| (*y.get(i, 0) - y_mean).powi(2)).sum()
-        } else {
-            (0..n).map(|i| (*y.get(i, 0)).powi(2)).sum()
-        };
         let r_squared = 1.0 - ssr / sst;
         let adj_r_squared = 1.0 - ((n - k_constant) as f64 / df_resid as f64) * (1.0 - r_squared);
 
@@ -1239,15 +1245,64 @@ mod tests {
         }
     }
 
-    /// 丁度識別かつ操作変数が内生変数を完全予測する退化ケース（`two_sls.rs`の
-    /// `fit_matches_closed_form_ols_when_instrument_perfectly_predicts_endog`と同じデータ）。
-    /// `weight_type`によらず丁度識別ではGMMの点推定は一致するはず（`docs/spec/iv-spec.md`1.2節）。
-    #[test]
-    fn fit_matches_closed_form_ols_when_just_identified_and_instrument_perfectly_predicts_endog() {
+    /// 丁度識別の小さなデータ（`two_sls.rs`の`just_identified_data`と同じ）。第一段階も構造式も
+    /// 完全フィットにならない。`weight_type`によらず丁度識別ではGMMの点推定は2SLSと一致するはず
+    /// （`docs/spec/iv-spec.md`1.2節）。
+    fn just_identified_input() -> IvInput {
         let z = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-        let x_endog = z.clone();
-        let y: Vec<f64> = x_endog.iter().map(|&x| 1.0 + 2.0 * x).collect();
+        let x_endog = vec![1.2, 1.9, 3.3, 3.8, 5.1];
+        let noise = [0.1, -0.2, 0.15, -0.05, 0.1];
+        let y: Vec<f64> = x_endog
+            .iter()
+            .zip(noise)
+            .map(|(&x, u)| 1.0 + 2.0 * x + u)
+            .collect();
+        IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            &[x_endog],
+            vec!["x_endog".to_string()],
+            &[z],
+            vec!["z".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap()
+    }
 
+    #[test]
+    fn fit_matches_two_sls_when_just_identified() {
+        let gmm = GmmEstimator::fit(
+            just_identified_input(),
+            GmmType::TwoStep {
+                weight: WeightType::Classical,
+            },
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+        let two_sls = crate::iv::two_sls::TwoSlsEstimator::fit(
+            just_identified_input(),
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        assert_eq!(gmm.param_names(), ["const", "x_endog"]);
+        for j in 0..2 {
+            assert!((*gmm.params().get(j, 0) - *two_sls.params().get(j, 0)).abs() < 1e-8);
+        }
+    }
+
+    #[test]
+    fn fit_returns_perfect_fit_when_the_structural_residuals_are_zero() {
+        // 構造式が厳密に成り立つと、初期推定の残差が全て0で重み行列が0になる。後段の逆行列が
+        // 特異になる前に、原因の分かる完全フィットとして止める。
+        let z = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let x_endog = vec![1.2, 1.9, 3.3, 3.8, 5.1];
+        let y: Vec<f64> = x_endog.iter().map(|&x| 1.0 + 2.0 * x).collect();
         let input = IvInput::from_columns(
             &y,
             &[],
@@ -1261,7 +1316,40 @@ mod tests {
         )
         .unwrap();
 
-        let estimator = GmmEstimator::fit(
+        let result = GmmEstimator::fit(
+            input,
+            GmmType::TwoStep {
+                weight: WeightType::Robust,
+            },
+            true,
+            CovType::Classical,
+            0.95,
+        );
+
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::Common(CommonError::PerfectFit)
+        );
+    }
+
+    #[test]
+    fn fit_returns_outcome_constant_for_a_constant_outcome() {
+        let z = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let x_endog = vec![1.2, 1.9, 3.3, 3.8, 5.1];
+        let input = IvInput::from_columns(
+            &[3.0; 5],
+            &[],
+            vec![],
+            &[x_endog],
+            vec!["x_endog".to_string()],
+            &[z],
+            vec!["z".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = GmmEstimator::fit(
             input,
             GmmType::TwoStep {
                 weight: WeightType::Classical,
@@ -1269,11 +1357,12 @@ mod tests {
             true,
             CovType::Classical,
             0.95,
-        )
-        .unwrap();
-        assert_eq!(estimator.param_names(), ["const", "x_endog"]);
-        assert!((*estimator.params().get(0, 0) - 1.0).abs() < 1e-8);
-        assert!((*estimator.params().get(1, 0) - 2.0).abs() < 1e-8);
+        );
+
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::Common(CommonError::OutcomeConstant)
+        );
     }
 
     #[test]
@@ -2620,24 +2709,8 @@ mod tests {
     /// 同じ扱い）。
     #[test]
     fn fit_sets_hansen_j_statistic_to_none_when_just_identified() {
-        let z = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-        let x_endog = z.clone();
-        let y: Vec<f64> = x_endog.iter().map(|&x| 1.0 + 2.0 * x).collect();
-        let input = IvInput::from_columns(
-            &y,
-            &[],
-            vec![],
-            &[x_endog],
-            vec!["x_endog".to_string()],
-            &[z],
-            vec!["z".to_string()],
-            true,
-            "y".to_string(),
-        )
-        .unwrap();
-
         let estimator = GmmEstimator::fit(
-            input,
+            just_identified_input(),
             GmmType::TwoStep {
                 weight: WeightType::Classical,
             },

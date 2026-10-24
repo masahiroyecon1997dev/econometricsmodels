@@ -78,11 +78,13 @@ class OLS:
             ValidationError: The input or options are invalid (a
                 column is missing, contains missing values or
                 NaN/infinity, insufficient observations,
-                `confidence_level` out of range, etc.). A subclass of
-                `ValueError`.
+                `confidence_level` out of range, `y` constant with an
+                intercept, etc.). A subclass of `ValueError`.
             ComputationError: A problem was detected during
-                computation (e.g. a singular design matrix). A
-                subclass of `RuntimeError`.
+                computation (e.g. a singular design matrix, or a
+                perfect fit: residuals zero up to rounding, so the
+                standard errors are undefined). A subclass of
+                `RuntimeError`.
         """
         raw = _lib.fit_ols(self._data, self._y, self._x, self._options)
         return OLSResults(raw)

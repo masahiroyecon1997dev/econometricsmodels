@@ -393,7 +393,7 @@ use crate::panel::re::{ReEffects, ReInput};
 use crate::shared::covariance::leverages;
 use crate::shared::error::{ClusterSetting, CommonError};
 use crate::shared::error_catalog::Stage;
-use crate::shared::goodness_of_fit::gaussian_goodness_of_fit;
+use crate::shared::goodness_of_fit::{gaussian_goodness_of_fit, is_perfect_fit};
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference;
 use crate::shared::least_squares::{LeastSquaresFit, least_squares};
@@ -805,6 +805,13 @@ impl FeEstimator {
 
         validate_no_zero_variance_regressors(&input, &x)?;
 
+        // 被説明変数もwithin変換後に分散が残らなければ、固定効果が説明するものが無い
+        // （個体内で定数、2-wayなら個体効果と時点効果だけで説明される）。説明変数と同じ
+        // 相対閾値で判定する。
+        if column_is_zero_variance(input.y(), &y) {
+            return Err(PanelError::OutcomeConstantWithinEntity);
+        }
+
         // `OlsInput::from_columns`が返しうる`LeastSquaresError::Common(DimensionMismatch)`は
         // ここでは理論上到達不能: `y`/`x`はどちらも`within_transform_*`が`input.y()`/
         // `input.x()`（`FeInput::from_columns`が既に同じ長さであることを検証済み）から
@@ -849,6 +856,15 @@ impl FeEstimator {
         let x_mat = within_input.x();
         let residuals: Vec<f64> = (0..n).map(|i| *residual_mat.get(i, 0)).collect();
         let ssr: f64 = residuals.iter().map(|r| r * r).sum();
+
+        // within回帰の残差が丸め誤差の範囲で0なら完全フィット。標準誤差とF検定が定義できない。
+        // within変換後の`y`の平均は0なので、総平方和は非中心化（`Σỹ²`）。
+        let sst_within: f64 = y.iter().map(|v| v * v).sum();
+        if is_perfect_fit(ssr, sst_within, k) {
+            return Err(PanelError::WithinRegressionFailed {
+                source: CommonError::PerfectFit.into(),
+            });
+        }
 
         // `df_inference`はt検定・信頼区間・F検定に使う自由度。`cov_type=Cluster`のとき
         // `G-1`、`Dk`のとき`t_periods-1`に切り替える（fixestの`ssc()`既定`t.df="min"`。
@@ -2646,10 +2662,37 @@ mod tests {
 
     #[test]
     fn fe_estimator_fit_one_way_recovers_known_slope() {
-        // entity a: x=[1,2,3], y=2x+5（fixed effect=5）→ y=[7,9,11]
-        // entity b: x=[4,5,6], y=2x+10（fixed effect=10）→ y=[18,20,22]
-        // ノイズなしのため、within変換後のOLS（切片なし）は真のスロープ2.0を厳密に
-        // 復元するはず（fixed effectはwithin変換で消去される）。
+        // entity a: x=[1,2,3], y=2x+5（fixed effect=5）+ノイズ
+        // entity b: x=[4,5,6], y=2x+10（fixed effect=10）+ノイズ
+        // 小さなノイズのもとで、within変換後のOLS（切片なし）は真のスロープ2.0の近くに返る
+        // （fixed effectはwithin変換で消去される）。
+        let entity = strings(&["a", "a", "a", "b", "b", "b"]);
+        let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let noise = [0.1, -0.2, 0.1, 0.05, -0.1, 0.05];
+        let y: Vec<f64> = x1
+            .iter()
+            .zip(&entity)
+            .zip(noise)
+            .map(|((x, e), u)| 2.0 * x + if e == "a" { 5.0 } else { 10.0 } + u)
+            .collect();
+        let input =
+            FeInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let fe = FeEstimator::fit(input, FeEffects::OneWay, FeCovType::Classical, 0.95).unwrap();
+
+        assert!((*fe.params().get(0, 0) - 2.0).abs() < 0.2);
+        assert_eq!(fe.effects(), FeEffects::OneWay);
+        assert!(!fe.within_input().has_intercept());
+        assert_eq!(fe.n_periods(), None);
+        for r in fe.residuals().col(0).iter() {
+            assert!(r.abs() < 0.3);
+        }
+    }
+
+    #[test]
+    fn fe_estimator_fit_returns_perfect_fit_for_exact_data() {
+        // ノイズなしでは、within回帰の残差が全て0で標準誤差とF検定が定義できない。
         let entity = strings(&["a", "a", "a", "b", "b", "b"]);
         let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
         let y: Vec<f64> = x1
@@ -2661,15 +2704,54 @@ mod tests {
             FeInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
                 .unwrap();
 
-        let fe = FeEstimator::fit(input, FeEffects::OneWay, FeCovType::Classical, 0.95).unwrap();
+        let result = FeEstimator::fit(input, FeEffects::OneWay, FeCovType::Classical, 0.95);
 
-        assert!((*fe.params().get(0, 0) - 2.0).abs() < 1e-9);
-        assert_eq!(fe.effects(), FeEffects::OneWay);
-        assert!(!fe.within_input().has_intercept());
-        assert_eq!(fe.n_periods(), None);
-        for r in fe.residuals().col(0).iter() {
-            assert!(r.abs() < 1e-9);
-        }
+        assert_eq!(
+            result.unwrap_err(),
+            PanelError::WithinRegressionFailed {
+                source: CommonError::PerfectFit.into(),
+            }
+        );
+    }
+
+    #[test]
+    fn fe_estimator_fit_returns_outcome_constant_within_entity_for_an_entity_level_outcome() {
+        // yが個体内で定数（個体間でだけ違う）なら、固定効果が全てを説明してwithin変換後のyは0になる。
+        // 0.1のように3回足して3で割ると丸め誤差が残る値も、相対閾値で定数とみなす。
+        let entity = strings(&["a", "a", "a", "b", "b", "b", "c", "c", "c"]);
+        let y = [0.1, 0.1, 0.1, 0.7, 0.7, 0.7, 1.3, 1.3, 1.3];
+        let x1 = vec![1.0, 3.0, 2.0, 5.0, 4.0, 6.0, 1.0, 4.0, 2.0];
+        let input =
+            FeInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let result = FeEstimator::fit(input, FeEffects::OneWay, FeCovType::Classical, 0.95);
+
+        assert_eq!(result.unwrap_err(), PanelError::OutcomeConstantWithinEntity);
+    }
+
+    #[test]
+    fn fe_estimator_fit_returns_outcome_constant_within_entity_when_effects_explain_the_outcome() {
+        // 2-wayでは、y = 個体効果 + 時点効果 もwithin変換後に0になる。
+        let entity = strings(&["a", "a", "a", "b", "b", "b", "c", "c", "c"]);
+        let time = strings(&["1", "2", "3", "1", "2", "3", "1", "2", "3"]);
+        let alpha = [1.0, 1.0, 1.0, 4.0, 4.0, 4.0, -2.0, -2.0, -2.0];
+        let gamma = [0.0, 0.5, 1.5, 0.0, 0.5, 1.5, 0.0, 0.5, 1.5];
+        let y: Vec<f64> = alpha.iter().zip(gamma).map(|(a, g)| a + g).collect();
+        let x1 = vec![1.0, 3.0, 2.0, 5.0, 4.0, 6.0, 1.0, 4.0, 2.0];
+        let input = FeInput::from_columns(
+            &y,
+            &[x1],
+            vec!["x1".to_string()],
+            &entity,
+            Some(&time),
+            "y".into(),
+        )
+        .unwrap();
+
+        let result = FeEstimator::fit(input, FeEffects::TwoWay, FeCovType::Classical, 0.95);
+
+        assert_eq!(result.unwrap_err(), PanelError::OutcomeConstantWithinEntity);
     }
 
     #[test]
@@ -2678,7 +2760,7 @@ mod tests {
         // getter）。`ols::fit_exposes_input_cov_type_and_residuals_via_getters`と同型。
         let entity = strings(&["a", "a", "b", "b"]);
         let x1 = vec![1.0, 2.0, 3.0, 4.0];
-        let y = [7.0, 9.0, 11.0, 13.0];
+        let y = [7.0, 9.2, 11.0, 12.6];
         let input =
             FeInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
                 .unwrap();
@@ -3253,7 +3335,7 @@ mod tests {
         let x3: Vec<f64> = (0..n).map(|i| ((i * 3) % 7) as f64).collect();
         let y: Vec<f64> = (0..n)
             .map(|i| {
-                let noise = if i % 2 == 0 { 0.1 } else { -0.1 };
+                let noise = if i % 2 == 0 { 1e3 } else { -1e3 };
                 2.0 * x1[i] + 3.0 * x2[i] + 0.5 * x3[i] + noise
             })
             .collect();
@@ -4756,7 +4838,7 @@ mod tests {
         faer::set_global_parallelism(faer::Par::rayon(0));
 
         let entity = strings(&["a", "a", "b", "b"]);
-        let y = [1.0, 2.0, 3.0, 4.0];
+        let y = [1.0, 2.2, 3.0, 4.6];
         let x1 = vec![1.0, 2.0, 3.0, 4.0];
         let input =
             FeInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())

@@ -122,7 +122,8 @@ class RE:
                 Hausman test cannot be computed),
                 `cov_type="cluster"` with no more clusters than the
                 identified slopes of the Hausman auxiliary regression,
-                an unknown `variance_method`, or
+                an unknown `variance_method`, an outcome constant
+                within every entity, or
                 `variance_method="amemiya"` with a
                 regressor that has no within variation (time-invariant;
                 for two-way effects, varying in at most one
@@ -139,7 +140,9 @@ class RE:
                 singular pooled first-stage
                 regression with `variance_method="wallace_hussain"`, or
                 a non-positive estimate of σ_ε² with `"wallace_hussain"`
-                or `"amemiya"`). A subclass of `RuntimeError`.
+                or `"amemiya"`, or a perfect fit of the within
+                regression that estimates σ_ε²: residuals zero up to
+                rounding). A subclass of `RuntimeError`.
         """
         raw = _lib.fit_re(
             self._data, self._y, self._x, self._entity, self._options

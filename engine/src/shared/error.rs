@@ -160,6 +160,17 @@ pub enum CommonError {
     #[error("{}", self.catalog_message())]
     NearSingularMatrix { matrix: MatrixKind },
 
+    /// 被説明変数が全行で同じ値で、切片のあるモデルが説明するものを持たない（総平方和が0で、
+    /// R-squaredが定義できない）。推定を走らせずに入力だけから分かるため`ValidationError`。
+    /// 切片なしのモデルでは定数でも非中心化の総平方和が正なので対象外。
+    #[error("{}", self.catalog_message())]
+    OutcomeConstant,
+
+    /// 残差が丸め誤差の範囲で0（`SSR <= k * epsilon * SST`）で、標準誤差と検定統計量が
+    /// 定義できない。判定は[`crate::shared::goodness_of_fit::is_perfect_fit`]の1か所。
+    #[error("{}", self.catalog_message())]
+    PerfectFit,
+
     /// 実装の誤りでだけ起きるはずの状態（不変条件の破れ）。`detail`は開発者向けの英語。
     #[error("{}", self.catalog_message())]
     Internal { detail: String },
@@ -228,6 +239,8 @@ impl ErrorInfo for CommonError {
             Self::NearSingularMatrix { matrix } => {
                 ErrorReport::new(ErrorCode::MatrixNearSingular).param("matrix", matrix.as_str())
             }
+            Self::OutcomeConstant => ErrorReport::new(ErrorCode::OutcomeConstant),
+            Self::PerfectFit => ErrorReport::new(ErrorCode::PerfectFit),
             Self::Internal { detail } => internal(detail.clone()),
         }
     }

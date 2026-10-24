@@ -6,7 +6,9 @@ use super::cov_type::CovType;
 use super::input::OlsInput;
 use crate::linear::common::LeastSquaresError;
 use crate::shared::error::CommonError;
-use crate::shared::goodness_of_fit::{GaussianGoodnessOfFit, gaussian_goodness_of_fit};
+use crate::shared::goodness_of_fit::{
+    GaussianGoodnessOfFit, gaussian_goodness_of_fit, is_perfect_fit,
+};
 use crate::shared::inference;
 use crate::shared::least_squares::{LeastSquaresFit, least_squares, residual_sum_of_squares};
 use crate::shared::validation::validate_has_regressors;
@@ -119,7 +121,26 @@ impl OlsEstimator {
         cov_type: CovType,
         confidence_level: f64,
     ) -> Result<Self, LeastSquaresError> {
-        Self::fit_impl(input, cov_type, confidence_level, false)
+        Self::fit_impl(input, cov_type, confidence_level, false, true)
+    }
+
+    /// [`fit`](Self::fit)と同じだが、被説明変数が定数（`CommonError::OutcomeConstant`）か、
+    /// 完全フィット（`CommonError::PerfectFit`）かを調べない。
+    ///
+    /// モデルの結果として利用者に見せる回帰ではなく、別の統計量の部品として使う補助的な回帰
+    /// （診断検定の補助回帰、IVの第二段階とWu-Hausman拡張回帰、REの準偏差変換後の回帰とハウスマンの
+    /// 補助回帰）に使う。これらの被説明変数は元のモデルの被説明変数ではない（残差の二乗、
+    /// 変換後の値、拡張回帰の列）ため、定数や完全フィットの判定の基準（元のモデルの総平方和）が
+    /// 当てはまらず、完全フィットは元のモデルの回帰が先に検出する。
+    ///
+    /// # Errors
+    /// 被説明変数に関する2つを除き[`fit`](Self::fit)と同じ。
+    pub(crate) fn fit_auxiliary(
+        input: OlsInput,
+        cov_type: CovType,
+        confidence_level: f64,
+    ) -> Result<Self, LeastSquaresError> {
+        Self::fit_impl(input, cov_type, confidence_level, false, false)
     }
 
     /// [`fit`](Self::fit)と同じだが、`cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`
@@ -141,16 +162,18 @@ impl OlsEstimator {
         cov_type: CovType,
         confidence_level: f64,
     ) -> Result<Self, LeastSquaresError> {
-        Self::fit_impl(input, cov_type, confidence_level, true)
+        Self::fit_impl(input, cov_type, confidence_level, true, true)
     }
 
-    /// `fit`/`fit_with_optional_f_test`の共通実装。`allow_undefined_f_test`が真のとき、
-    /// クラスター数が傾き係数の数以下でも全体F検定を`None`にして続行する。
+    /// `fit`/`fit_with_optional_f_test`/`fit_auxiliary`の共通実装。`allow_undefined_f_test`が
+    /// 真のとき、クラスター数が傾き係数の数以下でも全体F検定を`None`にして続行する。
+    /// `check_outcome`が真のとき、被説明変数が定数（切片ありのみ）か完全フィットなら失敗させる。
     fn fit_impl(
         input: OlsInput,
         cov_type: CovType,
         confidence_level: f64,
         allow_undefined_f_test: bool,
+        check_outcome: bool,
     ) -> Result<Self, LeastSquaresError> {
         validate_has_regressors(input.nobs(), input.k())?;
 
@@ -177,6 +200,11 @@ impl OlsEstimator {
             allow_undefined_f_test,
         )?;
 
+        // 入力だけから分かる被説明変数の検証は、QR分解より前に行う。
+        if check_outcome && input.has_intercept() && input.outcome_constant() {
+            return Err(CommonError::OutcomeConstant.into());
+        }
+
         let LeastSquaresFit {
             params,
             residuals,
@@ -187,6 +215,10 @@ impl OlsEstimator {
 
         let df_resid = n - k;
         let ssr = residual_sum_of_squares(&residuals);
+        // 共分散・F検定より前に止める（残差が0だと`sigma^2`が0で、後段は0割りや無意味な桁の値になる）。
+        if check_outcome && is_perfect_fit(ssr, input.outcome_sst(), k) {
+            return Err(CommonError::PerfectFit.into());
+        }
         let sigma2 = ssr / (df_resid as f64);
 
         let CovParams {
@@ -433,10 +465,54 @@ mod tests {
     use crate::linear::common::row_time_order;
     use crate::shared::error::MatrixKind;
 
-    #[test]
-    fn fit_recovers_known_coefficients_for_exact_fit_data() {
-        // y = 1 + 2*x、ノイズなしの厳密解を持つデータ
+    /// y = 1 + 2*x、ノイズなしの厳密解を持つデータ。
+    fn exact_fit_input() -> OlsInput {
         let y = vec![1.0, 3.0, 5.0, 7.0, 9.0];
+        let x_columns = vec![vec![0.0, 1.0, 2.0, 3.0, 4.0]];
+        OlsInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn fit_returns_perfect_fit_for_exact_fit_data() {
+        // 残差が全て0に近いと`sigma^2`が0で標準誤差・F検定が定義できないため、共分散を計算する前に止める。
+        let result = OlsEstimator::fit(exact_fit_input(), CovType::Classical, 0.95);
+
+        assert_eq!(
+            result.unwrap_err(),
+            LeastSquaresError::Common(CommonError::PerfectFit)
+        );
+    }
+
+    #[test]
+    fn fit_auxiliary_recovers_known_coefficients_for_exact_fit_data() {
+        // 補助回帰は完全フィットの判定をしないので、係数は厳密解のまま返る。
+        let estimator =
+            OlsEstimator::fit_auxiliary(exact_fit_input(), CovType::Classical, 0.95).unwrap();
+        let params = estimator.params();
+
+        assert!(
+            (*params.get(0, 0) - 1.0).abs() < 1e-9,
+            "const: {}",
+            *params.get(0, 0)
+        );
+        assert!(
+            (*params.get(1, 0) - 2.0).abs() < 1e-9,
+            "x1: {}",
+            *params.get(1, 0)
+        );
+    }
+
+    #[test]
+    fn fit_recovers_known_coefficients_for_nearly_exact_data() {
+        // y = 1 + 2*x に小さな交互のノイズ。係数は厳密解の近くに返る。
+        let y = vec![1.1, 2.9, 5.1, 6.9, 9.1];
         let x_columns = vec![vec![0.0, 1.0, 2.0, 3.0, 4.0]];
         let input = OlsInput::from_columns(
             &y,
@@ -450,16 +526,58 @@ mod tests {
         let estimator = OlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
         let params = estimator.params();
 
-        assert!(
-            (*params.get(0, 0) - 1.0).abs() < 1e-9,
-            "const: {}",
-            *params.get(0, 0)
+        assert!((*params.get(0, 0) - 1.0).abs() < 0.2);
+        assert!((*params.get(1, 0) - 2.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn fit_returns_outcome_constant_when_the_outcome_is_the_same_in_every_row() {
+        let input = OlsInput::from_columns(
+            &[3.0; 5],
+            &[vec![0.0, 1.0, 2.0, 3.0, 5.0]],
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = OlsEstimator::fit(input, CovType::Classical, 0.95);
+
+        assert_eq!(
+            result.unwrap_err(),
+            LeastSquaresError::Common(CommonError::OutcomeConstant)
         );
-        assert!(
-            (*params.get(1, 0) - 2.0).abs() < 1e-9,
-            "x1: {}",
-            *params.get(1, 0)
-        );
+    }
+
+    #[test]
+    fn fit_accepts_a_constant_outcome_without_an_intercept() {
+        // 切片なしでは定数の非中心化の総平方和が正なので、説明するものがある。
+        let input = OlsInput::from_columns(
+            &[3.0; 5],
+            &[vec![1.0, 1.1, 0.9, 1.0, 1.05]],
+            vec!["x1".to_string()],
+            false,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        assert!(OlsEstimator::fit(input, CovType::Classical, 0.95).is_ok());
+    }
+
+    #[test]
+    fn perfect_fit_is_judged_relative_to_the_total_sum_of_squares() {
+        // 同じ形の関係でも、ノイズが総平方和に対して`k * epsilon`を超えれば完全フィットではない
+        // （ここでは相対的な大きさ約3e-4）。
+        let x: Vec<f64> = (0..20).map(f64::from).collect();
+        let y: Vec<f64> = x
+            .iter()
+            .enumerate()
+            .map(|(i, v)| 1.0 + 2.0 * v + if i % 2 == 0 { 0.01 } else { -0.01 })
+            .collect();
+        let input = OlsInput::from_columns(&y, &[x], vec!["x1".to_string()], true, "y".to_string())
+            .unwrap();
+
+        assert!(OlsEstimator::fit(input, CovType::Classical, 0.95).is_ok());
     }
 
     #[test]
@@ -537,7 +655,7 @@ mod tests {
         let x3: Vec<f64> = (0..n).map(|i| (i % 3) as f64).collect();
         let y: Vec<f64> = (0..n)
             .map(|i| {
-                let noise = if i % 2 == 0 { 0.1 } else { -0.1 };
+                let noise = if i % 2 == 0 { 1e3 } else { -1e3 };
                 1.0 + 2.0 * x1[i] + 3.0 * x2[i] + 0.5 * x3[i] + noise
             })
             .collect();
@@ -832,8 +950,8 @@ mod tests {
 
     #[test]
     fn fit_exposes_input_cov_type_and_residuals_via_getters() {
-        // y = 1 + 2*x、ノイズなしの厳密解を持つデータ（残差が全て0に近いことを確認しやすい）
-        let y = vec![1.0, 3.0, 5.0, 7.0, 9.0];
+        // y = 1 + 2*x に小さな交互のノイズ（残差が小さいことを確認しやすい）
+        let y = vec![1.01, 2.99, 5.01, 6.99, 9.01];
         let x_columns = vec![vec![0.0, 1.0, 2.0, 3.0, 4.0]];
         let input = OlsInput::from_columns(
             &y,
@@ -850,7 +968,7 @@ mod tests {
         assert_eq!(estimator.cov_type(), &CovType::Classical);
         let residuals = estimator.residuals();
         for i in 0..5 {
-            assert!((*residuals.get(i, 0)).abs() < 1e-9);
+            assert!((*residuals.get(i, 0)).abs() < 0.05);
         }
     }
 

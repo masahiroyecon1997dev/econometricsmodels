@@ -64,12 +64,14 @@
 
 use crate::iv::common::{
     IvError, IvInput, compute_first_stage, mat_column_to_vec, mat_to_columns,
-    validate_observation_counts, validate_structural_cluster_count, without_baked_in_intercept,
+    validate_observation_counts, validate_outcome_not_constant, validate_structural_cluster_count,
+    without_baked_in_intercept,
 };
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use crate::shared::covariance::{cluster_cov_params, resolve_hac_lags, time_ordering};
 use crate::shared::error::{ClusterSetting, CommonError, MatrixKind};
+use crate::shared::goodness_of_fit::{is_perfect_fit, total_sum_of_squares};
 use crate::shared::inference;
 use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 use crate::shared::validation::validate_cluster_groups;
@@ -206,6 +208,10 @@ impl TwoSlsEstimator {
         // 弾き、`IvError::Common`として一貫させる（`compute_first_stage`より前）。
         validate_structural_cluster_count(&input, &cov_type)?;
 
+        // 被説明変数が定数（切片あり）のモデルは説明するものが無い。入力だけから分かるため、
+        // 第一段階より前に弾く。
+        validate_outcome_not_constant(&input)?;
+
         // `x_exog`は`second_stage_columns`（第二段階）・`structural_columns`
         // （サンドイッチSE計算）でも同じ内容を使うため、`Mat`からの変換を一度だけ行い
         // 使い回す（毎回`mat_to_columns`で`Mat`を走査し直す無駄を避ける）。
@@ -260,9 +266,12 @@ impl TwoSlsEstimator {
             input.dep_var_name().to_string(),
         )
         .map_err(|source| IvError::SecondStageFailed { source })?;
-        let second_stage =
-            OlsEstimator::fit(second_stage_input, SECOND_STAGE_COV_TYPE, confidence_level)
-                .map_err(|source| IvError::SecondStageFailed { source })?;
+        let second_stage = OlsEstimator::fit_auxiliary(
+            second_stage_input,
+            SECOND_STAGE_COV_TYPE,
+            confidence_level,
+        )
+        .map_err(|source| IvError::SecondStageFailed { source })?;
 
         // ── ここから独立実装のサンドイッチ型SE計算（モジュール冒頭のdocコメント参照）──
         let x_hat = second_stage.input().x(); // X̂ = [x_exog, x̂_endog]
@@ -282,6 +291,13 @@ impl TwoSlsEstimator {
 
         let df_resid = n - k;
         let ssr: f64 = (0..n).map(|i| (*residuals.get(i, 0)).powi(2)).sum();
+
+        // 構造残差が丸め誤差の範囲で0なら、標準誤差とそれを使う検定統計量は定義できない。
+        // 第二段階回帰の残差ではなく構造残差で判定する（第二段階は`X̂`への回帰で別の量）。
+        let sst = total_sum_of_squares(&y, None, input.has_intercept());
+        if is_perfect_fit(ssr, sst, k) {
+            return Err(CommonError::PerfectFit.into());
+        }
 
         let xtx_inv = xtx_inverse(x_hat, k)?;
 
@@ -357,14 +373,6 @@ impl TwoSlsEstimator {
         }
 
         let k_constant = usize::from(input.has_intercept());
-        let sst: f64 = if input.has_intercept() {
-            let y_mean: f64 = (0..n).map(|i| *input.y().get(i, 0)).sum::<f64>() / (n as f64);
-            (0..n)
-                .map(|i| (*input.y().get(i, 0) - y_mean).powi(2))
-                .sum()
-        } else {
-            (0..n).map(|i| (*input.y().get(i, 0)).powi(2)).sum()
-        };
         let r_squared = 1.0 - ssr / sst;
         let adj_r_squared = 1.0 - ((n - k_constant) as f64 / df_resid as f64) * (1.0 - r_squared);
 
@@ -436,7 +444,7 @@ impl TwoSlsEstimator {
                     input.dep_var_name().to_string(),
                 )?;
                 let hausman_estimator =
-                    OlsEstimator::fit(hausman_input, cov_type.clone(), confidence_level)?;
+                    OlsEstimator::fit_auxiliary(hausman_input, cov_type.clone(), confidence_level)?;
                 let (stat, p_value) = hausman_estimator.wald_test_last_columns(input.k_endog())?;
                 Ok((
                     stat,
@@ -864,13 +872,8 @@ mod tests {
     use crate::shared::error::CommonError;
     use crate::shared::group_codes::GroupCodes;
 
-    /// 丁度識別（`len(instruments) == len(x_endog)`）の閉形式解と数値照合するテストデータ。
-    ///
-    /// 構造式: `y = 1 + 2*x_endog + e`、操作変数`z`は`x_endog`と相関するが`e`とは無相関
-    /// （手計算しやすいよう`x_endog = z`の完全予測になるデータを使う。この場合、第一段階の
-    /// 予測値`x̂_endog`は`x_endog`そのものと一致するため、2SLSはOLSと数値的に一致する
-    /// （操作変数が内生変数を完全に予測する退化ケース、`docs/spec/iv-spec.md`1.2節の丁度識別と
-    /// 同様の考え方をさらに単純化したもの）。
+    /// 操作変数`z`が内生変数`x_endog`を完全に予測するデータ（`x_endog = z`、`y = 1 + 2*x_endog`）。
+    /// 第一段階の残差が全て0になるため、第一段階は完全フィットとして拒否される。
     fn perfectly_predicted_endog_data() -> (Vec<f64>, Vec<f64>, Vec<f64>) {
         let z = vec![1.0, 2.0, 3.0, 4.0, 5.0];
         let x_endog = z.clone();
@@ -878,8 +881,71 @@ mod tests {
         (y, x_endog, z)
     }
 
+    /// 丁度識別（`len(instruments) == len(x_endog)`）の閉形式解と数値照合するテストデータ。
+    ///
+    /// 構造式: `y = 1 + 2*x_endog + e`。`x_endog`は`z`に小さなノイズを足した値で、第一段階も
+    /// 構造式も完全フィットにならない。
+    fn just_identified_data() -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+        let z = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let x_endog = vec![1.2, 1.9, 3.3, 3.8, 5.1];
+        let noise = [0.1, -0.2, 0.15, -0.05, 0.1];
+        let y: Vec<f64> = x_endog
+            .iter()
+            .zip(noise)
+            .map(|(&x, u)| 1.0 + 2.0 * x + u)
+            .collect();
+        (y, x_endog, z)
+    }
+
+    fn just_identified_input() -> IvInput {
+        let (y, x_endog, z) = just_identified_data();
+        IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            &[x_endog],
+            vec!["x_endog".to_string()],
+            &[z],
+            vec!["z".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap()
+    }
+
     #[test]
-    fn fit_matches_closed_form_ols_when_instrument_perfectly_predicts_endog() {
+    fn fit_matches_the_closed_form_iv_estimator_when_just_identified() {
+        // 丁度識別・単一の操作変数では2SLSは`beta1 = cov(z, y) / cov(z, x)`、
+        // `beta0 = mean(y) - beta1 * mean(x)`の閉形式解と一致する。
+        let (y, x_endog, z) = just_identified_data();
+        let n = y.len() as f64;
+        let mean = |v: &[f64]| v.iter().sum::<f64>() / n;
+        let (y_bar, x_bar, z_bar) = (mean(&y), mean(&x_endog), mean(&z));
+        let cov_zy: f64 = z
+            .iter()
+            .zip(&y)
+            .map(|(a, b)| (a - z_bar) * (b - y_bar))
+            .sum();
+        let cov_zx: f64 = z
+            .iter()
+            .zip(&x_endog)
+            .map(|(a, b)| (a - z_bar) * (b - x_bar))
+            .sum();
+        let beta1 = cov_zy / cov_zx;
+        let beta0 = y_bar - beta1 * x_bar;
+
+        let estimator =
+            TwoSlsEstimator::fit(just_identified_input(), CovType::Classical, 0.95).unwrap();
+
+        assert_eq!(estimator.param_names(), ["const", "x_endog"]);
+        assert!((*estimator.params().get(0, 0) - beta0).abs() < 1e-8);
+        assert!((*estimator.params().get(1, 0) - beta1).abs() < 1e-8);
+    }
+
+    #[test]
+    fn fit_returns_the_first_stage_perfect_fit_when_instrument_perfectly_predicts_endog() {
+        // 操作変数が内生変数を完全に予測する（第一段階の残差が全て0）と、第一段階の標準誤差と
+        // 部分F統計量が定義できない。第一段階の文脈つきで完全フィットとして拒否する。
         let (y, x_endog, z) = perfectly_predicted_endog_data();
         let input = IvInput::from_columns(
             &y,
@@ -894,10 +960,66 @@ mod tests {
         )
         .unwrap();
 
-        let estimator = TwoSlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
-        assert_eq!(estimator.param_names(), ["const", "x_endog"]);
-        assert!((*estimator.params().get(0, 0) - 1.0).abs() < 1e-8);
-        assert!((*estimator.params().get(1, 0) - 2.0).abs() < 1e-8);
+        let result = TwoSlsEstimator::fit(input, CovType::Classical, 0.95);
+
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::FirstStageFailed {
+                endog_name: "x_endog".to_string(),
+                source: CommonError::PerfectFit.into(),
+            }
+        );
+    }
+
+    #[test]
+    fn fit_returns_perfect_fit_when_the_structural_residuals_are_zero() {
+        // 構造式`y = 1 + 2*x_endog`が厳密に成り立つと（第一段階は完全フィットではない）、
+        // 構造残差が全て0で標準誤差が定義できない。第二段階回帰ではなく構造残差で判定する。
+        let (_, x_endog, z) = just_identified_data();
+        let y: Vec<f64> = x_endog.iter().map(|&x| 1.0 + 2.0 * x).collect();
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            &[x_endog],
+            vec!["x_endog".to_string()],
+            &[z],
+            vec!["z".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = TwoSlsEstimator::fit(input, CovType::Classical, 0.95);
+
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::Common(CommonError::PerfectFit)
+        );
+    }
+
+    #[test]
+    fn fit_returns_outcome_constant_before_the_first_stage() {
+        let (_, x_endog, z) = just_identified_data();
+        let input = IvInput::from_columns(
+            &[3.0; 5],
+            &[],
+            vec![],
+            &[x_endog],
+            vec!["x_endog".to_string()],
+            &[z],
+            vec!["z".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = TwoSlsEstimator::fit(input, CovType::Classical, 0.95);
+
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::Common(CommonError::OutcomeConstant)
+        );
     }
 
     #[test]
@@ -908,21 +1030,7 @@ mod tests {
         // 設計行列は極小なので一時的な `Rayon` 設定は病理を招かない。
         faer::set_global_parallelism(faer::Par::rayon(0));
 
-        let (y, x_endog, z) = perfectly_predicted_endog_data();
-        let input = IvInput::from_columns(
-            &y,
-            &[],
-            vec![],
-            &[x_endog],
-            vec!["x_endog".to_string()],
-            &[z],
-            vec!["z".to_string()],
-            true,
-            "y".to_string(),
-        )
-        .unwrap();
-
-        let _ = TwoSlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
+        let _ = TwoSlsEstimator::fit(just_identified_input(), CovType::Classical, 0.95).unwrap();
 
         assert!(matches!(faer::get_global_parallelism(), faer::Par::Seq));
     }
@@ -931,7 +1039,7 @@ mod tests {
     fn fit_matches_ols_when_x_endog_and_instruments_are_empty() {
         // `x_endog=[]`かつ`instruments=[]`の退化ケース（`IvInput`のdocコメント参照）は
         // 2SLSが素のOLSと数値的に一致するはず。
-        let y = vec![2.0, 4.0, 6.0, 8.0, 10.0];
+        let y = vec![2.1, 3.8, 6.3, 7.9, 10.2];
         let x_exog = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
         let input = IvInput::from_columns(
             &y,
@@ -949,8 +1057,8 @@ mod tests {
         let estimator = TwoSlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
         assert_eq!(estimator.param_names(), ["const", "x1"]);
         assert!(estimator.first_stage_estimators().is_empty());
-        assert!((*estimator.params().get(0, 0) - 0.0).abs() < 1e-8);
-        assert!((*estimator.params().get(1, 0) - 2.0).abs() < 1e-8);
+        assert!((*estimator.params().get(0, 0) - 0.0).abs() < 0.5);
+        assert!((*estimator.params().get(1, 0) - 2.0).abs() < 0.2);
 
         // `x_endog=[]`だと`X̂ = X`（推定値=実際の値）のため、SE・適合度統計量も
         // 素のOLSと数値的に一致するはず（`OlsEstimator`への直接fitと照合）。
@@ -994,7 +1102,7 @@ mod tests {
     /// 同名の分岐と同じ0除算回避の扱い、モジュール冒頭のdocコメント参照）。
     #[test]
     fn fit_sets_f_statistic_and_f_p_value_to_nan_for_const_only_model() {
-        let y = vec![2.0, 4.0, 6.0, 8.0, 10.0];
+        let y = vec![2.1, 3.8, 6.3, 7.9, 10.2];
         let input = IvInput::from_columns(
             &y,
             &[],
@@ -1019,7 +1127,7 @@ mod tests {
         // `x_endog=[]`だと第一段階ループが一度も回らないため、`confidence_level`の
         // 範囲チェックは第二段階の`OlsEstimator::fit`経由でのみ働く（モジュール冒頭の
         // docコメント参照）。
-        let y = vec![2.0, 4.0, 6.0, 8.0, 10.0];
+        let y = vec![2.1, 3.8, 6.3, 7.9, 10.2];
         let x_exog = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
         let input = IvInput::from_columns(
             &y,
@@ -1108,21 +1216,8 @@ mod tests {
     /// ため`None`になる（`docs/spec/iv-spec.md`1.2節・3.5節）。
     #[test]
     fn fit_sets_sargan_statistic_to_none_when_just_identified() {
-        let (y, x_endog, z) = perfectly_predicted_endog_data();
-        let input = IvInput::from_columns(
-            &y,
-            &[],
-            vec![],
-            &[x_endog],
-            vec!["x_endog".to_string()],
-            &[z],
-            vec!["z".to_string()],
-            true,
-            "y".to_string(),
-        )
-        .unwrap();
-
-        let estimator = TwoSlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
+        let estimator =
+            TwoSlsEstimator::fit(just_identified_input(), CovType::Classical, 0.95).unwrap();
         assert_eq!(estimator.sargan_statistic(), None);
         assert_eq!(estimator.sargan_p_value(), None);
     }
@@ -1905,7 +2000,7 @@ mod tests {
     /// （モジュール冒頭のdocコメント参照）、エラーは先に`FirstStageFailed`として
     /// 発生してしまい、第二段階固有の経路を検証できない。
     fn x_endog_empty_input() -> IvInput {
-        let y = vec![2.0, 4.0, 6.0, 8.0, 10.0];
+        let y = vec![2.1, 3.8, 6.3, 7.9, 10.2];
         let x_exog = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
         IvInput::from_columns(
             &y,
@@ -2537,7 +2632,7 @@ mod tests {
     /// `weak_instrument_f_statistics()`も空になる。
     #[test]
     fn weak_instrument_f_statistics_is_empty_when_x_endog_is_empty() {
-        let y = vec![2.0, 4.0, 6.0, 8.0, 10.0];
+        let y = vec![2.1, 3.8, 6.3, 7.9, 10.2];
         let x_exog = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
         let input = IvInput::from_columns(
             &y,
@@ -2616,35 +2711,6 @@ mod tests {
     fn wu_hausman_statistics_are_none_when_x_endog_is_empty() {
         let estimator =
             TwoSlsEstimator::fit(x_endog_empty_input(), CovType::Classical, 0.95).unwrap();
-        assert_eq!(estimator.wu_hausman_statistic(), None);
-        assert_eq!(estimator.wu_hausman_p_value(), None);
-    }
-
-    /// 操作変数が内生変数を完全予測する退化ケース（`perfectly_predicted_endog_data()`、
-    /// 第一段階残差の分散がゼロ）では、Wu-Hausmanの拡張回帰の設計行列に分散ゼロの列が
-    /// 混入し特異になる。この場合`fit()`全体は失敗させず（`params`/`std_errors`等の主要な
-    /// 推定結果はWu-Hausman計算と無関係に正しく計算できるため）、`wu_hausman_statistic`/
-    /// `wu_hausman_p_value`だけ`None`にする（ユーザー確認済み、`fit()`のdocコメント参照）。
-    #[test]
-    fn fit_sets_wu_hausman_statistics_to_none_when_instrument_perfectly_predicts_endog() {
-        let (y, x_endog, z) = perfectly_predicted_endog_data();
-        let input = IvInput::from_columns(
-            &y,
-            &[],
-            vec![],
-            &[x_endog],
-            vec!["x_endog".to_string()],
-            &[z],
-            vec!["z".to_string()],
-            true,
-            "y".to_string(),
-        )
-        .unwrap();
-
-        let estimator = TwoSlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
-        // 主要な推定結果自体は退化の影響を受けず正しく計算できている
-        // （既存テスト`fit_matches_closed_form_ols_when_instrument_perfectly_predicts_endog`）。
-        assert!((*estimator.params().get(1, 0) - 2.0).abs() < 1e-8);
         assert_eq!(estimator.wu_hausman_statistic(), None);
         assert_eq!(estimator.wu_hausman_p_value(), None);
     }

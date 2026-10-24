@@ -49,6 +49,8 @@
 |---|---|---|
 | `REGRESSOR_NO_WITHIN_VARIATION`（FE） | `ValidationError` | 個体内変換後の列の単純な統計量。他の手法の`DESIGN_MATRIX_SINGULAR`は分解（ランクの判定）で分かるので`ComputationError` |
 | `AMEMIYA_REQUIRES_WITHIN_VARIATION` | `ValidationError` | 同上 |
+| `OUTCOME_CONSTANT`・`OUTCOME_CONSTANT_WITHIN_ENTITY` | `ValidationError` | 被説明変数の値だけで決まる（全行が同じ値、個体内変換後に分散が残らない）。推定を走らせずに分かる |
+| `PERFECT_FIT` | `ComputationError` | 推定した残差で決まる（残差平方和が総平方和の`k·ε`倍以下）。残差は推定してみないと分からない |
 | `DK_TWO_PERIODS_DEGENERATE`・`CLUSTER_TWO_GROUPS_DEGENERATE` | `ValidationError` | パネルの構造だけで決まる |
 | `NO_UNCENSORED_OBSERVATIONS`（Tobit） | `ValidationError` | 打ち切り境界と`y`の個数だけで決まる |
 | `DIAGNOSTIC_VARIABLES_CONSTANT` | `ValidationError` | 診断検定の変数がすべて定数かは、列の統計量だけで決まる |

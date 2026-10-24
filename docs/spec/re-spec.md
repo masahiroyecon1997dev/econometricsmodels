@@ -111,6 +111,12 @@ Python `linearmodels.RandomEffects`の実装（Swamy-Arora）に準拠する。R
   `df_resid() = n - k_tv - n_entities`になる（`plm`と同じ。`linearmodels`は時間不変の列も
   自由度に数えるため`σ_ε²`が食い違う）。全説明変数が時間不変でも成立する（FEは説明変数0個を
   受け付ける）。分散がゼロかどうかの判定はFEの分散ゼロ検出と同じ相対閾値。
+  - 被説明変数の検査もこの内部FE推定が担う（RE自身は重複して持たない）: `y`が個体ごとに定数
+    （`σ_ε²`を推定するwithin変動が無い）なら`OUTCOME_CONSTANT_WITHIN_ENTITY`（`ValidationError`、
+    文脈句は付けない）、within回帰の残差が0（ノイズ無しのデータ。`σ_ε² = 0`で`θ = 1`となり
+    最終回帰の定数列が0になる）なら`PERFECT_FIT`（`ComputationError`、`stage`は
+    `VARIANCE_COMPONENT_WITHIN_REGRESSION`）。以前は最終回帰の特異性（`DESIGN_MATRIX_SINGULAR`）に
+    落ちていた。
 - **σ_u²（individual variance）**: between回帰（エンティティ平均`[1, x̄ᵢ.]`への最小二乗）のSSR、
   調和平均`t_bar = n_entities / Σ(1/T_i)`を使う標準式`max(0, ssr/df_resid - σ_ε²/t_bar)`。
   `df_resid = n_entities - K_b - 1`。平均が個体間で一定の列（バランスパネルで時点間でのみ変わる

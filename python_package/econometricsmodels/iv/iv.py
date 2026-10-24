@@ -107,11 +107,14 @@ class IV:
                 chosen `estimator`/`gmm_type`/`cov_type` does not
                 use (e.g. `cluster` without `cov_type="cluster"`,
                 `gmm_max_iter` with a `gmm_type` other than
-                `"iterated"`), or too few instruments for
-                identification). A subclass of `ValueError`.
+                `"iterated"`), too few instruments for
+                identification, or `y` constant with an intercept). A
+                subclass of `ValueError`.
             ComputationError: A problem was detected during
                 computation (e.g. a singular first- or second-stage
-                design matrix). A subclass of `RuntimeError`.
+                design matrix, or a perfect fit of the structural
+                equation or of a first stage: residuals zero up to
+                rounding). A subclass of `RuntimeError`.
         """
         raw = _lib.fit_iv(
             self._data,

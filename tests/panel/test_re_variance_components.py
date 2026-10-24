@@ -234,19 +234,18 @@ def test_two_way_without_regressors_that_vary_in_both_dimensions():
     assert res.sigma2_eps == pytest.approx(want, rel=1e-12)
 
 
-def test_tiny_error_variance_gives_theta_close_to_one_or_a_computation_error():
+def test_tiny_error_variance_gives_theta_close_to_one_or_a_perfect_fit():
     """誤差分散が極小でも、`θ ≈ 1`で成功する。完全に当てはまる極限
-    （`σ_ε² ≈ 1e-18`）では、準偏差変換後の回帰の傾きの共分散が数値的に特異になり
-    `ComputationError`（`MATRIX_NEAR_SINGULAR`）になる。"""
+    （`σ_ε² ≈ 1e-18`）では、分散成分を求めるwithin回帰の残差が総平方和の
+    `k * epsilon`倍以下になり、完全フィット（`PERFECT_FIT`）として止まる。"""
     ok = _fit(
         _panel(1, entity_sd=1.0, time_sd=0.0, noise_sd=1e-6),
         cov_type="classical",
     )
     assert 0.9999 < min(ok.theta.values()) < 1.0
     with raises_error(
-        ErrorCode.MATRIX_NEAR_SINGULAR,
-        matrix="COEFFICIENT_COVARIANCE",
-        stage="QUASI_DEMEANED_REGRESSION",
+        ErrorCode.PERFECT_FIT,
+        stage="VARIANCE_COMPONENT_WITHIN_REGRESSION",
     ):
         _fit(
             _panel(1, entity_sd=1.0, time_sd=0.0, noise_sd=1e-9),

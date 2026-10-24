@@ -420,17 +420,15 @@ def test_between_regression_insufficient_entities_raises():
         RE(df, y="y", x=["x1"], entity="entity").fit()
 
 
-def test_quasi_demeaned_regression_fails_when_sigma2_eps_is_zero():
+def test_noiseless_data_is_a_perfect_fit_in_the_variance_component_regression():
     """ノイズ無しの線形DGP（`y = 2*x1 + entity固有の切片`、entity間の切片が
     異なるためσ_u²>0）はσ_ε²=0に収束し、θ_i=1（全エンティティ）で切片復元用
-    の定数列が恒等的に全ゼロ列になるため`OlsEstimator::fit`が特異行列として
-    失敗する（`DESIGN_MATRIX_SINGULAR`、`stage="QUASI_DEMEANED_REGRESSION"`、
-    `engine/src/panel/re.rs`の
-    `re_estimator_fit_returns_quasi_demeaned_regression_failed_when_sigma2_eps_is_zero`
-    と同じデータ）。RE自身の最終回帰（準偏差変換後の回帰）に
-    実際に到達する唯一の現実的な経路——通常の多重共線性・スケール差は
-    σ_ε²用の内部1-way FE呼び出しが先に失敗する
-    （`test_perfect_multicollinearity_raises_computation_error`と対照）。
+    の定数列が恒等的に全ゼロ列になる。最終回帰の特異性に落ちる前に、σ_ε²を求める
+    内部のwithin回帰が完全フィット（`PERFECT_FIT`、
+    `stage="VARIANCE_COMPONENT_WITHIN_REGRESSION"`）として止まる
+    （`engine/src/panel/re.rs`の
+    `re_estimator_fit_returns_perfect_fit_when_the_within_regression_is_exact`
+    と同じデータ）。
     """
     df = pl.DataFrame(
         {
@@ -440,7 +438,7 @@ def test_quasi_demeaned_regression_fails_when_sigma2_eps_is_zero():
         }
     )
     with raises_error(
-        ErrorCode.DESIGN_MATRIX_SINGULAR, stage="QUASI_DEMEANED_REGRESSION"
+        ErrorCode.PERFECT_FIT, stage="VARIANCE_COMPONENT_WITHIN_REGRESSION"
     ):
         RE(df, y="y", x=["x1"], entity="entity").fit()
 

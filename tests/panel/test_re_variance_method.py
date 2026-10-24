@@ -688,20 +688,20 @@ def test_non_positive_sigma2_eps_is_a_computation_error():
     assert math.isfinite(fit("swamy_arora").sigma2_u)
 
 
-@pytest.mark.parametrize("method", ["swamy_arora", "amemiya"])
-def test_noiseless_data_is_a_computation_error_when_the_first_stage_is_within(
-    method,
-):
-    """ノイズの無い線形DGPはwithin残差が（ほぼ）0で`σ_ε²`が潰れ、準偏差変換後の設計行列が
-    特異になる。1段目がwithin推定の`swamy_arora`・`amemiya`が対象（`wallace_hussain`の
-    1段目はプールドOLSで、個体効果が残差に残るため`σ_ε²`は潰れない）。"""
+@pytest.mark.parametrize(
+    "method", ["swamy_arora", "wallace_hussain", "amemiya"]
+)
+def test_noiseless_data_is_a_perfect_fit_for_every_method(method):
+    """ノイズの無い線形DGPはwithin残差が（ほぼ）0で`σ_ε²`が潰れる。分散成分の1段目が
+    プールドOLSの`wallace_hussain`でも、ハウスマン検定とwithin R²のために内部のFE推定は
+    全推定法で走るため、そのwithin回帰が完全フィット（`PERFECT_FIT`）として止まる。"""
     case = _case("ow_baseline")
     df = _frame(case)
     exact = df.with_columns(
         y=2.0 * pl.col("x1") - pl.col("x2") + pl.col("entity").rank("dense")
     )
     with raises_error(
-        ErrorCode.DESIGN_MATRIX_SINGULAR, stage="QUASI_DEMEANED_REGRESSION"
+        ErrorCode.PERFECT_FIT, stage="VARIANCE_COMPONENT_WITHIN_REGRESSION"
     ):
         _fit(case, "classical", method, exact)
 

@@ -206,6 +206,13 @@ pub enum PanelError {
     #[error("{}", self.catalog_message())]
     ZeroVarianceAfterDemeaning { column: String },
 
+    /// 被説明変数がwithin変換後に分散ゼロ（個体内で定数、2-wayなら個体効果と時点効果だけで
+    /// 説明される）。固定効果が説明するものが残らず、within回帰のR-squaredが定義できない。
+    /// 説明変数の`ZeroVarianceAfterDemeaning`と同じ相対閾値で判定する
+    /// （[`crate::panel::fe::column_is_zero_variance`]）。
+    #[error("{}", self.catalog_message())]
+    OutcomeConstantWithinEntity,
+
     /// 2-way FE（entity + time FE）を要求したのに`time`列が指定されていない。
     ///
     /// `time`は`FEOptions`内の`Option`フィールドで、2-way指定時のみ実質必須になる
@@ -474,6 +481,9 @@ impl ErrorInfo for PanelError {
             Self::ZeroVarianceAfterDemeaning { column } => {
                 ErrorReport::new(ErrorCode::RegressorNoWithinVariation)
                     .param("column", column.as_str())
+            }
+            Self::OutcomeConstantWithinEntity => {
+                ErrorReport::new(ErrorCode::OutcomeConstantWithinEntity)
             }
             Self::InvalidDkBandwidth { bandwidth, t } => {
                 ErrorReport::new(ErrorCode::DkBandwidthOutOfRange)
@@ -1183,6 +1193,11 @@ mod tests {
                 },
                 ErrorCode::RegressorNoWithinVariation,
                 "Regressor 'x' has no variation left after the within transformation: it is time-invariant, or collinear with the fixed effects.",
+            ),
+            (
+                PanelError::OutcomeConstantWithinEntity,
+                ErrorCode::OutcomeConstantWithinEntity,
+                "The outcome has no variation left after the fixed effects are removed: it is constant within every entity, or fully explained by the entity and time effects.",
             ),
             (
                 PanelError::InsufficientDkPeriods { t_periods: 1 },

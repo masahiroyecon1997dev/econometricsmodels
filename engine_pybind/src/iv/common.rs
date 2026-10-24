@@ -55,7 +55,7 @@ use std::collections::HashMap;
 
 use engine::iv::common::{
     IvError, IvInput, compute_first_stage, validate_observation_counts,
-    validate_structural_cluster_count,
+    validate_outcome_not_constant, validate_structural_cluster_count,
 };
 use engine::iv::gmm::{GmmEstimator, GmmType, WeightType};
 use engine::iv::two_sls::TwoSlsEstimator;
@@ -1068,6 +1068,8 @@ pub(crate) fn build_iv_input(
 ///   `ValidationError`（`validate_observation_counts`、`compute_first_stage`より前）
 /// - `cov_type="cluster"`でクラスター数が構造方程式の傾き係数の数以下（または2未満）:
 ///   `ValidationError`（`validate_structural_cluster_count`、`compute_first_stage`より前）
+/// - 切片があり`y`が全行で同じ値: `ValidationError`（`validate_outcome_not_constant`、
+///   `compute_first_stage`より前）
 /// - `build_iv_input`が返すエラー（列抽出・y/x_exog/x_endog/instrumentsの重複・
 ///   `"const"`列衝突・`estimator`/`cov_type`文字列の検証等）は`ValidationError`
 /// - `gmm_type`/`gmm_weight_type`の文字列が不正（使われないオプションでも）、または使われない
@@ -1115,6 +1117,10 @@ pub(crate) fn fit(
     // このチェックが常に`FirstStageFailed`（第一段階の`g`・`q`）に隠れ、エンジン側の
     // 構造方程式チェックがPythonから到達不能になる。
     validate_structural_cluster_count(&input, &cov_type).map_err(iv_error_to_pyerr)?;
+
+    // 被説明変数が定数（切片あり）のモデルは説明するものが無い。入力だけから分かるため、これも
+    // `compute_first_stage`より先に弾く（`TwoSlsEstimator::fit`/`GmmEstimator::fit`冒頭と同じ実装）。
+    validate_outcome_not_constant(&input).map_err(|e| iv_error_to_pyerr(IvError::from(e)))?;
 
     // 第一段階回帰・弱操作変数診断は`estimator`によらず共通（モジュールdocコメント参照）。
     // `input`は下でestimatorごとの推定器に移動するため、参照のみで済むこの呼び出しを先に行う。

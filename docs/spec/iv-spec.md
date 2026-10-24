@@ -40,6 +40,15 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   `W₀ = (Z'Z)⁻¹`でOLSに縮退）、`n < l`では`Z'Z`が特異になる。クラスター数が第一段階の
   傾き係数の数以下のとき全体F検定だけを`None`にできる（3.1節）のとは異なり、`X̂`の元になる推定
   そのものが成立しない。
+- **被説明変数が定数・完全フィット**: 切片があり`y`が全行で同じ値なら`OUTCOME_CONSTANT`
+  （`ValidationError`、`validate_outcome_not_constant`。第一段階より前に弾く）。構造残差
+  $y - X\hat\beta$（第二段階回帰の残差ではない）の平方和が`y`の総平方和の`k·ε`倍以下なら
+  `PERFECT_FIT`（`ComputationError`、判定は`ols-spec.md`3.3節と同じ`is_perfect_fit`）。GMMは
+  重み行列`S`が0になって逆行列が特異になる前に、初期推定（2SLSと同じ点推定）の構造残差で判定する。
+  第一段階は内生変数ごとの`OlsEstimator::fit_with_optional_f_test`なので、操作変数が内生変数を
+  完全に予測する（第一段階の残差が0）と、その内生変数の文脈（`stage=FIRST_STAGE`）で
+  `PERFECT_FIT`になる。第二段階・Wu-Hausman拡張回帰・部分F統計量の制限モデルは判定しない
+  （`fit_auxiliary`）。
 - **バリデーション**（`engine_pybind::iv::common::build_iv_input`）:
   - `y`/`x_exog`/`x_endog`/`instruments`間の重複列名は`ValidationError`。
   - 各ロール内部（`x_exog`/`x_endog`/`instruments`それぞれ）の重複列名も`ValidationError`。
@@ -303,8 +312,9 @@ Sargan検定（2SLS）／Hansen J検定（GMM）を`fit()`の結果本体に含�
 - **`estimator="gmm"`では常に`None`**（`GmmEstimator`はWu-Hausman検定を実装しない）。
 - **想定内の理由で失敗した場合は`fit()`全体を失敗させず`None`にする**（`FirstStageFailed`/
   `SecondStageFailed`の"all-or-nothing"方針とは意図的に異なる）。想定内の理由は2つ:
-  (1) 第一段階残差の分散がゼロ（操作変数が内生変数を完全予測する退化ケース）で拡張回帰の
-  設計行列に分散ゼロの列が混入し特異になる、(2) 拡張回帰は第二段階より内生変数の数だけ
+  (1) 第一段階残差が第二段階の列と共線になり拡張回帰の設計行列が特異になる（第一段階の残差が
+  0になる退化ケースは、第一段階が`PERFECT_FIT`で先に止めるので、この経路には来ない）、
+  (2) 拡張回帰は第二段階より内生変数の数だけ
   列が多い（`k_exog+2*k_endog`列）ため、境界的なサンプルサイズでは第二段階は成功するが
   拡張回帰は観測数不足になりうる。**それ以外の失敗（数値的なほぼ特異性等）は`None`へ
   握りつぶさず`IvError::HausmanRegressionFailed`として伝播する**（広すぎる`Err(_)`

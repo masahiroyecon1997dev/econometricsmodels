@@ -1055,7 +1055,7 @@ fn hausman_aux_wald_f(
     k: usize,
     confidence_level: f64,
 ) -> Result<f64, LeastSquaresError> {
-    let aux = OlsEstimator::fit(aux_input, cov_type, confidence_level)?;
+    let aux = OlsEstimator::fit_auxiliary(aux_input, cov_type, confidence_level)?;
     Ok(aux.wald_test_last_columns(k)?.0)
 }
 
@@ -1201,7 +1201,7 @@ fn re_hausman_test(
             )
             .map_err(|e| to_err(LeastSquaresError::Common(e)))?;
 
-            let aux = OlsEstimator::fit(aux_input, CovType::Classical, confidence_level)
+            let aux = OlsEstimator::fit_auxiliary(aux_input, CovType::Classical, confidence_level)
                 .map_err(to_err)?;
             let k_aux = aux.input().k();
             let x_mat = aux.input().x();
@@ -1223,7 +1223,7 @@ fn re_hausman_test(
                 .0
         }
         ReCovType::Dk { bandwidth, time } => {
-            let aux = OlsEstimator::fit(aux_input, CovType::Classical, confidence_level)
+            let aux = OlsEstimator::fit_auxiliary(aux_input, CovType::Classical, confidence_level)
                 .map_err(to_err)?;
             let n = aux.input().nobs();
             let k_aux = aux.input().k();
@@ -1565,8 +1565,9 @@ impl ReEstimator {
             input.dep_var_name().to_string(),
         )
         .map_err(|source| PanelError::QuasiDemeanedRegressionFailed { source })?;
-        let estimator = OlsEstimator::fit(ols_input, CovType::Classical, confidence_level)
-            .map_err(|source| PanelError::QuasiDemeanedRegressionFailed { source })?;
+        let estimator =
+            OlsEstimator::fit_auxiliary(ols_input, CovType::Classical, confidence_level)
+                .map_err(|source| PanelError::QuasiDemeanedRegressionFailed { source })?;
 
         let n = estimator.input().nobs();
         let df_model = estimator.input().k();
@@ -5313,19 +5314,11 @@ mod tests {
     }
 
     #[test]
-    fn re_estimator_fit_returns_quasi_demeaned_regression_failed_when_sigma2_eps_is_zero() {
-        // rust-reviewer指摘: σ_ε²=0（σ_u²>0、σ_ε²のみゼロ）は
-        // `θ_i = 1 - sqrt(0/(T_i・σ_u²+0)) = 1`（全エンティティ）になり、切片復元用の
-        // 定数列`1 - θ_i・1`が恒等的に全ゼロ列になる。この結果`OlsEstimator::fit`が
-        // 確実に特異行列として失敗し、`QuasiDemeanedRegressionFailed`に実際に到達する
-        // 唯一の現実的な経路になる（`engine/src/panel/CLAUDE.md`参照）。
-        //
-        // ノイズ無しの線形DGP（`y = 2*x1 + entity固有の切片`）にすると、内部FE推定の
-        // within回帰残差平方和が厳密に0になりσ_ε²=0を再現できる
-        // （`fe_estimator_fit_one_way_recovers_known_slope`と同型のデータ構成）。
-        // entity間の切片（5, 10, 1）が異なるためσ_u²>0（between回帰のSSRが非ゼロ）
-        // になり、`BetweenRegressionFailed`より先にこの経路へ到達する
-        // （Pythonで実地確認済み: sigma2_eps=0.0, sigma2_u≈20.02, theta=1.0 for all）。
+    fn re_estimator_fit_returns_perfect_fit_when_the_within_regression_is_exact() {
+        // ノイズ無しの線形DGP（`y = 2*x1 + entity固有の切片`）では、分散成分を求める内部FEの
+        // within回帰の残差が全て0になり、σ_ε²=0（θ=1で最終回帰の定数列が全て0になる）に
+        // なる。最終回帰の特異性（`QuasiDemeanedRegressionFailed`）に落ちる前に、原因の分かる
+        // 完全フィットとして、分散成分のwithin回帰の文脈つきで止まる。
         let entity = strings(&["a", "a", "a", "b", "b", "c", "c"]);
         let x1 = vec![1.0, 2.0, 3.0, 2.0, 3.0, 4.0, 5.0];
         let y = [7.0, 9.0, 11.0, 14.0, 16.0, 9.0, 11.0];
@@ -5335,14 +5328,34 @@ mod tests {
 
         let result = ReEstimator::fit(input, ReEffects::OneWay, ReCovType::Classical, 0.95);
 
+        let err = result.unwrap_err();
         assert_eq!(
-            result.unwrap_err(),
-            PanelError::QuasiDemeanedRegressionFailed {
-                source: crate::linear::common::LeastSquaresError::SingularMatrix {
-                    columns: vec!["const".to_string()]
-                },
+            err,
+            PanelError::WithinRegressionFailed {
+                source: crate::shared::error::CommonError::PerfectFit.into(),
             }
+            .in_stage(Stage::VarianceComponentWithinRegression)
         );
+        assert_eq!(
+            err.report().code(),
+            crate::shared::error_catalog::ErrorCode::PerfectFit
+        );
+    }
+
+    #[test]
+    fn re_estimator_fit_passes_outcome_constant_within_entity_through_without_a_stage() {
+        // 個体ごとに定数のyは、分散成分のwithin回帰が説明するものを持たない。入力の事実なので
+        // 文脈句は付けない。
+        let entity = strings(&["a", "a", "a", "b", "b", "c", "c"]);
+        let x1 = vec![1.0, 2.0, 3.0, 2.0, 3.0, 4.0, 5.0];
+        let y = [0.1, 0.1, 0.1, 0.7, 0.7, 1.3, 1.3];
+        let input =
+            ReInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let result = ReEstimator::fit(input, ReEffects::OneWay, ReCovType::Classical, 0.95);
+
+        assert_eq!(result.unwrap_err(), PanelError::OutcomeConstantWithinEntity);
     }
 
     // ── ハウスマン検定 ─────────────────────────────────────

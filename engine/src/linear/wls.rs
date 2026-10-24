@@ -213,6 +213,7 @@ fn original_scale_fitted_and_residuals(
 mod tests {
     use super::*;
     use crate::linear::common::row_time_order;
+    use crate::shared::error::CommonError;
     use crate::shared::group_codes::GroupCodes;
 
     #[test]
@@ -348,8 +349,8 @@ mod tests {
 
     #[test]
     fn fit_recovers_known_coefficients_with_nonuniform_weights() {
-        // y = 1 + 2*x（ノイズなしの厳密解）に対しては、重みを変えても推定値は変わらないはず。
-        let y = vec![1.0, 3.0, 5.0, 7.0, 9.0];
+        // y = 1 + 2*x に小さなノイズ。重みを変えても推定値は真の値の近くに返る。
+        let y = vec![1.1, 2.9, 5.1, 6.9, 9.1];
         let x_columns = vec![vec![0.0, 1.0, 2.0, 3.0, 4.0]];
         let weights = vec![1.0, 2.0, 0.5, 3.0, 1.5];
 
@@ -365,11 +366,57 @@ mod tests {
         )
         .unwrap();
 
-        assert!((*wls.estimator().params().get(0, 0) - 1.0).abs() < 1e-9);
-        assert!((*wls.estimator().params().get(1, 0) - 2.0).abs() < 1e-9);
-        for r in wls.residuals() {
-            assert!(r.abs() < 1e-9);
+        let b0 = *wls.estimator().params().get(0, 0);
+        let b1 = *wls.estimator().params().get(1, 0);
+        assert!((b0 - 1.0).abs() < 0.3);
+        assert!((b1 - 2.0).abs() < 0.15);
+        for (i, r) in wls.residuals().iter().enumerate() {
+            assert!((r - (y[i] - b0 - b1 * x_columns[0][i])).abs() < 1e-12);
         }
+    }
+
+    #[test]
+    fn fit_returns_perfect_fit_for_exact_data_under_any_weights() {
+        // y = 1 + 2*x のノイズなしの厳密解は、重みを変えても残差が0で標準誤差が定義できない。
+        let y = vec![1.0, 3.0, 5.0, 7.0, 9.0];
+        let x_columns = vec![vec![0.0, 1.0, 2.0, 3.0, 4.0]];
+        let weights = vec![1.0, 2.0, 0.5, 3.0, 1.5];
+
+        let result = WlsEstimator::fit(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+            &weights,
+            CovType::Classical,
+            0.95,
+        );
+
+        assert_eq!(
+            result.unwrap_err(),
+            LeastSquaresError::Common(CommonError::PerfectFit)
+        );
+    }
+
+    #[test]
+    fn fit_returns_outcome_constant_for_a_constant_outcome_under_any_weights() {
+        // 重み付き平均で中心化した総平方和も0になる。
+        let result = WlsEstimator::fit(
+            &[4.0; 5],
+            &[vec![0.0, 1.0, 2.0, 3.0, 5.0]],
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+            &[1.0, 2.0, 0.5, 3.0, 1.5],
+            CovType::Classical,
+            0.95,
+        );
+
+        assert_eq!(
+            result.unwrap_err(),
+            LeastSquaresError::Common(CommonError::OutcomeConstant)
+        );
     }
 
     #[test]
@@ -576,14 +623,15 @@ mod tests {
     fn fit_with_multiple_x_columns_recovers_known_coefficients() {
         // original_scale_fitted_and_residualsのx_columnsループ（複数列）が正しく計算できることを確認する
         // （これまでのテストはx列1本のみだった）。
-        let y = vec![9.0, 8.0, 19.0, 18.0, 29.0, 28.0]; // 1 + 2*x1 + 3*x2
+        // 1 + 2*x1 + 3*x2 に小さなノイズ。
+        let y = vec![9.1, 7.8, 19.15, 18.05, 28.9, 28.12];
         let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
         let x2 = vec![2.0, 1.0, 4.0, 3.0, 6.0, 5.0];
         let weights = vec![1.0, 2.0, 0.5, 3.0, 1.5, 2.5];
 
         let wls = WlsEstimator::fit(
             &y,
-            &[x1, x2],
+            &[x1.clone(), x2.clone()],
             vec!["x1".to_string(), "x2".to_string()],
             true,
             "y".to_string(),
@@ -593,11 +641,13 @@ mod tests {
         )
         .unwrap();
 
-        assert!((*wls.estimator().params().get(0, 0) - 1.0).abs() < 1e-9); // const
-        assert!((*wls.estimator().params().get(1, 0) - 2.0).abs() < 1e-9); // x1
-        assert!((*wls.estimator().params().get(2, 0) - 3.0).abs() < 1e-9); // x2
-        for r in wls.residuals() {
-            assert!(r.abs() < 1e-9);
+        let params = wls.estimator().params();
+        let (b0, b1, b2) = (*params.get(0, 0), *params.get(1, 0), *params.get(2, 0));
+        assert!((b0 - 1.0).abs() < 0.5); // const
+        assert!((b1 - 2.0).abs() < 0.5); // x1
+        assert!((b2 - 3.0).abs() < 0.5); // x2
+        for (i, r) in wls.residuals().iter().enumerate() {
+            assert!((r - (y[i] - b0 - b1 * x1[i] - b2 * x2[i])).abs() < 1e-12);
         }
     }
 

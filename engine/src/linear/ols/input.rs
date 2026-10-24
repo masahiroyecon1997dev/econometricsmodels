@@ -3,6 +3,8 @@ use faer::Mat;
 use crate::linear::common::LeastSquaresError;
 use crate::shared::design_matrix::design_matrix_element;
 use crate::shared::error::CommonError;
+use crate::shared::goodness_of_fit::total_sum_of_squares;
+use crate::shared::validation::all_values_equal;
 
 /// OLSの被説明変数・設計行列を保持する入力データ。
 ///
@@ -20,6 +22,12 @@ pub struct OlsInput {
     dep_var_name: String,
     /// 定数項を含むか。R²・調整済みR²（center済み/uncenteredのSSTの選択）で必要
     has_intercept: bool,
+    /// 重み付け・列の変換をする前の`y`の総平方和（切片があれば（重み付き）平均で中心化、
+    /// なければ非中心化）。完全フィットの判定（`is_perfect_fit`）の基準で、WLSでも元の`y`と
+    /// 重みで決まる（`y`は`sqrt(w)`倍に変換済みで、そこから計算すると別の量になる）
+    outcome_sst: f64,
+    /// 変換前の`y`が全行で同じ値か（`has_intercept`のモデルでは説明するものが無い）
+    outcome_constant: bool,
 }
 
 impl OlsInput {
@@ -147,12 +155,17 @@ impl OlsInput {
         }
         param_names.extend(x_names);
 
+        let outcome_sst = total_sum_of_squares(y, weights, include_intercept);
+        let outcome_constant = all_values_equal(y.iter().copied());
+
         Ok(Self {
             y: y_mat,
             x,
             param_names,
             dep_var_name,
             has_intercept: include_intercept,
+            outcome_sst,
+            outcome_constant,
         })
     }
 
@@ -175,6 +188,16 @@ impl OlsInput {
     /// 定数項を含むか
     pub fn has_intercept(&self) -> bool {
         self.has_intercept
+    }
+
+    /// 変換前の`y`の総平方和（`outcome_sst`フィールドの説明参照）
+    pub(crate) fn outcome_sst(&self) -> f64 {
+        self.outcome_sst
+    }
+
+    /// 変換前の`y`が全行で同じ値か
+    pub(crate) fn outcome_constant(&self) -> bool {
+        self.outcome_constant
     }
 
     /// 観測数 n

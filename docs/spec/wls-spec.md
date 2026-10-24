@@ -73,6 +73,11 @@ WLSは`OlsEstimator::fit`をそのまま呼ぶため、既存の`LeastSquaresErr
 - `WeightDimensionMismatch { y_rows, weight_rows }`: 重み配列と`y`の行数不一致（防御的チェック）。
 - `NonPositiveWeight { row, weight }`: 重みが0以下（NaN含む）。
 
+被説明変数が定数（`OUTCOME_CONSTANT`、切片あり）と完全フィット（`PERFECT_FIT`）の判定は
+`OlsEstimator::fit`の判定（`ols-spec.md`3.3節）をそのまま使う。総平方和は変換後の$\tilde y$ではなく
+`OlsInput`が元の$y$と重みから保持する値（切片ありは重み付き平均で中心化した$\sum w_i(y_i-\bar y_w)^2$、
+切片なしは$\sum w_i y_i^2$。次節のR²と同じ`SST`）を使い、判定は重み付き残差平方和で行う。
+
 ### 3.3 標準誤差
 
 classical / HC0〜HC3 / HAC / cluster とも、変換後データ（$\tilde x_i=\sqrt{w_i}x_i$,

@@ -42,7 +42,8 @@ use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use crate::shared::error::{ClusterSetting, CommonError, ErrorInfo, staged_report};
 use crate::shared::error_catalog::{ErrorCode, ErrorReport, Stage};
 use crate::shared::validation::{
-    GMM_MAX_ITER_MIN, MAX_ITER_LIMIT, validate_cluster_count_covers_slopes, validate_cluster_groups,
+    GMM_MAX_ITER_MIN, MAX_ITER_LIMIT, all_values_equal, validate_cluster_count_covers_slopes,
+    validate_cluster_groups,
 };
 
 /// 2SLS/GMMの計算過程で発生しうるエラー。
@@ -533,6 +534,21 @@ pub fn validate_structural_cluster_count(
     Ok(())
 }
 
+/// 構造方程式の被説明変数が全行で同じ値で、切片のあるモデルが説明するものを持たない入力を弾く
+/// （`CommonError::OutcomeConstant`、`ValidationError`）。切片なしのモデルでは定数でも非中心化の
+/// 総平方和が正なので対象外。`TwoSlsEstimator::fit`・`GmmEstimator::fit`と`engine_pybind`の`fit`が
+/// 共有する（`engine_pybind`は第一段階より前に呼ぶ）。
+///
+/// # Errors
+/// 切片があり、被説明変数がすべて同じ値: `CommonError::OutcomeConstant`
+pub fn validate_outcome_not_constant(input: &IvInput) -> Result<(), CommonError> {
+    let y = input.y();
+    if input.has_intercept() && all_values_equal((0..y.nrows()).map(|i| *y.get(i, 0))) {
+        return Err(CommonError::OutcomeConstant);
+    }
+    Ok(())
+}
+
 /// [`compute_first_stage`]の戻り値: 内生変数ごとの第一段階回帰（`x_endog_names`と同じ順序）、
 /// 弱操作変数診断（部分F統計量、同じく`x_endog_names`と同じ順序）。
 pub type FirstStageResult = (Vec<(String, OlsEstimator)>, Vec<(String, f64)>);
@@ -662,53 +678,52 @@ fn partial_f_statistic(
     // （制限モデルに回帰変数が1つも無い）は「x_exogが空」だけでなく「定数項も無い」
     // ことを合わせて判定する必要がある（`x_exog=[]`でも`has_intercept=true`なら
     // 「定数項のみ」の正当な制限モデルになる）。
-    let ssr_r: f64 =
-        if x_exog_columns.is_empty() && !has_intercept {
-            // 制限モデルに回帰変数が1つも無い（x_exog=[]かつhas_intercept=false）場合、
-            // 「常に0を予測する」モデルのSSRをy_endog自体の二乗和として直接計算する
-            // （OlsEstimatorは回帰変数0個の入力を受け付けない、CommonError::NoRegressors
-            // になるため、この退化ケースだけは特別扱いする）。
-            y_endog.iter().map(|v| v.powi(2)).sum()
-        } else {
-            // `x_exog_columns`（定数項を除いた素のx_exog）に`OlsInput::from_columns`が
-            // `has_intercept`に応じて定数項列を追加したものは、`unrestricted`の設計行列
-            // （`x_exog ++ instruments`に同じ`has_intercept`で定数項を追加したもの、
-            // `OlsEstimator::fit`がcol_piv_qrで既にfull column rankを検証済み）の列の
-            // 真部分集合のため、この制限モデルの設計行列も必然的にfull column rankになる
-            // （full column rankな行列から任意の列部分集合を取っても線形独立性は保たれる）。
-            // よってここで`OlsEstimator::fit`が`SingularMatrix`等で失敗することは理論上ない。
-            // `CovType::Classical`・`confidence_level=0.95`は残差（SSR）の計算に使わない
-            // （点推定・残差はcov_type/confidence_levelに依存しないため）ので、呼び出し元が
-            // 指定した値と一致させる必要はなく、固定値で足りる。
-            //
-            // `y_endog`・`x_exog_columns`はどちらも同じ`IvInput`（同じnで構築済み）から
-            // 取り出しているため、ここで`DimensionMismatch`が実際に発生することは理論上ない
-            // （第一段階ループの`OlsInput::from_columns`呼び出しと同じ理由）。
-            //
-            // エラー変換先を専用の`IvError`バリアントに分けず`FirstStageFailed`を再利用する
-            // 理由: 上記の通りこの`OlsEstimator::fit`呼び出しは（フルランク保証・次元一致の
-            // 両方から）理論上到達不能であり、実際に到達した場合の文言の精度より
-            // バリアント数を増やさないことを優先した（`xtx_inverse`と同じ「理論上到達不能な
-            // 防御的Result化」の扱い）。
-            let restricted_input = OlsInput::from_columns(
-                y_endog,
-                x_exog_columns,
-                x_exog_names.to_vec(),
-                has_intercept,
-                endog_name.to_string(),
-            )
+    let ssr_r: f64 = if x_exog_columns.is_empty() && !has_intercept {
+        // 制限モデルに回帰変数が1つも無い（x_exog=[]かつhas_intercept=false）場合、
+        // 「常に0を予測する」モデルのSSRをy_endog自体の二乗和として直接計算する
+        // （OlsEstimatorは回帰変数0個の入力を受け付けない、CommonError::NoRegressors
+        // になるため、この退化ケースだけは特別扱いする）。
+        y_endog.iter().map(|v| v.powi(2)).sum()
+    } else {
+        // `x_exog_columns`（定数項を除いた素のx_exog）に`OlsInput::from_columns`が
+        // `has_intercept`に応じて定数項列を追加したものは、`unrestricted`の設計行列
+        // （`x_exog ++ instruments`に同じ`has_intercept`で定数項を追加したもの、
+        // `OlsEstimator::fit`がcol_piv_qrで既にfull column rankを検証済み）の列の
+        // 真部分集合のため、この制限モデルの設計行列も必然的にfull column rankになる
+        // （full column rankな行列から任意の列部分集合を取っても線形独立性は保たれる）。
+        // よってここで`OlsEstimator::fit`が`SingularMatrix`等で失敗することは理論上ない。
+        // `CovType::Classical`・`confidence_level=0.95`は残差（SSR）の計算に使わない
+        // （点推定・残差はcov_type/confidence_levelに依存しないため）ので、呼び出し元が
+        // 指定した値と一致させる必要はなく、固定値で足りる。
+        //
+        // `y_endog`・`x_exog_columns`はどちらも同じ`IvInput`（同じnで構築済み）から
+        // 取り出しているため、ここで`DimensionMismatch`が実際に発生することは理論上ない
+        // （第一段階ループの`OlsInput::from_columns`呼び出しと同じ理由）。
+        //
+        // エラー変換先を専用の`IvError`バリアントに分けず`FirstStageFailed`を再利用する
+        // 理由: 上記の通りこの`OlsEstimator::fit`呼び出しは（フルランク保証・次元一致の
+        // 両方から）理論上到達不能であり、実際に到達した場合の文言の精度より
+        // バリアント数を増やさないことを優先した（`xtx_inverse`と同じ「理論上到達不能な
+        // 防御的Result化」の扱い）。
+        let restricted_input = OlsInput::from_columns(
+            y_endog,
+            x_exog_columns,
+            x_exog_names.to_vec(),
+            has_intercept,
+            endog_name.to_string(),
+        )
+        .map_err(|source| IvError::FirstStageFailed {
+            endog_name: endog_name.to_string(),
+            source,
+        })?;
+        let restricted = OlsEstimator::fit_auxiliary(restricted_input, CovType::Classical, 0.95)
             .map_err(|source| IvError::FirstStageFailed {
                 endog_name: endog_name.to_string(),
                 source,
             })?;
-            let restricted = OlsEstimator::fit(restricted_input, CovType::Classical, 0.95)
-                .map_err(|source| IvError::FirstStageFailed {
-                    endog_name: endog_name.to_string(),
-                    source,
-                })?;
-            let resid = restricted.residuals();
-            (0..resid.nrows()).map(|i| (*resid.get(i, 0)).powi(2)).sum()
-        };
+        let resid = restricted.residuals();
+        (0..resid.nrows()).map(|i| (*resid.get(i, 0)).powi(2)).sum()
+    };
 
     Ok(((ssr_r - ssr_u) / (q as f64)) / (ssr_u / (df_u as f64)))
 }

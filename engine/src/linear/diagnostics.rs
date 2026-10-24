@@ -200,7 +200,7 @@ fn squared_residual_aux_test(
         true,
         "resid^2".to_string(),
     )?;
-    let estimator = OlsEstimator::fit(input, CovType::Classical, AUX_CONFIDENCE_LEVEL)
+    let estimator = OlsEstimator::fit_auxiliary(input, CovType::Classical, AUX_CONFIDENCE_LEVEL)
         .map_err(|e| aux_fit_error(test, e))?;
 
     let r_squared = validate_aux_r_squared(estimator.r_squared(), test)?;

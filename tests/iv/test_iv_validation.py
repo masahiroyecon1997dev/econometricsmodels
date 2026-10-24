@@ -1397,8 +1397,6 @@ def _second_stage_singular_frame(label: str):
     [
         ("x_endog_collinear", True),
         ("x_endog_collinear", False),
-        ("x_endog_with_x_exog", True),
-        ("x_endog_with_x_exog", False),
         # 厳密に無相関な操作変数は`const`との共線性（切片あり）でのみ特異になる。
         ("instrument_irrelevant", True),
     ],
@@ -1408,9 +1406,8 @@ def test_second_stage_singular_raises_computation_error(
 ):
     """第一段階は成功するが構造方程式の説明変数が共線になるケース。第一段階は
     内生変数ごとに独立に走り、各回帰の設計行列`[const, x_exog, instruments]`は
-    特異にならない。`x_endog`同士が共線（`endog2 = 2*endog1`）、`x_endog`が
-    `x_exog`と共線（`endog1 = 3*x1`）、または操作変数が内生変数と厳密に無相関
-    （階数条件の違反）だと、第二段階の設計行列`[const, x_exog, x̂_endog]`が特異になる
+    特異にならない。`x_endog`同士が共線（`endog2 = 2*endog1`）、または操作変数が
+    内生変数と厳密に無相関（階数条件の違反）だと、第二段階の設計行列`[const, x_exog, x̂_endog]`が特異になる
     （`second_stage_input`経路）。2SLSは第二段階回帰の`ComputationError`
     （`DESIGN_MATRIX_SINGULAR`、`stage="SECOND_STAGE"`）、GMMは第二段階を持たず
     `X'ZWZ'X`の逆行列が取れずに`ComputationError`
@@ -1429,6 +1426,31 @@ def test_second_stage_singular_raises_computation_error(
         }
     )
     with raises_error(**expected):
+        our_fit(
+            df,
+            x_exog=x_exog,
+            x_endog=x_endog,
+            instruments=instruments,
+            options=IVOptions(
+                estimator=estimator, include_intercept=include_intercept
+            ),
+        )
+
+
+@pytest.mark.parametrize("estimator", ["2sls", "gmm"])
+@pytest.mark.parametrize("include_intercept", [True, False])
+def test_endogenous_regressor_that_is_a_function_of_exogenous_has_a_perfect_first_stage(
+    estimator, include_intercept
+):
+    """内生変数が外生変数の厳密な関数（`endog1 = 3*x1`）だと、その第一段階
+    `endog1 ~ x1 + z1 + z2`は残差が0の完全フィットになり、標準誤差が定義できない。
+    構造方程式の第二段階が共線になる前に、第一段階の文脈つきの`PERFECT_FIT`で止まる。"""
+    df, x_exog, x_endog, instruments = _second_stage_singular_frame(
+        "x_endog_with_x_exog"
+    )
+    with raises_error(
+        ErrorCode.PERFECT_FIT, stage="FIRST_STAGE", endog_name="endog1"
+    ):
         our_fit(
             df,
             x_exog=x_exog,

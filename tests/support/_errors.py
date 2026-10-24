@@ -100,6 +100,9 @@ MIGRATED_CODES: frozenset[str] = frozenset(
         ErrorCode.CLUSTER_TWO_GROUPS_DEGENERATE,
         ErrorCode.AMEMIYA_REQUIRES_WITHIN_VARIATION,
         ErrorCode.NON_POSITIVE_IDIOSYNCRATIC_VARIANCE,
+        ErrorCode.OUTCOME_CONSTANT,
+        ErrorCode.OUTCOME_CONSTANT_WITHIN_ENTITY,
+        ErrorCode.PERFECT_FIT,
         ErrorCode.INTERNAL_ERROR,
     }
 )

@@ -29,13 +29,14 @@ $ARGUMENTS （patch/minor/major、または明示的なバージョン番号）
    - `CHANGELOG.md`に確認済みの内容を追記する（`[Unreleased]`の下に新しいバージョンセクションを追加し、末尾の比較リンクも更新する）。
    - バージョン番号を更新する（`Cargo.toml`の`[workspace.package] version`・`pyproject.toml`の`[project] version`・`python_package/econometricsmodels/__init__.py`の`__version__`の3箇所）。
    - `cargo check --workspace`・`uv lock`を実行し、`Cargo.lock`/`uv.lock`を同期する。
+   - `cargo about generate about.hbs -o THIRD-PARTY-LICENSES.html`で、配布物に同梱するライセンス一覧を再生成する（`Cargo.lock`・自クレートの版に追随させる。`ci_engine.yml`の`licenses`ジョブが同じコマンドで古さを検出する）。
 7. **公開ページの性能数値を更新する**（下記「性能ページの更新」）。
 8. 変更内容一式（`git status`・`git diff`で最終確認）をコミットする（**タグ付けはここでは行わない**。下記「タグ付けについて」参照）。
 
 ## 注意
 
 - ステップ5の確認は、ファイルを編集する**前**に行う（プレビューで確認 → 確認後に編集、の順序を守る。編集してから確認を求めると、ユーザーが`git diff`を見に行く手間が生じる）。
-- バージョン番号は `Cargo.toml`（`[workspace.package] version`）・`pyproject.toml`（`[project] version`）・`python_package/econometricsmodels/__init__.py`（`__version__`）の3箇所を更新する（`Cargo.lock`/`uv.lock`は`cargo check`/`uv lock`等で同期する）。
+- バージョン番号は `Cargo.toml`（`[workspace.package] version`）・`pyproject.toml`（`[project] version`）・`python_package/econometricsmodels/__init__.py`（`__version__`）の3箇所を更新する（`Cargo.lock`/`uv.lock`は`cargo check`/`uv lock`等で同期する。`THIRD-PARTY-LICENSES.html`は`cargo about generate`で再生成する）。
 - push、PyPIへの公開（`cd_release.yml`のトリガーとなる操作）はこのコマンドでは行わない。
 
 ## タグ付けについて

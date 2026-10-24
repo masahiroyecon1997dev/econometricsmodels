@@ -35,7 +35,8 @@ module-name = "econometricsmodels._lib"
 python-source = "python_package"
 features = ["pyo3/extension-module"]
 # 依存クレートのライセンス一覧レポート（`cargo about generate about.hbs -o
-# THIRD-PARTY-LICENSES.html`で生成。CIには組み込まず随時手動更新する）を
+# THIRD-PARTY-LICENSES.html`で生成。更新は/releaseの手順に含め、ci_engine.ymlの
+# `licenses`ジョブが古さを検出する）を
 # 配布物（wheel/sdist）に同梱する。
 #
 # LICENSEも明示的に含める。maturinはCLI上「Including license file」と表示するが、

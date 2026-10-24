@@ -17,6 +17,12 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
     `.devcontainer/Dockerfile`（`ARG CARGO_AUDIT_VERSION`、`cargo install --locked`でソースビルド）と
     `ci_engine.yml`の`tool: cargo-audit@<版>`は同じ版に揃える（食い違いは
     `check_cargo_tool_updates.yml`が検出する）。
+  - `licenses`ジョブ: `cargo about generate about.hbs -o THIRD-PARTY-LICENSES.html`で再生成し、
+    コミット済みの`THIRD-PARTY-LICENSES.html`と差分があれば失敗させる（配布物に同梱する依存
+    ライセンス一覧が`Cargo.lock`に追随していることの保証。MIT/Apache-2.0は配布時に著作権表示・
+    ライセンス文の同梱を求めるため）。`cargo-about`はバージョン固定で、`.devcontainer/Dockerfile`の
+    `ARG CARGO_ABOUT_VERSION`と`tool: cargo-about@<版>`を揃える（`cargo-audit`と同様）。
+    失敗時はローカルで同じコマンドを実行して差分をコミットする。リリース時の再生成は`/release`の手順に含む。
 - **`ci_python.yml`**（`python_package`/`engine_pybind`の品質検証、3ジョブ、
   `python_package/**`・`engine_pybind/**`・`pyproject.toml`・`uv.lock`・`tests/**`を
   トリガー。`engine/**`は含めない）:

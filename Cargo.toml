@@ -37,7 +37,7 @@ argmin = "=0.11.0"
 argmin-math = { version = "=0.5.1", default-features = false, features = ["vec"] }
 # proptest: property-basedテスト（testing-policy.md「将来的に検討する技術」）。
 # dev-dependency専用（配布物には含まれない）。
-proptest = "=1.11.0"
+proptest = "=1.12.0"
 
 [profile.release]
 # 境界の`guard`（engine_pybind/src/shared/errors.rs）は`catch_unwind`でpanicを`INTERNAL_ERROR`に変える。

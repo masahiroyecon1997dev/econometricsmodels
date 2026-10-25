@@ -8,7 +8,7 @@ Every estimator is compared numerically against established reference implementa
 - **Independent cross-check.** Where available, a second, independent implementation (mostly R) is compared as well. It covers the main reported statistics, not only coefficients and standard errors, so a bug in the primary reference or a shared misunderstanding is not silently inherited. Statistics without an independent reference are listed under [Not compared against a second reference](#not-compared-against-a-second-reference).
 - **Frozen reference values.** Reference values are generated once from the pinned reference packages and stored as JSON files in the repository. The test suite compares against these files, so R and the reference packages are not needed to run the tests, and a new release of a reference package cannot change a result unnoticed.
 - **Convention differences are documented.** When two implementations use different statistical conventions, such as small-sample corrections, the difference is documented (see [Inference conventions](inference-conventions.md)) and the comparison is adjusted for that statistic only.
-- **Continuous integration.** The comparisons run on every pull request in the *CI (python)* workflow on Python 3.12, 3.13, 3.14 and 3.15, and the Rust engine's own unit and property-based tests run in *CI (engine)*.
+- **Continuous integration.** The comparisons run on every pull request in the *CI (python)* workflow on Python 3.12, 3.13 and 3.14, and the Rust engine's own unit and property-based tests run in *CI (engine)*.
 
 ## Reference implementations
 
@@ -180,7 +180,7 @@ The package accepts `polars>=1.38.1` with no upper limit, so installing it never
 | polars | Where |
 |---|---|
 | 1.38.1 (the oldest supported) | A second `pytest` run on Python 3.12, after the normal run |
-| the version in the lockfile (currently 2.0.0) | The normal run on Python 3.12, 3.13, 3.14 and 3.15. Dependabot updates the lockfile, so new polars releases are tested through its pull requests |
+| the version in the lockfile (currently 2.0.0) | The normal run on Python 3.12, 3.13 and 3.14. Dependabot updates the lockfile, so new polars releases are tested through its pull requests |
 
 The lower limit is the oldest version for which the whole suite passes. Older versions are known to fail: 1.27 and below cannot hand a DataFrame to the Rust core, 1.28 to 1.31 read an `Enum` time column as different values (so the estimates change without an error), and 1.32 to 1.37 cannot read `Float16` columns. Versions between the two tested ones are not run, which is the usual practice of testing both ends of a range. Because the compiled core reads a polars DataFrame through polars' own foreign function interface, a future polars release can break it; if that happens, the test run on the lockfile version fails first.
 

@@ -23,7 +23,7 @@ env:
   # サポート対象Python（CLAUDE.md 11章）に限定してビルドする。--find-interpreterは
   # 使わない（manylinuxコンテナ内にある未サポートバージョン・free-threaded版まで
   # 全てビルドしてしまうため）。
-  MATURIN_INTERPRETER_ARGS: -i python3.12 -i python3.13 -i python3.14 -i python3.15
+  MATURIN_INTERPRETER_ARGS: -i python3.12 -i python3.13 -i python3.14
 
 permissions:
   contents: read
@@ -73,7 +73,6 @@ jobs:
             3.12
             3.13
             3.14
-            3.15
 
       - name: Build wheels
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
@@ -117,7 +116,6 @@ jobs:
             3.12
             3.13
             3.14
-            3.15
           architecture: x64
 
       - name: Build wheels
@@ -164,7 +162,6 @@ jobs:
             3.12
             3.13
             3.14
-            3.15
 
       - name: Build wheels
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0

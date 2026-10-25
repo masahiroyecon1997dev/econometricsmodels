@@ -15,9 +15,9 @@ use.
 
 | What | Where |
 |---|---|
-| A bug | [Bug report](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/new) |
-| A change to an existing method (a new option, standard error, or diagnostic) | [Issue](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/new) |
-| A new estimation method | [Issue](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/new) |
+| A bug | [Bug report](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/new?template=bug_report.yml) |
+| A change to an existing method (a new option, standard error, or diagnostic) | [Issue](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/new?template=method_change.yml) |
+| A new estimation method | [Issue](https://github.com/masahiroyecon1997dev/econometricsmodels/issues/new?template=new_method.yml) |
 | A security vulnerability | [Private report](https://github.com/masahiroyecon1997dev/econometricsmodels/security/advisories/new). See [SECURITY.md](SECURITY.md) |
 
 It helps to take a quick look at the existing issues first, since the roadmap

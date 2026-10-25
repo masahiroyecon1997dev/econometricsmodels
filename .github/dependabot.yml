@@ -10,6 +10,7 @@ updates:
     cooldown:
       default-days: 10
     # セキュリティアップデートPRは常にcooldown対象外（GitHub側の既定動作、設定不要）。
+    # ただしsecurity updatesはtarget-branchを無視してmain向けに出る。扱いはCLAUDE.md 5章。
 
   # python_package/pyproject.toml + uv.lock。"pip"ではなく"uv"を使う
   # （PEP 735の[dependency-groups]・uv.lock更新に対応した専用エコシステム。

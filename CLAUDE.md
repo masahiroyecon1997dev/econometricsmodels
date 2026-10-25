@@ -104,9 +104,12 @@ econometricsmodels/
 - **コミットメッセージ**: Conventional Commits（`feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `ci:` 等）
 - **ブランチ構成**:
   - `main`: 公開済み（PyPIリリース済み）の状態。タグ付けの対象。
-  - `dev`: mainへマージする前の検証用。リリース作業中に発生した緊急のバグ・脆弱性対応の受け皿、およびDependabotの更新PRの向け先。
+  - `dev`: mainへマージする前の検証用。Dependabotの更新PR（version updates）の向け先。
   - `release/vX.Y.Z`: 次リリース用の作業ブランチ。リリースごとに作成し、機能実装・単発のfix/CI変更・ドキュメント更新を含む通常の作業はここに直接コミットする（手法・フェーズ単位のfeature branchは切らない）。
-- **緊急対応**: 脆弱性等で`release/*`と切り離して`dev`へ先に反映したい場合のみ、`fix/<内容>`等の短命ブランチを切り、`dev`へのPRでマージする。`dev`に入った変更は`release/*`へ取り込む（`git merge origin/dev`）。
+- **緊急対応（配布物に入る依存の脆弱性・公開済みの版の重大なバグ）**: `fix/<内容>`等の短命ブランチを切り、`main`へのPRでマージする。その後パッチリリース（Z+1。`/release`→`/release-publish`の手順）を出し、`main`の変更を`dev`と`release/*`へ取り込む（`git merge origin/main`）。利用者が使っているPyPIの版は`main`から出るため、公開済みの版にパッチを当てられるようにする。
+- **配布物に入らない依存の更新**（`test`・`docs`・`dev`・`benchmark`グループ、CIのaction等）: 緊急にはしない。`dev`/`release/*`で通常どおり更新する。
+- **Dependabotのsecurity updates**: `dependabot.yml`の`target-branch`を無視して、デフォルトブランチ（`main`）向けにPRが出る（Dependabotの仕様）。更新対象が配布物に入るなら上の緊急対応として扱い、入らないなら`release/*`側で同じ更新（`uv lock --upgrade-package <名前>`等）を行い、`main`向けのPRは閉じる。
+- **配布物に入るかの判断**: wheel/sdistに入るのは、`engine`/`engine_pybind`がビルドするRustクレートと、実行時依存（`pyproject.toml`の`dependencies`）。`cargo audit`は機能フラグを考慮せず`Cargo.lock`全体をスキャンするので、実際にビルドされるかは`cargo tree --target all -e normal,build -i <クレート>`で確認する（`docs/spec/ci-cd-notes.md`の「セキュリティ」節参照）。
 - **保護設定**: `main`と`dev`へはローカルからの直pushを禁止し、pull request経由のみとする（ブランチ保護）。
 - **リリースの流れ**: `release/vX.Y.Z` → `dev`（PR）→ `main`（PR）→ タグpush（詳細は`.claude/skills/release-publish/SKILL.md`）。
 - **マージ**: CIがgreenであることに加え、内容を確認してからmergeする（自動セルフマージはしない）。

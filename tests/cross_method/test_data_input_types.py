@@ -220,7 +220,7 @@ def _new_data() -> pl.DataFrame:
 
 
 def _call(result, path: str, new_data):
-    return getattr(result, path)(new_data)
+    return getattr(result, path)(new_data=new_data)
 
 
 @pytest.mark.parametrize("path", PATHS)
@@ -400,7 +400,7 @@ def test_augment_keeps_an_uint128_column_that_the_model_does_not_read(
     result = NEW_DATA_METHODS[method](data)
 
     from_training = result.augment()
-    from_new = result.augment(_new_data().with_columns(extra.head(3)))
+    from_new = result.augment(new_data=_new_data().with_columns(extra.head(3)))
 
     assert from_training["extra"].dtype == pl.UInt128
     assert from_training["extra"].equals(data["extra"])
@@ -415,7 +415,9 @@ def test_augment_of_the_estimation_data_keeps_unused_columns(frame, method):
     rng = np.random.default_rng(0)
     extra = pl.Series("extra", rng.integers(0, 100, N), dtype=pl.Int64)
 
-    augmented = result.augment(frame.with_columns(extra.cast(pl.Int8)))
+    augmented = result.augment(
+        new_data=frame.with_columns(extra.cast(pl.Int8))
+    )
 
     assert augmented["extra"].dtype == pl.Int8
 
@@ -529,7 +531,7 @@ def test_ols_diagnostics_are_not_changed_by_editing_the_data_in_place(frame):
     data = _with_uint128(frame)
     result = OLS(data, "y", ["x1", "x2"]).fit()
     white = result.white_test().statistic
-    breusch_pagan = result.breusch_pagan_test(["x2"]).statistic
+    breusch_pagan = result.breusch_pagan_test(variables=["x2"]).statistic
 
     data.replace_column(
         data.get_column_index("x2"), pl.Series("x2", [1.0] * N)
@@ -537,7 +539,9 @@ def test_ols_diagnostics_are_not_changed_by_editing_the_data_in_place(frame):
     data.drop_in_place("x1")
 
     assert result.white_test().statistic == white
-    assert result.breusch_pagan_test(["x2"]).statistic == breusch_pagan
+    assert (
+        result.breusch_pagan_test(variables=["x2"]).statistic == breusch_pagan
+    )
 
 
 # ── OLSの診断検定と取り込めないdtype ─────────────────────────────────
@@ -550,8 +554,8 @@ def test_ols_diagnostics_ignore_an_unused_uint128_column(frame):
 
     assert result.white_test().statistic == plain.white_test().statistic
     assert (
-        result.breusch_pagan_test(["z"]).statistic
-        == plain.breusch_pagan_test(["z"]).statistic
+        result.breusch_pagan_test(variables=["z"]).statistic
+        == plain.breusch_pagan_test(variables=["z"]).statistic
     )
     assert (
         result.breusch_godfrey_test("tt", 2).statistic
@@ -569,7 +573,7 @@ def test_breusch_pagan_variables_naming_an_uint128_column_are_rejected(frame):
         argument="variables",
         data_argument="data",
     ):
-        result.breusch_pagan_test(["z", "u"])
+        result.breusch_pagan_test(variables=["z", "u"])
 
 
 def test_breusch_godfrey_time_naming_an_uint128_column_is_rejected(frame):

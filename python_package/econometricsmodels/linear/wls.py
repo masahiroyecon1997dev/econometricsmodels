@@ -282,7 +282,7 @@ class WLSResults:
         """
         return params_table_rows(self._raw)
 
-    def predict(self, new_data: pl.DataFrame | None = None) -> list[float]:
+    def predict(self, *, new_data: pl.DataFrame | None = None) -> list[float]:
         """Predicted values.
 
         Weights play no role: the predicted value is `x_i'β̂` on the
@@ -310,7 +310,7 @@ class WLSResults:
         """
         return self._raw.predict(new_data)
 
-    def augment(self, new_data: pl.DataFrame | None = None) -> pl.DataFrame:
+    def augment(self, *, new_data: pl.DataFrame | None = None) -> pl.DataFrame:
         """Source data with the predicted values appended as a column.
 
         Same design as `OLSResults.augment()`: weights play no role in

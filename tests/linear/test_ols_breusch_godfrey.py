@@ -134,7 +134,7 @@ def test_default_returns_lm_version_with_chi2_distribution(ar1):
 
 def test_f_version_has_f_distribution_and_denominator_degrees_of_freedom(ar1):
     fitted = OLS(ar1, y="y", x=["x"]).fit()
-    res = fitted.breusch_godfrey_test("t", 3, "f")
+    res = fitted.breusch_godfrey_test("t", 3, statistic="f")
 
     assert res.distribution == "f"
     assert res.df == res.nlags == 3
@@ -153,7 +153,7 @@ def test_detects_serial_correlation_in_ar1_errors(ar1):
 def test_statistic_argument_is_case_insensitive(ar1, statistic, spelling):
     fitted = OLS(ar1, y="y", x=["x"]).fit()
     assert_argument_case_insensitive(
-        lambda label: fitted.breusch_godfrey_test("t", 2, label),
+        lambda label: fitted.breusch_godfrey_test("t", 2, statistic=label),
         statistic,
         spelling,
     )
@@ -288,7 +288,11 @@ def test_result_is_invariant_to_the_scale_of_the_regressors_and_of_y(ar1):
 
 
 def test_to_dict_is_json_ready(ar1):
-    res = OLS(ar1, y="y", x=["x"]).fit().breusch_godfrey_test("t", 2, "f")
+    res = (
+        OLS(ar1, y="y", x=["x"])
+        .fit()
+        .breusch_godfrey_test("t", 2, statistic="f")
+    )
     as_dict = res.to_dict()
 
     assert set(as_dict) == {
@@ -341,7 +345,7 @@ def test_time_that_is_not_a_str_raises_type_error(ar1, time):
 def test_statistic_that_is_not_a_str_raises_type_error(ar1):
     fitted = OLS(ar1, y="y", x=["x"]).fit()
     with pytest.raises(TypeError, match="statistic"):
-        fitted.breusch_godfrey_test("t", 1, 1)
+        fitted.breusch_godfrey_test("t", 1, statistic=1)
 
 
 def test_time_and_nlags_are_required(ar1):
@@ -360,7 +364,7 @@ def test_unknown_statistic_raises_validation_error(ar1):
         value="chi2",
         allowed=msgs.ALLOWED_DIAGNOSTIC_STATISTICS,
     ):
-        fitted.breusch_godfrey_test("t", 1, "chi2")
+        fitted.breusch_godfrey_test("t", 1, statistic="chi2")
 
 
 def test_missing_time_column_raises_validation_error(ar1):
@@ -436,7 +440,7 @@ def test_time_column_may_also_be_a_regressor(ar1):
     列から再抽出しても、statsmodelsと一致する。"""
     fitted = OLS(ar1, y="y", x=["x", "t"]).fit()
     res = fitted.breusch_godfrey_test("t", 3)
-    f_res = fitted.breusch_godfrey_test("t", 3, "f")
+    f_res = fitted.breusch_godfrey_test("t", 3, statistic="f")
 
     exog = sm.add_constant(
         np.column_stack([ar1["x"].to_numpy(), ar1["t"].to_numpy()])
@@ -470,7 +474,7 @@ def test_observation_count_at_the_boundary():
     df = _ar1_dataset(n=10, seed=2)
     fitted = OLS(df, y="y", x=["x"]).fit()
 
-    ok = fitted.breusch_godfrey_test("t", 7, "f")
+    ok = fitted.breusch_godfrey_test("t", 7, statistic="f")
     assert ok.df == 7
     assert ok.df_denom == 1
 
@@ -551,8 +555,8 @@ def test_result_without_training_data_raises_validation_error():
 def _check_against(fitted, time: str, ref: dict, label: str) -> None:
     for m_key, expected in ref["nlags"].items():
         m = int(m_key)
-        lm = fitted.breusch_godfrey_test(time, m, "lm")
-        f = fitted.breusch_godfrey_test(time, m, "f")
+        lm = fitted.breusch_godfrey_test(time, m, statistic="lm")
+        f = fitted.breusch_godfrey_test(time, m, statistic="f")
 
         _ref_close(lm.statistic, expected["lm"], f"{label}/m={m}/lm")
         _ref_close_p(
@@ -592,8 +596,8 @@ def test_wooldridge_matches_statsmodels(reference, load_wooldridge, case):
 def _check_against_r(fitted, time: str, ref: dict, label: str) -> None:
     for m_key, expected in ref["nlags"].items():
         m = int(m_key)
-        lm = fitted.breusch_godfrey_test(time, m, "lm")
-        f = fitted.breusch_godfrey_test(time, m, "f")
+        lm = fitted.breusch_godfrey_test(time, m, statistic="lm")
+        f = fitted.breusch_godfrey_test(time, m, statistic="f")
 
         _cc_close(lm.statistic, expected["lm"], f"{label}/m={m}/lm")
         _cc_close_p(

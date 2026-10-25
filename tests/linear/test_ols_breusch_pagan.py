@@ -173,9 +173,9 @@ def test_statistic_argument_is_case_insensitive(baseline, statistic, spelling):
 
 def test_statistic_can_be_given_as_the_second_positional_argument(baseline):
     fitted = baseline.fit()
-    assert fitted.breusch_pagan_test(None, "f") == fitted.breusch_pagan_test(
-        statistic="f"
-    )
+    assert fitted.breusch_pagan_test(
+        variables=None, statistic="f"
+    ) == fitted.breusch_pagan_test(statistic="f")
 
 
 def test_variables_default_to_the_model_independent_variables(baseline):
@@ -185,12 +185,12 @@ def test_variables_default_to_the_model_independent_variables(baseline):
     assert default.aux_terms == ["const", "x1", "x2", "x3"]
     assert default.dropped_terms == []
     assert default.df == len(default.aux_terms) - 1
-    assert fitted.breusch_pagan_test(["x1", "x2", "x3"]) == default
+    assert fitted.breusch_pagan_test(variables=["x1", "x2", "x3"]) == default
     assert fitted.breusch_pagan_test(variables=None) == default
 
 
 def test_explicit_variables_define_the_auxiliary_regression(baseline):
-    res = baseline.fit().breusch_pagan_test(["x2", "x1"])
+    res = baseline.fit().breusch_pagan_test(variables=["x2", "x1"])
 
     assert res.aux_terms == ["const", "x2", "x1"]
     assert res.df == 2
@@ -199,7 +199,7 @@ def test_explicit_variables_define_the_auxiliary_regression(baseline):
 def test_variables_may_be_columns_that_are_not_in_the_model():
     df, _ = _synthetic("baseline")
     fitted = OLS(df, y="y", x=["x1"]).fit()
-    res = fitted.breusch_pagan_test(["x2", "x3"])
+    res = fitted.breusch_pagan_test(variables=["x2", "x3"])
 
     assert res.aux_terms == ["const", "x2", "x3"]
     assert res.df == 2
@@ -208,7 +208,7 @@ def test_variables_may_be_columns_that_are_not_in_the_model():
 
 def test_variables_may_include_the_dependent_variable(baseline):
     """`y`を指定しても拒否しない（`y`に依存する分散は意味のあるケースがある）。"""
-    res = baseline.fit().breusch_pagan_test(["y"])
+    res = baseline.fit().breusch_pagan_test(variables=["y"])
     assert res.aux_terms == ["const", "y"]
     assert res.df == 1
 
@@ -222,10 +222,16 @@ def test_boolean_and_integer_variables_are_accepted():
     )
     fitted = OLS(df, y="y", x=["x1"]).fit()
 
-    flag = fitted.breusch_pagan_test(["flag"])
+    flag = fitted.breusch_pagan_test(variables=["flag"])
     assert flag.aux_terms == ["const", "flag"]
-    assert flag.statistic == fitted.breusch_pagan_test(["flag_f"]).statistic
-    assert fitted.breusch_pagan_test(["flag_int"]).statistic == flag.statistic
+    assert (
+        flag.statistic
+        == fitted.breusch_pagan_test(variables=["flag_f"]).statistic
+    )
+    assert (
+        fitted.breusch_pagan_test(variables=["flag_int"]).statistic
+        == flag.statistic
+    )
 
 
 def test_lm_and_f_versions_report_the_same_terms(baseline):
@@ -253,14 +259,14 @@ def test_aux_regression_has_a_constant_without_an_intercept_in_the_model():
 def test_constant_and_duplicate_variables_are_dropped():
     """定数列と、先に指定した列と同一の列は補助回帰から除き、自由度は残った列数で数える。"""
     fitted, variables = _fit_synthetic_case("baseline_constant_and_duplicate")
-    res = fitted.breusch_pagan_test(variables)
+    res = fitted.breusch_pagan_test(variables=variables)
 
     assert res.aux_terms == ["const", "x1", "x2"]
     assert res.dropped_terms == ["one", "x1_copy"]
     assert res.df == 2
     # 除いた後の変数を直接指定した結果と一致する。
     assert res == dataclasses.replace(
-        fitted.breusch_pagan_test(["x1", "x2"]),
+        fitted.breusch_pagan_test(variables=["x1", "x2"]),
         dropped_terms=["one", "x1_copy"],
     )
 
@@ -328,7 +334,7 @@ def test_result_is_invariant_to_variable_order_and_scale_of_y(baseline):
     fitted = baseline.fit()
     base = fitted.breusch_pagan_test()
 
-    reordered = fitted.breusch_pagan_test(list(reversed(x_cols)))
+    reordered = fitted.breusch_pagan_test(variables=list(reversed(x_cols)))
     assert reordered.df == base.df
     _cc_close(reordered.statistic, base.statistic, "reordered/statistic")
     assert reordered.aux_terms[1:] == list(reversed(x_cols))
@@ -396,7 +402,7 @@ def test_variables_that_is_not_a_list_raises_type_error(baseline, variables):
             type_name=fully_qualified_type_name(variables),
         ),
     ):
-        baseline.fit().breusch_pagan_test(variables)
+        baseline.fit().breusch_pagan_test(variables=variables)
 
 
 def test_variables_element_that_is_not_a_str_raises_type_error(baseline):
@@ -406,7 +412,7 @@ def test_variables_element_that_is_not_a_str_raises_type_error(baseline):
             msgs.VARIABLES_ELEMENT_NOT_STR, index=1, type_name="int"
         ),
     ):
-        baseline.fit().breusch_pagan_test(["x1", 2])
+        baseline.fit().breusch_pagan_test(variables=["x1", 2])
 
 
 def test_non_string_statistic_raises_type_error(baseline):
@@ -432,7 +438,7 @@ def test_unknown_statistic_raises_validation_error(baseline):
 
 def test_empty_variables_raises_validation_error(baseline):
     with raises_error(ErrorCode.ROLE_EMPTY, argument="variables"):
-        baseline.fit().breusch_pagan_test([])
+        baseline.fit().breusch_pagan_test(variables=[])
 
 
 def test_all_constant_variables_raise_validation_error():
@@ -445,7 +451,7 @@ def test_all_constant_variables_raise_validation_error():
     with raises_error(
         ErrorCode.DIAGNOSTIC_VARIABLES_CONSTANT, test="BREUSCH_PAGAN"
     ) as info:
-        fitted.breusch_pagan_test(["c"])
+        fitted.breusch_pagan_test(variables=["c"])
     assert isinstance(info.value, ValueError)
     assert not isinstance(info.value, RuntimeError)
 
@@ -459,14 +465,14 @@ def test_constant_variables_with_different_values_raise_validation_error():
     with raises_error(
         ErrorCode.DIAGNOSTIC_VARIABLES_CONSTANT, test="BREUSCH_PAGAN"
     ):
-        fitted.breusch_pagan_test(["c1", "c2"])
+        fitted.breusch_pagan_test(variables=["c1", "c2"])
 
 
 def test_duplicate_variables_raise_validation_error(baseline):
     with raises_error(
         ErrorCode.ROLE_DUPLICATE_COLUMN, column="x1", argument="variables"
     ):
-        baseline.fit().breusch_pagan_test(["x1", "x2", "x1"])
+        baseline.fit().breusch_pagan_test(variables=["x1", "x2", "x1"])
 
 
 def test_missing_column_raises_validation_error(baseline):
@@ -476,7 +482,7 @@ def test_missing_column_raises_validation_error(baseline):
         argument="variables",
         data_argument="data",
     ):
-        baseline.fit().breusch_pagan_test(["x1", "nope"])
+        baseline.fit().breusch_pagan_test(variables=["x1", "nope"])
 
 
 def test_variable_with_an_unsupported_dtype_raises_validation_error():
@@ -491,7 +497,7 @@ def test_variable_with_an_unsupported_dtype_raises_validation_error():
         argument="variables",
         data_argument="data",
     ):
-        fitted.breusch_pagan_test(["label"])
+        fitted.breusch_pagan_test(variables=["label"])
 
 
 def test_variable_with_missing_values_raises_validation_error():
@@ -513,7 +519,7 @@ def test_variable_with_missing_values_raises_validation_error():
         argument="variables",
         data_argument="data",
     ):
-        fitted.breusch_pagan_test(["z"])
+        fitted.breusch_pagan_test(variables=["z"])
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf")], ids=str)
@@ -536,7 +542,7 @@ def test_variable_with_non_finite_values_raises_validation_error(value):
         argument="variables",
         data_argument="data",
     ):
-        fitted.breusch_pagan_test(["z"])
+        fitted.breusch_pagan_test(variables=["z"])
 
 
 def test_too_few_observations_for_the_auxiliary_regression_raises():
@@ -558,7 +564,7 @@ def test_too_few_observations_for_the_auxiliary_regression_raises():
         n_params=3,
         min_obs=4,
     ):
-        fitted.breusch_pagan_test(["x1", "x2"])
+        fitted.breusch_pagan_test(variables=["x1", "x2"])
 
 
 def test_sample_size_is_checked_against_the_variables_that_remain_after_dropping():
@@ -571,7 +577,9 @@ def test_sample_size_is_checked_against_the_variables_that_remain_after_dropping
     )
     fitted = OLS(df, y="y", x=["x1"]).fit()
 
-    ok = fitted.breusch_pagan_test(["one", "x1", "x2"], "f")
+    ok = fitted.breusch_pagan_test(
+        variables=["one", "x1", "x2"], statistic="f"
+    )
     assert ok.df == 2
     assert ok.df_denom == 1
 
@@ -583,7 +591,7 @@ def test_sample_size_is_checked_against_the_variables_that_remain_after_dropping
         min_obs=4,
     ):
         OLS(df.head(3), y="y", x=["x1"]).fit().breusch_pagan_test(
-            ["one", "x1", "x2"]
+            variables=["one", "x1", "x2"]
         )
 
 
@@ -636,11 +644,11 @@ def test_variable_that_overflows_when_scaled_raises_computation_error():
     with raises_error(
         ErrorCode.DIAGNOSTIC_VARIABLE_DEGENERATE, test="BREUSCH_PAGAN"
     ):
-        fitted.breusch_pagan_test(["big"])
+        fitted.breusch_pagan_test(variables=["big"])
     with raises_error(
         ErrorCode.DIAGNOSTIC_VARIABLES_CONSTANT, test="BREUSCH_PAGAN"
     ):
-        fitted.breusch_pagan_test(["big_const"])
+        fitted.breusch_pagan_test(variables=["big_const"])
 
 
 def test_auxiliary_regression_that_fits_exactly_raises_computation_error():
@@ -648,7 +656,7 @@ def test_auxiliary_regression_that_fits_exactly_raises_computation_error():
     検定統計量が定義できない。"""
     df, _ = _synthetic("baseline")
     fitted = OLS(df, y="y", x=["x1"]).fit()
-    augmented = fitted.augment(df)
+    augmented = fitted.augment(new_data=df)
     residual = (augmented["y"] - augmented["predicted"]).to_numpy()
     df = df.with_columns(pl.Series("e2", residual**2))
     fitted = OLS(df, y="y", x=["x1"]).fit()
@@ -656,7 +664,7 @@ def test_auxiliary_regression_that_fits_exactly_raises_computation_error():
     with raises_error(
         ErrorCode.DIAGNOSTIC_STATISTIC_UNDEFINED, test="BREUSCH_PAGAN"
     ):
-        fitted.breusch_pagan_test(["e2"])
+        fitted.breusch_pagan_test(variables=["e2"])
 
 
 def test_collinear_but_not_identical_variables_raise_computation_error():
@@ -671,7 +679,7 @@ def test_collinear_but_not_identical_variables_raise_computation_error():
         stage="DIAGNOSTIC_AUXILIARY_REGRESSION",
         test="BREUSCH_PAGAN",
     ):
-        fitted.breusch_pagan_test(["x1", "x1_double"])
+        fitted.breusch_pagan_test(variables=["x1", "x1_double"])
 
 
 def test_full_set_of_dummies_without_intercept_raises_computation_error():
@@ -696,15 +704,15 @@ def test_full_set_of_dummies_without_intercept_raises_computation_error():
         stage="DIAGNOSTIC_AUXILIARY_REGRESSION",
         test="BREUSCH_PAGAN",
     ):
-        fitted.breusch_pagan_test(["d1", "d2", "d3"])
+        fitted.breusch_pagan_test(variables=["d1", "d2", "d3"])
 
 
 # ── 主リファレンス（statsmodels `het_breuschpagan`）との数値照合 ───────
 
 
 def _check_against(fitted, variables, ref: dict, label: str) -> None:
-    lm = fitted.breusch_pagan_test(variables, "lm")
-    f = fitted.breusch_pagan_test(variables, "f")
+    lm = fitted.breusch_pagan_test(variables=variables, statistic="lm")
+    f = fitted.breusch_pagan_test(variables=variables, statistic="f")
 
     _ref_close(lm.statistic, ref["lm"], f"{label}/lm")
     _ref_close_p(lm.p_value, ref["lm_p_value"], f"{label}/lm_p_value")
@@ -719,7 +727,7 @@ def test_matches_statsmodels(reference, case):
     fitted, variables = _fit_synthetic_case(case)
 
     _check_against(fitted, variables, reference["synthetic"][case], case)
-    res = fitted.breusch_pagan_test(variables)
+    res = fitted.breusch_pagan_test(variables=variables)
     assert res.dropped_terms == SYNTHETIC_EXPECTED_DROPPED.get(case, [])
 
 
@@ -728,7 +736,7 @@ def test_baseline_df1_is_the_smallest_sample_with_one_denominator_degree():
     White検定は補助回帰の列数が足りず拒否される（`n = 5`、定数込み10列）ので、この境界は
     BP検定のフィクスチャ（statsmodels・R）でだけ確認できる。"""
     fitted, variables = _fit_synthetic_case("baseline_df1")
-    res = fitted.breusch_pagan_test(variables, "f")
+    res = fitted.breusch_pagan_test(variables=variables, statistic="f")
 
     assert fitted.n_obs == 5
     assert res.df == 3
@@ -741,7 +749,7 @@ def test_heteroskedastic_variance_is_rejected_when_z_is_the_driving_variable():
     （裾のp値の経路。フィクスチャでstatsmodels・Rと照合する）。"""
     fitted, variables = _fit_synthetic_case("heteroskedastic_abs_x1")
     assert variables == ["abs_x1"]
-    assert fitted.breusch_pagan_test(variables).p_value < 1e-10
+    assert fitted.breusch_pagan_test(variables=variables).p_value < 1e-10
 
     fitted_default, _ = _fit_synthetic_case("heteroskedastic")
     assert fitted_default.breusch_pagan_test().p_value > 0.05
@@ -760,12 +768,12 @@ def test_hprice1_matches_the_textbook_values(load_wooldridge, case):
     fitted, variables = _fit_wooldridge_case(case, load_wooldridge)
     expected = TEXTBOOK_HPRICE1[case]
 
-    assert fitted.breusch_pagan_test(variables, "lm").statistic == (
-        pytest.approx(expected["lm"], abs=TEXTBOOK_ATOL)
-    )
-    assert fitted.breusch_pagan_test(variables, "f").statistic == (
-        pytest.approx(expected["f"], abs=TEXTBOOK_ATOL)
-    )
+    assert fitted.breusch_pagan_test(
+        variables=variables, statistic="lm"
+    ).statistic == (pytest.approx(expected["lm"], abs=TEXTBOOK_ATOL))
+    assert fitted.breusch_pagan_test(
+        variables=variables, statistic="f"
+    ).statistic == (pytest.approx(expected["f"], abs=TEXTBOOK_ATOL))
 
 
 def test_smallest_sample_matches_statsmodels():
@@ -779,8 +787,8 @@ def test_smallest_sample_matches_statsmodels():
         pl.DataFrame({"y": y, "x1": x1, "x2": x2}), y="y", x=["x1"]
     ).fit()
 
-    lm = fitted.breusch_pagan_test(["x1", "x2"], "lm")
-    f = fitted.breusch_pagan_test(["x1", "x2"], "f")
+    lm = fitted.breusch_pagan_test(variables=["x1", "x2"], statistic="lm")
+    f = fitted.breusch_pagan_test(variables=["x1", "x2"], statistic="f")
     assert lm.df == 2
     assert f.df_denom == 1
 
@@ -798,8 +806,8 @@ def test_smallest_sample_matches_statsmodels():
 
 
 def _check_against_r(fitted, variables, ref: dict, label: str) -> None:
-    lm = fitted.breusch_pagan_test(variables, "lm")
-    f = fitted.breusch_pagan_test(variables, "f")
+    lm = fitted.breusch_pagan_test(variables=variables, statistic="lm")
+    f = fitted.breusch_pagan_test(variables=variables, statistic="f")
 
     _cc_close(lm.statistic, ref["lm"], f"{label}/lm")
     _cc_close_p(lm.p_value, ref["lm_p_value"], f"{label}/lm_p_value")

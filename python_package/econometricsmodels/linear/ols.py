@@ -281,7 +281,7 @@ class OLSResults:
         """
         return params_table_rows(self._raw)
 
-    def predict(self, new_data: pl.DataFrame | None = None) -> list[float]:
+    def predict(self, *, new_data: pl.DataFrame | None = None) -> list[float]:
         """Predicted values.
 
         Also available for new data through `new_data`; there is no
@@ -307,7 +307,7 @@ class OLSResults:
         """
         return self._raw.predict(new_data)
 
-    def augment(self, new_data: pl.DataFrame | None = None) -> pl.DataFrame:
+    def augment(self, *, new_data: pl.DataFrame | None = None) -> pl.DataFrame:
         """Source data with the predicted values appended as a column.
 
         Same `new_data` semantics as `predict()`, but returns a polars
@@ -338,7 +338,7 @@ class OLSResults:
         return self._raw.augment(new_data)
 
     def white_test(
-        self, statistic: Literal["lm", "f"] = "lm"
+        self, *, statistic: Literal["lm", "f"] = "lm"
     ) -> WhiteTestResult:
         """White test for heteroskedasticity.
 
@@ -393,6 +393,7 @@ class OLSResults:
 
     def breusch_pagan_test(
         self,
+        *,
         variables: list[str] | None = None,
         statistic: Literal["lm", "f"] = "lm",
     ) -> BreuschPaganTestResult:
@@ -465,6 +466,7 @@ class OLSResults:
         self,
         time: str,
         nlags: int,
+        *,
         statistic: Literal["lm", "f"] = "lm",
     ) -> BreuschGodfreyTestResult:
         """Breusch-Godfrey test for serial correlation of the errors.

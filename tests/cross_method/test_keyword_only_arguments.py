@@ -26,11 +26,6 @@ PENDING: frozenset[str] = frozenset(
         "LogitResults.marginal_effects",
         "LogitResults.pred_table",
         "LogitResults.predict",
-        "OLSResults.augment",
-        "OLSResults.breusch_godfrey_test",
-        "OLSResults.breusch_pagan_test",
-        "OLSResults.predict",
-        "OLSResults.white_test",
         "ProbitResults.augment",
         "ProbitResults.marginal_effects",
         "ProbitResults.pred_table",
@@ -38,8 +33,6 @@ PENDING: frozenset[str] = frozenset(
         "TobitResults.augment",
         "TobitResults.marginal_effects",
         "TobitResults.predict",
-        "WLSResults.augment",
-        "WLSResults.predict",
     }
 )
 

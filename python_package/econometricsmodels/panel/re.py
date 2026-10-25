@@ -251,17 +251,17 @@ class REResults:
         return by_param(self._raw.param_names, self._raw.test_stats)
 
     @property
-    def stat_dist(self) -> Literal["t", "normal"]:
-        """Distribution of `test_stats`: `"t"` (t-statistics) or
-        `"normal"` (z-statistics)."""
+    def stat_dist(self) -> Literal["t"]:
+        """Distribution of `test_stats`. Always `"t"`: t-statistics are
+        used for every `cov_type`."""
         return self._raw.stat_dist
 
     @property
-    def stat_df(self) -> int | None:
-        """Degrees of freedom of the t distribution behind `test_stats`,
-        or `None` when `stat_dist` is `"normal"`. May differ from
-        `df_resid` (cluster-robust inference uses `G - 1`, Driscoll-Kraay
-        `T - 1`), so use this to recompute p-values from `test_stats`."""
+    def stat_df(self) -> int:
+        """Degrees of freedom of the t distribution behind `test_stats`.
+        May differ from `df_resid` (cluster-robust inference uses
+        `G - 1`, Driscoll-Kraay `T - 1`), so use this to recompute
+        p-values from `test_stats`."""
         return self._raw.stat_df
 
     @property

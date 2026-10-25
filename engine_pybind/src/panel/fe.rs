@@ -262,10 +262,10 @@ pub struct FEResult {
     pub std_errors: Vec<f64>,
     #[pyo3(get)]
     pub test_stats: Vec<f64>,
-    /// Distribution of `test_stats`: `"t"` or `"normal"`.
+    /// Distribution of `test_stats`; always `"t"` for FE.
     #[pyo3(get)]
     pub stat_dist: String,
-    /// Degrees of freedom of the t distribution (`None` for `"normal"`). May differ from
+    /// Degrees of freedom of the t distribution (always `Some`). May differ from
     /// `df_resid` (e.g. cluster-robust inference uses `G - 1`).
     #[pyo3(get)]
     pub stat_df: Option<i64>,

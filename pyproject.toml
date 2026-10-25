@@ -106,6 +106,12 @@ docs = [
 [tool.ruff]
 line-length = 79
 
+# ruff 0.16以降はMarkdown内のPythonコードブロックも整形対象になるが、docs/配下の
+# コード例は読みやすさを優先して79桁に収めない（データ列・行末コメント等）。
+# 例の正しさはtests/cross_method/test_doc_examples.pyが実行して検証する。
+[tool.ruff.format]
+exclude = ["docs/**/*.md"]
+
 # pytest実行時にsys.pathへ載せるパス。
 # - "."   : `import benchmark.<系統>....` を1経路で解決（旧: 各テストファイルの
 #           `sys.path.insert`＋devcontainerのPYTHONPATHを全廃したもの）。

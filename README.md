@@ -281,7 +281,7 @@ different R packages are used.
   verification page.
 - **Reproducible and continuous.** Reference values are generated once from
   pinned package versions and stored in the repository, and the comparisons
-  run in CI on every pull request on Python 3.12, 3.13 and 3.14. The Rust
+  run in CI on every pull request on Python 3.12, 3.13, 3.14 and 3.15. The Rust
   engine also has its own unit and property-based tests.
 
 For the statistics compared, the test data, tolerances, and the cases

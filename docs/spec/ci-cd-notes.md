@@ -30,7 +30,7 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
 - **`ci_python.yml`**（`python_package`/`engine_pybind`の品質検証、3ジョブ、
   `python_package/**`・`engine_pybind/**`・`pyproject.toml`・`uv.lock`・`tests/**`を
   トリガー。`engine/**`は含めない）:
-  - `test`ジョブ（Python 3.12/3.13/3.14マトリクス）: `uv sync --locked --group test` →
+  - `test`ジョブ（Python 3.12/3.13/3.14/3.15マトリクス）: `uv sync --locked --group test` →
     `uv run maturin develop` → **import時間チェック** → `pytest tests` → `ruff check .` →
     `ruff format --check .`。Python 3.12のジョブだけ、最後に`polars==1.38.1`（`pyproject.toml`の
     `polars>=`の下限と同じ版。変えるときは両方と`docs/guide/verification.md`の表を揃える）を
@@ -50,7 +50,7 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
     解決しない。`.claude/rules/python-style.md`「開発ツールの実行方針」と同じ理由）。
 - **`cd_release.yml`**（Linux（manylinux/musllinux × x86_64/aarch64の4種）/macOS/Windows向けwheelビルド、タグpush（`v*`）+
   `workflow_dispatch`のみ。PR毎には回さない）: ビルド対象Pythonは
-  `-i python3.12 -i python3.13 -i python3.14`を明示指定（`--find-interpreter`は未サポート
+  `-i python3.12 -i python3.13 -i python3.14 -i python3.15`を明示指定（`--find-interpreter`は未サポート
   バージョンまで検出するため不採用）。各ビルドジョブは`Build wheels`直後に
   **wheelサイズ記録ステップ**（`python -m performance.measure_wheel_size dist`）
   を持つ。ビルド済みwheelのサイズ（圧縮/展開後/うち`.so`|`.pyd`）を

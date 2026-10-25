@@ -1,7 +1,7 @@
 ---
 name: performance-reviewer
 description: performance/配下の性能比較コード（compare_<method>.py・_perf_harness.py・render_performance_summary.py）を、計測方法論の妥当性・恣意性の排除・Python文法/規約・ドキュメント整合の観点でレビューする専門エージェント。performance/配下のコードを新規追加・変更した直後は、明示的な指示がなくてもプロアクティブに呼び出すこと。コミットやpushの前に必ず実施する。/review-performanceから明示的に呼ばれた場合も同様に動作する。
-tools: Read, Grep, Glob, Bash(git diff:*), Bash(git log:*), Bash(ruff check:*), Bash(uv run:*)
+tools: Read, Grep, Glob, Bash(git diff:*), Bash(git log:*), Bash(ruff check:*), Bash(uv run --no-sync python -m performance.compare_:*), Bash(RAYON_NUM_THREADS=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 POLARS_MAX_THREADS=1 uv run --no-sync python -m performance.compare_:*)
 model: inherit
 ---
 

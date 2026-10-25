@@ -2,7 +2,7 @@
 name: refactor-candidates
 description: 指定した範囲のコード・コメント・ディレクトリ構造・ドキュメントからリファクタリング候補を洗い出し、重要度付きで提示する。起票方法（まとめ方・既存Issueへの追記か新規か）をユーザーと確認した上でGitHub Issueに起票する。コードは変更しない
 argument-hint: "[洗い出し対象の範囲（例: engine/src/iv/、tests/support/、docs/spec/配下）]"
-allowed-tools: Read, Grep, Glob, Bash(git status:*), Bash(git log:*), Bash(gh issue list:*), Bash(gh issue view:*), Bash(gh issue create:*), Bash(gh issue comment:*)
+allowed-tools: Read, Grep, Glob, Bash(git status:*), Bash(git log:*), Bash(gh issue list:*), Bash(gh issue view:*)
 ---
 
 # リファクタリング候補の洗い出し
@@ -67,7 +67,8 @@ $ARGUMENTS
 
 6. **起票**
    手順5で合意した内容どおりに、`gh issue create`（新規）または`gh issue comment`（追記）で
-   起票する。
+   起票する（公開リポジトリへの書き込みなので`allowed-tools`には入れておらず、
+   実行時に権限確認も出る）。
    - 本文は**英語**（リポジトリがpublicなため、5章）。
    - 対象（ファイル・行）／内容／重要度／根拠を含め、後から着手する人が文脈なしで
      理解できる書き方にする。

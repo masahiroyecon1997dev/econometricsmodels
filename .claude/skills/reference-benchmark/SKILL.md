@@ -2,7 +2,7 @@
 name: reference-benchmark
 description: statsmodels/linearmodels（主）・Rパッケージ（クロスチェック）と、合成データセット/Wooldridgeデータセットを使って推定手法のベンチマーク値を生成し、tests/fixtures/benchmarks/にJSONとして固定する。新しい推定手法のテスト作成（/test-new）の一部として使用する。
 argument-hint: "[手法名]"
-allowed-tools: Read, Write, Bash(python3:*), Bash(Rscript:*), Bash(pytest:*)
+allowed-tools: Read, Write, Bash(python3 -m benchmark.:*), Bash(python -m benchmark.:*), Bash(uv run python -m benchmark.:*), Bash(Rscript benchmark/:*), Bash(pytest:*)
 ---
 
 # リファレンスベンチマーク生成

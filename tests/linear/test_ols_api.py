@@ -309,7 +309,7 @@ def test_predict_new_data_matches_statsmodels(wide_dataset):
     sm_res = sm_fit(wide_dataset, x=WIDE_X)
 
     new_data = wide_new_data()
-    predicted = res.predict(new_data.select(reversed(WIDE_X)))
+    predicted = res.predict(new_data=new_data.select(reversed(WIDE_X)))
 
     expected = sm_res.predict(sm.add_constant(new_data.to_numpy()))
 
@@ -332,7 +332,7 @@ def test_predict_new_data_without_intercept_matches_statsmodels():
 
     new_x1 = np.array([1.0, 2.0, -3.0])
     new_data = pl.DataFrame({"x1": new_x1})
-    predicted = res.predict(new_data)
+    predicted = res.predict(new_data=new_data)
     expected = sm_res.predict(new_x1.reshape(-1, 1))
 
     for i, (value, exp) in enumerate(zip(predicted, expected)):
@@ -361,7 +361,7 @@ def test_predict_with_include_intercept_false_and_x_named_const():
     res = OLS(df, y="y", x=["const", "x2"], options=options).fit()
 
     new_data = pl.DataFrame({"const": [100.0, 200.0], "x2": [10.0, 20.0]})
-    predicted = res.predict(new_data)
+    predicted = res.predict(new_data=new_data)
 
     coef_const = res.params["const"]
     coef_x2 = res.params["x2"]
@@ -376,7 +376,7 @@ def test_predict_new_data_structure(wide_dataset):
     res = our_fit(wide_dataset, x=WIDE_X)
     new_data = wide_new_data(2)
 
-    predicted = res.predict(new_data)
+    predicted = res.predict(new_data=new_data)
 
     assert isinstance(predicted, list)
     assert len(predicted) == 2
@@ -415,7 +415,7 @@ def test_augment_new_data_returns_new_data_with_predicted_column(
     res = our_fit(wide_dataset, x=WIDE_X)
     new_data = wide_new_data(2)
 
-    augmented = res.augment(new_data)
+    augmented = res.augment(new_data=new_data)
 
     assert isinstance(augmented, pl.DataFrame)
     assert augmented.height == 2
@@ -423,7 +423,7 @@ def test_augment_new_data_returns_new_data_with_predicted_column(
     for col in WIDE_X:
         assert augmented[col].to_list() == new_data[col].to_list()
 
-    expected = res.predict(new_data)
+    expected = res.predict(new_data=new_data)
     assert augmented["predicted"].to_list() == expected
 
 
@@ -434,7 +434,7 @@ def test_augment_new_data_with_extra_column_preserves_it(wide_dataset):
     res = our_fit(wide_dataset, x=WIDE_X)
     new_data = wide_new_data(2).insert_column(0, pl.Series("id", ["a", "b"]))
 
-    augmented = res.augment(new_data)
+    augmented = res.augment(new_data=new_data)
 
     assert augmented.columns == ["id", *WIDE_X, "predicted"]
     assert augmented["id"].to_list() == ["a", "b"]
@@ -456,8 +456,8 @@ def test_augment_without_intercept_matches_predict():
     assert augmented_none["predicted"].to_list() == expected_none
 
     new_data = pl.DataFrame({"x1": [10.0, 20.0]})
-    augmented_new = res.augment(new_data)
-    expected_new = res.predict(new_data)
+    augmented_new = res.augment(new_data=new_data)
+    expected_new = res.predict(new_data=new_data)
     assert augmented_new["predicted"].to_list() == expected_new
 
 

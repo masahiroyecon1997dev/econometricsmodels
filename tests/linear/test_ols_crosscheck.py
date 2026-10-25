@@ -197,7 +197,7 @@ def test_predict_new_data_matches_r(crosscheck):
             "x2": PREDICT_NEW_DATA["x2"],
         }
     )
-    predicted = res.predict(new_data)
+    predicted = res.predict(new_data=new_data)
     ref = crosscheck["synthetic"]["baseline"]["predict"]["predicted"]
 
     assert len(predicted) == len(ref)

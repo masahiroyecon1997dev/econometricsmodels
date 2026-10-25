@@ -137,7 +137,7 @@ def test_f_version_has_f_distribution_and_denominator_degrees_of_freedom(
     baseline,
 ):
     fitted = baseline.fit()
-    res = fitted.white_test("f")
+    res = fitted.white_test(statistic="f")
 
     assert res.distribution == "f"
     assert res.df == _expected_df(3)
@@ -150,7 +150,7 @@ def test_f_version_has_f_distribution_and_denominator_degrees_of_freedom(
 def test_statistic_argument_is_case_insensitive(baseline, statistic, spelling):
     fitted = baseline.fit()
     assert_argument_case_insensitive(
-        lambda label: fitted.white_test(label), statistic, spelling
+        lambda label: fitted.white_test(statistic=label), statistic, spelling
     )
 
 
@@ -177,7 +177,7 @@ def test_aux_terms_lists_constant_then_variables_squares_and_products(
 
 def test_lm_and_f_versions_report_the_same_terms(baseline):
     fitted = baseline.fit()
-    lm, f = fitted.white_test("lm"), fitted.white_test("f")
+    lm, f = fitted.white_test(statistic="lm"), fitted.white_test(statistic="f")
     assert lm.aux_terms == f.aux_terms
     assert lm.dropped_terms == f.dropped_terms
     assert lm.df == f.df
@@ -248,7 +248,7 @@ def test_result_is_invariant_to_scale_and_location_of_the_variables():
 
 
 def test_to_dict_is_json_ready(baseline):
-    res = baseline.fit().white_test("f")
+    res = baseline.fit().white_test(statistic="f")
     as_dict = res.to_dict()
 
     assert set(as_dict) == {
@@ -341,7 +341,7 @@ def test_non_string_statistic_raises_type_error(baseline):
     """型違いは`ValidationError`ではなく組み込みの`TypeError`
     （`docs/guide/validation.md`の分担）。"""
     with pytest.raises(TypeError):
-        baseline.fit().white_test(1)  # type: ignore[arg-type]
+        baseline.fit().white_test(statistic=1)  # type: ignore[arg-type]
 
 
 # ── ValidationError ─────────────────────────────────────────────────
@@ -354,7 +354,7 @@ def test_unknown_statistic_raises_validation_error(baseline):
         value="chi2",
         allowed=msgs.ALLOWED_DIAGNOSTIC_STATISTICS,
     ):
-        baseline.fit().white_test("chi2")
+        baseline.fit().white_test(statistic="chi2")
 
 
 def test_too_few_observations_for_the_auxiliary_regression_raises():
@@ -403,7 +403,7 @@ def test_sample_size_is_checked_against_the_terms_that_remain_after_dropping():
     y = [1.1, 2.9, 0.4, 5.2, 3.3, -0.7]
     df = pl.DataFrame({"y": y, "x1": x1, "d": d})
 
-    ok = OLS(df, y="y", x=["x1", "d"]).fit().white_test("f")
+    ok = OLS(df, y="y", x=["x1", "d"]).fit().white_test(statistic="f")
     assert ok.df == 4
     assert ok.df_denom == 1
 
@@ -508,8 +508,8 @@ def test_full_set_of_dummies_without_intercept_raises_computation_error():
 
 
 def _check_against(fitted, ref: dict, label: str) -> None:
-    lm = fitted.white_test("lm")
-    f = fitted.white_test("f")
+    lm = fitted.white_test(statistic="lm")
+    f = fitted.white_test(statistic="f")
 
     _ref_close(lm.statistic, ref["lm"], f"{label}/lm")
     _ref_close_p(lm.p_value, ref["lm_p_value"], f"{label}/lm_p_value")
@@ -565,7 +565,7 @@ def test_smallest_sample_matches_statsmodels():
         pl.DataFrame({"y": y, "x1": x1, "x2": x2}), y="y", x=["x1", "x2"]
     ).fit()
 
-    lm, f = fitted.white_test("lm"), fitted.white_test("f")
+    lm, f = fitted.white_test(statistic="lm"), fitted.white_test(statistic="f")
     assert lm.df == 5
     assert f.df_denom == 1
 
@@ -582,8 +582,8 @@ def test_smallest_sample_matches_statsmodels():
 
 
 def _check_against_r(fitted, ref: dict, label: str) -> None:
-    lm = fitted.white_test("lm")
-    f = fitted.white_test("f")
+    lm = fitted.white_test(statistic="lm")
+    f = fitted.white_test(statistic="f")
 
     _cc_close(lm.statistic, ref["lm"], f"{label}/lm")
     _cc_close_p(lm.p_value, ref["lm_p_value"], f"{label}/lm_p_value")

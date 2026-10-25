@@ -88,7 +88,7 @@ fitted = result.predict()
 # time by name; column order does not matter, and the constant column must
 # not be included)
 new_data = pl.DataFrame({"x1": [13.0, 14.0]})
-predicted = result.predict(new_data)
+predicted = result.predict(new_data=new_data)
 
 print(predicted)  # [..., ...] (a plain list of floats)
 ```
@@ -96,7 +96,7 @@ print(predicted)  # [..., ...] (a plain list of floats)
 `OLSResults.augment()` takes the same `new_data` argument, but instead returns the source data (the training data, or `new_data` when given) with the predicted values appended as a `"predicted"` column — a polars DataFrame rather than a plain list. This is the one exception to the library's general policy of not returning DataFrames.
 
 ```python
-augmented = result.augment(new_data)
+augmented = result.augment(new_data=new_data)
 print(augmented)  # original `new_data` columns, plus a "predicted" column
 ```
 
@@ -112,7 +112,7 @@ print(white.aux_terms)  # ["const", "x1", "x2", "x1^2", "x2^2", "x1:x2"]
 print(white.dropped_terms)  # terms left out, e.g. ["d^2"] for a 0/1 dummy d
 
 white.to_dict()  # a JSON-ready dict
-white_f = result.white_test("f")
+white_f = result.white_test(statistic="f")
 ```
 
 The auxiliary regression always includes a constant, even when the model was fitted with `include_intercept=False`, so the first element of `aux_terms` is always `"const"`. Terms that are constant or numerically identical to an earlier term (the square of a 0/1 dummy equals the dummy itself) are dropped, and the degrees of freedom count the terms that remain. The term labels only describe what was used; they are not a formula and are never parsed. The test does not depend on `cov_type`.
@@ -126,8 +126,8 @@ bp = result.breusch_pagan_test()  # the model's regressors
 print(bp.statistic, bp.p_value, bp.df)
 print(bp.aux_terms)  # ["const", "x1", "x2"]
 
-bp_size = result.breusch_pagan_test(["firm_size"])  # any numeric column
-bp_f = result.breusch_pagan_test(["x1"], "f")  # F version
+bp_size = result.breusch_pagan_test(variables=["firm_size"])  # any numeric column
+bp_f = result.breusch_pagan_test(variables=["x1"], statistic="f")  # F version
 ```
 
 This is the studentized (Koenker) version, which does not assume normal errors. The auxiliary regression always includes a constant, constant or duplicate columns are dropped (`dropped_terms` shows them), and the test does not depend on `cov_type`.
@@ -139,7 +139,7 @@ This is the studentized (Koenker) version, which does not assume normal errors. 
 ```python
 bg = result.breusch_godfrey_test("year", 2)  # LM version (chi-squared)
 print(bg.statistic, bg.p_value, bg.df, bg.nlags)
-bg_f = result.breusch_godfrey_test("year", 2, "f")  # F version
+bg_f = result.breusch_godfrey_test("year", 2, statistic="f")  # F version
 bg.to_dict()  # a JSON-ready dict
 ```
 

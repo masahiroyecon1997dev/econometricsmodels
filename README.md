@@ -361,5 +361,6 @@ not just major ones.
 - [Documentation](https://masahiroyecon1997dev.github.io/econometricsmodels/) — usage guides and full API reference
 - [PyPI](https://pypi.org/project/econometricsmodels/)
 - [GitHub Issues](https://github.com/masahiroyecon1997dev/econometricsmodels/issues) — bug reports, feature requests, roadmap status
+- [Contributing](https://github.com/masahiroyecon1997dev/econometricsmodels/blob/main/CONTRIBUTING.md) — how to report bugs and propose methods (issues welcome; pull requests cannot be reviewed)
 - [Changelog](https://github.com/masahiroyecon1997dev/econometricsmodels/blob/main/CHANGELOG.md)
 - [License](https://github.com/masahiroyecon1997dev/econometricsmodels/blob/main/LICENSE) — MIT

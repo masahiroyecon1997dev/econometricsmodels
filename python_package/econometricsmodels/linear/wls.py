@@ -62,6 +62,7 @@ class WLS:
         y: str,
         x: list[str],
         weight: str,
+        *,
         options: WLSOptions | None = None,
     ) -> None:
         self._data = data

@@ -77,6 +77,7 @@ class IV:
         x_exog: list[str],
         x_endog: list[str],
         instruments: list[str],
+        *,
         options: IVOptions | None = None,
     ) -> None:
         self._data = data

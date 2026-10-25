@@ -87,6 +87,7 @@ class RE:
         y: str,
         x: list[str],
         entity: str,
+        *,
         options: REOptions | None = None,
     ) -> None:
         self._data = data

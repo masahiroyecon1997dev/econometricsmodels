@@ -45,20 +45,26 @@ def frame() -> pl.DataFrame:
 CLUSTER = {"cov_type": "cluster", "cluster": "cluster"}
 
 CLUSTER_FITS = {
-    "OLS": lambda d: OLS(d, "y", ["x1"], OLSOptions(**CLUSTER)).fit(),
-    "WLS": lambda d: WLS(d, "y", ["x1"], "w", WLSOptions(**CLUSTER)).fit(),
-    "Logit": lambda d: Logit(d, "y01", ["x1"], LogitOptions(**CLUSTER)).fit(),
-    "Probit": lambda d: Probit(
-        d, "y01", ["x1"], ProbitOptions(**CLUSTER)
+    "OLS": lambda d: OLS(d, "y", ["x1"], options=OLSOptions(**CLUSTER)).fit(),
+    "WLS": lambda d: WLS(
+        d, "y", ["x1"], "w", options=WLSOptions(**CLUSTER)
     ).fit(),
-    "Tobit": lambda d: Tobit(d, "yc", ["x1"], TobitOptions(**CLUSTER)).fit(),
+    "Logit": lambda d: Logit(
+        d, "y01", ["x1"], options=LogitOptions(**CLUSTER)
+    ).fit(),
+    "Probit": lambda d: Probit(
+        d, "y01", ["x1"], options=ProbitOptions(**CLUSTER)
+    ).fit(),
+    "Tobit": lambda d: Tobit(
+        d, "yc", ["x1"], options=TobitOptions(**CLUSTER)
+    ).fit(),
     "IV": lambda d: IV(
         d,
         "y",
         ["x2"],
         ["x1"],
         ["z", "z2"],
-        IVOptions(**CLUSTER),
+        options=IVOptions(**CLUSTER),
     ).fit(),
     # GMMの重み行列用のクラスター列は、`cov_type`用とは別の抽出箇所を通る
     # （`cov_type`はclassicalのまま、重みだけがクラスター列を使う）。
@@ -68,12 +74,16 @@ CLUSTER_FITS = {
         ["x2"],
         ["x1"],
         ["z", "z2"],
-        IVOptions(
+        options=IVOptions(
             estimator="gmm", gmm_weight_type="cluster", cluster="cluster"
         ),
     ).fit(),
-    "FE": lambda d: FE(d, "y", ["x1"], "entity", FEOptions(**CLUSTER)).fit(),
-    "RE": lambda d: RE(d, "y", ["x1"], "entity", REOptions(**CLUSTER)).fit(),
+    "FE": lambda d: FE(
+        d, "y", ["x1"], "entity", options=FEOptions(**CLUSTER)
+    ).fit(),
+    "RE": lambda d: RE(
+        d, "y", ["x1"], "entity", options=REOptions(**CLUSTER)
+    ).fit(),
 }
 
 ENTITY_FITS = {
@@ -83,16 +93,16 @@ ENTITY_FITS = {
 
 TIME_FITS = {
     "FE.time": lambda d: FE(
-        d, "y", ["x1"], "entity", FEOptions(time="t")
+        d, "y", ["x1"], "entity", options=FEOptions(time="t")
     ).fit(),
     "FE.dk_time": lambda d: FE(
-        d, "y", ["x1"], "entity", FEOptions(cov_type="dk", dk_time="t")
+        d, "y", ["x1"], "entity", options=FEOptions(cov_type="dk", dk_time="t")
     ).fit(),
     "RE.time": lambda d: RE(
-        d, "y", ["x1"], "entity", REOptions(time="t")
+        d, "y", ["x1"], "entity", options=REOptions(time="t")
     ).fit(),
     "RE.dk_time": lambda d: RE(
-        d, "y", ["x1"], "entity", REOptions(cov_type="dk", dk_time="t")
+        d, "y", ["x1"], "entity", options=REOptions(cov_type="dk", dk_time="t")
     ).fit(),
 }
 
@@ -428,7 +438,9 @@ def _long_panel() -> pl.DataFrame:
 
 def _dk_se(df: pl.DataFrame, column: str) -> float:
     options = FEOptions(cov_type="dk", dk_time=column, dk_bandwidth=3)
-    return FE(df, "y", ["x1"], "entity", options).fit().std_errors["x1"]
+    return (
+        FE(df, "y", ["x1"], "entity", options=options).fit().std_errors["x1"]
+    )
 
 
 def _month_start(period: int) -> dt.date:

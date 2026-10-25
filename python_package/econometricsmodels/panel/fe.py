@@ -77,6 +77,7 @@ class FE:
         y: str,
         x: list[str],
         entity: str,
+        *,
         options: FEOptions | None = None,
     ) -> None:
         self._data = data

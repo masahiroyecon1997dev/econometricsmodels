@@ -59,6 +59,7 @@ class Logit:
         data: pl.DataFrame,
         y: str,
         x: list[str],
+        *,
         options: LogitOptions | None = None,
     ) -> None:
         self._data = data

@@ -20,21 +20,7 @@ import econometricsmodels
 import pytest
 
 # まだ位置引数を受け付ける`クラス.メンバー`（`__init__`はコンストラクタ）。
-PENDING: frozenset[str] = frozenset(
-    {
-        "LogitResults.augment",
-        "LogitResults.marginal_effects",
-        "LogitResults.pred_table",
-        "LogitResults.predict",
-        "ProbitResults.augment",
-        "ProbitResults.marginal_effects",
-        "ProbitResults.pred_table",
-        "ProbitResults.predict",
-        "TobitResults.augment",
-        "TobitResults.marginal_effects",
-        "TobitResults.predict",
-    }
-)
+PENDING: frozenset[str] = frozenset({})
 
 
 def _public_classes() -> list[type]:

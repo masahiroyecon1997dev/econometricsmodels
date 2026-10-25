@@ -24,39 +24,44 @@ exclude_docs: |
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
+  # 系統（engine/src/の linear・nonlinear・iv・panel）ごとにまとめる。
   - Models:
-      - OLS:
-          - Usage: usage/ols.md
-          - Options and results: api/ols.md
-          - Definitions: methods/ols.md
-      - WLS:
-          - Usage: usage/wls.md
-          - Options and results: api/wls.md
-          - Definitions: methods/wls.md
-      - Logit:
-          - Usage: usage/logit.md
-          - Options and results: api/logit.md
-          - Definitions: methods/logit.md
-      - Probit:
-          - Usage: usage/probit.md
-          - Options and results: api/probit.md
-          - Definitions: methods/probit.md
-      - Tobit:
-          - Usage: usage/tobit.md
-          - Options and results: api/tobit.md
-          - Definitions: methods/tobit.md
-      - IV:
-          - Usage: usage/iv.md
-          - Options and results: api/iv.md
-          - Definitions: methods/iv.md
-      - FE:
-          - Usage: usage/fe.md
-          - Options and results: api/fe.md
-          - Definitions: methods/fe.md
-      - RE:
-          - Usage: usage/re.md
-          - Options and results: api/re.md
-          - Definitions: methods/re.md
+      - Linear models:
+          - OLS:
+              - Usage: usage/ols.md
+              - Options and results: api/ols.md
+              - Definitions: methods/ols.md
+          - WLS:
+              - Usage: usage/wls.md
+              - Options and results: api/wls.md
+              - Definitions: methods/wls.md
+      - Nonlinear models:
+          - Logit:
+              - Usage: usage/logit.md
+              - Options and results: api/logit.md
+              - Definitions: methods/logit.md
+          - Probit:
+              - Usage: usage/probit.md
+              - Options and results: api/probit.md
+              - Definitions: methods/probit.md
+          - Tobit:
+              - Usage: usage/tobit.md
+              - Options and results: api/tobit.md
+              - Definitions: methods/tobit.md
+      - Instrumental variables:
+          - IV:
+              - Usage: usage/iv.md
+              - Options and results: api/iv.md
+              - Definitions: methods/iv.md
+      - Panel models:
+          - FE:
+              - Usage: usage/fe.md
+              - Options and results: api/fe.md
+              - Definitions: methods/fe.md
+          - RE:
+              - Usage: usage/re.md
+              - Options and results: api/re.md
+              - Definitions: methods/re.md
   - Guides:
       - Accepted data: guide/accepted-data.md
       - Validation and errors: guide/validation.md

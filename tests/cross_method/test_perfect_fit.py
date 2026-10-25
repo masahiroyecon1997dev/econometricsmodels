@@ -100,7 +100,7 @@ def _fit(
             df,
             "y",
             ["x", "x2"],
-            OLSOptions(include_intercept=include_intercept, **opts),
+            options=OLSOptions(include_intercept=include_intercept, **opts),
         ).fit()
     if model == "WLS":
         return WLS(
@@ -108,15 +108,15 @@ def _fit(
             "y",
             ["x", "x2"],
             "w",
-            WLSOptions(include_intercept=include_intercept, **opts),
+            options=WLSOptions(include_intercept=include_intercept, **opts),
         ).fit()
     if model == "FE":
         return FE(
-            df, "y", ["x", "x2"], "entity", FEOptions(**kw, **opts)
+            df, "y", ["x", "x2"], "entity", options=FEOptions(**kw, **opts)
         ).fit()
     if model == "RE":
         return RE(
-            df, "y", ["x", "x2"], "entity", REOptions(**kw, **opts)
+            df, "y", ["x", "x2"], "entity", options=REOptions(**kw, **opts)
         ).fit()
     estimator = "gmm" if model == "IV-GMM" else "2sls"
     gmm = {"gmm_type": gmm_type} if gmm_type else {}
@@ -126,7 +126,7 @@ def _fit(
         ["x"],
         ["endog"],
         ["z", "z2"],
-        IVOptions(
+        options=IVOptions(
             estimator=estimator,
             include_intercept=include_intercept,
             **opts,
@@ -259,7 +259,7 @@ def test_perfect_first_stage_is_reported_with_the_first_stage_context(df):
                 ["x"],
                 ["endog"],
                 ["z", "z2"],
-                IVOptions(estimator=estimator),
+                options=IVOptions(estimator=estimator),
             ).fit()
 
 
@@ -290,7 +290,7 @@ def test_only_the_second_endogenous_regressor_has_a_perfect_first_stage(df):
             ["x"],
             ["endog", "endog2"],
             ["z", "z2", "noise"],
-            IVOptions(),
+            options=IVOptions(),
         ).fit()
 
 
@@ -308,7 +308,7 @@ def test_wu_hausman_is_none_when_only_the_augmented_regression_is_exact(
             ["x"],
             ["endog"],
             ["z", "z2"],
-            IVOptions(estimator=estimator),
+            options=IVOptions(estimator=estimator),
         )
         .fit()
         .first_stage()["endog"]
@@ -323,7 +323,7 @@ def test_wu_hausman_is_none_when_only_the_augmented_regression_is_exact(
         ["x"],
         ["endog"],
         ["z", "z2"],
-        IVOptions(estimator=estimator),
+        options=IVOptions(estimator=estimator),
     ).fit()
     assert result.wu_hausman_statistic is None
     assert result.wu_hausman_p_value is None
@@ -339,7 +339,7 @@ def test_the_second_stage_regression_is_not_judged_for_a_perfect_fit(df):
             ["x"],
             ["endog"],
             ["z", "z2"],
-            IVOptions(),
+            options=IVOptions(),
         )
         .fit()
         .first_stage()["endog"]
@@ -348,7 +348,9 @@ def test_the_second_stage_regression_is_not_judged_for_a_perfect_fit(df):
     data = df.with_columns(
         y=pl.Series(1.0 + 2.0 * (df["endog"].to_numpy() - v))
     )
-    result = IV(data, "y", ["x"], ["endog"], ["z", "z2"], IVOptions()).fit()
+    result = IV(
+        data, "y", ["x"], ["endog"], ["z", "z2"], options=IVOptions()
+    ).fit()
     assert all(np.isfinite(list(result.std_errors.values())))
 
 
@@ -421,7 +423,7 @@ def test_constant_outcome_is_reported_before_the_first_stage(df):
                 ["x"],
                 ["endog"],
                 ["z", "z2"],
-                IVOptions(estimator=estimator),
+                options=IVOptions(estimator=estimator),
             ).fit()
 
 
@@ -441,7 +443,7 @@ def test_constant_outcome_is_reported_before_the_cluster_count(df):
             data,
             "y",
             ["x", "x2", "z"],
-            OLSOptions(cov_type="cluster", cluster="few"),
+            options=OLSOptions(cov_type="cluster", cluster="few"),
         ).fit()
 
 
@@ -453,7 +455,7 @@ def test_a_constant_endogenous_regressor_is_reported_in_its_first_stage(df):
     with raises_error(
         ErrorCode.OUTCOME_CONSTANT, stage="FIRST_STAGE", endog_name="endog"
     ):
-        IV(data, "y", ["x"], ["endog"], ["z", "z2"], IVOptions()).fit()
+        IV(data, "y", ["x"], ["endog"], ["z", "z2"], options=IVOptions()).fit()
 
 
 def test_a_constant_endogenous_regressor_without_an_intercept_is_allowed(df):
@@ -466,7 +468,7 @@ def test_a_constant_endogenous_regressor_without_an_intercept_is_allowed(df):
         ["x"],
         ["endog"],
         ["z", "z2"],
-        IVOptions(include_intercept=False),
+        options=IVOptions(include_intercept=False),
     ).fit()
     assert all(np.isfinite(list(result.std_errors.values())))
 

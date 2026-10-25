@@ -94,12 +94,12 @@ def _fit_fe(df: pl.DataFrame, column: str, *, two_way: bool):
         if two_way
         else FEOptions(cov_type="dk", dk_time=column)
     )
-    return FE(df, "y", _x_columns(df), "entity", options).fit()
+    return FE(df, "y", _x_columns(df), "entity", options=options).fit()
 
 
 def _fit_re(df: pl.DataFrame, column: str):
     options = REOptions(cov_type="dk", dk_time=column)
-    return RE(df, "y", _x_columns(df), "entity", options).fit()
+    return RE(df, "y", _x_columns(df), "entity", options=options).fit()
 
 
 @pytest.mark.parametrize("two_way", [False, True], ids=["one_way", "two_way"])
@@ -195,7 +195,7 @@ def _time_effects(df: pl.DataFrame, column: str) -> dict:
         "y",
         _x_columns(df),
         "entity",
-        FEOptions(time=column),
+        options=FEOptions(time=column),
     ).fit()
     return res.fixed_effects()["time"]
 
@@ -240,10 +240,14 @@ def test_two_way_time_effects_values_do_not_depend_on_how_labels_are_written(
         "y",
         _x_columns(padded),
         "entity",
-        FEOptions(time="label"),
+        options=FEOptions(time="label"),
     ).fit()
     got = FE(
-        plain, "y", _x_columns(plain), "entity", FEOptions(time="label")
+        plain,
+        "y",
+        _x_columns(plain),
+        "entity",
+        options=FEOptions(time="label"),
     ).fit()
 
     expected_time = list(expected.fixed_effects()["time"].values())

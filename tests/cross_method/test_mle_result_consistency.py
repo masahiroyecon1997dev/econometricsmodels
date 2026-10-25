@@ -116,9 +116,15 @@ def datasets(binary_dataset: Any, censored_dataset: Any) -> dict[str, Any]:
 @pytest.fixture(scope="module")
 def results(datasets: dict[str, Any]) -> dict[str, Any]:
     return {
-        "Logit": Logit(datasets["Logit"], "y", X, LogitOptions()).fit(),
-        "Probit": Probit(datasets["Probit"], "y", X, ProbitOptions()).fit(),
-        "Tobit": Tobit(datasets["Tobit"], "y", X, TobitOptions()).fit(),
+        "Logit": Logit(
+            datasets["Logit"], "y", X, options=LogitOptions()
+        ).fit(),
+        "Probit": Probit(
+            datasets["Probit"], "y", X, options=ProbitOptions()
+        ).fit(),
+        "Tobit": Tobit(
+            datasets["Tobit"], "y", X, options=TobitOptions()
+        ).fit(),
     }
 
 

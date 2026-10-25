@@ -59,6 +59,7 @@ class Probit:
         data: pl.DataFrame,
         y: str,
         x: list[str],
+        *,
         options: ProbitOptions | None = None,
     ) -> None:
         self._data = data

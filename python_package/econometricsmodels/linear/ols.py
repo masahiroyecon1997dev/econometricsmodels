@@ -58,6 +58,7 @@ class OLS:
         data: pl.DataFrame,
         y: str,
         x: list[str],
+        *,
         options: OLSOptions | None = None,
     ) -> None:
         self._data = data

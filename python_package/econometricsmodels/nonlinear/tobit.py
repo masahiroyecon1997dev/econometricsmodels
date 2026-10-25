@@ -68,6 +68,7 @@ class Tobit:
         data: pl.DataFrame,
         y: str,
         x: list[str],
+        *,
         options: TobitOptions | None = None,
     ) -> None:
         self._data = data

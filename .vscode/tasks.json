@@ -18,7 +18,7 @@
     {
       "label": "docs: serve (mkdocs)",
       "type": "shell",
-      "command": "uv run --group docs mkdocs serve --config-file docs/mkdocs.yml --dev-addr 0.0.0.0:8000",
+      "command": "uv run --group docs mkdocs serve --config-file docs/mkdocs.yml --dev-addr 127.0.0.1:8000",
       "isBackground": true,
       "presentation": { "reveal": "always", "panel": "dedicated" },
       "problemMatcher": {

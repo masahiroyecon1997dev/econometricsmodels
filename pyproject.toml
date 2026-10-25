@@ -65,12 +65,12 @@ exclude = ["**/CLAUDE.md", "**/.gitkeep", "**/error_catalog_golden.txt"]
 # バージョンを上げる場合はフィクスチャの再生成とセットで行うこと。
 test = [
     "pytest==9.1.1",
-    "numpy==2.5.3",
+    "numpy==2.5.4",
     "statsmodels==0.15.0",
     # IV（2SLS/GMM）のフィクスチャ生成に使った主リファレンス実装
     # （`docs/spec/iv-spec.md`4章）。statsmodelsと同じ理由で`==`厳密固定。
     "linearmodels==7.0",
-    "ruff==0.16.10",
+    "ruff==0.17.0",
     # Wooldridge実データでのクロスチェックテスト用（tests/support/_helpers.pyの
     # wooldridge_loader）。標準CIで確実に実行されるよう
     # 専用グループからここへ移した。依存はpandasのみで、statsmodels/linearmodels経由で既に
@@ -97,7 +97,7 @@ audit = [
 docs = [
     "mkdocs==1.6.1",
     "mkdocs-material==9.7.7",
-    "mkdocstrings[python]==1.0.6",
+    "mkdocstrings[python]==1.0.7",
 ]
 
 # .claude/rules/python-style.md「Lint / フォーマット」で確定済みの line-length=79

@@ -83,6 +83,14 @@ use crate::shared::validation::{
 /// Estimation options for RE (random effects panel regression).
 ///
 /// All arguments are keyword-only.
+///
+/// Options by purpose:
+///
+/// - Standard errors: `cov_type`; with `"cluster"` also `cluster`; with
+///   `"dk"` also `dk_time` (required) and `dk_bandwidth`.
+/// - Effects: `time` (sets two-way effects; balanced panels only).
+/// - Variance components: `variance_method`.
+/// - Confidence intervals: `confidence_level`.
 // 各フィールドの意味・既定値の根拠は`docs/spec/panel-common.md`・`docs/spec/re-spec.md`。
 // module/from_py_objectの理由は`OLSOptions`と同じ（`engine_pybind/src/linear/ols.rs`参照）。
 #[pyclass(from_py_object, module = "econometricsmodels._lib")]

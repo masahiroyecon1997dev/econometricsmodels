@@ -41,6 +41,13 @@ use crate::shared::validation::{RoleValue, validate_common_roles, validate_no_du
 /// All arguments are keyword-only.
 ///
 /// `weight` is not an option: it is a top-level argument of `WLS`, next to `y` and `x`.
+///
+/// Options by purpose:
+///
+/// - Standard errors: `cov_type`; with `"cluster"` also `cluster`; with
+///   `"hac"` also `hac_time` (required) and `hac_lags`.
+/// - Confidence intervals: `confidence_level`.
+/// - Model: `include_intercept`.
 // 各フィールドの意味・既定値の根拠は`docs/spec/wls-spec.md`「API引数」。
 // `OLSOptions`と同じフィールド構成だが、将来WLS固有のオプションを足してもOLS利用者に
 // 影響しないよう、結果型`WLSResult`と同様に独立した型にしている。このフィールドの重複は

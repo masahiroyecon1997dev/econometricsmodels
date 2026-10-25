@@ -26,6 +26,8 @@ jobs:
       ISSUE_TITLE: "devcontainer: R package/R updates available"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # 更新ありのとき終了コード1でreport.mdを書き出す（2以上はスクリプト自体の異常）。
       - name: Compare pinned versions with CRAN

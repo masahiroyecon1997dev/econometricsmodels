@@ -37,7 +37,7 @@ FIXTURE_PATH = (
 RTOL = TOLERANCES["fe_crosscheck"]["rtol"]
 ATOL = TOLERANCES["fe_crosscheck"]["atol"]
 
-_assert_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
+_assert_dict_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
 
 # 同じ時間順になる、固定幅でないラベルへの付け替え。`period`は`0..24`の整数。
 _MONTH_STARTS = [
@@ -80,7 +80,7 @@ def frame() -> pl.DataFrame:
 
 @pytest.fixture(scope="module")
 def reference() -> dict:
-    return json.loads(FIXTURE_PATH.read_text())[SCENARIO]
+    return json.loads(FIXTURE_PATH.read_text())["synthetic"][SCENARIO]
 
 
 def _x_columns(df: pl.DataFrame) -> list[str]:
@@ -113,9 +113,11 @@ def test_fe_dk_matches_fixest_for_any_labels_in_time_order(
     res = _fit_fe(df, "label", two_way=two_way)
 
     ref = reference["two_way" if two_way else "one_way"]["dk"]
-    _assert_close(res.std_errors, ref["se"], f"{relabeling}/se")
-    _assert_close(res.test_stats, ref["test_stats"], f"{relabeling}/t")
-    _assert_close(res.p_values, ref["p_values"], f"{relabeling}/p")
+    _assert_dict_close(
+        res.std_errors, ref["std_errors"], f"{relabeling}/std_errors"
+    )
+    _assert_dict_close(res.test_stats, ref["test_stats"], f"{relabeling}/t")
+    _assert_dict_close(res.p_values, ref["p_values"], f"{relabeling}/p")
 
 
 @pytest.mark.parametrize("relabeling", list(RELABELINGS))

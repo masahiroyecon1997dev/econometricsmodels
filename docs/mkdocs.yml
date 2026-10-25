@@ -4,32 +4,74 @@ repo_url: https://github.com/masahiroyecon1997dev/econometricsmodels
 repo_name: masahiroyecon1997dev/econometricsmodels
 
 # このファイル自体がdocs/直下にあるため、同じdocs/をdocs_dirとして扱う
-# （デフォルトの"docs/mkdocs.yml相対docs/"にはしない）。docs/planning/・docs/spec/・
-# docs/plan.mdはビルド対象に含まれるがnavには載せない
-# （CLAUDE.md 10章「ソースとしては誰でも閲覧可能という前提で運用する」）。
-# 利用者向けの横断解説はdocs/guide/に置き、navに載せる。
+# （デフォルトの"docs/mkdocs.yml相対docs/"にはしない）。
+# 公開サイトに載せるのは英語のページ（index.md・getting-started.md・usage/・api/・methods/・guide/）のみ。
+# 日本語の内部ドキュメント（spec/・performance/・planning/）は下のexclude_docsで外す
+# （リポジトリ自体はpublicなので、ソースとしては閲覧可能という前提は変わらない）。
 docs_dir: .
 site_dir: ../site
+
+# docs_dirが`.`のため、何も指定しないとdocs/配下の全ファイルがサイトに出力され、
+# 検索の索引にも入る。日本語の内部ドキュメント（仕様書spec/・性能比較の開発ノートperformance/・
+# 実装途中の設計ノートplanning/）と設定ファイル自体は公開サイトに出さない。
+# パターンは.gitignore形式で、docs_dirからの相対パス。
+exclude_docs: |
+  planning/
+  spec/
+  performance/
+  mkdocs.yml
 
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
-  - API Reference:
-      - OLS: api/ols.md
-      - WLS: api/wls.md
-      - Logit: api/logit.md
-      - Probit: api/probit.md
-      - Tobit: api/tobit.md
-      - IV: api/iv.md
-      - FE: api/fe.md
-      - RE: api/re.md
+  - Models:
+      - OLS:
+          - Usage: usage/ols.md
+          - Options and results: api/ols.md
+          - Definitions: methods/ols.md
+      - WLS:
+          - Usage: usage/wls.md
+          - Options and results: api/wls.md
+          - Definitions: methods/wls.md
+      - Logit:
+          - Usage: usage/logit.md
+          - Options and results: api/logit.md
+          - Definitions: methods/logit.md
+      - Probit:
+          - Usage: usage/probit.md
+          - Options and results: api/probit.md
+          - Definitions: methods/probit.md
+      - Tobit:
+          - Usage: usage/tobit.md
+          - Options and results: api/tobit.md
+          - Definitions: methods/tobit.md
+      - IV:
+          - Usage: usage/iv.md
+          - Options and results: api/iv.md
+          - Definitions: methods/iv.md
+      - FE:
+          - Usage: usage/fe.md
+          - Options and results: api/fe.md
+          - Definitions: methods/fe.md
+      - RE:
+          - Usage: usage/re.md
+          - Options and results: api/re.md
+          - Definitions: methods/re.md
   - Guides:
       - Accepted data: guide/accepted-data.md
       - Validation and errors: guide/validation.md
+      - Error codes: guide/error-codes.md
+      - Errors (API): api/errors.md
       - Inference conventions: guide/inference-conventions.md
+  - Verification and performance:
       - Verification: guide/verification.md
       - Performance: guide/performance.md
       - Performance results: guide/performance-results.md
+
+# 内部リンクとアンカーの切れをビルド時に警告する。
+validation:
+  links:
+    anchors: warn
 
 theme:
   name: material
@@ -52,6 +94,15 @@ theme:
 markdown_extensions:
   - admonition
   - pymdownx.superfences
+  # 数式は\( \)と\[ \]で書き、MathJaxで描画する（下のextra_javascript）。
+  - pymdownx.arithmatex:
+      generic: true
+  - toc:
+      permalink: true
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-mml-chtml.js
 
 plugins:
   - search
@@ -63,6 +114,12 @@ plugins:
             show_source: false
             show_root_heading: true
             merge_init_into_class: true
+            # クラスの先頭に属性・メソッドの一覧表を出し、右の目次にも並べる
+            # （全部を読まずに目的のプロパティへ飛べるようにする）。
+            summary: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            docstring_section_style: table
             # PyO3コンパイル済みクラスは動的検査でdunderメソッド（__new__/__repr__等）も
             # メンバーとして拾われるため、明示的に除外する。
             filters:

@@ -9,26 +9,58 @@ R クロスチェックは `test_iv_crosscheck.py`（OLS/WLS/Logit/Probit の
 `test_<手法>_api.py` 等と同じ4分割）。
 
 `iv_dataset`/`clustered_dataset` フィクスチャと `our_fit` ヘルパーは
-`tests/iv/conftest.py`／`tests/iv/_iv_helpers.py`。
+`tests/iv/conftest.py`／`tests/support/_iv_helpers.py`。
 """
 
 from __future__ import annotations
 
 import polars as pl
 import pytest
+from _assertions import (
+    assert_hac_time_reorders_rows,
+    assert_option_case_insensitive,
+    assert_params_table_matches_attributes,
+    assert_same_estimates,
+)
 from _constants import DATA_DIR
 from _helpers import (
+    CASE_SPELLINGS,
     HAC_AUTO_LAG_SAMPLE_SIZES,
     ROW_TIME,
     hac_lag_frame,
     hac_time_for,
+    reorder_rows,
+    respell,
+    with_cluster_groups,
+    with_row_time,
 )
 from _iv_helpers import our_fit
-from econometricsmodels import IV, IVOptions, IVResults, ValidationError
+from _tolerances import TOLERANCES
+from econometricsmodels import IV, IVOptions, IVResults
 
 from benchmark.common import hac_auto_lag
+from benchmark.iv.constants import IV_COV_TYPES
+from benchmark.iv.datasets import (
+    MULTI_ENDOG_SCENARIOS,
+    THREE_ENDOG_INSTRUMENTS,
+    THREE_ENDOG_X_ENDOG,
+    multi_endog_instruments,
+)
 
-# ── 成功パス・結果型 ──────────────────────────────────────────────
+
+def _assert_valid_test_statistic(
+    statistic: float | None, p_value: float | None
+) -> None:
+    """統計量が正、p値が開区間(0, 1)にあること。`is not None`だけでは見逃す
+    退化した値（0・NaN・スケールの誤り等）への簡易ガード。
+    """
+    assert statistic is not None
+    assert p_value is not None
+    assert statistic > 0.0
+    assert 0.0 < p_value < 1.0
+
+
+# ── 成功パス・結果型 ──────────────────────────────────────────────────
 
 
 def test_fit_succeeds_and_returns_iv_results(iv_dataset):
@@ -46,50 +78,9 @@ def test_default_options_use_2sls_classical(iv_dataset):
     assert res.n_iter == 1
 
 
-def test_gmm_method_runs_and_converges(iv_dataset):
-    """`estimator="gmm"`の既定オプション（`gmm_type="two_step"`、2-step
-    efficient GMM）が成功パスで動作すること。
-    """
-    options = IVOptions(estimator="gmm")
-    res = our_fit(iv_dataset, options=options)
-    assert res.converged
-    assert res.n_iter == 2
-    assert res.gmm_type == "two_step"
-
-
-def test_gmm_one_step_has_no_weight_type_and_runs_once(iv_dataset):
-    """`gmm_type="one_step"`は`gmm_weight_type`を使わず、`gmm_weight_type`は
-    `None`、`n_iter=1`で常に収束扱い。
-    """
-    options = IVOptions(estimator="gmm", gmm_type="one_step")
-    res = our_fit(iv_dataset, options=options)
-    assert res.gmm_type == "one_step"
-    assert res.gmm_weight_type is None
-    assert res.n_iter == 1
-    assert res.converged
-
-
-def test_gmm_type_is_case_insensitive_and_echoed_lowercase(iv_dataset):
-    options = IVOptions(estimator="gmm", gmm_type="Two_Step")
-    assert our_fit(iv_dataset, options=options).gmm_type == "two_step"
-
-
-def test_gmm_iterated_uses_effective_defaults(iv_dataset):
-    """`gmm_max_iter`/`gmm_tol`が`None`（既定）でも`"iterated"`では
-    実効既定値（100 / 1e-6）で反復し、収束すること。
-    """
-    options = IVOptions(
-        estimator="gmm", gmm_type="iterated", gmm_weight_type="robust"
-    )
-    res = our_fit(iv_dataset, options=options)
-    assert res.gmm_type == "iterated"
-    assert res.converged
-    assert 3 <= res.n_iter <= 100
-
-
-def test_gmm_type_is_none_for_2sls(iv_dataset):
-    res = our_fit(iv_dataset, options=IVOptions(estimator="2sls"))
-    assert res.gmm_type is None
+def test_residuals_length_matches_n_obs(iv_dataset):
+    res = our_fit(iv_dataset)
+    assert len(res.residuals) == res.n_obs == iv_dataset.height
 
 
 def test_cluster_g2_boundary_succeeds_when_x_exog_is_empty():
@@ -115,12 +106,7 @@ def test_cluster_g2_boundary_succeeds_when_x_exog_is_empty():
     assert res.params["endog1"] != 0.0
 
 
-def test_residuals_length_matches_n_obs(iv_dataset):
-    res = our_fit(iv_dataset)
-    assert len(res.residuals) == res.n_obs == iv_dataset.height
-
-
-# ── API構造 ──────────────────────────────────────────────────────
+# ── API構造 ───────────────────────────────────────────────────────────
 
 
 def test_param_names_order(iv_dataset):
@@ -131,24 +117,25 @@ def test_param_names_order(iv_dataset):
     assert res.param_names == ["const", "x1", "endog1"]
 
 
-def test_coef_table_structure(iv_dataset):
+def test_params_table_structure(iv_dataset):
     res = our_fit(iv_dataset)
-    table = res.coef_table()
+    table = res.params_table()
+    assert_params_table_matches_attributes(res)
 
     assert isinstance(table, list)
     assert len(table) == 3  # const, x1, endog1
     expected_keys = {
+        "param_name",
         "param",
-        "coef",
-        "std_err",
+        "std_error",
         "test_stat",
         "p_value",
         "conf_lower",
         "conf_upper",
     }
     for row in table:
-        assert expected_keys <= set(row.keys())
-    assert [row["param"] for row in table] == ["const", "x1", "endog1"]
+        assert set(row.keys()) == expected_keys
+    assert [row["param_name"] for row in table] == ["const", "x1", "endog1"]
 
 
 def test_conf_int_structure(iv_dataset):
@@ -161,7 +148,7 @@ def test_conf_int_structure(iv_dataset):
         assert lower < upper
 
 
-def test_params_std_errors_stats_p_values_share_keys(iv_dataset):
+def test_params_std_errors_test_stats_p_values_share_keys(iv_dataset):
     res = our_fit(iv_dataset)
     expected_keys = {"const", "x1", "endog1"}
 
@@ -206,8 +193,7 @@ def test_overid_statistic_present_when_over_identified(iv_dataset):
     はNoneにならない（2SLSのSargan検定）。
     """
     res = our_fit(iv_dataset)
-    assert res.overid_statistic is not None
-    assert res.overid_p_value is not None
+    _assert_valid_test_statistic(res.overid_statistic, res.overid_p_value)
 
 
 def test_overid_statistic_none_when_just_identified(iv_dataset):
@@ -228,8 +214,99 @@ def test_overid_statistic_present_for_gmm_hansen_j(iv_dataset):
     """
     options = IVOptions(estimator="gmm")
     res = our_fit(iv_dataset, options=options)
-    assert res.overid_statistic is not None
-    assert res.overid_p_value is not None
+    _assert_valid_test_statistic(res.overid_statistic, res.overid_p_value)
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        IVOptions(),
+        IVOptions(estimator="gmm", gmm_weight_type="classical"),
+        IVOptions(estimator="gmm", gmm_weight_type="robust"),
+        IVOptions(
+            estimator="gmm", gmm_weight_type="hac", **hac_time_for("hac")
+        ),
+    ],
+    ids=["2sls", "gmm_classical", "gmm_robust", "gmm_hac"],
+)
+def test_overid_test_rejects_only_when_instrument_is_invalid(
+    iv_dataset, options
+):
+    """過剰識別検定（Sargan/Hansen J）が、操作変数が有効なデータ（`iv_baseline`）
+    では棄却せず、最後の操作変数が構造誤差と相関するデータ（`invalid_instrument`）
+    では明確に棄却する（p値が1e-4未満）。`invalid_instrument`の相関の強さを
+    変えて棄却が弱くなった場合に、リファレンス照合が通ったまま過剰識別検定が
+    棄却できることの確認だけが失われるのを防ぐ。
+    """
+    valid = our_fit(iv_dataset, options=options)
+    invalid = our_fit(
+        pl.read_csv(DATA_DIR / "iv_invalid_instrument.csv"), options=options
+    )
+    assert valid.overid_p_value is not None
+    assert invalid.overid_p_value is not None
+    assert (
+        valid.overid_p_value > TOLERANCES["iv_api"]["overid_valid_min_p_value"]
+    )
+    assert (
+        0.0
+        < invalid.overid_p_value
+        < TOLERANCES["iv_api"]["overid_rejection_max_p_value"]
+    )
+
+
+@pytest.mark.parametrize("scenario", MULTI_ENDOG_SCENARIOS)
+@pytest.mark.parametrize("estimator", ["2sls", "gmm"])
+def test_multi_endog_overid_df_and_wu_hausman_df(scenario, estimator):
+    """複数内生変数（`k_endog=2`）の過剰識別検定とWu-Hausman検定の自由度。
+    過剰識別検定の自由度は`len(instruments) - len(x_endog)`（丁度識別の
+    `just_identified`は`None`）、Wu-Hausman検定はF(n_endog, df_resid - n_endog)
+    （2SLSのみ、GMMは`None`）。内生変数1本の小データだけを見る
+    `tests/cross_method/test_test_dfs.py`では`df_num=2`・`overid_df=l-2`が
+    検証されない。
+    """
+    df = pl.read_csv(DATA_DIR / f"iv_{scenario}_multi_endog.csv")
+    instruments = multi_endog_instruments(scenario)
+    res = our_fit(
+        df,
+        x_endog=["endog1", "endog2"],
+        instruments=instruments,
+        options=IVOptions(estimator=estimator),
+    )
+
+    n_endog = 2
+    if len(instruments) == n_endog:
+        assert res.overid_df is None
+    else:
+        assert res.overid_df == len(instruments) - n_endog
+    if estimator == "2sls":
+        assert res.wu_hausman_df_num == n_endog
+        assert res.wu_hausman_df_denom == res.df_resid - n_endog
+    else:
+        assert res.wu_hausman_df_num is None
+        assert res.wu_hausman_df_denom is None
+
+
+@pytest.mark.parametrize("estimator", ["2sls", "gmm"])
+def test_three_endog_overid_df_and_wu_hausman_df(estimator):
+    """内生変数3本・操作変数4本（過剰識別度1）の自由度。過剰識別検定は
+    `len(instruments) - len(x_endog) = 1`、Wu-Hausman検定（2SLSのみ）は
+    F(3, df_resid - 3)。
+    """
+    df = pl.read_csv(DATA_DIR / "iv_baseline_three_endog.csv")
+    res = our_fit(
+        df,
+        x_endog=THREE_ENDOG_X_ENDOG,
+        instruments=THREE_ENDOG_INSTRUMENTS,
+        options=IVOptions(estimator=estimator),
+    )
+
+    assert res.overid_df == 1
+    if estimator == "2sls":
+        assert res.wu_hausman_df_num == 3
+        assert res.wu_hausman_df_denom == res.df_resid - 3
+    else:
+        assert res.wu_hausman_df_num is None
+        assert res.wu_hausman_df_denom is None
 
 
 def test_wu_hausman_is_none_for_gmm(iv_dataset):
@@ -245,8 +322,9 @@ def test_wu_hausman_is_none_for_gmm(iv_dataset):
 
 def test_wu_hausman_is_not_none_for_2sls(iv_dataset):
     res = our_fit(iv_dataset)
-    assert res.wu_hausman_statistic is not None
-    assert res.wu_hausman_p_value is not None
+    _assert_valid_test_statistic(
+        res.wu_hausman_statistic, res.wu_hausman_p_value
+    )
 
 
 def test_wu_hausman_degrades_to_none_when_cluster_count_at_most_augmented_slopes(
@@ -261,10 +339,7 @@ def test_wu_hausman_degrades_to_none_when_cluster_count_at_most_augmented_slopes
     （`instruments=["z1"]`、第一段階`q_fs=2`なので`G=3`で第一段階は成功）で
     構造方程式`q=2`・`k_endog=1`・`q_aug=3`、`G=3`（`q=2 < G=3 <= q_aug=3`）。
     """
-    cluster = pl.Series(
-        "cluster_group", [i % 3 for i in range(iv_dataset.height)]
-    )
-    df = iv_dataset.with_columns(cluster)
+    df = with_cluster_groups(iv_dataset, 3)
     options = IVOptions(cov_type="cluster", cluster="cluster_group")
     res = our_fit(df, instruments=["z1"], options=options)
 
@@ -274,84 +349,30 @@ def test_wu_hausman_degrades_to_none_when_cluster_count_at_most_augmented_slopes
     assert res.params["endog1"] is not None
 
 
-# ── オプションの反映 ──────────────────────────────────────────────
+# ── オプションの反映 ──────────────────────────────────────────────────
 
 
-def test_cov_type_label(iv_dataset):
-    for cov_type in ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]:
-        options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
-        res = our_fit(iv_dataset, options=options)
-        assert res.cov_type == cov_type
-
-
-def test_cluster_cov_type_label(clustered_dataset):
-    options = IVOptions(cov_type="cluster", cluster="cluster_group")
-    res = our_fit(clustered_dataset, options=options)
-    assert res.cov_type == "cluster"
-
-
-@pytest.mark.parametrize(
-    "cov_type, expected_label",
-    [
-        ("CLASSICAL", "classical"),
-        ("Classical", "classical"),
-        ("HC0", "hc0"),
-        ("Hc1", "hc1"),
-        ("HC2", "hc2"),
-        ("hc3", "hc3"),
-        ("HAC", "hac"),
-    ],
-)
-def test_cov_type_is_case_insensitive(iv_dataset, cov_type, expected_label):
-    """`cov_type`が大文字小文字を区別しないこと（`engine_pybind`側の
-    `parse_iv_cov_type`のRust実装と対になる、Python API境界での確認。
-    OLS/WLS/Logit/Probitの`test_cov_type_is_case_insensitive`と同型、
-    `testing-completeness-reviewer`指摘）。
-    """
-    options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
-    res = our_fit(iv_dataset, options=options)
-    assert res.cov_type == expected_label
-
-
-@pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
-def test_nonrobust_is_rejected(iv_dataset, cov_type):
-    """`"nonrobust"`（旧別名）は受け付けない（概念ごとに文字列を1つに絞る）。"""
-    with pytest.raises(ValidationError, match="unknown cov_type: 'nonrobust'"):
-        our_fit(
-            iv_dataset,
-            options=IVOptions(cov_type=cov_type, **hac_time_for(cov_type)),
-        )
-
-
-@pytest.mark.parametrize(
-    "gmm_weight_type, expected",
-    [
-        ("CLASSICAL", "classical"),
-        ("Classical", "classical"),
-        ("ROBUST", "robust"),
-        ("HAC", "hac"),
-    ],
-)
-def test_weight_type_matches_canonical_result_regardless_of_case(
-    iv_dataset, gmm_weight_type, expected
+@pytest.mark.parametrize("spelling", CASE_SPELLINGS)
+@pytest.mark.parametrize("cov_type", IV_COV_TYPES)
+def test_cov_type_is_case_insensitive(
+    iv_dataset, clustered_dataset, cov_type, spelling
 ):
-    """`gmm_weight_type`が大文字小文字を区別しないこと
-    （`engine_pybind`側の`parse_weight_type`と対になる、Python API境界での確認。
-    `testing-completeness-reviewer`指摘）。
+    """全`cov_type`で、`res.cov_type`が正規形（小文字）で返り、どの大文字小文字の
+    綴りでも正規形と同一の推定結果になること（`engine_pybind`側の
+    `parse_cov_kind`のRust実装と対になる、Python API境界での確認。
+    OLS/WLS/Logit/Probit/Tobit/FE/REの`test_cov_type_is_case_insensitive`と同型）。
+    clusterは`cluster`列を持つ`clustered_dataset`を使う。
     """
-    options = IVOptions(
-        estimator="gmm",
-        gmm_weight_type=gmm_weight_type,
-        **hac_time_for(gmm_weight_type),
-    )
-    res = our_fit(iv_dataset, options=options)
+    df = clustered_dataset if cov_type == "cluster" else iv_dataset
+    kwargs = {"cluster": "cluster_group"} if cov_type == "cluster" else {}
 
-    canonical_options = IVOptions(
-        estimator="gmm", gmm_weight_type=expected, **hac_time_for(expected)
-    )
-    canonical_res = our_fit(iv_dataset, options=canonical_options)
-    for name in res.param_names:
-        assert res.params[name] == canonical_res.params[name], name
+    def fit(label: str):
+        options = IVOptions(cov_type=label, **kwargs, **hac_time_for(cov_type))
+        return our_fit(df, options=options)
+
+    res = fit(respell(cov_type, spelling))
+    assert res.cov_type == cov_type
+    assert_same_estimates(res, fit(cov_type))
 
 
 def test_confidence_level_changes_interval_width(iv_dataset):
@@ -362,64 +383,6 @@ def test_confidence_level_changes_interval_width(iv_dataset):
         wide_width = wide.conf_int[name][1] - wide.conf_int[name][0]
         narrow_width = narrow.conf_int[name][1] - narrow.conf_int[name][0]
         assert narrow_width < wide_width, name
-
-
-def test_hac_auto_lags_runs_and_returns_finite_std_errors(iv_dataset):
-    """`hac_lags`省略時（`None`、自動計算式）でもエラーなく動作すること。"""
-    options = IVOptions(cov_type="hac", hac_time=ROW_TIME)
-    res = our_fit(iv_dataset, options=options)
-    assert res.cov_type == "hac"
-    for se in res.std_errors.values():
-        assert se > 0.0
-
-
-def test_hac_time_reorders_rows_before_computing_lags():
-    """`hac_time`を指定すると、DataFrameの行順に関わらず時系列順で
-    ラグ付き自己共分散を計算すること（`test_ols_api.py`の同名テストと同じ発想を
-    IVに適用、engine_pybindの`hac_time`列抽出経路をAPI境界から検証する）。
-    """
-    ordered_df = pl.DataFrame(
-        {
-            "y": [2.0, 4.0, 5.0, 4.0, 5.0, 6.0, 5.0, 7.0],
-            "endog1": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
-            "z1": [1.5, 2.5, 2.0, 4.5, 3.0, 5.5, 6.0, 7.5],
-            "time": [float(i) for i in range(8)],
-        }
-    )
-    ordered_options = IVOptions(cov_type="hac", hac_lags=1, hac_time="time")
-    ordered_res = IV(
-        ordered_df,
-        y="y",
-        x_exog=[],
-        x_endog=["endog1"],
-        instruments=["z1"],
-        options=ordered_options,
-    ).fit()
-
-    perm = [3, 1, 5, 2, 4, 0, 7, 6]
-    shuffled_df = pl.DataFrame(
-        {
-            "y": [ordered_df["y"][i] for i in perm],
-            "endog1": [ordered_df["endog1"][i] for i in perm],
-            "z1": [ordered_df["z1"][i] for i in perm],
-            "time": [float(i) for i in perm],
-        }
-    )
-    shuffled_options = IVOptions(cov_type="hac", hac_lags=1, hac_time="time")
-    shuffled_res = IV(
-        shuffled_df,
-        y="y",
-        x_exog=[],
-        x_endog=["endog1"],
-        instruments=["z1"],
-        options=shuffled_options,
-    ).fit()
-
-    for name in ["const", "endog1"]:
-        assert (
-            abs(shuffled_res.std_errors[name] - ordered_res.std_errors[name])
-            < 1e-9
-        ), name
 
 
 def test_include_intercept_false_omits_const(iv_dataset):
@@ -479,29 +442,54 @@ def test_include_intercept_false_allows_const_in_instruments():
     assert res.first_stage()["endog1"].param_names == ["x1", "const"]
 
 
-@pytest.mark.parametrize(
-    "gmm_weight_type", ["classical", "robust", "cluster", "hac"]
-)
-def test_gmm_weight_type_options_run(
-    iv_dataset, clustered_dataset, gmm_weight_type
-):
-    """`estimator="gmm"`の`gmm_weight_type`各値が成功パスで動作すること（数値照合は
-    `test_iv_gmm_reference.py`）。`cluster`/`hac`は`cov_type`と同じ
-    `cluster`フィールドと`hac_lags`フィールドを共用する仕様
-    （`engine_pybind/src/iv/CLAUDE.md`参照）。
+def test_hac_auto_lags_runs_and_returns_finite_std_errors(iv_dataset):
+    """`hac_lags`省略時（`None`、自動計算式）でもエラーなく動作すること。"""
+    options = IVOptions(cov_type="hac", hac_time=ROW_TIME)
+    res = our_fit(iv_dataset, options=options)
+    assert res.cov_type == "hac"
+    for se in res.std_errors.values():
+        assert se > 0.0
+
+
+def test_hac_time_reorders_rows_before_computing_lags():
+    """`hac_time`を指定すると、DataFrameの行順に関わらず時系列順で
+    ラグ付き自己共分散を計算すること（`test_ols_api.py`の同名テストと同じ発想を
+    IVに適用、engine_pybindの`hac_time`列抽出経路をAPI境界から検証する）。
     """
-    df = clustered_dataset if gmm_weight_type == "cluster" else iv_dataset
-    kwargs = (
-        {"cluster": "cluster_group"} if gmm_weight_type == "cluster" else {}
+    ordered_df = pl.DataFrame(
+        {
+            "y": [2.0, 4.0, 5.0, 4.0, 5.0, 6.0, 5.0, 7.0],
+            "endog1": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+            "z1": [1.5, 2.5, 2.0, 4.5, 3.0, 5.5, 6.0, 7.5],
+            "time": [float(i) for i in range(8)],
+        }
     )
-    options = IVOptions(
-        estimator="gmm",
-        gmm_weight_type=gmm_weight_type,
-        **kwargs,
-        **hac_time_for(gmm_weight_type),
+    shuffled_df = reorder_rows(ordered_df, [3, 1, 5, 2, 4, 0, 7, 6])
+
+    def fit_std_errors(df: pl.DataFrame, hac_time: str) -> dict[str, float]:
+        options = IVOptions(cov_type="hac", hac_lags=1, hac_time=hac_time)
+        return (
+            IV(
+                df,
+                y="y",
+                x_exog=[],
+                x_endog=["endog1"],
+                instruments=["z1"],
+                options=options,
+            )
+            .fit()
+            .std_errors
+        )
+
+    assert_hac_time_reorders_rows(
+        fit_std_errors(ordered_df, "time"),
+        fit_std_errors(shuffled_df, "time"),
+        fit_std_errors(with_row_time(shuffled_df), ROW_TIME),
+        atol_invariant=TOLERANCES["iv_api"]["atol_hac_time_reorder"],
+        min_rel_effect=TOLERANCES["iv_api"][
+            "min_rel_hac_time_row_order_effect"
+        ],
     )
-    res = our_fit(df, options=options)
-    assert res.converged
 
 
 @pytest.mark.parametrize("cov_type", ["classical", "hc0", "hac", "cluster"])
@@ -524,85 +512,51 @@ def test_gmm_cov_type_options_run_independently_of_weight_type(
     assert res.converged
 
 
+@pytest.mark.parametrize("spelling", CASE_SPELLINGS)
 @pytest.mark.parametrize("estimator", ["2sls", "gmm"])
-def test_estimator_label(iv_dataset, estimator):
-    """`res.estimator`が指定した`estimator`（正規化済み小文字）を反映すること
-    （`test_cov_type_label`と同型）。
+def test_estimator_is_case_insensitive(iv_dataset, estimator, spelling):
+    """`res.estimator`が正規形（小文字）で返り、どの大文字小文字の綴りでも
+    正規形と同一の推定結果になること（`test_cov_type_is_case_insensitive`と同型）。
     """
-    res = our_fit(iv_dataset, options=IVOptions(estimator=estimator))
-    assert res.estimator == estimator
+
+    def fit(label):
+        return our_fit(iv_dataset, options=IVOptions(estimator=label))
+
+    assert_option_case_insensitive(fit, "estimator", estimator, spelling)
 
 
+@pytest.mark.parametrize("spelling", CASE_SPELLINGS)
 @pytest.mark.parametrize(
     "gmm_weight_type", ["classical", "robust", "cluster", "hac"]
 )
-def test_weight_type_label(iv_dataset, clustered_dataset, gmm_weight_type):
-    """`res.gmm_weight_type`が`estimator="gmm"`のとき指定した`gmm_weight_type`
-    （正規化済み小文字）を反映すること。
+def test_weight_type_is_case_insensitive(
+    iv_dataset, clustered_dataset, gmm_weight_type, spelling
+):
+    """`estimator="gmm"`の全`gmm_weight_type`で、`res.gmm_weight_type`が正規形
+    （小文字）で返り、どの大文字小文字の綴りでも正規形と同一の推定結果で収束
+    すること（`engine_pybind`側の`parse_iv_option_values`と対になる、Python API
+    境界での確認。数値照合は`test_iv_gmm_reference.py`）。`cluster`/`hac`は
+    `cov_type`と同じ`cluster`フィールドと`hac_lags`フィールドを共用する仕様
+    （`engine_pybind/src/iv/CLAUDE.md`参照）。
     """
     df = clustered_dataset if gmm_weight_type == "cluster" else iv_dataset
     kwargs = (
         {"cluster": "cluster_group"} if gmm_weight_type == "cluster" else {}
     )
-    options = IVOptions(
-        estimator="gmm",
-        gmm_weight_type=gmm_weight_type,
-        **kwargs,
-        **hac_time_for(gmm_weight_type),
-    )
-    res = our_fit(df, options=options)
+
+    def fit(label: str):
+        options = IVOptions(
+            estimator="gmm",
+            gmm_weight_type=label,
+            **kwargs,
+            **hac_time_for(gmm_weight_type),
+        )
+        return our_fit(df, options=options)
+
+    res = fit(respell(gmm_weight_type, spelling))
     assert res.gmm_weight_type == gmm_weight_type
-
-
-@pytest.mark.parametrize(
-    "estimator, expected_label",
-    [
-        ("2SLS", "2sls"),
-        ("2Sls", "2sls"),
-        ("GMM", "gmm"),
-        ("Gmm", "gmm"),
-    ],
-)
-def test_estimator_is_case_insensitive(iv_dataset, estimator, expected_label):
-    """`estimator`が大文字小文字を区別しないこと（`test_cov_type_is_case_insensitive`
-    と同型）。
-    """
-    res = our_fit(iv_dataset, options=IVOptions(estimator=estimator))
-    assert res.estimator == expected_label
-
-
-@pytest.mark.parametrize(
-    "gmm_weight_type, expected_label",
-    [
-        ("CLASSICAL", "classical"),
-        ("Classical", "classical"),
-        ("ROBUST", "robust"),
-        ("Robust", "robust"),
-        ("CLUSTER", "cluster"),
-        ("HAC", "hac"),
-    ],
-)
-def test_weight_type_is_case_insensitive(
-    iv_dataset, clustered_dataset, gmm_weight_type, expected_label
-):
-    df = (
-        clustered_dataset
-        if gmm_weight_type.lower() == "cluster"
-        else iv_dataset
-    )
-    kwargs = (
-        {"cluster": "cluster_group"}
-        if gmm_weight_type.lower() == "cluster"
-        else {}
-    )
-    options = IVOptions(
-        estimator="gmm",
-        gmm_weight_type=gmm_weight_type,
-        **kwargs,
-        **hac_time_for(gmm_weight_type),
-    )
-    res = our_fit(df, options=options)
-    assert res.gmm_weight_type == expected_label
+    assert res.converged
+    assert_same_estimates(res, fit(gmm_weight_type))
 
 
 def test_weight_type_is_none_for_2sls(iv_dataset):
@@ -663,7 +617,65 @@ def test_gmm_only_options_default_to_none():
     assert options.raise_on_non_convergence is None
 
 
-# ── HACの実使用ラグ数（hac_lags_used）─────────────────────────────
+# ── GMM（estimator="gmm"） ────────────────────────────────────────────
+
+
+def test_gmm_method_runs_and_converges(iv_dataset):
+    """`estimator="gmm"`の既定オプション（`gmm_type="two_step"`、2-step
+    efficient GMM）が成功パスで動作すること。
+    """
+    options = IVOptions(estimator="gmm")
+    res = our_fit(iv_dataset, options=options)
+    assert res.converged
+    assert res.n_iter == 2
+    assert res.gmm_type == "two_step"
+
+
+def test_gmm_one_step_has_no_weight_type_and_runs_once(iv_dataset):
+    """`gmm_type="one_step"`は`gmm_weight_type`を使わず、`gmm_weight_type`は
+    `None`、`n_iter=1`で常に収束扱い。
+    """
+    options = IVOptions(estimator="gmm", gmm_type="one_step")
+    res = our_fit(iv_dataset, options=options)
+    assert res.gmm_type == "one_step"
+    assert res.gmm_weight_type is None
+    assert res.n_iter == 1
+    assert res.converged
+
+
+@pytest.mark.parametrize("spelling", CASE_SPELLINGS)
+@pytest.mark.parametrize("gmm_type", ["one_step", "two_step", "iterated"])
+def test_gmm_type_is_case_insensitive(iv_dataset, gmm_type, spelling):
+    """`res.gmm_type`が正規形（小文字）で返り、どの大文字小文字の綴りでも正規形と
+    同一の推定結果になること。
+    """
+
+    def fit(label):
+        options = IVOptions(estimator="gmm", gmm_type=label)
+        return our_fit(iv_dataset, options=options)
+
+    assert_option_case_insensitive(fit, "gmm_type", gmm_type, spelling)
+
+
+def test_gmm_iterated_uses_effective_defaults(iv_dataset):
+    """`gmm_max_iter`/`gmm_tol`が`None`（既定）でも`"iterated"`では
+    実効既定値（100 / 1e-6）で反復し、収束すること。
+    """
+    options = IVOptions(
+        estimator="gmm", gmm_type="iterated", gmm_weight_type="robust"
+    )
+    res = our_fit(iv_dataset, options=options)
+    assert res.gmm_type == "iterated"
+    assert res.converged
+    assert 3 <= res.n_iter <= 100
+
+
+def test_gmm_type_is_none_for_2sls(iv_dataset):
+    res = our_fit(iv_dataset, options=IVOptions(estimator="2sls"))
+    assert res.gmm_type is None
+
+
+# ── HACの実使用ラグ数（hac_lags_used） ────────────────────────────────
 
 
 @pytest.mark.parametrize("n", HAC_AUTO_LAG_SAMPLE_SIZES)
@@ -724,5 +736,5 @@ def test_hac_lags_used_echoes_explicit_hac_lags(iv_dataset, estimator):
     ],
     ids=["2sls_hc1", "gmm_hc1", "gmm_one_step", "gmm_robust_weight"],
 )
-def test_hac_lags_used_is_none_without_hac(iv_dataset, options):
+def test_hac_lags_used_is_none_unless_hac(iv_dataset, options):
     assert our_fit(iv_dataset, options=options).hac_lags_used is None

@@ -2,7 +2,9 @@
 
 主リファレンス（linearmodels）との厳密比較（classical/hc1）は
 `test_re_reference.py`で行う。classical/hc1もこのファイルのplmで独立に検証する
-（全統計量。F統計量はこのファイルが全cov_typeの独立リファレンス）。
+（全統計量。F統計量はこのファイルが全cov_typeの独立リファレンス。ただし
+`unbalanced`は傾きだけのWald Fを手書きした参照値で、独立性が下がる。下記
+「不均衡パネル（unbalanced）の参照値」参照）。
 ここでは`tests/fixtures/benchmarks/re_crosscheck.json`（`benchmark/panel/
 fixtures/generate_re_crosscheck_fixtures.py`で生成）を用いて、linearmodelsとは
 独立した実装（R: plm）との一致を確認する。
@@ -23,25 +25,50 @@ fixtures/generate_re_crosscheck_fixtures.py`で生成）を用いて、linearmod
 - **ハウスマン検定**（`hausman_statistic`/`hausman_p_value`/`hausman_df`）:
   `linearmodels`に専用実装が無いため、`plm::phtest(method = "aux",
   effect = "individual")`（回帰ベース）が唯一の参照実装（panel-common.md
-  5.3節）。比較は常に1-wayで`REOptions.dk_time`の有無によらない
+  5.3節）。`unbalanced`だけは、`linearmodels`の分散成分から補助回帰を組み立てた
+  plmを参照にする（下記）。比較は常に1-wayで`REOptions.dk_time`の有無によらない
   （`generate_re_crosscheck_fixtures.py`モジュールdoc参照）。
+
+## 不均衡パネル（unbalanced）の参照値
+
+plmのSwamy-Arora分散成分は、`linearmodels`準拠の本実装と不均衡パネルで僅かに
+異なる（plm自身のREとの差: 係数が最大0.18%、標準誤差・信頼区間等がcov_typeに
+応じて1%前後、dkのバンド幅0では信頼区間が12%）。差は共分散推定量や小標本補正
+ではなく分散成分の推定にあるため、`unbalanced`の標準誤差・推論統計量（全
+cov_type、dkの明示バンド幅を含む）は、plm自身のREではなく`linearmodels`の分散
+成分をplmに与えて準偏差変換したデータへの`vcov`・`vcovHC`・`vcovSCC`と比べる
+（`run_plm_re_given_variance_benchmark.R`）。他のシナリオと同じく機械精度で
+一致し、補正式の取り違え（clusterの`G/(G-1)`欠落は標準誤差に約1.3%）も検出
+できる。
+
+この参照でplmが検証するのは係数・共分散行列・小標本補正まで。θの式、傾きだけの
+Wald F統計量（`pwaldtest`は変換後の定数列も検定に含めるため手書き）、t検定への
+変換は手書きで、分散成分そのもの（Swamy-Arora）は`linearmodels`（`re.json`）が
+検証する。θの式とF統計量の式は、plm自身の分散成分を与えた参照値がplm自身のRE
+と一致することで、フィクスチャを作るたびに確かめている。
+
+## dkの明示バンド幅・時点数の境界・実データ
+
+- **明示バンド幅**: 既定式は`T=6`でも`T=25`でも2になるため、`dk_bandwidth`を
+  0・2・3（`T=25`のシナリオは12も）で明示して`vcovSCC(maxlag=)`と比べる。
+- **時点数の境界**: ハウスマン検定の対象数`k=2`に対し`T=k+1=3`の成功パス
+  （`baseline.dk_three_periods`）。`T<=k`は`test_re_validation.py`の
+  `ValidationError`。
+- **wagepan**: `T=8`、検定対象3個（`T-1=7`）でdkも標準誤差・ハウスマン検定の
+  両方をplmと比べる（時点列は`year`）。
 
 ## ハウスマン統計量の方式について
 
 補助回帰版は統計量が構造的に非負になるため符号処理は不要。`plm`は補助回帰の
 定数項に準偏差変換前の`1`を使い、本実装もこれに合わせている。バランスパネルでは
-機械精度で一致し、不均衡パネルではSwamy-Arora分散成分の差（σ_u²）で数％ずれる
-（`_UNBALANCED_HAUSMAN_SCENARIO`）。
-
-## 許容誤差について
-
-plmの変量効果分散成分推定（Swamy-Arora）がlinearmodels準拠の本実装と不均衡
-パネルで僅かに異なるため、`unbalanced`シナリオのみ、係数が最大0.18%、標準誤差・
-信頼区間等がcov_typeに応じて最大1%台（dkの信頼区間は3.7%）乖離する。許容誤差は一律ではなく、統計量・cov_type別に実測へマージンを載せる
-（`_tolerances.py`の`re_crosscheck`の`rtol_unbalanced*`）。バランスパネルでは
-機械精度で一致するため、それ以外のシナリオは`rtol_balanced`で厳密に比較する
-（cluster・dkの`G/(G-1)`・`T/(T-1)`補正は標準誤差に1%前後しか効かず、緩い
-許容誤差では補正式の取り違えを検出できないため、バランスパネルを緩めない）。
+機械精度で一致する。不均衡パネル（`UNBALANCED_SCENARIO`）では、`phtest`の補助回帰が
+plmのSwamy-Arora分散成分から作るθに依存し、plm自身の値とは統計量が1〜2%ずれる
+（dkのバンド幅2と3の差約2.1%を隠す）。そのためハウスマン検定も、`linearmodels`の
+分散成分から補助回帰を組み立ててplmの`vcov`系を当てた値と機械精度で比べる
+（`run_plm_re_given_variance_hausman_benchmark.R`）。plmが検証するのは補助回帰の
+係数と共分散行列まで。補助回帰の組み立て（準偏差変換した`y*`・`X*`、within変換した
+`X̃`、素の定数項、検定対象の選択）は手書きで、plm自身の分散成分を与えた値が
+`phtest`と一致することで、フィクスチャを作るたびに確かめている。
 
 役割分担:
     - 構造・API: `test_re_api.py`
@@ -55,39 +82,49 @@ plmの変量効果分散成分推定（Swamy-Arora）がlinearmodels準拠の本
 from __future__ import annotations
 
 import json
-import math
 from functools import partial
 from pathlib import Path
 
-import _error_messages as msgs
 import polars as pl
 import pytest
-from _assertions import assert_close, assert_dict_close, rename_intercept
+from _assertions import assert_close, assert_dict_close, assert_inference_close
 from _constants import DATA_DIR
-from _error_messages import escaped
+from _errors import raises_error
 from _helpers import load_wooldridge_dataset
+from _panel_helpers import bandwidth_cases, x_columns
 from _tolerances import TOLERANCES
 from econometricsmodels import (
     RE,
+    ErrorCode,
     REOptions,
     ValidationError,
 )
 
 from benchmark.common import (
     WAGEPAN_ENTITY,
+    WAGEPAN_TIME,
     WAGEPAN_X,
     WAGEPAN_Y,
-    imbalanced_cluster_groups,
+)
+from benchmark.panel.cluster_cases import (
+    CLUSTER_IMBALANCED_CSV,
+    K1_CSV,
+    cluster_g3_groups,
+    cluster_imbalanced_groups,
+)
+from benchmark.panel.fixtures.generate_fe_crosscheck_fixtures import (
+    dk_three_periods_frame,
 )
 from benchmark.panel.fixtures.generate_fe_fixtures import NUMERIC_SCENARIOS
 from benchmark.panel.fixtures.generate_re_crosscheck_fixtures import (
     COV_TYPES,
+    DK_EXPLICIT_BANDWIDTH_KEY,
+    DK_EXPLICIT_BANDWIDTHS,
     HAUSMAN_COV_TYPES,
     HAUSMAN_DK_BANDWIDTH_KEY,
-    HAUSMAN_DK_BANDWIDTH_SCENARIOS,
-    HAUSMAN_DK_BANDWIDTHS,
     HAUSMAN_KEY,
     SCENARIO_COV_TYPES,
+    UNBALANCED_SCENARIO,
     WAGEPAN_COV_TYPES,
 )
 
@@ -98,32 +135,18 @@ FIXTURE_PATH = (
     / "re_crosscheck.json"
 )
 
-RTOL_BALANCED = TOLERANCES["re_crosscheck"]["rtol_balanced"]
-RTOL_UNBALANCED_COEF = TOLERANCES["re_crosscheck"]["rtol_unbalanced_coef"]
-RTOL_UNBALANCED_F = TOLERANCES["re_crosscheck"][
-    "rtol_unbalanced_f"
-]  # cov_type別
-RTOL_UNBALANCED = TOLERANCES["re_crosscheck"]["rtol_unbalanced"]  # cov_type別
+RTOL = TOLERANCES["re_crosscheck"]["rtol"]
 ATOL = TOLERANCES["re_crosscheck"]["atol"]
 RTOL_P_VALUE = TOLERANCES["re_crosscheck"]["rtol_p_value"]
-P_LOG10_UNBALANCED = TOLERANCES["re_crosscheck"]["p_value_log10_unbalanced"]
 RTOL_HAUSMAN = TOLERANCES["re_crosscheck"]["rtol_hausman"]
 ATOL_HAUSMAN = TOLERANCES["re_crosscheck"]["atol_hausman"]
-RTOL_HAUSMAN_UNBALANCED = TOLERANCES["re_crosscheck"][
-    "rtol_hausman_unbalanced"
-]  # cov_type別
-RTOL_HAUSMAN_P_VALUE_UNBALANCED = TOLERANCES["re_crosscheck"][
-    "rtol_hausman_p_value_unbalanced"
-]
 RTOL_HAUSMAN_ILL_CONDITIONED = TOLERANCES["re_crosscheck"][
     "rtol_hausman_ill_conditioned"
 ]
 ATOL_HAUSMAN_P_VALUE = TOLERANCES["re_crosscheck"]["atol_hausman_p_value"]
 
-# plm/linearmodelsの分散成分（σ_u²）推定の差でθが変わり、ハウスマン統計量への
-# 増幅がcoef/seよりさらに大きくなる唯一のシナリオ（モジュールdoc「許容誤差に
-# ついて」参照）。
-_UNBALANCED_HAUSMAN_SCENARIO = "unbalanced"
+# 条件数が大きく、ハウスマン統計量にだけ専用の緩めたrtol
+# （`rtol_hausman_ill_conditioned`）を使うシナリオ。
 _ILL_CONDITIONED_HAUSMAN_SCENARIO = "high_condition_number"
 
 
@@ -136,29 +159,10 @@ _assert_close = partial(assert_close, atol=ATOL)
 _assert_dict_close = partial(assert_dict_close, atol=ATOL)
 
 
-def _assert_p_close(
-    ours: float, ref: float, label: str, *, balanced: bool
-) -> None:
+def _assert_p_close(ours: float, ref: float, label: str) -> None:
     """p値の比較。絶対誤差の下限を設けない（下限があると、参照値が1e-8未満の
-    裾のp値が0.0でも通ってしまう）。
-
-    バランスパネルは相対誤差のみで比較する。不均衡パネルはSwamy-Arora分散成分の
-    差で統計量が数％ずれ、裾のp値は相対誤差では桁違いにずれる（統計量の0.1%の
-    差が`exp(-F)`型に増幅される）ため、常用対数の差で比較する
-    （0.0への潰れやオーダーの取り違えは検出できる）。
-    """
-    if balanced:
-        assert_close(ours, ref, label, rtol=RTOL_P_VALUE, atol=0.0)
-        return
-    if ref == 0.0:
-        assert ours == 0.0, f"{label}: ours={ours!r}, ref=0.0"
-        return
-    assert ours > 0.0, f"{label}: ours={ours!r} underflowed, ref={ref!r}"
-    diff = abs(math.log10(ours / ref))
-    assert diff <= P_LOG10_UNBALANCED, (
-        f"{label}: ours={ours!r}, ref={ref!r}, |log10 ratio|={diff!r} "
-        f"> {P_LOG10_UNBALANCED}"
-    )
+    裾のp値が0.0でも通ってしまう）。"""
+    assert_close(ours, ref, label, rtol=RTOL_P_VALUE, atol=0.0)
 
 
 ALL_CASES = [
@@ -168,56 +172,25 @@ ALL_CASES = [
 ]
 
 
-def _f_rtol_for(scenario: str, cov_type: str) -> float:
-    """F統計量のrtol。不均衡パネルのみ分散成分の差をcov_type別に許容する。"""
-    if scenario != _UNBALANCED_HAUSMAN_SCENARIO:
-        return RTOL_BALANCED
-    return RTOL_UNBALANCED_F[cov_type]
-
-
-def _rtols_for(scenario: str, cov_type: str) -> tuple[float, float]:
-    """(係数のrtol, se・t・p値・信頼区間のrtol)。不均衡パネルのみSwamy-Arora
-    分散成分の差を統計量・cov_type別に許容する（モジュールdoc参照）。"""
-    if scenario != _UNBALANCED_HAUSMAN_SCENARIO:
-        return RTOL_BALANCED, RTOL_BALANCED
-    return RTOL_UNBALANCED_COEF, RTOL_UNBALANCED[cov_type]
-
-
 def _check_result(
     res,
     ref: dict,
     label: str,
-    *,
-    rtol: float,
-    coef_rtol: float | None = None,
-    f_rtol: float | None = None,
-    balanced: bool = True,
 ) -> None:
-    coef_rtol = rtol if coef_rtol is None else coef_rtol
-    f_rtol = rtol if f_rtol is None else f_rtol
-    _assert_dict_close(
-        res.params, ref["coef"], f"{label}/coef", rtol=coef_rtol
-    )
-    _assert_dict_close(res.std_errors, ref["se"], f"{label}/se", rtol=rtol)
-    _assert_dict_close(
-        res.test_stats, ref["test_stats"], f"{label}/test_stats", rtol=rtol
-    )
-    for name, p_ref in ref["p_values"].items():
-        _assert_p_close(
-            res.p_values[rename_intercept(name)],
-            p_ref,
-            f"{label}/p_values/{name}",
-            balanced=balanced,
-        )
+    def p_value_check(
+        ours: dict[str, float], ref_p: dict[str, float], p_label: str
+    ) -> None:
+        for name, p_ref in ref_p.items():
+            _assert_p_close(ours[name], p_ref, f"{p_label}/{name}")
 
-    for name, (ref_lower, ref_upper) in ref["conf_int"].items():
-        our_lower, our_upper = res.conf_int[name]
-        _assert_close(
-            our_lower, ref_lower, f"{label}/conf_lower/{name}", rtol=rtol
-        )
-        _assert_close(
-            our_upper, ref_upper, f"{label}/conf_upper/{name}", rtol=rtol
-        )
+    assert_inference_close(
+        res,
+        ref,
+        label,
+        rtol=RTOL,
+        atol=ATOL,
+        p_value_check=p_value_check,
+    )
 
     # F統計量はcov_typeに連動するWald検定（plm::pwaldtest(vcov=...)の統計量と
     # t検定と同じ分母自由度から計算したp値）。
@@ -225,14 +198,9 @@ def _check_result(
         res.f_statistic,
         ref["f_statistic"],
         f"{label}/f_statistic",
-        rtol=f_rtol,
+        rtol=RTOL,
     )
-    _assert_p_close(
-        res.f_p_value,
-        ref["f_p_value"],
-        f"{label}/f_p_value",
-        balanced=balanced,
-    )
+    _assert_p_close(res.f_p_value, ref["f_p_value"], f"{label}/f_p_value")
 
 
 def _check_hausman(
@@ -240,17 +208,13 @@ def _check_hausman(
     ref: dict,
     label: str,
     *,
-    cov_type: str,
     scenario: str | None = None,
 ) -> None:
-    rtol_p_value = None
-    if scenario == _UNBALANCED_HAUSMAN_SCENARIO:
-        rtol_hausman = RTOL_HAUSMAN_UNBALANCED[cov_type]
-        rtol_p_value = RTOL_HAUSMAN_P_VALUE_UNBALANCED[cov_type]
-    elif scenario == _ILL_CONDITIONED_HAUSMAN_SCENARIO:
-        rtol_hausman = RTOL_HAUSMAN_ILL_CONDITIONED
-    else:
-        rtol_hausman = RTOL_HAUSMAN
+    rtol_hausman = (
+        RTOL_HAUSMAN_ILL_CONDITIONED
+        if scenario == _ILL_CONDITIONED_HAUSMAN_SCENARIO
+        else RTOL_HAUSMAN
+    )
     assert_close(
         res.hausman_statistic,
         ref["hausman_statistic"],
@@ -262,7 +226,7 @@ def _check_hausman(
         res.hausman_p_value,
         ref["hausman_p_value"],
         f"{label}/hausman_p_value",
-        rtol=rtol_hausman if rtol_p_value is None else rtol_p_value,
+        rtol=rtol_hausman,
         atol=ATOL_HAUSMAN_P_VALUE,
     )
     assert res.hausman_df == ref["hausman_df"], f"{label}/hausman_df"
@@ -271,17 +235,32 @@ def _check_hausman(
 # ── 凍結フィクスチャとの数値照合（合成データ） ───────────────────────
 
 
-def _re_options(cov_type: str) -> REOptions:
-    # timeはdkのときだけ指定できる（REOptionsのバリデーション）。
+def _reference_label(scenario: str) -> str:
+    """参照値の出どころ。`unbalanced`はplm自身のREではなく、`linearmodels`の
+    分散成分を与えたplm（モジュールdoc「不均衡パネル（unbalanced）の参照値」参照）。"""
+    if scenario == UNBALANCED_SCENARIO:
+        return "plm with linearmodels variance components"
+    return "plm"
+
+
+def _re_options(
+    cov_type: str,
+    *,
+    dk_time: str = "time",
+    dk_bandwidth: int | None = None,
+) -> REOptions:
+    # dk_time・dk_bandwidthはdkのときだけ指定できる（REOptionsの検証）。
     if cov_type == "dk":
-        return REOptions(cov_type="dk", dk_time="time")
+        return REOptions(
+            cov_type="dk", dk_time=dk_time, dk_bandwidth=dk_bandwidth
+        )
     return REOptions(cov_type=cov_type)
 
 
 @pytest.mark.parametrize("scenario, cov_type", ALL_CASES)
-def test_synthetic_matches_plm(crosscheck, scenario, cov_type):
+def test_matches_plm(crosscheck, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
-    x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
+    x_cols = x_columns(df)
     res = RE(
         df,
         y="y",
@@ -290,36 +269,11 @@ def test_synthetic_matches_plm(crosscheck, scenario, cov_type):
         options=_re_options(cov_type),
     ).fit()
 
-    coef_rtol, rtol = _rtols_for(scenario, cov_type)
     _check_result(
         res,
-        crosscheck[scenario][cov_type],
-        f"{scenario}/{cov_type}",
-        rtol=rtol,
-        coef_rtol=coef_rtol,
-        f_rtol=_f_rtol_for(scenario, cov_type),
-        balanced=scenario != _UNBALANCED_HAUSMAN_SCENARIO,
+        crosscheck["synthetic"][scenario][cov_type],
+        f"{scenario}/{cov_type} vs {_reference_label(scenario)}",
     )
-
-
-@pytest.mark.parametrize("cov_type", ["cluster", "dk"])
-def test_many_regressors_cluster_dk_raise_validation_error(cov_type):
-    """`many_regressors`（k=20、40エンティティ、T=6）はRE本体は成功する入力
-    だが、ハウスマン検定の補助回帰のロバスト共分散が構造的に特異になり
-    `fit()`が失敗する（cluster: 補助回帰の傾き係数`2k=40`がG=40以下、dk:
-    検定対象`k=20`が`T-1=5`超。`re-spec.md`3.7節）。このためplmの標準誤差
-    クロスチェックの対象外（`SCENARIO_COV_TYPES`）で、失敗パスのみ確認する。
-    """
-    df = pl.read_csv(DATA_DIR / "fe_many_regressors.csv")
-    x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
-    with pytest.raises(ValidationError):
-        RE(
-            df,
-            y="y",
-            x=x_cols,
-            entity="entity",
-            options=_re_options(cov_type),
-        ).fit()
 
 
 def _fit_with_cluster_column(csv_name: str, x_cols: list[str], groups):
@@ -342,17 +296,15 @@ def test_cluster_imbalanced_matches_plm_based_reference(crosscheck):
     （`run_plm_benchmark.R`モジュールコメント参照）。`stat_df`はentity数ではなく
     クラスター数`G-1`になる。バランスパネルのため機械精度で比較する。
     """
-    n = pl.read_csv(DATA_DIR / "fe_baseline_cluster_imbalanced.csv").height
-    groups = imbalanced_cluster_groups(n)
+    groups = cluster_imbalanced_groups()
     res = _fit_with_cluster_column(
-        "fe_baseline_cluster_imbalanced.csv", ["x1", "x2"], groups
+        CLUSTER_IMBALANCED_CSV, ["x1", "x2"], groups
     )
 
     _check_result(
         res,
-        crosscheck["baseline"]["cluster_imbalanced"],
+        crosscheck["synthetic"]["baseline"]["cluster_imbalanced"],
         "baseline/cluster_imbalanced",
-        rtol=RTOL_BALANCED,
     )
     assert res.stat_df == len(set(groups)) - 1
 
@@ -363,17 +315,89 @@ def test_cluster_g3_boundary_matches_plm_based_reference(crosscheck):
     （`G=2`は`test_hausman_cluster_count_equal_to_auxiliary_slopes_raises`系の
     `ValidationError`）。
     """
-    n = pl.read_csv(DATA_DIR / "fe_baseline_k1.csv").height
-    groups = [str(i % 3) for i in range(n)]
-    res = _fit_with_cluster_column("fe_baseline_k1.csv", ["x1"], groups)
+    res = _fit_with_cluster_column(K1_CSV, ["x1"], cluster_g3_groups())
 
     _check_result(
         res,
-        crosscheck["baseline"]["cluster_g3"],
+        crosscheck["synthetic"]["baseline"]["cluster_g3"],
         "baseline/cluster_g3",
-        rtol=RTOL_BALANCED,
     )
     assert res.stat_df == 2
+
+
+# ── dkの明示バンド幅 ──────────────────────────────────────────────────
+
+
+DK_BANDWIDTH_CASES = bandwidth_cases(DK_EXPLICIT_BANDWIDTHS)
+
+
+@pytest.mark.parametrize("scenario, bandwidth", DK_BANDWIDTH_CASES)
+def test_dk_explicit_bandwidth_matches_plm(crosscheck, scenario, bandwidth):
+    """`dk_bandwidth`を明示指定した場合の標準誤差・推論統計量も
+    `vcovSCC(maxlag=bandwidth)`と機械精度で一致する。
+
+    参照値は、balancedではplm自身のRE、`unbalanced`では`linearmodels`の分散成分
+    を与えて準偏差変換したデータへのplmの`vcovSCC`（モジュールdoc参照）。後者は
+    係数・共分散行列・小標本補正までをplmが検証し、θの式・傾きだけのWald F・
+    t検定への変換は手書きなので、検証できるのはバンド幅の扱いと小標本補正に
+    限られる（等価性は生成時にplm自身の分散成分で確認済み）。バンド幅の扱いは
+    wagepan（実データ）のplm自身のREでも確かめている。"""
+    df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
+    res = RE(
+        df,
+        y="y",
+        x=["x1", "x2"],
+        entity="entity",
+        options=_re_options("dk", dk_bandwidth=bandwidth),
+    ).fit()
+
+    assert res.dk_bandwidth_used == bandwidth
+    _check_result(
+        res,
+        crosscheck["synthetic"][scenario][DK_EXPLICIT_BANDWIDTH_KEY][
+            str(bandwidth)
+        ],
+        f"{scenario}/dk/bandwidth={bandwidth} vs {_reference_label(scenario)}",
+    )
+
+
+# ── 境界値（dkの時点数） ──────────────────────────────────────────────
+
+
+def _fit_dk_three_periods():
+    return RE(
+        dk_three_periods_frame(),
+        y="y",
+        x=["x1", "x2"],
+        entity="entity",
+        options=_re_options("dk"),
+    ).fit()
+
+
+def test_dk_three_periods_matches_plm(crosscheck):
+    """Driscoll-Kraayの時点数`T = k+1`（k=2、分母自由度`T-1 = k`）の境界の
+    成功パス。REは`fit()`のハウスマン検定の対象数`k`に対し`T > k`が必要で、
+    `T = 3`が`k = 2`での最小の時点数（`T <= k`は`ValidationError`、
+    `test_hausman_dk_too_few_periods_raises`）。"""
+    res = _fit_dk_three_periods()
+
+    assert res.stat_df == 2
+    _check_result(
+        res,
+        crosscheck["synthetic"]["baseline"]["dk_three_periods"],
+        "baseline/dk_three_periods",
+    )
+
+
+def test_dk_three_periods_hausman_matches_plm(crosscheck):
+    """`T = k+1`境界のハウスマン検定（補助回帰の傾き`2k`個ではなく検定対象
+    `k`個に対しDK共分散のrank`T-1`が足りるかが境界を決める。`re-spec.md`
+    3.7節）。"""
+    _check_hausman(
+        _fit_dk_three_periods(),
+        crosscheck["synthetic"]["baseline"]["dk_three_periods_hausman"],
+        "baseline/dk_three_periods",
+    )
 
 
 # ── 凍結フィクスチャとの数値照合（実データ: Wooldridge wagepan） ───────
@@ -382,27 +406,26 @@ def test_cluster_g3_boundary_matches_plm_based_reference(crosscheck):
 @pytest.mark.parametrize("cov_type", WAGEPAN_COV_TYPES)
 def test_wagepan_matches_plm(crosscheck, cov_type):
     df = load_wooldridge_dataset("wagepan")
-    options = REOptions(cov_type=cov_type)
+    options = _re_options(cov_type, dk_time=WAGEPAN_TIME)
     res = RE(
         df, y=WAGEPAN_Y, x=WAGEPAN_X, entity=WAGEPAN_ENTITY, options=options
     ).fit()
 
     _check_result(
         res,
-        crosscheck["wagepan"][cov_type],
+        crosscheck["wooldridge"]["wagepan"][cov_type],
         f"wagepan/{cov_type}",
-        rtol=RTOL_BALANCED,
     )
 
 
-# ── ハウスマン検定（RE本体のcov_typeに連動、plm::phtest(method="aux", vcov=...)） ──
+# ── ハウスマン検定（RE本体のcov_typeに連動、plm::phtest(method="aux", vcov=...)。unbalancedは分散成分を与えた補助回帰） ──
 
 
 @pytest.mark.parametrize("cov_type", HAUSMAN_COV_TYPES)
 @pytest.mark.parametrize("scenario", NUMERIC_SCENARIOS)
-def test_synthetic_hausman_matches_plm(crosscheck, scenario, cov_type):
+def test_hausman_matches_plm(crosscheck, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
-    x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
+    x_cols = x_columns(df)
     model = RE(
         df,
         y="y",
@@ -410,7 +433,7 @@ def test_synthetic_hausman_matches_plm(crosscheck, scenario, cov_type):
         entity="entity",
         options=_re_options(cov_type),
     )
-    ref = crosscheck[scenario][HAUSMAN_KEY][cov_type]
+    ref = crosscheck["synthetic"][scenario][HAUSMAN_KEY][cov_type]
     if ref is None:
         # ロバスト共分散が構造的に特異でplmに参照値が無いケース
         # （`generate_re_crosscheck_fixtures.py`の`_STRUCTURALLY_SINGULAR`）。
@@ -423,8 +446,7 @@ def test_synthetic_hausman_matches_plm(crosscheck, scenario, cov_type):
     _check_hausman(
         model.fit(),
         ref,
-        f"{scenario}/{cov_type}",
-        cov_type=cov_type,
+        f"{scenario}/{cov_type} vs {_reference_label(scenario)}",
         scenario=scenario,
     )
 
@@ -443,18 +465,17 @@ def test_wagepan_hausman_matches_plm(crosscheck, cov_type):
 
     _check_hausman(
         res,
-        crosscheck["wagepan"][HAUSMAN_KEY][cov_type],
+        crosscheck["wooldridge"]["wagepan"][HAUSMAN_KEY][cov_type],
         f"wagepan/{cov_type}",
-        cov_type=cov_type,
     )
 
 
-@pytest.mark.parametrize("bandwidth", HAUSMAN_DK_BANDWIDTHS)
-@pytest.mark.parametrize("scenario", HAUSMAN_DK_BANDWIDTH_SCENARIOS)
+@pytest.mark.parametrize("scenario, bandwidth", DK_BANDWIDTH_CASES)
 def test_hausman_dk_explicit_bandwidth_matches_plm(
     crosscheck, scenario, bandwidth
 ):
-    """`dk_bandwidth`を明示指定した場合も`vcovSCC(maxlag=bandwidth)`と一致する。"""
+    """`dk_bandwidth`を明示指定した場合も`vcovSCC(maxlag=bandwidth)`と一致する。
+    `unbalanced`でもバンド幅2と3（統計量の差は約2%）を判別できる。"""
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
     res = RE(
         df,
@@ -468,9 +489,10 @@ def test_hausman_dk_explicit_bandwidth_matches_plm(
 
     _check_hausman(
         res,
-        crosscheck[scenario][HAUSMAN_DK_BANDWIDTH_KEY][str(bandwidth)],
-        f"{scenario}/dk/bandwidth={bandwidth}",
-        cov_type="dk",
+        crosscheck["synthetic"][scenario][HAUSMAN_DK_BANDWIDTH_KEY][
+            str(bandwidth)
+        ],
+        f"{scenario}/dk/bandwidth={bandwidth} vs {_reference_label(scenario)}",
         scenario=scenario,
     )
 
@@ -527,7 +549,13 @@ def test_hausman_cluster_count_equal_to_auxiliary_slopes_raises():
     `G <= 2k`（境界ちょうど）のためfit()が`ValidationError`で失敗する。
     """
     df = _tiny_panel(n_entities=4, n_periods=6)
-    with pytest.raises(ValidationError, match="Hausman"):
+    with raises_error(
+        ErrorCode.CLUSTER_COUNT_NOT_ABOVE_SLOPES,
+        n_clusters=4,
+        n_slopes=4,
+        min_clusters=5,
+        stage="HAUSMAN_REGRESSION",
+    ):
         RE(
             df,
             y="y",
@@ -551,11 +579,12 @@ def test_hausman_dk_too_few_periods_raises():
     fit()が補助回帰を待たず`ValidationError`で失敗する。
     """
     df = _tiny_panel(n_entities=20, n_periods=2)
-    with pytest.raises(
-        ValidationError,
-        match=escaped(
-            msgs.INSUFFICIENT_DK_PERIODS_FOR_INFERENCE, t_periods=2, q=2
-        ),
+    with raises_error(
+        ErrorCode.DK_PERIODS_NOT_ABOVE_COEFFICIENTS,
+        n_periods=2,
+        n_coefficients=2,
+        min_periods=3,
+        stage="OVERALL_F_TEST",
     ):
         RE(
             df,

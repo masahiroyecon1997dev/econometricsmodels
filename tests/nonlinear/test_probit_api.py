@@ -21,9 +21,12 @@ from statistics import NormalDist
 
 import _binary_choice_checks as _checks
 import pytest
+from _helpers import CASE_SPELLINGS
 from econometricsmodels import Probit, ProbitOptions, ProbitResults
 
-# ── 成功パス・結果型 ──────────────────────────────────────────────
+from benchmark.nonlinear.constants import MLE_COV_TYPES, MLE_SOLVERS
+
+# ── 成功パス・結果型 ──────────────────────────────────────────────────
 
 
 def test_fit_succeeds_and_returns_probit_results(binary_dataset):
@@ -38,11 +41,15 @@ def test_default_options_use_classical_and_converge(binary_dataset):
     )
 
 
-# ── API構造 ──────────────────────────────────────────────────────
+# ── API構造 ───────────────────────────────────────────────────────────
 
 
-def test_coef_table_structure(binary_dataset):
-    _checks.check_coef_table_structure(binary_dataset, Probit)
+def test_param_names_include_const_first(binary_dataset):
+    _checks.check_param_names_include_const_first(binary_dataset, Probit)
+
+
+def test_params_table_structure(binary_dataset):
+    _checks.check_params_table_structure(binary_dataset, Probit)
 
 
 def test_conf_int_structure(binary_dataset):
@@ -55,35 +62,24 @@ def test_params_std_errors_test_stats_p_values_share_keys(binary_dataset):
     )
 
 
-def test_n_obs_matches_dataset_size(binary_dataset):
-    _checks.check_n_obs_matches_dataset_size(binary_dataset, Probit)
+def test_n_obs_and_dep_var_name(binary_dataset):
+    _checks.check_n_obs_and_dep_var_name(binary_dataset, Probit)
 
 
-def test_dep_var_name(binary_dataset):
-    _checks.check_dep_var_name(binary_dataset, Probit)
+# ── オプションの反映 ──────────────────────────────────────────────────
 
 
-def test_param_names_include_const_first(binary_dataset):
-    _checks.check_param_names_include_const_first(binary_dataset, Probit)
-
-
-# ── オプションの反映 ──────────────────────────────────────────────
 #
 # cov_type 以外の ProbitOptions フィールド（solver・include_intercept・
 # confidence_level・raise_on_non_convergence）が、engine_pybind 側の
 # 文字列パース・列抽出・分岐ロジックを経て正しく反映されることを確認する。
 
 
-@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
-def test_method_option_converges_to_same_params(binary_dataset, solver):
-    _checks.check_method_option_converges_to_same_params(
-        binary_dataset, Probit, ProbitOptions, solver
-    )
-
-
-def test_include_intercept_false_omits_const_and_converges(binary_dataset):
-    _checks.check_include_intercept_false_omits_const_and_converges(
-        binary_dataset, Probit, ProbitOptions
+@pytest.mark.parametrize("spelling", CASE_SPELLINGS)
+@pytest.mark.parametrize("cov_type", MLE_COV_TYPES)
+def test_cov_type_is_case_insensitive(binary_dataset, cov_type, spelling):
+    _checks.check_cov_type_is_case_insensitive(
+        binary_dataset, Probit, ProbitOptions, cov_type, spelling
     )
 
 
@@ -93,9 +89,28 @@ def test_confidence_level_changes_interval_width(binary_dataset):
     )
 
 
-@pytest.mark.parametrize(
-    "cov_type", ["classical", "opg", "hc0", "hc1", "cluster"]
-)
+def test_include_intercept_false_omits_const_and_converges(binary_dataset):
+    _checks.check_include_intercept_false_omits_const_and_converges(
+        binary_dataset, Probit, ProbitOptions
+    )
+
+
+@pytest.mark.parametrize("solver", MLE_SOLVERS)
+def test_solver_option_converges(binary_dataset, solver):
+    _checks.check_solver_option_converges(
+        binary_dataset, Probit, ProbitOptions, solver
+    )
+
+
+@pytest.mark.parametrize("spelling", CASE_SPELLINGS)
+@pytest.mark.parametrize("solver", MLE_SOLVERS)
+def test_solver_is_case_insensitive(binary_dataset, solver, spelling):
+    _checks.check_solver_is_case_insensitive(
+        binary_dataset, Probit, ProbitOptions, solver, spelling
+    )
+
+
+@pytest.mark.parametrize("cov_type", MLE_COV_TYPES)
 def test_raise_on_non_convergence_false_returns_result_without_raising(
     binary_dataset, cov_type
 ):
@@ -104,69 +119,15 @@ def test_raise_on_non_convergence_false_returns_result_without_raising(
     )
 
 
-def test_cov_type_label(binary_dataset):
-    _checks.check_cov_type_label(binary_dataset, Probit, ProbitOptions)
+# ── predict() ─────────────────────────────────────────────────────────
 
 
-def test_method_label(binary_dataset):
-    _checks.check_method_label(binary_dataset, Probit, ProbitOptions)
+def test_predict_returns_probabilities(binary_dataset):
+    _checks.check_predict_returns_probabilities(binary_dataset, Probit)
 
 
-@pytest.mark.parametrize(
-    "solver, expected_label",
-    [
-        ("NEWTON", "newton"),
-        ("Newton", "newton"),
-        ("BFGS", "bfgs"),
-        ("Bfgs", "bfgs"),
-        ("LBFGS", "lbfgs"),
-        ("Lbfgs", "lbfgs"),
-    ],
-)
-def test_method_is_case_insensitive(binary_dataset, solver, expected_label):
-    _checks.check_method_is_case_insensitive(
-        binary_dataset, Probit, ProbitOptions, solver, expected_label
-    )
-
-
-@pytest.mark.parametrize(
-    "cov_type, expected_label",
-    [
-        ("CLASSICAL", "classical"),
-        ("Classical", "classical"),
-        ("OPG", "opg"),
-        ("Opg", "opg"),
-        ("HC0", "hc0"),
-        ("Hc1", "hc1"),
-        ("CLUSTER", "cluster"),
-    ],
-)
-def test_cov_type_is_case_insensitive(
-    binary_dataset, cov_type, expected_label
-):
-    _checks.check_cov_type_is_case_insensitive(
-        binary_dataset, Probit, ProbitOptions, cov_type, expected_label
-    )
-
-
-@pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
-def test_nonrobust_is_rejected(binary_dataset, cov_type):
-    _checks.check_nonrobust_is_rejected(
-        binary_dataset, Probit, ProbitOptions, cov_type
-    )
-
-
-# ── predict() ────────────────────────────────────────────────────
-
-
-def test_predict_returns_row_oriented_probabilities(binary_dataset):
-    _checks.check_predict_returns_row_oriented_probabilities(
-        binary_dataset, Probit
-    )
-
-
-def test_predict_new_data_returns_row_oriented_probabilities(binary_dataset):
-    _checks.check_predict_new_data_returns_row_oriented_probabilities(
+def test_predict_new_data_returns_probabilities(binary_dataset):
+    _checks.check_predict_new_data_returns_probabilities(
         binary_dataset, Probit
     )
 
@@ -177,7 +138,7 @@ def test_predict_with_include_intercept_false_and_x_named_const():
     )
 
 
-# ── augment() ────────────────────────────────────────────────────
+# ── augment() ─────────────────────────────────────────────────────────
 
 
 def test_augment_none_returns_training_data_with_probability_column(
@@ -202,7 +163,7 @@ def test_augment_without_intercept_matches_predict():
     )
 
 
-# ── pred_table() ─────────────────────────────────────────────────
+# ── pred_table() ──────────────────────────────────────────────────────
 
 
 def test_pred_table_default_threshold_sums_to_n_obs(binary_dataset):
@@ -217,7 +178,7 @@ def test_pred_table_actual_counts_invariant_to_threshold(binary_dataset):
     )
 
 
-# ── marginal_effects() ────────────────────────────────────────────
+# ── marginal_effects() ────────────────────────────────────────────────
 
 
 def test_marginal_effects_default_excludes_intercept(binary_dataset):
@@ -234,7 +195,17 @@ def test_marginal_effects_mean_and_median_differ_from_overall(
     )
 
 
-def test_marginal_effects_at_is_case_insensitive(binary_dataset):
+@pytest.mark.parametrize("at", ["overall", "mean", "median"])
+@pytest.mark.parametrize("spelling", CASE_SPELLINGS)
+def test_marginal_effects_at_is_case_insensitive(binary_dataset, at, spelling):
     _checks.check_marginal_effects_at_is_case_insensitive(
-        binary_dataset, Probit
+        binary_dataset, Probit, at, spelling
+    )
+
+
+def test_marginal_effects_confidence_level_is_independent_of_fit(
+    binary_dataset,
+):
+    _checks.check_marginal_effects_confidence_level_is_independent_of_fit(
+        binary_dataset, Probit, ProbitOptions
     )

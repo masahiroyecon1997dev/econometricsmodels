@@ -38,9 +38,15 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-from _assertions import assert_close, assert_dict_close
+from _assertions import (
+    assert_close,
+    assert_dict_close,
+    assert_fields_close,
+    assert_inference_close,
+)
 from _constants import DATA_DIR
 from _helpers import load_wooldridge_dataset
+from _panel_helpers import x_columns
 from _tolerances import TOLERANCES
 from econometricsmodels import FE, FEOptions
 
@@ -85,45 +91,24 @@ def fixtures() -> dict:
 
 _assert_close = partial(assert_close, rtol=RTOL, atol=ATOL)
 _assert_dict_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
+_assert_fields_close = partial(assert_fields_close, rtol=RTOL, atol=ATOL)
 
 
 def _check_result(
     res, ref: dict, label: str, *, check_r_squared_within: bool
 ) -> None:
-    _assert_dict_close(res.params, ref["coef"], f"{label}/coef")
-    _assert_dict_close(res.std_errors, ref["se"], f"{label}/se")
-    _assert_dict_close(
-        res.test_stats, ref["test_stats"], f"{label}/test_stats"
-    )
-    _assert_dict_close(res.p_values, ref["p_values"], f"{label}/p_values")
-
-    for name, (ref_lower, ref_upper) in ref["conf_int"].items():
-        our_lower, our_upper = res.conf_int[name]
-        _assert_close(our_lower, ref_lower, f"{label}/conf_lower/{name}")
-        _assert_close(our_upper, ref_upper, f"{label}/conf_upper/{name}")
+    assert_inference_close(res, ref, label, rtol=RTOL, atol=ATOL)
 
     assert res.n_obs == ref["n_obs"], f"{label}/n_obs"
     assert res.df_resid == ref["df_resid"], f"{label}/df_resid"
     assert res.df_model == ref["df_model"], f"{label}/df_model"
     assert res.n_entities == ref["n_entities"], f"{label}/n_entities"
 
-    _assert_close(res.f_statistic, ref["f_statistic"], f"{label}/f_statistic")
-    _assert_close(res.f_p_value, ref["f_p_value"], f"{label}/f_p_value")
+    _assert_fields_close(res, ref, ("f_statistic", "f_p_value"), label)
     if check_r_squared_within:
-        _assert_close(
-            res.r_squared_within,
-            ref["r_squared_within"],
-            f"{label}/r_squared_within",
-        )
-    _assert_close(
-        res.r_squared_between,
-        ref["r_squared_between"],
-        f"{label}/r_squared_between",
-    )
-    _assert_close(
-        res.r_squared_overall,
-        ref["r_squared_overall"],
-        f"{label}/r_squared_overall",
+        _assert_fields_close(res, ref, ("r_squared_within",), label)
+    _assert_fields_close(
+        res, ref, ("r_squared_between", "r_squared_overall"), label
     )
 
 
@@ -133,13 +118,13 @@ def _check_result(
 @pytest.mark.parametrize("scenario, cov_type", ONE_WAY_CASES)
 def test_matches_linearmodels_one_way(fixtures, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
-    x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
+    x_cols = x_columns(df)
     options = FEOptions(cov_type=cov_type)
     res = FE(df, y="y", x=x_cols, entity="entity", options=options).fit()
 
     _check_result(
         res,
-        fixtures[scenario]["one_way"][cov_type],
+        fixtures["synthetic"][scenario]["one_way"][cov_type],
         f"{scenario}/one_way/{cov_type}",
         check_r_squared_within=True,
     )
@@ -148,13 +133,13 @@ def test_matches_linearmodels_one_way(fixtures, scenario, cov_type):
 @pytest.mark.parametrize("scenario, cov_type", TWO_WAY_CASES)
 def test_matches_linearmodels_two_way(fixtures, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
-    x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
+    x_cols = x_columns(df)
     options = FEOptions(cov_type=cov_type, time="time")
     res = FE(df, y="y", x=x_cols, entity="entity", options=options).fit()
 
     _check_result(
         res,
-        fixtures[scenario]["two_way"][cov_type],
+        fixtures["synthetic"][scenario]["two_way"][cov_type],
         f"{scenario}/two_way/{cov_type}",
         check_r_squared_within=False,
     )
@@ -172,7 +157,7 @@ def test_boundary_df1_one_way_matches_linearmodels(fixtures):
 
     _check_result(
         res,
-        fixtures["baseline_df1"]["one_way"],
+        fixtures["synthetic"]["baseline_df1"]["one_way"],
         "baseline_df1/one_way",
         check_r_squared_within=True,
     )
@@ -189,7 +174,7 @@ def test_boundary_df1_two_way_matches_linearmodels(fixtures):
 
     _check_result(
         res,
-        fixtures["baseline_df1"]["two_way"],
+        fixtures["synthetic"]["baseline_df1"]["two_way"],
         "baseline_df1/two_way",
         check_r_squared_within=False,
     )
@@ -208,7 +193,7 @@ def test_wagepan_one_way_matches_linearmodels(fixtures, cov_type):
 
     _check_result(
         res,
-        fixtures["wagepan"]["one_way"][cov_type],
+        fixtures["wooldridge"]["wagepan"]["one_way"][cov_type],
         f"wagepan/one_way/{cov_type}",
         check_r_squared_within=True,
     )
@@ -224,7 +209,7 @@ def test_wagepan_two_way_matches_linearmodels(fixtures, cov_type):
 
     _check_result(
         res,
-        fixtures["wagepan"]["two_way"][cov_type],
+        fixtures["wooldridge"]["wagepan"]["two_way"][cov_type],
         f"wagepan/two_way/{cov_type}",
         check_r_squared_within=False,
     )

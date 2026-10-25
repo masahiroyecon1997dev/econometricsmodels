@@ -13,7 +13,14 @@ import json
 from pathlib import Path
 
 from benchmark.common import freeze_scenarios, run_freeze_cli
-from benchmark.panel.datasets import SCENARIOS, generate_fe_dataset
+from benchmark.panel.cluster_cases import CLUSTER_IMBALANCED_SUFFIX, K1_SUFFIX
+from benchmark.panel.datasets import (
+    SCENARIOS,
+    generate_fe_dataset,
+    re_equal_counts_shifted_time_panel,
+    re_two_way_small_panel,
+    re_zero_variance_component_panels,
+)
 
 # df_resid=1境界（1-way）成功パス専用。SCENARIOSには追加せず、baselineを
 # n_entities=3, n_periods=2, k=2でオーバーライドした専用データとして固定する
@@ -73,8 +80,8 @@ def freeze(output_dir: Path) -> None:
         FE_CLUSTER_IMBALANCED_SCENARIOS,
         "fe",
         true_betas,
-        filename_suffix="_cluster_imbalanced",
-        key_suffix="_cluster_imbalanced",
+        filename_suffix=CLUSTER_IMBALANCED_SUFFIX,
+        key_suffix=CLUSTER_IMBALANCED_SUFFIX,
         n_entities=20,
         n_periods=10,
     )
@@ -84,9 +91,17 @@ def freeze(output_dir: Path) -> None:
         FE_CLUSTER_G2_SCENARIOS,
         "fe",
         true_betas,
-        filename_suffix="_k1",
-        key_suffix="_k1",
+        filename_suffix=K1_SUFFIX,
+        key_suffix=K1_SUFFIX,
         k=1,
+    )
+    # 2-way REの手計算・plm照合用の小さな手作りパネル（乱数ではないため真の係数は無い）。
+    re_two_way_small_panel().write_csv(output_dir / "re_two_way_small.csv")
+    # 分散成分が0に切り上げられるRE用パネル（`variance_method`のplm照合用）。
+    for name, panel in re_zero_variance_component_panels().items():
+        panel.write_csv(output_dir / f"{name}.csv")
+    re_equal_counts_shifted_time_panel().write_csv(
+        output_dir / "re_equal_counts_shifted_time.csv"
     )
     (output_dir / "fe_true_beta.json").write_text(
         json.dumps(true_betas, indent=2)

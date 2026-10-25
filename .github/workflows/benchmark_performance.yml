@@ -44,6 +44,8 @@ jobs:
         method: [ols, wls, logit, probit, iv, tobit, fe, re]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
 
@@ -51,28 +53,27 @@ jobs:
         with:
           python-version: "3.12"
 
-      # test（statsmodels / linearmodels）+ benchmark（pyarrow:
-      # polars.DataFrame.to_pandas()がリファレンス実装へ渡す前に必要）+
-      # dev（maturin）の3グループが必要。ci_python.ymlのtestグループのみとは異なる。
-      - name: uv sync (test + benchmark + dev groups)
-        run: uv sync --locked --group test --group benchmark --group dev
+      # test（statsmodels / linearmodels / pyarrow）+ dev（maturin）の2グループが必要。
+      # ci_python.ymlのtestグループのみとは異なる。
+      - name: uv sync (test + dev groups)
+        run: uv sync --locked --group test --group dev
 
       # 【最重要】必ずreleaseビルドで計測する。デフォルトの`maturin develop`（debugビルド）
       # のままだと最大140倍遅い誤った結果になることを実測済み
       # （docs/performance/ols.md「最重要の教訓」参照）。
       - name: maturin develop --release
-        run: uv run --locked --group test --group benchmark --group dev maturin develop --release
+        run: uv run --locked --group test --group dev maturin develop --release
 
       # リポジトリルートから `-m` で実行する（Initiative A のパッケージ化に伴い、
       # `benchmark.*`（DGP）・`performance.*` を PYTHONPATH 非依存で解決するため）。
       - name: compare_${{ matrix.method }}.py
         run: |
-          uv run --locked --group test --group benchmark --group dev \
+          uv run --locked --group test --group dev \
             python -m performance.compare_${{ matrix.method }} --repeats 3 --output results.json
 
       - name: render job summary
         run: |
-          uv run --locked --group test --group benchmark --group dev \
+          uv run --locked --group test --group dev \
             python -m performance.render_performance_summary results.json >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

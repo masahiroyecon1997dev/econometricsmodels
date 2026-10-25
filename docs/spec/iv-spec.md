@@ -31,6 +31,26 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   誤用も検出できる。
 - **識別の順序条件**（`len(instruments) >= len(x_endog)`）を満たさない場合は`fit()`冒頭
   （第一段階回帰の前）で`IvError::InsufficientInstruments`（`ValidationError`）にする。
+- **観測数**（`engine::iv::common::validate_observation_counts`）は`fit()`冒頭（第一段階回帰の前）で、
+  構造方程式の`n <= k`（`k = k_exog + k_endog`、定数項込み）を共通の`InsufficientObservations`で、
+  次に第一段階の`n <= l`（`l = k_exog + len(instruments)`、定数項込み）を
+  `IvError::InsufficientObservationsForFirstStage`（`ValidationError`）で拒否する。`l >= k`
+  のため構造方程式を先に報告しないと第一段階の`k`に隠れる。`n <= l`は診断のdegradeでは済まない:
+  `n = l`では第一段階が完全に当てはまり`X̂ = X`となって2SLSがOLSと一致し（GMMも
+  `W₀ = (Z'Z)⁻¹`でOLSに縮退）、`n < l`では`Z'Z`が特異になる。クラスター数が第一段階の
+  傾き係数の数以下のとき全体F検定だけを`None`にできる（3.1節）のとは異なり、`X̂`の元になる推定
+  そのものが成立しない。
+- **被説明変数が定数・完全フィット**: 切片があり`y`が全行で同じ値なら`OUTCOME_CONSTANT`
+  （`ValidationError`、`validate_outcome_not_constant`。第一段階より前に弾く）。構造残差
+  $y - X\hat\beta$（第二段階回帰の残差ではない）の平方和が`y`の総平方和の`k·ε`倍以下なら
+  `PERFECT_FIT`（`ComputationError`、判定は`ols-spec.md`3.3節と同じ`is_perfect_fit`）。GMMは
+  重み行列`S`が0になって逆行列が特異になる前に、初期推定（2SLSと同じ点推定）の構造残差で判定する。
+  第一段階は内生変数ごとの`OlsEstimator::fit_with_optional_f_test`なので、操作変数が内生変数を
+  完全に予測する（第一段階の残差が0）と、その内生変数の文脈（`stage=FIRST_STAGE`）で
+  `PERFECT_FIT`になる（診断ではなく`fit()`全体を拒否する。2SLSがOLSに一致する退化も含め、
+  標準誤差が定義できない回帰を結果に残さない）。第二段階・部分F統計量の制限モデルは判定しない
+  （`fit_auxiliary`。第二段階は`X̂`への回帰で、判定は構造残差で行う）。Wu-Hausman拡張回帰は
+  元の`y`の回帰なので判定し、完全フィットなら3.6節のとおり検定統計量だけ`None`にする。
 - **バリデーション**（`engine_pybind::iv::common::build_iv_input`）:
   - `y`/`x_exog`/`x_endog`/`instruments`間の重複列名は`ValidationError`。
   - 各ロール内部（`x_exog`/`x_endog`/`instruments`それぞれ）の重複列名も`ValidationError`。
@@ -133,8 +153,8 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   （`engine::iv::common::compute_first_stage`を共有）。
 - 弱操作変数診断・過剰識別検定・Wu-Hausman検定はいずれも`fit()`の結果本体に含める
   （別メソッド化しない）。
-- `summary()`は実装しない。python_package層（`IVResults`）の`coef_table()`は行指向
-  `list[dict]`で、キーは`param`/`coef`/`std_err`/`test_stat`/`p_value`/`conf_lower`/`conf_upper`。
+- `summary()`は実装しない。python_package層（`IVResults`）の`params_table()`は行指向
+  `list[dict]`で、キーは`param_name`/`param`/`std_error`/`test_stat`/`p_value`/`conf_lower`/`conf_upper`。
 
 ## 3. 内部実装の計算仕様
 
@@ -146,10 +166,14 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 `entity`のような常在するグルーピング列が無いため`"cluster"`をデフォルトにする根拠が無い）。
 
 - **2SLSの分散はサンドイッチ型**: `(X'PzX)^-1 X'Pz Ω Pz X (X'PzX)^-1`（`Ω`の推定方法が
-  `cov_type`で変わる）。`hc_cov_params`/`cluster_cov_params`/`hac_cov_params`
+  `cov_type`で変わる）。`hc_cov_params`/`hac_cov_params`
   （`engine/src/iv/two_sls.rs`）は`X̂`（射影後の予測値）ベースのレバレッジ・スコアで
   OLSの対応する実装と同型に計算するが、コード自体はOLS（`engine::linear::ols`）に寄せず
-  **意図的に独立実装**にしている（IVのサンドイッチ型分散計算はOLS/nonlinearどちらの既存
+  **意図的に独立実装**にしている（例外: クラスターの蓄積`Σ_g S_g S_g'`と小標本補正は、
+  OLS本体ではなく共有モジュール`shared::covariance`の`cluster_meat`/`cluster_correction`
+  を、設計行列`X̂`・構造残差`e`で呼ぶ。加算順を1か所に固定するため。HACのラグ数の解決
+  （範囲検証と既定式）も同モジュールの`resolve_hac_lags`を共有する。レバレッジ・HACの
+  カーネル計算等OLS固有の調整はここに持ち込まない）（IVのサンドイッチ型分散計算はOLS/nonlinearどちらの既存
   計算にも寄せない独立実装でよいという既存方針）。GMMのモーメント共分散行列計算
   （`gmm.rs`）も同じ理由で2SLS側と独立に実装している（`iv/CLAUDE.md`「2SLSとGMMの独立実装
   方針」参照）。
@@ -167,9 +191,18 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 - **`cov_type="cluster"`はクラスター数`G`が構造方程式の傾き係数の数`q`（`k - k_constant`）
   より多くなければならない**（`G <= q`は`CommonError::InsufficientClustersForInference`＝
   `ValidationError`。`rank(Ŝ) ≤ G-1`のためロバストWald/F（χ²）検定の`q×q`
-  部分行列が構造的に特異。`fit()`冒頭で構造方程式の`q`を使って弾く。第一段階・第二段階
-  回帰の`OlsEstimator::fit`内でも同じ検証が走るが、そちらは`FirstStageFailed`/
-  `SecondStageFailed`にラップされるため区別される）。OLS/WLS/Tobit/Logit/Probit/IVで横断
+  部分行列が構造的に特異。`fit()`冒頭で構造方程式の`q`を使って弾く。判定は
+  `engine::iv::common::validate_structural_cluster_count`に集約し、`TwoSlsEstimator::fit`/
+  `GmmEstimator::fit`冒頭と`engine_pybind`の`fit`（`compute_first_stage`より前）が共有する。
+  第二段階回帰の`OlsEstimator::fit`内でも同じ検証が走るが、そちらは
+  `SecondStageFailed`にラップされるため区別される。**構造方程式では
+  `G > q`でも、第一段階の傾き係数の数`q_first = k_exog傾き + k_instruments (>= q)`が`G`以下の
+  ときは、第一段階の全体F検定（`first_stage()`の`f_statistic`/`f_p_value`/`f_df_num`/
+  `f_df_denom`）だけを`None`にして`fit()`は成功する**（第一段階のロバストWald/F検定が構造的に
+  特異になるが、診断でしかなく、係数・標準誤差・弱操作変数診断は有効なため。構造方程式の結果は
+  全体Wald検定を必須の出力に持つので、`G <= q`は上のとおり拒否したまま）。第一段階の推定は
+  `OlsEstimator::fit_with_optional_f_test`（`G <= q`でも`G >= 2`ならF検定だけ定義なしにして続行）
+  を使う（`compute_first_stage`）。OLS/WLS/Tobit/Logit/Probit/IVの主結果は横断
   統一。Wu-Hausman拡張回帰は`q_aug = q + k_endog`で`G <= q_aug`になりうるが、実際に使う
   末尾`k_endog`列の部分行列は`rank(Ŝ) ≤ G-1 ≥ k_endog`なら計算可能なので`wu_hausman_*`を
   `None`へdegradeする（3.6節）。
@@ -281,8 +314,10 @@ Sargan検定（2SLS）／Hansen J検定（GMM）を`fit()`の結果本体に含�
 - **`estimator="gmm"`では常に`None`**（`GmmEstimator`はWu-Hausman検定を実装しない）。
 - **想定内の理由で失敗した場合は`fit()`全体を失敗させず`None`にする**（`FirstStageFailed`/
   `SecondStageFailed`の"all-or-nothing"方針とは意図的に異なる）。想定内の理由は2つ:
-  (1) 第一段階残差の分散がゼロ（操作変数が内生変数を完全予測する退化ケース）で拡張回帰の
-  設計行列に分散ゼロの列が混入し特異になる、(2) 拡張回帰は第二段階より内生変数の数だけ
+  (1) 拡張回帰が完全フィット（`y`が第二段階の説明変数と第一段階残差で丸め誤差の範囲で
+  厳密に説明される。`sigma^2 = 0`でワルド統計量が定義できない）、第一段階残差が他の列と共線に
+  なり設計行列が特異になる（第一段階の残差が0になる退化ケースは第一段階が`PERFECT_FIT`で
+  先に止めるので、この経路には来ない）、(2) 拡張回帰は第二段階より内生変数の数だけ
   列が多い（`k_exog+2*k_endog`列）ため、境界的なサンプルサイズでは第二段階は成功するが
   拡張回帰は観測数不足になりうる。**それ以外の失敗（数値的なほぼ特異性等）は`None`へ
   握りつぶさず`IvError::HausmanRegressionFailed`として伝播する**（広すぎる`Err(_)`
@@ -301,43 +336,84 @@ Sargan検定（2SLS）／Hansen J検定（GMM）を`fit()`の結果本体に含�
   OLS自体が軽量という前提で許容した設計判断。
 - 返す`OLSResults.f_statistic`/`f_p_value`は`x_exog`の寄与を含む通常のOLS F検定であり、
   弱操作変数診断の部分F統計量（3.4節）とは別物。
+- **`cov_type="cluster"`でクラスター数`G`が第一段階の傾き係数の数`q_first`以下（構造方程式は
+  `G > q_struct`）のときは、その第一段階回帰の`f_statistic`/`f_p_value`/`f_df_num`/`f_df_denom`が
+  `None`になる**（2章・3.1節）。標準誤差・t検定・信頼区間は`G-1`自由度で計算され、弱操作変数F
+  （3.4節）は古典的なネストF検定で`cov_type`・`G`に依存しないため値が出る。ただしこの
+  弱操作変数Fは等分散前提の統計量で、クラスターが少ないときにクラスターロバストな関連性の
+  根拠にはならない（`G`の大小によらない既存の限界）。なお`G`が小さいときのクラスターロバスト
+  標準誤差は下方バイアスが大きく信頼性が低い（`G-1`自由度のt分布を使うのはその緩和にすぎない）。
+  この領域の第一段階は診断として読み、F検定が`None`になる＝標準誤差が十分に信頼できる、
+  という意味ではない。
 
 ### 3.8 engine_pybind: エラー変換
 
 `engine::iv::common::IvError` → `PyErr`対応（`iv_error_to_pyerr`、`engine_pybind/src/iv/
 common.rs`）:
 
-| `IvError` | Python例外 |
-|---|---|
-| `Common(CommonError)` | `common_error_to_pyerr`に委譲 |
-| `InsufficientInstruments` / `InvalidHacLags` / `InvalidGmmMaxIter` / `InvalidGmmTol` / `InsufficientClustersForWeightMatrix` | `ValidationError` |
-| `GmmNonConvergence` | `ComputationError`（`MleError::NonConvergence`と同じ分類: パラメータの不正ではなく計算過程で発覚した問題） |
-| `FirstStageFailed` / `SecondStageFailed` / `HausmanRegressionFailed` | 内部の`LeastSquaresError`が`ComputationError`相当かどうかで`ComputationError`/`ValidationError`に分岐（`least_squares_error_is_computation_error`） |
+| `IvError` | `code`（カタログ） | 例外 |
+|---|---|---|
+| `Common(CommonError)`（`InvalidHacLags`を含む） | `CommonError`と同じ | `CommonError`と同じ |
+| `InsufficientInstruments` | `INSUFFICIENT_INSTRUMENTS` | `ValidationError` |
+| `InsufficientObservationsForFirstStage` | `INSUFFICIENT_OBSERVATIONS_FOR_FIRST_STAGE` | `ValidationError` |
+| `InsufficientClustersForWeightMatrix` | `GMM_WEIGHT_CLUSTER_COUNT_TOO_SMALL`（`min_clusters`は丁度識別で`l+1`、過剰識別で`l`） | `ValidationError` |
+| `InvalidGmmMaxIter` / `InvalidGmmTol` | `GMM_MAX_ITER_OUT_OF_RANGE` / `TOLERANCE_NOT_POSITIVE_FINITE` | `ValidationError` |
+| `GmmNonConvergence` | `NOT_CONVERGED`（`iter_option="gmm_max_iter"`。`MleError::NonConvergence`と同じ分類: パラメータの不正ではなく計算過程で発覚した問題） | `ComputationError` |
+| `FirstStageFailed` / `SecondStageFailed` / `HausmanRegressionFailed` | 内部の`LeastSquaresError`の`code`に`stage`（`FIRST_STAGE`・`SECOND_STAGE`・`WU_HAUSMAN_REGRESSION`）を付ける（`stage`を付けてよい`code`のみ） | `code`のクラスで決まる |
 
 `IvError`（`engine`）・`PyErr`（`pyo3`）はどちらもこのクレート外定義の型のためorphan ruleに
-より`impl From`は書けず、関数として実装し`.map_err(iv_error_to_pyerr)?`で変換する。
+より`impl From`は書けず、関数として実装し`.map_err(iv_error_to_pyerr)?`で変換する
+（`ErrorInfo::report()`の`code`・`params`から例外を作る）。
 
 ## 4. テスト
 
 - **Python主リファレンス**: `linearmodels`（`IV2SLS`＝2SLS、`IVGMM`＝GMM）。
-- **Rクロスチェック**: `ivreg`（2SLSのみ、GMMは非対応）。`classical`/`hc0`〜`hc3`/
+- **Rクロスチェック（2SLS）**: `ivreg`。`classical`/`hc0`〜`hc3`/
   `cluster`/`hac`の`vcov`を`coeftest()`経由でそのまま使える。`summary(model,
   diagnostics=TRUE)`は`vcov.`に行列を渡すと常にclassical（iid）vcovにフォールバックする
   仕様のため、`weak_instrument_f_statistics`/`overid_statistic`（設計自体が常にclassical）
   はcov_typeによらず一律クロスチェックできる。`wu_hausman_statistic`/`wu_hausman_p_value`も
   `summary(diagnostics=TRUE, vcov.=<関数>)`でcov_type別のロバスト共分散を診断表に反映できるため、
   全cov_typeでクロスチェックする（`benchmark/iv/references/run_ivreg.R`参照）。ただしclusterの
-  p値のみ、`ivreg`のWald検定がF分布の分母自由度にクラスター数を反映しないため一致せず、統計量のみ
-  比較する。
-- **GMMのRクロスチェックは例外的に省略する**（`ivreg`が対応していないため）。
-  「Python主リファレンス＋Rクロスチェック」の2系統検証の例外であることをテスト実装時に
-  明記する（RE のハウスマン検定と同型の例外規定）。
-- **許容誤差**: 相対誤差1e-8＋絶対誤差フロア1e-10（`tests/_tolerances.py`の`iv_reference`）を
+  p値のみ、`ivreg`のWald検定がF分布の分母自由度にクラスター数を反映しないため一致しない。
+  統計量はそのまま比較し、p値は`ivreg`の統計量とF(`n_endog`, `G-1`)から再計算して本実装と比較する
+  （`tests/iv/test_iv_crosscheck.py`の`_check_result`の`n_clusters`）。
+- **Rクロスチェック（GMM）**: `ivreg`はGMM非対応のため、R `momentfit`（1.0、`gmm`パッケージの
+  後継）を使う（`benchmark/iv/references/run_momentfit.R`、フィクスチャ
+  `iv_gmm_crosscheck.json`、テスト`tests/iv/test_iv_gmm_crosscheck.py`）。`gmm`パッケージは
+  1段階目の重みが単位行列で固定され、linearmodels・本実装の`(Z'Z)⁻¹`と揃えられないため
+  採用しない。`iv_gmm.json`（linearmodels）と同じ構成（`NUMERIC_SCENARIOS`×classical重み×
+  cov_type、baselineの他の重み・重みと共分散の組み合わせ、過剰識別の棄却シナリオ（`invalid_instrument`）の
+  robust重み、複数内生変数（`MULTI_ENDOG_SCENARIOS`、classical以外の重みは`MULTI_ENDOG_OTHER_WEIGHT_TYPES`）、
+  Wooldridge `card`）を、
+  係数・標準誤差・z値・p値・信頼区間・`n_obs`/`df_resid`・ロバストWald・Hansen Jで照合する。
+  **対象外**: hc2/hc3（linearmodels・momentfitとも非対応で、GMMのHC2/HC3は外部参照なし）、
+  反復GMM・1段階GMM（フィクスチャがclassical重みのみで、反復しても2SLSと同じ結果になる。
+  収束判定も実装ごとに異なる）、弱操作変数F・R²（2SLSのivregクロスチェックと重複、
+  momentfitは出さない）。
+  - **momentfitを揃えるための設定と、揃えないと一致しない原因**（`run_momentfit.R`のヘッダ
+    コメントが実装の正本。実測で確定し、全ケース相対誤差1e-10以下で一致）:
+
+    | 現象 | 原因 | Rスクリプトでの対処 |
+    |---|---|---|
+    | HAC・クラスター重みで係数が合わない（HACで約1e-2） | momentfit 1.0のバグ。`evalWeights`はHAC・クラスターで`chol(pivot=TRUE)`の因子を保持し、`quadra`が`attr(w, "pivot")`でピボットを取ろうとするが、実際の属性は`w@w`側に付いているためピボットが失われる（qr型のiid・MDSは`w@w$pivot`を使うため影響しない） | 2SLS → `S = vcov(model, θ̂_2SLS)` → `gmmFit(model, weights = solve(S), type = "onestep")`と重み行列を明示的に渡す |
+    | 頑健な重みで係数が約1e-6ずれる | 既定の`initW = "ident"`（1段階目が単位行列）、`centeredVcov = TRUE`（モーメントを中心化） | `initW = "tsls"`、`centeredVcov = FALSE` |
+    | Hansen Jが約0.2%ずれる | `specTest`の既定は最終推定値の残差で重みを作り直す。linearmodels・本実装は推定に使った重みを使う | `specTest(fit, wObj = <推定時の重み>)` |
+    | HAC重みのカーネルが合わない | momentfitの`bw`はBartlettの分母で`bw = ラグ数 + 1`。既定は`prewhite = 1`、QSカーネル、`adjust = TRUE`（Sを`n/(n-q)`倍。係数は不変だがJが変わる） | `kernel = "Bartlett"`、`bw = lag + 1`、`prewhite = FALSE`、`adjust = FALSE` |
+    | classical共分散の標準誤差が約0.3%ずれる | momentfitの`iid`は`σ̂² = sd(e)²`（中心化して`n-1`で割る）、本実装・linearmodelsは中心化した残差二乗和を`n-k`で割る（`debiased=True`） | 一般サンドイッチ（`sandwich = TRUE`、meatを`iid`モデルで計算）の標準誤差に`√((n-1)/(n-k))`を掛ける |
+    | cluster共分散の標準誤差が約5.6%ずれる | linearmodelsの補正は`G/(G-1)·(n-1)/(n-k)`（Stata流）、momentfitは`G/(G-1)`のみ | `cadjust = TRUE`に加え`√((n-1)/(n-k))`を掛ける |
+    | hc1・hac共分散 | 差なし | hc1は`df.adj = TRUE`、hacは`adjust = FALSE`（同じ帯域幅） |
+
+    補正係数はスクリプト内のスカラー手計算で、独立検証として効くのは重み行列・ブレッド・
+    ミート行列本体（momentfitの計算）。z値・p値・信頼区間・ロバストWaldは係数・標準誤差・
+    共分散行列からの計算（momentfitがネイティブに出す統計量ではない）。
+  - 許容誤差は`tests/support/_tolerances_iv.py`の`iv_gmm_crosscheck`（rtol 1e-8、atol 1e-8）。
+- **許容誤差**: 相対誤差1e-8＋絶対誤差フロア1e-10（`tests/support/_tolerances_iv.py`の`iv_reference`）を
   基本。`classical`/`hc0`〜`hc1`/`cluster`/`hac`は
   `linearmodels`と(`cov_type`, `debiased`)の対応（`classical`↔(`unadjusted`,
   `debiased=True`)、`hc0`↔(`robust`, `debiased=False`)、`hc1`↔(`robust`,
   `debiased=True`)、`cluster`↔(`clustered`, `debiased=True`)、`hac`↔(`kernel`(bartlett),
-  `debiased=False`)）で`coef`/`se`が実質機械精度（実測1e-10以下）で一致する。`hc2`/
+  `debiased=False`)）で`params`/`std_errors`が実質機械精度（実測1e-10以下）で一致する。`hc2`/
   `hc3`は`linearmodels`では検証できない（`linearmodels.iv.covariance`にhc2/hc3相当が
   無い）ため、R `ivreg`+`sandwich::vcovHC(type="HC2"/"HC3")`で検証する。`f_p_value`は
   浮動小数点アンダーフローに近い極小値（1e-9〜1e-12オーダー）のケースで相対誤差比較が
@@ -345,11 +421,13 @@ common.rs`）:
 - **実データセット**: Wooldridge `card`（Card 1995、大学近接操作変数`nearc2`/`nearc4`に
   よる教育の収益率推定`lwage ~ CARD_X_EXOG + educ`）。`test_iv_reference.py`
   （linearmodels）・`test_iv_crosscheck.py`（ivreg）の両方で全`cov_type`をクロス
-  チェックする。GMMは実データセットでのRクロスチェックも対象外。
+  チェックする。GMMも同じ`card`で、`test_iv_gmm_reference.py`（linearmodels、classical重み×
+  全cov_type＋robust/hac重み×classical共分散）・`test_iv_gmm_crosscheck.py`（momentfit）の
+  両方を照合する（`card`にはクラスター列が無いためcluster重み・cluster共分散は含めない）。
 - テストファイル: `tests/iv/test_iv_api.py`（成功パスの構造・API・オプション反映）/
   `test_iv_validation.py`（`ValidationError`/`ComputationError`パス）/
   `test_iv_reference.py`（linearmodels、2SLS）/ `test_iv_gmm_reference.py`（linearmodels、
-  GMM）/ `test_iv_crosscheck.py`（R ivreg、2SLSのみ）。
+  GMM）/ `test_iv_crosscheck.py`（R ivreg、2SLS）/ `test_iv_gmm_crosscheck.py`（R momentfit、GMM）。
 
 ## 5. 未実装・未対応
 

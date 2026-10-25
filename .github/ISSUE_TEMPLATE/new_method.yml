@@ -1,0 +1,33 @@
+name: New method
+description: Suggest an estimation method that is not available yet
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Thank you for the suggestion! Every field is optional. The name of the
+        method alone is enough to start.
+  - type: input
+    id: name
+    attributes:
+      label: Method name
+  - type: textarea
+    id: use
+    attributes:
+      label: What would you use it for?
+      description: >-
+        The kind of analysis, written as concretely as you can. It helps me
+        picture how the method will be used.
+  - type: textarea
+    id: literature
+    attributes:
+      label: Reference
+      description: >-
+        A paper or a textbook chapter. Even a name or a title is fine, so I
+        can ask "is this the one you mean?"
+  - type: textarea
+    id: implementation
+    attributes:
+      label: Reference implementation
+      description: >-
+        If you know one, for example "this R package does it" or a
+        statsmodels or linearmodels function. It does not have to be exact.

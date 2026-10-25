@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "econometricsmodels"
-version = "0.8.0"
+version = "0.9.0"
 description = "Econometric estimators for scripts, pipelines, and apps, numerically verified against statsmodels, linearmodels, and R"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -14,7 +14,13 @@ authors = [
 ]
 keywords = ["econometrics", "statistics", "regression", "ols", "logit", "probit", "tobit", "instrumental-variables", "panel-data", "polars"]
 dependencies = [
-    "polars==2.0.0",
+    # 下限は、全テストが通ることを確認した最古のバージョン(ci_python.ymlのtestジョブが
+    # 同じバージョンでpytestを回す。変えるときは両方を揃える)。上限は付けない
+    # (利用者が入れているpolarsをダウングレードしないため)。1.31以下はEnum型の時点列が
+    # 静かに別の値になり、1.36以下はFloat16列を読めない。1.27以下は動かない。
+    # 拡張モジュールはRust側のpolarsクレートのFFI経由でPythonのpolarsを読むため、
+    # 新しいpolarsは開発側(uv.lock、Dependabot)で追従する。
+    "polars>=1.38.1",
 ]
 classifiers = [
     "Programming Language :: Rust",
@@ -35,7 +41,8 @@ module-name = "econometricsmodels._lib"
 python-source = "python_package"
 features = ["pyo3/extension-module"]
 # 依存クレートのライセンス一覧レポート（`cargo about generate about.hbs -o
-# THIRD-PARTY-LICENSES.html`で生成。CIには組み込まず随時手動更新する）を
+# THIRD-PARTY-LICENSES.html`で生成。更新は/releaseの手順に含め、ci_engine.ymlの
+# `licenses`ジョブが古さを検出する）を
 # 配布物（wheel/sdist）に同梱する。
 #
 # LICENSEも明示的に含める。maturinはCLI上「Including license file」と表示するが、
@@ -44,10 +51,15 @@ features = ["pyo3/extension-module"]
 # 「License-File LICENSE does not exist in distribution file」エラーになる
 # （v0.1.0初回リリース時に実際に発生・確認済み）。includeへ明示的に足すことで回避する。
 include = ["THIRD-PARTY-LICENSES.html", "LICENSE"]
+# 開発用のファイルを配布物に入れない。CLAUDE.mdは開発者向けの指示で、python_package配下の
+# ものはwheelにも入り利用者のsite-packagesに置かれる（利用者のAIエージェントに指示として
+# 読み込まれうる）。error_catalog_golden.txtはRustの単体テスト専用（`include_str!`は
+# `#[cfg(test)]`内のみ）で、ビルドには不要。
+exclude = ["**/CLAUDE.md", "**/.gitkeep", "**/error_catalog_golden.txt"]
 
 [dependency-groups]
 # CI（ci_python.yml）が使う: pytest tests / ruff check . / ruff format --check .
-# benchmark_performance.ymlもstatsmodels目的でこのグループを使う。
+# benchmark_performance.ymlも（statsmodels・pyarrow目的で）このグループを使う。
 # statsmodelsはtests/fixtures/benchmarks/のフィクスチャ生成に使った主リファレンス実装のため、
 # `==`で厳密固定する（.claude/rules/testing-policy.md「ベンチマーク値のフィクスチャ化」参照）。
 # バージョンを上げる場合はフィクスチャの再生成とセットで行うこと。
@@ -59,27 +71,27 @@ test = [
     # （`docs/spec/iv-spec.md`4章）。statsmodelsと同じ理由で`==`厳密固定。
     "linearmodels==7.0",
     "ruff==0.16.10",
-    # Wooldridge実データでのクロスチェックテスト用（tests/_helpers.pyの
-    # wooldridge_loader）。標準CIで確実に実行されるようbenchmarkグループから
-    # ここへ移した。依存はpandasのみで、statsmodels/linearmodels経由で既に
+    # Wooldridge実データでのクロスチェックテスト用（tests/support/_helpers.pyの
+    # wooldridge_loader）。標準CIで確実に実行されるよう
+    # 専用グループからここへ移した。依存はpandasのみで、statsmodels/linearmodels経由で既に
     # 間接的に入っているため追加コストはwooldridge本体のwheelのみ。実データ
     # 自体はこのパッケージのwheel内に留まりリポジトリへは再配布しないため、
-    # 下記benchmarkグループのpyarrow同様、ライセンス上の制約（実データをCSVとして
+    # 下記pyarrow同様、ライセンス上の制約（実データをCSVとして
     # 固定・再配布しない方針、testing-policy.md参照）とは無関係。
     "wooldridge==0.5.0",
-]
-# benchmark/ 配下のベンチマーク値生成・性能比較スクリプト専用（CLAUDE.md 3章
-# 「benchmark/はtests/とは別ライフサイクル」参照）。ci_python.ymlは使わない
-# （随時実行するツール）が、benchmark_performance.yml（compare_<method>.py実行用）
-# はタグpush/workflow_dispatch時にこのグループを使う。
-benchmark = [
-    # polars.DataFrame.to_pandas()が内部で要求する（各リファレンス実装アダプタ・
-    # performance/compare_*.pyがpandasに変換してリファレンス実装に渡すため）。
-    # pandas側は直接依存に含めない。
+    # polars.DataFrame.to_pandas()が内部で要求する。テストがリファレンス実装
+    # （statsmodels/linearmodels/R）へ渡すためpandasに変換する箇所と、benchmark/・
+    # performance/配下のリファレンス実装アダプタ（compare_*.py）が使う。pandas側は
+    # 直接依存に含めない。
     "pyarrow==26.0.0",
 ]
 dev = [
     "maturin==1.15.0",
+]
+# ci_python.ymlのpip-auditジョブ専用（testグループと併用して依存の脆弱性を監査する）。
+# `uvx`/`--with`で実行のたびに最新版を解決しないよう、ここへ版固定で入れる。
+audit = [
+    "pip-audit==2.10.1",
 ]
 # mkdocsドキュメント生成専用（CIでは使わない。cd_docs.ymlでのCI組み込みは別issue）。
 docs = [
@@ -94,11 +106,17 @@ docs = [
 [tool.ruff]
 line-length = 79
 
+# ruff 0.16以降はMarkdown内のPythonコードブロックも整形対象になるが、docs/配下の
+# コード例は読みやすさを優先して79桁に収めない（データ列・行末コメント等）。
+# 例の正しさはtests/cross_method/test_doc_examples.pyが実行して検証する。
+[tool.ruff.format]
+exclude = ["docs/**/*.md"]
+
 # pytest実行時にsys.pathへ載せるパス。
 # - "."   : `import benchmark.<系統>....` を1経路で解決（旧: 各テストファイルの
 #           `sys.path.insert`＋devcontainerのPYTHONPATHを全廃したもの）。
-# - "tests": `tests/` を系統別サブディレクトリ（linear/ nonlinear/ iv/）に分けた際、
-#           各テストが `from _helpers import ...` 等の裸import で共有ヘルパー
-#           （tests/_helpers.py 等）を解決できるようにする（サブディレクトリからでも1経路）。
+# - "tests/support": 共有ヘルパー・系統別ヘルパー（`tests/support/_helpers.py` 等）の置き場。
+#           `tests/` の全サブディレクトリのテストが `from _helpers import ...` 等の
+#           裸importで解決できるようにする（サブディレクトリからでも1経路）。
 [tool.pytest.ini_options]
-pythonpath = [".", "tests"]
+pythonpath = [".", "tests/support"]

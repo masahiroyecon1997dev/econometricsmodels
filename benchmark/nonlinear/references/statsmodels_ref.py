@@ -41,7 +41,7 @@ get_robustcov_results`は`HC1`指定時に`getattr(self, "cov_HC1", None)`でモ
 （`sandwich::vcovHC(glm_obj, type="HC1")`、`n/(n-k)`補正を正しく適用し本実装の
 式と一致）を主リファレンスとして扱う（ユーザー確認済み）**。このスクリプトの
 呼び出し元（`fixtures/generate_logit_fixtures.py`/`generate_probit_fixtures.py`）は
-`cov_type="hc1"`をCOV_TYPESに含めない。`fixtures/generate_logit_crosscheck_fixtures.py`/
+`cov_type="hc1"`を`STATSMODELS_COV_TYPES`（`benchmark/nonlinear/constants.py`）に含めない。`fixtures/generate_logit_crosscheck_fixtures.py`/
 `generate_probit_crosscheck_fixtures.py`（R側）が`hc1`の数値比較のfixtureを担う。
 
 使用例（リポジトリルートから）:
@@ -54,30 +54,38 @@ get_robustcov_results`は`HC1`指定時に`getattr(self, "cov_HC1", None)`でモ
     python -m benchmark.nonlinear.references.statsmodels_ref --model logit \\
         --dataset-source wooldridge --dataset mroz \\
         --formula "inlf ~ nwifeinc + educ + exper + expersq + age + kidslt6 + kidsge6" \\
-        --cov-type cluster --cluster city
+        --cov-type hc0
+
+`--cluster`にはデータセットに既にある列名を指定する。合成データにはグループ列が
+無いため、疑似グループは`run(groups=...)`で渡す（`fixtures/generate_logit_fixtures.py`/
+`generate_probit_fixtures.py`が使う）。mrozの`city`はG=2で本実装が
+`InsufficientClustersForInference`として弾くため、クラスターのフィクスチャにしていない。
+多クラスターの実データは`--dataset apple`（`ecolbs > 0`の2値`y`、州でG=49）を使う。
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 import numpy as np
 
 from benchmark.common import load_frozen_dataset as _load_synthetic
 from benchmark.common.load_wooldridge import load as _load_wooldridge
+from benchmark.common.load_wooldridge import load_apple_adoption
 from benchmark.common.reference.normalize import normalize_names
 
 MARGEFF_AT = ["overall", "mean", "median"]
 
 
-def _margeff_frame(fit_result, at: str) -> dict:
-    sf = fit_result.get_margeff(at=at).summary_frame()
+def _margeff_frame(fit_result, at: str, alpha: float) -> dict:
+    sf = fit_result.get_margeff(at=at).summary_frame(alpha=alpha)
     return {
         str(name): {
             "effect": float(row.iloc[0]),
-            "std_err": float(row.iloc[1]),
+            "std_error": float(row.iloc[1]),
             "test_stat": float(row.iloc[2]),
             "p_value": float(row.iloc[3]),
             "conf_lower": float(row.iloc[4]),
@@ -99,7 +107,17 @@ def run(
     confidence_level: float = 0.95,
     model: str = "logit",
     method: str = "newton",
+    groups: Sequence | None = None,
+    include_intercept: bool = True,
 ) -> dict:
+    """1ケース分のstatsmodels結果を返す。
+
+    `include_intercept=False`は式に`- 1`を付けて切片を落とす（パラメータ名に`const`は現れず、`log_likelihood_null`は切片のみのモデルを
+    参照する）。
+
+    `groups`は合成データにグループ列が無いときの疑似グループラベル（データ行数と同じ長さ）。
+    渡すと列`_group`として付与し、`cluster`が未指定ならそれでクラスターする。
+    """
     import statsmodels.formula.api as smf
 
     if model not in _SMF_MODEL_FN:
@@ -112,11 +130,20 @@ def run(
     if dataset_source == "synthetic":
         df, true_beta = _load_synthetic(model, dataset)
         pandas_df = df.to_pandas()
+        if groups is not None:
+            pandas_df["_group"] = list(groups)
+            cluster = cluster or "_group"
         if formula is None:
             x_cols = [c for c in df.columns if c != "y"]
             formula = "y ~ " + " + ".join(x_cols)
     elif dataset_source == "wooldridge":
-        pandas_df = _load_wooldridge(dataset).to_pandas()
+        # appleは`ecolbs > 0`の2値`y`を導出してから使う（Wooldridgeの生データには無い）。
+        frame = (
+            load_apple_adoption()
+            if dataset == "apple"
+            else _load_wooldridge(dataset)
+        )
+        pandas_df = frame.to_pandas()
         if formula is None:
             raise ValueError(
                 "wooldridgeデータセットの場合は--formulaの指定が必須です"
@@ -125,9 +152,10 @@ def run(
         raise ValueError(f"unknown dataset_source: {dataset_source!r}")
 
     alpha = 1.0 - confidence_level
+    fit_formula = formula if include_intercept else f"{formula} - 1"
 
     if cov_type.lower() == "opg":
-        base = smf_fit(formula=formula, data=pandas_df).fit(
+        base = smf_fit(formula=fit_formula, data=pandas_df).fit(
             disp=0, method=method
         )
         params = base.params.to_numpy()
@@ -144,8 +172,8 @@ def run(
         conf_high = params + z_crit * se
 
         raw: dict = {
-            "coef": dict(zip(param_names, params.tolist())),
-            "se": dict(zip(param_names, se.tolist())),
+            "params": dict(zip(param_names, params.tolist())),
+            "std_errors": dict(zip(param_names, se.tolist())),
             "test_stats": dict(zip(param_names, z.tolist())),
             "p_values": dict(zip(param_names, p_values.tolist())),
             "conf_int": {
@@ -166,15 +194,17 @@ def run(
         if sm_cov_type == "cluster":
             fit_kwargs["cov_kwds"] = {"groups": pandas_df[cluster]}
 
-        sm_model = smf_fit(formula=formula, data=pandas_df)
+        sm_model = smf_fit(formula=fit_formula, data=pandas_df)
         fitted = sm_model.fit(disp=0, **fit_kwargs)
 
         ci = fitted.conf_int(alpha=alpha)
         raw = {
-            "coef": {
+            "params": {
                 str(k): float(v) for k, v in fitted.params.to_dict().items()
             },
-            "se": {str(k): float(v) for k, v in fitted.bse.to_dict().items()},
+            "std_errors": {
+                str(k): float(v) for k, v in fitted.bse.to_dict().items()
+            },
             "test_stats": {
                 str(k): float(v) for k, v in fitted.tvalues.to_dict().items()
             },
@@ -185,7 +215,9 @@ def run(
                 str(idx): [float(row[0]), float(row[1])]
                 for idx, row in ci.iterrows()
             },
-            "margeff": {at: _margeff_frame(fitted, at) for at in MARGEFF_AT},
+            "margeff": {
+                at: _margeff_frame(fitted, at, alpha) for at in MARGEFF_AT
+            },
         }
         # patsy（formula API）由来の生の切片名"Intercept"を、生成時点で
         # 本実装の"const"へ正規化する（Rクロスチェック側`normalize_names`と
@@ -225,7 +257,8 @@ def run(
         "cov_type_requested": cov_type,
         "method_requested": method,
         "confidence_level": confidence_level,
-        "formula": formula,
+        "formula": fit_formula,
+        "include_intercept": include_intercept,
     }
     return result
 
@@ -248,6 +281,11 @@ if __name__ == "__main__":
     parser.add_argument("--cluster", default=None)
     parser.add_argument("--confidence-level", type=float, default=0.95)
     parser.add_argument("--method", default="newton")
+    parser.add_argument(
+        "--no-intercept",
+        action="store_true",
+        help="指定するとinclude_intercept=False相当（formulaに'- 1'を付与）",
+    )
     args = parser.parse_args()
 
     output = run(
@@ -259,5 +297,6 @@ if __name__ == "__main__":
         args.confidence_level,
         args.model,
         args.method,
+        include_intercept=not args.no_intercept,
     )
     print(json.dumps(output, indent=2))

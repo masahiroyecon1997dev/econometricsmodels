@@ -1,7 +1,7 @@
 """IV(2SLS)の主リファレンス（linearmodels）による数値比較テスト。
 
 `tests/fixtures/benchmarks/iv.json`（`benchmark/iv/fixtures/
-generate_iv_fixtures.py`で生成）を読み込み、10個の合成データシナリオ×
+generate_iv_fixtures.py`で生成）を読み込み、`NUMERIC_SCENARIOS`の各合成データシナリオ×
 classical/HC0/HC1/HAC（+クラスター、baselineのみ）で、係数・標準誤差・
 検定統計量・適合度統計量・診断統計量を相対誤差1e-8で厳密比較する
 （`.claude/rules/testing-policy.md`「許容誤差」の基本方針）。
@@ -12,13 +12,12 @@ classical/HC0/HC1/HAC（+クラスター、baselineのみ）で、係数・標�
     - 主リファレンス（linearmodels）との厳密な数値一致: このファイル（2SLS）
     - GMM の同種テスト: `test_iv_gmm_reference.py`
     - 独立実装（R `ivreg`）とのクロスチェック: `test_iv_crosscheck.py`
+    - GMM の独立実装（R `momentfit`）とのクロスチェック: `test_iv_gmm_crosscheck.py`
 
 Note:
-    - `estimator="gmm"`はこのフィクスチャの対象外（フィクスチャ生成時点で
-      `estimator="gmm"`がまだPython側に配線されていなかったため、
-      `benchmark/iv/fixtures/generate_iv_fixtures.py`のモジュールdoc
-      コメント参照）。GMMのlinearmodels（`IVGMM`）クロスチェックは
-      別途フィクスチャ生成からやり直す必要がある。
+    - `estimator="gmm"`はこのフィクスチャの対象外（2SLSのみを生成する。
+      `benchmark/iv/fixtures/generate_iv_fixtures.py`のモジュールdocコメント参照）。
+      GMMのlinearmodels（`IVGMM`）との照合は`test_iv_gmm_reference.py`。
     - `hc2`/`hc3`は`linearmodels`固有の制約により対象外（`linearmodels.iv.covariance`が
       hc2/hc3相当の実装を持たないため、`iv.json`の`_meta.note`参照）。ただし
       「参照実装が無い」わけではない——R `ivreg`+`sandwich::vcovHC`では検証可能なことを
@@ -28,12 +27,10 @@ Note:
       （`two_sls.rs`の`fit_computes_hc2_std_errors_matching_manual_sandwich_formula`
       等、独立な素朴ループでの手計算とのクロスチェック）は数式レベルの細粒度回帰確認と
       して引き続き有効。
-    - `wu_hausman_statistic`はcov_type="hac"のときlinearmodels側との対応式が
-      不明なためフィクスチャ自体が`None`（原因未特定、次セッションで別途調査
-      予定、`benchmark/iv/references/linearmodels_ref.py`のモジュールdocコメント参照）。
-      本実装側は`hac`でも値を返す（`None`にはならない）ため、`ref`が`None`の
-      ときは比較をスキップするだけで、本実装側の値が`None`であることは
-      要求しない。df1（自由度1境界）は逆にaugmented regressionが
+    - `wu_hausman_statistic`は`hac`を含む全cov_typeで`res.wooldridge_regression`
+      と機械精度で一致する（`benchmark/iv/references/linearmodels_ref.py`の
+      モジュールdocコメント参照）。独立実装のR `ivreg`は`test_iv_crosscheck.py`で
+      検証している。df1（自由度1境界）はaugmented regressionが
       saturated（残差自由度0）になるため全cov_typeでフィクスチャが`None`に
       なり、本実装側も同じ理由でNoneを返す（`engine/src/iv/CLAUDE.md`
       「Wu-Hausmanの拡張回帰が想定内の理由で失敗した場合」参照）。
@@ -42,9 +39,12 @@ Note:
       （statsmodelsで独立計算した同じ定義のnested F検定）と比較する
       （`weak_instrument_f_linearmodels`と機械精度で一致することは
       フィクスチャ生成時に確認済み、`iv.json`の`_meta.note`参照）。
-    - 第一段階回帰の結果（`first_stage()`）自体はここでは比較しない
-      （`first_stage()`は通常のOLS回帰の結果をそのまま返すだけで、
-      `test_ols_reference.py`が既にOLSの数値一致を検証済みのため）。
+    - 第一段階回帰の結果（`first_stage()`）はここでは比較しない（IV固有の
+      配線＝どの列を・どの切片設定で回帰に渡すかは、同じ入力の`OLS`との直接比較で
+      `test_iv_first_stage.py`が検証する）。
+    - `include_intercept=False`（切片なし）は`iv.json`の`synthetic.no_intercept`
+      （`NO_INTERCEPT_SCENARIOS`の4シナリオ×classical/hc0/hc1/hac）と比較する
+      （`test_no_intercept_matches_linearmodels`）。
 
     フィクスチャ生成時と同じ入力データを、`tests/fixtures/benchmarks/data/`
     に固定済みのCSV（`benchmark/iv/freeze.py`参照）から読む。
@@ -58,8 +58,13 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-from _assertions import assert_close, assert_dict_close
-from _assertions import rename_intercept as _rename
+from _assertions import (
+    assert_close,
+    assert_dict_close,
+    assert_fields_close,
+    assert_inference_close,
+    assert_p_value_close,
+)
 from _constants import DATA_DIR
 from _helpers import (
     hac_time_for,
@@ -71,10 +76,26 @@ from _tolerances import TOLERANCES
 from econometricsmodels import IV, IVOptions
 
 from benchmark.common import imbalanced_cluster_groups
-from benchmark.iv.fixtures.generate_iv_fixtures import CARD_X_EXOG
-from benchmark.iv.fixtures.generate_iv_fixtures import (
+from benchmark.iv.constants import (
+    CARD_REGION_COLUMN,
+    CARD_X_EXOG,
+    CLUSTER_ILL_CONDITIONED_SCENARIOS,
+    CONFIDENCE_LEVEL_NON_DEFAULT,
+    LINEARMODELS_COV_TYPES,
+)
+from benchmark.iv.datasets import (
+    MULTI_ENDOG_SCENARIOS,
+    THREE_ENDOG_INSTRUMENTS,
+    THREE_ENDOG_X_ENDOG,
+    multi_endog_instruments,
+    scenario_instruments,
+    scenario_x_exog,
+    with_card_region,
+)
+from benchmark.iv.datasets import (
     NUMERIC_SCENARIOS as SCENARIOS,
 )
+from benchmark.iv.fixtures.generate_iv_fixtures import NO_INTERCEPT_SCENARIOS
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parents[1] / "fixtures" / "benchmarks" / "iv.json"
@@ -83,24 +104,12 @@ FIXTURE_PATH = (
 RTOL = TOLERANCES["iv_reference"]["rtol"]
 ATOL = TOLERANCES["iv_reference"]["atol"]
 
-# SCENARIOSはgenerate_iv_fixtures.pyのNUMERIC_SCENARIOSと常に一致させる必要が
-# あるため、そちらをimportして単一の定義元にする。
-# hc2/hc3はlinearmodelsに対応する実装が無いため対象外（モジュールdocコメント参照）。
-COV_TYPES = ["classical", "hc0", "hc1", "hac"]
 
-# just_identifiedのみinstruments=["z1"]（`generate_iv_fixtures.py`と同じ）。
-INSTRUMENTS_BY_SCENARIO = {"just_identified": ["z1"]}
-# moderate_multicollinearity/high_condition_numberはk_exog=2（`generate_iv_fixtures.py`と同じ）。
-X_EXOG_BY_SCENARIO = {
-    "moderate_multicollinearity": ["x1", "x2"],
-    "high_condition_number": ["x1", "x2"],
-    "scale_variance_mild": ["x1", "x2"],
-}
-
-# HACラグ: `IVOptions.hac_lags`未指定（自動計算）で、`engine::iv::two_sls::
-# resolve_hac_lags`と`benchmark/iv/references/linearmodels_ref.py`の`_hac_auto_lag`が
+# HACラグ: `IVOptions.hac_lags`未指定（自動計算）で、
+# `engine::shared::covariance::{resolve_hac_lags,default_hac_lags}`と
+# `benchmark/iv/references/linearmodels_ref.py`の`_hac_auto_lag`が
 # 同じ式（`floor(4*(n/100)**(2/9))`）を使うため、明示指定しなくても一致する
-# （OLSの`HAC_MAXLAGS`のような固定値の受け渡しが不要）。
+# （OLS/WLSのreferenceテストも同じ方式）。
 
 
 @pytest.fixture(scope="module")
@@ -110,30 +119,26 @@ def fixtures() -> dict:
 
 _assert_close = partial(assert_close, rtol=RTOL, atol=ATOL)
 _assert_dict_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
+_assert_fields_close = partial(assert_fields_close, rtol=RTOL, atol=ATOL)
 
 
-def _check_result(res, ref: dict, label: str) -> None:
-    _assert_dict_close(res.params, ref["coef"], f"{label}/coef")
-    _assert_dict_close(res.std_errors, ref["se"], f"{label}/se")
-    _assert_dict_close(
-        res.test_stats, ref["test_stats"], f"{label}/test_stats"
+def _check_result(
+    res, ref: dict, label: str, *, rtol_wald: float = RTOL
+) -> None:
+    assert_inference_close(res, ref, label, rtol=RTOL, atol=ATOL)
+
+    # `rtol_wald`: Wald/F統計量とp値だけの相対許容誤差。実データ（card）×クラスターで
+    # クラスター共分散Vの精度（約3e-12）が`V_slopes`の条件数（約3e7）で増幅され、
+    # 他の統計量より緩い値が要る（`_tolerances_iv.py`の`rtol_wald_card_cluster`参照）。
+    _assert_fields_close(res, ref, ("r_squared", "adj_r_squared"), label)
+    assert_fields_close(
+        res,
+        ref,
+        (("wald_statistic", "f_statistic"), ("wald_p_value", "f_p_value")),
+        label,
+        rtol=rtol_wald,
+        atol=ATOL,
     )
-    _assert_dict_close(res.p_values, ref["p_values"], f"{label}/p_values")
-
-    for name, (ref_lower, ref_upper) in ref["conf_int"].items():
-        our_name = _rename(name)
-        our_lower, our_upper = res.conf_int[our_name]
-        _assert_close(our_lower, ref_lower, f"{label}/conf_lower/{name}")
-        _assert_close(our_upper, ref_upper, f"{label}/conf_upper/{name}")
-
-    _assert_close(res.r_squared, ref["r_squared"], f"{label}/r_squared")
-    _assert_close(
-        res.adj_r_squared, ref["adj_r_squared"], f"{label}/adj_r_squared"
-    )
-    _assert_close(
-        res.wald_statistic, ref["f_statistic"], f"{label}/f_statistic"
-    )
-    _assert_close(res.wald_p_value, ref["f_p_value"], f"{label}/f_p_value")
     assert res.n_obs == ref["nobs"], f"{label}/n_obs"
     assert res.df_resid == ref["df_resid"], f"{label}/df_resid"
 
@@ -146,25 +151,26 @@ def _check_result(res, ref: dict, label: str) -> None:
             ref["sargan_statistic"],
             f"{label}/overid_statistic",
         )
-        _assert_close(
+        assert_p_value_close(
             res.overid_p_value,
             ref["sargan_p_value"],
             f"{label}/overid_p_value",
+            rtol=RTOL,
         )
 
-    # wu_hausmanはcov_type="hac"だとフィクスチャ側がNone（モジュールdoc
-    # コメント参照）。本実装側は依然値を返しうるため、ref側がNoneのときは
-    # 比較自体をスキップする（本実装側がNoneであることは要求しない）。
+    # ref側がNone（df1: 拡張回帰がsaturatedで双方None）のときは比較自体を
+    # スキップする（本実装側がNoneであることは要求しない）。
     if ref["wu_hausman_statistic"] is not None:
         _assert_close(
             res.wu_hausman_statistic,
             ref["wu_hausman_statistic"],
             f"{label}/wu_hausman_statistic",
         )
-        _assert_close(
+        assert_p_value_close(
             res.wu_hausman_p_value,
             ref["wu_hausman_p_value"],
             f"{label}/wu_hausman_p_value",
+            rtol=RTOL,
         )
 
     _assert_dict_close(
@@ -174,14 +180,14 @@ def _check_result(res, ref: dict, label: str) -> None:
     )
 
 
-# ── 凍結フィクスチャとの数値照合 ───────────────────────────────────
+# ── 凍結フィクスチャとの数値照合（合成データ） ────────────────────────
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
 @pytest.mark.parametrize("scenario", SCENARIOS)
 def test_matches_linearmodels(fixtures, scenario, cov_type):
-    x_exog = X_EXOG_BY_SCENARIO.get(scenario, ["x1"])
-    instruments = INSTRUMENTS_BY_SCENARIO.get(scenario, ["z1", "z2"])
+    x_exog = scenario_x_exog(scenario)
+    instruments = scenario_instruments(scenario)
     df = pl.read_csv(DATA_DIR / f"iv_{scenario}.csv")
     options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
     res = IV(
@@ -193,13 +199,18 @@ def test_matches_linearmodels(fixtures, scenario, cov_type):
         options=options,
     ).fit()
 
-    _check_result(res, fixtures[scenario][cov_type], f"{scenario}/{cov_type}")
+    _check_result(
+        res,
+        fixtures["synthetic"][scenario][cov_type],
+        f"{scenario}/{cov_type}",
+    )
 
 
 def test_cluster_matches_linearmodels(fixtures):
     """クラスターロバストSE。`generate_iv_fixtures.py`と同じ疑似グループ
     （行番号%10）を再現する。統計的な意味はなく、実装の動作確認用のため
-    `baseline`シナリオのみ（`coef`/`se`のみが記録されている）。
+    `baseline`シナリオのみ。推論統計量はt(G-1)・F(q, G-1)で比較する
+    （`linearmodels`の`run()`が同じ自由度で計算し直している）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
     df = with_cluster_groups(df, 10)
@@ -213,9 +224,7 @@ def test_cluster_matches_linearmodels(fixtures):
         options=options,
     ).fit()
 
-    ref = fixtures["baseline"]["cluster"]
-    _assert_dict_close(res.params, ref["coef"], "cluster/coef")
-    _assert_dict_close(res.std_errors, ref["se"], "cluster/se")
+    _check_result(res, fixtures["synthetic"]["baseline"]["cluster"], "cluster")
 
 
 def test_cluster_imbalanced_matches_linearmodels(fixtures):
@@ -237,17 +246,18 @@ def test_cluster_imbalanced_matches_linearmodels(fixtures):
         options=options,
     ).fit()
 
-    ref = fixtures["baseline"]["cluster_imbalanced"]
-    _assert_dict_close(res.params, ref["coef"], "cluster_imbalanced/coef")
-    _assert_dict_close(res.std_errors, ref["se"], "cluster_imbalanced/se")
+    _check_result(
+        res,
+        fixtures["synthetic"]["baseline"]["cluster_imbalanced"],
+        "cluster_imbalanced",
+    )
 
 
 def test_cluster_g2_matches_linearmodels(fixtures):
     """クラスタ数境界（G=2ちょうど）の成功パス。`x_exog=[]`・`instruments`1本・
     行番号%2の疑似グループ（`engine/src/iv/CLAUDE.md`「修正済み」の再現条件と
-    同じ、フィクスチャ化した。以前は構造確認
-    （`test_iv_api.py::test_cluster_g2_boundary_succeeds_when_x_exog_is_empty`）
-    のみでリファレンス実装との数値照合が無かった）。
+    同じ。構造確認は
+    `test_iv_api.py::test_cluster_g2_boundary_succeeds_when_x_exog_is_empty`）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_g2.csv")
     df = df.with_columns((pl.int_range(pl.len()) % 2).alias("cluster_group"))
@@ -261,20 +271,72 @@ def test_cluster_g2_matches_linearmodels(fixtures):
         options=options,
     ).fit()
 
-    ref = fixtures["baseline"]["cluster_g2"]
-    _assert_dict_close(res.params, ref["coef"], "cluster_g2/coef")
-    _assert_dict_close(res.std_errors, ref["se"], "cluster_g2/se")
+    ref = fixtures["synthetic"]["baseline"]["cluster_g2"]
+    _check_result(res, ref, "cluster_g2")
+    # 拡張回帰の傾き係数の数q_aug=2がG=2以上のため、Wu-Hausmanは双方None。
+    assert ref["wu_hausman_statistic"] is None
+    assert res.wu_hausman_statistic is None
+    assert res.wu_hausman_p_value is None
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
-def test_multi_endog_matches_linearmodels(fixtures, cov_type):
-    """複数内生変数（`x_endog=["endog1", "endog2"]`）の成功パス。
-    `weak_instrument_f_statistics`・`overid_statistic`（Sargan、過剰識別）・
-    `wu_hausman_statistic`（複数内生変数のジョイント検定）が正しく機能することを
-    確認する（`testing-completeness-reviewer`指摘のmust fix）。
+@pytest.mark.parametrize("scenario", CLUSTER_ILL_CONDITIONED_SCENARIOS)
+def test_cluster_ill_conditioned_matches_linearmodels(fixtures, scenario):
+    """悪条件・多重共線性シナリオ×クラスターロバストSE（均等な疑似グループ行番号%10）。
+    クラスター共分散は`(X̂'X̂)⁻¹`を他の`cov_type`と共有するため、悪条件との組み合わせでの
+    数値的挙動もクラスターで確認する（OLS/WLSの同名テストと同じ理由）。
     """
-    df = pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv")
+    df = with_cluster_groups(pl.read_csv(DATA_DIR / f"iv_{scenario}.csv"), 10)
+    options = IVOptions(cov_type="cluster", cluster="cluster_group")
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=scenario_x_exog(scenario),
+        x_endog=["endog1"],
+        instruments=scenario_instruments(scenario),
+        options=options,
+    ).fit()
+
+    _check_result(
+        res, fixtures["synthetic"][scenario]["cluster"], f"{scenario}/cluster"
+    )
+
+
+@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
+@pytest.mark.parametrize("scenario", MULTI_ENDOG_SCENARIOS)
+def test_multi_endog_matches_linearmodels(fixtures, scenario, cov_type):
+    """複数内生変数（`x_endog=["endog1", "endog2"]`）の成功パス。
+    `weak_instrument_f_statistics`（内生変数ごと）・`overid_statistic`（Sargan。
+    `just_identified`は丁度識別で`None`）・`wu_hausman_statistic`（複数内生変数の
+    ジョイント検定）が正しく機能することを、`MULTI_ENDOG_SCENARIOS`（過剰識別の
+    baseline、丁度識別、弱操作変数、不均一分散）で確認する。
+    """
+    df = pl.read_csv(DATA_DIR / f"iv_{scenario}_multi_endog.csv")
     options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1", "endog2"],
+        instruments=multi_endog_instruments(scenario),
+        options=options,
+    ).fit()
+
+    _check_result(
+        res,
+        fixtures["synthetic"]["multi_endog"][scenario][cov_type],
+        f"multi_endog/{scenario}/{cov_type}",
+    )
+
+
+def test_multi_endog_cluster_matches_linearmodels(fixtures):
+    """複数内生変数×クラスターロバストSE（疑似グループ行番号%10）。Wu-Hausmanの
+    F分布の自由度が`(n_endog, G-1)=(2, 9)`になる経路（内生変数1本の`baseline`
+    のクラスターでは`(1, 9)`）。
+    """
+    df = with_cluster_groups(
+        pl.read_csv(DATA_DIR / "iv_baseline_multi_endog.csv"), 10
+    )
+    options = IVOptions(cov_type="cluster", cluster="cluster_group")
     res = IV(
         with_row_time(df),
         y="y",
@@ -285,31 +347,40 @@ def test_multi_endog_matches_linearmodels(fixtures, cov_type):
     ).fit()
 
     _check_result(
-        res, fixtures["multi_endog"][cov_type], f"multi_endog/{cov_type}"
+        res,
+        fixtures["synthetic"]["multi_endog"]["baseline"]["cluster"],
+        "multi_endog/baseline/cluster",
     )
+    assert res.wu_hausman_df_num == 2
+    assert res.wu_hausman_df_denom == 9
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
-def test_card_matches_linearmodels(fixtures, cov_type):
-    """実データセット（Wooldridge card、Card 1995の大学近接操作変数による教育の
-    収益率推定）。`testing-policy.md`「テスト用データセット」2.が要求する実データ
-    検証がIV系統に無かった（`testing-completeness-reviewer`指摘のshould fix）。
+@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
+def test_three_endog_matches_linearmodels(fixtures, cov_type):
+    """内生変数3本（過剰識別度1）。Wu-Hausmanの分子自由度が3になる経路と、
+    `weak_instrument_f_statistics`が内生変数ごとに3つ返ることを確認する。
     """
-    df = load_wooldridge_dataset("card")
+    df = pl.read_csv(DATA_DIR / "iv_baseline_three_endog.csv")
     options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
     res = IV(
         with_row_time(df),
-        y="lwage",
-        x_exog=CARD_X_EXOG,
-        x_endog=["educ"],
-        instruments=["nearc2", "nearc4"],
+        y="y",
+        x_exog=["x1"],
+        x_endog=THREE_ENDOG_X_ENDOG,
+        instruments=THREE_ENDOG_INSTRUMENTS,
         options=options,
     ).fit()
 
-    _check_result(res, fixtures["card"][cov_type], f"card/{cov_type}")
+    _check_result(
+        res,
+        fixtures["synthetic"]["three_endog"][cov_type],
+        f"three_endog/{cov_type}",
+    )
+    assert res.wu_hausman_df_num == 3
+    assert set(res.weak_instrument_f_statistics) == set(THREE_ENDOG_X_ENDOG)
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
+@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
 def test_df1_matches_linearmodels(fixtures, cov_type):
     """自由度1境界（df_resid=1ちょうど）の成功パス。`x_exog=[]`・
     `x_endog=['endog1']`・`instruments=['z1']`（丁度識別、n=3）。境界値・
@@ -329,8 +400,175 @@ def test_df1_matches_linearmodels(fixtures, cov_type):
         options=options,
     ).fit()
 
-    _check_result(res, fixtures["df1"][cov_type], f"df1/{cov_type}")
+    _check_result(
+        res, fixtures["synthetic"]["df1"][cov_type], f"df1/{cov_type}"
+    )
+    # augmented regressionがsaturatedで、本実装も参照と同じくNoneを返す。
+    assert res.wu_hausman_statistic is None, f"df1/{cov_type}"
+    assert res.wu_hausman_p_value is None, f"df1/{cov_type}"
+
+
+# ── 凍結フィクスチャとの数値照合（オプション） ────────────────────────
+
+
+@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
+@pytest.mark.parametrize("scenario", list(NO_INTERCEPT_SCENARIOS))
+def test_no_intercept_matches_linearmodels(fixtures, scenario, cov_type):
+    """`include_intercept=False`（切片なし）。`param_names`に`const`が無いこと、
+    R²が切片なしの定義（非中心化）、Wald統計量が全係数を検定すること
+    （`_check_result`が係数・SE・R²・Wald・診断統計量を一括比較する）。
+    `x_exog_empty`は`x_exog=[]`かつ切片なしで、弱操作変数診断の制限モデルが
+    回帰変数0個になる退化ケース。
+    """
+    spec = NO_INTERCEPT_SCENARIOS[scenario]
+    df = pl.read_csv(DATA_DIR / f"iv_{spec['dataset']}.csv")
+    options = IVOptions(
+        include_intercept=False,
+        cov_type=cov_type,
+        **hac_time_for(cov_type),
+    )
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=spec["x_exog"],
+        x_endog=spec["x_endog"],
+        instruments=spec["instruments"],
+        options=options,
+    ).fit()
+
+    ref = fixtures["synthetic"]["no_intercept"][scenario][cov_type]
+    assert "const" not in res.param_names, f"{scenario}/{cov_type}"
+    _check_result(res, ref, f"no_intercept/{scenario}/{cov_type}")
+
+
+def test_no_intercept_cluster_matches_linearmodels(fixtures):
+    """`include_intercept=False`×クラスターロバストSE（`baseline`、切片ありの
+    `test_cluster_matches_linearmodels`と同じ疑似グループ行番号%10）。
+    """
+    df = with_cluster_groups(pl.read_csv(DATA_DIR / "iv_baseline.csv"), 10)
+    options = IVOptions(
+        include_intercept=False, cov_type="cluster", cluster="cluster_group"
+    )
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1"],
+        instruments=["z1", "z2"],
+        options=options,
+    ).fit()
+
+    assert "const" not in res.param_names
+    _check_result(
+        res,
+        fixtures["synthetic"]["no_intercept"]["baseline"]["cluster"],
+        "no_intercept/cluster",
+    )
 
 
 # 完全な多重共線性・極端なスケール差（`ComputationError` パス）は
-# `test_iv_validation.py` へ移設（4分割、項目68）。
+# `test_iv_validation.py`で確認する。
+
+
+@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
+def test_confidence_level_matches_linearmodels(fixtures, cov_type):
+    """`confidence_level`非既定が、cov_typeによらず信頼区間の臨界値まで
+    linearmodelsと一致すること（baselineシナリオ）。クラスターは
+    `test_confidence_level_cluster_matches_linearmodels`。
+    """
+    df = pl.read_csv(DATA_DIR / "iv_baseline.csv")
+    options = IVOptions(
+        confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+        cov_type=cov_type,
+        **hac_time_for(cov_type),
+    )
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1"],
+        instruments=["z1", "z2"],
+        options=options,
+    ).fit()
+
+    _check_result(
+        res,
+        fixtures["synthetic"]["baseline"]["confidence_level"][cov_type],
+        f"confidence_level/{cov_type}",
+    )
+
+
+def test_confidence_level_cluster_matches_linearmodels(fixtures):
+    """`confidence_level`非既定×クラスターロバストSE。信頼区間の臨界値は
+    t(G-1)（`df_resid`ではない）で計算される。
+    """
+    df = with_cluster_groups(pl.read_csv(DATA_DIR / "iv_baseline.csv"), 10)
+    options = IVOptions(
+        confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+        cov_type="cluster",
+        cluster="cluster_group",
+    )
+    res = IV(
+        with_row_time(df),
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog1"],
+        instruments=["z1", "z2"],
+        options=options,
+    ).fit()
+
+    _check_result(
+        res,
+        fixtures["synthetic"]["baseline"]["confidence_level"]["cluster"],
+        "confidence_level/cluster",
+    )
+
+
+# ── 凍結フィクスチャとの数値照合（実データ） ──────────────────────────
+
+
+@pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)
+def test_card_matches_linearmodels(fixtures, cov_type):
+    """実データセット（Wooldridge card、Card 1995の大学近接操作変数による教育の
+    収益率推定）。`testing-policy.md`「テスト用データセット」2.の実データ検証。
+    """
+    df = load_wooldridge_dataset("card")
+    options = IVOptions(cov_type=cov_type, **hac_time_for(cov_type))
+    res = IV(
+        with_row_time(df),
+        y="lwage",
+        x_exog=CARD_X_EXOG,
+        x_endog=["educ"],
+        instruments=["nearc2", "nearc4"],
+        options=options,
+    ).fit()
+
+    _check_result(
+        res, fixtures["wooldridge"]["card"][cov_type], f"card/{cov_type}"
+    )
+
+
+def test_card_cluster_matches_linearmodels(fixtures):
+    """実データのグループ列でのクラスターロバストSE。居住地域ダミー
+    （`reg661`〜`reg669`）から作った9グループ（群の大きさ85〜627の不均衡）。
+    均等な疑似グループ（行番号%10）だけでは見逃す、実データのグループ構造での確認。
+    Wald/F統計量だけ、クラスター共分散の条件数による丸め誤差のぶん緩い許容誤差を使う
+    （`_tolerances_iv.py`の`RTOL_WALD_CARD_CLUSTER`参照）。
+    """
+    df = with_card_region(load_wooldridge_dataset("card"))
+    options = IVOptions(cov_type="cluster", cluster=CARD_REGION_COLUMN)
+    res = IV(
+        with_row_time(df),
+        y="lwage",
+        x_exog=CARD_X_EXOG,
+        x_endog=["educ"],
+        instruments=["nearc2", "nearc4"],
+        options=options,
+    ).fit()
+
+    _check_result(
+        res,
+        fixtures["wooldridge"]["card"]["cluster"],
+        "card/cluster",
+        rtol_wald=TOLERANCES["iv_reference"]["rtol_wald_card_cluster"],
+    )

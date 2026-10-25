@@ -23,7 +23,7 @@ Note:
     フィクスチャ生成時と同じ入力データを、`tests/fixtures/benchmarks/data/`に
     固定済みのCSV（`fe_{scenario}.csv`、FEと共用）から読む——RE専用の合成
     データセットは無い（`benchmark/panel/references/linearmodels_ref.py`
-    モジュールdoc「RE（`run_re()`）固有の相違点」参照、ユーザー確認済み）。
+    モジュールdoc「RE（`run_re()`）固有の相違点」参照）。
     hc2/hc3・aic/bic・log_likelihood・ハウスマン検定は`linearmodels.
     RandomEffects`が提供しないためこのファイルの対象外
     （`test_re_crosscheck.py`のplmのみで検証する単一参照実装の例外）。
@@ -37,9 +37,15 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-from _assertions import assert_close, assert_dict_close
+from _assertions import (
+    assert_close,
+    assert_dict_close,
+    assert_fields_close,
+    assert_inference_close,
+)
 from _constants import DATA_DIR
 from _helpers import load_wooldridge_dataset
+from _panel_helpers import x_columns
 from _tolerances import TOLERANCES
 from econometricsmodels import RE, REOptions
 
@@ -65,20 +71,11 @@ def fixtures() -> dict:
 
 _assert_close = partial(assert_close, rtol=RTOL, atol=ATOL)
 _assert_dict_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
+_assert_fields_close = partial(assert_fields_close, rtol=RTOL, atol=ATOL)
 
 
 def _check_result(res, ref: dict, label: str) -> None:
-    _assert_dict_close(res.params, ref["coef"], f"{label}/coef")
-    _assert_dict_close(res.std_errors, ref["se"], f"{label}/se")
-    _assert_dict_close(
-        res.test_stats, ref["test_stats"], f"{label}/test_stats"
-    )
-    _assert_dict_close(res.p_values, ref["p_values"], f"{label}/p_values")
-
-    for name, (ref_lower, ref_upper) in ref["conf_int"].items():
-        our_lower, our_upper = res.conf_int[name]
-        _assert_close(our_lower, ref_lower, f"{label}/conf_lower/{name}")
-        _assert_close(our_upper, ref_upper, f"{label}/conf_upper/{name}")
+    assert_inference_close(res, ref, label, rtol=RTOL, atol=ATOL)
 
     assert res.n_obs == ref["n_obs"], f"{label}/n_obs"
     assert res.df_resid == ref["df_resid"], f"{label}/df_resid"
@@ -87,23 +84,28 @@ def _check_result(res, ref: dict, label: str) -> None:
 
     # `f_statistic_robust`（cov_type連動のWald二次形式）と比較する。
     # classical/hc1ともに不均衡パネルでも機械精度で一致する。
-    _assert_close(res.f_statistic, ref["f_statistic"], f"{label}/f_statistic")
-    _assert_close(res.f_p_value, ref["f_p_value"], f"{label}/f_p_value")
-    _assert_close(
-        res.r_squared_within,
-        ref["r_squared_within"],
-        f"{label}/r_squared_within",
+    _assert_fields_close(
+        res,
+        ref,
+        (
+            "f_statistic",
+            "f_p_value",
+            "r_squared_within",
+            "r_squared_between",
+            "r_squared_overall",
+        ),
+        label,
     )
-    _assert_close(
-        res.r_squared_between,
-        ref["r_squared_between"],
-        f"{label}/r_squared_between",
-    )
-    _assert_close(
-        res.r_squared_overall,
-        ref["r_squared_overall"],
-        f"{label}/r_squared_overall",
-    )
+
+    # 分散成分（linearmodels `variance_decomposition`）と準偏差変換の重み
+    # （`theta`、エンティティごと）。1-wayは`σ_λ²`・2-wayの重みを持たない。
+    _assert_fields_close(res, ref, ("sigma2_eps", "sigma2_u"), label)
+    _assert_dict_close(res.theta, ref["theta"], f"{label}/theta")
+    assert len(res.theta) == len(ref["theta"]), f"{label}/theta length"
+    assert res.sigma2_lambda is None, f"{label}/sigma2_lambda"
+    assert res.theta_entity is None, f"{label}/theta_entity"
+    assert res.theta_time is None, f"{label}/theta_time"
+    assert res.theta_total is None, f"{label}/theta_total"
 
 
 # ── 凍結フィクスチャとの数値照合（合成データ） ───────────────────────
@@ -113,11 +115,15 @@ def _check_result(res, ref: dict, label: str) -> None:
 @pytest.mark.parametrize("scenario", NUMERIC_SCENARIOS)
 def test_matches_linearmodels(fixtures, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
-    x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
+    x_cols = x_columns(df)
     options = REOptions(cov_type=cov_type)
     res = RE(df, y="y", x=x_cols, entity="entity", options=options).fit()
 
-    _check_result(res, fixtures[scenario][cov_type], f"{scenario}/{cov_type}")
+    _check_result(
+        res,
+        fixtures["synthetic"][scenario][cov_type],
+        f"{scenario}/{cov_type}",
+    )
 
 
 # ── 凍結フィクスチャとの数値照合（実データ: Wooldridge wagepan） ───────
@@ -131,4 +137,6 @@ def test_wagepan_matches_linearmodels(fixtures, cov_type):
         df, y=WAGEPAN_Y, x=WAGEPAN_X, entity=WAGEPAN_ENTITY, options=options
     ).fit()
 
-    _check_result(res, fixtures["wagepan"][cov_type], f"wagepan/{cov_type}")
+    _check_result(
+        res, fixtures["wooldridge"]["wagepan"][cov_type], f"wagepan/{cov_type}"
+    )

@@ -10,8 +10,8 @@
   正式なクロスチェック。fixest（≒pyfixestの実装元）とは独立した実装のため採用。
 - pyfixestは正確性検証には使わない（性能比較専用）。
 
-classical/HC0-3/clusterはRとほぼ機械精度で一致するため厳密比較、HACのみ小標本補正の
-慣習差により緩い許容誤差で比較する（`tests/linear/test_wls_crosscheck.py`参照）。
+全cov_type（HACを含む）がRとほぼ機械精度で一致するため厳密比較する（HACはR側を
+`NeweyWest(adjust = FALSE)`にして小標本補正の慣習差を揃える）（`tests/linear/test_wls_crosscheck.py`参照）。
 
 係数・標準誤差に加え、t値・p値・信頼区間・R²・調整済みR²・AIC/BIC/対数尤度・
 F統計量・F検定p値もRクロスチェック対象に含める（`testing-policy.md`
@@ -42,49 +42,22 @@ import polars as pl
 from benchmark.common import (
     BENCHMARKS_DIR,
     WEIGHT_COLUMN_NAME,
-    hac_auto_lag,
+    balanced_cluster_groups,
     imbalanced_cluster_groups,
     load_frozen_dataset,
     run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
-from benchmark.linear.fixtures.generate_wls_fixtures import _add_age_bin
+from benchmark.linear.constants import (
+    CLUSTER_ILL_CONDITIONED_SCENARIOS,
+    CONFIDENCE_LEVEL_NON_DEFAULT,
+    COV_TYPES,
+    HAC_LAGS_EXPLICIT,
+    NON_HAC_COV_TYPES,
+    NUMERIC_SCENARIOS,
+)
+from benchmark.linear.datasets import add_age_bin
 from benchmark.linear.references.r import run_lm_r
-
-# 完全な多重共線性・scale_varianceは数値比較の対象外（generate_wls_fixtures.pyと
-# 同じ方針。scale_varianceは全cov_typeでComputationErrorになる）。
-NUMERIC_SCENARIOS = [
-    "baseline",
-    "small_n",
-    "high_variance",
-    "heteroskedastic",
-    "autocorrelated",
-    "moderate_multicollinearity",
-    "high_condition_number",
-    # scale_varianceより緩いスケール差の成功パス（OLSの同種ケース相当）。
-    "scale_variance_mild",
-    # n=k+1（自由度1ちょうど）の成功パス（OLSの同種ケース相当）。
-    "baseline_df1",
-    # 高次元（説明変数k=20、列ごとに0.1〜100倍のスケール差）の成功パス
-    # （OLSの同種ケース相当）。
-    "many_regressors",
-    # x1の5%を外れ値に置き換えた成功パス（OLSの同種ケース相当）。
-    "outlier_regressor",
-]
-
-R_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
-
-# 悪条件・多重共線性シナリオとクラスターロバストSEの組み合わせでの数値的
-# 頑健性確認用（generate_ols_crosscheck_fixtures.pyと同じリスト・同じ理由、
-# OLS側の横展開）。
-CLUSTER_ILL_CONDITIONED_SCENARIOS = [
-    "high_condition_number",
-    "moderate_multicollinearity",
-]
-
-# generate_ols_crosscheck_fixtures.pyと同じ値・同じ理由（baselineシナリオ
-# のみでR_COV_TYPES全種＋clusterと組み合わせて確認する。ユーザー確認済み）。
-CONFIDENCE_LEVEL_NON_DEFAULT = 0.90
 
 
 def _write_csv(df, tmpdir: Path, name: str) -> Path:
@@ -106,22 +79,10 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
         n = df.height
 
         fixtures[scenario] = {}
-        for cov_type in R_COV_TYPES:
-            entry: dict = {}
-            if cov_type == "hac":
-                lag = hac_auto_lag(n)
-                entry["r"] = run_lm_r(
-                    csv_path,
-                    formula,
-                    cov_type,
-                    hac_lag=lag,
-                    weight_col=WEIGHT_COLUMN_NAME,
-                )
-                entry["hac_lag"] = lag
-            else:
-                entry["r"] = run_lm_r(
-                    csv_path, formula, cov_type, weight_col=WEIGHT_COLUMN_NAME
-                )
+        for cov_type in COV_TYPES:
+            entry = run_lm_r(
+                csv_path, formula, cov_type, weight_col=WEIGHT_COLUMN_NAME
+            )
 
             fixtures[scenario][cov_type] = entry
 
@@ -154,39 +115,25 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             # 列名の重複が許容されることの数値的な確認が目的で、cov_type間の
             # 挙動差を検証する趣旨ではないためclassicalのみ
             # （generate_wls_fixtures.pyと同じ方針）。
-            fixtures[scenario]["weight_in_x"] = {
-                "r": run_lm_r(
-                    csv_path,
-                    "y ~ x1 + x2 + x3 + weight",
-                    "classical",
-                    weight_col=WEIGHT_COLUMN_NAME,
-                )
-            }
+            fixtures[scenario]["weight_in_x"] = run_lm_r(
+                csv_path,
+                "y ~ x1 + x2 + x3 + weight",
+                "classical",
+                weight_col=WEIGHT_COLUMN_NAME,
+            )
 
             # include_intercept=False（切片なし）。R側はformula自体に"- 1"を
-            # 付けるだけで表現できる。全cov_type（R_COV_TYPES + cluster）と
+            # 付けるだけで表現できる。全cov_type（COV_TYPES + cluster）と
             # 組み合わせて確認する（OLS側の横展開）。
             formula_no_intercept = f"{formula} - 1"
             fixtures[scenario]["no_intercept"] = {}
-            for cov_type in R_COV_TYPES:
-                entry = {}
-                if cov_type == "hac":
-                    lag = hac_auto_lag(n)
-                    entry["r"] = run_lm_r(
-                        csv_path,
-                        formula_no_intercept,
-                        cov_type,
-                        hac_lag=lag,
-                        weight_col=WEIGHT_COLUMN_NAME,
-                    )
-                    entry["hac_lag"] = lag
-                else:
-                    entry["r"] = run_lm_r(
-                        csv_path,
-                        formula_no_intercept,
-                        cov_type,
-                        weight_col=WEIGHT_COLUMN_NAME,
-                    )
+            for cov_type in COV_TYPES:
+                entry = run_lm_r(
+                    csv_path,
+                    formula_no_intercept,
+                    cov_type,
+                    weight_col=WEIGHT_COLUMN_NAME,
+                )
                 fixtures[scenario]["no_intercept"][cov_type] = entry
             fixtures[scenario]["no_intercept"]["cluster"] = _run_cluster_case(
                 df,
@@ -196,29 +143,16 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
             )
 
             # confidence_level非既定（0.95以外）。全cov_type
-            # （R_COV_TYPES + cluster）と組み合わせて確認する（OLS側の横展開）。
+            # （COV_TYPES + cluster）と組み合わせて確認する（OLS側の横展開）。
             fixtures[scenario]["confidence_level"] = {}
-            for cov_type in R_COV_TYPES:
-                entry = {}
-                if cov_type == "hac":
-                    lag = hac_auto_lag(n)
-                    entry["r"] = run_lm_r(
-                        csv_path,
-                        formula,
-                        cov_type,
-                        hac_lag=lag,
-                        weight_col=WEIGHT_COLUMN_NAME,
-                        confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
-                    )
-                    entry["hac_lag"] = lag
-                else:
-                    entry["r"] = run_lm_r(
-                        csv_path,
-                        formula,
-                        cov_type,
-                        weight_col=WEIGHT_COLUMN_NAME,
-                        confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
-                    )
+            for cov_type in COV_TYPES:
+                entry = run_lm_r(
+                    csv_path,
+                    formula,
+                    cov_type,
+                    weight_col=WEIGHT_COLUMN_NAME,
+                    confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+                )
                 fixtures[scenario]["confidence_level"][cov_type] = entry
             fixtures[scenario]["confidence_level"]["cluster"] = (
                 _run_cluster_case(
@@ -229,6 +163,18 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
                     confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
                 )
             )
+
+            # 自動選択とは別に明示指定したhac_lags（HAC_LAGS_EXPLICIT）。
+            fixtures[scenario]["hac_lags"] = {
+                str(lag): run_lm_r(
+                    csv_path,
+                    formula,
+                    "hac",
+                    weight_col=WEIGHT_COLUMN_NAME,
+                    hac_lag=lag,
+                )
+                for lag in HAC_LAGS_EXPLICIT
+            }
         elif scenario in CLUSTER_ILL_CONDITIONED_SCENARIOS:
             # 悪条件・多重共線性シナリオとクラスターの組み合わせでの数値的
             # 頑健性確認用（generate_ols_crosscheck_fixtures.pyと同じ理由）。
@@ -262,26 +208,19 @@ def _run_cluster_case(
     """
     n = df.height
     cluster_group = (
-        groups if groups is not None else [i % 10 for i in range(n)]
+        groups if groups is not None else balanced_cluster_groups(n)
     )
     grouped = df.with_columns(pl.Series("cluster_group", cluster_group))
     tmp_path = csv_path.with_name(csv_path.stem + suffix + ".csv")
     grouped.write_csv(tmp_path)
-    return {
-        "r": run_lm_r(
-            tmp_path,
-            formula,
-            "cluster",
-            cluster="cluster_group",
-            weight_col=WEIGHT_COLUMN_NAME,
-            confidence_level=confidence_level,
-        )
-    }
-
-
-# HACは時系列順の無いクロスセクションデータのため対象外（generate_wls_fixtures.py
-# のWOOLDRIDGE_COV_TYPESと同じ方針。OLSのwage1/gpa2実データcrosscheckも同様）。
-WOOLDRIDGE_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3"]
+    return run_lm_r(
+        tmp_path,
+        formula,
+        "cluster",
+        cluster="cluster_group",
+        weight_col=WEIGHT_COLUMN_NAME,
+        confidence_level=confidence_level,
+    )
 
 
 def build_401ksubs_fixture(tmpdir: Path) -> dict:
@@ -289,7 +228,7 @@ def build_401ksubs_fixture(tmpdir: Path) -> dict:
 
     回帰式・重み定義はgenerate_wls_fixtures.py（statsmodels側）と揃える
     （docs/spec/wls-spec.md参照）。classical/HC0-3に加え、地域等の実カテゴリ列が
-    無いため、ageの分位ビン（`generate_wls_fixtures._add_age_bin`と同じ8分位）を
+    無いため、ageの分位ビン（`benchmark.linear.datasets.add_age_bin`の8分位）を
     疑似的なクラスター列としたクラスターロバストSEも確認する。
     """
     df = load_wooldridge("401ksubs").filter(pl.col("fsize") == 1)
@@ -298,23 +237,19 @@ def build_401ksubs_fixture(tmpdir: Path) -> dict:
     csv_path = _write_csv(df, tmpdir, "401ksubs")
 
     fixtures = {
-        cov_type: {
-            "r": run_lm_r(csv_path, formula, cov_type, weight_col="inv_inc")
-        }
-        for cov_type in WOOLDRIDGE_COV_TYPES
+        cov_type: run_lm_r(csv_path, formula, cov_type, weight_col="inv_inc")
+        for cov_type in NON_HAC_COV_TYPES
     }
 
-    df_clustered = _add_age_bin(df)
+    df_clustered = add_age_bin(df)
     csv_path_clustered = _write_csv(df_clustered, tmpdir, "401ksubs_cluster")
-    fixtures["cluster"] = {
-        "r": run_lm_r(
-            csv_path_clustered,
-            formula,
-            "cluster",
-            cluster="age_bin",
-            weight_col="inv_inc",
-        )
-    }
+    fixtures["cluster"] = run_lm_r(
+        csv_path_clustered,
+        formula,
+        "cluster",
+        cluster="age_bin",
+        weight_col="inv_inc",
+    )
     return fixtures
 
 
@@ -323,7 +258,7 @@ def build_fixtures() -> dict:
         tmpdir = Path(tmp)
         fixtures = {
             "synthetic": build_synthetic_fixtures(tmpdir),
-            "401ksubs": build_401ksubs_fixture(tmpdir),
+            "wooldridge": {"401ksubs": build_401ksubs_fixture(tmpdir)},
         }
 
     r_version = subprocess.run(
@@ -349,8 +284,8 @@ def build_fixtures() -> dict:
             "lm(weights=) + sandwich/lmtest）によるクロスチェック用。係数・"
             "標準誤差・t値・p値・信頼区間・R²・調整済みR²・AIC・BIC・"
             "対数尤度・F統計量・F検定p値を含む（信頼区間はconfidence_level=0.95"
-            "固定で計算）。classical/HC0-3/clusterは厳密比較、HACのみ緩い"
-            "許容誤差での比較を想定する（testing-policy.md参照）"
+            "固定で計算）。全cov_type（HACを含む）を厳密比較する"
+            "想定（testing-policy.md参照）"
         ),
         "generated_at": datetime.now(UTC).isoformat(),
         "r_version": r_version,
@@ -362,7 +297,7 @@ def build_fixtures() -> dict:
             "scale_varianceはOLSと同じ理由でロバストWald検定の"
             "共分散部分行列が全cov_typeで数値的にほぼ特異になる、"
             "WLSでも実測確認済み）。"
-            "HACはR側のみ（explicit lagを本実装の自動ラグ式に合わせて指定）。"
+            "HACのラグは本実装の自動ラグ式に合わせてRラッパーが決め、`hac_lag`に残す（statsmodels側のols.json/wls.jsonも同じ自動ラグ）。"
             "clusterはR側のみ確認。baselineシナリオで疑似グループ（行番号%10）"
             "に加え、不均衡グループ（cluster_imbalanced）・クラスタ数境界G=2"
             "（cluster_g2）を含む（OLSの同種ケース相当。グルーピングパターンの"
@@ -370,10 +305,9 @@ def build_fixtures() -> dict:
             "1パターンのみ、後述）。"
             "high_condition_number/baseline_df1は境界値・悪条件ケース"
             "（OLSの同種ケース相当）。high_condition_number/"
-            "moderate_multicollinearityにもclusterエントリを追加（従来"
-            "クラスター系はbaselineシナリオのみで、悪条件・多重共線性シナリオ"
-            "との組み合わせが未検証だった。均等な疑似グループ（行番号%10）のみ。"
-            "OLS側の横展開）。"
+            "moderate_multicollinearityにもclusterエントリを持つ（悪条件・"
+            "多重共線性シナリオとの組み合わせの確認用。"
+            "均等な疑似グループ（行番号%10）のみ。OLS側と同じ）。"
             "baseline.weight_in_xは、weightと同じ列をxにも含める成功パス。"
             "classicalのみ（cov_type間の挙動差の検証が"
             "目的ではないため）。"
@@ -384,14 +318,16 @@ def build_fixtures() -> dict:
             "パラメータ名は全ソースで切片を'const'に正規化済み。"
             "重みは合成データセットの'weight'列。401ksubsはinv_inc（1/inc）。"
             "401ksubsはclassical/HC0-3（HACは時系列順が無いため対象外）に加え、"
-            "ageの分位ビン（8分位、generate_wls_fixtures._add_age_bin）を"
+            "ageの分位ビン（8分位、benchmark.linear.datasets.add_age_bin）を"
             "疑似的なクラスター列としたクラスターロバストSEも含む。"
             "pyfixestとの比較は正確性検証から除外（性能比較専用）。"
             "baseline.no_interceptはinclude_intercept=False（切片なし、"
-            "formulaに'- 1'を付与）をR_COV_TYPES全種＋clusterと組み合わせて"
+            "formulaに'- 1'を付与）をCOV_TYPES全種＋clusterと組み合わせて"
             "確認する（statsmodels主リファレンス側〔wls.json〕・OLS側の横展開）。"
+            "baseline.hac_lagsは自動選択とは別に明示したHACラグ"
+            f"（{HAC_LAGS_EXPLICIT}、キーは文字列。0はHC0相当）。"
             "baseline.confidence_levelはconfidence_level="
-            f"{CONFIDENCE_LEVEL_NON_DEFAULT}（既定0.95以外）をR_COV_TYPES"
+            f"{CONFIDENCE_LEVEL_NON_DEFAULT}（既定0.95以外）をCOV_TYPES"
             "全種＋clusterと組み合わせて確認する（run_lm_crosscheck.R側の"
             "'--confidence-level='フラグを利用、同じくstatsmodels主リファレンス"
             "側・OLS側の横展開）。"

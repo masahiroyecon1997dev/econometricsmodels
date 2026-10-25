@@ -26,22 +26,38 @@ import numpy as np
 import polars as pl
 import pytest
 import statsmodels.api as sm
-from _assertions import assert_close
+from _assertions import (
+    assert_close,
+    assert_hac_time_reorders_rows,
+    assert_params_table_matches_attributes,
+    assert_same_estimates,
+)
+from _constants import WIDE_X
 from _helpers import (
+    CASE_SPELLINGS,
     HAC_AUTO_LAG_SAMPLE_SIZES,
     ROW_TIME,
     hac_lag_frame,
     hac_time_for,
+    reorder_rows,
+    respell,
     with_row_time,
 )
-from _ols_helpers import our_fit, our_fit_cluster, sm_fit
+from _ols_helpers import (
+    HAC_REORDER_ORDER,
+    hac_reorder_frame,
+    our_fit,
+    sm_fit,
+    wide_new_data,
+)
 from _tolerances import TOLERANCES
-from econometricsmodels import OLS, OLSOptions, ValidationError
+from econometricsmodels import OLS, OLSOptions, OLSResults
 
 from benchmark.common import hac_auto_lag
+from benchmark.linear.constants import COV_TYPES, WIDE_BETA
 
 # predict() の statsmodels 照合も凍結フィクスチャ照合と同じ許容誤差
-# （`_tolerances.py` の "ols_reference"）で行う。`_assertions.assert_close`
+# （`_tolerances_linear.py` の "ols_reference"）で行う。`_assertions.assert_close`
 # （`tol = max(rtol*|ref|, atol)`）に統一し、独自の絶対誤差定数は持たない。
 _assert_close = partial(
     assert_close,
@@ -49,7 +65,167 @@ _assert_close = partial(
     atol=TOLERANCES["ols_reference"]["atol"],
 )
 
-# ── 成功パス・結果型 ──────────────────────────────────────────────
+
+# ── 成功パス・結果型 ──────────────────────────────────────────────────
+
+
+def test_fit_succeeds_and_returns_ols_results(dataset):
+    res = our_fit(dataset)
+    assert isinstance(res, OLSResults)
+
+
+def test_default_options_use_classical():
+    """`options`省略時は`OLSOptions()`の既定値（classical）が使われること。"""
+    df = pl.DataFrame({"y": [1.0, 2.0, 3.0], "x1": [1.0, 2.0, 3.5]})
+    res = OLS(df, y="y", x=["x1"]).fit()
+    assert res.cov_type == "classical"
+
+
+def test_residuals_sum_near_zero(dataset):
+    """残差の和が0に近いこと（定数項ありOLSの性質）。"""
+    our_res = our_fit(dataset)
+    assert_close(
+        sum(our_res.residuals),
+        0.0,
+        "sum(residuals)",
+        rtol=0.0,
+        atol=TOLERANCES["ols_api"]["atol_residual_sum"],
+    )
+
+
+def test_params_follow_the_column_order_of_the_true_coefficients(
+    wide_dataset,
+):
+    """説明変数8列で、各係数の推定値が自分の列の真の係数に近いこと
+    （真の係数は全て異なる値に離してあるため、列の取り違え・ずれがあると
+    標準誤差の数倍以上外れる。statsmodelsとの数値照合を持たない
+    `param_names`の並びの確認を、値の側からも固定する）。
+    """
+    res = our_fit(wide_dataset, x=WIDE_X)
+
+    assert res.param_names == ["const", *WIDE_X]
+    for name, true_value in zip(res.param_names, WIDE_BETA):
+        assert abs(res.params[name] - true_value) < 5 * res.std_errors[name], (
+            name
+        )
+
+
+# ── API構造 ───────────────────────────────────────────────────────────
+
+
+def test_params_table_structure(wide_dataset):
+    res = our_fit(wide_dataset, x=WIDE_X)
+    table = res.params_table()
+    assert_params_table_matches_attributes(res)
+
+    assert isinstance(table, list)
+    assert len(table) == 1 + len(WIDE_X)  # const, x1..x8
+    expected_keys = {
+        "param_name",
+        "param",
+        "std_error",
+        "test_stat",
+        "p_value",
+        "conf_lower",
+        "conf_upper",
+    }
+    for row in table:
+        assert set(row.keys()) == expected_keys
+    assert [row["param_name"] for row in table] == ["const", *WIDE_X]
+
+
+def test_conf_int_structure(wide_dataset):
+    res = our_fit(wide_dataset, x=WIDE_X)
+    ci = res.conf_int
+
+    assert isinstance(ci, dict)
+    assert list(ci) == ["const", *WIDE_X]
+    for lower, upper in ci.values():
+        assert lower < upper
+
+
+def test_params_std_errors_test_stats_p_values_share_keys(wide_dataset):
+    res = our_fit(wide_dataset, x=WIDE_X)
+    expected_keys = ["const", *WIDE_X]
+
+    assert list(res.params) == expected_keys
+    assert list(res.std_errors) == expected_keys
+    assert list(res.test_stats) == expected_keys
+    assert list(res.p_values) == expected_keys
+
+
+def test_n_obs_and_dep_var_name(dataset):
+    res = our_fit(dataset)
+    assert res.n_obs == 100
+    assert res.dep_var_name == "y"
+
+
+# ── オプションの反映 ──────────────────────────────────────────────────
+
+
+#
+# cov_type以外のOLSOptionsフィールド（include_intercept・confidence_level・
+# hac_lags=None・hac_time）が、engine_pybind側の列抽出・分岐ロジックを経て
+# 正しく反映されることを確認する。
+
+
+@pytest.mark.parametrize("spelling", CASE_SPELLINGS)
+@pytest.mark.parametrize("cov_type", [*COV_TYPES, "cluster"])
+def test_cov_type_is_case_insensitive(dataset, cov_type, spelling):
+    """全`cov_type`で、`res.cov_type`が正規形（小文字）で返り、どの大文字小文字の
+    綴りでも正規形と同一の推定結果になること（`engine_pybind`側の
+    `parse_cov_kind`のRust単体テストと対になる、Python API境界での確認）。
+    HACは`hac_lags`省略時の自動計算式で確認する。
+    """
+
+    def fit(label: str):
+        kwargs = {"cluster": "cluster"} if cov_type == "cluster" else {}
+        options = OLSOptions(
+            cov_type=label, **kwargs, **hac_time_for(cov_type)
+        )
+        return OLS(
+            with_row_time(dataset), y="y", x=["x1", "x2"], options=options
+        ).fit()
+
+    res = fit(respell(cov_type, spelling))
+    assert res.cov_type == cov_type
+    assert_same_estimates(res, fit(cov_type))
+
+
+def test_confidence_level_changes_interval_width(wide_dataset):
+    """`confidence_level`を下げると信頼区間が狭くなること
+
+    （既定の0.95以外の値がengine_pybind経由で実際に反映されることの確認）。
+    """
+    wide = OLS(
+        wide_dataset,
+        y="y",
+        x=WIDE_X,
+        options=OLSOptions(confidence_level=0.99),
+    ).fit()
+    narrow = OLS(
+        wide_dataset,
+        y="y",
+        x=WIDE_X,
+        options=OLSOptions(confidence_level=0.80),
+    ).fit()
+
+    for name in ["const", *WIDE_X]:
+        wide_width = wide.conf_int[name][1] - wide.conf_int[name][0]
+        narrow_width = narrow.conf_int[name][1] - narrow.conf_int[name][0]
+        assert narrow_width < wide_width, name
+
+
+def test_include_intercept_false_omits_const(wide_dataset):
+    """`include_intercept=False`では`const`が出ず、`df_model`は傾き係数の数（
+    切片あり・なしで同じ）になること（数値照合は`test_ols_reference.py`の
+    `test_no_intercept_matches_statsmodels`）。
+    """
+    options = OLSOptions(include_intercept=False)
+    res = OLS(wide_dataset, y="y", x=WIDE_X, options=options).fit()
+    assert res.param_names == WIDE_X
+    assert res.df_model == len(WIDE_X)
+    assert our_fit(wide_dataset, x=WIDE_X).df_model == len(WIDE_X)
 
 
 def test_hac_runs_and_returns_finite_std_errors(dataset):
@@ -66,10 +242,8 @@ def test_hac_runs_and_returns_finite_std_errors(dataset):
 
 def test_hac_auto_lags_runs_and_returns_finite_std_errors(dataset):
     """`hac_lags`省略時（`None`、自動計算式）でもエラーなく動作すること
-
-    （既存の`test_hac_runs_and_returns_finite_std_errors`は`hac_lags=2`を
-    明示していたため、`None`がPython→Rustに正しく伝播する経路は
-    未検証だった）。
+    （`None`がPython→Rustに正しく伝播する経路。`hac_lags`を明示する経路は
+    `test_hac_runs_and_returns_finite_std_errors`）。
     """
     # hac_lags省略 = 自動計算
     options = OLSOptions(cov_type="hac", hac_time=ROW_TIME)
@@ -82,251 +256,66 @@ def test_hac_auto_lags_runs_and_returns_finite_std_errors(dataset):
         assert se > 0.0
 
 
-@pytest.mark.parametrize("n", HAC_AUTO_LAG_SAMPLE_SIZES)
-def test_hac_lags_used_matches_python_auto_lag_formula(n):
-    """`hac_lags`省略時の`hac_lags_used`が、Python側の独立実装
-    （`benchmark.common.hac_auto_lag`）と複数の標本サイズで一致すること。
-    """
-    options = OLSOptions(cov_type="hac", hac_time=ROW_TIME)
-    res = OLS(hac_lag_frame(n), y="y", x=["x1", "x2"], options=options).fit()
-    assert res.hac_lags_used == hac_auto_lag(n)
-
-
-@pytest.mark.parametrize("hac_lags", [0, 3, 10])
-def test_hac_lags_used_echoes_explicit_hac_lags(dataset, hac_lags):
-    """`hac_lags`を明示指定したときは、自動計算値ではなく指定値が返ること。"""
-    options = OLSOptions(cov_type="hac", hac_lags=hac_lags, hac_time=ROW_TIME)
-    res = OLS(
-        with_row_time(dataset), y="y", x=["x1", "x2"], options=options
-    ).fit()
-    assert res.hac_lags_used == hac_lags
-
-
-@pytest.mark.parametrize("cov_type", ["classical", "hc0", "hc3"])
-def test_hac_lags_used_is_none_unless_hac(dataset, cov_type):
-    res = OLS(
-        dataset, y="y", x=["x1", "x2"], options=OLSOptions(cov_type=cov_type)
-    ).fit()
-    assert res.hac_lags_used is None
-
-
-def test_residuals_sum_near_zero(dataset):
-    """残差の和が0に近いこと（定数項ありOLSの性質）。"""
-    our_res = our_fit(dataset)
-    assert abs(sum(our_res.residuals)) < 1e-8
-
-
-# ── API構造 ──────────────────────────────────────────────────────
-
-
-def test_coef_table_structure(dataset):
-    res = our_fit(dataset)
-    table = res.coef_table()
-
-    assert isinstance(table, list)
-    assert len(table) == 3  # const, x1, x2
-    expected_keys = {
-        "param",
-        "coef",
-        "std_err",
-        "test_stat",
-        "p_value",
-        "conf_lower",
-        "conf_upper",
-    }
-    for row in table:
-        assert expected_keys <= set(row.keys())
-    assert [row["param"] for row in table] == ["const", "x1", "x2"]
-
-
-def test_conf_int_structure(dataset):
-    res = our_fit(dataset)
-    ci = res.conf_int
-
-    assert isinstance(ci, dict)
-    assert set(ci.keys()) == {"const", "x1", "x2"}
-    for lower, upper in ci.values():
-        assert lower < upper
-
-
-def test_params_std_errors_test_stats_p_values_share_keys(dataset):
-    res = our_fit(dataset)
-    expected_keys = {"const", "x1", "x2"}
-
-    assert set(res.params.keys()) == expected_keys
-    assert set(res.std_errors.keys()) == expected_keys
-    assert set(res.test_stats.keys()) == expected_keys
-    assert set(res.p_values.keys()) == expected_keys
-
-
-def test_n_obs_and_dep_var_name(dataset):
-    res = our_fit(dataset)
-    assert res.n_obs == 100
-    assert res.dep_var_name == "y"
-
-
-# ── オプションの反映 ──────────────────────────────────────────────
-#
-# cov_type以外のOLSOptionsフィールド（include_intercept・confidence_level・
-# hac_lags=None・hac_time）が、engine_pybind側の列抽出・分岐ロジックを経て
-# 正しく反映されることを確認する。
-
-
-def test_cov_type_label(dataset):
-    for cov_type in ["classical", "hc0", "hc1", "hc2", "hc3"]:
-        res = our_fit(dataset, cov_type)
-        assert res.cov_type == cov_type
-
-    res = our_fit_cluster(dataset)
-    assert res.cov_type == "cluster"
-
-
-@pytest.mark.parametrize(
-    "cov_type, expected_label",
-    [
-        ("CLASSICAL", "classical"),
-        ("Classical", "classical"),
-        ("HC0", "hc0"),
-        ("Hc1", "hc1"),
-        ("HC2", "hc2"),
-        ("hc3", "hc3"),
-        ("HAC", "hac"),
-        ("Hac", "hac"),
-    ],
-)
-def test_cov_type_is_case_insensitive(dataset, cov_type, expected_label):
-    """`cov_type`が大文字小文字を区別しないこと（`engine_pybind`側の
-    `parse_cov_type`のRust単体テストと対になる、Python API境界での確認。
-    テスト網羅性レビューで判明した抜け。HACは
-    `hac_lags`省略時の自動計算式で成功パスを確認する
-    （テスト網羅性候補・項目35）。
-    """
-    options = OLSOptions(cov_type=cov_type, **hac_time_for(cov_type))
-    res = OLS(
-        with_row_time(dataset), y="y", x=["x1", "x2"], options=options
-    ).fit()
-    assert res.cov_type == expected_label
-
-
-@pytest.mark.parametrize("cov_type", ["nonrobust", "NONROBUST", "NonRobust"])
-def test_nonrobust_is_rejected(dataset, cov_type):
-    """`"nonrobust"`（旧別名）は受け付けない（概念ごとに文字列を1つに絞る）。"""
-    with pytest.raises(ValidationError, match="unknown cov_type: 'nonrobust'"):
-        our_fit(dataset, cov_type)
-
-
-def test_default_options_use_classical():
-    """`options`省略時は`OLSOptions()`の既定値（classical）が使われること。"""
-    df = pl.DataFrame({"y": [1.0, 2.0, 3.0], "x1": [1.0, 2.0, 3.5]})
-    res = OLS(df, y="y", x=["x1"]).fit()
-    assert res.cov_type == "classical"
-
-
-def test_confidence_level_changes_interval_width(dataset):
-    """`confidence_level`を下げると信頼区間が狭くなること
-
-    （既定の0.95以外の値がengine_pybind経由で実際に反映されることの確認）。
-    """
-    wide = OLS(
-        dataset,
-        y="y",
-        x=["x1", "x2"],
-        options=OLSOptions(confidence_level=0.99),
-    ).fit()
-    narrow = OLS(
-        dataset,
-        y="y",
-        x=["x1", "x2"],
-        options=OLSOptions(confidence_level=0.80),
-    ).fit()
-
-    for name in ["const", "x1", "x2"]:
-        wide_width = wide.conf_int[name][1] - wide.conf_int[name][0]
-        narrow_width = narrow.conf_int[name][1] - narrow.conf_int[name][0]
-        assert narrow_width < wide_width, name
-
-
 def test_hac_time_reorders_rows_before_computing_lags():
     """`hac_time`を指定すると、DataFrameの行順に関わらず時系列順で
 
     ラグ付き自己共分散を計算すること。データは`engine/src/linear/ols.rs`の
     `fit_computes_hac_std_errors_respecting_time_order`と同一（時系列順で
-    x=[1..5], y=[2,4,5,4,5]をtime順=[3,1,5,2,4]にシャッフルして入力し、
-    `hac_time`無指定・時系列順の入力と同じ結果になることを確認する）。
-    engine_pybindの`hac_time`列抽出（`extract_time_order_ranks`）を
+    x=[1..5], y=[2,4,5,4,5]の行を並べ替えて入力し、時系列順の入力と同じ
+    結果になること、および行順をそのまま時間順とみなした結果とは異なること
+    を確認する）。engine_pybindの`hac_time`列抽出（`extract_time_order_ranks`）を
     Python API境界から検証する。
     """
-    ordered_df = pl.DataFrame(
-        {
-            "y": [2.0, 4.0, 5.0, 4.0, 5.0],
-            "x1": [1.0, 2.0, 3.0, 4.0, 5.0],
-            "time": [1.0, 2.0, 3.0, 4.0, 5.0],
-        }
+    ordered_df = hac_reorder_frame()
+    shuffled_df = reorder_rows(ordered_df, HAC_REORDER_ORDER)
+
+    def fit_std_errors(df: pl.DataFrame, hac_time: str) -> dict[str, float]:
+        options = OLSOptions(cov_type="hac", hac_lags=1, hac_time=hac_time)
+        return OLS(df, y="y", x=["x1"], options=options).fit().std_errors
+
+    assert_hac_time_reorders_rows(
+        fit_std_errors(ordered_df, "time"),
+        fit_std_errors(shuffled_df, "time"),
+        fit_std_errors(with_row_time(shuffled_df), ROW_TIME),
+        atol_invariant=TOLERANCES["ols_api"]["atol_hac_time_reorder"],
+        min_rel_effect=TOLERANCES["ols_api"][
+            "min_rel_hac_time_row_order_effect"
+        ],
     )
-    ordered_options = OLSOptions(cov_type="hac", hac_lags=1, hac_time="time")
-    ordered_res = OLS(
-        ordered_df, y="y", x=["x1"], options=ordered_options
-    ).fit()
-
-    shuffled_df = pl.DataFrame(
-        {
-            "y": [5.0, 2.0, 5.0, 4.0, 4.0],
-            "x1": [3.0, 1.0, 5.0, 2.0, 4.0],
-            "time": [3.0, 1.0, 5.0, 2.0, 4.0],
-        }
-    )
-    shuffled_options = OLSOptions(cov_type="hac", hac_lags=1, hac_time="time")
-    shuffled_res = OLS(
-        shuffled_df, y="y", x=["x1"], options=shuffled_options
-    ).fit()
-
-    for name in ["const", "x1"]:
-        assert (
-            abs(shuffled_res.std_errors[name] - ordered_res.std_errors[name])
-            < 1e-9
-        ), name
 
 
-# ── predict() ────────────────────────────────────────────────────
+# ── predict() ─────────────────────────────────────────────────────────
 
 
-def test_predict_none_matches_statsmodels_fitted_values(dataset):
+def test_predict_none_matches_statsmodels_fitted_values(wide_dataset):
     """`predict(new_data=None)`が学習データに対するstatsmodelsのfittedvaluesと一致すること。"""
-    sm_res = sm_fit(dataset)
-    res = our_fit(dataset)
+    sm_res = sm_fit(wide_dataset, x=WIDE_X)
+    res = our_fit(wide_dataset, x=WIDE_X)
 
     predicted = res.predict()
 
-    assert len(predicted) == len(dataset)
-    for i, (row, expected) in enumerate(zip(predicted, sm_res.fittedvalues)):
-        _assert_close(row["predicted"], expected, f"predicted/{i}")
+    assert len(predicted) == len(wide_dataset)
+    for i, (value, expected) in enumerate(zip(predicted, sm_res.fittedvalues)):
+        _assert_close(value, expected, f"predicted/{i}")
 
 
-def test_predict_new_data_matches_statsmodels(dataset):
+def test_predict_new_data_matches_statsmodels(wide_dataset):
     """新規データに対する`predict()`がstatsmodelsの`.predict()`と一致すること。
 
-    列順を学習時（x1, x2）と入れ替えて渡し、列名でマッチングされる
+    列順を学習時（x1..x8）と逆順にして渡し、列名でマッチングされる
     （列順に依存しない）ことも合わせて確認する。
     """
-    res = our_fit(dataset)
-    sm_res = sm_fit(dataset)
+    res = our_fit(wide_dataset, x=WIDE_X)
+    sm_res = sm_fit(wide_dataset, x=WIDE_X)
 
-    new_data = pl.DataFrame({"x2": [0.5, -1.0, 2.0], "x1": [1.0, 2.0, -0.5]})
-    predicted = res.predict(new_data)
+    new_data = wide_new_data()
+    predicted = res.predict(new_data.select(reversed(WIDE_X)))
 
-    sm_new_x = sm.add_constant(
-        np.column_stack(
-            [
-                new_data["x1"].to_numpy(),
-                new_data["x2"].to_numpy(),
-            ]
-        )
-    )
-    expected = sm_res.predict(sm_new_x)
+    expected = sm_res.predict(sm.add_constant(new_data.to_numpy()))
 
     assert len(predicted) == 3
-    for i, (row, exp) in enumerate(zip(predicted, expected)):
-        _assert_close(row["predicted"], exp, f"predicted/{i}")
+    for i, (value, exp) in enumerate(zip(predicted, expected)):
+        _assert_close(value, exp, f"predicted/{i}")
 
 
 def test_predict_new_data_without_intercept_matches_statsmodels():
@@ -346,8 +335,8 @@ def test_predict_new_data_without_intercept_matches_statsmodels():
     predicted = res.predict(new_data)
     expected = sm_res.predict(new_x1.reshape(-1, 1))
 
-    for i, (row, exp) in enumerate(zip(predicted, expected)):
-        _assert_close(row["predicted"], exp, f"predicted/{i}")
+    for i, (value, exp) in enumerate(zip(predicted, expected)):
+        _assert_close(value, exp, f"predicted/{i}")
 
 
 def test_predict_with_include_intercept_false_and_x_named_const():
@@ -376,82 +365,78 @@ def test_predict_with_include_intercept_false_and_x_named_const():
 
     coef_const = res.params["const"]
     coef_x2 = res.params["x2"]
-    for i, (row, (c, x2)) in enumerate(
+    for i, (value, (c, x2)) in enumerate(
         zip(predicted, [(100.0, 10.0), (200.0, 20.0)])
     ):
         expected = coef_const * c + coef_x2 * x2
-        _assert_close(row["predicted"], expected, f"predicted/{i}")
+        _assert_close(value, expected, f"predicted/{i}")
 
 
-def test_predict_new_data_structure(dataset):
-    res = our_fit(dataset)
-    new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
+def test_predict_new_data_structure(wide_dataset):
+    res = our_fit(wide_dataset, x=WIDE_X)
+    new_data = wide_new_data(2)
 
     predicted = res.predict(new_data)
 
     assert isinstance(predicted, list)
     assert len(predicted) == 2
-    for row in predicted:
-        assert set(row.keys()) == {"predicted"}
-        assert isinstance(row["predicted"], float)
+    assert all(isinstance(value, float) for value in predicted)
 
 
-# ── augment() ────────────────────────────────────────────────────
+# ── augment() ─────────────────────────────────────────────────────────
 
 
-def test_augment_none_returns_training_data_with_predicted_column(dataset):
+def test_augment_none_returns_training_data_with_predicted_column(
+    wide_dataset,
+):
     """`augment(new_data=None)`が、学習データの全列＋`"predicted"`列を持つ
     DataFrameを、`predict()`と同じ予測値・元データと同じ行順で返すこと。
     """
-    res = our_fit(dataset)
+    res = our_fit(wide_dataset, x=WIDE_X)
 
     augmented = res.augment()
 
     assert isinstance(augmented, pl.DataFrame)
-    assert augmented.height == dataset.height
-    assert augmented.columns == [*dataset.columns, "predicted"]
-    for col in dataset.columns:
-        assert augmented[col].to_list() == dataset[col].to_list()
+    assert augmented.height == wide_dataset.height
+    assert augmented.columns == [*wide_dataset.columns, "predicted"]
+    for col in wide_dataset.columns:
+        assert augmented[col].to_list() == wide_dataset[col].to_list()
 
-    expected = [row["predicted"] for row in res.predict()]
+    expected = res.predict()
     assert augmented["predicted"].to_list() == expected
 
 
-def test_augment_new_data_returns_new_data_with_predicted_column(dataset):
+def test_augment_new_data_returns_new_data_with_predicted_column(
+    wide_dataset,
+):
     """`augment(new_data)`が、`new_data`の全列＋`"predicted"`列を持つ
     DataFrameを、`predict(new_data)`と同じ予測値で返すこと。
     """
-    res = our_fit(dataset)
-    new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
+    res = our_fit(wide_dataset, x=WIDE_X)
+    new_data = wide_new_data(2)
 
     augmented = res.augment(new_data)
 
     assert isinstance(augmented, pl.DataFrame)
     assert augmented.height == 2
-    assert augmented.columns == ["x1", "x2", "predicted"]
-    assert augmented["x1"].to_list() == new_data["x1"].to_list()
-    assert augmented["x2"].to_list() == new_data["x2"].to_list()
+    assert augmented.columns == [*WIDE_X, "predicted"]
+    for col in WIDE_X:
+        assert augmented[col].to_list() == new_data[col].to_list()
 
-    expected = [row["predicted"] for row in res.predict(new_data)]
+    expected = res.predict(new_data)
     assert augmented["predicted"].to_list() == expected
 
 
-def test_augment_new_data_with_extra_column_preserves_it(dataset):
+def test_augment_new_data_with_extra_column_preserves_it(wide_dataset):
     """`new_data`が`x`列以外の余分な列（予測に使わない識別子列等）を含む場合、
     その列もそのまま`"predicted"`列と一緒に返されること。
     """
-    res = our_fit(dataset)
-    new_data = pl.DataFrame(
-        {
-            "id": ["a", "b"],
-            "x1": [1.0, 2.0],
-            "x2": [0.5, -0.5],
-        }
-    )
+    res = our_fit(wide_dataset, x=WIDE_X)
+    new_data = wide_new_data(2).insert_column(0, pl.Series("id", ["a", "b"]))
 
     augmented = res.augment(new_data)
 
-    assert augmented.columns == ["id", "x1", "x2", "predicted"]
+    assert augmented.columns == ["id", *WIDE_X, "predicted"]
     assert augmented["id"].to_list() == ["a", "b"]
 
 
@@ -467,28 +452,29 @@ def test_augment_without_intercept_matches_predict():
     res = OLS(df, y="y", x=["x1"], options=options).fit()
 
     augmented_none = res.augment()
-    expected_none = [row["predicted"] for row in res.predict()]
+    expected_none = res.predict()
     assert augmented_none["predicted"].to_list() == expected_none
 
     new_data = pl.DataFrame({"x1": [10.0, 20.0]})
     augmented_new = res.augment(new_data)
-    expected_new = [row["predicted"] for row in res.predict(new_data)]
+    expected_new = res.predict(new_data)
     assert augmented_new["predicted"].to_list() == expected_new
 
 
-# ── クラスターロバストSEの健全性チェック（真のクラスター内相関） ──────
+# ── 統計的健全性チェック（クラスターSE） ──────────────────────────────
+
+
 #
 # 上記のクラスター系テスト・test_ols_reference.py/test_ols_crosscheck.pyの
 # クラスター系テストは、いずれも誤差i.i.d.なデータに疑似グループラベルを
 # 後付けしたものであり、リファレンス実装（statsmodels/R）との数値一致を
-# 検証する目的には十分だが、「クラスターロバストSEが真のクラスター内相関が
-# ある状況で意図通り機能するか（通常のSEより適切に大きくなるか）」という
-# 別種の健全性は検証していなかった。以下はその
-# 健全性のみを確認する専用テストであり、他のテストと異なりリファレンス
-# 実装との数値比較は行わない。
+# 検証する。「クラスターロバストSEが真のクラスター内相関がある状況で意図通り
+# 機能するか（通常のSEより適切に大きくなるか）」という別種の健全性は、
+# 以下の専用テストで確認する。他のテストと異なりリファレンス実装との
+# 数値比較は行わない。
 
 
-def test_cluster_std_error_exceeds_classical_under_true_intra_cluster_correlation():
+def test_cluster_se_exceeds_classical_under_intra_cluster_correlation():
     """説明変数・誤差の両方にクラスター内相関を持たせたMoulton型DGPで、
     クラスターロバストSEが古典的SEより明確に大きくなることを確認する。
 
@@ -536,3 +522,34 @@ def test_cluster_std_error_exceeds_classical_under_true_intra_cluster_correlatio
 
     ratio = cluster.std_errors["x1"] / classical.std_errors["x1"]
     assert ratio > 1.5, f"ratio={ratio}"
+
+
+# ── HACの実使用ラグ数（hac_lags_used） ────────────────────────────────
+
+
+@pytest.mark.parametrize("n", HAC_AUTO_LAG_SAMPLE_SIZES)
+def test_hac_lags_used_matches_python_auto_lag_formula(n):
+    """`hac_lags`省略時の`hac_lags_used`が、Python側の独立実装
+    （`benchmark.common.hac_auto_lag`）と複数の標本サイズで一致すること。
+    """
+    options = OLSOptions(cov_type="hac", hac_time=ROW_TIME)
+    res = OLS(hac_lag_frame(n), y="y", x=["x1", "x2"], options=options).fit()
+    assert res.hac_lags_used == hac_auto_lag(n)
+
+
+@pytest.mark.parametrize("hac_lags", [0, 3, 10])
+def test_hac_lags_used_echoes_explicit_hac_lags(dataset, hac_lags):
+    """`hac_lags`を明示指定したときは、自動計算値ではなく指定値が返ること。"""
+    options = OLSOptions(cov_type="hac", hac_lags=hac_lags, hac_time=ROW_TIME)
+    res = OLS(
+        with_row_time(dataset), y="y", x=["x1", "x2"], options=options
+    ).fit()
+    assert res.hac_lags_used == hac_lags
+
+
+@pytest.mark.parametrize("cov_type", ["classical", "hc0", "hc3"])
+def test_hac_lags_used_is_none_unless_hac(dataset, cov_type):
+    res = OLS(
+        dataset, y="y", x=["x1", "x2"], options=OLSOptions(cov_type=cov_type)
+    ).fit()
+    assert res.hac_lags_used is None

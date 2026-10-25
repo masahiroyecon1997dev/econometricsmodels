@@ -1,7 +1,7 @@
 """IV 系統のテスト共通フィクスチャ。
 
 `iv_dataset`/`clustered_dataset` は `test_iv_api.py`/`test_iv_validation.py` の
-両方が使う（関心事分割前は `test_iv.py` 内で定義されていた）。
+両方が使う。
 `tests/conftest.py` の `dataset` 等と違い IV 固有のため、系統ディレクトリ側の
 conftest に置く。
 """

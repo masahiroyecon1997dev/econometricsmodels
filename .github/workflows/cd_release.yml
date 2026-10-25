@@ -10,6 +10,8 @@ name: CD (release build)
 # 設計だとPyPI公開失敗時にtagが永久に使えなくなる。本ワークフローはtag pushを
 # トリガーにし、PyPI公開が成功して初めてGitHub Releaseを作ることで、公開失敗時は
 # tagを削除して同じバージョンで再実行できるようにしている。
+# （v*タグはrulesetで更新・削除を禁止している（バイパスなし）。この回復手順を取るときは、
+# Settings > Rules でrulesetを一時的に無効にしてからtagを削除し、再作成後に有効へ戻す。）
 on:
   push:
     tags:
@@ -18,7 +20,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # サポート対象Python（CLAUDE.md 12章）に限定してビルドする。--find-interpreterは
+  # サポート対象Python（CLAUDE.md 11章）に限定してビルドする。--find-interpreterは
   # 使わない（manylinuxコンテナ内にある未サポートバージョン・free-threaded版まで
   # 全てビルドしてしまうため）。
   MATURIN_INTERPRETER_ARGS: -i python3.12 -i python3.13 -i python3.14
@@ -62,6 +64,8 @@ jobs:
             size_baseline: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -103,6 +107,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -147,6 +153,8 @@ jobs:
             target: aarch64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -179,6 +187,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Build sdist
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
@@ -218,7 +228,7 @@ jobs:
       # 公開イメージが存在しないコミットSHAを指定するとmanifest unknownで失敗する
       # （v0.1.0初回リリース時に実際に発生・確認済み）。バージョンタグでの参照が
       # 唯一動作する方式のため、ここに限りSHAピン留めの方針の例外とする。
-      - uses: pypa/gh-action-pypi-publish@v1.14.2
+      - uses: pypa/gh-action-pypi-publish@v1.14.3
         with:
           # tag再push（公開失敗後の再実行）で、既に成功済みのファイルを
           # 再アップロードしようとして400エラーになるのを防ぐ。
@@ -239,10 +249,14 @@ jobs:
           merge-multiple: true
 
       - name: Create Release
+        # タグ名には`$(...)`等のシェルのメタ文字を含められるため、`run:`へ式を直接
+        # 埋め込まず、環境変数経由で渡す(テンプレートインジェクション対策)。
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
         run: |
-          gh release create "${{ github.ref_name }}" dist/* \
-            --repo "${{ github.repository }}" \
-            --title "${{ github.ref_name }}" \
+          gh release create "$TAG" dist/* \
+            --repo "$REPO" \
+            --title "$TAG" \
             --generate-notes

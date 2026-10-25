@@ -19,7 +19,7 @@
 //!    実装した。
 //! 2. **engine呼び出し段階**: `build_fe_input`を実際に呼び出す`fit`関数を追加し、`lib.rs`に
 //!    `#[pyfunction] fit_fe`を新設して`#[pymodule]`に登録する。`build_fe_input`/
-//!    `parse_fe_cov_type`/`panel_error_to_pyerr`はこの時点で本番経路（`fit_fe`）から
+//!    `parse_panel_cov_kind`/`panel_error_to_pyerr`はこの時点で本番経路（`fit_fe`）から
 //!    実際に呼ばれるようになるため、`#[allow(dead_code)]`はすべて削除する
 //!    （`engine_pybind/src/iv/CLAUDE.md`「実装フェーズの分割方針」の初期実装段階と同じ）。
 //! 3. **`fixed_effects()`メソッド追加段階**: IVの`first_stage()`と同じ
@@ -37,7 +37,7 @@
 //! （ユーザー確認済み、2026-09-12）。**`cov_type="dk"`では`dk_time`が必須**で、`time`
 //! （2-way FEの固定効果の時間次元）を暗黙に借用しない（どの列がDKの時点かを明示させ、
 //! 意図と違う列が選ばれても気づけない状況を避けるため。`dk_time`未指定は
-//! `ValidationError`、`parse_fe_cov_type`参照）。2-wayでも`dk_time`が常にDK計算に使われ、
+//! `ValidationError`、`parse_panel_cov_kind`参照）。2-wayでも`dk_time`が常にDK計算に使われ、
 //! `time`と別の時間粒度（四半期の固定効果に年次のDK等）も指定できる（詳細な経緯・engine側の
 //! 対応する変更は`engine/src/panel/fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）。
 //!
@@ -46,12 +46,8 @@
 //! FEは`hc0`を**サポートしない**（linearmodels・fixestともにパネル/FE向けの`hc0`
 //! オプションが存在しないため、`FeCovType` enumから除外済み）。OLS/WLS/IVとは
 //! 異なりFEの`cov_type`文字列パースはこの1点で分岐が異なるため、`linear::common::
-//! parse_cov_type`を流用せず独立実装する。IVの`cov_type`パースは元々（`iv::common::
-//! parse_iv_cov_type`という）別実装を持っていたが、`OLSOptions`/`IVOptions`が同名
-//! フィールドを持つ偶然の一致により後から`linear::common::parse_cov_type`へ統合された
-//! ——FEはこの一致が無く
-//! （`hc0`非対応・`Dk`の意味論がFE固有）、意図的に独立実装を維持している点でIVとは事情が
-//! 異なる。
+//! parse_cov_kind`を流用せず、FE/RE共通の`panel::common::parse_panel_cov_kind`を使う
+//! （OLS/WLS/IVは`linear::common`を共有する。`hc0`非対応・`Dk`の意味論がパネル固有のため）。
 //!
 //! ## `x`の空リストを許容しない
 //!
@@ -69,31 +65,33 @@
 //! （OLS自身も`engine::linear::ols::OlsEstimator::fit`自体はk=0をpanicなく受理するが
 //! Python APIの`validate_x_non_empty`が弾く、という既存の非対称性と同じ構図）。
 
+use crate::shared::errors::guard;
 use engine::panel::common::TimeKeys;
 use engine::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput, FixedEffects};
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use pyo3_polars::PyDataFrame;
 
-use super::common::{panel_error_to_pyerr, validate_dk_time_role};
-use crate::column_extraction::{
-    extract_f64_column, extract_f64_columns, extract_group_key_column, extract_time_keys,
+use super::common::{
+    PanelCovKind, PanelModel, check_panel_cov_options, panel_error_to_pyerr, parse_panel_cov_kind,
+    require_dk_time, validate_dk_time_role,
 };
-use crate::errors::ValidationError;
-use crate::linear::common::mat_to_vec;
-use crate::option_values::{
+use crate::shared::column_error::ColumnSource;
+use crate::shared::column_extraction::{
+    SelectedData, extract_entity_groups, extract_f64_column, extract_f64_columns,
+    extract_optional_cluster_groups, extract_time_keys,
+};
+use crate::shared::mat_conversion::mat_to_vec;
+use crate::shared::option_repr::PyRepr;
+use crate::shared::option_values::{
     extract_strict_float, extract_strict_opt_column, extract_strict_opt_int, extract_strict_text,
 };
-use crate::validation::{
-    RoleValue, reject_unused_option, validate_no_duplicate_roles,
-    validate_no_duplicate_within_role, validate_x_non_empty,
+use crate::shared::validation::{
+    RoleValue, validate_no_duplicate_roles, validate_no_duplicate_within_role, validate_x_non_empty,
 };
 
 /// Estimation options for FE (fixed effects panel regression).
-///
-/// See `docs/spec/panel-common.md` for the rationale behind each field's
-/// meaning and default value.
+// 各フィールドの意味・既定値の根拠は`docs/spec/panel-common.md`。
 // module/from_py_objectの理由は`OLSOptions`と同じ（`engine_pybind/src/linear/ols.rs`参照）。
 #[pyclass(from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
@@ -143,6 +141,19 @@ pub struct FEOptions {
     pub dk_bandwidth: Option<i64>,
 }
 
+impl FEOptions {
+    /// このオプションが指名するデータの列（`time`・`cluster`・`dk_time`）。使われるかどうか（`cov_type`等）には
+    /// よらず、指名されたものを全て返す。`fit()`はこれらと`y`・`x`等だけをデータから取り込む。
+    pub(crate) fn data_columns(&self) -> Vec<String> {
+        self.time
+            .iter()
+            .chain(&self.cluster)
+            .chain(&self.dk_time)
+            .cloned()
+            .collect()
+    }
+}
+
 #[pymethods]
 impl FEOptions {
     #[new]
@@ -156,12 +167,14 @@ impl FEOptions {
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
-        #[pyo3(from_py_with = crate::option_values::cov_type_arg)] cov_type: String,
-        #[pyo3(from_py_with = crate::option_values::confidence_level_arg)] confidence_level: f64,
-        #[pyo3(from_py_with = crate::option_values::time_arg)] time: Option<String>,
-        #[pyo3(from_py_with = crate::option_values::cluster_arg)] cluster: Option<String>,
-        #[pyo3(from_py_with = crate::option_values::dk_time_arg)] dk_time: Option<String>,
-        #[pyo3(from_py_with = crate::option_values::dk_bandwidth_arg)] dk_bandwidth: Option<i64>,
+        #[pyo3(from_py_with = crate::shared::option_values::cov_type_arg)] cov_type: String,
+        #[pyo3(from_py_with = crate::shared::option_values::confidence_level_arg)] confidence_level: f64,
+        #[pyo3(from_py_with = crate::shared::option_values::time_arg)] time: Option<String>,
+        #[pyo3(from_py_with = crate::shared::option_values::cluster_arg)] cluster: Option<String>,
+        #[pyo3(from_py_with = crate::shared::option_values::dk_time_arg)] dk_time: Option<String>,
+        #[pyo3(from_py_with = crate::shared::option_values::dk_bandwidth_arg)] dk_bandwidth: Option<
+            i64,
+        >,
     ) -> Self {
         Self {
             cov_type,
@@ -211,14 +224,14 @@ impl FEOptions {
 
     fn __repr__(&self) -> String {
         format!(
-            "FEOptions(cov_type={:?}, confidence_level={}, time={:?}, cluster={:?}, \
-             dk_time={:?}, dk_bandwidth={:?})",
-            self.cov_type,
-            self.confidence_level,
-            self.time,
-            self.cluster,
-            self.dk_time,
-            self.dk_bandwidth
+            "FEOptions(cov_type={}, confidence_level={}, time={}, cluster={}, \
+             dk_time={}, dk_bandwidth={})",
+            self.cov_type.py_repr(),
+            self.confidence_level.py_repr(),
+            self.time.py_repr(),
+            self.cluster.py_repr(),
+            self.dk_time.py_repr(),
+            self.dk_bandwidth.py_repr()
         )
     }
 }
@@ -249,10 +262,10 @@ pub struct FEResult {
     pub std_errors: Vec<f64>,
     #[pyo3(get)]
     pub test_stats: Vec<f64>,
-    /// Distribution of `test_stats`: `"t"` or `"normal"`.
+    /// Distribution of `test_stats`; always `"t"` for FE.
     #[pyo3(get)]
     pub stat_dist: String,
-    /// Degrees of freedom of the t distribution (`None` for `"normal"`). May differ from
+    /// Degrees of freedom of the t distribution (always `Some`). May differ from
     /// `df_resid` (e.g. cluster-robust inference uses `G - 1`).
     #[pyo3(get)]
     pub stat_df: Option<i64>,
@@ -292,14 +305,17 @@ pub struct FEResult {
     /// of unique time periods in `dk_time`. `None` unless `cov_type="dk"`.
     #[pyo3(get)]
     pub dk_bandwidth_used: Option<i64>,
+    /// Overall F-test statistic of the slope coefficients. `None` when the test is not
+    /// defined: there are no slope coefficients.
     #[pyo3(get)]
-    pub f_statistic: f64,
+    pub f_statistic: Option<f64>,
+    /// P-value of `f_statistic` (`None` exactly when `f_statistic` is `None`).
     #[pyo3(get)]
-    pub f_p_value: f64,
-    /// Numerator degrees of freedom of `f_statistic` (`None` when it is NaN).
+    pub f_p_value: Option<f64>,
+    /// Numerator degrees of freedom of `f_statistic` (`None` when `f_statistic` is `None`).
     #[pyo3(get)]
     pub f_df_num: Option<usize>,
-    /// Denominator degrees of freedom of `f_statistic` (`None` when it is NaN). May differ
+    /// Denominator degrees of freedom of `f_statistic` (`None` when `f_statistic` is `None`). May differ
     /// from `df_resid` (e.g. OLS/WLS with cluster-robust inference uses `G - 1`).
     #[pyo3(get)]
     pub f_df_denom: Option<usize>,
@@ -343,101 +359,61 @@ impl FEResult {
     /// observation order, so numerical agreement with `fixest` for two-way effects
     /// only holds when those two choices of `t_ref` coincide for the given data.
     fn fixed_effects(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
-        match self.estimator.fixed_effects() {
-            FixedEffects::OneWay(effects) => Ok(effects.into_pyobject(py)?.unbind()),
-            FixedEffects::TwoWay { entity, time } => {
-                // 時点は時間順に並べた`dict`にする（Pythonの`dict`は挿入順を保つ）。
-                let time_effects = PyDict::new(py);
-                for (period, effect) in time {
-                    time_effects.set_item(period, effect)?;
+        guard(|| {
+            match self.estimator.fixed_effects() {
+                FixedEffects::OneWay(effects) => Ok(effects.into_pyobject(py)?.unbind()),
+                FixedEffects::TwoWay { entity, time } => {
+                    // 時点は時間順に並べた`dict`にする（Pythonの`dict`は挿入順を保つ）。
+                    let time_effects = PyDict::new(py);
+                    for (period, effect) in time {
+                        time_effects.set_item(period, effect)?;
+                    }
+                    let outer = PyDict::new(py);
+                    outer.set_item("entity", entity)?;
+                    outer.set_item("time", time_effects)?;
+                    Ok(outer.unbind())
                 }
-                let outer = PyDict::new(py);
-                outer.set_item("entity", entity)?;
-                outer.set_item("time", time_effects)?;
-                Ok(outer.unbind())
             }
-        }
+        })
     }
 }
 
-/// `FEOptions.cov_type`をパースし、該当する`cov_type`のときのみ`cluster`/`dk_time`を
-/// 抽出したうえで`engine::panel::fe::FeCovType`を組み立てる。
+/// [`PanelCovKind`]に対応する列（`cluster`・`dk_time`）をDataFrameから抽出して
+/// `engine::panel::fe::FeCovType`を組み立てる。
 ///
-/// `linear::common::parse_cov_type`（OLS/WLS用）を流用しない理由はモジュールdoc
+/// `linear::common::resolve_cov_type`（OLS/WLS用）を流用しない理由はモジュールdoc
 /// 「`cov_type`の非対応値」参照（`hc0`が無い・`Dk`の`time`上書きがFE固有のため）。
+/// 使われないオプションの検査は`check_panel_cov_options`の責務。
 ///
 /// # Errors
-/// `cov_type`の文字列が既知の値のいずれでもない場合は`ValidationError`（`hc0`は非対応の
-/// 専用メッセージ、それ以外の未知の値は一般的な「unknown cov_type」メッセージ）。それ以外
-/// （列の抽出時に発覚する問題等）は`column_extraction`の責務で`ValidationError`。
-fn parse_fe_cov_type(df: &DataFrame, options: &FEOptions) -> PyResult<(FeCovType, String)> {
-    let cov_type_lower = options.cov_type.to_lowercase();
-    let cov_type = match cov_type_lower.as_str() {
-        "classical" => FeCovType::Classical,
-        "hc1" => FeCovType::Hc1,
-        "hc2" => FeCovType::Hc2,
-        "hc3" => FeCovType::Hc3,
-        "cluster" => {
-            let groups = options
-                .cluster
-                .as_ref()
-                .map(|col_name| extract_group_key_column(df, col_name))
-                .transpose()?;
-            FeCovType::Cluster { groups }
-        }
-        "dk" => {
-            // DKの時点列は`dk_time`で明示する（必須）。2-way FEの`time`（固定効果構造）を
-            // 暗黙に借用すると、意図と違う列が選ばれても気づけないため
-            // （モジュールdoc「`FEOptions.time`と`FEOptions.dk_time`は別物」参照）。
-            let Some(dk_time) = options.dk_time.as_ref() else {
-                return Err(ValidationError::new_err(
-                    "cov_type='dk' requires the `dk_time` option: the column that defines \
-                     the time periods of the Driscoll-Kraay estimator (it is not taken from \
-                     `time`, which only sets the two-way fixed effects)",
-                ));
-            };
-            let time = extract_time_keys(df, dk_time)?;
+/// 列の抽出時に発覚する問題は`column_extraction`の責務で`ValidationError`。`Dk`で
+/// `dk_time`が未指定の場合も`ValidationError`（`check_panel_cov_options`を通していれば
+/// 起きない）。
+fn resolve_fe_cov_type(
+    df: &DataFrame,
+    kind: PanelCovKind,
+    options: &FEOptions,
+) -> PyResult<FeCovType> {
+    Ok(match kind {
+        PanelCovKind::Classical => FeCovType::Classical,
+        PanelCovKind::Hc1 => FeCovType::Hc1,
+        PanelCovKind::Hc2 => FeCovType::Hc2,
+        PanelCovKind::Hc3 => FeCovType::Hc3,
+        PanelCovKind::Cluster => FeCovType::Cluster {
+            groups: extract_optional_cluster_groups(
+                df,
+                options.cluster.as_deref(),
+                ColumnSource::new("cluster", "data"),
+            )?,
+        },
+        PanelCovKind::Dk => {
+            let dk_time = require_dk_time(options.dk_time.as_deref())?;
             FeCovType::Dk {
                 bandwidth: options.dk_bandwidth,
-                time,
+                time: extract_time_keys(df, dk_time, ColumnSource::new("dk_time", "data"))?,
             }
         }
-        "hc0" => {
-            return Err(ValidationError::new_err(
-                "cov_type='hc0' is not supported for FE (neither linearmodels nor fixest \
-                 offer HC0 for panel/FE regressions); use 'hc1', 'hc2', or 'hc3' instead",
-            ));
-        }
-        other => {
-            return Err(ValidationError::new_err(format!(
-                "unknown cov_type: '{other}'. Expected one of 'classical', 'hc1' through \
-                 'hc3', 'cluster', or 'dk'"
-            )));
-        }
-    };
-
-    // 未知の`cov_type`は「unknown cov_type」を優先して報告する（上のmatchが先）。
-    reject_unused_option(
-        "cluster",
-        options.cluster.is_some(),
-        cov_type_lower == "cluster",
-        "cov_type=\"cluster\"",
-    )?;
-    let is_dk = cov_type_lower == "dk";
-    reject_unused_option(
-        "dk_time",
-        options.dk_time.is_some(),
-        is_dk,
-        "cov_type=\"dk\"",
-    )?;
-    reject_unused_option(
-        "dk_bandwidth",
-        options.dk_bandwidth.is_some(),
-        is_dk,
-        "cov_type=\"dk\"",
-    )?;
-
-    Ok((cov_type, cov_type_lower))
+    })
 }
 
 /// Pythonから渡された `data` / `y` / `x` / `entity` / `options` を検証し、
@@ -455,7 +431,7 @@ fn parse_fe_cov_type(df: &DataFrame, options: &FEOptions) -> PyResult<(FeCovType
 ///   他手法と揃えた——経緯はモジュールdoc「`x`の空リストを許容しない」参照）。
 ///   `y`/`entity`/`time`/`x`間の重複・`x`内部の重複も同じく`validation.rs`の責務で
 ///   `ValidationError`
-/// - `cov_type`の文字列が不正な場合は`ValidationError`（`parse_fe_cov_type`参照）
+/// - `cov_type`の文字列が不正な場合は`ValidationError`（`parse_panel_cov_kind`参照）
 /// - それ以外（`y`/`entity`/`time`間の行数不一致等）は`engine::panel::common::PanelError`
 ///   から`panel_error_to_pyerr`で変換
 pub(crate) fn build_fe_input(
@@ -465,6 +441,17 @@ pub(crate) fn build_fe_input(
     entity: String,
     options: &FEOptions,
 ) -> PyResult<(FeInput, FeEffects, FeCovType, String)> {
+    // DataFrameを見ない検査を先に行う。報告順は`docs/guide/validation.md`
+    // 「Order in which errors are reported」: オプションの値 → オプションの組合せ →
+    // ロール構造 → `y`/`x`の列 → オプション列 → エンジン。
+    let cov_kind = parse_panel_cov_kind(&options.cov_type, PanelModel::Fe)?;
+    check_panel_cov_options(
+        cov_kind,
+        options.cluster.as_deref(),
+        options.dk_time.as_deref(),
+        options.dk_bandwidth,
+    )?;
+
     // `x`が空リストであることを許容しない（モジュールdoc参照）。
     // OLS/WLS/Logit/Probit/IVと同じ`validate_x_non_empty`を呼ぶ（`.claude/rules/
     // rust-style.md`「バリデーションの責務分担」）。
@@ -482,17 +469,17 @@ pub(crate) fn build_fe_input(
     validate_dk_time_role(&y, &entity, options.dk_time.as_deref())?;
 
     // ── y/x/entity列の抽出 ─────────────────────────────────────────────
-    let y_slice = extract_f64_column(df, &y)?;
+    let y_slice = extract_f64_column(df, &y, ColumnSource::new("y", "data"))?;
 
-    let x_slices = extract_f64_columns(df, &x)?;
+    let x_slices = extract_f64_columns(df, &x, ColumnSource::new("x", "data"))?;
 
-    let entity_slice = extract_group_key_column(df, &entity)?;
+    let entity_groups = extract_entity_groups(df, &entity, ColumnSource::new("entity", "data"))?;
 
     // ── `time`列の抽出（2-way FEを指定した場合のみ）───────────────────────
     let time_keys: Option<TimeKeys> = options
         .time
         .as_ref()
-        .map(|col_name| extract_time_keys(df, col_name))
+        .map(|col_name| extract_time_keys(df, col_name, ColumnSource::new("time", "data")))
         .transpose()?;
     let effects = if time_keys.is_some() {
         FeEffects::TwoWay
@@ -501,12 +488,12 @@ pub(crate) fn build_fe_input(
     };
 
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ）─────────────
-    let (cov_type, cov_type_lower) = parse_fe_cov_type(df, options)?;
+    let cov_type = resolve_fe_cov_type(df, cov_kind, options)?;
 
-    let input = FeInput::from_columns_ordered(&y_slice, &x_slices, x, &entity_slice, time_keys, y)
+    let input = FeInput::from_group_codes(&y_slice, &x_slices, x, entity_groups, time_keys, y)
         .map_err(panel_error_to_pyerr)?;
 
-    Ok((input, effects, cov_type, cov_type_lower))
+    Ok((input, effects, cov_type, cov_kind.name().to_string()))
 }
 
 /// Pythonから渡された `data` / `y` / `x` / `entity` / `options` を検証し、
@@ -517,7 +504,8 @@ pub(crate) fn build_fe_input(
 /// エンティティコードのユニーク数）から取得する。
 ///
 /// `params`/`param_names`/`residuals`/`dep_var_name`/`n_obs`/`log_likelihood`は
-/// `FeEstimator::estimator()`（内部で委譲した`OlsEstimator`）から取得する
+/// `FeEstimator`のgetter（`params()`・`within_input()`・`residuals()`・`log_likelihood()`）から
+/// 取得する
 /// （`std_errors`/`test_stats`/`p_values`/`conf_lower`/`conf_upper`はFE自身が`cov_type`・
 /// 自由度調整を反映して計算し直した値のため、`FeEstimator`自身のgetterを使う——
 /// `engine/src/panel/fe.rs`モジュールdoc「`OlsEstimator`への委譲」参照）。
@@ -529,21 +517,20 @@ pub(crate) fn build_fe_input(
 ///   自由度不足・分散ゼロ・委譲先`OlsEstimator::fit`の失敗・FE自身のF検定の失敗等）は
 ///   `panel_error_to_pyerr`で変換
 pub(crate) fn fit(
-    data: PyDataFrame,
+    data: SelectedData,
     y: String,
     x: Vec<String>,
     entity: String,
     options: &FEOptions,
 ) -> PyResult<FEResult> {
-    let df: DataFrame = data.into();
+    let df: DataFrame = data.frame;
     let (input, effects, cov_type, cov_type_lower) = build_fe_input(&df, y, x, entity, options)?;
 
     let estimator = FeEstimator::fit(input, effects, cov_type, options.confidence_level)
         .map_err(panel_error_to_pyerr)?;
-    let ols = estimator.estimator();
 
     Ok(FEResult {
-        params: mat_to_vec(ols.params()),
+        params: mat_to_vec(estimator.params()),
         std_errors: mat_to_vec(estimator.std_errors()),
         test_stats: mat_to_vec(estimator.test_stats()),
         stat_dist: estimator.stat_dist().name().to_string(),
@@ -551,10 +538,10 @@ pub(crate) fn fit(
         p_values: mat_to_vec(estimator.p_values()),
         conf_lower: mat_to_vec(estimator.conf_lower()),
         conf_upper: mat_to_vec(estimator.conf_upper()),
-        param_names: ols.input().param_names().to_vec(),
-        residuals: mat_to_vec(ols.residuals()),
-        dep_var_name: ols.input().dep_var_name().to_string(),
-        n_obs: ols.input().nobs(),
+        param_names: estimator.within_input().param_names().to_vec(),
+        residuals: mat_to_vec(estimator.residuals()),
+        dep_var_name: estimator.within_input().dep_var_name().to_string(),
+        n_obs: estimator.within_input().nobs(),
         df_resid: estimator.df_resid(),
         df_model: estimator.df_model(),
         n_entities: estimator.input().n_entities(),
@@ -565,7 +552,7 @@ pub(crate) fn fit(
         f_p_value: estimator.f_p_value(),
         f_df_num: estimator.f_df().map(|(num, _)| num),
         f_df_denom: estimator.f_df().map(|(_, denom)| denom),
-        log_likelihood: ols.log_likelihood(),
+        log_likelihood: estimator.log_likelihood(),
         aic: estimator.aic(),
         bic: estimator.bic(),
         r_squared_within: estimator.r_squared_within(),
@@ -578,6 +565,7 @@ pub(crate) fn fit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use engine::shared::group_codes::GroupCodes;
     use polars::df;
 
     /// `build_fe_input`のテスト全体で使う既定の`FEOptions`（`cov_type="cluster"`・
@@ -612,7 +600,7 @@ mod tests {
 
         assert_eq!(input.nobs(), 6);
         assert_eq!(input.x_names(), &["x1".to_string()]);
-        assert_eq!(input.time(), None);
+        assert_eq!(input.time_keys(), None);
         assert_eq!(effects, FeEffects::OneWay);
         assert_eq!(
             cov_type,
@@ -638,8 +626,11 @@ mod tests {
         .unwrap();
 
         assert_eq!(effects, FeEffects::TwoWay);
-        let expected_time = ["1", "2", "1", "2", "1", "2"].map(str::to_string);
-        assert_eq!(input.time(), Some(expected_time.as_slice()));
+        let Some(time_keys) = input.time_keys() else {
+            panic!("time keys must be set");
+        };
+        assert_eq!(time_keys.len(), 6);
+        assert_eq!(time_keys.periods(), ["1", "2"]);
     }
 
     #[test]
@@ -771,18 +762,18 @@ mod tests {
         assert_eq!(
             cov_type,
             FeCovType::Cluster {
-                groups: Some(vec![
+                groups: Some(GroupCodes::from_labels_without_keys(&[
                     "x".to_string(),
                     "y".to_string(),
                     "x".to_string(),
                     "y".to_string(),
-                ])
+                ]))
             }
         );
     }
 
     #[test]
-    fn build_fe_input_hac_uses_dk_time_when_time_is_not_set() {
+    fn build_fe_input_dk_uses_dk_time_when_time_is_not_set() {
         // 1-way FE + DK HAC（`time`未指定・`dk_time`のみ指定）の組み合わせ
         // （モジュールdoc「`FEOptions.time`と`FEOptions.dk_time`は別物」参照）。
         let df = well_formed_df();
@@ -800,7 +791,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(effects, FeEffects::OneWay);
-        assert_eq!(input.time(), None); // dk_timeはFeInput.timeには渡らない
+        assert_eq!(input.time_keys(), None); // dk_timeはFeInput.timeには渡らない
         assert_eq!(
             cov_type,
             FeCovType::Dk {
@@ -815,8 +806,8 @@ mod tests {
     }
 
     #[test]
-    fn build_fe_input_hac_uses_dk_time_independently_of_time_when_both_set() {
-        // 2-way（`time`指定あり）でもDKの時点列は`dk_time`だけから決まり、`FeInput.time()`
+    fn build_fe_input_dk_uses_dk_time_independently_of_time_when_both_set() {
+        // 2-way（`time`指定あり）でもDKの時点列は`dk_time`だけから決まり、`FeInput.time_keys()`
         // （固定効果の時間次元）とは独立であることを確認する（モジュールdoc参照）。
         let df = df!(
             "y" => [1.0, 2.0, 3.0, 4.0],
@@ -841,8 +832,11 @@ mod tests {
         .unwrap();
 
         assert_eq!(effects, FeEffects::TwoWay);
-        let expected_time = ["1", "2", "1", "2"].map(str::to_string);
-        assert_eq!(input.time(), Some(expected_time.as_slice()));
+        let Some(time_keys) = input.time_keys() else {
+            panic!("time keys must be set");
+        };
+        assert_eq!(time_keys.len(), 4);
+        assert_eq!(time_keys.periods(), ["1", "2"]);
         assert_eq!(
             cov_type,
             FeCovType::Dk {

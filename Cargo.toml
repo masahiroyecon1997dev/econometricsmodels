@@ -6,7 +6,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.8.0"
+version = "0.9.0"
 edition = "2024"
 license = "MIT"
 publish = false
@@ -38,3 +38,8 @@ argmin-math = { version = "=0.5.1", default-features = false, features = ["vec"]
 # proptest: property-basedテスト（testing-policy.md「将来的に検討する技術」）。
 # dev-dependency専用（配布物には含まれない）。
 proptest = "=1.11.0"
+
+[profile.release]
+# 境界の`guard`（engine_pybind/src/shared/errors.rs）は`catch_unwind`でpanicを`INTERNAL_ERROR`に変える。
+# `panic = "abort"`にすると捕まえられずプロセスごと落ちるため、`unwind`（既定）を明示して固定する。
+panic = "unwind"

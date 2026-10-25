@@ -29,17 +29,17 @@
 //! 共通行列演算向け）は符号反転しない生のスコア`sᵢ=(yᵢ-pᵢ)xᵢ`を返す
 //! （`nonlinear/common.rs`の`SolverOutput.hessian`と同じく対数尤度そのものの符号）。
 
-use crate::error::CommonError;
-use crate::inference;
 use crate::nonlinear::common::{
     CovType, FittedModelForMarginalEffects, GoodnessOfFit, MarginalEffects, MarginalEffectsAt,
-    MleError, MleFitOptions, SandwichVariant, SeparationNormCheck, cluster_cov_params,
-    column_means, column_medians, compensated_sum, destandardize_cov_params, destandardize_params,
-    goodness_of_fit, log_likelihood_null, marginal_effects_from_w_s,
-    observed_information_cov_params, ols_based_initial_params, opg_cov_params, pred_table,
-    predict_from_link, predict_new_data, run_solver, sandwich_cov_params, standardize_columns,
-    validate_fit_preconditions,
+    MleError, MleFitOptions, SandwichVariant, cluster_cov_params, column_means, column_medians,
+    compensated_sum, destandardize_cov_params, destandardize_params, goodness_of_fit,
+    log_likelihood_null, marginal_effects_from_w_s, observed_information_cov_params,
+    ols_based_initial_params, opg_cov_params, pred_table, predict_from_link, predict_new_data,
+    run_solver, sandwich_cov_params, standardize_columns, validate_fit_preconditions,
 };
+use crate::nonlinear::separation::verify_no_separation;
+use crate::shared::error::CommonError;
+use crate::shared::inference;
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::Mat;
 use statrs::distribution::Normal;
@@ -282,10 +282,12 @@ impl LogitProblem {
     pub fn scores(&self, params: &[f64]) -> Mat<f64> {
         let n = self.x.nrows();
         let k = self.x.ncols();
-        Mat::from_fn(n, k, |i, j| {
-            let p = logistic(self.linear_predictor(i, params));
-            (*self.y.get(i, 0) - p) * (*self.x.get(i, j))
-        })
+        // 行の残差`yᵢ-pᵢ`は`j`によらないため、観測あたり1回だけ計算する
+        // （セルごとに計算すると`linear_predictor`のO(k)が行あたりk回になる）。
+        let residuals: Vec<f64> = (0..n)
+            .map(|i| *self.y.get(i, 0) - logistic(self.linear_predictor(i, params)))
+            .collect();
+        Mat::from_fn(n, k, |i, j| residuals[i] * (*self.x.get(i, j)))
     }
 }
 
@@ -491,8 +493,8 @@ impl LogitEstimator {
             confidence_level,
         } = options;
 
-        // faer のグローバル並列度を Par::Seq に固定する（`crate::parallelism`）。
-        crate::parallelism::ensure_serial();
+        // faer のグローバル並列度を Par::Seq に固定する（`crate::shared::parallelism`）。
+        crate::shared::parallelism::ensure_serial();
 
         let n = input.nobs();
         let k = input.k();
@@ -515,8 +517,10 @@ impl LogitEstimator {
         // 別経路に分かれていた）。
         let initial_params = ols_based_initial_params(
             &x_std,
+            input.x(),
             input.y(),
             input.has_intercept(),
+            input.param_names(),
             // logit: IRLS重み `w = p̄(1-p̄)`、リンク値 `η₀ = ln(p̄/(1-p̄))`。
             |p_bar| (p_bar * (1.0 - p_bar), (p_bar / (1.0 - p_bar)).ln()),
         )?;
@@ -543,14 +547,20 @@ impl LogitEstimator {
             tol,
             input.y().nrows(),
             raise_on_non_convergence,
-            // Logitは`y∈{0,1}`で係数が±∞へ発散するため(準)完全分離の
-            // 標準化パラメータノルム事後チェックを有効にする。
-            SeparationNormCheck::Enabled,
         )?;
 
         let params = destandardize_params(&output.params, &scale);
 
         let hessian_std = Mat::from_fn(k, k, |i, j| output.hessian[i][j]);
+        // 収束後に完全分離・準完全分離を厳密に判定する（`nonlinear::separation`）。
+        // 分離なら`raise_on_non_convergence`に応じてエラー、または`converged=false`で続行する。
+        let converged = verify_no_separation(
+            input.x(),
+            &scale,
+            input.y(),
+            output.converged,
+            raise_on_non_convergence,
+        )?;
         // `problem_for_scores.as_ref().expect(...)`は各非`Classical`分岐でのみ呼ばれ、
         // 直前の`match cov_type { CovType::Classical => None, _ => Some(...) }`により
         // 常に`Some`であることが保証されている内部契約（`cov_type`という同じ値で
@@ -597,7 +607,7 @@ impl LogitEstimator {
                 // ため）。ここでの`expect`はその契約を明記する防御的な扱い。
                 let groups = groups
                     .as_ref()
-                    .expect("groups is validated as Some at the top of fit()");
+                    .expect("groups are validated by validate_fit_preconditions for Cluster");
                 cluster_cov_params(&hessian_std, &problem.scores(&output.params), n, k, groups)?
             }
         };
@@ -606,8 +616,7 @@ impl LogitEstimator {
         // `Normal::new(0.0, 1.0)`は標準正規分布であり、標準偏差が正であることを
         // 要求するstatrsの検証を常に満たすため、この`map_err`分岐は理論上到達不能
         // （`.claude/rules/rust-style.md`「テスト」のカバレッジ方針参照）。
-        let normal =
-            Normal::new(0.0, 1.0).map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+        let normal = Normal::new(0.0, 1.0).map_err(|e| CommonError::internal(e.to_string()))?;
         let z_crit = inference::critical_value(&normal, confidence_level);
 
         let mut std_errors = vec![0.0; k];
@@ -652,7 +661,7 @@ impl LogitEstimator {
             p_values,
             conf_lower,
             conf_upper,
-            converged: output.converged,
+            converged,
             n_iter: output.n_iter,
             log_likelihood: llf,
             log_likelihood_null: llnull,
@@ -886,6 +895,8 @@ impl LogitEstimator {
 mod tests {
     use super::*;
     use crate::nonlinear::common::{SolverType, dydx_and_jacobian};
+    use crate::shared::error::ClusterSetting;
+    use crate::shared::group_codes::GroupCodes;
     use statrs::distribution::{ChiSquared, ContinuousCDF};
 
     #[test]
@@ -1004,6 +1015,33 @@ mod tests {
         assert!((hessian[0][1] - 2.5).abs() < 1e-12, "{:?}", hessian);
         assert!((hessian[1][0] - 2.5).abs() < 1e-12, "{:?}", hessian);
         assert!((hessian[1][1] - 7.5).abs() < 1e-12, "{:?}", hessian);
+    }
+
+    /// `scores`は行ごとの残差を観測あたり1回だけ計算して行を埋める。セルごとに再計算する
+    /// 素朴な式と、演算の順序まで含めてビット単位で一致することを確認する
+    /// （極端なパラメータ点を含む）。
+    /// 参照式は本体と同じヘルパーを呼ぶため、検出するのは行列に詰める配置・順序の退行で、
+    /// ヘルパー側の式の変更は別のテスト（閉形式・数値微分）が担う。
+    #[test]
+    fn scores_match_per_cell_reference_bit_for_bit() {
+        let input = small_input();
+        let problem = LogitProblem::new(&input);
+        // `[800.0, -1.0]`は`z≥796`で`logistic`が`1.0`に飽和する（`y-p`が`±0.0`・`-1.0`になる）
+        for params in [
+            vec![0.0, 0.0],
+            vec![0.3, -0.7],
+            vec![40.0, -25.0],
+            vec![800.0, -1.0],
+        ] {
+            let scores = problem.scores(&params);
+            for i in 0..scores.nrows() {
+                for j in 0..scores.ncols() {
+                    let p = logistic(problem.linear_predictor(i, &params));
+                    let expected = (*problem.y.get(i, 0) - p) * (*problem.x.get(i, j));
+                    assert_eq!(scores.get(i, j).to_bits(), expected.to_bits(), "({i}, {j})");
+                }
+            }
+        }
     }
 
     #[test]
@@ -1144,7 +1182,7 @@ mod tests {
 
     #[test]
     fn fit_pins_faer_global_parallelism_to_seq() {
-        // `fit()` 冒頭の `crate::parallelism::ensure_serial()` が faer の
+        // `fit()` 冒頭の `crate::shared::parallelism::ensure_serial()` が faer の
         // グローバル並列度を `Par::Seq` へ引き戻すことの回帰ガード（nonlinear 系統代表）。
         // 別テストが `Seq` にしている可能性があるため、まず `Rayon` に戻してから通す。
         // 設計行列は極小なので一時的な `Rayon` 設定は病理を招かない。
@@ -1218,7 +1256,7 @@ mod tests {
     /// `cov_params`の対称性・各種統計量の内部整合性（z値・信頼区間の定義式通りの関係）を
     /// 検証する回帰テスト。特に`destandardize_cov_params`が非対角成分も含めて
     /// 正しく元のスケールへ逆変換できているかを確認する（対角成分だけでは
-    /// `destandardize_cov_params`の`stds[i]*stds[j]`の掛け違い（転置ミス等）を検出できない）。
+    /// `destandardize_cov_params`のヤコビアン`J`の非対角（切片行）の取り違えや転置ミス等を検出できない）。
     #[test]
     fn fit_cov_params_is_symmetric_and_stats_are_internally_consistent() {
         let y = vec![0.0, 1.0, 0.0, 1.0];
@@ -1476,12 +1514,7 @@ mod tests {
             input_for_reconstruction.x(),
             input_for_reconstruction.has_intercept(),
         );
-        let params_std: Vec<f64> = classical
-            .params()
-            .iter()
-            .zip(scale.stds())
-            .map(|(p, s)| p * s)
-            .collect();
+        let params_std = scale.standardize_params(classical.params());
         let problem_std =
             LogitProblem::from_standardized(x_std, input_for_reconstruction.y().clone());
         let scores_std = problem_std.scores(&params_std);
@@ -1578,12 +1611,7 @@ mod tests {
             input_for_reconstruction.x(),
             input_for_reconstruction.has_intercept(),
         );
-        let params_std: Vec<f64> = classical
-            .params()
-            .iter()
-            .zip(scale.stds())
-            .map(|(p, s)| p * s)
-            .collect();
+        let params_std = scale.standardize_params(classical.params());
         let problem_std =
             LogitProblem::from_standardized(x_std, input_for_reconstruction.y().clone());
         let scores_std = problem_std.scores(&params_std);
@@ -1591,7 +1619,14 @@ mod tests {
         let hessian_std = Mat::from_fn(k, k, |i, j| -cost_hessian_std[i][j]);
 
         let expected_cluster = destandardize_cov_params(
-            &cluster_cov_params(&hessian_std, &scores_std, n, k, &groups).unwrap(),
+            &cluster_cov_params(
+                &hessian_std,
+                &scores_std,
+                n,
+                k,
+                &crate::shared::group_codes::GroupCodes::from_labels(&groups),
+            )
+            .unwrap(),
             &scale,
         );
 
@@ -1603,7 +1638,7 @@ mod tests {
                 tol: 1e-8,
                 raise_on_non_convergence: true,
                 cov_type: CovType::Cluster {
-                    groups: Some(groups),
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
                 },
                 confidence_level: 0.95,
             },
@@ -1672,12 +1707,7 @@ mod tests {
             input_for_reconstruction.x(),
             input_for_reconstruction.has_intercept(),
         );
-        let params_std: Vec<f64> = classical
-            .params()
-            .iter()
-            .zip(scale.stds())
-            .map(|(p, s)| p * s)
-            .collect();
+        let params_std = scale.standardize_params(classical.params());
         let problem_std =
             LogitProblem::from_standardized(x_std, input_for_reconstruction.y().clone());
         let scores_std = problem_std.scores(&params_std);
@@ -1685,7 +1715,14 @@ mod tests {
         let hessian_std = Mat::from_fn(k, k, |i, j| -cost_hessian_std[i][j]);
 
         let expected_cluster = destandardize_cov_params(
-            &cluster_cov_params(&hessian_std, &scores_std, n, k, &groups).unwrap(),
+            &cluster_cov_params(
+                &hessian_std,
+                &scores_std,
+                n,
+                k,
+                &crate::shared::group_codes::GroupCodes::from_labels(&groups),
+            )
+            .unwrap(),
             &scale,
         );
 
@@ -1697,7 +1734,7 @@ mod tests {
                 tol: 1e-8,
                 raise_on_non_convergence: true,
                 cov_type: CovType::Cluster {
-                    groups: Some(groups),
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
                 },
                 confidence_level: 0.95,
             },
@@ -1742,7 +1779,9 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            MleError::Common(CommonError::MissingClusterColumn)
+            MleError::Common(CommonError::MissingClusterColumn {
+                setting: ClusterSetting::CovType,
+            })
         );
     }
 
@@ -1768,7 +1807,7 @@ mod tests {
                 tol: 1e-8,
                 raise_on_non_convergence: true,
                 cov_type: CovType::Cluster {
-                    groups: Some(groups),
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
                 },
                 confidence_level: 0.95,
             },
@@ -1776,7 +1815,10 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            MleError::Common(CommonError::InsufficientClusters { g: 1 })
+            MleError::Common(CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 1
+            })
         );
     }
 
@@ -1814,7 +1856,7 @@ mod tests {
                 tol: 1e-8,
                 raise_on_non_convergence: true,
                 cov_type: CovType::Cluster {
-                    groups: Some(groups),
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
                 },
                 confidence_level: 0.95,
             },
@@ -1861,7 +1903,7 @@ mod tests {
             CovType::Hc0,
             CovType::Hc1,
             CovType::Cluster {
-                groups: Some(groups),
+                groups: Some(GroupCodes::from_labels_without_keys(&groups)),
             },
         ] {
             let newton = LogitEstimator::fit(
@@ -1899,10 +1941,12 @@ mod tests {
                 );
                 for i in 0..k {
                     for j in 0..k {
+                        // 相対許容: 4観測・近分離のためcovの成分は`O(10²)`と大きく、絶対許容
+                        // `1e-4`は相対`1e-7`に当たりbfgsの収束点の僅かな差で落ちる。
+                        let expected = *newton.cov_params().get(i, j);
                         assert!(
-                            (*estimator.cov_params().get(i, j) - *newton.cov_params().get(i, j))
-                                .abs()
-                                < 1e-4,
+                            (*estimator.cov_params().get(i, j) - expected).abs()
+                                < 1e-4 * (1.0 + expected.abs()),
                             "cov_type={:?}, solver={:?}, ({i},{j}): actual={}, newton={}",
                             cov_type,
                             solver,
@@ -2173,6 +2217,41 @@ mod tests {
         }
     }
 
+    /// 標準偏差0の列（定数列）は、切片ありでは標準化で平均が引かれて全ゼロ列になり、
+    /// 設計行列がランク落ちして`SingularDesignMatrix`で弾かれる（`solver`に依らない）。
+    #[test]
+    fn fit_returns_singular_design_matrix_error_for_constant_column_with_intercept() {
+        let y = vec![0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0];
+        let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let constant = vec![0.1; 8];
+
+        for solver in [SolverType::Newton, SolverType::Bfgs, SolverType::Lbfgs] {
+            let input = LogitInput::from_columns(
+                &y,
+                &[x1.clone(), constant.clone()],
+                vec!["x1".to_string(), "c".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap();
+            let result = LogitEstimator::fit(
+                input,
+                MleFitOptions {
+                    solver,
+                    max_iter: 35,
+                    tol: 1e-6,
+                    raise_on_non_convergence: true,
+                    cov_type: CovType::Classical,
+                    confidence_level: 0.95,
+                },
+            );
+            assert!(
+                matches!(result, Err(MleError::SingularDesignMatrix { .. })),
+                "solver={solver:?}, result={result:?}"
+            );
+        }
+    }
+
     /// 完全な多重共線性（`x2 = 2·x1`）の設計行列は、`fit()`冒頭の列ピボットQR
     /// ランクチェック（`nonlinear::common::checked_design_matrix_qr`）で`solver`・
     /// `cov_type`に関わらず単一経路で`SingularDesignMatrix`として弾かれる。
@@ -2219,7 +2298,7 @@ mod tests {
                 CovType::Hc1,
                 CovType::Opg,
                 CovType::Cluster {
-                    groups: Some(groups.clone()),
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
                 },
             ] {
                 let input = LogitInput::from_columns(
@@ -2243,7 +2322,7 @@ mod tests {
                     },
                 );
                 assert!(
-                    matches!(result, Err(MleError::SingularDesignMatrix)),
+                    matches!(result, Err(MleError::SingularDesignMatrix { .. })),
                     "solver={solver:?}, cov_type={cov_type:?}, result={result:?}"
                 );
             }
@@ -2259,12 +2338,11 @@ mod tests {
     //      `fit_converges_normally_for_mild_near_separation_data_across_all_methods`
     //      （`max_iter=35`で3手法とも収束）で正常収束が保証されており、かつ warm start
     //      からでも1反復では`tol=1e-12`に到底届かない。
-    //   2. `SeparationNormCheck::Enabled`との相互作用: `run_solver`の事後チェックは
-    //      「収束扱い かつ 標準化パラメータノルム>閾値」でのみ`SeparationSuspected`を
-    //      返す。`max_iter=1`では未収束のため事後チェックは素通りし、必ず
-    //      `NonConvergence`（`raise=true`）／`converged=false`（`raise=false`）になる。
-    //      `beta1=100`（`fit_returns_separation_suspected_error_for_near_separation_data`）
-    //      だと収束判定が絡んで話が変わるため、境界側の`20`である必要がある。
+    //   2. 分離チェックとの相互作用: 分離の検出（`verify_no_separation`）は収束した場合にだけ
+    //      走る。`max_iter=1`では未収束のため必ず`NonConvergence`（`raise=true`）／
+    //      `converged=false`（`raise=false`）になる。`beta1=100`
+    //      （`fit_returns_separation_detected_error_for_separated_data`）は完全分離になる
+    //      ため、境界側の`20`である必要がある。
     #[test]
     fn fit_returns_non_convergence_error_when_max_iter_is_too_small_and_raise_is_true() {
         let result = LogitEstimator::fit(
@@ -2302,22 +2380,12 @@ mod tests {
         assert!(!estimator.converged());
     }
 
-    /// 准完全分離データ（`x1`の真の係数を極端に大きくし、ほぼ全観測がx1の符号だけで
-    /// 完全に分類できるようにしたDGP）で、勾配ノルム基準では収束済みと誤判定されず
-    /// `SeparationSuspected`を返すことを確認する。
-    ///
-    /// 疑似乱数生成は`benchmark/nonlinear/generate_logit_datasets.py`の
-    /// `_NEAR_SEPARATION_BETA1`と同じ設計思想（真のlogit DGPで生成）だが、
-    /// このケースを確実に再現するため既存の`near_separation`シナリオ
-    /// （`beta1=20`、意図的に境界ケースに留めてある）よりさらに極端な`beta1=100`を使う。
-    /// 実機診断で、この`beta1`だと標準化パラメータ空間でのノルムが約1282に達し、
-    /// `near_separation`シナリオ（約31）を大きく上回ることを確認済み
-    /// （`SEPARATION_PARAM_NORM_THRESHOLD`のdocコメント参照）。
-    /// `beta1`（`x1`の真の係数）を指定して准分離データを生成する。`beta1`が大きいほど
-    /// `y`が`x1`の符号だけで決まりやすくなる（`SeparationSuspected`のテスト用、
-    /// `beta1=100`）。小さい`beta1`（例: `20`）は`benchmark/nonlinear/
-    /// generate_logit_datasets.py`の`near_separation`シナリオ（意図的に境界ケースに
-    /// 留めてある、既存の合格テストが使う）と同じ設計思想の、正常に収束するデータになる。
+    /// `beta1`（`x1`の真の係数）を指定して、ほぼ分離したデータを生成する。`beta1`が大きいほど
+    /// `y`が`x1`の符号だけで決まりやすくなり、`beta1=100`では`x1`の符号で全観測が完全に分類
+    /// できる（完全分離、`fit_returns_separation_detected_error_for_separated_data`）。
+    /// 疑似乱数生成は`benchmark/nonlinear/datasets.py`の`near_separation`シナリオと同じ設計
+    /// 思想（真のlogit DGPで生成）。小さい`beta1`（例: `20`）は、そのシナリオと同様に意図的に
+    /// 境界ケースに留めた、正常に収束するデータになる。
     fn near_separation_input_with_beta1(beta1: f64) -> LogitInput {
         fn lcg(seed: &mut u64) -> f64 {
             *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
@@ -2352,17 +2420,11 @@ mod tests {
     }
 
     #[test]
-    fn fit_returns_separation_suspected_error_for_near_separation_data() {
-        // 実測で確認済みの最小反復回数（`SeparationSuspected`が発火するまでの
-        // `n_iter`）: newton=22・bfgs=36（自前実装`FaerBfgs`）・
-        // lbfgs=29。手法ごとに実測値+数回分の余裕を持たせた`max_iter`にすることで、
-        // 将来いずれかの手法だけ反復回数が増加する回帰が起きても検出できるように
-        // する（3手法で同じ`max_iter`を共有すると、他手法に合わせて緩めた分だけ
-        // 検出力が落ちるため）。
+    fn fit_returns_separation_detected_error_for_separated_data() {
         for (solver, max_iter) in [
-            (SolverType::Newton, 25),
-            (SolverType::Bfgs, 40),
-            (SolverType::Lbfgs, 32),
+            (SolverType::Newton, 100),
+            (SolverType::Bfgs, 100),
+            (SolverType::Lbfgs, 100),
         ] {
             let result = LogitEstimator::fit(
                 near_separation_input(),
@@ -2376,7 +2438,7 @@ mod tests {
                 },
             );
             assert!(
-                matches!(result, Err(MleError::SeparationSuspected { .. })),
+                matches!(result, Err(MleError::SeparationDetected)),
                 "solver={:?}, result={:?}",
                 solver,
                 result
@@ -2385,7 +2447,7 @@ mod tests {
     }
 
     #[test]
-    fn fit_returns_unconverged_result_for_near_separation_data_without_raising() {
+    fn fit_returns_unconverged_result_for_separated_data_without_raising() {
         let estimator = LogitEstimator::fit(
             near_separation_input(),
             MleFitOptions {
@@ -2401,11 +2463,73 @@ mod tests {
         assert!(!estimator.converged());
     }
 
-    /// `beta1=20`（`SeparationSuspected`を誤検知させてはいけない境界ケース、`tests/
+    /// 回帰変数どうしの相関が強い（等相関`ρ=0.9`・`k=20`）データでも、`lbfgs`が既定の
+    /// `max_iter=35`以内に`newton`と同じ解へ収束する回帰テスト。標準化後Hessianの条件数が
+    /// 数百になり、`γI`を初期行列とするL-BFGSは40反復前後を要し既定を超えた。warm start点の
+    /// 逆Hessianを初期行列にすると4反復前後になる（centeringでは直らない、相関による悪条件）。
+    #[test]
+    fn fit_lbfgs_converges_within_default_max_iter_for_strongly_correlated_regressors() {
+        let (y, columns) =
+            crate::nonlinear::common::test_support::equicorrelated_binary_data(1000, 20, 0.9, 1);
+        let names: Vec<String> = (1..=20).map(|j| format!("x{j}")).collect();
+        let fit = |solver: SolverType| {
+            let input =
+                LogitInput::from_columns(&y, &columns, names.clone(), true, "y".to_string())
+                    .unwrap();
+            LogitEstimator::fit(
+                input,
+                MleFitOptions {
+                    solver,
+                    max_iter: 35,
+                    tol: 1e-8,
+                    raise_on_non_convergence: true,
+                    cov_type: CovType::Classical,
+                    confidence_level: 0.95,
+                },
+            )
+            .unwrap()
+        };
+
+        let newton = fit(SolverType::Newton);
+        let lbfgs = fit(SolverType::Lbfgs);
+
+        assert!(lbfgs.converged());
+        // 初期行列が`γI`だと40反復前後、warm start点の逆Hessianだと4反復前後（実測）。
+        assert!(lbfgs.n_iter() <= 15, "n_iter={}", lbfgs.n_iter());
+        for (a, b) in lbfgs.params().iter().zip(newton.params()) {
+            assert!(
+                (a - b).abs() <= 1e-5 * (1.0 + b.abs()),
+                "lbfgs={:?}, newton={:?}",
+                lbfgs.params(),
+                newton.params()
+            );
+        }
+    }
+
+    /// 平均が標準偏差に比べて大きい列（平均÷標準偏差が約12〜16）を持つ設計行列でも、標準化後の
+    /// Hessianは良条件（条件数が小さい）になる。標準化で平均を引かないと列が切片列とほぼ共線に
+    /// なり、条件数が数千になる（Wooldridge appleで約7,300）。ソルバーの初期化（`FaerBfgs`/
+    /// `FaerLbfgs`の逆Hessian）はこの悪条件を反復数の面で隠すため、反復数ではなく条件数を直接見る。
+    #[test]
+    fn standardized_hessian_is_well_conditioned_for_columns_with_large_means() {
+        let (y, columns) = crate::nonlinear::common::test_support::large_means_binary_data();
+        let names: Vec<String> = (1..=columns.len()).map(|j| format!("x{j}")).collect();
+        let input = LogitInput::from_columns(&y, &columns, names, true, "y".to_string()).unwrap();
+        let k = input.k();
+
+        let (x_std, _) = standardize_columns(input.x(), input.has_intercept());
+        let problem = LogitProblem::from_standardized(x_std, input.y().clone());
+        let hessian = problem.hessian(&vec![0.0; k]).unwrap();
+
+        let cond = crate::nonlinear::common::test_support::condition_number(&hessian);
+        // 平均を引く標準化では列が互いにほぼ直交し1〜2程度、引かないと数百〜数千（実測）。
+        assert!(cond < 10.0, "condition number={cond}");
+    }
+
+    /// `beta1=20`（分離と誤検知してはいけない境界ケース、`tests/
     /// api_tests/fixtures/benchmarks/data/logit_near_separation.csv`と同じ設計思想）で
     /// 3手法とも正常に収束することを固定するリグレッションテスト（rust-reviewer指摘）。
-    /// `SEPARATION_PARAM_NORM_THRESHOLD`を将来変更する際にこのテストが
-    /// 壊れないか確認することで、閾値の調整が既存の合格ケースを誤検知させないことを保証する。
+    /// 分離検出の変更が既存の合格ケースを誤検知させないことを保証する。
     #[test]
     fn fit_converges_normally_for_mild_near_separation_data_across_all_methods() {
         for solver in [SolverType::Newton, SolverType::Bfgs, SolverType::Lbfgs] {
@@ -3041,7 +3165,7 @@ mod tests {
         }
     }
 
-    /// property-basedテスト。`ols.rs`の`mod proptests`と同型の設計だが、Logitは
+    /// property-basedテスト。`ols/estimator.rs`の`mod proptests`と同型の設計だが、Logitは
     /// MLEベースのため不変条件が異なる（`testing-policy.md`「property-basedテスト」参照）。
     /// OLSの`coefficients_scale_linearly_with_y`（yに関する線形性）に相当する不変条件は
     /// 無い（yは0/1のためスケール自体に意味が無い）代わりに、MLEの一次条件
@@ -3142,7 +3266,7 @@ mod tests {
             ]
         }
 
-        /// `ols.rs`側の同名ヘルパー（`RTOL=1e-6`）より緩い`1e-4`を使う理由: OLSの
+        /// `ols/estimator.rs`側の同名ヘルパー（`RTOL=1e-6`）より緩い`1e-4`を使う理由: OLSの
         /// 列順序不変性は閉形式解（col_piv_qr）の数値誤差のみが要因だが、Logitは
         /// 反復最適化（Newton/BFGS/L-BFGS）を経るため、列順序の違いで収束経路
         /// （標準化空間での列スケールが変わる）が変わり、`tol`ちょうどで停止する

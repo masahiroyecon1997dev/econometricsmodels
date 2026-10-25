@@ -10,12 +10,12 @@ paths:
 
 ## コメント運用
 
-Issue番号・内部管理ドキュメント（`refactoring-candidates.md`等）への参照可否は、CLAUDE.md 6章「コメント・ドキュメントでの参照方針」に準じる（`tests`/`benchmark`固有の追加規約はない）。
+Issue番号・内部管理ドキュメント（`docs/planning/specs/`配下の設計ノート等）への参照可否は、CLAUDE.md 6章「コメント・ドキュメントでの参照方針」に準じる（`tests`/`benchmark`固有の追加規約はない）。
 
 ## テストの分離
 
 - `engine`の純粋ロジックの単体テストは、対象コードと同じファイル内の`#[cfg(test)] mod tests`に置く（`cargo test -p engine`）。
-- `tests/`: リファレンス実装との答え合わせテスト（`pytest`）。系統別サブディレクトリ（`tests/linear/`・`tests/nonlinear/`・`tests/iv/`。`benchmark/` と同じ grain）に手法別ファイル `test_<手法>*.py` を置く。系統によらず全テストが使う共有物（`conftest.py`・`_assertions.py`・`_helpers.py`・`_tolerances.py`）は `tests/` 直下。サブディレクトリからでも `from _helpers import ...` 等の裸importが通るのは `pyproject.toml` の `pythonpath = [".", "tests"]` による。
+- `tests/`: リファレンス実装との答え合わせテスト（`pytest`）。系統別サブディレクトリ（`tests/linear/`・`tests/nonlinear/`・`tests/iv/`・`tests/panel/`。`benchmark/` と同じ grain）に手法別ファイル `test_<手法>*.py` を置く。全手法を横断するテスト（入力の型・オプションの型・`stat_dist`/自由度の整合等）は `tests/cross_method/` に置く。テストではないヘルパー（共有の `_assertions.py`・`_helpers.py`・`_tolerances.py`・`_errors.py`・`_error_expectations.py` 等と、系統別の `_ols_helpers.py`・`_binary_choice_checks.py` 等）は `tests/support/` 一箇所に集約する。`conftest.py` は `tests/` 直下（共有フィクスチャ）、各系統ディレクトリ（系統固有のフィクスチャ）、`tests/cross_method/`（横断テスト用のパネルデータ `panel_df` 等。60行の小さなデータは `_dtype_helpers.make_frame`）に置く。どのディレクトリからでも `from _helpers import ...` 等の裸importが通るのは `pyproject.toml` の `pythonpath = [".", "tests/support"]` による。
 
 ## リファレンス実装
 
@@ -32,7 +32,7 @@ Issue番号・内部管理ドキュメント（`refactoring-candidates.md`等）
        Probitの観測情報行列Hessianを本実装と同じ解析式で手計算しているが、
        `numDeriv::hessian()`による数値微分Hessianとの一致を別途確認済み）。
     3. 1・2のどちらも現実的でない場合は、その旨と理由をクロスチェックスクリプトのコメントに明記し、独立性が限定的であることを認識した上で使う。
-  - 上記の対策が特に重要になるのは、**主リファレンス自体がクロスチェックと同系統（例: 両方ともR実装）で、独立した第三者実装による三角測量が効かない手法**（例: Tobitは主リファレンスがR `AER::tobit`、クロスチェックもR `censReg`）。statsmodels等の独立した主リファレンスが別途存在する手法（OLS/WLS/Logit/Probit/IV等）では、本実装とRクロスチェックに共通の誤解があっても、独立に実装された主リファレンスとは一致しない可能性が高く、実質的な三角測量として機能する。
+  - 上記の対策が特に重要になるのは、**主リファレンス自体がクロスチェックと同系統（例: 両方ともR実装）で、独立した第三者実装による三角測量が効かない手法**（例: Tobitは主リファレンスがR `AER::tobit`、クロスチェックもR `censReg`。両者は別実装なのでクロスチェックとして成立するが、Python参照が無く外部（R以外）からの確認が効かない）。statsmodels等の独立した主リファレンスが別途存在する手法（OLS/WLS/Logit/Probit/IV等）では、本実装とRクロスチェックに共通の誤解があっても、独立に実装された主リファレンスとは一致しない可能性が高く、実質的な三角測量として機能する。
 - **pyfixest**（Python）: OLSの正確性検証には使わない。fixest（R）本体のソースを確認したところ、pyfixest（Python、v0.60.0時点）のHC2/HC3標準誤差はfixestの設計ではなく**pyfixest自身の実装バグ**（HC1用の`N/(N-k)`小標本補正をHC2/HC3にも誤って適用）により系統的に乖離することが判明したため。性能比較（実行時間・メモリ）でのみ使う。FE/REの正確性検証にも使っていない（linearmodelsとR `fixest`/`plm`を使う。詳細は`docs/guide/verification.md`参照）。
 
 ## テスト用データセット
@@ -56,8 +56,35 @@ Issue番号・内部管理ドキュメント（`refactoring-candidates.md`等）
 ## テストの3系統
 
 1. **成功パス**: 数値比較（フィクスチャJSONとの一致、下記参照）
-2. **`ValidationError`パス**: 入力起因のエラー（欠損値、列の重複、観測数不足、`confidence_level`範囲外等）。想定した例外クラスが発生することを確認する（数値比較はしない）
-3. **`ComputationError`パス**: 計算過程で発覚する問題（完全な多重共線性等）。同じく例外クラスの発生のみを確認する
+2. **`ValidationError`パス**: 入力起因のエラー（欠損値、列の重複、観測数不足、`confidence_level`範囲外等）。想定した`code`と`params`で例外が発生することを`tests/support/_errors.py`の`raises_error(code, **params)`で確認する（数値比較はしない。文面は照合しない: 文面はRust側の単体テストと`tests/cross_method/test_error_catalog.py`が固定する）。引数・オプションの型違いは構造化されない`TypeError`で、文面を`_error_expectations.py`のテンプレートで照合する
+3. **`ComputationError`パス**: 計算過程で発覚する問題（完全な多重共線性等）。同じく`raises_error`で`code`と`params`を確認する。カタログの`code`はすべて`MIGRATED_CODES`（実際のエラー経路から送出されることをテストで保証済み）か`UNREACHABLE_CODES`（Pythonから構成できない`code`。理由を添える）のどちらかに入れる（通常のテストが検査する）。全体実行（`pytest tests --check-error-coverage`）は、`MIGRATED_CODES`の全`code`が1度は送出されること、`UNREACHABLE_CODES`の`code`が送出されていないことを検査する
+
+## テストファイルの構成規約
+
+手法ごとのテストは、次の4種類のファイルに分ける（`tests/<系統>/test_<手法>_*.py`）。手法が増えても同じ構成・命名に揃える。
+
+- **ファイル = 結果別**:
+  - `_api.py`: 成功パスの構造・結果型・オプション反映。
+  - `_validation.py`: `ValidationError`/`ComputationError`の境界を確認するテスト。入力・オプションを弾くテストは、拒否する別名の確認（`cov_type="nonrobust"`の拒否等）も含めてこちらに置く。境界の反対側の成功パス（分離と誤検出しない、境界ちょうどで収束する等）も、境界のテストと対にして同じ見出しの下に置く（離すと、境界のどちら側を何が守っているかが読み取れなくなるため）。
+  - `_reference.py`: 主リファレンス（statsmodels/linearmodels/R `AER`等）との数値照合。
+  - `_crosscheck.py`: 独立実装（R）との数値照合。
+- **見出し = 機能別**（`# ── predict() ──`のようなセクション見出し）。見出しの文言と並び順は次のとおりに揃える（該当する機能がある手法のみ）。見出しの罫線は表示幅72桁にそろえる。1ファイルが大きくなっても、見出しの軸（機能別）を結果別に変えない。
+  - `_api.py`: 「成功パス・結果型」「API構造」「オプションの反映」「predict()」「augment()」「pred_table()」「censoring_fit_check()」「marginal_effects()」の順。手法固有の見出し（`fixed_effects()`・ハウスマン検定・OLSとの不変条件・`hac_lags_used`等）はこれらの後ろに置く。
+    - 手法固有の見出しの並びは、手法固有の機能（`fixed_effects()`・ハウスマン検定・OLSとの不変条件・IVの`GMM（estimator="gmm"）`等）→「統計的健全性チェック（クラスターSE）」→ HAC/DKの実使用値（「HACの実使用ラグ数（hac_lags_used）」「Driscoll-Kraayバンド幅の実使用値（dk_bandwidth_used）」）の順。HAC/DK/GMMのテストを「成功パス・結果型」に置かない。
+    - 見出し内の並びは、手法間で共通のテストを先頭に同じ順で置き、手法固有のテストを後ろに置く（同名のテストが手法ごとに別の位置にあると、抜けに気づけないため）。「成功パス・結果型」は`test_fit_succeeds_and_returns_<手法>_results`→`test_default_options_use_*`→その他。「API構造」は`param_names`系→`params_table_structure`→`conf_int_structure`→`params_std_errors_test_stats_p_values_share_keys`→`n_obs`系→その他。「オプションの反映」は`test_cov_type_is_case_insensitive`→`test_confidence_level_changes_interval_width`→`test_include_intercept_false_*`→HACのオプション→solver等のその他のオプション。
+  - `_validation.py`: 「ValidationError（入力データ）」「ValidationError（predict()のnew_data）」「ValidationError（augment()）」「ValidationError（オプション）」「ValidationError（marginal_effects()）」「ComputationError」「例外クラスの継承」の順。入力データを主題で分ける場合は「ValidationError（入力データ: 重み列）」のように`入力データ:`に続けて主題を書く。「使われないオプション」は「ValidationError（オプション）」の下に置く。
+  - `_reference.py`/`_crosscheck.py`: 「凍結フィクスチャとの数値照合（合成データ）」「凍結フィクスチャとの数値照合（オプション）」「凍結フィクスチャとの数値照合（実データ）」の順（FE/REのように実データを特定する場合は「（実データ: Wooldridge wagepan）」と書いてよい）。凍結フィクスチャを使わない照合（ライブ statsmodels 等）はその後ろに「ライブ <リファレンス> との照合」として置く。見出しが1つだけのファイルにも付ける。
+    - 合成データ節の並びは、ベースライン → `predict`（あれば）→ クラスター（`cluster` → `cluster_imbalanced` → `cluster_g2`/`g3` → `cluster_ill_conditioned`）→ HAC → 手法固有のシナリオ（`multi_endog`・`df1`・`weight_in_x`等）。オプション節は`no_intercept`/`include_intercept_false` → `confidence_level` → solver/method（クラスター・HAC付きの組み合わせは単独の直後）。
+    - テスト名は`test_<シナリオ>_matches_<参照名>`。ベースライン（合成データの標準シナリオ）はシナリオを省き`test_matches_<参照名>`とする（`synthetic_`は付けない。FEの1-way/2-wayは`test_matches_<参照名>_one_way`/`_two_way`）。切片なしのオプションは`no_intercept`、solverの指定は`solver`（`method`にしない）で表す。
+    - FE/REの「境界値」節は合成データ節の後・実データ節の前に置く。ハウスマン検定などの手法固有の主題の節は実データ節の後ろに置く。
+  - `tests/cross_method/`の横断テスト: 見出しは論点別（例: 既定の`cov_type`、`cov_type`連動、不均衡パネル）。見出しの中は手法の順（linear → nonlinear → iv → panel、linearはOLS → WLS、nonlinearはLogit/Probit → Tobit、panelはFE → RE）に並べ、どの手法のどの論点が欠けているかが一覧で分かるようにする。補助関数（`_fe`・`_re`・`_iv`等）は先頭にまとめる。
+- **主題別ファイル**: 上記4種類に収まらない大きな主題（White検定などの事後診断、二元配置、Mundlak、第一段階回帰、GMM等）は、`test_<手法>_<主題>.py`として別ファイルにしてよい。その中でも、数値照合と構造・エラーの区別は上のファイル分割に倣う。
+- **`include_intercept=False`の置き場**: `_api.py`には構造・配線（`param_names`に`const`が出ない、`df_model`、収束）だけを置き、statsmodels/R/linearmodelsとの数値照合は凍結フィクスチャを使う`_reference.py`/`_crosscheck.py`に置く。`predict()`/`augment()`のように独立したAPI面のスモーク級照合に限り、`_api.py`でライブstatsmodels照合を行ってよい（各`_api.py`のモジュールdoc参照）。
+- **文字列オプション・文字列引数の大文字小文字**: 大文字小文字を区別しない文字列のオプション（`cov_type`・`solver`・`estimator`・`gmm_weight_type`・`gmm_type`・`variance_method`）とメソッドの文字列引数（`marginal_effects`の`at`・`target`、`predict`/`augment`の`target`、診断検定の`statistic`）は、各手法が受け付ける全ての値について、`tests/support/_helpers.py`の`CASE_SPELLINGS`（小文字・全大文字・先頭のみ大文字・大小交互）×値の網羅で`test_<名前>_is_case_insensitive`（引数は`test_marginal_effects_target_is_case_insensitive`のように対象のメソッド名を含めてよい）に集約する。オプションは`_assertions.assert_option_case_insensitive`（`res.<オプション>`が正規形（小文字）で返ることと、全ての綴りで正規形と同一の推定結果になること。内部で`assert_same_estimates`を使う）、メソッド引数は`_assertions.assert_argument_case_insensitive`（戻り値が正規形のときと等しいこと）を使い、ラベルだけを見る別テストは作らない。クラスターが必要な値（`cluster`）は専用データを使う引数にして同じテストに含める。新しい文字列のオプション・引数を足したら、同じ形のテストを足す。
+- **共通の命名**: 結果型は`test_fit_succeeds_and_returns_<手法>_results`、件数・被説明変数名は`test_n_obs_and_dep_var_name`（FE/REは`n_entities`も確認するため`test_n_obs_dep_var_name_and_n_entities`）。
+- **solverの収束**: `_api.py`のsolver別テストは`converged`のみを確認する（最尤解との一致は`_reference.py`が厳しい許容誤差で担う）。
+- **数値の比較**: `assert abs(...) < tol`や`pytest.approx`を直書きせず、`_assertions.assert_close`（`label`を渡せる）を使う。許容誤差のリテラルを直書きせず、系統別の`_tolerances_<系統>.py`（`linear`・`nonlinear`・`iv`・`panel`）に実測の最大差とマージンの根拠をコメントして置き、`_tolerances.py`が結合して公開する`TOLERANCES`から引いて`functools.partial`で束縛して使う（キーが系統間で重複するとimport時に`ValueError`）（本実装内の不変条件の比較は`<手法>_api`のキー）。
+- **docstring**: 現在の挙動と理由だけを書く。「従来は〜だった」「〜に統合した」のような変更履歴、レビュー指摘・ユーザー確認の記録は書かない（経緯はgit logが持つ）。回帰ガードとして「過去にこの入力で〜が起きた」ことが、そのテストの存在理由を説明する場合に限り、理由として残してよい。シナリオの件数は書かず、`NUMERIC_SCENARIOS`のように定数名で参照する。
 
 ## engine（Rust）のカバレッジ方針
 
@@ -75,6 +102,7 @@ Issue番号・内部管理ドキュメント（`refactoring-candidates.md`等）
 - リファレンス実装（statsmodels/R）の実行結果は、CIで毎回再計算せず、**JSONファイルとして`tests/fixtures/benchmarks/`にコミットし固定する**。ベンチマーク由来のフィクスチャを`fixtures/`直下ではなく`benchmarks/`サブディレクトリに分けているのは、他の目的のフィクスチャ（ベンチマーク比較以外でテストが読み込みたいデータ）と混在させないため。
 - 理由: CIを軽く保つため（Rパッケージのインストールはビルドが重い）。またリファレンス実装側のバージョンアップで数値が変わり、意図せずテストが壊れることを防ぐため。
 - フィクスチャの命名: 手法・シナリオ・cov_type等が分かる形にする（例: `ols.json`に、シナリオ×cov_typeをネストして持たせる。実例は`tests/fixtures/benchmarks/ols.json`参照）。
+  - **最上位は全フィクスチャで`synthetic`・`wooldridge`・`_meta`の3キーに統一する**。`synthetic`は合成データのシナリオと、それを元にした`solver`・`no_intercept`等の特殊ケース、`wooldridge`は実データ（`wage1`・`mroz`・`card`・`wagepan`等）。その下はシナリオ×cov_typeの順にネストする（cov_typeのエントリは、リファレンス実装の結果をそのまま置く。補助値の`hac_lag`は結果と同じ階層に置く）。統計量のキーは公開APIの名前（`params`・`std_errors`・`test_stats`・`p_values`・`conf_int`）に揃える。生成スクリプトは平坦に組み立て、末尾で`benchmark.common.group_by_dataset_source`が二層に振り分ける。
 - **フィクスチャを生成するスクリプトと、生成されたJSON自体は別の場所に置く**。生成スクリプトは`benchmark/<系統>/fixtures/generate_<手法名>_fixtures.py`（コード、`benchmark/`側で管理。系統ディレクトリ構成は`.claude/skills/reference-benchmark/SKILL.md`参照）、生成物は`tests/fixtures/benchmarks/<手法名>.json`（データ、テスト側で管理）。
 - **合成データセット自体も同様にCSVとしてtests側（`tests/fixtures/benchmarks/data/`）に固定する**（`benchmark/<系統>/freeze.py`で生成）。理由: ジェネレータ側のコードが将来変わっても、既に固定したフィクスチャJSONの期待値と無言で不整合にならないようにするため。
   - **Wooldridgeデータセットはこの固定化の対象外**とする（`wooldridge`パッケージ自体はMITライセンスだが、同梱される実データの著作権は原典の教科書側にある可能性があり、フィルタ後の部分集合であってもMITライセンスの本リポジトリにCSVとして再配布してよいか未確認のため。ユーザー確認済み）。Wooldridgeデータは引き続き`load_wooldridge.py`経由で都度ロードする。`wooldridge`パッケージ自体はtest依存グループに含め標準CIで常にインストールする（実データはパッケージのwheel内に留まりリポジトリへ再配布するわけではないため、上記の再配布可否の制約とは無関係）。`pytest.importorskip("wooldridge")`は、test依存グループを経由しない実行環境向けの防御的フォールバックとして残す。
@@ -93,7 +121,7 @@ Issue番号・内部管理ドキュメント（`refactoring-candidates.md`等）
   1. **基準パッケージを1つ決める**（本実装が採用する計算方法・慣習と一致するもの）。基準パッケージとは相対誤差1e-8の厳密比較を行う。
   2. **他のパッケージはクロスチェック用**とし、許容誤差を緩めて比較する（大きく乖離していないかの確認が目的で、厳密一致は期待しない）。
   3. **採用した計算方法と、どのパッケージが同じ計算方法かをテストコードのコメント・関連ドキュメントに明記する**（`docs/planning/specs/`配下の該当手法のノート、無ければ`docs/spec/ols-spec.md`同様の形式で新規作成）。
-- **同じクロスチェック用パッケージでも、統計量・cov_typeごとに実測乖離が大きく異なる場合は、許容誤差を分けてよい**（一律に緩めると、本来検出できるはずのバグを見逃す）。分ける場合は実測値（最大相対誤差）に基づいて具体的な数値を決める。例: OLSのRクロスチェック（`tests/linear/test_ols_crosscheck.py`）はclassical/HC0-3/clusterで機械精度一致（実測1e-14程度）のため基本方針の1e-8を適用し、HAC（実測0.4%程度）のみ1e-2に緩めている。
+- **同じクロスチェック用パッケージでも、統計量・cov_typeごとに実測乖離が大きく異なる場合は、許容誤差を分けてよい**（一律に緩めると、本来検出できるはずのバグを見逃す）。分ける場合は実測値（最大相対誤差）に基づいて具体的な数値を決める。例: OLS/WLS/IVのRクロスチェック（`tests/linear/test_ols_crosscheck.py`等）はHACを含む全cov_typeで機械精度一致（実測1e-14程度）のため基本方針の1e-8を適用する。HACは当初0.4〜11%の乖離があり緩めていたが、原因がRの`NeweyWest(adjust = TRUE)`が掛ける`n/(n-k)`というスカラー1つだと分かり、R側を`adjust = FALSE`にして揃えた。**緩める前に、乖離が1つの慣習差（スカラー倍・自由度の数え方等）で説明できるか調べ、参照側の設定で揃えられるなら揃える**（説明できないまま実測値にマージンを載せない）。
 
 ## パフォーマンス比較（ベンチマーク）の方法論
 
@@ -101,7 +129,11 @@ Issue番号・内部管理ドキュメント（`refactoring-candidates.md`等）
 - ベンチマーク作成時は、比較対象の実装がどのタイミングで何を計算するか（即時評価か遅延評価か）を事前に確認し、本実装（常に一括計算）と同じ処理範囲になるよう計測コードを書く。
 - **入力形式の変換コストは計測区間の外に置く**。本パッケージの入力はpolarsだが、リファレンス実装（statsmodels/linearmodels）はpandas入力を前提とするため`polars.DataFrame.to_pandas()`が必要になる。これはリファレンス実装本体の処理ではなく変換コストなので、ウォームアップ・計測ループの外で1回だけ実施し、変換済みオブジェクトを各試行で使い回す（`performance/_perf_harness.py`の`_worker()`）。engine側はArrowゼロコピーでpolarsをそのまま渡すため変換は発生しない。
 - **線形代数バックエンドのスレッド数を両者で揃える（1に固定する）**。engine（faer/rayon）とリファレンス実装（numpy/BLAS）でスレッドプールの挙動が異なり、多コア機・負荷下では競合で実行時間が単一スレッド時の数十倍に膨れ上がって計測が不安定になることを実測で確認した（OLSのclassical n=1,000,000で約0.15秒→3〜4秒）。ワーカーサブプロセスの環境変数（`RAYON_NUM_THREADS`/`OMP_NUM_THREADS`/`OPENBLAS_NUM_THREADS`等）で両者を1スレッドに固定し、「計算コアの効率」の比較をスレッドプール挙動の環境差から切り離す（`performance/_perf_harness.py`の`_SINGLE_THREAD_ENV`）。
-- **正確性検証（テスト）とは異なり、性能比較はcov_type・オプションの全組み合わせを網羅する必要はない**。正確性検証は方針上あらゆる組み合わせで一致を確認するが、性能比較の目的はライブラリ間の相対的な傾向（速い/遅い、メモリ使用量の桁）を把握することであり、代表的な1〜2ケース（例: 計算コストが最も軽いclassicalと、最も重いcov_type）で十分とする。ただし各推定手法について性能比較を1回は作成すること自体は必須とする。
+- **性能比較は、既定の標準誤差でn軸・k軸を回し、標準誤差の種類（`cov_type`）はcov軸で全て測る**。正確性検証のようにcov_type×オプションの全組み合わせは網羅しないが、「最も重いcov_type」を実装時の軽い実測で手書き選定する方式は採らない（実装が変わるたびに順位が入れ替わり、選ばなかったcov_typeの劣化がどこにも現れないため）。
+  - **n軸・k軸**: 既定の標準誤差（classical）だけ。n軸は10,000 / 100,000 / 1,000,000（リファレンスが大nで計測不能な手法は上限を下げ、engine単独の大標本点を足す）、k軸は5・20。
+  - **cov軸**: 手法が対応する標準誤差を全て、固定のn（100,000）・k=5で測る（`PerfAdapter.cov_cases`）。clusterはクラスター数G（50 / n÷10）とクラスターの行の並び（random / sorted）の2×2で測る。パネル（FE/RE）のclusterはentity固定の1ケース。リファレンスに同等の標準誤差が無いもの（linearmodelsのHC2/HC3、statsmodels discrete modelの`opg`・`hc1`）は`CovCase.libraries`でengine単独にする。新しいcov_typeを手法に足したら、cov軸のケースも足す。
+  - **method軸**: solver・estimatorの違いは代表点1つ。標準誤差と組になる変種（IVのGMMの重み行列・反復）はcov軸の`CovCase.method`/`variant`で測る。
+  - 手法ごとに性能比較を1回は作成することは必須。公開ページ（`docs/guide/performance.md`）のサマリーは、既定の標準誤差の表と、cov軸の速度比マトリクス（手法×標準誤差の種類）を機械的に生成する。
 
 ## 必須事項
 
@@ -110,9 +142,9 @@ Issue番号・内部管理ドキュメント（`refactoring-candidates.md`等）
 
 ## property-basedテスト（`proptest`）
 
-`engine`クレートに`dev-dependencies`として導入済み（OLSで先行導入）。固定seed・固定シナリオでの値の一致確認（`#[cfg(test)] mod tests`の通常の単体テスト）だけでは「そのseedでは偶然問題が顕在化しないケース」を拾えない構造的な穴があるため、各手法が満たすべき不変条件を個別の値比較より高い網羅性で検証する目的で使う。
+`engine`クレートに`dev-dependencies`として導入済み（OLSで先行導入し、現在はWLS・Logit・Probit・Tobit・IV・パネル（FE/RE）の各系統にも展開している）。固定seed・固定シナリオでの値の一致確認（`#[cfg(test)] mod tests`の通常の単体テスト）だけでは「そのseedでは偶然問題が顕在化しないケース」を拾えない構造的な穴があるため、各手法が満たすべき不変条件を個別の値比較より高い網羅性で検証する目的で使う。
 
-- 対象ファイルの`#[cfg(test)] mod tests`内に`mod proptests`としてネストする（`engine/src/linear/ols.rs`参照）。通常の固定値単体テストと同じファイル・同じ`mod tests`に置くことで、リファクタリング時の追従漏れを防ぐ既存方針（`rust-style.md`「テスト」）を踏襲する。
+- 対象ファイルの`#[cfg(test)] mod tests`内に`mod proptests`としてネストする（`engine/src/linear/ols/estimator.rs`参照）。通常の固定値単体テストと同じファイル・同じ`mod tests`に置くことで、リファクタリング時の追従漏れを防ぐ既存方針（`rust-style.md`「テスト」）を踏襲する。
 - ランダムに生成する設計行列は、`SingularMatrix`にならない範囲（フルランク保証）に制約する。実務上は「独立な連続一様分布からのサンプリング + `n`に十分なマージンを持たせる（`n >> k`）」で事実上フルランクになるため、追加で`prop_assume!(result.is_ok())`を安全弁として使えば十分（`ols.rs`の`ols_case_strategy`参照）。
 - 許容誤差は固定フィクスチャ比較（`RTOL=1e-8`）より緩める（乱数生成でデータのスケールが揃わないため、相対誤差ベース+絶対誤差フロアで`RTOL=1e-6`程度を目安にする）。
 - **プロパティの有効性は、既存のテストでは検出できない意図的なバグをコードに一時的に注入し、プロパティが実際に失敗することを確認してから元に戻す**、という形で検証する（全4プロパティについて実施・記録済み。「プロパティを書いただけで一度も落ちたことがない」状態は、プロパティ自体が無意味な可能性を否定できないため）。

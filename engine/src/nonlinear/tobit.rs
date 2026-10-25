@@ -106,20 +106,20 @@
 //! 詳細な導入経緯は
 //! `regularized_newton_step`のdocコメント参照（ユーザー確認済み）。
 
-use crate::error::CommonError;
-use crate::inference;
-use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 use crate::nonlinear::common::{
-    CovType, MarginalEffects, MarginalEffectsAt, MleError, MleFitOptions, SandwichVariant,
-    SeparationNormCheck, U_CLAMP, checked_design_matrix_qr, clamped_pdf_cdf, cluster_cov_params,
+    ColumnScale, CovType, MarginalEffects, MarginalEffectsAt, MleError, MleFitOptions,
+    SandwichVariant, U_CLAMP, checked_design_matrix_qr, clamped_pdf_cdf, cluster_cov_params,
     column_means, column_medians, compensated_sum, observed_information_cov_params, opg_cov_params,
     predict_new_data, run_solver, sandwich_cov_params, validate_cluster_cov_type,
     validate_confidence_level, validate_mle_options, validate_sufficient_observations,
 };
+use crate::shared::error::{CommonError, MatrixKind};
+use crate::shared::inference;
+use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::prelude::{Solve, SolveLstsq};
 use faer::{Mat, Side};
-use statrs::distribution::{ChiSquared, ContinuousCDF, Normal};
+use statrs::distribution::{ChiSquared, Continuous, ContinuousCDF, Normal};
 
 /// Tobitの被説明変数・設計行列・打ち切り境界を保持する入力データ。
 ///
@@ -157,8 +157,9 @@ impl TobitInput {
     ///
     /// # Errors
     /// - `y`といずれかの`x_columns`の長さが一致しない: `CommonError::DimensionMismatch`
-    /// - `lower`/`upper`が両方`None`、いずれかが`NaN`または無限大、または両方`Some`で
-    ///   `lower >= upper`: `MleError::InvalidCensoringBounds`
+    /// - `lower`/`upper`が両方`None`: `MleError::CensoringBoundsMissing`
+    /// - `lower`/`upper`のいずれかが`NaN`または無限大: `MleError::CensoringBoundNotFinite`
+    /// - 両方`Some`で`lower >= upper`: `MleError::CensoringBoundsNotOrdered`
     /// - `y`が指定された境界の範囲外の値を含む: `MleError::YOutOfCensoringBounds`
     ///
     /// # パニックについて
@@ -191,18 +192,18 @@ impl TobitInput {
             }
         }
 
-        // 肯定形の妥当性条件を`!`で囲み、NaNを自動的に弾く書き方
-        // （`validate_fit_preconditions`の`confidence_level`検証と同じパターン。
-        // `l >= u`のような否定形の直接比較だとNaNに対して常に`false`になり
-        // すり抜けてしまう。`is_finite()`で無限大も合わせて弾く）。
-        let bounds_valid = match (lower, upper) {
-            (None, None) => false,
-            (Some(l), None) => l.is_finite(),
-            (None, Some(u)) => u.is_finite(),
-            (Some(l), Some(u)) => l.is_finite() && u.is_finite() && l < u,
-        };
-        if !bounds_valid {
-            return Err(MleError::InvalidCensoringBounds { lower, upper });
+        // 有限性（NaN・無限大）を先に確かめ、順序の比較は有限値だけに行う
+        // （NaNは`l >= u`が常に`false`になり、順序の検査をすり抜けるため）。
+        if lower.is_none() && upper.is_none() {
+            return Err(MleError::CensoringBoundsMissing);
+        }
+        if !(lower.is_none_or(f64::is_finite) && upper.is_none_or(f64::is_finite)) {
+            return Err(MleError::CensoringBoundNotFinite { lower, upper });
+        }
+        if let (Some(l), Some(u)) = (lower, upper)
+            && l >= u
+        {
+            return Err(MleError::CensoringBoundsNotOrdered { lower: l, upper: u });
         }
 
         for (i, &value) in y.iter().enumerate() {
@@ -463,12 +464,20 @@ impl TobitProblem {
         let k = self.k();
         let sigma = params[k].exp();
         let normal = Normal::standard();
-        Mat::from_fn(n, k + 1, |i, col| {
+        // `contribution`（`linear_predictor`・`φ`/`Φ`・打ち切り分岐）は列によらないため、
+        // 観測あたり1回だけ計算する。`Contribution`ごとは保持せず、使う2成分だけ集める。
+        let mut beta_coefs = Vec::with_capacity(n);
+        let mut score_s = Vec::with_capacity(n);
+        for i in 0..n {
             let contribution = self.contribution(i, params, &normal);
+            beta_coefs.push(contribution.score_beta_coef);
+            score_s.push(contribution.score_s);
+        }
+        Mat::from_fn(n, k + 1, |i, col| {
             if col < k {
-                contribution.score_beta_coef * (*self.x.get(i, col)) / sigma
+                beta_coefs[i] * (*self.x.get(i, col)) / sigma
             } else {
-                contribution.score_s
+                score_s[i]
             }
         })
     }
@@ -589,16 +598,17 @@ fn population_std(values: impl Iterator<Item = f64> + Clone, n: usize) -> f64 {
     if sd > 0.0 { sd } else { 1.0 }
 }
 
-/// `TobitEstimator::fit`が最適化に使う、設計行列`x`・被説明変数`y`の標準化スケール
-/// （Tobit局所）。`nonlinear/common.rs`の`standardize_columns`/`ColumnScale`/
-/// `destandardize_params`を使わず、Tobit内で完結させる。
+/// `TobitEstimator::fit`が最適化に使う、設計行列`x`・被説明変数`y`の標準化スケール。
 ///
-/// **`standardize_columns`と分けた理由**:
-/// 1. **`y`のスケーリング**: `separation_suspected`（`nonlinear/common.rs`、標準化
-///    パラメータ空間のL2ノルムが`SEPARATION_PARAM_NORM_THRESHOLD`超で(準)分離と判定）は
-///    Logit/Probit（`y∈{0,1}`）で較正されている。Tobitは`y`が連続でスケールが任意の
-///    ため、`y`のスケールが大きいだけで健全なMLE解でもノルムが閾値を超え誤発火する
-///    （Wooldridge mroz `hours`の生スケールTobitで発覚）。`x`の列標準化と同じ発想
+/// `x`側（列の平均・標準偏差、切片の逆変換、ヤコビアンの`x`部分）はLogit/Probitと共通の
+/// `nonlinear/common.rs`の`ColumnScale`（切片ありのとき平均も引く）に委ね、この構造体は
+/// Tobit固有の`y`のスケーリング（`y_scale`）と`σ`（`logσ`）の扱いだけを持つ。
+///
+/// **Tobit固有の処理は`y`のスケーリング**（Logit/Probitの`standardize_columns`は`y`を扱わない）:
+/// 1. **`y`のスケーリング**: 当時あった分離ヒューリスティック（標準化パラメータ空間のL2ノルムが
+///    閾値を超えたら(準)分離と判定する、現在は廃止）はLogit/Probit（`y∈{0,1}`）で較正されていた。
+///    Tobitは`y`が連続でスケールが任意のため、`y`のスケールが大きいだけで健全なMLE解でも
+///    ノルムが閾値を超え誤発火した（Wooldridge mroz `hours`の生スケールTobitで発覚）。`x`の列標準化と同じ発想
 ///    （R `survival::survreg`は設計行列を標準化する）を`y`にも適用してスケール不変にする。
 ///    **`y_scale`は`y`の母集団標準偏差を「2の冪に丸めた」値**（`2^round(log2(sd))`）。
 ///    2の冪で割る操作は倍精度浮動小数点で指数部のシフトのみ（仮数部は不変）＝厳密なため、
@@ -607,48 +617,38 @@ fn population_std(values: impl Iterator<Item = f64> + Clone, n: usize) -> f64 {
 ///    標準偏差（例: `0.949`）で割ると、その丸め誤差（~1e-16）だけでも打ち切り率が高く
 ///    Hessianが際どい悪条件のデータ（合成`heavy_censoring`、左打ち切り60%）で正則化
 ///    NewtonがSingularHessianに倒れることが実測で判明したため、丸めて厳密化する。
-/// 2. **`x`列の平均センタリング（切片ありのときのみ）**: `standardize_columns`は
-///    スケーリングのみで平均を引かない（`include_intercept=false`で逆変換が壊れるため、
-///    同関数のdocコメント参照）。しかし`exper`(0〜45)と`expersq`(0〜2025)のように
-///    強く共線な列を含むと、スケーリングだけでは標準化後のHessianが悪条件のままで、
-///    正則化Newton（`regularized_newton_step`）が回復不能な不定符号領域に落ちる
-///    （mroz `hours`で実測、`ols_initial_params`の丸め誤差~1e-14で結果が変わるほど際どい）。
-///    切片ありモデルでは列を平均センタリングすると`survreg`同様Newtonが安定して収束する。
-///    切片なしモデルではセンタリングせず（吸収先の切片が無く逆変換が壊れるため）、
-///    スケーリングのみ行う。
+///
+/// **`x`列の平均センタリング（切片ありのときのみ）は`ColumnScale`が行う共通の処理**。Tobitでも
+/// 必要な理由: `exper`(0〜45)と`expersq`(0〜2025)のように強く共線な列を含むと、スケーリング
+/// だけでは標準化後のHessianが悪条件のままで、正則化Newton（`regularized_newton_step`）が
+/// 回復不能な不定符号領域に落ちる（mroz `hours`で実測、`ols_initial_params`の丸め誤差~1e-14で
+/// 結果が変わるほど際どい）。切片ありモデルでは列を平均センタリングすると`survreg`同様Newtonが
+/// 安定して収束する。切片なしモデルではセンタリングせず（吸収先の切片が無く逆変換が壊れる
+/// ため）、スケーリングのみ行う。
 ///
 /// 標準化空間の内部パラメータ`(β̃, s̃=logσ̃)`と元のスケール`(β, s=logσ)`の対応
 /// （`c = y_scale`、`x̄ⱼ`・`stdⱼ`は`x`列`j`の平均・母集団標準偏差、切片列は`x̄₀=0`・`std₀=1`）:
 ///
 /// - 切片あり: `βⱼ = c·β̃ⱼ/stdⱼ`（`j≥1`）、`β₀ = c·β̃₀ - Σ_{j≥1} x̄ⱼ·βⱼ`、`s = s̃ + ln c`
 /// - 切片なし: `βⱼ = c·β̃ⱼ/stdⱼ`（全`j`）、`s = s̃ + ln c`
+///
+/// `β`の式は`ColumnScale`の逆変換に`c`を掛けたもの。`c`は2の冪なので、オーバーフロー・
+/// サブノーマルを除き、`c·β̃ⱼ/stdⱼ`と`c·(β̃ⱼ/stdⱼ)`、切片の補正項も掛ける順序によらず
+/// ビット単位で同じ値になる。この一致は正しさのためではなく、Tobitの出力を丸めの
+/// レベルで安定させるために保っている（`y_scale`を2の冪以外にしない理由でもある）。
 struct TobitScaling {
-    /// `x`各列の平均（切片列は0.0。切片なしモデルでは全列0.0＝センタリングしない）
-    x_means: Vec<f64>,
-    /// `x`各列の母集団標準偏差（切片列・定数列は1.0）
-    x_stds: Vec<f64>,
+    /// `x`側の標準化スケール（列ごとの平均・標準偏差、切片の逆変換、ヤコビアンの`x`部分）。
+    /// Logit/Probitと共通の`ColumnScale`（切片ありのとき平均も引く）。
+    x: ColumnScale,
     /// `y`（と打ち切り境界）のスケール = `y`の母集団標準偏差を2の冪に丸めた値
     /// （`2^round(log2(sd))`、必ず`> 0`。構造体docコメント参照）
     y_scale: f64,
-    /// 切片列（列0）を持つか
-    has_intercept: bool,
 }
 
 impl TobitScaling {
     /// `x`・`y`から標準化スケールを求める。
     fn fit(x: &Mat<f64>, y: &Mat<f64>, has_intercept: bool) -> Self {
         let n = x.nrows();
-        let k = x.ncols();
-        let start = usize::from(has_intercept);
-        let mut x_means = vec![0.0; k];
-        let mut x_stds = vec![1.0; k];
-        for j in start..k {
-            let col = || (0..n).map(|i| *x.get(i, j));
-            if has_intercept {
-                x_means[j] = col().sum::<f64>() / n as f64;
-            }
-            x_stds[j] = population_std(col(), n);
-        }
         // `y`の母集団標準偏差を2の冪に丸める（構造体docコメント「`y`のスケーリング」参照。
         // 2の冪での除算は仮数部を変えないため、`y`が程よいスケールなら恒等変換になる）。
         // 指数は倍精度の正規化数の範囲に収める（極端な`y`はengine_pybind側の非有限値
@@ -659,19 +659,15 @@ impl TobitScaling {
             .clamp(-1000, 1000);
         let y_scale = 2.0_f64.powi(y_exp);
         Self {
-            x_means,
-            x_stds,
+            x: ColumnScale::fit(x, has_intercept),
             y_scale,
-            has_intercept,
         }
     }
 
     /// 設計行列を標準化する: 切片ありは`x̃ⱼ = (xⱼ - x̄ⱼ)/stdⱼ`、切片なしは`x̃ⱼ = xⱼ/stdⱼ`
-    /// （切片列は無変換）。
+    /// （切片列は無変換）。`ColumnScale::standardize`に委譲する。
     fn standardize_x(&self, x: &Mat<f64>) -> Mat<f64> {
-        Mat::from_fn(x.nrows(), x.ncols(), |i, j| {
-            (*x.get(i, j) - self.x_means[j]) / self.x_stds[j]
-        })
+        self.x.standardize(x)
     }
 
     /// `y`を`y_scale`でスケーリングする（平均は引かない）。
@@ -685,44 +681,40 @@ impl TobitScaling {
     }
 
     /// 標準化空間の内部パラメータ`(β̃, s̃)`（`k+1`次元）を元のスケールの`(β, logσ)`へ
-    /// 逆変換する（構造体docコメントの式）。
+    /// 逆変換する（構造体docコメントの式）。`β`は`x`側の逆変換
+    /// （`ColumnScale`の式）に`y_scale`を掛けたもの。`y_scale`は2の冪なので、この掛け算は
+    /// 掛ける順序によらずビット単位で同じ値になる（構造体docコメント参照）。
     fn destandardize_params(&self, params_std: &[f64]) -> Vec<f64> {
-        let k = self.x_stds.len();
+        let k = self.x.stds().len();
+        debug_assert_eq!(
+            params_std.len(),
+            k + 1,
+            "params_std holds the k coefficients and log sigma"
+        );
         let c = self.y_scale;
-        let start = usize::from(self.has_intercept);
-        let mut out = vec![0.0; k + 1];
-        // 傾き係数（切片ありのとき列0を除く全列）: `βⱼ = c·β̃ⱼ/stdⱼ`
-        for (j, out_j) in out.iter_mut().enumerate().take(k).skip(start) {
-            *out_j = c * params_std[j] / self.x_stds[j];
-        }
-        // 切片: `β₀ = c·β̃₀ - Σ_{j≥1} x̄ⱼ·βⱼ`（既に確定した傾き係数を使う）
-        if self.has_intercept {
-            out[0] = c * params_std[0] - (1..k).map(|j| self.x_means[j] * out[j]).sum::<f64>();
-        }
-        out[k] = params_std[k] + c.ln();
+        let mut out = Vec::with_capacity(k + 1);
+        out.extend(
+            crate::nonlinear::common::destandardize_params(&params_std[..k], &self.x)
+                .into_iter()
+                .map(|b| c * b),
+        );
+        out.push(params_std[k] + c.ln());
         out
     }
 
     /// `(β̃, s̃)`空間から`(β, σ)`空間（元のスケール）への変換のヤコビアン`(k+1)×(k+1)`。
     /// `Cov(β, σ) = J · Cov(β̃, s̃) · Jᵀ`で使う（`destandardize_params`の線形部分の
     /// 微分に、`s̃→σ=c·exp(s̃)`のデルタ法`∂σ/∂s̃=σ`を末尾行に折り込んだもの）。`sigma`は
-    /// 逆変換済みの`σ`。
+    /// 逆変換済みの`σ`。`β`の部分は`x`側のヤコビアン（`ColumnScale::param_jacobian`）の`c`倍。
     fn param_jacobian(&self, sigma: f64) -> Mat<f64> {
-        let k = self.x_stds.len();
+        let k = self.x.stds().len();
         let c = self.y_scale;
+        let jx = self.x.param_jacobian();
         Mat::from_fn(k + 1, k + 1, |i, m| {
             if i == k {
                 if m == k { sigma } else { 0.0 }
-            } else if self.has_intercept && i == 0 {
-                if m == 0 {
-                    c
-                } else if m < k {
-                    -c * self.x_means[m] / self.x_stds[m]
-                } else {
-                    0.0
-                }
-            } else if m == i {
-                c / self.x_stds[i]
+            } else if m < k {
+                c * *jx.get(i, m)
             } else {
                 0.0
             }
@@ -750,15 +742,23 @@ impl TobitScaling {
 /// 同じ関数のQR解に加えてリンクのスケール補正を施すが、Tobitの`β`はOLSと同一スケールの
 /// ため補正は不要で、QR解をそのまま`β`初期値に使い、`σ`初期値だけ残差から別途求める）。
 ///
+/// `x`は標準化済みの設計行列、`x_original`は標準化前の設計行列（共線な列の特定に使う。
+/// `checked_design_matrix_qr`参照）。
+///
 /// # Errors
 /// `x`が特異（完全な多重共線性等）な場合は`MleError::SingularDesignMatrix`を返す
 /// （`MleError::SingularDesignMatrix`のdocコメント参照。Newton法が一度も反復していない
 /// 段階で発生しうるため`SingularHessian`とは区別する）。
-fn ols_initial_params(x: &Mat<f64>, y: &Mat<f64>) -> Result<Vec<f64>, MleError> {
+fn ols_initial_params(
+    x: &Mat<f64>,
+    x_original: &Mat<f64>,
+    y: &Mat<f64>,
+    names: &[String],
+) -> Result<Vec<f64>, MleError> {
     let n = x.nrows();
     let k = x.ncols();
 
-    let qr = checked_design_matrix_qr(x)?;
+    let qr = checked_design_matrix_qr(x, x_original, names)?;
     let beta_mat = qr.solve_lstsq(y);
     let beta: Vec<f64> = (0..k).map(|i| *beta_mat.get(i, 0)).collect();
 
@@ -827,7 +827,7 @@ fn log_likelihood(
 /// Tobitのみ）。
 ///
 /// # Errors
-/// `Σ_slopes`が悪条件・特異な場合は`CommonError::ComputationFailed`
+/// `Σ_slopes`が悪条件・特異な場合は`CommonError::NearSingularMatrix`
 /// （OLSの`wald_f_test`と同じ理由、理論上は正定値のはずだが浮動小数点演算の丸めによる
 /// 境界的な失敗に備えた防御的な扱い）。`ChiSquared::new`の失敗（`df_model<=0`）は
 /// 呼び出し元が`df_model>0`を事前に保証するため理論上到達不能。
@@ -845,22 +845,22 @@ fn wald_chi2_test(
     ensure_well_conditioned_symmetric_matrix(
         &v_slopes,
         df_model,
-        "coefficient covariance submatrix for the Wald test",
+        MatrixKind::CoefficientCovariance,
     )?;
 
-    let llt = v_slopes.llt(Side::Lower).map_err(|_| {
-        CommonError::ComputationFailed(
-            "failed to invert coefficient covariance submatrix for the Wald test".to_string(),
-        )
-    })?;
+    let llt = v_slopes
+        .llt(Side::Lower)
+        .map_err(|_| CommonError::NearSingularMatrix {
+            matrix: MatrixKind::CoefficientCovariance,
+        })?;
     let v_slopes_inv_beta = llt.solve(&beta_slopes);
 
     let wald_statistic: f64 = (0..df_model)
         .map(|i| (*beta_slopes.get(i, 0)) * (*v_slopes_inv_beta.get(i, 0)))
         .sum();
 
-    let chi2 = ChiSquared::new(df_model as f64)
-        .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+    let chi2 =
+        ChiSquared::new(df_model as f64).map_err(|e| CommonError::internal(e.to_string()))?;
     let wald_p_value = chi2.sf(wald_statistic);
 
     Ok((wald_statistic, wald_p_value))
@@ -878,6 +878,197 @@ pub enum MarginalEffectsTarget {
     ExpectedObserved,
     /// 非打ち切り確率 `P(uncensored|x)`
     ProbUncensored,
+    /// 非打ち切り領域での条件付き期待値 `E[y|lower<y<upper,x]`（切断正規分布の平均）。
+    /// 下限0のみの左打ち切りなら `E[y|y>0,x]`。`E[y|x]`との関係は
+    /// `E[y|x]=lower·P(下限)+upper·P(上限)+P(uncensored|x)·E[y|lower<y<upper,x]`
+    ExpectedUncensored,
+}
+
+/// 逆ミルズ比・生存関数を連分数展開で評価する`a`の下限。連分数は`a>=3`で60段あれば相対誤差
+/// `3e-17`以下に収束する。`a`がこれ未満では`normal_survival`（テイラー級数）で`Φ(-a)`を
+/// 作って`φ(a)/Φ(-a)`を直接計算する。`a≈38`では`φ`・`Φ(-a)`がアンダーフローするため、
+/// 裾は連分数でなければ評価できない。
+const MILLS_CONTINUED_FRACTION_THRESHOLD: f64 = 3.0;
+
+/// 連分数展開の段数（`a>=MILLS_CONTINUED_FRACTION_THRESHOLD`で倍精度に十分収束する）。
+const MILLS_CONTINUED_FRACTION_DEPTH: u32 = 60;
+
+/// `Φ(x)-1/2`（`x>=0`）を絶対誤差`≈5e-16`以下で計算する。`statrs`の`Normal::cdf`は絶対誤差が
+/// 約`1.4e-11`（`Φ(-1)`で相対`8.6e-11`）あり、`W=Φ(zb)-Φ(za)`で割る量では限界効果の
+/// 標準誤差に`100`倍程度に増幅されて現れる（`k=20`で相対`1e-8`）ため使わない。
+/// `x<MILLS_CONTINUED_FRACTION_THRESHOLD`では`normal_cdf_minus_half_series`、それ以上では
+/// `1/2-φ(x)/λ(x)`（`λ`は連分数、`Φ(x)`が1に近いので絶対誤差で足りる）。
+fn normal_cdf_minus_half(normal: &Normal, x: f64) -> f64 {
+    debug_assert!(x >= 0.0 || x.is_nan(), "requires x >= 0");
+    if x >= MILLS_CONTINUED_FRACTION_THRESHOLD {
+        let (lambda, _) = inverse_mills_ratio_continued_fraction(x, MILLS_CONTINUED_FRACTION_DEPTH);
+        return 0.5 - normal.pdf(x) / lambda;
+    }
+    normal_cdf_minus_half_series(normal, x)
+}
+
+/// `Φ(x)-1/2=φ(x)·Σₙ x^{2n+1}/(2n+1)!!`（`x>=0`、全項が正で桁落ちなし）。`x<3`なら最大33項で
+/// 収束する（打ち切り条件は項が和の`1e-17`以下）。上限500は収束しない入力（NaN等）での
+/// 無限ループ防止。`x`が大きいほど項数が増えるため`x<MILLS_CONTINUED_FRACTION_THRESHOLD`で使う。
+fn normal_cdf_minus_half_series(normal: &Normal, x: f64) -> f64 {
+    let x2 = x * x;
+    let mut term = x;
+    let mut sum = x;
+    for n in 1..=500u32 {
+        term *= x2 / (2.0 * f64::from(n) + 1.0);
+        sum += term;
+        if term <= sum * 1e-17 {
+            break;
+        }
+    }
+    normal.pdf(x) * sum
+}
+
+/// 標準正規分布の生存関数`Φ(-a)`。`a<0`は`1/2+(Φ(-a)-1/2)`、`0<=a<3`は`1/2-(Φ(a)-1/2)`
+/// （`Φ(-3)≈1.3e-3`で桁落ちは約3桁、`a→3`で相対誤差が最大`4e-13`）、`a>=3`は
+/// `φ(a)/λ(a)`（連分数、相対`5e-16`以下）。`a>=3`は`a≈38`で`φ(a)/λ`が非正規化数になり
+/// `a≳38.6`で0になるので、それより遠い裾は`inverse_mills_ratio_and_gap`（`φ`を作らない）を
+/// 使う。本番経路（`inverse_mills_ratio_and_gap`）が呼ぶのは`a<3`のみ。
+fn normal_survival(normal: &Normal, a: f64) -> f64 {
+    if a < 0.0 {
+        0.5 + normal_cdf_minus_half(normal, -a)
+    } else if a < MILLS_CONTINUED_FRACTION_THRESHOLD {
+        0.5 - normal_cdf_minus_half(normal, a)
+    } else {
+        let (lambda, _) = inverse_mills_ratio_continued_fraction(a, MILLS_CONTINUED_FRACTION_DEPTH);
+        normal.pdf(a) / lambda
+    }
+}
+
+/// 逆ミルズ比`λ(a)=φ(a)/Φ(-a)`（標準正規分布の右裾のハザード率）と、その`a`からの
+/// 超過分`λ(a)-a`を返す。`a`が大きいと`λ≈a`で、引き算`λ-a`は桁落ちするため
+/// （真値は`≈1/a`）、超過分は引き算せず直接計算して一緒に返す。
+///
+/// `a`が小さい（負を含む）ときは`normal_survival`の`Φ(-a)`を使い（`1-Φ(a)`は裾で0に潰れる
+/// ため使わない）、`a>=MILLS_CONTINUED_FRACTION_THRESHOLD`では連分数展開
+/// `λ(a)=a+1/(a+2/(a+3/(a+…)))`に切り替える（`φ`と`Φ(-a)`が`a≈38`でアンダーフローする
+/// 領域でも有効）。
+fn inverse_mills_ratio_and_gap(normal: &Normal, a: f64) -> (f64, f64) {
+    if a < MILLS_CONTINUED_FRACTION_THRESHOLD {
+        let lambda = normal.pdf(a) / normal_survival(normal, a);
+        (lambda, lambda - a)
+    } else {
+        inverse_mills_ratio_continued_fraction(a, MILLS_CONTINUED_FRACTION_DEPTH)
+    }
+}
+
+/// `inverse_mills_ratio_and_gap`の連分数展開（`depth>=2`段で打ち切り、内側から評価する）。
+/// `a>0`が前提。`λ(a)-a=1/(a+2/(a+3/(a+…)))`は第2項以降の連分数の逆数として
+/// 引き算なしに得られる。
+fn inverse_mills_ratio_continued_fraction(a: f64, depth: u32) -> (f64, f64) {
+    let mut t = a;
+    for k in (2..=depth).rev() {
+        t = a + f64::from(k) / t;
+    }
+    let gap = 1.0 / t;
+    (a + gap, gap)
+}
+
+/// `0<=za<zb`の上側裾での`(Pa, Pb, A, B)`。`Pa=φ(za)/W`・`Pb=φ(zb)/W`
+/// （`W=Φ(zb)-Φ(za)`）、`A=Pa-za`・`B=zb+Pb`（`ExpectedUncensored`の式で`za`・`zb`との
+/// 大きな数同士の差を避けるための量。`truncation_pdf_ratios`参照）。
+///
+/// `W`を直接作ると両方が裾にあるとき桁落ち・アンダーフローするため、`W=Φ(-za)-Φ(-zb)`を
+/// `Φ(-za)`で割った比で表す。`p=λ(za)`・`q=λ(zb)`・`r=φ(zb)/φ(za)=exp(-(zb²-za²)/2)`と
+/// すると`φ(zb)/Φ(-za)=r·p`・`Φ(-zb)/Φ(-za)=r·p/q`なので、`W/Φ(-za)=1-r·p/q`、
+/// `Pa=p·q/(q-r·p)`、`Pb=r·p·q/(q-r·p)`となる（`q>p>=r·p`で分母は正）。
+/// `A=(p-za)+(Pa-p)=gap_p+r·p²/(q-r·p)`は正の項の和で、`B=zb+Pb`も正の項の和。
+fn upper_tail_pdf_ratios(normal: &Normal, za: f64, zb: f64) -> (f64, f64, f64, f64) {
+    debug_assert!(0.0 <= za && za < zb, "upper tail requires 0 <= za < zb");
+    let (p, gap_p) = inverse_mills_ratio_and_gap(normal, za);
+    let (q, _) = inverse_mills_ratio_and_gap(normal, zb);
+    let r = (-0.5 * (zb - za) * (zb + za)).exp();
+    let denom = q - r * p;
+    let pa = p * q / denom;
+    let pb = r * p * q / denom;
+    (pa, pb, gap_p + r * p * p / denom, zb + pb)
+}
+
+/// `truncation_pdf_ratios`の返り値。`pa=φ(za)/W`・`pb=φ(zb)/W`（`W=Φ(zb)-Φ(za)`、
+/// 境界が無い方向は0）、`a_gap=pa-za`・`b_gap=zb+pb`。
+struct TruncationRatios {
+    pa: f64,
+    pb: f64,
+    a_gap: f64,
+    b_gap: f64,
+}
+
+/// 非打ち切り領域`(za,zb)`（標準化した下限・上限。`None`はその方向の打ち切りなし）に
+/// 切断した標準正規分布について、`W=Φ(zb)-Φ(za)`で割る量を`W→0`となる裾でも
+/// 破綻しない形で返す（`TruncationRatios`）。`E[y|uncensored]`の`μ`からのずれ
+/// `σ(Pa-Pb)`、切断分散比`w`など、`W`で割る量は全てこれで書ける。`A=Pa-za`・
+/// `B=zb+Pb`は`|z|`が大きいと`Pa≈za`のように大きな数同士の差になるため、引き算せず
+/// 直接計算して返す（`uncensored_w_and_s`が`z²`同士の桁落ちを避けるのに使う）。
+///
+/// - 片側のみ: 逆ミルズ比（左のみ`Pa=λ(za)`、`A=λ(za)-za`。右のみ`Pb=λ(-zb)`、
+///   `B=λ(-zb)-(-zb)`）
+/// - 両側で`za>=0`（上側の裾）: `upper_tail_pdf_ratios`
+/// - 両側で`zb<=0`（下側の裾）: 符号反転`(za,zb)→(-zb,-za)`で上側の裾へ写し、
+///   `(Pa,Pb)`と`(A,B)`をそれぞれ入れ替える
+/// - 両側で`za<0<zb`: `W`が裾に潰れないので直接計算する（`A`・`B`は正の項の和）
+fn truncation_pdf_ratios(normal: &Normal, za: Option<f64>, zb: Option<f64>) -> TruncationRatios {
+    let (pa, pb, a_gap, b_gap) = match (za, zb) {
+        (None, None) => (0.0, 0.0, 0.0, 0.0),
+        (Some(a), None) => {
+            let (lambda, gap) = inverse_mills_ratio_and_gap(normal, a);
+            (lambda, 0.0, gap, 0.0)
+        }
+        (None, Some(b)) => {
+            let (lambda, gap) = inverse_mills_ratio_and_gap(normal, -b);
+            (0.0, lambda, 0.0, gap)
+        }
+        (Some(a), Some(b)) => {
+            if a >= 0.0 {
+                upper_tail_pdf_ratios(normal, a, b)
+            } else if b <= 0.0 {
+                let (pa_m, pb_m, a_gap_m, b_gap_m) = upper_tail_pdf_ratios(normal, -b, -a);
+                (pb_m, pa_m, b_gap_m, a_gap_m)
+            } else {
+                // `Φ(b)-Φ(a)=(Φ(b)-1/2)+(1/2-Φ(a))`は正の項の和（`a<0<b`）
+                let w = normal_cdf_minus_half(normal, b) + normal_cdf_minus_half(normal, -a);
+                let pa = normal.pdf(a) / w;
+                let pb = normal.pdf(b) / w;
+                (pa, pb, pa - a, b + pb)
+            }
+        }
+    };
+    TruncationRatios {
+        pa,
+        pb,
+        a_gap,
+        b_gap,
+    }
+}
+
+/// `ExpectedUncensored`の評価に使う、線形予測子`mu`での標準化境界と`TruncationRatios`。
+/// `za`/`zb`は境界が無い方向を`0.0`のダミー値にする（対応する`pa`/`pb`が0なので
+/// 以降の式に影響しない）。
+struct UncensoredTerms {
+    za: f64,
+    zb: f64,
+    ratios: TruncationRatios,
+}
+
+impl UncensoredTerms {
+    fn new(mu: f64, sigma: f64, lower: Option<f64>, upper: Option<f64>, normal: &Normal) -> Self {
+        let za = lower.map(|l| (l - mu) / sigma);
+        let zb = upper.map(|u| (u - mu) / sigma);
+        Self {
+            za: za.unwrap_or(0.0),
+            zb: zb.unwrap_or(0.0),
+            ratios: truncation_pdf_ratios(normal, za, zb),
+        }
+    }
+
+    /// `E[y|uncensored]=μ+σ·(Pa-Pb)`
+    fn mean(&self, mu: f64, sigma: f64) -> f64 {
+        mu + sigma * (self.ratios.pa - self.ratios.pb)
+    }
 }
 
 /// 打ち切り境界`bound`を標準化した`z=(bound-μ)/σ`・`φ(z)`・`Φ(z)`を計算する。`None`は
@@ -920,6 +1111,7 @@ fn boundary_terms(
 /// - `ProbUncensored`（`P(uncensored|x)=W(θ)`自体）: `w=∂W/∂μ=(φ(za)-φ(zb))/σ`。
 ///   その勾配は`∂²W/∂μ²=(za·φ(za)-zb·φ(zb))/σ²`・
 ///   `∂(∂W/∂μ)/∂σ=(φ(za)(za²-1)-φ(zb)(zb²-1))/σ²`
+/// - `ExpectedUncensored`（`E[y|uncensored,x]`）: `uncensored_w_and_s`
 ///
 /// いずれも境界項がある方向のみ`φ≠0`となるため（`boundary_terms`のNone時`φ=0`）、
 /// 左/右/両側打ち切りいずれでも同じ式で正しく計算できる（両側打ち切りは
@@ -940,11 +1132,16 @@ fn target_w_and_s(
     }
 
     let mu: f64 = (0..k).map(|m| x_point[m] * beta[m]).sum();
+    if target == MarginalEffectsTarget::ExpectedUncensored {
+        return uncensored_w_and_s(x_point, mu, sigma, lower, upper, normal);
+    }
     let (za, phi_za, cdf_za) = boundary_terms(lower, mu, sigma, normal, true);
     let (zb, phi_zb, cdf_zb) = boundary_terms(upper, mu, sigma, normal, false);
 
     match target {
-        MarginalEffectsTarget::ExpectedLatent => unreachable!("handled by early return above"),
+        MarginalEffectsTarget::ExpectedLatent | MarginalEffectsTarget::ExpectedUncensored => {
+            unreachable!("handled by early return above")
+        }
         MarginalEffectsTarget::ExpectedObserved => {
             let w = cdf_zb - cdf_za;
             let dw_dmu = (phi_za - phi_zb) / sigma;
@@ -960,6 +1157,109 @@ fn target_w_and_s(
             (w, s_beta, s_sigma)
         }
     }
+}
+
+/// `ExpectedUncensored`を信頼できる精度で評価できる、非打ち切り区間の幅`(upper-lower)/σ`の下限。
+/// `w`の絶対誤差は約`ε/δ²`、真値は`≈δ²/12`なので相対誤差は約`12ε/δ⁴`で、デルタ法に使う
+/// `∂w/∂μ`・`∂w/∂σ`の誤差はさらに大きい（`ε/δ³`級。`|z|=10`で`δ=1e-3`の`s`は
+/// 絶対`2e-8`で`w≈1e-7`の`1/5`）。`δ=1e-2`で`w`の相対誤差が全領域（`za∈[-10,10]`）で
+/// `6e-7`以下（80桁参照の実測）、`δ=1e-3`では`w`の相対誤差が`3e-3`〜、`s`が`w`の1%超になる。
+/// `σ̂`が区間幅の100倍以上（非打ち切りの確率が約0.4%未満）でほぼ識別できない当てはめのときだけ
+/// 超える。
+const MIN_UNCENSORED_WIDTH_RATIO: f64 = 1e-2;
+
+/// 両側打ち切りで非打ち切り区間が`σ`に比べて狭すぎる場合に
+/// [`MleError::UncensoredIntervalTooNarrow`]を返す（`MIN_UNCENSORED_WIDTH_RATIO`）。
+/// 片側打ち切りは区間が無限大なので常に`Ok`。幅`(upper-lower)/σ`はモデル（`σ̂`）で1つに
+/// 決まり観測に依存しないので、呼び出しごとに1回検査すれば足りる。
+fn ensure_uncensored_interval_resolvable(
+    lower: Option<f64>,
+    upper: Option<f64>,
+    sigma: f64,
+) -> Result<(), MleError> {
+    if let (Some(lower), Some(upper)) = (lower, upper)
+        && (upper - lower) / sigma < MIN_UNCENSORED_WIDTH_RATIO
+    {
+        return Err(MleError::UncensoredIntervalTooNarrow {
+            lower,
+            upper,
+            sigma,
+        });
+    }
+    Ok(())
+}
+
+/// `ExpectedUncensored`（`m(μ,σ)=E[y|lower<y<upper,x]=μ+σ(Pa-Pb)`）の`(w, s_beta, s_sigma)`。
+///
+/// ## 数式
+///
+/// `m`は`x`に`μ=x'β`を通してしか依存しないので`dydx_j=w·βⱼ`、`w=∂m/∂μ`。
+/// `Pa=φ(za)/W`・`Pb=φ(zb)/W`・`ρ1=Pa-Pb`・`ρ2=za·Pa-zb·Pb`とおくと
+/// `w=1+ρ2-ρ1²`（切断正規分布の分散を`σ²`で割った値で、`(0,1)`に入る）。
+/// `za`/`zb`についての偏微分は`W_a=-φa`・`W_b=φb`などから
+///
+/// - `∂ρ1/∂za=Pa(ρ1-za)`・`∂ρ1/∂zb=Pb(zb-ρ1)`
+/// - `∂ρ2/∂za=Pa(1-za²+ρ2)`・`∂ρ2/∂zb=Pb(zb²-1-ρ2)`
+/// - `w_a=∂ρ2/∂za-2ρ1∂ρ1/∂za`・`w_b=∂ρ2/∂zb-2ρ1∂ρ1/∂zb`
+///
+/// で、`∂za/∂μ=∂zb/∂μ=-1/σ`・`∂za/∂σ=-za/σ`・`∂zb/∂σ=-zb/σ`より
+/// `∂w/∂μ=-(w_a+w_b)/σ`・`∂w/∂σ=-(za·w_a+zb·w_b)/σ`。左のみ打ち切り（`zb`なし）で
+/// `Pa=λ(za)`とすると`w=1+za·λ-λ²`（McDonald-Moffittの`1-zλ-λ²`型の式）に一致する。
+///
+/// ## 数値安定性
+///
+/// 上の式をそのまま書くと、`|z|`が大きい裾（`Pa≈za`）では`za²`と`za·Pa`の大きな数同士の
+/// 引き算になり、`w_a`の絶対誤差が`ε·z³`で増える（`z=72`の観測を含む実データで`s_sigma`の
+/// 相対誤差が`5e-9`、限界効果の標準誤差が`1e-8`ずれた）。
+/// `A=Pa-za`・`B=zb+Pb`（`truncation_pdf_ratios`が引き算なしに返す）で整理すると
+///
+/// - `w=1-Pa·A-Pb·B+2·Pa·Pb`
+/// - `w_a=Pa[1+za·A-zb·Pb-2ρ1(A-Pb)]`
+/// - `w_b=Pb[-1+zb·B-za·Pa-2ρ1(B-Pa)]`
+///
+/// となり、括弧内は`O(1)`同士の和なので絶対誤差は`ε·Pa`程度に収まる。`W→0`となる裾でも
+/// `Pa`・`Pb`が直接計算されるため割り算は破綻しない。`w`は理論上`(0,1)`なので、丸め誤差で
+/// 範囲外になった値が平均に混ざらないよう`[0,1]`にクランプする。
+///
+/// ## 既知の限界
+///
+/// - **遠い裾の相対精度**: 片側の裾で`|z|`が大きいと、括弧内の`O(1)`同士が`O(z⁻⁴)`まで
+///   打ち消し合うため、絶対誤差は小さいままでも`w`・`w_a`・`w_b`の**相対**精度は
+///   `|z|≳1e3`から落ち、`|z|≳1e4`で`w_a`は符号も保証されない（`w≈1/z²`・`w_a≈-2/z³`自体が
+///   無視できる大きさなので、全観測の平均には影響しない）。
+/// - **非打ち切り区間が極端に狭い場合**: 区間幅`δ=zb-za=(upper-lower)/σ`が小さいと、上側/下側の
+///   裾の`q-r·p`や中央の`W`・`1-Pa·A-Pb·B+…`が桁落ちする（`MIN_UNCENSORED_WIDTH_RATIO`の
+///   docコメント参照）。この関数は`δ`を検査しない。`TobitEstimator`の`predict`・
+///   `predict_new_data`・`marginal_effects`が入口で`ensure_uncensored_interval_resolvable`
+///   により`δ<1e-2`を`MleError::UncensoredIntervalTooNarrow`として拒否する。
+fn uncensored_w_and_s(
+    x_point: &[f64],
+    mu: f64,
+    sigma: f64,
+    lower: Option<f64>,
+    upper: Option<f64>,
+    normal: &Normal,
+) -> (f64, Vec<f64>, f64) {
+    let UncensoredTerms {
+        za,
+        zb,
+        ratios:
+            TruncationRatios {
+                pa,
+                pb,
+                a_gap,
+                b_gap,
+            },
+    } = UncensoredTerms::new(mu, sigma, lower, upper, normal);
+    let rho1 = pa - pb;
+    let w = (1.0 - pa * a_gap - pb * b_gap + 2.0 * pa * pb).clamp(0.0, 1.0);
+
+    let w_a = pa * (1.0 + za * a_gap - zb * pb - 2.0 * rho1 * (a_gap - pb));
+    let w_b = pb * (-1.0 + zb * b_gap - za * pa - 2.0 * rho1 * (b_gap - pa));
+    let dw_dmu = -(w_a + w_b) / sigma;
+    let s_beta: Vec<f64> = x_point.iter().map(|&x_m| dw_dmu * x_m).collect();
+    let s_sigma = -(za * w_a + zb * w_b) / sigma;
+    (w, s_beta, s_sigma)
 }
 
 /// `target_w_and_s`の`at="overall"`（AME）版。全観測を1回走査し、各観測の`(w,s_beta,
@@ -1077,8 +1377,7 @@ fn marginal_effects_from_tobit_w_s(
     // statrsの検証を常に満たすため、この`map_err`分岐は理論上到達不能
     // （`.claude/rules/rust-style.md`「テスト」のカバレッジ方針参照、`marginal_effects_from_w_s`
     // と同じ扱い）。
-    let normal =
-        Normal::new(0.0, 1.0).map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+    let normal = Normal::new(0.0, 1.0).map_err(|e| CommonError::internal(e.to_string()))?;
     let z_crit = inference::critical_value(&normal, confidence_level);
 
     let k_constant = usize::from(has_intercept);
@@ -1128,6 +1427,9 @@ fn marginal_effects_from_tobit_w_s(
 /// 左のみ・右のみ・両側打ち切りいずれでも同じ式で正しく計算できる（`target_w_and_s`の
 /// docコメント「数式」と同じ考え方。こちらは値そのもの、`target_w_and_s`はその微分）。
 ///
+/// `ExpectedUncensored`は`E[y|lower<y<upper,x]=μ+σ(Pa-Pb)`（`UncensoredTerms::mean`、
+/// 裾でも安定な`truncation_pdf_ratios`経由）。
+///
 /// `E[y|x]`の閉形式は`Φ(za)*lower + (1-Φ(zb))*upper + (Φ(zb)-Φ(za))*mu - σ(φ(zb)-φ(za))`
 /// （両側打ち切りの一般形。`lower`/`upper`が`None`の側は`boundary_terms`の規約により
 /// 係数が0になるため、ダミー値`lower.unwrap_or(0.0)`/`upper.unwrap_or(0.0)`を掛けても
@@ -1143,10 +1445,15 @@ fn predicted_value(
     if target == MarginalEffectsTarget::ExpectedLatent {
         return mu;
     }
+    if target == MarginalEffectsTarget::ExpectedUncensored {
+        return UncensoredTerms::new(mu, sigma, lower, upper, normal).mean(mu, sigma);
+    }
     let (_, phi_za, cdf_za) = boundary_terms(lower, mu, sigma, normal, true);
     let (_, phi_zb, cdf_zb) = boundary_terms(upper, mu, sigma, normal, false);
     match target {
-        MarginalEffectsTarget::ExpectedLatent => unreachable!("handled by early return above"),
+        MarginalEffectsTarget::ExpectedLatent | MarginalEffectsTarget::ExpectedUncensored => {
+            unreachable!("handled by early return above")
+        }
         MarginalEffectsTarget::ExpectedObserved => {
             let lower_c = lower.unwrap_or(0.0);
             let upper_c = upper.unwrap_or(0.0);
@@ -1310,7 +1617,7 @@ impl TobitEstimator {
     /// （`logσ`が常に存在するため対応するケースが生じない、同関数のdocコメント参照）。
     /// 推定オプションの検証は3手法共通の`validate_mle_options`を使い、Logit/Probit用の
     /// `validate_fit_preconditions`は呼ばない（手法ごとの違いは同関数のdocコメント参照）。
-    /// 打ち切り境界の検証（`MleError::InvalidCensoringBounds`/`YOutOfCensoringBounds`）は
+    /// 打ち切り境界の検証（`MleError::CensoringBoundsMissing`等・`YOutOfCensoringBounds`）は
     /// `fit()`ではなく`TobitInput::from_columns`で完了済み（モジュール冒頭のdocコメント参照）。
     ///
     /// ## `σ`のSE（デルタ法）
@@ -1338,8 +1645,8 @@ impl TobitEstimator {
     /// - `cov_type=Cluster`でクラスター数が2未満: `CommonError::InsufficientClusters`
     /// - `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下:
     ///   `CommonError::InsufficientClustersForInference`（`rank(Ŝ) ≤ g - 1`のため全体
-    ///   Wald検定の`q×q`部分行列が構造的に特異。従来は`wald_chi2_test`内の
-    ///   `ComputationFailed`だったものを`fit()`冒頭のバリデーションへ前倒し）
+    ///   Wald検定の`q×q`部分行列が構造的に特異。`wald_chi2_test`内の
+    ///   `NearSingularMatrix`（`ComputationError`）に任せず`fit()`冒頭のバリデーションで弾く）
     /// - OLS初期値計算時に`x`が特異（完全な多重共線性等）: `MleError::SingularDesignMatrix`
     ///   （`ols_initial_params`参照）
     /// - `raise_on_non_convergence=true`かつ`max_iter`回で未収束: `MleError::NonConvergence`
@@ -1347,7 +1654,7 @@ impl TobitEstimator {
     ///   `MleError::SingularHessian`
     /// - `cov_type=Opg`でOPG行列（`Σᵢ sᵢsᵢ'`）が特異: `MleError::SingularOpgMatrix`
     /// - 傾き係数間の悪条件（極端なスケール差等）でWald検定用の係数分散共分散部分行列が
-    ///   数値的にほぼ特異: `CommonError::ComputationFailed`（`wald_chi2_test`参照。`g > q`
+    ///   数値的にほぼ特異: `CommonError::NearSingularMatrix`（`wald_chi2_test`参照。`g > q`
     ///   でも起こりうるbackstop。`df_model==0`（切片以外の`β`が無い）のときはこの検定自体を
     ///   スキップし`wald_statistic`/`wald_p_value`はNaNになる）
     pub fn fit(input: TobitInput, options: MleFitOptions) -> Result<Self, MleError> {
@@ -1360,8 +1667,8 @@ impl TobitEstimator {
             confidence_level,
         } = options;
 
-        // faer のグローバル並列度を Par::Seq に固定する（`crate::parallelism`）。
-        crate::parallelism::ensure_serial();
+        // faer のグローバル並列度を Par::Seq に固定する（`crate::shared::parallelism`）。
+        crate::shared::parallelism::ensure_serial();
 
         validate_mle_options(confidence_level, max_iter, tol)?;
 
@@ -1380,7 +1687,7 @@ impl TobitEstimator {
         let y_std = scaling.standardize_y(input.y());
         let lower_std = scaling.standardize_bound(input.lower());
         let upper_std = scaling.standardize_bound(input.upper());
-        let initial_params = ols_initial_params(&x_std, &y_std)?;
+        let initial_params = ols_initial_params(&x_std, input.x(), &y_std, input.param_names())?;
         let problem = TobitProblem::from_standardized(x_std, y_std, lower_std, upper_std);
         // `cov_type`がOPG/サンドイッチ型/クラスターの場合、収束点でのスコア評価に
         // 標準化空間の`TobitProblem`が必要になる。`run_solver`は`problem`の所有権を
@@ -1400,13 +1707,11 @@ impl TobitEstimator {
             tol,
             input.y().nrows(),
             raise_on_non_convergence,
-            // Tobitの真の分離は係数発散ではなく`σ→0`退化として現れるため、標準化
-            // パラメータノルムによる(準)完全分離の事後チェックは無効にする。全件打ち切りは
-            // `validate_has_uncensored_observations`（`NoUncensoredObservations`）、
-            // 部分的な準完全分離は`NonConvergence`で捕捉される
-            // （`SeparationNormCheck`のdocコメント参照）。
-            SeparationNormCheck::Disabled,
         )?;
+        // Tobitの真の分離は係数発散ではなく`σ→0`退化として現れるため、Logit/Probitの分離検出
+        // （`nonlinear::separation`）は行わない。全件打ち切りは
+        // `validate_has_uncensored_observations`（`NoUncensoredObservations`）、
+        // 部分的な準完全分離は`NonConvergence`で捕捉される。
 
         // 標準化空間の内部パラメータ`(β̃, s̃)`を元のスケールの`(β, logσ)`へ逆変換する
         // （`TobitScaling`のdocコメントの式）。
@@ -1455,11 +1760,11 @@ impl TobitEstimator {
                     .as_ref()
                     .expect("problem_for_scores must be Some for CovType::Cluster");
                 // `groups`のNone・クラスター数不足の検証はfit()冒頭の
-                // `validate_cluster_cov_type`で完了済み。ここでの`expect`はその契約を
-                // 明記する防御的な扱い（`LogitEstimator::fit`と同じ）。
+                // `validate_cluster_cov_type`で完了済み。
+                // ここでの`expect`はその契約を明記する防御的な扱い（`LogitEstimator::fit`と同じ）。
                 let groups = groups
                     .as_ref()
-                    .expect("groups is validated as Some at the top of fit()");
+                    .expect("groups are validated by validate_cluster_cov_type for Cluster");
                 cluster_cov_params(
                     &hessian_std,
                     &problem.scores(&output.params),
@@ -1504,6 +1809,10 @@ impl TobitEstimator {
             input.upper(),
             &params_full,
         );
+        // `σ`は推定されるパラメータなので、`aic`/`bic`の罰則と`df_resid`はそれを含む総パラメータ数
+        // `k+1`を使う。一方`df_model`（下）はWald検定の対象となる傾き係数の数で、`σ`は検定対象
+        // ではないため`k - k_constant`になる（両者は意図的に別の数え方。
+        // `docs/spec/tobit-spec.md`「適合度統計量」参照）。
         let aic = -2.0 * llf + 2.0 * ((k + 1) as f64);
         let bic = -2.0 * llf + (n as f64).ln() * ((k + 1) as f64);
         let df_resid = n - (k + 1);
@@ -1664,7 +1973,9 @@ impl TobitEstimator {
     /// 自動判定は行わない（常に連続変数として扱う、Logit/Probitと同じ方針）。
     ///
     /// # Errors
-    /// `confidence_level`が`(0, 1)`の範囲外: `CommonError::InvalidConfidenceLevel`
+    /// - `confidence_level`が`(0, 1)`の範囲外: `CommonError::InvalidConfidenceLevel`
+    /// - `target`が`ExpectedUncensored`で、両側打ち切りの非打ち切り区間が`σ̂`に比べて狭すぎる:
+    ///   `MleError::UncensoredIntervalTooNarrow`
     pub fn marginal_effects(
         &self,
         at: MarginalEffectsAt,
@@ -1676,6 +1987,9 @@ impl TobitEstimator {
         let lower = self.input.lower();
         let upper = self.input.upper();
         let normal = Normal::standard();
+        if target == MarginalEffectsTarget::ExpectedUncensored {
+            ensure_uncensored_interval_resolvable(lower, upper, self.sigma)?;
+        }
 
         let (w, s_beta, s_sigma) = match at {
             MarginalEffectsAt::Overall => {
@@ -1727,19 +2041,26 @@ impl TobitEstimator {
     /// （`target`省略時の`E[y|x]`、`docs/spec/nonlinear-common.md`
     /// 6章）はPython層（engine_pybind）の責務（`SolverType`/`CovType`等と同じ設計、
     /// `.claude/rules/rust-style.md`参照）。
-    pub fn predict(&self, target: MarginalEffectsTarget) -> Vec<f64> {
+    ///
+    /// # Errors
+    /// `target`が`ExpectedUncensored`で、両側打ち切りの非打ち切り区間が`σ̂`に比べて狭すぎる:
+    /// `MleError::UncensoredIntervalTooNarrow`
+    pub fn predict(&self, target: MarginalEffectsTarget) -> Result<Vec<f64>, MleError> {
         let x = self.input.x();
         let n = x.nrows();
         let k = self.input.k();
         let lower = self.input.lower();
         let upper = self.input.upper();
         let normal = Normal::standard();
-        (0..n)
+        if target == MarginalEffectsTarget::ExpectedUncensored {
+            ensure_uncensored_interval_resolvable(lower, upper, self.sigma)?;
+        }
+        Ok((0..n)
             .map(|i| {
                 let mu: f64 = (0..k).map(|j| *x.get(i, j) * self.params[j]).sum();
                 predicted_value(target, mu, self.sigma, lower, upper, &normal)
             })
-            .collect()
+            .collect())
     }
 
     /// 新規データ（out-of-sample、`new_x_columns`）に対する予測値。
@@ -1754,19 +2075,28 @@ impl TobitEstimator {
     ///
     /// `new_x_columns`の本数・順序の契約、パニック条件は
     /// `nonlinear::common::predict_new_data`のdocコメント参照。
+    ///
+    /// # Errors
+    /// `predict`と同じ（`MleError::UncensoredIntervalTooNarrow`）。
     pub fn predict_new_data(
         &self,
         target: MarginalEffectsTarget,
         new_x_columns: &[Vec<f64>],
-    ) -> Vec<f64> {
+    ) -> Result<Vec<f64>, MleError> {
         let has_intercept = self.input.has_intercept();
         let lower = self.input.lower();
         let upper = self.input.upper();
         let sigma = self.sigma;
         let normal = Normal::standard();
-        predict_new_data(&self.params, has_intercept, new_x_columns, |mu| {
-            predicted_value(target, mu, sigma, lower, upper, &normal)
-        })
+        if target == MarginalEffectsTarget::ExpectedUncensored {
+            ensure_uncensored_interval_resolvable(lower, upper, sigma)?;
+        }
+        Ok(predict_new_data(
+            &self.params,
+            has_intercept,
+            new_x_columns,
+            |mu| predicted_value(target, mu, sigma, lower, upper, &normal),
+        ))
     }
 
     /// 打ち切り予測の適合度チェック（Logit/Probitの`pred_table`の代替、`predict`とは独立
@@ -1853,7 +2183,8 @@ impl TobitEstimator {
 mod tests {
     use super::*;
     use crate::nonlinear::common::SolverType;
-    use statrs::distribution::{Continuous, ContinuousCDF};
+    use crate::shared::error::{ClusterSetting, ErrorInfo};
+    use crate::shared::group_codes::GroupCodes;
 
     #[test]
     fn wald_chi2_test_keeps_precision_in_the_far_tail() {
@@ -1949,7 +2280,7 @@ mod tests {
     }
 
     #[test]
-    fn from_columns_returns_invalid_censoring_bounds_when_lower_is_nan() {
+    fn from_columns_returns_censoring_bound_not_finite_when_lower_is_nan() {
         let y = vec![0.0, 1.0, 2.0];
         let result = TobitInput::from_columns(
             &y,
@@ -1963,7 +2294,7 @@ mod tests {
 
         assert!(matches!(
             result.unwrap_err(),
-            MleError::InvalidCensoringBounds {
+            MleError::CensoringBoundNotFinite {
                 lower: Some(l),
                 upper: Some(u)
             } if l.is_nan() && u == 10.0
@@ -1971,7 +2302,7 @@ mod tests {
     }
 
     #[test]
-    fn from_columns_returns_invalid_censoring_bounds_when_upper_is_nan() {
+    fn from_columns_returns_censoring_bound_not_finite_when_upper_is_nan() {
         let y = vec![0.0, 1.0, 2.0];
         let result = TobitInput::from_columns(
             &y,
@@ -1985,7 +2316,7 @@ mod tests {
 
         assert!(matches!(
             result.unwrap_err(),
-            MleError::InvalidCensoringBounds {
+            MleError::CensoringBoundNotFinite {
                 lower: Some(l),
                 upper: Some(u)
             } if l == 0.0 && u.is_nan()
@@ -1993,7 +2324,7 @@ mod tests {
     }
 
     #[test]
-    fn from_columns_returns_invalid_censoring_bounds_when_only_bound_is_nan() {
+    fn from_columns_returns_censoring_bound_not_finite_when_only_bound_is_nan() {
         // 片側のみ指定（upper=None）でも、`lower`単体がNaNなら弾かれることを確認する
         // （`(Some(l), None) => l.is_finite()`分岐、両方Someのケースとは別分岐）。
         let y = vec![0.0, 1.0, 2.0];
@@ -2002,11 +2333,83 @@ mod tests {
 
         assert!(matches!(
             result.unwrap_err(),
-            MleError::InvalidCensoringBounds {
+            MleError::CensoringBoundNotFinite {
                 lower: Some(l),
                 upper: None
             } if l.is_nan()
         ));
+    }
+
+    #[test]
+    fn from_columns_returns_censoring_bound_not_finite_for_infinite_bounds() {
+        let y = vec![0.0, 1.0, 2.0];
+        for (lower, upper) in [
+            (Some(f64::NEG_INFINITY), None),
+            (None, Some(f64::INFINITY)),
+            (Some(0.0), Some(f64::INFINITY)),
+            (Some(f64::NEG_INFINITY), Some(10.0)),
+        ] {
+            let result =
+                TobitInput::from_columns(&y, &[], vec![], true, "y".to_string(), lower, upper);
+
+            assert_eq!(
+                result.unwrap_err(),
+                MleError::CensoringBoundNotFinite { lower, upper },
+                "lower={lower:?}, upper={upper:?}"
+            );
+        }
+    }
+
+    /// 判定順は Missing → NotFinite → NotOrdered。逆順に判定すると、順序が逆転した
+    /// 非有限の境界が`CensoringBoundsNotOrdered`になる。
+    #[test]
+    fn from_columns_reports_not_finite_before_not_ordered() {
+        let y = vec![0.0, 1.0, 2.0];
+        for (lower, upper) in [
+            (f64::INFINITY, f64::NEG_INFINITY),
+            (5.0, f64::NAN),
+            (f64::NAN, -1.0),
+        ] {
+            let result = TobitInput::from_columns(
+                &y,
+                &[],
+                vec![],
+                true,
+                "y".to_string(),
+                Some(lower),
+                Some(upper),
+            );
+
+            assert!(
+                matches!(
+                    result.unwrap_err(),
+                    MleError::CensoringBoundNotFinite { .. }
+                ),
+                "lower={lower}, upper={upper}"
+            );
+        }
+    }
+
+    #[test]
+    fn from_columns_returns_censoring_bounds_not_ordered_when_lower_gt_upper() {
+        let y = vec![0.0, 1.0, 2.0];
+        let result = TobitInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            true,
+            "y".to_string(),
+            Some(10.0),
+            Some(5.0),
+        );
+
+        assert_eq!(
+            result.unwrap_err(),
+            MleError::CensoringBoundsNotOrdered {
+                lower: 10.0,
+                upper: 5.0
+            }
+        );
     }
 
     #[test]
@@ -2071,30 +2474,24 @@ mod tests {
     }
 
     #[test]
-    fn from_columns_returns_invalid_censoring_bounds_when_both_none() {
+    fn from_columns_returns_censoring_bounds_missing_when_both_none() {
         let y = vec![0.0, 1.0, 2.0];
         let result = TobitInput::from_columns(&y, &[], vec![], true, "y".to_string(), None, None);
 
-        assert_eq!(
-            result.unwrap_err(),
-            MleError::InvalidCensoringBounds {
-                lower: None,
-                upper: None
-            }
-        );
+        assert_eq!(result.unwrap_err(), MleError::CensoringBoundsMissing);
     }
 
     #[test]
-    fn from_columns_returns_invalid_censoring_bounds_when_lower_ge_upper() {
+    fn from_columns_returns_censoring_bounds_not_ordered_when_lower_ge_upper() {
         let y = vec![0.0, 1.0, 2.0];
         let result =
             TobitInput::from_columns(&y, &[], vec![], true, "y".to_string(), Some(5.0), Some(5.0));
 
         assert_eq!(
             result.unwrap_err(),
-            MleError::InvalidCensoringBounds {
-                lower: Some(5.0),
-                upper: Some(5.0)
+            MleError::CensoringBoundsNotOrdered {
+                lower: 5.0,
+                upper: 5.0
             }
         );
     }
@@ -2223,6 +2620,46 @@ mod tests {
                     analytic[i][j],
                     numeric
                 );
+            }
+        }
+    }
+
+    /// `scores`は`contribution`を観測あたり1回だけ計算して行を埋める。セルごとに再計算する
+    /// 素朴な式と、ビット単位で一致することを確認する（左・右・非打ち切りの観測と、
+    /// `|zeta|`が`U_CLAMP`を超える極端なパラメータ点を含む）。
+    /// 参照式は本体と同じヘルパーを呼ぶため、検出するのは行列に詰める配置・順序の退行で、
+    /// ヘルパー側の式の変更は別のテスト（閉形式・数値微分）が担う。
+    #[test]
+    fn scores_match_per_cell_reference_bit_for_bit() {
+        let input = mixed_censoring_input();
+        let problem = TobitProblem::new(&input);
+        let normal = Normal::standard();
+        // 通常点に加え、`zeta`が両側でクランプされる点（`β₀`の符号違い）と、`σ=e^s`が極小・
+        // 極大の点を含める。
+        for params in [
+            vec![0.5, 0.3, -0.2],
+            vec![-1.0, 2.0, 0.4],
+            vec![30.0, -9.0, -1.5],
+            vec![-30.0, -9.0, -1.5],
+            vec![0.5, 0.3, -6.0],
+            vec![0.5, 0.3, 4.0],
+        ] {
+            let scores = problem.scores(&params);
+            let (k, sigma) = (problem.k(), params[problem.k()].exp());
+            for i in 0..scores.nrows() {
+                for col in 0..=k {
+                    let c = problem.contribution(i, &params, &normal);
+                    let expected = if col < k {
+                        c.score_beta_coef * (*problem.x.get(i, col)) / sigma
+                    } else {
+                        c.score_s
+                    };
+                    assert_eq!(
+                        scores.get(i, col).to_bits(),
+                        expected.to_bits(),
+                        "({i}, {col})"
+                    );
+                }
             }
         }
     }
@@ -2694,10 +3131,10 @@ mod tests {
     /// 入力だけから判定できるため、`fit()`冒頭のバリデーション
     /// （`validate_cluster_cov_type` → `validate_cluster_count_covers_slopes`）が
     /// `CommonError::InsufficientClustersForInference`で弾く（
-    /// 従来は`wald_chi2_test`内の`ComputationFailed`だった）。`wald_chi2_test`の
+    /// 検証が無ければ`wald_chi2_test`内の`NearSingularMatrix`になる）。`wald_chi2_test`の
     /// `ensure_well_conditioned_symmetric_matrix`側のbackstop（`g > q`だが悪条件で
     /// 数値的にほぼ特異なケース）は、`wald_f_test`と共有する純粋な線形代数
-    /// ユーティリティであり`linear_algebra.rs`の単体テスト・OLSの
+    /// ユーティリティであり`shared/linear_algebra.rs`の単体テスト・OLSの
     /// `fit_returns_computation_failed_for_extreme_scale_difference_in_f_test`で担保する
     /// （Tobitは`TobitScaling`が`x`を内部で列標準化するため、極端なスケール差による
     /// 悪条件をTobitの`fit()`経由で再現するのが困難で、Tobit固有テストは設けない）。
@@ -2721,7 +3158,7 @@ mod tests {
                 tol: 1e-8,
                 raise_on_non_convergence: true,
                 cov_type: CovType::Cluster {
-                    groups: Some(groups),
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
                 },
                 confidence_level: 0.95,
             },
@@ -2871,7 +3308,7 @@ mod tests {
                 tol: 1e-12,
                 raise_on_non_convergence: false,
                 cov_type: CovType::Cluster {
-                    groups: Some(groups),
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
                 },
                 confidence_level: 0.95,
             },
@@ -3027,9 +3464,16 @@ mod tests {
                 confidence_level: 0.95,
             },
         );
+        let err = result.unwrap_err();
         assert_eq!(
-            result.unwrap_err(),
+            err,
             MleError::Common(CommonError::InsufficientObservations { n: 2, k: 2 })
+        );
+        // `n_params`は`β`の数に`log σ`を足した値になる。
+        let report = err.report();
+        assert_eq!(
+            report.message(),
+            "Not enough observations: 2 observation(s) for 2 parameter(s); at least 3 are needed."
         );
     }
 
@@ -3041,7 +3485,7 @@ mod tests {
         let x = Mat::from_fn(4, 2, |i, j| if j == 0 { 1.0 } else { xs[i] });
         let y = Mat::from_fn(4, 1, |i, _| 2.0 * xs[i] + 1.0); // y=2x+1、完全に当てはまる
 
-        let params = ols_initial_params(&x, &y).unwrap();
+        let params = ols_initial_params(&x, &x, &y, &[]).unwrap();
 
         assert_eq!(params.len(), 3);
         assert!((params[0] - 1.0).abs() < 1e-9, "intercept={}", params[0]);
@@ -3084,7 +3528,7 @@ mod tests {
             },
         );
         assert!(
-            matches!(result, Err(MleError::SingularDesignMatrix)),
+            matches!(result, Err(MleError::SingularDesignMatrix { .. })),
             "{:?}",
             result
         );
@@ -3309,6 +3753,130 @@ mod tests {
         }
     }
 
+    /// 標準化に使う`y`のスケール`y_scale`は、`y`のスケールによらず厳密に2の冪になる。
+    /// 掛け算の順序で値が変わらない性質（`tobit_scaling_destandardize_matches_the_closed_form_bit_for_bit`）
+    /// と、反復軌道が標準化前と厳密に相似に保たれる性質の前提。
+    #[test]
+    fn tobit_scaling_y_scale_is_an_exact_power_of_two() {
+        let x = Mat::from_fn(5, 2, |i, j| {
+            if j == 0 {
+                1.0
+            } else {
+                [1.0, 3.0, 2.0, 5.0, 4.0][i]
+            }
+        });
+        for factor in [1e-6, 0.01, 0.3, 1.0, 7.0, 50.0, 1e4, 1e9] {
+            let y = Mat::from_fn(5, 1, |i, _| [3.0, 7.0, 5.0, 11.0, 9.0][i] * factor);
+            let scale = TobitScaling::fit(&x, &y, true).y_scale;
+            assert!(scale > 0.0 && scale.is_finite(), "factor={factor}");
+            // 2の冪は仮数部が0（`log2`が整数）で、`powi`で戻すと元の値に厳密に一致する。
+            let exp = scale.log2();
+            assert_eq!(exp.fract(), 0.0, "factor={factor}, y_scale={scale}");
+            assert_eq!(2.0_f64.powi(exp as i32), scale, "factor={factor}");
+        }
+    }
+
+    /// `TobitScaling`の逆変換・ヤコビアンが、`ColumnScale`に委ねる前の式
+    /// （`βⱼ = c·β̃ⱼ/stdⱼ`、`β₀ = c·β̃₀ - Σ x̄ⱼβⱼ`、`J`の対角`c/stdⱼ`・第0行`-c·x̄ⱼ/stdⱼ`）と
+    /// ビット単位で一致する。`y_scale`が2の冪なので、掛ける順序が違っても値が変わらないことを
+    /// 固定する。許容誤差を使わないのは、丸め誤差が入ってもテストが気づけなくなるため。
+    /// `y`のスケールを変えて`c≠1`（大小両方）の場合も確かめる。
+    #[test]
+    fn tobit_scaling_destandardize_matches_the_closed_form_bit_for_bit() {
+        let n = 6;
+        for has_intercept in [true, false] {
+            let cols: Vec<Vec<f64>> = if has_intercept {
+                vec![
+                    vec![1.0; n],
+                    vec![10.0, 12.0, 9.0, 15.0, 11.0, 13.0],
+                    vec![100.0, 400.0, 900.0, 1600.0, 2500.0, 3600.0],
+                ]
+            } else {
+                vec![
+                    vec![2.0, 4.0, 6.0, 8.0, 10.0, 7.0],
+                    vec![1.0, 3.0, 2.0, 5.0, 4.0, 9.0],
+                    vec![0.5, 0.1, 0.9, 0.3, 0.7, 0.2],
+                ]
+            };
+            let k = cols.len();
+            let x = Mat::from_fn(n, k, |i, j| cols[j][i]);
+            let start = usize::from(has_intercept);
+
+            for y_factor in [0.003, 1.0, 40.0, 2500.0] {
+                let y = Mat::from_fn(n, 1, |i, _| [3.0, 7.0, 5.0, 11.0, 9.0, 4.0][i] * y_factor);
+                let scaling = TobitScaling::fit(&x, &y, has_intercept);
+                let c = scaling.y_scale;
+
+                // `x`の平均・母集団標準偏差を、実装とは独立に（切片列・切片なしでは平均0）求める。
+                let means: Vec<f64> = (0..k)
+                    .map(|j| {
+                        if has_intercept && j >= start {
+                            cols[j].iter().sum::<f64>() / n as f64
+                        } else {
+                            0.0
+                        }
+                    })
+                    .collect();
+                let stds: Vec<f64> = (0..k)
+                    .map(|j| {
+                        if j < start {
+                            return 1.0;
+                        }
+                        let m = cols[j].iter().sum::<f64>() / n as f64;
+                        let var = cols[j].iter().map(|v| (v - m).powi(2)).sum::<f64>() / n as f64;
+                        if var.sqrt() > 0.0 { var.sqrt() } else { 1.0 }
+                    })
+                    .collect();
+
+                let params_std: Vec<f64> = (0..=k).map(|j| 0.3 + 0.2 * j as f64).collect();
+                let mut expected = vec![0.0; k + 1];
+                for j in start..k {
+                    expected[j] = c * params_std[j] / stds[j];
+                }
+                if has_intercept {
+                    expected[0] =
+                        c * params_std[0] - (1..k).map(|j| means[j] * expected[j]).sum::<f64>();
+                }
+                expected[k] = params_std[k] + c.ln();
+
+                let actual = scaling.destandardize_params(&params_std);
+                for j in 0..=k {
+                    assert_eq!(
+                        actual[j].to_bits(),
+                        expected[j].to_bits(),
+                        "has_intercept={has_intercept}, y_factor={y_factor}, j={j}: \
+                         {} vs {}",
+                        actual[j],
+                        expected[j]
+                    );
+                }
+
+                let sigma = 1.7;
+                let jac = scaling.param_jacobian(sigma);
+                for i in 0..=k {
+                    for m in 0..=k {
+                        let expected_ij = if i == k {
+                            if m == k { sigma } else { 0.0 }
+                        } else if m == k {
+                            0.0
+                        } else if has_intercept && i == 0 {
+                            if m == 0 { c } else { -c * means[m] / stds[m] }
+                        } else if m == i {
+                            c / stds[i]
+                        } else {
+                            0.0
+                        };
+                        assert_eq!(
+                            jac.get(i, m).to_bits(),
+                            expected_ij.to_bits(),
+                            "has_intercept={has_intercept}, y_factor={y_factor}, J[{i}][{m}]"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     /// `TobitScaling::param_jacobian`（`destandardize_cov_params`が両側から掛ける`J`）が、
     /// `(β̃, s̃) → (β, σ)`の写像の解析ヤコビアンと一致することを、中心差分で独立に検証する
     /// （`expected_cov_params`ヘルパーは最終段で`destandardize_cov_params`を本体と共用して
@@ -3375,15 +3943,12 @@ mod tests {
     /// `y`（および打ち切り境界）を大きなスケールに引き伸ばしても、`fit()`が生スケールの
     /// データと数学的に同値な推定値に収束することを確認する回帰テスト。
     ///
-    /// `y`を標準化せず最適化していた頃は、`y`のスケールが大きいと健全なMLE解でも
-    /// 標準化パラメータ空間のL2ノルムが`SEPARATION_PARAM_NORM_THRESHOLD`を超え、
-    /// (準)分離ヒューリスティック（`nonlinear/common.rs`の`separation_suspected`）が
-    /// 誤発火して`MleError::SeparationSuspected`を返していた（Wooldridge mroz `hours`の
-    /// 生スケールTobitで発覚）。`TobitScaling`が`y`を2の冪に丸めたスケールで
-    /// スケーリングしてから最適化し収束後に逆変換することで解消した。その後
-    /// `run_solver`に`SeparationNormCheck::Disabled`を渡すようになりTobitはこの事後
-    /// チェック自体を通らなくなったため、現在は二重に発火し得ない（本テストは
-    /// `TobitScaling`によるスケール同値性の回帰テストとして維持する）。
+    /// `y`を標準化せず最適化していた頃は、`y`のスケールが大きいと健全なMLE解でも標準化
+    /// パラメータ空間のL2ノルムが大きくなり、当時あった標準化パラメータのノルムによる
+    /// (準)分離ヒューリスティックが誤発火して失敗していた（Wooldridge mroz `hours`の
+    /// 生スケールTobitで発覚）。`TobitScaling`が`y`を2の冪に丸めたスケールでスケーリング
+    /// してから最適化し収束後に逆変換することで解消した（本テストは`TobitScaling`による
+    /// スケール同値性の回帰テストとして維持する）。
     ///
     /// `y' = c·y`・`lower' = c·lower`（`c`は2の冪）とすると`β' = c·β`・`σ' = c·σ`・
     /// `SE' = c·SE`が厳密に成り立ち（`TobitScaling`が`y_scale`も`c`倍の2の冪に丸めるため、
@@ -3508,8 +4073,8 @@ mod tests {
 
         assert!(est.converged());
         // 傾きは真値 40 の近傍（打ち切り＋ノイズがあるため緩め）。以前は`y`の
-        // 大スケールで`SeparationSuspected`が誤発火し`.unwrap()`がpanicしていた
-        // （現在はTobitがこの事後チェックを通らないため）。
+        // 大スケールで当時のノルムによる分離ヒューリスティックが誤発火し`.unwrap()`が
+        // panicしていた（現在はこのヒューリスティック自体が無い）。
         assert!(
             (est.params()[0] - 40.0).abs() < 5.0,
             "slope={}, expected≈40",
@@ -3539,23 +4104,20 @@ mod tests {
         );
     }
 
-    /// Tobitの(準)完全分離は`MleError::SeparationSuspected`ではなく
+    /// Tobitの(準)完全分離は`MleError::SeparationDetected`ではなく
     /// `MleError::NonConvergence`として現れることを固定する。
     ///
-    /// `fit()`は`run_solver`に`SeparationNormCheck::Disabled`を渡すため、標準化
-    /// パラメータノルム基準の(準)完全分離事後チェックを通らない。これを
-    /// `SeparationNormCheck::Enabled`へ戻す回帰が入っても、その後の`TobitScaling`が
-    /// 標準化ノルムを閾値以下に保つため`SeparationSuspected`は発火せず——この失敗モードが
-    /// `NonConvergence`であること自体を、Tobitの分離の現れ方の正本として固定する
-    /// （`SeparationSuspected`と`NonConvergence`はどちらも`ComputationError`にマップ
-    /// されるため、Python API境界のテストでは区別できない）。`run_solver`ゲートの
-    /// 両方向の直接検証は`nonlinear/common.rs`の`run_solver_*_separation_*`テスト。
+    /// `fit()`はLogit/Probit用の分離検出（`nonlinear::separation`）を呼ばない。Tobitの分離は
+    /// 係数の発散ではなく`σ→0`への退化として現れるため、この失敗モードが`NonConvergence`で
+    /// あること自体を、Tobitの分離の現れ方の正本として固定する（`SeparationDetected`と
+    /// `NonConvergence`はどちらも`ComputationError`にマップされるため、Python API境界の
+    /// テストでは区別できない）。
     ///
     /// DGP: `y* = 100·x1 + 0.5·x2`（ノイズ皆無）を`lower=0`で左打ち切り。非打ち切り
     /// 観測は存在する（`NoUncensoredObservations`は通過する）が、分離方向に沿って
     /// `σ→0`へ退化し、Newtonは`max_iter`まで収束しない。
     #[test]
-    fn fit_returns_non_convergence_not_separation_suspected_for_noise_free_separation() {
+    fn fit_returns_non_convergence_not_separation_detected_for_noise_free_separation() {
         let n = 120;
         let x1: Vec<f64> = (0..n)
             .map(|i| -2.0 + 4.0 * (i as f64) / ((n - 1) as f64))
@@ -3622,6 +4184,94 @@ mod tests {
         assert!(!estimator.converged());
     }
 
+    /// 打ち切りが重い（60観測中51観測＝85%が0で左打ち切り）合成データ。外部の乱数に依存しない
+    /// 線形合同法で作る（`tests/support/_nonlinear_helpers.py`の`heavily_censored_tobit_dataset`と同じ手順・
+    /// 同じ値。Python側の同名テストと同じ入力で挙動を固定する）。潜在変数は
+    /// `y* = -1.8 + x1 + 0.5·x2 + e`（`x1`・`x2`・`e`は12個の一様乱数の和−6で近似した正規乱数）。
+    fn heavily_censored_input() -> TobitInput {
+        let mut state: u64 = 167;
+        let mut unit = move || {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((state >> 11) as f64) / ((1u64 << 53) as f64)
+        };
+        let mut normal = move || (0..12).map(|_| unit()).sum::<f64>() - 6.0;
+        let n = 60;
+        // 引数の評価順（`x1`→`x2`→`e`）がPython側と同じになるよう、1つのクロージャを
+        // 3回続けて回す。
+        let x1: Vec<f64> = (0..n).map(|_| normal()).collect();
+        let x2: Vec<f64> = (0..n).map(|_| normal()).collect();
+        let e: Vec<f64> = (0..n).map(|_| normal()).collect();
+        let y: Vec<f64> = (0..n)
+            .map(|i| (-1.8 + x1[i] + 0.5 * x2[i] + e[i]).max(0.0))
+            .collect();
+        assert_eq!(y.iter().filter(|&&v| v == 0.0).count(), 51);
+        TobitInput::from_columns(
+            &y,
+            &[x1, x2],
+            vec!["x1".to_string(), "x2".to_string()],
+            true,
+            "y".to_string(),
+            Some(0.0),
+            None,
+        )
+        .unwrap()
+    }
+
+    fn heavily_censored_groups() -> Vec<String> {
+        (0..60).map(|i| (i % 4).to_string()).collect()
+    }
+
+    fn truncated_fit_options(solver: SolverType, cov_type: CovType) -> MleFitOptions {
+        MleFitOptions {
+            solver,
+            max_iter: 1,
+            tol: 1e-12,
+            raise_on_non_convergence: false,
+            cov_type,
+            confidence_level: 0.95,
+        }
+    }
+
+    fn all_cov_types_for_heavily_censored_input() -> Vec<CovType> {
+        let groups = heavily_censored_groups();
+        vec![
+            CovType::Classical,
+            CovType::Opg,
+            CovType::Hc0,
+            CovType::Hc1,
+            CovType::Cluster {
+                groups: Some(GroupCodes::from_labels_without_keys(&groups)),
+            },
+        ]
+    }
+
+    /// `max_iter=1`・`raise_on_non_convergence=false`で打ち切った点は、重く打ち切られたデータでは
+    /// `(β, log σ)`尤度が凹でない領域の近くにある。`Newton`（LM減衰で凹な領域に留まる）・`Bfgs`・`Lbfgs`
+    /// （初期点のHessianが正定値ならその厳密な逆行列から出発するため、1手目がNewtonステップと一致）は、
+    /// 全`cov_type`で未収束の結果を返す（Hessianの逆行列を使う`Classical`/`Hc0`/`Hc1`/`Cluster`でも
+    /// `SingularHessian`にならない）。かつて`Lbfgs`は初期点のHessianを使わず1手目が勾配方向だったため、
+    /// このデータでは凹でない領域（費用関数Hessianの最小固有値が約-0.6）に着地し、Hessianの逆行列を使う
+    /// `cov_type`が`SingularHessian`になっていた。
+    #[test]
+    fn fit_returns_unconverged_result_for_every_solver_and_cov_type_at_truncated_point() {
+        for solver in [SolverType::Newton, SolverType::Bfgs, SolverType::Lbfgs] {
+            for cov_type in all_cov_types_for_heavily_censored_input() {
+                let result = TobitEstimator::fit(
+                    heavily_censored_input(),
+                    truncated_fit_options(solver, cov_type.clone()),
+                );
+                let estimator = result
+                    .unwrap_or_else(|e| panic!("solver={solver:?}, cov_type={cov_type:?}: {e:?}"));
+                assert!(
+                    !estimator.converged(),
+                    "solver={solver:?}, cov_type={cov_type:?}"
+                );
+            }
+        }
+    }
+
     /// OPG/HC0/HC1/クラスターSEの独立再計算検証・組み合わせテストで共通に使う多変量
     /// データセット（切片+説明変数2つ+`s`で`k+1=4`次元、実際の左打ち切りを含む）。
     /// `censored_regression_input`（説明変数1つ）を拡張したもの。情報行列の等式が
@@ -3668,19 +4318,10 @@ mod tests {
         // 元のスケールの`(β, σ)`から標準化空間の内部パラメータ`(β̃, s̃=logσ̃)`を再構成する
         // （`destandardize_params`の逆写像。`TobitScaling`のdocコメントの式を反転）。
         let c = scaling.y_scale;
-        let start = usize::from(scaling.has_intercept);
-        let mut params_std = vec![0.0; k + 1];
-        for (j, p) in params_std.iter_mut().enumerate().take(k).skip(start) {
-            *p = classical.params()[j] * scaling.x_stds[j] / c;
-        }
-        if scaling.has_intercept {
-            params_std[0] = (classical.params()[0]
-                + (1..k)
-                    .map(|j| scaling.x_means[j] * classical.params()[j])
-                    .sum::<f64>())
-                / c;
-        }
-        params_std[k] = classical.sigma().ln() - c.ln();
+        // `β/c`を`ColumnScale::standardize_params`（`x`側の逆写像）で標準化空間へ戻す。
+        let beta_over_c: Vec<f64> = classical.params()[..k].iter().map(|b| b / c).collect();
+        let mut params_std = scaling.x.standardize_params(&beta_over_c);
+        params_std.push(classical.sigma().ln() - c.ln());
 
         let problem_std = TobitProblem::from_standardized(x_std, y_std, lower_std, upper_std);
         let scores_std = problem_std.scores(&params_std);
@@ -3770,7 +4411,8 @@ mod tests {
     /// 常時組み込まれたことで、クラスターロバスト共分散`Ŝ=Σ_g S_gS_g'`の構造的な制約
     /// （`rank(Ŝ)≤G`、`engine/src/linear/CLAUDE.md`「クラスター数`G`と傾き係数の数`q`の
     /// 関係」参照）がWald検定の`q×q`部分行列にも及ぶことが判明した。`G=2`（`q`と同数）
-    /// では実測でこの部分行列が特異になり`fit()`全体が`ComputationFailed`になったため、
+    /// では実測でこの部分行列が特異になり`fit()`全体が`NearSingularMatrix`
+    /// （`ComputationError`）になったため、
     /// `G>q`を満たす`G=4`に変更した（OLSの既存ガイドライン「境界の成功パスのテストでは
     /// `q`を`G`以下に保つ」をTobitでも踏襲）。
     #[test]
@@ -3792,7 +4434,7 @@ mod tests {
             CovType::Hc0,
             CovType::Hc1,
             CovType::Cluster {
-                groups: Some(groups),
+                groups: Some(GroupCodes::from_labels_without_keys(&groups)),
             },
         ] {
             let newton = TobitEstimator::fit(
@@ -3838,8 +4480,8 @@ mod tests {
     /// `engine/src/linear/CLAUDE.md`「クラスター数`G`と傾き係数の数`q`の関係」参照）が
     /// Wald検定の`q×q`部分行列にも及ぶことが判明した。`multivariate_censored_input`
     /// （`q=2`）に対し`G=2`（G=2の境界値）を組み合わせると`q`と
-    /// 同数になり、実測でこの部分行列が特異になり`fit()`全体が`ComputationFailed`に
-    /// なった。`q=1`のデータセットなら`G=2>q=1`を満たしたまま「G=2の境界値」を検証できる
+    /// 同数になり、実測でこの部分行列が特異になり`fit()`全体が`NearSingularMatrix`
+    /// （`ComputationError`）になった。`q=1`のデータセットなら`G=2>q=1`を満たしたまま「G=2の境界値」を検証できる
     /// ため、こちらに切り替えた（OLSの既存ガイドライン「境界の成功パスのテストでは`q`を
     /// `G`以下に保つ」をTobitでも踏襲）。
     #[test]
@@ -3873,7 +4515,14 @@ mod tests {
         let groups_for_expected = groups.clone();
         let expected_cluster =
             expected_cov_params(&censored_regression_input(), &classical, |h, s| {
-                cluster_cov_params(h, s, n, k_plus_1, &groups_for_expected).unwrap()
+                cluster_cov_params(
+                    h,
+                    s,
+                    n,
+                    k_plus_1,
+                    &crate::shared::group_codes::GroupCodes::from_labels(&groups_for_expected),
+                )
+                .unwrap()
             });
 
         let estimator = TobitEstimator::fit(
@@ -3884,7 +4533,7 @@ mod tests {
                 tol: 1e-8,
                 raise_on_non_convergence: true,
                 cov_type: CovType::Cluster {
-                    groups: Some(groups),
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
                 },
                 confidence_level: 0.95,
             },
@@ -3930,7 +4579,14 @@ mod tests {
         let groups_for_expected = groups.clone();
         let expected_cluster =
             expected_cov_params(&censored_regression_input(), &classical, |h, s| {
-                cluster_cov_params(h, s, n, k_plus_1, &groups_for_expected).unwrap()
+                cluster_cov_params(
+                    h,
+                    s,
+                    n,
+                    k_plus_1,
+                    &crate::shared::group_codes::GroupCodes::from_labels(&groups_for_expected),
+                )
+                .unwrap()
             });
 
         let estimator = TobitEstimator::fit(
@@ -3941,7 +4597,7 @@ mod tests {
                 tol: 1e-8,
                 raise_on_non_convergence: true,
                 cov_type: CovType::Cluster {
-                    groups: Some(groups),
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
                 },
                 confidence_level: 0.95,
             },
@@ -3965,7 +4621,9 @@ mod tests {
         );
         assert_eq!(
             result.unwrap_err(),
-            MleError::Common(CommonError::MissingClusterColumn)
+            MleError::Common(CommonError::MissingClusterColumn {
+                setting: ClusterSetting::CovType,
+            })
         );
     }
 
@@ -3980,14 +4638,17 @@ mod tests {
                 tol: 1e-8,
                 raise_on_non_convergence: true,
                 cov_type: CovType::Cluster {
-                    groups: Some(groups),
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
                 },
                 confidence_level: 0.95,
             },
         );
         assert_eq!(
             result.unwrap_err(),
-            MleError::Common(CommonError::InsufficientClusters { g: 1 })
+            MleError::Common(CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 1
+            })
         );
     }
 
@@ -4144,6 +4805,905 @@ mod tests {
             }
             (None, None) => unreachable!("TobitInput::from_columns rejects both-None bounds"),
         }
+    }
+
+    /// `E[y|lower<y<upper,x]`の閉形式。`(lower,upper)`ごとに独立した分岐で、`φ/W`を
+    /// 素直に直接計算する教科書通りの式（`1-Φ`や`Φ(zb)-Φ(za)`をそのまま使うため、裾では
+    /// 桁落ちする。片側は生存関数`Φ(-z)`を使うので裾でも正確だが、両側は中程度の`z`
+    /// での検算専用。いずれも`truncation_pdf_ratios`とは別のコードパス）。
+    fn expected_uncensored_closed_form(
+        mu: f64,
+        sigma: f64,
+        lower: Option<f64>,
+        upper: Option<f64>,
+    ) -> f64 {
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        match (lower, upper) {
+            (Some(c), None) => {
+                let z = (c - mu) / sigma;
+                mu + sigma * normal.pdf(z) / normal.cdf(-z)
+            }
+            (None, Some(c)) => {
+                let z = (c - mu) / sigma;
+                mu - sigma * normal.pdf(z) / normal.cdf(z)
+            }
+            (Some(c1), Some(c2)) => {
+                let za = (c1 - mu) / sigma;
+                let zb = (c2 - mu) / sigma;
+                mu + sigma * (normal.pdf(za) - normal.pdf(zb)) / (normal.cdf(zb) - normal.cdf(za))
+            }
+            (None, None) => unreachable!("TobitInput::from_columns rejects both-None bounds"),
+        }
+    }
+
+    /// ノイズの大きい決定論的な打ち切りデータ（`y*=-2+0.7x+ε`、`ε`は`±2.5`の一様、
+    /// `x=0.25·i`、`i=0..60`）に`lower`/`upper`を適用した入力。既存の少数観測データは
+    /// 当てはめ後の`σ`が小さく`z`が裾に入るため、素直な閉形式（`expected_uncensored_closed_form`）
+    /// で独立に検算できる範囲に`z`を収める用途。
+    fn noisy_censored_input(lower: Option<f64>, upper: Option<f64>) -> TobitInput {
+        let x: Vec<f64> = (0..60).map(|i| 0.25 * f64::from(i)).collect();
+        let y: Vec<f64> = (0..60u32)
+            .map(|i| {
+                let u = f64::from((i * 7919) % 1009) / 1009.0;
+                let latent = -2.0 + 0.7 * x[i as usize] + (u - 0.5) * 5.0;
+                let latent = lower.map_or(latent, |l| latent.max(l));
+                upper.map_or(latent, |u| latent.min(u))
+            })
+            .collect();
+        TobitInput::from_columns(
+            &y,
+            &[x],
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+            lower,
+            upper,
+        )
+        .unwrap()
+    }
+
+    /// `(lower,upper)`の代表的な3構成（左のみ・右のみ・両側）。
+    fn bounds_configs() -> [(Option<f64>, Option<f64>); 3] {
+        [
+            (Some(0.0), None),
+            (None, Some(1.0)),
+            (Some(-1.0), Some(1.5)),
+        ]
+    }
+
+    fn assert_relative_eq(actual: f64, expected: f64, rtol: f64, label: &str) {
+        let scale = expected.abs().max(f64::MIN_POSITIVE);
+        assert!(
+            (actual - expected).abs() <= rtol * scale,
+            "{label}: actual={actual:e}, expected={expected:e}, rel={:e}",
+            (actual - expected).abs() / scale
+        );
+    }
+
+    /// 逆ミルズ比`λ(a)=φ(a)/Φ(-a)`とその超過分`λ(a)-a`の参照値。`a<=1`は
+    /// `scipy.special.erfcx`（`λ=√(2/π)/erfcx(a/√2)`）、`a>=3`は連分数を60桁の10進演算で
+    /// 20000段評価した値（超過分`λ-a`も同じ演算で直接作った値）。`a∈[2.5,3)`の参照は
+    /// 70桁の10進演算のテイラー級数（`scipy`の`erfcx`と一致を確認済み）。直接計算
+    /// （`a<MILLS_CONTINUED_FRACTION_THRESHOLD=3`、テイラー級数の`Φ`）と連分数の両方の領域、
+    /// および切り替え点の前後（`2.9999`・`3.0`）を含む。
+    #[test]
+    fn inverse_mills_ratio_and_gap_match_high_precision_reference_on_both_branches() {
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        // (a, lambda, gap)。`a<3`のgapは`λ-a`の引き算で、`λ/gap≈12`倍に誤差が増幅される
+        let cases = [
+            (-5.0, 1.486_719_940_904_908_6e-6, None),
+            (0.0, 0.797_884_560_802_865_4, None),
+            (1.0, 1.525_135_276_160_981_3, None),
+            (2.5, 2.822_744_797_663_907, Some(0.322_744_797_663_907_2)),
+            (2.9, 3.190_315_139_542_982, Some(0.290_315_139_542_982)),
+            (2.99, 3.273_805_823_492_689, Some(0.283_805_823_492_688_8)),
+            (2.9999, 3.283_005_711_006_472, Some(0.283_105_711_006_471_4)),
+            (3.0, 3.283_098_654_930_436, Some(0.283_098_654_930_436_5)),
+            (5.0, 5.186_503_967_125_842, Some(0.186_503_967_125_842_1)),
+            (10.0, 10.098_093_233_962_512, Some(0.098_093_233_962_511_96)),
+            (29.9, 29.933_370_411_296_167, None),
+            (38.0, 38.026_279_466_575_87, Some(0.026_279_466_575_868_99)),
+            (
+                100.0,
+                100.009_998_000_999_26,
+                Some(0.009_998_000_999_260_705),
+            ),
+            (1000.0, 1_000.000_999_998, Some(0.000_999_998_000_01)),
+        ];
+        for (a, lambda, gap) in cases {
+            let (actual, actual_gap) = inverse_mills_ratio_and_gap(&normal, a);
+            // 級数側（`a<3`）は`a→3`で`Φ(-a)=1/2-(Φ(a)-1/2)`の桁落ちが増え、`λ`は最大`4e-13`、
+            // `gap`は最大`4e-12`（実測）。連分数側（`a>=3`）は`5e-16`以下
+            let (lambda_rtol, gap_rtol) = if a < MILLS_CONTINUED_FRACTION_THRESHOLD {
+                (1e-12, 1e-11)
+            } else {
+                (1e-14, 1e-13)
+            };
+            assert_relative_eq(actual, lambda, lambda_rtol, &format!("lambda({a})"));
+            if let Some(gap) = gap {
+                assert_relative_eq(actual_gap, gap, gap_rtol, &format!("gap({a})"));
+            }
+        }
+    }
+
+    /// 切り替え点`MILLS_CONTINUED_FRACTION_THRESHOLD`の前後で`λ`・`Φ(x)-1/2`・`Φ(-a)`が
+    /// 連続（飛びがない）。直接計算側（テイラー級数）と連分数側が同じ値を返すことの確認。
+    #[test]
+    fn mills_ratio_and_normal_cdf_are_continuous_across_the_series_to_continued_fraction_switch() {
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        let t = MILLS_CONTINUED_FRACTION_THRESHOLD;
+        // 切り替え点の直前の浮動小数点数（傾きによる変化を除き、飛びだけを見る）
+        let below = f64::from_bits(t.to_bits() - 1);
+        let (lambda_below, _) = inverse_mills_ratio_and_gap(&normal, below);
+        let (lambda_at, _) = inverse_mills_ratio_and_gap(&normal, t);
+        // 飛びの実測は`λ`で`1.3e-13`、`Φ(-a)`で`3.6e-13`（級数側の桁落ち）。許容は`1e-12`
+        assert!(
+            (lambda_at - lambda_below).abs() < 1e-12,
+            "lambda: below={lambda_below}, at={lambda_at}"
+        );
+        assert_relative_eq(
+            normal_survival(&normal, below),
+            normal_survival(&normal, t),
+            1e-12,
+            "survival around switch",
+        );
+        assert_relative_eq(
+            normal_cdf_minus_half(&normal, below),
+            normal_cdf_minus_half(&normal, t),
+            1e-12,
+            "cdf-1/2 around switch",
+        );
+    }
+
+    /// `statrs`の`Normal::cdf`（絶対誤差約`1.4e-11`）に代わる`normal_cdf_minus_half`・
+    /// `normal_survival`の精度。参照は`scipy.special`（`0.5·erf(x/√2)`・`ndtr(-a)`）。
+    /// `Φ(-8)≈6.2e-16`のような裾でも相対`1e-13`、`1/2`近傍も絶対`1e-16`級で一致する。
+    #[test]
+    fn normal_cdf_minus_half_and_survival_match_scipy_to_machine_precision() {
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        for (x, expected) in [
+            (0.5, 0.191_462_461_274_013_06),
+            (1.0, 0.341_344_746_068_542_9),
+            (2.0, 0.477_249_868_051_820_8),
+            (2.99, 0.498_605_112_764_507_75),
+            (3.0, 0.498_650_101_968_369_9),
+            (5.0, 0.499_999_713_348_428_13),
+        ] {
+            assert_relative_eq(
+                normal_cdf_minus_half(&normal, x),
+                expected,
+                1e-14,
+                &format!("Phi({x})-1/2"),
+            );
+        }
+        for (a, expected) in [
+            (-2.0, 0.977_249_868_051_820_8),
+            (0.0, 0.5),
+            (1.0, 0.158_655_253_931_457_07),
+            (2.0, 0.022_750_131_948_179_195),
+            (2.99, 0.001_394_887_235_492_246_8),
+            (3.0, 0.001_349_898_031_630_093_3),
+            (4.0, 3.167_124_183_311_986e-5),
+            (8.0, 6.220_960_574_271_74e-16),
+        ] {
+            assert_relative_eq(
+                normal_survival(&normal, a),
+                expected,
+                1e-13,
+                &format!("Phi(-{a})"),
+            );
+        }
+    }
+
+    /// 連分数展開は、切り替え点より上（`a=3`・`3.5`・`4`）でも、テイラー級数
+    /// （`normal_cdf_minus_half_series`、切り替え点より上へ外挿して`Φ(-a)=1/2-(Φ(a)-1/2)`を作る）
+    /// 由来の`φ(a)/Φ(-a)`と一致する。段数`MILLS_CONTINUED_FRACTION_DEPTH`が切り替え点でも
+    /// 収束していることの確認で、段数を落とす（20等）と失敗する。級数側は`a`が大きいほど
+    /// `Φ(-a)=1/2-(Φ(a)-1/2)`の桁落ち（相対`ε/Φ(-a)`）で精度が落ちるため、許容は`a`に応じて
+    /// `Φ(-3)=1.3e-3`で`5e-13`、`Φ(-3.5)=2.3e-4`で`2e-12`、`Φ(-4)=3.2e-5`で`1e-11`（実測`4e-12`）。
+    #[test]
+    fn inverse_mills_ratio_continued_fraction_agrees_with_series_based_survival_near_the_switch() {
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        for (a, rtol) in [(3.0, 5e-13), (3.5, 2e-12), (4.0, 1e-11)] {
+            let series_survival = 0.5 - normal_cdf_minus_half_series(&normal, a);
+            let series_lambda = normal.pdf(a) / series_survival;
+            let (cf, _) = inverse_mills_ratio_continued_fraction(a, MILLS_CONTINUED_FRACTION_DEPTH);
+            assert_relative_eq(cf, series_lambda, rtol, &format!("cf vs series at a={a}"));
+        }
+    }
+
+    /// 補助関数は`NaN`・`±inf`・`±40`でもpanicや無限ループなしに有限時間で戻り、値は
+    /// `Φ(-a)`の定義（`a=-inf`で1、`a=+inf`で0、`NaN`は`NaN`）に従う。
+    #[test]
+    fn normal_cdf_helpers_handle_non_finite_and_far_tail_inputs_without_panicking() {
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        assert!(normal_survival(&normal, f64::NAN).is_nan());
+        assert!(normal_cdf_minus_half(&normal, f64::NAN).is_nan());
+        assert_eq!(normal_survival(&normal, f64::INFINITY), 0.0);
+        assert_eq!(normal_survival(&normal, f64::NEG_INFINITY), 1.0);
+        assert_eq!(normal_survival(&normal, -40.0), 1.0);
+        assert!(normal_survival(&normal, 40.0) >= 0.0);
+        assert_eq!(normal_cdf_minus_half(&normal, 40.0), 0.5);
+        // 遠い裾の逆ミルズ比は有限（`φ`を作らない連分数）
+        for a in [-1e8, -40.0, 40.0, 1e8] {
+            let (lambda, gap) = inverse_mills_ratio_and_gap(&normal, a);
+            assert!(lambda.is_finite() && gap.is_finite(), "a={a}");
+        }
+    }
+
+    /// `(Pa,Pb)`と`ExpectedUncensored`の`(w, ∂w/∂μ, ∂w/∂σ)`を、70〜80桁の10進演算で
+    /// 直接評価した参照値（定義通りに`φ/W`・`w=1+ρ2-ρ1²`・偏微分を計算。裾は`W=Φ(-za)-Φ(-zb)`を
+    /// 連分数の`Φ(-z)`から、中央・級数側は`Φ(x)-1/2`のテイラー級数から作る）と突き合わせる。
+    /// 左のみ・右のみ・両側の上側の裾・下側の裾（符号反転）・`zb`が遥か先で片側と一致する場合に
+    /// 加え、切り替え点の前後の両側`(2.9,3.1)`・`(-3.2,-2.9)`・`(2.99,3.5)`、中央`(-1,1.5)`、
+    /// 級数側の上側`(0.5,1)`を含む。`z=40`では`Φ(-40)≈3.7e-350`が倍精度でアンダーフローし、
+    /// 直接計算では`W=0`になる領域。許容は実測（`w`の絶対誤差`2e-16`、`Pa`/`Pb`の相対`1e-16`、
+    /// `s_beta`は`z=40`で`3e-15`、`s_sigma`は`z=40`で`1e-13`・`z=1000`で`9e-12`）の約10倍。
+    /// 整理前の式（`ε·z³`の桁落ち）は`z=40`以上で許容を超える。
+    #[test]
+    fn uncensored_terms_and_w_match_high_precision_reference_in_extreme_tails() {
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        // (label, za, zb, Pa, Pb, w, w_a, w_b)
+        #[allow(clippy::type_complexity)]
+        let cases: [(&str, Option<f64>, Option<f64>, f64, f64, f64, f64, f64); 15] = [
+            (
+                "left-only z=40",
+                Some(40.0),
+                None,
+                40.024_968_847_207_26,
+                0.0,
+                6.226_683_785_913_888e-4,
+                -3.101_744_039_648_625e-5,
+                0.0,
+            ),
+            (
+                "left-only z=100",
+                Some(100.0),
+                None,
+                100.009_998_000_999_26,
+                0.0,
+                9.994_004_994_826_346e-5,
+                -1.997_602_995_862_343e-6,
+                0.0,
+            ),
+            (
+                "left-only z=1000",
+                Some(1000.0),
+                None,
+                1_000.000_999_998,
+                0.0,
+                9.999_940_000_499_995e-7,
+                -1.999_976_000_299_996e-9,
+                0.0,
+            ),
+            (
+                "right-only z=-40",
+                None,
+                Some(-40.0),
+                0.0,
+                40.024_968_847_207_26,
+                6.226_683_785_913_888e-4,
+                0.0,
+                3.101_744_039_648_625e-5,
+            ),
+            (
+                "two-sided upper (40,45)",
+                Some(40.0),
+                Some(45.0),
+                40.024_968_847_207_26,
+                2.064_208_671_428_423_9e-91,
+                6.226_683_785_913_888e-4,
+                -3.101_744_039_648_625e-5,
+                5.108_980_927_616_573e-90,
+            ),
+            (
+                "two-sided upper (30,31)",
+                Some(30.0),
+                Some(31.0),
+                30.033_259_667_435_328,
+                1.704_593_283_822_866_3e-12,
+                1.103_771_511_835_282_2e-3,
+                -7.309_993_169_431_127e-5,
+                1.591_209_021_285_825_6e-12,
+            ),
+            (
+                "two-sided upper (40,1000)",
+                Some(40.0),
+                Some(1000.0),
+                40.024_968_847_207_26,
+                0.0,
+                6.226_683_785_913_888e-4,
+                -3.101_744_039_648_625e-5,
+                0.0,
+            ),
+            (
+                "two-sided lower (-45,-40)",
+                Some(-45.0),
+                Some(-40.0),
+                2.064_208_671_428_423_9e-91,
+                40.024_968_847_207_26,
+                6.226_683_785_913_888e-4,
+                -5.108_980_927_616_573e-90,
+                3.101_744_039_648_625e-5,
+            ),
+            (
+                "two-sided lower (-31,-30)",
+                Some(-31.0),
+                Some(-30.0),
+                1.704_593_283_822_866_3e-12,
+                30.033_259_667_435_328,
+                1.103_771_511_835_282_2e-3,
+                -1.591_209_021_285_825_6e-12,
+                7.309_993_169_431_127e-5,
+            ),
+            (
+                "two-sided upper (12,12.5)",
+                Some(12.0),
+                Some(12.5),
+                12.107_653_550_680_133,
+                0.026_485_384_604_148_263,
+                6.151_043_601_970_409e-3,
+                -5.293_800_087_694_461_5e-3,
+                4.483_156_195_574_498e-3,
+            ),
+            (
+                "two-sided middle (-1,1.5)",
+                Some(-1.0),
+                Some(1.5),
+                0.312_406_707_904_292_9,
+                0.167_219_260_751_766_74,
+                0.415_685_006_157_389_35,
+                -0.279_844_332_730_801_1,
+                0.237_423_265_323_732_5,
+            ),
+            (
+                "two-sided series side (0.5,1)",
+                Some(0.5),
+                Some(1.0),
+                2.348_945_555_820_274,
+                1.614_405_096_978_975_4,
+                0.020_517_995_256_376_27,
+                -0.081_018_025_127_821_73,
+                0.080_640_782_102_733_44,
+            ),
+            (
+                "two-sided across switch (2.9,3.1)",
+                Some(2.9),
+                Some(3.1),
+                6.627_104_844_212_096,
+                3.637_032_252_118_688_6,
+                0.003_269_960_658_955_57,
+                -0.032_095_805_611_538_79,
+                0.032_057_072_683_910_62,
+            ),
+            (
+                "two-sided lower across switch (-3.2,-2.9)",
+                Some(-3.2),
+                Some(-2.9),
+                2.022_684_343_271_988,
+                5.050_188_210_696_992,
+                0.007_176_245_277_561_196,
+                -0.045_669_523_263_236_76,
+                0.045_860_713_340_026_13,
+            ),
+            (
+                "two-sided just above switch (2.99,3.5)",
+                Some(2.99),
+                Some(3.5),
+                3.929_066_816_439_395_4,
+                0.750_850_996_568_809_9,
+                0.018_875_495_487_299_693,
+                -0.065_024_874_586_292_15,
+                0.063_574_225_828_370_7,
+            ),
+        ];
+        // `mu=1, sigma=2`で`za=(lower-mu)/sigma`が上の値になるよう境界を逆算する
+        let (mu, sigma) = (1.0, 2.0);
+        for (label, za, zb, pa, pb, w, w_a, w_b) in cases {
+            let lower = za.map(|z| mu + sigma * z);
+            let upper = zb.map(|z| mu + sigma * z);
+            let terms = UncensoredTerms::new(mu, sigma, lower, upper, &normal);
+            // 切り替え点の手前（`a<3`）を通る級数側は`λ`の相対誤差が最大`4e-13`
+            let near_switch = label.contains("switch");
+            let ratio_rtol = if near_switch { 1e-12 } else { 1e-14 };
+            assert_relative_eq(terms.ratios.pa, pa, ratio_rtol, &format!("{label}: Pa"));
+            assert_relative_eq(terms.ratios.pb, pb, ratio_rtol, &format!("{label}: Pb"));
+
+            let x_point = [1.0, 2.0];
+            let (w_actual, s_beta, s_sigma) =
+                uncensored_w_and_s(&x_point, mu, sigma, lower, upper, &normal);
+            let z_scale = za.unwrap_or(0.0).abs().max(zb.unwrap_or(0.0).abs());
+            // `w`は`1-Pa·A-Pb·B+2·Pa·Pb`（`O(1)`同士の和）なので絶対誤差は数`ε`。切り替え点付近の
+            // 級数側は`Pa`・`Pb`・`A`・`B`の誤差（`λ`で最大`4e-13`、`gap`で最大`4e-12`）が`O(10)`倍で効く
+            assert!(
+                (w_actual - w).abs() <= if near_switch { 2e-12 } else { 2e-15 },
+                "{label}: w actual={w_actual:e}, expected={w:e}"
+            );
+            let dw_dmu = -(w_a + w_b) / sigma;
+            let dw_dsigma = -(za.unwrap_or(0.0) * w_a + zb.unwrap_or(0.0) * w_b) / sigma;
+            assert!(
+                (s_beta[1] - dw_dmu * x_point[1]).abs()
+                    <= if near_switch {
+                        5e-12
+                    } else {
+                        1e-15 * z_scale + 1e-15
+                    },
+                "{label}: s_beta actual={:e}, expected={:e}",
+                s_beta[1],
+                dw_dmu * x_point[1]
+            );
+            assert!(
+                (s_sigma - dw_dsigma).abs()
+                    <= if near_switch {
+                        2e-11
+                    } else {
+                        1e-15 * z_scale * z_scale + 1e-15
+                    },
+                "{label}: s_sigma actual={s_sigma:e}, expected={dw_dsigma:e}"
+            );
+        }
+    }
+
+    /// 極端な入力（`z`が`1e8`、`w`が丸め誤差に支配される領域を含む）でも、`m`・`w`・`s`が
+    /// 有限で、`w`は`[0,1]`に収まり`m`は非打ち切り領域`[lower,upper]`に収まる。
+    #[test]
+    fn expected_uncensored_stays_finite_and_bounded_for_extreme_inputs() {
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        let sigma = 1.0;
+        for (lower, upper) in bounds_configs() {
+            for mu in [
+                -1e8, -1e4, -100.0, -39.0, -8.0, 0.0, 0.5, 8.0, 39.0, 100.0, 1e4, 1e8,
+            ] {
+                let m = predicted_value(
+                    MarginalEffectsTarget::ExpectedUncensored,
+                    mu,
+                    sigma,
+                    lower,
+                    upper,
+                    &normal,
+                );
+                let (w, s_beta, s_sigma) = target_w_and_s(
+                    MarginalEffectsTarget::ExpectedUncensored,
+                    &[1.0],
+                    &[mu],
+                    sigma,
+                    lower,
+                    upper,
+                    &normal,
+                );
+                let label = format!("lower={lower:?}, upper={upper:?}, mu={mu}");
+                assert!(m.is_finite(), "{label}: m={m}");
+                assert!(w.is_finite() && (0.0..=1.0).contains(&w), "{label}: w={w}");
+                assert!(s_beta[0].is_finite(), "{label}: s_beta={}", s_beta[0]);
+                assert!(s_sigma.is_finite(), "{label}: s_sigma={s_sigma}");
+                // 非打ち切り領域への条件付き期待値は領域内（境界は丸め誤差分だけ許す）
+                let eps = 1e-9 * (1.0 + m.abs());
+                if let Some(l) = lower {
+                    assert!(m >= l - eps, "{label}: m={m} < lower");
+                }
+                if let Some(u) = upper {
+                    assert!(m <= u + eps, "{label}: m={m} > upper");
+                }
+            }
+        }
+    }
+
+    /// 遠い裾では`E[y|uncensored]`は最寄りの境界に漸近する（`μ`が下限よりずっと下なら
+    /// `m→lower`、上限よりずっと上なら`m→upper`）。素直な`φ/W`だと`W=0`で`NaN`になる領域。
+    #[test]
+    fn expected_uncensored_converges_to_nearest_bound_in_far_tail() {
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        let m_left = predicted_value(
+            MarginalEffectsTarget::ExpectedUncensored,
+            -100.0,
+            1.0,
+            Some(0.0),
+            None,
+            &normal,
+        );
+        // 左のみ: m = μ+σλ(za), za=100 → λ=100.00999800099926 → m=0.00999800099926
+        assert_relative_eq(m_left, 0.009_998_000_999_26, 1e-9, "left-only far tail");
+        let m_right = predicted_value(
+            MarginalEffectsTarget::ExpectedUncensored,
+            100.0,
+            1.0,
+            None,
+            Some(0.0),
+            &normal,
+        );
+        assert_relative_eq(m_right, -0.009_998_000_999_26, 1e-9, "right-only far tail");
+        let m_two_sided_above = predicted_value(
+            MarginalEffectsTarget::ExpectedUncensored,
+            1000.0,
+            1.0,
+            Some(-1.0),
+            Some(2.0),
+            &normal,
+        );
+        // 上限より遥か上（`zb=-998`）: m = μ - σ·λ(998) = 1000 - (998 + gap), gap = λ(998)-998 ≈ 1/(998+2/998)
+        assert!(
+            (m_two_sided_above - (2.0 - 1.0 / (998.0 + 2.0 / 998.0))).abs() < 1e-9,
+            "m={m_two_sided_above}"
+        );
+    }
+
+    /// 全領域（左のみ・右のみ・両側、`za=0`・`zb=0`の領域境界を含む）で、
+    /// `predicted_value`が独立の閉形式`expected_uncensored_closed_form`と一致する。
+    #[test]
+    fn predicted_value_expected_uncensored_matches_independent_closed_form() {
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        for (lower, upper) in bounds_configs() {
+            for sigma in [0.8, 1.0, 3.0] {
+                for mu in [-3.5, -1.5, -1.0, 0.0, 0.3, 1.0, 1.5, 2.5, 4.5] {
+                    let actual = predicted_value(
+                        MarginalEffectsTarget::ExpectedUncensored,
+                        mu,
+                        sigma,
+                        lower,
+                        upper,
+                        &normal,
+                    );
+                    let expected = expected_uncensored_closed_form(mu, sigma, lower, upper);
+                    assert!(
+                        (actual - expected).abs() < 1e-9 * (1.0 + expected.abs()),
+                        "lower={lower:?}, upper={upper:?}, sigma={sigma}, mu={mu}: \
+                         actual={actual}, expected={expected}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// 分解恒等式 `E[y|x]=lower·P(下限)+upper·P(上限)+P(uncensored|x)·E[y|uncensored,x]`
+    /// （下限0のみの左打ち切りなら`E[y|x]=P(y>0|x)·E[y|y>0,x]`）。既存の
+    /// `ExpectedObserved`・`ProbUncensored`と新`ExpectedUncensored`が互いに整合することの確認。
+    #[test]
+    fn expected_observed_equals_censoring_mass_plus_prob_uncensored_times_expected_uncensored() {
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        for (lower, upper) in bounds_configs() {
+            for sigma in [0.8, 1.0, 3.0] {
+                for mu in [-3.5, -1.0, 0.0, 0.7, 1.5, 2.5, 4.5] {
+                    let predict =
+                        |target| predicted_value(target, mu, sigma, lower, upper, &normal);
+                    let p_lower = lower.map_or(0.0, |l| normal.cdf((l - mu) / sigma));
+                    let p_upper = upper.map_or(0.0, |u| 1.0 - normal.cdf((u - mu) / sigma));
+                    let decomposed = lower.unwrap_or(0.0) * p_lower
+                        + upper.unwrap_or(0.0) * p_upper
+                        + predict(MarginalEffectsTarget::ProbUncensored)
+                            * predict(MarginalEffectsTarget::ExpectedUncensored);
+                    let observed = predict(MarginalEffectsTarget::ExpectedObserved);
+                    assert!(
+                        (observed - decomposed).abs() < 1e-9 * (1.0 + observed.abs()),
+                        "lower={lower:?}, upper={upper:?}, sigma={sigma}, mu={mu}: \
+                         observed={observed}, decomposed={decomposed}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// `w=∂m/∂μ`・`s_beta=∂w/∂μ·x`・`s_sigma=∂w/∂σ`を、独立の閉形式`m`の中心差分
+    /// （`w`は`m`の`μ`微分、`s`は`w`の微分なので`m`の2階・3階の差分）と突き合わせる。
+    /// 3構成 × `μ`・`σ`の格子で、領域の切り替え（`za>=0`・`zb<=0`・中央）をまたぐ。
+    /// `w`の比較に使うオラクル`expected_uncensored_closed_form`は`statrs`の`cdf`（絶対誤差
+    /// 約`1.4e-11`）を使うため、中心差分（`h=1e-4`）経由で約`1e-7`・`h`で割る分`1e-9`級の誤差を
+    /// 含む（実測の最大差`1.1e-9`）。許容`1e-8`はその約10倍。`s`の比較は本番の`w`の差分なので
+    /// 中心差分の打ち切り誤差`h²·|w'''|/6`だけ（実測の最大`1.4e-8`）で、許容は`1e-7`。
+    #[test]
+    fn target_w_and_s_expected_uncensored_matches_finite_differences_of_closed_form_mean() {
+        let normal = Normal::new(0.0, 1.0).unwrap();
+        let w_of = |mu: f64, sigma: f64, lower, upper| {
+            target_w_and_s(
+                MarginalEffectsTarget::ExpectedUncensored,
+                &[1.0],
+                &[mu],
+                sigma,
+                lower,
+                upper,
+                &normal,
+            )
+            .0
+        };
+        for (lower, upper) in bounds_configs() {
+            for sigma in [0.7, 1.0, 2.5] {
+                for mu in [-3.0, -1.0, -0.4, 0.0, 0.4, 1.0, 1.5, 2.0, 4.0] {
+                    let h = 1e-4;
+                    let m = |mu: f64, sigma: f64| {
+                        expected_uncensored_closed_form(mu, sigma, lower, upper)
+                    };
+                    let label = format!("lower={lower:?}, upper={upper:?}, sigma={sigma}, mu={mu}");
+
+                    let (w, s_beta, s_sigma) = target_w_and_s(
+                        MarginalEffectsTarget::ExpectedUncensored,
+                        &[1.0],
+                        &[mu],
+                        sigma,
+                        lower,
+                        upper,
+                        &normal,
+                    );
+                    let w_fd = (m(mu + h, sigma) - m(mu - h, sigma)) / (2.0 * h);
+                    assert!((w - w_fd).abs() < 1e-8, "{label}: w={w}, fd={w_fd}");
+                    assert!((0.0..=1.0).contains(&w), "{label}: w={w}");
+
+                    let dw_dmu_fd = (w_of(mu + h, sigma, lower, upper)
+                        - w_of(mu - h, sigma, lower, upper))
+                        / (2.0 * h);
+                    assert!(
+                        (s_beta[0] - dw_dmu_fd).abs() < 1e-7,
+                        "{label}: s_beta={}, fd={dw_dmu_fd}",
+                        s_beta[0]
+                    );
+                    let dw_dsigma_fd = (w_of(mu, sigma + h, lower, upper)
+                        - w_of(mu, sigma - h, lower, upper))
+                        / (2.0 * h);
+                    assert!(
+                        (s_sigma - dw_dsigma_fd).abs() < 1e-7,
+                        "{label}: s_sigma={s_sigma}, fd={dw_dsigma_fd}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// `at="overall"`の限界効果（effect・デルタ法のSE）を、独立の閉形式`m`から作った
+    /// AME関数の中心差分ヤコビアンで再計算した値と突き合わせる（左のみ・右のみ・両側）。
+    #[test]
+    fn fit_marginal_effects_expected_uncensored_overall_matches_independent_recomputation() {
+        let inputs = [
+            noisy_censored_input(Some(0.0), None),
+            noisy_censored_input(None, Some(6.0)),
+            noisy_censored_input(Some(0.0), Some(6.0)),
+        ];
+        for input in inputs {
+            let estimator = TobitEstimator::fit(
+                input,
+                MleFitOptions {
+                    solver: SolverType::Newton,
+                    max_iter: 100,
+                    tol: 1e-8,
+                    raise_on_non_convergence: true,
+                    cov_type: CovType::Classical,
+                    confidence_level: 0.95,
+                },
+            )
+            .unwrap();
+            let lower = estimator.input().lower();
+            let upper = estimator.input().upper();
+            let x = estimator.input().x();
+            let n = x.nrows();
+            let k = 2;
+            let label = format!("lower={lower:?}, upper={upper:?}");
+
+            let effects = estimator
+                .marginal_effects(
+                    MarginalEffectsAt::Overall,
+                    MarginalEffectsTarget::ExpectedUncensored,
+                    0.95,
+                )
+                .unwrap();
+
+            // AME_j = (1/n)Σ w_i·β_j, w_i=∂m/∂μ を m の中心差分で作る（k=2なのでj=1のみ）
+            let ame = |params: &[f64], sigma: f64| -> f64 {
+                let h = 1e-5;
+                (0..n)
+                    .map(|i| {
+                        let mu: f64 = params[0] + params[1] * (*x.get(i, 1));
+                        let m = |mu: f64| expected_uncensored_closed_form(mu, sigma, lower, upper);
+                        (m(mu + h) - m(mu - h)) / (2.0 * h) * params[1]
+                    })
+                    .sum::<f64>()
+                    / (n as f64)
+            };
+            let params = estimator.params();
+            let sigma = estimator.sigma();
+            assert!(
+                (effects.effect()[0] - ame(params, sigma)).abs() < 1e-6,
+                "{label}: actual={}, expected={}",
+                effects.effect()[0],
+                ame(params, sigma)
+            );
+
+            let h_param = 1e-3;
+            let mut jac_row = vec![0.0; k + 1];
+            for (m_idx, jac) in jac_row.iter_mut().take(k).enumerate() {
+                let mut plus_p = params.to_vec();
+                plus_p[m_idx] += h_param;
+                let mut minus_p = params.to_vec();
+                minus_p[m_idx] -= h_param;
+                *jac = (ame(&plus_p, sigma) - ame(&minus_p, sigma)) / (2.0 * h_param);
+            }
+            jac_row[k] =
+                (ame(params, sigma + h_param) - ame(params, sigma - h_param)) / (2.0 * h_param);
+            let mut var = 0.0;
+            for a in 0..=k {
+                for b in 0..=k {
+                    var += jac_row[a] * (*estimator.cov_params().get(a, b)) * jac_row[b];
+                }
+            }
+            let expected_se = var.sqrt();
+            assert!(
+                (effects.std_errors()[0] - expected_se).abs() < 1e-5 * (1.0 + expected_se),
+                "{label}: actual SE={}, expected SE={expected_se}",
+                effects.std_errors()[0]
+            );
+        }
+    }
+
+    /// `predict`/`predict_new_data`が`ExpectedUncensored`で独立の閉形式と一致し、
+    /// 学習データへの`predict`と同じ`x`での`predict_new_data`が一致する。
+    #[test]
+    fn predict_and_predict_new_data_expected_uncensored_match_closed_form() {
+        let inputs = [
+            noisy_censored_input(Some(0.0), None),
+            noisy_censored_input(None, Some(6.0)),
+            noisy_censored_input(Some(0.0), Some(6.0)),
+        ];
+        for input in inputs {
+            let estimator = TobitEstimator::fit(
+                input,
+                MleFitOptions {
+                    solver: SolverType::Newton,
+                    max_iter: 100,
+                    tol: 1e-8,
+                    raise_on_non_convergence: true,
+                    cov_type: CovType::Classical,
+                    confidence_level: 0.95,
+                },
+            )
+            .unwrap();
+            let lower = estimator.input().lower();
+            let upper = estimator.input().upper();
+            let x = estimator.input().x();
+            let params = estimator.params();
+            let sigma = estimator.sigma();
+
+            let predicted = estimator
+                .predict(MarginalEffectsTarget::ExpectedUncensored)
+                .unwrap();
+            for (i, &p) in predicted.iter().enumerate() {
+                let mu: f64 = params[0] + params[1] * (*x.get(i, 1));
+                let expected = expected_uncensored_closed_form(mu, sigma, lower, upper);
+                assert!(
+                    (p - expected).abs() < 1e-9 * (1.0 + expected.abs()),
+                    "lower={lower:?}, upper={upper:?}, i={i}: actual={p}, expected={expected}"
+                );
+            }
+
+            let x1: Vec<f64> = (0..x.nrows()).map(|i| *x.get(i, 1)).collect();
+            let predicted_new = estimator
+                .predict_new_data(MarginalEffectsTarget::ExpectedUncensored, &[x1])
+                .unwrap();
+            assert_eq!(predicted_new.len(), predicted.len());
+            for (a, b) in predicted_new.iter().zip(&predicted) {
+                assert!((a - b).abs() < 1e-12, "predict_new_data={a}, predict={b}");
+            }
+        }
+    }
+
+    /// 非打ち切り区間の幅`(upper-lower)/σ`が`MIN_UNCENSORED_WIDTH_RATIO`未満のときだけ
+    /// `UncensoredIntervalTooNarrow`を返す。境界ちょうど（`=1e-2`）は通し、片側打ち切り
+    /// （`lower`か`upper`が`None`）は`σ`がどれほど大きくても通す。
+    #[test]
+    fn ensure_uncensored_interval_resolvable_rejects_only_narrow_two_sided_intervals() {
+        // 幅/σ = 1/100 = 0.01（境界ちょうど）は通す
+        assert!(ensure_uncensored_interval_resolvable(Some(0.0), Some(1.0), 100.0).is_ok());
+        // 幅/σ = 1/100.5 < 0.01 は拒否し、境界とσを持つ
+        match ensure_uncensored_interval_resolvable(Some(0.0), Some(1.0), 100.5) {
+            Err(MleError::UncensoredIntervalTooNarrow {
+                lower,
+                upper,
+                sigma,
+            }) => {
+                assert_eq!((lower, upper, sigma), (0.0, 1.0, 100.5));
+            }
+            other => panic!("expected UncensoredIntervalTooNarrow, got {other:?}"),
+        }
+        // 片側打ち切りは区間が無限大なので`σ`が巨大でも通す
+        assert!(ensure_uncensored_interval_resolvable(Some(0.0), None, 1e12).is_ok());
+        assert!(ensure_uncensored_interval_resolvable(None, Some(0.0), 1e12).is_ok());
+        // 広い区間は通す
+        assert!(ensure_uncensored_interval_resolvable(Some(-5.0), Some(5.0), 1.0).is_ok());
+    }
+
+    /// ほぼ全観測が両端に打ち切られた当てはめ（`σ̂`が区間幅の100倍超）。
+    fn narrow_interval_estimator(n_interior: usize) -> TobitEstimator {
+        let n = 2000usize;
+        let x: Vec<f64> = (0..n)
+            .map(|i| ((i * 7919) % 1009) as f64 / 1009.0)
+            .collect();
+        let y: Vec<f64> = (0..n)
+            .map(|i| {
+                if i < n_interior {
+                    0.5
+                } else if i % 2 == 0 {
+                    0.0
+                } else {
+                    1.0
+                }
+            })
+            .collect();
+        let input = TobitInput::from_columns(
+            &y,
+            &[x],
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+            Some(0.0),
+            Some(1.0),
+        )
+        .unwrap();
+        TobitEstimator::fit(
+            input,
+            MleFitOptions {
+                solver: SolverType::Newton,
+                max_iter: 200,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
+        )
+        .unwrap()
+    }
+
+    /// 狭い区間の当てはめ（`σ̂≈160`、`δ≈6e-3`）では`ExpectedUncensored`の`predict`・
+    /// `predict_new_data`・`marginal_effects`が`UncensoredIntervalTooNarrow`になり、他の3targetは
+    /// 通常どおり計算できる（エラーは`expected_uncensored`固有）。区間がちょうど十分な当てはめ
+    /// （`σ̂≈40`、`δ≈0.025`）では`ExpectedUncensored`も計算できる。
+    #[test]
+    fn expected_uncensored_errors_only_when_the_fitted_interval_is_too_narrow() {
+        let narrow = narrow_interval_estimator(5);
+        assert!(
+            1.0 / narrow.sigma() < MIN_UNCENSORED_WIDTH_RATIO,
+            "fixture is not narrow"
+        );
+        let new_x = vec![vec![0.2, 0.8]];
+        assert!(matches!(
+            narrow.predict(MarginalEffectsTarget::ExpectedUncensored),
+            Err(MleError::UncensoredIntervalTooNarrow { .. })
+        ));
+        assert!(matches!(
+            narrow.predict_new_data(MarginalEffectsTarget::ExpectedUncensored, &new_x),
+            Err(MleError::UncensoredIntervalTooNarrow { .. })
+        ));
+        assert!(matches!(
+            narrow.marginal_effects(
+                MarginalEffectsAt::Overall,
+                MarginalEffectsTarget::ExpectedUncensored,
+                0.95
+            ),
+            Err(MleError::UncensoredIntervalTooNarrow { .. })
+        ));
+        for target in [
+            MarginalEffectsTarget::ExpectedLatent,
+            MarginalEffectsTarget::ExpectedObserved,
+            MarginalEffectsTarget::ProbUncensored,
+        ] {
+            let predicted = narrow.predict(target).unwrap();
+            assert!(predicted.iter().all(|v| v.is_finite()), "{target:?}");
+            assert!(
+                narrow.predict_new_data(target, &new_x).is_ok(),
+                "{target:?}"
+            );
+            assert!(
+                narrow
+                    .marginal_effects(MarginalEffectsAt::Overall, target, 0.95)
+                    .is_ok(),
+                "{target:?}"
+            );
+        }
+
+        let wide_enough = narrow_interval_estimator(20);
+        assert!(1.0 / wide_enough.sigma() >= MIN_UNCENSORED_WIDTH_RATIO);
+        let predicted = wide_enough
+            .predict(MarginalEffectsTarget::ExpectedUncensored)
+            .unwrap();
+        assert!(
+            predicted
+                .iter()
+                .all(|v| v.is_finite() && (0.0..=1.0).contains(v))
+        );
     }
 
     /// 切片のみモデル（k=1）は限界効果の出力対象となる説明変数が存在しない
@@ -4707,7 +6267,9 @@ mod tests {
         let k = 2;
         let params = estimator.params();
 
-        let predicted = estimator.predict(MarginalEffectsTarget::ExpectedLatent);
+        let predicted = estimator
+            .predict(MarginalEffectsTarget::ExpectedLatent)
+            .unwrap();
         assert_eq!(predicted.len(), n);
         for (i, &predicted_i) in predicted.iter().enumerate() {
             let expected: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
@@ -4743,8 +6305,12 @@ mod tests {
         assert_eq!(lower, Some(0.0));
         assert_eq!(upper, None);
 
-        let predicted_observed = estimator.predict(MarginalEffectsTarget::ExpectedObserved);
-        let predicted_prob = estimator.predict(MarginalEffectsTarget::ProbUncensored);
+        let predicted_observed = estimator
+            .predict(MarginalEffectsTarget::ExpectedObserved)
+            .unwrap();
+        let predicted_prob = estimator
+            .predict(MarginalEffectsTarget::ProbUncensored)
+            .unwrap();
         for i in 0..n {
             let mu: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
             let expected_observed = expected_observed_closed_form(mu, sigma, lower, upper);
@@ -4788,8 +6354,12 @@ mod tests {
         assert_eq!(lower, None);
         assert_eq!(upper, Some(6.0));
 
-        let predicted_observed = estimator.predict(MarginalEffectsTarget::ExpectedObserved);
-        let predicted_prob = estimator.predict(MarginalEffectsTarget::ProbUncensored);
+        let predicted_observed = estimator
+            .predict(MarginalEffectsTarget::ExpectedObserved)
+            .unwrap();
+        let predicted_prob = estimator
+            .predict(MarginalEffectsTarget::ProbUncensored)
+            .unwrap();
         for i in 0..n {
             let mu: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
             let expected_observed = expected_observed_closed_form(mu, sigma, lower, upper);
@@ -4825,8 +6395,12 @@ mod tests {
         assert_eq!(lower, Some(0.0));
         assert_eq!(upper, Some(6.0));
 
-        let predicted_observed = estimator.predict(MarginalEffectsTarget::ExpectedObserved);
-        let predicted_prob = estimator.predict(MarginalEffectsTarget::ProbUncensored);
+        let predicted_observed = estimator
+            .predict(MarginalEffectsTarget::ExpectedObserved)
+            .unwrap();
+        let predicted_prob = estimator
+            .predict(MarginalEffectsTarget::ProbUncensored)
+            .unwrap();
         for i in 0..n {
             let mu: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
             let expected_observed = expected_observed_closed_form(mu, sigma, lower, upper);
@@ -5043,9 +6617,15 @@ mod tests {
         let lower = estimator.input().lower();
         let upper = estimator.input().upper();
 
-        let predicted_latent = estimator.predict(MarginalEffectsTarget::ExpectedLatent);
-        let predicted_observed = estimator.predict(MarginalEffectsTarget::ExpectedObserved);
-        let predicted_prob = estimator.predict(MarginalEffectsTarget::ProbUncensored);
+        let predicted_latent = estimator
+            .predict(MarginalEffectsTarget::ExpectedLatent)
+            .unwrap();
+        let predicted_observed = estimator
+            .predict(MarginalEffectsTarget::ExpectedObserved)
+            .unwrap();
+        let predicted_prob = estimator
+            .predict(MarginalEffectsTarget::ProbUncensored)
+            .unwrap();
         for i in 0..n {
             let mu: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
             assert!((predicted_latent[i] - mu).abs() < 1e-12);
@@ -5081,12 +6661,15 @@ mod tests {
 
         // 学習データには無い新規のx値
         let new_x_columns = vec![vec![15.0, 25.0], vec![3.0, -1.0]];
-        let predicted_latent =
-            estimator.predict_new_data(MarginalEffectsTarget::ExpectedLatent, &new_x_columns);
-        let predicted_observed =
-            estimator.predict_new_data(MarginalEffectsTarget::ExpectedObserved, &new_x_columns);
-        let predicted_prob =
-            estimator.predict_new_data(MarginalEffectsTarget::ProbUncensored, &new_x_columns);
+        let predicted_latent = estimator
+            .predict_new_data(MarginalEffectsTarget::ExpectedLatent, &new_x_columns)
+            .unwrap();
+        let predicted_observed = estimator
+            .predict_new_data(MarginalEffectsTarget::ExpectedObserved, &new_x_columns)
+            .unwrap();
+        let predicted_prob = estimator
+            .predict_new_data(MarginalEffectsTarget::ProbUncensored, &new_x_columns)
+            .unwrap();
 
         assert_eq!(predicted_latent.len(), 2);
         for i in 0..2 {
@@ -5136,12 +6719,15 @@ mod tests {
         let upper = estimator.input().upper();
 
         let new_x_columns = vec![vec![15.0, 25.0], vec![3.0, -1.0]];
-        let predicted_latent =
-            estimator.predict_new_data(MarginalEffectsTarget::ExpectedLatent, &new_x_columns);
-        let predicted_observed =
-            estimator.predict_new_data(MarginalEffectsTarget::ExpectedObserved, &new_x_columns);
-        let predicted_prob =
-            estimator.predict_new_data(MarginalEffectsTarget::ProbUncensored, &new_x_columns);
+        let predicted_latent = estimator
+            .predict_new_data(MarginalEffectsTarget::ExpectedLatent, &new_x_columns)
+            .unwrap();
+        let predicted_observed = estimator
+            .predict_new_data(MarginalEffectsTarget::ExpectedObserved, &new_x_columns)
+            .unwrap();
+        let predicted_prob = estimator
+            .predict_new_data(MarginalEffectsTarget::ProbUncensored, &new_x_columns)
+            .unwrap();
 
         assert_eq!(predicted_observed.len(), 2);
         for i in 0..2 {
@@ -5393,6 +6979,13 @@ mod tests {
     /// sandwich_cov_params`のHC1補正係数を反転（`n/(n-k)`→`(n-k)/n`、Logit/Probitと
     /// 共有するロジックのため同一のバグ注入で確認）するバグを注入し、いずれも検出
     /// できることを確認した。
+    ///
+    /// `ExpectedUncensored`の3件（`decomposition_identity_holds_for_random_inputs`・
+    /// `expected_uncensored_stays_within_bounds_and_w_in_unit_interval`・
+    /// `mirror_symmetry_negates_mean_and_derivative_and_keeps_weight`）は`fit()`を介さず
+    /// `predicted_value`・`target_w_and_s`を乱数の`(μ,σ,境界)`で直接検証する。バグ注入で
+    /// 有効性を確認済み: 下側の裾の鏡像で`(Pa,Pb)`・`(A,B)`の入れ替えを外す→3件とも失敗、
+    /// 平均を`μ+σ(Pa+Pb)`にする→3件とも失敗、`∂w/∂μ`の符号を誤る→鏡像対称性が失敗。
     mod proptests {
         use super::*;
         use proptest::collection;
@@ -5686,7 +7279,7 @@ mod tests {
         ///
         /// **判明した事実（当時）**: 30万試行中8件が`MleError::EvaluationBudgetExceeded`
         /// 相当のエラー（`SolverType::Lbfgs`は当時のargmin組み込みLBFGSの`SolverExit`経由で
-        /// 同じメッセージを含む`ComputationFailed`になっていた）を引き起こした。**8件
+        /// 同じメッセージを含む計算エラーになっていた）を引き起こした。**8件
         /// 全てが`solver=Lbfgs`**で、`solver=Bfgs`・`solver=Newton`は1件もヒットしな
         /// かった。打ち切り割合（`n_uncensored/n`）は0.38〜0.80、`n`は41〜75、`k`は
         /// 1〜3、`sigma`は0.53〜1.85とヒット全体に幅広く分布しており、「極端な打ち切り・
@@ -5827,7 +7420,7 @@ mod tests {
             );
             // 実測`n_iter=11`（緩い上限、rust-reviewer指摘）。`FaerLbfgs`の1回目line
             // search初期ステップ幅の設計変更（`engine/src/nonlinear/CLAUDE.md`
-            // 「実装時に踏んだ罠その2」参照、未解決）時に、収束はするが反復回数が
+            // 「実装時に踏んだ罠その2」参照）時に、収束はするが反復回数が
             // 大きく増える形の劣化が紛れ込んでいないかを検知するためのガード。
             let n_iter = result.unwrap().n_iter();
             assert!(
@@ -5836,6 +7429,288 @@ mod tests {
                  iterations (a large increase would indicate a regression in FaerLbfgs's \
                  first-iteration self-scaling, even though it still converges)"
             );
+        }
+
+        // ── ExpectedUncensored（`E[y|lower<y<upper,x]`）の不変条件 ──────────
+        // 以降は`fit()`を介さず`predicted_value`・`target_w_and_s`を直接検証する。
+        // 乱数の`(μ, σ, lower, upper)`は、非打ち切り区間の幅/σが
+        // `MIN_UNCENSORED_WIDTH_RATIO`以上になる範囲に限る（それ未満は`TobitEstimator`が
+        // `UncensoredIntervalTooNarrow`で拒否する）。`μ`は`±60`まで振って`z`が数十に
+        // なる裾（連分数・鏡像変換の分岐）も踏む。
+
+        /// `(mu, sigma, lower, upper)`。`lower`/`upper`は片側・両側のいずれかで、
+        /// 両側のときは幅が`σ`の`1/100`以上。
+        type UncensoredCase = (f64, f64, Option<f64>, Option<f64>);
+
+        fn uncensored_case_strategy() -> impl Strategy<Value = UncensoredCase> {
+            (
+                -60.0f64..60.0,
+                0.2f64..5.0,
+                -3.0f64..3.0,
+                0.0f64..8.0,
+                0u8..3,
+            )
+                .prop_map(|(mu, sigma, lower, width, kind)| {
+                    // 幅の下限: `δ=width/σ>=0.01`を満たすよう`σ/100`以上にする
+                    let width = width + sigma / 100.0;
+                    let (lo, up) = match kind {
+                        0 => (Some(lower), None),
+                        1 => (None, Some(lower)),
+                        _ => (Some(lower), Some(lower + width)),
+                    };
+                    (mu, sigma, lo, up)
+                })
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(512))]
+
+            /// 分解恒等式: `E[y|x] = lower·P(下限) + upper·P(上限) + P(uncensored|x)·E[y|uncensored,x]`
+            /// （下限0のみの左打ち切りなら`E[y|x]=P(y>0|x)·E[y|y>0,x]`）。既存の`ExpectedObserved`・
+            /// `ProbUncensored`（`statrs`の`cdf`、絶対誤差`1e-11`級）と新`ExpectedUncensored`
+            /// （別の安定実装）が、乱数の`(μ,σ,境界)`全域で整合する。裾（`z`が数十）では
+            /// `P(uncensored)≈0`なので右辺は`lower`/`upper`の項が支配する。
+            #[test]
+            fn decomposition_identity_holds_for_random_inputs(
+                (mu, sigma, lower, upper) in uncensored_case_strategy(),
+            ) {
+                let normal = Normal::standard();
+                let value = |t| predicted_value(t, mu, sigma, lower, upper, &normal);
+                let p_lower = lower.map_or(0.0, |l| normal.cdf((l - mu) / sigma));
+                let p_upper = upper.map_or(0.0, |u| 1.0 - normal.cdf((u - mu) / sigma));
+                let decomposed = lower.unwrap_or(0.0) * p_lower
+                    + upper.unwrap_or(0.0) * p_upper
+                    + value(MarginalEffectsTarget::ProbUncensored)
+                        * value(MarginalEffectsTarget::ExpectedUncensored);
+                let observed = value(MarginalEffectsTarget::ExpectedObserved);
+                prop_assert!(
+                    (observed - decomposed).abs() <= 1e-8 * (1.0 + observed.abs()),
+                    "observed={observed}, decomposed={decomposed}"
+                );
+            }
+
+            /// 値域: `E[y|lower<y<upper,x]`は非打ち切り領域`[lower, upper]`に収まり
+            /// （境界は丸め誤差分だけ許す）、重み`w`（切断分散/σ²）は`[0,1]`、`s_beta`・
+            /// `s_sigma`は有限。裾（`z`が数十）でも破綻しない。
+            #[test]
+            fn expected_uncensored_stays_within_bounds_and_w_in_unit_interval(
+                (mu, sigma, lower, upper) in uncensored_case_strategy(),
+            ) {
+                let normal = Normal::standard();
+                let m = predicted_value(
+                    MarginalEffectsTarget::ExpectedUncensored, mu, sigma, lower, upper, &normal,
+                );
+                let (w, s_beta, s_sigma) = target_w_and_s(
+                    MarginalEffectsTarget::ExpectedUncensored,
+                    &[1.0], &[mu], sigma, lower, upper, &normal,
+                );
+                prop_assert!(m.is_finite() && w.is_finite() && s_beta[0].is_finite() && s_sigma.is_finite());
+                prop_assert!((0.0..=1.0).contains(&w), "w={w}");
+                let eps = 1e-9 * (1.0 + m.abs());
+                if let Some(l) = lower {
+                    prop_assert!(m >= l - eps, "m={m} < lower={l}");
+                }
+                if let Some(u) = upper {
+                    prop_assert!(m <= u + eps, "m={m} > upper={u}");
+                }
+            }
+
+            /// 鏡像対称性: `(μ, lower, upper)→(-μ, -upper, -lower)`で、平均`m`は符号反転、
+            /// 重み`w`は不変、`∂w/∂μ`は符号反転、`∂w/∂σ`は不変。左のみ↔右のみに入れ替わり、
+            /// 両側の上側の裾（`za>=0`）↔下側の裾（`zb<=0`）が別の分岐（符号反転した
+            /// `upper_tail_pdf_ratios`）を通るため、片方の分岐の符号・入れ替え（`Pa↔Pb`・`A↔B`）の
+            /// バグを検出できる。
+            #[test]
+            fn mirror_symmetry_negates_mean_and_derivative_and_keeps_weight(
+                (mu, sigma, lower, upper) in uncensored_case_strategy(),
+            ) {
+                let normal = Normal::standard();
+                let (mirror_lower, mirror_upper) = (upper.map(|u| -u), lower.map(|l| -l));
+                let m = predicted_value(
+                    MarginalEffectsTarget::ExpectedUncensored, mu, sigma, lower, upper, &normal,
+                );
+                let m_mirror = predicted_value(
+                    MarginalEffectsTarget::ExpectedUncensored, -mu, sigma, mirror_lower, mirror_upper, &normal,
+                );
+                let (w, s_beta, s_sigma) = target_w_and_s(
+                    MarginalEffectsTarget::ExpectedUncensored, &[1.0], &[mu], sigma, lower, upper, &normal,
+                );
+                let (w_mirror, s_beta_mirror, s_sigma_mirror) = target_w_and_s(
+                    MarginalEffectsTarget::ExpectedUncensored, &[1.0], &[-mu], sigma, mirror_lower, mirror_upper, &normal,
+                );
+                // `z`が数十の裾では`ε·z`〜`ε·z²`の丸め誤差があるので`z`に応じて許容を広げる
+                let z_max = [lower, upper]
+                    .iter()
+                    .flatten()
+                    .map(|b| ((b - mu) / sigma).abs())
+                    .fold(0.0f64, f64::max);
+                let tol = 1e-9 * (1.0 + z_max * z_max);
+                prop_assert!((m + m_mirror).abs() <= 1e-9 * (1.0 + m.abs() + mu.abs()), "m={m}, mirror={m_mirror}");
+                prop_assert!((w - w_mirror).abs() <= tol, "w={w}, mirror={w_mirror}");
+                prop_assert!((s_beta[0] + s_beta_mirror[0]).abs() <= tol, "s_beta={}, mirror={}", s_beta[0], s_beta_mirror[0]);
+                prop_assert!((s_sigma - s_sigma_mirror).abs() <= tol, "s_sigma={s_sigma}, mirror={s_sigma_mirror}");
+            }
+        }
+
+        /// `censored_hessian_weight_is_non_negative_at_extreme_params`が生成するケース:
+        /// `(n, k, x_cols, y_raw, censored_flags, bounds, intercept, slopes, s, v)`。
+        /// `intercept`・`slopes`は`(符号, 10の指数)`、`s`は`logσ`、`v`は二次形式の方向。
+        type ExtremeCase = (
+            usize,
+            usize,
+            Vec<Vec<f64>>,
+            Vec<f64>,
+            Vec<bool>,
+            Bounds,
+            f64,
+            Vec<(bool, f64)>,
+            f64,
+            Vec<f64>,
+        );
+
+        /// `fit()`を通さずHessianを直接評価する点のケース。`tobit_case_strategy`は
+        /// `|zeta|`が`U_CLAMP≈8.13`に届くことがほとんどないため、`σ=e^s`（`s∈[-1,1]`）に
+        /// 対して切片を`|β₀|∈[10^1.5, 1000]`で振り、0行目の`|zeta|=|β₀|/σ`が`U_CLAMP`を
+        /// 超えるようにする。
+        fn extreme_param_case_strategy() -> impl Strategy<Value = ExtremeCase> {
+            (1..=MAX_K).prop_flat_map(|k| {
+                (k + 5..=60usize).prop_flat_map(move |n| {
+                    (
+                        Just(n),
+                        Just(k),
+                        collection::vec(collection::vec(-2.0f64..2.0, n), k),
+                        collection::vec(0.05f64..0.9, n),
+                        collection::vec(any::<bool>(), n),
+                        censoring_strategy(),
+                        1.5f64..3.0,
+                        collection::vec((any::<bool>(), 0.0f64..3.0), k),
+                        -1.0f64..1.0,
+                        collection::vec(-1.0f64..1.0, k + 1),
+                    )
+                })
+            })
+        }
+
+        fn signed_power_of_ten((positive, exponent): (bool, f64)) -> f64 {
+            let magnitude = 10f64.powf(exponent);
+            if positive { magnitude } else { -magnitude }
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(256))]
+
+            /// 任意のパラメータ点で、打ち切り観測の`A(u)=λ(λ+u)`（`h_beta_coef`）が非負で、
+            /// Hessianの`β`ブロック（`A(u)`と非打ち切りの`1`を係数とする`Σ coef·xx'/σ²`）が
+            /// 半正定値になる。`λ`だけクランプして生の`zeta`を混ぜると`|zeta|>U_CLAMP`の
+            /// 領域で`A(u)`が負になる回帰を捕まえる（Probitの`hessian_weight_is_non_negative_
+            /// at_extreme_params`と対）。`(β, logσ)`全体のHessianは大域凹でないため、符号の性質
+            /// （非負・半正定値）は`β`ブロックだけに表明する。`β`-`s`・`s`-`s`ブロックは符号の
+            /// 性質が無いので、代わりに(1)0行目の寄与がクランプ境界`zeta=-U_CLAMP`での閉形式
+            /// （`A=m(m-U)`、`c=-U·A-m`、`h_beta_s=direction·c`、`h_ss=-U·c`、`m=φ/Φ`）に
+            /// 一致すること、(2)`hessian()`が`Contribution`の和として組み立てられていること
+            /// （全ブロック）を確認する。保証するのは「クランプ後の関数としての性質」で、クランプ
+            /// しない真のHessianとの一致ではない（`score_s`は生の`zeta`を使うため、クランプ領域で
+            /// `gradient`とHessianが非整合な既知の課題は別）。
+            ///
+            /// 0行目は説明変数を全て0にして`xb=β₀`とし、`β₀`の符号を打ち切り方向と逆に置く
+            /// （左・両側は下限で打ち切り、`β₀>0`で`zeta=(l-β₀)/σ<-U_CLAMP`。右は
+            /// `β₀<0`で`zeta=(β₀-u)/σ<-U_CLAMP`）ので、どのケースでもクランプ領域の打ち切り
+            /// 観測を少なくとも1件含む。1行目は非打ち切りにして、打ち切りと非打ち切りの両方を含める。
+            ///
+            /// 有効性確認済み: `censored_contribution`の`zeta_for_hessian`を生の`zeta`に戻すと、
+            /// 左・右どちらの分岐だけを戻しても失敗する（通常の`tobit_case_strategy`は`|zeta|`が
+            /// `U_CLAMP`に届かず検出できない）。
+            #[test]
+            fn censored_hessian_weight_is_non_negative_at_extreme_params(
+                (n, k, mut x_cols, y_raw, censored, bounds, intercept_exp, slopes, s, v)
+                    in extreme_param_case_strategy(),
+            ) {
+                for col in &mut x_cols {
+                    col[0] = 0.0;
+                }
+                let (lower, upper) = bounds;
+                let beta0 = signed_power_of_ten((lower.is_some(), intercept_exp));
+                let mut params = vec![beta0];
+                params.extend(slopes.iter().map(|&slope| signed_power_of_ten(slope)));
+                params.push(s);
+
+                // 観測の値: 打ち切りなら境界値、そうでなければ区間内部の値。0行目は必ず
+                // 打ち切り、1行目は必ず非打ち切り。0行目の境界は`β₀`の符号と逆側にそろえる
+                // （下限があれば下限、なければ上限）。
+                let y: Vec<f64> = (0..n)
+                    .map(|i| {
+                        let r = y_raw[i];
+                        let is_censored = i == 0 || (i != 1 && censored[i]);
+                        match (lower, upper) {
+                            (Some(l), None) => if is_censored { l } else { l + r },
+                            (None, Some(u)) => if is_censored { u } else { u - r },
+                            (Some(l), Some(_)) if i == 0 => l,
+                            (Some(l), Some(u)) => {
+                                if !is_censored { l + (u - l) * r } else if r > 0.5 { u } else { l }
+                            }
+                            (None, None) => unreachable!("censoring_strategy always sets a bound"),
+                        }
+                    })
+                    .collect();
+
+                let input = TobitInput::from_columns(&y, &x_cols, x_names(k), true, "y".to_string(), lower, upper).unwrap();
+                let problem = TobitProblem::new(&input);
+                let normal = Normal::standard();
+                let sigma = s.exp();
+
+                let zeta0 = match lower {
+                    Some(l) => (l - params[0]) / sigma,
+                    None => (params[0] - upper.unwrap_or(0.0)) / sigma,
+                };
+                prop_assert!(zeta0 < -U_CLAMP, "row 0 must be censored beyond U_CLAMP, got zeta={zeta0}");
+
+                let contributions: Vec<Contribution> =
+                    (0..n).map(|i| problem.contribution(i, &params, &normal)).collect();
+                for (i, c) in contributions.iter().enumerate() {
+                    prop_assert!(c.h_beta_coef >= 0.0, "A(u)[{i}]={} should be non-negative", c.h_beta_coef);
+                }
+                // 0行目はクランプ境界`zeta=-U_CLAMP`と同じ寄与（0行目は`lower`があれば左、なければ右）
+                let (phi, big_phi) = clamped_pdf_cdf(&normal, -U_CLAMP);
+                let m = phi / big_phi;
+                let a0 = m * (m - U_CLAMP);
+                let c0 = -U_CLAMP * a0 - m;
+                let direction = if lower.is_some() { 1.0 } else { -1.0 };
+                let close = |actual: f64, expected: f64| (actual - expected).abs() <= 1e-9 * (1.0 + expected.abs());
+                prop_assert!(close(contributions[0].h_beta_coef, a0), "A[0]={} vs {a0}", contributions[0].h_beta_coef);
+                prop_assert!(close(contributions[0].h_beta_s_coef, direction * c0), "h_beta_s[0]={} vs {}", contributions[0].h_beta_s_coef, direction * c0);
+                prop_assert!(close(contributions[0].h_ss, -U_CLAMP * c0), "h_ss[0]={} vs {}", contributions[0].h_ss, -U_CLAMP * c0);
+
+                // `hessian()`は`Contribution`の和: 全ブロックを別ループで組み立て直して比べる
+                let hessian = problem.hessian(&params).unwrap();
+                let kb = k + 1; // 切片を含む`β`の本数
+                let sigma2 = sigma * sigma;
+                let scale: f64 = 1.0 + (0..=kb).map(|a| hessian[a][a].abs()).sum::<f64>();
+                for (a, row) in hessian.iter().enumerate().take(kb) {
+                    for (b, cell) in row.iter().enumerate().take(kb) {
+                        let expected: f64 = (0..n)
+                            .map(|i| contributions[i].h_beta_coef * problem.x.get(i, a) * problem.x.get(i, b) / sigma2)
+                            .sum();
+                        prop_assert!((cell - expected).abs() <= 1e-9 * scale, "H[{a}][{b}]={cell} vs {expected}");
+                    }
+                    let cross: f64 = (0..n)
+                        .map(|i| contributions[i].h_beta_s_coef * problem.x.get(i, a) / sigma)
+                        .sum();
+                    prop_assert!((hessian[a][kb] - cross).abs() <= 1e-9 * scale, "H[{a}][s]={} vs {cross}", hessian[a][kb]);
+                    prop_assert!((hessian[kb][a] - cross).abs() <= 1e-9 * scale, "H[s][{a}]={} vs {cross}", hessian[kb][a]);
+                }
+                let h_ss: f64 = contributions.iter().map(|c| c.h_ss).sum();
+                prop_assert!((hessian[kb][kb] - h_ss).abs() <= 1e-9 * scale, "H[s][s]={} vs {h_ss}", hessian[kb][kb]);
+
+                // `β`ブロックの半正定値性: 対角が非負、任意方向`v'H_ββv ≥ 0`
+                for (a, row) in hessian.iter().enumerate().take(kb) {
+                    prop_assert!(row[a] >= 0.0, "H[{a}][{a}]={} should be non-negative", row[a]);
+                }
+                let quad: f64 = (0..kb)
+                    .flat_map(|a| (0..kb).map(move |b| (a, b)))
+                    .map(|(a, b)| v[a] * hessian[a][b] * v[b])
+                    .sum();
+                prop_assert!(quad >= -1e-9 * scale, "v'H_bb v={quad} should be non-negative (scale={scale})");
+            }
         }
     }
 }

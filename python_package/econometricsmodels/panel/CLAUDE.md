@@ -13,9 +13,12 @@
 ## 実装パターン
 
 - `FE`/`FEResults`・`RE`/`REResults`はいずれも`IV`/`IVResults`と同型（`data`/`y`/`x`/`entity`/`options`を保持するだけのコンストラクタ、`fit()`呼び出し時に初めて`_lib.fit_fe`/`_lib.fit_re`を呼ぶ。コンストラクタでは検証しない）。
-- `params`/`std_errors`/`test_stats`/`p_values`は係数名→値の`dict[str, float]`（O(1)取り出し用）。行指向で欲しい場合は`coef_table()`（`OLSResults.coef_table()`と同じキー: `param`/`coef`/`std_err`/`test_stat`/`p_value`/`conf_lower`/`conf_upper`。FE/REともOLS同様t検定のためIVの`stats`/`stat`のような汎用命名は不要）。
+- `params`/`std_errors`/`test_stats`/`p_values`は係数名→値の`dict[str, float]`（O(1)取り出し用）。行指向で欲しい場合は`params_table()`（`OLSResults.params_table()`と同じキー: `param_name`/`param`/`std_error`/`test_stat`/`p_value`/`conf_lower`/`conf_upper`。FE/REともOLS同様t検定のためIVの`stats`/`stat`のような汎用命名は不要）。
 - `fixed_effects()`（FE限定）はIVの`first_stage()`と同じ「追加結果は別メソッド」方針（`docs/spec/fe-spec.md`3.5節）。ただし`first_stage()`と異なり結果の型変換は不要（`_lib.FEResult.fixed_effects()`が返す`dict`をそのまま素通しする）。
-- **REにはFEの`fixed_effects()`に相当する追加メソッドが無い**: ハウスマン検定（`hausman_statistic`/`hausman_p_value`/`hausman_df`）は`fit()`内で自動計算済みの値をそのまま`REResults`のプロパティとして公開するだけで済む（`panel-common.md`2.4節「RE: ハウスマン検定は`fit()`内で自動計算」）。3つとも`float | None`/`int | None`型（傾き係数が0個の場合のみ`None`。補助回帰・ロバスト共分散の計算失敗は`fit()`が`ValidationError`/`ComputationError`で失敗する）。比較は常に1-wayで、補助回帰のWald検定の共分散はRE本体の`cov_type`に連動する。`REOptions.dk_time`（`cov_type="dk"`専用・必須）はDKの時点列にのみ使う。
+- **REにはFEの`fixed_effects()`に相当する追加メソッドが無い**: ハウスマン検定（`hausman_statistic`/`hausman_p_value`/`hausman_df`）は`fit()`内で自動計算済みの値をそのまま`REResults`のプロパティとして公開するだけで済む（`panel-common.md`2.4節「RE: ハウスマン検定は`fit()`内で自動計算」）。3つとも`float | None`/`int | None`型（検定できる傾き係数が無い場合のみ`None`。補助回帰・ロバスト共分散の計算失敗は`fit()`が`ValidationError`/`ComputationError`で失敗する）。比較相手はRE本体と同じ個体効果構造のFE（1-wayはentity、2-wayはentity+time）で、補助回帰のWald検定の共分散はRE本体の`cov_type`に連動する。`REOptions.dk_time`（`cov_type="dk"`専用・必須）はDKの時点列にのみ使う。
+- **`REOptions.variance_method`**（`"swamy_arora"`・`"wallace_hussain"`・`"amemiya"`）と`REResults.variance_method`（正規化した値）: 分散成分と重みがどの推定法の値かを示す。`REOptions`は`_lib`の再輸出のままで、docstringはRust側（`engine_pybind/src/panel/re.rs`）が正本。
+- **REの分散成分と重み**: `sigma2_eps`・`sigma2_u`（`float`）、`sigma2_lambda`（2-wayのみ）、`theta`（1-wayのみ、エンティティID→θ_i、IDの辞書順の`dict`）、`theta_entity`/`theta_time`/`theta_total`（2-wayのみ）をプロパティで返す。使わない側は`None`（型安定。`re-spec.md`2章）。
+- **2-way RE（`REOptions.time`、バランスパネル）**: `REResults.n_periods`（2-wayのみ、1-wayは`None`）を持つ。ハウスマン検定・パネルR²は2-wayでも1-wayと同じプロパティで返す（`hausman_df`は2-way within変換後に分散のある列の数、`re-spec.md`3.6・3.7節）。`time`と`dk_time`は別物で、`cov_type="dk"`では`dk_time`が必須（`time`は借用されない）。
 - **REは切片を持つ**ため`param_names[0]`が常に`"const"`になる（FEはwithin変換で切片が構造的に消えるため無い）。`df_resid`の意味もFEと異なる（`n - k`、FEの`n - n_entities - k`とは別式、`re-spec.md`3.3節）——docstringに明記して混同を防ぐ。
 
 ## テスト

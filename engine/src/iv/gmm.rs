@@ -67,14 +67,15 @@
 //!   （後述「Hansen J過剰識別検定」参照、点推定とHansen Jで`S`の要件が異なる点に注意）。
 //! - `Robust`: `S = Σᵢ êᵢ² zᵢzᵢ'`（`two_sls.rs`の`hc_cov_params`
 //!   のHC0相当だがレバレッジ調整は無し）。
-//! - `Cluster`: `S = Σ_g (Σ_{i∈g} êᵢzᵢ)(Σ_{i∈g} êᵢzᵢ)'`（`two_sls.rs`の
-//!   `cluster_cov_params`と同型だが小標本補正は無し）。
+//! - `Cluster`: `S = Σ_g (Σ_{i∈g} êᵢzᵢ)(Σ_{i∈g} êᵢzᵢ)'`（`shared::covariance::cluster_meat`
+//!   と同じ蓄積で、小標本補正は無し）。
 //! - `Hac`: Newey-West（Bartlettカーネル）による`S`。`two_sls.rs`の`hac_cov_params`と
 //!   同型（時系列相関を仮定する、パネルのDriscoll-Kraayではない。
 //!   `docs/spec/iv-spec.md`1.2節・`two_sls.rs`冒頭コメント参照）。
 //!
-//! 上記4関数は、数式としては`two_sls.rs`の`hc_cov_params`/`cluster_cov_params`/
-//! `hac_cov_params`と同型だが、独立に実装している（後述「2SLSとの共通化の判断」参照）。
+//! 上記4関数は、数式としては`two_sls.rs`の`hc_cov_params`/`hac_cov_params`と同型だが、
+//! 独立に実装している（後述「2SLSとの共通化の判断」参照）。クラスターの蓄積
+//! （`Σ_g S_g S_g'`）だけは`shared::covariance::cluster_meat`と共有する。
 //!
 //! ## Hansen J過剰識別検定（`docs/spec/iv-spec.md`3.5節）
 //!
@@ -142,11 +143,11 @@
 //!   GMMクロスチェック実装中に発覚・修正。`linearmodels`の`HomoskedasticWeightMatrix`
 //!   が常に中心化する設計と実測突き合わせて判明）。
 //! - `hc0`〜`hc3`: `two_sls.rs`の`hc_cov_params`と同型（`X̂`→`Z`）。HC2/HC3のレバレッジは
-//!   `Z`から計算する自己拡張で、**GMM自体の外部参照実装での検証は不可能**（R `ivreg`が
-//!   GMMに対応していないため、`docs/spec/iv-spec.md`4章。2SLSのHC2/HC3はR `ivreg`+
-//!   `sandwich::vcovHC`で検証可能なことを実機確認済み——`docs/spec/iv-spec.md`4章——
-//!   だが、GMMはivreg非対応という別軸の制約が
-//!   残るため対象外のまま。ユーザー確認済み）。**HC1の小標本補正
+//!   `Z`から計算する自己拡張で、**GMMのHC2/HC3は外部参照実装での検証は不可能**（
+//!   `linearmodels`の`IVGMM`にも、Rクロスチェックに使う`momentfit`にも対応する共分散推定が
+//!   無い。`docs/spec/iv-spec.md`4章。2SLSのHC2/HC3はR `ivreg`+`sandwich::vcovHC`で
+//!   検証可能なことを実機確認済み——`docs/spec/iv-spec.md`4章——だが、GMMには同等の
+//!   参照が無いため対象外のまま。ユーザー確認済み）。**HC1の小標本補正
 //!   `n/(n-k)`・クラスターの補正`(G/(G-1))((n-1)/(n-k))`はどちらも`l`（全操作変数の数）
 //!   ではなく`k`（構造方程式の係数の数）を使う**（rust-reviewerの指摘で修正）:
 //!   補正対象の残差`êᵢ = yᵢ - xᵢ'β̂`は常に`k`個のパラメータで推定された構造残差であり、
@@ -154,11 +155,12 @@
 //!   過ぎず、レバレッジの計算（`Z`空間での「距離」）には妥当でも、補正係数の分母にまで
 //!   機械的に`X̂`→`Z`・`k`→`l`を適用したのは誤りだった（`gmm_hc_omega`/`gmm_cluster_omega`
 //!   のdocコメント参照）。
-//! - `cluster`: `two_sls.rs`の`cluster_cov_params`と同型（`X̂`→`Z`、上記の通り補正は`k`）。
+//! - `cluster`: `cluster_meat`（`shared::covariance`）に`êᵢzᵢ`を渡し、補正は`cluster_correction`
+//!   の`k`（`X̂`→`Z`、上記の通り補正は`k`）。
 //! - `hac`: 上記の通り`hac_moment_covariance`をそのまま再利用。
 //!
 //! **検定分布はz（標準正規）**（`docs/spec/iv-spec.md`3.2節で確定済み、2-step efficient GMMの
-//! 漸近正規性が根拠）。`engine::inference`の分布非依存関数（`critical_value`/
+//! 漸近正規性が根拠）。`engine::shared::inference`の分布非依存関数（`critical_value`/
 //! `compute_inference_stat`）を`statrs::distribution::Normal`で使う（`two_sls.rs`が
 //! `StudentsT`で使うのと同じ関数で、分布に依存しない設計方針に沿っている）。
 //!
@@ -194,22 +196,29 @@
 //!
 //! 以上より、**点推定の数値的一致は確認しつつ、実装は独立のまま維持する**
 //! （`docs/spec/iv-spec.md`3.1節の既存方針「IVのサンドイッチ型分散計算は独自実装でよい」を
-//! 2SLS/GMM間の関係にも適用した判断）。
-
-use std::collections::BTreeMap;
+//! 2SLS/GMM間の関係にも適用した判断）。ただしクラスターの蓄積（`Σ_g S_g S_g'`）と小標本補正は、
+//! 2SLS・OLS・panel・nonlinearと共有する`shared::covariance`の`cluster_meat`系を使う。
 
 use faer::linalg::matmul::matmul;
 use faer::prelude::Solve;
 use faer::{Accum, Mat, Par, Side};
 use statrs::distribution::{ChiSquared, ContinuousCDF, Normal};
 
-use crate::error::CommonError;
-use crate::inference;
-use crate::iv::common::{IvError, IvInput, mat_to_columns};
+use crate::iv::common::{
+    IvError, IvInput, mat_column_to_vec, mat_to_columns, validate_observation_counts,
+    validate_outcome_not_constant, validate_structural_cluster_count,
+};
 use crate::linear::ols::CovType;
-use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
-use crate::validation::MAX_ITER_LIMIT;
-use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
+use crate::shared::covariance::{
+    cluster_correction, cluster_meat, resolve_hac_lags, time_ordering,
+};
+use crate::shared::error::{ClusterSetting, CommonError, MatrixKind};
+use crate::shared::goodness_of_fit::{is_perfect_fit, total_sum_of_squares};
+use crate::shared::group_codes::GroupCodes;
+use crate::shared::inference;
+use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
+use crate::shared::validation::validate_cluster_groups;
+use crate::shared::validation::{GMM_MAX_ITER_MIN, MAX_ITER_LIMIT};
 
 /// GMMの点推定に使う重み行列の種別（`docs/spec/iv-spec.md`1.2節）。
 ///
@@ -221,8 +230,9 @@ pub enum WeightType {
     Classical,
     /// 不均一分散頑健。
     Robust,
-    /// クラスター頑健。`groups`が`None`の場合は`CommonError::MissingClusterColumn`。
-    Cluster { groups: Option<Vec<String>> },
+    /// クラスター頑健。`groups`が`None`の場合は`CommonError::MissingClusterColumn`、コードの
+    /// 行数が`n`と食い違う場合は`CommonError::ClusterDimensionMismatch`。
+    Cluster { groups: Option<GroupCodes> },
     /// Newey-West（Bartlettカーネル）によるHAC型。`lags=None`なら`two_sls.rs`と同じ
     /// 経験則で自動計算する。`time_order`は`IvInput`の行と対応する長さnの配列で、この値の昇順を
     /// 時系列順とする（必須。行順を暗黙に時系列順とみなす既定は置かない）。
@@ -318,13 +328,15 @@ impl GmmEstimator {
     ///   `IvError::Common(CommonError::InvalidConfidenceLevel)`
     /// - 観測数`n`が`k`（構造方程式の係数の数）以下:
     ///   `IvError::Common(CommonError::InsufficientObservations)`
+    /// - 観測数`n`が全操作変数の数`l`（`x_exog ++ instruments`、定数項込み）以下（`n > k`でも）:
+    ///   `IvError::InsufficientObservationsForFirstStage`（`validate_observation_counts`）
     /// - `Iterated`の`max_iter`が3未満: `IvError::InvalidGmmMaxIter`
     /// - `Iterated`の`tol`が正の有限値でない（0以下・NaN・inf）: `IvError::InvalidGmmTol`
     /// - `raise_on_non_convergence=true`かつ`Iterated`が`max_iter`回
     ///   以内に収束しなかった: `IvError::GmmNonConvergence`
     /// - 識別の順序条件`len(instruments) >= len(x_endog)`を満たさない:
     ///   `IvError::InsufficientInstruments`
-    /// - `TwoStep`/`Iterated`の`weight`が`Hac`で`lags`が不正: `IvError::InvalidHacLags`
+    /// - `TwoStep`/`Iterated`の`weight`が`Hac`で`lags`が不正: `CommonError::InvalidHacLags`
     /// - `TwoStep`/`Iterated`の`weight`が`Cluster`でグループキー未指定・クラスター数不足:
     ///   `IvError::Common(CommonError::MissingClusterColumn` /
     ///   `CommonError::InsufficientClusters)`
@@ -334,14 +346,14 @@ impl GmmEstimator {
     ///   特異。`validate_weight_type`で検証する）
     /// - `Z'Z`または`X'WX`型のブレッド行列が（数値的に）特異（上記の`g`と`l`の関係で
     ///   事前に弾けない悪条件のbackstop）:
-    ///   `IvError::Common(CommonError::ComputationFailed)`
+    ///   `IvError::Common(CommonError::NearSingularMatrix)`
     /// - `cov_type=Cluster`でグループキー未指定・クラスター数不足:
     ///   `IvError::Common(CommonError::MissingClusterColumn` /
     ///   `CommonError::InsufficientClusters)`
     /// - `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下:
     ///   `IvError::Common(CommonError::InsufficientClustersForInference)`（`rank(Ŝ) ≤ g-1`
     ///   のためロバストWald（χ²）検定の`q×q`部分行列が構造的に特異になる）
-    /// - `cov_type=Hac`の`lags`が不正: `IvError::InvalidHacLags`
+    /// - `cov_type=Hac`の`lags`が不正: `CommonError::InvalidHacLags`
     pub fn fit(
         input: IvInput,
         gmm_type: GmmType,
@@ -349,14 +361,14 @@ impl GmmEstimator {
         cov_type: CovType,
         confidence_level: f64,
     ) -> Result<Self, IvError> {
-        // faer のグローバル並列度を Par::Seq に固定する（`crate::parallelism`）。
-        crate::parallelism::ensure_serial();
+        // faer のグローバル並列度を Par::Seq に固定する（`crate::shared::parallelism`）。
+        crate::shared::parallelism::ensure_serial();
 
         if !(confidence_level > 0.0 && confidence_level < 1.0) {
             return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
         }
         if let GmmType::Iterated { max_iter, tol, .. } = &gmm_type {
-            if *max_iter < 3 || *max_iter as u64 > MAX_ITER_LIMIT as u64 {
+            if *max_iter < GMM_MAX_ITER_MIN as usize || *max_iter as u64 > MAX_ITER_LIMIT as u64 {
                 return Err(IvError::InvalidGmmMaxIter {
                     max_iter: *max_iter as i64,
                 });
@@ -375,34 +387,25 @@ impl GmmEstimator {
         let n = input.nobs();
         // 観測数`n`が`k`（構造方程式の係数の数）以下だと、後段のサンドイッチSE計算
         // （`df_resid=n-k`による除算、HC1補正`n/(n-k)`等）がNaN/Infinityを静かに生成しうる
-        // （`ols.rs`のn<=k検証と同じ理由）。`OlsEstimator::fit`/`TwoSlsEstimator::fit`と
-        // 同じ`CommonError::InsufficientObservations`で早期に弾く。
-        //
-        // `l`（全操作変数の数）については、`hc0`〜`hc3`/`cluster`の小標本補正が`l`ではなく
-        // `k`を使う設計（`gmm_hc_omega`のdocコメント参照）に修正した結果、`n<=l`固有の
-        // NaN/Infinityリスクは残っていない——`Z'Z`が特異になるケース（`n<l`ならほぼ確実、
-        // `n=l`でも起こりうる）は、点推定自体（`gmm_point_estimate`）や`gmm_hc_omega`の
-        // レバレッジ計算（`invert_spd`）が`Result`で`ComputationFailed`を返す経路で
-        // 既に保護されている（NaNの静かな伝播ではなく明示的なエラーになる）ため、
-        // 別途`n<=l`を検証する必要はない。
+        // （`ols/estimator.rs`のn<=k検証と同じ理由）。さらに`n`が`l`（全操作変数
+        // `x_exog ++ instruments`の数）以下だと、`n < l`では`Z'Z`が特異、`n == l`では
+        // `Z`が正則になり`W₀ = (Z'Z)⁻¹`のGMMがOLSへ縮退する。`TwoSlsEstimator::fit`・
+        // `engine_pybind`と同じ`validate_observation_counts`で、構造方程式の`n <= k`
+        // （`CommonError::InsufficientObservations`）を先に、次に`n <= l`
+        // （`IvError::InsufficientObservationsForFirstStage`）を弾く。
+        validate_observation_counts(&input)?;
         let k = input.k_exog() + input.k_endog();
-        if n <= k {
-            return Err(CommonError::InsufficientObservations { n, k }.into());
-        }
 
         // `cov_type=Cluster`でクラスター数`g`が構造方程式の傾き係数の数`q`
         // （`k - k_constant`）以下だと、ロバストWald（χ²）検定の`q×q`部分行列が構造的に
-        // 特異になる（`rank(Ŝ) ≤ g - 1`、`two_sls.rs`/`ols.rs`と同型）。
+        // 特異になる（`rank(Ŝ) ≤ g - 1`、`two_sls.rs`/`ols/estimator.rs`と同型）。
         // `g`・`q`は入力だけから判定できるため、点推定・SE計算より前に弾く。
         // `weight_type=Cluster`の重み行列`S`（l×l）の`G`と`l`の関係は別軸のため
         // `validate_weight_type`側で検証する。
-        if let CovType::Cluster {
-            groups: Some(groups),
-        } = &cov_type
-        {
-            let g = validate_cluster_groups(groups, n)?;
-            validate_cluster_count_covers_slopes(g, k - usize::from(input.has_intercept()))?;
-        }
+        validate_structural_cluster_count(&input, &cov_type)?;
+
+        // 被説明変数が定数（切片あり）のモデルは説明するものが無い（`TwoSlsEstimator::fit`と同じ）。
+        validate_outcome_not_constant(&input)?;
 
         // 1段階GMMは`weight_type`を持たない（点推定・Hansen Jとも`(Z'Z)⁻¹`のみで計算する）
         // ため検証もしない。2段階・反復では点推定に使う重みの妥当性を検証する。
@@ -411,9 +414,12 @@ impl GmmEstimator {
             GmmType::TwoStep { weight } | GmmType::Iterated { weight, .. } => Some(weight),
         };
         let l_instruments = input.k_exog() + input.instruments().ncols();
-        if let Some(weight_type) = weight_type {
-            validate_weight_type(weight_type, n, k, l_instruments)?;
-        }
+        // `weight_type=Cluster`のグループ（`validate_weight_type`が検証して返す）。`cov_type=Cluster`
+        // のグループとは別の入力で、同じ列を指していても別々に渡される。
+        let weight_cluster_codes = match weight_type {
+            Some(weight_type) => validate_weight_type(weight_type, n, k, l_instruments)?,
+            None => None,
+        };
 
         let x_exog_columns = mat_to_columns(input.x_exog());
 
@@ -439,6 +445,14 @@ impl GmmEstimator {
         let ztz = z.transpose() * &z;
         let beta0 = gmm_point_estimate(&z, &x, y, &ztz)?;
         let residuals0 = y - &x * &beta0;
+
+        // 初期推定の残差が丸め誤差の範囲で0なら完全フィット。重み行列`S`が0になって後段の逆行列が
+        // 特異になる前に、原因が分かるエラーで止める（`TwoSlsEstimator::fit`と同じ判定）。
+        let sst = total_sum_of_squares(&mat_column_to_vec(y, 0), None, input.has_intercept());
+        let ssr0: f64 = (0..n).map(|i| (*residuals0.get(i, 0)).powi(2)).sum();
+        if is_perfect_fit(ssr0, sst, k) {
+            return Err(CommonError::PerfectFit.into());
+        }
 
         // weight_type=ClassicalのHansen J検定専用の重み行列`σ̂²₀・Z'Z`（モジュール冒頭の
         // docコメント「Hansen J過剰識別検定」参照。`σ̂²`によるスケーリングは点推定には
@@ -496,9 +510,12 @@ impl GmmEstimator {
                         Mat::from_fn(l, l, |i, j| sigma2 * (*ztz.get(i, j)))
                     }
                     WeightType::Robust => robust_moment_covariance(&z, &residuals, n, l),
-                    WeightType::Cluster { groups } => {
-                        let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
-                        cluster_moment_covariance(&z, &residuals, n, l, groups)
+                    WeightType::Cluster { .. } => {
+                        let groups =
+                            weight_cluster_codes.ok_or(CommonError::MissingClusterColumn {
+                                setting: ClusterSetting::GmmWeightType,
+                            })?;
+                        cluster_moment_covariance(&z, &residuals, l, groups)
                     }
                     WeightType::Hac { .. } => {
                         // `hac_precomputed`は`weight_type=Hac`のとき（このアームに入る
@@ -554,19 +571,17 @@ impl GmmEstimator {
         } else {
             let df = q - k_endog;
             let zte = z.transpose() * &residuals;
-            let llt_s = s_used.llt(Side::Lower).map_err(|_| {
-                CommonError::ComputationFailed(
-                    "failed to invert GMM weight matrix S for the Hansen J overidentification \
-                     test"
-                        .to_string(),
-                )
-            })?;
+            let llt_s = s_used
+                .llt(Side::Lower)
+                .map_err(|_| CommonError::NearSingularMatrix {
+                    matrix: MatrixKind::GmmWeight,
+                })?;
             let s_inv_zte = llt_s.solve(&zte);
             let stat: f64 = (0..l)
                 .map(|i| (*zte.get(i, 0)) * (*s_inv_zte.get(i, 0)))
                 .sum();
-            let chi2 = ChiSquared::new(df as f64)
-                .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+            let chi2 =
+                ChiSquared::new(df as f64).map_err(|e| CommonError::internal(e.to_string()))?;
             let p_value = chi2.sf(stat);
             (Some(stat), Some(p_value), Some(df))
         };
@@ -584,11 +599,19 @@ impl GmmEstimator {
         let s_inv = invert_spd(
             &s_used,
             l,
-            "GMM weight matrix S for the sandwich covariance",
+            CommonError::NearSingularMatrix {
+                matrix: MatrixKind::GmmWeight,
+            },
         )?;
         let zx = z.transpose() * &x; // (l, k)
         let bread = zx.transpose() * &s_inv * &zx; // (k, k) = X'ZWZ'X
-        let bread_inv = invert_spd(&bread, k, "X'ZWZ'X (GMM sandwich bread matrix)")?;
+        let bread_inv = invert_spd(
+            &bread,
+            k,
+            CommonError::NearSingularMatrix {
+                matrix: MatrixKind::GmmBread,
+            },
+        )?;
 
         let omega_hat = match &cov_type {
             CovType::Classical => {
@@ -618,10 +641,11 @@ impl GmmEstimator {
                 hac_moment_covariance(&z, &residuals, n, l, lags, &order)
             }
             CovType::Cluster { groups } => {
-                let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
-                // クラスター数 `g <= df_model`（構造方程式の傾き係数の数）は`fit()`冒頭で
-                // 既に`InsufficientClustersForInference`として弾いている。
-                validate_cluster_groups(groups, n)?;
+                // クラスター数 `g >= 2`・`g > df_model`（構造方程式の傾き係数の数）は`fit()`冒頭
+                // （`validate_structural_cluster_count`）で検証済み。
+                let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn {
+                    setting: ClusterSetting::CovType,
+                })?;
                 gmm_cluster_omega(&z, &residuals, n, k, l, groups)
             }
         };
@@ -636,7 +660,7 @@ impl GmmEstimator {
         }
 
         let normal_dist =
-            Normal::new(0.0, 1.0).map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+            Normal::new(0.0, 1.0).map_err(|e| CommonError::internal(e.to_string()))?;
         let z_crit = inference::critical_value(&normal_dist, confidence_level);
 
         let mut test_stats = Mat::<f64>::zeros(k, 1);
@@ -654,12 +678,6 @@ impl GmmEstimator {
             *conf_upper.get_mut(j, 0) = stat.conf_high;
         }
 
-        let sst: f64 = if input.has_intercept() {
-            let y_mean: f64 = (0..n).map(|i| *y.get(i, 0)).sum::<f64>() / (n as f64);
-            (0..n).map(|i| (*y.get(i, 0) - y_mean).powi(2)).sum()
-        } else {
-            (0..n).map(|i| (*y.get(i, 0)).powi(2)).sum()
-        };
         let r_squared = 1.0 - ssr / sst;
         let adj_r_squared = 1.0 - ((n - k_constant) as f64 / df_resid as f64) * (1.0 - r_squared);
 
@@ -882,27 +900,34 @@ fn gmm_coefficients_converged(prev: &Mat<f64>, next: &Mat<f64>, rtol: f64) -> bo
 /// `Cluster`の`S`（l×l）は`rank(S) ≤ G`で、丁度識別（`l == k`）では`Z'ê = 0`により
 /// `rank(S) ≤ G-1`となる。よって過剰識別は`G < l`、丁度識別は`G <= l`で構造的に特異に
 /// なるため`IvError::InsufficientClustersForWeightMatrix`で弾く。
+///
+/// `Cluster`のとき、検証したグループ（整数コード）を返す（それ以外は`None`）。
+/// 呼び出し元は、このコードを反復の間そのまま借りて`cluster_moment_covariance`に渡す。
 fn validate_weight_type(
     weight_type: &WeightType,
     n: usize,
     k: usize,
     l: usize,
-) -> Result<(), IvError> {
+) -> Result<Option<&GroupCodes>, IvError> {
     match weight_type {
         WeightType::Classical | WeightType::Robust => {}
         WeightType::Cluster { groups } => {
-            let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
-            let g = validate_cluster_groups(groups, n)?;
-            let exactly_identified = l == k;
-            if g < l || (exactly_identified && g == l) {
-                return Err(IvError::InsufficientClustersForWeightMatrix { g, l });
+            let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn {
+                setting: ClusterSetting::GmmWeightType,
+            })?;
+            let g = validate_cluster_groups(groups, n, ClusterSetting::GmmWeightType)?;
+            // 丁度識別は`G <= l`、過剰識別は`G < l`で`S`が特異になる。
+            let min_clusters = if l == k { l + 1 } else { l };
+            if g < min_clusters {
+                return Err(IvError::InsufficientClustersForWeightMatrix { g, l, min_clusters });
             }
+            return Ok(Some(groups));
         }
         WeightType::Hac { lags, .. } => {
             resolve_hac_lags(*lags, n)?;
         }
     }
-    Ok(())
+    Ok(None)
 }
 
 /// 重み行列`W=S⁻¹`によるGMMの点推定 `β̂(W) = (X'ZWZ'X)⁻¹X'ZWZ'y` を求める。
@@ -920,20 +945,22 @@ fn gmm_point_estimate(
     let zx = z.transpose() * x; // (l, k)
     let zy = z.transpose() * y; // (l, 1)
 
-    let llt_s = s.llt(Side::Lower).map_err(|_| {
-        CommonError::ComputationFailed(
-            "failed to invert GMM weight matrix S (Z'Z or moment covariance)".to_string(),
-        )
-    })?;
+    let llt_s = s
+        .llt(Side::Lower)
+        .map_err(|_| CommonError::NearSingularMatrix {
+            matrix: MatrixKind::GmmWeight,
+        })?;
     let s_inv_zx = llt_s.solve(&zx); // (l, k) = S⁻¹Z'X
     let s_inv_zy = llt_s.solve(&zy); // (l, 1) = S⁻¹Z'y
 
     let bread = zx.transpose() * &s_inv_zx; // (k, k) = X'ZS⁻¹Z'X
     let meat = zx.transpose() * &s_inv_zy; // (k, 1) = X'ZS⁻¹Z'y
 
-    let llt_bread = bread.llt(Side::Lower).map_err(|_| {
-        CommonError::ComputationFailed("failed to invert X'ZWZ'X (GMM bread matrix)".to_string())
-    })?;
+    let llt_bread = bread
+        .llt(Side::Lower)
+        .map_err(|_| CommonError::NearSingularMatrix {
+            matrix: MatrixKind::GmmBread,
+        })?;
     Ok(llt_bread.solve(&meat))
 }
 
@@ -946,69 +973,18 @@ fn robust_moment_covariance(z: &Mat<f64>, residuals: &Mat<f64>, n: usize, l: usi
 }
 
 /// クラスター頑健なモーメント分散共分散行列: `Σ_g (Σ_{i∈g} êᵢzᵢ)(Σ_{i∈g} êᵢzᵢ)'`（l×l）。
-/// `two_sls.rs`の`cluster_cov_params`と同型だが小標本補正は無し（モジュール冒頭の
-/// docコメント参照）。`BTreeMap`を使う理由も`two_sls.rs`と同じ
-/// （`engine/src/linear/CLAUDE.md`「踏んだ罠」参照、`HashMap`はグループの反復順序が
-/// 実行のたびに変わりうる）。`groups`が`G>=2`であることは`validate_cluster_groups`
-/// （呼び出し元）で検証済みの前提。
+/// `shared::covariance::cluster_meat`で`êᵢzᵢ`を集計するだけで小標本補正は無し
+/// （モジュール冒頭のdocコメント参照）。グループの反復順は`GroupCodes`のコード順
+/// （キーの辞書順）で、`cluster_meat`と同じ（`engine/src/linear/CLAUDE.md`
+/// 「踏んだ罠」参照、`HashMap`はグループの反復順序が実行のたびに変わりうる）。`groups`が
+/// `G>=2`であることは`validate_cluster_groups`（呼び出し元）で検証済みの前提。
 fn cluster_moment_covariance(
     z: &Mat<f64>,
     residuals: &Mat<f64>,
-    n: usize,
     l: usize,
-    groups: &[String],
+    groups: &GroupCodes,
 ) -> Mat<f64> {
-    let mut group_indices: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
-    for (i, g) in groups.iter().enumerate().take(n) {
-        group_indices.entry(g.as_str()).or_default().push(i);
-    }
-
-    let mut s = Mat::<f64>::zeros(l, l);
-    for indices in group_indices.values() {
-        let mut s_g = vec![0.0_f64; l];
-        for &i in indices {
-            let e = *residuals.get(i, 0);
-            for (a, s_g_a) in s_g.iter_mut().enumerate() {
-                *s_g_a += e * (*z.get(i, a));
-            }
-        }
-        for a in 0..l {
-            for b in 0..l {
-                *s.get_mut(a, b) += s_g[a] * s_g[b];
-            }
-        }
-    }
-    s
-}
-
-/// `weight_type=Hac`の`lags`（`Option<i64>`）を実際に使うラグ数（`usize`）に解決する
-/// （`two_sls.rs`の`resolve_hac_lags`と同じ経験則。エラー型が`IvError`のため独立実装だが、
-/// `IvError::InvalidHacLags`自体は`two_sls.rs`のcov_type=Hacと共有する既存バリアント、
-/// `iv/common.rs`参照）。
-fn resolve_hac_lags(lags: Option<i64>, n: usize) -> Result<usize, IvError> {
-    match lags {
-        Some(l) => {
-            if l < 0 || (l as usize) >= n {
-                return Err(IvError::InvalidHacLags { hac_lags: l, n });
-            }
-            Ok(l as usize)
-        }
-        None => Ok((4.0 * (n as f64 / 100.0).powf(2.0 / 9.0)).floor() as usize),
-    }
-}
-
-/// `weight_type=Hac`の`time_order`から、時系列の昇順に並べたときの行インデックス列を
-/// 求める（`two_sls.rs`の`time_ordering`と同型）。
-///
-/// `partial_cmp().unwrap()`について: `time_order`の値はNaN/無限大を含まないことが
-/// `engine_pybind::column_extraction`側で既に保証されている前提（`two_sls.rs`の
-/// `time_ordering`と同じ理由）。値が互いに異なる（同値は`ValidationError`で弾かれ、
-/// 昇順の位置＝順位で渡される）ことも同様に前提で、この関数自身は同値を検出しない。
-fn time_ordering(time_order: &[f64], n: usize) -> Vec<usize> {
-    debug_assert_eq!(time_order.len(), n);
-    let mut order: Vec<usize> = (0..n).collect();
-    order.sort_by(|&a, &b| time_order[a].partial_cmp(&time_order[b]).unwrap());
-    order
+    cluster_meat(groups, l, |i, a| (*residuals.get(i, 0)) * (*z.get(i, a))).0
 }
 
 /// Newey-West（Bartlettカーネル）によるモーメント分散共分散行列: `two_sls.rs`の
@@ -1065,20 +1041,18 @@ fn hac_moment_covariance(
 /// 対称正定値行列`mat`（`dim`×`dim`）の逆行列を明示的に構築する。モジュール冒頭の
 /// docコメント「標準誤差・検定統計量（cov_type対応）」参照（`two_sls.rs`の`xtx_inverse`と
 /// 同じ考え方だが、`s_used`・`bread`の2箇所で使い回すため独立したヘルパーにした）。
-fn invert_spd(mat: &Mat<f64>, dim: usize, context: &str) -> Result<Mat<f64>, IvError> {
-    let llt = mat
-        .llt(Side::Lower)
-        .map_err(|_| CommonError::ComputationFailed(format!("failed to invert {context}")))?;
+fn invert_spd(mat: &Mat<f64>, dim: usize, failure: CommonError) -> Result<Mat<f64>, IvError> {
+    let llt = mat.llt(Side::Lower).map_err(|_| failure)?;
     Ok(llt.solve(Mat::<f64>::identity(dim, dim)))
 }
 
 /// HC0〜HC3ロバストなモーメント条件の分散共分散行列（cov_type用）: `Σᵢ scaleᵢ² zᵢzᵢ'`
 /// （l×l）。`two_sls.rs`の`hc_cov_params`と同型の自己拡張（`X̂`→`Z`）で、レバレッジは
-/// `Z`（点推定用の`ztz`をそのまま流用）から計算する——**GMM自体の外部参照実装での検証は
-/// 不可能**（R `ivreg`が2SLSのみ対応でGMMには対応していないため、`docs/spec/iv-spec.md`
-/// 4章）。2SLSのHC2/HC3は逆にR `ivreg`+`sandwich::vcovHC`で検証可能なことを実機確認
-/// 済み（`docs/spec/iv-spec.md`4章）だが、GMMは
-/// ivreg非対応という別軸の制約のため対象外のまま。モジュール冒頭のdocコメント
+/// `Z`（点推定用の`ztz`をそのまま流用）から計算する——**GMMのHC2/HC3は外部参照実装での
+/// 検証は不可能**（`linearmodels`の`IVGMM`にもRクロスチェックの`momentfit`にも対応する
+/// 共分散推定が無い、`docs/spec/iv-spec.md`4章）。2SLSのHC2/HC3は逆にR `ivreg`+
+/// `sandwich::vcovHC`で検証可能なことを実機確認済み（`docs/spec/iv-spec.md`4章）だが、
+/// GMMには同等の参照が無いため対象外のまま。モジュール冒頭のdocコメント
 /// 「標準誤差・検定統計量（cov_type対応）」参照。
 ///
 /// **HC1の小標本補正`n/(n-k)`は`l`（全操作変数の数）ではなく`k`（構造方程式の係数の数）を
@@ -1104,7 +1078,11 @@ fn gmm_hc_omega(
             // 境界的な失敗に備えて`Result`のまま扱う（`two_sls.rs`の`xtx_inverse`と同じ
             // 防御的な扱い、`.claude/rules/rust-style.md`「unwrap/expectはプロトタイプ
             // 段階を除き避ける」）。
-            let ztz_inv = invert_spd(ztz, l, "Z'Z for GMM HC2/HC3 leverage")?;
+            let ztz_inv = invert_spd(
+                ztz,
+                l,
+                CommonError::internal("Z'Z could not be factorized for the HC2/HC3 leverage"),
+            )?;
             let zh = z * &ztz_inv; // (n, l)
             Some(
                 (0..n)
@@ -1123,11 +1101,11 @@ fn gmm_hc_omega(
             HcVariant::Hc0 => resid,
             HcVariant::Hc1 => resid * hc1_correction,
             HcVariant::Hc2 => {
-                let h = leverage.as_ref().expect("Hc2はleverage計算済み")[i];
+                let h = leverage.as_ref().expect("leverage is computed for HC2")[i];
                 resid / (1.0 - h).sqrt()
             }
             HcVariant::Hc3 => {
-                let h = leverage.as_ref().expect("Hc3はleverage計算済み")[i];
+                let h = leverage.as_ref().expect("leverage is computed for HC3")[i];
                 resid / (1.0 - h)
             }
         };
@@ -1148,7 +1126,8 @@ enum HcVariant {
 
 /// クラスターロバストなモーメント条件の分散共分散行列（cov_type用）:
 /// `Σ_g (Σ_{i∈g} êᵢzᵢ)(Σ_{i∈g} êᵢzᵢ)' * correction`（l×l）。`two_sls.rs`の
-/// `cluster_cov_params`と同型の自己拡張（`X̂`→`Z`）。点推定用の`cluster_moment_covariance`は
+/// `shared::covariance::cluster_cov_params`（2SLSが呼ぶ共有関数）と同型の自己拡張
+/// （`X̂`→`Z`、集計は`cluster_meat`共有）。点推定用の`cluster_moment_covariance`は
 /// 小標本補正が無いため使い回さない（モジュール冒頭のdocコメント参照）。`groups`が
 /// `G>=2`であることは`validate_cluster_groups`（呼び出し元）で検証済みの前提。
 ///
@@ -1161,32 +1140,10 @@ fn gmm_cluster_omega(
     n: usize,
     k: usize,
     l: usize,
-    groups: &[String],
+    groups: &GroupCodes,
 ) -> Mat<f64> {
-    let mut group_indices: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
-    for (i, g) in groups.iter().enumerate().take(n) {
-        group_indices.entry(g.as_str()).or_default().push(i);
-    }
-    let n_groups = group_indices.len();
-
-    let mut s_hat = Mat::<f64>::zeros(l, l);
-    for indices in group_indices.values() {
-        let mut s_g = vec![0.0_f64; l];
-        for &i in indices {
-            let e = *residuals.get(i, 0);
-            for (a, s_g_a) in s_g.iter_mut().enumerate() {
-                *s_g_a += e * (*z.get(i, a));
-            }
-        }
-        for a in 0..l {
-            for b in 0..l {
-                *s_hat.get_mut(a, b) += s_g[a] * s_g[b];
-            }
-        }
-    }
-
-    let correction =
-        (n_groups as f64 / (n_groups as f64 - 1.0)) * ((n as f64 - 1.0) / ((n - k) as f64));
+    let (s_hat, n_groups) = cluster_meat(groups, l, |i, a| (*residuals.get(i, 0)) * (*z.get(i, a)));
+    let correction = cluster_correction(n_groups, n, k);
     Mat::from_fn(l, l, |i, j| correction * (*s_hat.get(i, j)))
 }
 
@@ -1209,22 +1166,22 @@ fn gmm_wald_chi2_test(
     ensure_well_conditioned_symmetric_matrix(
         &v_slopes,
         df_model,
-        "coefficient covariance submatrix for the GMM Wald test",
+        MatrixKind::CoefficientCovariance,
     )?;
 
-    let llt = v_slopes.llt(Side::Lower).map_err(|_| {
-        CommonError::ComputationFailed(
-            "failed to invert coefficient covariance submatrix for the GMM Wald test".to_string(),
-        )
-    })?;
+    let llt = v_slopes
+        .llt(Side::Lower)
+        .map_err(|_| CommonError::NearSingularMatrix {
+            matrix: MatrixKind::CoefficientCovariance,
+        })?;
     let v_slopes_inv_beta = llt.solve(&beta_slopes);
 
     let wald: f64 = (0..df_model)
         .map(|i| (*beta_slopes.get(i, 0)) * (*v_slopes_inv_beta.get(i, 0)))
         .sum();
 
-    let chi2 = ChiSquared::new(df_model as f64)
-        .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+    let chi2 =
+        ChiSquared::new(df_model as f64).map_err(|e| CommonError::internal(e.to_string()))?;
     let p_value = chi2.sf(wald);
 
     Ok((wald, p_value))
@@ -1233,9 +1190,9 @@ fn gmm_wald_chi2_test(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::CommonError;
     use crate::linear::common::row_time_order;
     use crate::linear::ols::CovType as OlsCovType;
+    use crate::shared::error::CommonError;
 
     /// 2SLSと同じデータ（`x_exog`に実変数を含む、過剰識別）で、`WeightType::Classical`の
     /// GMM点推定が`TwoSlsEstimator`の点推定と厳密に一致することを確認する（モジュール冒頭の
@@ -1288,15 +1245,64 @@ mod tests {
         }
     }
 
-    /// 丁度識別かつ操作変数が内生変数を完全予測する退化ケース（`two_sls.rs`の
-    /// `fit_matches_closed_form_ols_when_instrument_perfectly_predicts_endog`と同じデータ）。
-    /// `weight_type`によらず丁度識別ではGMMの点推定は一致するはず（`docs/spec/iv-spec.md`1.2節）。
-    #[test]
-    fn fit_matches_closed_form_ols_when_just_identified_and_instrument_perfectly_predicts_endog() {
+    /// 丁度識別の小さなデータ（`two_sls.rs`の`just_identified_data`と同じ）。第一段階も構造式も
+    /// 完全フィットにならない。`weight_type`によらず丁度識別ではGMMの点推定は2SLSと一致するはず
+    /// （`docs/spec/iv-spec.md`1.2節）。
+    fn just_identified_input() -> IvInput {
         let z = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-        let x_endog = z.clone();
-        let y: Vec<f64> = x_endog.iter().map(|&x| 1.0 + 2.0 * x).collect();
+        let x_endog = vec![1.2, 1.9, 3.3, 3.8, 5.1];
+        let noise = [0.1, -0.2, 0.15, -0.05, 0.1];
+        let y: Vec<f64> = x_endog
+            .iter()
+            .zip(noise)
+            .map(|(&x, u)| 1.0 + 2.0 * x + u)
+            .collect();
+        IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            &[x_endog],
+            vec!["x_endog".to_string()],
+            &[z],
+            vec!["z".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap()
+    }
 
+    #[test]
+    fn fit_matches_two_sls_when_just_identified() {
+        let gmm = GmmEstimator::fit(
+            just_identified_input(),
+            GmmType::TwoStep {
+                weight: WeightType::Classical,
+            },
+            true,
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+        let two_sls = crate::iv::two_sls::TwoSlsEstimator::fit(
+            just_identified_input(),
+            CovType::Classical,
+            0.95,
+        )
+        .unwrap();
+
+        assert_eq!(gmm.param_names(), ["const", "x_endog"]);
+        for j in 0..2 {
+            assert!((*gmm.params().get(j, 0) - *two_sls.params().get(j, 0)).abs() < 1e-8);
+        }
+    }
+
+    #[test]
+    fn fit_returns_perfect_fit_when_the_structural_residuals_are_zero() {
+        // 構造式が厳密に成り立つと、初期推定の残差が全て0で重み行列が0になる。後段の逆行列が
+        // 特異になる前に、原因の分かる完全フィットとして止める。
+        let z = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let x_endog = vec![1.2, 1.9, 3.3, 3.8, 5.1];
+        let y: Vec<f64> = x_endog.iter().map(|&x| 1.0 + 2.0 * x).collect();
         let input = IvInput::from_columns(
             &y,
             &[],
@@ -1310,7 +1316,40 @@ mod tests {
         )
         .unwrap();
 
-        let estimator = GmmEstimator::fit(
+        let result = GmmEstimator::fit(
+            input,
+            GmmType::TwoStep {
+                weight: WeightType::Robust,
+            },
+            true,
+            CovType::Classical,
+            0.95,
+        );
+
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::Common(CommonError::PerfectFit)
+        );
+    }
+
+    #[test]
+    fn fit_returns_outcome_constant_for_a_constant_outcome() {
+        let z = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let x_endog = vec![1.2, 1.9, 3.3, 3.8, 5.1];
+        let input = IvInput::from_columns(
+            &[3.0; 5],
+            &[],
+            vec![],
+            &[x_endog],
+            vec!["x_endog".to_string()],
+            &[z],
+            vec!["z".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = GmmEstimator::fit(
             input,
             GmmType::TwoStep {
                 weight: WeightType::Classical,
@@ -1318,11 +1357,12 @@ mod tests {
             true,
             CovType::Classical,
             0.95,
-        )
-        .unwrap();
-        assert_eq!(estimator.param_names(), ["const", "x_endog"]);
-        assert!((*estimator.params().get(0, 0) - 1.0).abs() < 1e-8);
-        assert!((*estimator.params().get(1, 0) - 2.0).abs() < 1e-8);
+        );
+
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::Common(CommonError::OutcomeConstant)
+        );
     }
 
     #[test]
@@ -1602,7 +1642,9 @@ mod tests {
         );
         assert_eq!(
             result.unwrap_err(),
-            IvError::Common(CommonError::MissingClusterColumn)
+            IvError::Common(CommonError::MissingClusterColumn {
+                setting: ClusterSetting::GmmWeightType,
+            })
         );
     }
 
@@ -1639,11 +1681,12 @@ mod tests {
         );
         assert_eq!(
             result.unwrap_err(),
-            IvError::InvalidHacLags { hac_lags: -1, n }
+            IvError::Common(CommonError::InvalidHacLags { hac_lags: -1, n })
         );
     }
 
-    /// 操作変数が完全な線形従属（`z2 = 2*z1`）だと`Z'Z`が特異になり`ComputationFailed`
+    /// 操作変数が完全な線形従属（`z2 = 2*z1`）だと`Z'Z`が特異になり
+    /// `CommonError::NearSingularMatrix { matrix: GmmWeight }`（`MATRIX_NEAR_SINGULAR`）
     /// になることを確認する（`.claude/rules/testing-policy.md`「テストの3系統」の
     /// `ComputationError`パス）。
     #[test]
@@ -1676,9 +1719,9 @@ mod tests {
         );
         assert_eq!(
             result.unwrap_err(),
-            IvError::Common(CommonError::ComputationFailed(
-                "failed to invert GMM weight matrix S (Z'Z or moment covariance)".to_string()
-            ))
+            IvError::Common(CommonError::NearSingularMatrix {
+                matrix: MatrixKind::GmmWeight
+            })
         );
     }
 
@@ -1710,7 +1753,7 @@ mod tests {
             input,
             GmmType::TwoStep {
                 weight: WeightType::Cluster {
-                    groups: Some(groups),
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
                 },
             },
             true,
@@ -1721,14 +1764,19 @@ mod tests {
 
     /// 過剰識別（l=3: const, z1, z2、k=2）では`S`は`rank(S) <= G`のため`G < l`で構造的に
     /// 特異になり、`fit()`冒頭で`InsufficientClustersForWeightMatrix`
-    /// （`ValidationError`）として弾く（従来は`ComputationFailed`。
+    /// （`ValidationError`）として弾く（行列計算に入ると`NearSingularMatrix`の
+    /// `ComputationError`になる。
     /// `fit_computes_cluster_weighted_estimate_matching_manual_formula`のdocコメント参照）。
     #[test]
     fn fit_returns_insufficient_clusters_for_weight_matrix_when_overidentified_and_g_less_than_l() {
         let result = fit_cluster_weighted(2, 2);
         assert_eq!(
             result.unwrap_err(),
-            IvError::InsufficientClustersForWeightMatrix { g: 2, l: 3 }
+            IvError::InsufficientClustersForWeightMatrix {
+                g: 2,
+                l: 3,
+                min_clusters: 3
+            }
         );
     }
 
@@ -1746,7 +1794,11 @@ mod tests {
         let result = fit_cluster_weighted(1, 2);
         assert_eq!(
             result.unwrap_err(),
-            IvError::InsufficientClustersForWeightMatrix { g: 2, l: 2 }
+            IvError::InsufficientClustersForWeightMatrix {
+                g: 2,
+                l: 2,
+                min_clusters: 3
+            }
         );
     }
 
@@ -1969,7 +2021,9 @@ mod tests {
         );
         assert_eq!(
             result.unwrap_err(),
-            IvError::Common(CommonError::MissingClusterColumn)
+            IvError::Common(CommonError::MissingClusterColumn {
+                setting: ClusterSetting::GmmWeightType,
+            })
         );
     }
 
@@ -1996,7 +2050,7 @@ mod tests {
             input,
             GmmType::TwoStep {
                 weight: WeightType::Cluster {
-                    groups: Some(groups),
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
                 },
             },
             true,
@@ -2005,7 +2059,10 @@ mod tests {
         );
         assert_eq!(
             result.unwrap_err(),
-            IvError::Common(CommonError::InsufficientClusters { g: 1 })
+            IvError::Common(CommonError::InsufficientClusters {
+                setting: ClusterSetting::GmmWeightType,
+                g: 1
+            })
         );
     }
 
@@ -2041,7 +2098,7 @@ mod tests {
             input,
             GmmType::TwoStep {
                 weight: WeightType::Cluster {
-                    groups: Some(groups.clone()),
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
                 },
             },
             true,
@@ -2147,7 +2204,7 @@ mod tests {
         );
         assert_eq!(
             result.unwrap_err(),
-            IvError::InvalidHacLags { hac_lags: -1, n }
+            IvError::Common(CommonError::InvalidHacLags { hac_lags: -1, n })
         );
 
         let result = GmmEstimator::fit(
@@ -2164,10 +2221,10 @@ mod tests {
         );
         assert_eq!(
             result.unwrap_err(),
-            IvError::InvalidHacLags {
+            IvError::Common(CommonError::InvalidHacLags {
                 hac_lags: n as i64,
                 n
-            }
+            })
         );
     }
 
@@ -2652,24 +2709,8 @@ mod tests {
     /// 同じ扱い）。
     #[test]
     fn fit_sets_hansen_j_statistic_to_none_when_just_identified() {
-        let z = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-        let x_endog = z.clone();
-        let y: Vec<f64> = x_endog.iter().map(|&x| 1.0 + 2.0 * x).collect();
-        let input = IvInput::from_columns(
-            &y,
-            &[],
-            vec![],
-            &[x_endog],
-            vec!["x_endog".to_string()],
-            &[z],
-            vec!["z".to_string()],
-            true,
-            "y".to_string(),
-        )
-        .unwrap();
-
         let estimator = GmmEstimator::fit(
-            input,
+            just_identified_input(),
             GmmType::TwoStep {
                 weight: WeightType::Classical,
             },
@@ -3298,6 +3339,151 @@ mod tests {
     /// `cov_type=Cluster`のSEを、小標本補正`(G/(G-1))((n-1)/(n-k))`込みの手計算
     /// サンドイッチ公式と数値照合する（`fit_computes_cluster_weighted_estimate_matching_
     /// manual_formula`と同じグループ構成、4グループ）。
+    fn labelled_groups(n: usize, modulus: usize, prefix: &str) -> Vec<String> {
+        (0..n).map(|i| format!("{prefix}{}", i % modulus)).collect()
+    }
+
+    #[test]
+    fn validate_weight_type_returns_the_groups_only_for_cluster() {
+        let n = 16;
+        let cluster = WeightType::Cluster {
+            groups: Some(GroupCodes::from_labels_without_keys(&labelled_groups(
+                n, 4, "a",
+            ))),
+        };
+        let codes = validate_weight_type(&cluster, n, 2, 3)
+            .unwrap()
+            .expect("Cluster weight must expose its groups");
+        assert_eq!(codes.nobs(), n);
+        assert_eq!(codes.n_groups(), 4);
+
+        for weight in [WeightType::Classical, WeightType::Robust] {
+            assert!(validate_weight_type(&weight, n, 2, 3).unwrap().is_none());
+        }
+    }
+
+    /// `cov_type`と`weight_type`が同じ`fit()`で別々のグルーピングを使うとき、それぞれが
+    /// 自分のコードで計算される（片方のコードをもう片方に流用していない）ことの確認。
+    /// 点推定は`cov_type`に依存しないので`cov_type=Classical`のときとビット一致し、標準誤差は
+    /// 分割を入れ替えると変わる。ラベルだけ付け替えた同じ分割では（ラベルの辞書順が変わり
+    /// 加算順が変わるため丸め誤差の範囲で）一致する。
+    #[test]
+    fn fit_uses_separate_codes_for_cov_type_and_weight_type_clusters() {
+        let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
+        let n = y.len();
+        let weight_groups = labelled_groups(n, 4, "a");
+        let cov_groups = labelled_groups(n, 5, "b");
+        let fit = |weight: &[String], cov: Option<&[String]>| {
+            let input = IvInput::from_columns(
+                &y,
+                &[],
+                vec![],
+                std::slice::from_ref(&x_endog),
+                vec!["endog1".to_string()],
+                &[z1.clone(), z2.clone()],
+                vec!["z1".to_string(), "z2".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap();
+            GmmEstimator::fit(
+                input,
+                GmmType::TwoStep {
+                    weight: WeightType::Cluster {
+                        groups: Some(GroupCodes::from_labels_without_keys(weight)),
+                    },
+                },
+                true,
+                match cov {
+                    Some(groups) => CovType::Cluster {
+                        groups: Some(GroupCodes::from_labels_without_keys(groups)),
+                    },
+                    None => CovType::Classical,
+                },
+                0.95,
+            )
+            .unwrap()
+        };
+
+        let mixed = fit(&weight_groups, Some(&cov_groups));
+        let classical_cov = fit(&weight_groups, None);
+        let swapped = fit(&cov_groups, Some(&weight_groups));
+        let same = fit(&weight_groups, Some(&weight_groups));
+        let relabelled: Vec<String> = cov_groups.iter().map(|g| format!("z{g}")).collect();
+        let mixed_relabelled = fit(&weight_groups, Some(&relabelled));
+
+        for j in 0..mixed.params().nrows() {
+            assert_eq!(
+                mixed.params().get(j, 0).to_bits(),
+                classical_cov.params().get(j, 0).to_bits()
+            );
+            let se = *mixed.std_errors().get(j, 0);
+            assert!(
+                (se - *mixed_relabelled.std_errors().get(j, 0)).abs() < 1e-10 * se,
+                "relabelling the cov_type clusters must not change the standard error"
+            );
+            assert_ne!(
+                se.to_bits(),
+                same.std_errors().get(j, 0).to_bits(),
+                "cov_type clusters must not be replaced by the weight_type clusters"
+            );
+            assert_ne!(
+                se.to_bits(),
+                swapped.std_errors().get(j, 0).to_bits(),
+                "swapping the two groupings must change the standard error"
+            );
+        }
+    }
+
+    /// 旧実装（`String`ラベルの`BTreeMap`で集計）をそのまま残したoracleと、
+    /// `cluster_moment_covariance`（コードで行を1回走査して集計）がビット単位で一致する。
+    #[test]
+    fn cluster_moment_covariance_is_bit_identical_to_the_string_keyed_btreemap_implementation() {
+        let n = 300;
+        let l = 4;
+        let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let labels: Vec<String> = (0..n)
+            .map(|_| ((next() * 29.0) as usize).to_string())
+            .collect();
+        let z = Mat::from_fn(n, l, |_, _| next() * 20.0 - 10.0);
+        let residuals = Mat::from_fn(n, 1, |_, _| next() * 4.0 - 2.0);
+
+        let mut by_label: std::collections::BTreeMap<&str, Vec<usize>> =
+            std::collections::BTreeMap::new();
+        for (i, label) in labels.iter().enumerate() {
+            by_label.entry(label.as_str()).or_default().push(i);
+        }
+        let mut expected = Mat::<f64>::zeros(l, l);
+        for rows in by_label.values() {
+            let mut s_g = vec![0.0_f64; l];
+            for &i in rows {
+                let e = *residuals.get(i, 0);
+                for (a, s_g_a) in s_g.iter_mut().enumerate() {
+                    *s_g_a += e * (*z.get(i, a));
+                }
+            }
+            for a in 0..l {
+                for b in 0..l {
+                    *expected.get_mut(a, b) += s_g[a] * s_g[b];
+                }
+            }
+        }
+
+        let codes = GroupCodes::from_labels_without_keys(&labels);
+        let actual = cluster_moment_covariance(&z, &residuals, l, &codes);
+        for a in 0..l {
+            for b in 0..l {
+                assert_eq!(actual.get(a, b).to_bits(), expected.get(a, b).to_bits());
+            }
+        }
+    }
+
     #[test]
     fn fit_computes_cluster_std_errors_matching_manual_sandwich_formula() {
         let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
@@ -3326,7 +3512,7 @@ mod tests {
             },
             true,
             CovType::Cluster {
-                groups: Some(groups.clone()),
+                groups: Some(GroupCodes::from_labels_without_keys(&groups)),
             },
             0.95,
         )
@@ -3560,7 +3746,9 @@ mod tests {
         );
         assert_eq!(
             result.unwrap_err(),
-            IvError::Common(CommonError::MissingClusterColumn)
+            IvError::Common(CommonError::MissingClusterColumn {
+                setting: ClusterSetting::CovType,
+            })
         );
     }
 
@@ -3591,7 +3779,7 @@ mod tests {
             },
             true,
             CovType::Cluster {
-                groups: Some(groups),
+                groups: Some(GroupCodes::from_labels_without_keys(&groups)),
             },
             0.95,
         );
@@ -3635,7 +3823,7 @@ mod tests {
             },
             true,
             CovType::Cluster {
-                groups: Some(groups),
+                groups: Some(GroupCodes::from_labels_without_keys(&groups)),
             },
             0.95,
         );
@@ -3678,7 +3866,7 @@ mod tests {
         );
         assert_eq!(
             result.unwrap_err(),
-            IvError::InvalidHacLags { hac_lags: -1, n }
+            IvError::Common(CommonError::InvalidHacLags { hac_lags: -1, n })
         );
     }
 
@@ -3843,6 +4031,83 @@ mod tests {
         );
     }
 
+    /// 構造方程式は推定できる（`n > k`）が全操作変数の数`l`以下の観測数なら、
+    /// `InsufficientObservationsForFirstStage`で拒否する（`n < l`では`Z'Z`が特異、
+    /// `n = l`では`W₀ = (Z'Z)⁻¹`のGMMがOLSへ縮退する）。`2sls`と同じ検証を共有する。
+    #[test]
+    fn fit_returns_insufficient_observations_for_first_stage_when_n_is_at_most_l() {
+        // n=3、k=2（切片+endog1）、l=3（切片+z1+z2）。
+        let y = vec![1.0, 2.0, 4.0];
+        let x_endog = vec![1.0, 2.5, 2.0];
+        let z = vec![vec![1.0, 2.0, 4.0], vec![2.0, 1.0, 5.0]];
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            std::slice::from_ref(&x_endog),
+            vec!["endog1".to_string()],
+            &z,
+            vec!["z1".to_string(), "z2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = GmmEstimator::fit(
+            input,
+            GmmType::TwoStep {
+                weight: WeightType::Classical,
+            },
+            true,
+            CovType::Classical,
+            0.95,
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::InsufficientObservationsForFirstStage { n: 3, l: 3 }
+        );
+    }
+
+    /// `n < l`（`k < n`）でも同じ専用エラーで拒否する（検証が無ければ`Z'Z`が特異になり
+    /// `NearSingularMatrix`の`ComputationError`になる経路）。
+    #[test]
+    fn fit_returns_insufficient_observations_for_first_stage_when_n_is_below_l() {
+        // n=3、k=2（切片+endog1）、l=4（切片+z1..z3）。
+        let y = vec![1.0, 2.0, 4.0];
+        let x_endog = vec![1.0, 2.5, 2.0];
+        let z = vec![
+            vec![1.0, 2.0, 4.0],
+            vec![2.0, 1.0, 5.0],
+            vec![0.5, 3.0, 1.0],
+        ];
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            std::slice::from_ref(&x_endog),
+            vec!["endog1".to_string()],
+            &z,
+            vec!["z1".to_string(), "z2".to_string(), "z3".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = GmmEstimator::fit(
+            input,
+            GmmType::TwoStep {
+                weight: WeightType::Classical,
+            },
+            true,
+            CovType::Classical,
+            0.95,
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::InsufficientObservationsForFirstStage { n: 3, l: 4 }
+        );
+    }
+
     /// `gmm_wald_chi2_test`（F統計量、常にロバストWald検定・χ²）を、`GmmEstimator`とは
     /// 独立に手計算したオラクルと数値照合する（rust-reviewerの指摘で追加。他の新規ロジック
     /// と同水準の検証にする）。
@@ -3892,6 +4157,67 @@ mod tests {
             "got {}, expected {}",
             estimator.wald_p_value(),
             expected_p
+        );
+    }
+
+    /// `OneStep`は`weight_type`を持たないため（`weight_cluster_codes`は
+    /// `None`）、`cov_type=Cluster`のグループは`validate_structural_cluster_count`だけで検証
+    /// され、`cov_type`から借りたコードで集計される。この経路が、点推定は`cov_type`に依らず、
+    /// 標準誤差はクラスター割り当てだけに依存し（ラベルの付け替えで変わらない）、
+    /// 欠落・長さ不一致のコードは`Err`になることを確認する。
+    #[test]
+    fn fit_with_one_step_gmm_uses_the_cov_type_cluster_groups_only() {
+        let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
+        let n = y.len();
+        let groups = labelled_groups(n, 5, "c");
+        let fit = |cov_type: CovType| {
+            let input = IvInput::from_columns(
+                &y,
+                &[],
+                vec![],
+                std::slice::from_ref(&x_endog),
+                vec!["endog1".to_string()],
+                &[z1.clone(), z2.clone()],
+                vec!["z1".to_string(), "z2".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap();
+            GmmEstimator::fit(input, GmmType::OneStep, true, cov_type, 0.95)
+        };
+        let cluster = |labels: &[String]| CovType::Cluster {
+            groups: Some(GroupCodes::from_labels_without_keys(labels)),
+        };
+
+        let classical = fit(CovType::Classical).unwrap();
+        let clustered = fit(cluster(&groups)).unwrap();
+        let relabelled_groups: Vec<String> = groups.iter().map(|g| format!("z{g}")).collect();
+        let relabelled = fit(cluster(&relabelled_groups)).unwrap();
+
+        for j in 0..clustered.params().nrows() {
+            // 点推定は`cov_type`に依存しない。
+            assert_eq!(
+                clustered.params().get(j, 0).to_bits(),
+                classical.params().get(j, 0).to_bits()
+            );
+            let se = *clustered.std_errors().get(j, 0);
+            assert_ne!(se.to_bits(), classical.std_errors().get(j, 0).to_bits());
+            // ラベルの付け替え（コードの順序は同じ）では標準誤差は変わらない。
+            assert!((se - *relabelled.std_errors().get(j, 0)).abs() < 1e-10 * se);
+        }
+
+        assert_eq!(
+            fit(CovType::Cluster { groups: None }).unwrap_err(),
+            IvError::Common(CommonError::MissingClusterColumn {
+                setting: ClusterSetting::CovType,
+            })
+        );
+        assert_eq!(
+            fit(cluster(&groups[..n - 1])).unwrap_err(),
+            IvError::Common(CommonError::ClusterDimensionMismatch {
+                groups_rows: n - 1,
+                n
+            })
         );
     }
 

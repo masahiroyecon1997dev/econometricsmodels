@@ -32,6 +32,12 @@ import polars as pl
 
 from .. import _lib
 from .._lib import TobitOptions
+from .._results_utils import (
+    by_param,
+    conf_int_by_param,
+    marginal_effect_rows,
+    params_table_rows,
+)
 
 __all__ = ["Tobit", "TobitOptions", "TobitResults"]
 
@@ -99,21 +105,30 @@ class Tobit:
 class TobitResults:
     """Tobit estimation results.
 
-    Array-valued properties (`params`, `std_errors`, etc.) are exposed
-    as dictionaries keyed by coefficient name (for O(1) lookup of a
-    single parameter). They include an entry for `"sigma"` (the error
-    term's standard deviation) in addition to the regression
-    coefficients, since `_lib.TobitResult` reports `sigma` alongside
-    `beta` in a unified `(k+1)`-length representation (see
-    `engine_pybind/src/nonlinear/tobit.rs`, `TobitResult`). Use
-    `coef_table()` for a row-oriented listing
-    (`docs/spec/nonlinear-common.md` section 5).
+    Coefficient-level properties (`params`, `std_errors`, etc.) are
+    dictionaries keyed by coefficient name, so one coefficient is
+    `result.params["x1"]`. They include an entry for `"sigma"` (the
+    standard deviation of the error term) after the regression
+    coefficients. Use `params_table()` for a row-oriented listing (a
+    list of dicts), for example for a JSON response.
 
-    `marginal_effects()`, `predict()`, and `censoring_fit_check()` are
-    provided as separate methods rather than fields on this class (they
-    depend on a representative point / prediction target not fixed at
-    `fit()` time; see `docs/spec/nonlinear-common.md`
-    section 6).
+    Fields by purpose:
+
+    - Coefficients and `sigma`: `params`, `std_errors`, `test_stats`,
+      `p_values`, `conf_int`; the names in order: `param_names`;
+      `sigma` on its own: `sigma`.
+    - Which distribution the tests use: `stat_dist` (always
+      `"normal"`), `stat_df`.
+    - Overall Wald test: `wald_statistic`, `wald_p_value`, `wald_df`,
+      `wald_dist`.
+    - Fit: `log_likelihood`, `aic`, `bic`.
+    - Censoring bounds used: `lower`, `upper`.
+    - Optimizer: `solver`, `converged`, `n_iter`.
+    - Sample and model size: `n_obs`, `df_model`, `df_resid`,
+      `dep_var_name`.
+    - Settings echoed back: `cov_type`.
+    - Methods: `predict()`, `augment()`, `marginal_effects()` (all
+      take a `target`), `censoring_fit_check()`, `params_table()`.
 
     Args:
         raw: The estimation result object returned by `_lib.fit_tobit`
@@ -141,21 +156,20 @@ class TobitResults:
     @property
     def params(self) -> dict[str, float]:
         """Coefficient name to coefficient value (includes `"sigma"`)."""
-        return dict(zip(self._raw.param_names, self._raw.params))
+        return by_param(self._raw.param_names, self._raw.params)
 
     @property
     def std_errors(self) -> dict[str, float]:
         """Coefficient name to standard error (includes `"sigma"`)."""
-        return dict(zip(self._raw.param_names, self._raw.std_errors))
+        return by_param(self._raw.param_names, self._raw.std_errors)
 
     @property
     def test_stats(self) -> dict[str, float]:
         """Coefficient name to z-statistic (includes `"sigma"`).
 
-        Tobit uses a z-test (standard normal), not a t-test (see
-        `docs/spec/nonlinear-common.md` section 4).
+        Tobit uses a z-test (standard normal), not a t-test.
         """
-        return dict(zip(self._raw.param_names, self._raw.test_stats))
+        return by_param(self._raw.param_names, self._raw.test_stats)
 
     @property
     def stat_dist(self) -> Literal["t", "normal"]:
@@ -174,20 +188,13 @@ class TobitResults:
     @property
     def p_values(self) -> dict[str, float]:
         """Coefficient name to two-sided p-value (includes `"sigma"`)."""
-        return dict(zip(self._raw.param_names, self._raw.p_values))
+        return by_param(self._raw.param_names, self._raw.p_values)
 
     @property
     def conf_int(self) -> dict[str, tuple[float, float]]:
         """Coefficient name to confidence interval `(lower, upper)`
         (includes `"sigma"`)."""
-        return {
-            name: (lower, upper)
-            for name, lower, upper in zip(
-                self._raw.param_names,
-                self._raw.conf_lower,
-                self._raw.conf_upper,
-            )
-        }
+        return conf_int_by_param(self._raw)
 
     @property
     def sigma(self) -> float:
@@ -288,45 +295,26 @@ class TobitResults:
         `TobitOptions.upper`). `None` means no censoring from above."""
         return self._raw.upper
 
-    def coef_table(self) -> list[dict[str, float | str]]:
+    def params_table(self) -> list[dict[str, float | str]]:
         """Row-oriented summary table of the coefficients.
 
         Shaped to be usable almost as-is in a REST API response. Same
-        shape as `LogitResults.coef_table()`. Includes a row for
+        shape as `LogitResults.params_table()`. Includes a row for
         `"sigma"` in addition to the regression coefficients (see
         `params`).
 
         Returns:
             A list of dictionaries, one per coefficient (including
-            `"sigma"`). Keys are `param`, `coef`, `std_err`, `test_stat`,
+            `"sigma"`). Keys are `param_name`, `param`, `std_error`, `test_stat`,
             `p_value`, `conf_lower`, `conf_upper`.
         """
-        return [
-            {
-                "param": name,
-                "coef": coef,
-                "std_err": se,
-                "test_stat": z,
-                "p_value": p,
-                "conf_lower": lower,
-                "conf_upper": upper,
-            }
-            for name, coef, se, z, p, lower, upper in zip(
-                self._raw.param_names,
-                self._raw.params,
-                self._raw.std_errors,
-                self._raw.test_stats,
-                self._raw.p_values,
-                self._raw.conf_lower,
-                self._raw.conf_upper,
-            )
-        ]
+        return params_table_rows(self._raw)
 
     def predict(
         self,
         new_data: pl.DataFrame | None = None,
         target: str = "expected_observed",
-    ) -> list[dict[str, float]]:
+    ) -> list[float]:
         """Predicted values for `target`, on the training data or `new_data`.
 
         Args:
@@ -342,24 +330,39 @@ class TobitResults:
                 `"expected_latent"` (`E[y*|x] = x'β`),
                 `"expected_observed"` (default; `E[y|x]`, the
                 censoring-adjusted conditional expectation, directly
-                comparable to the observed `y`), or
-                `"prob_uncensored"` (`P(uncensored|x)`).
+                comparable to the observed `y`),
+                `"prob_uncensored"` (`P(uncensored|x)`), or
+                `"expected_uncensored"` (`E[y|lower<y<upper,x]`, the
+                expectation restricted to the uncensored region; with
+                a single lower bound of 0 this is `E[y|y>0,x]`).
                 Case-insensitive. Independent of `new_data`: the same
-                three targets are available whether predicting on the
-                training data or new data.
+                four targets are available whether predicting on the
+                training data or new data, and for left-, right- and
+                two-sided censoring.
+
+                The last three are related by `E[y|x] = lower *
+                P(y*<=lower|x) + upper * P(y*>=upper|x) +
+                P(uncensored|x) * E[y|lower<y<upper,x]`, where `y*` is
+                the latent variable; the term of a bound that does not
+                exist is dropped (with a single lower bound of 0 this is
+                `E[y|x] = P(y>0|x) * E[y|y>0,x]`).
 
         Returns:
-            Row-oriented predictions, one dict per observation. Each
-            dict has a single key, `"predicted"`.
+            Predicted values of `target`, one per observation, in
+            row order.
 
         Raises:
-            ValidationError: `target` is not one of the three known
+            ValidationError: `target` is not one of the four known
                 values, or `new_data` is missing a required `x`
                 column, or a column contains missing/NaN/infinite
                 values. A subclass of `ValueError`.
+            ComputationError: `target="expected_uncensored"` with a
+                two-sided censoring model whose uncensored interval is
+                narrower than 1% of the estimated `sigma` (the
+                conditional expectation is not computable reliably).
+                A subclass of `RuntimeError`.
         """
-        raw = self._raw.predict(new_data, target)
-        return [{"predicted": p} for p in raw]
+        return self._raw.predict(new_data, target)
 
     def augment(
         self,
@@ -370,10 +373,9 @@ class TobitResults:
 
         Same `target`/`new_data` semantics as `predict()`, but returns
         a polars DataFrame (the training data, or `new_data` when
-        given, plus a new predicted-value column) instead of a
-        row-oriented list. See `OLSResults.augment()` for the
-        project's general policy on this DataFrame-returning
-        exception.
+        given, plus a new predicted-value column) instead of a plain
+        list. See `OLSResults.augment()` for the project's general
+        policy on this DataFrame-returning exception.
 
         Like Logit/Probit's fixed `"predicted_probability"` column, the
         appended column here has a `predicted_` prefix and is named `"predicted_{target}"`, using
@@ -398,6 +400,7 @@ class TobitResults:
             ValidationError: Same as `predict()`, or the source data
                 already has a column named `"predicted_{target}"`
                 (which would otherwise be silently overwritten).
+            ComputationError: Same as `predict()`.
         """
         return self._raw.augment(new_data, target)
 
@@ -411,8 +414,7 @@ class TobitResults:
 
         Unlike Logit/Probit, this is Tobit's own implementation (not
         the shared `dydx_and_jacobian` pattern) because the formula
-        differs per `target` (see `docs/spec/nonlinear-common.md`
-        section 6). Independent of the `confidence_level`
+        differs per `target`. Independent of the `confidence_level`
         used in `fit()` (may differ from it). The constant term
         (intercept) is excluded from the output.
 
@@ -422,46 +424,27 @@ class TobitResults:
                 marginal effects), `"mean"`, or `"median"`.
                 Case-insensitive.
             target: Which quantity's marginal effect to compute. Same
-                three values as `predict()`. Case-insensitive.
+                four values as `predict()`. Case-insensitive.
             confidence_level: Confidence level for the confidence
                 interval, in the range (0, 1). Defaults to 0.95.
 
         Returns:
             A list of dictionaries, one per explanatory variable
-            (excluding the intercept). Keys are `param`, `effect`,
-            `std_err`, `test_stat`, `p_value`, `conf_lower`, `conf_upper` (see
-            `docs/spec/nonlinear-common.md` section 6). `test_stat` is
+            (excluding the intercept). Keys are `param_name`, `effect`,
+            `std_error`, `test_stat`, `p_value`, `conf_lower`, `conf_upper`. `test_stat` is
             always a z-statistic (normal distribution). `effect` is
             the marginal effect estimate (corresponds to `dy/dx` in
             Stata's `margins, dydx(*)` and statsmodels).
 
         Raises:
             ValidationError: `at` is not one of `"overall"`, `"mean"`,
-                `"median"`, `target` is not one of the three known
+                `"median"`, `target` is not one of the four known
                 values, or `confidence_level` is out of range. A
                 subclass of `ValueError`.
+            ComputationError: Same as `predict()`.
         """
         raw = self._raw.marginal_effects(at, target, confidence_level)
-        return [
-            {
-                "param": name,
-                "effect": effect,
-                "std_err": se,
-                "test_stat": z,
-                "p_value": p,
-                "conf_lower": lower,
-                "conf_upper": upper,
-            }
-            for name, effect, se, z, p, lower, upper in zip(
-                raw.param_names,
-                raw.effect,
-                raw.std_errors,
-                raw.test_stats,
-                raw.p_values,
-                raw.conf_lower,
-                raw.conf_upper,
-            )
-        ]
+        return marginal_effect_rows(raw)
 
     def censoring_fit_check(self) -> list[dict[str, float | str]]:
         """Censoring goodness-of-fit check.
@@ -471,7 +454,7 @@ class TobitResults:
         training observations exactly at that boundary) against the
         model-implied average probability. Replaces Logit/Probit's
         `pred_table()`, which is not meaningful for Tobit's continuous
-        `y` (`docs/spec/nonlinear-common.md` section 6). A direction is
+        `y`. A direction is
         omitted from the result when the corresponding
         `TobitOptions.lower`/`upper` was `None` (that direction has no
         censoring).

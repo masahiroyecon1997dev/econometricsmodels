@@ -1,0 +1,70 @@
+name: Check cargo tool updates
+
+# Dependabotは`.devcontainer/Dockerfile`の`cargo install`行・`ARG`値や、ワークフローの
+# `tool: <crate>@<版>`を扱えないため、ピン留めしたcargo開発ツールの更新と、
+# DockerfileとCIのピンの食い違いをここで定期確認する（詳細は docs/spec/ci-cd-notes.md）。
+# 更新があればIssueを自動起票（既存の未クローズIssueがあれば本文を更新）し、
+# すべて最新かつ一致したら自動でクローズする。
+on:
+  schedule:
+    - cron: "0 0 * * 1" # 毎週月曜 00:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: check-cargo-tool-updates
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check pinned cargo dev tools
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ISSUE_TITLE: "devcontainer: cargo dev tool updates available"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # 更新・食い違いありのとき終了コード1でreport.mdを書き出す（2以上はスクリプト自体の異常）。
+      - name: Compare pinned versions with crates.io
+        id: check
+        run: |
+          set +e
+          python3 .github/scripts/check_cargo_tool_updates.py --output report.md
+          code=$?
+          set -e
+          if [ "$code" -gt 1 ]; then
+            exit "$code"
+          fi
+          echo "outdated=$code" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update the tracking issue
+        if: steps.check.outputs.outdated == '1'
+        run: |
+          number=$(gh issue list --state open --label dependencies \
+            --json number,title \
+            --jq "map(select(.title == env.ISSUE_TITLE)) | .[0].number // empty")
+          if [ -n "$number" ]; then
+            gh issue edit "$number" --body-file report.md
+            echo "Updated issue #$number" >> "$GITHUB_STEP_SUMMARY"
+          else
+            gh issue create --title "$ISSUE_TITLE" \
+              --label dependencies --label setup \
+              --body-file report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Close the tracking issue when everything is up to date
+        if: steps.check.outputs.outdated == '0'
+        run: |
+          number=$(gh issue list --state open --label dependencies \
+            --json number,title \
+            --jq "map(select(.title == env.ISSUE_TITLE)) | .[0].number // empty")
+          if [ -n "$number" ]; then
+            gh issue close "$number" \
+              --comment "All pinned cargo dev tools are up to date and the Dockerfile and CI pins agree."
+          fi

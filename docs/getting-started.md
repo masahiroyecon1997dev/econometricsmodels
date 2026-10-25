@@ -1,8 +1,18 @@
 # Getting Started
 
-## OLS (Ordinary Least Squares)
+econometricsmodels takes a polars DataFrame and column names, and returns a result object. Every estimator is used the same way:
 
-Pass the column names of the dependent variable (`y`) and independent variables (`x`), along with the polars DataFrame to estimate on, to `OLS`, then call `.fit()`.
+1. Create the model with the data, the column names and, optionally, an options object.
+2. Call `.fit()`. All validation happens here, and invalid input raises an error instead of being silently repaired.
+3. Read the result: attributes such as `params` and `std_errors`, or methods such as `predict()`.
+
+```bash
+pip install econometricsmodels
+```
+
+## A first regression: OLS
+
+Pass the data, the dependent variable `y` (one column name) and the independent variables `x` (a list of column names).
 
 ```python
 import polars as pl
@@ -22,338 +32,95 @@ print(result.std_errors)  # {"const": ..., "x1": ...}
 print(result.r_squared)
 ```
 
-With `include_intercept` (default `True`), a constant term (`const`) is automatically added to the design matrix, separate from the columns specified in `x`.
-
-## Switching the type of standard error
-
-Setting `cov_type` on `OLSOptions` lets you switch to heteroskedasticity-robust standard errors (HC0-HC3), cluster-robust standard errors, or HAC (Newey-West) standard errors.
+A constant (`const`) is added automatically; there is no formula string. Estimation settings go in an options object:
 
 ```python
-from econometricsmodels import OLS, OLSOptions
+from econometricsmodels import OLSOptions
 
-# Heteroskedasticity-robust standard errors (HC1)
-options = OLSOptions(cov_type="hc1")
-result = OLS(df, y="y", x=["x1"], options=options).fit()
-
-# Cluster-robust standard errors (specify a column name from data)
-options = OLSOptions(cov_type="cluster", cluster="group_id")
-result = OLS(df, y="y", x=["x1"], options=options).fit()
-
-# HAC (Newey-West) standard errors: name the column that gives the time order.
-# The row order is never assumed, so add an index column if the rows are already sorted.
-options = OLSOptions(cov_type="hac", hac_time="period")
+options = OLSOptions(cov_type="hc1")  # heteroskedasticity-robust standard errors
 result = OLS(df, y="y", x=["x1"], options=options).fit()
 ```
 
-When `hac_lags` is omitted, the number of lags is chosen automatically as `floor(4 * (n / 100) ** (2 / 9))`. The lag count actually used (the explicit `hac_lags` or the automatic value) is available as `result.hac_lags_used`, which is `None` for any other `cov_type`.
+## Reading the results
 
-See the [API Reference](api/ols.md) for the full list of available options.
-
-## Retrieving results
-
-`OLSResults` exposes coefficients, standard errors, etc. as dictionaries keyed by coefficient name (`str`). If you need a row-oriented listing — e.g. for a REST API response — use `coef_table()`.
+Coefficient-level results are dictionaries keyed by coefficient name. For a row-oriented listing, for example for a REST API response, use `params_table()`, which is a plain list of dictionaries that can be passed to polars or `json.dumps`.
 
 ```python
-for row in result.coef_table():
-    print(row["param"], row["coef"], row["std_err"], row["p_value"])
+for row in result.params_table():
+    print(row["param_name"], row["param"], row["std_error"], row["p_value"])
 ```
 
-## Predicted values
+Every method's results share these fields, so code that reads one result type works with the others:
 
-`OLSResults.predict()` returns predicted values. With no arguments, it returns the fitted values for the training data used in `fit()`; passing `new_data` returns out-of-sample predictions for new data instead.
+| Field | Content |
+|---|---|
+| `params`, `std_errors`, `test_stats`, `p_values` | `dict` keyed by coefficient name |
+| `conf_int` | `dict` of `(lower, upper)` keyed by coefficient name |
+| `param_names` | The coefficient names, in order (`"const"` first when there is an intercept) |
+| `stat_dist`, `stat_df` | The distribution behind `test_stats` and `p_values` (`"t"` or `"normal"`) and its degrees of freedom (`None` for the normal distribution) |
+| `cov_type`, `n_obs`, `df_resid` | The standard error type used, the number of observations and the residual degrees of freedom |
+| `log_likelihood`, `aic`, `bic` | Information criteria (every method except IV) |
 
-```python
-# Fitted values for the training data
-fitted = result.predict()
+The remaining fields depend on the method (for example `r_squared` for OLS, `lr_statistic` for Logit, `hausman_statistic` for RE). They are grouped by purpose at the top of each results class on the method's *Options and results* page.
 
-# Predictions for new data (columns must match the `x` columns used at fit
-# time by name; column order does not matter, and the constant column must
-# not be included)
-new_data = pl.DataFrame({"x1": [6.0, 7.0]})
-predicted = result.predict(new_data)
+## The same interface for other models: Logit
 
-print(predicted)  # [{"predicted": ...}, {"predicted": ...}]
-```
-
-`OLSResults.augment()` takes the same `new_data` argument, but instead returns the source data (the training data, or `new_data` when given) with the predicted values appended as a `"predicted"` column — a polars DataFrame rather than a row-oriented list. This is the one exception to the library's general policy of not returning DataFrames.
+Moving to another model does not mean learning a new interface. A binary logistic regression uses the same arguments and the same result accessors; only the outcome (coded 0/1) and some extra methods differ.
 
 ```python
-augmented = result.augment(new_data)
-print(augmented)  # original `new_data` columns, plus a "predicted" column
-```
-
-## WLS (Weighted Least Squares)
-
-`WLS` is `OLS` with an added `weight` argument (the column name of the weight column). Weights are treated as analytic weights proportional to the inverse of the variance, and do not need to be normalized. Values less than or equal to 0 raise a `ValidationError`.
-
-```python
-from econometricsmodels import WLS
-
-df = df.with_columns(pl.Series("w", [1.0, 1.0, 1.0, 1.0, 1.0]))
-
-result = WLS(df, y="y", x=["x1"], weight="w").fit()
-
-print(result.params)
-print(result.std_errors)
-```
-
-Estimation options are configured via `WLSOptions`, which has the same fields as `OLSOptions` (`cov_type`, etc.). See "Switching the type of standard error" above for how to switch standard error types, and the [API Reference](api/wls.md) for details on the `weight` argument.
-
-`WLSResults.predict()` and `WLSResults.augment()` work exactly like their `OLSResults` counterparts (see "Predicted values" above); weights play no role in either the training-data or out-of-sample case.
-
-## Logit (binary logistic regression)
-
-`Logit` estimates a binary logistic regression model by maximum likelihood. The dependent variable `y` must be coded 0/1.
-
-```python
-import polars as pl
 from econometricsmodels import Logit
 
 df = pl.DataFrame(
     {
-        "y": [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
-        "x1": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0],
+        "y": [0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 1.0],
+        "x1": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
     }
 )
 
 result = Logit(df, y="y", x=["x1"]).fit()
 
-print(result.params)  # {"const": ..., "x1": ...}
-print(result.std_errors)  # {"const": ..., "x1": ...}
+print(result.params)
 print(result.pseudo_r_squared)
+print(result.predict())  # fitted probabilities
+print(result.marginal_effects())  # dy/dx with delta-method standard errors
 ```
 
-`LogitOptions` supports `cov_type` (`"classical"`, `"opg"`, `"hc0"`, `"hc1"`, or `"cluster"`) and `solver` (`"newton"`, `"bfgs"`, or `"lbfgs"`); see the [API Reference](api/logit.md) for the full list of options.
+Methods with extra inputs add arguments: `IV` takes `x_exog`, `x_endog` and `instruments`, and the panel models `FE` and `RE` take `entity`.
 
-### Predicted values and classification table
+## Handling errors
 
-`LogitResults.predict()` returns predicted probabilities (not a 0/1 class prediction, unlike `OLSResults.predict()`'s `"predicted"` — this is the standard statsmodels convention). With no arguments, it returns fitted probabilities for the training data; passing `new_data` returns out-of-sample predictions for new data instead (same `new_data` semantics as `OLSResults.predict()`). `pred_table()` returns a 2x2 classification (confusion) table for a given probability threshold (default 0.5), for the training data only.
+Invalid input or options (a missing column, missing values, ...) raise `ValidationError`, a subclass of `ValueError`. A problem found during computation (for example a singular design matrix) raises `ComputationError`, a subclass of `RuntimeError`. A wrong argument *type* raises the built-in `TypeError`.
 
-```python
-predicted = result.predict()
-print(predicted)  # [{"probability": ...}, ...]
-
-new_data = pl.DataFrame({"x1": [1.0, 2.0]})
-predicted = result.predict(new_data)
-print(predicted)  # [{"probability": ...}, {"probability": ...}]
-
-table = result.pred_table()
-for row in table:
-    print(row["actual"], row["predicted_0"], row["predicted_1"])
-```
-
-`LogitResults.augment()` takes the same `new_data` argument as `predict()`, but returns a polars DataFrame (the source data plus a new `"predicted_probability"` column) instead of a row-oriented list, mirroring `OLSResults.augment()`.
+Both package exceptions carry a stable `code` and a `params` dictionary with the values behind the message, so a program can branch on them instead of parsing text:
 
 ```python
-augmented = result.augment(new_data)
-print(
-    augmented
-)  # original `new_data` columns, plus a "predicted_probability" column
-```
-
-### Marginal effects
-
-`LogitResults.marginal_effects()` returns `dy/dx` for each explanatory variable (the constant term is excluded), with delta-method standard errors. Use `at` to choose the representative point: `"overall"` (default, average marginal effects), `"mean"`, or `"median"`.
-
-```python
-for row in result.marginal_effects():
-    print(row["param"], row["effect"], row["std_err"], row["p_value"])
-
-# Marginal effects evaluated at the mean of the explanatory variables
-mean_effects = result.marginal_effects(at="mean")
-```
-
-## Probit (probit regression)
-
-`Probit` estimates a binary probit regression model by maximum likelihood. The dependent variable `y` must be coded 0/1. Its API is identical to [Logit](#logit-binary-logistic-regression) — the only difference is the link function (the standard normal CDF `Φ` in place of the logistic CDF `Λ`).
-
-```python
-import polars as pl
-from econometricsmodels import Probit
-
-df = pl.DataFrame(
-    {
-        "y": [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
-        "x1": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0],
-    }
-)
-
-result = Probit(df, y="y", x=["x1"]).fit()
-
-print(result.params)  # {"const": ..., "x1": ...}
-print(result.std_errors)  # {"const": ..., "x1": ...}
-print(result.pseudo_r_squared)
-```
-
-`ProbitOptions` supports the same `cov_type` and `solver` choices as `LogitOptions`; see the [API Reference](api/probit.md) for the full list of options. `ProbitResults.predict()`, `augment()`, `pred_table()`, and `marginal_effects()` work exactly like their [Logit](#predicted-values-and-classification-table) counterparts (substitute `Probit`/`ProbitOptions` for `Logit`/`LogitOptions` in the examples above).
-
-## Tobit (censored regression)
-
-`Tobit` estimates a censored normal regression model by maximum likelihood. The observed `y` is a continuous latent regression censored at a lower bound, an upper bound, or both. `TobitOptions.lower` (default `0.0`) and `upper` (default `None`) set the bounds; `None` means that side is not censored.
-
-```python
-import polars as pl
-from econometricsmodels import Tobit, TobitOptions
-
-df = pl.DataFrame(
-    {
-        "y": [0.0, 0.0, 1.2, 2.5, 3.1, 4.8, 6.0],
-        "x1": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0],
-    }
-)
-
-result = Tobit(df, y="y", x=["x1"]).fit()  # left-censored at 0 by default
-
-print(result.params)  # {"const": ..., "x1": ..., "sigma": ...}
-print(result.sigma)
-print(result.wald_statistic, result.wald_p_value)
-```
-
-`param_names` ends with `"sigma"` — the error standard deviation is reported as an estimated parameter with its own standard error. Instead of a likelihood-ratio test, `TobitResults` exposes `wald_statistic` / `wald_p_value` for the joint hypothesis that all slopes are zero.
-
-### Predictions and marginal effects
-
-`predict()` and `marginal_effects()` take a `target`: `"expected_latent"` (`E[y*|x] = x'β`), `"expected_observed"` (the default, the censoring-adjusted mean `E[y|x]`), or `"prob_uncensored"`. `marginal_effects()` also takes `at` (`"overall"`, `"mean"`, `"median"`) and excludes the constant term.
-
-```python
-for row in result.marginal_effects(target="expected_observed"):
-    print(row["param"], row["effect"], row["std_err"])
-
-# predict() returns a list of {"predicted": ...} dicts
-fitted = result.predict(target="expected_observed")
-
-# new_data (out-of-sample) works the same way as OLS/Logit/Probit
-new_data = pl.DataFrame({"x1": [1.0, 2.0]})
-predicted = result.predict(new_data, target="expected_observed")
-```
-
-`augment()` takes the same `target`/`new_data` arguments as `predict()`, but returns a polars DataFrame instead of a row-oriented list. Like Logit/Probit's `"predicted_probability"` column, the appended column has a `predicted_` prefix; here it is named `"predicted_{target}"` (e.g. `"predicted_expected_observed"`), since `predict()`'s meaning depends on `target` — this also lets you call `augment()` once per `target` on the same DataFrame without a column name collision.
-
-```python
-augmented = result.augment(target="expected_observed")
-print(augmented)  # original columns, plus "predicted_expected_observed"
-
-# Stack a second target onto the same DataFrame without a name collision
-augmented = result.augment(augmented, target="prob_uncensored")
-```
-
-### Censoring fit check
-
-`censoring_fit_check()` compares the observed censoring rate against the model-implied rate for each censored direction (`"lower"` / `"uncensored"` / `"upper"`):
-
-```python
-for row in result.censoring_fit_check():
-    print(row["category"], row["observed_rate"], row["model_implied_rate"])
-```
-
-See the [API Reference](api/tobit.md) for the full list of options.
-
-## IV (instrumental variables: 2SLS/GMM)
-
-`IV` estimates a linear model with endogenous regressors. Independent variables are split into `x_exog` (exogenous) and `x_endog` (endogenous), plus `instruments` (excluded instruments — at least one per endogenous variable for identification).
-
-```python
-import polars as pl
-from econometricsmodels import IV
-
-df = pl.DataFrame(
-    {
-        "y": [1.0, 2.4, 2.9, 4.3, 5.1, 5.8, 7.2, 7.9],
-        "endog1": [1.1, 1.9, 2.8, 3.6, 4.4, 5.3, 6.0, 6.9],
-        "z1": [0.9, 2.1, 2.7, 3.9, 4.2, 5.6, 5.8, 7.1],
-    }
-)
-
-result = IV(df, y="y", x_exog=[], x_endog=["endog1"], instruments=["z1"]).fit()
-
-print(result.params)  # {"const": ..., "endog1": ...}
-print(result.std_errors)  # {"const": ..., "endog1": ...}
-print(result.r_squared)
-```
-
-`IVOptions.estimator` selects `"2sls"` (default) or `"gmm"`. `cov_type` supports the same range as [OLS](#switching-the-type-of-standard-error); for `estimator="gmm"`, a separate `gmm_weight_type` selects the weight matrix used for point estimation. See the [API Reference](api/iv.md) for the full list of options.
-
-### Diagnostics and first-stage results
-
-```python
-print(result.weak_instrument_f_statistics)  # {"endog1": ...}
-print(
-    result.overid_statistic, result.overid_p_value
-)  # None, None (just-identified)
-print(
-    result.wu_hausman_statistic, result.wu_hausman_p_value
-)  # estimator="2sls" only
-
-first_stage = result.first_stage()
-print(
-    first_stage["endog1"].params
-)  # OLSResults for endog1 ~ x_exog + instruments
-```
-
-See the [API Reference](api/iv.md#diagnostics) for what each diagnostic tests and when it is `None`.
-
-## FE (fixed effects panel regression)
-
-`FE` estimates a one-way or two-way fixed effects (within) panel regression. Pass the entity (panel unit) identifier column via `entity`; enable two-way effects by also setting `FEOptions.time`.
-
-```python
-import polars as pl
-from econometricsmodels import FE
-
-df = pl.DataFrame(
-    {
-        "y": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-        "x1": [2.0, 4.0, 1.0, 5.0, 3.0, 6.0],
-        "id": ["a", "a", "b", "b", "c", "c"],
-    }
-)
-
-result = FE(df, y="y", x=["x1"], entity="id").fit()
-
-print(result.params)  # {"x1": ...} — no intercept (within-transformed away)
-print(result.std_errors)
-print(result.r_squared_within)
-```
-
-`FEOptions.cov_type` defaults to `"cluster"` on `entity`; `"hc0"` is not supported for FE. See "Switching the type of standard error" above for the other choices, and the [API Reference](api/fe.md) for the full list of options, including two-way effects (`time`).
-
-`fixed_effects()` recovers the entity (and, for two-way, time) fixed effects post-hoc from the fitted coefficients:
-
-```python
-print(result.fixed_effects())  # {"a": ..., "b": ..., "c": ...} for one-way
-```
-
-FE has no `predict()`, `augment()`, or `summary()`.
-
-## RE (random effects panel regression)
-
-`RE` estimates a random effects (Swamy-Arora GLS) panel regression, entity-direction only (unlike FE, two-way random effects are out of scope). Unlike FE, RE has an intercept, and a Hausman test comparing against the equivalent one-way FE specification is computed automatically as part of `fit()`.
-
-```python
-from econometricsmodels import RE
-
-result = RE(df, y="y", x=["x1"], entity="id").fit()
-
-print(result.params)  # {"const": ..., "x1": ...}
-print(result.std_errors)
-print(result.hausman_statistic, result.hausman_p_value)
-```
-
-`REOptions.cov_type` has the same defaults and support as FE (`"cluster"` on `entity` by default; `"hc0"` unsupported). See the [API Reference](api/re.md) for the full list of options, including Driscoll-Kraay standard errors (`cov_type="dk"`, requires `dk_time`). Like FE, RE has no `predict()`, `augment()`, or `summary()`.
-
-## Error handling
-
-See [Validation and errors](guide/validation.md) for the design philosophy and the full list of situations that raise each error.
-
-Invalid input or options (a missing column, missing values, etc.) raise `ValidationError` (a subclass of `ValueError`). Problems detected during computation (e.g. a singular design matrix) raise `ComputationError` (a subclass of `RuntimeError`).
-
-```python
-from econometricsmodels import ComputationError, ValidationError
+from econometricsmodels import ComputationError, ErrorCode, ValidationError
 
 try:
     result = OLS(df, y="y", x=["x1", "x2"]).fit()
 except ValidationError as e:
-    print("Input error:", e)
+    print(e.code, e.params)  # e.g. COLUMN_NOT_FOUND {'column': 'x2', ...}
+    print("Input error:", e)  # message and hint
 except ComputationError as e:
-    print("Computation error:", e)
+    if e.code == ErrorCode.DESIGN_MATRIX_SINGULAR:
+        print("Collinear columns:", e.params["columns"])
 ```
+
+Missing values are never dropped for you and collinear columns are never removed: see [Validation and errors](guide/validation.md#reading-an-error) for what an exception contains and why input is rejected rather than repaired, and [Error codes](guide/error-codes.md) for every `code`.
+
+## Every method
+
+Each method has three pages: a short **usage** guide with examples, the **options and results** reference (what each option does and which fields a result has), and the **definitions** (the formulas, covariance types and test distributions).
+
+| Method | For | Usage | Options and results | Definitions |
+|---|---|---|---|---|
+| OLS | Linear regression | [Usage](usage/ols.md) | [Reference](api/ols.md) | [Definitions](methods/ols.md) |
+| WLS | Linear regression with weights | [Usage](usage/wls.md) | [Reference](api/wls.md) | [Definitions](methods/wls.md) |
+| Logit | Binary outcome (logistic) | [Usage](usage/logit.md) | [Reference](api/logit.md) | [Definitions](methods/logit.md) |
+| Probit | Binary outcome (normal) | [Usage](usage/probit.md) | [Reference](api/probit.md) | [Definitions](methods/probit.md) |
+| Tobit | Censored outcome | [Usage](usage/tobit.md) | [Reference](api/tobit.md) | [Definitions](methods/tobit.md) |
+| IV | Endogenous regressors (2SLS, GMM) | [Usage](usage/iv.md) | [Reference](api/iv.md) | [Definitions](methods/iv.md) |
+| FE | Panel data, fixed effects | [Usage](usage/fe.md) | [Reference](api/fe.md) | [Definitions](methods/fe.md) |
+| RE | Panel data, random effects | [Usage](usage/re.md) | [Reference](api/re.md) | [Definitions](methods/re.md) |
+
+The [Guides](guide/accepted-data.md) cover the data the estimators accept, validation and errors, and how the test distributions compare with other packages.

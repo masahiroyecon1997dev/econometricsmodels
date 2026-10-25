@@ -87,6 +87,18 @@ jobs:
       - name: ruff format --check
         run: uv run --locked --group test ruff format --check .
 
+      # サポートする最古のpolarsでもテストが通ることを確認する(pyproject.tomlの
+      # `polars>=`の下限と同じバージョンにする。通ることを確認した最古のバージョンが
+      # 下限であり、それより古いとEnum型の時点列が静かに別の値になるなどの問題がある)。
+      # 拡張モジュールはPythonのpolarsのバージョンに依存しないため、ビルド済みのものを
+      # そのまま使う。uv.lockの環境を書き換えるので、このステップは最後に置く。
+      - name: pytest (oldest supported polars)
+        if: matrix.python-version == '3.12'
+        run: |
+          uv pip install polars==1.38.1
+          uv run --no-sync python -c "import polars; assert polars.__version__ == '1.38.1', polars.__version__"
+          uv run --no-sync pytest tests
+
   engine_pybind-lint:
     name: cargo test / clippy / fmt (engine_pybind)
     if: github.event_name != 'schedule'

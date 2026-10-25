@@ -173,6 +173,17 @@ The F statistic tests that all slope coefficients are jointly zero (the constant
 - **OLS Breusch-Pagan test with constant or duplicate variables.** statsmodels counts the chi-squared degrees of freedom of `het_breuschpagan` from the number of columns, not their rank, so it is given the variables that remain after the constant and duplicate columns are dropped; the dropping itself is checked against R, which is given the columns as they are and counts the rank.
 - **OLS Breusch-Godfrey test without an intercept** is checked against R `lmtest::bgtest` only. statsmodels adds a constant to the auxiliary regression of a model without an intercept (R and Greene do not), so its value is a different statistic and is not used there.
 
+## polars versions
+
+The package accepts `polars>=1.38.1` with no upper limit, so installing it never changes the polars you already have. Every pull request runs the whole test suite twice:
+
+| polars | Where |
+|---|---|
+| 1.38.1 (the oldest supported) | A second `pytest` run on Python 3.12, after the normal run |
+| the version in the lockfile (currently 2.0.0) | The normal run on Python 3.12, 3.13 and 3.14. Dependabot updates the lockfile, so new polars releases are tested through its pull requests |
+
+The lower limit is the oldest version for which the whole suite passes. Older versions are known to fail: 1.27 and below cannot hand a DataFrame to the Rust core, 1.28 to 1.31 read an `Enum` time column as different values (so the estimates change without an error), and 1.32 to 1.37 cannot read `Float16` columns. Versions between the two tested ones are not run, which is the usual practice of testing both ends of a range. Because the compiled core reads a polars DataFrame through polars' own foreign function interface, a future polars release can break it; if that happens, the test run on the lockfile version fails first.
+
 ## Test data
 
 All synthetic datasets are generated once, frozen as CSV files in the repository and read from there, so a later change to a data generator cannot silently invalidate stored reference values.

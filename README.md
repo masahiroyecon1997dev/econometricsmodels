@@ -80,9 +80,13 @@
 pip install econometricsmodels
 ```
 
-Requires Python 3.12 or later. The computational core is pure Rust
-(no system BLAS/LAPACK dependency), with prebuilt wheels for Linux,
-macOS, and Windows.
+Requires Python 3.12 or later and polars 1.38.1 or later (there is no upper
+limit, so an installed polars is never downgraded). The test suite runs in CI
+against the oldest supported polars (1.38.1) and the newest one pinned in the
+lockfile; older versions are not supported, because some of them read
+`Enum` columns as different values or cannot read `Float16` columns. The
+computational core is pure Rust (no system BLAS/LAPACK dependency), with
+prebuilt wheels for Linux, macOS, and Windows.
 
 ## Quickstart
 

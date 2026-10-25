@@ -28,11 +28,13 @@ crate-type = ["cdylib", "rlib"]
 # `maturin build`/`maturin develop`実行時にこのフィーチャを外部から有効化するため、
 # 配布物には引き続き反映される（`cargo`単体のビルド・テストとは別経路）。
 pyo3 = { version = "=0.29.3" }
-# polars（Rustクレート）とpyo3-polars: バージョンはPython側pyproject.tomlのpolars==1.42.1と
-# 数字を合わせるものではない（Rustクレートpolarsは0.5x系、Python側は1.x系で既に別の
-# バージョン体系に分離済み）。pyo3-polarsが使うpolars_ffi::version_0という安定版FFI
+# polars（Rustクレート）とpyo3-polars: バージョンはPython側pyproject.tomlのpolarsと
+# 数字を合わせるものではない（Rustクレートpolarsは0.5x系、Python側は1.x/2.x系で既に別の
+# バージョン体系に分離済み）。pyo3-polarsがpolars_ffi::version_0という安定版FFI
 # プロトコル（Arrow C Data Interfaceに近い、バージョン非依存のインターフェース）経由で
-# 互換性が担保される。
+# Python側のpolarsを読むため、Python側は範囲で受け付ける。ただし互換性はFFIだけでは決まらず、
+# Python側が古いとEnum型の列が別の値になる、Float16を読めない等の差が出る。そのため
+# 下限はpyproject.tomlの`polars>=`で、全テストが通ることを確認した最古のバージョンにしている。
 # crates.io公開版pyo3-polars 0.28.0（2026-08-04公開）がpyo3="^0.29"・polars="^0.55.1"を
 # 要求するようになったため、再開条件を満たしたとして三者同時に上げた
 # （旧版はpyo3-polars 0.27.0がpyo3="^0.28"のままだったため、pyo3=0.28.3/polars=0.54.4に

@@ -32,7 +32,12 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
   トリガー。`engine/**`は含めない）:
   - `test`ジョブ（Python 3.12/3.13/3.14マトリクス）: `uv sync --locked --group test` →
     `uv run maturin develop` → **import時間チェック** → `pytest tests` → `ruff check .` →
-    `ruff format --check .`。
+    `ruff format --check .`。Python 3.12のジョブだけ、最後に`polars==1.38.1`（`pyproject.toml`の
+    `polars>=`の下限と同じ版。変えるときは両方と`docs/guide/verification.md`の表を揃える）を
+    `uv pip install`で入れ替えて`pytest tests`をもう一度回す（サポートする最古のpolarsの確認。
+    拡張はPython側polarsの版に依存しないのでビルドは再利用する。`uv.lock`の環境を書き換える
+    ため最後に置く）。下限を決めた根拠は、1.27以下は動かず、1.28〜1.31はEnum型の時点列が静かに
+    別の値になり、1.32〜1.37はFloat16を読めないこと（1.38.1で全テストが通る）。
     `engine_pybind`はabi3を使っていないためPythonマイナーバージョンごとに別ビルドが必要。
     import時間チェック（`python -m performance.check_import_time`）は
     直前の`maturin develop`（デバッグ）拡張をそのまま使い、`import econometricsmodels`

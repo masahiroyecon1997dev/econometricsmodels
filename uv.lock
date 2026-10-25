@@ -209,7 +209,7 @@ test = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "polars", specifier = "==2.0.0" }]
+requires-dist = [{ name = "polars", specifier = ">=1.38.1" }]
 
 [package.metadata.requires-dev]
 audit = [{ name = "pip-audit", specifier = "==2.10.1" }]

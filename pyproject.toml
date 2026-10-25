@@ -14,7 +14,13 @@ authors = [
 ]
 keywords = ["econometrics", "statistics", "regression", "ols", "logit", "probit", "tobit", "instrumental-variables", "panel-data", "polars"]
 dependencies = [
-    "polars==2.0.0",
+    # 下限は、全テストが通ることを確認した最古のバージョン(ci_python.ymlのtestジョブが
+    # 同じバージョンでpytestを回す。変えるときは両方を揃える)。上限は付けない
+    # (利用者が入れているpolarsをダウングレードしないため)。1.31以下はEnum型の時点列が
+    # 静かに別の値になり、1.36以下はFloat16列を読めない。1.27以下は動かない。
+    # 拡張モジュールはRust側のpolarsクレートのFFI経由でPythonのpolarsを読むため、
+    # 新しいpolarsは開発側(uv.lock、Dependabot)で追従する。
+    "polars>=1.38.1",
 ]
 classifiers = [
     "Programming Language :: Rust",

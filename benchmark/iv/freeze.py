@@ -10,8 +10,8 @@ import json
 from pathlib import Path
 
 from benchmark.common import freeze_scenarios, run_freeze_cli
+from benchmark.iv.datasets import MULTI_ENDOG_SCENARIOS, generate_iv_dataset
 from benchmark.iv.datasets import SCENARIOS as IV_SCENARIOS
-from benchmark.iv.datasets import generate_iv_dataset
 
 # datasets.pyのSCENARIOS（IV: 2SLS/GMM用の全シナリオ）をそのまま使う。
 # moderate_multicollinearity/high_condition_number/scale_variance/
@@ -31,8 +31,13 @@ IV_K_EXOG_OVERRIDES = {
 IV_G2_BOUNDARY_SCENARIOS = ["baseline"]
 
 # 複数内生変数（k_endog>=2）の成功パス確認専用。k_instruments=3・k_endog=2で
-# 過剰識別（Sargan/Hansen Jが非nullになる）にする。
-IV_MULTI_ENDOG_SCENARIOS = ["baseline"]
+# 過剰識別（Sargan/Hansen Jが非nullになる）にする。just_identifiedは
+# k_instruments=k_endog=2の丁度識別に強制される（datasets.pyのdocstring参照）。
+IV_MULTI_ENDOG_SCENARIOS = MULTI_ENDOG_SCENARIOS
+
+# 内生変数3本（k_endog=3）の成功パス確認専用。k_instruments=4で過剰識別
+# （自由度1）にする。
+IV_THREE_ENDOG_SCENARIOS = ["baseline"]
 
 # 自由度1境界（df_resid=1ちょうど）の成功パス確認専用。IVは
 # OLSと異なり内生変数1本・操作変数1本が最低限必要なため、x_exog=0・k_endog=1・
@@ -77,6 +82,18 @@ def freeze(output_dir: Path) -> None:
         key_suffix="_multi_endog",
         k_endog=2,
         k_instruments=3,
+    )
+
+    freeze_scenarios(
+        output_dir,
+        generate_iv_dataset,
+        IV_THREE_ENDOG_SCENARIOS,
+        "iv",
+        iv_true_betas,
+        filename_suffix="_three_endog",
+        key_suffix="_three_endog",
+        k_endog=3,
+        k_instruments=4,
     )
 
     freeze_scenarios(

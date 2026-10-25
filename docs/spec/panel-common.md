@@ -13,9 +13,9 @@ Swamy-Arora分散成分推定の具体式、固定効果の復元等）は[`fe-s
 - `y: str`、`x: list[str]`はOLSと同じ。
 - `entity: str`（エンティティID列名）は**独立の必須引数**とする。FE/REいずれもパネル構造が
   無ければモデルとして成立しないため、`y`/`x`と同格に扱う。
-- `time`（時点ID列名）は必須ではないため`Options`内に置く（`FEOptions.time`、
-  `str | None`、デフォルト`None`）。REは2-way構造を持たないため`time`オプション自体が無く、
-  DKの時点列は`REOptions.dk_time`で受け取る（下記）。
+- `time`（時点ID列名）は必須ではないため`Options`内に置く（`FEOptions.time`・`REOptions.time`、
+  `str | None`、デフォルト`None`）。どちらも2-way（entity + time）の指定で、`None`なら1-way。
+  DKの時点列は別フィールド`dk_time`で受け取る（下記）。
   - FEの2-way（entity + time FE）を指定する場合は`time`が実質的に必須になるが、これは
     `OLSOptions.cluster`が`cov_type="cluster"`のときのみ必須になるのと同じ「条件付き必須」
     パターンであり、`Options`に置くという判断自体は変えない。未指定時のバリデーションエラーで
@@ -32,14 +32,12 @@ Swamy-Arora分散成分推定の具体式、固定効果の復元等）は[`fe-s
     使われ、「2-way FEの固定効果構造に使う時点粒度」と「DK HACカーネルに使う時系列粒度」が
     異なるケースにも対応する。engine側は`FeCovType::Dk { bandwidth, time: TimeKeys }`
     （`time`は必須）として実装（`engine/src/panel/fe.rs`モジュールdoc「Driscoll-Kraay型
-    パネルHAC対応」参照）。**REは同名・同じ意味の`REOptions.dk_time`を持つ**（`time`という名前の
-    オプションは持たない。REは2-way構造を持たず、FEの`time`に相当するものが無いため。将来
-    2-way REを実装するときは、FEと同じ意味の`time`を改めて導入する）。
+    パネルHAC対応」参照）。**REも同名・同じ意味の`REOptions.time`・`REOptions.dk_time`を持ち、
+    同じ規約に従う**（`ReInput.time`が2-wayの時間次元、DKの時点列は`ReCovType::Dk { time }`で別に渡す）。
 - **`time`を`Options`に置く理由（トップレベル引数に昇格しない）**:
-  - `time`の意味がFEとREで異なる。FEでは2-way固定効果の構造指定だが、REでは`cov_type="dk"`の
-    時系列順序専用でRE自身の変換・ハウスマン検定には使わない。「パネル構造を定義する列名」という
-    共通の役割を持たないため、トップレベル引数にするとREでは意味の異なる（または`cov_type`次第で
-    無効になる）引数になる。
+  - `time`は条件付き必須（2-wayを指定するときだけ要る）で、1-wayでは不要な引数になる。
+    トップレベル引数にすると1-wayの呼び出しでも毎回渡す必要が出る（`None`を許すなら`Options`と
+    同じ）。FE・REとも2-way構造の指定という同じ役割だが、`entity`と違い無くてもモデルが成立する。
   - `cluster`/`dk_time`（OLS/IVでは`hac_time`）等の補助列も、列名を取るが`Options`に置く既存規則と
     整合する。
   - 将来の高次元FE（3つ以上のFE次元）では、必須の`entity`以外の次元は`Options`側に並べる想定で、
@@ -80,7 +78,8 @@ OLS（`OLSResult`、`engine_pybind/src/linear/ols.rs:137-191`）の項目を土�
 | `n_obs` | Logit由来の表記 | OLS/WLSも`n_obs`に統一済み |
 | `df_resid` / `df_model` | Logit由来、パネル向けに新規追加 | OLSには無いが、FEは自由度調整が`n - n_entities - k`という非自明な式になるため明示的に返す価値が高い |
 | `n_entities` | 新規追加（FE/RE限定） | パネルユニット数。pyfixest/plmの前例に倣う |
-| `n_periods` | 新規追加（FEのみ） | 2-way FEの時点数（1-wayは`None`）。`fe-spec.md`2章参照 |
+| `sigma2_eps` / `sigma2_u` / `sigma2_lambda` / `theta` / `theta_entity` / `theta_time` / `theta_total` | 新規追加（REのみ） | 分散成分（σ_ε²・σ_u²、2-wayのσ_λ²）と準偏差変換の重み（1-wayは個体ごとのθ、2-wayは3つの重み）。詳細は`re-spec.md`2章 |
+| `n_periods` | 新規追加（FE・RE） | 2-wayの時点数（1-wayは`None`、`dk_time`だけの指定でも`None`）。`fe-spec.md`2章・`re-spec.md`2章参照 |
 | `cov_type` | OLS共通 | サポート対象は3.1節 |
 | `f_statistic` / `f_p_value` | OLS共通 | そのまま踏襲（ただしengine側の実装はOLSの単純な流用ではない。傾き係数`k`個の同時Wald検定をFE/RE独自の`cov_type`別`cov_params`・パネル自由度調整済み`df_resid`で行う） |
 | `log_likelihood` / `aic` / `bic` | OLS共通 | FE/REは最小二乗族で正規性下の尤度が定義できるため含める |
@@ -106,11 +105,11 @@ OLS（`OLSResult`、`engine_pybind/src/linear/ols.rs:137-191`）の項目を土�
 
 - **RE: ハウスマン検定は`fit()`内で自動計算**し、`REResult`に`hausman_statistic` /
   `hausman_p_value` / `hausman_df`として含める（詳細は[`re-spec.md`](./re-spec.md)3.7節）。
-  - **回帰ベース（補助回帰）版**（`plm::phtest(method = "aux")`相当）で、比較は常に1-way。
+  - **回帰ベース（補助回帰）版**（`plm::phtest(method = "aux")`相当）で、比較相手はRE本体と同じ個体効果構造のFE（1-wayはentity、2-wayはentity+time）。
     補助回帰のWald検定の共分散はRE本体の`cov_type`に連動する（`re-spec.md`3.7節）。
-  - 補助回帰が成立しない場合（傾き係数0個・ランク落ち等）は、`hausman_statistic`等を
-    `None`にしたうえで、RE本体の結果は正常に返す（REの主要な結果自体は有効なため、
-    診断情報の欠落だけに留める）。
+  - **`hausman_*`が`None`になるのは、検定できる傾き係数が無い場合のみ**（1-wayは時間変化のある列が無い、2-wayは2-way within変換後に分散のある列が無い、または残りが識別できない列）。補助回帰のランク落ち・
+    Wald検定の特異性・クラスター数不足など、計算自体が成立しない場合は`hausman_*`を`None`にせず
+    `fit()`が失敗する（設計行列の多重共線性でエラーにするのと同じ方針。`re-spec.md`3.7節）。
 - **パネル固有R²（2.3節）**: `fit()`の結果本体に含める（別メソッド化しない）。
 - **IV: 第一段階回帰結果は別メソッド**（[`iv-spec.md`](./iv-spec.md)2章参照）。
 
@@ -161,8 +160,8 @@ FE/REのClassical/HC1-3以外の全cov_typeに広げたもの）。`df_resid`自
 
 ### 4.1 既存の共通化パターン（前提）
 
-- `CommonError`（`engine/src/error.rs`）、`ensure_well_conditioned_symmetric_matrix`
-  （`engine::linear_algebra`）、`engine_pybind/src/validation.rs`の列名検証4関数
+- `CommonError`（`engine/src/shared/error.rs`）、`ensure_well_conditioned_symmetric_matrix`
+  （`engine::shared::linear_algebra`）、`engine_pybind/src/shared/validation.rs`の列名検証4関数
   （`validate_x_non_empty`等）は既に系統横断で共有済み。
 - **WLSはOLSを「並行輸入」ではなく「委譲」で再利用している**: 重み変換
   （`sqrt(weight)`）したデータをそのまま`OlsEstimator::fit`に渡し、その後で重み付き用に
@@ -174,7 +173,7 @@ FE/REのClassical/HC1-3以外の全cov_typeに広げたもの）。`df_resid`自
 1. **t/z検定の後処理の共通関数化**: OLS（t分布、`ols.rs:396-420`）とLogit（z分布、
    `logit.rs:694-717`）で、`std_err`/`stat`/`p_value`/`conf_low`/`conf_high`を計算する
    ループがほぼ同型のまま系統ごとに独立実装されていた。`statrs::distribution::ContinuousCDF`を
-   ジェネリックに取る関数として`engine/src/inference.rs`（crate直下、系統をまたぐ位置）に
+   ジェネリックに取る関数として`engine/src/shared/inference.rs`（系統をまたいで共有する位置）に
    切り出した。OLS・Logitに加えて、同型の重複がある`probit.rs`（z分布）・`nonlinear/common.rs`の
    `marginal_effects_from_w_s`（限界効果のSE/z値/CI、Logit/Probit共通）も対象に含めた。
    FE/RE（t分布）・IVの2SLS（t分布）・GMM（z分布、[`iv-spec.md`](./iv-spec.md)3.3節）もこの
@@ -251,7 +250,8 @@ REは`plm`）のみ）。
   係数なし）。dkは`plm::vcovSCC(type = "HC0")`にfixestの補正`T/(T-1)·(n-1)/(n-k-G)`を
   手計算で掛けるため、plmが検証するのはカーネル・バンド幅の規約までで補正係数は
   fixestのみが独立に検証する。2-way・entity以外のクラスター列はplmが扱えずfixestのみ。
-  fixestが一致しない`bandwidth == t_periods - 1`はplmのみが参照値になる。
+  fixestが一致しない`bandwidth == t_periods - 1`（fixest側のoff-by-oneで最終ラグ項が落ちる。
+  `fe-spec.md`3.3節7.）はplmのみが参照値になる。
   fixestの境界ケースのうち、`G = q+1`・`G = 2`（先頭3・2 entityへの絞り込み）、
   `T = q+1`のdk、dkのバンド幅0・1、entityあたりの観測数の偏り（[2,3,5,10]期）も
   plmで検証する。plmは非entityのクラスター列を扱えないため、`G = q+1`・`G = 2`・観測数の
@@ -270,6 +270,10 @@ REは`plm`）のみ）。
 ＋Rクロスチェック」の2系統検証の例外**として、**Rの`plm::phtest(method = "aux", effect = "individual")`のみを参照値とする**ことを
 許容する。`testing-policy.md`の「一部の統計量だけRクロスチェックを省略しない」という原則から
 意図的に外れる例外であることをテスト実装時のコメント・ドキュメントに明記する。
+不均衡パネルではplm自身の分散成分（Swamy-Arora）が`linearmodels`準拠の本実装と異なり
+`phtest`の統計量が1〜2%ずれるため、不均衡パネルの参照値は、`linearmodels`の分散成分から
+補助回帰を組み立ててplmの`vcov`系を当てたもの（`phtest`と同じ手順をplm自身の分散成分で
+再現すると`phtest`と一致することを生成のたびに確認）にする。
 
 ### 5.4 許容誤差
 

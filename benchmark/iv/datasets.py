@@ -17,6 +17,12 @@
 （除外制約: instrumentsは構造誤差とは無相関という仮定を満たすように、DGP上も
 本当に無相関にしている）。
 
+`invalid_instrument`は最後の操作変数を構造誤差uと相関させ（除外制約の違反）、
+Sargan/Hansen J検定が棄却される（p値が小さくなる）シナリオ。他のシナリオは
+操作変数が有効なため、過剰識別検定のp値は小さくならない。
+`many_regressors`は`k_exog`をMANY_REGRESSORS_K（20）に固定し列ごとに0.1〜100倍の
+スケール差を持たせる（操作変数の数は変えず、過剰識別度は不変）。`outlier_regressor`は
+x_exogの1列目（x1）の5%を外れ値に置き換える（操作変数・内生変数は汚染しない）。
 `k_exog`/`k_endog`/`k_instruments`は呼び出し側が指定する（OLSの`generate_linear_dataset`の
 `k`引数と同じ設計）。`just_identified`シナリオのみ`k_instruments`を`k_endog`に
 強制する（丁度識別、Sargan/Hansen Jが`None`になる分岐の検証用）。
@@ -52,6 +58,7 @@ from benchmark.common.dgp_constants import (
     SCALE_VARIANCE_X1_SCALE,
     SCALE_VARIANCE_X2_SCALE,
 )
+from benchmark.iv.constants import CARD_REGION_COLUMN, CARD_REGION_DUMMIES
 
 SCENARIOS = [
     "baseline",
@@ -66,10 +73,97 @@ SCENARIOS = [
     "perfect_multicollinearity",
     "scale_variance",
     "scale_variance_mild",
+    "invalid_instrument",
+    "many_regressors",
+    "outlier_regressor",
 ]
+
+# 丁度識別・過剰識別を問わずx_exog=['x1'], x_endog=['endog1'], instruments=[...]の
+# 構造で数値比較できるシナリオ。perfect_multicollinearityはComputationErrorの発生
+# 確認のみ（testing-policy.md「テストの3系統」）、scale_variance（x1*1e6, x2*1e-3）は
+# 全cov_typeでComputationErrorのためここに含めない。scale_variance_mildは、より緩い
+# スケール差（x1*1e2, x2*1e-1）の成功パスで、faer等の数値計算ライブラリ依存部分の
+# 精度リグレッションを検知する（OLSのscale_variance_mildと同じ発想）。
+NUMERIC_SCENARIOS = [
+    s
+    for s in SCENARIOS
+    if s not in ("perfect_multicollinearity", "scale_variance")
+]
+
+# just_identifiedのみinstruments=['z1']（k_instruments == k_endogに強制される、
+# 上のdocstring参照）。他は全シナリオ共通でinstruments=2本。
+INSTRUMENTS_BY_SCENARIO = {"just_identified": ["z1"]}
+
+# moderate_multicollinearity/high_condition_number/scale_variance_mildはk_exog=2
+# （x1, x2）で固定済み（`benchmark/iv/freeze.py`のIV_K_EXOG_OVERRIDES参照）。
+X_EXOG_BY_SCENARIO = {
+    "moderate_multicollinearity": ["x1", "x2"],
+    "high_condition_number": ["x1", "x2"],
+    "scale_variance_mild": ["x1", "x2"],
+    "many_regressors": [f"x{i}" for i in range(1, 21)],
+}
+
+# 複数内生変数（k_endog=2）を持つシナリオ。`benchmark/iv/freeze.py`が
+# `k_endog=2`・`k_instruments=3`でCSV（`iv_<シナリオ>_multi_endog.csv`）を凍結する。
+# `just_identified`は操作変数が`k_endog`に強制されるため2本（丁度識別）。
+MULTI_ENDOG_SCENARIOS = [
+    "baseline",
+    "just_identified",
+    "weak_instruments",
+    "heteroskedastic",
+    "autocorrelated",
+    "small_n",
+]
+MULTI_ENDOG_INSTRUMENTS_BY_SCENARIO = {"just_identified": ["z1", "z2"]}
+
+# 内生変数3本（`x_endog=["endog1", "endog2", "endog3"]`）の成功パス確認用データ
+# （baselineシナリオ、`benchmark/iv/freeze.py`が`k_endog=3`・`k_instruments=4`で
+# `iv_baseline_three_endog.csv`として凍結する）。Wu-Hausmanの分子自由度が3になる
+# 経路と、過剰識別度（4-3=1）が内生変数の数と独立であることを確認する。
+THREE_ENDOG_X_ENDOG = ["endog1", "endog2", "endog3"]
+THREE_ENDOG_INSTRUMENTS = ["z1", "z2", "z3", "z4"]
+
+
+def with_card_region(df: pl.DataFrame) -> pl.DataFrame:
+    """Wooldridge cardに、地域ダミー（`reg661`〜`reg669`）から作った実カテゴリ列
+    `region`（文字列、9グループ）を足す。実データでのクラスターロバストSEの
+    グループ列として、フィクスチャ生成とテストが共有する。
+    """
+    expr = pl.lit(None, dtype=pl.String)
+    for dummy in reversed(CARD_REGION_DUMMIES):
+        expr = pl.when(pl.col(dummy) == 1).then(pl.lit(dummy)).otherwise(expr)
+    return df.with_columns(expr.alias(CARD_REGION_COLUMN))
+
+
+def scenario_x_exog(scenario: str) -> list[str]:
+    """`NUMERIC_SCENARIOS`の各シナリオで`IV`に渡す外生説明変数（既定は`x1`のみ）。"""
+    return X_EXOG_BY_SCENARIO.get(scenario, ["x1"])
+
+
+def multi_endog_instruments(scenario: str) -> list[str]:
+    """`MULTI_ENDOG_SCENARIOS`の各シナリオで`IV`に渡す操作変数（既定は`z1`〜`z3`）。"""
+    return MULTI_ENDOG_INSTRUMENTS_BY_SCENARIO.get(
+        scenario, ["z1", "z2", "z3"]
+    )
+
+
+def scenario_instruments(scenario: str) -> list[str]:
+    """`NUMERIC_SCENARIOS`の各シナリオで`IV`に渡す操作変数（既定は`z1`・`z2`）。"""
+    return INSTRUMENTS_BY_SCENARIO.get(scenario, ["z1", "z2"])
+
 
 # 内生性の強さ: 構造誤差uと第一段階誤差vの相関（シナリオ間で共通の固定値）。
 _RHO_ENDOG = 0.6
+
+
+def _rho_endog(k_endog: int) -> float:
+    """構造誤差uと各第一段階誤差v_jの相関。共分散行列(u, v_1..v_k)が正定値であるには
+    `rho * sqrt(k_endog) < 1`が必要なため（v_i・v_jは無相関）、k_endogが大きいときは
+    `_RHO_ENDOG`を下げる。k_endog<=2では`_RHO_ENDOG`のまま（0.9/sqrt(2)=0.636 > 0.6）で、
+    既存のデータは変わらない。
+    """
+    return min(_RHO_ENDOG, 0.9 / np.sqrt(k_endog))
+
 
 # high_varianceシナリオでの構造誤差uの分散（`benchmark/linear/datasets.py`の
 # high_variance、errors ~ N(0, 10.0)と同じ標準偏差10）。既定は分散1。
@@ -83,6 +177,24 @@ _U_VAR_HIGH_VARIANCE = 100.0
 # pi=0.1（`_PI_WEAK`）→ F≈7.4（閾値10を下回る、弱操作変数として明確）。
 _PI_STRONG = 0.5
 _PI_WEAK = 0.1
+
+# invalid_instrumentシナリオで、最後の操作変数と構造誤差uの相関（除外制約の違反の
+# 強さ）。操作変数の分散は1のまま保つ（`z_last = c*u + sqrt(1-c^2)*z_last`）。
+# n=500・k_instruments=2・seed=42で、Sargan（5.7e-8）とHansen J（robust重み
+# 9.7e-7、hac重み1.4e-5）のp値がいずれも1e-4を下回って明確に棄却し、かつ0に
+# 潰れない大きさになるよう実測して決めた（0.3ではSarganが1.5e-3で弱く、0.6では
+# Sarganが1e-10まで潰れて相対誤差の比較が裾の丸めに敏感になる）。
+_INVALID_INSTRUMENT_CORR = 0.5
+
+# many_regressorsシナリオで固定する説明変数の数と、列ごとのスケール差の範囲
+# （log10、0.1〜100倍。`benchmark/linear/datasets.py`と同じ値）。
+MANY_REGRESSORS_K = 20
+_MANY_REGRESSORS_LOG_SCALE_RANGE = (-1.0, 2.0)
+
+# outlier_regressorシナリオでx_exogの1列目に混入させる外れ値（Tukeyの汚染混合
+# モデル、`benchmark/linear/datasets.py`と同じ値）。
+_OUTLIER_REGRESSOR_CONTAM_PROB = 0.05
+_OUTLIER_REGRESSOR_CONTAM_SCALE = 20.0
 
 
 def generate_iv_dataset(
@@ -100,7 +212,8 @@ def generate_iv_dataset(
     Args:
         scenario: `SCENARIOS`のいずれか。
         n: サンプルサイズ（`"small_n"`シナリオでは40に強制される）。
-        k_exog: 外生説明変数の数（x1..x{k_exog}）。`moderate_multicollinearity`/
+        k_exog: 外生説明変数の数（x1..x{k_exog}）。`many_regressors`では
+            MANY_REGRESSORS_K（20）に強制される。`moderate_multicollinearity`/
             `high_condition_number`はk_exog>=2、`perfect_multicollinearity`/
             `scale_variance`はk_exog>=2（`perfect_multicollinearity`は列3個目を
             上書きするためk_exog>=3）が必要。
@@ -143,17 +256,25 @@ def generate_iv_dataset(
         raise ValueError(f"{scenario} requires k_exog >= 3")
     if scenario in ("scale_variance", "scale_variance_mild") and k_exog < 2:
         raise ValueError(f"{scenario} requires k_exog >= 2")
-    if scenario in ("heteroskedastic", "autocorrelated") and k_endog != 1:
-        # 下記の誤差生成ロジック（二変量正規分布の分岐）がk_endog=1専用のため。
-        raise ValueError(f"{scenario} requires k_endog == 1")
 
     rng = np.random.default_rng(seed)
 
     if scenario == "small_n":
         n = 40
 
+    if scenario == "many_regressors":
+        k_exog = MANY_REGRESSORS_K
+
     if beta_exog is None:
-        beta_exog = rng.uniform(-2.0, 2.0, size=k_exog)
+        if scenario == "many_regressors":
+            # 列取り違えバグを検出しやすくするため、係数の絶対値を列ごとに
+            # 意図的にずらす（隣接インデックス間で最低0.5の間隔を保証、
+            # `benchmark/linear/datasets.py`と同じ方針）。
+            magnitudes = 1.0 + 0.5 * np.arange(k_exog)
+            signs = rng.choice([-1.0, 1.0], size=k_exog)
+            beta_exog = signs * magnitudes
+        else:
+            beta_exog = rng.uniform(-2.0, 2.0, size=k_exog)
     if beta_endog is None:
         beta_endog = rng.uniform(-2.0, 2.0, size=k_endog)
     beta0 = float(rng.uniform(-1.0, 1.0))
@@ -164,36 +285,41 @@ def generate_iv_dataset(
     if scenario == "perfect_multicollinearity":
         apply_perfect_multicollinearity(x_exog)
 
+    if scenario == "outlier_regressor":
+        # x1の一部（5%）だけをTukeyの汚染混合モデルで外れ値に置き換える
+        # （SD20倍、少数の高レバレッジ行）。内生変数・構造式ともこの汚染後の
+        # x_exogから作るため、DGPは汚染込みで一貫する。操作変数・誤差は
+        # 汚染しない（関連性・除外制約を壊さない）。
+        is_outlier = rng.uniform(size=n) < _OUTLIER_REGRESSOR_CONTAM_PROB
+        outlier_vals = rng.normal(0.0, _OUTLIER_REGRESSOR_CONTAM_SCALE, size=n)
+        x_exog[:, 0] = np.where(is_outlier, outlier_vals, x_exog[:, 0])
+
     # --- 操作変数 instruments（構造誤差u・第一段階誤差vのいずれとも独立に生成、
     # 除外制約を満たすようにする） ---
     z = rng.normal(0.0, 1.0, size=(n, k_instruments))
 
     # --- 内生性: 構造誤差uと第一段階誤差vの相関 ---
-    # heteroskedastic/autocorrelated分岐は二変量正規分布（k_endog=1専用、
-    # 呼び出し側で強制済み）のまま、それ以外（"else"分岐）は内生変数ごとに
-    # 独立な第一段階誤差v_jに一般化する（下記参照）。
-    cov_uv = np.array([[1.0, _RHO_ENDOG], [_RHO_ENDOG, 1.0]])
-    if scenario == "heteroskedastic":
-        # 分散がx_exogの最初の列に依存（`benchmark/linear/datasets.py`の
-        # heteroskedasticシナリオと同じ発想）。
-        sigma_i = (
-            HETEROSKEDASTIC_SIGMA_BASE
-            + HETEROSKEDASTIC_SIGMA_SLOPE * np.abs(x_exog[:, 0])
-        )
-        uv = rng.multivariate_normal(mean=[0.0, 0.0], cov=cov_uv, size=n)
-        u = uv[:, 0] * sigma_i
-        v = uv[:, 1:2]  # (n, 1)
-    elif scenario == "autocorrelated":
+    # autocorrelated分岐はAR(1)の構造誤差、それ以外（"else"分岐）はi.i.d.の
+    # 構造誤差。どちらも内生変数ごとに独立な第一段階誤差v_jを持つ（下記参照）。
+    if scenario == "autocorrelated":
         # AR(1): u_t = rho_ar * u_{t-1} + innovation_t
         # （`benchmark/linear/datasets.py`のautocorrelatedシナリオと同じ発想。
         # vは自己相関させない: HAC/Kernelの検証対象は構造誤差uの時系列相関のため）。
+        # 内生変数ごとに独立な第一段階誤差v_jを持つ。k_endog=1では従来の二変量
+        # 正規分布からの生成と乱数列が一致する。
         rho_ar = AUTOCORRELATED_RHO
-        uv_innov = rng.multivariate_normal(mean=[0.0, 0.0], cov=cov_uv, size=n)
+        dim = 1 + k_endog
+        cov_innov = np.eye(dim)
+        cov_innov[0, 1:] = _rho_endog(k_endog)
+        cov_innov[1:, 0] = _rho_endog(k_endog)
+        uv_innov = rng.multivariate_normal(
+            mean=np.zeros(dim), cov=cov_innov, size=n
+        )
         u = np.zeros(n)
         u[0] = uv_innov[0, 0]
         for t in range(1, n):
             u[t] = rho_ar * u[t - 1] + uv_innov[t, 0]
-        v = uv_innov[:, 1:2]  # (n, 1)
+        v = uv_innov[:, 1:]  # (n, k_endog)
     else:
         # 内生変数ごとに独立な第一段階誤差v_j（構造誤差uとはそれぞれ相関
         # _RHO_ENDOGを持つが、v_i・v_j（i≠j）同士は無相関）。k_endog=1では
@@ -203,18 +329,33 @@ def generate_iv_dataset(
         # 実測）になり、Wu-Hausman検定の拡張回帰が推定不能になるため、内生変数
         # ごとに独立なvが必須。
         # high_varianceは構造誤差uの分散のみ拡大する（vの分散は1のまま、
-        # u-v_j間の共分散はcorr(u,v_j)=_RHO_ENDOGを保つようスケーリング）。
+        # u-v_j間の共分散はcorr(u,v_j)=_rho_endog(k_endog)を保つようスケーリング）。
         u_var = _U_VAR_HIGH_VARIANCE if scenario == "high_variance" else 1.0
         dim = 1 + k_endog
         cov_u_v = np.eye(dim)
         cov_u_v[0, 0] = u_var
-        cov_u_v[0, 1:] = _RHO_ENDOG * np.sqrt(u_var)
-        cov_u_v[1:, 0] = _RHO_ENDOG * np.sqrt(u_var)
+        cov_u_v[0, 1:] = _rho_endog(k_endog) * np.sqrt(u_var)
+        cov_u_v[1:, 0] = _rho_endog(k_endog) * np.sqrt(u_var)
         draws = rng.multivariate_normal(
             mean=np.zeros(dim), cov=cov_u_v, size=n
         )
         u = draws[:, 0]
         v = draws[:, 1:]  # (n, k_endog)
+        if scenario == "heteroskedastic":
+            # 構造誤差uの分散がx_exogの最初の列に依存（`benchmark/linear/
+            # datasets.py`のheteroskedasticシナリオと同じ発想）。vは等分散のまま
+            # （u-v_j間の相関は観測ごとに変わるが、第一段階は等分散で十分）。
+            # k_endog=1では従来の二変量正規分布からの生成と乱数列が一致する。
+            sigma_i = (
+                HETEROSKEDASTIC_SIGMA_BASE
+                + HETEROSKEDASTIC_SIGMA_SLOPE * np.abs(x_exog[:, 0])
+            )
+            u = u * sigma_i
+        if scenario == "invalid_instrument":
+            # 最後の操作変数を構造誤差uと相関させる（除外制約の違反）。
+            # 他の操作変数は有効なまま、Sargan/Hansen J検定が棄却する。
+            c = _INVALID_INSTRUMENT_CORR
+            z[:, -1] = c * u + np.sqrt(1.0 - c**2) * z[:, -1]
 
     # --- 第一段階: x_endog = pi0 + Z @ pi + x_exog @ gamma + v ---
     pi_strength = _PI_WEAK if scenario == "weak_instruments" else _PI_STRONG
@@ -237,6 +378,16 @@ def generate_iv_dataset(
         beta_exog = beta_exog.copy()
         beta_exog[0] /= SCALE_VARIANCE_X1_SCALE
         beta_exog[1] /= SCALE_VARIANCE_X2_SCALE
+
+    if scenario == "many_regressors":
+        # 列ごとにスケールを大きくばらつかせる（0.1〜100倍、3桁のスケール差）。
+        # 高次元での数値的頑健性を検証する成功パス。x_endogはスケーリング前の
+        # x_exogから計算済み（スケールの大きい列に内生変数が支配され操作変数が
+        # 事実上無関係になるのを避ける）のため、yへの影響はbeta_exogを逆
+        # スケーリングして相殺する（scale_varianceと同じ発想）。
+        col_scales = np.logspace(*_MANY_REGRESSORS_LOG_SCALE_RANGE, k_exog)
+        x_exog = x_exog * col_scales
+        beta_exog = beta_exog / col_scales
 
     if scenario == "scale_variance_mild":
         # scale_varianceより緩いスケール差（x1は10^2オーダー、x2は10^-1

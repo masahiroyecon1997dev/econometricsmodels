@@ -31,25 +31,18 @@ OLS/WLS/Logit/Probit は statsmodels、IV は linearmodels をリファレンス
 `tests/nonlinear/test_tobit_reference.py`（`AER::tobit`）・`test_tobit_crosscheck.py`
 （`censReg`）が担う。
 
-## cov_type の範囲
+## スイープ軸と cov_type の範囲
 
-`.claude/rules/testing-policy.md`「パフォーマンス比較（ベンチマーク）の方法論」に
-従い、代表2点のみ計測する: 最も軽い `classical` と、最も計算コストの重い
-`cluster`。n=100,000・k=5 で全 cov_type を実測して確認済み（classical 0.138s <
-opg 0.148s < hc1 0.150s < hc0 0.154s < cluster 0.162s、engine・newton）。省略する
-`opg`/`hc0`/`hc1` は classical と cluster の間に収まる。cluster の疑似グループ数は
-50 固定。
-
-## スイープ軸
-
-- **n 軸**（k=5 固定、newton）: classical / cluster とも n=1,000〜100,000。加えて
-  **classical のみ n=200,000 / 1,000,000**（`n_sweep_engine_only`、seed は
-  `default_seed=42` のみ。全 cov_type で大 n を回すと CI 時間がかさむため classical
-  に絞る。下記「## n 軸の大標本点」参照）。
-- **k 軸**（n=10,000 固定、newton）: k=5・20、classical / cluster。
+- **n 軸**（k=5 固定、newton）: classical のみ n=10,000〜100,000。加えて
+  **n=200,000 / 1,000,000**（`n_sweep_engine_only`、seed は `default_seed=42` の
+  み。下記「## n 軸の大標本点」参照）。
+- **k 軸**（n=10,000 固定、newton）: k=5・20、classical のみ。
+- **cov 軸**（n=100,000・k=5、newton）: 標準誤差の種類を全て回す。`classical`・
+  `opg`・`hc0`・`hc1`、cluster の 2×2（G=50 / G=n/10 × random / sorted）。
+  リファレンスが無いので全て engine 単独。
 - **method 軸**: 下記「## method（オプティマイザ）の範囲」参照。
 
-## n 軸の大標本点（classical のみ n=200,000 / 1,000,000）
+## n 軸の大標本点（n=200,000 / 1,000,000）
 
 - **n=1,000,000（seed=42）が過去の再現点**。乱数 β の
   `moderate_censoring` DGP で engine が
@@ -80,7 +73,7 @@ opg 0.148s < hc1 0.150s < hc0 0.154s < cluster 0.162s、engine・newton）。省
 ## method（オプティマイザ）の範囲
 
 既定は Newton-Raphson で、n/k スイープは newton で回す。加えて `lbfgs` を
-**method 軸**として代表点1つ（cov_type=classical・k=5・n=100,000）で計測する。
+**method 軸**として代表点1つ（classical・k=5・n=100,000）で計測する。
 **`bfgs` は現状 method 軸から除外している**: engine の Tobit BFGS 経路は n>=10,000
 で `MoreThuenteLineSearch: NaN or Inf` により発散する（Issue #292。
 `_perf_harness._run_isolated` は `check=True` なので、そのまま入れると benchmark
@@ -101,7 +94,7 @@ quasi-Newton のパフォーマンス劣化の早期検知として、`check_rep
     # （一括実行では `_perf_harness._run_isolated` が自動で設定する）。
     RAYON_NUM_THREADS=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \\
         python -m performance.compare_tobit \\
-        --worker --library engine --cov-type cluster --n 1000 --k 5
+        --worker --library engine --cov-case cluster_g50_random --n 1000 --k 5
 """
 
 from __future__ import annotations
@@ -109,11 +102,23 @@ from __future__ import annotations
 import polars as pl
 
 from benchmark.nonlinear.datasets import generate_censored_regression_dataset
-from performance._perf_harness import FitContext, PerfAdapter, run_cli
+from performance._perf_harness import (
+    CovCase,
+    FitContext,
+    PerfAdapter,
+    cluster_cases,
+    run_cli,
+)
 
-# クラスターロバストSE計測用の疑似グループ数（compare_logit.py / compare_probit.py
-# と同じ）。
-_N_CLUSTERS = 50
+_ENGINE_COV_TYPES = ("classical", "opg", "hc0", "hc1")
+
+_COV_CASES = (
+    CovCase("classical", "classical"),
+    CovCase("opg", "opg"),
+    CovCase("hc0", "hc0"),
+    CovCase("hc1", "hc1"),
+    *cluster_cases(),
+)
 
 # 計測に使う打ち切りシナリオ。左打ち切り ~35%（Tobit テストの BASELINE_SCENARIO と
 # 同じ。`benchmark/nonlinear/datasets.py` の `_TOBIT_SCENARIO_CONFIG`）。
@@ -124,10 +129,7 @@ def _build_dataframe(n: int, k: int, seed: int):
     df, _beta, _bounds = generate_censored_regression_dataset(
         _SCENARIO, n=n, k=k, seed=seed
     )
-    # cluster cov_type 用に行番号ベースの疑似グループ列を付ける。
-    return df.with_columns(
-        (pl.int_range(pl.len()) % _N_CLUSTERS).alias("cluster_group")
-    )
+    return df
 
 
 def _lower_bound(y: pl.Series) -> float:
@@ -141,9 +143,12 @@ def _fit_once_engine(ctx: FitContext):
     from econometricsmodels import Tobit, TobitOptions
 
     lower = _lower_bound(ctx.df[ctx.y_col])
-    if ctx.cov_type == "classical":
+    if ctx.cov_type in _ENGINE_COV_TYPES:
         options = TobitOptions(
-            lower=lower, upper=None, cov_type="classical", solver=ctx.method
+            lower=lower,
+            upper=None,
+            cov_type=ctx.cov_type,
+            solver=ctx.method,
         )
     elif ctx.cov_type == "cluster":
         options = TobitOptions(
@@ -184,7 +189,7 @@ def _check_method_ratios(report: dict) -> list[str]:
             for r in rows
             if r["axis"] == "n"
             and r["library"] == "engine"
-            and r["cov_type"] == "classical"
+            and r["cov_case"] == meta["default_cov_case"]
             and r["n"] == n
             and r["method"] == default_method
         ),
@@ -213,18 +218,17 @@ TOBIT_ADAPTER = PerfAdapter(
     # インプロセス計測できるリファレンス実装が無いため engine 単独
     # （module docstring「engine 単独で計測する」参照）。
     libraries=("engine",),
-    cov_types=("classical", "cluster"),
+    cov_cases=_COV_CASES,
     # engine は git ハッシュで足りるため記録するリファレンス版は無い。
     reference_versions=dict,
     build_dataframe=_build_dataframe,
     fit_once=_fit_once_engine,
-    cluster="cluster_group",
-    # classical / cluster とも n=1,000〜100,000。
-    n_sweep=(1_000, 10_000, 100_000),
-    # classical のみ追加する大標本点。n=1,000,000（seed=42）が過去の大標本
+    # n=10,000〜100,000（n 軸は classical のみ）。
+    n_sweep=(10_000, 100_000),
+    # 追加する大標本点。n=1,000,000（seed=42）が過去の大標本
     # Hessian 特異エラーの再現点で、修正（d797f9b / 5b79ffe）の回帰検知を担う。
     # n=200,000 は n スケーリングのデータ点＋早期警告（seed=42 では再現
-    # しない）。全 cov_type で回すと CI 時間がかさむため classical に絞る。詳細・
+    # しない）。詳細・
     # 限界（単一 seed / 例外のみ捕捉 / リリース単位で発火）は docstring
     # 「## n 軸の大標本点」参照。
     n_sweep_engine_only=(200_000, 1_000_000),

@@ -1,0 +1,268 @@
+{
+  "synthetic": {
+    "baseline": {
+      "lm": 10.831154064730452,
+      "lm_p_value": 0.2874603156049917,
+      "f": 1.2055063821960312,
+      "f_p_value": 0.2891310964668247,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_white",
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-10T22:39:43.083125+00:00",
+        "formula": "y ~ x1 + x2 + x3",
+        "include_intercept": true
+      }
+    },
+    "baseline_k1": {
+      "lm": 2.480685428141338,
+      "lm_p_value": 0.28928505888830486,
+      "f": 1.2390480345946049,
+      "f_p_value": 0.2905530072528651,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_white",
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-10T22:39:43.088681+00:00",
+        "formula": "y ~ x1",
+        "include_intercept": true
+      }
+    },
+    "small_n": {
+      "lm": 11.394485905978675,
+      "lm_p_value": 0.24963473825573673,
+      "f": 1.471212499010113,
+      "f_p_value": 0.2774278469249512,
+      "n_obs": 20,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_white",
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-10T22:39:43.094492+00:00",
+        "formula": "y ~ x1 + x2 + x3",
+        "include_intercept": true
+      }
+    },
+    "high_variance": {
+      "lm": 10.831154064730397,
+      "lm_p_value": 0.28746031560499485,
+      "f": 1.205506382196026,
+      "f_p_value": 0.289131096466828,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_white",
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-10T22:39:43.101729+00:00",
+        "formula": "y ~ x1 + x2 + x3",
+        "include_intercept": true
+      }
+    },
+    "heteroskedastic": {
+      "lm": 115.68264446444965,
+      "lm_p_value": 1.0200817850263215e-20,
+      "f": 16.38821983710423,
+      "f_p_value": 1.2808324573412985e-23,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_white",
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-10T22:39:43.109967+00:00",
+        "formula": "y ~ x1 + x2 + x3",
+        "include_intercept": true
+      }
+    },
+    "autocorrelated": {
+      "lm": 20.817887905071775,
+      "lm_p_value": 0.013484033422688885,
+      "f": 2.365318556118839,
+      "f_p_value": 0.012710683104548289,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_white",
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-10T22:39:43.118145+00:00",
+        "formula": "y ~ x1 + x2 + x3",
+        "include_intercept": true
+      }
+    },
+    "moderate_multicollinearity": {
+      "lm": 10.831154064730287,
+      "lm_p_value": 0.28746031560500285,
+      "f": 1.2055063821960166,
+      "f_p_value": 0.289131096466834,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_white",
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-10T22:39:43.125757+00:00",
+        "formula": "y ~ x1 + x2 + x3",
+        "include_intercept": true
+      }
+    },
+    "high_condition_number": {
+      "lm": 10.831154064730397,
+      "lm_p_value": 0.28746031560499485,
+      "f": 1.20550638219603,
+      "f_p_value": 0.2891310964668259,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_white",
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-10T22:39:43.133197+00:00",
+        "formula": "y ~ x1 + x2 + x3",
+        "include_intercept": true
+      }
+    },
+    "scale_variance_mild": {
+      "lm": 10.831154064730342,
+      "lm_p_value": 0.28746031560499924,
+      "f": 1.205506382196022,
+      "f_p_value": 0.2891310964668307,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_white",
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-10T22:39:43.139945+00:00",
+        "formula": "y ~ x1 + x2 + x3",
+        "include_intercept": true
+      }
+    },
+    "many_regressors": {
+      "lm": 215.51604425734706,
+      "lm_p_value": 0.7449821644254134,
+      "f": 0.8860256055395059,
+      "f_p_value": 0.8281122417549442,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_white",
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-10T22:39:43.368171+00:00",
+        "formula": "y ~ x1 + x2 + x3 + x4 + x5 + x6 + x7 + x8 + x9 + x10 + x11 + x12 + x13 + x14 + x15 + x16 + x17 + x18 + x19 + x20",
+        "include_intercept": true
+      }
+    },
+    "outlier_regressor": {
+      "lm": 5.7435697457337564,
+      "lm_p_value": 0.7652832307888244,
+      "f": 0.6326785951444793,
+      "f_p_value": 0.7693718604486685,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_white",
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-10T22:39:43.384847+00:00",
+        "formula": "y ~ x1 + x2 + x3",
+        "include_intercept": true
+      }
+    },
+    "baseline_no_intercept": {
+      "lm": 10.484689256015756,
+      "lm_p_value": 0.31268887544063095,
+      "f": 1.1661189531515128,
+      "f_p_value": 0.314682400335942,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_white",
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-10T22:39:43.406345+00:00",
+        "formula": "y ~ x1 + x2 + x3",
+        "include_intercept": false
+      }
+    }
+  },
+  "wooldridge": {
+    "wage1": {
+      "lm": 20.741466032626903,
+      "lm_p_value": 0.013849153279925093,
+      "f": 2.353601781909533,
+      "f_p_value": 0.013105280352801452,
+      "n_obs": 526,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_white",
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-10T22:39:43.432226+00:00",
+        "formula": "lwage ~ educ + exper + tenure",
+        "include_intercept": true
+      }
+    },
+    "gpa2": {
+      "lm": 202.16503258504005,
+      "lm_p_value": 1.1649051772767156e-38,
+      "f": 23.5597933836201,
+      "f_p_value": 1.1572734829379065e-39,
+      "n_obs": 4137,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_white",
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-10T22:39:43.477206+00:00",
+        "formula": "colgpa ~ sat + hsperc + tothrs",
+        "include_intercept": true
+      }
+    },
+    "wage1_dummies": {
+      "lm": 35.46485574767648,
+      "lm_p_value": 0.008256461632079633,
+      "f": 2.036402043626845,
+      "f_p_value": 0.007173150085415303,
+      "n_obs": 526,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_white",
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-10T22:39:43.496320+00:00",
+        "formula": "lwage ~ educ + exper + tenure + female + married",
+        "include_intercept": true
+      }
+    },
+    "wage1_polynomial": {
+      "lm": 40.440221495108275,
+      "lm_p_value": 0.0018174594513218367,
+      "f": 2.3458826064346425,
+      "f_p_value": 0.001431732611580792,
+      "n_obs": 526,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_white",
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-10T22:39:43.514024+00:00",
+        "formula": "lwage ~ educ + exper + expersq + tenure + tenursq",
+        "include_intercept": true
+      }
+    },
+    "wage1_region": {
+      "lm": 24.685114099363176,
+      "lm_p_value": 0.037806298666451035,
+      "f": 1.7972868749110704,
+      "f_p_value": 0.03609145900379711,
+      "n_obs": 526,
+      "_meta": {
+        "reference": "statsmodels",
+        "function": "statsmodels.stats.diagnostic.het_white",
+        "statsmodels_version": "0.15.0",
+        "generated_at": "2026-10-10T22:39:43.538856+00:00",
+        "formula": "lwage ~ educ + exper + northcen + south + west",
+        "include_intercept": true
+      }
+    }
+  },
+  "_meta": {
+    "method": "ols_white",
+    "generated_at": "2026-10-10T22:39:43.538959+00:00",
+    "primary_reference": "statsmodels.stats.diagnostic.het_white",
+    "statsmodels_version": "0.15.0",
+    "note": "baseline_df1（n=5）は補助回帰の列数に対して観測数が足りずValidationErrorになるため含めない。baseline_no_interceptはinclude_intercept=Falseのモデルの残差を使い、補助回帰には常に定数を含める。wooldridge.wage1_dummiesはダミー変数（female, married）の二乗が元のダミーと同一の列になるケースで、statsmodelsのhet_whiteも補助回帰のランクで自由度を数えるため、LM・F版・p値までRと一致する。"
+  }
+}

@@ -24,7 +24,6 @@ logit_crosscheck.json）を生成するスクリプト。
 
 from __future__ import annotations
 
-import subprocess
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -32,14 +31,26 @@ from pathlib import Path
 import polars as pl
 
 from benchmark.common import (
+    APPLE_CLUSTER,
+    APPLE_FORMULA,
     BENCHMARKS_DIR,
     MROZ_FORMULA,
+    balanced_cluster_groups,
     imbalanced_cluster_groups,
     load_frozen_dataset,
     run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
-from benchmark.nonlinear.references.r import run_glm_r
+from benchmark.common.load_wooldridge import load_apple_adoption
+from benchmark.nonlinear.constants import (
+    CONFIDENCE_LEVEL_NON_DEFAULT,
+    NON_CLUSTER_COV_TYPES,
+)
+from benchmark.nonlinear.references.r import (
+    glm_reference_settings,
+    glm_reference_versions,
+    run_glm_r,
+)
 
 NUMERIC_SCENARIOS = [
     "baseline",
@@ -48,10 +59,11 @@ NUMERIC_SCENARIOS = [
     "high_condition_number",
     "near_separation",
     "scale_variance",
+    # 高次元（k=20）と高レバレッジ行。hc1のn/(n-k)補正とOPG・HC0の挙動は
+    # Rのみが参照のため、主リファレンス（statsmodels）と同じシナリオを通す。
+    "many_regressors",
+    "outlier_regressor",
 ]
-
-# hc1をここでは主リファレンスとして含める（他はクロスチェック用）。
-R_COV_TYPES = ["classical", "opg", "hc0", "hc1", "cluster"]
 
 
 def _write_csv(df, tmpdir: Path, name: str) -> Path:
@@ -65,16 +77,16 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
 
     for scenario in NUMERIC_SCENARIOS:
         df, _ = load_frozen_dataset("logit", scenario)
-        formula = "y ~ x1 + x2 + x3"
+        # many_regressorsはx1..x20なので、式は列名から組む。
+        x_cols = [c for c in df.columns if c != "y"]
+        formula = "y ~ " + " + ".join(x_cols)
         csv_path = _write_csv(df, tmpdir, scenario)
 
         fixtures[scenario] = {}
-        for cov_type in R_COV_TYPES:
-            if cov_type == "cluster":
-                continue
-            fixtures[scenario][cov_type] = {
-                "r": run_glm_r(csv_path, formula, cov_type)
-            }
+        for cov_type in NON_CLUSTER_COV_TYPES:
+            fixtures[scenario][cov_type] = run_glm_r(
+                csv_path, formula, cov_type
+            )
 
     baseline_df, _ = load_frozen_dataset("logit", "baseline")
     n = baseline_df.height
@@ -89,9 +101,63 @@ def build_synthetic_fixtures(tmpdir: Path) -> dict:
         groups=imbalanced_cluster_groups(n),
         suffix="_cluster_imbalanced",
     )
+    # クラスター数の境界G=q+1（q=3、G=4）。G<=qはValidationErrorで、成功パスを持てる
+    # 最小のG（testing-policy.md「テスト用データセット」3.）。
+    fixtures["baseline"]["cluster_g4"] = _run_cluster_case(
+        baseline_csv,
+        formula="y ~ x1 + x2 + x3",
+        tmpdir=tmpdir,
+        groups=balanced_cluster_groups(n, 4),
+        suffix="_cluster_g4",
+    )
     # NOTE: cluster_g2（G=2×説明変数3個）の成功パスフィクスチャは
     # 削除した。`rank(Ŝ)<=G-1`のため`G<=q`ではクラスターロバスト共分散が退化し、
     # `fit()`冒頭のバリデーションが ValidationError で弾く。
+
+    # include_intercept=False（切片なし）。式に`- 1`を付けて切片を落とす
+    # （`run_glm_crosscheck.R`は式以外の変更なしで切片なしのfitに対応する）。
+    # statsmodels側（logit.json）は`hc1`と不均衡クラスターを持たないため、
+    # ここが切片なしのhc1・不均衡クラスターの唯一の数値照合対象になる。
+    no_intercept_formula = "y ~ x1 + x2 + x3 - 1"
+    fixtures["baseline"]["no_intercept"] = {
+        cov_type: run_glm_r(baseline_csv, no_intercept_formula, cov_type)
+        for cov_type in NON_CLUSTER_COV_TYPES
+    }
+    fixtures["baseline"]["no_intercept"]["cluster"] = _run_cluster_case(
+        baseline_csv,
+        formula=no_intercept_formula,
+        tmpdir=tmpdir,
+        suffix="_no_intercept_cluster",
+    )
+    fixtures["baseline"]["no_intercept"]["cluster_imbalanced"] = (
+        _run_cluster_case(
+            baseline_csv,
+            formula=no_intercept_formula,
+            tmpdir=tmpdir,
+            groups=imbalanced_cluster_groups(n),
+            suffix="_no_intercept_cluster_imbalanced",
+        )
+    )
+
+    # confidence_level非既定（0.95以外）。係数と限界効果の信頼区間を、全cov_type
+    # （opg・hc1を含む）とクラスターで確認する（OLS/WLS/IVと同じ。statsmodels側
+    # にhc1が無いため、hc1の非既定水準はここが唯一の数値照合対象）。
+    fixtures["baseline"]["confidence_level"] = {
+        cov_type: run_glm_r(
+            baseline_csv,
+            "y ~ x1 + x2 + x3",
+            cov_type,
+            confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+        )
+        for cov_type in NON_CLUSTER_COV_TYPES
+    }
+    fixtures["baseline"]["confidence_level"]["cluster"] = _run_cluster_case(
+        baseline_csv,
+        formula="y ~ x1 + x2 + x3",
+        tmpdir=tmpdir,
+        suffix="_confidence_level_cluster",
+        confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+    )
 
     return fixtures
 
@@ -102,18 +168,23 @@ def _run_cluster_case(
     tmpdir: Path,
     groups: list | None = None,
     suffix: str = "_cluster",
+    confidence_level: float = 0.95,
 ) -> dict:
     df = pl.read_csv(csv_path)
     n = df.height
     cluster_group = (
-        groups if groups is not None else [i % 10 for i in range(n)]
+        groups if groups is not None else balanced_cluster_groups(n)
     )
     grouped = df.with_columns(pl.Series("cluster_group", cluster_group))
     tmp_path = csv_path.with_name(csv_path.stem + suffix + ".csv")
     grouped.write_csv(tmp_path)
-    return {
-        "r": run_glm_r(tmp_path, formula, "cluster", cluster="cluster_group")
-    }
+    return run_glm_r(
+        tmp_path,
+        formula,
+        "cluster",
+        cluster="cluster_group",
+        confidence_level=confidence_level,
+    )
 
 
 def build_wooldridge_fixtures(tmpdir: Path) -> dict:
@@ -121,13 +192,24 @@ def build_wooldridge_fixtures(tmpdir: Path) -> dict:
     csv_path = _write_csv(df, tmpdir, "mroz")
 
     fixtures: dict = {}
-    for cov_type in R_COV_TYPES:
-        if cov_type == "cluster":
-            continue
-        fixtures[cov_type] = {"r": run_glm_r(csv_path, MROZ_FORMULA, cov_type)}
+    for cov_type in NON_CLUSTER_COV_TYPES:
+        fixtures[cov_type] = run_glm_r(csv_path, MROZ_FORMULA, cov_type)
     # NOTE: mrozの`city`（G=2）クラスターロバストSEの成功パスフィクスチャは
     # 削除した（MROZ_X は7変数で`G=2 <= q=7`のため ValidationError）。
     return fixtures
+
+
+def build_apple_fixtures(tmpdir: Path) -> dict:
+    """多クラスターの実データ（apple、`ecolbs > 0`、州でG=49）。"""
+    csv_path = _write_csv(load_apple_adoption(), tmpdir, "apple")
+    return {
+        "cluster": run_glm_r(
+            csv_path,
+            APPLE_FORMULA,
+            "cluster",
+            cluster=APPLE_CLUSTER,
+        )
+    }
 
 
 def build_fixtures() -> dict:
@@ -135,26 +217,11 @@ def build_fixtures() -> dict:
         tmpdir = Path(tmp)
         fixtures = {
             "synthetic": build_synthetic_fixtures(tmpdir),
-            "wooldridge": {"mroz": build_wooldridge_fixtures(tmpdir)},
+            "wooldridge": {
+                "mroz": build_wooldridge_fixtures(tmpdir),
+                "apple": build_apple_fixtures(tmpdir),
+            },
         }
-
-    r_version = subprocess.run(
-        ["Rscript", "-e", "cat(as.character(getRversion()))"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-
-    marginaleffects_version = subprocess.run(
-        [
-            "Rscript",
-            "-e",
-            'cat(as.character(packageVersion("marginaleffects")))',
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
 
     fixtures["_meta"] = {
         "method": "logit",
@@ -171,14 +238,32 @@ def build_fixtures() -> dict:
             "算出不可）。"
         ),
         "generated_at": datetime.now(UTC).isoformat(),
-        "r_version": r_version,
-        "marginaleffects_version": marginaleffects_version,
+        **glm_reference_versions(),
+        # 正本はrun_glm_crosscheck.Rの`glm_settings`。
+        "glm_reference_settings": glm_reference_settings(),
         "note": (
+            "many_regressors（k=20）とoutlier_regressor（x1の5%が外れ値）を含む。"
+            "ロバストSE・クラスターSEの参照値は、収束後の係数から再fitを繰り返した"
+            "glmで計算している（run_glm_crosscheck.R参照）。"
+            "その設定は_meta.glm_reference_settings、各エントリのirls_iterations・"
+            "refit_count・refit_max_rel_changeは実際の収束の記録。"
             "perfect_multicollinearityシナリオはここに含まない"
             "（ComputationErrorの発生確認のみ、テストコード側で対応）。"
             "clusterは合成データ（baselineシナリオ、均等疑似グループ・不均衡"
-            "グループ）を含む。G<=q（傾き係数の数）のケース（旧cluster_g2・mroz/city）は"
+            "グループ）に加え、クラスター数の境界G=q+1（cluster_g4、q=3でG=4）を含む。G<=q（傾き係数の数）のケース（旧cluster_g2・mroz/city）は"
             "ValidationErrorになるため成功パスフィクスチャを持たない。"
+            "実データのクラスターはapple（`ecolbs > 0`、州でG=49）が担う。"
+            "baseline.no_interceptはinclude_intercept=False（切片なし）のクロスチェックで、"
+            "全cov_type（opg・hc1を含む）と均等・不均衡のクラスターを持つ。statsmodels側には"
+            "hc1と不均衡クラスターが無いため、ここが唯一の数値照合対象。"
+            "log_likelihood_nullは常に切片のみのモデルを参照するため、lr_statisticが負値に"
+            "なりうる。"
+            "baseline.confidence_levelは非既定の信頼水準（0.90）のクロスチェックで、"
+            "係数と限界効果の信頼区間を全cov_type（opg・hc1を含む）とクラスターで持つ。"
+            "全エントリが予測関連の参照値を持つ: 分類表pred_table（確率>0.5で1）、"
+            "標本内の予測確率の先頭10行predict_headと全行の合計predict_sum、"
+            "新規データ（学習データの各傾きの平均±1標準偏差の2行new_x）の予測確率"
+            "predict_new_data。"
             "パラメータ名は全ソースで切片を'const'に正規化済み。"
         ),
     }

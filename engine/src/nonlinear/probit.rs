@@ -60,20 +60,21 @@
 //! の領域では`zᵢ`に対して事実上定数になる。ここで生の（非クランプの）`zᵢ`を`w`の
 //! 計算に混ぜると、上記導出の前提（`λᵢ`が`zᵢ`の滑らかな関数であること）が崩れ、
 //! `λᵢ(λᵢ+zᵢ)>0`という大域凹性の恒等式が数値的に破れて`w`が負になりうる（実測で
-//! 悪条件パラメータ点にて確認済み）。`linear_predictor_and_residual`が返す`zᵢ`は
-//! `λᵢ`と同じクランプ済み`u`から再構成した値であり、この非対称性を避けている。
+//! 悪条件パラメータ点にて確認済み）。`hessian_weight`は`λᵢ`と同じクランプ済み`u`から
+//! `zᵢ`を再構成して重みを作っており、この非対称性を避けている。
 
-use crate::error::CommonError;
-use crate::inference;
 use crate::nonlinear::common::{
     CovType, FittedModelForMarginalEffects, GoodnessOfFit, MarginalEffects, MarginalEffectsAt,
-    MleError, MleFitOptions, SandwichVariant, SeparationNormCheck, U_CLAMP, clamped_pdf_cdf,
-    cluster_cov_params, column_means, column_medians, compensated_sum, destandardize_cov_params,
-    destandardize_params, goodness_of_fit, log_likelihood_null, marginal_effects_from_w_s,
+    MleError, MleFitOptions, SandwichVariant, U_CLAMP, clamped_pdf_cdf, cluster_cov_params,
+    column_means, column_medians, compensated_sum, destandardize_cov_params, destandardize_params,
+    goodness_of_fit, log_likelihood_null, marginal_effects_from_w_s,
     observed_information_cov_params, ols_based_initial_params, opg_cov_params, pred_table,
     predict_from_link, predict_new_data, run_solver, sandwich_cov_params, standardize_columns,
     validate_fit_preconditions,
 };
+use crate::nonlinear::separation::verify_no_separation;
+use crate::shared::error::CommonError;
+use crate::shared::inference;
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::Mat;
 use statrs::distribution::{Continuous, ContinuousCDF, Normal};
@@ -304,35 +305,45 @@ impl ProbitProblem {
             .sum()
     }
 
-    /// 観測`i`の一般化残差`λ_i = q_i φ(q_i z_i)/Φ(q_i z_i)`（`q_i=2y_i-1`、モジュール
-    /// 冒頭の数式参照）と、`hessian`の重み`w=λᵢ(λᵢ+zᵢ)`が使う**`λᵢ`と整合するように
-    /// クランプ済みの`zᵢ`**（`z̃ᵢ = qᵢ·clamp(qᵢzᵢ, -U_CLAMP, U_CLAMP)`）をまとめて
-    /// 計算する。`hessian`が両方を必要とするため、個別に呼び出すより重複計算を避けられる。
-    /// `normal`は呼び出し側（観測`n`件のループ全体）で1回だけ構築して渡す
-    /// （`cost`/`gradient`/`hessian`いずれもn回ではなく1回の構築で済ませる）。
-    ///
-    /// **`z̃ᵢ`は生の線形予測子`zᵢ`ではない**: `λᵢ`は`clamped_pdf_cdf`で
-    /// `u=qᵢzᵢ`を`[-U_CLAMP, U_CLAMP]`にクランプした後の値を使うため、`|u|>U_CLAMP`の
-    /// 領域では`λᵢ`は`zᵢ`に対して事実上定数になる。この領域で`hessian`の重み計算に
-    /// 生の（非クランプの）`zᵢ`を混ぜると、`λᵢ(λᵢ+zᵢ)>0`という大域凹性の前提
-    /// （モジュール冒頭の導出参照）が数学的に破れ、`w`が負になりうる
-    /// （実測: 悪条件パラメータ点で`w<0`の観測を確認済み）。`λᵢ`が実際に依存している
-    /// のと同じクランプ済み引数から`z̃ᵢ`を再構成することで、`λᵢ(λᵢ+z̃ᵢ)>0`の恒等式が
-    /// クランプ領域でも保たれる（クランプ後の`u`に対する同一の解析式を評価しているに
-    /// すぎないため）。
-    fn linear_predictor_and_residual(
-        &self,
-        i: usize,
-        params: &[f64],
-        normal: &Normal,
-    ) -> (f64, f64) {
-        let z = self.linear_predictor(i, params);
+    /// 観測`i`の符号付き線形予測子 `(q_i, u_i)`（`q_i=2y_i-1`、`u_i=q_i z_i`）。
+    /// 一般化残差`λ_i`・`hessian`の重みの両方がこの`u_i`から作られる。
+    fn signed_index(&self, i: usize, params: &[f64]) -> (f64, f64) {
         let q = 2.0 * (*self.y.get(i, 0)) - 1.0;
-        let u = q * z;
+        (q, q * self.linear_predictor(i, params))
+    }
+
+    /// `signed_index`の`(q, u)`から一般化残差`λ = q φ(u)/Φ(u)`（モジュール冒頭の数式参照）を
+    /// 計算する。`u`は`clamped_pdf_cdf`が`[-U_CLAMP, U_CLAMP]`にクランプしてから評価する。
+    fn generalized_residual_at(normal: &Normal, q: f64, u: f64) -> f64 {
         let (phi, big_phi) = clamped_pdf_cdf(normal, u);
-        let lambda = q * phi / big_phi;
-        let z_for_hessian = q * u.clamp(-U_CLAMP, U_CLAMP);
-        (z_for_hessian, lambda)
+        q * phi / big_phi
+    }
+
+    /// 観測`i`の一般化残差`λ_i = q_i φ(q_i z_i)/Φ(q_i z_i)`（`q_i=2y_i-1`）。
+    /// `gradient`/`scores`が使う（`cost`は対数尤度を`log_likelihood`で直接評価する）。
+    /// `normal`は呼び出し側（観測`n`件のループ全体）で
+    /// 1回だけ構築して渡す。
+    fn generalized_residual(&self, i: usize, params: &[f64], normal: &Normal) -> f64 {
+        let (q, u) = self.signed_index(i, params);
+        Self::generalized_residual_at(normal, q, u)
+    }
+
+    /// 観測`i`の`hessian`の重み `w_i = λ_i(λ_i + z̃_i)`。`z̃_i = q_i·clamp(q_i z_i, -U_CLAMP,
+    /// U_CLAMP)`は`λ_i`と同じクランプ済み引数から再構成した値で、**生の線形予測子`z_i`では
+    /// ない**。`z̃_i`は`w_i`の中でしか意味を持たないため、単独では返さずこの関数の中に閉じている。
+    ///
+    /// `λ_i`は`clamped_pdf_cdf`で`u=q_i z_i`を`[-U_CLAMP, U_CLAMP]`にクランプした後の値を
+    /// 使うため、`|u|>U_CLAMP`の領域では`λ_i`は`z_i`に対して事実上定数になる。この領域で
+    /// 生の（非クランプの）`z_i`を`w_i`に混ぜると、`λ_i(λ_i+z_i)>0`という大域凹性の前提
+    /// （モジュール冒頭の導出参照）が数学的に破れ、`w_i`が負になりうる（実測: 悪条件
+    /// パラメータ点で`w<0`の観測を確認済み）。`λ_i`が実際に依存しているのと同じクランプ済み
+    /// 引数から`z̃_i`を再構成することで、`λ_i(λ_i+z̃_i)>0`の恒等式がクランプ領域でも保たれる
+    /// （クランプ後の`u`に対する同一の解析式を評価しているにすぎないため）。
+    fn hessian_weight(&self, i: usize, params: &[f64], normal: &Normal) -> f64 {
+        let (q, u) = self.signed_index(i, params);
+        let lambda = Self::generalized_residual_at(normal, q, u);
+        let clamped_z = q * u.clamp(-U_CLAMP, U_CLAMP);
+        lambda * (lambda + clamped_z)
     }
 
     /// 観測ごとのスコア行列（n×k）。各行が`sᵢ = λᵢxᵢ`（対数尤度の1階微分そのもの、
@@ -342,10 +353,12 @@ impl ProbitProblem {
         let n = self.x.nrows();
         let k = self.x.ncols();
         let normal = Normal::standard();
-        Mat::from_fn(n, k, |i, j| {
-            let (_, lambda) = self.linear_predictor_and_residual(i, params, &normal);
-            lambda * (*self.x.get(i, j))
-        })
+        // `λᵢ`は`j`によらないため、観測あたり1回だけ計算する（セルごとに計算すると
+        // `linear_predictor`のO(k)と`φ`/`Φ`の評価が行あたりk回になる）。
+        let lambdas: Vec<f64> = (0..n)
+            .map(|i| self.generalized_residual(i, params, &normal))
+            .collect();
+        Mat::from_fn(n, k, |i, j| lambdas[i] * (*self.x.get(i, j)))
     }
 }
 
@@ -370,7 +383,7 @@ impl Gradient for ProbitProblem {
         let normal = Normal::standard();
         let mut grad = vec![0.0; k];
         for i in 0..n {
-            let (_, lambda) = self.linear_predictor_and_residual(i, param, &normal);
+            let lambda = self.generalized_residual(i, param, &normal);
             for (j, grad_j) in grad.iter_mut().enumerate() {
                 *grad_j += -lambda * (*self.x.get(i, j));
             }
@@ -386,8 +399,8 @@ impl Hessian for ProbitProblem {
     /// `-ℓ(θ)`のHessian `X'WX`（`W = diag(λᵢ(λᵢ+zᵢ))`、対数尤度のHessian`-X'WX`の
     /// 符号反転）。`run_solver`のdocコメント「`Hessian`トレイトの符号規約」参照。
     ///
-    /// `zᵢ`は`linear_predictor_and_residual`が返す、`λᵢ`と同じクランプ済み引数から
-    /// 再構成した値（同関数のdocコメント参照）。これにより`λᵢ(λᵢ+zᵢ)>0`
+    /// 重みは`hessian_weight`が返す、`λᵢ`と同じクランプ済み引数から`zᵢ`を
+    /// 再構成して作った値（同関数のdocコメント参照）。これにより`λᵢ(λᵢ+zᵢ)>0`
     /// （`W`の正定値性、対数尤度の大域凹性の根拠）がクランプ領域でも保たれる。
     fn hessian(&self, param: &Self::Param) -> Result<Self::Hessian, OptimizerError> {
         let n = self.x.nrows();
@@ -395,8 +408,7 @@ impl Hessian for ProbitProblem {
         let normal = Normal::standard();
         let mut h = vec![vec![0.0; k]; k];
         for i in 0..n {
-            let (z, lambda) = self.linear_predictor_and_residual(i, param, &normal);
-            let w = lambda * (lambda + z);
+            let w = self.hessian_weight(i, param, &normal);
             for (a, row) in h.iter_mut().enumerate().take(k) {
                 let xa = *self.x.get(i, a);
                 for (b, cell) in row.iter_mut().enumerate().take(k) {
@@ -553,8 +565,8 @@ impl ProbitEstimator {
             confidence_level,
         } = options;
 
-        // faer のグローバル並列度を Par::Seq に固定する（`crate::parallelism`）。
-        crate::parallelism::ensure_serial();
+        // faer のグローバル並列度を Par::Seq に固定する（`crate::shared::parallelism`）。
+        crate::shared::parallelism::ensure_serial();
 
         let n = input.nobs();
         let k = input.k();
@@ -577,8 +589,10 @@ impl ProbitEstimator {
             let normal = Normal::standard();
             ols_based_initial_params(
                 &x_std,
+                input.x(),
                 input.y(),
                 input.has_intercept(),
+                input.param_names(),
                 // probit: IRLS重み `w = φ(Φ⁻¹(p̄))`、リンク値 `η₀ = Φ⁻¹(p̄)`。
                 |p_bar| {
                     let eta0 = normal.inverse_cdf(p_bar);
@@ -609,14 +623,20 @@ impl ProbitEstimator {
             tol,
             input.y().nrows(),
             raise_on_non_convergence,
-            // Probitは`y∈{0,1}`で係数が±∞へ発散するため(準)完全分離の
-            // 標準化パラメータノルム事後チェックを有効にする。
-            SeparationNormCheck::Enabled,
         )?;
 
         let params = destandardize_params(&output.params, &scale);
 
         let hessian_std = Mat::from_fn(k, k, |i, j| output.hessian[i][j]);
+        // 収束後に完全分離・準完全分離を厳密に判定する（`nonlinear::separation`）。
+        // 分離なら`raise_on_non_convergence`に応じてエラー、または`converged=false`で続行する。
+        let converged = verify_no_separation(
+            input.x(),
+            &scale,
+            input.y(),
+            output.converged,
+            raise_on_non_convergence,
+        )?;
         // `problem_for_scores.as_ref().expect(...)`は各非`Classical`分岐でのみ呼ばれ、
         // 直前の`match cov_type { CovType::Classical => None, _ => Some(...) }`により
         // 常に`Some`であることが保証されている内部契約（`LogitEstimator::fit`と同じ、
@@ -662,7 +682,7 @@ impl ProbitEstimator {
                 // ため）。ここでの`expect`はその契約を明記する防御的な扱い。
                 let groups = groups
                     .as_ref()
-                    .expect("groups is validated as Some at the top of fit()");
+                    .expect("groups are validated by validate_fit_preconditions for Cluster");
                 cluster_cov_params(&hessian_std, &problem.scores(&output.params), n, k, groups)?
             }
         };
@@ -713,7 +733,7 @@ impl ProbitEstimator {
             p_values,
             conf_lower,
             conf_upper,
-            converged: output.converged,
+            converged,
             n_iter: output.n_iter,
             log_likelihood: llf,
             log_likelihood_null: llnull,
@@ -944,6 +964,8 @@ impl ProbitEstimator {
 mod tests {
     use super::*;
     use crate::nonlinear::common::{SolverType, dydx_and_jacobian};
+    use crate::shared::error::ClusterSetting;
+    use crate::shared::group_codes::GroupCodes;
     use statrs::distribution::ChiSquared;
 
     #[test]
@@ -1068,6 +1090,28 @@ mod tests {
         assert!((hessian[1][1] - w * 30.0).abs() < 1e-9, "{:?}", hessian);
     }
 
+    /// `scores`は行ごとの一般化残差`λᵢ`を観測あたり1回だけ計算して行を埋める。セルごとに
+    /// 再計算する素朴な式と、ビット単位で一致することを確認する（`|z|`が`U_CLAMP`を
+    /// 超える極端なパラメータ点を含む）。
+    /// 参照式は本体と同じヘルパーを呼ぶため、検出するのは行列に詰める配置・順序の退行で、
+    /// ヘルパー側の式の変更は別のテスト（閉形式・数値微分）が担う。
+    #[test]
+    fn scores_match_per_cell_reference_bit_for_bit() {
+        let input = small_input();
+        let problem = ProbitProblem::new(&input);
+        let normal = Normal::standard();
+        for params in [vec![0.0, 0.0], vec![0.3, -0.7], vec![40.0, -25.0]] {
+            let scores = problem.scores(&params);
+            for i in 0..scores.nrows() {
+                for j in 0..scores.ncols() {
+                    let expected =
+                        problem.generalized_residual(i, &params, &normal) * (*problem.x.get(i, j));
+                    assert_eq!(scores.get(i, j).to_bits(), expected.to_bits(), "({i}, {j})");
+                }
+            }
+        }
+    }
+
     #[test]
     fn scores_match_closed_form_at_zero_params() {
         let input = small_input();
@@ -1180,6 +1224,34 @@ mod tests {
         let scores = problem.scores(&params);
         for i in 0..2 {
             assert!(scores.get(i, 0).is_finite(), "row {i}");
+        }
+    }
+
+    /// `|z|`が`U_CLAMP`未満の通常領域では`z̃=z`なので、`hessian_weight`は素の
+    /// `λ(λ+z)`と一致し、`generalized_residual`は`scores`の切片列（`λ·1`）と一致する。
+    #[test]
+    fn hessian_weight_and_generalized_residual_match_closed_form_in_the_unclamped_region() {
+        let y = vec![1.0, 0.0, 1.0, 0.0, 1.0];
+        let x_columns = vec![vec![0.5, -1.0, 2.0, 0.3, -0.7]];
+        let input =
+            ProbitInput::from_columns(&y, &x_columns, vec!["x".to_string()], true, "y".to_string())
+                .unwrap();
+        let problem = ProbitProblem::new(&input);
+        let params = vec![0.2, 0.4];
+        let normal = Normal::standard();
+        let scores = problem.scores(&params);
+
+        for i in 0..y.len() {
+            let z = params[0] + params[1] * x_columns[0][i];
+            let q = 2.0 * y[i] - 1.0;
+            let lambda = q * normal.pdf(q * z) / normal.cdf(q * z);
+
+            let residual = problem.generalized_residual(i, &params, &normal);
+            assert!((residual - lambda).abs() < 1e-12, "row {i}");
+            assert!((*scores.get(i, 0) - residual).abs() < 1e-12, "row {i}");
+
+            let weight = problem.hessian_weight(i, &params, &normal);
+            assert!((weight - lambda * (lambda + z)).abs() < 1e-12, "row {i}");
         }
     }
 
@@ -1318,12 +1390,18 @@ mod tests {
             ProbitInput::from_columns(&y, &[x1], vec!["x1".to_string()], true, "y".to_string())
                 .unwrap();
         let (x_std, scale) = standardize_columns(input.x(), input.has_intercept());
-        let initial_params =
-            ols_based_initial_params(&x_std, input.y(), input.has_intercept(), |p_bar| {
+        let initial_params = ols_based_initial_params(
+            &x_std,
+            input.x(),
+            input.y(),
+            input.has_intercept(),
+            &[],
+            |p_bar| {
                 let eta0 = normal.inverse_cdf(p_bar);
                 (normal.pdf(eta0), eta0)
-            })
-            .unwrap();
+            },
+        )
+        .unwrap();
 
         let run = |solver: SolverType| {
             let inner = ProbitProblem::from_standardized(x_std.clone(), input.y().clone());
@@ -1340,7 +1418,6 @@ mod tests {
                 1e-6,
                 input.y().nrows(),
                 true,
-                SeparationNormCheck::Enabled,
             )
             .unwrap();
             assert!(output.converged, "{solver:?} did not converge");
@@ -1381,22 +1458,12 @@ mod tests {
         }
     }
 
-    /// `SEPARATION_PARAM_NORM_THRESHOLD=100.0`（`nonlinear/common.rs`、Logitの実測に
-    /// 基づく較正値）がProbitでも同程度に機能するかを検証する一連のテスト
-    /// （`docs/spec/probit-spec.md`4章）。
+    /// `beta1`（`x1`の真の係数）を指定して、ほぼ分離したデータを生成する。
     ///
     /// `logit.rs`の`near_separation_input_with_beta1`と同型の設計（`beta=[0,beta1,0.5]`、
     /// 同じLCG・同じ`n=200`・同じ`x1`/`x2`分布）だが、リンク関数のみ`Normal::cdf`に
-    /// 変える。この意図的な「他はすべて揃えてリンクだけ変える」設計により、閾値較正の
-    /// リンク依存性を直接比較できる。実測較正（2026-09-13）:
-    /// `beta1`を段階的に強めると、標準化パラメータのL2ノルムはLogitと同程度の
-    /// オーダーで増加し（例: 真の分離に限りなく近い境界で両リンクとも閾値100に対し
-    /// 5〜11%の余裕で収束）、閾値を超えて`SeparationSuspected`が正常に発火する
-    /// `beta1`もLogit（`100`）よりProbitの方が小さい値（`50`）で足りる——Probitの方が
-    /// テイルの減衰が速く、同じ標準化スケールでもより低い`beta1`で飽和に達するため、
-    /// これは較正のズレではなくリンク関数の性質の違いとして期待通り。この一連のテストの
-    /// 範囲ではLogit用に較正された閾値100がProbit固有の誤検知/検出漏れを起こす証拠は
-    /// 見つからなかった。
+    /// 変える。完全分離になる`beta1`はLogit（`100`）よりProbitの方が小さい値（`50`）で足りる
+    /// ——Probitの方がテイルの減衰が速く、より低い`beta1`で飽和に達するため。
     fn near_separation_input_with_beta1(beta1: f64) -> ProbitInput {
         fn lcg(seed: &mut u64) -> f64 {
             *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
@@ -1431,14 +1498,11 @@ mod tests {
     }
 
     #[test]
-    fn fit_returns_separation_suspected_error_for_near_separation_data() {
-        // 実測で確認済みの最小反復回数（`SeparationSuspected`が発火するまでの
-        // `n_iter`）: newton=22・bfgs=28・lbfgs=26（`logit.rs`の同名テストと同じ考え方、
-        // 手法ごとに実測値+数回分の余裕を持たせる）。
+    fn fit_returns_separation_detected_error_for_separated_data() {
         for (solver, max_iter) in [
-            (SolverType::Newton, 25),
-            (SolverType::Bfgs, 32),
-            (SolverType::Lbfgs, 30),
+            (SolverType::Newton, 100),
+            (SolverType::Bfgs, 100),
+            (SolverType::Lbfgs, 100),
         ] {
             let result = ProbitEstimator::fit(
                 near_separation_input(),
@@ -1452,7 +1516,7 @@ mod tests {
                 },
             );
             assert!(
-                matches!(result, Err(MleError::SeparationSuspected { .. })),
+                matches!(result, Err(MleError::SeparationDetected)),
                 "solver={:?}, result={:?}",
                 solver,
                 result
@@ -1461,7 +1525,7 @@ mod tests {
     }
 
     #[test]
-    fn fit_returns_unconverged_result_for_near_separation_data_without_raising() {
+    fn fit_returns_unconverged_result_for_separated_data_without_raising() {
         let estimator = ProbitEstimator::fit(
             near_separation_input(),
             MleFitOptions {
@@ -1477,11 +1541,72 @@ mod tests {
         assert!(!estimator.converged());
     }
 
-    /// `beta1=20`（`SeparationSuspected`を誤検知させてはいけない境界ケース）で3手法とも
-    /// 正常に収束することを固定するリグレッションテスト（`logit.rs`の同名テストと同じ
-    /// 位置づけ）。`SEPARATION_PARAM_NORM_THRESHOLD`を将来変更する際にこのテストが
-    /// 壊れないか確認することで、閾値の調整が既存の合格ケースを誤検知させないことを
-    /// 保証する。
+    /// 回帰変数どうしの相関が強い（等相関`ρ=0.9`・`k=20`）データでも、`lbfgs`が既定の
+    /// `max_iter=35`以内に`newton`と同じ解へ収束する回帰テスト。標準化後Hessianの条件数が
+    /// 数百になり、`γI`を初期行列とするL-BFGSは40反復前後を要し既定を超えた。warm start点の
+    /// 逆Hessianを初期行列にすると4反復前後になる（centeringでは直らない、相関による悪条件）。
+    #[test]
+    fn fit_lbfgs_converges_within_default_max_iter_for_strongly_correlated_regressors() {
+        let (y, columns) =
+            crate::nonlinear::common::test_support::equicorrelated_binary_data(1000, 20, 0.9, 1);
+        let names: Vec<String> = (1..=20).map(|j| format!("x{j}")).collect();
+        let fit = |solver: SolverType| {
+            let input =
+                ProbitInput::from_columns(&y, &columns, names.clone(), true, "y".to_string())
+                    .unwrap();
+            ProbitEstimator::fit(
+                input,
+                MleFitOptions {
+                    solver,
+                    max_iter: 35,
+                    tol: 1e-8,
+                    raise_on_non_convergence: true,
+                    cov_type: CovType::Classical,
+                    confidence_level: 0.95,
+                },
+            )
+            .unwrap()
+        };
+
+        let newton = fit(SolverType::Newton);
+        let lbfgs = fit(SolverType::Lbfgs);
+
+        assert!(lbfgs.converged());
+        // 初期行列が`γI`だと40反復前後、warm start点の逆Hessianだと4反復前後（実測）。
+        assert!(lbfgs.n_iter() <= 15, "n_iter={}", lbfgs.n_iter());
+        for (a, b) in lbfgs.params().iter().zip(newton.params()) {
+            assert!(
+                (a - b).abs() <= 1e-5 * (1.0 + b.abs()),
+                "lbfgs={:?}, newton={:?}",
+                lbfgs.params(),
+                newton.params()
+            );
+        }
+    }
+
+    /// 平均が標準偏差に比べて大きい列（平均÷標準偏差が約12〜16）を持つ設計行列でも、標準化後の
+    /// Hessianは良条件（条件数が小さい）になる。標準化で平均を引かないと列が切片列とほぼ共線に
+    /// なり、条件数が数千になる（Wooldridge appleで約7,300）。ソルバーの初期化（`FaerBfgs`/
+    /// `FaerLbfgs`の逆Hessian）はこの悪条件を反復数の面で隠すため、反復数ではなく条件数を直接見る。
+    #[test]
+    fn standardized_hessian_is_well_conditioned_for_columns_with_large_means() {
+        let (y, columns) = crate::nonlinear::common::test_support::large_means_binary_data();
+        let names: Vec<String> = (1..=columns.len()).map(|j| format!("x{j}")).collect();
+        let input = ProbitInput::from_columns(&y, &columns, names, true, "y".to_string()).unwrap();
+        let k = input.k();
+
+        let (x_std, _) = standardize_columns(input.x(), input.has_intercept());
+        let problem = ProbitProblem::from_standardized(x_std, input.y().clone());
+        let hessian = problem.hessian(&vec![0.0; k]).unwrap();
+
+        let cond = crate::nonlinear::common::test_support::condition_number(&hessian);
+        // 平均を引く標準化では列が互いにほぼ直交し1〜2程度、引かないと数百〜数千（実測）。
+        assert!(cond < 10.0, "condition number={cond}");
+    }
+
+    /// `beta1=20`（分離と誤検知してはいけない境界ケース）で3手法とも正常に収束することを
+    /// 固定するリグレッションテスト（`logit.rs`の同名テストと同じ位置づけ）。分離検出の
+    /// 変更が既存の合格ケースを誤検知させないことを保証する。
     #[test]
     fn fit_converges_normally_for_mild_near_separation_data_across_all_methods() {
         for solver in [SolverType::Newton, SolverType::Bfgs, SolverType::Lbfgs] {
@@ -1597,7 +1722,7 @@ mod tests {
     /// `cov_params`の対称性・各種統計量の内部整合性（z値・信頼区間の定義式通りの関係）を
     /// 検証する回帰テスト。特に`destandardize_cov_params`が非対角成分も含めて
     /// 正しく元のスケールへ逆変換できているかを確認する（対角成分だけでは
-    /// `destandardize_cov_params`の`stds[i]*stds[j]`の掛け違い（転置ミス等）を検出できない）。
+    /// `destandardize_cov_params`のヤコビアン`J`の非対角（切片行）の取り違えや転置ミス等を検出できない）。
     #[test]
     fn fit_cov_params_is_symmetric_and_stats_are_internally_consistent() {
         let y = vec![0.0, 1.0, 0.0, 1.0];
@@ -1856,12 +1981,7 @@ mod tests {
             input_for_reconstruction.x(),
             input_for_reconstruction.has_intercept(),
         );
-        let params_std: Vec<f64> = classical
-            .params()
-            .iter()
-            .zip(scale.stds())
-            .map(|(p, s)| p * s)
-            .collect();
+        let params_std = scale.standardize_params(classical.params());
         let problem_std =
             ProbitProblem::from_standardized(x_std, input_for_reconstruction.y().clone());
         let scores_std = problem_std.scores(&params_std);
@@ -1958,12 +2078,7 @@ mod tests {
             input_for_reconstruction.x(),
             input_for_reconstruction.has_intercept(),
         );
-        let params_std: Vec<f64> = classical
-            .params()
-            .iter()
-            .zip(scale.stds())
-            .map(|(p, s)| p * s)
-            .collect();
+        let params_std = scale.standardize_params(classical.params());
         let problem_std =
             ProbitProblem::from_standardized(x_std, input_for_reconstruction.y().clone());
         let scores_std = problem_std.scores(&params_std);
@@ -1971,7 +2086,14 @@ mod tests {
         let hessian_std = Mat::from_fn(k, k, |i, j| -cost_hessian_std[i][j]);
 
         let expected_cluster = destandardize_cov_params(
-            &cluster_cov_params(&hessian_std, &scores_std, n, k, &groups).unwrap(),
+            &cluster_cov_params(
+                &hessian_std,
+                &scores_std,
+                n,
+                k,
+                &crate::shared::group_codes::GroupCodes::from_labels(&groups),
+            )
+            .unwrap(),
             &scale,
         );
 
@@ -1983,7 +2105,7 @@ mod tests {
                 tol: 1e-8,
                 raise_on_non_convergence: true,
                 cov_type: CovType::Cluster {
-                    groups: Some(groups),
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
                 },
                 confidence_level: 0.95,
             },
@@ -2050,12 +2172,7 @@ mod tests {
             input_for_reconstruction.x(),
             input_for_reconstruction.has_intercept(),
         );
-        let params_std: Vec<f64> = classical
-            .params()
-            .iter()
-            .zip(scale.stds())
-            .map(|(p, s)| p * s)
-            .collect();
+        let params_std = scale.standardize_params(classical.params());
         let problem_std =
             ProbitProblem::from_standardized(x_std, input_for_reconstruction.y().clone());
         let scores_std = problem_std.scores(&params_std);
@@ -2063,7 +2180,14 @@ mod tests {
         let hessian_std = Mat::from_fn(k, k, |i, j| -cost_hessian_std[i][j]);
 
         let expected_cluster = destandardize_cov_params(
-            &cluster_cov_params(&hessian_std, &scores_std, n, k, &groups).unwrap(),
+            &cluster_cov_params(
+                &hessian_std,
+                &scores_std,
+                n,
+                k,
+                &crate::shared::group_codes::GroupCodes::from_labels(&groups),
+            )
+            .unwrap(),
             &scale,
         );
 
@@ -2075,7 +2199,7 @@ mod tests {
                 tol: 1e-8,
                 raise_on_non_convergence: true,
                 cov_type: CovType::Cluster {
-                    groups: Some(groups),
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
                 },
                 confidence_level: 0.95,
             },
@@ -2120,7 +2244,9 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            MleError::Common(CommonError::MissingClusterColumn)
+            MleError::Common(CommonError::MissingClusterColumn {
+                setting: ClusterSetting::CovType,
+            })
         );
     }
 
@@ -2146,7 +2272,7 @@ mod tests {
                 tol: 1e-8,
                 raise_on_non_convergence: true,
                 cov_type: CovType::Cluster {
-                    groups: Some(groups),
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
                 },
                 confidence_level: 0.95,
             },
@@ -2154,7 +2280,10 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            MleError::Common(CommonError::InsufficientClusters { g: 1 })
+            MleError::Common(CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 1
+            })
         );
     }
 
@@ -2191,7 +2320,7 @@ mod tests {
                 tol: 1e-8,
                 raise_on_non_convergence: true,
                 cov_type: CovType::Cluster {
-                    groups: Some(groups),
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
                 },
                 confidence_level: 0.95,
             },
@@ -2238,7 +2367,7 @@ mod tests {
             CovType::Hc0,
             CovType::Hc1,
             CovType::Cluster {
-                groups: Some(groups),
+                groups: Some(GroupCodes::from_labels_without_keys(&groups)),
             },
         ] {
             let newton = ProbitEstimator::fit(
@@ -2523,6 +2652,41 @@ mod tests {
         );
     }
 
+    /// 標準偏差0の列（定数列）は、切片ありでは標準化で平均が引かれて全ゼロ列になり、
+    /// 設計行列がランク落ちして`SingularDesignMatrix`で弾かれる（`solver`に依らない）。
+    #[test]
+    fn fit_returns_singular_design_matrix_error_for_constant_column_with_intercept() {
+        let y = vec![0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0];
+        let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let constant = vec![0.1; 8];
+
+        for solver in [SolverType::Newton, SolverType::Bfgs, SolverType::Lbfgs] {
+            let input = ProbitInput::from_columns(
+                &y,
+                &[x1.clone(), constant.clone()],
+                vec!["x1".to_string(), "c".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap();
+            let result = ProbitEstimator::fit(
+                input,
+                MleFitOptions {
+                    solver,
+                    max_iter: 35,
+                    tol: 1e-6,
+                    raise_on_non_convergence: true,
+                    cov_type: CovType::Classical,
+                    confidence_level: 0.95,
+                },
+            );
+            assert!(
+                matches!(result, Err(MleError::SingularDesignMatrix { .. })),
+                "solver={solver:?}, result={result:?}"
+            );
+        }
+    }
+
     /// 完全な多重共線性（`x2 = 2·x1`）の設計行列は、`fit()`冒頭の列ピボットQR
     /// ランクチェック（`nonlinear::common::checked_design_matrix_qr`）で`solver`・
     /// `cov_type`に関わらず単一経路で`SingularDesignMatrix`として弾かれる
@@ -2559,7 +2723,7 @@ mod tests {
                 CovType::Hc1,
                 CovType::Opg,
                 CovType::Cluster {
-                    groups: Some(groups.clone()),
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
                 },
             ] {
                 let input = ProbitInput::from_columns(
@@ -2583,7 +2747,7 @@ mod tests {
                     },
                 );
                 assert!(
-                    matches!(result, Err(MleError::SingularDesignMatrix)),
+                    matches!(result, Err(MleError::SingularDesignMatrix { .. })),
                     "solver={solver:?}, cov_type={cov_type:?}, result={result:?}"
                 );
             }
@@ -3477,6 +3641,123 @@ mod tests {
                         "HC0 se[{i}]={} should be <= HC1 se[{i}]={}", se_hc0[i], se_hc1[i]
                     );
                 }
+            }
+        }
+
+        /// `hessian_weight_is_non_negative_at_extreme_params`が生成するケース:
+        /// `(n, k, x_cols, y_flags, intercept, slopes, v)`。`intercept`・`slopes`は
+        /// `(符号, 10の指数)`で、パラメータの大きさを対数一様に振る（`|z|`が`U_CLAMP`を
+        /// 大きく超える領域まで）。`v`は二次形式の方向ベクトル。
+        type ExtremeCase = (
+            usize,
+            usize,
+            Vec<Vec<f64>>,
+            Vec<bool>,
+            (bool, f64),
+            Vec<(bool, f64)>,
+            Vec<f64>,
+        );
+
+        /// `fit()`を通さずHessianを直接評価する点のケース。通常の`probit_case_strategy`は
+        /// `|z|`が`U_CLAMP≈8.13`に届くことがほとんどなく、クランプ領域の誤分類観測を作れない
+        /// ため、切片を`|β₀|∈[10, 1000]`（`U_CLAMP`超）、傾きを`|βⱼ|∈[1, 1000]`で振る。
+        fn extreme_param_case_strategy() -> impl Strategy<Value = ExtremeCase> {
+            (1..=MAX_K).prop_flat_map(|k| {
+                (k + 5..=60usize).prop_flat_map(move |n| {
+                    (
+                        Just(n),
+                        Just(k),
+                        collection::vec(collection::vec(-2.0f64..2.0, n), k),
+                        collection::vec(any::<bool>(), n),
+                        (any::<bool>(), 1.0f64..3.0),
+                        collection::vec((any::<bool>(), 0.0f64..3.0), k),
+                        collection::vec(-1.0f64..1.0, k + 1),
+                    )
+                })
+            })
+        }
+
+        fn signed_power_of_ten((positive, exponent): (bool, f64)) -> f64 {
+            let magnitude = 10f64.powf(exponent);
+            if positive { magnitude } else { -magnitude }
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(256))]
+
+            /// 任意のパラメータ点で、観測ごとのHessian重み`wᵢ=λᵢ(λᵢ+z̃ᵢ)`が非負で、Hessian
+            /// `X'WX`が半正定値（対角成分が非負、任意の`v`で`v'Hv≥0`）になる。`A(u)=λ(λ+u)>0`
+            /// （モジュール冒頭の導出）の数値版で、クランプ領域の誤分類観測（`qᵢzᵢ<-U_CLAMP`）
+            /// で`λ`だけクランプして生の`z`を混ぜると`w`が負になる回帰を捕まえる。
+            ///
+            /// 符号だけだと`|w|`で隠す変更や`hessian()`の組み立て誤りを見逃すため、(1)0行目の重みが
+            /// クランプ境界`u=-U_CLAMP`での閉形式`m(m-U_CLAMP)`（`m=φ/Φ`）に一致すること、
+            /// (2)`hessian()`が`Σᵢwᵢxᵢₐxᵢᵦ`と一致することも確認する。保証するのは「クランプ後の
+            /// 関数としての半正定値性」で、クランプしない真のHessianとの一致ではない
+            /// （クランプ領域で`cost`/`gradient`とHessianが非整合な既知の課題は別、`probit-spec.md`4章）。
+            ///
+            /// 0行目は説明変数を全て0にして`z₀=β₀`（`|β₀|>U_CLAMP`）とし、`y₀`を符号と逆に
+            /// 置く（誤分類、`q₀z₀=-|β₀|<-U_CLAMP`）ので、どのケースでもクランプ領域の誤分類
+            /// 観測を少なくとも1件含む。`y₁`は`y₀`と逆の値にして`y`に変動を持たせる。
+            ///
+            /// 有効性確認済み: `hessian_weight`の`clamped_z`を生の線形予測子`z`に戻すと失敗する。
+            #[test]
+            fn hessian_weight_is_non_negative_at_extreme_params(
+                (n, k, mut x_cols, y_flags, intercept, slopes, v) in extreme_param_case_strategy(),
+            ) {
+                for col in &mut x_cols {
+                    col[0] = 0.0;
+                }
+                let mut params = vec![signed_power_of_ten(intercept)];
+                params.extend(slopes.iter().map(|&s| signed_power_of_ten(s)));
+
+                let mut y: Vec<f64> = y_flags.iter().map(|&b| if b { 1.0 } else { 0.0 }).collect();
+                y[0] = if params[0] > 0.0 { 0.0 } else { 1.0 };
+                y[1] = 1.0 - y[0];
+
+                let input = ProbitInput::from_columns(&y, &x_cols, x_names(k), true, "y".to_string()).unwrap();
+                let problem = ProbitProblem::new(&input);
+                let normal = Normal::standard();
+
+                let (_, u0) = problem.signed_index(0, &params);
+                prop_assert!(u0 < -U_CLAMP, "row 0 must be misclassified beyond U_CLAMP, got u={u0}");
+
+                let weights: Vec<f64> = (0..n)
+                    .map(|i| problem.hessian_weight(i, &params, &normal))
+                    .collect();
+                for (i, w) in weights.iter().enumerate() {
+                    prop_assert!(*w >= 0.0, "w[{i}]={w} should be non-negative");
+                }
+                // 0行目はクランプ境界`u=-U_CLAMP`と同じ重み: `q²=1`なので`w=m(m-U_CLAMP)`
+                let (phi, big_phi) = clamped_pdf_cdf(&normal, -U_CLAMP);
+                let m = phi / big_phi;
+                let boundary_weight = m * (m - U_CLAMP);
+                prop_assert!(
+                    (weights[0] - boundary_weight).abs() <= 1e-9 * (1.0 + boundary_weight),
+                    "w[0]={} should equal the boundary weight {boundary_weight}", weights[0]
+                );
+
+                let hessian = problem.hessian(&params).unwrap();
+                let scale: f64 = 1.0 + (0..=k).map(|a| hessian[a][a].abs()).sum::<f64>();
+                for (a, row) in hessian.iter().enumerate() {
+                    for (b, cell) in row.iter().enumerate() {
+                        let expected: f64 = (0..n)
+                            .map(|i| weights[i] * problem.x.get(i, a) * problem.x.get(i, b))
+                            .sum();
+                        prop_assert!(
+                            (cell - expected).abs() <= 1e-9 * scale,
+                            "H[{a}][{b}]={cell} should equal sum_i w_i x_ia x_ib = {expected}"
+                        );
+                    }
+                }
+                for (a, row) in hessian.iter().enumerate() {
+                    prop_assert!(row[a] >= 0.0, "H[{a}][{a}]={} should be non-negative", row[a]);
+                }
+                let quad: f64 = (0..=k)
+                    .flat_map(|a| (0..=k).map(move |b| (a, b)))
+                    .map(|(a, b)| v[a] * hessian[a][b] * v[b])
+                    .sum();
+                prop_assert!(quad >= -1e-9 * scale, "v'Hv={quad} should be non-negative (scale={scale})");
             }
         }
     }

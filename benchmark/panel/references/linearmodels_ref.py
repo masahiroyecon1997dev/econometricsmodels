@@ -316,8 +316,8 @@ def run(
     }
 
     result: dict = {
-        "coef": coef,
-        "se": se,
+        "params": coef,
+        "std_errors": se,
         "test_stats": test_stats,
         "p_values": p_values,
         "conf_int": conf_int,
@@ -430,8 +430,8 @@ def run_re(
     }
 
     result: dict = {
-        "coef": coef,
-        "se": se,
+        "params": coef,
+        "std_errors": se,
         "test_stats": test_stats,
         "p_values": p_values,
         "conf_int": conf_int,
@@ -446,6 +446,13 @@ def run_re(
         "r_squared_within": float(res.rsquared_within),
         "r_squared_between": float(res.rsquared_between),
         "r_squared_overall": float(res.rsquared_overall),
+        # 分散成分（Swamy-Arora）と準偏差変換の重み。`variance_decomposition`の
+        # `Effects`が`σ_u²`、`Residual`が`σ_ε²`。`theta`はエンティティごと。
+        "sigma2_eps": float(res.variance_decomposition["Residual"]),
+        "sigma2_u": float(res.variance_decomposition["Effects"]),
+        "theta": {
+            str(k): float(v) for k, v in res.theta["theta"].to_dict().items()
+        },
     }
 
     if true_beta is not None:

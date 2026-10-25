@@ -6,7 +6,7 @@
 # ロバストWald F検定の2ブロックのみを対象にする。
 
 # 係数・標準誤差・t値・p値をcoeftest()から抽出し、名前付きベクトルとして返す。
-extract_coef_se <- function(model, vc, df_inference) {
+extract_params_std_errors <- function(model, vc, df_inference) {
   ct <- coeftest(model, vcov = vc, df = df_inference)
   coefs <- ct[, 1]
   ses <- ct[, 2]

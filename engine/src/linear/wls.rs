@@ -63,8 +63,8 @@ impl WlsEstimator {
         cov_type: CovType,
         confidence_level: f64,
     ) -> Result<Self, LeastSquaresError> {
-        // faer のグローバル並列度を Par::Seq に固定する（`crate::parallelism`）。
-        crate::parallelism::ensure_serial();
+        // faer のグローバル並列度を Par::Seq に固定する（`crate::shared::parallelism`）。
+        crate::shared::parallelism::ensure_serial();
 
         let input = OlsInput::from_columns_weighted(
             y,
@@ -139,10 +139,10 @@ impl WlsEstimator {
 
 /// R²・調整済みR²・対数尤度・AIC・BICを、元の（変換前の）`y`・`weights`から計算し直す。
 ///
-/// 統計量ごとの理由はモジュール冒頭のdocコメント参照。SSR自体は重み付き残差の二乗和
-/// （`Σ w_i (y_i - ŷ_i)²`）で、`estimator`が変換後データに対して計算したSSRと数学的に
-/// 同一の値になる（`sqrt(w_i)(y_i-ŷ_i)`の二乗が`w_i(y_i-ŷ_i)²`のため）ため、
-/// `original_scale_fitted_and_residuals`と`weights`から計算し直しても内部で二重計算にはならない。
+/// 統計量ごとの理由はモジュール冒頭のdocコメント参照。SSRは元スケールの残差と`weights`から
+/// `Σ w_i (y_i - ŷ_i)²`として計算し直す。`estimator`が変換後データに対して計算したSSRと
+/// 数学的に同一の値になる（`sqrt(w_i)(y_i-ŷ_i)`の二乗が`w_i(y_i-ŷ_i)²`のため）が、
+/// `OlsEstimator`はSSRを公開していないため、O(n)の再計算で得ている。
 fn weighted_fit_statistics(
     y: &[f64],
     weights: &[f64],
@@ -213,6 +213,8 @@ fn original_scale_fitted_and_residuals(
 mod tests {
     use super::*;
     use crate::linear::common::row_time_order;
+    use crate::shared::error::CommonError;
+    use crate::shared::group_codes::GroupCodes;
 
     #[test]
     fn fit_with_all_weights_one_matches_ols() {
@@ -254,8 +256,14 @@ mod tests {
                 *ols.conf_lower().get(j, 0)
             );
         }
-        assert_eq!(wls.estimator().f_statistic(), ols.f_statistic());
-        assert_eq!(wls.estimator().f_p_value(), ols.f_p_value());
+        assert_eq!(
+            wls.estimator().f_statistic().unwrap(),
+            ols.f_statistic().unwrap()
+        );
+        assert_eq!(
+            wls.estimator().f_p_value().unwrap(),
+            ols.f_p_value().unwrap()
+        );
 
         // r_squared/adj_r_squared/log_likelihood/aic/bicはWlsEstimator側の（元スケールの
         // y・weightsから計算し直した）値を使う。重みが全て1なら重み付き平均=単純平均、
@@ -269,7 +277,7 @@ mod tests {
         assert!((wls.aic() - ols.aic()).abs() < 1e-9);
         assert!((wls.bic() - ols.bic()).abs() < 1e-9);
 
-        // 残差の計算経路自体はwls.rs（手動ループ）とols.rs（faerの行列演算）で異なるため、
+        // 残差の計算経路自体はwls.rs（手動ループ）とols/estimator.rs（faerの行列演算）で異なるため、
         // 丸め誤差レベルでの一致を確認する（構造的な完全一致の保証対象はestimator()側）。
         for i in 0..5 {
             assert!((wls.residuals()[i] - *ols.residuals().get(i, 0)).abs() < 1e-12);
@@ -278,7 +286,7 @@ mod tests {
 
     #[test]
     fn fitted_values_equals_y_minus_residuals() {
-        // `ols.rs`の同名テスト（`fitted_values_equals_y_minus_residuals`）と同じ不変条件
+        // `ols/estimator.rs`の同名テスト（`fitted_values_equals_y_minus_residuals`）と同じ不変条件
         // （`fitted_values()`と`residuals()`が同じ`original_scale_fitted_and_residuals`
         // 呼び出しから一貫して導かれていることの確認）。
         let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
@@ -335,14 +343,14 @@ mod tests {
         assert!((wls.log_likelihood() - (-4.694_800_450_440_493)).abs() < 1e-9);
         assert!((wls.aic() - 13.389_600_900_880_986).abs() < 1e-9);
         assert!((wls.bic() - 12.608_476_725_749_187).abs() < 1e-9);
-        assert!((wls.estimator().f_statistic() - 2.490_519_076_986_167_6).abs() < 1e-6);
-        assert!((wls.estimator().f_p_value() - 0.212_642_917_457_664_06).abs() < 1e-6);
+        assert!((wls.estimator().f_statistic().unwrap() - 2.490_519_076_986_167_6).abs() < 1e-6);
+        assert!((wls.estimator().f_p_value().unwrap() - 0.212_642_917_457_664_06).abs() < 1e-6);
     }
 
     #[test]
     fn fit_recovers_known_coefficients_with_nonuniform_weights() {
-        // y = 1 + 2*x（ノイズなしの厳密解）に対しては、重みを変えても推定値は変わらないはず。
-        let y = vec![1.0, 3.0, 5.0, 7.0, 9.0];
+        // y = 1 + 2*x に小さなノイズ。重みを変えても推定値は真の値の近くに返る。
+        let y = vec![1.1, 2.9, 5.1, 6.9, 9.1];
         let x_columns = vec![vec![0.0, 1.0, 2.0, 3.0, 4.0]];
         let weights = vec![1.0, 2.0, 0.5, 3.0, 1.5];
 
@@ -358,11 +366,70 @@ mod tests {
         )
         .unwrap();
 
-        assert!((*wls.estimator().params().get(0, 0) - 1.0).abs() < 1e-9);
-        assert!((*wls.estimator().params().get(1, 0) - 2.0).abs() < 1e-9);
-        for r in wls.residuals() {
-            assert!(r.abs() < 1e-9);
+        // 重み付き正規方程式の閉形式解（単回帰）: b1 = Sxy / Sxx（重み付き偏差）、b0 = ȳ_w - b1*x̄_w。
+        let x = &x_columns[0];
+        let sw: f64 = weights.iter().sum();
+        let xbar = x.iter().zip(&weights).map(|(a, w)| a * w).sum::<f64>() / sw;
+        let ybar = y.iter().zip(&weights).map(|(a, w)| a * w).sum::<f64>() / sw;
+        let sxy: f64 = (0..5)
+            .map(|i| weights[i] * (x[i] - xbar) * (y[i] - ybar))
+            .sum();
+        let sxx: f64 = (0..5).map(|i| weights[i] * (x[i] - xbar).powi(2)).sum();
+        let (want_b1, want_b0) = (sxy / sxx, ybar - sxy / sxx * xbar);
+
+        let b0 = *wls.estimator().params().get(0, 0);
+        let b1 = *wls.estimator().params().get(1, 0);
+        assert!((b0 - want_b0).abs() < 1e-9);
+        assert!((b1 - want_b1).abs() < 1e-9);
+        assert!((b0 - 1.0).abs() < 0.3);
+        assert!((b1 - 2.0).abs() < 0.15);
+        for (i, r) in wls.residuals().iter().enumerate() {
+            assert!((r - (y[i] - b0 - b1 * x_columns[0][i])).abs() < 1e-12);
         }
+    }
+
+    #[test]
+    fn fit_returns_perfect_fit_for_exact_data_under_any_weights() {
+        // y = 1 + 2*x のノイズなしの厳密解は、重みを変えても残差が0で標準誤差が定義できない。
+        let y = vec![1.0, 3.0, 5.0, 7.0, 9.0];
+        let x_columns = vec![vec![0.0, 1.0, 2.0, 3.0, 4.0]];
+        let weights = vec![1.0, 2.0, 0.5, 3.0, 1.5];
+
+        let result = WlsEstimator::fit(
+            &y,
+            &x_columns,
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+            &weights,
+            CovType::Classical,
+            0.95,
+        );
+
+        assert_eq!(
+            result.unwrap_err(),
+            LeastSquaresError::Common(CommonError::PerfectFit)
+        );
+    }
+
+    #[test]
+    fn fit_returns_outcome_constant_for_a_constant_outcome_under_any_weights() {
+        // 重み付き平均で中心化した総平方和も0になる。
+        let result = WlsEstimator::fit(
+            &[4.0; 5],
+            &[vec![0.0, 1.0, 2.0, 3.0, 5.0]],
+            vec!["x1".to_string()],
+            true,
+            "y".to_string(),
+            &[1.0, 2.0, 0.5, 3.0, 1.5],
+            CovType::Classical,
+            0.95,
+        );
+
+        assert_eq!(
+            result.unwrap_err(),
+            LeastSquaresError::Common(CommonError::OutcomeConstant)
+        );
     }
 
     #[test]
@@ -394,8 +461,7 @@ mod tests {
     #[test]
     fn fit_propagates_no_regressors_error_when_k_is_zero() {
         // `WlsEstimator::fit`は常に（ゲート付きの）`OlsEstimator::fit`に委譲するため、
-        // k=0拒否もそのまま伝播する。`fit_allowing_no_regressors`への
-        // 特別扱いは不要（WLSはk=0になりえない呼び出し方をする対象ではなく、
+        // k=0拒否もそのまま伝播する（WLSはk=0になりえない呼び出し方をする対象ではなく、
         // OLSと同じくPython向け公開APIとしてk=0を拒否すべき対象）。
         let y = vec![1.0, 2.0, 3.0, 4.0, 5.0];
         let weights = vec![1.0; 5];
@@ -413,7 +479,7 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            LeastSquaresError::Common(crate::error::CommonError::NoRegressors { n: 5 })
+            LeastSquaresError::Common(crate::shared::error::CommonError::NoRegressors { n: 5 })
         );
     }
 
@@ -453,7 +519,7 @@ mod tests {
                 time_order: row_time_order(6),
             },
             CovType::Cluster {
-                groups: Some(clusters.clone()),
+                groups: Some(GroupCodes::from_labels_without_keys(&clusters)),
             },
         ];
 
@@ -525,7 +591,7 @@ mod tests {
         //
         // y = 2*x1に対する厳密解（ノイズなし）は使わない: k=1（切片なし・x1のみ）で
         // 残差がすべて0になると分散が数値的にゼロになり、F検定（wald_f_test）の
-        // Cholesky分解がComputationFailedを返してしまう（本来は理論上到達不能な
+        // Cholesky分解が`NearSingularMatrix`を返してしまう（本来は理論上到達不能な
         // 防御的分岐だが、ゼロ分散という退化ケースでは実際に到達しうる）。
         // このテストの目的はF検定の退化ケースの検証ではないため、小さなノイズを入れる。
         let y = vec![2.1, 3.9, 6.2, 7.8, 10.1]; // y ≈ 2*x1
@@ -570,14 +636,15 @@ mod tests {
     fn fit_with_multiple_x_columns_recovers_known_coefficients() {
         // original_scale_fitted_and_residualsのx_columnsループ（複数列）が正しく計算できることを確認する
         // （これまでのテストはx列1本のみだった）。
-        let y = vec![9.0, 8.0, 19.0, 18.0, 29.0, 28.0]; // 1 + 2*x1 + 3*x2
+        // 1 + 2*x1 + 3*x2 に小さなノイズ。
+        let y = vec![9.1, 7.8, 19.15, 18.05, 28.9, 28.12];
         let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
         let x2 = vec![2.0, 1.0, 4.0, 3.0, 6.0, 5.0];
         let weights = vec![1.0, 2.0, 0.5, 3.0, 1.5, 2.5];
 
         let wls = WlsEstimator::fit(
             &y,
-            &[x1, x2],
+            &[x1.clone(), x2.clone()],
             vec!["x1".to_string(), "x2".to_string()],
             true,
             "y".to_string(),
@@ -587,15 +654,17 @@ mod tests {
         )
         .unwrap();
 
-        assert!((*wls.estimator().params().get(0, 0) - 1.0).abs() < 1e-9); // const
-        assert!((*wls.estimator().params().get(1, 0) - 2.0).abs() < 1e-9); // x1
-        assert!((*wls.estimator().params().get(2, 0) - 3.0).abs() < 1e-9); // x2
-        for r in wls.residuals() {
-            assert!(r.abs() < 1e-9);
+        let params = wls.estimator().params();
+        let (b0, b1, b2) = (*params.get(0, 0), *params.get(1, 0), *params.get(2, 0));
+        assert!((b0 - 1.0).abs() < 0.5); // const
+        assert!((b1 - 2.0).abs() < 0.5); // x1
+        assert!((b2 - 3.0).abs() < 0.5); // x2
+        for (i, r) in wls.residuals().iter().enumerate() {
+            assert!((r - (y[i] - b0 - b1 * x1[i] - b2 * x2[i])).abs() < 1e-12);
         }
     }
 
-    /// property-basedテスト。`ols.rs`の`mod proptests`と同型の設計
+    /// property-basedテスト。`ols/estimator.rs`の`mod proptests`と同型の設計
     /// （`testing-policy.md`「property-basedテスト」参照）。
     ///
     /// プロパティの有効性検証（バグ注入→検出確認→元に戻す）は、新規プロパティ
@@ -605,7 +674,7 @@ mod tests {
     /// `coefficients_scale_linearly_with_y`（`OlsInput::from_columns_impl`の
     /// y変換に定数オフセットのバグを注入）の3件で実施済み。残り2件
     /// （`coefficients_and_se_are_invariant_to_column_order`・
-    /// `hc0_std_errors_are_at_most_hc1_std_errors`）は`ols.rs`側で検証済みの
+    /// `hc0_std_errors_are_at_most_hc1_std_errors`）は`ols/estimator.rs`側で検証済みの
     /// 同一ロジック（`OlsEstimator::fit`）をWLSの重み付き変換経由で呼ぶのみのため
     /// 個別のバグ注入は省略した。
     mod proptests {
@@ -621,9 +690,10 @@ mod tests {
 
         /// `(n, k, y, x_cols, weights, keys)`を生成する共通ストラテジ。
         ///
-        /// `y`/`x_cols`の生成方針は`ols.rs`の`ols_case_strategy`と同じ
+        /// `y`/`x_cols`の生成方針は`ols/estimator.rs`の`ols_case_strategy`と同じ
         /// （`n=k+10..=60`のマージン、独立な連続一様分布）。`weights`は正値
-        /// （`0.1..10.0`）のみ生成する（`WlsInput`が非正の重みを拒否するため）。
+        /// （`0.1..10.0`）のみ生成する（`OlsInput::from_columns_weighted`が非正の重みを
+        /// 拒否するため）。
         fn wls_case_strategy() -> impl Strategy<Value = WlsCase> {
             (1..=MAX_K).prop_flat_map(|k| {
                 (k + 10..=60usize).prop_flat_map(move |n| {
@@ -657,7 +727,7 @@ mod tests {
 
             /// 切片ありなら重み付き残差和は常に0（`Σ w_i・residuals_i ≈ 0`）。
             ///
-            /// `ols.rs`の`residuals_sum_to_zero_when_intercept_included`の単純移植では
+            /// `ols/estimator.rs`の`residuals_sum_to_zero_when_intercept_included`の単純移植では
             /// **ない**点に注意: WLSの正規方程式は変換後データ（切片列も`sqrt(w_i)`倍）の
             /// `X'e=0`から従うため、元スケールに戻すと単純な残差和ゼロではなく重み付き和が
             /// ゼロになる（`Σ sqrt(w_i)・sqrt(w_i)・residuals_i = Σ w_i・residuals_i = 0`）。
@@ -725,7 +795,7 @@ mod tests {
             }
 
             /// yをc倍すると、切片を含む全ての係数がc倍にスケールする
-            /// （WLSも重み付き最小二乗解がyに関して線形なため、`ols.rs`の
+            /// （WLSも重み付き最小二乗解がyに関して線形なため、`ols/estimator.rs`の
             /// `coefficients_scale_linearly_with_y`と同じ理由で成り立つ）。
             #[test]
             fn coefficients_scale_linearly_with_y(

@@ -8,15 +8,9 @@ for `x`, an options object for estimation settings (CLAUDE.md section 2,
 `.claude/rules/python-style.md` "設計方針との整合性").
 
 `weight`, like `y`, is a top-level argument referring to a column name
-in `data` (see `docs/spec/wls-spec.md`, "API引数").
-`WLSOptions` is re-exported as-is from `_lib` (not redefined as a
-Python class), matching `OLSOptions`'s pattern (see
-`python_package/econometricsmodels/linear/CLAUDE.md`). Its fields are
-field-for-field identical to `OLSOptions` today, but it is a separate
-class (`WLSResults` was already independent from `OLSResults` from the
-start, so keeping `WLSOptions` tied to `OLSOptions` would have been
-the odd one out): WLS-specific options may be added later without
-affecting `OLSOptions`/OLS users.
+in `data`. `WLSOptions` is re-exported as-is from `_lib` (not redefined
+as a Python class), following the `OLSOptions` pattern (see
+`python_package/econometricsmodels/linear/CLAUDE.md`).
 """
 
 from __future__ import annotations
@@ -27,6 +21,11 @@ import polars as pl
 
 from .. import _lib
 from .._lib import WLSOptions
+from .._results_utils import (
+    by_param,
+    conf_int_by_param,
+    params_table_rows,
+)
 
 __all__ = ["WLS", "WLSOptions", "WLSResults"]
 
@@ -85,11 +84,13 @@ class WLS:
                 column is missing, contains missing values or
                 NaN/infinity, a weight is non-positive, `weight`
                 duplicates `y`/`x`, insufficient observations,
-                `confidence_level` out of range, etc.). A subclass of
-                `ValueError`.
+                `confidence_level` out of range, `y` constant with an
+                intercept, etc.). A subclass of `ValueError`.
             ComputationError: A problem was detected during
-                computation (e.g. a singular design matrix). A
-                subclass of `RuntimeError`.
+                computation (e.g. a singular design matrix, or a
+                perfect fit: residuals zero up to rounding, so the
+                standard errors are undefined). A subclass of
+                `RuntimeError`.
         """
         raw = _lib.fit_wls(
             self._data, self._y, self._x, self._weight, self._options
@@ -100,11 +101,25 @@ class WLS:
 class WLSResults:
     """WLS estimation results.
 
-    Array-valued properties (`params`, `std_errors`, etc.) are exposed
-    as dictionaries keyed by coefficient name (for O(1) lookup of a
-    single parameter). Use `coef_table()` for a row-oriented listing
-    (same shape as `OLSResults`; see
-    `docs/spec/ols-spec.md`, "結果構造体").
+    Coefficient-level properties (`params`, `std_errors`, etc.) are
+    dictionaries keyed by coefficient name, so one coefficient is
+    `result.params["x1"]`. Use `params_table()` for a row-oriented
+    listing (a list of dicts), for example for a JSON response.
+
+    Fields by purpose:
+
+    - Coefficients: `params`, `std_errors`, `test_stats`, `p_values`,
+      `conf_int`; the names in order: `param_names`.
+    - Which distribution the tests use: `stat_dist`, `stat_df`.
+    - Overall F test: `f_statistic`, `f_p_value`, `f_df_num`,
+      `f_df_denom`.
+    - Fit (weighted): `r_squared`, `adj_r_squared`, `log_likelihood`,
+      `aic`, `bic`.
+    - Sample and model size: `n_obs`, `df_model`, `df_resid`,
+      `dep_var_name`.
+    - Settings echoed back: `cov_type`, `hac_lags_used`.
+    - Residuals: `residuals`.
+    - Methods: `predict()`, `augment()`, `params_table()`.
 
     Args:
         raw: The estimation result object returned by `_lib.fit_wls`
@@ -114,8 +129,7 @@ class WLSResults:
         Users normally do not construct this directly; it is returned
         by `WLS.fit()`. `residuals` are on the original (unweighted)
         scale, `y_i - x_i'β̂`, which differs from the weighted
-        residuals used in the standard error computation (see
-        `docs/spec/wls-spec.md`, "結果構造体").
+        residuals used in the standard error computation.
     """
 
     def __init__(self, raw: _lib.WLSResult) -> None:
@@ -129,49 +143,41 @@ class WLSResults:
     @property
     def params(self) -> dict[str, float]:
         """Coefficient name to coefficient value."""
-        return dict(zip(self._raw.param_names, self._raw.params))
+        return by_param(self._raw.param_names, self._raw.params)
 
     @property
     def std_errors(self) -> dict[str, float]:
         """Coefficient name to standard error."""
-        return dict(zip(self._raw.param_names, self._raw.std_errors))
+        return by_param(self._raw.param_names, self._raw.std_errors)
 
     @property
     def test_stats(self) -> dict[str, float]:
         """Coefficient name to test statistic (t-statistic; see
         `stat_dist`)."""
-        return dict(zip(self._raw.param_names, self._raw.test_stats))
+        return by_param(self._raw.param_names, self._raw.test_stats)
 
     @property
-    def stat_dist(self) -> Literal["t", "normal"]:
-        """Distribution of `test_stats`: `"t"` (t-statistics) or
-        `"normal"` (z-statistics)."""
+    def stat_dist(self) -> Literal["t"]:
+        """Distribution of `test_stats`. Always `"t"`: t-statistics are
+        used for every `cov_type`."""
         return self._raw.stat_dist
 
     @property
-    def stat_df(self) -> int | None:
-        """Degrees of freedom of the t distribution behind `test_stats`,
-        or `None` when `stat_dist` is `"normal"`. May differ from
-        `df_resid` (e.g. cluster-robust inference uses `G - 1`), so use
-        this to recompute p-values from `test_stats`."""
+    def stat_df(self) -> int:
+        """Degrees of freedom of the t distribution behind `test_stats`.
+        May differ from `df_resid` (e.g. cluster-robust inference uses
+        `G - 1`), so use this to recompute p-values from `test_stats`."""
         return self._raw.stat_df
 
     @property
     def p_values(self) -> dict[str, float]:
         """Coefficient name to two-sided p-value."""
-        return dict(zip(self._raw.param_names, self._raw.p_values))
+        return by_param(self._raw.param_names, self._raw.p_values)
 
     @property
     def conf_int(self) -> dict[str, tuple[float, float]]:
         """Coefficient name to confidence interval `(lower, upper)`."""
-        return {
-            name: (lower, upper)
-            for name, lower, upper in zip(
-                self._raw.param_names,
-                self._raw.conf_lower,
-                self._raw.conf_upper,
-            )
-        }
+        return conf_int_by_param(self._raw)
 
     @property
     def residuals(self) -> list[float]:
@@ -212,26 +218,28 @@ class WLSResults:
         return self._raw.adj_r_squared
 
     @property
-    def f_statistic(self) -> float:
-        """F-statistic."""
+    def f_statistic(self) -> float | None:
+        """F-statistic of the overall test that all slope coefficients are
+        zero (`None` when there are no slope coefficients)."""
         return self._raw.f_statistic
 
     @property
-    def f_p_value(self) -> float:
-        """P-value of the F-statistic."""
+    def f_p_value(self) -> float | None:
+        """P-value of the F-statistic (`None` when `f_statistic` is
+        `None`)."""
         return self._raw.f_p_value
 
     @property
     def f_df_num(self) -> int | None:
-        """Numerator degrees of freedom of `f_statistic` (`None` when it
-        is NaN, i.e. there are no slope coefficients)."""
+        """Numerator degrees of freedom of `f_statistic` (`None` when
+        `f_statistic` is `None`)."""
         return self._raw.f_df_num
 
     @property
     def f_df_denom(self) -> int | None:
-        """Denominator degrees of freedom of `f_statistic` (`None` when it
-        is NaN). May differ from `df_resid`, so use this to recompute the
-        p-value from `f_statistic`."""
+        """Denominator degrees of freedom of `f_statistic` (`None` when
+        `f_statistic` is `None`). May differ from `df_resid`, so use this to recompute
+        the p-value from `f_statistic`."""
         return self._raw.f_df_denom
 
     @property
@@ -260,52 +268,25 @@ class WLSResults:
         """Bayesian Information Criterion (BIC)."""
         return self._raw.bic
 
-    def coef_table(self) -> list[dict[str, float | str]]:
+    def params_table(self) -> list[dict[str, float | str]]:
         """Row-oriented summary table of the coefficients.
 
-        Shaped to be usable almost as-is in a REST API response (see
-        `docs/spec/ols-spec.md`, "結果構造体"). Returned
-        as `list[dict]` rather than a polars DataFrame, per the
-        project's policy of not using DataFrames for the coefficient
-        table itself.
+        Shaped to be usable almost as-is in a REST API response.
+        Returned as `list[dict]` rather than a polars DataFrame.
 
         Returns:
             A list of dictionaries, one per coefficient. Keys are
-            `param`, `coef`, `std_err`, `test_stat`, `p_value`,
+            `param_name`, `param`, `std_error`, `test_stat`, `p_value`,
             `conf_lower`, `conf_upper`.
         """
-        return [
-            {
-                "param": name,
-                "coef": coef,
-                "std_err": se,
-                "test_stat": t,
-                "p_value": p,
-                "conf_lower": lower,
-                "conf_upper": upper,
-            }
-            for name, coef, se, t, p, lower, upper in zip(
-                self._raw.param_names,
-                self._raw.params,
-                self._raw.std_errors,
-                self._raw.test_stats,
-                self._raw.p_values,
-                self._raw.conf_lower,
-                self._raw.conf_upper,
-            )
-        ]
+        return params_table_rows(self._raw)
 
-    def predict(
-        self, new_data: pl.DataFrame | None = None
-    ) -> list[dict[str, float]]:
+    def predict(self, new_data: pl.DataFrame | None = None) -> list[float]:
         """Predicted values.
 
-        Same design as `OLSResults.predict()`: unified into a single
-        method rather than a separate `fitted_values` property.
-        Weights play no role in either case: the predicted value is
-        `x_i'β̂` on the original (unweighted) scale regardless of
-        `new_data`, and out-of-sample observations have no weight to
-        apply (see `docs/spec/wls-spec.md`, "predict()").
+        Weights play no role: the predicted value is `x_i'β̂` on the
+        original (unweighted) scale regardless of `new_data`, and
+        out-of-sample observations have no weight to apply.
 
         Args:
             new_data: New data to predict on. Must contain columns with
@@ -318,16 +299,15 @@ class WLSResults:
                 same original (unweighted) scale as `residuals`.
 
         Returns:
-            Row-oriented predictions, one dict per observation. Each
-            dict currently has a single key, `"predicted"`.
+            Predicted values, one per observation, in row order (like
+            `residuals`).
 
         Raises:
             ValidationError: `new_data` is missing a required `x`
                 column, or a column contains missing/NaN/infinite
                 values.
         """
-        raw = self._raw.predict(new_data)
-        return [{"predicted": value} for value in raw]
+        return self._raw.predict(new_data)
 
     def augment(self, new_data: pl.DataFrame | None = None) -> pl.DataFrame:
         """Source data with the predicted values appended as a column.

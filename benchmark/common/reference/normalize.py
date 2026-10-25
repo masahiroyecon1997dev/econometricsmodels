@@ -8,9 +8,20 @@ statsmodels_ref.py`、OLS/WLS/Logit/Probit共通）でも同じ形（切片名�
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Sequence
 
 _INTERCEPT_ALIASES_DEFAULT = ("(Intercept)", "Intercept")
+
+
+def fix_intercept_name(
+    name: str, intercept_aliases: Collection[str] = _INTERCEPT_ALIASES_DEFAULT
+) -> str:
+    """切片の別名を本実装の`"const"`へ畳む（それ以外の名前はそのまま返す）。
+
+    `normalize_names`を通さず係数dictを自前で組み立てる生成スクリプト
+    （IVの`linearmodels_ref.py`）が、同じ規則で名前を揃えるための単一の定義元。
+    """
+    return "const" if name in intercept_aliases else name
 
 
 def normalize_names(
@@ -18,18 +29,18 @@ def normalize_names(
     *,
     stat_key: str = "test_stats",
     scalar_keys: Sequence[str] = (),
-    intercept_aliases: Iterable[str] = _INTERCEPT_ALIASES_DEFAULT,
+    intercept_aliases: Collection[str] = _INTERCEPT_ALIASES_DEFAULT,
     conf_from_low_high: bool = False,
     fix_margeff: bool = False,
 ) -> dict:
     """リファレンス実装の出力パラメータ名を本実装の`param_names`規則
     （切片="const"）へ揃える。
 
-    出力キーの順序は`coef, se, <stat_key>, p_values, conf_int,
+    出力キーの順序は`params, std_errors, <stat_key>, p_values, conf_int,
     <scalar_keysの順>, (margeff)`で固定（既存フィクスチャと同じ並び）。
 
     Args:
-        raw: `coef`/`se`/`<stat_key>`/`p_values`（いずれもパラメータ名
+        raw: `params`/`std_errors`/`<stat_key>`/`p_values`（いずれもパラメータ名
             キーのdict）と、`conf_int`（`conf_from_low_high=False`時）
             または`conf_low`/`conf_high`（`conf_from_low_high=True`時）を
             持つdict。
@@ -48,14 +59,14 @@ def normalize_names(
     """
 
     def fix(name: str) -> str:
-        return "const" if name in intercept_aliases else name
+        return fix_intercept_name(name, intercept_aliases)
 
     def fixed(mapping: dict) -> dict:
         return {fix(k): v for k, v in mapping.items()}
 
     result: dict = {
-        "coef": fixed(raw["coef"]),
-        "se": fixed(raw["se"]),
+        "params": fixed(raw["params"]),
+        "std_errors": fixed(raw["std_errors"]),
         stat_key: fixed(raw[stat_key]),
         "p_values": fixed(raw["p_values"]),
     }

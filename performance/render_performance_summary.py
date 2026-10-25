@@ -2,7 +2,7 @@
 
 GitHub ActionsのJob Summary（`$GITHUB_STEP_SUMMARY`）向け。手法別の計測
 スクリプト（`compare_ols.py`等）と共通ハーネス（`_perf_harness.py`）はJSON
-出力に専念し、表示形式への整形は責務を分けてこちらに置く。手法名・cov_type・
+出力に専念し、表示形式への整形は責務を分けてこちらに置く。手法名・cov ケース・
 ライブラリはレポートの`_meta`から読むため、このスクリプトは手法非依存。
 
 使用例（リポジトリルートから）:
@@ -77,35 +77,146 @@ def _pivot_table(
     return "\n".join(lines)
 
 
+def case_label(row: dict) -> str:
+    """計測行の cov ケース名（`cov_case`。無い旧形式の結果は `cov_type`）。"""
+    return row.get("cov_case") or row["cov_type"]
+
+
+def default_case(meta: dict) -> str:
+    """n・k・method 軸で回した既定の標準誤差のケース名。"""
+    return meta.get("default_cov_case") or meta["cov_types"][0]
+
+
+def case_title(case: dict) -> str:
+    """`_meta["cov_cases"]` の1要素から、表に出す読みやすい名前を作る。
+
+    例: "cluster (G=50, random)"・"cluster (G=n/10, sorted)"・"hc1"。
+    """
+    label, cov_type = case["label"], case["cov_type"]
+    layout = case.get("cluster_layout")
+    if layout is None:
+        return label
+    name = cov_type if label.startswith(f"{cov_type}_") else label
+    groups = (
+        f"G={case['n_clusters']}"
+        if case.get("n_clusters") is not None
+        else f"G=n/{case['cluster_size']}"
+    )
+    return f"{name} ({groups}, {layout})"
+
+
+def format_ratio(ratio: float) -> str:
+    """速度比（参照実装の時間 / 自パッケージの時間）を表示用に整形する。"""
+    return f"{ratio:.2f}x" if ratio < 1 else f"{ratio:.1f}x"
+
+
+def speedup(own_time: float, ref_time: float) -> str:
+    """参照実装の時間 / 自パッケージの時間 を表示用に整形する。"""
+    return format_ratio(ref_time / own_time)
+
+
 def _render_axis_section(
     title: str,
     subtitle: str,
     axis_key: str,
     axis_results: list[dict],
-    cov_types: list[str],
     libraries: list[str],
     include_rss: bool,
 ) -> list[str]:
-    """n軸・k軸それぞれのセクション（見出し＋cov_typeごとの表）を組み立てる。
+    """n軸・k軸それぞれのセクション（見出し＋表）を組み立てる。
 
     その軸で実際に計測されたライブラリのみを列にする（`PerfAdapter.
     k_sweep_libraries` で軸ごとにライブラリを絞る手法があるため。絞られた側を
-    "-" で埋めた列を出さない）。
+    "-" で埋めた列を出さない）。n軸・k軸は既定の標準誤差だけなので表は1つ。
+    標準誤差が複数混ざった結果（旧形式）は標準誤差ごとに小見出しを付けて分ける。
     """
+    if not axis_results:
+        return []
     present = [
         lib
         for lib in libraries
         if any(r["library"] == lib for r in axis_results)
     ]
+    labels = list(dict.fromkeys(case_label(r) for r in axis_results))
     lines = [title, "", subtitle, ""]
-    for cov_type in cov_types:
-        rows = [r for r in axis_results if r["cov_type"] == cov_type]
-        if not rows:
-            continue
-        lines.append(f"### {cov_type}")
-        lines.append("")
+    for label in labels:
+        rows = [r for r in axis_results if case_label(r) == label]
+        if len(labels) > 1:
+            lines += [f"### {label}", ""]
         lines.append(_pivot_table(rows, axis_key, present, include_rss))
         lines.append("")
+    return lines
+
+
+def _render_cov_section(
+    title: str,
+    subtitle: str,
+    cov_results: list[dict],
+    libraries: list[str],
+    cov_cases: list[dict],
+    first_header: str,
+    speedup_header: str,
+) -> list[str]:
+    """cov軸のセクション（標準誤差のケースごとに1行の表）を組み立てる。
+
+    列は計測されたライブラリの `実行時間 / ピークRSS` と、参照実装が1つだけの
+    ときの速度比（参照実装の時間 / 自パッケージの時間）。参照実装で計測して
+    いないケースの速度比は "-"。
+
+    Args:
+        title: セクション見出し。
+        subtitle: 見出し直下の説明文。
+        cov_results: cov軸の計測結果行。
+        libraries: 列として並べるライブラリ名（表示順。先頭が自パッケージ）。
+        cov_cases: `_meta["cov_cases"]`（行の並びと表示名のもと）。
+        first_header: 1列目の見出し。
+        speedup_header: 速度比列の見出し。
+    """
+    if not cov_results:
+        return []
+    present = [
+        lib
+        for lib in libraries
+        if any(r["library"] == lib for r in cov_results)
+    ]
+    with_speedup = len(present) == 2
+    header = [first_header, *present] + (
+        [speedup_header] if with_speedup else []
+    )
+    lines = [
+        title,
+        "",
+        subtitle,
+        "",
+        "| " + " | ".join(header) + " |",
+        "|---" * len(header) + "|",
+    ]
+    for case in cov_cases:
+        rows = {
+            r["library"]: r
+            for r in cov_results
+            if case_label(r) == case["label"]
+        }
+        if not rows:
+            continue
+        cells = [case_title(case)]
+        for library in present:
+            r = rows.get(library)
+            cells.append(
+                "-"
+                if r is None
+                else f"{_format_time(r['time_median_s'])} / "
+                f"{_format_rss(r['peak_rss_kb'])}"
+            )
+        if with_speedup:
+            own, ref = rows.get(present[0]), rows.get(present[1])
+            cells.append(
+                speedup(own["time_median_s"], ref["time_median_s"])
+                if own and ref
+                else "-"
+            )
+        lines.append("| " + " | ".join(cells) + " |")
+    lines.append("")
     return lines
 
 
@@ -114,9 +225,8 @@ def _render_method_section(
 ) -> list[str]:
     """method軸（bfgs/lbfgs、gmm 等を代表点で計測）のセクションを組み立てる。
 
-    行=method、列=library の1表のみ（cov_type=classical・n/k 固定）。既定の
-    method（`default_method`）は n軸の同条件（cov_type=classical,
-    n=method_sweep_n）を参照する。
+    行=method、列=library の1表のみ（既定の標準誤差・n/k 固定）。既定の
+    method（`default_method`）は n軸の同条件（n=method_sweep_n）を参照する。
     """
     if not method_results:
         return []
@@ -125,7 +235,7 @@ def _render_method_section(
     default_method = meta.get("default_method", "newton")
     lines = [
         (
-            f"## method軸（cov_type=classical, k={meta['n_sweep_fixed_k']}, "
+            f"## method軸（{default_case(meta)}, k={meta['n_sweep_fixed_k']}, "
             f"n={n_label}固定）"
         ),
         "",
@@ -174,7 +284,6 @@ def render(report: dict) -> str:
     meta = report["_meta"]
     method: str = meta.get("method", "ols")
     libraries: list[str] = meta["libraries"]
-    cov_types: list[str] = meta["cov_types"]
     results: list[dict] = report["results"]
 
     lines = [
@@ -203,31 +312,49 @@ def render(report: dict) -> str:
         lines += [f"> {w}" for w in warnings]
         lines.append("")
 
-    n_subtitle = "実行時間（秒、中央値） / ピークRSS（MB）"
+    n_subtitle = (
+        f"{default_case(meta)}。実行時間（秒、中央値） / ピークRSS（MB）"
+    )
     engine_only_n = meta.get("n_sweep_engine_only") or []
     if engine_only_n:
         joined = "/".join(f"{n:,}" for n in engine_only_n)
         n_subtitle += (
             f"（n={joined} は大標本での engine の回帰検知用で "
-            f"cov_type={cov_types[0]} のみ。全 cov_type / 全ライブラリでは回さない）"
+            f"{default_case(meta)} のみ。全ライブラリでは回さない）"
         )
     lines += _render_axis_section(
         title=f"## n軸（k={meta['n_sweep_fixed_k']}固定）",
         subtitle=n_subtitle,
         axis_key="n",
         axis_results=[r for r in results if r["axis"] == "n"],
-        cov_types=cov_types,
         libraries=libraries,
         include_rss=True,
     )
     lines += _render_axis_section(
         title=f"## k軸（n={meta['k_sweep_fixed_n']:,}固定）",
-        subtitle="実行時間（秒、中央値）",
+        subtitle=f"{default_case(meta)}。実行時間（秒、中央値）",
         axis_key="k",
         axis_results=[r for r in results if r["axis"] == "k"],
-        cov_types=cov_types,
         libraries=libraries,
         include_rss=False,
+    )
+    lines += _render_cov_section(
+        title=(
+            f"## cov軸（n={meta['cov_sweep_n']:,}, "
+            f"k={meta['n_sweep_fixed_k']}固定）"
+            if meta.get("cov_sweep_n")
+            else "## cov軸"
+        ),
+        subtitle=(
+            "標準誤差の種類ごとの実行時間（秒、中央値） / ピークRSS（MB）。"
+            "速度比は参照実装の時間 / 自パッケージの時間（1未満なら参照実装が"
+            "速い）。参照実装に同等の標準誤差が無いケースは自パッケージのみ。"
+        ),
+        cov_results=[r for r in results if r["axis"] == "cov"],
+        libraries=libraries,
+        cov_cases=meta.get("cov_cases") or [],
+        first_header="標準誤差",
+        speedup_header="速度比",
     )
     lines += _render_method_section(
         [r for r in results if r["axis"] == "method"], libraries, meta

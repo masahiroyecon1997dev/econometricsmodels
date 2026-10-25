@@ -3,7 +3,7 @@
 //! OLSは1手法1エラー型（`LeastSquaresError`、旧`OlsError`）だったが、nonlinear系統は`raise_on_non_convergence`
 //! 未収束・観測数不足・`confidence_level`範囲外等、3手法でほぼ共通のバリアントが多いため、
 //! `<系統>/common.rs`に共有型として定義する（`.claude/rules/rust-style.md`「ファイル・
-//! ディレクトリ構成」参照）。Tobit専用のバリアント（`InvalidCensoringBounds`）も、別のenumに
+//! ディレクトリ構成」参照）。Tobit専用のバリアント（`CensoringBoundsMissing`等）も、別のenumに
 //! 分離せず同じ`MleError`に含める（Logit/Probitの`fit()`はそのバリアントを構築しないだけで、
 //! 型を分ける必要はない。OLSの`CovType::Hac`/`CovType::Cluster`がフィールド付きバリアントとして
 //! 共存しているのと同じ考え方）。
@@ -12,9 +12,9 @@
 //! 「エラー型（`MleError`、共有）」を参照。
 //!
 //! `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/
-//! `MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`は、linear系統の
-//! `LeastSquaresError`と文言まで完全に重複していたため`engine::error::CommonError`に
-//! 切り出し、`Common`バリアント経由で保持する。
+//! `MissingClusterColumn`/`InsufficientClusters`等は、linear系統の`LeastSquaresError`と
+//! 文言まで完全に重複していたため`engine::shared::error::CommonError`に切り出し、
+//! `Common`バリアント経由で保持する（数値的なほぼ特異性は`CommonError::NearSingularMatrix`）。
 
 use argmin::core::TerminationStatus;
 use argmin::core::{
@@ -29,12 +29,18 @@ use std::cell::Cell;
 use std::collections::VecDeque;
 use thiserror::Error;
 
-use crate::design_matrix::design_matrix_element;
-use crate::error::CommonError;
-use crate::inference;
-use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
-use crate::validation::MAX_ITER_LIMIT;
-use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
+use crate::shared::covariance::{cluster_correction, cluster_meat, sandwich};
+use crate::shared::design_matrix::design_matrix_element;
+use crate::shared::error::{ClusterSetting, CommonError, ErrorInfo, MatrixKind};
+use crate::shared::error_catalog::{ErrorCode, ErrorReport};
+use crate::shared::group_codes::GroupCodes;
+use crate::shared::inference;
+use crate::shared::linear_algebra::{
+    RankDeficient, checked_col_piv_qr, collinear_columns, column_names,
+    ensure_well_conditioned_symmetric_matrix,
+};
+use crate::shared::validation::{MAX_ITER_LIMIT, MAX_ITER_MIN};
+use crate::shared::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 
 /// Logit/Probit/Tobitの計算過程で発生しうるエラー。
 ///
@@ -47,36 +53,30 @@ pub enum MleError {
     Common(#[from] CommonError),
 
     /// `raise_on_non_convergence=true`（既定）かつ`max_iter`回で収束しなかった。
-    #[error(
-        "failed to converge after {n_iter} iterations. Set raise_on_non_convergence=False \
-         to receive the result anyway, or increase max_iter"
-    )]
+    #[error("{}", self.catalog_message())]
     NonConvergence { n_iter: usize },
 
-    /// `max_iter`が0以下。
-    #[error(
-        "max_iter must be an integer between 1 and {}, got {max_iter}",
-        MAX_ITER_LIMIT
-    )]
+    /// `max_iter`が`1..=MAX_ITER_LIMIT`の範囲外。
+    #[error("{}", self.catalog_message())]
     InvalidMaxIter { max_iter: i64 },
 
     /// `tol`が0以下、またはNaN・無限大。勾配ノルムに基づく収束判定`‖∇ℓ(θ)‖ < tol`が
     /// 理論上満たされない（NaNは常に偽、`0`以下は到達不能）ため、常に`max_iter`まで反復して
     /// `NonConvergence`（または`converged=false`）になる（`InvalidMaxIter`と同じ形の
     /// 早期バリデーション）。
-    #[error("tol must be a positive finite number, got {tol}")]
+    #[error("{}", self.catalog_message())]
     InvalidTol { tol: f64 },
 
     /// Hessianが特異で逆行列が計算できない。Newton法のステップ求解中（収束前の任意の点）、
     /// および収束点での観測情報行列・サンドイッチ型・クラスターロバストSE計算
     /// （いずれもHessianの逆行列を使う）の両方で発生しうる。
-    #[error("the Hessian is singular and cannot be inverted")]
+    #[error("{}", self.catalog_message())]
     SingularHessian,
 
     /// OPG（`Σᵢ sᵢsᵢ'`、outer product of gradients）行列が特異で逆行列が計算できない。
     /// `cov_type="opg"`（BHHH）でのみ発生しうる。Hessianではなくスコアの外積和が
     /// 特異という別の原因のため、`SingularHessian`とは区別する。
-    #[error("the outer-product-of-gradients (OPG) matrix is singular and cannot be inverted")]
+    #[error("{}", self.catalog_message())]
     SingularOpgMatrix,
 
     /// Tobit専用: Newton法の初期値計算（打ち切りを無視した単純なOLS、`ols_initial_params`
@@ -84,17 +84,20 @@ pub enum MleError {
     /// `SingularHessian`（最適化中・収束後のHessianの逆行列計算）とは、Newton法が
     /// 一度も反復していない段階で発生しうる点・Hessianを一切評価していない点が異なるため
     /// 区別する（`SingularOpgMatrix`を`SingularHessian`と区別しているのと同じ考え方）。
-    #[error(
-        "the design matrix used for the initial value estimate is singular and cannot be inverted"
-    )]
-    SingularDesignMatrix,
+    #[error("{}", self.catalog_message())]
+    SingularDesignMatrix { columns: Vec<String> },
 
-    /// Tobit専用: 打ち切り境界（下限/上限）の指定が不正（下限≧上限等）。
-    #[error(
-        "invalid censoring bounds: lower={lower:?}, upper={upper:?} \
-         (at least one bound must be set, and lower must be less than upper when both are set)"
-    )]
-    InvalidCensoringBounds {
+    /// Tobit専用: 打ち切り境界が両方とも`None`（少なくとも片側の指定が必要）。
+    #[error("{}", self.catalog_message())]
+    CensoringBoundsMissing,
+
+    /// Tobit専用: 両側の境界が有限で、下限が上限以上（`lower >= upper`）。
+    #[error("{}", self.catalog_message())]
+    CensoringBoundsNotOrdered { lower: f64, upper: f64 },
+
+    /// Tobit専用: 指定された境界にNaNまたは無限大が含まれる。
+    #[error("{}", self.catalog_message())]
+    CensoringBoundNotFinite {
         lower: Option<f64>,
         upper: Option<f64>,
     },
@@ -104,23 +107,21 @@ pub enum MleError {
     /// statsmodelsの`Logit`はコンストラクタ時点で単位区間`[0,1]`を要求する
     /// （比率データ／frequency weights的な用途も許容する設計）が、本実装は
     /// 常に真の2値アウトカムのみを想定するため、より厳格に`{0.0, 1.0}`の完全一致を
-    /// 要求する（ユーザー確認済み）。`InvalidCensoringBounds`（Tobit専用）
+    /// 要求する（ユーザー確認済み）。Tobit専用の境界エラー（`CensoringBoundsMissing`等）
     /// と対称的に、Tobit（連続な打ち切り被説明変数）の`fit()`はこのバリアントを
     /// 構築しない（`MleError`モジュールdocコメント「別のenumに分離せず同じ`MleError`に
     /// 含める」の方針通り）。
-    #[error("y at row {row} must be coded as 0.0 or 1.0 (binary outcome), got {value}")]
+    #[error("{}", self.catalog_message())]
     InvalidBinaryY { row: usize, value: f64 },
 
     /// Tobit専用: `y`の実測値が、指定された打ち切り境界の範囲外にある行を含む。
     ///
-    /// `InvalidCensoringBounds`（境界の指定自体が不正）とは異なり、境界の指定自体は
+    /// `CensoringBoundsMissing`/`CensoringBoundsNotOrdered`/`CensoringBoundNotFinite`（境界の指定自体が不正）とは異なり、境界の指定自体は
     /// 妥当だが実測`y`との整合性が取れないケース（`lower`指定時に`y < lower`の行がある、
     /// または`upper`指定時に`y > upper`の行がある）。`InvalidBinaryY`と同型の
     /// 「行番号+値」パターンで、`TobitInput::from_columns`が構築する
     /// （`engine/src/nonlinear/tobit.rs`参照）。
-    #[error(
-        "y at row {row} is out of the censoring bounds (lower={lower:?}, upper={upper:?}): got {value}"
-    )]
+    #[error("{}", self.catalog_message())]
     YOutOfCensoringBounds {
         row: usize,
         value: f64,
@@ -144,57 +145,43 @@ pub enum MleError {
     /// 判定するロジック——線形計画法的な実行可能性判定に相当——は複雑さに見合わないと
     /// 判断、ユーザー確認済み）。
     ///
-    /// `SeparationSuspected`（Logit/Probitの準/完全分離）と同様の「有限のMLEが
-    /// 存在しない」病理だが、Tobitでは標準化パラメータ空間のノルムが必ずしも
-    /// 大きくならない（`σ`が小さくなる形で退化するため）ため`SeparationSuspected`の
-    /// 検出条件では捕捉できない。実測で確認済み: 全件打ち切りデータ（`x`が単調増加で
+    /// [`SeparationDetected`](Self::SeparationDetected)（Logit/Probitの準/完全分離）と
+    /// 同様の「有限のMLEが存在しない」病理だが、Tobitでは係数が±∞へ発散せず`σ`が小さくなる
+    /// 形で退化するため、Logit/Probitの分離検出（`nonlinear::separation`）では捕捉できない。実測で確認済み: 全件打ち切りデータ（`x`が単調増加で
     /// 完全分離が成立するケース）で`fit()`が`converged=true`のまま統計的に無意味な
     /// 巨大SE（標準誤差が実測で100万倍オーダー）を返す退化収束を起こす。参照実装
     /// `survival::survreg`（`AER::tobit`のエンジン）は同種のデータで初期反復に失敗し
     /// エラーを返す（"initial iteration failed"）。`fit()`冒頭でのバリデーションとして
     /// 早期に検出する（`docs/spec/tobit-spec.md`1章「非識別データの検出」参照）。
-    #[error(
-        "no uncensored observations: at least one y value strictly between lower={lower:?} and \
-         upper={upper:?} is required to identify the model"
-    )]
+    #[error("{}", self.catalog_message())]
     NoUncensoredObservations {
         lower: Option<f64>,
         upper: Option<f64>,
     },
 
-    /// 勾配ノルム基準（`‖∇ℓ(θ)‖ < tol`）は満たしたが、標準化パラメータ空間でのノルムが
-    /// 異常に大きい。(準)完全分離（quasi-/complete separation）では、係数が発散していく
-    /// 過程でロジスティックのスコア項`p(1-p)`が浮動小数点アンダーフローによりほぼ0.0に
-    /// なり、真には収束していないのに勾配ノルムだけが先に`tol`を割り込む。
+    /// Logit/Probit専用: データが完全分離または準完全分離している。説明変数の線形結合が
+    /// （全観測または一部の観測について）2値の被説明変数を完全に予測するため、有限の
+    /// 最尤推定量は存在せず、係数が発散する方向に尤度が増え続ける。
     ///
-    /// 当初はNewton法のステップ幅（更新前後のパラメータの差）が縮小しているかを見る、
-    /// より直接的な基準を検討した（真の停留点への収束ならステップ幅も勾配ノルムと共に
-    /// 縮小するはずという理屈）。しかしargminの`IterState`は、ソルバーが`take_param()`で
-    /// 現在のパラメータを取り出してから新しい`param()`を設定する実装パターン（自作の
-    /// `FaerNewton`、および組み込みのBFGS/LBFGSも同じパターン）だと、`prev_param`が
-    /// 正しく追跡されない（`take_param()`の時点で`param`が`None`になるため、`param()`
-    /// 内部の退避swapが空振りする）ことが実装時に判明し、3手法統一では使えなかった
-    /// （ユーザー確認済み）。代わりに、`fit()`が最適化前に標準化する設計行列
-    /// （`standardize_columns`）を活かし、標準化パラメータ空間でのノルムの大きさを
-    /// 事後チェックする、より単純だが3手法へ確実に統一適用できる基準を採用した。
-    /// 実測（既存の`near_separation`シナリオ=境界ケース vs 発見時の病的データ）で
-    /// 標準化パラメータノルムに40倍以上の差があることを確認済み
-    /// （`SEPARATION_PARAM_NORM_THRESHOLD`のdocコメント参照）。
+    /// 収束後に`nonlinear::separation`が厳密に判定する（`Zθ ≥ 0`かつどれかが厳密に正となる`θ`が
+    /// 存在するか、という線形計画）。閾値を持たないため標本サイズ・説明変数の数・リンク関数に
+    /// 依らず、分離は「疑い」ではなく確定した事実として扱う。
     ///
-    /// **Logit/Probit専用**（`run_solver`に[`SeparationNormCheck`]を渡して切り替え、
-    /// Logit/Probitは`Enabled`・Tobitは`Disabled`）。Tobitでは発火しない: (準)完全分離が
-    /// 起きても係数は±∞へ発散せず`σ→0`退化として現れるため標準化パラメータノルムは
-    /// 閾値を超えない。Tobitの分離は全件打ち切りなら`NoUncensoredObservations`
-    /// （`fit()`冒頭のバリデーション）、部分的な準完全分離なら`NonConvergence`
-    /// （`max_iter`到達）として捕捉される。加えてその後のTobitは`standardize_columns`
-    /// ではなく`tobit.rs`局所の`TobitScaling`で標準化しており、`y∈{0,1}`で較正した
-    /// この閾値はTobitのパラメータ空間には適用できない。
-    #[error(
-        "convergence could not be verified after {n_iter} iterations: the gradient norm \
-         dropped below tol, but the (standardized) parameter norm is implausibly large. This \
-         pattern is typical of (quasi-)complete separation, where no finite MLE exists"
-    )]
-    SeparationSuspected { n_iter: usize },
+    /// 旧来の標準化パラメータのL2ノルム（閾値`100`）による検出は、この判定に置き換えて廃止した。
+    /// ノルムは分離の有無ではなく停止時のマージンと点の幾何配置で決まる量で、小標本（`n≲20`）
+    /// では分離解を見逃し、強い多重共線性では有限のMLEを誤って棄却していた。
+    ///
+    /// `Tobit`では発火しない（[`NoUncensoredObservations`](Self::NoUncensoredObservations)参照）。
+    #[error("{}", self.catalog_message())]
+    SeparationDetected,
+
+    /// Tobit専用: `target="expected_uncensored"`（`E[y|lower<y<upper,x]`）の非打ち切り区間の幅
+    /// `(upper-lower)/σ̂`が小さすぎ（`MIN_UNCENSORED_WIDTH_RATIO`未満）、`W=Φ(zb)-Φ(za)`で
+    /// 割る量が桁落ちで信頼できない（`w`の相対誤差が約`12ε/δ⁴`、デルタ法の`s`はさらに悪い）。
+    /// 推定済みの`σ̂`で決まる条件で入力そのものは不正ではないため`ComputationError`
+    /// （`ValidationError`ではない）。`lower`/`upper`が`None`の片側打ち切りでは発生しない。
+    #[error("{}", self.catalog_message())]
+    UncensoredIntervalTooNarrow { lower: f64, upper: f64, sigma: f64 },
 
     /// `bfgs`/`lbfgs`のline search（`MoreThuenteLineSearch`）が、収束判定を一度も満たさない
     /// まま目的関数・勾配の評価回数の総枠（[`BudgetedProblem`]）を使い切った。
@@ -219,58 +206,96 @@ pub enum MleError {
     /// 同じ総枠を共有する。`newton`は`MAX_LM_ATTEMPTS`で頭打ちのLMラダーによりこの
     /// バリアントが実質発火しないため、メッセージは主な発火源である`bfgs`/`lbfgs`の
     /// line search（cost/gradient評価）に絞って表現している。
-    #[error(
-        "the optimizer evaluated the objective/gradient {budget} times without satisfying its \
-         convergence criteria (this typically indicates the line search failed to converge for \
-         this input); try a different solver, or adjust max_iter/tol"
-    )]
+    #[error("{}", self.catalog_message())]
     EvaluationBudgetExceeded { budget: u64 },
+
+    /// 1回のline searchが、反復の上限`max_iters`回で収束しなかった（`lbfgs`）。
+    #[error("{}", self.catalog_message())]
+    LineSearchFailed { max_iters: u64 },
+
+    /// 完全分離・準完全分離が無いことを、線形計画が数値的に完了せず確認できなかった。
+    /// `detail`は原因（開発者向け。利用者に見せるメッセージには含めない）。
+    #[error("{}", self.catalog_message())]
+    SeparationCheckFailed { detail: String },
 }
 
-/// [`SeparationSuspected`](MleError::SeparationSuspected)を検出する閾値。標準化
-/// パラメータ空間（`fit()`が最適化に使う空間、`standardize_columns`参照）でのノルムが
-/// これを超える場合、勾配ノルム基準で収束と判定されていても取り消す。`LogitOptions`等に
-/// 公開の調整用オプションとしては設けず（ユーザー確認済み）、内部実装の
-/// 詳細として固定する。
-///
-/// 値の根拠: 既存の`near_separation`シナリオ（`beta1=20`、意図的に境界ケースに留めてある
-/// 合成データ、既存の合格テストが使う）は標準化パラメータノルムが約31。一方、発見時の
-/// 病的データ（`beta1=100`）は約1282。両者の間には40倍以上の開きがあり、`100`はこの
-/// ギャップの中間（正常な境界ケース側に3倍強のマージンを残す）に位置する。
-///
-/// **Logit/Probitの`y∈{0,1}`で較正した値**であり、`run_solver`に
-/// [`SeparationNormCheck::Enabled`]を渡したとき（Logit/Probit）のみ使われる。Tobitでは
-/// 適用しない（[`MleError::SeparationSuspected`]参照）。
-const SEPARATION_PARAM_NORM_THRESHOLD: f64 = 100.0;
-
-/// `run_solver`の(準)完全分離事後チェック（標準化パラメータノルムが
-/// [`SEPARATION_PARAM_NORM_THRESHOLD`]を超えたら収束判定を取り消す、
-/// [`MleError::SeparationSuspected`]参照）を有効にするか。隣接する`raise_on_non_convergence`
-/// と同型の生`bool`を並べると取り違えても型で気づけないため、bool引数ではなく専用enumで
-/// 呼び出し側を自己記述的にする（rust-reviewer指摘）。
-///
-/// - [`Enabled`](SeparationNormCheck::Enabled): Logit/Probit。`y∈{0,1}`で係数が±∞へ
-///   発散するため、この検出が意味を持つ。
-/// - [`Disabled`](SeparationNormCheck::Disabled): Tobit。真の分離は`σ→0`退化として現れ
-///   標準化パラメータノルムは閾値を超えず、実質発火しない。かつその後のTobitは
-///   `standardize_columns`ではなく`tobit.rs`局所の`TobitScaling`で標準化しており、この
-///   閾値はそもそもTobitのパラメータ空間には未較正。Tobitの分離は
-///   `NoUncensoredObservations`（全件打ち切り）または`NonConvergence`（部分的準分離）で
-///   捕捉される。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SeparationNormCheck {
-    Enabled,
-    Disabled,
+impl ErrorInfo for MleError {
+    fn report(&self) -> ErrorReport {
+        match self {
+            Self::Common(common) => common.report(),
+            Self::InvalidMaxIter { max_iter } => ErrorReport::new(ErrorCode::MaxIterOutOfRange)
+                .param("value", *max_iter)
+                .param("min", MAX_ITER_MIN)
+                .param("max", MAX_ITER_LIMIT),
+            Self::InvalidTol { tol } => ErrorReport::new(ErrorCode::ToleranceNotPositiveFinite)
+                .param("option", "tol")
+                .param("value", *tol),
+            Self::NonConvergence { n_iter } => ErrorReport::new(ErrorCode::NotConverged)
+                .param("n_iter", *n_iter)
+                .param("iter_option", "max_iter"),
+            Self::SingularHessian => ErrorReport::new(ErrorCode::MatrixNearSingular)
+                .param("matrix", MatrixKind::Hessian.as_str()),
+            Self::SingularOpgMatrix => ErrorReport::new(ErrorCode::MatrixNearSingular)
+                .param("matrix", MatrixKind::Opg.as_str()),
+            Self::SingularDesignMatrix { columns } => {
+                ErrorReport::new(ErrorCode::DesignMatrixSingular).param("columns", columns.clone())
+            }
+            Self::SeparationDetected => ErrorReport::new(ErrorCode::SeparationDetected),
+            Self::UncensoredIntervalTooNarrow {
+                lower,
+                upper,
+                sigma,
+            } => ErrorReport::new(ErrorCode::UncensoredIntervalTooNarrow)
+                .param("lower", *lower)
+                .param("upper", *upper)
+                .param("sigma", *sigma),
+            Self::EvaluationBudgetExceeded { budget } => {
+                ErrorReport::new(ErrorCode::LineSearchFailed).param("n_evaluations", *budget)
+            }
+            Self::LineSearchFailed { max_iters } => {
+                ErrorReport::new(ErrorCode::LineSearchFailed).param("n_evaluations", *max_iters)
+            }
+            Self::SeparationCheckFailed { .. } => {
+                ErrorReport::new(ErrorCode::SeparationCheckFailed)
+            }
+            Self::CensoringBoundsMissing => ErrorReport::new(ErrorCode::CensoringBoundsMissing),
+            Self::CensoringBoundsNotOrdered { lower, upper } => {
+                ErrorReport::new(ErrorCode::CensoringBoundsNotOrdered)
+                    .param("lower", *lower)
+                    .param("upper", *upper)
+            }
+            Self::CensoringBoundNotFinite { lower, upper } => {
+                ErrorReport::new(ErrorCode::CensoringBoundNotFinite)
+                    .param("lower", *lower)
+                    .param("upper", *upper)
+            }
+            Self::InvalidBinaryY { row, value } => ErrorReport::new(ErrorCode::OutcomeNotBinary)
+                .param("row", *row)
+                .param("value", *value),
+            Self::YOutOfCensoringBounds {
+                row,
+                value,
+                lower,
+                upper,
+            } => ErrorReport::new(ErrorCode::OutcomeOutsideCensoringBounds)
+                .param("row", *row)
+                .param("value", *value)
+                .param("lower", *lower)
+                .param("upper", *upper),
+            Self::NoUncensoredObservations { lower, upper } => {
+                ErrorReport::new(ErrorCode::NoUncensoredObservations)
+                    .param("lower", *lower)
+                    .param("upper", *upper)
+            }
+        }
+    }
 }
 
-/// 標準化パラメータ空間でのノルムが[`SEPARATION_PARAM_NORM_THRESHOLD`]を超えるか
-/// （[`MleError::SeparationSuspected`]の判定条件そのもの）。`run_solver`本体から
-/// 切り出しているのは、実際の最適化トラジェクトリ（`beta1`を振っても、ロジスティック
-/// 関数の浮動小数点飽和により`y`の実現値が広い範囲で同一になり、閾値付近の境界データを
-/// 意図的に作るのが難しい）に頼らず、境界値そのものを直接検証できるようにするため
-/// （rust-reviewerの指摘を受けて追加）。
-fn separation_suspected(params: &[f64]) -> bool {
-    l2_norm(params) > SEPARATION_PARAM_NORM_THRESHOLD
+impl MleError {
+    /// `Display`が使う`message`。
+    fn catalog_message(&self) -> String {
+        self.report().message()
+    }
 }
 
 /// `y`が`{0.0, 1.0}`の2値でない値を含む場合にエラーを返す（Logit/Probit専用、
@@ -290,9 +315,9 @@ pub fn validate_binary_y(y: &Mat<f64>) -> Result<(), MleError> {
     Ok(())
 }
 
-/// `max_iter`が`1..=MAX_ITER_LIMIT`の範囲外の場合にエラーを返す。
+/// `max_iter`が`MAX_ITER_MIN..=MAX_ITER_LIMIT`の範囲外の場合にエラーを返す。
 fn validate_max_iter(max_iter: i64) -> Result<(), MleError> {
-    if !(1..=MAX_ITER_LIMIT).contains(&max_iter) {
+    if !(MAX_ITER_MIN..=MAX_ITER_LIMIT).contains(&max_iter) {
         return Err(MleError::InvalidMaxIter { max_iter });
     }
     Ok(())
@@ -348,21 +373,25 @@ pub fn validate_sufficient_observations(n: usize, k: usize) -> Result<(), MleErr
 /// `n_slopes`（= `k - k_constant`）より多いこと（`validate_cluster_count_covers_slopes`、
 /// `rank(Ŝ) ≤ g - 1`のため`g <= n_slopes`だと`n_slopes×n_slopes`部分行列が構造的に
 /// 特異）を検証する（`Cluster`以外は無検証）。`n`と型が同じ`usize`の
-/// `n_slopes`を並べているが、`n`は`validate_cluster_groups`内の`debug_assert_eq!
-/// (groups.len(), n)`で、`n_slopes`は`g <= n_slopes`の比較結果で、取り違えれば
-/// いずれもテスト/デバッグビルドで早期に露見する（`validate_fit_preconditions`が
+/// `n_slopes`を並べているが、`n`は`validate_cluster_groups`内の
+/// `groups.nobs() != n`の判定（`ClusterDimensionMismatch`）で、`n_slopes`は
+/// `g <= n_slopes`の比較結果で、取り違えればいずれもテストで早期に露見する（`validate_fit_preconditions`が
 /// 多数の同型引数を持つため`has_intercept: bool`を受け取るのとは対照的に、こちらは
 /// 引数が3つで`cov_type`が異なる型のため`usize`のまま受け取る）。
-pub fn validate_cluster_cov_type(
+///
+pub(crate) fn validate_cluster_cov_type(
     cov_type: &CovType,
     n: usize,
     n_slopes: usize,
 ) -> Result<(), MleError> {
-    if let CovType::Cluster { groups } = cov_type {
-        let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
-        let g = validate_cluster_groups(groups, n)?;
-        validate_cluster_count_covers_slopes(g, n_slopes)?;
-    }
+    let CovType::Cluster { groups } = cov_type else {
+        return Ok(());
+    };
+    let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn {
+        setting: ClusterSetting::CovType,
+    })?;
+    let g = validate_cluster_groups(groups, n, ClusterSetting::CovType)?;
+    validate_cluster_count_covers_slopes(g, n_slopes)?;
     Ok(())
 }
 
@@ -402,7 +431,7 @@ pub fn validate_mle_options(
 /// - Tobit固有の検証として、非打ち切り観測が1件以上あること
 ///   （`tobit.rs`の`validate_has_uncensored_observations`）を最後に追加で行う
 ///
-/// Tobit固有の打ち切り境界の検証（境界指定自体の妥当性＝`MleError::InvalidCensoringBounds`、
+/// Tobit固有の打ち切り境界の検証（境界指定自体の妥当性＝`MleError::CensoringBoundsMissing`等、
 /// `y`と境界の整合性＝`MleError::YOutOfCensoringBounds`）は`fit()`ではなく
 /// `TobitInput::from_columns`で行う（`tobit.rs`冒頭のdocコメント参照）。
 ///
@@ -411,7 +440,7 @@ pub fn validate_mle_options(
 /// コンパイルが通ってしまうため（レビュー指摘）、傾き係数の数は`usize`ではなく
 /// `has_intercept: bool`で受け取り、この関数内で`k - usize::from(has_intercept)`と
 /// して算出する（`k`との取り違えを型で防ぐ）。
-pub fn validate_fit_preconditions(
+pub(crate) fn validate_fit_preconditions(
     confidence_level: f64,
     max_iter: i64,
     tol: f64,
@@ -426,8 +455,7 @@ pub fn validate_fit_preconditions(
     let n = y.nrows();
     validate_has_regressors(n, k)?;
     validate_sufficient_observations(n, k)?;
-    validate_cluster_cov_type(cov_type, n, k - usize::from(has_intercept))?;
-    Ok(())
+    validate_cluster_cov_type(cov_type, n, k - usize::from(has_intercept))
 }
 
 /// 切片のみモデルの対数尤度 `ℓ_null = n1*ln(ȳ) + n0*ln(1-ȳ)`（`ȳ=n1/n`の閉じた形の
@@ -502,8 +530,8 @@ pub fn goodness_of_fit(
     let lr_p_value = if df_model == 0 {
         f64::NAN
     } else {
-        let chi2 = ChiSquared::new(df_model as f64)
-            .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+        let chi2 =
+            ChiSquared::new(df_model as f64).map_err(|e| CommonError::internal(e.to_string()))?;
         chi2.sf(lr_statistic)
     };
 
@@ -553,9 +581,10 @@ pub enum CovType {
     /// クラスターロバスト（`"cluster"`）: `Σ = correction * H⁻¹(Σ_g S_gS_g')H⁻¹`
     /// （`docs/spec/nonlinear-common.md`3章参照）。
     Cluster {
-        /// クラスターのグループキー。モデルの入力データの行と対応する長さnの配列。
+        /// クラスターのグループ（整数コード化済み）。モデルの入力データの行と対応する長さnの列で、
+        /// 行数が`n`と食い違うと`CommonError::ClusterDimensionMismatch`（`GroupCodes`のdoc参照）。
         /// `None`の場合、モデルの`fit()`は`CommonError::MissingClusterColumn`を返す。
-        groups: Option<Vec<String>>,
+        groups: Option<GroupCodes>,
     },
 }
 
@@ -628,17 +657,16 @@ pub fn column_means(x: &Mat<f64>) -> Vec<f64> {
 /// 説明変数ごとの標本中央値（列ごと、`marginal_effects`の`at="median"`用）。`n`が偶数の
 /// 場合は中央2値の平均。元はLogitの`column_medians`（`common.rs`へ移設）。
 ///
-/// `partial_cmp().unwrap()`について: `x`の値はNaN/無限大を含まないことが
-/// `engine_pybind::column_extraction`側で既に保証されている前提（`engine`の責務境界の
-/// 内側であり、クリーンな値しか受け取らない。OLSの`time_ordering`と同じ扱い、
-/// `engine/src/linear/ols.rs`参照）。
+/// 並べ替えは`total_cmp`で行い、`x`にNaNが紛れてもpanicしない。`x`の値はNaN/無限大を含まない
+/// ことが`engine_pybind::column_extraction`側で既に保証されている前提（`engine`の責務境界の
+/// 内側であり、クリーンな値しか受け取らない）。
 pub fn column_medians(x: &Mat<f64>) -> Vec<f64> {
     let n = x.nrows();
     let k = x.ncols();
     (0..k)
         .map(|j| {
             let mut col: Vec<f64> = (0..n).map(|i| *x.get(i, j)).collect();
-            col.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            col.sort_by(f64::total_cmp);
             if n % 2 == 1 {
                 col[n / 2]
             } else {
@@ -648,8 +676,9 @@ pub fn column_medians(x: &Mat<f64>) -> Vec<f64> {
         .collect()
 }
 
-/// `marginal_effects`の結果。`coef_table`と同じ行指向（`effect`/`std_err`/`z`/`p_value`/
-/// `conf_low`/`conf_high`、`docs/spec/nonlinear-common.md`6章）。定数項（切片）は行から除外する
+/// `marginal_effects`の結果。`params_table`と同じ行指向で、python_package層の行キーは
+/// `param_name`/`effect`/`std_error`/`test_stat`/`p_value`/`conf_lower`/`conf_upper`
+/// （`docs/spec/nonlinear-common.md`6章）。定数項（切片）は行から除外する
 /// （切片の限界効果は経済学的に意味を持たない、statsmodelsの`get_margeff()`と同じ扱い）。
 /// Logit/Probit/Tobitいずれでも同じ形の結果になるため`common.rs`に置く（元はLogitの
 /// `MarginalEffects`、`common.rs`へ移設）。
@@ -677,7 +706,7 @@ impl MarginalEffects {
     /// クレート内の他モジュールから`MarginalEffects`を組み立てるためのコンストラクタ。
     /// フィールドはprivateのため（`.claude/rules/rust-style.md`「推定量構造体の設計」）、
     /// `marginal_effects_from_w_s`を経由しないモデル（Tobit。
-    /// `w`/`s`自体の計算式は独自実装だが、出力構造体の形は`coef_table`と同じ行指向で
+    /// `w`/`s`自体の計算式は独自実装だが、出力構造体の形は`params_table`と同じ行指向で
     /// Logit/Probitと共通、`docs/spec/nonlinear-common.md`6章）が、独自に計算したデルタ法の
     /// 結果からこの構造体を構築するために必要。
     pub(crate) fn from_parts(
@@ -836,8 +865,7 @@ pub fn marginal_effects_from_w_s(
     // `Normal::new(0.0, 1.0)`は標準正規分布であり、標準偏差が正であることを要求する
     // statrsの検証を常に満たすため、この`map_err`分岐は理論上到達不能
     // （`.claude/rules/rust-style.md`「テスト」のカバレッジ方針参照、`fit()`と同じ扱い）。
-    let normal =
-        Normal::new(0.0, 1.0).map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+    let normal = Normal::new(0.0, 1.0).map_err(|e| CommonError::internal(e.to_string()))?;
     let z_crit = inference::critical_value(&normal, confidence_level);
 
     let k_constant = usize::from(has_intercept);
@@ -946,7 +974,7 @@ pub fn predict_from_link(x: &Mat<f64>, params: &[f64], link: impl Fn(f64) -> f64
 /// `"const"`を除いたもの）と同じ本数・同じ順序である必要がある。`has_intercept`が
 /// `true`の場合、定数項の列はここで自動的に先頭に付加するため`new_x_columns`に
 /// 含めない（`LogitInput::from_columns`/`ProbitInput::from_columns`の切片列自動追加と
-/// 一致させるため、`crate::design_matrix::design_matrix_element`を共有する）。
+/// 一致させるため、`crate::shared::design_matrix::design_matrix_element`を共有する）。
 ///
 /// # パニックについて
 /// `new_x_columns.len()`が`params.len() - usize::from(has_intercept)`と一致しない場合は
@@ -987,7 +1015,7 @@ pub fn predict_new_data(
 /// 極端になると`λ=φ(u)/Φ(u)`（逆ミルズ比、一般化残差）が`0.0/0.0`のNaNになりうる
 /// （実測では`|u|≳39`から発生。本閾値`≈8.126`はそれよりずっと手前で安全に倒す）。
 ///
-/// 元はProbit専用（`ProbitProblem::linear_predictor_and_residual`の一般化残差
+/// 元はProbit専用（`ProbitProblem::generalized_residual_at`の一般化残差
 /// `λ_i=q_iφ(q_iz_i)/Φ(q_iz_i)`向け）だったが、Tobitの打ち切り観測の尤度
 /// （`logΦ(z)`・`log(1-Φ(z))`型）も同型の`λ=φ/Φ`を含み同じリスクを共有するため、
 /// Tobit実装時にここへ移設して共有した。
@@ -1292,10 +1320,8 @@ where
 /// `SolverOutput.hessian`（対数尤度そのもののHessian、符号が逆）への変換はこの関数が
 /// 内部で1回だけ行う（呼び出し側・各モデルの実装は意識しなくてよい）。
 ///
-/// `separation_norm_check`（[`SeparationNormCheck`]）は(準)完全分離の事後チェック
-/// （標準化パラメータ空間のノルムが[`SEPARATION_PARAM_NORM_THRESHOLD`]を超えたら収束
-/// 判定を取り消す、[`MleError::SeparationSuspected`]参照）を有効にするか。Logit/Probitは
-/// `Enabled`、Tobitは`Disabled`（理由は[`SeparationNormCheck`]のdocコメント参照）。
+/// (準)完全分離の検出はこの関数では行わない。Logit/Probitの`fit()`が収束後に
+/// `nonlinear::separation::verify_no_separation`を呼ぶ（[`MleError::SeparationDetected`]参照）。
 ///
 /// **`tol`の意味論はsolverにより異なる**: `Newton`は総和勾配に対する
 /// 絶対閾値`‖∇ℓ(θ)‖ < tol`のまま（2次収束のため`n`依存性の影響をほとんど受けない、
@@ -1309,12 +1335,9 @@ where
 /// # Errors
 /// - 収束点のHessianが特異（`SingularHessian`）
 /// - `raise_on_non_convergence=true`かつ`max_iter`回で収束しなかった（`NonConvergence`）
-/// - `separation_norm_check=Enabled`かつ`raise_on_non_convergence=true`で、勾配ノルム基準は
-///   満たしたが標準化パラメータノルムが過大（`SeparationSuspected`）
 /// - `bfgs`/`lbfgs`のline searchが収束判定を満たさないまま評価回数の総枠を使い切った
 ///   （`EvaluationBudgetExceeded`、`BudgetedProblem`参照）
-/// - その他ソルバー内部でのエラー（`ComputationFailed`）
-#[allow(clippy::too_many_arguments)]
+/// - その他ソルバー内部でのエラー（`CommonError::Internal`）。line searchの失敗は`LineSearchFailed`
 pub fn run_solver<O>(
     problem: O,
     solver: SolverType,
@@ -1323,7 +1346,6 @@ pub fn run_solver<O>(
     tol: f64,
     n_obs: usize,
     raise_on_non_convergence: bool,
-    separation_norm_check: SeparationNormCheck,
 ) -> Result<SolverOutput, MleError>
 where
     O: CostFunction<Param = Vec<f64>, Output = f64>
@@ -1343,7 +1365,7 @@ where
         .saturating_mul(MAX_EVALUATIONS_PER_ITER);
     let problem = BudgetedProblem::new(problem, budget);
 
-    let (params, mut converged, n_iter, model) = match solver {
+    let (params, converged, n_iter, model) = match solver {
         SolverType::Newton => {
             let optimizer = FaerNewton {
                 tol,
@@ -1363,6 +1385,7 @@ where
                 linesearch: wolfe_line_search()?,
                 tol: tol * n_obs as f64,
                 stalled_at_optimum: false,
+                h0_from_hessian: false,
             };
             let result = Executor::new(problem, optimizer)
                 .configure(|state| state.param(initial_params).max_iters(max_iter))
@@ -1380,6 +1403,7 @@ where
                 stalled_at_optimum: false,
                 s_history: VecDeque::with_capacity(LBFGS_HISTORY_SIZE),
                 y_history: VecDeque::with_capacity(LBFGS_HISTORY_SIZE),
+                h0: None,
             };
             let result = Executor::new(problem, optimizer)
                 .configure(|state| state.param(initial_params).max_iters(max_iter))
@@ -1388,22 +1412,6 @@ where
             extract_outcome(result.state, result.problem)?
         }
     };
-
-    // 勾配ノルム基準では収束と判定されたが、標準化パラメータ空間でのノルムが異常に
-    // 大きい場合（准/完全分離の兆候、`MleError::SeparationSuspected`のdocコメント参照）は、
-    // 収束の判定を取り消す。`raise_on_non_convergence`の扱いは通常の`NonConvergence`と
-    // 揃える（`true`なら専用エラーで即座に返す、`false`なら`converged=false`のまま
-    // 後続処理を継続する）。この事後チェックはLogit/Probit（`Enabled`）のみ通り、Tobitは
-    // `Disabled`で素通しする（`SeparationNormCheck`のdocコメント参照）。
-    if matches!(separation_norm_check, SeparationNormCheck::Enabled)
-        && converged
-        && separation_suspected(&params)
-    {
-        converged = false;
-        if raise_on_non_convergence {
-            return Err(MleError::SeparationSuspected { n_iter });
-        }
-    }
 
     if !converged && raise_on_non_convergence {
         return Err(MleError::NonConvergence { n_iter });
@@ -1425,7 +1433,7 @@ where
     let cost_hessian = model
         .into_inner()
         .hessian(&params)
-        .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+        .map_err(|e| CommonError::internal(e.to_string()))?;
     let hessian: Vec<Vec<f64>> = cost_hessian
         .iter()
         .map(|row| row.iter().map(|v| -v).collect())
@@ -1474,31 +1482,40 @@ where
         Some(TerminationReason::SolverConverged)
     );
     let n_iter = state.get_iter() as usize;
-    let params = state.get_best_param().cloned().ok_or_else(|| {
-        CommonError::ComputationFailed("solver did not produce a parameter estimate".to_string())
-    })?;
-    let model = problem.take_problem().ok_or_else(|| {
-        CommonError::ComputationFailed("failed to recover the optimization problem".to_string())
-    })?;
+    let params = state
+        .get_best_param()
+        .cloned()
+        .ok_or_else(|| CommonError::internal("the solver did not produce a parameter estimate"))?;
+    let model = problem
+        .take_problem()
+        .ok_or_else(|| CommonError::internal("the optimization problem could not be recovered"))?;
     Ok((params, converged, n_iter, model))
 }
 
 /// argminの内部エラー（`anyhow::Error`）を`MleError`に変換する。
 /// `FaerNewton::next_iter`内で`MleError`から`?`により変換された値は`downcast`で復元し、
-/// それ以外（argmin自体の内部エラー等）は`ComputationFailed`にまとめる。
+/// それ以外のうち、argminのline searchが入力（探索方向・目的関数の値）に応じて返す
+/// `ArgminError::ConditionViolated`/`InvalidParameter`（「降下方向でない」「NaN/Infに遭遇した」等）は
+/// `LineSearchFailed`、残り（argmin自体の内部エラー等、実装の誤りでだけ起きるもの）は
+/// `Internal`にする。
 ///
-/// **`Err(other)`分岐は実測ではカバーされていない**（判明済み）:
-/// 本プロジェクトが制御する全てのエラー経路（`FaerNewton`・モデルの`CostFunction`/
-/// `Gradient`/`Hessian`実装）は`MleError`（`?`経由で`anyhow::Error`に変換されたもの）
-/// のみを返すため、`downcast`は常に成功する。この分岐はargmin自体の内部（`Executor`の
-/// 状態管理等）が予期しない`anyhow::Error`を生成した場合に備えた防御的なフォールバックで、
-/// 意図的にargminの内部を破壊するようなテストを書くのは実装の振る舞いというより
-/// argmin内部実装への依存になるため見送っている（`.claude/rules/testing-policy.md`
+/// 前者は`bfgs`/`lbfgs`の退化した目的関数で実際に起こりうる（`MoreThuenteLineSearch`が
+/// `Executor::run()`の`Err`として返す）。後者の`Internal`は、本プロジェクトが制御する全ての
+/// エラー経路が`MleError`を返すため実測ではカバーされていない防御的なフォールバックで、
+/// 意図的にargminの内部を破壊するテストは書かない（`.claude/rules/testing-policy.md`
 /// 「engine（Rust）のカバレッジ方針」の理論上到達不能な防御的エラーパスと同じ性質）。
 fn convert_optimizer_error(e: OptimizerError) -> MleError {
     match e.downcast::<MleError>() {
         Ok(mle_error) => mle_error,
-        Err(other) => CommonError::ComputationFailed(other.to_string()).into(),
+        Err(other) => match other.downcast_ref::<argmin::core::ArgminError>() {
+            Some(
+                argmin::core::ArgminError::ConditionViolated { .. }
+                | argmin::core::ArgminError::InvalidParameter { .. },
+            ) => MleError::LineSearchFailed {
+                max_iters: LINE_SEARCH_MAX_ITERS,
+            },
+            _ => CommonError::internal(other.to_string()).into(),
+        },
     }
 }
 
@@ -1508,10 +1525,7 @@ fn identity_matrix(k: usize) -> Vec<Vec<f64>> {
         .collect()
 }
 
-/// L2ノルム。勾配ベクトルの収束判定（`FaerNewton::terminate`）だけでなく、
-/// パラメータベクトルのノルム（`SEPARATION_PARAM_NORM_THRESHOLD`の判定）にも流用する
-/// 中立的な名前にしている（元は`gradient_norm`という名前だったが、勾配以外の用途にも
-/// 使うようになったため改名した（rust-reviewer指摘）。
+/// L2ノルム（勾配ベクトルの収束判定`FaerNewton::terminate`等で使う）。
 fn l2_norm(g: &[f64]) -> f64 {
     g.iter().map(|x| x * x).sum::<f64>().sqrt()
 }
@@ -1562,8 +1576,8 @@ where
 /// argmin組み込みの`Newton`ソルバーは`H: ArgminInv<H>`（Hessianの逆行列）を要求するが、
 /// `argmin-math`の`vec`機能（`Vec<Vec<f64>>`向け）には`ArgminInv`の実装が存在しない
 /// （faer/nalgebra/ndarrayの行列型にしか実装されていない）ため使えない。Newton法は独自の
-/// `Solver`実装とし、ステップの求解はfaer（列ピボットQR、OLSの`ensure_full_rank`と同じ
-/// 特異性検出パターン）で行う（`docs/spec/nonlinear-common.md`1.2節参照）。
+/// `Solver`実装とし、ステップの求解はfaer（列ピボットQR、`linear_algebra::checked_col_piv_qr`の
+/// 特異性検出）で行う（`docs/spec/nonlinear-common.md`1.2節参照）。
 struct FaerNewton {
     tol: f64,
     /// `regularized_newton_step`が[`RegularizedStep::NoProgress`]または
@@ -1603,8 +1617,8 @@ type NewtonState = IterState<Vec<f64>, Vec<f64>, (), Vec<Vec<f64>>, (), f64>;
 /// ステップが最急降下方向`-g/λ`に漸近し、非零の勾配に対しては理論上必ず降下方向になる
 /// （`regularized_newton_step`のdocコメント参照）ため、実務的にはこれよりずっと少ない
 /// 回数（Tobitの打ち切りデータでの実測では1反復あたり最大9回程度）で受理される。
-/// `SEPARATION_PARAM_NORM_THRESHOLD`のように実測比較による厳密な根拠があるわけではなく、
-/// 「理論上十分すぎるほど大きい」という設計上の安全マージンとして選んだ値。
+/// 実測比較による厳密な根拠があるわけではなく、「理論上十分すぎるほど大きい」という
+/// 設計上の安全マージンとして選んだ値。
 const MAX_LM_ATTEMPTS: usize = 40;
 /// `λ=0`（生のNewtonステップ）がコストを減少させなかった場合の初期正則化係数。
 const INITIAL_LM_LAMBDA: f64 = 1e-3;
@@ -1630,7 +1644,8 @@ const NEWTON_STALL_GRAD_RATIO: f64 = 0.9;
 /// 受理した結果で、真の床ではなかった。[`FaerNewton::stalled_at_optimum`]のdocコメント参照。）
 ///
 /// この「初期の勾配ノルムは`1e2`〜`1e6`」という前提は、`run_solver`の呼び出し元
-/// （Logit/Probitの`standardize_columns`、Tobitの`TobitScaling`）が**設計行列を標準化した
+/// （Logit/Probitの`standardize_columns`、Tobitの`TobitScaling`。どちらも`ColumnScale`で
+/// `x`を標準化する）が**設計行列を標準化した
 /// 空間で最適化する**ことに依存している。非標準化スケール（`x`が極端に大きい等）で
 /// `run_solver`を呼ぶ手法を将来追加する場合、この定数の妥当性は再検証が必要
 /// （rust-reviewer指摘。より根本的にはNewton減少量`√(gᵀH⁻¹g)`のようなスケール不変な
@@ -1978,29 +1993,48 @@ fn cost_hessian_is_positive_definite(hessian: &[Vec<f64>]) -> bool {
 }
 
 /// Newtonステップ`Δθ = H⁻¹g`を求める。`H`は対称とは限らない（収束点から離れた場所では
-/// 正定値でないこともある、Probit等）ため、列ピボットQR（OLSの`ensure_full_rank`と同じ
+/// 正定値でないこともある、Probit等）ため、列ピボットQR（`linear_algebra::checked_col_piv_qr`の
 /// 相対閾値での特異性検出）を使う。
 fn newton_step(hessian: &[Vec<f64>], grad: &[f64]) -> Result<Vec<f64>, MleError> {
     let k = grad.len();
     let h = Mat::from_fn(k, k, |i, j| hessian[i][j]);
     let g = Mat::from_fn(k, 1, |i, _| grad[i]);
 
-    let qr = h.col_piv_qr();
-    let r = qr.thin_R();
-    let max_abs_diag = (0..k).map(|i| (*r.get(i, i)).abs()).fold(0.0_f64, f64::max);
-    let threshold = (k as f64) * f64::EPSILON * max_abs_diag;
-    for i in 0..k {
-        let diag = (*r.get(i, i)).abs();
-        // NaNを明示的にチェックする（`diag <= threshold`だとNaNとの比較は常にfalseになり
-        // すり抜けてしまう）。全ゼロ行列のcol_piv_qrは列選択時の0除算によりRの対角がNaNに
-        // なりうるため（faer 0.24.4で実機確認済み）、この形にしている。
-        if diag.is_nan() || diag <= threshold {
-            return Err(MleError::SingularHessian);
-        }
-    }
+    let qr = checked_col_piv_qr(&h).map_err(|_| MleError::SingularHessian)?;
 
     let step = qr.solve_lstsq(&g);
     Ok((0..k).map(|i| *step.get(i, 0)).collect())
+}
+
+/// コスト関数のHessian`H`が正定値かつ可逆なとき、その逆行列`H⁻¹`（対称化済み）を返す。
+/// そうでない（正定値でない・特異・非有限値を含む）場合は`None`。
+///
+/// `FaerBfgs::init`・`FaerLbfgs::init`が初期逆Hessian近似に使う。`H`が正定値でない場合の`H⁻¹`は
+/// 降下方向を作らない（line searchが`Search direction must be a descent direction`で
+/// 失敗する）ため、呼び出し側は`None`のとき従来の初期化（`FaerBfgs`は単位行列＋self-scaling、
+/// `FaerLbfgs`は`γI`）へ戻す。
+///
+/// 列ピボットQRは1回だけ行い（特異性判定は`newton_step`と同じ`checked_col_piv_qr`）、単位行列を
+/// 右辺にまとめて解く（`k`本の右辺ごとにQRをやり直すと`O(k⁴)`になる）。
+fn inverse_if_positive_definite(hessian: &[Vec<f64>]) -> Option<Vec<Vec<f64>>> {
+    if !cost_hessian_is_positive_definite(hessian) {
+        return None;
+    }
+    let k = hessian.len();
+    let h = Mat::from_fn(k, k, |i, j| hessian[i][j]);
+    let qr = checked_col_piv_qr(&h).ok()?;
+    let identity = Mat::from_fn(k, k, |i, j| if i == j { 1.0 } else { 0.0 });
+    let solved = qr.solve_lstsq(&identity);
+    let inv: Vec<Vec<f64>> = (0..k)
+        .map(|i| (0..k).map(|j| *solved.get(i, j)).collect())
+        .collect();
+    let symmetrized: Vec<Vec<f64>> = (0..k)
+        .map(|i| (0..k).map(|j| 0.5 * (inv[i][j] + inv[j][i])).collect())
+        .collect();
+    symmetrized
+        .iter()
+        .all(|row| row.iter().all(|v| v.is_finite()))
+        .then_some(symmetrized)
 }
 
 /// argmin組み込みのBFGS（`argmin::solver::quasinewton::BFGS`）は、外側反復をまたぐ
@@ -2030,6 +2064,20 @@ fn newton_step(hessian: &[Vec<f64>], grad: &[f64]) -> Result<Vec<f64>, MleError>
 /// （固定値のまま反復間で使い回すと、スケール補正済みの反復まで不必要に小さい
 /// ステップから始めることになり逆効果になりうるため）。
 ///
+/// **warm startとの相互作用（初期逆Hessianを初期点の厳密Hessianの逆行列にする）**:
+/// Logit/Probitはwarm start（`ols_based_initial_params`）で最適点の近くから始まるが、
+/// 上記の`min(1,1/‖g₀‖)`は1回目のステップ長を初期点の位置によらず常に`‖s₀‖=1`
+/// （標準化パラメータ空間）にする。ゼロ初期値（最適点まで距離およそ1）には適切だが、
+/// warm startでは過大で、最初のsecantペアが最適点から遠い領域の曲率を拾うため`γ`が
+/// 真の逆曲率から外れ、超1次収束に入るまでの反復が増える（実測: 反復数が
+/// Logit n=100,000で8→13、Probit n=1,000,000で8→10。line searchの評価回数は
+/// 変わらず原因ではない）。初期点で`H`を1回評価して`H⁻¹`を初期逆Hessianにすると、
+/// 1回目のステップはほぼNewtonステップになりこの問題が消える（同条件で13→6、10→7）。
+/// `H`が正定値でない場合（Tobitのように尤度が大域凹でない手法）は`H⁻¹`が降下方向を
+/// 作らないため、従来の単位行列＋self-scalingに戻す（[`inverse_if_positive_definite`]）。
+/// `H`を「nullモデルの`w·X'X`」で代用する案は、Hessianの評価が不要になる反面、反復数が
+/// 改善せず（Logit n=1,000,000では悪化）不採用。
+///
 /// **`SolverType::Lbfgs`は当初対象外だったが、現在は解消済み**: 導入当初は
 /// argmin 0.11.0の組み込みLBFGS実装が`s`/`y`履歴・初期`γ`を外部から注入する公開APIを
 /// 持たず（privateフィールド、対応するビルダーメソッド無し）、同じ手法を適用できな
@@ -2048,6 +2096,10 @@ struct FaerBfgs {
     /// 示すフラグ。`terminate`で収束として扱う（[`QUASI_NEWTON_STALL_GRAD_FACTOR`]の
     /// docコメント参照、`FaerNewton::stalled_at_optimum`と同じ位置づけ）。
     stalled_at_optimum: bool,
+    /// `init`で初期逆Hessianをwarm start点の厳密Hessianの逆行列にしたか。`true`のとき
+    /// 1回目の反復のself-scaling（`bfgs_updated_inv_hessian`の`is_first_iter`）は行わない
+    /// （既にスケール・形状とも曲率に合っているため。再スケールすると情報を捨てる）。
+    h0_from_hessian: bool,
 }
 
 type BfgsState = IterState<Vec<f64>, Vec<f64>, (), Vec<Vec<f64>>, (), f64>;
@@ -2055,7 +2107,8 @@ type BfgsState = IterState<Vec<f64>, Vec<f64>, (), Vec<Vec<f64>>, (), f64>;
 impl<O> Solver<O, BfgsState> for FaerBfgs
 where
     O: CostFunction<Param = Vec<f64>, Output = f64>
-        + Gradient<Param = Vec<f64>, Gradient = Vec<f64>>,
+        + Gradient<Param = Vec<f64>, Gradient = Vec<f64>>
+        + Hessian<Param = Vec<f64>, Hessian = Vec<Vec<f64>>>,
 {
     /// `argmin::core::Solver`トレイトの必須メソッド（`FaerNewton::name`と同じ理由で
     /// 未カバーでも振る舞いの正しさに影響しない）。
@@ -2075,10 +2128,20 @@ where
         })?;
         let grad = problem.gradient(&param)?;
 
-        // 1回目の反復専用のline search初期ステップ幅（`FaerBfgs`のdocコメント参照）。
-        // `g0_norm`が実質ゼロ（既に停留点付近）なら`1.0/g0_norm`は`f64::INFINITY`に
-        // なり`min(1.0)`で1.0（＝標準値）に収まるため、この場合は特別扱い不要で
-        // 自然に既定動作へ落ちる。
+        // 初期点（warm start）の厳密Hessianが正定値なら、その逆行列を初期逆Hessianにする
+        // （`FaerBfgs`のdocコメント「warm startとの相互作用」参照）。1回目のステップは
+        // ほぼNewtonステップになるため、初期ステップ幅は標準の`1.0`のままでよい。
+        if let Some(inv_hessian) = inverse_if_positive_definite(&problem.hessian(&param)?) {
+            self.h0_from_hessian = true;
+            let state = state.param(param).gradient(grad).inv_hessian(inv_hessian);
+            return Ok((state, None));
+        }
+
+        // 初期点のHessianが正定値でない（Tobit等、尤度が大域凹でない手法のwarm start点）
+        // 場合の従来の初期化。1回目の反復専用のline search初期ステップ幅（`FaerBfgs`の
+        // docコメント参照）。`g0_norm`が実質ゼロ（既に停留点付近）なら`1.0/g0_norm`は
+        // `f64::INFINITY`になり`min(1.0)`で1.0（＝標準値）に収まるため、この場合は特別扱い
+        // 不要で自然に既定動作へ落ちる。
         let alpha0 = (1.0 / l2_norm(&grad)).min(1.0);
         if alpha0.is_finite() && alpha0 > 0.0 {
             self.linesearch.initial_step_length(alpha0)?;
@@ -2171,6 +2234,8 @@ where
         if is_first_iter {
             self.linesearch.initial_step_length(1.0)?;
         }
+        // 初期逆Hessianを厳密Hessianの逆行列にした場合は、1回目もself-scalingしない。
+        let apply_self_scaling = is_first_iter && !self.h0_from_hessian;
 
         let sk: Vec<f64> = xk1.iter().zip(param.iter()).map(|(a, b)| a - b).collect();
         let yk: Vec<f64> = grad
@@ -2185,7 +2250,8 @@ where
             !line_search_step_satisfies_wolfe(cur_cost, &prev_grad, next_cost, &grad, &sk)
                 && is_near_convergence_target(&grad, self.tol);
 
-        let updated_inv_hessian = bfgs_updated_inv_hessian(inv_hessian, &sk, &yk, is_first_iter);
+        let updated_inv_hessian =
+            bfgs_updated_inv_hessian(inv_hessian, &sk, &yk, apply_self_scaling);
 
         Ok((
             state
@@ -2360,8 +2426,20 @@ fn bfgs_updated_inv_hessian(
 /// チェックだが、この実装では`FaerLbfgs`のみを対象とし`FaerBfgs`側は変更しない、
 /// ユーザー確認済み）。
 ///
-/// `FaerBfgs`と異なり逆Hessian近似を陽には持たず、直近[`LBFGS_HISTORY_SIZE`]件の
-/// secantペア`(s,y)`だけを保持する（limited-memoryの由来）。
+/// `FaerBfgs`と異なり逆Hessian近似の全体は更新せず、直近[`LBFGS_HISTORY_SIZE`]件の
+/// secantペア`(s,y)`だけを保持する（limited-memoryの由来）。初期行列だけは`k×k`の行列`h0`を持つ。
+///
+/// **初期行列（`h0`）**: two-loop recursionの初期行列には、標準の`γI`（`γ=sᵀy/yᵀy`）ではなく、
+/// warm start点の厳密Hessianの逆行列`H₀⁻¹`を使う（`FaerBfgs::init`と同じ
+/// `inverse_if_positive_definite`で正定値かつ可逆のときのみ）。`γI`は曲率のスケールしか表さず、
+/// 回帰変数間の相関による悪条件の形を履歴から学習するのに多くの反復を要するため。`H₀⁻¹`は直近の
+/// ペアで`sᵀy/(yᵀH₀⁻¹y)`倍に再スケールして使う（warm start点と収束点でHessianが大きく違う
+/// データで、素の`H₀⁻¹`が`γI`より悪化するのを避ける）。
+///
+/// **正定値でない場合（Tobitのように尤度が大域凹でない手法のwarm start点）は、`H₀⁻¹`が降下方向を
+/// 作らないため従来の初期化（`γI`と1回目のline search初期ステップ幅の調整）へ戻す。**
+/// `h0`が`Some`のとき1回目のステップは既にNewtonステップに相当するスケールなので、初期ステップ幅は
+/// 標準の`1.0`のままにする。実測値と経緯は`engine/src/nonlinear/CLAUDE.md`参照。
 struct FaerLbfgs {
     /// line search。`self`が所有し反復間で使い回す（`FaerBfgs::linesearch`と同じ理由）。
     linesearch: MoreThuenteLineSearch<Vec<f64>, Vec<f64>, f64>,
@@ -2374,6 +2452,9 @@ struct FaerLbfgs {
     s_history: VecDeque<Vec<f64>>,
     /// 直近`y`（勾配差分`∇f_{k+1}-∇f_k`）の履歴。`s_history`のdocコメント参照。
     y_history: VecDeque<Vec<f64>>,
+    /// warm start点の厳密Hessianの逆行列（正定値のときのみ`Some`。構造体docコメント参照）。
+    /// `None`のときは従来の`γI`初期化。
+    h0: Option<Vec<Vec<f64>>>,
 }
 
 type LbfgsState = IterState<Vec<f64>, Vec<f64>, (), (), (), f64>;
@@ -2381,7 +2462,8 @@ type LbfgsState = IterState<Vec<f64>, Vec<f64>, (), (), (), f64>;
 impl<O> Solver<O, LbfgsState> for FaerLbfgs
 where
     O: CostFunction<Param = Vec<f64>, Output = f64>
-        + Gradient<Param = Vec<f64>, Gradient = Vec<f64>>,
+        + Gradient<Param = Vec<f64>, Gradient = Vec<f64>>
+        + Hessian<Param = Vec<f64>, Hessian = Vec<Vec<f64>>>,
 {
     /// `argmin::core::Solver`トレイトの必須メソッド（`FaerNewton::name`と同じ理由で
     /// 未カバーでも振る舞いの正しさに影響しない）。
@@ -2400,6 +2482,14 @@ where
             )
         })?;
         let grad = problem.gradient(&param)?;
+
+        // 初期点（warm start）の厳密Hessianが正定値なら、その逆行列を初期行列にする
+        // （`FaerLbfgs`のdocコメント「初期行列」参照）。1回目のステップがほぼNewtonステップに
+        // なるため、line searchの初期ステップ幅は標準の`1.0`のままでよい。
+        if let Some(inv_hessian) = inverse_if_positive_definite(&problem.hessian(&param)?) {
+            self.h0 = Some(inv_hessian);
+            return Ok((state.param(param).gradient(grad), None));
+        }
 
         // 1回目の反復専用のline search初期ステップ幅（`FaerBfgs::init`と同じ式・同じ
         // 理由）。履歴が空の1回目は`two_loop_recursion`のγが既定`1.0`のままで探索方向
@@ -2442,7 +2532,12 @@ where
         // `FaerBfgs::next_iter`の`is_first_iter`と同じ役割（履歴追加前に判定する）。
         let is_first_iter = state.get_iter() == 0;
 
-        let direction = two_loop_recursion(&self.s_history, &self.y_history, &prev_grad);
+        let direction = two_loop_recursion(
+            &self.s_history,
+            &self.y_history,
+            &prev_grad,
+            self.h0.as_deref(),
+        );
         self.linesearch.search_direction(direction);
 
         // `take_problem()`が`None`になるのは既に一度取り出した後に再度取り出した場合
@@ -2482,10 +2577,9 @@ where
         // 打ち切り時点のパラメータをそのまま`Ok`で返すため、収束判定を明示的に
         // 確認する（`FaerBfgs`には無いチェック）。
         if !line_search_converged(&sub_state) {
-            let mle_error: MleError = CommonError::ComputationFailed(format!(
-                "line search did not converge within {LINE_SEARCH_MAX_ITERS} iterations"
-            ))
-            .into();
+            let mle_error = MleError::LineSearchFailed {
+                max_iters: LINE_SEARCH_MAX_ITERS,
+            };
             return Err(mle_error.into());
         }
 
@@ -2564,19 +2658,22 @@ where
 /// 直近`m`件のsecantペア`(sᵢ,yᵢ)`（`s_history`/`y_history`、古い順）と現在の勾配`grad`から
 /// 近似逆Hessian×勾配`H_k∇f_k`を計算し、降下方向`-H_k∇f_k`を返す。
 ///
-/// `s_history`/`y_history`が空（最適化1回目の反復）の場合は`γ=1.0`（スケーリング無し）
-/// として単位行列近似にフォールバックし、`-grad`を返す（`FaerLbfgs::init`が設定する
-/// line search初期ステップ幅でこの反復のスケールを別途補う、`FaerLbfgs`のdocコメント
-/// 参照）。
+/// `h0`は初期行列（`FaerLbfgs`のdocコメント「初期行列」参照）。`Some(H₀⁻¹)`のときは
+/// `H₀⁻¹`を直近のペアで`sᵀy/(yᵀH₀⁻¹y)`倍に再スケールして使い、履歴が空（最適化1回目の反復）なら
+/// 再スケールせず`-H₀⁻¹grad`を返す。`yᵀH₀⁻¹y`・`sᵀy`が実質ゼロ以下（縮退）のときも再スケール
+/// しない（`1.0`）。
 ///
-/// `γ=(s_lastᵀy_last)/(y_lastᵀy_last)`（直近のペアのみを使うself-scaling、argmin組み込み
-/// `LBFGS::next_iter`の`gamma`計算と同じ式）。`y_lastᵀy_last`が実質ゼロ（縮退）の場合は
-/// ゼロ除算を避け`γ=1.0`にフォールバックする（`bfgs_updated_inv_hessian`の
+/// `None`のときは標準の`γI`: 履歴が空なら`γ=1.0`（スケーリング無し）として単位行列近似にフォール
+/// バックし`-grad`を返す（`FaerLbfgs::init`が設定するline search初期ステップ幅でこの反復の
+/// スケールを別途補う）。`γ=(s_lastᵀy_last)/(y_lastᵀy_last)`（直近のペアのみを使うself-scaling、
+/// argmin組み込み`LBFGS::next_iter`の`gamma`計算と同じ式）で、`y_lastᵀy_last`が実質ゼロ（縮退）
+/// の場合はゼロ除算を避け`γ=1.0`にフォールバックする（`bfgs_updated_inv_hessian`の
 /// `ykyk > f64::EPSILON`ガードと同じ発想）。
 fn two_loop_recursion(
     s_history: &VecDeque<Vec<f64>>,
     y_history: &VecDeque<Vec<f64>>,
     grad: &[f64],
+    h0: Option<&[Vec<f64>]>,
 ) -> Vec<f64> {
     let m = s_history.len();
     let mut q = grad.to_vec();
@@ -2608,19 +2705,39 @@ fn two_loop_recursion(
         alpha[i] = alpha_i;
     }
 
-    let gamma = s_history
-        .back()
-        .zip(y_history.back())
-        .map(|(s, y)| {
-            let yy = dot(y, y);
-            if yy > f64::EPSILON {
-                dot(s, y) / yy
-            } else {
-                1.0
-            }
-        })
-        .unwrap_or(1.0);
-    let mut r: Vec<f64> = q.iter().map(|v| v * gamma).collect();
+    let mut r: Vec<f64> = match h0 {
+        Some(h0) => {
+            // 初期行列`H₀⁻¹`を直近のペアで`sᵀy/(yᵀH₀⁻¹y)`倍に再スケールして`H₀⁻¹q`に掛ける
+            // （`FaerLbfgs`のdocコメント「初期行列」参照）。ペアが無い（1回目の反復）、または
+            // `yᵀH₀⁻¹y`・`sᵀy`が実質ゼロ以下（縮退）のときは再スケールしない（`1.0`）。
+            let scale = s_history
+                .back()
+                .zip(y_history.back())
+                .and_then(|(s, y)| {
+                    let h0_y: Vec<f64> = h0.iter().map(|row| dot(row, y)).collect();
+                    let y_h0_y = dot(y, &h0_y);
+                    let s_y = dot(s, y);
+                    (y_h0_y > f64::EPSILON && s_y > f64::EPSILON).then(|| s_y / y_h0_y)
+                })
+                .unwrap_or(1.0);
+            h0.iter().map(|row| scale * dot(row, &q)).collect()
+        }
+        None => {
+            let gamma = s_history
+                .back()
+                .zip(y_history.back())
+                .map(|(s, y)| {
+                    let yy = dot(y, y);
+                    if yy > f64::EPSILON {
+                        dot(s, y) / yy
+                    } else {
+                        1.0
+                    }
+                })
+                .unwrap_or(1.0);
+            q.iter().map(|v| v * gamma).collect()
+        }
+    };
 
     for (i, (s, y)) in s_history.iter().zip(y_history.iter()).enumerate() {
         let beta_i = rho[i] * dot(y, &r);
@@ -2633,17 +2750,19 @@ fn two_loop_recursion(
     r.iter().map(|v| -v).collect()
 }
 
-/// 設計行列`x`を列ピボットQR分解し、ランク落ちが無ければQR分解をそのまま返す
-/// （呼び出し側が`solve_lstsq`で最小二乗解＝反復最適化の初期値を、再分解せずに
+/// 標準化済みの設計行列`x_std`を列ピボットQR分解し、ランク落ちが無ければQR分解をそのまま
+/// 返す（呼び出し側が`solve_lstsq`で最小二乗解＝反復最適化の初期値を、再分解せずに
 /// 取り出せるようにするため）。
 ///
-/// `x`は標準化済み（Logit/Probitの`ols_based_initial_params`）でも生スケール
-/// （`tobit::ols_initial_params`）でもよい。特異性判定は`R`の対角成分に対する相対閾値
-/// `k·ε·max|R_ii|`（`.claude/rules/rust-style.md`「線形代数」、`linear::ols`の
-/// `ensure_full_rank`・`newton_step`と同一式）で、列ごとの一様スケーリングに対して
-/// 不変なため、標準化の有無で判定結果は変わらない。全ゼロ列を含む設計行列では
-/// `col_piv_qr`が`R`の対角にNaNを生成しうるため、NaNも明示的に弾く（`newton_step`と
-/// 同じ罠、`engine/src/linear/CLAUDE.md`「相対閾値との比較だけではNaNをすり抜ける」参照）。
+/// 特異性判定は`linear_algebra::checked_col_piv_qr`
+/// （OLS・`newton_step`と共通。`R`の対角成分に対する相対閾値`k·ε·max|R_ii|`とNaNの明示チェック、
+/// `.claude/rules/rust-style.md`「線形代数」）で、列ごとの一様スケーリングに対して
+/// 不変なため、標準化の有無で判定結果は変わらない。
+///
+/// **共線な列は標準化前の`x`で特定する**: 切片ありの標準化は非切片列の平均を引くので、
+/// 標準化後の行列では切片との共線性（定数列・ダミー変数の罠）が切片を含まない形に見えてしまう。
+/// 利用者に報告するのは元の設計の列なので、判定は`x_std`、列の特定は`x`で行う（`x`と`x_std`は
+/// 同じ列名`names`を共有する）。
 ///
 /// Logit/Probit（`ols_based_initial_params`）とTobit（`tobit::ols_initial_params`）が
 /// `fit()`冒頭で共有する。Newton法が一度も反復していない段階での検出のため、エラーは
@@ -2652,22 +2771,23 @@ fn two_loop_recursion(
 /// 多重共線性を検出するのが本関数を共有する目的）。
 ///
 /// # Errors
-/// `x`がランク落ち（完全な多重共線性等）: `MleError::SingularDesignMatrix`
+/// `x_std`がランク落ち（完全な多重共線性等）: `MleError::SingularDesignMatrix`
+/// （`names`は設計の列名で、共線な列を`x`から求めて名前に直す）。
 pub fn checked_design_matrix_qr(
+    x_std: &Mat<f64>,
     x: &Mat<f64>,
+    names: &[String],
 ) -> Result<faer::linalg::solvers::ColPivQr<f64>, MleError> {
-    let k = x.ncols();
-    let qr = x.col_piv_qr();
-    let r = qr.thin_R();
-    let max_abs_diag = (0..k).map(|i| (*r.get(i, i)).abs()).fold(0.0_f64, f64::max);
-    let threshold = (k as f64) * f64::EPSILON * max_abs_diag;
-    for i in 0..k {
-        let diag = (*r.get(i, i)).abs();
-        if diag.is_nan() || diag <= threshold {
-            return Err(MleError::SingularDesignMatrix);
+    checked_col_piv_qr(x_std).map_err(|err| {
+        debug_assert_eq!(
+            err,
+            RankDeficient::Columns,
+            "checked_col_piv_qr only reports rank deficiency of the columns"
+        );
+        MleError::SingularDesignMatrix {
+            columns: column_names(&collinear_columns(x), names),
         }
-    }
-    Ok(qr)
+    })
 }
 
 /// 標準化空間での線形確率モデル（LPM）最小二乗解を、リンク関数のIRLS 1ステップ相当の
@@ -2695,14 +2815,17 @@ pub fn checked_design_matrix_qr(
 /// 異なるためクロージャで受ける、`predict_from_link`と同じ方針）。
 ///
 /// # Errors
-/// `x_std`がランク落ち: `MleError::SingularDesignMatrix`（`checked_design_matrix_qr`）
+/// `x_std`がランク落ち: `MleError::SingularDesignMatrix`（`checked_design_matrix_qr`。
+/// `x`は標準化前の設計行列で、共線な列の特定に使う）
 pub fn ols_based_initial_params(
     x_std: &Mat<f64>,
+    x: &Mat<f64>,
     y: &Mat<f64>,
     has_intercept: bool,
+    names: &[String],
     link_terms: impl Fn(f64) -> (f64, f64),
 ) -> Result<Vec<f64>, MleError> {
-    let qr = checked_design_matrix_qr(x_std)?;
+    let qr = checked_design_matrix_qr(x_std, x, names)?;
     let k = x_std.ncols();
     let n = y.nrows();
     let beta_lpm = qr.solve_lstsq(y);
@@ -2724,96 +2847,181 @@ pub fn ols_based_initial_params(
     Ok(params)
 }
 
-/// 設計行列の列ごとの標準化スケール（標準偏差のみ。平均は引かない）。
+/// 設計行列の列ごとの標準化スケール（標準偏差と、切片ありのときのみ平均）。
 ///
-/// 分散1へのスケーリングのみ行い、平均センタリングは行わない。理由: `x_std = (x-mean)/std`と
-/// 平均も引く標準化は、切片が「平均分のズレ」を吸収する前提の変換で、`include_intercept=false`
-/// のとき逆変換の式が成立しない（吸収先の切片が存在しないため）。`x_std = x/std`のみなら
-/// `θ_orig_j = θ_std_j/std_j`で完結し、切片の有無に関係なく成立する。当初の目的（勾配ノルムの
-/// 絶対閾値がxのスケールに依存する問題への対処）もスケーリングのみで達成できる
+/// 切片ありのモデルでは`x̃ⱼ = (xⱼ - x̄ⱼ)/stdⱼ`（平均0・分散1）、切片なしのモデルでは
+/// `x̃ⱼ = xⱼ/stdⱼ`（分散1のみ）に標準化する。切片列は無変換。標準偏差0の列（定数列）は`std`を`1.0`の
+/// ままにするので、切片なしでは無変換、切片ありでは平均を引いて全ゼロ列になる（切片と共線なので
+/// `checked_design_matrix_qr`が`SingularDesignMatrix`で弾く）。
+///
+/// **切片ありのとき平均を引く理由**: 平均を引かないと、平均が標準偏差に比べて大きい列
+/// （例: Wooldridge appleの`ecoprc`は平均÷標準偏差が3.7）が切片列とほぼ同じ方向を向き、
+/// 標準化後のHessianが悪条件になる（appleで条件数約7,300、平均を引くと約14）。悪条件のまま
+/// だとBFGS/L-BFGSの反復数が桁違いに増える（appleのlbfgsが95反復、平均を引くと19反復。
+/// newton・bfgsはほぼ変わらない）。解きやすい問題に直してからソルバーに渡す方針で、
+/// ソルバーごとの補正（`FaerBfgs`の初期逆Hessian等）に頼らない。
+///
+/// **切片なしのときは引かない理由**: 平均を引く操作は「切片が平均分のズレを吸収する」ことで
+/// 成立する再パラメータ化のため、吸収先の切片が無いと逆変換が成立しない。切片なしでは
+/// 切片列との共線性という上の原因自体が無いので、スケーリングのみで足りる
 /// （`docs/spec/nonlinear-common.md`1.3節「スケール依存への対処（標準化）」参照）。
+///
+/// 標準化空間のパラメータ`θ̃`と元のスケールの`θ`の対応（`x̄₀=0`・`std₀=1`、切片列は列0）:
+///
+/// - 傾き: `θⱼ = θ̃ⱼ/stdⱼ`
+/// - 切片: `θ₀ = θ̃₀ - Σ_{j≥1} x̄ⱼθⱼ`（切片ありのときのみ。`x̃'θ̃ = x'θ`から導く）
 #[derive(Debug, Clone)]
 pub struct ColumnScale {
     /// 列ごとの標準偏差。切片列（`has_intercept=true`の先頭列）は`1.0`のまま
-    /// （スケーリング対象外）。標準偏差が0の列（定数列）も`1.0`のまま扱う（0除算回避）。
+    /// （スケーリング対象外）。標準偏差が0の列（定数列）も`1.0`のまま扱う（0除算回避。
+    /// 切片ありでは`means`が引かれて全ゼロ列になる、`ColumnScale`のdocコメント参照）。
     stds: Vec<f64>,
+    /// 列ごとの平均。切片ありのとき、切片列以外は元の列の平均。切片列と切片なしの
+    /// モデルは全列`0.0`（平均を引かない）。
+    means: Vec<f64>,
+    /// 先頭列が切片列か。切片の逆変換（`destandardize_params`）で使う。
+    has_intercept: bool,
 }
 
 impl ColumnScale {
-    /// 列ごとの標準偏差（`standardize_columns`のdocコメント参照）。標準化はengine内部の
-    /// 実装詳細であり`engine_pybind`に公開する必然性は無い（rust-reviewer指摘）が、
-    /// `pub(crate)`にすると`cargo clippy --all-targets -- -D warnings`の`lib`ターゲット
-    /// （テストコードを含まないビルド）で`dead_code`エラーになる（唯一の呼び出し元が
-    /// `nonlinear/logit.rs`の`#[cfg(test)] mod tests`のみのため）。`pub`アイテムは
-    /// dead_code検出の対象外という言語仕様上の扱いにより、`pub`のままにしている
-    /// （テストが`fit()`と同じ標準化・逆標準化の手順を独立に再現するために必要）。
+    /// `x`の各列の平均・標準偏差から標準化スケールを求める（切片列は除外、標準偏差0の列は
+    /// `std`を`1.0`のままにする）。`has_intercept`のときのみ平均を保持する。
+    /// `has_intercept`のときは列0が切片列であることを前提にする（設計行列の規約）。
+    /// 設計行列を実際に標準化するのは`standardize`（Tobitのように、`x`以外（`y`等）の
+    /// スケールも同時に決めたい呼び出し側が、スケールの計算と行列への適用を分けて呼べるようにしている）。
+    pub fn fit(x: &Mat<f64>, has_intercept: bool) -> Self {
+        let n = x.nrows();
+        let k = x.ncols();
+        let start = usize::from(has_intercept);
+
+        let mut stds = vec![1.0; k];
+        let mut means = vec![0.0; k];
+        for j in start..k {
+            let mean: f64 = (0..n).map(|i| *x.get(i, j)).sum::<f64>() / n as f64;
+            let var: f64 = (0..n).map(|i| (*x.get(i, j) - mean).powi(2)).sum::<f64>() / n as f64;
+            let sd = var.sqrt();
+            if sd > 0.0 {
+                stds[j] = sd;
+            }
+            if has_intercept {
+                means[j] = mean;
+            }
+        }
+        Self {
+            stds,
+            means,
+            has_intercept,
+        }
+    }
+
+    /// 設計行列`x`を標準化する: `x̃ᵢⱼ = (xᵢⱼ - x̄ⱼ)/stdⱼ`（切片なしでは`x̄ⱼ=0`、切片列は無変換）。
+    /// `fit`で求めたのと同じ`x`（または同じ列構成の設計行列）に適用する。
+    pub fn standardize(&self, x: &Mat<f64>) -> Mat<f64> {
+        debug_assert_eq!(
+            x.ncols(),
+            self.stds.len(),
+            "pass a design matrix with the same columns as `fit`"
+        );
+        Mat::from_fn(x.nrows(), x.ncols(), |i, j| {
+            (*x.get(i, j) - self.means[j]) / self.stds[j]
+        })
+    }
+
+    /// 列ごとの標準偏差（`standardize_columns`のdocコメント参照）。分離検出
+    /// （`nonlinear::separation`）が、標準化後の行列を複製せず元の`x`から行を都度計算するために使う。
+    ///
+    /// 分離の有無は切片込みの再パラメータ化（平均を引く操作）で変わらないため、分離検出は
+    /// 平均を引かない標準偏差だけの行のまま使い続ける（`means`は渡さない）。
     pub fn stds(&self) -> &[f64] {
         &self.stds
     }
 
-    /// `stds`の末尾に、スケーリング対象外（無変換）を表す`1.0`を`n`個追加した新しい
-    /// `ColumnScale`を返す。Tobitの`(β, logσ)`のように、`x`の列に対応しない追加
-    /// パラメータ（`logσ`）を`params`に含む場合に、既存の`zip`ベースの
-    /// `destandardize_params`/`destandardize_cov_params`をそのまま再利用するために使う
-    /// （`logσ`は`x`の列スケーリングとは無関係な量で、線形再パラメータ化`x_std=x/std`の
-    /// 下で不変。`docs/spec/tobit-spec.md`3.2節「TobitScaling」参照）。
-    pub fn extend_unscaled(&self, n: usize) -> Self {
-        let mut stds = self.stds.clone();
-        stds.extend(std::iter::repeat_n(1.0, n));
-        Self { stds }
+    /// 元のスケールのパラメータ`θ`を標準化空間の`θ̃`へ変換する（`destandardize_params`の
+    /// 逆変換。テストで標準化空間の値を再現するために使う）。
+    #[cfg(test)]
+    pub fn standardize_params(&self, params: &[f64]) -> Vec<f64> {
+        let mut out: Vec<f64> = params.iter().zip(&self.stds).map(|(p, s)| p * s).collect();
+        if self.has_intercept {
+            let shift: f64 = params
+                .iter()
+                .zip(&self.means)
+                .skip(1)
+                .map(|(p, m)| p * m)
+                .sum();
+            if let Some(intercept) = out.first_mut() {
+                *intercept += shift;
+            }
+        }
+        out
+    }
+
+    /// 標準化空間のパラメータから元のスケールのパラメータへの線形変換の行列`J`
+    /// （`θ = Jθ̃`、`k×k`）。`J = diag(1/stds)`で、切片ありのときのみ第0行の
+    /// 傾き成分に`J[0][m] = -x̄ₘ/stdₘ`が入る（`destandardize_params`の式の係数）。
+    pub fn param_jacobian(&self) -> Mat<f64> {
+        let k = self.stds.len();
+        Mat::from_fn(k, k, |i, m| {
+            if i == m {
+                1.0 / self.stds[i]
+            } else if self.has_intercept && i == 0 {
+                -self.means[m] / self.stds[m]
+            } else {
+                0.0
+            }
+        })
     }
 }
 
-/// 設計行列`x`の各列を標準偏差でスケーリングする（切片列は除外）。
+/// 設計行列`x`の各列を標準化する（切片列は除外）。切片ありのときは平均も引く
+/// （`ColumnScale`のdocコメント参照）。`ColumnScale::fit`と`ColumnScale::standardize`の合成。
 /// 収束後は`destandardize_params`で元のスケールのパラメータへ逆変換する。
 pub fn standardize_columns(x: &Mat<f64>, has_intercept: bool) -> (Mat<f64>, ColumnScale) {
-    let n = x.nrows();
-    let k = x.ncols();
-    let start = usize::from(has_intercept);
-
-    let mut stds = vec![1.0; k];
-    for (j, std) in stds.iter_mut().enumerate().take(k).skip(start) {
-        let mean: f64 = (0..n).map(|i| *x.get(i, j)).sum::<f64>() / n as f64;
-        let var: f64 = (0..n).map(|i| (*x.get(i, j) - mean).powi(2)).sum::<f64>() / n as f64;
-        let sd = var.sqrt();
-        if sd > 0.0 {
-            *std = sd;
-        }
-    }
-
-    let x_std = Mat::from_fn(n, k, |i, j| *x.get(i, j) / stds[j]);
-    (x_std, ColumnScale { stds })
+    let scale = ColumnScale::fit(x, has_intercept);
+    let x_std = scale.standardize(x);
+    (x_std, scale)
 }
 
 /// `standardize_columns`で標準化した空間で最適化した`params_std`を、元のスケールの
-/// パラメータへ逆変換する（`θ_orig_j = θ_std_j / std_j`）。
+/// パラメータへ逆変換する（`ColumnScale`のdocコメントの式: 傾き`θⱼ=θ̃ⱼ/stdⱼ`、
+/// 切片ありのとき切片`θ₀=θ̃₀-Σ_{j≥1}x̄ⱼθⱼ`）。
 pub fn destandardize_params(params_std: &[f64], scale: &ColumnScale) -> Vec<f64> {
-    params_std
+    let mut out: Vec<f64> = params_std
         .iter()
         .zip(scale.stds.iter())
         .map(|(p, s)| p / s)
-        .collect()
+        .collect();
+    if scale.has_intercept {
+        // 確定した傾き係数（`out[1..]`）を使って切片を補正する。
+        let shift: f64 = out
+            .iter()
+            .zip(&scale.means)
+            .skip(1)
+            .map(|(b, m)| b * m)
+            .sum();
+        if let Some(intercept) = out.first_mut() {
+            *intercept -= shift;
+        }
+    }
+    out
 }
 
 /// `standardize_columns`で標準化した空間で評価した係数分散共分散行列`cov_std`
 /// （`observed_information_cov_params`等の`cov_type`共通行列演算の戻り値）を、
 /// 元のスケールの係数分散共分散行列へ逆変換する。
 ///
-/// `θ_orig = D⁻¹θ_std`（`D = diag(stds)`、`destandardize_params`と同じ変換）のとき、
-/// 対数尤度を`θ_std`の関数とみなすと連鎖律により`H_std = D⁻¹ H_orig D⁻¹`
-/// （`H`はHessian、`D`は対角行列なので`D⁻¹` の転置は`D⁻¹`自身）が成り立つ。
-/// 分散共分散行列はHessianの逆行列に比例する（`Σ = -H⁻¹`等）ため、
-/// `Σ_orig = -H_orig⁻¹ = -(D H_std D)⁻¹ = D⁻¹(-H_std⁻¹)D⁻¹ = D⁻¹ Σ_std D⁻¹`
-/// （`H_std = D⁻¹H_origD⁻¹`の逆を取ると`H_orig = D H_std D`になることを使った）。
+/// `θ_orig = Jθ_std`（`J`は`ColumnScale::param_jacobian`、`destandardize_params`と同じ
+/// 線形変換）のとき、対数尤度を`θ_std`の関数とみなすと連鎖律により
+/// `H_std = JᵀH_origJ`（`H`はHessian）が成り立つ。分散共分散行列はHessianの逆行列に
+/// 比例する（`Σ = -H⁻¹`等）ため、`J`が可逆なら
+/// `Σ_orig = -H_orig⁻¹ = -(J⁻ᵀH_stdJ⁻¹)⁻¹ = J(-H_std⁻¹)Jᵀ = J Σ_std Jᵀ`。
 /// この関係はOPG（`Σᵢsᵢsᵢ'`の逆行列）・サンドイッチ・クラスターの各`cov_type`でも
-/// 同様に成り立つ（いずれも`H⁻¹`を両側から掛ける、または`H⁻¹`の逆行列を取る形の式のため）。
-/// `D`が対角行列であることから、要素ごとに`Σ_orig[i,j] = Σ_std[i,j] / (stds[i]*stds[j])`
-/// という単純な計算に帰着する。
+/// 同様に成り立つ（いずれも`H⁻¹`を両側から掛ける、または`H⁻¹`の逆行列を取る形の式のため。
+/// スコアも`s_std = Jᵀ s_orig`と同じ連鎖律で変換される）。
+/// 平均を引かない（切片なし）場合は`J`が対角になり、要素ごとに
+/// `Σ_orig[i,j] = Σ_std[i,j] / (stds[i]*stds[j])`に帰着する。
 pub fn destandardize_cov_params(cov_std: &Mat<f64>, scale: &ColumnScale) -> Mat<f64> {
-    let k = scale.stds.len();
-    Mat::from_fn(k, k, |i, j| {
-        *cov_std.get(i, j) / (scale.stds[i] * scale.stds[j])
-    })
+    let j = scale.param_jacobian();
+    &j * cov_std * j.transpose()
 }
 
 // `cov_type`ごとの係数分散共分散行列の共通計算。モデル固有の尤度計算には依存せず、
@@ -2837,7 +3045,7 @@ pub fn destandardize_cov_params(cov_std: &Mat<f64>, scale: &ColumnScale) -> Mat<
 /// サンドイッチ型・クラスターロバストの計算でも同じ戻り値をそのまま両側から掛ければよく、
 /// 追加の符号反転は不要（`sandwich_cov_params`・`cluster_cov_params`参照）。
 ///
-/// **Cholesky分解の前に固有値ベースの悪条件検出を行う**（`crate::linear_algebra::
+/// **Cholesky分解の前に固有値ベースの悪条件検出を行う**（`crate::shared::linear_algebra::
 /// ensure_well_conditioned_symmetric_matrix`、OLSの`wald_f_test`と共有する
 /// ユーティリティ）。非ピボットCholesky（`Llt`）のL因子対角成分は、構造的な
 /// 特異性（完全な多重共線性等）を確実には検出できない（OLSで実測確認済み）。
@@ -2848,11 +3056,9 @@ pub fn destandardize_cov_params(cov_std: &Mat<f64>, scale: &ColumnScale) -> Mat<
 /// 最適化すると、修正前はエラーにならず桁違いに巨大な値を返していた）。
 fn neg_hessian_inverse(hessian: &Mat<f64>, k: usize) -> Result<Mat<f64>, MleError> {
     let neg_h = Mat::from_fn(k, k, |i, j| -(*hessian.get(i, j)));
-    // `context`引数（"negated Hessian"）は`map_err`で`MleError::SingularHessian`に
-    // 潰すため実際には使われない。呼び出し元ごとに専用のエラーバリアントを持つ
-    // 系統（nonlinear）ではこれでよいが、`ensure_well_conditioned_symmetric_matrix`
-    // 自体は`CommonError::ComputationFailed`のメッセージ用に使う汎用引数であることに注意。
-    ensure_well_conditioned_symmetric_matrix(&neg_h, k, "negated Hessian")
+    // `MatrixKind::Hessian`は`map_err`で`MleError::SingularHessian`に潰すため、
+    // 返る`CommonError`自体は使われない（このバリアントも`MATRIX_NEAR_SINGULAR`の`HESSIAN`を返す）。
+    ensure_well_conditioned_symmetric_matrix(&neg_h, k, MatrixKind::Hessian)
         .map_err(|_| MleError::SingularHessian)?;
     let llt = neg_h
         .llt(Side::Lower)
@@ -2882,7 +3088,7 @@ fn opg_matrix(scores: &Mat<f64>) -> Mat<f64> {
 /// symmetric_matrix`による固有値ベースの悪条件検出を行う。
 pub fn opg_cov_params(scores: &Mat<f64>, k: usize) -> Result<Mat<f64>, MleError> {
     let psi = opg_matrix(scores);
-    ensure_well_conditioned_symmetric_matrix(&psi, k, "OPG matrix")
+    ensure_well_conditioned_symmetric_matrix(&psi, k, MatrixKind::Opg)
         .map_err(|_| MleError::SingularOpgMatrix)?;
     let llt = psi
         .llt(Side::Lower)
@@ -2930,57 +3136,305 @@ pub fn sandwich_cov_params(
 /// `groups`が2種類以上の値を持つこと（クラスター数`G>=2`）の検証（`CommonError::
 /// InsufficientClusters`）、および未指定時の`CommonError::MissingClusterColumn`は
 /// モデルごとの`fit()`実装側の責務（OLSの`validate_cluster_groups`と同じ役割分担）。
-/// `groups.len() != n`もモデル側の内部契約（`debug_assert_eq!`で検証）。
-pub fn cluster_cov_params(
+/// `groups.nobs() != n`もモデル側の`validate_cluster_groups`で検証済みであることが前提
+/// （この関数の`debug_assert_eq!`は、検証を通さずに呼ぶ誤用を開発時に検出するためのもの）。
+pub(crate) fn cluster_cov_params(
     hessian: &Mat<f64>,
     scores: &Mat<f64>,
     n: usize,
     k: usize,
-    groups: &[String],
+    groups: &GroupCodes,
 ) -> Result<Mat<f64>, MleError> {
     debug_assert_eq!(
-        groups.len(),
+        groups.nobs(),
         n,
         "groups length must match nobs (caller contract)"
     );
 
     let neg_h_inv = neg_hessian_inverse(hessian, k)?;
 
-    // `HashMap`は反復順序がプロセスごとのハッシュシードに依存し非決定的なため、`BTreeMap`
-    // （クラスター名の辞書順）を使う（OLSの`cluster_cov_params`と同じ理由）。
-    let mut group_indices: std::collections::BTreeMap<&str, Vec<usize>> =
-        std::collections::BTreeMap::new();
-    for (i, g) in groups.iter().enumerate() {
-        group_indices.entry(g.as_str()).or_default().push(i);
-    }
-    let n_groups = group_indices.len();
+    let (s_hat, n_groups) = cluster_meat(groups, k, |i, a| *scores.get(i, a));
 
-    let mut s_hat = Mat::<f64>::zeros(k, k);
-    for indices in group_indices.values() {
-        let mut s_g = vec![0.0_f64; k];
-        for &i in indices {
-            for (a, s_g_a) in s_g.iter_mut().enumerate() {
-                *s_g_a += *scores.get(i, a);
-            }
-        }
-        for a in 0..k {
-            for b in 0..k {
-                *s_hat.get_mut(a, b) += s_g[a] * s_g[b];
-            }
-        }
-    }
-
-    let correction =
-        (n_groups as f64 / (n_groups as f64 - 1.0)) * ((n as f64 - 1.0) / ((n - k) as f64));
-    let sandwich = &neg_h_inv * &s_hat * &neg_h_inv;
+    let correction = cluster_correction(n_groups, n, k);
+    let sandwich = sandwich(&neg_h_inv, &s_hat);
     Ok(Mat::from_fn(k, k, |i, j| {
         correction * (*sandwich.get(i, j))
     }))
 }
 
+/// テスト共有の補助（`logit.rs`・`probit.rs`のテストからも使う）。
+#[cfg(test)]
+pub(crate) mod test_support {
+    /// 対称行列（`Vec<Vec<f64>>`）の条件数（最大固有値/最小固有値。正定値を仮定）。
+    pub(crate) fn condition_number(matrix: &[Vec<f64>]) -> f64 {
+        let k = matrix.len();
+        let m = faer::Mat::from_fn(k, k, |i, j| matrix[i][j]);
+        let eig = m.self_adjoint_eigenvalues(faer::Side::Lower).unwrap();
+        let (min, max) = eig
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| {
+                (lo.min(*v), hi.max(*v))
+            });
+        max / min
+    }
+
+    /// 平均が標準偏差に比べて大きい説明変数4個（平均÷標準偏差が約12〜16）と、ロジスティック形の
+    /// 2値`y`を決定的に作る（標準化で平均を引く処理の回帰テスト用）。
+    pub(crate) fn large_means_binary_data() -> (Vec<f64>, Vec<Vec<f64>>) {
+        fn lcg(seed: &mut u64) -> f64 {
+            *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            ((*seed >> 11) as f64) / ((1u64 << 53) as f64)
+        }
+        let n = 600;
+        let mut seed = 7u64;
+        // (平均, 標準偏差, 標準化した値に対する真の係数)
+        let spec = [
+            (20.0, 1.5, 0.6),
+            (12.0, 1.0, -0.4),
+            (30.0, 2.0, 0.5),
+            (8.0, 0.5, -0.3),
+        ];
+        let columns: Vec<Vec<f64>> = spec
+            .iter()
+            .map(|&(mean, sd, _)| {
+                (0..n)
+                    .map(|_| {
+                        // 12個の一様乱数の和-6で近似した標準正規乱数
+                        let z: f64 = (0..12).map(|_| lcg(&mut seed)).sum::<f64>() - 6.0;
+                        mean + sd * z
+                    })
+                    .collect()
+            })
+            .collect();
+        let y = (0..n)
+            .map(|i| {
+                let eta: f64 = -0.2
+                    + spec
+                        .iter()
+                        .zip(&columns)
+                        .map(|(&(mean, sd, b), col)| b * (col[i] - mean) / sd)
+                        .sum::<f64>();
+                if lcg(&mut seed) < 1.0 / (1.0 + (-eta).exp()) {
+                    1.0
+                } else {
+                    0.0
+                }
+            })
+            .collect();
+        (y, columns)
+    }
+
+    /// 等相関`ρ`の説明変数`k`個（各列は平均0・分散1）と、ロジスティック形の2値`y`を決定的に
+    /// 作る（Logit/Probitの`lbfgs`回帰テスト用。相関が強いと標準化後Hessianの条件数が大きくなる）。
+    /// 乱数は線形合同法、正規乱数は12個の一様乱数の和-6で近似する。
+    pub(crate) fn equicorrelated_binary_data(
+        n: usize,
+        k: usize,
+        rho: f64,
+        seed: u64,
+    ) -> (Vec<f64>, Vec<Vec<f64>>) {
+        fn lcg(seed: &mut u64) -> f64 {
+            *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            ((*seed >> 11) as f64) / ((1u64 << 53) as f64)
+        }
+        fn normal(seed: &mut u64) -> f64 {
+            (0..12).map(|_| lcg(seed)).sum::<f64>() - 6.0
+        }
+        let mut seed = seed;
+        let common: Vec<f64> = (0..n).map(|_| normal(&mut seed)).collect();
+        let columns: Vec<Vec<f64>> = (0..k)
+            .map(|_| {
+                common
+                    .iter()
+                    .map(|z0| rho.sqrt() * z0 + (1.0 - rho).sqrt() * normal(&mut seed))
+                    .collect()
+            })
+            .collect();
+        let y = (0..n)
+            .map(|i| {
+                let eta: f64 = -0.2
+                    + columns
+                        .iter()
+                        .enumerate()
+                        .map(|(j, col)| {
+                            0.5 * (1.0 + 0.3 * j as f64) * col[i] / (k as f64).sqrt()
+                                * if j % 2 == 0 { 1.0 } else { -1.0 }
+                        })
+                        .sum::<f64>();
+                if lcg(&mut seed) < 1.0 / (1.0 + (-eta).exp()) {
+                    1.0
+                } else {
+                    0.0
+                }
+            })
+            .collect();
+        (y, columns)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mle_cataloged_variants_display_the_catalog_message_and_common_delegates() {
+        let nan_tol = MleError::InvalidTol { tol: f64::NAN };
+        assert_eq!(
+            nan_tol.to_string(),
+            "tol must be a positive finite number, got NaN."
+        );
+        assert_eq!(
+            MleError::InvalidTol { tol: f64::INFINITY }.to_string(),
+            "tol must be a positive finite number, got inf."
+        );
+        let max_iter = MleError::InvalidMaxIter {
+            max_iter: MAX_ITER_LIMIT + 1,
+        };
+        assert_eq!(max_iter.to_string(), max_iter.report().message());
+        let wrapped = MleError::Common(CommonError::InvalidHacLags { hac_lags: 9, n: 9 });
+        assert_eq!(wrapped.report().code(), ErrorCode::HacLagsOutOfRange);
+    }
+
+    #[test]
+    fn option_range_errors_map_to_catalog_codes_with_valid_params() {
+        let max_iter = MleError::InvalidMaxIter { max_iter: 0 }.report();
+        assert_eq!(max_iter.code(), ErrorCode::MaxIterOutOfRange);
+        assert!(max_iter.validate().is_ok());
+
+        let tol = MleError::InvalidTol { tol: -1.0 }.report();
+        assert_eq!(tol.code(), ErrorCode::ToleranceNotPositiveFinite);
+        assert!(tol.validate().is_ok());
+        assert_eq!(
+            tol.message(),
+            "tol must be a positive finite number, got -1.0."
+        );
+    }
+
+    #[test]
+    fn numerical_errors_map_to_catalog_codes_with_valid_params() {
+        let cases = [
+            (
+                MleError::NonConvergence { n_iter: 35 },
+                ErrorCode::NotConverged,
+                "The optimizer did not converge after 35 iteration(s).",
+            ),
+            (
+                MleError::SingularHessian,
+                ErrorCode::MatrixNearSingular,
+                "A matrix needed to compute the estimates or their covariance is numerically singular.",
+            ),
+            (
+                MleError::SingularOpgMatrix,
+                ErrorCode::MatrixNearSingular,
+                "A matrix needed to compute the estimates or their covariance is numerically singular.",
+            ),
+            (
+                MleError::SingularDesignMatrix {
+                    columns: vec!["x1".to_string(), "x2".to_string()],
+                },
+                ErrorCode::DesignMatrixSingular,
+                "The design matrix is singular: the columns 'x1', 'x2' are perfectly collinear.",
+            ),
+            (
+                MleError::EvaluationBudgetExceeded { budget: 4000 },
+                ErrorCode::LineSearchFailed,
+                "The optimizer's line search did not converge.",
+            ),
+            (
+                MleError::LineSearchFailed { max_iters: 100 },
+                ErrorCode::LineSearchFailed,
+                "The optimizer's line search did not converge.",
+            ),
+            (
+                MleError::SeparationCheckFailed {
+                    detail: "x".to_string(),
+                },
+                ErrorCode::SeparationCheckFailed,
+                "The check for separation in the data could not be completed.",
+            ),
+        ];
+        for (err, code, message) in cases {
+            let report = err.report();
+            assert_eq!(report.code(), code);
+            assert!(report.validate().is_ok());
+            assert_eq!(report.message(), message);
+            assert_eq!(err.to_string(), message);
+        }
+        let matrices: Vec<_> = [MleError::SingularHessian, MleError::SingularOpgMatrix]
+            .iter()
+            .map(|e| e.report().all_params())
+            .collect();
+        assert_ne!(matrices[0], matrices[1]);
+        for err in [
+            MleError::SeparationDetected,
+            MleError::UncensoredIntervalTooNarrow {
+                lower: 0.0,
+                upper: 0.001,
+                sigma: 1.0,
+            },
+        ] {
+            let report = err.report();
+            assert!(report.validate().is_ok());
+            assert_eq!(err.to_string(), report.message());
+        }
+    }
+
+    #[test]
+    fn outcome_and_censoring_errors_map_to_catalog_codes_with_valid_params() {
+        let cases = [
+            (
+                MleError::InvalidBinaryY { row: 3, value: 1.5 },
+                ErrorCode::OutcomeNotBinary,
+                "The outcome y at row 3 (0-based) must be 0 or 1, got 1.5.",
+            ),
+            (
+                MleError::CensoringBoundsMissing,
+                ErrorCode::CensoringBoundsMissing,
+                "Both censoring bounds are None.",
+            ),
+            (
+                MleError::CensoringBoundsNotOrdered {
+                    lower: 2.0,
+                    upper: 1.0,
+                },
+                ErrorCode::CensoringBoundsNotOrdered,
+                "lower (2.0) must be less than upper (1.0).",
+            ),
+            (
+                MleError::CensoringBoundNotFinite {
+                    lower: Some(f64::NAN),
+                    upper: None,
+                },
+                ErrorCode::CensoringBoundNotFinite,
+                "The censoring bounds must be finite numbers or None, got lower=NaN, upper=None.",
+            ),
+            (
+                MleError::YOutOfCensoringBounds {
+                    row: 1,
+                    value: -1.0,
+                    lower: Some(0.0),
+                    upper: None,
+                },
+                ErrorCode::OutcomeOutsideCensoringBounds,
+                "The outcome y at row 1 (0-based) is -1.0, outside the censoring bounds (lower=0.0, upper=None).",
+            ),
+            (
+                MleError::NoUncensoredObservations {
+                    lower: Some(0.0),
+                    upper: Some(1.0),
+                },
+                ErrorCode::NoUncensoredObservations,
+                "No observation lies strictly between the censoring bounds (lower=0.0, upper=1.0), so the model cannot be identified.",
+            ),
+        ];
+        for (err, code, message) in cases {
+            let report = err.report();
+            assert_eq!(report.code(), code);
+            assert!(report.validate().is_ok());
+            assert_eq!(report.message(), message);
+            assert_eq!(err.to_string(), message);
+        }
+    }
 
     /// テスト用のダミー目的関数: `f(θ) = 0.5 (θ - target)' A (θ - target)`
     /// （`A`は対角行列、対角成分は正でAは正定値）。最小点は`θ = target`、
@@ -3033,6 +3487,31 @@ mod tests {
                         .collect()
                 })
                 .collect())
+        }
+    }
+
+    /// `f(x)=x⁴/4-x²/2`（極小点`x=±1`、`|x|<1/√3`で`f''<0`）。初期点のHessianが正定値でない
+    /// 場合の初期化（フォールバック）を確かめるための1変数の非凸問題。
+    struct Quartic;
+    impl CostFunction for Quartic {
+        type Param = Vec<f64>;
+        type Output = f64;
+        fn cost(&self, p: &Self::Param) -> Result<Self::Output, OptimizerError> {
+            Ok(p[0].powi(4) / 4.0 - p[0].powi(2) / 2.0)
+        }
+    }
+    impl Gradient for Quartic {
+        type Param = Vec<f64>;
+        type Gradient = Vec<f64>;
+        fn gradient(&self, p: &Self::Param) -> Result<Self::Gradient, OptimizerError> {
+            Ok(vec![p[0].powi(3) - p[0]])
+        }
+    }
+    impl Hessian for Quartic {
+        type Param = Vec<f64>;
+        type Hessian = Vec<Vec<f64>>;
+        fn hessian(&self, p: &Self::Param) -> Result<Self::Hessian, OptimizerError> {
+            Ok(vec![vec![3.0 * p[0].powi(2) - 1.0]])
         }
     }
 
@@ -3137,7 +3616,6 @@ mod tests {
             1e-6,
             1,
             true,
-            SeparationNormCheck::Enabled,
         );
 
         assert!(matches!(
@@ -3152,8 +3630,7 @@ mod tests {
         // search用`Executor`に明示的な`max_iters`（[`LINE_SEARCH_MAX_ITERS`]=100）を
         // 設定しているため、[`BudgetedProblem`]の総枠（このテストでは
         // `(1+1)*2000=4000`評価分）を使い切るより先にこちらの上限に到達し、
-        // `MleError::Common(ComputationFailed(..))`（「line search did not converge
-        // within..」）を返す（`SolverType::Bfgs`、上のテストとは異なり
+        // `MleError::LineSearchFailed`を返す（`SolverType::Bfgs`、上のテストとは異なり
         // `EvaluationBudgetExceeded`という具体的なバリアントにはならない。`FaerBfgs`には
         // この個別チェックが無いため）。
         let result = run_solver(
@@ -3164,13 +3641,11 @@ mod tests {
             1e-6,
             1,
             true,
-            SeparationNormCheck::Enabled,
         );
 
-        let message = result.unwrap_err().to_string();
-        assert!(
-            message.contains("line search did not converge within 100 iterations"),
-            "unexpected error message: {message}"
+        assert_eq!(
+            result.unwrap_err(),
+            MleError::LineSearchFailed { max_iters: 100 }
         );
     }
 
@@ -3182,7 +3657,7 @@ mod tests {
         let y_history = VecDeque::new();
         let grad = vec![3.0, -4.0];
 
-        let direction = two_loop_recursion(&s_history, &y_history, &grad);
+        let direction = two_loop_recursion(&s_history, &y_history, &grad, None);
         assert_eq!(direction, vec![-3.0, 4.0]);
     }
 
@@ -3201,7 +3676,7 @@ mod tests {
         y_history.push_back(vec![1.0, 2.0]);
         let grad = vec![2.0, 3.0];
 
-        let direction = two_loop_recursion(&s_history, &y_history, &grad);
+        let direction = two_loop_recursion(&s_history, &y_history, &grad, None);
         assert!(
             (direction[0] - (-2.4)).abs() < 1e-10,
             "direction={direction:?}"
@@ -3230,7 +3705,7 @@ mod tests {
         y_history.push_back(vec![1.0, 2.0]);
         let grad = vec![2.0, 3.0];
 
-        let direction = two_loop_recursion(&s_history, &y_history, &grad);
+        let direction = two_loop_recursion(&s_history, &y_history, &grad, None);
         assert!(
             (direction[0] - (-2.4)).abs() < 1e-10,
             "degenerate pair should be fully transparent: direction={direction:?}"
@@ -3260,7 +3735,7 @@ mod tests {
         y_history.push_back(vec![1e-10, 0.0]);
         let grad = vec![2.0, 3.0];
 
-        let direction = two_loop_recursion(&s_history, &y_history, &grad);
+        let direction = two_loop_recursion(&s_history, &y_history, &grad, None);
         assert_eq!(
             direction[1], -3.0,
             "gamma=1.0 fallback should leave the y-orthogonal component exact: {direction:?}"
@@ -3277,7 +3752,6 @@ mod tests {
             1e-6,
             1,
             true,
-            SeparationNormCheck::Enabled,
         )
         .unwrap();
 
@@ -3307,7 +3781,6 @@ mod tests {
             1e-6,
             1,
             true,
-            SeparationNormCheck::Enabled,
         )
         .unwrap();
 
@@ -3335,7 +3808,6 @@ mod tests {
             1e-9,
             1000,
             true,
-            SeparationNormCheck::Enabled,
         )
         .unwrap();
         let via_tol = run_solver(
@@ -3346,7 +3818,6 @@ mod tests {
             1e-6,
             1,
             true,
-            SeparationNormCheck::Enabled,
         )
         .unwrap();
 
@@ -3366,7 +3837,6 @@ mod tests {
             1e-9,
             1000,
             true,
-            SeparationNormCheck::Enabled,
         )
         .unwrap();
         let via_tol = run_solver(
@@ -3377,7 +3847,6 @@ mod tests {
             1e-6,
             1,
             true,
-            SeparationNormCheck::Enabled,
         )
         .unwrap();
 
@@ -3398,7 +3867,6 @@ mod tests {
             1e-6,
             1,
             true,
-            SeparationNormCheck::Enabled,
         )
         .unwrap();
         let large_n_obs = run_solver(
@@ -3409,7 +3877,6 @@ mod tests {
             1e-6,
             1_000_000,
             true,
-            SeparationNormCheck::Enabled,
         )
         .unwrap();
 
@@ -3460,6 +3927,283 @@ mod tests {
 
         let updated = bfgs_updated_inv_hessian(inv_hessian.clone(), &s, &y, false);
         assert_eq!(updated, inv_hessian);
+    }
+
+    #[test]
+    fn inverse_if_positive_definite_returns_symmetric_inverse_for_positive_definite_hessian() {
+        // [[4,1],[1,3]]の逆行列は(1/11)·[[3,-1],[-1,4]]。
+        let inv = inverse_if_positive_definite(&[vec![4.0, 1.0], vec![1.0, 3.0]]).unwrap();
+        let expected = [[3.0 / 11.0, -1.0 / 11.0], [-1.0 / 11.0, 4.0 / 11.0]];
+        for i in 0..2 {
+            for j in 0..2 {
+                assert!((inv[i][j] - expected[i][j]).abs() < 1e-12, "{inv:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn inverse_if_positive_definite_returns_none_for_indefinite_or_singular_hessian() {
+        // 不定符号（固有値 +3, -1）: 逆行列は降下方向を作らないため弾く。
+        assert!(inverse_if_positive_definite(&[vec![1.0, 2.0], vec![2.0, 1.0]]).is_none());
+        // 特異（ランク1）。
+        assert!(inverse_if_positive_definite(&[vec![1.0, 1.0], vec![1.0, 1.0]]).is_none());
+        // 非有限値を含む。
+        assert!(inverse_if_positive_definite(&[vec![f64::NAN, 0.0], vec![0.0, 1.0]]).is_none());
+    }
+
+    /// 初期点のHessianが正定値なら初期逆Hessianが厳密になり、二次関数は初期スケールの
+    /// 大きな食い違い（初期点`(1000,-1000)`）があっても1〜2反復で収束する
+    /// （単位行列からの出発では、rank-2更新がHessianを学習するのに`k`反復以上要る）。
+    #[test]
+    fn run_solver_bfgs_uses_exact_inverse_hessian_at_initial_point_when_positive_definite() {
+        let output = run_solver(
+            quadratic_problem(),
+            SolverType::Bfgs,
+            vec![1000.0, -1000.0],
+            100,
+            1e-9,
+            1,
+            true,
+        )
+        .unwrap();
+
+        assert!(output.converged);
+        assert!(output.n_iter <= 2, "n_iter={}", output.n_iter);
+    }
+
+    /// 初期点のHessianが正定値でない（`f(x)=x⁴/4-x²/2`は`|x|<1/√3`で`f''<0`）場合は
+    /// 従来の初期化（単位行列＋self-scaling）に戻り、`H⁻¹`が降下方向を作らず
+    /// line searchが失敗する、という事態を避けて極小点`x=1`へ収束する。
+    #[test]
+    fn run_solver_bfgs_falls_back_when_hessian_at_initial_point_is_indefinite() {
+        let output = run_solver(Quartic, SolverType::Bfgs, vec![0.1], 100, 1e-9, 1, true).unwrap();
+
+        assert!(output.converged);
+        assert!((output.params[0] - 1.0).abs() < 1e-6, "{:?}", output.params);
+    }
+
+    /// `FaerLbfgs`も`FaerBfgs`と同じく、初期点のHessianが正定値ならその厳密な逆行列を初期行列
+    /// にするため、二次関数は初期スケールの大きな食い違い（初期点`(1000,-1000)`）があっても
+    /// 1〜2反復で収束する（`γI`からの出発では、履歴がHessianの形を学習するのに`k`反復以上要る）。
+    #[test]
+    fn run_solver_lbfgs_uses_exact_inverse_hessian_at_initial_point_when_positive_definite() {
+        let output = run_solver(
+            quadratic_problem(),
+            SolverType::Lbfgs,
+            vec![1000.0, -1000.0],
+            100,
+            1e-9,
+            1,
+            true,
+        )
+        .unwrap();
+
+        assert!(output.converged);
+        assert!(output.n_iter <= 2, "n_iter={}", output.n_iter);
+    }
+
+    /// 初期点のHessianが正定値でない場合は従来の初期化（`γI`と1回目のline search初期ステップ幅の
+    /// 調整）に戻り、`H⁻¹`が降下方向を作らずline searchが失敗する、という事態を避けて極小点`x=1`へ
+    /// 収束する（`run_solver_bfgs_falls_back_when_hessian_at_initial_point_is_indefinite`の`lbfgs`版）。
+    #[test]
+    fn run_solver_lbfgs_falls_back_when_hessian_at_initial_point_is_indefinite() {
+        let output = run_solver(Quartic, SolverType::Lbfgs, vec![0.1], 100, 1e-9, 1, true).unwrap();
+
+        assert!(output.converged);
+        assert!((output.params[0] - 1.0).abs() < 1e-6, "{:?}", output.params);
+    }
+
+    /// 初期行列`H₀⁻¹`を渡したtwo-loop recursionの手計算。履歴が空（1回目の反復）なら
+    /// 再スケールせず`-H₀⁻¹g`。
+    #[test]
+    fn two_loop_recursion_with_initial_matrix_returns_minus_h0_times_gradient_when_history_is_empty()
+     {
+        let h0 = vec![vec![2.0, 0.0], vec![0.0, 4.0]];
+        let direction = two_loop_recursion(
+            &VecDeque::new(),
+            &VecDeque::new(),
+            &[1.0, 1.0],
+            Some(h0.as_slice()),
+        );
+        assert_eq!(direction, vec![-2.0, -4.0]);
+    }
+
+    /// 1組のペアがあるとき、`H₀⁻¹`を`sᵀy/(yᵀH₀⁻¹y)`倍に再スケールして使う。
+    /// `s=[1,0]`・`y=[1,2]`・`H₀⁻¹=diag(2,1)`・`g=[3,1]`:
+    /// `ρ=1/sᵀy=1`、`α=ρsᵀg=3`、`q=g-αy=[0,-5]`、`yᵀH₀⁻¹y=2+4=6`なのでスケール`1/6`、
+    /// `r=(1/6)H₀⁻¹q=[0,-5/6]`、`β=ρyᵀr=-5/3`、`r+=s(α-β)`で`r=[14/3,-5/6]`、方向`-r`。
+    #[test]
+    fn two_loop_recursion_with_initial_matrix_rescales_it_by_the_latest_pair() {
+        let h0 = vec![vec![2.0, 0.0], vec![0.0, 1.0]];
+        let s_history = VecDeque::from(vec![vec![1.0, 0.0]]);
+        let y_history = VecDeque::from(vec![vec![1.0, 2.0]]);
+
+        let direction =
+            two_loop_recursion(&s_history, &y_history, &[3.0, 1.0], Some(h0.as_slice()));
+
+        assert!((direction[0] + 14.0 / 3.0).abs() < 1e-12, "{direction:?}");
+        assert!((direction[1] - 5.0 / 6.0).abs() < 1e-12, "{direction:?}");
+    }
+
+    /// 割線方程式`H_new y = s`は初期行列のスケールによらず成り立つ（再スケールが
+    /// two-loop recursionの割線条件を壊さないことの確認）。`g=y`なら`-direction=s`。
+    #[test]
+    fn two_loop_recursion_with_initial_matrix_satisfies_the_secant_equation() {
+        let h0 = vec![vec![3.0, 1.0], vec![1.0, 2.0]];
+        let s = vec![0.5, -1.0];
+        let y = vec![1.5, 0.25];
+        let s_history = VecDeque::from(vec![s.clone()]);
+        let y_history = VecDeque::from(vec![y.clone()]);
+
+        let direction = two_loop_recursion(&s_history, &y_history, &y, Some(h0.as_slice()));
+
+        for (d, s_j) in direction.iter().zip(&s) {
+            assert!((d + s_j).abs() < 1e-12, "{direction:?} vs {s:?}");
+        }
+    }
+
+    /// 履歴`pairs`（古い順）と初期行列`h0`（再スケール済み）から、密な逆Hessian近似を
+    /// `bfgs_rank2_update`で古いペアから順に更新して`-H g`を返す（two-loop recursionの独立な参照実装）。
+    fn dense_lbfgs_direction(
+        h0: &[Vec<f64>],
+        pairs: &[(Vec<f64>, Vec<f64>)],
+        g: &[f64],
+    ) -> Vec<f64> {
+        let mut h = h0.to_vec();
+        for (s, y) in pairs {
+            h = bfgs_rank2_update(&h, s, y, 1.0 / dot(y, s));
+        }
+        h.iter().map(|row| -dot(row, g)).collect()
+    }
+
+    fn scaled(h0: &[Vec<f64>], scale: f64) -> Vec<Vec<f64>> {
+        h0.iter()
+            .map(|row| row.iter().map(|v| v * scale).collect())
+            .collect()
+    }
+
+    fn assert_close_relative(actual: &[f64], expected: &[f64], rtol: f64) {
+        for (a, e) in actual.iter().zip(expected) {
+            assert!(
+                (a - e).abs() <= rtol * (1.0 + e.abs()),
+                "{actual:?} vs {expected:?}"
+            );
+        }
+    }
+
+    /// 履歴が2ペア以上のとき、再スケールは**直近のペア**（`sᵀy/(yᵀH₀⁻¹y)`）から決まり、結果は
+    /// 「再スケールした`H₀⁻¹`に古いペアから順にBFGSのrank-2更新を適用した密な行列」×勾配と一致する。
+    /// 直近のペアではなく最古のペアから決めると、このデータでは別の値になる。
+    #[test]
+    fn two_loop_recursion_with_initial_matrix_matches_dense_bfgs_update_with_several_pairs() {
+        // 3次元で2ペア: 次元がペア数以下だと割線方程式が逆Hessianを一意に決め、初期行列の
+        // スケールが結果に現れない（2次元・2ペアでは区別できない）。
+        let h0 = vec![
+            vec![3.0, 1.0, 0.0],
+            vec![1.0, 2.0, 0.5],
+            vec![0.0, 0.5, 1.5],
+        ];
+        let pairs = vec![
+            (vec![1.0, 0.0, 0.5], vec![2.0, 1.0, 0.3]),
+            (vec![0.5, -1.0, 0.2], vec![1.5, 0.25, -0.1]),
+        ];
+        let g = [0.7, -1.3, 0.4];
+        let s_history: VecDeque<Vec<f64>> = pairs.iter().map(|(s, _)| s.clone()).collect();
+        let y_history: VecDeque<Vec<f64>> = pairs.iter().map(|(_, y)| y.clone()).collect();
+
+        let scale_from = |(s, y): &(Vec<f64>, Vec<f64>)| {
+            let h0_y: Vec<f64> = h0.iter().map(|row| dot(row, y)).collect();
+            dot(s, y) / dot(y, &h0_y)
+        };
+        let latest_scale = scale_from(&pairs[1]);
+        let oldest_scale = scale_from(&pairs[0]);
+        assert!(
+            (latest_scale - oldest_scale).abs() > 1e-3,
+            "テストデータの前提"
+        );
+
+        let direction = two_loop_recursion(&s_history, &y_history, &g, Some(h0.as_slice()));
+        let expected = dense_lbfgs_direction(&scaled(&h0, latest_scale), &pairs, &g);
+        assert_close_relative(&direction, &expected, 1e-12);
+
+        let wrong = dense_lbfgs_direction(&scaled(&h0, oldest_scale), &pairs, &g);
+        assert!(
+            direction
+                .iter()
+                .zip(&wrong)
+                .any(|(a, w)| (a - w).abs() > 1e-6),
+            "最古のペアから決めたスケールと区別できない"
+        );
+    }
+
+    /// 直近のペアだけが縮退（`sᵀy≤ε`）し、それ以前に有効なペアがあるとき、縮退したペアは
+    /// two-loop recursionが無視し、再スケールもしない（`1.0`）。結果は有効な古いペアだけを
+    /// `H₀⁻¹`に適用した密な行列と一致する。
+    #[test]
+    fn two_loop_recursion_with_initial_matrix_ignores_a_degenerate_latest_pair() {
+        let h0 = vec![vec![3.0, 1.0], vec![1.0, 2.0]];
+        let valid = (vec![1.0, 0.0], vec![2.0, 1.0]);
+        let degenerate = (vec![1.0, 0.0], vec![-1.0, 0.0]);
+        let g = [0.7, -1.3];
+        let s_history = VecDeque::from(vec![valid.0.clone(), degenerate.0.clone()]);
+        let y_history = VecDeque::from(vec![valid.1.clone(), degenerate.1.clone()]);
+
+        let direction = two_loop_recursion(&s_history, &y_history, &g, Some(h0.as_slice()));
+        let expected = dense_lbfgs_direction(&h0, &[valid], &g);
+
+        assert_close_relative(&direction, &expected, 1e-12);
+    }
+
+    /// `sᵀy`は十分正だが`yᵀH₀⁻¹y≤ε`（`y`が極端に小さい）の場合も再スケールしない（`1.0`）。
+    /// `sᵀy>ε`のガードとは独立に、`yᵀH₀⁻¹y`側のガード（ゼロ除算回避）を通る。
+    #[test]
+    fn two_loop_recursion_with_initial_matrix_does_not_rescale_when_y_h0_y_is_negligible() {
+        let h0 = vec![vec![2.0, 0.0], vec![0.0, 4.0]];
+        let pair = (vec![1.0, 1.0], vec![5e-9, 5e-9]);
+        assert!(dot(&pair.0, &pair.1) > f64::EPSILON, "テストデータの前提");
+        let h0_y: Vec<f64> = h0.iter().map(|row| dot(row, &pair.1)).collect();
+        assert!(dot(&pair.1, &h0_y) <= f64::EPSILON, "テストデータの前提");
+        let g = [1.0, -2.0];
+        let s_history = VecDeque::from(vec![pair.0.clone()]);
+        let y_history = VecDeque::from(vec![pair.1.clone()]);
+
+        let direction = two_loop_recursion(&s_history, &y_history, &g, Some(h0.as_slice()));
+        let expected = dense_lbfgs_direction(&h0, &[pair], &g);
+
+        assert_close_relative(&direction, &expected, 1e-8);
+    }
+
+    /// `run_solver_lbfgs_falls_back_...`の補足: 初期点のHessianは正定値だが`f''`がほぼ0で
+    /// 最初の`H₀⁻¹`が巨大になる初期点（`x=0.6`、`f''=3x²-1≈0.08`）でも、再スケールと強Wolfe条件の
+    /// 下で極小点`x=1`へ収束する（固定の`H₀⁻¹`が反復途中で不適切になっても破綻しない）。
+    #[test]
+    fn run_solver_lbfgs_converges_from_a_start_where_the_initial_inverse_hessian_is_huge() {
+        for x0 in [0.6, 0.7, -0.6, 3.0] {
+            let output =
+                run_solver(Quartic, SolverType::Lbfgs, vec![x0], 100, 1e-9, 1, true).unwrap();
+
+            assert!(output.converged, "x0={x0}");
+            assert!(
+                (output.params[0].abs() - 1.0).abs() < 1e-6,
+                "x0={x0}, {:?}",
+                output.params
+            );
+        }
+    }
+
+    /// 直近のペアの曲率が実質ゼロ以下（`sᵀy≤ε`）なら再スケールせず（`1.0`）、そのペアは
+    /// two-loop recursion自体が無視する（`two_loop_recursion_skips_degenerate_pair_...`と同じ
+    /// ガード）ため、方向は`-H₀⁻¹g`になる。
+    #[test]
+    fn two_loop_recursion_with_initial_matrix_does_not_rescale_for_a_degenerate_pair() {
+        let h0 = vec![vec![2.0, 0.0], vec![0.0, 4.0]];
+        let s_history = VecDeque::from(vec![vec![1.0, 0.0]]);
+        let y_history = VecDeque::from(vec![vec![-1.0, 0.0]]);
+
+        let direction =
+            two_loop_recursion(&s_history, &y_history, &[1.0, 1.0], Some(h0.as_slice()));
+
+        assert_eq!(direction, vec![-2.0, -4.0]);
     }
 
     #[test]
@@ -3677,17 +4421,7 @@ mod tests {
         for solver in [SolverType::Bfgs, SolverType::Lbfgs] {
             let problem = NoisyCostFloorProblem::new();
             let evaluations = std::rc::Rc::clone(&problem.evaluations);
-            let output = run_solver(
-                problem,
-                solver,
-                vec![0.0, 0.0],
-                100,
-                1e-2,
-                1,
-                true,
-                SeparationNormCheck::Disabled,
-            )
-            .unwrap();
+            let output = run_solver(problem, solver, vec![0.0, 0.0], 100, 1e-2, 1, true).unwrap();
 
             assert!(output.converged, "{solver:?}: {output:?}");
             let grad = NoisyCostFloorProblem::new()
@@ -3724,6 +4458,7 @@ mod tests {
             linesearch: linesearch(),
             tol: 1e-2,
             stalled_at_optimum: false,
+            h0_from_hessian: false,
         };
         let result = Executor::new(NoisyCostFloorProblem::new(), bfgs)
             .configure(|state| state.param(vec![0.0, 0.0]).max_iters(100))
@@ -3737,6 +4472,7 @@ mod tests {
             stalled_at_optimum: false,
             s_history: VecDeque::with_capacity(LBFGS_HISTORY_SIZE),
             y_history: VecDeque::with_capacity(LBFGS_HISTORY_SIZE),
+            h0: None,
         };
         let result = Executor::new(NoisyCostFloorProblem::new(), lbfgs)
             .configure(|state| state.param(vec![0.0, 0.0]).max_iters(100))
@@ -3776,7 +4512,6 @@ mod tests {
             1e-6,
             1,
             true,
-            SeparationNormCheck::Enabled,
         )
         .unwrap();
 
@@ -3789,33 +4524,33 @@ mod tests {
         );
     }
 
+    // `max_iter=0`: 初期逆Hessianが厳密なため、二次関数は`max_iter=1`でも1反復で収束する。
     #[test]
     fn run_solver_returns_non_convergence_error_when_max_iter_is_too_small() {
         let result = run_solver(
             quadratic_problem(),
             SolverType::Bfgs,
             vec![1000.0, -1000.0],
-            1,
+            0,
             1e-12,
             1,
             true,
-            SeparationNormCheck::Enabled,
         );
 
         assert!(matches!(result, Err(MleError::NonConvergence { .. })));
     }
 
+    // `max_iter=0`: 初期逆Hessianが厳密なため、二次関数は`max_iter=1`でも1反復で収束する。
     #[test]
     fn run_solver_returns_result_without_raising_when_raise_on_non_convergence_is_false() {
         let output = run_solver(
             quadratic_problem(),
             SolverType::Bfgs,
             vec![1000.0, -1000.0],
-            1,
+            0,
             1e-12,
             1,
             false,
-            SeparationNormCheck::Enabled,
         )
         .unwrap();
 
@@ -3832,7 +4567,6 @@ mod tests {
             1e-12,
             1,
             true,
-            SeparationNormCheck::Enabled,
         );
 
         assert!(matches!(result, Err(MleError::NonConvergence { .. })));
@@ -3848,7 +4582,6 @@ mod tests {
             1e-12,
             1,
             false,
-            SeparationNormCheck::Enabled,
         )
         .unwrap();
 
@@ -3899,7 +4632,6 @@ mod tests {
             1e-6,
             1,
             true,
-            SeparationNormCheck::Enabled,
         );
 
         assert!(
@@ -3967,7 +4699,6 @@ mod tests {
             1e-6,
             1,
             false,
-            SeparationNormCheck::Enabled,
         )
         .unwrap();
 
@@ -4055,7 +4786,6 @@ mod tests {
             1e-6,
             1,
             true,
-            SeparationNormCheck::Disabled,
         )
         .unwrap();
 
@@ -4085,7 +4815,6 @@ mod tests {
             1e-6,
             1,
             false,
-            SeparationNormCheck::Disabled,
         )
         .unwrap();
 
@@ -4142,7 +4871,6 @@ mod tests {
             1e-6,
             1,
             true,
-            SeparationNormCheck::Disabled,
         );
 
         assert!(
@@ -4200,7 +4928,6 @@ mod tests {
             1e-6,
             1,
             true,
-            SeparationNormCheck::Disabled,
         );
 
         assert!(
@@ -4291,7 +5018,6 @@ mod tests {
             1e-6,
             1,
             true,
-            SeparationNormCheck::Disabled,
         )
         .unwrap();
 
@@ -4491,7 +5217,6 @@ mod tests {
             1e-6,
             1,
             true,
-            SeparationNormCheck::Disabled,
         )
         .unwrap();
 
@@ -4548,7 +5273,8 @@ mod tests {
         });
         let y = Mat::from_fn(5, 1, |i, _| [1.0, 2.0, 2.0, 4.0, 5.0][i]);
 
-        let qr = checked_design_matrix_qr(&x).expect("full-rank design matrix must be accepted");
+        let qr = checked_design_matrix_qr(&x, &x, &[])
+            .expect("full-rank design matrix must be accepted");
         let beta = qr.solve_lstsq(&y);
         // 正規方程式 X'Xβ = X'y を満たすはず（残差が設計行列と直交）。
         let resid = &y - &x * &beta;
@@ -4569,9 +5295,13 @@ mod tests {
             1 => [1.0, 2.0, 3.0, 4.0, 5.0][i],
             _ => 2.0 * [1.0, 2.0, 3.0, 4.0, 5.0][i],
         });
+        let names = ["const".to_string(), "t".to_string(), "t2".to_string()];
+        // 従属になるのは3列目と、それを表す2列目（切片は関わらない）。
         assert_eq!(
-            checked_design_matrix_qr(&x).unwrap_err(),
-            MleError::SingularDesignMatrix
+            checked_design_matrix_qr(&x, &x, &names).unwrap_err(),
+            MleError::SingularDesignMatrix {
+                columns: vec!["t".to_string(), "t2".to_string()]
+            }
         );
     }
 
@@ -4579,9 +5309,12 @@ mod tests {
     fn checked_design_matrix_qr_rejects_all_zero_design_matrix_via_nan_guard() {
         // 全ゼロ列の`col_piv_qr`は`R`の対角にNaNを生じうる（`newton_step`と同じ罠）。
         let x = Mat::from_fn(4, 2, |_, _| 0.0);
+        // 全ゼロの先頭列はそれ単独で従属。
         assert_eq!(
-            checked_design_matrix_qr(&x).unwrap_err(),
-            MleError::SingularDesignMatrix
+            checked_design_matrix_qr(&x, &x, &["a".to_string(), "b".to_string()]).unwrap_err(),
+            MleError::SingularDesignMatrix {
+                columns: vec!["a".to_string()]
+            }
         );
     }
 
@@ -4591,7 +5324,7 @@ mod tests {
         // `β⁽¹⁾[0] = p̄/w + (η₀ - p̄/w) = η₀ = ln(p̄/(1-p̄))`（切片のみモデルの厳密なMLE）。
         let y = Mat::from_fn(7, 1, |i, _| if i < 4 { 1.0 } else { 0.0 });
         let x = Mat::from_fn(7, 1, |_, _| 1.0);
-        let params = ols_based_initial_params(&x, &y, true, |p_bar| {
+        let params = ols_based_initial_params(&x, &x, &y, true, &[], |p_bar| {
             (p_bar * (1.0 - p_bar), (p_bar / (1.0 - p_bar)).ln())
         })
         .unwrap();
@@ -4608,8 +5341,8 @@ mod tests {
         let x = Mat::from_fn(4, 1, |i, _| [1.0, 2.0, 3.0, 4.0][i]);
         let y = Mat::from_fn(4, 1, |i, _| [0.0, 0.0, 1.0, 1.0][i]);
 
-        let raw = ols_based_initial_params(&x, &y, false, |_| (1.0, 0.0)).unwrap();
-        let scaled = ols_based_initial_params(&x, &y, false, |_| (0.25, 0.0)).unwrap();
+        let raw = ols_based_initial_params(&x, &x, &y, false, &[], |_| (1.0, 0.0)).unwrap();
+        let scaled = ols_based_initial_params(&x, &x, &y, false, &[], |_| (0.25, 0.0)).unwrap();
         assert!(
             (scaled[0] - raw[0] / 0.25).abs() < 1e-12,
             "{scaled:?} {raw:?}"
@@ -4626,7 +5359,7 @@ mod tests {
             |i, j| if j == 0 { 1.0 } else { [1.0, 2.0, 3.0, 4.0][i] },
         );
         let y = Mat::from_fn(4, 1, |_, _| 1.0);
-        let params = ols_based_initial_params(&x, &y, true, |_| {
+        let params = ols_based_initial_params(&x, &x, &y, true, &[], |_| {
             panic!("link_terms must not be called for a degenerate p_bar")
         })
         .unwrap();
@@ -4645,8 +5378,45 @@ mod tests {
         });
         let y = Mat::from_fn(5, 1, |i, _| [0.0, 1.0, 0.0, 1.0, 1.0][i]);
         assert_eq!(
-            ols_based_initial_params(&x, &y, true, |p| (p * (1.0 - p), 0.0)).unwrap_err(),
-            MleError::SingularDesignMatrix
+            ols_based_initial_params(&x, &x, &y, true, &[], |p| (p * (1.0 - p), 0.0)).unwrap_err(),
+            MleError::SingularDesignMatrix {
+                columns: vec!["column 1".to_string(), "column 2".to_string()]
+            }
+        );
+    }
+
+    #[test]
+    fn checked_design_matrix_qr_reports_the_intercept_for_collinearity_hidden_by_centering() {
+        // 標準化（切片ありでは非切片列の平均を引く）後の行列では、切片との共線性が切片を含まない形に
+        // 見える。共線な列は標準化前の設計行列から特定するので、切片も報告に含まれる。
+        let names = ["const".to_string(), "d1".to_string(), "d2".to_string()];
+        // ダミー変数の罠: `d1 + d2 = const`。
+        let trap = Mat::from_fn(6, 3, |i, j| match j {
+            0 => 1.0,
+            1 => [1.0, 0.0, 1.0, 0.0, 1.0, 0.0][i],
+            _ => [0.0, 1.0, 0.0, 1.0, 0.0, 1.0][i],
+        });
+        let (trap_std, _) = standardize_columns(&trap, true);
+        assert_eq!(
+            checked_design_matrix_qr(&trap_std, &trap, &names).unwrap_err(),
+            MleError::SingularDesignMatrix {
+                columns: names.to_vec()
+            }
+        );
+
+        // 定数列は切片と共線（標準化後は全ゼロ列になる）。
+        let constant = Mat::from_fn(6, 3, |i, j| match j {
+            0 => 1.0,
+            1 => [1.0, 2.0, 4.0, 3.0, 6.0, 5.0][i],
+            _ => 3.0,
+        });
+        let (constant_std, _) = standardize_columns(&constant, true);
+        let names = ["const".to_string(), "x".to_string(), "c".to_string()];
+        assert_eq!(
+            checked_design_matrix_qr(&constant_std, &constant, &names).unwrap_err(),
+            MleError::SingularDesignMatrix {
+                columns: vec!["const".to_string(), "c".to_string()]
+            }
         );
     }
 
@@ -4667,7 +5437,7 @@ mod tests {
         for i in 0..4 {
             assert_eq!(*x_std.get(i, 0), 1.0);
         }
-        // 平均は引いていないため、分散（平均まわりの2次モーメント）で検証する
+        // 切片列以外の標準化後の列は平均0（切片あり）・分散1。ここでは分散（平均まわりの2次モーメント）で検証する
         // （2乗の平均=E[x²]ではなくVar(x)=E[x²]-E[x]²が1になるはず）。
         let variance = |col: usize| -> f64 {
             let values: Vec<f64> = (0..4).map(|i| *x_std.get(i, col)).collect();
@@ -4715,28 +5485,138 @@ mod tests {
             }
         });
 
-        let (_, scale) = standardize_columns(&x, true);
+        let (x_std, scale) = standardize_columns(&x, true);
         let params_std = vec![1.5, 6.0, -3.0];
         let params_orig = destandardize_params(&params_std, &scale);
 
-        // 切片の係数はスケーリング対象外（scale.stds[0] == 1.0）のため、
-        // 切片なしのケースと同様に線形予測子が一致するはず。切片項自体は
-        // 平均センタリングをしていないため素通しでよい（destandardize_paramsの
-        // 補正対象にならない）。
-        assert_eq!(params_orig[0], params_std[0]);
+        // 切片以外の標準化後の列は平均0・分散1（平均を引くのは切片ありのときのみ）。
+        for j in 1..3 {
+            let mean = (0..4).map(|i| *x_std.get(i, j)).sum::<f64>() / 4.0;
+            let var = (0..4)
+                .map(|i| (*x_std.get(i, j) - mean).powi(2))
+                .sum::<f64>()
+                / 4.0;
+            assert!(mean.abs() < 1e-12, "col {j} mean={mean}");
+            assert!((var - 1.0).abs() < 1e-12, "col {j} var={var}");
+        }
+        // 切片列は無変換。
         for i in 0..4 {
-            let pred_std: f64 = params_std[0]
-                + (1..3)
-                    .map(|j| (*x.get(i, j) / scale.stds[j]) * params_std[j])
-                    .sum::<f64>();
-            let pred_orig: f64 =
-                params_orig[0] + (1..3).map(|j| *x.get(i, j) * params_orig[j]).sum::<f64>();
+            assert_eq!(*x_std.get(i, 0), 1.0);
+        }
+
+        // 傾きは`θⱼ=θ̃ⱼ/stdⱼ`、切片は`θ₀=θ̃₀-Σx̄ⱼθⱼ`（手計算した式）。標準化空間と元の
+        // スケールで線形予測子が一致することも確認する。
+        for j in 1..3 {
+            assert!((params_orig[j] - params_std[j] / scale.stds[j]).abs() < 1e-12);
+        }
+        let expected_intercept =
+            params_std[0] - (1..3).map(|j| scale.means[j] * params_orig[j]).sum::<f64>();
+        assert!((params_orig[0] - expected_intercept).abs() < 1e-12);
+        for i in 0..4 {
+            let pred_std: f64 = (0..3).map(|j| *x_std.get(i, j) * params_std[j]).sum();
+            let pred_orig: f64 = (0..3).map(|j| *x.get(i, j) * params_orig[j]).sum();
             assert!((pred_std - pred_orig).abs() < 1e-9);
+        }
+
+        // `standardize_params`は`destandardize_params`の逆変換。
+        let round_trip = scale.standardize_params(&params_orig);
+        for (a, b) in round_trip.iter().zip(&params_std) {
+            assert!((a - b).abs() < 1e-12, "{round_trip:?} vs {params_std:?}");
         }
     }
 
     #[test]
-    fn destandardize_cov_params_divides_by_outer_product_of_stds() {
+    fn standardize_columns_without_intercept_does_not_subtract_the_mean() {
+        // 切片なしでは吸収先の切片が無いため平均を引かない（`x/std`のみ）。`means`は全列0.0で、
+        // 逆変換（`destandardize_params`・`destandardize_cov_params`）も対角（`/std`）のまま。
+        let x = Mat::from_fn(4, 2, |i, j| {
+            if j == 0 {
+                [10.0, 20.0, 30.0, 40.0][i]
+            } else {
+                [100.0, 200.0, 150.0, 50.0][i]
+            }
+        });
+        let (x_std, scale) = standardize_columns(&x, false);
+
+        assert!(scale.means.iter().all(|m| *m == 0.0));
+        for i in 0..4 {
+            for j in 0..2 {
+                assert_eq!(*x_std.get(i, j), *x.get(i, j) / scale.stds[j]);
+            }
+        }
+        let cov_std = Mat::from_fn(2, 2, |i, j| [[4.0, 6.0], [6.0, 9.0]][i][j]);
+        let cov_orig = destandardize_cov_params(&cov_std, &scale);
+        for i in 0..2 {
+            for j in 0..2 {
+                let expected = *cov_std.get(i, j) / (scale.stds[i] * scale.stds[j]);
+                assert!((*cov_orig.get(i, j) - expected).abs() < 1e-12);
+            }
+        }
+    }
+
+    #[test]
+    fn standardize_columns_turns_a_constant_column_into_an_all_zero_column_with_intercept() {
+        // 標準偏差0の列は`std=1.0`のままで、切片ありでは平均が引かれて全ゼロ列になる
+        // （切片と共線。`fit()`の列ピボットQRランクチェックが弾く）。切片なしでは無変換。
+        let x = Mat::from_fn(4, 3, |i, j| match j {
+            0 => 1.0,
+            1 => [1.0, 2.0, 3.0, 4.0][i],
+            _ => 0.1,
+        });
+
+        let (x_std, scale) = standardize_columns(&x, true);
+        assert_eq!(scale.stds[2], 1.0);
+        assert_eq!(scale.means[2], 0.1);
+        for i in 0..4 {
+            assert_eq!(*x_std.get(i, 2), 0.0);
+        }
+
+        let (x_std_no_intercept, scale_no_intercept) = standardize_columns(&x, false);
+        assert_eq!(scale_no_intercept.stds[2], 1.0);
+        for i in 0..4 {
+            assert_eq!(*x_std_no_intercept.get(i, 2), 0.1);
+        }
+    }
+
+    #[test]
+    fn column_scale_fit_then_standardize_applies_the_fitted_mean_and_std_to_other_rows() {
+        // `fit`で求めた平均・標準偏差を、`fit`に使っていない別の行へ適用できる。
+        let x_fit = Mat::from_fn(4, 3, |i, j| match j {
+            0 => 1.0,
+            1 => [10.0, 20.0, 30.0, 40.0][i],
+            _ => 5.0,
+        });
+        let x_new = Mat::from_fn(2, 3, |i, j| match j {
+            0 => 1.0,
+            1 => [25.0, 100.0][i],
+            _ => 5.0,
+        });
+
+        let scale = ColumnScale::fit(&x_fit, true);
+        assert_eq!(scale.means, vec![0.0, 25.0, 5.0]);
+        // 切片列と標準偏差0の列（定数列）は`std=1.0`。
+        assert_eq!(scale.stds[0], 1.0);
+        assert_eq!(scale.stds[2], 1.0);
+        let sd1 = 125.0_f64.sqrt();
+        assert_eq!(scale.stds[1], sd1);
+
+        let std_new = scale.standardize(&x_new);
+        assert_eq!(*std_new.get(0, 0), 1.0);
+        assert_eq!(*std_new.get(0, 1), 0.0);
+        assert_eq!(*std_new.get(1, 1), 75.0 / sd1);
+        assert_eq!(*std_new.get(0, 2), 0.0);
+
+        // 切片なしでは`means`が全0（平均を引かない）。
+        let scale_no_intercept = ColumnScale::fit(&x_fit, false);
+        assert!(scale_no_intercept.means.iter().all(|m| *m == 0.0));
+        assert_eq!(
+            *scale_no_intercept.standardize(&x_new).get(1, 1),
+            100.0 / sd1
+        );
+    }
+
+    #[test]
+    fn destandardize_cov_params_applies_the_intercept_adjusted_linear_map() {
         let x = Mat::from_fn(4, 2, |i, j| {
             if j == 0 {
                 1.0
@@ -4747,54 +5627,48 @@ mod tests {
         let (_, scale) = standardize_columns(&x, true);
         assert_eq!(scale.stds[0], 1.0);
         assert!(scale.stds[1] > 1.0);
+        assert_eq!(scale.means[1], 25.0);
 
         let cov_std = Mat::from_fn(2, 2, |i, j| [[4.0, 6.0], [6.0, 9.0]][i][j]);
         let cov_orig = destandardize_cov_params(&cov_std, &scale);
 
-        // 切片列は`stds[0]==1.0`なので影響を受けない。x1列は`stds[1]`で
-        // 割った分だけ小さくなる（`Σ_orig[i,j] = Σ_std[i,j]/(stds[i]*stds[j])`）。
-        let s1 = scale.stds[1];
-        assert!((*cov_orig.get(0, 0) - 4.0).abs() < 1e-12);
-        assert!((*cov_orig.get(0, 1) - 6.0 / s1).abs() < 1e-12);
-        assert!((*cov_orig.get(1, 0) - 6.0 / s1).abs() < 1e-12);
-        assert!((*cov_orig.get(1, 1) - 9.0 / (s1 * s1)).abs() < 1e-12);
+        // `θ₀ = θ̃₀ - (x̄/s)θ̃₁`、`θ₁ = θ̃₁/s`（`s=stds[1]`、`x̄=means[1]`）から、
+        // 分散・共分散の展開式（`Var(a-bc)`型）を手で書いた期待値。
+        let s = scale.stds[1];
+        let r = 25.0 / s;
+        let var0 = 4.0 - 2.0 * r * 6.0 + r * r * 9.0;
+        let cov01 = (6.0 - r * 9.0) / s;
+        let var1 = 9.0 / (s * s);
+        assert!((*cov_orig.get(0, 0) - var0).abs() < 1e-12);
+        assert!((*cov_orig.get(0, 1) - cov01).abs() < 1e-12);
+        assert!((*cov_orig.get(1, 0) - cov01).abs() < 1e-12);
+        assert!((*cov_orig.get(1, 1) - var1).abs() < 1e-12);
     }
 
     #[test]
     fn mle_error_messages_are_human_readable() {
         // 6種の共通バリアント（DimensionMismatch等）のメッセージ検証は
-        // `engine::error`側のテストに集約済み。ここではnonlinear固有の
+        // `engine::shared::error`側のテストに集約済み。ここではnonlinear固有の
         // バリアントに加え、`Common`が`CommonError`のDisplayをtransparentに転送する
         // ことだけを確認する。
         assert_eq!(
-            MleError::NonConvergence { n_iter: 35 }.to_string(),
-            "failed to converge after 35 iterations. Set raise_on_non_convergence=False \
-             to receive the result anyway, or increase max_iter"
-        );
-        assert_eq!(
             MleError::InvalidMaxIter { max_iter: 0 }.to_string(),
-            "max_iter must be an integer between 1 and 10000, got 0"
+            "max_iter must be an integer from 1 to 10000, got 0."
         );
         assert_eq!(
-            MleError::SingularHessian.to_string(),
-            "the Hessian is singular and cannot be inverted"
-        );
-        assert_eq!(
-            MleError::InvalidCensoringBounds {
-                lower: Some(10.0),
-                upper: Some(5.0),
+            MleError::CensoringBoundsNotOrdered {
+                lower: 10.0,
+                upper: 5.0,
             }
             .to_string(),
-            "invalid censoring bounds: lower=Some(10.0), upper=Some(5.0) \
-             (at least one bound must be set, and lower must be less than upper when both are set)"
+            "lower (10.0) must be less than upper (5.0)."
         );
         assert_eq!(
-            MleError::SingularOpgMatrix.to_string(),
-            "the outer-product-of-gradients (OPG) matrix is singular and cannot be inverted"
-        );
-        assert_eq!(
-            MleError::Common(CommonError::MissingClusterColumn).to_string(),
-            "cov_type='cluster' requires cluster identifiers to be provided"
+            MleError::Common(CommonError::MissingClusterColumn {
+                setting: ClusterSetting::CovType,
+            })
+            .to_string(),
+            r#"cov_type="cluster" requires the cluster option, the column that identifies the clusters."#
         );
     }
 
@@ -4803,8 +5677,14 @@ mod tests {
         assert_eq!(MleError::SingularHessian, MleError::SingularHessian);
         assert_ne!(MleError::SingularHessian, MleError::SingularOpgMatrix);
         assert_ne!(
-            MleError::Common(CommonError::InsufficientClusters { g: 1 }),
-            MleError::Common(CommonError::InsufficientClusters { g: 0 })
+            MleError::Common(CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 1
+            }),
+            MleError::Common(CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 0
+            })
         );
         assert_eq!(
             MleError::NonConvergence { n_iter: 35 },
@@ -4933,12 +5813,7 @@ mod tests {
         // correction = G/(G-1) * (n-1)/(n-k) = 2/1 * 3/2 = 3
         // H⁻¹S_hatH⁻¹ = [[2,2],[2,2]] (observed_information_cov_paramsの対角0.5,0.2で挟む)
         // Σ = 3 * [[2,2],[2,2]] = [[6,6],[6,6]]
-        let groups = vec![
-            "a".to_string(),
-            "b".to_string(),
-            "a".to_string(),
-            "b".to_string(),
-        ];
+        let groups = cov_test_groups();
         let cov =
             cluster_cov_params(&cov_test_hessian(), &cov_test_scores(), 4, 2, &groups).unwrap();
         assert!((*cov.get(0, 0) - 6.0).abs() < 1e-9, "{:?}", cov);
@@ -4947,15 +5822,16 @@ mod tests {
         assert!((*cov.get(1, 0) - 6.0).abs() < 1e-9, "{:?}", cov);
     }
 
+    /// `cov_test_scores`と同じ4行に対応する、a/bが交互のクラスターのコード。
+    fn cov_test_groups() -> GroupCodes {
+        let ids: Vec<String> = ["a", "b", "a", "b"].iter().map(|s| s.to_string()).collect();
+        GroupCodes::from_labels(&ids)
+    }
+
     #[test]
     fn cluster_cov_params_returns_singular_hessian_error_for_zero_hessian() {
         let zero_hessian = Mat::<f64>::zeros(2, 2);
-        let groups = vec![
-            "a".to_string(),
-            "b".to_string(),
-            "a".to_string(),
-            "b".to_string(),
-        ];
+        let groups = cov_test_groups();
         let result = cluster_cov_params(&zero_hessian, &cov_test_scores(), 4, 2, &groups);
         assert!(
             matches!(result, Err(MleError::SingularHessian)),
@@ -5163,7 +6039,10 @@ mod tests {
                 true,
                 &CovType::Cluster { groups: None }
             ),
-            Err(CommonError::MissingClusterColumn.into())
+            Err(CommonError::MissingClusterColumn {
+                setting: ClusterSetting::CovType,
+            }
+            .into())
         );
     }
 
@@ -5185,124 +6064,11 @@ mod tests {
                 3,
                 true,
                 &CovType::Cluster {
-                    groups: Some(groups)
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups))
                 }
             ),
             Err(CommonError::InsufficientClustersForInference { g: 2, q: 2 }.into())
         );
-    }
-
-    /// [`SEPARATION_PARAM_NORM_THRESHOLD`]の境界値を直接検証する（実際の最適化
-    /// トラジェクトリに頼らない理由は`separation_suspected`のdocコメント参照）。
-    #[test]
-    fn separation_suspected_is_false_just_below_threshold() {
-        assert!(!separation_suspected(&[
-            SEPARATION_PARAM_NORM_THRESHOLD - 0.1,
-            0.0
-        ]));
-    }
-
-    #[test]
-    fn separation_suspected_is_false_exactly_at_threshold() {
-        // `>`（`>=`ではない）で判定するため、ちょうど閾値と一致する場合はfalse。
-        assert!(!separation_suspected(&[
-            SEPARATION_PARAM_NORM_THRESHOLD,
-            0.0
-        ]));
-    }
-
-    #[test]
-    fn separation_suspected_is_true_just_above_threshold() {
-        assert!(separation_suspected(&[
-            SEPARATION_PARAM_NORM_THRESHOLD + 0.1,
-            0.0
-        ]));
-    }
-
-    /// 最小点のノルムが[`SEPARATION_PARAM_NORM_THRESHOLD`]を超える2次問題。`diag_a`が
-    /// 全て`1.0`なのでコスト関数のHessianは単位行列（非特異）、`run_solver`は`target`へ
-    /// 素直に収束する。`target`のノルムは`200 > 100`。
-    fn large_norm_minimum_problem() -> QuadraticProblem {
-        QuadraticProblem {
-            target: vec![200.0, 0.0],
-            diag_a: vec![1.0, 1.0],
-        }
-    }
-
-    /// `SeparationNormCheck::Enabled`（Logit/Probit相当）: 勾配ノルム基準では収束するが
-    /// 標準化パラメータノルムが過大なので`raise_on_non_convergence=true`で
-    /// `SeparationSuspected`を返す。
-    #[test]
-    fn run_solver_returns_separation_suspected_when_check_is_enabled() {
-        let result = run_solver(
-            large_norm_minimum_problem(),
-            SolverType::Newton,
-            vec![0.0, 0.0],
-            35,
-            1e-6,
-            1,
-            true,
-            SeparationNormCheck::Enabled,
-        );
-
-        assert!(
-            matches!(result, Err(MleError::SeparationSuspected { .. })),
-            "{result:?}"
-        );
-    }
-
-    /// `SeparationNormCheck::Enabled`かつ`raise_on_non_convergence=false`: エラーは返さず
-    /// `converged=false`へ格下げする（通常の`NonConvergence`と揃えた挙動）。格下げは
-    /// `converged`フラグだけを落とし、`params`/`n_iter`/`hessian`等の結果本体は通常通り
-    /// 埋めて返す（rust-reviewer指摘、downgradeの契約を明示）。
-    #[test]
-    fn run_solver_downgrades_to_unconverged_on_separation_norm_when_raise_is_false() {
-        let output = run_solver(
-            large_norm_minimum_problem(),
-            SolverType::Newton,
-            vec![0.0, 0.0],
-            35,
-            1e-6,
-            1,
-            false,
-            SeparationNormCheck::Enabled,
-        )
-        .unwrap();
-
-        assert!(!output.converged);
-        // 結果本体は素通し: `target=[200,0]`近傍のパラメータがそのまま返る。
-        assert!(
-            (output.params[0] - 200.0).abs() < 1e-6,
-            "{:?}",
-            output.params
-        );
-        assert!(output.params[1].abs() < 1e-6, "{:?}", output.params);
-        assert!(output.n_iter > 0);
-    }
-
-    /// `SeparationNormCheck::Disabled`（Tobit相当）: 同じ大ノルム収束点でも事後チェックを
-    /// 通らず、`converged=true`で`target`へ収束した結果をそのまま返す。
-    #[test]
-    fn run_solver_ignores_separation_norm_when_check_is_disabled() {
-        let output = run_solver(
-            large_norm_minimum_problem(),
-            SolverType::Newton,
-            vec![0.0, 0.0],
-            35,
-            1e-6,
-            1,
-            true,
-            SeparationNormCheck::Disabled,
-        )
-        .unwrap();
-
-        assert!(output.converged);
-        assert!(
-            (output.params[0] - 200.0).abs() < 1e-6,
-            "{:?}",
-            output.params
-        );
-        assert!(output.params[1].abs() < 1e-6, "{:?}", output.params);
     }
 
     /// `log_likelihood_null`は`n1`（y=1の観測数）または`n0`（y=0の観測数）が0の
@@ -5597,5 +6363,37 @@ mod tests {
         let new_x_columns = vec![vec![10.0, 20.0]]; // 1列しかない
 
         let _ = predict_new_data(&params, true, &new_x_columns, |z| z);
+    }
+
+    #[test]
+    fn validate_cluster_cov_type_accepts_valid_cluster_and_other_cov_types() {
+        let groups: Vec<String> = ["a", "b", "c", "a", "b", "c"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(
+            validate_cluster_cov_type(
+                &CovType::Cluster {
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
+                },
+                6,
+                1,
+            ),
+            Ok(())
+        );
+        assert_eq!(validate_cluster_cov_type(&CovType::Classical, 6, 1), Ok(()));
+        // グループ数（3）が傾き係数の数以下なら、コードを作ったうえで弾く。
+        assert!(matches!(
+            validate_cluster_cov_type(
+                &CovType::Cluster {
+                    groups: Some(GroupCodes::from_labels_without_keys(&groups)),
+                },
+                6,
+                3,
+            ),
+            Err(MleError::Common(
+                CommonError::InsufficientClustersForInference { g: 3, q: 3 }
+            ))
+        ));
     }
 }

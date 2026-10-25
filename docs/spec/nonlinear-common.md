@@ -36,7 +36,7 @@ Logit/Probit/Tobit（最尤推定ベースの非線形モデル）が共有す�
 
 - **Newton**: 組み込み`Newton`ソルバーは`H: ArgminInv<H>`（Hessianの逆行列）を要求するが、
   `argmin-math`の`vec`機能には`ArgminInv`の実装が存在しない。Newtonステップの求解
-  （`H·Δθ = g`）はfaerの列ピボットQR（`col_piv_qr`、OLSの`ensure_full_rank`と同じ相対閾値
+  （`H·Δθ = g`）はfaerの列ピボットQR（`col_piv_qr`、OLSと共通の`linear_algebra::checked_col_piv_qr`と同じ相対閾値
   での特異性検出）で行う。特異なら`MleError::SingularHessian`。
   - **ステップの検証（LM型減衰）**: `regularized_newton_step`は`H + λI`で`cost`が狭義に減少する
     候補が見つかるまで`λ`を`0→1e-3→×4→…`（最大40段）と増やす（Tobitの不定符号Hessian対策、
@@ -60,7 +60,7 @@ Logit/Probit/Tobit（最尤推定ベースの非線形モデル）が共有す�
     分解能判定（約1 ULPの評価誤差を前提にした`10·ε·|cost|`）が成り立たない。勾配・Hessianの
     総和は素朴な加算のまま（収束点で勾配の累積値が小さく、丸め誤差が問題にならない）。
     **新しいMLE手法の`cost`も補償和で書く**こと。
-- **BFGS**: 組み込みBFGSの初期逆Hessーは単位行列（スケール`O(1)`）固定で、尤度Hessianの
+- **BFGS**: 組み込みBFGSの初期逆Hessianは単位行列（スケール`O(1)`）固定で、尤度Hessianの
   スケール（`O(n)`、観測数`n`個のスコアの和）との乖離が`n`が大きいほど開き、line searchが
   1反復あたり多数の関数評価を消費する（実測: n=1,000,000でnewton 0.65s・組み込みbfgs
   11.21s）。Nocedal & Wright 6.1節のself-scaling初期化・line searchの初期ステップ幅の反復間
@@ -69,10 +69,24 @@ Logit/Probit/Tobit（最尤推定ベースの非線形モデル）が共有す�
   2回目以降は標準の`alpha=1.0`に戻す。secant条件`yᵀs>0`を満たさない場合はrank-2更新を
   スキップする（閾値は絶対値`f64::EPSILON`固定、相対閾値は実測で反復回数・実行時間が
   かえって悪化したため不採用）。
+  **初期逆Hessian**: warm start点（Logit/Probit）で`H`を1回評価し、正定値なら`H⁻¹`を
+  初期逆Hessianにする（このとき1回目のself-scalingは行わず、初期ステップ幅も`1.0`）。
+  上の`min(1,1/‖g₀‖)`は1回目のステップ長を初期点によらず`‖s₀‖=1`にするため、最適点に近い
+  warm startでは過大になり、最初のsecantペアが遠い領域の曲率を拾って反復が増える
+  （実測: Logit n=100,000で8→13反復、line searchの評価回数は変わらない）。`H⁻¹`の初期化で
+  同条件が13→6反復になる。`H`が正定値でない場合（Tobit等、尤度が大域凹でない手法）は
+  `H⁻¹`が降下方向を作らないため、従来の単位行列＋self-scalingに戻す。nullモデルの
+  `w·X'X`で`H`を代用する案は、Hessian評価が不要になる反面、反復数が改善せず不採用。
 - **L-BFGS**: 同じ理由（`s`/`y`履歴・初期`γ`を注入する公開APIが無い）で自前実装
-  （`two_loop_recursion`、Nocedal & Wright Algorithm 7.4）。line search内側`Executor`に
-  明示的な`max_iters`（`LINE_SEARCH_MAX_ITERS=100`）を設定し、到達時は`ComputationFailed`
-  として明示的にエラー化する（`FaerBfgs`には無い追加ガード）。`two_loop_recursion`の
+  （`two_loop_recursion`、Nocedal & Wright Algorithm 7.4）。two-loop recursionの初期行列は、
+  warm start点の厳密Hessianが正定値ならその逆行列`H₀⁻¹`を直近のペアで`sᵀy/(yᵀH₀⁻¹y)`倍に
+  再スケールしたもの、正定値でなければ従来の`γI`（`FaerBfgs::init`と同じ判定）。`γI`は曲率の
+  スケールしか表せず、回帰変数間の相関による悪条件（centeringでは直らない。等相関`ρ=0.9`・`k=20`で
+  条件数約235）で`lbfgs`が44反復かかり既定の`max_iter=35`を超えた（`newton`3・`bfgs`4反復）。
+  `H₀⁻¹`を再スケールせず使うと、warm start点と収束点でHessianが大きく違うデータ
+  （Logit `near_separation`・Tobit `heavy_censoring`）で`γI`より悪化するため再スケールする。line search内側`Executor`に
+  明示的な`max_iters`（`LINE_SEARCH_MAX_ITERS=100`）を設定し、到達時は`MleError::LineSearchFailed`
+  （`code`は`LINE_SEARCH_FAILED`、`ComputationError`）として明示的にエラー化する（`FaerBfgs`には無い追加ガード）。`two_loop_recursion`の
   逆向きループには`yᵀs<=f64::EPSILON`のペアをゼロ除算回避のため無視するガードを持つが、
   secant条件によるhistory admissionガード自体は**不採用**（履歴凍結による収束の悪化を実測で
   確認したため。`MoreThuenteLineSearch`のstrong Wolfe条件により受理されたペアは理論上
@@ -170,10 +184,26 @@ statsmodels（`ConvergenceWarning`を出しつつ結果は必ず返す＝常に�
 
 **スケール依存への対処（標準化）**: 説明変数のスケールが異なると勾配の絶対閾値の妥当性が
 崩れるため、`nonlinear/common.rs`の`standardize_columns`/`destandardize_params`で
-標準化空間で最適化する。**「分散1のみ（スケーリングのみ、平均は引かない）」**
-（`x_std = x/std`）——「平均0・分散1」への標準化は`include_intercept=false`のとき
-逆変換の数式が壊れる（切片が「平均分のズレ」を吸収する前提が成り立たないため）ことが
-判明し不採用にした。標準偏差が0の列（定数列）はスケーリング対象から除外する。
+標準化空間で最適化する。**切片ありのときは「平均0・分散1」（`x_std = (x-x̄)/std`）、
+切片なしのときは「分散1のみ」（`x_std = x/std`）**。切片列と標準偏差が0の列（定数列）は
+無変換。
+
+- **切片ありで平均も引く理由**: 平均を引かないと、平均が標準偏差に比べて大きい列が切片列と
+  ほぼ共線になり、標準化後のHessianが悪条件になる（Wooldridge appleで条件数約7,300、平均を
+  引くと約14）。悪条件のまま`bfgs`/`lbfgs`に渡すと反復数が桁違いに増える（appleの`lbfgs`が
+  Logit 95・Probit 96反復、平均を引くと19・14反復。mrozも93・73反復が22・17反復）。
+  ソルバーごとの補正（初期逆Hessian等）で補うのではなく、パラメータ化の側を直す方針。
+- **切片なしでは平均を引かない理由**: 平均を引く操作は切片が「平均分のズレ」を吸収する前提で
+  成立する再パラメータ化のため、吸収先の切片が無いと逆変換の数式が壊れる。切片なしでは
+  切片列との共線性という上の原因自体が無い。
+- 逆変換: 傾き`θⱼ=θ̃ⱼ/stdⱼ`、切片（切片ありのみ）`θ₀=θ̃₀-Σ_{j≥1}x̄ⱼθⱼ`。共分散は
+  `Σ_orig = J Σ_std Jᵀ`（`J`は`θ_orig=Jθ_std`の線形変換の行列。`diag(1/std)`に、切片の行の
+  傾き成分`-x̄ₘ/stdₘ`が加わる）。OPG・サンドイッチ・クラスターでも、`H⁻¹`と
+  スコア`s_std=Jᵀs_orig`が同じ連鎖律に従うため同じ式で戻せる。
+- 分離検出（1.4節・`separation.rs`）は標準偏差で割るだけの行を使い続ける（切片込みの
+  再パラメータ化は分離の有無を変えず、LPの閾値の較正もその行に対するもの）。
+- Tobitは`x`側をこの`ColumnScale`に委ね、`TobitScaling`が`y`のスケーリングと`logσ`の扱いを
+  加える（`tobit-spec.md`3.2節）。
 
 ### 1.4 設計行列のランクチェック・初期値
 
@@ -196,20 +226,27 @@ Logit/Probit/Tobit共有の1つのエラー型を`engine/src/nonlinear/common.rs
 Tobit固有のバリアント（打ち切り境界の検証等）も同じ`MleError`にバリアントとして追加する
 （型を分けない）。
 
-| バリアント | Python例外 | 由来 |
+| バリアント | `code`（Python例外） | 由来 |
 |---|---|---|
-| `Common(CommonError)` | `ComputationFailed`のみ`ComputationError`、他は`ValidationError` | `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/`MissingClusterColumn`/`InsufficientClusters`/`InsufficientClustersForInference`/`NoRegressors`/`ComputationFailed`。系統横断で重複するバリアントは`CommonError`（`engine::error`）に切り出し、`MleError`は`#[error(transparent)] Common(#[from] CommonError)`で包む |
-| `InvalidMaxIter` / `InvalidTol` | `ValidationError` | `max_iter<=0`等 |
-| `NonConvergence { n_iter }` | `ComputationError` | `raise_on_non_convergence=true`かつ`max_iter`到達 |
-| `SingularDesignMatrix` | `ComputationError` | 最適化前の列ピボットQRランクチェックでのランク落ち（1.4節） |
-| `SingularHessian` | `ComputationError` | 収束点のHessianが特異で観測情報行列の逆行列が計算できない |
-| `SingularOpgMatrix` | `ComputationError` | OPG行列（`Σsᵢsᵢ'`、`cov_type="opg"`）が特異。`SingularHessian`と原因が異なるため別バリアントに分離 |
-| `SeparationSuspected { n_iter }` | `ComputationError` | 完全分離下のアンダーフローによる誤収束判定を検出（Logit/Probitのみ、3.4節） |
-| `EvaluationBudgetExceeded { budget }` | `ComputationError` | line searchの評価回数バジェット超過（1.2節） |
-| `InvalidCensoringBounds` 等（Tobit専用） | `ValidationError` | 下限≧上限等の不正な指定 |
+| `Common(CommonError)` | `CommonError`のバリアントごとの`code`（`ols-spec.md`3.6節の対応表と同じ。`NearSingularMatrix`は`MATRIX_NEAR_SINGULAR`の`ComputationError`、`INSUFFICIENT_OBSERVATIONS`等は`ValidationError`、到達不能な状態は`INTERNAL_ERROR`の`ComputationError`） | 系統横断で重複するバリアントは`CommonError`（`engine::shared::error`）に切り出し、`MleError`は`#[error(transparent)] Common(#[from] CommonError)`で包む |
+| `InvalidMaxIter` | `MAX_ITER_OUT_OF_RANGE`（`ValidationError`） | `max_iter`が範囲外 |
+| `InvalidTol` | `TOLERANCE_NOT_POSITIVE_FINITE`（`ValidationError`） | `tol`が0以下・NaN・無限大 |
+| `NonConvergence { n_iter }` | `NOT_CONVERGED`（`ComputationError`） | `raise_on_non_convergence=true`かつ`max_iter`到達 |
+| `SingularDesignMatrix` | `DESIGN_MATRIX_SINGULAR`（`ComputationError`） | 最適化前の列ピボットQRランクチェックでのランク落ち（1.4節） |
+| `SingularHessian` | `MATRIX_NEAR_SINGULAR`（`matrix=HESSIAN`、`ComputationError`） | 収束点のHessianが特異で観測情報行列の逆行列が計算できない |
+| `SingularOpgMatrix` | `MATRIX_NEAR_SINGULAR`（`matrix=OPG`、`ComputationError`） | OPG行列（`Σsᵢsᵢ'`、`cov_type="opg"`）が特異。`SingularHessian`と原因が異なるため別バリアントに分離 |
+| `SeparationDetected` | `SEPARATION_DETECTED`（`ComputationError`） | 完全分離・準完全分離（有限のMLEが存在しない）を収束後に線形計画で厳密に検出（Logit/Probitのみ。`engine/src/nonlinear/separation.rs`、`logit-spec.md`3.2節） |
+| `SeparationCheckFailed { detail }` | `SEPARATION_CHECK_FAILED`（`ComputationError`） | 分離が無いことを線形計画が数値的に完了せず確認できなかった（`raise_on_non_convergence=true`のとき） |
+| `EvaluationBudgetExceeded { budget }`・`LineSearchFailed { max_iters }` | `LINE_SEARCH_FAILED`（`ComputationError`） | line searchの評価回数バジェット超過（1.2節）・line searchの反復上限到達（`lbfgs`） |
+| `UncensoredIntervalTooNarrow { lower, upper, sigma }`（Tobit専用） | `UNCENSORED_INTERVAL_TOO_NARROW`（`ComputationError`） | `expected_uncensored`の非打ち切り区間が`σ̂`の1%未満（`tobit-spec.md`3.5節） |
+| `CensoringBoundsMissing`・`CensoringBoundsNotOrdered`・`CensoringBoundNotFinite`（Tobit専用） | `CENSORING_BOUNDS_MISSING`・`CENSORING_BOUNDS_NOT_ORDERED`・`CENSORING_BOUND_NOT_FINITE`（`ValidationError`） | 境界が両方`None`・下限≧上限・NaN/無限大 |
+| `InvalidBinaryY { row, value }`（Logit/Probit専用） | `OUTCOME_NOT_BINARY`（`ValidationError`） | `y`が`{0.0, 1.0}`以外 |
+| `YOutOfCensoringBounds { row, value, lower, upper }`（Tobit専用） | `OUTCOME_OUTSIDE_CENSORING_BOUNDS`（`ValidationError`） | `y`が打ち切り境界の外 |
+| `NoUncensoredObservations { lower, upper }`（Tobit専用） | `NO_UNCENSORED_OBSERVATIONS`（`ValidationError`） | 境界の内側に観測が1件も無い |
 
-`Common`以外の各バリアントは`engine_pybind`側で`MleError` → `PyErr`変換
-（`mle_error_to_pyerr`、`common_error_to_pyerr`に委譲）を行う。
+各バリアントは`ErrorInfo::report()`で`code`・`params`に変換され、`engine_pybind`側の
+`mle_error_to_pyerr`（`to_pyerr`を呼ぶだけの1行）が`ValidationError`/`ComputationError`にする。
+`code`ごとの文面・`params`は`docs/guide/error-codes.md`（カタログから生成）を参照。
 
 ## 3. `cov_type`共通行列演算
 
@@ -223,7 +260,7 @@ Hessianとする。いずれも標準化空間で`Σ_std`を計算した後、`d
 | `opg` | outer product of gradients `Σ = (Σᵢ sᵢsᵢ')⁻¹`（BHHH） |
 | `hc0` | サンドイッチ型 `Σ = H⁻¹(Σᵢ sᵢsᵢ')H⁻¹`（misspecification-robust） |
 | `hc1` | `hc0`に小標本補正`n/(n-k)`を乗じる |
-| `cluster` | `Σ = correction・H⁻¹(Σ_g S_gS_g')H⁻¹`、`S_g = Σ_{i∈g} sᵢ`（OLSの`cluster_cov_params`と同型） |
+| `cluster` | `Σ = correction・H⁻¹(Σ_g S_gS_g')H⁻¹`、`S_g = Σ_{i∈g} sᵢ`（OLSの`shared::covariance::cluster_cov_params`と`cluster_meat`・`cluster_correction`・`sandwich`を共有） |
 
 - HC2/HC3は対象外（レバレッジ・hat行列に依存した補正で線形回帰特有の概念のため）。HACも
   対象外（時系列拡張として保留）。
@@ -244,13 +281,13 @@ Hessianとする。いずれも標準化空間で`Σ_std`を計算した後、`d
   識別失敗の隠蔽になるため`fit()`冒頭で弾く（OLS/WLS/Tobit/IVと横断統一）。少数クラスタ
   一般の漸近的信頼性（`G=5, q=2`等、計算は通るケース）は別軸で弾かない。
 - **クラスターキー未指定・クラスター数不足の検証はこの共通関数のスコープ外**（呼び出し側の
-  責務、OLSの`validate_cluster_groups`を共有し`engine::validation::validate_cluster_groups`
+  責務、OLSの`validate_cluster_groups`を共有し`engine::shared::validation::validate_cluster_groups`
   に集約済み）。反復最適化の無駄を避けるため、この検証は全手法`fit()`冒頭・最適化実行前に
   行う（OLS/WLSも閉形式解だが位置を統一）。
 - **特異性検出は固有値分解ベースの相対閾値判定を経由する**: 非ピボットCholesky分解の失敗
   だけでは構造的な特異性・悪条件を確実には検出できない（`solver=Bfgs`/`Lbfgs`は
   `newton_step`のピボット付きQRを経由しないため顕在化した）。`ensure_well_conditioned_
-  symmetric_matrix`（`engine/src/linear_algebra.rs`、`SelfAdjointEigen`ベース、OLSの
+  symmetric_matrix`（`engine/src/shared/linear_algebra.rs`、`SelfAdjointEigen`ベース、OLSの
   `wald_f_test`用実装を系統横断で共有）をCholesky分解の前に呼び、エラー時は
   `SingularHessian`/`SingularOpgMatrix`にマップする。
 
@@ -292,10 +329,11 @@ MLEベースの非線形モデルは漸近理論が正規分布に基づいて�
 
 - `marginal_effects(at="overall" | "mean" | "median", ...)`: 限界効果。既定は`at="overall"`
   （AME、average marginal effects）。標準誤差はデルタ法で計算し、`fit()`時の`cov_params`を
-  再利用する（再最適化不要）。Return形式は`coef_table`と同じ行指向
-  （`effect`/`std_err`/`test_stat`/`p_value`/`conf_lower`/`conf_upper`。`effect`以外は`coef_table`と同名）。「見る/見ない」を切り替える
+  再利用する（再最適化不要）。Return形式は`params_table`と同じ行指向
+  （`param_name`/`effect`/`std_error`/`test_stat`/`p_value`/`conf_lower`/`conf_upper`。`effect`は
+  `params_table`の値の列`param`に当たる限界効果の列で、`effect`以外のキーは`params_table`と同名）。「見る/見ない」を切り替える
   フラグは設けない（可変なのは`at`のみ）。
-- `predict()`: 予測確率（Logit/Probit）。
+- `predict()`: 予測確率（Logit/Probit）。観測順の`list[float]`。
 - `pred_table()`: 分類の的中表（閾値依存のため、コアのReturnには含めない。Logit/Probit
   のみ）。
 
@@ -316,8 +354,9 @@ MLEベースの非線形モデルは漸近理論が正規分布に基づいて�
   ベクトル（外部から任意の評価点を指定するオプションは見送り）。
 - **Tobitは`predict()`/`marginal_effects()`/`pred_table()`のいずれも独自の形になる**
   （詳細は[`tobit-spec.md`](./tobit-spec.md)3.5〜3.6節）: `predict(target)`/
-  `marginal_effects(target)`は`E[y*|x]=x'β`・`E[y|x]`（既定）・`P(uncensored|x)`の3対象を
-  取る（McDonald-Moffitt 1980）。3対象とも`dydx_j = w(θ)·βⱼ`に帰着するが`w`の式が対象
+  `marginal_effects(target)`は`E[y*|x]=x'β`・`E[y|x]`（既定）・`P(uncensored|x)`・
+  `E[y|lower<y<upper,x]`（非打ち切り領域での条件付き期待値）の4対象を
+  取る（McDonald-Moffitt 1980）。4対象とも`dydx_j = w(θ)·βⱼ`に帰着するが`w`の式が対象
   ごとに異なるためLogit/Probitの`dydx_and_jacobian`とは共有せず独立実装する。`pred_table()`
   は廃止し`censoring_fit_check()`（方向別の観測打ち切り率 vs モデル含意率）に置き換える。
 
@@ -326,7 +365,7 @@ MLEベースの非線形モデルは漸近理論が正規分布に基づいて�
 | モデル | オプション | 状態 |
 |---|---|---|
 | Logit / Probit | `start_params: Option<Vec<f64>>`（ユーザー指定初期値） | 未実装（見送り）。`None`時の内部初期値は1.4節のwarm start |
-| Tobit | 打ち切り方向（左/右/両側）・下限/上限値 | 確定（`TobitOptions.lower: Option<f64>`既定`Some(0.0)`・`upper: Option<f64>`既定`None`。両方`None`・`lower>=upper`は`InvalidCensoringBounds`、`y`が境界と矛盾する場合は`YOutOfCensoringBounds`） |
+| Tobit | 打ち切り方向（左/右/両側）・下限/上限値 | 確定（`TobitOptions.lower: Option<f64>`既定`Some(0.0)`・`upper: Option<f64>`既定`None`。両方`None`は`CensoringBoundsMissing`、`lower>=upper`は`CensoringBoundsNotOrdered`、NaN・無限大は`CensoringBoundNotFinite`、`y`が境界と矛盾する場合は`YOutOfCensoringBounds`） |
 | Tobit | `dist`（誤差分布） | Gaussian固定。他分布はv1では対象外 |
 | 多項ロジット | 参照カテゴリ（`base_category`等） | 着手時に決定 |
 | 順序ロジット/プロビット | 閾値パラメータ数 | オプション化しない。yのカテゴリ数（K個）から`K-1`個を自動導出する |

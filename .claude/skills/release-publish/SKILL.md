@@ -2,7 +2,7 @@
 name: release-publish
 description: バージョンバンプ済みのコミットを、devへのPR〜mainへの反映〜タグ付け〜PyPI公開確認まで進める（side-effectがあるため明示的な呼び出しのみ）
 argument-hint: "対象バージョン番号（例: 0.2.0）"
-allowed-tools: Read, Bash(git:*), Bash(gh:*), Monitor, AskUserQuestion
+allowed-tools: Read, Bash(git status:*), Bash(git log:*), Bash(git diff:*), Bash(git show:*), Bash(git rev-parse:*), Bash(git fetch:*), Bash(git branch --show-current:*), Bash(git tag -a:*), Bash(git tag -l:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr checks:*), Bash(gh run list:*), Bash(gh run view:*), Bash(gh run watch:*), Bash(gh workflow run cd_release.yml:*), Bash(gh release view:*), Monitor, AskUserQuestion
 disable-model-invocation: true
 ---
 
@@ -52,4 +52,5 @@ disable-model-invocation: true
 
 - 各ステップの「ユーザーに依頼し、待つ」は省略しない。マージ・タグpush・PyPI公開承認はいずれもユーザー自身の操作／確認を経てから次に進む。
 - タグpush・PyPI公開は実世界への副作用を伴う操作のため、手順3（事前ビルド確認）を省略しない。
+- `git push`（ブランチ・タグ）と`gh pr merge`は`allowed-tools`に入れていない。実行するたびに権限確認が出る（タグpushは手順10の確認に加えて二重になるが、実世界への副作用が大きいため意図的）。force pushと`--delete`は`.claude/settings.json`でdenyしている。
 - 想定外のCI失敗・承認待ち以外の異常（ジョブ失敗等）が起きた場合は、その場で報告し次のステップに進む前にユーザーに確認する。

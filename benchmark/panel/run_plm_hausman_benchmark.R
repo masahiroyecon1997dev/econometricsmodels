@@ -4,9 +4,14 @@
 # `plm::phtest(method = "aux", effect = "individual", vcov = ...)`を、本実装の
 # `ReOptions.cov_type`（RE本体の`cov_type`に連動、`re-spec.md`3.7節）ごとに計算する。
 # linearmodelsにハウスマン検定の専用実装は無いため、plmが唯一の参照実装
-# （panel-common.md 5.3節）。
+# （panel-common.md 5.3節）。バランスパネルではplm自身の分散成分が本実装と一致するが、
+# 不均衡パネルでは統計量が1〜2%ずれるため、不均衡パネルの参照値には使わず、分散成分を
+# 与えて補助回帰を組み立てる`references/run_plm_re_given_variance_hausman_benchmark.R`
+# を使う。
 #
 # ## cov_typeとplmのvcovの対応（数値照合で確定済み）
+#
+# 実装は`_plm_common.R`の`plm_vcov_function`（classicalだけ`phtest`にvcovを渡さない）。
 #
 # - classical: vcovなし（補助回帰のclassical Wald）
 # - hc1/hc2/hc3: `vcovHC(method = "white1", type = "HC1"/"HC2"/"HC3")`
@@ -22,6 +27,11 @@
 # 使用例:
 #   Rscript run_plm_hausman_benchmark.R data.csv "y ~ x1 + x2" hc1 entity time
 #   Rscript run_plm_hausman_benchmark.R data.csv "y ~ x1 + x2" dk entity time 2
+
+# cov_type別のvcovは`_plm_common.R`を使う（Rには__file__相当が無いため、
+# commandArgs()の--file=から自身のディレクトリを特定してsource()する）。
+script_path <- sub("^--file=", "", grep("^--file=", commandArgs(), value = TRUE))
+source(file.path(dirname(script_path), "_plm_common.R"))
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 5) {
@@ -42,22 +52,9 @@ df <- read.csv(data_path, check.names = FALSE)
 suppressMessages(library(plm))
 pdf <- pdata.frame(df, index = c(entity_col, time_col))
 
-if (cov_type == "classical") {
-  vc <- NULL
-} else if (cov_type %in% c("hc1", "hc2", "hc3")) {
-  hc_type <- toupper(cov_type)
-  vc <- function(x) vcovHC(x, method = "white1", type = hc_type)
-} else if (cov_type == "cluster") {
-  vc <- function(x) vcovHC(x, method = "arellano", type = "sss")
-} else if (cov_type == "dk") {
-  if (length(args) < 6) {
-    stop("dk requires maxlag as the 6th argument")
-  }
-  maxlag <- as.integer(args[6])
-  vc <- function(x) vcovSCC(x, maxlag = maxlag, type = "sss")
-} else {
-  stop(paste("unknown cov_type:", cov_type))
-}
+maxlag <- if (length(args) >= 6) as.integer(args[6]) else NA
+# classicalはvcovを渡さない（補助回帰のclassical Wald）。
+vc <- if (cov_type == "classical") NULL else plm_vcov_function(cov_type, maxlag)
 
 if (is.null(vc)) {
   ph <- phtest(

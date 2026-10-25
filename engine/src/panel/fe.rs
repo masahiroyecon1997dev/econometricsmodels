@@ -48,7 +48,7 @@
 //! 観測数1のグループ（singleton）を明示的に検出し`PanelError::SingletonGroup`を返す
 //! （`fe-spec.md`1章）。自動除外はしない。**下流の特異行列エラーとして偶発的に検出される形には
 //! しない**——singletonのエンティティ/時点はwithin変換後にその行が全列ゼロになり
-//! `OlsEstimator::fit`側で特異行列として（間接的に、かつ原因の分かりにくいエラー
+//! 最小二乗側で特異行列として（間接的に、かつ原因の分かりにくいエラー
 //! メッセージで）検出されうるが、`fe-spec.md`1章はこれを避け、within変換の**前**に生の
 //! `entity`/`time`列から直接カウントして専用のバリデーションエラーにすることを要求する。
 //! - **1-way**: entityのみ検出（`validate_no_singleton_groups_one_way`）。
@@ -57,28 +57,30 @@
 //! - 複数のsingletonグループが存在する場合は、観測順で最初に現れるグループのみを
 //!   報告する（`validate_no_zero_variance_regressors`の「最初の1件を報告」方針と統一）。
 //!
-//! ## `OlsEstimator`への委譲（`FeEstimator`、4.3節）
+//! ## within変換後の最小二乗（`FeEstimator`、4.3節）
 //!
-//! FEは**まず`OlsEstimator`への委譲を試す**（within変換したデータを`OlsEstimator::fit`に
-//! 渡す、`WlsEstimator`と同型のパターン。`docs/spec/panel-common.md`4.3節）。
-//! `FeEstimator::fit`は「singleton検出→within変換（2-wayはバランスパネル検証も内包）→
-//! 分散ゼロ検出→`OlsEstimator::fit`」の順にパイプラインを実行する。
+//! FEはwithin変換したデータに最小二乗をあてはめる（Frisch-Waugh-Lovell定理により、
+//! within変換後の最小二乗点推定はFE推定量`β̂`と数学的に一致する。`docs/spec/panel-common.md`
+//! 4.3節）。`FeEstimator::fit`は「singleton検出→within変換（2-wayはバランスパネル検証も内包）→
+//! 自由度検証→分散ゼロ検出→`confidence_level`検証→`shared::least_squares::least_squares`→
+//! `cov_type`別の共分散計算→自由度調整後の統計量の再計算」の順にパイプラインを実行する。
 //!
-//! **`FeEstimator::fit`はwithin推定量`β̂`の委譲に加えて、自由度調整（`fe-spec.md`3.2節）・
-//! `cov_type`対応（3.1節・3.2節）・パネル固有R²（2.3節）まで
-//! 実装している**。within変換後のOLS推定量`β̂`はwithin推定量として数学的に正しい値になる
-//! （自由度・`cov_type`に依存しない）ため、委譲だけで正しく求まる（4.3節。WLSがR²等を
-//! 素のOLS計算のままでは使わなかったのと同じ教訓が、以下の再計算箇所に表れている）。
+//! 当初は`OlsEstimator::fit`（`CovType::Classical`固定）に委譲していたが、FEが使うのは
+//! `β̂`・残差・`(X̃'X̃)⁻¹`・適合度だけで、標準誤差・F検定は`cov_type`ごとにFE自身が計算し直す
+//! （`OlsEstimator`の推論結果は使わない）ため、最小二乗の部品を直接呼ぶ形に置き換えた。
+//! `x=[]`（固定効果のみのモデル）だとwithin変換後の設計行列も0列（`k=0`）になるが、
+//! `least_squares`は0列も受理する。
 //!
-//! `FeEstimator::fit`は`OlsInput::from_columns`を`include_intercept=false`で呼ぶ
-//! （within変換で全体平均も含めて差し引かれているため、変換後データに切片は不要——
-//! `OlsEstimator::fit`が変換後の残差平均をゼロと仮定する通常のOLSと同じ考え方）。
-//! `OlsEstimator::fit`自体は常に`CovType::Classical`で呼ぶ（`β̂`・残差の取得のみが目的で、
-//! `cov_type`ごとの標準誤差は`FeEstimator`が独自に計算し直すため、委譲先のcov_type選択は
-//! 結果に影響しない。詳細は「cov_type対応」節参照）。
+//! `FeEstimator::fit`は`OlsInput::from_columns`を`include_intercept=false`で作る
+//! （within変換で全体平均も含めて差し引かれているため、変換後データに切片は不要）。
+//! within R²・対数尤度は`shared::goodness_of_fit::gaussian_goodness_of_fit`
+//! （`has_intercept=false`、非中心化TSS）で求める。
 //!
-//! `OlsInput::from_columns`/`OlsEstimator::fit`が返す`LeastSquaresError`は
-//! `PanelError::WithinRegressionFailed { source }`に包む（`common.rs`のdocコメント参照）。
+//! `confidence_level`が`(0, 1)`の範囲外、および設計行列の特異性（`least_squares`の
+//! `RankDeficient`）は`PanelError::WithinRegressionFailed { source }`（`LeastSquaresError`の
+//! `InvalidConfidenceLevel`・`SingularMatrix`）に包む（`common.rs`のdocコメント参照）。
+//! 観測数不足（`n <= df_model`）は先に`InsufficientDegreesOfFreedom`で弾くため、最小二乗側の
+//! `n <= k`検査には到達しない。
 //!
 //! `FeEffects`（`OneWay`/`TwoWay`）で1-way/2-wayを切り替える。将来`FEOptions`
 //! が導入されたら、その一部（またはそのままのフィールド型）として
@@ -92,15 +94,15 @@
 //! 補正する、`fe-spec.md`3.2節）。`df_resid = n - df_model`。`n <= df_model`なら
 //! `PanelError::InsufficientDegreesOfFreedom`。
 //!
-//! **`OlsEstimator`自身のt検定・調整済みR²・AIC/BICは`df_resid_ols = n - k`（`k`のみ、
-//! `neffects`を知らない）を前提に計算されているため誤り**（WLSの教訓と同型）。
-//! `FeEstimator::fit`は以下を委譲後に再計算し、上書きする:
+//! **素の最小二乗（`OlsEstimator`）のt検定・調整済みR²・AIC/BICは`df_resid_ols = n - k`
+//! （`k`のみ、`neffects`を知らない）を前提にしているためFEには使えない**（WLSの教訓と同型）。
+//! `FeEstimator::fit`は`OlsEstimator`を経由せず、以下をFE自身で計算する:
 //! - **標準誤差・t値・p値・信頼区間**: `cov_type`ごとに`FeEstimator`自身が独自に
 //!   計算し直す（下記「cov_type対応」節参照）。t値・p値・信頼区間の計算自体は
-//!   t分布（自由度は`cov_type`によらず常に`df_resid`、3.3節）で`crate::inference`の
+//!   t分布（自由度は`cov_type`によらず常に`df_resid`、3.3節）で`crate::shared::inference`の
 //!   共有ヘルパーを使う（OLS自身と同じロジック）。
 //! - **AIC/BIC**: `log_likelihood`自体は`SSR/n`のみに依存し`df_resid`非依存の式
-//!   （`OlsEstimator::log_likelihood()`のformulaと同一）のためそのまま再利用できるが、
+//!   （`gaussian_goodness_of_fit`の`log_likelihood`）のためそのまま再利用できるが、
 //!   ペナルティ項の乗数は`k`ではなく`df_model`（固定効果の実効パラメータ数を含む）を使う:
 //!   `aic = -2*log_likelihood + 2*df_model`、`bic = -2*log_likelihood + ln(n)*df_model`。
 //! - **F統計量**（`f_statistic`/`f_p_value`）: 当初は検定統計量（t検定）に限定してスコープ
@@ -108,10 +110,9 @@
 //!   （`panel-common.md`2.1節がOLS同様
 //!   `f_statistic`/`f_p_value`を含める前提だった）の実装時に、engine側に対応する
 //!   panel自由度調整版が存在しないことが判明し、ユーザー確認の上で本節に前倒しで
-//!   実装した。**`OlsEstimator`自身の`estimator().f_statistic()`/`f_p_value()`は
-//!   引き続き`df_resid_ols = n - k`・`CovType::Classical`ベースのままで誤り**
-//!   （`FeEstimator`自身の`f_statistic()`/`f_p_value()`を使うこと、`estimator()`の
-//!   docコメント参照）。
+//!   実装した。`FeEstimator`は`OlsEstimator`を保持しないため、F統計量は
+//!   `FeEstimator`自身の`f_statistic()`/`f_p_value()`だけ（`df_resid_ols = n - k`・
+//!   `CovType::Classical`ベースの値は存在しない）。
 //!   - **定義**: 「切片を除く全傾き係数が同時にゼロ」というOLSの`f_statistic`と同じ
 //!     帰無仮説を、FEの傾き係数`k`個（FEは`within`変換で切片が消えているため
 //!     `k_constant=0`、`OlsInput::from_columns`を`include_intercept=false`で呼ぶのと
@@ -121,19 +122,22 @@
 //!     モデル全体のF検定であり定義が異なるため、クロスチェックには使わない——後述
 //!     「検証」参照）。
 //!   - **実装**: `cov_type`別に計算し直した`cov_params`（`std_errors`等と同じ、この節の
-//!     直前で計算済み）と`estimator.params()`を使い、`crate::linear::ols::wald_f_test`
-//!     （OLS本体の`fit()`・`wald_test_last_columns`が使う既存のWald F検定を`pub(crate)`化
-//!     して再利用、サンドイッチ計算を複製しない。`.claude/rules/rust-style.md`
+//!     直前で計算済み）と`params()`（`β̂`）を使い、`crate::shared::wald::wald_f_test`
+//!     （OLS本体の`fit()`・`wald_test_last_columns`・REと共有するWald F検定を再利用、
+//!     サンドイッチ計算を複製しない。`.claude/rules/rust-style.md`
 //!     「全手法で共有するロジック」・`engine/src/linear/CLAUDE.md`の`wald_test_last_columns`
 //!     再利用方針と同じ判断）で`(k_constant=0, df_model=k, df_inference)`を渡す。
 //!     分母自由度`df_inference`は`cov_type=Cluster`のとき`G-1`、`Dk`のとき
 //!     `t_periods-1`、それ以外は`df_resid`（**OLS自身のCluster特有の
 //!     `n_groups-1`切替と同じパターンに揃えた**、上記「`cov_type`対応」節参照）。
 //!     `k=0`（説明変数無し）はOLSと同じくNaNを返す。
-//!   - **エラー**: `wald_f_test`の失敗（共分散部分行列が数値的にほぼ特異）は
-//!     `PanelError::FTestFailed { source }`として伝播する（`WithinRegressionFailed`とは
-//!     意味が異なる——`OlsEstimator::fit`自体は既に成功した後の、F検定固有の計算失敗
-//!     のため別バリアントにする、`common.rs`のdocコメント参照）。rankの上界から入力だけで
+//!   - **エラー**: `wald_f_test`の失敗（共分散部分行列が数値的にほぼ特異。`CommonError`を
+//!     `LeastSquaresError`に包む）は`PanelError::FTestFailed { source }`として伝播する
+//!     （`WithinRegressionFailed`とは意味が異なる——最小二乗自体は既に成功した後の、
+//!     F検定固有の計算失敗のため別バリアントにする、`common.rs`のdocコメント参照）。
+//!     以前は委譲先の`OlsEstimator::fit`が（`Classical`で）同種のF検定を内部で無条件に
+//!     計算していたため、完全適合・極端なスケール差の入力は`WithinRegressionFailed`として
+//!     先に失敗していたが、現在はFE自身のF検定の失敗として`FTestFailed`になる。rankの上界から入力だけで
 //!     構造的な特異性が判定できる入力（Clusterの`G <= k`、Dkの`t_periods <= k`）は
 //!     共分散計算の前に`InsufficientClustersForInference`/
 //!     `PanelError::InsufficientDkPeriodsForInference`で弾く。2グループ（Clusterの`G=2`・
@@ -145,7 +149,7 @@
 //!   - **検証**: 主リファレンス`linearmodels`の`PanelOLS.fit().f_statistic`
 //!     （`cov_type="unadjusted"`）と数値比較する。`k=1`（`fixest_reference_input`を使う
 //!     既存テスト）では「1自由度のF検定は両側t検定と代数的に等価」
-//!     （`OlsEstimator`の同名の性質、`ols.rs`の
+//!     （`OlsEstimator`の同名の性質、`ols/estimator.rs`の
 //!     `wald_test_last_columns_matches_squared_t_statistic_for_single_column`参照）が
 //!     成り立つため、既に検証済みの`test_stats`/`p_values`から`f_statistic = test_stat²`・
 //!     `f_p_value = p_value`という追加の恒等式チェックで足りる。`k=2`の真の同時検定
@@ -168,14 +172,13 @@
 //!
 //! **2.3節の「OLSの`r_squared`をそのまま流用しない」の解釈**: この一文は「単一の曖昧な
 //! フィールドを残さず明示的な3フィールドのみにする」というフィールド構成についての
-//! 要求であり、`r_squared_within`の**値**として`OlsEstimator::r_squared()`をそのまま
+//! 要求であり、`r_squared_within`の**値**として最小二乗の`R²`（切片なし、非中心化TSS）をそのまま
 //! 採用すること自体は妨げない（後述の通りこの値は数学的に「within R²」の定義そのもの
 //! と一致するため、独立に再計算する意味が無い）。
 //!
 //! - **`r_squared_within`は「実際に使ったFE構造でdemeanした残差」を採用**（1-wayは
-//!   entityのみ、2-wayはentity+timeの両方）——`estimator().r_squared()`をそのまま使う
-//!   （`OlsInput::from_columns`が`include_intercept=false`で呼ばれるため`OlsEstimator`
-//!   自身が非中心化TSSを使う分岐を通り、within変換後の`y`の平均が厳密にゼロになる性質
+//!   entityのみ、2-wayはentity+timeの両方）——`gaussian_goodness_of_fit(.., has_intercept=false).r_squared`で求める
+//!   （切片なしのため非中心化TSSを使う分岐を通り、within変換後の`y`の平均が厳密にゼロになる性質
 //!   （`Σ_i(y_i - ȳ_{e(i)}.) = 0`が任意の不均衡パネルで成り立つ）と合わせて、この値が
 //!   まさに「within R²」の定義と一致する）。**`linearmodels`自身の`rsquared_within`は
 //!   常にentityのみのdemeanで固定**（2-wayモデルでも時間効果を含めない）という別定義
@@ -189,7 +192,7 @@
 //!   `has_constant=False`分岐（非中心化TSS、切片による中心化を行わない）が常に適用される:
 //!   - `r_squared_overall`: 固定効果の切片項を一切含めない——**元の`y`・`x`に、推定した
 //!     傾き係数`β̂`だけを当てはめた残差**で計算する（`SSR = Σ_i(y_i - x_i'β̂)²`、
-//!     `TSS = Σ_i y_i²`）。within推定の残差（`estimator().residuals()`、FWL定理により
+//!     `TSS = Σ_i y_i²`）。within推定の残差（`FeEstimator::residuals()`、FWL定理により
 //!     固定効果込みの残差と一致）とは別物であることに注意（固定効果の説明力を無視した、
 //!     意図的に「弱い」R²）。
 //!   - `r_squared_between`: エンティティ平均`ȳ_i.`・`x̄_i.`に同じ`β̂`を当てはめた残差
@@ -207,9 +210,9 @@
 //!
 //! ## `cov_type`対応（`FeCovType`、3.1節・3.2節）
 //!
-//! **`OlsEstimator`の既存cov_type計算（`classical_cov_params`/`hc_cov_params`/
-//! `cluster_cov_params`）はそのまま流用できない**。`engine::linear::ols`の関数は`private`で
-//! 呼び出せないという理由だけでなく、以下の3点でFEに必要な計算式そのものが異なるため
+//! **`shared::covariance`の既存cov_type計算（`classical_cov_params`/`hc_cov_params`/
+//! `cluster_cov_params`）はそのまま流用できない**。以下の3点でFEに必要な計算式そのものが
+//! 異なるため
 //! （linearmodels・fixestのソースコード確認・実地数値検証済み、ユーザー承認済み、
 //! 2026-09-12）:
 //!
@@ -231,7 +234,9 @@
 //!      entity効果とtime効果の重複分`-1/n`を補正）で計算できる
 //!      （`leverage_full`関数doc参照。fixestの`vcov="HC2"`/`"HC3"`と数値一致を
 //!      1-way・2-way双方で確認済み）。
-//! 3. **Clusterも独自に計算し直す**（`OlsEstimator`の`cluster_cov_params`は使わない）:
+//! 3. **Clusterも独自に計算し直す**（`shared::covariance::cluster_cov_params`は使わない。
+//!    ただし蓄積`Σ_g S_g S_g'`は`cluster_meat`、補正式は`cluster_correction`を共有し、
+//!    FE固有なのは補正の`K`だけ）:
 //!    **【linearmodels方式からfixest方式へ変更】** 当初はlinearmodels
 //!    （旧FE主リファレンス）に合わせ`(G/(G-1))`補正を掛けず`n/(n-extra_df-k)`のみを
 //!    使っていたが、fixest（R）・Stata（`xtreg`/`reghdfe`）の利用者が期待する値と
@@ -260,7 +265,7 @@
 //! **t値・p値・信頼区間・F検定の自由度（`df_inference`）は`cov_type=Cluster`のとき
 //! `G-1`、`Dk`のとき`t_periods-1`に切り替える**（fixestの`ssc()`既定`t.df="min"`、
 //! 。OLS自身が`cov_type=Cluster`のときだけ`n_groups-1`に切り替える
-//! （`ols.rs`の`df_inference`）のと同じパターンをClassical/HC1-3以外の全cov_typeに
+//! （`ols/estimator.rs`の`df_inference`）のと同じパターンをClassical/HC1-3以外の全cov_typeに
 //! 広げたもの）。`df_resid`自体（σ̂²・調整済みR²・AIC/BIC）は`cov_type`によらず
 //! 常に元のパネル自由度調整済みの値のまま。
 //!
@@ -316,18 +321,18 @@
 //!   として常に明示的に受け取る（必須。1-way/2-wayのどちらでも同じ）。
 //! - `Cluster`と異なり`fe_cluster_k_correction`のネスト判定は行わない——DKは常に
 //!   `K = df_model`（上記スケールの導出参照）。
-//! - **`FeCovType::Dk.time`は必須で、`FeInput.time()`にはフォールバックしない**: 当初は
-//!   `Option<TimeKeys>`で、`None`なら2-way FEの`FeInput.time()`を暗黙に借用していたが、
+//! - **`FeCovType::Dk.time`は必須で、`FeInput.time_keys()`にはフォールバックしない**: 当初は
+//!   `Option<TimeKeys>`で、`None`なら2-way FEの`FeInput.time_keys()`を暗黙に借用していたが、
 //!   どの列がDKの時点かを呼び出し側が明示しない設計は、意図と違う列が選ばれても気づけない
 //!   ため廃止した（`engine_pybind`の`FEOptions.dk_time`が`cov_type="dk"`で必須）。
-//!   `FeInput.time()`は2-way FEの固定効果の時間次元専用で、DK HACの時系列順序とは独立
+//!   `FeInput.time_keys()`は2-way FEの固定効果の時間次元専用で、DK HACの時系列順序とは独立
 //!   （2-wayで`time`と別の時間粒度のDKを使うこともできる）。
 //!
 //! ## 固定効果自体（α_i）の復元（`fixed_effects()`、`fe-spec.md`3.5節）
 //!
 //! `fe-spec.md`3.5節どおり別メソッド（`fit()`の戻り値本体には含めない、IVの`first_stage()`と同じ
 //! 「追加結果は別メソッド」方針）。`FeEstimator`は`fit()`時点で`input`（変換前の元の
-//! `y`/`x`/`entity`/`time`）と`estimator().params()`（β̂）を既に保持しているため、
+//! `y`/`x`/`entity`/`time`）と`params()`（β̂）を既に保持しているため、
 //! `fixed_effects()`は追加のフィールドを持たず呼び出し時に計算し直す（IVの`first_stage`
 //! と異なり、固定効果自体の値は主推定`β̂`の計算に必要ないため、常に計算しておく理由が無い）。
 //!
@@ -376,18 +381,26 @@ use std::collections::BTreeMap;
 use faer::Mat;
 use statrs::distribution::StudentsT;
 
-use crate::error::CommonError;
-use crate::inference;
-use crate::linear::ols::{CovType, OlsEstimator, OlsInput, wald_f_test};
+use crate::linear::common::LeastSquaresError;
+use crate::linear::ols::OlsInput;
 use crate::panel::common::{
-    GroupCodes, PanelDimension, PanelError, PanelHcVariant, TimeKeys, design_matrix_from_columns,
-    leverage_within, panel_classical_cov_params, panel_cluster_cov_params,
-    panel_driscoll_kraay_cov_params, panel_hc_cov_params, quasi_demean_column,
-    resolve_dk_bandwidth, validate_cluster_group_codes,
-    validate_dk_periods_cover_tested_coefficients, xtx_inverse,
+    PanelDimension, PanelError, PanelHcVariant, TimeKeys, panel_classical_cov_params,
+    panel_cluster_cov_params, panel_driscoll_kraay_cov_params, panel_hc_cov_params,
+    quasi_demean_column, resolve_dk_bandwidth, validate_dk_periods_cover_tested_coefficients,
+    validate_panel_input,
 };
-use crate::panel::re::ReInput;
-use crate::validation::validate_cluster_count_covers_slopes;
+use crate::panel::re::{ReEffects, ReInput};
+use crate::shared::covariance::leverages;
+use crate::shared::error::{ClusterSetting, CommonError};
+use crate::shared::error_catalog::Stage;
+use crate::shared::goodness_of_fit::{gaussian_goodness_of_fit, is_perfect_fit};
+use crate::shared::group_codes::GroupCodes;
+use crate::shared::inference;
+use crate::shared::least_squares::{LeastSquaresFit, least_squares};
+use crate::shared::validation::{
+    column_is_zero_variance, validate_cluster_count_covers_slopes, validate_cluster_groups,
+};
+use crate::shared::wald::wald_f_test;
 
 /// FEの被説明変数・説明変数・パネル識別子を保持する入力データ。
 ///
@@ -402,60 +415,14 @@ pub struct FeInput {
     x: Vec<Vec<f64>>,
     /// 説明変数名。`x`の列と対応する。
     x_names: Vec<String>,
-    /// 各行のエンティティID（長さ`n`）。
-    entity: Vec<String>,
-    /// 各行の時点ラベルと、その時間順のコード（長さ`n`）。2-way FE（entity + time FE）を
+    /// 各行の時点コード（時間順、長さ`n`）。2-way FE（entity + time FE）を
     /// 指定しない場合は`None`（`panel-common.md`1.1節: `time`は`FEOptions`内の条件付き
     /// 必須オプション）。
     time: Option<TimeKeys>,
     /// 被説明変数名。
     dep_var_name: String,
-    /// `entity`の整数コード（構築時に一度だけ作る、`GroupCodes`のdocコメント参照）。
+    /// `entity`の整数コード（キー付き。構築時に一度だけ作る、`GroupCodes`のdocコメント参照）。
     entity_codes: GroupCodes,
-}
-
-/// `FeInput::from_columns`の次元検証（エラー条件は`from_columns`のdocコメント参照）。
-fn validate_input_dimensions(
-    y: &[f64],
-    x_columns: &[Vec<f64>],
-    x_names: &[String],
-    entity: &[String],
-    time: Option<&[String]>,
-) -> Result<(), PanelError> {
-    debug_assert_eq!(
-        x_columns.len(),
-        x_names.len(),
-        "x_columns and x_names must have the same length"
-    );
-
-    for col in x_columns {
-        if col.len() != y.len() {
-            return Err(CommonError::DimensionMismatch {
-                y_rows: y.len(),
-                x_rows: col.len(),
-            }
-            .into());
-        }
-    }
-
-    if entity.len() != y.len() {
-        return Err(PanelError::IdentifierDimensionMismatch {
-            dimension: PanelDimension::Entity,
-            y_rows: y.len(),
-            other_rows: entity.len(),
-        });
-    }
-
-    if let Some(time) = time
-        && time.len() != y.len()
-    {
-        return Err(PanelError::IdentifierDimensionMismatch {
-            dimension: PanelDimension::Time,
-            y_rows: y.len(),
-            other_rows: time.len(),
-        });
-    }
-    Ok(())
 }
 
 impl FeInput {
@@ -463,6 +430,7 @@ impl FeInput {
     /// から`FeInput`を組み立てる。
     ///
     /// # Errors
+    /// 検査の順序は`validate_panel_input`（`panel/common.rs`、FE/REで共通）が正本。
     /// - いずれかの`x_columns`の長さが`y`と一致しない場合は
     ///   `PanelError::Common(CommonError::DimensionMismatch)`
     /// - `entity`の長さが`y`と一致しない場合は
@@ -509,37 +477,70 @@ impl FeInput {
         time: Option<TimeKeys>,
         dep_var_name: String,
     ) -> Result<Self, PanelError> {
-        validate_input_dimensions(
+        Self::from_group_codes(
             y,
             x_columns,
-            &x_names,
-            entity,
-            time.as_ref().map(TimeKeys::ids),
-        )?;
+            x_names,
+            GroupCodes::from_labels(entity),
+            time,
+            dep_var_name,
+        )
+    }
+
+    /// `from_columns_ordered`の`entity`を、コード化済みの`GroupCodes`で受け取る版。
+    /// `engine_pybind`は、行ごとの`String`を作らずに`GroupCodes::from_factorized`で作ったコードを
+    /// 渡す。`from_columns`/`from_columns_ordered`は、この関数にラベルから作ったコードを渡す
+    /// 簡便版。
+    ///
+    /// `entity`はキー付き（`from_labels`/`from_factorized`）であること。固定効果のキーに使う。
+    ///
+    /// # Errors
+    /// `from_columns`と同じ。加えて、`entity`がキー無しのコードの場合は`PanelError::Common`
+    /// （`CommonError::Internal`、呼び出し側の実装誤り）。
+    pub fn from_group_codes(
+        y: &[f64],
+        x_columns: &[Vec<f64>],
+        x_names: Vec<String>,
+        entity: GroupCodes,
+        time: Option<TimeKeys>,
+        dep_var_name: String,
+    ) -> Result<Self, PanelError> {
+        validate_panel_input(y, x_columns, &x_names, &entity, time.as_ref())?;
 
         Ok(Self {
             y: y.to_vec(),
             x: x_columns.to_vec(),
             x_names,
-            entity: entity.to_vec(),
             time,
             dep_var_name,
-            entity_codes: GroupCodes::from_ids(entity),
+            entity_codes: entity,
         })
     }
 
-    /// REの分散成分推定（`swamy_arora_variance_components`）用の1-way FE入力（`time`なし）を、
-    /// `ReInput`の`y`・`x`・`entity`から作る。`ReInput`が既に持つエンティティコードを
+    /// REの分散成分推定（`swamy_arora_variance_components`）用のFE入力を、
+    /// `ReInput`の`y`・`x`・`entity`（2-wayなら`time`も）から作る。`ReInput`が既に持つエンティティコードを
     /// 再利用し作り直さない。`ReInput::from_columns`が同じ次元検証を済ませているため
     /// 検証は不要で、`entity`とコードの対応も`ReInput`が保証する（別々の引数で受けて
     /// 食い違う余地を作らない）。
-    pub(crate) fn from_re_input(input: &ReInput) -> Self {
+    ///
+    /// `columns`は`input.x()`のうちFEに渡す列の添字（昇順）。REは時間不変の列を許容するため、
+    /// 内部のFE推定にはwithin変換後の分散がある列だけを渡す（`time_varying_regressor_indices`）。
+    /// FEは分散ゼロの列を拒否するため、全列を渡すと時間不変の列でREごと失敗する。
+    ///
+    /// `effects`が`TwoWay`のときだけ`ReInput`の`time`（2-wayの時間次元）を引き継ぐ
+    /// （1-wayでは`time`があっても使わない）。
+    pub(crate) fn from_re_input(input: &ReInput, columns: &[usize], effects: ReEffects) -> Self {
         Self {
             y: input.y().to_vec(),
-            x: input.x().to_vec(),
-            x_names: input.x_names().to_vec(),
-            entity: input.entity().to_vec(),
-            time: None,
+            x: columns.iter().map(|&j| input.x()[j].clone()).collect(),
+            x_names: columns
+                .iter()
+                .map(|&j| input.x_names()[j].clone())
+                .collect(),
+            time: match effects {
+                ReEffects::OneWay => None,
+                ReEffects::TwoWay => input.time_keys().cloned(),
+            },
             dep_var_name: input.dep_var_name().to_string(),
             entity_codes: input.entity_codes().clone(),
         }
@@ -575,14 +576,14 @@ impl FeInput {
         &self.x_names
     }
 
-    /// 各行のエンティティID（長さ`n`）。
-    pub fn entity(&self) -> &[String] {
-        &self.entity
+    /// ユニークなエンティティのラベル（コード順＝辞書順）。
+    pub fn entity_labels(&self) -> &[String] {
+        self.entity_codes.keys()
     }
 
-    /// 各行の時点ID（長さ`n`）。1-way FEでは`None`。
-    pub fn time(&self) -> Option<&[String]> {
-        self.time.as_ref().map(TimeKeys::ids)
+    /// 時点のラベルと時間順のコード。1-way FEでは`None`。
+    pub fn time_keys(&self) -> Option<&TimeKeys> {
+        self.time.as_ref()
     }
 
     /// 被説明変数名。
@@ -597,7 +598,7 @@ impl FeInput {
 }
 
 /// FEの固定効果の方向（1-way/2-way）を指定する。`FeEstimator::fit`が受け取る
-/// （モジュールdoc「`OlsEstimator`への委譲」参照。将来`FEOptions`に
+/// （モジュールdoc「within変換後の最小二乗」参照。将来`FEOptions`に
 /// 統合される想定の暫定的なパラメータ）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeEffects {
@@ -644,15 +645,16 @@ pub enum FeCovType {
     /// Hc2よりさらに保守的なレバレッジ補正。
     Hc3,
     /// クラスターロバスト。`groups`が`None`なら`entity`引数の列を自動的に使う
-    /// （3.2節、`cluster`省略時のデフォルト挙動）。
-    Cluster { groups: Option<Vec<String>> },
+    /// （3.2節、`cluster`省略時のデフォルト挙動）。`Some`のコードの行数が`n`と食い違うと
+    /// `CommonError::ClusterDimensionMismatch`（`GroupCodes`のdoc参照）。
+    Cluster { groups: Option<GroupCodes> },
     /// Driscoll-Kraay型パネルHAC（3.1節）。`bandwidth`が`None`なら
     /// `floor(4*(t/100)^(2/9))`（`t`はユニークな時点数）で自動計算する（モジュールdoc
     /// 「Driscoll-Kraay型パネルHAC対応」参照）。
     ///
     /// `time`: DK計算の時点ラベルと時間順のコード（必須）。2-way FEの固定効果の時間次元
-    /// （`input.time()`）とは独立で、DKカーネルを適用する時間粒度を呼び出し側が明示する
-    /// （`engine_pybind`の`FEOptions.dk_time`が配線される）。`input.time()`へのフォール
+    /// （`input.time_keys()`）とは独立で、DKカーネルを適用する時間粒度を呼び出し側が明示する
+    /// （`engine_pybind`の`FEOptions.dk_time`が配線される）。`input.time_keys()`へのフォール
     /// バックはしない——どの列が時点かを暗黙に借用すると、意図と違う列が選ばれても気づけない
     /// ため。
     Dk {
@@ -661,9 +663,9 @@ pub enum FeCovType {
     },
 }
 
-/// FEの推定結果。`within`変換したデータを`OlsEstimator::fit`に委譲し、`cov_type`
+/// FEの推定結果。`within`変換したデータに最小二乗をあてはめ、`cov_type`
 /// ・自由度調整を反映した標準誤差等を計算し直す
-/// （モジュールdoc「`OlsEstimator`への委譲」「自由度調整」「`cov_type`対応」参照）。
+/// （モジュールdoc「within変換後の最小二乗」「自由度調整」「`cov_type`対応」参照）。
 ///
 /// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」）。
 #[derive(Debug)]
@@ -671,7 +673,15 @@ pub struct FeEstimator {
     input: FeInput,
     effects: FeEffects,
     cov_type: FeCovType,
-    estimator: OlsEstimator,
+    /// within変換済みの`y`・設計行列・係数名（切片なし）。
+    within_input: OlsInput,
+    /// FE推定量`β̂`（within変換後の最小二乗解、Frisch-Waugh-Lovell定理）。
+    params: Mat<f64>,
+    /// within変換後の回帰の残差（固定効果込み）。
+    residuals: Mat<f64>,
+    /// 正規誤差を仮定した対数尤度。`SSR/n`のみに依存しdf非依存の式（AIC/BICの罰則項の
+    /// 乗数だけ`k`から`df_model`に差し替える、モジュールdoc参照）。
+    log_likelihood: f64,
     /// パネル自由度調整後のモデル自由度（`k + neffects`、`fe-spec.md`3.2節）。
     df_model: usize,
     /// パネル自由度調整後の残差自由度（`n - df_model`、`fe-spec.md`3.2節）。
@@ -694,7 +704,7 @@ pub struct FeEstimator {
     conf_lower: Mat<f64>,
     conf_upper: Mat<f64>,
     /// 実際に使ったFE構造でdemeanしたR²（1-wayはentityのみ、2-wayはentity+time）。
-    /// `estimator().r_squared()`と同じ値（モジュールdoc「パネル固有R²」参照）。
+    /// モジュールdoc「パネル固有R²」参照。
     r_squared_within: f64,
     /// エンティティ平均ベースのR²（linearmodelsの`rsquared_between`と完全一致、
     /// モジュールdoc参照）。
@@ -704,30 +714,29 @@ pub struct FeEstimator {
     r_squared_overall: f64,
     aic: f64,
     bic: f64,
-    /// 傾き係数`k`個の同時Wald F検定（`estimator().f_statistic()`とは異なりFE用に
-    /// panel自由度調整済み・`cov_type`反映済み、モジュールdoc「自由度調整」のF統計量節
-    /// 参照）。`k=0`ならNaN。
-    f_statistic: f64,
-    f_p_value: f64,
+    /// 傾き係数`k`個の同時Wald F検定の`(F統計量, p値)`（素の最小二乗の`f_statistic`とは
+    /// 異なりFE用にpanel自由度調整済み・`cov_type`反映済み、モジュールdoc「自由度調整」の
+    /// F統計量節参照）。`k=0`なら`None`。
+    f_test: Option<(f64, f64)>,
 }
 
 impl FeEstimator {
-    /// `input`を`effects`が指定する方向でwithin変換した上で`OlsEstimator::fit`に委譲し、
-    /// FEを推定する。パネル自由度調整（`fe-spec.md`3.2節）・`cov_type`対応
+    /// `input`を`effects`が指定する方向でwithin変換した上で最小二乗をあてはめ
+    /// （`shared::least_squares::least_squares`）、FEを推定する。パネル自由度調整（`fe-spec.md`3.2節）・`cov_type`対応
     /// （3.1節・3.2節）を反映した標準誤差・t値・p値・信頼区間・AIC/BIC、
     /// パネル固有R²（2.3節）を計算し直す（モジュールdoc「自由度調整」
     /// 「`cov_type`対応」「パネル固有R²」参照）。
     ///
-    /// パイプライン: singleton検出
+    /// パイプライン: 2-wayの時点コードの解決（`two_way_time`。2-wayで`time`が無ければ
+    /// `PanelError::TwoWayRequiresTime`。以降の検証より先に評価する）→ singleton検出
     /// （`validate_no_singleton_groups_one_way`/`validate_no_singleton_groups_two_way`）
     /// → within変換（`within_transform_one_way`/`within_transform_two_way`、
     /// 2-wayはバランスパネル検証を内包）→ 自由度検証 → 分散ゼロ検出
-    /// （`validate_no_zero_variance_regressors`）→ `OlsEstimator::fit`への委譲
-    /// （`include_intercept=false`・`cov_type=CovType::Classical`固定。理由はモジュールdoc
-    /// 参照）→ `cov_type`別の共分散行列の計算 → 自由度調整後の統計量の再計算。
+    /// （`validate_no_zero_variance_regressors`）→ `confidence_level`検証 → 最小二乗
+    /// （切片なし。理由はモジュールdoc参照）→ `cov_type`別の共分散行列の計算 → 自由度調整後の統計量の再計算。
     ///
     /// # Errors
-    /// - `effects=TwoWay`で`input.time()`が`None`の場合は`PanelError::TwoWayRequiresTime`
+    /// - `effects=TwoWay`で`input.time_keys()`が`None`の場合は`PanelError::TwoWayRequiresTime`
     /// - singletonグループが見つかった場合は`PanelError::SingletonGroup`
     /// - `effects=TwoWay`でバランスパネルでない場合は`PanelError::UnbalancedPanelForTwoWay`
     /// - パネル自由度調整後の残差自由度（`df_resid`）が正にならない場合は
@@ -745,7 +754,7 @@ impl FeEstimator {
     ///   全時点でも）が2時点に1観測ずつなら`PanelError::DegenerateDkTwoPeriods`
     /// - `cov_type=Cluster`でクラスター数が2で全エンティティ（2-wayでは全時点でも）が
     ///   2クラスターに1観測ずつなら`PanelError::DegenerateClusterTwoGroups`
-    /// - 委譲先の`OlsEstimator::fit`が失敗した場合（観測数不足・特異行列等）は
+    /// - `confidence_level`が`(0, 1)`の範囲外、または設計行列が特異な場合は
     ///   `PanelError::WithinRegressionFailed`
     /// - F検定の共分散部分行列が数値的にほぼ特異な場合は`PanelError::FTestFailed`
     pub fn fit(
@@ -754,11 +763,15 @@ impl FeEstimator {
         cov_type: FeCovType,
         confidence_level: f64,
     ) -> Result<Self, PanelError> {
-        // faerのグローバル並列度をPar::Seqに固定する（`crate::parallelism`。
-        // 委譲先のOlsEstimator::fit自身も呼ぶが、`cargo test -p engine`でFeEstimator::fitを
-        // 直接叩く経路との統一のためここでも呼ぶ、`engine/src/panel/CLAUDE.md`「faerの
+        // faerのグローバル並列度をPar::Seqに固定する（`crate::shared::parallelism`。
+        // `cargo test -p engine`でFeEstimator::fitを直接叩く経路でも担保するためここで呼ぶ、`engine/src/panel/CLAUDE.md`「faerの
         // グローバル並列度」参照）。
-        crate::parallelism::ensure_serial();
+        crate::shared::parallelism::ensure_serial();
+
+        // 2-wayの時点コード（1-wayは`None`）。`time`が無いのに2-wayを指定した入力はここで
+        // 弾き、以降は`Some`かどうかだけで1-way/2-wayを分岐する（`effects`と`input.time`の
+        // 食い違いを後段で`expect`せずに済む）。
+        let two_way_time = two_way_time(effects, &input)?;
 
         let (y, x) = match effects {
             FeEffects::OneWay => {
@@ -773,18 +786,7 @@ impl FeEstimator {
 
         let n = input.nobs();
         let n_entities = input.entity_codes().n_groups();
-        let n_periods = match effects {
-            FeEffects::OneWay => None,
-            FeEffects::TwoWay => Some(
-                input
-                    .time_codes()
-                    .expect(
-                        "2-way already validated `time` is present \
-                         (validate_no_singleton_groups_two_way/within_transform_two_way)",
-                    )
-                    .n_groups(),
-            ),
-        };
+        let n_periods = two_way_time.map(GroupCodes::n_groups);
         let k = input.x_names().len();
         // `neffects`: entityダミー・timeダミーの実効パラメータ数（`fe-spec.md`3.2節）。2-wayは両者の
         // 間に定数項ぶんの重複が1つ生じるため`+1`補正（`n_entities + n_periods - 1`）。
@@ -805,14 +807,21 @@ impl FeEstimator {
 
         validate_no_zero_variance_regressors(&input, &x)?;
 
+        // 被説明変数もwithin変換後に分散が残らなければ、固定効果が説明するものが無い
+        // （個体内で定数、2-wayなら個体効果と時点効果だけで説明される）。説明変数と同じ
+        // 相対閾値で判定する。
+        if column_is_zero_variance(input.y(), &y) {
+            return Err(PanelError::OutcomeConstantWithinEntity);
+        }
+
         // `OlsInput::from_columns`が返しうる`LeastSquaresError::Common(DimensionMismatch)`は
         // ここでは理論上到達不能: `y`/`x`はどちらも`within_transform_*`が`input.y()`/
         // `input.x()`（`FeInput::from_columns`が既に同じ長さであることを検証済み）から
         // 1対1で生成した同じ長さの列であり、この関数内で長さがずれる操作をしていない。
         // それでも`Result`を返す契約（`from_columns`のシグネチャ）をそのまま守り、
-        // `unwrap`はしない（`ols::xtx_inverse`等の「理論上到達不能でも`Result`化する」方針
-        // に揃える、`.claude/rules/rust-style.md`「テスト」参照）。
-        let ols_input = OlsInput::from_columns(
+        // `unwrap`はしない（`.claude/rules/rust-style.md`「テスト」の「理論上到達不能でも
+        // `Result`化する」方針に揃える）。
+        let within_input = OlsInput::from_columns(
             &y,
             &x,
             input.x_names().to_vec(),
@@ -820,34 +829,49 @@ impl FeEstimator {
             input.dep_var_name().to_string(),
         )
         .map_err(|source| PanelError::WithinRegressionFailed { source })?;
-        // `cov_type`は常に`Classical`で委譲する（`β̂`・残差の取得のみが目的で、
-        // `cov_type`ごとの標準誤差は下記でFE自身が計算し直すため。モジュールdoc
-        // 「`cov_type`対応」参照）。
-        //
-        // `OlsEstimator::fit`（ゲート付き公開エントリ）ではなく`fit_allowing_no_regressors`
-        // を呼ぶ: `x=[]`（固定効果のみのモデル）だとwithin変換後の設計行列`x`も0列になり
-        // `k=0`になるため（`engine/src/linear/CLAUDE.md`「k=0の扱い」参照）。
-        let estimator = OlsEstimator::fit_allowing_no_regressors(
-            ols_input,
-            CovType::Classical,
-            confidence_level,
-        )
-        .map_err(|source| PanelError::WithinRegressionFailed { source })?;
 
-        // `cov_type`別の共分散行列の計算に使う共通の材料（within変換後の設計行列とその
-        // グラム逆行列、残差・SSR）。`OlsEstimator`は`cov_params`をprivateで保持しており
-        // 再利用できないため、`x`（内部で既に持っているwithin変換後の列）から独立に
-        // 組み立て直す（モジュールdoc「`cov_type`対応」参照）。
-        let x_mat = design_matrix_from_columns(&x, n);
-        let xtx_inv = xtx_inverse(&x_mat, k)?;
-        let residuals: Vec<f64> = (0..n).map(|i| *estimator.residuals().get(i, 0)).collect();
+        if !(confidence_level > 0.0 && confidence_level < 1.0) {
+            return Err(PanelError::WithinRegressionFailed {
+                source: CommonError::InvalidConfidenceLevel { confidence_level }.into(),
+            });
+        }
+
+        // `β̂`・残差・`(X̃'X̃)⁻¹`は最小二乗の部品を直接呼んで求める（`cov_type`ごとの標準誤差は
+        // 下記でFE自身が計算し直すため、`OlsEstimator`の推論は使わない。モジュールdoc
+        // 「`cov_type`対応」参照）。`x=[]`（固定効果のみのモデル）だとwithin変換後の設計行列`x`も
+        // 0列になり`k=0`になるが、`least_squares`は0列も受理する。
+        let LeastSquaresFit {
+            params,
+            residuals: residual_mat,
+            xtx_inv,
+        } = least_squares(within_input.x(), within_input.y()).map_err(|err| {
+            PanelError::WithinRegressionFailed {
+                source: LeastSquaresError::from_rank_deficient(
+                    err,
+                    within_input.x(),
+                    within_input.param_names(),
+                ),
+            }
+        })?;
+
+        // `cov_type`別の共分散行列の計算に使う共通の材料（within変換後の設計行列、残差・SSR）。
+        let x_mat = within_input.x();
+        let residuals: Vec<f64> = (0..n).map(|i| *residual_mat.get(i, 0)).collect();
         let ssr: f64 = residuals.iter().map(|r| r * r).sum();
+
+        // within回帰の残差が丸め誤差の範囲で0なら完全フィット。標準誤差とF検定が定義できない。
+        // within変換後の`y`の平均は0なので、総平方和は非中心化（`Σỹ²`）。
+        let sst_within: f64 = y.iter().map(|v| v * v).sum();
+        if is_perfect_fit(ssr, sst_within, k) {
+            return Err(PanelError::WithinRegressionFailed {
+                source: CommonError::PerfectFit.into(),
+            });
+        }
 
         // `df_inference`はt検定・信頼区間・F検定に使う自由度。`cov_type=Cluster`のとき
         // `G-1`、`Dk`のとき`t_periods-1`に切り替える（fixestの`ssc()`既定`t.df="min"`。
         // それ以外（Classical/HC1-3）は引き続き`df_resid`のまま
-        // （`ols::fit_allowing_no_regressors`の`df_inference`と同じ切り替えパターン、
-        // ）。標準誤差のスケール計算に使う`K`（`fe_cluster_k_correction`）とは
+        // （`OlsEstimator::fit`の`df_inference`と同じ切り替えパターン）。標準誤差のスケール計算に使う`K`（`fe_cluster_k_correction`）とは
         // 別軸の値であることに注意。
         let mut dk_bandwidth_used = None;
         let (cov_params, df_inference) = match &cov_type {
@@ -857,7 +881,7 @@ impl FeEstimator {
             ),
             FeCovType::Hc1 => (
                 panel_hc_cov_params(
-                    &x_mat,
+                    x_mat,
                     &residuals,
                     &xtx_inv,
                     df_resid,
@@ -867,12 +891,8 @@ impl FeEstimator {
                 df_resid,
             ),
             FeCovType::Hc2 | FeCovType::Hc3 => {
-                let h_within = leverage_within(&x_mat, &xtx_inv, n, k);
-                let time_for_leverage = match effects {
-                    FeEffects::OneWay => None,
-                    FeEffects::TwoWay => input.time_codes(),
-                };
-                let h_full = leverage_full(&h_within, input.entity_codes(), time_for_leverage, n);
+                let h_within = leverages(x_mat, &xtx_inv);
+                let h_full = leverage_full(&h_within, input.entity_codes(), two_way_time, n);
                 let variant = if matches!(cov_type, FeCovType::Hc2) {
                     PanelHcVariant::Hc2
                 } else {
@@ -880,7 +900,7 @@ impl FeEstimator {
                 };
                 (
                     panel_hc_cov_params(
-                        &x_mat,
+                        x_mat,
                         &residuals,
                         &xtx_inv,
                         df_resid,
@@ -891,31 +911,32 @@ impl FeEstimator {
                 )
             }
             FeCovType::Cluster { groups } => {
-                // 既定（entityクラスター）は`FeInput`のコードを再利用し、明示指定の列だけ
-                // ここでコード化する。
-                let explicit_codes = groups.as_deref().map(GroupCodes::from_ids);
-                let group_codes = explicit_codes.as_ref().unwrap_or(input.entity_codes());
-                let n_groups = validate_cluster_group_codes(group_codes, n)?;
+                // 既定（entityクラスター）は`FeInput`のコードを再利用し、明示指定の列は
+                // 渡されたコードをそのまま使う。
+                let group_codes = groups.as_ref().unwrap_or(input.entity_codes());
+                let n_groups = validate_cluster_groups(group_codes, n, ClusterSetting::CovType)?;
                 validate_cluster_count_covers_slopes(n_groups, k)?;
                 // 直前の`G > k`により、ここで`G=2`なら`k`は高々1。
                 if k >= 1
                     && n_groups == 2
-                    && two_group_split_is_degenerate(effects, &input, group_codes)
+                    && two_group_split_is_degenerate(
+                        input.entity_codes(),
+                        two_way_time,
+                        group_codes,
+                    )
                 {
                     return Err(PanelError::DegenerateClusterTwoGroups);
                 }
                 let k_correction = fe_cluster_k_correction(
-                    effects,
                     input.entity_codes(),
-                    input.time_codes(),
+                    two_way_time,
                     n_entities,
-                    n_periods,
                     df_model,
                     k,
                     group_codes,
                 );
                 let cov = panel_cluster_cov_params(
-                    &x_mat,
+                    x_mat,
                     &residuals,
                     &xtx_inv,
                     n,
@@ -929,26 +950,26 @@ impl FeEstimator {
                 bandwidth,
                 time: dk_time,
             } => {
-                let time: &[String] = dk_time.ids();
                 // `FeInput::from_columns`は`entity`・`y`等との長さを検証済みだが、`dk_time`
                 // （公開APIの`FeCovType::Dk.time`）は未検証のため、ここで検証する。長さが
                 // 合わないと下の退化判定が`zip`で黙って切り詰められ、DK計算は範囲外アクセスになる。
-                if time.len() != n {
+                if dk_time.len() != n {
                     return Err(PanelError::IdentifierDimensionMismatch {
                         dimension: PanelDimension::Time,
                         y_rows: n,
-                        other_rows: time.len(),
+                        other_rows: dk_time.len(),
                     });
                 }
                 let time_codes = dk_time.codes();
                 let t_periods = time_codes.n_groups();
                 let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
                 dk_bandwidth_used = Some(bw);
-                validate_dk_periods_cover_tested_coefficients(t_periods, k)?;
+                validate_dk_periods_cover_tested_coefficients(t_periods, k)
+                    .map_err(|e| e.in_stage(Stage::OverallFTest))?;
                 // 直前の`t_periods > k`により、ここで`t_periods=2`なら`k`は高々1。
                 if k >= 1
                     && t_periods == 2
-                    && two_group_split_is_degenerate(effects, &input, time_codes)
+                    && two_group_split_is_degenerate(input.entity_codes(), two_way_time, time_codes)
                 {
                     return Err(PanelError::DegenerateDkTwoPeriods);
                 }
@@ -956,7 +977,7 @@ impl FeEstimator {
                 // 発生しない、`fe_cluster_k_correction`のdocコメント参照）。`K=df_model`を
                 // そのまま使う。
                 let cov = panel_driscoll_kraay_cov_params(
-                    &x_mat, &residuals, &xtx_inv, time_codes, df_model, bw,
+                    x_mat, &residuals, &xtx_inv, time_codes, df_model, bw,
                 );
                 (cov, t_periods - 1)
             }
@@ -970,7 +991,7 @@ impl FeEstimator {
         // いずれかであり理論上到達不能（`ReEstimator::fit`と同じ「保証済みの不変条件に対する
         // 防御的`Result`化」、`.claude/rules/rust-style.md`「テスト」参照）。
         let t_dist = StudentsT::new(0.0, 1.0, df_inference as f64)
-            .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+            .map_err(|e| CommonError::internal(e.to_string()))?;
         let t_crit = inference::critical_value(&t_dist, confidence_level);
 
         let mut std_errors = Mat::zeros(k, 1);
@@ -979,7 +1000,7 @@ impl FeEstimator {
         let mut conf_lower = Mat::zeros(k, 1);
         let mut conf_upper = Mat::zeros(k, 1);
         for j in 0..k {
-            let coef = *estimator.params().get(j, 0);
+            let coef = *params.get(j, 0);
             let se = (*cov_params.get(j, j)).sqrt();
             let stat = inference::compute_inference_stat(&t_dist, coef, se, t_crit);
 
@@ -990,45 +1011,50 @@ impl FeEstimator {
             *conf_upper.get_mut(j, 0) = stat.conf_high;
         }
 
-        // パネル固有R²（モジュールdoc「パネル固有R²」参照）。within R²は
-        // 実際に使ったFE構造でdemeanした残差ベースで、`OlsInput::from_columns`が
-        // `include_intercept=false`で呼ばれているため`estimator().r_squared()`が既に
-        // この定義と一致する（再計算不要）。between/overallはlinearmodelsの`_rsquared`と
-        // 完全一致させるため、変換前の元の`y`/`x`から独立に計算し直す。
-        let r_squared_within = estimator.r_squared();
-        let r_squared_between = fe_r_squared_between(
-            input.y(),
-            input.x(),
-            estimator.params(),
-            input.entity_codes(),
-        );
-        let r_squared_overall = fe_r_squared_overall(input.y(), input.x(), estimator.params());
+        // パネル固有R²（モジュールdoc「パネル固有R²」参照）。within R²は実際に使ったFE構造で
+        // demeanした残差ベースで、切片なしのwithin変換後データへの最小二乗の適合度
+        // （`has_intercept=false`、非中心化TSS）がそのままこの定義と一致する。
+        // between/overallはlinearmodelsの`_rsquared`と完全一致させるため、変換前の元の
+        // `y`/`x`から独立に計算し直す。
+        let fit_stats = gaussian_goodness_of_fit(within_input.y(), ssr, k, false);
+        let r_squared_within = fit_stats.r_squared;
+        let r_squared_between =
+            fe_r_squared_between(input.y(), input.x(), &params, input.entity_codes());
+        let r_squared_overall = fe_r_squared_overall(input.y(), input.x(), &params);
 
         // `log_likelihood`自体は`SSR/n`のみに依存しdf非依存の式のためそのまま再利用できる
         // （モジュールdoc参照）。ペナルティ項の乗数だけ`k`から`df_model`に差し替える。
-        let log_likelihood = estimator.log_likelihood();
+        let log_likelihood = fit_stats.log_likelihood;
         let aic = -2.0 * log_likelihood + 2.0 * (df_model as f64);
         let bic = -2.0 * log_likelihood + (n as f64).ln() * (df_model as f64);
 
         // F統計量（モジュールdoc「自由度調整」のF統計量節）: 傾き係数`k`個の
         // 同時Wald検定。FEの`cov_params`（`cov_type`別、上で計算済み）・`df_inference`
-        // （`cov_type=Cluster`/`Dk`のときだけ`df_resid`から切り替わる、`ols::wald_f_test`の
+        // （`cov_type=Cluster`/`Dk`のときだけ`df_resid`から切り替わる、`shared::wald::wald_f_test`の
         // `df_inference`引数と同じ扱い）を使う。`k_constant=0`（FEに切片は無い、上記
         // `OlsInput::from_columns`呼び出しと同じ理由）。
-        let (f_statistic, f_p_value) = if k == 0 {
-            // 説明変数が無いモデル。検定対象が存在しないため`OlsEstimator::fit`同様NaN
-            // （0除算を避ける）。
-            (f64::NAN, f64::NAN)
+        let f_test = if k == 0 {
+            // 説明変数が無いモデル。検定対象が存在しないため`OlsEstimator::fit`同様
+            // 定義なし（`None`）。
+            None
         } else {
-            wald_f_test(estimator.params(), &cov_params, 0, k, df_inference)
-                .map_err(|source| PanelError::FTestFailed { source })?
+            Some(
+                wald_f_test(&params, &cov_params, 0, k, df_inference).map_err(|source| {
+                    PanelError::FTestFailed {
+                        source: source.into(),
+                    }
+                })?,
+            )
         };
 
         Ok(Self {
             input,
             effects,
             cov_type,
-            estimator,
+            within_input,
+            params,
+            residuals: residual_mat,
+            log_likelihood,
             df_model,
             df_resid,
             df_inference,
@@ -1044,8 +1070,7 @@ impl FeEstimator {
             r_squared_overall,
             aic,
             bic,
-            f_statistic,
-            f_p_value,
+            f_test,
         })
     }
 
@@ -1064,19 +1089,26 @@ impl FeEstimator {
         &self.cov_type
     }
 
-    /// within変換済みデータに対する`OlsEstimator`本体。
-    ///
-    /// **係数（`params()`）・残差（`residuals()`）・within R²（`r_squared()`、
-    /// `FeEstimator::r_squared_within()`と同値）は正しい値**だが、**標準誤差・t値・p値・
-    /// 信頼区間・調整済みR²・AIC/BICは`cov_type=Classical`・パネル自由度調整前の値の
-    /// ままで誤り**（`FeEstimator`自身の同名メソッド（`std_errors()`等）を使うこと、
-    /// モジュールdoc「自由度調整」「`cov_type`対応」「パネル固有R²」参照）。
-    /// **F統計量も同様に誤り**——`estimator().f_statistic()`/`f_p_value()`は
-    /// `df_resid_ols = n - k`・`CovType::Classical`ベースのまま（`FeEstimator`自身の
-    /// `f_statistic()`/`f_p_value()`を使うこと、モジュールdoc「自由度調整」のF統計量節
-    /// 参照）。
-    pub fn estimator(&self) -> &OlsEstimator {
-        &self.estimator
+    /// within変換済みの`y`・設計行列・係数名（切片なし）。`param_names()`・`dep_var_name()`・
+    /// `nobs()`・`k()`もここから読む。
+    pub fn within_input(&self) -> &OlsInput {
+        &self.within_input
+    }
+
+    /// FE推定量`β̂`（k, 1）。within変換後の回帰の最小二乗解で、`within_input().param_names()`と
+    /// 対応する。
+    pub fn params(&self) -> &Mat<f64> {
+        &self.params
+    }
+
+    /// within変換後の回帰の残差（n, 1）。
+    pub fn residuals(&self) -> &Mat<f64> {
+        &self.residuals
+    }
+
+    /// 対数尤度（正規誤差を仮定した最尤推定量`σ̂² = SSR/n`ベース、`df`非依存）。
+    pub fn log_likelihood(&self) -> f64 {
+        self.log_likelihood
     }
 
     /// パネル自由度調整後のモデル自由度（`k + neffects`、`fe-spec.md`3.2節）。
@@ -1106,7 +1138,7 @@ impl FeEstimator {
         self.n_periods
     }
 
-    /// `cov_type`別に計算し直した標準誤差（`(k, 1)`、`estimator().params()`と対応）。
+    /// `cov_type`別に計算し直した標準誤差（`(k, 1)`、`params()`と対応）。
     pub fn std_errors(&self) -> &Mat<f64> {
         &self.std_errors
     }
@@ -1166,20 +1198,20 @@ impl FeEstimator {
     }
 
     /// 傾き係数`k`個が同時にゼロという帰無仮説のWald F検定統計量
-    /// （モジュールdoc「自由度調整」のF統計量節参照）。`k=0`ならNaN。
-    pub fn f_statistic(&self) -> f64 {
-        self.f_statistic
+    /// （モジュールdoc「自由度調整」のF統計量節参照）。`k=0`なら`None`。
+    pub fn f_statistic(&self) -> Option<f64> {
+        self.f_test.map(|(statistic, _)| statistic)
     }
 
-    /// `f_statistic()`のp値。
-    pub fn f_p_value(&self) -> f64 {
-        self.f_p_value
+    /// `f_statistic()`のp値。`f_statistic()`が`None`のとき`None`。
+    pub fn f_p_value(&self) -> Option<f64> {
+        self.f_test.map(|(_, p_value)| p_value)
     }
 
-    /// `f_statistic()`の自由度`(分子, 分母)` = `(k, df_inference)`。`k=0`でNaNのときは`None`。
+    /// `f_statistic()`の自由度`(分子, 分母)` = `(k, df_inference)`。`k=0`で`None`のときは`None`。
     pub fn f_df(&self) -> Option<(usize, usize)> {
-        let k = self.estimator.input().k();
-        (k > 0).then_some((k, self.df_inference))
+        self.f_test
+            .map(|_| (self.within_input.k(), self.df_inference))
     }
 
     /// 固定効果自体（α_i、2-wayはγ_tも）を事後的に復元する（`fe-spec.md`3.5節）。
@@ -1193,7 +1225,7 @@ impl FeEstimator {
     pub fn fixed_effects(&self) -> FixedEffects {
         let y = self.input.y();
         let x = self.input.x();
-        let params = self.estimator.params();
+        let params = &self.params;
 
         match self.effects {
             FeEffects::OneWay => FixedEffects::OneWay(
@@ -1203,8 +1235,7 @@ impl FeEstimator {
             ),
             FeEffects::TwoWay => {
                 let time = self.input.time_codes().expect(
-                    "2-way already validated `time` is present \
-                     (validate_no_singleton_groups_two_way/within_transform_two_way)",
+                    "2-way already validated `time` is present (`fit` resolves `two_way_time`)",
                 );
                 let entity_means = group_residual_means(y, x, params, self.input.entity_codes());
                 let time_means = group_residual_means(y, x, params, time);
@@ -1332,40 +1363,27 @@ fn fixef_dimension_nested_within_cluster(dim: &GroupCodes, cluster: &GroupCodes)
 /// 具体例（実地検証済み）: 1-way FE（`n_entities=20`）・`cluster=entity`（既定）・
 /// `k=2`なら`df_model=22`・`nested_size_sum=20`・`count_nested=m=1`で`K=22-20+1=3`
 /// （`k+1=3`と一致、フロアはno-op）。
-#[allow(clippy::too_many_arguments)]
+///
+/// `two_way_time`は2-wayの時点コード（1-wayは`None`）。FE次元は1-wayがentityのみ、
+/// 2-wayがentityとtime（水準数は`time.n_groups()`）。
 fn fe_cluster_k_correction(
-    effects: FeEffects,
     entity: &GroupCodes,
-    time: Option<&GroupCodes>,
+    two_way_time: Option<&GroupCodes>,
     n_entities: usize,
-    n_periods: Option<usize>,
     df_model: usize,
     k: usize,
     cluster: &GroupCodes,
 ) -> usize {
-    let dims: Vec<(bool, usize)> = match effects {
-        FeEffects::OneWay => {
-            vec![(
-                fixef_dimension_nested_within_cluster(entity, cluster),
-                n_entities,
-            )]
-        }
-        FeEffects::TwoWay => {
-            let time =
-                time.expect("2-way FE always has `time` (validated by within_transform_two_way)");
-            let n_periods = n_periods.expect("2-way FE always has `n_periods`");
-            vec![
-                (
-                    fixef_dimension_nested_within_cluster(entity, cluster),
-                    n_entities,
-                ),
-                (
-                    fixef_dimension_nested_within_cluster(time, cluster),
-                    n_periods,
-                ),
-            ]
-        }
-    };
+    let mut dims = vec![(
+        fixef_dimension_nested_within_cluster(entity, cluster),
+        n_entities,
+    )];
+    if let Some(time) = two_way_time {
+        dims.push((
+            fixef_dimension_nested_within_cluster(time, cluster),
+            time.n_groups(),
+        ));
+    }
     let m = dims.len();
     let count_nested = dims.iter().filter(|(nested, _)| *nested).count();
     let nested_size_sum: usize = dims
@@ -1441,7 +1459,7 @@ fn fe_r_squared_between(y: &[f64], x: &[Vec<f64>], params: &Mat<f64>, entity: &G
 /// `PanelOLS._rsquared`のoverall式と完全一致させる（モジュールdoc「パネル固有R²」参照）。
 ///
 /// `y`/`x`は**within変換前の元の列**を渡すこと。within推定の残差
-/// （`estimator().residuals()`、FWL定理により固定効果込みの残差と一致）とは異なり、
+/// （`residuals()`、FWL定理により固定効果込みの残差と一致）とは異なり、
 /// ここでは`β̂`だけを元の`y`/`x`に当てはめた残差（固定効果の切片項を含めない）を使う。
 ///
 /// `TSS <= 0`なら`linearmodels`と同じく`0.0`を返す。
@@ -1514,8 +1532,11 @@ pub fn within_transform_one_way(input: &FeInput) -> (Vec<f64>, Vec<Vec<f64>>) {
 ///
 /// 戻り値は`(y_transformed, x_transformed)`（元の列順を保持）。
 ///
+/// `FeEstimator::fit`経由では`two_way_time`が`time`の無い入力を先に弾くため、ここの
+/// `time`の存在チェックは単体利用時の防御（到達しない二重チェックだが意図的に残している）。
+///
 /// # Errors
-/// - `input.time()`が`None`の場合は`PanelError::TwoWayRequiresTime`
+/// - `input.time_keys()`が`None`の場合は`PanelError::TwoWayRequiresTime`
 /// - バランスパネルでない場合は`PanelError::UnbalancedPanelForTwoWay`
 pub fn within_transform_two_way(input: &FeInput) -> Result<(Vec<f64>, Vec<Vec<f64>>), PanelError> {
     let time_codes = input.time_codes().ok_or(PanelError::TwoWayRequiresTime)?;
@@ -1560,8 +1581,11 @@ pub fn validate_no_singleton_groups_one_way(input: &FeInput) -> Result<(), Panel
 /// あった場合はentity側を先に報告する。`FeInput`のフィールド順（entity→time）に合わせた
 /// 恣意的な優先順位）。
 ///
+/// `FeEstimator::fit`経由では`two_way_time`が`time`の無い入力を先に弾くため、ここの
+/// `time`の存在チェックは単体利用時の防御（到達しない二重チェックだが意図的に残している）。
+///
 /// # Errors
-/// - `input.time()`が`None`の場合は`PanelError::TwoWayRequiresTime`
+/// - `input.time_keys()`が`None`の場合は`PanelError::TwoWayRequiresTime`
 /// - entityまたはtimeに観測数1のグループが見つかった場合は`PanelError::SingletonGroup`
 ///   （該当する`dimension`を含む）
 pub fn validate_no_singleton_groups_two_way(input: &FeInput) -> Result<(), PanelError> {
@@ -1576,7 +1600,10 @@ pub fn validate_no_singleton_groups_two_way(input: &FeInput) -> Result<(), Panel
 /// 複数のsingletonグループが存在する場合は、観測順で最初に現れるグループのみを報告する
 /// （`validate_no_zero_variance_regressors`の「最初の1件を報告」方針と統一）。観測数は
 /// `FeInput`の構築時に作ったコード（`GroupCodes::counts`）をそのまま使う。
-fn reject_singleton_group(dimension: PanelDimension, ids: &GroupCodes) -> Result<(), PanelError> {
+pub(crate) fn reject_singleton_group(
+    dimension: PanelDimension,
+    ids: &GroupCodes,
+) -> Result<(), PanelError> {
     // 観測順で最初に現れたsingletonを報告する（旧実装の`String`版と同じ選び方）。
     for &c in ids.codes() {
         if ids.counts()[c] == 1 {
@@ -1631,42 +1658,49 @@ pub fn validate_no_zero_variance_regressors(
     Ok(())
 }
 
-/// `transformed`（within変換後の1列）の分散が、`original`（変換前の同じ列）のスケールに
-/// 対して無視できるほど小さいかを判定する。
+/// 2-way within変換後に分散がある列の添字を昇順で返す（`time_varying_regressor_indices`の
+/// 2-way版）。2-wayのwithin変換は「entityでquasi-demean→timeでquasi-demean」の2段階
+/// （`within_transform_two_way`）で、バランスパネルで閉形式の二重デミーニングと一致する。
+/// 時点間でのみ（個体間でのみ）変わる列は2-way within変換後に全ゼロ列になり、時間不変の列と
+/// 同じく「分散ゼロ」と判定される。
 ///
-/// **絶対閾値ではなく相対閾値を使う**（`.claude/rules/rust-style.md`「線形代数」の特異性
-/// 判定の方針と同じ。データのスケールに依存しないようにするため）。`original`の最大絶対値を
-/// スケールの目安にする理由: 真に分散ゼロの列（時間不変・完全共線）は、within変換後の値が
-/// 数学的には厳密に0だが浮動小数点演算では丸め誤差の残差（`original`のスケールに比例する
-/// 大きさ）が残る。`transformed`自身の最大絶対値をスケールに使うと、この残差自身を基準に
-/// 残差を判定する自己参照になり閾値が機能しないため、変換前の値を基準にする。
+/// **バランスパネルであることの検証はしない**（呼び出し側が`validate_balanced_panel`で
+/// 済ませている前提。不均衡だと2段階適用は二重デミーニングと一致しない）。
+pub(crate) fn two_way_time_varying_regressor_indices(
+    x: &[Vec<f64>],
+    entity: &GroupCodes,
+    time: &GroupCodes,
+) -> Vec<usize> {
+    let entity_theta = vec![1.0; entity.n_groups()];
+    let time_theta = vec![1.0; time.n_groups()];
+    x.iter()
+        .enumerate()
+        .filter(|(_, original)| {
+            let by_entity = quasi_demean_column(original, entity, &entity_theta);
+            let transformed = quasi_demean_column(&by_entity, time, &time_theta);
+            !column_is_zero_variance(original, &transformed)
+        })
+        .map(|(j, _)| j)
+        .collect()
+}
+
+/// `x`の各列のうち、1-way within変換（`entity`でθ=1のquasi-demean）後に分散がある列
+/// （時間変化のある列）の添字を昇順で返す。分散ゼロの判定は
+/// `validate_no_zero_variance_regressors`と同じ`column_is_zero_variance`（相対閾値）を使うため、
+/// ここで時間変化ありと判定された列は、そのままFEに渡しても分散ゼロで拒否されない。
 ///
-/// 閾値の乗数`n`（観測数）は、`ols::xtx_inverse`の特異性判定
-/// （`(k as f64) * f64::EPSILON * max_abs_diag`、分解に関わる次元数を乗数にする）と同じ
-/// 発想: グループ平均の集約（`quasi_demean_column`、観測数`n`項の和）→差分の丸め誤差の
-/// 蓄積が観測数に比例しうることを踏まえた選択。2-wayは「entityでdemean→timeでdemean」の
-/// 2段階適用（モジュールdoc参照）で丸め誤差が2回蓄積しうるが、閾値はこの2段階分を明示的に
-/// 倍にはしていない（実測上、時間不変・完全共線変数の残差は乗数`2`の差では閾値を跨がない
-/// 桁数——原点`scale`比`~1e-16`——であることを想定した割り切り。将来1-wayと2-wayで
-/// 誤検出/見逃しの傾向差が実際に問題になったら、2-way用の乗数を分けることを検討する）。
-fn column_is_zero_variance(original: &[f64], transformed: &[f64]) -> bool {
-    let n = transformed.len();
-    if n == 0 {
-        // n=0は`FeInput::from_columns`が許容する境界ケース（`from_columns_with_zero_
-        // observations_succeeds`）。分散の定義自体が意味を持たないため、ゼロ分散とは
-        // 判定しない（呼び出し側の`fit()`は別途`InsufficientDegreesOfFreedom`等で
-        // n=0を弾く想定、`fe-spec.md`1章はあくまで「デミーニング後の分散」の検証に限定する）。
-        return false;
-    }
-
-    let mean: f64 = transformed.iter().sum::<f64>() / n as f64;
-    let variance: f64 = transformed.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n as f64;
-    let std_dev = variance.sqrt();
-
-    let scale = original.iter().fold(0.0_f64, |acc, v| acc.max(v.abs()));
-    let threshold = n as f64 * f64::EPSILON * scale;
-
-    std_dev <= threshold
+/// REが時間不変の列を許容するために使う（`re-spec.md`5章）。FEの`fit()`は分散ゼロの列を
+/// 拒否する設計のままで、この関数は拒否の代わりに「FEに渡す列を選ぶ」ために同じ判定を使う。
+pub(crate) fn time_varying_regressor_indices(x: &[Vec<f64>], entity: &GroupCodes) -> Vec<usize> {
+    let theta = vec![1.0; entity.n_groups()];
+    x.iter()
+        .enumerate()
+        .filter(|(_, original)| {
+            let transformed = quasi_demean_column(original, entity, &theta);
+            !column_is_zero_variance(original, &transformed)
+        })
+        .map(|(j, _)| j)
+        .collect()
 }
 
 /// 2-way FEがバランスパネル（`entity` × `time`の全組合せが過不足なく1回ずつ存在する）
@@ -1686,7 +1720,10 @@ fn column_is_zero_variance(original: &[f64], transformed: &[f64]) -> bool {
 ///
 /// `entity.nobs() == time.nobs()`は`FeInput::from_columns`が既に保証している契約
 /// （呼び出し側は常に同じ`FeInput`からこの2つを渡す）。
-fn validate_balanced_panel(entity: &GroupCodes, time: &GroupCodes) -> Result<(), PanelError> {
+pub(crate) fn validate_balanced_panel(
+    entity: &GroupCodes,
+    time: &GroupCodes,
+) -> Result<(), PanelError> {
     debug_assert_eq!(
         entity.nobs(),
         time.nobs(),
@@ -1717,6 +1754,19 @@ fn validate_balanced_panel(entity: &GroupCodes, time: &GroupCodes) -> Result<(),
     Ok(())
 }
 
+/// 2-wayの時点コードを返す（1-wayは`None`）。2-wayなのに`input`に`time`が無ければ
+/// `PanelError::TwoWayRequiresTime`。`FeEstimator::fit`が最初に呼び、以降の
+/// cov_type別の計算は`effects`ではなくこの`Option`で1-way/2-wayを区別する。
+fn two_way_time(effects: FeEffects, input: &FeInput) -> Result<Option<&GroupCodes>, PanelError> {
+    match effects {
+        FeEffects::OneWay => Ok(None),
+        FeEffects::TwoWay => input
+            .time_codes()
+            .map(Some)
+            .ok_or(PanelError::TwoWayRequiresTime),
+    }
+}
+
 /// ユニーク数2の`groups`（Clusterのクラスター列・Dkの時点列）について、within変換後の
 /// グループスコアが恒等的にゼロになるか（`PanelError::DegenerateDkTwoPeriods`/
 /// `DegenerateClusterTwoGroups`の判定）。
@@ -1727,14 +1777,15 @@ fn validate_balanced_panel(entity: &GroupCodes, time: &GroupCodes) -> Result<(),
 /// 正規方程式でスコアの和はゼロのため、両方ゼロになる。entity方向（2時点のパネルを
 /// timeでクラスタリング等）だけでなく、2-wayではtime方向（エンティティ2つのパネルを
 /// entityでクラスタリング——Clusterの既定——等）も同じ構造になる。
-fn two_group_split_is_degenerate(effects: FeEffects, input: &FeInput, groups: &GroupCodes) -> bool {
-    if every_level_splits_once_across_two_groups(input.entity_codes(), groups) {
-        return true;
-    }
-    match (effects, input.time_codes()) {
-        (FeEffects::TwoWay, Some(time)) => every_level_splits_once_across_two_groups(time, groups),
-        _ => false,
-    }
+///
+/// `two_way_time`は2-wayの時点コード（1-wayは`None`、`two_way_time`関数参照）。
+fn two_group_split_is_degenerate(
+    entity: &GroupCodes,
+    two_way_time: Option<&GroupCodes>,
+    groups: &GroupCodes,
+) -> bool {
+    every_level_splits_once_across_two_groups(entity, groups)
+        || two_way_time.is_some_and(|time| every_level_splits_once_across_two_groups(time, groups))
 }
 
 /// `levels`の全水準がちょうど2観測を持ち、その2観測の`groups`ラベルが異なるか
@@ -1742,7 +1793,7 @@ fn two_group_split_is_degenerate(effects: FeEffects, input: &FeInput, groups: &G
 /// 1水準でも3観測以上・同じグループに2観測・1観測があれば`false`。
 ///
 /// `levels.nobs() == groups.nobs()`は呼び出し側の契約（`FeInput`のコードと、
-/// `validate_cluster_group_codes`済みのクラスター列のコード、または`fit()`のDkアームで
+/// `validate_cluster_groups`済みのクラスター列のコード、または`fit()`のDkアームで
 /// 長さを検証済みのDK時点列のコード）。
 fn every_level_splits_once_across_two_groups(levels: &GroupCodes, groups: &GroupCodes) -> bool {
     debug_assert_eq!(
@@ -1771,6 +1822,7 @@ fn every_level_splits_once_across_two_groups(levels: &GroupCodes, groups: &Group
 mod tests {
     use super::*;
     use crate::linear::common::LeastSquaresError;
+    use crate::shared::error::MatrixKind;
 
     fn strings(values: &[&str]) -> Vec<String> {
         values.iter().map(|s| s.to_string()).collect()
@@ -1787,7 +1839,7 @@ mod tests {
     }
 
     fn codes(values: &[&str]) -> GroupCodes {
-        GroupCodes::from_ids(&strings(values))
+        GroupCodes::from_labels(&strings(values))
     }
 
     #[test]
@@ -1809,11 +1861,121 @@ mod tests {
         assert_eq!(input.y(), &y);
         assert_eq!(input.x(), &[x1]);
         assert_eq!(input.x_names(), &["x1".to_string()]);
-        assert_eq!(input.entity(), entity.as_slice());
-        assert_eq!(input.time(), None);
+        // ユニークなラベルを辞書順（コード順）に並べたもの。
+        assert_eq!(input.entity_labels(), ["a", "b"]);
+        assert_eq!(input.time_keys(), None);
         assert_eq!(input.dep_var_name(), "y");
         assert_eq!(input.nobs(), 4);
         assert_eq!(input.n_entities(), 2);
+    }
+
+    #[test]
+    fn from_group_codes_matches_from_columns_and_requires_entity_keys() {
+        let y = [1.0, 2.0, 3.0, 4.0];
+        let x = vec![vec![1.0, 2.0, 3.0, 5.0]];
+        let entity = strings(&["a", "a", "b", "b"]);
+
+        let from_strings = FeInput::from_columns(
+            &y,
+            &x,
+            vec!["x1".to_string()],
+            &entity,
+            None,
+            "y".to_string(),
+        )
+        .unwrap();
+        let from_codes = FeInput::from_group_codes(
+            &y,
+            &x,
+            vec!["x1".to_string()],
+            GroupCodes::from_factorized(vec![1, 1, 0, 0], &["b", "a"]).unwrap(),
+            None,
+            "y".to_string(),
+        )
+        .unwrap();
+        assert_eq!(from_codes.entity_labels(), from_strings.entity_labels());
+        assert_eq!(from_codes.n_entities(), 2);
+
+        // キー無しのコードは固定効果のキーが作れないため受け付けない。
+        let keyless = GroupCodes::from_labels_without_keys(&entity);
+        assert!(matches!(
+            FeInput::from_group_codes(
+                &y,
+                &x,
+                vec!["x1".to_string()],
+                keyless,
+                None,
+                "y".to_string()
+            ),
+            Err(PanelError::Common(CommonError::Internal { .. }))
+        ));
+        // 行数の食い違いは従来どおり`IdentifierDimensionMismatch`。
+        assert!(matches!(
+            FeInput::from_group_codes(
+                &y,
+                &x,
+                vec!["x1".to_string()],
+                GroupCodes::from_labels(&strings(&["a", "b"])),
+                None,
+                "y".to_string()
+            ),
+            Err(PanelError::IdentifierDimensionMismatch {
+                dimension: PanelDimension::Entity,
+                ..
+            })
+        ));
+    }
+
+    /// エラーの優先順位: 次元の食い違い（`y`↔各`x`列、`entity`の行数、`time`の行数）が先で、
+    /// `entity`がキー無しであることの拒否は最後。
+    #[test]
+    fn from_group_codes_reports_dimension_mismatches_before_missing_entity_keys() {
+        let y = [1.0, 2.0, 3.0, 4.0];
+        let x = vec![vec![1.0, 2.0, 3.0, 5.0]];
+        let keyless = |labels: &[&str]| GroupCodes::from_labels_without_keys(&strings(labels));
+
+        // `time`の行数の食い違い（`entity`は正しい長さでキー付き）。
+        assert!(matches!(
+            FeInput::from_group_codes(
+                &y,
+                &x,
+                vec!["x1".to_string()],
+                GroupCodes::from_labels(&strings(&["a", "a", "b", "b"])),
+                Some(TimeKeys::lexicographic(strings(&["1", "2"]))),
+                "y".to_string()
+            ),
+            Err(PanelError::IdentifierDimensionMismatch {
+                dimension: PanelDimension::Time,
+                ..
+            })
+        ));
+        // キー無しで、かつ`entity`の行数も食い違う: 行数のエラーが先。
+        assert!(matches!(
+            FeInput::from_group_codes(
+                &y,
+                &x,
+                vec!["x1".to_string()],
+                keyless(&["a", "b"]),
+                None,
+                "y".to_string()
+            ),
+            Err(PanelError::IdentifierDimensionMismatch {
+                dimension: PanelDimension::Entity,
+                ..
+            })
+        ));
+        // `x`の列の行数の食い違いは、`entity`の検証より先。
+        assert!(matches!(
+            FeInput::from_group_codes(
+                &y,
+                &[vec![1.0, 2.0]],
+                vec!["x1".to_string()],
+                keyless(&["a", "b"]),
+                None,
+                "y".to_string()
+            ),
+            Err(PanelError::Common(CommonError::DimensionMismatch { .. }))
+        ));
     }
 
     #[test]
@@ -1832,7 +1994,12 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(input.time(), Some(time.as_slice()));
+        // 時点は`lexicographic`（ラベルの辞書順）。行数と、ユニークなラベルの時間順を確認する。
+        let Some(time_keys) = input.time_keys() else {
+            panic!("time keys must be set");
+        };
+        assert_eq!(time_keys.len(), 4);
+        assert_eq!(time_keys.periods(), ["2020", "2021"]);
     }
 
     #[test]
@@ -1917,7 +2084,7 @@ mod tests {
             FeInput::from_columns(&[], &[], vec![], &[], Some(&[]), "y".to_string()).unwrap();
 
         assert_eq!(input.nobs(), 0);
-        assert_eq!(input.time(), Some([].as_slice()));
+        assert_eq!(input.time_keys().map(TimeKeys::len), Some(0));
     }
 
     #[test]
@@ -2211,7 +2378,7 @@ mod tests {
         // regressor_succeeds`と同様の境界値テストの慣習に合わせる）。空配列にはsingleton
         // となりうる要素自体が存在しないため`Ok(())`になる。
         assert_eq!(
-            reject_singleton_group(PanelDimension::Entity, &GroupCodes::from_ids(&[])),
+            reject_singleton_group(PanelDimension::Entity, &GroupCodes::from_labels(&[])),
             Ok(())
         );
     }
@@ -2255,6 +2422,99 @@ mod tests {
             PanelError::ZeroVarianceAfterDemeaning {
                 column: "female".to_string(),
             }
+        );
+    }
+
+    #[test]
+    fn time_varying_regressor_indices_returns_only_columns_with_within_variation() {
+        // 先頭・末尾が時間不変（エンティティ内で一定）、中央が時間変化。列順を保ち、
+        // 時間変化のある列の添字だけを昇順で返す。
+        let entity = strings(&["a", "a", "b", "b", "b"]);
+        let input = FeInput::from_columns(
+            &[1.0, 2.0, 3.0, 4.0, 5.0],
+            &[
+                vec![7.0, 7.0, -2.0, -2.0, -2.0],
+                vec![1.0, 3.0, 2.0, 5.0, 9.0],
+                vec![0.5, 0.5, 0.5, 0.5, 0.5],
+            ],
+            strings(&["z1", "x", "z2"]),
+            &entity,
+            None,
+            "y".into(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            time_varying_regressor_indices(input.x(), input.entity_codes()),
+            vec![1]
+        );
+    }
+
+    #[test]
+    fn time_varying_regressor_indices_agrees_with_zero_variance_validation() {
+        // 返した添字の列だけを集めた入力は`validate_no_zero_variance_regressors`を通り、
+        // 返さなかった列だけを集めた入力は同じ検証で拒否される（FEに渡せる列の選別が
+        // FE自身の判定とずれない）。
+        let entity = strings(&["a", "a", "b", "b", "b", "c", "c"]);
+        let columns = vec![
+            vec![2.0, 2.0, 5.0, 5.0, 5.0, -1.0, -1.0],
+            vec![1.0, 4.0, 2.0, 2.5, 9.0, 3.0, 8.0],
+            vec![1e6, 1e6, 1e6, 1e6, 1e6, 1e6, 1e6],
+        ];
+        let names = strings(&["z", "x", "big"]);
+        let y = [1.0; 7];
+        let full =
+            FeInput::from_columns(&y, &columns, names.clone(), &entity, None, "y".into()).unwrap();
+        let keep = time_varying_regressor_indices(full.x(), full.entity_codes());
+        assert_eq!(keep, vec![1]);
+
+        let kept_input = FeInput::from_columns(
+            &y,
+            &[columns[1].clone()],
+            vec![names[1].clone()],
+            &entity,
+            None,
+            "y".into(),
+        )
+        .unwrap();
+        let (_, x_kept) = within_transform_one_way(&kept_input);
+        assert_eq!(
+            validate_no_zero_variance_regressors(&kept_input, &x_kept),
+            Ok(())
+        );
+
+        let dropped_input = FeInput::from_columns(
+            &y,
+            &[columns[0].clone(), columns[2].clone()],
+            vec![names[0].clone(), names[2].clone()],
+            &entity,
+            None,
+            "y".into(),
+        )
+        .unwrap();
+        let (_, x_dropped) = within_transform_one_way(&dropped_input);
+        assert!(validate_no_zero_variance_regressors(&dropped_input, &x_dropped).is_err());
+    }
+
+    #[test]
+    fn time_varying_regressor_indices_is_empty_for_no_regressors_and_all_for_varying_columns() {
+        let entity = strings(&["a", "a", "b", "b"]);
+        let none =
+            FeInput::from_columns(&[1.0; 4], &[], vec![], &entity, None, "y".into()).unwrap();
+        assert!(time_varying_regressor_indices(none.x(), none.entity_codes()).is_empty());
+
+        let all = FeInput::from_columns(
+            &[1.0; 4],
+            &[vec![1.0, 2.0, 3.0, 5.0], vec![9.0, 1.0, 2.0, 8.0]],
+            strings(&["x1", "x2"]),
+            &entity,
+            None,
+            "y".into(),
+        )
+        .unwrap();
+        assert_eq!(
+            time_varying_regressor_indices(all.x(), all.entity_codes()),
+            vec![0, 1]
         );
     }
 
@@ -2366,10 +2626,37 @@ mod tests {
 
     #[test]
     fn fe_estimator_fit_one_way_recovers_known_slope() {
-        // entity a: x=[1,2,3], y=2x+5（fixed effect=5）→ y=[7,9,11]
-        // entity b: x=[4,5,6], y=2x+10（fixed effect=10）→ y=[18,20,22]
-        // ノイズなしのため、within変換後のOLS（切片なし）は真のスロープ2.0を厳密に
-        // 復元するはず（fixed effectはwithin変換で消去される）。
+        // entity a: x=[1,2,3], y=2x+5（fixed effect=5）+ノイズ
+        // entity b: x=[4,5,6], y=2x+10（fixed effect=10）+ノイズ
+        // 小さなノイズのもとで、within変換後のOLS（切片なし）は真のスロープ2.0の近くに返る
+        // （fixed effectはwithin変換で消去される）。
+        let entity = strings(&["a", "a", "a", "b", "b", "b"]);
+        let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let noise = [0.1, -0.2, 0.1, 0.05, -0.1, 0.05];
+        let y: Vec<f64> = x1
+            .iter()
+            .zip(&entity)
+            .zip(noise)
+            .map(|((x, e), u)| 2.0 * x + if e == "a" { 5.0 } else { 10.0 } + u)
+            .collect();
+        let input =
+            FeInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let fe = FeEstimator::fit(input, FeEffects::OneWay, FeCovType::Classical, 0.95).unwrap();
+
+        assert!((*fe.params().get(0, 0) - 2.0).abs() < 0.2);
+        assert_eq!(fe.effects(), FeEffects::OneWay);
+        assert!(!fe.within_input().has_intercept());
+        assert_eq!(fe.n_periods(), None);
+        for r in fe.residuals().col(0).iter() {
+            assert!(r.abs() < 0.3);
+        }
+    }
+
+    #[test]
+    fn fe_estimator_fit_returns_perfect_fit_for_exact_data() {
+        // ノイズなしでは、within回帰の残差が全て0で標準誤差とF検定が定義できない。
         let entity = strings(&["a", "a", "a", "b", "b", "b"]);
         let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
         let y: Vec<f64> = x1
@@ -2381,15 +2668,54 @@ mod tests {
             FeInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
                 .unwrap();
 
-        let fe = FeEstimator::fit(input, FeEffects::OneWay, FeCovType::Classical, 0.95).unwrap();
+        let result = FeEstimator::fit(input, FeEffects::OneWay, FeCovType::Classical, 0.95);
 
-        assert!((*fe.estimator().params().get(0, 0) - 2.0).abs() < 1e-9);
-        assert_eq!(fe.effects(), FeEffects::OneWay);
-        assert!(!fe.estimator().input().has_intercept());
-        assert_eq!(fe.n_periods(), None);
-        for r in fe.estimator().residuals().col(0).iter() {
-            assert!(r.abs() < 1e-9);
-        }
+        assert_eq!(
+            result.unwrap_err(),
+            PanelError::WithinRegressionFailed {
+                source: CommonError::PerfectFit.into(),
+            }
+        );
+    }
+
+    #[test]
+    fn fe_estimator_fit_returns_outcome_constant_within_entity_for_an_entity_level_outcome() {
+        // yが個体内で定数（個体間でだけ違う）なら、固定効果が全てを説明してwithin変換後のyは0になる。
+        // 0.1のように3回足して3で割ると丸め誤差が残る値も、相対閾値で定数とみなす。
+        let entity = strings(&["a", "a", "a", "b", "b", "b", "c", "c", "c"]);
+        let y = [0.1, 0.1, 0.1, 0.7, 0.7, 0.7, 1.3, 1.3, 1.3];
+        let x1 = vec![1.0, 3.0, 2.0, 5.0, 4.0, 6.0, 1.0, 4.0, 2.0];
+        let input =
+            FeInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
+                .unwrap();
+
+        let result = FeEstimator::fit(input, FeEffects::OneWay, FeCovType::Classical, 0.95);
+
+        assert_eq!(result.unwrap_err(), PanelError::OutcomeConstantWithinEntity);
+    }
+
+    #[test]
+    fn fe_estimator_fit_returns_outcome_constant_within_entity_when_effects_explain_the_outcome() {
+        // 2-wayでは、y = 個体効果 + 時点効果 もwithin変換後に0になる。
+        let entity = strings(&["a", "a", "a", "b", "b", "b", "c", "c", "c"]);
+        let time = strings(&["1", "2", "3", "1", "2", "3", "1", "2", "3"]);
+        let alpha = [1.0, 1.0, 1.0, 4.0, 4.0, 4.0, -2.0, -2.0, -2.0];
+        let gamma = [0.0, 0.5, 1.5, 0.0, 0.5, 1.5, 0.0, 0.5, 1.5];
+        let y: Vec<f64> = alpha.iter().zip(gamma).map(|(a, g)| a + g).collect();
+        let x1 = vec![1.0, 3.0, 2.0, 5.0, 4.0, 6.0, 1.0, 4.0, 2.0];
+        let input = FeInput::from_columns(
+            &y,
+            &[x1],
+            vec!["x1".to_string()],
+            &entity,
+            Some(&time),
+            "y".into(),
+        )
+        .unwrap();
+
+        let result = FeEstimator::fit(input, FeEffects::TwoWay, FeCovType::Classical, 0.95);
+
+        assert_eq!(result.unwrap_err(), PanelError::OutcomeConstantWithinEntity);
     }
 
     #[test]
@@ -2398,7 +2724,7 @@ mod tests {
         // getter）。`ols::fit_exposes_input_cov_type_and_residuals_via_getters`と同型。
         let entity = strings(&["a", "a", "b", "b"]);
         let x1 = vec![1.0, 2.0, 3.0, 4.0];
-        let y = [7.0, 9.0, 11.0, 13.0];
+        let y = [7.0, 9.2, 11.0, 12.6];
         let input =
             FeInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
                 .unwrap();
@@ -2434,8 +2760,8 @@ mod tests {
         // （N=2,T=2のn=4だとdf_model=1+3=4となりn<=df_modelで弾かれてしまう）。
         // 2-way within変換後、x1_out ≈ 2 * y_out がほぼ成り立つため、切片なしOLSの
         // スロープは0.5にほぼ一致するはず。x1はy*2からごくわずかに擾乱を入れる
-        // （厳密にx1=2*yだと残差が全行ゼロになり、`OlsEstimator::fit`のF検定
-        // （`wald_f_test`）が分散ゼロによる特異行列で`ComputationFailed`を返してしまう
+        // （厳密にx1=2*yだと残差が全行ゼロになり、F検定
+        // （`wald_f_test`）が分散ゼロによる特異行列で`NearSingularMatrix`を返してしまう
         // 退化ケースを踏むため。既存の`WlsEstimator`のテストコメント
         // `fit_without_intercept_uses_uncentered_r_squared_and_omits_const`と同じ理由）。
         let entity = strings(&["a", "a", "a", "b", "b", "b", "c", "c", "c"]);
@@ -2459,7 +2785,7 @@ mod tests {
         // との数値比較ではなく、本テスト自身が注入した擾乱ノイズに対する内部整合性の
         // 確認のため）。ノイズの大きさ（最大0.02、xスケール比で見ると相対誤差1〜2%程度）
         // に対してスロープ推定への影響がこの範囲に収まることを確認する目的の閾値。
-        assert!((*fe.estimator().params().get(0, 0) - 0.5).abs() < 0.01);
+        assert!((*fe.params().get(0, 0) - 0.5).abs() < 0.01);
         assert_eq!(fe.effects(), FeEffects::TwoWay);
         assert_eq!(fe.df_model(), 6);
         assert_eq!(fe.n_periods(), Some(3));
@@ -2528,6 +2854,45 @@ mod tests {
         let result = FeEstimator::fit(input, FeEffects::TwoWay, FeCovType::Classical, 0.95);
 
         assert_eq!(result.unwrap_err(), PanelError::TwoWayRequiresTime);
+    }
+
+    #[test]
+    fn fe_estimator_fit_two_way_without_time_reports_requires_time_before_any_other_error() {
+        // 2-wayで`time`が無いことは、他のどの欠陥（entityのsingleton・不正な
+        // `confidence_level`・cov_type固有の検証）よりも先に報告される。優先順位は
+        // `fit()`冒頭の`two_way_time`が守る。
+        let entity = strings(&["a", "a", "c"]);
+        let y = [1.0, 2.0, 3.0];
+        let covs = || {
+            vec![
+                FeCovType::Classical,
+                FeCovType::Hc2,
+                FeCovType::Cluster { groups: None },
+                FeCovType::Dk {
+                    bandwidth: Some(100),
+                    time: lex_time(&["1", "2", "3"]),
+                },
+            ]
+        };
+        for cov_type in covs() {
+            let input = FeInput::from_columns(
+                &y,
+                &[vec![1.0, 2.0, 4.0]],
+                vec!["x1".to_string()],
+                &entity,
+                None,
+                "y".into(),
+            )
+            .unwrap();
+
+            let result = FeEstimator::fit(input, FeEffects::TwoWay, cov_type.clone(), 1.5);
+
+            assert_eq!(
+                result.unwrap_err(),
+                PanelError::TwoWayRequiresTime,
+                "cov_type = {cov_type:?}"
+            );
+        }
     }
 
     #[test]
@@ -2621,7 +2986,7 @@ mod tests {
 
     #[test]
     fn fe_estimator_fit_propagates_invalid_confidence_level_error() {
-        // 委譲先の`OlsEstimator::fit`が検証する`confidence_level`の範囲チェック
+        // `confidence_level`の範囲チェック
         // （`(0, 1)`の範囲外）が、`PanelError::WithinRegressionFailed`として正しく
         // 伝播することを確認する（`iv::two_sls`の同型テストに倣う）。
         let entity = strings(&["a", "a", "b", "b"]);
@@ -2645,11 +3010,10 @@ mod tests {
 
     #[test]
     fn fe_estimator_fit_wraps_ols_failure_as_within_regression_failed() {
-        // 自由度検証（`n <= df_model`）が`OlsEstimator::fit`自身の`n <= k`
-        // チェックより常に厳しい（`df_model = k + neffects > k`）ため、`OlsEstimator::fit`
-        // 側の観測数不足はこの経路では発生しえなくなった（`fe_estimator_fit_propagates_
-        // insufficient_degrees_of_freedom_error`が先に弾く）。そのため、ここでは
-        // `OlsEstimator::fit`固有の別の失敗——完全な多重共線性（`LeastSquaresError::
+        // 自由度検証（`n <= df_model`）が最小二乗側の`n <= k`相当の条件より常に厳しい
+        // （`df_model = k + neffects > k`）ため、最小二乗側の観測数不足はこの経路では
+        // 発生しえない（`fe_estimator_fit_propagates_insufficient_degrees_of_freedom_error`が
+        // 先に弾く）。そのため、ここでは最小二乗固有の別の失敗——完全な多重共線性（`LeastSquaresError::
         // SingularMatrix`）——を踏ませる: x2はx1のちょうど2倍で、within変換
         // （線形変換）後も比例関係`x2_demeaned = 2 * x1_demeaned`が保たれ完全共線になる。
         // n=6（3エンティティ、singletonではない）・k=2でdf_model=2+3=5、n=6>5と
@@ -2679,7 +3043,7 @@ mod tests {
     #[test]
     fn fe_estimator_fit_propagates_insufficient_degrees_of_freedom_error() {
         // n=4・n_entities=2・k=2でdf_model=k+n_entities=4となり、n<=df_modelのため
-        // `OlsEstimator::fit`へ委譲する前に`PanelError::InsufficientDegreesOfFreedom`で
+        // 最小二乗へ進む前に`PanelError::InsufficientDegreesOfFreedom`で
         // 弾かれることを確認する。
         let entity = strings(&["a", "a", "b", "b"]);
         let y = [1.0, 2.0, 3.0, 4.0];
@@ -2706,6 +3070,63 @@ mod tests {
                 k: 2,
             }
         );
+    }
+
+    /// エラーの`min_obs`が`fit`の実際の境界と一致する: 拒否される最大の`n`（`n = df_model`）の
+    /// 次の`n = min_obs`で成功する。1-wayの`n_effects`は個体数（ここでは2）。
+    #[test]
+    fn insufficient_degrees_of_freedom_min_obs_matches_the_fit_boundary() {
+        use crate::shared::error::ErrorInfo;
+        use crate::shared::error_catalog::ParamValue;
+
+        let build = |n: usize, k: usize| {
+            let entity: Vec<String> = (0..n)
+                .map(|i| if i < n.div_ceil(2) { "a" } else { "b" }.to_string())
+                .collect();
+            let y: Vec<f64> = (0..n)
+                .map(|i| (i as f64 * 0.9).sin() + 0.1 * i as f64)
+                .collect();
+            let x: Vec<Vec<f64>> = (0..k)
+                .map(|j| {
+                    (0..n)
+                        .map(|i| ((i * (j + 2) + j) as f64 * 1.3).cos())
+                        .collect()
+                })
+                .collect();
+            let names = (0..k).map(|j| format!("x{j}")).collect();
+            FeInput::from_columns(&y, &x, names, &entity, None, "y".into()).unwrap()
+        };
+        for k in 2..=4_usize {
+            let n_effects = 2;
+            let rejected_n = n_effects + k;
+            let err = FeEstimator::fit(
+                build(rejected_n, k),
+                FeEffects::OneWay,
+                FeCovType::Classical,
+                0.95,
+            )
+            .unwrap_err();
+            let min_obs = err
+                .report()
+                .all_params()
+                .into_iter()
+                .find_map(|(name, value)| match (name.as_str(), value) {
+                    ("min_obs", ParamValue::Int(v)) => Some(v as usize),
+                    _ => None,
+                })
+                .expect("min_obs");
+            assert_eq!(min_obs, rejected_n + 1, "k={k}");
+            assert!(
+                FeEstimator::fit(
+                    build(min_obs, k),
+                    FeEffects::OneWay,
+                    FeCovType::Classical,
+                    0.95
+                )
+                .is_ok(),
+                "k={k}"
+            );
+        }
     }
 
     /// N=4（id: a,b,c,d）×T=3（t: 1,2,3）のバランスパネル。`fe_estimator_fit_one_way_
@@ -2735,7 +3156,7 @@ mod tests {
 
         assert_eq!(fe.df_model(), 5); // k(1) + n_entities(4)
         assert_eq!(fe.df_resid(), 7); // n(12) - df_model(5)
-        assert!((*fe.estimator().params().get(0, 0) - 1.402_777_777_777_78).abs() < 1e-9);
+        assert!((*fe.params().get(0, 0) - 1.402_777_777_777_78).abs() < 1e-9);
         assert!((*fe.std_errors().get(0, 0) - 0.432_598_838_244_034).abs() < 1e-6);
         assert!((*fe.test_stats().get(0, 0) - 3.242_675_785_889_31).abs() < 1e-6);
         assert!((*fe.p_values().get(0, 0) - 0.014_200_386_789_949_8).abs() < 1e-6);
@@ -2751,8 +3172,8 @@ mod tests {
         assert!((fe.r_squared_overall() - 0.732_444_936_421_435).abs() < 1e-9);
         // F統計量: k=1のため「1自由度のF検定は両側t検定と代数的に等価」
         // （モジュールdoc「自由度調整」のF統計量節参照）。
-        assert!((fe.f_statistic() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
-        assert!((fe.f_p_value() - *fe.p_values().get(0, 0)).abs() < 1e-9);
+        assert!((fe.f_statistic().unwrap() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((fe.f_p_value().unwrap() - *fe.p_values().get(0, 0)).abs() < 1e-9);
     }
 
     #[test]
@@ -2773,7 +3194,7 @@ mod tests {
 
         assert_eq!(fe.df_model(), 7); // k(1) + neffects(n_entities(4)+n_periods(3)-1=6)
         assert_eq!(fe.df_resid(), 5); // n(12) - df_model(7)
-        assert!((*fe.estimator().params().get(0, 0) - 0.822_429_906_542_056).abs() < 1e-9);
+        assert!((*fe.params().get(0, 0) - 0.822_429_906_542_056).abs() < 1e-9);
         assert!((*fe.std_errors().get(0, 0) - 0.227_239_295_931_651).abs() < 1e-6);
         assert!((*fe.test_stats().get(0, 0) - 3.619_223_969_033_19).abs() < 1e-6);
         assert!((*fe.p_values().get(0, 0) - 0.015_231_948_369_008_1).abs() < 1e-6);
@@ -2791,8 +3212,8 @@ mod tests {
         assert!((fe.r_squared_overall() - 0.511_356_250_429_877).abs() < 1e-9);
         // F統計量: k=1のため「1自由度のF検定は両側t検定と代数的に等価」
         // （モジュールdoc「自由度調整」のF統計量節参照）。
-        assert!((fe.f_statistic() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
-        assert!((fe.f_p_value() - *fe.p_values().get(0, 0)).abs() < 1e-9);
+        assert!((fe.f_statistic().unwrap() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((fe.f_p_value().unwrap() - *fe.p_values().get(0, 0)).abs() < 1e-9);
     }
 
     // ── F統計量 ───────────────────────────────────────────────────────────
@@ -2834,8 +3255,8 @@ mod tests {
         assert_eq!(fe.df_resid(), 6); // n(12) - df_model(k(2)+n_entities(4))
         // `PanelOLS(y, [x1, x2], entity_effects=True).fit(cov_type="unadjusted",
         // debiased=True).f_statistic`: F(2,6)。
-        assert!((fe.f_statistic() - 4.544_331_119_544_591).abs() < 1e-9);
-        assert!((fe.f_p_value() - 0.062_878_408_429_192_23).abs() < 1e-9);
+        assert!((fe.f_statistic().unwrap() - 4.544_331_119_544_591).abs() < 1e-9);
+        assert!((fe.f_p_value().unwrap() - 0.062_878_408_429_192_23).abs() < 1e-9);
     }
 
     #[test]
@@ -2856,24 +3277,53 @@ mod tests {
         assert_eq!(fe.df_resid(), 4); // n(12) - df_model(k(2)+neffects(4+3-1=6))
         // `PanelOLS(y, [x1, x2], entity_effects=True, time_effects=True).fit(
         // cov_type="unadjusted", debiased=True).f_statistic`: F(2,4)。
-        assert!((fe.f_statistic() - 9.574_202_321_891_761).abs() < 1e-9);
-        assert!((fe.f_p_value() - 0.029_859_178_280_428_5).abs() < 1e-9);
+        assert!((fe.f_statistic().unwrap() - 9.574_202_321_891_761).abs() < 1e-9);
+        assert!((fe.f_p_value().unwrap() - 0.029_859_178_280_428_5).abs() < 1e-9);
     }
 
-    // `PanelError::FTestFailed`（`wald_f_test`の`ensure_well_conditioned_symmetric_matrix`
-    // backstopがFE独自の`cov_params`に対して発火する経路）は、意図的にテストを追加して
-    // いない。OLSの`fit_returns_computation_failed_for_extreme_scale_difference_in_f_test`
-    // と同型の「説明変数間の極端なスケール差」構成を試したが、`FeEstimator::fit`が委譲する
-    // `OlsEstimator::fit`自身が（`CovType::Classical`で）同じ設計行列に対する同種の
-    // F検定を内部で無条件に計算しており、そちらが先に`WithinRegressionFailed`として
-    // 失敗してしまい`FTestFailed`（FEが`cov_type`別に計算し直した後段の`wald_f_test`
-    // 呼び出し）まで到達しなかった（実地確認済み）。`cov_type=Classical`である限り
-    // 両者はほぼ同じ行列を検定するため構造的に避けられない。`FTestFailed`を単独で
-    // 再現するには、委譲先の内部検定は素通りしつつFE独自の頑健共分散（HC/Cluster/HAC）
-    // だけがほぼ特異になる病的なデータが要るが、確実な構成方法が見つからなかったため、
-    // このbackstop自体は`wald_f_test`側のOLSテストで既に検証済み（同じ関数を再利用して
-    // いるため実装自体の正しさはそちらで担保される）という理由で、この一分岐（FE経由の
-    // 到達）だけのテストは見送る。
+    #[test]
+    fn fe_estimator_fit_returns_f_test_failed_for_extreme_scale_difference() {
+        // x1は1e6オーダー、x2は1e-3オーダーとスケールが極端に異なる（x3は通常スケール）。
+        // within変換後も3列は線形従属ではないため設計行列自体はフルランク
+        // （`WithinRegressionFailed`にはならない）だが、傾き係数の同時共分散部分行列の条件数が
+        // スケール比の2乗（≈1e18）相当となり倍精度の限界を超えるため、FE自身のF検定
+        // （`wald_f_test`の`ensure_well_conditioned_symmetric_matrix`）が`FTestFailed`を返す。
+        // 以前は委譲先の`OlsEstimator::fit`が同種のF検定を先に計算して
+        // `WithinRegressionFailed`として失敗していたため、この経路は再現できなかった。
+        let n = 20;
+        let entity: Vec<String> = (0..n).map(|i| format!("e{}", i % 5)).collect();
+        let x1: Vec<f64> = (0..n).map(|i| 1e6 * (((i * 7) % 11) as f64)).collect();
+        let x2: Vec<f64> = (0..n)
+            .map(|i| 1e-3 * (((i * 5) % 13) as f64).powi(2))
+            .collect();
+        let x3: Vec<f64> = (0..n).map(|i| ((i * 3) % 7) as f64).collect();
+        let y: Vec<f64> = (0..n)
+            .map(|i| {
+                let noise = if i % 2 == 0 { 1e3 } else { -1e3 };
+                2.0 * x1[i] + 3.0 * x2[i] + 0.5 * x3[i] + noise
+            })
+            .collect();
+        let input = FeInput::from_columns(
+            &y,
+            &[x1, x2, x3],
+            vec!["x1".to_string(), "x2".to_string(), "x3".to_string()],
+            &entity,
+            None,
+            "y".into(),
+        )
+        .unwrap();
+
+        let result = FeEstimator::fit(input, FeEffects::OneWay, FeCovType::Classical, 0.95);
+
+        assert!(matches!(
+            result.unwrap_err(),
+            PanelError::FTestFailed {
+                source: LeastSquaresError::Common(CommonError::NearSingularMatrix {
+                    matrix: MatrixKind::CoefficientCovariance
+                })
+            }
+        ));
+    }
 
     // ── パネル固有R² ─────────────────────────────────────────────────────
 
@@ -2894,7 +3344,7 @@ mod tests {
 
         let fe = FeEstimator::fit(input, FeEffects::OneWay, FeCovType::Classical, 0.95).unwrap();
 
-        assert!((*fe.estimator().params().get(0, 0) - 1.497_297_297_297_297_5).abs() < 1e-9);
+        assert!((*fe.params().get(0, 0) - 1.497_297_297_297_297_5).abs() < 1e-9);
         assert!((fe.r_squared_within() - 0.975_885_532_591_415).abs() < 1e-9);
         assert!((fe.r_squared_between() - 0.943_825_384_692_178_9).abs() < 1e-9);
         assert!((fe.r_squared_overall() - 0.947_558_874_189_504_9).abs() < 1e-9);
@@ -2916,7 +3366,7 @@ mod tests {
 
         let fe = FeEstimator::fit(input, FeEffects::OneWay, FeCovType::Classical, 0.95).unwrap();
 
-        assert!((*fe.estimator().params().get(0, 0) - (-1.310_344_827_586_206_9)).abs() < 1e-9);
+        assert!((*fe.params().get(0, 0) - (-1.310_344_827_586_206_9)).abs() < 1e-9);
         assert!((fe.r_squared_within() - 0.889_162_561_576_354_6).abs() < 1e-9);
         assert_eq!(fe.r_squared_between(), 0.0);
         assert!((fe.r_squared_overall() - (-2.330_219_126_889_757_4)).abs() < 1e-9);
@@ -2996,8 +3446,8 @@ mod tests {
         .unwrap();
 
         let fe = FeEstimator::fit(input, FeEffects::TwoWay, FeCovType::Classical, 0.95).unwrap();
-        let beta = *fe.estimator().params().get(0, 0);
-        let residuals = fe.estimator().residuals();
+        let beta = *fe.params().get(0, 0);
+        let residuals = fe.residuals();
 
         let FixedEffects::TwoWay {
             entity: entity_effects,
@@ -3038,9 +3488,9 @@ mod tests {
         assert!((effects["a"] - 2.0).abs() < 1e-12);
         assert!((effects["b"] - 6.0).abs() < 1e-12);
         assert!((effects["c"] - 3.0).abs() < 1e-12);
-        // F統計量: k=0（検定対象の傾き係数が無い）はOlsEstimatorと同じくNaN。
-        assert!(fe.f_statistic().is_nan());
-        assert!(fe.f_p_value().is_nan());
+        // F統計量: k=0（検定対象の傾き係数が無い）は`OlsEstimator`と同じく`None`。
+        assert!(fe.f_statistic().is_none());
+        assert!(fe.f_p_value().is_none());
     }
 
     #[test]
@@ -3092,12 +3542,12 @@ mod tests {
         assert!((time["9"] - (-3.0)).abs() < 1e-12);
         assert!((entity["e1"] - 3.5).abs() < 1e-12);
         assert!((entity["e2"] - 8.5).abs() < 1e-12);
-        // F統計量: k=0（検定対象の傾き係数が無い）はOlsEstimatorと同じくNaN。
-        assert!(fe.f_statistic().is_nan());
-        assert!(fe.f_p_value().is_nan());
+        // F統計量: k=0（検定対象の傾き係数が無い）は`OlsEstimator`と同じく`None`。
+        assert!(fe.f_statistic().is_none());
+        assert!(fe.f_p_value().is_none());
 
         // 不変条件: k=0でも `α_i + γ_t + ε̂_it = y_it`（正規化の選び方に依存しない）。
-        let residuals = fe.estimator().residuals();
+        let residuals = fe.residuals();
         let entity_ids = ["e1", "e1", "e2", "e2"];
         let time_ids = ["9", "10", "9", "10"];
         for i in 0..y.len() {
@@ -3126,8 +3576,8 @@ mod tests {
         // （モジュールdoc「自由度調整」のF統計量節参照）。HC1のcov_paramsが正しく
         // wald_f_testに渡っていることの回帰ガード（classical以外のcov_typeでの唯一の
         // F統計量検証、rust-reviewer指摘）。
-        assert!((hc1.f_statistic() - hc1.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
-        assert!((hc1.f_p_value() - *hc1.p_values().get(0, 0)).abs() < 1e-9);
+        assert!((hc1.f_statistic().unwrap() - hc1.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((hc1.f_p_value().unwrap() - *hc1.p_values().get(0, 0)).abs() < 1e-9);
 
         let (entity, _time, x, y) = fixest_reference_input();
         let input =
@@ -3137,8 +3587,8 @@ mod tests {
         assert!((*hc2.std_errors().get(0, 0) - 0.492_939_313_874_837).abs() < 1e-9);
         assert!((*hc2.test_stats().get(0, 0) - 2.845_741_328_178_91).abs() < 1e-6);
         assert!((*hc2.p_values().get(0, 0) - 0.024_839_464_368_821_2).abs() < 1e-6);
-        assert!((hc2.f_statistic() - hc2.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
-        assert!((hc2.f_p_value() - *hc2.p_values().get(0, 0)).abs() < 1e-9);
+        assert!((hc2.f_statistic().unwrap() - hc2.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((hc2.f_p_value().unwrap() - *hc2.p_values().get(0, 0)).abs() < 1e-9);
 
         let (entity, _time, x, y) = fixest_reference_input();
         let input =
@@ -3148,8 +3598,8 @@ mod tests {
         assert!((*hc3.std_errors().get(0, 0) - 0.687_184_240_890_824).abs() < 1e-9);
         assert!((*hc3.test_stats().get(0, 0) - 2.041_341_599_975_14).abs() < 1e-6);
         assert!((*hc3.p_values().get(0, 0) - 0.080_553_228_223_064_4).abs() < 1e-6);
-        assert!((hc3.f_statistic() - hc3.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
-        assert!((hc3.f_p_value() - *hc3.p_values().get(0, 0)).abs() < 1e-9);
+        assert!((hc3.f_statistic().unwrap() - hc3.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((hc3.f_p_value().unwrap() - *hc3.p_values().get(0, 0)).abs() < 1e-9);
     }
 
     #[test]
@@ -3168,8 +3618,8 @@ mod tests {
         .unwrap();
         let hc1 = FeEstimator::fit(input, FeEffects::TwoWay, FeCovType::Hc1, 0.95).unwrap();
         assert!((*hc1.std_errors().get(0, 0) - 0.205_876_715_757_555).abs() < 1e-9);
-        assert!((hc1.f_statistic() - hc1.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
-        assert!((hc1.f_p_value() - *hc1.p_values().get(0, 0)).abs() < 1e-9);
+        assert!((hc1.f_statistic().unwrap() - hc1.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((hc1.f_p_value().unwrap() - *hc1.p_values().get(0, 0)).abs() < 1e-9);
 
         let (entity, time, x, y) = fixest_reference_input();
         let input = FeInput::from_columns(
@@ -3183,8 +3633,8 @@ mod tests {
         .unwrap();
         let hc2 = FeEstimator::fit(input, FeEffects::TwoWay, FeCovType::Hc2, 0.95).unwrap();
         assert!((*hc2.std_errors().get(0, 0) - 0.304_984_723_480_691).abs() < 1e-9);
-        assert!((hc2.f_statistic() - hc2.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
-        assert!((hc2.f_p_value() - *hc2.p_values().get(0, 0)).abs() < 1e-9);
+        assert!((hc2.f_statistic().unwrap() - hc2.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((hc2.f_p_value().unwrap() - *hc2.p_values().get(0, 0)).abs() < 1e-9);
 
         let (entity, time, x, y) = fixest_reference_input();
         let input = FeInput::from_columns(
@@ -3198,8 +3648,8 @@ mod tests {
         .unwrap();
         let hc3 = FeEstimator::fit(input, FeEffects::TwoWay, FeCovType::Hc3, 0.95).unwrap();
         assert!((*hc3.std_errors().get(0, 0) - 0.737_275_671_443_649).abs() < 1e-9);
-        assert!((hc3.f_statistic() - hc3.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
-        assert!((hc3.f_p_value() - *hc3.p_values().get(0, 0)).abs() < 1e-9);
+        assert!((hc3.f_statistic().unwrap() - hc3.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((hc3.f_p_value().unwrap() - *hc3.p_values().get(0, 0)).abs() < 1e-9);
     }
 
     #[test]
@@ -3226,8 +3676,8 @@ mod tests {
         assert!((*fe.std_errors().get(0, 0) - 0.603_104_702_643_124_5).abs() < 1e-9);
         assert!((*fe.test_stats().get(0, 0) - 2.325_927_441_172_424).abs() < 1e-6);
         assert!((*fe.p_values().get(0, 0) - 0.102_527_902_595_719_5).abs() < 1e-6);
-        assert!((fe.f_statistic() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
-        assert!((fe.f_p_value() - *fe.p_values().get(0, 0)).abs() < 1e-9);
+        assert!((fe.f_statistic().unwrap() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((fe.f_p_value().unwrap() - *fe.p_values().get(0, 0)).abs() < 1e-9);
         // `f_df()`（カバレッジ監査で判明した未検証の単純getter。分母自由度が
         // `df_resid`から`df_inference`に変わったため、`df_resid`
         // （`n-df_model=12-5=7`）とは異なる`df_inference`（`G-1=n_entities-1=3`）を
@@ -3264,8 +3714,8 @@ mod tests {
         assert!((*fe.std_errors().get(0, 0) - 0.158_754_475_018_330_4).abs() < 1e-9);
         assert!((*fe.test_stats().get(0, 0) - 5.180_514_794_604_026).abs() < 1e-6);
         assert!((*fe.p_values().get(0, 0) - 0.013_962_411_468_796_73).abs() < 1e-6);
-        assert!((fe.f_statistic() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
-        assert!((fe.f_p_value() - *fe.p_values().get(0, 0)).abs() < 1e-9);
+        assert!((fe.f_statistic().unwrap() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((fe.f_p_value().unwrap() - *fe.p_values().get(0, 0)).abs() < 1e-9);
     }
 
     #[test]
@@ -3282,14 +3732,16 @@ mod tests {
         let fe = FeEstimator::fit(
             input,
             FeEffects::OneWay,
-            FeCovType::Cluster { groups: Some(time) },
+            FeCovType::Cluster {
+                groups: Some(GroupCodes::from_labels_without_keys(&time)),
+            },
             0.95,
         )
         .unwrap();
 
         assert!((*fe.std_errors().get(0, 0) - 0.115_060_764_365_329_2).abs() < 1e-9);
-        assert!((fe.f_statistic() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
-        assert!((fe.f_p_value() - *fe.p_values().get(0, 0)).abs() < 1e-9);
+        assert!((fe.f_statistic().unwrap() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((fe.f_p_value().unwrap() - *fe.p_values().get(0, 0)).abs() < 1e-9);
     }
 
     #[test]
@@ -3388,16 +3840,7 @@ mod tests {
         let k = 1;
         let n_entities = 2;
         let df_model = k + n_entities; // 実際のFeEstimator::fitと同じneffects=n_entitiesの関係
-        let k_correction = fe_cluster_k_correction(
-            FeEffects::OneWay,
-            &entity,
-            None,
-            n_entities,
-            None,
-            df_model,
-            k,
-            &entity,
-        );
+        let k_correction = fe_cluster_k_correction(&entity, None, n_entities, df_model, k, &entity);
         assert_eq!(k_correction, k + 1);
     }
 
@@ -3414,16 +3857,7 @@ mod tests {
         let k = 1;
         let n_entities = 2;
         let df_model = 2; // 本来のneffects=n_entities=2との整合を意図的に崩す
-        let k_correction = fe_cluster_k_correction(
-            FeEffects::OneWay,
-            &entity,
-            None,
-            n_entities,
-            None,
-            df_model,
-            k,
-            &entity,
-        );
+        let k_correction = fe_cluster_k_correction(&entity, None, n_entities, df_model, k, &entity);
         assert_eq!(
             k_correction,
             k + 1,
@@ -3447,14 +3881,17 @@ mod tests {
             input,
             FeEffects::OneWay,
             FeCovType::Cluster {
-                groups: Some(single_cluster),
+                groups: Some(GroupCodes::from_labels_without_keys(&single_cluster)),
             },
             0.95,
         );
 
         assert_eq!(
             result.unwrap_err(),
-            PanelError::Common(CommonError::InsufficientClusters { g: 1 })
+            PanelError::Common(CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 1
+            })
         );
     }
 
@@ -3483,7 +3920,7 @@ mod tests {
             input,
             FeEffects::OneWay,
             FeCovType::Cluster {
-                groups: Some(two_clusters),
+                groups: Some(GroupCodes::from_labels_without_keys(&two_clusters)),
             },
             0.95,
         );
@@ -3525,19 +3962,19 @@ mod tests {
         )
         .unwrap();
 
-        assert!((*fe.estimator().params().get(0, 0) - 1.402_777_777_777_78).abs() < 1e-9);
+        assert!((*fe.params().get(0, 0) - 1.402_777_777_777_78).abs() < 1e-9);
         assert!((*fe.std_errors().get(0, 0) - 0.112_778_272_530_122_7).abs() < 1e-9);
         assert!((*fe.test_stats().get(0, 0) - 12.438_369_078_610_43).abs() < 1e-6);
         assert!((*fe.p_values().get(0, 0) - 0.006_401_580_635_206_468).abs() < 1e-9);
         assert!((*fe.conf_lower().get(0, 0) - 0.917_532_035_619_617).abs() < 1e-6);
         assert!((*fe.conf_upper().get(0, 0) - 1.888_023_519_935_939).abs() < 1e-6);
-        assert!((fe.f_statistic() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
-        assert!((fe.f_p_value() - *fe.p_values().get(0, 0)).abs() < 1e-9);
+        assert!((fe.f_statistic().unwrap() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((fe.f_p_value().unwrap() - *fe.p_values().get(0, 0)).abs() < 1e-9);
     }
 
     #[test]
     fn fe_estimator_fit_one_way_hac_uses_explicit_time_override_without_fe_input_time() {
-        // `FeCovType::Dk.time`（明示指定）は`FeInput.time()`を経由せずに
+        // `FeCovType::Dk.time`（明示指定）は`FeInput.time_keys()`を経由せずに
         // DK HACを成立させられる（`engine_pybind`の`FEOptions.dk_time`が1-way FE + DK HAC
         // の組み合わせをこの経路で配線する想定）。`FeInput::from_columns`には`time=None`を
         // 渡し、`fe_estimator_fit_one_way_hac_matches_fixest_default_bandwidth`と
@@ -3558,15 +3995,15 @@ mod tests {
         )
         .unwrap();
 
-        assert!((*fe.estimator().params().get(0, 0) - 1.402_777_777_777_78).abs() < 1e-9);
+        assert!((*fe.params().get(0, 0) - 1.402_777_777_777_78).abs() < 1e-9);
         assert!((*fe.std_errors().get(0, 0) - 0.112_778_272_530_122_7).abs() < 1e-9);
     }
 
     #[test]
     fn fe_estimator_fit_one_way_hac_ignores_fe_input_time() {
-        // `FeInput.time()`にも`time`があっても、DKの時点列は`FeCovType::Dk.time`だけから
-        // 決まる（`FeInput.time()`は2-wayの固定効果の時間次元専用、モジュールdoc
-        // 「Driscoll-Kraay型パネルHAC対応」参照）ことを確認する。`FeInput.time()`にわざと
+        // `FeInput.time_keys()`にも`time`があっても、DKの時点列は`FeCovType::Dk.time`だけから
+        // 決まる（`FeInput.time_keys()`は2-wayの固定効果の時間次元専用、モジュールdoc
+        // 「Driscoll-Kraay型パネルHAC対応」参照）ことを確認する。`FeInput.time_keys()`にわざと
         // 全観測が同一のダミー時点列を渡し、それが無視されて`FeCovType::Dk.time`の方の結果と
         // 一致することを確認する。
         let (entity, time, x, y) = fixest_reference_input();
@@ -3668,21 +4105,16 @@ mod tests {
         // `testing-policy.md`が警告する「ループ本体がテストで一度も複数回実行されない」
         // 落とし穴と同型）。
         //
-        // **fixestの`vcov=DK(2)`とは意図的に数値比較しない**（実装時に
-        // devcontainer内のfixest 0.14.2で実地確認・rust-reviewerが追加検証済み。
-        // fixestの内部C++実装（`cpp_driscoll_kraay`）を`.Call`経由で直接叩いて分解した
-        // 結果、不一致が起きるのは「`bandwidth>=2`全般」ではなく、**`bandwidth ==
-        // t_periods - 1`（許容範囲`[0, t_periods)`の上限ちょうど）のときに限られる**
-        // ことが判明した——T=5の合成データで`bandwidth=0..=3`（いずれも`< t_periods-1`）は
-        // 本実装と`cpp_driscoll_kraay`が完全一致し、`bandwidth=4`（`=t_periods-1`）の
-        // ときだけ`cpp_driscoll_kraay`が最後のラグ項（`l=bandwidth`）を落とした値に
-        // 一致した。本テストの`t_periods=3`・`bandwidth=2`はまさにこの境界ケース
-        // （`bandwidth=2=t_periods-1`）に該当する。原因はfixest側の独立した実装詳細
-        // （バンド幅が時点数の上限ちょうどのときに意図的に最終ラグ項を切り捨てる仕様か、
-        // C++実装のoff-by-oneか未確認）。この差はこの変更が扱う小標本補正
-        // （`G/(G-1)`・`K`・推論の自由度）とは無関係な、カーネル本体の項数の話のため、
-        // 本Issueのスコープ外として別途GitHub Issue化する（利用者が許容範囲の上限
-        // ちょうどを明示指定すると、fixestと一致しない実運用上の落とし穴になりうる）。
+        // **fixestの`vcov=DK(2)`とは意図的に数値比較しない**（devcontainer内のfixest
+        // 0.14.2で実地確認済み）。本テストの`t_periods=3`・`bandwidth=2`は許容範囲
+        // `[0, t_periods)`の上限ちょうど（`bandwidth == t_periods - 1`）で、この境界では
+        // fixestが最後のラグ項（`l=bandwidth`）を落とした値を返し、標準のBartlettカーネルを
+        // 実装した本実装と一致しない。原因はfixestのC++実装`cpp_driscoll_kraay`のoff-by-one
+        // （ラグの個数`L = bandwidth + 1`に`L > T - 1`の上限を課すため、`bandwidth == T - 1`
+        // のときだけ最大ラグが`T - 2`に切り詰められる）で、`bandwidth <= t_periods - 2`では
+        // 一致する。本実装は標準カーネルを維持する（`docs/spec/fe-spec.md`3.3節7.参照）。
+        // 境界の標準カーネルは`panel_driscoll_kraay_cov_params`の単体テスト（定義式の手計算）と
+        // plmとの照合（`fe_plm_crosscheck.json`の`dk_max_bandwidth`）で検証している。
         //
         // このテスト自体は、変更していないカーネル計算（`bandwidth=1`の既定テストで
         // fixestと一致確認済みの実装）に新しい小標本補正（`(t_periods/(t_periods-1))×
@@ -3745,14 +4177,14 @@ mod tests {
         )
         .unwrap();
 
-        assert!((*fe.estimator().params().get(0, 0) - 0.822_429_906_542_056).abs() < 1e-9);
+        assert!((*fe.params().get(0, 0) - 0.822_429_906_542_056).abs() < 1e-9);
         assert!((*fe.std_errors().get(0, 0) - 0.258_392_668_199_213_7).abs() < 1e-9);
         assert!((*fe.test_stats().get(0, 0) - 3.182_868_586_302_089).abs() < 1e-6);
         assert!((*fe.p_values().get(0, 0) - 0.086_146_397_773_918_86).abs() < 1e-9);
         assert!((*fe.conf_lower().get(0, 0) - (-0.289_344_012_632_537_7)).abs() < 1e-6);
         assert!((*fe.conf_upper().get(0, 0) - 1.934_203_825_716_65).abs() < 1e-6);
-        assert!((fe.f_statistic() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
-        assert!((fe.f_p_value() - *fe.p_values().get(0, 0)).abs() < 1e-9);
+        assert!((fe.f_statistic().unwrap() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
+        assert!((fe.f_p_value().unwrap() - *fe.p_values().get(0, 0)).abs() < 1e-9);
     }
 
     #[test]
@@ -3761,8 +4193,8 @@ mod tests {
         // kernel_by_new_correction`）と同様、2-way FEでもラグ項ループが複数回（l=1,2）
         // 実行されるケースを検証する（rust-reviewer指摘）。同テストのコメントの通り、
         // `bandwidth == t_periods - 1`（ここでは`2 == 3 - 1`）という境界値はfixestの
-        // 生カーネルと一致しない独立した問題があるため、fixestとの数値比較はせず
-        // 回帰ガードとして期待値を固定する。
+        // C++実装のoff-by-oneにより本実装と一致しないため（同テストのコメント参照）、
+        // fixestとの数値比較はせず回帰ガードとして期待値を固定する。
         let (entity, time, x, y) = fixest_reference_input();
         let input = FeInput::from_columns(
             &y,
@@ -3835,7 +4267,9 @@ mod tests {
         let cluster = FeEstimator::fit(
             input,
             FeEffects::OneWay,
-            FeCovType::Cluster { groups: Some(time) },
+            FeCovType::Cluster {
+                groups: Some(GroupCodes::from_labels_without_keys(&time)),
+            },
             0.95,
         )
         .unwrap();
@@ -3934,6 +4368,7 @@ mod tests {
         assert_eq!(
             result.unwrap_err(),
             PanelError::InsufficientDkPeriodsForInference { t_periods: 3, q: 3 }
+                .in_stage(Stage::OverallFTest)
         );
     }
 
@@ -3952,7 +4387,7 @@ mod tests {
             0.95,
         )
         .unwrap();
-        assert!(fe.f_statistic().is_finite());
+        assert!(fe.f_statistic().unwrap().is_finite());
         assert!((0..2).all(|j| *fe.std_errors().get(j, 0) > 0.0));
     }
 
@@ -3972,6 +4407,7 @@ mod tests {
         assert_eq!(
             result.unwrap_err(),
             PanelError::InsufficientDkPeriodsForInference { t_periods: 3, q: 3 }
+                .in_stage(Stage::OverallFTest)
         );
     }
 
@@ -4001,10 +4437,10 @@ mod tests {
 
     /// `input`が持つ時点（ラベルの辞書順）を、DKの時点列としてそのまま渡す。
     fn dk_time_from(input: &FeInput) -> TimeKeys {
-        let Some(time) = input.time() else {
+        let Some(time) = input.time_keys() else {
             panic!("test input must have a time column");
         };
-        TimeKeys::lexicographic(time.to_vec())
+        time.clone()
     }
 
     fn dk_bandwidth_zero(input: &FeInput) -> FeCovType {
@@ -4041,7 +4477,9 @@ mod tests {
         let result = FeEstimator::fit(
             input,
             FeEffects::OneWay,
-            FeCovType::Cluster { groups: Some(time) },
+            FeCovType::Cluster {
+                groups: Some(GroupCodes::from_labels_without_keys(&time)),
+            },
             0.95,
         );
         assert_eq!(result.unwrap_err(), PanelError::DegenerateClusterTwoGroups);
@@ -4054,13 +4492,15 @@ mod tests {
         let dk_cov = dk_bandwidth_zero(&input);
         let dk = FeEstimator::fit(input, FeEffects::OneWay, dk_cov, 0.95).unwrap();
         assert!(*dk.std_errors().get(0, 0) > 1e-8);
-        assert!(dk.f_statistic().is_finite());
+        assert!(dk.f_statistic().unwrap().is_finite());
 
         let (input, _) = two_period_input(1, true);
         let cluster = FeEstimator::fit(
             input,
             FeEffects::OneWay,
-            FeCovType::Cluster { groups: Some(time) },
+            FeCovType::Cluster {
+                groups: Some(GroupCodes::from_labels_without_keys(&time)),
+            },
             0.95,
         )
         .unwrap();
@@ -4132,7 +4572,7 @@ mod tests {
             four_by_two_input(&THREE_PERIOD_LABELS),
             FeEffects::OneWay,
             FeCovType::Cluster {
-                groups: Some(groups),
+                groups: Some(GroupCodes::from_labels_without_keys(&groups)),
             },
             0.95,
         );
@@ -4146,7 +4586,9 @@ mod tests {
         let result = FeEstimator::fit(
             input,
             FeEffects::OneWay,
-            FeCovType::Cluster { groups: Some(time) },
+            FeCovType::Cluster {
+                groups: Some(GroupCodes::from_labels_without_keys(&time)),
+            },
             0.95,
         );
         assert!(result.is_ok());
@@ -4343,7 +4785,7 @@ mod tests {
 
         assert_eq!(fe.df_model(), 3);
         assert_eq!(fe.df_resid(), 3);
-        assert_eq!(fe.estimator().params().nrows(), 0);
+        assert_eq!(fe.params().nrows(), 0);
         assert_eq!(fe.std_errors().nrows(), 0);
         assert!(fe.aic().is_finite());
         assert!(fe.bic().is_finite());
@@ -4354,13 +4796,13 @@ mod tests {
 
     #[test]
     fn fe_estimator_fit_pins_faer_global_parallelism_to_seq() {
-        // `fit()`冒頭の`crate::parallelism::ensure_serial()`がfaerのグローバル
+        // `fit()`冒頭の`crate::shared::parallelism::ensure_serial()`がfaerのグローバル
         // 並列度を`Par::Seq`へ引き戻すことの回帰ガード（panel系統代表、
         // `engine/src/panel/CLAUDE.md`「faerのグローバル並列度」参照）。
         faer::set_global_parallelism(faer::Par::rayon(0));
 
         let entity = strings(&["a", "a", "b", "b"]);
-        let y = [1.0, 2.0, 3.0, 4.0];
+        let y = [1.0, 2.2, 3.0, 4.6];
         let x1 = vec![1.0, 2.0, 3.0, 4.0];
         let input =
             FeInput::from_columns(&y, &[x1], vec!["x1".to_string()], &entity, None, "y".into())
@@ -4380,6 +4822,7 @@ mod tests {
     /// 複製する」と同じ教訓を踏まえ、実装の内部関数を再利用しない独立実装にしている）。
     mod proptests {
         use super::*;
+        use crate::linear::ols::{CovType, OlsEstimator};
         use proptest::collection;
         use proptest::prelude::*;
 
@@ -4563,9 +5006,7 @@ mod tests {
                 FeInput::from_columns(y, x, names, entity, Some(time), "y".to_string()).ok()?;
             let est = FeEstimator::fit(input, case.effects, cov, 0.95).ok()?;
             let k = x.len();
-            let params = (0..k)
-                .map(|j| *est.estimator().params().get(j, 0))
-                .collect();
+            let params = (0..k).map(|j| *est.params().get(j, 0)).collect();
             let se = (0..k).map(|j| *est.std_errors().get(j, 0)).collect();
             Some((params, se))
         }
@@ -4582,7 +5023,7 @@ mod tests {
         }
 
         /// 固定効果推定の数値誤差（within変換・QR）を考慮し、固定フィクスチャ比較より緩めた
-        /// 相対誤差（`ols.rs`のproptestと同じ方針）。
+        /// 相対誤差（`ols/estimator.rs`のproptestと同じ方針）。
         fn assert_approx_eq(actual: f64, expected: f64, msg: &str) {
             let tol = 1e-6 * expected.abs().max(1.0);
             assert!(

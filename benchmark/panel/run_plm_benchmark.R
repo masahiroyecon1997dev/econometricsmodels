@@ -32,6 +32,9 @@
 # type="HC1")`、`n/(n-K)`補正）もplmで計算する。バランスパネルでは本実装と機械精度で
 # 一致する（実測確認済み）。hc1は`linearmodels`の"robust"とも同じ式。
 #
+# 上記のcov_type→vcovの対応とt検定への変換の実装は`_plm_common.R`
+# （`plm_vcov_function`・`plm_t_df`・`plm_t_inference`）。
+#
 # plmの変量効果分散成分推定（Swamy-Arora）がlinearmodelsと僅かに異なる実装の
 # ため、点推定自体が不均衡パネルで最大0.1%程度乖離することを実測確認済み
 # （バランスパネルでは6桁程度で一致）。この乖離のためplm側の値は不均衡パネルで
@@ -42,11 +45,11 @@
 #
 # `summary(model, vcov=...)`はz値・正規分布p値を返す（plmの`RandomEffects`は
 # 漸近正規近似の検定を既定にしている、実測確認済み）。本実装は常にt分布で
-# 報告する（panel-common.md 3.3節）ため、t統計量・p値・信頼区間はcoef/seから
+# 報告する（panel-common.md 3.3節）ため、t統計量・p値・信頼区間はparams/std_errorsから
 # 本実装と同じt分布の式で計算し直す。自由度は`cov_type`で切り替わり、
 # hc2/hc3は`df_resid`、clusterは`G-1`、dkは`T-1`（fixestの`ssc()`既定
 # `t.df="min"`に合わせた本実装の規約）。
-# **本体はcoef/se（vcovHC/vcovSCCの生の値）であり、t検定への変換は両実装共通の
+# **本体はparams/std_errors（vcovHC/vcovSCCの生の値）であり、t検定への変換は両実装共通の
 # 標準的な式（バグを覆い隠す余地が薄い）のため、この手計算自体が独立性を大きく
 # 損なうものではないと判断した**（AIC/BIC計算での前例（run_lm_crosscheck.R等）と
 # 同型の対応）。ただしclusterの`G-1`・dkの`T-1`という自由度の選択自体は本実装と
@@ -78,6 +81,11 @@
 # 独立したR実装での検証は現時点で行わない（式自体の正しさはOLS本体のテストで
 # 別途担保済み）。
 #
+# ## 分散成分の推定法（環境変数`PLM_RANDOM_METHOD`）
+#
+# 既定は`swar`（Swamy-Arora）。環境変数`PLM_RANDOM_METHOD`に`walhus`・`amemiya`を指定すると、
+# その推定法の`random.method`で推定する（本実装の`variance_method`の参照）。
+#
 # 事前準備: plm・jsonlite（.devcontainer/Dockerfileに導入済み）
 #
 # 使用例:
@@ -86,6 +94,11 @@
 #   Rscript run_plm_benchmark.R data.csv "y ~ x1 + x2" cluster entity time
 #   Rscript run_plm_benchmark.R data.csv "y ~ x1 + x2" dk entity time 2
 #   Rscript run_plm_benchmark.R data.csv "y ~ x1 + x2" cluster entity time cluster_group
+
+# cov_type別のvcovとt検定への変換は`_plm_common.R`を使う（Rには__file__相当が無い
+# ため、commandArgs()の--file=から自身のディレクトリを特定してsource()する）。
+script_path <- sub("^--file=", "", grep("^--file=", commandArgs(), value = TRUE))
+source(file.path(dirname(script_path), "_plm_common.R"))
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 5) {
@@ -113,7 +126,7 @@ model <- plm(
   as.formula(formula_str),
   data = pdf,
   model = "random",
-  random.method = "swar"
+  random.method = Sys.getenv("PLM_RANDOM_METHOD", "swar")
 )
 
 n_groups <- length(unique(df[[entity_col]]))
@@ -121,22 +134,7 @@ n_periods <- length(unique(df[[time_col]]))
 df_resid <- df.residual(model)
 
 # cov_typeごとのvcovとt分布の自由度（モジュールコメント参照）。
-if (cov_type == "classical") {
-  vc <- vcov(model)
-  t_df <- df_resid
-} else if (cov_type == "hc1") {
-  vc <- vcovHC(model, method = "white1", type = "HC1")
-  t_df <- df_resid
-} else if (cov_type == "hc2") {
-  vc <- vcovHC(model, method = "white1", type = "HC2")
-  t_df <- df_resid
-} else if (cov_type == "hc3") {
-  vc <- vcovHC(model, method = "white1", type = "HC3")
-  t_df <- df_resid
-} else if (cov_type == "cluster" && length(args) < 6) {
-  vc <- vcovHC(model, method = "arellano", type = "sss")
-  t_df <- n_groups - 1
-} else if (cov_type == "cluster") {
+if (cov_type == "cluster" && length(args) >= 6) {
   # entity以外の列でクラスター（モジュールコメント参照）。
   # `pdata.frame`は行をentity・時点でソートし行名を"entity-time"にするため、
   # 元データの"entity-time"キーでクラスター列と対応づける（行順が崩れた入力でも
@@ -153,28 +151,21 @@ if (cov_type == "classical") {
   # lmの係数名（"X(Intercept)"等）をplmの係数名に戻す。
   dimnames(vc) <- list(names(coef(model)), names(coef(model)))
   t_df <- length(unique(cluster_ids)) - 1
-} else if (cov_type == "dk") {
-  if (length(args) < 6) {
-    stop("dk requires maxlag as the 6th argument")
-  }
-  vc <- vcovSCC(model, maxlag = as.integer(args[6]), type = "sss")
-  t_df <- n_periods - 1
 } else {
-  stop(paste(
-    "unknown cov_type (or unsupported for R crosscheck):",
-    cov_type
-  ))
+  maxlag <- if (cov_type == "dk" && length(args) >= 6) as.integer(args[6]) else NA
+  vc <- plm_vcov_function(cov_type, maxlag)(model)
+  t_df <- plm_t_df(cov_type, df_resid, n_groups, n_periods)
 }
 
 coefs <- coef(model)
 ses <- sqrt(diag(vc))
 
 # t検定への変換（モジュールコメント「t検定への変換」参照）。
-test_stats <- coefs / ses
-p_values <- 2 * pt(-abs(test_stats), df = t_df)
-crit <- qt(0.975, df = t_df) # 95%信頼区間固定（run_fixest_benchmark.Rのconfint()既定と揃える）
-conf_lower <- coefs - crit * ses
-conf_upper <- coefs + crit * ses
+inference <- plm_t_inference(coefs, ses, t_df)
+test_stats <- inference$test_stats
+p_values <- inference$p_values
+conf_lower <- inference$conf_lower
+conf_upper <- inference$conf_upper
 
 # F統計量（上記コメント参照）。`vc`は上のcov_typeごとの分散共分散行列。
 # pwaldtestは`vcov`に`cluster`属性が無いと分母自由度を`df.residual`のままにする
@@ -185,8 +176,8 @@ f_p_value_val <- pf(wald_f$statistic, f_df_num, t_df, lower.tail = FALSE)
 
 library(jsonlite)
 result <- list(
-  coef = as.list(coefs),
-  se = as.list(ses),
+  params = as.list(coefs),
+  std_errors = as.list(ses),
   test_stats = as.list(test_stats),
   p_values = as.list(p_values),
   conf_int = mapply(
@@ -196,6 +187,11 @@ result <- list(
     SIMPLIFY = FALSE
   ),
   f_statistic = unname(wald_f$statistic),
-  f_p_value = unname(f_p_value_val)
+  f_p_value = unname(f_p_value_val),
+  # plmの分散成分（Swamy-Arora）。不均衡パネルでは本実装とσ_u²の定義が異なる
+  # ため、この値を手計算のGLSに与えてplmと一致することを確認するために出力する
+  # （テスト`test_re_time_invariant.py`）。
+  sigma2_eps = unname(ercomp(model)$sigma2["idios"]),
+  sigma2_u = unname(ercomp(model)$sigma2["id"])
 )
 cat(toJSON(result, auto_unbox = TRUE, digits = NA))

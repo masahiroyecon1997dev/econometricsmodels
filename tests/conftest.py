@@ -1,8 +1,104 @@
 """共有フィクスチャ。n=100, seed=42, 10 クラスターのデータセットを提供する。"""
 
+from pathlib import Path
+
 import numpy as np
 import polars as pl
 import pytest
+from _errors import RAISED_CODES, UNREACHABLE_CODES, unraised_migrated_codes
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--check-error-coverage",
+        action="store_true",
+        default=False,
+        help=(
+            "テスト全体の実行後に、移行済みのエラー`code`がすべて一度は"
+            "`raises_error`で検査されたことを確認する（全体実行専用）。"
+        ),
+    )
+
+
+_MISSING_CODES = pytest.StashKey[list[str]]()
+
+# `_lib.raise_error_for_test`・`_lib.panic_for_test`はデバッグビルド
+# (`cfg(debug_assertions)`)にだけ含まれる。`maturin develop --release`や、`uv run`・`uv sync`が
+# 拡張をreleaseで再ビルドした環境にはなく、それを使うテストがAttributeErrorで落ちて
+# 原因が分かりにくいため、その場合は理由を添えてskipする。CI（常にデバッグビルド）では
+# skipされず、全体実行の`--check-error-coverage`が、skipで送出されなかった`code`を検出する。
+_TEST_HOOK_NAMES = ("raise_error_for_test", "panic_for_test")
+_NO_TEST_HOOKS = (
+    "_libがデバッグビルドではない(release/最適化ビルド)ため、テスト専用関数"
+    "(raise_error_for_test・panic_for_test)がない。`uv run maturin develop`で"
+    "入れ直す"
+)
+
+
+def _has_test_hooks() -> bool:
+    from econometricsmodels import _lib
+
+    return all(hasattr(_lib, name) for name in _TEST_HOOK_NAMES)
+
+
+def pytest_report_header(config: pytest.Config) -> str | None:
+    if _has_test_hooks():
+        return None
+    return f"WARNING: {_NO_TEST_HOOKS}。該当のテストはskipされる"
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_call(item: pytest.Item):
+    try:
+        return (yield)
+    except AttributeError as exc:
+        if "_for_test" in str(exc) and not _has_test_hooks():
+            pytest.skip(_NO_TEST_HOOKS)
+        raise
+
+
+def _is_full_run(config: pytest.Config) -> bool:
+    """絞り込み（`-k`・`-m`・`--lf`・`--deselect`・`--collect-only`・`tests`以外の指定）の無い全体実行か。"""
+    option = config.option
+    if option.keyword or option.markexpr or option.collectonly:
+        return False
+    if option.deselect:
+        return False
+    if getattr(option, "lf", False) or getattr(option, "failedfirst", False):
+        return False
+    tests_dir = Path(__file__).resolve().parent
+    return all(Path(arg).resolve() == tests_dir for arg in config.args)
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    config = session.config
+    if not config.getoption("--check-error-coverage"):
+        return
+    if exitstatus != 0 or not _is_full_run(config):
+        return
+    missing = unraised_migrated_codes()
+    stale = sorted(RAISED_CODES & {str(c) for c in UNREACHABLE_CODES})
+    if stale:
+        # 実経路から送出できるようになった`code`は`MIGRATED_CODES`へ移す。
+        missing = [
+            *missing,
+            *(f"{c} (listed in UNREACHABLE_CODES)" for c in stale),
+        ]
+    if missing:
+        config.stash[_MISSING_CODES] = missing
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+def pytest_terminal_summary(
+    terminalreporter: pytest.TerminalReporter, config: pytest.Config
+) -> None:
+    missing = config.stash.get(_MISSING_CODES, None)
+    if missing:
+        terminalreporter.write_line(
+            "error codes never raised in a test (raises_error): "
+            + ", ".join(missing),
+            red=True,
+        )
 
 
 @pytest.fixture(scope="session")

@@ -1,18 +1,25 @@
-# Logit
+# Logit: options and results
 
-`Logit` estimates a binary logistic regression model by maximum likelihood. It shares the general API shape with [OLS](ols.md) (`data`/`y`/`x`/`options` constructor, `.fit()`), but differs in several ways specific to a maximum-likelihood, discrete-choice model: standard errors use a z-test rather than a t-test, `cov_type` supports `opg` (outer product of gradients) in place of HC2/HC3/HAC, and `LogitResults` adds `marginal_effects()`, `predict()`, and `pred_table()`.
+**Logit**: [Usage](../usage/logit.md) · **Options and results** · [Definitions](../methods/logit.md)
 
-## Standard error types
+`Logit` estimates a binary logistic regression model by maximum likelihood. It shares the general API shape with [OLS](ols.md) (`data`/`y`/`x`/`options` constructor, `.fit()`), and its results add `marginal_effects()`, `predict()` and `pred_table()`.
 
-`LogitOptions.cov_type` supports `"classical"` (observed-information / Hessian-based), `"opg"` (outer product of gradients), `"hc0"`, `"hc1"`, and `"cluster"` (requires `cluster`). Unlike [OLS](../getting-started.md#switching-the-type-of-standard-error), HC2/HC3 and HAC are not available for Logit.
+The estimator, the `cov_type` options (`classical`, `opg`, `hc0`, `hc1`, `cluster`), the solvers and convergence rules, separation, the z tests, the likelihood-ratio test and the marginal effects are defined in [Methods: Logit](../methods/logit.md).
 
-## Solver options
+## Options at a glance
 
-`LogitOptions.solver` selects the optimization algorithm used to maximize the log-likelihood: `"newton"` (default, Newton-Raphson), `"bfgs"`, or `"lbfgs"`. All three converge to the same maximum-likelihood estimate; they differ in iteration cost and behavior on ill-conditioned problems. `max_iter` and `tol` control the iteration limit and the gradient-norm convergence threshold. When the solver does not converge within `max_iter` iterations, a `ComputationError` is raised unless `raise_on_non_convergence=False`, in which case `LogitResults.converged` is `False` instead.
+| Option | Purpose | Default | Notes |
+|---|---|---|---|
+| `cov_type` | Standard error type: `"classical"`, `"opg"`, `"hc0"`, `"hc1"`, `"cluster"` | `"classical"` | `"cluster"` needs `cluster` |
+| `cluster` | Column that defines the clusters | `None` | Only with `cov_type="cluster"` |
+| `solver` | `"newton"`, `"bfgs"` or `"lbfgs"` | `"newton"` | All converge to the same estimate |
+| `max_iter` | Iteration limit, 1 to 10,000 | `35` | |
+| `tol` | Convergence tolerance on the gradient | `1e-6` for `"newton"`, `1e-8` for the others | The meaning depends on the solver; see the docstring |
+| `raise_on_non_convergence` | Raise an error if the solver does not converge | `True` | With `False` the last iterate is returned with `converged=False` |
+| `confidence_level` | Level of `conf_int`, in (0, 1) | `0.95` | |
+| `include_intercept` | Add a constant column (`const`) | `True` | |
 
-## Marginal effects
-
-`LogitResults.marginal_effects()` computes `dy/dx` with delta-method standard errors, evaluated at `"overall"` (average marginal effects, the default), `"mean"`, or `"median"`. The constant term is excluded from the output. See [Getting Started](../getting-started.md#marginal-effects) for an example.
+The fields of the results are listed by purpose at the top of the results class below.
 
 ::: econometricsmodels.Logit
     options:

@@ -26,6 +26,11 @@ import polars as pl
 
 from .. import _lib
 from .._lib import IVOptions
+from .._results_utils import (
+    by_param,
+    conf_int_by_param,
+    params_table_rows,
+)
 from ..linear.ols import OLSResults
 
 __all__ = ["IV", "IVOptions", "IVResults"]
@@ -44,8 +49,7 @@ class IV:
         x_endog: List of column names of the endogenous independent
             variables.
         instruments: List of column names of the excluded instruments
-            (must not overlap `x_exog`; see
-            `docs/spec/iv-spec.md` section 1.1).
+            (must not overlap `x_exog`).
         options: Estimation options. Defaults to `IVOptions()`
             (`estimator="2sls"`, classical, with intercept,
             confidence_level=0.95) when omitted.
@@ -102,11 +106,14 @@ class IV:
                 chosen `estimator`/`gmm_type`/`cov_type` does not
                 use (e.g. `cluster` without `cov_type="cluster"`,
                 `gmm_max_iter` with a `gmm_type` other than
-                `"iterated"`), or too few instruments for
-                identification). A subclass of `ValueError`.
+                `"iterated"`), too few instruments for
+                identification, or `y` constant with an intercept). A
+                subclass of `ValueError`.
             ComputationError: A problem was detected during
                 computation (e.g. a singular first- or second-stage
-                design matrix). A subclass of `RuntimeError`.
+                design matrix, or a perfect fit of the structural
+                equation or of a first stage: residuals zero up to
+                rounding). A subclass of `RuntimeError`.
         """
         raw = _lib.fit_iv(
             self._data,
@@ -122,13 +129,34 @@ class IV:
 class IVResults:
     """IV estimation results.
 
-    Array-valued properties (`params`, `std_errors`, etc.) are exposed
-    as dictionaries keyed by coefficient name (for O(1) lookup of a
-    single parameter). Use `coef_table()` for a row-oriented listing.
+    Coefficient-level properties (`params`, `std_errors`, etc.) are
+    dictionaries keyed by coefficient name, so one coefficient is
+    `result.params["x1"]`. Use `params_table()` for a row-oriented
+    listing (a list of dicts), for example for a JSON response.
 
-    `first_stage()` (per-endogenous-variable first-stage regression
-    results) is provided as a separate method rather than a field on
-    this class (`docs/spec/iv-spec.md` section 2).
+    Fields by purpose:
+
+    - Coefficients: `params`, `std_errors`, `test_stats`, `p_values`,
+      `conf_int`; the names in order: `param_names`.
+    - Which distribution the tests use: `stat_dist` (`"t"` for 2SLS,
+      `"normal"` for GMM), `stat_df`.
+    - Overall Wald test: `wald_statistic`, `wald_p_value`,
+      `wald_dist`, `wald_df_num`, `wald_df_denom`.
+    - Weak instruments: `weak_instrument_f_statistics`,
+      `weak_instrument_f_df_num`, `weak_instrument_f_df_denom`.
+    - Overidentification (Sargan or Hansen J): `overid_statistic`,
+      `overid_p_value`, `overid_df`.
+    - Endogeneity (2SLS only): `wu_hausman_statistic`,
+      `wu_hausman_p_value`, `wu_hausman_df_num`, `wu_hausman_df_denom`.
+    - Fit: `r_squared`, `adj_r_squared`.
+    - Estimator used: `estimator`, `gmm_type`, `gmm_weight_type`,
+      `converged`, `n_iter`.
+    - Sample and model size: `n_obs`, `df_model`, `df_resid`,
+      `dep_var_name`.
+    - Settings echoed back: `cov_type`, `hac_lags_used`.
+    - Residuals: `residuals` (structural residuals).
+    - Methods: `first_stage()` (one `OLSResults` per endogenous
+      variable), `params_table()`.
 
     Args:
         raw: The estimation result object returned by `_lib.fit_iv`
@@ -151,12 +179,12 @@ class IVResults:
     @property
     def params(self) -> dict[str, float]:
         """Coefficient name to coefficient value."""
-        return dict(zip(self._raw.param_names, self._raw.params))
+        return by_param(self._raw.param_names, self._raw.params)
 
     @property
     def std_errors(self) -> dict[str, float]:
         """Coefficient name to standard error."""
-        return dict(zip(self._raw.param_names, self._raw.std_errors))
+        return by_param(self._raw.param_names, self._raw.std_errors)
 
     @property
     def test_stats(self) -> dict[str, float]:
@@ -165,7 +193,7 @@ class IVResults:
         t-statistic for `estimator="2sls"`, z-statistic for
         `estimator="gmm"`; `stat_dist` tells which.
         """
-        return dict(zip(self._raw.param_names, self._raw.test_stats))
+        return by_param(self._raw.param_names, self._raw.test_stats)
 
     @property
     def stat_dist(self) -> Literal["t", "normal"]:
@@ -184,19 +212,12 @@ class IVResults:
     @property
     def p_values(self) -> dict[str, float]:
         """Coefficient name to two-sided p-value."""
-        return dict(zip(self._raw.param_names, self._raw.p_values))
+        return by_param(self._raw.param_names, self._raw.p_values)
 
     @property
     def conf_int(self) -> dict[str, tuple[float, float]]:
         """Coefficient name to confidence interval `(lower, upper)`."""
-        return {
-            name: (lower, upper)
-            for name, lower, upper in zip(
-                self._raw.param_names,
-                self._raw.conf_lower,
-                self._raw.conf_upper,
-            )
-        }
+        return conf_int_by_param(self._raw)
 
     @property
     def residuals(self) -> list[float]:
@@ -342,7 +363,7 @@ class IVResults:
         same as the plain F-statistic of the corresponding regression
         in `first_stage()`, which includes `x_exog`'s contribution
         too. Computed the same way for both `estimator="2sls"` and
-        `estimator="gmm"`; see `docs/spec/iv-spec.md` section 3.4.
+        `estimator="gmm"`.
         """
         return self._raw.weak_instrument_f_statistics
 
@@ -366,8 +387,7 @@ class IVResults:
         or Hansen J (`estimator="gmm"`).
 
         `None` when just-identified (`len(instruments) ==
-        len(x_endog)`, degrees of freedom 0); see
-        `docs/spec/iv-spec.md` section 3.5.
+        len(x_endog)`, degrees of freedom 0).
         """
         return self._raw.overid_statistic
 
@@ -403,8 +423,7 @@ class IVResults:
         variable, or there are too few observations for the extra
         residual columns) — this does not affect the validity of
         the other results. **Always `None` for `estimator="gmm"`**
-        (not implemented for GMM). See
-        `docs/spec/iv-spec.md` section 3.6.
+        (not implemented for GMM).
         """
         return self._raw.wu_hausman_statistic
 
@@ -429,51 +448,42 @@ class IVResults:
         """
         return self._raw.wu_hausman_p_value
 
-    def coef_table(self) -> list[dict[str, float | str]]:
+    def params_table(self) -> list[dict[str, float | str]]:
         """Row-oriented summary table of the coefficients.
 
         Shaped to be usable almost as-is in a REST API response (same
-        policy as `OLSResults.coef_table()`). Returned as `list[dict]`
+        policy as `OLSResults.params_table()`). Returned as `list[dict]`
         rather than a polars DataFrame, per the project's policy of
-        not using DataFrames for the coefficient table itself.
+        not using DataFrames for the parameter table itself.
 
         Returns:
             A list of dictionaries, one per coefficient. Keys are
-            `param`, `coef`, `std_err`, `test_stat`, `p_value`,
+            `param_name`, `param`, `std_error`, `test_stat`, `p_value`,
             `conf_lower`, `conf_upper`.
         """
-        return [
-            {
-                "param": name,
-                "coef": coef,
-                "std_err": se,
-                "test_stat": test_stat,
-                "p_value": p,
-                "conf_lower": lower,
-                "conf_upper": upper,
-            }
-            for name, coef, se, test_stat, p, lower, upper in zip(
-                self._raw.param_names,
-                self._raw.params,
-                self._raw.std_errors,
-                self._raw.test_stats,
-                self._raw.p_values,
-                self._raw.conf_lower,
-                self._raw.conf_upper,
-            )
-        ]
+        return params_table_rows(self._raw)
 
     def first_stage(self) -> dict[str, OLSResults]:
         """Per-endogenous-variable first-stage regression results.
 
         Each first-stage regression is `x_endog[i] ~ x_exog +
-        instruments`, estimated by plain OLS (`docs/spec/iv-spec.md`
-        section 2). Returns the existing
+        instruments`, estimated by plain OLS. Returns the existing
         `OLSResults` type rather than a new IV-specific type — the
         first stage is a genuine, valid OLS regression in its own
         right. Its `f_statistic`/`f_p_value` include `x_exog`'s
         contribution and are **not** the weak-instrument partial
         F-statistic (`weak_instrument_f_statistics`).
+
+        With `cov_type="cluster"` and a number of clusters that is larger
+        than the slope coefficients of the structural equation but not
+        larger than those of a first-stage regression, the cluster-robust
+        covariance of the first-stage slopes is singular and the overall
+        F-test cannot be computed: that regression's `f_statistic`,
+        `f_p_value`, `f_df_num` and `f_df_denom` are `None`. Its
+        coefficients, standard errors and the weak-instrument F-statistic
+        are unaffected (the latter is the classical nested F-test, not
+        cluster-robust, so with few clusters it is not cluster-robust
+        evidence of instrument relevance).
 
         Returns:
             A dictionary keyed by endogenous variable name (matching

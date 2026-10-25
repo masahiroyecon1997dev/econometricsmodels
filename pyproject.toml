@@ -77,6 +77,11 @@ test = [
 dev = [
     "maturin==1.15.0",
 ]
+# ci_python.ymlのpip-auditジョブ専用（testグループと併用して依存の脆弱性を監査する）。
+# `uvx`/`--with`で実行のたびに最新版を解決しないよう、ここへ版固定で入れる。
+audit = [
+    "pip-audit==2.10.1",
+]
 # mkdocsドキュメント生成専用（CIでは使わない。cd_docs.ymlでのCI組み込みは別issue）。
 docs = [
     "mkdocs==1.6.1",

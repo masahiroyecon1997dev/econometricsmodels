@@ -17,6 +17,10 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
     `.devcontainer/Dockerfile`（`ARG CARGO_AUDIT_VERSION`、`cargo install --locked`でソースビルド）と
     `ci_engine.yml`の`tool: cargo-audit@<版>`は同じ版に揃える（食い違いは
     `check_cargo_tool_updates.yml`が検出する）。
+    `ci_engine.yml`・`ci_python.yml`には`schedule`（毎週月曜 01:00 UTC）も設定しており、
+    コードを変更していない期間に公開された脆弱性も検知する。scheduleでは`audit`/`pip-audit`
+    ジョブだけが動き、他のジョブは`if: github.event_name != 'schedule'`で飛ばす
+    （scheduleはデフォルトブランチでしか動かない）。
   - `licenses`ジョブ: `cargo about generate about.hbs -o THIRD-PARTY-LICENSES.html`で再生成し、
     コミット済みの`THIRD-PARTY-LICENSES.html`と差分があれば失敗させる（配布物に同梱する依存
     ライセンス一覧が`Cargo.lock`に追随していることの保証。MIT/Apache-2.0は配布時に著作権表示・
@@ -36,7 +40,9 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
     メトリクスの節・`docs/performance/package-health.md`参照）。
   - `engine_pybind-lint`ジョブ: `cargo fmt -p engine_pybind --check` →
     `cargo clippy -p engine_pybind --all-targets -- -D warnings`。
-  - `pip-audit`ジョブ（Python 3.12固定）: `test`グループのみ対象。
+  - `pip-audit`ジョブ（Python 3.12固定）: `test`グループのみ対象。`pip-audit`自体は
+    `audit`依存グループに`==`で固定し`uv.lock`に記録する（`--with`で実行のたびに最新版を
+    解決しない。`.claude/rules/python-style.md`「開発ツールの実行方針」と同じ理由）。
 - **`cd_release.yml`**（Linux（manylinux/musllinux × x86_64/aarch64の4種）/macOS/Windows向けwheelビルド、タグpush（`v*`）+
   `workflow_dispatch`のみ。PR毎には回さない）: ビルド対象Pythonは
   `-i python3.12 -i python3.13 -i python3.14`を明示指定（`--find-interpreter`は未サポート
@@ -103,6 +109,17 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
   手動でのローカル実測サマリーは `docs/performance/<method>.md`に記録する
   （生成JSONは`docs/performance/results/`、`.gitignore`対象）。
 - 全ワークフローでアクションをコミットSHAで固定する（サプライチェーン攻撃対策）。
+  例外は`pypa/gh-action-pypi-publish`のみ（`cd_release.yml`のコメント参照）。そのため
+  リポジトリ設定の「Require actions to be pinned to a full-length commit SHA」は有効にできない
+  （有効にするとPyPI公開ジョブが失敗する）。
+- 全`actions/checkout`に`persist-credentials: false`を付ける（以降のステップから`.git/config`経由で
+  `GITHUB_TOKEN`を読ませない。gitのpush等を行うワークフローは無い）。`run:`には`${{ }}`を
+  直接埋め込まず、外部から決まりうる値（タグ名等）は`env`経由で渡す（`cd_release.yml`）。
+- ワークフローの静的解析にはzizmorが使える（ローカルでは
+  `uv run --no-project --with zizmor==<版> zizmor --offline .github/workflows`。
+  `GITHUB_TOKEN`/`GH_TOKEN`が空文字で定義されているとエラーになるため`env -u`で外す）。
+  CIには組み込んでいない。既定のpersonaで残る指摘は、上記の`pypi-publish`の例外と、
+  `benchmark_performance.yml`のキャッシュ（`cache-poisoning`、信頼度Low）のみ。
 
 ## パッケージ健全性メトリクス（import時間・インストール容量）
 

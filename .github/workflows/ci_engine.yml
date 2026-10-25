@@ -16,6 +16,11 @@ on:
   # 報告されるようにする（フィルタがあると該当PRで一度もチェックが実行されず、
   # マージ不能になる）。
   pull_request:
+  # コードを変更していない期間に公開された脆弱性を検知するため、auditジョブだけを
+  # 週1回実行する(他のジョブはif: github.event_name != 'schedule'で飛ばす)。
+  # scheduleはデフォルトブランチ(main)でしか動かない。
+  schedule:
+    - cron: "0 1 * * 1" # 毎週月曜 01:00 UTC
 
 env:
   CARGO_TERM_COLOR: always
@@ -26,9 +31,12 @@ permissions:
 jobs:
   test:
     name: cargo test / clippy / fmt (engine)
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
@@ -48,6 +56,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # workspace全体のCargo.lock（engine + engine_pybind）を対象にRustSecアドバイザリDBと
       # 突き合わせる。engine_pybind側の依存もここでカバーする
@@ -68,9 +78,12 @@ jobs:
 
   licenses:
     name: THIRD-PARTY-LICENSES.html up to date
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # 配布物（wheel/sdist）に同梱する依存クレートのライセンス一覧が、Cargo.lockと
       # 食い違っていないことを確認する。MIT/Apache-2.0は配布物に著作権表示・ライセンス文を

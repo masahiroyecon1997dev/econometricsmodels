@@ -43,6 +43,13 @@ use engine::shared::error_catalog::{ErrorCode, ParamValue};
 /// Estimation options for OLS.
 ///
 /// All arguments are keyword-only.
+///
+/// Options by purpose:
+///
+/// - Standard errors: `cov_type`; with `"cluster"` also `cluster`; with
+///   `"hac"` also `hac_time` (required) and `hac_lags`.
+/// - Confidence intervals: `confidence_level`.
+/// - Model: `include_intercept`.
 // 各フィールドの意味・既定値の根拠は`docs/spec/ols-spec.md`「API引数」。
 // `fit_ols`がPython側から`OLSOptions`インスタンスを引数として受け取るため、
 // `FromPyObject`実装を明示的に維持する（pyo3 0.28以降、Cloneを実装する#[pyclass]の

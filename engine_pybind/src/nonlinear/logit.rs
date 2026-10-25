@@ -47,6 +47,12 @@ use crate::shared::validation::validate_common_roles;
 ///
 /// All arguments are keyword-only.
 ///
+/// Options by purpose:
+///
+/// - Standard errors: `cov_type`; with `"cluster"` also `cluster`.
+/// - Optimizer: `solver`, `max_iter`, `tol`, `raise_on_non_convergence`.
+/// - Confidence intervals: `confidence_level`.
+/// - Model: `include_intercept`.
 // 各フィールドの意味・既定値の根拠は`docs/spec/nonlinear-common.md`。
 // `start_params`（初期値の指定）は、engine（`LogitEstimator::fit`）が未対応のため
 // 意図的に持たない（`docs/spec/logit-spec.md`「未実装・未対応」）。対応後に追加する。

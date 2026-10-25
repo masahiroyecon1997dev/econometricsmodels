@@ -103,6 +103,18 @@ pub(crate) fn iv_error_to_pyerr(err: IvError) -> PyErr {
 ///
 /// A single options class serves both estimation methods; fields that apply to
 /// only one estimator are documented as such.
+///
+/// Options by purpose:
+///
+/// - Estimator: `estimator`.
+/// - Standard errors: `cov_type`; with `"cluster"` also `cluster`; with
+///   `"hac"` also `hac_time` (required) and `hac_lags`.
+/// - GMM only: `gmm_type`, `gmm_weight_type` (the weight matrix of the point
+///   estimate, with the same `cluster`, `hac_time` and `hac_lags` fields).
+/// - GMM, `gmm_type="iterated"` only: `gmm_max_iter`, `gmm_tol`,
+///   `raise_on_non_convergence`.
+/// - Confidence intervals: `confidence_level`.
+/// - Model: `include_intercept`.
 // 各フィールドの意味・既定値の根拠は`docs/spec/iv-spec.md`。
 // module/from_py_objectの理由は`OLSOptions`/`LogitOptions`と同じ
 // （`engine_pybind/src/linear/ols.rs`のコメント参照）。

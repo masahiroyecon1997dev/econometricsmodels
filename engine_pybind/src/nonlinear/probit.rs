@@ -48,6 +48,12 @@ use crate::shared::validation::validate_common_roles;
 ///
 /// All arguments are keyword-only.
 ///
+/// Options by purpose:
+///
+/// - Standard errors: `cov_type`; with `"cluster"` also `cluster`.
+/// - Optimizer: `solver`, `max_iter`, `tol`, `raise_on_non_convergence`.
+/// - Confidence intervals: `confidence_level`.
+/// - Model: `include_intercept`.
 // 各フィールドの意味・既定値の根拠は`docs/spec/nonlinear-common.md`（7章: `LogitOptions`と
 // 同じオプション構成）。`start_params`は`LogitOptions`と同じ理由で意図的に持たない。
 // `fit`がPython側から`ProbitOptions`インスタンスを引数として受け取るため、

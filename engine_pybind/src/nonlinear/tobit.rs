@@ -58,6 +58,14 @@ use crate::shared::validation::validate_common_roles;
 ///
 /// All arguments are keyword-only.
 ///
+/// Options by purpose:
+///
+/// - Standard errors: `cov_type`; with `"cluster"` also `cluster`.
+/// - Censoring: `lower`, `upper` (at least one must be set).
+/// - Optimizer: `solver`, `max_iter`, `tol`, `raise_on_non_convergence`.
+/// - Confidence intervals: `confidence_level`.
+/// - Model: `include_intercept`.
+///
 // 各フィールドの意味・既定値の根拠は`docs/spec/tobit-spec.md`。
 // `LogitOptions`と同じ理由（pyo3 0.28以降のFromPyObject自動導出の仕様変更、
 // mkdocstringsのalias解決対応）で`from_py_object` + `module`を明示する。

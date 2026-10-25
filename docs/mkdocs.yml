@@ -33,9 +33,16 @@ nav:
       - IV: api/iv.md
       - FE: api/fe.md
       - RE: api/re.md
+      - Errors: api/errors.md
   - Methods:
       - OLS: methods/ols.md
       - WLS: methods/wls.md
+      - Logit: methods/logit.md
+      - Probit: methods/probit.md
+      - Tobit: methods/tobit.md
+      - IV: methods/iv.md
+      - FE: methods/fe.md
+      - RE: methods/re.md
   - Guides:
       - Accepted data: guide/accepted-data.md
       - Validation and errors: guide/validation.md
@@ -44,6 +51,11 @@ nav:
       - Verification: guide/verification.md
       - Performance: guide/performance.md
       - Performance results: guide/performance-results.md
+
+# 内部リンクとアンカーの切れをビルド時に警告する。
+validation:
+  links:
+    anchors: warn
 
 theme:
   name: material
@@ -66,6 +78,15 @@ theme:
 markdown_extensions:
   - admonition
   - pymdownx.superfences
+  # 数式は\( \)と\[ \]で書き、MathJaxで描画する（下のextra_javascript）。
+  - pymdownx.arithmatex:
+      generic: true
+  - toc:
+      permalink: true
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-mml-chtml.js
 
 plugins:
   - search

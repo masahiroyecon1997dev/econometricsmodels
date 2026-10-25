@@ -325,7 +325,7 @@ class LogitResults:
         class depends on `threshold` (matches statsmodels'
         `BinaryResults.pred_table(threshold)`). Unlike `predict()`,
         out-of-sample data (a `new_data` argument) is not yet
-        supported (tracked separately).
+        supported.
 
         Args:
             threshold: Probability threshold above which an

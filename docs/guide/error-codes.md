@@ -29,7 +29,7 @@ An exception has these attributes:
 - The wording of `message` and `hint` can be improved at any time. Do not parse it.
 - `ErrorCode` (exported at the top level) is a `StrEnum` of all codes, so `e.code == ErrorCode.COLUMN_NOT_FOUND` and `e.code == "COLUMN_NOT_FOUND"` are both true.
 - The exceptions can be constructed (`ValidationError(code, message, hint=None, params=None)`), copied and pickled, so an application can raise the same kind of exception from its own checks and pass it between processes.
-- A wrong argument or option *type* raises the built-in `TypeError`, which has no `code`. See [Validation and errors](validation.md#the-two-exception-classes).
+- A wrong argument or option *type* raises the built-in `TypeError`, which has no `code`. See [Validation and errors](validation.md#reading-an-error).
 
 The catalog below lists, for every `code`, the exception class, the keys and types of `params`, and the English templates of `message` and `hint` (`{name}` is replaced by the value of the parameter `name`).
 

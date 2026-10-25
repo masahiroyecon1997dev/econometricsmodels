@@ -17,9 +17,41 @@
 pip install econometricsmodels
 ```
 
+## A first example
+
+```python
+import polars as pl
+from econometricsmodels import OLS, OLSOptions
+
+df = pl.DataFrame(
+    {
+        "y": [2.1, 3.9, 6.2, 8.1, 9.8],
+        "x1": [1.0, 2.0, 3.0, 4.0, 5.0],
+    }
+)
+
+result = OLS(df, y="y", x=["x1"], options=OLSOptions(cov_type="hc1")).fit()
+
+print(result.params)  # {"const": ..., "x1": ...}
+print(result.params_table())  # a list of dicts, ready for polars or json.dumps
+```
+
+Invalid input raises an exception that carries a stable `code` and the values behind the message, so a program can react to it without parsing text (see [Validation and errors](guide/validation.md#reading-an-error)).
+
 ## Supported methods
 
-Currently implemented: OLS (Ordinary Least Squares), WLS (Weighted Least Squares), Logit (binary logistic regression), Probit (binary probit regression), Tobit (censored regression), IV (instrumental variables, 2SLS/GMM), FE (fixed effects panel regression), and RE (random effects panel regression). See [Getting Started](getting-started.md) for usage, and the API Reference ([OLS](api/ols.md) / [WLS](api/wls.md) / [Logit](api/logit.md) / [Probit](api/probit.md) / [Tobit](api/tobit.md) / [IV](api/iv.md) / [FE](api/fe.md) / [RE](api/re.md)) for detailed options and return values. The [Methods](methods/ols.md) section defines the estimators, covariance types and diagnostics ([OLS](methods/ols.md), [WLS](methods/wls.md)).
+| Method | Estimator | Definitions | API |
+|---|---|---|---|
+| OLS | Ordinary least squares | [Methods](methods/ols.md) | [API](api/ols.md) |
+| WLS | Weighted least squares | [Methods](methods/wls.md) | [API](api/wls.md) |
+| Logit | Binary logistic regression (maximum likelihood) | [Methods](methods/logit.md) | [API](api/logit.md) |
+| Probit | Binary probit regression (maximum likelihood) | [Methods](methods/probit.md) | [API](api/probit.md) |
+| Tobit | Censored regression (maximum likelihood) | [Methods](methods/tobit.md) | [API](api/tobit.md) |
+| IV | Instrumental variables, 2SLS and GMM | [Methods](methods/iv.md) | [API](api/iv.md) |
+| FE | Fixed effects (within) panel regression | [Methods](methods/fe.md) | [API](api/fe.md) |
+| RE | Random effects (GLS) panel regression | [Methods](methods/re.md) | [API](api/re.md) |
+
+[Getting Started](getting-started.md) shows how to use each of them. The **Methods** pages define what is computed (the estimator, the covariance types, the test distributions, the fit statistics and the diagnostics), and the **API Reference** pages list the arguments, options and result fields.
 
 More methods are planned as the project expands; see [GitHub Issues](https://github.com/masahiroyecon1997dev/econometricsmodels/issues) for what is planned or in progress.
 

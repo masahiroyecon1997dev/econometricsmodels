@@ -1,6 +1,86 @@
 # Validation and errors
 
-This page explains how econometricsmodels treats invalid input, which exceptions it raises and when, and, just as important, what it does **not** check. A call that does not raise an error does not mean that the model is appropriate for your data.
+This page explains how to read and handle the exceptions econometricsmodels raises, why it rejects invalid input instead of repairing it, when each error occurs, and, just as important, what it does **not** check. A call that does not raise an error does not mean that the model is appropriate for your data.
+
+## Reading an error
+
+A call that cannot run raises one of three exceptions. The first thing to decide is which one, because it tells you who has to act:
+
+| Exception | Base class | Meaning | Usually fixed by |
+|---|---|---|---|
+| `ValidationError` | `ValueError` | The data or an option is invalid. It can be decided from the inputs alone, before any estimation work. | Changing the data or the options. |
+| `ComputationError` | `RuntimeError` | The inputs are acceptable on their face, but a numerical routine fails or cannot be trusted (a singular matrix, an optimizer that does not converge). | Changing the model, or rescaling the data. |
+| `TypeError` | `Exception` | An argument has the wrong *type*, as opposed to a wrong value. Built in, so it has no `code`. | Changing the code that calls the estimator. |
+
+### What an exception contains
+
+`ValidationError` and `ComputationError` carry the same four attributes:
+
+| Attribute | Type | Meaning |
+|---|---|---|
+| `code` | `str` | A stable identifier of the situation, such as `COLUMN_NOT_FOUND`. |
+| `params` | `dict` | The values that appear in the text, keyed by name. |
+| `message` | `str` | What is wrong. |
+| `hint` | `str` or `None` | What to do next. |
+
+`str(e)` is `message` and `hint` joined by a space. For an unknown column:
+
+```python
+import polars as pl
+from econometricsmodels import OLS, ValidationError
+
+df = pl.DataFrame({"y": [1.0, 2.0, 3.0, 4.0], "x1": [1.0, 2.0, 3.0, 5.0]})
+
+try:
+    OLS(df, y="y", x=["zz"]).fit()
+except ValidationError as e:
+    print(e.code)  # COLUMN_NOT_FOUND
+    print(e.params)  # {'column': 'zz', 'argument': 'x', 'data_argument': 'data'}
+    print(e.message)  # Column 'zz' (given as x) does not exist in data.
+    print(e.hint)  # Check the spelling against data.columns.
+    print(e)  # message and hint, joined by a space
+```
+
+`params` holds exactly the values that were substituted into `message` and `hint`, so it is also where the data for your own handling comes from. The keys differ by `code`: a missing-values error has `column` and `count`, a collinearity error has `columns` (a list). The keys and their types for every code are in [Error codes](error-codes.md).
+
+### Handling an error in code
+
+Branch on the exception class for the coarse distinction, and on `code` for anything finer. Never parse `message` or `hint`: their wording can be improved between versions. `code`, the class of a `code`, and the keys and types of `params` are the stable interface.
+
+```python
+from econometricsmodels import (
+    OLS,
+    ComputationError,
+    ErrorCode,
+    ValidationError,
+)
+
+try:
+    result = OLS(df, y="y", x=["x1", "x2"]).fit()
+except ValidationError as e:
+    if e.code == ErrorCode.COLUMN_CONTAINS_NULL:
+        # e.params["column"], e.params["count"]: your decision how to clean
+        ...
+    else:
+        raise
+except ComputationError as e:
+    if e.code == ErrorCode.DESIGN_MATRIX_SINGULAR:
+        print("Collinear columns:", e.params["columns"])
+    else:
+        raise
+```
+
+`ErrorCode` is a `StrEnum`, so `e.code == ErrorCode.COLUMN_NOT_FOUND` and `e.code == "COLUMN_NOT_FOUND"` are both true. New codes can be added in a later version, so keep a fallback for a `code` you do not know, such as showing `str(e)`. [Error codes](error-codes.md) lists every code and shows how to write your own messages, for example in another language. The reference for the exception classes is on the [Errors](../api/errors.md) page.
+
+In an application, a useful split is to treat `ValidationError` as a response to the caller ("your input is wrong", for example HTTP 400 or 422), with `code` and `params` passed on so the client can render a message, and `ComputationError` as "this data does not support this model". An internal error (a bug in the package) is also a `ComputationError`, with the code `INTERNAL_ERROR`; it is never silently swallowed, and a panic in the Rust core arrives as an ordinary exception that `except Exception` catches.
+
+### Which class is raised
+
+The boundary follows the nature of the check: could you see the problem by looking at the inputs, without running the estimator? If so it is a `ValidationError`; if it needs a numerical routine such as a matrix factorization, or only shows up in an estimated quantity, it is a `ComputationError`. The class does not depend on where in `fit()` the check happens to run. It is a coarse distinction between "fix the input or the options" and "the data do not support this model", although some `ComputationError` codes also suggest a change to the input, such as removing a collinear column or rescaling a variable. For anything finer, branch on the `code`: a code always has the same class. Cases close to the boundary are listed below under their class. For example, a regressor with no variation left after the within transformation is a `ValidationError` (a simple statistic of a column), while a singular design matrix found by the factorization is a `ComputationError`.
+
+### Wrong argument types
+
+A wrong argument *type* raises the built-in `TypeError`, following the Python convention. The message names the argument, the type it expected and the type it got. Passing a pandas DataFrame or a `polars.LazyFrame` as `data`, passing `x="x1"` instead of `x=["x1"]`, a `bool` or a non-integer for an integer option such as `hac_lags`, an options object of the wrong class and an unknown option name are all `TypeError`. The types each argument accepts are listed in [Accepted data](accepted-data.md#argument-types).
 
 ## Design philosophy
 
@@ -43,37 +123,13 @@ The package does not emit Python warnings. Conditions that make a result unusabl
 
 The checks cover whether the input and the numerical computation are well defined. They do not judge whether the model is appropriate. See [What is not checked](#what-is-not-checked).
 
-## The two exception classes
-
-| Exception | Base class | Meaning |
-|---|---|---|
-| `ValidationError` | `ValueError` | The input or an option is invalid. It can be decided from the inputs alone (counts, ranges, uniqueness, the structure of a panel, simple statistics of a column), before any estimation work. |
-| `ComputationError` | `RuntimeError` | The inputs are acceptable on their face, but a numerical routine fails or cannot be trusted: a matrix factorization or inversion, an optimization, an estimated quantity that turns out to be unusable. An internal error (a bug) is raised as a `ComputationError` too, with the code `INTERNAL_ERROR`. |
-
-```python
-from econometricsmodels import ComputationError, ValidationError
-
-try:
-    result = OLS(df, y="y", x=["x1", "x2"]).fit()
-except ValidationError as e:
-    print("Fix the input or the options:", e)
-except ComputationError as e:
-    print("The data do not support this model:", e)
-```
-
-The exception class and the `code` are the stable interface. Every exception has a `code` (for example `COLUMN_NOT_FOUND`), a `params` dictionary with the values that appear in the text, a `message` that says what is wrong and a `hint` that says what to do next; `str(e)` is the two joined. The wording of `message` and `hint` can change between versions, so do not parse it: branch on `code` and read `params`. All codes, their parameters and their English templates are listed in [Error codes](error-codes.md), which also shows how to write your own messages, for example in another language. `ComputationError` has no subclasses: the cause is the `code`.
-
-The boundary follows the nature of the check: could you see the problem by looking at the inputs, without running the estimator? If so it is a `ValidationError`; if it needs a numerical routine such as a matrix factorization, or only shows up in an estimated quantity, it is a `ComputationError`. The class does not depend on where in `fit()` the check happens to run, so moving a check earlier does not change it. The class is a coarse distinction between "fix the input or the options" and "the data do not support this model", although some `ComputationError` codes also suggest a change to the input, such as removing a collinear column or rescaling a variable. For anything finer, branch on the `code`: a code always has the same class. Where a case sits close to the boundary, it is listed below under its class. For example, a regressor with no variation left after the within transformation is a `ValidationError` (a simple statistic of a column), while a singular design matrix found by the factorization is a `ComputationError`.
-
-A wrong argument *type*, as opposed to a wrong value, raises the built-in `TypeError`, not `ValidationError`, following the Python convention. The message names the argument, the type it expected and the type it got: passing a pandas DataFrame or a `polars.LazyFrame` as `data`, passing `x="x1"` instead of `x=["x1"]`, a `bool` or a non-integer for an integer option such as `hac_lags`, or an options object of the wrong class are all `TypeError`. An unknown option name is a `TypeError` as well. The types each argument accepts are listed in [Accepted data](accepted-data.md#argument-types).
-
 ## When `ValidationError` is raised
 
 ### Order in which errors are reported
 
 A call is checked in a fixed order, the same for every method, and the **first** problem found is the one reported. If an input has several problems, fixing the error you see can reveal the next one. The order is:
 
-1. **Argument types.** A wrong type raises `TypeError` (see above), before anything else.
+1. **Argument types.** A wrong type raises `TypeError` (see [Wrong argument types](#wrong-argument-types)), before anything else.
 2. **Option values.** An unknown string for `estimator`, `cov_type`, `gmm_type`, `gmm_weight_type`, `solver` or `variance_method`, checked in this order (a method without the option skips it). An unknown value is reported even if the option would not be used, for example `gmm_type="bogus"` with `estimator="2sls"`.
 3. **Option combinations.** An option that the chosen `cov_type` or estimator does not use (for example `cluster` with `cov_type="classical"`), and then a required option that is missing (for example `hac_time` with `cov_type="hac"`, or `dk_time` with `cov_type="dk"`).
 4. **Roles.** The same column used in two roles, a column named twice, an empty `x`, `"const"` in `x` when an intercept is added.
@@ -85,30 +141,128 @@ Steps 2 to 4 look only at the arguments and options, never at the data. So a typ
 
 ### In every method
 
-| Category | Situation |
-|---|---|
-| Columns | A named column does not exist. The same column is used in two roles (for example `y` also in `x`, or the weight column as `y`). For the Driscoll–Kraay `dk_time` column only `y` and `entity` are checked: it may also be one of the regressors, or the same column as FE's `time`. `x` is empty, or names a column twice. With an intercept, `x` contains a column called `"const"`. A column has a dtype that its role does not accept, such as a string, date or categorical column used as a number (see [Accepted data](accepted-data.md#column-types-by-role)). The `hac_time` column has the same value in two or more rows, including a constant column, so the observations have no time order (see [Order of observations](accepted-data.md#order-of-observations-for-hac)). |
-| Outcome | In a model with an intercept, `y` has the same value in every row, up to rounding (there is nothing to explain; the test is the same relative one as for a regressor with no within-variation in FE). A model without an intercept may have a constant `y`. |
-| Missing values | A null in any used column, or a NaN or infinite value in a numeric column or in a float entity, cluster or time column. A column of the `Null` dtype counts as all missing. |
-| Sample size | There are not enough observations: `n <= k`. There are no regressors. In IV the structural equation is checked first (`n` must exceed its number of coefficients, including the intercept), then the first stage (`n` must exceed the number of instruments including the intercept and the exogenous regressors). At `n` equal to that number the first stage fits perfectly and the 2SLS estimate equals OLS; below it the instruments are singular. |
-| Options | `confidence_level` is outside (0, 1) or NaN. An unknown `cov_type` or other option value. `hac_lags` is outside `[0, n)`, including a very large integer. `tol` or `gmm_tol` is not a positive finite number. An option is set that the chosen `cov_type` or estimator does not use. `cov_type="hac"` (or IV's `gmm_weight_type="hac"`) without `hac_time`. |
-| Clustering | `cov_type="cluster"` without a `cluster` column. Fewer than two clusters, or no more clusters than slope coefficients, so that the joint test is impossible. In IV the slope coefficients of the structural equation are counted. A first-stage regression with more slope coefficients than clusters does not fail: its overall F statistic is `None` (see [Inference conventions](inference-conventions.md#weak-instruments)). |
-| Prediction | Columns of `new_data` are missing, null or non-finite. |
+Each bullet is a situation that raises a `ValidationError`.
+
+**Columns**
+
+- A named column does not exist.
+- The same column is used in two roles (for example `y` also in `x`, or the weight column as `y`).
+- For the Driscoll–Kraay `dk_time` column only `y` and `entity` are checked: it may also be one of the regressors, or the same column as FE's `time`.
+- `x` is empty, or names a column twice.
+- With an intercept, `x` contains a column called `"const"`.
+- A column has a dtype that its role does not accept, such as a string, date or categorical column used as a number (see [Accepted data](accepted-data.md#column-types-by-role)).
+- The `hac_time` column has the same value in two or more rows, including a constant column, so the observations have no time order (see [Order of observations](accepted-data.md#order-of-observations-for-hac)).
+
+**Outcome**
+
+- In a model with an intercept, `y` has the same value in every row, up to rounding (there is nothing to explain; the test is the same relative one as for a regressor with no within-variation in FE).
+- A model without an intercept may have a constant `y`.
+
+**Missing values**
+
+- A null in any used column, or a NaN or infinite value in a numeric column or in a float entity, cluster or time column.
+- A column of the `Null` dtype counts as all missing.
+
+**Sample size**
+
+- There are not enough observations: `n <= k`.
+- There are no regressors.
+- In IV the structural equation is checked first (`n` must exceed its number of coefficients, including the intercept), then the first stage (`n` must exceed the number of instruments including the intercept and the exogenous regressors).
+- At `n` equal to that number the first stage fits perfectly and the 2SLS estimate equals OLS; below it the instruments are singular.
+
+**Options**
+
+- `confidence_level` is outside (0, 1) or NaN.
+- An unknown `cov_type` or other option value.
+- `hac_lags` is outside `[0, n)`, including a very large integer.
+- `tol` or `gmm_tol` is not a positive finite number.
+- An option is set that the chosen `cov_type` or estimator does not use.
+- `cov_type="hac"` (or IV's `gmm_weight_type="hac"`) without `hac_time`.
+
+**Clustering**
+
+- `cov_type="cluster"` without a `cluster` column.
+- Fewer than two clusters, or no more clusters than slope coefficients, so that the joint test is impossible.
+- In IV the slope coefficients of the structural equation are counted.
+- A first-stage regression with more slope coefficients than clusters does not fail: its overall F statistic is `None` (see [Inference conventions](inference-conventions.md#weak-instruments)).
+
+**Prediction**
+
+- Columns of `new_data` are missing, null or non-finite.
 
 ### Method-specific
 
-| Method | Situation |
-|---|---|
-| WLS | A weight is zero, negative, null or NaN. The weight column is missing. |
-| OLS (`breusch_godfrey_test()`) | `statistic` is not `"lm"` or `"f"`. `nlags` is below 1, or too large for the number of observations (`n <= k + nlags`). The `time` column does not exist, has an unsupported dtype, or contains missing values, NaN, infinity or duplicates (the row order is never used as the time order). The result has no retained training data (the `OLSResults` returned by `IVResults.first_stage()`). `time` or `statistic` that is not a `str`, or `nlags` that is not an `int` (a `bool` or `float` too), raises `TypeError`. |
-| OLS (`breusch_pagan_test()`) | `statistic` is not `"lm"` or `"f"`. `variables` is empty, names a column twice, or names a column that does not exist, has an unsupported dtype or contains missing values, NaN or infinity (a column that is not in the model is checked too). Every variable is constant. Too few observations for the auxiliary regression. The result has no retained training data (the `OLSResults` returned by `IVResults.first_stage()`). `variables` that is not a `list` of `str`, or `statistic` that is not a `str`, raises `TypeError`. |
-| OLS (`white_test()`) | `statistic` is not `"lm"` or `"f"`. Every regressor is constant. Too few observations for the auxiliary regression, which has far more columns than the model (all squares and products of the regressors). The result has no retained training data (the `OLSResults` returned by `IVResults.first_stage()`). |
-| Logit, Probit | `y` is not coded exactly 0 or 1. `max_iter` is not an integer from 1 to 10,000, or `tol` is not a positive finite number. |
-| Tobit | `max_iter` is not an integer from 1 to 10,000, or `tol` is not a positive finite number. Both censoring bounds are `None`, or the lower bound is not below the upper bound. `y` lies outside the bounds. There is no uncensored observation. `x` contains a column named `"sigma"`. |
-| IV | Fewer instruments than endogenous regressors (the order condition). `x_endog` or `instruments` is empty. GMM options are set for an estimator that does not use them, or are out of range (`gmm_max_iter` outside 3 to 10,000, or `gmm_tol` not a positive finite number). With `gmm_weight_type="cluster"`, there are too few clusters for the weight matrix. |
-| FE | A singleton entity, or in a two-way model a singleton time period. A two-way model on an unbalanced panel, or without `time`. A regressor with no within-variation (constant over time within every entity). The outcome has no variation left after the fixed effects are removed (constant within every entity, or in a two-way model fully explained by the entity and time effects). Too few degrees of freedom. |
-| RE | The outcome is constant within every entity. A singleton entity, or in a two-way model (`time` set) a singleton time period. A two-way model on an unbalanced panel. With `cov_type="cluster"`, too few clusters for the Hausman auxiliary regression (counting only the identified columns). A time-invariant regressor is allowed, unlike in FE, and so is a regressor together with its entity or time mean (correlated random effects, Mundlak): the aliased columns of the between and Hausman auxiliary regressions are dropped and `hausman_df` counts the identified ones. An unknown `variance_method`, or `variance_method="amemiya"` with a regressor that has no within variation (time-invariant; in a two-way model, varying in at most one dimension): use `"swamy_arora"` or `"wallace_hussain"`. |
-| FE, RE | `cov_type="dk"` without `dk_time` (neither borrows `time` for it), with an invalid `dk_bandwidth`, with too few time periods for the number of coefficients tested, or with a degenerate two-period structure. |
+These are in addition to the situations above.
+
+**WLS**
+
+- A weight is zero, negative, null or NaN.
+- The weight column is missing.
+
+**OLS (`breusch_godfrey_test()`)**
+
+- `statistic` is not `"lm"` or `"f"`.
+- `nlags` is below 1, or too large for the number of observations (`n <= k + nlags`).
+- The `time` column does not exist, has an unsupported dtype, or contains missing values, NaN, infinity or duplicates (the row order is never used as the time order).
+- The result has no retained training data (the `OLSResults` returned by `IVResults.first_stage()`).
+- `time` or `statistic` that is not a `str`, or `nlags` that is not an `int` (a `bool` or `float` too), raises `TypeError`.
+
+**OLS (`breusch_pagan_test()`)**
+
+- `statistic` is not `"lm"` or `"f"`.
+- `variables` is empty, names a column twice, or names a column that does not exist, has an unsupported dtype or contains missing values, NaN or infinity (a column that is not in the model is checked too).
+- Every variable is constant.
+- Too few observations for the auxiliary regression.
+- The result has no retained training data (the `OLSResults` returned by `IVResults.first_stage()`).
+- `variables` that is not a `list` of `str`, or `statistic` that is not a `str`, raises `TypeError`.
+
+**OLS (`white_test()`)**
+
+- `statistic` is not `"lm"` or `"f"`.
+- Every regressor is constant.
+- Too few observations for the auxiliary regression, which has far more columns than the model (all squares and products of the regressors).
+- The result has no retained training data (the `OLSResults` returned by `IVResults.first_stage()`).
+
+**Logit, Probit**
+
+- `y` is not coded exactly 0 or 1.
+- `max_iter` is not an integer from 1 to 10,000, or `tol` is not a positive finite number.
+
+**Tobit**
+
+- `max_iter` is not an integer from 1 to 10,000, or `tol` is not a positive finite number.
+- Both censoring bounds are `None`, or the lower bound is not below the upper bound.
+- `y` lies outside the bounds.
+- There is no uncensored observation.
+- `x` contains a column named `"sigma"`.
+
+**IV**
+
+- Fewer instruments than endogenous regressors (the order condition).
+- `x_endog` or `instruments` is empty.
+- GMM options are set for an estimator that does not use them, or are out of range (`gmm_max_iter` outside 3 to 10,000, or `gmm_tol` not a positive finite number).
+- With `gmm_weight_type="cluster"`, there are too few clusters for the weight matrix.
+
+**FE**
+
+- A singleton entity, or in a two-way model a singleton time period.
+- A two-way model on an unbalanced panel, or without `time`.
+- A regressor with no within-variation (constant over time within every entity).
+- The outcome has no variation left after the fixed effects are removed (constant within every entity, or in a two-way model fully explained by the entity and time effects).
+- Too few degrees of freedom.
+
+**RE**
+
+- The outcome is constant within every entity.
+- A singleton entity, or in a two-way model (`time` set) a singleton time period.
+- A two-way model on an unbalanced panel.
+- With `cov_type="cluster"`, too few clusters for the Hausman auxiliary regression (counting only the identified columns).
+- A time-invariant regressor is allowed, unlike in FE, and so is a regressor together with its entity or time mean (correlated random effects, Mundlak): the aliased columns of the between and Hausman auxiliary regressions are dropped and `hausman_df` counts the identified ones.
+- An unknown `variance_method`, or `variance_method="amemiya"` with a regressor that has no within variation (time-invariant; in a two-way model, varying in at most one dimension): use `"swamy_arora"` or `"wallace_hussain"`.
+
+**FE, RE**
+
+- `cov_type="dk"` without `dk_time` (neither borrows `time` for it), with an invalid `dk_bandwidth`, with too few time periods for the number of coefficients tested, or with a degenerate two-period structure.
 
 ## When `ComputationError` is raised
 
@@ -145,6 +299,7 @@ The absence of an error says nothing about the following. They are your responsi
 
 ## Where to look next
 
+- [Errors](../api/errors.md): the reference for `ValidationError`, `ComputationError` and `ErrorCode`.
 - [Error codes](error-codes.md): every `code`, its parameters and the English message and hint templates.
 - [Accepted data](accepted-data.md): the input type, the column types accepted in each role, and the argument types.
 - [Inference conventions](inference-conventions.md): the distributions and degrees of freedom behind the reported statistics.

@@ -1,5 +1,17 @@
 # Getting Started
 
+Every estimator is used the same way: pass a polars DataFrame, the column names and (optionally) an options object, then call `.fit()`. This page walks through each method in turn; the first section, OLS, introduces the conventions the others share.
+
+| Method | Section |
+|---|---|
+| OLS, WLS | [OLS](#ols-ordinary-least-squares), [WLS](#wls-weighted-least-squares) |
+| Logit, Probit, Tobit | [Logit](#logit-binary-logistic-regression), [Probit](#probit-probit-regression), [Tobit](#tobit-censored-regression) |
+| IV | [IV](#iv-instrumental-variables-2slsgmm) |
+| FE, RE | [FE](#fe-fixed-effects-panel-regression), [RE](#re-random-effects-panel-regression) |
+| Handling errors | [Error handling](#error-handling) |
+
+What each estimator computes is defined on the [Methods](methods/ols.md) pages, and the arguments, options and result fields are in the [API Reference](api/ols.md).
+
 ## OLS (Ordinary Least Squares)
 
 Pass the column names of the dependent variable (`y`) and independent variables (`x`), along with the polars DataFrame to estimate on, to `OLS`, then call `.fit()`.
@@ -24,7 +36,7 @@ print(result.r_squared)
 
 With `include_intercept` (default `True`), a constant term (`const`) is automatically added to the design matrix, separate from the columns specified in `x`.
 
-## Switching the type of standard error
+### Switching the type of standard error
 
 Setting `cov_type` on `OLSOptions` lets you switch to heteroskedasticity-robust standard errors (HC0-HC3), cluster-robust standard errors, or HAC (Newey-West) standard errors.
 
@@ -49,16 +61,29 @@ When `hac_lags` is omitted, the number of lags is chosen automatically as `floor
 
 See the [API Reference](api/ols.md) for the full list of available options.
 
-## Retrieving results
+### Retrieving results
 
 `OLSResults` exposes coefficients, standard errors, etc. as dictionaries keyed by coefficient name (`str`). If you need a row-oriented listing — e.g. for a REST API response — use `params_table()`.
+
+Every method's results share these fields, so code that reads one result type works with the others:
+
+| Field | Content |
+|---|---|
+| `params`, `std_errors`, `test_stats`, `p_values` | `dict` keyed by coefficient name |
+| `conf_int` | `dict` of `(lower, upper)` keyed by coefficient name |
+| `param_names` | The coefficient names, in order (`"const"` first when there is an intercept) |
+| `stat_dist`, `stat_df` | The distribution behind `test_stats` and `p_values` (`"t"` or `"normal"`) and its degrees of freedom (`None` for the normal distribution) |
+| `cov_type`, `n_obs`, `df_resid` | The standard error type used, the number of observations and the residual degrees of freedom |
+| `log_likelihood`, `aic`, `bic` | Information criteria (OLS, WLS, Logit, Probit, Tobit, FE, RE) |
+
+The remaining fields depend on the method (for example `r_squared` for OLS, `lr_statistic` for Logit, `hausman_statistic` for RE) and are listed on each method's API page.
 
 ```python
 for row in result.params_table():
     print(row["param_name"], row["param"], row["std_error"], row["p_value"])
 ```
 
-## Predicted values
+### Predicted values
 
 `OLSResults.predict()` returns predicted values. With no arguments, it returns the fitted values for the training data used in `fit()`; passing `new_data` returns out-of-sample predictions for new data instead.
 
@@ -82,7 +107,7 @@ augmented = result.augment(new_data)
 print(augmented)  # original `new_data` columns, plus a "predicted" column
 ```
 
-## Diagnostics: White test for heteroskedasticity
+### Diagnostics: White test for heteroskedasticity
 
 `OLSResults.white_test()` is a post-estimation diagnostic: it is never computed by `fit()`, and you call it when you want it. It regresses the squared residuals on the independent variables, their squares and their pairwise products. `statistic="lm"` (default) returns the LM version `n * R²` (chi-squared); `statistic="f"` returns the F version of the same auxiliary regression.
 
@@ -334,7 +359,7 @@ print(
 )  # OLSResults for endog1 ~ x_exog + instruments
 ```
 
-See the [API Reference](api/iv.md#diagnostics) for what each diagnostic tests and when it is `None`.
+See [Methods: IV](methods/iv.md#diagnostics) for what each diagnostic tests, and the [API Reference](api/iv.md) for when it is `None`.
 
 ## FE (fixed effects panel regression)
 
@@ -387,17 +412,21 @@ print(result.hausman_statistic, result.hausman_p_value)
 
 ## Error handling
 
-See [Validation and errors](guide/validation.md) for the design philosophy and the full list of situations that raise each error.
+Invalid input or options (a missing column, missing values, etc.) raise `ValidationError` (a subclass of `ValueError`). Problems detected during computation (e.g. a singular design matrix) raise `ComputationError` (a subclass of `RuntimeError`). A wrong argument *type* raises the built-in `TypeError`.
 
-Invalid input or options (a missing column, missing values, etc.) raise `ValidationError` (a subclass of `ValueError`). Problems detected during computation (e.g. a singular design matrix) raise `ComputationError` (a subclass of `RuntimeError`).
+Both exceptions carry a stable `code` and a `params` dictionary with the values behind the message, so a program can branch on them instead of parsing text:
 
 ```python
-from econometricsmodels import ComputationError, ValidationError
+from econometricsmodels import ComputationError, ErrorCode, ValidationError
 
 try:
     result = OLS(df, y="y", x=["x1", "x2"]).fit()
 except ValidationError as e:
-    print("Input error:", e)
+    print(e.code, e.params)  # e.g. COLUMN_NOT_FOUND {'column': 'x2', ...}
+    print("Input error:", e)  # message and hint
 except ComputationError as e:
-    print("Computation error:", e)
+    if e.code == ErrorCode.DESIGN_MATRIX_SINGULAR:
+        print("Collinear columns:", e.params["columns"])
 ```
+
+See [Validation and errors](guide/validation.md#reading-an-error) for what an exception contains and how to handle it, and [Error codes](guide/error-codes.md) for every `code`.

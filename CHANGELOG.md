@@ -5,6 +5,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking**: optional arguments are keyword-only everywhere, so adding or reordering an argument can no longer make a positional call silently set another one. (1) Every `*Options` class (`OLSOptions`, `WLSOptions`, `IVOptions`, `LogitOptions`, `ProbitOptions`, `TobitOptions`, `FEOptions`, `REOptions`) takes all its arguments by keyword: `OLSOptions(cov_type="hc1")`; `OLSOptions("hc1")` raises `TypeError`. (2) The `options` argument of `OLS`, `WLS`, `IV`, `Logit`, `Probit`, `Tobit`, `FE` and `RE` is keyword-only: `OLS(df, "y", ["x1"], options=opts)`. The columns (`data`, `y`, `x`, `weight`, `entity`, `x_exog`, `x_endog`, `instruments`) stay positional. (3) The optional arguments of the result methods are keyword-only: `predict()` / `augment()` (`new_data`, `target`), `pred_table()` (`threshold`), `marginal_effects()` (`at`, `target`, `confidence_level`), `white_test()` (`statistic`), `breusch_pagan_test()` (`variables`, `statistic`) and `breusch_godfrey_test()` (`statistic`; `time` and `nlags` stay positional). Migration: write the argument name, for example `result.predict(new_data=df)` and `result.breusch_pagan_test(variables=["x1"], statistic="f")`. A positional call fails with `TypeError` instead of changing meaning
+
 ## [0.9.0] - 2026-10-25
 
 ### Added

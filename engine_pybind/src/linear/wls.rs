@@ -38,6 +38,8 @@ use crate::shared::validation::{RoleValue, validate_common_roles, validate_no_du
 
 /// Estimation options for WLS.
 ///
+/// All arguments are keyword-only.
+///
 /// `weight` is not an option: it is a top-level argument of `WLS`, next to `y` and `x`.
 // 各フィールドの意味・既定値の根拠は`docs/spec/wls-spec.md`「API引数」。
 // `OLSOptions`と同じフィールド構成だが、将来WLS固有のオプションを足してもOLS利用者に

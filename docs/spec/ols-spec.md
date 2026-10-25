@@ -9,7 +9,7 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols/`・`engi
 
 ## 1. API引数
 
-3層構成: `OLS(data, y, x, options).fit() -> OLSResults`（python_package）→
+3層構成: `OLS(data, y, x, options=options).fit() -> OLSResults`（python_package）→
 `fit_ols(data, y, x, options) -> OLSResult`（engine_pybind、PyO3境界）→
 正規方程式ソルバー・標準誤差計算（engine）。
 

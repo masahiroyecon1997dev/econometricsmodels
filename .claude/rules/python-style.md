@@ -28,6 +28,7 @@ Issue番号・内部管理ドキュメント（`docs/planning/specs/`配下の�
 
 - データ入力は **polarsのみ**。pandas等への変換・依存を持ち込まない。
 - 変数は **List渡し**、推定オプションは **オブジェクト渡し**。formula文字列パースを実装しない。
+- **デフォルト値のある引数はキーワード専用にする**（`def f(self, required, *, option=None)`）。推定クラスの`options`、結果クラスのメソッドの任意引数（`new_data`・`target`・`statistic`・`variables`・`threshold`・`at`・`confidence_level`等）が対象で、引数の追加・並べ替えで位置渡しの呼び出しが壊れないようにする。必須引数（`data`・`y`・`x`、`breusch_godfrey_test`の`time`・`nlags`等）は位置渡しのままでよい。`engine_pybind`の生のメソッドを呼ぶ内部の呼び出しは対象外。`tests/cross_method/test_keyword_only_arguments.py`が公開クラスのコンストラクタと公開メソッドを検査する。
 - `engine_pybind` からの呼び出しを薄くラップする。計算ロジックをPython側に持たない。
 
 ## 開発ツールの実行方針

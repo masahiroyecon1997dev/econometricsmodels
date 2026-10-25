@@ -99,6 +99,8 @@ pub(crate) fn iv_error_to_pyerr(err: IvError) -> PyErr {
 
 /// Estimation options for IV (2SLS/GMM).
 ///
+/// All arguments are keyword-only.
+///
 /// A single options class serves both estimation methods; fields that apply to
 /// only one estimator are documented as such.
 // 各フィールドの意味・既定値の根拠は`docs/spec/iv-spec.md`。

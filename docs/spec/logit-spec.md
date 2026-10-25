@@ -9,7 +9,7 @@ Logit（二項ロジスティック回帰、最尤推定）の確定済み仕様
 
 ## 1. API引数
 
-3層構成: `Logit(data, y, x, options).fit() -> LogitResults`（python_package）→
+3層構成: `Logit(data, y, x, options=options).fit() -> LogitResults`（python_package）→
 `fit_logit(data, y, x, options) -> LogitResult`（engine_pybind）→ `LogitEstimator::fit`（engine、
 Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 

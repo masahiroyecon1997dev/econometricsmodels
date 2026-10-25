@@ -275,7 +275,7 @@ class ProbitResults:
         """
         return params_table_rows(self._raw)
 
-    def predict(self, new_data: pl.DataFrame | None = None) -> list[float]:
+    def predict(self, *, new_data: pl.DataFrame | None = None) -> list[float]:
         """Predicted probabilities `p_i = Φ(x_i'β̂)`.
 
         Note:
@@ -307,7 +307,7 @@ class ProbitResults:
         """
         return self._raw.predict(new_data)
 
-    def augment(self, new_data: pl.DataFrame | None = None) -> pl.DataFrame:
+    def augment(self, *, new_data: pl.DataFrame | None = None) -> pl.DataFrame:
         """Source data with the predicted probabilities appended as a
         column.
 
@@ -333,7 +333,7 @@ class ProbitResults:
         """
         return self._raw.augment(new_data)
 
-    def pred_table(self, threshold: float = 0.5) -> list[dict[str, float]]:
+    def pred_table(self, *, threshold: float = 0.5) -> list[dict[str, float]]:
         """Classification (confusion) table.
 
         `actual` always uses a fixed 0.5 split; only the predicted
@@ -359,7 +359,7 @@ class ProbitResults:
         ]
 
     def marginal_effects(
-        self, at: str = "overall", confidence_level: float = 0.95
+        self, *, at: str = "overall", confidence_level: float = 0.95
     ) -> list[dict[str, float | str]]:
         """Marginal effects (`dy/dx`) with delta-method standard errors.
 

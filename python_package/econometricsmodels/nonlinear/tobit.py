@@ -313,6 +313,7 @@ class TobitResults:
 
     def predict(
         self,
+        *,
         new_data: pl.DataFrame | None = None,
         target: str = "expected_observed",
     ) -> list[float]:
@@ -367,6 +368,7 @@ class TobitResults:
 
     def augment(
         self,
+        *,
         new_data: pl.DataFrame | None = None,
         target: str = "expected_observed",
     ) -> pl.DataFrame:
@@ -407,6 +409,7 @@ class TobitResults:
 
     def marginal_effects(
         self,
+        *,
         at: str = "overall",
         target: str = "expected_observed",
         confidence_level: float = 0.95,

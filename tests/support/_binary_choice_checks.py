@@ -299,7 +299,7 @@ def check_predict_new_data_returns_probabilities(dataset, estimator_cls):
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
     new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
 
-    predicted = res.predict(new_data)
+    predicted = res.predict(new_data=new_data)
 
     assert isinstance(predicted, list)
     assert len(predicted) == 2
@@ -341,13 +341,13 @@ def check_augment_new_data_returns_new_data_with_probability_column(
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
     new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
 
-    augmented = res.augment(new_data)
+    augmented = res.augment(new_data=new_data)
 
     assert isinstance(augmented, pl.DataFrame)
     assert augmented.height == 2
     assert augmented.columns == ["x1", "x2", "predicted_probability"]
 
-    expected = res.predict(new_data)
+    expected = res.predict(new_data=new_data)
     assert augmented["predicted_probability"].to_list() == expected
 
 
@@ -373,8 +373,8 @@ def check_augment_without_intercept_matches_predict(
     assert augmented_none["predicted_probability"].to_list() == expected_none
 
     new_data = pl.DataFrame({"x1": [10.0, 20.0]})
-    augmented_new = res.augment(new_data)
-    expected_new = res.predict(new_data)
+    augmented_new = res.augment(new_data=new_data)
+    expected_new = res.predict(new_data=new_data)
     assert augmented_new["predicted_probability"].to_list() == expected_new
 
 
@@ -396,8 +396,8 @@ def check_pred_table_actual_counts_invariant_to_threshold(
 ):
     """`actual`の行合計はthresholdに関わらず一定（固定0.5分割のため）。"""
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
-    table_default = res.pred_table(0.5)
-    table_other = res.pred_table(0.9)
+    table_default = res.pred_table(threshold=0.5)
+    table_other = res.pred_table(threshold=0.9)
 
     def row_totals(table):
         return {
@@ -572,7 +572,7 @@ def check_data_not_polars_raises(dataset, estimator_cls):
             param_name="new_data",
         ),
     ):
-        res.predict(bad_new_data)
+        res.predict(new_data=bad_new_data)
     with pytest.raises(
         TypeError,
         match=escaped(
@@ -580,7 +580,7 @@ def check_data_not_polars_raises(dataset, estimator_cls):
             param_name="new_data",
         ),
     ):
-        res.augment(bad_new_data)
+        res.augment(new_data=bad_new_data)
 
 
 def check_null_values_raise(estimator_cls):
@@ -720,7 +720,7 @@ def check_predict_missing_column_raises(dataset, estimator_cls):
         argument="x",
         data_argument="new_data",
     ):
-        res.predict(new_data)
+        res.predict(new_data=new_data)
 
 
 def check_predict_non_numeric_dtype_raises(dataset, estimator_cls):
@@ -735,7 +735,7 @@ def check_predict_non_numeric_dtype_raises(dataset, estimator_cls):
         argument="x",
         data_argument="new_data",
     ):
-        res.predict(new_data)
+        res.predict(new_data=new_data)
 
 
 def check_predict_null_or_non_finite_values_raise(dataset, estimator_cls):
@@ -749,7 +749,7 @@ def check_predict_null_or_non_finite_values_raise(dataset, estimator_cls):
         argument="x",
         data_argument="new_data",
     ):
-        res.predict(new_data_null)
+        res.predict(new_data=new_data_null)
 
     new_data_inf = pl.DataFrame({"x1": [1.0, float("inf")], "x2": [1.0, 2.0]})
     with raises_error(
@@ -760,7 +760,7 @@ def check_predict_null_or_non_finite_values_raise(dataset, estimator_cls):
         argument="x",
         data_argument="new_data",
     ):
-        res.predict(new_data_inf)
+        res.predict(new_data=new_data_inf)
 
 
 def check_augment_column_collision_raises(dataset, estimator_cls):
@@ -785,7 +785,7 @@ def check_augment_column_collision_raises(dataset, estimator_cls):
     with raises_error(
         ErrorCode.AUGMENT_COLUMN_EXISTS, column="predicted_probability"
     ):
-        res.augment(new_data)
+        res.augment(new_data=new_data)
 
 
 def check_augment_missing_column_raises(dataset, estimator_cls):
@@ -801,7 +801,7 @@ def check_augment_missing_column_raises(dataset, estimator_cls):
         argument="x",
         data_argument="new_data",
     ):
-        res.augment(new_data)
+        res.augment(new_data=new_data)
 
 
 # ── test_<solver>_validation.py: ValidationError（オプション） ─────
@@ -1807,7 +1807,7 @@ def check_predict_new_data_matches_statsmodels(
     new_data = pl.DataFrame(
         {"x2": [0.5, -1.0], "x3": [0.2, 0.1], "x1": [1.0, -0.5]}
     )
-    predicted = res.predict(new_data)
+    predicted = res.predict(new_data=new_data)
 
     sm_new_x = sm.add_constant(
         np.column_stack(
@@ -1843,7 +1843,7 @@ def check_predict_new_data_without_intercept_matches_statsmodels(
 
     new_x1 = [1.0, 2.0, -3.0]
     new_data = pl.DataFrame({"x1": new_x1})
-    predicted = res.predict(new_data)
+    predicted = res.predict(new_data=new_data)
     expected = sm_fitted.predict([[v] for v in new_x1])
 
     assert len(predicted) == 3
@@ -1881,7 +1881,7 @@ def check_predict_with_include_intercept_false_and_x_named_const(
     res = estimator_cls(df, y="y", x=["const", "x2"], options=options).fit()
 
     new_data = pl.DataFrame({"const": [100.0, 200.0], "x2": [10.0, 20.0]})
-    predicted = res.predict(new_data)
+    predicted = res.predict(new_data=new_data)
 
     coef_const = res.params["const"]
     coef_x2 = res.params["x2"]

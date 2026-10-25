@@ -33,7 +33,7 @@ predicted = result.predict()
 print(predicted)  # [0.83, 0.12, ...] (a plain list of probabilities)
 
 new_data = pl.DataFrame({"x1": [1.0, 2.0]})
-predicted = result.predict(new_data)
+predicted = result.predict(new_data=new_data)
 print(predicted)  # [..., ...]
 
 table = result.pred_table()
@@ -44,7 +44,7 @@ for row in table:
 `LogitResults.augment()` takes the same `new_data` argument as `predict()`, but returns a polars DataFrame (the source data plus a new `"predicted_probability"` column) instead of a plain list, mirroring `OLSResults.augment()`.
 
 ```python
-augmented = result.augment(new_data)
+augmented = result.augment(new_data=new_data)
 print(
     augmented
 )  # original `new_data` columns, plus a "predicted_probability" column

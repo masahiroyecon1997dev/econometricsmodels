@@ -293,7 +293,7 @@ def check_predict_returns_probabilities(dataset, estimator_cls):
 
 
 def check_predict_new_data_returns_probabilities(dataset, estimator_cls):
-    """`predict(new_data)`（out-of-sample）が学習データと構造の
+    """`predict(new_data=...)`（out-of-sample）が学習データと構造の
     異なる新規データに対しても同じ形状（確率の`list[float]`）を返すこと。
     """
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
@@ -335,8 +335,8 @@ def check_augment_none_returns_training_data_with_probability_column(
 def check_augment_new_data_returns_new_data_with_probability_column(
     dataset, estimator_cls
 ):
-    """`augment(new_data)`が、`new_data`の全列＋`"predicted_probability"`列を持つ
-    DataFrameを、`predict(new_data)`と同じ予測確率で返すこと。
+    """`augment(new_data=...)`が、`new_data`の全列＋`"predicted_probability"`列を持つ
+    DataFrameを、`predict(new_data=...)`と同じ予測確率で返すこと。
     """
     res = estimator_cls(dataset, y="y", x=["x1", "x2"]).fit()
     new_data = pl.DataFrame({"x1": [1.0, 2.0], "x2": [0.5, -0.5]})
@@ -1829,7 +1829,7 @@ def check_predict_new_data_matches_statsmodels(
 def check_predict_new_data_without_intercept_matches_statsmodels(
     config: BinaryChoiceReferenceConfig, sm_estimator_cls
 ) -> None:
-    """`include_intercept=False`でfitした場合の`predict(new_data)`も
+    """`include_intercept=False`でfitした場合の`predict(new_data=...)`も
     statsmodelsと一致すること（OLSの`test_predict_new_data_without_intercept_
     matches_statsmodels`と同型）。
     """
@@ -1855,7 +1855,7 @@ def check_predict_with_include_intercept_false_and_x_named_const(
     estimator_cls, options_cls, link
 ) -> None:
     """`include_intercept=False`かつ`x`に`"const"`という名前の列を含む場合でも
-    `predict(new_data)`が正しく動作すること（OLSの`test_predict_with_include_
+    `predict(new_data=...)`が正しく動作すること（OLSの`test_predict_with_include_
     intercept_false_and_x_named_const`と同型の回帰テスト）。
 
     `include_intercept=True`のときのみ`"const"`列名との衝突チェックが働く仕様

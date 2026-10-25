@@ -409,8 +409,8 @@ def test_augment_none_returns_training_data_with_predicted_column(
 def test_augment_new_data_returns_new_data_with_predicted_column(
     wide_dataset,
 ):
-    """`augment(new_data)`が、`new_data`の全列＋`"predicted"`列を持つ
-    DataFrameを、`predict(new_data)`と同じ予測値で返すこと。
+    """`augment(new_data=...)`が、`new_data`の全列＋`"predicted"`列を持つ
+    DataFrameを、`predict(new_data=...)`と同じ予測値で返すこと。
     """
     res = our_fit(wide_dataset, x=WIDE_X)
     new_data = wide_new_data(2)

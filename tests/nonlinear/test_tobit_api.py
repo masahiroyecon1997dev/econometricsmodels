@@ -399,7 +399,7 @@ def test_predict_target_is_case_insensitive(
 )
 def test_predict_with_include_intercept_false_and_x_named_const(target):
     """`include_intercept=False`かつ`x`に`"const"`という名前の列を含む場合でも
-    `predict(new_data)`が、その列の値を使って正しく計算されること。
+    `predict(new_data=...)`が、その列の値を使って正しく計算されること。
 
     `include_intercept=True`のときのみ`"const"`列名との衝突チェックが働く仕様の
     ため、`include_intercept=False`ならユーザーが`"const"`という名前の（切片では
@@ -452,9 +452,9 @@ def test_predict_augment_take_new_data_as_keyword_only_arg(
     augmented = res.augment(new_data=new_data)
     assert augmented.height == 2
     assert "predicted_expected_observed" in augmented.columns
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="positional"):
         res.predict(new_data)  # type: ignore[misc]
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="positional"):
         res.augment(new_data)  # type: ignore[misc]
 
 

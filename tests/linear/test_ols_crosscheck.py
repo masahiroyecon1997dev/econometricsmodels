@@ -28,7 +28,7 @@ classical/HC0-3/clusterはRとほぼ機械精度で一致する（実測で相�
 `predict()`（`docs/spec/ols-spec.md`「predict()」）も対象に含める。
 `run_lm_predict_crosscheck.R`（`fitted()`・`predict(model, newdata=...)`）を使い、
 全シナリオで`predict(new_data=None)`（学習データの予測値）を、baselineシナリオのみ
-`predict(new_data)`（新規データの予測値、列順を入れ替えて列名マッチングも確認）を
+`predict(new_data=...)`（新規データの予測値、列順を入れ替えて列名マッチングも確認）を
 crosscheckする。
 
 `include_intercept=False`（切片なし）・`confidence_level`非既定は、baseline
@@ -183,7 +183,7 @@ def test_predict_none_matches_r_fitted_values(crosscheck, scenario):
 
 
 def test_predict_new_data_matches_r(crosscheck):
-    """`predict(new_data)`（新規データに対する予測値）がRの`predict(model, newdata=...)`
+    """`predict(new_data=...)`（新規データに対する予測値）がRの`predict(model, newdata=...)`
     と一致すること（baselineシナリオのみ。列順を学習時と入れ替えて渡し、列名マッチングも
     合わせて確認する）。
     """

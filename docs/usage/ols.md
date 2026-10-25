@@ -119,7 +119,7 @@ The auxiliary regression always includes a constant, even when the model was fit
 
 ## Diagnostics: Breusch-Pagan test for heteroskedasticity
 
-`OLSResults.breusch_pagan_test(variables=None, statistic="lm")` is another post-estimation test for heteroskedasticity, never computed by `fit()`. It regresses the squared residuals on a constant and the columns you name in `variables`; with no `variables` it uses the model's regressors. Unlike the White test you choose which variables may drive the error variance, and they need not be in the model.
+`OLSResults.breusch_pagan_test(*, variables=None, statistic="lm")` is another post-estimation test for heteroskedasticity, never computed by `fit()`. It regresses the squared residuals on a constant and the columns you name in `variables`; with no `variables` it uses the model's regressors. Unlike the White test you choose which variables may drive the error variance, and they need not be in the model.
 
 ```python
 bp = result.breusch_pagan_test()  # the model's regressors
@@ -134,7 +134,7 @@ This is the studentized (Koenker) version, which does not assume normal errors. 
 
 ## Diagnostics: Breusch-Godfrey test for serial correlation
 
-`OLSResults.breusch_godfrey_test(time, nlags, statistic="lm")` tests for serial correlation of the errors by regressing the residuals on the regressors and their own lags. It is a post-estimation diagnostic, never computed by `fit()`. `time` is the column that gives the time order and `nlags` the number of lags; both are required, because the row order is never assumed to be the time order and there is no natural default lag.
+`OLSResults.breusch_godfrey_test(time, nlags, *, statistic="lm")` tests for serial correlation of the errors by regressing the residuals on the regressors and their own lags. It is a post-estimation diagnostic, never computed by `fit()`. `time` is the column that gives the time order and `nlags` the number of lags; both are required, because the row order is never assumed to be the time order and there is no natural default lag.
 
 ```python
 bg = result.breusch_godfrey_test("year", 2)  # LM version (chi-squared)

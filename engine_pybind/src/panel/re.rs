@@ -157,6 +157,7 @@ impl REOptions {
 impl REOptions {
     #[new]
     #[pyo3(signature = (
+        *,
         cov_type = "cluster".to_string(),
         confidence_level = 0.95,
         time = None,

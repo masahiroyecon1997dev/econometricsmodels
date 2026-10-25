@@ -22,14 +22,6 @@ import pytest
 # まだ位置引数を受け付ける`クラス.メンバー`（`__init__`はコンストラクタ）。
 PENDING: frozenset[str] = frozenset(
     {
-        "FEOptions.__init__",
-        "IVOptions.__init__",
-        "LogitOptions.__init__",
-        "OLSOptions.__init__",
-        "ProbitOptions.__init__",
-        "REOptions.__init__",
-        "TobitOptions.__init__",
-        "WLSOptions.__init__",
         "FE.__init__",
         "IV.__init__",
         "Logit.__init__",

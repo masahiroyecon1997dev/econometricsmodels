@@ -25,10 +25,14 @@
 //! （`Pz`が射影行列＝冪等・対称であることから代数的に導出できる、Wooldridge (2010) 5章）。
 //! そのため本モジュールは、第二段階の`OlsEstimator`（`params()`のみ利用、後述）とは別に、
 //! この`(X̂, e)`に対する独立実装のサンドイッチ計算（`classical_cov_params`/`hc_cov_params`/
-//! `hac_cov_params`/`cluster_cov_params`/`wald_f_test`、いずれも本ファイル下部）を行う。
+//! `hac_cov_params`/`wald_f_test`、いずれも本ファイル下部。クラスターのサンドイッチは
+//! 設計行列と残差を引数に取る`shared::covariance::cluster_cov_params`を、`X̂`・構造残差`e`で
+//! 呼ぶ）を行う。
 //! OLS（`engine::linear::ols`）の同名の同型計算とは**意図的に独立実装**にしている
 //! （`docs/spec/iv-spec.md`3.1節「IVのサンドイッチ型分散計算は独自実装でよい……OLS/nonlinear
-//! どちらの既存計算にも寄せない」）。
+//! どちらの既存計算にも寄せない」）。例外はクラスターの蓄積・補正と、HACのラグ数の解決で、
+//! 共有モジュール`shared::covariance`（OLS本体ではない）の`cluster_meat`/`cluster_correction`・
+//! `resolve_hac_lags`を使う。
 //!
 //! 第一段階の各`OlsEstimator`はそれ自体が正しい（ナイーブな）OLS回帰であり、
 //! （弱操作変数診断等で必要になる）SE・F統計量も含めてそのまま公開してよい
@@ -58,16 +62,19 @@
 //! サンドイッチ計算側では検証しない。`x_endog=[]`の退化ケースでは第一段階ループが
 //! 一度も回らないため、この検証が範囲外エラーを検知する唯一の経路になる）。
 
-use crate::error::CommonError;
-use crate::inference;
 use crate::iv::common::{
     IvError, IvInput, compute_first_stage, mat_column_to_vec, mat_to_columns,
+    validate_observation_counts, validate_outcome_not_constant, validate_structural_cluster_count,
     without_baked_in_intercept,
 };
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
-use crate::linear_algebra::ensure_well_conditioned_symmetric_matrix;
-use crate::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
+use crate::shared::covariance::{cluster_cov_params, resolve_hac_lags, time_ordering};
+use crate::shared::error::{ClusterSetting, CommonError, MatrixKind};
+use crate::shared::goodness_of_fit::{is_perfect_fit, total_sum_of_squares};
+use crate::shared::inference;
+use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
+use crate::shared::validation::validate_cluster_groups;
 use faer::linalg::matmul::matmul;
 use faer::prelude::Solve;
 use faer::{Accum, Mat, Par, Side};
@@ -149,20 +156,23 @@ impl TwoSlsEstimator {
     /// # Errors
     /// - 識別の順序条件`len(instruments) >= len(x_endog)`を満たさない:
     ///   `IvError::InsufficientInstruments`
+    /// - 観測数`n`が構造方程式の係数の数`k`以下: `IvError::Common(CommonError::InsufficientObservations)`
+    /// - 観測数`n`が第一段階の回帰変数の数`l`（`x_exog ++ instruments`、定数項込み）以下
+    ///   （`n > k`でも）: `IvError::InsufficientObservationsForFirstStage`（`validate_observation_counts`）
     /// - 第一段階回帰（内生変数ごと）が失敗: `IvError::FirstStageFailed`
     ///   （`cov_type=Cluster`でグループキー未指定・信頼水準が範囲外等、`cov_type`/
     ///   `confidence_level`起因のエラーもここに含まれる）
     /// - 第二段階回帰（`second_stage`の内部委譲フィット）が失敗: `IvError::SecondStageFailed`
     ///   （`x_endog=[]`の退化ケースでは第一段階ループが一度も回らないため、
     ///   `confidence_level`が範囲外の場合のエラーもここ経由になる）
-    /// - `cov_type=Hac`の`hac_lags`が不正: `IvError::InvalidHacLags`
+    /// - `cov_type=Hac`の`hac_lags`が不正: `CommonError::InvalidHacLags`
     /// - `cov_type=Cluster`でグループキー未指定・クラスター数不足:
     ///   `IvError::Common(CommonError::MissingClusterColumn` /
     ///   `CommonError::InsufficientClusters)`
     /// - `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下:
     ///   `IvError::Common(CommonError::InsufficientClustersForInference)`（`rank(Ŝ) ≤ g-1`
     ///   のためロバストWald/F検定の`q×q`部分行列が構造的に特異。`g > q`でも
-    ///   悪条件で数値的にほぼ特異なら従来どおり`CommonError::ComputationFailed`が
+    ///   悪条件で数値的にほぼ特異なら従来どおり`CommonError::NearSingularMatrix`が
     ///   backstop）
     ///
     /// Wu-Hausman検定（`wu_hausman_statistic()`/`wu_hausman_p_value()`）の
@@ -174,8 +184,8 @@ impl TwoSlsEstimator {
     /// 識別可能性の検証をここで行う理由は`IvInput`の構造体docコメント参照
     /// （`OlsEstimator::fit`が`n<=k`を検証するのと同じ層分け、ユーザー確認済み）。
     pub fn fit(input: IvInput, cov_type: CovType, confidence_level: f64) -> Result<Self, IvError> {
-        // faer のグローバル並列度を Par::Seq に固定する（`crate::parallelism`）。
-        crate::parallelism::ensure_serial();
+        // faer のグローバル並列度を Par::Seq に固定する（`crate::shared::parallelism`）。
+        crate::shared::parallelism::ensure_serial();
 
         if input.k_instruments() < input.k_endog() {
             return Err(IvError::InsufficientInstruments {
@@ -184,23 +194,23 @@ impl TwoSlsEstimator {
             });
         }
 
+        // 観測数`n`が構造方程式の係数の数`k`・第一段階の回帰変数の数`l`以下の入力を、
+        // 第一段階・第二段階の`OlsEstimator::fit`（`FirstStageFailed`/`SecondStageFailed`に
+        // ラップされ、`k`も構造方程式のものと食い違う）より先に弾く。
+        validate_observation_counts(&input)?;
+
         // `cov_type=Cluster`でクラスター数`g`が構造方程式の傾き係数の数`q`
         // （`k - k_constant`）以下だと、ロバストWald/F検定の`q×q`部分行列が構造的に
-        // 特異になる（`rank(Ŝ) ≤ g - 1`。`ols.rs`の同型チェックを参照）。
+        // 特異になる（`rank(Ŝ) ≤ g - 1`。`ols/estimator.rs`の同型チェックを参照）。
         // 第一段階・第二段階回帰の`OlsEstimator::fit`内でも同じ検証が走るが、そちらは
         // 第一段階固有の傾き係数の数で判定され`FirstStageFailed`にラップされて`q`の値も
         // 構造方程式のものと食い違うため、`fit()`冒頭で構造方程式の`q`を使って明示的に
         // 弾き、`IvError::Common`として一貫させる（`compute_first_stage`より前）。
-        if let CovType::Cluster {
-            groups: Some(groups),
-        } = &cov_type
-        {
-            let g = validate_cluster_groups(groups, input.nobs())?;
-            validate_cluster_count_covers_slopes(
-                g,
-                input.k_exog() + input.k_endog() - usize::from(input.has_intercept()),
-            )?;
-        }
+        validate_structural_cluster_count(&input, &cov_type)?;
+
+        // 被説明変数が定数（切片あり）のモデルは説明するものが無い。入力だけから分かるため、
+        // 第一段階より前に弾く。
+        validate_outcome_not_constant(&input)?;
 
         // `x_exog`は`second_stage_columns`（第二段階）・`structural_columns`
         // （サンドイッチSE計算）でも同じ内容を使うため、`Mat`からの変換を一度だけ行い
@@ -256,9 +266,12 @@ impl TwoSlsEstimator {
             input.dep_var_name().to_string(),
         )
         .map_err(|source| IvError::SecondStageFailed { source })?;
-        let second_stage =
-            OlsEstimator::fit(second_stage_input, SECOND_STAGE_COV_TYPE, confidence_level)
-                .map_err(|source| IvError::SecondStageFailed { source })?;
+        let second_stage = OlsEstimator::fit_auxiliary(
+            second_stage_input,
+            SECOND_STAGE_COV_TYPE,
+            confidence_level,
+        )
+        .map_err(|source| IvError::SecondStageFailed { source })?;
 
         // ── ここから独立実装のサンドイッチ型SE計算（モジュール冒頭のdocコメント参照）──
         let x_hat = second_stage.input().x(); // X̂ = [x_exog, x̂_endog]
@@ -279,10 +292,17 @@ impl TwoSlsEstimator {
         let df_resid = n - k;
         let ssr: f64 = (0..n).map(|i| (*residuals.get(i, 0)).powi(2)).sum();
 
+        // 構造残差が丸め誤差の範囲で0なら、標準誤差とそれを使う検定統計量は定義できない。
+        // 第二段階回帰の残差ではなく構造残差で判定する（第二段階は`X̂`への回帰で別の量）。
+        let sst = total_sum_of_squares(&y, None, input.has_intercept());
+        if is_perfect_fit(ssr, sst, k) {
+            return Err(CommonError::PerfectFit.into());
+        }
+
         let xtx_inv = xtx_inverse(x_hat, k)?;
 
         // `df_inference`はt検定・信頼区間・F検定に使う自由度。`cov_type=Cluster`のときだけ
-        // `G-1`に切り替える（OLSと同じ慣行、`ols.rs`の`fit()`docコメント参照）。
+        // `G-1`に切り替える（OLSと同じ慣行、`ols/estimator.rs`の`fit()`docコメント参照）。
         let mut hac_lags_used = None;
         let (cov_params, df_inference) = match &cov_type {
             CovType::Classical => {
@@ -315,11 +335,15 @@ impl TwoSlsEstimator {
                 )
             }
             CovType::Cluster { groups } => {
-                let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn)?;
+                let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn {
+                    setting: ClusterSetting::CovType,
+                })?;
                 // クラスター数 `g <= q`（構造方程式の傾き係数の数）は`fit()`冒頭で
                 // 既に`InsufficientClustersForInference`として弾いている。
-                let n_groups = validate_cluster_groups(groups, n)?;
-                let cov = cluster_cov_params(x_hat, &residuals, &xtx_inv, n, k, groups);
+                let n_groups = validate_cluster_groups(groups, n, ClusterSetting::CovType)?;
+                // 設計行列に`X̂`、残差に構造残差`e`を使う点のみがOLSとの違い（共有関数は
+                // 設計行列と残差を引数に取る）。
+                let cov = cluster_cov_params(x_hat, &residuals, &xtx_inv, groups);
                 (cov, n_groups - 1)
             }
         };
@@ -330,7 +354,7 @@ impl TwoSlsEstimator {
         }
 
         let t_dist = StudentsT::new(0.0, 1.0, df_inference as f64)
-            .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+            .map_err(|e| CommonError::internal(e.to_string()))?;
         let t_crit = inference::critical_value(&t_dist, confidence_level);
 
         let mut test_stats = Mat::<f64>::zeros(k, 1);
@@ -349,14 +373,6 @@ impl TwoSlsEstimator {
         }
 
         let k_constant = usize::from(input.has_intercept());
-        let sst: f64 = if input.has_intercept() {
-            let y_mean: f64 = (0..n).map(|i| *input.y().get(i, 0)).sum::<f64>() / (n as f64);
-            (0..n)
-                .map(|i| (*input.y().get(i, 0) - y_mean).powi(2))
-                .sum()
-        } else {
-            (0..n).map(|i| (*input.y().get(i, 0)).powi(2)).sum()
-        };
         let r_squared = 1.0 - ssr / sst;
         let adj_r_squared = 1.0 - ((n - k_constant) as f64 / df_resid as f64) * (1.0 - r_squared);
 
@@ -379,9 +395,11 @@ impl TwoSlsEstimator {
         // 拡張回帰は元の第二段階（k_exog+k_endog列）より内生変数の数だけ列が多い
         // （k_exog+2*k_endog列、残差列が追加分）ため、境界的なサンプルサイズでは
         // 第二段階は成功するが拡張回帰は`InsufficientObservations`になりうる。また
-        // 第一段階残差の分散がゼロ（操作変数が内生変数を完全予測する退化ケース等）だと
-        // 拡張回帰の設計行列に分散ゼロの列が混入し特異（`SingularMatrix`）、変数間の
-        // スケール差等では`wald_test_last_columns`側が`ComputationFailed`になりうる。
+        // 構造式の`y`が第二段階の説明変数と第一段階残差で（丸め誤差の範囲で）厳密に
+        // 説明される入力は、拡張回帰が完全フィット（`PerfectFit`）になり、`sigma^2`が0で
+        // ワルド統計量が定義できない。変数間のスケール差等では`wald_test_last_columns`側が
+        // `NearSingularMatrix`になりうる。`SingularMatrix`（残差列が他の列と共線）は、第一段階が
+        // 完全フィットで先に止まり第二段階の列も独立なため通常は起きないが、防御として同じ扱いにする。
         // さらに`cov_type=Cluster`では、構造式の傾き係数の数`q`が`fit()`冒頭のチェックを
         // 通っていても、拡張回帰は残差列の分だけ`q`が増える（`q_aug = q + k_endog`）ため
         // `g <= q_aug`となり拡張回帰の`OlsEstimator::fit`が`InsufficientClustersForInference`
@@ -427,6 +445,8 @@ impl TwoSlsEstimator {
                     input.has_intercept(),
                     input.dep_var_name().to_string(),
                 )?;
+                // 被説明変数は元の構造式の`y`（説明変数側に第一段階残差が加わるだけ）なので、
+                // 完全フィットの判定は元の`y`の総平方和で行う（`fit_auxiliary`ではなく`fit`）。
                 let hausman_estimator =
                     OlsEstimator::fit(hausman_input, cov_type.clone(), confidence_level)?;
                 let (stat, p_value) = hausman_estimator.wald_test_last_columns(input.k_endog())?;
@@ -440,14 +460,15 @@ impl TwoSlsEstimator {
 
             match hausman_result {
                 Ok((stat, p_value, df)) => (Some(stat), Some(p_value), Some(df)),
-                Err(LeastSquaresError::SingularMatrix)
+                Err(LeastSquaresError::SingularMatrix { .. })
+                | Err(LeastSquaresError::Common(CommonError::PerfectFit))
                 | Err(LeastSquaresError::Common(CommonError::InsufficientObservations {
                     ..
                 }))
                 | Err(LeastSquaresError::Common(CommonError::InsufficientClustersForInference {
                     ..
                 }))
-                | Err(LeastSquaresError::Common(CommonError::ComputationFailed(_))) => {
+                | Err(LeastSquaresError::Common(CommonError::NearSingularMatrix { .. })) => {
                     (None, None, None)
                 }
                 Err(source) => return Err(IvError::HausmanRegressionFailed { source }),
@@ -479,10 +500,10 @@ impl TwoSlsEstimator {
             let z = Mat::from_fn(n, l, |i, j| instrument_columns[j][i]);
             let ztz = z.transpose() * &z;
             let zte = z.transpose() * &residuals;
+            // 第一段階が同じ`Z'Z`（`instrument_columns`は第一段階の設計行列と同じ列）を既に分解済み
+            // のため、ここで失敗するのは実装の誤り。
             let llt_ztz = ztz.llt(Side::Lower).map_err(|_| {
-                CommonError::ComputationFailed(
-                    "failed to invert Z'Z for the Sargan overidentification test".to_string(),
-                )
+                CommonError::internal("Z'Z could not be factorized in the Sargan test")
             })?;
             let ztz_inv_zte = llt_ztz.solve(&zte);
             let quad: f64 = (0..l)
@@ -490,8 +511,8 @@ impl TwoSlsEstimator {
                 .sum();
             let sigma2 = ssr / (n as f64);
             let stat = quad / sigma2;
-            let chi2 = ChiSquared::new(df as f64)
-                .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+            let chi2 =
+                ChiSquared::new(df as f64).map_err(|e| CommonError::internal(e.to_string()))?;
             let p_value = chi2.sf(stat);
             (Some(stat), Some(p_value), Some(df))
         };
@@ -684,15 +705,13 @@ impl TwoSlsEstimator {
 ///
 /// `X̂`（第二段階の設計行列）は`second_stage`の内部委譲フィット（`OlsEstimator::fit`）が
 /// 既に`col_piv_qr`で特異性を検証済みのため、理論上ここで`LltError`は発生しないはずだが、
-/// 浮動小数点演算の丸めにより境界的なケースで失敗しうる（`ols.rs`の`xtx_inverse`と同じ
+/// 浮動小数点演算の丸めにより境界的なケースで失敗しうる（`shared/covariance.rs`の`xtx_inverse`と同じ
 /// 防御的な扱い）。
 fn xtx_inverse(x: &Mat<f64>, k: usize) -> Result<Mat<f64>, IvError> {
     let xtx = x.transpose() * x;
-    let llt = xtx.llt(Side::Lower).map_err(|_| {
-        CommonError::ComputationFailed(
-            "failed to invert X̂'X̂ (2SLS second-stage bread matrix)".to_string(),
-        )
-    })?;
+    let llt = xtx
+        .llt(Side::Lower)
+        .map_err(|_| CommonError::internal("the second-stage X̂'X̂ could not be factorized"))?;
     Ok(llt.solve(Mat::<f64>::identity(k, k)))
 }
 
@@ -702,7 +721,7 @@ fn classical_cov_params(sigma2: f64, xtx_inv: &Mat<f64>, k: usize) -> Mat<f64> {
     Mat::from_fn(k, k, |i, j| sigma2 * (*xtx_inv.get(i, j)))
 }
 
-/// `hc_cov_params`の内部でのみ使う、HCの種類（`ols.rs`の`HcVariant`と同じ位置づけ）。
+/// `hc_cov_params`の内部でのみ使う、HCの種類（`shared/covariance.rs`の`HcVariant`と同じ位置づけ）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HcVariant {
     Hc0,
@@ -712,7 +731,7 @@ enum HcVariant {
 }
 
 /// HC0〜HC3ロバストな係数分散共分散行列: `(X̂'X̂)⁻¹Ψ̂(X̂'X̂)⁻¹`（k×k）。`Ψ̂`は構造残差
-/// （`residuals`引数、`e = y - Xβ̂`）を使って計算する。数式・実装方針は`ols.rs`の
+/// （`residuals`引数、`e = y - Xβ̂`）を使って計算する。数式・実装方針は`ols/estimator.rs`の
 /// `hc_cov_params`と同型（モジュール冒頭のdocコメント「独立実装」参照。設計行列に`X̂`、
 /// 残差に構造残差`e`を使う点のみがOLSとの違い）。
 fn hc_cov_params(
@@ -743,11 +762,11 @@ fn hc_cov_params(
             HcVariant::Hc0 => resid,
             HcVariant::Hc1 => resid * hc1_correction,
             HcVariant::Hc2 => {
-                let h = leverage.as_ref().expect("Hc2はleverage計算済み")[i];
+                let h = leverage.as_ref().expect("leverage is computed for HC2")[i];
                 resid / (1.0 - h).sqrt()
             }
             HcVariant::Hc3 => {
-                let h = leverage.as_ref().expect("Hc3はleverage計算済み")[i];
+                let h = leverage.as_ref().expect("leverage is computed for HC3")[i];
                 resid / (1.0 - h)
             }
         };
@@ -758,37 +777,8 @@ fn hc_cov_params(
     xtx_inv * &psi_hat * xtx_inv
 }
 
-/// `CovType::Hac`の`lags`（`Option<i64>`）を実際に使うラグ数（`usize`）に解決する
-/// （`ols.rs`の`resolve_hac_lags`と同じ経験則。数式・境界条件は同一だがエラー型が
-/// `IvError`のため独立実装、モジュール冒頭のdocコメント参照）。
-fn resolve_hac_lags(lags: Option<i64>, n: usize) -> Result<usize, IvError> {
-    match lags {
-        Some(l) => {
-            if l < 0 || (l as usize) >= n {
-                return Err(IvError::InvalidHacLags { hac_lags: l, n });
-            }
-            Ok(l as usize)
-        }
-        None => Ok((4.0 * (n as f64 / 100.0).powf(2.0 / 9.0)).floor() as usize),
-    }
-}
-
-/// `CovType::Hac`の`time_order`から、時系列の昇順に並べたときの行インデックス列を求める
-/// （`ols.rs`の`time_ordering`と同型）。
-///
-/// `partial_cmp().unwrap()`について: `time_order`の値はNaN/無限大を含まないことが
-/// `engine_pybind::column_extraction`側で既に保証されている前提（`ols.rs`の
-/// `time_ordering`と同じ理由）。値が互いに異なる（同値は`ValidationError`で弾かれ、
-/// 昇順の位置＝順位で渡される）ことも同様に前提で、この関数自身は同値を検出しない。
-fn time_ordering(time_order: &[f64], n: usize) -> Vec<usize> {
-    debug_assert_eq!(time_order.len(), n);
-    let mut order: Vec<usize> = (0..n).collect();
-    order.sort_by(|&a, &b| time_order[a].partial_cmp(&time_order[b]).unwrap());
-    order
-}
-
 /// Newey-West HACの係数分散共分散行列: `(X̂'X̂)⁻¹Ŝ(X̂'X̂)⁻¹`（k×k）。数式・実装方針は
-/// `ols.rs`の`hac_cov_params`と同型（`Par::Seq`を明示指定する理由も同じ、
+/// `shared/covariance.rs`の`hac_cov_params`と同型（`Par::Seq`を明示指定する理由も同じ、
 /// `.claude/rules/rust-style.md`「パフォーマンス」参照）。設計行列に`X̂`、残差に構造残差
 /// `e`を使う点のみがOLSとの違い。
 fn hac_cov_params(
@@ -839,50 +829,8 @@ fn hac_cov_params(
     xtx_inv * &s_hat * xtx_inv
 }
 
-/// クラスターロバストな係数分散共分散行列: `(X̂'X̂)⁻¹Ŝ(X̂'X̂)⁻¹ * correction`（k×k）。数式・
-/// 実装方針は`ols.rs`の`cluster_cov_params`と同型（`BTreeMap`を使う理由も同じ、
-/// `engine/src/linear/CLAUDE.md`「踏んだ罠」参照）。設計行列に`X̂`、残差に構造残差`e`を
-/// 使う点のみがOLSとの違い。`groups`が`G>=2`であることは`validate_cluster_groups`
-/// （呼び出し元）で検証済みの前提。
-fn cluster_cov_params(
-    x: &Mat<f64>,
-    residuals: &Mat<f64>,
-    xtx_inv: &Mat<f64>,
-    n: usize,
-    k: usize,
-    groups: &[String],
-) -> Mat<f64> {
-    let mut group_indices: std::collections::BTreeMap<&str, Vec<usize>> =
-        std::collections::BTreeMap::new();
-    for (i, g) in groups.iter().enumerate() {
-        group_indices.entry(g.as_str()).or_default().push(i);
-    }
-    let n_groups = group_indices.len();
-
-    let mut s_hat = Mat::<f64>::zeros(k, k);
-    for indices in group_indices.values() {
-        let mut s_g = vec![0.0_f64; k];
-        for &i in indices {
-            let e = *residuals.get(i, 0);
-            for (a, s_g_a) in s_g.iter_mut().enumerate() {
-                *s_g_a += e * (*x.get(i, a));
-            }
-        }
-        for a in 0..k {
-            for b in 0..k {
-                *s_hat.get_mut(a, b) += s_g[a] * s_g[b];
-            }
-        }
-    }
-
-    let correction =
-        (n_groups as f64 / (n_groups as f64 - 1.0)) * ((n as f64 - 1.0) / ((n - k) as f64));
-    let cov_uncorrected = xtx_inv * &s_hat * xtx_inv;
-    Mat::from_fn(k, k, |i, j| correction * (*cov_uncorrected.get(i, j)))
-}
-
 /// 傾き係数（切片を除く`df_model`個の係数）が全てゼロという帰無仮説のロバストWald検定を行い、
-/// F統計量とそのp値を返す。数式・実装方針は`ols.rs`の`wald_f_test`と同型（`cov_type=
+/// F統計量とそのp値を返す。数式・実装方針は`shared/wald.rs`の`wald_f_test`と同型（`cov_type=
 /// Classical`のとき代数的に古典的F検定と一致することも同じ、`ensure_well_conditioned_
 /// symmetric_matrix`による事前の条件数チェックが必要な理由も同じ）。
 fn wald_f_test(
@@ -900,14 +848,14 @@ fn wald_f_test(
     ensure_well_conditioned_symmetric_matrix(
         &v_slopes,
         df_model,
-        "coefficient covariance submatrix for the 2SLS F-test",
+        MatrixKind::CoefficientCovariance,
     )?;
 
-    let llt = v_slopes.llt(Side::Lower).map_err(|_| {
-        CommonError::ComputationFailed(
-            "failed to invert coefficient covariance submatrix for the 2SLS F-test".to_string(),
-        )
-    })?;
+    let llt = v_slopes
+        .llt(Side::Lower)
+        .map_err(|_| CommonError::NearSingularMatrix {
+            matrix: MatrixKind::CoefficientCovariance,
+        })?;
     let v_slopes_inv_beta = llt.solve(&beta_slopes);
 
     let wald: f64 = (0..df_model)
@@ -916,7 +864,7 @@ fn wald_f_test(
     let wald_statistic = wald / (df_model as f64);
 
     let f_dist = FisherSnedecor::new(df_model as f64, df_inference as f64)
-        .map_err(|e| CommonError::ComputationFailed(e.to_string()))?;
+        .map_err(|e| CommonError::internal(e.to_string()))?;
     let wald_p_value = f_dist.sf(wald_statistic);
 
     Ok((wald_statistic, wald_p_value))
@@ -925,16 +873,12 @@ fn wald_f_test(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::CommonError;
     use crate::linear::common::row_time_order;
+    use crate::shared::error::CommonError;
+    use crate::shared::group_codes::GroupCodes;
 
-    /// 丁度識別（`len(instruments) == len(x_endog)`）の閉形式解と数値照合するテストデータ。
-    ///
-    /// 構造式: `y = 1 + 2*x_endog + e`、操作変数`z`は`x_endog`と相関するが`e`とは無相関
-    /// （手計算しやすいよう`x_endog = z`の完全予測になるデータを使う。この場合、第一段階の
-    /// 予測値`x̂_endog`は`x_endog`そのものと一致するため、2SLSはOLSと数値的に一致する
-    /// （操作変数が内生変数を完全に予測する退化ケース、`docs/spec/iv-spec.md`1.2節の丁度識別と
-    /// 同様の考え方をさらに単純化したもの）。
+    /// 操作変数`z`が内生変数`x_endog`を完全に予測するデータ（`x_endog = z`、`y = 1 + 2*x_endog`）。
+    /// 第一段階の残差が全て0になるため、第一段階は完全フィットとして拒否される。
     fn perfectly_predicted_endog_data() -> (Vec<f64>, Vec<f64>, Vec<f64>) {
         let z = vec![1.0, 2.0, 3.0, 4.0, 5.0];
         let x_endog = z.clone();
@@ -942,9 +886,134 @@ mod tests {
         (y, x_endog, z)
     }
 
+    /// 丁度識別（`len(instruments) == len(x_endog)`）の閉形式解と数値照合するテストデータ。
+    ///
+    /// 構造式: `y = 1 + 2*x_endog + e`。`x_endog`は`z`に小さなノイズを足した値で、第一段階も
+    /// 構造式も完全フィットにならない。
+    fn just_identified_data() -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+        let z = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let x_endog = vec![1.2, 1.9, 3.3, 3.8, 5.1];
+        let noise = [0.1, -0.2, 0.15, -0.05, 0.1];
+        let y: Vec<f64> = x_endog
+            .iter()
+            .zip(noise)
+            .map(|(&x, u)| 1.0 + 2.0 * x + u)
+            .collect();
+        (y, x_endog, z)
+    }
+
+    fn just_identified_input() -> IvInput {
+        let (y, x_endog, z) = just_identified_data();
+        IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            &[x_endog],
+            vec!["x_endog".to_string()],
+            &[z],
+            vec!["z".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap()
+    }
+
     #[test]
-    fn fit_matches_closed_form_ols_when_instrument_perfectly_predicts_endog() {
+    fn fit_matches_the_closed_form_iv_estimator_when_just_identified() {
+        // 丁度識別・単一の操作変数では2SLSは`beta1 = cov(z, y) / cov(z, x)`、
+        // `beta0 = mean(y) - beta1 * mean(x)`の閉形式解と一致する。
+        let (y, x_endog, z) = just_identified_data();
+        let n = y.len() as f64;
+        let mean = |v: &[f64]| v.iter().sum::<f64>() / n;
+        let (y_bar, x_bar, z_bar) = (mean(&y), mean(&x_endog), mean(&z));
+        let cov_zy: f64 = z
+            .iter()
+            .zip(&y)
+            .map(|(a, b)| (a - z_bar) * (b - y_bar))
+            .sum();
+        let cov_zx: f64 = z
+            .iter()
+            .zip(&x_endog)
+            .map(|(a, b)| (a - z_bar) * (b - x_bar))
+            .sum();
+        let beta1 = cov_zy / cov_zx;
+        let beta0 = y_bar - beta1 * x_bar;
+
+        let estimator =
+            TwoSlsEstimator::fit(just_identified_input(), CovType::Classical, 0.95).unwrap();
+
+        assert_eq!(estimator.param_names(), ["const", "x_endog"]);
+        assert!((*estimator.params().get(0, 0) - beta0).abs() < 1e-8);
+        assert!((*estimator.params().get(1, 0) - beta1).abs() < 1e-8);
+    }
+
+    #[test]
+    fn fit_returns_the_first_stage_perfect_fit_when_instrument_perfectly_predicts_endog() {
+        // 操作変数が内生変数を完全に予測する（第一段階の残差が全て0）と、第一段階の標準誤差と
+        // 部分F統計量が定義できない。第一段階の文脈つきで完全フィットとして拒否する。
         let (y, x_endog, z) = perfectly_predicted_endog_data();
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            &[x_endog],
+            vec!["x_endog".to_string()],
+            &[z],
+            vec!["z".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = TwoSlsEstimator::fit(input, CovType::Classical, 0.95);
+
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::FirstStageFailed {
+                endog_name: "x_endog".to_string(),
+                source: CommonError::PerfectFit.into(),
+            }
+        );
+    }
+
+    #[test]
+    fn fit_returns_perfect_fit_when_the_structural_residuals_are_zero() {
+        // 構造式`y = 1 + 2*x_endog`が厳密に成り立つと（第一段階は完全フィットではない）、
+        // 構造残差が全て0で標準誤差が定義できない。第二段階回帰ではなく構造残差で判定する。
+        let (_, x_endog, z) = just_identified_data();
+        let y: Vec<f64> = x_endog.iter().map(|&x| 1.0 + 2.0 * x).collect();
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            &[x_endog],
+            vec!["x_endog".to_string()],
+            &[z],
+            vec!["z".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = TwoSlsEstimator::fit(input, CovType::Classical, 0.95);
+
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::Common(CommonError::PerfectFit)
+        );
+    }
+
+    #[test]
+    fn fit_does_not_judge_the_second_stage_regression_for_a_perfect_fit() {
+        // y = 1 + 2*x̂（x̂は第一段階の当てはめ値）は、第二段階の回帰`y ~ const + x̂`が厳密に成り立つ
+        // が、構造残差`y - 1 - 2*x_endog = -2v`は0ではない。標準誤差の基準は構造残差なので、
+        // 第二段階の回帰は完全フィットの判定をしない（`fit_auxiliary`）。
+        let base = TwoSlsEstimator::fit(just_identified_input(), CovType::Classical, 0.95).unwrap();
+        let v = base.first_stage_estimators()[0].1.residuals();
+        let (_, x_endog, z) = just_identified_data();
+        let y: Vec<f64> = (0..5)
+            .map(|i| 1.0 + 2.0 * (x_endog[i] - *v.get(i, 0)))
+            .collect();
         let input = IvInput::from_columns(
             &y,
             &[],
@@ -959,20 +1028,22 @@ mod tests {
         .unwrap();
 
         let estimator = TwoSlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
-        assert_eq!(estimator.param_names(), ["const", "x_endog"]);
-        assert!((*estimator.params().get(0, 0) - 1.0).abs() < 1e-8);
+
         assert!((*estimator.params().get(1, 0) - 2.0).abs() < 1e-8);
+        assert!((0..2).all(|j| estimator.std_errors().get(j, 0).is_finite()));
     }
 
     #[test]
-    fn fit_pins_faer_global_parallelism_to_seq() {
-        // `fit()` 冒頭の `crate::parallelism::ensure_serial()` が faer の
-        // グローバル並列度を `Par::Seq` へ引き戻すことの回帰ガード（iv 系統代表）。
-        // 別テストが `Seq` にしている可能性があるため、まず `Rayon` に戻してから通す。
-        // 設計行列は極小なので一時的な `Rayon` 設定は病理を招かない。
-        faer::set_global_parallelism(faer::Par::rayon(0));
-
-        let (y, x_endog, z) = perfectly_predicted_endog_data();
+    fn fit_sets_wu_hausman_statistics_to_none_when_the_augmented_regression_is_exact() {
+        // y = 1 + 2*x_endog + 3*v（vは第一段階残差）は、構造残差(= 3v)も第一段階も完全フィット
+        // ではないが、Wu-Hausmanの拡張回帰`y ~ const + x_endog + v`は厳密に成り立つ。
+        // sigma^2が0でワルド統計量が定義できないので、`fit()`は成功し、検定統計量だけ`None`にする。
+        let base = TwoSlsEstimator::fit(just_identified_input(), CovType::Classical, 0.95).unwrap();
+        let v = base.first_stage_estimators()[0].1.residuals();
+        let (_, x_endog, z) = just_identified_data();
+        let y: Vec<f64> = (0..5)
+            .map(|i| 1.0 + 2.0 * x_endog[i] + 3.0 * *v.get(i, 0))
+            .collect();
         let input = IvInput::from_columns(
             &y,
             &[],
@@ -986,7 +1057,74 @@ mod tests {
         )
         .unwrap();
 
-        let _ = TwoSlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
+        let estimator = TwoSlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
+
+        assert!((*estimator.params().get(1, 0) - 2.0).abs() < 1e-8);
+        assert_eq!(estimator.wu_hausman_statistic(), None);
+        assert_eq!(estimator.wu_hausman_p_value(), None);
+    }
+
+    #[test]
+    fn fit_returns_outcome_constant_for_a_constant_endogenous_regressor_in_its_first_stage() {
+        // 定数の内生変数は、その第一段階の被説明変数が定数。第一段階の文脈つきで報告する。
+        let (y, _, z) = just_identified_data();
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            &[vec![2.0; 5]],
+            vec!["x_endog".to_string()],
+            &[z],
+            vec!["z".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = TwoSlsEstimator::fit(input, CovType::Classical, 0.95);
+
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::FirstStageFailed {
+                endog_name: "x_endog".to_string(),
+                source: CommonError::OutcomeConstant.into(),
+            }
+        );
+    }
+
+    #[test]
+    fn fit_returns_outcome_constant_before_the_first_stage() {
+        let (_, x_endog, z) = just_identified_data();
+        let input = IvInput::from_columns(
+            &[3.0; 5],
+            &[],
+            vec![],
+            &[x_endog],
+            vec!["x_endog".to_string()],
+            &[z],
+            vec!["z".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = TwoSlsEstimator::fit(input, CovType::Classical, 0.95);
+
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::Common(CommonError::OutcomeConstant)
+        );
+    }
+
+    #[test]
+    fn fit_pins_faer_global_parallelism_to_seq() {
+        // `fit()` 冒頭の `crate::shared::parallelism::ensure_serial()` が faer の
+        // グローバル並列度を `Par::Seq` へ引き戻すことの回帰ガード（iv 系統代表）。
+        // 別テストが `Seq` にしている可能性があるため、まず `Rayon` に戻してから通す。
+        // 設計行列は極小なので一時的な `Rayon` 設定は病理を招かない。
+        faer::set_global_parallelism(faer::Par::rayon(0));
+
+        let _ = TwoSlsEstimator::fit(just_identified_input(), CovType::Classical, 0.95).unwrap();
 
         assert!(matches!(faer::get_global_parallelism(), faer::Par::Seq));
     }
@@ -995,7 +1133,7 @@ mod tests {
     fn fit_matches_ols_when_x_endog_and_instruments_are_empty() {
         // `x_endog=[]`かつ`instruments=[]`の退化ケース（`IvInput`のdocコメント参照）は
         // 2SLSが素のOLSと数値的に一致するはず。
-        let y = vec![2.0, 4.0, 6.0, 8.0, 10.0];
+        let y = vec![2.1, 3.8, 6.3, 7.9, 10.2];
         let x_exog = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
         let input = IvInput::from_columns(
             &y,
@@ -1013,8 +1151,8 @@ mod tests {
         let estimator = TwoSlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
         assert_eq!(estimator.param_names(), ["const", "x1"]);
         assert!(estimator.first_stage_estimators().is_empty());
-        assert!((*estimator.params().get(0, 0) - 0.0).abs() < 1e-8);
-        assert!((*estimator.params().get(1, 0) - 2.0).abs() < 1e-8);
+        assert!((*estimator.params().get(0, 0) - 0.0).abs() < 0.5);
+        assert!((*estimator.params().get(1, 0) - 2.0).abs() < 0.2);
 
         // `x_endog=[]`だと`X̂ = X`（推定値=実際の値）のため、SE・適合度統計量も
         // 素のOLSと数値的に一致するはず（`OlsEstimator`への直接fitと照合）。
@@ -1033,8 +1171,8 @@ mod tests {
             );
         }
         assert!((estimator.r_squared() - ols_estimator.r_squared()).abs() < 1e-8);
-        assert!((estimator.wald_statistic() - ols_estimator.f_statistic()).abs() < 1e-8);
-        assert!((estimator.wald_p_value() - ols_estimator.f_p_value()).abs() < 1e-8);
+        assert!((estimator.wald_statistic() - ols_estimator.f_statistic().unwrap()).abs() < 1e-8);
+        assert!((estimator.wald_p_value() - ols_estimator.f_p_value().unwrap()).abs() < 1e-8);
         for j in 0..2 {
             assert!(
                 (*estimator.p_values().get(j, 0) - *ols_estimator.p_values().get(j, 0)).abs()
@@ -1054,11 +1192,11 @@ mod tests {
     }
 
     /// 説明変数が定数項のみ（傾き係数が無い、`df_model=0`）の退化モデルでは、F検定の
-    /// 対象が存在しないため`wald_statistic`/`wald_p_value`は`NaN`になる（`ols.rs`の
+    /// 対象が存在しないため`wald_statistic`/`wald_p_value`は`NaN`になる（`ols/estimator.rs`の
     /// 同名の分岐と同じ0除算回避の扱い、モジュール冒頭のdocコメント参照）。
     #[test]
     fn fit_sets_f_statistic_and_f_p_value_to_nan_for_const_only_model() {
-        let y = vec![2.0, 4.0, 6.0, 8.0, 10.0];
+        let y = vec![2.1, 3.8, 6.3, 7.9, 10.2];
         let input = IvInput::from_columns(
             &y,
             &[],
@@ -1083,7 +1221,7 @@ mod tests {
         // `x_endog=[]`だと第一段階ループが一度も回らないため、`confidence_level`の
         // 範囲チェックは第二段階の`OlsEstimator::fit`経由でのみ働く（モジュール冒頭の
         // docコメント参照）。
-        let y = vec![2.0, 4.0, 6.0, 8.0, 10.0];
+        let y = vec![2.1, 3.8, 6.3, 7.9, 10.2];
         let x_exog = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
         let input = IvInput::from_columns(
             &y,
@@ -1172,21 +1310,8 @@ mod tests {
     /// ため`None`になる（`docs/spec/iv-spec.md`1.2節・3.5節）。
     #[test]
     fn fit_sets_sargan_statistic_to_none_when_just_identified() {
-        let (y, x_endog, z) = perfectly_predicted_endog_data();
-        let input = IvInput::from_columns(
-            &y,
-            &[],
-            vec![],
-            &[x_endog],
-            vec!["x_endog".to_string()],
-            &[z],
-            vec!["z".to_string()],
-            true,
-            "y".to_string(),
-        )
-        .unwrap();
-
-        let estimator = TwoSlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
+        let estimator =
+            TwoSlsEstimator::fit(just_identified_input(), CovType::Classical, 0.95).unwrap();
         assert_eq!(estimator.sargan_statistic(), None);
         assert_eq!(estimator.sargan_p_value(), None);
     }
@@ -1732,7 +1857,7 @@ mod tests {
     /// クラスターロバストSEのテスト専用データ・グループ。`nontrivial_x_exog_input()`
     /// （操作変数2個）だと第一段階の傾き係数`q=3`（x1, z1, z2）に対しクラスター数`G=4`が
     /// 際どく、`Ŝ`（rank≤G）の傾き部分行列が数値的にほぼ特異になり`fit()`自体が
-    /// `ComputationFailed`で失敗する（`engine/src/linear/CLAUDE.md`「クラスター数`G`と
+    /// `NearSingularMatrix`で失敗する（`engine/src/linear/CLAUDE.md`「クラスター数`G`と
     /// 傾き係数の数`q`の関係」参照、IVの第一段階にも同じ制約が当てはまる）。操作変数を
     /// 1個に減らし（`q=2`）安全な余裕を持たせた専用データを使う。
     fn cluster_test_input_and_groups() -> (IvInput, Vec<String>) {
@@ -1769,7 +1894,7 @@ mod tests {
     fn fit_computes_cluster_std_errors_matching_manual_formula() {
         let (input, groups) = cluster_test_input_and_groups();
         let cov_type = CovType::Cluster {
-            groups: Some(groups.clone()),
+            groups: Some(GroupCodes::from_labels_without_keys(&groups)),
         };
         let estimator = TwoSlsEstimator::fit(input, cov_type, 0.95).unwrap();
 
@@ -1794,7 +1919,7 @@ mod tests {
 
     /// `cov_type=Hac{lags: Some(0), ..}`は自己相関項（`l=1..=lags`のループ）が空になり、
     /// `l=0`項（HC0のΨ̂と同形）のみが残るため、HC0と数値的に一致するはず
-    /// （`ols.rs`の`fit_hac_with_zero_lags_matches_hc0`と同じ内部整合性テスト）。
+    /// （`ols/estimator.rs`の`fit_hac_with_zero_lags_matches_hc0`と同じ内部整合性テスト）。
     #[test]
     fn fit_hac_with_zero_lags_matches_hc0() {
         let hac_estimator = TwoSlsEstimator::fit(
@@ -1903,7 +2028,7 @@ mod tests {
     }
 
     /// `time_order`を指定した場合、行順がシャッフルされていても時系列順に並べ替えてから
-    /// ラグ付き自己共分散を計算することを確認する（`ols.rs`の
+    /// ラグ付き自己共分散を計算することを確認する（`ols/estimator.rs`の
     /// `fit_computes_hac_std_errors_respecting_time_order`と同じ検証方針）。データは
     /// `nontrivial_x_exog_columns()`と同一の内容を、時系列順の逆転を含む順序でシャッフル
     /// して与える。
@@ -1969,7 +2094,7 @@ mod tests {
     /// （モジュール冒頭のdocコメント参照）、エラーは先に`FirstStageFailed`として
     /// 発生してしまい、第二段階固有の経路を検証できない。
     fn x_endog_empty_input() -> IvInput {
-        let y = vec![2.0, 4.0, 6.0, 8.0, 10.0];
+        let y = vec![2.1, 3.8, 6.3, 7.9, 10.2];
         let x_exog = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
         IvInput::from_columns(
             &y,
@@ -1997,7 +2122,7 @@ mod tests {
         );
         assert_eq!(
             result.unwrap_err(),
-            IvError::InvalidHacLags { hac_lags: -1, n: 5 }
+            IvError::Common(CommonError::InvalidHacLags { hac_lags: -1, n: 5 })
         );
     }
 
@@ -2010,7 +2135,9 @@ mod tests {
         );
         assert_eq!(
             result.unwrap_err(),
-            IvError::Common(CommonError::MissingClusterColumn)
+            IvError::Common(CommonError::MissingClusterColumn {
+                setting: ClusterSetting::CovType,
+            })
         );
     }
 
@@ -2020,13 +2147,16 @@ mod tests {
         let result = TwoSlsEstimator::fit(
             x_endog_empty_input(),
             CovType::Cluster {
-                groups: Some(groups),
+                groups: Some(GroupCodes::from_labels_without_keys(&groups)),
             },
             0.95,
         );
         assert_eq!(
             result.unwrap_err(),
-            IvError::Common(CommonError::InsufficientClusters { g: 1 })
+            IvError::Common(CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 1
+            })
         );
     }
 
@@ -2053,7 +2183,7 @@ mod tests {
         let result = TwoSlsEstimator::fit(
             input,
             CovType::Cluster {
-                groups: Some(groups),
+                groups: Some(GroupCodes::from_labels_without_keys(&groups)),
             },
             0.95,
         );
@@ -2068,7 +2198,7 @@ mod tests {
     /// `g <= q_aug`となり、拡張回帰の`OlsEstimator::fit`が`InsufficientClustersForInference`
     /// を返す。Wu-Hausmanが実際に使うのは末尾`k_endog`列の部分行列（`rank(Ŝ) ≤ g-1 ≥
     /// k_endog`なら計算可能）だが、`OlsEstimator::fit`のoverall F検定がその手前で弾くため、
-    /// 他のdegrade理由（`SingularMatrix`/`InsufficientObservations`/`ComputationFailed`）と
+    /// 他のdegrade理由（`SingularMatrix`/`InsufficientObservations`/`NearSingularMatrix`）と
     /// 同じく`wu_hausman_*`を`None`へdegradeする（`fit()`全体は成功する）。
     /// `cluster_test_input_and_groups`は`[const, x1, endog1]`（`q=2`・`k_endog=1`・
     /// `q_aug=3`）なので`g=3`（`q=2 < g=3 <= q_aug=3`）と組み合わせる。
@@ -2079,7 +2209,7 @@ mod tests {
         let estimator = TwoSlsEstimator::fit(
             input,
             CovType::Cluster {
-                groups: Some(groups),
+                groups: Some(GroupCodes::from_labels_without_keys(&groups)),
             },
             0.95,
         )
@@ -2087,6 +2217,37 @@ mod tests {
 
         assert!(estimator.wu_hausman_statistic().is_none());
         assert!(estimator.wu_hausman_p_value().is_none());
+    }
+
+    /// 構造方程式は`G > q_struct`だが第一段階では`G == q_first`（`nontrivial_x_exog_input`は
+    /// `[const, x1, endog1]`で`q_struct=2`、第一段階は`x1`・`z1`・`z2`で`q_first=3`、`g=3`）の
+    /// とき、第一段階の全体F検定が定義できなくても`fit()`全体は成功する。第一段階の
+    /// `f_statistic()`は`None`、構造方程式の結果（Wald検定を含む）は計算され、弱操作変数診断は
+    /// `cov_type`に依存しないため古典的な`cov_type`と同じ値になる。
+    #[test]
+    fn fit_succeeds_when_cluster_count_is_between_structural_and_first_stage_slopes() {
+        let n = nontrivial_x_exog_input().nobs();
+        let groups: Vec<String> = (0..n).map(|i| format!("g{}", i % 3)).collect();
+        let estimator = TwoSlsEstimator::fit(
+            nontrivial_x_exog_input(),
+            CovType::Cluster {
+                groups: Some(GroupCodes::from_labels_without_keys(&groups)),
+            },
+            0.95,
+        )
+        .unwrap();
+
+        let (_, first_stage) = &estimator.first_stage_estimators()[0];
+        assert_eq!(first_stage.f_statistic(), None);
+        assert_eq!(first_stage.f_df(), None);
+        assert!(estimator.wald_statistic().is_finite());
+
+        let classical =
+            TwoSlsEstimator::fit(nontrivial_x_exog_input(), CovType::Classical, 0.95).unwrap();
+        assert_eq!(
+            estimator.weak_instrument_f_statistics(),
+            classical.weak_instrument_f_statistics()
+        );
     }
 
     /// `G=2`クラスター・`x_exog=[]`・丁度識別（`instruments`1本）という、
@@ -2124,7 +2285,7 @@ mod tests {
         )
         .unwrap();
         let cov_type = CovType::Cluster {
-            groups: Some(groups.clone()),
+            groups: Some(GroupCodes::from_labels_without_keys(&groups)),
         };
         let estimator = TwoSlsEstimator::fit(input, cov_type, 0.95).unwrap();
 
@@ -2145,7 +2306,7 @@ mod tests {
         let expected = OlsEstimator::fit(
             ols_input,
             CovType::Cluster {
-                groups: Some(groups),
+                groups: Some(GroupCodes::from_labels_without_keys(&groups)),
             },
             0.95,
         )
@@ -2173,7 +2334,10 @@ mod tests {
         // いた（`engine/src/iv/CLAUDE.md`「修正済み」参照）。修正後は素の
         // `OlsEstimator::fit`と一致する。
         assert!((first_stage_estimator.r_squared() - expected.r_squared()).abs() < 1e-10);
-        assert!((first_stage_estimator.f_statistic() - expected.f_statistic()).abs() < 1e-8);
+        assert!(
+            (first_stage_estimator.f_statistic().unwrap() - expected.f_statistic().unwrap()).abs()
+                < 1e-8
+        );
     }
 
     /// `r_squared`/`adj_r_squared`/`df_resid`/`df_model`を、構造残差のSSR・元の`y`のTSSから
@@ -2286,7 +2450,9 @@ mod tests {
         assert_eq!(
             result.unwrap_err(),
             IvError::SecondStageFailed {
-                source: crate::linear::common::LeastSquaresError::SingularMatrix,
+                source: crate::linear::common::LeastSquaresError::SingularMatrix {
+                    columns: vec!["const".to_string(), "endog1".to_string()]
+                },
             }
         );
     }
@@ -2316,15 +2482,18 @@ mod tests {
             result.unwrap_err(),
             IvError::FirstStageFailed {
                 endog_name: "endog1".to_string(),
-                source: crate::linear::common::LeastSquaresError::SingularMatrix,
+                source: crate::linear::common::LeastSquaresError::SingularMatrix {
+                    columns: vec!["const".to_string(), "z1".to_string()]
+                },
             }
         );
     }
 
+    /// 観測数が構造方程式の係数の数以下なら、第一段階の`FirstStageFailed`ではなく
+    /// 構造方程式の`n`・`k`で`CommonError::InsufficientObservations`を返す。
     #[test]
-    fn fit_returns_common_error_via_first_stage_failed_source() {
-        // 第一段階の観測数不足（n<=k）はCommonError経由でLeastSquaresErrorに包まれ、
-        // それがさらにFirstStageFailedに包まれることを確認する。
+    fn fit_reports_structural_insufficient_observations_before_the_first_stage() {
+        // n=2、構造方程式は切片+endog1でk=2、第一段階は切片+z1..z3でl=4。
         let y = vec![1.0, 2.0];
         let x_endog = vec![vec![1.0, 2.0]];
         let instruments = vec![vec![1.0, 2.0], vec![2.0, 1.0], vec![3.0, 4.0]];
@@ -2342,15 +2511,103 @@ mod tests {
         .unwrap();
 
         let result = TwoSlsEstimator::fit(input, CovType::Classical, 0.95);
-        assert!(matches!(
-            result,
-            Err(IvError::FirstStageFailed {
-                source: crate::linear::common::LeastSquaresError::Common(
-                    CommonError::InsufficientObservations { .. }
-                ),
-                ..
-            })
-        ));
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::Common(CommonError::InsufficientObservations { n: 2, k: 2 })
+        );
+    }
+
+    /// 構造方程式は推定できる（`n > k`）が第一段階の回帰変数の数`l`以下の観測数なら、
+    /// 第一段階の観測数不足として専用エラーで拒否する（`n = l`では`X̂ = X`で2SLSがOLSに縮退する）。
+    #[test]
+    fn fit_returns_insufficient_observations_for_first_stage_when_n_is_at_most_l() {
+        // n=3、構造方程式は切片+endog1でk=2（n>k）、第一段階は切片+z1+z2でl=3（n=l）。
+        let y = vec![1.0, 2.0, 4.0];
+        let x_endog = vec![vec![1.0, 2.5, 2.0]];
+        let instruments = vec![vec![1.0, 2.0, 4.0], vec![2.0, 1.0, 5.0]];
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            &x_endog,
+            vec!["endog1".to_string()],
+            &instruments,
+            vec!["z1".to_string(), "z2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = TwoSlsEstimator::fit(input, CovType::Classical, 0.95);
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::InsufficientObservationsForFirstStage { n: 3, l: 3 }
+        );
+    }
+
+    /// `n < l`（`k < n`）でも同じ専用エラーで拒否する。
+    #[test]
+    fn fit_returns_insufficient_observations_for_first_stage_when_n_is_below_l() {
+        // n=3、k=2（切片+endog1）、l=4（切片+z1..z3）。
+        let y = vec![1.0, 2.0, 4.0];
+        let x_endog = vec![vec![1.0, 2.5, 2.0]];
+        let instruments = vec![
+            vec![1.0, 2.0, 4.0],
+            vec![2.0, 1.0, 5.0],
+            vec![0.5, 3.0, 1.0],
+        ];
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            &x_endog,
+            vec!["endog1".to_string()],
+            &instruments,
+            vec!["z1".to_string(), "z2".to_string(), "z3".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+
+        let result = TwoSlsEstimator::fit(input, CovType::Classical, 0.95);
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::InsufficientObservationsForFirstStage { n: 3, l: 4 }
+        );
+    }
+
+    /// 観測数の検証はクラスター数の検証より先に走る（クラスターが1つだけでも、
+    /// `n <= l`なら観測数不足を返す）。
+    #[test]
+    fn fit_checks_observation_count_before_cluster_count() {
+        let y = vec![1.0, 2.0, 4.0];
+        let x_endog = vec![vec![1.0, 2.5, 2.0]];
+        let instruments = vec![vec![1.0, 2.0, 4.0], vec![2.0, 1.0, 5.0]];
+        let input = IvInput::from_columns(
+            &y,
+            &[],
+            vec![],
+            &x_endog,
+            vec!["endog1".to_string()],
+            &instruments,
+            vec!["z1".to_string(), "z2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+        let one_cluster = CovType::Cluster {
+            groups: Some(GroupCodes::from_labels_without_keys(&[
+                "a".to_string(),
+                "a".to_string(),
+                "a".to_string(),
+            ])),
+        };
+
+        let result = TwoSlsEstimator::fit(input, one_cluster, 0.95);
+        assert_eq!(
+            result.unwrap_err(),
+            IvError::InsufficientObservationsForFirstStage { n: 3, l: 3 }
+        );
     }
 
     /// 正規方程式`β=(X'X)⁻¹X'y`を`faer`演算で直接解く、SUT（`partial_wald_statistic`・
@@ -2469,7 +2726,7 @@ mod tests {
     /// `weak_instrument_f_statistics()`も空になる。
     #[test]
     fn weak_instrument_f_statistics_is_empty_when_x_endog_is_empty() {
-        let y = vec![2.0, 4.0, 6.0, 8.0, 10.0];
+        let y = vec![2.1, 3.8, 6.3, 7.9, 10.2];
         let x_exog = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
         let input = IvInput::from_columns(
             &y,
@@ -2552,40 +2809,11 @@ mod tests {
         assert_eq!(estimator.wu_hausman_p_value(), None);
     }
 
-    /// 操作変数が内生変数を完全予測する退化ケース（`perfectly_predicted_endog_data()`、
-    /// 第一段階残差の分散がゼロ）では、Wu-Hausmanの拡張回帰の設計行列に分散ゼロの列が
-    /// 混入し特異になる。この場合`fit()`全体は失敗させず（`params`/`std_errors`等の主要な
-    /// 推定結果はWu-Hausman計算と無関係に正しく計算できるため）、`wu_hausman_statistic`/
-    /// `wu_hausman_p_value`だけ`None`にする（ユーザー確認済み、`fit()`のdocコメント参照）。
-    #[test]
-    fn fit_sets_wu_hausman_statistics_to_none_when_instrument_perfectly_predicts_endog() {
-        let (y, x_endog, z) = perfectly_predicted_endog_data();
-        let input = IvInput::from_columns(
-            &y,
-            &[],
-            vec![],
-            &[x_endog],
-            vec!["x_endog".to_string()],
-            &[z],
-            vec!["z".to_string()],
-            true,
-            "y".to_string(),
-        )
-        .unwrap();
-
-        let estimator = TwoSlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
-        // 主要な推定結果自体は退化の影響を受けず正しく計算できている
-        // （既存テスト`fit_matches_closed_form_ols_when_instrument_perfectly_predicts_endog`）。
-        assert!((*estimator.params().get(1, 0) - 2.0).abs() < 1e-8);
-        assert_eq!(estimator.wu_hausman_statistic(), None);
-        assert_eq!(estimator.wu_hausman_p_value(), None);
-    }
-
     /// Wu-Hausman統計量が、`TwoSlsEstimator::fit`（SUT）とは独立に手計算した拡張回帰
     /// （`y ~ const + x1 + x_endog + 第一段階残差`、`nontrivial_x_exog_columns()`を使う）の
     /// オラクルと数値一致することを確認する。`cov_type=Classical`なので、単一の追加列
     /// （`k_endog=1`）に対するWald F検定は`t²`（該当係数のt統計量の2乗）と代数的に一致する
-    /// （`ols.rs`の`wald_test_last_columns_matches_squared_t_statistic_for_single_column`と
+    /// （`ols/estimator.rs`の`wald_test_last_columns_matches_squared_t_statistic_for_single_column`と
     /// 同じ恒等式）。
     #[test]
     fn fit_computes_wu_hausman_statistic_matching_manual_augmented_regression() {
@@ -2726,7 +2954,7 @@ mod tests {
 
         // 末尾2列（v_hat1, v_hat2の係数）に対するジョイントWald検定を手計算する
         // （`F = (β_slopes' Σ⁻¹ β_slopes) / q`、`Σ`は該当2列に対応する`cov_params`の
-        // 2×2部分行列。`ols.rs`の`wald_f_test`と同じ式を、SUTとは独立に計算する）。
+        // 2×2部分行列。`shared/wald.rs`の`wald_f_test`と同じ式を、SUTとは独立に計算する）。
         let q = 2;
         let beta_slopes = Mat::from_fn(q, 1, |i, _| *beta_aug.get(i + 4, 0));
         let cov_slopes = Mat::from_fn(q, q, |i, j| sigma2 * (*xtx_inv.get(i + 4, j + 4)));
@@ -2837,7 +3065,7 @@ mod tests {
             "endogenous_stat={endogenous_stat}, exogenous_stat={exogenous_stat}"
         );
     }
-    /// property-basedテスト。`ols.rs`の`mod proptests`と同型の設計（配置・許容誤差`RTOL=1e-6`・
+    /// property-basedテスト。`ols/estimator.rs`の`mod proptests`と同型の設計（配置・許容誤差`RTOL=1e-6`・
     /// `prop_assume!`によるフルランク安全弁）だが、IV固有の不変条件（操作変数の張る空間のみへの
     /// 依存・丁度識別の閉形式解）を検証する。ケース生成は`common::proptest_support`。
     mod proptests {

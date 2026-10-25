@@ -34,10 +34,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
 
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: "3.12"
 
@@ -57,11 +59,11 @@ jobs:
       # になっている」というエラーで失敗する。--config-fileで明示指定することで
       # 設定ファイル自身のディレクトリを基準に相対パスを解決させ、この踏み穴を避ける
       # （実測確認済み）。
-      # --strictは付けない: docs/planning/specs/内のソースファイルへの相対リンクが
-      # 現状WARNINGを出しており（Issue #111、未修正）、付けると必ず失敗するため。
-      # Issue #111解消後に--strict化を再検討する。
+      # --strictでリンク切れ等のWARNINGをビルド失敗にする。ソースファイルへの相対リンクが
+      # WARNINGを出していたdocs/planning/はdocs/mkdocs.ymlのexclude_docsでビルド対象から
+      # 外しているため、現在WARNINGは出ない。
       - name: mkdocs build
-        run: uv run --locked --group docs mkdocs build --config-file docs/mkdocs.yml
+        run: uv run --locked --group docs mkdocs build --strict --config-file docs/mkdocs.yml
 
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 

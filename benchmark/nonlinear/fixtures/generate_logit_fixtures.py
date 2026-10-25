@@ -26,12 +26,19 @@ import polars as pl
 import statsmodels
 
 from benchmark.common import (
+    APPLE_CLUSTER,
+    APPLE_FORMULA,
     BENCHMARKS_DIR,
     DATA_DIR,
     MROZ_FORMULA,
-    extract_coef_se,
+    balanced_cluster_groups,
+    group_by_dataset_source,
     imbalanced_cluster_groups,
     run_fixture_cli,
+)
+from benchmark.nonlinear.constants import (
+    CONFIDENCE_LEVEL_NON_DEFAULT,
+    STATSMODELS_COV_TYPES,
 )
 from benchmark.nonlinear.references.statsmodels_ref import run
 
@@ -58,11 +65,6 @@ NUMERIC_SCENARIOS = [
     "outlier_regressor",
 ]
 
-# hc1はstatsmodelsで未実装のためここには含めない（上記docstring参照）。
-# clusterはbaselineのみ、下のcluster専用ケース（_run_cluster_case）で個別に扱うため
-# ここには含めない（OLS/WLSと同じ書き方、項目14参照）。
-COV_TYPES = ["classical", "opg", "hc0"]
-
 # newton以外のmethod（bfgs/lbfgs）が主リファレンスに対しフルの統計量（std_errors含む）で
 # 一致することの確認用。
 # baselineシナリオ・classical cov_typeの1ケースのみで十分（method自体の違いは
@@ -75,7 +77,7 @@ def build_fixtures() -> dict:
 
     for scenario in NUMERIC_SCENARIOS:
         fixtures[scenario] = {}
-        for cov_type in COV_TYPES:
+        for cov_type in STATSMODELS_COV_TYPES:
             result = run(
                 dataset_source="synthetic",
                 dataset=scenario,
@@ -88,10 +90,74 @@ def build_fixtures() -> dict:
     # baselineシナリオでのみ、複数のグルーピングパターンで確認する
     # （OLSのgenerate_ols_fixtures.pyと同じ方針、testing-policy.md「テスト用データセット」3.）。
     n = pl.read_csv(DATA_DIR / "logit_baseline.csv").height
-    fixtures["baseline"]["cluster"] = _run_cluster_case()
-    fixtures["baseline"]["cluster_imbalanced"] = _run_cluster_case(
+    fixtures["baseline"]["cluster"] = run(
+        dataset_source="synthetic",
+        dataset="baseline",
+        formula=None,
+        cov_type="cluster",
+        groups=balanced_cluster_groups(n),
+    )
+    # 不均衡な疑似グループ（サイズ[2,3,5,10,30,50]のタイル）。
+    fixtures["baseline"]["cluster_imbalanced"] = run(
+        dataset_source="synthetic",
+        dataset="baseline",
+        formula=None,
+        cov_type="cluster",
         groups=imbalanced_cluster_groups(n),
-        note="不均衡な疑似グループ（サイズ[2,3,5,10,30,50]のタイル）。",
+    )
+    # クラスター数の境界G=q+1（q=3、G=4）。G<=qはValidationErrorで、成功パスを持てる
+    # 最小のG（testing-policy.md「テスト用データセット」3.）。
+    fixtures["baseline"]["cluster_g4"] = run(
+        dataset_source="synthetic",
+        dataset="baseline",
+        formula=None,
+        cov_type="cluster",
+        groups=balanced_cluster_groups(n, 4),
+    )
+    # include_intercept=False（切片なし）。全cov_type（STATSMODELS_COV_TYPES +
+    # cluster）と組み合わせて確認する（OLS/WLSと同じ）。
+    fixtures["baseline"]["no_intercept"] = {
+        cov_type: run(
+            dataset_source="synthetic",
+            dataset="baseline",
+            formula=None,
+            cov_type=cov_type,
+            model="logit",
+            include_intercept=False,
+        )
+        for cov_type in STATSMODELS_COV_TYPES
+    }
+    fixtures["baseline"]["no_intercept"]["cluster"] = run(
+        dataset_source="synthetic",
+        dataset="baseline",
+        formula=None,
+        cov_type="cluster",
+        model="logit",
+        include_intercept=False,
+        groups=balanced_cluster_groups(n),
+    )
+    # confidence_level非既定（0.95以外）。係数と限界効果の信頼区間を、全cov_type
+    # （STATSMODELS_COV_TYPES + cluster）で確認する（OLS/WLSと同じ）。opgの限界効果は
+    # statsmodels側では算出しないためnull。
+    fixtures["baseline"]["confidence_level"] = {
+        cov_type: run(
+            dataset_source="synthetic",
+            dataset="baseline",
+            formula=None,
+            cov_type=cov_type,
+            model="logit",
+            confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+        )
+        for cov_type in STATSMODELS_COV_TYPES
+    }
+    fixtures["baseline"]["confidence_level"]["cluster"] = run(
+        dataset_source="synthetic",
+        dataset="baseline",
+        formula=None,
+        cov_type="cluster",
+        model="logit",
+        confidence_level=CONFIDENCE_LEVEL_NON_DEFAULT,
+        groups=balanced_cluster_groups(n),
     )
     # NOTE: G=2×説明変数3個（cluster_g2）の成功パスフィクスチャは
     # 削除した。`rank(Ŝ)<=G-1`のため`G<=q`（q=3）ではクラスターロバスト共分散が
@@ -101,7 +167,7 @@ def build_fixtures() -> dict:
 
     # 実データセット（Wooldridge mroz、労働参加モデル）。
     fixtures["mroz"] = {}
-    for cov_type in COV_TYPES:
+    for cov_type in STATSMODELS_COV_TYPES:
         fixtures["mroz"][cov_type] = run(
             dataset_source="wooldridge",
             dataset="mroz",
@@ -112,6 +178,19 @@ def build_fixtures() -> dict:
     # 削除した。MROZ_X は7変数で`G=2 <= q=7`のため、上記 cluster_g2 と
     # 同じ理由で ValidationError になる。エラーパスは
     # test_logit_validation.py::test_mroz_cluster_cov_type_raises_validation_error。
+
+    # 多クラスターの実データ（Wooldridge apple、`ecolbs > 0`の2値`y`、州でG=49、
+    # グループサイズ1〜66）。mrozのG=2は成功パスを持てないため、実データのクラスターは
+    # こちらが担う。
+    fixtures["apple"] = {
+        "cluster": run(
+            dataset_source="wooldridge",
+            dataset="apple",
+            formula=APPLE_FORMULA,
+            cov_type="cluster",
+            cluster=APPLE_CLUSTER,
+        )
+    }
 
     fixtures["solver"] = {
         method: run(
@@ -149,6 +228,18 @@ def build_fixtures() -> dict:
             "ならない。docs/spec/logit-spec.md参照）。"
             "G<=q（傾き係数の数）でのクラスターロバストSE（cluster_g2・mroz/city）は"
             "ValidationErrorになるため成功パスフィクスチャを持たない。"
+            "clusterはbaselineシナリオ（均等・不均衡の疑似グループ、境界G=q+1のcluster_g4）とapple（実データ、"
+            "州でG=49）。全統計量・限界効果を持つ。"
+            "baseline.confidence_levelは非既定の信頼水準（0.90）を全cov_type（opgを含む。"
+            "opgのmargeffはnull）とクラスター（均等な疑似グループ）で確認する。"
+            "baseline.no_interceptはinclude_intercept=False（切片なし）を"
+            "全cov_type（opgを含む。opgのmargeffはnull）とクラスター（均等な疑似グループ）"
+            "で確認する。log_likelihood_nullは常に切片のみのモデルを参照するため、"
+            "lr_statisticが負値になりうる。"
+            "bfgs/lbfgsのnear_separation・cluster・apple組み合わせは、ここにsolver別の"
+            "フィクスチャを持たず、statsmodelsのnewtonで生成した同じシナリオ・cov_typeの"
+            "エントリを参照にする（statsmodels自身のbfgs/lbfgsは収束許容が緩く、"
+            "near_separationでは本実装のbfgs/lbfgsと最大~7e-3（Logit。Probitは~8e-4）差が出るため）。"
             "methodはbfgs/lbfgsがnewtonと同じ最尤解・標準誤差に収束することを主"
             "リファレンスに対して確認するためのfixture（baselineシナリオ・classical"
             "cov_typeの1ケースのみ）。"
@@ -160,39 +251,7 @@ def build_fixtures() -> dict:
             "（OLSの同種ケース相当）。"
         ),
     }
-    return fixtures
-
-
-def _run_cluster_case(
-    groups: list | None = None,
-    note: str = "決め打ちの疑似グループ（行番号%10）。統計的な意味はなく、実装の動作確認用。",
-) -> dict:
-    """クラスターロバストSE確認用に、疑似グループを付けて実行する。"""
-    import statsmodels.formula.api as smf
-
-    df = pl.read_csv(DATA_DIR / "logit_baseline.csv")
-    pandas_df = df.to_pandas()
-    pandas_df["_group"] = (
-        groups
-        if groups is not None
-        else [i % 10 for i in range(len(pandas_df))]
-    )
-
-    formula = "y ~ x1 + x2 + x3"
-    model = smf.logit(formula=formula, data=pandas_df).fit(
-        disp=0, cov_type="cluster", cov_kwds={"groups": pandas_df["_group"]}
-    )
-
-    return {
-        **extract_coef_se(model),
-        "_meta": {
-            "reference": "statsmodels",
-            "statsmodels_version": statsmodels.__version__,
-            "generated_at": datetime.now(UTC).isoformat(),
-            "note": note,
-            "formula": formula,
-        },
-    }
+    return group_by_dataset_source(fixtures, ["mroz", "apple"])
 
 
 if __name__ == "__main__":

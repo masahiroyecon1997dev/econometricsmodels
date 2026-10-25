@@ -1,9 +1,11 @@
 # OLS 仕様書
 
-OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols.rs`・`engine_pybind/src/linear/ols.rs`・
+OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols/`・`engine/src/shared/`（共分散・Wald検定・最小二乗・適合度の部品）・`engine_pybind/src/linear/ols.rs`・
 `python_package/econometricsmodels/linear/ols.py`として実装済み。パフォーマンス比較の詳細は
 [`../performance/ols.md`](../performance/ols.md)、CI/CD・セキュリティはmethod非依存のため
 [`ci-cd-notes.md`](./ci-cd-notes.md)を参照。
+
+数式・定義の正本は公開ページ[`docs/methods/ols.md`](../methods/ols.md)（英語）。本書は実装上の判断・内部構成・テスト方針・ベンチマーク上の注意を記す（定義式は重複させない）。
 
 ## 1. API引数
 
@@ -39,8 +41,15 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols.rs`・`en
 `df_resid` / `df_model` / `log_likelihood` / `aic` / `bic`。
 
 - `df_resid = n - k`、`df_model`は定数項を除く傾き係数の数。`f_df_num = df_model`、`f_df_denom`は
-  検定に使った自由度（`df_resid`、`cov_type="cluster"`のときだけ`G-1`）。傾き係数が無く
-  `f_statistic`がNaNのときは`f_df_num`/`f_df_denom`も`None`。
+  検定に使った自由度（`df_resid`、`cov_type="cluster"`のときだけ`G-1`）。
+- `f_statistic`/`f_p_value`/`f_df_num`/`f_df_denom`は、全体F検定が定義できないとき**4つとも`None`**
+  （`float | None`）。定義できないのは、傾き係数が無いとき（NaNではなく`None`。Python APIは
+  `x`が空だと拒否するため通常は起きない）と、`IVResults.first_stage()`が返す第一段階回帰で
+  `cov_type="cluster"`のクラスター数`G`が第一段階の傾き係数の数`q`以下のとき（`rank(Ŝ) ≤ G-1 < q`で
+  傾き部分行列が構造的に特異。`iv-spec.md`2章・3.7節）。後者のため、engineには`G <= q`でも
+  全体F検定だけを`None`にして続行する`OlsEstimator::fit_with_optional_f_test`がある。
+  `OlsEstimator::fit`（`OLS(...).fit()`・WLS・FE・REの各`fit`が使う）は従来どおり`G <= q`を
+  `ValidationError`で拒否する。FE・RE・WLSの`f_statistic`/`f_p_value`も同じ`float | None`。
 
 - `hac_lags_used`: `cov_type="hac"`のとき実際に使われたラグ数`L`（`hac_lags`明示指定ならその値、
   未指定なら経験則で自動計算した値。engineの`resolve_hac_lags`の戻り値をそのまま保持する）。
@@ -51,12 +60,15 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols.rs`・`en
   `engine/src/linear/CLAUDE.md`参照。IVのWu-Hausman検定用に追加するまでは
   `fit()`内のローカル変数として使い切っていた）が、`engine_pybind`側に公開する`OLSResult`
   には引き続き含めない。
-- `summary()`（テキスト整形）・DataFrame版の`coef_table()`/`conf_int()`は作らない
+- `summary()`（テキスト整形）・DataFrame版の`params_table()`/`conf_int()`は作らない
   （プログラムから呼び出して使う設計方針上、テキスト表示・対話的操作を前提に
   しないため）。
 - python_package層（`OLSResults`）:
   - `params`/`std_errors`/`test_stats`/`p_values`/`conf_int`: 係数名→値の`dict`（O(1)取り出し用）。
-  - `coef_table()`: 行指向`list[dict]`（REST APIレスポンスにそのまま使える形）。
+  - `params_table()`: 行指向`list[dict]`（REST APIレスポンスにそのまま使える形）。行のキーは対応する属性名の単数形:
+    `param_name`（`param_names`）・`param`（`params`）・`std_error`（`std_errors`）・`test_stat`（`test_stats`）・
+    `p_value`（`p_values`）。`conf_lower`/`conf_upper`は`conf_int`の下限・上限。Tobitの`sigma`の行も同じキーで、
+    値が係数でなくても`param`で正確に表せる。`marginal_effects()`の行は`param`の代わりに`effect`を持つ。
   - `residuals`: `list[float]`をそのまま素通し。
 
 ## 3. 内部実装の計算仕様
@@ -70,36 +82,23 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols.rs`・`en
   `diag.is_nan() || diag <= threshold`という形で、NaNも明示的に検出する（`include_intercept=false`
   かつ全説明変数列がゼロという設計行列全体が完全にゼロのケースで、`col_piv_qr`が列選択時の0除算に
   よりR対角成分にNaNを生成しうるため。単純な`<=`比較だとNaNとの比較が常にfalseになりすり抜ける）。
-- 標準誤差計算用の`(X'X)⁻¹`（`xtx_inverse`）は`X'X`自体のCholesky分解で求める（QR分解の`R`因子から
+- 標準誤差計算用の`(X'X)⁻¹`（`shared::covariance::xtx_inverse`）は`X'X`自体のCholesky分解で求める（QR分解の`R`因子から
   導出する案は実測で高速化しないことを確認済み）。
 
 ### 3.2 標準誤差
 
-**classical**（デフォルト）: `σ̂²(X'X)⁻¹`の対角成分の平方根、`σ̂² = SSR/(n-k)`。t統計量・p値は
-自由度`n-k`のt分布（**statsmodelsは`cov_type`がclassical以外だと既定で正規分布(`use_t=False`)
-を使うが、本プロジェクトは全`cov_type`でt分布に統一する**。ベンチマーク照合時は`use_t=True`を
-明示指定する必要がある）。
+classical / HC0〜HC3 / HAC / cluster の定義式、検定分布、自由度の正本は公開ページ[`docs/methods/ols.md`](../methods/ols.md)。
+本節は実装上の判断とベンチマーク照合上の注意のみを記す。
 
-**HC0〜HC3**: $\widehat{\mathrm{Var}}_{HC}(\hat\beta) = (X^\top X)^{-1} \hat\Psi (X^\top X)^{-1}$
+**classical**: **statsmodelsは`cov_type`がclassical以外だと既定で正規分布(`use_t=False`)を使うが、本プロジェクトは
+全`cov_type`でt分布に統一する**。ベンチマーク照合時は`use_t=True`を明示指定する必要がある。
 
-| タイプ | $\hat\Psi$ |
-|---|---|
-| HC0 | $\sum_i \hat\varepsilon_i^2\, x_i x_i^\top$ |
-| HC1 | $\frac{n}{n-k}\cdot$ HC0 |
-| HC2 | $\sum_i \frac{\hat\varepsilon_i^2}{1-h_{ii}}\, x_i x_i^\top$ |
-| HC3 | $\sum_i \frac{\hat\varepsilon_i^2}{(1-h_{ii})^2}\, x_i x_i^\top$ |
-
-$h_{ii} = x_i^\top (X^\top X)^{-1} x_i$（レバレッジ、HC2/HC3のみ必要）。HC2/HC3は`h_ii`が1に極めて
-近い退化した設計だと発散しうるが、これはHC2/HC3自体の数学的性質でありengine固有のバグではない。
+**HC0〜HC3**: HC2/HC3は`h_ii`が1に極めて近い退化した設計だと発散しうるが、これはHC2/HC3自体の
+数学的性質でありengine固有のバグではない。
 
 **HAC（Newey-West、Bartlettカーネル）**:
-$$
-\widehat{\mathrm{Var}}_{HAC}(\hat\beta) = (X^\top X)^{-1}\, \hat S \,(X^\top X)^{-1}, \quad
-\hat S = \hat S_0 + \sum_{l=1}^{L} w_l (\hat S_l + \hat S_l^\top), \quad w_l = 1 - \frac{l}{L+1}
-$$
-- ラグ数`L`: `hac_lags`指定時はその値（`0 <= L < n`を検証）、未指定時は経験則
-  `L = floor(4*(n/100)^(2/9))`で自動計算（EViews等でも使われるデータ非依存の式。完全な
-  データ依存の自動バンド幅選択は主リファレンスのstatsmodelsに同等機能がなく未実装）。
+- ラグ数`L`: `hac_lags`指定時は`0 <= L < n`を検証。未指定時の経験則はデータ非依存の式（EViews等でも
+  使われる）。完全なデータ依存の自動バンド幅選択は主リファレンスのstatsmodelsに同等機能がなく未実装。
 - `hac_time`は必須（未指定は`ValidationError`）。行順を時系列順とみなす暗黙の既定は置かない:
   データが時系列順に並んでいなくてもエラーにならず、時系列順のHACに見える誤った結果が黙って
   返るため、時間順は常に列で明示させる（行順がそのまま時間順なら、`df.with_row_index("t")`
@@ -117,21 +116,26 @@ $$
   同値に潰れて、この検査をすり抜けるため。
 - **パフォーマンス上の罠**: `k×k`という小さい出力サイズの行列積で、faer既定の並列実行は
   ディスパッチオーバーヘッドが計算本体を上回り逐次より遅くなる（実測n=10,000,k=2で6倍悪化）。
-  `hac_cov_params`内でのみ`Par::Seq`を明示指定して回避している。他手法で同様の小さい行列の
+  `shared::covariance::hac_meat`内でのみ`Par::Seq`を明示指定して回避している。他手法で同様の小さい行列の
   頻繁な積を書く場合も並列化の要否を実測してから決めること。
 - statsmodelsとの照合は`cov_kwds={"maxlags": L}, use_t=True`。`use_correction`（小標本補正）は
-  既定の`False`のままで一致することを確認済み。
+  既定の`False`のままで一致することを確認済み。`L`は主リファレンス（statsmodels）もRクロスチェックも
+  本実装の自動選択式（`benchmark.common.hac_auto_lag(n)`）に揃え、どちらのフィクスチャにも`hac_lag`として残す
+  （statsmodelsとの照合は`hac_lags`を省略し、`hac_lags_used`が`hac_lag`と一致することも確認する）。
+  自動選択とは別に、baselineで`hac_lags`を明示した`0`（HC0相当）・`1`もstatsmodels・Rの両方と照合する。
 
-**クラスター**: $\hat S = \sum_g S_g S_g^\top$（$S_g = \sum_{i\in g}\hat\varepsilon_i x_i$）。
-- グループ化は**`BTreeMap`を使う（`HashMap`は禁止）**: `HashMap`はプロセスごとのハッシュシードで
+**クラスター**: 式は`methods/ols.md`。
+- グループ化は**キーの辞書順に整数コードを振る`GroupCodes`（`BTreeMap`と同じ反復順）を使う
+  （`HashMap`は禁止）**: `HashMap`はプロセスごとのハッシュシードで
   反復順序が変わり、浮動小数点加算の非結合性により`fit()`を複数回呼ぶと標準誤差が1 ULP程度ぶれる
   非決定性バグを起こす（`fit_cluster_std_errors_are_deterministic_across_repeated_fits`で固定）。
   クラスター系の実装を今後増やす場合も同じ罠がある。
-- 小標本補正`G/(G-1) * (n-1)/(n-k)`は常に適用し、無効化オプションは設けない（statsmodels
+- `CovType::Cluster { groups }`は整数コード化済みの`Option<GroupCodes>`で受け取る（`engine_pybind`が
+  クラスター列のラベルから作って渡す）。`fit()`はクラスター数の検証と集計に同じコードを使う。
+- 小標本補正は常に適用し、無効化オプションは設けない（statsmodels
   `cov_cluster`の既定`use_correction=True`と一致）。
-- t検定・信頼区間・F検定の自由度は`cov_type="cluster"`のときのみ`n-k`ではなく**`G-1`**に切り替える
-  （statsmodelsの既定`df_correction=True`、計量経済学の標準的慣行）。`df_resid`自体（σ̂²・調整済み
-  R²・AIC/BIC）は常に`n-k`のまま。
+- 自由度を`cov_type="cluster"`のときのみ`G-1`に切り替えるのは、statsmodelsの既定
+  `df_correction=True`・計量経済学の標準的慣行に合わせたもの。`df_resid`自体は常に`n-k`。
 - **`G ≤ q`の境界（`ValidationError`）**: $\hat S = \sum_g S_g S_g'$は、クラスター
   寄与スコアの総和がゼロ（正規方程式$X'e = 0$）になるため`rank(Ŝ) ≤ G - 1`。F検定が使う`q×q`
   （`q = k - k_constant` = 傾き係数の数）部分行列は`G ≤ q`のとき構造的に特異になる（`G = q`
@@ -147,37 +151,61 @@ $$
 
 ### 3.3 適合度統計量
 
-- R²・調整済みR²: `include_intercept`により centered TSS（`Σ(y_i-ȳ)²`）/ uncentered TSS
-  （`Σy_i²`）を切り替える（statsmodelsの`k_constant`分岐と一致）。調整済みR²は
-  `1 - ((n-k_constant)/df_resid)*(1-R²)`。
-- 対数尤度: `llf = -(n/2)*(ln(2π) + ln(SSR/n) + 1)`（分散は最尤推定量`SSR/n`。classical標準誤差の
-  不偏推定量`SSR/(n-k)`とは異なる）。`aic = -2*llf + 2k`、`bic = -2*llf + ln(n)*k`。
-- F統計量: `cov_type`によらず単一の式`F = (β_slopes' Σ⁻¹ β_slopes) / q`（`Σ`は`cov_params`の
-  傾き係数部分行列、`q = k - k_constant`）。`cov_type=Classical`のとき古典的F検定と代数的に一致し、
-  HC0-3・HAC・clusterではそのままロバストWald検定になる。`q=0`は`f64::NAN`（0除算回避）。
+- R²・調整済みR²・対数尤度・AIC/BIC・F統計量の定義式は[`docs/methods/ols.md`](../methods/ols.md)。
+  R²の総平方和は`include_intercept`で中心化/非中心化を切り替える（statsmodelsの`k_constant`分岐と一致）。
+  F統計量は`cov_type`によらず単一の式で、`q=0`は`f64::NAN`（0除算回避）。
 - **`Σ`が数値的にほぼ特異な場合の検出**: 変数間のスケールが極端に異なる設計行列では、`Σ`の条件数が
   倍精度の限界を超えるが非ピボットCholesky分解自体は失敗せず無意味なF統計量を返しうる
   （実測でstatsmodelsとの相対誤差5e10程度）。`ensure_well_conditioned_symmetric_matrix`
-  （`crate::linear_algebra`、nonlinear系統とも共有）が`SelfAdjointEigen`で実際の固有値を求め、
-  最大固有値との相対比で判定しCholesky分解前に`ComputationFailed`で止める。
+  （`crate::shared::linear_algebra`、nonlinear系統とも共有）が`SelfAdjointEigen`で実際の固有値を求め、
+  最大固有値との相対比で判定しCholesky分解前に`CommonError::NearSingularMatrix`
+  （`matrix=COEFFICIENT_COVARIANCE`、`code`は`MATRIX_NEAR_SINGULAR`、`ComputationError`）で止める。
+- **被説明変数が定数（`OUTCOME_CONSTANT`）**: 切片のあるモデルで`y`が（丸め誤差の範囲で）全行で
+  同じ値だと、中心化した総平方和が0でR²が定義できない。入力だけから分かるので、QR分解より前に
+  `ValidationError`にする。切片なしのモデルでは定数でも非中心化の総平方和が正なので対象外。
+  判定はFEの分散ゼロ検出（`REGRESSOR_NO_WITHIN_VARIATION`）と同じ相対閾値
+  （`shared::validation::has_no_variation`: 平均で中心化した値の標準偏差が、`y`の最大絶対値×
+  観測数×`ε`以下）で、`0.1 + 0.2`と`0.3`のような1 ulpの違いも定数とみなす。**観測数が非常に多く
+  平均が標準偏差より桁違いに大きい`y`（例: 観測数100万で、平均の`2e-10`倍未満しか変動しない値）は
+  定数と判定される。**
+- **完全フィット（`PERFECT_FIT`）**: 残差平方和が総平方和の`k·ε`倍以下（`SSR <= k·ε·SST`、
+  `1 - R² <= k·ε`と同じ。`ε = f64::EPSILON`、`k`は係数の数、`SST`はモデルのR²の総平方和）だと、
+  `σ̂² = 0`で標準誤差とF検定が定義できない。残差が厳密に0にならず丸め誤差が残るデータで、
+  成功してF統計量が`1e35`のような無意味な値になったり、クラスターのときだけ`MATRIX_NEAR_SINGULAR`
+  になったり、と結果がデータの丸め誤差で変わっていたため、共分散・F検定を計算する前（係数の計算の
+  直後）に、総平方和に対する相対閾値で`ComputationError`にする。判定は
+  `shared::goodness_of_fit::is_perfect_fit`の1か所で、OLS・WLS・FE・IVが共有する。**閾値は残差の
+  大きさではなく平方和の比に対するもので、残差の標準偏差が`y`の標準偏差の約`1e-8`倍以下
+  （`R² > 1 - 1e-15`程度）のデータが対象になる**（実データの当てはまりではまず起きず、合成データで
+  式どおりに`y`を作ったときに起きる）。会計恒等式のように`y`が説明変数の厳密な関数のデータは
+  推定できなくなる（残差が0の回帰には標準誤差が無い）。
+  - 総平方和は平均で中心化するため、平均が標準偏差より桁違いに大きい`y`でも、丸め誤差の残差を
+    検出できる（平均が標準偏差の`1e8`倍までは、丸め誤差だけの`y`を全て検出することを実測した。
+    `1e10`倍を超えると丸め誤差が信号に近づき、F統計量が`1e14`程度の有限値で成功する。そこまで
+    精度が落ちたデータは、完全フィットかどうかを判別できる情報自体が残っていない）。
+  - `SST`は元の`y`から計算する（`OlsInput`が保持する）。WLSは変換後の`sqrt(w)y`ではなく重み付き平均で
+    中心化した`Σw(y-ȳ_w)²`（切片なしは`Σwy²`）。
+  - 診断検定の補助回帰、IVの第二段階、REの準偏差変換後の回帰とハウスマンの補助回帰は判定しない
+    （`OlsEstimator::fit_auxiliary`。被説明変数が元のモデルの`y`でない、または残差が元のモデルの
+    残差でないため。完全フィットは元のモデルの回帰が先に検出する）。IVのWu-Hausman拡張回帰は
+    元の`y`の回帰なので判定し、完全フィットなら検定統計量だけ`None`にする（`iv-spec.md`3.6節）。
 
 ### 3.4 `predict()`
 
-- `OLSResults.predict(new_data: pl.DataFrame | None = None) -> list[dict[str, float]]`
+- `OLSResults.predict(new_data: pl.DataFrame | None = None) -> list[float]`
   （`OLS`側ではなく`OLSResults`側。`OLS`はfit前の設定を保持するだけのステートレスな値のため）。
 - `new_data=None`（デフォルト）: 学習データに対する予測値`ŷ = Xβ̂`を返す（`fit()`時に計算し
   内部に保持。独立したプロパティとしては公開せず`predict()`経由のみ）。
 - `new_data`指定時: 新規データに対する予測値（out-of-sample）。`x`と同じ列名を持つ列を含む必要が
   ある（列名でマッチング、列順不問）。`include_intercept=True`でfitした場合、定数項の列は
   `new_data`に含めない（自動付加される）。
-- 戻り値は行指向`list[dict[str, float]]`で統一（点予測のみの現段階では1キーのみだが、将来
-  信頼区間・予測区間を追加する場合にキーを追加できる形にするため）。キー名は`"predicted"`
-  （学習データ・新規データいずれの場合も同じキー。当初`"fitted"`固定だったが、
-  new_data指定時（out-of-sample）に対して統計学の慣習上不正確という指摘を受け、
-  `"predicted"`に統一した。統計学の慣習では学習データに対する予測を
-  「fitted values」、新規データに対する予測を「predicted values」と呼び分けるが、
-  本APIは`new_data`の有無で戻り値の型・構造を変えない設計方針のため、キー名も
-  呼び分けず`"predicted"`で統一する）。
+- 戻り値は観測順の`list[float]`（`residuals`と同じ形）。学習データ・新規データのどちらでも
+  同じ型で返す（統計学の慣習では学習データへの予測を「fitted values」、新規データへの予測を
+  「predicted values」と呼び分けるが、本APIは`new_data`の有無で戻り値の型・構造を変えない
+  設計方針のため呼び分けない）。点予測だけを返すので単一キーの`dict`にする意味がなく、
+  1要素ごとに`dict`を作るコストも避けられる。将来、信頼区間・予測区間を足す場合は
+  `predict()`にキーを足さず（引数で戻り値の型が変わるのを避けるため）、別メソッドとして追加する
+  （statsmodelsの`get_prediction()`と同じ分け方）。
 - **Logitとの命名整合**: `LogitEstimator::predict()`（学習データの予測確率のみを返す設計、
   statsmodelsの`results.predict(exog=None)`と同型）が先に実装・マージ済みだったため、OLS側を
   この命名（`fitted_values`プロパティを作らず`predict(new_data=None)`に一本化）に揃えた。
@@ -192,18 +220,19 @@ $$
   指定時は`new_data`）に予測値の列（`"predicted"`）を1列付加したpolars DataFrameを返す点のみ異なる。
 - **プロジェクト全体の「DataFrameは返さない」方針（2章）の唯一の例外**。予測値と元データの行対応を
   分かりやすくしたいというユーザー要望（R `broom::augment()`が先行事例）に応えるため。既存の
-  `predict()`/`residuals`/`coef_table()`は変更せず、この用途専用の新規メソッドとして追加した
+  `predict()`/`residuals`/`params_table()`は変更せず、この用途専用の新規メソッドとして追加した
   （フラグで戻り値の型を変える設計はboolean trapのため不採用）。
 - **スコープは予測列のみ**（残差列の同時付加は見送り、必要になれば別issueで拡張検討）。
 - **実装層は`engine_pybind`**（`python_package`側で`predict()`の結果を`with_columns()`するだけでも
   実現できるが、列名衝突のエラー送出のしやすさを優先しユーザー判断でRust側に置いた）。
-  `OLSResult`（Rust）に`fit()`時の元DataFrameを`training_data: Option<DataFrame>`として非公開保持する
-  （polarsの列は内部で参照カウント方式のため、このクローン自体は実質コピーを伴わない）。
-  `new_data`指定時は`predict()`と同じ`x`列抽出＋`engine::linear::ols::predict_new_data`を再利用し、
-  `new_data`自体をソースにする。
+  `OLSResult`（Rust）に`fit()`に渡された元の`polars.DataFrame`を`source_data: Option<Py<PyAny>>`として
+  非公開保持し（参照を持つだけでコピーしない）、`new_data=None`ではそれに予測値の列を足して返す。
+  推定に使わない列（取り込めないdtypeの列を含む）もそのまま残る。`new_data`指定時は`predict()`と同じ
+  `x`列抽出＋`engine::linear::ols::predict_new_data`を再利用し、`new_data`自体をソースにする
+  （`x`列だけを取り込み、予測値の列は`new_data`の`polars.DataFrame`に足す）。
 - **列名衝突は`ValidationError`**（ソースデータに既に`"predicted"`列がある場合、`include_intercept=True`
-  時の`"const"`列衝突と同じ発想で黙って上書きしない。`engine_pybind::validation::validate_no_existing_column`）。
-- `training_data`が`None`（`IVResult.first_stage()`が`OLSResult`を構築する経路——各内生変数の
+  時の`"const"`列衝突と同じ発想で黙って上書きしない。`engine_pybind::shared::augment::append_predicted_column`）。
+- `source_data`が`None`（`IVResult.first_stage()`が`OLSResult`を構築する経路——各内生変数の
   第一段階回帰は単一のソースDataFrameを持たないため）の`OLSResults`に対して`augment(new_data=None)`を
   呼ぶと`ValidationError`になる（`new_data`を指定した呼び出しは通常どおり動作する）。
 
@@ -211,32 +240,49 @@ $$
 
 - Arrowゼロコピーは Python→Rust境界（`pyo3-polars`の`PyDataFrame`）の受け渡しを指す。
   polars DataFrame→`faer::Mat<f64>`は2段階: `engine_pybind`が列ごとに`Vec<f64>`へ抽出
-  （`column_extraction::extract_f64_column`）→`engine`（`OlsInput::from_columns`）が
+  （`shared::column_extraction::extract_f64_column`）→`engine`（`OlsInput::from_columns`）が
   `faer::Mat`を組み立てる。この2回のコピー自体は許容する（QR分解本体のコストに対して無視できる）。
 - `engine`はpolars/PyO3を知らない。列名が要る検証（`y`/`x`重複、`"const"`衝突、`x`空リスト）は
   `engine_pybind`側の責務。`confidence_level`範囲・`cluster`未指定は`engine`側が検知するため
   `engine_pybind`側で重複チェックしない。
-- `engine::linear::common::LeastSquaresError` → `PyErr`対応表:
+- `engine::linear::common::LeastSquaresError` → `PyErr`対応表。各バリアントは`ErrorInfo::report()`で
+  カタログ（`engine/src/shared/error_catalog.rs`）の`code`と`params`になり、Python例外のクラスは
+  `code`ごとのカタログのクラスで決まる（`code`ごとの文面・`params`は`docs/guide/error-codes.md`）:
 
-  | `LeastSquaresError` | Python例外 |
-  |---|---|
-  | `Common(DimensionMismatch \| InsufficientObservations \| MissingClusterColumn \| InvalidConfidenceLevel \| InsufficientClusters \| InsufficientClustersForInference \| NoRegressors)` | `ValidationError` |
-  | `WeightDimensionMismatch \| NonPositiveWeight`（WLS） | `ValidationError` |
-  | `InvalidHacLags` | `ValidationError` |
-  | `SingularMatrix` | `ComputationError` |
-  | `Common(ComputationFailed)` | `ComputationError` |
+  | `LeastSquaresError` | `code` | Python例外 |
+  |---|---|---|
+  | `Common(InsufficientObservations)` | `INSUFFICIENT_OBSERVATIONS` | `ValidationError` |
+  | `Common(MissingClusterColumn)` | `CLUSTER_REQUIRED` | `ValidationError` |
+  | `Common(InsufficientClusters)` | `CLUSTER_COUNT_TOO_SMALL` | `ValidationError` |
+  | `Common(InsufficientClustersForInference)` | `CLUSTER_COUNT_NOT_ABOVE_SLOPES` | `ValidationError` |
+  | `Common(InvalidConfidenceLevel)` | `CONFIDENCE_LEVEL_OUT_OF_RANGE` | `ValidationError` |
+  | `Common(InvalidHacLags)` | `HAC_LAGS_OUT_OF_RANGE` | `ValidationError` |
+  | `NonPositiveWeight`（WLS） | `WEIGHT_NOT_POSITIVE` | `ValidationError` |
+  | `SingularMatrix` | `DESIGN_MATRIX_SINGULAR` | `ComputationError` |
+  | `Common(NearSingularMatrix { matrix })` | `MATRIX_NEAR_SINGULAR` | `ComputationError` |
+  | `Common(OutcomeConstant)` | `OUTCOME_CONSTANT` | `ValidationError` |
+  | `Common(PerfectFit)` | `PERFECT_FIT` | `ComputationError` |
+  | `Common(DimensionMismatch \| ClusterDimensionMismatch \| NoRegressors \| Internal)`・`WeightDimensionMismatch` | `INTERNAL_ERROR` | `ComputationError` |
+
+  `engine_pybind`が同じ`DataFrame`の列から`y`・`x`・`weight`を作るため、`INTERNAL_ERROR`の行は
+  Python APIからは起こらない（起きたら実装の誤り）。事後診断検定のバリアント（`InvalidNlags`等）の
+  対応は`error-codes.md`を参照。
 
   `impl From<LeastSquaresError> for PyErr`は書けない（`LeastSquaresError`・`PyErr`ともこのクレート
-  外定義の型でorphan ruleに抵触）。関数`least_squares_error_to_pyerr`として実装し
-  `.map_err(...)?`で変換する。
+  外定義の型でorphan ruleに抵触）。関数`least_squares_error_to_pyerr`（`to_pyerr(&err)`を呼ぶだけ）として
+  実装し`.map_err(...)?`で変換する。
 - バージョン固定: `pyo3=0.29.2` / `polars=0.55.2` / `pyo3-polars=0.28.0`（すべて`=`固定）。
   `pyo3-polars=0.28.0`が`pyo3="^0.29"`・`polars="^0.55.1"`を要求するための組み合わせ。互換性は数字ではなく
   `pyo3-polars`が使う`polars_ffi::version_0`という安定版FFIプロトコルで担保される。
 
 ### 3.7 テスト
 
-- 許容誤差: classical/HC0-3/cluster/係数はRとの実測で相対誤差1e-14程度のため`rtol_strict=1e-8`（`tests/_tolerances.py`の`ols_crosscheck`）。
-  HACはRとの`prewhite`/`adjust`慣習差により実測0.4%程度のため`rtol_hac=1e-2`。
+- 許容誤差: classical/HC0-3/cluster/係数はRとの実測で相対誤差1e-14程度のため`rtol_strict=1e-8`（`tests/support/_tolerances_linear.py`の`ols_crosscheck`）。
+  HACも同じ`rtol_strict`（R側は`NeweyWest(adjust = FALSE)`。既定の`adjust = TRUE`は共分散に
+  `n/(n-k)`を掛けるが本実装・statsmodelsは掛けず、このスカラー倍だけが差の全てで、
+  小標本（n=20）・高次元（k=21）を含む全合成シナリオで機械精度一致する）。
+- HACの実データは時系列のWooldridge `prminwge`（`lprepop ~ lmincov + lusgnp`、年次昇順でn=38、
+  行順を`hac_time`にする）でstatsmodels・Rの両方と照合する。横断面の`wage1`/`gpa2`/`mroz`はHACの対象外。
 - `tests/linear/` に4ファイルで役割分担する:
   `test_ols_api.py`（成功パスの構造・API・オプション反映・`predict()`/`augment()`）/
   `test_ols_validation.py`（`ValidationError`/`ComputationError`パス）/
@@ -245,25 +291,37 @@ $$
   `.claude/rules/testing-policy.md`を参照。
 - `hac_lags_used`（自動選択ラグ数）は、`tests/linear/test_ols_api.py`が複数の標本サイズ
   （境界`n=51200`を含む）でPython側の独立実装`benchmark.common.hac_auto_lag`と直接比較する
-  （Rust側`resolve_hac_lags`との式の一致の直接検証。WLS・IV・FE/REのDKも各`*_api.py`で同様）。
+  （Rust側`shared::covariance::resolve_hac_lags`との式の一致の直接検証。WLS・IV・FE/REのDKも各`*_api.py`で同様）。
 - pyfixestはOLSの正確性検証には使わない（HC2/HC3にHC1用の小標本補正を誤って適用する既知の
   実装バグがあるため）。性能比較専用（[`../performance/ols.md`](../performance/ols.md)）。
 - 実データセット: `wage1`（`lwage ~ educ + exper + tenure`）・
-  `gpa2`（`colgpa ~ sat + hsperc + tothrs`）のWooldridgeデータセット2つ、
-  classical/HC0-3で主リファレンス（statsmodels、`test_ols_reference.py`）・
-  独立実装（R、`test_ols_crosscheck.py`）の両方と照合する（従来Rクロスチェック側にしか
-  無かった実データ検証をstatsmodels側にも追加）。
+  `gpa2`（`colgpa ~ sat + hsperc + tothrs`）・
+  `mroz`（`inlf ~ nwifeinc + educ + exper + expersq + age + kidslt6 + kidsge6`、Logit/Probitと同じ
+  回帰式。被説明変数が0/1の線形確率モデルで、分散がxに依存するためclassicalとHC0-3の差が大きく出る）の
+  Wooldridgeデータセット3つ、classical/HC0-3で主リファレンス（statsmodels、`test_ols_reference.py`）・
+  独立実装（R、`test_ols_crosscheck.py`）の両方と照合する。`mroz`はクラスターに使える自然なカテゴリ列が
+  無く（`city`はG=2でG<=qのため`ValidationError`）、HACも時系列順が無いため対象外。
+- 列数・列順に依存するapiテスト（`param_names`の並び、`params_table`/`conf_int`のキー、
+  `predict()`/`augment()`の列の扱い、`include_intercept=False`）は、共有の`dataset`（説明変数2列）
+  ではなく凍結済みの`synthetic_baseline_wide.csv`（`wide_dataset`フィクスチャ、n=100・x1..x8、
+  切片を含む真の係数は全て0.75以上離した値、`benchmark.linear.constants.WIDE_BETA`）で行う。2列だと
+  列の取り違えは1通りの入れ替えしか起こり得ず、3列以上が絡むバグを検出できないため。真の係数との
+  近さ（標準誤差の5倍以内）で並びを確認し、係数・標準誤差・t値・p値・信頼区間が列名ごとに
+  statsmodelsと一致することを`test_ols_reference.py`（WLSは`test_wls_reference.py`）で確認する。WLSの`test_wls_api.py`も同じデータを使う
+  （重みは同CSVの`weight`列）。列数に依存しない`ValidationError`系は小さい`dataset`のまま。
   `wage1`はさらに地域ダミー（northcen/south/west、基準northeast）から合成したregion列
   でのクラスターロバストSE（実データでのグループ列、4グループ・不均衡サイズ）も両方で検証する。
 - `engine`側は上記の固定シナリオ単体テストに加え、property-basedテスト（`proptest`、
-  `engine/src/linear/ols.rs`の`mod proptests`）で不変条件を検証する（詳細な方針は
+  `engine/src/linear/ols/estimator.rs`の`mod proptests`）で不変条件を検証する（詳細な方針は
   `testing-policy.md`「property-basedテスト」参照）。対象プロパティ: 定数項ありなら残差和は常に0、
   yのスカラー倍で係数（切片含む）も同じ倍率でスケールする、xの列順序を入れ替えても係数名で
   対応付ければ値は変わらない、HC0の標準誤差は常にHC1以下。いずれも意図的なバグ注入により
   実際に検出できることを確認済み。
-- 上記4ファイルの役割分担（リファレンス実装との数値照合）とは別に、`test_ols_api.py`末尾に
+- `white_test()`（3.9節）・`breusch_godfrey_test()`（3.10節）は、診断検定1つで1ファイルにまとめた
+  `test_ols_white.py`・`test_ols_breusch_godfrey.py`に置く（上記4分割と同じ区分を1ファイル内に持つ）。
+- 上記4ファイルの役割分担（リファレンス実装との数値照合）とは別に、`test_ols_api.py`に
   クラスターロバストSEの統計的健全性チェックを1本持つ
-  （`test_cluster_std_error_exceeds_classical_under_true_intra_cluster_correlation`）。
+  （`test_cluster_se_exceeds_classical_under_intra_cluster_correlation`）。
   既存のクラスター系テストは誤差i.i.d.なデータに疑似グループラベルを後付けしたもので、
   「クラスターロバストSEが真のクラスター内相関がある状況で意図通り機能するか」は未検証
   だった。説明変数・誤差の両方にクラスター内相関を
@@ -277,12 +335,163 @@ $$
 releaseビルド（`maturin develop --release`）必須（debugビルドは最大140倍遅い）。
 classical/HC1/clusterはstatsmodels/pyfixest以上に高速、HACも大規模データではほぼ互角。
 メモリはengineが一貫して最小。詳細な実測データは[`../performance/ols.md`](../performance/ols.md)参照。
-faerのグローバル並列度は`engine::parallelism::ensure_serial()`で常時`Par::Seq`に固定
+faerのグローバル並列度は`engine::shared::parallelism::ensure_serial()`で常時`Par::Seq`に固定
 している（tall-skinnyな設計行列では暗黙の全コア並列化が高速化せず、多コア機・負荷下で
 不安定になったため。`engine/src/linear/CLAUDE.md`「faerのグローバル並列度」）。
 
+### 3.9 `white_test()`（事後診断）
+
+- `OLSResults.white_test(statistic: Literal["lm", "f"] = "lm") -> WhiteTestResult`。事後診断なので
+  `fit()`では計算せず、利用者が選んで呼ぶ（`docs/spec/inference-conventions.md`6章）。結果型は検定共通の
+  frozen dataclass `DiagnosticResult`（`statistic`/`p_value`/`df`/`df_denom`/`distribution`、`to_dict()`）
+  を継承した`WhiteTestResult`（追加フィールド`aux_terms`/`dropped_terms`）。`distribution`は
+  `Literal["chi2", "f"]`の文字列（`stat_dist`と同じ流儀）。
+- **定義**: 補助回帰・統計量の定義は[`docs/methods/ols.md`](../methods/ols.md)。LM/F版は戻り値を分けず`statistic`引数で選ぶ（型を単純にするため）。
+- **補助回帰は常に定数を含める**（元のモデルが`include_intercept=False`でも同じ）。`aux_terms`の
+  先頭は常に補助回帰の定数`"const"`。元のモデルに定数が無くても補助回帰の定数があることを結果で
+  読めるようにするため。元のモデルが`include_intercept=False`で`x`に`"const"`という名前の列を
+  持つ場合は`"const"`が2つ現れるが、先頭が補助回帰の定数である（位置で区別できる）。
+- **項と除外ルール**: 項は`x`の各列・各列の二乗・列の組の積の順（ラベルは`"x1"`/`"x1^2"`/`"x1:x2"`）。
+  定数列（全て0を含む）と、先に採用した項と数値的に同一の列（相対許容誤差1e-12。ダミーの二乗
+  `d*d == d`、排他的ダミー同士の積が全て0になる場合等）を除き、除いた項を`dropped_terms`に返す。
+  定数の説明変数（`include_intercept=False`のモデルに入れた定数列）を含む項は、その定数倍の別の項
+  なので値の比較を待たず全て除く。**`df`は除外後の項の数（ランクに基づく）**。`fit()`は完全な
+  多重共線性を`ComputationError`で弾くが、補助回帰の重複はテスト自身の構成（`d² = d`）から機械的に
+  生じ利用者のモデル指定の誤りではないため、ここでは除いて続行する（何を使ったかは結果で見える）。
+  ラベルは出力専用で、式としてパースしない・引数に受け付けない（formula方式を採らない方針
+  〔CLAUDE.md 2章〕は入力の設計の話）。
+- **数値の扱い**: 補助回帰の各列は標準化してから回帰する。定数ありの`R²`は列の平行移動・スケールで
+  変わらないが、生の値のままだと平均が標準偏差より桁違いに大きい変数（賃金・人口等）の二乗項が
+  元の列とほぼ共線になり、`fit()`の特異性判定・条件数チェックで誤って失敗するため（実測: 平均5e3、
+  SD1e3の列で失敗）。`R²`が非有限、または1以上ならF統計量が定義できず`ComputationError`
+  （`f64::max`はNaNを無視して0.0を返すため、丸める前に非有限を判定する）。
+- **エラー**: `statistic`が不正・観測数が補助回帰の列数（定数込み）以下
+  （`LeastSquaresError::InsufficientObservationsForAuxRegression`、`CommonError::
+  InsufficientObservations`は元のモデルの`k`を指すためメッセージを分けた）・元のデータが
+  無い結果（`IVResults.first_stage()`由来）・全ての`x`が定数は`ValidationError`。補助回帰が除外後も
+  特異（既知の制限: 全カテゴリのダミーを`include_intercept=False`で入れると補助回帰の定数と
+  共線になる）、または補助回帰が推定できない場合は`ComputationError`（メッセージに
+  `White test`と補助回帰であることを含め、元のモデルの共線性と取り違えないようにする）。
+- **実装**: engineの`linear::diagnostics::white_test`（`x`の列・列名・残差を受け取り、補助回帰に
+  `OlsEstimator::fit`〔`CovType::Classical`〕を再利用）。`OLSResult`は`OlsEstimator`を保持しないため
+  `engine_pybind`が元のデータと`param_names`から`x`の列だけを取り込んで渡す（`predict_for`と同じ経路、
+  `augment()`と同様に元のデータが無ければ`ValidationError`）。LM/Fの両方をengineが計算し、
+  `statistic`の選択は`engine_pybind`。p値は`statrs`の`sf`（`1 - cdf`は裾で潰れるため使わない）。
+- **リファレンスとの関係**: statsmodels `het_white`は補助回帰の項の重複を除かないが、補助回帰を`OLS`で
+  当てはめ自由度をランク（`df_model = rank - k_constant`）で数えるため、ダミーの二乗のような重複列
+  があっても本実装と一致する（`SingularMatrixWarning`は出る）。Rは`lmtest::bptest(studentize = TRUE)`
+  （Koenker版、`n·R²`）。F版はRに専用関数が無いため同じ補助回帰の`lm`から計算する。いずれも
+  `lm`のエイリアス処理でランクに基づく自由度になる。
+- **テスト**: `tests/linear/test_ols_white.py`の1ファイルにまとめる（構造・エラーパス・statsmodels凍結
+  フィクスチャ`ols_white.json`・Rクロスチェック`ols_white_crosscheck.json`）。合成データの
+  `WHITE_SYNTHETIC_SCENARIOS`（`baseline_df1`〔n=5で補助回帰に足りない〕・`scale_variance`・
+  `perfect_multicollinearity`〔元の`fit()`が失敗〕を除く、説明変数1個の`baseline_k1`を含む）、
+  baselineの`include_intercept=False`、Wooldridge実データ（`wage1`・`gpa2`・ダミーを含む
+  `wage1_dummies`・二乗列を含む`wage1_polynomial`・排他的ダミーの`wage1_region`）を、statsmodels・R
+  の両方と照合する。観測数の境界（`n = k`で拒否、`n = k + 1`で成功し`df_denom = 1`）と、重複除外後の
+  列数での境界判定も確認する。許容誤差は`ols_white_reference`/`ols_white_crosscheck`（`rtol=1e-8`、
+  実測最大相対誤差約2e-12）。p値は絶対誤差フロアを使わず相対誤差のみで比較する（裾の1e-39級の
+  p値が`sf`ではなく`1 - cdf`で0に潰れる回帰を検出するため）。engine側は`diagnostics.rs`の`mod tests`（statsmodels値との照合、ダミー・定数・スケール・
+  NaN残差・共線等）。
+
+### 3.10 `breusch_godfrey_test()`（事後診断）
+
+- `OLSResults.breusch_godfrey_test(time: str, nlags: int, statistic: Literal["lm", "f"] = "lm")
+  -> BreuschGodfreyTestResult`。事後診断なので`fit()`では計算しない（`docs/spec/inference-conventions.md`
+  6章）。結果型は`DiagnosticResult`を継承した`BreuschGodfreyTestResult`（追加フィールド`nlags`。
+  `df`と同じ値だがラグ次数を直接読めるよう別に持つ）。
+- **`time`と`nlags`は必須引数**。行順を時間順とみなす暗黙の既定は置かない（`hac_time`と同じ理由。
+  横断面データでは順序に意味が無く、この検定自体が意味を持たない。パッケージは警告を出さない）。
+  `nlags`も、statsmodelsの既定`min(10, n//5)`・Rの`order = 1`のどちらも恣意的な値のため既定を置かない。
+  `nlags`は`int`（`bool`・`float`は`TypeError`）、1以上（未満は`ValidationError`）。
+- **定義**: 補助回帰・統計量の定義は[`docs/methods/ols.md`](../methods/ols.md)（Greene・R `lmtest::bgtest`と同じ）。`û`は`X`と直交するOLS残差なので、LM版は補助回帰の残差二乗和`SSR_u`だけから`n·(1 - SSR_u/Σû²)`と書ける。
+- **サンプル前期間のラグは0で埋める**（statsmodels・R `bgtest`の既定・Stataと同じ）。補助回帰の観測数は
+  常に`n`。観測を落とす版（R `fill = NA`）は対応する主リファレンスが無いため提供しない。
+- **補助回帰は元のモデルの`X`をそのまま使い、`include_intercept=False`でも定数を足さない**（R・Greeneの定義）。
+  statsmodelsは切片なしのモデル（`k_constant == 0`）でだけ補助回帰に定数を足すため定義が異なり、
+  このケースはRのみで照合する（切片ありはstatsmodels・Rの両方）。
+- **時間順**: `time`はデータ（`fit()`に渡したDataFrame）の列名。値の昇順が時間順で、`hac_time`と同じ
+  `extract_time_order_ranks`で順位にする（整数・浮動小数・`Decimal`・`Date`・`Datetime`、同値・欠損値・
+  NaN・無限大は`ValidationError`）。**値の間隔（欠番）は見ず、並べた順にラグを取る**。
+- **数値の扱い**: 補助回帰は`OlsEstimator::fit`を使わず、列ノルムでスケールした列ピボットQRで
+  `SSR_u`を直接求める（必要なのは`SSR_u`だけ）。Whiteと違い列を標準化（中心化）しないのは、切片なしの
+  モデルを元の`X`のまま扱うため中心化すると列空間が変わるから（`SSR_u`は列の正のスケールでは変わらない）。
+  完全適合（`SSR_u`が`k_aux·ε·Σû²`以下）はFの分母が0になるため`ComputationError`。
+- **エラー**: `statistic`不正・`nlags < 1`・観測数が補助回帰の列数`k + nlags`以下
+  （`InsufficientObservationsForAuxRegression`）・`time`列の不備・元のデータが無い結果は
+  `ValidationError`、型違い（`time`/`statistic`が`str`でない・`nlags`が`int`でない）は`TypeError`。
+  補助回帰が特異（ラグが`X`と共線）・残差が全て0・完全適合・非有限は`ComputationError`
+  （メッセージに`Breusch-Godfrey test`を含め、元のモデルの共線性と取り違えないようにする）。
+  残差が全て0・完全適合は元の`fit()`が先に`ComputationError`にするためPython経由では
+  到達しにくく、Rustの単体テストで担保する。
+- **実装**: engineの`linear::diagnostics::breusch_godfrey_test`（説明変数の列・`has_intercept`・残差・
+  時間の順位・`nlags`）。`engine_pybind`が元のデータから`x`と時間列だけを取り込んで渡す
+  （`white_test()`と同じ経路、元のデータが無ければ`ValidationError`）。LM/Fの両方をengineが
+  計算し、`statistic`の選択は`engine_pybind`。
+- **リファレンス**: 切片ありはstatsmodels `acorr_breusch_godfrey`（主）とR `bgtest`（`type = "Chisq"/"F"`、
+  `fill = 0`）、切片なしはR `bgtest`のみ。
+- **テスト**: `tests/linear/test_ols_breusch_godfrey.py`の1ファイル（構造・エラーパス・statsmodels凍結
+  フィクスチャ`ols_breusch_godfrey.json`・Rクロスチェック`ols_breusch_godfrey_crosscheck.json`）。
+  合成データ（`BG_SYNTHETIC_SCENARIOS`、行番号を時間列にする）×`nlags = 1, 4`、切片なし（baseline・
+  autocorrelated、Rのみ）、Wooldridge実データ`phillips`（`inf ~ unem`、行を無作為に並べ替えて`year`を
+  時間列として渡す）を照合する。許容誤差は`ols_breusch_godfrey_reference`/`_crosscheck`（`rtol=1e-8`、
+  実測最大相対誤差約6e-12、p値は相対誤差のみ）。観測数の境界（`n = k + nlags`で拒否、
+  `n = k + nlags + 1`で成功し`df_denom = 1`）、時間列による並べ替え、時間列のdtype、`cov_type`非依存も確認する。
+- **`nlags`の上限とメモリ**: 上限は数理的な条件`n > k + nlags`（`df_denom >= 1`）だけで、観測数に対する
+  割合や固定値の上限は置かない（統計的に正当化できる線がなく、R・statsmodelsも置かない）。補助回帰は
+  `n × (k + nlags)`の行列を作るため、`nlags`が`n`に近く`n`が大きいと確保できないことがある。行列の
+  サイズ計算のオーバーフローと確保の失敗（QR分解が内部で確保する同サイズの複製を含む）は、プロセスを
+  異常終了させず`ComputationError`（`nlags`を小さくするよう促す）にする。ただしLinuxのメモリの
+  オーバーコミットにより、確保には成功しても実際に使うと終了させられる場合は検知できない。
+
+### 3.11 `breusch_pagan_test()`（事後診断）
+
+- `OLSResults.breusch_pagan_test(variables: list[str] | None = None, statistic: Literal["lm", "f"] = "lm")
+  -> BreuschPaganTestResult`。`fit()`では計算しない事後診断（`docs/spec/inference-conventions.md`
+  6章）。結果型は`DiagnosticResult`を継承した`BreuschPaganTestResult`（追加フィールドは
+  `WhiteTestResult`と同じ`aux_terms`・`dropped_terms`）。`cov_type`には依存しない。
+- **定義**: 補助回帰・統計量の定義は[`docs/methods/ols.md`](../methods/ols.md)。Koenkerの標準化版のみ扱う。元のBreusch-Pagan（1979）の`ESS/2`版は誤差の正規性を仮定するため扱わない（R `bptest(studentize = TRUE)`・statsmodels `het_breuschpagan(robust = True)`の既定と同じ版）。後から`studentize`引数を足す場合は後方互換に追加できる。
+- **`variables`**: 不均一分散の原因と疑う変数の列名のリスト（`x`と同じくlist渡し、式は使わない）。
+  既定（`None`）はモデルの説明変数。**モデルに入っていない列や`y`列も指定できる**（拒否しない。
+  BP検定の本質は`Z`を利用者が選ぶことで、R `varformula`・statsmodels `exog_het`も同じ）。型・検査は`x`と
+  同じ（`list`以外・`str`以外の要素は`TypeError`、空リスト・同じ列名の重複・存在しない列・数値として
+  使えないdtype・欠損値/NaN/無限大は`ValidationError`）。ただし`"const"`という列名は拒否しない
+  （`aux_terms`の先頭の定数と紛れるが位置で区別できる）。
+- **補助回帰は常に定数を含める**（`include_intercept=False`でも同じ）。`aux_terms`の先頭は常に`"const"`、
+  項のラベルは列名そのまま。White検定と同じ除外ルール: 定数列と、先に指定した列と数値的に同一の列
+  （相対許容誤差1e-12）を除いて`dropped_terms`に返し、**`df`は除外後の列数（ランクに基づく）**。
+  除くのは定数と完全に同一な列だけで、`2 * x1`のような同一ではない共線列は除かず`ComputationError`
+  （全カテゴリのダミーと定数の組み合わせも同様。`white_test()`と同じ制限）。補助回帰の各列は標準化して
+  から回帰する（`R²`は変わらず、平均の大きい変数でも失敗しない）。
+- **エラー**: `statistic`が不正・観測数が補助回帰の列数（定数込み`q + 1`）以下・元のデータが無い結果
+  （`IVResults.first_stage()`由来）・全ての`variables`が定数は`ValidationError`。補助回帰が除外後も特異、
+  または`R²`が定義できない（残差の二乗が定数等）場合は`ComputationError`（メッセージに
+  `Breusch-Pagan test`と補助回帰であることを含める）。
+- **実装**: engineの`linear::diagnostics::breusch_pagan_test`（`z`の列・列名・残差を受け取る）。
+  `white_test`と補助回帰以降の処理（項の除外・標準化・統計量・p値、`squared_residual_aux_test`）を共有し、
+  違いは補助回帰の説明変数（`x`・二乗・交差項か、`variables`そのものか）だけ。`engine_pybind`が
+  元のデータから`variables`（既定は`param_names`から取り出した`x`）の列だけを取り込んで渡す。
+  p値は`statrs`の`sf`。
+- **リファレンスとの関係**: 主リファレンスはstatsmodels `het_breuschpagan(robust=True)`。`exog_het`に
+  定数が無いと補助回帰に定数を入れないため、常に定数列を足して渡す。**LMのp値の自由度を列数-1で数え
+  列のランクを見ない**ため、定数列・重複列を含む`Z`は除いた後の列を渡す（`reference_variables`）。
+  定数・重複を落とす挙動そのものはR `lmtest::bptest(studentize = TRUE)`（自由度は補助回帰の
+  ランク-1）にそのまま渡して照合する。F版はRに専用関数が無いため同じ補助回帰の`lm`から計算する。
+- **テスト**: `tests/linear/test_ols_breusch_pagan.py`の1ファイルにまとめる（構造・エラーパス・
+  statsmodels凍結フィクスチャ`ols_breusch_pagan.json`・Rクロスチェック`ols_breusch_pagan_crosscheck.json`）。
+  合成データの`BP_SYNTHETIC_CASES`（`Z`＝モデルのxで`WHITE_SYNTHETIC_SCENARIOS`、`baseline`の`Z`をモデルの
+  一部・モデル外の列にしたケース、切片なし、定数列・重複列を含むケース、`baseline_df1`〔n=5で`df_denom = 1`の成功パス。White検定では列数不足〕、誤差分散が`|x1|`に比例する`heteroskedastic`で`Z = |x1|`にして実際に棄却する裾のp値の経路）と、Wooldridge実データ
+  （`hprice1`・`hprice1_log`〔教科書の例8.4の公表値とも照合〕・`wage1`・モデル外の列を`Z`にした
+  `wage1_outside_model`）を、statsmodels・Rの両方と照合する。観測数の境界（`n = q + 1`で拒否、
+  `n = q + 2`で成功し`df_denom = 1`）も確認する。許容誤差は`ols_breusch_pagan_reference`/
+  `ols_breusch_pagan_crosscheck`（`rtol=1e-8`、実測最大相対誤差約2e-12）。p値は相対誤差のみで比較する。
+
 ## 4. 未実装・未対応
 
-- `predict()`の信頼区間・予測区間（点予測のみ対応）
+- 診断検定のうち、RESET・Jarque-Bera等（別メソッドとして順次追加。時間順が必要な検定は
+  時間列を必須引数とする、`docs/spec/inference-conventions.md`6章）
+- `breusch_pagan_test()`の元のBreusch-Pagan（1979）の`ESS/2`版（正規性を仮定する版）。必要になれば`studentize`引数で後方互換に追加できる
+- `white_test()`・`breusch_pagan_test()`・`breusch_godfrey_test()`のWLS・IV（`first_stage()`以外）への展開（WLSは残差が重み付きかどうかで意味が変わるため別途検討）
+- `predict()`の信頼区間・予測区間（点予測のみ対応。追加する場合は別メソッド、3.4節参照）
 - HACの完全なデータ依存バンド幅自動選択（Newey & West 1994）: 参照実装がなく数値照合手段がないため見送り
 - `SingularMatrix`のエラーメッセージを状況に応じて分岐させる（優先度低）

@@ -1,0 +1,26 @@
+name: Change to an existing method
+description: A new option, standard error, or diagnostic for a method that already exists
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Thank you for the idea! Every field is optional, so please fill in
+        only what you know.
+  - type: textarea
+    id: request
+    attributes:
+      label: What would you like to have?
+      description: The method and the option, standard error, or diagnostic.
+  - type: textarea
+    id: use
+    attributes:
+      label: What would you use it for?
+      description: The more concrete, the better. It helps me picture how it will be used.
+  - type: textarea
+    id: reference
+    attributes:
+      label: Where is it available?
+      description: >-
+        If you know another package that provides it (for example "this R
+        function does it"), please mention it. A reference or a package name
+        is enough.

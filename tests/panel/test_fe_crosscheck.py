@@ -34,8 +34,20 @@
 ## dkの対象外シナリオ
 
 `many_regressors`（k=20、T=6）はk>T-1で同時検定の部分行列が構造的に特異になり
-本実装が`ValidationError`にするため対象外。wagepan（T=8）は短いTでのDKのため
-`fe.json`と同様に対象外（`SCENARIO_COV_TYPES`・`WAGEPAN_COV_TYPES`）。
+本実装が`ValidationError`にするため対象外（`SCENARIO_COV_TYPES`。失敗パスは
+`test_fe_validation.py`の`test_many_regressors_dk_raises_validation_error`）。
+wagepan（T=8）は`WAGEPAN_X`が3変数で`T-1=7 > q=3`のため対象に含み、時点列は
+`year`。
+
+## 既定値以外の指定
+
+- **dkの明示バンド幅**: `DK_EXPLICIT_BANDWIDTHS`のシナリオで`T-1`未満の値を
+  fixestと比べる（`bandwidth == T-1`は最終ラグを落とすfixestと食い違うため
+  `test_fe_plm_crosscheck.py`が持つ）。
+- **2-wayでentity以外のcluster列**: 時間効果とネストする`time`、どちらの
+  固定効果ともネストしない列、`G = q+1`の境界、サイズが偏ったクラスター
+  （`TWO_WAY_CLUSTER_CASES`）。fixestの`K.fixef="nonnested"`が分岐するのは
+  ネストする`time`とそれ以外の2通り。
 
 役割分担:
     - 構造・API・`fixed_effects()`: `test_fe_api.py`
@@ -54,9 +66,15 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-from _assertions import assert_close, assert_dict_close
+from _assertions import (
+    assert_close,
+    assert_dict_close,
+    assert_fields_close,
+    assert_inference_close,
+)
 from _constants import DATA_DIR
 from _helpers import load_wooldridge_dataset
+from _panel_helpers import bandwidth_cases, x_columns
 from _tolerances import TOLERANCES
 from econometricsmodels import FE, FEOptions
 
@@ -65,16 +83,19 @@ from benchmark.common import (
     WAGEPAN_TIME,
     WAGEPAN_X,
     WAGEPAN_Y,
-    imbalanced_cluster_groups,
 )
+from benchmark.panel.cluster_cases import K1_CSV, cluster_imbalanced_frame
 from benchmark.panel.fixtures.generate_fe_crosscheck_fixtures import (
     COV_TYPES,
+    DK_EXPLICIT_BANDWIDTHS,
     ONE_WAY_ONLY_SCENARIOS,
     ROBUST_BOUNDARY_COV_TYPES,
     SCENARIO_COV_TYPES,
+    TWO_WAY_CLUSTER_CASES,
     TWO_WAY_SCENARIOS,
     WAGEPAN_COV_TYPES,
-    _dk_three_periods_frame,
+    dk_three_periods_frame,
+    two_way_cluster_frame,
 )
 
 FIXTURE_PATH = (
@@ -115,6 +136,7 @@ def crosscheck() -> dict:
 
 _assert_close = partial(assert_close, rtol=RTOL, atol=ATOL)
 _assert_dict_close = partial(assert_dict_close, rtol=RTOL, atol=ATOL)
+_assert_fields_close = partial(assert_fields_close, rtol=RTOL, atol=ATOL)
 # p値は絶対誤差の下限を設けず相対誤差だけで比較する（下限があると、参照値が
 # 1e-8未満の裾のp値が0.0でも通ってしまう）。
 _assert_p_close = partial(assert_close, rtol=RTOL_P_VALUE, atol=ATOL_P_VALUE)
@@ -130,47 +152,48 @@ def _check_result(res, ref: dict, label: str) -> None:
     AIC/BIC/log_likelihood・Within R2はクロスチェック側のみ持つ統計量
     （モジュールdoc「このファイルだけが持つ統計量」参照）。
     """
-    _assert_dict_close(res.params, ref["coef"], f"{label}/coef")
-    _assert_dict_close(res.std_errors, ref["se"], f"{label}/se")
-    _assert_dict_close(
-        res.test_stats, ref["test_stats"], f"{label}/test_stats"
+    assert_inference_close(
+        res,
+        ref,
+        label,
+        rtol=RTOL,
+        atol=ATOL,
+        p_value_check=_assert_p_dict_close,
     )
-    _assert_p_dict_close(res.p_values, ref["p_values"], f"{label}/p_values")
-    for name, (ref_lower, ref_upper) in ref["conf_int"].items():
-        our_lower, our_upper = res.conf_int[name]
-        _assert_close(our_lower, ref_lower, f"{label}/conf_lower/{name}")
-        _assert_close(our_upper, ref_upper, f"{label}/conf_upper/{name}")
 
-    _assert_close(res.f_statistic, ref["f_statistic"], f"{label}/f_statistic")
+    # f_p_valueは裾でも0.0を通さないよう、p値用の許容誤差（下限なし）で比べる。
     _assert_p_close(res.f_p_value, ref["f_p_value"], f"{label}/f_p_value")
-    _assert_close(res.aic, ref["aic"], f"{label}/aic")
-    _assert_close(res.bic, ref["bic"], f"{label}/bic")
-    _assert_close(
-        res.log_likelihood, ref["log_likelihood"], f"{label}/log_likelihood"
+    _assert_fields_close(
+        res, ref, ("f_statistic", "aic", "bic", "log_likelihood"), label
     )
     if "r_squared_within" in ref:
-        _assert_close(
-            res.r_squared_within,
-            ref["r_squared_within"],
-            f"{label}/r_squared_within",
-        )
+        _assert_fields_close(res, ref, ("r_squared_within",), label)
 
 
-def _options(cov_type: str, *, two_way: bool) -> FEOptions:
-    """`dk`は1-way・2-wayとも時点列（`dk_time`）を明示する必要がある。"""
-    kwargs = {"time": "time"} if two_way else {}
+def _options(
+    cov_type: str,
+    *,
+    two_way: bool,
+    dk_bandwidth: int | None = None,
+    time: str = "time",
+    dk_time: str = "time",
+) -> FEOptions:
+    """`time`は2-wayの時間列、`dk_time`はdkの時点列（別のオプション）。`dk`は
+    1-way・2-wayとも`dk_time`を明示する必要がある。"""
+    kwargs = {"time": time} if two_way else {}
     if cov_type == "dk":
-        kwargs["dk_time"] = "time"
+        kwargs["dk_time"] = dk_time
+        kwargs["dk_bandwidth"] = dk_bandwidth
     return FEOptions(cov_type=cov_type, **kwargs)
 
 
-# ── 凍結フィクスチャとの数値照合（合成データ） ───────────────────────
+# ── 凍結フィクスチャとの数値照合（合成データ） ────────────────────────
 
 
 @pytest.mark.parametrize("scenario, cov_type", ONE_WAY_CASES)
-def test_synthetic_one_way_matches_fixest(crosscheck, scenario, cov_type):
+def test_matches_fixest_one_way(crosscheck, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
-    x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
+    x_cols = x_columns(df)
     res = FE(
         df,
         y="y",
@@ -181,15 +204,15 @@ def test_synthetic_one_way_matches_fixest(crosscheck, scenario, cov_type):
 
     _check_result(
         res,
-        crosscheck[scenario]["one_way"][cov_type],
+        crosscheck["synthetic"][scenario]["one_way"][cov_type],
         f"{scenario}/one_way/{cov_type}",
     )
 
 
 @pytest.mark.parametrize("scenario, cov_type", TWO_WAY_CASES)
-def test_synthetic_two_way_matches_fixest(crosscheck, scenario, cov_type):
+def test_matches_fixest_two_way(crosscheck, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
-    x_cols = [c for c in df.columns if c not in ("y", "entity", "time")]
+    x_cols = x_columns(df)
     res = FE(
         df,
         y="y",
@@ -200,15 +223,61 @@ def test_synthetic_two_way_matches_fixest(crosscheck, scenario, cov_type):
 
     _check_result(
         res,
-        crosscheck[scenario]["two_way"][cov_type],
+        crosscheck["synthetic"][scenario]["two_way"][cov_type],
         f"{scenario}/two_way/{cov_type}",
     )
 
 
-# ── 凍結フィクスチャとの数値照合（実データ: Wooldridge wagepan） ───────
+# ── dkの明示バンド幅 ──────────────────────────────────────────────────
+
+# fixestは`bandwidth == T-1`で最終ラグを落とすためT-1未満のみ
+# （T-1は`test_fe_plm_crosscheck.py`）。
+DK_BANDWIDTH_ONE_WAY_CASES = bandwidth_cases(DK_EXPLICIT_BANDWIDTHS)
+DK_BANDWIDTH_TWO_WAY_CASES = [
+    case for case in DK_BANDWIDTH_ONE_WAY_CASES if case[0] in TWO_WAY_SCENARIOS
+]
 
 
-# ── 境界値・クラスター不均衡 ────────────────────────────────────
+def _fit_dk_bandwidth(scenario: str, bandwidth: int, *, two_way: bool):
+    df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
+    x_cols = x_columns(df)
+    options = _options("dk", two_way=two_way, dk_bandwidth=bandwidth)
+    return FE(df, y="y", x=x_cols, entity="entity", options=options).fit()
+
+
+@pytest.mark.parametrize("scenario, bandwidth", DK_BANDWIDTH_ONE_WAY_CASES)
+def test_dk_explicit_bandwidth_one_way_matches_fixest(
+    crosscheck, scenario, bandwidth
+):
+    res = _fit_dk_bandwidth(scenario, bandwidth, two_way=False)
+
+    assert res.dk_bandwidth_used == bandwidth
+    _check_result(
+        res,
+        crosscheck["synthetic"][scenario]["dk_explicit_bandwidth"]["one_way"][
+            str(bandwidth)
+        ],
+        f"{scenario}/one_way/dk_bandwidth_{bandwidth}",
+    )
+
+
+@pytest.mark.parametrize("scenario, bandwidth", DK_BANDWIDTH_TWO_WAY_CASES)
+def test_dk_explicit_bandwidth_two_way_matches_fixest(
+    crosscheck, scenario, bandwidth
+):
+    res = _fit_dk_bandwidth(scenario, bandwidth, two_way=True)
+
+    assert res.dk_bandwidth_used == bandwidth
+    _check_result(
+        res,
+        crosscheck["synthetic"][scenario]["dk_explicit_bandwidth"]["two_way"][
+            str(bandwidth)
+        ],
+        f"{scenario}/two_way/dk_bandwidth_{bandwidth}",
+    )
+
+
+# ── 境界値・クラスター不均衡 ──────────────────────────────────────────
 
 
 def test_cluster_imbalanced_matches_fixest(crosscheck):
@@ -217,22 +286,20 @@ def test_cluster_imbalanced_matches_fixest(crosscheck):
     csv`（entity=20×period=10のn=200）を使う。クラスター列自体はCSVに含めず
     テスト側で都度動的生成する（`generate_fe_crosscheck_fixtures.py`と同じ方針）。
     """
-    df = pl.read_csv(DATA_DIR / "fe_baseline_cluster_imbalanced.csv")
-    groups = imbalanced_cluster_groups(df.height)
-    df = df.with_columns(pl.Series("cluster_group", groups))
+    df = cluster_imbalanced_frame()
     options = FEOptions(cov_type="cluster", cluster="cluster_group")
     res = FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 
     _check_result(
         res,
-        crosscheck["baseline"]["cluster_imbalanced"],
+        crosscheck["synthetic"]["baseline"]["cluster_imbalanced"],
         "baseline/cluster_imbalanced",
     )
 
 
 def test_cluster_g2_matches_fixest(crosscheck):
     """クラスタ数境界（G=2、q=1でG>q）の成功パスのfixestクロスチェック。"""
-    df = pl.read_csv(DATA_DIR / "fe_baseline_k1.csv")
+    df = pl.read_csv(DATA_DIR / K1_CSV)
     groups = [str(i % 2) for i in range(df.height)]
     df = df.with_columns(pl.Series("cluster_group", groups))
     options = FEOptions(cov_type="cluster", cluster="cluster_group")
@@ -240,7 +307,7 @@ def test_cluster_g2_matches_fixest(crosscheck):
 
     _check_result(
         res,
-        crosscheck["baseline"]["cluster_g2"],
+        crosscheck["synthetic"]["baseline"]["cluster_g2"],
         "baseline/cluster_g2",
     )
 
@@ -258,21 +325,44 @@ def test_cluster_g3_two_slopes_matches_fixest(crosscheck):
     assert (res.f_df_num, res.f_df_denom) == (2, 2)
     _check_result(
         res,
-        crosscheck["baseline"]["cluster_g3_two_slopes"],
+        crosscheck["synthetic"]["baseline"]["cluster_g3_two_slopes"],
         "baseline/cluster_g3_two_slopes",
+    )
+
+
+@pytest.mark.parametrize("case", list(TWO_WAY_CLUSTER_CASES))
+def test_two_way_cluster_on_non_entity_column_matches_fixest(crosscheck, case):
+    """2-wayでentity以外の列によるクラスタリング（時間効果とネストする`time`、
+    ネストしない列、`G = q+1`の境界、サイズが偏ったクラスター）。fixestの
+    `K.fixef="nonnested"`が分岐するのはネストする`time`とそれ以外の2通りで、
+    `G = q+1`は自由度の境界、サイズが偏ったクラスターはサイズの偏りを加える
+    （`TWO_WAY_CLUSTER_CASES`参照）。分母自由度は全ケースで`G-1`。"""
+    df, cluster = two_way_cluster_frame(case)
+    options = FEOptions(cov_type="cluster", cluster=cluster, time="time")
+    res = FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
+
+    n_clusters = df[cluster].n_unique()
+    assert res.stat_df == n_clusters - 1
+    assert res.f_df_denom == n_clusters - 1
+    _check_result(
+        res,
+        crosscheck["synthetic"]["baseline"][
+            TWO_WAY_CLUSTER_CASES[case].fixture_key
+        ],
+        f"baseline/two_way/cluster={case}",
     )
 
 
 def test_dk_three_periods_matches_fixest(crosscheck):
     """Driscoll-Kraayの時点数`T = q+1`（q=2、分母自由度`T-1 = q`）の境界。"""
-    df = _dk_three_periods_frame()
+    df = dk_three_periods_frame()
     options = FEOptions(cov_type="dk", dk_time="time")
     res = FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
 
     assert (res.f_df_num, res.f_df_denom) == (2, 2)
     _check_result(
         res,
-        crosscheck["baseline"]["dk_three_periods"],
+        crosscheck["synthetic"]["baseline"]["dk_three_periods"],
         "baseline/dk_three_periods",
     )
 
@@ -286,12 +376,16 @@ def test_boundary_df1_robust_matches_fixest(crosscheck, cov_type, two_way):
         df = pl.read_csv(DATA_DIR / "fe_baseline_df1_two_way.csv")
         x = ["x1", "x2", "x3"]
         options = FEOptions(cov_type=cov_type, time="time")
-        ref = crosscheck["baseline_df1"]["two_way_robust"][cov_type]
+        ref = crosscheck["synthetic"]["baseline_df1"]["two_way_robust"][
+            cov_type
+        ]
     else:
         df = pl.read_csv(DATA_DIR / "fe_baseline_df1_one_way.csv")
         x = ["x1", "x2"]
         options = FEOptions(cov_type=cov_type)
-        ref = crosscheck["baseline_df1"]["one_way_robust"][cov_type]
+        ref = crosscheck["synthetic"]["baseline_df1"]["one_way_robust"][
+            cov_type
+        ]
     res = FE(df, y="y", x=x, entity="entity", options=options).fit()
 
     assert res.f_df_denom == 1
@@ -306,7 +400,7 @@ def test_boundary_df1_one_way_matches_fixest(crosscheck):
 
     _check_result(
         res,
-        crosscheck["baseline_df1"]["one_way"],
+        crosscheck["synthetic"]["baseline_df1"]["one_way"],
         "baseline_df1/one_way",
     )
 
@@ -321,22 +415,25 @@ def test_boundary_df1_two_way_matches_fixest(crosscheck):
 
     _check_result(
         res,
-        crosscheck["baseline_df1"]["two_way"],
+        crosscheck["synthetic"]["baseline_df1"]["two_way"],
         "baseline_df1/two_way",
     )
+
+
+# ── 凍結フィクスチャとの数値照合（実データ: Wooldridge wagepan） ──────
 
 
 @pytest.mark.parametrize("cov_type", WAGEPAN_COV_TYPES)
 def test_wagepan_one_way_matches_fixest(crosscheck, cov_type):
     df = load_wooldridge_dataset("wagepan")
-    options = FEOptions(cov_type=cov_type)
+    options = _options(cov_type, two_way=False, dk_time=WAGEPAN_TIME)
     res = FE(
         df, y=WAGEPAN_Y, x=WAGEPAN_X, entity=WAGEPAN_ENTITY, options=options
     ).fit()
 
     _check_result(
         res,
-        crosscheck["wagepan"]["one_way"][cov_type],
+        crosscheck["wooldridge"]["wagepan"]["one_way"][cov_type],
         f"wagepan/one_way/{cov_type}",
     )
 
@@ -344,13 +441,15 @@ def test_wagepan_one_way_matches_fixest(crosscheck, cov_type):
 @pytest.mark.parametrize("cov_type", WAGEPAN_COV_TYPES)
 def test_wagepan_two_way_matches_fixest(crosscheck, cov_type):
     df = load_wooldridge_dataset("wagepan")
-    options = FEOptions(cov_type=cov_type, time=WAGEPAN_TIME)
+    options = _options(
+        cov_type, two_way=True, time=WAGEPAN_TIME, dk_time=WAGEPAN_TIME
+    )
     res = FE(
         df, y=WAGEPAN_Y, x=WAGEPAN_X, entity=WAGEPAN_ENTITY, options=options
     ).fit()
 
     _check_result(
         res,
-        crosscheck["wagepan"]["two_way"][cov_type],
+        crosscheck["wooldridge"]["wagepan"]["two_way"][cov_type],
         f"wagepan/two_way/{cov_type}",
     )

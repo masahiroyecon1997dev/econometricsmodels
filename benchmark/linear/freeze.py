@@ -12,14 +12,17 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
+
 from benchmark.common import freeze_scenarios, run_freeze_cli
+from benchmark.linear.constants import WIDE_BETA, WIDE_K
 from benchmark.linear.datasets import (
     SCENARIOS as SYNTHETIC_SCENARIOS,
 )
 from benchmark.linear.datasets import generate_linear_dataset
 
-# benchmark/linear/datasets.pyのSCENARIOS（全シナリオ、generate_ols_fixtures.py /
-# generate_wls_fixtures.pyのNUMERIC_SCENARIOSにperfect_multicollinearity・
+# benchmark/linear/datasets.pyのSCENARIOS（全シナリオ、benchmark/linear/constants.pyの
+# NUMERIC_SCENARIOSにperfect_multicollinearity・
 # scale_variance（いずれもComputationErrorパスのテストで使う、数値比較はしない）を
 # 加えたもの）をそのまま使う。
 
@@ -34,6 +37,12 @@ SYNTHETIC_K1_SCENARIOS = ["baseline"]
 # （= generate_linear_dataset()のk + 1 = 4）のため、df_resid=1ちょうどにするには
 # n = 4 + 1 = 5 が必要（n = generate_linear_dataset()のk + 2）。
 SYNTHETIC_BOUNDARY_DF1_SCENARIOS = ["baseline"]
+
+# api・列順系のテスト用（`tests/linear/conftest.py`の`wide_dataset`）。baselineを
+# 説明変数8列・真の係数を離して置いたもの（`WIDE_BETA`参照）でオーバーライドした専用
+# データとして固定する。NUMERIC_SCENARIOSには入れない（数値フィクスチャJSONの
+# 対象ではなく、既存シナリオのrng呼び出し順にも影響しない）。
+SYNTHETIC_WIDE_SCENARIOS = ["baseline"]
 
 
 def freeze(output_dir: Path) -> None:
@@ -65,6 +74,18 @@ def freeze(output_dir: Path) -> None:
         key_suffix="_df1",
         n=5,
         k=3,
+    )
+    freeze_scenarios(
+        output_dir,
+        generate_linear_dataset,
+        SYNTHETIC_WIDE_SCENARIOS,
+        "synthetic",
+        true_betas,
+        filename_suffix="_wide",
+        key_suffix="_wide",
+        n=100,
+        k=WIDE_K,
+        beta=np.array(WIDE_BETA),
     )
     (output_dir / "synthetic_true_beta.json").write_text(
         json.dumps(true_betas, indent=2)

@@ -46,7 +46,7 @@ Probit固有の差分のみを記載する。
 ### 3.2 最適化・収束判定
 
 `LogitEstimator::fit`と同じ設計（標準化空間での最適化、`solver`に関わらず収束点のHessianを解析的に
-評価、`SeparationSuspected`による完全分離下のアンダーフロー対策を共有）。近似解析解
+評価、収束後の完全分離・準完全分離の検出`nonlinear::separation`を共有）。近似解析解
 （切片のみモデル、`Φ(θ̂)=ȳ`すなわち`θ̂=Φ⁻¹(ȳ)`）で検証している。
 
 初期値（warm start）・設計行列のランクチェックもLogitと共通（[`logit-spec.md`](./logit-spec.md)
@@ -102,7 +102,7 @@ MLEが`Φ(θ̂)=ȳ`を満たすため、この計算がリンク関数に依存�
 `predict(new_data=None)`は`p_i=Φ(x_i'θ)`をそのまま計算する（Logitの`Λ`を`Φ`に置き換えたのみ、
 out-of-sample対応も含めて設計は同一）。`pred_table`の計算本体はリンク関数を参照しないため
 `common.rs`の共有関数をそのまま使う（[`logit-spec.md`](./logit-spec.md)3.6節参照）。`pred_table`は
-in-sample限定のまま。`augment(new_data=None)`もLogitと完全に同一の設計（`"predicted_probability"`列）。
+in-sample限定のまま。`augment(new_data=None)`もLogitと完全に同一の設計（`"predicted_probability"`列）。予測・分類表の検証（Rクロスチェックとstatsmodels）もLogitと同じ（[`logit-spec.md`](./logit-spec.md)3.6節参照）。
 
 ### 3.7 engine_pybind: エラー変換
 
@@ -112,12 +112,18 @@ in-sample限定のまま。`augment(new_data=None)`もLogitと完全に同一の
 ### 3.8 テスト
 
 - 許容誤差はLogitと同じ基本方針（statsmodels主リファレンス`RTOL=1e-8`、Rクロスチェック
-  `RTOL=1e-6`、`ATOL=1e-12`、実測最大~1.4e-7。R側参照値の生成方針もLogitと同じ）。個別の値を設定した項目:
-  信頼区間（下限/上限が0に近い境界での増幅、`RTOL=1e-5`、実測最大~1.8e-6）・p値（`ATOL=1e-7`）のみ
-  （`tests/_tolerances.py`の`probit_crosscheck`）。Wooldridge実データ（`mroz`）の
+  `RTOL=2e-7`、`ATOL=1e-12`、実測最大~2.8e-8。切片なし（`baseline.no_intercept`）も同じ許容誤差で通る。クラスター数の境界`G = q + 1`（`baseline.cluster_g4`、q=3でG=4）も同じ許容誤差で通る。非既定の`confidence_level`（0.90、`baseline.confidence_level`）も同じ許容誤差で、係数と限界効果の信頼区間の両方を比べる。
+  R側参照値の生成方針もLogitと同じ）。信頼区間（下限/上限が0に近い項目）・p値・`apple`を含め、
+  全統計量・全ケースに同じ許容誤差を使う（`tests/support/_tolerances_nonlinear.py`の`probit_crosscheck`）。
+  Rの`glm(probit)`は収束判定がデビアンスの変化量だけで、非正準リンクのFisher scoringは収束が線形のため
+  係数が~1e-7ずれて止まりうる（`apple`で~6e-8、観測情報行列の手計算とロバストSEで~1e-6に増幅）。
+  参照値は再fitを繰り返してこのずれを消しており、`apple`の実測最大はp値を除いて~2e-9（p値込みで~2.7e-8）になった。裾のp値（`|ref|`が約5e-6未満）は`ATOL=1e-12`の下限で比較されるため、同じ係数のz値の厳密な比較で担保している。
+  Wooldridge実データ（`mroz`）の
   クラスターロバストSE（`cluster="city"`、G=2）は`G<=q`でクラスターロバスト共分散が退化し
   `ValidationError`になるため成功パスのフィクスチャを持たず、許容誤差も設けない
-  （`test_probit_validation.py`でエラーを確認）。
+  （`test_probit_validation.py`でエラーを確認）。実データのクラスターロバストSEは、Logitと同じ
+  `apple`（州、`G=49`）が担う。`solver`の組み合わせは
+  Logitと同じ方針（[`logit-spec.md`](./logit-spec.md)3.8節。`probit_reference.rtol_solver_vs_newton=2e-5`）。
 - **`cov_type="hc1"`/`"opg"`の既知の欠落はLogitと同様**（statsmodelsのdiscrete modelでの非対応、
   対処もRを主リファレンスにする点まで同じ、[`logit-spec.md`](./logit-spec.md)3.8節参照）。
 - **Rの`glm()`既定共分散が非正準リンクで「期待情報行列」を返す問題（重要）**: Rの`glm()`の
@@ -144,7 +150,7 @@ in-sample限定のまま。`augment(new_data=None)`もLogitと完全に同一の
   `zᵢ`を混在させていた。この非対称性により、`|z|>U_CLAMP`かつ誤分類（`qᵢzᵢ`が
   大きく負）の観測で`w`が**負**になりうる（`λᵢ(λᵢ+zᵢ)>0`という大域凹性の前提が
   数値的に破れる）ことを調査時（2026-09-12）に数値実験で確認していた。
-  修正として、`linear_predictor_and_residual`が返す`zᵢ`を`λᵢ`と同じクランプ済み
+  修正として、`hessian_weight`が`zᵢ`を`λᵢ`と同じクランプ済み
   引数から`z̃ᵢ = qᵢ·clamp(qᵢzᵢ, -U_CLAMP, U_CLAMP)`として再構成し、`hessian`は
   この`z̃ᵢ`を使うように変更した。修正前は既存の境界値テストのデータ（切片のみ、
   `z=1000`、`y=[1,0]`）で`h[0][0]≈-8177`（負）だったが、修正後は`h[0][0]≈0.986`
@@ -170,27 +176,17 @@ in-sample限定のまま。`augment(new_data=None)`もLogitと完全に同一の
   - **回帰テスト**:
     `fit_bfgs_and_lbfgs_match_newton_despite_deep_u_clamp_excursions_in_near_separation_data`
     （near separationデータでbfgs/lbfgsがnewtonと一致し続けることを固定）。
-- **`SEPARATION_PARAM_NORM_THRESHOLD=100.0`（Logitの実測に基づく較正値）はProbitでも
-  同程度に機能することを実測で確認済み（実害なし、2026-09-13）**: Probitはリンク関数の
-  テイルの減衰特性がLogitと異なるため、同じ閾値がProbitでも適切かは未較正だった。
-  この事後チェック（`run_solver`の`separation_norm_check: SeparationNormCheck`）は
-  `y∈{0,1}`のLogit/Probitのみ`Enabled`で、Tobitは`Disabled`。
-  - **実測内容**: 同一の`x1`/`x2`分布・同一の疑似乱数seedで、リンク関数のみ変えて
-    分離度合い（`beta1`）を段階的に強めながら、収束点の標準化パラメータL2ノルムを
-    比較した。既存のcalibration値での成功パス（probit `beta1=10`→norm≈7.5、logit
-    `beta1=20`→norm≈17.7）ではどちらも閾値100に対して十分な余裕があった。真の分離に
-    限りなく近い境界付近（浮動小数点精度で`p`が飽和する直前）では、probitはnorm≈93.3、
-    logitはnorm≈89.0で収束しており、どちらも閾値100に対し5〜11%程度の余裕で収まって
-    いた（probitの方がやや余裕が小さいが差は5%程度）。さらに分離度を上げると、両リンク
-    ともnormが数百に急激に飛び、`SeparationSuspected`が正常に発火した。真の分離に
-    近づくほど`SeparationSuspected`が発火する`beta1`はLogit（`100`）よりProbitの方が
-    小さい値（`50`）で足りたが、これは較正のズレではなくProbitのテイルの減衰が速く
-    同じ標準化スケールでもより低い`beta1`で飽和に達するという、リンク関数の性質の
-    違いとして期待通り。この実測の範囲ではProbit固有の追加の誤検知/検出漏れリスクは
-    確認できなかった。
-  - **回帰テスト**:
-    `fit_returns_separation_suspected_error_for_near_separation_data`
-    （`beta1=50`で3手法とも`SeparationSuspected`を返すことを固定）・
-    `fit_returns_unconverged_result_for_near_separation_data_without_raising`・
+- **分離検出はLogitと同じ仕組み（`nonlinear::separation`、[`logit-spec.md`](./logit-spec.md)3.2節）**:
+  収束後に線形計画で完全分離・準完全分離を厳密に判定する。閾値を持たず、リンク関数に依らない
+  （`zᵢ=(2yᵢ-1)xᵢ`の符号条件のみ）。旧方式（標準化パラメータのL2ノルムが閾値`100`を超えたら
+  収束を取り消す）はProbitでも廃止した。Probitは同じ分離でもノルムが小さく（`n=5`で中央値約9）、
+  `n=5`（`n=k+1`）で分離した500件中467件が`converged=True`のまま返り、強い多重共線性では
+  有限のMLEが存在する`20`件中`8`件を誤って棄却していた。
+  - **回帰テスト**: `fit_returns_separation_detected_error_for_separated_data`
+    （`beta1=50`で3手法とも`SeparationDetected`を返すことを固定）・
+    `fit_returns_unconverged_result_for_separated_data_without_raising`・
     `fit_converges_normally_for_mild_near_separation_data_across_all_methods`
-    （`beta1=20`で3手法とも誤検知なく正常収束することを固定）。
+    （`beta1=20`で3手法とも誤検知なく正常収束することを固定）。Python側は
+    `tests/nonlinear/test_probit_validation.py`の`test_separation_*`・
+    `test_small_sample_separation_is_not_reported_as_success`・
+    `test_strongly_collinear_regressors_are_not_rejected_as_separation`。

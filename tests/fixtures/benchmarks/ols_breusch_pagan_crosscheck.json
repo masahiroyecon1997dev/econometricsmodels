@@ -1,0 +1,383 @@
+{
+  "synthetic": {
+    "baseline": {
+      "lm": 5.21711016173204,
+      "lm_p_value": 0.156572323771785,
+      "df": 3,
+      "f": 1.74331455497241,
+      "f_p_value": 0.15719833694741,
+      "f_df_num": 3,
+      "f_df_denom": 496,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "R lmtest::bptest(studentize = TRUE) + lm",
+        "r_version": "R version 4.5.3 (2026-03-11)",
+        "lmtest_version": "0.9.40",
+        "jsonlite_version": "2.0.0"
+      }
+    },
+    "baseline_k1": {
+      "lm": 2.35447734033159,
+      "lm_p_value": 0.124923748465003,
+      "df": 1,
+      "f": 2.35615445552196,
+      "f_p_value": 0.125424519430084,
+      "f_df_num": 1,
+      "f_df_denom": 498,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "R lmtest::bptest(studentize = TRUE) + lm",
+        "r_version": "R version 4.5.3 (2026-03-11)",
+        "lmtest_version": "0.9.40",
+        "jsonlite_version": "2.0.0"
+      }
+    },
+    "small_n": {
+      "lm": 4.4221977185241,
+      "lm_p_value": 0.219335948368667,
+      "df": 3,
+      "f": 1.51401680883067,
+      "f_p_value": 0.249067096924414,
+      "f_df_num": 3,
+      "f_df_denom": 16,
+      "n_obs": 20,
+      "_meta": {
+        "reference": "R lmtest::bptest(studentize = TRUE) + lm",
+        "r_version": "R version 4.5.3 (2026-03-11)",
+        "lmtest_version": "0.9.40",
+        "jsonlite_version": "2.0.0"
+      }
+    },
+    "high_variance": {
+      "lm": 5.21711016173205,
+      "lm_p_value": 0.156572323771784,
+      "df": 3,
+      "f": 1.74331455497241,
+      "f_p_value": 0.157198336947409,
+      "f_df_num": 3,
+      "f_df_denom": 496,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "R lmtest::bptest(studentize = TRUE) + lm",
+        "r_version": "R version 4.5.3 (2026-03-11)",
+        "lmtest_version": "0.9.40",
+        "jsonlite_version": "2.0.0"
+      }
+    },
+    "heteroskedastic": {
+      "lm": 4.90365505628262,
+      "lm_p_value": 0.178989470583632,
+      "df": 3,
+      "f": 1.63753508635622,
+      "f_p_value": 0.179774777619377,
+      "f_df_num": 3,
+      "f_df_denom": 496,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "R lmtest::bptest(studentize = TRUE) + lm",
+        "r_version": "R version 4.5.3 (2026-03-11)",
+        "lmtest_version": "0.9.40",
+        "jsonlite_version": "2.0.0"
+      }
+    },
+    "autocorrelated": {
+      "lm": 3.10273105682175,
+      "lm_p_value": 0.376055676699106,
+      "df": 3,
+      "f": 1.03237610694105,
+      "f_p_value": 0.377865234925682,
+      "f_df_num": 3,
+      "f_df_denom": 496,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "R lmtest::bptest(studentize = TRUE) + lm",
+        "r_version": "R version 4.5.3 (2026-03-11)",
+        "lmtest_version": "0.9.40",
+        "jsonlite_version": "2.0.0"
+      }
+    },
+    "moderate_multicollinearity": {
+      "lm": 5.21711016173205,
+      "lm_p_value": 0.156572323771785,
+      "df": 3,
+      "f": 1.74331455497241,
+      "f_p_value": 0.157198336947409,
+      "f_df_num": 3,
+      "f_df_denom": 496,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "R lmtest::bptest(studentize = TRUE) + lm",
+        "r_version": "R version 4.5.3 (2026-03-11)",
+        "lmtest_version": "0.9.40",
+        "jsonlite_version": "2.0.0"
+      }
+    },
+    "high_condition_number": {
+      "lm": 5.21711016173206,
+      "lm_p_value": 0.156572323771783,
+      "df": 3,
+      "f": 1.74331455497242,
+      "f_p_value": 0.157198336947407,
+      "f_df_num": 3,
+      "f_df_denom": 496,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "R lmtest::bptest(studentize = TRUE) + lm",
+        "r_version": "R version 4.5.3 (2026-03-11)",
+        "lmtest_version": "0.9.40",
+        "jsonlite_version": "2.0.0"
+      }
+    },
+    "scale_variance_mild": {
+      "lm": 5.21711016173202,
+      "lm_p_value": 0.156572323771786,
+      "df": 3,
+      "f": 1.74331455497241,
+      "f_p_value": 0.157198336947411,
+      "f_df_num": 3,
+      "f_df_denom": 496,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "R lmtest::bptest(studentize = TRUE) + lm",
+        "r_version": "R version 4.5.3 (2026-03-11)",
+        "lmtest_version": "0.9.40",
+        "jsonlite_version": "2.0.0"
+      }
+    },
+    "many_regressors": {
+      "lm": 17.6365670795394,
+      "lm_p_value": 0.611335630891674,
+      "df": 20,
+      "f": 0.875679524456448,
+      "f_p_value": 0.61886250022696,
+      "f_df_num": 20,
+      "f_df_denom": 479,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "R lmtest::bptest(studentize = TRUE) + lm",
+        "r_version": "R version 4.5.3 (2026-03-11)",
+        "lmtest_version": "0.9.40",
+        "jsonlite_version": "2.0.0"
+      }
+    },
+    "outlier_regressor": {
+      "lm": 1.37230834030214,
+      "lm_p_value": 0.712038452531749,
+      "df": 3,
+      "f": 0.455025495090499,
+      "f_p_value": 0.713859336296497,
+      "f_df_num": 3,
+      "f_df_denom": 496,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "R lmtest::bptest(studentize = TRUE) + lm",
+        "r_version": "R version 4.5.3 (2026-03-11)",
+        "lmtest_version": "0.9.40",
+        "jsonlite_version": "2.0.0"
+      }
+    },
+    "baseline_df1": {
+      "lm": 4.12562137572059,
+      "lm_p_value": 0.248214898353049,
+      "df": 3,
+      "f": 1.5727821873202,
+      "f_p_value": 0.516491632754371,
+      "f_df_num": 3,
+      "f_df_denom": 1,
+      "n_obs": 5,
+      "_meta": {
+        "reference": "R lmtest::bptest(studentize = TRUE) + lm",
+        "r_version": "R version 4.5.3 (2026-03-11)",
+        "lmtest_version": "0.9.40",
+        "jsonlite_version": "2.0.0"
+      }
+    },
+    "heteroskedastic_abs_x1": {
+      "lm": 104.087784595068,
+      "lm_p_value": 1.93547833551023e-24,
+      "df": 1,
+      "f": 130.927298303558,
+      "f_p_value": 4.45907148906895e-27,
+      "f_df_num": 1,
+      "f_df_denom": 498,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "R lmtest::bptest(studentize = TRUE) + lm",
+        "r_version": "R version 4.5.3 (2026-03-11)",
+        "lmtest_version": "0.9.40",
+        "jsonlite_version": "2.0.0"
+      }
+    },
+    "heteroskedastic_no_intercept": {
+      "lm": 4.32836950698197,
+      "lm_p_value": 0.228119807949193,
+      "df": 3,
+      "f": 1.4437456462374,
+      "f_p_value": 0.229227369954861,
+      "f_df_num": 3,
+      "f_df_denom": 496,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "R lmtest::bptest(studentize = TRUE) + lm",
+        "r_version": "R version 4.5.3 (2026-03-11)",
+        "lmtest_version": "0.9.40",
+        "jsonlite_version": "2.0.0"
+      }
+    },
+    "baseline_subset": {
+      "lm": 2.24056717139104,
+      "lm_p_value": 0.13443166259448,
+      "df": 1,
+      "f": 2.2416500376738,
+      "f_p_value": 0.134971075645052,
+      "f_df_num": 1,
+      "f_df_denom": 498,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "R lmtest::bptest(studentize = TRUE) + lm",
+        "r_version": "R version 4.5.3 (2026-03-11)",
+        "lmtest_version": "0.9.40",
+        "jsonlite_version": "2.0.0"
+      }
+    },
+    "baseline_outside_model": {
+      "lm": 2.37689980602774,
+      "lm_p_value": 0.304693202211701,
+      "df": 2,
+      "f": 1.18696178205484,
+      "f_p_value": 0.306010454814129,
+      "f_df_num": 2,
+      "f_df_denom": 497,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "R lmtest::bptest(studentize = TRUE) + lm",
+        "r_version": "R version 4.5.3 (2026-03-11)",
+        "lmtest_version": "0.9.40",
+        "jsonlite_version": "2.0.0"
+      }
+    },
+    "baseline_no_intercept": {
+      "lm": 2.37978414436227,
+      "lm_p_value": 0.497408891676928,
+      "df": 3,
+      "f": 0.790678579094089,
+      "f_p_value": 0.499475614274517,
+      "f_df_num": 3,
+      "f_df_denom": 496,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "R lmtest::bptest(studentize = TRUE) + lm",
+        "r_version": "R version 4.5.3 (2026-03-11)",
+        "lmtest_version": "0.9.40",
+        "jsonlite_version": "2.0.0"
+      }
+    },
+    "baseline_no_intercept_outside_model": {
+      "lm": 161.634755242313,
+      "lm_p_value": 7.97000983360667e-36,
+      "df": 2,
+      "f": 118.706744560834,
+      "f_p_value": 7.2162622451269e-43,
+      "f_df_num": 2,
+      "f_df_denom": 497,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "R lmtest::bptest(studentize = TRUE) + lm",
+        "r_version": "R version 4.5.3 (2026-03-11)",
+        "lmtest_version": "0.9.40",
+        "jsonlite_version": "2.0.0"
+      }
+    },
+    "baseline_constant_and_duplicate": {
+      "lm": 3.59132049313825,
+      "lm_p_value": 0.166017803468015,
+      "df": 2,
+      "f": 1.79779923153523,
+      "f_p_value": 0.166738719711711,
+      "f_df_num": 2,
+      "f_df_denom": 497,
+      "n_obs": 500,
+      "_meta": {
+        "reference": "R lmtest::bptest(studentize = TRUE) + lm",
+        "r_version": "R version 4.5.3 (2026-03-11)",
+        "lmtest_version": "0.9.40",
+        "jsonlite_version": "2.0.0"
+      }
+    }
+  },
+  "wooldridge": {
+    "hprice1": {
+      "lm": 14.09238550435,
+      "lm_p_value": 0.00278205955568941,
+      "df": 3,
+      "f": 5.33891936324131,
+      "f_p_value": 0.00204774442093635,
+      "f_df_num": 3,
+      "f_df_denom": 84,
+      "n_obs": 88,
+      "_meta": {
+        "reference": "R lmtest::bptest(studentize = TRUE) + lm",
+        "r_version": "R version 4.5.3 (2026-03-11)",
+        "lmtest_version": "0.9.40",
+        "jsonlite_version": "2.0.0"
+      }
+    },
+    "hprice1_log": {
+      "lm": 4.22324811730436,
+      "lm_p_value": 0.238344590581187,
+      "df": 3,
+      "f": 1.41150074008715,
+      "f_p_value": 0.245145417352455,
+      "f_df_num": 3,
+      "f_df_denom": 84,
+      "n_obs": 88,
+      "_meta": {
+        "reference": "R lmtest::bptest(studentize = TRUE) + lm",
+        "r_version": "R version 4.5.3 (2026-03-11)",
+        "lmtest_version": "0.9.40",
+        "jsonlite_version": "2.0.0"
+      }
+    },
+    "wage1": {
+      "lm": 10.7612058553173,
+      "lm_p_value": 0.01308975400295,
+      "df": 3,
+      "f": 3.63413982041775,
+      "f_p_value": 0.0128554170627527,
+      "f_df_num": 3,
+      "f_df_denom": 522,
+      "n_obs": 526,
+      "_meta": {
+        "reference": "R lmtest::bptest(studentize = TRUE) + lm",
+        "r_version": "R version 4.5.3 (2026-03-11)",
+        "lmtest_version": "0.9.40",
+        "jsonlite_version": "2.0.0"
+      }
+    },
+    "wage1_outside_model": {
+      "lm": 14.4544221476212,
+      "lm_p_value": 0.000726544318682356,
+      "df": 2,
+      "f": 7.38904128048924,
+      "f_p_value": 0.000684670195627496,
+      "f_df_num": 2,
+      "f_df_denom": 523,
+      "n_obs": 526,
+      "_meta": {
+        "reference": "R lmtest::bptest(studentize = TRUE) + lm",
+        "r_version": "R version 4.5.3 (2026-03-11)",
+        "lmtest_version": "0.9.40",
+        "jsonlite_version": "2.0.0"
+      }
+    }
+  },
+  "_meta": {
+    "method": "ols_breusch_pagan_crosscheck",
+    "generated_at": "2026-10-11T00:16:08.878378+00:00",
+    "reference": "R lmtest::bptest(studentize = TRUE) + lm",
+    "r_version": "R version 4.5.3 (2026-03-11)",
+    "lmtest_version": "0.9.40",
+    "jsonlite_version": "2.0.0",
+    "note": "補助回帰の変数に定数列・重複列をそのまま含めてもRのlmはエイリアスとして扱い、自由度はランクに基づく。切片なしのモデルの残差を使う場合も、補助回帰には定数を含める（bptestの既定）。"
+  }
+}

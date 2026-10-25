@@ -1,0 +1,43 @@
+name: Bug report
+description: Something does not work, or a result looks wrong
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting! Every field is optional, so please fill in
+        only what you know. The code you ran and the error message or output
+        you got are the most helpful parts.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A short description of the problem.
+  - type: textarea
+    id: code
+    attributes:
+      label: Code you ran
+      description: >-
+        A small example is ideal, for example with an inline polars
+        DataFrame. Whatever you have is fine.
+      render: python
+  - type: textarea
+    id: output
+    attributes:
+      label: Error message or output
+      description: The error message or the result you got.
+      render: text
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      description: >-
+        If you know where the expected value comes from (for example a
+        statsmodels, linearmodels, or R call), please mention it, together
+        with the options you set.
+  - type: textarea
+    id: environment
+    attributes:
+      label: Versions
+      description: >-
+        As far as you know: econometricsmodels (`pip show
+        econometricsmodels`), Python, polars, and your OS.

@@ -2,8 +2,8 @@
 
 `tests/fixtures/benchmarks/probit_crosscheck.json`（`benchmark/nonlinear/
 fixtures/generate_probit_crosscheck_fixtures.py`で生成）を読み込み、係数・標準誤差・
-適合度統計量・限界効果をRとクロスチェックする。役割分担は`test_probit_reference.py`
-と同じ（`test_logit_crosscheck.py`と同型。
+適合度統計量・限界効果（全統計量）をRとクロスチェックする（cluster 3ケース（均等・不均衡・境界G=q+1）と、切片なし
+（`include_intercept=False`）と非既定の`confidence_level`（0.90）の全cov_typeも全統計量・限界効果）。役割分担は`test_probit_reference.py`と同じ（`test_logit_crosscheck.py`と同型。
 `.claude/rules/testing-policy.md`「リファレンス実装」参照）。
 
 Note:
@@ -25,12 +25,12 @@ Note:
     許容誤差はOLSのRクロスチェック（classical/HC0-3/clusterで機械精度一致）より
     緩い。ProbitはRのglm（IRLS/Fisher scoring）と本実装（Newton/BFGS/L-BFGS）が
     どちらも反復最適化のため、OLSの閉形式解同士の比較（機械精度一致）ほどの
-    精度は出ない。ただしR側の参照値は`glm()`の収束判定と`marginaleffects`の
-    数値微分の刻み幅を厳しくして生成しており（`benchmark/nonlinear/references/
-    run_glm_crosscheck.R`参照）、基本方針はLogitと同じRTOL=1e-6（実測最大相対誤差
-    ~1.4e-7に対するマージン。ATOLは1e-12で純粋な相対誤差比較）。信頼区間（0に近い境界での増幅）とp値のみ個別の
-    許容誤差を設定している（根拠は`tests/_tolerances.py`の`probit_crosscheck`の
-    コメント参照。`testing-policy.md`「許容誤差」の方針通り）。
+    精度は出ない。ただしR側の参照値は、収束後の係数から再fitを繰り返し、
+    `marginaleffects`の数値微分の刻み幅を厳しくして生成しており（`benchmark/
+    nonlinear/references/run_glm_crosscheck.R`参照）、基本方針はLogitと同じ
+    RTOL=2e-7（実測最大相対誤差~2.8e-8に対するマージン。ATOLは1e-12で純粋な相対
+    誤差比較）。全統計量に同じ許容誤差を使う（根拠は`tests/support/
+    _tolerances_nonlinear.py`の`probit_crosscheck`のコメント参照）。
 """
 
 from __future__ import annotations
@@ -40,12 +40,25 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-from _constants import DATA_DIR, MROZ_X
+from _assertions import (
+    assert_fields_close,
+    assert_inference_close,
+)
+from _constants import APPLE_CLUSTER, APPLE_X, DATA_DIR, MROZ_X
 from _helpers import load_wooldridge_dataset, with_cluster_groups
+from _nonlinear_helpers import (
+    check_margeff,
+    check_predictions,
+    load_apple_adoption_dataset,
+)
 from _tolerances import TOLERANCES
 from econometricsmodels import Probit, ProbitOptions
 
 from benchmark.common import imbalanced_cluster_groups
+from benchmark.nonlinear.constants import (
+    CONFIDENCE_LEVEL_NON_DEFAULT,
+    NON_CLUSTER_COV_TYPES,
+)
 from benchmark.nonlinear.fixtures.generate_probit_crosscheck_fixtures import (
     NUMERIC_SCENARIOS as SCENARIOS,
 )
@@ -60,16 +73,6 @@ FIXTURE_PATH = (
 RTOL = TOLERANCES["probit_crosscheck"]["rtol"]
 ATOL = TOLERANCES["probit_crosscheck"]["atol"]
 
-# conf_intは下限（または上限）が0に近いと絶対誤差が相対誤差に増幅されるため、
-# 係数・SE本体より緩いRTOLを使う（実測最大相対誤差~1.8e-6、small_n/hc1/x2の下限）。
-RTOL_CONF_INT = TOLERANCES["probit_crosscheck"]["rtol_conf_int"]
-
-# p値は標準正規分布CDFの裾で係数・zのわずかな数値差が増幅されるため、係数・SE本体
-# より緩いATOLを置く（rtolで収まらない実測最大絶対誤差~1.8e-8、mroz/opg/kidsge6）。
-ATOL_P_VALUE = TOLERANCES["probit_crosscheck"]["atol_p_value"]
-
-COV_TYPES = ["classical", "opg", "hc0", "hc1"]
-MARGEFF_AT = ["overall", "mean", "median"]
 
 # near_separationは既定tol=1e-6だとstatsmodels/Rとの一致精度が下がる境界ケース
 # （test_probit_reference.py参照）。ここでも同じ理由でtol=1e-8を明示指定する。
@@ -81,88 +84,43 @@ def fixtures() -> dict:
     return json.loads(FIXTURE_PATH.read_text())
 
 
-def _assert_close(
-    ours: float,
-    ref: float,
-    label: str,
-    rtol: float = RTOL,
-    atol: float = ATOL,
+def _check_result(
+    res, ref: dict, label: str, *, confidence_level: float = 0.95
 ) -> None:
-    diff = abs(ours - ref)
-    tol = max(rtol * abs(ref), atol)
-    assert diff <= tol, (
-        f"{label}: ours={ours!r}, ref={ref!r}, diff={diff!r} > tol={tol!r}"
+    """全統計量を比べる。`confidence_level`は係数の信頼区間は`fit()`のオプション側で、
+    限界効果の信頼区間は`marginal_effects()`の引数側で指定するため、後者に渡す。"""
+    assert_inference_close(res, ref, label, rtol=RTOL, atol=ATOL)
+    assert_fields_close(
+        res,
+        ref,
+        (
+            "log_likelihood",
+            "log_likelihood_null",
+            "aic",
+            "bic",
+            "lr_statistic",
+            "lr_p_value",
+            "pseudo_r_squared",
+        ),
+        label,
+        rtol=RTOL,
+        atol=ATOL,
     )
-
-
-def _assert_dict_close(
-    ours: dict[str, float],
-    ref: dict[str, float],
-    label: str,
-    atol: float = ATOL,
-    rtol: float = RTOL,
-) -> None:
-    for name, ref_val in ref.items():
-        _assert_close(
-            ours[name], ref_val, f"{label}/{name}", rtol=rtol, atol=atol
-        )
-
-
-def _check_margeff(res, ref_margeff: dict, label: str) -> None:
-    for at in MARGEFF_AT:
-        effects = {row["param"]: row for row in res.marginal_effects(at=at)}
-        for name, ref_stats in ref_margeff[at].items():
-            row = effects[name]
-            _assert_close(
-                row["effect"],
-                ref_stats["effect"],
-                f"{label}/{at}/{name}/effect",
-            )
-            _assert_close(
-                row["std_err"],
-                ref_stats["std_err"],
-                f"{label}/{at}/{name}/std_err",
-            )
-
-
-def _check_result(res, ref: dict, label: str) -> None:
-    _assert_dict_close(res.params, ref["coef"], f"{label}/coef")
-    _assert_dict_close(res.std_errors, ref["se"], f"{label}/se")
-    _assert_dict_close(
-        res.test_stats, ref["test_stats"], f"{label}/test_stats"
+    check_margeff(
+        res,
+        ref["margeff"],
+        label,
+        rtol=RTOL,
+        atol=ATOL,
+        confidence_level=confidence_level,
     )
-    _assert_dict_close(
-        res.p_values, ref["p_values"], f"{label}/p_values", atol=ATOL_P_VALUE
-    )
-    for name, (ref_lower, ref_upper) in ref["conf_int"].items():
-        our_lower, our_upper = res.conf_int[name]
-        _assert_close(
-            our_lower,
-            ref_lower,
-            f"{label}/conf_lower/{name}",
-            rtol=RTOL_CONF_INT,
-        )
-        _assert_close(
-            our_upper,
-            ref_upper,
-            f"{label}/conf_upper/{name}",
-            rtol=RTOL_CONF_INT,
-        )
-    for field in (
-        "log_likelihood",
-        "log_likelihood_null",
-        "aic",
-        "bic",
-        "lr_statistic",
-        "lr_p_value",
-        "pseudo_r_squared",
-    ):
-        _assert_close(getattr(res, field), ref[field], f"{label}/{field}")
-    if "margeff" in ref:
-        _check_margeff(res, ref["margeff"], label)
+    check_predictions(res, ref, label, rtol=RTOL, atol=ATOL)
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
+# ── 凍結フィクスチャとの数値照合（合成データ） ────────────────────────
+
+
+@pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
 @pytest.mark.parametrize("scenario", SCENARIOS)
 def test_matches_r_glm(fixtures, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"probit_{scenario}.csv")
@@ -170,9 +128,10 @@ def test_matches_r_glm(fixtures, scenario, cov_type):
         {"tol": _NEAR_SEPARATION_TOL} if scenario == "near_separation" else {}
     )
     options = ProbitOptions(cov_type=cov_type, **kwargs)
-    res = Probit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+    x_cols = [c for c in df.columns if c != "y"]
+    res = Probit(df, y="y", x=x_cols, options=options).fit()
 
-    ref = fixtures["synthetic"][scenario][cov_type]["r"]
+    ref = fixtures["synthetic"][scenario][cov_type]
     _check_result(res, ref, f"{scenario}/{cov_type}")
 
 
@@ -182,9 +141,8 @@ def test_cluster_matches_r_glm(fixtures):
     options = ProbitOptions(cov_type="cluster", cluster="cluster_group")
     res = Probit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
-    ref = fixtures["synthetic"]["baseline"]["cluster"]["r"]
-    _assert_dict_close(res.params, ref["coef"], "cluster/coef")
-    _assert_dict_close(res.std_errors, ref["se"], "cluster/se")
+    ref = fixtures["synthetic"]["baseline"]["cluster"]
+    _check_result(res, ref, "cluster")
 
 
 def test_cluster_imbalanced_matches_r_glm(fixtures):
@@ -194,16 +152,115 @@ def test_cluster_imbalanced_matches_r_glm(fixtures):
     options = ProbitOptions(cov_type="cluster", cluster="cluster_group")
     res = Probit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
 
-    ref = fixtures["synthetic"]["baseline"]["cluster_imbalanced"]["r"]
-    _assert_dict_close(res.params, ref["coef"], "cluster_imbalanced/coef")
-    _assert_dict_close(res.std_errors, ref["se"], "cluster_imbalanced/se")
+    ref = fixtures["synthetic"]["baseline"]["cluster_imbalanced"]
+    _check_result(res, ref, "cluster_imbalanced")
 
 
-@pytest.mark.parametrize("cov_type", COV_TYPES)
+def test_cluster_g4_boundary_matches_r_glm(fixtures):
+    """クラスター数の境界`G = q + 1`（baselineの傾きq=3、G=4）。"""
+    df = pl.read_csv(DATA_DIR / "probit_baseline.csv")
+    df = with_cluster_groups(df, 4)
+    options = ProbitOptions(cov_type="cluster", cluster="cluster_group")
+    res = Probit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+    ref = fixtures["synthetic"]["baseline"]["cluster_g4"]
+    _check_result(res, ref, "cluster_g4")
+
+
+# ── 凍結フィクスチャとの数値照合（オプション） ────────────────────────
+
+
+@pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
+def test_no_intercept_matches_r_glm(fixtures, cov_type):
+    """`include_intercept=False`（baseline）。hc1（全統計量）とopgの限界効果はRのみが参照。
+
+    `log_likelihood_null`は常に切片のみのモデルを参照するため、`lr_statistic`が
+    負値になりうる。
+    """
+    df = pl.read_csv(DATA_DIR / "probit_baseline.csv")
+    options = ProbitOptions(cov_type=cov_type, include_intercept=False)
+    res = Probit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+    ref = fixtures["synthetic"]["baseline"]["no_intercept"][cov_type]
+    _check_result(res, ref, f"no_intercept/{cov_type}")
+
+
+def test_no_intercept_cluster_matches_r_glm(fixtures):
+    df = pl.read_csv(DATA_DIR / "probit_baseline.csv")
+    df = with_cluster_groups(df, 10)
+    options = ProbitOptions(
+        cov_type="cluster", cluster="cluster_group", include_intercept=False
+    )
+    res = Probit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+    ref = fixtures["synthetic"]["baseline"]["no_intercept"]["cluster"]
+    _check_result(res, ref, "no_intercept/cluster")
+
+
+def test_no_intercept_cluster_imbalanced_matches_r_glm(fixtures):
+    df = pl.read_csv(DATA_DIR / "probit_baseline.csv")
+    groups = imbalanced_cluster_groups(df.height)
+    df = df.with_columns(pl.Series("cluster_group", groups))
+    options = ProbitOptions(
+        cov_type="cluster", cluster="cluster_group", include_intercept=False
+    )
+    res = Probit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+    ref = fixtures["synthetic"]["baseline"]["no_intercept"][
+        "cluster_imbalanced"
+    ]
+    _check_result(res, ref, "no_intercept/cluster_imbalanced")
+
+
+@pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
+def test_confidence_level_matches_r_glm(fixtures, cov_type):
+    """非既定の`confidence_level`（baseline）。係数と限界効果の信頼区間をRと比べる。
+
+    臨界値を固定した実装（例: 1.96）は0.90の区間で外れる。限界効果の水準は
+    `fit()`のオプションとは独立の`marginal_effects(confidence_level=...)`で指定する。
+    """
+    level = CONFIDENCE_LEVEL_NON_DEFAULT
+    df = pl.read_csv(DATA_DIR / "probit_baseline.csv")
+    options = ProbitOptions(cov_type=cov_type, confidence_level=level)
+    res = Probit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+    ref = fixtures["synthetic"]["baseline"]["confidence_level"][cov_type]
+    _check_result(
+        res, ref, f"confidence_level/{cov_type}", confidence_level=level
+    )
+
+
+def test_confidence_level_cluster_matches_r_glm(fixtures):
+    level = CONFIDENCE_LEVEL_NON_DEFAULT
+    df = pl.read_csv(DATA_DIR / "probit_baseline.csv")
+    df = with_cluster_groups(df, 10)
+    options = ProbitOptions(
+        cov_type="cluster", cluster="cluster_group", confidence_level=level
+    )
+    res = Probit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+
+    ref = fixtures["synthetic"]["baseline"]["confidence_level"]["cluster"]
+    _check_result(res, ref, "confidence_level/cluster", confidence_level=level)
+
+
+# ── 凍結フィクスチャとの数値照合（実データ） ──────────────────────────
+
+
+def test_apple_cluster_matches_r_glm(fixtures):
+    """多クラスターの実データ（Wooldridge apple、`ecolbs > 0`、州でG=49）。"""
+    df = load_apple_adoption_dataset()
+    options = ProbitOptions(cov_type="cluster", cluster=APPLE_CLUSTER)
+    res = Probit(df, y="y", x=APPLE_X, options=options).fit()
+
+    ref = fixtures["wooldridge"]["apple"]["cluster"]
+    _check_result(res, ref, "apple/cluster")
+
+
+@pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
 def test_mroz_matches_r_glm(fixtures, cov_type):
     df = load_wooldridge_dataset("mroz")
     options = ProbitOptions(cov_type=cov_type)
     res = Probit(df, y="inlf", x=MROZ_X, options=options).fit()
 
-    ref = fixtures["wooldridge"]["mroz"][cov_type]["r"]
+    ref = fixtures["wooldridge"]["mroz"][cov_type]
     _check_result(res, ref, f"mroz/{cov_type}")

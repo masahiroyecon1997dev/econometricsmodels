@@ -30,66 +30,25 @@ import statsmodels
 from benchmark.common import (
     BENCHMARKS_DIR,
     DATA_DIR,
+    balanced_cluster_groups,
+    group_by_dataset_source,
     imbalanced_cluster_groups,
     run_fixture_cli,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
-from benchmark.linear.constants import HAC_MAXLAGS
+from benchmark.linear.constants import (
+    CLUSTER_ILL_CONDITIONED_SCENARIOS,
+    CONFIDENCE_LEVEL_NON_DEFAULT,
+    COV_TYPES,
+    HAC_LAGS_EXPLICIT,
+    NON_HAC_COV_TYPES,
+    NUMERIC_SCENARIOS,
+)
+from benchmark.linear.datasets import add_age_bin
 from benchmark.linear.references.statsmodels_ref import (
     extract_full_fit_stats,
     run,
 )
-
-# 完全な多重共線性・scale_varianceは数値比較の対象外（testing-policy.md
-# 「テストの3系統」参照）。ComputationErrorが発生することのみをテスト
-# コード側で確認する（OLSと同じ挙動をWLSでも実測確認済み）。
-NUMERIC_SCENARIOS = [
-    "baseline",
-    "small_n",
-    "high_variance",
-    "heteroskedastic",
-    "autocorrelated",
-    "moderate_multicollinearity",
-    "high_condition_number",
-    # scale_varianceより緩いスケール差の成功パス（OLSの同種ケース相当）。
-    "scale_variance_mild",
-    # n=k+1（自由度1ちょうど）の成功パス（OLSの同種ケース相当）。
-    "baseline_df1",
-    # 高次元（説明変数k=20、列ごとに0.1〜100倍のスケール差）の成功パス
-    # （OLSの同種ケース相当）。
-    "many_regressors",
-    # x1の5%を外れ値に置き換えた成功パス（OLSの同種ケース相当）。
-    "outlier_regressor",
-]
-
-# classical/HC系は全シナリオで確認。HACはautocorrelatedシナリオが本来の目的
-# （他のシナリオでも動くことの確認はできるが、統計的な意味は薄い。OLSと同じ方針）。
-COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
-
-# 401ksubs（クロスセクションデータ）ではHACは時系列順が無いため対象外
-# （OLSのwage1/gpa2実データcrosscheckと同じくHC0-3のみを対象にする）。
-# クラスターはage分位ビン（_run_401ksubs_caseのcluster="age_bin"）で別途追加。
-WOOLDRIDGE_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3"]
-
-# クラスターロバスト共分散Ŝ=(X'X)⁻¹(Σ_g X_g'e_ge_g'X_g)(X'X)⁻¹は(X'X)⁻¹を他の
-# cov_type（classical/HC0-3/HAC）と共有するが、この(X'X)⁻¹自体が悪条件・
-# 多重共線性シナリオでは数値的に不安定になりうる（他のcov_typeでは
-# COV_TYPES経由で全シナリオ検証済みだが、クラスターは従来baselineのみ
-# だったため、この組み合わせが未検証だった。OLS側の横展開）。
-# 均等な疑似グループ（行番号%10）1パターンのみ追加確認する（グルーピング
-# パターン自体の網羅性はbaselineシナリオで既に検証済みのため重複させない）。
-CLUSTER_ILL_CONDITIONED_SCENARIOS = [
-    "high_condition_number",
-    "moderate_multicollinearity",
-]
-
-# include_intercept=False・confidence_level非既定の効果は、シナリオ依存では
-# なくオプションの配線自体の動作確認が目的のため（クラスター同様、
-# testing-policy.md「テスト用データセット」3.）、baselineシナリオのみで
-# 全cov_type（COV_TYPES + cluster）と組み合わせて確認する（OLS側の横展開、
-# ユーザー確認済み）。0.95（既定）・0.99/0.80（test_wls_api.pyの幅の単調性
-# テストで使用済み）とは異なる値として0.90を選ぶ。
-CONFIDENCE_LEVEL_NON_DEFAULT = 0.90
 
 
 def build_fixtures() -> dict:
@@ -182,6 +141,19 @@ def build_fixtures() -> dict:
                     "均等な疑似グループ（行番号%10）のみ（OLS側の横展開）。",
                 )
             )
+
+            # 自動選択とは別に明示指定したhac_lags（HAC_LAGS_EXPLICIT）。
+            fixtures[scenario]["hac_lags"] = {
+                str(lag): run(
+                    dataset_source="synthetic",
+                    dataset=scenario,
+                    formula=None,
+                    cov_type="hac",
+                    weight_col="weight",
+                    hac_lags=lag,
+                )
+                for lag in HAC_LAGS_EXPLICIT
+            }
         elif scenario in CLUSTER_ILL_CONDITIONED_SCENARIOS:
             fixtures[scenario]["cluster"] = _run_cluster_case(
                 scenario=scenario,
@@ -193,7 +165,7 @@ def build_fixtures() -> dict:
 
     fixtures["401ksubs"] = {
         cov_type: _run_401ksubs_case(cov_type)
-        for cov_type in WOOLDRIDGE_COV_TYPES
+        for cov_type in NON_HAC_COV_TYPES
     }
     fixtures["401ksubs"]["cluster"] = _run_401ksubs_case(
         "cluster", cluster="age_bin"
@@ -204,7 +176,6 @@ def build_fixtures() -> dict:
         "generated_at": datetime.now(UTC).isoformat(),
         "primary_reference": "statsmodels",
         "statsmodels_version": statsmodels.__version__,
-        "hac_maxlags": HAC_MAXLAGS,
         "note": (
             "perfect_multicollinearity・scale_varianceシナリオはここに含まない"
             "（いずれもComputationErrorの発生確認のみ、テストコード側で対応。"
@@ -215,7 +186,7 @@ def build_fixtures() -> dict:
             "クロスチェック用のRベンチマークはwls_crosscheck.json（別スクリプト）で生成する。"
             "401ksubsの回帰式・重み定義はdocs/spec/wls-spec.md参照。"
             "401ksubsはclassical/HC0-3（HACは時系列順が無いため対象外）と"
-            "クラスター（ageの分位ビン、_add_age_bin参照）をcov_type別に持つ。"
+            "クラスター（ageの分位ビン、add_age_bin参照）をcov_type別に持つ。"
             "baseline.weight_in_xは、weightと同じ列をxにも含める成功パス。"
             "classicalのみ（cov_type間の挙動差の検証が"
             "目的ではないため）。"
@@ -223,33 +194,28 @@ def build_fixtures() -> dict:
             "高次元シナリオ（OLSの同種ケース相当）。"
             "outlier_regressorはx1の5%を外れ値に置き換えた成功パス"
             "（OLSの同種ケース相当）。"
-            "クラスター系（cluster/cluster_imbalanced/cluster_g2）は従来coef/se"
-            "のみだったが、test_stats/p_values/conf_int/r_squared等のフル統計量まで"
-            "検証範囲を広げた（_run_cluster_caseがextract_full_fit_statsを"
-            "使うよう変更、OLS側の横展開）。あわせて_run_cluster_caseに"
-            "use_t=Trueが指定されていなかった不備を修正（cluster時に既定の"
-            "正規分布ではなく自由度G-1のt分布を使う本プロジェクトの方針"
-            "〔docs/spec/ols-spec.md「標準誤差」〕に合わせた。coef/seは"
-            "use_tに依存しないため既存フィクスチャの値に影響なし）。"
-            "401ksubsも同じくextract_full_fit_statsを使うよう変更（元々"
-            "use_t=Trueは指定済みで、フル統計量の手書き重複を解消したのみ、"
-            "数値自体に変更なし）。"
+            "クラスター系（cluster/cluster_imbalanced/cluster_g2）は"
+            "params/std_errorsに加え、test_stats/p_values/conf_int/r_squared等の"
+            "フル統計量まで検証する（_run_cluster_caseがextract_full_fit_statsを"
+            "使う。OLS側と同じ）。_run_cluster_caseはuse_t=Trueを指定する"
+            "（cluster時に既定の正規分布ではなく自由度G-1のt分布を使う本プロジェクトの"
+            "方針〔docs/spec/ols-spec.md「標準誤差」〕に合わせる。"
+            "params/std_errorsはuse_tに依存しない）。"
+            "401ksubsも同じくextract_full_fit_statsを使う。"
             "high_condition_number/moderate_multicollinearityにもcluster"
-            "エントリを追加（従来クラスター系はbaselineシナリオのみで、"
-            "悪条件・多重共線性シナリオとの組み合わせが未検証だった。"
-            "均等な疑似グループ（行番号%10）のみ。OLS側の横展開）。"
+            "エントリを持つ（悪条件・多重共線性シナリオとの組み合わせの確認用。"
+            "均等な疑似グループ（行番号%10）のみ。OLS側と同じ）。"
             "baseline.no_interceptはinclude_intercept=False（切片なし）を"
-            "COV_TYPES全種＋clusterと組み合わせて確認する（従来ライブ"
-            "statsmodels比較〔ad-hocデータ1パターン〕のみだったものを、"
-            "他オプションと同じ凍結フィクスチャに統合。OLS側の横展開）。"
+            "COV_TYPES全種＋clusterと組み合わせて確認する（OLS側と同じ）。"
+            "baseline.hac_lagsは自動選択とは別に明示したHACラグ"
+            f"（{HAC_LAGS_EXPLICIT}、キーは文字列。0はHC0相当）。"
             "baseline.confidence_levelはconfidence_level="
             f"{CONFIDENCE_LEVEL_NON_DEFAULT}（既定0.95以外）をCOV_TYPES全種＋"
-            "clusterと組み合わせて確認する（従来相対比較〔幅の広さの"
-            "単調性のみ〕だったものを、具体的な数値の正しさまで検証する"
-            "よう拡張。OLS側の横展開）。"
+            "clusterと組み合わせて確認する（幅の広さの単調性だけでなく、"
+            "具体的な数値の正しさまで検証する。OLS側と同じ）。"
         ),
     }
-    return fixtures
+    return group_by_dataset_source(fixtures, ["401ksubs"])
 
 
 def _run_cluster_case(
@@ -285,7 +251,7 @@ def _run_cluster_case(
     pandas_df["_group"] = (
         groups
         if groups is not None
-        else [i % 10 for i in range(len(pandas_df))]
+        else balanced_cluster_groups(len(pandas_df))
     )
 
     x_cols = [c for c in df.columns if c not in ("y", "weight")]
@@ -325,16 +291,16 @@ def _run_401ksubs_case(cov_type: str, cluster: str | None = None) -> dict:
 
     Args:
         cov_type: "classical"/"hc0"-"hc3"/"cluster"（HACは時系列順の無い
-            クロスセクションデータのため対象外、OLSのwage1/gpa2と同じ方針）。
+            クロスセクションデータのため対象外、OLSのwage1/gpa2/mrozと同じ方針）。
         cluster: cov_type="cluster"のときのグループ列名
             （`age_bin`、地域等の自然なカテゴリ列が無いため年齢の分位ビンで代用。
-            `_add_age_bin`参照）。
+            `add_age_bin`参照）。
     """
     import statsmodels.formula.api as smf
 
     df = load_wooldridge("401ksubs").filter(pl.col("fsize") == 1)
     if cov_type.lower() == "cluster":
-        df = _add_age_bin(df)
+        df = add_age_bin(df)
 
     formula = "nettfa ~ inc + incsq + age + agesq + male + e401k"
     pandas_df = df.to_pandas()
@@ -367,29 +333,13 @@ def _run_401ksubs_case(cov_type: str, cluster: str | None = None) -> dict:
             "基づく1/inc（feasible GLSではない、analytic weight）。"
             + (
                 "地域等の実カテゴリ列が無いため、ageの分位ビン（8分位、"
-                "_add_age_bin参照）を疑似的なクラスター列として使う。"
+                "add_age_bin参照）を疑似的なクラスター列として使う。"
                 if cov_type.lower() == "cluster"
                 else ""
             )
         ),
     }
     return result
-
-
-def _add_age_bin(df: pl.DataFrame, n_bins: int = 8) -> pl.DataFrame:
-    """`age`を分位点で`n_bins`個にビン化した`age_bin`列を追加する。
-
-    401ksubsには地域等の自然なカテゴリ列が無いため（marr/maleのような
-    2値変数のみ）、実データでのクラスターロバストSE検証（testing-policy.md
-    「実データでのグループ列も検証する」）用に、実データの分布から作る
-    疑似グループとして年齢の分位ビンを使う（G=8、q=6の説明変数より十分大きい）。
-    """
-    return df.with_columns(
-        pl.col("age")
-        .qcut(n_bins, allow_duplicates=True)
-        .alias("age_bin")
-        .cast(pl.Utf8)
-    )
 
 
 if __name__ == "__main__":

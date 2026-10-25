@@ -15,7 +15,7 @@ generate_tobit_crosscheck_fixtures.py` で生成）を読み込み、`test_tobit
 Note:
     許容誤差は基本 1e-8（`censReg` 側の maxLik 収束を reltol=1e-14 まで詰めたため、
     合成シナリオは点推定・SE・限界効果とも ~2e-9 で一致する）。ただし以下は
-    実測乖離に基づき個別に緩める（`tests/_tolerances.py` の `tobit_crosscheck`）:
+    実測乖離に基づき個別に緩める（`tests/support/_tolerances_nonlinear.py` の `tobit_crosscheck`）:
         - `high_condition_number`（x1,x2 相関 0.999）の SE・z・信頼区間・限界効果 SE:
           悪条件下で2つの独立最適化器の解の僅差が分散系で ~1.9e-8 まで増幅する。
         - `mroz`（`hours` 生スケール）の SE・z・Wald・信頼区間・限界効果 SE:
@@ -29,6 +29,8 @@ from __future__ import annotations
 import _tobit_checks as _checks
 import pytest
 from _tolerances import TOLERANCES
+
+from benchmark.nonlinear.constants import NON_CLUSTER_COV_TYPES
 
 _TOL = TOLERANCES["tobit_crosscheck"]
 FIXTURE_PATH = _checks.FIXTURE_DIR / "tobit_crosscheck.json"
@@ -55,7 +57,7 @@ def _tolerances(scenario: str) -> dict:
     }
 
 
-def _method_tolerances() -> dict:
+def _solver_tolerances() -> dict:
     rtol = _TOL["rtol_solver"]
     return {
         "rtol_point": rtol,
@@ -65,10 +67,13 @@ def _method_tolerances() -> dict:
     }
 
 
-@pytest.mark.parametrize("cov_type", _checks.COV_TYPES)
+# ── 凍結フィクスチャとの数値照合（合成データ） ────────────────────────
+
+
+@pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
 @pytest.mark.parametrize("scenario", _checks.SCENARIOS)
 def test_matches_censreg(fixtures, scenario, cov_type):
-    ref = fixtures[scenario][cov_type]
+    ref = fixtures["synthetic"][scenario][cov_type]
     res = _checks.build_fit(scenario, cov_type, ref)
     _checks.check_result(
         res, ref, f"{scenario}/{cov_type}", **_tolerances(scenario)
@@ -77,7 +82,7 @@ def test_matches_censreg(fixtures, scenario, cov_type):
 
 @pytest.mark.parametrize("cov_key", _checks.CLUSTER_COV_KEYS)
 def test_cluster_matches_censreg(fixtures, cov_key):
-    ref = fixtures[_checks.BASELINE_SCENARIO][cov_key]
+    ref = fixtures["synthetic"][_checks.BASELINE_SCENARIO][cov_key]
     res = _checks.build_fit(_checks.BASELINE_SCENARIO, cov_key, ref)
     _checks.check_result(
         res,
@@ -87,16 +92,12 @@ def test_cluster_matches_censreg(fixtures, cov_key):
     )
 
 
-@pytest.mark.parametrize("solver", _checks.METHODS)
-def test_method_matches_censreg(fixtures, solver):
-    ref = fixtures["solver"][solver]
-    res = _checks.build_method_fit(solver, ref)
-    _checks.check_result(res, ref, f"solver/{solver}", **_method_tolerances())
+# ── 凍結フィクスチャとの数値照合（オプション） ────────────────────────
 
 
-@pytest.mark.parametrize("cov_type", _checks.COV_TYPES)
+@pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
 def test_no_intercept_matches_censreg(fixtures, cov_type):
-    ref = fixtures["no_intercept"][cov_type]
+    ref = fixtures["synthetic"]["no_intercept"][cov_type]
     res = _checks.build_no_intercept_fit(cov_type, ref)
     _checks.check_result(
         res,
@@ -106,8 +107,45 @@ def test_no_intercept_matches_censreg(fixtures, cov_type):
     )
 
 
-@pytest.mark.parametrize("cov_type", _checks.COV_TYPES)
+@pytest.mark.parametrize("solver", _checks.METHODS)
+def test_solver_matches_censreg(fixtures, solver):
+    ref = fixtures["synthetic"]["solver"][solver]
+    res = _checks.build_method_fit(solver, ref)
+    _checks.check_result(res, ref, f"solver/{solver}", **_solver_tolerances())
+
+
+def _combination_tolerances() -> dict:
+    rtol = _TOL["rtol_solver_combination"]
+    return {
+        "rtol_point": rtol,
+        "rtol_inference": rtol,
+        "rtol_conf_int": rtol,
+        "atol": _TOL["atol"],
+    }
+
+
+@pytest.mark.parametrize("solver", _checks.METHODS)
+@pytest.mark.parametrize(
+    ("scenario", "cov_key"), _checks.SOLVER_COMBINATION_CASES
+)
+def test_solver_combination_matches_censreg(
+    fixtures, scenario, cov_key, solver
+):
+    ref = fixtures["synthetic"][scenario][cov_key]
+    res = _checks.build_fit(scenario, cov_key, ref, solver=solver)
+    _checks.check_result(
+        res,
+        ref,
+        f"{scenario}/{cov_key}/{solver}",
+        **_combination_tolerances(),
+    )
+
+
+# ── 凍結フィクスチャとの数値照合（実データ） ──────────────────────────
+
+
+@pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
 def test_mroz_matches_censreg(fixtures, cov_type):
-    ref = fixtures["mroz"][cov_type]
+    ref = fixtures["wooldridge"]["mroz"][cov_type]
     res = _checks.build_fit("mroz", cov_type, ref)
     _checks.check_result(res, ref, f"mroz/{cov_type}", **_tolerances("mroz"))

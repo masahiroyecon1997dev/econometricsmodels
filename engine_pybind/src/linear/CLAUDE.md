@@ -11,18 +11,56 @@
 - `ChunkedArray::rechunk()`は`Cow<'_, ChunkedArray<T>>`を返す。`Cow`は`IntoIterator`非実装のため`.into_iter()`ではなく`.iter()`を使う（`Cow`はDerefで透過的に呼べる）。
 - pyo3 0.28では`PyObject`型エイリアスがpreludeから削除済み。`Py<PyAny>`を直接使う。
 - pyo3 0.28以降、`Clone`実装`#[pyclass]`の`FromPyObject`自動導出はopt-in。Python側インスタンスを引数で受け取るオプション型（`OLSOptions`等）には`#[pyclass(from_py_object)]`を明示する。
-- `DataFrame::new`は`(height: usize, columns: Vec<Column>)`という2引数シグネチャ（`Vec<Column>`のみを渡す旧APIではない）。列を追加するには`polars::prelude::Column::new(name.into(), values)`で構築し、既存の`DataFrame`には`.with_column(column)`（`PolarsResult<&mut Self>`）で付加する（`OLSResult::augment()`/`WLSResult::augment()`で使う）。
+- `DataFrame::new`は`(height: usize, columns: Vec<Column>)`という2引数シグネチャ（`Vec<Column>`のみを渡す旧APIではない）。列を追加するには`polars::prelude::Column::new(name.into(), values)`で構築し、既存の`DataFrame`には`.with_column(column)`（`PolarsResult<&mut Self>`）で付加する（`DataFrame::new`は`select_columns`が取り込んだ列の組み立てに使う）。
+
+## `white_test()`（事後診断）の配線
+
+`OLSResult`は`OlsEstimator`を保持しないため、`white_test()`は`x_column_names` → `extract_f64_columns`（`predict_for`は両者を
+束ねた`extract_model_x_columns`を使うが、`white_test()`は列名自体も`engine`に渡すため
+分けて呼ぶ）で元のデータ（`source_data`）と`param_names`から`x`の列だけを`select_columns`で取り込み、保持している`residuals`と
+合わせて`engine::linear::diagnostics::white_test`に渡す。`source_data`が`None`（`IVResult.first_stage()`
+由来）なら`augment(new_data=None)`と同じく`ValidationError`。`has_intercept`は`param_names[0] == "const"`で
+推定せず保持フィールドを使う（`include_intercept=false`で`x`に`"const"`列がありうるため）。LM/Fの両方を
+engineが計算し、`statistic`引数（`StatisticVersion`、大文字小文字を区別しない）で`WhiteTestOutput`の
+フィールドを選ぶだけ（`select_statistic`はWhite・BPで共通）。計算ロジックは持たない。
+
+`breusch_godfrey_test(time, nlags, statistic)`も同じ配線（`x`は`extract_model_x_columns`で再抽出し、残差に加え、時間列を
+`extract_time_order_ranks`で順位にして`engine`へ渡す。`hac_time`と同じく同値・欠損値・NaNは
+`ValidationError`）。引数は型検査を厳密にするため`&Bound<PyAny>`で受け、`extract_strict_text`/
+`extract_strict_int`（`bool`・`float`は`TypeError`）を通す。`nlags`は`i64`のまま`engine`に渡し、
+`nlags < 1`の検査と巨大値の飽和は`engine`側（`InvalidNlags`・観測数不足）。
+`breusch_pagan_test(variables, statistic)`も同じ配線で、`variables`は`Option<&Bound<PyAny>>`として
+`extract_column_list`（`list`以外・`str`以外の要素は`TypeError`）で受け、`None`なら
+`x_column_names`でモデルの`x`を使う。空リスト・重複は`validate_x_non_empty`/
+`validate_no_duplicate_within_role`（ロール名`variables`）で`ValidationError`。モデルの`x`や`y`との
+重複は検査しない（モデル外の列・`y`列も`Z`にできる仕様）。元のデータの有無は`variables`の
+型検査より後（型の誤りは学習データが無い結果でも`TypeError`）。
+
+## 使う列だけ取り込む（`select_columns`）
+
+`fit_*`と`predict()`/`augment()`の`new_data`は、`PyDataFrame`への変換（`pyo3-polars`が全列をArrow経由で取り込む）を直接行わない。
+`shared/column_extraction.rs`の`check_dataframe`で`polars.DataFrame`かを調べ（`TypeError`）、
+`select_columns`で**推定に指名された列だけ**を取り込んだ`DataFrame`（`SelectedData.frame`）と、元のPythonオブジェクト（`SelectedData.source`）を得る。
+指名されない列は読まない。未使用の`UInt128`列がpolars-coreのpanicを起こす（取り込めないdtype。`UNREADABLE_DTYPES`）のを避けるため。
+指名される列は`fit_*`（`lib.rs`）が`y`・`x`等と各`*Options::data_columns()`（`cluster`・`hac_time`・`time`・`dk_time`）から組み立てる。
+**オプションに列名を持つフィールドを足したら、`data_columns()`に足す**（足さないと、その列が取り込まれず`COLUMN_NOT_FOUND`になる）。
+存在しない列は選ばず、列を引く側（`extract_f64_column`等）が`COLUMN_NOT_FOUND`にする。取り込めないdtypeの列は、`Null`型の目印の列
+（名前に（dtype、元の列名）を符号化）に置き換え、列を引く側（`missing_column_error`）が`COLUMN_UNSUPPORTED_DTYPE`にする。
+こうして検査の順序は、列を引く位置で決まる（`tests/cross_method/test_validation_order.py`）。
+`LogitResult`等の`predict_for`は、`new_data`から`x`列だけを`select_model_x_columns`で取り込む。
 
 ## DataFrameを構築して返す（`augment()`）
 
 `predict()`までは全メソッドが`Vec<f64>`等のフラットな値を返すだけだったが、`augment()`は
-`OLSResult`/`WLSResult`が`fit()`時の元`PyDataFrame`を非公開の`training_data`フィールド
-（`OLSResult`は`Option<DataFrame>`、`IVResult.first_stage()`という別経路の構築元を持つため。
-`WLSResult`はこの経路がなく常に`DataFrame`）として保持し、`new_data=None`時にそれへ予測値の列を
-付加して返す設計にした。polarsの列は内部で参照カウント方式のため、`DataFrame`を`clone()`しても
-実際のデータはコピーされない（Arrowゼロコピー方針、CLAUDE.md 2章と整合）。列名衝突
-（ソースデータに既に`"predicted"`列がある場合）は`validation.rs`の
-`validate_no_existing_column`で`ValidationError`にする（黙って上書きしない）。詳細な設計判断は
+結果が`fit()`に渡された元の`polars.DataFrame`（Pythonオブジェクト）を非公開の`source_data`フィールド
+（`OLSResult`は`Option<Py<PyAny>>`、`IVResult.first_stage()`という別経路の構築元を持つため。
+他の結果型はこの経路がなく常に保持）として持ち、`new_data=None`時にそれへ予測値の列を足して返す。
+足すのは`shared/augment.rs`の`append_predicted_column`で、Python側の`DataFrame.with_columns`に`PySeries`を渡す。
+取り込んだ`DataFrame`ではなく元のオブジェクトに足すので、推定に使わない列（取り込めないdtypeの列を含む）が出力に残る。
+参照を持つだけでデータはコピーしない（Arrowゼロコピー方針、CLAUDE.md 2章と整合）。列名衝突
+（ソースデータに既に`"predicted"`列がある場合）は`append_predicted_column`が元の`columns`を調べて
+`ValidationError`にする（黙って上書きしない）。OLSの事後診断（White・Breusch-Pagan・Breusch-Godfrey）も、必要な列を
+`source_data`から都度`select_columns`で取り込む。詳細な設計判断は
 `docs/spec/ols-spec.md`「augment()」参照。
 
 ## バリデーションの責務分担（`engine`と重複させない）
@@ -34,7 +72,7 @@
 - `include_intercept=true`のとき`x`に`"const"`という列名がある場合（自動追加する定数項名と衝突）
 - `x`が空リストの場合
 
-これらは元々OLS/WLS/Logitの`fit`/`build_logit_input`にメッセージ文言まで重複して実装されていたが、`engine_pybind/src/validation.rs`（クレート直下、`column_extraction.rs`と同じ位置づけ）に集約した: `validate_x_non_empty`/`validate_no_duplicate_x`/`validate_no_const_collision`/`validate_no_duplicate_roles`（`y`/`weight`等の単一列名ロール間の重複、`roles: &[(&str, &str)]`のペアリストを受け取る汎用関数。ただし`x`のように複数列を取るロール、例えば将来のIVの`instrument`には未対応、着手時に再検討が要る）。**新しい手法を実装する際も、この4関数を呼び出す形にし、同様のチェックを独自実装しないこと。**
+これらは元々OLS/WLS/Logitの`fit`/`build_logit_input`にメッセージ文言まで重複して実装されていたが、`engine_pybind/src/shared/validation.rs`（`shared/`配下、`column_extraction.rs`と同じ位置づけ）に集約した: `validate_x_non_empty`/`validate_no_duplicate_x`/`validate_no_const_collision`/`validate_no_duplicate_roles`（`y`/`weight`等の単一列名ロール間の重複、`roles: &[(&str, &str)]`のペアリストを受け取る汎用関数。ただし`x`のように複数列を取るロール、例えば将来のIVの`instrument`には未対応、着手時に再検討が要る）。**新しい手法を実装する際も、この4関数を呼び出す形にし、同様のチェックを独自実装しないこと。**
 
 `confidence_level`の範囲チェック・`cov_type="cluster"`なのに`cluster`未指定、といった`engine`側が既に検知する項目は`engine_pybind`側で重複チェックしない（`LeastSquaresError`のバリアント一覧は`ols-spec.md`「engine/engine_pybind間のデータ受け渡し・エラー変換」の対応表を参照）。
 
@@ -42,7 +80,7 @@
 
 ## エラー変換
 
-`engine::linear::common::LeastSquaresError`（OLS/WLS共通のエラー型。元々`OlsError`という名前だったがWLSも含む実態に合わせて改名・`linear/common.rs`に移動）→ `PyErr`は`impl From`ではなく`fn least_squares_error_to_pyerr(err: LeastSquaresError) -> PyErr`という関数として実装する（`LeastSquaresError`・`PyErr`ともにこのクレート外定義の型でorphan ruleに抵触するため）。呼び出し側で`.map_err(least_squares_error_to_pyerr)?`する。WLSも同型のパターンを踏襲する。
+`engine::linear::common::LeastSquaresError`（OLS/WLS共通のエラー型。元々`OlsError`という名前だったがWLSも含む実態に合わせて改名・`linear/common.rs`に移動）→ `PyErr`は`impl From`ではなく`fn least_squares_error_to_pyerr(err: LeastSquaresError) -> PyErr`という関数として実装する（`LeastSquaresError`・`PyErr`ともにこのクレート外定義の型でorphan ruleに抵触するため）。呼び出し側で`.map_err(least_squares_error_to_pyerr)?`する。中身は`to_pyerr(&err)`を呼ぶだけで、バリアントごとの分岐は持たない（`code`・`params`と例外クラスの別は`engine`側の`ErrorInfo::report()`とカタログが決める）。WLSも同型のパターンを踏襲する。
 
 ## `cov_type`固有の追加列
 
@@ -52,4 +90,8 @@
 
 `WLS`は当初専用の`WLSOptions`を持たず`OLSOptions`をそのまま再利用していたが（`WLSResult`は元から独立型だったのと非対称だった）、ユーザビリティ向上のため`WLSOptions`を新設した。フィールド構成は`OLSOptions`と完全に同一（`cov_type`/`include_intercept`/`confidence_level`/`cluster`/`hac_lags`/`hac_time`、既定値・意味論とも同じ、`docs/spec/wls-spec.md`「API引数」参照）。このフィールド重複は意図的で共通base構造体には切り出さない（`engine_pybind/src/nonlinear/CLAUDE.md`「`LogitOptions`/`ProbitOptions`/`TobitOptions`のフィールド重複は意図的」節と同じ理由。`IVOptions`が`OLSOptions`と同種のフィールドを独立再定義している既存precedentとの一貫性、PyO3のpyclassコンストラクタがフラットなkwargs surface前提であること）。
 
-`parse_cov_type`（`linear/common.rs`）はこの新設に伴い、`&OLSOptions`ではなく`cov_type: &str, cluster: Option<&str>, hac_lags: Option<i64>, hac_time: Option<&str>`という個々のフィールド値を引数に取る形に一般化した（`nonlinear::common::parse_cov_type`が最初から個々の値を取っているのと同じ設計）。`OLSOptions`/`WLSOptions`どちらの`fit`関数も、呼び出し側で`&options.cov_type`等を展開して渡す。
+`cov_type`の検査（`linear/common.rs`）は、`&OLSOptions`ではなく`cov_type: &str, cluster: Option<&str>, hac_lags: Option<i64>, hac_time: Option<&str>`という個々のフィールド値を引数に取る形にしている（`nonlinear::common`の`parse_cov_kind`等と同じ設計）。`OLSOptions`/`WLSOptions`/`IVOptions`のどの`fit`関数も、呼び出し側で`&options.cov_type`等を展開して渡す。
+
+## `cov_type`の検査（値・組合せ・列）と報告順
+
+`linear/common.rs`の`CovKind`（文字列だけで決まる種類）を、`parse_cov_kind`（値。正規形は`CovKind::name()`）→ `check_cov_options`（`cluster`/`hac_lags`/`hac_time`の未使用 → `hac`での`hac_time`欠落）→ `resolve_cov_type`（`cluster`/`hac_time`の列を抽出して`engine`の`CovType`にする）の3段で使う。`fit`は、DataFrameを見ない検査（`cov_type`の値 → 組合せ）→ ロール構造（`validate_common_roles`等）→ `y`/`x`（WLSは`weight`も）の列 → `cluster`/`hac_time`の列の順に呼ぶ。`*Result.cov_type`は`CovKind::name()`から作り、呼び出し側で小文字化し直さない。IVは`cov_type`と`gmm_weight_type`が`cluster`/`hac_*`を共有するため、組合せの検査は`iv::common::check_iv_options`が行い、値と列の解決にはこの`parse_cov_kind`/`resolve_cov_type`を使う。この順序は`tests/cross_method/test_validation_order.py`が固定している。

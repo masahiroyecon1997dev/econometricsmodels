@@ -44,10 +44,51 @@
 #   Rscript run_glm_crosscheck.R data.csv "y ~ x1 + x2 + x3" opg probit
 #   Rscript run_glm_crosscheck.R data.csv "y ~ x1 + x2 + x3" hc0 logit
 #   Rscript run_glm_crosscheck.R data.csv "y ~ x1 + x2 + x3" cluster logit cluster
+#   # include_intercept=False相当はformula自体に"- 1"を付ける（例: "y ~ x1 + x2 + x3 - 1"）。
+#   # 係数名・model.matrix・限界効果の変数選択はいずれも名前ベースで切片列を仮定せず、
+#   # 帰無モデル（対数尤度null）は常に切片のみ（y ~ 1）を使う。df_modelはk_params - 1のまま
+#   # （本実装・statsmodelsと同じ定義）で、lr_statisticは負値になりうる。
+#   Rscript run_glm_crosscheck.R data.csv "y ~ x1 + x2 + x3 - 1" hc1 logit
+#
+#   # 信頼区間（係数・限界効果）のconfidence_level（既定0.95）を変える場合は
+#   # "--confidence-level="フラグを任意の位置に追加する（cov_type固有の位置引数とは
+#   # 独立に抜き出すため。linear/references/run_lm_crosscheck.Rと同じ方式）。
+#   Rscript run_glm_crosscheck.R data.csv "y ~ x1 + x2 + x3" hc0 logit --confidence-level=0.90
 
-args <- commandArgs(trailingOnly = TRUE)
+# 参照値を決める設定の単一の情報源。`--settings`で出力し、生成スクリプトが
+# fixtureの`_meta`へ転記する（理由は下の`glm()`・限界効果の各コメント参照）。
+glm_settings <- list(
+  glm_epsilon = 1e-14,
+  glm_maxit = 100,
+  refit_rel_change_tol = 1e-13,
+  max_refit = 100,
+  margeff_eps_sd_factor = 1e-5,
+  margeff_eps_rule = "eps = margeff_eps_sd_factor * sd(x), per variable"
+)
+
+args_raw <- commandArgs(trailingOnly = TRUE)
+if (length(args_raw) == 1 && args_raw[1] == "--settings") {
+  cat(jsonlite::toJSON(glm_settings, auto_unbox = TRUE, digits = NA))
+  quit(status = 0)
+}
+
+# "--confidence-level="フラグは、clusterのような位置引数とは独立に先に抜き出す
+# （残りの引数の位置関係を崩さないため）。
+confidence_level <- 0.95
+cl_flag_pattern <- "^--confidence-level="
+cl_flag_idx <- grep(cl_flag_pattern, args_raw)
+if (length(cl_flag_idx) > 0) {
+  confidence_level <- as.numeric(sub(cl_flag_pattern, "", args_raw[cl_flag_idx[1]]))
+  args <- args_raw[-cl_flag_idx]
+} else {
+  args <- args_raw
+}
+if (is.na(confidence_level) || confidence_level <= 0 || confidence_level >= 1) {
+  stop("--confidence-level must be in (0, 1)")
+}
+
 if (length(args) < 2) {
-  stop("usage: Rscript run_glm_crosscheck.R <data.csv> <formula> [cov_type=classical] [link=logit] [cluster]")
+  stop("usage: Rscript run_glm_crosscheck.R <data.csv> <formula> [cov_type=classical] [link=logit] [cluster] [--confidence-level=X]")
 }
 data_path <- args[1]
 formula_str <- args[2]
@@ -66,20 +107,57 @@ library(lmtest)
 library(marginaleffects)
 library(jsonlite)
 
-# 収束判定を既定（epsilon=1e-8）より厳しくする: `sandwich::estfun()`は`glm()`が
-# 最終反復の1つ前の係数で計算した作業重みを使うため、既定のままだとスコア寄与が
-# 最終係数のスコアとずれ、hc0/hc1/opgの標準誤差（とそれを使う限界効果の標準誤差・
-# 信頼区間）に相対誤差~3e-5程度の参照側ノイズが乗る（mrozで実測。係数・classicalは
-# 影響なし）。epsilon=1e-14では~4e-10まで下がる。
-glm_control <- glm.control(epsilon = 1e-14, maxit = 100)
-model <- glm(
-  as.formula(formula_str),
-  data = df,
-  family = binomial(link = link),
-  control = glm_control
+# `glm()`の収束判定はデビアンスの変化量（epsilon）だけで、デビアンスは最適点の近くで
+# 係数の誤差の2乗にしか効かないため、epsilon=1e-14でも係数が相対~1e-7ずれて止まりうる
+# （非正準リンクのprobitはFisher scoringの収束が線形で、appleでは~6e-8）。この係数の
+# ずれは、観測情報行列の手計算（下記）とロバストSEで~1e-6に増幅される。
+# さらに`sandwich::estfun()`/`meatHC()`は`glm()`が保持する作業重み・作業残差を使うが、
+# これらは最終反復の1つ前の係数で計算されている。そのため収束判定を厳しくしても
+# スコア寄与が最終係数のスコアとずれ、hc0/hc1/opgの標準誤差（とそれを使う限界効果の
+# 標準誤差・信頼区間）に参照側ノイズが乗る（既定のepsilon=1e-8ではmrozで相対~3e-5、
+# epsilon=1e-14でもk=20（many_regressors）では~1.1e-7。係数・classicalは影響なし）。
+# どちらも、収束した係数を`start`にして再fitを繰り返す（再fitは毎回少なくとも
+# 1回のFisher scoringを行う）ことで解消する。係数の変化が相対1e-13未満になるまで続け、
+# 最後の再fitで作業重み・作業残差が最終係数のものになる。
+glm_control <- glm.control(
+  epsilon = glm_settings$glm_epsilon,
+  maxit = glm_settings$glm_maxit
 )
+refit <- function(start = NULL) {
+  glm(
+    as.formula(formula_str),
+    data = df,
+    family = binomial(link = link),
+    start = start,
+    control = glm_control
+  )
+}
+model <- refit()
 if (!model$converged) {
-  stop("glm() did not converge with epsilon=1e-14")
+  stop(paste("glm() did not converge with epsilon =", glm_settings$glm_epsilon))
+}
+# fixtureへ記録する収束の診断値（参照値の再現条件の確認用）:
+# 最初のglm()のIRLS反復数、固定点に達するまでの再fit回数、最後の再fitでの
+# 係数の最大相対変化。
+irls_iterations <- model$iter
+refit_count <- 0
+refit_max_rel_change <- NA_real_
+for (i in seq_len(glm_settings$max_refit)) {
+  prev_coef <- coef(model)
+  model <- refit(start = prev_coef)
+  if (!model$converged) {
+    stop("glm() refit from converged coefficients did not converge")
+  }
+  refit_count <- i
+  refit_max_rel_change <- max(
+    abs(coef(model) - prev_coef) / pmax(abs(coef(model)), 1e-8)
+  )
+  if (refit_max_rel_change < glm_settings$refit_rel_change_tol) {
+    break
+  }
+  if (i == glm_settings$max_refit) {
+    stop("glm() refit did not reach a fixed point")
+  }
 }
 
 # 観測情報行列（真の対数尤度のHessian）の重みを、本実装（nonlinear/probit.rs・
@@ -161,14 +239,14 @@ if (cov_type == "classical") {
 }
 
 # z検定（本実装・statsmodelsと同じくz分布ベース、glm/binomialのcoeftestの既定）。
-# 信頼区間は標準正規分布の臨界値で手計算する（本実装のz検定・nonlinear-common.md
-# 4章と揃える。coeftestは信頼区間を返さないため）。
+# 信頼区間は標準正規分布の臨界値（`confidence_level`から求める。既定0.95）で手計算する
+# （本実装のz検定・nonlinear-common.md4章と揃える。coeftestは信頼区間を返さないため）。
 ct <- coeftest(model, vcov = vc)
 coefs <- ct[, 1]
 ses <- ct[, 2]
 zs <- ct[, 3]
 pvalues <- ct[, 4]
-z_crit <- qnorm(0.975)
+z_crit <- qnorm(1 - (1 - confidence_level) / 2)
 conf_low <- coefs - z_crit * ses
 conf_high <- coefs + z_crit * ses
 names(coefs) <- rownames(ct)
@@ -203,7 +281,7 @@ format_margeff <- function(me_df) {
   for (i in seq_len(nrow(me_df))) {
     out[[me_df$term[i]]] <- list(
       effect = me_df$estimate[i],
-      std_err = me_df$std.error[i],
+      std_error = me_df$std.error[i],
       test_stat = me_df$statistic[i],
       p_value = me_df$p.value[i],
       conf_lower = me_df$conf.low[i],
@@ -228,7 +306,7 @@ format_margeff <- function(me_df) {
 # 呼び出す（全シナリオ・全変数で解析解と~1e-11、標準誤差も本実装と~1e-8で一致する。
 # `numderiv=`引数は効果の刻み幅に影響しない）。
 margeff_vars <- setdiff(names(coef(model)), "(Intercept)")
-margeff_eps <- function(v) 1e-5 * sd(df[[v]])
+margeff_eps <- function(v) glm_settings$margeff_eps_sd_factor * sd(df[[v]])
 margeff_by_var <- function(call_fun) {
   do.call(rbind, lapply(margeff_vars, function(v) {
     call_fun(v, margeff_eps(v))
@@ -236,7 +314,13 @@ margeff_by_var <- function(call_fun) {
 }
 margeff <- list(
   overall = format_margeff(margeff_by_var(function(v, eps) {
-    avg_slopes(model, variables = v, vcov = vc, eps = eps)
+    avg_slopes(
+      model,
+      variables = v,
+      vcov = vc,
+      eps = eps,
+      conf_level = confidence_level
+    )
   })),
   mean = format_margeff(margeff_by_var(function(v, eps) {
     slopes(
@@ -244,7 +328,8 @@ margeff <- list(
       variables = v,
       newdata = datagrid(model = model, FUN_numeric = mean, FUN_integer = mean),
       vcov = vc,
-      eps = eps
+      eps = eps,
+      conf_level = confidence_level
     )
   })),
   median = format_margeff(margeff_by_var(function(v, eps) {
@@ -253,14 +338,56 @@ margeff <- list(
       variables = v,
       newdata = datagrid(model = model, FUN_numeric = median, FUN_integer = median),
       vcov = vc,
-      eps = eps
+      eps = eps,
+      conf_level = confidence_level
     )
   }))
 )
 
+# 予測確率と分類表。cov_typeに依存しない（点推定のみ）ため全エントリに同じ形で出す。
+# `pred_table`は本実装・statsmodelsと同じ規約: 行は実際のクラス（y >= 0.5で0/1）、
+# 列は予測クラス（確率 > 0.5 で1。ちょうど0.5は0側の厳密な不等号）。
+fitted_prob <- as.numeric(fitted(model))
+pred_table <- matrix(
+  as.numeric(table(
+    factor(as.integer(model$y >= 0.5), levels = 0:1),
+    factor(as.integer(fitted_prob > 0.5), levels = 0:1)
+  )),
+  nrow = 2,
+  ncol = 2
+)
+
+stopifnot(sum(pred_table) == nrow(df))
+
+# 標本内予測は先頭PRED_HEAD行と全行の合計（先頭以外の行の取り違えも合計で検知する）。
+PRED_HEAD <- 10
+predict_head <- fitted_prob[seq_len(min(PRED_HEAD, length(fitted_prob)))]
+predict_sum <- sum(fitted_prob)
+
+# 新規データ（out-of-sample）の予測確率。学習データの各スロープ列の「平均+1標準偏差」
+# 「平均-1標準偏差」を値とする2行を作り、`linkinv(new_mm %*% beta)`で計算する。
+# 切片列がある場合は常に1。この検証が対象にするのは確率の式そのもの（標本内で検証済み）
+# ではなく、新規データの設計行列組み立て（切片の自動付加・列名による対応付け）が
+# Rの`model.matrix`の規約と一致すること。Python側は`new_x`をそのまま`new_data`に使う。
+mm <- model.matrix(model)
+beta <- coef(model)
+slope_cols <- which(colnames(mm) != "(Intercept)")
+new_mm <- matrix(0, nrow = 2, ncol = ncol(mm))
+colnames(new_mm) <- colnames(mm)
+if ("(Intercept)" %in% colnames(mm)) new_mm[, "(Intercept)"] <- 1
+slope_means <- colMeans(mm[, slope_cols, drop = FALSE])
+slope_sds <- apply(mm[, slope_cols, drop = FALSE], 2, sd)
+new_mm[1, slope_cols] <- slope_means + slope_sds
+new_mm[2, slope_cols] <- slope_means - slope_sds
+predict_new_data <- as.numeric(model$family$linkinv(new_mm %*% beta))
+new_x <- list()
+for (col_idx in slope_cols) {
+  new_x[[colnames(mm)[col_idx]]] <- new_mm[, col_idx]
+}
+
 result <- list(
-  coef = as.list(coefs),
-  se = as.list(ses),
+  params = as.list(coefs),
+  std_errors = as.list(ses),
   test_stats = as.list(zs),
   p_values = as.list(pvalues),
   conf_low = as.list(conf_low),
@@ -272,6 +399,14 @@ result <- list(
   lr_statistic = lr_stat,
   lr_p_value = lr_pvalue,
   pseudo_r_squared = prsquared,
-  margeff = margeff
+  irls_iterations = irls_iterations,
+  refit_count = refit_count,
+  refit_max_rel_change = refit_max_rel_change,
+  margeff = margeff,
+  pred_table = pred_table,
+  predict_head = predict_head,
+  predict_sum = predict_sum,
+  predict_new_data = predict_new_data,
+  new_x = new_x
 )
 cat(toJSON(result, auto_unbox = TRUE, digits = NA))

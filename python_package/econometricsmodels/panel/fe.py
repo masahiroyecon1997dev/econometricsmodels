@@ -29,6 +29,11 @@ import polars as pl
 
 from .. import _lib
 from .._lib import FEOptions
+from .._results_utils import (
+    by_param,
+    conf_int_by_param,
+    params_table_rows,
+)
 
 __all__ = ["FE", "FEOptions", "FEResults"]
 
@@ -37,8 +42,7 @@ class FE:
     """Fixed effects (within) panel regression estimator.
 
     Supports one-way (entity) and two-way (entity + time) fixed
-    effects, selected via `FEOptions.time` (`docs/spec/fe-spec.md`
-    section 1).
+    effects, selected via `FEOptions.time`.
 
     Args:
         data: A polars DataFrame containing the dependent variable,
@@ -99,7 +103,9 @@ class FE:
                 unsupported for FE), an unbalanced panel with two-way
                 effects, a singleton entity/time group, or an
                 explanatory variable with zero variance after the
-                within transformation, `cov_type="dk"` without `dk_time` (the Driscoll-Kraay
+                within transformation, an outcome with no variation
+                left after the fixed effects are removed,
+                `cov_type="dk"` without `dk_time` (the Driscoll-Kraay
                 time periods are never taken from `time`), `cov_type="dk"` with no more
                 unique time periods than regressors: the
                 Driscoll-Kraay covariance has rank at most T-1, so the
@@ -111,7 +117,9 @@ class FE:
                 `ValueError`.
             ComputationError: A problem was detected during
                 computation (e.g. a singular within-transformed design
-                matrix). A subclass of `RuntimeError`.
+                matrix, or a perfect fit of the within regression:
+                residuals zero up to rounding). A subclass of
+                `RuntimeError`.
         """
         raw = _lib.fit_fe(
             self._data, self._y, self._x, self._entity, self._options
@@ -122,13 +130,27 @@ class FE:
 class FEResults:
     """FE estimation results.
 
-    Array-valued properties (`params`, `std_errors`, etc.) are exposed
-    as dictionaries keyed by coefficient name (for O(1) lookup of a
-    single parameter). Use `coef_table()` for a row-oriented listing.
+    Coefficient-level properties (`params`, `std_errors`, etc.) are
+    dictionaries keyed by coefficient name, so one coefficient is
+    `result.params["x1"]`. Use `params_table()` for a row-oriented
+    listing (a list of dicts), for example for a JSON response.
 
-    `fixed_effects()` (the fixed effects themselves) is provided as a
-    separate method rather than a field on this class
-    (`docs/spec/fe-spec.md` section 3.5).
+    Fields by purpose:
+
+    - Coefficients (no intercept): `params`, `std_errors`,
+      `test_stats`, `p_values`, `conf_int`; the names in order:
+      `param_names`.
+    - Which distribution the tests use: `stat_dist`, `stat_df`.
+    - Overall F test: `f_statistic`, `f_p_value`, `f_df_num`,
+      `f_df_denom`.
+    - Fit: `r_squared_within`, `r_squared_between`,
+      `r_squared_overall`, `log_likelihood`, `aic`, `bic`.
+    - Panel size: `n_obs`, `n_entities`, `n_periods` (two-way only).
+    - Model size: `df_model`, `df_resid`, `dep_var_name`.
+    - Settings echoed back: `cov_type`, `dk_bandwidth_used`.
+    - Residuals: `residuals` (within-transformed).
+    - Methods: `fixed_effects()` (the entity and time effects),
+      `params_table()`.
 
     Args:
         raw: The estimation result object returned by `_lib.fit_fe`
@@ -151,49 +173,42 @@ class FEResults:
     @property
     def params(self) -> dict[str, float]:
         """Coefficient name to coefficient value."""
-        return dict(zip(self._raw.param_names, self._raw.params))
+        return by_param(self._raw.param_names, self._raw.params)
 
     @property
     def std_errors(self) -> dict[str, float]:
         """Coefficient name to standard error."""
-        return dict(zip(self._raw.param_names, self._raw.std_errors))
+        return by_param(self._raw.param_names, self._raw.std_errors)
 
     @property
     def test_stats(self) -> dict[str, float]:
         """Coefficient name to test statistic (t-statistic; see
         `stat_dist`)."""
-        return dict(zip(self._raw.param_names, self._raw.test_stats))
+        return by_param(self._raw.param_names, self._raw.test_stats)
 
     @property
-    def stat_dist(self) -> Literal["t", "normal"]:
-        """Distribution of `test_stats`: `"t"` (t-statistics) or
-        `"normal"` (z-statistics)."""
+    def stat_dist(self) -> Literal["t"]:
+        """Distribution of `test_stats`. Always `"t"`: t-statistics are
+        used for every `cov_type`."""
         return self._raw.stat_dist
 
     @property
-    def stat_df(self) -> int | None:
-        """Degrees of freedom of the t distribution behind `test_stats`,
-        or `None` when `stat_dist` is `"normal"`. May differ from
-        `df_resid` (cluster-robust inference uses `G - 1`, Driscoll-Kraay
-        `T - 1`), so use this to recompute p-values from `test_stats`."""
+    def stat_df(self) -> int:
+        """Degrees of freedom of the t distribution behind `test_stats`.
+        May differ from `df_resid` (cluster-robust inference uses
+        `G - 1`, Driscoll-Kraay `T - 1`), so use this to recompute
+        p-values from `test_stats`."""
         return self._raw.stat_df
 
     @property
     def p_values(self) -> dict[str, float]:
         """Coefficient name to two-sided p-value."""
-        return dict(zip(self._raw.param_names, self._raw.p_values))
+        return by_param(self._raw.param_names, self._raw.p_values)
 
     @property
     def conf_int(self) -> dict[str, tuple[float, float]]:
         """Coefficient name to confidence interval `(lower, upper)`."""
-        return {
-            name: (lower, upper)
-            for name, lower, upper in zip(
-                self._raw.param_names,
-                self._raw.conf_lower,
-                self._raw.conf_upper,
-            )
-        }
+        return conf_int_by_param(self._raw)
 
     @property
     def residuals(self) -> list[float]:
@@ -249,30 +264,32 @@ class FEResults:
         return self._raw.dk_bandwidth_used
 
     @property
-    def f_statistic(self) -> float:
+    def f_statistic(self) -> float | None:
         """F-statistic for the joint significance of the slope
         coefficients (classical F-test when `cov_type="classical"`, a
-        robust Wald test otherwise)."""
+        robust Wald test otherwise). `None` when there are no slope
+        coefficients."""
         return self._raw.f_statistic
 
     @property
-    def f_p_value(self) -> float:
-        """P-value of the F-statistic."""
+    def f_p_value(self) -> float | None:
+        """P-value of the F-statistic (`None` when `f_statistic` is
+        `None`)."""
         return self._raw.f_p_value
 
     @property
     def f_df_num(self) -> int | None:
-        """Numerator degrees of freedom of `f_statistic` (`None` when it
-        is NaN, i.e. there are no slope coefficients)."""
+        """Numerator degrees of freedom of `f_statistic` (`None` when
+        `f_statistic` is `None`)."""
         return self._raw.f_df_num
 
     @property
     def f_df_denom(self) -> int | None:
-        """Denominator degrees of freedom of `f_statistic` (`None` when it
-        is NaN). Follows `cov_type` like the t-tests (`G - 1` for
+        """Denominator degrees of freedom of `f_statistic` (`None` when
+        `f_statistic` is `None`). Follows `cov_type` like the t-tests (`G - 1` for
         `cov_type="cluster"`, `T - 1` for `"dk"`, `df_resid` otherwise),
-        so it equals `stat_df` whenever `f_statistic` is not NaN. Use this
-        to recompute the p-value from `f_statistic`."""
+        so it equals `stat_df` whenever `f_statistic` is not `None`. Use
+        this to recompute the p-value from `f_statistic`."""
         return self._raw.f_df_denom
 
     @property
@@ -305,39 +322,20 @@ class FEResults:
         """Overall R² (based on the untransformed variables)."""
         return self._raw.r_squared_overall
 
-    def coef_table(self) -> list[dict[str, float | str]]:
+    def params_table(self) -> list[dict[str, float | str]]:
         """Row-oriented summary table of the coefficients.
 
         Shaped to be usable almost as-is in a REST API response (same
-        policy as `OLSResults.coef_table()`). Returned as `list[dict]`
+        policy as `OLSResults.params_table()`). Returned as `list[dict]`
         rather than a polars DataFrame, per the project's policy of
-        not using DataFrames for the coefficient table itself.
+        not using DataFrames for the parameter table itself.
 
         Returns:
             A list of dictionaries, one per coefficient. Keys are
-            `param`, `coef`, `std_err`, `test_stat`, `p_value`,
+            `param_name`, `param`, `std_error`, `test_stat`, `p_value`,
             `conf_lower`, `conf_upper`.
         """
-        return [
-            {
-                "param": name,
-                "coef": coef,
-                "std_err": se,
-                "test_stat": t,
-                "p_value": p,
-                "conf_lower": lower,
-                "conf_upper": upper,
-            }
-            for name, coef, se, t, p, lower, upper in zip(
-                self._raw.param_names,
-                self._raw.params,
-                self._raw.std_errors,
-                self._raw.test_stats,
-                self._raw.p_values,
-                self._raw.conf_lower,
-                self._raw.conf_upper,
-            )
-        ]
+        return params_table_rows(self._raw)
 
     def fixed_effects(
         self,
@@ -347,10 +345,7 @@ class FEResults:
 
         One-way: `dict[str, float]` keyed by entity id. Two-way:
         `dict[str, dict[str, float]]` with top-level keys `"entity"`/
-        `"time"`. See `docs/spec/fe-spec.md`
-        section 3.5 and `_lib.FEResult.fixed_effects`'s docstring for
-        the exact formula, including the two-way normalization
-        convention. `α_i`/`γ_t` are not individually identified in the
+        `"time"`. `α_i`/`γ_t` are not individually identified in the
         two-way case, so `γ_t` of the first period in time order (the
         order of the values of the time column) is fixed to 0 and
         `α_i` absorbs the overall level. The `"time"` dictionary lists

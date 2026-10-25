@@ -9,7 +9,7 @@ JSONにまとめて書き出す。
 両者を分けている理由は`.claude/skills/reference-benchmark/SKILL.md`参照。
 
 入力データは`tests/fixtures/benchmarks/data/`に固定済みのCSVを読む
-（`benchmark/linear/freeze.py`参照）。Wooldridgeデータ（wage1/gpa2）は
+（`benchmark/linear/freeze.py`参照）。Wooldridgeデータ（wage1/gpa2/mroz）は
 `load_wooldridge.py`経由で都度ロードする（データの再配布ライセンスが
 未確認のためCSVとして固定しない）。
 
@@ -27,85 +27,45 @@ import statsmodels
 from benchmark.common import (
     BENCHMARKS_DIR,
     DATA_DIR,
+    balanced_cluster_groups,
+    group_by_dataset_source,
     imbalanced_cluster_groups,
     run_fixture_cli,
 )
+from benchmark.common.constants import MROZ_FORMULA
 from benchmark.common.load_wooldridge import load as load_wooldridge
-from benchmark.linear.constants import HAC_MAXLAGS, PREDICT_NEW_DATA
+from benchmark.linear.constants import (
+    CLUSTER_ILL_CONDITIONED_SCENARIOS,
+    CONFIDENCE_LEVEL_NON_DEFAULT,
+    COV_TYPES,
+    HAC_LAGS_EXPLICIT,
+    NON_HAC_COV_TYPES,
+    NUMERIC_SCENARIOS,
+    PREDICT_NEW_DATA,
+)
 from benchmark.linear.references.statsmodels_ref import (
     extract_full_fit_stats,
     run,
     run_predict,
 )
 
-# 完全な多重共線性・scale_varianceは数値比較の対象外（testing-policy.md「テストの3系統」参照）。
-# ComputationErrorが発生することのみをテストコード側で対応する。scale_varianceは
-# 傾き係数の同時共分散部分行列がスケール比の2乗相当の条件数を持ち倍精度の限界を
-# 超えるため、wald_f_test側で全cov_typeでComputationErrorになる。
-NUMERIC_SCENARIOS = [
-    "baseline",
-    "small_n",
-    "high_variance",
-    "heteroskedastic",
-    "autocorrelated",
-    "moderate_multicollinearity",
-    "high_condition_number",
-    # scale_variance（x1*1e6, x2*1e-3、全cov_typeでComputationError）より
-    # 緩いスケール差（x1*1e2, x2*1e-1）の成功パス。faer等の数値計算
-    # ライブラリ依存部分の将来の精度リグレッションを検知する
-    # （testing-policy.md「テスト用データセット」1.、ユーザー確認済み）。
-    "scale_variance_mild",
-    # n=k+1（自由度1ちょうど）の成功パス。baselineをn=5,k=3で
-    # オーバーライドした専用データ（engine側の`k`は定数項込みでk=4になる
-    # ため、df_resid=1にはn=5が必要。benchmark/linear/freeze.py参照）。同じx1..x3の
-    # 列構成のため、他シナリオと同じ自動フォーミュラ生成に乗る。
-    "baseline_df1",
-    # 高次元（説明変数k=20、列ごとに0.1〜100倍のスケール差）の成功パス。
-    # 列数依存バグ（インデックス誤り等）・高kでの数値的頑健性を検証する
-    # （ユーザー確認済み）。x1..x20の
-    # 列構成のため、他シナリオと同じ自動フォーミュラ生成に乗る。
-    "many_regressors",
-    # x1の5%をTukeyの汚染混合モデル（SD20倍）で外れ値に置き換えた成功パス。
-    # 少数の高レバレッジ行での数値的頑健性を検証する
-    # （ユーザー確認済み）。
-    "outlier_regressor",
-]
-
-# classical/HC系は全シナリオで確認。HACはautocorrelatedシナリオが本来の目的
-# （他のシナリオでも動くことの確認はできるが、統計的な意味は薄い）。
-COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3", "hac"]
-
 # 実データ（Wooldridge）。`generate_ols_crosscheck_fixtures.py`
 # （build_wooldridge_fixtures）と同じデータセット・回帰式・cov_type
-# （wage1/gpa2、classical/HC0-3、HACは横断面データのため対象外）。
-# 従来Rクロスチェック側にしか無かった実データ検証を主リファレンス
-# （statsmodels）側にも追加する（ユーザー確認済み）。
+# （wage1/gpa2/mroz、classical/HC0-3、HACは横断面データのため対象外）。
+# mrozは被説明変数がinlf（0/1）の実データの線形確率モデル（Logit/Probitと同じ
+# 回帰式`MROZ_FORMULA`）。誤差の分散がxに依存するため構造的に不均一分散で、
+# classicalとHC0-3の差が大きく出る。クラスターは自然なカテゴリ列が無く（`city`は
+# G=2でG<=qのため弾かれる）、HACは時系列順が無いため、いずれも対象外。
 WOOLDRIDGE_DATASETS = {
     "wage1": "lwage ~ educ + exper + tenure",
     "gpa2": "colgpa ~ sat + hsperc + tothrs",
+    "mroz": MROZ_FORMULA,
 }
-WOOLDRIDGE_COV_TYPES = ["classical", "hc0", "hc1", "hc2", "hc3"]
 
-# クラスターロバスト共分散Ŝ=(X'X)⁻¹(Σ_g X_g'e_ge_g'X_g)(X'X)⁻¹は(X'X)⁻¹を他の
-# cov_type（classical/HC0-3/HAC）と共有するが、この(X'X)⁻¹自体が悪条件・
-# 多重共線性シナリオでは数値的に不安定になりうる（他のcov_typeでは
-# COV_TYPES経由で全シナリオ検証済みだが、クラスターは従来baselineのみ
-# だったため、この組み合わせが未検証だった）。均等な疑似グループ
-# （行番号%10）1パターンのみ追加確認する（グルーピングパターン自体の
-# 網羅性はbaselineシナリオで既に確認済みのため重複させない。
-# ユーザー確認済み）。
-CLUSTER_ILL_CONDITIONED_SCENARIOS = [
-    "high_condition_number",
-    "moderate_multicollinearity",
-]
-
-# include_intercept=False・confidence_level非既定の効果は、シナリオ依存では
-# なくオプションの配線自体の動作確認が目的のため（クラスター同様、
-# testing-policy.md「テスト用データセット」3.）、baselineシナリオのみで
-# 全cov_type（COV_TYPES + cluster）と組み合わせて確認する（ユーザー確認済み）。
-# 0.95（既定）・0.99/0.80（test_ols_api.pyの幅の単調性テストで使用済み）とは
-# 異なる値として0.90を選ぶ。
-CONFIDENCE_LEVEL_NON_DEFAULT = 0.90
+# HACの実データ（時系列、年次昇順でn=38）。行順をそのまま時間順として使う。
+WOOLDRIDGE_HAC_DATASETS = {
+    "prminwge": "lprepop ~ lmincov + lusgnp",
+}
 
 
 def build_fixtures() -> dict:
@@ -126,7 +86,7 @@ def build_fixtures() -> dict:
         # cov_typeループとは別に1回だけ計算する。全シナリオで学習データに
         # 対する予測値（fitted）、baselineシナリオのみout-of-sample予測値
         # （predicted）も確認する（Rクロスチェック側`ols_crosscheck.json`と
-        # 同じ網羅性。ユーザー確認済み）。
+        # 同じ網羅性）。
         fixtures[scenario]["predict"] = run_predict(
             dataset_source="synthetic",
             dataset=scenario,
@@ -160,7 +120,7 @@ def build_fixtures() -> dict:
             )
 
             # include_intercept=False（切片なし）。全cov_type（COV_TYPES +
-            # cluster）と組み合わせて確認する（ユーザー確認済み）。
+            # cluster）と組み合わせて確認する。
             fixtures[scenario]["no_intercept"] = {
                 cov_type: run(
                     dataset_source="synthetic",
@@ -197,6 +157,18 @@ def build_fixtures() -> dict:
                     "均等な疑似グループ（行番号%10）のみ。",
                 )
             )
+
+            # 自動選択とは別に明示指定したhac_lags（HAC_LAGS_EXPLICIT）。
+            fixtures[scenario]["hac_lags"] = {
+                str(lag): run(
+                    dataset_source="synthetic",
+                    dataset=scenario,
+                    formula=None,
+                    cov_type="hac",
+                    hac_lags=lag,
+                )
+                for lag in HAC_LAGS_EXPLICIT
+            }
         elif scenario in CLUSTER_ILL_CONDITIONED_SCENARIOS:
             fixtures[scenario]["cluster"] = _run_cluster_case(
                 scenario=scenario,
@@ -213,16 +185,24 @@ def build_fixtures() -> dict:
                 formula=formula,
                 cov_type=cov_type,
             )
-            for cov_type in WOOLDRIDGE_COV_TYPES
+            for cov_type in NON_HAC_COV_TYPES
         }
     fixtures["wage1"]["cluster"] = _run_wage1_region_cluster_case()
+    for name, formula in WOOLDRIDGE_HAC_DATASETS.items():
+        fixtures[name] = {
+            "hac": run(
+                dataset_source="wooldridge",
+                dataset=name,
+                formula=formula,
+                cov_type="hac",
+            )
+        }
 
     fixtures["_meta"] = {
         "method": "ols",
         "generated_at": datetime.now(UTC).isoformat(),
         "primary_reference": "statsmodels",
         "statsmodels_version": statsmodels.__version__,
-        "hac_maxlags": HAC_MAXLAGS,
         "note": (
             "perfect_multicollinearity・scale_varianceシナリオはここに含まない"
             "（いずれもComputationErrorの発生確認のみ、テストコード側で対応。"
@@ -234,45 +214,46 @@ def build_fixtures() -> dict:
             "高次元シナリオ。"
             "outlier_regressorはx1の5%をTukeyの汚染混合モデル（SD20倍）で"
             "外れ値に置き換えた成功パス。"
-            "wage1/gpa2はWooldridge実データ（classical/HC0-3、HACは"
+            "wage1/gpa2/mrozはWooldridge実データ（classical/HC0-3、HACは"
             "時系列順の無いクロスセクションデータのため対象外）。"
+            "mrozはinlf（0/1）を被説明変数にした線形確率モデル。"
+            "prminwge（時系列、n=38）はHACのみの実データ。HACのラグは全ケース"
+            "本実装の自動選択式（benchmark.common.hac_auto_lag）で、使ったラグは"
+            "各cov_type=hacエントリのhac_lagに残す。"
             "generate_ols_crosscheck_fixtures.pyのbuild_wooldridge_fixtures()と"
-            "同じデータセット・回帰式で、従来Rクロスチェック側にしか無かった"
-            "実データ検証を主リファレンス側にも追加したもの。wage1.clusterは"
+            "同じデータセット・回帰式を使う。wage1.clusterは"
             "地域ダミー（northcen/south/west、基準northeast）から合成した"
             "実カテゴリ列regionでのクラスターロバストSE。各シナリオの"
             "'predict'キーは学習データに対する予測値（fitted、cov_typeに"
             "依存しないためcov_typeループとは別に1回だけ計算）。baseline"
             "シナリオのみout-of-sample予測値（predicted、"
-            "benchmark.linear.constants.PREDICT_NEW_DATA）も含む。従来"
-            "Rクロスチェック側（ols_crosscheck.json）にしか無かったpredict()の"
-            "検証を主リファレンス側にも追加したもの。Wooldridge実データ側は"
-            "Rクロスチェック側と同じくpredict()"
-            "検証の対象外。クラスター系（cluster/cluster_imbalanced/cluster_g2/"
-            "wage1.cluster）は従来coef/seのみだったが、test_stats/p_values/"
-            "conf_int/r_squared等のフル統計量まで検証範囲を広げた"
-            "（_run_cluster_case等がextract_full_fit_statsを使うよう変更）。"
-            "あわせて_run_cluster_caseに"
-            "use_t=Trueが指定されていなかった不備を修正（cluster時に既定の"
+            "benchmark.linear.constants.PREDICT_NEW_DATA）も含む"
+            "（Rクロスチェック側ols_crosscheck.jsonと同じ網羅性）。"
+            "Wooldridge実データ側はpredict()検証の対象外。"
+            "クラスター系（cluster/cluster_imbalanced/cluster_g2/"
+            "wage1.cluster）はparams/std_errorsに加え、test_stats/p_values/"
+            "conf_int/r_squared等のフル統計量まで検証する"
+            "（_run_cluster_case等がextract_full_fit_statsを使う）。"
+            "_run_cluster_caseはuse_t=Trueを指定する（cluster時に既定の"
             "正規分布ではなく自由度G-1のt分布を使う本プロジェクトの方針"
-            "〔docs/spec/ols-spec.md「標準誤差」〕に合わせた。coef/seは"
-            "use_tに依存しないため既存フィクスチャの値に影響なし）。"
+            "〔docs/spec/ols-spec.md「標準誤差」〕に合わせる。params/std_errorsは"
+            "use_tに依存しない）。"
             "high_condition_number/moderate_multicollinearityにもcluster"
-            "エントリを追加（従来クラスター系はbaselineシナリオのみで、"
-            "悪条件・多重共線性シナリオとの組み合わせが未検証だった。"
+            "エントリを持つ（悪条件・多重共線性シナリオとの組み合わせの確認用。"
             "均等な疑似グループ（行番号%10）のみ）。"
             "baseline.no_interceptはinclude_intercept=False（切片なし）を"
-            "COV_TYPES全種＋clusterと組み合わせて確認する（従来ライブ"
-            "statsmodels比較〔ad-hocデータ1パターン〕のみだったものを、"
-            "他オプションと同じ凍結フィクスチャに統合）。"
+            "COV_TYPES全種＋clusterと組み合わせて確認する。"
+            "baseline.hac_lagsは自動選択とは別に明示したHACラグ"
+            f"（{HAC_LAGS_EXPLICIT}、キーは文字列。0はHC0相当）。"
             "baseline.confidence_levelはconfidence_level="
             f"{CONFIDENCE_LEVEL_NON_DEFAULT}（既定0.95以外）をCOV_TYPES全種＋"
-            "clusterと組み合わせて確認する（従来相対比較〔幅の広さの"
-            "単調性のみ〕だったものを、具体的な数値の正しさまで検証する"
-            "よう拡張）。"
+            "clusterと組み合わせて確認する（幅の広さの単調性だけでなく、"
+            "具体的な数値の正しさまで検証する）。"
         ),
     }
-    return fixtures
+    return group_by_dataset_source(
+        fixtures, [*WOOLDRIDGE_DATASETS, *WOOLDRIDGE_HAC_DATASETS]
+    )
 
 
 def _run_cluster_case(
@@ -308,7 +289,7 @@ def _run_cluster_case(
     pandas_df["_group"] = (
         groups
         if groups is not None
-        else [i % 10 for i in range(len(pandas_df))]
+        else balanced_cluster_groups(len(pandas_df))
     )
 
     x_cols = [c for c in df.columns if c not in ("y", "weight")]

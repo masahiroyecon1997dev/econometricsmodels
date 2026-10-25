@@ -12,12 +12,18 @@ on:
       # benchmark/配下のフィクスチャ生成モジュールは pytest が import 時に読み込む
       # （定数・ヘルパーの単一定義元）。壊れると pytest も落ちるため CI をトリガーする。
       - "benchmark/**"
+      # エラーカタログからErrorCode・公開ドキュメントを生成するスクリプト（--checkをCIで回す）。
+      - "tools/**"
       # testジョブが import 時間チェック（performance/check_import_time.py）を回す。
       - "performance/**"
       - ".github/workflows/ci_python.yml"
   # pull_requestにはpathsフィルタを付けない（ci_engine.ymlと同じ理由、
   # 「必須ステータスチェック」参照）。
   pull_request:
+  # pip-auditジョブだけを週1回実行する(ci_engine.ymlのscheduleと同じ理由。
+  # 他のジョブはif: github.event_name != 'schedule'で飛ばす)。
+  schedule:
+    - cron: "0 1 * * 1" # 毎週月曜 01:00 UTC
 
 env:
   CARGO_TERM_COLOR: always
@@ -28,6 +34,7 @@ permissions:
 jobs:
   test:
     name: pytest / ruff (py${{ matrix.python-version }})
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -35,10 +42,12 @@ jobs:
         python-version: ["3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
 
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -61,8 +70,16 @@ jobs:
       - name: import time check (package health)
         run: uv run --locked --group test python -m performance.check_import_time
 
+      # エラーカタログ（Rustの正本）から生成したErrorCodeと公開ドキュメントの表が
+      # 最新であること。カタログを変えたら `python tools/render_error_catalog.py`
+      # で再生成してコミットする。
+      - name: error catalog outputs (--check)
+        run: uv run --locked --group test python tools/render_error_catalog.py --check
+
+      # --check-error-coverage: 全体実行の終了時に、移行済みのエラー`code`が
+      # すべて一度はテストで送出されたこと（tests/support/_errors.py）を確認する。
       - name: pytest
-        run: uv run --locked --group test pytest tests
+        run: uv run --locked --group test pytest tests --check-error-coverage
 
       - name: ruff check
         run: uv run --locked --group test ruff check .
@@ -70,11 +87,26 @@ jobs:
       - name: ruff format --check
         run: uv run --locked --group test ruff format --check .
 
+      # サポートする最古のpolarsでもテストが通ることを確認する(pyproject.tomlの
+      # `polars>=`の下限と同じバージョンにする。通ることを確認した最古のバージョンが
+      # 下限であり、それより古いとEnum型の時点列が静かに別の値になるなどの問題がある)。
+      # 拡張モジュールはPythonのpolarsのバージョンに依存しないため、ビルド済みのものを
+      # そのまま使う。uv.lockの環境を書き換えるので、このステップは最後に置く。
+      - name: pytest (oldest supported polars)
+        if: matrix.python-version == '3.12'
+        run: |
+          uv pip install polars==1.38.1
+          uv run --no-sync python -c "import polars; assert polars.__version__ == '1.38.1', polars.__version__"
+          uv run --no-sync pytest tests
+
   engine_pybind-lint:
     name: cargo test / clippy / fmt (engine_pybind)
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
@@ -104,19 +136,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: "3.12"
 
       # testグループのみを対象にする（本ワークフローが実際にインストールする依存と
       # 一致させる。benchmark/docsグループはCIでは使わない方針のため対象外）。
-      # `--with pip-audit`でプロジェクトのロック環境にpip-auditだけ一時的に重ねて実行する。
+      # pip-auditはauditグループに版固定(==)で入れ、uv.lockにハッシュごと記録する
+      # （`uvx`・`--with`のように実行のたびにPyPIの最新版を解決しない）。
       # pip-auditは依存パッケージのみを監査対象にし、econometricsmodels自体はPyPI未公開の
       # ためスキップされる（想定通り）。extension moduleのビルド（maturin develop）は
       # 監査結果に影響しないため、Rustツールチェーンのセットアップごと省略する。
-      - name: uv sync (test group)
-        run: uv sync --locked --group test
+      - name: uv sync (test + audit groups)
+        run: uv sync --locked --group test --group audit
 
       - name: pip-audit
-        run: uv run --locked --group test --with pip-audit pip-audit
+        run: uv run --locked --group test --group audit pip-audit

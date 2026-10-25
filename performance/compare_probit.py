@@ -19,19 +19,19 @@ AIC・BIC までを**常に一括計算**する。一方 statsmodels の `Probit
 `_fit_once_statsmodels` では `.fit()` 直後に `llf`/`llnull`/`llr`/`llr_pvalue`/
 `prsquared`/`aic`/`bic` へ明示的にアクセスし、engine と同じ処理範囲で計測する。
 
-## cov_type の範囲
+## 軸と cov_type の範囲
 
-`.claude/rules/testing-policy.md`「パフォーマンス比較（ベンチマーク）の方法論」に
-従い、代表2点のみ計測する: 最も軽い `classical` と、最も計算コストの重い
-`cluster`。Logit/Probit は OLS/WLS と違い HAC を持たない。classical/hc0/cluster を
-n=100,000 で軽く実測したところ、Logit と同じく cluster が最重だった
-（`docs/performance/probit.md`「計測方法」）。
+n 軸（10,000 / 100,000、k=5。大標本点は下記）と k 軸（n=10,000）は既定の標準誤差
+（classical）だけを回し、標準誤差の種類は **cov 軸**（n=100,000・k=5、newton）で
+全て回す: `classical`・`opg`・`hc0`・`hc1`、cluster の 2×2（G=50 / G=n/10 ×
+random / sorted）。Logit/Probit は OLS/WLS と違い HAC を持たない。
 
-**`opg` は計測対象外**: statsmodels の discrete model（`Probit.fit`）は `opg` を
-`cov_type` 引数としてネイティブに受け付けず、`score_obs` からの手計算
-（`benchmark/nonlinear/references/statsmodels_ref.py` 参照）になる。engine の
-ネイティブ OPG との比較は「計測対象の処理範囲を対称に揃える」方針に反するため
-除外する。
+**`opg` と `hc1` は engine 単独で測る**: statsmodels の discrete model
+（`Probit.fit`）は `opg` を `cov_type` 引数としてネイティブに受け付けず
+（`score_obs` からの手計算）、`hc1` は暗黙に `hc0` へフォールバックして実体が
+`hc0` と同じになる（どちらも `benchmark/nonlinear/references/statsmodels_ref.py`
+参照）。同等のリファレンスが無いため、`hc0` と cluster だけを statsmodels と
+比較する。
 
 ## n 軸の大標本点（classical・engine 単独のみ n=200,000 / 1,000,000）
 
@@ -52,19 +52,17 @@ n=100,000 で軽く実測したところ、Logit と同じく cluster が最重�
   と同じ位置づけ）。
 - このガードの限界（単一 seed=42・例外のみ捕捉・リリース単位で発火）は
   `compare_tobit.py`「## n 軸の大標本点」と同じ（詳細はそちらを参照）。
-- **未解決の別論点（Issue #316）**: `ProbitProblem::hessian`の
-  重み`w=λᵢ(λᵢ+zᵢ)`は`U_CLAMP`でクランプした`λᵢ`とクランプしていない生の`zᵢ`を
-  掛け合わせており、`|z|>U_CLAMP`の反復点では理論上`w`が負になりうる（Probit
-  尤度の大域凹性の根拠`λᵢ(λᵢ+zᵢ)>0`が数値的に破れる）。今回のwarm start
-  （#279）は最適化軌道を`|z|`の小さい領域に留めるためこの経路を踏まないが、
-  より悪条件なデータ・seed・BFGS/L-BFGS経路では理論上まだ踏みうる別バグ。
-  `docs/spec/probit-spec.md`4章の既存の注記（未検証リスクとして記載済み）を
-  参照。本 guard はこの経路を作らないため検知できない。
+- **Hessian重みのクランプ不整合は修正済み**: 以前は`ProbitProblem::hessian`の
+  重み`w=λᵢ(λᵢ+zᵢ)`が`U_CLAMP`でクランプした`λᵢ`と生の`zᵢ`を混在させ、
+  `|z|>U_CLAMP`の反復点で`w`が負になりえた（Probit尤度の大域凹性の根拠
+  `λᵢ(λᵢ+zᵢ)>0`が数値的に破れる）。現在は`zᵢ`も`λᵢ`と同じクランプ済み引数から
+  再構成するため解消している（`docs/spec/probit-spec.md`4章参照）。この修正は
+  通常データの収束経路を変えないため、本 guard の検知対象ではない。
 
 ## method（オプティマイザ）の範囲
 
 engine・statsmodels とも既定は Newton-Raphson で、n/k スイープは newton で回す。
-加えて `bfgs`/`lbfgs` を **method 軸**として代表点1つ（cov_type=classical・
+加えて `bfgs`/`lbfgs` を **method 軸**として代表点1つ（classical・
 k=5・n=100,000）で計測する（`PerfAdapter.extra_methods`）。正確性検証も newton を
 主軸に bfgs/lbfgs は代表ケースのみ、という絞り方に合わせている。
 
@@ -77,36 +75,49 @@ k=5・n=100,000）で計測する（`PerfAdapter.extra_methods`）。正確性�
     # （一括実行では `_perf_harness._run_isolated` が自動で設定する）。
     RAYON_NUM_THREADS=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \\
         python -m performance.compare_probit \\
-        --worker --library engine --cov-type cluster --n 1000 --k 5
+        --worker --library engine --cov-case cluster_g50_random --n 1000 --k 5
 """
 
 from __future__ import annotations
 
-import polars as pl
 import statsmodels
 
 from benchmark.nonlinear.datasets import generate_binary_choice_dataset
-from performance._perf_harness import FitContext, PerfAdapter, run_cli
+from performance._perf_harness import (
+    CovCase,
+    FitContext,
+    PerfAdapter,
+    cluster_cases,
+    run_cli,
+)
 
-# クラスターロバストSE計測用の疑似グループ数（旧 compare_performance.py と同じ）。
-_N_CLUSTERS = 50
+_ENGINE_COV_TYPES = ("classical", "opg", "hc0", "hc1")
+
+_COV_CASES = (
+    CovCase("classical", "classical"),
+    # statsmodels の discrete model は opg をネイティブに受け付けず（score_obs
+    # からの手計算）、hc1 は暗黙に hc0 へフォールバックして実体が hc0 と同じに
+    # なるため（`benchmark/nonlinear/references/statsmodels_ref.py` 参照）、
+    # 同等のリファレンスが無いこの2つは engine 単独で測る。
+    CovCase("opg", "opg", libraries=("engine",)),
+    CovCase("hc0", "hc0"),
+    CovCase("hc1", "hc1", libraries=("engine",)),
+    *cluster_cases(),
+)
 
 
 def _build_dataframe(n: int, k: int, seed: int):
     df, _ = generate_binary_choice_dataset(
         "baseline", link="probit", n=n, k=k, seed=seed
     )
-    # cluster cov_type 用に行番号ベースの疑似グループ列を付ける。
-    return df.with_columns(
-        (pl.int_range(pl.len()) % _N_CLUSTERS).alias("cluster_group")
-    )
+    return df
 
 
 def _fit_once_engine(ctx: FitContext):
     from econometricsmodels import Probit, ProbitOptions
 
-    if ctx.cov_type == "classical":
-        options = ProbitOptions(cov_type="classical", solver=ctx.method)
+    if ctx.cov_type in _ENGINE_COV_TYPES:
+        options = ProbitOptions(cov_type=ctx.cov_type, solver=ctx.method)
     elif ctx.cov_type == "cluster":
         options = ProbitOptions(
             cov_type="cluster",
@@ -125,7 +136,7 @@ def _fit_once_statsmodels(ctx: FitContext):
     fit_kwargs: dict = {
         "disp": 0,
         "method": ctx.method,
-        "cov_type": "nonrobust" if ctx.cov_type == "classical" else "cluster",
+        "cov_type": {"classical": "nonrobust"}.get(ctx.cov_type, ctx.cov_type),
     }
     if ctx.cov_type == "cluster":
         fit_kwargs["cov_kwds"] = {"groups": ctx.pandas_df[ctx.cluster]}
@@ -156,15 +167,14 @@ PROBIT_ADAPTER = PerfAdapter(
     method="probit",
     module="performance.compare_probit",
     libraries=("engine", "statsmodels"),
-    cov_types=("classical", "cluster"),
+    cov_cases=_COV_CASES,
     reference_versions=lambda: {
         "statsmodels_version": statsmodels.__version__
     },
     build_dataframe=_build_dataframe,
     fit_once=_fit_once,
-    cluster="cluster_group",
-    # classical / cluster とも n=1,000〜100,000。
-    n_sweep=(1_000, 10_000, 100_000),
+    # statsmodels 比較は n=100,000 まで（大標本点は下の engine 単独）。
+    n_sweep=(10_000, 100_000),
     # classical・engine単独のみ追加する大標本点。n=1,000,000（seed=42）が
     # 過去の大標本 Hessian 特異エラーの再現点で、修正の
     # 回帰検知を担う。n=200,000 は n スケーリングのデータ点＋早期警告。全

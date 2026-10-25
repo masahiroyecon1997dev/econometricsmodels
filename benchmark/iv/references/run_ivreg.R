@@ -42,8 +42,10 @@
 # 高精度で一致するがp値は一致しない（実測: G=10のケースでstatistic=112.32は
 # 完全一致、p値はR側8.5e-24 vs 本実装2.2e-06——G-1=9で計算するとRのstatisticから
 # 本実装のp値が再現できることを確認済み）。このためcluster cov_typeのみ
-# `wu_hausman_p_value`をクロスチェック対象から除外する（`gmm_type="one_step"`の
-# Hansen J除外と同型のパターン、ユーザー確認済み）。
+# `wu_hausman_p_value`をフィクスチャ（NA）から除外する。テスト側（`tests/iv/
+# test_iv_crosscheck.py`）がこのstatisticとF(n_endog, G-1)からp値を再計算して
+# 本実装と比較するため、p値の確認自体は外していない（フィクスチャからの除外は
+# `gmm_type="one_step"`のHansen J除外と同型のパターン、ユーザー確認済み）。
 #
 # 事前準備: install.packages(c("ivreg", "sandwich", "lmtest", "jsonlite"))
 #
@@ -107,17 +109,22 @@ if (cov_type == "classical") {
     stop("hac requires <hac_lag> (integer) as arg4")
   }
   lag <- as.integer(args[4])
-  vcov_fn <- function(m) NeweyWest(m, lag = lag, prewhite = FALSE, adjust = TRUE)
+  # adjust=FALSE: `NeweyWest(adjust = TRUE)`は共分散全体に`n/(n-k)`を掛けるが、本実装・
+  # linearmodelsは掛けない。構造式では`k`は係数の数、Wu-Hausmanの補助回帰では内生変数の
+  # 第一段階残差の分だけ多い`k_aug`（`n/(n-k_aug)`）が掛かる。このスカラー倍だけが
+  # 差の全てで（n=40・k=3で標準誤差4.0%・Wu-Hausman統計量11.1%、p値はそれがF分布の
+  # 裾で増幅されて16.8%）、`adjust = FALSE`にすれば小標本でも機械精度で一致する。
+  vcov_fn <- function(m) NeweyWest(m, lag = lag, prewhite = FALSE, adjust = FALSE)
 } else {
   stop(paste("unknown cov_type:", cov_type))
 }
 vc <- vcov_fn(model)
 
-coef_se <- extract_coef_se(model, vc, df_inference)
-coefs <- coef_se$coefs
-ses <- coef_se$ses
-test_stats <- coef_se$test_stats
-p_values <- coef_se$p_values
+inference <- extract_params_std_errors(model, vc, df_inference)
+coefs <- inference$coefs
+ses <- inference$ses
+test_stats <- inference$test_stats
+p_values <- inference$p_values
 
 # 信頼区間（既定confidence_level=0.95固定、../../linear/references/run_lm_crosscheck.Rと同じ
 # 手計算方式。baseのconfint(model)はclassicalのvcovしか使わないため使えない）。
@@ -198,8 +205,8 @@ if (is.null(diag_table_wu)) {
 }
 
 result <- list(
-  coef = as.list(coefs),
-  se = as.list(ses),
+  params = as.list(coefs),
+  std_errors = as.list(ses),
   test_stats = as.list(test_stats),
   p_values = as.list(p_values),
   conf_int = mapply(

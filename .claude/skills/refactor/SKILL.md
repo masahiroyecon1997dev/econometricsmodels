@@ -2,7 +2,7 @@
 name: refactor
 description: 実装済みのコード・コメント・ディレクトリ構造・ドキュメント（README/CLAUDE.md/仕様書）を対象に、ユーザー指定の範囲・方針でリファクタリングの計画提示から適用まで一括で行う
 argument-hint: "[対象範囲と方針（例: engine/src/iv/ の重複ロジック共通化、docs配下のIssue番号言及の整理等）]"
-allowed-tools: Read, Write, Edit, Grep, Glob, Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git mv:*), Bash(git rm:*), Bash(git add:*), Bash(cargo build:*), Bash(cargo test:*), Bash(cargo clippy:*), Bash(cargo fmt:*), Bash(pytest:*), Bash(ruff check:*), Bash(ruff format:*)
+allowed-tools: Read, Write, Edit, Grep, Glob, Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(gh issue view:*), Bash(git mv:*), Bash(git rm:*), Bash(git add:*), Bash(cargo build:*), Bash(cargo test:*), Bash(cargo clippy:*), Bash(cargo fmt:*), Bash(pytest:*), Bash(ruff check:*), Bash(ruff format:*)
 ---
 
 # リファクタリング
@@ -14,6 +14,13 @@ allowed-tools: Read, Write, Edit, Grep, Glob, Bash(git status:*), Bash(git diff:
 洗い出して直す形にはしない）。既存の`review-rust`/`review-python`/`review-testing`が
 「直近の差分」を指摘のみ行うのに対し、このスキルは**実装当時から蓄積した既存コード・ドキュメントを
 横断的に対象**にし、指摘から適用まで一括で行う。
+
+候補の洗い出しとGitHub Issue起票だけを行いたい場合は`/refactor-candidates`を使う
+（コードは変更しない）。起票済みのIssueを元に適用する場合は、`$ARGUMENTS`にIssue番号を
+渡してよい（`gh issue view`で内容を確認し、対象範囲・方針として扱う。
+Issueの記載が現状のコードと食い違う場合は着手前にユーザーへ確認する）。
+このスキルの「観点」は`refactor-candidates`の洗い出し観点の正本でもあるため、
+観点を変更したら両スキルの整合を確認する。
 
 ## 対象範囲・方針
 
@@ -88,8 +95,8 @@ $ARGUMENTS
    `/code-review`を省略したままコミットしない。
 
 7. **記録**
-   `docs/planning/specs/refactoring-issue231-progress.md`の該当フェーズに、変更ファイル一覧・
-   判断結果・未解決事項を追記する。
+   変更ファイル一覧・判断結果は、コミットメッセージと対応するGitHub Issue（あればコメント）に
+   残す。未解決事項はIssueに起票する（本文は英語、CLAUDE.md 5章）。進捗管理用のファイルは持たない。
 
 ## 完了条件
 
@@ -98,7 +105,7 @@ $ARGUMENTS
 - **`/code-review`を実行し、指摘への対応（適用 or 対応不要の理由記録）が完了している**
   （変更した層に関わらず必須。省略した状態で完了条件を満たしたと報告しない）
 - 破壊的操作（削除・移動）はすべて事前提示・合意を経ている
-- `docs/planning/specs/refactoring-issue231-progress.md`に記録済み
+- 判断結果・未解決事項がコミットメッセージ・GitHub Issueに残っている
 
 ## 制約
 

@@ -29,25 +29,32 @@ from benchmark.common import (
     DATA_DIR,
     SYNTHETIC_FORMULA,
     TOBIT_MROZ_FORMULA,
+    balanced_cluster_groups,
+    group_by_dataset_source,
     imbalanced_cluster_groups,
     load_frozen_dataset,
 )
 from benchmark.common.load_wooldridge import load as load_wooldridge
+from benchmark.nonlinear.constants import NON_CLUSTER_COV_TYPES
 from benchmark.nonlinear.datasets import (
     TOBIT_ERROR_PATH_SCENARIOS,
     TOBIT_SCENARIOS,
 )
 from benchmark.nonlinear.references.r import run_tobit_r
+from benchmark.nonlinear.references.scipy_tobit import (
+    expected_uncensored_reference,
+    scipy_version,
+)
 
 # 数値比較する合成シナリオ（エラーパス専用シナリオを除いた全て）。
 NUMERIC_SCENARIOS = [
     s for s in TOBIT_SCENARIOS if s not in TOBIT_ERROR_PATH_SCENARIOS
 ]
 
-# 各シナリオで回す cov_type。cluster はグルーピングの動作確認が目的でシナリオ非依存の
-# ため、下の baseline 相当シナリオ（moderate_censoring）でのみ複数パターンを確認する
-# （generate_logit_fixtures.py と同じ方針、testing-policy.md「テスト用データセット」3.）。
-PER_SCENARIO_COV_TYPES = ["classical", "opg", "hc0", "hc1"]
+# 各シナリオで回す cov_type は `NON_CLUSTER_COV_TYPES`。cluster はグルーピングの動作確認が
+# 目的でシナリオ非依存のため、下の baseline 相当シナリオ（moderate_censoring）でのみ
+# 複数パターンを確認する（generate_logit_fixtures.py と同じ方針、testing-policy.md
+# 「テスト用データセット」3.）。
 
 # baseline 相当（Logit の "baseline" に対応する、素直な中程度打ち切りシナリオ）。
 # cluster / method の特殊ケースはここに付ける。
@@ -107,6 +114,16 @@ def _run(
     result["censoring_bounds"] = [lower, upper]
     result["x_cols"] = x_cols
     result["include_intercept"] = include_intercept
+    # `expected_uncensored`（E[y|lower<y<upper,x]）の第三者実装（scipy.stats.truncnorm）
+    # による参照値。AER/censReg にネイティブの対応物が無いため。生成時の値をJSONに固定する。
+    result["third_party_expected_uncensored"] = expected_uncensored_reference(
+        csv_path,
+        result,
+        x_cols=x_cols,
+        include_intercept=include_intercept,
+        lower=lower,
+        upper=upper,
+    )
     return result
 
 
@@ -132,7 +149,7 @@ def _cluster_case(
     """
     n = base_df.height
     cluster_group = (
-        groups if groups is not None else [i % 10 for i in range(n)]
+        groups if groups is not None else balanced_cluster_groups(n)
     )
     grouped = base_df.with_columns(pl.Series("cluster_group", cluster_group))
     csv_path = tmpdir / f"{BASELINE_SCENARIO}{suffix}.csv"
@@ -168,7 +185,7 @@ def build(engine: str) -> dict:
             formula = "y ~ " + " + ".join(x_cols)
 
             fixtures[scenario] = {}
-            for cov_type in PER_SCENARIO_COV_TYPES:
+            for cov_type in NON_CLUSTER_COV_TYPES:
                 result = _run(
                     csv_path,
                     formula,
@@ -229,7 +246,7 @@ def build(engine: str) -> dict:
         # 同じ 4 cov_type を回す（切片なし経路がロバスト共分散でも一致することの確認、
         # テスト網羅性レビュー 観点3）。
         fixtures["no_intercept"] = {}
-        for cov_type in PER_SCENARIO_COV_TYPES:
+        for cov_type in NON_CLUSTER_COV_TYPES:
             fixtures["no_intercept"][cov_type] = _run(
                 tmpdir / f"{BASELINE_SCENARIO}.csv",
                 SYNTHETIC_FORMULA,
@@ -245,7 +262,7 @@ def build(engine: str) -> dict:
         mroz_csv = tmpdir / "mroz.csv"
         mroz_df.write_csv(mroz_csv)
         fixtures["mroz"] = {}
-        for cov_type in PER_SCENARIO_COV_TYPES:
+        for cov_type in NON_CLUSTER_COV_TYPES:
             fixtures["mroz"][cov_type] = _run(
                 mroz_csv,
                 TOBIT_MROZ_FORMULA,
@@ -259,7 +276,7 @@ def build(engine: str) -> dict:
         # `G=2 <= q=7` のため、`rank(Ŝ) <= G-1` で全体 Wald 検定の `7×7` 部分行列が
         # 構造的に特異になり、`fit()` 冒頭のバリデーションが `ValidationError`
         # （`InsufficientClustersForInference`）で弾く。エラーパスは
-        # test_tobit.py::test_mroz_hours_cluster_cov_type_raises_validation_error。
+        # test_tobit_validation.py::test_mroz_hours_cluster_cov_type_raises_validation_error。
 
     is_primary = engine == "survreg"
     fixtures["_meta"] = {
@@ -275,7 +292,8 @@ def build(engine: str) -> dict:
             + engine
             + "。係数・標準誤差・z値・p値・信頼区間（末尾に sigma を含む）・"
             "対数尤度・AIC・BIC・全体 Wald 統計量/ p値・限界効果"
-            "（expected_latent/expected_observed/prob_uncensored × "
+            "（expected_latent/expected_observed/prob_uncensored/"
+            "expected_uncensored × "
             "overall/mean/median）・予測値（先頭10行）・打ち切り適合度を含む。"
             "AER::tobit は survival::survreg の薄いラッパーで、係数・スケール・"
             "vcov・logLik は survreg 由来。survreg / censReg はいずれも "
@@ -291,14 +309,18 @@ def build(engine: str) -> dict:
         "sandwich_version": _r_package_version("sandwich"),
         # run_tobit_crosscheck.R が手計算箇所の formula 非依存検証に使う。
         "numDeriv_version": _r_package_version("numDeriv"),
+        # `expected_uncensored` の第三者参照（scipy.stats.truncnorm）。
+        "scipy_version": scipy_version(),
         "note": (
             "合成シナリオは打ち切り比率（light/moderate/heavy）・打ち切り方向"
-            "（right/interval）・誤差構造（high_variance/heteroskedastic）・悪条件"
+            "（right/interval）・両側の裾に入る区間打ち切り（interval_wide_spread: "
+            "非打ち切り区間が線形予測子の散らばりよりずっと狭く、標準化した下限 >=3 かつ"
+            "上限が有限、および上限 <=-3 かつ下限が有限の観測を含む）・誤差構造（high_variance/heteroskedastic）・悪条件"
             "（small_n/moderate_multicollinearity/high_condition_number/"
             "scale_variance_mild）を含む。heteroskedastic は Tobit MLE の等分散仮定に"
             "対する誤設定で opg/hc0/hc1 と classical が乖離する（点推定は擬似真値に一致）。"
             "perfect_multicollinearity / scale_variance シナリオは含まない"
-            "（ComputationError の発生確認のみ、test_tobit.py で凍結 CSV に対して確認）。"
+            "（ComputationError の発生確認のみ、test_tobit_validation.py で凍結 CSV に対して確認）。"
             "cluster は合成データ（moderate_censoring、均等疑似グループ・不均衡グループ・"
             "G=2 境界）を含む。`G <= q`（傾き係数の数）のケース（旧 mroz/city、"
             "G=2・q=7）は ValidationError になるため成功パスフィクスチャを持たない。"
@@ -309,14 +331,14 @@ def build(engine: str) -> dict:
             "フィットでき、非クラスターの4 cov_type で数値照合する（G<=q のため"
             "クラスターケースは持たない、上記）。censReg 交差検証は生スケール mroz で "
             "maxLik の収束が survreg ほど詰まらず標準誤差系で相対 ~1e-7 乖離するため、"
-            "テスト側で mroz 専用に許容誤差を緩める（tests/_tolerances.py）。"
+            "テスト側で mroz 専用に許容誤差を緩める（tests/support/_tolerances.py）。"
             "AIC/BIC は R の AIC()/BIC() ジェネリック、classical の全体 Wald は "
             "AER:::summary.tobit$wald、スコア・限界効果/予測の閉形式は numDeriv 数値微分と "
             "run_tobit_crosscheck.R 内で一致確認済み（formula 非依存の独立検証、"
             "testing-policy.md「リファレンス実装」2.）。意図的にフィクスチャ化しない"
-            "組み合わせ: confidence_level 非既定（幅の単調性のみ test_tobit.py で確認）、"
+            "組み合わせ: confidence_level 非既定（幅の単調性のみ test_tobit_api.py で確認）、"
             "method×非classical、cluster×右/区間打ち切り、実データ×cluster 成功パス。"
             "パラメータ名は切片を 'const' に正規化済み。"
         ),
     }
-    return fixtures
+    return group_by_dataset_source(fixtures, ["mroz"])

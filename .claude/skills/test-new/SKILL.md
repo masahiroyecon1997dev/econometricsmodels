@@ -2,7 +2,7 @@
 name: test-new
 description: 新しい推定手法について、リファレンス実装とのベンチマーク作成とテストコード作成を行う
 argument-hint: "[対象の推定手法名]"
-allowed-tools: Read, Write, Edit, Bash(pytest:*), Bash(Rscript:*)
+allowed-tools: Read, Write, Edit, Bash(pytest:*), Bash(Rscript benchmark/:*)
 ---
 
 # 新規手法のテスト作成
@@ -16,7 +16,7 @@ $ARGUMENTS
 ## 手順
 
 1. **リファレンス実装の選定**
-   - 対象手法に応じて、主リファレンス（**statsmodels** / **linearmodels**）と、独立クロスチェック用の**Rパッケージ**（fixest, plm, AER, ivreg等）を選定する。pyfixestは精度検証には使わない（`.claude/rules/testing-policy.md`「リファレンス実装」参照）。
+   - 対象手法に応じて、主リファレンス（**statsmodels** / **linearmodels**）と、独立クロスチェック用の**Rパッケージ**（fixest, plm, AER, ivreg, momentfit等）を選定する。pyfixestは精度検証には使わない（`.claude/rules/testing-policy.md`「リファレンス実装」参照）。
    - 選定理由をユーザーに提示する。
 
 2. **ベンチマーク値の作成**
@@ -25,9 +25,10 @@ $ARGUMENTS
 
 3. **テストコードの作成**
    - `tests/<系統>/`（`linear`/`nonlinear`/`iv`。`benchmark/` と同じ grain）に
-     `test_<手法>*.py` を作成する。共有物（`conftest.py`・`_assertions.py`・
-     `_helpers.py`・`_tolerances.py`）は `tests/` 直下（裸importは
-     `pyproject.toml` の `pythonpath = [".", "tests"]` で解決）。既存系統に当て
+     `test_<手法>*.py` を作成する。ヘルパー（`_assertions.py`・`_helpers.py`・
+     `_tolerances.py`、系統別の `_<手法>_helpers.py` 等）は `tests/support/` に置く
+     （裸importは `pyproject.toml` の `pythonpath = [".", "tests/support"]` で解決）。
+     共有フィクスチャの `conftest.py` は `tests/` 直下。既存系統に当て
      はまらない新系統は、`benchmark/` 側のディレクトリ名に合わせて新設する。
    - 許容誤差は **相対誤差1e-8を基本方針** とする。ただし、計算方法自体がリファレンス実装と異なる手法（例: FEにおけるHausman検定など）は、その旨をコメントで明記した上で個別の許容誤差を設定する。
 
@@ -35,7 +36,7 @@ $ARGUMENTS
    - 対応する純粋ロジックの単体テスト（対象ソースファイル内の`#[cfg(test)] mod tests`、`cargo test -p engine`）が必要か確認し、なければ作成を提案する（`.claude/rules/rust-style.md`「テスト」参照）。
 
 5. **公開ページへの反映**
-   - `docs/guide/verification.md`（英語・mkdocsのnav掲載）に、対象手法の行を追加・更新する: 手法×リファレンス表、「What is compared」表、許容誤差の表（`tests/_tolerances.py`の実測値と一致させる）、実データ表。単一リファレンスなど独立クロスチェックの無い統計量は「Not compared against a second reference」に書く。
+   - `docs/guide/verification.md`（英語・mkdocsのnav掲載）に、対象手法の行を追加・更新する: 手法×リファレンス表、「What is compared」表、許容誤差の表（`tests/support/_tolerances_<系統>.py`の実測値と一致させる）、実データ表。単一リファレンスなど独立クロスチェックの無い統計量は「Not compared against a second reference」に書く。
    - 手法固有のバリデーション（新しい列引数・オプションの検証）や`ComputationError`の原因を追加した場合は、`docs/guide/validation.md`の分類表（Method-specific／`ComputationError`）に反映する。
    - `docs/guide/inference-conventions.md`の手法別の表に1行追加する（`docs/spec/inference-conventions.md`には重複させない）。
    - 許容誤差・リファレンスの食い違い（spec・コード・公開ページ）に気づいたら独自判断で埋めず、先にユーザーへ確認する（CLAUDE.md 14章）。

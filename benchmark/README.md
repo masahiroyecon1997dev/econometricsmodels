@@ -37,7 +37,7 @@ python -m benchmark.regenerate_all --datasets-only    # 全系統CSVのみ（Rsc
   wheel/sdistの中身）は[MITライセンス](../LICENSE)です。
 - `benchmark/`配下のRスクリプト（`*.R`）は、独立実装によるクロスチェック用に以下の
   Rパッケージを使用します。
-  - `fixest` / `plm` / `ivreg` / `sandwich` / `lmtest` / `AER` / `censReg` /
+  - `fixest` / `plm` / `ivreg` / `momentfit` / `sandwich` / `lmtest` / `AER` / `censReg` /
     `maxLik` / `survival` / `numDeriv`: GPL-2 / GPL-3（パッケージにより異なる）
   - `jsonlite`: MIT
   - `AER`（`tobit`＝`survival::survreg` の薄ラッパー）は Tobit の主リファレンス、

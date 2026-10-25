@@ -1,10 +1,11 @@
 """データ生成過程（DGP）まわりの系統非依存ヘルパー。
 
-- `imbalanced_cluster_groups`: 不均衡なクラスタラベル列の生成。
+- `balanced_cluster_groups`/`imbalanced_cluster_groups`: 均等・不均衡な
+  クラスタラベル列の生成。
 - `linear_predictor`: 「切片＋線形結合」の計算。
 - `correlated_design_matrix`/`apply_perfect_multicollinearity`:
   multicollinearity系シナリオの説明変数行列生成。
-- `hac_auto_lag`: HACの自動ラグ選択式（engineの`resolve_hac_lags`と同じ）。
+- `hac_auto_lag`: HACの自動ラグ選択式（engineの`default_hac_lags`と同じ）。
 - `validate_choice`: 候補集合に含まれなければ`ValueError`（`scenario`/`link`検証）。
 - `preview_dataset`: `benchmark/<系統>/datasets.py`共通の単体実行プレビュー。
 
@@ -22,6 +23,23 @@ import polars as pl
 # [2, 3, 5, 10, 30, 50]（合計100）を1タイルとして繰り返す不均衡なクラスタサイズ
 # パターン（testing-policy.md「テスト用データセット」3.参照）。
 _IMBALANCED_CLUSTER_TILE = [2, 3, 5, 10, 30, 50]
+
+
+def balanced_cluster_groups(n: int, n_groups: int = 10) -> list[int]:
+    """均等サイズの疑似クラスターラベル（行番号を`n_groups`で割った余り）を生成する。
+
+    統計的な意味はなく、クラスターロバストSEの実装の動作確認用
+    （`.claude/rules/testing-policy.md`「テスト用データセット」3.）。
+
+    Args:
+        n: 観測数。
+        n_groups: グループ数（既定10）。
+
+    Returns:
+        長さnのグループラベル（整数0〜`n_groups - 1`）のリスト。
+        `imbalanced_cluster_groups`の文字列ラベルとは型が異なる。
+    """
+    return [i % n_groups for i in range(n)]
 
 
 def imbalanced_cluster_groups(n: int) -> list[str]:
@@ -113,7 +131,7 @@ def apply_perfect_multicollinearity(X: np.ndarray) -> None:
 
 
 def hac_auto_lag(n: int) -> int:
-    """engineのHAC自動ラグ選択式（`resolve_hac_lags`）と同じ計算式。
+    """engineのHAC自動ラグ選択式（`shared::covariance::default_hac_lags`）と同じ計算式。
 
     Rクロスチェック・性能比較の各スクリプトに同じ明示ラグを渡すことで、
     自動ラグ選択式自体の実装差を比較対象から除外するために使う。

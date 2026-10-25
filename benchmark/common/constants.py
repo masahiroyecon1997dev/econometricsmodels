@@ -16,6 +16,14 @@ MROZ_FORMULA = (
     "inlf ~ nwifeinc + educ + exper + expersq + age + kidslt6 + kidsge6"
 )
 
+# Wooldridge apple データセット（Logit/Probit の多クラスター実データケース）。
+# `ecolbs`（エコりんごの購入量、連続）を`ecolbs > 0`で2値化した`y`を被説明変数にし、
+# 州（`state`、G=49、グループサイズ1〜66）でクラスターする。`y`は`load_apple_adoption`が
+# 付与する（Wooldridgeの生データには無い）。
+APPLE_X = ["ecoprc", "regprc", "faminc", "hhsize", "educ", "age", "reglbs"]
+APPLE_FORMULA = "y ~ " + " + ".join(APPLE_X)
+APPLE_CLUSTER = "state"
+
 # Wooldridge mroz データセットの Tobit（Example 17.2）用回帰式。RHS は MROZ_FORMULA と
 # 同じで、被説明変数が労働参加ダミー inlf ではなく年間労働時間 hours（0 で左打ち切り、
 # 325/753 ≈ 43% が 0）。hours は生スケールのまま使う（engine 側の分離ヒューリスティックが

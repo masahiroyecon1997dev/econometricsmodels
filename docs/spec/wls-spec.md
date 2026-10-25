@@ -1,6 +1,6 @@
 # WLS 仕様書
 
-WLS（Weighted Least Squares）の確定済み仕様。`engine/src/linear/wls.rs`・
+WLS（Weighted Least Squares）の確定済み仕様。数式・定義の正本は公開ページ[`docs/methods/wls.md`](../methods/wls.md)（英語）で、本書は実装上の判断・内部構成・テスト方針を記す（定義式は重複させない）。`engine/src/linear/wls.rs`・
 `engine_pybind/src/linear/wls.rs`・`python_package/econometricsmodels/linear/wls.py`として
 実装済み。OLSに強く依存する設計のため、共通する式・理由は[`ols-spec.md`](./ols-spec.md)を参照し、
 本ドキュメントではWLS固有の差分のみを記載する。
@@ -15,12 +15,11 @@ WLS（Weighted Least Squares）の確定済み仕様。`engine/src/linear/wls.rs
   理由: `cluster`/`hac_time`は`cov_type`に応じた条件付き・デフォルトありの「推定方法の設定」
   だが、`weight`はモデルそのものを規定する必須データであり、性質が異なる。この分類はFE
   （`entity_id`）・IV（`instruments`）等、今後の必須データ列にも適用する。
-- 専用の`WLSOptions`型を新設し（2026-09-12）、`OLSOptions`と完全に同一のフィールド
+- 専用の`WLSOptions`型を持ち、`OLSOptions`と完全に同一のフィールド
   構成（`cov_type`/`include_intercept`/`confidence_level`/`cluster`/`hac_lags`/`hac_time`、
-  意味論もOLSと完全に同じ）を持つ独立したpyclassとして実装する。当初は専用型を新設せず
-  `OLSOptions`をそのまま再利用していたが、`WLSResult`が元から独立型だったのと非対称だった
-  ことと、将来WLS固有のオプションが必要になった際に`OLSOptions`/OLS利用者へ影響を与えずに
-  拡張できるようにするため、独立型に変更した。このフィールド重複自体は意図的に共通base
+  意味論もOLSと完全に同じ）を持つ独立したpyclassとして実装する。結果型`WLSResult`が独立型なのと
+  対称にするためと、将来WLS固有のオプションが必要になった際に`OLSOptions`/OLS利用者へ影響を
+  与えずに拡張できるようにするため、`OLSOptions`を再利用せず独立型にしている。このフィールド重複自体は意図的に共通base
   構造体へ切り出さない（PyO3の`#[pyclass]`コンストラクタがフラットなkwargs surface前提の
   ため。`IVOptions`が`OLSOptions`と同種のフィールドを独立再定義している既存precedentとも
   一貫している。`engine_pybind/src/linear/CLAUDE.md`参照）。
@@ -74,6 +73,11 @@ WLSは`OlsEstimator::fit`をそのまま呼ぶため、既存の`LeastSquaresErr
 - `WeightDimensionMismatch { y_rows, weight_rows }`: 重み配列と`y`の行数不一致（防御的チェック）。
 - `NonPositiveWeight { row, weight }`: 重みが0以下（NaN含む）。
 
+被説明変数が定数（`OUTCOME_CONSTANT`、切片あり）と完全フィット（`PERFECT_FIT`）の判定は
+`OlsEstimator::fit`の判定（`ols-spec.md`3.3節）をそのまま使う。総平方和は変換後の$\tilde y$ではなく
+`OlsInput`が元の$y$と重みから保持する値（切片ありは重み付き平均で中心化した$\sum w_i(y_i-\bar y_w)^2$、
+切片なしは$\sum w_i y_i^2$。次節のR²と同じ`SST`）を使い、判定は重み付き残差平方和で行う。
+
 ### 3.3 標準誤差
 
 classical / HC0〜HC3 / HAC / cluster とも、変換後データ（$\tilde x_i=\sqrt{w_i}x_i$,
@@ -82,8 +86,6 @@ $\tilde y_i=\sqrt{w_i}y_i$, $\tilde\varepsilon_i=\sqrt{w_i}\hat\varepsilon_i$）
 statsmodelsの`WLS`も内部的に同じ変換方式`wexog=sqrt(weights)*exog`で実装されており、この設計は
 そのままstatsmodelsとの数値一致が期待できる）。
 
-- HC0の$\hat\Psi=\sum_i\tilde\varepsilon_i^2\tilde x_i\tilde x_i^\top=\sum_i w_i^2\hat\varepsilon_i^2 x_i x_i^\top$
-  のように、重みが2乗で効く（残差と設計行列の両方に$\sqrt{w_i}$がかかるため）。
 - クラスターのグループ分け自体（`cluster`によるグルーピング）は重み変換の影響を受けない
   （グループ内で合計する対象が変換後の値になるだけ）。小標本補正・自由度の扱いもOLSと同じ。
   クラスター数`G <= 傾き係数の数q`は`InsufficientClustersForInference`（`ValidationError`）
@@ -100,22 +102,11 @@ statsmodelsの`WLS`も内部的に同じ変換方式`wexog=sqrt(weights)*exog`�
 OLSの計算式をそのまま適用するだけでは誤りになる**（statsmodelsとのクロスチェックで、R²相対誤差
 0.2〜1%程度、対数尤度に加法的なずれが実際に発生することを確認済み）。
 
-**R²**: `SST`（切片ありの場合、centered）は変換後$\tilde y$の単純平均ではなく、**元の$y$の重み付き
-平均** $\bar y_w=\sum w_i y_i/\sum w_i$ を使う。
-
-$$
-\mathrm{SST} = \sum_i w_i (y_i - \bar y_w)^2 \quad\text{（切片あり）}, \qquad
-\mathrm{SST} = \sum_i w_i y_i^2 \quad\text{（切片なし、uncentered。こちらは代入のままで正しい）}
-$$
-
-**対数尤度**: `sqrt(weight)`変換のヤコビアンに由来する補正項が必要。
-
-$$
-\ell = -\frac{n}{2}\Big(\ln(2\pi) + \ln(\mathrm{SSR}/n) + 1\Big) + \frac{1}{2}\sum_i \ln w_i
-$$
-
-（第1項はOLSの対数尤度の式に変換後の`SSR`・`n`を代入したもの、第2項$\frac12\sum_i\ln w_i$が
-追加の補正項）。AIC/BICはこの$\ell$から通常通り計算する（式自体は不変、$\ell$の値が変わる）。
+**R²・対数尤度**の定義式（重み付き平均による`SST`、ヤコビアンに由来する対数尤度の補正項
+$\tfrac12\sum_i\ln w_i$）は公開ページ[`docs/methods/wls.md`](../methods/wls.md)が正本。
+実装上の要点は、`SST`を変換後$\tilde y$の単純平均ではなく元の$y$の重み付き平均で中心化すること
+（切片なしは代入のままで正しい）と、対数尤度に補正項が必要なこと。AIC/BICはこの対数尤度から
+通常通り計算する。
 
 **実装**: `OlsEstimator`/`OlsInput`自体は重みを一切知らない設計を維持したまま、
 `WlsEstimator::fit`側（元の、変換前の`y`・重みにアクセスできる層）で上記5フィールドを計算し直す
@@ -124,7 +115,7 @@ $$
 
 ### 3.5 `predict()`
 
-`WLSResults.predict(new_data: pl.DataFrame | None = None) -> list[dict[str, float]]`。
+`WLSResults.predict(new_data: pl.DataFrame | None = None) -> list[float]`。
 OLSの`predict()`（`ols-spec.md`「predict()」）と完全に同じ設計・シグネチャを適用する。
 
 - **重みは予測値の計算に一切関与しない**。「学習データに対する重み付き予測値」という概念自体が
@@ -140,21 +131,23 @@ OLSの`predict()`（`ols-spec.md`「predict()」）と完全に同じ設計・�
   純粋関数、係数と設計行列だけから予測値を計算し重みの概念を持たない）をそのまま再利用する
   （`WlsEstimator`が内部で`OlsEstimator`をラップする設計のため、この関数はWLS/OLSのどちらで
   推定した係数にも同じように使える）。
-- 戻り値のキー名は`"predicted"`（OLSと統一）。
+- 戻り値は観測順の`list[float]`（OLSと統一）。
 
 ### 3.6 `augment()`
 
 `WLSResults.augment(new_data: pl.DataFrame | None = None) -> pl.DataFrame`。
 OLSの`augment()`（`ols-spec.md`「augment()」）と完全に同じ設計・シグネチャを適用する。
-`predict()`と同様、重みは計算に一切関与しない。`WLSResult`（Rust）は`fit()`時の元DataFrameを
-`training_data: DataFrame`として非公開保持する（`OLSResult`と異なり`IVResult.first_stage()`の
-ような別経路の構築元が無いため`Option`にせず常に保持する）。
+`predict()`と同様、重みは計算に一切関与しない。`WLSResult`（Rust）は`fit()`に渡された元の
+`polars.DataFrame`を非公開保持し（`OLSResult`と異なり`IVResult.first_stage()`のような別経路の構築元が
+無いため`Option`にせず常に保持する）、`augment(new_data=None)`はそれに予測値の列を足して返す
+（推定に使わない列も残る。`ols-spec.md`「augment()」）。
 
 ### 3.7 テスト
 
-- 許容誤差: classical/HC0-3/clusterはOLSと同じ`rtol_strict=1e-8`（`tests/_tolerances.py`の`wls_crosscheck`）（Rとの実測でほぼ機械精度）。
-  **HACのみOLSより緩い`rtol_hac=5e-2`**（OLSは1e-2。実測最大相対誤差約4.3%、重み付けによる
-  小標本補正の慣習差の増幅が原因と推測、未調査）。
+- 許容誤差: classical/HC0-3/clusterはOLSと同じ`rtol_strict=1e-8`（`tests/support/_tolerances_linear.py`の`wls_crosscheck`）（Rとの実測でほぼ機械精度）。
+  HACもOLSと同じ`rtol_strict`（R側は`NeweyWest(adjust = FALSE)`。既定の`adjust = TRUE`は共分散に
+  `n/(n-k)`を掛けるが本実装・statsmodelsは掛けず、WLSでもこのスカラー倍だけが差の全てで、
+  OLSと同じ値になる。以前の`rtol_hac=5e-2`（実測約4.3%）は現在の入力では再現しない）。
 - 実データセット: `401ksubs`（`fsize==1`の単身世帯サブサンプル、n=2017）、Wooldridge Example
   8.5・8.6と同じ変数構成`nettfa ~ inc + incsq + age + agesq + male + e401k`、重みは`1/inc`
   （`inv_inc`列）。Example 8.6のfeasible GLS（分散モデル自体の推定）は本実装のスコープ外のため

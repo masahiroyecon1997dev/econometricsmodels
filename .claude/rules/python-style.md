@@ -16,7 +16,7 @@ paths:
 
 ## コメント運用
 
-Issue番号・内部管理ドキュメント（`refactoring-candidates.md`等）への参照可否は、CLAUDE.md 6章「コメント・ドキュメントでの参照方針」に準じる（`python_package`固有の追加規約はない）。
+Issue番号・内部管理ドキュメント（`docs/planning/specs/`配下の設計ノート等）への参照可否は、CLAUDE.md 6章「コメント・ドキュメントでの参照方針」に準じる（`python_package`固有の追加規約はない）。
 
 ## Lint / フォーマット
 
@@ -39,5 +39,5 @@ Issue番号・内部管理ドキュメント（`refactoring-candidates.md`等）
 
 ## テスト
 
-- 対応するリファレンス実装（pyfixest/R）との比較テストは `tests/`（pytest）に置く。
+- 対応するリファレンス実装（statsmodels/linearmodels/R）との比較テストは `tests/`（pytest）に置く（pyfixestは性能比較専用）。
 - 許容誤差等のテスト方針の詳細は `testing-policy.md` を参照。

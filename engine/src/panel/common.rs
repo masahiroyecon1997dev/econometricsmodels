@@ -5,7 +5,7 @@
 //! `PanelError`を共有する（`docs/spec/panel-common.md`4.4節）。
 //!
 //! `DimensionMismatch`/`InsufficientObservations`/`InvalidConfidenceLevel`/
-//! `MissingClusterColumn`/`InsufficientClusters`/`ComputationFailed`は`engine::error::
+//! `MissingClusterColumn`/`InsufficientClusters`/`NearSingularMatrix`等は`engine::shared::error::
 //! CommonError`に切り出し済みのため、ここでは`Common`バリアント経由で保持する。
 //!
 //! FE/RE固有バリアントは、`docs/spec/fe-spec.md`（FE固有論点）・`docs/spec/re-spec.md`
@@ -15,28 +15,27 @@
 //!   1章）
 //! - `InsufficientDegreesOfFreedom`: パネル自由度調整（`fe-spec.md`3.2節）
 //! - `SingletonGroup`: 観測数1のグループ（`fe-spec.md`1章）
-//! - `UnbalancedPanelForTwoWay`: 2-way FEのバランスパネル必須（`fe-spec.md`1章）
+//! - `UnbalancedPanelForTwoWay`: 2-way FE・REのバランスパネル必須（`fe-spec.md`1章）
 //! - `ZeroVarianceAfterDemeaning`: within変換後に分散ゼロの説明変数（`fe-spec.md`1章）
-//! - `TwoWayRequiresTime`: 2-way FE指定時の`time`必須（`panel-common.md`1.1節）
-//! - `DkRequiresTime`: REでDriscoll-Kraay型パネルHAC（`ReCovType::Dk`）を指定したのに時点列
-//!   （`REOptions.dk_time`由来の`ReInput::time()`）が無い（`panel-common.md`3.1節。FEは
-//!   `FeCovType::Dk.time`が型で必須のため発生しない）
+//! - `TwoWayRequiresTime`: 2-way FE・RE指定時の`time`必須（`panel-common.md`1.1節）
 //! - `InvalidDkBandwidth`: `FeCovType::Dk`の明示的な`bandwidth`が`[0, t)`の範囲外
-//!   （`t`はユニークな時点数。`LeastSquaresError::InvalidHacLags`と同型だが
+//!   （`t`はユニークな時点数。`CommonError::InvalidHacLags`と同型だが
 //!   上限が観測数`n`ではなく時点数`t`）
 //! - `InsufficientDkPeriodsForInference`: DK指定時に時点数`t`が同時Wald検定の対象係数の
 //!   数`q`以下（`rank(S) ≤ t-1`のため検定の部分行列が構造的に特異。
 //!   `CommonError::InsufficientClustersForInference`のDK版）
+//! - `InStage`: 別のバリアントを、起きた計算の文脈（`stage`）つきで包む（REの内部FE推定、
+//!   FE・REのDK時点数不足の全体F検定）
 //! - `DegenerateDkTwoPeriods`/`DegenerateClusterTwoGroups`: FEで時点数（DK）・クラスター数が
 //!   2かつ吸収したFE次元（entity、2-wayではtimeも）のいずれかで全水準が2グループに1観測ずつの
 //!   とき、within変換によりスコアが恒等的にゼロになり共分散がゼロに退化する
 //! - `WithinRegressionFailed`: within変換済みデータの最小二乗推定委譲の失敗
 //!   （`panel-common.md`4.3節）
 //! - `FTestFailed`: F統計量（`fe.rs`モジュールdoc「自由度調整」のF統計量節、REは
-//!   `re.rs`モジュールdoc「F統計量」）のWald検定（`crate::linear::ols::wald_f_test`）が
+//!   `re.rs`モジュールdoc「F統計量」）のWald検定（`crate::shared::wald::wald_f_test`）が
 //!   失敗した場合。`WithinRegressionFailed`と
 //!   意味が異なる（`OlsEstimator::fit`自体は既に成功した後の、F検定固有の共分散部分行列の
-//!   ほぼ特異性というbackstopのみ、`ols.rs`の`wald_f_test`docコメント参照）ため別バリアントに
+//!   ほぼ特異性というbackstopのみ、`shared/wald.rs`の`wald_f_test`docコメント参照）ため別バリアントに
 //!   分離した（`IvError::FirstStageFailed`が`WithinRegressionFailed`と同じ`LeastSquaresError`
 //!   ラップでも変換箇所ごとに専用バリアントにする判断と同じ）。
 //! - `BetweenRegressionFailed`: RE（Swamy-Arora分散成分推定、`re-spec.md`3.1節）の
@@ -44,6 +43,10 @@
 //!   失敗した場合（エンティティ数が説明変数の数以下等）。`WithinRegressionFailed`と同じ
 //!   `LeastSquaresError`ラップだが、対象がFEのwithin回帰ではなくREのbetween回帰のため
 //!   別バリアントにする（`FTestFailed`と同じ判断）。
+//! - `PooledRegressionFailed`・`AmemiyaRequiresWithinVariation`・
+//!   `NonPositiveIdiosyncraticVariance`: REの`variance_method`（Wallace-Hussain・Amemiya、
+//!   `re-spec.md`3.1.2節）の1段目の回帰の失敗、Amemiyaがwithin変動の無い列を受け付けない
+//!   こと、σ_ε²が正にならないこと。
 //! - `QuasiDemeanedRegressionFailed`: RE（`ReEstimator::fit`、`re-spec.md`3.2節）の
 //!   準偏差変換済みデータ（`quasi_demean_transform`の出力に、同じθで変換した定数列を
 //!   加えたもの）への`OlsEstimator::fit(include_intercept=false)`委譲が失敗した場合。
@@ -58,16 +61,16 @@
 //! コードを書く過程で随時追加する（`LeastSquaresError`・`IvError`のdocコメントと同じ
 //! 「土台を用意し、必要になった時点で足す」方針）。
 
-use std::cmp::Ordering;
-use std::collections::HashMap;
 use std::fmt;
 
-use faer::prelude::Solve;
-use faer::{Mat, Side};
+use faer::Mat;
 use thiserror::Error;
 
-use crate::error::CommonError;
 use crate::linear::common::LeastSquaresError;
+use crate::shared::covariance::{cluster_correction, cluster_meat, default_hac_lags};
+use crate::shared::error::{CommonError, ErrorInfo, staged_report};
+use crate::shared::error_catalog::{ErrorCode, ErrorReport, Stage};
+use crate::shared::group_codes::GroupCodes;
 
 /// パネルデータの2つの次元。エラーメッセージ・バリデーションで「どちらの次元の
 /// 問題か」を区別するために使う。
@@ -84,23 +87,38 @@ pub enum PanelDimension {
     Time,
 }
 
-impl fmt::Display for PanelDimension {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl PanelDimension {
+    /// エラーの`argument`に入る名前（公開される値のため、`Display`とは独立に固定する）。
+    fn argument_name(self) -> &'static str {
         match self {
-            PanelDimension::Entity => write!(f, "entity"),
-            PanelDimension::Time => write!(f, "time"),
+            PanelDimension::Entity => "entity",
+            PanelDimension::Time => "time",
         }
     }
 }
 
-/// `InsufficientDegreesOfFreedom`のメッセージで、2-way（`n_periods`が`Some`）のときだけ
-/// `, n_periods=<T>`を差し込む。`Option`のDebug表記（`Some(4)`/`None`）がユーザー向け
-/// メッセージに漏れるのを避けるため（`.claude/rules/rust-style.md`「言語方針」——
-/// ユーザー可視文字列は英語かつ実装の内部表現を出さない）。
-fn n_periods_clause(n_periods: &Option<usize>) -> String {
-    match n_periods {
-        Some(n_periods) => format!(", n_periods={n_periods}"),
-        None => String::new(),
+impl fmt::Display for PanelDimension {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.argument_name())
+    }
+}
+
+/// REの分散成分推定で、between回帰がどの単位の平均に対する回帰か
+/// （`PanelError::BetweenRegressionFailed`の`means`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BetweenMeans {
+    /// 個体（エンティティ）平均への回帰（1-way・2-wayのσ_u²）。
+    Entity,
+    /// 時点平均への回帰（2-wayのσ_λ²）。
+    Time,
+}
+
+impl std::fmt::Display for BetweenMeans {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Entity => "entity",
+            Self::Time => "time",
+        })
     }
 }
 
@@ -122,7 +140,7 @@ pub enum PanelError {
     /// `PanelDimension`で表す（`SingletonGroup`と同じ使い方）。`engine_pybind`が同じ
     /// polars DataFrameから列抽出する限り実際には起こり得ない（OLSの`y`/`x`長さ不一致
     /// チェックと同じ、`engine_pybind`〜`engine`間の契約に対する防御的な`Result`化）。
-    #[error("dimension mismatch: y has {y_rows} rows but {dimension} has {other_rows} rows")]
+    #[error("{}", self.catalog_message())]
     IdentifierDimensionMismatch {
         dimension: PanelDimension,
         y_rows: usize,
@@ -138,13 +156,8 @@ pub enum PanelError {
     ///
     /// となる。`CommonError::InsufficientObservations`（単純な`n <= k`）とは
     /// 消費する自由度の内訳が異なるため別バリアントにする。`n_periods`は1-wayでは
-    /// `None`（メッセージにも出さない、`n_periods_clause`参照）。
-    #[error(
-        "insufficient degrees of freedom for panel estimation: n_obs={n_obs}, \
-         n_entities={n_entities}{}, k={k} \
-         (the panel-adjusted residual degrees of freedom must be positive)",
-        n_periods_clause(n_periods)
-    )]
+    /// `None`（エラーの`n_effects`は個体数だけになる）。
+    #[error("{}", self.catalog_message())]
     InsufficientDegreesOfFreedom {
         n_obs: usize,
         n_entities: usize,
@@ -158,11 +171,7 @@ pub enum PanelError {
     /// listwise deletion等の自動除外はせず常にエラーとする（欠損値を常にエラーとする
     /// 全体方針の踏襲）。下流の特異行列エラーとして偶発的に検出される形にはせず、
     /// 「観測数1のグループ」を明示的にこのバリアントで弾く。
-    #[error(
-        "singleton {dimension} group detected: {dimension} '{group_id}' has only 1 \
-         observation. Singleton groups are not dropped automatically; remove them from \
-         the input"
-    )]
+    #[error("{}", self.catalog_message())]
     SingletonGroup {
         dimension: PanelDimension,
         group_id: String,
@@ -181,10 +190,7 @@ pub enum PanelError {
     /// 入力もありうる。このエラーを構築する検証（FE実装issue）は、(entity, time)
     /// ペアの一意性・全組合せの充足まで確認する必要がある。`expected`はカウント上の
     /// 期待値（`n_entities * n_periods`）でメッセージ用。
-    #[error(
-        "two-way fixed effects requires a balanced panel: got n_obs={n_obs} for \
-         n_entities={n_entities} x n_periods={n_periods} (expected {expected} observations)"
-    )]
+    #[error("{}", self.catalog_message())]
     UnbalancedPanelForTwoWay {
         n_obs: usize,
         n_entities: usize,
@@ -197,11 +203,15 @@ pub enum PanelError {
     /// 時間不変変数（1-way FEで問題になる典型例）だけでなく、2-wayで time FE と
     /// 完全共線な「エンティティ間で変動しない列」も同じチェックで検出できる
     /// （`docs/spec/fe-spec.md`1章。1-way/2-wayで同一ロジックを共有する）。
-    #[error(
-        "regressor '{column}' has zero variance after the within-transformation \
-         (it is time-invariant, or collinear with the fixed effects)"
-    )]
+    #[error("{}", self.catalog_message())]
     ZeroVarianceAfterDemeaning { column: String },
+
+    /// 被説明変数がwithin変換後に分散ゼロ（個体内で定数、2-wayなら個体効果と時点効果だけで
+    /// 説明される）。固定効果が説明するものが残らず、within回帰のR-squaredが定義できない。
+    /// 説明変数の`ZeroVarianceAfterDemeaning`と同じ相対閾値で判定する
+    /// （[`crate::shared::validation::column_is_zero_variance`]）。
+    #[error("{}", self.catalog_message())]
+    OutcomeConstantWithinEntity,
 
     /// 2-way FE（entity + time FE）を要求したのに`time`列が指定されていない。
     ///
@@ -209,25 +219,19 @@ pub enum PanelError {
     /// 「条件付き必須」パターン（`panel-common.md`1.1節。`OLSOptions.cluster`が
     /// `cov_type="cluster"`のときだけ必須になるのと同型）。未指定時のバリデーション
     /// エラーとしてここで担保する。
-    #[error("two-way fixed effects requires the `time` option to be set")]
-    TwoWayRequiresTime,
-
-    /// REでDriscoll-Kraay型パネルHAC（`ReCovType::Dk`、3.1節）を指定したのに、時点列
-    /// （`ReInput::time()`、`REOptions.dk_time`由来）が指定されていない。
     ///
-    /// DKは時点ごとにクロスセクション和を取ってからHACカーネルを適用するため時点列が必須
-    /// （`TwoWayRequiresTime`と同型の「条件付き必須」パターン）。FEの`FeCovType::Dk`は型で
-    /// 時点列（`time: TimeKeys`）を必須にしているため、このエラーはREでのみ発生する。
-    #[error("Driscoll-Kraay panel HAC requires the `dk_time` option to be set")]
-    DkRequiresTime,
+    /// `engine_pybind`は`time`の有無から1-way/2-wayを決めるため、Python APIからは起こらない
+    /// （起きたら実装の誤りなので`INTERNAL_ERROR`として報告する）。
+    #[error("{}", self.catalog_message())]
+    TwoWayRequiresTime,
 
     /// `FeCovType::Dk`の明示的な`bandwidth`が`[0, t)`の範囲外（`t`はユニークな時点数）。
     ///
-    /// `LeastSquaresError::InvalidHacLags`と同型のバリデーションだが、上限が観測数`n`
+    /// `CommonError::InvalidHacLags`と同型のバリデーションだが、上限が観測数`n`
     /// ではなく時点数`t`になる点が異なる（DKのバンド幅は「時点のラグ」であり「観測の
     /// ラグ」ではないため、`engine/src/panel/CLAUDE.md`「Driscoll-Kraay型パネルHAC対応」
     /// 参照）。
-    #[error("bandwidth must be in the range [0, t): got {bandwidth}, t={t}")]
+    #[error("{}", self.catalog_message())]
     InvalidDkBandwidth { bandwidth: i64, t: usize },
 
     /// `FeCovType::Dk`/`ReCovType::Dk`でユニークな時点数`t_periods`が1しかない。
@@ -238,7 +242,7 @@ pub enum PanelError {
     /// `t_periods/(t_periods-1)`が`1/0`に発散し、クラスターの`G=1`が
     /// `validate_cluster_groups`で拒否されるのと同じ理由で計算が成立しない
     /// （`ols::validate_cluster_groups`の`G>=2`要求と同型の前提）。
-    #[error("Driscoll-Kraay panel HAC requires at least 2 unique time periods: got {t_periods}")]
+    #[error("{}", self.catalog_message())]
     InsufficientDkPeriods { t_periods: usize },
 
     /// `FeCovType::Dk`/`ReCovType::Dk`で、ユニークな時点数`t_periods`が同時Wald検定の
@@ -251,12 +255,7 @@ pub enum PanelError {
     /// 数値的な特異性判定（`ensure_well_conditioned_symmetric_matrix`）任せにすると、
     /// 理論上0の固有値に乗る丸め誤差が閾値を超えた場合に巨大な無意味な統計量を
     /// 黙って返しうるため、入力だけから判定できるこの条件を行列計算の前に弾く。
-    #[error(
-        "cov_type='dk' requires more unique time periods than jointly tested coefficients: \
-         got t_periods={t_periods} for q={q} coefficient(s) (the slope F-test for FE, the \
-         Hausman test for RE), but the Driscoll-Kraay covariance has rank at most \
-         t_periods-1, so the q×q Wald submatrix is singular when t_periods <= q"
-    )]
+    #[error("{}", self.catalog_message())]
     InsufficientDkPeriodsForInference { t_periods: usize, q: usize },
 
     /// FEで`FeCovType::Dk`の時点数が2、かつ吸収したFE次元（常にentity、2-wayではtimeも）の
@@ -272,13 +271,7 @@ pub enum PanelError {
     /// 約`1e-16`の標準誤差と巨大なF統計量を黙って返していたため入力から弾く。
     /// 1水準でもこのパターンを崩せば退化しない（その場合は通す）。
     /// REは残差がwithin変換されないため対象外。
-    #[error(
-        "cov_type='dk' with 2 unique time periods is degenerate for fixed effects when every \
-         entity (or, with two-way effects, every time period) is observed exactly once in each \
-         of the two periods: the within transformation makes the two per-period scores equal, \
-         and they sum to zero, so the Driscoll-Kraay covariance is identically zero. Use more \
-         time periods or another cov_type"
-    )]
+    #[error("{}", self.catalog_message())]
     DegenerateDkTwoPeriods,
 
     /// FEで`FeCovType::Cluster`のクラスター数が2、かつ吸収したFE次元（常にentity、2-wayでは
@@ -288,14 +281,7 @@ pub enum PanelError {
     ///
     /// `DegenerateDkTwoPeriods`と同じ理由でクラスタースコアが`s_1 = s_2 = 0`となり、
     /// クラスターロバスト共分散が恒等的にゼロになる。
-    #[error(
-        "cov_type='cluster' with 2 clusters is degenerate for fixed effects when every entity \
-         (or, with two-way effects, every time period) is observed exactly once in each cluster \
-         (e.g. clustering by time with 2 periods, or by entity with 2 entities and two-way \
-         effects): the within transformation makes the two cluster scores equal, and they sum \
-         to zero, so the cluster-robust covariance is identically zero. Use more clusters or \
-         another cov_type"
-    )]
+    #[error("{}", self.catalog_message())]
     DegenerateClusterTwoGroups,
 
     /// within変換済みデータに対する最小二乗推定（`OlsEstimator::fit`への委譲、
@@ -307,21 +293,21 @@ pub enum PanelError {
     /// `CommonError`が`Common`と`WithinRegressionFailed(LeastSquaresError::Common)`の
     /// 2経路で`PanelError`になりうる曖昧さを避け、変換箇所を追跡可能にするため
     /// （`IvError::FirstStageFailed`が`#[from]`を使わない判断と同じ）。
-    #[error("within-transformed least-squares estimation failed: {source}")]
+    #[error("{}", self.catalog_message())]
     WithinRegressionFailed {
         #[source]
         source: LeastSquaresError,
     },
 
-    /// F統計量のWald検定（`crate::linear::ols::wald_f_test`への委譲）が
+    /// F統計量のWald検定（`crate::shared::wald::wald_f_test`への委譲）が
     /// 失敗した。`WithinRegressionFailed`とは別バリアント（理由はモジュールdoc参照）。
     ///
-    /// 実際に発生しうるのは`LeastSquaresError::Common(CommonError::ComputationFailed)`
+    /// 実際に発生しうるのは`LeastSquaresError::Common(CommonError::NearSingularMatrix)`
     /// のみ（`wald_f_test`のdocコメント「backstop」参照。傾き係数間の極端なスケール差等で
     /// 共分散部分行列が数値的にほぼ特異な場合）。それでも型は`WithinRegressionFailed`と
     /// 同じ`LeastSquaresError`のまま保持する（`wald_f_test`のエラー型を独自に絞り込む
     /// メリットが無いため）。
-    #[error("F-test for joint significance of the slope coefficients failed: {source}")]
+    #[error("{}", self.catalog_message())]
     FTestFailed {
         #[source]
         source: LeastSquaresError,
@@ -334,10 +320,52 @@ pub enum PanelError {
     /// ではなくREのbetween回帰のため別バリアントにする（`FTestFailed`と同じ判断、
     /// モジュールdoc参照）。最も起こりやすいのはエンティティ数が説明変数の数以下
     /// （`CommonError::InsufficientObservations`）。
-    #[error("between-regression least-squares estimation for variance component failed: {source}")]
+    #[error("{}", self.catalog_message())]
     BetweenRegressionFailed {
+        /// どの平均への回帰が失敗したか（2-wayは個体平均・時点平均の2本を推定する）。
+        means: BetweenMeans,
         #[source]
         source: LeastSquaresError,
+    },
+
+    /// RE（`variance_method`が`WallaceHussain`、`re-spec.md`3.1.2節）の1段目の回帰
+    /// （全説明変数と切片へのプールドOLS）が失敗した。
+    ///
+    /// 残差の二乗和から分散成分を求めるため、設計行列が特異（完全な多重共線性）だと
+    /// 推定できない。`WithinRegressionFailed`等と同じ`LeastSquaresError`ラップだが、
+    /// 対象が別のため別バリアントにする。
+    #[error("{}", self.catalog_message())]
+    PooledRegressionFailed {
+        #[source]
+        source: LeastSquaresError,
+    },
+
+    /// RE（`variance_method`が`Amemiya`、`re-spec.md`3.1.2節）で、within変動の無い説明変数
+    /// （時間不変の列。2-wayでは個体間でのみ・時点間でのみ変わる列も）がある。
+    ///
+    /// Amemiya法は1段目をwithin推定だけで行うため、within変動の無い列の効果が残差に残り、
+    /// σ_u²が偏る。`plm`も不均衡パネルでは同じ理由で推定を拒否する。
+    #[error("{}", self.catalog_message())]
+    AmemiyaRequiresWithinVariation {
+        /// within変動の無い列の名前。
+        columns: Vec<String>,
+    },
+
+    /// RE（`variance_method`が`WallaceHussain`・`Amemiya`）で推定したσ_ε²が0以下になった
+    /// （θが定まらない）。`plm`は0に切り上げてθが`NaN`になる。
+    #[error("{}", self.catalog_message())]
+    NonPositiveIdiosyncraticVariance {
+        /// 推定法の名前（`variance_method`の値）。
+        method: &'static str,
+        sigma2_eps: f64,
+    },
+
+    /// RE（`variance_method`が`WallaceHussain`・`Amemiya`）の分散成分を決めるモーメント方程式
+    /// （2×2）が特異で解けない。
+    #[error("{}", self.catalog_message())]
+    VarianceComponentsMomentsSingular {
+        /// 推定法の名前（`variance_method`の値）。
+        method: &'static str,
     },
 
     /// RE（`ReEstimator::fit`、`re-spec.md`3.2節）の準偏差変換済みデータへの
@@ -346,7 +374,7 @@ pub enum PanelError {
     /// `WithinRegressionFailed`（FEのwithin変換済みデータ）・`BetweenRegressionFailed`
     /// （REのbetween回帰）とは対象が異なるため別バリアントにする（同じ判断の3件目、
     /// モジュールdoc参照）。
-    #[error("quasi-demeaned least-squares estimation for random effects failed: {source}")]
+    #[error("{}", self.catalog_message())]
     QuasiDemeanedRegressionFailed {
         #[source]
         source: LeastSquaresError,
@@ -357,145 +385,160 @@ pub enum PanelError {
     ///
     /// 補助回帰のランク落ち、クラスター数`G`が補助回帰の傾き係数の数`2k`以下
     /// （`CommonError::InsufficientClustersForInference`）、DK・ロバスト共分散部分行列の
-    /// ほぼ特異性（`CommonError::ComputationFailed`）等。DKの時点数不足（`T <= k`）は
-    /// これに包まず、補助回帰の前に`InsufficientDkPeriodsForInference`で弾く。ハウスマン検定はRE本体の付随的な
+    /// ほぼ特異性（`CommonError::NearSingularMatrix`）等。DKの時点数不足（`T <= q`、`q`はRE本体の
+    /// 傾き係数の数）はこれに包まず、補助回帰の前に`InsufficientDkPeriodsForInference`で弾く。ハウスマン検定はRE本体の付随的な
     /// 診断情報だが、計算自体が成立しない場合は`None`で隠さずエラーにする
     /// （設計行列の多重共線性でエラーにするのと同じ方針）。
-    #[error("Hausman test auxiliary regression failed: {source}")]
+    #[error("{}", self.catalog_message())]
     HausmanTestFailed {
         #[source]
         source: LeastSquaresError,
     },
-}
 
-/// パネル識別子（entity・time・クラスター列等、同一性だけが意味を持つ`String`列）を、
-/// 整数コードに一度だけ変換したもの。
-///
-/// within変換・準偏差変換・グループ平均・クラスター/DKの集計は、行ごとに「どのグループか」を
-/// 引く処理を列ごと・統計量ごとに繰り返す。`String`をキーにしたハッシュ表・`BTreeMap`で毎回
-/// 引き直すと、大標本（n=1,000,000・エンティティ166,666）では1列あたり約0.2秒かかり、FE/REの
-/// 計算時間の大半を占めていた（QR分解よりはるかに重い）。`FeInput`/`ReInput`の構築時に一度だけ
-/// コード化して保持し、以降はコードで配列を直接引く（1列あたり数ms）。
-///
-/// **コードの順序は、`from_ids`ではキーの辞書順（`String`の`Ord`、旧実装の
-/// `BTreeMap<&str, _>`の反復順と同じ）にする**。グループ間の加算順（クラスターの
-/// `Σ_g S_g S_g'`等）・between回帰の行順を旧実装と同じに保ち、結果をビット単位で
-/// 変えないため。時点だけは、DKの時系列順序が値の順序で決まる必要があるため、
-/// `TimeKeys`が`from_ids_ordered`で値の順序のコードを振る（`TimeKeys`のdoc参照）。
-/// グループ内の行は観測順に積む（`group_indices`の安定な計数ソート）。
-///
-/// `engine`クレート内部専用（`FeInput`/`ReInput`の公開APIは引き続き`String`列で受け取る）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct GroupCodes {
-    /// 各行のグループコード（長さ`n`、値は`0..n_groups`）。
-    codes: Vec<usize>,
-    /// グループごとの観測数（長さ`n_groups`、コード順）。
-    counts: Vec<usize>,
-    /// グループのキー（長さ`n_groups`、コード順）。
-    keys: Vec<String>,
-}
-
-impl GroupCodes {
-    /// `ids`を辞書順の整数コードに変換する。ハッシュは`ids`全体に1回、ソートはユニークな
-    /// キー（`n_groups`個）にだけ行う。
-    pub(crate) fn from_ids(ids: &[String]) -> Self {
-        Self::from_ids_ordered(ids, |_, _| Ordering::Equal)
-    }
-
-    /// `ids`を整数コードに変換する。コードの順序は`compare_rows`（各キーが最初に現れた行の
-    /// インデックス2つを比べる）で決め、同順位は`String`の辞書順で決める。`from_ids`は
-    /// `compare_rows`が常に`Equal`の場合（辞書順のみ）にあたる。
+    /// `source`のエラーを、起きた計算の文脈（`stage`）つきで報告する。
     ///
-    /// 同じキーの行は同じ順序づけの値を持つこと（`TimeKeys`の各コンストラクタが保証する）。
-    /// 異なるキーが同順位になるのは、値としては等しい別表記（浮動小数点の`0.0`と`-0.0`等）
-    /// だけで、その2つの順序はキーの辞書順で行の並びに依らず決まる。
-    pub(crate) fn from_ids_ordered(
-        ids: &[String],
-        compare_rows: impl Fn(usize, usize) -> Ordering,
-    ) -> Self {
-        // 1. 出現順の仮コード（ハッシュ1回/行）。キーごとに最初に現れた行も控える。
-        let mut first_seen: HashMap<&str, usize> = HashMap::new();
-        let mut unique: Vec<&str> = Vec::new();
-        let mut first_row: Vec<usize> = Vec::new();
-        let mut codes: Vec<usize> = ids
-            .iter()
-            .enumerate()
-            .map(|(row, id)| {
-                *first_seen.entry(id.as_str()).or_insert_with(|| {
-                    unique.push(id.as_str());
-                    first_row.push(row);
-                    unique.len() - 1
-                })
-            })
-            .collect();
+    /// 同じ検証や計算が複数の文脈で呼ばれ、文面だけでは何の計算で失敗したか分からないときに使う
+    /// （REの分散成分の推定に使う内部FEの自由度不足、FE・REの全体F検定のDK時点数不足）。
+    /// `report()`は`source`の`code`に`stage`を付ける（`stage`を付けてよい`code`のみ。`source`が
+    /// すでに別の`stage`を持つときは置き換える）。
+    #[error("{}", self.catalog_message())]
+    InStage {
+        stage: Stage,
+        #[source]
+        source: Box<PanelError>,
+    },
+}
 
-        // 2. ユニークなキーだけを並べ、仮コード→順序づけコードの対応を作る。
-        let mut order: Vec<usize> = (0..unique.len()).collect();
-        order.sort_unstable_by(|&a, &b| {
-            compare_rows(first_row[a], first_row[b]).then_with(|| unique[a].cmp(unique[b]))
-        });
-        let mut rank = vec![0; unique.len()];
-        for (r, &provisional_code) in order.iter().enumerate() {
-            rank[provisional_code] = r;
+impl ErrorInfo for PanelError {
+    /// `WithinRegressionFailed`等の段階ごとの包みは、`source`の`code`（`stage`を付けてよい
+    /// `code`なら`stage`つき）を返す。
+    fn report(&self) -> ErrorReport {
+        match self {
+            Self::Common(common) => common.report(),
+            Self::WithinRegressionFailed { source } => {
+                staged_report(source.report(), Stage::WithinRegression)
+            }
+            Self::FTestFailed { source } => staged_report(source.report(), Stage::OverallFTest),
+            Self::BetweenRegressionFailed { means, source } => staged_report(
+                source.report(),
+                match means {
+                    BetweenMeans::Entity => Stage::BetweenRegressionEntity,
+                    BetweenMeans::Time => Stage::BetweenRegressionTime,
+                },
+            ),
+            Self::PooledRegressionFailed { source } => {
+                staged_report(source.report(), Stage::PooledRegression)
+            }
+            Self::QuasiDemeanedRegressionFailed { source } => {
+                staged_report(source.report(), Stage::QuasiDemeanedRegression)
+            }
+            Self::HausmanTestFailed { source } => {
+                staged_report(source.report(), Stage::HausmanRegression)
+            }
+            Self::InStage { stage, source } => staged_report(source.report(), stage.clone()),
+            Self::IdentifierDimensionMismatch {
+                dimension,
+                y_rows,
+                other_rows,
+            } => ErrorReport::new(ErrorCode::InternalError).param(
+                "detail",
+                format!("y has {y_rows} rows but {dimension} has {other_rows} rows"),
+            ),
+            Self::TwoWayRequiresTime => ErrorReport::new(ErrorCode::InternalError).param(
+                "detail",
+                "two-way effects were requested without a time column",
+            ),
+            Self::InsufficientDegreesOfFreedom {
+                n_obs,
+                n_entities,
+                n_periods,
+                k,
+            } => {
+                // 2-wayは個体ダミーと時点ダミーの間の定数項ぶんを1つ引く。
+                let n_effects = n_entities + n_periods.map_or(0, |t| t.saturating_sub(1));
+                ErrorReport::new(ErrorCode::InsufficientDegreesOfFreedom)
+                    .param("n_obs", *n_obs)
+                    .param("n_params", *k)
+                    .param("n_effects", n_effects)
+                    .param("min_obs", n_effects + k + 1)
+            }
+            Self::SingletonGroup {
+                dimension,
+                group_id,
+            } => ErrorReport::new(ErrorCode::SingletonGroup)
+                .param("argument", dimension.argument_name())
+                .param("group", group_id.as_str()),
+            Self::UnbalancedPanelForTwoWay {
+                n_obs,
+                n_entities,
+                n_periods,
+                expected,
+            } => ErrorReport::new(ErrorCode::PanelNotBalancedForTwoWay)
+                .param("n_obs", *n_obs)
+                .param("n_entities", *n_entities)
+                .param("n_periods", *n_periods)
+                .param("expected_obs", *expected),
+            Self::ZeroVarianceAfterDemeaning { column } => {
+                ErrorReport::new(ErrorCode::RegressorNoWithinVariation)
+                    .param("column", column.as_str())
+            }
+            Self::OutcomeConstantWithinEntity => {
+                ErrorReport::new(ErrorCode::OutcomeConstantWithinEntity)
+            }
+            Self::InvalidDkBandwidth { bandwidth, t } => {
+                ErrorReport::new(ErrorCode::DkBandwidthOutOfRange)
+                    .param("value", *bandwidth)
+                    .param("n_periods", *t)
+                    .param("max", t.saturating_sub(1))
+            }
+            Self::InsufficientDkPeriods { t_periods } => {
+                ErrorReport::new(ErrorCode::DkPeriodsTooFew)
+                    .param("n_periods", *t_periods)
+                    .param("min_periods", 2_usize)
+            }
+            Self::InsufficientDkPeriodsForInference { t_periods, q } => {
+                ErrorReport::new(ErrorCode::DkPeriodsNotAboveCoefficients)
+                    .param("n_periods", *t_periods)
+                    .param("n_coefficients", *q)
+                    .param("min_periods", q + 1)
+            }
+            Self::DegenerateDkTwoPeriods => ErrorReport::new(ErrorCode::DkTwoPeriodsDegenerate),
+            Self::DegenerateClusterTwoGroups => {
+                ErrorReport::new(ErrorCode::ClusterTwoGroupsDegenerate)
+            }
+            Self::AmemiyaRequiresWithinVariation { columns } => {
+                ErrorReport::new(ErrorCode::AmemiyaRequiresWithinVariation)
+                    .param("columns", columns.clone())
+            }
+            Self::NonPositiveIdiosyncraticVariance { method, sigma2_eps } => {
+                ErrorReport::new(ErrorCode::NonPositiveIdiosyncraticVariance)
+                    .param("sigma2_eps", *sigma2_eps)
+                    .param("variance_method", *method)
+            }
+            Self::VarianceComponentsMomentsSingular { method } => {
+                ErrorReport::new(ErrorCode::VarianceComponentsMomentsSingular)
+                    .param("variance_method", *method)
+            }
         }
+    }
+}
 
-        // 仮コードをその場で順序づけコードに置き換える（別の`Vec`を確保しない）。
-        for c in &mut codes {
-            *c = rank[*c];
-        }
-        let mut counts = vec![0; unique.len()];
-        for &c in &codes {
-            counts[c] += 1;
-        }
-        let keys = order.iter().map(|&c| unique[c].to_string()).collect();
-        Self {
-            codes,
-            counts,
-            keys,
+impl PanelError {
+    /// このエラーを、起きた計算の文脈（`stage`）つきで包む（[`PanelError::InStage`]）。
+    pub(crate) fn in_stage(self, stage: Stage) -> Self {
+        debug_assert!(
+            self.report().code().spec().stage_allowed,
+            "the code of {self:?} does not carry a stage"
+        );
+        Self::InStage {
+            stage,
+            source: Box::new(self),
         }
     }
 
-    /// 各行のグループコード（長さ`n`）。
-    pub(crate) fn codes(&self) -> &[usize] {
-        &self.codes
-    }
-
-    /// グループごとの観測数（コード順）。
-    pub(crate) fn counts(&self) -> &[usize] {
-        &self.counts
-    }
-
-    /// グループのキー（コード順）。
-    pub(crate) fn keys(&self) -> &[String] {
-        &self.keys
-    }
-
-    /// ユニークなグループ数。
-    pub(crate) fn n_groups(&self) -> usize {
-        self.counts.len()
-    }
-
-    /// 行数`n`。
-    pub(crate) fn nobs(&self) -> usize {
-        self.codes.len()
-    }
-
-    /// グループごとの行インデックス（コード順、グループ内は観測順）。旧実装の
-    /// `String`キーの`BTreeMap`でまとめたもの（キー順＝辞書順、グループ内は観測順）と同じ
-    /// 順序・同じ中身を、計数ソートで`O(n)`で作る。
-    pub(crate) fn group_indices(&self) -> GroupIndices {
-        let mut offsets = Vec::with_capacity(self.counts.len() + 1);
-        offsets.push(0);
-        for &count in &self.counts {
-            offsets.push(offsets[offsets.len() - 1] + count);
-        }
-        let mut next = offsets[..self.counts.len()].to_vec();
-        let mut indices = vec![0; self.codes.len()];
-        for (i, &c) in self.codes.iter().enumerate() {
-            indices[next[c]] = i;
-            next[c] += 1;
-        }
-        GroupIndices { offsets, indices }
+    /// `Display`が使う`message`。
+    fn catalog_message(&self) -> String {
+        self.report().message()
     }
 }
 
@@ -505,24 +548,38 @@ impl GroupCodes {
 /// 時点の順序は**ラベルの文字列ではなく列の値の順序**で決める（整数・浮動小数点は数値順、
 /// 日付・日時は時系列順、`Enum`はカテゴリ定義順）。文字列の辞書順では`1, 10, 11, 2, ...`の
 /// ように並んで時点の対応がずれ、DKの標準誤差が黙って変わる。値の順序をどう取るかは
-/// `engine_pybind`が列のdtypeから決め、コンストラクタで渡す。ラベル自体（`String`）は
+/// `engine_pybind`が列のdtypeから決め、コンストラクタで渡す。ラベル（`String`）は
 /// 同一性の判定と`fixed_effects()`のキーに使う。
 ///
-/// ユニークな時点は1つのコードに対応し、コードは0から時点の昇順に振る。
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// ユニークな時点は1つのコードに対応し、コードは0から時点の昇順に振る。行ごとのラベルの
+/// `String`列は持たない（コードと、ユニークな時点のラベルだけ）。
+///
+/// 構築は、行ごとのラベルから作る`lexicographic`/`by_integer`/`by_float`と、呼び出し側が
+/// 行ごとの`String`を作らずに振った仮コードから作る`*_factorized`の2系統。
+#[derive(Debug, Clone)]
 pub struct TimeKeys {
-    /// 各行の時点ラベル（長さ`n`）。
-    ids: Vec<String>,
-    /// `ids`のコード（時間順）。
+    /// 各行の時点コード（時間順、キー付き）。
     codes: GroupCodes,
 }
+
+impl PartialEq for TimeKeys {
+    /// 時間順のコードと、ユニークな時点のラベル（時間順）の両方を比べる。`GroupCodes`の`==`は
+    /// キーを見ないが、時点ではラベルが`fixed_effects()`のキーと`dk_time`の指定の同一性を決める
+    /// ため、コードが同じでもラベルが違う時点列を等しいとみなさない。
+    fn eq(&self, other: &Self) -> bool {
+        self.codes == other.codes && self.periods() == other.periods()
+    }
+}
+
+impl Eq for TimeKeys {}
 
 impl TimeKeys {
     /// ラベルの辞書順を時間順とみなす（ISO 8601の日付・ゼロ埋めした年月等、辞書順が時間順と
     /// 一致するラベル向け）。`FeInput::from_columns`/`ReInput::from_columns`はこの順序を使う。
     pub fn lexicographic(ids: Vec<String>) -> Self {
-        let codes = GroupCodes::from_ids(&ids);
-        Self { ids, codes }
+        Self {
+            codes: GroupCodes::from_labels(&ids),
+        }
     }
 
     /// 各行の整数値`values`の昇順を時間順にする（整数列・日付・日時・`Enum`の物理順序）。
@@ -531,9 +588,9 @@ impl TimeKeys {
     /// `values`の長さが`ids`と一致しない場合は`PanelError::IdentifierDimensionMismatch`
     /// （`engine_pybind`が同じ列から作る限り起こり得ない契約違反に対する防御）。
     pub fn by_integer(ids: Vec<String>, values: &[i128]) -> Result<Self, PanelError> {
-        check_key_lengths(&ids, values.len())?;
-        let codes = GroupCodes::from_ids_ordered(&ids, |a, b| values[a].cmp(&values[b]));
-        Ok(Self { ids, codes })
+        check_key_lengths(ids.len(), values.len())?;
+        let codes = GroupCodes::from_labels_ordered(&ids, |a, b| values[a].cmp(&values[b]));
+        Ok(Self { codes })
     }
 
     /// 各行の浮動小数点値`values`の昇順（`f64::total_cmp`）を時間順にする。有限値であること
@@ -542,14 +599,57 @@ impl TimeKeys {
     /// # Errors
     /// `values`の長さが`ids`と一致しない場合は`PanelError::IdentifierDimensionMismatch`。
     pub fn by_float(ids: Vec<String>, values: &[f64]) -> Result<Self, PanelError> {
-        check_key_lengths(&ids, values.len())?;
-        let codes = GroupCodes::from_ids_ordered(&ids, |a, b| values[a].total_cmp(&values[b]));
-        Ok(Self { ids, codes })
+        check_key_lengths(ids.len(), values.len())?;
+        let codes = GroupCodes::from_labels_ordered(&ids, |a, b| values[a].total_cmp(&values[b]));
+        Ok(Self { codes })
     }
 
-    /// 各行の時点ラベル（長さ`n`）。
-    pub fn ids(&self) -> &[String] {
-        &self.ids
+    /// [`Self::lexicographic`]の仮コード版。各行の仮コード`codes`（値は`0..labels.len()`）と、
+    /// 仮グループごとの時点ラベル`labels`から作る（`GroupCodes::from_factorized`と同じ
+    /// 規則で、同じラベルの仮グループは1つにまとめる）。
+    ///
+    /// # Errors
+    /// 仮コードが範囲外、または使われていない仮コードがある場合（`PanelError::Common`）。
+    pub fn lexicographic_factorized(
+        codes: Vec<usize>,
+        labels: &[&str],
+    ) -> Result<Self, PanelError> {
+        Ok(Self {
+            codes: GroupCodes::from_factorized(codes, labels)?,
+        })
+    }
+
+    /// [`Self::by_integer`]の仮コード版。`group_values[g]`は仮グループ`g`の整数値。
+    ///
+    /// # Errors
+    /// `group_values`の長さが`labels`と一致しない場合は`PanelError::IdentifierDimensionMismatch`。
+    /// そのほか`lexicographic_factorized`と同じ。
+    pub fn by_integer_factorized(
+        codes: Vec<usize>,
+        labels: &[&str],
+        group_values: &[i128],
+    ) -> Result<Self, PanelError> {
+        check_key_lengths(labels.len(), group_values.len())?;
+        let codes = GroupCodes::from_factorized_ordered(codes, labels, |a, b| {
+            group_values[a].cmp(&group_values[b])
+        })?;
+        Ok(Self { codes })
+    }
+
+    /// [`Self::by_float`]の仮コード版。`group_values[g]`は仮グループ`g`の浮動小数点値。
+    ///
+    /// # Errors
+    /// `by_integer_factorized`と同じ。
+    pub fn by_float_factorized(
+        codes: Vec<usize>,
+        labels: &[&str],
+        group_values: &[f64],
+    ) -> Result<Self, PanelError> {
+        check_key_lengths(labels.len(), group_values.len())?;
+        let codes = GroupCodes::from_factorized_ordered(codes, labels, |a, b| {
+            group_values[a].total_cmp(&group_values[b])
+        })?;
+        Ok(Self { codes })
     }
 
     /// 時点ラベルのコード（時間順）。
@@ -559,12 +659,12 @@ impl TimeKeys {
 
     /// 行数`n`。
     pub fn len(&self) -> usize {
-        self.ids.len()
+        self.codes.nobs()
     }
 
     /// 行数が0か。
     pub fn is_empty(&self) -> bool {
-        self.ids.is_empty()
+        self.codes.nobs() == 0
     }
 
     /// ユニークな時点のラベルを時間順に並べたもの。
@@ -574,103 +674,96 @@ impl TimeKeys {
 }
 
 /// `TimeKeys`のコンストラクタが、ラベルと順序づけの値の長さを検証する。
-fn check_key_lengths(ids: &[String], values: usize) -> Result<(), PanelError> {
-    if ids.len() != values {
+fn check_key_lengths(labels: usize, values: usize) -> Result<(), PanelError> {
+    if labels != values {
         return Err(PanelError::IdentifierDimensionMismatch {
             dimension: PanelDimension::Time,
-            y_rows: ids.len(),
+            y_rows: labels,
             other_rows: values,
         });
     }
     Ok(())
 }
 
-/// `validate_cluster_groups`（OLS等と共有、`String`列を受ける）と同じ検証をコードで行う
-/// （クラスター数`G`を返し、`G < 2`なら`CommonError::InsufficientClusters`）。FE/REの
-/// クラスター列は`GroupCodes`にしてあるため、文字列を数え直さない。
-pub(crate) fn validate_cluster_group_codes(
-    groups: &GroupCodes,
-    n: usize,
-) -> Result<usize, CommonError> {
+/// `FeInput::from_group_codes`/`ReInput::from_group_codes`の入力検証（FE/REで共通）。
+/// 検査の順序は、各`x_columns`の行数（`y`との不一致は`CommonError::DimensionMismatch`）、
+/// `entity`の長さ、`time`の長さ（以上2つは`PanelError::IdentifierDimensionMismatch`）、
+/// `entity`がキーを持つか（`require_entity_keys`）。
+///
+/// # パニックについて
+/// `x_names.len() != x_columns.len()`の場合は`debug_assert!`でパニックする（呼び出し側
+/// `engine_pybind`の実装バグでしか起こり得ない内部契約であり、実データに起因する
+/// `ValidationError`とは性質が異なる。`OlsInput::from_columns`と同じ理由）。
+pub(crate) fn validate_panel_input(
+    y: &[f64],
+    x_columns: &[Vec<f64>],
+    x_names: &[String],
+    entity: &GroupCodes,
+    time: Option<&TimeKeys>,
+) -> Result<(), PanelError> {
     debug_assert_eq!(
-        groups.nobs(),
-        n,
-        "groups length must match nobs (engine_pybind contract)"
+        x_columns.len(),
+        x_names.len(),
+        "x_columns and x_names must have the same length"
     );
-    let g = groups.n_groups();
-    if g < 2 {
-        return Err(CommonError::InsufficientClusters { g });
+
+    for col in x_columns {
+        if col.len() != y.len() {
+            return Err(CommonError::DimensionMismatch {
+                y_rows: y.len(),
+                x_rows: col.len(),
+            }
+            .into());
+        }
     }
-    Ok(g)
-}
 
-/// `GroupCodes::group_indices`の結果（CSR形式: グループ`g`の行は
-/// `indices[offsets[g]..offsets[g+1]]`）。グループごとに`Vec`を確保しないため、グループ数が
-/// 多い（エンティティ166,666等）ときも確保は2回で済む。
-pub(crate) struct GroupIndices {
-    offsets: Vec<usize>,
-    indices: Vec<usize>,
-}
-
-impl GroupIndices {
-    /// グループごとの行インデックスをコード順に返す。
-    pub(crate) fn iter(&self) -> impl Iterator<Item = &[usize]> {
-        self.offsets.windows(2).map(|w| &self.indices[w[0]..w[1]])
+    if entity.nobs() != y.len() {
+        return Err(PanelError::IdentifierDimensionMismatch {
+            dimension: PanelDimension::Entity,
+            y_rows: y.len(),
+            other_rows: entity.nobs(),
+        });
     }
+
+    if let Some(time) = time
+        && time.len() != y.len()
+    {
+        return Err(PanelError::IdentifierDimensionMismatch {
+            dimension: PanelDimension::Time,
+            y_rows: y.len(),
+            other_rows: time.len(),
+        });
+    }
+    require_entity_keys(entity)
 }
 
-/// FE/RE共有のcov_type計算ヘルパー（元は`fe.rs`の`fe_*_cov_params`をFE→common.rsへ移設。
-/// 「FE専用で書いたが後にREでも同じ数式が必要と判明したため共有ロジックとして移設した」
-/// 経緯）。**数式自体はFE実装時のまま変更していない**——移設したのは
-/// 呼び出し側（`fe.rs`/`re.rs`）が渡す`df_resid`・`extra_df`・レバレッジの値がFE/REで
-/// 異なるだけで、計算ロジック自体はモデル非依存（`.claude/rules/rust-style.md`
-/// 「全手法で共有するロジック」）。
-///
-/// **RE実装で判明した重要な事実**: `linearmodels.RandomEffects.fit()`の
-/// ソース確認により、REは`cov_type`によらず常に`extra_df=0`を使う（FEのような
-/// `neffects`・`entity_nested_within_cluster`の条件分岐が一切不要）。REの変換済み
-/// 設計行列は「省略された固定効果ダミー」を持たない（切片も含め全パラメータが実際に
-/// 列として含まれている）ため、HC2/HC3のレバレッジも`leverage_full`（FE専用、
-/// `fe.rs`に残置）ではなく本モジュールの`leverage_within`（＝素の`h_ii = x_i(X'X)⁻¹x_i'`）
-/// で足りる。手動データで`linearmodels`（Classical/HC1/Cluster/HAC）・`plm`
-/// （HC2/HC3、`linearmodels`に実装が無いため）との数値一致を実地検証済み
-/// （`engine/src/panel/re.rs`のテスト参照、ユーザー確認済み・2026-09-19）。
-///
-/// within変換後の列（`Vec<Vec<f64>>`、列ごとに長さ`n`）から`faer::Mat`を組み立てる。
-/// `OlsInput::from_columns`と同じ列順・行順の規約（`columns[j][i]`がi行j列）。
-pub(crate) fn design_matrix_from_columns(columns: &[Vec<f64>], n: usize) -> Mat<f64> {
-    let k = columns.len();
-    Mat::from_fn(n, k, |i, j| columns[j][i])
+/// パネル入力のentityのコードがキー（`keys()`）を持つことを確かめる。固定効果のキーに使うため、
+/// キー無しのコード（`GroupCodes::from_*_without_keys`）は受け付けない。
+fn require_entity_keys(entity: &GroupCodes) -> Result<(), PanelError> {
+    if !entity.has_keys() {
+        return Err(CommonError::internal(
+            "entity codes must carry keys (build them with GroupCodes::from_labels or \
+             GroupCodes::from_factorized)",
+        )
+        .into());
+    }
+    Ok(())
 }
 
 /// `(X̃'X̃)⁻¹`を求める（`X̃`はFE/REそれぞれの変換後の設計行列）。HC1〜HC3・Clusterいずれの
-/// 計算でも共通して必要になる。`ols::xtx_inverse`と同じ発想だが、`OlsEstimator`が
+/// 計算でも共通して必要になる。`shared::covariance::xtx_inverse`と同じ発想だが、`OlsEstimator`が
 /// 保持する`cov_params`はprivateで再利用できないため独立に計算し直す。
 ///
 /// `X̃'X̃`が対称正定値であることは、`OlsEstimator::fit`が同じ`x`で既に成功している
 /// （＝特異ではないと確認済み）ことから理論上保証されるが、`OlsEstimator`と同じく
 /// 浮動小数点演算の境界的なケースに備えて`Result`化する。
-pub(crate) fn xtx_inverse(x: &Mat<f64>, k: usize) -> Result<Mat<f64>, PanelError> {
-    let xtx = x.transpose() * x;
-    let llt = xtx.llt(Side::Lower).map_err(|_| {
-        CommonError::ComputationFailed(
-            "failed to invert the transformed design matrix's Gram matrix for panel cov_type \
-             computation"
-                .to_string(),
+pub(crate) fn xtx_inverse(x: &Mat<f64>) -> Result<Mat<f64>, PanelError> {
+    crate::shared::covariance::xtx_inverse(x).map_err(|_| {
+        CommonError::internal(
+            "the Gram matrix of the transformed design matrix could not be inverted",
         )
-    })?;
-    Ok(llt.solve(Mat::<f64>::identity(k, k)))
-}
-
-/// 行ごとのレバレッジ `h_ii = x̃_i (X̃'X̃)⁻¹ x̃_i'`（`ols::hc_cov_params`のレバレッジ計算と
-/// 同じ式）。FEでは`leverage_full`（`fe.rs`）の材料（`h_within`）として使う。REでは
-/// 変換済み設計行列に省略された固定効果ダミーが無いため、この値自体がそのままHC2/HC3の
-/// レバレッジになる（モジュールdoc参照）。
-pub(crate) fn leverage_within(x: &Mat<f64>, xtx_inv: &Mat<f64>, n: usize, k: usize) -> Vec<f64> {
-    let xh = x * xtx_inv;
-    (0..n)
-        .map(|i| (0..k).map(|j| (*xh.get(i, j)) * (*x.get(i, j))).sum())
-        .collect()
+        .into()
+    })
 }
 
 /// classical: `σ̂² (X̃'X̃)⁻¹`（`σ̂² = SSR/df_resid`）。
@@ -684,7 +777,7 @@ pub(crate) fn panel_classical_cov_params(
     Mat::from_fn(k, k, |i, j| sigma2 * (*xtx_inv.get(i, j)))
 }
 
-/// `panel_hc_cov_params`内部でのみ使うHCの種類（`ols::HcVariant`と同型だがHC0を含まない、
+/// `panel_hc_cov_params`内部でのみ使うHCの種類（`shared::covariance::HcVariant`と同型だがHC0を含まない、
 /// FE/REともにHC0はスコープ外、`fe.rs`モジュールdoc「`cov_type`対応」参照）。
 pub(crate) enum PanelHcVariant {
     Hc1,
@@ -692,15 +785,15 @@ pub(crate) enum PanelHcVariant {
     Hc3,
 }
 
-/// HC1〜HC3の係数分散共分散行列（k×k）。`ols::hc_cov_params`と同型の構造だが、
+/// HC1〜HC3の係数分散共分散行列（k×k）。`shared::covariance::hc_cov_params`と同型の構造だが、
 /// 小標本補正がFE/RE用に異なる（`fe.rs`モジュールdoc「`cov_type`対応」参照）:
 /// - HC1: `w_i = n/df_resid`
-/// - HC2/HC3: `w_i`はレバレッジ`h`ベース（FEは`leverage_full`、REは`leverage_within`を渡す）
+/// - HC2/HC3: `w_i`はレバレッジ`h`ベース（FEは`leverage_full`、REは`shared::covariance::leverages`の素のレバレッジを渡す）
 ///
 /// `h`の`expect`（`Hc2`/`Hc3`分岐）は、呼び出し元の`fit()`が`variant=Hc2|Hc3`のときは
 /// 必ず`Some(&h)`を渡す構造になっており、`variant`と`h`の組み合わせに呼び出し側のバグ
-/// 以外で不整合が生じることはない（`ols::hc_cov_params`の同型の
-/// `.expect("Hc2はleverage計算済み")`と同じ「型で表現しきれない呼び出し規約」の防御）。
+/// 以外で不整合が生じることはない（`shared::covariance::hc_cov_params`の同型の
+/// `.expect("leverage is computed for HC2")`と同じ「型で表現しきれない呼び出し規約」の防御）。
 pub(crate) fn panel_hc_cov_params(
     x: &Mat<f64>,
     residuals: &[f64],
@@ -733,11 +826,11 @@ pub(crate) fn panel_hc_cov_params(
     xtx_inv * &psi_hat * xtx_inv
 }
 
-/// クラスターロバスト係数分散共分散行列（k×k）。`ols::cluster_cov_params`と同じ
+/// クラスターロバスト係数分散共分散行列（k×k）。`shared::covariance::cluster_cov_params`と同じ
 /// Stata流`(G/(G-1))×((n-1)/(n-K))`小標本補正を使う（fixest（R）・Stataの`xtreg`/
 /// `reghdfe`との数値一致のため、linearmodels方式`n/(n-extra_df-k)`から
 /// 変更した。`fe.rs`モジュールdoc「`cov_type`対応」参照）。`G`はこの関数が
-/// `groups`から数える（`ols::cluster_cov_params`と同じ）。`K`（`(n-1)/(n-K)`の分母）は
+/// `groups`から数える（`shared::covariance::cluster_cov_params`と同じ）。`K`（`(n-1)/(n-K)`の分母）は
 /// 呼び出し側が決める`k_correction`引数で渡す——FEは固定効果ダミーとクラスター変数の
 /// ネスト関係で決まるfixest固有のK計算（`fe.rs`の`fe_cluster_k_correction`）、REは
 /// 単純に`df_model`（FEのような固定効果ダミーのネスト補正が不要、モジュールdoc参照）。
@@ -750,27 +843,8 @@ pub(crate) fn panel_cluster_cov_params(
     groups: &GroupCodes,
     k_correction: usize,
 ) -> Mat<f64> {
-    let group_indices = groups.group_indices();
-    let n_groups = groups.n_groups();
-
-    let mut s_hat = Mat::<f64>::zeros(k, k);
-    for indices in group_indices.iter() {
-        let mut s_g = vec![0.0_f64; k];
-        for &i in indices {
-            let e = residuals[i];
-            for (a, s_g_a) in s_g.iter_mut().enumerate() {
-                *s_g_a += e * (*x.get(i, a));
-            }
-        }
-        for a in 0..k {
-            for b in 0..k {
-                *s_hat.get_mut(a, b) += s_g[a] * s_g[b];
-            }
-        }
-    }
-
-    let correction = (n_groups as f64 / (n_groups as f64 - 1.0))
-        * ((n as f64 - 1.0) / ((n - k_correction) as f64));
+    let (s_hat, n_groups) = cluster_meat(groups, k, |i, a| residuals[i] * (*x.get(i, a)));
+    let correction = cluster_correction(n_groups, n, k_correction);
     let cov_uncorrected = xtx_inv * &s_hat * xtx_inv;
     Mat::from_fn(k, k, |i, j| correction * (*cov_uncorrected.get(i, j)))
 }
@@ -780,8 +854,9 @@ pub(crate) fn panel_cluster_cov_params(
 ///
 /// `Some(bw)`の場合は`0 <= bw < t`を検証してそのまま使う（`t`はユニークな時点数）。`None`の
 /// 場合は`linearmodels`の`DriscollKraay`と同じ経験則`floor(4*(t/100)^(2/9))`で自動計算する
-/// （`fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照。OLSの`resolve_hac_lags`と
-/// 式の形は同じだが、観測数`n`ではなく時点数`t`が引数になる点が異なる）。
+/// （`fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照。式は
+/// `shared::covariance::default_hac_lags`でOLS・IVのHACと共有するが、引数が観測数`n`では
+/// なく時点数`t`になる点が異なる）。
 ///
 /// `t < 2`は`bandwidth`の値によらず`PanelError::InsufficientDkPeriods`で拒否する
 /// （fixest型の`G/(G-1)`相当補正を導入したことに伴う前提条件。同エラーの
@@ -798,7 +873,7 @@ pub(crate) fn resolve_dk_bandwidth(bandwidth: Option<i64>, t: usize) -> Result<u
             }
             Ok(bw as usize)
         }
-        None => Ok((4.0 * (t as f64 / 100.0).powf(2.0 / 9.0)).floor() as usize),
+        None => Ok(default_hac_lags(t)),
     }
 }
 
@@ -835,8 +910,10 @@ pub(crate) fn validate_dk_periods_cover_tested_coefficients(
 /// `time`のコード（`GroupCodes`、コード順＝時系列順、`TimeKeys`のdoc参照）で集計して
 /// `ξ_t`（時点`t`でのクロスセクション和）を求める。
 ///
-/// **`bandwidth <= t_periods`（狭義の`<`ではない）が呼び出し元の`resolve_dk_bandwidth`から
-/// 保証される**（詳細は`fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）。
+/// **`bandwidth < t_periods`が呼び出し元の`resolve_dk_bandwidth`から保証される**
+/// （詳細は`fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）。上限の
+/// `bandwidth == t_periods - 1`でも最終ラグ項`l = bandwidth`を含める標準のBartlettカーネル
+/// で、この境界ではfixestと一致しない（`docs/spec/fe-spec.md`3.3節）。
 ///
 /// ラグごとの`k×k`行列積（`xi_top.transpose() * xi_bot`等）は呼び出し元の`fit()`冒頭の
 /// `ensure_serial()`が固定したグローバル`Par::Seq`に依存している（OLSの`hac_cov_params`が
@@ -967,21 +1044,284 @@ pub(crate) fn quasi_demean_column(col: &[f64], entity: &GroupCodes, theta: &[f64
         .collect()
 }
 
+/// 2-way REのGLS変換の3つの重み（`re-spec.md`5章）。
+///
+/// バランスパネルでは全観測で共通の値で、変換は`y - θ₁ȳᵢ. - θ₂ȳ.ₜ + θ₃ȳ..`。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct TwoWayTheta {
+    /// entity平均`ȳᵢ.`にかかる重み`θ₁`。
+    pub(crate) entity: f64,
+    /// time平均`ȳ.ₜ`にかかる重み`θ₂`。
+    pub(crate) time: f64,
+    /// 総平均`ȳ..`にかかる重み`θ₃`（`θ₁`と`θ₂`の積ではなく、`θ₁ + θ₂ - 1 + σ_ε/σ₄`）。
+    pub(crate) total: f64,
+}
+
+/// 2-way RE（バランスパネル）のGLS変換`col - θ₁ȳᵢ. - θ₂ȳ.ₜ + θ₃ȳ..`を1列に適用する。
+///
+/// `quasi_demean_column`は1つのグルーピングしか扱えず、FEの2-wayのように「entityで
+/// quasi-demean→その結果をtimeでquasi-demean」の2段階適用（θ₁・θ₂だけを使う）では
+/// `θ₃`が合わずGLS変換にならない（`θ₃ ≠ θ₁θ₂`）ため、3つの平均を同時に引く専用の関数を
+/// 用意した。θ=1・1・1なら2-way within変換（二重デミーニング）になる。
+///
+/// 平均はバランスパネルを前提に`GroupCodes::counts()`で割る（総平均は`n`で割る）。
+/// バランスパネルであることの検証は呼び出し側の責務（`validate_balanced_panel`）。
+///
+/// # Panics
+/// `entity`・`time`の観測数が`col.len()`と一致しない場合（`quasi_demean_column`と同じ内部契約）。
+pub(crate) fn quasi_demean_two_way(
+    col: &[f64],
+    entity: &GroupCodes,
+    time: &GroupCodes,
+    theta: TwoWayTheta,
+) -> Vec<f64> {
+    assert_eq!(
+        entity.nobs(),
+        col.len(),
+        "entity length must match column length (ReInput contract)"
+    );
+    assert_eq!(
+        time.nobs(),
+        col.len(),
+        "time length must match column length (ReInput contract)"
+    );
+
+    let mut entity_sums = vec![0.0_f64; entity.n_groups()];
+    let mut time_sums = vec![0.0_f64; time.n_groups()];
+    let mut total = 0.0_f64;
+    for ((value, &e), &t) in col.iter().zip(entity.codes()).zip(time.codes()) {
+        entity_sums[e] += *value;
+        time_sums[t] += *value;
+        total += *value;
+    }
+    let grand_mean = total / col.len() as f64;
+    let entity_shift: Vec<f64> = entity_sums
+        .iter()
+        .zip(entity.counts())
+        .map(|(sum, &count)| theta.entity * (sum / count as f64))
+        .collect();
+    let time_shift: Vec<f64> = time_sums
+        .iter()
+        .zip(time.counts())
+        .map(|(sum, &count)| theta.time * (sum / count as f64))
+        .collect();
+    let grand_shift = theta.total * grand_mean;
+
+    col.iter()
+        .zip(entity.codes())
+        .zip(time.codes())
+        .map(|((value, &e), &t)| value - entity_shift[e] - time_shift[t] + grand_shift)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use super::*;
+    use crate::shared::error::ClusterSetting;
 
-    /// `ids`の値ごとに観測インデックスをまとめる（`BTreeMap`のキー＝`ids`の辞書順）。
-    /// `GroupCodes`導入前の実装で、`GroupCodes`のコード順・グループ内の観測順が
-    /// これと一致することを確かめるテストのオラクルとしてだけ残している。
-    fn group_indices_by_key(ids: &[String]) -> BTreeMap<&str, Vec<usize>> {
-        let mut indices: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
-        for (i, id) in ids.iter().enumerate() {
-            indices.entry(id.as_str()).or_default().push(i);
+    #[test]
+    fn panel_cataloged_variants_display_the_catalog_message_and_common_delegates() {
+        let err = PanelError::InvalidDkBandwidth { bandwidth: 6, t: 6 };
+        assert_eq!(
+            err.to_string(),
+            "dk_bandwidth must be from 0 to 5, one less than the number of unique time periods \
+             in dk_time (6), got 6."
+        );
+        let wrapped = PanelError::Common(CommonError::InvalidHacLags { hac_lags: 3, n: 3 });
+        assert_eq!(wrapped.report().code(), ErrorCode::HacLagsOutOfRange);
+    }
+
+    #[test]
+    fn dk_bandwidth_error_maps_to_the_catalog() {
+        let report = PanelError::InvalidDkBandwidth { bandwidth: 7, t: 6 }.report();
+        assert_eq!(report.code(), ErrorCode::DkBandwidthOutOfRange);
+        assert!(report.validate().is_ok());
+    }
+
+    #[test]
+    fn panel_input_errors_map_to_catalog_codes_with_valid_params() {
+        let cases = [
+            (
+                PanelError::InsufficientDegreesOfFreedom {
+                    n_obs: 10,
+                    n_entities: 5,
+                    n_periods: None,
+                    k: 5,
+                },
+                ErrorCode::InsufficientDegreesOfFreedom,
+                "Not enough observations for the panel model: 10 observation(s), but 5 coefficient(s) and 5 fixed-effect parameter(s) (entity effects, plus time effects in a two-way model) must be estimated; at least 11 are needed.",
+            ),
+            (
+                PanelError::InsufficientDegreesOfFreedom {
+                    n_obs: 10,
+                    n_entities: 5,
+                    n_periods: Some(2),
+                    k: 1,
+                },
+                ErrorCode::InsufficientDegreesOfFreedom,
+                "Not enough observations for the panel model: 10 observation(s), but 1 coefficient(s) and 6 fixed-effect parameter(s) (entity effects, plus time effects in a two-way model) must be estimated; at least 8 are needed.",
+            ),
+            (
+                PanelError::SingletonGroup {
+                    dimension: PanelDimension::Entity,
+                    group_id: "a".to_string(),
+                },
+                ErrorCode::SingletonGroup,
+                "The entity group 'a' has only one observation, and singleton groups are not dropped automatically.",
+            ),
+            (
+                PanelError::SingletonGroup {
+                    dimension: PanelDimension::Time,
+                    group_id: "2020".to_string(),
+                },
+                ErrorCode::SingletonGroup,
+                "The time group '2020' has only one observation, and singleton groups are not dropped automatically.",
+            ),
+            (
+                PanelError::UnbalancedPanelForTwoWay {
+                    n_obs: 5,
+                    n_entities: 2,
+                    n_periods: 3,
+                    expected: 6,
+                },
+                ErrorCode::PanelNotBalancedForTwoWay,
+                "Two-way estimation requires a balanced panel: 5 observation(s) for 2 entities and 3 periods, but 6 are expected.",
+            ),
+            (
+                PanelError::ZeroVarianceAfterDemeaning {
+                    column: "x".to_string(),
+                },
+                ErrorCode::RegressorNoWithinVariation,
+                "Regressor 'x' has no variation left after the within transformation: it is time-invariant, or collinear with the fixed effects.",
+            ),
+            (
+                PanelError::OutcomeConstantWithinEntity,
+                ErrorCode::OutcomeConstantWithinEntity,
+                "The outcome has no variation left after the fixed effects are removed: it is constant within every entity, or fully explained by the entity and time effects.",
+            ),
+            (
+                PanelError::InsufficientDkPeriods { t_periods: 1 },
+                ErrorCode::DkPeriodsTooFew,
+                "cov_type=\"dk\" needs at least 2 unique time periods in dk_time, but there are 1.",
+            ),
+            (
+                PanelError::InsufficientDkPeriodsForInference { t_periods: 3, q: 3 },
+                ErrorCode::DkPeriodsNotAboveCoefficients,
+                "cov_type=\"dk\" needs more time periods than jointly tested coefficients: dk_time has 3 periods for 3 coefficient(s); at least 4 are needed.",
+            ),
+            (
+                PanelError::AmemiyaRequiresWithinVariation {
+                    columns: vec!["a".to_string(), "b".to_string()],
+                },
+                ErrorCode::AmemiyaRequiresWithinVariation,
+                "variance_method=\"amemiya\" needs every regressor to vary within the effects, but these do not: 'a', 'b'.",
+            ),
+            (
+                PanelError::NonPositiveIdiosyncraticVariance {
+                    method: "amemiya",
+                    sigma2_eps: -0.5,
+                },
+                ErrorCode::NonPositiveIdiosyncraticVariance,
+                "The estimated idiosyncratic variance is not positive (-0.5) with variance_method=\"amemiya\", so the random-effects weights are undefined.",
+            ),
+        ];
+        for (err, code, message) in cases {
+            let report = err.report();
+            assert_eq!(report.code(), code);
+            assert!(report.validate().is_ok());
+            assert_eq!(report.message(), message);
+            assert_eq!(err.to_string(), message);
         }
-        indices
+        for err in [
+            PanelError::DegenerateDkTwoPeriods,
+            PanelError::DegenerateClusterTwoGroups,
+            PanelError::VarianceComponentsMomentsSingular { method: "amemiya" },
+        ] {
+            let report = err.report();
+            assert!(report.validate().is_ok());
+            assert_eq!(err.to_string(), report.message());
+        }
+        // 実装の誤りでだけ起きるものは`INTERNAL_ERROR`になる。
+        for err in [
+            PanelError::TwoWayRequiresTime,
+            PanelError::IdentifierDimensionMismatch {
+                dimension: PanelDimension::Entity,
+                y_rows: 3,
+                other_rows: 2,
+            },
+        ] {
+            let report = err.report();
+            assert_eq!(report.code(), ErrorCode::InternalError);
+            assert!(report.validate().is_ok());
+        }
+    }
+
+    #[test]
+    fn validate_panel_input_reports_the_first_failing_check_in_order() {
+        let y = [1.0, 2.0, 3.0];
+        let names = labels(&["x"]);
+        let entity = GroupCodes::from_labels(&labels(&["a", "a", "b"]));
+        let time = TimeKeys::lexicographic(labels(&["1", "2", "1"]));
+        assert_eq!(
+            validate_panel_input(&y, &[vec![1.0, 2.0, 3.0]], &names, &entity, Some(&time)),
+            Ok(())
+        );
+
+        // x列 → entityの長さ → timeの長さ → entityのキー、の順。すべて同時に崩れていれば
+        // x列の不一致が先に返る。
+        let short_entity = GroupCodes::from_labels(&labels(&["a", "b"]));
+        let short_time = TimeKeys::lexicographic(labels(&["1"]));
+        let keyless = GroupCodes::from_labels_without_keys(&labels(&["a", "a"]));
+        assert_eq!(
+            validate_panel_input(&y, &[vec![1.0]], &names, &keyless, Some(&short_time)),
+            Err(CommonError::DimensionMismatch {
+                y_rows: 3,
+                x_rows: 1
+            }
+            .into())
+        );
+        assert_eq!(
+            validate_panel_input(
+                &y,
+                &[vec![1.0; 3]],
+                &names,
+                &short_entity,
+                Some(&short_time)
+            ),
+            Err(PanelError::IdentifierDimensionMismatch {
+                dimension: PanelDimension::Entity,
+                y_rows: 3,
+                other_rows: 2
+            })
+        );
+        assert_eq!(
+            validate_panel_input(&y, &[vec![1.0; 3]], &names, &entity, Some(&short_time)),
+            Err(PanelError::IdentifierDimensionMismatch {
+                dimension: PanelDimension::Time,
+                y_rows: 3,
+                other_rows: 1
+            })
+        );
+        // キー無しのentityでtimeの長さも合っていなければ、キー検査は最後なのでtimeの不一致が先。
+        let keyless_full = GroupCodes::from_labels_without_keys(&labels(&["a", "a", "b"]));
+        assert_eq!(
+            validate_panel_input(
+                &y,
+                &[vec![1.0; 3]],
+                &names,
+                &keyless_full,
+                Some(&short_time)
+            ),
+            Err(PanelError::IdentifierDimensionMismatch {
+                dimension: PanelDimension::Time,
+                y_rows: 3,
+                other_rows: 1
+            })
+        );
+        assert!(matches!(
+            validate_panel_input(&y, &[vec![1.0; 3]], &names, &keyless_full, None),
+            Err(PanelError::Common(CommonError::Internal { .. }))
+        ));
     }
 
     #[test]
@@ -991,125 +1331,76 @@ mod tests {
     }
 
     #[test]
+    fn in_stage_adds_a_stage_to_the_wrapped_code_and_replaces_an_inner_stage() {
+        let dof = PanelError::InsufficientDegreesOfFreedom {
+            n_obs: 10,
+            n_entities: 5,
+            n_periods: None,
+            k: 5,
+        };
+        let wrapped = dof.in_stage(Stage::VarianceComponentWithinRegression);
+        let report = wrapped.report();
+        assert_eq!(report.code(), ErrorCode::InsufficientDegreesOfFreedom);
+        assert_eq!(
+            report.stage(),
+            Some(&Stage::VarianceComponentWithinRegression)
+        );
+        assert!(report.validate().is_ok());
+        assert_eq!(wrapped.to_string(), report.message());
+        assert!(
+            wrapped
+                .to_string()
+                .starts_with("In the within regression used to estimate a variance component: ")
+        );
+        // 内側の`stage`は外側に置き換わる。
+        let inner = PanelError::WithinRegressionFailed {
+            source: LeastSquaresError::SingularMatrix {
+                columns: vec!["x".to_string()],
+            },
+        };
+        assert_eq!(inner.report().stage(), Some(&Stage::WithinRegression));
+        let outer = inner.in_stage(Stage::VarianceComponentWithinRegression);
+        assert_eq!(
+            outer.report().stage(),
+            Some(&Stage::VarianceComponentWithinRegression)
+        );
+    }
+
+    #[test]
     fn panel_error_messages_are_human_readable() {
+        assert_eq!(
+            PanelError::InvalidDkBandwidth { bandwidth: 7, t: 6 }.to_string(),
+            "dk_bandwidth must be from 0 to 5, one less than the number of unique time periods \
+             in dk_time (6), got 7."
+        );
         assert!(
             PanelError::DegenerateDkTwoPeriods
                 .to_string()
-                .starts_with("cov_type='dk' with 2 unique time periods is degenerate")
+                .starts_with("With 2 time periods")
         );
         assert!(
             PanelError::DegenerateClusterTwoGroups
                 .to_string()
-                .starts_with("cov_type='cluster' with 2 clusters is degenerate")
-        );
-        assert_eq!(
-            PanelError::InsufficientDkPeriodsForInference {
-                t_periods: 6,
-                q: 20
-            }
-            .to_string(),
-            "cov_type='dk' requires more unique time periods than jointly tested coefficients: \
-             got t_periods=6 for q=20 coefficient(s) (the slope F-test for FE, the Hausman test \
-             for RE), but the Driscoll-Kraay covariance has rank at most t_periods-1, so the q×q \
-             Wald submatrix is singular when t_periods <= q"
-        );
-        assert_eq!(
-            PanelError::IdentifierDimensionMismatch {
-                dimension: PanelDimension::Entity,
-                y_rows: 10,
-                other_rows: 8,
-            }
-            .to_string(),
-            "dimension mismatch: y has 10 rows but entity has 8 rows"
-        );
-        assert_eq!(
-            PanelError::IdentifierDimensionMismatch {
-                dimension: PanelDimension::Time,
-                y_rows: 10,
-                other_rows: 8,
-            }
-            .to_string(),
-            "dimension mismatch: y has 10 rows but time has 8 rows"
-        );
-        assert_eq!(
-            PanelError::InsufficientDegreesOfFreedom {
-                n_obs: 10,
-                n_entities: 8,
-                n_periods: None,
-                k: 2,
-            }
-            .to_string(),
-            "insufficient degrees of freedom for panel estimation: n_obs=10, \
-             n_entities=8, k=2 \
-             (the panel-adjusted residual degrees of freedom must be positive)"
-        );
-        assert_eq!(
-            PanelError::InsufficientDegreesOfFreedom {
-                n_obs: 20,
-                n_entities: 5,
-                n_periods: Some(4),
-                k: 3,
-            }
-            .to_string(),
-            "insufficient degrees of freedom for panel estimation: n_obs=20, \
-             n_entities=5, n_periods=4, k=3 \
-             (the panel-adjusted residual degrees of freedom must be positive)"
-        );
-        assert_eq!(
-            PanelError::SingletonGroup {
-                dimension: PanelDimension::Entity,
-                group_id: "firm_42".to_string(),
-            }
-            .to_string(),
-            "singleton entity group detected: entity 'firm_42' has only 1 observation. \
-             Singleton groups are not dropped automatically; remove them from the input"
-        );
-        assert_eq!(
-            PanelError::SingletonGroup {
-                dimension: PanelDimension::Time,
-                group_id: "2020".to_string(),
-            }
-            .to_string(),
-            "singleton time group detected: time '2020' has only 1 observation. \
-             Singleton groups are not dropped automatically; remove them from the input"
-        );
-        assert_eq!(
-            PanelError::UnbalancedPanelForTwoWay {
-                n_obs: 39,
-                n_entities: 10,
-                n_periods: 4,
-                expected: 40,
-            }
-            .to_string(),
-            "two-way fixed effects requires a balanced panel: got n_obs=39 for \
-             n_entities=10 x n_periods=4 (expected 40 observations)"
-        );
-        assert_eq!(
-            PanelError::ZeroVarianceAfterDemeaning {
-                column: "female".to_string(),
-            }
-            .to_string(),
-            "regressor 'female' has zero variance after the within-transformation \
-             (it is time-invariant, or collinear with the fixed effects)"
-        );
-        assert_eq!(
-            PanelError::TwoWayRequiresTime.to_string(),
-            "two-way fixed effects requires the `time` option to be set"
-        );
-        assert_eq!(
-            PanelError::WithinRegressionFailed {
-                source: LeastSquaresError::SingularMatrix,
-            }
-            .to_string(),
-            "within-transformed least-squares estimation failed: design matrix is \
-             singular (perfect multicollinearity detected)"
+                .starts_with("With 2 clusters")
         );
         // `#[error(transparent)]`: `Common`は内側`CommonError`のメッセージを
         // そのまま透過する（`IvError`/`MleError`のテストと同じ確認）。
         assert_eq!(
-            PanelError::Common(CommonError::InsufficientClusters { g: 1 }).to_string(),
-            "cov_type='cluster' requires at least 2 clusters, got 1"
+            PanelError::Common(CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 1
+            })
+            .to_string(),
+            r#"cov_type="cluster" needs at least 2 clusters, but the cluster column has 1."#
         );
+        // 回帰の包みは原因のメッセージに、どの回帰かを示す文脈句が付く。
+        let wrapped = PanelError::WithinRegressionFailed {
+            source: LeastSquaresError::SingularMatrix {
+                columns: vec!["x".to_string()],
+            },
+        };
+        assert_eq!(wrapped.to_string(), wrapped.report().message());
+        assert!(wrapped.to_string().contains("design matrix is singular"));
     }
 
     #[test]
@@ -1186,7 +1477,10 @@ mod tests {
     #[test]
     fn panel_error_from_operator_propagates_common_error() {
         fn inner() -> Result<(), CommonError> {
-            Err(CommonError::InsufficientClusters { g: 1 })
+            Err(CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 1,
+            })
         }
         fn outer() -> Result<(), PanelError> {
             inner()?;
@@ -1194,7 +1488,10 @@ mod tests {
         }
         assert_eq!(
             outer().unwrap_err(),
-            PanelError::Common(CommonError::InsufficientClusters { g: 1 })
+            PanelError::Common(CommonError::InsufficientClusters {
+                setting: ClusterSetting::CovType,
+                g: 1
+            })
         );
     }
 
@@ -1215,19 +1512,38 @@ mod tests {
     }
 
     #[test]
+    fn nested_observation_count_error_carries_the_regression_stage() {
+        let report = PanelError::BetweenRegressionFailed {
+            means: BetweenMeans::Time,
+            source: LeastSquaresError::Common(CommonError::InsufficientObservations { n: 2, k: 3 }),
+        }
+        .report();
+        assert_eq!(report.code(), ErrorCode::InsufficientObservations);
+        assert_eq!(report.stage(), Some(&Stage::BetweenRegressionTime));
+        assert!(report.validate().is_ok());
+
+        let report = PanelError::WithinRegressionFailed {
+            source: LeastSquaresError::Common(CommonError::MissingClusterColumn {
+                setting: ClusterSetting::CovType,
+            }),
+        }
+        .report();
+        assert_eq!(report.code(), ErrorCode::ClusterRequired);
+        assert!(report.stage().is_none());
+    }
+
+    #[test]
     fn between_regression_failed_message_and_equality() {
         let err = PanelError::BetweenRegressionFailed {
+            means: BetweenMeans::Time,
             source: LeastSquaresError::Common(CommonError::InsufficientObservations { n: 2, k: 3 }),
         };
-        assert_eq!(
-            err.to_string(),
-            "between-regression least-squares estimation for variance component failed: \
-             insufficient observations: n=2 must be greater than k=3 \
-             (number of independent variables, including the intercept)"
-        );
+        assert_eq!(err.to_string(), err.report().message());
+        assert_eq!(err.report().stage(), Some(&Stage::BetweenRegressionTime));
         assert_eq!(
             err,
             PanelError::BetweenRegressionFailed {
+                means: BetweenMeans::Time,
                 source: LeastSquaresError::Common(CommonError::InsufficientObservations {
                     n: 2,
                     k: 3,
@@ -1239,17 +1555,18 @@ mod tests {
     #[test]
     fn quasi_demeaned_regression_failed_message_and_equality() {
         let err = PanelError::QuasiDemeanedRegressionFailed {
-            source: LeastSquaresError::SingularMatrix,
+            source: LeastSquaresError::SingularMatrix {
+                columns: vec!["x".to_string()],
+            },
         };
-        assert_eq!(
-            err.to_string(),
-            "quasi-demeaned least-squares estimation for random effects failed: design matrix \
-             is singular (perfect multicollinearity detected)"
-        );
+        assert_eq!(err.to_string(), err.report().message());
+        assert_eq!(err.report().stage(), Some(&Stage::QuasiDemeanedRegression));
         assert_eq!(
             err,
             PanelError::QuasiDemeanedRegressionFailed {
-                source: LeastSquaresError::SingularMatrix,
+                source: LeastSquaresError::SingularMatrix {
+                    columns: vec!["x".to_string()]
+                },
             }
         );
     }
@@ -1257,41 +1574,20 @@ mod tests {
     #[test]
     fn hausman_test_failed_message_and_equality() {
         let err = PanelError::HausmanTestFailed {
-            source: LeastSquaresError::SingularMatrix,
+            source: LeastSquaresError::SingularMatrix {
+                columns: vec!["x".to_string()],
+            },
         };
-        assert_eq!(
-            err.to_string(),
-            "Hausman test auxiliary regression failed: design matrix is singular \
-             (perfect multicollinearity detected)"
-        );
+        assert_eq!(err.to_string(), err.report().message());
+        assert_eq!(err.report().stage(), Some(&Stage::HausmanRegression));
         assert_eq!(
             err,
             PanelError::HausmanTestFailed {
-                source: LeastSquaresError::SingularMatrix,
+                source: LeastSquaresError::SingularMatrix {
+                    columns: vec!["x".to_string()]
+                },
             }
         );
-    }
-
-    // ── GroupCodes ─────────────────────────────────────────────────────────
-
-    #[test]
-    fn group_codes_assigns_codes_in_key_order_not_appearance_order() {
-        // 出現順は "b", "a", "c" だが、コードは辞書順（旧`BTreeMap`の反復順）に振る。
-        let codes = entities(&["b", "a", "b", "c", "a", "b"]);
-        assert_eq!(codes.keys(), ["a", "b", "c"]);
-        assert_eq!(codes.codes(), [1, 0, 1, 2, 0, 1]);
-        assert_eq!(codes.counts(), [2, 3, 1]);
-        assert_eq!(codes.n_groups(), 3);
-        assert_eq!(codes.nobs(), 6);
-    }
-
-    #[test]
-    fn group_codes_uses_string_byte_order_like_btreemap() {
-        // 数値文字列も`String`の辞書順（"10" < "9"）。DKの時系列順序の規約と同じ。
-        let ids: Vec<String> = ["9", "10", "2"].iter().map(|s| s.to_string()).collect();
-        let codes = GroupCodes::from_ids(&ids);
-        let btree_order: Vec<&str> = group_indices_by_key(&ids).keys().copied().collect();
-        assert_eq!(codes.keys(), btree_order.as_slice());
     }
 
     // ── TimeKeys ───────────────────────────────────────────────────────────
@@ -1301,12 +1597,173 @@ mod tests {
     }
 
     #[test]
+    fn time_keys_factorized_constructors_match_the_label_constructors() {
+        // 仮コードは出現順の`[0,1,2,0]`（`"9"=0, "10"=1, "2"=2`）。
+        let codes = vec![0, 1, 2, 0];
+        let group_labels = ["9", "10", "2"];
+
+        let by_label =
+            TimeKeys::by_integer(labels(&["9", "10", "2", "9"]), &[9, 10, 2, 9]).unwrap();
+        let factorized =
+            TimeKeys::by_integer_factorized(codes.clone(), &group_labels, &[9, 10, 2]).unwrap();
+        assert_eq!(factorized, by_label);
+        assert_eq!(factorized.periods(), by_label.periods());
+        assert_eq!(factorized.len(), 4);
+
+        let lexicographic = TimeKeys::lexicographic(labels(&["9", "10", "2", "9"]));
+        assert_eq!(
+            TimeKeys::lexicographic_factorized(codes.clone(), &group_labels).unwrap(),
+            lexicographic
+        );
+
+        // `-0.0`と`0.0`は別の時点（ラベルが異なる）で、`total_cmp`の順に並ぶ。
+        let by_float = TimeKeys::by_float(
+            labels(&["0.0", "-0.0", "1.0", "0.0"]),
+            &[0.0, -0.0, 1.0, 0.0],
+        )
+        .unwrap();
+        let float_factorized = TimeKeys::by_float_factorized(
+            vec![0, 1, 2, 0],
+            &["0.0", "-0.0", "1.0"],
+            &[0.0, -0.0, 1.0],
+        )
+        .unwrap();
+        assert_eq!(float_factorized, by_float);
+        assert_eq!(float_factorized.periods(), ["-0.0", "0.0", "1.0"]);
+    }
+
+    #[test]
+    fn time_keys_factorized_constructors_reject_inconsistent_inputs() {
+        // 順序づけの値の数が仮グループ数と合わない。
+        assert!(matches!(
+            TimeKeys::by_integer_factorized(vec![0, 1], &["a", "b"], &[1]),
+            Err(PanelError::IdentifierDimensionMismatch {
+                dimension: PanelDimension::Time,
+                ..
+            })
+        ));
+        // 範囲外・未使用の仮コード。
+        assert!(matches!(
+            TimeKeys::lexicographic_factorized(vec![0, 2], &["a", "b"]),
+            Err(PanelError::Common(CommonError::Internal { .. }))
+        ));
+    }
+
+    #[test]
+    fn time_keys_factorized_merges_provisional_groups_with_the_same_label_and_value() {
+        // 仮グループ0と1は同じラベル"a"・同じ値1（併合される）。2は"b"・値2。
+        let merged =
+            TimeKeys::by_integer_factorized(vec![0, 1, 2, 1], &["a", "a", "b"], &[1, 1, 2])
+                .unwrap();
+        let expected = TimeKeys::by_integer(labels(&["a", "a", "b", "a"]), &[1, 1, 2, 1]).unwrap();
+        assert_eq!(merged, expected);
+        assert_eq!(merged.periods(), ["a", "b"]);
+    }
+
+    #[test]
+    fn time_keys_factorized_rejects_same_label_with_different_values() {
+        // 同じラベル"a"なのに値が違い、値の順序で"b"を挟むと隣り合わない。併合されずキーが
+        // 重複するため、黙って受け入れずに`Err`にする（呼び出し側の契約違反）。
+        assert!(matches!(
+            TimeKeys::by_integer_factorized(vec![0, 1, 2], &["a", "b", "a"], &[1, 2, 3]),
+            Err(PanelError::Common(CommonError::Internal { .. }))
+        ));
+        assert!(matches!(
+            TimeKeys::by_float_factorized(vec![0, 1, 2], &["a", "b", "a"], &[1.0, 2.0, 3.0]),
+            Err(PanelError::Common(CommonError::Internal { .. }))
+        ));
+    }
+
+    #[test]
+    fn time_keys_equality_compares_period_labels_not_only_codes() {
+        // コード（時間順）は同じ`[0, 1, 0, 1]`でも、時点のラベルが違えば等しくない。
+        let coarse = TimeKeys::lexicographic(labels(&["1", "2", "1", "2"]));
+        let fine = TimeKeys::lexicographic(labels(&["q1", "q2", "q1", "q2"]));
+        assert_ne!(coarse, fine);
+        assert_eq!(
+            coarse,
+            TimeKeys::lexicographic(labels(&["1", "2", "1", "2"]))
+        );
+    }
+
+    mod time_keys_proptests {
+        use proptest::collection;
+        use proptest::prelude::*;
+
+        use super::*;
+
+        /// 行ごとの値`values`について、仮コードを出現順と逆の順序で振り、`split`なら同じ値を
+        /// 行の偶奇で2つの仮グループに割る。仮グループごとのラベルと代表値も返す。
+        fn factorize_reversed<V: Copy + PartialEq>(
+            values: &[V],
+            label: impl Fn(V) -> String,
+            split: bool,
+        ) -> (Vec<usize>, Vec<String>, Vec<V>) {
+            let key = |row: usize| (values[row], if split { row % 2 } else { 0 });
+            let mut unique: Vec<(V, usize)> = Vec::new();
+            for row in (0..values.len()).rev() {
+                if !unique.contains(&key(row)) {
+                    unique.push(key(row));
+                }
+            }
+            let codes = (0..values.len())
+                .map(|row| unique.iter().position(|k| *k == key(row)).unwrap())
+                .collect();
+            let labels = unique.iter().map(|(v, _)| label(*v)).collect();
+            let group_values = unique.iter().map(|(v, _)| *v).collect();
+            (codes, labels, group_values)
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(256))]
+
+            /// 整数の時点（`"10"`と`"9"`のように辞書順と値の順序が食い違う値を含む）で、
+            /// `by_integer_factorized`は`by_integer`と同じ`TimeKeys`（コードとラベル）になる。
+            #[test]
+            fn by_integer_factorized_agrees_with_by_integer(
+                values in collection::vec(-5i128..120, 1..60),
+                split in any::<bool>(),
+            ) {
+                let ids: Vec<String> = values.iter().map(|v| v.to_string()).collect();
+                let (codes, group_labels, group_values) =
+                    factorize_reversed(&values, |v| v.to_string(), split);
+                let refs: Vec<&str> = group_labels.iter().map(String::as_str).collect();
+
+                let actual = TimeKeys::by_integer_factorized(codes, &refs, &group_values).unwrap();
+                let expected = TimeKeys::by_integer(ids, &values).unwrap();
+                prop_assert_eq!(actual, expected);
+            }
+
+            /// 浮動小数の時点（`0.0`と`-0.0`は別の時点）で、`by_float_factorized`は`by_float`と
+            /// 同じ`TimeKeys`になる。
+            #[test]
+            fn by_float_factorized_agrees_with_by_float(
+                picks in collection::vec(0usize..7, 1..60),
+                split in any::<bool>(),
+            ) {
+                let pool = [0.0_f64, -0.0, 1.5, -2.25, 10.0, 9.0, 1e-3];
+                let values: Vec<f64> = picks.iter().map(|&i| pool[i]).collect();
+                // `f64`は`PartialEq`で`0.0 == -0.0`なので、ビット列で別の値として分解する。
+                let bits: Vec<u64> = values.iter().map(|v| v.to_bits()).collect();
+                let ids: Vec<String> = values.iter().map(|v| format!("{v:?}")).collect();
+                let (codes, group_labels, group_bits) =
+                    factorize_reversed(&bits, |b| format!("{:?}", f64::from_bits(b)), split);
+                let group_values: Vec<f64> = group_bits.iter().map(|&b| f64::from_bits(b)).collect();
+                let refs: Vec<&str> = group_labels.iter().map(String::as_str).collect();
+
+                let actual = TimeKeys::by_float_factorized(codes, &refs, &group_values).unwrap();
+                let expected = TimeKeys::by_float(ids, &values).unwrap();
+                prop_assert_eq!(actual, expected);
+            }
+        }
+    }
+
+    #[test]
     fn time_keys_by_integer_orders_periods_numerically_not_lexicographically() {
         // 辞書順なら "10" < "2" < "9"。値の順序では 2 < 9 < 10。
         let keys = TimeKeys::by_integer(labels(&["9", "10", "2", "9"]), &[9, 10, 2, 9]).unwrap();
         assert_eq!(keys.periods(), ["2", "9", "10"]);
         assert_eq!(keys.codes().codes(), [1, 2, 0, 1]);
-        assert_eq!(keys.ids(), ["9", "10", "2", "9"]);
         assert_eq!(keys.len(), 4);
     }
 
@@ -1339,10 +1796,10 @@ mod tests {
     }
 
     #[test]
-    fn time_keys_lexicographic_matches_group_codes_from_ids() {
+    fn time_keys_lexicographic_matches_group_codes_from_labels() {
         let ids = labels(&["b", "a", "c", "a"]);
         let keys = TimeKeys::lexicographic(ids.clone());
-        assert_eq!(keys.codes(), &GroupCodes::from_ids(&ids));
+        assert_eq!(keys.codes(), &GroupCodes::from_labels(&ids));
         assert_eq!(keys.periods(), ["a", "b", "c"]);
     }
 
@@ -1367,96 +1824,12 @@ mod tests {
         assert!(keys.periods().is_empty());
     }
 
-    mod group_codes_proptests {
-        use proptest::collection;
-        use proptest::prelude::*;
-
-        use super::*;
-
-        /// ASCII・数値文字列（`"10" < "9"`の辞書順）・マルチバイト（UTF-8のバイト順と
-        /// コードポイント順が一致する）・空文字列を混ぜたラベル。
-        fn label() -> impl Strategy<Value = String> {
-            prop_oneof![
-                "[a-cA-C]{1,3}",
-                (0u32..120).prop_map(|n| n.to_string()),
-                prop::sample::select(vec![
-                    "東京", "大阪", "京都", "é", "e", "z", "Z", "", "😀", "ab"
-                ])
-                .prop_map(String::from),
-            ]
-        }
-
-        proptest! {
-            #![proptest_config(ProptestConfig::with_cases(256))]
-
-            /// `GroupCodes`が、旧実装（`String`キーの`BTreeMap`）と同じキー順・同じ観測数・
-            /// 同じグループ内の観測順になる。コードは各行のキーに対応する。
-            #[test]
-            fn group_codes_agree_with_btreemap_grouping(
-                ids in collection::vec(label(), 1..80),
-            ) {
-                let codes = GroupCodes::from_ids(&ids);
-                let oracle = group_indices_by_key(&ids);
-
-                let oracle_keys: Vec<&str> = oracle.keys().copied().collect();
-                prop_assert_eq!(codes.keys(), oracle_keys.as_slice());
-                prop_assert_eq!(codes.nobs(), ids.len());
-                prop_assert_eq!(codes.n_groups(), oracle.len());
-                for (i, id) in ids.iter().enumerate() {
-                    prop_assert_eq!(&codes.keys()[codes.codes()[i]], id);
-                }
-                let expected_counts: Vec<usize> = oracle.values().map(Vec::len).collect();
-                prop_assert_eq!(codes.counts(), expected_counts.as_slice());
-                let actual: Vec<Vec<usize>> =
-                    codes.group_indices().iter().map(<[usize]>::to_vec).collect();
-                let expected: Vec<Vec<usize>> = oracle.into_values().collect();
-                prop_assert_eq!(actual, expected);
-            }
-        }
-    }
-
-    #[test]
-    fn group_indices_matches_group_indices_by_key() {
-        // コード順・グループ内の観測順とも旧実装の`group_indices_by_key`と同じ。
-        let ids: Vec<String> = ["b", "a", "b", "c", "a", "b"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        let expected: Vec<Vec<usize>> = group_indices_by_key(&ids).into_values().collect();
-        let actual: Vec<Vec<usize>> = GroupCodes::from_ids(&ids)
-            .group_indices()
-            .iter()
-            .map(<[usize]>::to_vec)
-            .collect();
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn group_codes_handles_empty_input() {
-        let codes = GroupCodes::from_ids(&[]);
-        assert_eq!(codes.n_groups(), 0);
-        assert_eq!(codes.nobs(), 0);
-        assert_eq!(codes.group_indices().iter().count(), 0);
-    }
-
-    #[test]
-    fn validate_cluster_group_codes_rejects_single_cluster() {
-        assert_eq!(
-            validate_cluster_group_codes(&entities(&["a", "a"]), 2),
-            Err(CommonError::InsufficientClusters { g: 1 })
-        );
-        assert_eq!(
-            validate_cluster_group_codes(&entities(&["a", "b"]), 2),
-            Ok(2)
-        );
-    }
-
     // ── quasi_demean_column ────────────────────────────────────────────────
 
     /// `["a", "a", "b", "b", "b"]`のエンティティ列から整数コードを作るヘルパ。
     fn entities(ids: &[&str]) -> GroupCodes {
         let ids: Vec<String> = ids.iter().map(|s| s.to_string()).collect();
-        GroupCodes::from_ids(&ids)
+        GroupCodes::from_labels(&ids)
     }
 
     /// エンティティID→θの組を、`entity`のコード順（キーの辞書順）の`Vec`に並べるヘルパ。
@@ -1592,5 +1965,88 @@ mod tests {
         let out = quasi_demean_column(&col, &entity, &theta);
 
         assert_eq!(out, vec![13.0, 17.0, -25.0, -15.0]);
+    }
+
+    // ── panel_driscoll_kraay_cov_params ────────────────────────────────────
+
+    /// 1変数・各時点1観測の入力で、`bandwidth`ごとの未スケール`Ŝ`を標準Bartlettカーネルの
+    /// 定義式どおりに素朴な二重ループで求める（`panel_driscoll_kraay_cov_params`の
+    /// 行列積による実装とは独立な手計算）。`skip_last_lag`が真なら`l = bandwidth`の項を
+    /// 落とす（fixestの`bandwidth == T-1`での挙動の再現）。
+    fn naive_bartlett_meat(xi: &[f64], bandwidth: usize, skip_last_lag: bool) -> f64 {
+        let t_periods = xi.len();
+        let mut meat: f64 = xi.iter().map(|v| v * v).sum();
+        for l in 1..=bandwidth {
+            if skip_last_lag && l == bandwidth {
+                continue;
+            }
+            let weight = 1.0 - (l as f64) / ((bandwidth + 1) as f64);
+            let gamma: f64 = (l..t_periods).map(|t| xi[t] * xi[t - l]).sum();
+            meat += 2.0 * weight * gamma;
+        }
+        meat
+    }
+
+    #[test]
+    fn panel_cluster_cov_params_uses_k_for_the_meat_and_k_correction_for_the_scale() {
+        // meatの次元は`k`（傾き係数の数）、小標本補正`(n-1)/(n-K)`の`K`は別引数`k_correction`。
+        // 2つが取り違えられないよう、`k=1`・`k_correction=3`として手計算と比べる。
+        // クラスター a={行0,行2}、b={行1,行3}、スコア s_i = e_i x_i。
+        let x_values = [1.0, 2.0, -1.0, 0.5];
+        let residuals = [0.5, -1.0, 2.0, 1.5];
+        let x = Mat::from_fn(4, 1, |i, _| x_values[i]);
+        let xtx_inv = Mat::from_fn(1, 1, |_, _| 0.25);
+        let groups = GroupCodes::from_labels(&labels(&["a", "b", "a", "b"]));
+
+        let cov = panel_cluster_cov_params(&x, &residuals, &xtx_inv, 4, 1, &groups, 3);
+
+        let s_a = residuals[0] * x_values[0] + residuals[2] * x_values[2];
+        let s_b = residuals[1] * x_values[1] + residuals[3] * x_values[3];
+        let meat = s_a * s_a + s_b * s_b;
+        let correction = (2.0 / 1.0) * ((4.0 - 1.0) / (4.0 - 3.0));
+        let expected = correction * 0.25 * meat * 0.25;
+        assert!((*cov.get(0, 0) - expected).abs() < 1e-12 * expected.abs());
+    }
+
+    #[test]
+    fn panel_driscoll_kraay_cov_params_matches_naive_bartlett_for_every_bandwidth_up_to_t_minus_1()
+    {
+        // T=5の各時点に1観測を置き、`ξ_t = e_t·x_t`を既知の値にする。`(X̃'X̃)⁻¹ = 1`・
+        // `K = 1`（スケールが`T/(T-1)`のみ）にして、`Ŝ`の定義式との直接比較にする。
+        //
+        // `bandwidth = T-1 = 4`（許容範囲の上限ちょうど）の最終ラグ項`l = 4`
+        // （`ξ_4 ξ_0`、重み`1/5`）が含まれることを固定する。fixestの`cpp_driscoll_kraay`は
+        // この境界で最大ラグを`T-2`に切り詰める（ラグの個数と最大ラグの取り違え）ため
+        // 最終ラグ項を落とし、本実装とは一致しない。本実装は標準の定義どおり含める
+        // （`docs/spec/fe-spec.md`3.3節）。`bandwidth <= T-2`ではfixestと一致する。
+        let ids: Vec<String> = (0..5).map(|t| t.to_string()).collect();
+        let time = GroupCodes::from_labels(&ids);
+        let x_values = [1.0, -2.0, 0.5, 3.0, -1.5];
+        let residuals = [0.7, 1.1, -0.4, 0.9, 2.0];
+        let x = Mat::from_fn(5, 1, |i, _| x_values[i]);
+        let xtx_inv = Mat::from_fn(1, 1, |_, _| 1.0);
+        let xi: Vec<f64> = x_values
+            .iter()
+            .zip(&residuals)
+            .map(|(x, e)| x * e)
+            .collect();
+        let scale = 5.0 / 4.0 * (4.0 / (5.0 - 1.0));
+
+        for bandwidth in 0..=4 {
+            let cov =
+                panel_driscoll_kraay_cov_params(&x, &residuals, &xtx_inv, &time, 1, bandwidth);
+            let expected = scale * naive_bartlett_meat(&xi, bandwidth, false);
+            assert!(
+                (*cov.get(0, 0) - expected).abs() < 1e-12 * expected.abs().max(1.0),
+                "bandwidth={bandwidth}: got {}, expected {expected}",
+                *cov.get(0, 0)
+            );
+        }
+
+        // 境界で最終ラグ項が寄与していること（落とした値とは異なること）を確かめる。
+        // これが成り立たないと上のループが境界での項の有無を区別できない。
+        let full = naive_bartlett_meat(&xi, 4, false);
+        let dropped = naive_bartlett_meat(&xi, 4, true);
+        assert!((full - dropped).abs() > 1e-6);
     }
 }

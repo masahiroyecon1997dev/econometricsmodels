@@ -19,6 +19,16 @@ import polars as pl
 
 from .. import _lib
 from .._lib import OLSOptions
+from .._results_utils import (
+    by_param,
+    conf_int_by_param,
+    params_table_rows,
+)
+from ..diagnostics import (
+    BreuschGodfreyTestResult,
+    BreuschPaganTestResult,
+    WhiteTestResult,
+)
 
 __all__ = ["OLS", "OLSOptions", "OLSResults"]
 
@@ -68,11 +78,13 @@ class OLS:
             ValidationError: The input or options are invalid (a
                 column is missing, contains missing values or
                 NaN/infinity, insufficient observations,
-                `confidence_level` out of range, etc.). A subclass of
-                `ValueError`.
+                `confidence_level` out of range, `y` constant with an
+                intercept, etc.). A subclass of `ValueError`.
             ComputationError: A problem was detected during
-                computation (e.g. a singular design matrix). A
-                subclass of `RuntimeError`.
+                computation (e.g. a singular design matrix, or a
+                perfect fit: residuals zero up to rounding, so the
+                standard errors are undefined). A subclass of
+                `RuntimeError`.
         """
         raw = _lib.fit_ols(self._data, self._y, self._x, self._options)
         return OLSResults(raw)
@@ -81,10 +93,27 @@ class OLS:
 class OLSResults:
     """OLS estimation results.
 
-    Array-valued properties (`params`, `std_errors`, etc.) are exposed
-    as dictionaries keyed by coefficient name (for O(1) lookup of a
-    single parameter). Use `coef_table()` for a row-oriented listing
-    (see `docs/spec/ols-spec.md`, "結果構造体").
+    Coefficient-level properties (`params`, `std_errors`, etc.) are
+    dictionaries keyed by coefficient name, so one coefficient is
+    `result.params["x1"]`. Use `params_table()` for a row-oriented
+    listing (a list of dicts), for example for a JSON response.
+
+    Fields by purpose:
+
+    - Coefficients: `params`, `std_errors`, `test_stats`, `p_values`,
+      `conf_int`; the names in order: `param_names`.
+    - Which distribution the tests use: `stat_dist`, `stat_df`.
+    - Overall F test: `f_statistic`, `f_p_value`, `f_df_num`,
+      `f_df_denom`.
+    - Fit: `r_squared`, `adj_r_squared`, `log_likelihood`, `aic`,
+      `bic`.
+    - Sample and model size: `n_obs`, `df_model`, `df_resid`,
+      `dep_var_name`.
+    - Settings echoed back: `cov_type`, `hac_lags_used`.
+    - Residuals: `residuals`.
+    - Methods: `predict()`, `augment()`, `params_table()`.
+    - Post-estimation tests (never run by `fit()`): `white_test()`,
+      `breusch_pagan_test()`, `breusch_godfrey_test()`.
 
     Args:
         raw: The estimation result object returned by `_lib.fit_ols`
@@ -106,49 +135,41 @@ class OLSResults:
     @property
     def params(self) -> dict[str, float]:
         """Coefficient name to coefficient value."""
-        return dict(zip(self._raw.param_names, self._raw.params))
+        return by_param(self._raw.param_names, self._raw.params)
 
     @property
     def std_errors(self) -> dict[str, float]:
         """Coefficient name to standard error."""
-        return dict(zip(self._raw.param_names, self._raw.std_errors))
+        return by_param(self._raw.param_names, self._raw.std_errors)
 
     @property
     def test_stats(self) -> dict[str, float]:
         """Coefficient name to test statistic (t-statistic; see
         `stat_dist`)."""
-        return dict(zip(self._raw.param_names, self._raw.test_stats))
+        return by_param(self._raw.param_names, self._raw.test_stats)
 
     @property
-    def stat_dist(self) -> Literal["t", "normal"]:
-        """Distribution of `test_stats`: `"t"` (t-statistics) or
-        `"normal"` (z-statistics)."""
+    def stat_dist(self) -> Literal["t"]:
+        """Distribution of `test_stats`. Always `"t"`: t-statistics are
+        used for every `cov_type`."""
         return self._raw.stat_dist
 
     @property
-    def stat_df(self) -> int | None:
-        """Degrees of freedom of the t distribution behind `test_stats`,
-        or `None` when `stat_dist` is `"normal"`. May differ from
-        `df_resid` (e.g. cluster-robust inference uses `G - 1`), so use
-        this to recompute p-values from `test_stats`."""
+    def stat_df(self) -> int:
+        """Degrees of freedom of the t distribution behind `test_stats`.
+        May differ from `df_resid` (e.g. cluster-robust inference uses
+        `G - 1`), so use this to recompute p-values from `test_stats`."""
         return self._raw.stat_df
 
     @property
     def p_values(self) -> dict[str, float]:
         """Coefficient name to two-sided p-value."""
-        return dict(zip(self._raw.param_names, self._raw.p_values))
+        return by_param(self._raw.param_names, self._raw.p_values)
 
     @property
     def conf_int(self) -> dict[str, tuple[float, float]]:
         """Coefficient name to confidence interval `(lower, upper)`."""
-        return {
-            name: (lower, upper)
-            for name, lower, upper in zip(
-                self._raw.param_names,
-                self._raw.conf_lower,
-                self._raw.conf_upper,
-            )
-        }
+        return conf_int_by_param(self._raw)
 
     @property
     def residuals(self) -> list[float]:
@@ -189,26 +210,35 @@ class OLSResults:
         return self._raw.adj_r_squared
 
     @property
-    def f_statistic(self) -> float:
-        """F-statistic."""
+    def f_statistic(self) -> float | None:
+        """F-statistic of the overall test that all slope coefficients are
+        zero.
+
+        `None` when the test is not defined: there are no slope
+        coefficients, or, for a first-stage regression returned by
+        `IVResults.first_stage()` with `cov_type="cluster"`, the number of
+        clusters is not larger than the number of slope coefficients (the
+        cluster-robust covariance of the slopes is then singular).
+        """
         return self._raw.f_statistic
 
     @property
-    def f_p_value(self) -> float:
-        """P-value of the F-statistic."""
+    def f_p_value(self) -> float | None:
+        """P-value of the F-statistic (`None` when `f_statistic` is
+        `None`)."""
         return self._raw.f_p_value
 
     @property
     def f_df_num(self) -> int | None:
-        """Numerator degrees of freedom of `f_statistic` (`None` when it
-        is NaN, i.e. there are no slope coefficients)."""
+        """Numerator degrees of freedom of `f_statistic` (`None` when
+        `f_statistic` is `None`)."""
         return self._raw.f_df_num
 
     @property
     def f_df_denom(self) -> int | None:
-        """Denominator degrees of freedom of `f_statistic` (`None` when it
-        is NaN). May differ from `df_resid`, so use this to recompute the
-        p-value from `f_statistic`."""
+        """Denominator degrees of freedom of `f_statistic` (`None` when
+        `f_statistic` is `None`). May differ from `df_resid`, so use this to recompute
+        the p-value from `f_statistic`."""
         return self._raw.f_df_denom
 
     @property
@@ -237,49 +267,24 @@ class OLSResults:
         """Bayesian Information Criterion (BIC)."""
         return self._raw.bic
 
-    def coef_table(self) -> list[dict[str, float | str]]:
+    def params_table(self) -> list[dict[str, float | str]]:
         """Row-oriented summary table of the coefficients.
 
-        Shaped to be usable almost as-is in a REST API response (see
-        `docs/spec/ols-spec.md`, "結果構造体"). Returned
-        as `list[dict]` rather than a polars DataFrame, per the
-        project's policy of not using DataFrames for the coefficient
-        table itself.
+        Shaped to be usable almost as-is in a REST API response.
+        Returned as `list[dict]` rather than a polars DataFrame.
 
         Returns:
             A list of dictionaries, one per coefficient. Keys are
-            `param`, `coef`, `std_err`, `test_stat`, `p_value`,
+            `param_name`, `param`, `std_error`, `test_stat`, `p_value`,
             `conf_lower`, `conf_upper`.
         """
-        return [
-            {
-                "param": name,
-                "coef": coef,
-                "std_err": se,
-                "test_stat": t,
-                "p_value": p,
-                "conf_lower": lower,
-                "conf_upper": upper,
-            }
-            for name, coef, se, t, p, lower, upper in zip(
-                self._raw.param_names,
-                self._raw.params,
-                self._raw.std_errors,
-                self._raw.test_stats,
-                self._raw.p_values,
-                self._raw.conf_lower,
-                self._raw.conf_upper,
-            )
-        ]
+        return params_table_rows(self._raw)
 
-    def predict(
-        self, new_data: pl.DataFrame | None = None
-    ) -> list[dict[str, float]]:
+    def predict(self, new_data: pl.DataFrame | None = None) -> list[float]:
         """Predicted values.
 
-        Unified into a single method rather than a separate
-        `fitted_values` property, to match the naming used by Logit's
-        `predict()` (`docs/spec/ols-spec.md`, "predict()").
+        Also available for new data through `new_data`; there is no
+        separate `fitted_values` property.
 
         Args:
             new_data: New data to predict on. Must contain columns with
@@ -291,26 +296,23 @@ class OLSResults:
                 values for the training data used in `fit()`.
 
         Returns:
-            Row-oriented predictions, one dict per observation. Each
-            dict currently has a single key, `"predicted"`.
+            Predicted values, one per observation, in row order (like
+            `residuals`).
 
         Raises:
             ValidationError: `new_data` is missing a required `x`
                 column, or a column contains missing/NaN/infinite
                 values.
         """
-        raw = self._raw.predict(new_data)
-        return [{"predicted": value} for value in raw]
+        return self._raw.predict(new_data)
 
     def augment(self, new_data: pl.DataFrame | None = None) -> pl.DataFrame:
         """Source data with the predicted values appended as a column.
 
         Same `new_data` semantics as `predict()`, but returns a polars
         DataFrame (the training data, or `new_data` when given, plus a
-        new `"predicted"` column) instead of a row-oriented list. This
-        is the one exception to the project's policy of not returning
-        DataFrames (`docs/spec/ols-spec.md`, "augment()"): it exists
-        specifically to attach predictions back to their source rows.
+        new `"predicted"` column) instead of a plain list. It exists
+        to attach predictions back to their source rows.
 
         Args:
             new_data: Same as `predict()`. If `None` (default), returns
@@ -333,3 +335,197 @@ class OLSResults:
                 explicit `new_data` still works normally in that case).
         """
         return self._raw.augment(new_data)
+
+    def white_test(
+        self, statistic: Literal["lm", "f"] = "lm"
+    ) -> WhiteTestResult:
+        """White test for heteroskedasticity.
+
+        Regresses the squared residuals on the independent variables,
+        their squares and their pairwise products, and tests that all
+        slopes are zero. The auxiliary regression always includes a
+        constant, even when the model was fitted with
+        `include_intercept=False`. Terms that are constant or numerically
+        identical to an earlier term (for example the square of a 0/1
+        dummy) are dropped, and the degrees of freedom count the terms
+        that remain; `WhiteTestResult.aux_terms` and `dropped_terms`
+        report them. The test assumes homoskedastic errors under the
+        null and does not depend on `cov_type`.
+
+        This is a post-estimation diagnostic: it is never computed by
+        `fit()`. It re-reads the independent variables from the data
+        passed to `fit()`.
+
+        Args:
+            statistic: `"lm"` (default) for the LM version
+                `n * R²` (chi-squared distribution), or `"f"` for the
+                F version of the same auxiliary regression.
+
+        Returns:
+            The test result, a `WhiteTestResult`: `distribution` is
+            `"chi2"` and `df_denom` is `None` for the LM version, `"f"`
+            and an integer for the F version. It also lists the terms of
+            the auxiliary regression (`aux_terms`, always starting with
+            the constant) and the dropped ones (`dropped_terms`).
+
+        Raises:
+            ValidationError: `statistic` is not `"lm"` or `"f"`; every
+                regressor is constant; there are too few observations for
+                the auxiliary regression; or this result has no retained
+                training data (currently only the `OLSResults` returned
+                by `IVResult.first_stage()`).
+            ComputationError: The auxiliary design matrix is still
+                singular after dropping terms, or the auxiliary
+                regression's R² is undefined (for example the squared
+                residuals are constant).
+        """
+        raw = self._raw.white_test(statistic)
+        return WhiteTestResult(
+            statistic=raw.statistic,
+            p_value=raw.p_value,
+            df=raw.df,
+            df_denom=raw.df_denom,
+            distribution=raw.distribution,
+            aux_terms=raw.aux_terms,
+            dropped_terms=raw.dropped_terms,
+        )
+
+    def breusch_pagan_test(
+        self,
+        variables: list[str] | None = None,
+        statistic: Literal["lm", "f"] = "lm",
+    ) -> BreuschPaganTestResult:
+        """Breusch-Pagan test for heteroskedasticity.
+
+        Regresses the squared residuals on a constant and the columns
+        named in `variables`, and tests that all slopes are zero. This is
+        Koenker's studentized version (`n * R²` of the auxiliary
+        regression), which does not assume normal errors; it is the
+        version of R's `lmtest::bptest()` (default) and of statsmodels'
+        `het_breuschpagan()` (`robust=True`, default). The auxiliary
+        regression always includes a constant, even when the model was
+        fitted with `include_intercept=False`. Variables that are constant
+        or numerically identical to an earlier one (for example a copy of
+        a dummy) are dropped, and the degrees of freedom count the
+        variables that remain; `BreuschPaganTestResult.aux_terms` and
+        `dropped_terms` report them. The test does not depend on
+        `cov_type`.
+
+        This is a post-estimation diagnostic: it is never computed by
+        `fit()`. It re-reads the variables from the data passed to
+        `fit()`.
+
+        Args:
+            variables: List of column names of the data passed to `fit()`
+                that may drive the error variance. They need not be the
+                model's independent variables: any numeric column can be
+                used, including one that is not in the model. Defaults to
+                the model's independent variables.
+            statistic: `"lm"` (default) for the LM version `n * R²`
+                (chi-squared distribution), or `"f"` for the F version
+                of the same auxiliary regression (case-insensitive).
+
+        Returns:
+            The test result, a `BreuschPaganTestResult`: `distribution`
+            is `"chi2"` and `df_denom` is `None` for the LM version, `"f"`
+            and an integer for the F version. It also lists the terms of
+            the auxiliary regression (`aux_terms`, always starting with
+            the constant) and the dropped ones (`dropped_terms`).
+
+        Raises:
+            TypeError: `variables` is not a `list` of `str`, or
+                `statistic` is not a `str`. A builtin exception, not a
+                `ValidationError`.
+            ValidationError: `statistic` is not `"lm"` or `"f"`;
+                `variables` is empty or names a column more than once; a
+                column does not exist, has an unsupported dtype or
+                contains missing values, NaN or infinity; every variable
+                is constant; there are too few observations for the
+                auxiliary regression; or this result has no retained
+                training data (currently only the `OLSResults` returned
+                by `IVResult.first_stage()`).
+            ComputationError: The auxiliary design matrix is still
+                singular after dropping variables, or the auxiliary
+                regression's R² is undefined (for example the squared
+                residuals are constant).
+        """
+        raw = self._raw.breusch_pagan_test(variables, statistic)
+        return BreuschPaganTestResult(
+            statistic=raw.statistic,
+            p_value=raw.p_value,
+            df=raw.df,
+            df_denom=raw.df_denom,
+            distribution=raw.distribution,
+            aux_terms=raw.aux_terms,
+            dropped_terms=raw.dropped_terms,
+        )
+
+    def breusch_godfrey_test(
+        self,
+        time: str,
+        nlags: int,
+        statistic: Literal["lm", "f"] = "lm",
+    ) -> BreuschGodfreyTestResult:
+        """Breusch-Godfrey test for serial correlation of the errors.
+
+        Regresses the residuals on the model's independent variables and
+        on their own lags 1 to `nlags`, and tests that the lag
+        coefficients are all zero. The lags are taken in the order of the
+        `time` column, and the lags before the first observation are
+        filled with zero (the convention of R's `lmtest::bgtest`,
+        statsmodels and Stata). The auxiliary regression uses the model's
+        regressors as they are: no constant is added to a model fitted
+        with `include_intercept=False` (the definition of R and Greene;
+        statsmodels adds one in that case, so its value differs). The test
+        does not depend on `cov_type`.
+
+        This is a post-estimation diagnostic: it is never computed by
+        `fit()`. It re-reads the independent variables and the `time`
+        column from the data passed to `fit()`.
+
+        The row order is never assumed to be the time order, so there is
+        no default for `time`. Only the order of the `time` values is
+        used: gaps between periods are not checked, and the lags follow
+        the sorted order. A cross-sectional data set has no meaningful
+        order, and the test is not meaningful for it.
+
+        Args:
+            time: Name of a column of the data passed to `fit()` that
+                gives the time order (integers, floats, `Decimal`,
+                `Date` or `Datetime`; the values must be distinct, as for
+                `OLSOptions.hac_time`).
+            nlags: Number of lags of the residuals, at least 1. There is
+                no default: pick the order that suits your data.
+            statistic: `"lm"` (default) for the LM version `n * R^2`
+                (chi-squared distribution), or `"f"` for the F version
+                (case-insensitive).
+
+        Returns:
+            The test result, a `BreuschGodfreyTestResult`: `distribution`
+            is `"chi2"` and `df_denom` is `None` for the LM version, `"f"`
+            and an integer for the F version.
+
+        Raises:
+            TypeError: `time` or `statistic` is not a `str`, or `nlags`
+                is not an `int` (a `bool` or `float` is rejected). A
+                builtin exception, not a `ValidationError`.
+            ValidationError: `statistic` is not `"lm"` or `"f"`;
+                `nlags < 1`; there are too few observations for the
+                auxiliary regression (`n <= k + nlags`); `time` does not
+                exist, has an unsupported dtype, or contains missing,
+                non-finite or duplicate values; or this result has no
+                retained training data (currently only the `OLSResults`
+                returned by `IVResult.first_stage()`).
+            ComputationError: The auxiliary design matrix is singular, or
+                the residuals are all zero or fitted exactly by the
+                auxiliary regression.
+        """
+        raw = self._raw.breusch_godfrey_test(time, nlags, statistic)
+        return BreuschGodfreyTestResult(
+            statistic=raw.statistic,
+            p_value=raw.p_value,
+            df=raw.df,
+            df_denom=raw.df_denom,
+            distribution=raw.distribution,
+            nlags=raw.nlags,
+        )

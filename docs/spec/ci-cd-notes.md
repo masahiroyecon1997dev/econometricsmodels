@@ -73,7 +73,11 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
 - **`cd_docs.yml`**: mkdocsドキュメントのGitHub Pagesへの自動デプロイ。
 - **`dependabot.yml`**（`cargo`・`uv`・`github-actions`・`docker`・`devcontainers`の5エコシステム。
   `docker`は`.devcontainer/Dockerfile`のベースイメージ、`devcontainers`は`devcontainer.json`の
-  featureと`devcontainer-lock.json`が対象）: `"pip"`ではなく
+  featureと`devcontainer-lock.json`が対象）。`docker`が追跡するのは`FROM`行のみ
+  （dependabot-coreの`docker/file_parser.rb`・`file_updater.rb`は`^FROM`にしか一致しない）で、
+  `COPY --from=<image>:<版>@sha256:...`への直書きは更新されない。uvの公式イメージは
+  そのため`FROM ghcr.io/astral-sh/uv:<版>@sha256:... AS uv`のステージとして先頭に宣言し、
+  `COPY --from=uv`で参照している（直書きに戻さないこと）。Python依存は`"pip"`ではなく
   **`"uv"`エコシステム**を採用（uv専用の`package-ecosystem`。`test`/`benchmark`/`dev`/`docs`
   全依存グループが更新対象になる）。`cargo audit`/`pip-audit`（CI実行時点のロックファイル検証）と
   Dependabot（レジストリの継続監視・PR自動生成）は補完関係で、統合・置き換えはしない。

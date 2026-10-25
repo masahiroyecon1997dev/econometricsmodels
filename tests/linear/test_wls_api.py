@@ -397,7 +397,7 @@ def test_predict_new_data_with_regressor_dependent_weight_matches_statsmodels(
 
 def test_predict_with_include_intercept_false_and_x_named_const():
     """`include_intercept=False`かつ`x`に`"const"`という名前の列を含む場合でも
-    `predict(new_data)`が、その列の値を使って正しく計算されること。
+    `predict(new_data=...)`が、その列の値を使って正しく計算されること。
 
     `include_intercept=True`のときのみ`"const"`列名との衝突チェックが働く仕様の
     ため（`wls-spec.md`「API引数」）、`include_intercept=False`ならユーザーが
@@ -470,8 +470,8 @@ def test_augment_none_returns_training_data_with_predicted_column(
 def test_augment_new_data_returns_new_data_with_predicted_column(
     wide_dataset,
 ):
-    """`augment(new_data)`が、`new_data`の全列＋`"predicted"`列を持つ
-    DataFrameを、`predict(new_data)`と同じ予測値で返すこと。
+    """`augment(new_data=...)`が、`new_data`の全列＋`"predicted"`列を持つ
+    DataFrameを、`predict(new_data=...)`と同じ予測値で返すこと。
     """
     res = WLS(wide_dataset, y="y", x=WIDE_X, weight="weight").fit()
     new_data = wide_new_data(2)
@@ -528,7 +528,7 @@ def test_augment_new_data_with_regressor_dependent_weight_matches_statsmodels(
     regressor_weight_dataset,
 ):
     """重みが説明変数に依存し範囲が広い場合（`REGRESSOR_WEIGHT`）も、
-    `augment(new_data)`の`"predicted"`列がstatsmodelsの`.predict()`と一致し、
+    `augment(new_data=...)`の`"predicted"`列がstatsmodelsの`.predict()`と一致し、
     `new_data`の全列が渡した順のまま保たれること（列順は学習時と逆順）。
     """
     import statsmodels.api as sm

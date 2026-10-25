@@ -176,7 +176,7 @@ def test_predict_none_matches_frozen_statsmodels(fixtures, scenario):
 
 
 def test_predict_new_data_matches_frozen_statsmodels(fixtures):
-    """`predict(new_data)`（新規データに対する予測値、baselineシナリオ）が、
+    """`predict(new_data=...)`（新規データに対する予測値、baselineシナリオ）が、
     凍結フィクスチャのstatsmodels `.predict()`と一致すること。列順を入れ替えて
     渡し、列名マッチング（列順不問）も合わせて確認する（Rクロスチェック側
     `test_predict_new_data_matches_r`と同じ発想）。

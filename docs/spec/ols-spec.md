@@ -341,7 +341,7 @@ faerのグローバル並列度は`engine::shared::parallelism::ensure_serial()`
 
 ### 3.9 `white_test()`（事後診断）
 
-- `OLSResults.white_test(statistic: Literal["lm", "f"] = "lm") -> WhiteTestResult`。事後診断なので
+- `OLSResults.white_test(*, statistic: Literal["lm", "f"] = "lm") -> WhiteTestResult`。事後診断なので
   `fit()`では計算せず、利用者が選んで呼ぶ（`docs/spec/inference-conventions.md`6章）。結果型は検定共通の
   frozen dataclass `DiagnosticResult`（`statistic`/`p_value`/`df`/`df_denom`/`distribution`、`to_dict()`）
   を継承した`WhiteTestResult`（追加フィールド`aux_terms`/`dropped_terms`）。`distribution`は
@@ -396,7 +396,7 @@ faerのグローバル並列度は`engine::shared::parallelism::ensure_serial()`
 
 ### 3.10 `breusch_godfrey_test()`（事後診断）
 
-- `OLSResults.breusch_godfrey_test(time: str, nlags: int, statistic: Literal["lm", "f"] = "lm")
+- `OLSResults.breusch_godfrey_test(time: str, nlags: int, *, statistic: Literal["lm", "f"] = "lm")
   -> BreuschGodfreyTestResult`。事後診断なので`fit()`では計算しない（`docs/spec/inference-conventions.md`
   6章）。結果型は`DiagnosticResult`を継承した`BreuschGodfreyTestResult`（追加フィールド`nlags`。
   `df`と同じ値だがラグ次数を直接読めるよう別に持つ）。
@@ -446,7 +446,7 @@ faerのグローバル並列度は`engine::shared::parallelism::ensure_serial()`
 
 ### 3.11 `breusch_pagan_test()`（事後診断）
 
-- `OLSResults.breusch_pagan_test(variables: list[str] | None = None, statistic: Literal["lm", "f"] = "lm")
+- `OLSResults.breusch_pagan_test(*, variables: list[str] | None = None, statistic: Literal["lm", "f"] = "lm")
   -> BreuschPaganTestResult`。`fit()`では計算しない事後診断（`docs/spec/inference-conventions.md`
   6章）。結果型は`DiagnosticResult`を継承した`BreuschPaganTestResult`（追加フィールドは
   `WhiteTestResult`と同じ`aux_terms`・`dropped_terms`）。`cov_type`には依存しない。

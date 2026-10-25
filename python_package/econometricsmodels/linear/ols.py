@@ -332,7 +332,7 @@ class OLSResults:
                 training data (currently only possible for the
                 `OLSResults` returned by `IVResult.first_stage()`,
                 which has no single source DataFrame to attach a
-                column to; calling `augment(new_data)` with an
+                column to; calling `augment(new_data=...)` with an
                 explicit `new_data` still works normally in that case).
         """
         return self._raw.augment(new_data)

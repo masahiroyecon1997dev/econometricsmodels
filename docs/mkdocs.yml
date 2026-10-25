@@ -4,12 +4,21 @@ repo_url: https://github.com/masahiroyecon1997dev/econometricsmodels
 repo_name: masahiroyecon1997dev/econometricsmodels
 
 # このファイル自体がdocs/直下にあるため、同じdocs/をdocs_dirとして扱う
-# （デフォルトの"docs/mkdocs.yml相対docs/"にはしない）。docs/planning/・docs/spec/は
+# （デフォルトの"docs/mkdocs.yml相対docs/"にはしない）。docs/spec/・docs/performance/は
 # ビルド対象に含まれるがnavには載せない
 # （CLAUDE.md 10章「ソースとしては誰でも閲覧可能という前提で運用する」）。
 # 利用者向けの横断解説はdocs/guide/に置き、navに載せる。
 docs_dir: .
 site_dir: ../site
+
+# docs_dirが`.`のため、何も指定しないとdocs/配下の全ファイルがサイトに出力され、
+# 検索の索引にも入る。実装途中の設計ノート(planning/)、設定ファイル自体、gitignore対象の
+# 計測結果JSON(performance/results/)は公開サイトに出さない。パターンは.gitignore形式で、
+# docs_dirからの相対パス。
+exclude_docs: |
+  planning/
+  mkdocs.yml
+  performance/results/
 
 nav:
   - Home: index.md

@@ -19,7 +19,9 @@ use nonlinear::tobit::{
 };
 use panel::fe::{FEOptions, FEResult};
 use panel::re::{REOptions, REResult};
-use shared::catalog_export::{error_catalog, panic_for_test, raise_error_for_test};
+use shared::catalog_export::error_catalog;
+#[cfg(debug_assertions)]
+use shared::catalog_export::{panic_for_test, raise_error_for_test};
 use shared::column_extraction::{
     check_dataframe, extract_column_list, extract_column_name, select_columns,
 };
@@ -352,8 +354,12 @@ fn _lib(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<REOptions>()?;
     m.add_class::<REResult>()?;
     m.add_function(wrap_pyfunction!(error_catalog, m)?)?;
-    m.add_function(wrap_pyfunction!(raise_error_for_test, m)?)?;
-    m.add_function(wrap_pyfunction!(panic_for_test, m)?)?;
+    // テスト専用の入口はデバッグビルドにだけ含める（配布するreleaseビルドには入れない）。
+    #[cfg(debug_assertions)]
+    {
+        m.add_function(wrap_pyfunction!(raise_error_for_test, m)?)?;
+        m.add_function(wrap_pyfunction!(panic_for_test, m)?)?;
+    }
     m.add("ValidationError", m.py().get_type::<ValidationError>())?;
     m.add("ComputationError", m.py().get_type::<ComputationError>())?;
     Ok(())

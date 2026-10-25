@@ -22,6 +22,40 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 _MISSING_CODES = pytest.StashKey[list[str]]()
 
+# `_lib.raise_error_for_test`・`_lib.panic_for_test`はデバッグビルド
+# (`cfg(debug_assertions)`)にだけ含まれる。`maturin develop --release`や、`uv run`・`uv sync`が
+# 拡張をreleaseで再ビルドした環境にはなく、それを使うテストがAttributeErrorで落ちて
+# 原因が分かりにくいため、その場合は理由を添えてskipする。CI（常にデバッグビルド）では
+# skipされず、全体実行の`--check-error-coverage`が、skipで送出されなかった`code`を検出する。
+_TEST_HOOK_NAMES = ("raise_error_for_test", "panic_for_test")
+_NO_TEST_HOOKS = (
+    "_libがデバッグビルドではない(release/最適化ビルド)ため、テスト専用関数"
+    "(raise_error_for_test・panic_for_test)がない。`uv run maturin develop`で"
+    "入れ直す"
+)
+
+
+def _has_test_hooks() -> bool:
+    from econometricsmodels import _lib
+
+    return all(hasattr(_lib, name) for name in _TEST_HOOK_NAMES)
+
+
+def pytest_report_header(config: pytest.Config) -> str | None:
+    if _has_test_hooks():
+        return None
+    return f"WARNING: {_NO_TEST_HOOKS}。該当のテストはskipされる"
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_call(item: pytest.Item):
+    try:
+        return (yield)
+    except AttributeError as exc:
+        if "_for_test" in str(exc) and not _has_test_hooks():
+            pytest.skip(_NO_TEST_HOOKS)
+        raise
+
 
 def _is_full_run(config: pytest.Config) -> bool:
     """絞り込み（`-k`・`-m`・`--lf`・`--deselect`・`--collect-only`・`tests`以外の指定）の無い全体実行か。"""

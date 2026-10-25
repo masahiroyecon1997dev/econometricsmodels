@@ -106,7 +106,7 @@
 
 - `#[pyclass(extends=PyValueError / PyRuntimeError)]`のマクロで`ValidationError`/`ComputationError`を生成する（属性定義の重複を避けるため）。`module="econometricsmodels._lib"`。
 - 変換は`to_pyerr(&err)`の1関数。各系統の`*_error_to_pyerr`はこれを呼ぶだけ。`engine_pybind`発の入力不正（`ColumnExtractionError`・オプション検査）も同じ組み立て関数を通す。
-- `_lib.error_catalog()`でカタログをPythonへ渡す（生成スクリプトとテストが読む）。`_lib.raise_error_for_test(code, params)`で任意の`code`を送出できる（カタログ全体の描画検査用）。
+- `_lib.error_catalog()`でカタログをPythonへ渡す（生成スクリプトとテストが読む）。`_lib.raise_error_for_test(code, params)`で任意の`code`を送出できる（カタログ全体の描画検査用）。`raise_error_for_test`と`panic_for_test`は`cfg(debug_assertions)`で**デバッグビルドにだけ**含める。CIのテスト・`maturin develop`・`cargo test`はデバッグビルドなので使えるが、配布するwheel（`--release`）には入らない。`maturin develop --release`（性能計測用）で入れた環境では存在しないので、その後に`pytest`を走らせる前に`maturin develop`（デバッグ）で入れ直す（`uv run`・`uv sync`が拡張をreleaseで再ビルドした場合も同じ）。入れ直さずに走らせても、`tests/conftest.py`が`AttributeError`を検出して、それを使うテストを理由つきでskipし、ヘッダーに警告を出す。CIは常にデバッグビルドなのでskipされず、全体実行の`--check-error-coverage`がskipで送出されなかった`code`を検出する。
 
 ### panicの境界変換（`guard`）
 

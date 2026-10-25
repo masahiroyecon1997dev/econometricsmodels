@@ -2,15 +2,23 @@
 //!
 //! `ErrorCode`のStrEnum・公開ドキュメントの表を生成するスクリプトと、カタログの整合を検査するテストが読む。
 //! 利用者向けのAPIではないので、`python_package`からは再エクスポートしない。
+//!
+//! テスト専用の入口（`raise_error_for_test`・`panic_for_test`）は`cfg(debug_assertions)`で
+//! デバッグビルドにだけ含める。`maturin develop`・`cargo test`（CIのテスト）はデバッグビルドなので
+//! 使えるが、配布するwheel（`--release`）には入らない。`maturin develop --release`で入れた環境では
+//! 使えないので、それでテストを走らせないこと。
 
-use engine::shared::error_catalog::{
-    CATALOG, ErrorClass, ErrorCode, ErrorReport, ParamType, ParamValue, Stage, TEST_LABELS,
-};
+use engine::shared::error_catalog::{CATALOG, ErrorClass, ParamType, Stage, TEST_LABELS};
+#[cfg(debug_assertions)]
+use engine::shared::error_catalog::{ErrorCode, ErrorReport, ParamValue};
+#[cfg(debug_assertions)]
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
-use super::errors::{guard, report_to_pyerr};
+use super::errors::guard;
+#[cfg(debug_assertions)]
+use super::errors::report_to_pyerr;
 
 fn param_type_name(ty: ParamType) -> &'static str {
     match ty {
@@ -82,6 +90,7 @@ pub(crate) fn error_catalog(py: Python<'_>) -> PyResult<Bound<'_, PyDict>> {
     })
 }
 
+#[cfg(debug_assertions)]
 fn to_param_value(ty: ParamType, value: &Bound<'_, PyAny>) -> PyResult<ParamValue> {
     Ok(match ty {
         ParamType::Int => ParamValue::Int(value.extract()?),
@@ -93,6 +102,7 @@ fn to_param_value(ty: ParamType, value: &Bound<'_, PyAny>) -> PyResult<ParamValu
     })
 }
 
+#[cfg(debug_assertions)]
 fn stage_from_params(name: &str, params: &Bound<'_, PyDict>) -> PyResult<Stage> {
     let mut stage = Stage::samples()
         .into_iter()
@@ -119,6 +129,7 @@ fn stage_from_params(name: &str, params: &Bound<'_, PyDict>) -> PyResult<Stage> 
 /// テスト用: `code`と`params`（例外の`params`と同じ形。`stage`とその補助値を含む）から例外を送出する。
 ///
 /// カタログの文面がRust側でどう描画されるかを、Pythonのテストが生成物と突き合わせるために使う。
+#[cfg(debug_assertions)]
 #[pyfunction]
 pub(crate) fn raise_error_for_test(code: &str, params: &Bound<'_, PyDict>) -> PyResult<()> {
     guard(|| {
@@ -150,6 +161,7 @@ pub(crate) fn raise_error_for_test(code: &str, params: &Bound<'_, PyDict>) -> Py
 /// `kind`は`"str"`（`&str`のpayload）・`"string"`（`String`のpayload）・`"other"`（文字列でないpayload）・
 /// `"long"`（300文字のメッセージ。`detail`の切り詰めを見る）。
 /// 実際の境界の関数と同じ`guard`を通る。
+#[cfg(debug_assertions)]
 #[pyfunction]
 pub(crate) fn panic_for_test(kind: &str) -> PyResult<()> {
     let kind = kind.to_owned();

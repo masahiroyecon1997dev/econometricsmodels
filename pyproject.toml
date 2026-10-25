@@ -45,6 +45,11 @@ features = ["pyo3/extension-module"]
 # 「License-File LICENSE does not exist in distribution file」エラーになる
 # （v0.1.0初回リリース時に実際に発生・確認済み）。includeへ明示的に足すことで回避する。
 include = ["THIRD-PARTY-LICENSES.html", "LICENSE"]
+# 開発用のファイルを配布物に入れない。CLAUDE.mdは開発者向けの指示で、python_package配下の
+# ものはwheelにも入り利用者のsite-packagesに置かれる（利用者のAIエージェントに指示として
+# 読み込まれうる）。error_catalog_golden.txtはRustの単体テスト専用（`include_str!`は
+# `#[cfg(test)]`内のみ）で、ビルドには不要。
+exclude = ["**/CLAUDE.md", "**/.gitkeep", "**/error_catalog_golden.txt"]
 
 [dependency-groups]
 # CI（ci_python.yml）が使う: pytest tests / ruff check . / ruff format --check .

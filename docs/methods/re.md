@@ -1,5 +1,7 @@
 # RE: definitions
 
+**RE**: [Usage](../usage/re.md) · [Options and results](../api/re.md) · **Definitions**
+
 This page defines what `RE` computes: the variance components, the quasi-demeaning (GLS) transformation, the covariance estimators behind `cov_type`, the test distributions, the panel R² statistics and the Hausman test. For the arguments and return values see the [RE API reference](../api/re.md); for how the test distributions differ from R, statsmodels and linearmodels see [Inference conventions](../guide/inference-conventions.md). The fixed effects counterpart is [FE](fe.md), and the notation is the same.
 
 ## Model and estimator

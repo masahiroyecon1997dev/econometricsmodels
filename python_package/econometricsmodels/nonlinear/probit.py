@@ -96,13 +96,27 @@ class Probit:
 class ProbitResults:
     """Probit estimation results.
 
-    Array-valued properties (`params`, `std_errors`, etc.) are exposed
-    as dictionaries keyed by coefficient name (for O(1) lookup of a
-    single parameter). Use `params_table()` for a row-oriented listing.
+    Coefficient-level properties (`params`, `std_errors`, etc.) are
+    dictionaries keyed by coefficient name, so one coefficient is
+    `result.params["x1"]`. Use `params_table()` for a row-oriented
+    listing (a list of dicts), for example for a JSON response.
 
-    `marginal_effects()`, `predict()`, and `pred_table()` are provided
-    as separate methods rather than fields on this class (they depend
-    on a representative point / threshold not fixed at `fit()` time).
+    Fields by purpose:
+
+    - Coefficients: `params`, `std_errors`, `test_stats`, `p_values`,
+      `conf_int`; the names in order: `param_names`.
+    - Which distribution the tests use: `stat_dist` (always
+      `"normal"`), `stat_df`.
+    - Overall likelihood-ratio test: `lr_statistic`, `lr_p_value`,
+      `lr_df`.
+    - Fit: `pseudo_r_squared`, `log_likelihood`,
+      `log_likelihood_null`, `aic`, `bic`.
+    - Optimizer: `solver`, `converged`, `n_iter`.
+    - Sample and model size: `n_obs`, `df_model`, `df_resid`,
+      `dep_var_name`.
+    - Settings echoed back: `cov_type`.
+    - Methods: `predict()` (probabilities), `augment()`,
+      `marginal_effects()`, `pred_table()`, `params_table()`.
 
     Args:
         raw: The estimation result object returned by `_lib.fit_probit`

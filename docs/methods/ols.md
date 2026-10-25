@@ -1,5 +1,7 @@
 # OLS: definitions
 
+**OLS**: [Usage](../usage/ols.md) · [Options and results](../api/ols.md) · **Definitions**
+
 This page defines what `OLS` computes: the estimator, the covariance estimators behind `cov_type`, the test distributions, the fit statistics and the post-estimation diagnostics. For the arguments and return values see the [OLS API reference](../api/ols.md); for how the test distributions differ from R, statsmodels and linearmodels see [Inference conventions](../guide/inference-conventions.md).
 
 ## Model and estimator

@@ -1,7 +1,7 @@
 """公開サイト（mkdocs）に出る文章が英語で、内部ドキュメントを指していないことのテスト。
 
 公開サイトに載るのは英語のページ（`docs/`直下の`index.md`・`getting-started.md`と
-`api/`・`guide/`・`methods/`）と、APIページがdocstringから描画するpublicなクラス・メソッドの
+`usage/`・`api/`・`guide/`・`methods/`）と、APIページがdocstringから描画するpublicなクラス・メソッドの
 docstring。日本語の内部ドキュメント（`docs/spec/`等）は`exclude_docs`で公開から外しており、
 そこへの参照や日本語が公開側に混ざると、公開サイトで読めない参照や日本語が出る。
 定義式の正本は`docs/methods/`で、`docs/spec/`には重複させない（CLAUDE.md 13章）。
@@ -26,7 +26,11 @@ INTERNAL_REF = re.compile(
 
 PUBLIC_PAGES = sorted(
     [DOCS / "index.md", DOCS / "getting-started.md"]
-    + [p for d in ("api", "guide", "methods") for p in (DOCS / d).glob("*.md")]
+    + [
+        p
+        for d in ("usage", "api", "guide", "methods")
+        for p in (DOCS / d).glob("*.md")
+    ]
 )
 
 

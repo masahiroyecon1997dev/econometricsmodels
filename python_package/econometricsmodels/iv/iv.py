@@ -129,13 +129,34 @@ class IV:
 class IVResults:
     """IV estimation results.
 
-    Array-valued properties (`params`, `std_errors`, etc.) are exposed
-    as dictionaries keyed by coefficient name (for O(1) lookup of a
-    single parameter). Use `params_table()` for a row-oriented listing.
+    Coefficient-level properties (`params`, `std_errors`, etc.) are
+    dictionaries keyed by coefficient name, so one coefficient is
+    `result.params["x1"]`. Use `params_table()` for a row-oriented
+    listing (a list of dicts), for example for a JSON response.
 
-    `first_stage()` (per-endogenous-variable first-stage regression
-    results) is provided as a separate method rather than a field on
-    this class.
+    Fields by purpose:
+
+    - Coefficients: `params`, `std_errors`, `test_stats`, `p_values`,
+      `conf_int`; the names in order: `param_names`.
+    - Which distribution the tests use: `stat_dist` (`"t"` for 2SLS,
+      `"normal"` for GMM), `stat_df`.
+    - Overall Wald test: `wald_statistic`, `wald_p_value`,
+      `wald_dist`, `wald_df_num`, `wald_df_denom`.
+    - Weak instruments: `weak_instrument_f_statistics`,
+      `weak_instrument_f_df_num`, `weak_instrument_f_df_denom`.
+    - Overidentification (Sargan or Hansen J): `overid_statistic`,
+      `overid_p_value`, `overid_df`.
+    - Endogeneity (2SLS only): `wu_hausman_statistic`,
+      `wu_hausman_p_value`, `wu_hausman_df_num`, `wu_hausman_df_denom`.
+    - Fit: `r_squared`, `adj_r_squared`.
+    - Estimator used: `estimator`, `gmm_type`, `gmm_weight_type`,
+      `converged`, `n_iter`.
+    - Sample and model size: `n_obs`, `df_model`, `df_resid`,
+      `dep_var_name`.
+    - Settings echoed back: `cov_type`, `hac_lags_used`.
+    - Residuals: `residuals` (structural residuals).
+    - Methods: `first_stage()` (one `OLSResults` per endogenous
+      variable), `params_table()`.
 
     Args:
         raw: The estimation result object returned by `_lib.fit_iv`

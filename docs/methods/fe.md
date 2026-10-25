@@ -1,5 +1,7 @@
 # FE: definitions
 
+**FE**: [Usage](../usage/fe.md) · [Options and results](../api/fe.md) · **Definitions**
+
 This page defines what `FE` computes: the within estimator, the degrees of freedom, the covariance estimators behind `cov_type`, the test distributions, the panel R² statistics and the recovery of the fixed effects. For the arguments and return values see the [FE API reference](../api/fe.md); for how the test distributions differ from R, statsmodels and linearmodels see [Inference conventions](../guide/inference-conventions.md). The random effects counterpart is [RE](re.md).
 
 ## Model and estimator

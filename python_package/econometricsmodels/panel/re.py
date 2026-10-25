@@ -153,67 +153,38 @@ class RE:
 class REResults:
     """RE estimation results.
 
-    Array-valued properties (`params`, `std_errors`, etc.) are exposed
-    as dictionaries keyed by coefficient name (for O(1) lookup of a
-    single parameter). Use `params_table()` for a row-oriented listing.
+    Coefficient-level properties (`params`, `std_errors`, etc.) are
+    dictionaries keyed by coefficient name, so one coefficient is
+    `result.params["x1"]`. Use `params_table()` for a row-oriented
+    listing (a list of dicts), for example for a JSON response.
     `param_names[0]` is always `"const"` (unlike FE, RE has an
-    intercept; see `engine::panel::re`'s module docstring on the Rust
-    side for why the quasi-demeaned constant column is named this
-    way).
+    intercept).
 
-    The Hausman test (`hausman_statistic`/`hausman_p_value`/
-    `hausman_df`) is computed automatically inside `fit()` and exposed
-    directly as properties here, rather than as a separate method like
-    FE's `fixed_effects()`. It is the
-    regression-based (auxiliary regression) version (Wooldridge 2010,
-    section 10.7.3): the quasi-demeaned `y` is regressed on a constant,
-    the quasi-demeaned regressors and the within-transformed
-    regressors, and the within-transformed coefficients are tested
-    jointly. The comparison is against fixed effects with the same
-    structure as RE itself (entity for one-way, entity and time for
-    two-way), regardless of `REOptions.dk_time`. It matches
-    `plm::phtest(method = "aux")` (`effect = "individual"` or
-    `"twoways"`) when every regressor varies in both dimensions;
-    otherwise `plm` tests the wrong coefficients. The Wald test's
-    covariance follows `cov_type` (the default `"cluster"` gives the
-    cluster-robust Hausman test; `"classical"` gives the classical
-    version). The auxiliary regression uses OLS-style small-sample
-    corrections, which differ from the RE standard errors'.
+    Fields by purpose:
 
-    `hausman_df` is the number of tested coefficients: the regressors
-    that still vary after the within transformation (entity means
-    removed for one-way, entity and time means removed for two-way, so
-    for two-way a regressor that varies in only one dimension is not
-    tested) and whose coefficient is identified. In a one-way model on a
-    balanced panel, a regressor that varies only over time (a year
-    trend) stays in the model but its within-transformed copy is
-    collinear with the constant, so it is left out of the tested set.
-    So is the within-transformed copy of a regressor whose entity mean
-    (or, for two-way effects, time mean) is also a regressor, as in a
-    correlated-random-effects (Mundlak) specification: it is a linear
-    combination of the constant, the quasi-demeaned regressors and the
-    earlier within-transformed copies, and, as in R's `lm`, the later
-    aliased column is dropped (relative tolerance `1e-7`). Only
-    within-transformed copies are dropped; a perfectly collinear
-    design still raises `ComputationError`. A time-invariant regressor
-    (constant over time within every entity) is allowed in RE and is
-    never tested. All three values are `None` only when no coefficient
-    can be tested. If the auxiliary regression
-    cannot be computed (rank-deficient design, or a structurally
-    singular robust covariance such as too few clusters or periods for
-    the auxiliary slopes), `fit()` raises
-    `ValidationError`/`ComputationError`. A failure in RE's own internal
-    FE call (used for the Hausman test, the within R² and the
-    Swamy-Arora and Amemiya variance components) makes `fit()` itself
-    raise instead (e.g. a singleton entity); see `RE.fit()`'s
-    docstring.
+    - Coefficients: `params`, `std_errors`, `test_stats`, `p_values`,
+      `conf_int`; the names in order: `param_names`.
+    - Which distribution the tests use: `stat_dist`, `stat_df`.
+    - Overall F test: `f_statistic`, `f_p_value`, `f_df_num`,
+      `f_df_denom`.
+    - Hausman test against FE (computed by `fit()`):
+      `hausman_statistic`, `hausman_p_value`, `hausman_df`.
+    - Variance components: `sigma2_eps`, `sigma2_u`, `sigma2_lambda`
+      (two-way only), and `variance_method`.
+    - Quasi-demeaning weights: `theta` (one-way), `theta_entity`,
+      `theta_time`, `theta_total` (two-way). The ones that do not
+      apply are `None`.
+    - Fit: `r_squared_within`, `r_squared_between`,
+      `r_squared_overall`, `log_likelihood`, `aic`, `bic`.
+    - Panel size: `n_obs`, `n_entities`, `n_periods` (two-way only).
+    - Model size: `df_model`, `df_resid`, `dep_var_name`.
+    - Settings echoed back: `cov_type`, `dk_bandwidth_used`.
+    - Residuals: `residuals` (quasi-demeaned).
+    - Methods: `params_table()`.
 
-    The estimated variance components (`sigma2_eps`, `sigma2_u`, and
-    `sigma2_lambda` for two-way effects) and the weights of the
-    quasi-demeaning that follow from them (`theta` for one-way,
-    `theta_entity`/`theta_time`/`theta_total` for two-way) are exposed as
-    properties; the ones that do not apply to the model are `None`.
-    `variance_method` tells which estimator produced them.
+    The Hausman test is the regression-based (auxiliary regression)
+    version; see the docstring of `hausman_statistic` and the
+    definitions in the documentation.
 
     Args:
         raw: The estimation result object returned by `_lib.fit_re`
@@ -496,14 +467,13 @@ class REResults:
         two-way effects). The Wald test's covariance follows
         `cov_type` (default `"cluster"` gives the cluster-robust
         Hausman test; `"classical"` gives the classical version). The
-        auxiliary regression uses OLS-style small-sample corrections,
-        unlike the RE standard errors. For unbalanced panels the
+        auxiliary regression uses the same small-sample corrections as
+        the RE standard errors. For unbalanced panels the
         auxiliary regression's constant is left untransformed, as in
         `plm::phtest`. `None` when no coefficient can be tested (no
         regressor varies after the within transformation, or the
         remaining ones are aliased, for example because the entity
-        mean of every time-varying regressor is also a regressor); see
-        the class docstring. If
+        mean of every time-varying regressor is also a regressor). If
         the auxiliary regression cannot be computed, `fit()` raises
         instead."""
         return self._raw.hausman_statistic

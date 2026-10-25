@@ -1,5 +1,7 @@
 # IV: definitions
 
+**IV**: [Usage](../usage/iv.md) · [Options and results](../api/iv.md) · **Definitions**
+
 This page defines what `IV` computes: the 2SLS and GMM estimators, the covariance estimators behind `cov_type`, the test distributions, and the diagnostics (weak instruments, overidentification, endogeneity). For the arguments and return values see the [IV API reference](../api/iv.md); for how the test distributions differ from R, statsmodels and linearmodels see [Inference conventions](../guide/inference-conventions.md).
 
 ## Model and notation

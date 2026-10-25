@@ -1,5 +1,7 @@
 # Probit: definitions
 
+**Probit**: [Usage](../usage/probit.md) · [Options and results](../api/probit.md) · **Definitions**
+
 This page defines what `Probit` computes. Probit is the same maximum-likelihood model as [Logit](logit.md) with the standard normal CDF in place of the logistic CDF, so the solvers, convergence rules, separation detection, covariance estimators (`cov_type`), test distribution, overall test and `pred_table()` are those defined on the [Logit page](logit.md). Only what the link function changes is described here. For the arguments and return values see the [Probit API reference](../api/probit.md).
 
 ## Model and estimator

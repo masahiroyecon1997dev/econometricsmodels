@@ -130,12 +130,27 @@ class FE:
 class FEResults:
     """FE estimation results.
 
-    Array-valued properties (`params`, `std_errors`, etc.) are exposed
-    as dictionaries keyed by coefficient name (for O(1) lookup of a
-    single parameter). Use `params_table()` for a row-oriented listing.
+    Coefficient-level properties (`params`, `std_errors`, etc.) are
+    dictionaries keyed by coefficient name, so one coefficient is
+    `result.params["x1"]`. Use `params_table()` for a row-oriented
+    listing (a list of dicts), for example for a JSON response.
 
-    `fixed_effects()` (the fixed effects themselves) is provided as a
-    separate method rather than a field on this class.
+    Fields by purpose:
+
+    - Coefficients (no intercept): `params`, `std_errors`,
+      `test_stats`, `p_values`, `conf_int`; the names in order:
+      `param_names`.
+    - Which distribution the tests use: `stat_dist`, `stat_df`.
+    - Overall F test: `f_statistic`, `f_p_value`, `f_df_num`,
+      `f_df_denom`.
+    - Fit: `r_squared_within`, `r_squared_between`,
+      `r_squared_overall`, `log_likelihood`, `aic`, `bic`.
+    - Panel size: `n_obs`, `n_entities`, `n_periods` (two-way only).
+    - Model size: `df_model`, `df_resid`, `dep_var_name`.
+    - Settings echoed back: `cov_type`, `dk_bandwidth_used`.
+    - Residuals: `residuals` (within-transformed).
+    - Methods: `fixed_effects()` (the entity and time effects),
+      `params_table()`.
 
     Args:
         raw: The estimation result object returned by `_lib.fit_fe`

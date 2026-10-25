@@ -105,18 +105,30 @@ class Tobit:
 class TobitResults:
     """Tobit estimation results.
 
-    Array-valued properties (`params`, `std_errors`, etc.) are exposed
-    as dictionaries keyed by coefficient name (for O(1) lookup of a
-    single parameter). They include an entry for `"sigma"` (the error
-    term's standard deviation) in addition to the regression
-    coefficients, since `_lib.TobitResult` reports `sigma` alongside
-    `beta` in a unified `(k+1)`-length representation. Use
-    `params_table()` for a row-oriented listing.
+    Coefficient-level properties (`params`, `std_errors`, etc.) are
+    dictionaries keyed by coefficient name, so one coefficient is
+    `result.params["x1"]`. They include an entry for `"sigma"` (the
+    standard deviation of the error term) after the regression
+    coefficients. Use `params_table()` for a row-oriented listing (a
+    list of dicts), for example for a JSON response.
 
-    `marginal_effects()`, `predict()`, and `censoring_fit_check()` are
-    provided as separate methods rather than fields on this class (they
-    depend on a representative point / prediction target not fixed at
-    `fit()` time).
+    Fields by purpose:
+
+    - Coefficients and `sigma`: `params`, `std_errors`, `test_stats`,
+      `p_values`, `conf_int`; the names in order: `param_names`;
+      `sigma` on its own: `sigma`.
+    - Which distribution the tests use: `stat_dist` (always
+      `"normal"`), `stat_df`.
+    - Overall Wald test: `wald_statistic`, `wald_p_value`, `wald_df`,
+      `wald_dist`.
+    - Fit: `log_likelihood`, `aic`, `bic`.
+    - Censoring bounds used: `lower`, `upper`.
+    - Optimizer: `solver`, `converged`, `n_iter`.
+    - Sample and model size: `n_obs`, `df_model`, `df_resid`,
+      `dep_var_name`.
+    - Settings echoed back: `cov_type`.
+    - Methods: `predict()`, `augment()`, `marginal_effects()` (all
+      take a `target`), `censoring_fit_check()`, `params_table()`.
 
     Args:
         raw: The estimation result object returned by `_lib.fit_tobit`

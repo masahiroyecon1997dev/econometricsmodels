@@ -1,5 +1,7 @@
 # WLS: definitions
 
+**WLS**: [Usage](../usage/wls.md) · [Options and results](../api/wls.md) · **Definitions**
+
 This page defines what `WLS` computes. WLS is least squares on \(\sqrt{w}\)-scaled data, so the covariance estimators and test distributions are those defined on the [OLS page](ols.md), applied to the scaled data. Only what the weights change is described here. For the arguments and return values see the [WLS API reference](../api/wls.md).
 
 ## Model and estimator

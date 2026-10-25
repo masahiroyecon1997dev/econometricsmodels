@@ -75,6 +75,8 @@ econometricsmodels/
 │
 ├── docs/                          # MkDocs（GitHub Pages公開）
 │   ├── mkdocs.yml                 # exclude_docsでspec/・performance/・planning/を公開サイトから外す
+│   ├── usage/                     # 手法ごとの使い方（英語の公開ページ。navの手法配下の1ページ目。コード例は自己完結させ、tests/cross_method/test_doc_examples.pyが実行する）
+│   ├── api/                       # 手法ごとのオプションと結果（英語の公開ページ。冒頭の「Options at a glance」の表とdocstringはmkdocstringsが描画する）
 │   ├── guide/                     # 利用者向けの英語の公開ページ（navに掲載。受け付けるデータ・バリデーション・推論の慣習・検証・性能。詳細は13章）
 │   ├── methods/                   # 手法ごとの定義（推定量・標準誤差・検定分布・適合度・診断の式）の英語の公開ページ（navに掲載。数式の正本。詳細は13章）
 │   ├── spec/                      # 実装済み手法の実装上の判断・内部構成・テスト方針の仕様書（日本語・公開サイトには出さない。詳細は13章）
@@ -166,7 +168,7 @@ econometricsmodels/
 - 仕様書: `docs/spec/`（実装済みの手法ごとの実装上の判断・内部構成・テスト方針・ベンチマーク上の注意。日本語で、公開サイトには出さない。method非依存のCI/CD・セキュリティ運用ノートもここに置く、例: `ci-cd-notes.md`・`inference-conventions.md`）、`docs/planning/specs/`（実装途中の手法の設計ノート・実装ノート）。
   ある手法の実装が完了したら、その手法の仕様書は`docs/planning/specs/`から`docs/spec/`へ集約する
   （経緯は削除し理由のみ簡潔に記載、1ファイルにまとめる）。
-- **手法の定義（数式）の正本**: `docs/methods/<手法>.md`（mkdocsのnavに載せる英語の公開ページ。推定量・`cov_type`ごとの共分散・検定分布と自由度・適合度統計量・事後診断の定義式）。`docs/spec/`には定義式を重複させず、このページへのリンクと、実装上の判断・理由だけを置く。手法の式や定義を変えたら`methods/`を更新し、`spec/`は理由が変わったときだけ更新する。オプション・結果フィールドの意味の正本はコード内のdocstring（APIページが自動生成）で、`spec/`の「API引数」「結果構造体」は設計判断の理由のみとする。公開側（`methods/`・`guide/`・`api/`・公開クラスのdocstring）は英語で、`docs/spec/`・`.claude/`・`CLAUDE.md`への参照を含めない（`tests/cross_method/test_public_docs.py`が検査する）。新手法の追加時は`methods/`に1ページ足し、mkdocsのnavに載せる。
+- **手法の定義（数式）の正本**: `docs/methods/<手法>.md`（mkdocsのnavに載せる英語の公開ページ。推定量・`cov_type`ごとの共分散・検定分布と自由度・適合度統計量・事後診断の定義式）。`docs/spec/`には定義式を重複させず、このページへのリンクと、実装上の判断・理由だけを置く。手法の式や定義を変えたら`methods/`を更新し、`spec/`は理由が変わったときだけ更新する。オプション・結果フィールドの意味の正本はコード内のdocstring（APIページが自動生成）で、`spec/`の「API引数」「結果構造体」は設計判断の理由のみとする。公開側（`usage/`・`methods/`・`guide/`・`api/`・公開クラスのdocstring）は英語で、`docs/spec/`・`.claude/`・`CLAUDE.md`への参照を含めない（`tests/cross_method/test_public_docs.py`が検査する）。新手法の追加時は`usage/`・`api/`・`methods/`に各1ページ足し、mkdocsのnavの手法配下（Usage / Options and results / Definitions）に載せる。`api/`ページは冒頭に「Options at a glance」の表を置き、Resultsクラスのdocstringには「Fields by purpose」で公開プロパティ・メソッドを目的別に漏れなく列挙する（`tests/cross_method/test_results_docstrings.py`が検査する）。`usage/`のコード例はページ内で自己完結させる。
 - 利用者向け横断ガイド: `docs/guide/`（mkdocsのnavに載せる英語の公開ページ）。現状は`inference-conventions.md`（手法別の検定分布・自由度、R/statsmodels/linearmodelsとの違い、診断統計量の読み方）。手法別の一覧表はこの公開ページを正本とし、`docs/spec/inference-conventions.md`には重複させず選択理由・ベンチマーク上の注意のみを置く。新手法の追加時は公開ページの表に1行追加する。
 - 性能比較記録: `docs/performance/<method>.md`（`performance/compare_<method>.py`の計測方法論・設計判断・既知の限界・今後の検討を残す日本語の開発ノート。
   計測結果の表は置かない）。生成JSONは`docs/performance/results/`（`.gitignore`対象）。

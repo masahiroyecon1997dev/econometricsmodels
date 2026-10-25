@@ -1,5 +1,7 @@
 # Tobit: definitions
 
+**Tobit**: [Usage](../usage/tobit.md) · [Options and results](../api/tobit.md) · **Definitions**
+
 This page defines what `Tobit` computes: the censored-normal likelihood, the covariance estimators behind `cov_type`, the test distributions, the overall test, the four prediction targets and the censoring fit check. Tobit is estimated by maximum likelihood like [Logit](logit.md), and the solvers, `tol`, `max_iter` and `raise_on_non_convergence` work as described there. For the arguments and return values see the [Tobit API reference](../api/tobit.md).
 
 ## Model and estimator

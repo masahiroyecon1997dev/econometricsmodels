@@ -93,9 +93,27 @@ class OLS:
 class OLSResults:
     """OLS estimation results.
 
-    Array-valued properties (`params`, `std_errors`, etc.) are exposed
-    as dictionaries keyed by coefficient name (for O(1) lookup of a
-    single parameter). Use `params_table()` for a row-oriented listing.
+    Coefficient-level properties (`params`, `std_errors`, etc.) are
+    dictionaries keyed by coefficient name, so one coefficient is
+    `result.params["x1"]`. Use `params_table()` for a row-oriented
+    listing (a list of dicts), for example for a JSON response.
+
+    Fields by purpose:
+
+    - Coefficients: `params`, `std_errors`, `test_stats`, `p_values`,
+      `conf_int`; the names in order: `param_names`.
+    - Which distribution the tests use: `stat_dist`, `stat_df`.
+    - Overall F test: `f_statistic`, `f_p_value`, `f_df_num`,
+      `f_df_denom`.
+    - Fit: `r_squared`, `adj_r_squared`, `log_likelihood`, `aic`,
+      `bic`.
+    - Sample and model size: `n_obs`, `df_model`, `df_resid`,
+      `dep_var_name`.
+    - Settings echoed back: `cov_type`, `hac_lags_used`.
+    - Residuals: `residuals`.
+    - Methods: `predict()`, `augment()`, `params_table()`.
+    - Post-estimation tests (never run by `fit()`): `white_test()`,
+      `breusch_pagan_test()`, `breusch_godfrey_test()`.
 
     Args:
         raw: The estimation result object returned by `_lib.fit_ols`

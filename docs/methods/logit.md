@@ -1,5 +1,7 @@
 # Logit: definitions
 
+**Logit**: [Usage](../usage/logit.md) · [Options and results](../api/logit.md) · **Definitions**
+
 This page defines what `Logit` computes: the estimator, the covariance estimators behind `cov_type`, the test distributions, the fit statistics, marginal effects and predictions. For the arguments and return values see the [Logit API reference](../api/logit.md); for how the test distributions differ from R, statsmodels and linearmodels see [Inference conventions](../guide/inference-conventions.md). [Probit](probit.md) differs only in the link function.
 
 ## Model and estimator

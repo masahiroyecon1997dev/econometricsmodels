@@ -5,7 +5,7 @@ repo_name: masahiroyecon1997dev/econometricsmodels
 
 # このファイル自体がdocs/直下にあるため、同じdocs/をdocs_dirとして扱う
 # （デフォルトの"docs/mkdocs.yml相対docs/"にはしない）。
-# 公開サイトに載せるのは英語のページ（index.md・getting-started.md・api/・guide/）のみ。
+# 公開サイトに載せるのは英語のページ（index.md・getting-started.md・usage/・api/・methods/・guide/）のみ。
 # 日本語の内部ドキュメント（spec/・performance/・planning/）は下のexclude_docsで外す
 # （リポジトリ自体はpublicなので、ソースとしては閲覧可能という前提は変わらない）。
 docs_dir: .
@@ -24,30 +24,46 @@ exclude_docs: |
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
-  - API Reference:
-      - OLS: api/ols.md
-      - WLS: api/wls.md
-      - Logit: api/logit.md
-      - Probit: api/probit.md
-      - Tobit: api/tobit.md
-      - IV: api/iv.md
-      - FE: api/fe.md
-      - RE: api/re.md
-      - Errors: api/errors.md
-  - Methods:
-      - OLS: methods/ols.md
-      - WLS: methods/wls.md
-      - Logit: methods/logit.md
-      - Probit: methods/probit.md
-      - Tobit: methods/tobit.md
-      - IV: methods/iv.md
-      - FE: methods/fe.md
-      - RE: methods/re.md
+  - Models:
+      - OLS:
+          - Usage: usage/ols.md
+          - Options and results: api/ols.md
+          - Definitions: methods/ols.md
+      - WLS:
+          - Usage: usage/wls.md
+          - Options and results: api/wls.md
+          - Definitions: methods/wls.md
+      - Logit:
+          - Usage: usage/logit.md
+          - Options and results: api/logit.md
+          - Definitions: methods/logit.md
+      - Probit:
+          - Usage: usage/probit.md
+          - Options and results: api/probit.md
+          - Definitions: methods/probit.md
+      - Tobit:
+          - Usage: usage/tobit.md
+          - Options and results: api/tobit.md
+          - Definitions: methods/tobit.md
+      - IV:
+          - Usage: usage/iv.md
+          - Options and results: api/iv.md
+          - Definitions: methods/iv.md
+      - FE:
+          - Usage: usage/fe.md
+          - Options and results: api/fe.md
+          - Definitions: methods/fe.md
+      - RE:
+          - Usage: usage/re.md
+          - Options and results: api/re.md
+          - Definitions: methods/re.md
   - Guides:
       - Accepted data: guide/accepted-data.md
       - Validation and errors: guide/validation.md
       - Error codes: guide/error-codes.md
+      - Errors (API): api/errors.md
       - Inference conventions: guide/inference-conventions.md
+  - Verification and performance:
       - Verification: guide/verification.md
       - Performance: guide/performance.md
       - Performance results: guide/performance-results.md
@@ -98,6 +114,12 @@ plugins:
             show_source: false
             show_root_heading: true
             merge_init_into_class: true
+            # クラスの先頭に属性・メソッドの一覧表を出し、右の目次にも並べる
+            # （全部を読まずに目的のプロパティへ飛べるようにする）。
+            summary: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            docstring_section_style: table
             # PyO3コンパイル済みクラスは動的検査でdunderメソッド（__new__/__repr__等）も
             # メンバーとして拾われるため、明示的に除外する。
             filters:

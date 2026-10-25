@@ -40,24 +40,28 @@ Invalid input raises an exception that carries a stable `code` and the values be
 
 ## Supported methods
 
-| Method | Estimator | Definitions | API |
-|---|---|---|---|
-| OLS | Ordinary least squares | [Methods](methods/ols.md) | [API](api/ols.md) |
-| WLS | Weighted least squares | [Methods](methods/wls.md) | [API](api/wls.md) |
-| Logit | Binary logistic regression (maximum likelihood) | [Methods](methods/logit.md) | [API](api/logit.md) |
-| Probit | Binary probit regression (maximum likelihood) | [Methods](methods/probit.md) | [API](api/probit.md) |
-| Tobit | Censored regression (maximum likelihood) | [Methods](methods/tobit.md) | [API](api/tobit.md) |
-| IV | Instrumental variables, 2SLS and GMM | [Methods](methods/iv.md) | [API](api/iv.md) |
-| FE | Fixed effects (within) panel regression | [Methods](methods/fe.md) | [API](api/fe.md) |
-| RE | Random effects (GLS) panel regression | [Methods](methods/re.md) | [API](api/re.md) |
+| Method | Estimator | Usage | Options and results | Definitions |
+|---|---|---|---|---|
+| OLS | Ordinary least squares | [Usage](usage/ols.md) | [Options and results](api/ols.md) | [Definitions](methods/ols.md) |
+| WLS | Weighted least squares | [Usage](usage/wls.md) | [Options and results](api/wls.md) | [Definitions](methods/wls.md) |
+| Logit | Binary logistic regression (maximum likelihood) | [Usage](usage/logit.md) | [Options and results](api/logit.md) | [Definitions](methods/logit.md) |
+| Probit | Binary probit regression (maximum likelihood) | [Usage](usage/probit.md) | [Options and results](api/probit.md) | [Definitions](methods/probit.md) |
+| Tobit | Censored regression (maximum likelihood) | [Usage](usage/tobit.md) | [Options and results](api/tobit.md) | [Definitions](methods/tobit.md) |
+| IV | Instrumental variables, 2SLS and GMM | [Usage](usage/iv.md) | [Options and results](api/iv.md) | [Definitions](methods/iv.md) |
+| FE | Fixed effects (within) panel regression | [Usage](usage/fe.md) | [Options and results](api/fe.md) | [Definitions](methods/fe.md) |
+| RE | Random effects (GLS) panel regression | [Usage](usage/re.md) | [Options and results](api/re.md) | [Definitions](methods/re.md) |
 
-[Getting Started](getting-started.md) shows how to use each of them. The **Methods** pages define what is computed (the estimator, the covariance types, the test distributions, the fit statistics and the diagnostics), and the **API Reference** pages list the arguments, options and result fields.
+[Getting Started](getting-started.md) introduces the conventions all of them share. Each method has three pages: **Usage** (examples), **Options and results** (the arguments, options and result fields) and **Definitions** (the estimator, the covariance types, the test distributions, the fit statistics and the diagnostics).
 
 More methods are planned as the project expands; see [GitHub Issues](https://github.com/masahiroyecon1997dev/econometricsmodels/issues) for what is planned or in progress.
 
 ## Guides
 
-- [Verification](guide/verification.md): the reference implementations each method is checked against, and the tolerances used.
-- [Validation and errors](guide/validation.md): why invalid input is rejected instead of repaired (for example, missing values are never dropped), and when each error is raised.
+- [Accepted data](guide/accepted-data.md): the input type and the column types each argument accepts.
+- [Validation and errors](guide/validation.md): how to read and handle an error, why invalid input is rejected instead of repaired (for example, missing values are never dropped), and when each error is raised. [Error codes](guide/error-codes.md) lists every `code`.
 - [Inference conventions](guide/inference-conventions.md): which test distributions and degrees of freedom each method uses, and where they differ from R, statsmodels and linearmodels.
+
+## Verification and performance
+
+- [Verification](guide/verification.md): the reference implementations each method is checked against, and the tolerances used.
 - [Performance](guide/performance.md): how execution time and memory compare with statsmodels and linearmodels, with [full results](guide/performance-results.md) per method.

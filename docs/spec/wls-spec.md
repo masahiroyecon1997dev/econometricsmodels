@@ -1,6 +1,6 @@
 # WLS 仕様書
 
-WLS（Weighted Least Squares）の確定済み仕様。`engine/src/linear/wls.rs`・
+WLS（Weighted Least Squares）の確定済み仕様。数式・定義の正本は公開ページ[`docs/methods/wls.md`](../methods/wls.md)（英語）で、本書は実装上の判断・内部構成・テスト方針を記す（定義式は重複させない）。`engine/src/linear/wls.rs`・
 `engine_pybind/src/linear/wls.rs`・`python_package/econometricsmodels/linear/wls.py`として
 実装済み。OLSに強く依存する設計のため、共通する式・理由は[`ols-spec.md`](./ols-spec.md)を参照し、
 本ドキュメントではWLS固有の差分のみを記載する。
@@ -86,8 +86,6 @@ $\tilde y_i=\sqrt{w_i}y_i$, $\tilde\varepsilon_i=\sqrt{w_i}\hat\varepsilon_i$）
 statsmodelsの`WLS`も内部的に同じ変換方式`wexog=sqrt(weights)*exog`で実装されており、この設計は
 そのままstatsmodelsとの数値一致が期待できる）。
 
-- HC0の$\hat\Psi=\sum_i\tilde\varepsilon_i^2\tilde x_i\tilde x_i^\top=\sum_i w_i^2\hat\varepsilon_i^2 x_i x_i^\top$
-  のように、重みが2乗で効く（残差と設計行列の両方に$\sqrt{w_i}$がかかるため）。
 - クラスターのグループ分け自体（`cluster`によるグルーピング）は重み変換の影響を受けない
   （グループ内で合計する対象が変換後の値になるだけ）。小標本補正・自由度の扱いもOLSと同じ。
   クラスター数`G <= 傾き係数の数q`は`InsufficientClustersForInference`（`ValidationError`）
@@ -104,22 +102,11 @@ statsmodelsの`WLS`も内部的に同じ変換方式`wexog=sqrt(weights)*exog`�
 OLSの計算式をそのまま適用するだけでは誤りになる**（statsmodelsとのクロスチェックで、R²相対誤差
 0.2〜1%程度、対数尤度に加法的なずれが実際に発生することを確認済み）。
 
-**R²**: `SST`（切片ありの場合、centered）は変換後$\tilde y$の単純平均ではなく、**元の$y$の重み付き
-平均** $\bar y_w=\sum w_i y_i/\sum w_i$ を使う。
-
-$$
-\mathrm{SST} = \sum_i w_i (y_i - \bar y_w)^2 \quad\text{（切片あり）}, \qquad
-\mathrm{SST} = \sum_i w_i y_i^2 \quad\text{（切片なし、uncentered。こちらは代入のままで正しい）}
-$$
-
-**対数尤度**: `sqrt(weight)`変換のヤコビアンに由来する補正項が必要。
-
-$$
-\ell = -\frac{n}{2}\Big(\ln(2\pi) + \ln(\mathrm{SSR}/n) + 1\Big) + \frac{1}{2}\sum_i \ln w_i
-$$
-
-（第1項はOLSの対数尤度の式に変換後の`SSR`・`n`を代入したもの、第2項$\frac12\sum_i\ln w_i$が
-追加の補正項）。AIC/BICはこの$\ell$から通常通り計算する（式自体は不変、$\ell$の値が変わる）。
+**R²・対数尤度**の定義式（重み付き平均による`SST`、ヤコビアンに由来する対数尤度の補正項
+$\tfrac12\sum_i\ln w_i$）は公開ページ[`docs/methods/wls.md`](../methods/wls.md)が正本。
+実装上の要点は、`SST`を変換後$\tilde y$の単純平均ではなく元の$y$の重み付き平均で中心化すること
+（切片なしは代入のままで正しい）と、対数尤度に補正項が必要なこと。AIC/BICはこの対数尤度から
+通常通り計算する。
 
 **実装**: `OlsEstimator`/`OlsInput`自体は重みを一切知らない設計を維持したまま、
 `WlsEstimator::fit`側（元の、変換前の`y`・重みにアクセスできる層）で上記5フィールドを計算し直す

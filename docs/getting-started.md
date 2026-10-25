@@ -141,7 +141,7 @@ print(result.params)
 print(result.std_errors)
 ```
 
-Estimation options are configured via `WLSOptions`, which has the same fields as `OLSOptions` (`cov_type`, etc.). See "Switching the type of standard error" above for how to switch standard error types, and the [API Reference](api/wls.md) for details on the `weight` argument.
+Estimation options are set with `WLSOptions`: `cov_type`, `include_intercept`, `confidence_level`, `cluster`, `hac_lags` and `hac_time`. "Switching the type of standard error" above shows how to choose the standard errors; the options mean the same here. See the [API Reference](api/wls.md) for the `weight` argument and [Methods: WLS](methods/wls.md) for how the weights enter the estimates and fit statistics.
 
 `WLSResults.predict()` and `WLSResults.augment()` work exactly like their `OLSResults` counterparts (see "Predicted values" above); weights play no role in either the training-data or out-of-sample case.
 

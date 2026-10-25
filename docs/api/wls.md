@@ -1,6 +1,6 @@
 # WLS
 
-`WLS` is implemented by applying `OLS`'s solver directly to `sqrt(weight)`-transformed data, so the normal-equations solver and the general form of standard errors (HC0-3 / cluster / HAC) are shared with [OLS](ols.md). `WLSOptions` has the same fields as `OLSOptions` but is a separate class (see below). This page only covers the semantics of weights (analytic weights) and the API specific to WLS.
+`WLS` fits a weighted least squares regression: `OLS` with a `weight` column. The standard error types (`cov_type`: classical, HC0-3, cluster, HAC) are the ones available for [OLS](ols.md). For the definitions behind the estimates, standard errors and fit statistics, see [Methods: WLS](../methods/wls.md).
 
 ## Weights (analytic weight)
 

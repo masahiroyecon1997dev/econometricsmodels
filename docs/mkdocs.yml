@@ -33,6 +33,9 @@ nav:
       - IV: api/iv.md
       - FE: api/fe.md
       - RE: api/re.md
+  - Methods:
+      - OLS: methods/ols.md
+      - WLS: methods/wls.md
   - Guides:
       - Accepted data: guide/accepted-data.md
       - Validation and errors: guide/validation.md

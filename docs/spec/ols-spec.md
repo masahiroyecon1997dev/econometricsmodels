@@ -5,6 +5,8 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols/`・`engi
 [`../performance/ols.md`](../performance/ols.md)、CI/CD・セキュリティはmethod非依存のため
 [`ci-cd-notes.md`](./ci-cd-notes.md)を参照。
 
+数式・定義の正本は公開ページ[`docs/methods/ols.md`](../methods/ols.md)（英語）。本書は実装上の判断・内部構成・テスト方針・ベンチマーク上の注意を記す（定義式は重複させない）。
+
 ## 1. API引数
 
 3層構成: `OLS(data, y, x, options).fit() -> OLSResults`（python_package）→
@@ -85,31 +87,18 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols/`・`engi
 
 ### 3.2 標準誤差
 
-**classical**（デフォルト）: `σ̂²(X'X)⁻¹`の対角成分の平方根、`σ̂² = SSR/(n-k)`。t統計量・p値は
-自由度`n-k`のt分布（**statsmodelsは`cov_type`がclassical以外だと既定で正規分布(`use_t=False`)
-を使うが、本プロジェクトは全`cov_type`でt分布に統一する**。ベンチマーク照合時は`use_t=True`を
-明示指定する必要がある）。
+classical / HC0〜HC3 / HAC / cluster の定義式、検定分布、自由度の正本は公開ページ[`docs/methods/ols.md`](../methods/ols.md)。
+本節は実装上の判断とベンチマーク照合上の注意のみを記す。
 
-**HC0〜HC3**: $\widehat{\mathrm{Var}}_{HC}(\hat\beta) = (X^\top X)^{-1} \hat\Psi (X^\top X)^{-1}$
+**classical**: **statsmodelsは`cov_type`がclassical以外だと既定で正規分布(`use_t=False`)を使うが、本プロジェクトは
+全`cov_type`でt分布に統一する**。ベンチマーク照合時は`use_t=True`を明示指定する必要がある。
 
-| タイプ | $\hat\Psi$ |
-|---|---|
-| HC0 | $\sum_i \hat\varepsilon_i^2\, x_i x_i^\top$ |
-| HC1 | $\frac{n}{n-k}\cdot$ HC0 |
-| HC2 | $\sum_i \frac{\hat\varepsilon_i^2}{1-h_{ii}}\, x_i x_i^\top$ |
-| HC3 | $\sum_i \frac{\hat\varepsilon_i^2}{(1-h_{ii})^2}\, x_i x_i^\top$ |
-
-$h_{ii} = x_i^\top (X^\top X)^{-1} x_i$（レバレッジ、HC2/HC3のみ必要）。HC2/HC3は`h_ii`が1に極めて
-近い退化した設計だと発散しうるが、これはHC2/HC3自体の数学的性質でありengine固有のバグではない。
+**HC0〜HC3**: HC2/HC3は`h_ii`が1に極めて近い退化した設計だと発散しうるが、これはHC2/HC3自体の
+数学的性質でありengine固有のバグではない。
 
 **HAC（Newey-West、Bartlettカーネル）**:
-$$
-\widehat{\mathrm{Var}}_{HAC}(\hat\beta) = (X^\top X)^{-1}\, \hat S \,(X^\top X)^{-1}, \quad
-\hat S = \hat S_0 + \sum_{l=1}^{L} w_l (\hat S_l + \hat S_l^\top), \quad w_l = 1 - \frac{l}{L+1}
-$$
-- ラグ数`L`: `hac_lags`指定時はその値（`0 <= L < n`を検証）、未指定時は経験則
-  `L = floor(4*(n/100)^(2/9))`で自動計算（EViews等でも使われるデータ非依存の式。完全な
-  データ依存の自動バンド幅選択は主リファレンスのstatsmodelsに同等機能がなく未実装）。
+- ラグ数`L`: `hac_lags`指定時は`0 <= L < n`を検証。未指定時の経験則はデータ非依存の式（EViews等でも
+  使われる）。完全なデータ依存の自動バンド幅選択は主リファレンスのstatsmodelsに同等機能がなく未実装。
 - `hac_time`は必須（未指定は`ValidationError`）。行順を時系列順とみなす暗黙の既定は置かない:
   データが時系列順に並んでいなくてもエラーにならず、時系列順のHACに見える誤った結果が黙って
   返るため、時間順は常に列で明示させる（行順がそのまま時間順なら、`df.with_row_index("t")`
@@ -135,7 +124,7 @@ $$
   （statsmodelsとの照合は`hac_lags`を省略し、`hac_lags_used`が`hac_lag`と一致することも確認する）。
   自動選択とは別に、baselineで`hac_lags`を明示した`0`（HC0相当）・`1`もstatsmodels・Rの両方と照合する。
 
-**クラスター**: $\hat S = \sum_g S_g S_g^\top$（$S_g = \sum_{i\in g}\hat\varepsilon_i x_i$）。
+**クラスター**: 式は`methods/ols.md`。
 - グループ化は**キーの辞書順に整数コードを振る`GroupCodes`（`BTreeMap`と同じ反復順）を使う
   （`HashMap`は禁止）**: `HashMap`はプロセスごとのハッシュシードで
   反復順序が変わり、浮動小数点加算の非結合性により`fit()`を複数回呼ぶと標準誤差が1 ULP程度ぶれる
@@ -143,11 +132,10 @@ $$
   クラスター系の実装を今後増やす場合も同じ罠がある。
 - `CovType::Cluster { groups }`は整数コード化済みの`Option<GroupCodes>`で受け取る（`engine_pybind`が
   クラスター列のラベルから作って渡す）。`fit()`はクラスター数の検証と集計に同じコードを使う。
-- 小標本補正`G/(G-1) * (n-1)/(n-k)`は常に適用し、無効化オプションは設けない（statsmodels
+- 小標本補正は常に適用し、無効化オプションは設けない（statsmodels
   `cov_cluster`の既定`use_correction=True`と一致）。
-- t検定・信頼区間・F検定の自由度は`cov_type="cluster"`のときのみ`n-k`ではなく**`G-1`**に切り替える
-  （statsmodelsの既定`df_correction=True`、計量経済学の標準的慣行）。`df_resid`自体（σ̂²・調整済み
-  R²・AIC/BIC）は常に`n-k`のまま。
+- 自由度を`cov_type="cluster"`のときのみ`G-1`に切り替えるのは、statsmodelsの既定
+  `df_correction=True`・計量経済学の標準的慣行に合わせたもの。`df_resid`自体は常に`n-k`。
 - **`G ≤ q`の境界（`ValidationError`）**: $\hat S = \sum_g S_g S_g'$は、クラスター
   寄与スコアの総和がゼロ（正規方程式$X'e = 0$）になるため`rank(Ŝ) ≤ G - 1`。F検定が使う`q×q`
   （`q = k - k_constant` = 傾き係数の数）部分行列は`G ≤ q`のとき構造的に特異になる（`G = q`
@@ -163,14 +151,9 @@ $$
 
 ### 3.3 適合度統計量
 
-- R²・調整済みR²: `include_intercept`により centered TSS（`Σ(y_i-ȳ)²`）/ uncentered TSS
-  （`Σy_i²`）を切り替える（statsmodelsの`k_constant`分岐と一致）。調整済みR²は
-  `1 - ((n-k_constant)/df_resid)*(1-R²)`。
-- 対数尤度: `llf = -(n/2)*(ln(2π) + ln(SSR/n) + 1)`（分散は最尤推定量`SSR/n`。classical標準誤差の
-  不偏推定量`SSR/(n-k)`とは異なる）。`aic = -2*llf + 2k`、`bic = -2*llf + ln(n)*k`。
-- F統計量: `cov_type`によらず単一の式`F = (β_slopes' Σ⁻¹ β_slopes) / q`（`Σ`は`cov_params`の
-  傾き係数部分行列、`q = k - k_constant`）。`cov_type=Classical`のとき古典的F検定と代数的に一致し、
-  HC0-3・HAC・clusterではそのままロバストWald検定になる。`q=0`は`f64::NAN`（0除算回避）。
+- R²・調整済みR²・対数尤度・AIC/BIC・F統計量の定義式は[`docs/methods/ols.md`](../methods/ols.md)。
+  R²の総平方和は`include_intercept`で中心化/非中心化を切り替える（statsmodelsの`k_constant`分岐と一致）。
+  F統計量は`cov_type`によらず単一の式で、`q=0`は`f64::NAN`（0除算回避）。
 - **`Σ`が数値的にほぼ特異な場合の検出**: 変数間のスケールが極端に異なる設計行列では、`Σ`の条件数が
   倍精度の限界を超えるが非ピボットCholesky分解自体は失敗せず無意味なF統計量を返しうる
   （実測でstatsmodelsとの相対誤差5e10程度）。`ensure_well_conditioned_symmetric_matrix`
@@ -363,10 +346,7 @@ faerのグローバル並列度は`engine::shared::parallelism::ensure_serial()`
   frozen dataclass `DiagnosticResult`（`statistic`/`p_value`/`df`/`df_denom`/`distribution`、`to_dict()`）
   を継承した`WhiteTestResult`（追加フィールド`aux_terms`/`dropped_terms`）。`distribution`は
   `Literal["chi2", "f"]`の文字列（`stat_dist`と同じ流儀）。
-- **定義**: 残差の二乗を、説明変数・その二乗・説明変数同士の交差項に回帰する補助回帰を行い、
-  LM版は`LM = n·R²`（帰無分布`χ²(q)`）、F版は古典的なF検定（`F(q, n-q-1)`）。`q`は補助回帰の
-  定数以外の列数。LM/F版は戻り値を分けず`statistic`引数で選ぶ（型を単純にするため）。
-  `cov_type`には依存しない（古典的な等分散を仮定する検定）。
+- **定義**: 補助回帰・統計量の定義は[`docs/methods/ols.md`](../methods/ols.md)。LM/F版は戻り値を分けず`statistic`引数で選ぶ（型を単純にするため）。
 - **補助回帰は常に定数を含める**（元のモデルが`include_intercept=False`でも同じ）。`aux_terms`の
   先頭は常に補助回帰の定数`"const"`。元のモデルに定数が無くても補助回帰の定数があることを結果で
   読めるようにするため。元のモデルが`include_intercept=False`で`x`に`"const"`という名前の列を
@@ -424,11 +404,7 @@ faerのグローバル並列度は`engine::shared::parallelism::ensure_serial()`
   横断面データでは順序に意味が無く、この検定自体が意味を持たない。パッケージは警告を出さない）。
   `nlags`も、statsmodelsの既定`min(10, n//5)`・Rの`order = 1`のどちらも恣意的な値のため既定を置かない。
   `nlags`は`int`（`bool`・`float`は`TypeError`）、1以上（未満は`ValidationError`）。
-- **定義**（Greene・R `lmtest::bgtest`と同じ）: 残差`û`を、元のモデルの説明変数`X`と`û`自身の1〜`nlags`次の
-  ラグ（時間列の昇順に並べた残差の遅れ）に回帰する補助回帰を行う。LM版は`LM = n·R²`（`χ²(nlags)`）、
-  F版は`F = ((Σû² - SSR_u)/m)/(SSR_u/(n - k - m))`（`F(m, n - k - m)`、`m = nlags`、`k`は元のモデルの
-  係数の数）。`û`は`X`と直交するOLS残差なので、補助回帰の残差二乗和`SSR_u`だけから
-  `LM = n·(1 - SSR_u/Σû²)`と書ける。`cov_type`には依存しない。
+- **定義**: 補助回帰・統計量の定義は[`docs/methods/ols.md`](../methods/ols.md)（Greene・R `lmtest::bgtest`と同じ）。`û`は`X`と直交するOLS残差なので、LM版は補助回帰の残差二乗和`SSR_u`だけから`n·(1 - SSR_u/Σû²)`と書ける。
 - **サンプル前期間のラグは0で埋める**（statsmodels・R `bgtest`の既定・Stataと同じ）。補助回帰の観測数は
   常に`n`。観測を落とす版（R `fill = NA`）は対応する主リファレンスが無いため提供しない。
 - **補助回帰は元のモデルの`X`をそのまま使い、`include_intercept=False`でも定数を足さない**（R・Greeneの定義）。
@@ -474,11 +450,7 @@ faerのグローバル並列度は`engine::shared::parallelism::ensure_serial()`
   -> BreuschPaganTestResult`。`fit()`では計算しない事後診断（`docs/spec/inference-conventions.md`
   6章）。結果型は`DiagnosticResult`を継承した`BreuschPaganTestResult`（追加フィールドは
   `WhiteTestResult`と同じ`aux_terms`・`dropped_terms`）。`cov_type`には依存しない。
-- **定義**: Koenkerの標準化版（`LM = n·R²`、`R²`は`û²`を定数と`variables`の列に回帰した補助回帰の
-  決定係数、帰無分布`χ²(q)`）。F版は補助回帰の全傾きがゼロという古典的なF検定`F(q, n - q - 1)`。
-  `q`は除外後の`variables`の列数。元のBreusch-Pagan（1979）の`ESS/2`版は誤差の正規性を仮定するため
-  扱わない（R `bptest(studentize = TRUE)`・statsmodels `het_breuschpagan(robust = True)`の既定と同じ版）。
-  後から`studentize`引数を足す場合は後方互換に追加できる。
+- **定義**: 補助回帰・統計量の定義は[`docs/methods/ols.md`](../methods/ols.md)。Koenkerの標準化版のみ扱う。元のBreusch-Pagan（1979）の`ESS/2`版は誤差の正規性を仮定するため扱わない（R `bptest(studentize = TRUE)`・statsmodels `het_breuschpagan(robust = True)`の既定と同じ版）。後から`studentize`引数を足す場合は後方互換に追加できる。
 - **`variables`**: 不均一分散の原因と疑う変数の列名のリスト（`x`と同じくlist渡し、式は使わない）。
   既定（`None`）はモデルの説明変数。**モデルに入っていない列や`y`列も指定できる**（拒否しない。
   BP検定の本質は`Z`を利用者が選ぶことで、R `varformula`・statsmodels `exog_het`も同じ）。型・検査は`x`と

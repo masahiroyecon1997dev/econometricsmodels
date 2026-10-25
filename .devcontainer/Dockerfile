@@ -156,8 +156,19 @@ ARG CARGO_LLVM_COV_VERSION=0.9.1
 
 RUN cargo install --locked \
         cargo-audit@${CARGO_AUDIT_VERSION} \
-        cargo-about@${CARGO_ABOUT_VERSION} \
         cargo-llvm-cov@${CARGO_LLVM_COV_VERSION}
+
+# cargo-aboutはdefault featureを持たず、バイナリは`cli`フィーチャーが必須
+# （`required-features = ["cli"]`）。`--features cli`を付けないとバイナリが無いまま
+# 警告だけでインストールが終わるため、上の行とは分けて`--features cli`を付ける
+# （まとめると、featureを持たない他のcrateにも`--features cli`が掛かってしまう）。
+RUN cargo install --locked cargo-about@${CARGO_ABOUT_VERSION} --features cli
+
+# 必要なサブコマンドが実際に使えることをビルド時に確認し、欠けていればイメージのビルドを失敗させる
+# （リリース準備で`cargo about generate`等を実行するまで気づかない事態を防ぐ）。
+RUN cargo audit --version \
+    && cargo about --version \
+    && cargo llvm-cov --version
 
 # -------------------------
 # uv (Python パッケージ管理)

@@ -26,6 +26,10 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
     ライセンス一覧が`Cargo.lock`に追随していることの保証。MIT/Apache-2.0は配布時に著作権表示・
     ライセンス文の同梱を求めるため）。`cargo-about`はバージョン固定で、`.devcontainer/Dockerfile`の
     `ARG CARGO_ABOUT_VERSION`と`tool: cargo-about@<版>`を揃える（`cargo-audit`と同様）。
+    devcontainerでは、`cargo-about`のバイナリが`cli`フィーチャー必須（default featureなし）のため、
+    他のツールとは別の`RUN`で`--features cli`を付けて入れる。`--features cli`が無いと、警告だけで
+    バイナリが入らないままイメージができてしまう。そのためDockerfileの末尾で3ツールとも`--version`を
+    実行し、欠けていればビルドを失敗させる（CIは`taiki-e/install-action`のビルド済みバイナリなので影響しない）。
     失敗時はローカルで同じコマンドを実行して差分をコミットする。リリース時の再生成は`/release`の手順に含む。
 - **`ci_python.yml`**（`python_package`/`engine_pybind`の品質検証、3ジョブ、
   `python_package/**`・`engine_pybind/**`・`pyproject.toml`・`uv.lock`・`tests/**`を

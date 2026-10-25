@@ -12,7 +12,8 @@
   引数の解釈が一致していること）。
 - `*Options`のdocコメントに`All arguments are keyword-only.`があること。
 
-例外クラス（`ValidationError`・`ComputationError`）は対象にしない。
+例外クラス（`ValidationError`・`ComputationError`）は対象にしない。Rust側から送出される
+もので利用者が構築しないため、`(code, message, hint, params)`の位置渡しは許す。
 """
 
 from __future__ import annotations

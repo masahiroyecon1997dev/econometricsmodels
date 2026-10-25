@@ -199,6 +199,7 @@ impl IVOptions {
 impl IVOptions {
     #[new]
     #[pyo3(signature = (
+        *,
         estimator = "2sls".to_string(),
         cov_type = "classical".to_string(),
         include_intercept = true,

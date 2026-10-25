@@ -131,6 +131,7 @@ impl LogitOptions {
 impl LogitOptions {
     #[new]
     #[pyo3(signature = (
+        *,
         cov_type = "classical".to_string(),
         include_intercept = true,
         confidence_level = 0.95,

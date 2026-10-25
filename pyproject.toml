@@ -97,7 +97,7 @@ audit = [
 docs = [
     "mkdocs==1.6.1",
     "mkdocs-material==9.7.7",
-    "mkdocstrings[python]==1.0.6",
+    "mkdocstrings[python]==1.0.7",
 ]
 
 # .claude/rules/python-style.md「Lint / フォーマット」で確定済みの line-length=79

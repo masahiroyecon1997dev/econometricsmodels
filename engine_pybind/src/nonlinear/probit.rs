@@ -46,6 +46,8 @@ use crate::shared::validation::validate_common_roles;
 
 /// Estimation options for Probit.
 ///
+/// All arguments are keyword-only.
+///
 // 各フィールドの意味・既定値の根拠は`docs/spec/nonlinear-common.md`（7章: `LogitOptions`と
 // 同じオプション構成）。`start_params`は`LogitOptions`と同じ理由で意図的に持たない。
 // `fit`がPython側から`ProbitOptions`インスタンスを引数として受け取るため、

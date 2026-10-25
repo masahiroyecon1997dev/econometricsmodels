@@ -41,6 +41,8 @@ use crate::shared::validation::{
 use engine::shared::error_catalog::{ErrorCode, ParamValue};
 
 /// Estimation options for OLS.
+///
+/// All arguments are keyword-only.
 // 各フィールドの意味・既定値の根拠は`docs/spec/ols-spec.md`「API引数」。
 // `fit_ols`がPython側から`OLSOptions`インスタンスを引数として受け取るため、
 // `FromPyObject`実装を明示的に維持する（pyo3 0.28以降、Cloneを実装する#[pyclass]の

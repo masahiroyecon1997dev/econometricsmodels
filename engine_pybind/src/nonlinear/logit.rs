@@ -45,6 +45,8 @@ use crate::shared::validation::validate_common_roles;
 
 /// Estimation options for Logit.
 ///
+/// All arguments are keyword-only.
+///
 // 各フィールドの意味・既定値の根拠は`docs/spec/nonlinear-common.md`。
 // `start_params`（初期値の指定）は、engine（`LogitEstimator::fit`）が未対応のため
 // 意図的に持たない（`docs/spec/logit-spec.md`「未実装・未対応」）。対応後に追加する。

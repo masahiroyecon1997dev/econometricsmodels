@@ -7,7 +7,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 
 ## 1. API引数
 
-3層構成: `IV(data, y, x_exog, x_endog, instruments, options).fit() -> IVResults`
+3層構成: `IV(data, y, x_exog, x_endog, instruments, options=options).fit() -> IVResults`
 （python_package）→ `fit_iv(data, y, x_exog, x_endog, instruments, options) -> IVResult`
 （engine_pybind）→ `TwoSlsEstimator::fit` / `GmmEstimator::fit`（engine、`IVOptions.estimator`で
 振り分け）。

@@ -10,7 +10,7 @@ FE固有の内容のみを記載する。
 
 ## 1. API引数
 
-3層構成: `FE(data, y, x, entity, options).fit() -> FEResults`（python_package）→
+3層構成: `FE(data, y, x, entity, options=options).fit() -> FEResults`（python_package）→
 `fit_fe(data, y, x, entity, options) -> FEResult`（engine_pybind）→ `FeEstimator::fit`
 （engine、within変換したデータを`OlsEstimator`へ委譲）。
 

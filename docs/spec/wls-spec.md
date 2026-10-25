@@ -7,7 +7,7 @@ WLS（Weighted Least Squares）の確定済み仕様。数式・定義の正本�
 
 ## 1. API引数
 
-3層構成: `WLS(data, y, x, weight, options).fit() -> WLSResults`（python_package）→
+3層構成: `WLS(data, y, x, weight, options=options).fit() -> WLSResults`（python_package）→
 `fit_wls(data, y, x, weight, options) -> WLSResult`（engine_pybind）→
 `OlsInput::from_columns_weighted` + 既存`OlsEstimator::fit`（engine、無変更で再利用）。
 

@@ -7,9 +7,6 @@
 `inspect.signature`で、`econometricsmodels.__all__`の公開クラスのコンストラクタと
 公開メソッドを走査する。`#[pyclass]`の`__text_signature__`も`*`を反映するため、Rust側の
 オプションクラスとPython側のラッパーを同じ方法で検査できる。
-
-`PENDING`は、まだ対応していない`クラス.メンバー`の一覧。対応した段階で消す。一覧に
-残っているのに既に対応済みのものは、テストが失敗して消し忘れを知らせる。
 """
 
 from __future__ import annotations
@@ -18,9 +15,6 @@ import inspect
 
 import econometricsmodels
 import pytest
-
-# まだ位置引数を受け付ける`クラス.メンバー`（`__init__`はコンストラクタ）。
-PENDING: frozenset[str] = frozenset({})
 
 
 def _public_classes() -> list[type]:
@@ -66,23 +60,12 @@ def _positional_optional(member: object) -> list[str]:
 
 @pytest.mark.parametrize("key", sorted(MEMBERS))
 def test_optional_arguments_are_keyword_only(key: str) -> None:
-    """デフォルト値のある引数は、`*`の後ろ（キーワード専用）にある。
-
-    `PENDING`の項目は逆に、まだ位置引数を受け付けていることを確認する。
-    """
+    """デフォルト値のある引数は、`*`の後ろ（キーワード専用）にある。"""
     positional = _positional_optional(MEMBERS[key])
-    if key in PENDING:
-        assert positional, f"{key} is keyword-only; remove it from PENDING"
-    else:
-        assert not positional, (
-            f"{key}: optional arguments {positional} accept positional "
-            "values; put `*` before them"
-        )
-
-
-def test_pending_lists_only_existing_members() -> None:
-    """`PENDING`に、存在しない`クラス.メンバー`が残っていない。"""
-    assert PENDING <= MEMBERS.keys()
+    assert not positional, (
+        f"{key}: optional arguments {positional} accept positional "
+        "values; put `*` before them"
+    )
 
 
 def test_every_public_estimator_is_scanned() -> None:

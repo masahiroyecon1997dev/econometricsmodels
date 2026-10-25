@@ -91,6 +91,8 @@ use crate::shared::validation::{
 };
 
 /// Estimation options for FE (fixed effects panel regression).
+///
+/// All arguments are keyword-only.
 // 各フィールドの意味・既定値の根拠は`docs/spec/panel-common.md`。
 // module/from_py_objectの理由は`OLSOptions`と同じ（`engine_pybind/src/linear/ols.rs`参照）。
 #[pyclass(from_py_object, module = "econometricsmodels._lib")]

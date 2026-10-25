@@ -164,7 +164,7 @@ class REResults:
     The Hausman test (`hausman_statistic`/`hausman_p_value`/
     `hausman_df`) is computed automatically inside `fit()` and exposed
     directly as properties here, rather than as a separate method like
-    FE's `fixed_effects()` (`panel-common.md` section 2.4). It is the
+    FE's `fixed_effects()`. It is the
     regression-based (auxiliary regression) version (Wooldridge 2010,
     section 10.7.3): the quasi-demeaned `y` is regressed on a constant,
     the quasi-demeaned regressors and the within-transformed

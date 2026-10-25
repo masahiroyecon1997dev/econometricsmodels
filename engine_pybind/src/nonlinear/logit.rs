@@ -45,13 +45,9 @@ use crate::shared::validation::validate_common_roles;
 
 /// Estimation options for Logit.
 ///
-/// See `docs/spec/nonlinear-common.md` for the rationale behind
-/// each field's meaning and default value.
-///
-/// `start_params` (user-specified initial values) is intentionally omitted: the
-/// underlying engine (`LogitEstimator::fit`) does not accept it yet (see
-/// `docs/spec/logit-spec.md`, "未実装・未対応"). It will be added once the
-/// engine side supports it.
+// 各フィールドの意味・既定値の根拠は`docs/spec/nonlinear-common.md`。
+// `start_params`（初期値の指定）は、engine（`LogitEstimator::fit`）が未対応のため
+// 意図的に持たない（`docs/spec/logit-spec.md`「未実装・未対応」）。対応後に追加する。
 // `fit_logit`がPython側から`LogitOptions`インスタンスを引数として受け取るため、
 // `FromPyObject`実装を明示的に維持する（`OLSOptions`と同じ理由、pyo3 0.28以降、Cloneを
 // 実装する#[pyclass]のFromPyObject自動導出はopt-inに変更されたため）。

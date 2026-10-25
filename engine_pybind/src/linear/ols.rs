@@ -41,9 +41,7 @@ use crate::shared::validation::{
 use engine::shared::error_catalog::{ErrorCode, ParamValue};
 
 /// Estimation options for OLS.
-///
-/// See `docs/spec/ols-spec.md` ("API引数") for the rationale behind each
-/// field's meaning and default value.
+// 各フィールドの意味・既定値の根拠は`docs/spec/ols-spec.md`「API引数」。
 // `fit_ols`がPython側から`OLSOptions`インスタンスを引数として受け取るため、
 // `FromPyObject`実装を明示的に維持する（pyo3 0.28以降、Cloneを実装する#[pyclass]の
 // FromPyObject自動導出はopt-inに変更されたため）。
@@ -324,10 +322,10 @@ pub struct OLSResult {
     pub std_errors: Vec<f64>,
     #[pyo3(get)]
     pub test_stats: Vec<f64>,
-    /// Distribution of `test_stats`: `"t"` or `"normal"`.
+    /// Distribution of `test_stats`; always `"t"` for OLS.
     #[pyo3(get)]
     pub stat_dist: String,
-    /// Degrees of freedom of the t distribution (`None` for `"normal"`). May differ from
+    /// Degrees of freedom of the t distribution (always `Some` for OLS). May differ from
     /// `df_resid` (e.g. cluster-robust inference uses `G - 1`).
     #[pyo3(get)]
     pub stat_df: Option<i64>,

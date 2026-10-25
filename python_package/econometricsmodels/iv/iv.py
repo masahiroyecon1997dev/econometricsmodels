@@ -49,8 +49,7 @@ class IV:
         x_endog: List of column names of the endogenous independent
             variables.
         instruments: List of column names of the excluded instruments
-            (must not overlap `x_exog`; see
-            `docs/spec/iv-spec.md` section 1.1).
+            (must not overlap `x_exog`).
         options: Estimation options. Defaults to `IVOptions()`
             (`estimator="2sls"`, classical, with intercept,
             confidence_level=0.95) when omitted.
@@ -136,7 +135,7 @@ class IVResults:
 
     `first_stage()` (per-endogenous-variable first-stage regression
     results) is provided as a separate method rather than a field on
-    this class (`docs/spec/iv-spec.md` section 2).
+    this class.
 
     Args:
         raw: The estimation result object returned by `_lib.fit_iv`
@@ -343,7 +342,7 @@ class IVResults:
         same as the plain F-statistic of the corresponding regression
         in `first_stage()`, which includes `x_exog`'s contribution
         too. Computed the same way for both `estimator="2sls"` and
-        `estimator="gmm"`; see `docs/spec/iv-spec.md` section 3.4.
+        `estimator="gmm"`.
         """
         return self._raw.weak_instrument_f_statistics
 
@@ -367,8 +366,7 @@ class IVResults:
         or Hansen J (`estimator="gmm"`).
 
         `None` when just-identified (`len(instruments) ==
-        len(x_endog)`, degrees of freedom 0); see
-        `docs/spec/iv-spec.md` section 3.5.
+        len(x_endog)`, degrees of freedom 0).
         """
         return self._raw.overid_statistic
 
@@ -404,8 +402,7 @@ class IVResults:
         variable, or there are too few observations for the extra
         residual columns) — this does not affect the validity of
         the other results. **Always `None` for `estimator="gmm"`**
-        (not implemented for GMM). See
-        `docs/spec/iv-spec.md` section 3.6.
+        (not implemented for GMM).
         """
         return self._raw.wu_hausman_statistic
 
@@ -449,8 +446,7 @@ class IVResults:
         """Per-endogenous-variable first-stage regression results.
 
         Each first-stage regression is `x_endog[i] ~ x_exog +
-        instruments`, estimated by plain OLS (`docs/spec/iv-spec.md`
-        section 2). Returns the existing
+        instruments`, estimated by plain OLS. Returns the existing
         `OLSResults` type rather than a new IV-specific type — the
         first stage is a genuine, valid OLS regression in its own
         right. Its `f_statistic`/`f_p_value` include `x_exog`'s

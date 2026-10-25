@@ -46,13 +46,8 @@ use crate::shared::validation::validate_common_roles;
 
 /// Estimation options for Probit.
 ///
-/// See `docs/spec/nonlinear-common.md` for the rationale behind
-/// each field's meaning and default value. Field-for-field identical to `LogitOptions`
-/// (the two models share the same option surface, `docs/spec/nonlinear-common.md` section 7).
-///
-/// `start_params` (user-specified initial values) is intentionally omitted: the
-/// underlying engine (`ProbitEstimator::fit`) does not accept it yet (deferred,
-/// same as `LogitOptions`). It will be added once the engine side supports it.
+// 各フィールドの意味・既定値の根拠は`docs/spec/nonlinear-common.md`（7章: `LogitOptions`と
+// 同じオプション構成）。`start_params`は`LogitOptions`と同じ理由で意図的に持たない。
 // `fit`がPython側から`ProbitOptions`インスタンスを引数として受け取るため、
 // `FromPyObject`実装を明示的に維持する（`LogitOptions`と同じ理由、pyo3 0.28以降、Cloneを
 // 実装する#[pyclass]のFromPyObject自動導出はopt-inに変更されたため）。

@@ -110,16 +110,13 @@ class TobitResults:
     single parameter). They include an entry for `"sigma"` (the error
     term's standard deviation) in addition to the regression
     coefficients, since `_lib.TobitResult` reports `sigma` alongside
-    `beta` in a unified `(k+1)`-length representation (see
-    `engine_pybind/src/nonlinear/tobit.rs`, `TobitResult`). Use
-    `params_table()` for a row-oriented listing
-    (`docs/spec/nonlinear-common.md` section 5).
+    `beta` in a unified `(k+1)`-length representation. Use
+    `params_table()` for a row-oriented listing.
 
     `marginal_effects()`, `predict()`, and `censoring_fit_check()` are
     provided as separate methods rather than fields on this class (they
     depend on a representative point / prediction target not fixed at
-    `fit()` time; see `docs/spec/nonlinear-common.md`
-    section 6).
+    `fit()` time).
 
     Args:
         raw: The estimation result object returned by `_lib.fit_tobit`
@@ -158,8 +155,7 @@ class TobitResults:
     def test_stats(self) -> dict[str, float]:
         """Coefficient name to z-statistic (includes `"sigma"`).
 
-        Tobit uses a z-test (standard normal), not a t-test (see
-        `docs/spec/nonlinear-common.md` section 4).
+        Tobit uses a z-test (standard normal), not a t-test.
         """
         return by_param(self._raw.param_names, self._raw.test_stats)
 
@@ -406,8 +402,7 @@ class TobitResults:
 
         Unlike Logit/Probit, this is Tobit's own implementation (not
         the shared `dydx_and_jacobian` pattern) because the formula
-        differs per `target` (see `docs/spec/nonlinear-common.md`
-        section 6). Independent of the `confidence_level`
+        differs per `target`. Independent of the `confidence_level`
         used in `fit()` (may differ from it). The constant term
         (intercept) is excluded from the output.
 
@@ -424,8 +419,7 @@ class TobitResults:
         Returns:
             A list of dictionaries, one per explanatory variable
             (excluding the intercept). Keys are `param_name`, `effect`,
-            `std_error`, `test_stat`, `p_value`, `conf_lower`, `conf_upper` (see
-            `docs/spec/nonlinear-common.md` section 6). `test_stat` is
+            `std_error`, `test_stat`, `p_value`, `conf_lower`, `conf_upper`. `test_stat` is
             always a z-statistic (normal distribution). `effect` is
             the marginal effect estimate (corresponds to `dy/dx` in
             Stata's `margins, dydx(*)` and statsmodels).
@@ -448,7 +442,7 @@ class TobitResults:
         training observations exactly at that boundary) against the
         model-implied average probability. Replaces Logit/Probit's
         `pred_table()`, which is not meaningful for Tobit's continuous
-        `y` (`docs/spec/nonlinear-common.md` section 6). A direction is
+        `y`. A direction is
         omitted from the result when the corresponding
         `TobitOptions.lower`/`upper` was `None` (that direction has no
         censoring).

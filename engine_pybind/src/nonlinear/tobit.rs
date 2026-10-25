@@ -56,8 +56,7 @@ use crate::shared::validation::validate_common_roles;
 
 /// Estimation options for Tobit.
 ///
-/// See `docs/spec/tobit-spec.md` for the rationale behind each field's meaning
-/// and default value.
+// 各フィールドの意味・既定値の根拠は`docs/spec/tobit-spec.md`。
 // `LogitOptions`と同じ理由（pyo3 0.28以降のFromPyObject自動導出の仕様変更、
 // mkdocstringsのalias解決対応）で`from_py_object` + `module`を明示する。
 #[pyclass(from_py_object, module = "econometricsmodels._lib")]

@@ -95,8 +95,7 @@ class OLSResults:
 
     Array-valued properties (`params`, `std_errors`, etc.) are exposed
     as dictionaries keyed by coefficient name (for O(1) lookup of a
-    single parameter). Use `params_table()` for a row-oriented listing
-    (see `docs/spec/ols-spec.md`, "結果構造体").
+    single parameter). Use `params_table()` for a row-oriented listing.
 
     Args:
         raw: The estimation result object returned by `_lib.fit_ols`
@@ -132,17 +131,16 @@ class OLSResults:
         return by_param(self._raw.param_names, self._raw.test_stats)
 
     @property
-    def stat_dist(self) -> Literal["t", "normal"]:
-        """Distribution of `test_stats`: `"t"` (t-statistics) or
-        `"normal"` (z-statistics)."""
+    def stat_dist(self) -> Literal["t"]:
+        """Distribution of `test_stats`. Always `"t"`: t-statistics are
+        used for every `cov_type`."""
         return self._raw.stat_dist
 
     @property
-    def stat_df(self) -> int | None:
-        """Degrees of freedom of the t distribution behind `test_stats`,
-        or `None` when `stat_dist` is `"normal"`. May differ from
-        `df_resid` (e.g. cluster-robust inference uses `G - 1`), so use
-        this to recompute p-values from `test_stats`."""
+    def stat_df(self) -> int:
+        """Degrees of freedom of the t distribution behind `test_stats`.
+        May differ from `df_resid` (e.g. cluster-robust inference uses
+        `G - 1`), so use this to recompute p-values from `test_stats`."""
         return self._raw.stat_df
 
     @property
@@ -254,11 +252,8 @@ class OLSResults:
     def params_table(self) -> list[dict[str, float | str]]:
         """Row-oriented summary table of the coefficients.
 
-        Shaped to be usable almost as-is in a REST API response (see
-        `docs/spec/ols-spec.md`, "結果構造体"). Returned
-        as `list[dict]` rather than a polars DataFrame, per the
-        project's policy of not using DataFrames for the coefficient
-        table itself.
+        Shaped to be usable almost as-is in a REST API response.
+        Returned as `list[dict]` rather than a polars DataFrame.
 
         Returns:
             A list of dictionaries, one per coefficient. Keys are
@@ -270,9 +265,8 @@ class OLSResults:
     def predict(self, new_data: pl.DataFrame | None = None) -> list[float]:
         """Predicted values.
 
-        Unified into a single method rather than a separate
-        `fitted_values` property, to match the naming used by Logit's
-        `predict()` (`docs/spec/ols-spec.md`, "predict()").
+        Also available for new data through `new_data`; there is no
+        separate `fitted_values` property.
 
         Args:
             new_data: New data to predict on. Must contain columns with
@@ -299,10 +293,8 @@ class OLSResults:
 
         Same `new_data` semantics as `predict()`, but returns a polars
         DataFrame (the training data, or `new_data` when given, plus a
-        new `"predicted"` column) instead of a plain list. This
-        is the one exception to the project's policy of not returning
-        DataFrames (`docs/spec/ols-spec.md`, "augment()"): it exists
-        specifically to attach predictions back to their source rows.
+        new `"predicted"` column) instead of a plain list. It exists
+        to attach predictions back to their source rows.
 
         Args:
             new_data: Same as `predict()`. If `None` (default), returns

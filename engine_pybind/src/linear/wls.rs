@@ -38,29 +38,12 @@ use crate::shared::validation::{RoleValue, validate_common_roles, validate_no_du
 
 /// Estimation options for WLS.
 ///
-/// See `docs/spec/wls-spec.md` ("API引数") for the rationale behind each
-/// field's meaning and default value.
-///
-/// Field-for-field identical to `OLSOptions` today (`cov_type`/`include_intercept`/
-/// `confidence_level`/`cluster`/`hac_lags`/`hac_time`, same defaults and semantics
-/// — `docs/spec/wls-spec.md` "API引数" confirms `hac_lags`/`hac_time` mean exactly the
-/// same thing for WLS as for OLS). Kept as an independent pyclass rather than reusing
-/// `OLSOptions` (the earlier shared-option design) so that a future WLS-specific option can be
-/// added without affecting `OLSOptions`/OLS users — the same reasoning `WLSResult`
-/// already uses relative to `OLSResult`.
-///
-/// This field-for-field duplication with `OLSOptions` (and, in the `nonlinear` system,
-/// `LogitOptions`/`ProbitOptions`/`TobitOptions`'s duplicated `method`/`max_iter`/`tol`/
-/// `raise_on_non_convergence`) is intentional and will not be collapsed into a shared
-/// base struct/trait here: PyO3's `#[pyclass]`/`#[pymethods]` constructor is inherently a
-/// flat keyword-argument surface, so a shared base type would either leak into the
-/// Python-facing API shape (composition: `WLSOptions(cov_type=..., mle=MleOptions(...))`)
-/// or add indirection without reducing the Python surface. `IVOptions`
-/// (`engine_pybind/src/iv/common.rs`) already re-declares this same field group
-/// independently from `OLSOptions`, so this duplication is consistent with the existing
-/// precedent in this codebase. Mechanical
-/// deduplication of the Rust-side boilerplate itself (field declarations/constructor/
-/// `__repr__`) via `macro_rules!` is tracked separately as future work.
+/// `weight` is not an option: it is a top-level argument of `WLS`, next to `y` and `x`.
+// 各フィールドの意味・既定値の根拠は`docs/spec/wls-spec.md`「API引数」。
+// `OLSOptions`と同じフィールド構成だが、将来WLS固有のオプションを足してもOLS利用者に
+// 影響しないよう、結果型`WLSResult`と同様に独立した型にしている。このフィールドの重複は
+// 意図的に共通baseへ切り出さない（`#[pyclass]`のコンストラクタはフラットなキーワード引数前提で、
+// 共通型を挟むとPython側のAPIの形に影響するため。`IVOptions`も同じ方針）。
 // `fit`がPython側から`WLSOptions`インスタンスを引数として受け取るため、
 // `FromPyObject`実装を明示的に維持する（`OLSOptions`と同じ理由、pyo3 0.28以降、Cloneを
 // 実装する#[pyclass]のFromPyObject自動導出はopt-inに変更されたため）。
@@ -192,9 +175,8 @@ impl WLSOptions {
 
 /// Estimation results for WLS.
 ///
-/// Field-for-field identical to `OLSResult` today, but kept as a separate type: WLS-specific
-/// fields (e.g. weighted residuals) may be added later without affecting `OLSResult`
-/// (`docs/spec/wls-spec.md`, "結果構造体").
+// `OLSResult`と同じフィールド構成だが、将来WLS固有の項目（重み付き残差等）を足しても
+// `OLSResult`に影響しないよう独立した型にしている（`docs/spec/wls-spec.md`「結果構造体」）。
 // `get_all`ではなく個別`#[pyo3(get)]`にしている理由は`OLSResult`と同じ
 // （`fitted_values`/`has_intercept`をPython側に公開しないため）。
 #[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
@@ -206,10 +188,10 @@ pub struct WLSResult {
     pub std_errors: Vec<f64>,
     #[pyo3(get)]
     pub test_stats: Vec<f64>,
-    /// Distribution of `test_stats`: `"t"` or `"normal"`.
+    /// Distribution of `test_stats`; always `"t"` for WLS.
     #[pyo3(get)]
     pub stat_dist: String,
-    /// Degrees of freedom of the t distribution (`None` for `"normal"`). May differ from
+    /// Degrees of freedom of the t distribution (always `Some` for WLS). May differ from
     /// `df_resid` (e.g. cluster-robust inference uses `G - 1`).
     #[pyo3(get)]
     pub stat_df: Option<i64>,

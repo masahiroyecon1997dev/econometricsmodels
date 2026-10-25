@@ -8,15 +8,9 @@ for `x`, an options object for estimation settings (CLAUDE.md section 2,
 `.claude/rules/python-style.md` "設計方針との整合性").
 
 `weight`, like `y`, is a top-level argument referring to a column name
-in `data` (see `docs/spec/wls-spec.md`, "API引数").
-`WLSOptions` is re-exported as-is from `_lib` (not redefined as a
-Python class), matching `OLSOptions`'s pattern (see
-`python_package/econometricsmodels/linear/CLAUDE.md`). Its fields are
-field-for-field identical to `OLSOptions` today, but it is a separate
-class (`WLSResults` was already independent from `OLSResults` from the
-start, so keeping `WLSOptions` tied to `OLSOptions` would have been
-the odd one out): WLS-specific options may be added later without
-affecting `OLSOptions`/OLS users.
+in `data`. `WLSOptions` is re-exported as-is from `_lib` (not redefined
+as a Python class), following the `OLSOptions` pattern (see
+`python_package/econometricsmodels/linear/CLAUDE.md`).
 """
 
 from __future__ import annotations
@@ -109,9 +103,7 @@ class WLSResults:
 
     Array-valued properties (`params`, `std_errors`, etc.) are exposed
     as dictionaries keyed by coefficient name (for O(1) lookup of a
-    single parameter). Use `params_table()` for a row-oriented listing
-    (same shape as `OLSResults`; see
-    `docs/spec/ols-spec.md`, "結果構造体").
+    single parameter). Use `params_table()` for a row-oriented listing.
 
     Args:
         raw: The estimation result object returned by `_lib.fit_wls`
@@ -121,8 +113,7 @@ class WLSResults:
         Users normally do not construct this directly; it is returned
         by `WLS.fit()`. `residuals` are on the original (unweighted)
         scale, `y_i - x_i'β̂`, which differs from the weighted
-        residuals used in the standard error computation (see
-        `docs/spec/wls-spec.md`, "結果構造体").
+        residuals used in the standard error computation.
     """
 
     def __init__(self, raw: _lib.WLSResult) -> None:
@@ -150,17 +141,16 @@ class WLSResults:
         return by_param(self._raw.param_names, self._raw.test_stats)
 
     @property
-    def stat_dist(self) -> Literal["t", "normal"]:
-        """Distribution of `test_stats`: `"t"` (t-statistics) or
-        `"normal"` (z-statistics)."""
+    def stat_dist(self) -> Literal["t"]:
+        """Distribution of `test_stats`. Always `"t"`: t-statistics are
+        used for every `cov_type`."""
         return self._raw.stat_dist
 
     @property
-    def stat_df(self) -> int | None:
-        """Degrees of freedom of the t distribution behind `test_stats`,
-        or `None` when `stat_dist` is `"normal"`. May differ from
-        `df_resid` (e.g. cluster-robust inference uses `G - 1`), so use
-        this to recompute p-values from `test_stats`."""
+    def stat_df(self) -> int:
+        """Degrees of freedom of the t distribution behind `test_stats`.
+        May differ from `df_resid` (e.g. cluster-robust inference uses
+        `G - 1`), so use this to recompute p-values from `test_stats`."""
         return self._raw.stat_df
 
     @property
@@ -265,11 +255,8 @@ class WLSResults:
     def params_table(self) -> list[dict[str, float | str]]:
         """Row-oriented summary table of the coefficients.
 
-        Shaped to be usable almost as-is in a REST API response (see
-        `docs/spec/ols-spec.md`, "結果構造体"). Returned
-        as `list[dict]` rather than a polars DataFrame, per the
-        project's policy of not using DataFrames for the coefficient
-        table itself.
+        Shaped to be usable almost as-is in a REST API response.
+        Returned as `list[dict]` rather than a polars DataFrame.
 
         Returns:
             A list of dictionaries, one per coefficient. Keys are
@@ -281,12 +268,9 @@ class WLSResults:
     def predict(self, new_data: pl.DataFrame | None = None) -> list[float]:
         """Predicted values.
 
-        Same design as `OLSResults.predict()`: unified into a single
-        method rather than a separate `fitted_values` property.
-        Weights play no role in either case: the predicted value is
-        `x_i'β̂` on the original (unweighted) scale regardless of
-        `new_data`, and out-of-sample observations have no weight to
-        apply (see `docs/spec/wls-spec.md`, "predict()").
+        Weights play no role: the predicted value is `x_i'β̂` on the
+        original (unweighted) scale regardless of `new_data`, and
+        out-of-sample observations have no weight to apply.
 
         Args:
             new_data: New data to predict on. Must contain columns with

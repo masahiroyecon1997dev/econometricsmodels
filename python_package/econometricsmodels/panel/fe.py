@@ -42,8 +42,7 @@ class FE:
     """Fixed effects (within) panel regression estimator.
 
     Supports one-way (entity) and two-way (entity + time) fixed
-    effects, selected via `FEOptions.time` (`docs/spec/fe-spec.md`
-    section 1).
+    effects, selected via `FEOptions.time`.
 
     Args:
         data: A polars DataFrame containing the dependent variable,
@@ -136,8 +135,7 @@ class FEResults:
     single parameter). Use `params_table()` for a row-oriented listing.
 
     `fixed_effects()` (the fixed effects themselves) is provided as a
-    separate method rather than a field on this class
-    (`docs/spec/fe-spec.md` section 3.5).
+    separate method rather than a field on this class.
 
     Args:
         raw: The estimation result object returned by `_lib.fit_fe`
@@ -332,10 +330,7 @@ class FEResults:
 
         One-way: `dict[str, float]` keyed by entity id. Two-way:
         `dict[str, dict[str, float]]` with top-level keys `"entity"`/
-        `"time"`. See `docs/spec/fe-spec.md`
-        section 3.5 and `_lib.FEResult.fixed_effects`'s docstring for
-        the exact formula, including the two-way normalization
-        convention. `α_i`/`γ_t` are not individually identified in the
+        `"time"`. `α_i`/`γ_t` are not individually identified in the
         two-way case, so `γ_t` of the first period in time order (the
         order of the values of the time column) is fixed to 0 and
         `α_i` absorbs the overall level. The `"time"` dictionary lists

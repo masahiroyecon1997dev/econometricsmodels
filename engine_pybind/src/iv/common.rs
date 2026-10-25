@@ -99,9 +99,9 @@ pub(crate) fn iv_error_to_pyerr(err: IvError) -> PyErr {
 
 /// Estimation options for IV (2SLS/GMM).
 ///
-/// See `docs/spec/iv-spec.md` for the rationale behind each field's
-/// meaning and default value. A single `IVOptions`/`fit_iv` pair serves both
-/// estimation methods; fields that apply to only one estimator are documented as such.
+/// A single options class serves both estimation methods; fields that apply to
+/// only one estimator are documented as such.
+// 各フィールドの意味・既定値の根拠は`docs/spec/iv-spec.md`。
 // module/from_py_objectの理由は`OLSOptions`/`LogitOptions`と同じ
 // （`engine_pybind/src/linear/ols.rs`のコメント参照）。
 #[pyclass(from_py_object, module = "econometricsmodels._lib")]
@@ -160,7 +160,7 @@ pub struct IVOptions {
     /// `gmm_type="two_step"`/`"iterated"`. Specifying it with `estimator="2sls"` or
     /// `gmm_type="one_step"` (which does not use a weight matrix) raises `ValidationError`.
     /// "cluster"/"hac" draw from the same `cluster`/`hac_lags`/`hac_time` fields as
-    /// `cov_type` (no separate fields; see module docstring "GMMのgmm_weight_type").
+    /// `cov_type` (there are no separate fields for GMM).
     #[pyo3(get)]
     pub gmm_weight_type: Option<String>,
 

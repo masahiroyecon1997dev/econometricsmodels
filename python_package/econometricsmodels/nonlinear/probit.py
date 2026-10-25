@@ -98,13 +98,11 @@ class ProbitResults:
 
     Array-valued properties (`params`, `std_errors`, etc.) are exposed
     as dictionaries keyed by coefficient name (for O(1) lookup of a
-    single parameter). Use `params_table()` for a row-oriented listing
-    (`docs/spec/nonlinear-common.md` section 5).
+    single parameter). Use `params_table()` for a row-oriented listing.
 
     `marginal_effects()`, `predict()`, and `pred_table()` are provided
     as separate methods rather than fields on this class (they depend
-    on a representative point / threshold not fixed at `fit()` time;
-    see `docs/spec/nonlinear-common.md` section 6).
+    on a representative point / threshold not fixed at `fit()` time).
 
     Args:
         raw: The estimation result object returned by `_lib.fit_probit`
@@ -143,8 +141,7 @@ class ProbitResults:
     def test_stats(self) -> dict[str, float]:
         """Coefficient name to z-statistic.
 
-        Probit uses a z-test (standard normal), not a t-test (see
-        `docs/spec/nonlinear-common.md` section 4).
+        Probit uses a z-test (standard normal), not a t-test.
         """
         return by_param(self._raw.param_names, self._raw.test_stats)
 
@@ -352,8 +349,7 @@ class ProbitResults:
         """Marginal effects (`dy/dx`) with delta-method standard errors.
 
         Independent of the `confidence_level` used in `fit()` (may
-        differ from it; see
-        `docs/spec/nonlinear-common.md` section 6). The
+        differ from it). The
         constant term (intercept) is excluded from the output.
 
         Args:
@@ -367,8 +363,7 @@ class ProbitResults:
         Returns:
             A list of dictionaries, one per explanatory variable
             (excluding the intercept). Keys are `param_name`, `effect`,
-            `std_error`, `test_stat`, `p_value`, `conf_lower`, `conf_upper` (see
-            `docs/spec/nonlinear-common.md` section 6). `test_stat` is
+            `std_error`, `test_stat`, `p_value`, `conf_lower`, `conf_upper`. `test_stat` is
             always a z-statistic (normal distribution). `effect` is
             the marginal effect estimate (corresponds to `dy/dx` in
             Stata's `margins, dydx(*)` and statsmodels).

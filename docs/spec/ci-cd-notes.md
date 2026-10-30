@@ -88,7 +88,11 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
     `-`と`.`を同値に扱う（Rの規則。`0.6.8`＝`0.6-8`）。
   - R本体: APT（`bookworm-cran40`）の索引に最新版しか載らず、版を固定できない。そのため
     基準を「フィクスチャJSONの`_meta.r_version`の最大値（凍結値の生成に使ったR）」とし、
-    APT索引の`r-base`最新版と比較する。
+    APT索引の`r-base`最新版と比較する。`_meta.r_version`は生成スクリプトにより書式が混在する
+    （`getRversion()`由来の`4.5.3`と`R.version.string`由来の`R version 4.5.3 (2026-03-11)`）
+    ため、比較前に正規表現で版番号だけを取り出す（日付まで数値として読むと、同じ版が別の版と
+    判定され、更新が無いのに毎週Issueが起票される）。回帰テストは
+    `tests/cross_method/test_check_r_updates.py`。
   - 更新があれば固定タイトルのIssue（`dependencies`/`setup`/`testing`ラベル）を自動起票し、
     未クローズの同名Issueがあれば本文を更新する。すべて最新になれば自動クローズする。
     Dependabotの`cooldown`相当の待機は設けていない（通知のみで、更新は人が判断するため）。

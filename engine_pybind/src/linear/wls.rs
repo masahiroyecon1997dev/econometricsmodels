@@ -21,7 +21,7 @@ use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 
 use super::common::{
-    CovKind, check_cov_options, least_squares_error_to_pyerr, parse_cov_kind, resolve_cov_type,
+    check_cov_options, least_squares_error_to_pyerr, parse_cov_kind, resolve_cov_type,
 };
 use crate::shared::augment::append_predicted_column;
 use crate::shared::column_error::ColumnSource;
@@ -394,57 +394,21 @@ pub fn fit(
 ) -> PyResult<WLSResult> {
     let SelectedData { source, frame } = data;
     // 取り込み済みの`frame`以降はPythonオブジェクトに触れないので、GILを手放して走らせる
-    // （他のPythonスレッドを止めず、複数のfitをスレッドで並行できる）。GILが要る`source`は
-    // クロージャの外に残す。
-    let (wls_estimator, cov_kind) = py.detach(|| fit_estimator(&frame, y, x, weight, options))?;
-
-    let estimator = wls_estimator.estimator();
-
-    Ok(WLSResult {
-        params: mat_to_vec(estimator.params()),
-        std_errors: mat_to_vec(estimator.std_errors()),
-        test_stats: mat_to_vec(estimator.test_stats()),
-        stat_dist: estimator.stat_dist().name().to_string(),
-        stat_df: estimator.stat_dist().df().map(|df| df as i64),
-        p_values: mat_to_vec(estimator.p_values()),
-        conf_lower: mat_to_vec(estimator.conf_lower()),
-        conf_upper: mat_to_vec(estimator.conf_upper()),
-        param_names: estimator.input().param_names().to_vec(),
-        residuals: wls_estimator.residuals().to_vec(),
-        dep_var_name: estimator.input().dep_var_name().to_string(),
-        n_obs: estimator.input().nobs(),
-        cov_type: cov_kind.name().to_string(),
-        hac_lags_used: estimator.hac_lags_used().map(|lags| lags as i64),
-        // r_squared/adj_r_squared/log_likelihood/aic/bicは`estimator`（変換後データに対する
-        // OLS）ではなく`wls_estimator`側の値を使う。元の（変換前の）y・weightsを使って
-        // 計算し直したもので、`estimator`側の値は変換のヤコビアン補正等が欠けており
-        // statsmodelsと一致しない（`engine::linear::wls`モジュール冒頭のdocコメント参照）。
-        r_squared: wls_estimator.r_squared(),
-        adj_r_squared: wls_estimator.adj_r_squared(),
-        f_statistic: estimator.f_statistic(),
-        f_p_value: estimator.f_p_value(),
-        f_df_num: estimator.f_df().map(|(num, _)| num),
-        f_df_denom: estimator.f_df().map(|(_, denom)| denom),
-        df_resid: estimator.df_resid(),
-        df_model: estimator.df_model(),
-        log_likelihood: wls_estimator.log_likelihood(),
-        aic: wls_estimator.aic(),
-        bic: wls_estimator.bic(),
-        fitted_values: wls_estimator.fitted_values().to_vec(),
-        has_intercept: estimator.input().has_intercept(),
-        source_data: source,
-    })
+    // （他のPythonスレッドを止めず、複数のfitをスレッドで並行できる）。結果の組み立てまで
+    // 手放した側で行うため、`source`（`Py<PyAny>`は`Send`）もクロージャに渡す。
+    py.detach(|| fit_frame(&frame, source, y, x, weight, options))
 }
 
 /// [`fit`]の純Rust部分（GILを手放した状態で走る）。`PyErr`は遅延生成でGILを要求しない
-/// ので、ここで`?`により返してよい。
-fn fit_estimator(
+/// ので、ここで`?`により返してよい。`source`は結果に載せるだけで、GILが要る操作はしない。
+fn fit_frame(
     df: &DataFrame,
+    source: Py<PyAny>,
     y: String,
     x: Vec<String>,
     weight: String,
     options: &WLSOptions,
-) -> PyResult<(WlsEstimator, CovKind)> {
+) -> PyResult<WLSResult> {
     // DataFrameを見ない検査を先に行う（報告順は`ols.rs`の`fit`と同じ）。
     let cov_kind = parse_cov_kind(&options.cov_type)?;
     check_cov_options(
@@ -497,5 +461,40 @@ fn fit_estimator(
     )
     .map_err(least_squares_error_to_pyerr)?;
 
-    Ok((wls_estimator, cov_kind))
+    let estimator = wls_estimator.estimator();
+
+    Ok(WLSResult {
+        params: mat_to_vec(estimator.params()),
+        std_errors: mat_to_vec(estimator.std_errors()),
+        test_stats: mat_to_vec(estimator.test_stats()),
+        stat_dist: estimator.stat_dist().name().to_string(),
+        stat_df: estimator.stat_dist().df().map(|df| df as i64),
+        p_values: mat_to_vec(estimator.p_values()),
+        conf_lower: mat_to_vec(estimator.conf_lower()),
+        conf_upper: mat_to_vec(estimator.conf_upper()),
+        param_names: estimator.input().param_names().to_vec(),
+        residuals: wls_estimator.residuals().to_vec(),
+        dep_var_name: estimator.input().dep_var_name().to_string(),
+        n_obs: estimator.input().nobs(),
+        cov_type: cov_kind.name().to_string(),
+        hac_lags_used: estimator.hac_lags_used().map(|lags| lags as i64),
+        // r_squared/adj_r_squared/log_likelihood/aic/bicは`estimator`（変換後データに対する
+        // OLS）ではなく`wls_estimator`側の値を使う。元の（変換前の）y・weightsを使って
+        // 計算し直したもので、`estimator`側の値は変換のヤコビアン補正等が欠けており
+        // statsmodelsと一致しない（`engine::linear::wls`モジュール冒頭のdocコメント参照）。
+        r_squared: wls_estimator.r_squared(),
+        adj_r_squared: wls_estimator.adj_r_squared(),
+        f_statistic: estimator.f_statistic(),
+        f_p_value: estimator.f_p_value(),
+        f_df_num: estimator.f_df().map(|(num, _)| num),
+        f_df_denom: estimator.f_df().map(|(_, denom)| denom),
+        df_resid: estimator.df_resid(),
+        df_model: estimator.df_model(),
+        log_likelihood: wls_estimator.log_likelihood(),
+        aic: wls_estimator.aic(),
+        bic: wls_estimator.bic(),
+        fitted_values: wls_estimator.fitted_values().to_vec(),
+        has_intercept: estimator.input().has_intercept(),
+        source_data: source,
+    })
 }

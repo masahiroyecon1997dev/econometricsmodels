@@ -608,7 +608,8 @@ pub(crate) fn fit(
     options: &REOptions,
 ) -> PyResult<REResult> {
     // 取り込み済みの`frame`以降はPythonオブジェクトに触れないので、GILを手放して走らせる
-    // （他のPythonスレッドを止めず、複数のfitをスレッドで並行できる）。
+    // （他のPythonスレッドを止めず、複数のfitをスレッドで並行できる）。`source`は使わず、
+    // 関数の末尾（`detach`から戻ってGILを持った状態）で`data`ごとdropされる。
     let SelectedData { frame, .. } = data;
     py.detach(|| fit_frame(&frame, y, x, entity, options))
 }

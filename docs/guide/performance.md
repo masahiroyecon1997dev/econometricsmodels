@@ -64,7 +64,7 @@ Performance is a goal rather than a guarantee. The points below are the ones wor
 
 `fit()` releases the Python global interpreter lock (GIL) while it estimates, for every method. Other Python threads keep running during a long fit, so a web server or a GUI is not blocked, and fits running in separate threads run in parallel.
 
-- Each fit is single-threaded. Speed-ups on many cores come from running several fits at once, for example a thread pool over bootstrap samples, specifications or groups.
+- The linear algebra of each fit runs on a single thread. Speed-ups on many cores come from running several fits at once, for example a thread pool over bootstrap samples, specifications or groups.
 - Each running fit holds its own copy of the numeric columns it uses, so peak memory grows with the number of fits in flight.
 - A running fit cannot be interrupted with `KeyboardInterrupt`; the interrupt is raised when the fit returns.
 - Reading the data from the `polars.DataFrame` happens before the lock is released, and the methods you call on a results object (`predict()`, `augment()`, diagnostic tests and so on) still hold the lock.

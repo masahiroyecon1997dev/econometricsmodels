@@ -505,9 +505,34 @@ pub(crate) fn fit(
 ) -> PyResult<ProbitResult> {
     let SelectedData { source, frame } = data;
     // 取り込み済みの`frame`以降はPythonオブジェクトに触れないので、GILを手放して走らせる
-    // （他のPythonスレッドを止めず、複数のfitをスレッドで並行できる）。GILが要る`source`は
-    // クロージャの外に残す。
-    let (estimator, cov_type_lower, solver) = py.detach(|| fit_estimator(&frame, y, x, options))?;
+    // （他のPythonスレッドを止めず、複数のfitをスレッドで並行できる）。結果の組み立てまで
+    // 手放した側で行うため、`source`（`Py<PyAny>`は`Send`）もクロージャに渡す。
+    py.detach(|| fit_frame(&frame, source, y, x, options))
+}
+
+/// [`fit`]の純Rust部分（GILを手放した状態で走る）。`PyErr`は遅延生成でGILを要求しない
+/// ので、ここで`?`により返してよい。`source`は結果に載せるだけで、GILが要る操作はしない。
+fn fit_frame(
+    df: &DataFrame,
+    source: Py<PyAny>,
+    y: String,
+    x: Vec<String>,
+    options: &ProbitOptions,
+) -> PyResult<ProbitResult> {
+    let (input, cov_type, cov_type_lower, solver) = build_probit_input(df, y, x, options)?;
+
+    let estimator = ProbitEstimator::fit(
+        input,
+        MleFitOptions {
+            solver,
+            max_iter: options.max_iter,
+            tol: options.tol,
+            raise_on_non_convergence: options.raise_on_non_convergence,
+            cov_type,
+            confidence_level: options.confidence_level,
+        },
+    )
+    .map_err(mle_error_to_pyerr)?;
 
     Ok(ProbitResult {
         params: estimator.params().to_vec(),
@@ -538,32 +563,6 @@ pub(crate) fn fit(
         estimator,
         source_data: source,
     })
-}
-
-/// [`fit`]の純Rust部分（GILを手放した状態で走る）。`PyErr`は遅延生成でGILを要求しない
-/// ので、ここで`?`により返してよい。
-fn fit_estimator(
-    df: &DataFrame,
-    y: String,
-    x: Vec<String>,
-    options: &ProbitOptions,
-) -> PyResult<(ProbitEstimator, String, EngineSolverType)> {
-    let (input, cov_type, cov_type_lower, solver) = build_probit_input(df, y, x, options)?;
-
-    let estimator = ProbitEstimator::fit(
-        input,
-        MleFitOptions {
-            solver,
-            max_iter: options.max_iter,
-            tol: options.tol,
-            raise_on_non_convergence: options.raise_on_non_convergence,
-            cov_type,
-            confidence_level: options.confidence_level,
-        },
-    )
-    .map_err(mle_error_to_pyerr)?;
-
-    Ok((estimator, cov_type_lower, solver))
 }
 
 #[cfg(test)]

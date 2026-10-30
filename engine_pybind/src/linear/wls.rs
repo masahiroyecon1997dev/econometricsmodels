@@ -21,7 +21,7 @@ use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 
 use super::common::{
-    check_cov_options, least_squares_error_to_pyerr, parse_cov_kind, resolve_cov_type,
+    CovKind, check_cov_options, least_squares_error_to_pyerr, parse_cov_kind, resolve_cov_type,
 };
 use crate::shared::augment::append_predicted_column;
 use crate::shared::column_error::ColumnSource;
@@ -385,65 +385,18 @@ impl WLSResult {
 ///   `hac_lags`の範囲外・クラスターキー未指定・重みの次元不一致・非正の重み等）は
 ///   `engine::linear::common::LeastSquaresError`から`least_squares_error_to_pyerr`で変換
 pub fn fit(
+    py: Python<'_>,
     data: SelectedData,
     y: String,
     x: Vec<String>,
     weight: String,
     options: &WLSOptions,
 ) -> PyResult<WLSResult> {
-    let SelectedData { source, frame: df } = data;
-
-    // DataFrameを見ない検査を先に行う（報告順は`ols.rs`の`fit`と同じ）。
-    let cov_kind = parse_cov_kind(&options.cov_type)?;
-    check_cov_options(
-        cov_kind,
-        options.cluster.as_deref(),
-        options.hac_lags,
-        options.hac_time.as_deref(),
-    )?;
-
-    // 誤って同じ列を複数の役割に指定するミスを、分かりやすいエラーで早期に防ぐ
-    // （`docs/spec/wls-spec.md`「API引数」参照）。`weight`と`x`の重複は禁止しない
-    // （重みに使った列を説明変数としても含める実務上の利用例があるため。
-    // `weight == y`は`y`を独立変数としても使うのと同型の致命的な問題のため引き続き禁止）。
-    validate_common_roles(&y, &x, options.include_intercept)?;
-    validate_no_duplicate_roles(&[
-        ("y", RoleValue::Single(&y)),
-        ("weight", RoleValue::Single(&weight)),
-    ])?;
-
-    // ── y列の抽出 ──────────────────────────────────────────────────────
-    let y_slice = extract_f64_column(&df, &y, ColumnSource::new("y", "data"))?;
-
-    // ── x列の抽出 ──────────────────────────────────────────────────────
-    let x_slices = extract_f64_columns(&df, &x, ColumnSource::new("x", "data"))?;
-
-    // ── weight列の抽出 ─────────────────────────────────────────────────
-    // NaN/無限大・欠損値の検証はextract_f64_columnがy/xと同じ経路で行う。0以下の値
-    // （analytic weightとして不正）の検証はengine側（LeastSquaresError::NonPositiveWeight）に
-    // 委ねる（`docs/spec/wls-spec.md`「エラー型」参照）。
-    let weight_slice = extract_f64_column(&df, &weight, ColumnSource::new("weight", "data"))?;
-
-    // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ、OLSと同じ）─────
-    let cov_type = resolve_cov_type(
-        &df,
-        cov_kind,
-        options.cluster.as_deref(),
-        options.hac_lags,
-        options.hac_time.as_deref(),
-    )?;
-
-    let wls_estimator = WlsEstimator::fit(
-        &y_slice,
-        &x_slices,
-        x,
-        options.include_intercept,
-        y,
-        &weight_slice,
-        cov_type,
-        options.confidence_level,
-    )
-    .map_err(least_squares_error_to_pyerr)?;
+    let SelectedData { source, frame } = data;
+    // 取り込み済みの`frame`以降はPythonオブジェクトに触れないので、GILを手放して走らせる
+    // （他のPythonスレッドを止めず、複数のfitをスレッドで並行できる）。GILが要る`source`は
+    // クロージャの外に残す。
+    let (wls_estimator, cov_kind) = py.detach(|| fit_estimator(&frame, y, x, weight, options))?;
 
     let estimator = wls_estimator.estimator();
 
@@ -481,4 +434,68 @@ pub fn fit(
         has_intercept: estimator.input().has_intercept(),
         source_data: source,
     })
+}
+
+/// [`fit`]の純Rust部分（GILを手放した状態で走る）。`PyErr`は遅延生成でGILを要求しない
+/// ので、ここで`?`により返してよい。
+fn fit_estimator(
+    df: &DataFrame,
+    y: String,
+    x: Vec<String>,
+    weight: String,
+    options: &WLSOptions,
+) -> PyResult<(WlsEstimator, CovKind)> {
+    // DataFrameを見ない検査を先に行う（報告順は`ols.rs`の`fit`と同じ）。
+    let cov_kind = parse_cov_kind(&options.cov_type)?;
+    check_cov_options(
+        cov_kind,
+        options.cluster.as_deref(),
+        options.hac_lags,
+        options.hac_time.as_deref(),
+    )?;
+
+    // 誤って同じ列を複数の役割に指定するミスを、分かりやすいエラーで早期に防ぐ
+    // （`docs/spec/wls-spec.md`「API引数」参照）。`weight`と`x`の重複は禁止しない
+    // （重みに使った列を説明変数としても含める実務上の利用例があるため。
+    // `weight == y`は`y`を独立変数としても使うのと同型の致命的な問題のため引き続き禁止）。
+    validate_common_roles(&y, &x, options.include_intercept)?;
+    validate_no_duplicate_roles(&[
+        ("y", RoleValue::Single(&y)),
+        ("weight", RoleValue::Single(&weight)),
+    ])?;
+
+    // ── y列の抽出 ──────────────────────────────────────────────────────
+    let y_slice = extract_f64_column(df, &y, ColumnSource::new("y", "data"))?;
+
+    // ── x列の抽出 ──────────────────────────────────────────────────────
+    let x_slices = extract_f64_columns(df, &x, ColumnSource::new("x", "data"))?;
+
+    // ── weight列の抽出 ─────────────────────────────────────────────────
+    // NaN/無限大・欠損値の検証はextract_f64_columnがy/xと同じ経路で行う。0以下の値
+    // （analytic weightとして不正）の検証はengine側（LeastSquaresError::NonPositiveWeight）に
+    // 委ねる（`docs/spec/wls-spec.md`「エラー型」参照）。
+    let weight_slice = extract_f64_column(df, &weight, ColumnSource::new("weight", "data"))?;
+
+    // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ、OLSと同じ）─────
+    let cov_type = resolve_cov_type(
+        df,
+        cov_kind,
+        options.cluster.as_deref(),
+        options.hac_lags,
+        options.hac_time.as_deref(),
+    )?;
+
+    let wls_estimator = WlsEstimator::fit(
+        &y_slice,
+        &x_slices,
+        x,
+        options.include_intercept,
+        y,
+        &weight_slice,
+        cov_type,
+        options.confidence_level,
+    )
+    .map_err(least_squares_error_to_pyerr)?;
+
+    Ok((wls_estimator, cov_kind))
 }

@@ -600,15 +600,30 @@ pub(crate) fn build_re_input(
 ///   準偏差変換済みデータへの委譲失敗、クラスター数不足、HAC関連のバリデーション等）は
 ///   `panel_error_to_pyerr`で変換
 pub(crate) fn fit(
+    py: Python<'_>,
     data: SelectedData,
     y: String,
     x: Vec<String>,
     entity: String,
     options: &REOptions,
 ) -> PyResult<REResult> {
-    let df: DataFrame = data.frame;
+    // 取り込み済みの`frame`以降はPythonオブジェクトに触れないので、GILを手放して走らせる
+    // （他のPythonスレッドを止めず、複数のfitをスレッドで並行できる）。
+    let SelectedData { frame, .. } = data;
+    py.detach(|| fit_frame(&frame, y, x, entity, options))
+}
+
+/// [`fit`]の純Rust部分（GILを手放した状態で走る）。`PyErr`は遅延生成でGILを要求しない
+/// ので、ここで`?`により返してよい。
+fn fit_frame(
+    df: &DataFrame,
+    y: String,
+    x: Vec<String>,
+    entity: String,
+    options: &REOptions,
+) -> PyResult<REResult> {
     let (input, effects, cov_type, cov_type_lower, variance_method) =
-        build_re_input(&df, y, x, entity, options)?;
+        build_re_input(df, y, x, entity, options)?;
 
     let estimator = ReEstimator::fit_with_variance_method(
         input,

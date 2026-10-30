@@ -701,26 +701,17 @@ pub(crate) fn build_tobit_input(
 ///   特異設計行列・クラスターキー未指定・クラスター数不足等）は`mle_error_to_pyerr`で
 ///   変換（詳細は`engine::nonlinear::tobit::TobitEstimator::fit`のdocコメント参照）
 pub(crate) fn fit(
+    py: Python<'_>,
     data: SelectedData,
     y: String,
     x: Vec<String>,
     options: &TobitOptions,
 ) -> PyResult<TobitResult> {
-    let SelectedData { source, frame: df } = data;
-    let (input, cov_type, cov_type_lower, solver) = build_tobit_input(&df, y, x, options)?;
-
-    let estimator = TobitEstimator::fit(
-        input,
-        MleFitOptions {
-            solver,
-            max_iter: options.max_iter,
-            tol: options.tol,
-            raise_on_non_convergence: options.raise_on_non_convergence,
-            cov_type,
-            confidence_level: options.confidence_level,
-        },
-    )
-    .map_err(mle_error_to_pyerr)?;
+    let SelectedData { source, frame } = data;
+    // 取り込み済みの`frame`以降はPythonオブジェクトに触れないので、GILを手放して走らせる
+    // （他のPythonスレッドを止めず、複数のfitをスレッドで並行できる）。GILが要る`source`は
+    // クロージャの外に残す。
+    let (estimator, cov_type_lower, solver) = py.detach(|| fit_estimator(&frame, y, x, options))?;
 
     // `params`/`param_names`を`(k+1)`長（`σ`を含む）に揃える
     // （`TobitResult`のdocコメント「非対称性の解消」参照）。
@@ -760,6 +751,32 @@ pub(crate) fn fit(
         estimator,
         source_data: source,
     })
+}
+
+/// [`fit`]の純Rust部分（GILを手放した状態で走る）。`PyErr`は遅延生成でGILを要求しない
+/// ので、ここで`?`により返してよい。
+fn fit_estimator(
+    df: &DataFrame,
+    y: String,
+    x: Vec<String>,
+    options: &TobitOptions,
+) -> PyResult<(TobitEstimator, String, EngineSolverType)> {
+    let (input, cov_type, cov_type_lower, solver) = build_tobit_input(df, y, x, options)?;
+
+    let estimator = TobitEstimator::fit(
+        input,
+        MleFitOptions {
+            solver,
+            max_iter: options.max_iter,
+            tol: options.tol,
+            raise_on_non_convergence: options.raise_on_non_convergence,
+            cov_type,
+            confidence_level: options.confidence_level,
+        },
+    )
+    .map_err(mle_error_to_pyerr)?;
+
+    Ok((estimator, cov_type_lower, solver))
 }
 
 #[cfg(test)]

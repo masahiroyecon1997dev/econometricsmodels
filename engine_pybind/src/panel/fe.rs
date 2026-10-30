@@ -527,14 +527,29 @@ pub(crate) fn build_fe_input(
 ///   自由度不足・分散ゼロ・委譲先`OlsEstimator::fit`の失敗・FE自身のF検定の失敗等）は
 ///   `panel_error_to_pyerr`で変換
 pub(crate) fn fit(
+    py: Python<'_>,
     data: SelectedData,
     y: String,
     x: Vec<String>,
     entity: String,
     options: &FEOptions,
 ) -> PyResult<FEResult> {
-    let df: DataFrame = data.frame;
-    let (input, effects, cov_type, cov_type_lower) = build_fe_input(&df, y, x, entity, options)?;
+    // 取り込み済みの`frame`以降はPythonオブジェクトに触れないので、GILを手放して走らせる
+    // （他のPythonスレッドを止めず、複数のfitをスレッドで並行できる）。
+    let SelectedData { frame, .. } = data;
+    py.detach(|| fit_frame(&frame, y, x, entity, options))
+}
+
+/// [`fit`]の純Rust部分（GILを手放した状態で走る）。`PyErr`は遅延生成でGILを要求しない
+/// ので、ここで`?`により返してよい。
+fn fit_frame(
+    df: &DataFrame,
+    y: String,
+    x: Vec<String>,
+    entity: String,
+    options: &FEOptions,
+) -> PyResult<FEResult> {
+    let (input, effects, cov_type, cov_type_lower) = build_fe_input(df, y, x, entity, options)?;
 
     let estimator = FeEstimator::fit(input, effects, cov_type, options.confidence_level)
         .map_err(panel_error_to_pyerr)?;

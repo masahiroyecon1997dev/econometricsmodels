@@ -750,13 +750,29 @@ impl OLSResult {
 ///   `hac_lags`の範囲外・クラスターキー未指定等）は`engine::linear::common::LeastSquaresError`から
 ///   `least_squares_error_to_pyerr`で変換
 pub fn fit(
+    py: Python<'_>,
     data: SelectedData,
     y: String,
     x: Vec<String>,
     options: &OLSOptions,
 ) -> PyResult<OLSResult> {
-    let SelectedData { source, frame: df } = data;
+    let SelectedData { source, frame } = data;
+    // 取り込み済みの`frame`以降はPythonオブジェクトに触れないので、GILを手放して走らせる
+    // （他のPythonスレッドを止めず、複数のfitをスレッドで並行できる）。GILが要る`source`は
+    // クロージャの外に残し、結果への取り付けは戻ってから行う。
+    let mut result = py.detach(|| fit_frame(&frame, y, x, options))?;
+    result.source_data = Some(source);
+    Ok(result)
+}
 
+/// [`fit`]の純Rust部分（GILを手放した状態で走る）。`PyErr`は遅延生成でGILを要求しない
+/// ので、ここで`?`により返してよい。
+fn fit_frame(
+    df: &DataFrame,
+    y: String,
+    x: Vec<String>,
+    options: &OLSOptions,
+) -> PyResult<OLSResult> {
     // DataFrameを見ない検査を先に行う。報告順は`docs/guide/validation.md`
     // 「Order in which errors are reported」: オプションの値 → オプションの組合せ →
     // ロール構造 → `y`/`x`の列 → オプション列 → エンジン。
@@ -773,14 +789,14 @@ pub fn fit(
     validate_common_roles(&y, &x, options.include_intercept)?;
 
     // ── y列の抽出 ──────────────────────────────────────────────────────
-    let y_slice = extract_f64_column(&df, &y, ColumnSource::new("y", "data"))?;
+    let y_slice = extract_f64_column(df, &y, ColumnSource::new("y", "data"))?;
 
     // ── x列の抽出 ──────────────────────────────────────────────────────
-    let x_slices = extract_f64_columns(&df, &x, ColumnSource::new("x", "data"))?;
+    let x_slices = extract_f64_columns(df, &x, ColumnSource::new("x", "data"))?;
 
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ）─────────────
     let cov_type = resolve_cov_type(
-        &df,
+        df,
         cov_kind,
         options.cluster.as_deref(),
         options.hac_lags,
@@ -792,9 +808,10 @@ pub fn fit(
     let estimator = OlsEstimator::fit(input, cov_type, options.confidence_level)
         .map_err(least_squares_error_to_pyerr)?;
 
-    let mut result = ols_estimator_to_result(&estimator, cov_kind.name().to_string());
-    result.source_data = Some(source);
-    Ok(result)
+    Ok(ols_estimator_to_result(
+        &estimator,
+        cov_kind.name().to_string(),
+    ))
 }
 
 /// フィット済み`OlsEstimator`を`OLSResult`（pyclass、Pythonに返す形）に変換する。

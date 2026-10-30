@@ -42,6 +42,7 @@ use shared::option_values::extract_options;
 ///     Estimation options.
 #[pyfunction]
 fn fit_ols(
+    py: Python<'_>,
     data: &Bound<'_, PyAny>,
     y: &Bound<'_, PyAny>,
     x: &Bound<'_, PyAny>,
@@ -56,7 +57,7 @@ fn fit_ols(
         columns.extend(x.iter().cloned());
         columns.extend(options.data_columns());
         let data = select_columns(data, "data", &columns)?;
-        linear::ols::fit(data, y, x, &options)
+        linear::ols::fit(py, data, y, x, &options)
     })
 }
 
@@ -77,6 +78,7 @@ fn fit_ols(
 ///     Estimation options.
 #[pyfunction]
 fn fit_wls(
+    py: Python<'_>,
     data: &Bound<'_, PyAny>,
     y: &Bound<'_, PyAny>,
     x: &Bound<'_, PyAny>,
@@ -93,7 +95,7 @@ fn fit_wls(
         columns.extend(x.iter().cloned());
         columns.extend(options.data_columns());
         let data = select_columns(data, "data", &columns)?;
-        linear::wls::fit(data, y, x, weight, &options)
+        linear::wls::fit(py, data, y, x, weight, &options)
     })
 }
 
@@ -112,6 +114,7 @@ fn fit_wls(
 ///     Estimation options.
 #[pyfunction]
 fn fit_logit(
+    py: Python<'_>,
     data: &Bound<'_, PyAny>,
     y: &Bound<'_, PyAny>,
     x: &Bound<'_, PyAny>,
@@ -126,7 +129,7 @@ fn fit_logit(
         columns.extend(x.iter().cloned());
         columns.extend(options.data_columns());
         let data = select_columns(data, "data", &columns)?;
-        nonlinear::logit::fit(data, y, x, &options)
+        nonlinear::logit::fit(py, data, y, x, &options)
     })
 }
 
@@ -145,6 +148,7 @@ fn fit_logit(
 ///     Estimation options.
 #[pyfunction]
 fn fit_probit(
+    py: Python<'_>,
     data: &Bound<'_, PyAny>,
     y: &Bound<'_, PyAny>,
     x: &Bound<'_, PyAny>,
@@ -159,7 +163,7 @@ fn fit_probit(
         columns.extend(x.iter().cloned());
         columns.extend(options.data_columns());
         let data = select_columns(data, "data", &columns)?;
-        nonlinear::probit::fit(data, y, x, &options)
+        nonlinear::probit::fit(py, data, y, x, &options)
     })
 }
 
@@ -178,6 +182,7 @@ fn fit_probit(
 ///     Estimation options.
 #[pyfunction]
 fn fit_tobit(
+    py: Python<'_>,
     data: &Bound<'_, PyAny>,
     y: &Bound<'_, PyAny>,
     x: &Bound<'_, PyAny>,
@@ -192,7 +197,7 @@ fn fit_tobit(
         columns.extend(x.iter().cloned());
         columns.extend(options.data_columns());
         let data = select_columns(data, "data", &columns)?;
-        nonlinear::tobit::fit(data, y, x, &options)
+        nonlinear::tobit::fit(py, data, y, x, &options)
     })
 }
 
@@ -215,6 +220,7 @@ fn fit_tobit(
 ///     Estimation options. `options.estimator` selects "2sls" (default) or "gmm".
 #[pyfunction]
 fn fit_iv(
+    py: Python<'_>,
     data: &Bound<'_, PyAny>,
     y: &Bound<'_, PyAny>,
     x_exog: &Bound<'_, PyAny>,
@@ -235,7 +241,7 @@ fn fit_iv(
         columns.extend(instruments.iter().cloned());
         columns.extend(options.data_columns());
         let data = select_columns(data, "data", &columns)?;
-        iv::common::fit(data, y, x_exog, x_endog, instruments, &options)
+        iv::common::fit(py, data, y, x_exog, x_endog, instruments, &options)
     })
 }
 
@@ -257,6 +263,7 @@ fn fit_iv(
 ///     Estimation options.
 #[pyfunction]
 fn fit_fe(
+    py: Python<'_>,
     data: &Bound<'_, PyAny>,
     y: &Bound<'_, PyAny>,
     x: &Bound<'_, PyAny>,
@@ -273,7 +280,7 @@ fn fit_fe(
         columns.extend(x.iter().cloned());
         columns.extend(options.data_columns());
         let data = select_columns(data, "data", &columns)?;
-        panel::fe::fit(data, y, x, entity, &options)
+        panel::fe::fit(py, data, y, x, entity, &options)
     })
 }
 
@@ -295,6 +302,7 @@ fn fit_fe(
 ///     Estimation options.
 #[pyfunction]
 fn fit_re(
+    py: Python<'_>,
     data: &Bound<'_, PyAny>,
     y: &Bound<'_, PyAny>,
     x: &Bound<'_, PyAny>,
@@ -311,7 +319,7 @@ fn fit_re(
         columns.extend(x.iter().cloned());
         columns.extend(options.data_columns());
         let data = select_columns(data, "data", &columns)?;
-        panel::re::fit(data, y, x, entity, &options)
+        panel::re::fit(py, data, y, x, entity, &options)
     })
 }
 

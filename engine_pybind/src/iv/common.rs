@@ -1094,6 +1094,7 @@ pub(crate) fn build_iv_input(
 ///   `engine::iv::common::IvError`（識別の順序条件・第一段階回帰の失敗・`cov_type`起因の
 ///   エラー・GMM固有のエラー等）は`iv_error_to_pyerr`で変換
 pub(crate) fn fit(
+    py: Python<'_>,
     data: SelectedData,
     y: String,
     x_exog: Vec<String>,
@@ -1101,9 +1102,24 @@ pub(crate) fn fit(
     instruments: Vec<String>,
     options: &IVOptions,
 ) -> PyResult<IVResult> {
-    let df: DataFrame = data.frame;
+    // 取り込み済みの`frame`以降はPythonオブジェクトに触れないので、GILを手放して走らせる
+    // （他のPythonスレッドを止めず、複数のfitをスレッドで並行できる）。
+    let SelectedData { frame, .. } = data;
+    py.detach(|| fit_frame(&frame, y, x_exog, x_endog, instruments, options))
+}
+
+/// [`fit`]の純Rust部分（GILを手放した状態で走る）。`PyErr`は遅延生成でGILを要求しない
+/// ので、ここで`?`により返してよい。
+fn fit_frame(
+    df: &DataFrame,
+    y: String,
+    x_exog: Vec<String>,
+    x_endog: Vec<String>,
+    instruments: Vec<String>,
+    options: &IVOptions,
+) -> PyResult<IVResult> {
     let (input, cov_type, cov_type_lower, plan) =
-        build_iv_input(&df, y, x_exog, x_endog, instruments, options)?;
+        build_iv_input(df, y, x_exog, x_endog, instruments, options)?;
 
     // 識別の順序条件（`TwoSlsEstimator::fit`/`GmmEstimator::fit`のいずれも冒頭で検証する
     // のと同じチェック）を`compute_first_stage`より先に行う。過小識別な入力で無駄な

@@ -60,6 +60,15 @@ Performance is a goal rather than a guarantee. The points below are the ones wor
 - **Probit and Tobit at the largest sizes are measured for this package only.** The reference implementation is not timed at `n = 200,000` and `n = 1,000,000` for Probit, so the largest comparison for Probit is at 100,000 observations.
 - **Instrumental variables: part of the gap is symmetric work.** linearmodels computes its first-stage diagnostics by re-fitting each first stage, and the benchmark includes that, because this package always reports the weak-instrument statistics from the same pass. In an earlier local measurement the 2SLS gap was still about threefold with that re-fit excluded. GMM with a kernel (HAC) weight matrix is not benchmarked, because linearmodels takes tens of seconds even at 100,000 observations.
 
+## Using fits from threads
+
+`fit()` releases the Python global interpreter lock (GIL) while it estimates, for every method. Other Python threads keep running during a long fit, so a web server or a GUI is not blocked, and fits running in separate threads run in parallel.
+
+- Each fit is single-threaded. Speed-ups on many cores come from running several fits at once, for example a thread pool over bootstrap samples, specifications or groups.
+- Each running fit holds its own copy of the numeric columns it uses, so peak memory grows with the number of fits in flight.
+- A running fit cannot be interrupted with `KeyboardInterrupt`; the interrupt is raised when the fit returns.
+- Reading the data from the `polars.DataFrame` happens before the lock is released, and the methods you call on a results object (`predict()`, `augment()`, diagnostic tests and so on) still hold the lock.
+
 ## Reproducing
 
 The measurement scripts live in the [`performance/`](https://github.com/masahiroyecon1997dev/econometricsmodels/tree/main/performance) directory of the repository; `performance/compare_<method>.py` runs one method and the shared harness takes care of process isolation, thread pinning and the symmetric measurement. Build the extension with `maturin develop --release` first.

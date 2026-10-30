@@ -178,6 +178,15 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
 - **`paste`（RUSTSEC-2024-0436、unmaintained）**: 経路は`faer → gemm/pulp`と`argmin`の2系統。
   proc-macroとして**実際にビルドされる**が、コンパイル時のみで実行時には含まれない。
   `faer`・`argmin`の両方が`paste`を外すまで解消できない。
+- **`zstd`系（`zstd`のRUSTSEC-2026-0391、`zstd-safe`の0398/0403、`zstd-sys`の0410）**: 経路は
+  `polars-arrow`のオプション依存。`cargo tree --target all -e normal,build,dev -i zstd`が
+  空で、リンク対象にも現れないため**実際にはビルドされない**。修正版（zstd 0.14系・zstd-safe 8系）は
+  `polars-arrow`が要求する0.13系の範囲外で、`polars`の新版待ち。同じ`zstd-safe`の`unsound`警告は
+  `cargo audit`が許可済みの警告として扱うため、失敗の原因にならずignore listにも登録していない。
+  **Dependabotが検知・修正PRを出せない理由**: security updateはGitHub Advisory Databaseの
+  アドバイザリを起点にするが、これらはRustSec DBにのみ存在した（`/advisories?ecosystem=rust`に
+  zstd系が無いことを確認）。`cargo audit`はRustSec DBを直接読むため差が出る。仮にアラートが出ても、
+  修正版が親クレートの要求範囲外なので更新PRは作れない。version updateは直接依存のみが対象。
 - **`event-listener`（RUSTSEC-2026-0221、unsound）**: 経路は`polars-lazy → polars-stream → async-channel`
   （ビルドされない）。パッチ版5.4.2へ`Cargo.lock`を更新して解消済みのため、ignore listには登録しない。
 

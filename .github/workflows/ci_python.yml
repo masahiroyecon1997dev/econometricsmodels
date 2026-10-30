@@ -113,9 +113,18 @@ jobs:
           components: clippy, rustfmt
 
       # engine_pybindはci_engine.yml（-p engineのみ対象）の対象外のため、ここで担当する。
-      # pyo3のビルドスクリプトはリンク済みのPython3を必要とするが、
-      # abi3等のバージョン限定cfgを使っていないため、ubuntu-latestランナーに元から
-      # 入っているpython3で十分（マトリクス化は不要）。
+      # pyo3のビルドスクリプトはリンク可能なlibpythonを必要とするが、
+      # abi3等のバージョン限定cfgを使っていないため、どの版でも足りる
+      # （検証はtestジョブのマトリクスが担うので、このジョブのマトリクス化は不要）。
+      # ランナー標準のpython3には頼らない: ubuntu-latestが26.04になった際、
+      # pyo3が選んだpython3.12のlibpythonが見つからずリンクに失敗した。
+      # 版はtestジョブのマトリクスの最大値に合わせる（新しいPythonをマトリクスに
+      # 足すとき、ここも同時に上げる）。「>=3.12」等の範囲指定は、pyo3が未対応の
+      # 新版が出た時点でこのジョブだけ予告なく落ちるため使わない。
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+
       #
       # cargo test: `crate-type = ["cdylib", "rlib"]`・`pyo3`の
       # `extension-module`フィーチャ非直接指定への変更により`cargo test -p engine_pybind`が

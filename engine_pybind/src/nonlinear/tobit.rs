@@ -144,6 +144,19 @@ pub struct TobitOptions {
     pub upper: Option<f64>,
 }
 
+crate::shared::pickle::impl_pickle_state!(TobitOptions {
+    cov_type,
+    include_intercept,
+    confidence_level,
+    cluster,
+    solver,
+    max_iter,
+    tol,
+    raise_on_non_convergence,
+    lower,
+    upper,
+});
+
 impl TobitOptions {
     /// このオプションが指名するデータの列（`cluster`）。使われるかどうか（`cov_type`等）には
     /// よらず、指名されたものを全て返す。`fit()`はこれらと`y`・`x`等だけをデータから取り込む。
@@ -154,6 +167,10 @@ impl TobitOptions {
 
 #[pymethods]
 impl TobitOptions {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
+
     #[new]
     #[pyo3(signature = (
         *,
@@ -563,6 +580,18 @@ pub struct CensoringFitCategoryResult {
     pub model_implied_rate: f64,
 }
 
+crate::shared::pickle::impl_pickle_state!(CensoringFitCategoryResult {
+    observed_rate,
+    model_implied_rate,
+});
+
+#[pymethods]
+impl CensoringFitCategoryResult {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
+}
+
 /// Censoring goodness-of-fit check. See `TobitResult.censoring_fit_check`.
 #[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
@@ -575,6 +604,53 @@ pub struct CensoringFitCheckResult {
     /// `None` when `TobitOptions.upper` was `None` (no censoring from above).
     #[pyo3(get)]
     pub upper: Option<CensoringFitCategoryResult>,
+}
+
+// ネストした`CensoringFitCategoryResult`（pyclass）は、`(observed_rate, model_implied_rate)`のタプルにして
+// 状態に入れる（`impl_pickle_state!`は`FromPyObject`を持たないpyclassのフィールドを復元できないため手書き）。
+impl crate::shared::pickle::PickleState for CensoringFitCheckResult {
+    const KIND: &'static str = "CensoringFitCheckResult";
+
+    fn to_state<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
+        let Self {
+            lower,
+            uncensored,
+            upper,
+        } = self;
+        let pair = |c: &CensoringFitCategoryResult| (c.observed_rate, c.model_implied_rate);
+        let state = pyo3::types::PyDict::new(py);
+        state.set_item("lower", lower.as_ref().map(pair))?;
+        state.set_item("uncensored", pair(uncensored))?;
+        state.set_item("upper", upper.as_ref().map(pair))?;
+        Ok(state)
+    }
+
+    fn from_state(state: &Bound<'_, pyo3::types::PyDict>) -> PyResult<Self> {
+        use crate::shared::pickle::{format_mismatch, take_field};
+        if state.len() != 3 {
+            return Err(format_mismatch(Self::KIND));
+        }
+        let category =
+            |(observed_rate, model_implied_rate): (f64, f64)| CensoringFitCategoryResult {
+                observed_rate,
+                model_implied_rate,
+            };
+        let lower: Option<(f64, f64)> = take_field(state, "lower", Self::KIND)?;
+        let uncensored: (f64, f64) = take_field(state, "uncensored", Self::KIND)?;
+        let upper: Option<(f64, f64)> = take_field(state, "upper", Self::KIND)?;
+        Ok(Self {
+            lower: lower.map(category),
+            uncensored: category(uncensored),
+            upper: upper.map(category),
+        })
+    }
+}
+
+#[pymethods]
+impl CensoringFitCheckResult {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
 }
 
 fn censoring_fit_category_to_result(category: CensoringFitCategory) -> CensoringFitCategoryResult {

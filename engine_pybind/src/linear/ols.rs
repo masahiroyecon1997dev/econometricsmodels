@@ -98,6 +98,15 @@ pub struct OLSOptions {
     pub hac_time: Option<String>,
 }
 
+crate::shared::pickle::impl_pickle_state!(OLSOptions {
+    cov_type,
+    include_intercept,
+    confidence_level,
+    cluster,
+    hac_lags,
+    hac_time,
+});
+
 impl OLSOptions {
     /// このオプションが指名するデータの列（`cluster`・`hac_time`）。使われるかどうか（`cov_type`）には
     /// よらず、指名されたものを全て返す。`fit()`はこれらと`y`・`x`だけをデータから取り込む。
@@ -108,6 +117,10 @@ impl OLSOptions {
 
 #[pymethods]
 impl OLSOptions {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
+
     #[new]
     #[pyo3(signature = (
         *,
@@ -421,6 +434,37 @@ pub struct OLSResult {
     source_data: Option<Py<PyAny>>,
 }
 
+crate::shared::pickle::impl_pickle_state!(OLSResult {
+    params,
+    std_errors,
+    test_stats,
+    stat_dist,
+    stat_df,
+    p_values,
+    conf_lower,
+    conf_upper,
+    param_names,
+    residuals,
+    dep_var_name,
+    n_obs,
+    cov_type,
+    hac_lags_used,
+    r_squared,
+    adj_r_squared,
+    f_statistic,
+    f_p_value,
+    f_df_num,
+    f_df_denom,
+    df_resid,
+    df_model,
+    log_likelihood,
+    aic,
+    bic,
+    fitted_values,
+    has_intercept,
+    source_data,
+});
+
 // `#[pymethods]`ブロックの外に置く非公開実装（pyo3は`#[pymethods]`内の全メソッドを
 // Python公開シグネチャとして扱おうとするため、`&DataFrame`のような`FromPyObject`
 // 未実装の型を引数に取るヘルパーはこちらに置く必要がある）。
@@ -461,6 +505,10 @@ impl OLSResult {
 
 #[pymethods]
 impl OLSResult {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
+
     /// Predicted values.
     ///
     /// With `new_data=None` (default), returns the fitted values for the training

@@ -103,6 +103,7 @@ MIGRATED_CODES: frozenset[str] = frozenset(
         ErrorCode.OUTCOME_CONSTANT,
         ErrorCode.OUTCOME_CONSTANT_WITHIN_ENTITY,
         ErrorCode.PERFECT_FIT,
+        ErrorCode.PICKLE_FORMAT_MISMATCH,
         ErrorCode.INTERNAL_ERROR,
     }
 )

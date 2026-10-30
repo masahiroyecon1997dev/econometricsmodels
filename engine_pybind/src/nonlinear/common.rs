@@ -64,6 +64,23 @@ pub struct MarginalEffectsResult {
     pub conf_upper: Vec<f64>,
 }
 
+crate::shared::pickle::impl_pickle_state!(MarginalEffectsResult {
+    param_names,
+    effect,
+    std_errors,
+    test_stats,
+    p_values,
+    conf_lower,
+    conf_upper,
+});
+
+#[pymethods]
+impl MarginalEffectsResult {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
+}
+
 /// `cov_type`の種類。列名を持たない、文字列だけから決まる値。
 ///
 /// `cov_type`の検査は、DataFrameを見ない順に3つに分ける

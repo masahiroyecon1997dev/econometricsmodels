@@ -150,6 +150,15 @@ pub struct FEOptions {
     pub dk_bandwidth: Option<i64>,
 }
 
+crate::shared::pickle::impl_pickle_state!(FEOptions {
+    cov_type,
+    confidence_level,
+    time,
+    cluster,
+    dk_time,
+    dk_bandwidth,
+});
+
 impl FEOptions {
     /// このオプションが指名するデータの列（`time`・`cluster`・`dk_time`）。使われるかどうか（`cov_type`等）には
     /// よらず、指名されたものを全て返す。`fit()`はこれらと`y`・`x`等だけをデータから取り込む。
@@ -165,6 +174,10 @@ impl FEOptions {
 
 #[pymethods]
 impl FEOptions {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
+
     #[new]
     #[pyo3(signature = (
         *,

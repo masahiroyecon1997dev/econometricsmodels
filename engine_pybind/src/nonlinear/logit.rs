@@ -127,6 +127,17 @@ pub struct LogitOptions {
     pub raise_on_non_convergence: bool,
 }
 
+crate::shared::pickle::impl_pickle_state!(LogitOptions {
+    cov_type,
+    include_intercept,
+    confidence_level,
+    cluster,
+    solver,
+    max_iter,
+    tol,
+    raise_on_non_convergence,
+});
+
 impl LogitOptions {
     /// このオプションが指名するデータの列（`cluster`）。使われるかどうか（`cov_type`等）には
     /// よらず、指名されたものを全て返す。`fit()`はこれらと`y`・`x`等だけをデータから取り込む。
@@ -137,6 +148,10 @@ impl LogitOptions {
 
 #[pymethods]
 impl LogitOptions {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
+
     #[new]
     #[pyo3(signature = (
         *,

@@ -100,6 +100,15 @@ pub struct WLSOptions {
     pub hac_time: Option<String>,
 }
 
+crate::shared::pickle::impl_pickle_state!(WLSOptions {
+    cov_type,
+    include_intercept,
+    confidence_level,
+    cluster,
+    hac_lags,
+    hac_time,
+});
+
 impl WLSOptions {
     /// このオプションが指名するデータの列（`cluster` ・`hac_time`）。使われるかどうか（`cov_type`等）には
     /// よらず、指名されたものを全て返す。`fit()`はこれらと`y`・`x`等だけをデータから取り込む。
@@ -110,6 +119,10 @@ impl WLSOptions {
 
 #[pymethods]
 impl WLSOptions {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
+
     #[new]
     #[pyo3(signature = (
         *,
@@ -275,6 +288,37 @@ pub struct WLSResult {
     source_data: Py<PyAny>,
 }
 
+crate::shared::pickle::impl_pickle_state!(WLSResult {
+    params,
+    std_errors,
+    test_stats,
+    stat_dist,
+    stat_df,
+    p_values,
+    conf_lower,
+    conf_upper,
+    param_names,
+    residuals,
+    dep_var_name,
+    n_obs,
+    cov_type,
+    hac_lags_used,
+    r_squared,
+    adj_r_squared,
+    f_statistic,
+    f_p_value,
+    f_df_num,
+    f_df_denom,
+    df_resid,
+    df_model,
+    log_likelihood,
+    aic,
+    bic,
+    fitted_values,
+    has_intercept,
+    source_data,
+});
+
 // `#[pymethods]`ブロックの外に置く非公開実装（`OLSResult`と同じ理由）。
 impl WLSResult {
     /// `predict()`/`augment()`のSome分岐で共有する、`df`に対するout-of-sample予測
@@ -299,6 +343,10 @@ impl WLSResult {
 
 #[pymethods]
 impl WLSResult {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
+
     /// Predicted values.
     ///
     /// With `new_data=None` (default), returns the fitted values for the training

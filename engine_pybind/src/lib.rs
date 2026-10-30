@@ -323,6 +323,52 @@ fn fit_re(
     })
 }
 
+/// `_restore_pickled`の種別ごとの分岐。種別名は各型の`PickleState::KIND`と照合するので、
+/// 綴りを別に書く必要がない（型を足してここに足し忘れても、`tests/cross_method/test_pickle.py`が検出する）。
+macro_rules! restore_by_kind {
+    ($kind:expr, $py:expr, $state:expr, $unknown:expr; $($ty:ty),+ $(,)?) => {
+        match $kind {
+            $( kind if kind == <$ty as shared::pickle::PickleState>::KIND => {
+                shared::pickle::restore::<$ty>($py, $state)
+            } )+
+            _ => Err($unknown),
+        }
+    };
+}
+
+/// Restore function returned by `__reduce__` of the options and result classes.
+///
+/// Internal entry point called by `pickle` and `copy`; not meant to be called directly.
+/// Raises `ValidationError` (`PICKLE_FORMAT_MISMATCH`) when `kind` is unknown, `version` differs
+/// from the current format, or `state` does not have the fields and types of that class.
+#[pyfunction]
+fn _restore_pickled(
+    py: Python<'_>,
+    kind: &Bound<'_, PyAny>,
+    version: &Bound<'_, PyAny>,
+    state: &Bound<'_, PyAny>,
+) -> PyResult<Py<PyAny>> {
+    guard(|| {
+        // 引数の型が違うときも`PICKLE_FORMAT_MISMATCH`にする（壊れたpickleの報告を1つの`code`にそろえる）。
+        let kind_name = kind
+            .extract::<String>()
+            .unwrap_or_else(|_| "(unknown)".to_string());
+        let mismatch = || shared::pickle::format_mismatch(&kind_name);
+        if version.extract::<u32>().ok() != Some(shared::pickle::FORMAT_VERSION) {
+            return Err(mismatch());
+        }
+        let state = state
+            .cast::<pyo3::types::PyDict>()
+            .map_err(|_| mismatch())?;
+        restore_by_kind!(
+            kind_name.as_str(), py, state, mismatch();
+            OLSOptions, OLSResult, WLSOptions, WLSResult, LogitOptions, MarginalEffectsResult,
+            ProbitOptions, TobitOptions, CensoringFitCategoryResult, CensoringFitCheckResult,
+            IVOptions, FEOptions, REOptions, REResult,
+        )
+    })
+}
+
 #[pymodule]
 fn _lib(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // `import econometricsmodels` の時点で faer のグローバル並列度を Par::Seq に
@@ -362,6 +408,7 @@ fn _lib(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<REOptions>()?;
     m.add_class::<REResult>()?;
     m.add_function(wrap_pyfunction!(error_catalog, m)?)?;
+    m.add_function(wrap_pyfunction!(_restore_pickled, m)?)?;
     // テスト専用の入口はデバッグビルドにだけ含める（配布するreleaseビルドには入れない）。
     #[cfg(debug_assertions)]
     {

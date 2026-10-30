@@ -201,6 +201,21 @@ pub struct IVOptions {
     pub raise_on_non_convergence: Option<bool>,
 }
 
+crate::shared::pickle::impl_pickle_state!(IVOptions {
+    estimator,
+    cov_type,
+    include_intercept,
+    confidence_level,
+    cluster,
+    hac_lags,
+    hac_time,
+    gmm_type,
+    gmm_weight_type,
+    gmm_max_iter,
+    gmm_tol,
+    raise_on_non_convergence,
+});
+
 impl IVOptions {
     /// このオプションが指名するデータの列（`cluster`・`hac_time`）。使われるかどうか（`cov_type`等）には
     /// よらず、指名されたものを全て返す。`fit()`はこれらと`y`・`x`等だけをデータから取り込む。
@@ -211,6 +226,10 @@ impl IVOptions {
 
 #[pymethods]
 impl IVOptions {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
+
     #[new]
     #[pyo3(signature = (
         *,

@@ -64,6 +64,7 @@ Issue番号・内部管理ドキュメント（`docs/planning/specs/`配下の�
   2. `engine`: 抽出済みの列（`&[f64]`/`&[Vec<f64>]`）から`faer::Mat`を組み立てる（例: `engine::linear::ols::OlsInput::from_columns`）。切片列の自動追加等、設計行列の組み立てに関わるロジックはここに置く（「計算ロジックをengine_pybindに書かない」原則、`docs/spec/ols-spec.md`参照）。
 - 変換時、列ごとに`Vec<f64>`へ抽出してから`faer::Mat`に詰め直す（2回のコピーが発生する）。より少ないコピー（polarsの`&[f64]`を直接借用してengine側で詰める等）も技術的には可能だが、`engine`の関数シグネチャにライフタイムが入り込み「pure Rustロジック、polars非依存」の独立性が損なわれるため、**採用しない**。このプロジェクトの想定データ規模では、この2回のコピーのコストはQR分解本体（O(n×k²)）に対して無視できるレベルであるため。
 - **`*Options`の`#[new]`は`#[pyo3(signature = (*, ...))]`で全引数をキーワード専用にする**。フィールドの追加・並べ替えで、位置渡しの呼び出しが別のフィールドへ値を黙って渡す事故を防ぐため。クラスのdocコメントに`All arguments are keyword-only.`を書く。`*,`とdocコメントの付け忘れは`tests/cross_method/test_keyword_only_arguments.py`が検出する（結果クラスのメソッドはPython側のラッパーが公開面で、そちらの規約は`python-style.md`）。
+- **利用者が保持する`#[pyclass]`（`*Options`・`*Result`）はpickle・`copy`に対応させる**: 同じ構造体のモジュールで`crate::shared::pickle::impl_pickle_state!(Type { 全フィールド })`を呼び、`#[pymethods]`に`__reduce__`（`crate::shared::pickle::reduce(slf)`の1行）を足し、`lib.rs`の`_restore_pickled`の`restore_by_kind!`に型を足す。フィールド一覧は分割代入と構造体リテラルに展開されるので、足し忘れはコンパイルエラーになる。`fit()`に渡した`DataFrame`（`source_data`）も状態に含める。フィールドの意味を変えて既存のpickleを読めなくするときは`pickle::FORMAT_VERSION`を上げる（フィールドの追加・削除はキー集合の検査で検出される）。クラスを足したときの漏れは`tests/cross_method/test_pickle.py`の`SAMPLES`が検出する。方針の詳細は`docs/spec/pickle-support.md`。
 - 欠損値（null）は`.rechunk()` + `null_count()`チェックで検出し、常にエラーとする（`testing-policy.md`・`docs/spec/ols-spec.md`の欠損値方針を参照）。サンプルの自動除外は行わない。
 - クラスター変数等の「グループの同一性」だけが意味を持つ列は、整数決め打ちにせず文字列として扱う（州名・企業ID等、実務では文字列/カテゴリカルの方が多いため）。
 

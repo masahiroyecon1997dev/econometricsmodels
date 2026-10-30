@@ -150,6 +150,16 @@ pub struct REOptions {
     pub variance_method: String,
 }
 
+crate::shared::pickle::impl_pickle_state!(REOptions {
+    cov_type,
+    confidence_level,
+    time,
+    cluster,
+    dk_time,
+    dk_bandwidth,
+    variance_method,
+});
+
 impl REOptions {
     /// このオプションが指名するデータの列（`time`・`cluster`・`dk_time`）。使われるかどうか（`cov_type`等）には
     /// よらず、指名されたものを全て返す。`fit()`はこれらと`y`・`x`等だけをデータから取り込む。
@@ -165,6 +175,10 @@ impl REOptions {
 
 #[pymethods]
 impl REOptions {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
+
     #[new]
     #[pyo3(signature = (
         *,
@@ -430,6 +444,55 @@ pub struct REResult {
     /// also a regressor (correlated random effects).
     #[pyo3(get)]
     pub hausman_df: Option<usize>,
+}
+
+crate::shared::pickle::impl_pickle_state!(REResult {
+    params,
+    std_errors,
+    test_stats,
+    stat_dist,
+    stat_df,
+    p_values,
+    conf_lower,
+    conf_upper,
+    param_names,
+    residuals,
+    dep_var_name,
+    n_obs,
+    df_resid,
+    df_model,
+    n_entities,
+    n_periods,
+    variance_method,
+    sigma2_eps,
+    sigma2_u,
+    sigma2_lambda,
+    theta,
+    theta_entity,
+    theta_time,
+    theta_total,
+    cov_type,
+    dk_bandwidth_used,
+    f_statistic,
+    f_p_value,
+    f_df_num,
+    f_df_denom,
+    log_likelihood,
+    aic,
+    bic,
+    r_squared_within,
+    r_squared_between,
+    r_squared_overall,
+    hausman_statistic,
+    hausman_p_value,
+    hausman_df,
+});
+
+#[pymethods]
+impl REResult {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
 }
 
 /// [`PanelCovKind`]に対応する列（`cluster`・`dk_time`）をDataFrameから抽出して

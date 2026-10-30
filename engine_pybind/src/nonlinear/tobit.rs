@@ -503,6 +503,7 @@ impl TobitResult {
     ))]
     fn marginal_effects(
         &self,
+        py: Python<'_>,
         at: String,
         target: String,
         confidence_level: f64,
@@ -510,9 +511,12 @@ impl TobitResult {
         guard(|| {
             let at = parse_marginal_effects_at(&at)?;
             let target = parse_marginal_effects_target(&target)?;
-            let effects = self
-                .estimator
-                .marginal_effects(at, target, confidence_level)
+            // 推定量だけを使う純Rustの計算なので、GILを手放して走らせる。
+            let effects = py
+                .detach(|| {
+                    self.estimator
+                        .marginal_effects(at, target, confidence_level)
+                })
                 .map_err(mle_error_to_pyerr)?;
 
             Ok(MarginalEffectsResult {

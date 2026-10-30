@@ -419,14 +419,15 @@ impl ProbitResult {
     #[pyo3(signature = (at="overall".to_string(), confidence_level=0.95))]
     fn marginal_effects(
         &self,
+        py: Python<'_>,
         at: String,
         confidence_level: f64,
     ) -> PyResult<MarginalEffectsResult> {
         guard(|| {
             let at = parse_marginal_effects_at(&at)?;
-            let effects = self
-                .estimator
-                .marginal_effects(at, confidence_level)
+            // 推定量だけを使う純Rustの計算なので、GILを手放して走らせる。
+            let effects = py
+                .detach(|| self.estimator.marginal_effects(at, confidence_level))
                 .map_err(mle_error_to_pyerr)?;
 
             Ok(MarginalEffectsResult {

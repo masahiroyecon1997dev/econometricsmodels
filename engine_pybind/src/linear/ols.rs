@@ -560,19 +560,23 @@ impl OLSResult {
 
             let x_names = x_column_names(&self.param_names, self.has_intercept, 0);
             let df = select_columns(&source, "data", x_names)?.frame;
-            let x_columns = extract_f64_columns(&df, x_names, ColumnSource::new("x", "data"))?;
-            let result = white_test(&x_columns, x_names, &self.residuals)
-                .map_err(least_squares_error_to_pyerr)?;
+            // 列の取り込み（GILが要る）の後は、Pythonオブジェクトに触れない。
+            py.detach(|| {
+                let x_columns = extract_f64_columns(&df, x_names, ColumnSource::new("x", "data"))?;
+                let result = white_test(&x_columns, x_names, &self.residuals)
+                    .map_err(least_squares_error_to_pyerr)?;
 
-            let (statistic, p_value, df_denom, distribution) = select_statistic(&result, version);
-            Ok(WhiteTestOutput {
-                statistic,
-                p_value,
-                df: result.df,
-                df_denom,
-                distribution,
-                aux_terms: result.aux_terms,
-                dropped_terms: result.dropped_terms,
+                let (statistic, p_value, df_denom, distribution) =
+                    select_statistic(&result, version);
+                Ok(WhiteTestOutput {
+                    statistic,
+                    p_value,
+                    df: result.df,
+                    df_denom,
+                    distribution,
+                    aux_terms: result.aux_terms,
+                    dropped_terms: result.dropped_terms,
+                })
             })
         })
     }
@@ -630,20 +634,24 @@ impl OLSResult {
                 "x"
             };
             let df = select_columns(&source, "data", z_names)?.frame;
-            let z_columns =
-                extract_f64_columns(&df, z_names, ColumnSource::new(z_argument, "data"))?;
-            let result = breusch_pagan_test(&z_columns, z_names, &self.residuals)
-                .map_err(least_squares_error_to_pyerr)?;
+            // 列の取り込み（GILが要る）の後は、Pythonオブジェクトに触れない。
+            py.detach(|| {
+                let z_columns =
+                    extract_f64_columns(&df, z_names, ColumnSource::new(z_argument, "data"))?;
+                let result = breusch_pagan_test(&z_columns, z_names, &self.residuals)
+                    .map_err(least_squares_error_to_pyerr)?;
 
-            let (statistic, p_value, df_denom, distribution) = select_statistic(&result, version);
-            Ok(BreuschPaganTestOutput {
-                statistic,
-                p_value,
-                df: result.df,
-                df_denom,
-                distribution,
-                aux_terms: result.aux_terms,
-                dropped_terms: result.dropped_terms,
+                let (statistic, p_value, df_denom, distribution) =
+                    select_statistic(&result, version);
+                Ok(BreuschPaganTestOutput {
+                    statistic,
+                    p_value,
+                    df: result.df,
+                    df_denom,
+                    distribution,
+                    aux_terms: result.aux_terms,
+                    dropped_terms: result.dropped_terms,
+                })
             })
         })
     }
@@ -695,41 +703,44 @@ impl OLSResult {
                 x_column_names(&self.param_names, self.has_intercept, 0).to_vec();
             needed.push(time.clone());
             let df = select_columns(&source, "data", &needed)?.frame;
-            let x_columns = extract_model_x_columns(
-                &df,
-                &self.param_names,
-                self.has_intercept,
-                0,
-                ColumnSource::new("x", "data"),
-            )?;
-            let time_order =
-                extract_time_order_ranks(&df, &time, ColumnSource::new("time", "data"))?;
-            let result = breusch_godfrey_test(
-                &x_columns,
-                self.has_intercept,
-                &self.residuals,
-                &time_order,
-                nlags,
-            )
-            .map_err(least_squares_error_to_pyerr)?;
+            // 列の取り込み（GILが要る）の後は、Pythonオブジェクトに触れない。
+            py.detach(|| {
+                let x_columns = extract_model_x_columns(
+                    &df,
+                    &self.param_names,
+                    self.has_intercept,
+                    0,
+                    ColumnSource::new("x", "data"),
+                )?;
+                let time_order =
+                    extract_time_order_ranks(&df, &time, ColumnSource::new("time", "data"))?;
+                let result = breusch_godfrey_test(
+                    &x_columns,
+                    self.has_intercept,
+                    &self.residuals,
+                    &time_order,
+                    nlags,
+                )
+                .map_err(least_squares_error_to_pyerr)?;
 
-            Ok(match version {
-                StatisticVersion::F => BreuschGodfreyTestOutput {
-                    statistic: result.f_statistic,
-                    p_value: result.f_p_value,
-                    df: result.df,
-                    df_denom: Some(result.f_df_denom),
-                    distribution: "f".to_string(),
-                    nlags: result.df,
-                },
-                StatisticVersion::Lm => BreuschGodfreyTestOutput {
-                    statistic: result.lm_statistic,
-                    p_value: result.lm_p_value,
-                    df: result.df,
-                    df_denom: None,
-                    distribution: "chi2".to_string(),
-                    nlags: result.df,
-                },
+                Ok(match version {
+                    StatisticVersion::F => BreuschGodfreyTestOutput {
+                        statistic: result.f_statistic,
+                        p_value: result.f_p_value,
+                        df: result.df,
+                        df_denom: Some(result.f_df_denom),
+                        distribution: "f".to_string(),
+                        nlags: result.df,
+                    },
+                    StatisticVersion::Lm => BreuschGodfreyTestOutput {
+                        statistic: result.lm_statistic,
+                        p_value: result.lm_p_value,
+                        df: result.df,
+                        df_denom: None,
+                        distribution: "chi2".to_string(),
+                        nlags: result.df,
+                    },
+                })
             })
         })
     }

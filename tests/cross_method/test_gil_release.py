@@ -1,4 +1,4 @@
-"""`fit()`が推定中にGILを手放すことのテスト。
+"""`fit()`と推定後のメソッドが計算中にGILを手放すことのテスト。
 
 GILを持ったまま推定すると、Webサーバー・GUIに組み込んだときに他のPythonスレッドが止まり、
 複数のfitをスレッドで並行しても速くならない。境界の関数は、列の取り込み（GILが要る）の後の
@@ -22,6 +22,7 @@ import threading
 import time
 from collections.abc import Callable
 from functools import cache, partial
+from typing import Any
 
 import econometricsmodels
 import numpy as np
@@ -54,7 +55,7 @@ FITS: dict[str, Callable[[pl.DataFrame], object]] = {
     "RE": lambda d: RE(d, y="y", x=X_NAMES, entity="entity").fit(),
 }
 
-# 手法ごとの行数（`PERIODS`の倍数）。反復最適化・第一段階を持つ手法は、同じ行数でも
+# ケースごとの行数（`PERIODS`の倍数）。反復最適化・第一段階を持つ手法は、同じ行数でも
 # 桁違いに遅い。
 ROWS = {
     "OLS": 200_000,
@@ -65,7 +66,50 @@ ROWS = {
     "IV": 50_000,
     "FE": 200_000,
     "RE": 50_000,
+    # 推定後のメソッド。White検定は補助回帰の項数が多く、同じ行数でも遅い。
+    # `marginal_effects`は`fit()`より桁違いに速いので、`fit()`（測定の外）に時間がかかり
+    # すぎない範囲で行数を増やしてある。
+    "OLS.white_test": 40_000,
+    "OLS.breusch_pagan_test": 200_000,
+    "OLS.breusch_godfrey_test": 100_000,
+    "Logit.marginal_effects": 40_000,
+    "Probit.marginal_effects": 40_000,
+    "Tobit.marginal_effects": 40_000,
 }
+
+
+def _fit_case(fit: Callable[[pl.DataFrame], object]):
+    """`fit()`そのものを測るケース。"""
+    return lambda data: partial(fit, data)
+
+
+def _post_case(method: str, call: Callable[[Any], object]):
+    """推定後のメソッド`call(results)`を測るケース。`fit()`は測定の外で済ませる。"""
+    return lambda data: partial(call, FITS[method](data))
+
+
+# 測るケース。キーは手法名（`fit()`）か`<手法名>.<メソッド名>`（推定後のメソッド）。
+# 推定後のメソッドは、列の取り込み（GILが要る）の後の計算をGILを手放して走らせるもの。
+CASES: dict[str, Callable[[pl.DataFrame], Callable[[], object]]] = {
+    **{method: _fit_case(fit) for method, fit in FITS.items()},
+    "OLS.white_test": _post_case("OLS", lambda r: r.white_test()),
+    "OLS.breusch_pagan_test": _post_case(
+        "OLS", lambda r: r.breusch_pagan_test()
+    ),
+    "OLS.breusch_godfrey_test": _post_case(
+        "OLS", lambda r: r.breusch_godfrey_test(time="t", nlags=2)
+    ),
+    "Logit.marginal_effects": _post_case(
+        "Logit", lambda r: r.marginal_effects()
+    ),
+    "Probit.marginal_effects": _post_case(
+        "Probit", lambda r: r.marginal_effects()
+    ),
+    "Tobit.marginal_effects": _post_case(
+        "Tobit", lambda r: r.marginal_effects()
+    ),
+}
+
 
 # 最長の停止時間が`fit()`の所要時間に占める割合の上限。GILを持ったままだと1.0に近く、
 # 手放していれば0.006以下。全体の1割を超えてGILを握る区間（例: 反復ごとのHessian計算）が
@@ -75,16 +119,19 @@ MAX_STALL_FRACTION = 0.10
 # GILを返してもらうまでの待ちを短くして、手放した場合の停止時間を安定して小さくする。
 SWITCH_INTERVAL = 0.0002
 
-# これより短いfitは、切り替え間隔やスケジューラの揺らぎと区別できない。この長さに
-# 届くまで行数を倍にして測り直し、`MAX_DOUBLINGS`回倍にしても届かなければ失敗にする。
-MIN_MEASURABLE_SECONDS = 0.05
+# 所要時間がこの長さに届くまで行数を倍にして測り直す。`MAX_DOUBLINGS`回倍にしても届かない
+# ときは、`MIN_MEASURABLE_SECONDS`以上なら測れたものとし、それ未満（切り替え間隔や
+# スケジューラの揺らぎと区別できない）なら失敗にする。デバッグビルド（CI）では行数を
+# 倍にする必要はない。
+TARGET_SECONDS = 0.05
+MIN_MEASURABLE_SECONDS = 0.01
 MAX_DOUBLINGS = 6
 
 
 @cache
 def make_data(n: int) -> pl.DataFrame:
     """全手法で使える列を持つ`n`行のデータ。`y_bin`（二値）・`y_cens`（0で左打ち切り）・
-    `w`（重み）・`entity`（10期のパネル）・内生変数`endog`と操作変数`z1`/`z2`を含む。"""
+    `w`（重み）・`entity`（10期のパネル）・時間順`t`・内生変数`endog`と操作変数`z1`/`z2`を含む。"""
     rng = np.random.default_rng(587)
     x = rng.normal(size=(n, len(X_NAMES)))
     z = rng.normal(size=(n, 2))
@@ -98,6 +145,7 @@ def make_data(n: int) -> pl.DataFrame:
         y_cens=np.maximum(latent, 0.0),
         w=rng.uniform(0.5, 2.0, size=n),
         entity=np.arange(n) // PERIODS,
+        t=np.arange(n),
         endog=endog,
         z1=z[:, 0],
         z2=z[:, 1],
@@ -143,39 +191,40 @@ def _longest_stall_during(fit: Callable[[], object]) -> tuple[float, float]:
         sys.setswitchinterval(previous)
 
 
-def _measure(method: str) -> tuple[float, float, int]:
-    """`method`の`fit()`を測る。短すぎれば行数を倍にして測り直し、最後の測定の
+def _measure(case: str) -> tuple[float, float, int]:
+    """`case`を測る。短すぎれば行数を倍にして測り直し、最後の測定の
     （停止時間、所要時間、行数）を返す。"""
-    fit = FITS[method]
-    n = ROWS[method]
+    n = ROWS[case]
     for _ in range(MAX_DOUBLINGS + 1):
-        data = make_data(n)
-        stall, duration = _longest_stall_during(partial(fit, data))
-        if duration >= MIN_MEASURABLE_SECONDS:
+        stall, duration = _longest_stall_during(CASES[case](make_data(n)))
+        if duration >= TARGET_SECONDS:
             break
         n *= 2
     return stall, duration, n
 
 
 def test_every_method_is_covered():
-    """公開されている手法（`*Options`）が、`FITS`と`ROWS`の両方に載っている。
-    新しい手法を足したときの足し忘れを検出する。"""
+    """公開されている手法（`*Options`）の`fit()`が`FITS`に載り、測るケース（`CASES`）と
+    行数（`ROWS`）が揃っている。新しい手法を足したときの足し忘れを検出する。"""
     methods = {
         name.removesuffix("Options")
         for name in econometricsmodels.__all__
         if name.endswith("Options")
     }
     assert set(FITS) == methods
-    assert set(ROWS) == methods
+    assert set(ROWS) == set(CASES)
+    assert methods <= set(CASES)
+    for case in CASES.keys() - methods:
+        assert case.partition(".")[0] in methods, case
     assert all(n % PERIODS == 0 for n in ROWS.values())
 
 
-@pytest.mark.parametrize("method", FITS)
-def test_fit_lets_other_python_threads_run(method):
-    stall, duration, n = _measure(method)
+@pytest.mark.parametrize("case", CASES)
+def test_other_python_threads_run_during(case):
+    stall, duration, n = _measure(case)
     assert duration >= MIN_MEASURABLE_SECONDS, (
-        f"fit took only {duration:.4f}s at {n} rows, too short to measure"
+        f"{case} took only {duration:.4f}s at {n} rows, too short to measure"
     )
     assert stall < MAX_STALL_FRACTION * duration, (
-        f"another thread was stalled for {stall:.3f}s of a {duration:.3f}s fit"
+        f"another thread was stalled for {stall:.3f}s of a {duration:.3f}s call"
     )

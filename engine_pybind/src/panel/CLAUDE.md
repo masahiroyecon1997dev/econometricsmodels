@@ -123,7 +123,7 @@ FEの1段階目（データ抽出・pyclass定義）と同じ段階（`REOptions
   - **`dk_time`は`FeInput.time`には一切渡らない**: `FeInput::from_group_codes`の時点引数には常に`effects[1]`由来の値のみを渡す（2-way判定・within変換用）。`dk_time`は`FeCovType::Dk { time: TimeKeys }`（下記、必須）に直接渡す、別経路。
   - **列の型の規則は位置で決まる**: `effects[0]`は`extract_entity_groups`（同一性だけのキー）、`effects[1]`は`extract_time_keys`（時点のキー）で抽出する（`panel/common.rs`の`extract_effects`）。従来の`entity`・`time`と同じ規則で、推定値と受け付ける入力を変えない。
   - **エラーの`argument`は`"effects"`に統一**し、どの列かは`column`で示す。`SINGLETON_GROUP`のparamsは`{argument, column, group}`で、`column`は`effects`の該当要素の列名。エンジンは`FeInput`/`ReInput`の`with_effect_names`で列名を受け取るだけで計算には使わない（`build_{fe,re}_input`が`.with_effect_names(effects[0].clone(), effects.get(1).cloned())`を呼ぶ）。
-  - **`effects`の上限は`MAX_EFFECTS`（当面FE/REとも2）**。3要素以上は`EFFECTS_TOO_MANY`（params: `model`・`n_effects`・`max_effects`）。文面は上限だけを示す中立の形（FEは将来上限を上げる予定、REは交差ランダム効果が標準的な推定量でないため上限が変わらない見込み、で理由は違うが、同じ`code`は同じ`hint`という規則のため）。
+  - **`effects`の上限は`MAX_EFFECTS`（当面FE/REとも2）**。3要素以上は`EFFECTS_TOO_MANY`（params: `model`・`n_columns`・`max_columns`）。文面は上限だけを示す中立の形（FEは将来上限を上げる予定、REは交差ランダム効果が標準的な推定量でないため上限が変わらない見込み、で理由は違うが、同じ`code`は同じ`hint`という規則のため）。
 - **`dk_bandwidth`**（Driscoll-Kraay HACのバンド幅）: OLS/WLS/IVの`hac_lags`と同じ役割だが、DKはNewey-West（観測数`n`ベース）と計算式・意味が異なる（`engine::panel::fe::FeCovType::Dk`の`bandwidth`は時点数`t`ベース）ため、意図的に別名にした（ユーザー確認済み、2026-09-12）。
 
 ## engine側の変更（`FeCovType::Dk`の拡張に伴うもの）

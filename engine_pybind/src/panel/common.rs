@@ -188,8 +188,8 @@ pub(crate) fn validate_effects(model: PanelModel, effects: &[String]) -> PyResul
             ErrorCode::EffectsTooMany,
             vec![
                 ("model", ParamValue::from(model.name())),
-                ("n_effects", ParamValue::from(effects.len())),
-                ("max_effects", ParamValue::from(MAX_EFFECTS)),
+                ("n_columns", ParamValue::from(effects.len())),
+                ("max_columns", ParamValue::from(MAX_EFFECTS)),
             ],
         ));
     }

@@ -84,7 +84,7 @@ def test_empty_effects_raises(name, model, panel):
 @pytest.mark.parametrize(("name", "model"), MODELS)
 def test_three_effects_raise_effects_too_many(name, model, panel):
     with raises_error(
-        "EFFECTS_TOO_MANY", model=name, n_effects=3, max_effects=2
+        "EFFECTS_TOO_MANY", model=name, n_columns=3, max_columns=2
     ):
         _fit(model, panel, ["firm", "year", "group"])
 

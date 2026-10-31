@@ -1888,18 +1888,18 @@ pub static CATALOG: &[ErrorSpec] = &[
                 in_text: true,
             },
             ParamSpec {
-                name: "n_effects",
+                name: "n_columns",
                 ty: ParamType::Int,
                 in_text: true,
             },
             ParamSpec {
-                name: "max_effects",
+                name: "max_columns",
                 ty: ParamType::Int,
                 in_text: true,
             },
         ],
-        message: r#"{model} supports at most {max_effects} columns in effects, but {n_effects} were given."#,
-        hint: Some(r#"Pass at most {max_effects} columns in effects."#),
+        message: r#"{model} supports at most {max_columns} columns in effects, but {n_columns} were given."#,
+        hint: Some(r#"Pass at most {max_columns} columns in effects."#),
         stage_allowed: false,
     },
     ErrorSpec {

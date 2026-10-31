@@ -21,6 +21,9 @@ PAGES = sorted(
     + list((DOCS / "usage").glob("*.md"))
 )
 CODE_BLOCK = re.compile(r"```python\n(.*?)```", re.DOTALL)
+# 先頭にこの行を置いたブロックは実行しない（ワーカープロセスを起動する例など、
+# テストの中では動かせないもの）。理由を行の後ろに書く。
+SKIP_MARKER = "# doc-test: skip"
 
 
 @pytest.mark.parametrize("page", PAGES, ids=lambda p: p.name)
@@ -29,6 +32,8 @@ def test_python_examples_run(page, capsys):
     for index, block in enumerate(
         CODE_BLOCK.findall(page.read_text(encoding="utf-8"))
     ):
+        if block.startswith(SKIP_MARKER):
+            continue
         try:
             code = compile(block, f"{page.name}[{index}]", "exec")
             exec(code, namespace)  # noqa: S102

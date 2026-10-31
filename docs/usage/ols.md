@@ -117,7 +117,7 @@ predicted = result.predict(new_data=new_data)
 print(predicted)  # [..., ...] (a plain list of floats)
 ```
 
-`OLSResults.augment()` takes the same `new_data` argument, but instead returns the source data (the training data, or `new_data` when given) with the predicted values appended as a `"predicted"` column — a polars DataFrame rather than a plain list. This is the one exception to the library's general policy of not returning DataFrames.
+`OLSResults.augment()` takes the same `new_data` argument, but instead returns the source data (the training data, or `new_data` when given) with the predicted values appended as a `"predicted"` column — a polars DataFrame rather than a plain list. `augment()` (here and in WLS, Logit, Probit and Tobit) is the exception to the library's general policy of not returning DataFrames.
 
 ```python
 augmented = result.augment(new_data=new_data)

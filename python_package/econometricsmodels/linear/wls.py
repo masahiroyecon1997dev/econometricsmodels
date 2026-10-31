@@ -38,8 +38,9 @@ class WLS:
         x: List of column names of the independent variables.
         weight: Column name of the weight column. Treated as an
             analytic weight (proportional to the inverse of the
-            variance; no normalization required). Non-positive values
-            raise `ValidationError`.
+            variance; no normalization required). Every weight must be
+            finite and strictly positive; a zero, negative, missing, NaN
+            or infinite weight raises `ValidationError`.
         options: Estimation options. Defaults to `WLSOptions()`
             (classical, with intercept, confidence_level=0.95) when
             omitted.

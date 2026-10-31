@@ -41,9 +41,10 @@ print(restored.white_test() == result.white_test())  # True
 
 ## Sending results between processes
 
-Options go to the worker, the result comes back. Results are ordinary pickleable objects, so no conversion is needed. The worker function must be importable (defined at the top level of a module), as for any pickled function; this is the usual `multiprocessing` rule, not one of this package.
+Options go to the worker, the result comes back. Results are ordinary pickleable objects, so no conversion is needed. The worker function must be importable (defined at the top level of a module), as for any pickled function; this is the usual `multiprocessing` rule, not one of this package. For the same reason the code that starts the pool must sit under an `if __name__ == "__main__":` guard when the start method imports the main module in each worker (`spawn`, the default on Windows and macOS, and `forkserver`, the default on Linux from Python 3.14).
 
-```py
+```python
+# doc-test: skip (starts worker processes)
 from concurrent.futures import ProcessPoolExecutor
 
 import polars as pl
@@ -64,19 +65,20 @@ if __name__ == "__main__":
 
 `joblib` works the same way:
 
-```py
+```python
+# doc-test: skip (continues the example above: `fit_one`, `frames`, `options`)
 from joblib import Parallel, delayed
 
 results = Parallel(n_jobs=4)(delayed(fit_one)((frame, options)) for frame in frames)
 ```
 
-The estimators release the Python GIL while they compute, so threads (`ThreadPoolExecutor`, `joblib`'s threading backend) also run fits in parallel and need no pickling at all. Use processes when the surrounding Python work is the bottleneck, or when the results have to leave the process (a cache, a queue).
+The estimators release the Python GIL while they compute, so threads (`ThreadPoolExecutor`, `joblib`'s threading backend) also run fits in parallel and need no pickling at all (see [Using fits from threads](performance.md#using-fits-from-threads)). Use processes when the surrounding Python work is the bottleneck, or when the results have to leave the process (a cache, a queue).
 
 ## What a pickle contains
 
-A pickle contains everything the result needs, **including the `polars.DataFrame` that was passed to `fit()`** (all of its columns, also the ones the model does not use). That is what lets a restored result call `augment()` and the diagnostic tests; a result without the data would raise `TRAINING_DATA_NOT_RETAINED` there.
+A pickle contains everything the result needs, **including the `polars.DataFrame` that was passed to `fit()`** (all of its columns, also the ones the model does not use). That is what lets a restored result call `augment()` and the diagnostic tests; a result without the data raises `AUGMENT_REQUIRES_NEW_DATA` in `augment()` and `TRAINING_DATA_NOT_RETAINED` in the diagnostic tests (see [Validation and errors](validation.md) and [Error codes](error-codes.md)).
 
-The consequence is size: **a pickle is at least as large as the DataFrame you fitted on.** For a DataFrame of three float columns with 100,000 rows (4.0 MB), the pickle of a `LogitResult` is about 4.0 MB (the DataFrame plus the coefficients), and that of an `OLSResults` about 5.6 MB, because it also holds the residuals and fitted values (two values per row). Logit, Probit and Tobit do not store their design matrix: it is rebuilt from the DataFrame when the pickle is restored, with the same column extraction as `fit()`, so restoring costs about as much as reading the columns again. The time to pickle grows in proportion to the size.
+The consequence is size: **a pickle is at least as large as the DataFrame you fitted on.** For a DataFrame of three float columns with 100,000 rows (2.4 MB), the pickle of a `LogitResult` is about 2.4 MB (the DataFrame plus the coefficients), and that of an `OLSResults` about 4.0 MB, because it also holds the residuals and fitted values (two values per row). Logit, Probit and Tobit do not store their design matrix: it is rebuilt from the DataFrame when the pickle is restored, with the same column extraction as `fit()`, so restoring costs about as much as reading the columns again. The time to pickle grows in proportion to the size.
 
 When only the numbers are needed, take them out of the result before sending it, instead of sending the result:
 
@@ -96,7 +98,7 @@ Some results cost a little more than others:
 
 - `FEResults` computes the fixed effects when it is pickled or copied, if `fixed_effects()` has not been called yet (the work grows with the number of entities). `fit()` itself is not slowed down.
 - `IVResults` keeps the first-stage regression of every endogenous variable, so its pickle holds one result per endogenous variable.
-- The results returned by `IVResults.first_stage()` keep no training data, so they cannot call `augment()` or the diagnostic tests, before or after a round trip (`TRAINING_DATA_NOT_RETAINED`).
+- The results returned by `IVResults.first_stage()` keep no training data, so they cannot call `augment()` without `new_data` (`AUGMENT_REQUIRES_NEW_DATA`) or the diagnostic tests (`TRAINING_DATA_NOT_RETAINED`), before or after a round trip.
 
 ## `copy.copy` and `copy.deepcopy`
 
@@ -106,7 +108,7 @@ Some results cost a little more than others:
 
 A pickle is for moving results between processes and for short-lived caches, not for archiving them.
 
-- **The version of econometricsmodels must be the same** when the pickle is written and read. Each pickle carries a format version, and restoring one that does not match (an older or newer package, or a changed set of fields) raises `ValidationError` with the code `PICKLE_FORMAT_MISMATCH`. The package does not convert old pickles. When a cache outlives an upgrade, treat that error as a cache miss and fit again.
+- **Use the same version of econometricsmodels** to write and to read a pickle. Each pickle carries a format version, which changes when the stored fields change. Restoring a pickle whose format version differs from the one of the installed package raises `ValidationError` with the code `PICKLE_FORMAT_MISMATCH`. Two package versions can share a format version, but the package does not promise it, and it does not convert old pickles. When a cache outlives an upgrade, treat that error as a cache miss and fit again.
 - **The DataFrame inside is pickled by polars**, so the polars versions of the two sides must be compatible in the way polars itself requires. An incompatibility there is reported by polars, not by `PICKLE_FORMAT_MISMATCH`.
 - **Only unpickle data you trust.** This is true of every `pickle`. The restore checks the structure and the types of the stored values, but not their numerical meaning: an edited pickle can hold coefficients that the estimator never produced, and the restored result reports them as it is told to.
 - To keep a result for the long term, store the values you need (for example `result.params_table()` as JSON), together with the data and the options, and fit again when you need the object.
@@ -114,5 +116,5 @@ A pickle is for moving results between processes and for short-lived caches, not
 ```python
 import json
 
-print(json.dumps(result.params_table())[:60])
+print(json.dumps(result.params_table()[0]))
 ```

@@ -20,7 +20,7 @@ A column is read in one of four roles, and each role accepts different dtypes. A
 | Time period (panel) | `time` (FE, RE), `dk_time` | Integers, floats, `String`, `Categorical`, `Enum`, `Date`, `Datetime` (no time zone) |
 | Time order (HAC) | `hac_time` | Integers, floats, `Decimal`, `Date`, `Datetime` (with or without a time zone). Not `Boolean`, which has at most two distinct values |
 
-Not accepted in a numeric role: `String`, `Categorical`, `Enum`, `Date`, `Datetime`, `Time`, `Duration`, `Binary`, `List`, `Array`, `Struct`. Also not accepted as a group identity or a time period: `Time`, `Duration`, `Decimal`, `Binary`, `List`, `Array`, `Struct`. A `Datetime` with a time zone is rejected as a group identity or a time period, with a message that says how to remove the zone: convert it to the zone you want to keep, then call `.dt.replace_time_zone(None)`. (`hac_time` accepts a time zone, and is compared in its own dtype rather than converted to a float; see [Order of observations for HAC](#order-of-observations-for-hac).) A column of the `Null` dtype (every value is missing) is reported as containing missing values, not as a dtype problem.
+Not accepted in a numeric role: `String`, `Categorical`, `Enum`, `Date`, `Datetime`, `Time`, `Duration`, `Binary`, `List`, `Array`, `Struct`. Also not accepted as a group identity or a time period: `Time`, `Duration`, `Decimal`, `Binary`, `List`, `Array`, `Struct`; nor, as a time period, `Boolean`. A `Datetime` with a time zone is rejected as a group identity or a time period, with a message that says how to remove the zone: convert it to the zone you want to keep, then call `.dt.replace_time_zone(None)`. (`hac_time` accepts a time zone, and is compared in its own dtype rather than converted to a float; see [Order of observations for HAC](#order-of-observations-for-hac).) A column of the `Null` dtype (every value is missing) is reported as containing missing values, not as a dtype problem.
 
 If the numbers you want to use are stored as strings or as dates, convert them yourself so that the intent is explicit:
 
@@ -48,9 +48,9 @@ Group identity and time period columns are compared by their text form, so only 
 
 ## Order of time periods
 
-For `cov_type="dk"` (Driscoll-Kraay) in FE and RE, the periods must be put in time order. The order comes from the values of the time column, not from the text of the labels, so integers with different numbers of digits (`1, 2, ..., 12`), negative numbers and decimals are ordered correctly:
+For `cov_type="dk"` (Driscoll-Kraay) in FE and RE, the periods of the `dk_time` column must be put in time order. The same order applies to the `time` column of FE and RE, which defines the time effects. The order comes from the values of the column, not from the text of the labels, so integers with different numbers of digits (`1, 2, ..., 12`), negative numbers and decimals are ordered correctly:
 
-| Dtype of the time column | Order of the periods |
+| Dtype of the `dk_time` or `time` column | Order of the periods |
 |---|---|
 | Integers, floats | Numeric, ascending |
 | `Date`, `Datetime` (no time zone) | Chronological |
@@ -73,23 +73,23 @@ Arguments that name columns must have the expected Python type. A mistake in the
 | `options` | The options class of the method (for example `OLSOptions`), or omitted |
 
 ```python
-# TypeError: x must be a list of column names, got str. Pass a list, for example x=["x1"].
-OLS(df, y="y", x="x1")
+# TypeError at fit(): x must be a list of column names, got str. Pass a list, for example x=["x1"].
+OLS(df, y="y", x="x1").fit()
 
-OLS(df, y="y", x=["x1"])  # correct
+OLS(df, y="y", x=["x1"]).fit()  # correct
 ```
 
-Numeric options are checked the same way, both when the options object is created and when an attribute is assigned. An integer option (`hac_lags`, `max_iter`, `gmm_max_iter`, `dk_bandwidth`) must be an `int`, and a real-valued option (`confidence_level`, `tol`, `gmm_tol`, `lower`, `upper`) must be an `int` or a `float`. A `bool`, a string, or `None` where a number is required raises `TypeError`: `OLSOptions(hac_lags=True)` is an error, not one lag. Whether the value is acceptable (a range, NaN, a very large integer) is checked at `fit()` and raises `ValidationError`. The iteration limits `max_iter` (Logit, Probit, Tobit) and `gmm_max_iter` (IV) must be between 1 and 10,000, and between 3 and 10,000: a larger value is rejected, because a problem that does not converge would run for an unbounded time and cannot be interrupted.
+Numeric options are checked the same way, both when the options object is created and when an attribute is assigned. An integer option (`hac_lags`, `max_iter`, `gmm_max_iter`, `dk_bandwidth`) must be an `int`, and a real-valued option (`confidence_level`, `tol`, `gmm_tol`, `lower`, `upper`) must be an `int` or a `float`. A `bool`, a string, or `None` where a number is required raises `TypeError`: `OLSOptions(hac_lags=True)` is an error, not one lag. Whether the value is acceptable (a range, NaN, a very large integer) is checked at `fit()` and raises `ValidationError`. The iteration limits are `max_iter` (Logit, Probit, Tobit), which must be between 1 and 10,000, and `gmm_max_iter` (IV), which must be between 3 and 10,000: a larger value is rejected, because a problem that does not converge would run for an unbounded time and cannot be interrupted.
+
+## Order of observations for HAC
+
+For `cov_type="hac"` in OLS, WLS and IV, and for `gmm_weight_type="hac"` in IV, the autocovariances are computed in time order, and `hac_time` names the column that gives it. It is required: the row order of the data is never assumed to be the time order, because data that are not sorted by time would otherwise give a wrong estimate that looks time-ordered. The observations are sorted by that column, and only the order of its values is used, not the gaps between them. If the rows are already in time order, add an index column (for example `df.with_row_index("t")`) and pass its name. (statsmodels uses the row order and takes no time column; R's `sandwich` (`NeweyWest`, `kernHAC`) uses the row order unless you pass `order.by`. This package has no row-order default on purpose.)
+
+Every value of `hac_time` must be different. If two rows share a value, their order is undefined, so the call raises a `ValidationError` that names the first two such rows. It does so for a constant column and for a column where only one pair repeats, instead of resolving the tie by row order and returning an estimate that looks time-ordered. If your data has several observations per time point, as in a panel, use FE or RE with `cov_type="dk"` (where observations at the same time are expected); otherwise make the values distinct.
+
+The column is compared in its own dtype, so the conversion to a 64-bit float described above does not apply to it: large integers and nanosecond `Datetime` values keep their exact order.
 
 ## Where to look next
 
 - [Validation and errors](validation.md): the errors raised for missing values, sample size and options, and what is not checked.
 - [Inference conventions](inference-conventions.md): the distributions and degrees of freedom behind the reported statistics.
-
-## Order of observations for HAC
-
-For `cov_type="hac"` in OLS, WLS and IV, and for `gmm_weight_type="hac"` in IV, the autocovariances are computed in time order, and `hac_time` names the column that gives it. It is required: the row order of the data is never assumed to be the time order, because data that are not sorted by time would otherwise give a wrong estimate that looks time-ordered. The observations are sorted by that column, and only the order of its values is used, not the gaps between them. If the rows are already in time order, add an index column (for example `df.with_row_index("t")`) and pass its name. (statsmodels and R's `sandwich` use the row order and take no time column, so this differs from them on purpose.)
-
-Every value of `hac_time` must be different. If two rows share a value, their order is undefined, so the call raises a `ValidationError` that names the first two such rows. It does so for a constant column and for a column where only one pair repeats, instead of resolving the tie by row order and returning an estimate that looks time-ordered. If your data has several observations per time point, as in a panel, use FE or RE with `cov_type="dk"` (where observations at the same time are expected); otherwise make the values distinct.
-
-The column is compared in its own dtype, so the conversion to a 64-bit float described above does not apply to it: large integers and nanosecond `Datetime` values keep their exact order.

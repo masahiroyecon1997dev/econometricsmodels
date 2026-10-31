@@ -30,11 +30,11 @@ print(result.pseudo_r_squared)
 
 ```python
 predicted = result.predict()
-print(predicted)  # [0.83, 0.12, ...] (a plain list of probabilities)
+print(predicted)  # [0.11, 0.18, 0.29, ...] (a plain list of probabilities)
 
 new_data = pl.DataFrame({"x1": [1.0, 2.0]})
 predicted = result.predict(new_data=new_data)
-print(predicted)  # [..., ...]
+print(predicted)  # [0.11, 0.18] (probabilities for the two new rows)
 
 table = result.pred_table()
 for row in table:

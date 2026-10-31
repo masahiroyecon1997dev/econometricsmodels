@@ -4,12 +4,14 @@ This page summarizes which reference distribution each method uses for its test 
 
 ## Reference distributions by method
 
+Notation: `n` is the number of observations, `k` the number of coefficients, `G` the number of clusters, `n_entities` the number of panel entities, and `t_periods` the number of distinct periods of the `dk_time` column (the periods of the Driscoll-Kraay kernel).
+
 | Method | Coefficient statistics (`test_stats`) | Overall test | Degrees of freedom |
 |---|---|---|---|
 | OLS | t | F (`f_statistic`) | `n - k`; `G - 1` with `cov_type="cluster"` |
 | WLS | t | F | same as OLS |
 | FE | t | F | `df_resid` (`n - n_entities - k` for one-way) for `classical`/`hc1`-`hc3`; `G - 1` with `cov_type="cluster"`; `t_periods - 1` with `cov_type="dk"` |
-| RE (one-way and two-way) | t | F | `df_resid` (`n - k`, with `k` all coefficients including the constant, for `classical`/`hc1`-`hc3`); `G - 1` with `cov_type="cluster"`; `t_periods - 1` with `cov_type="dk"`. The F statistic follows `cov_type`, so `f_df_denom` equals the degrees of freedom of the t tests. See [Methods: RE](../methods/re.md#degrees-of-freedom) |
+| RE (one-way and two-way) | t | F | `df_resid` (`n - k`, with `k` all coefficients including the constant, for `classical`/`hc1`-`hc3`); `G - 1` with `cov_type="cluster"`; `t_periods - 1` with `cov_type="dk"`. The F statistic follows `cov_type`, so `f_df_denom` equals the degrees of freedom of the t tests. See [Definitions: RE](../methods/re.md#degrees-of-freedom) |
 | IV, `estimator="2sls"` | t | F (`wald_dist="f"`) | `df_resid`; `G - 1` with `cov_type="cluster"` |
 | IV, `estimator="gmm"` | normal | chi-squared (`wald_dist="chi2"`) | none |
 | Logit / Probit | normal | likelihood-ratio chi-squared (`lr_statistic`, `lr_df`) | none |
@@ -17,9 +19,9 @@ This page summarizes which reference distribution each method uses for its test 
 
 - Every results object reports the distribution actually used in `stat_dist` (`"t"` or `"normal"`) and the t degrees of freedom in `stat_df` (`None` for the normal distribution). `stat_df` is the value used for the p-values and confidence intervals, so it can differ from `df_resid` (for example with `cov_type="cluster"` in OLS, WLS, FE, RE and 2SLS, or `cov_type="dk"` in FE and RE).
 - The degrees of freedom of every test statistic are exposed so you can recompute a p-value yourself: `f_df_num` / `f_df_denom` (OLS, WLS, FE, RE), `wald_df_num` / `wald_df_denom` (IV), `wu_hausman_df_num` / `wu_hausman_df_denom`, `weak_instrument_f_df_num` / `weak_instrument_f_df_denom`, `overid_df` (IV), `lr_df` (Logit, Probit), `wald_df` (Tobit), `hausman_df` (RE). A degrees-of-freedom field is `None` when its statistic is not available. The overall F statistic (`f_statistic`, `f_p_value`) is also `None` when it is not defined, for example for a first-stage regression with `cov_type="cluster"` and no more clusters than slope coefficients (see [Weak instruments](#weak-instruments)).
-- `REOptions.variance_method` (`"swamy_arora"`, `"wallace_hussain"`, `"amemiya"`) selects how the RE variance components are estimated. Wallace-Hussain and Amemiya follow `plm`; Swamy-Arora on an unbalanced one-way panel is the `linearmodels` formula, not `plm`'s, so the two give different numbers there. The formulas and the cases that are rejected are in [Methods: RE](../methods/re.md#variance-components-variance_method).
+- `REOptions.variance_method` (`"swamy_arora"`, `"wallace_hussain"`, `"amemiya"`) selects how the RE variance components are estimated. Wallace-Hussain and Amemiya follow `plm`; Swamy-Arora on an unbalanced one-way panel is the `linearmodels` formula, not `plm`'s, so the two give different numbers there. The formulas and the cases that are rejected are in [Definitions: RE](../methods/re.md#variance-components-variance_method).
 - Two-way RE (`REOptions.time`, balanced panels) reports `n_periods`. `time` only defines the time effect: the Driscoll-Kraay time column is the separate `dk_time` option.
-- `wald_dist` (IV and Tobit) tells whether the overall Wald statistic is F or chi-squared, since the name alone does not.
+- `wald_dist` names the distribution of the overall Wald statistic: `"f"` or `"chi2"` for IV, depending on the estimator, and always `"chi2"` for Tobit.
 - `marginal_effects()` always uses the normal distribution.
 
 ### Why the choice differs between methods
@@ -55,7 +57,7 @@ The defaults below were checked against R 4.5.3 (sandwich 3.1.3, lmtest 0.9.40, 
 
 - **IV (`IV2SLS`, `IVGMM`)**: `fit(debiased=False)` is the default, which reports normal and chi-squared statistics. econometricsmodels 2SLS always reports t and F (equivalent to `debiased=True`, except with `cov_type="cluster"`, where the degrees of freedom are `G - 1` and linearmodels uses `n - k`); GMM always reports normal and chi-squared (equivalent to `debiased=False`).
 - **Panel (`PanelOLS`, `RandomEffects`)**: `fit(debiased=True)` is the default, which reports t and F, consistent with FE and RE here. Point estimates and the `classical`/`hc1`-`hc3` standard errors match linearmodels' `PanelOLS`/`RandomEffects`.
-    - The `cluster` and `dk` standard errors and their degrees of freedom differ from linearmodels. FE and RE use the fixest (R) and Stata small-sample corrections (`G/(G-1)·(n-1)/(n-K)`), which is what `fixest`, `xtreg` and `reghdfe` users expect, whereas linearmodels uses `n/(n-extra_df-k)`. The exact formulas are in [Methods: FE](../methods/fe.md#covariance-of-the-coefficients-cov_type) and [Methods: RE](../methods/re.md#covariance-of-the-coefficients-cov_type).
+    - The `cluster` and `dk` standard errors and their degrees of freedom differ from linearmodels. FE and RE use the fixest (R) and Stata small-sample corrections (`G/(G-1)·(n-1)/(n-K)`), which is what `fixest`, `xtreg` and `reghdfe` users expect, whereas linearmodels uses `n/(n-extra_df-k)`. The exact formulas are in [Definitions: FE](../methods/fe.md#covariance-of-the-coefficients-cov_type) and [Definitions: RE](../methods/re.md#covariance-of-the-coefficients-cov_type).
     - The RE F statistic is the Wald quadratic form (the same as `plm::pwaldtest(test = "F", vcov = ...)` and linearmodels' `f_statistic_robust`), not linearmodels' `f_statistic`. That one is a sum-of-squares version that ignores `cov_type`; the two agree only for the classical covariance on balanced panels, and linearmodels' value can even be negative on a very unbalanced panel.
     - RE accepts a time-invariant regressor (FE rejects it). The variance component σ_ε² is then estimated from the within regression of the time-varying regressors only, with `n - N - k_tv` degrees of freedom (as in `plm`), whereas linearmodels also counts the time-invariant columns, so its σ_ε² and therefore its coefficients differ from the fourth digit.
 
@@ -78,6 +80,10 @@ The result is not compared with the Stock-Yogo critical values, so no weak / str
 
 If you need an overidentification test that is robust to heteroskedasticity or clustering, use `estimator="gmm"` with a robust or cluster `gmm_weight_type` and read Hansen's J.
 
+## Endogeneity test (Wu-Hausman)
+
+`wu_hausman_statistic` and `wu_hausman_p_value` (IV, `estimator="2sls"` only) are the regression-based test described in [Definitions: IV](../methods/iv.md#endogeneity-wu_hausman_statistic). Unlike the weak-instrument statistic, it follows the `cov_type` passed to `fit()`; the F test has `wu_hausman_df_num` and `wu_hausman_df_denom` degrees of freedom.
+
 ## Other diagnostics
 
 - **White test (OLS, `white_test()`)**: a post-estimation diagnostic, not computed by `fit()`. `statistic="lm"` is `n * R²` of the auxiliary regression of the squared residuals on the regressors, their squares and cross products (chi-squared with `df` degrees of freedom); `statistic="f"` is the F version (`F(df, df_denom)`). The auxiliary regression always has a constant and does not depend on `cov_type`. Constant terms and terms numerically identical to an earlier one (such as the square of a 0/1 dummy) are dropped, and `df` counts the rank (`aux_terms` and `dropped_terms` show which terms). statsmodels `het_white` and R's `lmtest::bptest(studentize = TRUE)` give the same values.
@@ -89,5 +95,4 @@ If you need an overidentification test that is robust to heteroskedasticity or c
     - Regressors that cannot be identified in the auxiliary regression are left out and `hausman_df` counts the rest: a regressor that varies only over time on a balanced panel, or one whose entity mean is also a regressor (correlated random effects).
     - `plm::phtest(method = "aux")` selects the tested coefficients by position, so for those regressors it tests the wrong coefficients and its statistic depends on the column order. It is not equivalent there.
 
-    The definition and the exact rules are in [Methods: RE](../methods/re.md#hausman-test).
-- **Wu-Hausman test (IV)**: follows the `cov_type` passed to `fit()`.
+    The definition and the exact rules are in [Definitions: RE](../methods/re.md#hausman-test).

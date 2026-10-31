@@ -6,7 +6,7 @@
 
 ## Weights (analytic weight)
 
-The `weight` argument specifies the column name of the weight column in `data`. Weights are treated as analytic weights proportional to the inverse of the variance, and do not need to be normalized (e.g. to sum to 1). Values less than or equal to 0, missing values, or NaN raise a `ValidationError`.
+The `weight` argument specifies the column name of the weight column in `data`. Weights are treated as analytic weights proportional to the inverse of the variance, and do not need to be normalized (e.g. to sum to 1). Every weight must be finite and strictly positive; a zero, negative, missing, NaN or infinite weight raises a `ValidationError`.
 
 ## Options at a glance
 
@@ -28,6 +28,8 @@ Which options go with which `cov_type` (an option set where it is not used raise
 | `"classical"`, `"hc0"` to `"hc3"` | | |
 | `"hac"` | `hac_time` | `hac_lags` |
 | `"cluster"` | `cluster` | |
+
+`WLSResults` has no post-estimation tests: `white_test()`, `breusch_pagan_test()` and `breusch_godfrey_test()` exist for `OLSResults` only.
 
 The fields of the results are listed by purpose at the top of the results class below.
 

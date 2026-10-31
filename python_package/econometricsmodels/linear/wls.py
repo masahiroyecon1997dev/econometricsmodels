@@ -1,16 +1,13 @@
 """Python wrapper for WLS (Weighted Least Squares).
 
 A thin wrapper around `econometricsmodels._lib.fit_wls` (the Rust
-implementation, `engine`/`engine_pybind`). Validation and estimation
-logic live entirely on the Rust side; this module only provides the
-Python-facing API shape for polars DataFrames — a list of column names
-for `x`, an options object for estimation settings (CLAUDE.md section 2,
-`.claude/rules/python-style.md` "設計方針との整合性").
+implementation). Validation and estimation happen on the Rust side; this
+module only provides the Python-facing API shape for polars DataFrames:
+a list of column names for `x` and an options object for the estimation
+settings.
 
-`weight`, like `y`, is a top-level argument referring to a column name
-in `data`. `WLSOptions` is re-exported as-is from `_lib` (not redefined
-as a Python class), following the `OLSOptions` pattern (see
-`python_package/econometricsmodels/linear/CLAUDE.md`).
+`weight`, like `y`, is a top-level argument naming a column of `data`.
+`WLSOptions` is re-exported as-is from `_lib`.
 """
 
 from __future__ import annotations
@@ -51,10 +48,15 @@ class WLS:
         >>> import polars as pl
         >>> from econometricsmodels import WLS
         >>> df = pl.DataFrame(
-        ...     {"y": [1.0, 2.0], "x1": [1.0, 2.0], "w": [1.0, 2.0]}
+        ...     {
+        ...         "y": [1.2, 1.9, 3.1, 3.8, 5.2],
+        ...         "x1": [1.0, 2.0, 3.0, 4.0, 5.0],
+        ...         "w": [1.0, 2.0, 1.0, 2.0, 1.0],
+        ...     }
         ... )
         >>> result = WLS(df, y="y", x=["x1"], weight="w").fit()
-        >>> result.params["x1"]
+        >>> round(result.params["x1"], 3)
+        0.983
     """
 
     def __init__(
@@ -123,10 +125,6 @@ class WLSResults:
     - Settings echoed back: `cov_type`, `hac_lags_used`.
     - Residuals: `residuals`.
     - Methods: `predict()`, `augment()`, `params_table()`.
-
-    Args:
-        raw: The estimation result object returned by `_lib.fit_wls`
-            (`_lib.WLSResult`).
 
     Note:
         Users normally do not construct this directly; it is returned
@@ -227,12 +225,13 @@ class WLSResults:
 
     @property
     def r_squared(self) -> float:
-        """Coefficient of determination (R²)."""
+        """Weighted coefficient of determination (R² of the weighted
+        regression)."""
         return self._raw.r_squared
 
     @property
     def adj_r_squared(self) -> float:
-        """Degrees-of-freedom-adjusted R²."""
+        """Degrees-of-freedom-adjusted weighted R²."""
         return self._raw.adj_r_squared
 
     @property

@@ -60,12 +60,12 @@ use engine::shared::error_catalog::{ErrorCode, ParamValue};
 #[pyclass(from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
 pub struct OLSOptions {
-    /// Standard error type: one of "classical", "hc0", "hc1", "hc2", "hc3", "hac", "cluster".
-    /// Case-insensitive.
+    /// Standard error type: one of "classical" (default), "hc0", "hc1", "hc2", "hc3",
+    /// "hac", "cluster". Case-insensitive.
     #[pyo3(get)]
     pub cov_type: String,
 
-    /// Whether the engine should automatically add an intercept column.
+    /// Whether to automatically add an intercept column.
     /// When true, a column of all 1.0 is prepended to the design matrix.
     /// If the user's `x` already contains a constant column while this is true,
     /// the resulting perfect collinearity raises `ComputationError` (singular matrix).
@@ -73,14 +73,14 @@ pub struct OLSOptions {
     pub include_intercept: bool,
 
     /// Confidence level for confidence intervals, in the range (0, 1).
-    /// Defaults to 0.95 (a 95% confidence interval). Named `confidence_level` rather
-    /// than `alpha` to avoid confusion with the significance level (the 0.05 side).
+    /// Defaults to 0.95 (a 95% confidence interval). This is the coverage, not the
+    /// significance level `alpha`.
     #[pyo3(get)]
     pub confidence_level: f64,
 
-    /// Column name to use as the cluster group key when `cov_type="cluster"`.
-    /// Refers to a column in `data` rather than being passed as a separate array.
-    /// Specifying it with any other `cov_type` raises `ValidationError`.
+    /// Column name to use as the cluster group key. Required when `cov_type="cluster"`
+    /// (omitting it raises `ValidationError`); specifying it with any other `cov_type`
+    /// also raises `ValidationError`.
     #[pyo3(get)]
     pub cluster: Option<String>,
 
@@ -324,10 +324,8 @@ pub struct BreuschGodfreyTestOutput {
 
 /// Estimation results for OLS.
 ///
-/// Structured data only (no `summary()`); see `docs/spec/ols-spec.md`
-/// ("結果構造体"). Row-oriented table construction (e.g. a `params_table`) is left to
-/// `python_package`. All array-valued fields (`params`, `std_errors`, etc.) share the
-/// same order as `param_names`.
+/// Structured data only (no `summary()`). All array-valued fields (`params`,
+/// `std_errors`, etc.) share the same order as `param_names`.
 // `OLSResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`OLSOptions`の`from_py_object`とは
 // 対照的。pyo3 0.28以降、Cloneを実装する#[pyclass]のFromPyObject自動導出はopt-inになった）。
@@ -412,9 +410,8 @@ pub struct OLSResult {
     #[pyo3(get)]
     pub bic: f64,
     /// Fitted values for the training data (`ŷ = Xβ̂`), cached at fit time.
-    /// Not exposed to Python directly; only `predict(new_data=None)` reads it
-    /// (`docs/spec/ols-spec.md` "predict()" — the Python-facing surface is unified into a
-    /// single `predict()` method rather than a separate `fitted_values` property).
+    /// Not exposed to Python directly; only `predict(new_data=None)` reads it (there is
+    /// no separate `fitted_values` property).
     fitted_values: Vec<f64>,
     /// Whether `fit()` was called with `include_intercept=True`. Not exposed to
     /// Python; only `predict()` reads it to decide whether to auto-prepend a

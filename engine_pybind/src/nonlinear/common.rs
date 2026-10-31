@@ -65,13 +65,8 @@ pub(crate) fn rebuild_columns(
     (!y.is_empty()).then_some((y, x))
 }
 
-/// `LogitResult::marginal_effects`/`ProbitResult::marginal_effects`共通の結果型。
-/// 定数項は除外される（`engine`側の`MarginalEffects`のdocコメント参照）。フィールドの
-/// 並びは`param_names`と対応する（`LogitResult`/`ProbitResult`本体と同じ規約）。
-///
-/// 元々`logit.rs`にLogit専用として定義していたが、`engine::nonlinear::common::
-/// MarginalEffects`がLogit/Probitで既に共有されているのに合わせ、こちらも
-/// `<系統>/common.rs`に移動した（`rust-style.md`「ファイル・ディレクトリ構成」参照）。
+/// Result of `marginal_effects()` for Logit, Probit and Tobit. The intercept (and, for
+/// Tobit, `sigma`) is excluded. The fields line up with `param_names`.
 #[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
 pub struct MarginalEffectsResult {

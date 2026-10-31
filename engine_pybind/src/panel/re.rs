@@ -98,7 +98,7 @@ use crate::shared::validation::{
 pub struct REOptions {
     /// Standard error type: one of "classical", "hc1", "hc2", "hc3", "cluster", "dk".
     /// Case-insensitive. Unlike OLS/WLS/IV, "hc0" is **not** supported (no reference
-    /// implementation offers it for panel/RE regressions; see the module docstring).
+    /// implementation offers it for panel/RE regressions).
     #[pyo3(get)]
     pub cov_type: String,
 
@@ -138,7 +138,7 @@ pub struct REOptions {
     #[pyo3(get)]
     pub dk_bandwidth: Option<i64>,
 
-    /// Estimator of the variance components `sigma_eps^2`, `sigma_u^2` (and `sigma_lambda^2`
+    /// Estimator of the variance components `σ_ε²`, `σ_u²` (and `σ_λ²`
     /// for two-way effects), one of "swamy_arora" (default), "wallace_hussain", "amemiya"
     /// (case-insensitive; `plm`'s `random.method` "swar", "walhus", "amemiya"). Applies to
     /// one-way and two-way effects alike. "swamy_arora" on an unbalanced one-way panel is the
@@ -272,15 +272,13 @@ impl REOptions {
 
 /// Estimation results for RE.
 ///
-/// Structured data only (no `summary()`); see `docs/spec/panel-common.md`
-/// section 2. All array-valued fields (`params`, `std_errors`, etc.) share the same order
-/// as `param_names` (`param_names[0]` is always `"const"`, since RE — unlike FE — has an
-/// intercept).
+/// Structured data only (no `summary()`). All array-valued fields (`params`,
+/// `std_errors`, etc.) share the same order as `param_names` (`param_names[0]` is always
+/// `"const"`, since RE — unlike FE — has an intercept).
 ///
 /// The Hausman test (`hausman_statistic` / `hausman_p_value` / `hausman_df`) is computed
-/// automatically inside `fit()` and included directly here (unlike FE's
-/// `fixed_effects()`, RE has no separate diagnostic method; see `panel-common.md`
-/// section 2.4). All three are `None` when there is no regressor left to test: every
+/// automatically inside `fit()` and included directly here (RE has no separate
+/// diagnostic method). All three are `None` when there is no regressor left to test: every
 /// regressor is time-invariant, or varies only over time on a balanced panel, or the
 /// within-transformed copy of every time-varying regressor is aliased (its entity or time mean
 /// is also a regressor, as in a correlated-random-effects specification); for two-way effects,
@@ -330,8 +328,7 @@ pub struct REResult {
     pub df_resid: usize,
     #[pyo3(get)]
     pub df_model: usize,
-    /// Number of panel entities (`panel-common.md` section 2.1, following the
-    /// pyfixest/plm precedent).
+    /// Number of panel entities.
     #[pyo3(get)]
     pub n_entities: usize,
     /// Number of unique time periods for two-way random effects (`REOptions.time` set);
@@ -344,44 +341,43 @@ pub struct REResult {
     /// `sigma2_u`, `sigma2_lambda` and the weights `theta*` are the values of this estimator.
     #[pyo3(get)]
     pub variance_method: String,
-    /// Estimated variance of the idiosyncratic error, `sigma_eps^2`. Swamy-Arora: the residual
+    /// Estimated variance of the idiosyncratic error, `σ_ε²`. Swamy-Arora: the residual
     /// variance of the internal fixed-effects regression with the same effect structure as the
     /// model (entity for one-way, entity and time for two-way), whose degrees of freedom exclude
-    /// the regressors without within variation, as in `plm` (`docs/spec/re-spec.md` section
-    /// 3.1). Wallace-Hussain and Amemiya: from the within-transformed first-stage residuals, see
-    /// section 3.1.2.
+    /// the regressors without within variation, as in `plm`. Wallace-Hussain and Amemiya:
+    /// from the within-transformed first-stage residuals.
     #[pyo3(get)]
     pub sigma2_eps: f64,
-    /// Estimated variance of the entity effect, `sigma_u^2` (a negative estimate is raised to
+    /// Estimated variance of the entity effect, `σ_u²` (a negative estimate is raised to
     /// 0). Swamy-Arora on an unbalanced panel is the `linearmodels` estimator, which differs
     /// from `plm`'s.
     #[pyo3(get)]
     pub sigma2_u: f64,
-    /// Estimated variance of the time effect, `sigma_lambda^2`, for two-way effects (a negative
+    /// Estimated variance of the time effect, `σ_λ²`, for two-way effects (a negative
     /// estimate is raised to 0); `None` for one-way.
     #[pyo3(get)]
     pub sigma2_lambda: Option<f64>,
     /// One-way quasi-demeaning weight of each entity,
-    /// `theta_i = 1 - sqrt(sigma_eps^2 / (T_i * sigma_u^2 + sigma_eps^2))` with `T_i` the number
-    /// of observations of the entity (0 when `sigma_u^2` is 0; different across entities only on
+    /// `θ_i = 1 - sqrt(σ_ε² / (T_i * σ_u² + σ_ε²))` with `T_i` the number
+    /// of observations of the entity (0 when `σ_u²` is 0; different across entities only on
     /// an unbalanced panel). The keys are the entity ids as strings, in lexicographic order (so
     /// `"10"` precedes `"2"` for integer ids); `None` for two-way.
     #[pyo3(get)]
     pub theta: Option<BTreeMap<String, f64>>,
     /// Two-way weight of the entity means in the GLS transformation
-    /// `x - theta_1 * mean_i(x) - theta_2 * mean_t(x) + theta_3 * mean(x)`:
-    /// `theta_1 = 1 - sigma_eps / sigma_1` with `sigma_1^2 = sigma_eps^2 + T * sigma_u^2`;
+    /// `x - θ₁ * mean_i(x) - θ₂ * mean_t(x) + θ₃ * mean(x)`:
+    /// `θ₁ = 1 - σ_ε / σ₁` with `σ₁² = σ_ε² + T * σ_u²`;
     /// `None` for one-way.
     #[pyo3(get)]
     pub theta_entity: Option<f64>,
-    /// Two-way weight of the time means: `theta_2 = 1 - sigma_eps / sigma_2` with
-    /// `sigma_2^2 = sigma_eps^2 + N * sigma_lambda^2`; `None` for one-way.
+    /// Two-way weight of the time means: `θ₂ = 1 - σ_ε / σ₂` with
+    /// `σ₂² = σ_ε² + N * σ_λ²`; `None` for one-way.
     #[pyo3(get)]
     pub theta_time: Option<f64>,
     /// Two-way weight of the overall mean:
-    /// `theta_3 = theta_1 + theta_2 - 1 + sigma_eps / sigma_4` with
-    /// `sigma_4^2 = sigma_eps^2 + T * sigma_u^2 + N * sigma_lambda^2`. It is not the product
-    /// `theta_1 * theta_2`, and it is exactly 0 when `sigma_u^2` or `sigma_lambda^2` is 0;
+    /// `θ₃ = θ₁ + θ₂ - 1 + σ_ε / σ₄` with
+    /// `σ₄² = σ_ε² + T * σ_u² + N * σ_λ²`. It is not the product
+    /// `θ₁ * θ₂`, and it is exactly 0 when `σ_u²` or `σ_λ²` is 0;
     /// `None` for one-way.
     #[pyo3(get)]
     pub theta_total: Option<f64>,
@@ -426,8 +422,7 @@ pub struct REResult {
     #[pyo3(get)]
     pub r_squared_overall: f64,
     /// Regression-based Hausman test statistic (chi-squared version, Wald test that the
-    /// within-transformed regressors are jointly zero in the auxiliary regression;
-    /// `docs/spec/re-spec.md` section 3.7). The comparison is against FE with the same
+    /// within-transformed regressors are jointly zero in the auxiliary regression). The comparison is against FE with the same
     /// structure as the RE model (entity for one-way, entity and time for two-way). The Wald
     /// test's covariance follows `cov_type`. Always non-negative. `None` when no slope
     /// coefficient can be tested: a regressor that does not vary after the within

@@ -123,7 +123,7 @@ pub(crate) fn iv_error_to_pyerr(err: IvError) -> PyErr {
 #[pyclass(from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
 pub struct IVOptions {
-    /// Estimation estimator: "2sls" (default) or "gmm". Case-insensitive.
+    /// Estimator: "2sls" (default) or "gmm". Case-insensitive.
     #[pyo3(get)]
     pub estimator: String,
 
@@ -133,7 +133,7 @@ pub struct IVOptions {
     #[pyo3(get)]
     pub cov_type: String,
 
-    /// Whether the engine should automatically add an intercept column to `x_exog`.
+    /// Whether to automatically add an intercept column to `x_exog`.
     /// `x_endog`/`instruments` never get an automatic intercept column.
     #[pyo3(get, set)]
     pub include_intercept: bool,
@@ -188,7 +188,8 @@ pub struct IVOptions {
     pub gmm_max_iter: Option<i64>,
 
     /// Convergence tolerance for `gmm_type="iterated"`: iteration stops once every
-    /// coefficient changes by less than this (relative/absolute mix). `None` (default)
+    /// coefficient changes by less than this relative to its previous value (with an absolute
+    /// floor of 1e-8, so that coefficients near zero converge). `None` (default)
     /// means 1e-6. Specifying it with any other `gmm_type` or with `estimator="2sls"`
     /// raises `ValidationError`.
     #[pyo3(get)]
@@ -366,36 +367,25 @@ impl IVOptions {
 
 /// Estimation results for IV (2SLS/GMM).
 ///
-/// Structured data only (no `summary()`); see `docs/spec/iv-spec.md`
-/// section 2. All array-valued fields (`params`, `std_errors`, etc.) share the same
-/// order as `param_names`.
+/// Structured data only (no `summary()`). All array-valued fields (`params`,
+/// `std_errors`, etc.) share the same order as `param_names`.
 ///
 /// `test_stats` holds the t-statistics (`estimator="2sls"`) or z-statistics
-/// (`estimator="gmm"`), depending on which distribution the fitted model uses for inference
-/// (`docs/spec/iv-spec.md` 3.2節); `stat_dist`/`stat_df` say which distribution (and, for
+/// (`estimator="gmm"`); `stat_dist`/`stat_df` say which distribution (and, for
 /// `"t"`, how many degrees of freedom) that is.
 ///
-/// `first_stage()`（内生変数ごとの第一段階回帰結果）はここにフィールドとして含めない。
-/// `fit()`の戻り値本体には含めず別メソッドとして公開する（`docs/spec/iv-spec.md`2章、
-/// 実装済み）。`predict()`/`marginal_effects()`用に`LogitResult`/
-/// `ProbitResult`が推定量そのものを非公開フィールド`estimator`として保持するのと同じ
-/// パターンだが、`IVResult`は`estimator`（2sls/gmm）非依存の非公開フィールド`first_stage:
-/// Vec<(String, OLSResult)>`から`first_stage()`を構築する（下記`first_stage`フィールド参照。
-/// 当初は`estimator: TwoSlsEstimator`という2sls専用のフィールドだったが、GMM配線時に
-/// estimator非依存の表現へ置き換えた——`engine::iv::common::compute_first_stage`が
-/// `estimator`によらず同じ第一段階回帰を計算するため、`fit`でこの表現に詰め替えるだけで済む）。
-///
-/// `fit_iv` (`fit` in this file) constructs and returns it. The core fields above are
-/// populated by `TwoSlsEstimator` (`estimator="2sls"`) or `GmmEstimator` (`estimator="gmm"`).
-/// `weak_instrument_f_statistics`/`first_stage` are populated from `engine::iv::common::
-/// compute_first_stage`, independent of `estimator` (module docstring参照).
-/// `wu_hausman_statistic`/`wu_hausman_p_value` are populated from `TwoSlsEstimator::
-/// wu_hausman_statistic()`/`wu_hausman_p_value()` for `estimator="2sls"`;
-/// always `None` for `estimator="gmm"` (`GmmEstimator` has no Wu-Hausman test).
-/// `overid_statistic`/`overid_p_value` are populated from `TwoSlsEstimator::
-/// sargan_statistic()`/`sargan_p_value()` (Sargan test, `estimator="2sls"`) or
-/// `GmmEstimator::hansen_j_statistic()`/`hansen_j_p_value()` (Hansen J test,
-/// `estimator="gmm"`).
+/// The first-stage regressions are not a field: `first_stage()` is a separate method.
+/// `weak_instrument_f_statistics` and `first_stage()` are computed the same way for
+/// both estimators. `wu_hausman_*` is available for `estimator="2sls"` only, and
+/// `overid_*` is the Sargan test (`estimator="2sls"`) or the Hansen J test
+/// (`estimator="gmm"`).
+// `first_stage()`（内生変数ごとの第一段階回帰結果）はフィールドに含めず別メソッドとして公開する。
+// `LogitResult`/`ProbitResult`が`predict()`用に推定量そのものを非公開フィールドとして保持する
+// のと同じパターンだが、`IVResult`は`estimator`（2sls/gmm）非依存の非公開フィールド
+// `first_stage: Vec<(String, OLSResult)>`から構築する。`engine::iv::common::compute_first_stage`が
+// `estimator`によらず同じ第一段階回帰を計算するため、`fit`でこの表現に詰め替えるだけで済む。
+// `weak_instrument_f_statistics`・`first_stage`は`compute_first_stage`、`wu_hausman_*`は
+// `TwoSlsEstimator`、`overid_*`は`TwoSlsEstimator::sargan_*`/`GmmEstimator::hansen_j_*`から埋める。
 // `IVResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`IVOptions`の`from_py_object`とは
 // 対照的、`OLSResult`/`LogitResult`と同じ理由）。
@@ -443,8 +433,7 @@ pub struct IVResult {
     /// Whether GMM iteration converged (`estimator="gmm"` only). Always `true` for
     /// `estimator="2sls"` (2SLS is a closed-form, non-iterative estimator, so convergence is
     /// trivially satisfied). Also always `true` for `gmm_type="one_step"`/`"two_step"` —
-    /// convergence is only actually checked for `gmm_type="iterated"`
-    /// (`docs/spec/iv-spec.md` 3.3節).
+    /// convergence is only actually checked for `gmm_type="iterated"`.
     #[pyo3(get)]
     pub converged: bool,
     /// Number of GMM estimations actually run, counting the initial estimate
@@ -502,11 +491,10 @@ pub struct IVResult {
     pub adj_r_squared: f64,
     /// Weak-instrument diagnostic: the partial F-statistic for each endogenous
     /// variable (keyed by variable name), testing the excluded instruments' joint
-    /// significance after partialling out `x_exog` (`docs/spec/iv-spec.md` 3.4節).
+    /// significance after partialling out `x_exog`.
     /// **Not** the same as the plain F-statistic of the corresponding regression in
     /// `first_stage()`, which includes `x_exog`'s contribution too. Empty when
-    /// `x_endog=[]`. Computed the same way for both `estimator="2sls"` and `estimator="gmm"`
-    /// (`engine::iv::common::compute_first_stage`, module docstring参照).
+    /// `x_endog=[]`. Computed the same way for both `estimator="2sls"` and `estimator="gmm"`.
     #[pyo3(get)]
     pub weak_instrument_f_statistics: HashMap<String, f64>,
     /// Numerator degrees of freedom of the weak-instrument F statistics (number of excluded
@@ -519,7 +507,7 @@ pub struct IVResult {
     pub weak_instrument_f_df_denom: Option<usize>,
     /// Overidentification test statistic: Sargan (`estimator="2sls"`) or Hansen J
     /// (`estimator="gmm"`). `None` when just-identified (`len(instruments) ==
-    /// len(x_endog)`, degrees of freedom 0), per `docs/spec/iv-spec.md` 3.5節.
+    /// len(x_endog)`, degrees of freedom 0).
     #[pyo3(get)]
     pub overid_statistic: Option<f64>,
     #[pyo3(get)]
@@ -529,8 +517,7 @@ pub struct IVResult {
     #[pyo3(get)]
     pub overid_df: Option<usize>,
     /// Wu-Hausman endogeneity test statistic (joint test over all endogenous
-    /// variables, regression-based / `wooldridge_regression` formulation,
-    /// `docs/spec/iv-spec.md` 3.6節). Always computed under the `cov_type` passed to
+    /// variables, regression-based / `wooldridge_regression` formulation). Always computed under the `cov_type` passed to
     /// `fit()` (unlike `weak_instrument_f_statistics`, which is always classical;
     /// `linearmodels`' `wooldridge_regression` uses the same covariance as the
     /// underlying model, and this mirrors that). `None` when there are no endogenous
@@ -538,8 +525,7 @@ pub struct IVResult {
     /// estimated (e.g. the first-stage residual has zero variance, or there are too
     /// few observations for the extra residual columns) — neither case fails `fit()`
     /// itself, since the other results remain valid. **Always `None` for
-    /// `estimator="gmm"`** (`GmmEstimator` does not implement this test; `docs/spec/iv-spec.md`
-    /// 3.6節's implementation is `TwoSlsEstimator`-only).
+    /// `estimator="gmm"`** (not implemented for GMM).
     #[pyo3(get)]
     pub wu_hausman_statistic: Option<f64>,
     #[pyo3(get)]
@@ -550,10 +536,9 @@ pub struct IVResult {
     /// Denominator degrees of freedom of the Wu-Hausman F test; `None` when it is `None`.
     #[pyo3(get)]
     pub wu_hausman_df_denom: Option<usize>,
-    /// `first_stage()`が読む。Python側には公開しない（`OLSResult`の`fitted_values`/
-    /// `has_intercept`、`LogitResult`/`ProbitResult`の`estimator`と同じ位置づけ）。
-    /// `estimator`非依存（`engine::iv::common::compute_first_stage`から構築、モジュール
-    /// docコメント参照）。
+    // `first_stage()`が読む。Python側には公開しない（`OLSResult`の`fitted_values`/
+    // `has_intercept`、`LogitResult`/`ProbitResult`の`estimator`と同じ位置づけ）。
+    // `estimator`非依存（`engine::iv::common::compute_first_stage`から構築）。
     first_stage: Vec<(String, OLSResult)>,
 }
 
@@ -633,11 +618,10 @@ impl IVResult {
     ///
     /// Each value is a full `OLSResults` (the same type OLS's `fit_ols` returns) — the
     /// first stage is a genuine, valid OLS regression in its own right, so no IV-specific
-    /// result type is needed (`docs/spec/iv-spec.md` 2章). Its `f_statistic`/`f_p_value`
+    /// result type is needed. Its `f_statistic`/`f_p_value`
     /// include `x_exog`'s contribution and are **not** the weak-instrument partial
     /// F-statistic (`weak_instrument_f_statistics`, computed separately).
-    /// Computed the same way for both `estimator="2sls"` and `estimator="gmm"` (module
-    /// docstring参照).
+    /// Computed the same way for both `estimator="2sls"` and `estimator="gmm"`.
     fn first_stage(&self, py: Python<'_>) -> PyResult<HashMap<String, OLSResult>> {
         guard(|| {
             Ok(self

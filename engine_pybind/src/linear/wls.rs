@@ -62,12 +62,12 @@ use crate::shared::validation::{RoleValue, validate_common_roles, validate_no_du
 #[pyclass(from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
 pub struct WLSOptions {
-    /// Standard error type: one of "classical", "hc0", "hc1", "hc2", "hc3", "hac", "cluster".
-    /// Case-insensitive.
+    /// Standard error type: one of "classical" (default), "hc0", "hc1", "hc2", "hc3",
+    /// "hac", "cluster". Case-insensitive.
     #[pyo3(get)]
     pub cov_type: String,
 
-    /// Whether the engine should automatically add an intercept column.
+    /// Whether to automatically add an intercept column.
     /// When true, a column of all 1.0 is prepended to the design matrix.
     /// If the user's `x` already contains a constant column while this is true,
     /// the resulting perfect collinearity raises `ComputationError` (singular matrix).
@@ -75,14 +75,14 @@ pub struct WLSOptions {
     pub include_intercept: bool,
 
     /// Confidence level for confidence intervals, in the range (0, 1).
-    /// Defaults to 0.95 (a 95% confidence interval). Named `confidence_level` rather
-    /// than `alpha` to avoid confusion with the significance level (the 0.05 side).
+    /// Defaults to 0.95 (a 95% confidence interval). This is the coverage, not the
+    /// significance level `alpha`.
     #[pyo3(get)]
     pub confidence_level: f64,
 
-    /// Column name to use as the cluster group key when `cov_type="cluster"`.
-    /// Refers to a column in `data` rather than being passed as a separate array.
-    /// Specifying it with any other `cov_type` raises `ValidationError`.
+    /// Column name to use as the cluster group key. Required when `cov_type="cluster"`
+    /// (omitting it raises `ValidationError`); specifying it with any other `cov_type`
+    /// also raises `ValidationError`.
     #[pyo3(get)]
     pub cluster: Option<String>,
 
@@ -231,8 +231,7 @@ pub struct WLSResult {
     #[pyo3(get)]
     pub param_names: Vec<String>,
     /// Original-scale (unweighted) residuals `y_i - x_i'β̂`. Not the weighted residuals
-    /// used internally for the standard error calculations
-    /// (`docs/spec/wls-spec.md`, "結果構造体").
+    /// used internally for the standard error calculations.
     #[pyo3(get)]
     pub residuals: Vec<f64>,
     #[pyo3(get)]
@@ -356,7 +355,7 @@ impl WLSResult {
     ///
     /// With `new_data=None` (default), returns the fitted values for the training
     /// data used in `fit()`, on the original (unweighted) scale — `ŷ = Xβ̂`, the same
-    /// scale as `residuals` (`docs/spec/wls-spec.md`, "結果構造体"). With `new_data`
+    /// scale as `residuals`. With `new_data`
     /// given, computes out-of-sample predictions for a new polars DataFrame: it must
     /// contain columns with the same names as the `x` columns passed at fit time
     /// (matched by name; column order does not matter). Weights play no role in

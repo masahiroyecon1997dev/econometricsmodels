@@ -79,7 +79,7 @@ pub struct TobitOptions {
     #[pyo3(get)]
     pub cov_type: String,
 
-    /// Whether the engine should automatically add an intercept column.
+    /// Whether to automatically add an intercept column.
     /// When true, a column of all 1.0 is prepended to the design matrix.
     /// If the user's `x` already contains a constant column while this is true,
     /// the resulting perfect collinearity raises `ComputationError` (singular
@@ -285,22 +285,17 @@ impl TobitOptions {
 
 /// Estimation results for Tobit.
 ///
-/// Structured data only (no `summary()`); see `docs/spec/nonlinear-common.md`
-/// section 5. `predict()` / `marginal_effects()` / `censoring_fit_check()` are provided as
-/// separate methods (not part of this struct's fields), matching section 6.
+/// Structured data only (no `summary()`). `predict()` / `marginal_effects()` /
+/// `censoring_fit_check()` are separate methods, not fields.
 ///
 /// `params`/`param_names`/`std_errors`/`test_stats`/`p_values`/`conf_lower`/`conf_upper` are all
 /// `(k+1)`-length: `sigma` (the error term's standard deviation) is appended as the last
-/// element, with `param_names[-1] == "sigma"`. This differs from the underlying
-/// `engine::nonlinear::tobit::TobitEstimator`, where `params()` is `k`-length (`beta` only)
-/// while the standard-error-related fields are `(k+1)`-length (an asymmetry stemming from
-/// `cov_params` being a `(k+1)x(k+1)` matrix over the joint `(beta, sigma)` space). This
-/// struct resolves that asymmetry so every array-valued field can be zipped together
-/// (confirmed with the user). `sigma` is a convenience shortcut equal to `params[-1]`.
+/// element, with `param_names[-1] == "sigma"`, so every array-valued field can be zipped
+/// together. `sigma` is a convenience shortcut equal to `params[-1]`.
 ///
 /// `log_likelihood_null`/`lr_statistic`/`lr_p_value`/`pseudo_r_squared` are not provided for
-/// Tobit (no closed form exists under censoring; `wald_statistic`/`wald_p_value` provide the
-/// overall model significance test instead, see `docs/spec/nonlinear-common.md` section 5).
+/// Tobit (no closed form exists under censoring); `wald_statistic`/`wald_p_value` give the
+/// overall model significance test instead.
 // `LogitResult`と同じ理由で`skip_from_py_object`・フィールドごとの個別`#[pyo3(get)]`・
 // `Clone`非導出（`fitted: TobitFitted`が`Clone`を実装していないため）。
 #[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
@@ -598,10 +593,8 @@ impl TobitResult {
 
     /// Marginal effects (`dy/dx`) with delta-method standard errors.
     ///
-    /// `target` selects the same four quantities as `predict()` (see its doc). Unlike
-    /// Logit/Probit, this is an independent implementation (not the shared
-    /// `dydx_and_jacobian` pattern) because the formula differs per `target`
-    /// (`docs/spec/nonlinear-common.md` section 6).
+    /// `target` selects the same four quantities as `predict()` (see its doc); the
+    /// formula differs per `target`.
     ///
     /// Independent of `fit()`'s `confidence_level` (re-evaluated here so callers can
     /// use a different confidence level without re-fitting).
@@ -648,7 +641,7 @@ impl TobitResult {
     /// that applies to this model, compares the observed rate (fraction of training
     /// observations exactly at that boundary) against the model-implied average
     /// probability. Replaces Logit/Probit's `pred_table()` (which is not meaningful for
-    /// Tobit's continuous `y`, `docs/spec/nonlinear-common.md` section 6).
+    /// Tobit's continuous `y`).
     ///
     /// `lower`/`upper` in the returned `CensoringFitCheckResult` are `None` when the
     /// corresponding `TobitOptions.lower`/`upper` was `None` (that direction has no

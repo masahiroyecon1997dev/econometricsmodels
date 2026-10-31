@@ -1,19 +1,13 @@
 """Python wrapper for Probit (binary probit regression).
 
 A thin wrapper around `econometricsmodels._lib.fit_probit` (the Rust
-implementation, `engine`/`engine_pybind`). Validation and estimation
-logic live entirely on the Rust side; this module only provides the
-Python-facing API shape for polars DataFrames — a list of column names
-for `x`, an options object for estimation settings (CLAUDE.md section 2,
-`.claude/rules/python-style.md` "設計方針との整合性").
+implementation). Validation and estimation happen on the Rust side; this
+module only provides the Python-facing API shape for polars DataFrames:
+a list of column names for `x` and an options object for the estimation
+settings.
 
-`ProbitOptions` is re-exported as-is from `_lib` (not redefined as a
-separate class; same policy as `LogitOptions`, see
-`docs/spec/ols-spec.md`, "API引数").
-
-`summary()` is not implemented (structured-data-only output policy; see
-`docs/spec/nonlinear-common.md` section 5 and the
-`OLSResults`/`WLSResults`/`LogitResults` precedent).
+`ProbitOptions` is re-exported as-is from `_lib`. There is no
+`summary()`: results are returned as structured data.
 """
 
 from __future__ import annotations
@@ -50,9 +44,15 @@ class Probit:
     Examples:
         >>> import polars as pl
         >>> from econometricsmodels import Probit
-        >>> df = pl.DataFrame({"y": [0.0, 1.0], "x1": [1.0, 2.0]})
+        >>> df = pl.DataFrame(
+        ...     {
+        ...         "y": [0.0, 0.0, 1.0, 0.0, 1.0, 1.0],
+        ...         "x1": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        ...     }
+        ... )
         >>> result = Probit(df, y="y", x=["x1"]).fit()
-        >>> result.params["x1"]
+        >>> round(result.params["x1"], 3)
+        0.76
     """
 
     def __init__(
@@ -121,10 +121,6 @@ class ProbitResults:
     - Methods: `predict()` (probabilities), `augment()`,
       `marginal_effects()`, `pred_table()`, `params_table()`.
 
-    Args:
-        raw: The estimation result object returned by `_lib.fit_probit`
-            (`_lib.ProbitResult`).
-
     Note:
         Users normally do not construct this directly; it is returned
         by `Probit.fit()`.
@@ -178,17 +174,15 @@ class ProbitResults:
         return by_param(self._raw.param_names, self._raw.test_stats)
 
     @property
-    def stat_dist(self) -> Literal["t", "normal"]:
-        """Distribution of `test_stats`: `"t"` (t-statistics) or
-        `"normal"` (z-statistics)."""
+    def stat_dist(self) -> Literal["normal"]:
+        """Distribution of `test_stats`. Always `"normal"`:
+        z-statistics are used for every `cov_type`."""
         return self._raw.stat_dist
 
     @property
-    def stat_df(self) -> int | None:
-        """Degrees of freedom of the t distribution behind `test_stats`,
-        or `None` when `stat_dist` is `"normal"`. May differ from
-        `df_resid` (e.g. cluster-robust inference uses `G - 1`), so use
-        this to recompute p-values from `test_stats`."""
+    def stat_df(self) -> None:
+        """Always `None`: the z-statistics in `test_stats` follow a
+        standard normal distribution, which has no degrees of freedom."""
         return self._raw.stat_df
 
     @property
@@ -214,12 +208,21 @@ class ProbitResults:
     @property
     def lr_statistic(self) -> float:
         """Likelihood-ratio test statistic (overall significance; the
-        Probit analogue of OLS's F-statistic)."""
+        Probit analogue of OLS's F-statistic).
+
+        It compares the fitted model with the intercept-only model, even
+        when the model was fitted with `include_intercept=False`. In that
+        case the intercept-only model is not nested in the fitted model,
+        so the statistic can be negative and the test is not meaningful.
+        """
         return self._raw.lr_statistic
 
     @property
     def lr_p_value(self) -> float:
-        """P-value of the likelihood-ratio test (chi-squared distribution)."""
+        """P-value of the likelihood-ratio test (chi-squared distribution).
+
+        See `lr_statistic` for the case `include_intercept=False`.
+        """
         return self._raw.lr_p_value
 
     @property
@@ -250,12 +253,16 @@ class ProbitResults:
 
     @property
     def df_model(self) -> int:
-        """Model degrees of freedom (`k - 1`)."""
+        """Model degrees of freedom (`k - 1`, where `k` is the number
+        of estimated coefficients). It is `k - 1` also with
+        `include_intercept=False`, the degrees of freedom of the
+        likelihood-ratio test against the intercept-only model."""
         return self._raw.df_model
 
     @property
     def df_resid(self) -> int:
-        """Residual degrees of freedom (`n - k`)."""
+        """Residual degrees of freedom (`n - k`, where `k` is the number
+        of estimated coefficients, including the intercept if any)."""
         return self._raw.df_resid
 
     @property
@@ -331,8 +338,7 @@ class ProbitResults:
         Same `new_data` semantics as `predict()`, but returns a polars
         DataFrame (the training data, or `new_data` when given, plus a
         new `"predicted_probability"` column) instead of a plain list.
-        See `OLSResults.augment()` for the project's general policy on
-        this DataFrame-returning exception.
+        It exists to attach predictions back to their source rows.
 
         Args:
             new_data: Same as `predict()`. If `None` (default), returns
@@ -353,11 +359,12 @@ class ProbitResults:
     def pred_table(self, *, threshold: float = 0.5) -> list[dict[str, float]]:
         """Classification (confusion) table.
 
-        `actual` always uses a fixed 0.5 split; only the predicted
-        class depends on `threshold` (matches statsmodels'
-        `BinaryResults.pred_table(threshold)`). Unlike `predict()`,
-        out-of-sample data (a `new_data` argument) is not yet
-        supported.
+        Counts the training observations by actual class (`y` is 0 or
+        1) and predicted class. The predicted class is 1 when the
+        predicted probability exceeds `threshold`. This matches
+        statsmodels' `BinaryResults.pred_table(threshold)`. Unlike
+        `predict()`, it has no `new_data` argument: it describes the
+        training data only.
 
         Args:
             threshold: Probability threshold above which an

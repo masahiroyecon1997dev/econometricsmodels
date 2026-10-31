@@ -251,7 +251,7 @@ fn fit_iv(
 /// ----------
 /// data : polars.DataFrame
 ///     The input data. Must contain the `y`, `x`, `entity`, and (if specified)
-///     time/cluster/HAC time columns.
+///     time/cluster/dk_time columns.
 /// y : str
 ///     Column name of the dependent variable.
 /// x : list[str]
@@ -290,7 +290,7 @@ fn fit_fe(
 /// ----------
 /// data : polars.DataFrame
 ///     The input data. Must contain the `y`, `x`, `entity`, and (if specified)
-///     time/cluster columns.
+///     time/cluster/dk_time columns.
 /// y : str
 ///     Column name of the dependent variable.
 /// x : list[str]

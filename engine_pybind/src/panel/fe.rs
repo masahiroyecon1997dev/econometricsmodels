@@ -137,13 +137,14 @@ pub struct FEOptions {
     pub cluster: Option<String>,
 
     /// Column name that defines the time periods of the Driscoll-Kraay HAC, independent
-    /// of `time` (`time` and `dk_time` serve different purposes; see the module
-    /// docstring). Required when `cov_type="dk"`, in one-way and two-way models alike:
+    /// of `time` (`time` defines the fixed-effects structure, `dk_time` the HAC periods).
+    /// Required when `cov_type="dk"`, in one-way and two-way models alike:
     /// leaving it unset raises `ValidationError`, and `time` is not used instead. With
     /// two-way effects the HAC may use a different time granularity from the fixed
     /// effects. It may not be the same column as `y` or `entity` (`ValidationError`), but
     /// may be one of the regressors or the same column as `time`. Specifying it with any
-    /// other `cov_type` raises `ValidationError`. The periods are ordered by the values of the column (see `time`).
+    /// other `cov_type` raises `ValidationError`. The periods are ordered by the values of the
+    /// column (see `time`).
     #[pyo3(get)]
     pub dk_time: Option<String>,
 
@@ -265,14 +266,11 @@ impl FEOptions {
 
 /// Estimation results for FE.
 ///
-/// Structured data only (no `summary()`); see `docs/spec/panel-common.md`
-/// section 2. All array-valued fields (`params`, `std_errors`, etc.) share the same order
-/// as `param_names`.
+/// Structured data only (no `summary()`). All array-valued fields (`params`,
+/// `std_errors`, etc.) share the same order as `param_names`.
 ///
-/// `fixed_effects()` (recovering the fixed effects themselves, `α_i`/`γ_t`) is
-/// intentionally not included as a field here. It is exposed as a separate method
-/// instead (see `docs/spec/fe-spec.md` section 3.5 — the same pattern as IV's
-/// `first_stage()`).
+/// The fixed effects themselves (`α_i`/`γ_t`) are not a field: they are computed on
+/// demand by the method `fixed_effects()`.
 // `FEResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`OLSResult`と同じ理由）。
 //
@@ -318,8 +316,7 @@ pub struct FEResult {
     pub df_resid: usize,
     #[pyo3(get)]
     pub df_model: usize,
-    /// Number of panel entities (`panel-common.md` section 2.1, following the
-    /// pyfixest/plm precedent).
+    /// Number of panel entities.
     #[pyo3(get)]
     pub n_entities: usize,
     /// Number of unique time periods for two-way effects (`FEOptions.time` set); `None`
@@ -463,10 +460,7 @@ impl FEResult {
     }
 
     /// The fixed effects themselves (`α_i` for entity, `γ_t` for time), recovered
-    /// post-hoc from the fitted coefficients (`α_i = ȳ_i - x̄_i'β̂`; see
-    /// `docs/spec/fe-spec.md` section 3.5 and
-    /// `engine::panel::fe::FeEstimator::fixed_effects`'s doc comment for the exact
-    /// formula, including the two-way normalization convention).
+    /// post-hoc from the fitted coefficients (`α_i = ȳ_i - x̄_i'β̂` for one-way effects).
     ///
     /// One-way: `dict[str, float]` keyed by entity id. Two-way: `dict[str, dict[str,
     /// float]]` with top-level keys `"entity"`/`"time"`.

@@ -71,7 +71,7 @@ pub struct ProbitOptions {
     #[pyo3(get)]
     pub cov_type: String,
 
-    /// Whether the engine should automatically add an intercept column.
+    /// Whether to automatically add an intercept column.
     /// When true, a column of all 1.0 is prepended to the design matrix.
     /// If the user's `x` already contains a constant column while this is true,
     /// the resulting perfect collinearity raises `ComputationError` (singular
@@ -244,13 +244,10 @@ impl ProbitOptions {
 
 /// Estimation results for Probit.
 ///
-/// Structured data only (no `summary()`); see `docs/spec/nonlinear-common.md`
-/// section 5. Row-oriented table construction (e.g. a `params_table`) is left to
-/// `python_package`. All array-valued fields (`params`, `std_errors`, etc.) share the
-/// same order as `param_names`.
+/// Structured data only (no `summary()`). All array-valued fields (`params`,
+/// `std_errors`, etc.) share the same order as `param_names`.
 ///
-/// `predict()` / `pred_table()` / `marginal_effects()` are provided as separate methods
-/// (not part of this struct's fields), matching `docs/spec/nonlinear-common.md` section 6.
+/// `predict()` / `pred_table()` / `marginal_effects()` are separate methods, not fields.
 // `ProbitResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`ProbitOptions`の`from_py_object`とは
 // 対照的。`LogitResult`と同じ理由）。
@@ -487,10 +484,10 @@ impl ProbitResult {
     /// 2x2 classification table as `[[row0], [row1]]`, where row/column index 0 is the
     /// negative class and 1 is the positive class: `table[actual][predicted]`.
     ///
-    /// `actual` always uses a fixed 0.5 split; only `predicted` depends on `threshold`
-    /// (matches statsmodels' `BinaryResults.pred_table(threshold)`; see
-    /// `engine::nonlinear::probit::ProbitEstimator::pred_table` for the exact semantics).
-    /// Out-of-sample data is not yet supported (same limitation as `predict()`).
+    /// Counts the training observations by actual class (`y` is 0 or 1) and predicted
+    /// class; the predicted class is 1 when the predicted probability exceeds
+    /// `threshold`. This matches statsmodels' `BinaryResults.pred_table(threshold)`.
+    /// There is no `new_data` argument: the table describes the training data only.
     #[pyo3(signature = (threshold=0.5))]
     fn pred_table(&self, threshold: f64) -> PyResult<Vec<Vec<f64>>> {
         guard(|| Ok(mat_to_rows(&self.fitted.pred_table(threshold))))
@@ -499,8 +496,7 @@ impl ProbitResult {
     /// Marginal effects (`dy/dx`) with delta-method standard errors.
     ///
     /// Independent of `fit()`'s `confidence_level` (re-evaluated here so callers can
-    /// use a different confidence level without re-fitting). See
-    /// `docs/spec/nonlinear-common.md` section 6.
+    /// use a different confidence level without re-fitting).
     ///
     /// # Errors
     /// - `at` is not one of `"overall"`, `"mean"`, `"median"` (case-insensitive):

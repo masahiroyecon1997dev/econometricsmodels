@@ -1,25 +1,18 @@
 """Python wrapper for Tobit (censored regression).
 
 A thin wrapper around `econometricsmodels._lib.fit_tobit` (the Rust
-implementation, `engine`/`engine_pybind`). Validation and estimation
-logic live entirely on the Rust side; this module only provides the
-Python-facing API shape for polars DataFrames — a list of column names
-for `x`, an options object for estimation settings (CLAUDE.md section 2,
-`.claude/rules/python-style.md` "設計方針との整合性").
+implementation). Validation and estimation happen on the Rust side; this
+module only provides the Python-facing API shape for polars DataFrames:
+a list of column names for `x` and an options object for the estimation
+settings.
 
-`TobitOptions` is re-exported as-is from `_lib` (not redefined as a
-separate class; same policy as `LogitOptions`/`OLSOptions`, see
-`docs/spec/ols-spec.md`, "API引数").
+`TobitOptions` is re-exported as-is from `_lib`. There is no
+`summary()`: results are returned as structured data.
 
-`summary()` is not implemented (structured-data-only output policy; see
-`docs/spec/nonlinear-common.md` section 5 and the
-`OLSResults`/`WLSResults`/`LogitResults` precedent).
-
-Unlike Logit/Probit, Tobit does not have `log_likelihood_null`,
-`lr_statistic`, `lr_p_value`, or `pseudo_r_squared` (no closed form
-exists for the intercept-only model under censoring); `wald_statistic`/
-`wald_p_value` provide the overall model significance test instead (see
-`docs/spec/nonlinear-common.md` section 5). There is no
+Unlike Logit and Probit, Tobit has no `log_likelihood_null`,
+`lr_statistic`, `lr_p_value` or `pseudo_r_squared` (the intercept-only
+model has no closed form under censoring); `wald_statistic` and
+`wald_p_value` give the overall significance test instead. There is no
 `pred_table()`; `censoring_fit_check()` takes its place (`y` is
 continuous, so a classification table is not meaningful).
 """
@@ -59,9 +52,15 @@ class Tobit:
     Examples:
         >>> import polars as pl
         >>> from econometricsmodels import Tobit
-        >>> df = pl.DataFrame({"y": [0.0, 1.0], "x1": [1.0, 2.0]})
+        >>> df = pl.DataFrame(
+        ...     {
+        ...         "y": [0.0, 0.0, 1.0, 0.5, 2.0, 3.5],
+        ...         "x1": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        ...     }
+        ... )
         >>> result = Tobit(df, y="y", x=["x1"]).fit()
-        >>> result.params["x1"]
+        >>> round(result.params["x1"], 3)
+        0.956
     """
 
     def __init__(
@@ -133,10 +132,6 @@ class TobitResults:
     - Methods: `predict()`, `augment()`, `marginal_effects()` (all
       take a `target`), `censoring_fit_check()`, `params_table()`.
 
-    Args:
-        raw: The estimation result object returned by `_lib.fit_tobit`
-            (`_lib.TobitResult`).
-
     Note:
         Users normally do not construct this directly; it is returned
         by `Tobit.fit()`.
@@ -191,17 +186,15 @@ class TobitResults:
         return by_param(self._raw.param_names, self._raw.test_stats)
 
     @property
-    def stat_dist(self) -> Literal["t", "normal"]:
-        """Distribution of `test_stats`: `"t"` (t-statistics) or
-        `"normal"` (z-statistics)."""
+    def stat_dist(self) -> Literal["normal"]:
+        """Distribution of `test_stats`. Always `"normal"`:
+        z-statistics are used for every `cov_type`."""
         return self._raw.stat_dist
 
     @property
-    def stat_df(self) -> int | None:
-        """Degrees of freedom of the t distribution behind `test_stats`,
-        or `None` when `stat_dist` is `"normal"`. May differ from
-        `df_resid` (e.g. cluster-robust inference uses `G - 1`), so use
-        this to recompute p-values from `test_stats`."""
+    def stat_df(self) -> None:
+        """Always `None`: the z-statistics in `test_stats` follow a
+        standard normal distribution, which has no degrees of freedom."""
         return self._raw.stat_df
 
     @property
@@ -251,8 +244,9 @@ class TobitResults:
 
     @property
     def df_resid(self) -> int:
-        """Residual degrees of freedom (`n - (k + 1)`, where `k + 1`
-        includes `sigma` as an estimated parameter)."""
+        """Residual degrees of freedom: `n` minus the number of estimated
+        parameters, which are the regression coefficients (including the
+        intercept, if any) and `sigma`."""
         return self._raw.df_resid
 
     @property
@@ -395,16 +389,16 @@ class TobitResults:
         Same `target`/`new_data` semantics as `predict()`, but returns
         a polars DataFrame (the training data, or `new_data` when
         given, plus a new predicted-value column) instead of a plain
-        list. See `OLSResults.augment()` for the project's general
-        policy on this DataFrame-returning exception.
+        list. It exists to attach predictions back to their source
+        rows.
 
-        Like Logit/Probit's fixed `"predicted_probability"` column, the
-        appended column here has a `predicted_` prefix and is named `"predicted_{target}"`, using
-        the lowercased `target` (e.g. `target="expected_observed"` or
+        The appended column is named `"predicted_{target}"`, using the
+        lowercased `target` (e.g. `target="expected_observed"` or
         `target="Expected_Observed"` both produce
-        `"predicted_expected_observed"`), since `predict()`'s meaning
-        depends on `target`. This also lets `augment()` be called once
-        per `target` on the same DataFrame without a name collision.
+        `"predicted_expected_observed"`), since the meaning of the
+        prediction depends on `target`. This also lets `augment()` be
+        called once per `target` on the same DataFrame without a name
+        collision.
 
         Args:
             new_data: Same as `predict()`. If `None` (default), returns
@@ -434,11 +428,10 @@ class TobitResults:
     ) -> list[dict[str, float | str]]:
         """Marginal effects (`dy/dx`) with delta-method standard errors.
 
-        Unlike Logit/Probit, this is Tobit's own implementation (not
-        the shared `dydx_and_jacobian` pattern) because the formula
-        differs per `target`. Independent of the `confidence_level`
-        used in `fit()` (may differ from it). The constant term
-        (intercept) is excluded from the output.
+        The formula differs per `target`. Independent of the
+        `confidence_level` used in `fit()` (may differ from it). The
+        constant term (intercept) and `"sigma"` are excluded from the
+        output.
 
         Args:
             at: The representative point at which to evaluate the

@@ -1,14 +1,12 @@
 """Python wrapper for OLS (Ordinary Least Squares).
 
 A thin wrapper around `econometricsmodels._lib.fit_ols` (the Rust
-implementation, `engine`/`engine_pybind`). Validation and estimation
-logic live entirely on the Rust side; this module only provides the
-Python-facing API shape for polars DataFrames — a list of column names
-for `x`, an options object for estimation settings (CLAUDE.md section 2,
-`.claude/rules/python-style.md` "設計方針との整合性").
+implementation). Validation and estimation happen on the Rust side; this
+module only provides the Python-facing API shape for polars DataFrames:
+a list of column names for `x` and an options object for the estimation
+settings.
 
-`OLSOptions` is re-exported as-is from `_lib` (not redefined as a
-separate class; see `docs/spec/ols-spec.md`, "API引数").
+`OLSOptions` is re-exported as-is from `_lib`.
 """
 
 from __future__ import annotations
@@ -49,9 +47,15 @@ class OLS:
     Examples:
         >>> import polars as pl
         >>> from econometricsmodels import OLS
-        >>> df = pl.DataFrame({"y": [1.0, 2.0], "x1": [1.0, 2.0]})
+        >>> df = pl.DataFrame(
+        ...     {
+        ...         "y": [1.2, 1.9, 3.1, 3.8, 5.2],
+        ...         "x1": [1.0, 2.0, 3.0, 4.0, 5.0],
+        ...     }
+        ... )
         >>> result = OLS(df, y="y", x=["x1"]).fit()
-        >>> result.params["x1"]
+        >>> round(result.params["x1"], 3)
+        0.99
     """
 
     def __init__(
@@ -117,10 +121,6 @@ class OLSResults:
     - Methods: `predict()`, `augment()`, `params_table()`.
     - Post-estimation tests (never run by `fit()`): `white_test()`,
       `breusch_pagan_test()`, `breusch_godfrey_test()`.
-
-    Args:
-        raw: The estimation result object returned by `_lib.fit_ols`
-            (`_lib.OLSResult`).
 
     Note:
         Users normally do not construct this directly; it is returned
@@ -347,7 +347,7 @@ class OLSResults:
                 otherwise be silently overwritten). Also raised for
                 `new_data=None` when this result has no retained
                 training data (currently only possible for the
-                `OLSResults` returned by `IVResult.first_stage()`,
+                `OLSResults` returned by `IVResults.first_stage()`,
                 which has no single source DataFrame to attach a
                 column to; calling `augment(new_data=...)` with an
                 explicit `new_data` still works normally in that case).
@@ -391,7 +391,7 @@ class OLSResults:
                 regressor is constant; there are too few observations for
                 the auxiliary regression; or this result has no retained
                 training data (currently only the `OLSResults` returned
-                by `IVResult.first_stage()`).
+                by `IVResults.first_stage()`).
             ComputationError: The auxiliary design matrix is still
                 singular after dropping terms, or the auxiliary
                 regression's R² is undefined (for example the squared
@@ -462,7 +462,7 @@ class OLSResults:
                 is constant; there are too few observations for the
                 auxiliary regression; or this result has no retained
                 training data (currently only the `OLSResults` returned
-                by `IVResult.first_stage()`).
+                by `IVResults.first_stage()`).
             ComputationError: The auxiliary design matrix is still
                 singular after dropping variables, or the auxiliary
                 regression's R² is undefined (for example the squared
@@ -535,7 +535,7 @@ class OLSResults:
                 exist, has an unsupported dtype, or contains missing,
                 non-finite or duplicate values; or this result has no
                 retained training data (currently only the `OLSResults`
-                returned by `IVResult.first_stage()`).
+                returned by `IVResults.first_stage()`).
             ComputationError: The auxiliary design matrix is singular, or
                 the residuals are all zero or fitted exactly by the
                 auxiliary regression.

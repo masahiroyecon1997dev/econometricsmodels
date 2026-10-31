@@ -63,6 +63,7 @@ nav:
               - Options and results: api/re.md
               - Definitions: methods/re.md
   - Guides:
+      - Arguments and options: guide/api-conventions.md
       - Accepted data: guide/accepted-data.md
       - Validation and errors: guide/validation.md
       - Error codes: guide/error-codes.md

@@ -13,10 +13,12 @@
 
 - **Consistent API** — Every model follows the same conventions: a polars
   DataFrame, column names as strings, and an options object in; a `.fit()`
-  call out, returning a result with the same accessors. Methods with extra
-  inputs (instruments for IV, an entity column for panel models) add
-  arguments, but moving from OLS to Logit, IV, or panel models doesn't mean
-  learning a new interface design.
+  call out, returning a result with the same accessors. One rule decides the
+  layout: a required column is an argument, and an optional setting is an
+  option. Methods with extra inputs (instruments for IV, an entity column for
+  panel models) add arguments, but moving from OLS to Logit, IV, or panel
+  models doesn't mean learning a new interface design
+  ([Arguments and options](https://masahiroyecon1997dev.github.io/econometricsmodels/guide/api-conventions/)).
 - **Programmatic specification and results** — Models are defined with
   explicit arguments and an options object, not a formula string. Results
   come back as Python objects (`.params`, `.std_errors`, `.p_values`,

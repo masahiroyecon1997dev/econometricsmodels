@@ -12,9 +12,9 @@ WLS（Weighted Least Squares）の確定済み仕様。数式・定義の正本�
 `OlsInput::from_columns_weighted` + 既存`OlsEstimator::fit`（engine、無変更で再利用）。
 
 - `weight: str`は`y`/`x`と同格の**必須のトップレベル引数**（`WLSOptions`側には置かない）。
-  理由: `cluster`/`hac_time`は`cov_type`に応じた条件付き・デフォルトありの「推定方法の設定」
-  だが、`weight`はモデルそのものを規定する必須データであり、性質が異なる。この分類はFE
-  （`entity_id`）・IV（`instruments`）等、今後の必須データ列にも適用する。
+  理由: `cluster`/`hac_time`は`cov_type`に応じた条件付きでデフォルトのある設定だが、`weight`は
+  必須でデフォルトがない。置き場所の基準（必須なら引数、任意ならOptions）と`weight`が単数形の理由は
+  [`api-conventions.md`](./api-conventions.md)を参照。
 - 専用の`WLSOptions`型を持ち、`OLSOptions`と完全に同一のフィールド
   構成（`cov_type`/`include_intercept`/`confidence_level`/`cluster`/`hac_lags`/`hac_time`、
   意味論もOLSと完全に同じ）を持つ独立したpyclassとして実装する。結果型`WLSResult`が独立型なのと

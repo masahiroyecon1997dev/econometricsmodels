@@ -34,7 +34,7 @@ Swamy-Arora分散成分推定の具体式、固定効果の復元等）は[`fe-s
     （`time`は必須）として実装（`engine/src/panel/fe.rs`モジュールdoc「Driscoll-Kraay型
     パネルHAC対応」参照）。**REも同名・同じ意味の`REOptions.time`・`REOptions.dk_time`を持ち、
     同じ規約に従う**（`ReInput.time`が2-wayの時間次元、DKの時点列は`ReCovType::Dk { time }`で別に渡す）。
-- **`time`を`Options`に置く理由（トップレベル引数に昇格しない）**:
+- **`time`を`Options`に置く理由（トップレベル引数に昇格しない）**（全手法共通の基準は[`api-conventions.md`](./api-conventions.md)）:
   - `time`は条件付き必須（2-wayを指定するときだけ要る）で、1-wayでは不要な引数になる。
     トップレベル引数にすると1-wayの呼び出しでも毎回渡す必要が出る（`None`を許すなら`Options`と
     同じ）。FE・REとも2-way構造の指定という同じ役割だが、`entity`と違い無くてもモデルが成立する。

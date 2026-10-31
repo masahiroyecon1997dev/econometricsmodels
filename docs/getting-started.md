@@ -89,7 +89,7 @@ print(logit_result.predict())  # fitted probabilities
 print(logit_result.marginal_effects())  # dy/dx with delta-method standard errors
 ```
 
-Methods with extra inputs add arguments: `IV` takes `x_exog`, `x_endog` and `instruments`, and the panel models `FE` and `RE` take `entity`.
+Methods with extra inputs add arguments: `IV` takes `x_exog`, `x_endog` and `instruments`, `WLS` takes `weight`, and the panel models `FE` and `RE` take `entity`. A required column is an argument and an optional setting is an option; see [Arguments and options](guide/api-conventions.md).
 
 ## Handling errors
 

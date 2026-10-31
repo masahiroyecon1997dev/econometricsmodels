@@ -14,6 +14,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 
 ### 1.1 `y` / `x_exog` / `x_endog` / `instruments`
 
+- 引数とOptionsの置き場所の基準と、`x`ではなく`x_exog`/`x_endog`にする理由は[`api-conventions.md`](./api-conventions.md)を参照。
 - `y: str`、`x_exog: list[str]`（外生説明変数）、`x_endog: list[str]`（内生説明変数）、
   `instruments: list[str]`（操作変数）をすべて独立の引数として渡す（OLSの`y`/`x`と同格、
   bareネーミング）。

@@ -248,9 +248,16 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Create Release
+      - name: Create Release (draft, then publish)
         # タグ名には`$(...)`等のシェルのメタ文字を含められるため、`run:`へ式を直接
         # 埋め込まず、環境変数経由で渡す(テンプレートインジェクション対策)。
+        #
+        # Immutable Releasesが有効だと、公開(publish)後のreleaseにはassetを足せず、tagも
+        # 固定される。draftで作成してassetを全て添付してから公開する(GitHub公式の推奨手順)。
+        # --verify-tagは、tagがリモートに無いときにghがデフォルトブランチからtagを
+        # 作ってしまうのを防ぐ(公開した時点でそのtagが固定されるため)。
+        # 公開前に失敗するとdraftが残る。再実行する前にdraftを削除すること
+        # (`.claude/skills/release-publish/SKILL.md`参照)。
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
@@ -259,4 +266,7 @@ jobs:
           gh release create "$TAG" dist/* \
             --repo "$REPO" \
             --title "$TAG" \
-            --generate-notes
+            --generate-notes \
+            --draft \
+            --verify-tag
+          gh release edit "$TAG" --repo "$REPO" --draft=false

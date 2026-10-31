@@ -22,7 +22,6 @@
 
 from __future__ import annotations
 
-import json
 import math
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
@@ -45,6 +44,7 @@ from _assertions import (
 from _constants import APPLE_CLUSTER, APPLE_X, DATA_DIR, MROZ_X
 from _error_expectations import escaped
 from _errors import raises_error, raises_one_of_errors
+from _fixture_cov import load_fixtures_with_cov
 from _helpers import (
     load_wooldridge_dataset,
     name_collision_frame,
@@ -1371,7 +1371,7 @@ class BinaryChoiceReferenceConfig:
     near_separation_tol: float
 
     def load_fixtures(self) -> dict:
-        return json.loads(self.fixture_path.read_text())
+        return load_fixtures_with_cov(self.fixture_path)
 
     def dataset_path(self, scenario: str) -> Path:
         return DATA_DIR / f"{self.dataset_prefix}_{scenario}.csv"

@@ -75,7 +75,11 @@ import numpy as np
 from benchmark.common import load_frozen_dataset as _load_synthetic
 from benchmark.common.load_wooldridge import load as _load_wooldridge
 from benchmark.common.load_wooldridge import load_apple_adoption
-from benchmark.common.reference.normalize import normalize_names
+from benchmark.common.reference.extract import extract_cov_params
+from benchmark.common.reference.normalize import (
+    normalize_cov_params,
+    normalize_names,
+)
 
 MARGEFF_AT = ["overall", "mean", "median"]
 
@@ -184,6 +188,12 @@ def run(
         # opgの限界効果はRクロスチェック（marginaleffects）側を正とするため
         # margeffはNoneのまま（fix_margeff=Falseで正規化対象から外す）。
         result = normalize_names(raw, stat_key="test_stats")
+        result["cov_params"] = normalize_cov_params(
+            {
+                row: dict(zip(param_names, values))
+                for row, values in zip(param_names, opg_cov.tolist())
+            }
+        )
         result["margeff"] = None
         model_for_stats = base
     else:
@@ -224,6 +234,7 @@ def run(
         # 同じ処理を生成時に揃える）。margeffの内側の
         # パラメータ名も同時に畳む（fix_margeff=True）。
         result = normalize_names(raw, stat_key="test_stats", fix_margeff=True)
+        result["cov_params"] = normalize_cov_params(extract_cov_params(fitted))
         model_for_stats = fitted
 
     result["log_likelihood"] = float(model_for_stats.llf)

@@ -256,6 +256,15 @@ names(pvalues) <- rownames(ct)
 names(conf_low) <- rownames(ct)
 names(conf_high) <- rownames(ct)
 
+# 係数の分散共分散行列（標準誤差の元になった`vc`そのもの）を`{行: {列: 値}}`で出す。
+# 行・列の名前は係数名（`coeftest`の行名）に揃える。
+cov_names <- rownames(ct)
+dimnames(vc) <- list(cov_names, cov_names)
+cov_params <- setNames(
+  lapply(cov_names, function(r) setNames(as.list(as.numeric(vc[r, ])), cov_names)),
+  cov_names
+)
+
 # 適合度統計量はcov_typeに依存しない（対数尤度・deviance由来のため）。
 # R標準のAIC()/BIC()は、二項分布族（分散パラメータを別途推定しない）では
 # 本実装・statsmodelsと同じ式（k=回帰係数の数のみ）に一致することを
@@ -392,6 +401,7 @@ result <- list(
   p_values = as.list(pvalues),
   conf_low = as.list(conf_low),
   conf_high = as.list(conf_high),
+  cov_params = cov_params,
   log_likelihood = ll,
   log_likelihood_null = ll_null,
   aic = -2 * ll + 2 * k_params,

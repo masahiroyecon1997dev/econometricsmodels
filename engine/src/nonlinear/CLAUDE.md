@@ -6,7 +6,7 @@
 
 `LogitEstimator`/`ProbitEstimator`/`TobitEstimator`は、入力データ・係数（Tobitは`σ`も）・係数の分散共分散行列を`fitted: *Fitted`として持つ。`predict`・`predict_new_data`・`pred_table`・`marginal_effects`・`censoring_fit_check`の実装は`*Fitted`にあり、`*Estimator`の同名メソッドは委譲するだけ（公開APIは変えていない）。標準誤差・適合度統計量・収束情報は`*Estimator`だけが持つ。`engine_pybind`の結果は`fit`の末尾で`into_fitted()`を受け取り、推定量全体を持たない。
 
-`*Fitted`はpickleの復元でも使うので、`from_design`（`*Input`。次元・係数名・打ち切り境界の整合）と`from_parts`（`*Fitted`。次元の整合、Tobitは`σ`が正の有限値）で組み立てられる。これは「推定量はコンストラクタで検証済みの状態を保証する」原則との両立のため: フィールドはprivateのまま、構築経路は`fit`と`from_parts`の2つだけ。**最適性（収束したこと）と`params`・`cov_params`の値の有限性は検査しない**（`fit`が作った状態であることは呼び出し側が保証する）。エラーは`CommonError::Internal`だが、`fit`が作った状態では起きず、壊れたpickleだけが到達する入力エラーで、`engine_pybind`が`PICKLE_FORMAT_MISMATCH`に変換する。**新しいMLE手法で`predict`等を持つときは、同じ形で`*Fitted`に実装を置くこと**（`docs/spec/pickle-support.md`）。
+`*Fitted`はpickleの復元でも使うので、`*Input::from_columns`（`fit`と同じ。次元・打ち切り境界の整合。復元では`source_data`の列から`y`・`x`を作り直して渡す）と`from_parts`（`*Fitted`。次元の整合、Tobitは`σ`が正の有限値）で組み立てられる。これは「推定量はコンストラクタで検証済みの状態を保証する」原則との両立のため: フィールドはprivateのまま、構築経路は`fit`と`from_parts`の2つだけ。**最適性（収束したこと）と`params`・`cov_params`の値の有限性は検査しない**（`fit`が作った状態であることは呼び出し側が保証する）。エラーは`CommonError::Internal`だが、`fit`が作った状態では起きず、壊れたpickleだけが到達する入力エラーで、`engine_pybind`が`PICKLE_FORMAT_MISMATCH`に変換する。**新しいMLE手法で`predict`等を持つときは、同じ形で`*Fitted`に実装を置くこと**（`docs/spec/pickle-support.md`）。
 
 ## 踏んだ罠（再発防止）
 

@@ -35,7 +35,7 @@ use crate::shared::augment::append_predicted_column;
 use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
     SelectedData, extract_f64_column, extract_f64_columns, extract_model_x_columns,
-    select_model_x_columns,
+    select_model_x_columns, x_column_names,
 };
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
@@ -333,18 +333,18 @@ pub struct LogitResult {
     source_data: Py<PyAny>,
 }
 
-// 入力データ（`y`・`x`・列名・切片の有無）・係数・係数の分散共分散行列のタプル。復元は`from_design`/`from_parts`を
-// 通して次元の整合を検査する（不整合なら`PICKLE_FORMAT_MISMATCH`）。
-impl crate::shared::pickle::PickleField for LogitFitted {
+// 入力データのうち`y`・`x`は状態に入れない（`source_data`の列から作り直せる）。入れるのは、`x`の列名・`y`の列名・
+// 切片の有無・係数・分散共分散行列。復元は`from_columns`/`from_parts`を通して次元の整合を検査する
+// （列が無い・不整合なら`PICKLE_FORMAT_MISMATCH`）。
+impl crate::shared::pickle::PickleFieldFromSource for LogitFitted {
     fn to_py<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        use crate::shared::pickle::to_tuple;
+        use crate::shared::pickle::{PickleField, to_tuple};
         let input = self.input();
+        let x_names = x_column_names(input.param_names(), input.has_intercept(), 0).to_vec();
         to_tuple(
             py,
             vec![
-                input.y().to_py(py)?,
-                input.x().to_py(py)?,
-                input.param_names().to_vec().to_py(py)?,
+                x_names.to_py(py)?,
                 input.dep_var_name().to_string().to_py(py)?,
                 input.has_intercept().to_py(py)?,
                 self.params().to_vec().to_py(py)?,
@@ -353,23 +353,17 @@ impl crate::shared::pickle::PickleField for LogitFitted {
         )
     }
 
-    fn from_py(obj: &Bound<'_, PyAny>) -> Option<Self> {
+    fn from_py(obj: &Bound<'_, PyAny>, source: &Bound<'_, PyAny>) -> Option<Self> {
+        use crate::nonlinear::common::rebuild_columns;
         use crate::shared::pickle::{PickleField, from_tuple};
-        let items = from_tuple(obj, 7)?;
-        let input = LogitInput::from_design(
-            PickleField::from_py(&items[0])?,
-            PickleField::from_py(&items[1])?,
-            PickleField::from_py(&items[2])?,
-            PickleField::from_py(&items[3])?,
-            PickleField::from_py(&items[4])?,
-        )
-        .ok()?;
-        LogitFitted::from_parts(
-            input,
-            PickleField::from_py(&items[5])?,
-            PickleField::from_py(&items[6])?,
-        )
-        .ok()
+        let items = from_tuple(obj, 5)?;
+        let x_names: Vec<String> = PickleField::from_py(&items[0])?;
+        let dep_var_name: String = PickleField::from_py(&items[1])?;
+        let has_intercept: bool = PickleField::from_py(&items[2])?;
+        let params: Vec<f64> = PickleField::from_py(&items[3])?;
+        let (y, x) = rebuild_columns(source, &dep_var_name, &x_names, has_intercept, params.len())?;
+        let input = LogitInput::from_columns(&y, &x, x_names, has_intercept, dep_var_name).ok()?;
+        LogitFitted::from_parts(input, params, PickleField::from_py(&items[4])?).ok()
     }
 }
 
@@ -399,8 +393,9 @@ crate::shared::pickle::impl_pickle_state!(LogitResult {
     n_iter,
     cov_type,
     solver,
-    fitted,
     source_data,
+} rebuilt_from(source_data) {
+    fitted
 });
 
 // `#[pymethods]`ブロックの外に置く非公開実装（`&DataFrame`が`FromPyObject`未実装の

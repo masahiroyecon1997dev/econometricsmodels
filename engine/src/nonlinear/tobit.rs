@@ -1539,54 +1539,6 @@ pub struct TobitFitted {
     cov_params: Mat<f64>,
 }
 
-impl TobitInput {
-    /// 設計行列・被説明変数・打ち切り境界をそのまま受け取って組み立てる（`from_columns`と違い切片列は
-    /// 足さない）。pickleから復元する経路用で、次元・係数名・境界の整合だけを検査する。
-    ///
-    /// `fit`が作った状態では起きない不整合（壊れた・改ざんされたpickleだけが到達する入力エラー）なので、
-    /// `engine_pybind`が`PICKLE_FORMAT_MISMATCH`へ変換する。
-    ///
-    /// # Errors
-    /// 次元（`y`が1列で1行以上、`y`と`x`の行数、`x`の列数と`param_names`の長さ）が合わない、`has_intercept`なのに
-    /// 先頭の係数名が`"const"`でない、境界がどちらも無い・有限でない・`lower < upper`でない:
-    /// `CommonError::Internal`
-    pub fn from_design(
-        y: Mat<f64>,
-        x: Mat<f64>,
-        param_names: Vec<String>,
-        dep_var_name: String,
-        has_intercept: bool,
-        lower: Option<f64>,
-        upper: Option<f64>,
-    ) -> Result<Self, MleError> {
-        let bounds_ok = (lower.is_some() || upper.is_some())
-            && lower.is_none_or(f64::is_finite)
-            && upper.is_none_or(f64::is_finite)
-            && match (lower, upper) {
-                (Some(l), Some(u)) => l < u,
-                _ => true,
-            };
-        let consistent = y.ncols() == 1
-            && y.nrows() >= 1
-            && y.nrows() == x.nrows()
-            && x.ncols() == param_names.len()
-            && (!has_intercept || param_names.first().map(String::as_str) == Some("const"))
-            && bounds_ok;
-        if !consistent {
-            return Err(CommonError::internal("inconsistent design matrix parts").into());
-        }
-        Ok(Self {
-            y,
-            x,
-            param_names,
-            dep_var_name,
-            has_intercept,
-            lower,
-            upper,
-        })
-    }
-}
-
 impl TobitFitted {
     /// 入力データ・係数・`σ`・分散共分散行列から組み立てる。
     ///
@@ -7864,14 +7816,21 @@ mod tests {
         .unwrap()
     }
 
+    /// `original`と同じ設計行列を、本番の復元と同じ`from_columns`で作り直す。
     fn rebuilt_input(original: &TobitFitted) -> TobitInput {
         let input = original.input();
-        TobitInput::from_design(
-            input.y().clone(),
-            input.x().clone(),
-            input.param_names().to_vec(),
-            input.dep_var_name().to_string(),
+        let start = usize::from(input.has_intercept());
+        let n = input.nobs();
+        let x_columns: Vec<Vec<f64>> = (start..input.k())
+            .map(|j| (0..n).map(|i| *input.x().get(i, j)).collect())
+            .collect();
+        let y: Vec<f64> = (0..n).map(|i| *input.y().get(i, 0)).collect();
+        TobitInput::from_columns(
+            &y,
+            &x_columns,
+            input.param_names()[start..].to_vec(),
             input.has_intercept(),
+            input.dep_var_name().to_string(),
             input.lower(),
             input.upper(),
         )
@@ -7927,34 +7886,6 @@ mod tests {
             check.uncensored().model_implied_rate(),
             expected_check.uncensored().model_implied_rate()
         );
-    }
-
-    #[test]
-    fn from_design_rejects_inconsistent_parts_and_bounds() {
-        let build = |y_cols: usize, rows: usize, names: Vec<&str>, intercept: bool, l, u| {
-            TobitInput::from_design(
-                Mat::from_fn(3, y_cols, |_, _| 0.0),
-                Mat::from_fn(rows, 2, |i, j| (i + j) as f64),
-                names.into_iter().map(String::from).collect(),
-                "y".to_string(),
-                intercept,
-                l,
-                u,
-            )
-        };
-        let names = || vec!["const", "x1"];
-        assert!(build(1, 3, names(), true, Some(0.0), None).is_ok());
-        assert!(build(2, 3, names(), true, Some(0.0), None).is_err());
-        assert!(build(1, 2, names(), true, Some(0.0), None).is_err());
-        assert!(build(1, 3, vec!["const"], true, Some(0.0), None).is_err());
-        assert!(build(1, 3, vec!["a", "b"], true, Some(0.0), None).is_err());
-        assert!(build(1, 3, vec!["a", "b"], false, Some(0.0), None).is_ok());
-        // 境界: どちらも無い・有限でない・順序が逆
-        assert!(build(1, 3, names(), true, None, None).is_err());
-        assert!(build(1, 3, names(), true, Some(f64::NAN), None).is_err());
-        assert!(build(1, 3, names(), true, None, Some(f64::INFINITY)).is_err());
-        assert!(build(1, 3, names(), true, Some(2.0), Some(1.0)).is_err());
-        assert!(build(1, 3, names(), true, Some(1.0), Some(2.0)).is_ok());
     }
 
     #[test]

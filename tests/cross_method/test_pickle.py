@@ -18,7 +18,6 @@ import copy
 import inspect
 import math
 import pickle
-import struct
 import threading
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import get_context
@@ -671,84 +670,207 @@ FITTED_NAMES = ["LogitResult", "ProbitResult", "TobitResult"]
 def _fitted_layout(name: str) -> dict[str, int]:
     """`fitted`のタプルの並び。
 
-    Logit/Probitは(y, x, names, dep, has_intercept, params, cov)、
-    Tobitは(y, x, names, dep, has_intercept, lower, upper, params, sigma, cov)。
+    `y`・`x`は状態に入れず、`source_data`の列から作り直す。Logit/Probitは
+    (xの列名, yの列名, 切片の有無, params, cov)、
+    Tobitは(xの列名, yの列名, 切片の有無, lower, upper, params, sigma, cov)。
     """
     if name == "TobitResult":
-        return {"lower": 5, "upper": 6, "params": 7, "sigma": 8, "cov": 9}
-    return {"params": 5, "cov": 6}
+        return {
+            "x_names": 0,
+            "dep": 1,
+            "intercept": 2,
+            "lower": 3,
+            "upper": 4,
+            "params": 5,
+            "sigma": 6,
+            "cov": 7,
+        }
+    return {"x_names": 0, "dep": 1, "intercept": 2, "params": 3, "cov": 4}
 
 
-def _restore_with(kind: str, version: int, state: dict, fitted: list) -> None:
-    _lib._restore_pickled(kind, version, {**state, "fitted": tuple(fitted)})
+def _restore_with(
+    kind: str, version: int, state: dict, fitted: list, **changes: object
+) -> None:
+    _lib._restore_pickled(
+        kind, version, {**state, "fitted": tuple(fitted), **changes}
+    )
 
 
 @pytest.mark.parametrize("name", FITTED_NAMES)
+def test_fitted_state_holds_no_design_matrix(
+    samples: dict[str, object], name: str
+) -> None:
+    """`y`・`x`は`source_data`から作り直すので、観測数に比例するバイト列を状態に入れない。"""
+    _, _, state = _reduce_args(samples[name])
+    n = state["source_data"].height
+    assert len(_fitted_layout(name)) == len(state["fitted"])
+    for item in state["fitted"]:
+        data = item[2] if isinstance(item, tuple) and len(item) == 3 else item
+        assert not isinstance(data, bytes) or len(data) < n * 8
+
+
+# 改ざんした`fitted`の部品。`layout`は`_fitted_layout`、`parts`は元の`fitted`のリスト。
+TAMPERED_PARTS = {
+    # `source_data`に無い列
+    "unknown_x": lambda layout, parts: {
+        layout["x_names"]: [*parts[layout["x_names"]], "zz"]
+    },
+    "unknown_y": lambda layout, parts: {layout["dep"]: "zz"},
+    # 係数の数と合わない列数
+    "fewer_x": lambda layout, parts: {
+        layout["x_names"]: parts[layout["x_names"]][:-1]
+    },
+    # `fit()`が拒否する列の構成（空・重複・`y`を`x`に含む・切片と`const`の衝突）
+    "no_x": lambda layout, parts: {layout["x_names"]: []},
+    "duplicated_x": lambda layout, parts: {
+        layout["x_names"]: parts[layout["x_names"]] * 2
+    },
+    "many_duplicated_x": lambda layout, parts: {
+        layout["x_names"]: parts[layout["x_names"]][:1] * 10_000
+    },
+    "y_in_x": lambda layout, parts: {
+        layout["x_names"]: [*parts[layout["x_names"]], parts[layout["dep"]]]
+    },
+    "const_in_x": lambda layout, parts: {
+        layout["x_names"]: ["const", *parts[layout["x_names"]][1:]],
+        layout["intercept"]: True,
+    },
+    # 切片の有無を反転すると係数の数が合わない
+    "intercept": lambda layout, parts: {
+        layout["intercept"]: not parts[layout["intercept"]]
+    },
+    "params": lambda layout, parts: {
+        layout["params"]: parts[layout["params"]] + bytes(8)
+    },
+    "cov_shape": lambda layout, parts: {layout["cov"]: (1, 1, bytes(8))},
+}
+
+
+@pytest.mark.parametrize("name", FITTED_NAMES)
+@pytest.mark.parametrize("case", sorted(TAMPERED_PARTS))
 def test_restore_rejects_a_fitted_state_with_inconsistent_parts(
-    samples: dict[str, object], name: str
+    samples: dict[str, object], name: str, case: str
 ) -> None:
-    """バイト列の長さは形と合っているが、部品どうしの次元が合わない状態を拒否する。
+    """`fit()`では作れない部品の組（次元・列の構成）を拒否する。
 
-    `from_design`/`from_parts`まで届く入力で、復元後のメソッドが添字の範囲外を読まないための検査。
+    列を読む前の検査と`from_columns`/`from_parts`まで届く入力で、復元後のメソッドが添字の範囲外を読まないこと、
+    小さいpickleから巨大な行列を確保しないことの検査。
     """
     kind, version, state = _reduce_args(samples[name])
     fitted = list(state["fitted"])
-    y, x, names = fitted[0], fitted[1], fitted[2]
     layout = _fitted_layout(name)
-    n, k = x[0], x[1]
-    assert y[:2] == (n, 1)
-    assert len(y[2]) == n * 8
-    assert len(x[2]) == n * k * 8
-    broken = {
-        # `y`だけ行数を減らす（`x`と合わない）
-        "y_rows": {0: (n - 1, 1, y[2][:-8])},
-        # `y`が2列
-        "y_columns": {0: (n // 2, 2, y[2])},
-        # `x`の列数を増やす（係数名の数と合わない）
-        "x_columns": {1: (n, k + 1, x[2] + bytes(8 * n))},
-        # 係数名が足りない
-        "names": {2: names[:-1]},
-        # 観測数が0
-        "no_observations": {0: (0, 1, b""), 1: (0, k, b"")},
-        "params": {layout["params"]: fitted[layout["params"]] + bytes(8)},
-        "cov_shape": {layout["cov"]: (1, 1, bytes(8))},
-    }
-    for label, replacement in broken.items():
-        tampered = list(fitted)
-        for index, value in replacement.items():
-            tampered[index] = value
-        with raises_error(ErrorCode.PICKLE_FORMAT_MISMATCH, object=kind):
-            _restore_with(kind, version, state, tampered)
-        assert label
+    tampered = list(fitted)
+    for index, value in TAMPERED_PARTS[case](layout, fitted).items():
+        tampered[index] = value
+    with raises_error(ErrorCode.PICKLE_FORMAT_MISMATCH, object=kind):
+        _restore_with(kind, version, state, tampered)
+
+
+BROKEN_SOURCES = {
+    "missing_x": lambda source, x, dep: source.drop(x),
+    "missing_y": lambda source, x, dep: source.drop(dep),
+    "string_x": lambda source, x, dep: source.with_columns(
+        pl.col(x).cast(pl.String)
+    ),
+    "null_x": lambda source, x, dep: source.with_columns(
+        pl.when(pl.int_range(pl.len()) == 0)
+        .then(None)
+        .otherwise(pl.col(x))
+        .alias(x)
+    ),
+    "infinite_y": lambda source, x, dep: source.with_columns(
+        pl.when(pl.int_range(pl.len()) == 0)
+        .then(float("inf"))
+        .otherwise(pl.col(dep))
+        .alias(dep)
+    ),
+    "no_rows": lambda source, x, dep: source.clear(),
+}
 
 
 @pytest.mark.parametrize("name", FITTED_NAMES)
-def test_restore_rejects_a_matrix_whose_shape_overflows(
-    samples: dict[str, object], name: str
+@pytest.mark.parametrize("case", sorted(BROKEN_SOURCES))
+def test_restore_rejects_a_source_data_that_cannot_rebuild_the_design(
+    samples: dict[str, object], name: str, case: str
 ) -> None:
+    """設計行列を作り直せない`source_data`（列が無い・数値でない・欠損値・無限大・0行）を拒否する。"""
     kind, version, state = _reduce_args(samples[name])
     fitted = list(state["fitted"])
-    for shape in ((2**63, 2), (2**64, 1), (1, 2**64), (-1, 1)):
+    layout = _fitted_layout(name)
+    frame = BROKEN_SOURCES[case](
+        state["source_data"],
+        fitted[layout["x_names"]][0],
+        fitted[layout["dep"]],
+    )
+    with raises_error(ErrorCode.PICKLE_FORMAT_MISMATCH, object=kind):
+        _restore_with(kind, version, state, fitted, source_data=frame)
+
+
+def test_restore_rejects_tobit_bounds_that_exclude_the_outcome(
+    samples: dict[str, object],
+) -> None:
+    """`y`が境界の外にある状態は`fit()`が拒否するので、復元も拒否する。"""
+    kind, version, state = _reduce_args(samples["TobitResult"])
+    fitted = list(state["fitted"])
+    layout = _fitted_layout(kind)
+    for key, value in (("lower", 1e9), ("upper", -1e9)):
         tampered = list(fitted)
-        tampered[1] = (*shape, b"")
+        tampered[layout[key]] = value
+        tampered[layout["upper" if key == "lower" else "lower"]] = None
         with raises_error(ErrorCode.PICKLE_FORMAT_MISMATCH, object=kind):
             _restore_with(kind, version, state, tampered)
 
 
-def test_matrix_state_is_little_endian_column_major() -> None:
-    """設計行列の状態の形式（列優先・リトルエンディアン）を固定する。
+@pytest.mark.parametrize("model", [Logit, Probit], ids=["logit", "probit"])
+def test_restore_rebuilds_the_design_from_any_numeric_dtype(model) -> None:
+    """`y`・`x`がInt・Boolean・Decimalでも、`fit()`と同じ変換で作り直して同じ値になる。
 
-    `x`は非正方で、行優先と列優先を取り違えると値が入れ替わる。`y`・`cov_params`は
-    取り違えても値が変わらないので、`x`で確かめる。
+    使わない列（文字列・リスト・欠損値を含む列）が`source_data`にあっても復元できる。
     """
+    frame = _frame().with_columns(
+        y_int=pl.col("y01").cast(pl.Int8),
+        y_bool=pl.col("y01").cast(pl.Boolean),
+        x_int=(pl.col("x1") * 10).round().cast(pl.Int32),
+        x_dec=pl.col("x2").round(3).cast(pl.Decimal(10, 3)),
+        junk_list=pl.concat_list(pl.col("x1"), pl.col("x2")),
+        junk_null=pl.when(pl.int_range(pl.len()) == 0)
+        .then(None)
+        .otherwise(pl.col("x1")),
+    )
+    for dep in ("y_int", "y_bool"):
+        result = model(frame, y=dep, x=["x_int", "x_dec", "x1"]).fit()
+        clone = pickle.loads(pickle.dumps(result))
+        assert clone.predict() == result.predict()
+        assert clone.pred_table() == result.pred_table()
+        assert clone.marginal_effects() == result.marginal_effects()
+
+
+def test_restored_design_matrix_comes_from_source_data() -> None:
+    """復元した結果の`y`・`x`は`source_data`の列で、元の値と同じ。値を入れ替えると予測が変わる。"""
     frame = _frame()
-    options = LogitOptions(include_intercept=False)
-    result = Logit(frame, y="y01", x=["x1", "x2"], options=options).fit()
-    _, _, state = _reduce_args(result._raw)
-    nrows, ncols, data = state["fitted"][1]
-    assert (nrows, ncols) == (frame.height, 2)
-    values = frame["x1"].to_list() + frame["x2"].to_list()
-    assert data == b"".join(struct.pack("<d", v) for v in values)
+    result = Logit(frame, y="y01", x=["x1", "x2"]).fit()
+    kind, version, state = _reduce_args(result._raw)
+    same = _lib._restore_pickled(kind, version, state)
+    assert same.predict() == result._raw.predict()
+    shifted = frame.with_columns(pl.col("x1") + 1.0)
+    other = _lib._restore_pickled(
+        kind, version, {**state, "source_data": shifted}
+    )
+    assert other.predict() != result._raw.predict()
+
+
+def test_logit_pickle_is_close_to_the_size_of_the_data() -> None:
+    """設計行列を状態に入れないので、pickleは`source_data`のサイズに近い。"""
+    rows = 20_000
+    frame = pl.DataFrame(
+        {
+            "y01": [float(i % 2) for i in range(rows)],
+            "x1": [((i * 37) % 101) / 10.0 + (i % 2) for i in range(rows)],
+            "x2": [((i * 91) % 103) / 10.0 for i in range(rows)],
+        }
+    )
+    result = Logit(frame, y="y01", x=["x1", "x2"]).fit()
+    assert len(pickle.dumps(result)) < 1.3 * len(pickle.dumps(frame))
 
 
 @pytest.mark.parametrize(

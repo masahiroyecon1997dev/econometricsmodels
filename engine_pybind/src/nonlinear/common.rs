@@ -12,9 +12,11 @@ use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 
 use crate::shared::column_error::ColumnSource;
-use crate::shared::column_extraction::extract_optional_cluster_groups;
+use crate::shared::column_extraction::{
+    extract_f64_column, extract_f64_columns, extract_optional_cluster_groups, select_columns,
+};
 use crate::shared::errors::{to_pyerr, unknown_option_value};
-use crate::shared::validation::reject_unused_option;
+use crate::shared::validation::{reject_unused_option, validate_common_roles};
 
 /// `engine::nonlinear::common::MleError`をPython例外に変換する。
 ///
@@ -27,6 +29,40 @@ use crate::shared::validation::reject_unused_option;
 /// 対応表は`docs/spec/nonlinear-common.md`2章「エラー型（`MleError`、共有）」参照。
 pub(crate) fn mle_error_to_pyerr(err: MleError) -> PyErr {
     to_pyerr(&err)
+}
+
+/// pickleの復元で、`source_data`（`fit()`に渡された`polars.DataFrame`）から`y`と`x`の列を取り出し直す。
+///
+/// 列を読む前に、`fit()`と同じ構造の検査（`x`が空でない、`y`と`x`・`x`内に重複がない、切片と`"const"`が
+/// 衝突しない）と、列数が係数の数（`n_params`）と合うことを確かめる。改ざんされた列名（同じ列の重複など）から
+/// 巨大な行列を確保しないため。この検査の後は、`x`の列は`source_data`にある相異なる列なので、確保量は
+/// `source_data`の大きさで抑えられる。
+///
+/// 取り出しは`fit()`と同じ`extract_f64_column(s)`を通すので、同じ値になる。検査に失敗する、列が無い・数値でない・
+/// 欠損値を含む、観測数が0のときは`None`（改ざんされたか、別の版が書いたpickle。呼び出し側が
+/// `PICKLE_FORMAT_MISMATCH`にする）。
+pub(crate) fn rebuild_columns(
+    source: &Bound<'_, PyAny>,
+    dep_var_name: &str,
+    x_names: &[String],
+    include_intercept: bool,
+    n_params: usize,
+) -> Option<(Vec<f64>, Vec<Vec<f64>>)> {
+    validate_common_roles(dep_var_name, x_names, include_intercept).ok()?;
+    if x_names.len() + usize::from(include_intercept) != n_params {
+        return None;
+    }
+    let mut columns = vec![dep_var_name.to_string()];
+    columns.extend_from_slice(x_names);
+    let selected = select_columns(source, "source_data", &columns).ok()?;
+    let y = extract_f64_column(
+        &selected.frame,
+        dep_var_name,
+        ColumnSource::new("y", "data"),
+    )
+    .ok()?;
+    let x = extract_f64_columns(&selected.frame, x_names, ColumnSource::new("x", "data")).ok()?;
+    (!y.is_empty()).then_some((y, x))
 }
 
 /// `faer::Mat<f64>`を行指向の`Vec<Vec<f64>>`に変換する（`pred_table`のような小さい

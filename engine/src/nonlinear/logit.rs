@@ -359,41 +359,6 @@ pub struct LogitFitted {
     cov_params: Mat<f64>,
 }
 
-impl LogitInput {
-    /// 設計行列と被説明変数をそのまま受け取って組み立てる（`from_columns`と違い切片列は足さない）。
-    /// pickleから復元する経路用で、次元と係数名の整合だけを検査する。
-    ///
-    /// `fit`が作った状態では起きない不整合（壊れた・改ざんされたpickleだけが到達する入力エラー）なので、
-    /// `engine_pybind`が`PICKLE_FORMAT_MISMATCH`へ変換する。
-    ///
-    /// # Errors
-    /// 次元（`y`が1列で1行以上、`y`と`x`の行数、`x`の列数と`param_names`の長さ）が合わない、`has_intercept`なのに
-    /// 先頭の係数名が`"const"`でない: `CommonError::Internal`
-    pub fn from_design(
-        y: Mat<f64>,
-        x: Mat<f64>,
-        param_names: Vec<String>,
-        dep_var_name: String,
-        has_intercept: bool,
-    ) -> Result<Self, MleError> {
-        let consistent = y.ncols() == 1
-            && y.nrows() >= 1
-            && y.nrows() == x.nrows()
-            && x.ncols() == param_names.len()
-            && (!has_intercept || param_names.first().map(String::as_str) == Some("const"));
-        if !consistent {
-            return Err(CommonError::internal("inconsistent design matrix parts").into());
-        }
-        Ok(Self {
-            y,
-            x,
-            param_names,
-            dep_var_name,
-            has_intercept,
-        })
-    }
-}
-
 impl LogitFitted {
     /// 入力データ・係数・係数の分散共分散行列から組み立てる。
     ///
@@ -3524,17 +3489,28 @@ mod tests {
         .unwrap()
     }
 
-    fn rebuilt_from_parts(original: &LogitFitted) -> LogitFitted {
+    /// `original`と同じ設計行列を、本番の復元と同じ`from_columns`で作り直す。
+    fn rebuilt_input(original: &LogitFitted) -> LogitInput {
         let input = original.input();
+        let start = usize::from(input.has_intercept());
+        let n = input.nobs();
+        let x_columns: Vec<Vec<f64>> = (start..input.k())
+            .map(|j| (0..n).map(|i| *input.x().get(i, j)).collect())
+            .collect();
+        let y: Vec<f64> = (0..n).map(|i| *input.y().get(i, 0)).collect();
+        LogitInput::from_columns(
+            &y,
+            &x_columns,
+            input.param_names()[start..].to_vec(),
+            input.has_intercept(),
+            input.dep_var_name().to_string(),
+        )
+        .unwrap()
+    }
+
+    fn rebuilt_from_parts(original: &LogitFitted) -> LogitFitted {
         LogitFitted::from_parts(
-            LogitInput::from_design(
-                input.y().clone(),
-                input.x().clone(),
-                input.param_names().to_vec(),
-                input.dep_var_name().to_string(),
-                input.has_intercept(),
-            )
-            .unwrap(),
+            rebuilt_input(original),
             original.params().to_vec(),
             original.cov_params().clone(),
         )
@@ -3568,48 +3544,9 @@ mod tests {
     }
 
     #[test]
-    fn from_design_rejects_inconsistent_parts() {
-        let ok = || {
-            (
-                Mat::from_fn(3, 1, |i, _| i as f64),
-                Mat::from_fn(3, 2, |i, j| (i + j) as f64),
-                vec!["const".to_string(), "x1".to_string()],
-            )
-        };
-        let build = |y: Mat<f64>, x: Mat<f64>, names: Vec<String>, intercept: bool| {
-            LogitInput::from_design(y, x, names, "y".to_string(), intercept)
-        };
-        let (y, x, names) = ok();
-        assert!(build(y, x, names, true).is_ok());
-
-        let (_, x, names) = ok();
-        assert!(build(Mat::from_fn(3, 2, |_, _| 0.0), x, names, true).is_err());
-        let (_, x, names) = ok();
-        assert!(build(Mat::from_fn(2, 1, |_, _| 0.0), x, names, true).is_err());
-        let (y, x, _) = ok();
-        assert!(build(y, x, vec!["const".to_string()], true).is_err());
-        // 先頭が"const"でないのに`has_intercept`
-        let (y, x, _) = ok();
-        assert!(build(y, x, vec!["a".to_string(), "b".to_string()], true).is_err());
-        // `has_intercept=false`なら先頭の名前は何でもよい
-        let (y, x, _) = ok();
-        assert!(build(y, x, vec!["a".to_string(), "b".to_string()], false).is_ok());
-    }
-
-    #[test]
     fn from_parts_rejects_params_or_covariance_of_the_wrong_size() {
         let original = fitted_test_estimator().into_fitted();
-        let make_input = || {
-            let input = original.input();
-            LogitInput::from_design(
-                input.y().clone(),
-                input.x().clone(),
-                input.param_names().to_vec(),
-                input.dep_var_name().to_string(),
-                input.has_intercept(),
-            )
-            .unwrap()
-        };
+        let make_input = || rebuilt_input(&original);
         let k = original.params().len();
         assert!(
             LogitFitted::from_parts(

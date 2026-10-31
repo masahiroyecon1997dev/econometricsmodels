@@ -10,6 +10,9 @@
 //! フィールド一覧から生成する。一覧は構造体の全フィールドを網羅する分割代入と構造体リテラルに展開されるので、
 //! フィールドを足して一覧に足し忘れるとコンパイルエラーになる。
 //!
+//! 他のフィールドから作り直せる部分（Logit・Probit・Tobitの`y`・`x`は`source_data`の列から作れる）は、状態に入れず
+//! 復元時に作り直す。`impl_pickle_state!`の`rebuilt_from`で、元になるフィールドを先に復元してから復元する。
+//!
 //! 復元は`ValidationError`の`PICKLE_FORMAT_MISMATCH`で失敗しうる。形式の版が違う、種別名が未知、キーの集合が
 //! 違う、値の型が違う、のいずれか。別の版のパッケージが書いたpickleを、中途半端に有効なオブジェクトとして
 //! 復元しないための扱い。フィールドの意味や並びを変えて既存のpickleを読めなくするときは[`FORMAT_VERSION`]を上げる。
@@ -50,6 +53,17 @@ pub(crate) trait PickleField: Sized {
 
     /// 型が合わなければ`None`（呼び出し側が`PICKLE_FORMAT_MISMATCH`にする）。
     fn from_py(obj: &Bound<'_, PyAny>) -> Option<Self>;
+}
+
+/// 状態のdictには一部だけを入れ、残りを復元済みの`source_data`から再構築するフィールドの型
+/// （Logit・Probit・Tobitの`fitted`。`y`・`x`は元のDataFrameの列から作り直せるので、状態に入れない）。
+/// [`impl_pickle_state!`]の`rebuilt_from`で使う。
+pub(crate) trait PickleFieldFromSource: Sized {
+    fn to_py<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>>;
+
+    /// `source`は復元済みの`source_data`（`polars.DataFrame`）。型が合わない・再構築できない
+    /// （列が無い、数値でない、欠損値を含む等）ときは`None`。
+    fn from_py(obj: &Bound<'_, PyAny>, source: &Bound<'_, PyAny>) -> Option<Self>;
 }
 
 /// 変換が`IntoPyObject`・`FromPyObject`そのままでよい型。
@@ -208,6 +222,19 @@ pub(crate) fn take_field<T: PickleField>(
         .ok_or_else(|| format_mismatch(kind))
 }
 
+/// [`take_field`]の、`source_data`から再構築するフィールド用。
+pub(crate) fn take_field_from_source<T: PickleFieldFromSource>(
+    state: &Bound<'_, PyDict>,
+    name: &str,
+    kind: &str,
+    source: &Bound<'_, PyAny>,
+) -> PyResult<T> {
+    state
+        .get_item(name)?
+        .and_then(|value| T::from_py(&value, source))
+        .ok_or_else(|| format_mismatch(kind))
+}
+
 /// `__reduce__`の本体。クラスの`#[pymethods]`から1行で呼ぶ。
 pub(crate) fn reduce<'py, T>(slf: &Bound<'py, T>) -> PyResult<Bound<'py, PyTuple>>
 where
@@ -241,7 +268,58 @@ where
 ///
 /// `impl_pickle_state!(OLSResult { params, std_errors, ... });`のように、構造体と同じモジュールで呼ぶ
 /// （非公開フィールドも列挙するため）。フィールドの型は[`PickleField`]を実装している必要がある。
+///
+/// `impl_pickle_state!(LogitResult { ..., source_data } rebuilt_from(source_data) { fitted });`のように
+/// `rebuilt_from(<DataFrameのフィールド>) { ... }`を付けると、波括弧の中のフィールドは
+/// [`PickleFieldFromSource`]で、先に復元した`<DataFrameのフィールド>`を使って復元する
+/// （`<DataFrameのフィールド>`は最初の波括弧にも含める）。
 macro_rules! impl_pickle_state {
+    ($ty:ident { $($field:ident),+ $(,)? } rebuilt_from($source:ident) { $($rebuilt:ident),+ $(,)? }) => {
+        impl $crate::shared::pickle::PickleState for $ty {
+            const KIND: &'static str = stringify!($ty);
+
+            fn to_state<'py>(
+                &self,
+                py: ::pyo3::Python<'py>,
+            ) -> ::pyo3::PyResult<::pyo3::Bound<'py, ::pyo3::types::PyDict>> {
+                let Self { $($field,)+ $($rebuilt),+ } = self;
+                let state = ::pyo3::types::PyDict::new(py);
+                $( state.set_item(
+                    stringify!($field),
+                    $crate::shared::pickle::PickleField::to_py($field, py)?,
+                )?; )+
+                $( state.set_item(
+                    stringify!($rebuilt),
+                    $crate::shared::pickle::PickleFieldFromSource::to_py($rebuilt, py)?,
+                )?; )+
+                Ok(state)
+            }
+
+            fn from_state(
+                state: &::pyo3::Bound<'_, ::pyo3::types::PyDict>,
+            ) -> ::pyo3::PyResult<Self> {
+                const N_FIELDS: usize =
+                    [$(stringify!($field),)+ $(stringify!($rebuilt)),+].len();
+                if state.len() != N_FIELDS {
+                    return Err($crate::shared::pickle::format_mismatch(Self::KIND));
+                }
+                // 再構築するフィールドは、元になるDataFrameを復元したあとで復元する。
+                $( let $field = $crate::shared::pickle::take_field(
+                    state,
+                    stringify!($field),
+                    Self::KIND,
+                )?; )+
+                let source: &::pyo3::Py<::pyo3::PyAny> = &$source;
+                $( let $rebuilt = $crate::shared::pickle::take_field_from_source(
+                    state,
+                    stringify!($rebuilt),
+                    Self::KIND,
+                    source.bind(state.py()),
+                )?; )+
+                Ok(Self { $($field,)+ $($rebuilt),+ })
+            }
+        }
+    };
     ($ty:ident { $($field:ident),+ $(,)? }) => {
         impl $crate::shared::pickle::PickleState for $ty {
             const KIND: &'static str = stringify!($ty);

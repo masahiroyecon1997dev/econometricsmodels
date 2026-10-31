@@ -76,7 +76,7 @@ The estimators release the Python GIL while they compute, so threads (`ThreadPoo
 
 A pickle contains everything the result needs, **including the `polars.DataFrame` that was passed to `fit()`** (all of its columns, also the ones the model does not use). That is what lets a restored result call `augment()` and the diagnostic tests; a result without the data would raise `TRAINING_DATA_NOT_RETAINED` there.
 
-The consequence is size: **a pickle is larger than the DataFrame you fitted on.** For a DataFrame of three float columns with 100,000 rows (4.0 MB), the pickle of an `OLSResults` is about 5.6 MB and that of a `LogitResults` about 7.2 MB. Logit, Probit and Tobit also keep their design matrix, so their pickles are about twice the data. The time to pickle grows in proportion.
+The consequence is size: **a pickle is at least as large as the DataFrame you fitted on.** For a DataFrame of three float columns with 100,000 rows (4.0 MB), the pickle of a `LogitResult` is about 4.0 MB (the DataFrame plus the coefficients), and that of an `OLSResults` about 5.6 MB, because it also holds the residuals and fitted values (two values per row). Logit, Probit and Tobit do not store their design matrix: it is rebuilt from the DataFrame when the pickle is restored, with the same column extraction as `fit()`, so restoring costs about as much as reading the columns again. The time to pickle grows in proportion to the size.
 
 When only the numbers are needed, take them out of the result before sending it, instead of sending the result:
 

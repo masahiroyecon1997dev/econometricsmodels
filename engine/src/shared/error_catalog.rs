@@ -1874,7 +1874,7 @@ pub static CATALOG: &[ErrorSpec] = &[
                 in_text: true,
             },
         ],
-        message: r#"The group '{group}' of column '{column}' (given as {argument}) has only one observation, and singleton groups are not dropped automatically."#,
+        message: r#"The group '{group}' of column '{column}' in {argument} has only one observation, and singleton groups are not dropped automatically."#,
         hint: Some(r#"Remove its rows from the input."#),
         stage_allowed: false,
     },

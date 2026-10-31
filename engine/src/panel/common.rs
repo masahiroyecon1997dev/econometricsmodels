@@ -1214,7 +1214,7 @@ mod tests {
                     group_id: "a".to_string(),
                 },
                 ErrorCode::SingletonGroup,
-                "The group 'a' of column 'firm' (given as effects) has only one observation, and singleton groups are not dropped automatically.",
+                "The group 'a' of column 'firm' in effects has only one observation, and singleton groups are not dropped automatically.",
             ),
             (
                 PanelError::SingletonGroup {
@@ -1223,7 +1223,7 @@ mod tests {
                     group_id: "2020".to_string(),
                 },
                 ErrorCode::SingletonGroup,
-                "The group '2020' of column 'year' (given as effects) has only one observation, and singleton groups are not dropped automatically.",
+                "The group '2020' of column 'year' in effects has only one observation, and singleton groups are not dropped automatically.",
             ),
             (
                 PanelError::UnbalancedPanelForTwoWay {

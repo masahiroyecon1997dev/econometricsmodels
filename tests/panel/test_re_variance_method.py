@@ -31,7 +31,6 @@
 
 from __future__ import annotations
 
-import json
 import math
 from pathlib import Path
 
@@ -43,6 +42,7 @@ import statsmodels.api as sm
 from _assertions import assert_close, assert_option_case_insensitive
 from _constants import DATA_DIR
 from _errors import raises_error
+from _fixture_cov import load_fixtures_with_cov
 from _helpers import CASE_SPELLINGS, load_wooldridge_dataset
 from _re_oracle import (
     CONDITIONING_SENSITIVE_KEYS,
@@ -96,6 +96,7 @@ ABSOLUTE_YEAR_CASES = {
 _ONE_WAY_PLM_KEYS = (
     "params",
     "std_errors",
+    "cov_params",
     "test_stats",
     "p_values",
     "f_statistic",
@@ -126,7 +127,7 @@ _TWO_WAY_PLM_KEYS = (
 
 @pytest.fixture(scope="module")
 def reference() -> dict:
-    return json.loads(FIXTURE_PATH.read_text())
+    return load_fixtures_with_cov(FIXTURE_PATH)
 
 
 def _frame(case: Case) -> pl.DataFrame:

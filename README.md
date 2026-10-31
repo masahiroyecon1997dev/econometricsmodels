@@ -253,7 +253,7 @@ model tests — for each supported covariance type.
 | RE<sup>1</sup> | linearmodels `RandomEffects`, R `plm` | R `plm`, statsmodels `OLS` | 1e-8 / 1e-8 (unbalanced panels: 5e-3 to 5e-2) |
 
 <sup>1</sup> For FE and RE, linearmodels covers only classical and HC1
-standard errors. Its cluster and Driscoll–Kraay standard errors use
+standard errors. Its cluster and Driscoll-Kraay standard errors use
 different small-sample corrections, so R (`fixest`, `plm`) is the primary
 reference for those. Which implementation checks which statistic is
 detailed on the verification page.
@@ -272,7 +272,7 @@ different R packages are used.
   well as some solver options and real-data cases listed on the
   verification page. Typical reasons are HAC small-sample conventions, both
   sides being iterative optimizers, or plm and linearmodels estimating the
-  Swamy–Arora variance components slightly differently on unbalanced
+  Swamy-Arora variance components slightly differently on unbalanced
   panels. The full list of tolerances and the reasons are on the
   verification page.
 - **Single-reference cases.** Some statistics have only one reference. For

@@ -33,6 +33,7 @@ from benchmark.common import (
     group_by_dataset_source,
     run_fixture_cli,
 )
+from benchmark.common.cov_fixtures import strip_cov_params
 from benchmark.panel.fixtures.generate_fe_fixtures import (
     NUMERIC_SCENARIOS,
     SCENARIO_X_COLS,
@@ -139,5 +140,7 @@ def build_fixtures() -> dict:
 
 if __name__ == "__main__":
     run_fixture_cli(
-        build_fixtures, BENCHMARKS_DIR / "re.json", description=__doc__
+        lambda: strip_cov_params(build_fixtures()),
+        BENCHMARKS_DIR / "re.json",
+        description=__doc__,
     )

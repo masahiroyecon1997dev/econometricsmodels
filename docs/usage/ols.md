@@ -54,6 +54,25 @@ When `hac_lags` is omitted, the number of lags is chosen automatically as `floor
 
 See [Options and results](../api/ols.md) for the full list of available options.
 
+## Choosing the type of standard error
+
+The coefficients are the same for every `cov_type`; only the standard errors, the t statistics, the p-values and the confidence intervals change. Choose by what you believe about the errors:
+
+| If the errors may be... | Use | Notes |
+|---|---|---|
+| Homoskedastic and uncorrelated | `"classical"` (default) | The textbook formula; too small if the variance of the errors depends on the regressors |
+| Heteroskedastic, observations independent | `"hc0"` to `"hc3"` | HC1 rescales HC0 by `n / (n - k)`. HC2 and HC3 correct for the leverage of each observation and are more cautious in small samples. |
+| Correlated within groups (firms, schools, regions) | `"cluster"` with `cluster=` | Name the column of the level at which errors can be correlated. The result is unreliable with few clusters; at least two are required, and more than the number of slope coefficients |
+| Serially correlated (time series) | `"hac"` with `hac_time=` | Newey-West. Also robust to heteroskedasticity. The lag length is chosen automatically unless you set `hac_lags` |
+
+A common minimal choice with independent observations is a heteroskedasticity-robust type (`"hc1"` or `"hc3"`), and a large difference from the classical standard errors is itself a sign of heteroskedasticity. The panel models have their own defaults and the Driscoll-Kraay type, which is robust to correlation across entities as well: see [FE: choosing the standard error](fe.md#choosing-the-type-of-standard-error). The formulas and degrees of freedom are in [Definitions: OLS](../methods/ols.md#covariance-of-the-coefficients-cov_type).
+
+```python
+for cov_type in ("classical", "hc3"):
+    fitted = OLS(df, y="y", x=["x1"], options=OLSOptions(cov_type=cov_type)).fit()
+    print(cov_type, fitted.std_errors["x1"], fitted.p_values["x1"])
+```
+
 ## Retrieving results
 
 `OLSResults` exposes coefficients, standard errors, etc. as dictionaries keyed by coefficient name (`str`). If you need a row-oriented listing — e.g. for a REST API response — use `params_table()`.
@@ -64,6 +83,7 @@ Every method's results share these fields, so code that reads one result type wo
 |---|---|
 | `params`, `std_errors`, `test_stats`, `p_values` | `dict` keyed by coefficient name |
 | `conf_int` | `dict` of `(lower, upper)` keyed by coefficient name |
+| `cov_params` | Covariance matrix of the coefficients: a `dict` of `dict`s keyed by coefficient name on both axes (Tobit also has `"sigma"` as the last row and column). See [below](#covariance-matrix-of-the-coefficients) |
 | `param_names` | The coefficient names, in order (`"const"` first when there is an intercept) |
 | `stat_dist`, `stat_df` | The distribution behind `test_stats` and `p_values` (`"t"` or `"normal"`) and its degrees of freedom (`None` for the normal distribution) |
 | `cov_type`, `n_obs`, `df_resid` | The standard error type used, the number of observations and the residual degrees of freedom |
@@ -75,6 +95,29 @@ The remaining fields depend on the method (for example `r_squared` for OLS, `lr_
 for row in result.params_table():
     print(row["param_name"], row["param"], row["std_error"], row["p_value"])
 ```
+
+## Covariance matrix of the coefficients
+
+Every results class has `cov_params`: the covariance matrix of the coefficients under the `cov_type` you chose, as a dictionary of dictionaries keyed by coefficient name on both axes. The covariance of `x1` and `x2` is `result.cov_params["x1"]["x2"]`, and the standard errors are the square roots of its diagonal. The names follow `param_names`: FE has no `"const"`, RE has it first, and Tobit adds `"sigma"` as the last row and column.
+
+With the matrix you can test a linear combination of coefficients or apply the delta method yourself, as in the example below. The formulas for each `cov_type` are in [Definitions](../methods/ols.md#covariance-of-the-coefficients-cov_type).
+
+```python
+import math
+
+two_vars = OLS(df, y="y", x=["x1", "x2"]).fit()
+cov = two_vars.cov_params
+
+# Estimate, standard error and t statistic of the sum of the `x1` and `x2`
+# coefficients: Var(b1 + b2) = Var(b1) + Var(b2) + 2 Cov(b1, b2)
+estimate = two_vars.params["x1"] + two_vars.params["x2"]
+variance = cov["x1"]["x1"] + cov["x2"]["x2"] + 2 * cov["x1"]["x2"]
+std_error = math.sqrt(variance)
+t_stat = estimate / std_error
+print(estimate, std_error, t_stat)
+```
+
+Compare `t_stat` with the distribution named in `stat_dist`: here a t distribution with `two_vars.stat_df` degrees of freedom, so the two-sided p-value is twice the upper tail probability of `abs(t_stat)` (for example `2 * scipy.stats.t.sf(abs(t_stat), two_vars.stat_df)`; SciPy is not a dependency of this package). Logit, Probit, Tobit and GMM use the standard normal distribution instead (`stat_dist` is `"normal"` and `stat_df` is `None`).
 
 ## Predicted values
 
@@ -88,15 +131,15 @@ fitted = result.predict()
 # time by name; column order does not matter, and the constant column must
 # not be included)
 new_data = pl.DataFrame({"x1": [13.0, 14.0]})
-predicted = result.predict(new_data)
+predicted = result.predict(new_data=new_data)
 
 print(predicted)  # [..., ...] (a plain list of floats)
 ```
 
-`OLSResults.augment()` takes the same `new_data` argument, but instead returns the source data (the training data, or `new_data` when given) with the predicted values appended as a `"predicted"` column — a polars DataFrame rather than a plain list. This is the one exception to the library's general policy of not returning DataFrames.
+`OLSResults.augment()` takes the same `new_data` argument, but instead returns the source data (the training data, or `new_data` when given) with the predicted values appended as a `"predicted"` column — a polars DataFrame rather than a plain list. `augment()` (here and in WLS, Logit, Probit and Tobit) is the exception to the library's general policy of not returning DataFrames.
 
 ```python
-augmented = result.augment(new_data)
+augmented = result.augment(new_data=new_data)
 print(augmented)  # original `new_data` columns, plus a "predicted" column
 ```
 
@@ -112,35 +155,41 @@ print(white.aux_terms)  # ["const", "x1", "x2", "x1^2", "x2^2", "x1:x2"]
 print(white.dropped_terms)  # terms left out, e.g. ["d^2"] for a 0/1 dummy d
 
 white.to_dict()  # a JSON-ready dict
-white_f = result.white_test("f")
+white_f = result.white_test(statistic="f")
 ```
+
+**How to read it.** The null hypothesis is that the error variance is constant (homoskedasticity). A small p-value (below 0.05, say) is evidence of heteroskedasticity, although the White test also reacts to some kinds of misspecification of the mean. If you reject, use a heteroskedasticity-robust `cov_type` (see [above](#choosing-the-type-of-standard-error)); a large p-value does not prove that the errors are homoskedastic.
 
 The auxiliary regression always includes a constant, even when the model was fitted with `include_intercept=False`, so the first element of `aux_terms` is always `"const"`. Terms that are constant or numerically identical to an earlier term (the square of a 0/1 dummy equals the dummy itself) are dropped, and the degrees of freedom count the terms that remain. The term labels only describe what was used; they are not a formula and are never parsed. The test does not depend on `cov_type`.
 
 ## Diagnostics: Breusch-Pagan test for heteroskedasticity
 
-`OLSResults.breusch_pagan_test(variables=None, statistic="lm")` is another post-estimation test for heteroskedasticity, never computed by `fit()`. It regresses the squared residuals on a constant and the columns you name in `variables`; with no `variables` it uses the model's regressors. Unlike the White test you choose which variables may drive the error variance, and they need not be in the model.
+`OLSResults.breusch_pagan_test(*, variables=None, statistic="lm")` is another post-estimation test for heteroskedasticity, never computed by `fit()`. It regresses the squared residuals on a constant and the columns you name in `variables`; with no `variables` it uses the model's regressors. Unlike the White test you choose which variables may drive the error variance, and they need not be in the model.
 
 ```python
 bp = result.breusch_pagan_test()  # the model's regressors
 print(bp.statistic, bp.p_value, bp.df)
 print(bp.aux_terms)  # ["const", "x1", "x2"]
 
-bp_size = result.breusch_pagan_test(["firm_size"])  # any numeric column
-bp_f = result.breusch_pagan_test(["x1"], "f")  # F version
+bp_size = result.breusch_pagan_test(variables=["firm_size"])  # any numeric column
+bp_f = result.breusch_pagan_test(variables=["x1"], statistic="f")  # F version
 ```
 
-This is the studentized (Koenker) version, which does not assume normal errors. The auxiliary regression always includes a constant, constant or duplicate columns are dropped (`dropped_terms` shows them), and the test does not depend on `cov_type`.
+**How to read it.** The null hypothesis is that the error variance is unrelated to the variables you named. A small p-value means the variance depends on them, so use a heteroskedasticity-robust `cov_type`. A large p-value says only that these variables do not explain the variance; others might. This is the studentized (Koenker) version, which does not assume normal errors. The auxiliary regression always includes a constant, constant or duplicate columns are dropped (`dropped_terms` shows them), and the test does not depend on `cov_type`.
 
 ## Diagnostics: Breusch-Godfrey test for serial correlation
 
-`OLSResults.breusch_godfrey_test(time, nlags, statistic="lm")` tests for serial correlation of the errors by regressing the residuals on the regressors and their own lags. It is a post-estimation diagnostic, never computed by `fit()`. `time` is the column that gives the time order and `nlags` the number of lags; both are required, because the row order is never assumed to be the time order and there is no natural default lag.
+`OLSResults.breusch_godfrey_test(time, nlags, *, statistic="lm")` tests for serial correlation of the errors by regressing the residuals on the regressors and their own lags. It is a post-estimation diagnostic, never computed by `fit()`. `time` is the column that gives the time order and `nlags` the number of lags; both are required, because the row order is never assumed to be the time order and there is no natural default lag.
 
 ```python
 bg = result.breusch_godfrey_test("year", 2)  # LM version (chi-squared)
 print(bg.statistic, bg.p_value, bg.df, bg.nlags)
-bg_f = result.breusch_godfrey_test("year", 2, "f")  # F version
+bg_f = result.breusch_godfrey_test("year", 2, statistic="f")  # F version
 bg.to_dict()  # a JSON-ready dict
 ```
 
-The rows may be in any order: they are sorted by `time` before the lags are taken. Only the order of the `time` values is used (gaps between periods are not checked), and the values must be distinct. Lags before the first observation are filled with zero. The test is meaningless for cross-sectional data.
+**How to read it.** The null hypothesis is that the errors are not serially correlated up to `nlags`. A small p-value is evidence of serial correlation, in which case the ordinary standard errors are not reliable: use `cov_type="hac"` or add the missing dynamics to the model. The rows may be in any order: they are sorted by `time` before the lags are taken. Only the order of the `time` values is used (gaps between periods are not checked), and the values must be distinct. Lags before the first observation are filled with zero. The test is meaningless for cross-sectional data.
+
+## See also
+
+[Accepted data](../guide/accepted-data.md), [Validation and errors](../guide/validation.md), [Inference conventions](../guide/inference-conventions.md) and [Verification](../guide/verification.md).

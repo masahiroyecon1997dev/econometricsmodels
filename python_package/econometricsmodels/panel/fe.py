@@ -1,24 +1,15 @@
 """Python wrapper for FE (fixed effects panel regression).
 
 A thin wrapper around `econometricsmodels._lib.fit_fe` (the Rust
-implementation, `engine`/`engine_pybind`). Validation and estimation
-logic live entirely on the Rust side; this module only provides the
-Python-facing API shape for polars DataFrames — `entity`/`time` as bare
-column-name arguments, `x` as a list, an options object for estimation
-settings (CLAUDE.md section 2, `.claude/rules/python-style.md`
-"設計方針との整合性", `docs/spec/panel-common.md` section 1).
+implementation). Validation and estimation happen on the Rust side; this
+module only provides the Python-facing API shape for polars DataFrames:
+`entity` as a column name, `x` as a list of column names, and an options
+object for the estimation settings.
 
-`FEOptions` is re-exported as-is from `_lib` (not redefined as a
-separate class; same policy as `OLSOptions`/`IVOptions`).
-
-`fixed_effects()` (the fixed effects themselves, `α_i`/`γ_t`) is
-provided as a separate method rather than a field on `FEResults`
-(`docs/spec/fe-spec.md` section 3.5, the same
-"additional results are a separate method" policy as IV's
-`first_stage()`).
-
-`summary()` is not implemented (structured-data-only output policy; see
-the `OLSResults`/`IVResults` precedent).
+`FEOptions` is re-exported as-is from `_lib`. The fixed effects
+themselves (`α_i`, `γ_t`) come from the separate method
+`FEResults.fixed_effects()`. There is no `summary()`: results are
+returned as structured data.
 """
 
 from __future__ import annotations
@@ -32,6 +23,7 @@ from .._lib import FEOptions
 from .._results_utils import (
     by_param,
     conf_int_by_param,
+    cov_params_by_param,
     params_table_rows,
 )
 
@@ -47,7 +39,8 @@ class FE:
     Args:
         data: A polars DataFrame containing the dependent variable,
             independent variables, entity identifier, and (if
-            specified) time/cluster/HAC time columns.
+            specified) the `time`, `cluster` and `dk_time` columns of
+            the options.
         y: Column name of the dependent variable.
         x: List of column names of the independent variables. Must
             contain at least one column name.
@@ -68,7 +61,8 @@ class FE:
         ...     }
         ... )
         >>> result = FE(df, y="y", x=["x1"], entity="id").fit()
-        >>> result.params["x1"]
+        >>> round(result.params["x1"], 3)
+        0.31
     """
 
     def __init__(
@@ -77,6 +71,7 @@ class FE:
         y: str,
         x: list[str],
         entity: str,
+        *,
         options: FEOptions | None = None,
     ) -> None:
         self._data = data
@@ -95,26 +90,34 @@ class FE:
             TypeError: An argument has the wrong type (for example
                 `x` is a string instead of a list of column names). A
                 builtin exception, not a `ValidationError`.
-            ValidationError: The input or options are invalid (`x` is
-                empty, a column is missing, contains missing values or
-                NaN/infinity, `y`/`x`/`entity`/`time` overlap,
-                insufficient observations, `confidence_level` out of
-                range, an unknown `cov_type` (or `cov_type="hc0"`,
-                unsupported for FE), an unbalanced panel with two-way
-                effects, a singleton entity/time group, or an
-                explanatory variable with zero variance after the
-                within transformation, an outcome with no variation
-                left after the fixed effects are removed,
-                `cov_type="dk"` without `dk_time` (the Driscoll-Kraay
-                time periods are never taken from `time`), `cov_type="dk"` with no more
-                unique time periods than regressors: the
-                Driscoll-Kraay covariance has rank at most T-1, so the
-                slope F-test cannot be computed, or `cov_type="dk"` with
-                2 time periods / `cov_type="cluster"` with 2 clusters
-                where every entity (or, with two-way effects, every
-                time period) is observed exactly once in each: the
-                covariance is then identically zero). A subclass of
-                `ValueError`.
+            ValidationError: The input or options are invalid. A
+                subclass of `ValueError`. For example:
+
+                - `x` is empty, a column is missing, or a column
+                  contains missing values, NaN or infinity.
+                - `y`, `x`, `entity` and `time` overlap.
+                - There are insufficient observations, or
+                  `confidence_level` is out of range.
+                - `cov_type` is unknown or `"hc0"` (not supported for
+                  FE).
+                - A two-way model (`time` set) is fitted on an
+                  unbalanced panel.
+                - An entity or time group has a single observation.
+                - An explanatory variable has zero variance after the
+                  within transformation, or the outcome has no variation
+                  left after the fixed effects are removed.
+                - `cov_type="dk"` without `dk_time` (the time periods
+                  are never taken from `time`).
+                - `cov_type="dk"` with no more unique `dk_time` periods
+                  than regressors: the Driscoll-Kraay covariance has
+                  rank at most `T - 1` (`T` periods), so the F-test of
+                  the slopes cannot be computed.
+                - `cov_type="dk"` with 2 `dk_time` periods, or
+                  `cov_type="cluster"` with 2 clusters, where every
+                  entity (with two-way effects, every time period) is
+                  observed exactly once in each: the covariance is then
+                  identically zero.
+
             ComputationError: A problem was detected during
                 computation (e.g. a singular within-transformed design
                 matrix, or a perfect fit of the within regression:
@@ -140,6 +143,7 @@ class FEResults:
     - Coefficients (no intercept): `params`, `std_errors`,
       `test_stats`, `p_values`, `conf_int`; the names in order:
       `param_names`.
+    - Covariance of the coefficients: `cov_params`.
     - Which distribution the tests use: `stat_dist`, `stat_df`.
     - Overall F test: `f_statistic`, `f_p_value`, `f_df_num`,
       `f_df_denom`.
@@ -151,10 +155,6 @@ class FEResults:
     - Residuals: `residuals` (within-transformed).
     - Methods: `fixed_effects()` (the entity and time effects),
       `params_table()`.
-
-    Args:
-        raw: The estimation result object returned by `_lib.fit_fe`
-            (`_lib.FEResult`).
 
     Note:
         Users normally do not construct this directly; it is returned
@@ -181,6 +181,21 @@ class FEResults:
         return by_param(self._raw.param_names, self._raw.std_errors)
 
     @property
+    def cov_params(self) -> dict[str, dict[str, float]]:
+        """Covariance matrix of the coefficients, as a dict of dicts by name.
+
+        Computed with the `cov_type` of the options, so `std_errors[a]` is
+        the square root of `cov_params[a][a]`. The covariance of `a` and `b`
+        is `cov_params["a"]["b"]`, and the keys are in `param_names` order.
+
+        The matrix is symmetric up to rounding error (a relative difference
+        of 1e-16 to 1e-15 between `cov_params["a"]["b"]` and
+        `cov_params["b"]["a"]`), so compare entries with a tolerance rather
+        than with `==`.
+        """
+        return cov_params_by_param(self._raw.param_names, self._raw.cov_params)
+
+    @property
     def test_stats(self) -> dict[str, float]:
         """Coefficient name to test statistic (t-statistic; see
         `stat_dist`)."""
@@ -196,8 +211,8 @@ class FEResults:
     def stat_df(self) -> int:
         """Degrees of freedom of the t distribution behind `test_stats`.
         May differ from `df_resid` (cluster-robust inference uses
-        `G - 1`, Driscoll-Kraay `T - 1`), so use this to recompute
-        p-values from `test_stats`."""
+        `G - 1`, Driscoll-Kraay the number of `dk_time` periods minus
+        1), so use this to recompute p-values from `test_stats`."""
         return self._raw.stat_df
 
     @property
@@ -233,8 +248,12 @@ class FEResults:
 
     @property
     def df_model(self) -> int:
-        """Model degrees of freedom (`k`, the number of slope
-        coefficients)."""
+        """Model degrees of freedom: the `k` slope coefficients plus the
+        absorbed fixed effects (`k + n_entities` for one-way,
+        `k + n_entities + n_periods - 1` for two-way). It is used for
+        the degrees of freedom of the inference (`df_resid = n -
+        df_model`) and for the information criteria; the number of slope
+        coefficients is `len(param_names)`."""
         return self._raw.df_model
 
     @property
@@ -287,7 +306,8 @@ class FEResults:
     def f_df_denom(self) -> int | None:
         """Denominator degrees of freedom of `f_statistic` (`None` when
         `f_statistic` is `None`). Follows `cov_type` like the t-tests (`G - 1` for
-        `cov_type="cluster"`, `T - 1` for `"dk"`, `df_resid` otherwise),
+        `cov_type="cluster"`, the number of `dk_time` periods minus 1 for
+        `"dk"`, `df_resid` otherwise),
         so it equals `stat_df` whenever `f_statistic` is not `None`. Use
         this to recompute the p-value from `f_statistic`."""
         return self._raw.f_df_denom

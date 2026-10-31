@@ -387,9 +387,9 @@ def check_predictions(
 
     new_data = pl.DataFrame(ref["new_x"])
     ref_new = ref["predict_new_data"]
-    predicted_new = res.predict(new_data)
+    predicted_new = res.predict(new_data=new_data)
     assert len(predicted_new) == len(ref_new), f"{label}/predict_new/length"
-    augmented_new = res.augment(new_data)
+    augmented_new = res.augment(new_data=new_data)
     assert augmented_new["predicted_probability"].to_list() == predicted_new, (
         f"{label}/augment/new_data"
     )

@@ -527,14 +527,14 @@ HAC_FITS = {
         d,
         "y",
         ["x1"],
-        OLSOptions(cov_type="hac", hac_lags=2, hac_time=hac_time),
+        options=OLSOptions(cov_type="hac", hac_lags=2, hac_time=hac_time),
     ).fit(),
     "WLS": lambda d, hac_time="t": WLS(
         d,
         "y",
         ["x1"],
         "w",
-        WLSOptions(cov_type="hac", hac_lags=2, hac_time=hac_time),
+        options=WLSOptions(cov_type="hac", hac_lags=2, hac_time=hac_time),
     ).fit(),
     "IV": lambda d, hac_time="t": IV(
         d,
@@ -542,7 +542,7 @@ HAC_FITS = {
         ["x2"],
         ["x1"],
         ["z", "z2"],
-        IVOptions(cov_type="hac", hac_lags=2, hac_time=hac_time),
+        options=IVOptions(cov_type="hac", hac_lags=2, hac_time=hac_time),
     ).fit(),
     "IV-GMM-cov": lambda d, hac_time="t": IV(
         d,
@@ -550,7 +550,7 @@ HAC_FITS = {
         ["x2"],
         ["x1"],
         ["z", "z2"],
-        IVOptions(
+        options=IVOptions(
             estimator="gmm", cov_type="hac", hac_lags=2, hac_time=hac_time
         ),
     ).fit(),
@@ -560,7 +560,7 @@ HAC_FITS = {
         ["x2"],
         ["x1"],
         ["z", "z2"],
-        IVOptions(
+        options=IVOptions(
             estimator="gmm",
             gmm_weight_type="hac",
             hac_lags=2,

@@ -56,6 +56,7 @@ from benchmark.common import (
     load_frozen_dataset,
     run_fixture_cli,
 )
+from benchmark.common.cov_fixtures import strip_cov_params
 from benchmark.common.load_wooldridge import load as load_wooldridge
 from benchmark.iv.constants import (
     CARD_REGION_COLUMN,
@@ -407,7 +408,7 @@ def build_fixtures() -> dict:
 
 if __name__ == "__main__":
     run_fixture_cli(
-        build_fixtures,
+        lambda: strip_cov_params(build_fixtures()),
         BENCHMARKS_DIR / "iv_crosscheck.json",
         description=__doc__,
     )

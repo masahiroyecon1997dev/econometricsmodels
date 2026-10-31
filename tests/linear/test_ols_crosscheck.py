@@ -15,7 +15,7 @@ small_nシナリオ n=20, k=4で約11.8%）。fixestの仕様ではなくpyfixes
 
 classical/HC0-3/clusterはRとほぼ機械精度で一致する（実測で相対誤差1e-14程度）
 ため`RTOL_STRICT`で厳密比較する。HACも同じ（R側は`NeweyWest(adjust = FALSE)`。
-既定の`adjust = TRUE`は共分散全体に`n/(n-k)`を掛けるが、本実装・statsmodelsは
+`adjust = TRUE`（`kernHAC`の既定。`NeweyWest`の既定は`FALSE`）は共分散全体に`n/(n-k)`を掛けるが、本実装・statsmodelsは
 掛けず、これだけが差の全てのため、スカラー補正の有無だけを揃えている。
 `benchmark/linear/references/run_lm_crosscheck.R`参照）。詳細は
 `docs/spec/ols-spec.md`「テスト」参照。
@@ -28,7 +28,7 @@ classical/HC0-3/clusterはRとほぼ機械精度で一致する（実測で相�
 `predict()`（`docs/spec/ols-spec.md`「predict()」）も対象に含める。
 `run_lm_predict_crosscheck.R`（`fitted()`・`predict(model, newdata=...)`）を使い、
 全シナリオで`predict(new_data=None)`（学習データの予測値）を、baselineシナリオのみ
-`predict(new_data)`（新規データの予測値、列順を入れ替えて列名マッチングも確認）を
+`predict(new_data=...)`（新規データの予測値、列順を入れ替えて列名マッチングも確認）を
 crosscheckする。
 
 `include_intercept=False`（切片なし）・`confidence_level`非既定は、baseline
@@ -53,14 +53,19 @@ Note:
 
 from __future__ import annotations
 
-import json
 from functools import partial
 from pathlib import Path
 
 import polars as pl
 import pytest
-from _assertions import assert_close, assert_dict_close, assert_fields_close
+from _assertions import (
+    assert_close,
+    assert_cov_params_close,
+    assert_dict_close,
+    assert_fields_close,
+)
 from _constants import DATA_DIR, MROZ_X
+from _fixture_cov import load_fixtures_with_cov
 from _helpers import (
     ROW_TIME,
     with_cluster_groups,
@@ -100,7 +105,7 @@ ATOL = TOLERANCES["ols_crosscheck"]["atol"]
 
 @pytest.fixture(scope="module")
 def crosscheck() -> dict:
-    return json.loads(FIXTURE_PATH.read_text())
+    return load_fixtures_with_cov(FIXTURE_PATH)
 
 
 _assert_dict_close = partial(assert_dict_close, rtol=RTOL_STRICT, atol=ATOL)
@@ -119,6 +124,11 @@ def _assert_fit_stats_close(res, ref: dict, label: str, rtol: float) -> None:
     cov_typeごとの共分散行列（標準誤差）に依存するため呼び出し元の
     rtol（全cov_typeでRTOL_STRICT）を使う。
     """
+    # 係数の分散共分散行列（`<手法>_cov_crosscheck.json`）も同じrtolで比べる。
+    # 標準誤差（対角の平方根）の比較とは別に、非対角成分も検証する。
+    assert_cov_params_close(
+        res.cov_params, ref["cov_params"], label, rtol=rtol
+    )
     _assert_fields_close(
         res,
         ref,
@@ -183,7 +193,7 @@ def test_predict_none_matches_r_fitted_values(crosscheck, scenario):
 
 
 def test_predict_new_data_matches_r(crosscheck):
-    """`predict(new_data)`（新規データに対する予測値）がRの`predict(model, newdata=...)`
+    """`predict(new_data=...)`（新規データに対する予測値）がRの`predict(model, newdata=...)`
     と一致すること（baselineシナリオのみ。列順を学習時と入れ替えて渡し、列名マッチングも
     合わせて確認する）。
     """
@@ -197,7 +207,7 @@ def test_predict_new_data_matches_r(crosscheck):
             "x2": PREDICT_NEW_DATA["x2"],
         }
     )
-    predicted = res.predict(new_data)
+    predicted = res.predict(new_data=new_data)
     ref = crosscheck["synthetic"]["baseline"]["predict"]["predicted"]
 
     assert len(predicted) == len(ref)

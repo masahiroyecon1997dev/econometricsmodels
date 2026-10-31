@@ -1,3 +1,8 @@
+# uvのバイナリ取得元。Dependabot(docker)は`FROM`行しか解析せず、`COPY --from=<image>`に
+# 直接書いた参照は追跡されないため、`FROM ... AS uv`のステージとして宣言し、
+# 下の`COPY --from=uv`で参照する。版とダイジェストの更新はDependabot(docker)が行う。
+FROM ghcr.io/astral-sh/uv:0.13.5@sha256:32a7bb39b496babbd997b0a39a4d66c126bdaf5661b302bf6f06abda8deca6ff AS uv
+
 # ベースイメージはタグだけでなくダイジェストでも固定する(同じタグの中身が差し替わっても
 # 検知できる)。ダイジェストの更新はDependabot(docker)が行う。
 FROM python:3.14-slim-bookworm@sha256:945c2676dc2b18e0c1f16879244122c57c0ffede60006bf3df159c507a31bcae
@@ -156,16 +161,28 @@ ARG CARGO_LLVM_COV_VERSION=0.9.1
 
 RUN cargo install --locked \
         cargo-audit@${CARGO_AUDIT_VERSION} \
-        cargo-about@${CARGO_ABOUT_VERSION} \
         cargo-llvm-cov@${CARGO_LLVM_COV_VERSION}
+
+# cargo-aboutはdefault featureを持たず、バイナリは`cli`フィーチャーが必須
+# （`required-features = ["cli"]`）。`--features cli`を付けないとバイナリが無いまま
+# 警告だけでインストールが終わるため、上の行とは分けて`--features cli`を付ける
+# （まとめると、featureを持たない他のcrateにも`--features cli`が掛かってしまう）。
+RUN cargo install --locked cargo-about@${CARGO_ABOUT_VERSION} --features cli
+
+# 必要なサブコマンドが実際に使えることをビルド時に確認し、欠けていればイメージのビルドを失敗させる
+# （リリース準備で`cargo about generate`等を実行するまで気づかない事態を防ぐ）。
+RUN cargo audit --version \
+    && cargo about --version \
+    && cargo llvm-cov --version
 
 # -------------------------
 # uv (Python パッケージ管理)
 # `curl | sh`ではなく、版とダイジェストを固定した公式イメージからバイナリをコピーする
 # (`uvx`は使わない方針だが、uvのイメージには同梱されるため一緒にコピーされる)。
-# バージョンとダイジェストの更新はDependabot(docker)が行う。
+# バージョンとダイジェストはファイル先頭の`FROM ... AS uv`で固定している
+# (更新はDependabot(docker)が行う)。
 # -------------------------
-COPY --from=ghcr.io/astral-sh/uv:0.13.5@sha256:32a7bb39b496babbd997b0a39a4d66c126bdaf5661b302bf6f06abda8deca6ff /uv /uvx /usr/local/bin/
+COPY --from=uv /uv /uvx /usr/local/bin/
 
 ENV PATH="/home/${USERNAME}/.local/bin:${PATH}"
 

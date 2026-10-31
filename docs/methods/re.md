@@ -11,9 +11,9 @@ y_{it} = \beta_0 + x_{it}'\beta + u_i + \varepsilon_{it} \quad \text{(one-way)},
 y_{it} = \beta_0 + x_{it}'\beta + u_i + \lambda_t + \varepsilon_{it} \quad \text{(two-way)}
 \]
 
-The effects are random: \(u_i\), \(\lambda_t\) and \(\varepsilon_{it}\) are uncorrelated with the regressors and with each other, with variances \(\sigma_u^2\), \(\sigma_\lambda^2\) and \(\sigma_\varepsilon^2\). Unlike FE, RE keeps the intercept (`const` is always the first parameter) and **allows time-invariant regressors**. With `REOptions.time` set it estimates entity and time effects on a balanced panel; otherwise only entity effects, and an unbalanced panel is allowed.
+The effects are random: \(u_i\), \(\lambda_t\) and \(\varepsilon_{it}\) are uncorrelated with the regressors and with each other, with variances \(\sigma_u^2\), \(\sigma_\lambda^2\) and \(\sigma_\varepsilon^2\). Unlike FE, RE keeps the intercept (`const` is always the first parameter) and **allows time-invariant regressors**. With `REOptions.time` set it estimates entity and time effects on a balanced panel; otherwise only entity effects, and an unbalanced panel is allowed. An entity with a single observation is rejected, as in FE.
 
-The estimator is feasible GLS, computed as OLS on quasi-demeaned data (all columns, including the constant, are transformed):
+The estimator is feasible GLS, computed as OLS on quasi-demeaned data (all columns, including the constant, are transformed); \(y^*\) and \(X^*\) denote the quasi-demeaned outcome and regressors:
 
 \[
 y_{it} - \theta_i \bar y_{i\cdot}, \qquad \theta_i = 1 - \sqrt{\frac{\sigma_\varepsilon^2}{T_i\,\sigma_u^2 + \sigma_\varepsilon^2}}
@@ -39,16 +39,16 @@ All three methods estimate \(\sigma_\varepsilon^2\), \(\sigma_u^2\) (and \(\sigm
 | `"wallace_hussain"` | Pooled OLS of \(y\) on a constant and all regressors |
 | `"amemiya"` | The within estimator |
 
-**Swamy–Arora.** With \(\bar T\) the harmonic mean of the \(T_i\):
+**Swamy-Arora.** With \(\bar T\) the harmonic mean of the \(T_i\):
 
 \[
 \hat\sigma_\varepsilon^2 = \frac{\mathrm{SSR}_{\text{within}}}{n - N - k_{tv}}, \qquad
 \hat\sigma_u^2 = \max\Big(0,\ \frac{\mathrm{SSR}_{\text{between}}}{N - K_b - 1} - \frac{\hat\sigma_\varepsilon^2}{\bar T}\Big)
 \]
 
-where \(k_{tv}\) counts the time-varying regressors (those with within variation) and \(K_b\) the regressors in the between regression. In the two-way model \(\hat\sigma_\varepsilon^2\) uses \(n - N - T + 1 - k_{tv}\), and \(\hat\sigma_u^2\), \(\hat\sigma_\lambda^2\) use the entity-mean and time-mean regressions with \(\sigma_\varepsilon^2/T\) and \(\sigma_\varepsilon^2/N\) subtracted. On an unbalanced one-way panel this is the `linearmodels` formula, which differs from the one in R's `plm` (by several percent in \(\sigma_u^2\) in a test case).
+where \(k_{tv}\) counts the time-varying regressors (those with within variation) and \(K_b\) the regressors in the between regression. In the two-way model \(\hat\sigma_\varepsilon^2\) uses \(n - N - T + 1 - k_{tv}\), and \(\hat\sigma_u^2\), \(\hat\sigma_\lambda^2\) use the entity-mean and time-mean regressions with \(\sigma_\varepsilon^2/T\) and \(\sigma_\varepsilon^2/N\) subtracted. On an unbalanced one-way panel this is the `linearmodels` formula, which differs from the one in R's `plm` (plm 2.6.7; the difference in \(\sigma_u^2\) depends on how unbalanced the panel is, and was 2.6 % in one test panel).
 
-**Wallace–Hussain and Amemiya** follow `plm` (`random.method = "walhus"` and `"amemiya"`). On a balanced panel (a one-way panel whose entities all have the same number of observations; two-way panels are always balanced) they use closed forms, and on an unbalanced one-way panel the trace-term forms. The two forms give different values on the same balanced panel. They are not available for unbalanced two-way panels (the panel is rejected). If the estimated \(\sigma_\varepsilon^2\) is not positive, `fit()` raises an error, whereas `plm` sets it to 0 and returns `NaN` weights. `"amemiya"` rejects a regressor without within variation (it would bias \(\sigma_u^2\)); `"wallace_hussain"` and `"swamy_arora"` accept it.
+**Wallace-Hussain and Amemiya** follow `plm` (`random.method = "walhus"` and `"amemiya"`). On a balanced panel (a one-way panel whose entities all have the same number of observations; two-way panels are always balanced) they use closed forms, and on an unbalanced one-way panel the trace-term forms. The closed form (balanced) and the trace-term form (unbalanced one-way) do not give the same value even on a balanced panel, so \(\hat\sigma_\varepsilon^2\) is not continuous when a row is dropped from a balanced panel. These methods are not available for unbalanced two-way panels (the panel is rejected). If the estimated \(\sigma_\varepsilon^2\) is not positive, `fit()` raises an error, whereas plm 2.6.7 sets it to 0 and continues (in a test case with unequal group sizes it then returned `theta = 1` for every entity). `"amemiya"` rejects a regressor without within variation (it would bias \(\sigma_u^2\)); `"wallace_hussain"` and `"swamy_arora"` accept it.
 
 ## Degrees of freedom
 
@@ -56,16 +56,22 @@ where \(k_{tv}\) counts the time-varying regressors (those with within variation
 
 ## Covariance of the coefficients: `cov_type`
 
-The options are the same as for [FE](fe.md#covariance-of-the-coefficients-cov_type), computed on the quasi-demeaned data: `"classical"`, `"hc1"`, `"hc2"`, `"hc3"`, `"cluster"` (the default, by entity) and `"dk"` (Driscoll–Kraay, requires `dk_time`, which is a different option from `time`). `"hc0"` is not available. Differences from FE:
+The options are the same as for [FE](fe.md#covariance-of-the-coefficients-cov_type), computed on the quasi-demeaned data: `"classical"`, `"hc1"`, `"hc2"`, `"hc3"`, `"cluster"` (the default, by entity) and `"dk"` (Driscoll-Kraay, requires `dk_time`, which is a different option from `time`). `"hc0"` is not available. The covariance matrix of the coefficients is available as `cov_params` on the results, with the constant first. Differences from FE:
 
-- Because there are no absorbed dummies, the leverage in HC2 and HC3 is the plain \(h_{ii} = \hat x_i'(\hat X'\hat X)^{-1}\hat x_i\) of the quasi-demeaned design, and the small-sample factor uses \(K = \mathrm{df}_{\text{model}}\) in every case: \(\frac{G}{G-1}\cdot\frac{n-1}{n-K}\) for `"cluster"` (the form of `plm::vcovHC(type = "sss")`) and \(\frac{T_d}{T_d-1}\cdot\frac{n-1}{n-K}\) for `"dk"`.
-- Cluster standard errors with `G` clusters need \(G\) greater than the number of slope coefficients, \(T_d\) greater than it for Driscoll–Kraay.
+- Because there are no absorbed dummies, the leverage in HC2 and HC3 is the plain \(h_{ii} = x_i^{*\prime}(X^{*\prime}X^*)^{-1}x_i^*\) of the quasi-demeaned design, and the small-sample factor uses \(K = \mathrm{df}_{\text{model}}\) in every case: \(\frac{G}{G-1}\cdot\frac{n-1}{n-K}\) for `"cluster"` (the form of `plm::vcovHC(type = "sss")`) and \(\frac{T_d}{T_d-1}\cdot\frac{n-1}{n-K}\) for `"dk"`.
+- Cluster standard errors with `G` clusters need \(G\) greater than the number of slope coefficients, \(T_d\) greater than it for Driscoll-Kraay.
 
 ## Test distributions and confidence intervals
 
-As for FE, every `cov_type` uses the **t distribution**, with \(\mathrm{df}_{\text{resid}}\) for `"classical"` and `"hc1"` to `"hc3"`, \(G-1\) for `"cluster"` and \(T_d-1\) for `"dk"`, returned as `stat_df`. The overall F test is the Wald test that the \(k\) slope coefficients are zero, \(F = \hat\beta_s'\hat\Sigma_s^{-1}\hat\beta_s/k\), with the covariance chosen by `cov_type` and the same degrees of freedom, so `f_df_denom` equals `stat_df`. The constant is not part of the tested hypothesis. This Wald form is used rather than the sum-of-squares form of `linearmodels`' `f_statistic`, which ignores `cov_type` and can be negative on a very unbalanced panel.
+As for FE, every `cov_type` uses the **t distribution**, with \(\mathrm{df}_{\text{resid}}\) for `"classical"` and `"hc1"` to `"hc3"`, \(G-1\) for `"cluster"` and \(T_d-1\) for `"dk"`, returned as `stat_df`.
 
-## Fit statistics
+## Overall test and fit statistics
+
+### Overall F test
+
+The overall F test is the Wald test that the \(k\) slope coefficients are zero, \(F = \hat\beta_s'\hat\Sigma_s^{-1}\hat\beta_s/k\), with the covariance chosen by `cov_type` and the same degrees of freedom, so `f_df_denom` equals `stat_df`. The constant is not part of the tested hypothesis. This Wald form is used rather than the sum-of-squares form of `linearmodels`' `f_statistic`, which ignores `cov_type`.
+
+### Fit statistics
 
 The log-likelihood is computed from the residuals of the quasi-demeaned regression as for [OLS](ols.md#fit-statistics), and \(\mathrm{AIC} = -2\ell + 2(k+1)\), \(\mathrm{BIC} = -2\ell + (k+1)\ln n\).
 
@@ -85,14 +91,16 @@ A time-invariant regressor is allowed. So is a regressor together with its entit
 
 ## Hausman test
 
-`hausman_statistic`, `hausman_p_value` and `hausman_df` are computed by `fit()`; they are `None` only when no slope coefficient can be tested. The test is the regression-based (auxiliary regression) version of Wooldridge (2010, section 10.7.3), equivalent to `plm::phtest(method = "aux")`: the quasi-demeaned \(y^*\) is regressed on an untransformed constant, the quasi-demeaned regressors \(X^*\) and the within-transformed regressors \(\tilde X\), and the Wald test that the coefficients of \(\tilde X\) are zero is reported:
+`hausman_statistic`, `hausman_p_value` and `hausman_df` are computed by `fit()`; they are `None` only when no slope coefficient can be tested. The test is the regression-based (auxiliary regression) version of Wooldridge (2010, section 10.7.3). It matches `plm::phtest(method = "aux")` when no regressor is time-invariant (see [Inference conventions](../guide/inference-conventions.md#other-diagnostics)). The quasi-demeaned \(y^*\) is regressed on an untransformed constant, the quasi-demeaned regressors \(X^*\) and the within-transformed regressors \(\tilde X\), and the Wald test that the coefficients of \(\tilde X\) are zero is reported:
 
 \[
 H = \hat\delta'\hat\Sigma_\delta^{-1}\hat\delta \sim \chi^2(\mathrm{df}), \qquad \mathrm{df} = \text{number of tested columns of } \tilde X
 \]
 
+where \(\hat\delta\) are the estimated coefficients of the tested columns of \(\tilde X\) and \(\hat\Sigma_\delta\) is their block of the covariance matrix chosen by `cov_type`.
+
 - The statistic is non-negative by construction.
 - The comparison is with the FE model of the same structure: entity effects, or entity and time effects when `time` is set.
-- The covariance follows `cov_type`, so the default `"cluster"` gives the cluster-robust Hausman test, and `"classical"` gives the classical version, which assumes that RE is fully efficient under the null. The small-sample corrections are those of the RE standard errors. `"dk"` rests on large-\(T\) asymptotics and may be distorted for a short panel.
-- Only time-varying regressors are tested. Columns of \(\tilde X\) that cannot be identified are left out, and `hausman_df` counts the identified ones: a regressor varying only over time on a balanced panel, and one whose entity mean (or time mean, in two-way) is also a regressor.
+- The covariance follows `cov_type`, so the default `"cluster"` gives the cluster-robust Hausman test, and `"classical"` gives the classical version, which assumes that RE is fully efficient under the null. The small-sample factors are those of the RE standard errors, with \(K\) the number of regressors of the auxiliary regression (the constant, \(X^*\) and the tested columns of \(\tilde X\), up to \(2k+1\)) instead of \(k+1\). `"dk"` rests on large-\(T\) asymptotics and may be distorted for a short panel.
+- Only time-varying regressors are tested. A column of \(\tilde X\) is left out of the test, and not counted in `hausman_df`, when it cannot be identified. This happens in two cases: its quasi-demeaned counterpart in \(X^*\) differs from it only by a constant (for example a regressor that varies only over time on a balanced panel), or the entity mean (in the two-way model, the time mean) of the regressor is also a regressor.
 - The auxiliary regression has up to \(2k\) slope coefficients, so `cov_type="cluster"` needs more than that many clusters, and `"dk"` needs more periods than the slope coefficients. If the regression cannot be computed, `fit()` raises an error instead of returning `None`; use `cov_type="classical"` or more clusters.

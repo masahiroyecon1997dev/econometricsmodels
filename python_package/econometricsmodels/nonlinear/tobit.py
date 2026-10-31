@@ -1,25 +1,18 @@
 """Python wrapper for Tobit (censored regression).
 
 A thin wrapper around `econometricsmodels._lib.fit_tobit` (the Rust
-implementation, `engine`/`engine_pybind`). Validation and estimation
-logic live entirely on the Rust side; this module only provides the
-Python-facing API shape for polars DataFrames — a list of column names
-for `x`, an options object for estimation settings (CLAUDE.md section 2,
-`.claude/rules/python-style.md` "設計方針との整合性").
+implementation). Validation and estimation happen on the Rust side; this
+module only provides the Python-facing API shape for polars DataFrames:
+a list of column names for `x` and an options object for the estimation
+settings.
 
-`TobitOptions` is re-exported as-is from `_lib` (not redefined as a
-separate class; same policy as `LogitOptions`/`OLSOptions`, see
-`docs/spec/ols-spec.md`, "API引数").
+`TobitOptions` is re-exported as-is from `_lib`. There is no
+`summary()`: results are returned as structured data.
 
-`summary()` is not implemented (structured-data-only output policy; see
-`docs/spec/nonlinear-common.md` section 5 and the
-`OLSResults`/`WLSResults`/`LogitResults` precedent).
-
-Unlike Logit/Probit, Tobit does not have `log_likelihood_null`,
-`lr_statistic`, `lr_p_value`, or `pseudo_r_squared` (no closed form
-exists for the intercept-only model under censoring); `wald_statistic`/
-`wald_p_value` provide the overall model significance test instead (see
-`docs/spec/nonlinear-common.md` section 5). There is no
+Unlike Logit and Probit, Tobit has no `log_likelihood_null`,
+`lr_statistic`, `lr_p_value` or `pseudo_r_squared` (the intercept-only
+model has no closed form under censoring); `wald_statistic` and
+`wald_p_value` give the overall significance test instead. There is no
 `pred_table()`; `censoring_fit_check()` takes its place (`y` is
 continuous, so a classification table is not meaningful).
 """
@@ -35,6 +28,7 @@ from .._lib import TobitOptions
 from .._results_utils import (
     by_param,
     conf_int_by_param,
+    cov_params_by_param,
     marginal_effect_rows,
     params_table_rows,
 )
@@ -58,9 +52,15 @@ class Tobit:
     Examples:
         >>> import polars as pl
         >>> from econometricsmodels import Tobit
-        >>> df = pl.DataFrame({"y": [0.0, 1.0], "x1": [1.0, 2.0]})
+        >>> df = pl.DataFrame(
+        ...     {
+        ...         "y": [0.0, 0.0, 1.0, 0.5, 2.0, 3.5],
+        ...         "x1": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        ...     }
+        ... )
         >>> result = Tobit(df, y="y", x=["x1"]).fit()
-        >>> result.params["x1"]
+        >>> round(result.params["x1"], 3)
+        0.956
     """
 
     def __init__(
@@ -68,6 +68,7 @@ class Tobit:
         data: pl.DataFrame,
         y: str,
         x: list[str],
+        *,
         options: TobitOptions | None = None,
     ) -> None:
         self._data = data
@@ -117,6 +118,7 @@ class TobitResults:
     - Coefficients and `sigma`: `params`, `std_errors`, `test_stats`,
       `p_values`, `conf_int`; the names in order: `param_names`;
       `sigma` on its own: `sigma`.
+    - Covariance of the coefficients and `sigma`: `cov_params`.
     - Which distribution the tests use: `stat_dist` (always
       `"normal"`), `stat_df`.
     - Overall Wald test: `wald_statistic`, `wald_p_value`, `wald_df`,
@@ -129,10 +131,6 @@ class TobitResults:
     - Settings echoed back: `cov_type`.
     - Methods: `predict()`, `augment()`, `marginal_effects()` (all
       take a `target`), `censoring_fit_check()`, `params_table()`.
-
-    Args:
-        raw: The estimation result object returned by `_lib.fit_tobit`
-            (`_lib.TobitResult`).
 
     Note:
         Users normally do not construct this directly; it is returned
@@ -164,6 +162,22 @@ class TobitResults:
         return by_param(self._raw.param_names, self._raw.std_errors)
 
     @property
+    def cov_params(self) -> dict[str, dict[str, float]]:
+        """Covariance matrix of the coefficients and `sigma`, by name.
+
+        `"sigma"` is the last row and column. Computed with the `cov_type`
+        of the options, so `std_errors[a]` is the square root of
+        `cov_params[a][a]`. The covariance of `a` and `b` is
+        `cov_params["a"]["b"]`, and the keys are in `param_names` order.
+
+        The matrix is symmetric up to rounding error (a relative difference
+        of 1e-16 to 1e-15 between `cov_params["a"]["b"]` and
+        `cov_params["b"]["a"]`), so compare entries with a tolerance rather
+        than with `==`.
+        """
+        return cov_params_by_param(self._raw.param_names, self._raw.cov_params)
+
+    @property
     def test_stats(self) -> dict[str, float]:
         """Coefficient name to z-statistic (includes `"sigma"`).
 
@@ -172,17 +186,15 @@ class TobitResults:
         return by_param(self._raw.param_names, self._raw.test_stats)
 
     @property
-    def stat_dist(self) -> Literal["t", "normal"]:
-        """Distribution of `test_stats`: `"t"` (t-statistics) or
-        `"normal"` (z-statistics)."""
+    def stat_dist(self) -> Literal["normal"]:
+        """Distribution of `test_stats`. Always `"normal"`:
+        z-statistics are used for every `cov_type`."""
         return self._raw.stat_dist
 
     @property
-    def stat_df(self) -> int | None:
-        """Degrees of freedom of the t distribution behind `test_stats`,
-        or `None` when `stat_dist` is `"normal"`. May differ from
-        `df_resid` (e.g. cluster-robust inference uses `G - 1`), so use
-        this to recompute p-values from `test_stats`."""
+    def stat_df(self) -> None:
+        """Always `None`: the z-statistics in `test_stats` follow a
+        standard normal distribution, which has no degrees of freedom."""
         return self._raw.stat_df
 
     @property
@@ -232,8 +244,9 @@ class TobitResults:
 
     @property
     def df_resid(self) -> int:
-        """Residual degrees of freedom (`n - (k + 1)`, where `k + 1`
-        includes `sigma` as an estimated parameter)."""
+        """Residual degrees of freedom: `n` minus the number of estimated
+        parameters, which are the regression coefficients (including the
+        intercept, if any) and `sigma`."""
         return self._raw.df_resid
 
     @property
@@ -312,6 +325,7 @@ class TobitResults:
 
     def predict(
         self,
+        *,
         new_data: pl.DataFrame | None = None,
         target: str = "expected_observed",
     ) -> list[float]:
@@ -366,6 +380,7 @@ class TobitResults:
 
     def augment(
         self,
+        *,
         new_data: pl.DataFrame | None = None,
         target: str = "expected_observed",
     ) -> pl.DataFrame:
@@ -374,16 +389,16 @@ class TobitResults:
         Same `target`/`new_data` semantics as `predict()`, but returns
         a polars DataFrame (the training data, or `new_data` when
         given, plus a new predicted-value column) instead of a plain
-        list. See `OLSResults.augment()` for the project's general
-        policy on this DataFrame-returning exception.
+        list. It exists to attach predictions back to their source
+        rows.
 
-        Like Logit/Probit's fixed `"predicted_probability"` column, the
-        appended column here has a `predicted_` prefix and is named `"predicted_{target}"`, using
-        the lowercased `target` (e.g. `target="expected_observed"` or
+        The appended column is named `"predicted_{target}"`, using the
+        lowercased `target` (e.g. `target="expected_observed"` or
         `target="Expected_Observed"` both produce
-        `"predicted_expected_observed"`), since `predict()`'s meaning
-        depends on `target`. This also lets `augment()` be called once
-        per `target` on the same DataFrame without a name collision.
+        `"predicted_expected_observed"`), since the meaning of the
+        prediction depends on `target`. This also lets `augment()` be
+        called once per `target` on the same DataFrame without a name
+        collision.
 
         Args:
             new_data: Same as `predict()`. If `None` (default), returns
@@ -406,17 +421,17 @@ class TobitResults:
 
     def marginal_effects(
         self,
+        *,
         at: str = "overall",
         target: str = "expected_observed",
         confidence_level: float = 0.95,
     ) -> list[dict[str, float | str]]:
         """Marginal effects (`dy/dx`) with delta-method standard errors.
 
-        Unlike Logit/Probit, this is Tobit's own implementation (not
-        the shared `dydx_and_jacobian` pattern) because the formula
-        differs per `target`. Independent of the `confidence_level`
-        used in `fit()` (may differ from it). The constant term
-        (intercept) is excluded from the output.
+        The formula differs per `target`. Independent of the
+        `confidence_level` used in `fit()` (may differ from it). The
+        constant term (intercept) and `"sigma"` are excluded from the
+        output.
 
         Args:
             at: The representative point at which to evaluate the
@@ -433,8 +448,8 @@ class TobitResults:
             (excluding the intercept). Keys are `param_name`, `effect`,
             `std_error`, `test_stat`, `p_value`, `conf_lower`, `conf_upper`. `test_stat` is
             always a z-statistic (normal distribution). `effect` is
-            the marginal effect estimate (corresponds to `dy/dx` in
-            Stata's `margins, dydx(*)` and statsmodels).
+            the marginal effect estimate, the derivative of the
+            quantity chosen by `target` with respect to the variable.
 
         Raises:
             ValidationError: `at` is not one of `"overall"`, `"mean"`,

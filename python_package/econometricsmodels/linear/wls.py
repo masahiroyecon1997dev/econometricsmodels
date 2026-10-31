@@ -1,16 +1,13 @@
 """Python wrapper for WLS (Weighted Least Squares).
 
 A thin wrapper around `econometricsmodels._lib.fit_wls` (the Rust
-implementation, `engine`/`engine_pybind`). Validation and estimation
-logic live entirely on the Rust side; this module only provides the
-Python-facing API shape for polars DataFrames — a list of column names
-for `x`, an options object for estimation settings (CLAUDE.md section 2,
-`.claude/rules/python-style.md` "設計方針との整合性").
+implementation). Validation and estimation happen on the Rust side; this
+module only provides the Python-facing API shape for polars DataFrames:
+a list of column names for `x` and an options object for the estimation
+settings.
 
-`weight`, like `y`, is a top-level argument referring to a column name
-in `data`. `WLSOptions` is re-exported as-is from `_lib` (not redefined
-as a Python class), following the `OLSOptions` pattern (see
-`python_package/econometricsmodels/linear/CLAUDE.md`).
+`weight`, like `y`, is a top-level argument naming a column of `data`.
+`WLSOptions` is re-exported as-is from `_lib`.
 """
 
 from __future__ import annotations
@@ -24,6 +21,7 @@ from .._lib import WLSOptions
 from .._results_utils import (
     by_param,
     conf_int_by_param,
+    cov_params_by_param,
     params_table_rows,
 )
 
@@ -40,8 +38,9 @@ class WLS:
         x: List of column names of the independent variables.
         weight: Column name of the weight column. Treated as an
             analytic weight (proportional to the inverse of the
-            variance; no normalization required). Non-positive values
-            raise `ValidationError`.
+            variance; no normalization required). Every weight must be
+            finite and strictly positive; a zero, negative, missing, NaN
+            or infinite weight raises `ValidationError`.
         options: Estimation options. Defaults to `WLSOptions()`
             (classical, with intercept, confidence_level=0.95) when
             omitted.
@@ -50,10 +49,15 @@ class WLS:
         >>> import polars as pl
         >>> from econometricsmodels import WLS
         >>> df = pl.DataFrame(
-        ...     {"y": [1.0, 2.0], "x1": [1.0, 2.0], "w": [1.0, 2.0]}
+        ...     {
+        ...         "y": [1.2, 1.9, 3.1, 3.8, 5.2],
+        ...         "x1": [1.0, 2.0, 3.0, 4.0, 5.0],
+        ...         "w": [1.0, 2.0, 1.0, 2.0, 1.0],
+        ...     }
         ... )
         >>> result = WLS(df, y="y", x=["x1"], weight="w").fit()
-        >>> result.params["x1"]
+        >>> round(result.params["x1"], 3)
+        0.983
     """
 
     def __init__(
@@ -62,6 +66,7 @@ class WLS:
         y: str,
         x: list[str],
         weight: str,
+        *,
         options: WLSOptions | None = None,
     ) -> None:
         self._data = data
@@ -110,6 +115,7 @@ class WLSResults:
 
     - Coefficients: `params`, `std_errors`, `test_stats`, `p_values`,
       `conf_int`; the names in order: `param_names`.
+    - Covariance of the coefficients: `cov_params`.
     - Which distribution the tests use: `stat_dist`, `stat_df`.
     - Overall F test: `f_statistic`, `f_p_value`, `f_df_num`,
       `f_df_denom`.
@@ -120,10 +126,6 @@ class WLSResults:
     - Settings echoed back: `cov_type`, `hac_lags_used`.
     - Residuals: `residuals`.
     - Methods: `predict()`, `augment()`, `params_table()`.
-
-    Args:
-        raw: The estimation result object returned by `_lib.fit_wls`
-            (`_lib.WLSResult`).
 
     Note:
         Users normally do not construct this directly; it is returned
@@ -149,6 +151,21 @@ class WLSResults:
     def std_errors(self) -> dict[str, float]:
         """Coefficient name to standard error."""
         return by_param(self._raw.param_names, self._raw.std_errors)
+
+    @property
+    def cov_params(self) -> dict[str, dict[str, float]]:
+        """Covariance matrix of the coefficients, as a dict of dicts by name.
+
+        Computed with the `cov_type` of the options, so `std_errors[a]` is
+        the square root of `cov_params[a][a]`. The covariance of `a` and `b`
+        is `cov_params["a"]["b"]`, and the keys are in `param_names` order.
+
+        The matrix is symmetric up to rounding error (a relative difference
+        of 1e-16 to 1e-15 between `cov_params["a"]["b"]` and
+        `cov_params["b"]["a"]`), so compare entries with a tolerance rather
+        than with `==`.
+        """
+        return cov_params_by_param(self._raw.param_names, self._raw.cov_params)
 
     @property
     def test_stats(self) -> dict[str, float]:
@@ -209,12 +226,13 @@ class WLSResults:
 
     @property
     def r_squared(self) -> float:
-        """Coefficient of determination (R²)."""
+        """Weighted coefficient of determination (R² of the weighted
+        regression)."""
         return self._raw.r_squared
 
     @property
     def adj_r_squared(self) -> float:
-        """Degrees-of-freedom-adjusted R²."""
+        """Degrees-of-freedom-adjusted weighted R²."""
         return self._raw.adj_r_squared
 
     @property
@@ -281,7 +299,7 @@ class WLSResults:
         """
         return params_table_rows(self._raw)
 
-    def predict(self, new_data: pl.DataFrame | None = None) -> list[float]:
+    def predict(self, *, new_data: pl.DataFrame | None = None) -> list[float]:
         """Predicted values.
 
         Weights play no role: the predicted value is `x_i'β̂` on the
@@ -309,7 +327,7 @@ class WLSResults:
         """
         return self._raw.predict(new_data)
 
-    def augment(self, new_data: pl.DataFrame | None = None) -> pl.DataFrame:
+    def augment(self, *, new_data: pl.DataFrame | None = None) -> pl.DataFrame:
         """Source data with the predicted values appended as a column.
 
         Same design as `OLSResults.augment()`: weights play no role in

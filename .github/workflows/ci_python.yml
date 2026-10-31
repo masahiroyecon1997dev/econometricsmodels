@@ -78,8 +78,10 @@ jobs:
 
       # --check-error-coverage: 全体実行の終了時に、移行済みのエラー`code`が
       # すべて一度はテストで送出されたこと（tests/support/_errors.py）を確認する。
+      # --check-cov-coverage: 全体実行の終了時に、読み込んだ係数の分散共分散行列の
+      # フィクスチャが、すべて一度はテストで比較されたこと（tests/support/_fixture_cov.py）を確認する。
       - name: pytest
-        run: uv run --locked --group test pytest tests --check-error-coverage
+        run: uv run --locked --group test pytest tests --check-error-coverage --check-cov-coverage
 
       - name: ruff check
         run: uv run --locked --group test ruff check .

@@ -12,9 +12,11 @@ use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 
 use crate::shared::column_error::ColumnSource;
-use crate::shared::column_extraction::extract_optional_cluster_groups;
+use crate::shared::column_extraction::{
+    extract_f64_column, extract_f64_columns, extract_optional_cluster_groups, select_columns,
+};
 use crate::shared::errors::{to_pyerr, unknown_option_value};
-use crate::shared::validation::reject_unused_option;
+use crate::shared::validation::{reject_unused_option, validate_common_roles};
 
 /// `engine::nonlinear::common::MleError`をPython例外に変換する。
 ///
@@ -29,22 +31,42 @@ pub(crate) fn mle_error_to_pyerr(err: MleError) -> PyErr {
     to_pyerr(&err)
 }
 
-/// `faer::Mat<f64>`を行指向の`Vec<Vec<f64>>`に変換する（`pred_table`のような小さい
-/// 2次元行列をPython側にそのまま返すため）。`engine_pybind/src/shared/mat_conversion.rs`の
-/// `mat_to_vec`は列ベクトル（n×1）専用のため、任意の形状に対応するこちらを別途用意した。
-pub(crate) fn mat_to_nested_vec(mat: &faer::Mat<f64>) -> Vec<Vec<f64>> {
-    (0..mat.nrows())
-        .map(|i| (0..mat.ncols()).map(|j| *mat.get(i, j)).collect())
-        .collect()
+/// pickleの復元で、`source_data`（`fit()`に渡された`polars.DataFrame`）から`y`と`x`の列を取り出し直す。
+///
+/// 列を読む前に、`fit()`と同じ構造の検査（`x`が空でない、`y`と`x`・`x`内に重複がない、切片と`"const"`が
+/// 衝突しない）と、列数が係数の数（`n_params`）と合うことを確かめる。改ざんされた列名（同じ列の重複など）から
+/// 巨大な行列を確保しないため。この検査の後は、`x`の列は`source_data`にある相異なる列なので、確保量は
+/// `source_data`の大きさで抑えられる。
+///
+/// 取り出しは`fit()`と同じ`extract_f64_column(s)`を通すので、同じ値になる。検査に失敗する、列が無い・数値でない・
+/// 欠損値を含む、観測数が0のときは`None`（改ざんされたか、別の版が書いたpickle。呼び出し側が
+/// `PICKLE_FORMAT_MISMATCH`にする）。
+pub(crate) fn rebuild_columns(
+    source: &Bound<'_, PyAny>,
+    dep_var_name: &str,
+    x_names: &[String],
+    include_intercept: bool,
+    n_params: usize,
+) -> Option<(Vec<f64>, Vec<Vec<f64>>)> {
+    validate_common_roles(dep_var_name, x_names, include_intercept).ok()?;
+    if x_names.len() + usize::from(include_intercept) != n_params {
+        return None;
+    }
+    let mut columns = vec![dep_var_name.to_string()];
+    columns.extend_from_slice(x_names);
+    let selected = select_columns(source, "source_data", &columns).ok()?;
+    let y = extract_f64_column(
+        &selected.frame,
+        dep_var_name,
+        ColumnSource::new("y", "data"),
+    )
+    .ok()?;
+    let x = extract_f64_columns(&selected.frame, x_names, ColumnSource::new("x", "data")).ok()?;
+    (!y.is_empty()).then_some((y, x))
 }
 
-/// `LogitResult::marginal_effects`/`ProbitResult::marginal_effects`共通の結果型。
-/// 定数項は除外される（`engine`側の`MarginalEffects`のdocコメント参照）。フィールドの
-/// 並びは`param_names`と対応する（`LogitResult`/`ProbitResult`本体と同じ規約）。
-///
-/// 元々`logit.rs`にLogit専用として定義していたが、`engine::nonlinear::common::
-/// MarginalEffects`がLogit/Probitで既に共有されているのに合わせ、こちらも
-/// `<系統>/common.rs`に移動した（`rust-style.md`「ファイル・ディレクトリ構成」参照）。
+/// Result of `marginal_effects()` for Logit, Probit and Tobit. The intercept (and, for
+/// Tobit, `sigma`) is excluded. The fields line up with `param_names`.
 #[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
 pub struct MarginalEffectsResult {
@@ -62,6 +84,23 @@ pub struct MarginalEffectsResult {
     pub conf_lower: Vec<f64>,
     #[pyo3(get)]
     pub conf_upper: Vec<f64>,
+}
+
+crate::shared::pickle::impl_pickle_state!(MarginalEffectsResult {
+    param_names,
+    effect,
+    std_errors,
+    test_stats,
+    p_values,
+    conf_lower,
+    conf_upper,
+});
+
+#[pymethods]
+impl MarginalEffectsResult {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
 }
 
 /// `cov_type`の種類。列名を持たない、文字列だけから決まる値。
@@ -331,21 +370,6 @@ mod tests {
     fn resolve_mle_tol_default_returns_explicit_tol_unchanged() {
         assert_eq!(resolve_mle_tol_default("newton", Some(1e-3)), 1e-3);
         assert_eq!(resolve_mle_tol_default("bfgs", Some(1e-3)), 1e-3);
-    }
-
-    #[test]
-    fn mat_to_nested_vec_preserves_row_major_order() {
-        let mat = faer::Mat::from_fn(2, 3, |i, j| (i * 3 + j) as f64);
-        assert_eq!(
-            mat_to_nested_vec(&mat),
-            vec![vec![0.0, 1.0, 2.0], vec![3.0, 4.0, 5.0]]
-        );
-    }
-
-    #[test]
-    fn mat_to_nested_vec_handles_single_row() {
-        let mat = faer::Mat::from_fn(1, 2, |_, j| j as f64);
-        assert_eq!(mat_to_nested_vec(&mat), vec![vec![0.0, 1.0]]);
     }
 
     // `parse_marginal_effects_at`自体は渡された文字列をそのまま照合する（`parse_cov_kind`/

@@ -12,7 +12,10 @@ from pathlib import Path
 import polars as pl
 
 from benchmark.common import hac_auto_lag
-from benchmark.common.reference.normalize import normalize_names
+from benchmark.common.reference.normalize import (
+    normalize_cov_params,
+    normalize_names,
+)
 from benchmark.common.reference.r import run_r
 
 _R_SCRIPT = Path(__file__).resolve().parent / "run_fixest_benchmark.R"
@@ -147,7 +150,7 @@ def run_fixest_r(
         extra.extend([str(dk_lag), dk_time])
 
     raw = run_r(_R_SCRIPT, csv_path, formula, cov_type, extra_args=extra)
-    return normalize_names(
+    result = normalize_names(
         raw,
         stat_key="test_stats",
         scalar_keys=_FIXEST_SCALAR_KEYS,
@@ -155,6 +158,10 @@ def run_fixest_r(
         # （normalize_namesの既定はOLS/WLS向けの切片名エイリアス）。
         intercept_aliases=(),
     )
+    result["cov_params"] = normalize_cov_params(
+        raw["cov_params"], intercept_aliases=()
+    )
+    return result
 
 
 def run_fe_plm_r(
@@ -189,13 +196,17 @@ def run_fe_plm_r(
     raw = run_r(
         _PLM_FE_R_SCRIPT, csv_path, formula, cov_type, extra_args=extra
     )
-    return normalize_names(
+    result = normalize_names(
         raw,
         stat_key="test_stats",
         scalar_keys=_PLM_FE_SCALAR_KEYS,
         # FEに切片は無い（run_fixest_rと同じ）。
         intercept_aliases=(),
     )
+    result["cov_params"] = normalize_cov_params(
+        raw["cov_params"], intercept_aliases=()
+    )
+    return result
 
 
 def run_re_plm_r(
@@ -242,11 +253,13 @@ def run_re_plm_r(
         extra_args=extra,
         env=_random_method_env(random_method),
     )
-    return normalize_names(
+    result = normalize_names(
         raw,
         stat_key="test_stats",
         scalar_keys=(*_PLM_SCALAR_KEYS, "sigma2_eps", "sigma2_u"),
     )
+    result["cov_params"] = normalize_cov_params(raw["cov_params"])
+    return result
 
 
 def _given_variance_extra_args(
@@ -316,9 +329,11 @@ def run_re_given_variance_plm_r(
         cov_type,
         extra_args=extra,
     )
-    return normalize_names(
+    result = normalize_names(
         raw, stat_key="test_stats", scalar_keys=_PLM_SCALAR_KEYS
     )
+    result["cov_params"] = normalize_cov_params(raw["cov_params"])
+    return result
 
 
 def run_re_hausman_plm_r(
@@ -504,8 +519,10 @@ def run_re_two_way_plm_r(
         extra_args=extra,
         env=_random_method_env(random_method),
     )
-    return normalize_names(
+    result = normalize_names(
         raw,
         stat_key="test_stats",
         scalar_keys=(*_PLM_RE_TWO_WAY_SCALAR_KEYS,),
     )
+    result["cov_params"] = normalize_cov_params(raw["cov_params"])
+    return result

@@ -10,7 +10,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from benchmark.common.reference.normalize import normalize_names
+from benchmark.common.reference.normalize import (
+    normalize_cov_params,
+    normalize_names,
+)
 from benchmark.common.reference.r import resolve_hac_lag, run_r
 
 _R_SCRIPT = Path(__file__).resolve().parent / "run_lm_crosscheck.R"
@@ -71,6 +74,9 @@ def run_lm_r(
     result = normalize_names(
         raw, stat_key="test_stats", scalar_keys=_LM_SCALAR_KEYS
     )
+    # 係数の分散共分散行列。統計量のフィクスチャには含めず、`cov_fixtures`が
+    # 別のJSONに分ける（`benchmark/common/cov_fixtures.py`）。
+    result["cov_params"] = normalize_cov_params(raw["cov_params"])
     if lag is not None:
         result["hac_lag"] = lag
     return result

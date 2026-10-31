@@ -16,6 +16,7 @@ from typing import Protocol
 __all__ = [
     "by_param",
     "conf_int_by_param",
+    "cov_params_by_param",
     "marginal_effect_rows",
     "params_table_rows",
 ]
@@ -84,6 +85,26 @@ def conf_int_by_param(
         for name, lower, upper in zip(
             raw.param_names, raw.conf_lower, raw.conf_upper
         )
+    }
+
+
+def cov_params_by_param(
+    param_names: Sequence[str], rows: Sequence[Sequence[float]]
+) -> dict[str, dict[str, float]]:
+    """Pair each coefficient name with its row of the covariance matrix.
+
+    Args:
+        param_names: Coefficient names, in estimation order.
+        rows: The covariance matrix as one row per coefficient, in the
+            same order on both axes.
+
+    Returns:
+        A dictionary of dictionaries, so the covariance of `a` and `b`
+        is `result["a"]["b"]`.
+    """
+    return {
+        row_name: dict(zip(param_names, row))
+        for row_name, row in zip(param_names, rows)
     }
 
 

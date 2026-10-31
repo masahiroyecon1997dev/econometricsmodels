@@ -60,7 +60,6 @@ wagepan（T=8）は`WAGEPAN_X`が3変数で`T-1=7 > q=3`のため対象に含み
 
 from __future__ import annotations
 
-import json
 from functools import partial
 from pathlib import Path
 
@@ -73,6 +72,7 @@ from _assertions import (
     assert_inference_close,
 )
 from _constants import DATA_DIR
+from _fixture_cov import load_fixtures_with_cov
 from _helpers import load_wooldridge_dataset
 from _panel_helpers import bandwidth_cases, x_columns
 from _tolerances import TOLERANCES
@@ -131,7 +131,7 @@ TWO_WAY_CASES = [
 
 @pytest.fixture(scope="module")
 def crosscheck() -> dict:
-    return json.loads(FIXTURE_PATH.read_text())
+    return load_fixtures_with_cov(FIXTURE_PATH)
 
 
 _assert_close = partial(assert_close, rtol=RTOL, atol=ATOL)

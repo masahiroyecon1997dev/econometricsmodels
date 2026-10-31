@@ -9,7 +9,7 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols/`・`engi
 
 ## 1. API引数
 
-3層構成: `OLS(data, y, x, options).fit() -> OLSResults`（python_package）→
+3層構成: `OLS(data, y, x, options=options).fit() -> OLSResults`（python_package）→
 `fit_ols(data, y, x, options) -> OLSResult`（engine_pybind、PyO3境界）→
 正規方程式ソルバー・標準誤差計算（engine）。
 
@@ -55,11 +55,14 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols/`・`engi
   未指定なら経験則で自動計算した値。engineの`resolve_hac_lags`の戻り値をそのまま保持する）。
   `hac`以外は`None`。入力`hac_lags`（`None`のまま）とは別フィールドで、ユーザー指定値は書き換えない。
 - `conf_int`は`conf_lower`/`conf_upper`の2配列に分割（engine内部表現・pyo3実装の簡潔さを優先）。
-- `k×kの分散共分散行列（cov_params）はPython側に公開しない`。`OlsEstimator`自体は非公開
-  フィールドとして保持する（クレート内の他系統からの部分Wald検定の再利用のため、
-  `engine/src/linear/CLAUDE.md`参照。IVのWu-Hausman検定用に追加するまでは
-  `fit()`内のローカル変数として使い切っていた）が、`engine_pybind`側に公開する`OLSResult`
-  には引き続き含めない。
+- `k×kの分散共分散行列（cov_params）`は`cov_type`に応じた値を`OLSResult.cov_params`（行ごとの
+  `list[list[float]]`、`param_names`順）として公開し、Python側の`OLSResults.cov_params`が
+  `dict[str, dict[str, float]]`（名前→名前→値）に組み直す。理由: 係数の結合検定・線形結合
+  （`b1 + b2`）の標準誤差・デルタ法を利用者が自分で計算できるようにするため。`params`/`std_errors`
+  と同じくキーが利用者の列名で決まる結果なので`dict`にする（`docs/spec/inference-conventions.md`6章）。
+  `std_errors`はこの対角成分の平方根で、全手法・全`cov_type`で一致する（`tests/cross_method/
+  test_cov_params.py`）。`OlsEstimator`自体は非公開フィールドとして保持し、クレート内の他系統からの
+  部分Wald検定の再利用にも使う（`engine/src/linear/CLAUDE.md`参照）。
 - `summary()`（テキスト整形）・DataFrame版の`params_table()`/`conf_int()`は作らない
   （プログラムから呼び出して使う設計方針上、テキスト表示・対話的操作を前提に
   しないため）。
@@ -278,7 +281,7 @@ classical / HC0〜HC3 / HAC / cluster の定義式、検定分布、自由度の
 ### 3.7 テスト
 
 - 許容誤差: classical/HC0-3/cluster/係数はRとの実測で相対誤差1e-14程度のため`rtol_strict=1e-8`（`tests/support/_tolerances_linear.py`の`ols_crosscheck`）。
-  HACも同じ`rtol_strict`（R側は`NeweyWest(adjust = FALSE)`。既定の`adjust = TRUE`は共分散に
+  HACも同じ`rtol_strict`（R側は`NeweyWest(adjust = FALSE)`。`adjust = TRUE`（`NeweyWest`の既定は`FALSE`。`kernHAC`・`vcovHAC`の既定）は共分散に
   `n/(n-k)`を掛けるが本実装・statsmodelsは掛けず、このスカラー倍だけが差の全てで、
   小標本（n=20）・高次元（k=21）を含む全合成シナリオで機械精度一致する）。
 - HACの実データは時系列のWooldridge `prminwge`（`lprepop ~ lmincov + lusgnp`、年次昇順でn=38、
@@ -292,8 +295,9 @@ classical / HC0〜HC3 / HAC / cluster の定義式、検定分布、自由度の
 - `hac_lags_used`（自動選択ラグ数）は、`tests/linear/test_ols_api.py`が複数の標本サイズ
   （境界`n=51200`を含む）でPython側の独立実装`benchmark.common.hac_auto_lag`と直接比較する
   （Rust側`shared::covariance::resolve_hac_lags`との式の一致の直接検証。WLS・IV・FE/REのDKも各`*_api.py`で同様）。
-- pyfixestはOLSの正確性検証には使わない（HC2/HC3にHC1用の小標本補正を誤って適用する既知の
-  実装バグがあるため）。性能比較専用（[`../performance/ols.md`](../performance/ols.md)）。
+- pyfixestはリファレンスに使わない（v0.60.0のHC2/HC3がfixestと系統的に乖離し、HC1用の小標本補正が
+  加わっているとみなすと説明できる差だったため。原因は断定していない。性能比較にも使わない:
+  [`../performance/ols.md`](../performance/ols.md)）。
 - 実データセット: `wage1`（`lwage ~ educ + exper + tenure`）・
   `gpa2`（`colgpa ~ sat + hsperc + tothrs`）・
   `mroz`（`inlf ~ nwifeinc + educ + exper + expersq + age + kidslt6 + kidsge6`、Logit/Probitと同じ
@@ -333,7 +337,7 @@ classical / HC0〜HC3 / HAC / cluster の定義式、検定分布、自由度の
 ### 3.8 パフォーマンス（要約）
 
 releaseビルド（`maturin develop --release`）必須（debugビルドは最大140倍遅い）。
-classical/HC1/clusterはstatsmodels/pyfixest以上に高速、HACも大規模データではほぼ互角。
+classical/HC1/clusterはstatsmodels以上に高速、HACも大規模データではほぼ互角。
 メモリはengineが一貫して最小。詳細な実測データは[`../performance/ols.md`](../performance/ols.md)参照。
 faerのグローバル並列度は`engine::shared::parallelism::ensure_serial()`で常時`Par::Seq`に固定
 している（tall-skinnyな設計行列では暗黙の全コア並列化が高速化せず、多コア機・負荷下で
@@ -341,7 +345,7 @@ faerのグローバル並列度は`engine::shared::parallelism::ensure_serial()`
 
 ### 3.9 `white_test()`（事後診断）
 
-- `OLSResults.white_test(statistic: Literal["lm", "f"] = "lm") -> WhiteTestResult`。事後診断なので
+- `OLSResults.white_test(*, statistic: Literal["lm", "f"] = "lm") -> WhiteTestResult`。事後診断なので
   `fit()`では計算せず、利用者が選んで呼ぶ（`docs/spec/inference-conventions.md`6章）。結果型は検定共通の
   frozen dataclass `DiagnosticResult`（`statistic`/`p_value`/`df`/`df_denom`/`distribution`、`to_dict()`）
   を継承した`WhiteTestResult`（追加フィールド`aux_terms`/`dropped_terms`）。`distribution`は
@@ -396,7 +400,7 @@ faerのグローバル並列度は`engine::shared::parallelism::ensure_serial()`
 
 ### 3.10 `breusch_godfrey_test()`（事後診断）
 
-- `OLSResults.breusch_godfrey_test(time: str, nlags: int, statistic: Literal["lm", "f"] = "lm")
+- `OLSResults.breusch_godfrey_test(time: str, nlags: int, *, statistic: Literal["lm", "f"] = "lm")
   -> BreuschGodfreyTestResult`。事後診断なので`fit()`では計算しない（`docs/spec/inference-conventions.md`
   6章）。結果型は`DiagnosticResult`を継承した`BreuschGodfreyTestResult`（追加フィールド`nlags`。
   `df`と同じ値だがラグ次数を直接読めるよう別に持つ）。
@@ -446,7 +450,7 @@ faerのグローバル並列度は`engine::shared::parallelism::ensure_serial()`
 
 ### 3.11 `breusch_pagan_test()`（事後診断）
 
-- `OLSResults.breusch_pagan_test(variables: list[str] | None = None, statistic: Literal["lm", "f"] = "lm")
+- `OLSResults.breusch_pagan_test(*, variables: list[str] | None = None, statistic: Literal["lm", "f"] = "lm")
   -> BreuschPaganTestResult`。`fit()`では計算しない事後診断（`docs/spec/inference-conventions.md`
   6章）。結果型は`DiagnosticResult`を継承した`BreuschPaganTestResult`（追加フィールドは
   `WhiteTestResult`と同じ`aux_terms`・`dropped_terms`）。`cov_type`には依存しない。

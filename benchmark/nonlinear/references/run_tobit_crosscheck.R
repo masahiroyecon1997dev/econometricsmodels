@@ -155,6 +155,14 @@ param_names <- c(names(beta), "sigma")
 names(est) <- param_names
 names(se) <- param_names
 
+# (β, σ) 空間の分散共分散行列（`se`の元になった`v`そのもの）を`{行: {列: 値}}`で出す。
+cov_params <- setNames(
+  lapply(seq_along(param_names), function(i) {
+    setNames(as.list(as.numeric(v[i, ])), param_names)
+  }),
+  param_names
+)
+
 z <- est / se
 pval <- 2 * pnorm(-abs(z))
 z_crit <- qnorm(0.975)
@@ -691,6 +699,7 @@ result <- list(
   p_values = as.list(pval),
   conf_low = as.list(conf_low),
   conf_high = as.list(conf_high),
+  cov_params = cov_params,
   sigma = sigma,
   log_likelihood = ll,
   aic = aic,

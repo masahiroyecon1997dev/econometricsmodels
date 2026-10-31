@@ -31,7 +31,6 @@ momentfitを本実装・linearmodelsと揃えるための設定と、揃えな�
 
 from __future__ import annotations
 
-import json
 from functools import partial
 from pathlib import Path
 
@@ -45,6 +44,7 @@ from _assertions import (
     assert_p_value_close,
 )
 from _constants import DATA_DIR
+from _fixture_cov import load_fixtures_with_cov
 from _helpers import (
     hac_time_for,
     load_wooldridge_dataset,
@@ -101,12 +101,12 @@ CLUSTER_COL = "cluster_group"
 
 @pytest.fixture(scope="module")
 def crosscheck() -> dict:
-    return json.loads(FIXTURE_PATH.read_text())["synthetic"]
+    return load_fixtures_with_cov(FIXTURE_PATH)["synthetic"]
 
 
 @pytest.fixture(scope="module")
 def crosscheck_wooldridge() -> dict:
-    return json.loads(FIXTURE_PATH.read_text())["wooldridge"]
+    return load_fixtures_with_cov(FIXTURE_PATH)["wooldridge"]
 
 
 def _check_result(

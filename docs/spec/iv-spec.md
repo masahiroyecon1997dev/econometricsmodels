@@ -7,7 +7,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 
 ## 1. API引数
 
-3層構成: `IV(data, y, x_exog, x_endog, instruments, options).fit() -> IVResults`
+3層構成: `IV(data, y, x_exog, x_endog, instruments, options=options).fit() -> IVResults`
 （python_package）→ `fit_iv(data, y, x_exog, x_endog, instruments, options) -> IVResult`
 （engine_pybind）→ `TwoSlsEstimator::fit` / `GmmEstimator::fit`（engine、`IVOptions.estimator`で
 振り分け）。
@@ -145,7 +145,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   分母は拡張回帰の`df_inference`）、`weak_instrument_f_df_num`/`weak_instrument_f_df_denom`
   （分子は除外操作変数の数、分母は第一段階回帰の残差自由度。内生変数ごとの辞書だが自由度は
   共通のためスカラー）。統計量が`None`/NaNのときは自由度も`None`。
-- **`cov_params`（k×kの分散共分散行列）はPython側に公開しない**（OLSと同じ方針）。
+- **`cov_params`（k×kの分散共分散行列）は`cov_type`に応じた値をPython側に公開する**（OLSと同じ方針、`ols-spec.md`「結果構造体」参照）。`TwoSlsEstimator`/`GmmEstimator`が`fit()`で計算した行列を保持し、`std_errors`はその対角成分の平方根。
 - **第一段階回帰結果は`first_stage()`という別メソッド**に切り出す（`fit()`の戻り値本体には
   含めない。非線形モデルの`marginal_effects()`分離方針を踏襲）。`first_stage() -> dict[str,
   OLSResults]`。キーは`x_endog`の変数名、値は既存の`OLSResults`型（新規のIV専用型は

@@ -216,9 +216,10 @@
 //! （linearmodels・fixestのソースコード確認・実地数値検証済み、ユーザー承認済み、
 //! 2026-09-12）:
 //!
-//! 1. **HC0はスコープ外**: linearmodels・fixestのどちらもパネル/FE回帰向けにHC0
-//!    （小標本補正なしの素のサンドイッチ）を提供していない（fixestは`"HC0"`という
-//!    文字列自体を受け付けない）。参照実装が無いため実装しない。
+//! 1. **HC0は実装しない（スコープ外）**: 小標本補正なしの素のサンドイッチは
+//!    パネル/FEでは提供しないという仕様判断。他パッケージの有無は理由にしない
+//!    （fixest 0.14.2は`vcov = "HC0"`を受け付けないが、plm 2.6.7は within・random
+//!    のどちらにも`vcovHC(type = "HC0")`を提供する。linearmodelsは未確認）。
 //! 2. **HC1〜HC3はOLS自身の値を流用できず、独自に計算し直す**:
 //!    - **HC1**: OLSのHC1は`n/(n-k)`という小標本補正係数を使うが、FEでは`n/df_resid`
 //!      （`df_resid`はパネル自由度調整後の値、`neffects`込み）を使う。この係数は
@@ -699,6 +700,8 @@ pub struct FeEstimator {
     /// ため、各entityの観測数とも一致する）。
     n_periods: Option<usize>,
     std_errors: Mat<f64>,
+    /// `cov_type`別の係数の分散共分散行列 `(k, k)`。`std_errors`はこの対角成分の平方根。
+    cov_params: Mat<f64>,
     test_stats: Mat<f64>,
     p_values: Mat<f64>,
     conf_lower: Mat<f64>,
@@ -1061,6 +1064,7 @@ impl FeEstimator {
             dk_bandwidth_used,
             n_periods,
             std_errors,
+            cov_params,
             test_stats,
             p_values,
             conf_lower,
@@ -1141,6 +1145,12 @@ impl FeEstimator {
     /// `cov_type`別に計算し直した標準誤差（`(k, 1)`、`params()`と対応）。
     pub fn std_errors(&self) -> &Mat<f64> {
         &self.std_errors
+    }
+
+    /// `cov_type`別に計算し直した係数の分散共分散行列（`(k, k)`、`params()`と対応）。
+    /// 固定効果（entity・timeダミー）の係数は含まない。
+    pub fn cov_params(&self) -> &Mat<f64> {
+        &self.cov_params
     }
 
     /// `cov_type`別に計算し直したt統計量（`(k, 1)`）。
@@ -5347,6 +5357,67 @@ mod tests {
         }
         for (id, a) in &entity_a {
             assert!((a - entity_b[id]).abs() < 1e-12);
+        }
+    }
+
+    /// 1-way・2-wayの全`cov_type`で、`cov_params()`が対称で、対角の平方根が`std_errors()`と
+    /// 一致する。次元は`(k, k)`（固定効果の係数は含まない）。
+    #[test]
+    fn cov_params_is_symmetric_and_diagonal_matches_std_errors_for_every_cov_type() {
+        let entity: Vec<String> = (0..24).map(|i| format!("e{}", i / 4)).collect();
+        let time: Vec<String> = (0..24).map(|i| format!("t{}", i % 4)).collect();
+        let x1: Vec<f64> = (0..24)
+            .map(|i| ((i as f64) * 0.7).sin() * 4.0 + i as f64)
+            .collect();
+        let x2: Vec<f64> = (0..24).map(|i| ((i as f64) * 1.3).cos() * 3.0).collect();
+        let y: Vec<f64> = (0..24)
+            .map(|i| {
+                2.0 + 1.5 * x1[i] - 0.8 * x2[i] + ((i as f64) * 2.1).sin() * 1.7 + (i / 4) as f64
+            })
+            .collect();
+
+        for effects in [FeEffects::OneWay, FeEffects::TwoWay] {
+            let cov_types = [
+                FeCovType::Classical,
+                FeCovType::Hc1,
+                FeCovType::Hc2,
+                FeCovType::Hc3,
+                FeCovType::Cluster { groups: None },
+                FeCovType::Dk {
+                    bandwidth: Some(1),
+                    time: TimeKeys::lexicographic(time.clone()),
+                },
+            ];
+            for cov_type in cov_types {
+                let name = format!("{effects:?}/{cov_type:?}");
+                let input = FeInput::from_columns(
+                    &y,
+                    &[x1.clone(), x2.clone()],
+                    vec!["x1".to_string(), "x2".to_string()],
+                    &entity,
+                    Some(&time),
+                    "y".to_string(),
+                )
+                .unwrap();
+                let fe = FeEstimator::fit(input, effects, cov_type, 0.95).unwrap();
+
+                let cov = fe.cov_params();
+                assert_eq!((cov.nrows(), cov.ncols()), (2, 2), "{name}: shape");
+                for i in 0..2 {
+                    for j in 0..2 {
+                        let scale = (*cov.get(i, i) * *cov.get(j, j)).sqrt();
+                        assert!(
+                            (*cov.get(i, j) - *cov.get(j, i)).abs() <= 1e-12 * scale,
+                            "{name}: cov_params not symmetric at ({i},{j})"
+                        );
+                    }
+                    let se = *fe.std_errors().get(i, 0);
+                    assert!(
+                        (cov.get(i, i).sqrt() - se).abs() <= 1e-12 * se,
+                        "{name}: sqrt(cov_params[{i}][{i}]) != std_errors[{i}]"
+                    );
+                }
+            }
         }
     }
 }

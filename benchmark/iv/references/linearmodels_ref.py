@@ -96,7 +96,11 @@ import polars as pl
 
 from benchmark.common import hac_auto_lag, load_frozen_dataset
 from benchmark.common.load_wooldridge import load as _load_wooldridge
-from benchmark.common.reference.normalize import fix_intercept_name
+from benchmark.common.reference.extract import cov_frame_to_dict
+from benchmark.common.reference.normalize import (
+    fix_intercept_name,
+    normalize_cov_params,
+)
 from benchmark.iv.datasets import with_card_region
 
 
@@ -296,6 +300,7 @@ def run(
         fix_intercept_name(k): float(v)
         for k, v in res.std_errors.to_dict().items()
     }
+    cov_params = normalize_cov_params(cov_frame_to_dict(res.cov))
     df_resid = int(res.df_resid)
     df_inference = df_resid if n_groups is None else n_groups - 1
     alpha = 1.0 - confidence_level
@@ -367,6 +372,7 @@ def run(
     result: dict = {
         "params": coef,
         "std_errors": se,
+        "cov_params": cov_params,
         "test_stats": test_stats,
         "p_values": p_values,
         "conf_int": conf_int,
@@ -573,6 +579,7 @@ def run_gmm(
         fix_intercept_name(k): float(v)
         for k, v in res.std_errors.to_dict().items()
     }
+    cov_params = normalize_cov_params(cov_frame_to_dict(res.cov))
     alpha = 1.0 - confidence_level
     z_crit = float(scipy_stats.norm.ppf(1 - alpha / 2))
     test_stats = {k: coef[k] / se[k] for k in coef}
@@ -602,6 +609,7 @@ def run_gmm(
     result: dict = {
         "params": coef,
         "std_errors": se,
+        "cov_params": cov_params,
         "test_stats": test_stats,
         "p_values": p_values,
         "conf_int": conf_int,

@@ -9,7 +9,7 @@ Logit（二項ロジスティック回帰、最尤推定）の確定済み仕様
 
 ## 1. API引数
 
-3層構成: `Logit(data, y, x, options).fit() -> LogitResults`（python_package）→
+3層構成: `Logit(data, y, x, options=options).fit() -> LogitResults`（python_package）→
 `fit_logit(data, y, x, options) -> LogitResult`（engine_pybind）→ `LogitEstimator::fit`（engine、
 Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 
@@ -47,9 +47,10 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 （McFadden） / `aic` / `bic` / `n_obs` / `df_model` / `df_resid` / `converged` / `n_iter` /
 `cov_type`（実際に使われた種別の小文字文字列） / `solver`（実際に使われたソルバーの小文字文字列）。
 
-- `k×kの分散共分散行列（cov_params）はPython側に公開しない`が、`predict()`/`pred_table()`/
-  `marginal_effects()`用に非公開フィールド`estimator: LogitEstimator`として結果オブジェクト内部に
-  保持する（`fit()`時の計算を再利用し再最適化を避けるため）。
+- `k×kの分散共分散行列（cov_params）`は`cov_type`に応じた値をPython側に公開する（`ols-spec.md`
+  「結果構造体」参照。Probit・Tobitも同様で、Tobitは`β∪{σ}`の`(k+1)×(k+1)`）。加えて、`predict()`/
+  `pred_table()`/`marginal_effects()`用に非公開フィールド`estimator: LogitEstimator`として結果
+  オブジェクト内部に保持する（`fit()`時の計算を再利用し再最適化を避けるため）。
 - `df_model`は`include_intercept`の値に関わらず常に`k-1`固定（OLSの`df_model = k - k_constant`とは
   定義が異なる）。`log_likelihood_null`が常に「切片のみ」モデルを参照するため、LR検定の自由度
   （フィット対象モデルと切片のみnullモデルとのパラメータ数差）として`k-1`に統一している。

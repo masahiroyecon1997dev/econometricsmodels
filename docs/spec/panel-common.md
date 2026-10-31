@@ -118,9 +118,8 @@ OLS（`OLSResult`、`engine_pybind/src/linear/ols.rs:137-191`）の項目を土�
 ### 3.1 `cov_type`のサポート対象
 
 `classical` / `hc0`〜`hc3` / `cluster` / `dk`（当初の名前は`hac`。OLSの`hac`と別の推定量のため改名）をすべて実装する予定だったが、**`hc0`は
-スコープ外とすることが判明した**（linearmodels・fixestともにパネル/FE向けの`hc0`オプションが
-存在しないため、`FeCovType` enumは`Hc1`/`Hc2`/`Hc3`のみを持つ。詳細・数式は
-`engine/src/panel/fe.rs`モジュールdoc「`cov_type`対応」参照）。以下`hc0`を除く
+スコープ外とした**（仕様判断。他パッケージの有無は理由にしない: fixestは`vcov = "HC0"`を受け付けないが、plm 2.6.7は提供する）ため、`FeCovType` enumは`Hc1`/`Hc2`/`Hc3`のみを持つ。詳細・数式は
+`engine/src/panel/fe.rs`モジュールdoc「`cov_type`対応」参照。以下`hc0`を除く
 `classical`/`hc1`〜`hc3`/`cluster`/`dk`が実装対象。ただし**`dk`はOLSの`hac`の実装を
 そのまま流用しない**。OLSの`hac`はグローバルな時系列順序（`dk_time`）に対する単純な
 Newey-West型HACだが、これをパネルにそのまま適用すると異なるエンティティの観測を単一の
@@ -223,8 +222,7 @@ OLSの計算をそのまま使わない（WLSがR²等を素のOLS計算のま�
 
 **`linearmodels`をFE/RE共通の主リファレンスとする**（`PanelOLS`＝FE、`RandomEffects`＝RE）。
 点推定・パネル固有R²・AIC/BIC等はこの方針のまま。
-`pyfixest`は既存方針（`docs/spec/ols-spec.md`／`testing-policy.md`、HC2/HC3の実装バグにより
-精度検証には使わない）を踏襲し、性能比較（実行時間・メモリ）のみに使う。
+`pyfixest`は既存方針（`docs/spec/ols-spec.md`／`testing-policy.md`）を踏襲し、リファレンスに使わない。
 
 **【例外】** 標準誤差・推論統計量（`std_errors`/`test_stats`/`p_values`/
 `conf_lower`/`conf_upper`）については、`linearmodels`ではなくR（FEは`fixest`、REは

@@ -42,6 +42,7 @@ use shared::option_values::extract_options;
 ///     Estimation options.
 #[pyfunction]
 fn fit_ols(
+    py: Python<'_>,
     data: &Bound<'_, PyAny>,
     y: &Bound<'_, PyAny>,
     x: &Bound<'_, PyAny>,
@@ -56,7 +57,7 @@ fn fit_ols(
         columns.extend(x.iter().cloned());
         columns.extend(options.data_columns());
         let data = select_columns(data, "data", &columns)?;
-        linear::ols::fit(data, y, x, &options)
+        linear::ols::fit(py, data, y, x, &options)
     })
 }
 
@@ -77,6 +78,7 @@ fn fit_ols(
 ///     Estimation options.
 #[pyfunction]
 fn fit_wls(
+    py: Python<'_>,
     data: &Bound<'_, PyAny>,
     y: &Bound<'_, PyAny>,
     x: &Bound<'_, PyAny>,
@@ -93,7 +95,7 @@ fn fit_wls(
         columns.extend(x.iter().cloned());
         columns.extend(options.data_columns());
         let data = select_columns(data, "data", &columns)?;
-        linear::wls::fit(data, y, x, weight, &options)
+        linear::wls::fit(py, data, y, x, weight, &options)
     })
 }
 
@@ -112,6 +114,7 @@ fn fit_wls(
 ///     Estimation options.
 #[pyfunction]
 fn fit_logit(
+    py: Python<'_>,
     data: &Bound<'_, PyAny>,
     y: &Bound<'_, PyAny>,
     x: &Bound<'_, PyAny>,
@@ -126,7 +129,7 @@ fn fit_logit(
         columns.extend(x.iter().cloned());
         columns.extend(options.data_columns());
         let data = select_columns(data, "data", &columns)?;
-        nonlinear::logit::fit(data, y, x, &options)
+        nonlinear::logit::fit(py, data, y, x, &options)
     })
 }
 
@@ -145,6 +148,7 @@ fn fit_logit(
 ///     Estimation options.
 #[pyfunction]
 fn fit_probit(
+    py: Python<'_>,
     data: &Bound<'_, PyAny>,
     y: &Bound<'_, PyAny>,
     x: &Bound<'_, PyAny>,
@@ -159,7 +163,7 @@ fn fit_probit(
         columns.extend(x.iter().cloned());
         columns.extend(options.data_columns());
         let data = select_columns(data, "data", &columns)?;
-        nonlinear::probit::fit(data, y, x, &options)
+        nonlinear::probit::fit(py, data, y, x, &options)
     })
 }
 
@@ -178,6 +182,7 @@ fn fit_probit(
 ///     Estimation options.
 #[pyfunction]
 fn fit_tobit(
+    py: Python<'_>,
     data: &Bound<'_, PyAny>,
     y: &Bound<'_, PyAny>,
     x: &Bound<'_, PyAny>,
@@ -192,7 +197,7 @@ fn fit_tobit(
         columns.extend(x.iter().cloned());
         columns.extend(options.data_columns());
         let data = select_columns(data, "data", &columns)?;
-        nonlinear::tobit::fit(data, y, x, &options)
+        nonlinear::tobit::fit(py, data, y, x, &options)
     })
 }
 
@@ -215,6 +220,7 @@ fn fit_tobit(
 ///     Estimation options. `options.estimator` selects "2sls" (default) or "gmm".
 #[pyfunction]
 fn fit_iv(
+    py: Python<'_>,
     data: &Bound<'_, PyAny>,
     y: &Bound<'_, PyAny>,
     x_exog: &Bound<'_, PyAny>,
@@ -235,7 +241,7 @@ fn fit_iv(
         columns.extend(instruments.iter().cloned());
         columns.extend(options.data_columns());
         let data = select_columns(data, "data", &columns)?;
-        iv::common::fit(data, y, x_exog, x_endog, instruments, &options)
+        iv::common::fit(py, data, y, x_exog, x_endog, instruments, &options)
     })
 }
 
@@ -245,7 +251,7 @@ fn fit_iv(
 /// ----------
 /// data : polars.DataFrame
 ///     The input data. Must contain the `y`, `x`, `entity`, and (if specified)
-///     time/cluster/HAC time columns.
+///     time/cluster/dk_time columns.
 /// y : str
 ///     Column name of the dependent variable.
 /// x : list[str]
@@ -257,6 +263,7 @@ fn fit_iv(
 ///     Estimation options.
 #[pyfunction]
 fn fit_fe(
+    py: Python<'_>,
     data: &Bound<'_, PyAny>,
     y: &Bound<'_, PyAny>,
     x: &Bound<'_, PyAny>,
@@ -273,7 +280,7 @@ fn fit_fe(
         columns.extend(x.iter().cloned());
         columns.extend(options.data_columns());
         let data = select_columns(data, "data", &columns)?;
-        panel::fe::fit(data, y, x, entity, &options)
+        panel::fe::fit(py, data, y, x, entity, &options)
     })
 }
 
@@ -283,7 +290,7 @@ fn fit_fe(
 /// ----------
 /// data : polars.DataFrame
 ///     The input data. Must contain the `y`, `x`, `entity`, and (if specified)
-///     time/cluster columns.
+///     time/cluster/dk_time columns.
 /// y : str
 ///     Column name of the dependent variable.
 /// x : list[str]
@@ -295,6 +302,7 @@ fn fit_fe(
 ///     Estimation options.
 #[pyfunction]
 fn fit_re(
+    py: Python<'_>,
     data: &Bound<'_, PyAny>,
     y: &Bound<'_, PyAny>,
     x: &Bound<'_, PyAny>,
@@ -311,7 +319,53 @@ fn fit_re(
         columns.extend(x.iter().cloned());
         columns.extend(options.data_columns());
         let data = select_columns(data, "data", &columns)?;
-        panel::re::fit(data, y, x, entity, &options)
+        panel::re::fit(py, data, y, x, entity, &options)
+    })
+}
+
+/// `_restore_pickled`の種別ごとの分岐。種別名は各型の`PickleState::KIND`と照合するので、
+/// 綴りを別に書く必要がない（型を足してここに足し忘れても、`tests/cross_method/test_pickle.py`が検出する）。
+macro_rules! restore_by_kind {
+    ($kind:expr, $py:expr, $state:expr, $unknown:expr; $($ty:ty),+ $(,)?) => {
+        match $kind {
+            $( kind if kind == <$ty as shared::pickle::PickleState>::KIND => {
+                shared::pickle::restore::<$ty>($py, $state)
+            } )+
+            _ => Err($unknown),
+        }
+    };
+}
+
+/// Restore function returned by `__reduce__` of the options and result classes.
+///
+/// Internal entry point called by `pickle` and `copy`; not meant to be called directly.
+/// Raises `ValidationError` (`PICKLE_FORMAT_MISMATCH`) when `kind` is unknown, `version` differs
+/// from the current format, or `state` does not have the fields and types of that class.
+#[pyfunction]
+fn _restore_pickled(
+    py: Python<'_>,
+    kind: &Bound<'_, PyAny>,
+    version: &Bound<'_, PyAny>,
+    state: &Bound<'_, PyAny>,
+) -> PyResult<Py<PyAny>> {
+    guard(|| {
+        // 引数の型が違うときも`PICKLE_FORMAT_MISMATCH`にする（壊れたpickleの報告を1つの`code`にそろえる）。
+        let kind_name = kind
+            .extract::<String>()
+            .unwrap_or_else(|_| "(unknown)".to_string());
+        let mismatch = || shared::pickle::format_mismatch(&kind_name);
+        if version.extract::<u32>().ok() != Some(shared::pickle::FORMAT_VERSION) {
+            return Err(mismatch());
+        }
+        let state = state
+            .cast::<pyo3::types::PyDict>()
+            .map_err(|_| mismatch())?;
+        restore_by_kind!(
+            kind_name.as_str(), py, state, mismatch();
+            OLSOptions, OLSResult, WLSOptions, WLSResult, LogitOptions, LogitResult, MarginalEffectsResult,
+            ProbitOptions, ProbitResult, TobitOptions, TobitResult, CensoringFitCategoryResult, CensoringFitCheckResult,
+            IVOptions, IVResult, FEOptions, FEResult, REOptions, REResult,
+        )
     })
 }
 
@@ -354,6 +408,7 @@ fn _lib(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<REOptions>()?;
     m.add_class::<REResult>()?;
     m.add_function(wrap_pyfunction!(error_catalog, m)?)?;
+    m.add_function(wrap_pyfunction!(_restore_pickled, m)?)?;
     // テスト専用の入口はデバッグビルドにだけ含める（配布するreleaseビルドには入れない）。
     #[cfg(debug_assertions)]
     {

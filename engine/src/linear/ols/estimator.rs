@@ -325,6 +325,11 @@ impl OlsEstimator {
         &self.std_errors
     }
 
+    /// `cov_type`に応じた係数の分散共分散行列 (k, k)。`std_errors`はこの対角成分の平方根
+    pub fn cov_params(&self) -> &Mat<f64> {
+        &self.cov_params
+    }
+
     /// t統計量 (k, 1)
     pub fn test_stats(&self) -> &Mat<f64> {
         &self.test_stats

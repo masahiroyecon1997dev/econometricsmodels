@@ -29,7 +29,7 @@ use crate::shared::column_extraction::{
     SelectedData, extract_f64_column, extract_f64_columns, extract_model_x_columns,
     select_model_x_columns,
 };
-use crate::shared::mat_conversion::mat_to_vec;
+use crate::shared::mat_conversion::{mat_to_rows, mat_to_vec};
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
     extract_strict_float, extract_strict_opt_column, extract_strict_opt_int, extract_strict_text,
@@ -38,7 +38,16 @@ use crate::shared::validation::{RoleValue, validate_common_roles, validate_no_du
 
 /// Estimation options for WLS.
 ///
+/// All arguments are keyword-only.
+///
 /// `weight` is not an option: it is a top-level argument of `WLS`, next to `y` and `x`.
+///
+/// Options by purpose:
+///
+/// - Standard errors: `cov_type`; with `"cluster"` also `cluster`; with
+///   `"hac"` also `hac_time` (required) and `hac_lags`.
+/// - Confidence intervals: `confidence_level`.
+/// - Model: `include_intercept`.
 // 各フィールドの意味・既定値の根拠は`docs/spec/wls-spec.md`「API引数」。
 // `OLSOptions`と同じフィールド構成だが、将来WLS固有のオプションを足してもOLS利用者に
 // 影響しないよう、結果型`WLSResult`と同様に独立した型にしている。このフィールドの重複は
@@ -53,12 +62,12 @@ use crate::shared::validation::{RoleValue, validate_common_roles, validate_no_du
 #[pyclass(from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
 pub struct WLSOptions {
-    /// Standard error type: one of "classical", "hc0", "hc1", "hc2", "hc3", "hac", "cluster".
-    /// Case-insensitive.
+    /// Standard error type: one of "classical" (default), "hc0", "hc1", "hc2", "hc3",
+    /// "hac", "cluster". Case-insensitive.
     #[pyo3(get)]
     pub cov_type: String,
 
-    /// Whether the engine should automatically add an intercept column.
+    /// Whether to automatically add an intercept column.
     /// When true, a column of all 1.0 is prepended to the design matrix.
     /// If the user's `x` already contains a constant column while this is true,
     /// the resulting perfect collinearity raises `ComputationError` (singular matrix).
@@ -66,14 +75,14 @@ pub struct WLSOptions {
     pub include_intercept: bool,
 
     /// Confidence level for confidence intervals, in the range (0, 1).
-    /// Defaults to 0.95 (a 95% confidence interval). Named `confidence_level` rather
-    /// than `alpha` to avoid confusion with the significance level (the 0.05 side).
+    /// Defaults to 0.95 (a 95% confidence interval). This is the coverage, not the
+    /// significance level `alpha`.
     #[pyo3(get)]
     pub confidence_level: f64,
 
-    /// Column name to use as the cluster group key when `cov_type="cluster"`.
-    /// Refers to a column in `data` rather than being passed as a separate array.
-    /// Specifying it with any other `cov_type` raises `ValidationError`.
+    /// Column name to use as the cluster group key. Required when `cov_type="cluster"`
+    /// (omitting it raises `ValidationError`); specifying it with any other `cov_type`
+    /// also raises `ValidationError`.
     #[pyo3(get)]
     pub cluster: Option<String>,
 
@@ -91,6 +100,15 @@ pub struct WLSOptions {
     pub hac_time: Option<String>,
 }
 
+crate::shared::pickle::impl_pickle_state!(WLSOptions {
+    cov_type,
+    include_intercept,
+    confidence_level,
+    cluster,
+    hac_lags,
+    hac_time,
+});
+
 impl WLSOptions {
     /// このオプションが指名するデータの列（`cluster` ・`hac_time`）。使われるかどうか（`cov_type`等）には
     /// よらず、指名されたものを全て返す。`fit()`はこれらと`y`・`x`等だけをデータから取り込む。
@@ -101,8 +119,13 @@ impl WLSOptions {
 
 #[pymethods]
 impl WLSOptions {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
+
     #[new]
     #[pyo3(signature = (
+        *,
         cov_type = "classical".to_string(),
         include_intercept = true,
         confidence_level = 0.95,
@@ -186,6 +209,10 @@ pub struct WLSResult {
     pub params: Vec<f64>,
     #[pyo3(get)]
     pub std_errors: Vec<f64>,
+    /// Covariance matrix of the coefficients under `cov_type`, one row per entry of
+    /// `param_names` (same order on both axes).
+    #[pyo3(get)]
+    pub cov_params: Vec<Vec<f64>>,
     #[pyo3(get)]
     pub test_stats: Vec<f64>,
     /// Distribution of `test_stats`; always `"t"` for WLS.
@@ -204,8 +231,7 @@ pub struct WLSResult {
     #[pyo3(get)]
     pub param_names: Vec<String>,
     /// Original-scale (unweighted) residuals `y_i - x_i'β̂`. Not the weighted residuals
-    /// used internally for the standard error calculations
-    /// (`docs/spec/wls-spec.md`, "結果構造体").
+    /// used internally for the standard error calculations.
     #[pyo3(get)]
     pub residuals: Vec<f64>,
     #[pyo3(get)]
@@ -265,6 +291,38 @@ pub struct WLSResult {
     source_data: Py<PyAny>,
 }
 
+crate::shared::pickle::impl_pickle_state!(WLSResult {
+    params,
+    std_errors,
+    cov_params,
+    test_stats,
+    stat_dist,
+    stat_df,
+    p_values,
+    conf_lower,
+    conf_upper,
+    param_names,
+    residuals,
+    dep_var_name,
+    n_obs,
+    cov_type,
+    hac_lags_used,
+    r_squared,
+    adj_r_squared,
+    f_statistic,
+    f_p_value,
+    f_df_num,
+    f_df_denom,
+    df_resid,
+    df_model,
+    log_likelihood,
+    aic,
+    bic,
+    fitted_values,
+    has_intercept,
+    source_data,
+});
+
 // `#[pymethods]`ブロックの外に置く非公開実装（`OLSResult`と同じ理由）。
 impl WLSResult {
     /// `predict()`/`augment()`のSome分岐で共有する、`df`に対するout-of-sample予測
@@ -289,11 +347,15 @@ impl WLSResult {
 
 #[pymethods]
 impl WLSResult {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
+
     /// Predicted values.
     ///
     /// With `new_data=None` (default), returns the fitted values for the training
     /// data used in `fit()`, on the original (unweighted) scale — `ŷ = Xβ̂`, the same
-    /// scale as `residuals` (`docs/spec/wls-spec.md`, "結果構造体"). With `new_data`
+    /// scale as `residuals`. With `new_data`
     /// given, computes out-of-sample predictions for a new polars DataFrame: it must
     /// contain columns with the same names as the `x` columns passed at fit time
     /// (matched by name; column order does not matter). Weights play no role in
@@ -375,14 +437,30 @@ impl WLSResult {
 ///   `hac_lags`の範囲外・クラスターキー未指定・重みの次元不一致・非正の重み等）は
 ///   `engine::linear::common::LeastSquaresError`から`least_squares_error_to_pyerr`で変換
 pub fn fit(
+    py: Python<'_>,
     data: SelectedData,
     y: String,
     x: Vec<String>,
     weight: String,
     options: &WLSOptions,
 ) -> PyResult<WLSResult> {
-    let SelectedData { source, frame: df } = data;
+    let SelectedData { source, frame } = data;
+    // 取り込み済みの`frame`以降はPythonオブジェクトに触れないので、GILを手放して走らせる
+    // （他のPythonスレッドを止めず、複数のfitをスレッドで並行できる）。結果の組み立てまで
+    // 手放した側で行うため、`source`（`Py<PyAny>`は`Send`）もクロージャに渡す。
+    py.detach(|| fit_frame(&frame, source, y, x, weight, options))
+}
 
+/// [`fit`]の純Rust部分（GILを手放した状態で走る）。`PyErr`は遅延生成でGILを要求しない
+/// ので、ここで`?`により返してよい。`source`は結果に載せるだけで、GILが要る操作はしない。
+fn fit_frame(
+    df: &DataFrame,
+    source: Py<PyAny>,
+    y: String,
+    x: Vec<String>,
+    weight: String,
+    options: &WLSOptions,
+) -> PyResult<WLSResult> {
     // DataFrameを見ない検査を先に行う（報告順は`ols.rs`の`fit`と同じ）。
     let cov_kind = parse_cov_kind(&options.cov_type)?;
     check_cov_options(
@@ -403,20 +481,20 @@ pub fn fit(
     ])?;
 
     // ── y列の抽出 ──────────────────────────────────────────────────────
-    let y_slice = extract_f64_column(&df, &y, ColumnSource::new("y", "data"))?;
+    let y_slice = extract_f64_column(df, &y, ColumnSource::new("y", "data"))?;
 
     // ── x列の抽出 ──────────────────────────────────────────────────────
-    let x_slices = extract_f64_columns(&df, &x, ColumnSource::new("x", "data"))?;
+    let x_slices = extract_f64_columns(df, &x, ColumnSource::new("x", "data"))?;
 
     // ── weight列の抽出 ─────────────────────────────────────────────────
     // NaN/無限大・欠損値の検証はextract_f64_columnがy/xと同じ経路で行う。0以下の値
     // （analytic weightとして不正）の検証はengine側（LeastSquaresError::NonPositiveWeight）に
     // 委ねる（`docs/spec/wls-spec.md`「エラー型」参照）。
-    let weight_slice = extract_f64_column(&df, &weight, ColumnSource::new("weight", "data"))?;
+    let weight_slice = extract_f64_column(df, &weight, ColumnSource::new("weight", "data"))?;
 
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ、OLSと同じ）─────
     let cov_type = resolve_cov_type(
-        &df,
+        df,
         cov_kind,
         options.cluster.as_deref(),
         options.hac_lags,
@@ -440,6 +518,7 @@ pub fn fit(
     Ok(WLSResult {
         params: mat_to_vec(estimator.params()),
         std_errors: mat_to_vec(estimator.std_errors()),
+        cov_params: mat_to_rows(estimator.cov_params()),
         test_stats: mat_to_vec(estimator.test_stats()),
         stat_dist: estimator.stat_dist().name().to_string(),
         stat_df: estimator.stat_dist().df().map(|df| df as i64),

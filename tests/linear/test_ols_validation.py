@@ -238,7 +238,7 @@ def test_data_not_polars_raises(dataset):
             param_name="new_data",
         ),
     ):
-        res.predict(bad_new_data)
+        res.predict(new_data=bad_new_data)
     with pytest.raises(
         TypeError,
         match=escaped(
@@ -246,7 +246,7 @@ def test_data_not_polars_raises(dataset):
             param_name="new_data",
         ),
     ):
-        res.augment(bad_new_data)
+        res.augment(new_data=bad_new_data)
 
 
 def test_lazyframe_data_raises_with_collect_hint(dataset):
@@ -272,7 +272,7 @@ def test_lazyframe_data_raises_with_collect_hint(dataset):
             param_name="new_data",
         ),
     ):
-        res.predict(lazy_new)
+        res.predict(new_data=lazy_new)
 
 
 def test_series_data_raises(dataset):
@@ -304,7 +304,7 @@ def test_predict_missing_column_raises(dataset):
         argument="x",
         data_argument="new_data",
     ):
-        res.predict(new_data)
+        res.predict(new_data=new_data)
 
 
 def test_predict_non_numeric_dtype_raises(dataset):
@@ -321,7 +321,7 @@ def test_predict_non_numeric_dtype_raises(dataset):
         argument="x",
         data_argument="new_data",
     ):
-        res.predict(new_data)
+        res.predict(new_data=new_data)
 
 
 def test_predict_null_or_non_finite_values_raise(dataset):
@@ -335,7 +335,7 @@ def test_predict_null_or_non_finite_values_raise(dataset):
         argument="x",
         data_argument="new_data",
     ):
-        res.predict(new_data_null)
+        res.predict(new_data=new_data_null)
 
     new_data_inf = pl.DataFrame({"x1": [1.0, float("inf")], "x2": [1.0, 2.0]})
     with raises_error(
@@ -346,7 +346,7 @@ def test_predict_null_or_non_finite_values_raise(dataset):
         argument="x",
         data_argument="new_data",
     ):
-        res.predict(new_data_inf)
+        res.predict(new_data=new_data_inf)
 
 
 # ── ValidationError（augment()） ──────────────────────────────────────
@@ -363,7 +363,7 @@ def test_augment_column_collision_raises(dataset):
     res = our_fit(dataset)
     new_data = pl.DataFrame({"x1": [1.0], "x2": [0.5], "predicted": [0.0]})
     with raises_error(ErrorCode.AUGMENT_COLUMN_EXISTS, column="predicted"):
-        res.augment(new_data)
+        res.augment(new_data=new_data)
 
 
 def test_augment_missing_column_raises(dataset):
@@ -379,7 +379,7 @@ def test_augment_missing_column_raises(dataset):
         argument="x",
         data_argument="new_data",
     ):
-        res.augment(new_data)
+        res.augment(new_data=new_data)
 
 
 # ── ValidationError（オプション） ─────────────────────────────────────

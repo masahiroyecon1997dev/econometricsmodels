@@ -29,7 +29,7 @@ use crate::shared::column_extraction::{
     x_column_names,
 };
 use crate::shared::errors::{guard, unknown_option_value, user_error};
-use crate::shared::mat_conversion::mat_to_vec;
+use crate::shared::mat_conversion::{mat_to_rows, mat_to_vec};
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
     extract_strict_float, extract_strict_int, extract_strict_opt_column, extract_strict_opt_int,
@@ -41,6 +41,15 @@ use crate::shared::validation::{
 use engine::shared::error_catalog::{ErrorCode, ParamValue};
 
 /// Estimation options for OLS.
+///
+/// All arguments are keyword-only.
+///
+/// Options by purpose:
+///
+/// - Standard errors: `cov_type`; with `"cluster"` also `cluster`; with
+///   `"hac"` also `hac_time` (required) and `hac_lags`.
+/// - Confidence intervals: `confidence_level`.
+/// - Model: `include_intercept`.
 // 各フィールドの意味・既定値の根拠は`docs/spec/ols-spec.md`「API引数」。
 // `fit_ols`がPython側から`OLSOptions`インスタンスを引数として受け取るため、
 // `FromPyObject`実装を明示的に維持する（pyo3 0.28以降、Cloneを実装する#[pyclass]の
@@ -51,12 +60,12 @@ use engine::shared::error_catalog::{ErrorCode, ParamValue};
 #[pyclass(from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
 pub struct OLSOptions {
-    /// Standard error type: one of "classical", "hc0", "hc1", "hc2", "hc3", "hac", "cluster".
-    /// Case-insensitive.
+    /// Standard error type: one of "classical" (default), "hc0", "hc1", "hc2", "hc3",
+    /// "hac", "cluster". Case-insensitive.
     #[pyo3(get)]
     pub cov_type: String,
 
-    /// Whether the engine should automatically add an intercept column.
+    /// Whether to automatically add an intercept column.
     /// When true, a column of all 1.0 is prepended to the design matrix.
     /// If the user's `x` already contains a constant column while this is true,
     /// the resulting perfect collinearity raises `ComputationError` (singular matrix).
@@ -64,14 +73,14 @@ pub struct OLSOptions {
     pub include_intercept: bool,
 
     /// Confidence level for confidence intervals, in the range (0, 1).
-    /// Defaults to 0.95 (a 95% confidence interval). Named `confidence_level` rather
-    /// than `alpha` to avoid confusion with the significance level (the 0.05 side).
+    /// Defaults to 0.95 (a 95% confidence interval). This is the coverage, not the
+    /// significance level `alpha`.
     #[pyo3(get)]
     pub confidence_level: f64,
 
-    /// Column name to use as the cluster group key when `cov_type="cluster"`.
-    /// Refers to a column in `data` rather than being passed as a separate array.
-    /// Specifying it with any other `cov_type` raises `ValidationError`.
+    /// Column name to use as the cluster group key. Required when `cov_type="cluster"`
+    /// (omitting it raises `ValidationError`); specifying it with any other `cov_type`
+    /// also raises `ValidationError`.
     #[pyo3(get)]
     pub cluster: Option<String>,
 
@@ -89,6 +98,15 @@ pub struct OLSOptions {
     pub hac_time: Option<String>,
 }
 
+crate::shared::pickle::impl_pickle_state!(OLSOptions {
+    cov_type,
+    include_intercept,
+    confidence_level,
+    cluster,
+    hac_lags,
+    hac_time,
+});
+
 impl OLSOptions {
     /// このオプションが指名するデータの列（`cluster`・`hac_time`）。使われるかどうか（`cov_type`）には
     /// よらず、指名されたものを全て返す。`fit()`はこれらと`y`・`x`だけをデータから取り込む。
@@ -99,8 +117,13 @@ impl OLSOptions {
 
 #[pymethods]
 impl OLSOptions {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
+
     #[new]
     #[pyo3(signature = (
+        *,
         cov_type = "classical".to_string(),
         include_intercept = true,
         confidence_level = 0.95,
@@ -301,10 +324,8 @@ pub struct BreuschGodfreyTestOutput {
 
 /// Estimation results for OLS.
 ///
-/// Structured data only (no `summary()`); see `docs/spec/ols-spec.md`
-/// ("結果構造体"). Row-oriented table construction (e.g. a `params_table`) is left to
-/// `python_package`. All array-valued fields (`params`, `std_errors`, etc.) share the
-/// same order as `param_names`.
+/// Structured data only (no `summary()`). All array-valued fields (`params`,
+/// `std_errors`, etc.) share the same order as `param_names`.
 // `OLSResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`OLSOptions`の`from_py_object`とは
 // 対照的。pyo3 0.28以降、Cloneを実装する#[pyclass]のFromPyObject自動導出はopt-inになった）。
@@ -320,6 +341,10 @@ pub struct OLSResult {
     pub params: Vec<f64>,
     #[pyo3(get)]
     pub std_errors: Vec<f64>,
+    /// Covariance matrix of the coefficients under `cov_type`, one row per entry of
+    /// `param_names` (same order on both axes).
+    #[pyo3(get)]
+    pub cov_params: Vec<Vec<f64>>,
     #[pyo3(get)]
     pub test_stats: Vec<f64>,
     /// Distribution of `test_stats`; always `"t"` for OLS.
@@ -385,9 +410,8 @@ pub struct OLSResult {
     #[pyo3(get)]
     pub bic: f64,
     /// Fitted values for the training data (`ŷ = Xβ̂`), cached at fit time.
-    /// Not exposed to Python directly; only `predict(new_data=None)` reads it
-    /// (`docs/spec/ols-spec.md` "predict()" — the Python-facing surface is unified into a
-    /// single `predict()` method rather than a separate `fitted_values` property).
+    /// Not exposed to Python directly; only `predict(new_data=None)` reads it (there is
+    /// no separate `fitted_values` property).
     fitted_values: Vec<f64>,
     /// Whether `fit()` was called with `include_intercept=True`. Not exposed to
     /// Python; only `predict()` reads it to decide whether to auto-prepend a
@@ -409,6 +433,109 @@ pub struct OLSResult {
     /// single source DataFrame, so `augment(new_data=None)` and the diagnostic tests
     /// on such a result raise `ValidationError` instead.
     source_data: Option<Py<PyAny>>,
+}
+
+crate::shared::pickle::impl_pickle_state!(OLSResult {
+    params,
+    std_errors,
+    cov_params,
+    test_stats,
+    stat_dist,
+    stat_df,
+    p_values,
+    conf_lower,
+    conf_upper,
+    param_names,
+    residuals,
+    dep_var_name,
+    n_obs,
+    cov_type,
+    hac_lags_used,
+    r_squared,
+    adj_r_squared,
+    f_statistic,
+    f_p_value,
+    f_df_num,
+    f_df_denom,
+    df_resid,
+    df_model,
+    log_likelihood,
+    aic,
+    bic,
+    fitted_values,
+    has_intercept,
+    source_data,
+});
+
+impl OLSResult {
+    /// 全フィールドの複製（`source_data`は同じDataFrameへの参照を増やすだけで、データはコピーしない）。
+    /// `Py<PyAny>`は`Clone`を実装しない（参照カウントの増加にGILが要る）ため`#[derive(Clone)]`ではなく、
+    /// `IVResult`が保持する第一段階の結果から`first_stage()`の戻り値を作るのに使う。
+    /// フィールドは分割代入で網羅するので、足し忘れはコンパイルエラーになる。
+    pub(crate) fn clone_ref(&self, py: Python<'_>) -> Self {
+        let Self {
+            params,
+            std_errors,
+            cov_params,
+            test_stats,
+            stat_dist,
+            stat_df,
+            p_values,
+            conf_lower,
+            conf_upper,
+            param_names,
+            residuals,
+            dep_var_name,
+            n_obs,
+            cov_type,
+            hac_lags_used,
+            r_squared,
+            adj_r_squared,
+            f_statistic,
+            f_p_value,
+            f_df_num,
+            f_df_denom,
+            df_resid,
+            df_model,
+            log_likelihood,
+            aic,
+            bic,
+            fitted_values,
+            has_intercept,
+            source_data,
+        } = self;
+        Self {
+            params: params.clone(),
+            std_errors: std_errors.clone(),
+            cov_params: cov_params.clone(),
+            test_stats: test_stats.clone(),
+            stat_dist: stat_dist.clone(),
+            stat_df: *stat_df,
+            p_values: p_values.clone(),
+            conf_lower: conf_lower.clone(),
+            conf_upper: conf_upper.clone(),
+            param_names: param_names.clone(),
+            residuals: residuals.clone(),
+            dep_var_name: dep_var_name.clone(),
+            n_obs: *n_obs,
+            cov_type: cov_type.clone(),
+            hac_lags_used: *hac_lags_used,
+            r_squared: *r_squared,
+            adj_r_squared: *adj_r_squared,
+            f_statistic: *f_statistic,
+            f_p_value: *f_p_value,
+            f_df_num: *f_df_num,
+            f_df_denom: *f_df_denom,
+            df_resid: *df_resid,
+            df_model: *df_model,
+            log_likelihood: *log_likelihood,
+            aic: *aic,
+            bic: *bic,
+            fitted_values: fitted_values.clone(),
+            has_intercept: *has_intercept,
+            source_data: source_data.as_ref().map(|data| data.clone_ref(py)),
+        }
+    }
 }
 
 // `#[pymethods]`ブロックの外に置く非公開実装（pyo3は`#[pymethods]`内の全メソッドを
@@ -451,6 +578,10 @@ impl OLSResult {
 
 #[pymethods]
 impl OLSResult {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
+
     /// Predicted values.
     ///
     /// With `new_data=None` (default), returns the fitted values for the training
@@ -550,19 +681,23 @@ impl OLSResult {
 
             let x_names = x_column_names(&self.param_names, self.has_intercept, 0);
             let df = select_columns(&source, "data", x_names)?.frame;
-            let x_columns = extract_f64_columns(&df, x_names, ColumnSource::new("x", "data"))?;
-            let result = white_test(&x_columns, x_names, &self.residuals)
-                .map_err(least_squares_error_to_pyerr)?;
+            // 列の取り込み（GILが要る）の後は、Pythonオブジェクトに触れない。
+            py.detach(|| {
+                let x_columns = extract_f64_columns(&df, x_names, ColumnSource::new("x", "data"))?;
+                let result = white_test(&x_columns, x_names, &self.residuals)
+                    .map_err(least_squares_error_to_pyerr)?;
 
-            let (statistic, p_value, df_denom, distribution) = select_statistic(&result, version);
-            Ok(WhiteTestOutput {
-                statistic,
-                p_value,
-                df: result.df,
-                df_denom,
-                distribution,
-                aux_terms: result.aux_terms,
-                dropped_terms: result.dropped_terms,
+                let (statistic, p_value, df_denom, distribution) =
+                    select_statistic(&result, version);
+                Ok(WhiteTestOutput {
+                    statistic,
+                    p_value,
+                    df: result.df,
+                    df_denom,
+                    distribution,
+                    aux_terms: result.aux_terms,
+                    dropped_terms: result.dropped_terms,
+                })
             })
         })
     }
@@ -620,20 +755,24 @@ impl OLSResult {
                 "x"
             };
             let df = select_columns(&source, "data", z_names)?.frame;
-            let z_columns =
-                extract_f64_columns(&df, z_names, ColumnSource::new(z_argument, "data"))?;
-            let result = breusch_pagan_test(&z_columns, z_names, &self.residuals)
-                .map_err(least_squares_error_to_pyerr)?;
+            // 列の取り込み（GILが要る）の後は、Pythonオブジェクトに触れない。
+            py.detach(|| {
+                let z_columns =
+                    extract_f64_columns(&df, z_names, ColumnSource::new(z_argument, "data"))?;
+                let result = breusch_pagan_test(&z_columns, z_names, &self.residuals)
+                    .map_err(least_squares_error_to_pyerr)?;
 
-            let (statistic, p_value, df_denom, distribution) = select_statistic(&result, version);
-            Ok(BreuschPaganTestOutput {
-                statistic,
-                p_value,
-                df: result.df,
-                df_denom,
-                distribution,
-                aux_terms: result.aux_terms,
-                dropped_terms: result.dropped_terms,
+                let (statistic, p_value, df_denom, distribution) =
+                    select_statistic(&result, version);
+                Ok(BreuschPaganTestOutput {
+                    statistic,
+                    p_value,
+                    df: result.df,
+                    df_denom,
+                    distribution,
+                    aux_terms: result.aux_terms,
+                    dropped_terms: result.dropped_terms,
+                })
             })
         })
     }
@@ -685,41 +824,44 @@ impl OLSResult {
                 x_column_names(&self.param_names, self.has_intercept, 0).to_vec();
             needed.push(time.clone());
             let df = select_columns(&source, "data", &needed)?.frame;
-            let x_columns = extract_model_x_columns(
-                &df,
-                &self.param_names,
-                self.has_intercept,
-                0,
-                ColumnSource::new("x", "data"),
-            )?;
-            let time_order =
-                extract_time_order_ranks(&df, &time, ColumnSource::new("time", "data"))?;
-            let result = breusch_godfrey_test(
-                &x_columns,
-                self.has_intercept,
-                &self.residuals,
-                &time_order,
-                nlags,
-            )
-            .map_err(least_squares_error_to_pyerr)?;
+            // 列の取り込み（GILが要る）の後は、Pythonオブジェクトに触れない。
+            py.detach(|| {
+                let x_columns = extract_model_x_columns(
+                    &df,
+                    &self.param_names,
+                    self.has_intercept,
+                    0,
+                    ColumnSource::new("x", "data"),
+                )?;
+                let time_order =
+                    extract_time_order_ranks(&df, &time, ColumnSource::new("time", "data"))?;
+                let result = breusch_godfrey_test(
+                    &x_columns,
+                    self.has_intercept,
+                    &self.residuals,
+                    &time_order,
+                    nlags,
+                )
+                .map_err(least_squares_error_to_pyerr)?;
 
-            Ok(match version {
-                StatisticVersion::F => BreuschGodfreyTestOutput {
-                    statistic: result.f_statistic,
-                    p_value: result.f_p_value,
-                    df: result.df,
-                    df_denom: Some(result.f_df_denom),
-                    distribution: "f".to_string(),
-                    nlags: result.df,
-                },
-                StatisticVersion::Lm => BreuschGodfreyTestOutput {
-                    statistic: result.lm_statistic,
-                    p_value: result.lm_p_value,
-                    df: result.df,
-                    df_denom: None,
-                    distribution: "chi2".to_string(),
-                    nlags: result.df,
-                },
+                Ok(match version {
+                    StatisticVersion::F => BreuschGodfreyTestOutput {
+                        statistic: result.f_statistic,
+                        p_value: result.f_p_value,
+                        df: result.df,
+                        df_denom: Some(result.f_df_denom),
+                        distribution: "f".to_string(),
+                        nlags: result.df,
+                    },
+                    StatisticVersion::Lm => BreuschGodfreyTestOutput {
+                        statistic: result.lm_statistic,
+                        p_value: result.lm_p_value,
+                        df: result.df,
+                        df_denom: None,
+                        distribution: "chi2".to_string(),
+                        nlags: result.df,
+                    },
+                })
             })
         })
     }
@@ -740,13 +882,29 @@ impl OLSResult {
 ///   `hac_lags`の範囲外・クラスターキー未指定等）は`engine::linear::common::LeastSquaresError`から
 ///   `least_squares_error_to_pyerr`で変換
 pub fn fit(
+    py: Python<'_>,
     data: SelectedData,
     y: String,
     x: Vec<String>,
     options: &OLSOptions,
 ) -> PyResult<OLSResult> {
-    let SelectedData { source, frame: df } = data;
+    let SelectedData { source, frame } = data;
+    // 取り込み済みの`frame`以降はPythonオブジェクトに触れないので、GILを手放して走らせる
+    // （他のPythonスレッドを止めず、複数のfitをスレッドで並行できる）。GILが要る`source`は
+    // クロージャの外に残し、結果への取り付けは戻ってから行う。
+    let mut result = py.detach(|| fit_frame(&frame, y, x, options))?;
+    result.source_data = Some(source);
+    Ok(result)
+}
 
+/// [`fit`]の純Rust部分（GILを手放した状態で走る）。`PyErr`は遅延生成でGILを要求しない
+/// ので、ここで`?`により返してよい。
+fn fit_frame(
+    df: &DataFrame,
+    y: String,
+    x: Vec<String>,
+    options: &OLSOptions,
+) -> PyResult<OLSResult> {
     // DataFrameを見ない検査を先に行う。報告順は`docs/guide/validation.md`
     // 「Order in which errors are reported」: オプションの値 → オプションの組合せ →
     // ロール構造 → `y`/`x`の列 → オプション列 → エンジン。
@@ -763,14 +921,14 @@ pub fn fit(
     validate_common_roles(&y, &x, options.include_intercept)?;
 
     // ── y列の抽出 ──────────────────────────────────────────────────────
-    let y_slice = extract_f64_column(&df, &y, ColumnSource::new("y", "data"))?;
+    let y_slice = extract_f64_column(df, &y, ColumnSource::new("y", "data"))?;
 
     // ── x列の抽出 ──────────────────────────────────────────────────────
-    let x_slices = extract_f64_columns(&df, &x, ColumnSource::new("x", "data"))?;
+    let x_slices = extract_f64_columns(df, &x, ColumnSource::new("x", "data"))?;
 
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ）─────────────
     let cov_type = resolve_cov_type(
-        &df,
+        df,
         cov_kind,
         options.cluster.as_deref(),
         options.hac_lags,
@@ -782,9 +940,10 @@ pub fn fit(
     let estimator = OlsEstimator::fit(input, cov_type, options.confidence_level)
         .map_err(least_squares_error_to_pyerr)?;
 
-    let mut result = ols_estimator_to_result(&estimator, cov_kind.name().to_string());
-    result.source_data = Some(source);
-    Ok(result)
+    Ok(ols_estimator_to_result(
+        &estimator,
+        cov_kind.name().to_string(),
+    ))
 }
 
 /// フィット済み`OlsEstimator`を`OLSResult`（pyclass、Pythonに返す形）に変換する。
@@ -812,6 +971,7 @@ pub(crate) fn ols_estimator_to_result(
     OLSResult {
         params: mat_to_vec(estimator.params()),
         std_errors: mat_to_vec(estimator.std_errors()),
+        cov_params: mat_to_rows(estimator.cov_params()),
         test_stats: mat_to_vec(estimator.test_stats()),
         stat_dist: estimator.stat_dist().name().to_string(),
         stat_df: estimator.stat_dist().df().map(|df| df as i64),

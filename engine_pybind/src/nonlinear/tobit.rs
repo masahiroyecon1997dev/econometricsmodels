@@ -29,7 +29,8 @@ use engine::nonlinear::common::{
     CovType as EngineCovType, MleFitOptions, SolverType as EngineSolverType,
 };
 use engine::nonlinear::tobit::{
-    CensoringFitCategory, CensoringFitCheck, MarginalEffectsTarget, TobitEstimator, TobitInput,
+    CensoringFitCategory, CensoringFitCheck, MarginalEffectsTarget, TobitEstimator, TobitFitted,
+    TobitInput,
 };
 use engine::shared::error_catalog::ErrorCode;
 use polars::prelude::DataFrame;
@@ -44,9 +45,10 @@ use crate::shared::augment::append_predicted_column;
 use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
     SelectedData, extract_f64_column, extract_f64_columns, extract_model_x_columns,
-    select_model_x_columns,
+    select_model_x_columns, x_column_names,
 };
 use crate::shared::errors::{guard, unknown_option_value, user_error};
+use crate::shared::mat_conversion::mat_to_rows;
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
     extract_strict_float, extract_strict_int, extract_strict_opt_column, extract_strict_opt_float,
@@ -55,6 +57,16 @@ use crate::shared::option_values::{
 use crate::shared::validation::validate_common_roles;
 
 /// Estimation options for Tobit.
+///
+/// All arguments are keyword-only.
+///
+/// Options by purpose:
+///
+/// - Standard errors: `cov_type`; with `"cluster"` also `cluster`.
+/// - Censoring: `lower`, `upper` (at least one must be set).
+/// - Optimizer: `solver`, `max_iter`, `tol`, `raise_on_non_convergence`.
+/// - Confidence intervals: `confidence_level`.
+/// - Model: `include_intercept`.
 ///
 // 各フィールドの意味・既定値の根拠は`docs/spec/tobit-spec.md`。
 // `LogitOptions`と同じ理由（pyo3 0.28以降のFromPyObject自動導出の仕様変更、
@@ -67,7 +79,7 @@ pub struct TobitOptions {
     #[pyo3(get)]
     pub cov_type: String,
 
-    /// Whether the engine should automatically add an intercept column.
+    /// Whether to automatically add an intercept column.
     /// When true, a column of all 1.0 is prepended to the design matrix.
     /// If the user's `x` already contains a constant column while this is true,
     /// the resulting perfect collinearity raises `ComputationError` (singular
@@ -134,6 +146,19 @@ pub struct TobitOptions {
     pub upper: Option<f64>,
 }
 
+crate::shared::pickle::impl_pickle_state!(TobitOptions {
+    cov_type,
+    include_intercept,
+    confidence_level,
+    cluster,
+    solver,
+    max_iter,
+    tol,
+    raise_on_non_convergence,
+    lower,
+    upper,
+});
+
 impl TobitOptions {
     /// このオプションが指名するデータの列（`cluster`）。使われるかどうか（`cov_type`等）には
     /// よらず、指名されたものを全て返す。`fit()`はこれらと`y`・`x`等だけをデータから取り込む。
@@ -144,8 +169,13 @@ impl TobitOptions {
 
 #[pymethods]
 impl TobitOptions {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
+
     #[new]
     #[pyo3(signature = (
+        *,
         cov_type = "classical".to_string(),
         include_intercept = true,
         confidence_level = 0.95,
@@ -255,24 +285,19 @@ impl TobitOptions {
 
 /// Estimation results for Tobit.
 ///
-/// Structured data only (no `summary()`); see `docs/spec/nonlinear-common.md`
-/// section 5. `predict()` / `marginal_effects()` / `censoring_fit_check()` are provided as
-/// separate methods (not part of this struct's fields), matching section 6.
+/// Structured data only (no `summary()`). `predict()` / `marginal_effects()` /
+/// `censoring_fit_check()` are separate methods, not fields.
 ///
 /// `params`/`param_names`/`std_errors`/`test_stats`/`p_values`/`conf_lower`/`conf_upper` are all
 /// `(k+1)`-length: `sigma` (the error term's standard deviation) is appended as the last
-/// element, with `param_names[-1] == "sigma"`. This differs from the underlying
-/// `engine::nonlinear::tobit::TobitEstimator`, where `params()` is `k`-length (`beta` only)
-/// while the standard-error-related fields are `(k+1)`-length (an asymmetry stemming from
-/// `cov_params` being a `(k+1)x(k+1)` matrix over the joint `(beta, sigma)` space). This
-/// struct resolves that asymmetry so every array-valued field can be zipped together
-/// (confirmed with the user). `sigma` is a convenience shortcut equal to `params[-1]`.
+/// element, with `param_names[-1] == "sigma"`, so every array-valued field can be zipped
+/// together. `sigma` is a convenience shortcut equal to `params[-1]`.
 ///
 /// `log_likelihood_null`/`lr_statistic`/`lr_p_value`/`pseudo_r_squared` are not provided for
-/// Tobit (no closed form exists under censoring; `wald_statistic`/`wald_p_value` provide the
-/// overall model significance test instead, see `docs/spec/nonlinear-common.md` section 5).
+/// Tobit (no closed form exists under censoring); `wald_statistic`/`wald_p_value` give the
+/// overall model significance test instead.
 // `LogitResult`と同じ理由で`skip_from_py_object`・フィールドごとの個別`#[pyo3(get)]`・
-// `Clone`非導出（`estimator: TobitEstimator`が`Clone`を実装していないため）。
+// `Clone`非導出（`fitted: TobitFitted`が`Clone`を実装していないため）。
 #[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug)]
 pub struct TobitResult {
@@ -280,6 +305,10 @@ pub struct TobitResult {
     pub params: Vec<f64>,
     #[pyo3(get)]
     pub std_errors: Vec<f64>,
+    /// Covariance matrix of the coefficients under `cov_type`, one row per entry of
+    /// `param_names` (same order on both axes).
+    #[pyo3(get)]
+    pub cov_params: Vec<Vec<f64>>,
     #[pyo3(get)]
     pub test_stats: Vec<f64>,
     /// Distribution of `test_stats`: `"t"` or `"normal"`.
@@ -349,13 +378,100 @@ pub struct TobitResult {
     #[pyo3(get)]
     pub upper: Option<f64>,
     /// Not exposed to Python; only `predict`/`marginal_effects`/`censoring_fit_check`
-    /// read it (`LogitResult`の`estimator`と同じ位置づけ)。
-    estimator: TobitEstimator,
+    /// read it (`LogitResult`の`fitted`と同じ位置づけ)。
+    fitted: TobitFitted,
     /// The `polars.DataFrame` passed to `fit()`, as given. `augment(new_data=None)` appends
     /// the predicted column to it, so every column is kept, including the ones the model
     /// does not read.
     source_data: Py<PyAny>,
 }
+
+// 入力データのうち`y`・`x`は状態に入れない（`source_data`の列から作り直せる）。入れるのは、`x`の列名・`y`の列名・
+// 切片の有無・打ち切り境界・係数・`σ`・分散共分散行列。復元は`from_columns`/`from_parts`を通して次元の整合を検査する
+// （列が無い・不整合なら`PICKLE_FORMAT_MISMATCH`）。
+impl crate::shared::pickle::PickleFieldFromSource for TobitFitted {
+    fn to_py<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        use crate::shared::pickle::{PickleField, to_tuple};
+        let input = self.input();
+        let x_names = x_column_names(input.param_names(), input.has_intercept(), 0).to_vec();
+        to_tuple(
+            py,
+            vec![
+                x_names.to_py(py)?,
+                input.dep_var_name().to_string().to_py(py)?,
+                input.has_intercept().to_py(py)?,
+                input.lower().to_py(py)?,
+                input.upper().to_py(py)?,
+                self.params().to_vec().to_py(py)?,
+                self.sigma().to_py(py)?,
+                self.cov_params().to_py(py)?,
+            ],
+        )
+    }
+
+    fn from_py(obj: &Bound<'_, PyAny>, source: &Bound<'_, PyAny>) -> Option<Self> {
+        use crate::nonlinear::common::rebuild_columns;
+        use crate::shared::pickle::{PickleField, from_tuple};
+        let items = from_tuple(obj, 8)?;
+        let x_names: Vec<String> = PickleField::from_py(&items[0])?;
+        let dep_var_name: String = PickleField::from_py(&items[1])?;
+        let has_intercept: bool = PickleField::from_py(&items[2])?;
+        let params: Vec<f64> = PickleField::from_py(&items[5])?;
+        validate_no_sigma_collision(&x_names).ok()?;
+        let (y, x) = rebuild_columns(source, &dep_var_name, &x_names, has_intercept, params.len())?;
+        let input = TobitInput::from_columns(
+            &y,
+            &x,
+            x_names,
+            has_intercept,
+            dep_var_name,
+            PickleField::from_py(&items[3])?,
+            PickleField::from_py(&items[4])?,
+        )
+        .ok()?;
+        TobitFitted::from_parts(
+            input,
+            params,
+            PickleField::from_py(&items[6])?,
+            PickleField::from_py(&items[7])?,
+        )
+        .ok()
+    }
+}
+
+crate::shared::pickle::impl_pickle_state!(TobitResult {
+    params,
+    std_errors,
+    cov_params,
+    test_stats,
+    stat_dist,
+    stat_df,
+    p_values,
+    conf_lower,
+    conf_upper,
+    param_names,
+    dep_var_name,
+    sigma,
+    log_likelihood,
+    aic,
+    bic,
+    n_obs,
+    df_model,
+    df_resid,
+    wald_statistic,
+    wald_p_value,
+    wald_dist,
+    wald_df,
+    converged,
+    n_iter,
+    cov_type,
+    solver,
+    lower,
+    upper,
+    source_data,
+} rebuilt_from(source_data) {
+    fitted
+});
 
 // `#[pymethods]`ブロックの外に置く非公開実装（`LogitResult`と同じ理由）。
 impl TobitResult {
@@ -364,27 +480,29 @@ impl TobitResult {
         select_model_x_columns(
             new_data,
             "new_data",
-            &self.param_names,
-            self.estimator.input().has_intercept(),
-            1,
+            self.fitted.input().param_names(),
+            self.fitted.input().has_intercept(),
+            0,
         )
     }
 
     /// `predict()`/`augment()`のSome分岐で共有する、`df`に対するout-of-sample予測
     /// （`x`列の抽出→`predict_new_data`呼び出し）。`x`の列名はLogit/Probitと異なり
-    /// `param_names`の先頭`"const"`（`has_intercept`時）と末尾`"sigma"`の両方を
-    /// 除いた部分（モジュールdocコメント参照）。
+    /// `fitted`の係数名（`σ`を含まない。結果の`param_names`は末尾に`"sigma"`を足した別の値）の
+    /// 先頭`"const"`（`has_intercept`時）を除いた部分（モジュールdocコメント参照）。結果側の
+    /// `param_names`ではなく`fitted`の名前を使うので、pickleから復元した状態でも両者の食い違いで
+    /// 列数が合わなくならない。
     fn predict_for(&self, target: MarginalEffectsTarget, df: &DataFrame) -> PyResult<Vec<f64>> {
-        let has_intercept = self.estimator.input().has_intercept();
+        let has_intercept = self.fitted.input().has_intercept();
         let x_columns = extract_model_x_columns(
             df,
-            &self.param_names,
+            self.fitted.input().param_names(),
             has_intercept,
-            1,
+            0,
             ColumnSource::new("x", "new_data"),
         )?;
 
-        self.estimator
+        self.fitted
             .predict_new_data(target, &x_columns)
             .map_err(mle_error_to_pyerr)
     }
@@ -392,6 +510,10 @@ impl TobitResult {
 
 #[pymethods]
 impl TobitResult {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
+
     /// Predicted values for the training data used in `fit()`, or for `new_data`
     /// when given.
     ///
@@ -414,7 +536,7 @@ impl TobitResult {
         guard(|| {
             let target = parse_marginal_effects_target(&target)?;
             let Some(new_data) = new_data else {
-                return self.estimator.predict(target).map_err(mle_error_to_pyerr);
+                return self.fitted.predict(target).map_err(mle_error_to_pyerr);
             };
 
             let selected = self.select_new_data(new_data)?;
@@ -458,7 +580,7 @@ impl TobitResult {
                 }
                 None => (
                     self.source_data.bind(py).clone(),
-                    self.estimator
+                    self.fitted
                         .predict(target_enum)
                         .map_err(mle_error_to_pyerr)?,
                 ),
@@ -471,10 +593,8 @@ impl TobitResult {
 
     /// Marginal effects (`dy/dx`) with delta-method standard errors.
     ///
-    /// `target` selects the same four quantities as `predict()` (see its doc). Unlike
-    /// Logit/Probit, this is an independent implementation (not the shared
-    /// `dydx_and_jacobian` pattern) because the formula differs per `target`
-    /// (`docs/spec/nonlinear-common.md` section 6).
+    /// `target` selects the same four quantities as `predict()` (see its doc); the
+    /// formula differs per `target`.
     ///
     /// Independent of `fit()`'s `confidence_level` (re-evaluated here so callers can
     /// use a different confidence level without re-fitting).
@@ -492,6 +612,7 @@ impl TobitResult {
     ))]
     fn marginal_effects(
         &self,
+        py: Python<'_>,
         at: String,
         target: String,
         confidence_level: f64,
@@ -499,9 +620,9 @@ impl TobitResult {
         guard(|| {
             let at = parse_marginal_effects_at(&at)?;
             let target = parse_marginal_effects_target(&target)?;
-            let effects = self
-                .estimator
-                .marginal_effects(at, target, confidence_level)
+            // 推定量だけを使う純Rustの計算なので、GILを手放して走らせる。
+            let effects = py
+                .detach(|| self.fitted.marginal_effects(at, target, confidence_level))
                 .map_err(mle_error_to_pyerr)?;
 
             Ok(MarginalEffectsResult {
@@ -520,7 +641,7 @@ impl TobitResult {
     /// that applies to this model, compares the observed rate (fraction of training
     /// observations exactly at that boundary) against the model-implied average
     /// probability. Replaces Logit/Probit's `pred_table()` (which is not meaningful for
-    /// Tobit's continuous `y`, `docs/spec/nonlinear-common.md` section 6).
+    /// Tobit's continuous `y`).
     ///
     /// `lower`/`upper` in the returned `CensoringFitCheckResult` are `None` when the
     /// corresponding `TobitOptions.lower`/`upper` was `None` (that direction has no
@@ -528,7 +649,7 @@ impl TobitResult {
     fn censoring_fit_check(&self) -> PyResult<CensoringFitCheckResult> {
         guard(|| {
             Ok(censoring_fit_check_to_result(
-                self.estimator.censoring_fit_check(),
+                self.fitted.censoring_fit_check(),
             ))
         })
     }
@@ -548,6 +669,18 @@ pub struct CensoringFitCategoryResult {
     pub model_implied_rate: f64,
 }
 
+crate::shared::pickle::impl_pickle_state!(CensoringFitCategoryResult {
+    observed_rate,
+    model_implied_rate,
+});
+
+#[pymethods]
+impl CensoringFitCategoryResult {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
+}
+
 /// Censoring goodness-of-fit check. See `TobitResult.censoring_fit_check`.
 #[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
@@ -560,6 +693,53 @@ pub struct CensoringFitCheckResult {
     /// `None` when `TobitOptions.upper` was `None` (no censoring from above).
     #[pyo3(get)]
     pub upper: Option<CensoringFitCategoryResult>,
+}
+
+// ネストした`CensoringFitCategoryResult`（pyclass）は、`(observed_rate, model_implied_rate)`のタプルにして
+// 状態に入れる（`impl_pickle_state!`は`FromPyObject`を持たないpyclassのフィールドを復元できないため手書き）。
+impl crate::shared::pickle::PickleState for CensoringFitCheckResult {
+    const KIND: &'static str = "CensoringFitCheckResult";
+
+    fn to_state<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
+        let Self {
+            lower,
+            uncensored,
+            upper,
+        } = self;
+        let pair = |c: &CensoringFitCategoryResult| (c.observed_rate, c.model_implied_rate);
+        let state = pyo3::types::PyDict::new(py);
+        state.set_item("lower", lower.as_ref().map(pair))?;
+        state.set_item("uncensored", pair(uncensored))?;
+        state.set_item("upper", upper.as_ref().map(pair))?;
+        Ok(state)
+    }
+
+    fn from_state(state: &Bound<'_, pyo3::types::PyDict>) -> PyResult<Self> {
+        use crate::shared::pickle::{format_mismatch, take_field};
+        if state.len() != 3 {
+            return Err(format_mismatch(Self::KIND));
+        }
+        let category =
+            |(observed_rate, model_implied_rate): (f64, f64)| CensoringFitCategoryResult {
+                observed_rate,
+                model_implied_rate,
+            };
+        let lower: Option<(f64, f64)> = take_field(state, "lower", Self::KIND)?;
+        let uncensored: (f64, f64) = take_field(state, "uncensored", Self::KIND)?;
+        let upper: Option<(f64, f64)> = take_field(state, "upper", Self::KIND)?;
+        Ok(Self {
+            lower: lower.map(category),
+            uncensored: category(uncensored),
+            upper: upper.map(category),
+        })
+    }
+}
+
+#[pymethods]
+impl CensoringFitCheckResult {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
 }
 
 fn censoring_fit_category_to_result(category: CensoringFitCategory) -> CensoringFitCategoryResult {
@@ -690,13 +870,29 @@ pub(crate) fn build_tobit_input(
 ///   特異設計行列・クラスターキー未指定・クラスター数不足等）は`mle_error_to_pyerr`で
 ///   変換（詳細は`engine::nonlinear::tobit::TobitEstimator::fit`のdocコメント参照）
 pub(crate) fn fit(
+    py: Python<'_>,
     data: SelectedData,
     y: String,
     x: Vec<String>,
     options: &TobitOptions,
 ) -> PyResult<TobitResult> {
-    let SelectedData { source, frame: df } = data;
-    let (input, cov_type, cov_type_lower, solver) = build_tobit_input(&df, y, x, options)?;
+    let SelectedData { source, frame } = data;
+    // 取り込み済みの`frame`以降はPythonオブジェクトに触れないので、GILを手放して走らせる
+    // （他のPythonスレッドを止めず、複数のfitをスレッドで並行できる）。結果の組み立てまで
+    // 手放した側で行うため、`source`（`Py<PyAny>`は`Send`）もクロージャに渡す。
+    py.detach(|| fit_frame(&frame, source, y, x, options))
+}
+
+/// [`fit`]の純Rust部分（GILを手放した状態で走る）。`PyErr`は遅延生成でGILを要求しない
+/// ので、ここで`?`により返してよい。`source`は結果に載せるだけで、GILが要る操作はしない。
+fn fit_frame(
+    df: &DataFrame,
+    source: Py<PyAny>,
+    y: String,
+    x: Vec<String>,
+    options: &TobitOptions,
+) -> PyResult<TobitResult> {
+    let (input, cov_type, cov_type_lower, solver) = build_tobit_input(df, y, x, options)?;
 
     let estimator = TobitEstimator::fit(
         input,
@@ -721,6 +917,7 @@ pub(crate) fn fit(
     Ok(TobitResult {
         params,
         std_errors: estimator.std_errors().to_vec(),
+        cov_params: mat_to_rows(estimator.cov_params()),
         test_stats: estimator.test_stats().to_vec(),
         stat_dist: estimator.stat_dist().name().to_string(),
         stat_df: estimator.stat_dist().df().map(|df| df as i64),
@@ -746,7 +943,7 @@ pub(crate) fn fit(
         solver: solver_name(solver).to_string(),
         lower: options.lower,
         upper: options.upper,
-        estimator,
+        fitted: estimator.into_fitted(),
         source_data: source,
     })
 }

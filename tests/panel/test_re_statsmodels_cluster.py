@@ -28,7 +28,6 @@ statsmodelsが同じ規約を持たず（`hac-groupsum`の`df_resid_inference`�
 
 from __future__ import annotations
 
-import json
 from functools import partial
 from pathlib import Path
 
@@ -36,6 +35,7 @@ import polars as pl
 import pytest
 from _assertions import assert_close, assert_dict_close, assert_inference_close
 from _constants import DATA_DIR
+from _fixture_cov import load_fixtures_with_cov
 from _helpers import load_wooldridge_dataset
 from _panel_helpers import x_columns
 from _tolerances import TOLERANCES
@@ -77,7 +77,7 @@ _assert_p_dict_close = partial(
 
 @pytest.fixture(scope="module")
 def reference() -> dict:
-    return json.loads(FIXTURE_PATH.read_text())
+    return load_fixtures_with_cov(FIXTURE_PATH)
 
 
 def _check(res, ref: dict, n_clusters: int, label: str) -> None:

@@ -183,6 +183,16 @@ if (cov_type == "classical") {
 vc <- unclass(vc)[, , drop = FALSE]
 ses <- sqrt(diag(vc))
 
+# 係数の分散共分散行列（標準誤差の元になった`vc`そのもの）を`{行: {列: 値}}`で出す。
+# 行・列の名前は係数名に揃える。
+cov_names <- names(coefs)
+cov_params <- setNames(
+  lapply(seq_along(cov_names), function(i) {
+    setNames(as.list(as.numeric(vc[i, ])), cov_names)
+  }),
+  cov_names
+)
+
 # z分布（ヘッダコメント6.参照）。
 test_stats <- coefs / ses
 p_values <- 2 * pnorm(-abs(test_stats))
@@ -210,6 +220,7 @@ if (n_moments > k) {
 result <- list(
   params = as.list(coefs),
   std_errors = as.list(ses),
+  cov_params = cov_params,
   test_stats = as.list(test_stats),
   p_values = as.list(p_values),
   conf_int = mapply(

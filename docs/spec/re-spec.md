@@ -10,7 +10,7 @@ RE固有の内容のみを記載する。FEとの共有範囲は[`fe-spec.md`](.
 
 ## 1. API引数
 
-3層構成: `RE(data, y, x, entity, options).fit() -> REResults`（python_package）→
+3層構成: `RE(data, y, x, entity, options=options).fit() -> REResults`（python_package）→
 `fit_re(data, y, x, entity, options) -> REResult`（engine_pybind）→ `ReEstimator::fit`
 （engine、準偏差変換したデータを`OlsEstimator`へ委譲）。
 
@@ -25,7 +25,7 @@ RE固有の内容のみを記載する。FEとの共有範囲は[`fe-spec.md`](.
   | `dk_time` | `str \| None` | `None` | `cov_type="dk"`時のDK時点列（`FEOptions.dk_time`と同名・同じ意味。`"dk"`では必須で、`time`は借用されない）。RE自身の準偏差変換には使わない。`"dk"`以外で指定すると`ValidationError` |
   | `cluster` | `str \| None` | `None` | `cov_type="cluster"`時のグループキー列名。省略時は`entity`をそのまま使う。他の`cov_type`で指定すると`ValidationError` |
   | `dk_bandwidth` | `int \| None` | `None` | DK HACのバンド幅。省略時は自動計算。`cov_type="dk"`以外で指定すると`ValidationError` |
-  | `variance_method` | `str` | `"swamy_arora"` | 分散成分の推定法: `"swamy_arora"`（既定、3.1節）/ `"wallace_hussain"` / `"amemiya"`（3.1.2節。`plm`の`random.method`の`swar`・`walhus`・`amemiya`）。大小無視。1-way・2-wayとも指定でき、末尾に置く（先頭6個の位置引数の順は`FEOptions`と同じ）。未知の値は`ValidationError` |
+  | `variance_method` | `str` | `"swamy_arora"` | 分散成分の推定法: `"swamy_arora"`（既定、3.1節）/ `"wallace_hussain"` / `"amemiya"`（3.1.2節。`plm`の`random.method`の`swar`・`walhus`・`amemiya`）。大小無視。1-way・2-wayとも指定でき、末尾に置く（先頭6個の並びは`FEOptions`と同じ。引数はキーワード専用）。未知の値は`ValidationError` |
 
 - **`time`と`dk_time`は別物（`FEOptions`と同じ規約、`panel-common.md`1.1節）**: `time`は2-way REの
   時間次元で、`dk_time`はDriscoll-Kraay HAC（`cov_type="dk"`）専用の時点列。`cov_type="dk"`では

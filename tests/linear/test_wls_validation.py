@@ -244,7 +244,7 @@ def test_data_not_polars_raises(unit_weight_dataset):
             param_name="new_data",
         ),
     ):
-        res.predict(bad_new_data)
+        res.predict(new_data=bad_new_data)
     with pytest.raises(
         TypeError,
         match=escaped(
@@ -252,7 +252,7 @@ def test_data_not_polars_raises(unit_weight_dataset):
             param_name="new_data",
         ),
     ):
-        res.augment(bad_new_data)
+        res.augment(new_data=bad_new_data)
 
 
 def test_y_empty_string_raises(unit_weight_dataset):
@@ -408,7 +408,7 @@ def test_predict_missing_column_raises(unit_weight_dataset):
         argument="x",
         data_argument="new_data",
     ):
-        res.predict(new_data)
+        res.predict(new_data=new_data)
 
 
 def test_predict_non_numeric_dtype_raises(unit_weight_dataset):
@@ -426,7 +426,7 @@ def test_predict_non_numeric_dtype_raises(unit_weight_dataset):
         argument="x",
         data_argument="new_data",
     ):
-        res.predict(new_data)
+        res.predict(new_data=new_data)
 
 
 def test_predict_null_or_non_finite_values_raise(unit_weight_dataset):
@@ -441,7 +441,7 @@ def test_predict_null_or_non_finite_values_raise(unit_weight_dataset):
         argument="x",
         data_argument="new_data",
     ):
-        res.predict(new_data_null)
+        res.predict(new_data=new_data_null)
 
     new_data_inf = pl.DataFrame({"x1": [1.0, float("inf")], "x2": [1.0, 2.0]})
     with raises_error(
@@ -452,7 +452,7 @@ def test_predict_null_or_non_finite_values_raise(unit_weight_dataset):
         argument="x",
         data_argument="new_data",
     ):
-        res.predict(new_data_inf)
+        res.predict(new_data=new_data_inf)
 
 
 # ── ValidationError（augment()） ──────────────────────────────────────
@@ -472,7 +472,7 @@ def test_augment_column_collision_raises(unit_weight_dataset):
     res = WLS(df, y="y", x=["x1", "x2"], weight="weight").fit()
     new_data = pl.DataFrame({"x1": [1.0], "x2": [0.5], "predicted": [0.0]})
     with raises_error(ErrorCode.AUGMENT_COLUMN_EXISTS, column="predicted"):
-        res.augment(new_data)
+        res.augment(new_data=new_data)
 
 
 def test_augment_missing_column_raises(unit_weight_dataset):
@@ -489,7 +489,7 @@ def test_augment_missing_column_raises(unit_weight_dataset):
         argument="x",
         data_argument="new_data",
     ):
-        res.augment(new_data)
+        res.augment(new_data=new_data)
 
 
 # ── ValidationError（オプション） ─────────────────────────────────────

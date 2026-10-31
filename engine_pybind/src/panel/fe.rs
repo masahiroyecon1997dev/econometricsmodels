@@ -24,10 +24,11 @@
 //!    （`engine_pybind/src/iv/CLAUDE.md`「実装フェーズの分割方針」の初期実装段階と同じ）。
 //! 3. **`fixed_effects()`メソッド追加段階**: IVの`first_stage()`と同じ
 //!    「追加結果は別メソッド」方針、`docs/spec/fe-spec.md`3.5節）を追加する。`FEResult`に
-//!    非公開フィールド`estimator: FeEstimator`（内部で`OlsEstimator`まで保持する）を
-//!    追加し、`fixed_effects()`はそこから`FeEstimator::fixed_effects()`をオンデマンドに
-//!    呼ぶだけ（IVの`IVResult.first_stage`フィールドが初期実装ではなく後続の拡張で
-//!    追加されたのと同じ段階分割）。
+//!    非公開フィールド（`LazyFixedEffects`。`FeEstimator`を保持し、固定効果は初回の
+//!    `fixed_effects()`かpickle時に計算して保持する）を追加し、`fixed_effects()`は
+//!    そこから返すだけ（IVの`IVResult.first_stage`フィールドが初期実装ではなく後続の拡張で
+//!    追加されたのと同じ段階分割）。pickleで復元した結果は`FeEstimator`を持たず、計算済みの
+//!    固定効果だけを持つ。
 //!
 //! ## `FEOptions.time`と`FEOptions.dk_time`は別物（`panel-common.md`1.1節）
 //!
@@ -43,8 +44,8 @@
 //!
 //! ## `cov_type`の非対応値
 //!
-//! FEは`hc0`を**サポートしない**（linearmodels・fixestともにパネル/FE向けの`hc0`
-//! オプションが存在しないため、`FeCovType` enumから除外済み）。OLS/WLS/IVとは
+//! FEは`hc0`を**サポートしない**（仕様判断で、他パッケージの有無は理由にしない。
+//! `FeCovType` enumから除外済み）。OLS/WLS/IVとは
 //! 異なりFEの`cov_type`文字列パースはこの1点で分岐が異なるため、`linear::common::
 //! parse_cov_kind`を流用せず、FE/RE共通の`panel::common::parse_panel_cov_kind`を使う
 //! （OLS/WLS/IVは`linear::common`を共有する。`hc0`非対応・`Dk`の意味論がパネル固有のため）。
@@ -69,8 +70,11 @@ use crate::shared::errors::guard;
 use engine::panel::common::TimeKeys;
 use engine::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput, FixedEffects};
 use polars::prelude::DataFrame;
+use pyo3::IntoPyObjectExt;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
+use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
 use super::common::{
     PanelCovKind, PanelModel, check_panel_cov_options, panel_error_to_pyerr, parse_panel_cov_kind,
@@ -81,7 +85,7 @@ use crate::shared::column_extraction::{
     SelectedData, extract_entity_groups, extract_f64_column, extract_f64_columns,
     extract_optional_cluster_groups, extract_time_keys,
 };
-use crate::shared::mat_conversion::mat_to_vec;
+use crate::shared::mat_conversion::{mat_to_rows, mat_to_vec};
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
     extract_strict_float, extract_strict_opt_column, extract_strict_opt_int, extract_strict_text,
@@ -91,14 +95,22 @@ use crate::shared::validation::{
 };
 
 /// Estimation options for FE (fixed effects panel regression).
+///
+/// All arguments are keyword-only.
+///
+/// Options by purpose:
+///
+/// - Standard errors: `cov_type`; with `"cluster"` also `cluster`; with
+///   `"dk"` also `dk_time` (required) and `dk_bandwidth`.
+/// - Effects: `time` (sets two-way effects; balanced panels only).
+/// - Confidence intervals: `confidence_level`.
 // 各フィールドの意味・既定値の根拠は`docs/spec/panel-common.md`。
 // module/from_py_objectの理由は`OLSOptions`と同じ（`engine_pybind/src/linear/ols.rs`参照）。
 #[pyclass(from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
 pub struct FEOptions {
     /// Standard error type: one of "classical", "hc1", "hc2", "hc3", "cluster", "dk".
-    /// Case-insensitive. Unlike OLS/WLS/IV, "hc0" is **not** supported (neither
-    /// linearmodels nor fixest offer it for panel/FE regressions).
+    /// Case-insensitive. Unlike OLS/WLS/IV, "hc0" is **not** supported.
     #[pyo3(get)]
     pub cov_type: String,
 
@@ -124,13 +136,14 @@ pub struct FEOptions {
     pub cluster: Option<String>,
 
     /// Column name that defines the time periods of the Driscoll-Kraay HAC, independent
-    /// of `time` (`time` and `dk_time` serve different purposes; see the module
-    /// docstring). Required when `cov_type="dk"`, in one-way and two-way models alike:
+    /// of `time` (`time` defines the fixed-effects structure, `dk_time` the HAC periods).
+    /// Required when `cov_type="dk"`, in one-way and two-way models alike:
     /// leaving it unset raises `ValidationError`, and `time` is not used instead. With
     /// two-way effects the HAC may use a different time granularity from the fixed
     /// effects. It may not be the same column as `y` or `entity` (`ValidationError`), but
     /// may be one of the regressors or the same column as `time`. Specifying it with any
-    /// other `cov_type` raises `ValidationError`. The periods are ordered by the values of the column (see `time`).
+    /// other `cov_type` raises `ValidationError`. The periods are ordered by the values of the
+    /// column (see `time`).
     #[pyo3(get)]
     pub dk_time: Option<String>,
 
@@ -140,6 +153,15 @@ pub struct FEOptions {
     #[pyo3(get)]
     pub dk_bandwidth: Option<i64>,
 }
+
+crate::shared::pickle::impl_pickle_state!(FEOptions {
+    cov_type,
+    confidence_level,
+    time,
+    cluster,
+    dk_time,
+    dk_bandwidth,
+});
 
 impl FEOptions {
     /// このオプションが指名するデータの列（`time`・`cluster`・`dk_time`）。使われるかどうか（`cov_type`等）には
@@ -156,8 +178,13 @@ impl FEOptions {
 
 #[pymethods]
 impl FEOptions {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
+
     #[new]
     #[pyo3(signature = (
+        *,
         cov_type = "cluster".to_string(),
         confidence_level = 0.95,
         time = None,
@@ -238,18 +265,15 @@ impl FEOptions {
 
 /// Estimation results for FE.
 ///
-/// Structured data only (no `summary()`); see `docs/spec/panel-common.md`
-/// section 2. All array-valued fields (`params`, `std_errors`, etc.) share the same order
-/// as `param_names`.
+/// Structured data only (no `summary()`). All array-valued fields (`params`,
+/// `std_errors`, etc.) share the same order as `param_names`.
 ///
-/// `fixed_effects()` (recovering the fixed effects themselves, `α_i`/`γ_t`) is
-/// intentionally not included as a field here. It is exposed as a separate method
-/// instead (see `docs/spec/fe-spec.md` section 3.5 — the same pattern as IV's
-/// `first_stage()`).
+/// The fixed effects themselves (`α_i`/`γ_t`) are not a field: they are computed on
+/// demand by the method `fixed_effects()`.
 // `FEResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`OLSResult`と同じ理由）。
 //
-// `Clone`を派生しない: `estimator`フィールドの`FeEstimator`（内部の`OlsEstimator`も）が
+// `Clone`を派生しない: `fixed_effects`フィールドが保持する`FeEstimator`（内部の`OlsEstimator`も）が
 // `Clone`を実装していないため（`LogitResult`/`ProbitResult`と同じ理由、
 // `.claude/rules/rust-style.md`「推定量構造体の設計」の通りprivateフィールドのみで、
 // `Clone`を要求する既存の呼び出し元も無い）。
@@ -260,6 +284,10 @@ pub struct FEResult {
     pub params: Vec<f64>,
     #[pyo3(get)]
     pub std_errors: Vec<f64>,
+    /// Covariance matrix of the coefficients under `cov_type`, one row per entry of
+    /// `param_names` (same order on both axes).
+    #[pyo3(get)]
+    pub cov_params: Vec<Vec<f64>>,
     #[pyo3(get)]
     pub test_stats: Vec<f64>,
     /// Distribution of `test_stats`; always `"t"` for FE.
@@ -287,8 +315,7 @@ pub struct FEResult {
     pub df_resid: usize,
     #[pyo3(get)]
     pub df_model: usize,
-    /// Number of panel entities (`panel-common.md` section 2.1, following the
-    /// pyfixest/plm precedent).
+    /// Number of panel entities.
     #[pyo3(get)]
     pub n_entities: usize,
     /// Number of unique time periods for two-way effects (`FEOptions.time` set); `None`
@@ -332,17 +359,107 @@ pub struct FEResult {
     #[pyo3(get)]
     pub r_squared_overall: f64,
     /// `fixed_effects()`が読む。Python側には公開しない（`OLSResult`の`fitted_values`/
-    /// `has_intercept`、`LogitResult`/`ProbitResult`の`estimator`と同じ位置づけ）。
-    estimator: FeEstimator,
+    /// `has_intercept`と同じ位置づけ）。固定効果は初回の`fixed_effects()`かpickle時まで計算を遅らせる。
+    fixed_effects: LazyFixedEffects,
 }
+
+/// 固定効果（`α_i`・`γ_t`）。`fit()`では計算せず（エンティティ数に比例する辞書を作るため、使わない人に
+/// 負担をかけない）、`fixed_effects()`かpickleで初めて必要になったときに`FeEstimator`から計算して保持する。
+///
+/// pickleで復元した結果は`FeEstimator`を持たず、計算済みの固定効果だけを持つ（`Computed`）。`FeEstimator`は
+/// 設計行列とグループコードを持つが、固定効果の計算以外には使わない。「推定量が無く、計算済みでもない」
+/// 状態は型として作れない。
+#[derive(Debug)]
+enum LazyFixedEffects {
+    Lazy {
+        estimator: Box<FeEstimator>,
+        cell: OnceLock<FixedEffects>,
+    },
+    Computed(FixedEffects),
+}
+
+impl LazyFixedEffects {
+    fn new(estimator: FeEstimator) -> Self {
+        Self::Lazy {
+            estimator: Box::new(estimator),
+            cell: OnceLock::new(),
+        }
+    }
+
+    /// 固定効果。未計算なら`FeEstimator`から計算して保持する。
+    fn get(&self) -> &FixedEffects {
+        match self {
+            Self::Lazy { estimator, cell } => cell.get_or_init(|| estimator.fixed_effects()),
+            Self::Computed(effects) => effects,
+        }
+    }
+}
+
+// 状態は`("one_way", {id: α})`か`("two_way", {id: α}, [(period, γ), ...])`。時点は時間順の並びを保つ。
+impl crate::shared::pickle::PickleField for LazyFixedEffects {
+    fn to_py<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        match self.get() {
+            FixedEffects::OneWay(effects) => ("one_way", effects).into_bound_py_any(py),
+            FixedEffects::TwoWay { entity, time } => {
+                ("two_way", entity, time).into_bound_py_any(py)
+            }
+        }
+    }
+
+    fn from_py(obj: &Bound<'_, PyAny>) -> Option<Self> {
+        let effects = if let Ok((tag, effects)) = obj.extract::<(String, BTreeMap<String, f64>)>() {
+            (tag == "one_way").then_some(FixedEffects::OneWay(effects))?
+        } else {
+            let (tag, entity, time) = obj
+                .extract::<(String, BTreeMap<String, f64>, Vec<(String, f64)>)>()
+                .ok()?;
+            (tag == "two_way").then_some(FixedEffects::TwoWay { entity, time })?
+        };
+        Some(Self::Computed(effects))
+    }
+}
+
+crate::shared::pickle::impl_pickle_state!(FEResult {
+    params,
+    std_errors,
+    cov_params,
+    test_stats,
+    stat_dist,
+    stat_df,
+    p_values,
+    conf_lower,
+    conf_upper,
+    param_names,
+    residuals,
+    dep_var_name,
+    n_obs,
+    df_resid,
+    df_model,
+    n_entities,
+    n_periods,
+    cov_type,
+    dk_bandwidth_used,
+    f_statistic,
+    f_p_value,
+    f_df_num,
+    f_df_denom,
+    log_likelihood,
+    aic,
+    bic,
+    r_squared_within,
+    r_squared_between,
+    r_squared_overall,
+    fixed_effects,
+});
 
 #[pymethods]
 impl FEResult {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
+
     /// The fixed effects themselves (`α_i` for entity, `γ_t` for time), recovered
-    /// post-hoc from the fitted coefficients (`α_i = ȳ_i - x̄_i'β̂`; see
-    /// `docs/spec/fe-spec.md` section 3.5 and
-    /// `engine::panel::fe::FeEstimator::fixed_effects`'s doc comment for the exact
-    /// formula, including the two-way normalization convention).
+    /// post-hoc from the fitted coefficients (`α_i = ȳ_i - x̄_i'β̂` for one-way effects).
     ///
     /// One-way: `dict[str, float]` keyed by entity id. Two-way: `dict[str, dict[str,
     /// float]]` with top-level keys `"entity"`/`"time"`.
@@ -360,7 +477,7 @@ impl FEResult {
     /// only holds when those two choices of `t_ref` coincide for the given data.
     fn fixed_effects(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
         guard(|| {
-            match self.estimator.fixed_effects() {
+            match self.fixed_effects.get() {
                 FixedEffects::OneWay(effects) => Ok(effects.into_pyobject(py)?.unbind()),
                 FixedEffects::TwoWay { entity, time } => {
                     // 時点は時間順に並べた`dict`にする（Pythonの`dict`は挿入順を保つ）。
@@ -517,14 +634,30 @@ pub(crate) fn build_fe_input(
 ///   自由度不足・分散ゼロ・委譲先`OlsEstimator::fit`の失敗・FE自身のF検定の失敗等）は
 ///   `panel_error_to_pyerr`で変換
 pub(crate) fn fit(
+    py: Python<'_>,
     data: SelectedData,
     y: String,
     x: Vec<String>,
     entity: String,
     options: &FEOptions,
 ) -> PyResult<FEResult> {
-    let df: DataFrame = data.frame;
-    let (input, effects, cov_type, cov_type_lower) = build_fe_input(&df, y, x, entity, options)?;
+    // 取り込み済みの`frame`以降はPythonオブジェクトに触れないので、GILを手放して走らせる
+    // （他のPythonスレッドを止めず、複数のfitをスレッドで並行できる）。`source`は使わず、
+    // 関数の末尾（`detach`から戻ってGILを持った状態）で`data`ごとdropされる。
+    let SelectedData { frame, .. } = data;
+    py.detach(|| fit_frame(&frame, y, x, entity, options))
+}
+
+/// [`fit`]の純Rust部分（GILを手放した状態で走る）。`PyErr`は遅延生成でGILを要求しない
+/// ので、ここで`?`により返してよい。
+fn fit_frame(
+    df: &DataFrame,
+    y: String,
+    x: Vec<String>,
+    entity: String,
+    options: &FEOptions,
+) -> PyResult<FEResult> {
+    let (input, effects, cov_type, cov_type_lower) = build_fe_input(df, y, x, entity, options)?;
 
     let estimator = FeEstimator::fit(input, effects, cov_type, options.confidence_level)
         .map_err(panel_error_to_pyerr)?;
@@ -532,6 +665,7 @@ pub(crate) fn fit(
     Ok(FEResult {
         params: mat_to_vec(estimator.params()),
         std_errors: mat_to_vec(estimator.std_errors()),
+        cov_params: mat_to_rows(estimator.cov_params()),
         test_stats: mat_to_vec(estimator.test_stats()),
         stat_dist: estimator.stat_dist().name().to_string(),
         stat_df: estimator.stat_dist().df().map(|df| df as i64),
@@ -558,7 +692,7 @@ pub(crate) fn fit(
         r_squared_within: estimator.r_squared_within(),
         r_squared_between: estimator.r_squared_between(),
         r_squared_overall: estimator.r_squared_overall(),
-        estimator,
+        fixed_effects: LazyFixedEffects::new(estimator),
     })
 }
 

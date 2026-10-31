@@ -8,7 +8,7 @@ Probit固有の差分のみを記載する。
 
 ## 1. API引数
 
-3層構成: `Probit(data, y, x, options).fit() -> ProbitResults` → `fit_probit(...) -> ProbitResult` →
+3層構成: `Probit(data, y, x, options=options).fit() -> ProbitResults` → `fit_probit(...) -> ProbitResult` →
 `ProbitEstimator::fit`。`ProbitOptions`は`LogitOptions`とフィールド単位で完全に同一（型・デフォルト値
 とも[`logit-spec.md`](./logit-spec.md)1章の表を参照）。
 

@@ -71,7 +71,7 @@ use crate::shared::column_extraction::{
     extract_optional_cluster_groups, extract_time_keys,
 };
 use crate::shared::errors::unknown_option_value;
-use crate::shared::mat_conversion::mat_to_vec;
+use crate::shared::mat_conversion::{mat_to_rows, mat_to_vec};
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
     extract_strict_float, extract_strict_opt_column, extract_strict_opt_int, extract_strict_text,
@@ -81,14 +81,23 @@ use crate::shared::validation::{
 };
 
 /// Estimation options for RE (random effects panel regression).
+///
+/// All arguments are keyword-only.
+///
+/// Options by purpose:
+///
+/// - Standard errors: `cov_type`; with `"cluster"` also `cluster`; with
+///   `"dk"` also `dk_time` (required) and `dk_bandwidth`.
+/// - Effects: `time` (sets two-way effects; balanced panels only).
+/// - Variance components: `variance_method`.
+/// - Confidence intervals: `confidence_level`.
 // 各フィールドの意味・既定値の根拠は`docs/spec/panel-common.md`・`docs/spec/re-spec.md`。
 // module/from_py_objectの理由は`OLSOptions`と同じ（`engine_pybind/src/linear/ols.rs`参照）。
 #[pyclass(from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
 pub struct REOptions {
     /// Standard error type: one of "classical", "hc1", "hc2", "hc3", "cluster", "dk".
-    /// Case-insensitive. Unlike OLS/WLS/IV, "hc0" is **not** supported (no reference
-    /// implementation offers it for panel/RE regressions; see the module docstring).
+    /// Case-insensitive. Unlike OLS/WLS/IV, "hc0" is **not** supported.
     #[pyo3(get)]
     pub cov_type: String,
 
@@ -128,7 +137,7 @@ pub struct REOptions {
     #[pyo3(get)]
     pub dk_bandwidth: Option<i64>,
 
-    /// Estimator of the variance components `sigma_eps^2`, `sigma_u^2` (and `sigma_lambda^2`
+    /// Estimator of the variance components `σ_ε²`, `σ_u²` (and `σ_λ²`
     /// for two-way effects), one of "swamy_arora" (default), "wallace_hussain", "amemiya"
     /// (case-insensitive; `plm`'s `random.method` "swar", "walhus", "amemiya"). Applies to
     /// one-way and two-way effects alike. "swamy_arora" on an unbalanced one-way panel is the
@@ -139,6 +148,16 @@ pub struct REOptions {
     #[pyo3(get)]
     pub variance_method: String,
 }
+
+crate::shared::pickle::impl_pickle_state!(REOptions {
+    cov_type,
+    confidence_level,
+    time,
+    cluster,
+    dk_time,
+    dk_bandwidth,
+    variance_method,
+});
 
 impl REOptions {
     /// このオプションが指名するデータの列（`time`・`cluster`・`dk_time`）。使われるかどうか（`cov_type`等）には
@@ -155,8 +174,13 @@ impl REOptions {
 
 #[pymethods]
 impl REOptions {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
+
     #[new]
     #[pyo3(signature = (
+        *,
         cov_type = "cluster".to_string(),
         confidence_level = 0.95,
         time = None,
@@ -247,15 +271,13 @@ impl REOptions {
 
 /// Estimation results for RE.
 ///
-/// Structured data only (no `summary()`); see `docs/spec/panel-common.md`
-/// section 2. All array-valued fields (`params`, `std_errors`, etc.) share the same order
-/// as `param_names` (`param_names[0]` is always `"const"`, since RE — unlike FE — has an
-/// intercept).
+/// Structured data only (no `summary()`). All array-valued fields (`params`,
+/// `std_errors`, etc.) share the same order as `param_names` (`param_names[0]` is always
+/// `"const"`, since RE — unlike FE — has an intercept).
 ///
 /// The Hausman test (`hausman_statistic` / `hausman_p_value` / `hausman_df`) is computed
-/// automatically inside `fit()` and included directly here (unlike FE's
-/// `fixed_effects()`, RE has no separate diagnostic method; see `panel-common.md`
-/// section 2.4). All three are `None` when there is no regressor left to test: every
+/// automatically inside `fit()` and included directly here (RE has no separate
+/// diagnostic method). All three are `None` when there is no regressor left to test: every
 /// regressor is time-invariant, or varies only over time on a balanced panel, or the
 /// within-transformed copy of every time-varying regressor is aliased (its entity or time mean
 /// is also a regressor, as in a correlated-random-effects specification); for two-way effects,
@@ -274,6 +296,10 @@ pub struct REResult {
     pub params: Vec<f64>,
     #[pyo3(get)]
     pub std_errors: Vec<f64>,
+    /// Covariance matrix of the coefficients under `cov_type`, one row per entry of
+    /// `param_names` (same order on both axes).
+    #[pyo3(get)]
+    pub cov_params: Vec<Vec<f64>>,
     #[pyo3(get)]
     pub test_stats: Vec<f64>,
     /// Distribution of `test_stats`; always `"t"` for RE.
@@ -301,8 +327,7 @@ pub struct REResult {
     pub df_resid: usize,
     #[pyo3(get)]
     pub df_model: usize,
-    /// Number of panel entities (`panel-common.md` section 2.1, following the
-    /// pyfixest/plm precedent).
+    /// Number of panel entities.
     #[pyo3(get)]
     pub n_entities: usize,
     /// Number of unique time periods for two-way random effects (`REOptions.time` set);
@@ -315,44 +340,43 @@ pub struct REResult {
     /// `sigma2_u`, `sigma2_lambda` and the weights `theta*` are the values of this estimator.
     #[pyo3(get)]
     pub variance_method: String,
-    /// Estimated variance of the idiosyncratic error, `sigma_eps^2`. Swamy-Arora: the residual
+    /// Estimated variance of the idiosyncratic error, `σ_ε²`. Swamy-Arora: the residual
     /// variance of the internal fixed-effects regression with the same effect structure as the
     /// model (entity for one-way, entity and time for two-way), whose degrees of freedom exclude
-    /// the regressors without within variation, as in `plm` (`docs/spec/re-spec.md` section
-    /// 3.1). Wallace-Hussain and Amemiya: from the within-transformed first-stage residuals, see
-    /// section 3.1.2.
+    /// the regressors without within variation, as in `plm`. Wallace-Hussain and Amemiya:
+    /// from the within-transformed first-stage residuals.
     #[pyo3(get)]
     pub sigma2_eps: f64,
-    /// Estimated variance of the entity effect, `sigma_u^2` (a negative estimate is raised to
+    /// Estimated variance of the entity effect, `σ_u²` (a negative estimate is raised to
     /// 0). Swamy-Arora on an unbalanced panel is the `linearmodels` estimator, which differs
     /// from `plm`'s.
     #[pyo3(get)]
     pub sigma2_u: f64,
-    /// Estimated variance of the time effect, `sigma_lambda^2`, for two-way effects (a negative
+    /// Estimated variance of the time effect, `σ_λ²`, for two-way effects (a negative
     /// estimate is raised to 0); `None` for one-way.
     #[pyo3(get)]
     pub sigma2_lambda: Option<f64>,
     /// One-way quasi-demeaning weight of each entity,
-    /// `theta_i = 1 - sqrt(sigma_eps^2 / (T_i * sigma_u^2 + sigma_eps^2))` with `T_i` the number
-    /// of observations of the entity (0 when `sigma_u^2` is 0; different across entities only on
+    /// `θ_i = 1 - sqrt(σ_ε² / (T_i * σ_u² + σ_ε²))` with `T_i` the number
+    /// of observations of the entity (0 when `σ_u²` is 0; different across entities only on
     /// an unbalanced panel). The keys are the entity ids as strings, in lexicographic order (so
     /// `"10"` precedes `"2"` for integer ids); `None` for two-way.
     #[pyo3(get)]
     pub theta: Option<BTreeMap<String, f64>>,
     /// Two-way weight of the entity means in the GLS transformation
-    /// `x - theta_1 * mean_i(x) - theta_2 * mean_t(x) + theta_3 * mean(x)`:
-    /// `theta_1 = 1 - sigma_eps / sigma_1` with `sigma_1^2 = sigma_eps^2 + T * sigma_u^2`;
+    /// `x - θ₁ * mean_i(x) - θ₂ * mean_t(x) + θ₃ * mean(x)`:
+    /// `θ₁ = 1 - σ_ε / σ₁` with `σ₁² = σ_ε² + T * σ_u²`;
     /// `None` for one-way.
     #[pyo3(get)]
     pub theta_entity: Option<f64>,
-    /// Two-way weight of the time means: `theta_2 = 1 - sigma_eps / sigma_2` with
-    /// `sigma_2^2 = sigma_eps^2 + N * sigma_lambda^2`; `None` for one-way.
+    /// Two-way weight of the time means: `θ₂ = 1 - σ_ε / σ₂` with
+    /// `σ₂² = σ_ε² + N * σ_λ²`; `None` for one-way.
     #[pyo3(get)]
     pub theta_time: Option<f64>,
     /// Two-way weight of the overall mean:
-    /// `theta_3 = theta_1 + theta_2 - 1 + sigma_eps / sigma_4` with
-    /// `sigma_4^2 = sigma_eps^2 + T * sigma_u^2 + N * sigma_lambda^2`. It is not the product
-    /// `theta_1 * theta_2`, and it is exactly 0 when `sigma_u^2` or `sigma_lambda^2` is 0;
+    /// `θ₃ = θ₁ + θ₂ - 1 + σ_ε / σ₄` with
+    /// `σ₄² = σ_ε² + T * σ_u² + N * σ_λ²`. It is not the product
+    /// `θ₁ * θ₂`, and it is exactly 0 when `σ_u²` or `σ_λ²` is 0;
     /// `None` for one-way.
     #[pyo3(get)]
     pub theta_total: Option<f64>,
@@ -397,8 +421,7 @@ pub struct REResult {
     #[pyo3(get)]
     pub r_squared_overall: f64,
     /// Regression-based Hausman test statistic (chi-squared version, Wald test that the
-    /// within-transformed regressors are jointly zero in the auxiliary regression;
-    /// `docs/spec/re-spec.md` section 3.7). The comparison is against FE with the same
+    /// within-transformed regressors are jointly zero in the auxiliary regression). The comparison is against FE with the same
     /// structure as the RE model (entity for one-way, entity and time for two-way). The Wald
     /// test's covariance follows `cov_type`. Always non-negative. `None` when no slope
     /// coefficient can be tested: a regressor that does not vary after the within
@@ -419,6 +442,56 @@ pub struct REResult {
     /// also a regressor (correlated random effects).
     #[pyo3(get)]
     pub hausman_df: Option<usize>,
+}
+
+crate::shared::pickle::impl_pickle_state!(REResult {
+    params,
+    std_errors,
+    cov_params,
+    test_stats,
+    stat_dist,
+    stat_df,
+    p_values,
+    conf_lower,
+    conf_upper,
+    param_names,
+    residuals,
+    dep_var_name,
+    n_obs,
+    df_resid,
+    df_model,
+    n_entities,
+    n_periods,
+    variance_method,
+    sigma2_eps,
+    sigma2_u,
+    sigma2_lambda,
+    theta,
+    theta_entity,
+    theta_time,
+    theta_total,
+    cov_type,
+    dk_bandwidth_used,
+    f_statistic,
+    f_p_value,
+    f_df_num,
+    f_df_denom,
+    log_likelihood,
+    aic,
+    bic,
+    r_squared_within,
+    r_squared_between,
+    r_squared_overall,
+    hausman_statistic,
+    hausman_p_value,
+    hausman_df,
+});
+
+#[pymethods]
+impl REResult {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
 }
 
 /// [`PanelCovKind`]に対応する列（`cluster`・`dk_time`）をDataFrameから抽出して
@@ -589,15 +662,31 @@ pub(crate) fn build_re_input(
 ///   準偏差変換済みデータへの委譲失敗、クラスター数不足、HAC関連のバリデーション等）は
 ///   `panel_error_to_pyerr`で変換
 pub(crate) fn fit(
+    py: Python<'_>,
     data: SelectedData,
     y: String,
     x: Vec<String>,
     entity: String,
     options: &REOptions,
 ) -> PyResult<REResult> {
-    let df: DataFrame = data.frame;
+    // 取り込み済みの`frame`以降はPythonオブジェクトに触れないので、GILを手放して走らせる
+    // （他のPythonスレッドを止めず、複数のfitをスレッドで並行できる）。`source`は使わず、
+    // 関数の末尾（`detach`から戻ってGILを持った状態）で`data`ごとdropされる。
+    let SelectedData { frame, .. } = data;
+    py.detach(|| fit_frame(&frame, y, x, entity, options))
+}
+
+/// [`fit`]の純Rust部分（GILを手放した状態で走る）。`PyErr`は遅延生成でGILを要求しない
+/// ので、ここで`?`により返してよい。
+fn fit_frame(
+    df: &DataFrame,
+    y: String,
+    x: Vec<String>,
+    entity: String,
+    options: &REOptions,
+) -> PyResult<REResult> {
     let (input, effects, cov_type, cov_type_lower, variance_method) =
-        build_re_input(&df, y, x, entity, options)?;
+        build_re_input(df, y, x, entity, options)?;
 
     let estimator = ReEstimator::fit_with_variance_method(
         input,
@@ -613,6 +702,7 @@ pub(crate) fn fit(
     Ok(REResult {
         params: mat_to_vec(ols.params()),
         std_errors: mat_to_vec(estimator.std_errors()),
+        cov_params: mat_to_rows(estimator.cov_params()),
         test_stats: mat_to_vec(estimator.test_stats()),
         stat_dist: estimator.stat_dist().name().to_string(),
         stat_df: estimator.stat_dist().df().map(|df| df as i64),

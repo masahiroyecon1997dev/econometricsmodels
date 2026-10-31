@@ -39,7 +39,6 @@ Note:
 
 from __future__ import annotations
 
-import json
 from functools import partial
 from pathlib import Path
 
@@ -52,6 +51,7 @@ from _assertions import (
     assert_inference_close,
 )
 from _constants import DATA_DIR, MROZ_X, WIDE_X
+from _fixture_cov import load_fixtures_with_cov
 from _helpers import (
     ROW_TIME,
     with_cluster_groups,
@@ -103,7 +103,7 @@ ATOL = TOLERANCES["ols_reference"]["atol"]
 
 @pytest.fixture(scope="module")
 def fixtures() -> dict:
-    return json.loads(FIXTURE_PATH.read_text())
+    return load_fixtures_with_cov(FIXTURE_PATH)
 
 
 _assert_close = partial(assert_close, rtol=RTOL, atol=ATOL)
@@ -176,7 +176,7 @@ def test_predict_none_matches_frozen_statsmodels(fixtures, scenario):
 
 
 def test_predict_new_data_matches_frozen_statsmodels(fixtures):
-    """`predict(new_data)`（新規データに対する予測値、baselineシナリオ）が、
+    """`predict(new_data=...)`（新規データに対する予測値、baselineシナリオ）が、
     凍結フィクスチャのstatsmodels `.predict()`と一致すること。列順を入れ替えて
     渡し、列名マッチング（列順不問）も合わせて確認する（Rクロスチェック側
     `test_predict_new_data_matches_r`と同じ発想）。
@@ -193,7 +193,7 @@ def test_predict_new_data_matches_frozen_statsmodels(fixtures):
             "x2": PREDICT_NEW_DATA["x2"],
         }
     )
-    predicted = res.predict(new_data)
+    predicted = res.predict(new_data=new_data)
     ref = fixtures["synthetic"]["baseline"]["predict"]["predicted"]
 
     assert len(predicted) == len(ref)

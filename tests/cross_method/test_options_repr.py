@@ -159,18 +159,10 @@ def test_repr_lists_fields_in_signature_order(cls: type) -> None:
     assert positions == sorted(positions)
 
 
-def test_re_options_positional_order_matches_fe_options():
-    """`REOptions`の位置引数の順は`FEOptions`と同じ（`time`の次が`cluster`、`dk_time`）。
-    REだけの`variance_method`は末尾に置く（先頭6個の順を保つ）。"""
-    re_options = REOptions("cluster", 0.9, "t", "g", "d", 2, "amemiya")
-    assert re_options.variance_method == "amemiya"
-    fe_options = FEOptions("cluster", 0.9, "t", "g", "d", 2)
-    for name in (
-        "cov_type",
-        "confidence_level",
-        "time",
-        "cluster",
-        "dk_time",
-        "dk_bandwidth",
-    ):
-        assert getattr(re_options, name) == getattr(fe_options, name)
+def test_re_options_field_order_matches_fe_options():
+    """`REOptions`のフィールドの並びは`FEOptions`と同じ（`time`の次が`cluster`、
+    `dk_time`）。REだけの`variance_method`は末尾に置く（先頭6個の並びを保つ）。
+    並びは`repr`の出力順とAPIページの表示順に現れる。"""
+    re_names = list(inspect.signature(REOptions).parameters)
+    fe_names = list(inspect.signature(FEOptions).parameters)
+    assert re_names == [*fe_names, "variance_method"]

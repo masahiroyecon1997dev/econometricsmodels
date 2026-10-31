@@ -50,6 +50,9 @@ NONLINEAR_TOLERANCES: dict[str, dict[str, float]] = {
     # 一致は実測で係数 ~3e-9・標準誤差 ~1e-9・対数尤度 ~1e-12と
     # RTOL_MACHINE_PRECISION を満たす。ATOL は Logit/Probit と同じ 1e-9
     # （反復最適化由来の 0 近傍ノイズが閉形式解より1桁大きい）。
+    # 係数とσの分散共分散行列（`tobit_cov.json`）も同じ`rtol_inference`で比べる。要素ごとの
+    # 尺度は`sqrt(V_ii·V_jj)`。実測の最大は4.97e-9（interval_wide_spread/hc1）。
+    # bfgs/lbfgsのケースは各solverの許容誤差で比べ、実測の最大は8.5e-8。
     "tobit_reference": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": 1e-9,
@@ -117,6 +120,10 @@ NONLINEAR_TOLERANCES: dict[str, dict[str, float]] = {
     # rtolを超えていても検知できない（同じ係数のz値を厳密に比べて担保している）。
     # 基本rtol=2e-7は、信頼区間などの最大値に約5.7倍、p値を含む最大値（Probit）に
     # 約3倍のマージン（固定フィクスチャとの比較で、OS・BLAS差の揺れに備える）。
+    # 係数の分散共分散行列（`<手法>_cov_crosscheck.json`）も同じrtolで比べる。要素ごとの尺度は
+    # `sqrt(V_ii·V_jj)`（`assert_cov_params_close`）。実測の最大はこの尺度で
+    # Logit 5.3e-10・Probit 6.8e-9（どちらも主リファレンスのstatsmodelsとRの両方、bfgs/lbfgsを除く）。
+    # statsmodels自身のbfgs/lbfgsとの比較（`rtol_solver`）はLogit 1.6e-5・Probit 1.3e-5。
     "logit_crosscheck": {
         "rtol": 2e-7,
         "atol": ATOL_LOGIT_PROBIT_CROSSCHECK,
@@ -129,6 +136,9 @@ NONLINEAR_TOLERANCES: dict[str, dict[str, float]] = {
     # 完全に独立（`nonlinear-common.md` 8章）。censReg 側の maxLik 収束を
     # reltol=1e-14 まで詰めた上で、合成シナリオは点推定・SE・限界効果とも
     # 相対 ~2e-9 で一致するため RTOL_MACHINE_PRECISION を適用する。
+    # 行列（`tobit_cov_crosscheck.json`）も同じ許容誤差で比べる。実測の最大は
+    # mroz/hc1の2.7e-7（`rtol_mroz`以内。censRegの収束限界による）。mroz以外の合成
+    # シナリオは1e-8以内。
     "tobit_crosscheck": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_CROSSCHECK_FLOOR,

@@ -22,6 +22,14 @@ PANEL_TOLERANCES: dict[str, dict[str, float]] = {
     # のみ、linearmodels自身がentityのみdemeanの別定義を使うため対象外
     # （テストコード側でこのフィールドの比較自体をスキップすること、
     # `benchmark/panel/references/linearmodels_ref.py`モジュールdoc参照）。
+    # 係数の分散共分散行列（`fe_cov.json`・`re_cov.json`と、`fe_cov_crosscheck.json`・
+    # `fe_plm_cov_crosscheck.json`・`re_cov_crosscheck.json`・`re_statsmodels_cluster_cov.json`・
+    # `re_time_invariant_cov.json`・`re_two_way_cov.json`・`re_variance_method_cov.json`）も、各テストの
+    # `rtol`で比べる。要素ごとの尺度は`sqrt(V_ii·V_jj)`（`assert_cov_params_close`）。実測の最大は
+    # この尺度で、FE・REの主リファレンスとクロスチェックは2e-12以下。`re_time_invariant`・
+    # `re_two_way`・`re_variance_method`は絶対年の列を含む入力で2e-8（time_invariant）・1e-8
+    # （two_way）・1.2e-7（variance_method）まで大きくなる。標準誤差と同じく
+    # `CONDITIONING_SENSITIVE_KEYS`に入れ、そこだけ`rtol_absolute_year`で比べる。
     "fe_reference": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_REFERENCE_FLOOR,
@@ -161,7 +169,7 @@ PANEL_TOLERANCES: dict[str, dict[str, float]] = {
     # ~1e-10（ハウスマン検定のp値）、絶対年の列を含む入力を除く）。
     # p値の裾の扱いと
     # `rtol_absolute_year`（絶対年の列、または個体平均に相対1e-3まで近い列（ほぼ別名）を含む入力で
-    # 丸め誤差が拡大する統計量だけ緩める。実測最大 ~6e-8）の理由は`re_two_way`と同じ。
+    # 丸め誤差が拡大する統計量だけ緩める。実測最大 ~6e-8、係数の分散共分散行列は1.2e-7）の理由は`re_two_way`と同じ。
     "re_variance_method": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_REFERENCE_FLOOR,

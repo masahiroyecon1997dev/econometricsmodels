@@ -43,6 +43,7 @@ DIAGNOSTIC_STATISTIC_UNDEFINED [Computation]: The White test statistic is undefi
 BREUSCH_GODFREY_MATRIX_TOO_LARGE [Computation]: The auxiliary regression matrix of the Breusch-Godfrey test (3 rows by 3 columns) is too large to allocate. Use a smaller nlags.
 TRAINING_DATA_NOT_RETAINED [Validation]: abc() needs the original training data, which this result does not keep (results returned by IVResults.first_stage() keep no training data). Call it on a result you fitted directly with OLS(...).fit().
 AUGMENT_REQUIRES_NEW_DATA [Validation]: augment() without new_data needs the original training data, which this result does not keep. Pass new_data.
+PICKLE_FORMAT_MISMATCH [Validation]: The pickled abc was written by an incompatible version of econometricsmodels and cannot be restored. Use the version of econometricsmodels that wrote the pickle, or create the object again.
 OUTCOME_CONSTANT [Validation]: The outcome has the same value in every row up to rounding, so a model with an intercept has nothing to explain. Use an outcome that varies across observations.
 OUTCOME_NOT_BINARY [Validation]: The outcome y at row 3 (0-based) must be 0 or 1, got 1.5. Code the outcome as 0 and 1, for example by casting a boolean column to an integer.
 CENSORING_BOUNDS_MISSING [Validation]: Both censoring bounds are None. Set lower, upper, or both.

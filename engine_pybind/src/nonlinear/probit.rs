@@ -23,21 +23,22 @@ use crate::shared::errors::guard;
 use engine::nonlinear::common::{
     CovType as EngineCovType, MleFitOptions, SolverType as EngineSolverType,
 };
-use engine::nonlinear::probit::{ProbitEstimator, ProbitInput};
+use engine::nonlinear::probit::{ProbitEstimator, ProbitFitted, ProbitInput};
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 
 use super::common::{
-    MarginalEffectsResult, check_cov_options, mat_to_nested_vec, mle_error_to_pyerr,
-    parse_cov_kind, parse_marginal_effects_at, parse_solver_type, resolve_cov_type,
-    resolve_mle_tol_default, solver_name,
+    MarginalEffectsResult, check_cov_options, mle_error_to_pyerr, parse_cov_kind,
+    parse_marginal_effects_at, parse_solver_type, resolve_cov_type, resolve_mle_tol_default,
+    solver_name,
 };
 use crate::shared::augment::append_predicted_column;
 use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
     SelectedData, extract_f64_column, extract_f64_columns, extract_model_x_columns,
-    select_model_x_columns,
+    select_model_x_columns, x_column_names,
 };
+use crate::shared::mat_conversion::mat_to_rows;
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
     extract_strict_float, extract_strict_int, extract_strict_opt_column, extract_strict_text,
@@ -46,6 +47,14 @@ use crate::shared::validation::validate_common_roles;
 
 /// Estimation options for Probit.
 ///
+/// All arguments are keyword-only.
+///
+/// Options by purpose:
+///
+/// - Standard errors: `cov_type`; with `"cluster"` also `cluster`.
+/// - Optimizer: `solver`, `max_iter`, `tol`, `raise_on_non_convergence`.
+/// - Confidence intervals: `confidence_level`.
+/// - Model: `include_intercept`.
 // 各フィールドの意味・既定値の根拠は`docs/spec/nonlinear-common.md`（7章: `LogitOptions`と
 // 同じオプション構成）。`start_params`は`LogitOptions`と同じ理由で意図的に持たない。
 // `fit`がPython側から`ProbitOptions`インスタンスを引数として受け取るため、
@@ -62,7 +71,7 @@ pub struct ProbitOptions {
     #[pyo3(get)]
     pub cov_type: String,
 
-    /// Whether the engine should automatically add an intercept column.
+    /// Whether to automatically add an intercept column.
     /// When true, a column of all 1.0 is prepended to the design matrix.
     /// If the user's `x` already contains a constant column while this is true,
     /// the resulting perfect collinearity raises `ComputationError` (singular
@@ -119,6 +128,17 @@ pub struct ProbitOptions {
     pub raise_on_non_convergence: bool,
 }
 
+crate::shared::pickle::impl_pickle_state!(ProbitOptions {
+    cov_type,
+    include_intercept,
+    confidence_level,
+    cluster,
+    solver,
+    max_iter,
+    tol,
+    raise_on_non_convergence,
+});
+
 impl ProbitOptions {
     /// このオプションが指名するデータの列（`cluster`）。使われるかどうか（`cov_type`等）には
     /// よらず、指名されたものを全て返す。`fit()`はこれらと`y`・`x`等だけをデータから取り込む。
@@ -129,8 +149,13 @@ impl ProbitOptions {
 
 #[pymethods]
 impl ProbitOptions {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
+
     #[new]
     #[pyo3(signature = (
+        *,
         cov_type = "classical".to_string(),
         include_intercept = true,
         confidence_level = 0.95,
@@ -219,22 +244,19 @@ impl ProbitOptions {
 
 /// Estimation results for Probit.
 ///
-/// Structured data only (no `summary()`); see `docs/spec/nonlinear-common.md`
-/// section 5. Row-oriented table construction (e.g. a `params_table`) is left to
-/// `python_package`. All array-valued fields (`params`, `std_errors`, etc.) share the
-/// same order as `param_names`.
+/// Structured data only (no `summary()`). All array-valued fields (`params`,
+/// `std_errors`, etc.) share the same order as `param_names`.
 ///
-/// `predict()` / `pred_table()` / `marginal_effects()` are provided as separate methods
-/// (not part of this struct's fields), matching `docs/spec/nonlinear-common.md` section 6.
+/// `predict()` / `pred_table()` / `marginal_effects()` are separate methods, not fields.
 // `ProbitResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`ProbitOptions`の`from_py_object`とは
 // 対照的。`LogitResult`と同じ理由）。
 //
 // `get_all`ではなく、フィールドごとに個別`#[pyo3(get)]`を付ける方式にしている
 // （`LogitResult`と同じ設計。`predict`/`pred_table`/`marginal_effects`の呼び出しに必要な
-// `estimator`フィールドを`#[pyo3(get)]`を付けずに済ませられるようにするため）。
+// `fitted`フィールドを`#[pyo3(get)]`を付けずに済ませられるようにするため）。
 //
-// `Clone`を派生しない: `estimator`（`engine::nonlinear::probit::ProbitEstimator`）が
+// `Clone`を派生しない: `fitted`（`engine::nonlinear::probit::ProbitFitted`）が
 // `Clone`を実装していないため（`LogitResult`と同じ理由）。
 #[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug)]
@@ -243,6 +265,10 @@ pub struct ProbitResult {
     pub params: Vec<f64>,
     #[pyo3(get)]
     pub std_errors: Vec<f64>,
+    /// Covariance matrix of the coefficients under `cov_type`, one row per entry of
+    /// `param_names` (same order on both axes).
+    #[pyo3(get)]
+    pub cov_params: Vec<Vec<f64>>,
     #[pyo3(get)]
     pub test_stats: Vec<f64>,
     /// Distribution of `test_stats`: `"t"` or `"normal"`.
@@ -299,13 +325,79 @@ pub struct ProbitResult {
     #[pyo3(get)]
     pub solver: String,
     /// Not exposed to Python; only `predict`/`pred_table`/`marginal_effects` read it
-    /// (`LogitResult`の`estimator`と同じ位置づけ、コメント参照)。
-    estimator: ProbitEstimator,
+    /// (`LogitResult`の`fitted`と同じ位置づけ、コメント参照)。
+    fitted: ProbitFitted,
     /// The `polars.DataFrame` passed to `fit()`, as given. `augment(new_data=None)` appends
     /// the predicted column to it, so every column is kept, including the ones the model
     /// does not read.
     source_data: Py<PyAny>,
 }
+
+// 入力データのうち`y`・`x`は状態に入れない（`source_data`の列から作り直せる）。入れるのは、`x`の列名・`y`の列名・
+// 切片の有無・係数・分散共分散行列。復元は`from_columns`/`from_parts`を通して次元の整合を検査する
+// （列が無い・不整合なら`PICKLE_FORMAT_MISMATCH`）。
+impl crate::shared::pickle::PickleFieldFromSource for ProbitFitted {
+    fn to_py<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        use crate::shared::pickle::{PickleField, to_tuple};
+        let input = self.input();
+        let x_names = x_column_names(input.param_names(), input.has_intercept(), 0).to_vec();
+        to_tuple(
+            py,
+            vec![
+                x_names.to_py(py)?,
+                input.dep_var_name().to_string().to_py(py)?,
+                input.has_intercept().to_py(py)?,
+                self.params().to_vec().to_py(py)?,
+                self.cov_params().to_py(py)?,
+            ],
+        )
+    }
+
+    fn from_py(obj: &Bound<'_, PyAny>, source: &Bound<'_, PyAny>) -> Option<Self> {
+        use crate::nonlinear::common::rebuild_columns;
+        use crate::shared::pickle::{PickleField, from_tuple};
+        let items = from_tuple(obj, 5)?;
+        let x_names: Vec<String> = PickleField::from_py(&items[0])?;
+        let dep_var_name: String = PickleField::from_py(&items[1])?;
+        let has_intercept: bool = PickleField::from_py(&items[2])?;
+        let params: Vec<f64> = PickleField::from_py(&items[3])?;
+        let (y, x) = rebuild_columns(source, &dep_var_name, &x_names, has_intercept, params.len())?;
+        let input = ProbitInput::from_columns(&y, &x, x_names, has_intercept, dep_var_name).ok()?;
+        ProbitFitted::from_parts(input, params, PickleField::from_py(&items[4])?).ok()
+    }
+}
+
+crate::shared::pickle::impl_pickle_state!(ProbitResult {
+    params,
+    std_errors,
+    cov_params,
+    test_stats,
+    stat_dist,
+    stat_df,
+    p_values,
+    conf_lower,
+    conf_upper,
+    param_names,
+    dep_var_name,
+    log_likelihood,
+    log_likelihood_null,
+    lr_statistic,
+    lr_p_value,
+    lr_df,
+    pseudo_r_squared,
+    aic,
+    bic,
+    n_obs,
+    df_model,
+    df_resid,
+    converged,
+    n_iter,
+    cov_type,
+    solver,
+    source_data,
+} rebuilt_from(source_data) {
+    fitted
+});
 
 // `#[pymethods]`ブロックの外に置く非公開実装（`LogitResult`と同じ理由）。
 impl ProbitResult {
@@ -314,8 +406,8 @@ impl ProbitResult {
         select_model_x_columns(
             new_data,
             "new_data",
-            &self.param_names,
-            self.estimator.input().has_intercept(),
+            self.fitted.input().param_names(),
+            self.fitted.input().has_intercept(),
             0,
         )
     }
@@ -323,21 +415,25 @@ impl ProbitResult {
     /// `predict()`/`augment()`のSome分岐で共有する、`df`に対するout-of-sample予測
     /// （`x`列の抽出→`predict_new_data`呼び出し）。
     fn predict_for(&self, df: &DataFrame) -> PyResult<Vec<f64>> {
-        let has_intercept = self.estimator.input().has_intercept();
+        let has_intercept = self.fitted.input().has_intercept();
         let x_columns = extract_model_x_columns(
             df,
-            &self.param_names,
+            self.fitted.input().param_names(),
             has_intercept,
             0,
             ColumnSource::new("x", "new_data"),
         )?;
 
-        Ok(self.estimator.predict_new_data(&x_columns))
+        Ok(self.fitted.predict_new_data(&x_columns))
     }
 }
 
 #[pymethods]
 impl ProbitResult {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
+
     /// Predicted probabilities for the training data used in `fit()`, or for
     /// `new_data` when given.
     ///
@@ -349,7 +445,7 @@ impl ProbitResult {
     fn predict(&self, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<f64>> {
         guard(|| {
             let Some(new_data) = new_data else {
-                return Ok(self.estimator.predict());
+                return Ok(self.fitted.predict());
             };
 
             let selected = self.select_new_data(new_data)?;
@@ -378,7 +474,7 @@ impl ProbitResult {
                     let probability = self.predict_for(&selected.frame)?;
                     (new_data.clone(), probability)
                 }
-                None => (self.source_data.bind(py).clone(), self.estimator.predict()),
+                None => (self.source_data.bind(py).clone(), self.fitted.predict()),
             };
 
             append_predicted_column(&source, "predicted_probability", probability)
@@ -388,20 +484,19 @@ impl ProbitResult {
     /// 2x2 classification table as `[[row0], [row1]]`, where row/column index 0 is the
     /// negative class and 1 is the positive class: `table[actual][predicted]`.
     ///
-    /// `actual` always uses a fixed 0.5 split; only `predicted` depends on `threshold`
-    /// (matches statsmodels' `BinaryResults.pred_table(threshold)`; see
-    /// `engine::nonlinear::probit::ProbitEstimator::pred_table` for the exact semantics).
-    /// Out-of-sample data is not yet supported (same limitation as `predict()`).
+    /// Counts the training observations by actual class (`y` is 0 or 1) and predicted
+    /// class; the predicted class is 1 when the predicted probability exceeds
+    /// `threshold`. This matches statsmodels' `BinaryResults.pred_table(threshold)`.
+    /// There is no `new_data` argument: the table describes the training data only.
     #[pyo3(signature = (threshold=0.5))]
     fn pred_table(&self, threshold: f64) -> PyResult<Vec<Vec<f64>>> {
-        guard(|| Ok(mat_to_nested_vec(&self.estimator.pred_table(threshold))))
+        guard(|| Ok(mat_to_rows(&self.fitted.pred_table(threshold))))
     }
 
     /// Marginal effects (`dy/dx`) with delta-method standard errors.
     ///
     /// Independent of `fit()`'s `confidence_level` (re-evaluated here so callers can
-    /// use a different confidence level without re-fitting). See
-    /// `docs/spec/nonlinear-common.md` section 6.
+    /// use a different confidence level without re-fitting).
     ///
     /// # Errors
     /// - `at` is not one of `"overall"`, `"mean"`, `"median"` (case-insensitive):
@@ -410,14 +505,15 @@ impl ProbitResult {
     #[pyo3(signature = (at="overall".to_string(), confidence_level=0.95))]
     fn marginal_effects(
         &self,
+        py: Python<'_>,
         at: String,
         confidence_level: f64,
     ) -> PyResult<MarginalEffectsResult> {
         guard(|| {
             let at = parse_marginal_effects_at(&at)?;
-            let effects = self
-                .estimator
-                .marginal_effects(at, confidence_level)
+            // 推定量だけを使う純Rustの計算なので、GILを手放して走らせる。
+            let effects = py
+                .detach(|| self.fitted.marginal_effects(at, confidence_level))
                 .map_err(mle_error_to_pyerr)?;
 
             Ok(MarginalEffectsResult {
@@ -488,13 +584,29 @@ pub(crate) fn build_probit_input(
 ///   クラスター数不足等）は`mle_error_to_pyerr`で変換（詳細は
 ///   `engine::nonlinear::probit::ProbitEstimator::fit`のdocコメント参照）
 pub(crate) fn fit(
+    py: Python<'_>,
     data: SelectedData,
     y: String,
     x: Vec<String>,
     options: &ProbitOptions,
 ) -> PyResult<ProbitResult> {
-    let SelectedData { source, frame: df } = data;
-    let (input, cov_type, cov_type_lower, solver) = build_probit_input(&df, y, x, options)?;
+    let SelectedData { source, frame } = data;
+    // 取り込み済みの`frame`以降はPythonオブジェクトに触れないので、GILを手放して走らせる
+    // （他のPythonスレッドを止めず、複数のfitをスレッドで並行できる）。結果の組み立てまで
+    // 手放した側で行うため、`source`（`Py<PyAny>`は`Send`）もクロージャに渡す。
+    py.detach(|| fit_frame(&frame, source, y, x, options))
+}
+
+/// [`fit`]の純Rust部分（GILを手放した状態で走る）。`PyErr`は遅延生成でGILを要求しない
+/// ので、ここで`?`により返してよい。`source`は結果に載せるだけで、GILが要る操作はしない。
+fn fit_frame(
+    df: &DataFrame,
+    source: Py<PyAny>,
+    y: String,
+    x: Vec<String>,
+    options: &ProbitOptions,
+) -> PyResult<ProbitResult> {
+    let (input, cov_type, cov_type_lower, solver) = build_probit_input(df, y, x, options)?;
 
     let estimator = ProbitEstimator::fit(
         input,
@@ -512,6 +624,7 @@ pub(crate) fn fit(
     Ok(ProbitResult {
         params: estimator.params().to_vec(),
         std_errors: estimator.std_errors().to_vec(),
+        cov_params: mat_to_rows(estimator.cov_params()),
         test_stats: estimator.test_stats().to_vec(),
         stat_dist: estimator.stat_dist().name().to_string(),
         stat_df: estimator.stat_dist().df().map(|df| df as i64),
@@ -535,7 +648,7 @@ pub(crate) fn fit(
         n_iter: estimator.n_iter(),
         cov_type: cov_type_lower,
         solver: solver_name(solver).to_string(),
-        estimator,
+        fitted: estimator.into_fitted(),
         source_data: source,
     })
 }

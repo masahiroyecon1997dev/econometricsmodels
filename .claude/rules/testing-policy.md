@@ -33,7 +33,7 @@ Issue番号・内部管理ドキュメント（`docs/planning/specs/`配下の�
        `numDeriv::hessian()`による数値微分Hessianとの一致を別途確認済み）。
     3. 1・2のどちらも現実的でない場合は、その旨と理由をクロスチェックスクリプトのコメントに明記し、独立性が限定的であることを認識した上で使う。
   - 上記の対策が特に重要になるのは、**主リファレンス自体がクロスチェックと同系統（例: 両方ともR実装）で、独立した第三者実装による三角測量が効かない手法**（例: Tobitは主リファレンスがR `AER::tobit`、クロスチェックもR `censReg`。両者は別実装なのでクロスチェックとして成立するが、Python参照が無く外部（R以外）からの確認が効かない）。statsmodels等の独立した主リファレンスが別途存在する手法（OLS/WLS/Logit/Probit/IV等）では、本実装とRクロスチェックに共通の誤解があっても、独立に実装された主リファレンスとは一致しない可能性が高く、実質的な三角測量として機能する。
-- **pyfixest**（Python）: OLSの正確性検証には使わない。fixest（R）本体のソースを確認したところ、pyfixest（Python、v0.60.0時点）のHC2/HC3標準誤差はfixestの設計ではなく**pyfixest自身の実装バグ**（HC1用の`N/(N-k)`小標本補正をHC2/HC3にも誤って適用）により系統的に乖離することが判明したため。性能比較（実行時間・メモリ）でのみ使う。FE/REの正確性検証にも使っていない（linearmodelsとR `fixest`/`plm`を使う。詳細は`docs/guide/verification.md`参照）。
+- **pyfixest**（Python）: リファレンスには使わない（正確性検証にも性能比較にも使っていない。性能比較は廃止済みで、`docs/performance/ols.md`参照）。v0.60.0とfixestの比較では、HC2/HC3標準誤差が系統的に乖離し、HC1用の`N/(N-k)`小標本補正が加わっているとみなすと説明できる差だった。原因の断定はせず、最新版とpyfixestの文書は未確認。FE/REの正確性検証もlinearmodelsとR `fixest`/`plm`で行う（詳細は`docs/guide/verification.md`参照）。
 
 ## テスト用データセット
 
@@ -103,6 +103,9 @@ Issue番号・内部管理ドキュメント（`docs/planning/specs/`配下の�
 - 理由: CIを軽く保つため（Rパッケージのインストールはビルドが重い）。またリファレンス実装側のバージョンアップで数値が変わり、意図せずテストが壊れることを防ぐため。
 - フィクスチャの命名: 手法・シナリオ・cov_type等が分かる形にする（例: `ols.json`に、シナリオ×cov_typeをネストして持たせる。実例は`tests/fixtures/benchmarks/ols.json`参照）。
   - **最上位は全フィクスチャで`synthetic`・`wooldridge`・`_meta`の3キーに統一する**。`synthetic`は合成データのシナリオと、それを元にした`solver`・`no_intercept`等の特殊ケース、`wooldridge`は実データ（`wage1`・`mroz`・`card`・`wagepan`等）。その下はシナリオ×cov_typeの順にネストする（cov_typeのエントリは、リファレンス実装の結果をそのまま置く。補助値の`hac_lag`は結果と同じ階層に置く）。統計量のキーは公開APIの名前（`params`・`std_errors`・`test_stats`・`p_values`・`conf_int`）に揃える。生成スクリプトは平坦に組み立て、末尾で`benchmark.common.group_by_dataset_source`が二層に振り分ける。
+- **係数の分散共分散行列（`cov_params`）は統計量のJSONに入れず、別のJSON（`<手法>_cov.json`、クロスチェックは`<手法>_cov_crosscheck.json`）に分ける**。行列は行・列とも係数名をキーにした入れ子のdictで、統計量のJSONと同じシナリオ×cov_typeの木に同じ位置の葉として並べる。2つのJSONは同じ`build_fixtures()`から`benchmark/common/cov_fixtures.py`で分けて書くので、キーはずれない。テストは`tests/support/_fixture_cov.py`の`load_fixtures_with_cov`で合流させて読み、葉の`sqrt(diag)`が`std_errors`と一致すること・葉の過不足がないことを読み込み時に確認する。行列の要素は`|ours - ref| <= rtol * sqrt(V_ii * V_jj)`で比べる（非対角成分が0に近くても要素自身の相対誤差に依存しない。絶対誤差のフロアは置かない）。
+- **`tests/cross_method/test_cov_params.py`は、各手法が受け付ける全`cov_type`で、形・対称性・対角の平方根と`std_errors`の一致を確かめる。** 手法・`cov_type`を足したら`COV_TYPES_BY_METHOD`と`METHOD_OPTIONS`に足す（パッケージが受け付ける値との食い違いは同ファイルの検査が検出する）。
+- **行列の葉は、すべてテストで比較する。** 読み込んだ行列が比較されないと、検証した気になるだけで何も検証しない。`assert_cov_params_close`が比較した行列を記録し、全体実行の`pytest tests --check-cov-coverage`（CIで有効）が、読み込んだのに比較されなかった葉を失敗として報告する（絞り込み実行では無効）。リファレンスの行列が本実装の定義と異なる、または手計算でも本実装と同じ計算方法になり独立なリファレンスにならない葉は、行列のフィクスチャに入れず（生成側で落とす）、`tests/support/_fixture_cov.py`の`NO_COV_LEAVES`に理由つきで登録し、`docs/guide/verification-details.md`の「Not compared against a second reference」に載せる。登録した葉に行列があると、登録されていない葉に行列が無いと、読み込み時に失敗する。
 - **フィクスチャを生成するスクリプトと、生成されたJSON自体は別の場所に置く**。生成スクリプトは`benchmark/<系統>/fixtures/generate_<手法名>_fixtures.py`（コード、`benchmark/`側で管理。系統ディレクトリ構成は`.claude/skills/reference-benchmark/SKILL.md`参照）、生成物は`tests/fixtures/benchmarks/<手法名>.json`（データ、テスト側で管理）。
 - **合成データセット自体も同様にCSVとしてtests側（`tests/fixtures/benchmarks/data/`）に固定する**（`benchmark/<系統>/freeze.py`で生成）。理由: ジェネレータ側のコードが将来変わっても、既に固定したフィクスチャJSONの期待値と無言で不整合にならないようにするため。
   - **Wooldridgeデータセットはこの固定化の対象外**とする（`wooldridge`パッケージ自体はMITライセンスだが、同梱される実データの著作権は原典の教科書側にある可能性があり、フィルタ後の部分集合であってもMITライセンスの本リポジトリにCSVとして再配布してよいか未確認のため。ユーザー確認済み）。Wooldridgeデータは引き続き`load_wooldridge.py`経由で都度ロードする。`wooldridge`パッケージ自体はtest依存グループに含め標準CIで常にインストールする（実データはパッケージのwheel内に留まりリポジトリへ再配布するわけではないため、上記の再配布可否の制約とは無関係）。`pytest.importorskip("wooldridge")`は、test依存グループを経由しない実行環境向けの防御的フォールバックとして残す。

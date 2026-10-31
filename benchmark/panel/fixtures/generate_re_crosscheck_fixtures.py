@@ -133,6 +133,7 @@ from benchmark.common import (
     group_by_dataset_source,
     run_fixture_cli,
 )
+from benchmark.common.cov_fixtures import strip_cov_params
 from benchmark.common.load_wooldridge import load as load_wooldridge
 from benchmark.panel.cluster_cases import (
     CLUSTER_IMBALANCED_CSV,
@@ -633,7 +634,7 @@ def build_fixtures() -> dict:
 
 if __name__ == "__main__":
     run_fixture_cli(
-        build_fixtures,
+        lambda: strip_cov_params(build_fixtures()),
         BENCHMARKS_DIR / "re_crosscheck.json",
         description=__doc__,
     )

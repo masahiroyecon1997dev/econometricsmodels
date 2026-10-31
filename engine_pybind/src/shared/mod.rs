@@ -11,4 +11,5 @@ pub(crate) mod errors;
 pub(crate) mod mat_conversion;
 pub(crate) mod option_repr;
 pub(crate) mod option_values;
+pub(crate) mod pickle;
 pub(crate) mod validation;

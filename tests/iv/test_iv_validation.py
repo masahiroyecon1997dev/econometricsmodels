@@ -582,7 +582,7 @@ def test_first_stage_augment_none_raises_validation_error(iv_dataset):
         first_stage.augment()
 
     new_data = pl.DataFrame({"x1": [1.0], "z1": [0.5], "z2": [0.2]})
-    augmented = first_stage.augment(new_data)
+    augmented = first_stage.augment(new_data=new_data)
     assert augmented.columns == ["x1", "z1", "z2", "predicted"]
 
 

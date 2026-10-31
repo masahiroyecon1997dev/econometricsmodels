@@ -64,6 +64,7 @@ from benchmark.common import (
     group_by_dataset_source,
     run_fixture_cli,
 )
+from benchmark.common.cov_fixtures import strip_cov_params
 from benchmark.common.load_wooldridge import load as load_wooldridge
 from benchmark.panel.references.r import (
     default_dk_bandwidth,
@@ -221,7 +222,7 @@ def build_fixtures() -> dict:
 
 if __name__ == "__main__":
     run_fixture_cli(
-        build_fixtures,
+        lambda: strip_cov_params(build_fixtures()),
         BENCHMARKS_DIR / "re_two_way.json",
         description=__doc__,
     )

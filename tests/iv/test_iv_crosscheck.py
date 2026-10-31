@@ -10,7 +10,7 @@ linearmodelsとは独立した実装（R `ivreg`）との一致を確認する
 
 classical/hc0〜hc3/cluster/HACはRとほぼ機械精度で一致する（OLSクロスチェックと同じ実測
 傾向）ため`RTOL_STRICT`で厳密比較する。HACのR側は`NeweyWest(adjust = FALSE)`
-（既定の`adjust = TRUE`は共分散全体に`n/(n-k)`を掛けるが、本実装・linearmodelsは
+（`adjust = TRUE`（`kernHAC`の既定。`NeweyWest`の既定は`FALSE`）は共分散全体に`n/(n-k)`を掛けるが、本実装・linearmodelsは
 掛けない。このスカラー倍だけが差の全てで、small_n（n=40）でも機械精度で一致する。
 `benchmark/iv/references/run_ivreg.R`・`test_ols_crosscheck.py`参照）。Wu-Hausmanは
 補助回帰が内生変数の第一段階残差の分だけ列が多く、`adjust = TRUE`なら
@@ -47,7 +47,6 @@ Note:
 
 from __future__ import annotations
 
-import json
 from functools import partial
 from pathlib import Path
 
@@ -61,6 +60,7 @@ from _assertions import (
     assert_p_value_close,
 )
 from _constants import DATA_DIR
+from _fixture_cov import load_fixtures_with_cov
 from _helpers import (
     hac_time_for,
     load_wooldridge_dataset,
@@ -114,12 +114,12 @@ ATOL = TOLERANCES["iv_crosscheck"]["atol"]
 
 @pytest.fixture(scope="module")
 def crosscheck() -> dict:
-    return json.loads(FIXTURE_PATH.read_text())["synthetic"]
+    return load_fixtures_with_cov(FIXTURE_PATH)["synthetic"]
 
 
 @pytest.fixture(scope="module")
 def crosscheck_wooldridge() -> dict:
-    return json.loads(FIXTURE_PATH.read_text())["wooldridge"]
+    return load_fixtures_with_cov(FIXTURE_PATH)["wooldridge"]
 
 
 # _assert_close/_assert_dict_closeはtests/support/_assertions.pyのassert_close/

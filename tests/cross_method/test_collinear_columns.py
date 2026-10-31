@@ -201,7 +201,7 @@ class TestDiagnosticAuxiliaryRegression:
             test="BREUSCH_PAGAN",
             columns=["x1", "x2", "combo"],
         ):
-            fitted.breusch_pagan_test(["x1", "x2", "combo"])
+            fitted.breusch_pagan_test(variables=["x1", "x2", "combo"])
 
     def test_white_reports_the_variables_of_the_dependency(self, df):
         fitted = _ols(df, ["d1", "d2"], include_intercept=False)
@@ -221,7 +221,7 @@ class TestDiagnosticAuxiliaryRegression:
             test="BREUSCH_PAGAN",
             columns=["d1", "d2"],
         ):
-            fitted.breusch_pagan_test(["d1", "d2"])
+            fitted.breusch_pagan_test(variables=["d1", "d2"])
 
 
 @pytest.mark.parametrize(

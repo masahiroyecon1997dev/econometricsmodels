@@ -32,6 +32,9 @@ IV_TOLERANCES: dict[str, dict[str, float]] = {
     # Wu-Hausman p値は絶対誤差の下限なしの相対比較、最大6e-10）。信頼区間の端点は
     # 0付近の値で相対差が膨らみ（最大1.9e-8）、絶対差は下限の1/10以下に収まる。
     # card×クラスターのWald/Fだけは`rtol_wald_card_cluster`（上記定数のコメント参照）。
+    # 係数の分散共分散行列（`iv_cov.json`・`iv_gmm_cov.json`と、そのクロスチェック）も、各テストの
+    # `rtol`で比べる。要素ごとの尺度は`sqrt(V_ii·V_jj)`（`assert_cov_params_close`）。実測の最大は
+    # この尺度で、2SLSが主1.0e-10・R 3.7e-11、GMMが主2.5e-10・R 1.7e-10。
     "iv_reference": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_REFERENCE_FLOOR,

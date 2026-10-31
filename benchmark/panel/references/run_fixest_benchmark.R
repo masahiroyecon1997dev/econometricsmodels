@@ -104,6 +104,14 @@ summ <- summary(model, vcov = vc)
 
 coefs <- coef(summ)
 ses <- se(summ)
+# 係数の分散共分散行列（`se()`の元になった行列そのもの）。
+cov_mat <- vcov(summ)
+cov_params <- setNames(
+  lapply(seq_along(coefs), function(i) {
+    setNames(as.list(as.numeric(cov_mat[i, ])), names(coefs))
+  }),
+  names(coefs)
+)
 # summ$coeftable[, col]は1行（説明変数1個）のとき行列添字の仕様で
 # rownamesが落ちる（coef()/se()はfixest専用アクセサのため影響を受けない）。
 # setNames()で明示的に名前を付け直す。
@@ -156,6 +164,7 @@ library(jsonlite)
 result <- list(
   params = as.list(coefs),
   std_errors = as.list(ses),
+  cov_params = cov_params,
   test_stats = as.list(test_stats),
   p_values = as.list(p_values),
   conf_int = mapply(

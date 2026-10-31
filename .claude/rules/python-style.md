@@ -12,6 +12,7 @@ paths:
 - 全public関数・クラスに **型ヒントを必須** で付与する。
 - 全public関数・クラスに **Googleスタイルのdocstringを必須** で付与する。
 - **docstringは英語にする**（モジュール・クラス・関数・メソッド・プロパティの`"""docstring"""`全て）。`rust-style.md`「言語方針」が`engine_pybind`の`#[pyclass]`/`#[pyfunction]`のdocコメント（PyO3経由でPythonの`__doc__`になるもの）を英語にする方針と揃え、mkdocs（mkdocstrings）で同じページにレンダリングされるRust側・Python側のdocstringで言語が混在しないようにする（発覚した不整合の是正）。PyPI公開の独立パッケージであり、Pythonエコシステムの慣習（pandas/numpy/polars等）に合わせる、という`rust-style.md`と同じ理由。
+- **推定量クラス**（`.fit()`を持つ公開クラス）のdocstringには、`Examples:`節に実行できる`>>>`の例を1つ以上置く。`tests/cross_method/test_docstring_examples.py`がパッケージ内のPythonモジュールの`>>>`の例を`doctest`で実行して出力まで照合し、推定量クラスに例があることも検査する（浮動小数は`round(..., 3)`などで丸めて書く）。結果クラスのメソッドに例を足した場合も、同じテストが自動で拾う。
 - **日本語のままでよい**: docstring以外の非公開実装コメント（実装の背景説明、設計判断の理由、TODOコメント等）。`rust-style.md`と同じ区別。
 
 ## コメント運用
@@ -28,6 +29,7 @@ Issue番号・内部管理ドキュメント（`docs/planning/specs/`配下の�
 
 - データ入力は **polarsのみ**。pandas等への変換・依存を持ち込まない。
 - 変数は **List渡し**、推定オプションは **オブジェクト渡し**。formula文字列パースを実装しない。
+- **デフォルト値のある引数はキーワード専用にする**（`def f(self, required, *, option=None)`）。推定クラスの`options`、結果クラスのメソッドの任意引数（`new_data`・`target`・`statistic`・`variables`・`threshold`・`at`・`confidence_level`等）が対象で、引数の追加・並べ替えで位置渡しの呼び出しが壊れないようにする。必須引数（`data`・`y`・`x`、`breusch_godfrey_test`の`time`・`nlags`等）は位置渡しのままでよい。`engine_pybind`の生のメソッドを呼ぶ内部の呼び出しは対象外。`tests/cross_method/test_keyword_only_arguments.py`が公開クラスのコンストラクタと公開メソッドを検査する。
 - `engine_pybind` からの呼び出しを薄くラップする。計算ロジックをPython側に持たない。
 
 ## 開発ツールの実行方針
@@ -39,5 +41,5 @@ Issue番号・内部管理ドキュメント（`docs/planning/specs/`配下の�
 
 ## テスト
 
-- 対応するリファレンス実装（statsmodels/linearmodels/R）との比較テストは `tests/`（pytest）に置く（pyfixestは性能比較専用）。
+- 対応するリファレンス実装（statsmodels/linearmodels/R）との比較テストは `tests/`（pytest）に置く（pyfixestはリファレンスに使わない）。
 - 許容誤差等のテスト方針の詳細は `testing-policy.md` を参照。

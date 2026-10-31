@@ -127,7 +127,7 @@ econometricsmodels/
 
 ## 7. テスト方針
 
-詳細は `.claude/rules/testing-policy.md`（tests配下で自動ロード）を参照。要点: statsmodels/linearmodels/Rとの数値比較で検証（pyfixestは性能比較専用）、許容誤差は相対誤差1e-8を基本（手法により例外あり）、engineの単体テストはソース内`mod tests`、`tests/`はpytestに分離。
+詳細は `.claude/rules/testing-policy.md`（tests配下で自動ロード）を参照。要点: statsmodels/linearmodels/Rとの数値比較で検証（pyfixestはリファレンスに使わない）、許容誤差は相対誤差1e-8を基本（手法により例外あり）、engineの単体テストはソース内`mod tests`、`tests/`はpytestに分離。
 
 ## 8. バージョニング・CI/CD
 
@@ -168,12 +168,13 @@ econometricsmodels/
 - 仕様書: `docs/spec/`（実装済みの手法ごとの実装上の判断・内部構成・テスト方針・ベンチマーク上の注意。日本語で、公開サイトには出さない。method非依存のCI/CD・セキュリティ運用ノートもここに置く、例: `ci-cd-notes.md`・`inference-conventions.md`）、`docs/planning/specs/`（実装途中の手法の設計ノート・実装ノート）。
   ある手法の実装が完了したら、その手法の仕様書は`docs/planning/specs/`から`docs/spec/`へ集約する
   （経緯は削除し理由のみ簡潔に記載、1ファイルにまとめる）。
-- **手法の定義（数式）の正本**: `docs/methods/<手法>.md`（mkdocsのnavに載せる英語の公開ページ。推定量・`cov_type`ごとの共分散・検定分布と自由度・適合度統計量・事後診断の定義式）。`docs/spec/`には定義式を重複させず、このページへのリンクと、実装上の判断・理由だけを置く。手法の式や定義を変えたら`methods/`を更新し、`spec/`は理由が変わったときだけ更新する。オプション・結果フィールドの意味の正本はコード内のdocstring（APIページが自動生成）で、`spec/`の「API引数」「結果構造体」は設計判断の理由のみとする。公開側（`usage/`・`methods/`・`guide/`・`api/`・公開クラスのdocstring）は英語で、`docs/spec/`・`.claude/`・`CLAUDE.md`への参照を含めない（`tests/cross_method/test_public_docs.py`が検査する）。新手法の追加時は`usage/`・`api/`・`methods/`に各1ページ足し、mkdocsのnavの手法配下（Usage / Options and results / Definitions）に載せる。`api/`ページは冒頭に「Options at a glance」の表を置き、Resultsクラスのdocstringには「Fields by purpose」で公開プロパティ・メソッドを目的別に漏れなく列挙する（`tests/cross_method/test_results_docstrings.py`が検査する）。`usage/`のコード例はページ内で自己完結させる。
+- **手法の定義（数式）の正本**: `docs/methods/<手法>.md`（mkdocsのnavに載せる英語の公開ページ。推定量・`cov_type`ごとの共分散・検定分布と自由度・適合度統計量・事後診断の定義式）。`docs/spec/`には定義式を重複させず、このページへのリンクと、実装上の判断・理由だけを置く。手法の式や定義を変えたら`methods/`を更新し、`spec/`は理由が変わったときだけ更新する。オプション・結果フィールドの意味の正本はコード内のdocstring（APIページが自動生成）で、`spec/`の「API引数」「結果構造体」は設計判断の理由のみとする。公開側（`usage/`・`methods/`・`guide/`・`api/`・公開クラスのdocstring）は英語で、`docs/spec/`・`.claude/`・`CLAUDE.md`への参照を含めない（`tests/cross_method/test_public_docs.py`が検査する）。新手法の追加時は`usage/`・`api/`・`methods/`に各1ページ足し、mkdocsのnavのModels配下で、系統（Linear models / Nonlinear models / Instrumental variables / Panel models。`engine/src/`の系統ディレクトリに対応）の中に手法を置き、手法の下にUsage / Options and results / Definitionsを載せる。`api/`ページは冒頭に「Options at a glance」の表を置き、Resultsクラスのdocstringには「Fields by purpose」で公開プロパティ・メソッドを、`*Options`（Rustの`///`）には「Options by purpose」でフィールドを、目的別に漏れなく列挙する（Optionsは短い導線だけで、詳細は`api/`の表）（`tests/cross_method/test_results_docstrings.py`が検査する）。`usage/`のコード例はページ内で自己完結させる。推定量クラスのdocstringの`Examples:`は`tests/cross_method/test_docstring_examples.py`が実行して出力まで照合する。
 - 利用者向け横断ガイド: `docs/guide/`（mkdocsのnavに載せる英語の公開ページ）。現状は`inference-conventions.md`（手法別の検定分布・自由度、R/statsmodels/linearmodelsとの違い、診断統計量の読み方）。手法別の一覧表はこの公開ページを正本とし、`docs/spec/inference-conventions.md`には重複させず選択理由・ベンチマーク上の注意のみを置く。新手法の追加時は公開ページの表に1行追加する。
+- **公開ドキュメントの校正・校閲**: 公開ページ（`docs/`の英語ページとAPIページに描画されるdocstring）を変更したら、`/review-docs`（または「校閲して」等の依頼）で校閲する。変更しただけでは自動実行しない（スペル・わかりやすさ・全体構成、数式・統計学の正しさ、実装との整合、他パッケージ言及の事実性を、`docs-prose-reviewer`/`docs-accuracy-reviewer`が確認する）。他パッケージ言及の事実確認でWeb検索をするときは、事前にユーザーの許可を得る。指摘はドキュメントを直さず提示し、起票は承認後にGitHub Issueへ行う。
 - 性能比較記録: `docs/performance/<method>.md`（`performance/compare_<method>.py`の計測方法論・設計判断・既知の限界・今後の検討を残す日本語の開発ノート。
   計測結果の表は置かない）。生成JSONは`docs/performance/results/`（`.gitignore`対象）。
 - **公開ページ（mkdocs nav掲載・英語）の運用ルール**: 検証と性能は、手法が増えたら公開ページにも反映する。
-  - `docs/guide/verification.md`: 手法×リファレンス（主・独立クロスチェック）・比較する統計量・許容誤差（`tests/support/_tolerances_<系統>.py`が正）・実データ・単一リファレンスの例外。新手法のテスト作成（`/test-new`）の完了条件に含める。
+  - `docs/guide/verification.md`: 手法×リファレンス（主・独立クロスチェック）・比較する統計量・許容誤差（`tests/support/_tolerances_<系統>.py`が正）・実データ。クロスチェックの設定の注記と単一リファレンスの例外（「Not compared against a second reference」）は`docs/guide/verification-details.md`に分けている。新手法のテスト作成（`/test-new`）の完了条件に含める。
   - `docs/guide/performance.md`（概要・既知の課題・計測条件は手書き、先頭のサマリー表は生成ブロック）と`docs/guide/performance-results.md`（全表、全体が生成物）: **数値は`benchmark_performance.yml`のCI計測値を正とする**（devcontainerの単発計測は使わない）。リリース準備時（`/release`）にリリースブランチで手動実行し、artifactから`python -m performance.render_docs_results`で再生成する。`README.md`「Performance」節の表・例にも同じ数値を丸めて転記しているため、再生成のたびに合わせて更新する（手順は`/release`）。手法を足すときは`benchmark_performance.yml`のmatrixに加えれば、次回の再生成で自動的にページへ現れる。
   - `docs/guide/accepted-data.md`: 受け付ける入力（polarsの`DataFrame`のみ）・列の役割ごとに許可するdtype・値の変換と精度・引数の型（`TypeError`との分担）。許可するdtypeの表は`engine_pybind/src/shared/column_extraction.rs`のdtype検査が正で、検査を変更したらこの表を同時に更新する（許可・拒否の方針を各手法specに複製しない）。
   - `docs/guide/validation.md`: バリデーションの設計思想（欠損値を自動除外しない理由等）と、`ValidationError`/`ComputationError`が出る状況の分類。手法固有のチェック（新しい列引数・オプションの検証、手法固有の`ComputationError`）を追加したら、該当する分類表に1行足す。新しいエラー（`code`）を足す手順と文面の規則は`docs/spec/error-handling.md`・`docs/spec/error-style-guide.md`（`.claude/rules/rust-style.md`のエラーハンドリング節に要約）。`docs/guide/error-codes.md`は`tools/render_error_catalog.py`の生成物（表は手で編集しない）。欠損値・共線列等の共通方針は各手法specに複製せず、このページを参照する。

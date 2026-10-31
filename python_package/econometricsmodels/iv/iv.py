@@ -1,21 +1,15 @@
 """Python wrapper for IV (instrumental variables: 2SLS/GMM).
 
 A thin wrapper around `econometricsmodels._lib.fit_iv` (the Rust
-implementation, `engine`/`engine_pybind`). Validation and estimation
-logic live entirely on the Rust side; this module only provides the
-Python-facing API shape for polars DataFrames — lists of column names
-for `x_exog`/`x_endog`/`instruments`, an options object for estimation
-settings (CLAUDE.md section 2, `.claude/rules/python-style.md`
-"設計方針との整合性").
+implementation). Validation and estimation happen on the Rust side; this
+module only provides the Python-facing API shape for polars DataFrames:
+lists of column names for `x_exog`, `x_endog` and `instruments`, and an
+options object for the estimation settings.
 
-`IVOptions` is re-exported as-is from `_lib` (not redefined as a
-separate class; same policy as `OLSOptions`/`LogitOptions`, see
-`docs/spec/ols-spec.md`, "API引数"). `IVOptions.estimator` selects
-`"2sls"` (default) or `"gmm"` — a single `IV`/`IVResults` pair serves
-both methods (`docs/spec/iv-spec.md` section 1.2).
-
-`summary()` is not implemented (structured-data-only output policy; see
-the `OLSResults`/`LogitResults` precedent).
+`IVOptions` is re-exported as-is from `_lib`. `IVOptions.estimator`
+selects `"2sls"` (default) or `"gmm"`; a single `IV`/`IVResults` pair
+serves both. There is no `summary()`: results are returned as structured
+data.
 """
 
 from __future__ import annotations
@@ -29,6 +23,7 @@ from .._lib import IVOptions
 from .._results_utils import (
     by_param,
     conf_int_by_param,
+    cov_params_by_param,
     params_table_rows,
 )
 from ..linear.ols import OLSResults
@@ -48,8 +43,9 @@ class IV:
             variables.
         x_endog: List of column names of the endogenous independent
             variables.
-        instruments: List of column names of the excluded instruments
-            (must not overlap `x_exog`).
+        instruments: List of column names of the excluded instruments.
+            No column may appear in more than one of `y`, `x_exog`,
+            `x_endog` and `instruments`.
         options: Estimation options. Defaults to `IVOptions()`
             (`estimator="2sls"`, classical, with intercept,
             confidence_level=0.95) when omitted.
@@ -59,15 +55,16 @@ class IV:
         >>> from econometricsmodels import IV
         >>> df = pl.DataFrame(
         ...     {
-        ...         "y": [1.0, 2.0, 3.0, 4.0],
-        ...         "endog1": [2.0, 1.0, 4.0, 3.0],
-        ...         "z1": [1.0, 3.0, 2.0, 4.0],
+        ...         "y": [1.0, 2.5, 2.0, 4.5, 5.0, 5.5],
+        ...         "endog1": [1.0, 2.0, 3.0, 3.5, 5.0, 6.0],
+        ...         "z1": [1.0, 1.5, 3.5, 3.0, 5.5, 5.0],
         ...     }
         ... )
         >>> result = IV(
         ...     df, y="y", x_exog=[], x_endog=["endog1"], instruments=["z1"]
         ... ).fit()
-        >>> result.params["endog1"]
+        >>> round(result.params["endog1"], 3)
+        0.858
     """
 
     def __init__(
@@ -77,6 +74,7 @@ class IV:
         x_exog: list[str],
         x_endog: list[str],
         instruments: list[str],
+        *,
         options: IVOptions | None = None,
     ) -> None:
         self._data = data
@@ -94,8 +92,8 @@ class IV:
 
         Raises:
             TypeError: An argument has the wrong type (for example
-                `x` is a string instead of a list of column names). A
-                builtin exception, not a `ValidationError`.
+                `x_exog` is a string instead of a list of column names).
+                A builtin exception, not a `ValidationError`.
             ValidationError: The input or options are invalid (a
                 column is missing, contains missing values or
                 NaN/infinity, `y`/`x_exog`/`x_endog`/`instruments`
@@ -138,6 +136,7 @@ class IVResults:
 
     - Coefficients: `params`, `std_errors`, `test_stats`, `p_values`,
       `conf_int`; the names in order: `param_names`.
+    - Covariance of the coefficients: `cov_params`.
     - Which distribution the tests use: `stat_dist` (`"t"` for 2SLS,
       `"normal"` for GMM), `stat_df`.
     - Overall Wald test: `wald_statistic`, `wald_p_value`,
@@ -157,10 +156,6 @@ class IVResults:
     - Residuals: `residuals` (structural residuals).
     - Methods: `first_stage()` (one `OLSResults` per endogenous
       variable), `params_table()`.
-
-    Args:
-        raw: The estimation result object returned by `_lib.fit_iv`
-            (`_lib.IVResult`).
 
     Note:
         Users normally do not construct this directly; it is returned
@@ -185,6 +180,21 @@ class IVResults:
     def std_errors(self) -> dict[str, float]:
         """Coefficient name to standard error."""
         return by_param(self._raw.param_names, self._raw.std_errors)
+
+    @property
+    def cov_params(self) -> dict[str, dict[str, float]]:
+        """Covariance matrix of the coefficients, as a dict of dicts by name.
+
+        Computed with the `cov_type` of the options, so `std_errors[a]` is
+        the square root of `cov_params[a][a]`. The covariance of `a` and `b`
+        is `cov_params["a"]["b"]`, and the keys are in `param_names` order.
+
+        The matrix is symmetric up to rounding error (a relative difference
+        of 1e-16 to 1e-15 between `cov_params["a"]["b"]` and
+        `cov_params["b"]["a"]`), so compare entries with a tolerance rather
+        than with `==`.
+        """
+        return cov_params_by_param(self._raw.param_names, self._raw.cov_params)
 
     @property
     def test_stats(self) -> dict[str, float]:

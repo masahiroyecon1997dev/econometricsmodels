@@ -97,6 +97,7 @@ Quotation marks around single values (such as `'{column}'`) are part of the temp
 | `DIAGNOSTIC_VARIABLES_CONSTANT` | `test` (str) | The {test_label} cannot be computed: all of its variables are constant. | Use variables that vary across observations. |
 | `TRAINING_DATA_NOT_RETAINED` | `method` (str) | {method}() needs the original training data, which this result does not keep (results returned by IVResults.first_stage() keep no training data). | Call it on a result you fitted directly with OLS(...).fit(). |
 | `AUGMENT_REQUIRES_NEW_DATA` | - | augment() without new_data needs the original training data, which this result does not keep. | Pass new_data. |
+| `PICKLE_FORMAT_MISMATCH` | `object` (str) | The pickled {object} was written by an incompatible version of econometricsmodels and cannot be restored. | Use the version of econometricsmodels that wrote the pickle, or create the object again. |
 | `OUTCOME_CONSTANT` | `stage` (optional, see Stages) | The outcome has the same value in every row up to rounding, so a model with an intercept has nothing to explain. | Use an outcome that varies across observations. |
 | `OUTCOME_NOT_BINARY` | `row` (int)<br>`value` (float) | The outcome y at row {row} (0-based) must be 0 or 1, got {value}. | Code the outcome as 0 and 1, for example by casting a boolean column to an integer. |
 | `CENSORING_BOUNDS_MISSING` | - | Both censoring bounds are None. | Set lower, upper, or both. |

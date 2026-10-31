@@ -295,6 +295,8 @@ pub struct GmmEstimator {
     hac_lags_used: Option<usize>,
     /// 標準誤差 (k, 1)。`cov_type`に応じたサンドイッチ型分散の対角成分の平方根。
     std_errors: Mat<f64>,
+    /// 係数の分散共分散行列 (k, k)。`std_errors`はこの対角成分の平方根。
+    cov_params: Mat<f64>,
     /// z統計量 (k, 1) = params / std_errors（`docs/spec/iv-spec.md`3.2節、GMMはz分布）。
     test_stats: Mat<f64>,
     /// 両側p値 (k, 1)。標準正規分布に基づく。
@@ -702,6 +704,7 @@ impl GmmEstimator {
             cov_type,
             hac_lags_used,
             std_errors,
+            cov_params,
             test_stats,
             p_values,
             conf_lower,
@@ -803,6 +806,11 @@ impl GmmEstimator {
     /// 標準誤差 (k, 1)。
     pub fn std_errors(&self) -> &Mat<f64> {
         &self.std_errors
+    }
+
+    /// `cov_type`に応じた係数の分散共分散行列 (k, k)。
+    pub fn cov_params(&self) -> &Mat<f64> {
+        &self.cov_params
     }
 
     /// z統計量 (k, 1)。
@@ -4432,6 +4440,74 @@ mod tests {
                 for j in 0..classical.params().nrows() {
                     assert_approx_eq(*robust.params().get(j, 0), *classical.params().get(j, 0), &format!("beta[{j}]"));
                 }
+            }
+        }
+    }
+
+    /// 全`cov_type`で、`cov_params()`が対称で、対角の平方根が`std_errors()`と一致する
+    /// （`std_errors`は`cov_params`の対角から作るため、公開している行列が標準誤差の元そのもの
+    /// であることの確認）。`bread⁻¹ · meat · bread⁻¹`の形は丸め誤差で僅かに非対称になりうるため、
+    /// 許容は両係数の分散から決まる尺度（`sqrt(V_ii·V_jj)`）の`1e-12`倍。
+    #[test]
+    fn cov_params_is_symmetric_and_diagonal_matches_std_errors_for_every_cov_type() {
+        let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
+        let labels: Vec<String> = (0..16).map(|i| format!("g{}", i / 4)).collect();
+
+        let cov_types = [
+            CovType::Classical,
+            CovType::Hc0,
+            CovType::Hc1,
+            CovType::Hc2,
+            CovType::Hc3,
+            CovType::Hac {
+                lags: Some(2),
+                time_order: row_time_order(16),
+            },
+            CovType::Cluster {
+                groups: Some(GroupCodes::from_labels_without_keys(&labels)),
+            },
+        ];
+        for cov_type in cov_types {
+            let name = format!("{cov_type:?}");
+            let input = IvInput::from_columns(
+                &y,
+                &[],
+                vec![],
+                std::slice::from_ref(&x_endog),
+                vec!["endog1".to_string()],
+                &[z1.clone(), z2.clone()],
+                vec!["z1".to_string(), "z2".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap();
+            let estimator = GmmEstimator::fit(
+                input,
+                GmmType::TwoStep {
+                    weight: WeightType::Robust,
+                },
+                true,
+                cov_type,
+                0.95,
+            )
+            .unwrap();
+
+            let cov = estimator.cov_params();
+            let k = estimator.params().nrows();
+            assert_eq!((cov.nrows(), cov.ncols()), (k, k), "{name}: shape");
+            for i in 0..k {
+                for j in 0..k {
+                    let scale = (*cov.get(i, i) * *cov.get(j, j)).sqrt();
+                    assert!(
+                        (*cov.get(i, j) - *cov.get(j, i)).abs() <= 1e-12 * scale,
+                        "{name}: cov_params not symmetric at ({i},{j})"
+                    );
+                }
+                let se = *estimator.std_errors().get(i, 0);
+                assert!(
+                    (cov.get(i, i).sqrt() - se).abs() <= 1e-12 * se,
+                    "{name}: sqrt(cov_params[{i}][{i}]) != std_errors[{i}]"
+                );
             }
         }
     }

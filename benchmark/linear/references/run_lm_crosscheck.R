@@ -158,6 +158,16 @@ f_test <- wald_f_test(model, vc, df_inference)
 f_statistic_val <- f_test$f_statistic
 f_p_value_val <- f_test$f_p_value
 
+# 係数の分散共分散行列（上で標準誤差の計算に使ったvc）。行ごとに名前付きのリストにする
+# （1x1の行列でも名前が残るよう、行を数値ベクトルにしてからcolnamesを付ける）。
+cov_params <- setNames(
+  lapply(
+    rownames(vc),
+    function(r) setNames(as.list(as.numeric(vc[r, ])), colnames(vc))
+  ),
+  rownames(vc)
+)
+
 library(jsonlite)
 result <- list(
   params = as.list(coefs),
@@ -176,6 +186,7 @@ result <- list(
   bic = bic_val,
   log_likelihood = loglik_val,
   f_statistic = f_statistic_val,
-  f_p_value = f_p_value_val
+  f_p_value = f_p_value_val,
+  cov_params = cov_params
 )
 cat(toJSON(result, auto_unbox = TRUE, digits = NA))

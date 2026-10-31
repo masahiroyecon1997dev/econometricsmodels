@@ -93,7 +93,8 @@ dev = [
 audit = [
     "pip-audit==2.10.1",
 ]
-# mkdocsドキュメント生成専用（CIでは使わない。cd_docs.ymlでのCI組み込みは別issue）。
+# mkdocsドキュメント生成専用（cd_docs.ymlが`--group docs`で使う。devcontainerの
+# postCreateCommandでもtestグループと併せて導入する）。
 docs = [
     "mkdocs==1.6.1",
     "mkdocs-material==9.7.7",

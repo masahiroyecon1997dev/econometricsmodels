@@ -26,6 +26,10 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
     ライセンス一覧が`Cargo.lock`に追随していることの保証。MIT/Apache-2.0は配布時に著作権表示・
     ライセンス文の同梱を求めるため）。`cargo-about`はバージョン固定で、`.devcontainer/Dockerfile`の
     `ARG CARGO_ABOUT_VERSION`と`tool: cargo-about@<版>`を揃える（`cargo-audit`と同様）。
+    devcontainerでは、`cargo-about`のバイナリが`cli`フィーチャー必須（default featureなし）のため、
+    他のツールとは別の`RUN`で`--features cli`を付けて入れる。`--features cli`が無いと、警告だけで
+    バイナリが入らないままイメージができてしまう。そのためDockerfileの末尾で3ツールとも`--version`を
+    実行し、欠けていればビルドを失敗させる（CIは`taiki-e/install-action`のビルド済みバイナリなので影響しない）。
     失敗時はローカルで同じコマンドを実行して差分をコミットする。リリース時の再生成は`/release`の手順に含む。
 - **`ci_python.yml`**（`python_package`/`engine_pybind`の品質検証、3ジョブ、
   `python_package/**`・`engine_pybind/**`・`pyproject.toml`・`uv.lock`・`tests/**`を
@@ -69,7 +73,11 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
 - **`cd_docs.yml`**: mkdocsドキュメントのGitHub Pagesへの自動デプロイ。
 - **`dependabot.yml`**（`cargo`・`uv`・`github-actions`・`docker`・`devcontainers`の5エコシステム。
   `docker`は`.devcontainer/Dockerfile`のベースイメージ、`devcontainers`は`devcontainer.json`の
-  featureと`devcontainer-lock.json`が対象）: `"pip"`ではなく
+  featureと`devcontainer-lock.json`が対象）。`docker`が追跡するのは`FROM`行のみ
+  （dependabot-coreの`docker/file_parser.rb`・`file_updater.rb`は`^FROM`にしか一致しない）で、
+  `COPY --from=<image>:<版>@sha256:...`への直書きは更新されない。uvの公式イメージは
+  そのため`FROM ghcr.io/astral-sh/uv:<版>@sha256:... AS uv`のステージとして先頭に宣言し、
+  `COPY --from=uv`で参照している（直書きに戻さないこと）。Python依存は`"pip"`ではなく
   **`"uv"`エコシステム**を採用（uv専用の`package-ecosystem`。`test`/`benchmark`/`dev`/`docs`
   全依存グループが更新対象になる）。`cargo audit`/`pip-audit`（CI実行時点のロックファイル検証）と
   Dependabot（レジストリの継続監視・PR自動生成）は補完関係で、統合・置き換えはしない。
@@ -80,7 +88,10 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
     `-`と`.`を同値に扱う（Rの規則。`0.6.8`＝`0.6-8`）。
   - R本体: APT（`bookworm-cran40`）の索引に最新版しか載らず、版を固定できない。そのため
     基準を「フィクスチャJSONの`_meta.r_version`の最大値（凍結値の生成に使ったR）」とし、
-    APT索引の`r-base`最新版と比較する。
+    APT索引の`r-base`最新版と比較する。`_meta.r_version`は生成スクリプトにより書式が混在する
+    （`getRversion()`由来の`4.5.3`と`R.version.string`由来の`R version 4.5.3 (2026-03-11)`）
+    ため、比較前に正規表現で版番号だけを取り出す（日付まで数値として読むと、同じ版が別の版と
+    判定され、更新が無いのに毎週Issueが起票される）。
   - 更新があれば固定タイトルのIssue（`dependencies`/`setup`/`testing`ラベル）を自動起票し、
     未クローズの同名Issueがあれば本文を更新する。すべて最新になれば自動クローズする。
     Dependabotの`cooldown`相当の待機は設けていない（通知のみで、更新は人が判断するため）。

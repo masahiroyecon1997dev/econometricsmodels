@@ -15,7 +15,7 @@ allowed-tools: Read, Write, Bash(python3 -m benchmark.:*), Bash(python -m benchm
 
 - **statsmodels**: 主リファレンス。classical/HC0-3/cluster/HAC、AIC/BIC/log-likelihood、ロバストWald検定まで一貫して対応
 - **R（lm + sandwich/lmtest）**: 独立実装によるクロスチェック。新しい統計量・cov_type追加時はstatsmodelsとRの一致を先に確認してからフィクスチャを固定する。対象は係数・標準誤差に限らない。R²・AIC・BIC・対数尤度・F統計量・F検定p値等、公開する統計量は全てcrosscheckする（`testing-policy.md`「リファレンス実装」参照）
-- **pyfixest**: OLSの正確性検証には使わない（HC2/HC3にpyfixest自身の実装バグによる系統的乖離があるため、詳細は`testing-policy.md`「リファレンス実装」参照）。性能比較専用。固定効果が絡むFE/REの正確性検証にも使わない（linearmodelsとR `fixest`/`plm`を使う。詳細は`docs/guide/verification.md`参照）
+- **pyfixest**: リファレンスに使わない（正確性検証にも性能比較にも使わない。v0.60.0のHC2/HC3で観測した差は`testing-policy.md`「リファレンス実装」参照）。FE/REの正確性検証はlinearmodelsとR `fixest`/`plm`を使う（詳細は`docs/guide/verification.md`参照）
 - **statsmodels discrete model（Logit等）固有の既知の欠落**（Probit実装時も要確認）: `cov_type="hc1"`はOLS/GLMと異なり小標本補正が未実装でHC0と同一値になる（Rが正リファレンス）。`cov_type="opg"`はネイティブ非対応（"cov_type not recognized"）で`model.score_obs(params)`から手計算が必要、かつ`opg`の限界効果（`get_margeff()`）はfit済み結果へのcov_params事後上書きが効かないためstatsmodels側では算出不可（R `marginaleffects`の`vcov=`引数を使う）。詳細は`docs/spec/logit-spec.md`「テスト」参照
 
 ## `benchmark/` ディレクトリの構成（動作確認済み）
@@ -56,7 +56,7 @@ allowed-tools: Read, Write, Bash(python3 -m benchmark.:*), Bash(python -m benchm
   - `benchmark/iv/references/run_momentfit.R`: momentfitパッケージによるGMMクロスチェック（ivregはGMM非対応）。momentfitを本実装・linearmodelsに揃える設定と、揃えないと一致しない原因（HAC・クラスター重みのピボット欠落バグ、`bw`の定義、Hansen Jの重み、標準誤差の小標本補正の流儀）はスクリプトのヘッダコメントと`docs/spec/iv-spec.md`4章が正本。
   - `benchmark/nonlinear/references/run_glm_crosscheck.R`: base R `glm` + sandwich（HC0/HC1/cluster）+ 手計算OPG（`sandwich::estfun()`のスコア寄与から`Σ=(Σsᵢsᵢ')⁻¹`）+ `marginaleffects`パッケージ（限界効果、`vcov=`引数でカスタム共分散行列を直接渡す）によるLogit/Probitクロスチェック。第4引数`link`（`logit`/`probit`）で切り替える。動作検証済み、正式なクロスチェックとして使用中。**注意（重要、Probit追加時に発覚）**: `classical`/`hc0`/`hc1`/`cluster`は`glm()`の既定`vcov()`/`vcovHC()`/`vcovCL()`（IRLS/Fisher scoringの期待情報行列ベース）をそのまま使わず、本実装と同じ解析式（`λᵢ(λᵢ+zᵢ)`等）で観測情報行列を手計算したものを`sandwich(bread.=...)`に渡す。Logit（binomial族の正準リンク）は期待情報行列と観測情報行列が理論上一致するため影響が無いが、Probit（非正準リンク）は一致せず、素の`vcov()`を使うと最大約8%の乖離が生じることが実測で発覚した（詳細は`docs/spec/probit-spec.md`参照）。**注意**: `glm()`の収束判定は`epsilon=1e-14`に厳しくする（既定の1e-8だと`sandwich::estfun()`が1反復前の作業重みを使い、hc0/hc1/opgの標準誤差の参照値に相対誤差~3e-5のノイズが乗る）。`slopes()`/`avg_slopes()`は変数ごとに`eps=1e-5*sd(x)`を指定して呼ぶ（`eps`は変数の単位そのものの絶対刻み幅で、既定や固定値だと勾配の急なケース・変数スケールの大きいケースで限界効果が解析解から~7e-6〜5e-5ずれる。`numderiv=`は効果の刻み幅に効かない）。**注意**: `marginaleffects::datagrid()`/`slopes(newdata="mean"|"median")`のショートカット文字列は、整数のみの数値列を`FUN_integer`（既定`round(mean(x))`）で丸めてしまい、本実装・statsmodelsの「生の標本平均・中央値」の定義とずれる。`datagrid(FUN_numeric=mean, FUN_integer=mean)`のように両方明示すること（`docs/spec/logit-spec.md`「テスト」参照）。
   - 注意: `read.csv()`はデフォルトで列名を`make.names()`により書き換える（例: `_group`→`X_group`）。クラスター列等を渡す場合は影響を受けるため、各スクリプトとも`check.names = FALSE`を指定している。
-- **pyfixestのHC2/HC3に関する既知の差異**: pyfixest自身の実装バグ（HC1用の小標本補正をHC2/HC3にも誤って適用）による系統的乖離があり、OLSの正確性検証からは除外し性能比較専用とする。詳細は`testing-policy.md`「リファレンス実装」・`docs/spec/ols-spec.md`「テスト」参照。
+- **pyfixestのHC2/HC3で観測した差**: v0.60.0のHC2/HC3はfixestと系統的に乖離した（HC1用の小標本補正が加わっているとみなすと説明できる差。原因は断定していない）ため、リファレンスに使わない。詳細は`testing-policy.md`「リファレンス実装」・`docs/spec/ols-spec.md`「テスト」参照。
 
 ## 手順
 
@@ -67,6 +67,7 @@ allowed-tools: Read, Write, Bash(python3 -m benchmark.:*), Bash(python -m benchm
 4. `benchmark/linear/datasets.py`の7シナリオ（固定済みCSV経由）で対象手法を実行する。ただし完全な多重共線性シナリオは数値比較の対象外（想定エラーの発生確認のみ、`testing-policy.md`「テストの3系統」参照）。境界値・悪条件（`n=k+1`、極端なスケール差、高条件数）やクラスター系の不均衡・境界値ケースも対象手法に応じて検討する（`testing-policy.md`「テスト用データセット」参照）。
 5. Wooldridge等の実データセットでも同様に確認する（実際に使うデータセットは手法実装時に個別に検討し、選定理由・変数構成を`docs/spec/<手法名>-spec.md`「テスト」節に明記する）。
 6. 生成した結果を`tests/fixtures/benchmarks/`にJSONとして保存する（`_meta`フィールドにリファレンス実装・バージョン・生成コマンドが含まれることを確認する）。
+   - **係数の分散共分散行列（`cov_params`）は別のJSON（`<手法>_cov.json`、クロスチェックは`<手法>_cov_crosscheck.json`）に分ける**。リファレンスのアダプタ（`statsmodels_ref.py`・各`r.py`）は各ケースの結果に`cov_params`（`{名前: {名前: 値}}`、切片名は`"const"`）を常に含めて返し、`generate_<手法>_fixtures.py`は`benchmark.common.cov_fixtures.strip_cov_params`で除いて統計量のJSONへ、`generate_<手法>_cov_fixtures.py`は`only_cov_params`で`cov_params`だけを取り出して行列のJSONへ書く（シナリオのループは`build_fixtures()`の1か所で、2ファイルのキーは構造的にずれない）。テストは`tests/support/_fixture_cov.py`の`load_fixtures_with_cov`で2つを合流させ、`assert_inference_close`が比較する。許容誤差は各ケースの`sqrt(V_ii·V_jj)`を尺度にした相対誤差（`assert_cov_params_close`）。新しい手法・リファレンスを足すときは、Rスクリプトが標準誤差の計算に使った行列をそのまま`cov_params`として出力する。
 7. テストコード自体の作成・実行は `/test-new` `/test-run` に引き継ぐ。このスキルはベンチマーク値の生成・フィクスチャ化に留める。pytest側は合成データについては`tests/fixtures/benchmarks/data/`の固定CSVを直接読む（ジェネレータを呼ばない）ため`wooldridge`パッケージは不要だが、Wooldridge実データのクロスチェックテストは`pytest.importorskip("wooldridge")`で任意扱いにする（下記参照）。
 
 ## 既知の未確定事項

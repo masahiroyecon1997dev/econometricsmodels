@@ -11,7 +11,7 @@ Logit/Probitとは尤度・予測量・内部パラメータ化が異なる。
 
 ## 1. API引数
 
-3層構成: `Tobit(data, y, x, options).fit() -> TobitResults`（python_package）→
+3層構成: `Tobit(data, y, x, options=options).fit() -> TobitResults`（python_package）→
 `fit_tobit(data, y, x, options) -> TobitResult`（engine_pybind）→ `TobitEstimator::fit`（engine、
 Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 

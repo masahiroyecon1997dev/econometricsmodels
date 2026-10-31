@@ -39,7 +39,6 @@ Note:
 
 from __future__ import annotations
 
-import json
 from functools import partial
 from pathlib import Path
 
@@ -52,6 +51,7 @@ from _assertions import (
     assert_inference_close,
 )
 from _constants import DATA_DIR, MROZ_X, WIDE_X
+from _fixture_cov import load_fixtures_with_cov
 from _helpers import (
     ROW_TIME,
     with_cluster_groups,
@@ -103,7 +103,7 @@ ATOL = TOLERANCES["ols_reference"]["atol"]
 
 @pytest.fixture(scope="module")
 def fixtures() -> dict:
-    return json.loads(FIXTURE_PATH.read_text())
+    return load_fixtures_with_cov(FIXTURE_PATH)
 
 
 _assert_close = partial(assert_close, rtol=RTOL, atol=ATOL)

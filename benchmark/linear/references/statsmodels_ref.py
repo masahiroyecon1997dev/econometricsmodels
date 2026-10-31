@@ -40,7 +40,11 @@ from benchmark.common import (
     load_frozen_dataset,
 )
 from benchmark.common.load_wooldridge import load as _load_wooldridge
-from benchmark.common.reference.normalize import normalize_names
+from benchmark.common.reference.extract import extract_cov_params
+from benchmark.common.reference.normalize import (
+    normalize_cov_params,
+    normalize_names,
+)
 
 
 def _load_synthetic(dataset: str) -> tuple[pl.DataFrame, list[float]]:
@@ -65,7 +69,8 @@ def extract_full_fit_stats(model, confidence_level: float = 0.95) -> dict:
     Returns:
         `params`/`std_errors`/`test_stats`/`p_values`/`conf_int`/`r_squared`/
         `adj_r_squared`/`f_statistic`/`f_p_value`/`aic`/`bic`/
-        `log_likelihood`/`nobs`/`df_resid`を含む辞書（パラメータ名の
+        `log_likelihood`/`nobs`/`df_resid`/`cov_params`（係数の分散共分散行列、
+        `{名前: {名前: 値}}`）を含む辞書（パラメータ名の
         "Intercept"→"const"正規化済み）。
     """
     alpha = 1.0 - confidence_level
@@ -97,6 +102,9 @@ def extract_full_fit_stats(model, confidence_level: float = 0.95) -> dict:
     result["log_likelihood"] = float(model.llf)
     result["nobs"] = int(model.nobs)
     result["df_resid"] = int(model.df_resid)
+    # 係数の分散共分散行列。統計量のフィクスチャには含めず、`cov_fixtures`が
+    # 別のJSONに分ける（`benchmark/common/cov_fixtures.py`）。
+    result["cov_params"] = normalize_cov_params(extract_cov_params(model))
     return result
 
 

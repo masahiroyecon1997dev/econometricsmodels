@@ -15,6 +15,9 @@ from _tolerances_common import (
 
 LINEAR_TOLERANCES: dict[str, dict[str, float]] = {
     # --- 主リファレンス（statsmodels/linearmodels/R）との数値比較 ---
+    # 係数の分散共分散行列（`<手法>_cov.json`）も同じ`rtol`で比べる。要素ごとの尺度は
+    # `sqrt(V_ii·V_jj)`で、絶対誤差のフロアは使わない（`assert_cov_params_close`）。
+    # 実測の最大の差はこの尺度で8.1e-12（OLS・WLSの主リファレンスとRクロスチェックの全ケース）。
     "ols_reference": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_REFERENCE_FLOOR,

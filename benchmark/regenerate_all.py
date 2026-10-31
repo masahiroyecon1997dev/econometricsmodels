@@ -46,6 +46,10 @@ _FIXTURE_MODULES = [
     "benchmark.linear.fixtures.generate_ols_breusch_pagan_fixtures",
     "benchmark.linear.fixtures.generate_ols_breusch_godfrey_fixtures",
     "benchmark.linear.fixtures.generate_wls_fixtures",
+    # 係数の分散共分散行列（`<手法>_cov.json`）。統計量のフィクスチャと同じ
+    # `build_fixtures()`から作るので、対応する統計量のフィクスチャと必ず一緒に再生成する。
+    "benchmark.linear.fixtures.generate_ols_cov_fixtures",
+    "benchmark.linear.fixtures.generate_wls_cov_fixtures",
     "benchmark.nonlinear.fixtures.generate_logit_fixtures",
     "benchmark.nonlinear.fixtures.generate_probit_fixtures",
     "benchmark.iv.fixtures.generate_iv_fixtures",
@@ -60,6 +64,8 @@ _FIXTURE_MODULES = [
     "benchmark.linear.fixtures.generate_ols_breusch_pagan_crosscheck_fixtures",
     "benchmark.linear.fixtures.generate_ols_breusch_godfrey_crosscheck_fixtures",
     "benchmark.linear.fixtures.generate_wls_crosscheck_fixtures",
+    "benchmark.linear.fixtures.generate_ols_cov_crosscheck_fixtures",
+    "benchmark.linear.fixtures.generate_wls_cov_crosscheck_fixtures",
     "benchmark.nonlinear.fixtures.generate_logit_crosscheck_fixtures",
     "benchmark.nonlinear.fixtures.generate_probit_crosscheck_fixtures",
     "benchmark.nonlinear.fixtures.generate_tobit_crosscheck_fixtures",

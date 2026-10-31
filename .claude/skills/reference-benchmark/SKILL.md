@@ -67,6 +67,7 @@ allowed-tools: Read, Write, Bash(python3 -m benchmark.:*), Bash(python -m benchm
 4. `benchmark/linear/datasets.py`の7シナリオ（固定済みCSV経由）で対象手法を実行する。ただし完全な多重共線性シナリオは数値比較の対象外（想定エラーの発生確認のみ、`testing-policy.md`「テストの3系統」参照）。境界値・悪条件（`n=k+1`、極端なスケール差、高条件数）やクラスター系の不均衡・境界値ケースも対象手法に応じて検討する（`testing-policy.md`「テスト用データセット」参照）。
 5. Wooldridge等の実データセットでも同様に確認する（実際に使うデータセットは手法実装時に個別に検討し、選定理由・変数構成を`docs/spec/<手法名>-spec.md`「テスト」節に明記する）。
 6. 生成した結果を`tests/fixtures/benchmarks/`にJSONとして保存する（`_meta`フィールドにリファレンス実装・バージョン・生成コマンドが含まれることを確認する）。
+   - **係数の分散共分散行列（`cov_params`）は別のJSON（`<手法>_cov.json`、クロスチェックは`<手法>_cov_crosscheck.json`）に分ける**。リファレンスのアダプタ（`statsmodels_ref.py`・各`r.py`）は各ケースの結果に`cov_params`（`{名前: {名前: 値}}`、切片名は`"const"`）を常に含めて返し、`generate_<手法>_fixtures.py`は`benchmark.common.cov_fixtures.strip_cov_params`で除いて統計量のJSONへ、`generate_<手法>_cov_fixtures.py`は`only_cov_params`で`cov_params`だけを取り出して行列のJSONへ書く（シナリオのループは`build_fixtures()`の1か所で、2ファイルのキーは構造的にずれない）。テストは`tests/support/_fixture_cov.py`の`load_fixtures_with_cov`で2つを合流させ、`assert_inference_close`が比較する。許容誤差は各ケースの`sqrt(V_ii·V_jj)`を尺度にした相対誤差（`assert_cov_params_close`）。新しい手法・リファレンスを足すときは、Rスクリプトが標準誤差の計算に使った行列をそのまま`cov_params`として出力する。
 7. テストコード自体の作成・実行は `/test-new` `/test-run` に引き継ぐ。このスキルはベンチマーク値の生成・フィクスチャ化に留める。pytest側は合成データについては`tests/fixtures/benchmarks/data/`の固定CSVを直接読む（ジェネレータを呼ばない）ため`wooldridge`パッケージは不要だが、Wooldridge実データのクロスチェックテストは`pytest.importorskip("wooldridge")`で任意扱いにする（下記参照）。
 
 ## 既知の未確定事項

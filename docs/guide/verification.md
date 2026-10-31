@@ -38,7 +38,7 @@ pyfixest is not used for accuracy checks. Its HC2/HC3 standard errors apply the 
 
 | Method | Statistics |
 |---|---|
-| OLS, WLS | coefficients, standard errors, t statistics, p-values, confidence intervals, R², adjusted R², F statistic and p-value, log-likelihood, AIC, BIC, predictions |
+| OLS, WLS | coefficients, standard errors, the covariance matrix of the coefficients (`cov_params`), t statistics, p-values, confidence intervals, R², adjusted R², F statistic and p-value, log-likelihood, AIC, BIC, predictions |
 | OLS White test | LM and F statistics with their p-values, and the degrees of freedom of the auxiliary regression (cross-check) |
 | OLS Breusch-Pagan test | LM and F statistics with their p-values, and the degrees of freedom of the auxiliary regression (cross-check) |
 | OLS Breusch-Godfrey test | LM and F statistics with their p-values for several lag orders, and the degrees of freedom (cross-check) |
@@ -55,6 +55,8 @@ Standard-error types are covered per method: classical, HC0–HC3, HAC, cluster,
 ## Tolerances
 
 Agreement is checked as `|ours - reference| <= max(rtol · |reference|, atol)`.
+
+The covariance matrix of the coefficients is compared entry by entry as `|ours - reference| <= rtol · sqrt(V_ii · V_jj)` with no absolute floor, where `V_ii` and `V_jj` are the reference variances of the two coefficients. An off-diagonal covariance can be close to zero, where a relative error of the entry itself means nothing; scaling by both variances keeps every entry at the same precision as the standard errors. Measured agreement for OLS and WLS is about `8e-12`.
 
 For the FE and RE cross-checks (coefficient and F-statistic p-values) the absolute floor `atol` is not applied: with a floor, a tail p-value below it (for example `1e-40`) would pass even if it were returned as `0`. FE p-values are compared by relative error only (`1e-6`, measured up to `3e-8` because the tail amplifies rounding errors in the statistic). RE p-values are compared the same way (`1e-6`), on balanced and unbalanced panels alike.
 

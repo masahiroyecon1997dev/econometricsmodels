@@ -53,7 +53,6 @@ Note:
 
 from __future__ import annotations
 
-import json
 from functools import partial
 from pathlib import Path
 
@@ -61,6 +60,7 @@ import polars as pl
 import pytest
 from _assertions import assert_close, assert_dict_close, assert_fields_close
 from _constants import DATA_DIR, MROZ_X
+from _fixture_cov import load_fixtures_with_cov
 from _helpers import (
     ROW_TIME,
     with_cluster_groups,
@@ -100,7 +100,7 @@ ATOL = TOLERANCES["ols_crosscheck"]["atol"]
 
 @pytest.fixture(scope="module")
 def crosscheck() -> dict:
-    return json.loads(FIXTURE_PATH.read_text())
+    return load_fixtures_with_cov(FIXTURE_PATH)
 
 
 _assert_dict_close = partial(assert_dict_close, rtol=RTOL_STRICT, atol=ATOL)

@@ -9,9 +9,32 @@ pub(crate) fn mat_to_vec(mat: &faer::Mat<f64>) -> Vec<f64> {
     (0..mat.nrows()).map(|i| *mat.get(i, 0)).collect()
 }
 
+/// `faer::Mat<f64>`（k×k等の行列）を行ごとの`Vec<Vec<f64>>`に変換する。
+/// 係数の分散共分散行列（`cov_params`）をPython側へ渡すときに使う。
+pub(crate) fn mat_to_rows(mat: &faer::Mat<f64>) -> Vec<Vec<f64>> {
+    (0..mat.nrows())
+        .map(|i| (0..mat.ncols()).map(|j| *mat.get(i, j)).collect())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mat_to_rows_preserves_row_and_column_order() {
+        let mat = faer::Mat::from_fn(2, 3, |i, j| (10 * i + j) as f64);
+        assert_eq!(
+            mat_to_rows(&mat),
+            vec![vec![0.0, 1.0, 2.0], vec![10.0, 11.0, 12.0]]
+        );
+    }
+
+    #[test]
+    fn mat_to_rows_handles_empty() {
+        let mat = faer::Mat::<f64>::zeros(0, 0);
+        assert!(mat_to_rows(&mat).is_empty());
+    }
 
     #[test]
     fn mat_to_vec_preserves_row_order() {

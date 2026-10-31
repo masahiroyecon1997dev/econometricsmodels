@@ -64,6 +64,7 @@ Every method's results share these fields, so code that reads one result type wo
 |---|---|
 | `params`, `std_errors`, `test_stats`, `p_values` | `dict` keyed by coefficient name |
 | `conf_int` | `dict` of `(lower, upper)` keyed by coefficient name |
+| `cov_params` | Covariance matrix of the coefficients under `cov_type`: a `dict` of `dict`s keyed by coefficient name on both axes (`std_errors` are the square roots of its diagonal) |
 | `param_names` | The coefficient names, in order (`"const"` first when there is an intercept) |
 | `stat_dist`, `stat_df` | The distribution behind `test_stats` and `p_values` (`"t"` or `"normal"`) and its degrees of freedom (`None` for the normal distribution) |
 | `cov_type`, `n_obs`, `df_resid` | The standard error type used, the number of observations and the residual degrees of freedom |
@@ -74,6 +75,24 @@ The remaining fields depend on the method (for example `r_squared` for OLS, `lr_
 ```python
 for row in result.params_table():
     print(row["param_name"], row["param"], row["std_error"], row["p_value"])
+```
+
+## Covariance matrix of the coefficients
+
+`result.cov_params` is the covariance matrix of the coefficients under the `cov_type` you chose, as a dictionary of dictionaries keyed by coefficient name on both axes: the covariance of `x1` and `x2` is `result.cov_params["x1"]["x2"]`. The standard errors are the square roots of its diagonal. With it you can test a linear combination of coefficients or apply the delta method yourself. The distribution and degrees of freedom for such a test are in `stat_dist` and `stat_df`.
+
+```python
+import math
+
+two_vars = OLS(df, y="y", x=["x1", "x2"]).fit()
+cov = two_vars.cov_params
+
+# Standard error and t statistic of b1 + b2
+estimate = two_vars.params["x1"] + two_vars.params["x2"]
+variance = cov["x1"]["x1"] + cov["x2"]["x2"] + 2 * cov["x1"]["x2"]
+std_error = math.sqrt(variance)
+t_stat = estimate / std_error  # compare with a t distribution with two_vars.stat_df
+print(estimate, std_error, t_stat)
 ```
 
 ## Predicted values

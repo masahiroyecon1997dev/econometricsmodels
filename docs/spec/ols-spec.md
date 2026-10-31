@@ -55,11 +55,14 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols/`・`engi
   未指定なら経験則で自動計算した値。engineの`resolve_hac_lags`の戻り値をそのまま保持する）。
   `hac`以外は`None`。入力`hac_lags`（`None`のまま）とは別フィールドで、ユーザー指定値は書き換えない。
 - `conf_int`は`conf_lower`/`conf_upper`の2配列に分割（engine内部表現・pyo3実装の簡潔さを優先）。
-- `k×kの分散共分散行列（cov_params）はPython側に公開しない`。`OlsEstimator`自体は非公開
-  フィールドとして保持する（クレート内の他系統からの部分Wald検定の再利用のため、
-  `engine/src/linear/CLAUDE.md`参照。IVのWu-Hausman検定用に追加するまでは
-  `fit()`内のローカル変数として使い切っていた）が、`engine_pybind`側に公開する`OLSResult`
-  には引き続き含めない。
+- `k×kの分散共分散行列（cov_params）`は`cov_type`に応じた値を`OLSResult.cov_params`（行ごとの
+  `list[list[float]]`、`param_names`順）として公開し、Python側の`OLSResults.cov_params`が
+  `dict[str, dict[str, float]]`（名前→名前→値）に組み直す。理由: 係数の結合検定・線形結合
+  （`b1 + b2`）の標準誤差・デルタ法を利用者が自分で計算できるようにするため。`params`/`std_errors`
+  と同じくキーが利用者の列名で決まる結果なので`dict`にする（`docs/spec/inference-conventions.md`6章）。
+  `std_errors`はこの対角成分の平方根で、全手法・全`cov_type`で一致する（`tests/cross_method/
+  test_cov_params.py`）。`OlsEstimator`自体は非公開フィールドとして保持し、クレート内の他系統からの
+  部分Wald検定の再利用にも使う（`engine/src/linear/CLAUDE.md`参照）。
 - `summary()`（テキスト整形）・DataFrame版の`params_table()`/`conf_int()`は作らない
   （プログラムから呼び出して使う設計方針上、テキスト表示・対話的操作を前提に
   しないため）。

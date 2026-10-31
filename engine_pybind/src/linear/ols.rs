@@ -29,7 +29,7 @@ use crate::shared::column_extraction::{
     x_column_names,
 };
 use crate::shared::errors::{guard, unknown_option_value, user_error};
-use crate::shared::mat_conversion::mat_to_vec;
+use crate::shared::mat_conversion::{mat_to_rows, mat_to_vec};
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
     extract_strict_float, extract_strict_int, extract_strict_opt_column, extract_strict_opt_int,
@@ -343,6 +343,10 @@ pub struct OLSResult {
     pub params: Vec<f64>,
     #[pyo3(get)]
     pub std_errors: Vec<f64>,
+    /// Covariance matrix of the coefficients under `cov_type`, one row per entry of
+    /// `param_names` (same order on both axes).
+    #[pyo3(get)]
+    pub cov_params: Vec<Vec<f64>>,
     #[pyo3(get)]
     pub test_stats: Vec<f64>,
     /// Distribution of `test_stats`; always `"t"` for OLS.
@@ -437,6 +441,7 @@ pub struct OLSResult {
 crate::shared::pickle::impl_pickle_state!(OLSResult {
     params,
     std_errors,
+    cov_params,
     test_stats,
     stat_dist,
     stat_df,
@@ -474,6 +479,7 @@ impl OLSResult {
         let Self {
             params,
             std_errors,
+            cov_params,
             test_stats,
             stat_dist,
             stat_df,
@@ -504,6 +510,7 @@ impl OLSResult {
         Self {
             params: params.clone(),
             std_errors: std_errors.clone(),
+            cov_params: cov_params.clone(),
             test_stats: test_stats.clone(),
             stat_dist: stat_dist.clone(),
             stat_df: *stat_df,
@@ -967,6 +974,7 @@ pub(crate) fn ols_estimator_to_result(
     OLSResult {
         params: mat_to_vec(estimator.params()),
         std_errors: mat_to_vec(estimator.std_errors()),
+        cov_params: mat_to_rows(estimator.cov_params()),
         test_stats: mat_to_vec(estimator.test_stats()),
         stat_dist: estimator.stat_dist().name().to_string(),
         stat_df: estimator.stat_dist().df().map(|df| df as i64),

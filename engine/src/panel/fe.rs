@@ -699,6 +699,8 @@ pub struct FeEstimator {
     /// ため、各entityの観測数とも一致する）。
     n_periods: Option<usize>,
     std_errors: Mat<f64>,
+    /// `cov_type`別の係数の分散共分散行列 `(k, k)`。`std_errors`はこの対角成分の平方根。
+    cov_params: Mat<f64>,
     test_stats: Mat<f64>,
     p_values: Mat<f64>,
     conf_lower: Mat<f64>,
@@ -1061,6 +1063,7 @@ impl FeEstimator {
             dk_bandwidth_used,
             n_periods,
             std_errors,
+            cov_params,
             test_stats,
             p_values,
             conf_lower,
@@ -1141,6 +1144,11 @@ impl FeEstimator {
     /// `cov_type`別に計算し直した標準誤差（`(k, 1)`、`params()`と対応）。
     pub fn std_errors(&self) -> &Mat<f64> {
         &self.std_errors
+    }
+
+    /// `cov_type`別に計算し直した係数の分散共分散行列（`(k, k)`、`params()`と対応）。
+    pub fn cov_params(&self) -> &Mat<f64> {
+        &self.cov_params
     }
 
     /// `cov_type`別に計算し直したt統計量（`(k, 1)`）。

@@ -27,9 +27,9 @@ use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 
 use super::common::{
-    MarginalEffectsResult, check_cov_options, mat_to_nested_vec, mle_error_to_pyerr,
-    parse_cov_kind, parse_marginal_effects_at, parse_solver_type, resolve_cov_type,
-    resolve_mle_tol_default, solver_name,
+    MarginalEffectsResult, check_cov_options, mle_error_to_pyerr, parse_cov_kind,
+    parse_marginal_effects_at, parse_solver_type, resolve_cov_type, resolve_mle_tol_default,
+    solver_name,
 };
 use crate::shared::augment::append_predicted_column;
 use crate::shared::column_error::ColumnSource;
@@ -37,6 +37,7 @@ use crate::shared::column_extraction::{
     SelectedData, extract_f64_column, extract_f64_columns, extract_model_x_columns,
     select_model_x_columns, x_column_names,
 };
+use crate::shared::mat_conversion::mat_to_rows;
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
     extract_strict_float, extract_strict_int, extract_strict_opt_column, extract_strict_text,
@@ -269,6 +270,10 @@ pub struct LogitResult {
     pub params: Vec<f64>,
     #[pyo3(get)]
     pub std_errors: Vec<f64>,
+    /// Covariance matrix of the coefficients under `cov_type`, one row per entry of
+    /// `param_names` (same order on both axes).
+    #[pyo3(get)]
+    pub cov_params: Vec<Vec<f64>>,
     #[pyo3(get)]
     pub test_stats: Vec<f64>,
     /// Distribution of `test_stats`: `"t"` or `"normal"`.
@@ -370,6 +375,7 @@ impl crate::shared::pickle::PickleFieldFromSource for LogitFitted {
 crate::shared::pickle::impl_pickle_state!(LogitResult {
     params,
     std_errors,
+    cov_params,
     test_stats,
     stat_dist,
     stat_df,
@@ -491,7 +497,7 @@ impl LogitResult {
     /// Out-of-sample data is not yet supported (same limitation as `predict()`).
     #[pyo3(signature = (threshold=0.5))]
     fn pred_table(&self, threshold: f64) -> PyResult<Vec<Vec<f64>>> {
-        guard(|| Ok(mat_to_nested_vec(&self.fitted.pred_table(threshold))))
+        guard(|| Ok(mat_to_rows(&self.fitted.pred_table(threshold))))
     }
 
     /// Marginal effects (`dy/dx`) with delta-method standard errors.
@@ -626,6 +632,7 @@ fn fit_frame(
     Ok(LogitResult {
         params: estimator.params().to_vec(),
         std_errors: estimator.std_errors().to_vec(),
+        cov_params: mat_to_rows(estimator.cov_params()),
         test_stats: estimator.test_stats().to_vec(),
         stat_dist: estimator.stat_dist().name().to_string(),
         stat_df: estimator.stat_dist().df().map(|df| df as i64),

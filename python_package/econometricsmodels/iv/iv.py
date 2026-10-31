@@ -29,6 +29,7 @@ from .._lib import IVOptions
 from .._results_utils import (
     by_param,
     conf_int_by_param,
+    cov_params_by_param,
     params_table_rows,
 )
 from ..linear.ols import OLSResults
@@ -139,6 +140,7 @@ class IVResults:
 
     - Coefficients: `params`, `std_errors`, `test_stats`, `p_values`,
       `conf_int`; the names in order: `param_names`.
+    - Covariance of the coefficients: `cov_params`.
     - Which distribution the tests use: `stat_dist` (`"t"` for 2SLS,
       `"normal"` for GMM), `stat_df`.
     - Overall Wald test: `wald_statistic`, `wald_p_value`,
@@ -186,6 +188,16 @@ class IVResults:
     def std_errors(self) -> dict[str, float]:
         """Coefficient name to standard error."""
         return by_param(self._raw.param_names, self._raw.std_errors)
+
+    @property
+    def cov_params(self) -> dict[str, dict[str, float]]:
+        """Covariance matrix of the coefficients, keyed by name.
+
+        Follows `cov_type`, so `std_errors[a]` is the square root of
+        `cov_params[a][a]`. The covariance of `a` and `b` is
+        `cov_params["a"]["b"]`, and the keys are in `param_names` order.
+        """
+        return cov_params_by_param(self._raw.param_names, self._raw.cov_params)
 
     @property
     def test_stats(self) -> dict[str, float]:

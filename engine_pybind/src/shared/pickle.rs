@@ -119,6 +119,26 @@ impl PickleField for Vec<f64> {
     }
 }
 
+/// 行ごとの`Vec<f64>`（係数の分散共分散行列`cov_params`）は、行ごとの`bytes`のタプル。
+/// 行の長さの整合（正方行列か）は検査しない（値の意味は検査しない方針、モジュール冒頭参照）。
+impl PickleField for Vec<Vec<f64>> {
+    fn to_py<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let rows = self
+            .iter()
+            .map(|row| row.to_py(py))
+            .collect::<PyResult<Vec<_>>>()?;
+        Ok(PyTuple::new(py, rows)?.into_any())
+    }
+
+    fn from_py(obj: &Bound<'_, PyAny>) -> Option<Self> {
+        obj.cast::<PyTuple>()
+            .ok()?
+            .iter()
+            .map(|row| <Vec<f64> as PickleField>::from_py(&row))
+            .collect()
+    }
+}
+
 /// 行列は`(行数, 列数, 列優先のf64のバイト列)`。形が`行数×列数`と合わないものは拒否する。
 impl PickleField for faer::Mat<f64> {
     fn to_py<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {

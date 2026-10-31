@@ -48,6 +48,7 @@ use crate::shared::column_extraction::{
     select_model_x_columns, x_column_names,
 };
 use crate::shared::errors::{guard, unknown_option_value, user_error};
+use crate::shared::mat_conversion::mat_to_rows;
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
     extract_strict_float, extract_strict_int, extract_strict_opt_column, extract_strict_opt_float,
@@ -309,6 +310,10 @@ pub struct TobitResult {
     pub params: Vec<f64>,
     #[pyo3(get)]
     pub std_errors: Vec<f64>,
+    /// Covariance matrix of the coefficients under `cov_type`, one row per entry of
+    /// `param_names` (same order on both axes).
+    #[pyo3(get)]
+    pub cov_params: Vec<Vec<f64>>,
     #[pyo3(get)]
     pub test_stats: Vec<f64>,
     /// Distribution of `test_stats`: `"t"` or `"normal"`.
@@ -442,6 +447,7 @@ impl crate::shared::pickle::PickleFieldFromSource for TobitFitted {
 crate::shared::pickle::impl_pickle_state!(TobitResult {
     params,
     std_errors,
+    cov_params,
     test_stats,
     stat_dist,
     stat_df,
@@ -918,6 +924,7 @@ fn fit_frame(
     Ok(TobitResult {
         params,
         std_errors: estimator.std_errors().to_vec(),
+        cov_params: mat_to_rows(estimator.cov_params()),
         test_stats: estimator.test_stats().to_vec(),
         stat_dist: estimator.stat_dist().name().to_string(),
         stat_df: estimator.stat_dist().df().map(|df| df as i64),

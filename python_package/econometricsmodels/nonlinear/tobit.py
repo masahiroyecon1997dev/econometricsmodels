@@ -35,6 +35,7 @@ from .._lib import TobitOptions
 from .._results_utils import (
     by_param,
     conf_int_by_param,
+    cov_params_by_param,
     marginal_effect_rows,
     params_table_rows,
 )
@@ -118,6 +119,7 @@ class TobitResults:
     - Coefficients and `sigma`: `params`, `std_errors`, `test_stats`,
       `p_values`, `conf_int`; the names in order: `param_names`;
       `sigma` on its own: `sigma`.
+    - Covariance of the coefficients and `sigma`: `cov_params`.
     - Which distribution the tests use: `stat_dist` (always
       `"normal"`), `stat_df`.
     - Overall Wald test: `wald_statistic`, `wald_p_value`, `wald_df`,
@@ -163,6 +165,16 @@ class TobitResults:
     def std_errors(self) -> dict[str, float]:
         """Coefficient name to standard error (includes `"sigma"`)."""
         return by_param(self._raw.param_names, self._raw.std_errors)
+
+    @property
+    def cov_params(self) -> dict[str, dict[str, float]]:
+        """Covariance matrix of the coefficients, keyed by name (includes `"sigma"`).
+
+        Follows `cov_type`, so `std_errors[a]` is the square root of
+        `cov_params[a][a]`. The covariance of `a` and `b` is
+        `cov_params["a"]["b"]`, and the keys are in `param_names` order.
+        """
+        return cov_params_by_param(self._raw.param_names, self._raw.cov_params)
 
     @property
     def test_stats(self) -> dict[str, float]:

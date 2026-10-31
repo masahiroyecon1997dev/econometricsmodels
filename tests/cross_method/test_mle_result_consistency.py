@@ -37,6 +37,7 @@ X = ["x1", "x2"]
 COMMON_VALUES = {
     "params",
     "std_errors",
+    "cov_params",
     "test_stats",
     "stat_dist",
     "stat_df",
@@ -210,13 +211,21 @@ def test_wrapper_returns_the_matching_raw_attribute(
     wrapper = results[name]
     raw = wrapper._raw
     by_param = {"params", "std_errors", "test_stats", "p_values"}
-    for attr in (COMMON_VALUES | SPECIFIC_VALUES[name]) - by_param:
+    # `cov_params`は行列（名前→名前→値）なので、`_raw`の行ごとの配列と別に照合する
+    for attr in (
+        (COMMON_VALUES | SPECIFIC_VALUES[name]) - by_param - {"cov_params"}
+    ):
         assert _same(getattr(wrapper, attr), getattr(raw, attr)), attr
     for attr in by_param:
         expected = dict(zip(raw.param_names, getattr(raw, attr), strict=True))
         got = getattr(wrapper, attr)
         assert list(got) == list(expected), attr
         assert all(_same(got[k], expected[k]) for k in expected), attr
+    assert list(wrapper.cov_params) == list(raw.param_names)
+    for row_name, row in zip(raw.param_names, raw.cov_params, strict=True):
+        assert wrapper.cov_params[row_name] == dict(
+            zip(raw.param_names, row, strict=True)
+        )
     assert wrapper.conf_int == {
         p: (lo, hi)
         for p, lo, hi in zip(

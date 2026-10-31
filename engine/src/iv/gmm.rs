@@ -295,6 +295,8 @@ pub struct GmmEstimator {
     hac_lags_used: Option<usize>,
     /// 標準誤差 (k, 1)。`cov_type`に応じたサンドイッチ型分散の対角成分の平方根。
     std_errors: Mat<f64>,
+    /// 係数の分散共分散行列 (k, k)。`std_errors`はこの対角成分の平方根。
+    cov_params: Mat<f64>,
     /// z統計量 (k, 1) = params / std_errors（`docs/spec/iv-spec.md`3.2節、GMMはz分布）。
     test_stats: Mat<f64>,
     /// 両側p値 (k, 1)。標準正規分布に基づく。
@@ -702,6 +704,7 @@ impl GmmEstimator {
             cov_type,
             hac_lags_used,
             std_errors,
+            cov_params,
             test_stats,
             p_values,
             conf_lower,
@@ -803,6 +806,11 @@ impl GmmEstimator {
     /// 標準誤差 (k, 1)。
     pub fn std_errors(&self) -> &Mat<f64> {
         &self.std_errors
+    }
+
+    /// `cov_type`に応じた係数の分散共分散行列 (k, k)。
+    pub fn cov_params(&self) -> &Mat<f64> {
+        &self.cov_params
     }
 
     /// z統計量 (k, 1)。

@@ -27,6 +27,7 @@ from .._lib import ProbitOptions
 from .._results_utils import (
     by_param,
     conf_int_by_param,
+    cov_params_by_param,
     marginal_effect_rows,
     params_table_rows,
 )
@@ -106,6 +107,7 @@ class ProbitResults:
 
     - Coefficients: `params`, `std_errors`, `test_stats`, `p_values`,
       `conf_int`; the names in order: `param_names`.
+    - Covariance of the coefficients: `cov_params`.
     - Which distribution the tests use: `stat_dist` (always
       `"normal"`), `stat_df`.
     - Overall likelihood-ratio test: `lr_statistic`, `lr_p_value`,
@@ -151,6 +153,16 @@ class ProbitResults:
     def std_errors(self) -> dict[str, float]:
         """Coefficient name to standard error."""
         return by_param(self._raw.param_names, self._raw.std_errors)
+
+    @property
+    def cov_params(self) -> dict[str, dict[str, float]]:
+        """Covariance matrix of the coefficients, keyed by name.
+
+        Follows `cov_type`, so `std_errors[a]` is the square root of
+        `cov_params[a][a]`. The covariance of `a` and `b` is
+        `cov_params["a"]["b"]`, and the keys are in `param_names` order.
+        """
+        return cov_params_by_param(self._raw.param_names, self._raw.cov_params)
 
     @property
     def test_stats(self) -> dict[str, float]:

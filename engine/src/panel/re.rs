@@ -1309,6 +1309,8 @@ pub struct ReEstimator {
     cov_type: ReCovType,
     /// `cov_type`別の標準誤差。
     std_errors: Mat<f64>,
+    /// `cov_type`別の係数の分散共分散行列 `(df_model, df_model)`。`std_errors`はこの対角成分の平方根。
+    cov_params: Mat<f64>,
     /// `cov_type`別のt統計量。
     test_stats: Mat<f64>,
     /// `cov_type`別のp値（自由度は`df_inference`、3.3節）。
@@ -1784,6 +1786,7 @@ impl ReEstimator {
             estimator,
             cov_type,
             std_errors,
+            cov_params,
             test_stats,
             p_values,
             conf_lower,
@@ -1852,6 +1855,11 @@ impl ReEstimator {
     /// `cov_type`別の標準誤差。
     pub fn std_errors(&self) -> &Mat<f64> {
         &self.std_errors
+    }
+
+    /// `cov_type`別の係数の分散共分散行列（切片を含む`(df_model, df_model)`、`params()`と対応）。
+    pub fn cov_params(&self) -> &Mat<f64> {
+        &self.cov_params
     }
 
     /// `cov_type`別のt統計量。

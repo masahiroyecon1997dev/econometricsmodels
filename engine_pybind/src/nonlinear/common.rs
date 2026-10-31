@@ -65,15 +65,6 @@ pub(crate) fn rebuild_columns(
     (!y.is_empty()).then_some((y, x))
 }
 
-/// `faer::Mat<f64>`を行指向の`Vec<Vec<f64>>`に変換する（`pred_table`のような小さい
-/// 2次元行列をPython側にそのまま返すため）。`engine_pybind/src/shared/mat_conversion.rs`の
-/// `mat_to_vec`は列ベクトル（n×1）専用のため、任意の形状に対応するこちらを別途用意した。
-pub(crate) fn mat_to_nested_vec(mat: &faer::Mat<f64>) -> Vec<Vec<f64>> {
-    (0..mat.nrows())
-        .map(|i| (0..mat.ncols()).map(|j| *mat.get(i, j)).collect())
-        .collect()
-}
-
 /// `LogitResult::marginal_effects`/`ProbitResult::marginal_effects`共通の結果型。
 /// 定数項は除外される（`engine`側の`MarginalEffects`のdocコメント参照）。フィールドの
 /// 並びは`param_names`と対応する（`LogitResult`/`ProbitResult`本体と同じ規約）。
@@ -384,21 +375,6 @@ mod tests {
     fn resolve_mle_tol_default_returns_explicit_tol_unchanged() {
         assert_eq!(resolve_mle_tol_default("newton", Some(1e-3)), 1e-3);
         assert_eq!(resolve_mle_tol_default("bfgs", Some(1e-3)), 1e-3);
-    }
-
-    #[test]
-    fn mat_to_nested_vec_preserves_row_major_order() {
-        let mat = faer::Mat::from_fn(2, 3, |i, j| (i * 3 + j) as f64);
-        assert_eq!(
-            mat_to_nested_vec(&mat),
-            vec![vec![0.0, 1.0, 2.0], vec![3.0, 4.0, 5.0]]
-        );
-    }
-
-    #[test]
-    fn mat_to_nested_vec_handles_single_row() {
-        let mat = faer::Mat::from_fn(1, 2, |_, j| j as f64);
-        assert_eq!(mat_to_nested_vec(&mat), vec![vec![0.0, 1.0]]);
     }
 
     // `parse_marginal_effects_at`自体は渡された文字列をそのまま照合する（`parse_cov_kind`/

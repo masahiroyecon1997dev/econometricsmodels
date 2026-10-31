@@ -50,7 +50,7 @@ Probit対応は当初「python_packageラッパー実装のみ」というスコ
 
 ## `pred_table`の`Mat<f64>`→Python変換
 
-`nonlinear/common.rs`の`mat_to_nested_vec`（行指向`Vec<Vec<f64>>`に変換）を使う。`shared/mat_conversion.rs`の`mat_to_vec`は列ベクトル（n×1）専用のため、任意形状に対応する別関数を用意した。Logit/Probitの`pred_table`（どちらも2×2形状）で共有している。
+`shared/mat_conversion.rs`の`mat_to_rows`（行指向`Vec<Vec<f64>>`に変換）を使う。同ファイルの`mat_to_vec`は列ベクトル（n×1）専用のため、任意形状に対応する別関数を用意した。Logit/Probitの`pred_table`（どちらも2×2形状）と、全手法の`cov_params`（k×k）で共有している。
 
 ## テストの制約: `PyErr`はGILが無いと`Display`できない
 

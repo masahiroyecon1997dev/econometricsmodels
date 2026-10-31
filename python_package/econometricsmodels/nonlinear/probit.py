@@ -24,6 +24,7 @@ from .._results_utils import (
     cov_params_by_param,
     marginal_effect_rows,
     params_table_rows,
+    results_repr,
 )
 
 __all__ = ["Probit", "ProbitOptions", "ProbitResults"]
@@ -103,6 +104,10 @@ class ProbitResults:
     `result.params["x1"]`. Use `params_table()` for a row-oriented
     listing (a list of dicts), for example for a JSON response.
 
+    Printing a result shows a short table of the coefficients and
+    their standard errors. Its layout may change between versions;
+    use `params_table()` for machine-readable output.
+
     Fields by purpose:
 
     - Coefficients: `params`, `std_errors`, `test_stats`, `p_values`,
@@ -128,6 +133,9 @@ class ProbitResults:
 
     def __init__(self, raw: _lib.ProbitResult) -> None:
         self._raw = raw
+
+    def __repr__(self) -> str:
+        return results_repr("ProbitResults", self._raw)
 
     @property
     def param_names(self) -> list[str]:

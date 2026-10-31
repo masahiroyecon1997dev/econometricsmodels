@@ -19,7 +19,11 @@ __all__ = [
     "cov_params_by_param",
     "marginal_effect_rows",
     "params_table_rows",
+    "results_repr",
 ]
+
+# Coefficient rows shown by `results_repr` before the rest is summarized.
+_REPR_MAX_ROWS = 20
 
 
 class _ConfIntColumns(Protocol):
@@ -40,6 +44,21 @@ class _ParamsTableColumns(_ConfIntColumns, Protocol):
     def test_stats(self) -> Sequence[float]: ...
     @property
     def p_values(self) -> Sequence[float]: ...
+
+
+class _ReprColumns(Protocol):
+    @property
+    def dep_var_name(self) -> str: ...
+    @property
+    def n_obs(self) -> int: ...
+    @property
+    def cov_type(self) -> str: ...
+    @property
+    def param_names(self) -> Sequence[str]: ...
+    @property
+    def params(self) -> Sequence[float]: ...
+    @property
+    def std_errors(self) -> Sequence[float]: ...
 
 
 class _MarginalEffectColumns(_ConfIntColumns, Protocol):
@@ -176,3 +195,46 @@ def marginal_effect_rows(
             raw.conf_upper,
         )
     ]
+
+
+def results_repr(class_name: str, raw: _ReprColumns) -> str:
+    """Build the short text shown by `repr()` of a `*Results` object.
+
+    The first line names the class, the dependent variable, the number
+    of observations and the covariance type. Below it comes one row per
+    coefficient with its estimate and standard error. At most 20 rows
+    are shown; the rest is summarized in a final line. The layout is for
+    reading in a terminal or notebook and may change between versions;
+    use `params_table()` for machine-readable output.
+
+    Args:
+        class_name: Name of the result class, for the first line.
+        raw: A `_lib` result object exposing the coefficient columns and
+            `dep_var_name`, `n_obs` and `cov_type`.
+
+    Returns:
+        The text, without a trailing newline.
+    """
+    head = (
+        f"{class_name}(dep_var={raw.dep_var_name!r}, "
+        f"n_obs={raw.n_obs}, cov_type={raw.cov_type!r})"
+    )
+    names = list(raw.param_names)
+    shown = min(len(names), _REPR_MAX_ROWS)
+    params = [f"{v:.6g}" for v in list(raw.params)[:shown]]
+    std_errors = [f"{v:.6g}" for v in list(raw.std_errors)[:shown]]
+    name_width = max((len(n) for n in names[:shown]), default=0)
+    param_width = max([len("param"), *map(len, params)])
+    se_width = max([len("std_error"), *map(len, std_errors)])
+    column_header = (
+        f"{'':<{name_width}}  {'param':>{param_width}}  "
+        f"{'std_error':>{se_width}}"
+    )
+    lines = [head, column_header]
+    for name, param, se in zip(names[:shown], params, std_errors):
+        lines.append(
+            f"{name:<{name_width}}  {param:>{param_width}}  {se:>{se_width}}"
+        )
+    if len(names) > shown:
+        lines.append(f"... ({len(names) - shown} more)")
+    return "\n".join(lines)

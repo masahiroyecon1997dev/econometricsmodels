@@ -25,6 +25,7 @@ from .._results_utils import (
     conf_int_by_param,
     cov_params_by_param,
     params_table_rows,
+    results_repr,
 )
 from ..linear.ols import OLSResults
 
@@ -132,6 +133,10 @@ class IVResults:
     `result.params["x1"]`. Use `params_table()` for a row-oriented
     listing (a list of dicts), for example for a JSON response.
 
+    Printing a result shows a short table of the coefficients and
+    their standard errors. Its layout may change between versions;
+    use `params_table()` for machine-readable output.
+
     Fields by purpose:
 
     - Coefficients: `params`, `std_errors`, `test_stats`, `p_values`,
@@ -164,6 +169,9 @@ class IVResults:
 
     def __init__(self, raw: _lib.IVResult) -> None:
         self._raw = raw
+
+    def __repr__(self) -> str:
+        return results_repr("IVResults", self._raw)
 
     @property
     def param_names(self) -> list[str]:

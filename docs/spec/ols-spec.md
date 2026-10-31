@@ -66,6 +66,11 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols/`・`engi
 - `summary()`（テキスト整形）・DataFrame版の`params_table()`/`conf_int()`は作らない
   （プログラムから呼び出して使う設計方針上、テキスト表示・対話的操作を前提に
   しないため）。
+- 例外として、全手法の`*Results`に短い`__repr__`を持たせる（デバッグ・ノートブックでの確認用）。
+  1行目に被説明変数・`n_obs`・`cov_type`、続けて係数ごとの`param`と`std_error`の2列だけを出す。
+  R²・p値・診断を足すと`summary()`に近づくため含めない。20行を超える係数は省略行にまとめる。
+  書式は公開APIではなく（機械可読な出力は`params_table()`）、`eval`での往復も求めない
+  （`*Options`の`__repr__`とは違う）。整形は`_results_utils.results_repr`に1つだけ置く。
 - python_package層（`OLSResults`）:
   - `params`/`std_errors`/`test_stats`/`p_values`/`conf_int`: 係数名→値の`dict`（O(1)取り出し用）。
   - `params_table()`: 行指向`list[dict]`（REST APIレスポンスにそのまま使える形）。行のキーは対応する属性名の単数形:

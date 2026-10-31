@@ -6,7 +6,7 @@
 
 以下は既にユーザー承認済みで見送りが確定している。「使いやすさ」目的で再提案しない（CLAUDE.md 2章の非交渉事項に準ずる運用）。
 
-- `summary()` / `conf_int()`のDataFrame版は実装しない。「薄いラッパー」というスコープを優先する。
+- `summary()` / `conf_int()`のDataFrame版は実装しない。「薄いラッパー」というスコープを優先する。ただし`*Results`の短い`__repr__`（被説明変数・`n_obs`・`cov_type`と、係数ごとの`param`・`std_error`の表のみ）は別機能として実装済み（`ols-spec.md`参照）。これを`summary()`へ育てない。
 - **`predict()`は例外的に実装する**。`fitted_values`という別名のプロパティは作らず、`predict(new_data=None)`の1メソッドに統一する。`new_data=None`（デフォルト）で学習データの予測値、指定時は新規データの予測値を返す。Logitの`predict()`（引数なしで学習データの予測確率を返す設計）と命名を揃えるため。戻り値は観測順の`list[float]`（`residuals`と同じ形。区間を足すなら別メソッドにし、`predict()`にキーを足さない。`ols-spec.md`「predict()」参照）。WLSにも同じ設計で実装済み（`wls-spec.md`「predict()」）。重みは予測値の計算に一切関与しない（学習データ・新規データいずれも`ŷ=x'β̂`）。`augment()`が付加する列名は`"predicted"`（学習データ・新規データで呼び分けない、OLS/WLS共通）。
 - **`augment(new_data=None)`も例外的に実装する**。`predict()`と同じ引数・エラー
   意味論で、ソースデータ（学習データ or `new_data`）に予測値の列（`"predicted"`）を1列付加した
@@ -24,5 +24,5 @@
 ## 実装パターン
 
 - `OLS`/`WLS`クラスは`data`/`y`/`x`（+`weight`）/`options`のコンストラクタ引数を保持するだけで、`fit()`呼び出し時に初めて`_lib.fit_ols`/`_lib.fit_wls`を呼ぶ（コンストラクタでは検証しない）。
-- 係数名→値の`dict`化・`conf_int`・`params_table()`の行組み立ては`econometricsmodels/_results_utils.py`のヘルパー（`by_param`/`conf_int_by_param`/`params_table_rows`/`marginal_effect_rows`）に集約している（全手法のResultsで共通）。プロパティ本体・docstringは各クラスに残し、基底クラス化はしない（手法ごとにdocstringやメンバーが分岐するため）。
+- 係数名→値の`dict`化・`conf_int`・`params_table()`の行組み立ては`econometricsmodels/_results_utils.py`のヘルパー（`by_param`/`conf_int_by_param`/`params_table_rows`/`marginal_effect_rows`/`results_repr`）に集約している（全手法のResultsで共通）。プロパティ本体・docstringは各クラスに残し、基底クラス化はしない（手法ごとにdocstringやメンバーが分岐するため）。
 - `OLSResults`/`WLSResults`は`_lib`の結果オブジェクト（`_lib.OLSResult`等）を`_raw`として保持する薄いラッパー。新しいプロパティを追加する際も、Rust側`#[pyclass(get_all)]`のフィールドをそのまま`dict`化する以上のロジックをPython側に持ち込まない。

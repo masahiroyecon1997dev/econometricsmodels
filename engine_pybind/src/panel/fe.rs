@@ -155,7 +155,6 @@ impl FEOptions {
         dk_time = None,
         dk_bandwidth = None,
     ))]
-    #[allow(clippy::too_many_arguments)]
     fn new(
         #[pyo3(from_py_with = crate::shared::option_values::cov_type_arg)] cov_type: String,
         #[pyo3(from_py_with = crate::shared::option_values::confidence_level_arg)] confidence_level: f64,

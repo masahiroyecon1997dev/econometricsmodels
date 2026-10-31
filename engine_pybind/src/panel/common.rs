@@ -172,7 +172,7 @@ pub(crate) fn validate_dk_time_role(
 }
 
 /// FE/REが受け付ける`effects`の列数の上限。1要素が1-way、2要素が2-way。
-pub(crate) const MAX_EFFECTS: usize = 2;
+const MAX_EFFECTS: usize = 2;
 
 /// `effects`の列数を検査する。DataFrameは見ない。
 ///

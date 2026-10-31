@@ -133,7 +133,6 @@ impl WLSOptions {
         hac_lags = None,
         hac_time = None,
     ))]
-    #[allow(clippy::too_many_arguments)]
     fn new(
         #[pyo3(from_py_with = crate::shared::option_values::cov_type_arg)] cov_type: String,
         include_intercept: bool,

@@ -735,7 +735,7 @@ fn with_group_labels<T>(
 ///
 /// # Errors
 /// [`extract_group_key_column`]と同じ。
-pub fn extract_cluster_groups(
+fn extract_cluster_groups(
     df: &DataFrame,
     name: &str,
     source: ColumnSource<'_>,

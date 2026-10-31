@@ -42,16 +42,16 @@ All options are sandwich estimators \((\tilde X'\tilde X)^{-1}\hat S(\tilde X'\t
 |---|---|
 | `"classical"` | \(\hat\sigma^2(\tilde X'\tilde X)^{-1}\), with \(\hat\sigma^2 = \mathrm{SSR}/\mathrm{df}_{\text{resid}}\) |
 | `"hc1"` | \(\hat S = \sum_{it} \hat\varepsilon_{it}^2 \tilde x_{it}\tilde x_{it}'\) times \(n/\mathrm{df}_{\text{resid}}\) |
-| `"hc2"`, `"hc3"` | \(\hat S = \sum_{it} c_{it}\hat\varepsilon_{it}^2 \tilde x_{it}\tilde x_{it}'\) with \(c = 1/(1-h)\) or \(1/(1-h)^2\), where \(h\) is the leverage of the full dummy-variable regression, not of the within-transformed data |
-| `"cluster"` | \(c\,(\tilde X'\tilde X)^{-1}\big(\sum_g s_g s_g'\big)(\tilde X'\tilde X)^{-1}\), \(s_g = \sum_{(i,t)\in g}\tilde x_{it}\hat\varepsilon_{it}\) |
+| `"hc2"`, `"hc3"` | \(\hat S = \sum_{it} c_{it}\hat\varepsilon_{it}^2 \tilde x_{it}\tilde x_{it}'\) with \(c_{it} = 1/(1-h_{it})\) or \(1/(1-h_{it})^2\), where \(h_{it}\) is the leverage of the full dummy-variable regression, not of the within-transformed data |
+| `"cluster"` | \(f\,(\tilde X'\tilde X)^{-1}\big(\sum_g s_g s_g'\big)(\tilde X'\tilde X)^{-1}\), \(s_g = \sum_{(i,t)\in g}\tilde x_{it}\hat\varepsilon_{it}\) |
 | `"dk"` | Driscoll-Kraay, below |
 
 ### Cluster-robust: small-sample factor
 
-With \(G\) clusters (`cluster`, by default the entities), the factor is
+With \(G\) clusters (`cluster`, by default the entities), the small-sample factor \(f\) is
 
 \[
-c = \frac{G}{G-1}\cdot\frac{n-1}{n-K}
+f = \frac{G}{G-1}\cdot\frac{n-1}{n-K}
 \]
 
 following `fixest`'s default `ssc()`. The effective number of parameters \(K\) depends on whether the fixed effects are *nested* in the clusters (each level of the effect lies in a single cluster):

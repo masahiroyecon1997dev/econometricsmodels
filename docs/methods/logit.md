@@ -18,13 +18,13 @@ with \(n\) observations and \(k\) coefficients \(\theta\). \(X\) holds the colum
 \ell(\theta) = \sum_i \big[\, y_i\, x_i'\theta - \ln\big(1 + e^{x_i'\theta}\big) \big]
 \]
 
-with score \(s_i = (y_i - p_i)\,x_i\) and Hessian \(H = -X'WX\), where \(p_i = \Lambda(x_i'\hat\theta)\) and \(W = \mathrm{diag}\big(p_i(1-p_i)\big)\). The log-likelihood is globally concave, so the maximum is unique whenever the design is not perfectly collinear. A design with perfectly collinear columns raises an error instead of being estimated on a reduced set of columns (see [Validation and errors](../guide/validation.md)).
+with score \(s_i = (y_i - p_i)\,x_i\) and Hessian \(H = -X'WX\), where \(p_i = \Lambda(x_i'\hat\theta)\) and \(W = \mathrm{diag}\big(p_i(1-p_i)\big)\). The log-likelihood is globally concave, and strictly concave when the columns of \(X\) are not perfectly collinear, so a maximum is unique if it exists; under separation (below) it does not exist. A design with perfectly collinear columns raises an error instead of being estimated on a reduced set of columns (see [Validation and errors](../guide/validation.md)).
 
 ### Solvers and convergence
 
 `solver` selects the algorithm: `"newton"` (default, Newton-Raphson), `"bfgs"` or `"lbfgs"`. All three converge to the same maximum-likelihood estimate; they differ in the cost of an iteration and in how they behave on ill-conditioned problems. The optimization is run on standardized columns and the results are transformed back, so the scale of the regressors does not affect convergence.
 
-`tol` is a threshold on the gradient norm. For `"newton"` it applies to the total gradient of the log-likelihood; for `"bfgs"` and `"lbfgs"` it applies to the total gradient divided by `n`. The default depends on the solver (`1e-6` for `"newton"`, `1e-8` for the others), and an explicit `tol` is used as given. When the solver has not converged after `max_iter` iterations, `fit()` raises an error unless `raise_on_non_convergence=False`, in which case the last iterate is returned with `converged=False`. `n_iter` is the number of iterations used.
+`tol` is a threshold on the gradient norm. The gradient is that of the log-likelihood with respect to the coefficients of the standardized columns (with an intercept, each column is centered and divided by its standard deviation). For `"newton"` it applies to the total gradient; for `"bfgs"` and `"lbfgs"` it applies to the total gradient divided by `n`. The default depends on the solver (`1e-6` for `"newton"`, `1e-8` for the others), and an explicit `tol` is used as given. When the solver has not converged after `max_iter` iterations, `fit()` raises an error unless `raise_on_non_convergence=False`, in which case the last iterate is returned with `converged=False`. `n_iter` is the number of iterations used.
 
 ### Separation
 
@@ -56,7 +56,7 @@ Let \(\ell_0\) be the log-likelihood of the model with only an intercept. It has
 \ell_0 = n_1 \ln\bar y + n_0 \ln(1-\bar y)
 \]
 
-where \(n_1\) and \(n_0\) are the numbers of observations with \(y=1\) and \(y=0\).
+where \(n_1\) and \(n_0\) are the numbers of observations with \(y=1\) and \(y=0\), and \(\bar y = n_1/n\). Let \(q = k-1\) be the number of slope coefficients.
 
 \[
 \mathrm{LR} = 2(\ell - \ell_0) \sim \chi^2(q), \qquad
@@ -67,7 +67,9 @@ R^2_{\mathrm{McFadden}} = 1 - \frac{\ell}{\ell_0}
 \mathrm{AIC} = -2\ell + 2k, \qquad \mathrm{BIC} = -2\ell + k \ln n
 \]
 
-\(q\) is the number of slope coefficients (reported as `lr_df`; the LR statistic is `None` when there are none). The overall test is the likelihood-ratio test whatever `cov_type` is used: it does not follow `cov_type`.
+\(q\) is reported as `lr_df`. The overall test is the likelihood-ratio test whatever `cov_type` is used: it does not follow `cov_type`.
+
+With `include_intercept=False`, \(\ell_0\) is still the log-likelihood of the intercept-only model, which is not nested in the fitted model, and \(q = k-1\) is used all the same (the convention of statsmodels). The LR statistic can then be negative and the test is not meaningful. If \(q = 0\) (`include_intercept=False` with a single regressor), `lr_df` is `None` and `lr_p_value` is `NaN`, while `lr_statistic` and `pseudo_r_squared` are still computed.
 
 ## Marginal effects
 
@@ -89,6 +91,6 @@ The effect is the derivative for every column, including a 0/1 dummy variable; i
 
 ## Predictions
 
-`predict()` returns the fitted probabilities \(\hat p_i = \Lambda(x_i'\hat\theta)\), not a 0/1 class. Without `new_data` it is evaluated on the estimation data. With `new_data` the frame must contain the columns of `x` (matched by name, in any order); do not include `const`, it is added automatically when the model has an intercept. `augment()` returns the same values as a `"predicted_probability"` column attached to the source data.
+`predict()` returns the fitted probabilities \(\hat p_i = \Lambda(x_i'\hat\theta)\), not a 0/1 class. Without `new_data` it is evaluated on the estimation data. With `new_data` the frame must contain the columns of `x` (matched by name, in any order); do not include `const`: it is added automatically when the model has an intercept. `augment()` returns the same values as a `"predicted_probability"` column attached to the source data.
 
 `pred_table(threshold=0.5)` is a 2×2 classification table for the estimation data only. The rows are the actual outcome, and the columns count the observations whose predicted probability is above or not above `threshold`. The actual outcome is always the observed 0/1 value, whatever the threshold.

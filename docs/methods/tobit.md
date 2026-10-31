@@ -13,7 +13,7 @@ y_i^* = x_i'\beta + \varepsilon_i, \quad \varepsilon_i \sim N(0, \sigma^2), \qqu
 y_i = \min\big(\max(y_i^*, a),\, b\big)
 \]
 
-With \(z_i = (y_i - x_i'\beta)/\sigma\), \(\Phi\) the standard normal CDF and \(\phi\) its density, an observation contributes to the log-likelihood according to its censoring status:
+Let \(k\) be the number of coefficients in \(\beta\) (including the constant, if any; \(\sigma\) is not counted). With \(z_i = (y_i - x_i'\beta)/\sigma\), \(\Phi\) the standard normal CDF and \(\phi\) its density, an observation contributes to the log-likelihood according to its censoring status:
 
 | Status | Contribution |
 |---|---|
@@ -23,9 +23,9 @@ With \(z_i = (y_i - x_i'\beta)/\sigma\), \(\Phi\) the standard normal CDF and \(
 
 An observation is censored when \(y_i\) is exactly equal to a bound, so make sure that the bounds and \(y\) have the same floating-point values. The `lower` and `upper` bounds are echoed back as `TobitResults.lower` and `.upper`.
 
-The error standard deviation \(\sigma\) is estimated together with \(\beta\) and is reported as the last parameter, named `sigma`, with its own standard error. Internally the optimizer works with \(\ln\sigma\), which keeps \(\sigma\) positive, and the covariance matrix is transformed to \((\beta, \sigma)\) by the delta method, including the covariances between \(\beta\) and \(\sigma\). A column of `x` may therefore not be named `"sigma"`.
+The error standard deviation \(\sigma\) is estimated together with \(\beta\) and is reported as the last parameter, named `sigma`, with its own standard error. Internally the optimizer works with \(\ln\sigma\), which keeps \(\sigma\) positive, and the covariance matrix is transformed to \((\beta, \sigma)\) by the delta method, including the covariances between \(\beta\) and \(\sigma\). Results are keyed by parameter name and \(\sigma\) appears under `sigma`, so a column of `x` may not have that name.
 
-Unlike the Logit and Probit likelihoods, the Tobit likelihood in \((\beta, \ln\sigma)\) is not globally concave. The default `"newton"` solver damps its step (Levenberg-Marquardt) where the Hessian is indefinite; the three solvers still converge to the same maximum-likelihood estimate.
+Unlike the Logit and Probit likelihoods, the Tobit likelihood in \((\beta, \ln\sigma)\) is not globally concave. The default `"newton"` solver damps its step (a Levenberg-Marquardt-type modification) where the Hessian is indefinite; the three solvers still converge to the same maximum-likelihood estimate.
 
 ### What `fit()` rejects
 
@@ -33,7 +33,7 @@ Unlike the Logit and Probit likelihoods, the Tobit likelihood in \((\beta, \ln\s
 
 ## Covariance of the coefficients: `cov_type`
 
-`"classical"`, `"opg"`, `"hc0"`, `"hc1"` and `"cluster"` are defined as for [Logit](logit.md#covariance-of-the-coefficients-cov_type), with the score and Hessian of the Tobit log-likelihood and \(k+1\) parameters (\(\beta\) and \(\sigma\)), so the factor of `"hc1"` is \(n/(n-k-1)\) and the small-sample factor of `"cluster"` uses \((n-1)/(n-k-1)\), where \(k\) is the number of coefficients without `sigma`. The covariance matrix includes \(\sigma\) as its last row and column, expressed in the scale of \(\sigma\) rather than \(\ln\sigma\), so `std_errors`, `test_stats`, `p_values` and `conf_int` have an entry for `sigma`. The matrix is available as `cov_params` on the results. HC2, HC3 and HAC are not available.
+`"classical"`, `"opg"`, `"hc0"`, `"hc1"` and `"cluster"` are defined as for [Logit](logit.md#covariance-of-the-coefficients-cov_type), with the score and Hessian of the Tobit log-likelihood and \(k+1\) parameters (\(\beta\) and \(\sigma\)), so the factor of `"hc1"` is \(n/(n-k-1)\) and the small-sample factor of `"cluster"` uses \((n-1)/(n-k-1)\), with \(k\) as defined above. The covariance matrix includes \(\sigma\) as its last row and column, expressed in the scale of \(\sigma\) rather than \(\ln\sigma\), so `std_errors`, `test_stats`, `p_values` and `conf_int` have an entry for `sigma`. The matrix is available as `cov_params` on the results. HC2, HC3 and HAC are not available.
 
 ## Test distributions and confidence intervals
 
@@ -57,7 +57,7 @@ There is no likelihood-ratio statistic and no pseudo R², because the intercept-
 
 ## Predictions and marginal effects: `target`
 
-`predict()` and `marginal_effects()` take a `target`. Write \(\mu_i = x_i'\hat\beta\), \(z_a = (a-\mu_i)/\hat\sigma\) and \(z_b = (b-\mu_i)/\hat\sigma\); a side that is not censored has \(\Phi = 0\) (below) or \(1\) (above) and \(\phi = 0\).
+`predict()` and `marginal_effects()` take a `target`. Write \(\mu_i = x_i'\hat\beta\), \(z_a = (a-\mu_i)/\hat\sigma\) and \(z_b = (b-\mu_i)/\hat\sigma\); without a lower bound, \(\Phi(z_a) = 0\) and \(\phi(z_a) = 0\) and the term with \(a\) drops out; without an upper bound, \(\Phi(z_b) = 1\) and \(\phi(z_b) = 0\) and the term with \(b\) drops out.
 
 | `target` | Quantity | Expression |
 |---|---|---|
@@ -66,11 +66,13 @@ There is no likelihood-ratio statistic and no pseudo R², because the intercept-
 | `"prob_uncensored"` | \(P(a < y < b \mid x)\) | \(\Phi(z_b) - \Phi(z_a)\) |
 | `"expected_uncensored"` | \(E[y \mid a < y < b,\, x]\), the mean of a truncated normal | \(\mu_i + \sigma\,\dfrac{\phi(z_a) - \phi(z_b)}{\Phi(z_b) - \Phi(z_a)}\) |
 
-The four are related by
+The last three targets are related by
 
 \[
 E[y \mid x] = a\,P(y = a \mid x) + b\,P(y = b \mid x) + P(a < y < b \mid x)\; E[y \mid a < y < b,\, x]
 \]
+
+where \(P(y = a \mid x) = \Phi(z_a)\) and \(P(y = b \mid x) = 1 - \Phi(z_b)\); the term of a side without a bound is dropped.
 
 With a single lower bound of 0 this reads \(E[y \mid x] = P(y > 0 \mid x)\, E[y \mid y > 0, x]\). `"expected_uncensored"` answers questions such as "among households with positive spending, how does average spending change with x?".
 
@@ -91,7 +93,7 @@ With two-sided censoring, `"expected_uncensored"` needs the uncensored interval 
 
 ## Censoring fit check
 
-`censoring_fit_check()` compares, for each censored direction, the share of observations actually at the bound with the share the model implies. It returns one entry per category: `"lower"`, `"uncensored"` and `"upper"` (a direction that is not censored is left out).
+`censoring_fit_check()` compares the share of observations actually in each category with the share the model implies. It returns one entry per category: `"lower"` (at the lower bound), `"uncensored"` and `"upper"` (at the upper bound). A side without a bound has no category and is left out; `"uncensored"` is always present.
 
 | Field | Definition |
 |---|---|

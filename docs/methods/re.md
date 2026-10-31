@@ -11,9 +11,9 @@ y_{it} = \beta_0 + x_{it}'\beta + u_i + \varepsilon_{it} \quad \text{(one-way)},
 y_{it} = \beta_0 + x_{it}'\beta + u_i + \lambda_t + \varepsilon_{it} \quad \text{(two-way)}
 \]
 
-The effects are random: \(u_i\), \(\lambda_t\) and \(\varepsilon_{it}\) are uncorrelated with the regressors and with each other, with variances \(\sigma_u^2\), \(\sigma_\lambda^2\) and \(\sigma_\varepsilon^2\). Unlike FE, RE keeps the intercept (`const` is always the first parameter) and **allows time-invariant regressors**. With `REOptions.time` set it estimates entity and time effects on a balanced panel; otherwise only entity effects, and an unbalanced panel is allowed.
+The effects are random: \(u_i\), \(\lambda_t\) and \(\varepsilon_{it}\) are uncorrelated with the regressors and with each other, with variances \(\sigma_u^2\), \(\sigma_\lambda^2\) and \(\sigma_\varepsilon^2\). Unlike FE, RE keeps the intercept (`const` is always the first parameter) and **allows time-invariant regressors**. With `REOptions.time` set it estimates entity and time effects on a balanced panel; otherwise only entity effects, and an unbalanced panel is allowed. An entity with a single observation is rejected, as in FE.
 
-The estimator is feasible GLS, computed as OLS on quasi-demeaned data (all columns, including the constant, are transformed):
+The estimator is feasible GLS, computed as OLS on quasi-demeaned data (all columns, including the constant, are transformed); \(y^*\) and \(X^*\) denote the quasi-demeaned outcome and regressors:
 
 \[
 y_{it} - \theta_i \bar y_{i\cdot}, \qquad \theta_i = 1 - \sqrt{\frac{\sigma_\varepsilon^2}{T_i\,\sigma_u^2 + \sigma_\varepsilon^2}}
@@ -48,7 +48,7 @@ All three methods estimate \(\sigma_\varepsilon^2\), \(\sigma_u^2\) (and \(\sigm
 
 where \(k_{tv}\) counts the time-varying regressors (those with within variation) and \(K_b\) the regressors in the between regression. In the two-way model \(\hat\sigma_\varepsilon^2\) uses \(n - N - T + 1 - k_{tv}\), and \(\hat\sigma_u^2\), \(\hat\sigma_\lambda^2\) use the entity-mean and time-mean regressions with \(\sigma_\varepsilon^2/T\) and \(\sigma_\varepsilon^2/N\) subtracted. On an unbalanced one-way panel this is the `linearmodels` formula, which differs from the one in R's `plm` (by several percent in \(\sigma_u^2\) in a test case).
 
-**Wallace-Hussain and Amemiya** follow `plm` (`random.method = "walhus"` and `"amemiya"`). On a balanced panel (a one-way panel whose entities all have the same number of observations; two-way panels are always balanced) they use closed forms, and on an unbalanced one-way panel the trace-term forms. The two forms give different values on the same balanced panel. They are not available for unbalanced two-way panels (the panel is rejected). If the estimated \(\sigma_\varepsilon^2\) is not positive, `fit()` raises an error, whereas `plm` sets it to 0 and returns `NaN` weights. `"amemiya"` rejects a regressor without within variation (it would bias \(\sigma_u^2\)); `"wallace_hussain"` and `"swamy_arora"` accept it.
+**Wallace-Hussain and Amemiya** follow `plm` (`random.method = "walhus"` and `"amemiya"`). On a balanced panel (a one-way panel whose entities all have the same number of observations; two-way panels are always balanced) they use closed forms, and on an unbalanced one-way panel the trace-term forms. The closed form (balanced) and the trace-term form (unbalanced one-way) do not give the same value even on a balanced panel, so \(\hat\sigma_\varepsilon^2\) is not continuous when a row is dropped from a balanced panel. These methods are not available for unbalanced two-way panels (the panel is rejected). If the estimated \(\sigma_\varepsilon^2\) is not positive, `fit()` raises an error, whereas `plm` sets it to 0 and returns `NaN` weights. `"amemiya"` rejects a regressor without within variation (it would bias \(\sigma_u^2\)); `"wallace_hussain"` and `"swamy_arora"` accept it.
 
 ## Degrees of freedom
 
@@ -58,7 +58,7 @@ where \(k_{tv}\) counts the time-varying regressors (those with within variation
 
 The options are the same as for [FE](fe.md#covariance-of-the-coefficients-cov_type), computed on the quasi-demeaned data: `"classical"`, `"hc1"`, `"hc2"`, `"hc3"`, `"cluster"` (the default, by entity) and `"dk"` (Driscoll-Kraay, requires `dk_time`, which is a different option from `time`). `"hc0"` is not available. The covariance matrix of the coefficients is available as `cov_params` on the results, with the constant first. Differences from FE:
 
-- Because there are no absorbed dummies, the leverage in HC2 and HC3 is the plain \(h_{ii} = \hat x_i'(\hat X'\hat X)^{-1}\hat x_i\) of the quasi-demeaned design, and the small-sample factor uses \(K = \mathrm{df}_{\text{model}}\) in every case: \(\frac{G}{G-1}\cdot\frac{n-1}{n-K}\) for `"cluster"` (the form of `plm::vcovHC(type = "sss")`) and \(\frac{T_d}{T_d-1}\cdot\frac{n-1}{n-K}\) for `"dk"`.
+- Because there are no absorbed dummies, the leverage in HC2 and HC3 is the plain \(h_{ii} = x_i^{*\prime}(X^{*\prime}X^*)^{-1}x_i^*\) of the quasi-demeaned design, and the small-sample factor uses \(K = \mathrm{df}_{\text{model}}\) in every case: \(\frac{G}{G-1}\cdot\frac{n-1}{n-K}\) for `"cluster"` (the form of `plm::vcovHC(type = "sss")`) and \(\frac{T_d}{T_d-1}\cdot\frac{n-1}{n-K}\) for `"dk"`.
 - Cluster standard errors with `G` clusters need \(G\) greater than the number of slope coefficients, \(T_d\) greater than it for Driscoll-Kraay.
 
 ## Test distributions and confidence intervals
@@ -91,8 +91,10 @@ A time-invariant regressor is allowed. So is a regressor together with its entit
 H = \hat\delta'\hat\Sigma_\delta^{-1}\hat\delta \sim \chi^2(\mathrm{df}), \qquad \mathrm{df} = \text{number of tested columns of } \tilde X
 \]
 
+where \(\hat\delta\) are the estimated coefficients of the tested columns of \(\tilde X\) and \(\hat\Sigma_\delta\) is their block of the covariance matrix chosen by `cov_type`.
+
 - The statistic is non-negative by construction.
 - The comparison is with the FE model of the same structure: entity effects, or entity and time effects when `time` is set.
-- The covariance follows `cov_type`, so the default `"cluster"` gives the cluster-robust Hausman test, and `"classical"` gives the classical version, which assumes that RE is fully efficient under the null. The small-sample corrections are those of the RE standard errors. `"dk"` rests on large-\(T\) asymptotics and may be distorted for a short panel.
-- Only time-varying regressors are tested. Columns of \(\tilde X\) that cannot be identified are left out, and `hausman_df` counts the identified ones: a regressor varying only over time on a balanced panel, and one whose entity mean (or time mean, in two-way) is also a regressor.
+- The covariance follows `cov_type`, so the default `"cluster"` gives the cluster-robust Hausman test, and `"classical"` gives the classical version, which assumes that RE is fully efficient under the null. The small-sample factors are those of the RE standard errors, with \(K\) the number of regressors of the auxiliary regression (the constant, \(X^*\) and the tested columns of \(\tilde X\), up to \(2k+1\)) instead of \(k+1\). `"dk"` rests on large-\(T\) asymptotics and may be distorted for a short panel.
+- Only time-varying regressors are tested. A column of \(\tilde X\) is left out of the test, and not counted in `hausman_df`, when it cannot be identified: its quasi-demeaned counterpart in \(X^*\) differs from it only by a constant (for example a regressor that varies only over time on a balanced panel), or the entity mean (in the two-way model, the time mean) of the regressor is also a regressor.
 - The auxiliary regression has up to \(2k\) slope coefficients, so `cov_type="cluster"` needs more than that many clusters, and `"dk"` needs more periods than the slope coefficients. If the regression cannot be computed, `fit()` raises an error instead of returning `None`; use `cov_type="classical"` or more clusters.

@@ -67,7 +67,7 @@ and the covariance is multiplied by the small-sample factor \(\dfrac{G}{G-1}\cdo
 
 ## Test distributions and confidence intervals
 
-Every `cov_type` uses the **t distribution**; the package never switches to the normal distribution for robust standard errors.
+Every `cov_type` uses the **t distribution**: OLS never switches to the normal distribution for robust standard errors. (The maximum-likelihood models Logit, Probit and Tobit use the normal distribution; see [Inference conventions](../guide/inference-conventions.md).)
 
 | | degrees of freedom |
 |---|---|
@@ -84,7 +84,7 @@ The degrees of freedom actually used are returned as `stat_df`; use it, not `df_
 
 ## Overall F test
 
-Let \(\beta_s\) be the \(q\) slope coefficients (all except the constant) and \(\Sigma_s\) the corresponding block of the covariance matrix chosen by `cov_type`:
+Let \(\hat\beta_s\) be the \(q\) estimated slope coefficients (all except the constant) and \(\hat\Sigma_s\) the corresponding block of the estimated covariance matrix chosen by `cov_type`:
 
 \[
 F = \frac{\hat\beta_s' \hat\Sigma_s^{-1} \hat\beta_s}{q} \sim F(q, \mathrm{df})
@@ -98,10 +98,10 @@ With an intercept, \(\mathrm{SST} = \sum_i (y_i - \bar y)^2\); without one, \(\m
 
 \[
 R^2 = 1 - \frac{\mathrm{SSR}}{\mathrm{SST}}, \qquad
-\bar R^2 = 1 - \frac{n-c}{n-k}\,(1-R^2)
+\bar R^2 = 1 - \frac{n-d}{n-k}\,(1-R^2)
 \]
 
-with \(c = 1\) with an intercept and \(c = 0\) without.
+where \(d = 1\) with an intercept and \(d = 0\) without.
 
 \[
 \ell = -\frac{n}{2}\Big(\ln(2\pi) + \ln\frac{\mathrm{SSR}}{n} + 1\Big), \qquad
@@ -111,21 +111,21 @@ with \(c = 1\) with an intercept and \(c = 0\) without.
 
 The log-likelihood \(\ell\) uses the maximum-likelihood variance \(\mathrm{SSR}/n\), not \(\hat\sigma^2\).
 
-Two situations in which these statistics are undefined are rejected rather than reported: an outcome that is constant in a model with an intercept (\(\mathrm{SST} = 0\)), and a perfect fit, where the residuals are zero up to rounding (\(\mathrm{SSR} \le k\,\epsilon\,\mathrm{SST}\), \(\epsilon\) the machine epsilon). See [Validation and errors](../guide/validation.md).
+Two situations in which these statistics are undefined are rejected rather than reported: an outcome that is constant in a model with an intercept (\(\mathrm{SST} = 0\)), and a perfect fit, where the residuals are zero up to rounding (\(\mathrm{SSR} \le k\,\epsilon_{\mathrm{mach}}\,\mathrm{SST}\), \(\epsilon_{\mathrm{mach}}\) the machine epsilon). See [Validation and errors](../guide/validation.md).
 
 ## Predictions
 
-`predict()` returns \(\hat y = x'\hat\beta\). Without `new_data` it is evaluated on the estimation data. With `new_data` the frame must contain the columns of `x` (matched by name, in any order); do not include `const`, it is added automatically when the model has an intercept. `augment()` returns the same values as a `"predicted"` column attached to the source data.
+`predict()` returns \(\hat y = x'\hat\beta\). Without `new_data` it is evaluated on the estimation data. With `new_data` the frame must contain the columns of `x` (matched by name, in any order); do not include `const`: it is added automatically when the model has an intercept. `augment()` returns the same values as a `"predicted"` column attached to the source data.
 
 ## Post-estimation diagnostics
 
 The diagnostics are never computed by `fit()`; call them on the results. None of them depends on `cov_type`, and each returns a result with `statistic`, `p_value`, `df`, `df_denom` and `distribution`.
 
-Each test regresses a residual-based quantity on a set of auxiliary columns, and offers two versions chosen by `statistic`: `"lm"` (\(n R^2\) of the auxiliary regression, chi-squared with \(q\) degrees of freedom) and `"f"` (the F test that the auxiliary slopes are all zero). \(q\) is the number of auxiliary columns excluding the constant.
+Each test regresses a residual-based quantity on a set of auxiliary columns, and offers two versions chosen by `statistic`: `"lm"` (\(n R^2\) of the auxiliary regression, chi-squared) and `"f"` (the F test that the auxiliary coefficients are all zero). For the White and Breusch-Pagan tests the auxiliary regression always has a constant, \(q\) is the number of auxiliary columns excluding the constant, and the LM version has \(q\) degrees of freedom. The Breusch-Godfrey test differs in both respects: its degrees of freedom are \(m\), the number of lags, and its auxiliary regression adds no constant of its own (see below).
 
 ### `white_test()`
 
-Tests the null of homoskedastic errors, in the form that does not assume normal errors (Koenker's studentized version). The auxiliary regression is of \(\hat\varepsilon^2\) on the regressors, their squares and their pairwise products. The F version is \(F(q,\, n-q-1)\).
+Tests the null of homoskedastic errors with the \(n R^2\) form of the statistic, which does not assume normal errors. The auxiliary regression is of \(\hat\varepsilon^2\) on the regressors, their squares and their pairwise products. The F version is \(F(q,\, n-q-1)\).
 
 - The auxiliary regression always has a constant, even for a model fitted with `include_intercept=False`; `aux_terms` lists the terms, starting with `const`.
 - Terms that are constant, or numerically identical to an earlier term (for example the square of a dummy variable), are dropped and listed in `dropped_terms`. `df` counts the terms that remain.
@@ -139,8 +139,10 @@ The same Koenker version of the Breusch-Pagan test, but the auxiliary regression
 Tests the null of no autocorrelation of order up to `nlags`. The residuals are put in the order of the column `time`, and the auxiliary regression is of \(\hat\varepsilon_t\) on the model's own \(X\) and its `nlags` lags (\(\hat\varepsilon_{t-1}, \dots, \hat\varepsilon_{t-m}\), \(m\) = `nlags`). Lags before the start of the sample are set to zero, so the auxiliary regression always uses all \(n\) observations.
 
 \[
-\mathrm{LM} = n R^2 \sim \chi^2(m), \qquad
+\mathrm{LM} = n R^2 \sim \chi^2(m), \quad R^2 = 1 - \frac{\mathrm{SSR}_{\mathrm{aux}}}{\sum_t \hat\varepsilon_t^2}, \qquad
 F = \frac{\big(\sum_t \hat\varepsilon_t^2 - \mathrm{SSR}_{\mathrm{aux}}\big)/m}{\mathrm{SSR}_{\mathrm{aux}}/(n-k-m)} \sim F(m,\, n-k-m)
 \]
 
 `time` and `nlags` have no defaults. The auxiliary regression uses `X` exactly as in the model, so no constant is added when the model has none.
+
+Here \(R^2\) is measured against \(\sum_t \hat\varepsilon_t^2\), not against the variation of \(\hat\varepsilon\) around its mean (an uncentered \(R^2\)). With an intercept the residuals have mean zero and the two coincide. Without one they differ, and the definition used here is that of R's `lmtest::bgtest` and of Greene; statsmodels adds a constant to the auxiliary regression in that case, so its value differs.

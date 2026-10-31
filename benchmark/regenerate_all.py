@@ -56,6 +56,8 @@ _FIXTURE_MODULES = [
     "benchmark.nonlinear.fixtures.generate_probit_cov_fixtures",
     "benchmark.iv.fixtures.generate_iv_fixtures",
     "benchmark.iv.fixtures.generate_iv_gmm_fixtures",
+    "benchmark.iv.fixtures.generate_iv_cov_fixtures",
+    "benchmark.iv.fixtures.generate_iv_gmm_cov_fixtures",
     "benchmark.panel.fixtures.generate_fe_fixtures",
     "benchmark.panel.fixtures.generate_re_fixtures",
     # Tobit は主リファレンス（AER::tobit）も交差検証（censReg）も R 実装のため
@@ -77,6 +79,8 @@ _FIXTURE_MODULES = [
     "benchmark.nonlinear.fixtures.generate_tobit_cov_crosscheck_fixtures",
     "benchmark.iv.fixtures.generate_iv_crosscheck_fixtures",
     "benchmark.iv.fixtures.generate_iv_gmm_crosscheck_fixtures",
+    "benchmark.iv.fixtures.generate_iv_cov_crosscheck_fixtures",
+    "benchmark.iv.fixtures.generate_iv_gmm_cov_crosscheck_fixtures",
     "benchmark.panel.fixtures.generate_fe_crosscheck_fixtures",
     "benchmark.panel.fixtures.generate_fe_plm_crosscheck_fixtures",
     "benchmark.panel.fixtures.generate_re_crosscheck_fixtures",

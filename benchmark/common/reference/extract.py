@@ -28,6 +28,18 @@ def extract_params_std_errors(model: Any) -> dict[str, dict[str, float]]:
     }
 
 
+def cov_frame_to_dict(cov: Any) -> dict[str, dict[str, float]]:
+    """分散共分散行列のpandas DataFrameを`{行の名前: {列の名前: 値}}`にする。
+
+    statsmodelsの`cov_params()`のほか、linearmodelsの`res.cov`のように、行列が
+    メソッドでなく属性のDataFrameで得られるリファレンスにも使う。
+    """
+    return {
+        str(row): {str(col): float(value) for col, value in values.items()}
+        for row, values in cov.iterrows()
+    }
+
+
 def extract_cov_params(model: Any) -> dict[str, dict[str, float]]:
     """statsmodelsのfit結果から係数の分散共分散行列を入れ子のdictで取り出す。
 
@@ -42,8 +54,4 @@ def extract_cov_params(model: Any) -> dict[str, dict[str, float]]:
     Returns:
         `{名前: {名前: 値}}`。行・列とも`model.params`と同じ順。
     """
-    cov = model.cov_params()
-    return {
-        str(row): {str(col): float(value) for col, value in values.items()}
-        for row, values in cov.iterrows()
-    }
+    return cov_frame_to_dict(model.cov_params())

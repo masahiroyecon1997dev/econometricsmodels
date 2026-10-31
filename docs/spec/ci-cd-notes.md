@@ -125,16 +125,20 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
   手動でのローカル実測サマリーは `docs/performance/<method>.md`に記録する
   （生成JSONは`docs/performance/results/`、`.gitignore`対象）。
 - 全ワークフローでアクションをコミットSHAで固定する（サプライチェーン攻撃対策）。
-  例外は`pypa/gh-action-pypi-publish`のみ（`cd_release.yml`のコメント参照）。そのため
-  リポジトリ設定の「Require actions to be pinned to a full-length commit SHA」は有効にできない
-  （有効にするとPyPI公開ジョブが失敗する）。
+  `pypa/gh-action-pypi-publish`はDockerコンテナactionで、`uses:`のrefをそのままGHCRの
+  イメージタグに使う実装のため、SHAで固定できるのは「リリースのコミットSHAと同名の
+  イメージタグが公開されている版」（v1.13.0以降で確認）に限られる。tagオブジェクトの
+  SHAではなくコミットSHAを使う。版を上げるときは、GHCRに同名のタグがあることを確認する
+  （無いと公開ジョブが`manifest unknown`で失敗する）。SHA指定でイメージの取得とコンテナの
+  起動まで進むことは、公開しない一時的なworkflowで確認済み。したがって
+  リポジトリ設定の「Require actions to be pinned to a full-length commit SHA」を有効にできる。
 - 全`actions/checkout`に`persist-credentials: false`を付ける（以降のステップから`.git/config`経由で
   `GITHUB_TOKEN`を読ませない。gitのpush等を行うワークフローは無い）。`run:`には`${{ }}`を
   直接埋め込まず、外部から決まりうる値（タグ名等）は`env`経由で渡す（`cd_release.yml`）。
 - ワークフローの静的解析にはzizmorが使える（ローカルでは
   `uv run --no-project --with zizmor==<版> zizmor --offline .github/workflows`。
   `GITHUB_TOKEN`/`GH_TOKEN`が空文字で定義されているとエラーになるため`env -u`で外す）。
-  CIには組み込んでいない。既定のpersonaで残る指摘は、上記の`pypi-publish`の例外と、
+  CIには組み込んでいない。既定のpersonaで残る指摘は、
   `benchmark_performance.yml`のキャッシュ（`cache-poisoning`、信頼度Low）のみ。
 
 ## パッケージ健全性メトリクス（import時間・インストール容量）

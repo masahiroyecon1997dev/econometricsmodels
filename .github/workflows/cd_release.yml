@@ -222,13 +222,13 @@ jobs:
           path: dist
           merge-multiple: true
 
-      # 他のactionと異なりSHAでのピン留めはできない。このactionはDockerコンテナ
-      # actionで、`uses:`に書いたref文字列をそのままghcr.ioのイメージタグとして
-      # 使う実装（pypa/gh-action-pypi-publishのcreate-docker-action.py）のため、
-      # 公開イメージが存在しないコミットSHAを指定するとmanifest unknownで失敗する
-      # （v0.1.0初回リリース時に実際に発生・確認済み）。バージョンタグでの参照が
-      # 唯一動作する方式のため、ここに限りSHAピン留めの方針の例外とする。
-      - uses: pypa/gh-action-pypi-publish@v1.14.3
+      # このactionはDockerコンテナactionで、`uses:`に書いたref文字列をそのまま
+      # ghcr.ioのイメージタグとして使う実装（pypa/gh-action-pypi-publishの
+      # create-docker-action.py）。公開イメージが存在しないコミットSHAを指定すると
+      # manifest unknownで失敗するが、リリースのコミットSHAと同名のイメージタグが
+      # 公開されている版（v1.13.0以降で確認）はSHAで固定できる。tagオブジェクトの
+      # SHAではなく、コミットSHA（`git ls-remote <repo> 'refs/tags/<版>^{}'`）を使う。
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           # tag再push（公開失敗後の再実行）で、既に成功済みのファイルを
           # 再アップロードしようとして400エラーになるのを防ぐ。

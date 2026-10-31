@@ -136,7 +136,9 @@ For a test that is robust to heteroskedasticity or clustering, use `estimator="g
 
 ### Endogeneity: `wu_hausman_statistic`
 
-The regression-based (control function) version: the first-stage residuals \(\hat v\) are added to the structural equation, \(y \sim X + \hat V\), and the F test that the coefficients of \(\hat V\) are jointly zero is reported, with the covariance given by the `cov_type` of the fit (the formulation of linearmodels' `wooldridge_regression`). linearmodels reports the Wald statistic of this regression with a chi-squared reference; here that statistic is divided by the number of endogenous variables and compared with an F distribution. The degrees of freedom are the number of endogenous variables and the residual degrees of freedom of the augmented regression, \(n - k - k_{\text{endog}}\) (\(G - 1\) with `cov_type="cluster"`).
+The regression-based (control function) version: the first-stage residuals \(\hat v\) are added to the structural equation, \(y \sim X + \hat V\), and the F test that the coefficients of \(\hat V\) are jointly zero is reported, with the covariance given by the `cov_type` of the fit (the formulation of linearmodels' `wooldridge_regression`).
+
+linearmodels reports the Wald statistic of this regression with a chi-squared reference. Here that statistic is divided by the number of endogenous variables and compared with an F distribution. The degrees of freedom are the number of endogenous variables and the residual degrees of freedom of the augmented regression, \(n - k - k_{\text{endog}}\) (\(G - 1\) with `cov_type="cluster"`).
 
 It is `None` for `estimator="gmm"`, and also when the augmented regression cannot be estimated: it has \(k_{\text{endog}}\) more columns than the structural equation, so there may be too few observations or clusters, or it may fit perfectly.
 

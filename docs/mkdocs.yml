@@ -66,9 +66,9 @@ nav:
       - Accepted data: guide/accepted-data.md
       - Validation and errors: guide/validation.md
       - Error codes: guide/error-codes.md
-      - Errors (API): api/errors.md
       - Inference conventions: guide/inference-conventions.md
       - Pickling and copying: guide/pickling.md
+      - Errors (API): api/errors.md
   - Verification and performance:
       - Verification: guide/verification.md
       - Performance: guide/performance.md

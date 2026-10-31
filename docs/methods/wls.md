@@ -33,11 +33,17 @@ In the sandwich estimators the weights therefore enter squared. For example, HC0
 
 The weights play no part in the choice of the HAC lag length, in the grouping by `cluster`, or in the small-sample factor and degrees of freedom: those depend only on \(n\), \(k\) and \(G\), exactly as for OLS.
 
-## Test distributions and the overall F test
+## Test distributions and confidence intervals
 
-As for OLS, every `cov_type` uses the t distribution with \(n-k\) degrees of freedom (\(G-1\) for `"cluster"`), and the overall F test is the Wald form \(\hat\beta_s' \hat\Sigma_s^{-1} \hat\beta_s / q\) computed from the scaled data.
+As for OLS, every `cov_type` uses the t distribution with \(n-k\) degrees of freedom (\(G-1\) for `"cluster"`).
 
-## Fit statistics
+## Overall test and fit statistics
+
+### Overall F test
+
+The overall F test is the Wald form \(\hat\beta_s' \hat\Sigma_s^{-1} \hat\beta_s / q\) computed from the scaled data, as for OLS.
+
+### Fit statistics
 
 The sums of squares are weighted. \(\mathrm{SSR} = \sum_i w_i \hat\varepsilon_i^2\), and the total sum of squares uses the weighted mean \(\bar y_w = \sum_i w_i y_i / \sum_i w_i\):
 
@@ -57,7 +63,7 @@ Adjusted R² has the same form as for OLS. The log-likelihood of the weighted mo
 
 AIC and BIC are computed from it as for OLS.
 
-## Residuals and predictions
+## Predictions
 
 `residuals` are on the **original scale**, \(y_i - x_i'\hat\beta\), not the weighted residuals \(\sqrt{w_i}\,\hat\varepsilon_i\) that the standard errors are built from. This matches `statsmodels`' `.resid` and keeps residual plots comparable with OLS.
 

@@ -2,15 +2,11 @@
 
 **FE**: [Usage](../usage/fe.md) · **Options and results** · [Definitions](../methods/fe.md)
 
-`FE` estimates a one-way (entity) or two-way (entity and time) fixed effects ("within") panel regression. It shares the API shape of [OLS](ols.md) (`data`/`y`/`x`/`options` constructor, `.fit()`), but `entity` is a required argument rather than an option, since a fixed effects model has no meaning without a panel structure. Two-way effects are selected with `FEOptions.time` and need a balanced panel.
-
-There is no intercept: the within transformation removes it, so `FEOptions` has no `include_intercept` and `FEResults.param_names` never includes `"const"`. `cov_type` defaults to `"cluster"` on `entity` (not `"classical"`), and `"hc0"` is not supported. `"dk"` (Driscoll-Kraay) requires `FEOptions.dk_time`, which is independent of `time`.
-
-The estimator, degrees of freedom, covariance estimators, test distributions, the three R² statistics and the recovery of the fixed effects (`FEResults.fixed_effects()`) are defined in [Methods: FE](../methods/fe.md).
+`FE` estimates a one-way (entity) or two-way (entity and time) fixed effects ("within") panel regression, with the same constructor and `.fit()` as [OLS](ols.md). `entity` is a required argument. There is no intercept, since the effects absorb it. The estimator, covariance estimators, R² statistics and the recovery of the fixed effects are defined in [Definitions: FE](../methods/fe.md).
 
 ## Options at a glance
 
-`entity` is an argument of `FE`, not an option. There is no `include_intercept`: the effects absorb the constant.
+Pass an `FEOptions` as `options=`. `entity` is an argument of `FE`, not an option, and there is no `include_intercept`.
 
 | Option | Purpose | Default | Notes |
 |---|---|---|---|
@@ -20,6 +16,16 @@ The estimator, degrees of freedom, covariance estimators, test distributions, th
 | `dk_bandwidth` | Kernel bandwidth | `None` (automatic) | Only with `cov_type="dk"` |
 | `time` | Column of the time identifier; sets two-way effects | `None` (one-way) | Two-way needs a balanced panel |
 | `confidence_level` | Level of `conf_int`, in (0, 1) | `0.95` | |
+
+Which options go with which `cov_type` (an option set where it is not used raises a `ValidationError`):
+
+| `cov_type` | Required | Optional |
+|---|---|---|
+| `"classical"`, `"hc1"` to `"hc3"` | | |
+| `"cluster"` (default) | | `cluster` (default: `entity`) |
+| `"dk"` | `dk_time` | `dk_bandwidth` |
+
+`time` is independent of `cov_type`: it sets the effects of the model, whereas `dk_time` sets the periods of the Driscoll-Kraay kernel, and the two may be different columns.
 
 The fields of the results are listed by purpose at the top of the results class below.
 

@@ -22,9 +22,21 @@ Let \(\lambda_i = a_i\,\phi(a_i z_i) / \Phi(a_i z_i)\) (the generalized residual
 
 For extreme linear predictors the ratio \(\phi/\Phi\) underflows in floating point. The argument \(a_i z_i\) is therefore clamped to \([-8.1259, 8.1259]\) (that is, \(-\Phi^{-1}(\epsilon)\) with \(\epsilon\) the machine epsilon) before \(\phi\) and \(\Phi\) are evaluated, as R's `binomial(link = "probit")` does. The clamp is applied to the log-likelihood, the score and the Hessian alike, so they stay consistent with each other.
 
-## Covariance, test distribution, overall test
+## Covariance of the coefficients: `cov_type`
 
-As for Logit, with the Probit score and Hessian above: `cov_type` is `"classical"`, `"opg"`, `"hc0"`, `"hc1"` or `"cluster"`, tests use the standard normal distribution, and the overall test is the likelihood-ratio test \(2(\ell - \ell_0)\) with the closed-form intercept-only log-likelihood \(\ell_0 = n_1 \ln\bar y + n_0 \ln(1-\bar y)\), where \(\bar y = n_1/n\). The degrees of freedom, and what happens with `include_intercept=False`, are as for [Logit](logit.md#overall-test-and-fit-statistics). McFadden's pseudo R², AIC and BIC are defined as for Logit. The covariance matrix of the coefficients is available as `cov_params` on the results, as for Logit.
+As for [Logit](logit.md#covariance-of-the-coefficients-cov_type), with the Probit score and Hessian above: `cov_type` is `"classical"`, `"opg"`, `"hc0"`, `"hc1"` or `"cluster"`. The covariance matrix of the coefficients is available as `cov_params` on the results, as for Logit.
+
+## Test distributions and confidence intervals
+
+Tests use the standard normal distribution, as for [Logit](logit.md#test-distributions-and-confidence-intervals).
+
+## Overall test and fit statistics
+
+The overall test is the likelihood-ratio test \(2(\ell - \ell_0)\) with the closed-form intercept-only log-likelihood \(\ell_0 = n_1 \ln\bar y + n_0 \ln(1-\bar y)\), where \(\bar y = n_1/n\). The degrees of freedom, and what happens with `include_intercept=False`, are as for [Logit](logit.md#overall-test-and-fit-statistics). McFadden's pseudo R², AIC and BIC are defined as for Logit.
+
+## Predictions
+
+`predict()` returns the fitted probabilities \(\hat p_i = \Phi(x_i'\hat\theta)\); `augment()` attaches them as a `"predicted_probability"` column; `pred_table()` is as for [Logit](logit.md#predictions).
 
 ## Marginal effects
 
@@ -35,7 +47,3 @@ For Probit
 \]
 
 The choices of `at` (`"overall"`, `"mean"`, `"median"`), the delta-method standard errors and the exclusion of the constant are as for [Logit](logit.md#marginal-effects).
-
-## Predictions
-
-`predict()` returns the fitted probabilities \(\hat p_i = \Phi(x_i'\hat\theta)\); `augment()` attaches them as a `"predicted_probability"` column; `pred_table()` is as for [Logit](logit.md#predictions).

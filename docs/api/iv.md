@@ -2,13 +2,11 @@
 
 **IV**: [Usage](../usage/iv.md) · **Options and results** · [Definitions](../methods/iv.md)
 
-`IV` estimates a linear model with endogenous regressors by two-stage least squares (2SLS) or generalized method of moments (GMM). Unlike [OLS](ols.md), the independent variables are split into `x_exog` (exogenous) and `x_endog` (endogenous), plus `instruments` (the excluded instruments, at least one per endogenous variable). `IVOptions.estimator` (`"2sls"`, the default, or `"gmm"`) selects the estimator; a single `IV`/`IVResults` pair serves both.
-
-Several `IVOptions` fields apply to GMM only (`gmm_type`, `gmm_weight_type`, `gmm_max_iter`, `gmm_tol`, `raise_on_non_convergence`). Setting any of them with `estimator="2sls"` raises a `ValidationError`, as do `gmm_max_iter`, `gmm_tol` and `raise_on_non_convergence` unless `gmm_type="iterated"`, and `gmm_weight_type` with `gmm_type="one_step"`. Their defaults are `None`, which means the effective defaults described in the docstring. The estimator, GMM type and weight type actually used are echoed back on the results.
-
-The estimators, `cov_type` for both of them, the test distributions, and the weak-instrument, overidentification and endogeneity diagnostics are defined in [Methods: IV](../methods/iv.md).
+`IV` estimates a linear model with endogenous regressors by two-stage least squares (2SLS) or generalized method of moments (GMM), with the same constructor and `.fit()` as [OLS](ols.md). The independent variables are split into `x_exog` (exogenous) and `x_endog` (endogenous), plus `instruments` (the excluded instruments, at least one per endogenous variable). `IVOptions.estimator` selects the estimator, and a single `IV`/`IVResults` pair serves both. The estimators, covariance types and diagnostics are defined in [Definitions: IV](../methods/iv.md).
 
 ## Options at a glance
+
+Pass an `IVOptions` as `options=`. Options of `None` take the effective default in parentheses where the option is used.
 
 | Option | Purpose | Default | Notes |
 |---|---|---|---|
@@ -25,7 +23,15 @@ The estimators, `cov_type` for both of them, the test distributions, and the wea
 | `confidence_level` | Level of `conf_int`, in (0, 1) | `0.95` | |
 | `include_intercept` | Add a constant to `x_exog` | `True` | |
 
-An option that the chosen mode does not use raises a `ValidationError` rather than being ignored; a default of `None` means the value in parentheses applies where the option is used.
+Which options go with which `cov_type` (an option set where it is not used raises a `ValidationError`):
+
+| `cov_type` | Required | Optional |
+|---|---|---|
+| `"classical"`, `"hc0"` to `"hc3"` | | |
+| `"hac"` | `hac_time` | `hac_lags` |
+| `"cluster"` | `cluster` | |
+
+For GMM, `gmm_weight_type` is chosen separately from `cov_type`: `"cluster"` needs `cluster`, and `"hac"` needs `hac_time` (and takes `hac_lags`). The GMM-only options (`gmm_type`, `gmm_weight_type`, `gmm_max_iter`, `gmm_tol`, `raise_on_non_convergence`) raise a `ValidationError` with `estimator="2sls"`. `gmm_max_iter`, `gmm_tol` and `raise_on_non_convergence` need `gmm_type="iterated"`, and `gmm_weight_type` is not allowed with `gmm_type="one_step"`. The estimator, GMM type and weight type actually used are echoed back on the results.
 
 The fields of the results are listed by purpose at the top of the results class below.
 

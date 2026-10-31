@@ -82,7 +82,9 @@ For coefficient \(j\), the t statistic is \(\hat\beta_j / \mathrm{se}(\hat\beta_
 
 The degrees of freedom actually used are returned as `stat_df`; use it, not `df_resid`, to recompute a p-value. `df_resid` is \(n-k\) regardless of `cov_type`.
 
-## Overall F test
+## Overall test and fit statistics
+
+### Overall F test
 
 Let \(\hat\beta_s\) be the \(q\) estimated slope coefficients (all except the constant) and \(\hat\Sigma_s\) the corresponding block of the estimated covariance matrix chosen by `cov_type`:
 
@@ -92,7 +94,7 @@ F = \frac{\hat\beta_s' \hat\Sigma_s^{-1} \hat\beta_s}{q} \sim F(q, \mathrm{df})
 
 \(\mathrm{df}\) is the t degrees of freedom above (\(G-1\) for `"cluster"`). With `"classical"` this is the textbook F test; with the other `cov_type` values it is a robust Wald test.
 
-## Fit statistics
+### Fit statistics
 
 With an intercept, \(\mathrm{SST} = \sum_i (y_i - \bar y)^2\); without one, \(\mathrm{SST} = \sum_i y_i^2\).
 

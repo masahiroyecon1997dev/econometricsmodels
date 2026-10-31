@@ -118,3 +118,9 @@ import json
 
 print(json.dumps(result.params_table()[0]))
 ```
+
+## Where to look next
+
+- [Performance](performance.md#using-fits-from-threads): using fits from threads and running several fits at once.
+- [Validation and errors](validation.md): the errors raised when a pickle cannot be restored.
+- [Accepted data](accepted-data.md): the data a result keeps for `augment()` and the diagnostic tests.

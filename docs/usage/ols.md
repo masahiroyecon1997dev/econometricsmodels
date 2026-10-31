@@ -54,6 +54,25 @@ When `hac_lags` is omitted, the number of lags is chosen automatically as `floor
 
 See [Options and results](../api/ols.md) for the full list of available options.
 
+## Choosing the type of standard error
+
+The coefficients are the same for every `cov_type`; only the standard errors, the t statistics, the p-values and the confidence intervals change. Choose by what you believe about the errors:
+
+| If the errors may be... | Use | Notes |
+|---|---|---|
+| Homoskedastic and uncorrelated | `"classical"` (default) | The textbook formula; too small if the variance of the errors depends on the regressors |
+| Heteroskedastic, observations independent | `"hc0"` to `"hc3"` | HC1 rescales HC0 by `n / (n - k)`. HC2 and HC3 correct for the leverage of each observation and are more cautious in small samples. |
+| Correlated within groups (firms, schools, regions) | `"cluster"` with `cluster=` | Name the column of the level at which errors can be correlated. The result is unreliable with few clusters; at least two are required, and more than the number of slope coefficients |
+| Serially correlated (time series) | `"hac"` with `hac_time=` | Newey-West. Also robust to heteroskedasticity. The lag length is chosen automatically unless you set `hac_lags` |
+
+A common minimal choice with independent observations is a heteroskedasticity-robust type (`"hc1"` or `"hc3"`), and a large difference from the classical standard errors is itself a sign of heteroskedasticity. The panel models have their own defaults and the Driscoll-Kraay type, which is robust to correlation across entities as well: see [FE: choosing the standard error](fe.md#choosing-the-type-of-standard-error). The formulas and degrees of freedom are in [Definitions: OLS](../methods/ols.md#covariance-of-the-coefficients-cov_type).
+
+```python
+for cov_type in ("classical", "hc3"):
+    fitted = OLS(df, y="y", x=["x1"], options=OLSOptions(cov_type=cov_type)).fit()
+    print(cov_type, fitted.std_errors["x1"], fitted.p_values["x1"])
+```
+
 ## Retrieving results
 
 `OLSResults` exposes coefficients, standard errors, etc. as dictionaries keyed by coefficient name (`str`). If you need a row-oriented listing — e.g. for a REST API response — use `params_table()`.
@@ -139,6 +158,8 @@ white.to_dict()  # a JSON-ready dict
 white_f = result.white_test(statistic="f")
 ```
 
+**How to read it.** The null hypothesis is that the error variance is constant (homoskedasticity). A small p-value (below 0.05, say) is evidence of heteroskedasticity, although the White test also reacts to some kinds of misspecification of the mean. If you reject, use a heteroskedasticity-robust `cov_type` (see [above](#choosing-the-type-of-standard-error)); a large p-value does not prove that the errors are homoskedastic.
+
 The auxiliary regression always includes a constant, even when the model was fitted with `include_intercept=False`, so the first element of `aux_terms` is always `"const"`. Terms that are constant or numerically identical to an earlier term (the square of a 0/1 dummy equals the dummy itself) are dropped, and the degrees of freedom count the terms that remain. The term labels only describe what was used; they are not a formula and are never parsed. The test does not depend on `cov_type`.
 
 ## Diagnostics: Breusch-Pagan test for heteroskedasticity
@@ -154,7 +175,7 @@ bp_size = result.breusch_pagan_test(variables=["firm_size"])  # any numeric colu
 bp_f = result.breusch_pagan_test(variables=["x1"], statistic="f")  # F version
 ```
 
-This is the studentized (Koenker) version, which does not assume normal errors. The auxiliary regression always includes a constant, constant or duplicate columns are dropped (`dropped_terms` shows them), and the test does not depend on `cov_type`.
+**How to read it.** The null hypothesis is that the error variance is unrelated to the variables you named. A small p-value means the variance depends on them, so use a heteroskedasticity-robust `cov_type`. A large p-value says only that these variables do not explain the variance; others might. This is the studentized (Koenker) version, which does not assume normal errors. The auxiliary regression always includes a constant, constant or duplicate columns are dropped (`dropped_terms` shows them), and the test does not depend on `cov_type`.
 
 ## Diagnostics: Breusch-Godfrey test for serial correlation
 
@@ -167,4 +188,8 @@ bg_f = result.breusch_godfrey_test("year", 2, statistic="f")  # F version
 bg.to_dict()  # a JSON-ready dict
 ```
 
-The rows may be in any order: they are sorted by `time` before the lags are taken. Only the order of the `time` values is used (gaps between periods are not checked), and the values must be distinct. Lags before the first observation are filled with zero. The test is meaningless for cross-sectional data.
+**How to read it.** The null hypothesis is that the errors are not serially correlated up to `nlags`. A small p-value is evidence of serial correlation, in which case the ordinary standard errors are not reliable: use `cov_type="hac"` or add the missing dynamics to the model. The rows may be in any order: they are sorted by `time` before the lags are taken. Only the order of the `time` values is used (gaps between periods are not checked), and the values must be distinct. Lags before the first observation are filled with zero. The test is meaningless for cross-sectional data.
+
+## See also
+
+[Accepted data](../guide/accepted-data.md), [Validation and errors](../guide/validation.md), [Inference conventions](../guide/inference-conventions.md) and [Verification](../guide/verification.md).

@@ -71,6 +71,12 @@ R^2_{\mathrm{McFadden}} = 1 - \frac{\ell}{\ell_0}
 
 With `include_intercept=False`, \(\ell_0\) is still the log-likelihood of the intercept-only model, which is not nested in the fitted model, and \(q = k-1\) is used all the same (the convention of statsmodels). The LR statistic can then be negative and the test is not meaningful. If \(q = 0\) (`include_intercept=False` with a single regressor), `lr_df` is `None` and `lr_p_value` is `NaN`, while `lr_statistic` and `pseudo_r_squared` are still computed.
 
+## Predictions
+
+`predict()` returns the fitted probabilities \(\hat p_i = \Lambda(x_i'\hat\theta)\), not a 0/1 class. Without `new_data` it is evaluated on the estimation data. With `new_data` the frame must contain the columns of `x` (matched by name, in any order); do not include `const`: it is added automatically when the model has an intercept. `augment()` returns the same values as a `"predicted_probability"` column attached to the source data.
+
+`pred_table(threshold=0.5)` is a 2×2 classification table for the estimation data only. The rows are the actual outcome, and the columns count the observations whose predicted probability is above or not above `threshold`. The actual outcome is always the observed 0/1 value, whatever the threshold.
+
 ## Marginal effects
 
 `marginal_effects(at=...)` returns \(\partial P(y=1)/\partial x_j\) for each explanatory variable (the constant is excluded), with delta-method standard errors and z statistics. For Logit
@@ -88,9 +94,3 @@ The point of evaluation is chosen by `at`:
 | `"median"` | The effect at the median of each explanatory variable. |
 
 The effect is the derivative for every column, including a 0/1 dummy variable; it is not the discrete change from 0 to 1. The standard error is \(\sqrt{J \hat\Sigma J'}\), where \(J\) is the gradient of the effect with respect to \(\theta\) and \(\hat\Sigma\) is the covariance matrix chosen by `cov_type`. The confidence level of `marginal_effects()` is its own argument and need not equal the one used in `fit()`.
-
-## Predictions
-
-`predict()` returns the fitted probabilities \(\hat p_i = \Lambda(x_i'\hat\theta)\), not a 0/1 class. Without `new_data` it is evaluated on the estimation data. With `new_data` the frame must contain the columns of `x` (matched by name, in any order); do not include `const`: it is added automatically when the model has an intercept. `augment()` returns the same values as a `"predicted_probability"` column attached to the source data.
-
-`pred_table(threshold=0.5)` is a 2×2 classification table for the estimation data only. The rows are the actual outcome, and the columns count the observations whose predicted probability is above or not above `threshold`. The actual outcome is always the observed 0/1 value, whatever the threshold.

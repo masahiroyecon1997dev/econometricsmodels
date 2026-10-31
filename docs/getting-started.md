@@ -10,6 +10,8 @@ econometricsmodels takes a polars DataFrame and column names, and returns a resu
 pip install econometricsmodels
 ```
 
+It needs Python 3.12 or later; polars (1.38.1 or later) is installed with it.
+
 ## A first regression: OLS
 
 Pass the data, the dependent variable `y` (one column name) and the independent variables `x` (a list of column names).
@@ -124,17 +126,6 @@ Missing values are never dropped for you and collinear columns are never removed
 
 ## Every method
 
-Each method has three pages: a short **usage** guide with examples, the **options and results** reference (what each option does and which fields a result has), and the **definitions** (the formulas, covariance types and test distributions).
-
-| Method | For | Usage | Options and results | Definitions |
-|---|---|---|---|---|
-| OLS | Linear regression | [Usage](usage/ols.md) | [Reference](api/ols.md) | [Definitions](methods/ols.md) |
-| WLS | Linear regression with weights | [Usage](usage/wls.md) | [Reference](api/wls.md) | [Definitions](methods/wls.md) |
-| Logit | Binary outcome (logistic) | [Usage](usage/logit.md) | [Reference](api/logit.md) | [Definitions](methods/logit.md) |
-| Probit | Binary outcome (normal) | [Usage](usage/probit.md) | [Reference](api/probit.md) | [Definitions](methods/probit.md) |
-| Tobit | Censored outcome | [Usage](usage/tobit.md) | [Reference](api/tobit.md) | [Definitions](methods/tobit.md) |
-| IV | Endogenous regressors (2SLS, GMM) | [Usage](usage/iv.md) | [Reference](api/iv.md) | [Definitions](methods/iv.md) |
-| FE | Panel data, fixed effects | [Usage](usage/fe.md) | [Reference](api/fe.md) | [Definitions](methods/fe.md) |
-| RE | Panel data, random effects | [Usage](usage/re.md) | [Reference](api/re.md) | [Definitions](methods/re.md) |
+Each method has three pages: a short **usage** guide with examples, the **options and results** reference (what each option does and which fields a result has), and the **definitions** (the formulas, covariance types and test distributions). The [table of methods on the home page](index.md#supported-methods) says when to use each one and links to its pages.
 
 The [Guides](guide/accepted-data.md) cover the data the estimators accept, validation and errors, how the test distributions compare with other packages, and how to [pickle and copy](guide/pickling.md) options and results.

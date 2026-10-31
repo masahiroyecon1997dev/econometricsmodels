@@ -2,7 +2,7 @@
 
 **WLS**: [Usage](../usage/wls.md) · **Options and results** · [Definitions](../methods/wls.md)
 
-`WLS` fits a weighted least squares regression: `OLS` with a `weight` column. The standard error types (`cov_type`: classical, HC0-3, cluster, HAC) are the ones available for [OLS](ols.md). For the definitions behind the estimates, standard errors and fit statistics, see [Methods: WLS](../methods/wls.md).
+`WLS` fits a weighted least squares regression: `OLS` with a `weight` column. The standard error types (`cov_type`: classical, HC0-3, cluster, HAC) are the ones available for [OLS](ols.md). For the definitions behind the estimates, standard errors and fit statistics, see [Definitions: WLS](../methods/wls.md).
 
 ## Weights (analytic weight)
 

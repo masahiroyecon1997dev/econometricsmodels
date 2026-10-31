@@ -97,3 +97,10 @@ If you need an overidentification test that is robust to heteroskedasticity or c
     - For those regressors `plm::phtest(method = "aux")` (plm 2.6.7) is not equivalent: in a check with a time-invariant regressor its statistic changed with the order of the regressors in the formula, whereas the statistic here does not depend on the column order.
 
     The definition and the exact rules are in [Definitions: RE](../methods/re.md#hausman-test).
+
+## Where to look next
+
+- The *Definitions* page of each method ([methods](../index.md#supported-methods)): the formulas behind the covariance types and test distributions.
+- [Verification](verification.md): how each statistic is compared with the reference implementations, and the convention differences it adjusts for.
+- [Validation and errors](validation.md): the errors raised for invalid input and options.
+- [Accepted data](accepted-data.md): the input type and the column types each argument accepts.

@@ -2,7 +2,7 @@
 
 **OLS**: [Usage](../usage/ols.md) · **Options and results** · [Definitions](../methods/ols.md)
 
-The formulas behind the estimates, the `cov_type` options, the test distributions and the diagnostics are defined in [Methods: OLS](../methods/ols.md).
+The formulas behind the estimates, the `cov_type` options, the test distributions and the diagnostics are defined in [Definitions: OLS](../methods/ols.md).
 
 ## Options at a glance
 

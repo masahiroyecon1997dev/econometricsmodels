@@ -4,7 +4,7 @@ econometricsmodels takes a polars DataFrame and column names, and returns a resu
 
 1. Create the model with the data, the column names and, optionally, an options object.
 2. Call `.fit()`. All validation happens here, and invalid input raises an error instead of being silently repaired.
-3. Read the result: attributes such as `params` and `std_errors`, or methods such as `predict()`.
+3. Read the result: print it for a quick look, or use attributes such as `params` and `std_errors`, or methods such as `predict()`.
 
 ```bash
 pip install econometricsmodels
@@ -45,7 +45,7 @@ result = OLS(df, y="y", x=["x1"], options=options).fit()
 
 ## Reading the results
 
-Printing a result shows a short table of the coefficients and their standard errors, enough for a quick look in a terminal or notebook. It is not a full summary and its layout may change between versions, so read values from the attributes below in code.
+Printing a result shows a header line (the dependent variable, the number of observations and the `cov_type`) and a short table of the coefficients and their standard errors. This is enough for a quick look in a terminal or notebook. It is not a `summary()`-style report, and its layout may change between versions, so in code read values from the attributes described below.
 
 ```python
 print(result)
@@ -58,9 +58,9 @@ const   0.14   0.135253
 x1      1.96  0.0444222
 ```
 
-With more than ten coefficients, the first nine rows and the last row are shown, with a line counting the omitted ones in between.
+A result with more than ten coefficients (counting `const`, and `sigma` for Tobit) shows the first nine rows, a line such as `... (2 more)`, and the last row, so a final parameter such as Tobit's `sigma` is always visible.
 
-Coefficient-level results are dictionaries keyed by coefficient name. For a row-oriented listing, for example for a REST API response, use `params_table()`, which is a plain list of dictionaries that can be passed to polars or `json.dumps`.
+To use the values in code, read them from the result. Coefficient-level results are dictionaries keyed by coefficient name. For a row-oriented listing, for example for a REST API response, use `params_table()`, which is a plain list of dictionaries that can be passed to polars or `json.dumps`.
 
 ```python
 for row in result.params_table():

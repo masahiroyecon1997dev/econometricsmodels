@@ -194,9 +194,11 @@ class REResults:
     `param_names[0]` is always `"const"` (unlike FE, RE has an
     intercept).
 
-    Printing a result shows a short table of the coefficients and
-    their standard errors. Its layout may change between versions;
-    use `params_table()` for machine-readable output.
+    Printing a result shows a header line (the dependent variable,
+    `n_obs` and `cov_type`) and a short table of the coefficients and
+    their standard errors. Its layout may change between versions, so
+    read the fields listed below or use `params_table()` rather than
+    parsing it.
 
     Fields by purpose:
 

@@ -32,3 +32,7 @@ print(result.fixed_effects())  # {"a": ..., "b": ..., "c": ...} for one-way
 ```
 
 FE has no `predict()`, `augment()`, or `summary()`.
+
+## Covariance matrix of the coefficients
+
+The covariance matrix of the coefficients is available as `result.cov_params`, in the same form for every method. See [OLS: covariance matrix of the coefficients](ols.md#covariance-matrix-of-the-coefficients).

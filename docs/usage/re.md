@@ -24,3 +24,7 @@ print(result.hausman_statistic, result.hausman_p_value)
 ```
 
 `REOptions.cov_type` has the same defaults and support as FE (`"cluster"` on `entity` by default; `"hc0"` unsupported). See [Options and results](../api/re.md) for the full list of options, including Driscoll-Kraay standard errors (`cov_type="dk"`, requires `dk_time`). Like FE, RE has no `predict()`, `augment()`, or `summary()`.
+
+## Covariance matrix of the coefficients
+
+The covariance matrix of the coefficients is available as `result.cov_params`, in the same form for every method. See [OLS: covariance matrix of the coefficients](ols.md#covariance-matrix-of-the-coefficients).

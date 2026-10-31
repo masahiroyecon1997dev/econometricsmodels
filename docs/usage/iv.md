@@ -43,3 +43,7 @@ print(
 ```
 
 See [Methods: IV](../methods/iv.md#diagnostics) for what each diagnostic tests, and the [Options and results](../api/iv.md) for when it is `None`.
+
+## Covariance matrix of the coefficients
+
+The covariance matrix of the coefficients is available as `result.cov_params`, in the same form for every method. See [OLS: covariance matrix of the coefficients](ols.md#covariance-matrix-of-the-coefficients).

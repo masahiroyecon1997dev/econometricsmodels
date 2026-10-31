@@ -25,3 +25,7 @@ print(result.std_errors)
 Estimation options are set with `WLSOptions`: `cov_type`, `include_intercept`, `confidence_level`, `cluster`, `hac_lags` and `hac_time`. [Switching the type of standard error](ols.md#switching-the-type-of-standard-error) shows how to choose the standard errors; the options mean the same here. See [Options and results](../api/wls.md) for the `weight` argument and [Methods: WLS](../methods/wls.md) for how the weights enter the estimates and fit statistics.
 
 `WLSResults.predict()` and `WLSResults.augment()` work exactly like their `OLSResults` counterparts (see [Predicted values](ols.md#predicted-values)); weights play no role in either the training-data or out-of-sample case.
+
+## Covariance matrix of the coefficients
+
+The covariance matrix of the coefficients is available as `result.cov_params`, in the same form for every method. See [OLS: covariance matrix of the coefficients](ols.md#covariance-matrix-of-the-coefficients).

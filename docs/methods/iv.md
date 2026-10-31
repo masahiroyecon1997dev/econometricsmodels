@@ -51,6 +51,8 @@ The weight type only affects the point estimate; the reported standard errors fo
 
 ## Covariance of the coefficients: `cov_type`
 
+The covariance matrix of the coefficients, for either estimator, is available as `cov_params` on the results.
+
 ### 2SLS
 
 Every option is a sandwich \((\hat X'\hat X)^{-1}\hat S(\hat X'\hat X)^{-1}\) built on \(\hat X\) and the structural residuals, except `"classical"`. Note that \(\hat X'\hat X = X'P_ZX\).

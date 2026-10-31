@@ -61,3 +61,7 @@ for row in result.marginal_effects():
 # Marginal effects evaluated at the mean of the explanatory variables
 mean_effects = result.marginal_effects(at="mean")
 ```
+
+## Covariance matrix of the coefficients
+
+The covariance matrix of the coefficients is available as `result.cov_params`, in the same form for every method. See [OLS: covariance matrix of the coefficients](ols.md#covariance-matrix-of-the-coefficients).

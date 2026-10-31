@@ -24,7 +24,7 @@ For extreme linear predictors the ratio \(\phi/\Phi\) underflows in floating poi
 
 ## Covariance, test distribution, overall test
 
-As for Logit, with the Probit score and Hessian above: `cov_type` is `"classical"`, `"opg"`, `"hc0"`, `"hc1"` or `"cluster"`, tests use the standard normal distribution, and the overall test is the likelihood-ratio test \(2(\ell - \ell_0)\) with the closed-form intercept-only log-likelihood \(\ell_0 = n_1 \ln\bar y + n_0 \ln(1-\bar y)\). McFadden's pseudo R², AIC and BIC are defined as for Logit.
+As for Logit, with the Probit score and Hessian above (the covariance matrix is available as `cov_params` on the results): `cov_type` is `"classical"`, `"opg"`, `"hc0"`, `"hc1"` or `"cluster"`, tests use the standard normal distribution, and the overall test is the likelihood-ratio test \(2(\ell - \ell_0)\) with the closed-form intercept-only log-likelihood \(\ell_0 = n_1 \ln\bar y + n_0 \ln(1-\bar y)\). McFadden's pseudo R², AIC and BIC are defined as for Logit.
 
 ## Marginal effects
 

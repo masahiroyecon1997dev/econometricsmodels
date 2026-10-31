@@ -447,9 +447,10 @@ def test_unbalanced_two_way_raises():
     with raises_error(
         ErrorCode.PANEL_NOT_BALANCED_FOR_TWO_WAY,
         n_obs=239,
-        n_entities=40,
-        n_periods=6,
-        expected_obs=240,
+        first_column="entity",
+        n_first_groups=40,
+        second_column="time",
+        n_second_groups=6,
     ):
         FE(df, y="y", x=["x1", "x2"], effects=["entity", "time"]).fit()
 

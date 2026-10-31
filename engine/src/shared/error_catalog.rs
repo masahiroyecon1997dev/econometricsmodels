@@ -1912,22 +1912,27 @@ pub static CATALOG: &[ErrorSpec] = &[
                 in_text: true,
             },
             ParamSpec {
-                name: "n_entities",
+                name: "first_column",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "n_first_groups",
                 ty: ParamType::Int,
                 in_text: true,
             },
             ParamSpec {
-                name: "n_periods",
-                ty: ParamType::Int,
+                name: "second_column",
+                ty: ParamType::Str,
                 in_text: true,
             },
             ParamSpec {
-                name: "expected_obs",
+                name: "n_second_groups",
                 ty: ParamType::Int,
                 in_text: true,
             },
         ],
-        message: r#"Two-way estimation requires a balanced panel: {n_obs} observation(s) for {n_entities} entities and {n_periods} periods, but {expected_obs} are expected."#,
+        message: r#"Two-way estimation requires a balanced panel: {n_obs} observation(s) for {n_first_groups} groups of '{first_column}' and {n_second_groups} of '{second_column}', but every combination needs exactly one."#,
         hint: Some(
             r#"Make every entity observed in every period, or estimate one-way effects by passing a single column in effects."#,
         ),

@@ -1567,7 +1567,7 @@ pub fn within_transform_one_way(input: &FeInput) -> (Vec<f64>, Vec<Vec<f64>>) {
 pub fn within_transform_two_way(input: &FeInput) -> Result<(Vec<f64>, Vec<Vec<f64>>), PanelError> {
     let time_codes = input.time_codes().ok_or(PanelError::TwoWayRequiresTime)?;
     let entity = input.entity_codes();
-    validate_balanced_panel(entity, time_codes)?;
+    validate_balanced_panel(entity, time_codes, input.effect_names())?;
 
     let entity_theta = vec![1.0; entity.n_groups()];
     let y_entity_demeaned = quasi_demean_column(input.y(), entity, &entity_theta);
@@ -1760,6 +1760,7 @@ pub(crate) fn time_varying_regressor_indices(x: &[Vec<f64>], entity: &GroupCodes
 pub(crate) fn validate_balanced_panel(
     entity: &GroupCodes,
     time: &GroupCodes,
+    names: &EffectNames,
 ) -> Result<(), PanelError> {
     debug_assert_eq!(
         entity.nobs(),
@@ -1772,9 +1773,10 @@ pub(crate) fn validate_balanced_panel(
     let expected = n_entities * n_periods;
     let unbalanced = || PanelError::UnbalancedPanelForTwoWay {
         n_obs,
+        entity_column: names.get(PanelDimension::Entity).to_string(),
         n_entities,
+        time_column: names.get(PanelDimension::Time).to_string(),
         n_periods,
-        expected,
     };
 
     if n_obs != expected {
@@ -2239,9 +2241,10 @@ mod tests {
             result.unwrap_err(),
             PanelError::UnbalancedPanelForTwoWay {
                 n_obs: 3,
+                entity_column: "entity".to_string(),
                 n_entities: 2,
+                time_column: "time".to_string(),
                 n_periods: 2,
-                expected: 4,
             }
         );
     }
@@ -2266,9 +2269,10 @@ mod tests {
             result.unwrap_err(),
             PanelError::UnbalancedPanelForTwoWay {
                 n_obs: 4,
+                entity_column: "entity".to_string(),
                 n_entities: 2,
+                time_column: "time".to_string(),
                 n_periods: 2,
-                expected: 4,
             }
         );
     }
@@ -3031,9 +3035,10 @@ mod tests {
             result.unwrap_err(),
             PanelError::UnbalancedPanelForTwoWay {
                 n_obs: 4,
+                entity_column: "entity".to_string(),
                 n_entities: 2,
+                time_column: "time".to_string(),
                 n_periods: 2,
-                expected: 4,
             }
         );
     }
@@ -3874,7 +3879,10 @@ mod tests {
         // 3エンティティ×2時点（n_entities != n_periods）で、行を観測順に並べていない。
         let entity = codes(&["c", "a", "b", "a", "c", "b"]);
         let time = codes(&["2", "1", "2", "2", "1", "1"]);
-        assert_eq!(validate_balanced_panel(&entity, &time), Ok(()));
+        assert_eq!(
+            validate_balanced_panel(&entity, &time, &EffectNames::default()),
+            Ok(())
+        );
     }
 
     #[test]
@@ -3883,13 +3891,32 @@ mod tests {
         let entity = codes(&["a", "a", "b", "b", "c", "c"]);
         let time = codes(&["1", "1", "1", "2", "1", "2"]);
         assert_eq!(
-            validate_balanced_panel(&entity, &time),
+            validate_balanced_panel(&entity, &time, &EffectNames::default()),
             Err(PanelError::UnbalancedPanelForTwoWay {
                 n_obs: 6,
+                entity_column: "entity".to_string(),
                 n_entities: 3,
+                time_column: "time".to_string(),
                 n_periods: 2,
-                expected: 6,
             })
+        );
+    }
+
+    #[test]
+    fn validate_balanced_panel_reports_the_column_names_set_by_effect_names() {
+        let entity = codes(&["a", "a", "b"]);
+        let time = codes(&["1", "2", "1"]);
+        let names = EffectNames::new("firm".to_string(), Some("year".to_string()));
+        let err = validate_balanced_panel(&entity, &time, &names).unwrap_err();
+        assert_eq!(
+            err,
+            PanelError::UnbalancedPanelForTwoWay {
+                n_obs: 3,
+                entity_column: "firm".to_string(),
+                n_entities: 2,
+                time_column: "year".to_string(),
+                n_periods: 2,
+            }
         );
     }
 

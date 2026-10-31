@@ -228,15 +228,16 @@ pub enum PanelError {
     ///
     /// なお「バランス」の判定は観測数カウント（`n_obs == n_entities * n_periods`）
     /// だけでは不十分で、あるペアの重複と別ペアの欠落が相殺してカウントだけ一致する
-    /// 入力もありうる。このエラーを構築する検証（FE実装issue）は、(entity, time)
-    /// ペアの一意性・全組合せの充足まで確認する必要がある。`expected`はカウント上の
-    /// 期待値（`n_entities * n_periods`）でメッセージ用。
+    /// 入力もありうる。このエラーを構築する検証は、(entity, time)ペアの一意性・
+    /// 全組合せの充足まで確認する必要がある（`validate_balanced_panel`）。
+    /// `entity_column`・`time_column`は`effects`の1つ目・2つ目の列名（メッセージ用）。
     #[error("{}", self.catalog_message())]
     UnbalancedPanelForTwoWay {
         n_obs: usize,
+        entity_column: String,
         n_entities: usize,
+        time_column: String,
         n_periods: usize,
-        expected: usize,
     },
 
     /// within変換（デミーニング）後に分散がゼロになる説明変数がある。
@@ -513,14 +514,16 @@ impl ErrorInfo for PanelError {
                 .param("group", group_id.as_str()),
             Self::UnbalancedPanelForTwoWay {
                 n_obs,
+                entity_column,
                 n_entities,
+                time_column,
                 n_periods,
-                expected,
             } => ErrorReport::new(ErrorCode::PanelNotBalancedForTwoWay)
                 .param("n_obs", *n_obs)
-                .param("n_entities", *n_entities)
-                .param("n_periods", *n_periods)
-                .param("expected_obs", *expected),
+                .param("first_column", entity_column.as_str())
+                .param("n_first_groups", *n_entities)
+                .param("second_column", time_column.as_str())
+                .param("n_second_groups", *n_periods),
             Self::ZeroVarianceAfterDemeaning { column } => {
                 ErrorReport::new(ErrorCode::RegressorNoWithinVariation)
                     .param("column", column.as_str())
@@ -1225,12 +1228,13 @@ mod tests {
             (
                 PanelError::UnbalancedPanelForTwoWay {
                     n_obs: 5,
+                    entity_column: "firm".to_string(),
                     n_entities: 2,
+                    time_column: "year".to_string(),
                     n_periods: 3,
-                    expected: 6,
                 },
                 ErrorCode::PanelNotBalancedForTwoWay,
-                "Two-way estimation requires a balanced panel: 5 observation(s) for 2 entities and 3 periods, but 6 are expected.",
+                "Two-way estimation requires a balanced panel: 5 observation(s) for 2 groups of 'firm' and 3 of 'year', but every combination needs exactly one.",
             ),
             (
                 PanelError::ZeroVarianceAfterDemeaning {

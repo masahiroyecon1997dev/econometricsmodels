@@ -883,7 +883,7 @@ pub(crate) fn internal_fe(
                 entity,
             )?;
             reject_singleton_group(PanelDimension::Time, names.get(PanelDimension::Time), time)?;
-            validate_balanced_panel(entity, time)?;
+            validate_balanced_panel(entity, time, names)?;
             let time_varying = two_way_time_varying_regressor_indices(input.x(), entity, time);
             let fe = FeEstimator::fit(
                 FeInput::from_re_input(input, &time_varying, ReEffects::TwoWay),
@@ -5283,9 +5283,10 @@ mod tests {
             },
             || PanelError::UnbalancedPanelForTwoWay {
                 n_obs: 5,
+                entity_column: "entity".to_string(),
                 n_entities: 2,
+                time_column: "time".to_string(),
                 n_periods: 3,
-                expected: 6,
             },
             // どの計算で起きても同じ入力の誤り（`stage`を付けない`code`）。
             || PanelError::WithinRegressionFailed {

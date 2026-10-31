@@ -824,9 +824,10 @@ def test_two_way_unbalanced_panel_still_raises(method):
     with raises_error(
         ErrorCode.PANEL_NOT_BALANCED_FOR_TWO_WAY,
         n_obs=df.height,
-        n_entities=40,
-        n_periods=6,
-        expected_obs=240,
+        first_column=case.entity_col,
+        n_first_groups=40,
+        second_column=case.time_col,
+        n_second_groups=6,
     ):
         _fit(case, "classical", method, df)
 

@@ -827,9 +827,10 @@ def test_unbalanced_panel_raises(panel):
     with raises_error(
         ErrorCode.PANEL_NOT_BALANCED_FOR_TWO_WAY,
         n_obs=23,
-        n_entities=6,
-        n_periods=4,
-        expected_obs=24,
+        first_column="entity",
+        n_first_groups=6,
+        second_column="time",
+        n_second_groups=4,
     ):
         _fit(df, REOptions())
 

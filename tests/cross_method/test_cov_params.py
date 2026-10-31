@@ -1,8 +1,9 @@
 """全手法共通の`cov_params`（係数の分散共分散行列）のテスト。
 
 形（名前→名前→値、`param_names`の順）、対称性、対角成分の平方根が`std_errors`と一致すること
-を、手法と`cov_type`の組み合わせごとに確かめる。数値そのものの照合は各手法の
-reference/crosscheckテストが担う。
+を、手法と`cov_type`の組み合わせごとに確かめる。組み合わせは、各手法が受け付ける`cov_type`の
+全体（`COV_TYPES_BY_METHOD`。パッケージの受け付ける値と食い違うと失敗する）。数値そのものの照合は
+各手法のreference/crosscheckテストが担う。
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from econometricsmodels import (
     REOptions,
     Tobit,
     TobitOptions,
+    ValidationError,
     WLSOptions,
 )
 
@@ -75,33 +77,66 @@ def _re(df, **options):
     ).fit()
 
 
-CASES = {
-    "ols-classical": (_ols, {}),
-    "ols-hc1": (_ols, {"cov_type": "hc1"}),
-    "ols-hac": (_ols, {"cov_type": "hac", "hac_time": "row"}),
-    "ols-cluster": (_ols, {"cov_type": "cluster", "cluster": "entity"}),
+# 手法（と、結果の形が変わるオプション）ごとの、受け付ける`cov_type`の全体。
+# `test_cov_types_cover_every_value_the_option_accepts`が、パッケージが受け付ける値と
+# 食い違うと失敗する（`cov_type`を足したら、ここにも足す）。
+COV_TYPES_BY_METHOD = {
+    "ols": ("classical", "hc0", "hc1", "hc2", "hc3", "hac", "cluster"),
+    "ols-no-intercept": (
+        "classical",
+        "hc0",
+        "hc1",
+        "hc2",
+        "hc3",
+        "hac",
+        "cluster",
+    ),
+    "wls": ("classical", "hc0", "hc1", "hc2", "hc3", "hac", "cluster"),
+    "logit": ("classical", "opg", "hc0", "hc1", "cluster"),
+    "probit": ("classical", "opg", "hc0", "hc1", "cluster"),
+    "tobit": ("classical", "opg", "hc0", "hc1", "cluster"),
+    "2sls": ("classical", "hc0", "hc1", "hc2", "hc3", "hac", "cluster"),
+    "gmm": ("classical", "hc0", "hc1", "hc2", "hc3", "hac", "cluster"),
+    "fe": ("classical", "hc1", "hc2", "hc3", "cluster", "dk"),
+    "fe-two-way": ("classical", "hc1", "hc2", "hc3", "cluster", "dk"),
+    "re": ("classical", "hc1", "hc2", "hc3", "cluster", "dk"),
+    "re-two-way": ("classical", "hc1", "hc2", "hc3", "cluster", "dk"),
+}
+
+# 手法ごとの、`cov_type`以外の固定のオプション。
+METHOD_OPTIONS = {
+    "ols": (_ols, {}),
     "ols-no-intercept": (_ols, {"include_intercept": False}),
-    "wls-classical": (_wls, {}),
-    "wls-cluster": (_wls, {"cov_type": "cluster", "cluster": "entity"}),
-    "logit-classical": (_logit, {}),
-    "logit-cluster": (_logit, {"cov_type": "cluster", "cluster": "entity"}),
-    "probit-classical": (_probit, {}),
-    "probit-cluster": (_probit, {"cov_type": "cluster", "cluster": "entity"}),
-    "tobit-classical": (_tobit, {}),
-    "tobit-cluster": (_tobit, {"cov_type": "cluster", "cluster": "entity"}),
-    "2sls-classical": (_iv, {}),
-    "2sls-cluster": (_iv, {"cov_type": "cluster", "cluster": "entity"}),
-    "gmm-classical": (_iv, {"estimator": "gmm"}),
-    "gmm-hc1": (_iv, {"estimator": "gmm", "cov_type": "hc1"}),
-    "fe-cluster": (_fe, {}),
-    "fe-classical": (_fe, {"cov_type": "classical"}),
-    "fe-hc2": (_fe, {"cov_type": "hc2"}),
-    "fe-dk": (_fe, {"cov_type": "dk", "dk_time": "time"}),
+    "wls": (_wls, {}),
+    "logit": (_logit, {}),
+    "probit": (_probit, {}),
+    "tobit": (_tobit, {}),
+    "2sls": (_iv, {}),
+    "gmm": (_iv, {"estimator": "gmm"}),
+    "fe": (_fe, {}),
     "fe-two-way": (_fe, {"time": "time"}),
-    "re-cluster": (_re, {}),
-    "re-classical": (_re, {"cov_type": "classical"}),
-    "re-dk": (_re, {"cov_type": "dk", "dk_time": "time"}),
+    "re": (_re, {}),
     "re-two-way": (_re, {"time": "time"}),
+}
+
+# `cov_type`が列を要求するときに足すオプション（HACは重複のない順序列、DKは時点列）。
+COV_TYPE_OPTIONS = {
+    "hac": {"hac_time": "row"},
+    "cluster": {"cluster": "entity"},
+    "dk": {"dk_time": "time"},
+}
+
+CASES = {
+    f"{method}-{cov_type}": (
+        METHOD_OPTIONS[method][0],
+        {
+            **METHOD_OPTIONS[method][1],
+            "cov_type": cov_type,
+            **COV_TYPE_OPTIONS.get(cov_type, {}),
+        },
+    )
+    for method, cov_types in COV_TYPES_BY_METHOD.items()
+    for cov_type in cov_types
 }
 
 
@@ -110,6 +145,23 @@ def res(request, panel_df):
     fit, options = CASES[request.param]
     # HACは重複のない順序列を要る
     return fit(panel_df.with_row_index("row"), **options)
+
+
+@pytest.mark.parametrize("method", list(COV_TYPES_BY_METHOD))
+def test_cov_types_cover_every_value_the_option_accepts(method, panel_df):
+    """表の`cov_type`が、パッケージが受け付ける値の全体と一致する。
+
+    未知の値を渡したときのエラーが、受け付ける値の一覧を`allowed`に持つ。
+    """
+    fit, options = METHOD_OPTIONS[method]
+    with pytest.raises(ValidationError) as caught:
+        fit(
+            panel_df.with_row_index("row"),
+            **{**options, "cov_type": "not-a-cov-type"},
+        )
+    assert sorted(caught.value.params["allowed"]) == sorted(
+        COV_TYPES_BY_METHOD[method]
+    ), f"{method}: update COV_TYPES_BY_METHOD"
 
 
 def test_cov_params_is_keyed_by_param_names_on_both_axes(res):

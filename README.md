@@ -23,8 +23,9 @@
 - **Programmatic specification and results** — Models are defined with
   explicit arguments and an options object, not a formula string. Results
   come back as Python objects (`.params`, `.std_errors`, `.p_values`,
-  `.conf_int`), not formatted text, so they are easy to build, inspect, and
-  feed into other code. Parameter tables (`params_table()`) are plain lists
+  `.conf_int`), not formatted text (printing a result shows only a short
+  table of coefficients and standard errors for a quick look), so they are
+  easy to build, inspect, and feed into other code. Parameter tables (`params_table()`) are plain lists
   of dicts that can be passed straight to polars or `json.dumps`.
 - **Explicit validation** — Invalid input is rejected rather than silently
   dropped or repaired. Missing values, perfectly collinear columns,

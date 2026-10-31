@@ -45,6 +45,21 @@ result = OLS(df, y="y", x=["x1"], options=options).fit()
 
 ## Reading the results
 
+Printing a result shows a short table of the coefficients and their standard errors, enough for a quick look in a terminal or notebook. It is not a full summary and its layout may change between versions, so read values from the attributes below in code.
+
+```python
+print(result)
+```
+
+```text
+OLSResults(dep_var='y', n_obs=5, cov_type='hc1')
+       param  std_error
+const   0.14   0.135253
+x1      1.96  0.0444222
+```
+
+With more than ten coefficients, the first nine rows and the last row are shown, with a line counting the omitted ones in between.
+
 Coefficient-level results are dictionaries keyed by coefficient name. For a row-oriented listing, for example for a REST API response, use `params_table()`, which is a plain list of dictionaries that can be passed to polars or `json.dumps`.
 
 ```python

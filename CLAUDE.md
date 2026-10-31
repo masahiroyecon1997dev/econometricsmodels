@@ -114,6 +114,7 @@ econometricsmodels/
 - **Dependabotのsecurity updates**: `dependabot.yml`の`target-branch`を無視して、デフォルトブランチ（`main`）向けにPRが出る（Dependabotの仕様）。更新対象が配布物に入るなら上の緊急対応として扱い、入らないなら`release/*`側で同じ更新（`uv lock --upgrade-package <名前>`等）を行い、`main`向けのPRは閉じる。
 - **配布物に入るかの判断**: wheel/sdistに入るのは、`engine`/`engine_pybind`がビルドするRustクレートと、実行時依存（`pyproject.toml`の`dependencies`）。`cargo audit`は機能フラグを考慮せず`Cargo.lock`全体をスキャンするので、実際にビルドされるかは`cargo tree --target all -e normal,build -i <クレート>`で確認する（`docs/spec/ci-cd-notes.md`の「セキュリティ」節参照）。
 - **保護設定**: `main`と`dev`へはローカルからの直pushを禁止し、pull request経由のみとする（ブランチ保護）。
+- **コミット署名**: `main`と`dev`は署名必須（ruleset）。署名鍵はホストにあり、署名のたびにホストの端末でパスフレーズの確認が出る。Claudeが守る点は`.claude/rules/commit-signing.md`を参照（ホスト環境の手順は利用者が個人で管理し、このリポジトリには置かない）。
 - **リリースの流れ**: `release/vX.Y.Z` → `dev`（PR）→ `main`（PR）→ タグpush（詳細は`.claude/skills/release-publish/SKILL.md`）。
 - **マージ**: CIがgreenであることに加え、内容を確認してからmergeする（自動セルフマージはしない）。
 - **GitHub Issue**: リポジトリがpublicなため、英語で記述する（README・MkDocsと同様の理由）。対象はIssue本文のみで、セッション内の会話・コミットメッセージは対象外（引き続き日本語）。

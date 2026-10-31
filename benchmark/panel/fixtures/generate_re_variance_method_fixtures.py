@@ -611,6 +611,20 @@ def _run_two_way(case: Case, csv_path: Path, method: str) -> dict:
     }
 
 
+def _drop_cov_params(entry: dict) -> None:
+    """plmの行列を落とす（plmと値が異なるケース）。
+
+    plmの行列は分散成分にトレース形を使うため、本実装の閉形式の行列と異なって当然で、
+    リファレンスにならない。手計算で比べても、計算方法が本実装と同じでは独立なリファレンスに
+    ならないので、行列は比べない（`tests/support/_fixture_cov.py`の`NO_COV_LEAVES`に
+    理由つきで登録している）。
+    """
+    for per_method in entry.values():
+        for cov_entry in per_method.values():
+            if isinstance(cov_entry, dict):
+                cov_entry.pop("cov_params", None)
+
+
 def build_fixtures() -> dict:
     fixtures: dict = {}
     with tempfile.TemporaryDirectory() as tmp:
@@ -620,6 +634,8 @@ def build_fixtures() -> dict:
             fixtures[case.name] = {
                 method: run(case, csv_path, method) for method in case.methods
             }
+            if case.differs_from_plm:
+                _drop_cov_params(fixtures[case.name])
 
     r_version = subprocess.run(
         ["Rscript", "-e", "cat(as.character(getRversion()))"],

@@ -14,6 +14,7 @@ import json
 import math
 from pathlib import Path
 
+import _fixture_cov as fixture_cov
 import pytest
 from _assertions import assert_cov_params_close
 from _fixture_cov import cov_fixture_path, load_fixtures_with_cov
@@ -132,3 +133,75 @@ def test_load_rejects_a_diagonal_that_disagrees_with_the_std_errors(tmp_path):
     path = _write_pair(tmp_path, stats, cov)
     with pytest.raises(AssertionError, match="sqrt"):
         load_fixtures_with_cov(path)
+
+
+# ── 行列を持たない葉の登録と、比較の記録 ───────────────────────────
+
+
+def test_load_accepts_a_registered_leaf_without_a_matrix(
+    tmp_path, monkeypatch
+):
+    stats = {"baseline": {"classical": _leaf(), "shifted": _leaf()}}
+    cov = {"baseline": {"classical": _cov_leaf()}}
+    path = _write_pair(tmp_path, stats, cov)
+    monkeypatch.setitem(
+        fixture_cov.NO_COV_LEAVES, "toy/baseline/shifted", "reason"
+    )
+    loaded = load_fixtures_with_cov(path)
+    assert "cov_params" not in loaded["baseline"]["shifted"]
+    assert "cov_params" in loaded["baseline"]["classical"]
+
+
+def test_load_rejects_a_registered_leaf_that_has_a_matrix(
+    tmp_path, monkeypatch
+):
+    stats = {"baseline": {"classical": _leaf()}}
+    cov = {"baseline": {"classical": _cov_leaf()}}
+    path = _write_pair(tmp_path, stats, cov)
+    monkeypatch.setitem(
+        fixture_cov.NO_COV_LEAVES, "toy/baseline/classical", "reason"
+    )
+    with pytest.raises(AssertionError, match="NO_COV_LEAVES"):
+        load_fixtures_with_cov(path)
+
+
+def test_load_rejects_a_registered_leaf_that_no_longer_exists(
+    tmp_path, monkeypatch
+):
+    stats = {"baseline": {"classical": _leaf()}}
+    cov = {"baseline": {"classical": _cov_leaf()}}
+    path = _write_pair(tmp_path, stats, cov)
+    monkeypatch.setitem(
+        fixture_cov.NO_COV_LEAVES, "toy/baseline/gone", "reason"
+    )
+    with pytest.raises(AssertionError, match="統計量のフィクスチャに無い葉"):
+        load_fixtures_with_cov(path)
+
+
+def test_comparing_a_loaded_matrix_marks_it_consumed(tmp_path, monkeypatch):
+    stats = {"baseline": {"classical": _leaf()}}
+    cov = {"baseline": {"classical": _cov_leaf()}}
+    path = _write_pair(tmp_path, stats, cov)
+    loaded = load_fixtures_with_cov(path)
+    ref = loaded["baseline"]["classical"]["cov_params"]
+    monkeypatch.setattr(fixture_cov, "CONSUMED_COV_LEAVES", set())
+    assert_cov_params_close(copy.deepcopy(ref), ref, "case", rtol=RTOL)
+    assert fixture_cov.CONSUMED_COV_LEAVES == {"toy/baseline/classical"}
+
+
+def test_unconsumed_leaves_are_the_loaded_ones_that_were_never_compared(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        fixture_cov, "REGISTERED_COV_LEAVES", {"a/x", "a/y", "b/z"}
+    )
+    monkeypatch.setattr(fixture_cov, "CONSUMED_COV_LEAVES", {"a/x"})
+    assert fixture_cov.unconsumed_cov_leaves() == ["a/y", "b/z"]
+
+
+def test_the_registered_leaves_have_a_reason():
+    # 行列を比べない葉は、理由なしに増やさない。
+    assert fixture_cov.NO_COV_LEAVES
+    assert all(
+        len(reason) > 20 for reason in fixture_cov.NO_COV_LEAVES.values()
+    )

@@ -28,6 +28,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 
 import polars as pl
+from _fixture_cov import mark_cov_consumed
 from _helpers import respell
 
 
@@ -138,6 +139,7 @@ def assert_cov_params_close(
     係数の分散から決まる尺度（対角成分なら`rtol * ref_ii`）で割る。絶対誤差の下限は置かない
     （係数のスケールが違うモデルでも、どの成分も同じ精度で比べるため）。
     """
+    mark_cov_consumed(ref)
     assert_same_keys(ours, ref, f"{label}/cov_params")
     assert list(ours) == list(ref), f"{label}/cov_params: 行の並びが違う"
     for row, ref_row in ref.items():

@@ -3222,4 +3222,74 @@ mod tests {
             }
         }
     }
+
+    /// 全`cov_type`で、`cov_params()`が対称で、対角の平方根が`std_errors()`と一致する
+    /// （`std_errors`は`cov_params`の対角から作るため、公開している行列が標準誤差の元そのもの
+    /// であることの確認）。次元は`(k, k)`。
+    #[test]
+    fn cov_params_is_symmetric_and_diagonal_matches_std_errors_for_every_cov_type() {
+        let z1: Vec<f64> = (1..=16).map(|i| i as f64).collect();
+        let z2: Vec<f64> = z1.iter().map(|&v| (v * 1.7).sin() * 5.0 + v).collect();
+        let noise = [
+            -3.0, 2.5, -1.0, 4.0, -5.0, 6.5, -2.0, 7.0, -8.0, 3.0, -9.5, 10.0, -4.0, 11.0, -12.5,
+            6.0,
+        ];
+        let x_endog: Vec<f64> = (0..16)
+            .map(|i| z1[i] + 0.5 * z2[i] + noise[i] * (1.0 + 0.3 * z1[i]))
+            .collect();
+        let x_exog: Vec<f64> = (0..16).map(|i| ((i as f64) * 0.9).cos() * 3.0).collect();
+        let y: Vec<f64> = (0..16)
+            .map(|i| 2.0 + 1.5 * x_endog[i] + 0.5 * x_exog[i] + noise[i] * 0.6)
+            .collect();
+        let labels: Vec<String> = (0..16).map(|i| format!("g{}", i / 4)).collect();
+
+        let cov_types = [
+            CovType::Classical,
+            CovType::Hc0,
+            CovType::Hc1,
+            CovType::Hc2,
+            CovType::Hc3,
+            CovType::Hac {
+                lags: Some(2),
+                time_order: row_time_order(16),
+            },
+            CovType::Cluster {
+                groups: Some(GroupCodes::from_labels_without_keys(&labels)),
+            },
+        ];
+        for cov_type in cov_types {
+            let name = format!("{cov_type:?}");
+            let input = IvInput::from_columns(
+                &y,
+                std::slice::from_ref(&x_exog),
+                vec!["x_exog".to_string()],
+                std::slice::from_ref(&x_endog),
+                vec!["endog1".to_string()],
+                &[z1.clone(), z2.clone()],
+                vec!["z1".to_string(), "z2".to_string()],
+                true,
+                "y".to_string(),
+            )
+            .unwrap();
+            let estimator = TwoSlsEstimator::fit(input, cov_type, 0.95).unwrap();
+
+            let cov = estimator.cov_params();
+            let k = estimator.params().nrows();
+            assert_eq!((cov.nrows(), cov.ncols()), (k, k), "{name}: shape");
+            for i in 0..k {
+                for j in 0..k {
+                    let scale = (*cov.get(i, i) * *cov.get(j, j)).sqrt();
+                    assert!(
+                        (*cov.get(i, j) - *cov.get(j, i)).abs() <= 1e-12 * scale,
+                        "{name}: cov_params not symmetric at ({i},{j})"
+                    );
+                }
+                let se = *estimator.std_errors().get(i, 0);
+                assert!(
+                    (cov.get(i, i).sqrt() - se).abs() <= 1e-12 * se,
+                    "{name}: sqrt(cov_params[{i}][{i}]) != std_errors[{i}]"
+                );
+            }
+        }
+    }
 }

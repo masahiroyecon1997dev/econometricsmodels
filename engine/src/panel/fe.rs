@@ -1147,6 +1147,7 @@ impl FeEstimator {
     }
 
     /// `cov_type`別に計算し直した係数の分散共分散行列（`(k, k)`、`params()`と対応）。
+    /// 固定効果（entity・timeダミー）の係数は含まない。
     pub fn cov_params(&self) -> &Mat<f64> {
         &self.cov_params
     }
@@ -5355,6 +5356,67 @@ mod tests {
         }
         for (id, a) in &entity_a {
             assert!((a - entity_b[id]).abs() < 1e-12);
+        }
+    }
+
+    /// 1-way・2-wayの全`cov_type`で、`cov_params()`が対称で、対角の平方根が`std_errors()`と
+    /// 一致する。次元は`(k, k)`（固定効果の係数は含まない）。
+    #[test]
+    fn cov_params_is_symmetric_and_diagonal_matches_std_errors_for_every_cov_type() {
+        let entity: Vec<String> = (0..24).map(|i| format!("e{}", i / 4)).collect();
+        let time: Vec<String> = (0..24).map(|i| format!("t{}", i % 4)).collect();
+        let x1: Vec<f64> = (0..24)
+            .map(|i| ((i as f64) * 0.7).sin() * 4.0 + i as f64)
+            .collect();
+        let x2: Vec<f64> = (0..24).map(|i| ((i as f64) * 1.3).cos() * 3.0).collect();
+        let y: Vec<f64> = (0..24)
+            .map(|i| {
+                2.0 + 1.5 * x1[i] - 0.8 * x2[i] + ((i as f64) * 2.1).sin() * 1.7 + (i / 4) as f64
+            })
+            .collect();
+
+        for effects in [FeEffects::OneWay, FeEffects::TwoWay] {
+            let cov_types = [
+                FeCovType::Classical,
+                FeCovType::Hc1,
+                FeCovType::Hc2,
+                FeCovType::Hc3,
+                FeCovType::Cluster { groups: None },
+                FeCovType::Dk {
+                    bandwidth: Some(1),
+                    time: TimeKeys::lexicographic(time.clone()),
+                },
+            ];
+            for cov_type in cov_types {
+                let name = format!("{effects:?}/{cov_type:?}");
+                let input = FeInput::from_columns(
+                    &y,
+                    &[x1.clone(), x2.clone()],
+                    vec!["x1".to_string(), "x2".to_string()],
+                    &entity,
+                    Some(&time),
+                    "y".to_string(),
+                )
+                .unwrap();
+                let fe = FeEstimator::fit(input, effects, cov_type, 0.95).unwrap();
+
+                let cov = fe.cov_params();
+                assert_eq!((cov.nrows(), cov.ncols()), (2, 2), "{name}: shape");
+                for i in 0..2 {
+                    for j in 0..2 {
+                        let scale = (*cov.get(i, i) * *cov.get(j, j)).sqrt();
+                        assert!(
+                            (*cov.get(i, j) - *cov.get(j, i)).abs() <= 1e-12 * scale,
+                            "{name}: cov_params not symmetric at ({i},{j})"
+                        );
+                    }
+                    let se = *fe.std_errors().get(i, 0);
+                    assert!(
+                        (cov.get(i, i).sqrt() - se).abs() <= 1e-12 * se,
+                        "{name}: sqrt(cov_params[{i}][{i}]) != std_errors[{i}]"
+                    );
+                }
+            }
         }
     }
 }

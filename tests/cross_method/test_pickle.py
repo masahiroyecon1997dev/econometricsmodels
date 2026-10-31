@@ -28,6 +28,7 @@ from _cross_method_helpers import fit_fe, fit_re
 from _dtype_helpers import make_frame
 from _errors import raises_error
 from econometricsmodels import (
+    FE,
     IV,
     OLS,
     WLS,
@@ -662,6 +663,37 @@ def test_restore_checks_the_type_of_every_field(
         broken = {**state, key: wrong}
         with raises_error(ErrorCode.PICKLE_FORMAT_MISMATCH, object=kind):
             _lib._restore_pickled(kind, version, broken)
+
+
+_COV_STATE_NAMES = sorted(name for name in SAMPLES if name.endswith("Result"))
+
+
+@pytest.mark.parametrize("name", _COV_STATE_NAMES)
+@pytest.mark.parametrize(
+    "broken",
+    [
+        pytest.param(((1.0, 2.0),), id="row_is_not_bytes"),
+        pytest.param([b"\x00" * 8], id="matrix_is_not_a_tuple"),
+        pytest.param((b"\x00" * 7,), id="row_length_is_not_a_multiple_of_8"),
+    ],
+)
+def test_restore_rejects_a_malformed_cov_params(
+    samples: dict[str, object], name: str, broken: object
+) -> None:
+    """`cov_params`は行ごとの`bytes`のタプル。形の違う値は、別のフィールドの型違いと同じく拒否する。"""
+    kind, version, state = _reduce_args(samples[name])
+    if "cov_params" not in state:
+        pytest.skip("this result class keeps no cov_params field")
+    with raises_error(ErrorCode.PICKLE_FORMAT_MISMATCH, object=kind):
+        _lib._restore_pickled(kind, version, {**state, "cov_params": broken})
+
+
+def test_single_coefficient_cov_params_round_trips() -> None:
+    """係数が1つ（1x1の行列）でも往復で値が変わらない。"""
+    result = FE(_frame(), y="y", x=["x1"], entity="entity").fit()
+    assert list(result.cov_params) == ["x1"]
+    clone = pickle.loads(pickle.dumps(result))
+    assert clone.cov_params == result.cov_params
 
 
 FITTED_NAMES = ["LogitResult", "ProbitResult", "TobitResult"]

@@ -4,12 +4,12 @@
 
 ## バージョン固定（変更時は要注意）
 
-`pyo3=0.28.2` / `polars=0.54.4` / `pyo3-polars=0.27.0`（すべて`=`で完全固定、`Cargo.toml`）。`pyo3-polars=0.27.0`が`pyo3="^0.28"`を要求するための組み合わせ（`pyo3 0.28.0`/`0.28.1`はyanked済み）。`pyo3`を上げる場合は対応する`pyo3-polars`の新版公開を待つ必要がある（`pyo3-polars`は2025年7月にpolars本体リポジトリへ統合されアーカイブ済み、`.claude/rules/rust-style.md`「既知のリスク」参照）。Rust側`polars`クレートとPython側`polars`パッケージ（PyPI）はバージョン体系が分離しているため、数字を合わせる必要はない（実際の互換性は`pyo3-polars`の`polars_ffi::version_0`が担保）。
+`pyo3`・`polars`・`pyo3-polars`はすべて`=`で完全固定している。固定値と、その組み合わせを選んだ理由（`pyo3-polars`が要求する`pyo3`のバージョン範囲等）は`engine_pybind/Cargo.toml`のコメントが正本で、ここには数字を複製しない。`pyo3`を上げる場合は対応する`pyo3-polars`の新版公開を待つ必要がある（`pyo3-polars`は2025年7月にpolars本体リポジトリへ統合されアーカイブ済み、`.claude/rules/rust-style.md`「既知のリスク」参照）。Rust側`polars`クレートとPython側`polars`パッケージ（PyPI）はバージョン体系が分離しているため、数字を合わせる必要はない（実際の互換性は`pyo3-polars`の`polars_ffi::version_0`が担保）。
 
-## polars 0.54.4特有の差異（踏んだ罠）
+## polars・pyo3のAPI差異（踏んだ罠）
 
 - `ChunkedArray::rechunk()`は`Cow<'_, ChunkedArray<T>>`を返す。`Cow`は`IntoIterator`非実装のため`.into_iter()`ではなく`.iter()`を使う（`Cow`はDerefで透過的に呼べる）。
-- pyo3 0.28では`PyObject`型エイリアスがpreludeから削除済み。`Py<PyAny>`を直接使う。
+- pyo3 0.28以降、`PyObject`型エイリアスがpreludeから削除済み。`Py<PyAny>`を直接使う。
 - pyo3 0.28以降、`Clone`実装`#[pyclass]`の`FromPyObject`自動導出はopt-in。Python側インスタンスを引数で受け取るオプション型（`OLSOptions`等）には`#[pyclass(from_py_object)]`を明示する。
 - `DataFrame::new`は`(height: usize, columns: Vec<Column>)`という2引数シグネチャ（`Vec<Column>`のみを渡す旧APIではない）。列を追加するには`polars::prelude::Column::new(name.into(), values)`で構築し、既存の`DataFrame`には`.with_column(column)`（`PolarsResult<&mut Self>`）で付加する（`DataFrame::new`は`select_columns`が取り込んだ列の組み立てに使う）。
 

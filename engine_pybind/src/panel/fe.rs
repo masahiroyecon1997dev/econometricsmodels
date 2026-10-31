@@ -1,7 +1,7 @@
 //! FEの推定オプション・結果、およびPython（polars DataFrame + 列名 + オプション）から
 //! `engine::panel::fe`（within変換・パネル自由度調整・`cov_type`対応・パネル固有R²）を
 //! 呼び出すところまでの一連の処理（データ抽出・pyclass定義、`FeEstimator::fit`への
-//! 実際の配線・`#[pymodule]`登録、`fixed_effects()`メソッドを段階的に実装した）。
+//! 配線、`fixed_effects()`メソッド）。
 //!
 //! 【責務分離】`.claude/rules/rust-style.md`「Python境界でのデータ受け渡し」参照。
 //! polars DataFrameから列ごとの`Vec<f64>`/`Vec<String>`への抽出はここ（`column_extraction`
@@ -11,24 +11,6 @@
 //! 【言語方針】`.claude/rules/rust-style.md`「言語方針」参照。
 //! 公開API（`FEOptions`/`FEResult`）のdocコメントと、`ValidationError`のメッセージ文字列は
 //! 英語。それ以外（このファイルの説明・非公開関数のdocコメント等）は日本語のまま。
-//!
-//! ## 実装フェーズの分割方針（IV・Logitと同じ3段階、`engine_pybind/src/iv/CLAUDE.md`参照）
-//!
-//! 1. **データ抽出・pyclass定義段階（完了）**: `FEOptions`/`FEResult`のpyclass定義、
-//!    列抽出・バリデーション・`engine::panel::fe::FeInput`構築までを行う`build_fe_input`を
-//!    実装した。
-//! 2. **engine呼び出し段階**: `build_fe_input`を実際に呼び出す`fit`関数を追加し、`lib.rs`に
-//!    `#[pyfunction] fit_fe`を新設して`#[pymodule]`に登録する。`build_fe_input`/
-//!    `parse_panel_cov_kind`/`panel_error_to_pyerr`はこの時点で本番経路（`fit_fe`）から
-//!    実際に呼ばれるようになるため、`#[allow(dead_code)]`はすべて削除する
-//!    （`engine_pybind/src/iv/CLAUDE.md`「実装フェーズの分割方針」の初期実装段階と同じ）。
-//! 3. **`fixed_effects()`メソッド追加段階**: IVの`first_stage()`と同じ
-//!    「追加結果は別メソッド」方針、`docs/spec/fe-spec.md`3.5節）を追加する。`FEResult`に
-//!    非公開フィールド（`LazyFixedEffects`。`FeEstimator`を保持し、固定効果は初回の
-//!    `fixed_effects()`かpickle時に計算して保持する）を追加し、`fixed_effects()`は
-//!    そこから返すだけ（IVの`IVResult.first_stage`フィールドが初期実装ではなく後続の拡張で
-//!    追加されたのと同じ段階分割）。pickleで復元した結果は`FeEstimator`を持たず、計算済みの
-//!    固定効果だけを持つ。
 //!
 //! ## `effects`と`FEOptions.dk_time`は別物（`panel-common.md`1.1節）
 //!
@@ -52,19 +34,15 @@
 //!
 //! ## `x`の空リストを許容しない
 //!
-//! v1では「固定効果のみのモデル」（`x=[]`）を意図的に許容していた（`validate_x_non_empty`を
-//! 呼ばない設計）。しかしユーザーからの指摘で、この判断が独立して吟味された
-//! 記録が`panel-common.md`に見当たらないこと・`x`が空だと何らかの説明変数が`y`に与える
-//! 効果を推定するという因果推論の営みが成立しない（実質「個体・時間固定効果によるyの分解」
-//! という別の操作になる）ことが指摘され、他手法（OLS/WLS/Logit/Probit/IV）と同じ
-//! `validate_x_non_empty`を適用し空を拒否する方針に変更した。**`engine`側
-//! （`FeInput::from_columns`・`FeEstimator::fit`）は変更していない**——k=0を受理する
-//! 既存の振る舞いはそのまま残す（`engine/src/panel/fe.rs`の
-//! `fe_estimator_fit_with_no_regressors_estimates_fixed_effects_only_model`が
-//! 引き続き固定効果のみのモデルがengineレベルでは動作することを検証する）。あくまで
-//! Python向けAPI（`engine_pybind`）の業務的なバリデーションとしてのみ拒否する
-//! （OLS自身も`engine::linear::ols::OlsEstimator::fit`自体はk=0をpanicなく受理するが
-//! Python APIの`validate_x_non_empty`が弾く、という既存の非対称性と同じ構図）。
+//! 固定効果のみのモデル（`x=[]`）は、`validate_x_non_empty`で拒否する（他手法のOLS/WLS/Logit/
+//! Probit/IVと同じ）。`x`が空だと、説明変数が`y`に与える効果を推定するという営みが成立せず、
+//! 実質「個体・時間固定効果による`y`の分解」という別の操作になるため。**`engine`側
+//! （`FeInput::from_columns`・`FeEstimator::fit`）はk=0を受理したまま**で、
+//! `engine/src/panel/fe.rs`の`fe_estimator_fit_with_no_regressors_estimates_fixed_effects_only_model`が
+//! engineレベルでは固定効果のみのモデルが動作することを検証する。拒否はPython向けAPI
+//! （`engine_pybind`）の業務的なバリデーションとしてのみ行う（OLSも
+//! `engine::linear::ols::OlsEstimator::fit`自体はk=0を受理するが、Python APIの
+//! `validate_x_non_empty`が弾くのと同じ構図）。
 
 use crate::shared::errors::{guard, internal_error};
 use engine::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput, FixedEffects};
@@ -314,8 +292,9 @@ pub struct FEResult {
     /// Numerator degrees of freedom of `f_statistic` (`None` when `f_statistic` is `None`).
     #[pyo3(get)]
     pub f_df_num: Option<usize>,
-    /// Denominator degrees of freedom of `f_statistic` (`None` when `f_statistic` is `None`). May differ
-    /// from `df_resid` (e.g. OLS/WLS with cluster-robust inference uses `G - 1`).
+    /// Denominator degrees of freedom of `f_statistic` (`None` when `f_statistic` is `None`). Follows
+    /// `cov_type` like the t-tests (`G - 1` for cluster, `T - 1` for Driscoll-Kraay,
+    /// `df_resid` otherwise).
     #[pyo3(get)]
     pub f_df_denom: Option<usize>,
     #[pyo3(get)]

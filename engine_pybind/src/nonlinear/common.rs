@@ -113,9 +113,8 @@ impl MarginalEffectsResult {
 /// - 組合せ: [`check_cov_options`]が`cluster`と`CovKind`の矛盾を検査する
 /// - 列: [`resolve_cov_type`]が`cluster`の列を抽出して`engine`の`CovType`にする
 ///
-/// Logit/Probit/Tobit共通（元は`logit.rs`/`probit.rs`/`tobit.rs`に
-/// バイト単位で完全一致するコードとして独立複製されていたが、`CovType`自体が
-/// 元々3手法共有の型であるのに合わせてここに集約した）。
+/// Logit/Probit/Tobit共通。`engine`の`CovType`自体が3手法共有の型なので、
+/// 文字列パース・検証も手法ごとに持たずここに集約している。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CovKind {
     Classical,

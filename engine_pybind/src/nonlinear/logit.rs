@@ -958,9 +958,8 @@ mod tests {
     /// `build_logit_input`（実際にPythonから渡される文字列を受ける入口）を通した
     /// 大文字小文字非依存性と、戻り値の正規形の文字列（`LogitResult.cov_type`に格納する値）の
     /// 検証。`parse_cov_kind`単体の同種のテストは`nonlinear/common.rs`にある。
-    /// （`testing-completeness-reviewer`指摘。`.unwrap()`ではなく`let-else`を使う理由は
-    /// `engine_pybind/src/linear/common.rs`の`parse_cov_kind`テストと同じ、`PyErr`のDebug
-    /// 実装はGIL取得を要求するため）。
+    /// `.unwrap()`ではなく`let-else`を使う理由は`engine_pybind/src/linear/common.rs`の
+    /// `parse_cov_kind`テストと同じ（`PyErr`のDebug実装はGIL取得を要求するため）。
     #[test]
     fn build_logit_input_cov_type_is_case_insensitive() {
         let df = well_formed_df();

@@ -26,11 +26,13 @@ def escaped(template: str, /, **kwargs: object) -> str:
 def fully_qualified_type_name(obj: object) -> str:
     """pyo3の`PyType::fully_qualified_name()`と同じ規則で型名を組み立てる。
 
-    `NOT_A_POLARS_DATAFRAME`の`{type_name}`はRust側でこの関数
-    （`engine_pybind/src/shared/column_extraction.rs`の`extract_dataframe`）を
-    使って組み立てているため、テスト側も同じ規則（`__module__`が
-    `"builtins"`/`"__main__"`のときは`__qualname__`のみ、それ以外は
-    `f"{{__module__}}.{{__qualname__}}"`）で期待値を作る。pandasの
+    `NOT_A_POLARS_DATAFRAME`の`{type_name}`はRust側の
+    `engine_pybind/src/shared/column_extraction.rs`の`type_name_of`
+    （`check_dataframe`が使う）で組み立てているため、テスト側も同じ規則
+    （`__module__`が`"builtins"`/`"__main__"`のときは`__qualname__`のみ、それ以外は
+    `f"{{__module__}}.{{__qualname__}}"`）で期待値を作る。`type_name_of`は本パッケージの
+    型の`econometricsmodels._lib.`接頭辞も落とすが、この関数はそれを扱わない
+    （pandas等の他パッケージの型を想定している）。pandasの
     `__module__`の値はバージョンによって異なりうる（例:
     3.0系は`"pandas"`、古いバージョンは`"pandas.core.frame"`）ため、
     ハードコードせずこの関数で実行時に計算する。
@@ -45,7 +47,7 @@ def fully_qualified_type_name(obj: object) -> str:
 
 # ── column_extraction.rs（全系統共通） ──────────────────────────────
 #
-# extract_dataframe: `data`/`new_data`にpolars以外のDataFrame（pandas等）が
+# check_dataframe: `data`/`new_data`にpolars以外のDataFrame（pandas等）が
 # 渡された場合に使う（engine_pybind/src/shared/column_extraction.rs）。
 # `param_name`は呼び出し側で"data"（fit系）または"new_data"（predict/augment）
 # を渡す。`type_name`はPythonオブジェクトの完全修飾クラス名

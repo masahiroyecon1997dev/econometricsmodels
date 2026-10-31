@@ -11,13 +11,12 @@
 //! 公開API（`ProbitOptions`/`ProbitResult`）のdocコメントと、`ValidationError`のメッセージ
 //! 文字列は英語。それ以外（このファイルの説明・非公開関数のdocコメント等）は日本語のまま。
 //!
-//! `build_probit_input`が`PyDataFrame`ではなく`polars::DataFrame`（プレーンなpolars型）を
-//! 受け取る設計にしているのは、`column_extraction::extract_f64_column`等が既に同じ
-//! シグネチャ（`&DataFrame`）を使っているため、およびPythonインタプリタ（GIL）を
-//! 起動せずに`cargo test`で直接ユニットテストできるようにするため。
+//! `build_probit_input`が`polars::DataFrame`（プレーンなpolars型）を受け取る設計にしているのは、
+//! `column_extraction::extract_f64_column`等が既に同じシグネチャ（`&DataFrame`）を使っているため、
+//! およびPythonインタプリタ（GIL）を起動せずに`cargo test`で直接ユニットテストできるようにするため。
 //! `fit`（本ファイルの`pub(crate)`関数、`#[pyfunction] fit_probit`本体は`lib.rs`側にあり
-//! これに委譲する）が`PyDataFrame`を受け取り、`.into()`で`DataFrame`に変換して
-//! から`build_probit_input`を呼ぶ（`logit.rs`の`fit`関数と同じ変換パターン）。
+//! これに委譲する）は、推定に使う列だけを取り込んだ`SelectedData`を受け取り、その`frame`から
+//! `build_probit_input`を呼ぶ（`logit.rs`の`fit`関数と同じパターン）。
 
 use crate::shared::errors::guard;
 use engine::nonlinear::common::{
@@ -921,7 +920,7 @@ mod tests {
 
     /// `build_probit_input`（Python境界から渡された文字列を受ける入口）を通した
     /// 大文字小文字非依存性と、戻り値の正規形の文字列（`ProbitResult.cov_type`に格納する値）の
-    /// 検証（`build_logit_input`の同名テストと同じ理由、`testing-completeness-reviewer`指摘）。
+    /// 検証（`build_logit_input`の同名テストと同じ理由）。
     #[test]
     fn build_probit_input_cov_type_is_case_insensitive() {
         let df = well_formed_df();

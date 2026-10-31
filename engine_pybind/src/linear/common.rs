@@ -1,12 +1,11 @@
 //! `linear`系統（OLS/WLS等）で共有するユーティリティ。
 //!
 //! `.claude/rules/rust-style.md`「ファイル・ディレクトリ構成」: 系統内で共有するロジックは
-//! `<系統>/common.rs`に置く。以前はOLSしかなく未作成だったが、WLSが`LeastSquaresError`の
-//! エラー変換等をOLSと共有する形で実装されたため作成した（`docs/spec/wls-spec.md`「エラー型」）。
+//! `<系統>/common.rs`に置く。`LeastSquaresError`のエラー変換等をOLSとWLSで共有する
+//! （`docs/spec/wls-spec.md`「エラー型」）。
 //!
-//! `LeastSquaresError`は元々`OlsError`という名前だったが、OLS単体のエラー型ではなくWLSも
-//! 含む`linear`系統共通のエラー型であることを名前に反映するため、`engine`側で
-//! `engine::linear::common::LeastSquaresError`に改名・移動した。
+//! `LeastSquaresError`はOLS単体ではなくWLSも含む`linear`系統共通のエラー型で、`engine`側の
+//! `engine::linear::common::LeastSquaresError`に定義されている。
 //!
 //! `LeastSquaresError`は`engine::shared::error::ErrorInfo`を実装しており、`code`・`params`
 //! （`Common`バリアントの`CommonError`も、nonlinear系統の`MleError`と同じ`report()`の経路）は

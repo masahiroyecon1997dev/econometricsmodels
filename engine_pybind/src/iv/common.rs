@@ -2,50 +2,34 @@
 //!
 //! `.claude/rules/rust-style.md`「ファイル・ディレクトリ構成」: 系統内で共有するロジックは
 //! `<系統>/common.rs`に置く（`engine_pybind/src/linear/common.rs`と同じ位置づけ）。
-//! `IVOptions`/`IVResult`/`build_iv_input`は2SLS/GMMどちらの`estimator`でも共有する
+//! `IVOptions`/`IVResult`/`build_iv_input`/`fit_frame`は2SLS/GMMどちらの`estimator`でも共有する
 //! （`fit_iv`という単一エントリポイントの背後で`estimator`により推定方式を切り替える設計、
-//! `docs/spec/iv-spec.md`1.2節）ため、系統内共有ロジックの
-//! 置き場所という位置づけに素直に合致する（`two_sls.rs`/`gmm.rs`のような手法ごとの
-//! ファイル分割はしない）。
+//! `docs/spec/iv-spec.md`1.2節）ため、`two_sls.rs`/`gmm.rs`のような手法ごとのファイル分割は
+//! しない。
 //!
 //! `IvError`の`Common`バリアント（`engine::shared::error::CommonError`）も、`IvError`の
 //! `ErrorInfo::report()`が同じ`code`・`params`に変換する（系統ごとに同じ判定ロジックを
 //! 重複させない）。
 //!
-//! ## 実装の経緯（要点のみ、詳細は各コミット・`engine/src/iv/CLAUDE.md`参照）
-//!
-//! `IVOptions`/`IVResult`のpyclass定義・`build_iv_input`→`TwoSlsEstimator::fit`
-//! への配線→弱操作変数診断・Wu-Hausman・Sargan→`first_stage()`の順に段階実装した。
-//! **`estimator="gmm"`は当初`GmmEstimator`（engine側）が点推定のみのスコープだったため
-//! 長らく`ValidationError`で弾いていたが、GMM側のcov_type対応（完了条件だったが
-//! 実装漏れだったことが発覚、`gmm.rs`参照）を実装したうえで、本ファイルでも
-//! 実際に配線した**（`fit_iv`から両`estimator`を呼び分ける）。
-//!
 //! ## `first_stage()`/`weak_instrument_f_statistics`は`estimator`に依存しない共通ロジック
 //!
 //! 第一段階回帰（`x_endog[j] ~ x_exog + instruments`）・弱操作変数診断（部分F統計量）は、
 //! `engine::iv::common::compute_first_stage`（2SLS/GMM間で共有、`engine/src/iv/CLAUDE.md`
-//! 参照）を`fit`が`estimator`によらず常に呼ぶことで、GMMでも2SLSと同じ診断情報を提供する
-//! （ユーザー確認済み）。`TwoSlsEstimator::fit`は内部でも同じ関数を呼ぶため、
-//! `estimator="2sls"`では第一段階回帰が二重計算になるが、OLS自体が軽量なため許容する
-//! （`GmmEstimator`のように第一段階回帰を必要としない推定器に合わせて`IVResult`側を
-//! 単純にする方を優先した設計判断）。
-//!
-//! `IVResult`は元々`estimator: TwoSlsEstimator`という2SLS専用の非公開フィールドで
-//! `first_stage()`を実装していたが、GMM配線にあたり`estimator`非依存の表現に置き換え、
-//! pickle対応にあたり、`fit`が第一段階の`OlsEstimator`（設計行列を持つ）を`OLSResult`へ
-//! 変換して`first_stage: Vec<(String, OLSResult)>`として保持する形にした（変換は
-//! `linear::ols::ols_estimator_to_result`を再利用、抽出済み）。`first_stage()`は`clone_ref`で
-//! 複製して返すだけで、pickleでは各`OLSResult`がそのまま状態に入る。
+//! 参照）を`fit`が`estimator`によらず常に呼ぶことで、GMMでも2SLSと同じ診断情報を提供する。
+//! `TwoSlsEstimator::fit`は内部でも同じ関数を呼ぶため、`estimator="2sls"`では第一段階回帰が
+//! 二重計算になるが、OLS自体が軽量なため許容する（`GmmEstimator`のように第一段階回帰を
+//! 必要としない推定器に合わせて`IVResult`側を単純にする方を優先した）。
+//! `IVResult`は第一段階の`OlsEstimator`（設計行列を持つ）を`OLSResult`へ変換
+//! （`linear::ols::ols_estimator_to_result`）して`first_stage: Vec<(String, OLSResult)>`として
+//! 保持する。`first_stage()`は`clone_ref`で複製して返すだけで、pickleでは各`OLSResult`が
+//! そのまま状態に入る。
 //!
 //! ## GMMの`gmm_weight_type`（`IVOptions.gmm_weight_type`/`cluster`/`hac_lags`/`hac_time`）
 //!
 //! `gmm_weight_type`は`cov_type`とは独立の軸（点推定に使う重み行列の選択、`engine::iv::gmm`の
 //! モジュールdocコメント参照）だが、`cluster`/`hac_lags`/`hac_time`は`cov_type`と
 //! 共用する（`IVOptions`に別フィールドを増やさない設計、`resolve_weight_type`参照）。
-//! `gmm_weight_type="cluster"`かつ`cov_type="cluster"`のように両軸が同じクラスター列を
-//! 参照する使い方を主に想定するが、`gmm_weight_type`と`cov_type`が異なる場合でも同じ列を
-//! 共用する（別々のクラスター変数を使い分けたいニーズが出てきたら別フィールド化を検討）。
+//! `gmm_weight_type`と`cov_type`が異なる場合でも同じ列を共用する。
 //!
 //! `wu_hausman_statistic`/`wu_hausman_p_value`は`estimator="gmm"`では常に`None`
 //! （`GmmEstimator`はWu-Hausman検定を持たない、`docs/spec/iv-spec.md`3.6節はTwoSlsEstimator
@@ -493,12 +477,12 @@ pub struct IVResult {
     /// variable (keyed by variable name), testing the excluded instruments' joint
     /// significance after partialling out `x_exog`.
     /// **Not** the same as the plain F-statistic of the corresponding regression in
-    /// `first_stage()`, which includes `x_exog`'s contribution too. Empty when
-    /// `x_endog=[]`. Computed the same way for both `estimator="2sls"` and `estimator="gmm"`.
+    /// `first_stage()`, which includes `x_exog`'s contribution too.
+    /// Computed the same way for both `estimator="2sls"` and `estimator="gmm"`.
     #[pyo3(get)]
     pub weak_instrument_f_statistics: HashMap<String, f64>,
     /// Numerator degrees of freedom of the weak-instrument F statistics (number of excluded
-    /// instruments; the same for every endogenous variable). `None` when `x_endog=[]`.
+    /// instruments; the same for every endogenous variable).
     #[pyo3(get)]
     pub weak_instrument_f_df_num: Option<usize>,
     /// Denominator degrees of freedom of the weak-instrument F statistics (residual df of
@@ -520,11 +504,10 @@ pub struct IVResult {
     /// variables, regression-based / `wooldridge_regression` formulation). Always computed under the `cov_type` passed to
     /// `fit()` (unlike `weak_instrument_f_statistics`, which is always classical;
     /// `linearmodels`' `wooldridge_regression` uses the same covariance as the
-    /// underlying model, and this mirrors that). `None` when there are no endogenous
-    /// variables to test (`x_endog=[]`), or when the augmented regression cannot be
-    /// estimated (e.g. the first-stage residual has zero variance, or there are too
-    /// few observations for the extra residual columns) — neither case fails `fit()`
-    /// itself, since the other results remain valid. **Always `None` for
+    /// underlying model, and this mirrors that). `None` when the augmented regression
+    /// cannot be estimated (e.g. the first-stage residual has zero variance, or there
+    /// are too few observations for the extra residual columns) — this does not fail
+    /// `fit()` itself, since the other results remain valid. **Always `None` for
     /// `estimator="gmm"`** (not implemented for GMM).
     #[pyo3(get)]
     pub wu_hausman_statistic: Option<f64>,
@@ -1058,16 +1041,11 @@ pub(crate) fn build_iv_input(
     validate_no_const_collision("instruments", &instruments, options.include_intercept)?;
 
     // `x_exog`は空リストを許容する（内生変数のみのモデルも成立するため、
-    // `docs/spec/iv-spec.md`1.1節）が、`x_endog`/`instruments`はいずれも最低1要素を要求する
-    // （2026-08-30ユーザー決定）。`x_endog=[]`は実質OLSと等価な退化ケースで
-    // あり「そもそもIVを使用すること自体が誤り」と判断し、`OLS`への切り替えなしにそのまま
-    // `IV`に渡せる利便性よりも誤用防止を優先した。`x_endog`/`instruments`を独立に検証する
-    // ため、`instruments=[]`だが`x_endog`が非空という順序条件違反（`InsufficientInstruments`、
-    // `fit`関数参照）とは別に、`x_endog=[]`だが`instruments`が非空という「操作変数はあるが
-    // 対応する内生変数が無い」誤用も検出できる。`engine::iv::common::IvInput`自体は
-    // このビジネスルールを持たず、引き続き空リストを許容する薄い構造体のまま
-    // （識別可能性を含む業務ルールの検証はPython API境界である`engine_pybind`側の責務、
-    // `IvInput`の構造体docコメント参照）。
+    // `docs/spec/iv-spec.md`1.1節）が、`x_endog`/`instruments`は最低1要素を要求する
+    // （`x_endog=[]`は実質OLSで、IVを使うこと自体が誤用のため）。独立に検証するので、
+    // 「操作変数はあるが対応する内生変数が無い」誤用も検出できる。`IvInput`自体はこの
+    // 規則を持たず空リストを許容する（検証はPython API境界である本層の責務、`IvInput`の
+    // 構造体docコメント参照）。
     validate_x_non_empty("x_endog", &x_endog)?;
     validate_x_non_empty("instruments", &instruments)?;
 
@@ -1195,12 +1173,12 @@ fn fit_frame(
 
     // 識別の順序条件（`TwoSlsEstimator::fit`/`GmmEstimator::fit`のいずれも冒頭で検証する
     // のと同じチェック）を`compute_first_stage`より先に行う。過小識別な入力で無駄な
-    // 第一段階回帰を走らせないため（rust-reviewerの指摘、`compute_first_stage`自体は
-    // この条件を検証しないため呼び出し元の責務）。この時点で`build_iv_input`の
+    // 第一段階回帰を走らせないため（`compute_first_stage`自体はこの条件を検証しない
+    // ので呼び出し元の責務）。この時点で`build_iv_input`の
     // `validate_x_non_empty("x_endog"/"instruments", ...)`を既に通過して
     // いるため`k_endog`/`k_instruments`はともに1以上であり、ここでの`<`判定は「両方
     // 指定されているが数が足りない」過小識別ケースのみを扱う（「そもそも変数が
-    // 指定されていない」退化ケースとは排他的、rust-reviewerの指摘で明記）。
+    // 指定されていない」退化ケースとは排他的）。
     if input.k_instruments() < input.k_endog() {
         return Err(iv_error_to_pyerr(IvError::InsufficientInstruments {
             n_instruments: input.k_instruments(),
@@ -1667,8 +1645,7 @@ mod tests {
     #[test]
     fn build_iv_input_returns_error_when_x_endog_and_instruments_are_both_empty() {
         // `x_endog=[]`かつ`instruments=[]`（実質OLSと等価な退化ケース）を
-        // 誤用として`ValidationError`で弾く（旧仕様では成功していた、
-        // `docs/spec/iv-spec.md`1.1節）。
+        // 誤用として`ValidationError`で弾く（`docs/spec/iv-spec.md`1.1節）。
         let df = well_formed_df();
         let options = default_options();
 

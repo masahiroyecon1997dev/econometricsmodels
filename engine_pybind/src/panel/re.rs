@@ -1,7 +1,6 @@
 //! REの推定オプション・結果、およびPython（polars DataFrame + 列名 + オプション）から
 //! `engine::panel::re`（Swamy-Arora分散成分推定・準偏差変換・`cov_type`対応・ハウスマン検定）
-//! を呼び出すところまでの一連の処理（データ抽出・pyclass定義、
-//! `ReEstimator::fit`への実際の配線・`#[pymodule]`登録を段階的に実装した）。
+//! を呼び出すところまでの一連の処理（データ抽出・pyclass定義、`ReEstimator::fit`への配線）。
 //!
 //! 【責務分離】`.claude/rules/rust-style.md`「Python境界でのデータ受け渡し」参照。
 //! polars DataFrameから列ごとの`Vec<f64>`/`Vec<String>`への抽出はここ（`column_extraction`
@@ -11,22 +10,8 @@
 //! 公開API（`REOptions`/`REResult`）のdocコメントと、`ValidationError`のメッセージ文字列は
 //! 英語。それ以外（このファイルの説明・非公開関数のdocコメント等）は日本語のまま。
 //!
-//! ## 実装フェーズの分割方針（FE・IV・Logitと同じ3段階、`engine_pybind/src/panel/CLAUDE.md`
-//! 「実装フェーズの分割方針」参照）
-//!
-//! 1. **データ抽出・pyclass定義（完了）**: `REOptions`/`REResult`のpyclass定義、
-//!    列抽出・バリデーション・`engine::panel::re::ReInput`構築までを行う`build_re_input`を
-//!    実装した。この時点では`#[pymodule]`への登録・実際の`ReEstimator::fit`呼び出しは
-//!    行わなかった（FEの1段階目と同じ分割）。
-//! 2. **本対応**: `build_re_input`を実際に呼び出す`fit`関数を追加し、`lib.rs`に
-//!    `#[pyfunction] fit_re`を新設して`#[pymodule]`に登録する（FEの2段階目相当）。
-//!    `build_re_input`/`resolve_re_cov_type`の`#[allow(dead_code)]`属性はこの時点で削除する
-//!    （本番経路（`fit_re`）から実際に呼ばれるようになったため）。
-//!
 //! RE自身に`fixed_effects()`のような追加メソッドは無い（ハウスマン検定は`fit()`内で自動
-//! 計算し`REResult`のフィールドに直接含める、`panel-common.md`2.4節）ため、FEの
-//! `fixed_effects()`段階（`fixed_effects()`メソッド）に相当する3段目は存在しない。
-//! 本対応でこの系統の実装は完結する。
+//! 計算し`REResult`のフィールドに直接含める、`panel-common.md`2.4節）。
 //!
 //! ## `effects`と`REOptions.dk_time`は別物（`FEOptions`と同じ規約）
 //!
@@ -48,13 +33,13 @@
 //! REも`hc0`を**サポートしない**（`ReCovType` enumから除外済み、FEと同じ理由・同じ
 //! `hc0`専用エラーメッセージ）。
 //!
-//! ## `x`の空リストを許容しない（ユーザー確認済み・2026-09-20）
+//! ## `x`の空リストを許容しない
 //!
 //! FEと同じ`validate_x_non_empty`を適用し、`x=[]`を拒否する。REで`x=[]`は
 //! 「分散成分（ICC）のみを推定するnullモデル」として単独で意味を持つ標準的なユースケース
 //! （パネル・混合モデル分析の"null model"）だが、`panel-common.md`にこの点の明示的な
-//! 決定が無く、他手法（OLS/WLS/Logit/Probit/IV/FE）と一貫させる方針をユーザーが
-//! 選択した。nullモデル・ICC推定のサポートは別途検討する。
+//! 決定が無いため、他手法（OLS/WLS/Logit/Probit/IV/FE）と一貫させて拒否する。
+//! nullモデル・ICC推定のサポートは別途検討する。
 
 use std::collections::BTreeMap;
 
@@ -534,8 +519,8 @@ fn parse_variance_method(value: &str) -> PyResult<VarianceMethod> {
 
 /// Pythonから渡された `data` / `y` / `x` / `effects` / `options` を検証し、
 /// `engine::panel::re::ReInput::from_columns`を呼び出すところまでを行う。
-/// `ReEstimator::fit`の呼び出し・`REResult`の構築は後続issueの`fit`関数が行う
-/// （モジュールdoc「実装フェーズの分割方針」参照）。
+/// 戻り値（`ReInput`・`ReEffects`・`ReCovType`・正規形の`cov_type`・`VarianceMethod`）を
+/// `fit`関数が受け取り、`ReEstimator::fit`を呼んで`REResult`を組み立てる。
 ///
 /// `effects`の1つ目を個体、2つ目（あれば）を時間次元として`ReInput`に渡し、2要素なら
 /// `ReEffects::TwoWay`、1要素なら`OneWay`を選ぶ。`options.dk_time`は`resolve_re_cov_type`が`ReCovType::Dk`に渡す
@@ -632,7 +617,7 @@ pub(crate) fn build_re_input(
 /// なる、`FeEstimator`と同じ理由）。
 ///
 /// # Errors
-/// - `build_re_input`が返すエラー（列抽出・y/x/entity/dk_timeの重複・`cov_type`文字列の
+/// - `build_re_input`が返すエラー（列抽出・y/x/effects/dk_timeの重複・`cov_type`文字列の
 ///   検証等）は`ValidationError`
 /// - `ReEstimator::fit`が返す`engine::panel::common::PanelError`（Swamy-Arora分散成分
 ///   推定の失敗——内部FE推定のsingleton検出・自由度不足、between回帰の失敗——、

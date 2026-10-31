@@ -145,7 +145,7 @@ print(augmented)  # original `new_data` columns, plus a "predicted" column
 
 ## Categorical regressors (dummy variables)
 
-There is no formula interface, so a categorical column is turned into dummy columns before estimation. Build them from a fixed list of levels, with one level left out as the baseline. Using the same list for the training data and for `new_data` gives both the same columns, even when `new_data` contains only some of the levels.
+There is no formula interface, so a categorical column is turned into dummy columns before estimation. This applies to every method in the package, not only OLS. Build the dummies from a fixed list of levels, with one level left out as the baseline: the full set of dummies adds up to the constant column, so keeping all of them together with the intercept makes the regressors perfectly collinear. Building the dummies from the same list for the estimation data and for `new_data` gives both frames the same columns, even when `new_data` contains only some of the levels.
 
 ```python
 levels = ["north", "south", "west"]  # "north" is the baseline (left out)
@@ -174,9 +174,11 @@ new_sales = pl.DataFrame({"x1": [10.0], "region": ["west"]})
 print(region_result.predict(new_data=region_dummies(new_sales)))
 ```
 
-Each `region=...` coefficient is the difference from the baseline region, holding the other regressors fixed. Boolean columns are accepted as numbers (see [Accepted data](../guide/accepted-data.md)), so the comparison above needs no cast.
+Each `region=...` coefficient is the difference in the expected value of `y` relative to the baseline region (`"north"`), holding the other regressors fixed. Boolean columns are accepted as numbers (see [Accepted data](../guide/accepted-data.md)), so the comparison above needs no cast.
 
-`DataFrame.to_dummies()` is convenient for the training data, but it creates columns only for the values present in the frame it is called on. Called on a `new_data` that lacks some levels, it returns different columns, and `predict()` then reports the missing column. Use it only when you are sure the levels are the same, and do not combine it with `drop_first=True` on a frame that may have a single level.
+A value that is not in `levels` (a typo, or a level that was never seen) gets 0 in every dummy column, so it is treated as the baseline without an error. Check that the values are all in `levels` if that matters.
+
+`DataFrame.to_dummies()` is convenient when you only estimate the model, but it returns one column per level, so drop one of them (for example with `drop_first=True`) when the model has an intercept; otherwise the columns are collinear with `const` and `fit()` raises a `ComputationError`. It also creates columns only for the values present in the frame it is called on. Called on a `new_data` that lacks some levels, it returns different columns, and `predict()` then reports the missing column. Use it only when the estimation data and `new_data` are guaranteed to contain the same levels. `drop_first=True` drops the level that appears first in the frame, so the baseline depends on the row order, and a frame with a single level is left with no dummy column.
 
 ## Diagnostics: White test for heteroskedasticity
 

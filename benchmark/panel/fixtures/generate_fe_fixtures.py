@@ -31,6 +31,7 @@ from benchmark.common import (
     group_by_dataset_source,
     run_fixture_cli,
 )
+from benchmark.common.cov_fixtures import strip_cov_params
 from benchmark.panel.references.linearmodels_ref import run
 
 # classical/hc1のみlinearmodelsと比較する。hc2/hc3はlinearmodels.PanelOLSが
@@ -200,5 +201,7 @@ def build_fixtures() -> dict:
 
 if __name__ == "__main__":
     run_fixture_cli(
-        build_fixtures, BENCHMARKS_DIR / "fe.json", description=__doc__
+        lambda: strip_cov_params(build_fixtures()),
+        BENCHMARKS_DIR / "fe.json",
+        description=__doc__,
     )

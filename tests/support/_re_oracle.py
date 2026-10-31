@@ -26,7 +26,7 @@ import math
 import numpy as np
 import polars as pl
 import statsmodels.api as sm
-from _assertions import assert_close
+from _assertions import assert_close, assert_cov_params_close
 from scipy import stats
 
 # 一定・ゼロかどうかの判定は、列の生スケールに対する相対値で行う。
@@ -439,6 +439,10 @@ def hand_computed(
     out = {
         "params": dict(zip(names, beta, strict=True)),
         "std_errors": dict(zip(names, se, strict=True)),
+        "cov_params": {
+            row: dict(zip(names, values, strict=True))
+            for row, values in zip(names, cov.tolist(), strict=True)
+        },
         "test_stats": dict(zip(names, t_stats, strict=True)),
         "p_values": dict(zip(names, p_values, strict=True)),
         "conf_int": {
@@ -512,6 +516,7 @@ def hand_computed(
 # せず、通常の許容誤差のまま比べる。
 CONDITIONING_SENSITIVE_KEYS = {
     "std_errors",
+    "cov_params",
     "test_stats",
     "p_values",
     "conf_int",
@@ -529,6 +534,7 @@ def result_stats(res) -> dict:
     return {
         "params": res.params,
         "std_errors": res.std_errors,
+        "cov_params": res.cov_params,
         "test_stats": res.test_stats,
         "p_values": res.p_values,
         "conf_int": res.conf_int,
@@ -609,6 +615,9 @@ def assert_stats_close(
         floor = 0.0 if key in P_VALUE_KEYS else atol
         if b is None:
             assert a is None, tag
+        elif key == "cov_params":
+            # 係数の分散共分散行列は要素ごとに、両方の分散から決まる尺度で比べる。
+            assert_cov_params_close(a, b, label, rtol=tol)
         elif isinstance(b, dict):
             assert set(a) == set(b), tag
             for name in b:

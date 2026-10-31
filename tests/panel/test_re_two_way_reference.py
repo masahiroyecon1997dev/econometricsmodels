@@ -22,7 +22,6 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,6 +31,7 @@ import pytest
 import statsmodels.api as sm
 from _assertions import assert_close
 from _constants import DATA_DIR
+from _fixture_cov import load_fixtures_with_cov
 from _helpers import load_wooldridge_dataset
 from _re_oracle import (
     CONDITIONING_SENSITIVE_KEYS,
@@ -67,7 +67,7 @@ RTOL_ABSOLUTE_YEAR = _TOL["rtol_absolute_year"]
 
 @pytest.fixture(scope="module")
 def reference() -> dict:
-    return json.loads(FIXTURE_PATH.read_text())
+    return load_fixtures_with_cov(FIXTURE_PATH)
 
 
 @dataclass(frozen=True)
@@ -192,6 +192,7 @@ NO_WITHIN_VARIATION = {
 _PLM_KEYS = (
     "params",
     "std_errors",
+    "cov_params",
     "test_stats",
     "p_values",
     "f_statistic",

@@ -60,6 +60,8 @@ _FIXTURE_MODULES = [
     "benchmark.iv.fixtures.generate_iv_gmm_cov_fixtures",
     "benchmark.panel.fixtures.generate_fe_fixtures",
     "benchmark.panel.fixtures.generate_re_fixtures",
+    "benchmark.panel.fixtures.generate_fe_cov_fixtures",
+    "benchmark.panel.fixtures.generate_re_cov_fixtures",
     # Tobit は主リファレンス（AER::tobit）も交差検証（censReg）も R 実装のため
     # 両方 Rscript 必須。
     "benchmark.nonlinear.fixtures.generate_tobit_fixtures",
@@ -88,6 +90,13 @@ _FIXTURE_MODULES = [
     "benchmark.panel.fixtures.generate_re_two_way_fixtures",
     "benchmark.panel.fixtures.generate_re_variance_method_fixtures",
     "benchmark.panel.fixtures.generate_re_statsmodels_cluster_fixtures",
+    "benchmark.panel.fixtures.generate_fe_cov_crosscheck_fixtures",
+    "benchmark.panel.fixtures.generate_fe_plm_cov_crosscheck_fixtures",
+    "benchmark.panel.fixtures.generate_re_cov_crosscheck_fixtures",
+    "benchmark.panel.fixtures.generate_re_statsmodels_cluster_cov_fixtures",
+    "benchmark.panel.fixtures.generate_re_time_invariant_cov_fixtures",
+    "benchmark.panel.fixtures.generate_re_two_way_cov_fixtures",
+    "benchmark.panel.fixtures.generate_re_variance_method_cov_fixtures",
 ]
 
 

@@ -40,7 +40,6 @@ FEでは識別できず拒否されるが、REでは識別できる（`re-spec.m
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import numpy as np
@@ -49,6 +48,7 @@ import pytest
 from _assertions import assert_close
 from _constants import DATA_DIR
 from _errors import raises_error
+from _fixture_cov import load_fixtures_with_cov
 from _helpers import load_wooldridge_dataset
 from _re_oracle import (
     CONDITIONING_SENSITIVE_KEYS,
@@ -103,7 +103,7 @@ ABSOLUTE_YEAR_SCENARIOS = {ABSOLUTE_YEAR, "wagepan_trend"}
 
 @pytest.fixture(scope="module")
 def reference() -> dict:
-    return json.loads(FIXTURE_PATH.read_text())
+    return load_fixtures_with_cov(FIXTURE_PATH)
 
 
 def _frame(scenario: str) -> pl.DataFrame:
@@ -355,6 +355,7 @@ def _plm_stats(plm: dict, hausman: dict) -> dict:
     return {
         "params": plm["params"],
         "std_errors": plm["std_errors"],
+        "cov_params": plm["cov_params"],
         "test_stats": plm["test_stats"],
         "p_values": plm["p_values"],
         "conf_int": {k: tuple(v) for k, v in plm["conf_int"].items()},

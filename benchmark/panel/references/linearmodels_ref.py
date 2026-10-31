@@ -114,6 +114,7 @@ import polars as pl
 
 from benchmark.common import hac_auto_lag, load_frozen_dataset
 from benchmark.common.load_wooldridge import load as _load_wooldridge
+from benchmark.common.reference.extract import cov_frame_to_dict
 
 
 def _load_panel_dataset(
@@ -308,6 +309,7 @@ def run(
 
     coef = {k: float(v) for k, v in res.params.to_dict().items()}
     se = {k: float(v) for k, v in res.std_errors.to_dict().items()}
+    cov_params = cov_frame_to_dict(res.cov)
     test_stats = {k: float(v) for k, v in res.tstats.to_dict().items()}
     p_values = {k: float(v) for k, v in res.pvalues.to_dict().items()}
     ci = res.conf_int(level=confidence_level)
@@ -318,6 +320,7 @@ def run(
     result: dict = {
         "params": coef,
         "std_errors": se,
+        "cov_params": cov_params,
         "test_stats": test_stats,
         "p_values": p_values,
         "conf_int": conf_int,
@@ -422,6 +425,7 @@ def run_re(
 
     coef = {k: float(v) for k, v in res.params.to_dict().items()}
     se = {k: float(v) for k, v in res.std_errors.to_dict().items()}
+    cov_params = cov_frame_to_dict(res.cov)
     test_stats = {k: float(v) for k, v in res.tstats.to_dict().items()}
     p_values = {k: float(v) for k, v in res.pvalues.to_dict().items()}
     ci = res.conf_int(level=confidence_level)
@@ -432,6 +436,7 @@ def run_re(
     result: dict = {
         "params": coef,
         "std_errors": se,
+        "cov_params": cov_params,
         "test_stats": test_stats,
         "p_values": p_values,
         "conf_int": conf_int,

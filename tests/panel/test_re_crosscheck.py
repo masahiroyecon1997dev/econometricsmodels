@@ -81,7 +81,6 @@ plmのSwamy-Arora分散成分から作るθに依存し、plm自身の値とは�
 
 from __future__ import annotations
 
-import json
 from functools import partial
 from pathlib import Path
 
@@ -90,6 +89,7 @@ import pytest
 from _assertions import assert_close, assert_dict_close, assert_inference_close
 from _constants import DATA_DIR
 from _errors import raises_error
+from _fixture_cov import load_fixtures_with_cov
 from _helpers import load_wooldridge_dataset
 from _panel_helpers import bandwidth_cases, x_columns
 from _tolerances import TOLERANCES
@@ -152,7 +152,7 @@ _ILL_CONDITIONED_HAUSMAN_SCENARIO = "high_condition_number"
 
 @pytest.fixture(scope="module")
 def crosscheck() -> dict:
-    return json.loads(FIXTURE_PATH.read_text())
+    return load_fixtures_with_cov(FIXTURE_PATH)
 
 
 _assert_close = partial(assert_close, atol=ATOL)

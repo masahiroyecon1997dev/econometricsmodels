@@ -18,6 +18,8 @@ import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 
+from benchmark.common.reference.extract import cov_frame_to_dict
+
 _INTERCEPT_PLM = "(Intercept)"
 _INTERCEPT = "const"
 
@@ -68,6 +70,7 @@ def run_re_cluster(
     return {
         "params": {n: float(res.params[n]) for n in names},
         "std_errors": {n: float(res.bse[n]) for n in names},
+        "cov_params": cov_frame_to_dict(res.cov_params()),
         "test_stats": {n: float(res.tvalues[n]) for n in names},
         "p_values": {n: float(res.pvalues[n]) for n in names},
         "conf_int": {

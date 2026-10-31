@@ -39,7 +39,7 @@ This assumes homoskedastic, uncorrelated errors.
 
 \(h_{ii} = x_i'(X'X)^{-1}x_i\) is the leverage of observation \(i\). HC2 and HC3 grow without bound as a leverage approaches 1, so a single extreme observation can dominate them.
 
-### `"hac"`: Newey–West
+### `"hac"`: Newey-West
 
 Heteroskedasticity- and autocorrelation-consistent standard errors with Bartlett weights:
 
@@ -132,7 +132,7 @@ Tests the null of homoskedastic errors, in the form that does not assume normal 
 
 ### `breusch_pagan_test(variables=None)`
 
-The same Koenker version of the Breusch–Pagan test, but the auxiliary regression of \(\hat\varepsilon^2\) is on `variables` (a list of column names) instead of the regressors, their squares and products. By default `variables` is the model's regressors; it can also name columns that are not in the model. The constant is always included and constant or duplicate columns are dropped as above. The F version is \(F(q,\, n-q-1)\).
+The same Koenker version of the Breusch-Pagan test, but the auxiliary regression of \(\hat\varepsilon^2\) is on `variables` (a list of column names) instead of the regressors, their squares and products. By default `variables` is the model's regressors; it can also name columns that are not in the model. The constant is always included and constant or duplicate columns are dropped as above. The F version is \(F(q,\, n-q-1)\).
 
 ### `breusch_godfrey_test(time, nlags)`
 

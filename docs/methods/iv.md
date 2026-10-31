@@ -43,7 +43,7 @@ The moment conditions are \(E[z_i \varepsilon_i] = 0\). For a weight matrix \(W\
 | `"classical"` | \(\hat\sigma^2 Z'Z\), with \(\hat\sigma^2 = \hat\varepsilon'\hat\varepsilon / n\). With `"two_step"` this reproduces 2SLS, and Hansen's J equals the Sargan statistic. |
 | `"robust"` | \(\sum_i \hat\varepsilon_i^2 z_i z_i'\) |
 | `"cluster"` | \(\sum_g \big(\sum_{i\in g} z_i\hat\varepsilon_i\big)\big(\sum_{i\in g} z_i\hat\varepsilon_i\big)'\) |
-| `"hac"` | The Newey–West (Bartlett) form of the OLS HAC estimator, applied to \(z_i\hat\varepsilon_i\) |
+| `"hac"` | The Newey-West (Bartlett) form of the OLS HAC estimator, applied to \(z_i\hat\varepsilon_i\) |
 
 The weight type only affects the point estimate; the reported standard errors follow `cov_type`, which is chosen independently. `gmm_type="one_step"` does not use a weight type. A positive scalar multiple of \(S\) does not change \(\hat\beta\), so no small-sample factor is applied to \(S\).
 
@@ -61,7 +61,7 @@ Every option is a sandwich \((\hat X'\hat X)^{-1}\hat S(\hat X'\hat X)^{-1}\) bu
 |---|---|
 | `"classical"` (default) | \(\hat\sigma^2 (X'P_ZX)^{-1}\), \(\hat\sigma^2 = \hat\varepsilon'\hat\varepsilon/(n-k)\) |
 | `"hc0"` to `"hc3"` | \(\hat S = \sum_i c_i \hat\varepsilon_i^2 \hat x_i\hat x_i'\), with the same \(c_i\) as in [OLS](ols.md#hc0-to-hc3-heteroskedasticity-robust) and the leverage \(h_{ii} = \hat x_i'(X'P_ZX)^{-1}\hat x_i\) |
-| `"hac"` | The Newey–West estimator of [OLS](ols.md#hac-neweywest) on \(\hat x_i\hat\varepsilon_i\); `hac_time` is required |
+| `"hac"` | The Newey-West estimator of [OLS](ols.md#hac-newey-west) on \(\hat x_i\hat\varepsilon_i\); `hac_time` is required |
 | `"cluster"` | The cluster estimator of [OLS](ols.md#cluster-cluster-robust) on \(\hat x_i\hat\varepsilon_i\), with the factor \(\frac{G}{G-1}\cdot\frac{n-1}{n-k}\) |
 
 The small-sample factors use \(k\), the number of coefficients of the structural equation, not the number of instruments \(l\).
@@ -110,7 +110,7 @@ For each endogenous variable \(x_{2j}\), the first-stage regression is \(x_{2j} 
 F_j = \frac{(\mathrm{SSR}_r - \mathrm{SSR}_u)/m}{\mathrm{SSR}_u/(n-l)} \sim F(m, n-l)
 \]
 
-where \(\mathrm{SSR}_r\) is the residual sum of squares of the restricted regression on \(X_1\) alone and \(\mathrm{SSR}_u\) of the first stage. It is always computed under homoskedasticity and does not depend on `cov_type`. It is not compared with the Stock–Yogo critical values and no weak/strong verdict is reported; a commonly quoted rule of thumb is a value above about 10. Joint diagnostics for several endogenous variables (Cragg–Donald) are not provided.
+where \(\mathrm{SSR}_r\) is the residual sum of squares of the restricted regression on \(X_1\) alone and \(\mathrm{SSR}_u\) of the first stage. It is always computed under homoskedasticity and does not depend on `cov_type`. It is not compared with the Stock-Yogo critical values and no weak/strong verdict is reported; a commonly quoted rule of thumb is a value above about 10. Joint diagnostics for several endogenous variables (Cragg-Donald) are not provided.
 
 ### Overidentification: `overid_statistic`
 

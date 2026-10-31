@@ -44,7 +44,7 @@ All options are sandwich estimators \((\tilde X'\tilde X)^{-1}\hat S(\tilde X'\t
 | `"hc1"` | \(\hat S = \sum_{it} \hat\varepsilon_{it}^2 \tilde x_{it}\tilde x_{it}'\) times \(n/\mathrm{df}_{\text{resid}}\) |
 | `"hc2"`, `"hc3"` | \(\hat S = \sum_{it} c_{it}\hat\varepsilon_{it}^2 \tilde x_{it}\tilde x_{it}'\) with \(c = 1/(1-h)\) or \(1/(1-h)^2\), where \(h\) is the leverage of the full dummy-variable regression, not of the within-transformed data |
 | `"cluster"` | \(c\,(\tilde X'\tilde X)^{-1}\big(\sum_g s_g s_g'\big)(\tilde X'\tilde X)^{-1}\), \(s_g = \sum_{(i,t)\in g}\tilde x_{it}\hat\varepsilon_{it}\) |
-| `"dk"` | Driscoll–Kraay, below |
+| `"dk"` | Driscoll-Kraay, below |
 
 ### Cluster-robust: small-sample factor
 
@@ -66,7 +66,7 @@ and \(K\) is never allowed to be below \(k+1\). `linearmodels` instead uses \(n/
 
 `fit()` raises an error with fewer than two clusters or when there are not more clusters than slope coefficients (the joint test is then undefined). It also rejects the degenerate case of two clusters that contain exactly one observation of each absorbed effect level, where the clustered covariance is identically zero.
 
-### Driscoll–Kraay: `"dk"`
+### Driscoll-Kraay: `"dk"`
 
 A panel HAC estimator that is robust to correlation across entities as well as within them (`fixest`'s `vcov = "DK"`, Stata's `xtscc`). With the period scores \(h_t = \sum_i \tilde x_{it}\hat\varepsilon_{it}\) over \(T_d\) periods of the `dk_time` column:
 

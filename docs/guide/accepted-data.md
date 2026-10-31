@@ -48,7 +48,7 @@ Group identity and time period columns are compared by their text form, so only 
 
 ## Order of time periods
 
-For `cov_type="dk"` (Driscoll–Kraay) in FE and RE, the periods must be put in time order. The order comes from the values of the time column, not from the text of the labels, so integers with different numbers of digits (`1, 2, ..., 12`), negative numbers and decimals are ordered correctly:
+For `cov_type="dk"` (Driscoll-Kraay) in FE and RE, the periods must be put in time order. The order comes from the values of the time column, not from the text of the labels, so integers with different numbers of digits (`1, 2, ..., 12`), negative numbers and decimals are ordered correctly:
 
 | Dtype of the time column | Order of the periods |
 |---|---|

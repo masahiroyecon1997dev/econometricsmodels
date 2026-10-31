@@ -22,7 +22,7 @@ with score \(s_i = (y_i - p_i)\,x_i\) and Hessian \(H = -X'WX\), where \(p_i = \
 
 ### Solvers and convergence
 
-`solver` selects the algorithm: `"newton"` (default, Newton–Raphson), `"bfgs"` or `"lbfgs"`. All three converge to the same maximum-likelihood estimate; they differ in the cost of an iteration and in how they behave on ill-conditioned problems. The optimization is run on standardized columns and the results are transformed back, so the scale of the regressors does not affect convergence.
+`solver` selects the algorithm: `"newton"` (default, Newton-Raphson), `"bfgs"` or `"lbfgs"`. All three converge to the same maximum-likelihood estimate; they differ in the cost of an iteration and in how they behave on ill-conditioned problems. The optimization is run on standardized columns and the results are transformed back, so the scale of the regressors does not affect convergence.
 
 `tol` is a threshold on the gradient norm. For `"newton"` it applies to the total gradient of the log-likelihood; for `"bfgs"` and `"lbfgs"` it applies to the total gradient divided by `n`. The default depends on the solver (`1e-6` for `"newton"`, `1e-8` for the others), and an explicit `tol` is used as given. When the solver has not converged after `max_iter` iterations, `fit()` raises an error unless `raise_on_non_convergence=False`, in which case the last iterate is returned with `converged=False`. `n_iter` is the number of iterations used.
 

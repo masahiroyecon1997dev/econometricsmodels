@@ -16,7 +16,7 @@ The variance components, the GLS transformation, the covariance estimators, the 
 |---|---|---|---|
 | `cov_type` | Standard error type: `"classical"`, `"hc1"`, `"hc2"`, `"hc3"`, `"cluster"`, `"dk"` | `"cluster"` | `"hc0"` is not available |
 | `cluster` | Column that defines the clusters | `None` (the `entity` column) | Only with `cov_type="cluster"` |
-| `dk_time` | Column that defines the time periods of the Driscoll–Kraay kernel | `None` | Required with `cov_type="dk"`; never taken from `time` |
+| `dk_time` | Column that defines the time periods of the Driscoll-Kraay kernel | `None` | Required with `cov_type="dk"`; never taken from `time` |
 | `dk_bandwidth` | Kernel bandwidth | `None` (automatic) | Only with `cov_type="dk"` |
 | `time` | Column of the time identifier; sets two-way effects | `None` (one-way) | Two-way needs a balanced panel |
 | `confidence_level` | Level of `conf_int`, in (0, 1) | `0.95` | |

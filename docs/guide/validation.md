@@ -147,7 +147,7 @@ Each bullet is a situation that raises a `ValidationError`.
 
 - A named column does not exist.
 - The same column is used in two roles (for example `y` also in `x`, or the weight column as `y`).
-- For the Driscoll–Kraay `dk_time` column only `y` and `entity` are checked: it may also be one of the regressors, or the same column as FE's `time`.
+- For the Driscoll-Kraay `dk_time` column only `y` and `entity` are checked: it may also be one of the regressors, or the same column as FE's `time`.
 - `x` is empty, or names a column twice.
 - With an intercept, `x` contains a column called `"const"`.
 - A column has a dtype that its role does not accept, such as a string, date or categorical column used as a number (see [Accepted data](accepted-data.md#column-types-by-role)).
@@ -290,7 +290,7 @@ The absence of an error says nothing about the following. They are your responsi
 
 - **Model specification.** Functional form, omitted variables, and the choice of regressors are not assessed.
 - **Heteroskedasticity, autocorrelation and clustering structure.** The package computes the standard errors you ask for through `cov_type`. It does not test which one is appropriate.
-- **Endogeneity.** For OLS, FE and RE nothing tests whether regressors are correlated with the error term. The Hausman test for RE and the Wu–Hausman test for IV are reported as statistics, not used to stop the estimation.
+- **Endogeneity.** For OLS, FE and RE nothing tests whether regressors are correlated with the error term. The Hausman test for RE and the Wu-Hausman test for IV are reported as statistics, not used to stop the estimation.
 - **Instrument validity and strength.** In IV only the order condition (at least as many instruments as endogenous regressors) is checked up front. The rank condition is not, so irrelevant instruments may surface later as a singular first stage. The weak-instrument F statistic is reported without a verdict, and the over-identification test is `None` when the model is just identified.
 - **Stationarity, outliers and influential observations.**
 - **Near-separation.** Data that are close to, but not at, separation have a finite estimate, so they estimate without an error, although the standard errors can be very large. Only exact separation is an error.

@@ -13,7 +13,7 @@ Pass an `OLSOptions` as `options=`. Every field has a default, so `OLSOptions()`
 | `cov_type` | Standard error type: `"classical"`, `"hc0"` to `"hc3"`, `"hac"`, `"cluster"` | `"classical"` | See the table below |
 | `cluster` | Column that defines the clusters | `None` | Only with `cov_type="cluster"` |
 | `hac_time` | Column that gives the time order | `None` | Required with `cov_type="hac"`; the row order is never assumed to be the time order |
-| `hac_lags` | Number of Newey–West lags | `None` (automatic) | Only with `cov_type="hac"` |
+| `hac_lags` | Number of Newey-West lags | `None` (automatic) | Only with `cov_type="hac"` |
 | `confidence_level` | Level of `conf_int`, in (0, 1) | `0.95` | |
 | `include_intercept` | Add a constant column (`const`) | `True` | Set to `False` if `x` already contains a constant |
 

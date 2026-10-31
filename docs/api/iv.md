@@ -16,7 +16,7 @@ The estimators, `cov_type` for both of them, the test distributions, and the wea
 | `cov_type` | Standard error type: `"classical"`, `"hc0"` to `"hc3"`, `"hac"`, `"cluster"` | `"classical"` | For GMM it is independent of `gmm_weight_type` |
 | `cluster` | Column that defines the clusters | `None` | With `cov_type="cluster"` or `gmm_weight_type="cluster"` |
 | `hac_time` | Column that gives the time order | `None` | Required with `cov_type="hac"` or `gmm_weight_type="hac"` |
-| `hac_lags` | Number of Newey–West lags | `None` (automatic) | With `"hac"` in either |
+| `hac_lags` | Number of Newey-West lags | `None` (automatic) | With `"hac"` in either |
 | `gmm_type` | `"one_step"`, `"two_step"` or `"iterated"` | `None` (`"two_step"`) | GMM only |
 | `gmm_weight_type` | Weight matrix for the point estimate: `"classical"`, `"robust"`, `"cluster"`, `"hac"` | `None` (`"classical"`) | GMM only; not with `gmm_type="one_step"` |
 | `gmm_max_iter` | Maximum number of estimations, 3 to 10,000 | `None` (100) | `gmm_type="iterated"` only |

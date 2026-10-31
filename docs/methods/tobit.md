@@ -25,7 +25,7 @@ An observation is censored when \(y_i\) is exactly equal to a bound, so make sur
 
 The error standard deviation \(\sigma\) is estimated together with \(\beta\) and is reported as the last parameter, named `sigma`, with its own standard error. Internally the optimizer works with \(\ln\sigma\), which keeps \(\sigma\) positive, and the covariance matrix is transformed to \((\beta, \sigma)\) by the delta method, including the covariances between \(\beta\) and \(\sigma\). A column of `x` may therefore not be named `"sigma"`.
 
-Unlike the Logit and Probit likelihoods, the Tobit likelihood in \((\beta, \ln\sigma)\) is not globally concave. The default `"newton"` solver damps its step (Levenberg–Marquardt) where the Hessian is indefinite; the three solvers still converge to the same maximum-likelihood estimate.
+Unlike the Logit and Probit likelihoods, the Tobit likelihood in \((\beta, \ln\sigma)\) is not globally concave. The default `"newton"` solver damps its step (Levenberg-Marquardt) where the Hessian is indefinite; the three solvers still converge to the same maximum-likelihood estimate.
 
 ### What `fit()` rejects
 
@@ -79,7 +79,7 @@ With a single lower bound of 0 this reads \(E[y \mid x] = P(y > 0 \mid x)\, E[y 
 | `target` | \(w\) |
 |---|---|
 | `"expected_latent"` | \(1\) |
-| `"expected_observed"` | \(\Phi(z_b) - \Phi(z_a)\) (McDonald–Moffitt) |
+| `"expected_observed"` | \(\Phi(z_b) - \Phi(z_a)\) (McDonald-Moffitt) |
 | `"prob_uncensored"` | \((\phi(z_a) - \phi(z_b))/\sigma\) |
 | `"expected_uncensored"` | the variance of the truncated normal divided by \(\sigma^2\), which lies in \((0, 1)\) |
 

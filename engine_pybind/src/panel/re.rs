@@ -97,8 +97,7 @@ use crate::shared::validation::{
 #[derive(Debug, Clone)]
 pub struct REOptions {
     /// Standard error type: one of "classical", "hc1", "hc2", "hc3", "cluster", "dk".
-    /// Case-insensitive. Unlike OLS/WLS/IV, "hc0" is **not** supported (no reference
-    /// implementation offers it for panel/RE regressions).
+    /// Case-insensitive. Unlike OLS/WLS/IV, "hc0" is **not** supported.
     #[pyo3(get)]
     pub cov_type: String,
 

@@ -9,7 +9,7 @@
 - **Explicit validation.** Invalid input is rejected rather than silently dropped or repaired. Missing values, perfectly collinear columns, degenerate groups, and options that would have no effect raise an error that states the cause (see [Validation and errors](guide/validation.md)).
 - **Modern dataframe workflow.** Built for [polars](https://pola.rs/), with data passed to the Rust core through Arrow, avoiding unnecessary conversions and copies. Other dataframe types are not accepted (see [Accepted data](guide/accepted-data.md)).
 - **Verified against established packages.** Each estimator is compared against at least one reference implementation, and differences in conventions (such as small-sample corrections) are documented (see [Verification](guide/verification.md)).
-- **Performance as a design goal.** The computational core is written in Rust, with no system BLAS/LAPACK dependency. Representative cases of each method are benchmarked against the packages it is verified against, and the results are published as measured, including cases where it is not faster (see [Performance](guide/performance.md)).
+- **Performance as a design goal.** The computational core is written in Rust, with no system BLAS/LAPACK dependency. Representative cases of each method are timed, against the packages it is verified against where there is a comparable one (Tobit has none), and the results are published as measured, including cases where it is not faster (see [Performance](guide/performance.md)).
 
 ## Installation
 

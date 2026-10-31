@@ -33,7 +33,7 @@ Issue番号・内部管理ドキュメント（`docs/planning/specs/`配下の�
        `numDeriv::hessian()`による数値微分Hessianとの一致を別途確認済み）。
     3. 1・2のどちらも現実的でない場合は、その旨と理由をクロスチェックスクリプトのコメントに明記し、独立性が限定的であることを認識した上で使う。
   - 上記の対策が特に重要になるのは、**主リファレンス自体がクロスチェックと同系統（例: 両方ともR実装）で、独立した第三者実装による三角測量が効かない手法**（例: Tobitは主リファレンスがR `AER::tobit`、クロスチェックもR `censReg`。両者は別実装なのでクロスチェックとして成立するが、Python参照が無く外部（R以外）からの確認が効かない）。statsmodels等の独立した主リファレンスが別途存在する手法（OLS/WLS/Logit/Probit/IV等）では、本実装とRクロスチェックに共通の誤解があっても、独立に実装された主リファレンスとは一致しない可能性が高く、実質的な三角測量として機能する。
-- **pyfixest**（Python）: OLSの正確性検証には使わない。fixest（R）本体のソースを確認したところ、pyfixest（Python、v0.60.0時点）のHC2/HC3標準誤差はfixestの設計ではなく**pyfixest自身の実装バグ**（HC1用の`N/(N-k)`小標本補正をHC2/HC3にも誤って適用）により系統的に乖離することが判明したため。性能比較（実行時間・メモリ）でのみ使う。FE/REの正確性検証にも使っていない（linearmodelsとR `fixest`/`plm`を使う。詳細は`docs/guide/verification.md`参照）。
+- **pyfixest**（Python）: リファレンスには使わない（正確性検証にも性能比較にも使っていない。性能比較は廃止済みで、`docs/performance/ols.md`参照）。v0.60.0とfixestの比較では、HC2/HC3標準誤差が系統的に乖離し、HC1用の`N/(N-k)`小標本補正が加わっているとみなすと説明できる差だった。原因の断定はせず、最新版とpyfixestの文書は未確認。FE/REの正確性検証もlinearmodelsとR `fixest`/`plm`で行う（詳細は`docs/guide/verification.md`参照）。
 
 ## テスト用データセット
 

@@ -15,7 +15,7 @@ small_nシナリオ n=20, k=4で約11.8%）。fixestの仕様ではなくpyfixes
 
 classical/HC0-3/clusterはRとほぼ機械精度で一致する（実測で相対誤差1e-14程度）
 ため`RTOL_STRICT`で厳密比較する。HACも同じ（R側は`NeweyWest(adjust = FALSE)`。
-既定の`adjust = TRUE`は共分散全体に`n/(n-k)`を掛けるが、本実装・statsmodelsは
+`adjust = TRUE`（`kernHAC`の既定。`NeweyWest`の既定は`FALSE`）は共分散全体に`n/(n-k)`を掛けるが、本実装・statsmodelsは
 掛けず、これだけが差の全てのため、スカラー補正の有無だけを揃えている。
 `benchmark/linear/references/run_lm_crosscheck.R`参照）。詳細は
 `docs/spec/ols-spec.md`「テスト」参照。

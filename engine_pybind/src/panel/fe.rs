@@ -44,8 +44,8 @@
 //!
 //! ## `cov_type`の非対応値
 //!
-//! FEは`hc0`を**サポートしない**（linearmodels・fixestともにパネル/FE向けの`hc0`
-//! オプションが存在しないため、`FeCovType` enumから除外済み）。OLS/WLS/IVとは
+//! FEは`hc0`を**サポートしない**（仕様判断で、他パッケージの有無は理由にしない。
+//! `FeCovType` enumから除外済み）。OLS/WLS/IVとは
 //! 異なりFEの`cov_type`文字列パースはこの1点で分岐が異なるため、`linear::common::
 //! parse_cov_kind`を流用せず、FE/RE共通の`panel::common::parse_panel_cov_kind`を使う
 //! （OLS/WLS/IVは`linear::common`を共有する。`hc0`非対応・`Dk`の意味論がパネル固有のため）。
@@ -110,8 +110,7 @@ use crate::shared::validation::{
 #[derive(Debug, Clone)]
 pub struct FEOptions {
     /// Standard error type: one of "classical", "hc1", "hc2", "hc3", "cluster", "dk".
-    /// Case-insensitive. Unlike OLS/WLS/IV, "hc0" is **not** supported (neither
-    /// linearmodels nor fixest offer it for panel/FE regressions).
+    /// Case-insensitive. Unlike OLS/WLS/IV, "hc0" is **not** supported.
     #[pyo3(get)]
     pub cov_type: String,
 

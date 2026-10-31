@@ -127,7 +127,7 @@ econometricsmodels/
 
 ## 7. テスト方針
 
-詳細は `.claude/rules/testing-policy.md`（tests配下で自動ロード）を参照。要点: statsmodels/linearmodels/Rとの数値比較で検証（pyfixestは性能比較専用）、許容誤差は相対誤差1e-8を基本（手法により例外あり）、engineの単体テストはソース内`mod tests`、`tests/`はpytestに分離。
+詳細は `.claude/rules/testing-policy.md`（tests配下で自動ロード）を参照。要点: statsmodels/linearmodels/Rとの数値比較で検証（pyfixestはリファレンスに使わない）、許容誤差は相対誤差1e-8を基本（手法により例外あり）、engineの単体テストはソース内`mod tests`、`tests/`はpytestに分離。
 
 ## 8. バージョニング・CI/CD
 

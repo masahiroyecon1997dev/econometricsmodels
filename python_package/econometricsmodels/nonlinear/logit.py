@@ -404,8 +404,9 @@ class LogitResults:
             (excluding the intercept). Keys are `param_name`, `effect`,
             `std_error`, `test_stat`, `p_value`, `conf_lower`, `conf_upper`. `test_stat` is
             always a z-statistic (normal distribution). `effect` is
-            the marginal effect estimate (corresponds to `dy/dx` in
-            Stata's `margins, dydx(*)` and statsmodels).
+            the marginal effect estimate, the derivative of the
+            predicted probability (the same as `get_margeff(method=
+            "dydx")` in statsmodels for the same `at`).
 
         Raises:
             ValidationError: `at` is not one of `"overall"`, `"mean"`,

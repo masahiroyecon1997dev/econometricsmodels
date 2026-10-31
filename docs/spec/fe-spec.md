@@ -155,7 +155,7 @@ polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）�
 設計）。`OlsEstimator`の既存cov_type計算式はそのまま流用できない——linearmodels/fixestの
 ソース確認・実地数値検証で判明した3点の相違:
 
-1. **HC0はスコープ外**（linearmodels・fixestともにパネル/FE向けのHC0オプションが存在しない）。
+1. **HC0はスコープ外**（仕様判断。fixest 0.14.2は`vcov = "HC0"`を受け付けないが、plm 2.6.7は提供するため、他パッケージの有無は理由にしない）。
 2. **HC1〜HC3は独自計算**: HC1は小標本補正係数が`n/(n-k)`ではなく`n/df_resid`。HC2/HC3の
    レバレッジは、within変換後の設計行列ではなくLSDV相当のフルレバレッジ
    `h_ii_full = 1/T_entity(i) + h_ii_within`（1-wayは分割回帰＝Frisch-Waugh-Lovellのレバレッジ

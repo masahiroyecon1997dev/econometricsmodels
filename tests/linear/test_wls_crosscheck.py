@@ -8,7 +8,7 @@ pyfixest除外の理由は`test_ols_crosscheck.py`と同じ。
 
 classical/HC0-3/cluster/HACはRとほぼ機械精度で一致する（実測で相対誤差1e-13〜1e-15
 程度）ため`RTOL_STRICT`で厳密比較する。HACのR側は`NeweyWest(adjust = FALSE)`
-（既定の`adjust = TRUE`は共分散全体に`n/(n-k)`を掛けるが本実装・statsmodelsは
+（`adjust = TRUE`（`kernHAC`の既定。`NeweyWest`の既定は`FALSE`）は共分散全体に`n/(n-k)`を掛けるが本実装・statsmodelsは
 掛けず、これだけが差の全て。OLSと完全に同じ値で、WLSに固有の乖離は無い。
 `benchmark/linear/references/run_lm_crosscheck.R`・`docs/spec/wls-spec.md`
 「テスト」参照）。

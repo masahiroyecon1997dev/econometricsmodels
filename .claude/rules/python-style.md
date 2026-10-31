@@ -40,5 +40,5 @@ Issue番号・内部管理ドキュメント（`docs/planning/specs/`配下の�
 
 ## テスト
 
-- 対応するリファレンス実装（statsmodels/linearmodels/R）との比較テストは `tests/`（pytest）に置く（pyfixestは性能比較専用）。
+- 対応するリファレンス実装（statsmodels/linearmodels/R）との比較テストは `tests/`（pytest）に置く（pyfixestはリファレンスに使わない）。
 - 許容誤差等のテスト方針の詳細は `testing-policy.md` を参照。

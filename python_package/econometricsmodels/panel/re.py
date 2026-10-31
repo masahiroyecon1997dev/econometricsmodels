@@ -334,9 +334,10 @@ class REResults:
         """Estimated variance of the entity effect, σ_u² (a negative
         estimate is raised to 0). Swamy-Arora on an unbalanced panel is
         the `linearmodels` estimator (harmonic mean of the entity
-        sizes), which differs from `plm`'s by a few percent up to about
-        10 %; on a balanced panel the two agree. Wallace-Hussain and
-        Amemiya follow `plm` on balanced and unbalanced panels."""
+        sizes), which differs from `plm`'s; the difference depends on
+        how unbalanced the panel is (2.6 % in one test panel), and on
+        a balanced panel the two agree. Wallace-Hussain and Amemiya
+        follow `plm` on balanced and unbalanced panels."""
         return self._raw.sigma2_u
 
     @property

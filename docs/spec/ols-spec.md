@@ -281,7 +281,7 @@ classical / HC0〜HC3 / HAC / cluster の定義式、検定分布、自由度の
 ### 3.7 テスト
 
 - 許容誤差: classical/HC0-3/cluster/係数はRとの実測で相対誤差1e-14程度のため`rtol_strict=1e-8`（`tests/support/_tolerances_linear.py`の`ols_crosscheck`）。
-  HACも同じ`rtol_strict`（R側は`NeweyWest(adjust = FALSE)`。既定の`adjust = TRUE`は共分散に
+  HACも同じ`rtol_strict`（R側は`NeweyWest(adjust = FALSE)`。`adjust = TRUE`（`NeweyWest`の既定は`FALSE`。`kernHAC`・`vcovHAC`の既定）は共分散に
   `n/(n-k)`を掛けるが本実装・statsmodelsは掛けず、このスカラー倍だけが差の全てで、
   小標本（n=20）・高次元（k=21）を含む全合成シナリオで機械精度一致する）。
 - HACの実データは時系列のWooldridge `prminwge`（`lprepop ~ lmincov + lusgnp`、年次昇順でn=38、
@@ -295,8 +295,9 @@ classical / HC0〜HC3 / HAC / cluster の定義式、検定分布、自由度の
 - `hac_lags_used`（自動選択ラグ数）は、`tests/linear/test_ols_api.py`が複数の標本サイズ
   （境界`n=51200`を含む）でPython側の独立実装`benchmark.common.hac_auto_lag`と直接比較する
   （Rust側`shared::covariance::resolve_hac_lags`との式の一致の直接検証。WLS・IV・FE/REのDKも各`*_api.py`で同様）。
-- pyfixestはOLSの正確性検証には使わない（HC2/HC3にHC1用の小標本補正を誤って適用する既知の
-  実装バグがあるため）。性能比較専用（[`../performance/ols.md`](../performance/ols.md)）。
+- pyfixestはリファレンスに使わない（v0.60.0のHC2/HC3がfixestと系統的に乖離し、HC1用の小標本補正が
+  加わっているとみなすと説明できる差だったため。原因は断定していない。性能比較にも使わない:
+  [`../performance/ols.md`](../performance/ols.md)）。
 - 実データセット: `wage1`（`lwage ~ educ + exper + tenure`）・
   `gpa2`（`colgpa ~ sat + hsperc + tothrs`）・
   `mroz`（`inlf ~ nwifeinc + educ + exper + expersq + age + kidslt6 + kidsge6`、Logit/Probitと同じ
@@ -336,7 +337,7 @@ classical / HC0〜HC3 / HAC / cluster の定義式、検定分布、自由度の
 ### 3.8 パフォーマンス（要約）
 
 releaseビルド（`maturin develop --release`）必須（debugビルドは最大140倍遅い）。
-classical/HC1/clusterはstatsmodels/pyfixest以上に高速、HACも大規模データではほぼ互角。
+classical/HC1/clusterはstatsmodels以上に高速、HACも大規模データではほぼ互角。
 メモリはengineが一貫して最小。詳細な実測データは[`../performance/ols.md`](../performance/ols.md)参照。
 faerのグローバル並列度は`engine::shared::parallelism::ensure_serial()`で常時`Par::Seq`に固定
 している（tall-skinnyな設計行列では暗黙の全コア並列化が高速化せず、多コア機・負荷下で

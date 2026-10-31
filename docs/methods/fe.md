@@ -62,7 +62,7 @@ following `fixest`'s default `ssc()`. The effective number of parameters \(K\) d
 | Some nested (typically two-way, clustered by entity) | \(\mathrm{df}_{\text{model}}\) minus the nested effect levels, plus the number of nested dimensions |
 | None nested (Stata's `xtreg, fe` situation) | \(\mathrm{df}_{\text{model}}\) |
 
-and \(K\) is never allowed to be below \(k+1\). `linearmodels` instead uses \(n/(n-\text{extra\_df}-k)\) with no \(G/(G-1)\) factor, so cluster standard errors differ from it.
+and \(K\) is never allowed to be below \(k+1\). `linearmodels` 7.1 instead uses \(n/(n-\text{extra\_df}-k)\) with no \(G/(G-1)\) factor, so cluster standard errors differ from it.
 
 `fit()` raises an error with fewer than two clusters or when there are not more clusters than slope coefficients (the joint test is then undefined). It also rejects the degenerate case of two clusters that contain exactly one observation of each absorbed effect level, where the clustered covariance is identically zero.
 
@@ -81,7 +81,7 @@ and the covariance is \(\frac{T_d}{T_d-1}\cdot\frac{n-1}{n-\mathrm{df}_{\text{mo
 - The bandwidth \(L\) is `dk_bandwidth` when given (\(0 \le L < T_d\)), otherwise \(\lfloor 4\,(T_d/100)^{2/9}\rfloor\); the value used is `dk_bandwidth_used`. Note that the rule uses the number of periods \(T_d\), not \(n\).
 - The periods are ordered by the **values** of `dk_time` (numerically, chronologically, by category order for an `Enum`, alphabetically for strings), never by the order of the rows. See [Accepted data](../guide/accepted-data.md#order-of-time-periods).
 - It needs more periods than slope coefficients (\(T_d > k\)), because \(\hat S\) has rank at most \(T_d - 1\).
-- With `dk_bandwidth` equal to \(T_d - 1\), `fixest` drops the last lag term because of an off-by-one in its compiled code. This package keeps the standard Bartlett kernel, so the two differ there only; smaller bandwidths agree.
+- With `dk_bandwidth` equal to \(T_d - 1\), `vcov = DK(lag = T_d - 1)` in `fixest` 0.14.2 gave a standard error equal to the computation with lags 1 to \(T_d - 2\) only. This package includes the last lag of the standard Bartlett kernel, so the two differ there only; smaller bandwidths agree. The cause (definition or defect) was not determined.
 
 ## Test distributions and confidence intervals
 
@@ -105,7 +105,7 @@ Three R² values are reported, because "the" R² is not well defined once effect
 | `r_squared_between` | \(1 - \sum_i (\bar y_{i\cdot} - \bar x_{i\cdot}'\hat\beta)^2 / \sum_i \bar y_{i\cdot}^2\) on the entity means |
 | `r_squared_overall` | \(1 - \sum (y_{it} - x_{it}'\hat\beta)^2 / \sum y_{it}^2\) on the original variables |
 
-The between and overall values use uncentered total sums of squares, because the model has no constant, and the between value is not weighted by the number of observations per entity; both agree with `linearmodels`. The within value for a two-way model uses both effects, whereas `linearmodels` always removes entity means only.
+The between and overall values use uncentered total sums of squares, because the model has no constant, and the between value is not weighted by the number of observations per entity; both agree with `linearmodels` 7.1. The within value for a two-way model uses both effects, whereas `rsquared_within` of `linearmodels` 7.1 removes entity means only.
 
 The log-likelihood is computed from the within residuals as for [OLS](ols.md#fit-statistics), and \(\mathrm{AIC} = -2\ell + 2\,\mathrm{df}_{\text{model}}\), \(\mathrm{BIC} = -2\ell + \mathrm{df}_{\text{model}}\ln n\).
 

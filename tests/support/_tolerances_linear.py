@@ -80,7 +80,7 @@ LINEAR_TOLERANCES: dict[str, dict[str, float]] = {
         "atol_p_value": 0.0,
     },
     # classical/HC0-3/cluster/HACは機械精度一致（実測1e-14程度）のためRTOL_STRICTを
-    # 適用する。HACのR側は`NeweyWest(adjust = FALSE)`: 既定の`adjust = TRUE`は共分散全体に
+    # 適用する。HACのR側は`NeweyWest(adjust = FALSE)`: `adjust = TRUE`（`kernHAC`の既定。`NeweyWest`の既定は`FALSE`）は共分散全体に
     # `n/(n-k)`（IVのWu-Hausmanの補助回帰は`n/(n-k_aug)`）を掛けるが、本実装・statsmodels・
     # linearmodelsは掛けず、このスカラー倍だけが差の全てだった（標準誤差で
     # `sqrt(n/(n-k))-1`、F統計量で`n/(n-k)-1`。n=500・k=4で0.4%・0.8%、n=40で4%・11%）。

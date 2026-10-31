@@ -492,8 +492,8 @@ class OLSResults:
         on their own lags 1 to `nlags`, and tests that the lag
         coefficients are all zero. The lags are taken in the order of the
         `time` column, and the lags before the first observation are
-        filled with zero (the convention of R's `lmtest::bgtest`,
-        statsmodels and Stata). The auxiliary regression uses the model's
+        filled with zero (the convention of R's `lmtest::bgtest` and
+        statsmodels). The auxiliary regression uses the model's
         regressors as they are: no constant is added to a model fitted
         with `include_intercept=False` (the definition of R and Greene;
         statsmodels adds one in that case, so its value differs). The test

@@ -3,6 +3,7 @@
 `multiprocessing`・`joblib`・キャッシュ・Celeryに載せられるよう、利用者が保持する`#[pyclass]`（`*Options`・`*Result`）を
 `pickle`・`copy.copy`・`copy.deepcopy`に対応させる。例外クラスは`errors.rs`の`__reduce__`で先に対応済み
 （`error-handling.md`）。実装は`engine_pybind/src/shared/pickle.rs`。
+利用者向けの説明（使い方・サイズ・版の制約）は公開ページ`docs/guide/pickling.md`が正本で、ここには設計判断だけを置く。
 
 ## 方式
 

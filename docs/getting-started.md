@@ -123,4 +123,4 @@ Each method has three pages: a short **usage** guide with examples, the **option
 | FE | Panel data, fixed effects | [Usage](usage/fe.md) | [Reference](api/fe.md) | [Definitions](methods/fe.md) |
 | RE | Panel data, random effects | [Usage](usage/re.md) | [Reference](api/re.md) | [Definitions](methods/re.md) |
 
-The [Guides](guide/accepted-data.md) cover the data the estimators accept, validation and errors, and how the test distributions compare with other packages.
+The [Guides](guide/accepted-data.md) cover the data the estimators accept, validation and errors, how the test distributions compare with other packages, and how to [pickle and copy](guide/pickling.md) options and results.

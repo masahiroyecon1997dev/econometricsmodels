@@ -290,6 +290,23 @@ def test_copy_keeps_every_attribute(
     _assert_same_state(original, clone)
 
 
+def test_shallow_copy_shares_the_training_data_and_deepcopy_does_not() -> None:
+    """`copy.copy`は元のDataFrameを共有し、`copy.deepcopy`は複製する（利用者向けガイドの記述）。"""
+    result = _fit_ols()
+    source = _reduce_args(result._raw)[2]["source_data"]
+    assert _reduce_args(copy.copy(result)._raw)[2]["source_data"] is source
+    assert (
+        _reduce_args(copy.deepcopy(result)._raw)[2]["source_data"]
+        is not source
+    )
+    # ラッパーを介さない`_lib`の結果でも同じ。
+    assert _reduce_args(copy.copy(result._raw))[2]["source_data"] is source
+    assert (
+        _reduce_args(copy.deepcopy(result._raw))[2]["source_data"]
+        is not source
+    )
+
+
 def test_restored_options_are_independent_and_mutable() -> None:
     original = OLSOptions(cov_type="hc1")
     clone = pickle.loads(pickle.dumps(original))

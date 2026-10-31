@@ -35,7 +35,7 @@ df = df.with_columns(
 )
 ```
 
-Booleans are accepted as numbers (`True` is 1 and `False` is 0). This is convenient for dummy variables and binary outcomes built from comparisons, for example `(pl.col("wage") > 20).alias("high_wage")`. The columns returned by `DataFrame.to_dummies()` (`UInt8`) work as regressors directly.
+Booleans are accepted as numbers (`True` is 1 and `False` is 0). This is convenient for dummy variables and binary outcomes built from comparisons, for example `(pl.col("wage") > 20).alias("high_wage")`. The columns returned by `DataFrame.to_dummies()` (`UInt8`) work as regressors directly. To build dummies that stay consistent between the estimation data and `new_data` for `predict()`, see [Categorical regressors](../usage/ols.md#categorical-regressors-dummy-variables).
 
 ## How values are converted
 

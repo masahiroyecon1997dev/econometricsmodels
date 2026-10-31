@@ -135,7 +135,7 @@ class ProbitResults:
         self._raw = raw
 
     def __repr__(self) -> str:
-        return results_repr("ProbitResults", self._raw)
+        return results_repr(type(self).__name__, self._raw)
 
     @property
     def param_names(self) -> list[str]:

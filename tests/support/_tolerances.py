@@ -1,7 +1,8 @@
 """数値比較の許容誤差（値）の集約。
 
 系統別の辞書（`_tolerances_linear.py`・`_tolerances_nonlinear.py`・
-`_tolerances_iv.py`・`_tolerances_panel.py`）を結合した単一の`TOLERANCES`を
+`_tolerances_iv.py`・`_tolerances_panel.py`・横断テスト用の
+`_tolerances_cross_method.py`）を結合した単一の`TOLERANCES`を
 公開する。テストは`from _tolerances import TOLERANCES`で参照し、
 `TOLERANCES["ols_reference"]`のようにテストファイル名の接頭辞で引く。
 共通の定数と方針は`_tolerances_common.py`を参照。
@@ -12,6 +13,7 @@
 
 from __future__ import annotations
 
+from _tolerances_cross_method import CROSS_METHOD_TOLERANCES
 from _tolerances_iv import IV_TOLERANCES
 from _tolerances_linear import LINEAR_TOLERANCES
 from _tolerances_nonlinear import NONLINEAR_TOLERANCES
@@ -39,4 +41,5 @@ TOLERANCES: dict[str, dict[str, float]] = _merge(
     NONLINEAR_TOLERANCES,
     IV_TOLERANCES,
     PANEL_TOLERANCES,
+    CROSS_METHOD_TOLERANCES,
 )

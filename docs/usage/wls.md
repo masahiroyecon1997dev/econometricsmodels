@@ -28,4 +28,4 @@ Estimation options are set with `WLSOptions`: `cov_type`, `include_intercept`, `
 
 ## Covariance matrix of the coefficients
 
-The covariance matrix of the coefficients is available as `result.cov_params`, in the same form for every method. See [OLS: covariance matrix of the coefficients](ols.md#covariance-matrix-of-the-coefficients).
+`result.cov_params` is the covariance matrix of the coefficients under your `cov_type`, as a dictionary of dictionaries keyed by coefficient name: the covariance of `x1` and `x2` is `result.cov_params["x1"]["x2"]`, and the standard errors are the square roots of its diagonal. See [OLS: covariance matrix of the coefficients](ols.md#covariance-matrix-of-the-coefficients) for an example that builds a standard error from it.

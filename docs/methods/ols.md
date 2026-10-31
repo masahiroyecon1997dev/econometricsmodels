@@ -16,7 +16,7 @@ where \(\mathrm{SSR} = \sum_i \hat\varepsilon_i^2\). A design with perfectly col
 
 ## Covariance of the coefficients: `cov_type`
 
-Every option below is a sandwich estimator \((X'X)^{-1} \hat S (X'X)^{-1}\) for the covariance of \(\hat\beta\), except `"classical"`. Standard errors are the square roots of its diagonal, and the matrix is available as `cov_params` on the results.
+Every option below is a sandwich estimator \((X'X)^{-1} \hat S (X'X)^{-1}\) for the covariance of \(\hat\beta\), except `"classical"`. Standard errors are the square roots of its diagonal, and the covariance matrix of the coefficients is available as `cov_params` on the results.
 
 ### `"classical"` (default)
 

@@ -56,6 +56,7 @@ Every method's results share these fields, so code that reads one result type wo
 |---|---|
 | `params`, `std_errors`, `test_stats`, `p_values` | `dict` keyed by coefficient name |
 | `conf_int` | `dict` of `(lower, upper)` keyed by coefficient name |
+| `cov_params` | Covariance matrix of the coefficients under `cov_type`: a `dict` of `dict`s keyed by coefficient name on both axes (Tobit also has `"sigma"` as the last row and column) |
 | `param_names` | The coefficient names, in order (`"const"` first when there is an intercept) |
 | `stat_dist`, `stat_df` | The distribution behind `test_stats` and `p_values` (`"t"` or `"normal"`) and its degrees of freedom (`None` for the normal distribution) |
 | `cov_type`, `n_obs`, `df_resid` | The standard error type used, the number of observations and the residual degrees of freedom |

@@ -18,7 +18,7 @@ The weight column is given by `weight`. Every weight must be finite and strictly
 
 ## Covariance of the coefficients: `cov_type`
 
-The covariance matrix of the coefficients is available as `cov_params` on the results. Every `cov_type` is defined as on the OLS page, evaluated on the scaled quantities \(\tilde x_i\) and \(\tilde\varepsilon_i = \sqrt{w_i}\,\hat\varepsilon_i\). For `"classical"`:
+Every `cov_type` is defined as on the OLS page, evaluated on the scaled quantities \(\tilde x_i\) and \(\tilde\varepsilon_i = \sqrt{w_i}\,\hat\varepsilon_i\); the covariance matrix of the coefficients is available as `cov_params` on the results. For `"classical"`:
 
 \[
 \hat\sigma^2 = \frac{\sum_i w_i \hat\varepsilon_i^2}{n-k}, \qquad

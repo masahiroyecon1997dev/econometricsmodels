@@ -64,7 +64,7 @@ Every method's results share these fields, so code that reads one result type wo
 |---|---|
 | `params`, `std_errors`, `test_stats`, `p_values` | `dict` keyed by coefficient name |
 | `conf_int` | `dict` of `(lower, upper)` keyed by coefficient name |
-| `cov_params` | Covariance matrix of the coefficients under `cov_type`: a `dict` of `dict`s keyed by coefficient name on both axes (`std_errors` are the square roots of its diagonal). Tobit also has `"sigma"` as the last row and column |
+| `cov_params` | Covariance matrix of the coefficients: a `dict` of `dict`s keyed by coefficient name on both axes (Tobit also has `"sigma"` as the last row and column). See [below](#covariance-matrix-of-the-coefficients) |
 | `param_names` | The coefficient names, in order (`"const"` first when there is an intercept) |
 | `stat_dist`, `stat_df` | The distribution behind `test_stats` and `p_values` (`"t"` or `"normal"`) and its degrees of freedom (`None` for the normal distribution) |
 | `cov_type`, `n_obs`, `df_resid` | The standard error type used, the number of observations and the residual degrees of freedom |
@@ -79,7 +79,9 @@ for row in result.params_table():
 
 ## Covariance matrix of the coefficients
 
-Every results class has `cov_params`, in the same form: the covariance matrix of the coefficients under the `cov_type` you chose, as a dictionary of dictionaries keyed by coefficient name on both axes. The covariance of `x1` and `x2` is `result.cov_params["x1"]["x2"]`. The standard errors are the square roots of its diagonal, and the names are in `param_names` order (for FE there is no `"const"`; for RE it comes first). For Tobit the matrix also contains `"sigma"`, as the last row and column. With the matrix you can test a linear combination of coefficients or apply the delta method yourself. The formulas for each `cov_type` are in [Definitions](../methods/ols.md#covariance-of-the-coefficients-cov_type).
+Every results class has `cov_params`: the covariance matrix of the coefficients under the `cov_type` you chose, as a dictionary of dictionaries keyed by coefficient name on both axes. The covariance of `x1` and `x2` is `result.cov_params["x1"]["x2"]`, and the standard errors are the square roots of its diagonal. The names follow `param_names`: FE has no `"const"`, RE has it first, and Tobit adds `"sigma"` as the last row and column.
+
+With the matrix you can test a linear combination of coefficients or apply the delta method yourself, as in the example below. The formulas for each `cov_type` are in [Definitions](../methods/ols.md#covariance-of-the-coefficients-cov_type).
 
 ```python
 import math
@@ -96,7 +98,7 @@ t_stat = estimate / std_error
 print(estimate, std_error, t_stat)
 ```
 
-Compare `t_stat` with the distribution in `stat_dist`: here it is a t distribution with `two_vars.stat_df` degrees of freedom. Logit, Probit, Tobit and GMM use the standard normal distribution instead (`stat_dist` is `"normal"` and `stat_df` is `None`).
+Compare `t_stat` with the distribution named in `stat_dist`: here a t distribution with `two_vars.stat_df` degrees of freedom, so the two-sided p-value is twice the upper tail probability of `abs(t_stat)` (for example `2 * scipy.stats.t.sf(abs(t_stat), two_vars.stat_df)`; SciPy is not a dependency of this package). Logit, Probit, Tobit and GMM use the standard normal distribution instead (`stat_dist` is `"normal"` and `stat_df` is `None`).
 
 ## Predicted values
 

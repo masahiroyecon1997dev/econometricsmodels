@@ -156,15 +156,16 @@ class ProbitResults:
 
     @property
     def cov_params(self) -> dict[str, dict[str, float]]:
-        """Covariance matrix of the coefficients, keyed by name.
+        """Covariance matrix of the coefficients, as a dict of dicts by name.
 
-        Follows `cov_type`, so `std_errors[a]` is the square root of
-        `cov_params[a][a]`. The covariance of `a` and `b` is
-        `cov_params["a"]["b"]`, and the keys are in `param_names` order.
+        Computed with the `cov_type` of the options, so `std_errors[a]` is
+        the square root of `cov_params[a][a]`. The covariance of `a` and `b`
+        is `cov_params["a"]["b"]`, and the keys are in `param_names` order.
 
-        The matrix is symmetric up to rounding error: `cov_params["a"]["b"]`
-        and `cov_params["b"]["a"]` can differ in the last digits (a relative
-        difference of about 1e-16).
+        The matrix is symmetric up to rounding error (a relative difference
+        of 1e-16 to 1e-15 between `cov_params["a"]["b"]` and
+        `cov_params["b"]["a"]`), so compare entries with a tolerance rather
+        than with `==`.
         """
         return cov_params_by_param(self._raw.param_names, self._raw.cov_params)
 

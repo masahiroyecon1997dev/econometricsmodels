@@ -51,7 +51,7 @@ The weight type only affects the point estimate; the reported standard errors fo
 
 ## Covariance of the coefficients: `cov_type`
 
-The covariance matrix of the coefficients, for either estimator, is available as `cov_params` on the results.
+The covariance matrix of the coefficients, for either estimator, is available as `cov_params` on the results; the standard errors are the square roots of its diagonal.
 
 ### 2SLS
 

@@ -32,7 +32,7 @@ If some combination of the regressors perfectly predicts the outcome, for all ob
 
 ## Covariance of the coefficients: `cov_type`
 
-Let \(s_i\) be the score of observation \(i\) and \(H\) the Hessian of \(\ell\), both at \(\hat\theta\). Standard errors are the square roots of the diagonal of the covariance matrix, and the matrix is available as `cov_params` on the results.
+Let \(s_i\) be the score of observation \(i\) and \(H\) the Hessian of \(\ell\), both at \(\hat\theta\). Standard errors are the square roots of the diagonal of the covariance matrix, and the covariance matrix of the coefficients is available as `cov_params` on the results.
 
 | `cov_type` | Covariance |
 |---|---|

@@ -36,7 +36,7 @@ The effects count as estimated parameters. `fit()` raises an error when \(n \le 
 
 ## Covariance of the coefficients: `cov_type`
 
-All options are sandwich estimators \((\tilde X'\tilde X)^{-1}\hat S(\tilde X'\tilde X)^{-1}\) on the within-transformed data, scaled as below. Standard errors are the square roots of the diagonal, and the matrix is available as `cov_params` on the results (it holds the slope coefficients only, not the fixed effects). `cov_type` defaults to `"cluster"` on `entity`, following `fixest`: panel data almost always have within-entity serial correlation. `"hc0"` is not available.
+All options are sandwich estimators \((\tilde X'\tilde X)^{-1}\hat S(\tilde X'\tilde X)^{-1}\) on the within-transformed data, scaled as below. Standard errors are the square roots of the diagonal, and the covariance matrix of the coefficients is available as `cov_params` on the results (it holds the slope coefficients only, not the fixed effects). `cov_type` defaults to `"cluster"` on `entity`, following `fixest`: panel data almost always have within-entity serial correlation. `"hc0"` is not available.
 
 | `cov_type` | Covariance |
 |---|---|

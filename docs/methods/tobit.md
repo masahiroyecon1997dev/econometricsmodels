@@ -33,7 +33,7 @@ Unlike the Logit and Probit likelihoods, the Tobit likelihood in \((\beta, \ln\s
 
 ## Covariance of the coefficients: `cov_type`
 
-`"classical"`, `"opg"`, `"hc0"`, `"hc1"` and `"cluster"` are defined as for [Logit](logit.md#covariance-of-the-coefficients-cov_type), with the score and Hessian of the Tobit log-likelihood and \(k+1\) parameters (\(\beta\) and \(\sigma\)), so the factor of `"hc1"` is \(n/(n-k-1)\) and the small-sample factor of `"cluster"` uses \((n-1)/(n-k-1)\), where \(k\) is the number of coefficients without `sigma`. The covariance matrix includes \(\sigma\) as its last row and column, in the scale of \(\sigma\) and not of \(\log\sigma\), and is available as `cov_params` on the results. So `std_errors`, `test_stats`, `p_values` and `conf_int` have an entry for `sigma`. HC2, HC3 and HAC are not available.
+`"classical"`, `"opg"`, `"hc0"`, `"hc1"` and `"cluster"` are defined as for [Logit](logit.md#covariance-of-the-coefficients-cov_type), with the score and Hessian of the Tobit log-likelihood and \(k+1\) parameters (\(\beta\) and \(\sigma\)), so the factor of `"hc1"` is \(n/(n-k-1)\) and the small-sample factor of `"cluster"` uses \((n-1)/(n-k-1)\), where \(k\) is the number of coefficients without `sigma`. The covariance matrix includes \(\sigma\) as its last row and column, expressed in the scale of \(\sigma\) rather than \(\ln\sigma\), so `std_errors`, `test_stats`, `p_values` and `conf_int` have an entry for `sigma`. The matrix is available as `cov_params` on the results. HC2, HC3 and HAC are not available.
 
 ## Test distributions and confidence intervals
 

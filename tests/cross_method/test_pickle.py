@@ -6,7 +6,6 @@
 
 - 対象クラスの網羅: `_lib`の`#[pyclass]`を列挙し、pickleに対応したクラスが`SAMPLES`（往復の
   見本）と一致すること。クラスを足してpickle対応を忘れたとき、`SAMPLES`にも足し忘れたときに落ちる。
-  `PENDING`は対応待ちのクラスで、対応したらここから外して`SAMPLES`に足す。
 - 往復: 全プロトコルで`pickle`、`copy.copy`、`copy.deepcopy`。
 - Pythonのラッパー（`OLSResults`等）: 公開プロパティ・`predict()`・`augment()`・事後診断が往復後も一致する。
 - 復元の失敗: 形式の版・種別・キーの集合・値の型が合わない状態は`PICKLE_FORMAT_MISMATCH`。
@@ -19,12 +18,14 @@ import copy
 import inspect
 import math
 import pickle
+import struct
+import threading
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import get_context
 
 import polars as pl
 import pytest
-from _cross_method_helpers import fit_re
+from _cross_method_helpers import fit_fe, fit_re
 from _dtype_helpers import make_frame
 from _errors import raises_error
 from econometricsmodels import (
@@ -37,6 +38,7 @@ from econometricsmodels import (
     Logit,
     LogitOptions,
     OLSOptions,
+    Probit,
     ProbitOptions,
     REOptions,
     Tobit,
@@ -50,11 +52,6 @@ PROTOCOLS = range(pickle.HIGHEST_PROTOCOL + 1)
 # `fit()`の途中結果を包むだけで、利用者が保持しない内部の型（すぐ`dataclass`に包まれる）。
 TRANSIENT = frozenset(
     {"WhiteTestOutput", "BreuschPaganTestOutput", "BreuschGodfreyTestOutput"}
-)
-
-# estimator（`engine`の推定量）を内部に持ち、まだpickleに対応していない結果クラス。
-PENDING = frozenset(
-    {"LogitResult", "ProbitResult", "TobitResult", "IVResult", "FEResult"}
 )
 
 
@@ -75,8 +72,28 @@ def _fit_wls():
     return WLS(_frame(), y="y", x=["x1", "x2"], weight="w").fit()
 
 
+def _fit_iv(**options):
+    return IV(
+        _frame(),
+        y="y",
+        x_endog=["x1"],
+        x_exog=["x2"],
+        instruments=["z", "z2"],
+        options=IVOptions(**options),
+    ).fit()
+
+
+def _binary_options(model, options: dict[str, object]):
+    option_class = LogitOptions if model is Logit else ProbitOptions
+    return option_class(**options)
+
+
 def _logit_raw():
     return Logit(_frame(), y="y01", x=["x1", "x2"]).fit()._raw
+
+
+def _probit_raw():
+    return Probit(_frame(), y="y01", x=["x1", "x2"]).fit()._raw
 
 
 def _tobit_raw():
@@ -153,6 +170,15 @@ SAMPLES = {
     "OLSResult": lambda: _fit_ols()._raw,
     "WLSResult": lambda: _fit_wls()._raw,
     "REResult": lambda: fit_re(_frame(), time="t")._raw,
+    "IVResult": lambda: _fit_iv()._raw,
+    "FEResult": lambda: (
+        fit_fe(
+            _frame(), time="t", cov_type="dk", dk_time="t", dk_bandwidth=1
+        )._raw
+    ),
+    "LogitResult": _logit_raw,
+    "TobitResult": _tobit_raw,
+    "ProbitResult": _probit_raw,
     "MarginalEffectsResult": lambda: _logit_raw().marginal_effects(),
     "CensoringFitCheckResult": lambda: _tobit_raw().censoring_fit_check(),
     "CensoringFitCategoryResult": lambda: (
@@ -222,27 +248,21 @@ def samples() -> dict[str, object]:
 
 
 def test_every_lib_class_is_picklable_or_listed() -> None:
-    """`_lib`のクラスは、往復の見本があるか、対応待ち・内部の型として挙げられている。
+    """`_lib`のクラスは、往復の見本があるか、内部の型として挙げられている。
 
     クラスを足してpickle対応を忘れた、または見本を足し忘れたときに落ちる。
     """
     classes = _lib_classes()
-    unaccounted = set(classes) - set(SAMPLES) - PENDING - TRANSIENT
+    unaccounted = set(classes) - set(SAMPLES) - TRANSIENT
     assert not unaccounted, f"add a __reduce__ and a sample for {unaccounted}"
-    stale = (set(SAMPLES) | PENDING | TRANSIENT) - set(classes)
+    stale = (set(SAMPLES) | TRANSIENT) - set(classes)
     assert not stale, f"no such class in _lib: {stale}"
-    assert not (set(SAMPLES) & (PENDING | TRANSIENT))
+    assert not (set(SAMPLES) & TRANSIENT)
 
 
 @pytest.mark.parametrize("name", sorted(SAMPLES))
 def test_sampled_class_defines_reduce(name: str) -> None:
     assert _lib_classes()[name].__reduce__ is not object.__reduce__
-
-
-@pytest.mark.parametrize("name", sorted(PENDING))
-def test_pending_class_is_not_picklable_yet(name: str) -> None:
-    """対応したら`PENDING`から外して`SAMPLES`に足す（このテストが促す）。"""
-    assert _lib_classes()[name].__reduce__ is object.__reduce__
 
 
 # ── 往復 ─────────────────────────────────────────────────────────
@@ -377,6 +397,157 @@ def test_restored_ols_result_runs_the_diagnostic_tests() -> None:
     ) == result.breusch_godfrey_test(time="order", nlags=2)
 
 
+@pytest.mark.parametrize("model", [Logit, Probit], ids=["logit", "probit"])
+@pytest.mark.parametrize("include_intercept", [True, False])
+def test_restored_binary_choice_result_keeps_every_method(
+    model, include_intercept: bool
+) -> None:
+    """学習データを使うメソッド（`predict`・`pred_table`・`marginal_effects`・`augment`）が往復後も同じ値を返す。"""
+    options = {"include_intercept": include_intercept}
+    result = model(
+        _frame(),
+        y="y01",
+        x=["x1", "x2"],
+        options=_binary_options(model, options),
+    ).fit()
+    clone = pickle.loads(pickle.dumps(result))
+    new_data = _frame().head(7)
+    assert clone.predict() == result.predict()
+    assert clone.predict(new_data=new_data) == result.predict(
+        new_data=new_data
+    )
+    assert clone.pred_table() == result.pred_table()
+    assert clone.pred_table(threshold=0.3) == result.pred_table(threshold=0.3)
+    for at in ("overall", "mean", "median"):
+        assert _same(
+            clone.marginal_effects(at=at, confidence_level=0.9),
+            result.marginal_effects(at=at, confidence_level=0.9),
+        )
+    assert clone.augment().equals(result.augment())
+    assert _same(result.params_table(), clone.params_table())
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        TobitOptions(lower=0.0),
+        TobitOptions(upper=2.5),
+        TobitOptions(lower=0.5, upper=2.5, include_intercept=False),
+    ],
+    ids=["lower_only", "upper_only", "both_no_intercept"],
+)
+def test_restored_tobit_result_keeps_every_method(
+    options: TobitOptions,
+) -> None:
+    """`target`ごとの予測・限界効果、打ち切りの当てはまりの確認、`augment`が往復後も同じ値を返す。"""
+    frame = _frame().with_columns(
+        yc=pl.col("y").clip(options.lower, options.upper)
+    )
+    result = Tobit(frame, y="yc", x=["x1", "x2"], options=options).fit()
+    clone = pickle.loads(pickle.dumps(result))
+    new_data = frame.head(7)
+    targets = (
+        "expected_latent",
+        "expected_observed",
+        "prob_uncensored",
+        "expected_uncensored",
+    )
+    for target in targets:
+        if target == "expected_uncensored" and (
+            options.lower is None or options.upper is None
+        ):
+            continue
+        assert clone.predict(target=target) == result.predict(target=target)
+        assert clone.predict(
+            new_data=new_data, target=target
+        ) == result.predict(new_data=new_data, target=target)
+        for at in ("overall", "mean", "median"):
+            assert _same(
+                clone.marginal_effects(at=at, target=target),
+                result.marginal_effects(at=at, target=target),
+            )
+    assert _same(clone.censoring_fit_check(), result.censoring_fit_check())
+    assert clone.augment(target="expected_latent").equals(
+        result.augment(target="expected_latent")
+    )
+    assert _same(result.params_table(), clone.params_table())
+
+
+def test_fixed_effects_are_the_same_across_threads() -> None:
+    """初回の`fixed_effects()`を複数スレッドから同時に呼んでも、同じ値になる。"""
+    result = fit_fe(_frame(), time="t")
+    expected = fit_fe(_frame(), time="t").fixed_effects()
+    outputs: list[object] = []
+
+    def call() -> None:
+        outputs.append(result.fixed_effects())
+
+    threads = [threading.Thread(target=call) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert len(outputs) == 8
+    assert all(output == expected for output in outputs)
+
+
+@pytest.mark.parametrize("two_way", [False, True], ids=["one_way", "two_way"])
+@pytest.mark.parametrize(
+    "compute_before", [False, True], ids=["lazy", "cached"]
+)
+def test_restored_fe_result_keeps_the_fixed_effects(
+    two_way: bool, compute_before: bool
+) -> None:
+    """固定効果は遅延計算。計算前に`pickle`しても、計算後に`pickle`しても同じ値が出る。"""
+    options = {"time": "t"} if two_way else {}
+    result = fit_fe(_frame(), **options)
+    expected = fit_fe(_frame(), **options).fixed_effects()
+    if compute_before:
+        result.fixed_effects()
+    clone = pickle.loads(pickle.dumps(result))
+    assert clone.fixed_effects() == expected
+    # 時点の並び（時間順）も保たれる。
+    if two_way:
+        assert list(clone.fixed_effects()["time"]) == list(expected["time"])
+    # 復元した結果をもう一度pickleしても変わらない。
+    again = pickle.loads(pickle.dumps(clone))
+    assert again.fixed_effects() == expected
+
+
+@pytest.mark.parametrize(
+    "options",
+    [{}, {"estimator": "gmm", "cov_type": "hc1"}],
+    ids=["2sls", "gmm"],
+)
+def test_restored_iv_result_keeps_first_stage_and_diagnostics(
+    options: dict[str, str],
+) -> None:
+    result = _fit_iv(**options)
+    clone = pickle.loads(pickle.dumps(result))
+    first, restored = result.first_stage(), clone.first_stage()
+    assert first.keys() == restored.keys() == {"x1"}
+    properties = _result_properties(first["x1"])
+    assert properties
+    for prop, value in properties.items():
+        assert _same(value, getattr(restored["x1"], prop)), prop
+    # 第一段階は通常のOLS回帰なので、独立に推定したOLSと一致する（`clone_ref`の取り違えを検出する）。
+    independent = OLS(
+        _frame(),
+        y="x1",
+        x=["x2", "z", "z2"],
+        options=OLSOptions(cov_type=options.get("cov_type", "classical")),
+    ).fit()
+    for prop in ("params", "std_errors", "r_squared", "adj_r_squared", "aic"):
+        assert _same(
+            getattr(restored["x1"], prop), getattr(independent, prop)
+        ), prop
+    assert _same(
+        result.weak_instrument_f_statistics,
+        clone.weak_instrument_f_statistics,
+    )
+    assert _same(result.params_table(), clone.params_table())
+
+
 def test_ols_first_stage_result_without_data_round_trips() -> None:
     """`IVResults.first_stage()`由来の結果は元のデータを持たない。持たないまま往復する。"""
     frame = _frame()
@@ -475,6 +646,153 @@ def test_restore_checks_the_type_of_every_field(
         broken = {**state, key: wrong}
         with raises_error(ErrorCode.PICKLE_FORMAT_MISMATCH, object=kind):
             _lib._restore_pickled(kind, version, broken)
+
+
+FITTED_NAMES = ["LogitResult", "ProbitResult", "TobitResult"]
+
+
+def _fitted_layout(name: str) -> dict[str, int]:
+    """`fitted`のタプルの並び。
+
+    Logit/Probitは(y, x, names, dep, has_intercept, params, cov)、
+    Tobitは(y, x, names, dep, has_intercept, lower, upper, params, sigma, cov)。
+    """
+    if name == "TobitResult":
+        return {"lower": 5, "upper": 6, "params": 7, "sigma": 8, "cov": 9}
+    return {"params": 5, "cov": 6}
+
+
+def _restore_with(kind: str, version: int, state: dict, fitted: list) -> None:
+    _lib._restore_pickled(kind, version, {**state, "fitted": tuple(fitted)})
+
+
+@pytest.mark.parametrize("name", FITTED_NAMES)
+def test_restore_rejects_a_fitted_state_with_inconsistent_parts(
+    samples: dict[str, object], name: str
+) -> None:
+    """バイト列の長さは形と合っているが、部品どうしの次元が合わない状態を拒否する。
+
+    `from_design`/`from_parts`まで届く入力で、復元後のメソッドが添字の範囲外を読まないための検査。
+    """
+    kind, version, state = _reduce_args(samples[name])
+    fitted = list(state["fitted"])
+    y, x, names = fitted[0], fitted[1], fitted[2]
+    layout = _fitted_layout(name)
+    n, k = x[0], x[1]
+    assert y[:2] == (n, 1)
+    assert len(y[2]) == n * 8
+    assert len(x[2]) == n * k * 8
+    broken = {
+        # `y`だけ行数を減らす（`x`と合わない）
+        "y_rows": {0: (n - 1, 1, y[2][:-8])},
+        # `y`が2列
+        "y_columns": {0: (n // 2, 2, y[2])},
+        # `x`の列数を増やす（係数名の数と合わない）
+        "x_columns": {1: (n, k + 1, x[2] + bytes(8 * n))},
+        # 係数名が足りない
+        "names": {2: names[:-1]},
+        # 観測数が0
+        "no_observations": {0: (0, 1, b""), 1: (0, k, b"")},
+        "params": {layout["params"]: fitted[layout["params"]] + bytes(8)},
+        "cov_shape": {layout["cov"]: (1, 1, bytes(8))},
+    }
+    for label, replacement in broken.items():
+        tampered = list(fitted)
+        for index, value in replacement.items():
+            tampered[index] = value
+        with raises_error(ErrorCode.PICKLE_FORMAT_MISMATCH, object=kind):
+            _restore_with(kind, version, state, tampered)
+        assert label
+
+
+@pytest.mark.parametrize("name", FITTED_NAMES)
+def test_restore_rejects_a_matrix_whose_shape_overflows(
+    samples: dict[str, object], name: str
+) -> None:
+    kind, version, state = _reduce_args(samples[name])
+    fitted = list(state["fitted"])
+    for shape in ((2**63, 2), (2**64, 1), (1, 2**64), (-1, 1)):
+        tampered = list(fitted)
+        tampered[1] = (*shape, b"")
+        with raises_error(ErrorCode.PICKLE_FORMAT_MISMATCH, object=kind):
+            _restore_with(kind, version, state, tampered)
+
+
+def test_matrix_state_is_little_endian_column_major() -> None:
+    """設計行列の状態の形式（列優先・リトルエンディアン）を固定する。
+
+    `x`は非正方で、行優先と列優先を取り違えると値が入れ替わる。`y`・`cov_params`は
+    取り違えても値が変わらないので、`x`で確かめる。
+    """
+    frame = _frame()
+    options = LogitOptions(include_intercept=False)
+    result = Logit(frame, y="y01", x=["x1", "x2"], options=options).fit()
+    _, _, state = _reduce_args(result._raw)
+    nrows, ncols, data = state["fitted"][1]
+    assert (nrows, ncols) == (frame.height, 2)
+    values = frame["x1"].to_list() + frame["x2"].to_list()
+    assert data == b"".join(struct.pack("<d", v) for v in values)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"sigma": 0.0},
+        {"sigma": -1.0},
+        {"sigma": float("nan")},
+        {"sigma": float("inf")},
+        {"lower": None, "upper": None},
+        {"lower": 2.0, "upper": 1.0},
+        {"lower": 1.0, "upper": 1.0},
+        {"lower": float("nan"), "upper": None},
+        {"lower": None, "upper": float("inf")},
+    ],
+    ids=[
+        "sigma_zero",
+        "sigma_negative",
+        "sigma_nan",
+        "sigma_infinite",
+        "no_bounds",
+        "bounds_reversed",
+        "bounds_equal",
+        "bound_nan",
+        "bound_infinite",
+    ],
+)
+def test_restore_rejects_a_tobit_state_with_a_bad_sigma_or_bounds(
+    samples: dict[str, object], changes: dict
+) -> None:
+    kind, version, state = _reduce_args(samples["TobitResult"])
+    fitted = list(state["fitted"])
+    layout = _fitted_layout(kind)
+    for key, value in changes.items():
+        fitted[layout[key]] = value
+    with raises_error(ErrorCode.PICKLE_FORMAT_MISMATCH, object=kind):
+        _restore_with(kind, version, state, fitted)
+
+
+@pytest.mark.parametrize(
+    "effects",
+    [
+        ("three_way", {"a": 1.0}),
+        ("one_way", {"a": "x"}),
+        ("one_way", [("a", 1.0)]),
+        ("two_way", {"a": 1.0}, {"t": 1.0}),
+        ("two_way", {"a": 1.0}, [("t", "x")]),
+        ("two_way", {"a": 1.0}),
+        ("one_way", {"a": 1.0}, [("t", 1.0)]),
+        {"a": 1.0},
+        None,
+    ],
+)
+def test_restore_rejects_malformed_fixed_effects(
+    samples: dict[str, object], effects: object
+) -> None:
+    kind, version, state = _reduce_args(samples["FEResult"])
+    with raises_error(ErrorCode.PICKLE_FORMAT_MISMATCH, object=kind):
+        _lib._restore_pickled(
+            kind, version, {**state, "fixed_effects": effects}
+        )
 
 
 def test_restore_rejects_a_source_data_that_is_not_a_dataframe(

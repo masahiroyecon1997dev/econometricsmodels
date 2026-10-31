@@ -420,6 +420,196 @@ impl Hessian for ProbitProblem {
     }
 }
 
+/// Probitの推定結果のうち、予測・的中表・限界効果に必要な最小の状態（入力データ・係数・係数の分散共分散行列）。
+///
+/// [`ProbitEstimator::into_fitted`]で取り出す。`engine_pybind`の結果オブジェクトは推定量全体ではなくこれを
+/// 保持し、pickleでは[`ProbitFitted::from_parts`]で復元する。フィールドはprivate（`.claude/rules/rust-style.md`
+/// 「推定量構造体の設計」参照）で、構築経路は`fit`と`from_parts`だけ。
+#[derive(Debug)]
+pub struct ProbitFitted {
+    input: ProbitInput,
+    /// 係数（元のスケール）。`input.param_names()`と対応する
+    params: Vec<f64>,
+    /// 係数の分散共分散行列（元のスケール、k×k）。限界効果（デルタ法）で使う
+    cov_params: Mat<f64>,
+}
+
+impl ProbitInput {
+    /// 設計行列と被説明変数をそのまま受け取って組み立てる（`from_columns`と違い切片列は足さない）。
+    /// pickleから復元する経路用で、次元と係数名の整合だけを検査する。
+    ///
+    /// `fit`が作った状態では起きない不整合（壊れた・改ざんされたpickleだけが到達する入力エラー）なので、
+    /// `engine_pybind`が`PICKLE_FORMAT_MISMATCH`へ変換する。
+    ///
+    /// # Errors
+    /// 次元（`y`が1列で1行以上、`y`と`x`の行数、`x`の列数と`param_names`の長さ）が合わない、`has_intercept`なのに
+    /// 先頭の係数名が`"const"`でない: `CommonError::Internal`
+    pub fn from_design(
+        y: Mat<f64>,
+        x: Mat<f64>,
+        param_names: Vec<String>,
+        dep_var_name: String,
+        has_intercept: bool,
+    ) -> Result<Self, MleError> {
+        let consistent = y.ncols() == 1
+            && y.nrows() >= 1
+            && y.nrows() == x.nrows()
+            && x.ncols() == param_names.len()
+            && (!has_intercept || param_names.first().map(String::as_str) == Some("const"));
+        if !consistent {
+            return Err(CommonError::internal("inconsistent design matrix parts").into());
+        }
+        Ok(Self {
+            y,
+            x,
+            param_names,
+            dep_var_name,
+            has_intercept,
+        })
+    }
+}
+
+impl ProbitFitted {
+    /// 入力データ・係数・係数の分散共分散行列から組み立てる。
+    ///
+    /// 最適性は検証できない（`fit`が収束した結果であることは呼び出し側が保証する）。ここで検査するのは、
+    /// 後続のメソッドが添字の範囲外にならないための次元の整合だけ。
+    ///
+    /// 壊れた・改ざんされたpickleだけが到達する入力エラーで、`engine_pybind`が`PICKLE_FORMAT_MISMATCH`へ変換する。
+    /// `params`・`cov_params`の値が有限かは検査しない（非有限値は後続の計算にNaNとして伝わるだけ）。
+    ///
+    /// # Errors
+    /// `params`の長さまたは`cov_params`の形が`k`と合わない: `CommonError::Internal`
+    pub fn from_parts(
+        input: ProbitInput,
+        params: Vec<f64>,
+        cov_params: Mat<f64>,
+    ) -> Result<Self, MleError> {
+        let k = input.k();
+        if params.len() != k || cov_params.nrows() != k || cov_params.ncols() != k {
+            return Err(CommonError::internal("inconsistent fitted model parts").into());
+        }
+        Ok(Self {
+            input,
+            params,
+            cov_params,
+        })
+    }
+
+    pub fn input(&self) -> &ProbitInput {
+        &self.input
+    }
+
+    pub fn params(&self) -> &[f64] {
+        &self.params
+    }
+
+    pub fn cov_params(&self) -> &Mat<f64> {
+        &self.cov_params
+    }
+
+    /// 限界効果（`marginal_effects`）。`fit()`とは独立した別メソッド（`fit()`のReturn
+    /// 本体には含めない、`docs/spec/nonlinear-common.md`6章で確定済み）。`fit()`時の
+    /// `cov_params`を再利用するため再最適化は不要（`confidence_level`は`fit()`とは
+    /// 独立したパラメータとして受け取り、`fit()`時の値に縛られず事後的に異なる
+    /// CI幅を見られるようにする、`LogitEstimator::marginal_effects`と同じ設計）。
+    ///
+    /// ## 数式（デルタ法）
+    ///
+    /// `p_i = Φ(x_i'θ)`のとき、変数`j`（連続変数として扱う。`dummy=False`が既定の
+    /// statsmodelsの`get_margeff()`に倣い、離散変数の自動判定は行わない設計、
+    /// `docs/spec/nonlinear-common.md`6章参照）の限界効果は
+    /// `dy/dx_j = φ(x_i'θ)θ_j`（Logitの`p(1-p)θ_j`とは異なり標準正規PDF`φ`を使う。
+    /// 参照）。
+    ///
+    /// - `at="overall"`（AME）: `g_j(θ) = w(θ)*θ_j`、`w(θ) = (1/n)Σᵢ φ(zᵢ)`
+    /// - `at="mean"`/`"median"`: `g_j(θ) = w(θ)*θ_j`、`w(θ) = φ(z̄)`
+    ///   （`z̄=x̄'θ`、`x̄`は各説明変数の標本平均または中央値からなる代表点）
+    ///
+    /// いずれも同じ`g_j(θ)=w(θ)*θ_j`という形に帰着するため、`w`とその勾配
+    /// `s_m=∂w/∂θ_m`さえ計算できれば、ヤコビアンは
+    /// `∂g_j/∂θ_m = θ_j*s_m + [j==m]*w`という共通の式で書ける
+    /// （`overall_w_and_s`/`at_point_w_and_s`が`(w,s)`を計算し、`w`・`s`の計算方法に
+    /// 依らない残りの計算——ヤコビアン・デルタ法標準誤差・定数項の除外——は
+    /// `nonlinear/common.rs`の`marginal_effects_from_w_s`に共通化されている
+    /// （Logitと数式まで同型であることを確認済み）。
+    ///
+    /// 変数`j`の分散は`Var(g_j) = jac_j · Σ · jac_jᵀ`（`jac_j`はヤコビアンの`j`行目、
+    /// `Σ=cov_params`）。標準誤差はこの平方根、検定分布は標準正規分布
+    /// （`fit()`本体と同じ、`docs/spec/nonlinear-common.md`4章）。
+    ///
+    /// 定数項（切片）は出力から除外する（切片の限界効果は意味を持たない、
+    /// statsmodelsも同様）。
+    ///
+    /// # Errors
+    /// `confidence_level`が`(0, 1)`の範囲外: `CommonError::InvalidConfidenceLevel`
+    pub fn marginal_effects(
+        &self,
+        at: MarginalEffectsAt,
+        confidence_level: f64,
+    ) -> Result<MarginalEffects, MleError> {
+        let x = self.input.x();
+        let k = self.input.k();
+        let (w, s) = match at {
+            MarginalEffectsAt::Overall => overall_w_and_s(x, &self.params),
+            MarginalEffectsAt::Mean => at_point_w_and_s(&column_means(x), &self.params),
+            MarginalEffectsAt::Median => at_point_w_and_s(&column_medians(x), &self.params),
+        };
+        marginal_effects_from_w_s(
+            FittedModelForMarginalEffects {
+                param_names: self.input.param_names(),
+                has_intercept: self.input.has_intercept(),
+                k,
+                params: &self.params,
+                cov_params: &self.cov_params,
+            },
+            w,
+            &s,
+            confidence_level,
+        )
+    }
+
+    /// 予測確率 `p_i = Φ(x_i'θ)` を、`fit()`に使った学習データ（`self.input.x()`）の
+    /// 各行について返す（`fit()`のReturn本体には含めない別メソッド、
+    /// `docs/spec/nonlinear-common.md`6章。`LogitEstimator::predict`の`Λ`を`Φ`に置き換えた
+    /// Probit版）。
+    ///
+    /// 新規データでの予測（out-of-sample）は`predict_new_data`。
+    pub fn predict(&self) -> Vec<f64> {
+        let normal = Normal::standard();
+        predict_from_link(self.input.x(), &self.params, |z| normal.cdf(z))
+    }
+
+    /// 新規データ（out-of-sample、`new_x_columns`）に対する予測確率
+    /// `p_i = Φ(x_i'θ)`。`LogitEstimator::predict_new_data`の`Λ`を`Φ`に
+    /// 置き換えたProbit版（設計上の理由は同メソッドのdocコメント参照）。
+    ///
+    /// `new_x_columns`の本数・順序の契約、パニック条件は
+    /// `nonlinear::common::predict_new_data`のdocコメント参照。
+    pub fn predict_new_data(&self, new_x_columns: &[Vec<f64>]) -> Vec<f64> {
+        let normal = Normal::standard();
+        predict_new_data(
+            &self.params,
+            self.input.has_intercept(),
+            new_x_columns,
+            |z| normal.cdf(z),
+        )
+    }
+
+    /// 分類の的中表（2×2、`table[actual][predicted]`のカウント。行=実測クラス、
+    /// 列=予測クラス）。`predict()`が返す予測確率のみを`threshold`で二値化し、実測`y`は
+    /// `threshold`に関わらず常に`0.5`で二値化する。数式・statsmodelsとの整合性の詳細は
+    /// `nonlinear/common.rs`の`pred_table`のdocコメント参照（リンク関数に依存しない計算
+    /// のため`common.rs`に共通化されている、Logitと共通）。
+    ///
+    /// **新規データでの的中表（out-of-sample）は未対応**（`predict()`とは異なり
+    /// スコープ外のまま、別issueでトラッキング。`LogitEstimator::pred_table`と同じ、
+    /// ユーザー確認済み）。
+    pub fn pred_table(&self, threshold: f64) -> Mat<f64> {
+        pred_table(&self.predict(), self.input.y(), threshold)
+    }
+}
+
 /// Probitの推定結果。`fit`でのバリデーション・最適化・`cov_type`に応じたSE計算・
 /// 適合度統計量の計算を通過した状態を表す。
 ///
@@ -428,15 +618,8 @@ impl Hessian for ProbitProblem {
 /// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
 #[derive(Debug)]
 pub struct ProbitEstimator {
-    input: ProbitInput,
-    /// 係数（元のスケール。`standardize_columns`で標準化した空間で最適化した後、
-    /// `destandardize_params`で逆変換済み）。`input.param_names()`と対応する
-    params: Vec<f64>,
-    /// 係数の分散共分散行列（元のスケール、k×k）。`fit`に渡した`cov_type`に応じて
-    /// 観測情報行列（`Classical`）・OPG（`Opg`）・サンドイッチ型（`Hc0`/`Hc1`）の
-    /// いずれかで計算される。限界効果（デルタ法）で再利用するため、対角成分
-    /// （`std_errors`）だけでなく行列そのものを保持する。
-    cov_params: Mat<f64>,
+    /// 予測・的中表・限界効果に必要な状態（入力データ・係数・係数の分散共分散行列）。
+    fitted: ProbitFitted,
     /// 標準誤差（k, 元のスケール）。`cov_params`の対角成分の平方根
     std_errors: Vec<f64>,
     /// z統計量（k）= `params / std_errors`
@@ -725,9 +908,11 @@ impl ProbitEstimator {
         } = gof;
 
         Ok(Self {
-            input,
-            params,
-            cov_params,
+            fitted: ProbitFitted {
+                input,
+                params,
+                cov_params,
+            },
             std_errors,
             test_stats,
             p_values,
@@ -749,12 +934,12 @@ impl ProbitEstimator {
 
     /// 推定に使った入力データ
     pub fn input(&self) -> &ProbitInput {
-        &self.input
+        self.fitted.input()
     }
 
     /// 係数の分散共分散行列（元のスケール、k×k）
     pub fn cov_params(&self) -> &Mat<f64> {
-        &self.cov_params
+        self.fitted.cov_params()
     }
 
     /// 標準誤差（k、元のスケール）
@@ -789,7 +974,7 @@ impl ProbitEstimator {
 
     /// 係数（元のスケール）
     pub fn params(&self) -> &[f64] {
-        &self.params
+        self.fitted.params()
     }
 
     /// 収束したかどうか
@@ -845,7 +1030,7 @@ impl ProbitEstimator {
     /// 観測数。`self.input.nobs()`への委譲（`OlsEstimator`/`LogitEstimator`と同じ
     /// パターン、`n`という同じ値の出どころを2つに分けない）
     pub fn n_obs(&self) -> usize {
-        self.input.nobs()
+        self.fitted.input().nobs()
     }
 
     /// モデルの自由度（`k-1`）
@@ -858,105 +1043,34 @@ impl ProbitEstimator {
         self.df_resid
     }
 
-    /// 限界効果（`marginal_effects`）。`fit()`とは独立した別メソッド（`fit()`のReturn
-    /// 本体には含めない、`docs/spec/nonlinear-common.md`6章で確定済み）。`fit()`時の
-    /// `cov_params`を再利用するため再最適化は不要（`confidence_level`は`fit()`とは
-    /// 独立したパラメータとして受け取り、`fit()`時の値に縛られず事後的に異なる
-    /// CI幅を見られるようにする、`LogitEstimator::marginal_effects`と同じ設計）。
-    ///
-    /// ## 数式（デルタ法）
-    ///
-    /// `p_i = Φ(x_i'θ)`のとき、変数`j`（連続変数として扱う。`dummy=False`が既定の
-    /// statsmodelsの`get_margeff()`に倣い、離散変数の自動判定は行わない設計、
-    /// `docs/spec/nonlinear-common.md`6章参照）の限界効果は
-    /// `dy/dx_j = φ(x_i'θ)θ_j`（Logitの`p(1-p)θ_j`とは異なり標準正規PDF`φ`を使う。
-    /// 参照）。
-    ///
-    /// - `at="overall"`（AME）: `g_j(θ) = w(θ)*θ_j`、`w(θ) = (1/n)Σᵢ φ(zᵢ)`
-    /// - `at="mean"`/`"median"`: `g_j(θ) = w(θ)*θ_j`、`w(θ) = φ(z̄)`
-    ///   （`z̄=x̄'θ`、`x̄`は各説明変数の標本平均または中央値からなる代表点）
-    ///
-    /// いずれも同じ`g_j(θ)=w(θ)*θ_j`という形に帰着するため、`w`とその勾配
-    /// `s_m=∂w/∂θ_m`さえ計算できれば、ヤコビアンは
-    /// `∂g_j/∂θ_m = θ_j*s_m + [j==m]*w`という共通の式で書ける
-    /// （`overall_w_and_s`/`at_point_w_and_s`が`(w,s)`を計算し、`w`・`s`の計算方法に
-    /// 依らない残りの計算——ヤコビアン・デルタ法標準誤差・定数項の除外——は
-    /// `nonlinear/common.rs`の`marginal_effects_from_w_s`に共通化されている
-    /// （Logitと数式まで同型であることを確認済み）。
-    ///
-    /// 変数`j`の分散は`Var(g_j) = jac_j · Σ · jac_jᵀ`（`jac_j`はヤコビアンの`j`行目、
-    /// `Σ=cov_params`）。標準誤差はこの平方根、検定分布は標準正規分布
-    /// （`fit()`本体と同じ、`docs/spec/nonlinear-common.md`4章）。
-    ///
-    /// 定数項（切片）は出力から除外する（切片の限界効果は意味を持たない、
-    /// statsmodelsも同様）。
-    ///
-    /// # Errors
-    /// `confidence_level`が`(0, 1)`の範囲外: `CommonError::InvalidConfidenceLevel`
+    /// 限界効果。実装は[`ProbitFitted::marginal_effects`]。
     pub fn marginal_effects(
         &self,
         at: MarginalEffectsAt,
         confidence_level: f64,
     ) -> Result<MarginalEffects, MleError> {
-        let x = self.input.x();
-        let k = self.input.k();
-        let (w, s) = match at {
-            MarginalEffectsAt::Overall => overall_w_and_s(x, &self.params),
-            MarginalEffectsAt::Mean => at_point_w_and_s(&column_means(x), &self.params),
-            MarginalEffectsAt::Median => at_point_w_and_s(&column_medians(x), &self.params),
-        };
-        marginal_effects_from_w_s(
-            FittedModelForMarginalEffects {
-                param_names: self.input.param_names(),
-                has_intercept: self.input.has_intercept(),
-                k,
-                params: &self.params,
-                cov_params: &self.cov_params,
-            },
-            w,
-            &s,
-            confidence_level,
-        )
+        self.fitted.marginal_effects(at, confidence_level)
     }
 
-    /// 予測確率 `p_i = Φ(x_i'θ)` を、`fit()`に使った学習データ（`self.input.x()`）の
-    /// 各行について返す（`fit()`のReturn本体には含めない別メソッド、
-    /// `docs/spec/nonlinear-common.md`6章。`LogitEstimator::predict`の`Λ`を`Φ`に置き換えた
-    /// Probit版）。
-    ///
-    /// 新規データでの予測（out-of-sample）は`predict_new_data`。
+    /// 学習データの予測確率。実装は[`ProbitFitted::predict`]。
     pub fn predict(&self) -> Vec<f64> {
-        let normal = Normal::standard();
-        predict_from_link(self.input.x(), &self.params, |z| normal.cdf(z))
+        self.fitted.predict()
     }
 
-    /// 新規データ（out-of-sample、`new_x_columns`）に対する予測確率
-    /// `p_i = Φ(x_i'θ)`。`LogitEstimator::predict_new_data`の`Λ`を`Φ`に
-    /// 置き換えたProbit版（設計上の理由は同メソッドのdocコメント参照）。
-    ///
-    /// `new_x_columns`の本数・順序の契約、パニック条件は
-    /// `nonlinear::common::predict_new_data`のdocコメント参照。
+    /// 新規データの予測確率。実装は[`ProbitFitted::predict_new_data`]。
     pub fn predict_new_data(&self, new_x_columns: &[Vec<f64>]) -> Vec<f64> {
-        let normal = Normal::standard();
-        predict_new_data(
-            &self.params,
-            self.input.has_intercept(),
-            new_x_columns,
-            |z| normal.cdf(z),
-        )
+        self.fitted.predict_new_data(new_x_columns)
     }
 
-    /// 分類の的中表（2×2、`table[actual][predicted]`のカウント。行=実測クラス、
-    /// 列=予測クラス）。`predict()`が返す予測確率のみを`threshold`で二値化し、実測`y`は
-    /// `threshold`に関わらず常に`0.5`で二値化する。数式・statsmodelsとの整合性の詳細は
-    /// `nonlinear/common.rs`の`pred_table`のdocコメント参照（リンク関数に依存しない計算
-    /// のため`common.rs`に共通化されている、Logitと共通）。
-    ///
-    /// **新規データでの的中表（out-of-sample）は未対応**（`predict()`とは異なり
-    /// スコープ外のまま、別issueでトラッキング。`LogitEstimator::pred_table`と同じ、
-    /// ユーザー確認済み）。
+    /// 分類の的中表。実装は[`ProbitFitted::pred_table`]。
     pub fn pred_table(&self, threshold: f64) -> Mat<f64> {
-        pred_table(&self.predict(), self.input.y(), threshold)
+        self.fitted.pred_table(threshold)
+    }
+
+    /// 予測・的中表・限界効果に必要な状態だけを取り出す。結果オブジェクトが推定量全体
+    /// （標準誤差や適合度統計量。結果側に値のコピーがある）を持たずに済む。
+    pub fn into_fitted(self) -> ProbitFitted {
+        self.fitted
     }
 }
 
@@ -3760,5 +3874,148 @@ mod tests {
                 prop_assert!(quad >= -1e-9 * scale, "v'Hv={quad} should be non-negative (scale={scale})");
             }
         }
+    }
+
+    // ── Fitted（pickleからの復元に使う最小の状態） ─────────────────────
+
+    fn fitted_test_estimator() -> ProbitEstimator {
+        let y = vec![0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0];
+        let x_columns = vec![
+            vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+            vec![0.5, -1.0, 2.0, 0.0, 1.5, -0.5, 1.0, 2.5],
+        ];
+        let input = ProbitInput::from_columns(
+            &y,
+            &x_columns,
+            vec!["x1".to_string(), "x2".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+        ProbitEstimator::fit(
+            input,
+            MleFitOptions {
+                solver: SolverType::Newton,
+                max_iter: 35,
+                tol: 1e-8,
+                raise_on_non_convergence: true,
+                cov_type: CovType::Classical,
+                confidence_level: 0.95,
+            },
+        )
+        .unwrap()
+    }
+
+    fn rebuilt_from_parts(original: &ProbitFitted) -> ProbitFitted {
+        let input = original.input();
+        ProbitFitted::from_parts(
+            ProbitInput::from_design(
+                input.y().clone(),
+                input.x().clone(),
+                input.param_names().to_vec(),
+                input.dep_var_name().to_string(),
+                input.has_intercept(),
+            )
+            .unwrap(),
+            original.params().to_vec(),
+            original.cov_params().clone(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn fitted_rebuilt_from_parts_reproduces_predict_pred_table_and_marginal_effects() {
+        let estimator = fitted_test_estimator();
+        let expected_effects = estimator
+            .marginal_effects(MarginalEffectsAt::Overall, 0.9)
+            .unwrap();
+        let expected_table = estimator.pred_table(0.4);
+        let expected_predict = estimator.predict();
+        let original = estimator.into_fitted();
+        let rebuilt = rebuilt_from_parts(&original);
+
+        assert_eq!(rebuilt.predict(), expected_predict);
+        assert_eq!(rebuilt.params(), original.params());
+        let table = rebuilt.pred_table(0.4);
+        for i in 0..2 {
+            for j in 0..2 {
+                assert_eq!(table.get(i, j), expected_table.get(i, j));
+            }
+        }
+        let effects = rebuilt
+            .marginal_effects(MarginalEffectsAt::Overall, 0.9)
+            .unwrap();
+        assert_eq!(effects.effect(), expected_effects.effect());
+        assert_eq!(effects.std_errors(), expected_effects.std_errors());
+    }
+
+    #[test]
+    fn from_design_rejects_inconsistent_parts() {
+        let ok = || {
+            (
+                Mat::from_fn(3, 1, |i, _| i as f64),
+                Mat::from_fn(3, 2, |i, j| (i + j) as f64),
+                vec!["const".to_string(), "x1".to_string()],
+            )
+        };
+        let build = |y: Mat<f64>, x: Mat<f64>, names: Vec<String>, intercept: bool| {
+            ProbitInput::from_design(y, x, names, "y".to_string(), intercept)
+        };
+        let (y, x, names) = ok();
+        assert!(build(y, x, names, true).is_ok());
+
+        let (_, x, names) = ok();
+        assert!(build(Mat::from_fn(3, 2, |_, _| 0.0), x, names, true).is_err());
+        let (_, x, names) = ok();
+        assert!(build(Mat::from_fn(2, 1, |_, _| 0.0), x, names, true).is_err());
+        let (y, x, _) = ok();
+        assert!(build(y, x, vec!["const".to_string()], true).is_err());
+        // 先頭が"const"でないのに`has_intercept`
+        let (y, x, _) = ok();
+        assert!(build(y, x, vec!["a".to_string(), "b".to_string()], true).is_err());
+        // `has_intercept=false`なら先頭の名前は何でもよい
+        let (y, x, _) = ok();
+        assert!(build(y, x, vec!["a".to_string(), "b".to_string()], false).is_ok());
+    }
+
+    #[test]
+    fn from_parts_rejects_params_or_covariance_of_the_wrong_size() {
+        let original = fitted_test_estimator().into_fitted();
+        let make_input = || {
+            let input = original.input();
+            ProbitInput::from_design(
+                input.y().clone(),
+                input.x().clone(),
+                input.param_names().to_vec(),
+                input.dep_var_name().to_string(),
+                input.has_intercept(),
+            )
+            .unwrap()
+        };
+        let k = original.params().len();
+        assert!(
+            ProbitFitted::from_parts(
+                make_input(),
+                vec![0.0; k + 1],
+                original.cov_params().clone()
+            )
+            .is_err()
+        );
+        assert!(
+            ProbitFitted::from_parts(
+                make_input(),
+                original.params().to_vec(),
+                Mat::zeros(k, k + 1)
+            )
+            .is_err()
+        );
+        assert!(
+            ProbitFitted::from_parts(
+                make_input(),
+                original.params().to_vec(),
+                Mat::zeros(k + 1, k)
+            )
+            .is_err()
+        );
     }
 }

@@ -24,10 +24,11 @@
 //!    （`engine_pybind/src/iv/CLAUDE.md`「実装フェーズの分割方針」の初期実装段階と同じ）。
 //! 3. **`fixed_effects()`メソッド追加段階**: IVの`first_stage()`と同じ
 //!    「追加結果は別メソッド」方針、`docs/spec/fe-spec.md`3.5節）を追加する。`FEResult`に
-//!    非公開フィールド`estimator: FeEstimator`（内部で`OlsEstimator`まで保持する）を
-//!    追加し、`fixed_effects()`はそこから`FeEstimator::fixed_effects()`をオンデマンドに
-//!    呼ぶだけ（IVの`IVResult.first_stage`フィールドが初期実装ではなく後続の拡張で
-//!    追加されたのと同じ段階分割）。
+//!    非公開フィールド（`LazyFixedEffects`。`FeEstimator`を保持し、固定効果は初回の
+//!    `fixed_effects()`かpickle時に計算して保持する）を追加し、`fixed_effects()`は
+//!    そこから返すだけ（IVの`IVResult.first_stage`フィールドが初期実装ではなく後続の拡張で
+//!    追加されたのと同じ段階分割）。pickleで復元した結果は`FeEstimator`を持たず、計算済みの
+//!    固定効果だけを持つ。
 //!
 //! ## `FEOptions.time`と`FEOptions.dk_time`は別物（`panel-common.md`1.1節）
 //!
@@ -69,8 +70,11 @@ use crate::shared::errors::guard;
 use engine::panel::common::TimeKeys;
 use engine::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput, FixedEffects};
 use polars::prelude::DataFrame;
+use pyo3::IntoPyObjectExt;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
+use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
 use super::common::{
     PanelCovKind, PanelModel, check_panel_cov_options, panel_error_to_pyerr, parse_panel_cov_kind,
@@ -272,7 +276,7 @@ impl FEOptions {
 // `FEResult`はRust側で組み立ててPythonに返すだけの型で、Python側からの生成・引数として
 // 受け取ることは想定していないため`skip_from_py_object`（`OLSResult`と同じ理由）。
 //
-// `Clone`を派生しない: `estimator`フィールドの`FeEstimator`（内部の`OlsEstimator`も）が
+// `Clone`を派生しない: `fixed_effects`フィールドが保持する`FeEstimator`（内部の`OlsEstimator`も）が
 // `Clone`を実装していないため（`LogitResult`/`ProbitResult`と同じ理由、
 // `.claude/rules/rust-style.md`「推定量構造体の設計」の通りprivateフィールドのみで、
 // `Clone`を要求する既存の呼び出し元も無い）。
@@ -355,12 +359,104 @@ pub struct FEResult {
     #[pyo3(get)]
     pub r_squared_overall: f64,
     /// `fixed_effects()`が読む。Python側には公開しない（`OLSResult`の`fitted_values`/
-    /// `has_intercept`、`LogitResult`/`ProbitResult`の`estimator`と同じ位置づけ）。
-    estimator: FeEstimator,
+    /// `has_intercept`と同じ位置づけ）。固定効果は初回の`fixed_effects()`かpickle時まで計算を遅らせる。
+    fixed_effects: LazyFixedEffects,
 }
+
+/// 固定効果（`α_i`・`γ_t`）。`fit()`では計算せず（エンティティ数に比例する辞書を作るため、使わない人に
+/// 負担をかけない）、`fixed_effects()`かpickleで初めて必要になったときに`FeEstimator`から計算して保持する。
+///
+/// pickleで復元した結果は`FeEstimator`を持たず、計算済みの固定効果だけを持つ（`Computed`）。`FeEstimator`は
+/// 設計行列とグループコードを持つが、固定効果の計算以外には使わない。「推定量が無く、計算済みでもない」
+/// 状態は型として作れない。
+#[derive(Debug)]
+enum LazyFixedEffects {
+    Lazy {
+        estimator: Box<FeEstimator>,
+        cell: OnceLock<FixedEffects>,
+    },
+    Computed(FixedEffects),
+}
+
+impl LazyFixedEffects {
+    fn new(estimator: FeEstimator) -> Self {
+        Self::Lazy {
+            estimator: Box::new(estimator),
+            cell: OnceLock::new(),
+        }
+    }
+
+    /// 固定効果。未計算なら`FeEstimator`から計算して保持する。
+    fn get(&self) -> &FixedEffects {
+        match self {
+            Self::Lazy { estimator, cell } => cell.get_or_init(|| estimator.fixed_effects()),
+            Self::Computed(effects) => effects,
+        }
+    }
+}
+
+// 状態は`("one_way", {id: α})`か`("two_way", {id: α}, [(period, γ), ...])`。時点は時間順の並びを保つ。
+impl crate::shared::pickle::PickleField for LazyFixedEffects {
+    fn to_py<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        match self.get() {
+            FixedEffects::OneWay(effects) => ("one_way", effects).into_bound_py_any(py),
+            FixedEffects::TwoWay { entity, time } => {
+                ("two_way", entity, time).into_bound_py_any(py)
+            }
+        }
+    }
+
+    fn from_py(obj: &Bound<'_, PyAny>) -> Option<Self> {
+        let effects = if let Ok((tag, effects)) = obj.extract::<(String, BTreeMap<String, f64>)>() {
+            (tag == "one_way").then_some(FixedEffects::OneWay(effects))?
+        } else {
+            let (tag, entity, time) = obj
+                .extract::<(String, BTreeMap<String, f64>, Vec<(String, f64)>)>()
+                .ok()?;
+            (tag == "two_way").then_some(FixedEffects::TwoWay { entity, time })?
+        };
+        Some(Self::Computed(effects))
+    }
+}
+
+crate::shared::pickle::impl_pickle_state!(FEResult {
+    params,
+    std_errors,
+    test_stats,
+    stat_dist,
+    stat_df,
+    p_values,
+    conf_lower,
+    conf_upper,
+    param_names,
+    residuals,
+    dep_var_name,
+    n_obs,
+    df_resid,
+    df_model,
+    n_entities,
+    n_periods,
+    cov_type,
+    dk_bandwidth_used,
+    f_statistic,
+    f_p_value,
+    f_df_num,
+    f_df_denom,
+    log_likelihood,
+    aic,
+    bic,
+    r_squared_within,
+    r_squared_between,
+    r_squared_overall,
+    fixed_effects,
+});
 
 #[pymethods]
 impl FEResult {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
+
     /// The fixed effects themselves (`α_i` for entity, `γ_t` for time), recovered
     /// post-hoc from the fitted coefficients (`α_i = ȳ_i - x̄_i'β̂`; see
     /// `docs/spec/fe-spec.md` section 3.5 and
@@ -383,7 +479,7 @@ impl FEResult {
     /// only holds when those two choices of `t_ref` coincide for the given data.
     fn fixed_effects(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
         guard(|| {
-            match self.estimator.fixed_effects() {
+            match self.fixed_effects.get() {
                 FixedEffects::OneWay(effects) => Ok(effects.into_pyobject(py)?.unbind()),
                 FixedEffects::TwoWay { entity, time } => {
                     // 時点は時間順に並べた`dict`にする（Pythonの`dict`は挿入順を保つ）。
@@ -597,7 +693,7 @@ fn fit_frame(
         r_squared_within: estimator.r_squared_within(),
         r_squared_between: estimator.r_squared_between(),
         r_squared_overall: estimator.r_squared_overall(),
-        estimator,
+        fixed_effects: LazyFixedEffects::new(estimator),
     })
 }
 

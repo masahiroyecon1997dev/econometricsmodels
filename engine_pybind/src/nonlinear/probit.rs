@@ -23,7 +23,7 @@ use crate::shared::errors::guard;
 use engine::nonlinear::common::{
     CovType as EngineCovType, MleFitOptions, SolverType as EngineSolverType,
 };
-use engine::nonlinear::probit::{ProbitEstimator, ProbitInput};
+use engine::nonlinear::probit::{ProbitEstimator, ProbitFitted, ProbitInput};
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 
@@ -256,9 +256,9 @@ impl ProbitOptions {
 //
 // `get_all`ではなく、フィールドごとに個別`#[pyo3(get)]`を付ける方式にしている
 // （`LogitResult`と同じ設計。`predict`/`pred_table`/`marginal_effects`の呼び出しに必要な
-// `estimator`フィールドを`#[pyo3(get)]`を付けずに済ませられるようにするため）。
+// `fitted`フィールドを`#[pyo3(get)]`を付けずに済ませられるようにするため）。
 //
-// `Clone`を派生しない: `estimator`（`engine::nonlinear::probit::ProbitEstimator`）が
+// `Clone`を派生しない: `fitted`（`engine::nonlinear::probit::ProbitFitted`）が
 // `Clone`を実装していないため（`LogitResult`と同じ理由）。
 #[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug)]
@@ -323,13 +323,83 @@ pub struct ProbitResult {
     #[pyo3(get)]
     pub solver: String,
     /// Not exposed to Python; only `predict`/`pred_table`/`marginal_effects` read it
-    /// (`LogitResult`の`estimator`と同じ位置づけ、コメント参照)。
-    estimator: ProbitEstimator,
+    /// (`LogitResult`の`fitted`と同じ位置づけ、コメント参照)。
+    fitted: ProbitFitted,
     /// The `polars.DataFrame` passed to `fit()`, as given. `augment(new_data=None)` appends
     /// the predicted column to it, so every column is kept, including the ones the model
     /// does not read.
     source_data: Py<PyAny>,
 }
+
+// 入力データ（`y`・`x`・列名・切片の有無）・係数・係数の分散共分散行列のタプル。復元は`from_design`/`from_parts`を
+// 通して次元の整合を検査する（不整合なら`PICKLE_FORMAT_MISMATCH`）。
+impl crate::shared::pickle::PickleField for ProbitFitted {
+    fn to_py<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        use crate::shared::pickle::to_tuple;
+        let input = self.input();
+        to_tuple(
+            py,
+            vec![
+                input.y().to_py(py)?,
+                input.x().to_py(py)?,
+                input.param_names().to_vec().to_py(py)?,
+                input.dep_var_name().to_string().to_py(py)?,
+                input.has_intercept().to_py(py)?,
+                self.params().to_vec().to_py(py)?,
+                self.cov_params().to_py(py)?,
+            ],
+        )
+    }
+
+    fn from_py(obj: &Bound<'_, PyAny>) -> Option<Self> {
+        use crate::shared::pickle::{PickleField, from_tuple};
+        let items = from_tuple(obj, 7)?;
+        let input = ProbitInput::from_design(
+            PickleField::from_py(&items[0])?,
+            PickleField::from_py(&items[1])?,
+            PickleField::from_py(&items[2])?,
+            PickleField::from_py(&items[3])?,
+            PickleField::from_py(&items[4])?,
+        )
+        .ok()?;
+        ProbitFitted::from_parts(
+            input,
+            PickleField::from_py(&items[5])?,
+            PickleField::from_py(&items[6])?,
+        )
+        .ok()
+    }
+}
+
+crate::shared::pickle::impl_pickle_state!(ProbitResult {
+    params,
+    std_errors,
+    test_stats,
+    stat_dist,
+    stat_df,
+    p_values,
+    conf_lower,
+    conf_upper,
+    param_names,
+    dep_var_name,
+    log_likelihood,
+    log_likelihood_null,
+    lr_statistic,
+    lr_p_value,
+    lr_df,
+    pseudo_r_squared,
+    aic,
+    bic,
+    n_obs,
+    df_model,
+    df_resid,
+    converged,
+    n_iter,
+    cov_type,
+    solver,
+    fitted,
+    source_data,
+});
 
 // `#[pymethods]`ブロックの外に置く非公開実装（`LogitResult`と同じ理由）。
 impl ProbitResult {
@@ -338,8 +408,8 @@ impl ProbitResult {
         select_model_x_columns(
             new_data,
             "new_data",
-            &self.param_names,
-            self.estimator.input().has_intercept(),
+            self.fitted.input().param_names(),
+            self.fitted.input().has_intercept(),
             0,
         )
     }
@@ -347,21 +417,25 @@ impl ProbitResult {
     /// `predict()`/`augment()`のSome分岐で共有する、`df`に対するout-of-sample予測
     /// （`x`列の抽出→`predict_new_data`呼び出し）。
     fn predict_for(&self, df: &DataFrame) -> PyResult<Vec<f64>> {
-        let has_intercept = self.estimator.input().has_intercept();
+        let has_intercept = self.fitted.input().has_intercept();
         let x_columns = extract_model_x_columns(
             df,
-            &self.param_names,
+            self.fitted.input().param_names(),
             has_intercept,
             0,
             ColumnSource::new("x", "new_data"),
         )?;
 
-        Ok(self.estimator.predict_new_data(&x_columns))
+        Ok(self.fitted.predict_new_data(&x_columns))
     }
 }
 
 #[pymethods]
 impl ProbitResult {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
+
     /// Predicted probabilities for the training data used in `fit()`, or for
     /// `new_data` when given.
     ///
@@ -373,7 +447,7 @@ impl ProbitResult {
     fn predict(&self, new_data: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<f64>> {
         guard(|| {
             let Some(new_data) = new_data else {
-                return Ok(self.estimator.predict());
+                return Ok(self.fitted.predict());
             };
 
             let selected = self.select_new_data(new_data)?;
@@ -402,7 +476,7 @@ impl ProbitResult {
                     let probability = self.predict_for(&selected.frame)?;
                     (new_data.clone(), probability)
                 }
-                None => (self.source_data.bind(py).clone(), self.estimator.predict()),
+                None => (self.source_data.bind(py).clone(), self.fitted.predict()),
             };
 
             append_predicted_column(&source, "predicted_probability", probability)
@@ -418,7 +492,7 @@ impl ProbitResult {
     /// Out-of-sample data is not yet supported (same limitation as `predict()`).
     #[pyo3(signature = (threshold=0.5))]
     fn pred_table(&self, threshold: f64) -> PyResult<Vec<Vec<f64>>> {
-        guard(|| Ok(mat_to_nested_vec(&self.estimator.pred_table(threshold))))
+        guard(|| Ok(mat_to_nested_vec(&self.fitted.pred_table(threshold))))
     }
 
     /// Marginal effects (`dy/dx`) with delta-method standard errors.
@@ -442,7 +516,7 @@ impl ProbitResult {
             let at = parse_marginal_effects_at(&at)?;
             // 推定量だけを使う純Rustの計算なので、GILを手放して走らせる。
             let effects = py
-                .detach(|| self.estimator.marginal_effects(at, confidence_level))
+                .detach(|| self.fitted.marginal_effects(at, confidence_level))
                 .map_err(mle_error_to_pyerr)?;
 
             Ok(MarginalEffectsResult {
@@ -576,7 +650,7 @@ fn fit_frame(
         n_iter: estimator.n_iter(),
         cov_type: cov_type_lower,
         solver: solver_name(solver).to_string(),
-        estimator,
+        fitted: estimator.into_fitted(),
         source_data: source,
     })
 }

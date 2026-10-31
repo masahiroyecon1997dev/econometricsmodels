@@ -32,9 +32,11 @@
 //! 単純にする方を優先した設計判断）。
 //!
 //! `IVResult`は元々`estimator: TwoSlsEstimator`という2SLS専用の非公開フィールドで
-//! `first_stage()`を実装していたが、GMM配線にあたり`first_stage: Vec<(String,
-//! OlsEstimator)>`という`estimator`非依存の表現に置き換えた（`OlsEstimator → OLSResult`
-//! 変換は`linear::ols::ols_estimator_to_result`を再利用、抽出済み）。
+//! `first_stage()`を実装していたが、GMM配線にあたり`estimator`非依存の表現に置き換え、
+//! pickle対応にあたり、`fit`が第一段階の`OlsEstimator`（設計行列を持つ）を`OLSResult`へ
+//! 変換して`first_stage: Vec<(String, OLSResult)>`として保持する形にした（変換は
+//! `linear::ols::ols_estimator_to_result`を再利用、抽出済み）。`first_stage()`は`clone_ref`で
+//! 複製して返すだけで、pickleでは各`OLSResult`がそのまま状態に入る。
 //!
 //! ## GMMの`gmm_weight_type`（`IVOptions.gmm_weight_type`/`cluster`/`hac_lags`/`hac_time`）
 //!
@@ -60,8 +62,8 @@ use engine::iv::common::{
 use engine::iv::gmm::{GmmEstimator, GmmType, WeightType};
 use engine::iv::two_sls::TwoSlsEstimator;
 use engine::linear::ols::CovType as EngineCovType;
-use engine::linear::ols::OlsEstimator;
 use polars::prelude::DataFrame;
+use pyo3::IntoPyObjectExt;
 use pyo3::prelude::*;
 
 use crate::linear::common::{CovKind, parse_cov_kind, require_hac_time, resolve_cov_type};
@@ -378,11 +380,10 @@ impl IVOptions {
 /// 実装済み）。`predict()`/`marginal_effects()`用に`LogitResult`/
 /// `ProbitResult`が推定量そのものを非公開フィールド`estimator`として保持するのと同じ
 /// パターンだが、`IVResult`は`estimator`（2sls/gmm）非依存の非公開フィールド`first_stage:
-/// Vec<(String, OlsEstimator)>`から`first_stage()`をオンデマンドに構築する（下記
-/// `first_stage`フィールド参照。当初は`estimator: TwoSlsEstimator`という2sls専用の
-/// フィールドだったが、GMM配線時にestimator非依存の表現へ置き換えた——`engine::iv::common::
-/// compute_first_stage`が`estimator`によらず同じ第一段階回帰を計算するため、`fit`の
-/// 呼び出し元でこの表現に詰め替えるだけで済む）。
+/// Vec<(String, OLSResult)>`から`first_stage()`を構築する（下記`first_stage`フィールド参照。
+/// 当初は`estimator: TwoSlsEstimator`という2sls専用のフィールドだったが、GMM配線時に
+/// estimator非依存の表現へ置き換えた——`engine::iv::common::compute_first_stage`が
+/// `estimator`によらず同じ第一段階回帰を計算するため、`fit`でこの表現に詰め替えるだけで済む）。
 ///
 /// `fit_iv` (`fit` in this file) constructs and returns it. The core fields above are
 /// populated by `TwoSlsEstimator` (`estimator="2sls"`) or `GmmEstimator` (`estimator="gmm"`).
@@ -399,9 +400,8 @@ impl IVOptions {
 // 受け取ることは想定していないため`skip_from_py_object`（`IVOptions`の`from_py_object`とは
 // 対照的、`OLSResult`/`LogitResult`と同じ理由）。
 //
-// `Clone`を派生しない: `first_stage`の要素`OlsEstimator`が`Clone`を実装していないため
-// （`LogitResult`/`ProbitResult`と同じ理由、`.claude/rules/rust-style.md`「推定量構造体の
-// 設計」の通りprivateフィールドのみで、Cloneを要求する既存の呼び出し元も無い）。
+// `Clone`を派生しない: `first_stage`の要素`OLSResult`が、GILなしでは複製できない`Py<PyAny>`
+// （`source_data`）を持つため`Clone`を実装していない。複製が要るときは`OLSResult::clone_ref`を使う。
 #[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug)]
 pub struct IVResult {
@@ -550,11 +550,79 @@ pub struct IVResult {
     /// `has_intercept`、`LogitResult`/`ProbitResult`の`estimator`と同じ位置づけ）。
     /// `estimator`非依存（`engine::iv::common::compute_first_stage`から構築、モジュール
     /// docコメント参照）。
-    first_stage: Vec<(String, OlsEstimator)>,
+    first_stage: Vec<(String, OLSResult)>,
 }
+
+// 第一段階の結果（`OLSResult`）は、それぞれの`__reduce__`でpickleされるオブジェクトとして状態に入れる。
+impl crate::shared::pickle::PickleField for Vec<(String, OLSResult)> {
+    fn to_py<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let items = self
+            .iter()
+            .map(|(name, result)| Ok((name.clone(), Py::new(py, result.clone_ref(py))?)))
+            .collect::<PyResult<Vec<_>>>()?;
+        items.into_bound_py_any(py)
+    }
+
+    fn from_py(obj: &Bound<'_, PyAny>) -> Option<Self> {
+        let items: Vec<(String, Bound<'_, PyAny>)> = obj.extract().ok()?;
+        items
+            .into_iter()
+            .map(|(name, item)| {
+                let result = item.cast::<OLSResult>().ok()?.try_borrow().ok()?;
+                Some((name, result.clone_ref(obj.py())))
+            })
+            .collect()
+    }
+}
+
+crate::shared::pickle::impl_pickle_state!(IVResult {
+    params,
+    std_errors,
+    test_stats,
+    stat_dist,
+    stat_df,
+    p_values,
+    conf_lower,
+    conf_upper,
+    param_names,
+    residuals,
+    dep_var_name,
+    n_obs,
+    df_resid,
+    df_model,
+    converged,
+    n_iter,
+    cov_type,
+    hac_lags_used,
+    estimator,
+    gmm_weight_type,
+    gmm_type,
+    wald_statistic,
+    wald_p_value,
+    wald_dist,
+    wald_df_num,
+    wald_df_denom,
+    r_squared,
+    adj_r_squared,
+    weak_instrument_f_statistics,
+    weak_instrument_f_df_num,
+    weak_instrument_f_df_denom,
+    overid_statistic,
+    overid_p_value,
+    overid_df,
+    wu_hausman_statistic,
+    wu_hausman_p_value,
+    wu_hausman_df_num,
+    wu_hausman_df_denom,
+    first_stage,
+});
 
 #[pymethods]
 impl IVResult {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
+
     /// Per-endogenous-variable first-stage regression results
     /// (`x_endog[i] ~ x_exog + instruments`), keyed by the endogenous variable name.
     ///
@@ -565,17 +633,12 @@ impl IVResult {
     /// F-statistic (`weak_instrument_f_statistics`, computed separately).
     /// Computed the same way for both `estimator="2sls"` and `estimator="gmm"` (module
     /// docstring参照).
-    fn first_stage(&self) -> PyResult<HashMap<String, OLSResult>> {
+    fn first_stage(&self, py: Python<'_>) -> PyResult<HashMap<String, OLSResult>> {
         guard(|| {
             Ok(self
                 .first_stage
                 .iter()
-                .map(|(name, estimator)| {
-                    (
-                        name.clone(),
-                        ols_estimator_to_result(estimator, self.cov_type.clone()),
-                    )
-                })
+                .map(|(name, result)| (name.clone(), result.clone_ref(py)))
                 .collect())
         })
     }
@@ -1181,6 +1244,15 @@ fn fit_frame(
     let weak_instrument_f_df = first_stage.first().map(|(_, first_stage_estimator)| {
         (input.k_instruments(), first_stage_estimator.df_resid())
     });
+    // 第一段階の推定量（設計行列を持つ）は結果に変えて手放す。`IVResult`が持つのは結果だけで、
+    // `first_stage()`の戻り値にも、pickleの状態にもそのまま使える。
+    let first_stage: Vec<(String, OLSResult)> = first_stage
+        .into_iter()
+        .map(|(name, estimator)| {
+            let result = ols_estimator_to_result(&estimator, cov_type_lower.clone());
+            (name, result)
+        })
+        .collect();
 
     if let Some(gmm) = plan.gmm {
         let estimator = GmmEstimator::fit(

@@ -29,7 +29,8 @@ use engine::nonlinear::common::{
     CovType as EngineCovType, MleFitOptions, SolverType as EngineSolverType,
 };
 use engine::nonlinear::tobit::{
-    CensoringFitCategory, CensoringFitCheck, MarginalEffectsTarget, TobitEstimator, TobitInput,
+    CensoringFitCategory, CensoringFitCheck, MarginalEffectsTarget, TobitEstimator, TobitFitted,
+    TobitInput,
 };
 use engine::shared::error_catalog::ErrorCode;
 use polars::prelude::DataFrame;
@@ -300,7 +301,7 @@ impl TobitOptions {
 /// Tobit (no closed form exists under censoring; `wald_statistic`/`wald_p_value` provide the
 /// overall model significance test instead, see `docs/spec/nonlinear-common.md` section 5).
 // `LogitResult`と同じ理由で`skip_from_py_object`・フィールドごとの個別`#[pyo3(get)]`・
-// `Clone`非導出（`estimator: TobitEstimator`が`Clone`を実装していないため）。
+// `Clone`非導出（`fitted: TobitFitted`が`Clone`を実装していないため）。
 #[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug)]
 pub struct TobitResult {
@@ -377,13 +378,91 @@ pub struct TobitResult {
     #[pyo3(get)]
     pub upper: Option<f64>,
     /// Not exposed to Python; only `predict`/`marginal_effects`/`censoring_fit_check`
-    /// read it (`LogitResult`の`estimator`と同じ位置づけ)。
-    estimator: TobitEstimator,
+    /// read it (`LogitResult`の`fitted`と同じ位置づけ)。
+    fitted: TobitFitted,
     /// The `polars.DataFrame` passed to `fit()`, as given. `augment(new_data=None)` appends
     /// the predicted column to it, so every column is kept, including the ones the model
     /// does not read.
     source_data: Py<PyAny>,
 }
+
+// 入力データ（`y`・`x`・列名・切片の有無・打ち切り境界）・係数・`σ`・`(β, σ)`の分散共分散行列のタプル。復元は
+// `from_design`/`from_parts`を通して次元と境界の整合を検査する（不整合なら`PICKLE_FORMAT_MISMATCH`）。
+impl crate::shared::pickle::PickleField for TobitFitted {
+    fn to_py<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        use crate::shared::pickle::to_tuple;
+        let input = self.input();
+        to_tuple(
+            py,
+            vec![
+                input.y().to_py(py)?,
+                input.x().to_py(py)?,
+                input.param_names().to_vec().to_py(py)?,
+                input.dep_var_name().to_string().to_py(py)?,
+                input.has_intercept().to_py(py)?,
+                input.lower().to_py(py)?,
+                input.upper().to_py(py)?,
+                self.params().to_vec().to_py(py)?,
+                self.sigma().to_py(py)?,
+                self.cov_params().to_py(py)?,
+            ],
+        )
+    }
+
+    fn from_py(obj: &Bound<'_, PyAny>) -> Option<Self> {
+        use crate::shared::pickle::{PickleField, from_tuple};
+        let items = from_tuple(obj, 10)?;
+        let input = TobitInput::from_design(
+            PickleField::from_py(&items[0])?,
+            PickleField::from_py(&items[1])?,
+            PickleField::from_py(&items[2])?,
+            PickleField::from_py(&items[3])?,
+            PickleField::from_py(&items[4])?,
+            PickleField::from_py(&items[5])?,
+            PickleField::from_py(&items[6])?,
+        )
+        .ok()?;
+        TobitFitted::from_parts(
+            input,
+            PickleField::from_py(&items[7])?,
+            PickleField::from_py(&items[8])?,
+            PickleField::from_py(&items[9])?,
+        )
+        .ok()
+    }
+}
+
+crate::shared::pickle::impl_pickle_state!(TobitResult {
+    params,
+    std_errors,
+    test_stats,
+    stat_dist,
+    stat_df,
+    p_values,
+    conf_lower,
+    conf_upper,
+    param_names,
+    dep_var_name,
+    sigma,
+    log_likelihood,
+    aic,
+    bic,
+    n_obs,
+    df_model,
+    df_resid,
+    wald_statistic,
+    wald_p_value,
+    wald_dist,
+    wald_df,
+    converged,
+    n_iter,
+    cov_type,
+    solver,
+    lower,
+    upper,
+    fitted,
+    source_data,
+});
 
 // `#[pymethods]`ブロックの外に置く非公開実装（`LogitResult`と同じ理由）。
 impl TobitResult {
@@ -392,27 +471,29 @@ impl TobitResult {
         select_model_x_columns(
             new_data,
             "new_data",
-            &self.param_names,
-            self.estimator.input().has_intercept(),
-            1,
+            self.fitted.input().param_names(),
+            self.fitted.input().has_intercept(),
+            0,
         )
     }
 
     /// `predict()`/`augment()`のSome分岐で共有する、`df`に対するout-of-sample予測
     /// （`x`列の抽出→`predict_new_data`呼び出し）。`x`の列名はLogit/Probitと異なり
-    /// `param_names`の先頭`"const"`（`has_intercept`時）と末尾`"sigma"`の両方を
-    /// 除いた部分（モジュールdocコメント参照）。
+    /// `fitted`の係数名（`σ`を含まない。結果の`param_names`は末尾に`"sigma"`を足した別の値）の
+    /// 先頭`"const"`（`has_intercept`時）を除いた部分（モジュールdocコメント参照）。結果側の
+    /// `param_names`ではなく`fitted`の名前を使うので、pickleから復元した状態でも両者の食い違いで
+    /// 列数が合わなくならない。
     fn predict_for(&self, target: MarginalEffectsTarget, df: &DataFrame) -> PyResult<Vec<f64>> {
-        let has_intercept = self.estimator.input().has_intercept();
+        let has_intercept = self.fitted.input().has_intercept();
         let x_columns = extract_model_x_columns(
             df,
-            &self.param_names,
+            self.fitted.input().param_names(),
             has_intercept,
-            1,
+            0,
             ColumnSource::new("x", "new_data"),
         )?;
 
-        self.estimator
+        self.fitted
             .predict_new_data(target, &x_columns)
             .map_err(mle_error_to_pyerr)
     }
@@ -420,6 +501,10 @@ impl TobitResult {
 
 #[pymethods]
 impl TobitResult {
+    fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
+        crate::shared::pickle::reduce(slf)
+    }
+
     /// Predicted values for the training data used in `fit()`, or for `new_data`
     /// when given.
     ///
@@ -442,7 +527,7 @@ impl TobitResult {
         guard(|| {
             let target = parse_marginal_effects_target(&target)?;
             let Some(new_data) = new_data else {
-                return self.estimator.predict(target).map_err(mle_error_to_pyerr);
+                return self.fitted.predict(target).map_err(mle_error_to_pyerr);
             };
 
             let selected = self.select_new_data(new_data)?;
@@ -486,7 +571,7 @@ impl TobitResult {
                 }
                 None => (
                     self.source_data.bind(py).clone(),
-                    self.estimator
+                    self.fitted
                         .predict(target_enum)
                         .map_err(mle_error_to_pyerr)?,
                 ),
@@ -530,10 +615,7 @@ impl TobitResult {
             let target = parse_marginal_effects_target(&target)?;
             // 推定量だけを使う純Rustの計算なので、GILを手放して走らせる。
             let effects = py
-                .detach(|| {
-                    self.estimator
-                        .marginal_effects(at, target, confidence_level)
-                })
+                .detach(|| self.fitted.marginal_effects(at, target, confidence_level))
                 .map_err(mle_error_to_pyerr)?;
 
             Ok(MarginalEffectsResult {
@@ -560,7 +642,7 @@ impl TobitResult {
     fn censoring_fit_check(&self) -> PyResult<CensoringFitCheckResult> {
         guard(|| {
             Ok(censoring_fit_check_to_result(
-                self.estimator.censoring_fit_check(),
+                self.fitted.censoring_fit_check(),
             ))
         })
     }
@@ -853,7 +935,7 @@ fn fit_frame(
         solver: solver_name(solver).to_string(),
         lower: options.lower,
         upper: options.upper,
-        estimator,
+        fitted: estimator.into_fitted(),
         source_data: source,
     })
 }

@@ -19,7 +19,7 @@
 //! （`*Options`のコンストラクタを通さない）。pickleは信頼できる入力にだけ使う前提で、不正な値のオプションは
 //! `fit()`が通常どおり検査し、`ValidationError`にする。
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use engine::shared::error_catalog::{ErrorCode, ParamValue};
 use pyo3::IntoPyObjectExt;
@@ -76,6 +76,7 @@ plain_pickle_field!(
     Vec<String>,
     (f64, f64),
     BTreeMap<String, f64>,
+    HashMap<String, f64>,
 );
 
 impl PickleField for Vec<f64> {
@@ -102,6 +103,57 @@ impl PickleField for Vec<f64> {
                 .collect()
         })
     }
+}
+
+/// 行列は`(行数, 列数, 列優先のf64のバイト列)`。形が`行数×列数`と合わないものは拒否する。
+impl PickleField for faer::Mat<f64> {
+    fn to_py<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let (nrows, ncols) = (self.nrows(), self.ncols());
+        // 一時の`Vec`を作らず、`bytes`のバッファへ列ごとに直接書き込む。
+        let bytes = PyBytes::new_with(py, nrows * ncols * size_of::<f64>(), |buf| {
+            let (cells, _) = buf.as_chunks_mut::<{ size_of::<f64>() }>();
+            if nrows > 0 {
+                for (j, column) in cells.chunks_mut(nrows).enumerate() {
+                    for (i, cell) in column.iter_mut().enumerate() {
+                        *cell = self.get(i, j).to_le_bytes();
+                    }
+                }
+            }
+            Ok(())
+        })?;
+        (nrows, ncols, bytes).into_bound_py_any(py)
+    }
+
+    fn from_py(obj: &Bound<'_, PyAny>) -> Option<Self> {
+        let (nrows, ncols, bytes) = obj.extract::<(usize, usize, Bound<'_, PyAny>)>().ok()?;
+        let bytes = bytes.cast::<PyBytes>().ok()?.as_bytes();
+        // 形が`行数×列数`のf64と一致しないものは拒否する（掛け算のオーバーフローも拒否）。
+        let expected = nrows.checked_mul(ncols)?.checked_mul(size_of::<f64>())?;
+        if bytes.len() != expected {
+            return None;
+        }
+        let (cells, _) = bytes.as_chunks::<{ size_of::<f64>() }>();
+        Some(faer::Mat::from_fn(nrows, ncols, |i, j| {
+            f64::from_le_bytes(cells[j * nrows + i])
+        }))
+    }
+}
+
+/// 複数の値を1つのタプルにまとめる（入れ子の状態を`PickleField`にするとき用）。
+pub(crate) fn to_tuple<'py>(
+    py: Python<'py>,
+    items: Vec<Bound<'py, PyAny>>,
+) -> PyResult<Bound<'py, PyAny>> {
+    Ok(PyTuple::new(py, items)?.into_any())
+}
+
+/// [`to_tuple`]の逆。長さが`len`のタプルでなければ`None`。
+pub(crate) fn from_tuple<'py>(
+    obj: &Bound<'py, PyAny>,
+    len: usize,
+) -> Option<Vec<Bound<'py, PyAny>>> {
+    let tuple = obj.cast::<PyTuple>().ok()?;
+    (tuple.len() == len).then(|| tuple.iter().collect())
 }
 
 impl<T: PickleField> PickleField for Option<T> {

@@ -465,6 +465,75 @@ crate::shared::pickle::impl_pickle_state!(OLSResult {
     source_data,
 });
 
+impl OLSResult {
+    /// 全フィールドの複製（`source_data`は同じDataFrameへの参照を増やすだけで、データはコピーしない）。
+    /// `Py<PyAny>`は`Clone`を実装しない（参照カウントの増加にGILが要る）ため`#[derive(Clone)]`ではなく、
+    /// `IVResult`が保持する第一段階の結果から`first_stage()`の戻り値を作るのに使う。
+    /// フィールドは分割代入で網羅するので、足し忘れはコンパイルエラーになる。
+    pub(crate) fn clone_ref(&self, py: Python<'_>) -> Self {
+        let Self {
+            params,
+            std_errors,
+            test_stats,
+            stat_dist,
+            stat_df,
+            p_values,
+            conf_lower,
+            conf_upper,
+            param_names,
+            residuals,
+            dep_var_name,
+            n_obs,
+            cov_type,
+            hac_lags_used,
+            r_squared,
+            adj_r_squared,
+            f_statistic,
+            f_p_value,
+            f_df_num,
+            f_df_denom,
+            df_resid,
+            df_model,
+            log_likelihood,
+            aic,
+            bic,
+            fitted_values,
+            has_intercept,
+            source_data,
+        } = self;
+        Self {
+            params: params.clone(),
+            std_errors: std_errors.clone(),
+            test_stats: test_stats.clone(),
+            stat_dist: stat_dist.clone(),
+            stat_df: *stat_df,
+            p_values: p_values.clone(),
+            conf_lower: conf_lower.clone(),
+            conf_upper: conf_upper.clone(),
+            param_names: param_names.clone(),
+            residuals: residuals.clone(),
+            dep_var_name: dep_var_name.clone(),
+            n_obs: *n_obs,
+            cov_type: cov_type.clone(),
+            hac_lags_used: *hac_lags_used,
+            r_squared: *r_squared,
+            adj_r_squared: *adj_r_squared,
+            f_statistic: *f_statistic,
+            f_p_value: *f_p_value,
+            f_df_num: *f_df_num,
+            f_df_denom: *f_df_denom,
+            df_resid: *df_resid,
+            df_model: *df_model,
+            log_likelihood: *log_likelihood,
+            aic: *aic,
+            bic: *bic,
+            fitted_values: fitted_values.clone(),
+            has_intercept: *has_intercept,
+            source_data: source_data.as_ref().map(|data| data.clone_ref(py)),
+        }
+    }
+}
+
 // `#[pymethods]`ブロックの外に置く非公開実装（pyo3は`#[pymethods]`内の全メソッドを
 // Python公開シグネチャとして扱おうとするため、`&DataFrame`のような`FromPyObject`
 // 未実装の型を引数に取るヘルパーはこちらに置く必要がある）。

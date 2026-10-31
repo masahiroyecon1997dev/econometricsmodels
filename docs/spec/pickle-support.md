@@ -53,12 +53,41 @@ pickleは永続化形式ではない。パッケージの版をまたぐ互換�
 `__reduce__`は値のコピーと変換だけでpanicしうる処理を持たないため、`error-handling.md`の方針どおり
 `guard`で包まない（`_restore_pickled`は`#[pyfunction]`なので包む）。
 
-## 対象の範囲と今後
+## estimatorを持つ結果（Logit・Probit・Tobit・FE・IV）
 
-- 実装済み: 全`*Options`、`OLSResult`・`WLSResult`・`REResult`、`MarginalEffectsResult`、
-  `CensoringFitCategoryResult`・`CensoringFitCheckResult`。
-- 未対応: `LogitResult`・`ProbitResult`・`TobitResult`・`FEResult`・`IVResult`。`engine`の推定量
-  （`LogitEstimator`・`FeEstimator`・`OlsEstimator`等）を非公開フィールドで持つ。推定量はフィールドが
-  非公開で`Clone`もserdeも無く、設計行列・共分散行列・グループコード等を保持する。方式は別途設計する
-  （推定量の検証済みの状態を保証する原則とどう両立するか、再推定の計算コスト、pickleサイズ）。
-- `tests/cross_method/test_pickle.py`の`PENDING`が未対応クラスの一覧で、対応したら外して`SAMPLES`に足す。
+結果クラスが`engine`の推定量（`LogitEstimator`・`FeEstimator`・`OlsEstimator`等）を持つと、フィールドが非公開で
+`Clone`もserdeも無いため、そのままは運べない。メソッドが実際に読む状態は小さいので、推定量そのものではなく
+その状態だけを持つ形にした。
+
+- **Logit・Probit・Tobit**: `engine`に最小の状態型（`LogitFitted`・`ProbitFitted`・`TobitFitted`）を設け、
+  `predict`・`pred_table`・`marginal_effects`・`censoring_fit_check`の実装をそこへ移した（推定量は委譲するだけ）。
+  状態は入力データ（`y`・`x`・係数名・切片の有無。Tobitは打ち切り境界も）・係数・分散共分散行列（Tobitは`σ`も）。
+  標準誤差や適合度統計量は結果クラスに値のコピーがある。結果は`fit`の末尾で`estimator.into_fitted()`を受け取り、
+  推定量全体は持たない。復元は`TobitInput::from_design`等と`from_parts`を通す。「推定量は検証済みの状態を保証する」
+  原則とは、フィールドを非公開のまま、構築経路を`fit`と`from_parts`の2つに限り、`from_parts`が次元の整合
+  （行数・列数・係数名・`σ`が正の有限値・境界の順序）を検査することで両立させる。最適性（収束していること）は
+  再検証できないので、検査しない。
+- **FE**: 固定効果（`FixedEffects`、エンティティ数に比例する辞書）を状態に持つ。`fit()`では計算せず、初回の
+  `fixed_effects()`かpickle時に推定量から計算して保持する（使わない利用者の`fit()`の速度を変えないため）。復元した
+  結果は推定量を持たず、計算済みの固定効果だけを持つ。
+- **IV**: 第一段階の`OlsEstimator`（設計行列を持つ）を、`fit`で`OLSResult`へ変換して保持する。`first_stage()`は
+  `OLSResult::clone_ref`で複製して返し、pickleでは各`OLSResult`がそのまま状態に入る。設計行列を手放すので、
+  メモリは減る。
+
+却下した案: 復元時に`source_data`から再推定する（毎回の推定コストがかかる。FE・REの結果と、IVの`first_stage()`
+由来の結果は元のデータを持たず使えない）、serdeを`engine`に導入する（依存が増え、非公開フィールドの扱いが複雑）、
+推定量の全フィールドを復元する（結果クラスに値のコピーがあり二重管理になる）。
+
+サイズと時間: Logit・Probit・Tobitは、設計行列と`y`を状態に直接入れるので、pickleは`source_data`（元のDataFrame）と
+合わせて元のデータの約2倍になる。`source_data`から`y`・`x`を再構築する方式でさらに小さくできるが、まず直接入れる
+方式にした（再構築は列抽出の再実行だけで再推定は要らない。必要になったら検討する）。n=1,000,000・k=5のLogitで、pickleは約104 MB（元のDataFrame 48 MB、設計行列 48 MB、`y` 8 MB）。`copy.copy`も設計行列のバイト列を作る。
+
+FEは、`pickle`・`copy`のたびに固定効果を計算する（まだ計算していなければ。エンティティ数に比例する）。利用者が`fixed_effects()`を一度も呼んでいなくても起きる。IVは、`fit`のたびに内生変数の数だけ第一段階を`OLSResult`へ変換する（残差と近似値の`Vec`を作る）。設計行列を手放せるので、メモリは減る。
+
+結果側の`param_names`と`fitted`の係数名は二重に持つが、`predict()`等の列の取り出しは`fitted`の名前を使うので、食い違った状態から添字の範囲外は起きない。
+
+## 対象の範囲
+
+全ての`*Options`・`*Result`と、`MarginalEffectsResult`・`CensoringFitCategoryResult`・`CensoringFitCheckResult`が対象。
+`tests/cross_method/test_pickle.py`の`SAMPLES`が対象クラスの一覧で、`_lib`の`#[pyclass]`が`SAMPLES`か内部の型
+（`TRANSIENT`）のどちらにも無いと落ちる。

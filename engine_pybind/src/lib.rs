@@ -362,9 +362,9 @@ fn _restore_pickled(
             .map_err(|_| mismatch())?;
         restore_by_kind!(
             kind_name.as_str(), py, state, mismatch();
-            OLSOptions, OLSResult, WLSOptions, WLSResult, LogitOptions, MarginalEffectsResult,
-            ProbitOptions, TobitOptions, CensoringFitCategoryResult, CensoringFitCheckResult,
-            IVOptions, FEOptions, REOptions, REResult,
+            OLSOptions, OLSResult, WLSOptions, WLSResult, LogitOptions, LogitResult, MarginalEffectsResult,
+            ProbitOptions, ProbitResult, TobitOptions, TobitResult, CensoringFitCategoryResult, CensoringFitCheckResult,
+            IVOptions, IVResult, FEOptions, FEResult, REOptions, REResult,
         )
     })
 }

@@ -2,6 +2,12 @@
 
 このファイルは `engine/src/nonlinear/` 配下のファイルを読み書きするときだけ自動ロードされる。ここに書くのは「削除するとClaudeが同じ間違いを繰り返す」レベルの既知の罠のみ。設計の背景・数式の導出は `docs/spec/logit-spec.md` / `docs/spec/probit-spec.md` / `docs/spec/tobit-spec.md` が正本（このファイルはその要約ではなく差分の索引）。
 
+## `*Estimator`と`*Fitted`（予測・限界効果に必要な最小の状態）
+
+`LogitEstimator`/`ProbitEstimator`/`TobitEstimator`は、入力データ・係数（Tobitは`σ`も）・係数の分散共分散行列を`fitted: *Fitted`として持つ。`predict`・`predict_new_data`・`pred_table`・`marginal_effects`・`censoring_fit_check`の実装は`*Fitted`にあり、`*Estimator`の同名メソッドは委譲するだけ（公開APIは変えていない）。標準誤差・適合度統計量・収束情報は`*Estimator`だけが持つ。`engine_pybind`の結果は`fit`の末尾で`into_fitted()`を受け取り、推定量全体を持たない。
+
+`*Fitted`はpickleの復元でも使うので、`from_design`（`*Input`。次元・係数名・打ち切り境界の整合）と`from_parts`（`*Fitted`。次元の整合、Tobitは`σ`が正の有限値）で組み立てられる。これは「推定量はコンストラクタで検証済みの状態を保証する」原則との両立のため: フィールドはprivateのまま、構築経路は`fit`と`from_parts`の2つだけ。**最適性（収束したこと）と`params`・`cov_params`の値の有限性は検査しない**（`fit`が作った状態であることは呼び出し側が保証する）。エラーは`CommonError::Internal`だが、`fit`が作った状態では起きず、壊れたpickleだけが到達する入力エラーで、`engine_pybind`が`PICKLE_FORMAT_MISMATCH`に変換する。**新しいMLE手法で`predict`等を持つときは、同じ形で`*Fitted`に実装を置くこと**（`docs/spec/pickle-support.md`）。
+
 ## 踏んだ罠（再発防止）
 
 - **多重共線性（設計行列のランク落ち）の検出は `fit()` 冒頭の列ピボットQRランクチェックに一本化**: Logit/Probit/Tobit の `fit()` は `solver`（newton/bfgs/lbfgs）に関わらず、`run_solver` を呼ぶ前に `nonlinear::common::checked_design_matrix_qr(x_std, x, names)` を必ず通し、ランク落ちを `MleError::SingularDesignMatrix`（→ `ComputationError`）で弾く。**新しい MLE 手法の `fit()` を足したら、`standardize_columns`（または手法固有のスケーリング）後・`run_solver` 前にこの呼び出しを入れること**。**共線な列の特定（報告する`columns`）は標準化後の `x_std` ではなく標準化前の `x` で行う**: 切片ありの標準化は非切片列の平均を引くため、`x_std` ではダミー変数の罠・定数列が切片を含まない形（`d1, d2` や `c`）に見えて、他の手法と報告が食い違う（`checked_design_matrix_qr_reports_the_intercept_for_collinearity_hidden_by_centering`で固定）。Logit/Probit は QR 解を `ols_based_initial_params`（LPM の IRLS 1ステップ相当の warm start）で初期値にも使う（Tobit は `ols_initial_params` が QR 解を `β` 初期値に、残差を `σ` 初期値にする）。旧来のゼロベクトル初期値では検出経路が `solver` ごとに分かれ（newton は `newton_step` 内 QR、bfgs/lbfgs は収束後の `observed_information_cov_params`）、過去に bfgs だけ検出漏れした実バグがあった。回帰ガードは `logit.rs`/`probit.rs` の `fit_returns_singular_design_matrix_error_for_perfectly_collinear_design_matrix`、`common.rs` の `checked_design_matrix_qr_*` / `ols_based_initial_params_*`。

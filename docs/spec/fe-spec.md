@@ -2,28 +2,29 @@
 
 FE（固定効果パネル回帰、within推定）の確定済み仕様。`engine/src/panel/fe.rs`（共通基盤は
 `engine/src/panel/common.rs`）・`engine_pybind/src/panel/fe.rs`・
-`python_package/econometricsmodels/panel/fe.py`として実装済み。FE/RE共通の設計判断（`entity`/
-`time`の引数設計、結果フィールドの共通コア、`cov_type`のサポート対象・デフォルト、内部実装の
+`python_package/econometricsmodels/panel/fe.py`として実装済み。FE/RE共通の設計判断（`effects`の
+引数設計、結果フィールドの共通コア、`cov_type`のサポート対象・デフォルト、内部実装の
 共通化方針、リファレンス実装・テスト方針）は
 [`panel-common.md`](./panel-common.md)を参照し、本ドキュメントには
 FE固有の内容のみを記載する。
 
 ## 1. API引数
 
-3層構成: `FE(data, y, x, entity, options=options).fit() -> FEResults`（python_package）→
-`fit_fe(data, y, x, entity, options) -> FEResult`（engine_pybind）→ `FeEstimator::fit`
+3層構成: `FE(data, y, x, effects, options=options).fit() -> FEResults`（python_package）→
+`fit_fe(data, y, x, effects, options) -> FEResult`（engine_pybind）→ `FeEstimator::fit`
 （engine、within変換したデータを`OlsEstimator`へ委譲）。
 
-- `y: str`、`x: list[str]`はOLSと同じ。`entity: str`は独立の必須引数（`y`/`x`と同格）。
+- `y: str`、`x: list[str]`はOLSと同じ。`effects: list[str]`は独立の必須引数（`y`/`x`と同格、1〜2要素。1要素=1-way、
+  2要素=2-way。`effects[0]`が個体、`effects[1]`が時点）。3要素以上は`EFFECTS_TOO_MANY`
+  （`ValidationError`）。`FEOptions.time`は廃止した（理由は`panel-common.md`1.1節）。
 - `FEOptions`（`#[pyclass]`）:
 
   | フィールド | 型 | デフォルト | 説明 |
   |---|---|---|---|
   | `cov_type` | `str` | `"cluster"` | `"classical"` / `"hc1"`〜`"hc3"` / `"cluster"` / `"dk"`（大小無視）。OLSと異なり`"hc0"`は非対応（`FeCovType` enum自体が持たない、専用エラーメッセージで弾く） |
   | `confidence_level` | `float` | `0.95` | |
-  | `time` | `str \| None` | `None` | `Some`なら2-way（entity+time）、`None`なら1-way。固定効果の構造専用で、`cov_type="dk"`の時点列としては使われない（`dk_time`を指定する） |
-  | `cluster` | `str \| None` | `None` | `cov_type="cluster"`時のグループキー列名。省略時は`entity`をそのまま使う。他の`cov_type`で指定すると`ValidationError` |
-  | `dk_time` | `str \| None` | `None` | DK HACの時点列（`cov_type="dk"`では必須、未指定は1-way・2-wayとも`ValidationError`）。`time`とは独立で、2-wayでも常にこちらがDK計算に使われる（固定効果は四半期、DKは年次、等も指定できる）。`cov_type="dk"`以外で指定すると`ValidationError` |
+  | `cluster` | `str \| None` | `None` | `cov_type="cluster"`時のグループキー列名。省略時は`effects`の先頭の列をそのまま使う。他の`cov_type`で指定すると`ValidationError` |
+  | `dk_time` | `str \| None` | `None` | DK HACの時点列（`cov_type="dk"`では必須、未指定は1-way・2-wayとも`ValidationError`）。`effects`とは独立で、2-wayでも常にこちらがDK計算に使われる（`effects`の列は借用しない）（固定効果は四半期、DKは年次、等も指定できる）。`cov_type="dk"`以外で指定すると`ValidationError` |
   | `dk_bandwidth` | `int \| None` | `None` | DK HACのバンド幅（時点数`t`ベース、OLSの`hac_lags`とは意味が異なるため別名）。省略時は`floor(4*(t/100)^(2/9))`で自動計算。`cov_type="dk"`以外で指定すると`ValidationError` |
 
 - **`include_intercept`は無い**: withinの変換で切片が構造的に消えるため、OLS/WLS/IVと異なり
@@ -37,22 +38,23 @@ FE固有の内容のみを記載する。
   維持している（`FeEstimator::fit`は`OlsEstimator`を経由せず、0列も受理する
   `shared::least_squares::least_squares`を直接呼ぶ。RE自身の内部`OlsEstimator::fit`呼び出しは
   between回帰・最終回帰どちらも構造的にk=0にならないため無変更）。
-- 列名を受け取る引数は`entity`/`time`/`cluster`/`dk_time`のいずれも`_col`サフィックスを
+- 列名を受け取る引数は`effects`/`cluster`/`dk_time`のいずれも`_col`サフィックスを
   付けない（`y`/`x`と同じ規約）。`dk_time`は`cov_type="dk"`の値を接頭辞にした名前。
-- **2-wayはバランスパネルを必須とする**。`(entity, time)`のユニークペア数が`n_obs`と一致しない
+- **2-wayはバランスパネルを必須とする**。`(effects[0], effects[1])`のユニークペア数が`n_obs`と一致しない
   （重複・欠落がある）場合も含め`ValidationError`（`validate_balanced_panel`が
-  `n_obs == n_entities * n_periods`のカウント一致だけでなくユニークペア数も検証する。ペアの
+  `n_obs == 個体数 * 時点数`のカウント一致だけでなくユニークペア数も検証する。ペアの
   重複と欠落が相殺するケースを見逃さないため）。回避オプションは用意しない。1-wayは不均衡
   パネルもv1から無条件でサポートする。
-- **1-wayは`(entity, time)`の重複を検証しない**。1-wayには`time`列が無く、組という概念自体が
-  ないため（`entity`内の観測の並びと数だけが意味を持つ。同じ行が重複していても各行は独立な
-  観測として扱う）。`cov_type="dk"`と`dk_time`を併用する場合も、重複する`(entity, dk_time)`は
+- **1-wayは個体と時点の組の重複を検証しない**。1-wayには時点の列が無く、組という概念自体が
+  ないため（個体内の観測の並びと数だけが意味を持つ。同じ行が重複していても各行は独立な
+  観測として扱う）。`cov_type="dk"`と`dk_time`を併用する場合も、重複する`(effects[0], dk_time)`は
   検証せず、DKの時点ごとのクロスセクション和でそのまま二重に数える。重複を弾くかどうかは
   利用者側の判断とし、検証は追加しない（意図した挙動）。
 - **singletonは自動除外せず常に`ValidationError`**（`validate_no_singleton_groups_one_way`/
-  `_two_way`。within変換の前に生の`entity`/`time`列を直接見て検出し、下流の特異行列エラーと
-  して偶発的に検出される形にはしない）。2-wayはentity・time双方を対称に検出する（両方
-  該当時はentity側を報告）。
+  `_two_way`。within変換の前に生の`effects`の列を直接見て検出し、下流の特異行列エラーと
+  して偶発的に検出される形にはしない）。2-wayは個体・時点双方を対称に検出する（両方
+  該当時は個体側を報告）。エラーの`argument`は`"effects"`で、どの列かは`column`に入る
+  （`SINGLETON_GROUP`の`group`はsingletonの値）。
 - **within変換後に分散ゼロになる説明変数は`ValidationError`**（`validate_no_zero_variance_
   regressors`。時間不変変数（1-way）・2-wayでtime FEと完全共線な列を同じロジックで検出する。
   閾値は絶対値ではなく相対値: 変換前の元の列の最大絶対値×観測数×`f64::EPSILON`と比較する）。
@@ -72,21 +74,21 @@ FE固有の内容のみを記載する。
 
 `FEResult`（`#[pyclass]`）が公開する項目: `params` / `std_errors` / `test_stats`（**t検定**） /
 `p_values` / `conf_lower` / `conf_upper` / `param_names`（切片なし） / `residuals` /
-`dep_var_name` / `n_obs` / `df_resid` / `df_model` / `n_entities` / `n_periods`（2-wayのみ、1-wayは`None`） / `cov_type` / `dk_bandwidth_used` / `f_statistic` /
+`dep_var_name` / `n_obs` / `df_resid` / `df_model` / `n_groups`（`dict[str, int]`、`effects`の列名→グループ数、`effects`の順） / `cov_type` / `dk_bandwidth_used` / `f_statistic` /
 `f_p_value` / `f_df_num` / `f_df_denom`（`(k, df_resid)`、`k=0`で`f_statistic`/`f_p_value`ともども`None`） / `log_likelihood` / `aic` / `bic` / `r_squared_within` / `r_squared_between` /
 `r_squared_overall`。
 
 - **`dk_bandwidth_used`**: `cov_type="dk"`のとき実際に使われたバンド幅（`dk_bandwidth`明示指定ならその値、
   未指定なら`resolve_dk_bandwidth`が`floor(4*(t/100)^(2/9))`で解決した値、`t`は`dk_time`のユニーク数）。
   `dk`以外は`None`。OLS/IVの`hac_lags_used`とは基準が観測数`n`でなく時点数`t`のため別名にしている。
-- **`n_entities`は`FeInput::n_entities()`（engine側getter）から取得する**: `FeInput`が構築時に
-  一度だけ作ったエンティティコード（`GroupCodes`）のユニーク数をそのまま使い、`engine_pybind`側で
-  数え直さない。
-- **`n_periods`は`FeEstimator::n_periods()`（engine側getter）から取得する**: `fit`内で自由度
-  計算のために既に求めている`time`のユニーク数をそのまま保持して公開する（二重計算しない）。
-  2-wayのみ`Some`、1-way（`dk_time`のみ指定した場合を含む）は`None`。2-wayはバランスパネル
-  必須のため、ユニーク時点数と各entityの観測数は一致する（将来2-wayの不均衡パネルに対応する
-  場合は定義を再検討する）。REの`n_periods`も同じ定義（2-way REのときだけ`Some`、`re-spec.md`2章）。
+- **`n_groups`は`effects`の列名をキーにした`dict[str, int]`**（`effects`の順。one-wayは1項目、
+  two-wayは2項目）: `FEResult`は`effects`（列名）と`group_counts`（件数）を保持し、`n_groups`
+  getterで`dict`にする。1つ目は`FeInput::n_entities()`（構築時に一度だけ作ったエンティティ
+  コード`GroupCodes`のユニーク数）、2つ目は`FeEstimator::n_periods()`（`fit`内で自由度計算の
+  ために既に求めている時点のユニーク数。二重計算しない）から取る。2-wayはバランスパネル必須の
+  ため、2つ目の件数は各個体の観測数と一致する（将来2-wayの不均衡パネルに対応する場合は
+  定義を再検討する）。固定の`n_entities`/`n_periods`ではなく列名キーにした理由は
+  `panel-common.md`2.1節。REの`n_groups`も同じ定義（`re-spec.md`2章）。
 - **`estimator()`（内部委譲した`OlsEstimator`）とFE自身のgetterの使い分け**: `params`/
   `param_names`/`residuals`/`dep_var_name`/`n_obs`/`log_likelihood`は`estimator()`から、
   `std_errors`/`test_stats`/`p_values`/`conf_lower`/`conf_upper`/`df_model`/`df_resid`/
@@ -116,7 +118,7 @@ polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）�
   なく、「entityでquasi-demean（θ=1）→ その結果をtimeでquasi-demean（θ=1）」という2段階の
   `quasi_demean_column`呼び出しで実装している。バランスパネルではこの2段階が閉形式と厳密に
   一致することを導出済み（独立検算のproptestでも検証済み）。バランスパネル検証
-  （`validate_balanced_panel`）は`time`未指定なら`PanelError::TwoWayRequiresTime`。
+  （`validate_balanced_panel`）は時点のキー未指定なら`PanelError::TwoWayRequiresTime`。
 
 `FeEstimator::fit`のパイプラインは「singleton検出 → within変換（2-wayはバランスパネル検証を
 内包） → 自由度検証 → 分散ゼロ検出 → `OlsEstimator::fit`への委譲（`include_intercept=false`
@@ -127,9 +129,9 @@ polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）�
 
 ### 3.2 自由度調整
 
-- **1-way**: `df_model = k + n_entities`、`df_resid = n - df_model`。
-- **2-way**: `df_model = k + n_entities + n_periods - 1`（entity/timeダミー間の定数項ぶんの
-  重複を`+1`補正、LSDVでの有効パラメータ数が`n_entities + n_periods - 1`になることに対応）。
+- **1-way**: `df_model = k + N`（`N`=個体数）、`df_resid = n - df_model`。
+- **2-way**: `df_model = k + N + T - 1`（`T`=時点数。個体/時点ダミー間の定数項ぶんの
+  重複を`+1`補正、LSDVでの有効パラメータ数が`N + T - 1`になることに対応）。
 - `n <= df_model`は`PanelError::InsufficientDegreesOfFreedom`。`neffects>=1`のため
   `df_model>k`が恒常的に成り立ち、`OlsEstimator::fit`自身の`n<=k`チェックより常に厳格
   （FE経由でOLS側の`InsufficientObservations`が発生することは構造的にない）。
@@ -177,17 +179,17 @@ polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）�
    関数doc参照。
    **2クラスターの退化**: `G=2`かつ吸収したFE次元（常にentity、2-wayではtimeも）のいずれかで
    全水準が2つのクラスターに1観測ずつで`k >= 1`なら、`PanelError::DegenerateClusterTwoGroups`
-   として拒否する。典型例は2時点のパネルを`time`でクラスタリング（entity方向）と、2-way FEで
-   エンティティ2つのパネルをentityでクラスタリング——Clusterの既定——（time方向）。within変換は
+   として拒否する。典型例は2時点のパネルを時点の列でクラスタリング（個体方向）と、2-way FEで
+   個体2つのパネルを`effects[0]`でクラスタリング——Clusterの既定——（時点方向）。within変換は
    吸収した各次元の水準内で和をゼロにするため、そうした水準の2観測で`x̃`・`ẽ`が符号反転し
    （entity方向なら`x̃_i1 = -x̃_i2`・`ẽ_i1 = -ẽ_i2`）、クラスタースコアが`s_1 = s_2`、
    正規方程式`s_1 + s_2 = 0`と合わせて`s_1 = s_2 = 0`、共分散が恒等的にゼロになるため
    （`G > k`の検証は`k=1`で通ってしまう）。1水準でもパターンが崩れれば退化しないため通す。
 
-`cov_type`のデフォルト（`"cluster"`、entity単位）・`cluster`文字列パースは
+`cov_type`のデフォルト（`"cluster"`、`effects`の先頭の列＝個体単位）・`cluster`文字列パースは
 `engine_pybind`層の責務。`FeEstimator::fit`自体はデフォルトを持たない。**2-way FEでも
-クラスターのデフォルトはentity単位のまま**（`cluster`で上書き可能）。2-way clustering
-（entity+time同時）はv1スコープ外。
+クラスターのデフォルトは`effects[0]`（個体）単位のまま**（`cluster`で上書き可能）。2-way clustering
+（個体+時点同時）はv1スコープ外。
 
 **Driscoll-Kraay型パネルHAC（`FeCovType::Dk { bandwidth, time }`）**: カーネル本体
 （Bartlett重み・ラグ項の積算）は`linearmodels.panel.covariance.DriscollKraay`のソース
@@ -215,16 +217,16 @@ polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）�
    時間順のコード（`TimeKeys`）で渡す。辞書順を使うと、ゼロ埋めのない整数
    （`1, 10, 11, 2, ...`）等でラグ項が別の時点同士を組み合わせ、標準誤差が黙って変わる。
 4. **1-way/2-way両対応**。DKの時点列は`dk_time`（engineでは`FeCovType::Dk.time`）として
-   常に明示的に受け取る。未指定は`ValidationError`（`engine_pybind`が弾く）。2-wayの`time`は
-   借用しない。
+   常に明示的に受け取る。未指定は`ValidationError`（`engine_pybind`が弾く）。2-wayの
+   `effects[1]`は借用しない。
 5. **スケールは`(t_periods/(t_periods-1)) × ((n-1)/(n-K)) × (X̃'X̃)⁻¹ Ŝ (X̃'X̃)⁻¹`**
    （fixestの`ssc()`は時点数`t_periods`をクラスターの`G`と同じ役割で使う。`K`は
    fixestの既定`K.fixef="full"`——DKにはクラスター変数という概念が無くネスト判定
    自体が発生しないため——により常に`K=df_model`）。
 6. **`FeCovType::Dk.time`は必須で、`FeInput.time_keys()`にはフォールバックしない**: 当初は
-   `Option`で、`None`なら2-wayの`time`を暗黙に借用していたが、どの列がDKの時点かを利用者が
+   `Option`で、`None`なら2-wayの時点キーを暗黙に借用していたが、どの列がDKの時点かを利用者が
    明示しない設計は、意図と違う列が選ばれても気づけないため廃止した。`FeInput.time_keys()`は
-   2-wayの固定効果の時間次元専用で、DKの時点列とは独立。
+   2-wayの固定効果の時間次元（`effects[1]`）専用で、DKの時点列とは独立。
 7. **`bandwidth == t_periods - 1`ではfixestと一致しない（fixest側の実装誤り、本実装は
    標準のBartlettカーネルを維持）**: `bandwidth`が許容範囲`[0, t_periods)`の上限ちょうど
    のとき、fixest 0.14.2の`vcov="DK"`は最後のラグ項（`l = bandwidth`）を落とした値を
@@ -281,13 +283,15 @@ demeanしたR²」を3種とも定義すると誤る）:
   任意性が無い）。
 - **2-way**: この式をそのまま時点効果に拡張できない——`α_i`に定数`c`を足し`γ_t`から`c`を
   引いても同じ予測値になるため正規化の任意性があり、単純に両方へ当てはめると大域平均が
-  二重計上されるバグになる。採用した規約: **`time`の時間順（DKの時系列順序と同じ、
+  二重計上されるバグになる。採用した規約: **`effects[1]`の時間順（DKの時系列順序と同じ、
   上記3.）で最初の値`t_ref`を基準に`γ_{t_ref}=0`とし、`α_i`に大域的な水準を吸収させる**（Stata `areg`・R `fixest`/`lfe`等と
   同型の「片方の基準カテゴリを0にする」慣行）。**`fixest::fixef()`との数値一致は`t_ref`の
-  選び方が一致する入力に限られる**（`fixest`自身の基準時点選択は`time`列の時間順ではなく
+  選び方が一致する入力に限られる**（`fixest`自身の基準時点選択は時点列の時間順ではなく
   観測順で最初に現れた値であるため、行の並び順を変えると`fixest`側の基準時点も変わる。
   2-wayの正規化はどの`t_ref`を選んでも数学的に等価なため、本実装は`fixest`の観測順依存の
-  挙動は再現せず時間順の規約を優先する）。`fixed_effects()`の`"time"`は時間順の`dict`で返す。
+  挙動は再現せず時間順の規約を優先する）。`fixed_effects()`は常に`{列名: {水準: 効果}}`の入れ子の`dict`（one-wayも1項目の入れ子。キーは
+  `effects`の列名で、`effects`の順）で、時点側の`dict`は時間順に並べる。入れ替えると
+  キー順と基準期間が変わる（`panel-common.md`1.1節）。
 
 ### 3.6 engine_pybind: エラー変換
 
@@ -298,7 +302,7 @@ demeanしたR²」を3種とも定義すると誤る）:
 |---|---|---|
 | `Common(CommonError)` | `CommonError`と同じ | `CommonError`と同じ |
 | `InsufficientDegreesOfFreedom` | `INSUFFICIENT_DEGREES_OF_FREEDOM`（`n_effects`は1-wayで個体数、2-wayで個体数+時点数-1） | `ValidationError` |
-| `SingletonGroup` | `SINGLETON_GROUP`（`argument`は`entity`か`time`） | `ValidationError` |
+| `SingletonGroup` | `SINGLETON_GROUP`（params: `argument`=`"effects"`・`column`・`group`。`column`は`effects`の該当要素の列名で、エンジンは`with_effect_names`で受け取り計算には使わない） | `ValidationError` |
 | `UnbalancedPanelForTwoWay` | `PANEL_NOT_BALANCED_FOR_TWO_WAY` | `ValidationError` |
 | `ZeroVarianceAfterDemeaning` | `REGRESSOR_NO_WITHIN_VARIATION` | `ValidationError` |
 | `OutcomeConstantWithinEntity` | `OUTCOME_CONSTANT_WITHIN_ENTITY` | `ValidationError` |
@@ -352,7 +356,7 @@ demeanしたR²」を3種とも定義すると誤る）:
 - **不均衡パネルでの2-way FE**: 反復的な交互射影（fixest/lfe方式）が必要で、v1では扱わない
   （閉形式の二重デミーニングはバランスパネルでのみ正確なため、6.4節相当の制約として
   `ValidationError`にする）。
-- **2-way clustering（entity+time同時）**: v1スコープ外。
+- **2-way clustering（個体+時点同時）**: v1スコープ外。
 - **Driscoll-Kraay HACのカーネル拡張**: Parzen/QSカーネルへの拡張は別issue。
 - **DKの`bandwidth == t_periods - 1`（許容範囲の上限ちょうど）でfixestと数値不一致**:
   fixestの`cpp_driscoll_kraay`のoff-by-oneが原因で、本実装は標準カーネルを維持する

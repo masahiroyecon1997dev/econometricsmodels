@@ -15,7 +15,7 @@
   DataFrame, column names as strings, and an options object in; a `.fit()`
   call out, returning a result with the same accessors. One rule decides the
   layout: a required column is an argument, and an optional setting is an
-  option. Methods with extra inputs (instruments for IV, an entity column for
+  option. Methods with extra inputs (instruments for IV, the effects columns for
   panel models) add arguments, but moving from OLS to Logit, IV, or panel
   models doesn't mean learning a new interface design
   ([Arguments and options](https://masahiroyecon1997dev.github.io/econometricsmodels/guide/api-conventions/)).

@@ -16,8 +16,8 @@ A column is read in one of four roles, and each role accepts different dtypes. A
 | Role | Arguments | Accepted dtypes |
 |---|---|---|
 | Numeric value | `y`, `x`, `weight`, `x_exog`, `x_endog`, `instruments` | Integers (`Int8` to `Int128`, `UInt8` to `UInt64`; `UInt128` is not accepted in any role), floats (`Float16`, `Float32`, `Float64`), `Boolean`, `Decimal` |
-| Group identity | `entity`, `cluster` | Integers, floats, `String`, `Categorical`, `Enum`, `Boolean`, `Date`, `Datetime` (no time zone) |
-| Time period (panel) | `time` (FE, RE), `dk_time` | Integers, floats, `String`, `Categorical`, `Enum`, `Date`, `Datetime` (no time zone) |
+| Group identity | the first column of `effects` (FE, RE), `cluster` | Integers, floats, `String`, `Categorical`, `Enum`, `Boolean`, `Date`, `Datetime` (no time zone) |
+| Time period (panel) | the second column of `effects` (FE, RE, two-way), `dk_time` | Integers, floats, `String`, `Categorical`, `Enum`, `Date`, `Datetime` (no time zone) |
 | Time order (HAC) | `hac_time` | Integers, floats, `Decimal`, `Date`, `Datetime` (with or without a time zone). Not `Boolean`, which has at most two distinct values |
 
 Not accepted in a numeric role: `String`, `Categorical`, `Enum`, `Date`, `Datetime`, `Time`, `Duration`, `Binary`, `List`, `Array`, `Struct`. Also not accepted as a group identity or a time period: `Time`, `Duration`, `Decimal`, `Binary`, `List`, `Array`, `Struct`; nor, as a time period, `Boolean`. A `Datetime` with a time zone is rejected as a group identity or a time period, with a message that says how to remove the zone: convert it to the zone you want to keep, then call `.dt.replace_time_zone(None)`. (`hac_time` accepts a time zone, and is compared in its own dtype rather than converted to a float; see [Order of observations for HAC](#order-of-observations-for-hac).) A column of the `Null` dtype (every value is missing) is reported as containing missing values, not as a dtype problem.
@@ -39,7 +39,7 @@ Booleans are accepted as numbers (`True` is 1 and `False` is 0). This is conveni
 
 Numeric values are converted to 64-bit floating point before the estimation. Float16, Float32, integers up to 2^53 in absolute value, and booleans convert exactly. Other values can lose precision:
 
-- **Integers beyond 2^53** (`Int64`, `UInt64`, `Int128`) are rounded to the nearest representable float. Large identifiers stored as integers are safe as `entity` or `cluster`, which compare their text form, but not as numeric values.
+- **Integers beyond 2^53** (`Int64`, `UInt64`, `Int128`) are rounded to the nearest representable float. Large identifiers stored as integers are safe as the first column of `effects` or as `cluster`, which compare their text form, but not as numeric values.
 - **Decimals** are converted to the nearest float, so a decimal with more than about 15 significant digits is rounded.
 
 The conversion is silent. If the exact value matters, check the range of your data before estimating.
@@ -48,9 +48,9 @@ Group identity and time period columns are compared by their text form, so only 
 
 ## Order of time periods
 
-For `cov_type="dk"` (Driscoll-Kraay) in FE and RE, the periods of the `dk_time` column must be put in time order. The same order applies to the `time` column of FE and RE, which defines the time effects. The order comes from the values of the column, not from the text of the labels, so integers with different numbers of digits (`1, 2, ..., 12`), negative numbers and decimals are ordered correctly:
+For `cov_type="dk"` (Driscoll-Kraay) in FE and RE, the periods of the `dk_time` column must be put in time order. The same order applies to the second column of `effects` in FE and RE, which defines the time effects. The order comes from the values of the column, not from the text of the labels, so integers with different numbers of digits (`1, 2, ..., 12`), negative numbers and decimals are ordered correctly:
 
-| Dtype of the `dk_time` or `time` column | Order of the periods |
+| Dtype of the `dk_time` column or the second column of `effects` | Order of the periods |
 |---|---|
 | Integers, floats | Numeric, ascending |
 | `Date`, `Datetime` (no time zone) | Chronological |
@@ -59,7 +59,7 @@ For `cov_type="dk"` (Driscoll-Kraay) in FE and RE, the periods of the `dk_time` 
 
 A string or a `Categorical` has no time order of its own, so its labels are sorted as text: `"9"` comes after `"10"`, and `"Q10"` comes right after `"Q1"`. If your periods are strings, use labels whose text order is the time order (ISO 8601 dates, zero-padded numbers), or use an `Enum` with the categories listed in time order. The row order of the data does not matter.
 
-The same order applies to the two-way fixed effects returned by `fixed_effects()`: the `"time"` dictionary lists the periods in time order, and the first period is the reference with an effect of 0.
+The same order applies to the two-way fixed effects returned by `fixed_effects()`: the dictionary of the second column of `effects` lists the periods in time order, and the first period is the reference with an effect of 0.
 
 ## Argument types
 
@@ -68,8 +68,8 @@ Arguments that name columns must have the expected Python type. A mistake in the
 | Argument | Type |
 |---|---|
 | `data`, `new_data` | `polars.DataFrame` |
-| `y`, `entity`, `weight` | `str` |
-| `x`, `x_exog`, `x_endog`, `instruments` | `list` of `str` (not a `str`, a tuple, or a `polars.Series`) |
+| `y`, `weight` | `str` |
+| `x`, `x_exog`, `x_endog`, `instruments`, `effects` | `list` of `str` (not a `str`, a tuple, or a `polars.Series`) |
 | `options` | The options class of the method (for example `OLSOptions`), or omitted |
 
 ```python

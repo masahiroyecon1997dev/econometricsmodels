@@ -126,7 +126,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   （`gmm_type="iterated"`以外は収束判定を行わないため常に`converged=true`、`n_iter`は1・2）。
 - **`gmm_type`**: `estimator="gmm"`では実際に使った推定方式（小文字に正規化）、`estimator="2sls"`では常に`None`。
   `gmm_type="one_step"`では`gmm_weight_type`は使われないため結果の`gmm_weight_type`も`None`。
-- **`n_entities`は含めない**（IVはパネル構造を前提としない）。
+- **`n_groups`（FE/REの`effects`ごとのグループ数）は含めない**（IVはパネル構造を前提としない）。
 - **`log_likelihood`/`aic`/`bic`は除外する**（2SLS/GMMは尤度ベースの推定法ではなく、
   Stataの`ivregress`もデフォルトでは出力しない。正規性を仮定した疑似尤度を計算して
   OLS/FE/REと同じフィールド名で返すと、異なる推定基準の値を同列に比較できるかのように
@@ -164,7 +164,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 `classical` / `hc0`〜`hc3` / `cluster` / `hac`をサポートする。IVはパネル構造を前提としない
 ため、`hac`はOLSの実装（グローバルな時系列順序に対する通常のNewey-West型）をそのまま
 踏襲する（Driscoll-Kraay型は不要）。デフォルトは`"classical"`（OLS踏襲。FE/REと異なり
-`entity`のような常在するグルーピング列が無いため`"cluster"`をデフォルトにする根拠が無い）。
+`effects`のような常在するグルーピング列が無いため`"cluster"`をデフォルトにする根拠が無い）。
 
 - **2SLSの分散はサンドイッチ型**: `(X'PzX)^-1 X'Pz Ω Pz X (X'PzX)^-1`（`Ω`の推定方法が
   `cov_type`で変わる）。`hc_cov_params`/`hac_cov_params`

@@ -2,7 +2,7 @@
 
 **FE**: **Usage** · [Options and results](../api/fe.md) · [Definitions](../methods/fe.md)
 
-`FE` estimates a one-way or two-way fixed effects (within) panel regression. Pass the entity (panel unit) identifier column via `entity`; enable two-way effects by also setting `FEOptions.time`.
+`FE` estimates a one-way or two-way fixed effects (within) panel regression. Pass the columns that define the effects as a list in `effects`: one column (the entity, or panel unit, identifier) gives one-way effects, and two columns (the entity, then the time period) give two-way effects. `FE` takes at most two columns in `effects`.
 
 ```python
 import polars as pl
@@ -16,24 +16,24 @@ df = pl.DataFrame(
     }
 )
 
-result = FE(df, y="y", x=["x1"], entity="id").fit()
+result = FE(df, y="y", x=["x1"], effects=["id"]).fit()
 
 print(result.params)  # {"x1": ...} — no intercept (within-transformed away)
 print(result.std_errors)
 print(result.r_squared_within)
 ```
 
-`fixed_effects()` recovers the entity (and, for two-way, time) fixed effects post-hoc from the fitted coefficients:
+`fixed_effects()` recovers the fixed effects post-hoc from the fitted coefficients. It returns one dictionary per column of `effects`, keyed by the column name:
 
 ```python
-print(result.fixed_effects())  # {"a": ..., "b": ..., "c": ...} for one-way
+print(result.fixed_effects())  # {"id": {"a": ..., "b": ..., "c": ...}} for one-way
 ```
 
 FE has no `predict()`, `augment()`, or `summary()`. See [Options and results](../api/fe.md) for the full list of options.
 
 ## Two-way effects
 
-Set `FEOptions.time` to add time effects as well as entity effects. The panel must be balanced: every entity observed in every period. The example panel has six firms observed in six years and is used in the rest of this page.
+Pass two columns in `effects`, the entity first and the time period second, to add time effects as well as entity effects. The panel must be balanced: every entity observed in every period. The first column is the entity (it is the default clustering column and the first key of `fixed_effects()`), and the second is the time period. The example panel has six firms observed in six years and is used in the rest of this page.
 
 ```python
 from econometricsmodels import FEOptions
@@ -54,19 +54,17 @@ panel = pl.DataFrame(
     }
 )
 
-two_way = FE(
-    panel, y="y", x=["x1", "x2"], entity="firm", options=FEOptions(time="year")
-).fit()
+two_way = FE(panel, y="y", x=["x1", "x2"], effects=["firm", "year"]).fit()
 
 print(two_way.params)
-print(two_way.fixed_effects())  # {"entity": {...}, "time": {...}}
+print(two_way.fixed_effects())  # {"firm": {...}, "year": {...}}
 ```
 
-The first period (in time order) is the reference with a time effect of 0, and the entity effects absorb the overall level. A regressor that does not vary within an entity, or that does not vary across entities in a two-way model, is absorbed by the effects and is rejected.
+The number of groups in each column is in `two_way.n_groups`, here `{"firm": 6, "year": 6}`. The first period (in time order) is the reference with a time effect of 0, and the entity effects absorb the overall level. Swapping the two columns leaves the coefficients unchanged (and the standard errors, unless they are clustered on the default column), but changes the default clustering column, the order of the keys of `fixed_effects()` and which column has the reference period. A regressor that does not vary within an entity, or that does not vary across entities in a two-way model, is absorbed by the effects and is rejected.
 
 ## Choosing the type of standard error
 
-`FEOptions.cov_type` defaults to `"cluster"` on `entity`, unlike OLS, because the errors of one entity are usually correlated over time. `"hc0"` is not supported for FE.
+`FEOptions.cov_type` defaults to `"cluster"` on the first column of `effects`, unlike OLS, because the errors of one entity are usually correlated over time. `"hc0"` is not supported for FE.
 
 | `cov_type` | Use it when |
 |---|---|
@@ -74,15 +72,15 @@ The first period (in time order) is the reference with a time effect of 0, and t
 | `"classical"`, `"hc1"` to `"hc3"` | Errors are independent across observations once the effects are removed (homoskedastic for `"classical"`) |
 | `"dk"` | Errors are also correlated across entities in the same period (cross-sectional dependence), for example common shocks. Needs `dk_time`, and works best with many periods |
 
-The Driscoll-Kraay type (`"dk"`) needs the column that gives the time periods, `dk_time`, which may differ from `time`; `dk_bandwidth` sets the number of lags of the kernel (by default chosen from the number of periods), and it must be less than the number of periods. The number of periods must also exceed the number of slope coefficients.
+The Driscoll-Kraay type (`"dk"`) needs the column that gives the time periods, `dk_time`, which may differ from the second column of `effects`; `dk_bandwidth` sets the number of lags of the kernel (by default chosen from the number of periods), and it must be less than the number of periods. The number of periods must also exceed the number of slope coefficients.
 
 ```python
-by_entity = FE(panel, y="y", x=["x1", "x2"], entity="firm").fit()  # cluster by firm
+by_entity = FE(panel, y="y", x=["x1", "x2"], effects=["firm"]).fit()  # cluster by firm
 dk = FE(
     panel,
     y="y",
     x=["x1", "x2"],
-    entity="firm",
+    effects=["firm"],
     options=FEOptions(cov_type="dk", dk_time="year"),
 ).fit()
 

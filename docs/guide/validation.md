@@ -90,7 +90,7 @@ Where the data or the options cannot be used as given, the package stops with an
 
 - **Missing values are never dropped.** A null, a NaN or an infinite value in any column used by the model raises an error. There is no listwise deletion.
 - **Collinear columns are never removed.** A perfectly collinear design raises an error instead of estimating on a reduced set of regressors. The one exception is RE's internal regressions that only estimate variance components or run the Hausman test (the between regression and the Hausman auxiliary regression), which drop aliased columns like R `lm` so that a correlated-random-effects specification (a regressor together with its entity mean) can be estimated; the final regression keeps every column.
-- **Small groups are never discarded.** FE and RE reject an entity with a single observation with a `ValidationError` instead of dropping it.
+- **Small groups are never discarded.** FE and RE reject a group of `effects` with a single observation with a `ValidationError` instead of dropping it.
 - **Options that would have no effect are rejected.** For example, passing `cluster` while `cov_type` is not `"cluster"` raises an error instead of being ignored.
 
 ### Why missing values are not dropped automatically
@@ -132,12 +132,13 @@ A call is checked in a fixed order, the same for every method, and the **first**
 1. **Argument types.** A wrong type raises `TypeError` (see [Wrong argument types](#wrong-argument-types)), before anything else.
 2. **Option values.** An unknown string for `estimator`, `cov_type`, `gmm_type`, `gmm_weight_type`, `solver` or `variance_method`, checked in this order (a method without the option skips it). An unknown value is reported even if the option would not be used, for example `gmm_type="bogus"` with `estimator="2sls"`.
 3. **Option combinations.** An option that the chosen `cov_type` or estimator does not use (for example `cluster` with `cov_type="classical"`), and then a required option that is missing (for example `hac_time` with `cov_type="hac"`, or `dk_time` with `cov_type="dk"`).
-4. **Roles.** The same column used in two roles, a column named twice, an empty `x`, `"const"` in `x` when an intercept is added.
-5. **The `y`, `x` and other model columns.** A column that does not exist, has an unsupported dtype or contains missing values.
-6. **The columns named by options.** `cluster`, `hac_time` and `dk_time`, with the same checks as in step 5.
-7. **The estimation itself.** Checks that need the sizes of the problem, such as `confidence_level`, `max_iter`, the number of observations or clusters, and singular matrices.
+4. **The number of columns in `effects`** (FE and RE). An empty list or three or more columns. This comes before the check of an empty `x`.
+5. **Roles.** An empty `x`, then the same column used in two roles (`y`, `effects` and `x`), then a column named twice in `x`, then a column named twice in `effects`, and for `dk_time` the roles it may not share. `"const"` in `x` when an intercept is added.
+6. **The `y`, `x` and other model columns.** A column that does not exist, has an unsupported dtype or contains missing values. The order is `y`, then `x`, then `effects`.
+7. **The columns named by options.** `cluster`, `hac_time` and `dk_time`, with the same checks as in step 6.
+8. **The estimation itself.** Checks that need the sizes of the problem, such as `confidence_level`, `max_iter`, the number of observations or clusters, and singular matrices.
 
-Steps 2 to 4 look only at the arguments and options, never at the data. So a typo in `cov_type` is reported even if a column name is also wrong, and an option that the chosen `cov_type` ignores is reported before a column it names is looked up. `ComputationError` can only come from step 7. One detail of step 7: a negative `gmm_max_iter` cannot be converted to a count, so it is rejected together with the columns of step 6, before the other checks of step 7; a positive value outside 3 to 10,000 is checked in step 7 itself.
+Steps 2 to 5 look only at the arguments and options, never at the data. So a typo in `cov_type` is reported even if a column name is also wrong, and an option that the chosen `cov_type` ignores is reported before a column it names is looked up. `ComputationError` can only come from step 8. One detail of step 8: a negative `gmm_max_iter` cannot be converted to a count, so it is rejected together with the columns of step 7, before the other checks of step 8; a positive value outside 3 to 10,000 is checked in step 8 itself.
 
 ### In every method
 
@@ -147,8 +148,9 @@ Each bullet is a situation that raises a `ValidationError`.
 
 - A named column does not exist.
 - The same column is used in two roles (for example `y` also in `x`, or the weight column as `y`).
-- For the Driscoll-Kraay `dk_time` column only `y` and `entity` are checked: it may also be one of the regressors, or the same column as FE's `time`.
+- For the Driscoll-Kraay `dk_time` column only `y` and the first column of `effects` are checked: it may also be one of the regressors, or the same column as the second column of `effects`.
 - `x` is empty, or names a column twice.
+- In FE and RE, `effects` is empty (`ROLE_EMPTY`) or names a column twice; or a column of `effects` is also `y` or one of the regressors.
 - With an intercept, `x` contains a column called `"const"`.
 - A column has a dtype that its role does not accept, such as a string, date or categorical column used as a number (see [Accepted data](accepted-data.md#column-types-by-role)).
 - The `hac_time` column has the same value in two or more rows, including a constant column, so the observations have no time order (see [Order of observations](accepted-data.md#order-of-observations-for-hac)).
@@ -160,7 +162,7 @@ Each bullet is a situation that raises a `ValidationError`.
 
 **Missing values**
 
-- A null in any used column, or a NaN or infinite value in a numeric column or in a float entity, cluster or time column.
+- A null in any used column, or a NaN or infinite value in a numeric column or in a float `effects`, cluster or time column.
 - A column of the `Null` dtype counts as all missing.
 
 **Sample size**
@@ -249,8 +251,9 @@ These are in addition to the situations above.
 
 **FE**
 
-- A singleton entity, or in a two-way model a singleton time period.
-- A two-way model on an unbalanced panel, or without `time`.
+- A group (a level of a column of `effects`) with a single observation: a singleton entity or, in a two-way model, a singleton time period (`SINGLETON_GROUP`).
+- A two-way model on an unbalanced panel.
+- More than two columns in `effects` (`EFFECTS_TOO_MANY`).
 - A regressor with no within-variation (constant over time within every entity).
 - The outcome has no variation left after the fixed effects are removed (constant within every entity, or in a two-way model fully explained by the entity and time effects).
 - Too few degrees of freedom.
@@ -258,15 +261,16 @@ These are in addition to the situations above.
 **RE**
 
 - The outcome is constant within every entity.
-- A singleton entity, or in a two-way model (`time` set) a singleton time period.
+- A group with a single observation: a singleton entity or, in a two-way model (two columns in `effects`), a singleton time period (`SINGLETON_GROUP`).
 - A two-way model on an unbalanced panel.
+- More than two columns in `effects` (`EFFECTS_TOO_MANY`).
 - With `cov_type="cluster"`, too few clusters for the Hausman auxiliary regression (counting only the identified columns).
 - A time-invariant regressor is allowed, unlike in FE, and so is a regressor together with its entity or time mean (correlated random effects, Mundlak): the aliased columns of the between and Hausman auxiliary regressions are dropped and `hausman_df` counts the identified ones.
 - An unknown `variance_method`, or `variance_method="amemiya"` with a regressor that has no within variation (time-invariant; in a two-way model, varying in at most one dimension): use `"swamy_arora"` or `"wallace_hussain"`.
 
 **FE, RE**
 
-- `cov_type="dk"` without `dk_time` (neither borrows `time` for it), with an invalid `dk_bandwidth`, with too few time periods for the number of coefficients tested, or with a degenerate two-period structure.
+- `cov_type="dk"` without `dk_time` (neither borrows a column of `effects` for it), with an invalid `dk_bandwidth`, with too few time periods for the number of coefficients tested, or with a degenerate two-period structure.
 - `cov_type="cluster"` with two clusters in which every entity (and, with two-way effects, every period) is observed exactly once in each: the covariance is identically zero (`CLUSTER_TWO_GROUPS_DEGENERATE`).
 
 ## When `ComputationError` is raised
@@ -317,7 +321,7 @@ The absence of an error says nothing about the following. They are your responsi
 - **Instrument validity and strength.** In IV only the order condition (at least as many instruments as endogenous regressors) is checked up front. The rank condition is not, so irrelevant instruments may surface later as a singular first stage. The weak-instrument F statistic is reported without a verdict, and the over-identification test is `None` when the model is just identified.
 - **Stationarity, outliers and influential observations.**
 - **Near-separation.** Data that are close to, but not at, separation have a finite estimate, so they estimate without an error, although the standard errors can be very large. Only exact separation is an error.
-- **Panel structure beyond what the estimator needs.** A one-way FE model does not complain about unbalanced panels or about repeated (entity, time) pairs. Only the two-way models (FE, and RE with `time`) require a balanced panel.
+- **Panel structure beyond what the estimator needs.** A one-way FE model does not complain about unbalanced panels or about repeated (entity, time) pairs. Only the two-way models (FE and RE with two columns in `effects`) require a balanced panel.
 - **Numeric precision.** Numeric columns are converted to 64-bit floating point without a warning, so integers beyond 2^53 and decimals with many digits can lose precision. See [Accepted data](accepted-data.md#how-values-are-converted).
 
 ## Where to look next

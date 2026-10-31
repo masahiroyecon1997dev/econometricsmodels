@@ -9,9 +9,13 @@
 **必須の列は引数、任意または条件付き必須の設定は`*Options`のフィールド。**
 
 - 必須の列引数は「モデルを定義する入力」で、`data`の直後に並べ、デフォルト値を持たない
-  （`y`・`x`・`weight`・`x_exog`・`x_endog`・`instruments`・`entity`）。
-- `cluster`・`hac_time`・`dk_time`・`time`は列名を取るが、任意または`cov_type`等に応じた条件付き必須
+  （`y`・`x`・`weight`・`x_exog`・`x_endog`・`instruments`・`effects`）。
+- `cluster`・`hac_time`・`dk_time`は列名を取るが、任意または`cov_type`等に応じた条件付き必須
   なので`Options`に置く。「列名だから引数」にはしない。
+- FE/REの`effects`（個体・時点の列）は必須なので引数に置く。個体と時点は「効果の次元」という同じ役割で、
+  1つのリストにまとめる（1要素=one-way、2要素=two-way）。1-wayか2-wayかは推定量そのものを変える
+  ため、推論の設定と同じ`Options`には置かない。DKの時点列`dk_time`は`effects`と別の役割
+  （`cov_type="dk"`で必須）なので`Options`に残す。理由の詳細は`panel-common.md`1.1節。
 - `options`は末尾のキーワード専用引数（デフォルト`None`）。デフォルト値のある引数はすべて`*`の後ろに置く
   （`tests/cross_method/test_keyword_only_arguments.py`が検査する）。
 
@@ -21,8 +25,8 @@
 
 ## 2. 命名
 
-- 1列は`str`で単数形（`y`・`weight`・`entity`・`cluster`・`hac_time`）。
-- 複数列は`list[str]`で、`x`・`x_<役割>`・複数形（`x`・`x_exog`・`x_endog`・`instruments`）。
+- 1列は`str`で単数形（`y`・`weight`・`cluster`・`hac_time`・`dk_time`）。
+- 複数列は`list[str]`で、`x`・`x_<役割>`・複数形（`x`・`x_exog`・`x_endog`・`instruments`・`effects`）。
 - 列名を取る引数に`_col`等のサフィックスは付けない。
 
 ## 3. 名前を変えないと決めたもの

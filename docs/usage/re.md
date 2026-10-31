@@ -2,7 +2,7 @@
 
 **RE**: **Usage** · [Options and results](../api/re.md) · [Definitions](../methods/re.md)
 
-`RE` estimates a random effects (GLS) panel regression: entity-direction effects, or entity and time effects on a balanced panel when `REOptions.time` is set. The variance components are estimated by Swamy-Arora by default; `REOptions(variance_method="wallace_hussain")` or `"amemiya"` selects the other estimators. Unlike FE, RE has an intercept, and a Hausman test comparing against the equivalent FE specification is computed automatically as part of `fit()`.
+`RE` estimates a random effects (GLS) panel regression: entity effects (one column in `effects`), or entity and time effects on a balanced panel (two columns in `effects`). The variance components are estimated by Swamy-Arora by default; `REOptions(variance_method="wallace_hussain")` or `"amemiya"` selects the other estimators. Unlike FE, RE has an intercept, and a Hausman test comparing against the equivalent FE specification is computed automatically as part of `fit()`.
 
 ```python
 import polars as pl
@@ -16,14 +16,14 @@ df = pl.DataFrame(
     }
 )
 
-result = RE(df, y="y", x=["x1"], entity="id").fit()
+result = RE(df, y="y", x=["x1"], effects=["id"]).fit()
 
 print(result.params)  # {"const": ..., "x1": ...}
 print(result.std_errors)
 print(result.hausman_statistic, result.hausman_p_value)
 ```
 
-`REOptions.cov_type` has the same defaults and support as [FE](fe.md#choosing-the-type-of-standard-error) (`"cluster"` on `entity` by default; `"hc0"` unsupported), and the Driscoll-Kraay type (`cov_type="dk"`) needs `dk_time`. See [Options and results](../api/re.md) for the full list of options. Like FE, RE has no `predict()`, `augment()`, or `summary()`.
+`REOptions.cov_type` has the same defaults and support as [FE](fe.md#choosing-the-type-of-standard-error) (`"cluster"` on the first column of `effects` by default; `"hc0"` unsupported), and the Driscoll-Kraay type (`cov_type="dk"`) needs `dk_time`. See [Options and results](../api/re.md) for the full list of options. Like FE, RE has no `predict()`, `augment()`, or `summary()`.
 
 ## Two-way effects, variance components and standard errors
 
@@ -48,12 +48,10 @@ panel = pl.DataFrame(
     }
 )
 
-one_way = RE(panel, y="y", x=["x1", "x2"], entity="firm").fit()
+one_way = RE(panel, y="y", x=["x1", "x2"], effects=["firm"]).fit()
 
-# Entity and time effects (balanced panel): set `time`
-two_way = RE(
-    panel, y="y", x=["x1", "x2"], entity="firm", options=REOptions(time="year")
-).fit()
+# Entity and time effects (balanced panel): two columns in `effects`
+two_way = RE(panel, y="y", x=["x1", "x2"], effects=["firm", "year"]).fit()
 print(two_way.sigma2_u, two_way.sigma2_lambda, two_way.sigma2_eps)
 
 # Another estimator of the variance components
@@ -61,7 +59,7 @@ wallace = RE(
     panel,
     y="y",
     x=["x1", "x2"],
-    entity="firm",
+    effects=["firm"],
     options=REOptions(variance_method="wallace_hussain"),
 ).fit()
 
@@ -70,13 +68,13 @@ dk = RE(
     panel,
     y="y",
     x=["x1", "x2"],
-    entity="firm",
+    effects=["firm"],
     options=REOptions(cov_type="dk", dk_time="year"),
 ).fit()
 print(one_way.sigma2_u, wallace.sigma2_u, dk.std_errors)
 ```
 
-`variance_method` chooses how the variance of the entity effect (`sigma2_u`), of the time effect (`sigma2_lambda`, two-way only) and of the idiosyncratic error (`sigma2_eps`) are estimated: `"swamy_arora"` (the default), `"wallace_hussain"` or `"amemiya"`. The formulas, and the unbalanced or time-invariant cases that `"amemiya"` rejects, are in [Definitions: RE](../methods/re.md#variance-components-variance_method). Time-invariant regressors are accepted (FE rejects them). The weights of the GLS transformation are available as `theta` (one-way, by entity) or `theta_entity`, `theta_time` and `theta_total` (two-way).
+`variance_method` chooses how the variance of the entity effect (`sigma2_u`), of the time effect (`sigma2_lambda`, two-way only) and of the idiosyncratic error (`sigma2_eps`) are estimated: `"swamy_arora"` (the default), `"wallace_hussain"` or `"amemiya"`. The formulas, and the unbalanced or time-invariant cases that `"amemiya"` rejects, are in [Definitions: RE](../methods/re.md#variance-components-variance_method). Time-invariant regressors are accepted (FE rejects them). In a two-way model the order of `effects` matters: the first column is the entity (`sigma2_u`, `theta_entity`) and the second is the time period (`sigma2_lambda`, `theta_time`). `RE` takes at most two columns in `effects`, because effects in three or more dimensions are not a standard random effects model; a third column is rejected. The weights of the GLS transformation are available as `theta` (one-way, by entity) or `theta_entity`, `theta_time` and `theta_total` (two-way).
 
 ## Reading the Hausman test
 

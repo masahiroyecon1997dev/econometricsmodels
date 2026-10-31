@@ -11,7 +11,7 @@ y_{it} = \beta_0 + x_{it}'\beta + u_i + \varepsilon_{it} \quad \text{(one-way)},
 y_{it} = \beta_0 + x_{it}'\beta + u_i + \lambda_t + \varepsilon_{it} \quad \text{(two-way)}
 \]
 
-The effects are random: \(u_i\), \(\lambda_t\) and \(\varepsilon_{it}\) are uncorrelated with the regressors and with each other, with variances \(\sigma_u^2\), \(\sigma_\lambda^2\) and \(\sigma_\varepsilon^2\). Unlike FE, RE keeps the intercept (`const` is always the first parameter) and **allows time-invariant regressors**. With `REOptions.time` set it estimates entity and time effects on a balanced panel; otherwise only entity effects, and an unbalanced panel is allowed. An entity with a single observation is rejected, as in FE.
+The effects are random: \(u_i\), \(\lambda_t\) and \(\varepsilon_{it}\) are uncorrelated with the regressors and with each other, with variances \(\sigma_u^2\), \(\sigma_\lambda^2\) and \(\sigma_\varepsilon^2\). Unlike FE, RE keeps the intercept (`const` is always the first parameter) and **allows time-invariant regressors**. With two columns in `effects` it estimates entity effects (the first column) and time effects (the second column) on a balanced panel; with one column it estimates only entity effects, and an unbalanced panel is allowed. An entity with a single observation is rejected, as in FE.
 
 The estimator is feasible GLS, computed as OLS on quasi-demeaned data (all columns, including the constant, are transformed); \(y^*\) and \(X^*\) denote the quasi-demeaned outcome and regressors:
 
@@ -56,7 +56,7 @@ where \(k_{tv}\) counts the time-varying regressors (those with within variation
 
 ## Covariance of the coefficients: `cov_type`
 
-The options are the same as for [FE](fe.md#covariance-of-the-coefficients-cov_type), computed on the quasi-demeaned data: `"classical"`, `"hc1"`, `"hc2"`, `"hc3"`, `"cluster"` (the default, by entity) and `"dk"` (Driscoll-Kraay, requires `dk_time`, which is a different option from `time`). `"hc0"` is not available. The covariance matrix of the coefficients is available as `cov_params` on the results, with the constant first. Differences from FE:
+The options are the same as for [FE](fe.md#covariance-of-the-coefficients-cov_type), computed on the quasi-demeaned data: `"classical"`, `"hc1"`, `"hc2"`, `"hc3"`, `"cluster"` (the default, by entity) and `"dk"` (Driscoll-Kraay, requires `dk_time`, which is a different option from the time column in `effects`). `"hc0"` is not available. The covariance matrix of the coefficients is available as `cov_params` on the results, with the constant first. Differences from FE:
 
 - Because there are no absorbed dummies, the leverage in HC2 and HC3 is the plain \(h_{ii} = x_i^{*\prime}(X^{*\prime}X^*)^{-1}x_i^*\) of the quasi-demeaned design, and the small-sample factor uses \(K = \mathrm{df}_{\text{model}}\) in every case: \(\frac{G}{G-1}\cdot\frac{n-1}{n-K}\) for `"cluster"` (the form of `plm::vcovHC(type = "sss")`) and \(\frac{T_d}{T_d-1}\cdot\frac{n-1}{n-K}\) for `"dk"`.
 - Cluster standard errors with `G` clusters need \(G\) greater than the number of slope coefficients, \(T_d\) greater than it for Driscoll-Kraay.
@@ -100,7 +100,7 @@ H = \hat\delta'\hat\Sigma_\delta^{-1}\hat\delta \sim \chi^2(\mathrm{df}), \qquad
 where \(\hat\delta\) are the estimated coefficients of the tested columns of \(\tilde X\) and \(\hat\Sigma_\delta\) is their block of the covariance matrix chosen by `cov_type`.
 
 - The statistic is non-negative by construction.
-- The comparison is with the FE model of the same structure: entity effects, or entity and time effects when `time` is set.
+- The comparison is with the FE model of the same structure: entity effects, or entity and time effects when `effects` has two columns.
 - The covariance follows `cov_type`, so the default `"cluster"` gives the cluster-robust Hausman test, and `"classical"` gives the classical version, which assumes that RE is fully efficient under the null. The small-sample factors are those of the RE standard errors, with \(K\) the number of regressors of the auxiliary regression (the constant, \(X^*\) and the tested columns of \(\tilde X\), up to \(2k+1\)) instead of \(k+1\). `"dk"` rests on large-\(T\) asymptotics and may be distorted for a short panel.
 - Only time-varying regressors are tested. A column of \(\tilde X\) is left out of the test, and not counted in `hausman_df`, when it cannot be identified. This happens in two cases: its quasi-demeaned counterpart in \(X^*\) differs from it only by a constant (for example a regressor that varies only over time on a balanced panel), or the entity mean (in the two-way model, the time mean) of the regressor is also a regressor.
 - The auxiliary regression has up to \(2k\) slope coefficients, so `cov_type="cluster"` needs more than that many clusters, and `"dk"` needs more periods than the slope coefficients. If the regression cannot be computed, `fit()` raises an error instead of returning `None`; use `cov_type="classical"` or more clusters.

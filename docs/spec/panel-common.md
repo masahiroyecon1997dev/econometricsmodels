@@ -7,52 +7,55 @@ Swamy-Arora分散成分推定の具体式、固定効果の復元等）は[`fe-s
 
 ## 1. 引数設計
 
-### 1.1 `y` / `x` / `entity` / `time` のシグネチャ
+### 1.1 `y` / `x` / `effects` のシグネチャ
 
-- `fit_fe(data, y, x, entity, options)` / `fit_re(data, y, x, entity, options)`
+- `fit_fe(data, y, x, effects, options)` / `fit_re(data, y, x, effects, options)`
 - `y: str`、`x: list[str]`はOLSと同じ。
-- `entity: str`（エンティティID列名）は**独立の必須引数**とする。FE/REいずれもパネル構造が
-  無ければモデルとして成立しないため、`y`/`x`と同格に扱う。
-- `time`（時点ID列名）は必須ではないため`Options`内に置く（`FEOptions.time`・`REOptions.time`、
-  `str | None`、デフォルト`None`）。どちらも2-way（entity + time）の指定で、`None`なら1-way。
-  DKの時点列は別フィールド`dk_time`で受け取る（下記）。
-  - FEの2-way（entity + time FE）を指定する場合は`time`が実質的に必須になるが、これは
-    `OLSOptions.cluster`が`cov_type="cluster"`のときのみ必須になるのと同じ「条件付き必須」
-    パターンであり、`Options`に置くという判断自体は変えない。未指定時のバリデーションエラーで
-    担保する。
-  - **`FEOptions.time`と`FEOptions.dk_time`は別物**: `time`は2-way FE（固定効果構造）を
-    指定するbareフィールドで、`Some`なら常に2-way・`None`なら1-way。Driscoll-Kraay型HAC
-    （`cov_type="dk"`）の時点列は別フィールド`dk_time`（`str | None`、`cov_type`の値`"dk"`を
-    接頭辞にした命名）で指定する。1-way FE + DK HAC（`time`未指定だが時点列だけ要る）という
-    組み合わせを表現するために導入した——`time`の有無だけで1-way/2-wayを決める設計（ブール
-    フラグ等の追加無し）にすると、DKの時点列と2-way構造を1つの`time`フィールドに詰め込めなく
-    なるため分離が必要になった。**`cov_type="dk"`では`dk_time`が必須で、`time`を暗黙に借用
-    しない**（未指定は`ValidationError`、1-way・2-wayとも同じ）。どの列がDKの時点かを利用者が
-    明示しない設計は、意図と違う列が選ばれても気づけないため。`dk_time`は2-wayでも常にDK計算に
-    使われ、「2-way FEの固定効果構造に使う時点粒度」と「DK HACカーネルに使う時系列粒度」が
-    異なるケースにも対応する。engine側は`FeCovType::Dk { bandwidth, time: TimeKeys }`
-    （`time`は必須）として実装（`engine/src/panel/fe.rs`モジュールdoc「Driscoll-Kraay型
-    パネルHAC対応」参照）。**REも同名・同じ意味の`REOptions.time`・`REOptions.dk_time`を持ち、
-    同じ規約に従う**（`ReInput.time`が2-wayの時間次元、DKの時点列は`ReCovType::Dk { time }`で別に渡す）。
-- **`time`を`Options`に置く理由（トップレベル引数に昇格しない）**（全手法共通の基準は[`api-conventions.md`](./api-conventions.md)）:
-  - `time`は条件付き必須（2-wayを指定するときだけ要る）で、1-wayでは不要な引数になる。
-    トップレベル引数にすると1-wayの呼び出しでも毎回渡す必要が出る（`None`を許すなら`Options`と
-    同じ）。FE・REとも2-way構造の指定という同じ役割だが、`entity`と違い無くてもモデルが成立する。
-  - `cluster`/`dk_time`（OLS/IVでは`hac_time`）等の補助列も、列名を取るが`Options`に置く既存規則と
-    整合する。
-  - 将来の高次元FE（3つ以上のFE次元）では、必須の`entity`以外の次元は`Options`側に並べる想定で、
-    その場合`time`は「追加FE次元の1つ」として`Options`に置く現行設計と矛盾しない。
-    今トップレベルへ昇格させると高次元FE導入時に再度移すことになる。
-- **命名規則**: 列名を受け取る引数は`entity`/`time`/`cluster`/`dk_time`のいずれも**`_col`サフィックスを
+- `effects: list[str]`（固定効果・変量効果の次元を指す列名）は**独立の必須引数**とする。FE/REいずれも
+  パネル構造が無ければモデルとして成立しないため、`y`/`x`と同格に扱う。1〜2要素で、1要素=one-way、
+  2要素=two-way（`effects[0]`が個体、`effects[1]`が時点。two-wayはバランスパネル必須）。
+  空は`ROLE_EMPTY`、3要素以上は`EFFECTS_TOO_MANY`（`ValidationError`、params: `model`・`n_effects`・
+  `max_effects`）。上限は当面FE/REとも2で、文面は上限だけを示す中立の形にしている（FEは将来上限を
+  上げる予定、REは交差ランダム効果が標準的な推定量でないため上限が変わらない見込みと理由は違うが、
+  同じcodeは同じhintという規則のため）。
+- `FEOptions.time`・`REOptions.time`は廃止した。`dk_time`（Driscoll-Kraay型HACの時点列、`str | None`）は
+  `effects`とは独立のまま`Options`に置く。**`cov_type="dk"`では`dk_time`が必須で、`effects`の列を
+  借用しない**（未指定は`ValidationError`、one-way・two-wayとも同じ）。どの列がDKの時点かを利用者が
+  明示しない設計は、意図と違う列が選ばれても気づけないため。`dk_time`は2-wayでも常にDK計算に使われ、
+  「2-wayの固定効果構造に使う時点粒度」と「DK HACカーネルに使う時系列粒度」が異なるケースにも
+  対応する。engine側は`FeCovType::Dk { bandwidth, time: TimeKeys }`（`time`は必須）として実装
+  （`engine/src/panel/fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）。REも同じ規約
+  （`ReInput.time`が2-wayの時間次元、DKの時点列は`ReCovType::Dk { time }`で別に渡す）。
+- **`effects`にまとめた理由（個体と時点を1つの必須引数にする）**（全手法共通の基準は
+  [`api-conventions.md`](./api-conventions.md)）:
+  - 基準は「必須の列は引数、任意または条件付き必須の設定は`Options`」の1本。個体と時点は
+    「効果の次元」として同じ役割なので、1つの必須引数にまとめた。`entity`が引数で`time`が`Options`と
+    いう非対称は利用者に分かりにくく、`time`はone-wayかtwo-wayかという推定量そのものを変えるのに、
+    推論の設定と同じ`Options`に置かれていた。`dk_time`との混同も避けられる。
+  - 3次元以上の固定効果（高次元FE）は別APIにせず、同じ`effects`の上限を上げるだけで足りる。
+    以前の「必須の`entity`以外の次元は`Options`側に並べる想定」とは逆の判断になった。
+  - 先頭要素がデフォルトのクラスターキー（fixestの慣習と同じ。3.2節）。REは2要素の順序に意味があり
+    （`effects[0]`が個体: `sigma2_u`・`theta_entity`、`effects[1]`が時点: `sigma2_lambda`・
+    `theta_time`）、バランスパネルでは入れ替えてもモデルが対称なので検証では検出できず、
+    ドキュメントとテストで保証する。FEは入れ替えても係数・SEは同じだが、デフォルトのクラスターキー、
+    `fixed_effects()`のキー順、時点側の基準期間が変わる。
+  - 列の型の規則は位置で決まる: `effects[0]`は従来の`entity`と同じ規則（同一性だけのキー）、
+    `effects[1]`は従来の`time`と同じ規則（時点のキー）。推定値と受け付ける入力を変えないため。
+    規則の統一は3次元以上を扱うときに検討する。
+  - エラーの`argument`は`"effects"`に統一し、どの列かは`column`で示す。`SINGLETON_GROUP`のparamsは
+    `{argument, column, group}`（`column`は`effects`の該当要素の列名。エンジンは`FeInput`/`ReInput`の
+    `with_effect_names`で列名を受け取り、計算には使わない）。
+- **命名規則**: 列名を受け取る引数は`effects`/`cluster`/`dk_time`のいずれも**`_col`サフィックスを
   付けない**（`y`/`x`/`weight`と同じ規約）。`dk_time`はDriscoll-Kraay型HACの時系列順序で、
-  `cov_type`の値`"dk"`を接頭辞にした名前（OLS/WLS/IVの`hac_time`と対応）。
-- FE/RE間で`entity`/`time`の命名は統一する。IV側の対応する引数は性質が異なるため
+  `cov_type`の値`"dk"`を接頭辞にした名前（OLS/WLS/IVの`hac_time`と対応）。複数列を取る`effects`は
+  `x`と同じく`list[str]`の複数形。
+- FE/RE間で`effects`の命名・意味は統一する。IV側の対応する引数は性質が異なるため
   [`iv-spec.md`](./iv-spec.md)を参照。
 
 ### 1.2 モデル固有オプションの置き場所
 
 `FEOptions`/`REOptions`という別々の`#[pyclass]`構造体に含める（`OLSOptions`/`LogitOptions`の
-前例を踏襲）。共有可能なフィールド（`entity`/`time`等）を内部実装上どこまで共通化するか
+前例を踏襲）。共有可能なフィールド（`effects`/`dk_time`等）を内部実装上どこまで共通化するか
 （トレイト・共通struct等）はAPI設計とは別問題として扱う。
 
 ### 1.3 `weights` / `offset` の扱い
@@ -76,14 +79,25 @@ OLS（`OLSResult`、`engine_pybind/src/linear/ols.rs:137-191`）の項目を土�
 | `params` / `std_errors` / `test_stats` / `p_values` / `conf_lower` / `conf_upper` / `param_names` | OLS共通 | 検定分布はt分布で統一（3.3節） |
 | `residuals` / `dep_var_name` | OLS共通 | そのまま踏襲 |
 | `n_obs` | Logit由来の表記 | OLS/WLSも`n_obs`に統一済み |
-| `df_resid` / `df_model` | Logit由来、パネル向けに新規追加 | OLSには無いが、FEは自由度調整が`n - n_entities - k`という非自明な式になるため明示的に返す価値が高い |
-| `n_entities` | 新規追加（FE/RE限定） | パネルユニット数。pyfixest/plmの前例に倣う |
+| `df_resid` / `df_model` | Logit由来、パネル向けに新規追加 | OLSには無いが、FEは自由度調整が`n - 個体数 - k`という非自明な式になるため明示的に返す価値が高い |
+| `n_groups` | 新規追加（FE/RE限定） | `dict[str, int]`（`effects`の列名→グループ数、`effects`の順）。次元ごとの件数は、次元が増えたり形が変わる（高次元FE・不均衡パネル）ときに構造が変わる標本の構造に属するので、固定の`n_entities`/`n_periods`ではなく列名キーにした |
 | `sigma2_eps` / `sigma2_u` / `sigma2_lambda` / `theta` / `theta_entity` / `theta_time` / `theta_total` | 新規追加（REのみ） | 分散成分（σ_ε²・σ_u²、2-wayのσ_λ²）と準偏差変換の重み（1-wayは個体ごとのθ、2-wayは3つの重み）。詳細は`re-spec.md`2章 |
-| `n_periods` | 新規追加（FE・RE） | 2-wayの時点数（1-wayは`None`、`dk_time`だけの指定でも`None`）。`fe-spec.md`2章・`re-spec.md`2章参照 |
 | `cov_type` | OLS共通 | サポート対象は3.1節 |
 | `f_statistic` / `f_p_value` | OLS共通 | そのまま踏襲（ただしengine側の実装はOLSの単純な流用ではない。傾き係数`k`個の同時Wald検定をFE/RE独自の`cov_type`別`cov_params`・パネル自由度調整済み`df_resid`で行う） |
 | `log_likelihood` / `aic` / `bic` | OLS共通 | FE/REは最小二乗族で正規性下の尤度が定義できるため含める |
 | `r_squared_within` / `r_squared_between` / `r_squared_overall` | 新規追加（OLSの`r_squared`/`adj_r_squared`を置き換え） | 詳細は2.3節 |
+
+**列名キーにしたもの・しなかったもの**: 次元ごとの件数（`n_groups`）と固定効果の水準（FEの`fixed_effects()`は
+one-wayでも常に`{列名: {水準: 効果}}`の入れ子）は、次元が増えたり形が変わる（高次元FE・不均衡パネル）ときに
+構造が変わる標本の構造に属するので列名キーにした。一方、**`sigma2_u`・`sigma2_lambda`・`theta`・`theta_entity`・
+`theta_time`・`theta_total`は意図的に現状維持**する。分散成分はモデルのパラメータで、バランスの有無によらず
+意味が変わらない。`theta_*`はバランスパネルの閉形式の3つの係数に紐づいたスカラーで、不均衡な2-way REでは
+この構造自体が成り立たない見込みのため、列名キーにしても備えにならず、1-wayの`theta`（個体の水準がキーの
+dict）と名前が衝突する。不均衡な2-way RE対応時に形が決まってから再検討する。
+
+**pickle**: `FEOptions`/`REOptions`のフィールド集合が変わり、`FEResult`/`REResult`の状態キー
+（`n_entities`・`n_periods`が`effects`・`group_counts`に）も変わるため、旧版のpickleは読めない
+（キー集合の検査で検出される。`FORMAT_VERSION`は上げていない）。
 
 ### 2.2 OLSの`nobs`→`n_obs`リネーム
 
@@ -130,19 +144,19 @@ Newey-West型HACだが、これをパネルにそのまま適用すると異な�
 
 ### 3.2 `cov_type`のデフォルト
 
-- `FEOptions`/`REOptions`の`cov_type`デフォルト値は**`"cluster"`（entity単位）**とする。
+- `FEOptions`/`REOptions`の`cov_type`デフォルト値は**`"cluster"`（`effects`の先頭の列＝個体単位）**とする。
   OLSの`"classical"`デフォルトから**意図的に逸脱する**。
   - 理由: fixestは実際にこの挙動（FE指定時は自動的に最初のFE変数でクラスターする）を
     デフォルトにしている前例がある。パネルデータでは異分散だけでなくエンティティ内の
     系列相関がほぼ常に存在し、`hc0`〜`hc3`（クラスタリングなしの異分散ロバスト）だけでは
     標準誤差を過小評価するリスクが高い（Cameron & Miller 2015）。
-  - FE/REは`entity`が必須引数（1章）のため、OLSと違いクラスター対象列が常に確実に
+  - FE/REは`effects`が必須引数（1章）のため、OLSと違いクラスター対象列が常に確実に
     存在し、デフォルト化の実装上の障害がない。
-- `cov_type="cluster"`時、`cluster`省略なら`entity`引数の列を自動的にクラスターキーとして
-  使う。`cluster`を明示指定すれば任意の列（例: `entity`より粗い粒度の`state`等）でも
+- `cov_type="cluster"`時、`cluster`省略なら`effects`の先頭の列を自動的にクラスターキーとして
+  使う（fixestの慣習と同じ）。`cluster`を明示指定すれば任意の列（例: 個体より粗い粒度の`state`等）でも
   クラスター可能（OLSの`cluster`と同じ任意指定パターン）。
-- **2-way clustering（entity+time同時）はv1スコープ外**。2-way FEのスコープ（2-way FEでも
-  クラスターのデフォルトはentity単位のまま維持する。詳細は[`fe-spec.md`](./fe-spec.md)参照）と
+- **2-way clustering（個体+時点同時）はv1スコープ外**。2-way FEのスコープ（2-way FEでも
+  クラスターのデフォルトは`effects[0]`（個体）単位のまま維持する。詳細は[`fe-spec.md`](./fe-spec.md)参照）と
   合わせて別途検討する。
 
 ### 3.3 検定分布
@@ -188,10 +202,10 @@ FEは**まずOlsEstimatorへの委譲を試す**（within変換したデータ�
 WLSと同型のパターン）。ただし以下はFE固有の再計算・補正が必要になる見込みで、無理に
 OLSの計算をそのまま使わない（WLSがR²等を素のOLS計算のまま使わなかったのと同じ教訓）。
 
-- 自由度（`n - n_entities - k`、単純な`n-k`ではない）→ 検定統計量・adjusted R²・
+- 自由度（`n - 個体数 - k`、単純な`n-k`ではない）→ 検定統計量・adjusted R²・
   AIC/BICすべてに波及
 - パネル固有R²（within/between/overall、2章）はOLSに存在しない新規計算
-- `cov_type`デフォルトのentity単位cluster化、HACのDriscoll-Kraay別実装（3章）
+- `cov_type`デフォルトの`effects[0]`単位cluster化、HACのDriscoll-Kraay別実装（3章）
 
 この委譲パターンが実際にうまくいくかは、within変換の実装方法（[`fe-spec.md`](./fe-spec.md)
 3.1節）次第のため、結論を固定せず「まず委譲を試して、補正が管理可能な範囲に収まるか実装時に

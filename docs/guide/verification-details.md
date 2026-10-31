@@ -88,7 +88,7 @@ On the unbalanced panel plm's Swamy-Arora variance components differ from this p
 
 **Two-way FE with another cluster column.** For FE with two-way effects, clustering on a column other than the entity is compared with fixest in four cases:
 
-- a column nested in the time effect (`time`);
+- a column nested in the time effect (the second column of `effects`);
 - a column nested in neither effect;
 - the boundary of three clusters with two slopes (the denominator degrees of freedom equal the number of slopes);
 - clusters of unequal size (2 to 50 observations).
@@ -171,7 +171,7 @@ Where only one reference exists, or a reference differs in a documented way, the
         - **plm on unbalanced panels:** plm and this package define the between-regression variance component σ_u² differently. A time-invariant coefficient is identified only by between-entity variation, so the difference is larger than for time-varying regressors (coefficients up to about 1.5 % on a mildly unbalanced panel and 13 % when the panel lengths range from 2 to 10 observations), and the two are not compared directly.
             - Instead, plm's own σ_ε² and σ_u² are given to the hand-written implementation, which then reproduces plm's coefficients, standard errors, t statistics, p-values, confidence intervals, F statistic and Hausman test, for every `cov_type`.
             - σ_ε² (which depends on the degrees of freedom `n - N - k_tv`) agrees with plm exactly.
-- **Two-way RE** (`REOptions.time`, balanced panels): plm (`model = "random"`, `effect = "twoways"`, Swamy-Arora) is the only reference, so the checks lean on it more than elsewhere.
+- **Two-way RE** (two columns in `effects`, balanced panels): plm (`model = "random"`, `effect = "twoways"`, Swamy-Arora) is the only reference, so the checks lean on it more than elsewhere.
     - Against plm, every `cov_type` is compared for the coefficients, standard errors, F statistic, the three variance components (`ercomp`) and the three quasi-demeaning weights. The t statistics, p-values and confidence intervals are recomputed from plm's coefficients and standard errors with the t distribution (plm reports z statistics).
     - The Hausman test is plm's auxiliary regression rebuilt from plm's transformed data with the tested coefficients selected by name. With a regressor that varies in only one dimension, the statistic of `phtest(method = "aux")` in plm 2.6.7 differs from the rebuilt auxiliary regression (see the time-invariant case above); the two agree otherwise.
     - Log-likelihood, AIC, BIC and the within / between / overall R² are not computed by plm and are computed from plm's coefficients by definition in the reference script, so that part is not independent. As a second check, the log-likelihood, AIC and BIC are compared with statsmodels `OLS` fitted to plm's quasi-demeaned data.

@@ -168,11 +168,12 @@ class TobitResults:
 
     @property
     def cov_params(self) -> dict[str, dict[str, float]]:
-        """Covariance matrix of the coefficients, keyed by name (includes `"sigma"`).
+        """Covariance matrix of the coefficients and `sigma`, by name.
 
-        Follows `cov_type`, so `std_errors[a]` is the square root of
-        `cov_params[a][a]`. The covariance of `a` and `b` is
-        `cov_params["a"]["b"]`, and the keys are in `param_names` order.
+        `"sigma"` is the last row and column. Follows `cov_type`, so
+        `std_errors[a]` is the square root of `cov_params[a][a]`. The
+        covariance of `a` and `b` is `cov_params["a"]["b"]`, and the keys
+        are in `param_names` order.
         """
         return cov_params_by_param(self._raw.param_names, self._raw.cov_params)
 

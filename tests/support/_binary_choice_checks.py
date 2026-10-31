@@ -34,6 +34,7 @@ import pytest
 from _assertions import (
     assert_argument_case_insensitive,
     assert_close,
+    assert_cov_params_close,
     assert_dict_close,
     assert_fields_close,
     assert_inference_close,
@@ -1757,6 +1758,10 @@ def check_solver_matches_statsmodels(
     )
     config.assert_dict_close_method(
         res.std_errors, ref["std_errors"], f"{label}/std_errors"
+    )
+    # 係数の分散共分散行列も、係数・標準誤差と同じ`rtol_solver`で比べる。
+    assert_cov_params_close(
+        res.cov_params, ref["cov_params"], label, rtol=config.rtol_solver
     )
     assert res.converged == ref["converged"], f"{label}/converged"
 

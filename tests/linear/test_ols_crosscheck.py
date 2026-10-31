@@ -58,7 +58,12 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-from _assertions import assert_close, assert_dict_close, assert_fields_close
+from _assertions import (
+    assert_close,
+    assert_cov_params_close,
+    assert_dict_close,
+    assert_fields_close,
+)
 from _constants import DATA_DIR, MROZ_X
 from _fixture_cov import load_fixtures_with_cov
 from _helpers import (
@@ -119,6 +124,11 @@ def _assert_fit_stats_close(res, ref: dict, label: str, rtol: float) -> None:
     cov_typeごとの共分散行列（標準誤差）に依存するため呼び出し元の
     rtol（全cov_typeでRTOL_STRICT）を使う。
     """
+    # 係数の分散共分散行列（`<手法>_cov_crosscheck.json`）も同じrtolで比べる。
+    # 標準誤差（対角の平方根）の比較とは別に、非対角成分も検証する。
+    assert_cov_params_close(
+        res.cov_params, ref["cov_params"], label, rtol=rtol
+    )
     _assert_fields_close(
         res,
         ref,

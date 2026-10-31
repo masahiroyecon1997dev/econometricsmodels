@@ -169,7 +169,7 @@ PANEL_TOLERANCES: dict[str, dict[str, float]] = {
     # ~1e-10（ハウスマン検定のp値）、絶対年の列を含む入力を除く）。
     # p値の裾の扱いと
     # `rtol_absolute_year`（絶対年の列、または個体平均に相対1e-3まで近い列（ほぼ別名）を含む入力で
-    # 丸め誤差が拡大する統計量だけ緩める。実測最大 ~6e-8）の理由は`re_two_way`と同じ。
+    # 丸め誤差が拡大する統計量だけ緩める。実測最大 ~6e-8、係数の分散共分散行列は1.2e-7）の理由は`re_two_way`と同じ。
     "re_variance_method": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_REFERENCE_FLOOR,

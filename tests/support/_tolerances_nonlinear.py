@@ -123,6 +123,7 @@ NONLINEAR_TOLERANCES: dict[str, dict[str, float]] = {
     # 係数の分散共分散行列（`<手法>_cov_crosscheck.json`）も同じrtolで比べる。要素ごとの尺度は
     # `sqrt(V_ii·V_jj)`（`assert_cov_params_close`）。実測の最大はこの尺度で
     # Logit 5.3e-10・Probit 6.8e-9（どちらも主リファレンスのstatsmodelsとRの両方、bfgs/lbfgsを除く）。
+    # statsmodels自身のbfgs/lbfgsとの比較（`rtol_solver`）はLogit 1.6e-5・Probit 1.3e-5。
     "logit_crosscheck": {
         "rtol": 2e-7,
         "atol": ATOL_LOGIT_PROBIT_CROSSCHECK,

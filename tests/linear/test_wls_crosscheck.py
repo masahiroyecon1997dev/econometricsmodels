@@ -35,7 +35,12 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-from _assertions import assert_close, assert_dict_close, assert_fields_close
+from _assertions import (
+    assert_close,
+    assert_cov_params_close,
+    assert_dict_close,
+    assert_fields_close,
+)
 from _constants import DATA_DIR
 from _fixture_cov import load_fixtures_with_cov
 from _helpers import (
@@ -90,6 +95,11 @@ def _assert_fit_stats_close(res, ref: dict, label: str, rtol: float) -> None:
     """R²・調整済みR²・AIC・BIC・対数尤度・F統計量・F検定p値・t値・p値・
     信頼区間の検証（`test_ols_crosscheck.py`と同じ方針）。
     """
+    # 係数の分散共分散行列（`<手法>_cov_crosscheck.json`）も同じrtolで比べる。
+    # 標準誤差（対角の平方根）の比較とは別に、非対角成分も検証する。
+    assert_cov_params_close(
+        res.cov_params, ref["cov_params"], label, rtol=rtol
+    )
     _assert_fields_close(
         res,
         ref,

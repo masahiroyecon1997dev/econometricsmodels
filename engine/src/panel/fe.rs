@@ -385,7 +385,7 @@ use statrs::distribution::StudentsT;
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::OlsInput;
 use crate::panel::common::{
-    PanelDimension, PanelError, PanelHcVariant, TimeKeys, panel_classical_cov_params,
+    EffectNames, PanelDimension, PanelError, PanelHcVariant, TimeKeys, panel_classical_cov_params,
     panel_cluster_cov_params, panel_driscoll_kraay_cov_params, panel_hc_cov_params,
     quasi_demean_column, resolve_dk_bandwidth, validate_dk_periods_cover_tested_coefficients,
     validate_panel_input,
@@ -424,6 +424,8 @@ pub struct FeInput {
     dep_var_name: String,
     /// `entity`の整数コード（キー付き。構築時に一度だけ作る、`GroupCodes`のdocコメント参照）。
     entity_codes: GroupCodes,
+    /// 効果の次元ごとの列名（エラーの`column`用。計算には使わない）。
+    effect_names: EffectNames,
 }
 
 impl FeInput {
@@ -515,6 +517,7 @@ impl FeInput {
             time,
             dep_var_name,
             entity_codes: entity,
+            effect_names: EffectNames::default(),
         })
     }
 
@@ -544,7 +547,20 @@ impl FeInput {
             },
             dep_var_name: input.dep_var_name().to_string(),
             entity_codes: input.entity_codes().clone(),
+            effect_names: input.effect_names().clone(),
         }
+    }
+
+    /// 効果の次元の列名を設定する（`engine_pybind`が`effects`の各要素を渡す）。エラーの`column`に
+    /// 載るだけで、計算には影響しない。`time`が`None`なら2つ目の名前は既定のまま。
+    pub fn with_effect_names(mut self, entity: String, time: Option<String>) -> Self {
+        self.effect_names = EffectNames::new(entity, time);
+        self
+    }
+
+    /// 効果の次元の列名。
+    pub(crate) fn effect_names(&self) -> &EffectNames {
+        &self.effect_names
     }
 
     /// `entity`の整数コード。
@@ -1578,7 +1594,11 @@ pub fn within_transform_two_way(input: &FeInput) -> Result<(Vec<f64>, Vec<Vec<f6
 /// entityに観測数1のグループが見つかった場合は`PanelError::SingletonGroup`
 /// （`dimension: PanelDimension::Entity`）。
 pub fn validate_no_singleton_groups_one_way(input: &FeInput) -> Result<(), PanelError> {
-    reject_singleton_group(PanelDimension::Entity, input.entity_codes())
+    reject_singleton_group(
+        PanelDimension::Entity,
+        input.effect_names().get(PanelDimension::Entity),
+        input.entity_codes(),
+    )
 }
 
 /// 2-way FE向けのsingleton検出（`fe-spec.md`1章）。entity・time双方を対称に検出する
@@ -1600,8 +1620,13 @@ pub fn validate_no_singleton_groups_one_way(input: &FeInput) -> Result<(), Panel
 ///   （該当する`dimension`を含む）
 pub fn validate_no_singleton_groups_two_way(input: &FeInput) -> Result<(), PanelError> {
     let time = input.time_codes().ok_or(PanelError::TwoWayRequiresTime)?;
-    reject_singleton_group(PanelDimension::Entity, input.entity_codes())?;
-    reject_singleton_group(PanelDimension::Time, time)
+    let names = input.effect_names();
+    reject_singleton_group(
+        PanelDimension::Entity,
+        names.get(PanelDimension::Entity),
+        input.entity_codes(),
+    )?;
+    reject_singleton_group(PanelDimension::Time, names.get(PanelDimension::Time), time)
 }
 
 /// `ids`（`entity`または`time`の列）に観測数1のグループがあれば
@@ -1612,6 +1637,7 @@ pub fn validate_no_singleton_groups_two_way(input: &FeInput) -> Result<(), Panel
 /// `FeInput`の構築時に作ったコード（`GroupCodes::counts`）をそのまま使う。
 pub(crate) fn reject_singleton_group(
     dimension: PanelDimension,
+    column: &str,
     ids: &GroupCodes,
 ) -> Result<(), PanelError> {
     // 観測順で最初に現れたsingletonを報告する（旧実装の`String`版と同じ選び方）。
@@ -1619,6 +1645,7 @@ pub(crate) fn reject_singleton_group(
         if ids.counts()[c] == 1 {
             return Err(PanelError::SingletonGroup {
                 dimension,
+                column: column.to_string(),
                 group_id: ids.keys()[c].clone(),
             });
         }
@@ -2261,6 +2288,7 @@ mod tests {
             result.unwrap_err(),
             PanelError::SingletonGroup {
                 dimension: PanelDimension::Entity,
+                column: "entity".to_string(),
                 group_id: "c".to_string(),
             }
         );
@@ -2278,6 +2306,7 @@ mod tests {
             validate_no_singleton_groups_one_way(&input).unwrap_err(),
             PanelError::SingletonGroup {
                 dimension: PanelDimension::Entity,
+                column: "entity".to_string(),
                 group_id: "b".to_string(),
             }
         );
@@ -2308,6 +2337,7 @@ mod tests {
             result.unwrap_err(),
             PanelError::SingletonGroup {
                 dimension: PanelDimension::Entity,
+                column: "entity".to_string(),
                 group_id: "c".to_string(),
             }
         );
@@ -2329,6 +2359,7 @@ mod tests {
             result.unwrap_err(),
             PanelError::SingletonGroup {
                 dimension: PanelDimension::Time,
+                column: "time".to_string(),
                 group_id: "3".to_string(),
             }
         );
@@ -2350,6 +2381,7 @@ mod tests {
             result.unwrap_err(),
             PanelError::SingletonGroup {
                 dimension: PanelDimension::Entity,
+                column: "entity".to_string(),
                 group_id: "c".to_string(),
             }
         );
@@ -2388,7 +2420,11 @@ mod tests {
         // regressor_succeeds`と同様の境界値テストの慣習に合わせる）。空配列にはsingleton
         // となりうる要素自体が存在しないため`Ok(())`になる。
         assert_eq!(
-            reject_singleton_group(PanelDimension::Entity, &GroupCodes::from_labels(&[])),
+            reject_singleton_group(
+                PanelDimension::Entity,
+                "entity",
+                &GroupCodes::from_labels(&[])
+            ),
             Ok(())
         );
     }
@@ -2402,6 +2438,47 @@ mod tests {
             FeInput::from_columns(&y, &[], vec![], &entity, Some(&time), "y".into()).unwrap();
 
         assert_eq!(validate_no_singleton_groups_two_way(&input), Ok(()));
+    }
+
+    #[test]
+    fn singleton_group_error_reports_the_column_names_set_by_with_effect_names() {
+        // 既定の名前は"entity"・"time"。`engine_pybind`が渡す列名がエラーの`column`に載る。
+        let y = [1.0, 2.0, 3.0, 4.0, 5.0];
+        let entity = strings(&["a", "a", "b", "b", "c"]);
+        let input = FeInput::from_columns(&y, &[], vec![], &entity, None, "y".into()).unwrap();
+        assert_eq!(
+            validate_no_singleton_groups_one_way(&input),
+            Err(PanelError::SingletonGroup {
+                dimension: PanelDimension::Entity,
+                column: "entity".to_string(),
+                group_id: "c".to_string(),
+            })
+        );
+        let input = input.with_effect_names("firm".to_string(), None);
+        assert_eq!(
+            validate_no_singleton_groups_one_way(&input),
+            Err(PanelError::SingletonGroup {
+                dimension: PanelDimension::Entity,
+                column: "firm".to_string(),
+                group_id: "c".to_string(),
+            })
+        );
+
+        // 時点側の単独グループ（時点"2"は1観測）は2つ目の名前で報告する。
+        let y = [1.0, 2.0, 3.0, 4.0];
+        let entity = strings(&["a", "a", "b", "b"]);
+        let time = strings(&["1", "2", "1", "1"]);
+        let input = FeInput::from_columns(&y, &[], vec![], &entity, Some(&time), "y".into())
+            .unwrap()
+            .with_effect_names("firm".to_string(), Some("year".to_string()));
+        assert_eq!(
+            validate_no_singleton_groups_two_way(&input),
+            Err(PanelError::SingletonGroup {
+                dimension: PanelDimension::Time,
+                column: "year".to_string(),
+                group_id: "2".to_string(),
+            })
+        );
     }
 
     // ── validate_no_zero_variance_regressors ────────────────────────────────
@@ -2817,6 +2894,7 @@ mod tests {
             result.unwrap_err(),
             PanelError::SingletonGroup {
                 dimension: PanelDimension::Entity,
+                column: "entity".to_string(),
                 group_id: "c".to_string(),
             }
         );
@@ -2930,6 +3008,7 @@ mod tests {
             result.unwrap_err(),
             PanelError::SingletonGroup {
                 dimension: PanelDimension::Entity,
+                column: "entity".to_string(),
                 group_id: "c".to_string(),
             }
         );

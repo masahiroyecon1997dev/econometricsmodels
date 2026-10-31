@@ -3,8 +3,8 @@
 A thin wrapper around `econometricsmodels._lib.fit_re` (the Rust
 implementation). Validation and estimation happen on the Rust side; this
 module only provides the Python-facing API shape for polars DataFrames:
-`entity` as a column name (`time` goes in `REOptions`), `x` as a list of
-column names, and an options object for the estimation settings.
+`effects` and `x` as lists of column names, and an options object for
+the estimation settings.
 
 `REOptions` is re-exported as-is from `_lib`. Unlike FE, the Hausman
 test against the equivalent FE specification is computed by `fit()` and
@@ -37,28 +37,38 @@ class RE:
     `REOptions.variance_method` selects Wallace-Hussain or Amemiya
     instead.
 
-    Unlike FE, RE has an intercept. By default it estimates one-way
-    (entity) random effects. Setting `REOptions.time` requests two-way
-    (entity + time) random effects, which requires a balanced panel
-    (`ValidationError` otherwise). The Hausman test and the panel R²
+    Unlike FE, RE has an intercept. `effects` with one column
+    estimates one-way (entity) random effects; with two columns, the
+    entity and then the time identifier, it estimates two-way random
+    effects, which requires a balanced panel (`ValidationError`
+    otherwise). More than two columns are not supported. The order of
+    the two columns matters: the first is the entity dimension
+    (`sigma2_u`, `theta_entity`) and the second the time dimension
+    (`sigma2_lambda`, `theta_time`). The Hausman test and the panel R²
     (within / between / overall) are available for both one-way and
     two-way effects; see `REResults`.
 
     Args:
         data: A polars DataFrame containing the dependent variable,
-            independent variables, entity identifier, and (if
-            specified) the `time`, `cluster` and `dk_time` columns of
-            the options.
+            independent variables, the `effects` columns, and (if
+            specified) the `cluster` and `dk_time` columns of the
+            options.
         y: Column name of the dependent variable.
         x: List of column names of the independent variables. Must
             contain at least one column name. A time-invariant
             regressor (constant over time within every entity) is
             allowed, unlike in FE.
-        entity: Column name of the entity (individual/panel unit)
-            identifier.
+        effects: List of one or two column names that define the random
+            effects. The first is the entity (individual/panel unit)
+            identifier; the optional second is the time identifier,
+            which makes the model two-way (balanced panels only). The
+            order matters: the first column gives `sigma2_u` and
+            `theta_entity`, the second `sigma2_lambda` and `theta_time`
+            (see above), and the first is also the default cluster
+            key.
         options: Estimation options. Defaults to `REOptions()`
-            (`cov_type="cluster"` on `entity`, confidence_level=0.95)
-            when omitted.
+            (`cov_type="cluster"` on the first column of `effects`,
+            confidence_level=0.95) when omitted.
 
     Examples:
         >>> import polars as pl
@@ -70,9 +80,27 @@ class RE:
         ...         "id": ["a", "a", "b", "b", "c", "c"],
         ...     }
         ... )
-        >>> result = RE(df, y="y", x=["x1"], entity="id").fit()
+        >>> result = RE(df, y="y", x=["x1"], effects=["id"]).fit()
         >>> round(result.params["x1"], 3)
         0.315
+
+        Two-way effects take a second column, the time identifier:
+
+        >>> panel = pl.DataFrame(
+        ...     {
+        ...         "y": [1.2, 2.1, 2.9, 2.0, 3.2, 3.9]
+        ...         + [0.5, 1.7, 2.2, 3.1, 3.8, 5.2],
+        ...         "x1": [1.0, 2.0, 3.0, 1.5, 2.5, 3.0]
+        ...         + [0.5, 1.0, 2.0, 2.0, 3.0, 4.0],
+        ...         "id": ["a"] * 3 + ["b"] * 3 + ["c"] * 3 + ["d"] * 3,
+        ...         "t": [1, 2, 3] * 4,
+        ...     }
+        ... )
+        >>> two_way = RE(
+        ...     panel, y="y", x=["x1"], effects=["id", "t"]
+        ... ).fit()
+        >>> two_way.n_groups
+        {'id': 4, 't': 3}
     """
 
     def __init__(
@@ -80,14 +108,14 @@ class RE:
         data: pl.DataFrame,
         y: str,
         x: list[str],
-        entity: str,
+        effects: list[str],
         *,
         options: REOptions | None = None,
     ) -> None:
         self._data = data
         self._y = y
         self._x = x
-        self._entity = entity
+        self._effects = effects
         self._options = options if options is not None else REOptions()
 
     def fit(self) -> REResults:
@@ -98,15 +126,17 @@ class RE:
 
         Raises:
             TypeError: An argument has the wrong type (for example
-                `x` is a string instead of a list of column names). A
-                builtin exception, not a `ValidationError`.
+                `x` or `effects` is a string instead of a list of
+                column names). A builtin exception, not a
+                `ValidationError`.
             ValidationError: The input or options are invalid. A
                 subclass of `ValueError`. For example:
 
                 - `x` is empty, a column is missing, or a column
                   contains missing values, NaN or infinity.
-                - `y`, `x`, `entity` and `time` overlap, or `dk_time`
-                  equals `y` or `entity`.
+                - `effects` is empty or has more than two columns, or
+                  `y`, `x` and `effects` overlap, or `dk_time` equals
+                  `y` or the first column of `effects`.
                 - There are insufficient observations, or
                   `confidence_level` is out of range.
                 - `cov_type` is unknown or `"hc0"` (not supported for
@@ -114,9 +144,9 @@ class RE:
                 - `dk_time` is given with a `cov_type` other than
                   `"dk"`, or `cov_type="dk"` is requested without
                   `dk_time`.
-                - A two-way model (`time` set) is fitted on an
-                  unbalanced panel or with a time period that has a
-                  single observation.
+                - A two-way model (two columns in `effects`) is fitted
+                  on an unbalanced panel or with a time period that has
+                  a single observation.
                 - An entity has a single observation.
                 - `cov_type="dk"` with no more unique `dk_time` periods
                   than regressors: the Driscoll-Kraay covariance has
@@ -144,7 +174,7 @@ class RE:
                   perfectly (residuals zero up to rounding).
         """
         raw = _lib.fit_re(
-            self._data, self._y, self._x, self._entity, self._options
+            self._data, self._y, self._x, self._effects, self._options
         )
         return REResults(raw)
 
@@ -176,7 +206,7 @@ class REResults:
       apply are `None`.
     - Fit: `r_squared_within`, `r_squared_between`,
       `r_squared_overall`, `log_likelihood`, `aic`, `bic`.
-    - Panel size: `n_obs`, `n_entities`, `n_periods` (two-way only).
+    - Panel size: `n_obs`, `n_groups`.
     - Model size: `df_model`, `df_resid`, `dep_var_name`.
     - Settings echoed back: `cov_type`, `dk_bandwidth_used`.
     - Residuals: `residuals` (quasi-demeaned).
@@ -274,8 +304,9 @@ class REResults:
     @property
     def df_resid(self) -> int:
         """Residual degrees of freedom (`n - df_model`, where `df_model`
-        counts the intercept; unlike FE's `n - n_entities - k`, since RE
-        is a GLS transform that does not consume entity-dummy degrees of
+        counts the intercept; unlike FE's `n - G1 - k`, with `G1` the
+        group count of the first `effects` column, since RE is a GLS
+        transform that does not consume entity-dummy degrees of
         freedom)."""
         return self._raw.df_resid
 
@@ -287,17 +318,14 @@ class REResults:
         return self._raw.df_model
 
     @property
-    def n_entities(self) -> int:
-        """Number of panel entities."""
-        return self._raw.n_entities
-
-    @property
-    def n_periods(self) -> int | None:
-        """Number of unique time periods (two-way effects only; `None`
-        for one-way, also when only `REOptions.dk_time` is given).
-        Two-way requires a balanced panel, so this equals the number of
-        observations per entity."""
-        return self._raw.n_periods
+    def n_groups(self) -> dict[str, int]:
+        """Number of groups (unique values) of each column in
+        `effects`, keyed by column name in the order given: one entry
+        for a one-way model, two for a two-way model. Two-way requires
+        a balanced panel, so the count of the second column equals the
+        number of observations per group of the first. For example
+        `{"id": 3, "t": 2}`."""
+        return self._raw.n_groups
 
     @property
     def variance_method(self) -> str:
@@ -331,7 +359,8 @@ class REResults:
 
     @property
     def sigma2_u(self) -> float:
-        """Estimated variance of the entity effect, σ_u² (a negative
+        """Estimated variance of the effect of the first column of
+        `effects` (the entity), σ_u² (a negative
         estimate is raised to 0). Swamy-Arora on an unbalanced panel is
         the `linearmodels` estimator (harmonic mean of the entity
         sizes), which differs from `plm`'s; the difference depends on
@@ -368,14 +397,16 @@ class REResults:
     def theta_entity(self) -> float | None:
         """Two-way weight θ₁ of the entity means in the GLS
         transformation `x - θ₁·x̄ᵢ - θ₂·x̄ₜ + θ₃·x̄`:
-        `θ₁ = 1 - σ_ε/σ₁` with `σ₁² = σ_ε² + T·σ_u²` (`T` periods).
+        `θ₁ = 1 - σ_ε/σ₁` with `σ₁² = σ_ε² + T·σ_u²` (`T` is the group
+        count of the second column of `effects`, the periods).
         It is 0 when σ_u² is 0. `None` for one-way."""
         return self._raw.theta_entity
 
     @property
     def theta_time(self) -> float | None:
         """Two-way weight θ₂ of the time means: `θ₂ = 1 - σ_ε/σ₂` with
-        `σ₂² = σ_ε² + N·σ_λ²` (`N` entities). It is 0 when σ_λ² is 0.
+        `σ₂² = σ_ε² + N·σ_λ²` (`N` is the group count of the first
+        column of `effects`, the entities). It is 0 when σ_λ² is 0.
         `None` for one-way."""
         return self._raw.theta_time
 

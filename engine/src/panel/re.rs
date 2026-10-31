@@ -221,7 +221,7 @@ use statrs::distribution::{ChiSquared, ContinuousCDF, StudentsT};
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use crate::panel::common::{
-    BetweenMeans, PanelDimension, PanelError, PanelHcVariant, TimeKeys, TwoWayTheta,
+    BetweenMeans, EffectNames, PanelDimension, PanelError, PanelHcVariant, TimeKeys, TwoWayTheta,
     panel_classical_cov_params, panel_cluster_cov_params, panel_driscoll_kraay_cov_params,
     panel_hc_cov_params, quasi_demean_column, quasi_demean_two_way, resolve_dk_bandwidth,
     validate_dk_periods_cover_tested_coefficients, validate_panel_input, xtx_inverse,
@@ -301,6 +301,8 @@ pub struct ReInput {
     dep_var_name: String,
     /// `entity`の整数コード（構築時に一度だけ作る、`GroupCodes`のdocコメント参照）。
     entity_codes: GroupCodes,
+    /// 効果の次元ごとの列名（エラーの`column`用。計算には使わない）。
+    effect_names: EffectNames,
 }
 
 impl ReInput {
@@ -394,7 +396,20 @@ impl ReInput {
             time,
             dep_var_name,
             entity_codes: entity,
+            effect_names: EffectNames::default(),
         })
+    }
+
+    /// 効果の次元の列名を設定する（`engine_pybind`が`effects`の各要素を渡す）。エラーの`column`に
+    /// 載るだけで、計算には影響しない。`time`が`None`なら2つ目の名前は既定のまま。
+    pub fn with_effect_names(mut self, entity: String, time: Option<String>) -> Self {
+        self.effect_names = EffectNames::new(entity, time);
+        self
+    }
+
+    /// 効果の次元の列名。
+    pub(crate) fn effect_names(&self) -> &EffectNames {
+        &self.effect_names
     }
 
     /// `entity`の整数コード。
@@ -861,8 +876,13 @@ pub(crate) fn internal_fe(
         ReEffects::TwoWay => {
             let entity = input.entity_codes();
             let time = input.time_codes().ok_or(PanelError::TwoWayRequiresTime)?;
-            reject_singleton_group(PanelDimension::Entity, entity)?;
-            reject_singleton_group(PanelDimension::Time, time)?;
+            let names = input.effect_names();
+            reject_singleton_group(
+                PanelDimension::Entity,
+                names.get(PanelDimension::Entity),
+                entity,
+            )?;
+            reject_singleton_group(PanelDimension::Time, names.get(PanelDimension::Time), time)?;
             validate_balanced_panel(entity, time)?;
             let time_varying = two_way_time_varying_regressor_indices(input.x(), entity, time);
             let fe = FeEstimator::fit(
@@ -2378,6 +2398,7 @@ mod tests {
             result.unwrap_err(),
             PanelError::SingletonGroup {
                 dimension: PanelDimension::Entity,
+                column: "entity".to_string(),
                 group_id: "c".to_string(),
             }
         );
@@ -5197,6 +5218,7 @@ mod tests {
             result.unwrap_err(),
             PanelError::SingletonGroup {
                 dimension: PanelDimension::Entity,
+                column: "entity".to_string(),
                 group_id: "c".to_string(),
             }
         );
@@ -5256,6 +5278,7 @@ mod tests {
         let untouched: [fn() -> PanelError; 3] = [
             || PanelError::SingletonGroup {
                 dimension: PanelDimension::Entity,
+                column: "entity".to_string(),
                 group_id: "a".to_string(),
             },
             || PanelError::UnbalancedPanelForTwoWay {

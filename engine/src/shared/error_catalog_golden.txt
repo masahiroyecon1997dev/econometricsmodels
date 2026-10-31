@@ -13,7 +13,7 @@ AUGMENT_COLUMN_EXISTS [Validation]: The data already has a column named 'abc', a
 OPTION_UNKNOWN_VALUE [Validation]: Unknown value "abc" for abc. Use one of: "a", "b".
 OPTION_UNUSED [Validation]: abc is only used when abc, so it would be silently ignored. Set abc, or remove abc.
 HAC_TIME_REQUIRED [Validation]: abc="hac" requires the hac_time option, the column that gives the time order of the observations; the row order of the data is never assumed to be the time order. Pass hac_time, using an index column such as df.with_row_index("t") if the rows are already in time order.
-DK_TIME_REQUIRED [Validation]: cov_type="dk" requires the dk_time option, the column that defines the time periods of the Driscoll-Kraay estimator; it is not taken from the time option, which only sets the two-way effects. Pass dk_time explicitly.
+DK_TIME_REQUIRED [Validation]: cov_type="dk" requires the dk_time option, the column that defines the time periods of the Driscoll-Kraay estimator; it is not taken from the columns in effects. Pass dk_time explicitly.
 CLUSTER_REQUIRED [Validation]: abc="cluster" requires the cluster option, the column that identifies the clusters. Pass the column name, for example cluster="firm_id".
 CONFIDENCE_LEVEL_OUT_OF_RANGE [Validation]: confidence_level must be strictly between 0 and 1, got 1.5. Use a value such as 0.95.
 TOLERANCE_NOT_POSITIVE_FINITE [Validation]: abc must be a positive finite number, got 1.5. Omit the option to use the default, or pass a small positive number.
@@ -55,8 +55,9 @@ INSUFFICIENT_INSTRUMENTS [Validation]: The model has 3 endogenous regressor(s) b
 INSUFFICIENT_OBSERVATIONS_FOR_FIRST_STAGE [Validation]: The first stage needs more observations than its 3 coefficient(s) (instruments, exogenous regressors and the intercept): 3 observation(s), at least 3 needed. Add observations, or remove instruments or exogenous regressors.
 GMM_WEIGHT_CLUSTER_COUNT_TOO_SMALL [Validation]: gmm_weight_type="cluster" needs at least 3 clusters for 3 instrument(s) (including exogenous regressors), but the cluster column has 3. Use a cluster column with more distinct values, or set a different gmm_weight_type.
 INSUFFICIENT_DEGREES_OF_FREEDOM [Validation]: Not enough observations for the panel model: 3 observation(s), but 3 coefficient(s) and 3 fixed-effect parameter(s) (entity effects, plus time effects in a two-way model) must be estimated; at least 3 are needed. Add observations, or remove regressors.
-SINGLETON_GROUP [Validation]: The abc group 'abc' has only one observation, and singleton groups are not dropped automatically. Remove its rows from the input.
-PANEL_NOT_BALANCED_FOR_TWO_WAY [Validation]: Two-way estimation requires a balanced panel: 3 observation(s) for 3 entities and 3 periods, but 3 are expected. Make every entity observed in every period, or estimate one-way effects by omitting the time option.
+SINGLETON_GROUP [Validation]: The group 'abc' of column 'abc' (given as abc) has only one observation, and singleton groups are not dropped automatically. Remove its rows from the input.
+EFFECTS_TOO_MANY [Validation]: abc supports at most 3 columns in effects, but 3 were given. Pass at most 3 columns in effects.
+PANEL_NOT_BALANCED_FOR_TWO_WAY [Validation]: Two-way estimation requires a balanced panel: 3 observation(s) for 3 entities and 3 periods, but 3 are expected. Make every entity observed in every period, or estimate one-way effects by passing a single column in effects.
 REGRESSOR_NO_WITHIN_VARIATION [Validation]: Regressor 'abc' has no variation left after the within transformation: it is time-invariant, or collinear with the fixed effects. Remove the regressor from x.
 OUTCOME_CONSTANT_WITHIN_ENTITY [Validation]: The outcome has no variation left after the fixed effects are removed: it is constant within every entity, or fully explained by the entity and time effects. Use an outcome that varies within entities.
 DK_PERIODS_TOO_FEW [Validation]: cov_type="dk" needs at least 3 unique time periods in dk_time, but there are 3. Use a dk_time column with more distinct periods, or set a different cov_type.

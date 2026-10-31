@@ -186,6 +186,5 @@ arg_extractors! {
     gmm_type_arg => extract_strict_opt_text("gmm_type") -> Option<String>;
     cluster_arg => extract_strict_opt_column("cluster") -> Option<String>;
     hac_time_arg => extract_strict_opt_column("hac_time") -> Option<String>;
-    time_arg => extract_strict_opt_column("time") -> Option<String>;
     dk_time_arg => extract_strict_opt_column("dk_time") -> Option<String>;
 }

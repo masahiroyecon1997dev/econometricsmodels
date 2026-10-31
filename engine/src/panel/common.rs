@@ -103,6 +103,45 @@ impl fmt::Display for PanelDimension {
     }
 }
 
+/// 効果の次元ごとの列名。エラーの`column`に載せるためだけに`FeInput`/`ReInput`が保持する
+/// （`engine_pybind`が`effects`の各要素の列名を渡す）。計算には使わない。
+///
+/// 既定は`"entity"`・`"time"`で、`engine`単体（テスト等）の構築ではこのまま使う。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EffectNames {
+    entity: String,
+    time: String,
+}
+
+impl Default for EffectNames {
+    fn default() -> Self {
+        Self {
+            entity: "entity".to_string(),
+            time: "time".to_string(),
+        }
+    }
+}
+
+impl EffectNames {
+    /// 1つ目の次元（個体）と、あれば2つ目の次元（時点）の列名を設定する。
+    /// 2つ目が`None`なら既定の名前を残す（1-wayでは使われない）。
+    pub(crate) fn new(entity: String, time: Option<String>) -> Self {
+        let default = Self::default();
+        Self {
+            entity,
+            time: time.unwrap_or(default.time),
+        }
+    }
+
+    /// `dimension`に対応する列名。
+    pub(crate) fn get(&self, dimension: PanelDimension) -> &str {
+        match dimension {
+            PanelDimension::Entity => &self.entity,
+            PanelDimension::Time => &self.time,
+        }
+    }
+}
+
 /// REの分散成分推定で、between回帰がどの単位の平均に対する回帰か
 /// （`PanelError::BetweenRegressionFailed`の`means`）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -174,6 +213,8 @@ pub enum PanelError {
     #[error("{}", self.catalog_message())]
     SingletonGroup {
         dimension: PanelDimension,
+        /// そのグループを定める列の名前（`effects`の要素）。
+        column: String,
         group_id: String,
     },
 
@@ -463,10 +504,12 @@ impl ErrorInfo for PanelError {
                     .param("min_obs", n_effects + k + 1)
             }
             Self::SingletonGroup {
-                dimension,
+                dimension: _,
+                column,
                 group_id,
             } => ErrorReport::new(ErrorCode::SingletonGroup)
-                .param("argument", dimension.argument_name())
+                .param("argument", "effects")
+                .param("column", column.as_str())
                 .param("group", group_id.as_str()),
             Self::UnbalancedPanelForTwoWay {
                 n_obs,
@@ -1164,18 +1207,20 @@ mod tests {
             (
                 PanelError::SingletonGroup {
                     dimension: PanelDimension::Entity,
+                    column: "firm".to_string(),
                     group_id: "a".to_string(),
                 },
                 ErrorCode::SingletonGroup,
-                "The entity group 'a' has only one observation, and singleton groups are not dropped automatically.",
+                "The group 'a' of column 'firm' (given as effects) has only one observation, and singleton groups are not dropped automatically.",
             ),
             (
                 PanelError::SingletonGroup {
                     dimension: PanelDimension::Time,
+                    column: "year".to_string(),
                     group_id: "2020".to_string(),
                 },
                 ErrorCode::SingletonGroup,
-                "The time group '2020' has only one observation, and singleton groups are not dropped automatically.",
+                "The group '2020' of column 'year' (given as effects) has only one observation, and singleton groups are not dropped automatically.",
             ),
             (
                 PanelError::UnbalancedPanelForTwoWay {
@@ -1427,20 +1472,24 @@ mod tests {
         assert_eq!(
             PanelError::SingletonGroup {
                 dimension: PanelDimension::Entity,
+                column: "entity".to_string(),
                 group_id: "a".to_string(),
             },
             PanelError::SingletonGroup {
                 dimension: PanelDimension::Entity,
+                column: "entity".to_string(),
                 group_id: "a".to_string(),
             }
         );
         assert_ne!(
             PanelError::SingletonGroup {
                 dimension: PanelDimension::Entity,
+                column: "entity".to_string(),
                 group_id: "a".to_string(),
             },
             PanelError::SingletonGroup {
                 dimension: PanelDimension::Time,
+                column: "time".to_string(),
                 group_id: "a".to_string(),
             }
         );

@@ -88,6 +88,7 @@ plain_pickle_field!(
     i64,
     String,
     Vec<String>,
+    Vec<usize>,
     (f64, f64),
     BTreeMap<String, f64>,
     HashMap<String, f64>,

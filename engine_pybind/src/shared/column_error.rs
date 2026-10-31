@@ -63,9 +63,9 @@ pub(crate) enum ColumnRole {
     Numeric,
     /// 行の並び順を決めるだけに使う列（HACの`hac_time`）。
     TimeOrder,
-    /// グループの同一性だけが意味を持つ列（`entity`・`cluster`）。
+    /// グループの同一性だけが意味を持つ列（`effects`の先頭の列・`cluster`）。
     GroupIdentifier,
-    /// 時点を表す列（FE/REの`time`・`dk_time`）。
+    /// 時点を表す列（FE/REの`effects`の2つ目・`dk_time`）。
     Time,
 }
 

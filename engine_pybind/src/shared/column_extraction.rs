@@ -591,9 +591,9 @@ pub fn extract_model_x_columns(
 /// キー列（グループの同一性や時点を表す列）の使われ方。許可するdtypeが異なる。
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum KeyRole {
-    /// グループの同一性だけが意味を持つ列（`entity`・`cluster`）。
+    /// グループの同一性だけが意味を持つ列（`effects`の先頭の列・`cluster`）。
     Identity,
-    /// 時点を表す列（FE/REの`time`・`dk_time`）。
+    /// 時点を表す列（FE/REの`effects`の2つ目・`dk_time`）。
     Time,
 }
 
@@ -649,7 +649,7 @@ fn check_key_dtype(
     ))
 }
 
-/// `df`から`name`列を、同一性だけが意味を持つグループキー（`entity`・`cluster`）として
+/// `df`から`name`列を、同一性だけが意味を持つグループキー（`effects`の先頭の列・`cluster`）として
 /// 文字列のVecで取り出す。
 ///
 /// 行ごとに`String`を作る旧経路で、本番のコードは[`extract_cluster_groups`]・
@@ -768,7 +768,7 @@ pub fn extract_optional_cluster_groups(
         .transpose()
 }
 
-/// `df`から`name`列を、パネルのエンティティ列（`entity`）として整数コード化した`GroupCodes`で
+/// `df`から`name`列を、パネルのエンティティ列（`effects`の先頭の列）として整数コード化した`GroupCodes`で
 /// 取り出す。[`extract_cluster_groups`]と同じ分解で、グループのキー（ラベル）も作る
 /// （`fixed_effects()`のキーに使う）。
 ///
@@ -789,7 +789,7 @@ pub fn extract_entity_groups(
     })
 }
 
-/// `df`から`name`列を、時点を表すキー（FE/REの`time`・`dk_time`）として、ラベルと
+/// `df`から`name`列を、時点を表すキー（FE/REの`effects`の2つ目・`dk_time`）として、ラベルと
 /// **値の順序**を持つ`TimeKeys`で取り出す。行ごとの`String`は作らない
 /// （[`extract_cluster_groups`]と同じ分解）。
 ///

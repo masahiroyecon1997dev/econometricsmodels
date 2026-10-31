@@ -7,12 +7,19 @@
 //! （`Common`バリアントの`CommonError`は`report()`が委譲する）は`engine`側が決める。
 //! ここでは`crate::shared::errors::to_pyerr`に渡すだけで、バリアントごとの分岐は持たない。
 
-use engine::panel::common::PanelError;
+use engine::panel::common::{PanelError, TimeKeys};
 use engine::shared::error_catalog::{ErrorCode, ParamValue};
-use pyo3::{PyErr, PyResult};
+use engine::shared::group_codes::GroupCodes;
+use polars::prelude::DataFrame;
+use pyo3::prelude::*;
+use pyo3::types::PyDict;
 
+use crate::shared::column_error::ColumnSource;
+use crate::shared::column_extraction::{extract_entity_groups, extract_time_keys};
 use crate::shared::errors::{to_pyerr, unknown_option_value, user_error};
-use crate::shared::validation::{RoleValue, reject_unused_option, validate_no_duplicate_roles};
+use crate::shared::validation::{
+    RoleValue, reject_unused_option, validate_no_duplicate_roles, validate_x_non_empty,
+};
 
 /// `cov_type`の検査でFEとREの文言を切り替えるためのモデル種別。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -96,7 +103,7 @@ pub(crate) fn parse_panel_cov_kind(cov_type: &str, model: PanelModel) -> PyResul
 
 /// DKの時点列`dk_time`が指定されていることを確かめ、その列名を返す。
 ///
-/// DKの時点列は`dk_time`で明示する（必須）。2-wayの`time`（固定効果・ランダム効果の
+/// DKの時点列は`dk_time`で明示する（必須）。2-wayの時点（`effects`の2つ目。固定効果・ランダム効果の
 /// 構造）を暗黙に借用すると、意図と違う列が選ばれても気づけないため。
 ///
 /// # Errors
@@ -140,24 +147,92 @@ pub(crate) fn check_panel_cov_options(
     Ok(())
 }
 
-/// `dk_time`（Driscoll-Kraay HACの時点列、FE/RE共通）が`y`・`entity`と同じ列でないことを
+/// `dk_time`（Driscoll-Kraay HACの時点列、FE/RE共通）が`y`・`effects`の先頭の列（個体）と同じ列でないことを
 /// 検証する。
 ///
-/// `dk_time`が`y`や`entity`と同じ列だと、時点が数値の`y`の値や個体IDそのものになり、
-/// DKの時点構造が意味を成さない（`dk_time == entity`は全個体が単一時点ずつになる退化入力）。
+/// `dk_time`が`y`や`effects`の先頭の列（個体）と同じ列だと、時点が数値の`y`の値や個体IDそのものになり、
+/// DKの時点構造が意味を成さない（`dk_time`が個体の列と同じなら全個体が単一時点ずつになる退化入力）。
 /// 一方、`x`との重複は許可する（年トレンドを説明変数に入れつつDKの時点にも使う、等は
-/// 正当な使い方）。FEの`time`（2-way固定効果の時間次元）との重複も許可する（固定効果と
+/// 正当な使い方）。`effects`の2つ目（2-wayの時間次元）との重複も許可する（固定効果と
 /// DKで同じ時間粒度を使うのが典型）。そのため`validate_no_duplicate_roles`に渡す
-/// ロールを`y`・`entity`・`dk_time`だけに絞り、`x`・`time`は含めない。
-pub(crate) fn validate_dk_time_role(y: &str, entity: &str, dk_time: Option<&str>) -> PyResult<()> {
+/// ロールを`y`・`effects`の先頭・`dk_time`だけに絞り、`x`・`effects`の2つ目は含めない。
+pub(crate) fn validate_dk_time_role(
+    y: &str,
+    first_effect: &str,
+    dk_time: Option<&str>,
+) -> PyResult<()> {
     let Some(dk_time) = dk_time else {
         return Ok(());
     };
     validate_no_duplicate_roles(&[
         ("y", RoleValue::Single(y)),
-        ("entity", RoleValue::Single(entity)),
+        ("effects", RoleValue::Single(first_effect)),
         ("dk_time", RoleValue::Single(dk_time)),
     ])
+}
+
+/// FE/REが受け付ける`effects`の列数の上限。1要素が1-way、2要素が2-way。
+pub(crate) const MAX_EFFECTS: usize = 2;
+
+/// `effects`の列数を検査する。DataFrameは見ない。
+///
+/// 空は`ROLE_EMPTY`、`MAX_EFFECTS`を超える場合は`EFFECTS_TOO_MANY`。重複と`y`・`x`との
+/// 重複は、列の役割の検査（`validate_no_duplicate_roles`等）が担う。
+///
+/// # Errors
+/// 空、または`MAX_EFFECTS`を超える場合は`ValidationError`。
+pub(crate) fn validate_effects(model: PanelModel, effects: &[String]) -> PyResult<()> {
+    validate_x_non_empty("effects", effects)?;
+    if effects.len() > MAX_EFFECTS {
+        return Err(user_error(
+            ErrorCode::EffectsTooMany,
+            vec![
+                ("model", ParamValue::from(model.name())),
+                ("n_effects", ParamValue::from(effects.len())),
+                ("max_effects", ParamValue::from(MAX_EFFECTS)),
+            ],
+        ));
+    }
+    Ok(())
+}
+
+/// `effects`の列をDataFrameから取り出す。1つ目は個体（同一性だけが意味を持つキー）、
+/// あれば2つ目は時点（値の順序を使うキー）として抽出する。
+///
+/// 列の型の規則は位置で決まる（1つ目は`KeyRole::Identity`、2つ目は`KeyRole::Time`）。
+/// 呼び出し側が`validate_effects`で列数を検査済みであること。
+///
+/// # Errors
+/// 列の抽出時に発覚する問題は`column_extraction`の責務で`ValidationError`。
+pub(crate) fn extract_effects(
+    df: &DataFrame,
+    effects: &[String],
+) -> PyResult<(GroupCodes, Option<TimeKeys>)> {
+    let entity = extract_entity_groups(df, &effects[0], ColumnSource::new("effects", "data"))?;
+    let time = effects
+        .get(1)
+        .map(|column| extract_time_keys(df, column, ColumnSource::new("effects", "data")))
+        .transpose()?;
+    Ok((entity, time))
+}
+
+/// 結果の`n_groups`ゲッターが返す`dict`（列名→グループ数、`effects`の順）を組み立てる。
+pub(crate) fn groups_dict<'py>(
+    py: Python<'py>,
+    effects: &[String],
+    counts: &[usize],
+) -> PyResult<Bound<'py, PyDict>> {
+    let dict = PyDict::new(py);
+    for (column, count) in effects.iter().zip(counts) {
+        dict.set_item(column, count)?;
+    }
+    Ok(dict)
+}
+
+/// 結果の`n_groups`に載せる、`effects`の列ごとのグループ数（`effects`と同じ順）。
+/// 1つ目は個体数、あれば2つ目は時点数。
+pub(crate) fn group_counts(n_entities: usize, n_periods: Option<usize>) -> Vec<usize> {
+    std::iter::once(n_entities).chain(n_periods).collect()
 }
 
 /// `engine::panel::common::PanelError`をPython例外に変換する。
@@ -217,7 +292,7 @@ mod tests {
         assert!(check_panel_cov_options(PanelCovKind::Cluster, None, None, Some(2)).is_err());
         assert!(check_panel_cov_options(PanelCovKind::Dk, Some("g"), Some("t"), None).is_err());
         assert!(check_panel_cov_options(PanelCovKind::Cluster, Some("g"), None, None).is_ok());
-        // `Cluster`で`cluster`が未指定なのはここでは弾かない（entity列にフォールバックする）。
+        // `Cluster`で`cluster`が未指定なのはここでは弾かない（`effects`の先頭の列にフォールバックする）。
         assert!(check_panel_cov_options(PanelCovKind::Cluster, None, None, None).is_ok());
         assert!(check_panel_cov_options(PanelCovKind::Dk, None, Some("t"), Some(2)).is_ok());
     }
@@ -247,5 +322,34 @@ mod tests {
     fn require_dk_time_returns_column_name_or_errors() {
         assert!(matches!(require_dk_time(Some("t")), Ok("t")));
         assert!(require_dk_time(None).is_err());
+    }
+
+    fn names(columns: &[&str]) -> Vec<String> {
+        columns.iter().map(|c| c.to_string()).collect()
+    }
+
+    #[test]
+    fn validate_effects_accepts_one_or_two_columns() {
+        for columns in [vec!["a"], vec!["a", "b"]] {
+            for model in [PanelModel::Fe, PanelModel::Re] {
+                assert!(validate_effects(model, &names(&columns)).is_ok());
+            }
+        }
+    }
+
+    #[test]
+    fn validate_effects_rejects_empty_and_more_than_max_effects() {
+        assert_eq!(MAX_EFFECTS, 2);
+        for model in [PanelModel::Fe, PanelModel::Re] {
+            assert!(validate_effects(model, &[]).is_err());
+            assert!(validate_effects(model, &names(&["a", "b", "c"])).is_err());
+            assert!(validate_effects(model, &names(&["a", "b", "c", "d"])).is_err());
+        }
+    }
+
+    #[test]
+    fn group_counts_has_one_entry_per_effect_in_order() {
+        assert_eq!(group_counts(4, None), vec![4]);
+        assert_eq!(group_counts(4, Some(3)), vec![4, 3]);
     }
 }

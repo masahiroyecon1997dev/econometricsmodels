@@ -1,4 +1,4 @@
-"""2-way RE（`REOptions.time`、バランスパネル）のplmクロスチェック用フィクスチャ
+"""2-way RE（`effects`が2要素、バランスパネル）のplmクロスチェック用フィクスチャ
 （tests/fixtures/benchmarks/re_two_way.json）を生成するスクリプト。
 
 ## 参照実装が`plm`だけの理由（単一参照実装の例外）

@@ -56,7 +56,7 @@ where \(k_{tv}\) counts the time-varying regressors (those with within variation
 
 ## Covariance of the coefficients: `cov_type`
 
-The options are the same as for [FE](fe.md#covariance-of-the-coefficients-cov_type), computed on the quasi-demeaned data: `"classical"`, `"hc1"`, `"hc2"`, `"hc3"`, `"cluster"` (the default, by entity) and `"dk"` (Driscoll-Kraay, requires `dk_time`, which is a different option from the time column in `effects`). `"hc0"` is not available. The covariance matrix of the coefficients is available as `cov_params` on the results, with the constant first. Differences from FE:
+The options are the same as for [FE](fe.md#covariance-of-the-coefficients-cov_type), computed on the quasi-demeaned data: `"classical"`, `"hc1"`, `"hc2"`, `"hc3"`, `"cluster"` (the default, by entity) and `"dk"` (Driscoll-Kraay, requires `dk_time`, which is independent of the columns in `effects`). `"hc0"` is not available. The covariance matrix of the coefficients is available as `cov_params` on the results, with the constant first. Differences from FE:
 
 - Because there are no absorbed dummies, the leverage in HC2 and HC3 is the plain \(h_{ii} = x_i^{*\prime}(X^{*\prime}X^*)^{-1}x_i^*\) of the quasi-demeaned design, and the small-sample factor uses \(K = \mathrm{df}_{\text{model}}\) in every case: \(\frac{G}{G-1}\cdot\frac{n-1}{n-K}\) for `"cluster"` (the form of `plm::vcovHC(type = "sss")`) and \(\frac{T_d}{T_d-1}\cdot\frac{n-1}{n-K}\) for `"dk"`.
 - Cluster standard errors with `G` clusters need \(G\) greater than the number of slope coefficients, \(T_d\) greater than it for Driscoll-Kraay.

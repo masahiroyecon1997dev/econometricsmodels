@@ -23,7 +23,7 @@ print(result.std_errors)
 print(result.r_squared_within)
 ```
 
-`fixed_effects()` recovers the fixed effects post-hoc from the fitted coefficients. It returns one dictionary per column of `effects`, keyed by the column name:
+`fixed_effects()` recovers the fixed effects post-hoc from the fitted coefficients. It returns a single dictionary with one entry per column of `effects`, keyed by the column name. Each entry maps the groups of that column to their effects. The group keys are always strings, even for an integer column such as `year`:
 
 ```python
 print(result.fixed_effects())  # {"id": {"a": ..., "b": ..., "c": ...}} for one-way
@@ -33,7 +33,7 @@ FE has no `predict()`, `augment()`, or `summary()`. See [Options and results](..
 
 ## Two-way effects
 
-Pass two columns in `effects`, the entity first and the time period second, to add time effects as well as entity effects. The panel must be balanced: every entity observed in every period. The first column is the entity (it is the default clustering column and the first key of `fixed_effects()`), and the second is the time period. The example panel has six firms observed in six years and is used in the rest of this page.
+Pass two columns in `effects`, the entity first and the time period second, to add time effects as well as entity effects. The panel must be balanced: every entity observed in every period. The first column is also the default clustering column and the first key of `fixed_effects()`. The example panel below has six firms observed in six years and is used in the rest of this page.
 
 ```python
 from econometricsmodels import FEOptions
@@ -60,19 +60,31 @@ print(two_way.params)
 print(two_way.fixed_effects())  # {"firm": {...}, "year": {...}}
 ```
 
-The number of groups in each column is in `two_way.n_groups`, here `{"firm": 6, "year": 6}`. The first period (in time order) is the reference with a time effect of 0, and the entity effects absorb the overall level. Swapping the two columns leaves the coefficients unchanged (and the standard errors, unless they are clustered on the default column), but changes the default clustering column, the order of the keys of `fixed_effects()` and which column has the reference period. A regressor that does not vary within an entity, or that does not vary across entities in a two-way model, is absorbed by the effects and is rejected.
+The number of groups in each column is in `two_way.n_groups`, a dictionary keyed by column name in the order of `effects`: here `{"firm": 6, "year": 6}`. The first period (in time order) is the reference with a time effect of 0, and the entity effects absorb the overall level.
+
+The order of the two columns matters for these results only:
+
+- the default clustering column (the first column);
+- the order of the keys of `fixed_effects()`;
+- which column has the reference period (the second column).
+
+The coefficients do not depend on the order. Neither do the standard errors, unless the default `cov_type="cluster"` is used without `cluster=`, because the default clustering column is then the first column of `effects`.
+
+A regressor that does not vary within an entity, or that does not vary across entities in a two-way model, is absorbed by the effects and is rejected.
 
 ## Choosing the type of standard error
+
+The examples below use the `panel` data frame defined above.
 
 `FEOptions.cov_type` defaults to `"cluster"` on the first column of `effects`, unlike OLS, because the errors of one entity are usually correlated over time. `"hc0"` is not supported for FE.
 
 | `cov_type` | Use it when |
 |---|---|
-| `"cluster"` (default) | Errors may be correlated within an entity over time (and heteroskedastic). Needs enough entities: the result is unreliable with few. `cluster=` names another column to cluster on |
+| `"cluster"` (default) | Errors may be correlated within an entity over time (and heteroskedastic). Needs enough entities: the result is unreliable with few. `FEOptions(cluster=...)` names another column to cluster on |
 | `"classical"`, `"hc1"` to `"hc3"` | Errors are independent across observations once the effects are removed (homoskedastic for `"classical"`) |
 | `"dk"` | Errors are also correlated across entities in the same period (cross-sectional dependence), for example common shocks. Needs `dk_time`, and works best with many periods |
 
-The Driscoll-Kraay type (`"dk"`) needs the column that gives the time periods, `dk_time`, which may differ from the second column of `effects`; `dk_bandwidth` sets the number of lags of the kernel (by default chosen from the number of periods), and it must be less than the number of periods. The number of periods must also exceed the number of slope coefficients.
+The Driscoll-Kraay type (`"dk"`) needs `dk_time`, the column that gives the time periods. It is independent of `effects`: it may be the second column of `effects` or another column, but not `y` or the first column of `effects`. `dk_bandwidth` sets the number of lags of the kernel (by default chosen from the number of periods); it must be less than the number of periods. The number of periods must also exceed the number of slope coefficients.
 
 ```python
 by_entity = FE(panel, y="y", x=["x1", "x2"], effects=["firm"]).fit()  # cluster by firm
@@ -91,7 +103,7 @@ The other types are described in [OLS: choosing the type of standard error](ols.
 
 ## Fixed or random effects?
 
-Use FE when the entity effects may be correlated with the regressors, which is the usual concern in observational data: it estimates the effect of changes within an entity and discards differences between entities. [RE](re.md) is more efficient when the effects are uncorrelated with the regressors, and it can estimate the effect of a regressor that does not change over time, which FE cannot. The Hausman test that `RE` computes compares the two: see [RE: reading the Hausman test](re.md#reading-the-hausman-test).
+Use FE when the entity effects (or the time effects in a two-way model) may be correlated with the regressors, which is the usual concern in observational data: it estimates the effect of changes within an entity and discards differences between entities. [RE](re.md) is more efficient when the effects are uncorrelated with the regressors, and it can estimate the effect of a regressor that does not change over time, which FE cannot. The Hausman test that `RE` computes compares the two: see [RE: reading the Hausman test](re.md#reading-the-hausman-test).
 
 ## Covariance matrix of the coefficients
 

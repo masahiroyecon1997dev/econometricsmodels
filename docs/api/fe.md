@@ -2,7 +2,7 @@
 
 **FE**: [Usage](../usage/fe.md) · **Options and results** · [Definitions](../methods/fe.md)
 
-`FE` estimates a one-way (entity) or two-way (entity and time) fixed effects ("within") panel regression, with the same constructor and `.fit()` as [OLS](ols.md). `effects` is a required argument: a list of one column (one-way, the entity) or two columns (two-way, the entity then the time period; the panel must be balanced). `FE` supports at most two columns in `effects`. The number of groups of each column is in `FEResults.n_groups`, keyed by column name, and `fixed_effects()` returns the effects of each column in the same order. There is no intercept, since the effects absorb it. The estimator, covariance estimators, R² statistics and the recovery of the fixed effects are defined in [Definitions: FE](../methods/fe.md).
+`FE` estimates a one-way (entity) or two-way (entity and time) fixed effects ("within") panel regression, with the same constructor and `.fit()` as [OLS](ols.md). `effects` is a required argument: a list of one column (one-way, the entity) or two columns (two-way, the entity then the time period; the panel must be balanced). The number of groups of each column is in `FEResults.n_groups`, keyed by column name, and `fixed_effects()` returns the effects of each column in the same order. There is no intercept, since the effects absorb it. The estimator, covariance estimators, R² statistics and the recovery of the fixed effects are defined in [Definitions: FE](../methods/fe.md).
 
 ## Options at a glance
 

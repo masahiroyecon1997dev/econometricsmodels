@@ -2,7 +2,7 @@
 
 **RE**: **Usage** · [Options and results](../api/re.md) · [Definitions](../methods/re.md)
 
-`RE` estimates a random effects (GLS) panel regression: entity effects (one column in `effects`), or entity and time effects on a balanced panel (two columns in `effects`). The variance components are estimated by Swamy-Arora by default; `REOptions(variance_method="wallace_hussain")` or `"amemiya"` selects the other estimators. Unlike FE, RE has an intercept, and a Hausman test comparing against the equivalent FE specification is computed automatically as part of `fit()`.
+`RE` estimates a random effects (GLS) panel regression: entity effects (one column in `effects`), or entity and time effects on a balanced panel (two columns in `effects`). At most two columns are allowed. The variance components are estimated by Swamy-Arora by default; `REOptions(variance_method="wallace_hussain")` or `"amemiya"` selects the other estimators. Unlike FE, RE has an intercept, and a Hausman test comparing against the equivalent FE specification is computed automatically as part of `fit()`.
 
 ```python
 import polars as pl
@@ -25,7 +25,7 @@ print(result.hausman_statistic, result.hausman_p_value)
 
 `REOptions.cov_type` has the same defaults and support as [FE](fe.md#choosing-the-type-of-standard-error) (`"cluster"` on the first column of `effects` by default; `"hc0"` unsupported), and the Driscoll-Kraay type (`cov_type="dk"`) needs `dk_time`. See [Options and results](../api/re.md) for the full list of options. Like FE, RE has no `predict()`, `augment()`, or `summary()`.
 
-## Two-way effects, variance components and standard errors
+## Two-way effects
 
 The example panel has six firms observed in six years.
 
@@ -53,7 +53,13 @@ one_way = RE(panel, y="y", x=["x1", "x2"], effects=["firm"]).fit()
 # Entity and time effects (balanced panel): two columns in `effects`
 two_way = RE(panel, y="y", x=["x1", "x2"], effects=["firm", "year"]).fit()
 print(two_way.sigma2_u, two_way.sigma2_lambda, two_way.sigma2_eps)
+```
 
+In a two-way model the order of `effects` matters: the first column is the entity (`sigma2_u`, `theta_entity`) and the second is the time period (`sigma2_lambda`, `theta_time`). The first column is also the default clustering column, so swapping the two columns leaves the coefficients unchanged but changes the default standard errors and the Hausman statistic, and swaps the labels of the variance components and weights. `RE` supports one or two columns in `effects`; a third column is rejected with a `ValidationError`. The number of groups in each column is in `two_way.n_groups`, a dictionary keyed by column name in the order of `effects`. The weights of the GLS transformation are available as `theta` (one-way, by entity) or `theta_entity`, `theta_time` and `theta_total` (two-way).
+
+## Variance components and standard errors
+
+```python
 # Another estimator of the variance components
 wallace = RE(
     panel,
@@ -74,11 +80,11 @@ dk = RE(
 print(one_way.sigma2_u, wallace.sigma2_u, dk.std_errors)
 ```
 
-`variance_method` chooses how the variance of the entity effect (`sigma2_u`), of the time effect (`sigma2_lambda`, two-way only) and of the idiosyncratic error (`sigma2_eps`) are estimated: `"swamy_arora"` (the default), `"wallace_hussain"` or `"amemiya"`. The formulas, and the unbalanced or time-invariant cases that `"amemiya"` rejects, are in [Definitions: RE](../methods/re.md#variance-components-variance_method). Time-invariant regressors are accepted (FE rejects them). In a two-way model the order of `effects` matters: the first column is the entity (`sigma2_u`, `theta_entity`) and the second is the time period (`sigma2_lambda`, `theta_time`). `RE` takes at most two columns in `effects`, because effects in three or more dimensions are not a standard random effects model; a third column is rejected. The weights of the GLS transformation are available as `theta` (one-way, by entity) or `theta_entity`, `theta_time` and `theta_total` (two-way).
+`variance_method` chooses how the variance of the entity effect (`sigma2_u`), of the time effect (`sigma2_lambda`, two-way only) and of the idiosyncratic error (`sigma2_eps`) are estimated: `"swamy_arora"` (the default), `"wallace_hussain"` or `"amemiya"`. The formulas, and the unbalanced or time-invariant cases that `"amemiya"` rejects, are in [Definitions: RE](../methods/re.md#variance-components-variance_method). Time-invariant regressors are accepted (FE rejects them).
 
 ## Reading the Hausman test
 
-`fit()` always computes a Hausman test, and its result is in `hausman_statistic`, `hausman_p_value` and `hausman_df`. The null hypothesis is that the entity effects are uncorrelated with the regressors, which is what makes RE consistent and efficient. A small p-value rejects it: the RE coefficients differ systematically from those of [FE](fe.md), and FE is the safer choice. A large p-value means the data do not show a difference, and RE, which is more efficient, can be used. Like any test, a large p-value does not prove that the null is true, especially in a small panel.
+`fit()` always computes a Hausman test, and its result is in `hausman_statistic`, `hausman_p_value` and `hausman_df`. The null hypothesis is that the effects (the entity effects, and the time effects in a two-way model) are uncorrelated with the regressors, which is what makes RE consistent and efficient. The test compares RE with the FE model that has the same `effects`. A small p-value rejects it: the RE coefficients differ systematically from those of [FE](fe.md), and FE is the safer choice. A large p-value means the data do not show a difference, and RE, which is more efficient, can be used. Like any test, a large p-value does not prove that the null is true, especially in a small panel.
 
 ```python
 print(one_way.hausman_statistic, one_way.hausman_p_value, one_way.hausman_df)
@@ -88,7 +94,7 @@ The test follows `cov_type` (with the default `"cluster"` it is the cluster-robu
 
 ## Fixed or random effects?
 
-Choose [FE](fe.md) when the entity effects may be correlated with the regressors, and RE when you believe they are not, for example when units are sampled at random from a large population, or when you need the coefficient of a regressor that does not change over time. The Hausman test above compares the two on your data.
+Choose [FE](fe.md) when the entity effects (or the time effects in a two-way model) may be correlated with the regressors, and RE when you believe they are not, for example when units are sampled at random from a large population, or when you need the coefficient of a regressor that does not change over time. The Hausman test above compares the two on your data.
 
 ## Covariance matrix of the coefficients
 

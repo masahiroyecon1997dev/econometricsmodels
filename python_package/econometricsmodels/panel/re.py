@@ -39,12 +39,15 @@ class RE:
 
     Unlike FE, RE has an intercept. `effects` with one column
     estimates one-way (entity) random effects; with two columns, the
-    entity and then the time identifier, it estimates two-way random
+    entity and then the time period, it estimates two-way random
     effects, which requires a balanced panel (`ValidationError`
     otherwise). More than two columns are not supported. The order of
     the two columns matters: the first is the entity dimension
     (`sigma2_u`, `theta_entity`) and the second the time dimension
-    (`sigma2_lambda`, `theta_time`). The Hausman test and the panel R²
+    (`sigma2_lambda`, `theta_time`). The first column is also the
+    default clustering column, so swapping the columns changes the
+    default standard errors and the Hausman test. The Hausman test and
+    the panel R²
     (within / between / overall) are available for both one-way and
     two-way effects; see `REResults`.
 
@@ -60,7 +63,7 @@ class RE:
             allowed, unlike in FE.
         effects: List of one or two column names that define the random
             effects. The first is the entity (individual/panel unit)
-            identifier; the optional second is the time identifier,
+            identifier; the optional second is the time period,
             which makes the model two-way (balanced panels only). The
             order matters: the first column gives `sigma2_u` and
             `theta_entity`, the second `sigma2_lambda` and `theta_time`
@@ -84,7 +87,7 @@ class RE:
         >>> round(result.params["x1"], 3)
         0.315
 
-        Two-way effects take a second column, the time identifier:
+        Two-way effects take a second column, the time period:
 
         >>> panel = pl.DataFrame(
         ...     {
@@ -141,13 +144,14 @@ class RE:
                   `confidence_level` is out of range.
                 - `cov_type` is unknown or `"hc0"` (not supported for
                   RE), or `variance_method` is unknown.
-                - `dk_time` is given with a `cov_type` other than
-                  `"dk"`, or `cov_type="dk"` is requested without
-                  `dk_time`.
+                - `cluster`, `dk_time` or `dk_bandwidth` is given with
+                  a `cov_type` that does not use it, or
+                  `cov_type="dk"` is requested without `dk_time`.
                 - A two-way model (two columns in `effects`) is fitted
-                  on an unbalanced panel or with a time period that has
-                  a single observation.
-                - An entity has a single observation.
+                  on an unbalanced panel.
+                - A group of a column in `effects` has a single
+                  observation (an entity or, in a two-way model, a
+                  time period).
                 - `cov_type="dk"` with no more unique `dk_time` periods
                   than regressors: the Driscoll-Kraay covariance has
                   rank at most `T - 1` (`T` periods), so the Hausman
@@ -304,10 +308,11 @@ class REResults:
     @property
     def df_resid(self) -> int:
         """Residual degrees of freedom (`n - df_model`, where `df_model`
-        counts the intercept; unlike FE's `n - G1 - k`, with `G1` the
-        group count of the first `effects` column, since RE is a GLS
-        transform that does not consume entity-dummy degrees of
-        freedom)."""
+        counts the intercept; unlike FE's `n - G1 - k` (one-way;
+        `n - G1 - G2 + 1 - k` for two-way), with `G1` and `G2` the
+        group counts of the first and second `effects` column, since
+        RE is a GLS transform that does not consume entity-dummy
+        degrees of freedom)."""
         return self._raw.df_resid
 
     @property

@@ -48,7 +48,7 @@ class FE:
             contain at least one column name.
         effects: List of one or two column names that define the fixed
             effects. The first is the entity (individual/panel unit)
-            identifier; the optional second is the time identifier,
+            identifier; the optional second is the time period,
             which makes the model two-way (balanced panels only). The
             order matters: the first column is the default cluster key,
             and the first period of the second column (in time order)
@@ -72,7 +72,7 @@ class FE:
         >>> round(result.params["x1"], 3)
         0.31
 
-        Two-way effects take a second column, the time identifier:
+        Two-way effects take a second column, the time period:
 
         >>> panel = pl.DataFrame(
         ...     {
@@ -131,6 +131,9 @@ class FE:
                   `confidence_level` is out of range.
                 - `cov_type` is unknown or `"hc0"` (not supported for
                   FE).
+                - `cluster`, `dk_time` or `dk_bandwidth` is given with
+                  a `cov_type` that does not use it, or
+                  `cov_type="dk"` is requested without `dk_time`.
                 - A two-way model (two columns in `effects`) is fitted
                   on an unbalanced panel.
                 - A group of a column in `effects` has a single
@@ -404,9 +407,9 @@ class FEResults:
         order of the values of the second column) is fixed to 0 and
         `α_i` absorbs the overall level. The dictionary of the second
         column lists the periods in time order.
-        `fixest::fixef()` instead uses the first time value in
-        observation order as the reference, so the two match
-        numerically only when both choose the same reference period.
+        `fixest::fixef()` chooses its own reference levels, so its
+        values for the time effects can differ from these by a
+        constant.
 
         Returns:
             The fixed effects, shaped as described above. The group key

@@ -89,7 +89,7 @@ print(logit_result.predict())  # fitted probabilities
 print(logit_result.marginal_effects())  # dy/dx with delta-method standard errors
 ```
 
-Methods with extra inputs add arguments: `IV` takes `x_exog`, `x_endog` and `instruments`, `WLS` takes `weight`, and the panel models `FE` and `RE` take `effects`, a list of one or two columns. Columns that define the model are arguments; everything optional, including optional columns such as `cluster`, goes in the options object. [Arguments and options](guide/api-conventions.md) gives the rule and lists the arguments of every model.
+Methods with extra inputs add arguments: `IV` takes `x_exog`, `x_endog` and `instruments`, `WLS` takes `weight`, and the panel models `FE` and `RE` take `effects`, a list of one column (the entity) or two (the entity, then the time period). Columns that define the model are arguments; everything optional, including optional columns such as `cluster`, goes in the options object. [Arguments and options](guide/api-conventions.md) gives the rule and lists the arguments of every model.
 
 ## Handling errors
 

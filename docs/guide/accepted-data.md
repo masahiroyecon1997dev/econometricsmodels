@@ -20,6 +20,8 @@ A column is read in one of four roles, and each role accepts different dtypes. A
 | Time period (panel) | the second column of `effects` (FE, RE, two-way), `dk_time` | Integers, floats, `String`, `Categorical`, `Enum`, `Date`, `Datetime` (no time zone) |
 | Time order (HAC) | `hac_time` | Integers, floats, `Decimal`, `Date`, `Datetime` (with or without a time zone). Not `Boolean`, which has at most two distinct values |
 
+In `FE` and `RE`, the role of a column in `effects` follows its position, not its content: the first column is read as a group identity (an entity) and the second as a time period, and the order is not checked. A *group* is one level of a column of `effects`, for example one entity. If you pass the time column first, it is treated as the entity, including for the default clustering column.
+
 Not accepted in a numeric role: `String`, `Categorical`, `Enum`, `Date`, `Datetime`, `Time`, `Duration`, `Binary`, `List`, `Array`, `Struct`. Also not accepted as a group identity or a time period: `Time`, `Duration`, `Decimal`, `Binary`, `List`, `Array`, `Struct`; nor, as a time period, `Boolean`. A `Datetime` with a time zone is rejected as a group identity or a time period, with a message that says how to remove the zone: convert it to the zone you want to keep, then call `.dt.replace_time_zone(None)`. (`hac_time` accepts a time zone, and is compared in its own dtype rather than converted to a float; see [Order of observations for HAC](#order-of-observations-for-hac).) A column of the `Null` dtype (every value is missing) is reported as containing missing values, not as a dtype problem.
 
 If the numbers you want to use are stored as strings or as dates, convert them yourself so that the intent is explicit:
@@ -50,7 +52,7 @@ Group identity and time period columns are compared by their text form, so only 
 
 For `cov_type="dk"` (Driscoll-Kraay) in FE and RE, the periods of the `dk_time` column must be put in time order. The same order applies to the second column of `effects` in FE and RE, which defines the time effects. The order comes from the values of the column, not from the text of the labels, so integers with different numbers of digits (`1, 2, ..., 12`), negative numbers and decimals are ordered correctly:
 
-| Dtype of the `dk_time` column or the second column of `effects` | Order of the periods |
+| Dtype of `dk_time` or of the second `effects` column | Order of the periods |
 |---|---|
 | Integers, floats | Numeric, ascending |
 | `Date`, `Datetime` (no time zone) | Chronological |
@@ -59,7 +61,7 @@ For `cov_type="dk"` (Driscoll-Kraay) in FE and RE, the periods of the `dk_time` 
 
 A string or a `Categorical` has no time order of its own, so its labels are sorted as text: `"9"` comes after `"10"`, and `"Q10"` comes right after `"Q1"`. If your periods are strings, use labels whose text order is the time order (ISO 8601 dates, zero-padded numbers), or use an `Enum` with the categories listed in time order. The row order of the data does not matter.
 
-The same order applies to the two-way fixed effects returned by `fixed_effects()`: the dictionary of the second column of `effects` lists the periods in time order, and the first period is the reference with an effect of 0.
+The same order applies to the two-way fixed effects returned by `fixed_effects()`: the dictionary keyed by the name of the second `effects` column lists the periods in time order, and its first period is the reference with an effect of 0.
 
 ## Argument types
 

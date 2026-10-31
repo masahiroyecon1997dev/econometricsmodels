@@ -117,7 +117,8 @@ pub struct REOptions {
     /// `cov_type="dk"` (required there, as in `FEOptions.dk_time`). Specifying it with any other
     /// `cov_type` raises `ValidationError`. It may not be the same column as `y` or the
     /// first column of `effects` (`ValidationError`), but may be one of the regressors or
-    /// the second column of `effects`. The periods are ordered by the values of the
+    /// the second column of `effects`. It is independent of `effects`: the columns of
+    /// `effects` are never used as the Driscoll-Kraay periods. The periods are ordered by the values of the
     /// column: numerically for integers and floats, chronologically for `Date` and
     /// `Datetime`, in the order of the categories for `Enum`, and alphabetically for
     /// strings and `Categorical`.

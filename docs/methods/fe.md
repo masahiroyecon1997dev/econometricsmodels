@@ -13,7 +13,7 @@ y_{it} = x_{it}'\beta + \alpha_i + \varepsilon_{it} \quad \text{(one-way)}, \qqu
 y_{it} = x_{it}'\beta + \alpha_i + \gamma_t + \varepsilon_{it} \quad \text{(two-way)}
 \]
 
-with \(n\) observations, \(N\) entities, \(T\) periods and \(k\) slope coefficients. The entities are identified by the first column of `effects`; a second column in `effects` identifies the periods and adds the time effects \(\gamma_t\). The effects are absorbed, so there is **no intercept** and `const` never appears.
+with \(n\) observations, \(N\) entities, \(T\) periods and \(k\) slope coefficients. The entities are identified by the first column of `effects` (\(N\) is its value in `n_groups`); a second column in `effects` identifies the periods (\(T\) is its value in `n_groups`) and adds the time effects \(\gamma_t\). The effects are absorbed, so there is **no intercept** and `const` never appears.
 
 \(\hat\beta\) is the OLS estimator on the within-transformed data, which equals the least-squares dummy-variable estimator:
 
@@ -23,7 +23,7 @@ with \(n\) observations, \(N\) entities, \(T\) periods and \(k\) slope coefficie
 \hat\beta = (\tilde X'\tilde X)^{-1}\tilde X'\tilde y
 \]
 
-The two-way transformation requires a **balanced panel** (every entity observed in every period); a one-way model allows an unbalanced panel and repeated (entity, time) pairs are not checked. The following are rejected rather than handled: an entity (or, for two-way, a period) with a single observation, a regressor with no within-variation (constant over time within every entity), and an outcome with no variation left after the effects are removed. See [Validation and errors](../guide/validation.md).
+The two-way transformation requires a **balanced panel** (every entity observed in every period); a one-way model allows an unbalanced panel. In a two-way model a repeated (entity, time) pair is reported as an unbalanced panel, even when it offsets a missing pair so that the number of observations matches. The following are rejected rather than handled: an entity (or, for two-way, a period) with a single observation, a regressor with no within-variation (constant over time within every entity), and an outcome with no variation left after the effects are removed. See [Validation and errors](../guide/validation.md).
 
 ## Degrees of freedom
 
@@ -36,7 +36,7 @@ The effects count as estimated parameters. `fit()` raises an error when \(n \le 
 
 ## Covariance of the coefficients: `cov_type`
 
-All options are sandwich estimators \((\tilde X'\tilde X)^{-1}\hat S(\tilde X'\tilde X)^{-1}\) on the within-transformed data, scaled as below. Standard errors are the square roots of the diagonal, and the covariance matrix of the coefficients is available as `cov_params` on the results (it holds the slope coefficients only, not the fixed effects). `cov_type` defaults to `"cluster"` on the first column of `effects` (the entity), following `fixest`: panel data almost always have within-entity serial correlation. `"hc0"` is not available.
+All options are sandwich estimators \((\tilde X'\tilde X)^{-1}\hat S(\tilde X'\tilde X)^{-1}\) on the within-transformed data, scaled as below. Standard errors are the square roots of the diagonal, and the covariance matrix of the coefficients is available as `cov_params` on the results (it holds the slope coefficients only, not the fixed effects). `cov_type` defaults to `"cluster"` on the first column of `effects` (the entity), because panel data almost always have within-entity serial correlation. This is the clustering variable that `fixest` uses for `vcov = "cluster"` (its first fixed effect); the default of `fixest` itself is IID standard errors. `"hc0"` is not available.
 
 | `cov_type` | Covariance |
 |---|---|
@@ -60,7 +60,7 @@ following `fixest`'s default `ssc()`. The effective number of parameters \(K\) d
 |---|---|
 | All nested in the clusters (the default: one-way, clustered by entity) | \(\mathrm{df}_{\text{model}}\) minus the number of nested effect levels, plus the number of effect dimensions |
 | Some nested (typically two-way, clustered by entity) | \(\mathrm{df}_{\text{model}}\) minus the nested effect levels, plus the number of nested dimensions |
-| None nested (Stata's `xtreg, fe` situation) | \(\mathrm{df}_{\text{model}}\) |
+| None nested | \(\mathrm{df}_{\text{model}}\) |
 
 and \(K\) is never allowed to be below \(k+1\). `linearmodels` 7.1 instead uses \(n/(n-\text{extra\_df}-k)\) with no \(G/(G-1)\) factor, so cluster standard errors differ from it.
 
@@ -120,6 +120,6 @@ The log-likelihood is computed from the within residuals as for [OLS](ols.md#fit
 The effects are recovered after estimation from the coefficients:
 
 - **One-way:** \(\hat\alpha_i = \bar y_{i\cdot} - \bar x_{i\cdot}'\hat\beta\), returned as a `dict` with the name of the `effects` column as its only key, whose value is a `dict` keyed by entity.
-- **Two-way:** the split of the overall level between \(\alpha_i\) and \(\gamma_t\) is not identified, so the first period in time order is the reference with \(\hat\gamma = 0\) and the entity effects absorb the level. The result has one key per column of `effects` (the entity column first, then the time column), and the periods are listed in time order. `fixest::fixef()` uses the first period in the order of the rows, so its values agree only when that is also the first period in time order.
+- **Two-way:** the split of the overall level between \(\alpha_i\) and \(\gamma_t\) is not identified, so the first period in time order is the reference with \(\hat\gamma = 0\) and the entity effects absorb the level. The result has one key per column of `effects` (the entity column first, then the time column), and the periods are listed in time order. `fixest::fixef()` chooses its own reference levels, so its values for the time effects can differ from these by a constant.
 
 `FE` has no `predict()`, `augment()` or `summary()`.

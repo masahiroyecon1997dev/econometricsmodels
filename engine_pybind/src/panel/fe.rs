@@ -455,9 +455,8 @@ impl FEResult {
     /// float columns, chronological for `Date`/`Datetime`, the category order for
     /// `Enum`, alphabetical for strings and `Categorical`) — a deterministic convention
     /// independent of row order. The dictionary of the second column lists the periods in
-    /// the same order. `fixest::fixef()` instead uses the time value that appears first in
-    /// observation order, so numerical agreement with `fixest` for two-way effects
-    /// only holds when those two choices of `t_ref` coincide for the given data.
+    /// the same order. `fixest::fixef()` chooses its own reference levels, so its values for the
+    /// time effects can differ from these by a constant.
     fn fixed_effects(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
         guard(|| {
             // 列名をキーにした入れ子の`dict`にする（1-wayは1項目、2-wayは2項目。

@@ -4,13 +4,13 @@ This page summarizes which reference distribution each method uses for its test 
 
 ## Reference distributions by method
 
-Notation: `n` is the number of observations, `k` the number of coefficients, `G` the number of clusters, `G1` the number of groups of the first column of `effects` (the first item of `n_groups`, the entities), and `t_periods` the number of distinct periods of the `dk_time` column (the periods of the Driscoll-Kraay kernel).
+Notation: `n` is the number of observations, `k` the number of coefficients, `G` the number of clusters, `N` the number of entities (the groups of the first column of `effects`, the first entry of `n_groups`), and `t_periods` the number of distinct periods of the `dk_time` column (the periods of the Driscoll-Kraay kernel).
 
 | Method | Coefficient statistics (`test_stats`) | Overall test | Degrees of freedom |
 |---|---|---|---|
 | OLS | t | F (`f_statistic`) | `n - k`; `G - 1` with `cov_type="cluster"` |
 | WLS | t | F | same as OLS |
-| FE | t | F | `df_resid` (`n - G1 - k` for one-way) for `classical`/`hc1`-`hc3`; `G - 1` with `cov_type="cluster"`; `t_periods - 1` with `cov_type="dk"` |
+| FE | t | F | `df_resid` (`n - N - k` for one-way) for `classical`/`hc1`-`hc3`; `G - 1` with `cov_type="cluster"`; `t_periods - 1` with `cov_type="dk"` |
 | RE (one-way and two-way) | t | F | `df_resid` (`n - k`, with `k` all coefficients including the constant, for `classical`/`hc1`-`hc3`); `G - 1` with `cov_type="cluster"`; `t_periods - 1` with `cov_type="dk"`. The F statistic follows `cov_type`, so `f_df_denom` equals the degrees of freedom of the t tests. See [Definitions: RE](../methods/re.md#degrees-of-freedom) |
 | IV, `estimator="2sls"` | t | F (`wald_dist="f"`) | `df_resid`; `G - 1` with `cov_type="cluster"` |
 | IV, `estimator="gmm"` | normal | chi-squared (`wald_dist="chi2"`) | none |
@@ -20,7 +20,7 @@ Notation: `n` is the number of observations, `k` the number of coefficients, `G`
 - Every results object reports the distribution actually used in `stat_dist` (`"t"` or `"normal"`) and the t degrees of freedom in `stat_df` (`None` for the normal distribution). `stat_df` is the value used for the p-values and confidence intervals, so it can differ from `df_resid` (for example with `cov_type="cluster"` in OLS, WLS, FE, RE and 2SLS, or `cov_type="dk"` in FE and RE).
 - The degrees of freedom of every test statistic are exposed so you can recompute a p-value yourself: `f_df_num` / `f_df_denom` (OLS, WLS, FE, RE), `wald_df_num` / `wald_df_denom` (IV), `wu_hausman_df_num` / `wu_hausman_df_denom`, `weak_instrument_f_df_num` / `weak_instrument_f_df_denom`, `overid_df` (IV), `lr_df` (Logit, Probit), `wald_df` (Tobit), `hausman_df` (RE). A degrees-of-freedom field is `None` when its statistic is not available. The overall F statistic (`f_statistic`, `f_p_value`) is also `None` when it is not defined, for example for a first-stage regression with `cov_type="cluster"` and no more clusters than slope coefficients (see [Weak instruments](#weak-instruments)).
 - `REOptions.variance_method` (`"swamy_arora"`, `"wallace_hussain"`, `"amemiya"`) selects how the RE variance components are estimated. Wallace-Hussain and Amemiya follow `plm`; Swamy-Arora on an unbalanced one-way panel is the `linearmodels` formula, not `plm`'s, so the two give different numbers there. The formulas and the cases that are rejected are in [Definitions: RE](../methods/re.md#variance-components-variance_method).
-- Two-way RE (two columns in `effects`, balanced panels) reports the number of periods as the second item of `n_groups`. The second column of `effects` only defines the time effect: the Driscoll-Kraay time column is the separate `dk_time` option.
+- Two-way RE (two columns in `effects`, balanced panels) reports the number of periods as the value for the second `effects` column in `n_groups`. The second column of `effects` only defines the time effect: the Driscoll-Kraay time column is the separate `dk_time` option.
 - `wald_dist` names the distribution of the overall Wald statistic: `"f"` or `"chi2"` for IV, depending on the estimator, and always `"chi2"` for Tobit.
 - `marginal_effects()` always uses the normal distribution.
 
@@ -44,7 +44,7 @@ The defaults below were checked against the package versions listed under [Verif
 | `glm(family = gaussian)` | t | not applicable (use OLS) |
 | `fixest::feols` | t, `n - k`; with `cluster`, t with `G - 1` | OLS matches; FE's small-sample corrections (`cov_type="cluster"`/`"dk"`) and their degrees of freedom (`G - 1` / `t_periods - 1`) are aligned with fixest's `ssc()` defaults (`K.fixef="nonnested"` for cluster, `"full"` for `hc1`-`hc3`/`dk`). One exception: with `dk_bandwidth = t_periods - 1`, `vcov = DK(lag = t_periods - 1)` gave standard errors equal to the computation with lags 1 to `t_periods - 2` only, so they differ from this package, which includes the last lag of the standard Bartlett kernel; smaller bandwidths agree. The fixest documentation does not state the maximum lag, so the cause was not determined |
 | `fixest::feglm` | z | same as Logit / Probit |
-| `plm` (`within`) | t, `df.residual` (`n - G1 - k`) | same as FE for `classical` and `hc1`-`hc3`; with `cov_type="cluster"` or `"dk"` this package uses `G - 1` or `t_periods - 1` degrees of freedom |
+| `plm` (`within`) | t, `df.residual` (`n - N - k`) | same as FE for `classical` and `hc1`-`hc3`; with `cov_type="cluster"` or `"dk"` this package uses `G - 1` or `t_periods - 1` degrees of freedom |
 | `plm` (`random`) | z (normal) | RE uses t, so p-values and confidence intervals differ; RE's `cov_type="cluster"` small-sample correction matches `plm::vcovHC(type="sss")` (Stata/R-style `G/(G-1)·(n-1)/(n-K)`) |
 | `ivreg::ivreg` | t | same as 2SLS, except with cluster standard errors: `ivreg` takes the Wu-Hausman F denominator degrees of freedom from the observations (`n - k_aug`), while this package uses `G - 1` |
 | `AER::tobit` | z | same as Tobit |

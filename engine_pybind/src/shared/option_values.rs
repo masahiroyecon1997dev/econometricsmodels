@@ -137,7 +137,7 @@ pub fn extract_strict_text(ob: &Bound<'_, PyAny>, name: &str) -> PyResult<String
     })
 }
 
-/// `None`を許す、列名を表す文字列のオプション値（`cluster`・`hac_time`・`time`・`dk_time`）。
+/// `None`を許す、列名を表す文字列のオプション値（`cluster`・`hac_time`・`dk_time`）。
 /// `fit()`の列名引数（`extract_column_name`）と同じ形式のメッセージにする。
 ///
 /// # Errors

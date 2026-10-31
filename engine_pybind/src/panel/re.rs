@@ -537,8 +537,8 @@ fn parse_variance_method(value: &str) -> PyResult<VarianceMethod> {
 /// `ReEstimator::fit`の呼び出し・`REResult`の構築は後続issueの`fit`関数が行う
 /// （モジュールdoc「実装フェーズの分割方針」参照）。
 ///
-/// `options.time`は2-wayの時間次元として`ReInput`に渡し、`ReEffects::TwoWay`を選ぶ
-/// （`None`なら`OneWay`）。`options.dk_time`は`resolve_re_cov_type`が`ReCovType::Dk`に渡す
+/// `effects`の1つ目を個体、2つ目（あれば）を時間次元として`ReInput`に渡し、2要素なら
+/// `ReEffects::TwoWay`、1要素なら`OneWay`を選ぶ。`options.dk_time`は`resolve_re_cov_type`が`ReCovType::Dk`に渡す
 /// （`"dk"`以外で指定された場合は`ValidationError`）。
 ///
 /// # Errors
@@ -583,7 +583,7 @@ pub(crate) fn build_re_input(
     // `dk_time`は`y`・`effects[0]`との重複だけ拒否する（`x`との重複は許可、`validate_dk_time_role`参照）。
     validate_dk_time_role(&y, &effects[0], options.dk_time.as_deref())?;
 
-    // ── y/x/entity列の抽出 ─────────────────────────────────────────────
+    // ── y/x/effects列の抽出 ─────────────────────────────────────────────
     let y_slice = extract_f64_column(df, &y, ColumnSource::new("y", "data"))?;
 
     let x_slices = extract_f64_columns(df, &x, ColumnSource::new("x", "data"))?;
@@ -616,8 +616,8 @@ pub(crate) fn build_re_input(
 /// `build_re_input`で構築した`ReInput`に対して`engine::panel::re::ReEstimator::fit`を
 /// 呼び出し、`REResult`として返す。
 ///
-/// `n_entities`は`ReEstimator::input().n_entities()`（`ReInput`が構築時に一度だけ作った
-/// エンティティコードのユニーク数）から取得する。
+/// `n_groups`の元になる`group_counts`は、`ReEstimator::input().n_entities()`（`ReInput`が構築時に
+/// 一度だけ作ったエンティティコードのユニーク数）と`n_periods()`（2-wayのみ）から作る。
 ///
 /// `params`/`param_names`/`residuals`/`dep_var_name`/`n_obs`/`log_likelihood`/`aic`/`bic`は
 /// `ReEstimator::estimator()`（内部で委譲した`OlsEstimator`）から取得する。FEと異なり

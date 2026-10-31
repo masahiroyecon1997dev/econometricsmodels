@@ -81,9 +81,9 @@ use crate::shared::group_codes::GroupCodes;
 /// （`fixed_effects()`の次元指定等）でも再利用できる想定。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PanelDimension {
-    /// エンティティ方向（個体・企業・州等、`entity`引数の列）。
+    /// エンティティ方向（個体・企業・州等、`effects`の1つ目の列）。
     Entity,
-    /// 時点方向（`time`オプションの列）。
+    /// 時点方向（`effects`の2つ目の列）。
     Time,
 }
 

@@ -580,7 +580,7 @@ pub(crate) fn build_fe_input(
     validate_no_duplicate_within_role("effects", &effects)?;
     validate_dk_time_role(&y, &effects[0], options.dk_time.as_deref())?;
 
-    // ── y/x/entity列の抽出 ─────────────────────────────────────────────
+    // ── y/x/effects列の抽出 ─────────────────────────────────────────────
     let y_slice = extract_f64_column(df, &y, ColumnSource::new("y", "data"))?;
 
     let x_slices = extract_f64_columns(df, &x, ColumnSource::new("x", "data"))?;
@@ -607,8 +607,8 @@ pub(crate) fn build_fe_input(
 /// `build_fe_input`で構築した`FeInput`に対して`engine::panel::fe::FeEstimator::fit`を
 /// 呼び出し、`FEResult`として返す。
 ///
-/// `n_entities`は`FeEstimator::input().n_entities()`（`FeInput`が構築時に一度だけ作った
-/// エンティティコードのユニーク数）から取得する。
+/// `n_groups`の元になる`group_counts`は、`FeEstimator::input().n_entities()`（`FeInput`が構築時に
+/// 一度だけ作ったエンティティコードのユニーク数）と`n_periods()`（2-wayのみ）から作る。
 ///
 /// `params`/`param_names`/`residuals`/`dep_var_name`/`n_obs`/`log_likelihood`は
 /// `FeEstimator`のgetter（`params()`・`within_input()`・`residuals()`・`log_likelihood()`）から
@@ -618,7 +618,7 @@ pub(crate) fn build_fe_input(
 /// `engine/src/panel/fe.rs`モジュールdoc「`OlsEstimator`への委譲」参照）。
 ///
 /// # Errors
-/// - `build_fe_input`が返すエラー（列抽出・y/x/entity/timeの重複・`cov_type`文字列の
+/// - `build_fe_input`が返すエラー（列抽出・y/x/effects/dk_timeの重複・`cov_type`文字列の
 ///   検証等）は`ValidationError`
 /// - `FeEstimator::fit`が返す`engine::panel::common::PanelError`（singleton検出・
 ///   自由度不足・分散ゼロ・委譲先`OlsEstimator::fit`の失敗・FE自身のF検定の失敗等）は

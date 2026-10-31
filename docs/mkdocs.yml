@@ -71,6 +71,7 @@ nav:
       - Errors (API): api/errors.md
   - Verification and performance:
       - Verification: guide/verification.md
+      - Verification details: guide/verification-details.md
       - Performance: guide/performance.md
       - Performance results: guide/performance-results.md
 

@@ -36,7 +36,7 @@ CLAUDE.md（特に7章）と`.claude/rules/testing-policy.md`は通常自動的�
 
 6. **公開ページ（`docs/guide/verification.md`）への反映**
    - 対象手法の行が、手法×リファレンス表（主リファレンス・独立クロスチェック）・「What is compared」表・許容誤差の表（`tests/support/_tolerances_<系統>.py` の値と一致）・実データ表に載っているか。リファレンスや許容誤差を変えたのに公開ページが古いままになっていないか。
-   - 独立クロスチェックが無い統計量・手法（単一リファレンスの例外）が「Not compared against a second reference」に書かれているか。
+   - 独立クロスチェックが無い統計量・手法（単一リファレンスの例外）が`docs/guide/verification-details.md`の「Not compared against a second reference」に書かれているか。
    - `docs/guide/inference-conventions.md` の手法別の表に1行追加されているか。
    - 公開ページと `docs/spec/<method>-spec.md` の許容誤差の記述が食い違っていないか（正はコード）。
 

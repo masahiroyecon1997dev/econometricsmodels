@@ -93,9 +93,15 @@ Every `cov_type` uses the **t distribution**. The degrees of freedom are
 | `"cluster"` | \(G-1\) |
 | `"dk"` | \(T_d-1\) |
 
-The value used is returned as `stat_df`. The overall F test (`f_statistic`) is the Wald test that all slope coefficients are zero, \(F = \hat\beta'\hat\Sigma^{-1}\hat\beta / k \sim F(k, \mathrm{df})\) with \(\hat\Sigma\) the covariance chosen by `cov_type` and the same degrees of freedom. The fixed effects themselves are not part of the tested hypothesis.
+The value used is returned as `stat_df`.
 
-## Fit statistics
+## Overall test and fit statistics
+
+### Overall F test
+
+The overall F test (`f_statistic`) is the Wald test that all slope coefficients are zero, \(F = \hat\beta'\hat\Sigma^{-1}\hat\beta / k \sim F(k, \mathrm{df})\), with \(\hat\Sigma\) the covariance chosen by `cov_type` and the same degrees of freedom as the t tests. The fixed effects themselves are not part of the tested hypothesis.
+
+### Fit statistics
 
 Three R² values are reported, because "the" R² is not well defined once effects are involved. With \(\hat\beta\) applied to the respective variables:
 

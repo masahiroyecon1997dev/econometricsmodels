@@ -100,6 +100,10 @@ With `cov_type="cluster"`, `fit()` raises an error with fewer than two clusters,
 
 GMM is an asymptotic estimator with no finite-sample degrees of freedom, so it uses the normal distribution; 2SLS uses the t and F distributions in the same way as [OLS](ols.md#test-distributions-and-confidence-intervals). `stat_dist` and `wald_dist` report which was used, and `stat_df` is `None` for GMM.
 
+## Overall test and fit statistics
+
+### Overall test
+
 The overall test, `wald_statistic`, is the Wald test that all \(q\) slope coefficients are zero, using the covariance chosen by `cov_type` (\(\hat\Sigma_s\) is the block of the covariance matrix of the slopes \(\hat\beta_s\)):
 
 \[
@@ -107,7 +111,7 @@ The overall test, `wald_statistic`, is the Wald test that all \(q\) slope coeffi
 \text{2SLS: } F = \mathrm{Wald}/q \sim F(q, \mathrm{df}), \qquad \text{GMM: } \mathrm{Wald} \sim \chi^2(q)
 \]
 
-## Fit statistics
+### Fit statistics
 
 \(R^2 = 1 - \mathrm{SSR}/\mathrm{SST}\) and the adjusted \(R^2\) are computed from the structural residuals, with \(\mathrm{SST}\) as in [OLS](ols.md#fit-statistics). Because the structural residuals are not least-squares residuals, \(R^2\) can be low or even negative, and it is not the share of variance explained by the instruments. A perfect fit (residuals zero up to rounding) is rejected, because the standard errors are then not defined.
 

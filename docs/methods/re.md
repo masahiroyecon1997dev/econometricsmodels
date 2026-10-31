@@ -63,9 +63,15 @@ The options are the same as for [FE](fe.md#covariance-of-the-coefficients-cov_ty
 
 ## Test distributions and confidence intervals
 
-As for FE, every `cov_type` uses the **t distribution**, with \(\mathrm{df}_{\text{resid}}\) for `"classical"` and `"hc1"` to `"hc3"`, \(G-1\) for `"cluster"` and \(T_d-1\) for `"dk"`, returned as `stat_df`. The overall F test is the Wald test that the \(k\) slope coefficients are zero, \(F = \hat\beta_s'\hat\Sigma_s^{-1}\hat\beta_s/k\), with the covariance chosen by `cov_type` and the same degrees of freedom, so `f_df_denom` equals `stat_df`. The constant is not part of the tested hypothesis. This Wald form is used rather than the sum-of-squares form of `linearmodels`' `f_statistic`, which ignores `cov_type` and can be negative on a very unbalanced panel.
+As for FE, every `cov_type` uses the **t distribution**, with \(\mathrm{df}_{\text{resid}}\) for `"classical"` and `"hc1"` to `"hc3"`, \(G-1\) for `"cluster"` and \(T_d-1\) for `"dk"`, returned as `stat_df`.
 
-## Fit statistics
+## Overall test and fit statistics
+
+### Overall F test
+
+The overall F test is the Wald test that the \(k\) slope coefficients are zero, \(F = \hat\beta_s'\hat\Sigma_s^{-1}\hat\beta_s/k\), with the covariance chosen by `cov_type` and the same degrees of freedom, so `f_df_denom` equals `stat_df`. The constant is not part of the tested hypothesis. This Wald form is used rather than the sum-of-squares form of `linearmodels`' `f_statistic`, which ignores `cov_type`.
+
+### Fit statistics
 
 The log-likelihood is computed from the residuals of the quasi-demeaned regression as for [OLS](ols.md#fit-statistics), and \(\mathrm{AIC} = -2\ell + 2(k+1)\), \(\mathrm{BIC} = -2\ell + (k+1)\ln n\).
 

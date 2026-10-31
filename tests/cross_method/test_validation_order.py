@@ -158,6 +158,8 @@ _PANEL_FAULTS = (
     "duplicate_x",
     "y_in_x",
     "empty_x",
+    "effects_empty",
+    "effects_too_many",
     "effects_second_is_y",
     "dk_time_is_y",
     "missing_y",
@@ -461,6 +463,23 @@ FAULTS = {
             },
         ),
         Fault("sigma_in_x", (4, 6), code=ErrorCode.TOBIT_SIGMA_NAME_COLLISION),
+        # FE/REの`effects`の列数の検査は、空の`x`の検査より前。
+        Fault(
+            "effects_empty",
+            (4, 0),
+            code=ErrorCode.ROLE_EMPTY,
+            params={"argument": "effects"},
+        ),
+        Fault(
+            "effects_too_many",
+            (4, 0),
+            code=ErrorCode.EFFECTS_TOO_MANY,
+            params=lambda m: {
+                "model": m.name.upper(),
+                "n_columns": 3,
+                "max_columns": 2,
+            },
+        ),
         Fault(
             "effects_second_is_y",
             (4, 2),
@@ -643,6 +662,10 @@ def changes(method: Method, fault_id: str) -> Changes:
             return {"weight": method.base_args["y"]}, {}
         case "sigma_in_x":
             return {x_role: [*base_x, "sigma"]}, {}
+        case "effects_empty":
+            return {"effects": []}, {}
+        case "effects_too_many":
+            return {"effects": ["entity", "time", "cluster"]}, {}
         case "effects_second_is_y":
             return {"effects": ["entity", method.base_args["y"]]}, {}
         case "dk_time_is_y":

@@ -8,6 +8,8 @@
 - `x_endog`: endogenous regressors, the ones you are worried about.
 - `instruments`: the excluded instruments, variables that are not in the model for `y`, are correlated with the endogenous regressors and are uncorrelated with the error. There must be at least one per endogenous variable; with more, the model is over-identified and can be tested (below).
 
+Why these names rather than a single `x`: see [Why `IV` has `x_exog` and `x_endog` instead of `x`](../guide/api-conventions.md#why-iv-has-x_exog-and-x_endog-instead-of-x).
+
 ```python
 import polars as pl
 from econometricsmodels import IV

@@ -59,6 +59,7 @@ More methods are planned as the project expands; see [GitHub Issues](https://git
 
 ## Guides
 
+- [Arguments and options](guide/api-conventions.md): which inputs are arguments and which are options, how arguments are named, and the arguments of every model.
 - [Accepted data](guide/accepted-data.md): the input type and the column types each argument accepts.
 - [Validation and errors](guide/validation.md): how to read and handle an error, why invalid input is rejected instead of repaired (for example, missing values are never dropped), and when each error is raised. [Error codes](guide/error-codes.md) lists every `code`.
 - [Inference conventions](guide/inference-conventions.md): which test distributions and degrees of freedom each method uses, and where they differ from R, statsmodels and linearmodels.

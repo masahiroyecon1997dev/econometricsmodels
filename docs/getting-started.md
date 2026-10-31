@@ -89,7 +89,7 @@ print(logit_result.predict())  # fitted probabilities
 print(logit_result.marginal_effects())  # dy/dx with delta-method standard errors
 ```
 
-Methods with extra inputs add arguments: `IV` takes `x_exog`, `x_endog` and `instruments`, `WLS` takes `weight`, and the panel models `FE` and `RE` take `entity`. A required column is an argument and an optional setting is an option; see [Arguments and options](guide/api-conventions.md).
+Methods with extra inputs add arguments: `IV` takes `x_exog`, `x_endog` and `instruments`, `WLS` takes `weight`, and the panel models `FE` and `RE` take `entity`. Columns that define the model are arguments; everything optional, including optional columns such as `cluster`, goes in the options object. [Arguments and options](guide/api-conventions.md) gives the rule and lists the arguments of every model.
 
 ## Handling errors
 
@@ -128,4 +128,4 @@ Missing values are never dropped for you and collinear columns are never removed
 
 Each method has three pages: a short **usage** guide with examples, the **options and results** reference (what each option does and which fields a result has), and the **definitions** (the formulas, covariance types and test distributions). The [table of methods on the home page](index.md#supported-methods) says when to use each one and links to its pages.
 
-The [Guides](guide/accepted-data.md) cover the data the estimators accept, validation and errors, how the test distributions compare with other packages, and how to [pickle and copy](guide/pickling.md) options and results.
+The Guides cover [how arguments and options are named and placed](guide/api-conventions.md), the data the estimators accept ([Accepted data](guide/accepted-data.md)), validation and errors, how the test distributions compare with other packages, and how to [pickle and copy](guide/pickling.md) options and results.

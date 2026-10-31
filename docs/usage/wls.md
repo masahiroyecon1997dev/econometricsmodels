@@ -2,7 +2,7 @@
 
 **WLS**: **Usage** · [Options and results](../api/wls.md) · [Definitions](../methods/wls.md)
 
-`WLS` is [OLS](ols.md) with an added `weight` argument (the column name of the weight column). Weights are treated as analytic weights proportional to the inverse of the variance, and do not need to be normalized. Every weight must be finite and strictly positive; a zero, negative, missing, NaN or infinite weight raises a `ValidationError`.
+`WLS` is [OLS](ols.md) with an added `weight` argument (the column name of the weight column; see [Why `WLS` has `weight`](../guide/api-conventions.md#why-wls-has-weight)). Weights are treated as analytic weights proportional to the inverse of the variance, and do not need to be normalized. Every weight must be finite and strictly positive; a zero, negative, missing, NaN or infinite weight raises a `ValidationError`.
 
 ```python
 import polars as pl

@@ -53,7 +53,6 @@ NON_DEFAULT_KWARGS: dict[type, dict[str, Any]] = {
     FEOptions: {
         "cov_type": "dk",
         "confidence_level": 0.9,
-        "time": "t",
         "cluster": "g",
         "dk_time": "t",
         "dk_bandwidth": 2,
@@ -61,7 +60,6 @@ NON_DEFAULT_KWARGS: dict[type, dict[str, Any]] = {
     REOptions: {
         "cov_type": "dk",
         "confidence_level": 0.9,
-        "time": "t",
         "cluster": "g",
         "dk_time": "t",
         "dk_bandwidth": 2,
@@ -154,14 +152,14 @@ def test_repr_has_no_rust_only_notation(cls: type) -> None:
 def test_repr_lists_fields_in_signature_order(cls: type) -> None:
     text = repr(cls(**NON_DEFAULT_KWARGS[cls]))
     names = inspect.signature(cls).parameters
-    # `\b`で`time=`が`hac_time=`の途中に一致しないようにする
+    # `\b`で名前が別のフィールド名の途中（`dk_time=`の`time=`等）に一致しないようにする
     positions = [re.search(rf"\b{name}=", text).start() for name in names]
     assert positions == sorted(positions)
 
 
 def test_re_options_field_order_matches_fe_options():
-    """`REOptions`のフィールドの並びは`FEOptions`と同じ（`time`の次が`cluster`、
-    `dk_time`）。REだけの`variance_method`は末尾に置く（先頭6個の並びを保つ）。
+    """`REOptions`のフィールドの並びは`FEOptions`と同じ（`confidence_level`の次が
+    `cluster`、`dk_time`）。REだけの`variance_method`は末尾に置く（共通のフィールドの並びを保つ）。
     並びは`repr`の出力順とAPIページの表示順に現れる。"""
     re_names = list(inspect.signature(REOptions).parameters)
     fe_names = list(inspect.signature(FEOptions).parameters)

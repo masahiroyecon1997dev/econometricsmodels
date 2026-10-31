@@ -65,15 +65,17 @@ def _iv(df, **options):
     return IV(df, options=IVOptions(**options), **IV_ARGS).fit()
 
 
-def _fe(df, **options):
+def _fe(df, *, two_way=False, **options):
+    effects = ["entity", "time"] if two_way else ["entity"]
     return FE(
-        df, y="y", x=X, entity="entity", options=FEOptions(**options)
+        df, y="y", x=X, effects=effects, options=FEOptions(**options)
     ).fit()
 
 
-def _re(df, **options):
+def _re(df, *, two_way=False, **options):
+    effects = ["entity", "time"] if two_way else ["entity"]
     return RE(
-        df, y="y", x=X, entity="entity", options=REOptions(**options)
+        df, y="y", x=X, effects=effects, options=REOptions(**options)
     ).fit()
 
 
@@ -114,9 +116,9 @@ METHOD_OPTIONS = {
     "2sls": (_iv, {}),
     "gmm": (_iv, {"estimator": "gmm"}),
     "fe": (_fe, {}),
-    "fe-two-way": (_fe, {"time": "time"}),
+    "fe-two-way": (_fe, {"two_way": True}),
     "re": (_re, {}),
-    "re-two-way": (_re, {"time": "time"}),
+    "re-two-way": (_re, {"two_way": True}),
 }
 
 # `cov_type`が列を要求するときに足すオプション（HACは重複のない順序列、DKは時点列）。

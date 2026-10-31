@@ -124,16 +124,18 @@ def test_group_identity_role_rejects_time_of_day(frame: pl.DataFrame) -> None:
         OLS(broken, "y", ["x1"], options=options).fit()
 
 
-def test_time_period_role_does_not_allow_booleans(frame: pl.DataFrame) -> None:
+def test_second_effects_role_does_not_allow_booleans(
+    frame: pl.DataFrame,
+) -> None:
     broken = frame.with_columns((pl.col("t") > 2).alias("t"))
     with raises_error(
         ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
         column="t",
-        argument="time",
+        argument="effects",
         dtype="Boolean",
         allowed=TIME_ALLOWED,
     ):
-        FE(broken, "y", ["x1"], "entity", options=FEOptions(time="t")).fit()
+        FE(broken, "y", ["x1"], ["entity", "t"]).fit()
 
 
 def test_dk_time_role_is_named_dk_time(frame: pl.DataFrame) -> None:
@@ -145,4 +147,4 @@ def test_dk_time_role_is_named_dk_time(frame: pl.DataFrame) -> None:
         argument="dk_time",
         allowed=TIME_ALLOWED,
     ):
-        FE(broken, "y", ["x1"], "entity", options=options).fit()
+        FE(broken, "y", ["x1"], ["entity"], options=options).fit()

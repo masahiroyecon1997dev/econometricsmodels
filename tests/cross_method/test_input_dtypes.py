@@ -115,10 +115,10 @@ def test_small_integer_entity_column_is_usable_as_group_key(base):
         (pl.int_range(pl.len()) // 6).cast(pl.Int8).alias("entity")
     )
 
-    result = FE(df, y="y", x=["x1", "x2"], entity="entity").fit()
+    result = FE(df, y="y", x=["x1", "x2"], effects=["entity"]).fit()
 
     as_int64 = df.with_columns(pl.col("entity").cast(pl.Int64))
-    expected = FE(as_int64, y="y", x=["x1", "x2"], entity="entity").fit()
+    expected = FE(as_int64, y="y", x=["x1", "x2"], effects=["entity"]).fit()
     assert result.params == expected.params
 
 
@@ -324,10 +324,10 @@ ROLE_FITS = {
     "iv.x_exog": lambda d: IV(d, "y", ["col"], ["x1"], ["z", "z2"]).fit(),
     "iv.x_endog": lambda d: IV(d, "y", ["x2"], ["col"], ["z", "z2"]).fit(),
     "iv.instruments": lambda d: IV(d, "y", ["x2"], ["x1"], ["z", "col"]).fit(),
-    "fe.y": lambda d: FE(d, "col", ["x1"], "entity").fit(),
-    "fe.x": lambda d: FE(d, "y", ["col"], "entity").fit(),
-    "re.y": lambda d: RE(d, "col", ["x1"], "entity").fit(),
-    "re.x": lambda d: RE(d, "y", ["col"], "entity").fit(),
+    "fe.y": lambda d: FE(d, "col", ["x1"], ["entity"]).fit(),
+    "fe.x": lambda d: FE(d, "y", ["col"], ["entity"]).fit(),
+    "re.y": lambda d: RE(d, "col", ["x1"], ["entity"]).fit(),
+    "re.x": lambda d: RE(d, "y", ["col"], ["entity"]).fit(),
     "logit.y": lambda d: Logit(d, "col", ["x1"]).fit(),
     "probit.y": lambda d: Probit(d, "col", ["x1"]).fit(),
     "tobit.y": lambda d: Tobit(d, "col", ["x1"]).fit(),

@@ -12,18 +12,17 @@
 
 `fe_dataset`（baseline、entity/time付きバランスパネル、n_entities=40 x
 n_periods=6）は`tests/panel/conftest.py`、`our_fit`ヘルパー（既定
-`x=["x1","x2"], entity="entity"`）は`tests/support/_fe_helpers.py`。
+`x=["x1","x2"], effects=["entity"]`）は`tests/support/_fe_helpers.py`。
 
 Note:
     `CLUSTER_REQUIRED`（OLS/WLS/IVが持つ「`cov_type='cluster'`なのに
     クラスター列が一切無い」エラー）はFEには存在しない。`cluster=None`
-    は常に`entity`引数の列に自動フォールバックするため、この失敗経路が
+    は常に`effects`の先頭要素の列に自動フォールバックするため、この失敗経路が
     構造的に到達不能（`engine_pybind/src/panel/fe.rs::resolve_fe_cov_type`
     参照）。
 
-    `PanelError::TwoWayRequiresTime`もテスト対象に含めない。`effects`
-    （1-way/2-way）は`options.time`がSome/Noneかで直接決まる設計のため、
-    Python APIからこのエラーに到達する経路が存在しない（確認済み）。
+    1-way/2-wayは`effects`の要素数（1/2）で直接決まるため、2-wayなのに
+    時点列が無い状態はPython APIから作れない。
 """
 
 from __future__ import annotations
@@ -54,22 +53,20 @@ COV_TYPES = ["classical", "hc1", "hc2", "hc3", "cluster"]
 
 
 #
-# `roles = [("y", Single), ("entity", Single), ("time", Single)?, ("x", Multi)]`
-# の並びに沿って、後方のロールほど先に検証される総当たり
-# （`engine_pybind/src/shared/validation.rs::find_duplicate_role_message`）。
-# 単一列ロール同士（y/entity/time）はSingle-vs-Singleで`later_role`/
-# `earlier_role`、単一列ロールが`x`に含まれる場合は常に単一列ロール側が
-# 主語になる（`duplicate_role_message`のdocコメント「呼び出し側の契約」）。
+# `y`・`effects`（1〜2要素）・`x`の列が重ならないことを検証する。`effects`は
+# `y`・`x`より前のロールなので、重なったときは`y`/`x`が`argument`、`effects`が
+# `other_argument`になる。`effects`内の重複は`ROLE_DUPLICATE_COLUMN`
+# （`argument="effects"`）。
 
 
 def test_y_overlaps_entity_raises(fe_dataset):
     with raises_error(
         ErrorCode.ROLE_COLUMN_OVERLAP,
         column="y",
-        argument="entity",
-        other_argument="y",
+        argument="y",
+        other_argument="effects",
     ):
-        FE(fe_dataset, y="y", x=["x1", "x2"], entity="y").fit()
+        FE(fe_dataset, y="y", x=["x1", "x2"], effects=["y"]).fit()
 
 
 def test_y_overlaps_x_raises(fe_dataset):
@@ -79,51 +76,45 @@ def test_y_overlaps_x_raises(fe_dataset):
         argument="y",
         other_argument="x",
     ):
-        FE(fe_dataset, y="y", x=["y", "x2"], entity="entity").fit()
+        FE(fe_dataset, y="y", x=["y", "x2"], effects=["entity"]).fit()
 
 
 def test_entity_overlaps_x_raises(fe_dataset):
     with raises_error(
         ErrorCode.ROLE_COLUMN_OVERLAP,
         column="entity",
-        argument="entity",
-        other_argument="x",
+        argument="x",
+        other_argument="effects",
     ):
-        FE(fe_dataset, y="y", x=["entity", "x2"], entity="entity").fit()
+        FE(fe_dataset, y="y", x=["entity", "x2"], effects=["entity"]).fit()
 
 
 def test_y_overlaps_time_raises(fe_dataset):
-    """2-way限定（`time`が設定されているときのみ`time`ロールが存在する）。"""
-    options = FEOptions(time="y")
+    """2-wayの2要素目（時点側）が`y`と同じ列でも拒否する。"""
     with raises_error(
         ErrorCode.ROLE_COLUMN_OVERLAP,
         column="y",
-        argument="time",
-        other_argument="y",
+        argument="y",
+        other_argument="effects",
     ):
-        FE(
-            fe_dataset, y="y", x=["x1", "x2"], entity="entity", options=options
-        ).fit()
+        FE(fe_dataset, y="y", x=["x1", "x2"], effects=["entity", "y"]).fit()
 
 
-def test_entity_overlaps_time_raises(fe_dataset):
-    options = FEOptions(time="entity")
+def test_duplicate_within_effects_raises(fe_dataset):
+    """`effects`の2要素が同じ列だと`effects`内の重複。"""
     with raises_error(
-        ErrorCode.ROLE_COLUMN_OVERLAP,
-        column="entity",
-        argument="time",
-        other_argument="entity",
+        ErrorCode.ROLE_DUPLICATE_COLUMN, column="entity", argument="effects"
     ):
         FE(
-            fe_dataset, y="y", x=["x1", "x2"], entity="entity", options=options
+            fe_dataset, y="y", x=["x1", "x2"], effects=["entity", "entity"]
         ).fit()
 
 
 @pytest.mark.parametrize(
-    ("column", "earlier_role"), [("y", "y"), ("entity", "entity")]
+    ("column", "earlier_role"), [("y", "y"), ("entity", "effects")]
 )
 def test_dk_time_overlaps_y_or_entity_raises(fe_dataset, column, earlier_role):
-    """`dk_time`が`y`・`entity`と同じ列だと、DKの時点構造が意味を成さない。"""
+    """`dk_time`が`y`・`effects[0]`と同じ列だと、DKの時点構造が意味を成さない。"""
     options = FEOptions(cov_type="dk", dk_time=column)
     with raises_error(
         ErrorCode.ROLE_COLUMN_OVERLAP,
@@ -132,7 +123,11 @@ def test_dk_time_overlaps_y_or_entity_raises(fe_dataset, column, earlier_role):
         other_argument=earlier_role,
     ):
         FE(
-            fe_dataset, y="y", x=["x1", "x2"], entity="entity", options=options
+            fe_dataset,
+            y="y",
+            x=["x1", "x2"],
+            effects=["entity"],
+            options=options,
         ).fit()
 
 
@@ -148,24 +143,23 @@ def test_dk_time_overlaps_y_or_entity_raises(fe_dataset, column, earlier_role):
 )
 def test_dk_time_may_equal_time_or_overlap_x(fe_dataset, time, x):
     dk_time = "time" if time else "x2"
-    options = FEOptions(cov_type="dk", time=time, dk_time=dk_time)
-    FE(fe_dataset, y="y", x=x, entity="entity", options=options).fit()
+    effects = ["entity", time] if time else ["entity"]
+    options = FEOptions(cov_type="dk", dk_time=dk_time)
+    FE(fe_dataset, y="y", x=x, effects=effects, options=options).fit()
 
 
 def test_time_overlaps_x_raises(fe_dataset):
-    options = FEOptions(time="time")
     with raises_error(
         ErrorCode.ROLE_COLUMN_OVERLAP,
         column="time",
-        argument="time",
-        other_argument="x",
+        argument="x",
+        other_argument="effects",
     ):
         FE(
             fe_dataset,
             y="y",
             x=["time", "x2"],
-            entity="entity",
-            options=options,
+            effects=["entity", "time"],
         ).fit()
 
 
@@ -173,7 +167,7 @@ def test_duplicate_within_x_raises(fe_dataset):
     with raises_error(
         ErrorCode.ROLE_DUPLICATE_COLUMN, column="x1", argument="x"
     ):
-        FE(fe_dataset, y="y", x=["x1", "x1"], entity="entity").fit()
+        FE(fe_dataset, y="y", x=["x1", "x1"], effects=["entity"]).fit()
 
 
 def test_x_empty_raises(fe_dataset):
@@ -181,7 +175,7 @@ def test_x_empty_raises(fe_dataset):
     `validate_x_non_empty`を適用する（`engine_pybind/src/panel/fe.rs`モジュールdoc参照）。
     """
     with raises_error(ErrorCode.ROLE_EMPTY, argument="x"):
-        FE(fe_dataset, y="y", x=[], entity="entity").fit()
+        FE(fe_dataset, y="y", x=[], effects=["entity"]).fit()
 
 
 # ── ValidationError（入力データ: 列の存在・欠損値） ───────────────────
@@ -203,7 +197,7 @@ def test_data_not_polars_raises():
             param_name="data",
         ),
     ):
-        FE(bad, y="y", x=["x1"], entity="entity").fit()
+        FE(bad, y="y", x=["x1"], effects=["entity"]).fit()
 
 
 def test_missing_y_column_raises(fe_dataset):
@@ -213,7 +207,9 @@ def test_missing_y_column_raises(fe_dataset):
         argument="y",
         data_argument="data",
     ):
-        FE(fe_dataset, y="nonexistent", x=["x1", "x2"], entity="entity").fit()
+        FE(
+            fe_dataset, y="nonexistent", x=["x1", "x2"], effects=["entity"]
+        ).fit()
 
 
 def test_missing_x_column_raises(fe_dataset):
@@ -223,29 +219,31 @@ def test_missing_x_column_raises(fe_dataset):
         argument="x",
         data_argument="data",
     ):
-        FE(fe_dataset, y="y", x=["nonexistent"], entity="entity").fit()
+        FE(fe_dataset, y="y", x=["nonexistent"], effects=["entity"]).fit()
 
 
 def test_missing_entity_column_raises(fe_dataset):
     with raises_error(
         ErrorCode.COLUMN_NOT_FOUND,
         column="nonexistent",
-        argument="entity",
+        argument="effects",
         data_argument="data",
     ):
-        FE(fe_dataset, y="y", x=["x1", "x2"], entity="nonexistent").fit()
+        FE(fe_dataset, y="y", x=["x1", "x2"], effects=["nonexistent"]).fit()
 
 
 def test_missing_time_column_raises(fe_dataset):
-    options = FEOptions(time="nonexistent")
     with raises_error(
         ErrorCode.COLUMN_NOT_FOUND,
         column="nonexistent",
-        argument="time",
+        argument="effects",
         data_argument="data",
     ):
         FE(
-            fe_dataset, y="y", x=["x1", "x2"], entity="entity", options=options
+            fe_dataset,
+            y="y",
+            x=["x1", "x2"],
+            effects=["entity", "nonexistent"],
         ).fit()
 
 
@@ -266,7 +264,7 @@ def test_numeric_column_null_values_raise(bad_col):
         argument="y" if bad_col == "y" else "x",
         data_argument="data",
     ):
-        FE(df, y="y", x=["x1"], entity="entity").fit()
+        FE(df, y="y", x=["x1"], effects=["entity"]).fit()
 
 
 @pytest.mark.parametrize(
@@ -293,12 +291,12 @@ def test_numeric_column_non_finite_values_raise(bad_col, value):
         argument="y" if bad_col == "y" else "x",
         data_argument="data",
     ):
-        FE(df, y="y", x=["x1"], entity="entity").fit()
+        FE(df, y="y", x=["x1"], effects=["entity"]).fit()
 
 
 @pytest.mark.parametrize("bad_col", ["entity", "time"])
 def test_group_key_column_null_values_raise(bad_col):
-    """`entity`/`time`の欠損値も、`y`/`x`と同じ`COLUMN_CONTAINS_NULL`。"""
+    """`effects`の列の欠損値も、`y`/`x`と同じ`COLUMN_CONTAINS_NULL`。"""
     values: dict[str, list[float | str | None]] = {
         "y": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
         "x1": [0.5, 1.5, 2.5, 3.5, 4.5, 5.5],
@@ -307,19 +305,18 @@ def test_group_key_column_null_values_raise(bad_col):
     }
     values[bad_col][1] = None
     df = pl.DataFrame(values)
-    options = FEOptions(time="time")
     with raises_error(
         ErrorCode.COLUMN_CONTAINS_NULL,
         column=bad_col,
         count=1,
-        argument=bad_col,
+        argument="effects",
         data_argument="data",
     ):
-        FE(df, y="y", x=["x1"], entity="entity", options=options).fit()
+        FE(df, y="y", x=["x1"], effects=["entity", "time"]).fit()
 
 
 def test_cluster_null_values_raise():
-    """`cluster`の欠損値も`entity`/`time`と同じ`COLUMN_CONTAINS_NULL`。"""
+    """`cluster`の欠損値も`effects`の列と同じ`COLUMN_CONTAINS_NULL`。"""
     df = pl.DataFrame(
         {
             "y": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
@@ -336,7 +333,7 @@ def test_cluster_null_values_raise():
         argument="cluster",
         data_argument="data",
     ):
-        FE(df, y="y", x=["x1"], entity="entity", options=options).fit()
+        FE(df, y="y", x=["x1"], effects=["entity"], options=options).fit()
 
 
 # ── ValidationError（入力データ: 自由度不足） ─────────────────────────
@@ -368,7 +365,7 @@ def test_insufficient_degrees_of_freedom_one_way_raises():
         n_effects=3,
         min_obs=7,
     ):
-        FE(df, y="y", x=["x1", "x2", "x3"], entity="entity").fit()
+        FE(df, y="y", x=["x1", "x2", "x3"], effects=["entity"]).fit()
 
 
 def test_insufficient_degrees_of_freedom_two_way_raises():
@@ -394,7 +391,6 @@ def test_insufficient_degrees_of_freedom_two_way_raises():
             "time": times,
         }
     )
-    options = FEOptions(time="time")
     with raises_error(
         ErrorCode.INSUFFICIENT_DEGREES_OF_FREEDOM,
         n_obs=9,
@@ -406,8 +402,7 @@ def test_insufficient_degrees_of_freedom_two_way_raises():
             df,
             y="y",
             x=["x1", "x2", "x3", "x4"],
-            entity="entity",
-            options=options,
+            effects=["entity", "time"],
         ).fit()
 
 
@@ -420,9 +415,12 @@ def test_singleton_entity_raises():
     """
     df = pl.read_csv(DATA_DIR / "fe_singleton_entity.csv")
     with raises_error(
-        ErrorCode.SINGLETON_GROUP, argument="entity", group="e00"
+        ErrorCode.SINGLETON_GROUP,
+        argument="effects",
+        column="entity",
+        group="e00",
     ):
-        FE(df, y="y", x=["x1", "x2"], entity="entity").fit()
+        FE(df, y="y", x=["x1", "x2"], effects=["entity"]).fit()
 
 
 def test_singleton_time_raises():
@@ -432,9 +430,13 @@ def test_singleton_time_raises():
     `singleton_time`コメント参照）。
     """
     df = pl.read_csv(DATA_DIR / "fe_singleton_time.csv")
-    options = FEOptions(time="time")
-    with raises_error(ErrorCode.SINGLETON_GROUP, argument="time", group="t5"):
-        FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
+    with raises_error(
+        ErrorCode.SINGLETON_GROUP,
+        argument="effects",
+        column="time",
+        group="t5",
+    ):
+        FE(df, y="y", x=["x1", "x2"], effects=["entity", "time"]).fit()
 
 
 def test_unbalanced_two_way_raises():
@@ -442,7 +444,6 @@ def test_unbalanced_two_way_raises():
     40×6=240）は2-way FE要求時に`PanelError::UnbalancedPanelForTwoWay`。
     """
     df = pl.read_csv(DATA_DIR / "fe_unbalanced_two_way.csv")
-    options = FEOptions(time="time")
     with raises_error(
         ErrorCode.PANEL_NOT_BALANCED_FOR_TWO_WAY,
         n_obs=239,
@@ -450,7 +451,7 @@ def test_unbalanced_two_way_raises():
         n_periods=6,
         expected_obs=240,
     ):
-        FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
+        FE(df, y="y", x=["x1", "x2"], effects=["entity", "time"]).fit()
 
 
 def test_zero_variance_after_demeaning_raises():
@@ -462,7 +463,7 @@ def test_zero_variance_after_demeaning_raises():
     with raises_error(
         ErrorCode.REGRESSOR_NO_WITHIN_VARIATION, column="x_invariant"
     ):
-        FE(df, y="y", x=["x1", "x2", "x_invariant"], entity="entity").fit()
+        FE(df, y="y", x=["x1", "x2", "x_invariant"], effects=["entity"]).fit()
 
 
 # ── ValidationError（オプション） ─────────────────────────────────────
@@ -505,15 +506,17 @@ def test_invalid_confidence_level_raises(fe_dataset, confidence_level):
 
 
 @pytest.mark.parametrize(
-    "time", [None, "time"], ids=["one_way", "two_way_time_not_borrowed"]
+    "effects",
+    [["entity"], ["entity", "time"]],
+    ids=["one_way", "two_way_time_not_borrowed"],
 )
-def test_dk_requires_dk_time_raises(fe_dataset, time):
-    """`cov_type="dk"`で`dk_time`が未指定だと`ValidationError`。2-way FEの`time`が
+def test_dk_requires_dk_time_raises(fe_dataset, effects):
+    """`cov_type="dk"`で`dk_time`が未指定だと`ValidationError`。2-way FEの`effects[1]`が
     あっても、それをDKの時点列として借用しない（どの列が時点かを明示させる）。
     """
-    options = FEOptions(cov_type="dk", time=time)
+    options = FEOptions(cov_type="dk")
     with raises_error(ErrorCode.DK_TIME_REQUIRED):
-        our_fit(fe_dataset, options=options)
+        our_fit(fe_dataset, effects=effects, options=options)
 
 
 @pytest.mark.parametrize("dk_bandwidth", [-1, 6])  # t=6（fe_datasetの時点数）
@@ -583,7 +586,9 @@ def test_cluster_count_at_most_slopes_raises_validation_error():
         n_slopes=2,
         min_clusters=3,
     ):
-        FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
+        FE(
+            df, y="y", x=["x1", "x2"], effects=["entity"], options=options
+        ).fit()
 
 
 def test_dk_single_period_raises_validation_error():
@@ -602,7 +607,7 @@ def test_dk_single_period_raises_validation_error():
     with raises_error(
         ErrorCode.DK_PERIODS_TOO_FEW, n_periods=1, min_periods=2
     ):
-        FE(df, y="y", x=["x"], entity="entity", options=options).fit()
+        FE(df, y="y", x=["x"], effects=["entity"], options=options).fit()
 
 
 def test_dk_periods_at_most_slopes_raises_validation_error():
@@ -635,7 +640,7 @@ def test_dk_periods_at_most_slopes_raises_validation_error():
             df,
             y="y",
             x=["x1", "x2", "x3"],
-            entity="entity",
+            effects=["entity"],
             options=options,
         ).fit()
 
@@ -650,8 +655,8 @@ def test_many_regressors_dk_raises_validation_error(two_way):
     df = pl.read_csv(DATA_DIR / "fe_many_regressors.csv")
     x_cols = x_columns(df)
     assert len(x_cols) == 20
-    kwargs = {"time": "time"} if two_way else {}
-    options = FEOptions(cov_type="dk", dk_time="time", **kwargs)
+    effects = ["entity", "time"] if two_way else ["entity"]
+    options = FEOptions(cov_type="dk", dk_time="time")
     with raises_error(
         ErrorCode.DK_PERIODS_NOT_ABOVE_COEFFICIENTS,
         n_periods=6,
@@ -659,14 +664,14 @@ def test_many_regressors_dk_raises_validation_error(two_way):
         min_periods=21,
         stage="OVERALL_F_TEST",
     ):
-        FE(df, y="y", x=x_cols, entity="entity", options=options).fit()
+        FE(df, y="y", x=x_cols, effects=effects, options=options).fit()
 
     FE(
         df,
         y="y",
         x=x_cols,
-        entity="entity",
-        options=FEOptions(cov_type="cluster", **kwargs),
+        effects=effects,
+        options=FEOptions(cov_type="cluster"),
     ).fit()
 
 
@@ -679,26 +684,29 @@ _TWO_PERIOD_PANEL = {
 
 
 @pytest.mark.parametrize(
-    ("options", "code"),
+    ("effects", "options", "code"),
     [
         (
+            ["entity"],
             FEOptions(cov_type="dk", dk_time="time", dk_bandwidth=0),
             ErrorCode.DK_TWO_PERIODS_DEGENERATE,
         ),
         (
-            FEOptions(
-                cov_type="dk", time="time", dk_time="time", dk_bandwidth=0
-            ),
+            ["entity", "time"],
+            FEOptions(cov_type="dk", dk_time="time", dk_bandwidth=0),
             ErrorCode.DK_TWO_PERIODS_DEGENERATE,
         ),
         (
+            ["entity"],
             FEOptions(cov_type="cluster", cluster="time"),
             ErrorCode.CLUSTER_TWO_GROUPS_DEGENERATE,
         ),
     ],
     ids=["dk-one_way", "dk-two_way", "cluster_by_time"],
 )
-def test_two_group_split_degeneracy_raises_validation_error(options, code):
+def test_two_group_split_degeneracy_raises_validation_error(
+    effects, options, code
+):
     """2時点のパネルで全エンティティが各時点に1観測ずつだと、within変換で
     時点（クラスター）スコアが恒等的にゼロになり、DK・timeクラスターの
     共分散がゼロに退化する（`PanelError::DegenerateDkTwoPeriods`/
@@ -707,7 +715,7 @@ def test_two_group_split_degeneracy_raises_validation_error(options, code):
     """
     df = pl.DataFrame(_TWO_PERIOD_PANEL)
     with raises_error(code):
-        FE(df, y="y", x=["x"], entity="entity", options=options).fit()
+        FE(df, y="y", x=["x"], effects=effects, options=options).fit()
 
 
 def test_two_way_two_entity_default_cluster_raises_validation_error():
@@ -724,9 +732,7 @@ def test_two_way_two_entity_default_cluster_raises_validation_error():
         }
     )
     with raises_error(ErrorCode.CLUSTER_TWO_GROUPS_DEGENERATE):
-        FE(
-            df, y="y", x=["x"], entity="entity", options=FEOptions(time="time")
-        ).fit()
+        FE(df, y="y", x=["x"], effects=["entity", "time"]).fit()
 
 
 @pytest.mark.parametrize(
@@ -747,7 +753,7 @@ def test_two_group_split_with_broken_pattern_is_accepted(options):
             ),
         ]
     )
-    res = FE(df, y="y", x=["x"], entity="entity", options=options).fit()
+    res = FE(df, y="y", x=["x"], effects=["entity"], options=options).fit()
     assert res.std_errors["x"] > 1e-8
 
 
@@ -808,7 +814,7 @@ def test_perfect_multicollinearity_raises_computation_error(fe_dataset):
     with raises_error(
         ErrorCode.DESIGN_MATRIX_SINGULAR, stage="WITHIN_REGRESSION"
     ):
-        FE(df, y="y", x=["x1", "x2", "x3"], entity="entity").fit()
+        FE(df, y="y", x=["x1", "x2", "x3"], effects=["entity"]).fit()
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)
@@ -830,7 +836,9 @@ def test_scale_variance_raises_computation_error(fe_dataset, cov_type):
         matrix="COEFFICIENT_COVARIANCE",
         stage="OVERALL_F_TEST",
     ):
-        FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
+        FE(
+            df, y="y", x=["x1", "x2"], effects=["entity"], options=options
+        ).fit()
 
 
 # ── 例外クラスの継承 ──────────────────────────────────────────────────

@@ -302,8 +302,10 @@ def _fit(options, df):
             options=options,
         ).fit()
     if cls is FEOptions:
-        return FE(df, y="y", x=["x1"], entity="entity", options=options).fit()
-    return RE(df, y="y", x=["x1"], entity="entity", options=options).fit()
+        return FE(
+            df, y="y", x=["x1"], effects=["entity"], options=options
+        ).fit()
+    return RE(df, y="y", x=["x1"], effects=["entity"], options=options).fit()
 
 
 ALL_OPTION_CLASSES = [
@@ -607,7 +609,7 @@ def test_numpy_uint64_beyond_i64_is_validation_error(df, how):
 
 # ── 文字列のoption ─────────────────────────────────────────────────
 #
-# 列名（`cluster`・`hac_time`・`time`・`dk_time`）は`fit()`の列名引数と同じ形式、
+# 列名（`cluster`・`hac_time`・`dk_time`）は`fit()`の列名引数と同じ形式、
 # それ以外（`cov_type`・`solver`等の選択肢）は`must be a str`のメッセージになる。
 
 # (オプションクラス, フィールド名, 種類, `None`を許すか)。種類は`column`・`text`。
@@ -634,11 +636,9 @@ STRING_FIELDS = [
     (IVOptions, "gmm_weight_type", "text", True),
     (IVOptions, "gmm_type", "text", True),
     (FEOptions, "cov_type", "text", False),
-    (FEOptions, "time", "column", True),
     (FEOptions, "cluster", "column", True),
     (FEOptions, "dk_time", "column", True),
     (REOptions, "cov_type", "text", False),
-    (REOptions, "time", "column", True),
     (REOptions, "dk_time", "column", True),
     (REOptions, "cluster", "column", True),
 ]

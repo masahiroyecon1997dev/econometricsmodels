@@ -1,4 +1,4 @@
-"""全手法共通の、列名引数（`y`・`x`・`entity`等）の型検証のテスト。
+"""全手法共通の、列名引数（`y`・`x`・`effects`等）の型検証のテスト。
 
 型の誤り（`x`が`list`でない、列名が`str`でない）は、`ValidationError`ではなく
 Pythonの慣習どおり組み込みの`TypeError`になり、メッセージに引数名と実際の型が含まれる。
@@ -48,7 +48,7 @@ def _or(value, default):
 
 
 # 手法ごとに、引数を差し替えて推定量を構築する関数。`x`は手法の説明変数引数
-# （IVでは`x_exog`）、`y`・`entity`・`weight`等を上書きできる。
+# （IVでは`x_exog`）、`y`・`effects`・`weight`等を上書きできる。
 def _build_ols(df, y="y", x=_UNSET):
     return OLS(df, y=y, x=_or(x, ["x1"]))
 
@@ -69,12 +69,12 @@ def _build_tobit(df, y="y", x=_UNSET):
     return Tobit(df, y=y, x=_or(x, ["x1"]))
 
 
-def _build_fe(df, y="y", x=_UNSET, entity="entity"):
-    return FE(df, y=y, x=_or(x, ["x1"]), entity=entity)
+def _build_fe(df, y="y", x=_UNSET, effects=_UNSET):
+    return FE(df, y=y, x=_or(x, ["x1"]), effects=_or(effects, ["entity"]))
 
 
-def _build_re(df, y="y", x=_UNSET, entity="entity"):
-    return RE(df, y=y, x=_or(x, ["x1"]), entity=entity)
+def _build_re(df, y="y", x=_UNSET, effects=_UNSET):
+    return RE(df, y=y, x=_or(x, ["x1"]), effects=_or(effects, ["entity"]))
 
 
 def _build_iv(df, y="y", x=_UNSET, x_endog=_UNSET, instruments=_UNSET):
@@ -173,7 +173,7 @@ def test_x_elements_must_be_str(df, x_method, value, position, got):
     )
 
 
-# 列名を受け取る単一の`str`引数: `y`（全手法）、`entity`（FE・RE）、`weight`（WLS）。
+# 列名を受け取る単一の`str`引数: `y`（全手法）、`weight`（WLS）。
 BAD_NAMES = [
     (["y"], "list"),
     (None, "NoneType"),
@@ -195,12 +195,44 @@ def test_y_must_be_a_str(df, x_method, value, got):
 
 
 @pytest.mark.parametrize(
-    ("value", "got"), BAD_NAMES, ids=[x[1] for x in BAD_NAMES]
+    ("value", "got"),
+    [
+        ("entity", "str"),
+        (("entity",), "tuple"),
+        (SERIES, msgs.fully_qualified_type_name(SERIES)),
+        (None, "NoneType"),
+        ({"entity"}, "set"),
+    ],
+    ids=["str", "tuple", "polars_series", "none", "set"],
 )
 @pytest.mark.parametrize("builder", [_build_fe, _build_re], ids=["FE", "RE"])
-def test_entity_must_be_a_str(df, builder, value, got):
+def test_effects_must_be_a_list(df, builder, value, got):
+    """`effects`が`list`でないと（`str`を含む）、`TypeError`になる。"""
     _assert_type_error_at_fit(
-        lambda: builder(df, entity=value), _msg_name("entity", got)
+        lambda: builder(df, effects=value), _msg_list("effects", got)
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "position", "got"),
+    [
+        ([1], 0, "int"),
+        (["entity", 2.5], 1, "float"),
+        ([None], 0, "NoneType"),
+        ([b"entity"], 0, "bytes"),
+    ],
+    ids=["int", "float_second", "none", "bytes"],
+)
+@pytest.mark.parametrize("builder", [_build_fe, _build_re], ids=["FE", "RE"])
+def test_effects_elements_must_be_str(df, builder, value, position, got):
+    _assert_type_error_at_fit(
+        lambda: builder(df, effects=value),
+        escaped(
+            msgs.COLUMN_LIST_ELEMENT_NOT_STR,
+            name="effects",
+            index=position,
+            type_name=got,
+        ),
     )
 
 
@@ -253,14 +285,13 @@ def test_iv_column_list_elements_must_be_str(df, name, value, position, got):
 def test_list_arguments_still_work(df):
     """正しい`list`・`str`の引数は推定できる（回帰確認）。"""
     assert _build_ols(df, x=["x1", "x2"]).fit().n_obs == N
-    assert FE(df, y="y", x=["x1"], entity="entity").fit().n_obs == N
+    assert FE(df, y="y", x=["x1"], effects=["entity"]).fit().n_obs == N
     assert (
         FE(
             df,
             y="y",
             x=["x1"],
-            entity="entity",
-            options=FEOptions(time="t"),
+            effects=["entity", "t"],
         )
         .fit()
         .n_obs
@@ -272,7 +303,7 @@ def test_list_arguments_still_work(df):
         .n_obs
         == N
     )
-    assert RE(df, y="y", x=["x1"], entity="entity").fit().n_obs == N
+    assert RE(df, y="y", x=["x1"], effects=["entity"]).fit().n_obs == N
 
 
 # ── options ──────────────────────────────────────────────────────────
@@ -291,8 +322,8 @@ OPTIONS_METHODS = {
         lambda d, o: IV(d, "y", ["x2"], ["x1"], ["z"], options=o),
         IVOptions,
     ),
-    "FE": (lambda d, o: FE(d, "y", ["x1"], "entity", options=o), FEOptions),
-    "RE": (lambda d, o: RE(d, "y", ["x1"], "entity", options=o), REOptions),
+    "FE": (lambda d, o: FE(d, "y", ["x1"], ["entity"], options=o), FEOptions),
+    "RE": (lambda d, o: RE(d, "y", ["x1"], ["entity"], options=o), REOptions),
 }
 
 

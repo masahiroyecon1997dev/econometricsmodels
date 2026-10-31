@@ -13,10 +13,10 @@ def our_fit_re(
     df: pl.DataFrame,
     *,
     x: list[str] | None = None,
-    entity: str = "entity",
+    effects: list[str] | None = None,
     options: REOptions | None = None,
 ) -> REResults:
-    """既定は`x=["x1", "x2"], entity="entity"`（`_fe_helpers.our_fit`と同じ既定、
+    """既定は`x=["x1", "x2"], effects=["entity"]`（`_fe_helpers.our_fit`と同じ既定、
     `benchmark/panel/datasets.py`が生成する列構成。RE専用の合成データセットは
     無く`fe_*.csv`を再利用するため列構成もFEと共通、`benchmark/panel/
     references/linearmodels_ref.py`モジュールdoc参照）。
@@ -28,6 +28,6 @@ def our_fit_re(
         df,
         y="y",
         x=["x1", "x2"] if x is None else x,
-        entity=entity,
+        effects=["entity"] if effects is None else effects,
         **kwargs,
     ).fit()

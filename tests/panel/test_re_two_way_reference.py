@@ -1,4 +1,4 @@
-"""2-way RE（`REOptions.time`、バランスパネル）のplm・手計算との数値照合。
+"""2-way RE（`effects`に個体列と時点列を渡す、バランスパネル）のplm・手計算との数値照合。
 
 2-way REを計算する参照実装は`plm`（`model = "random"`・`effect = "twoways"`・Swamy-Arora）
 だけで（`linearmodels.RandomEffects`は1-wayのみ）、plmとの照合が主になる
@@ -109,15 +109,13 @@ class Case:
             self.frame(),
             y=self.y_col,
             x=self.x_cols,
-            entity=self.entity_col,
+            effects=[self.entity_col, self.time_col],
             options=self.options(cov_type),
         ).fit()
 
     def options(self, cov_type: str) -> REOptions:
         dk_time = self.time_col if cov_type == "dk" else None
-        return REOptions(
-            cov_type=cov_type, time=self.time_col, dk_time=dk_time
-        )
+        return REOptions(cov_type=cov_type, dk_time=dk_time)
 
     def oracle(self, cov_type: str, **kwargs) -> dict:
         return hand_computed(

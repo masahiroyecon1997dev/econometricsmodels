@@ -51,8 +51,8 @@ FITS = {
     "Probit": lambda d: Probit(d, "y01", ["x1"]).fit(),
     "Tobit": lambda d: Tobit(d, "yc", ["x1"]).fit(),
     "IV": lambda d: IV(d, "y", ["x2"], ["x1"], ["z", "z2"]).fit(),
-    "FE": lambda d: FE(d, "y", ["x1"], "entity").fit(),
-    "RE": lambda d: RE(d, "y", ["x1"], "entity").fit(),
+    "FE": lambda d: FE(d, "y", ["x1"], ["entity"]).fit(),
+    "RE": lambda d: RE(d, "y", ["x1"], ["entity"]).fit(),
 }
 
 
@@ -593,7 +593,7 @@ def test_breusch_godfrey_time_naming_an_uint128_column_is_rejected(frame):
 
 
 def test_option_columns_are_read_when_an_unreadable_column_is_present(frame):
-    """`cluster`・`hac_time`・`time`・`dk_time`が指名されると読まれ、無関係の`UInt128`列は
+    """`cluster`・`hac_time`・`effects`・`dk_time`が指名されると読まれ、無関係の`UInt128`列は
     読まれない（結果は`UInt128`列が無いときと同じ）。"""
     data = _with_uint128(frame)
     cases = {
@@ -610,11 +610,11 @@ def test_option_columns_are_read_when_an_unreadable_column_is_present(frame):
             d,
             "y",
             ["x1"],
-            "entity",
+            ["entity"],
             options=FEOptions(cov_type="dk", dk_time="t"),
         ).fit(),
         "re-twoway": lambda d: RE(
-            d, "y", ["x1"], "entity", options=REOptions(time="t")
+            d, "y", ["x1"], ["entity", "t"], options=REOptions()
         ).fit(),
         "logit-cluster": lambda d: Logit(
             d,

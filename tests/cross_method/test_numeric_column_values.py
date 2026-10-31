@@ -4,7 +4,7 @@
 ループもある。先頭の列だけを調べるループや、特定の列だけ検査を飛ばす経路を見逃さない
 ように、各手法が使う数値列の全てに、nullとNaNと±infを入れて確認する（`fit()`の
 `y`・`x`・IVの各変数、`predict()`・`augment()`の`new_data`の全ての`x`列）。
-キー列（`cluster`・`entity`・`time`）は`test_key_columns.py`が担う。
+キー列（`cluster`・`effects`・`dk_time`）は`test_key_columns.py`が担う。
 """
 
 from __future__ import annotations
@@ -114,11 +114,11 @@ FIT_CASES = {
         ],
     ),
     "FE": (
-        lambda d: FE(d, "y", ["x1", "x2"], "entity").fit(),
+        lambda d: FE(d, "y", ["x1", "x2"], ["entity"]).fit(),
         [("y", "y"), ("x1", "x"), ("x2", "x")],
     ),
     "RE": (
-        lambda d: RE(d, "y", ["x1", "x2"], "entity").fit(),
+        lambda d: RE(d, "y", ["x1", "x2"], ["entity"]).fit(),
         [("y", "y"), ("x1", "x"), ("x2", "x")],
     ),
 }

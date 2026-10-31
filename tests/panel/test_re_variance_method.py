@@ -145,10 +145,16 @@ def _plm_entry(reference: dict, case: Case) -> dict:
     return reference[section][case.name]
 
 
+def _effects(case: Case) -> list[str]:
+    """`effects`引数。2-wayのケースは`[個体列, 時点列]`、1-wayは`[個体列]`。"""
+    if case.two_way:
+        return [case.entity_col, case.time_col]
+    return [case.entity_col]
+
+
 def _options(case: Case, cov_type: str, method: str) -> REOptions:
     return REOptions(
         cov_type=cov_type,
-        time=case.time_col if case.two_way else None,
         dk_time=case.time_col if cov_type == "dk" else None,
         variance_method=method,
     )
@@ -159,7 +165,7 @@ def _fit(case: Case, cov_type: str, method: str, df=None):
         _frame(case) if df is None else df,
         y=case.y_col,
         x=list(case.x),
-        entity=case.entity_col,
+        effects=_effects(case),
         options=_options(case, cov_type, method),
     ).fit()
 
@@ -446,10 +452,8 @@ def test_default_variance_method_is_swamy_arora(case_name):
         _frame(case),
         y=case.y_col,
         x=list(case.x),
-        entity=case.entity_col,
-        options=REOptions(
-            cov_type="classical", time=case.time_col if case.two_way else None
-        ),
+        effects=_effects(case),
+        options=REOptions(cov_type="classical"),
     ).fit()
     explicit = _fit(case, "classical", "swamy_arora")
     assert default.variance_method == "swamy_arora"
@@ -510,7 +514,7 @@ def test_unknown_variance_method_is_reported_before_the_data_is_checked():
             _frame(case),
             y="y",
             x=["no_such_column"],
-            entity="entity",
+            effects=["entity"],
             options=REOptions(variance_method="nerlove"),
         ).fit()
 
@@ -653,7 +657,7 @@ def test_wallace_hussain_pooled_regression_failure_is_a_computation_error():
             df,
             y="y",
             x=["x1", "x_invariant", "z2"],
-            entity="entity",
+            effects=["entity"],
             options=REOptions(variance_method="wallace_hussain"),
         ).fit()
 
@@ -675,7 +679,7 @@ def test_non_positive_sigma2_eps_is_a_computation_error():
             df,
             y="y",
             x=["x1"],
-            entity="entity",
+            effects=["entity"],
             options=REOptions(variance_method=method),
         ).fit()
 
@@ -722,7 +726,7 @@ def test_perfect_collinearity_is_a_computation_error_for_every_method(method):
             df,
             y="y",
             x=["x1", "x2", "x3"],
-            entity="entity",
+            effects=["entity"],
             options=REOptions(variance_method=method),
         ).fit()
 
@@ -748,7 +752,7 @@ def test_extreme_scale_difference_is_a_computation_error_for_every_method(
             df,
             y="y",
             x=["x1", "x2"],
-            entity="entity",
+            effects=["entity"],
             options=REOptions(cov_type=cov_type, variance_method=method),
         ).fit()
 
@@ -776,7 +780,7 @@ def test_entity_count_equal_to_slope_count_plus_one_blocks_only_swamy_arora():
             df,
             y="y",
             x=["x1", "x2"],
-            entity="entity",
+            effects=["entity"],
             options=REOptions(cov_type="classical", variance_method=method),
         ).fit()
 
@@ -805,7 +809,10 @@ def test_singleton_entity_is_a_validation_error_for_every_method(method):
     df = _frame(case)
     kept = df.filter((pl.col("entity") != "e00") | (pl.col("time") == "t0"))
     with raises_error(
-        ErrorCode.SINGLETON_GROUP, argument="entity", group="e00"
+        ErrorCode.SINGLETON_GROUP,
+        argument="effects",
+        column="entity",
+        group="e00",
     ):
         _fit(case, "classical", method, kept)
 

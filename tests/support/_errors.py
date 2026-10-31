@@ -93,6 +93,7 @@ MIGRATED_CODES: frozenset[str] = frozenset(
         ErrorCode.INSUFFICIENT_DEGREES_OF_FREEDOM,
         ErrorCode.SINGLETON_GROUP,
         ErrorCode.PANEL_NOT_BALANCED_FOR_TWO_WAY,
+        ErrorCode.EFFECTS_TOO_MANY,
         ErrorCode.REGRESSOR_NO_WITHIN_VARIATION,
         ErrorCode.DK_PERIODS_TOO_FEW,
         ErrorCode.DK_PERIODS_NOT_ABOVE_COEFFICIENTS,

@@ -349,7 +349,7 @@ class TestPanelDesign:
             stage="WITHIN_REGRESSION",
             columns=["x1", "x1_copy"],
         ):
-            FE(df, "y", ["x1", "x1_copy"], "entity").fit()
+            FE(df, "y", ["x1", "x1_copy"], ["entity"]).fit()
 
     def test_re_reports_a_duplicate_in_the_variance_component_regression(
         self, df
@@ -359,7 +359,7 @@ class TestPanelDesign:
             stage="VARIANCE_COMPONENT_WITHIN_REGRESSION",
             columns=["x1", "x1_copy"],
         ):
-            RE(df, "y", ["x1", "x1_copy"], "entity").fit()
+            RE(df, "y", ["x1", "x1_copy"], ["entity"]).fit()
 
     def test_re_reports_time_invariant_duplicates_in_the_final_regression(
         self, df
@@ -369,7 +369,7 @@ class TestPanelDesign:
             stage="QUASI_DEMEANED_REGRESSION",
             columns=["level", "level_copy"],
         ):
-            RE(df, "y", ["x1", "level", "level_copy"], "entity").fit()
+            RE(df, "y", ["x1", "level", "level_copy"], ["entity"]).fit()
 
     def test_re_reports_time_invariant_duplicates_in_the_pooled_regression(
         self, df
@@ -383,7 +383,7 @@ class TestPanelDesign:
                 df,
                 "y",
                 ["x1", "level", "level_copy"],
-                "entity",
+                ["entity"],
                 options=REOptions(variance_method="wallace_hussain"),
             ).fit()
 
@@ -396,7 +396,7 @@ class TestPanelDesign:
             stage="WITHIN_REGRESSION",
             columns=["x1", "x1_plus_level"],
         ):
-            FE(df, "y", ["x1", "x1_plus_level"], "entity").fit()
+            FE(df, "y", ["x1", "x1_plus_level"], ["entity"]).fit()
 
     def test_re_amemiya_reports_the_variance_component_regression(self, df):
         with raises_error(
@@ -408,6 +408,6 @@ class TestPanelDesign:
                 df,
                 "y",
                 ["x1", "x1_copy"],
-                "entity",
+                ["entity"],
                 options=REOptions(variance_method="amemiya"),
             ).fit()

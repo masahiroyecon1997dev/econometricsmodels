@@ -1,8 +1,8 @@
-"""2-way RE（`REOptions.time`、バランスパネル）の構造・API・バリデーションのテスト。
+"""2-way RE（`effects`に個体列と時点列を渡す、バランスパネル）の構造・API・バリデーションのテスト。
 
 参照実装（plm）・仕様どおりの手計算との網羅的な数値照合（全`cov_type`・複数シナリオ・
 実データ）は`test_re_two_way_reference.py`が担う。ここでは小さなバランスパネル
-（`re_two_way_small.csv`）で、`n_periods`・自由度・Hausman検定（手計算との照合、クラスター数・
+（`re_two_way_small.csv`）で、`n_groups`・自由度・Hausman検定（手計算との照合、クラスター数・
 時点数の境界、`cluster`・`dk_time`の列指定）・分散成分と重みの構造・オプションの
 バリデーションを確認する。
 
@@ -52,27 +52,28 @@ def panel() -> pl.DataFrame:
     )
 
 
-def _fit(df, options, x=("x1", "xi", "xt")):
-    return RE(df, y="y", x=list(x), entity="entity", options=options).fit()
+def _fit(df, options, x=("x1", "xi", "xt"), *, two_way=True):
+    """既定は2-way（`effects=["entity", "time"]`）。`two_way=False`で1-way。"""
+    effects = ["entity", "time"] if two_way else ["entity"]
+    return RE(df, y="y", x=list(x), effects=effects, options=options).fit()
 
 
 def test_two_way_reports_degrees_of_freedom(panel):
     """`df_resid = n - k`、`df_model = k + 1`（切片込み）。classicalのF検定の
     分母自由度は`df_resid`、clusterは`G - 1`（plmとの数値照合は
     `test_re_two_way_reference.py`）。"""
-    classical = _fit(panel, REOptions(cov_type="classical", time="time"))
-    cluster = _fit(panel, REOptions(cov_type="cluster", time="time"))
+    classical = _fit(panel, REOptions(cov_type="classical"))
+    cluster = _fit(panel, REOptions(cov_type="cluster"))
     assert classical.df_resid == 20
     assert classical.df_model == 4
     assert classical.f_df_denom == 20
     assert cluster.f_df_denom == 5  # G - 1
 
 
-def test_two_way_reports_n_periods(panel):
-    res = _fit(panel, REOptions(cov_type="classical", time="time"))
+def test_two_way_reports_n_groups(panel):
+    res = _fit(panel, REOptions(cov_type="classical"))
 
-    assert res.n_periods == 4
-    assert res.n_entities == 6
+    assert res.n_groups == {"entity": 6, "time": 4}
 
 
 HAUSMAN_COV_TYPES = ["classical", "hc1", "hc2", "hc3", "cluster", "dk"]
@@ -87,7 +88,7 @@ def _oracle(panel, x, cov_type, **kwargs):
 
 def _options(cov_type, **kwargs):
     extra = {"dk_time": "time", "dk_bandwidth": 1} if cov_type == "dk" else {}
-    return REOptions(cov_type=cov_type, time="time", **extra, **kwargs)
+    return REOptions(cov_type=cov_type, **extra, **kwargs)
 
 
 @pytest.mark.parametrize("cov_type", HAUSMAN_COV_TYPES)
@@ -124,7 +125,7 @@ def test_two_way_results_do_not_depend_on_the_column_order(panel):
     """時間変化のある列が先頭以外にあっても結果は同じ（列の対応づけの回帰ガード）。"""
     base = _fit(
         panel,
-        REOptions(cov_type="classical", time="time"),
+        REOptions(cov_type="classical"),
         x=("x1", "xi", "z", "x2"),
     )
     for x in [
@@ -132,7 +133,7 @@ def test_two_way_results_do_not_depend_on_the_column_order(panel):
         ("z", "x2", "xi", "x1"),
         ("x2", "z", "x1", "xi"),
     ]:
-        res = _fit(panel, REOptions(cov_type="classical", time="time"), x=x)
+        res = _fit(panel, REOptions(cov_type="classical"), x=x)
         assert res.hausman_df == base.hausman_df
         assert res.hausman_statistic == pytest.approx(
             base.hausman_statistic, rel=1e-9
@@ -149,7 +150,7 @@ def test_two_way_results_do_not_depend_on_the_column_order(panel):
 def test_two_way_hausman_cluster_count_must_cover_the_auxiliary_slopes(panel):
     """時点でクラスタリング（G = 4）。RE本体の傾き3個には足りるが、補助回帰の傾き
     （`x*`の3個と`x̃`の1個）には足りず`ValidationError`になる。`x1 + xi`なら通る。"""
-    options = REOptions(cov_type="cluster", time="time", cluster="time")
+    options = REOptions(cov_type="cluster", cluster="time")
     with raises_error(
         ErrorCode.CLUSTER_COUNT_NOT_ABOVE_SLOPES,
         setting="cov_type",
@@ -171,9 +172,7 @@ def test_two_way_hausman_cluster_count_must_cover_the_auxiliary_slopes(panel):
 def test_two_way_hausman_dk_periods_must_exceed_the_slopes(panel):
     """`dk_time`を3時点にまとめる。RE本体の傾き3個では`T = 3 <= q`で
     `ValidationError`、`x1 + xi`（q = 2）なら通って手計算と一致する。"""
-    options = REOptions(
-        cov_type="dk", time="time", dk_time="dk3", dk_bandwidth=1
-    )
+    options = REOptions(cov_type="dk", dk_time="dk3", dk_bandwidth=1)
     with raises_error(
         ErrorCode.DK_PERIODS_NOT_ABOVE_COEFFICIENTS,
         n_periods=3,
@@ -196,7 +195,7 @@ def test_two_way_hausman_uses_the_cluster_and_dk_time_columns(panel):
     groups = np.unique(panel["grp"].to_numpy(), return_inverse=True)[1]
     clustered = _fit(
         panel,
-        REOptions(cov_type="cluster", time="time", cluster="grp"),
+        REOptions(cov_type="cluster", cluster="grp"),
         x=("x1",),
     )
     hand = _oracle(panel, ("x1",), "cluster", cluster=groups)
@@ -211,9 +210,7 @@ def test_two_way_hausman_uses_the_cluster_and_dk_time_columns(panel):
     for x in [("x1",), ("x1", "xi", "xt")]:
         dk = _fit(
             panel,
-            REOptions(
-                cov_type="dk", time="time", dk_time="dk_perm", dk_bandwidth=1
-            ),
+            REOptions(cov_type="dk", dk_time="dk_perm", dk_bandwidth=1),
             x=x,
         )
         hand = _oracle(panel, x, "dk", dk_time_col="dk_perm")
@@ -228,7 +225,7 @@ def test_two_way_hausman_uses_the_cluster_and_dk_time_columns(panel):
 
 def test_two_way_hausman_test_is_none_without_two_way_variation(panel):
     """一次元でしか変わらない列だけなら検定できず`None`（`fit()`は成功する）。"""
-    res = _fit(panel, REOptions(time="time"), x=("xi", "xt"))
+    res = _fit(panel, REOptions(), x=("xi", "xt"))
     assert res.hausman_statistic is None
     assert res.hausman_p_value is None
     assert res.hausman_df is None
@@ -241,7 +238,7 @@ def test_two_way_exposes_variance_components_and_weights_but_no_entity_theta(
     """2-wayは`sigma2_lambda`と3つの重みを持ち、1-wayの`theta`（個体ごと）は`None`
     （値のplm::ercompとの照合は`test_re_two_way_reference.py`）。重みは分散成分から
     `θ₁ = 1 - σ_ε/σ₁`・`θ₂ = 1 - σ_ε/σ₂`・`θ₃ = θ₁ + θ₂ - 1 + σ_ε/σ₄`と定まる。"""
-    res = _fit(panel, REOptions(time="time"), x=("x1", "xi", "xt"))
+    res = _fit(panel, REOptions(), x=("x1", "xi", "xt"))
     n, t = 6, 4
     eps, u, lam = res.sigma2_eps, res.sigma2_u, res.sigma2_lambda
     sigma = [
@@ -262,7 +259,9 @@ def test_one_way_exposes_theta_per_entity_and_no_two_way_fields(panel):
     """1-wayは`σ_λ²`と2-wayの重みが`None`で、`theta`はエンティティID→θ_i
     （バランスパネルなので全エンティティで同じ値、`1 - sqrt(σ_ε² / (T·σ_u² + σ_ε²))`）。
     値のplmとの照合は`test_re_time_invariant.py`。"""
-    res = _fit(panel, REOptions(cov_type="classical"), x=("x1", "xt"))
+    res = _fit(
+        panel, REOptions(cov_type="classical"), x=("x1", "xt"), two_way=False
+    )
     assert res.sigma2_lambda is None
     assert res.theta_entity is None
     assert res.theta_time is None
@@ -279,7 +278,7 @@ def test_theta_total_is_zero_when_a_variance_component_is_zero(panel):
         y=2.0 * pl.col("x1")
         + pl.Series([0.1 * ((r * 7) % 5) for r in range(24)])
     )
-    res = _fit(df, REOptions(time="time"), x=("x1",))
+    res = _fit(df, REOptions(), x=("x1",))
     assert res.sigma2_u == 0.0
     assert res.sigma2_lambda == 0.0
     assert (res.theta_entity, res.theta_time, res.theta_total) == (
@@ -290,16 +289,22 @@ def test_theta_total_is_zero_when_a_variance_component_is_zero(panel):
 
 
 def test_one_way_has_no_n_periods(panel):
-    """`time`を指定しない1-wayは`n_periods`が`None`で、`dk_time`だけの指定でも同じ。"""
-    plain = _fit(panel, REOptions(cov_type="classical"), x=("x1", "xi"))
+    """`effects`が1要素の1-wayは`n_groups`に`time`を含まず、、`dk_time`だけの指定でも同じ。"""
+    plain = _fit(
+        panel,
+        REOptions(cov_type="classical"),
+        x=("x1", "xi"),
+        two_way=False,
+    )
     dk = _fit(
         panel,
         REOptions(cov_type="dk", dk_time="time"),
         x=("x1", "xi"),
+        two_way=False,
     )
 
-    assert plain.n_periods is None
-    assert dk.n_periods is None
+    assert list(plain.n_groups) == ["entity"]
+    assert list(dk.n_groups) == ["entity"]
     assert plain.hausman_statistic is not None
 
 
@@ -307,7 +312,9 @@ def test_one_way_accepts_time_only_regressor_like_plm(panel):
     """1-wayでも、時点間でのみ変わる列（`xt`、年トレンド等）を含められる。
     バランスパネルでは個体平均が一定になるためbetween回帰から落ち、plmと同じ
     推定値になる。Hausman検定は`x̃t`が識別できないため`x1`だけを検定する。"""
-    res = _fit(panel, REOptions(cov_type="classical"), x=("x1", "xt"))
+    res = _fit(
+        panel, REOptions(cov_type="classical"), x=("x1", "xt"), two_way=False
+    )
 
     for name, value in _ONE_WAY_REF["params"].items():
         assert res.params[name] == pytest.approx(value, rel=1e-8)
@@ -387,8 +394,8 @@ def test_standard_errors_match_ols_on_the_plm_transformed_data(
     """plmの重みで変換した`y`・`x`を切片込みの回帰（statsmodels）に当てはめた
     係数・標準誤差・t値・p値が一致する。1-wayの時点間のみ変わる列（`xt`）と
     2-wayの一次元でしか変わらない列を含む。HC2・HC3は素のレバレッジ。"""
-    options = REOptions(cov_type=cov_type, time="time" if two_way else None)
-    res = _fit(panel, options, x=x)
+    options = REOptions(cov_type=cov_type)
+    res = _fit(panel, options, x=x, two_way=two_way)
 
     y, design = _transformed_design(panel, x, thetas, two_way)
     ref = sm.OLS(y, design).fit(use_t=True, **sm_kwargs)
@@ -420,8 +427,9 @@ def test_cluster_standard_errors_match_ols_on_the_plm_transformed_data(
     """クラスター標準誤差（既定のentityクラスター）も変換後の回帰と一致する。"""
     res = _fit(
         panel,
-        REOptions(cov_type="cluster", time="time" if two_way else None),
+        REOptions(cov_type="cluster"),
         x=x,
+        two_way=two_way,
     )
     y, design = _transformed_design(panel, x, thetas, two_way)
     groups = panel["entity"].to_numpy()
@@ -460,12 +468,12 @@ def test_two_way_driscoll_kraay_without_lags_equals_time_clusters(panel):
     # Hausmanの補助回帰がクラスター数（4）を要するため、`x1`だけで比べる。
     dk = _fit(
         panel,
-        REOptions(cov_type="dk", time="time", dk_time="time", dk_bandwidth=0),
+        REOptions(cov_type="dk", dk_time="time", dk_bandwidth=0),
         x=("x1",),
     )
     clustered = _fit(
         panel,
-        REOptions(cov_type="cluster", time="time", cluster="time"),
+        REOptions(cov_type="cluster", cluster="time"),
         x=("x1",),
     )
     assert list(dk.std_errors.values()) == pytest.approx(
@@ -476,15 +484,15 @@ def test_two_way_driscoll_kraay_without_lags_equals_time_clusters(panel):
 @pytest.mark.parametrize("cov_type", ["hc1", "hc2", "hc3", "cluster", "dk"])
 def test_two_way_runs_with_every_cov_type(panel, cov_type):
     kwargs = {"dk_time": "time"} if cov_type == "dk" else {}
-    res = _fit(panel, REOptions(cov_type=cov_type, time="time", **kwargs))
+    res = _fit(panel, REOptions(cov_type=cov_type, **kwargs))
     assert all(math.isfinite(v) and v > 0 for v in res.std_errors.values())
 
 
 @pytest.mark.parametrize("x", [("xi", "xt"), ("xt",), ("xi",)])
 def test_two_way_accepts_regressors_that_vary_in_only_one_dimension(panel, x):
     """時間変化のある列が無くても（内部の2-way FEが説明変数0個でも）推定できる。"""
-    res = _fit(panel, REOptions(time="time"), x=x)
-    assert res.n_periods == 4
+    res = _fit(panel, REOptions(), x=x)
+    assert res.n_groups["time"] == 4
     assert all(math.isfinite(v) for v in res.params.values())
 
 
@@ -494,7 +502,7 @@ def test_two_way_constant_column_raises_computation_error(panel):
     with raises_error(
         ErrorCode.DESIGN_MATRIX_SINGULAR, stage="QUASI_DEMEANED_REGRESSION"
     ):
-        _fit(df, REOptions(time="time"), x=("x1", "c"))
+        _fit(df, REOptions(), x=("x1", "c"))
 
 
 def _baseline() -> pl.DataFrame:
@@ -562,7 +570,7 @@ def test_two_way_computation_error_paths(columns, x, stage):
     else:
         expected = {"code": ErrorCode.DESIGN_MATRIX_SINGULAR}
     with raises_error(stage=stage, **expected):
-        _fit(df, REOptions(time="time"), x=x)
+        _fit(df, REOptions(), x=x)
 
 
 def test_two_way_noiseless_data_is_a_perfect_fit():
@@ -575,7 +583,7 @@ def test_two_way_noiseless_data_is_a_perfect_fit():
     with raises_error(
         ErrorCode.PERFECT_FIT, stage="VARIANCE_COMPONENT_WITHIN_REGRESSION"
     ):
-        _fit(df, REOptions(time="time"), x=("x1", "x2"))
+        _fit(df, REOptions(), x=("x1", "x2"))
 
 
 def test_two_way_with_too_few_degrees_of_freedom_for_the_internal_fe_raises(
@@ -593,7 +601,7 @@ def test_two_way_with_too_few_degrees_of_freedom_for_the_internal_fe_raises(
         min_obs=5,
         stage="VARIANCE_COMPONENT_WITHIN_REGRESSION",
     ):
-        _fit(df, REOptions(time="time"), x=("x1",))
+        _fit(df, REOptions(), x=("x1",))
 
 
 def test_two_way_with_many_regressors_raises_because_time_means_cannot_be_fitted():
@@ -608,7 +616,7 @@ def test_two_way_with_many_regressors_raises_because_time_means_cannot_be_fitted
     ):
         _fit(
             many,
-            REOptions(time="time"),
+            REOptions(),
             x=tuple(f"x{i}" for i in range(1, 21)),
         )
 
@@ -622,7 +630,7 @@ def test_between_regression_success_boundary_matches_hand_computed(
         pl.col("entity").is_in([f"e{i}" for i in range(1, n_entities + 1)])
         & (pl.col("time") <= n_periods)
     )
-    res = _fit(df, REOptions(cov_type="classical", time="time"), x=("x1",))
+    res = _fit(df, REOptions(cov_type="classical"), x=("x1",))
     hand = hand_computed(df, ["x1"], "classical", two_way=True)
     for name in res.param_names:
         assert res.params[name] == pytest.approx(
@@ -637,7 +645,7 @@ def test_between_regression_success_boundary_matches_hand_computed(
 def test_two_way_results_do_not_depend_on_the_row_order(panel):
     """行をシャッフルしても係数・標準誤差・Hausman検定は同じで、`residuals`は入力の
     行順に並ぶ（個体平均・時点平均を行コードで取るため、取り違えの回帰ガード）。"""
-    options = REOptions(cov_type="hc1", time="time")
+    options = REOptions(cov_type="hc1")
     base = _fit(panel, options, x=("x1", "xi", "xt"))
     order = np.random.default_rng(7).permutation(panel.height)
     shuffled_df = panel[order.tolist()]
@@ -660,9 +668,7 @@ def test_two_way_results_do_not_depend_on_the_row_order(panel):
 
 def test_two_way_residuals_match_hand_computed(panel):
     """`residuals`は準偏差変換した回帰の残差（入力の行順）。"""
-    res = _fit(
-        panel, REOptions(cov_type="classical", time="time"), x=("x1", "xi")
-    )
+    res = _fit(panel, REOptions(cov_type="classical"), x=("x1", "xi"))
     hand = hand_computed(panel, ["x1", "xi"], "classical", two_way=True)
     assert res.residuals == pytest.approx(
         hand["residuals"], rel=1e-8, abs=1e-12
@@ -675,9 +681,7 @@ def test_two_way_without_variance_components_equals_pooled_ols(panel):
         y=2.0 * pl.col("x1")
         + pl.Series([0.1 * ((r * 7) % 5) for r in range(24)])
     )
-    res = _fit(
-        df, REOptions(cov_type="classical", time="time"), x=("x1", "xi")
-    )
+    res = _fit(df, REOptions(cov_type="classical"), x=("x1", "xi"))
     assert res.sigma2_u == 0.0
     assert res.sigma2_lambda == 0.0
     design = sm.add_constant(df.select("x1", "xi").to_numpy())
@@ -721,8 +725,8 @@ def test_two_way_with_one_zero_component_equals_the_one_component_gls(zero):
             df,
             y="y",
             x=["x"],
-            entity="entity",
-            options=REOptions(cov_type="classical", time="time"),
+            effects=["entity", "time"],
+            options=REOptions(cov_type="classical"),
         ).fit()
         if (res.sigma2_u if zero == "entity" else res.sigma2_lambda) == 0.0:
             break
@@ -764,19 +768,15 @@ def test_non_finite_float_group_key_columns_raise(panel, role, bad):
         .alias("key")
     )
     kwargs = {
-        "entity": {"entity": "key", "options": REOptions(time="time")},
-        "time": {"entity": "entity", "options": REOptions(time="key")},
+        "entity": {"effects": ["key", "time"], "options": REOptions()},
+        "time": {"effects": ["entity", "key"], "options": REOptions()},
         "cluster": {
-            "entity": "entity",
-            "options": REOptions(
-                cov_type="cluster", time="time", cluster="key"
-            ),
+            "effects": ["entity", "time"],
+            "options": REOptions(cov_type="cluster", cluster="key"),
         },
         "dk_time": {
-            "entity": "entity",
-            "options": REOptions(
-                cov_type="dk", time="time", dk_time="key", dk_bandwidth=1
-            ),
+            "effects": ["entity", "time"],
+            "options": REOptions(cov_type="dk", dk_time="key", dk_bandwidth=1),
         },
     }[role]
     with raises_error(
@@ -784,7 +784,7 @@ def test_non_finite_float_group_key_columns_raise(panel, role, bad):
         column="key",
         value=pytest.approx(bad, nan_ok=True),
         row=3,
-        argument=role,
+        argument="effects" if role in ("entity", "time") else role,
         data_argument="data",
     ):
         RE(df, y="y", x=["x1"], **kwargs).fit()
@@ -794,8 +794,15 @@ def test_one_way_time_only_column_on_unbalanced_panel_is_tested(panel):
     """1行欠けた不均衡パネルでは、時点間でのみ変わる列も個体平均が一定でなく、
     ハウスマン検定の対象に残る（バランスなら`hausman_df == 1`）。"""
     unbalanced = panel.with_row_index().filter(pl.col("index") != 5)
-    balanced = _fit(panel, REOptions(cov_type="classical"), x=("x1", "xt"))
-    res = _fit(unbalanced, REOptions(cov_type="classical"), x=("x1", "xt"))
+    balanced = _fit(
+        panel, REOptions(cov_type="classical"), x=("x1", "xt"), two_way=False
+    )
+    res = _fit(
+        unbalanced,
+        REOptions(cov_type="classical"),
+        x=("x1", "xt"),
+        two_way=False,
+    )
     assert balanced.hausman_df == 1
     assert res.hausman_df == 2
 
@@ -804,14 +811,14 @@ def test_dk_time_is_independent_of_time(panel):
     """2-wayでも`cov_type="dk"`は`dk_time`が必須で、`time`は借用されない。
     `dk_time`が`time`と同じ列でも指定できる。"""
     with raises_error(ErrorCode.DK_TIME_REQUIRED):
-        _fit(panel, REOptions(cov_type="dk", time="time"), x=("x1", "xi"))
+        _fit(panel, REOptions(cov_type="dk"), x=("x1", "xi"))
 
     res = _fit(
         panel,
-        REOptions(cov_type="dk", time="time", dk_time="time"),
+        REOptions(cov_type="dk", dk_time="time"),
         x=("x1", "xi"),
     )
-    assert res.n_periods == 4
+    assert res.n_groups["time"] == 4
     assert res.dk_bandwidth_used == 1
 
 
@@ -824,19 +831,26 @@ def test_unbalanced_panel_raises(panel):
         n_periods=4,
         expected_obs=24,
     ):
-        _fit(df, REOptions(time="time"))
+        _fit(df, REOptions())
 
 
 def test_unbalanced_panel_is_allowed_for_one_way(panel):
     df = panel.slice(1, panel.height - 1)
-    assert _fit(df, REOptions(cov_type="classical"), x=("x1",)).n_obs == 23
+    assert (
+        _fit(
+            df, REOptions(cov_type="classical"), x=("x1",), two_way=False
+        ).n_obs
+        == 23
+    )
 
 
 def test_singleton_time_raises(panel):
     """最後の時点を1観測だけ残すと、時点のsingletonで`ValidationError`。"""
     keep = (pl.col("time") != 4) | (pl.int_range(pl.len()).over("time") == 0)
-    with raises_error(ErrorCode.SINGLETON_GROUP, argument="time", group="4"):
-        _fit(panel.filter(keep), REOptions(time="time"), x=("x1",))
+    with raises_error(
+        ErrorCode.SINGLETON_GROUP, argument="effects", column="time", group="4"
+    ):
+        _fit(panel.filter(keep), REOptions(), x=("x1",))
 
 
 @pytest.mark.parametrize(
@@ -858,7 +872,7 @@ def test_between_regression_failure_names_the_regression(panel, keep, means):
         n_params=2,
         min_obs=3,
     ):
-        _fit(panel.filter(keep), REOptions(time="time"), x=("x1",))
+        _fit(panel.filter(keep), REOptions(), x=("x1",))
 
 
 def test_time_with_null_values_raises(panel):
@@ -872,7 +886,7 @@ def test_time_with_null_values_raises(panel):
         ErrorCode.COLUMN_CONTAINS_NULL,
         column="time",
         count=1,
-        argument="time",
+        argument="effects",
         data_argument="data",
     ):
-        _fit(df, REOptions(time="time"))
+        _fit(df, REOptions())

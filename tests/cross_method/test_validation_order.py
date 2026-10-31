@@ -9,8 +9,10 @@
    `solver` → `variance_method`。使われないオプションの未知の値も報告する
 3. オプションの組合せ: 使われないオプション → 必須オプションの欠落
    （`cov_type`の`hac`/`dk`が先、`gmm_weight_type`の`hac`が後）
-4. ロールの構造（列名の重複など）
-5. `y`・`x`などモデルの列（存在・dtype・欠損値）
+4. ロールの構造: `x`が空 → ロール間の重複（`y`・`effects`・`x`） → `x`内の重複 →
+   `dk_time`のロール → `"const"`などの名前の衝突
+   （FE/REの`effects`の列数の検査は、これより前に行われる）
+5. `y`・`x`などモデルの列（存在・dtype・欠損値）。順序は`y` → `x` → `effects`
 6. オプションの列（`cluster`・`hac_time`・`dk_time`・GMMの重み行列の列）
 7. エンジンの検査（`confidence_level`の範囲など）
 
@@ -156,12 +158,12 @@ _PANEL_FAULTS = (
     "duplicate_x",
     "y_in_x",
     "empty_x",
-    "time_is_y",
+    "effects_second_is_y",
     "dk_time_is_y",
     "missing_y",
     "missing_x",
-    "missing_entity",
-    "missing_time",
+    "missing_effects_first",
+    "missing_effects_second",
     "missing_cluster_column",
     "missing_time_column",
     "bad_confidence_level",
@@ -172,7 +174,7 @@ _IV_ARGS = {
     "x_endog": ["x1"],
     "instruments": ["z", "z2"],
 }
-_PANEL_ARGS = {"y": "y", "x": _X, "entity": "entity"}
+_PANEL_ARGS = {"y": "y", "x": _X, "effects": ["entity"]}
 
 METHODS = [
     Method(
@@ -426,31 +428,31 @@ FAULTS = {
         ),
         Fault(
             "duplicate_x",
-            (4, 0),
+            (4, 3),
             code=ErrorCode.ROLE_DUPLICATE_COLUMN,
             params=_dup_x,
         ),
         Fault(
             "y_in_x",
-            (4, 0),
+            (4, 2),
             code=ErrorCode.ROLE_COLUMN_OVERLAP,
             params=_y_in_x,
         ),
         Fault(
             "const_in_x",
-            (4, 0),
+            (4, 6),
             code=ErrorCode.INTERCEPT_NAME_COLLISION,
             params=lambda m: {"argument": m.x_role},
         ),
         Fault(
             "empty_x",
-            (4, 0),
+            (4, 1),
             code=ErrorCode.ROLE_EMPTY,
             params=lambda m: {"argument": _arg_role(m)},
         ),
         Fault(
             "weight_is_y",
-            (4, 0),
+            (4, 6),
             code=ErrorCode.ROLE_COLUMN_OVERLAP,
             params={
                 "column": "y",
@@ -458,20 +460,20 @@ FAULTS = {
                 "other_argument": "y",
             },
         ),
-        Fault("sigma_in_x", (4, 0), code=ErrorCode.TOBIT_SIGMA_NAME_COLLISION),
+        Fault("sigma_in_x", (4, 6), code=ErrorCode.TOBIT_SIGMA_NAME_COLLISION),
         Fault(
-            "time_is_y",
-            (4, 0),
+            "effects_second_is_y",
+            (4, 2),
             code=ErrorCode.ROLE_COLUMN_OVERLAP,
             params={
                 "column": "y",
-                "argument": "time",
-                "other_argument": "y",
+                "argument": "y",
+                "other_argument": "effects",
             },
         ),
         Fault(
             "dk_time_is_y",
-            (4, 0),
+            (4, 5),
             code=ErrorCode.ROLE_COLUMN_OVERLAP,
             params={
                 "column": "y",
@@ -487,30 +489,40 @@ FAULTS = {
         ),
         Fault(
             "uint128_x",
-            (5, 0),
+            (5, 1),
             code=ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
             params=lambda m: {
-                "column": "u128",
+                "column": "u128_x",
                 "dtype": "UInt128",
                 "argument": m.x_role,
             },
         ),
         Fault("missing_y", (5, 0), column="no_such_y", argument="y"),
-        Fault("missing_x", (5, 0), column="no_such_x"),
+        Fault("missing_x", (5, 1), column="no_such_x"),
         Fault(
             "missing_weight",
-            (5, 0),
+            (5, 1),
             column="no_such_weight",
             argument="weight",
         ),
         Fault(
             "missing_instrument",
-            (5, 0),
+            (5, 1),
             column="no_such_z",
             argument="instruments",
         ),
-        Fault("missing_entity", (5, 0), column="no_such_e", argument="entity"),
-        Fault("missing_time", (5, 0), column="no_such_t", argument="time"),
+        Fault(
+            "missing_effects_first",
+            (5, 2),
+            column="no_such_e",
+            argument="effects",
+        ),
+        Fault(
+            "missing_effects_second",
+            (5, 2),
+            column="no_such_t",
+            argument="effects",
+        ),
         Fault(
             "missing_cluster_column",
             (6, 0),
@@ -561,12 +573,21 @@ FAULTS = {
 }
 
 # `y`の列名を使う故障。`y`を別の列名に変える故障と混ぜると、成立しなくなる。
-_Y_FAULTS = frozenset({"y_in_x", "weight_is_y", "time_is_y", "dk_time_is_y"})
+_Y_FAULTS = frozenset(
+    {"y_in_x", "weight_is_y", "effects_second_is_y", "dk_time_is_y"}
+)
 _Y_CHANGERS = frozenset({"missing_y", "non_binary_y", "uint128_y"})
 # `hac`/`dk`を選ぶと使われてしまう、`hac_lags`/`dk_*`の未使用の故障。
 _UNUSED_WITHOUT_TIME_COV = frozenset(
     {"unused_hac_lags", "unused_dk_bandwidth", "unused_dk_time"}
 )
+
+
+def rank(method: Method, fault_id: str) -> tuple[int, int]:
+    """`method`での故障の順位。IVの空の`x_endog`は、`"const"`の検査と同じ順位。"""
+    if fault_id == "empty_x" and method.name.startswith("iv"):
+        return FAULTS[fault_id].rank[0], 6
+    return FAULTS[fault_id].rank
 
 
 def changes(method: Method, fault_id: str) -> Changes:
@@ -622,14 +643,14 @@ def changes(method: Method, fault_id: str) -> Changes:
             return {"weight": method.base_args["y"]}, {}
         case "sigma_in_x":
             return {x_role: [*base_x, "sigma"]}, {}
-        case "time_is_y":
-            return {}, {"time": method.base_args["y"]}
+        case "effects_second_is_y":
+            return {"effects": ["entity", method.base_args["y"]]}, {}
         case "dk_time_is_y":
             return {}, {"cov_type": "dk", "dk_time": method.base_args["y"]}
         case "uint128_y":
             return {"y": "u128"}, {}
         case "uint128_x":
-            return {x_role: [*base_x, "u128"]}, {}
+            return {x_role: [*base_x, "u128_x"]}, {}
         case "uint128_cluster":
             return {}, {"cov_type": "cluster", "cluster": "u128"}
         case "missing_y":
@@ -641,10 +662,10 @@ def changes(method: Method, fault_id: str) -> Changes:
         case "missing_instrument":
             instruments = method.base_args["instruments"]
             return {"instruments": [*instruments, "no_such_z"]}, {}
-        case "missing_entity":
-            return {"entity": "no_such_e"}, {}
-        case "missing_time":
-            return {}, {"time": "no_such_t"}
+        case "missing_effects_first":
+            return {"effects": ["no_such_e"]}, {}
+        case "missing_effects_second":
+            return {"effects": ["entity", "no_such_t"]}, {}
         case "missing_cluster_column":
             return {}, {"cov_type": "cluster", "cluster": "no_such_cluster"}
         case "missing_time_column":
@@ -726,7 +747,7 @@ def _pairs(method: Method) -> list[tuple[str, str]]:
     return [
         (a, b)
         for a, b in itertools.permutations(method.faults, 2)
-        if FAULTS[a].rank < FAULTS[b].rank and compose(method, a, b)
+        if rank(method, a) < rank(method, b) and compose(method, a, b)
     ]
 
 
@@ -770,10 +791,11 @@ def raises_fault(fault: Fault, method: Method) -> Any:
 def df() -> pl.DataFrame:
     frame = make_frame(11)
     # 取り込めないdtypeの列。指名されたときの報告順を確かめるための故障が使う。
+    # `y`と`x`に別々に混ぜても、ロールの重複にならないよう2列用意する。
     u128 = pl.Series("u128", range(frame.height), dtype=pl.Int64).cast(
         pl.UInt128
     )
-    return frame.with_columns(u128)
+    return frame.with_columns(u128, u128.alias("u128_x"))
 
 
 # ── 前提（故障の定義と単独の故障）────────────────────────────────────
@@ -823,7 +845,7 @@ def test_every_method_covers_every_stage_boundary(method):
     故障の定義を変えて、ある手法の境界の組がすべて消えたときに気づくための検査。
     """
     covered = {
-        (FAULTS[a].rank[0], FAULTS[b].rank[0]) for a, b in _pairs(method)
+        (rank(method, a)[0], rank(method, b)[0]) for a, b in _pairs(method)
     }
     for boundary in BOUNDARIES:
         assert boundary in covered, boundary

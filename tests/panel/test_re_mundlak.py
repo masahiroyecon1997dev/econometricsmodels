@@ -38,12 +38,12 @@ def _frame() -> pl.DataFrame:
     )
 
 
-def _fit(x, options=None, df=None):
+def _fit(x, options=None, df=None, *, two_way=False):
     return RE(
         _frame() if df is None else df,
         y="y",
         x=x,
-        entity="entity",
+        effects=["entity", "time"] if two_way else ["entity"],
         options=options or REOptions(cov_type="classical"),
     ).fit()
 
@@ -116,10 +116,10 @@ def test_two_way_means_in_both_directions():
     """2-wayでは個体平均の列は個体平均の回帰で、時点平均の列は時点平均の回帰で別名になる。
     個体平均だけなら`x̃`に別名は無く（`hausman_df = 2`）、両方を加えると`x̃1`が別名になる
     （`hausman_df = 1`）。分散成分は平均を加えない場合と同じ。"""
-    options = REOptions(cov_type="classical", time="time")
-    plain = _fit(["x1", "x2"], options)
-    entity_mean = _fit(["x1", "x2", "x1_bar"], options)
-    both = _fit(["x1", "x2", "x1_bar", "x1_tbar"], options)
+    options = REOptions(cov_type="classical")
+    plain = _fit(["x1", "x2"], options, two_way=True)
+    entity_mean = _fit(["x1", "x2", "x1_bar"], options, two_way=True)
+    both = _fit(["x1", "x2", "x1_bar", "x1_tbar"], options, two_way=True)
     assert entity_mean.hausman_df == 2
     assert both.hausman_df == 1
     for res in (entity_mean, both):
@@ -143,8 +143,9 @@ def test_two_way_means_of_every_regressor_leave_nothing_to_test():
     )
     res = _fit(
         ["x1", "x2", "x1_bar", "x2_bar", "x1_tbar", "x2_tbar"],
-        REOptions(cov_type="classical", time="time"),
+        REOptions(cov_type="classical"),
         df,
+        two_way=True,
     )
     assert res.hausman_df is None
     assert res.hausman_statistic is None
@@ -213,7 +214,7 @@ def test_all_means_add_up_to_the_fixed_effects_slopes():
         df,
         y="y",
         x=["x1", "x2"],
-        entity="entity",
+        effects=["entity"],
         options=FEOptions(cov_type="classical"),
     ).fit()
     for name in ("x1", "x2"):

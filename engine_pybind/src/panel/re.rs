@@ -269,7 +269,8 @@ pub struct REResult {
     #[pyo3(get)]
     pub stat_dist: String,
     /// Degrees of freedom of the t distribution (always `Some`). May differ from
-    /// `df_resid` (e.g. cluster-robust inference uses `G - 1`).
+    /// `df_resid`: cluster-robust inference uses `G - 1`, where `G` is the number of
+    /// clusters, and Driscoll-Kraay uses the number of `dk_time` periods minus 1.
     #[pyo3(get)]
     pub stat_df: Option<i64>,
     #[pyo3(get)]
@@ -358,9 +359,11 @@ pub struct REResult {
     /// Numerator degrees of freedom of `f_statistic` (`None` when `f_statistic` is `None`).
     #[pyo3(get)]
     pub f_df_num: Option<usize>,
-    /// Denominator degrees of freedom of `f_statistic` (`None` when `f_statistic` is `None`). Follows
-    /// `cov_type` like the t-tests (`G - 1` for cluster, `T - 1` for Driscoll-Kraay,
-    /// `df_resid` otherwise).
+    /// Denominator degrees of freedom of `f_statistic` (`None` when `f_statistic` is `None`).
+    /// Follows `cov_type` like the t-tests, so it equals `stat_df` whenever `f_statistic` is
+    /// not `None`: the number of clusters minus 1 for `"cluster"`, the number of `dk_time`
+    /// periods minus 1 for `"dk"`, and `df_resid` otherwise. Use it to recompute the p-value
+    /// from `f_statistic`.
     #[pyo3(get)]
     pub f_df_denom: Option<usize>,
     #[pyo3(get)]

@@ -482,11 +482,13 @@ pub struct IVResult {
     #[pyo3(get)]
     pub weak_instrument_f_statistics: HashMap<String, f64>,
     /// Numerator degrees of freedom of the weak-instrument F statistics (number of excluded
-    /// instruments; the same for every endogenous variable).
+    /// instruments; the same for every endogenous variable). Never `None`, because `x_endog`
+    /// always has at least one variable.
     #[pyo3(get)]
     pub weak_instrument_f_df_num: Option<usize>,
     /// Denominator degrees of freedom of the weak-instrument F statistics (residual df of
-    /// the first-stage regressions; the same for every endogenous variable).
+    /// the first-stage regressions; the same for every endogenous variable). Never `None`,
+    /// because `x_endog` always has at least one variable.
     #[pyo3(get)]
     pub weak_instrument_f_df_denom: Option<usize>,
     /// Overidentification test statistic: Sargan (`estimator="2sls"`) or Hansen J
@@ -501,22 +503,27 @@ pub struct IVResult {
     #[pyo3(get)]
     pub overid_df: Option<usize>,
     /// Wu-Hausman endogeneity test statistic (joint test over all endogenous
-    /// variables, regression-based / `wooldridge_regression` formulation). Always computed under the `cov_type` passed to
-    /// `fit()` (unlike `weak_instrument_f_statistics`, which is always classical;
-    /// `linearmodels`' `wooldridge_regression` uses the same covariance as the
-    /// underlying model, and this mirrors that). `None` when the augmented regression
-    /// cannot be estimated (e.g. the first-stage residual has zero variance, or there
-    /// are too few observations for the extra residual columns) — this does not fail
+    /// variables, regression-based / `wooldridge_regression` formulation). Always computed
+    /// under the `cov_type` in `options` (unlike `weak_instrument_f_statistics`, which is
+    /// always classical; `linearmodels`' `wooldridge_regression` uses the same covariance as
+    /// the underlying model, and this mirrors that). `None` when the augmented regression
+    /// cannot be estimated (e.g. the augmented design is singular; `y` is exactly explained by
+    /// the second-stage regressors and the first-stage residuals, so the augmented regression
+    /// fits perfectly; or there are too few observations or clusters for the extra residual
+    /// columns) — this does not fail
     /// `fit()` itself, since the other results remain valid. **Always `None` for
     /// `estimator="gmm"`** (not implemented for GMM).
     #[pyo3(get)]
     pub wu_hausman_statistic: Option<f64>,
+    /// P-value of the Wu-Hausman test. `None` exactly when `wu_hausman_statistic` is `None`.
     #[pyo3(get)]
     pub wu_hausman_p_value: Option<f64>,
-    /// Numerator degrees of freedom of the Wu-Hausman F test; `None` when it is `None`.
+    /// Numerator degrees of freedom of the Wu-Hausman F test (the number of endogenous
+    /// variables). `None` exactly when `wu_hausman_statistic` is `None`.
     #[pyo3(get)]
     pub wu_hausman_df_num: Option<usize>,
-    /// Denominator degrees of freedom of the Wu-Hausman F test; `None` when it is `None`.
+    /// Denominator degrees of freedom of the Wu-Hausman F test. `None` exactly when
+    /// `wu_hausman_statistic` is `None`.
     #[pyo3(get)]
     pub wu_hausman_df_denom: Option<usize>,
     // `first_stage()`が読む。Python側には公開しない（`OLSResult`の`fitted_values`/

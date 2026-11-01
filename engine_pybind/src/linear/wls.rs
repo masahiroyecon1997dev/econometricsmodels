@@ -218,7 +218,8 @@ pub struct WLSResult {
     #[pyo3(get)]
     pub stat_dist: String,
     /// Degrees of freedom of the t distribution (always `Some` for WLS). May differ from
-    /// `df_resid` (e.g. cluster-robust inference uses `G - 1`).
+    /// `df_resid` (e.g. cluster-robust inference uses `G - 1`, where `G` is the number of
+    /// clusters).
     #[pyo3(get)]
     pub stat_df: Option<i64>,
     #[pyo3(get)]
@@ -260,8 +261,10 @@ pub struct WLSResult {
     /// Numerator degrees of freedom of `f_statistic` (`None` when `f_statistic` is `None`).
     #[pyo3(get)]
     pub f_df_num: Option<usize>,
-    /// Denominator degrees of freedom of `f_statistic` (`None` when `f_statistic` is `None`). May differ
-    /// from `df_resid` (e.g. OLS/WLS with cluster-robust inference uses `G - 1`).
+    /// Denominator degrees of freedom of `f_statistic` (`None` when `f_statistic` is `None`).
+    /// Follows `cov_type` like the t-tests, so it equals `stat_df` whenever `f_statistic` is
+    /// not `None`: the number of clusters minus 1 for `"cluster"` and `df_resid` otherwise.
+    /// Use it to recompute the p-value from `f_statistic`.
     #[pyo3(get)]
     pub f_df_denom: Option<usize>,
     /// Residual degrees of freedom (`n - k`).

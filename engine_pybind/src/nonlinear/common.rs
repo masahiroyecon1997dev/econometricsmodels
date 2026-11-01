@@ -380,11 +380,13 @@ pub(crate) fn parse_marginal_effects_at(at: &str) -> PyResult<MarginalEffectsAt>
 /// `tol`が明示されていればそのまま返す。`solver`は大文字小文字を区別せず、未知の値は
 /// ここでは検証せず（`fit()`時の`parse_solver_type`が`ValidationError`にする）`1e-8`側になる。
 pub(crate) fn resolve_mle_tol_default(solver: &str, tol: Option<f64>) -> f64 {
-    tol.unwrap_or(if solver.eq_ignore_ascii_case("newton") {
-        1e-6
-    } else {
-        1e-8
-    })
+    tol.unwrap_or(
+        if matches!(parse_solver_type(solver), Ok(SolverType::Newton)) {
+            1e-6
+        } else {
+            1e-8
+        },
+    )
 }
 
 #[cfg(test)]

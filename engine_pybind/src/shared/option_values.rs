@@ -8,6 +8,9 @@
 //!   （`hac_lags`は`[0, n)`、`max_iter`は`1..=10000`等）に到達させる。この変換自体は固定の
 //!   上限を持たない。実数も同様に`±inf`に飽和させる。
 //!
+//! 文字列のオプションを種類（enum）にする`parse_choice`もここに置く（受け付ける名前と`allowed`を
+//! 1つの表から作る）。
+//!
 //! 型の誤り（`bool`・文字列・`None`等）は`TypeError`、値の誤り（範囲外・NaN・巨大な値・未知の
 //! 選択肢）は`ValidationError`（`fit()`時の検査）という分担にしている。文字列のオプション
 //! （`cov_type`・`cluster`等）も、型の誤りのメッセージを`fit()`の列名引数と同じ形式にする。
@@ -37,15 +40,26 @@ pub(crate) fn parse_choice<T: Copy>(
     value: &str,
     choices: &[(&'static str, T)],
 ) -> PyResult<T> {
+    debug_assert!(
+        choices
+            .iter()
+            .enumerate()
+            .all(|(i, (name, _))| *name == name.to_lowercase()
+                && choices[..i].iter().all(|(earlier, _)| earlier != name)),
+        "choice names must be unique and lowercase: {:?}",
+        allowed_names(choices)
+    );
     let lowered = value.to_lowercase();
     choices
         .iter()
         .find(|(name, _)| *name == lowered)
         .map(|&(_, choice)| choice)
-        .ok_or_else(|| {
-            let allowed: Vec<&str> = choices.iter().map(|&(name, _)| name).collect();
-            unknown_option_value(option, value, &allowed)
-        })
+        .ok_or_else(|| unknown_option_value(option, value, &allowed_names(choices)))
+}
+
+/// `choices`の名前を、表の並びのまま返す（エラーの`allowed`に載せる値）。
+pub(crate) fn allowed_names<T>(choices: &[(&'static str, T)]) -> Vec<&'static str> {
+    choices.iter().map(|&(name, _)| name).collect()
 }
 
 /// 手法の`*Options`オブジェクト（`OLSOptions`等）を取り出す。
@@ -225,6 +239,11 @@ mod tests {
     fn parse_choice_is_case_insensitive_and_returns_the_matching_value() {
         assert!(matches!(parse_choice("opt", "alpha", CHOICES), Ok(1)));
         assert!(matches!(parse_choice("opt", "BeTa", CHOICES), Ok(2)));
+    }
+
+    #[test]
+    fn allowed_names_keeps_the_order_of_the_table() {
+        assert_eq!(allowed_names(CHOICES), vec!["alpha", "beta"]);
     }
 
     #[test]

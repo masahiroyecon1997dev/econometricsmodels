@@ -20,7 +20,7 @@ use crate::shared::column_extraction::{
     physical_f64, physical_i128, with_group_labels,
 };
 use crate::shared::errors::{to_pyerr, user_error};
-use crate::shared::option_values::parse_choice;
+use crate::shared::option_values::{allowed_names, parse_choice};
 use crate::shared::validation::{
     RoleValue, reject_unused_option, validate_no_duplicate_roles,
     validate_no_duplicate_within_role, validate_role_non_empty,
@@ -95,13 +95,15 @@ impl PanelCovKind {
 /// 既知の値のいずれでもない場合は`ValidationError`。
 pub(crate) fn parse_panel_cov_kind(cov_type: &str, model: PanelModel) -> PyResult<PanelCovKind> {
     if cov_type.to_lowercase() == "hc0" {
-        let allowed: Vec<&str> = PANEL_COV_CHOICES.iter().map(|&(name, _)| name).collect();
         return Err(user_error(
             ErrorCode::CovTypeNotAvailableForModel,
             vec![
                 ("value", ParamValue::from(cov_type)),
                 ("model", ParamValue::from(model.name())),
-                ("allowed", ParamValue::from(allowed)),
+                (
+                    "allowed",
+                    ParamValue::from(allowed_names(PANEL_COV_CHOICES)),
+                ),
             ],
         ));
     }

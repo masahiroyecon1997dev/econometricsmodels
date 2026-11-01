@@ -48,7 +48,7 @@
 
 ## オプションの検査（値・組合せ・列）と報告順
 
-`build_iv_input`は、DataFrameを見ない検査（`parse_iv_option_values`: `estimator` → `cov_type` → `gmm_type` → `gmm_weight_type`の値。`check_iv_options`: 使われないオプション → 必須の`hac_time`の欠落）→ ロール構造 → `y`/`x_exog`/`x_endog`/`instruments`の列 → オプション列（`cov_type`側は`resolve_cov_type`、GMMの重み行列側は`resolve_gmm_setup`）の順に呼ぶ。GMMの重み行列の列も`fit`ではなく`build_iv_input`で抽出し、戻り値の`IvPlan`（`IvEstimator`と、`estimator="gmm"`のときの`GmmSetup`）で`fit`に渡す。`*Result`の`cov_type`/`estimator`/`gmm_type`/`gmm_weight_type`の正規形は`CovKind::name()`/`IvEstimator::name()`等から作り、呼び出し側で小文字化し直さない。この順序は`tests/cross_method/test_validation_order.py`が固定している。`gmm_max_iter`が負値のときの変換エラーは`resolve_gmm_setup`で起きるが、範囲（3以上・上限）と`gmm_tol`の検証はengineが行う。
+`build_iv_input`は、DataFrameを見ない検査（`parse_iv_option_values`: `estimator` → `cov_type` → `gmm_type` → `gmm_weight_type`の値。`check_iv_options`: 使われないオプション → 必須の`hac_time`の欠落）→ ロール構造 → `y`/`x_exog`/`x_endog`/`instruments`の列 → オプション列（`cov_type`側は`resolve_cov_type`、GMMの重み行列側は`resolve_gmm_setup`）の順に呼ぶ。GMMの重み行列の列も`fit`ではなく`build_iv_input`で抽出し、戻り値`BuiltIvInput`の`plan`（`IvPlan`: `IvEstimator`と、`estimator="gmm"`のときの`GmmSetup`）で`fit`に渡す。`*Result`の`cov_type`/`estimator`/`gmm_type`/`gmm_weight_type`の正規形は`CovKind::name()`/`IvEstimator::name()`等から作り、呼び出し側で小文字化し直さない。この順序は`tests/cross_method/test_validation_order.py`が固定している。`gmm_max_iter`が負値のときの変換エラーは`resolve_gmm_setup`で起きるが、範囲（3以上・上限）と`gmm_tol`の検証はengineが行う。
 
 ## `IVResult.test_stats`と`stat_dist`/`stat_df`
 

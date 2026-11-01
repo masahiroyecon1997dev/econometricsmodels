@@ -36,9 +36,9 @@ pub enum RoleValue<'a> {
 /// 複数列ロール（`x`/`x_endog`/`instruments`等）が空リストでないことを検証する。
 /// `role_name`はエラーメッセージに使う。
 ///
-/// `x`以外のロール（IVの`x_endog`/`instruments`。`x_exog`とは異なり空リストを
-/// 許容しない）にも同じ検証が必要なため、`validate_no_duplicate_within_role`と同じく
-/// ロール名を引数で受ける。OLS/WLS/Logit/Probit/Tobitは`role_name="x"`で呼ぶ。
+/// ロールごとに空を許すかが違う（IVの`x_exog`は空でもよいが、`x_endog`/`instruments`は
+/// 空を許さない）ため、`validate_no_duplicate_within_role`と同じくロール名を引数で受ける。
+/// OLS/WLS/Logit/Probit/Tobitは`role_name="x"`で呼ぶ。
 pub fn validate_role_non_empty(role_name: &str, columns: &[String]) -> PyResult<()> {
     if columns.is_empty() {
         return Err(user_error(

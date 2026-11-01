@@ -58,9 +58,9 @@ use crate::shared::column_extraction::{
 };
 use crate::shared::mat_conversion::{mat_to_rows, mat_to_vec};
 use crate::shared::option_repr::PyRepr;
-use crate::shared::option_values::parse_choice;
 use crate::shared::option_values::{
     extract_strict_float, extract_strict_opt_column, extract_strict_opt_int, extract_strict_text,
+    parse_choice,
 };
 
 /// Estimation options for RE (random effects panel regression).

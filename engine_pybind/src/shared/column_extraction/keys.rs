@@ -7,7 +7,7 @@ use polars::prelude::*;
 use pyo3::prelude::*;
 
 use super::dtype::{KeyRole, check_key_dtype};
-use super::frame::{missing_column_error, reject_missing_values};
+use super::frame::{missing_column_error, present_value, reject_missing_values};
 use crate::shared::column_error::{ColumnExtractionError, ColumnRole, ColumnSource};
 use crate::shared::errors::common_error_to_pyerr;
 
@@ -214,20 +214,20 @@ pub(crate) fn extract_key_column(
 /// `HashMap`は値の検索にだけ使い、反復しない（反復順序がハッシュシードに依存する非決定性は
 /// 起きない。コードの順序は`engine`の`GroupCodes`がラベルの辞書順に振り直す）。
 fn factorize_keys<K: std::hash::Hash + Eq>(
-    keys: impl Iterator<Item = K>,
-) -> (Vec<usize>, Vec<usize>) {
+    keys: impl Iterator<Item = Result<K, ColumnExtractionError>>,
+) -> Result<(Vec<usize>, Vec<usize>), ColumnExtractionError> {
     let mut seen: HashMap<K, usize> = HashMap::new();
     let mut first_rows: Vec<usize> = Vec::new();
     let codes = keys
         .enumerate()
         .map(|(row, key)| {
-            *seen.entry(key).or_insert_with(|| {
+            Ok(*seen.entry(key?).or_insert_with(|| {
                 first_rows.push(row);
                 first_rows.len() - 1
-            })
+            }))
         })
-        .collect();
-    (codes, first_rows)
+        .collect::<Result<Vec<usize>, ColumnExtractionError>>()?;
+    Ok((codes, first_rows))
 }
 
 /// キー列の値そのもの（文字列・整数・浮動小数のビット列）でハッシュして、行ごとの仮コードと
@@ -245,17 +245,11 @@ fn factorize_key_column(
     if dtype.is_float() {
         let as_f64 = series.cast(&DataType::Float64).map_err(convert)?;
         let ca = as_f64.f64().map_err(convert)?;
-        return Ok(factorize_keys(
-            ca.iter()
-                .map(|v| v.expect("null_count was checked to be zero").to_bits()),
-        ));
+        return factorize_keys(ca.iter().map(|v| present_value(name, v).map(f64::to_bits)));
     }
     if matches!(dtype, DataType::String) {
         let ca = series.str().map_err(convert)?;
-        return Ok(factorize_keys(
-            ca.iter()
-                .map(|v| v.expect("null_count was checked to be zero")),
-        ));
+        return factorize_keys(ca.iter().map(|v| present_value(name, v)));
     }
     // 整数・真偽値・`Date`・`Datetime`・`Categorical`・`Enum`は、内部表現の整数の等しさで
     // 判定する（`Categorical`/`Enum`は列内でカテゴリごとに異なる整数）。
@@ -264,10 +258,7 @@ fn factorize_key_column(
         .cast(&DataType::Int128)
         .map_err(convert)?;
     let ca = as_i128.i128().map_err(convert)?;
-    Ok(factorize_keys(
-        ca.iter()
-            .map(|v| v.expect("null_count was checked to be zero")),
-    ))
+    factorize_keys(ca.iter().map(|v| present_value(name, v)))
 }
 
 /// 浮動小数の列に非有限値（NaN・無限大）があれば、最初の1件を`ValidationError`にする。

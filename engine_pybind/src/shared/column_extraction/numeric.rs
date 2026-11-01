@@ -4,7 +4,9 @@ use polars::prelude::*;
 use pyo3::prelude::*;
 
 use super::dtype::{NumericRole, check_numeric_dtype};
-use super::frame::{SelectedData, missing_column_error, reject_missing_values, select_columns};
+use super::frame::{
+    SelectedData, missing_column_error, present_value, reject_missing_values, select_columns,
+};
 use crate::shared::column_error::{ColumnExtractionError, ColumnRole, ColumnSource};
 
 /// `new_data`から、`predict()`/`augment()`が使う`x`列（結果オブジェクトの`param_names`から決まる。
@@ -111,8 +113,8 @@ fn cast_to_finite_f64_values(
         Err(_) => {
             // 通常はここに来ないはずだが、フォールバックとしてイテレータ経由で構築
             ca.iter()
-                .map(|v| v.expect("null_count was checked to be zero"))
-                .collect()
+                .map(|v| present_value(name, v))
+                .collect::<Result<Vec<f64>, _>>()?
         }
     };
 
@@ -210,7 +212,7 @@ pub fn extract_model_x_columns(
     extract_f64_columns(df, x_column_names(param_names, has_intercept), source)
 }
 
-pub(crate) fn time_order_error(name: &str, err: PolarsError) -> ColumnExtractionError {
+fn time_order_error(name: &str, err: PolarsError) -> ColumnExtractionError {
     ColumnExtractionError::ordering_failed(name, err)
 }
 
@@ -228,6 +230,27 @@ pub(crate) fn physical_i128(
         .map_err(|e| time_order_error(name, e))?;
     as_i128
         .i128()
+        .map_err(|e| time_order_error(name, e))?
+        .iter()
+        .map(|v| {
+            v.ok_or_else(|| {
+                ColumnExtractionError::ordering_failed(
+                    name,
+                    "unexpected null in a column checked to have none",
+                )
+            })
+        })
+        .collect()
+}
+
+/// 時点の順序づけに使う浮動小数の列を`f64`の`Vec`にする（[`physical_i128`]の浮動小数版）。
+/// 欠損値（null）が無いことは呼び出し側が検査済みで、変換の失敗は`OrderingFailed`にする。
+pub(crate) fn physical_f64(name: &str, series: &Series) -> Result<Vec<f64>, ColumnExtractionError> {
+    let as_f64 = series
+        .cast(&DataType::Float64)
+        .map_err(|e| time_order_error(name, e))?;
+    as_f64
+        .f64()
         .map_err(|e| time_order_error(name, e))?
         .iter()
         .map(|v| {

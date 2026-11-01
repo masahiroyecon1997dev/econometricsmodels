@@ -32,4 +32,4 @@ pub use numeric::{
     extract_f64_column, extract_f64_columns, extract_model_x_columns, extract_time_order_ranks,
     select_model_x_columns, x_column_names,
 };
-pub(crate) use numeric::{physical_i128, time_order_error};
+pub(crate) use numeric::{physical_f64, physical_i128};

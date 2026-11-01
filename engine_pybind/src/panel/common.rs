@@ -17,7 +17,7 @@ use pyo3::types::PyDict;
 use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
     FactorizedKey, KeyRole, checked_key_column, extract_entity_groups, factorize_checked_key,
-    physical_i128, time_order_error, with_group_labels,
+    physical_f64, physical_i128, with_group_labels,
 };
 use crate::shared::errors::{to_pyerr, unknown_option_value, user_error};
 use crate::shared::validation::{
@@ -321,15 +321,7 @@ pub(crate) fn extract_time_keys(
 
     with_group_labels(name, &representatives, |labels| {
         if dtype.is_float() {
-            let as_f64 = representatives
-                .cast(&DataType::Float64)
-                .map_err(|e| time_order_error(name, e))?;
-            let values: Vec<f64> = as_f64
-                .f64()
-                .map_err(|e| time_order_error(name, e))?
-                .iter()
-                .map(|v| v.expect("null_count was checked to be zero"))
-                .collect();
+            let values = physical_f64(name, &representatives)?;
             TimeKeys::by_float_factorized(codes, labels, &values).map_err(panel_error_to_pyerr)
         } else if dtype.is_integer()
             || matches!(

@@ -175,6 +175,17 @@ pub(super) fn reject_missing_values(
     Ok(())
 }
 
+/// 欠損値（null）が無いと検査した列の値を取り出す。`None`は検査の後に起きない想定の防御的な経路で、
+/// panicさせずに`ConversionFailed`（内部エラー）にする。
+pub(super) fn present_value<T>(name: &str, value: Option<T>) -> Result<T, ColumnExtractionError> {
+    value.ok_or_else(|| {
+        ColumnExtractionError::conversion_failed(
+            name,
+            "unexpected null in a column checked to have none",
+        )
+    })
+}
+
 /// `ob`がpandasの`DataFrame`（サブクラスを含む）か。pandasをimportせずに、型の継承順
 /// （MRO）にある型の完全修飾名だけで判定する（pandasは依存に含まれない）。
 fn is_pandas_dataframe(ob: &Bound<'_, PyAny>) -> bool {
@@ -275,6 +286,15 @@ fn is_instance_of_polars(ob: &Bound<'_, PyAny>, class_name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn present_value_returns_the_value_or_a_conversion_failure() {
+        assert!(matches!(present_value("x", Some(1.0)), Ok(v) if v == 1.0));
+        assert!(matches!(
+            present_value::<f64>("x", None),
+            Err(ColumnExtractionError::ConversionFailed { .. })
+        ));
+    }
 
     #[test]
     fn unreadable_label_names_a_plain_unreadable_dtype_and_the_outer_type_of_a_nested_one() {

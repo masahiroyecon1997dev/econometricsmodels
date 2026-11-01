@@ -49,8 +49,7 @@ use pyo3::prelude::*;
 
 use super::common::{
     PanelCovKind, PanelModel, check_panel_cov_options, extract_effects, group_counts, groups_dict,
-    panel_error_to_pyerr, parse_panel_cov_kind, require_dk_time, validate_dk_time_role,
-    validate_effects,
+    panel_error_to_pyerr, parse_panel_cov_kind, require_dk_time, validate_panel_roles,
 };
 use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
@@ -62,9 +61,6 @@ use crate::shared::mat_conversion::{mat_to_rows, mat_to_vec};
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
     extract_strict_float, extract_strict_opt_column, extract_strict_opt_int, extract_strict_text,
-};
-use crate::shared::validation::{
-    RoleValue, validate_no_duplicate_roles, validate_no_duplicate_within_role, validate_x_non_empty,
 };
 
 /// Estimation options for RE (random effects panel regression).
@@ -558,18 +554,8 @@ pub(crate) fn build_re_input(
         options.dk_bandwidth,
     )?;
 
-    // `effects`の列数（空・3つ以上）を先に見る。
-    validate_effects(PanelModel::Re, &effects)?;
-    validate_x_non_empty("x", &x)?;
-    validate_no_duplicate_roles(&[
-        ("y", RoleValue::Single(&y)),
-        ("effects", RoleValue::Multi(&effects)),
-        ("x", RoleValue::Multi(&x)),
-    ])?;
-    validate_no_duplicate_within_role("x", &x)?;
-    validate_no_duplicate_within_role("effects", &effects)?;
-    // `dk_time`は`y`・`effects[0]`との重複だけ拒否する（`x`との重複は許可、`validate_dk_time_role`参照）。
-    validate_dk_time_role(&y, &effects[0], options.dk_time.as_deref())?;
+    // `effects`の列数・`x`が空（モジュールdoc参照）・列の役割の重複・`dk_time`の役割を検査する。
+    validate_panel_roles(PanelModel::Re, &y, &x, &effects, options.dk_time.as_deref())?;
 
     // ── y/x/effects列の抽出 ─────────────────────────────────────────────
     let y_slice = extract_f64_column(df, &y, ColumnSource::new("y", "data"))?;
@@ -821,41 +807,6 @@ mod tests {
     }
 
     #[test]
-    fn build_re_input_rejects_second_effect_that_duplicates_another_role() {
-        let df = well_formed_df();
-        for column in ["y", "id", "x1"] {
-            let options = default_options();
-            let result = build_re_input(
-                &df,
-                "y".to_string(),
-                vec!["x1".to_string()],
-                vec!["id".to_string(), column.to_string()],
-                &options,
-            );
-            assert!(result.is_err(), "effects[1]={column}");
-        }
-    }
-
-    #[test]
-    fn build_re_input_allows_dk_time_to_equal_second_effect() {
-        // 2-wayの時間次元とDKの時点列に同じ列を使うのは自然（`FEOptions`と同じ）。
-        let df = well_formed_df();
-        let mut options = default_options();
-        options.cov_type = "dk".to_string();
-        options.dk_time = Some("t".to_string());
-
-        let result = build_re_input(
-            &df,
-            "y".to_string(),
-            vec!["x1".to_string()],
-            vec!["id".to_string(), "t".to_string()],
-            &options,
-        );
-
-        assert!(result.is_ok());
-    }
-
-    #[test]
     fn build_re_input_rejects_dk_time_when_cov_type_is_not_dk() {
         // `dk_time`はDK HACの時系列順序専用（ハウスマン検定の比較相手には影響しない）。`cov_type`が"dk"以外だと
         // 黙って無視されるため`ValidationError`にする。
@@ -876,9 +827,9 @@ mod tests {
     }
 
     #[test]
-    fn build_re_input_returns_error_for_empty_x() {
-        // `x=[]`を拒否する（モジュールdoc「`x`の空リストを許容しない」参照。
-        // FE・OLS/WLS/Logit/Probit/IVと同じ`validate_x_non_empty`）。
+    fn build_re_input_rejects_empty_x() {
+        // 列の役割の検査が`validate_panel_roles`経由で配線されていることの確認
+        // （検査の中身は`panel/common.rs`のテストが持つ）。
         let df = well_formed_df();
         let options = default_options();
 
@@ -890,89 +841,6 @@ mod tests {
             &options,
         );
 
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn build_re_input_returns_error_when_y_overlaps_entity() {
-        let df = well_formed_df();
-        let options = default_options();
-
-        let result = build_re_input(
-            &df,
-            "y".to_string(),
-            vec!["x1".to_string()],
-            vec!["y".to_string()],
-            &options,
-        );
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn build_re_input_returns_error_when_x_overlaps_entity() {
-        let df = well_formed_df();
-        let options = default_options();
-
-        let result = build_re_input(
-            &df,
-            "y".to_string(),
-            vec!["x1".to_string(), "id".to_string()],
-            vec!["id".to_string()],
-            &options,
-        );
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn build_re_input_allows_x_to_overlap_dk_time() {
-        // 年トレンドを説明変数に入れつつDKの時点にも使う、等は正当な使い方
-        // （`validate_dk_time_role`参照）。
-        let df = well_formed_df();
-        let mut options = default_options();
-        options.cov_type = "dk".to_string();
-        options.dk_time = Some("x1".to_string());
-
-        let result = build_re_input(
-            &df,
-            "y".to_string(),
-            vec!["x1".to_string()],
-            vec!["id".to_string()],
-            &options,
-        );
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn build_re_input_rejects_dk_time_that_is_y_or_entity() {
-        let df = well_formed_df();
-        for column in ["y", "id"] {
-            let mut options = default_options();
-            options.cov_type = "dk".to_string();
-            options.dk_time = Some(column.to_string());
-
-            let result = build_re_input(
-                &df,
-                "y".to_string(),
-                vec!["x1".to_string()],
-                vec!["id".to_string()],
-                &options,
-            );
-            assert!(result.is_err(), "dk_time={column}");
-        }
-    }
-
-    #[test]
-    fn build_re_input_returns_error_when_x_contains_duplicate() {
-        let df = well_formed_df();
-        let options = default_options();
-
-        let result = build_re_input(
-            &df,
-            "y".to_string(),
-            vec!["x1".to_string(), "x1".to_string()],
-            vec!["id".to_string()],
-            &options,
-        );
         assert!(result.is_err());
     }
 

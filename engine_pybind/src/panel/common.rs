@@ -18,7 +18,8 @@ use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{extract_entity_groups, extract_time_keys};
 use crate::shared::errors::{to_pyerr, unknown_option_value, user_error};
 use crate::shared::validation::{
-    RoleValue, reject_unused_option, validate_no_duplicate_roles, validate_x_non_empty,
+    RoleValue, reject_unused_option, validate_no_duplicate_roles,
+    validate_no_duplicate_within_role, validate_x_non_empty,
 };
 
 /// `cov_type`の検査でFEとREの文言を切り替えるためのモデル種別。
@@ -156,11 +157,7 @@ pub(crate) fn check_panel_cov_options(
 /// 正当な使い方）。`effects`の2つ目（2-wayの時間次元）との重複も許可する（固定効果と
 /// DKで同じ時間粒度を使うのが典型）。そのため`validate_no_duplicate_roles`に渡す
 /// ロールを`y`・`effects`の先頭・`dk_time`だけに絞り、`x`・`effects`の2つ目は含めない。
-pub(crate) fn validate_dk_time_role(
-    y: &str,
-    first_effect: &str,
-    dk_time: Option<&str>,
-) -> PyResult<()> {
+fn validate_dk_time_role(y: &str, first_effect: &str, dk_time: Option<&str>) -> PyResult<()> {
     let Some(dk_time) = dk_time else {
         return Ok(());
     };
@@ -181,7 +178,7 @@ const MAX_EFFECTS: usize = 2;
 ///
 /// # Errors
 /// 空、または`MAX_EFFECTS`を超える場合は`ValidationError`。
-pub(crate) fn validate_effects(model: PanelModel, effects: &[String]) -> PyResult<()> {
+fn validate_effects(model: PanelModel, effects: &[String]) -> PyResult<()> {
     validate_x_non_empty("effects", effects)?;
     if effects.len() > MAX_EFFECTS {
         return Err(user_error(
@@ -194,6 +191,47 @@ pub(crate) fn validate_effects(model: PanelModel, effects: &[String]) -> PyResul
         ));
     }
     Ok(())
+}
+
+/// `y`・`x`・`effects`・`dk_time`の列の役割（DataFrameを見ない構造）を検査する。FE/RE共通。
+///
+/// 次の順に検査し、最初の違反で返す。
+///
+/// 1. `effects`の列数（空→`ROLE_EMPTY`、3要素以上→`EFFECTS_TOO_MANY`。[`validate_effects`]）
+/// 2. `x`が空でない
+/// 3. `y`・`effects`・`x`の間に同じ列が無い
+/// 4. `x`の内部に重複が無い
+/// 5. `effects`の内部に重複が無い
+/// 6. `dk_time`が`y`・`effects[0]`と同じ列でない（[`validate_dk_time_role`]）
+///
+/// `cov_type`・`variance_method`の値の検査と組合せの検査（[`parse_panel_cov_kind`]・
+/// [`check_panel_cov_options`]）は呼び出し側で、これより前に行うこと（報告順は
+/// `tests/cross_method/test_validation_order.py`が固定している）。手順6は手順1で空の`effects`を
+/// 弾いた後に`effects[0]`を参照するため、手順の順序を入れ替えない。
+///
+/// # Errors
+/// 上のいずれかに違反する場合は`ValidationError`。
+pub(crate) fn validate_panel_roles(
+    model: PanelModel,
+    y: &str,
+    x: &[String],
+    effects: &[String],
+    dk_time: Option<&str>,
+) -> PyResult<()> {
+    // `effects`の列数（空・3つ以上）を先に見る。
+    validate_effects(model, effects)?;
+    // `x`が空リストであることを許容しない（`x=[]`は他手法と同じく`validate_x_non_empty`で拒否）。
+    validate_x_non_empty("x", x)?;
+    validate_no_duplicate_roles(&[
+        ("y", RoleValue::Single(y)),
+        ("effects", RoleValue::Multi(effects)),
+        ("x", RoleValue::Multi(x)),
+    ])?;
+    validate_no_duplicate_within_role("x", x)?;
+    validate_no_duplicate_within_role("effects", effects)?;
+    // `dk_time`は`y`・`effects[0]`との重複だけ拒否する（`x`との重複は許可、`validate_dk_time_role`参照）。
+    // `effects`が空でないことは手順1で確かめ済み。
+    validate_dk_time_role(y, &effects[0], dk_time)
 }
 
 /// `effects`の列をDataFrameから取り出す。1つ目は個体（同一性だけが意味を持つキー）、
@@ -344,6 +382,64 @@ mod tests {
             assert!(validate_effects(model, &[]).is_err());
             assert!(validate_effects(model, &names(&["a", "b", "c"])).is_err());
             assert!(validate_effects(model, &names(&["a", "b", "c", "d"])).is_err());
+        }
+    }
+
+    /// `validate_panel_roles`がFE/REとも`ok`どおりの結果になることを確かめる。
+    fn assert_roles(y: &str, x: &[&str], effects: &[&str], dk_time: Option<&str>, ok: bool) {
+        for model in [PanelModel::Fe, PanelModel::Re] {
+            let result = validate_panel_roles(model, y, &names(x), &names(effects), dk_time);
+            assert_eq!(
+                result.is_ok(),
+                ok,
+                "model={model:?} y={y} x={x:?} effects={effects:?} dk_time={dk_time:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_panel_roles_rejects_empty_x() {
+        // 固定効果・ランダム効果のみのモデル（`x=[]`）は拒否する。
+        assert_roles("y", &[], &["id"], None, false);
+    }
+
+    #[test]
+    fn validate_panel_roles_rejects_y_that_overlaps_effects() {
+        assert_roles("y", &["x1"], &["y"], None, false);
+    }
+
+    #[test]
+    fn validate_panel_roles_rejects_x_that_overlaps_effects() {
+        // 個体の列、2つ目の列（2-wayの時点）のどちらとの重複も拒否する。
+        assert_roles("y", &["x1", "id"], &["id"], None, false);
+        assert_roles("y", &["x1", "t"], &["id", "t"], None, false);
+    }
+
+    #[test]
+    fn validate_panel_roles_rejects_second_effect_that_duplicates_another_role() {
+        for column in ["y", "id", "x1"] {
+            assert_roles("y", &["x1"], &["id", column], None, false);
+        }
+    }
+
+    #[test]
+    fn validate_panel_roles_rejects_duplicates_within_x() {
+        assert_roles("y", &["x1", "x1"], &["id"], None, false);
+    }
+
+    #[test]
+    fn validate_panel_roles_dk_time_may_equal_second_effect_or_x_but_not_y_or_first_effect() {
+        // 固定効果・ランダム効果と同じ時間粒度(`dk_time == effects[1]`)や、`x`との重複は
+        // 正当な使い方。`y`・`effects[0]`と同じ列だけ拒否する(`validate_dk_time_role`参照)。
+        let cases: [(&[&str], &str, bool); 5] = [
+            (&["id", "t"], "t", true),
+            (&["id"], "x1", true),
+            (&["id"], "y", false),
+            (&["id"], "id", false),
+            (&["id", "t"], "id", false),
+        ];
+        for (effects, dk_time, ok) in cases {
+            assert_roles("y", &["x1"], effects, Some(dk_time), ok);
         }
     }
 

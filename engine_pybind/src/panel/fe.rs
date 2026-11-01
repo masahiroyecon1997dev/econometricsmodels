@@ -55,8 +55,7 @@ use std::sync::OnceLock;
 
 use super::common::{
     PanelCovKind, PanelModel, check_panel_cov_options, extract_effects, group_counts, groups_dict,
-    panel_error_to_pyerr, parse_panel_cov_kind, require_dk_time, validate_dk_time_role,
-    validate_effects,
+    panel_error_to_pyerr, parse_panel_cov_kind, require_dk_time, validate_panel_roles,
 };
 use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
@@ -67,9 +66,6 @@ use crate::shared::mat_conversion::{mat_to_rows, mat_to_vec};
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
     extract_strict_float, extract_strict_opt_column, extract_strict_opt_int, extract_strict_text,
-};
-use crate::shared::validation::{
-    RoleValue, validate_no_duplicate_roles, validate_no_duplicate_within_role, validate_x_non_empty,
 };
 
 /// Estimation options for FE (fixed effects panel regression).
@@ -524,7 +520,7 @@ fn resolve_fe_cov_type(
 ///   他手法と揃えた——経緯はモジュールdoc「`x`の空リストを許容しない」参照）。
 ///   `y`/`effects`/`x`間の重複・`x`・`effects`内部の重複も同じく`validation.rs`の責務で
 ///   `ValidationError`
-/// - `effects`が空、または3要素以上の場合は`ValidationError`（`validate_effects`）
+/// - `effects`が空、または3要素以上の場合は`ValidationError`（`validate_panel_roles`内の`validate_effects`）
 /// - `cov_type`の文字列が不正な場合は`ValidationError`（`parse_panel_cov_kind`参照）
 /// - それ以外（`y`/`effects`間の行数不一致等）は`engine::panel::common::PanelError`
 ///   から`panel_error_to_pyerr`で変換
@@ -546,20 +542,8 @@ pub(crate) fn build_fe_input(
         options.dk_bandwidth,
     )?;
 
-    // `effects`の列数（空・3つ以上）を先に見る。
-    validate_effects(PanelModel::Fe, &effects)?;
-    // `x`が空リストであることを許容しない（モジュールdoc参照）。
-    // OLS/WLS/Logit/Probit/IVと同じ`validate_x_non_empty`を呼ぶ（`.claude/rules/
-    // rust-style.md`「バリデーションの責務分担」）。
-    validate_x_non_empty("x", &x)?;
-    validate_no_duplicate_roles(&[
-        ("y", RoleValue::Single(&y)),
-        ("effects", RoleValue::Multi(&effects)),
-        ("x", RoleValue::Multi(&x)),
-    ])?;
-    validate_no_duplicate_within_role("x", &x)?;
-    validate_no_duplicate_within_role("effects", &effects)?;
-    validate_dk_time_role(&y, &effects[0], options.dk_time.as_deref())?;
+    // `effects`の列数・`x`が空（モジュールdoc参照）・列の役割の重複・`dk_time`の役割を検査する。
+    validate_panel_roles(PanelModel::Fe, &y, &x, &effects, options.dk_time.as_deref())?;
 
     // ── y/x/effects列の抽出 ─────────────────────────────────────────────
     let y_slice = extract_f64_column(df, &y, ColumnSource::new("y", "data"))?;
@@ -741,9 +725,9 @@ mod tests {
     }
 
     #[test]
-    fn build_fe_input_returns_error_for_empty_x() {
-        // 固定効果のみのモデル（`x=[]`）を拒否する（モジュールdoc「`x`の
-        // 空リストを許容しない」参照。OLS/WLS/Logit/Probit/IVと同じ`validate_x_non_empty`）。
+    fn build_fe_input_rejects_empty_x() {
+        // 列の役割の検査が`validate_panel_roles`経由で配線されていることの確認
+        // （検査の中身は`panel/common.rs`のテストが持つ）。
         let df = well_formed_df();
         let options = default_options();
 
@@ -755,66 +739,6 @@ mod tests {
             &options,
         );
 
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn build_fe_input_returns_error_when_y_overlaps_entity() {
-        let df = well_formed_df();
-        let options = default_options();
-
-        let result = build_fe_input(
-            &df,
-            "y".to_string(),
-            vec!["x1".to_string()],
-            vec!["y".to_string()],
-            &options,
-        );
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn build_fe_input_returns_error_when_x_overlaps_entity() {
-        let df = well_formed_df();
-        let options = default_options();
-
-        let result = build_fe_input(
-            &df,
-            "y".to_string(),
-            vec!["x1".to_string(), "id".to_string()],
-            vec!["id".to_string()],
-            &options,
-        );
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn build_fe_input_returns_error_when_x_overlaps_second_effect() {
-        let df = well_formed_df();
-        let options = default_options();
-
-        let result = build_fe_input(
-            &df,
-            "y".to_string(),
-            vec!["x1".to_string(), "t".to_string()],
-            vec!["id".to_string(), "t".to_string()],
-            &options,
-        );
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn build_fe_input_returns_error_when_x_contains_duplicate() {
-        let df = well_formed_df();
-        let options = default_options();
-
-        let result = build_fe_input(
-            &df,
-            "y".to_string(),
-            vec!["x1".to_string(), "x1".to_string()],
-            vec!["id".to_string()],
-            &options,
-        );
         assert!(result.is_err());
     }
 
@@ -957,35 +881,6 @@ mod tests {
                 ),
             }
         );
-    }
-
-    #[test]
-    fn build_fe_input_dk_time_may_equal_second_effect_or_x_but_not_y_or_first_effect() {
-        // 固定効果と同じ時間粒度(`dk_time == effects[1]`)や、`x`との重複は正当な使い方。
-        // `y`・`effects[0]`と同じ列だけ拒否する(`validate_dk_time_role`参照)。
-        let df = well_formed_df();
-        let cases = [
-            (vec!["id", "t"], "t", vec!["x1"], true),
-            (vec!["id"], "x1", vec!["x1"], true),
-            (vec!["id"], "y", vec!["x1"], false),
-            (vec!["id"], "id", vec!["x1"], false),
-            (vec!["id", "t"], "id", vec!["x1"], false),
-        ];
-        for (effects, dk_time, x, ok) in cases {
-            let mut options = default_options();
-            options.cov_type = "dk".to_string();
-            options.dk_time = Some(dk_time.to_string());
-
-            let result = build_fe_input(
-                &df,
-                "y".to_string(),
-                x.iter().map(|c| c.to_string()).collect(),
-                effects.iter().map(|c| c.to_string()).collect(),
-                &options,
-            );
-
-            assert_eq!(result.is_ok(), ok, "effects={effects:?} dk_time={dk_time}");
-        }
     }
 
     #[test]

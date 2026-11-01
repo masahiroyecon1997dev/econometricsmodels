@@ -3,10 +3,7 @@
 use crate::linear::ols::{OLSResult, ols_estimator_to_result};
 use crate::shared::column_extraction::SelectedData;
 use crate::shared::mat_conversion::{mat_to_rows, mat_to_vec};
-use engine::iv::common::{
-    IvError, compute_first_stage, validate_observation_counts, validate_outcome_not_constant,
-    validate_structural_cluster_count,
-};
+use engine::iv::common::{compute_first_stage, validate_iv_fit_inputs};
 use engine::iv::gmm::GmmEstimator;
 use engine::iv::two_sls::TwoSlsEstimator;
 use polars::prelude::DataFrame;
@@ -33,11 +30,10 @@ use super::result::IVResult;
 ///
 /// # Errors
 /// - 観測数が構造方程式の係数の数以下、または第一段階の回帰変数の数以下:
-///   `ValidationError`（`validate_observation_counts`、`compute_first_stage`より前）
+///   `ValidationError`（`validate_iv_fit_inputs`、`compute_first_stage`より前）
 /// - `cov_type="cluster"`でクラスター数が構造方程式の傾き係数の数以下（または2未満）:
-///   `ValidationError`（`validate_structural_cluster_count`、`compute_first_stage`より前）
-/// - 切片があり`y`が全行で同じ値: `ValidationError`（`validate_outcome_not_constant`、
-///   `compute_first_stage`より前）
+///   `ValidationError`（同上）
+/// - 切片があり`y`が全行で同じ値: `ValidationError`（同上）
 /// - `build_iv_input`が返すエラー（列抽出・y/x_exog/x_endog/instrumentsの重複・
 ///   `"const"`列衝突・`estimator`/`cov_type`文字列の検証等）は`ValidationError`
 /// - `gmm_type`/`gmm_weight_type`の文字列が不正（使われないオプションでも）、または使われない
@@ -75,37 +71,16 @@ fn fit_frame(
     let (input, cov_type, cov_type_lower, plan) =
         build_iv_input(df, y, x_exog, x_endog, instruments, options)?;
 
-    // 識別の順序条件（`TwoSlsEstimator::fit`/`GmmEstimator::fit`のいずれも冒頭で検証する
-    // のと同じチェック）を`compute_first_stage`より先に行う。過小識別な入力で無駄な
-    // 第一段階回帰を走らせないため（`compute_first_stage`自体はこの条件を検証しない
-    // ので呼び出し元の責務）。この時点で`build_iv_input`の
-    // `validate_x_non_empty("x_endog"/"instruments", ...)`を既に通過して
-    // いるため`k_endog`/`k_instruments`はともに1以上であり、ここでの`<`判定は「両方
-    // 指定されているが数が足りない」過小識別ケースのみを扱う（「そもそも変数が
-    // 指定されていない」退化ケースとは排他的）。
-    if input.k_instruments() < input.k_endog() {
-        return Err(iv_error_to_pyerr(IvError::InsufficientInstruments {
-            n_instruments: input.k_instruments(),
-            n_endog: input.k_endog(),
-        }));
-    }
-
-    // 観測数`n`のチェック（構造方程式の`n <= k`を先に、次に第一段階の`n <= l`）を
-    // `compute_first_stage`より先に行う。第一段階の回帰変数の数は識別条件により構造方程式
-    // 以上のため、先に第一段階を走らせると構造方程式の`n <= k`が第一段階の
-    // `FirstStageFailed`（第一段階の`k`）に隠れて報告されてしまう。
-    validate_observation_counts(&input).map_err(iv_error_to_pyerr)?;
-
-    // `cov_type=Cluster`の構造方程式の`G <= q`チェック（`TwoSlsEstimator::fit`/
+    // 識別の順序条件（過小識別な入力で無駄な第一段階回帰を走らせない。この時点で
+    // `build_iv_input`の`validate_x_non_empty("x_endog"/"instruments", ...)`を通過しており
+    // `k_endog`/`k_instruments`はともに1以上なので、「両方指定されているが数が足りない」
+    // ケースのみを扱う）・観測数`n`（構造方程式の`n <= k`を先に、次に第一段階の`n <= l`）・`cov_type=Cluster`の
+    // 構造方程式の`G <= q`・被説明変数が定数、のチェック（`TwoSlsEstimator::fit`/
     // `GmmEstimator::fit`冒頭と同じ実装）を`compute_first_stage`より先に行う。第一段階の
-    // 傾き係数の数は識別条件により構造方程式以上のため、先に第一段階を走らせると
-    // このチェックが常に`FirstStageFailed`（第一段階の`g`・`q`）に隠れ、エンジン側の
-    // 構造方程式チェックがPythonから到達不能になる。
-    validate_structural_cluster_count(&input, &cov_type).map_err(iv_error_to_pyerr)?;
-
-    // 被説明変数が定数（切片あり）のモデルは説明するものが無い。入力だけから分かるため、これも
-    // `compute_first_stage`より先に弾く（`TwoSlsEstimator::fit`/`GmmEstimator::fit`冒頭と同じ実装）。
-    validate_outcome_not_constant(&input).map_err(|e| iv_error_to_pyerr(IvError::from(e)))?;
+    // 回帰変数・傾き係数の数は識別条件により構造方程式以上のため、先に第一段階を走らせると
+    // 構造方程式側のチェックが`FirstStageFailed`（第一段階の`k`・`g`・`q`）に隠れ、
+    // エンジン側のチェックがPythonから到達不能になる。
+    validate_iv_fit_inputs(&input, &cov_type).map_err(iv_error_to_pyerr)?;
 
     // 第一段階回帰・弱操作変数診断は`estimator`によらず共通（モジュールdocコメント参照）。
     // `input`は下でestimatorごとの推定器に移動するため、参照のみで済むこの呼び出しを先に行う。

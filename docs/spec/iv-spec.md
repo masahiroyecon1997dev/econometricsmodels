@@ -32,7 +32,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   誤用も検出できる。
 - **識別の順序条件**（`len(instruments) >= len(x_endog)`）を満たさない場合は`fit()`冒頭
   （第一段階回帰の前）で`IvError::InsufficientInstruments`（`ValidationError`）にする。
-- **観測数**（`engine::iv::common::validate_observation_counts`）は`fit()`冒頭（第一段階回帰の前）で、
+- **観測数**（`engine::iv::common::validate_iv_fit_inputs`が呼ぶ`validate_observation_counts`）は`fit()`冒頭（第一段階回帰の前）で、
   構造方程式の`n <= k`（`k = k_exog + k_endog`、定数項込み）を共通の`InsufficientObservations`で、
   次に第一段階の`n <= l`（`l = k_exog + len(instruments)`、定数項込み）を
   `IvError::InsufficientObservationsForFirstStage`（`ValidationError`）で拒否する。`l >= k`
@@ -42,7 +42,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   傾き係数の数以下のとき全体F検定だけを`None`にできる（3.1節）のとは異なり、`X̂`の元になる推定
   そのものが成立しない。
 - **被説明変数が定数・完全フィット**: 切片があり`y`が全行で同じ値なら`OUTCOME_CONSTANT`
-  （`ValidationError`、`validate_outcome_not_constant`。第一段階より前に弾く）。構造残差
+  （`ValidationError`、`validate_iv_fit_inputs`が呼ぶ`validate_outcome_not_constant`。第一段階より前に弾く）。構造残差
   $y - X\hat\beta$（第二段階回帰の残差ではない）の平方和が`y`の総平方和の`k·ε`倍以下なら
   `PERFECT_FIT`（`ComputationError`、判定は`ols-spec.md`3.3節と同じ`is_perfect_fit`）。GMMは
   重み行列`S`が0になって逆行列が特異になる前に、初期推定（2SLSと同じ点推定）の構造残差で判定する。
@@ -193,7 +193,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   より多くなければならない**（`G <= q`は`CommonError::InsufficientClustersForInference`＝
   `ValidationError`。`rank(Ŝ) ≤ G-1`のためロバストWald/F（χ²）検定の`q×q`
   部分行列が構造的に特異。`fit()`冒頭で構造方程式の`q`を使って弾く。判定は
-  `engine::iv::common::validate_structural_cluster_count`に集約し、`TwoSlsEstimator::fit`/
+  `engine::iv::common::validate_iv_fit_inputs`（内部の`validate_structural_cluster_count`）に集約し、`TwoSlsEstimator::fit`/
   `GmmEstimator::fit`冒頭と`engine_pybind`の`fit`（`compute_first_stage`より前）が共有する。
   第二段階回帰の`OlsEstimator::fit`内でも同じ検証が走るが、そちらは
   `SecondStageFailed`にラップされるため区別される。**構造方程式では

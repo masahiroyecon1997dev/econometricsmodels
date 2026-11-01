@@ -31,7 +31,7 @@
 //!    係数が`tol`で収束するか、初回推定を含めて`max_iter`回に達するまで繰り返す
 //!    （`max_iter`は3以上。2回以下は`TwoStep`と紛らわしいため`IvError::InvalidGmmMaxIter`）。
 //!    2-stepと3-step以降でアルゴリズムを分岐させる必要はなく、各ステップで
-//!    「直前の残差からSを再構築→再推定」を繰り返すだけである（`fit()`のループ参照）。
+//!    「直前の残差からSを再構築→再推定」を繰り返すだけである（`gmm_iterate`参照）。
 //!
 //! ## 収束条件（`Iterated`の`tol`）
 //!
@@ -113,7 +113,7 @@
 //!
 //! **`weight_type`（点推定に使う重み）と`cov_type`（SE計算方法）は独立**（モジュール冒頭
 //! 「`GmmType`と点推定への影響」参照）なので、点推定に実際に使った
-//! 重み`W = S_used⁻¹`（`fit()`内の`s_used`、`OneStep`なら`classical_s`）と、
+//! 重み`W = S_used⁻¹`（`gmm_iterate`が返す`s_used`、`OneStep`なら`classical_s`）と、
 //! `cov_type`が指定するモーメント条件の分散`Ω̂`（`Z`ベース、l×l）は一般に一致しない。
 //! そのため、`weight_type=cov_type`相当（効率的GMM）のときに`Avar(β̂)=(X'ZΩ̂⁻¹Z'X)⁻¹`へ
 //! 潰せる特殊ケースを分岐させず、**常に一般形のサンドイッチ**を使う（ユーザー確認済み）:
@@ -205,8 +205,8 @@ use faer::{Accum, Mat, Par, Side};
 use statrs::distribution::{ChiSquared, ContinuousCDF, Normal};
 
 use crate::iv::common::{
-    IvError, IvInput, mat_column_to_vec, mat_to_columns, validate_observation_counts,
-    validate_outcome_not_constant, validate_structural_cluster_count,
+    InferenceTable, IvError, IvInput, hcat, inference_table, mat_column_to_vec,
+    validate_iv_fit_inputs,
 };
 use crate::linear::ols::CovType;
 use crate::shared::covariance::{
@@ -331,7 +331,7 @@ impl GmmEstimator {
     /// - 観測数`n`が`k`（構造方程式の係数の数）以下:
     ///   `IvError::Common(CommonError::InsufficientObservations)`
     /// - 観測数`n`が全操作変数の数`l`（`x_exog ++ instruments`、定数項込み）以下（`n > k`でも）:
-    ///   `IvError::InsufficientObservationsForFirstStage`（`validate_observation_counts`）
+    ///   `IvError::InsufficientObservationsForFirstStage`（`validate_iv_fit_inputs`）
     /// - `Iterated`の`max_iter`が3未満: `IvError::InvalidGmmMaxIter`
     /// - `Iterated`の`tol`が正の有限値でない（0以下・NaN・inf）: `IvError::InvalidGmmTol`
     /// - `raise_on_non_convergence=true`かつ`Iterated`が`max_iter`回
@@ -379,35 +379,15 @@ impl GmmEstimator {
                 return Err(IvError::InvalidGmmTol { gmm_tol: *tol });
             }
         }
-        if input.k_instruments() < input.k_endog() {
-            return Err(IvError::InsufficientInstruments {
-                n_instruments: input.k_instruments(),
-                n_endog: input.k_endog(),
-            });
-        }
-
         let n = input.nobs();
-        // 観測数`n`が`k`（構造方程式の係数の数）以下だと、後段のサンドイッチSE計算
-        // （`df_resid=n-k`による除算、HC1補正`n/(n-k)`等）がNaN/Infinityを静かに生成しうる
-        // （`ols/estimator.rs`のn<=k検証と同じ理由）。さらに`n`が`l`（全操作変数
-        // `x_exog ++ instruments`の数）以下だと、`n < l`では`Z'Z`が特異、`n == l`では
-        // `Z`が正則になり`W₀ = (Z'Z)⁻¹`のGMMがOLSへ縮退する。`TwoSlsEstimator::fit`・
-        // `engine_pybind`と同じ`validate_observation_counts`で、構造方程式の`n <= k`
-        // （`CommonError::InsufficientObservations`）を先に、次に`n <= l`
-        // （`IvError::InsufficientObservationsForFirstStage`）を弾く。
-        validate_observation_counts(&input)?;
-        let k = input.k_exog() + input.k_endog();
-
-        // `cov_type=Cluster`でクラスター数`g`が構造方程式の傾き係数の数`q`
-        // （`k - k_constant`）以下だと、ロバストWald（χ²）検定の`q×q`部分行列が構造的に
-        // 特異になる（`rank(Ŝ) ≤ g - 1`、`two_sls.rs`/`ols/estimator.rs`と同型）。
-        // `g`・`q`は入力だけから判定できるため、点推定・SE計算より前に弾く。
+        // 観測数（`n <= k`はサンドイッチSE計算のNaN/Infinity、`n <= l`は`Z'Z`の特異または
+        // `W₀ = (Z'Z)⁻¹`のGMMがOLSへ縮退するのを防ぐ）・`cov_type=Cluster`のクラスター数
+        // （構造方程式の`G <= q`）・被説明変数の定数を、点推定・SE計算より前に弾く
+        // （`TwoSlsEstimator::fit`・`engine_pybind`と同じ`validate_iv_fit_inputs`）。
         // `weight_type=Cluster`の重み行列`S`（l×l）の`G`と`l`の関係は別軸のため
         // `validate_weight_type`側で検証する。
-        validate_structural_cluster_count(&input, &cov_type)?;
-
-        // 被説明変数が定数（切片あり）のモデルは説明するものが無い（`TwoSlsEstimator::fit`と同じ）。
-        validate_outcome_not_constant(&input)?;
+        validate_iv_fit_inputs(&input, &cov_type)?;
+        let k = input.k_exog() + input.k_endog();
 
         // 1段階GMMは`weight_type`を持たない（点推定・Hansen Jとも`(Z'Z)⁻¹`のみで計算する）
         // ため検証もしない。2段階・反復では点推定に使う重みの妥当性を検証する。
@@ -423,20 +403,13 @@ impl GmmEstimator {
             None => None,
         };
 
-        let x_exog_columns = mat_to_columns(input.x_exog());
-
         // Z = x_exog ++ instruments（全操作変数、docs/spec/iv-spec.md 1.1節）。
-        let mut z_columns = x_exog_columns.clone();
-        z_columns.extend(mat_to_columns(input.instruments()));
-        let l = z_columns.len();
-        let z = Mat::from_fn(n, l, |i, j| z_columns[j][i]);
+        let z = hcat(input.x_exog(), input.instruments());
+        let l = z.ncols();
 
         // X = x_exog ++ x_endog（実際の内生変数。2SLSの第二段階のようなX̂への
         // 置き換えはしない、モジュール冒頭のdocコメント参照）。
-        let mut x_columns = x_exog_columns;
-        x_columns.extend(mat_to_columns(input.x_endog()));
-        let k = x_columns.len();
-        let x = Mat::from_fn(n, k, |i, j| x_columns[j][i]);
+        let x = hcat(input.x_exog(), input.x_endog());
 
         let mut param_names = input.x_exog_names().to_vec();
         param_names.extend(input.x_endog_names().iter().cloned());
@@ -465,88 +438,26 @@ impl GmmEstimator {
             (0..n).map(|i| (*residuals0.get(i, 0)).powi(2)).sum::<f64>() / (n as f64);
         let classical_s = Mat::from_fn(l, l, |i, j| sigma2_0 * (*ztz.get(i, j)));
 
-        // 反復本体。1段階は1度も回らず打ち切り（`weight_type`を持たない）、2段階は2回目の
-        // 推定まで、反復は収束するか`max_iter`回に達するまで回す（モジュール冒頭のdocコメント
-        // 「`GmmType`と点推定への影響」「収束条件」参照）。`s_used`はHansen J検定（下記）に
-        // 使う重み行列で、ループが1度も回らない場合は常に`classical_s`（σ̂²₀・Z'Z）を使う。
-        let mut beta = beta0;
-        let mut residuals = residuals0;
-        let mut s_used = classical_s;
-        let mut n_iter: i64 = 1;
-        // `Iterated`以外は収束判定自体を行わないため常にtrue。`Iterated`は
-        // ループ内で実際に収束条件を満たした場合のみtrueに更新する（`max_iter>=3`のため
-        // 比較対象となる前回推定値は必ず存在する）。
-        let mut converged = !matches!(gmm_type, GmmType::Iterated { .. });
-        let mut hac_lags_used: Option<usize> = None;
-        let (max_steps, tol): (i64, Option<f64>) = match &gmm_type {
-            GmmType::OneStep => (1, None),
-            GmmType::TwoStep { .. } => (2, None),
-            GmmType::Iterated { max_iter, tol, .. } => (*max_iter as i64, Some(*tol)),
-        };
-
-        if let Some(weight_type) = weight_type {
-            // Hacのlags解決・時系列順序（`O(n log n)`のソートを含む）はweight_typeに対して
-            // 不変な前処理のため、ループの外で一度だけ計算し使い回す（ループ内で反復のたびに
-            // 再計算すると、max_iterが大きいiterated GMMで無駄なコストが反復回数倍に
-            // 膨らむ。rust-reviewerの指摘）。Clusterのgroups検証は`validate_weight_type`
-            // （`fit()`冒頭）で既に1回行っているため、ループ内では再検証しない。
-            let hac_precomputed = match &weight_type {
-                WeightType::Hac { lags, time_order } => {
-                    let lags = resolve_hac_lags(*lags, n)?;
-                    hac_lags_used = Some(lags);
-                    let order = time_ordering(time_order, n);
-                    Some((lags, order))
-                }
-                _ => None,
-            };
-
-            while n_iter < max_steps {
-                // 点推定は正のスカラー倍不変のため`classical_s`相当（σ̂²・Z'Z）を使っても
-                // `Z'Z`単体を使った場合と`β̂`は変わらない。Hansen Jにそのまま使い回せる
-                // よう、あらかじめ正しくスケーリングされたSを使う（`iv/CLAUDE.md`参照）。
-                let s_next = match &weight_type {
-                    WeightType::Classical => {
-                        let sigma2: f64 =
-                            (0..n).map(|i| (*residuals.get(i, 0)).powi(2)).sum::<f64>()
-                                / (n as f64);
-                        Mat::from_fn(l, l, |i, j| sigma2 * (*ztz.get(i, j)))
-                    }
-                    WeightType::Robust => robust_moment_covariance(&z, &residuals, n, l),
-                    WeightType::Cluster { .. } => {
-                        let groups =
-                            weight_cluster_codes.ok_or(CommonError::MissingClusterColumn {
-                                setting: ClusterSetting::GmmWeightType,
-                            })?;
-                        cluster_moment_covariance(&z, &residuals, l, groups)
-                    }
-                    WeightType::Hac { .. } => {
-                        // `hac_precomputed`は`weight_type=Hac`のとき（このアームに入る
-                        // ときは常に）ループ開始前にSomeとして構築済み（`weight_type`は
-                        // ループ中不変のため、上記matchと同じ分岐に必ず入る）。
-                        let (lags, order) = hac_precomputed
-                            .as_ref()
-                            .expect("hac_precomputed is Some whenever weight_type is Hac");
-                        hac_moment_covariance(&z, &residuals, n, l, *lags, order)
-                    }
-                };
-                let beta_next = gmm_point_estimate(&z, &x, y, &s_next)?;
-                n_iter += 1;
-
-                let just_converged = match tol {
-                    Some(tol) => gmm_coefficients_converged(&beta, &beta_next, tol),
-                    None => false,
-                };
-
-                beta = beta_next;
-                residuals = y - &x * &beta;
-                s_used = s_next;
-
-                if just_converged {
-                    converged = true;
-                    break;
-                }
-            }
-        }
+        // 方式（`gmm_type`）に応じた回数の再推定（詳細は`gmm_iterate`のdocコメント）。
+        let GmmIteration {
+            beta,
+            residuals,
+            s_used,
+            n_iter,
+            converged,
+            hac_lags_used,
+        } = gmm_iterate(
+            &gmm_type,
+            weight_type,
+            weight_cluster_codes,
+            &z,
+            &x,
+            y,
+            &ztz,
+            beta0,
+            residuals0,
+            classical_s,
+        )?;
 
         if !converged && raise_on_non_convergence {
             return Err(IvError::GmmNonConvergence {
@@ -554,39 +465,7 @@ impl GmmEstimator {
             });
         }
 
-        // Hansen J過剰識別検定（docs/spec/iv-spec.md 3.5節）。
-        // `J = (Z'ê)'S⁻¹(Z'ê)`（`n`で割らない、モジュール冒頭のdocコメント
-        // 「Hansen J過剰識別検定」参照。`ê`は最終推定に基づく残差、`S`は最終推定`beta`に
-        // 実際に使った重み行列`s_used`）。自由度は`len(instruments) - len(x_endog)`
-        // （`two_sls.rs`のSargan検定と同じ、`docs/spec/iv-spec.md`1.1節の`instruments`＝
-        // 除外操作変数のみという定義に対応）。丁度識別（自由度0）では`None`
-        // （`docs/spec/iv-spec.md`1.2節・3.5節）。
-        //
-        // `s_used`は`beta`計算時（`gmm_point_estimate`内の`llt`、または`classical_s`
-        // 自体が正定値`Z'Z`の正のスカラー倍）で既に反転成功済み・正定値性が保証された
-        // 行列のため、ここでの特異性は理論上到達不能（`two_sls.rs`の`xtx_inverse`と
-        // 同じ防御的`Result`化）。
-        let q = input.k_instruments();
-        let k_endog = input.k_endog();
-        let (hansen_j_statistic, hansen_j_p_value, hansen_j_df) = if q == k_endog {
-            (None, None, None)
-        } else {
-            let df = q - k_endog;
-            let zte = z.transpose() * &residuals;
-            let llt_s = s_used
-                .llt(Side::Lower)
-                .map_err(|_| CommonError::NearSingularMatrix {
-                    matrix: MatrixKind::GmmWeight,
-                })?;
-            let s_inv_zte = llt_s.solve(&zte);
-            let stat: f64 = (0..l)
-                .map(|i| (*zte.get(i, 0)) * (*s_inv_zte.get(i, 0)))
-                .sum();
-            let chi2 =
-                ChiSquared::new(df as f64).map_err(|e| CommonError::internal(e.to_string()))?;
-            let p_value = chi2.sf(stat);
-            (Some(stat), Some(p_value), Some(df))
-        };
+        let hansen_j = hansen_j_test(&input, &z, &residuals, &s_used)?;
 
         // ── ここから独立実装のサンドイッチ型SE計算（モジュール冒頭のdocコメント
         // 「標準誤差・検定統計量（cov_type対応）」参照）──
@@ -595,90 +474,22 @@ impl GmmEstimator {
         let df_model = k - k_constant;
         let ssr: f64 = (0..n).map(|i| (*residuals.get(i, 0)).powi(2)).sum();
 
-        // W = S_used⁻¹（点推定に実際に使った重み）。bread = X'ZWZ'X（`gmm_point_estimate`
-        // 内の`bread`と同型だが、こちらは後続のΩ̂サンドイッチでも使い回すため明示的な
-        // 逆行列として保持する（`two_sls.rs`の`xtx_inverse`と同じ考え方）。
-        let s_inv = invert_spd(
-            &s_used,
-            l,
-            CommonError::NearSingularMatrix {
-                matrix: MatrixKind::GmmWeight,
-            },
-        )?;
-        let zx = z.transpose() * &x; // (l, k)
-        let bread = zx.transpose() * &s_inv * &zx; // (k, k) = X'ZWZ'X
-        let bread_inv = invert_spd(
-            &bread,
-            k,
-            CommonError::NearSingularMatrix {
-                matrix: MatrixKind::GmmBread,
-            },
-        )?;
-
-        let omega_hat = match &cov_type {
-            CovType::Classical => {
-                // 残差を中心化した標本分散を使う（`weight_type=Classical`以外では
-                // GMMの一次条件が`ē=0`を保証しないため、モジュール冒頭のdocコメント
-                // 「標準誤差・検定統計量」`classical`の項参照）。
-                let mean_residual: f64 =
-                    (0..n).map(|i| *residuals.get(i, 0)).sum::<f64>() / (n as f64);
-                let centered_ssr: f64 = (0..n)
-                    .map(|i| (*residuals.get(i, 0) - mean_residual).powi(2))
-                    .sum();
-                let sigma2 = centered_ssr / (df_resid as f64);
-                Mat::from_fn(l, l, |i, j| sigma2 * (*ztz.get(i, j)))
-            }
-            CovType::Hc0 => gmm_hc_omega(&z, &residuals, &ztz, n, k, l, HcVariant::Hc0)?,
-            CovType::Hc1 => gmm_hc_omega(&z, &residuals, &ztz, n, k, l, HcVariant::Hc1)?,
-            CovType::Hc2 => gmm_hc_omega(&z, &residuals, &ztz, n, k, l, HcVariant::Hc2)?,
-            CovType::Hc3 => gmm_hc_omega(&z, &residuals, &ztz, n, k, l, HcVariant::Hc3)?,
-            CovType::Hac { lags, time_order } => {
-                let lags = resolve_hac_lags(*lags, n)?;
-                hac_lags_used = Some(lags);
-                let order = time_ordering(time_order, n);
-                // Newey-West重み付け以外の小標本補正を持たないため、点推定用の
-                // `hac_moment_covariance`と計算式が一致する（モジュール冒頭の
-                // docコメント参照。`robust_moment_covariance`/`cluster_moment_covariance`は
-                // 補正が無く使い回せないのと対照的）。
-                hac_moment_covariance(&z, &residuals, n, l, lags, &order)
-            }
-            CovType::Cluster { groups } => {
-                // クラスター数 `g >= 2`・`g > df_model`（構造方程式の傾き係数の数）は`fit()`冒頭
-                // （`validate_structural_cluster_count`）で検証済み。
-                let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn {
-                    setting: ClusterSetting::CovType,
-                })?;
-                gmm_cluster_omega(&z, &residuals, n, k, l, groups)
-            }
-        };
-
-        let meat_z = &s_inv * &omega_hat * &s_inv; // (l, l) = WΩ̂W
-        let meat = zx.transpose() * &meat_z * &zx; // (k, k) = X'ZWΩ̂WZ'X
-        let cov_params = &bread_inv * &meat * &bread_inv; // (k, k)
-
-        let mut std_errors = Mat::<f64>::zeros(k, 1);
-        for j in 0..k {
-            *std_errors.get_mut(j, 0) = (*cov_params.get(j, j)).sqrt();
-        }
+        let GmmCovariance {
+            cov_params,
+            hac_lags_used: cov_hac_lags,
+        } = sandwich_covariance(&cov_type, &z, &x, &residuals, &ztz, &s_used, df_resid)?;
+        // `cov_type=Hac`のラグ数は`weight_type=Hac`のラグ数より優先する。
+        let hac_lags_used = cov_hac_lags.or(hac_lags_used);
 
         let normal_dist =
             Normal::new(0.0, 1.0).map_err(|e| CommonError::internal(e.to_string()))?;
-        let z_crit = inference::critical_value(&normal_dist, confidence_level);
-
-        let mut test_stats = Mat::<f64>::zeros(k, 1);
-        let mut p_values = Mat::<f64>::zeros(k, 1);
-        let mut conf_lower = Mat::<f64>::zeros(k, 1);
-        let mut conf_upper = Mat::<f64>::zeros(k, 1);
-        for j in 0..k {
-            let coef = *beta.get(j, 0);
-            let se = *std_errors.get(j, 0);
-            let stat = inference::compute_inference_stat(&normal_dist, coef, se, z_crit);
-
-            *test_stats.get_mut(j, 0) = stat.stat;
-            *p_values.get_mut(j, 0) = stat.p_value;
-            *conf_lower.get_mut(j, 0) = stat.conf_low;
-            *conf_upper.get_mut(j, 0) = stat.conf_high;
-        }
+        let InferenceTable {
+            std_errors,
+            test_stats,
+            p_values,
+            conf_lower,
+            conf_upper,
+        } = inference_table(&beta, &cov_params, &normal_dist, confidence_level);
 
         let r_squared = 1.0 - ssr / sst;
         let adj_r_squared = 1.0 - ((n - k_constant) as f64 / df_resid as f64) * (1.0 - r_squared);
@@ -715,9 +526,9 @@ impl GmmEstimator {
             adj_r_squared,
             wald_statistic,
             wald_p_value,
-            hansen_j_statistic,
-            hansen_j_p_value,
-            hansen_j_df,
+            hansen_j_statistic: hansen_j.as_ref().map(|t| t.statistic),
+            hansen_j_p_value: hansen_j.as_ref().map(|t| t.p_value),
+            hansen_j_df: hansen_j.as_ref().map(|t| t.df),
         })
     }
 
@@ -880,6 +691,270 @@ impl GmmEstimator {
 /// 使う`ATOL`の既定値と同じ`1e-8`を踏襲する（`.claude/rules/testing-policy.md`
 /// 「許容誤差は相対誤差1e-8を基本」）。
 const GMM_CONVERGENCE_ATOL: f64 = 1e-8;
+
+/// [`gmm_iterate`]の戻り値。
+struct GmmIteration {
+    beta: Mat<f64>,
+    /// 最終推定の残差 `ê = y - Xβ̂`。
+    residuals: Mat<f64>,
+    /// 最終推定`beta`に実際に使った重み行列`S`（l×l）。ループが1度も回らない場合は
+    /// `classical_s`（σ̂²₀・Z'Z）。
+    s_used: Mat<f64>,
+    n_iter: i64,
+    converged: bool,
+    /// `weight_type=Hac`のとき実際に使われたラグ数。それ以外では`None`。
+    hac_lags_used: Option<usize>,
+}
+
+/// 初期推定（`W₀ = (Z'Z)⁻¹`）から、方式（`gmm_type`）に応じた回数だけ「直前の残差から`S`を
+/// 再構築→再推定」を繰り返す。1段階は1度も回らず打ち切り（`weight_type`を持たない）、2段階は
+/// 2回目の推定まで、反復は収束するか`max_iter`回に達するまで回す（モジュール冒頭のdocコメント
+/// 「`GmmType`と点推定への影響」「収束条件」参照）。`s_used`はHansen J検定に使う重み行列で、
+/// ループが1度も回らない場合は常に`classical_s`（σ̂²₀・Z'Z）を使う。
+#[allow(clippy::too_many_arguments)]
+fn gmm_iterate(
+    gmm_type: &GmmType,
+    weight_type: Option<&WeightType>,
+    weight_cluster_codes: Option<&GroupCodes>,
+    z: &Mat<f64>,
+    x: &Mat<f64>,
+    y: &Mat<f64>,
+    ztz: &Mat<f64>,
+    beta0: Mat<f64>,
+    residuals0: Mat<f64>,
+    classical_s: Mat<f64>,
+) -> Result<GmmIteration, IvError> {
+    let n = z.nrows();
+    let l = z.ncols();
+    let mut beta = beta0;
+    let mut residuals = residuals0;
+    let mut s_used = classical_s;
+    let mut n_iter: i64 = 1;
+    // `Iterated`以外は収束判定自体を行わないため常にtrue。`Iterated`は
+    // ループ内で実際に収束条件を満たした場合のみtrueに更新する（`max_iter>=3`のため
+    // 比較対象となる前回推定値は必ず存在する）。
+    let mut converged = !matches!(gmm_type, GmmType::Iterated { .. });
+    let mut hac_lags_used: Option<usize> = None;
+    let (max_steps, tol): (i64, Option<f64>) = match gmm_type {
+        GmmType::OneStep => (1, None),
+        GmmType::TwoStep { .. } => (2, None),
+        GmmType::Iterated { max_iter, tol, .. } => (*max_iter as i64, Some(*tol)),
+    };
+
+    if let Some(weight_type) = weight_type {
+        // Hacのlags解決・時系列順序（`O(n log n)`のソートを含む）はweight_typeに対して
+        // 不変な前処理のため、ループの外で一度だけ計算し使い回す（ループ内で反復のたびに
+        // 再計算すると、max_iterが大きいiterated GMMで無駄なコストが反復回数倍に
+        // 膨らむ）。Clusterのgroups検証は`validate_weight_type`（`fit()`冒頭）で既に
+        // 1回行っているため、ループ内では再検証しない。
+        let hac_precomputed = match weight_type {
+            WeightType::Hac { lags, time_order } => {
+                let lags = resolve_hac_lags(*lags, n)?;
+                hac_lags_used = Some(lags);
+                let order = time_ordering(time_order, n);
+                Some((lags, order))
+            }
+            _ => None,
+        };
+
+        while n_iter < max_steps {
+            // 点推定は正のスカラー倍不変のため`classical_s`相当（σ̂²・Z'Z）を使っても
+            // `Z'Z`単体を使った場合と`β̂`は変わらない。Hansen Jにそのまま使い回せる
+            // よう、あらかじめ正しくスケーリングされたSを使う（`iv/CLAUDE.md`参照）。
+            let s_next = match weight_type {
+                WeightType::Classical => {
+                    let sigma2: f64 =
+                        (0..n).map(|i| (*residuals.get(i, 0)).powi(2)).sum::<f64>() / (n as f64);
+                    Mat::from_fn(l, l, |i, j| sigma2 * (*ztz.get(i, j)))
+                }
+                WeightType::Robust => robust_moment_covariance(z, &residuals, n, l),
+                WeightType::Cluster { .. } => {
+                    let groups = weight_cluster_codes.ok_or(CommonError::MissingClusterColumn {
+                        setting: ClusterSetting::GmmWeightType,
+                    })?;
+                    cluster_moment_covariance(z, &residuals, l, groups)
+                }
+                WeightType::Hac { .. } => {
+                    // `hac_precomputed`は`weight_type=Hac`のとき（このアームに入る
+                    // ときは常に）ループ開始前にSomeとして構築済み（`weight_type`は
+                    // ループ中不変のため、上記matchと同じ分岐に必ず入る）。
+                    let (lags, order) = hac_precomputed
+                        .as_ref()
+                        .expect("hac_precomputed is Some whenever weight_type is Hac");
+                    hac_moment_covariance(z, &residuals, n, l, *lags, order)
+                }
+            };
+            let beta_next = gmm_point_estimate(z, x, y, &s_next)?;
+            n_iter += 1;
+
+            let just_converged = match tol {
+                Some(tol) => gmm_coefficients_converged(&beta, &beta_next, tol),
+                None => false,
+            };
+
+            beta = beta_next;
+            residuals = y - x * &beta;
+            s_used = s_next;
+
+            if just_converged {
+                converged = true;
+                break;
+            }
+        }
+    }
+
+    Ok(GmmIteration {
+        beta,
+        residuals,
+        s_used,
+        n_iter,
+        converged,
+        hac_lags_used,
+    })
+}
+
+/// [`hansen_j_test`]の戻り値。
+struct HansenJTest {
+    statistic: f64,
+    p_value: f64,
+    df: usize,
+}
+
+/// Hansen J過剰識別検定（docs/spec/iv-spec.md 3.5節）。
+/// `J = (Z'ê)'S⁻¹(Z'ê)`（`n`で割らない、モジュール冒頭のdocコメント
+/// 「Hansen J過剰識別検定」参照。`ê`は最終推定に基づく残差、`S`は最終推定`beta`に
+/// 実際に使った重み行列`s_used`）。自由度は`len(instruments) - len(x_endog)`
+/// （`two_sls.rs`のSargan検定と同じ、`docs/spec/iv-spec.md`1.1節の`instruments`＝
+/// 除外操作変数のみという定義に対応）。丁度識別（自由度0）では`None`
+/// （`docs/spec/iv-spec.md`1.2節・3.5節）。
+///
+/// `s_used`は`beta`計算時（`gmm_point_estimate`内の`llt`、または`classical_s`
+/// 自体が正定値`Z'Z`の正のスカラー倍）で既に反転成功済み・正定値性が保証された
+/// 行列のため、ここでの特異性は理論上到達不能（`two_sls.rs`の`xtx_inverse`と
+/// 同じ防御的`Result`化）。
+fn hansen_j_test(
+    input: &IvInput,
+    z: &Mat<f64>,
+    residuals: &Mat<f64>,
+    s_used: &Mat<f64>,
+) -> Result<Option<HansenJTest>, IvError> {
+    let q = input.k_instruments();
+    let k_endog = input.k_endog();
+    if q == k_endog {
+        return Ok(None);
+    }
+    let l = z.ncols();
+    let df = q - k_endog;
+    let zte = z.transpose() * residuals;
+    let llt_s = s_used
+        .llt(Side::Lower)
+        .map_err(|_| CommonError::NearSingularMatrix {
+            matrix: MatrixKind::GmmWeight,
+        })?;
+    let s_inv_zte = llt_s.solve(&zte);
+    let statistic: f64 = (0..l)
+        .map(|i| (*zte.get(i, 0)) * (*s_inv_zte.get(i, 0)))
+        .sum();
+    let chi2 = ChiSquared::new(df as f64).map_err(|e| CommonError::internal(e.to_string()))?;
+    let p_value = chi2.sf(statistic);
+    Ok(Some(HansenJTest {
+        statistic,
+        p_value,
+        df,
+    }))
+}
+
+/// [`sandwich_covariance`]の戻り値。
+struct GmmCovariance {
+    cov_params: Mat<f64>,
+    /// `cov_type=Hac`のとき実際に使われたラグ数。それ以外では`None`。
+    hac_lags_used: Option<usize>,
+}
+
+/// 独立実装のサンドイッチ型係数分散共分散行列
+/// `Avar(β̂) = B⁻¹(X'ZWΩ̂WZ'X)B⁻¹`（`B = X'ZWZ'X`、`W = S_used⁻¹`は点推定に実際に使った
+/// 重み、k×k）。モジュール冒頭のdocコメント「標準誤差・検定統計量（cov_type対応）」参照。
+///
+/// `df_resid`は`cov_type=Classical`の`σ̂² = Σ(êᵢ-ē)²/df_resid`にだけ使う（`fit()`は`n - k`を
+/// 渡す）。HC1・クラスターの小標本補正は`n`・`k`（`x`の形）に従う。
+fn sandwich_covariance(
+    cov_type: &CovType,
+    z: &Mat<f64>,
+    x: &Mat<f64>,
+    residuals: &Mat<f64>,
+    ztz: &Mat<f64>,
+    s_used: &Mat<f64>,
+    df_resid: usize,
+) -> Result<GmmCovariance, IvError> {
+    let n = z.nrows();
+    let l = z.ncols();
+    let k = x.ncols();
+    let mut hac_lags_used = None;
+
+    // W = S_used⁻¹（点推定に実際に使った重み）。bread = X'ZWZ'X（`gmm_point_estimate`
+    // 内の`bread`と同型だが、こちらは後続のΩ̂サンドイッチでも使い回すため明示的な
+    // 逆行列として保持する（`two_sls.rs`の`xtx_inverse`と同じ考え方）。
+    let s_inv = invert_spd(
+        s_used,
+        l,
+        CommonError::NearSingularMatrix {
+            matrix: MatrixKind::GmmWeight,
+        },
+    )?;
+    let zx = z.transpose() * x; // (l, k)
+    let bread = zx.transpose() * &s_inv * &zx; // (k, k) = X'ZWZ'X
+    let bread_inv = invert_spd(
+        &bread,
+        k,
+        CommonError::NearSingularMatrix {
+            matrix: MatrixKind::GmmBread,
+        },
+    )?;
+
+    let omega_hat = match cov_type {
+        CovType::Classical => {
+            // 残差を中心化した標本分散を使う（`weight_type=Classical`以外では
+            // GMMの一次条件が`ē=0`を保証しないため、モジュール冒頭のdocコメント
+            // 「標準誤差・検定統計量」`classical`の項参照）。
+            let mean_residual: f64 = (0..n).map(|i| *residuals.get(i, 0)).sum::<f64>() / (n as f64);
+            let centered_ssr: f64 = (0..n)
+                .map(|i| (*residuals.get(i, 0) - mean_residual).powi(2))
+                .sum();
+            let sigma2 = centered_ssr / (df_resid as f64);
+            Mat::from_fn(l, l, |i, j| sigma2 * (*ztz.get(i, j)))
+        }
+        CovType::Hc0 => gmm_hc_omega(z, residuals, ztz, n, k, l, HcVariant::Hc0)?,
+        CovType::Hc1 => gmm_hc_omega(z, residuals, ztz, n, k, l, HcVariant::Hc1)?,
+        CovType::Hc2 => gmm_hc_omega(z, residuals, ztz, n, k, l, HcVariant::Hc2)?,
+        CovType::Hc3 => gmm_hc_omega(z, residuals, ztz, n, k, l, HcVariant::Hc3)?,
+        CovType::Hac { lags, time_order } => {
+            let lags = resolve_hac_lags(*lags, n)?;
+            hac_lags_used = Some(lags);
+            let order = time_ordering(time_order, n);
+            // Newey-West重み付け以外の小標本補正を持たないため、点推定用の
+            // `hac_moment_covariance`と計算式が一致する（モジュール冒頭の
+            // docコメント参照。`robust_moment_covariance`/`cluster_moment_covariance`は
+            // 補正が無く使い回せないのと対照的）。
+            hac_moment_covariance(z, residuals, n, l, lags, &order)
+        }
+        CovType::Cluster { groups } => {
+            // クラスター数 `g >= 2`・`g > df_model`（構造方程式の傾き係数の数）は`fit()`冒頭
+            // （`validate_iv_fit_inputs`）で検証済み。
+            let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn {
+                setting: ClusterSetting::CovType,
+            })?;
+            gmm_cluster_omega(z, residuals, n, k, l, groups)
+        }
+    };
+
+    let meat_z = &s_inv * &omega_hat * &s_inv; // (l, l) = WΩ̂W
+    let meat = zx.transpose() * &meat_z * &zx; // (k, k) = X'ZWΩ̂WZ'X
+    let cov_params = &bread_inv * &meat * &bread_inv; // (k, k)
+    Ok(GmmCovariance {
+        cov_params,
+        hac_lags_used,
+    })
+}
 
 /// 係数ベクトルが収束したかをelementwiseで判定する: 各係数`i`について
 /// `|next_i - prev_i| <= max(rtol * |prev_i|, GMM_CONVERGENCE_ATOL)`を満たせば収束

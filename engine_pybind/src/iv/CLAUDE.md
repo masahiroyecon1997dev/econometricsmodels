@@ -35,9 +35,9 @@
 
 以下はいずれも`compute_first_stage`より前に`fit_frame`で行う。第一段階の回帰変数・クラスター係数の数は識別条件により構造方程式以上のため、先に第一段階を走らせると構造方程式側の検査が第一段階の`FirstStageFailed`に隠れてPythonから到達不能になるため（`compute_first_stage`自体はこれらを検証しない）。
 
-- **識別の順序条件（`k_instruments < k_endog`）**: 過小識別な入力で無駄な第一段階回帰が走るのも防ぐ。`build_iv_input`が`x_endog`/`instruments`の非空を既に検証しているため、ここでの`<`判定は「両方指定されているが数が足りない」ケースのみを扱う。
-- **観測数（`engine::iv::common::validate_observation_counts`）**: 構造方程式の`n <= k`を先に`CommonError::InsufficientObservations`（構造方程式の`k`）で、次に`n <= l`（`l = k_exog + k_instruments`、定数項込みの第一段階の回帰変数の数）を`IvError::InsufficientObservationsForFirstStage`（`ValidationError`）で弾く。`n == l`では`X̂ = X`で2SLSがOLSに縮退し（GMMの`W₀ = (Z'Z)⁻¹`も同様）、`n < l`では`Z'Z`が特異のため、第一段階を診断としてdegradeする余地はなく拒否する（`tests/iv/test_iv_validation.py`の`test_observation_count_boundaries`で固定）。
-- **`cov_type=Cluster`の構造方程式の`G <= q`**（`engine::iv::common::validate_structural_cluster_count`。`q`の式はエンジン側に集約し、pybindに複製しない）: 構造方程式で`G>q`でも第一段階の`q`が`G`以下なら、`fit`は失敗せず、その第一段階の`OLSResult`（`first_stage()`）の`f_statistic`/`f_p_value`/`f_df_num`/`f_df_denom`だけが`None`になる（`test_cluster_count_between_structural_and_first_stage_slopes_leaves_first_stage_f_undefined`/`test_cluster_count_boundaries`で固定）。`OLSResult`のF系列は全手法（OLS/WLS/FE/RE）で`Option<f64>`。
+- **識別の順序条件（`k_instruments < k_endog`）**（`engine::iv::common::validate_iv_fit_inputs`の先頭）: 過小識別な入力で無駄な第一段階回帰が走るのも防ぐ。`build_iv_input`が`x_endog`/`instruments`の非空を既に検証しているため、ここでの`<`判定は「両方指定されているが数が足りない」ケースのみを扱う。
+- **観測数（`engine::iv::common::validate_iv_fit_inputs`が呼ぶ`validate_observation_counts`）**: 構造方程式の`n <= k`を先に`CommonError::InsufficientObservations`（構造方程式の`k`）で、次に`n <= l`（`l = k_exog + k_instruments`、定数項込みの第一段階の回帰変数の数）を`IvError::InsufficientObservationsForFirstStage`（`ValidationError`）で弾く。`n == l`では`X̂ = X`で2SLSがOLSに縮退し（GMMの`W₀ = (Z'Z)⁻¹`も同様）、`n < l`では`Z'Z`が特異のため、第一段階を診断としてdegradeする余地はなく拒否する（`tests/iv/test_iv_validation.py`の`test_observation_count_boundaries`で固定）。
+- **`cov_type=Cluster`の構造方程式の`G <= q`**（`engine::iv::common::validate_iv_fit_inputs`が呼ぶ`validate_structural_cluster_count`。`q`の式はエンジン側に集約し、pybindに複製しない）: 構造方程式で`G>q`でも第一段階の`q`が`G`以下なら、`fit`は失敗せず、その第一段階の`OLSResult`（`first_stage()`）の`f_statistic`/`f_p_value`/`f_df_num`/`f_df_denom`だけが`None`になる（`test_cluster_count_between_structural_and_first_stage_slopes_leaves_first_stage_f_undefined`/`test_cluster_count_boundaries`で固定）。`OLSResult`のF系列は全手法（OLS/WLS/FE/RE）で`Option<f64>`。
 
 ## GMMのオプションと重み行列
 

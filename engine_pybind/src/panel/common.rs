@@ -292,7 +292,7 @@ pub(crate) fn panel_error_to_pyerr(err: PanelError) -> PyErr {
 
 /// `df`から`name`列を、時点を表すキー（FE/REの`effects`の2つ目・`dk_time`）として、ラベルと
 /// **値の順序**を持つ`TimeKeys`で取り出す。行ごとの`String`は作らない
-/// （`extract_cluster_groups`（`shared/column_extraction.rs`）と同じ分解）。
+/// （`extract_cluster_groups`（`shared/column_extraction/`）と同じ分解）。
 ///
 /// ラベルは文字列表現（同一性の判定と`fixed_effects()`のキーに使う）。時点の順序は列の
 /// dtypeの値の順序で決める。文字列表現の辞書順は`1, 10, 11, 2, ...`のように時間順と

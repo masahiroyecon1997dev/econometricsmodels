@@ -1,7 +1,7 @@
 //! 全手法で共有する、列名レベルの入力バリデーション（`ValidationError`）。
 //!
 //! `.claude/rules/rust-style.md`「全手法で共有するロジックは系統ディレクトリの外、
-//! `shared/`に置く」の方針、`column_extraction.rs`と同じ位置づけ。
+//! `shared/`に置く」の方針、`column_extraction/`と同じ位置づけ。
 //!
 //! OLS/WLS/Logit等の`fit`/`build_*_input`冒頭で共通に行うバリデーション（xが空・
 //! yやweight等のロール間の重複・x内の重複・`include_intercept=true`時の`"const"`列衝突）

@@ -272,7 +272,7 @@ def test_numeric_column_null_values_raise(bad_col):
 )
 @pytest.mark.parametrize("bad_col", ["y", "x1"])
 def test_numeric_column_non_finite_values_raise(bad_col, value):
-    """NaN・無限大は`column_extraction.rs`内でnull（`test_numeric_column_
+    """NaN・無限大は`column_extraction/`内でnull（`test_numeric_column_
     null_values_raise`）とは別ロジックのため個別に確認する。
     """
     values: dict[str, list[float]] = {

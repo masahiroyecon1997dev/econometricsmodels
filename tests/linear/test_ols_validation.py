@@ -96,7 +96,7 @@ def test_null_values_raise():
 def test_non_finite_values_raise():
     """`y`/`x`にNaN・無限大が含まれる場合`ValidationError`。
 
-    null（`test_null_values_raise`）とNaN/無限大は`column_extraction.rs`内で
+    null（`test_null_values_raise`）とNaN/無限大は`column_extraction/`内で
     別ロジックのため個別に確認する。
     `x`側も`y`側と同じ`extract_f64_column`を通るため対称に確認する
     （predict()側の`test_predict_null_or_non_finite_values_raise`との

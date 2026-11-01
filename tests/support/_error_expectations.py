@@ -27,7 +27,7 @@ def fully_qualified_type_name(obj: object) -> str:
     """pyo3の`PyType::fully_qualified_name()`と同じ規則で型名を組み立てる。
 
     `NOT_A_POLARS_DATAFRAME`の`{type_name}`はRust側の
-    `engine_pybind/src/shared/column_extraction.rs`の`type_name_of`
+    `engine_pybind/src/shared/column_extraction/`の`type_name_of`
     （`check_dataframe`が使う）で組み立てているため、テスト側も同じ規則
     （`__module__`が`"builtins"`/`"__main__"`のときは`__qualname__`のみ、それ以外は
     `f"{{__module__}}.{{__qualname__}}"`）で期待値を作る。`type_name_of`は本パッケージの
@@ -45,10 +45,10 @@ def fully_qualified_type_name(obj: object) -> str:
     return f"{module}.{cls.__qualname__}"
 
 
-# ── column_extraction.rs（全系統共通） ──────────────────────────────
+# ── column_extraction/（全系統共通） ──────────────────────────────
 #
 # check_dataframe: `data`/`new_data`にpolars以外のDataFrame（pandas等）が
-# 渡された場合に使う（engine_pybind/src/shared/column_extraction.rs）。
+# 渡された場合に使う（engine_pybind/src/shared/column_extraction/）。
 # `param_name`は呼び出し側で"data"（fit系）または"new_data"（predict/augment）
 # を渡す。`type_name`はPythonオブジェクトの完全修飾クラス名
 # （`type(obj).__module__ + "." + type(obj).__qualname__`相当）。

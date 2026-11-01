@@ -23,7 +23,7 @@ paths:
   - 系統名・手法の割り当ては上記を初期案とし、実装時に見直してよい（例: Phase2の"Logit"とPhase6の"Logit"は別系統ディレクトリに属するため衝突しない）
 - **手法＝最初は1ファイル**（例: `linear/wls.rs`）。ファイルが肥大化したら`ols/`のようにディレクトリに昇格し、責務ごとに分割する（`linear/ols/`は`mod.rs`（`pub use`の再エクスポートのみ）・`cov_type.rs`・`cov_params.rs`・`input.rs`・`estimator.rs`・`predict.rs`）。型とその`impl`は同じファイルに置き（「型だけ」「関数だけ」で分けない）、`mod tests`も対象コードと同じファイルに置く。公開パスは`mod.rs`の再エクスポートで保ち、呼び出し側を変えない。全手法に最初から複数ファイルを強制しない。
 - **系統内で共有するロジック**は`<系統>/common.rs`に置く。
-- **全手法で共有するロジック**（DataFrameからの列抽出等、統計手法に依存しない処理）は系統ディレクトリの外、`shared/`（例: `engine_pybind/src/shared/column_extraction.rs`）に置く。
+- **全手法で共有するロジック**（DataFrameからの列抽出等、統計手法に依存しない処理）は系統ディレクトリの外、`shared/`（例: `engine_pybind/src/shared/column_extraction/`）に置く。
 - **複数の系統が使う計算部品**（共分散行列のmeat/sandwich・Wald検定・最小二乗・適合度統計量・クラスターのグループ化）は`engine/src/shared/`に置く。各系統は他系統の内部ではなく`shared/`に依存する。`shared/`は**何をするコードか**（線形代数・共分散・推論等）で分け、どの系統が使うかでは分けない（利用側は手法の追加で変わり、利用者別にするとファイルの移動が繰り返し起きるため）。系統の`common.rs`（系統内で共有するロジック・エラー型）とは別物で、`shared/`の関数は特定系統のエラー型を返さない（`CommonError`か、`linear_algebra::RankDeficient`のような系統非依存の型を返し、呼び出し側が自系統のエラーへ`map_err`する）。`error.rs`（`CommonError`・`ErrorInfo`）・`error_catalog.rs`（エラーのカタログ）・`inference.rs`・`linear_algebra.rs`・`parallelism.rs`・`validation.rs`・`design_matrix.rs`も`shared/`に置く（engineのクレート直下に残るのは`lib.rs`と`shared/`・系統ディレクトリだけ）。`shared/mod.rs`では、`engine_pybind`から名前で参照するモジュール（`error`・`error_catalog`・`group_codes`・`parallelism`）のみ`pub mod`、それ以外は`pub(crate) mod`にする。直下への再エクスポート（`pub use shared::error;`等）は置かない。
 - `engine`と`engine_pybind`で同じ系統名・ディレクトリ構成を揃える（`engine/src/linear/ols/` ⇔ `engine_pybind/src/linear/ols.rs`のように対応させる。手法の中のファイル分割はengine側だけでよい）。共有コードも同じく、両クレートとも`shared/`に置く（`engine/src/shared/` ⇔ `engine_pybind/src/shared/`。中身は別で、engine_pybind側は列抽出・入力検証・オプション値・例外クラス・結果DataFrameの構築・`Mat<f64>`から`Vec`への変換）。
 
@@ -77,7 +77,7 @@ Issue番号・内部管理ドキュメント（`docs/planning/specs/`配下の�
 - **Python側の例外はカテゴリ別に分ける**（全て`PyValueError`にまとめない）。`engine_pybind/src/shared/errors.rs`の`#[pyclass]`で、次の2クラスを定義する（`module = "econometricsmodels._lib"`）。どちらに属するかは**カタログの`code`ごとに決まる**。
   - `ValidationError`: 入力・パラメータが不正（欠損値、観測数不足、クラスター数不足、`confidence_level`の範囲外等）。Python側の`ValueError`を継承させ、素の`except ValueError`でも捕まえられるようにする。
   - `ComputationError`: 計算過程で発覚した問題（特異行列、収束しない等）。Python側の`RuntimeError`を継承させる。
-  - 引数・オプションの**型**の誤りは構造化せず、組み込みの`TypeError`にする（`column_extraction.rs`・`option_values.rs`が作る文面は、引数名を引用符で囲まず`{argument} must be a ..., got {type}.`の形にする。`options`は`extract_options`で取り出し、`options must be an instance of OLSOptions, got WLSOptions.`の形にする。未知のキーワード引数など、Python本来の`TypeError`は対象外）。
+  - 引数・オプションの**型**の誤りは構造化せず、組み込みの`TypeError`にする（`column_extraction/`・`option_values.rs`が作る文面は、引数名を引用符で囲まず`{argument} must be a ..., got {type}.`の形にする。`options`は`extract_options`で取り出し、`options must be an instance of OLSOptions, got WLSOptions.`の形にする。未知のキーワード引数など、Python本来の`TypeError`は対象外）。
   - メモリ不足等は専用の例外クラスを設けない（Rust/Pythonのメモリ確保失敗は通常このレイヤーで綺麗に変換できるものではないため）。
 - **例外は構造化する**: `code`（UPPER_SNAKE_CASE）・`message`・`hint`・`params`を持つ。文面は`engine/src/shared/error_catalog.rs`の`CATALOG`（`code`ごとのクラス・`params`の型・`message`/`hint`のテンプレート）が正本で、手で保守する。文面の規則（英語のみ・記号を使わず単語で書く・`hint`は機械的な対処だけ等）は`error_catalog.rs`のテストが強制する。エラー型にはカタログを直接書かず、`engine::shared::error::ErrorInfo::report()`で`ErrorReport`（`code`＋`params`）を返す。
 - **エラーを足す・変えるとき**:

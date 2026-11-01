@@ -39,7 +39,7 @@ CLAUDE.md（特に2章・13章）は通常自動的にコンテキストへ含�
    - オプション名・型・既定値・許容値・必須/任意が、`*Options`（Pythonラッパーと`engine_pybind`）の実際の定義と一致しているか
    - 結果のプロパティ・メソッド名、返り値の型（`DiagnosticResult`系のフィールド、`dict`/`list[float]`の別）が一致しているか
    - 手法が実際に行う計算（どの自由度補正、どの検定分布、欠損値や共線列の扱い、並べ替えやソート順への依存、正規化・スケーリング）と、文章・式の記述が一致しているか
-   - `guide/accepted-data.md`のdtype表が`engine_pybind/src/shared/column_extraction.rs`の検査と一致しているか
+   - `guide/accepted-data.md`のdtype表が`engine_pybind/src/shared/column_extraction/dtype.rs`の検査と一致しているか
    - `guide/validation.md`のエラー分類が実際の`ValidationError`/`ComputationError`の発生条件と一致しているか
    - `guide/verification.md`の手法×リファレンス表・許容誤差が、`benchmark/`と`tests/support/_tolerances_*.py`の実際と一致しているか
    - `guide/inference-conventions.md`の手法別の分布・自由度の表が実装と一致しているか

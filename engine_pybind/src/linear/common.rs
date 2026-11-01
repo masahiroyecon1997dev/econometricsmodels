@@ -16,7 +16,7 @@ use engine::linear::common::LeastSquaresError;
 use engine::linear::ols::CovType as EngineCovType;
 use engine::shared::error_catalog::{ErrorCode, ParamValue};
 use polars::prelude::DataFrame;
-use pyo3::prelude::*;
+use pyo3::{Bound, PyAny, PyErr, PyResult};
 
 use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{

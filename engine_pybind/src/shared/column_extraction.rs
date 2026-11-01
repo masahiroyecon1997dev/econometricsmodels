@@ -416,16 +416,7 @@ pub fn extract_time_order_ranks(
     reject_missing_values(name, series.null_count(), source)?;
     // 整数は値そのもの、`Date`は日数、`Datetime`は時間単位ごとの経過時間、`Decimal`は
     // 同一列で共通のスケールを掛けた整数が物理表現になっており、その大小がそのまま順序になる（`extract_time_keys`と同じ。タイムゾーンの有無は順序に影響しない）。
-    let as_i128 = series
-        .to_physical_repr()
-        .cast(&DataType::Int128)
-        .map_err(|e| time_order_error(name, e))?;
-    let values: Vec<i128> = as_i128
-        .i128()
-        .map_err(|e| time_order_error(name, e))?
-        .iter()
-        .map(|v| v.expect("null_count was checked to be zero"))
-        .collect();
+    let values = physical_i128(name, series.as_materialized_series())?;
     Ok(strict_ranks(name, &values, source)?)
 }
 
@@ -819,16 +810,7 @@ pub fn extract_time_keys(
         {
             // 整数は値そのもの、`Date`は日数、`Datetime`は時間単位ごとの経過時間、`Enum`は
             // カテゴリの定義順の添字が内部表現の整数になっており、その大小がそのまま時間順になる。
-            let as_i128 = representatives
-                .to_physical_repr()
-                .cast(&DataType::Int128)
-                .map_err(|e| time_order_error(name, e))?;
-            let values: Vec<i128> = as_i128
-                .i128()
-                .map_err(|e| time_order_error(name, e))?
-                .iter()
-                .map(|v| v.expect("null_count was checked to be zero"))
-                .collect();
+            let values = physical_i128(name, &representatives)?;
             TimeKeys::by_integer_factorized(codes, labels, &values).map_err(panel_error_to_pyerr)
         } else {
             // 文字列・`Categorical`（順序を持たない型）はラベルの辞書順。
@@ -839,6 +821,30 @@ pub fn extract_time_keys(
 
 fn time_order_error(name: &str, err: PolarsError) -> ColumnExtractionError {
     ColumnExtractionError::ordering_failed(name, err)
+}
+
+/// 時点の順序づけに使う列の物理表現を`i128`の`Vec`にする（整数は値そのもの、`Date`は日数、
+/// `Datetime`は時間単位ごとの経過時間、`Decimal`は共通のスケールを掛けた整数、`Enum`は
+/// カテゴリの定義順の添字。その大小がそのまま時間順になる）。欠損値（null）が無いことは
+/// 呼び出し側が検査済みで、変換の失敗は`OrderingFailed`にする。
+fn physical_i128(name: &str, series: &Series) -> Result<Vec<i128>, ColumnExtractionError> {
+    let as_i128 = series
+        .to_physical_repr()
+        .cast(&DataType::Int128)
+        .map_err(|e| time_order_error(name, e))?;
+    as_i128
+        .i128()
+        .map_err(|e| time_order_error(name, e))?
+        .iter()
+        .map(|v| {
+            v.ok_or_else(|| {
+                ColumnExtractionError::ordering_failed(
+                    name,
+                    "unexpected null in a column checked to have none",
+                )
+            })
+        })
+        .collect()
 }
 
 /// キー列`name`の存在・dtype・欠損値・（浮動小数の）非有限値を検査し、問題が無ければその列を返す。

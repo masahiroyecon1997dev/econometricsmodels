@@ -15,7 +15,8 @@ use pyo3::prelude::*;
 
 use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
-    extract_f64_column, extract_f64_columns, extract_optional_cluster_groups, select_columns,
+    extract_f64_column, extract_f64_columns, extract_model_x_columns,
+    extract_optional_cluster_groups, select_columns, select_model_x_columns,
 };
 use crate::shared::errors::{to_pyerr, unknown_option_value};
 use crate::shared::validation::{reject_unused_option, validate_common_roles};
@@ -31,6 +32,39 @@ use crate::shared::validation::{reject_unused_option, validate_common_roles};
 /// 対応表は`docs/spec/nonlinear-common.md`2章「エラー型（`MleError`、共有）」参照。
 pub(crate) fn mle_error_to_pyerr(err: MleError) -> PyErr {
     to_pyerr(&err)
+}
+
+/// `LogitResult`/`ProbitResult`/`TobitResult`の`predict()`/`augment()`が`new_data`を受け取った
+/// ときに共有する、out-of-sample予測（`x`列だけの取り込み→列の抽出→`predict`の呼び出し）。
+///
+/// `predict`は抽出した`x`列を受け取り、予測値を返す。リンク関数の選択（Logitはロジスティック関数、
+/// Probitは正規分布CDF、Tobitは`target`・`sigma`・打ち切り境界）は`*Fitted`のメソッド側にあるので、
+/// 手法固有の分岐は呼び出し側のクロージャが`fitted`のメソッドを呼ぶだけになる。`param_names`は
+/// `fitted`の係数名（Tobitは`σ`を含まない）で、結果側の`param_names`ではない。pickleから復元した
+/// 状態でも両者の食い違いで列数が合わなくならない。
+///
+/// 戻り値は予測値だけで、`select_model_x_columns`が返す`SelectedData`の`source`は使わない。
+/// `augment()`が予測値を足す先は取り込み前の`new_data`自体で、呼び出し側が持っている。
+///
+/// # Errors
+/// `new_data`が`polars.DataFrame`でない場合は`TypeError`。必要な`x`列が無い、数値にキャストできない、
+/// 欠損値・NaN・無限大を含む場合は`ValidationError`（`fit()`と同じ列抽出）。`predict`が返した
+/// エラーはそのまま返す。
+pub(crate) fn predict_out_of_sample(
+    new_data: &Bound<'_, PyAny>,
+    param_names: &[String],
+    has_intercept: bool,
+    predict: impl FnOnce(&[Vec<f64>]) -> PyResult<Vec<f64>>,
+) -> PyResult<Vec<f64>> {
+    let selected = select_model_x_columns(new_data, "new_data", param_names, has_intercept)?;
+    let x_columns = extract_model_x_columns(
+        &selected.frame,
+        param_names,
+        has_intercept,
+        ColumnSource::new("x", "new_data"),
+    )?;
+
+    predict(&x_columns)
 }
 
 /// pickleの復元で、`source_data`（`fit()`に渡された`polars.DataFrame`）から`y`と`x`の列を取り出し直す。

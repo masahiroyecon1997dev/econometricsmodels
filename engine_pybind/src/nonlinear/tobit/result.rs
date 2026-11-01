@@ -1,16 +1,12 @@
 //! `TobitResult`（Tobitの推定結果）と、その`#[pymethods]`（`predict`・`augment`・`marginal_effects`・`censoring_fit_check`）。
 
 use crate::nonlinear::common::{
-    MarginalEffectsResult, mle_error_to_pyerr, parse_marginal_effects_at,
+    MarginalEffectsResult, mle_error_to_pyerr, parse_marginal_effects_at, predict_out_of_sample,
 };
 use crate::shared::augment::append_predicted_column;
-use crate::shared::column_error::ColumnSource;
-use crate::shared::column_extraction::{
-    SelectedData, extract_model_x_columns, select_model_x_columns, x_column_names,
-};
+use crate::shared::column_extraction::x_column_names;
 use crate::shared::errors::{guard, unknown_option_value};
 use engine::nonlinear::tobit::{MarginalEffectsTarget, TobitFitted, TobitInput};
-use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 
 use super::censoring_fit::{CensoringFitCheckResult, censoring_fit_check_to_result};
@@ -206,39 +202,6 @@ crate::shared::pickle::impl_pickle_state!(TobitResult {
     fitted
 });
 
-// `#[pymethods]`ブロックの外に置く非公開実装（`LogitResult`と同じ理由）。
-impl TobitResult {
-    /// `new_data`から`predict()`/`augment()`が使う`x`列だけを取り込む。
-    fn select_new_data(&self, new_data: &Bound<'_, PyAny>) -> PyResult<SelectedData> {
-        select_model_x_columns(
-            new_data,
-            "new_data",
-            self.fitted.input().param_names(),
-            self.fitted.input().has_intercept(),
-        )
-    }
-
-    /// `predict()`/`augment()`のSome分岐で共有する、`df`に対するout-of-sample予測
-    /// （`x`列の抽出→`predict_new_data`呼び出し）。`x`の列名はLogit/Probitと異なり
-    /// `fitted`の係数名（`σ`を含まない。結果の`param_names`は末尾に`"sigma"`を足した別の値）の
-    /// 先頭`"const"`（`has_intercept`時）を除いた部分（モジュールdocコメント参照）。結果側の
-    /// `param_names`ではなく`fitted`の名前を使うので、pickleから復元した状態でも両者の食い違いで
-    /// 列数が合わなくならない。
-    fn predict_for(&self, target: MarginalEffectsTarget, df: &DataFrame) -> PyResult<Vec<f64>> {
-        let has_intercept = self.fitted.input().has_intercept();
-        let x_columns = extract_model_x_columns(
-            df,
-            self.fitted.input().param_names(),
-            has_intercept,
-            ColumnSource::new("x", "new_data"),
-        )?;
-
-        self.fitted
-            .predict_new_data(target, &x_columns)
-            .map_err(mle_error_to_pyerr)
-    }
-}
-
 #[pymethods]
 impl TobitResult {
     fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
@@ -270,8 +233,16 @@ impl TobitResult {
                 return self.fitted.predict(target).map_err(mle_error_to_pyerr);
             };
 
-            let selected = self.select_new_data(new_data)?;
-            self.predict_for(target, &selected.frame)
+            predict_out_of_sample(
+                new_data,
+                self.fitted.input().param_names(),
+                self.fitted.input().has_intercept(),
+                |x_columns| {
+                    self.fitted
+                        .predict_new_data(target, x_columns)
+                        .map_err(mle_error_to_pyerr)
+                },
+            )
         })
     }
 
@@ -305,8 +276,16 @@ impl TobitResult {
 
             let (source, predicted) = match new_data {
                 Some(new_data) => {
-                    let selected = self.select_new_data(new_data)?;
-                    let predicted = self.predict_for(target_enum, &selected.frame)?;
+                    let predicted = predict_out_of_sample(
+                        new_data,
+                        self.fitted.input().param_names(),
+                        self.fitted.input().has_intercept(),
+                        |x_columns| {
+                            self.fitted
+                                .predict_new_data(target_enum, x_columns)
+                                .map_err(mle_error_to_pyerr)
+                        },
+                    )?;
                     (new_data.clone(), predicted)
                 }
                 None => (

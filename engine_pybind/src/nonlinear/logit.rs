@@ -28,13 +28,10 @@ use pyo3::prelude::*;
 
 use super::common::{
     MarginalEffectsResult, MleColumnSpec, extract_mle_columns, mle_error_to_pyerr,
-    parse_marginal_effects_at, resolve_mle_tol_default, solver_name,
+    parse_marginal_effects_at, predict_out_of_sample, resolve_mle_tol_default, solver_name,
 };
 use crate::shared::augment::append_predicted_column;
-use crate::shared::column_error::ColumnSource;
-use crate::shared::column_extraction::{
-    SelectedData, extract_model_x_columns, select_model_x_columns, x_column_names,
-};
+use crate::shared::column_extraction::{SelectedData, x_column_names};
 use crate::shared::mat_conversion::mat_to_rows;
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
@@ -398,35 +395,6 @@ crate::shared::pickle::impl_pickle_state!(LogitResult {
     fitted
 });
 
-// `#[pymethods]`ブロックの外に置く非公開実装（`&DataFrame`が`FromPyObject`未実装の
-// ため、`#[pymethods]`内に置くとpyo3がPython公開シグネチャとして解釈しようとして
-// ビルドエラーになる）。
-impl LogitResult {
-    /// `new_data`から`predict()`/`augment()`が使う`x`列だけを取り込む。
-    fn select_new_data(&self, new_data: &Bound<'_, PyAny>) -> PyResult<SelectedData> {
-        select_model_x_columns(
-            new_data,
-            "new_data",
-            self.fitted.input().param_names(),
-            self.fitted.input().has_intercept(),
-        )
-    }
-
-    /// `predict()`/`augment()`のSome分岐で共有する、`df`に対するout-of-sample予測
-    /// （`x`列の抽出→`predict_new_data`呼び出し）。
-    fn predict_for(&self, df: &DataFrame) -> PyResult<Vec<f64>> {
-        let has_intercept = self.fitted.input().has_intercept();
-        let x_columns = extract_model_x_columns(
-            df,
-            self.fitted.input().param_names(),
-            has_intercept,
-            ColumnSource::new("x", "new_data"),
-        )?;
-
-        Ok(self.fitted.predict_new_data(&x_columns))
-    }
-}
-
 #[pymethods]
 impl LogitResult {
     fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
@@ -447,8 +415,12 @@ impl LogitResult {
                 return Ok(self.fitted.predict());
             };
 
-            let selected = self.select_new_data(new_data)?;
-            self.predict_for(&selected.frame)
+            predict_out_of_sample(
+                new_data,
+                self.fitted.input().param_names(),
+                self.fitted.input().has_intercept(),
+                |x_columns| Ok(self.fitted.predict_new_data(x_columns)),
+            )
         })
     }
 
@@ -469,8 +441,12 @@ impl LogitResult {
         guard(|| {
             let (source, probability) = match new_data {
                 Some(new_data) => {
-                    let selected = self.select_new_data(new_data)?;
-                    let probability = self.predict_for(&selected.frame)?;
+                    let probability = predict_out_of_sample(
+                        new_data,
+                        self.fitted.input().param_names(),
+                        self.fitted.input().has_intercept(),
+                        |x_columns| Ok(self.fitted.predict_new_data(x_columns)),
+                    )?;
                     (new_data.clone(), probability)
                 }
                 None => (self.source_data.bind(py).clone(), self.fitted.predict()),

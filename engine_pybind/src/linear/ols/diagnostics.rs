@@ -9,9 +9,8 @@ use crate::shared::column_extraction::{
     extract_column_list, extract_f64_columns, extract_model_x_columns, extract_time_order_ranks,
     select_columns, x_column_names,
 };
-use crate::shared::errors::unknown_option_value;
-use crate::shared::option_values::{extract_strict_int, extract_strict_text};
-use crate::shared::validation::{validate_no_duplicate_within_role, validate_x_non_empty};
+use crate::shared::option_values::{extract_strict_int, extract_strict_text, parse_choice};
+use crate::shared::validation::{validate_no_duplicate_within_role, validate_role_non_empty};
 use engine::linear::diagnostics::{
     AuxRegressionTest, breusch_godfrey_test, breusch_pagan_test, white_test,
 };
@@ -92,11 +91,11 @@ enum StatisticVersion {
 /// # Errors
 /// `statistic`が`"lm"`でも`"f"`でもない: `ValidationError`
 fn parse_statistic_version(statistic: &str) -> PyResult<StatisticVersion> {
-    match statistic.to_lowercase().as_str() {
-        "lm" => Ok(StatisticVersion::Lm),
-        "f" => Ok(StatisticVersion::F),
-        _ => Err(unknown_option_value("statistic", statistic, &["lm", "f"])),
-    }
+    parse_choice(
+        "statistic",
+        statistic,
+        &[("lm", StatisticVersion::Lm), ("f", StatisticVersion::F)],
+    )
 }
 
 /// 選んだ版（LM/F）の統計量・p値・分母自由度・分布名を取り出す（White検定・Breusch-Pagan検定
@@ -190,7 +189,7 @@ pub(super) fn run_breusch_pagan_test(
 
     let z_names = match variables.as_deref() {
         Some(names) => {
-            validate_x_non_empty("variables", names)?;
+            validate_role_non_empty("variables", names)?;
             validate_no_duplicate_within_role("variables", names)?;
             names
         }

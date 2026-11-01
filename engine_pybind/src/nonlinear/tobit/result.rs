@@ -5,7 +5,8 @@ use crate::nonlinear::common::{
 };
 use crate::shared::augment::append_predicted_column;
 use crate::shared::column_extraction::x_column_names;
-use crate::shared::errors::{guard, unknown_option_value};
+use crate::shared::errors::guard;
+use crate::shared::option_values::parse_choice;
 use engine::nonlinear::tobit::{MarginalEffectsTarget, TobitFitted, TobitInput};
 use pyo3::prelude::*;
 
@@ -365,22 +366,19 @@ impl TobitResult {
 /// # Errors
 /// `target`が既知の値のいずれでもない: `ValidationError`
 fn parse_marginal_effects_target(target: &str) -> PyResult<MarginalEffectsTarget> {
-    match target.to_lowercase().as_str() {
-        "expected_latent" => Ok(MarginalEffectsTarget::ExpectedLatent),
-        "expected_observed" => Ok(MarginalEffectsTarget::ExpectedObserved),
-        "prob_uncensored" => Ok(MarginalEffectsTarget::ProbUncensored),
-        "expected_uncensored" => Ok(MarginalEffectsTarget::ExpectedUncensored),
-        _ => Err(unknown_option_value(
-            "target",
-            target,
-            &[
-                "expected_latent",
-                "expected_observed",
-                "prob_uncensored",
+    parse_choice(
+        "target",
+        target,
+        &[
+            ("expected_latent", MarginalEffectsTarget::ExpectedLatent),
+            ("expected_observed", MarginalEffectsTarget::ExpectedObserved),
+            ("prob_uncensored", MarginalEffectsTarget::ProbUncensored),
+            (
                 "expected_uncensored",
-            ],
-        )),
-    }
+                MarginalEffectsTarget::ExpectedUncensored,
+            ),
+        ],
+    )
 }
 
 #[cfg(test)]

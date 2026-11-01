@@ -1,7 +1,7 @@
 //! `IVOptions`の文字列オプションの解釈（値）と検査（組合せ）。
 
 use crate::linear::common::{CovKind, parse_cov_kind, require_hac_time};
-use crate::shared::errors::unknown_option_value;
+use crate::shared::option_values::parse_choice;
 use crate::shared::validation::reject_unused_option;
 use pyo3::prelude::*;
 
@@ -104,42 +104,36 @@ impl IvOptionValues {
 }
 
 fn parse_estimator(estimator: &str) -> PyResult<IvEstimator> {
-    match estimator.to_lowercase().as_str() {
-        "2sls" => Ok(IvEstimator::TwoSls),
-        "gmm" => Ok(IvEstimator::Gmm),
-        _ => Err(unknown_option_value(
-            "estimator",
-            estimator,
-            &["2sls", "gmm"],
-        )),
-    }
+    parse_choice(
+        "estimator",
+        estimator,
+        &[("2sls", IvEstimator::TwoSls), ("gmm", IvEstimator::Gmm)],
+    )
 }
 
 fn parse_gmm_kind(gmm_type: &str) -> PyResult<GmmKind> {
-    match gmm_type.to_lowercase().as_str() {
-        "one_step" => Ok(GmmKind::OneStep),
-        "two_step" => Ok(GmmKind::TwoStep),
-        "iterated" => Ok(GmmKind::Iterated),
-        _ => Err(unknown_option_value(
-            "gmm_type",
-            gmm_type,
-            &["one_step", "two_step", "iterated"],
-        )),
-    }
+    parse_choice(
+        "gmm_type",
+        gmm_type,
+        &[
+            ("one_step", GmmKind::OneStep),
+            ("two_step", GmmKind::TwoStep),
+            ("iterated", GmmKind::Iterated),
+        ],
+    )
 }
 
 fn parse_weight_kind(weight_type: &str) -> PyResult<WeightKind> {
-    match weight_type.to_lowercase().as_str() {
-        "classical" => Ok(WeightKind::Classical),
-        "robust" => Ok(WeightKind::Robust),
-        "cluster" => Ok(WeightKind::Cluster),
-        "hac" => Ok(WeightKind::Hac),
-        _ => Err(unknown_option_value(
-            "gmm_weight_type",
-            weight_type,
-            &["classical", "robust", "cluster", "hac"],
-        )),
-    }
+    parse_choice(
+        "gmm_weight_type",
+        weight_type,
+        &[
+            ("classical", WeightKind::Classical),
+            ("robust", WeightKind::Robust),
+            ("cluster", WeightKind::Cluster),
+            ("hac", WeightKind::Hac),
+        ],
+    )
 }
 
 /// 文字列のオプション（`estimator`・`cov_type`・`gmm_type`・`gmm_weight_type`）を種類に

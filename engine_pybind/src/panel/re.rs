@@ -35,7 +35,7 @@
 //!
 //! ## `x`の空リストを許容しない
 //!
-//! FEと同じ`validate_x_non_empty`を適用し、`x=[]`を拒否する。REで`x=[]`は
+//! FEと同じ`validate_role_non_empty`を適用し、`x=[]`を拒否する。REで`x=[]`は
 //! 「分散成分（ICC）のみを推定するnullモデル」として単独で意味を持つ標準的なユースケース
 //! （パネル・混合モデル分析の"null model"）だが、`panel-common.md`にこの点の明示的な
 //! 決定が無いため、他手法（OLS/WLS/Logit/Probit/IV/FE）と一貫させて拒否する。
@@ -56,9 +56,9 @@ use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
     SelectedData, extract_f64_column, extract_f64_columns, extract_optional_cluster_groups,
 };
-use crate::shared::errors::unknown_option_value;
 use crate::shared::mat_conversion::{mat_to_rows, mat_to_vec};
 use crate::shared::option_repr::PyRepr;
+use crate::shared::option_values::parse_choice;
 use crate::shared::option_values::{
     extract_strict_float, extract_strict_opt_column, extract_strict_opt_int, extract_strict_text,
 };
@@ -504,16 +504,15 @@ fn resolve_re_cov_type(
 /// # Errors
 /// 未知の値は`ValidationError`。
 fn parse_variance_method(value: &str) -> PyResult<VarianceMethod> {
-    match value.to_lowercase().as_str() {
-        "swamy_arora" => Ok(VarianceMethod::SwamyArora),
-        "wallace_hussain" => Ok(VarianceMethod::WallaceHussain),
-        "amemiya" => Ok(VarianceMethod::Amemiya),
-        _ => Err(unknown_option_value(
-            "variance_method",
-            value,
-            &["swamy_arora", "wallace_hussain", "amemiya"],
-        )),
-    }
+    parse_choice(
+        "variance_method",
+        value,
+        &[
+            ("swamy_arora", VarianceMethod::SwamyArora),
+            ("wallace_hussain", VarianceMethod::WallaceHussain),
+            ("amemiya", VarianceMethod::Amemiya),
+        ],
+    )
 }
 
 /// Pythonから渡された `data` / `y` / `x` / `effects` / `options` を検証し、

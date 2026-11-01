@@ -18,7 +18,8 @@ use crate::shared::column_extraction::{
     extract_f64_column, extract_f64_columns, extract_model_x_columns,
     extract_optional_cluster_groups, select_columns, select_model_x_columns,
 };
-use crate::shared::errors::{to_pyerr, unknown_option_value};
+use crate::shared::errors::to_pyerr;
+use crate::shared::option_values::parse_choice;
 use crate::shared::validation::{reject_unused_option, validate_common_roles};
 
 /// `engine::nonlinear::common::MleError`をPython例外に変換する。
@@ -269,18 +270,17 @@ impl CovKind {
 /// # Errors
 /// 既知の値のいずれでもない場合は`ValidationError`。
 pub(crate) fn parse_cov_kind(cov_type: &str) -> PyResult<CovKind> {
-    match cov_type.to_lowercase().as_str() {
-        "classical" => Ok(CovKind::Classical),
-        "opg" => Ok(CovKind::Opg),
-        "hc0" => Ok(CovKind::Hc0),
-        "hc1" => Ok(CovKind::Hc1),
-        "cluster" => Ok(CovKind::Cluster),
-        _ => Err(unknown_option_value(
-            "cov_type",
-            cov_type,
-            &["classical", "opg", "hc0", "hc1", "cluster"],
-        )),
-    }
+    parse_choice(
+        "cov_type",
+        cov_type,
+        &[
+            ("classical", CovKind::Classical),
+            ("opg", CovKind::Opg),
+            ("hc0", CovKind::Hc0),
+            ("hc1", CovKind::Hc1),
+            ("cluster", CovKind::Cluster),
+        ],
+    )
 }
 
 /// `cluster`が`kind`と矛盾しないことを検査する。DataFrameは見ない。
@@ -334,16 +334,15 @@ pub(crate) fn resolve_cov_type(
 /// # Errors
 /// `solver`が既知の値のいずれでもない: `ValidationError`
 pub(crate) fn parse_solver_type(solver: &str) -> PyResult<SolverType> {
-    match solver.to_lowercase().as_str() {
-        "newton" => Ok(SolverType::Newton),
-        "bfgs" => Ok(SolverType::Bfgs),
-        "lbfgs" => Ok(SolverType::Lbfgs),
-        _ => Err(unknown_option_value(
-            "solver",
-            solver,
-            &["newton", "bfgs", "lbfgs"],
-        )),
-    }
+    parse_choice(
+        "solver",
+        solver,
+        &[
+            ("newton", SolverType::Newton),
+            ("bfgs", SolverType::Bfgs),
+            ("lbfgs", SolverType::Lbfgs),
+        ],
+    )
 }
 
 /// `*Result.solver`に格納する、[`SolverType`]の正規形の名前。
@@ -362,16 +361,15 @@ pub(crate) fn solver_name(solver: SolverType) -> &'static str {
 /// # Errors
 /// `at`が既知の値のいずれでもない: `ValidationError`
 pub(crate) fn parse_marginal_effects_at(at: &str) -> PyResult<MarginalEffectsAt> {
-    match at.to_lowercase().as_str() {
-        "overall" => Ok(MarginalEffectsAt::Overall),
-        "mean" => Ok(MarginalEffectsAt::Mean),
-        "median" => Ok(MarginalEffectsAt::Median),
-        _ => Err(unknown_option_value(
-            "at",
-            at,
-            &["overall", "mean", "median"],
-        )),
-    }
+    parse_choice(
+        "at",
+        at,
+        &[
+            ("overall", MarginalEffectsAt::Overall),
+            ("mean", MarginalEffectsAt::Mean),
+            ("median", MarginalEffectsAt::Median),
+        ],
+    )
 }
 
 /// `LogitOptions`/`ProbitOptions`/`TobitOptions`のコンストラクタで`tol=None`のときの既定値を

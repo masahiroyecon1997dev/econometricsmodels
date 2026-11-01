@@ -19,10 +19,11 @@ use crate::shared::column_extraction::{
     FactorizedKey, KeyRole, checked_key_column, extract_entity_groups, factorize_checked_key,
     physical_f64, physical_i128, with_group_labels,
 };
-use crate::shared::errors::{to_pyerr, unknown_option_value, user_error};
+use crate::shared::errors::{to_pyerr, user_error};
+use crate::shared::option_values::parse_choice;
 use crate::shared::validation::{
     RoleValue, reject_unused_option, validate_no_duplicate_roles,
-    validate_no_duplicate_within_role, validate_x_non_empty,
+    validate_no_duplicate_within_role, validate_role_non_empty,
 };
 
 /// `cov_type`の検査でFEとREの文言を切り替えるためのモデル種別。
@@ -42,7 +43,14 @@ impl PanelModel {
 }
 
 /// FE/REが受け付ける`cov_type`の値（`hc0`は含まない）。
-const PANEL_COV_TYPES: &[&str] = &["classical", "hc1", "hc2", "hc3", "cluster", "dk"];
+const PANEL_COV_CHOICES: &[(&str, PanelCovKind)] = &[
+    ("classical", PanelCovKind::Classical),
+    ("hc1", PanelCovKind::Hc1),
+    ("hc2", PanelCovKind::Hc2),
+    ("hc3", PanelCovKind::Hc3),
+    ("cluster", PanelCovKind::Cluster),
+    ("dk", PanelCovKind::Dk),
+];
 
 /// FE/REの`cov_type`の種類。列名や`dk_bandwidth`を持たない、文字列だけから決まる値。
 ///
@@ -86,23 +94,18 @@ impl PanelCovKind {
 /// # Errors
 /// 既知の値のいずれでもない場合は`ValidationError`。
 pub(crate) fn parse_panel_cov_kind(cov_type: &str, model: PanelModel) -> PyResult<PanelCovKind> {
-    match cov_type.to_lowercase().as_str() {
-        "classical" => Ok(PanelCovKind::Classical),
-        "hc1" => Ok(PanelCovKind::Hc1),
-        "hc2" => Ok(PanelCovKind::Hc2),
-        "hc3" => Ok(PanelCovKind::Hc3),
-        "cluster" => Ok(PanelCovKind::Cluster),
-        "dk" => Ok(PanelCovKind::Dk),
-        "hc0" => Err(user_error(
+    if cov_type.to_lowercase() == "hc0" {
+        let allowed: Vec<&str> = PANEL_COV_CHOICES.iter().map(|&(name, _)| name).collect();
+        return Err(user_error(
             ErrorCode::CovTypeNotAvailableForModel,
             vec![
                 ("value", ParamValue::from(cov_type)),
                 ("model", ParamValue::from(model.name())),
-                ("allowed", ParamValue::from(PANEL_COV_TYPES.to_vec())),
+                ("allowed", ParamValue::from(allowed)),
             ],
-        )),
-        _ => Err(unknown_option_value("cov_type", cov_type, PANEL_COV_TYPES)),
+        ));
     }
+    parse_choice("cov_type", cov_type, PANEL_COV_CHOICES)
 }
 
 /// DKの時点列`dk_time`が指定されていることを確かめ、その列名を返す。
@@ -182,7 +185,7 @@ const MAX_EFFECTS: usize = 2;
 /// # Errors
 /// 空、または`MAX_EFFECTS`を超える場合は`ValidationError`。
 fn validate_effects(model: PanelModel, effects: &[String]) -> PyResult<()> {
-    validate_x_non_empty("effects", effects)?;
+    validate_role_non_empty("effects", effects)?;
     if effects.len() > MAX_EFFECTS {
         return Err(user_error(
             ErrorCode::EffectsTooMany,
@@ -223,8 +226,8 @@ pub(crate) fn validate_panel_roles(
 ) -> PyResult<()> {
     // `effects`の列数（空・3つ以上）を先に見る。
     validate_effects(model, effects)?;
-    // `x`が空リストであることを許容しない（`x=[]`は他手法と同じく`validate_x_non_empty`で拒否）。
-    validate_x_non_empty("x", x)?;
+    // `x`が空リストであることを許容しない（`x=[]`は他手法と同じく`validate_role_non_empty`で拒否）。
+    validate_role_non_empty("x", x)?;
     validate_no_duplicate_roles(&[
         ("y", RoleValue::Single(y)),
         ("effects", RoleValue::Multi(effects)),

@@ -10,12 +10,15 @@
 use engine::panel::common::{PanelError, TimeKeys};
 use engine::shared::error_catalog::{ErrorCode, ParamValue};
 use engine::shared::group_codes::GroupCodes;
-use polars::prelude::DataFrame;
+use polars::prelude::{DataFrame, DataType};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use crate::shared::column_error::ColumnSource;
-use crate::shared::column_extraction::{extract_entity_groups, extract_time_keys};
+use crate::shared::column_extraction::{
+    FactorizedKey, KeyRole, checked_key_column, extract_entity_groups, factorize_checked_key,
+    physical_i128, time_order_error, with_group_labels,
+};
 use crate::shared::errors::{to_pyerr, unknown_option_value, user_error};
 use crate::shared::validation::{
     RoleValue, reject_unused_option, validate_no_duplicate_roles,
@@ -287,9 +290,72 @@ pub(crate) fn panel_error_to_pyerr(err: PanelError) -> PyErr {
     to_pyerr(&err)
 }
 
+/// `df`から`name`列を、時点を表すキー（FE/REの`effects`の2つ目・`dk_time`）として、ラベルと
+/// **値の順序**を持つ`TimeKeys`で取り出す。行ごとの`String`は作らない
+/// （`extract_cluster_groups`（`shared/column_extraction.rs`）と同じ分解）。
+///
+/// ラベルは文字列表現（同一性の判定と`fixed_effects()`のキーに使う）。時点の順序は列の
+/// dtypeの値の順序で決める。文字列表現の辞書順は`1, 10, 11, 2, ...`のように時間順と
+/// ずれるため使わない。
+///
+/// | dtype | 時点の順序 |
+/// |---|---|
+/// | 整数・`Date`・`Datetime`（タイムゾーンなし） | 値の昇順（`Date`・`Datetime`は時系列順） |
+/// | 浮動小数 | 数値の昇順 |
+/// | `Enum` | カテゴリの定義順 |
+/// | 文字列・`Categorical` | ラベルの辞書順（バイト順） |
+///
+/// # Errors
+/// `extract_group_key_column`と同じ（許可するdtypeだけが異なる）。
+pub(crate) fn extract_time_keys(
+    df: &DataFrame,
+    name: &str,
+    source: ColumnSource<'_>,
+) -> PyResult<TimeKeys> {
+    let column = checked_key_column(df, name, KeyRole::Time, source)?;
+    let FactorizedKey {
+        codes,
+        representatives,
+    } = factorize_checked_key(name, column)?;
+    let dtype = representatives.dtype().clone();
+
+    with_group_labels(name, &representatives, |labels| {
+        if dtype.is_float() {
+            let as_f64 = representatives
+                .cast(&DataType::Float64)
+                .map_err(|e| time_order_error(name, e))?;
+            let values: Vec<f64> = as_f64
+                .f64()
+                .map_err(|e| time_order_error(name, e))?
+                .iter()
+                .map(|v| v.expect("null_count was checked to be zero"))
+                .collect();
+            TimeKeys::by_float_factorized(codes, labels, &values).map_err(panel_error_to_pyerr)
+        } else if dtype.is_integer()
+            || matches!(
+                dtype,
+                DataType::Date | DataType::Datetime(..) | DataType::Enum(..)
+            )
+        {
+            // 整数は値そのもの、`Date`は日数、`Datetime`は時間単位ごとの経過時間、`Enum`は
+            // カテゴリの定義順の添字が内部表現の整数になっており、その大小がそのまま時間順になる。
+            let values = physical_i128(name, &representatives)?;
+            TimeKeys::by_integer_factorized(codes, labels, &values).map_err(panel_error_to_pyerr)
+        } else {
+            // 文字列・`Categorical`（順序を持たない型）はラベルの辞書順。
+            TimeKeys::lexicographic_factorized(codes, labels).map_err(panel_error_to_pyerr)
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared::column_extraction::extract_key_column;
+    use polars::df;
+    use polars::prelude::*;
+
+    const SRC: ColumnSource<'static> = ColumnSource::new("x", "data");
 
     /// `unwrap()`/`expect()`は使わない：`PyErr`の`Debug`実装はGIL取得を要求し、GIL未初期化の
     /// この環境では二重パニックを起こす（`nonlinear/CLAUDE.md`「テストの制約」参照）。
@@ -447,5 +513,190 @@ mod tests {
     fn group_counts_has_one_entry_per_effect_in_order() {
         assert_eq!(group_counts(4, None), vec![4]);
         assert_eq!(group_counts(4, Some(3)), vec![4, 3]);
+    }
+
+    /// 行ごとの`String`を経由する素朴な`extract_time_keys`（比較対象の独立な参照実装）。
+    fn extract_time_keys_via_row_strings(df: &DataFrame, name: &str) -> PyResult<TimeKeys> {
+        let ids = extract_key_column(df, name, KeyRole::Time, SRC)?;
+        let series = df.column(name).unwrap();
+        let dtype = series.dtype();
+        if dtype.is_float() {
+            let as_f64 = series.cast(&DataType::Float64).unwrap();
+            let values: Vec<f64> = as_f64.f64().unwrap().iter().map(|v| v.unwrap()).collect();
+            Ok(TimeKeys::by_float(ids, &values).unwrap())
+        } else if dtype.is_integer()
+            || matches!(
+                dtype,
+                DataType::Date | DataType::Datetime(..) | DataType::Enum(..)
+            )
+        {
+            let as_i128 = series.to_physical_repr().cast(&DataType::Int128).unwrap();
+            let values: Vec<i128> = as_i128.i128().unwrap().iter().map(|v| v.unwrap()).collect();
+            Ok(TimeKeys::by_integer(ids, &values).unwrap())
+        } else {
+            Ok(TimeKeys::lexicographic(ids))
+        }
+    }
+
+    /// 時点列も、行ごとの`String`を経由する参照実装と同じ`TimeKeys`（コードと時点のラベル）になる。
+    #[test]
+    fn extract_time_keys_agrees_with_the_row_string_path_for_every_time_dtype() {
+        let ints: [i64; 8] = [10, 9, 2, 10, -3, 100, 9, 2];
+        let enum_dtype = {
+            let categories = FrozenCategories::new(["z", "10", "9", "a"]).unwrap();
+            DataType::Enum(categories.clone(), categories.mapping().clone())
+        };
+        let mut cases: Vec<(String, Series)> = vec![
+            ("Int64".into(), Series::new("k".into(), ints)),
+            (
+                "Int8".into(),
+                Series::new("k".into(), ints).cast(&DataType::Int8).unwrap(),
+            ),
+            (
+                "UInt16".into(),
+                Series::new("k".into(), ints.map(|v| v.unsigned_abs()))
+                    .cast(&DataType::UInt16)
+                    .unwrap(),
+            ),
+            (
+                "Float64".into(),
+                Series::new("k".into(), [1.5, -0.0, 0.0, 10.0, 2.5, 1.5, 9.0, 0.0]),
+            ),
+            (
+                "Float32".into(),
+                Series::new("k".into(), [1.5_f32, -0.0, 0.0, 10.0, 2.5, 1.5, 9.0, 0.1]),
+            ),
+            (
+                "String".into(),
+                Series::new("k".into(), ["b", "10", "a", "9", "b", "", "10", "é"]),
+            ),
+            (
+                "Date".into(),
+                Series::new("k".into(), ints.map(|v| v as i32))
+                    .cast(&DataType::Date)
+                    .unwrap(),
+            ),
+            (
+                "Enum".into(),
+                Series::new("k".into(), ["10", "z", "a", "10", "9", "z", "a", "9"])
+                    .cast(&enum_dtype)
+                    .unwrap(),
+            ),
+            (
+                "Categorical".into(),
+                Series::new("k".into(), ["b", "10", "a", "9", "b", "c", "10", "a"])
+                    .cast(&DataType::from_categories(Categories::global()))
+                    .unwrap(),
+            ),
+        ];
+        for unit in [
+            TimeUnit::Milliseconds,
+            TimeUnit::Microseconds,
+            TimeUnit::Nanoseconds,
+        ] {
+            cases.push((
+                format!("Datetime({unit:?})"),
+                Series::new("k".into(), ints)
+                    .cast(&DataType::Datetime(unit, None))
+                    .unwrap(),
+            ));
+        }
+        for (label, series) in cases {
+            let df = frame_of(series);
+            let Ok(expected) = extract_time_keys_via_row_strings(&df, "k") else {
+                panic!("{label}: row string path failed");
+            };
+            let Ok(actual) = extract_time_keys(&df, "k", SRC) else {
+                panic!("{label}: extract_time_keys failed");
+            };
+            assert_eq!(actual, expected, "{label}");
+            assert_eq!(actual.periods(), expected.periods(), "{label}");
+            assert_eq!(actual.len(), expected.len(), "{label}");
+        }
+    }
+
+    fn frame_of(series: Series) -> DataFrame {
+        DataFrame::new(series.len(), vec![series.into()]).unwrap()
+    }
+
+    fn periods_of(df: &DataFrame) -> Vec<String> {
+        extract_time_keys(df, "t", SRC).unwrap().periods().to_vec()
+    }
+
+    #[test]
+    fn extract_time_keys_orders_integers_numerically() {
+        let df = df!("t" => [10i64, 2, 9, -3, 2]).unwrap();
+
+        assert_eq!(periods_of(&df), ["-3", "2", "9", "10"]);
+    }
+
+    #[test]
+    fn extract_time_keys_orders_every_integer_dtype_numerically() {
+        for dtype in [
+            DataType::Int8,
+            DataType::Int16,
+            DataType::Int32,
+            DataType::Int64,
+            DataType::Int128,
+            DataType::UInt8,
+            DataType::UInt16,
+            DataType::UInt32,
+            DataType::UInt64,
+        ] {
+            let df = frame_of(
+                Series::new("t".into(), [10i64, 2, 9, 2])
+                    .cast(&dtype)
+                    .unwrap(),
+            );
+
+            assert_eq!(periods_of(&df), ["2", "9", "10"], "{dtype}");
+        }
+    }
+
+    #[test]
+    fn extract_time_keys_orders_floats_numerically() {
+        let df = df!("t" => [10.5, 2.0, -0.5, 9.25, 2.0]).unwrap();
+
+        assert_eq!(periods_of(&df), ["-0.5", "2.0", "9.25", "10.5"]);
+    }
+
+    #[test]
+    fn extract_time_keys_orders_dates_and_datetimes_chronologically() {
+        let date_df = frame_of(
+            Series::new("t".into(), [19_000i32, 18_000, 20_000])
+                .cast(&DataType::Date)
+                .unwrap(),
+        );
+        let datetime_df = frame_of(
+            Series::new("t".into(), [3_000i64, 1_000, 2_000])
+                .cast(&DataType::Datetime(TimeUnit::Milliseconds, None))
+                .unwrap(),
+        );
+
+        let dates = periods_of(&date_df);
+        let datetimes = periods_of(&datetime_df);
+
+        // 日付・日時の文字列表現は桁数が固定で、辞書順も時系列順に一致する。1つずつ小さい値が
+        // 先頭に来ていれば、内部表現の整数の順に並んでいる。
+        assert_eq!(dates.len(), 3);
+        assert!(dates.windows(2).all(|w| w[0] < w[1]), "{dates:?}");
+        assert_eq!(datetimes.len(), 3);
+        assert!(datetimes.windows(2).all(|w| w[0] < w[1]), "{datetimes:?}");
+    }
+
+    #[test]
+    fn extract_time_keys_orders_strings_lexicographically() {
+        let df = df!("t" => ["b", "10", "a", "9"]).unwrap();
+
+        assert_eq!(periods_of(&df), ["10", "9", "a", "b"]);
+    }
+
+    #[test]
+    fn extract_time_keys_rejects_unusable_columns_like_the_key_column() {
+        let df = df!("t" => [1.0, f64::NAN]).unwrap();
+        assert!(extract_time_keys(&df, "t", SRC).is_err());
+        let df = df!("t" => [true, false]).unwrap();
+        assert!(extract_time_keys(&df, "t", SRC).is_err());
+        assert!(extract_time_keys(&df, "missing", SRC).is_err());
     }
 }

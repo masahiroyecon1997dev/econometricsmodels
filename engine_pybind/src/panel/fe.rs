@@ -54,13 +54,13 @@ use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 use super::common::{
-    PanelCovKind, PanelModel, check_panel_cov_options, extract_effects, group_counts, groups_dict,
-    panel_error_to_pyerr, parse_panel_cov_kind, require_dk_time, validate_panel_roles,
+    PanelCovKind, PanelModel, check_panel_cov_options, extract_effects, extract_time_keys,
+    group_counts, groups_dict, panel_error_to_pyerr, parse_panel_cov_kind, require_dk_time,
+    validate_panel_roles,
 };
 use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
     SelectedData, extract_f64_column, extract_f64_columns, extract_optional_cluster_groups,
-    extract_time_keys,
 };
 use crate::shared::mat_conversion::{mat_to_rows, mat_to_vec};
 use crate::shared::option_repr::PyRepr;

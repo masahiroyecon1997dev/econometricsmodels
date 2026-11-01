@@ -46,7 +46,7 @@ def test_panel_hc0_keeps_the_case_given(frame: pl.DataFrame) -> None:
         ErrorCode.COV_TYPE_NOT_AVAILABLE_FOR_MODEL, value="HC0", model="FE"
     ):
         FE(
-            frame, "y", ["x1"], "entity", options=FEOptions(cov_type="HC0")
+            frame, "y", ["x1"], ["entity"], options=FEOptions(cov_type="HC0")
         ).fit()
 
 
@@ -60,7 +60,7 @@ def test_variance_method_keeps_the_case_given(frame: pl.DataFrame) -> None:
             frame,
             "y",
             ["x1"],
-            "entity",
+            ["entity"],
             options=REOptions(variance_method="NoSuch"),
         ).fit()
 
@@ -131,13 +131,13 @@ def test_panel_unknown_cov_type_and_re_hc0_keep_the_case_given(
         ErrorCode.OPTION_UNKNOWN_VALUE, option="cov_type", value="HAC"
     ):
         FE(
-            frame, "y", ["x1"], "entity", options=FEOptions(cov_type="HAC")
+            frame, "y", ["x1"], ["entity"], options=FEOptions(cov_type="HAC")
         ).fit()
     with raises_error(
         ErrorCode.COV_TYPE_NOT_AVAILABLE_FOR_MODEL, value="Hc0", model="RE"
     ):
         RE(
-            frame, "y", ["x1"], "entity", options=REOptions(cov_type="Hc0")
+            frame, "y", ["x1"], ["entity"], options=REOptions(cov_type="Hc0")
         ).fit()
 
 

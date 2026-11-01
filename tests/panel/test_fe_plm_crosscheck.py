@@ -181,7 +181,7 @@ def _fit_frame(
 ):
     x_cols = x_columns(df)
     options = _options(cov_type, dk_bandwidth=dk_bandwidth)
-    return FE(df, y="y", x=x_cols, entity="entity", options=options).fit()
+    return FE(df, y="y", x=x_cols, effects=["entity"], options=options).fit()
 
 
 def _fit(scenario: str, cov_type: str, *, dk_bandwidth: int | None = None):
@@ -319,7 +319,7 @@ def test_wagepan_one_way_matches_plm(crosscheck, cov_type):
         df,
         y=WAGEPAN_Y,
         x=WAGEPAN_X,
-        entity=WAGEPAN_ENTITY,
+        effects=[WAGEPAN_ENTITY],
         options=options,
     ).fit()
 

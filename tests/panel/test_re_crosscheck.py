@@ -265,7 +265,7 @@ def test_matches_plm(crosscheck, scenario, cov_type):
         df,
         y="y",
         x=x_cols,
-        entity="entity",
+        effects=["entity"],
         options=_re_options(cov_type),
     ).fit()
 
@@ -284,7 +284,7 @@ def _fit_with_cluster_column(csv_name: str, x_cols: list[str], groups):
         df,
         y="y",
         x=x_cols,
-        entity="entity",
+        effects=["entity"],
         options=REOptions(cov_type="cluster", cluster="cluster_group"),
     ).fit()
 
@@ -347,7 +347,7 @@ def test_dk_explicit_bandwidth_matches_plm(crosscheck, scenario, bandwidth):
         df,
         y="y",
         x=["x1", "x2"],
-        entity="entity",
+        effects=["entity"],
         options=_re_options("dk", dk_bandwidth=bandwidth),
     ).fit()
 
@@ -369,7 +369,7 @@ def _fit_dk_three_periods():
         dk_three_periods_frame(),
         y="y",
         x=["x1", "x2"],
-        entity="entity",
+        effects=["entity"],
         options=_re_options("dk"),
     ).fit()
 
@@ -408,7 +408,7 @@ def test_wagepan_matches_plm(crosscheck, cov_type):
     df = load_wooldridge_dataset("wagepan")
     options = _re_options(cov_type, dk_time=WAGEPAN_TIME)
     res = RE(
-        df, y=WAGEPAN_Y, x=WAGEPAN_X, entity=WAGEPAN_ENTITY, options=options
+        df, y=WAGEPAN_Y, x=WAGEPAN_X, effects=[WAGEPAN_ENTITY], options=options
     ).fit()
 
     _check_result(
@@ -430,7 +430,7 @@ def test_hausman_matches_plm(crosscheck, scenario, cov_type):
         df,
         y="y",
         x=x_cols,
-        entity="entity",
+        effects=["entity"],
         options=_re_options(cov_type),
     )
     ref = crosscheck["synthetic"][scenario][HAUSMAN_KEY][cov_type]
@@ -460,7 +460,7 @@ def test_wagepan_hausman_matches_plm(crosscheck, cov_type):
         else REOptions(cov_type=cov_type)
     )
     res = RE(
-        df, y=WAGEPAN_Y, x=WAGEPAN_X, entity=WAGEPAN_ENTITY, options=options
+        df, y=WAGEPAN_Y, x=WAGEPAN_X, effects=[WAGEPAN_ENTITY], options=options
     ).fit()
 
     _check_hausman(
@@ -481,7 +481,7 @@ def test_hausman_dk_explicit_bandwidth_matches_plm(
         df,
         y="y",
         x=["x1", "x2"],
-        entity="entity",
+        effects=["entity"],
         options=REOptions(
             cov_type="dk", dk_time="time", dk_bandwidth=bandwidth
         ),
@@ -515,7 +515,7 @@ def test_hausman_cluster_with_non_entity_column():
             df,
             y="y",
             x=["x1", "x2"],
-            entity="entity",
+            effects=["entity"],
             options=REOptions(cov_type="cluster", cluster=cluster),
         ).fit()
 
@@ -560,7 +560,7 @@ def test_hausman_cluster_count_equal_to_auxiliary_slopes_raises():
             df,
             y="y",
             x=["x1", "x2"],
-            entity="entity",
+            effects=["entity"],
             options=REOptions(cov_type="cluster"),
         ).fit()
     # G=5 > 2k=4なら成功する（境界の成功パス）。
@@ -568,7 +568,7 @@ def test_hausman_cluster_count_equal_to_auxiliary_slopes_raises():
         _tiny_panel(n_entities=5, n_periods=6),
         y="y",
         x=["x1", "x2"],
-        entity="entity",
+        effects=["entity"],
         options=REOptions(cov_type="cluster"),
     ).fit()
     assert ok.hausman_df == 2
@@ -590,6 +590,6 @@ def test_hausman_dk_too_few_periods_raises():
             df,
             y="y",
             x=["x1", "x2"],
-            entity="entity",
+            effects=["entity"],
             options=REOptions(cov_type="dk", dk_time="time", dk_bandwidth=0),
         ).fit()

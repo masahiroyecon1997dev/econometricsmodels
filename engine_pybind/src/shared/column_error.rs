@@ -1,7 +1,7 @@
 //! 列の抽出（`column_extraction.rs`）で起きる入力不正のエラー型。
 //!
-//! 列が存在しない・欠損値や非有限値を含む・dtypeが許可されない、といった同じ原因のエラーが
-//! 抽出関数ごとに別々に組み立てられ、メッセージが重複・不揃いになっていたため、1バリアントに集約する。
+//! 列が存在しない・欠損値や非有限値を含む・dtypeが許可されない、といった同じ原因のエラーを、
+//! どの抽出関数からでも同じ1つのバリアントで表す（メッセージが抽出関数ごとにばらつかない）。
 //! `engine`の`CommonError`と同じ考え方だが、polarsに依存するため`engine`ではなくここに置く。
 //!
 //! 文面と`params`は`engine::shared::error_catalog`のカタログが決め、このバリアントは
@@ -63,9 +63,9 @@ pub(crate) enum ColumnRole {
     Numeric,
     /// 行の並び順を決めるだけに使う列（HACの`hac_time`）。
     TimeOrder,
-    /// グループの同一性だけが意味を持つ列（`entity`・`cluster`）。
+    /// グループの同一性だけが意味を持つ列（`effects`の先頭の列・`cluster`）。
     GroupIdentifier,
-    /// 時点を表す列（FE/REの`time`・`dk_time`）。
+    /// 時点を表す列（FE/REの`effects`の2つ目・`dk_time`）。
     Time,
 }
 

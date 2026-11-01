@@ -135,7 +135,7 @@ def test_fe_f_dfs(panel_df):
         panel_df,
         y="y",
         x=["x1", "x2"],
-        entity="entity",
+        effects=["entity"],
         options=FEOptions(cov_type="classical"),
     ).fit()
     assert (classical.f_df_num, classical.f_df_denom) == (
@@ -146,7 +146,7 @@ def test_fe_f_dfs(panel_df):
         classical.f_p_value, rel=1e-8
     )
 
-    cluster = FE(panel_df, y="y", x=["x1", "x2"], entity="entity").fit()
+    cluster = FE(panel_df, y="y", x=["x1", "x2"], effects=["entity"]).fit()
     assert (cluster.f_df_num, cluster.f_df_denom) == (2, N_ENTITIES - 1)
     assert _f_p(cluster.f_statistic, 2, N_ENTITIES - 1) == pytest.approx(
         cluster.f_p_value, rel=1e-8
@@ -156,7 +156,7 @@ def test_fe_f_dfs(panel_df):
         panel_df,
         y="y",
         x=["x1", "x2"],
-        entity="entity",
+        effects=["entity"],
         options=FEOptions(cov_type="dk", dk_time="time"),
     ).fit()
     assert (dk.f_df_num, dk.f_df_denom) == (2, N_PERIODS - 1)
@@ -167,7 +167,7 @@ def test_fe_f_dfs(panel_df):
 
 def test_re_f_dfs_and_hausman_df(panel_df):
     # 既定の`cov_type`は`cluster`（entityクラスター）なので分母自由度は`G-1`。
-    res = RE(panel_df, y="y", x=["x1", "x2"], entity="entity").fit()
+    res = RE(panel_df, y="y", x=["x1", "x2"], effects=["entity"]).fit()
     assert (res.f_df_num, res.f_df_denom) == (2, N_ENTITIES - 1)
     assert _f_p(res.f_statistic, 2, N_ENTITIES - 1) == pytest.approx(
         res.f_p_value, rel=1e-8
@@ -256,13 +256,13 @@ def test_fe_cluster_f_denominator_is_g_minus_one(
     [
         pytest.param({"dk_time": "time"}, N_PERIODS, id="1way-dk_time"),
         pytest.param(
-            {"time": "time", "dk_time": "time"}, N_PERIODS, id="2way-dk_time"
+            {"two_way": True, "dk_time": "time"}, N_PERIODS, id="2way-dk_time"
         ),
         pytest.param(
             {"dk_time": "time5"}, N_PERIODS_COARSE, id="1way-dk_time-coarse"
         ),
         pytest.param(
-            {"time": "time", "dk_time": "time5"},
+            {"two_way": True, "dk_time": "time5"},
             N_PERIODS_COARSE,
             id="2way-dk_time-overrides-time",
         ),

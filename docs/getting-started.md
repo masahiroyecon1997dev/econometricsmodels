@@ -4,7 +4,7 @@ econometricsmodels takes a polars DataFrame and column names, and returns a resu
 
 1. Create the model with the data, the column names and, optionally, an options object.
 2. Call `.fit()`. All validation happens here, and invalid input raises an error instead of being silently repaired.
-3. Read the result: attributes such as `params` and `std_errors`, or methods such as `predict()`.
+3. Read the result: print it for a quick look, or use attributes such as `params` and `std_errors`, or methods such as `predict()`.
 
 ```bash
 pip install econometricsmodels
@@ -45,7 +45,22 @@ result = OLS(df, y="y", x=["x1"], options=options).fit()
 
 ## Reading the results
 
-Coefficient-level results are dictionaries keyed by coefficient name. For a row-oriented listing, for example for a REST API response, use `params_table()`, which is a plain list of dictionaries that can be passed to polars or `json.dumps`.
+Printing a result shows a header line (the dependent variable, the number of observations and the `cov_type`) and a short table of the coefficients and their standard errors. This is enough for a quick look in a terminal or notebook. It is not a `summary()`-style report, and its layout may change between versions, so in code read values from the attributes described below.
+
+```python
+print(result)
+```
+
+```text
+OLSResults(dep_var='y', n_obs=5, cov_type='hc1')
+       param  std_error
+const   0.14   0.135253
+x1      1.96  0.0444222
+```
+
+A result with more than ten coefficients (counting `const`, and `sigma` for Tobit) shows the first nine rows, a line such as `... (2 more)`, and the last row, so a final parameter such as Tobit's `sigma` is always visible.
+
+To use the values in code, read them from the result. Coefficient-level results are dictionaries keyed by coefficient name. For a row-oriented listing, for example for a REST API response, use `params_table()`, which is a plain list of dictionaries that can be passed to polars or `json.dumps`.
 
 ```python
 for row in result.params_table():
@@ -89,7 +104,7 @@ print(logit_result.predict())  # fitted probabilities
 print(logit_result.marginal_effects())  # dy/dx with delta-method standard errors
 ```
 
-Methods with extra inputs add arguments: `IV` takes `x_exog`, `x_endog` and `instruments`, and the panel models `FE` and `RE` take `entity`.
+Methods with extra inputs add arguments: `IV` takes `x_exog`, `x_endog` and `instruments`, `WLS` takes `weight`, and the panel models `FE` and `RE` take `effects`, a list of one column (the entity) or two (the entity, then the time period). Columns that define the model are arguments; everything optional, including optional columns such as `cluster`, goes in the options object. [Arguments and options](guide/api-conventions.md) gives the rule and lists the arguments of every model.
 
 ## Handling errors
 
@@ -128,4 +143,4 @@ Missing values are never dropped for you and collinear columns are never removed
 
 Each method has three pages: a short **usage** guide with examples, the **options and results** reference (what each option does and which fields a result has), and the **definitions** (the formulas, covariance types and test distributions). The [table of methods on the home page](index.md#supported-methods) says when to use each one and links to its pages.
 
-The [Guides](guide/accepted-data.md) cover the data the estimators accept, validation and errors, how the test distributions compare with other packages, and how to [pickle and copy](guide/pickling.md) options and results.
+The Guides cover [how arguments and options are named and placed](guide/api-conventions.md), the data the estimators accept ([Accepted data](guide/accepted-data.md)), validation and errors, how the test distributions compare with other packages, and how to [pickle and copy](guide/pickling.md) options and results. For categorical regressors, build the dummy columns explicitly; see [OLS: Categorical regressors](usage/ols.md#categorical-regressors-dummy-variables), which applies to every method.

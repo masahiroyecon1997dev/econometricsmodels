@@ -37,9 +37,13 @@ def _panel(
     )
 
 
-def _fit(df, **options):
+def _fit(df, *, two_way=False, **options):
     return RE(
-        df, y="y", x=["x"], entity="entity", options=REOptions(**options)
+        df,
+        y="y",
+        x=["x"],
+        effects=["entity", "time"] if two_way else ["entity"],
+        options=REOptions(**options),
     ).fit()
 
 
@@ -90,7 +94,7 @@ def test_theta_keys_are_the_entity_ids_as_strings_in_lexicographic_order(ids):
     res = _fit(df, cov_type="classical")
 
     assert list(res.theta) == sorted(str(i) for i in ids)
-    assert len(res.theta) == res.n_entities == len(ids)
+    assert len(res.theta) == res.n_groups["entity"] == len(ids)
     assert all(isinstance(v, float) for v in res.theta.values())
 
 
@@ -106,8 +110,8 @@ def test_theta_keys_are_the_entity_ids_as_strings_in_lexicographic_order(ids):
 )
 def test_variance_components_do_not_depend_on_inference_options(options):
     df = _panel(2, entity_sd=1.0, time_sd=1.0)
-    base = _fit(df, time="time", cov_type="classical")
-    res = _fit(df, time="time", **options)
+    base = _fit(df, two_way=True, cov_type="classical")
+    res = _fit(df, two_way=True, **options)
     for name in (
         "sigma2_eps",
         "sigma2_u",
@@ -123,7 +127,7 @@ def test_two_way_with_only_the_time_variance_keeps_only_the_time_weight():
     """`σ_u² = 0`・`σ_λ² > 0`なら`θ₁ = 0`・`θ₃ = 0`・`θ₂ > 0`で、変換は時点平均
     だけを引く（時点効果だけのRE）。係数は`y - θ₂ȳ.ₜ`・`x - θ₂x̄.ₜ`への最小二乗と一致する。"""
     df = _panel(0)
-    res = _fit(df, time="time", cov_type="classical")
+    res = _fit(df, two_way=True, cov_type="classical")
     assert res.sigma2_u == 0.0
     assert res.sigma2_lambda > 0.0
     assert res.theta_entity == 0.0
@@ -149,7 +153,7 @@ def test_two_way_with_only_the_time_variance_keeps_only_the_time_weight():
 
 def test_two_way_with_only_the_entity_variance_keeps_only_the_entity_weight():
     df = _panel(3, entity_sd=3.0, time_sd=0.0)
-    res = _fit(df, time="time", cov_type="classical")
+    res = _fit(df, two_way=True, cov_type="classical")
     assert res.sigma2_lambda == 0.0
     assert res.sigma2_u > 0.0
     assert res.theta_time == 0.0
@@ -200,7 +204,7 @@ def test_one_way_with_only_dk_time_has_theta_and_no_two_way_fields():
 
 
 def test_two_way_has_no_one_way_theta():
-    res = _fit(_panel(5, entity_sd=1.0), time="time", cov_type="classical")
+    res = _fit(_panel(5, entity_sd=1.0), two_way=True, cov_type="classical")
     assert res.theta is None
     assert all(
         isinstance(v, float)
@@ -225,8 +229,8 @@ def test_two_way_without_regressors_that_vary_in_both_dimensions():
         df,
         y="y",
         x=["xi"],
-        entity="entity",
-        options=REOptions(time="time", cov_type="classical"),
+        effects=["entity", "time"],
+        options=REOptions(cov_type="classical"),
     ).fit()
     y = df["y"].to_numpy().reshape(8, 5)
     within = y - y.mean(axis=1, keepdims=True) - y.mean(axis=0) + y.mean()

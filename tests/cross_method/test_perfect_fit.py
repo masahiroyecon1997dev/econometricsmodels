@@ -91,10 +91,12 @@ def _fit(
     cov_type: str = "classical",
     include_intercept: bool = True,
     gmm_type: str | None = None,
+    two_way: bool = False,
     **kw,
 ):
     """`model`で`y`を`x`・`x2`（IVは`x`を外生変数、`endog`を内生変数、`z`・`z2`を操作変数）に回帰する。"""
     opts = _cov_options(cov_type)
+    effects = ["entity", "time"] if two_way else ["entity"]
     if model == "OLS":
         return OLS(
             df,
@@ -112,11 +114,11 @@ def _fit(
         ).fit()
     if model == "FE":
         return FE(
-            df, "y", ["x", "x2"], "entity", options=FEOptions(**kw, **opts)
+            df, "y", ["x", "x2"], effects, options=FEOptions(**kw, **opts)
         ).fit()
     if model == "RE":
         return RE(
-            df, "y", ["x", "x2"], "entity", options=REOptions(**kw, **opts)
+            df, "y", ["x", "x2"], effects, options=REOptions(**kw, **opts)
         ).fit()
     estimator = "gmm" if model == "IV-GMM" else "2sls"
     gmm = {"gmm_type": gmm_type} if gmm_type else {}
@@ -186,7 +188,7 @@ def test_perfect_fit_in_a_two_way_fixed_effects_model(cov_type, df):
         - 0.5 * pl.col("time")
     )
     with raises_error(ErrorCode.PERFECT_FIT, stage="WITHIN_REGRESSION"):
-        _fit("FE", data, cov_type, time="time")
+        _fit("FE", data, cov_type, two_way=True)
 
 
 @pytest.mark.parametrize("model", ["OLS", "WLS"])
@@ -497,7 +499,7 @@ def test_outcome_explained_by_entity_and_time_effects_in_a_two_way_model(
     """2-wayでは、`y = 個体効果 + 時点効果`も2方向のwithin変換後に0になる。"""
     data = df.with_columns(y=2.0 * pl.col("entity") - 0.5 * pl.col("time"))
     with raises_error(ErrorCode.OUTCOME_CONSTANT_WITHIN_ENTITY):
-        _fit(model, data, time="time")
+        _fit(model, data, two_way=True)
 
 
 @pytest.mark.parametrize("model", ["FE", "RE"])
@@ -527,7 +529,7 @@ def test_outcome_constant_within_entity_is_not_staged_in_re(df):
     """REの内部FEが報告するが、入力の事実なので文脈句（`stage`）は付けない。"""
     data = df.with_columns(y=pl.lit(4.0))
     with pytest.raises(Exception) as info:
-        RE(data, "y", ["x"], "entity").fit()
+        RE(data, "y", ["x"], ["entity"]).fit()
     assert getattr(info.value, "code", None) == (
         ErrorCode.OUTCOME_CONSTANT_WITHIN_ENTITY
     )

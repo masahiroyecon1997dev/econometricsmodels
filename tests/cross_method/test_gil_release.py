@@ -51,8 +51,8 @@ FITS: dict[str, Callable[[pl.DataFrame], object]] = {
     "IV": lambda d: IV(
         d, y="y", x_exog=X_NAMES, x_endog=["endog"], instruments=["z1", "z2"]
     ).fit(),
-    "FE": lambda d: FE(d, y="y", x=X_NAMES, entity="entity").fit(),
-    "RE": lambda d: RE(d, y="y", x=X_NAMES, entity="entity").fit(),
+    "FE": lambda d: FE(d, y="y", x=X_NAMES, effects=["entity"]).fit(),
+    "RE": lambda d: RE(d, y="y", x=X_NAMES, effects=["entity"]).fit(),
 }
 
 # ケースごとの行数（`PERIODS`の倍数）。反復最適化・第一段階を持つ手法は、同じ行数でも

@@ -13,15 +13,20 @@
 
 - **Consistent API** — Every model follows the same conventions: a polars
   DataFrame, column names as strings, and an options object in; a `.fit()`
-  call out, returning a result with the same accessors. Methods with extra
-  inputs (instruments for IV, an entity column for panel models) add
-  arguments, but moving from OLS to Logit, IV, or panel models doesn't mean
-  learning a new interface design.
+  call out, returning a result with the same accessors. One rule decides the
+  layout: a required column is an argument, and an optional setting is an
+  option. Methods with extra inputs (instruments for IV, the entity and
+  optional time columns, passed as `effects`, for panel models) add arguments,
+  but moving from OLS to Logit, IV, or panel models doesn't mean learning a new
+  interface design
+  ([Arguments and options](https://masahiroyecon1997dev.github.io/econometricsmodels/guide/api-conventions/)).
 - **Programmatic specification and results** — Models are defined with
   explicit arguments and an options object, not a formula string. Results
   come back as Python objects (`.params`, `.std_errors`, `.p_values`,
-  `.conf_int`), not formatted text, so they are easy to build, inspect, and
-  feed into other code. Parameter tables (`params_table()`) are plain lists
+  `.conf_int`), not a formatted report, so they are easy to build,
+  inspect, and feed into other code. Printing a result shows only a
+  one-line header and a short table of coefficients and standard errors
+  for a quick look. Parameter tables (`params_table()`) are plain lists
   of dicts that can be passed straight to polars or `json.dumps`.
 - **Explicit validation** — Invalid input is rejected rather than silently
   dropped or repaired. Missing values, perfectly collinear columns,
@@ -152,8 +157,8 @@ Each key of a row is the singular of the matching result attribute
 are the two ends of `conf_int`). The rows of `marginal_effects()` use the same keys,
 with `effect` in place of `param`.
 
-There is no formatted text to parse. `params_table()` is shaped so it can
-be passed directly into a Polars DataFrame, a JSON API response, or an
+The printed table is for reading, not parsing. `params_table()` is shaped
+so it can be passed directly into a Polars DataFrame, a JSON API response, or an
 automated reporting workflow:
 
 ```python

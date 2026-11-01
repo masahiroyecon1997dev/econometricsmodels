@@ -12,12 +12,12 @@
 
 `fe_dataset`（baseline、entity/time付きバランスパネル、n_entities=40 x
 n_periods=6）は`tests/panel/conftest.py`（FEと共用、RE専用の合成データセットは
-無い）、`our_fit_re`ヘルパー（既定`x=["x1","x2"], entity="entity"`）は
+無い）、`our_fit_re`ヘルパー（既定`x=["x1","x2"], effects=["entity"]`）は
 `tests/support/_re_helpers.py`。
 
 Note:
     `CLUSTER_REQUIRED`はFEと同じ理由で構造的に到達不能
-    （`cluster=None`は常に`entity`引数の列に自動フォールバックする、
+    （`cluster=None`は常に`effects`の先頭要素の列に自動フォールバックする、
     `engine_pybind/src/panel/re.rs::resolve_re_cov_type`参照）。`x=[]`が
     `ValidationError`になる理由は`engine_pybind/src/panel/re.rs`
     モジュールdoc「`x`の空リストを許容しない」参照。
@@ -65,10 +65,10 @@ def test_y_overlaps_entity_raises(fe_dataset):
     with raises_error(
         ErrorCode.ROLE_COLUMN_OVERLAP,
         column="y",
-        argument="entity",
-        other_argument="y",
+        argument="y",
+        other_argument="effects",
     ):
-        RE(fe_dataset, y="y", x=["x1", "x2"], entity="y").fit()
+        RE(fe_dataset, y="y", x=["x1", "x2"], effects=["y"]).fit()
 
 
 def test_y_overlaps_x_raises(fe_dataset):
@@ -78,56 +78,48 @@ def test_y_overlaps_x_raises(fe_dataset):
         argument="y",
         other_argument="x",
     ):
-        RE(fe_dataset, y="y", x=["y", "x2"], entity="entity").fit()
+        RE(fe_dataset, y="y", x=["y", "x2"], effects=["entity"]).fit()
 
 
 def test_entity_overlaps_x_raises(fe_dataset):
     with raises_error(
         ErrorCode.ROLE_COLUMN_OVERLAP,
         column="entity",
-        argument="entity",
-        other_argument="x",
+        argument="x",
+        other_argument="effects",
     ):
-        RE(fe_dataset, y="y", x=["entity", "x2"], entity="entity").fit()
+        RE(fe_dataset, y="y", x=["entity", "x2"], effects=["entity"]).fit()
 
 
 def test_y_overlaps_time_raises(fe_dataset):
-    options = REOptions(time="y")
+    """2-wayの2要素目（時点側）が`y`と同じ列でも拒否する。"""
     with raises_error(
         ErrorCode.ROLE_COLUMN_OVERLAP,
         column="y",
-        argument="time",
-        other_argument="y",
+        argument="y",
+        other_argument="effects",
     ):
-        RE(
-            fe_dataset, y="y", x=["x1", "x2"], entity="entity", options=options
-        ).fit()
+        RE(fe_dataset, y="y", x=["x1", "x2"], effects=["entity", "y"]).fit()
 
 
-def test_entity_overlaps_time_raises(fe_dataset):
-    options = REOptions(time="entity")
+def test_duplicate_within_effects_raises(fe_dataset):
+    """`effects`の2要素が同じ列だと`effects`内の重複。"""
     with raises_error(
-        ErrorCode.ROLE_COLUMN_OVERLAP,
-        column="entity",
-        argument="time",
-        other_argument="entity",
+        ErrorCode.ROLE_DUPLICATE_COLUMN, column="entity", argument="effects"
     ):
         RE(
-            fe_dataset, y="y", x=["x1", "x2"], entity="entity", options=options
+            fe_dataset, y="y", x=["x1", "x2"], effects=["entity", "entity"]
         ).fit()
 
 
 def test_x_overlaps_time_raises(fe_dataset):
-    options = REOptions(time="x1")
     with raises_error(
         ErrorCode.ROLE_COLUMN_OVERLAP,
         column="x1",
-        argument="time",
-        other_argument="x",
+        argument="x",
+        other_argument="effects",
     ):
-        RE(
-            fe_dataset, y="y", x=["x1", "x2"], entity="entity", options=options
-        ).fit()
+        RE(fe_dataset, y="y", x=["x1", "x2"], effects=["entity", "x1"]).fit()
 
 
 def test_y_overlaps_dk_time_raises(fe_dataset):
@@ -140,7 +132,11 @@ def test_y_overlaps_dk_time_raises(fe_dataset):
         other_argument="y",
     ):
         RE(
-            fe_dataset, y="y", x=["x1", "x2"], entity="entity", options=options
+            fe_dataset,
+            y="y",
+            x=["x1", "x2"],
+            effects=["entity"],
+            options=options,
         ).fit()
 
 
@@ -150,23 +146,27 @@ def test_entity_overlaps_dk_time_raises(fe_dataset):
         ErrorCode.ROLE_COLUMN_OVERLAP,
         column="entity",
         argument="dk_time",
-        other_argument="entity",
+        other_argument="effects",
     ):
         RE(
-            fe_dataset, y="y", x=["x1", "x2"], entity="entity", options=options
+            fe_dataset,
+            y="y",
+            x=["x1", "x2"],
+            effects=["entity"],
+            options=options,
         ).fit()
 
 
 def test_dk_time_may_overlap_x(fe_dataset):
     """`dk_time`と`x`の重複は許可する（年トレンドを説明変数に入れつつ
-    DKの時点にも使う、等は正当な使い方）。拒否するのは`y`・`entity`との重複だけ。
+    DKの時点にも使う、等は正当な使い方）。拒否するのは`y`・`effects[0]`との重複だけ。
     """
     options = REOptions(cov_type="dk", dk_time="x2")
     RE(
         fe_dataset,
         y="y",
         x=["x1", "x2"],
-        entity="entity",
+        effects=["entity"],
         options=options,
     ).fit()
 
@@ -175,7 +175,7 @@ def test_duplicate_within_x_raises(fe_dataset):
     with raises_error(
         ErrorCode.ROLE_DUPLICATE_COLUMN, column="x1", argument="x"
     ):
-        RE(fe_dataset, y="y", x=["x1", "x1"], entity="entity").fit()
+        RE(fe_dataset, y="y", x=["x1", "x1"], effects=["entity"]).fit()
 
 
 def test_x_empty_raises(fe_dataset):
@@ -184,7 +184,7 @@ def test_x_empty_raises(fe_dataset):
     （`engine_pybind/src/panel/re.rs`モジュールdoc参照）。
     """
     with raises_error(ErrorCode.ROLE_EMPTY, argument="x"):
-        RE(fe_dataset, y="y", x=[], entity="entity").fit()
+        RE(fe_dataset, y="y", x=[], effects=["entity"]).fit()
 
 
 # ── ValidationError（入力データ: 列の存在・欠損値） ───────────────────
@@ -206,7 +206,7 @@ def test_data_not_polars_raises():
             param_name="data",
         ),
     ):
-        RE(bad, y="y", x=["x1"], entity="entity").fit()
+        RE(bad, y="y", x=["x1"], effects=["entity"]).fit()
 
 
 def test_missing_y_column_raises(fe_dataset):
@@ -216,7 +216,9 @@ def test_missing_y_column_raises(fe_dataset):
         argument="y",
         data_argument="data",
     ):
-        RE(fe_dataset, y="nonexistent", x=["x1", "x2"], entity="entity").fit()
+        RE(
+            fe_dataset, y="nonexistent", x=["x1", "x2"], effects=["entity"]
+        ).fit()
 
 
 def test_missing_x_column_raises(fe_dataset):
@@ -226,30 +228,32 @@ def test_missing_x_column_raises(fe_dataset):
         argument="x",
         data_argument="data",
     ):
-        RE(fe_dataset, y="y", x=["nonexistent"], entity="entity").fit()
+        RE(fe_dataset, y="y", x=["nonexistent"], effects=["entity"]).fit()
 
 
 def test_missing_entity_column_raises(fe_dataset):
     with raises_error(
         ErrorCode.COLUMN_NOT_FOUND,
         column="nonexistent",
-        argument="entity",
+        argument="effects",
         data_argument="data",
     ):
-        RE(fe_dataset, y="y", x=["x1", "x2"], entity="nonexistent").fit()
+        RE(fe_dataset, y="y", x=["x1", "x2"], effects=["nonexistent"]).fit()
 
 
 def test_missing_time_column_raises(fe_dataset):
-    """2-way（`REOptions.time`）の時点列が存在しない場合。"""
-    options = REOptions(time="nonexistent")
+    """2-wayの時点列（`effects`の2要素目）が存在しない場合。"""
     with raises_error(
         ErrorCode.COLUMN_NOT_FOUND,
         column="nonexistent",
-        argument="time",
+        argument="effects",
         data_argument="data",
     ):
         RE(
-            fe_dataset, y="y", x=["x1", "x2"], entity="entity", options=options
+            fe_dataset,
+            y="y",
+            x=["x1", "x2"],
+            effects=["entity", "nonexistent"],
         ).fit()
 
 
@@ -262,7 +266,11 @@ def test_missing_dk_time_column_raises(fe_dataset):
         data_argument="data",
     ):
         RE(
-            fe_dataset, y="y", x=["x1", "x2"], entity="entity", options=options
+            fe_dataset,
+            y="y",
+            x=["x1", "x2"],
+            effects=["entity"],
+            options=options,
         ).fit()
 
 
@@ -283,7 +291,7 @@ def test_numeric_column_null_values_raise(bad_col):
         argument="y" if bad_col == "y" else "x",
         data_argument="data",
     ):
-        RE(df, y="y", x=["x1"], entity="entity").fit()
+        RE(df, y="y", x=["x1"], effects=["entity"]).fit()
 
 
 @pytest.mark.parametrize(
@@ -307,10 +315,10 @@ def test_numeric_column_non_finite_values_raise(bad_col, value):
         argument="y" if bad_col == "y" else "x",
         data_argument="data",
     ):
-        RE(df, y="y", x=["x1"], entity="entity").fit()
+        RE(df, y="y", x=["x1"], effects=["entity"]).fit()
 
 
-@pytest.mark.parametrize("option", ["time", "dk_time"])
+@pytest.mark.parametrize("option", ["effects", "dk_time"])
 @pytest.mark.parametrize("bad_col", ["entity", "time"])
 def test_group_key_column_null_values_raise(bad_col, option):
     values: dict[str, list[float | str | None]] = {
@@ -321,19 +329,18 @@ def test_group_key_column_null_values_raise(bad_col, option):
     }
     values[bad_col][1] = None
     df = pl.DataFrame(values)
-    options = (
-        REOptions(time="time")
-        if option == "time"
-        else REOptions(cov_type="dk", dk_time="time")
-    )
+    if option == "effects":
+        effects, options = ["entity", "time"], REOptions()
+    else:
+        effects, options = ["entity"], REOptions(cov_type="dk", dk_time="time")
     with raises_error(
         ErrorCode.COLUMN_CONTAINS_NULL,
         column=bad_col,
         count=1,
-        argument=bad_col if bad_col == "entity" else option,
+        argument="effects" if bad_col == "entity" else option,
         data_argument="data",
     ):
-        RE(df, y="y", x=["x1"], entity="entity", options=options).fit()
+        RE(df, y="y", x=["x1"], effects=effects, options=options).fit()
 
 
 def test_cluster_null_values_raise():
@@ -353,7 +360,7 @@ def test_cluster_null_values_raise():
         argument="cluster",
         data_argument="data",
     ):
-        RE(df, y="y", x=["x1"], entity="entity", options=options).fit()
+        RE(df, y="y", x=["x1"], effects=["entity"], options=options).fit()
 
 
 # ── ValidationError（入力データ: singleton・分散成分推定の失敗） ──────
@@ -366,9 +373,12 @@ def test_singleton_entity_raises():
     """
     df = pl.read_csv(DATA_DIR / "fe_singleton_entity.csv")
     with raises_error(
-        ErrorCode.SINGLETON_GROUP, argument="entity", group="e00"
+        ErrorCode.SINGLETON_GROUP,
+        argument="effects",
+        column="entity",
+        group="e00",
     ):
-        RE(df, y="y", x=["x1", "x2"], entity="entity").fit()
+        RE(df, y="y", x=["x1", "x2"], effects=["entity"]).fit()
 
 
 def test_insufficient_degrees_of_freedom_in_internal_within_regression_raises():
@@ -393,7 +403,7 @@ def test_insufficient_degrees_of_freedom_in_internal_within_regression_raises():
         min_obs=7,
         stage="VARIANCE_COMPONENT_WITHIN_REGRESSION",
     ):
-        RE(df, y="y", x=["x1", "x2", "x3"], entity="entity").fit()
+        RE(df, y="y", x=["x1", "x2", "x3"], effects=["entity"]).fit()
 
 
 def test_between_regression_insufficient_entities_raises():
@@ -417,7 +427,7 @@ def test_between_regression_insufficient_entities_raises():
         n_params=2,
         min_obs=3,
     ):
-        RE(df, y="y", x=["x1"], entity="entity").fit()
+        RE(df, y="y", x=["x1"], effects=["entity"]).fit()
 
 
 def test_noiseless_data_is_a_perfect_fit_in_the_variance_component_regression():
@@ -440,7 +450,7 @@ def test_noiseless_data_is_a_perfect_fit_in_the_variance_component_regression():
     with raises_error(
         ErrorCode.PERFECT_FIT, stage="VARIANCE_COMPONENT_WITHIN_REGRESSION"
     ):
-        RE(df, y="y", x=["x1"], entity="entity").fit()
+        RE(df, y="y", x=["x1"], effects=["entity"]).fit()
 
 
 # ── ValidationError（オプション） ─────────────────────────────────────
@@ -565,7 +575,9 @@ def test_cluster_count_at_most_slopes_raises_validation_error():
         n_slopes=2,
         min_clusters=3,
     ):
-        RE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
+        RE(
+            df, y="y", x=["x1", "x2"], effects=["entity"], options=options
+        ).fit()
 
 
 def test_dk_single_period_raises_validation_error():
@@ -584,7 +596,7 @@ def test_dk_single_period_raises_validation_error():
     with raises_error(
         ErrorCode.DK_PERIODS_TOO_FEW, n_periods=1, min_periods=2
     ):
-        RE(df, y="y", x=["x"], entity="entity", options=options).fit()
+        RE(df, y="y", x=["x"], effects=["entity"], options=options).fit()
 
 
 def test_dk_periods_at_most_hausman_slopes_raises_validation_error():
@@ -611,7 +623,9 @@ def test_dk_periods_at_most_hausman_slopes_raises_validation_error():
         min_periods=3,
         stage="OVERALL_F_TEST",
     ):
-        RE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
+        RE(
+            df, y="y", x=["x1", "x2"], effects=["entity"], options=options
+        ).fit()
 
 
 def test_many_regressors_cluster_raises_validation_error():
@@ -633,7 +647,7 @@ def test_many_regressors_cluster_raises_validation_error():
             df,
             y="y",
             x=x_cols,
-            entity="entity",
+            effects=["entity"],
             options=REOptions(cov_type="cluster"),
         ).fit()
 
@@ -655,7 +669,7 @@ def test_many_regressors_dk_raises_validation_error():
             df,
             y="y",
             x=x_cols,
-            entity="entity",
+            effects=["entity"],
             options=REOptions(cov_type="dk", dk_time="time"),
         ).fit()
 
@@ -709,7 +723,7 @@ def test_perfect_multicollinearity_raises_computation_error(fe_dataset):
         ErrorCode.DESIGN_MATRIX_SINGULAR,
         stage="VARIANCE_COMPONENT_WITHIN_REGRESSION",
     ):
-        RE(df, y="y", x=["x1", "x2", "x3"], entity="entity").fit()
+        RE(df, y="y", x=["x1", "x2", "x3"], effects=["entity"]).fit()
 
 
 @pytest.mark.parametrize(
@@ -732,7 +746,9 @@ def test_scale_variance_raises_computation_error(fe_dataset, cov_type):
         matrix="COEFFICIENT_COVARIANCE",
         stage="VARIANCE_COMPONENT_WITHIN_REGRESSION",
     ):
-        RE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
+        RE(
+            df, y="y", x=["x1", "x2"], effects=["entity"], options=options
+        ).fit()
 
 
 # ── 例外クラスの継承 ──────────────────────────────────────────────────

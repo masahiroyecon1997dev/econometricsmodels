@@ -89,17 +89,14 @@ def _x_columns(df: pl.DataFrame) -> list[str]:
 
 
 def _fit_fe(df: pl.DataFrame, column: str, *, two_way: bool):
-    options = (
-        FEOptions(cov_type="dk", time=column, dk_time=column)
-        if two_way
-        else FEOptions(cov_type="dk", dk_time=column)
-    )
-    return FE(df, "y", _x_columns(df), "entity", options=options).fit()
+    options = FEOptions(cov_type="dk", dk_time=column)
+    effects = ["entity", column] if two_way else ["entity"]
+    return FE(df, "y", _x_columns(df), effects, options=options).fit()
 
 
 def _fit_re(df: pl.DataFrame, column: str):
     options = REOptions(cov_type="dk", dk_time=column)
-    return RE(df, "y", _x_columns(df), "entity", options=options).fit()
+    return RE(df, "y", _x_columns(df), ["entity"], options=options).fit()
 
 
 @pytest.mark.parametrize("two_way", [False, True], ids=["one_way", "two_way"])
@@ -194,10 +191,9 @@ def _time_effects(df: pl.DataFrame, column: str) -> dict:
         df,
         "y",
         _x_columns(df),
-        "entity",
-        options=FEOptions(time=column),
+        ["entity", column],
     ).fit()
-    return res.fixed_effects()["time"]
+    return res.fixed_effects()[column]
 
 
 def test_two_way_time_effects_are_listed_in_time_order(frame):
@@ -239,19 +235,17 @@ def test_two_way_time_effects_values_do_not_depend_on_how_labels_are_written(
         padded,
         "y",
         _x_columns(padded),
-        "entity",
-        options=FEOptions(time="label"),
+        ["entity", "label"],
     ).fit()
     got = FE(
         plain,
         "y",
         _x_columns(plain),
-        "entity",
-        options=FEOptions(time="label"),
+        ["entity", "label"],
     ).fit()
 
-    expected_time = list(expected.fixed_effects()["time"].values())
-    got_time = list(got.fixed_effects()["time"].values())
+    expected_time = list(expected.fixed_effects()["label"].values())
+    got_time = list(got.fixed_effects()["label"].values())
     assert got_time == pytest.approx(expected_time, rel=1e-10, abs=1e-10)
     assert got.fixed_effects()["entity"] == pytest.approx(
         expected.fixed_effects()["entity"], rel=1e-10, abs=1e-10

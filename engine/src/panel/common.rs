@@ -81,9 +81,9 @@ use crate::shared::group_codes::GroupCodes;
 /// （`fixed_effects()`の次元指定等）でも再利用できる想定。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PanelDimension {
-    /// エンティティ方向（個体・企業・州等、`entity`引数の列）。
+    /// エンティティ方向（個体・企業・州等、`effects`の1つ目の列）。
     Entity,
-    /// 時点方向（`time`オプションの列）。
+    /// 時点方向（`effects`の2つ目の列）。
     Time,
 }
 
@@ -100,6 +100,45 @@ impl PanelDimension {
 impl fmt::Display for PanelDimension {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.argument_name())
+    }
+}
+
+/// 効果の次元ごとの列名。エラーの`column`に載せるためだけに`FeInput`/`ReInput`が保持する
+/// （`engine_pybind`が`effects`の各要素の列名を渡す）。計算には使わない。
+///
+/// 既定は`"entity"`・`"time"`で、`engine`単体（テスト等）の構築ではこのまま使う。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EffectNames {
+    entity: String,
+    time: String,
+}
+
+impl Default for EffectNames {
+    fn default() -> Self {
+        Self {
+            entity: "entity".to_string(),
+            time: "time".to_string(),
+        }
+    }
+}
+
+impl EffectNames {
+    /// 1つ目の次元（個体）と、あれば2つ目の次元（時点）の列名を設定する。
+    /// 2つ目が`None`なら既定の名前を残す（1-wayでは使われない）。
+    pub(crate) fn new(entity: String, time: Option<String>) -> Self {
+        let default = Self::default();
+        Self {
+            entity,
+            time: time.unwrap_or(default.time),
+        }
+    }
+
+    /// `dimension`に対応する列名。
+    pub(crate) fn get(&self, dimension: PanelDimension) -> &str {
+        match dimension {
+            PanelDimension::Entity => &self.entity,
+            PanelDimension::Time => &self.time,
+        }
     }
 }
 
@@ -174,6 +213,8 @@ pub enum PanelError {
     #[error("{}", self.catalog_message())]
     SingletonGroup {
         dimension: PanelDimension,
+        /// そのグループを定める列の名前（`effects`の要素）。
+        column: String,
         group_id: String,
     },
 
@@ -187,15 +228,16 @@ pub enum PanelError {
     ///
     /// なお「バランス」の判定は観測数カウント（`n_obs == n_entities * n_periods`）
     /// だけでは不十分で、あるペアの重複と別ペアの欠落が相殺してカウントだけ一致する
-    /// 入力もありうる。このエラーを構築する検証（FE実装issue）は、(entity, time)
-    /// ペアの一意性・全組合せの充足まで確認する必要がある。`expected`はカウント上の
-    /// 期待値（`n_entities * n_periods`）でメッセージ用。
+    /// 入力もありうる。このエラーを構築する検証は、(entity, time)ペアの一意性・
+    /// 全組合せの充足まで確認する必要がある（`validate_balanced_panel`）。
+    /// `entity_column`・`time_column`は`effects`の1つ目・2つ目の列名（メッセージ用）。
     #[error("{}", self.catalog_message())]
     UnbalancedPanelForTwoWay {
         n_obs: usize,
+        entity_column: String,
         n_entities: usize,
+        time_column: String,
         n_periods: usize,
-        expected: usize,
     },
 
     /// within変換（デミーニング）後に分散がゼロになる説明変数がある。
@@ -463,21 +505,25 @@ impl ErrorInfo for PanelError {
                     .param("min_obs", n_effects + k + 1)
             }
             Self::SingletonGroup {
-                dimension,
+                dimension: _,
+                column,
                 group_id,
             } => ErrorReport::new(ErrorCode::SingletonGroup)
-                .param("argument", dimension.argument_name())
+                .param("argument", "effects")
+                .param("column", column.as_str())
                 .param("group", group_id.as_str()),
             Self::UnbalancedPanelForTwoWay {
                 n_obs,
+                entity_column,
                 n_entities,
+                time_column,
                 n_periods,
-                expected,
             } => ErrorReport::new(ErrorCode::PanelNotBalancedForTwoWay)
                 .param("n_obs", *n_obs)
-                .param("n_entities", *n_entities)
-                .param("n_periods", *n_periods)
-                .param("expected_obs", *expected),
+                .param("first_column", entity_column.as_str())
+                .param("n_first_groups", *n_entities)
+                .param("second_column", time_column.as_str())
+                .param("n_second_groups", *n_periods),
             Self::ZeroVarianceAfterDemeaning { column } => {
                 ErrorReport::new(ErrorCode::RegressorNoWithinVariation)
                     .param("column", column.as_str())
@@ -1164,28 +1210,31 @@ mod tests {
             (
                 PanelError::SingletonGroup {
                     dimension: PanelDimension::Entity,
+                    column: "firm".to_string(),
                     group_id: "a".to_string(),
                 },
                 ErrorCode::SingletonGroup,
-                "The entity group 'a' has only one observation, and singleton groups are not dropped automatically.",
+                "The group 'a' of column 'firm' in effects has only one observation, and singleton groups are not dropped automatically.",
             ),
             (
                 PanelError::SingletonGroup {
                     dimension: PanelDimension::Time,
+                    column: "year".to_string(),
                     group_id: "2020".to_string(),
                 },
                 ErrorCode::SingletonGroup,
-                "The time group '2020' has only one observation, and singleton groups are not dropped automatically.",
+                "The group '2020' of column 'year' in effects has only one observation, and singleton groups are not dropped automatically.",
             ),
             (
                 PanelError::UnbalancedPanelForTwoWay {
                     n_obs: 5,
+                    entity_column: "firm".to_string(),
                     n_entities: 2,
+                    time_column: "year".to_string(),
                     n_periods: 3,
-                    expected: 6,
                 },
                 ErrorCode::PanelNotBalancedForTwoWay,
-                "Two-way estimation requires a balanced panel: 5 observation(s) for 2 entities and 3 periods, but 6 are expected.",
+                "Two-way estimation requires a balanced panel: 5 observation(s) for 2 groups of 'firm' and 3 of 'year', but every combination needs exactly one.",
             ),
             (
                 PanelError::ZeroVarianceAfterDemeaning {
@@ -1427,20 +1476,24 @@ mod tests {
         assert_eq!(
             PanelError::SingletonGroup {
                 dimension: PanelDimension::Entity,
+                column: "entity".to_string(),
                 group_id: "a".to_string(),
             },
             PanelError::SingletonGroup {
                 dimension: PanelDimension::Entity,
+                column: "entity".to_string(),
                 group_id: "a".to_string(),
             }
         );
         assert_ne!(
             PanelError::SingletonGroup {
                 dimension: PanelDimension::Entity,
+                column: "entity".to_string(),
                 group_id: "a".to_string(),
             },
             PanelError::SingletonGroup {
                 dimension: PanelDimension::Time,
+                column: "time".to_string(),
                 group_id: "a".to_string(),
             }
         );

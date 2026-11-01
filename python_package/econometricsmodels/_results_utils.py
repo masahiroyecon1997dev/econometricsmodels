@@ -19,7 +19,14 @@ __all__ = [
     "cov_params_by_param",
     "marginal_effect_rows",
     "params_table_rows",
+    "results_repr",
 ]
+
+# Most coefficient rows `results_repr` shows; with more coefficients, the
+# first `_REPR_MAX_ROWS - 1` and the last one are shown.
+_REPR_MAX_ROWS = 10
+# Longest coefficient name `results_repr` shows before cutting it short.
+_REPR_MAX_NAME = 30
 
 
 class _ConfIntColumns(Protocol):
@@ -40,6 +47,21 @@ class _ParamsTableColumns(_ConfIntColumns, Protocol):
     def test_stats(self) -> Sequence[float]: ...
     @property
     def p_values(self) -> Sequence[float]: ...
+
+
+class _ReprColumns(Protocol):
+    @property
+    def dep_var_name(self) -> str: ...
+    @property
+    def n_obs(self) -> int: ...
+    @property
+    def cov_type(self) -> str: ...
+    @property
+    def param_names(self) -> Sequence[str]: ...
+    @property
+    def params(self) -> Sequence[float]: ...
+    @property
+    def std_errors(self) -> Sequence[float]: ...
 
 
 class _MarginalEffectColumns(_ConfIntColumns, Protocol):
@@ -176,3 +198,67 @@ def marginal_effect_rows(
             raw.conf_upper,
         )
     ]
+
+
+def _repr_name(name: str) -> str:
+    """Escape a coefficient name for one line and cut it to a fixed length."""
+    shown = repr(name)[1:-1]
+    if len(shown) > _REPR_MAX_NAME:
+        return shown[: _REPR_MAX_NAME - 1] + "\u2026"
+    return shown
+
+
+def results_repr(class_name: str, raw: _ReprColumns) -> str:
+    """Build the short text shown by `repr()` of a `*Results` object.
+
+    The first line names the class, the dependent variable, the number
+    of observations and the covariance type. Below it comes one row per
+    coefficient with its estimate and standard error. With more than a
+    fixed small number of coefficients, the first rows are followed by
+    a line counting the omitted ones and then the last row, so a final
+    parameter such as the `sigma` of Tobit is always shown. Names are
+    escaped to one line and cut when long; widths are counted in
+    characters, so wide (for example Japanese) names may misalign the
+    columns. The layout is for reading in a terminal or notebook and
+    may change between versions; use `params_table()` for
+    machine-readable output.
+
+    Args:
+        class_name: Name of the result class, for the first line.
+        raw: A `_lib` result object exposing the coefficient columns and
+            `dep_var_name`, `n_obs` and `cov_type`.
+
+    Returns:
+        The text, without a trailing newline.
+    """
+    head = (
+        f"{class_name}(dep_var={raw.dep_var_name!r}, "
+        f"n_obs={raw.n_obs}, cov_type={raw.cov_type!r})"
+    )
+    all_names = raw.param_names
+    all_params = raw.params
+    all_std_errors = raw.std_errors
+    count = len(all_names)
+    if count > _REPR_MAX_ROWS:
+        shown = [*range(_REPR_MAX_ROWS - 1), count - 1]
+        omitted = count - _REPR_MAX_ROWS
+    else:
+        shown = list(range(count))
+        omitted = 0
+    names = [_repr_name(all_names[i]) for i in shown]
+    params = [f"{all_params[i]:.6g}" for i in shown]
+    std_errors = [f"{all_std_errors[i]:.6g}" for i in shown]
+    name_width = max(map(len, names), default=0)
+    param_width = max([len("param"), *map(len, params)])
+    se_width = max([len("std_error"), *map(len, std_errors)])
+    rows = [
+        f"{name:<{name_width}}  {param:>{param_width}}  {se:>{se_width}}"
+        for name, param, se in zip(names, params, std_errors)
+    ]
+    if omitted:
+        rows.insert(len(rows) - 1, f"... ({omitted} more)")
+    column_header = (
+        f"{'':<{name_width}}  {'param':>{param_width}}  "
+        f"{'std_error':>{se_width}}"
+    )
+    return "\n".join([head, column_header, *rows])

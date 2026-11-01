@@ -156,7 +156,6 @@ SAMPLES = {
     "FEOptions": lambda: FEOptions(
         cov_type="dk",
         confidence_level=0.85,
-        time="t",
         cluster="entity",
         dk_time="t",
         dk_bandwidth=1,
@@ -164,16 +163,20 @@ SAMPLES = {
     "REOptions": lambda: REOptions(
         cov_type="cluster",
         cluster="cluster",
-        time="t",
         variance_method="wallace_hussain",
     ),
     "OLSResult": lambda: _fit_ols()._raw,
     "WLSResult": lambda: _fit_wls()._raw,
-    "REResult": lambda: fit_re(_frame(), time="t")._raw,
+    "REResult": lambda: fit_re(_frame(), two_way=True, time_column="t")._raw,
     "IVResult": lambda: _fit_iv()._raw,
     "FEResult": lambda: (
         fit_fe(
-            _frame(), time="t", cov_type="dk", dk_time="t", dk_bandwidth=1
+            _frame(),
+            two_way=True,
+            time_column="t",
+            cov_type="dk",
+            dk_time="t",
+            dk_bandwidth=1,
         )._raw
     ),
     "LogitResult": _logit_raw,
@@ -492,8 +495,8 @@ def test_restored_tobit_result_keeps_every_method(
 
 def test_fixed_effects_are_the_same_across_threads() -> None:
     """初回の`fixed_effects()`を複数スレッドから同時に呼んでも、同じ値になる。"""
-    result = fit_fe(_frame(), time="t")
-    expected = fit_fe(_frame(), time="t").fixed_effects()
+    result = fit_fe(_frame(), two_way=True, time_column="t")
+    expected = fit_fe(_frame(), two_way=True, time_column="t").fixed_effects()
     outputs: list[object] = []
 
     def call() -> None:
@@ -516,7 +519,7 @@ def test_restored_fe_result_keeps_the_fixed_effects(
     two_way: bool, compute_before: bool
 ) -> None:
     """固定効果は遅延計算。計算前に`pickle`しても、計算後に`pickle`しても同じ値が出る。"""
-    options = {"time": "t"} if two_way else {}
+    options = {"two_way": two_way, "time_column": "t"}
     result = fit_fe(_frame(), **options)
     expected = fit_fe(_frame(), **options).fixed_effects()
     if compute_before:
@@ -525,7 +528,7 @@ def test_restored_fe_result_keeps_the_fixed_effects(
     assert clone.fixed_effects() == expected
     # 時点の並び（時間順）も保たれる。
     if two_way:
-        assert list(clone.fixed_effects()["time"]) == list(expected["time"])
+        assert list(clone.fixed_effects()["t"]) == list(expected["t"])
     # 復元した結果をもう一度pickleしても変わらない。
     again = pickle.loads(pickle.dumps(clone))
     assert again.fixed_effects() == expected
@@ -690,7 +693,7 @@ def test_restore_rejects_a_malformed_cov_params(
 
 def test_single_coefficient_cov_params_round_trips() -> None:
     """係数が1つ（1x1の行列）でも往復で値が変わらない。"""
-    result = FE(_frame(), y="y", x=["x1"], entity="entity").fit()
+    result = FE(_frame(), y="y", x=["x1"], effects=["entity"]).fit()
     assert list(result.cov_params) == ["x1"]
     clone = pickle.loads(pickle.dumps(result))
     assert clone.cov_params == result.cov_params

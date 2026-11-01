@@ -7,11 +7,10 @@
 //! polarsのnull（値が存在しない）とIEEE754のNaN（値は存在するが数値として無効）は別概念であり、
 //! 両方を検出する必要がある。
 //!
-//! 【polarsのバージョン依存に関する注意（検証・修正済み）】
-//! polars 0.55.2での実ビルドを確認済み（0.54.4でも同様）。当初の草案から2点修正した:
-//! `ChunkedArray`の`.rechunk()`が`Cow<'_, ChunkedArray<T>>`を返すようになった影響で
-//! （`IntoIterator`が実装されなくなったため）、値の取り出しは`.into_iter()`ではなく
-//! `.iter()`（`ChunkedArray::iter`メソッド）を使う。
+//! 【polarsのバージョン依存に関する注意】
+//! `ChunkedArray`の`.rechunk()`は`Cow<'_, ChunkedArray<T>>`を返し、`IntoIterator`が
+//! 実装されないため、値の取り出しは`.into_iter()`ではなく`.iter()`
+//! （`ChunkedArray::iter`メソッド）を使う（polars 0.55.2で確認）。
 
 use std::collections::HashMap;
 
@@ -534,11 +533,11 @@ fn rank_distinct_values<T: PartialOrd>(values: &[T]) -> Result<Vec<f64>, (usize,
 }
 
 /// `param_names`から`x`列名部分を取り出す。`has_intercept`時は先頭の`"const"`、
-/// `exclude_trailing`個は末尾の要素を除く（Tobitの`"sigma"`等、末尾に合成
-/// パラメータ名を持つ手法向け。持たない手法は`exclude_trailing=0`を渡す）。
+/// `exclude_trailing`個は末尾の要素を除く（末尾に合成パラメータ名を持つ手法向け。
+/// 現状の全呼び出しは`0`で、Tobitも`param_names`に`"sigma"`を含まないため`0`）。
 ///
 /// OLS/WLS/Logit/Probit/Tobitの`predict()`/`augment()`が`param_names`から`x`列名
-/// だけを取り出す際に共通して使う規約（切片項の自動追加）を集約したもの。
+/// だけを取り出す際に共通して使う規約（切片項の自動追加）。
 pub fn x_column_names(
     param_names: &[String],
     has_intercept: bool,
@@ -550,9 +549,8 @@ pub fn x_column_names(
 }
 
 /// `df`から`names`（複数の列名）を、`names`と同じ順序の`Vec<Vec<f64>>`としてまとめて
-/// 取り出す（`extract_f64_column`を列ごとに呼ぶだけの薄いラッパー）。`predict()`/
-/// `augment()`の`x`列抽出ループがOLS/WLS/Logit/Probit/Tobitで重複していたため、
-/// 共通ユーティリティとしてここに集約した。
+/// 取り出す（`extract_f64_column`を列ごとに呼ぶだけの薄いラッパー）。OLS/WLS/Logit/
+/// Probit/Tobitの`predict()`/`augment()`が共通で使う`x`列の抽出ループ。
 ///
 /// # Errors
 /// 各列につき`extract_f64_column`と同じ（列が存在しない・数値として使えないdtype・
@@ -591,9 +589,9 @@ pub fn extract_model_x_columns(
 /// キー列（グループの同一性や時点を表す列）の使われ方。許可するdtypeが異なる。
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum KeyRole {
-    /// グループの同一性だけが意味を持つ列（`entity`・`cluster`）。
+    /// グループの同一性だけが意味を持つ列（`effects`の先頭の列・`cluster`）。
     Identity,
-    /// 時点を表す列（FE/REの`time`・`dk_time`）。
+    /// 時点を表す列（FE/REの`effects`の2つ目・`dk_time`）。
     Time,
 }
 
@@ -649,12 +647,12 @@ fn check_key_dtype(
     ))
 }
 
-/// `df`から`name`列を、同一性だけが意味を持つグループキー（`entity`・`cluster`）として
+/// `df`から`name`列を、同一性だけが意味を持つグループキー（`effects`の先頭の列・`cluster`）として
 /// 文字列のVecで取り出す。
 ///
-/// 行ごとに`String`を作る旧経路で、本番のコードは[`extract_cluster_groups`]・
-/// [`extract_entity_groups`]（行ごとの`String`を作らない）を使う。ここは、それらが旧経路と同じ
-/// コードになることを確かめるテストの比較対象（オラクル）としてだけ残している。
+/// 行ごとに`String`を作る素朴な実装で、本番のコードは[`extract_cluster_groups`]・
+/// [`extract_entity_groups`]（行ごとの`String`を作らない）を使う。ここは、それらが
+/// 本関数と同じコードになることを確かめるテストの比較対象（独立な参照実装）として置いている。
 ///
 /// クラスター変数は整数IDとは限らない（州名・産業コード・企業ID等の文字列/
 /// カテゴリカル変数であることが多い）ため、値そのものではなく「グループの
@@ -737,7 +735,7 @@ fn with_group_labels<T>(
 ///
 /// # Errors
 /// [`extract_group_key_column`]と同じ。
-pub fn extract_cluster_groups(
+fn extract_cluster_groups(
     df: &DataFrame,
     name: &str,
     source: ColumnSource<'_>,
@@ -768,7 +766,7 @@ pub fn extract_optional_cluster_groups(
         .transpose()
 }
 
-/// `df`から`name`列を、パネルのエンティティ列（`entity`）として整数コード化した`GroupCodes`で
+/// `df`から`name`列を、パネルのエンティティ列（`effects`の先頭の列）として整数コード化した`GroupCodes`で
 /// 取り出す。[`extract_cluster_groups`]と同じ分解で、グループのキー（ラベル）も作る
 /// （`fixed_effects()`のキーに使う）。
 ///
@@ -789,7 +787,7 @@ pub fn extract_entity_groups(
     })
 }
 
-/// `df`から`name`列を、時点を表すキー（FE/REの`time`・`dk_time`）として、ラベルと
+/// `df`から`name`列を、時点を表すキー（FE/REの`effects`の2つ目・`dk_time`）として、ラベルと
 /// **値の順序**を持つ`TimeKeys`で取り出す。行ごとの`String`は作らない
 /// （[`extract_cluster_groups`]と同じ分解）。
 ///
@@ -1195,7 +1193,7 @@ mod tests {
 
     #[test]
     fn extract_cluster_groups_codes_labels_in_string_order_and_propagates_errors() {
-        // 整数IDも文字列表現の辞書順（"10" < "9"）でコード化する（旧`BTreeMap<&str, _>`の反復順）。
+        // 整数IDも文字列表現の辞書順（"10" < "9"）でコード化する（`BTreeMap<&str, _>`に入れたときの反復順と同じ）。
         let df = df!("k" => [9_i64, 10, 9, 2]).unwrap();
 
         let groups = extract_cluster_groups(&df, "k", SRC).unwrap();
@@ -1235,7 +1233,7 @@ mod tests {
     }
 
     /// 行ごとの`String`を経由する`extract_group_key_column`＋`from_labels_without_keys`
-    /// （旧実装）と、値そのものをハッシュして仮コードを振る`extract_cluster_groups`が、
+    /// （参照実装）と、値そのものをハッシュして仮コードを振る`extract_cluster_groups`が、
     /// キーに使える全てのdtypeで同じコードになる。
     #[test]
     fn extract_cluster_groups_agrees_with_the_string_label_path_for_every_key_dtype() {
@@ -1301,7 +1299,7 @@ mod tests {
         }
     }
 
-    /// 旧経路（`extract_group_key_column`→`from_labels_without_keys`）と`extract_cluster_groups`の
+    /// 行ごとの`String`を経由する経路（`extract_group_key_column`→`from_labels_without_keys`）と`extract_cluster_groups`の
     /// コードが等しいことを確認する。`PyErr`の`Debug`はGIL未初期化のテスト環境で二重panicするため、
     /// `unwrap()`は使わない。
     fn assert_cluster_groups_agree_with_string_labels(label: &str, series: Series) {
@@ -1315,7 +1313,7 @@ mod tests {
         };
         assert_eq!(actual, expected, "{label}");
 
-        // エンティティ列用（キー付き）も、旧経路の`from_labels`と同じコード・同じキーになる。
+        // エンティティ列用（キー付き）も、`from_labels`経由の結果と同じコード・同じキーになる。
         let expected_keyed = GroupCodes::from_labels(&labels);
         let Ok(actual_keyed) = extract_entity_groups(&df, "k", SRC) else {
             panic!("{label}: extract_entity_groups failed");
@@ -1344,7 +1342,7 @@ mod tests {
         );
     }
 
-    /// 行ごとの`String`を経由する旧経路の`extract_time_keys`（比較対象のオラクル）。
+    /// 行ごとの`String`を経由する素朴な`extract_time_keys`（比較対象の独立な参照実装）。
     fn extract_time_keys_via_row_strings(df: &DataFrame, name: &str) -> PyResult<TimeKeys> {
         let ids = extract_key_column(df, name, KeyRole::Time, SRC)?;
         let series = df.column(name).unwrap();
@@ -1367,7 +1365,7 @@ mod tests {
         }
     }
 
-    /// 時点列も、行ごとの`String`を経由する旧経路と同じ`TimeKeys`（コードと時点のラベル）になる。
+    /// 時点列も、行ごとの`String`を経由する参照実装と同じ`TimeKeys`（コードと時点のラベル）になる。
     #[test]
     fn extract_time_keys_agrees_with_the_row_string_path_for_every_time_dtype() {
         let ints: [i64; 8] = [10, 9, 2, 10, -3, 100, 9, 2];

@@ -178,17 +178,15 @@ def _fit_once_engine(ctx: FitContext):
     from econometricsmodels import FE, FEOptions
 
     two_way = ctx.method == "two_way"
-    kwargs: dict = {
-        "cov_type": ctx.cov_type,
-        "time": _TIME_COL if two_way else None,
-    }
+    effects = [_ENTITY_COL, _TIME_COL] if two_way else [_ENTITY_COL]
+    kwargs: dict = {"cov_type": ctx.cov_type}
     if ctx.cov_type == "dk":
         kwargs.update(dk_time=_TIME_COL, dk_bandwidth=_DK_BANDWIDTH)
     elif ctx.cov_type not in _ENGINE_COV_TYPES:
         raise ValueError(f"unknown cov_type: {ctx.cov_type!r}")
     options = FEOptions(**kwargs)
     return FE(
-        ctx.df, y=ctx.y_col, x=ctx.x_cols, entity=_ENTITY_COL, options=options
+        ctx.df, y=ctx.y_col, x=ctx.x_cols, effects=effects, options=options
     ).fit()
 
 

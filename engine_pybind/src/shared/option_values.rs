@@ -137,7 +137,7 @@ pub fn extract_strict_text(ob: &Bound<'_, PyAny>, name: &str) -> PyResult<String
     })
 }
 
-/// `None`を許す、列名を表す文字列のオプション値（`cluster`・`hac_time`・`time`・`dk_time`）。
+/// `None`を許す、列名を表す文字列のオプション値（`cluster`・`hac_time`・`dk_time`）。
 /// `fit()`の列名引数（`extract_column_name`）と同じ形式のメッセージにする。
 ///
 /// # Errors
@@ -186,6 +186,5 @@ arg_extractors! {
     gmm_type_arg => extract_strict_opt_text("gmm_type") -> Option<String>;
     cluster_arg => extract_strict_opt_column("cluster") -> Option<String>;
     hac_time_arg => extract_strict_opt_column("hac_time") -> Option<String>;
-    time_arg => extract_strict_opt_column("time") -> Option<String>;
     dk_time_arg => extract_strict_opt_column("dk_time") -> Option<String>;
 }

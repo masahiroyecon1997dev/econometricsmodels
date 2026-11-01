@@ -31,6 +31,7 @@ from .._results_utils import (
     cov_params_by_param,
     marginal_effect_rows,
     params_table_rows,
+    results_repr,
 )
 
 __all__ = ["Tobit", "TobitOptions", "TobitResults"]
@@ -113,6 +114,12 @@ class TobitResults:
     coefficients. Use `params_table()` for a row-oriented listing (a
     list of dicts), for example for a JSON response.
 
+    Printing a result shows a header line (the dependent variable,
+    `n_obs` and `cov_type`) and a short table of the coefficients and
+    their standard errors. Its layout may change between versions, so
+    read the fields listed below or use `params_table()` rather than
+    parsing it.
+
     Fields by purpose:
 
     - Coefficients and `sigma`: `params`, `std_errors`, `test_stats`,
@@ -139,6 +146,9 @@ class TobitResults:
 
     def __init__(self, raw: _lib.TobitResult) -> None:
         self._raw = raw
+
+    def __repr__(self) -> str:
+        return results_repr(type(self).__name__, self._raw)
 
     @property
     def param_names(self) -> list[str]:

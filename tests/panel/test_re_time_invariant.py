@@ -129,7 +129,7 @@ def _fit(
         df,
         y="y",
         x=x,
-        entity="entity",
+        effects=["entity"],
         options=_options(cov_type, cluster),
     ).fit()
 
@@ -338,7 +338,7 @@ def test_wagepan_variance_components_match_plm(reference, name, x_cols):
         _wagepan_frame(),
         y="lwage",
         x=x_cols,
-        entity="nr",
+        effects=["nr"],
         options=REOptions(cov_type="classical"),
     ).fit()
     ref = reference["wooldridge"][name]["classical"]
@@ -380,7 +380,7 @@ def test_wagepan_matches_plm(reference, name, x_cols, cov_type):
         df,
         y="lwage",
         x=x_cols,
-        entity="nr",
+        effects=["nr"],
         options=REOptions(cov_type=cov_type),
     ).fit()
     ref = reference["wooldridge"][name]
@@ -417,7 +417,7 @@ def test_wagepan_hausman_matches_plm(reference, name, x_cols, cov_type):
         _wagepan_frame(),
         y="lwage",
         x=x_cols,
-        entity="nr",
+        effects=["nr"],
         options=options,
     ).fit()
     ref = reference["wooldridge"][name][HAUSMAN_KEY][cov_type]

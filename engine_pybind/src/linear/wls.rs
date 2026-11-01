@@ -110,7 +110,7 @@ crate::shared::pickle::impl_pickle_state!(WLSOptions {
 });
 
 impl WLSOptions {
-    /// このオプションが指名するデータの列（`cluster` ・`hac_time`）。使われるかどうか（`cov_type`等）には
+    /// このオプションが指名するデータの列（`cluster`・`hac_time`）。使われるかどうか（`cov_type`等）には
     /// よらず、指名されたものを全て返す。`fit()`はこれらと`y`・`x`等だけをデータから取り込む。
     pub(crate) fn data_columns(&self) -> Vec<String> {
         self.cluster.iter().chain(&self.hac_time).cloned().collect()
@@ -133,7 +133,6 @@ impl WLSOptions {
         hac_lags = None,
         hac_time = None,
     ))]
-    #[allow(clippy::too_many_arguments)]
     fn new(
         #[pyo3(from_py_with = crate::shared::option_values::cov_type_arg)] cov_type: String,
         include_intercept: bool,
@@ -238,7 +237,7 @@ pub struct WLSResult {
     pub dep_var_name: String,
     #[pyo3(get)]
     pub n_obs: usize,
-    /// Standard error type actually used (echoes `OLSOptions.cov_type`, normalized to
+    /// Standard error type actually used (echoes `WLSOptions.cov_type`, normalized to
     /// lowercase; e.g. `"classical"`, `"hc1"`, `"hac"`, `"cluster"`).
     #[pyo3(get)]
     pub cov_type: String,

@@ -10,10 +10,10 @@
 //!   （`engine::nonlinear::tobit::TobitEstimator::params()`は`β`のみ`k`長だが、
 //!   `std_errors()`等は`σ`を含む`k+1`長という非対称な設計になっているため、Python側では
 //!   `param_names`の末尾に`"sigma"`を追加して`params`に`sigma()`の値を追加し、全フィールドを
-//!   `(k+1)`長に揃えてzipできるようにする。ユーザー確認済み）
+//!   `(k+1)`長に揃えてzipできるようにする）
 //! - `predict()`/`marginal_effects()`は`target`引数（`"expected_latent"`/
 //!   `"expected_observed"`/`"prob_uncensored"`/`"expected_uncensored"`、Rust側
-//!   `MarginalEffectsTarget`のsnake_case版、ユーザー確認済み）を追加で受け取る
+//!   `MarginalEffectsTarget`のsnake_case版）を追加で受け取る
 //! - `pred_table()`の代わりに`censoring_fit_check()`を提供する（`y`が連続変数のため
 //!   分類の的中表は意味を持たない、`docs/spec/nonlinear-common.md`6章）
 //! - `log_likelihood_null`/`lr_statistic`/`lr_p_value`/`pseudo_r_squared`は無い
@@ -788,8 +788,7 @@ fn parse_marginal_effects_target(target: &str) -> PyResult<MarginalEffectsTarget
 /// 無条件で追加する設計（`TobitResult`のdocコメント参照）のため、`x`にユーザー指定の
 /// `"sigma"`列があると`param_names`に重複した`"sigma"`が現れ、`zip(param_names, params)`
 /// のような素朴な利用をした際に`x`の`"sigma"`列に対応する係数がエラーにならず静かに
-/// 上書きされる（`validate_no_const_collision`の`"const"`列衝突と同型の問題、
-/// rust-reviewer指摘）。
+/// 上書きされる（`validate_no_const_collision`の`"const"`列衝突と同型の問題）。
 ///
 /// # Errors
 /// `x`に`"sigma"`という列名が含まれる場合は`ValidationError`
@@ -1126,8 +1125,8 @@ mod tests {
     }
 
     /// `x`に`"sigma"`という列名があると、`fit()`が`param_names`の末尾に追加する合成
-    /// パラメータ名`"sigma"`と衝突する（`validate_no_sigma_collision`のdocコメント参照、
-    /// rust-reviewer指摘）。`"const"`列衝突と同型のテストパターン。
+    /// パラメータ名`"sigma"`と衝突する（`validate_no_sigma_collision`のdocコメント参照）。
+    /// `"const"`列衝突と同型のテストパターン。
     #[test]
     fn build_tobit_input_returns_validation_error_for_sigma_collision() {
         let df = df!(
@@ -1350,13 +1349,11 @@ mod tests {
     }
 
     /// `censoring_fit_category_to_result`/`censoring_fit_check_to_result`（`CensoringFitCategory`/
-    /// `CensoringFitCheck`のprivateフィールドをPython向けpyclassに詰め替えるだけの変換）は
-    /// これまで検証されていなかった（フィールドの取り違え・`Option`ラップ漏れ等を検出でき
-    /// ない状態だった、rust-reviewer指摘）。`TobitEstimator::fit`は`SelectedData`を経由しない
-    /// ため（`engine_pybind/src/nonlinear/CLAUDE.md`の既知の制約通り、`fit`本体はGILが
-    /// 必要な`SelectedData`引数のため`cargo test`から直接呼べないが、`TobitEstimator::fit`
-    /// 自体はengine層の関数でGIL不要）、`build_tobit_input`が返す`TobitInput`にそのまま
-    /// 適用してこの変換ロジックを独立に検証する。
+    /// `CensoringFitCheck`のprivateフィールドをPython向けpyclassに詰め替えるだけの変換）は、
+    /// フィールドの取り違え・`Option`ラップ漏れ等を検出するため独立に検証する。`fit`本体は
+    /// GILが必要な`SelectedData`引数のため`cargo test`から直接呼べない
+    /// （`engine_pybind/src/nonlinear/CLAUDE.md`の既知の制約）が、`TobitEstimator::fit`自体は
+    /// engine層の関数でGIL不要なので、`build_tobit_input`が返す`TobitInput`にそのまま適用する。
     #[test]
     fn censoring_fit_check_to_result_correctly_maps_categories_and_fields() {
         let df = df!(

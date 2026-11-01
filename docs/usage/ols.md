@@ -143,6 +143,43 @@ augmented = result.augment(new_data=new_data)
 print(augmented)  # original `new_data` columns, plus a "predicted" column
 ```
 
+## Categorical regressors (dummy variables)
+
+There is no formula interface, so a categorical column is turned into dummy columns before estimation. This applies to every method in the package, not only OLS. Build the dummies from a fixed list of levels, with one level left out as the baseline: the full set of dummies adds up to the constant column, so keeping all of them together with the intercept makes the regressors perfectly collinear. Building the dummies from the same list for the estimation data and for `new_data` gives both frames the same columns, even when `new_data` contains only some of the levels.
+
+```python
+levels = ["north", "south", "west"]  # "north" is the baseline (left out)
+
+
+def region_dummies(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.with_columns(
+        (pl.col("region") == level).alias(f"region={level}")
+        for level in levels[1:]
+    )
+
+
+sales = pl.DataFrame(
+    {
+        "y": [4.7, 6.3, 8.9, 10.2, 10.4, 14.7, 13.1, 17.8, 19.2],
+        "x1": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
+        "region": ["north", "south", "west"] * 3,
+    }
+)
+dummy_names = [f"region={level}" for level in levels[1:]]
+region_result = OLS(region_dummies(sales), y="y", x=["x1", *dummy_names]).fit()
+print(region_result.params)  # {"const": ..., "x1": ..., "region=south": ..., "region=west": ...}
+
+# One new observation from a single region still gets every dummy column
+new_sales = pl.DataFrame({"x1": [10.0], "region": ["west"]})
+print(region_result.predict(new_data=region_dummies(new_sales)))
+```
+
+Each `region=...` coefficient is the difference in the expected value of `y` relative to the baseline region (`"north"`), holding the other regressors fixed. Boolean columns are accepted as numbers (see [Accepted data](../guide/accepted-data.md)), so the comparison above needs no cast.
+
+A value that is not in `levels` (a typo, or a level that was never seen) gets 0 in every dummy column, so it is treated as the baseline without an error. Check that the values are all in `levels` if that matters.
+
+`DataFrame.to_dummies()` is convenient when you only estimate the model, but it returns one column per level, so drop one of them (for example with `drop_first=True`) when the model has an intercept; otherwise the columns are collinear with `const` and `fit()` raises a `ComputationError`. It also creates columns only for the values present in the frame it is called on. Called on a `new_data` that lacks some levels, it returns different columns, and `predict()` then reports the missing column. Use it only when the estimation data and `new_data` are guaranteed to contain the same levels. `drop_first=True` drops the level that appears first in the frame, so the baseline depends on the row order, and a frame with a single level is left with no dummy column.
+
 ## Diagnostics: White test for heteroskedasticity
 
 `OLSResults.white_test()` is a post-estimation diagnostic: it is never computed by `fit()`, and you call it when you want it. It regresses the squared residuals on the independent variables, their squares and their pairwise products. `statistic="lm"` (default) returns the LM version `n * R²` (chi-squared); `statistic="f"` returns the F version of the same auxiliary regression.

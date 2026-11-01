@@ -250,15 +250,16 @@ fn fit_iv(
 /// Parameters
 /// ----------
 /// data : polars.DataFrame
-///     The input data. Must contain the `y`, `x`, `entity`, and (if specified)
-///     time/cluster/dk_time columns.
+///     The input data. Must contain the `y`, `x`, `effects`, and (if specified)
+///     cluster/dk_time columns.
 /// y : str
 ///     Column name of the dependent variable.
 /// x : list[str]
 ///     Column names of the independent variables. Must contain at least one
 ///     column name.
-/// entity : str
-///     Column name of the entity (individual/panel unit) identifier.
+/// effects : list[str]
+///     Column names that define the fixed effects: one column for one-way
+///     effects, two columns (entity, then time) for two-way effects.
 /// options : FEOptions
 ///     Estimation options.
 #[pyfunction]
@@ -267,20 +268,21 @@ fn fit_fe(
     data: &Bound<'_, PyAny>,
     y: &Bound<'_, PyAny>,
     x: &Bound<'_, PyAny>,
-    entity: &Bound<'_, PyAny>,
+    effects: &Bound<'_, PyAny>,
     options: &Bound<'_, PyAny>,
 ) -> PyResult<FEResult> {
     guard(|| {
         check_dataframe(data, "data")?;
         let y = extract_column_name(y, "y")?;
         let x = extract_column_list(x, "x")?;
-        let entity = extract_column_name(entity, "entity")?;
+        let effects = extract_column_list(effects, "effects")?;
         let options: FEOptions = extract_options(options, "options")?;
-        let mut columns: Vec<String> = vec![y.clone(), entity.clone()];
+        let mut columns: Vec<String> = vec![y.clone()];
+        columns.extend(effects.iter().cloned());
         columns.extend(x.iter().cloned());
         columns.extend(options.data_columns());
         let data = select_columns(data, "data", &columns)?;
-        panel::fe::fit(py, data, y, x, entity, &options)
+        panel::fe::fit(py, data, y, x, effects, &options)
     })
 }
 
@@ -289,15 +291,16 @@ fn fit_fe(
 /// Parameters
 /// ----------
 /// data : polars.DataFrame
-///     The input data. Must contain the `y`, `x`, `entity`, and (if specified)
-///     time/cluster/dk_time columns.
+///     The input data. Must contain the `y`, `x`, `effects`, and (if specified)
+///     cluster/dk_time columns.
 /// y : str
 ///     Column name of the dependent variable.
 /// x : list[str]
 ///     Column names of the independent variables. Must contain at least one
 ///     column name.
-/// entity : str
-///     Column name of the entity (individual/panel unit) identifier.
+/// effects : list[str]
+///     Column names that define the random effects: one column for one-way
+///     effects, two columns (entity, then time) for two-way effects.
 /// options : REOptions
 ///     Estimation options.
 #[pyfunction]
@@ -306,20 +309,21 @@ fn fit_re(
     data: &Bound<'_, PyAny>,
     y: &Bound<'_, PyAny>,
     x: &Bound<'_, PyAny>,
-    entity: &Bound<'_, PyAny>,
+    effects: &Bound<'_, PyAny>,
     options: &Bound<'_, PyAny>,
 ) -> PyResult<REResult> {
     guard(|| {
         check_dataframe(data, "data")?;
         let y = extract_column_name(y, "y")?;
         let x = extract_column_list(x, "x")?;
-        let entity = extract_column_name(entity, "entity")?;
+        let effects = extract_column_list(effects, "effects")?;
         let options: REOptions = extract_options(options, "options")?;
-        let mut columns: Vec<String> = vec![y.clone(), entity.clone()];
+        let mut columns: Vec<String> = vec![y.clone()];
+        columns.extend(effects.iter().cloned());
         columns.extend(x.iter().cloned());
         columns.extend(options.data_columns());
         let data = select_columns(data, "data", &columns)?;
-        panel::re::fit(py, data, y, x, entity, &options)
+        panel::re::fit(py, data, y, x, effects, &options)
     })
 }
 

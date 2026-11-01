@@ -109,7 +109,7 @@ def test_cluster_matches_statsmodels(reference, scenario):
         df,
         y="y",
         x=x_cols,
-        entity="entity",
+        effects=["entity"],
         options=REOptions(cov_type="cluster"),
     ).fit()
 
@@ -129,7 +129,7 @@ def _fit_with_cluster_column(csv_name: str, x_cols: list[str], groups):
         df,
         y="y",
         x=x_cols,
-        entity="entity",
+        effects=["entity"],
         options=REOptions(cov_type="cluster", cluster="cluster_group"),
     ).fit()
 
@@ -160,7 +160,7 @@ def test_cluster_imbalanced_shuffled_rows_matches_statsmodels(reference):
         df,
         y="y",
         x=["x1", "x2"],
-        entity="entity",
+        effects=["entity"],
         options=REOptions(cov_type="cluster", cluster="cluster_group"),
     ).fit()
 
@@ -191,7 +191,7 @@ def test_wagepan_cluster_matches_statsmodels(reference):
         df,
         y=WAGEPAN_Y,
         x=WAGEPAN_X,
-        entity=WAGEPAN_ENTITY,
+        effects=[WAGEPAN_ENTITY],
         options=REOptions(cov_type="cluster"),
     ).fit()
 

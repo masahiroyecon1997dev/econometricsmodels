@@ -102,7 +102,10 @@ def _check_result(
     assert res.n_obs == ref["n_obs"], f"{label}/n_obs"
     assert res.df_resid == ref["df_resid"], f"{label}/df_resid"
     assert res.df_model == ref["df_model"], f"{label}/df_model"
-    assert res.n_entities == ref["n_entities"], f"{label}/n_entities"
+    # `n_groups`は`effects`の順（先頭が個体）。
+    assert next(iter(res.n_groups.values())) == ref["n_entities"], (
+        f"{label}/n_entities"
+    )
 
     _assert_fields_close(res, ref, ("f_statistic", "f_p_value"), label)
     if check_r_squared_within:
@@ -120,7 +123,7 @@ def test_matches_linearmodels_one_way(fixtures, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
     x_cols = x_columns(df)
     options = FEOptions(cov_type=cov_type)
-    res = FE(df, y="y", x=x_cols, entity="entity", options=options).fit()
+    res = FE(df, y="y", x=x_cols, effects=["entity"], options=options).fit()
 
     _check_result(
         res,
@@ -134,8 +137,10 @@ def test_matches_linearmodels_one_way(fixtures, scenario, cov_type):
 def test_matches_linearmodels_two_way(fixtures, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
     x_cols = x_columns(df)
-    options = FEOptions(cov_type=cov_type, time="time")
-    res = FE(df, y="y", x=x_cols, entity="entity", options=options).fit()
+    options = FEOptions(cov_type=cov_type)
+    res = FE(
+        df, y="y", x=x_cols, effects=["entity", "time"], options=options
+    ).fit()
 
     _check_result(
         res,
@@ -153,7 +158,9 @@ def test_boundary_df1_one_way_matches_linearmodels(fixtures):
     df_resid=6-3-2=1（`benchmark/panel/freeze.py`参照）。"""
     df = pl.read_csv(DATA_DIR / "fe_baseline_df1_one_way.csv")
     options = FEOptions(cov_type="classical")
-    res = FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
+    res = FE(
+        df, y="y", x=["x1", "x2"], effects=["entity"], options=options
+    ).fit()
 
     _check_result(
         res,
@@ -167,9 +174,13 @@ def test_boundary_df1_two_way_matches_linearmodels(fixtures):
     """df_resid=1境界（2-way）の成功パス。entity=3×period=3・k=3、
     df_resid=9-(3+3+3-1)=1。"""
     df = pl.read_csv(DATA_DIR / "fe_baseline_df1_two_way.csv")
-    options = FEOptions(cov_type="classical", time="time")
+    options = FEOptions(cov_type="classical")
     res = FE(
-        df, y="y", x=["x1", "x2", "x3"], entity="entity", options=options
+        df,
+        y="y",
+        x=["x1", "x2", "x3"],
+        effects=["entity", "time"],
+        options=options,
     ).fit()
 
     _check_result(
@@ -188,7 +199,7 @@ def test_wagepan_one_way_matches_linearmodels(fixtures, cov_type):
     df = load_wooldridge_dataset("wagepan")
     options = FEOptions(cov_type=cov_type)
     res = FE(
-        df, y=WAGEPAN_Y, x=WAGEPAN_X, entity=WAGEPAN_ENTITY, options=options
+        df, y=WAGEPAN_Y, x=WAGEPAN_X, effects=[WAGEPAN_ENTITY], options=options
     ).fit()
 
     _check_result(
@@ -202,9 +213,13 @@ def test_wagepan_one_way_matches_linearmodels(fixtures, cov_type):
 @pytest.mark.parametrize("cov_type", WAGEPAN_COV_TYPES)
 def test_wagepan_two_way_matches_linearmodels(fixtures, cov_type):
     df = load_wooldridge_dataset("wagepan")
-    options = FEOptions(cov_type=cov_type, time=WAGEPAN_TIME)
+    options = FEOptions(cov_type=cov_type)
     res = FE(
-        df, y=WAGEPAN_Y, x=WAGEPAN_X, entity=WAGEPAN_ENTITY, options=options
+        df,
+        y=WAGEPAN_Y,
+        x=WAGEPAN_X,
+        effects=[WAGEPAN_ENTITY, WAGEPAN_TIME],
+        options=options,
     ).fit()
 
     _check_result(

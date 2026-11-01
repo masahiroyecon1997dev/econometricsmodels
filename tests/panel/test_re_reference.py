@@ -80,7 +80,10 @@ def _check_result(res, ref: dict, label: str) -> None:
     assert res.n_obs == ref["n_obs"], f"{label}/n_obs"
     assert res.df_resid == ref["df_resid"], f"{label}/df_resid"
     assert res.df_model == ref["df_model"], f"{label}/df_model"
-    assert res.n_entities == ref["n_entities"], f"{label}/n_entities"
+    # `n_groups`は`effects`の順（先頭が個体）。
+    assert next(iter(res.n_groups.values())) == ref["n_entities"], (
+        f"{label}/n_entities"
+    )
 
     # `f_statistic_robust`（cov_type連動のWald二次形式）と比較する。
     # classical/hc1ともに不均衡パネルでも機械精度で一致する。
@@ -117,7 +120,7 @@ def test_matches_linearmodels(fixtures, scenario, cov_type):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
     x_cols = x_columns(df)
     options = REOptions(cov_type=cov_type)
-    res = RE(df, y="y", x=x_cols, entity="entity", options=options).fit()
+    res = RE(df, y="y", x=x_cols, effects=["entity"], options=options).fit()
 
     _check_result(
         res,
@@ -134,7 +137,7 @@ def test_wagepan_matches_linearmodels(fixtures, cov_type):
     df = load_wooldridge_dataset("wagepan")
     options = REOptions(cov_type=cov_type)
     res = RE(
-        df, y=WAGEPAN_Y, x=WAGEPAN_X, entity=WAGEPAN_ENTITY, options=options
+        df, y=WAGEPAN_Y, x=WAGEPAN_X, effects=[WAGEPAN_ENTITY], options=options
     ).fit()
 
     _check_result(

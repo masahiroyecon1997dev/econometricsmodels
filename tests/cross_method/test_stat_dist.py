@@ -126,7 +126,7 @@ def test_iv_2sls_cluster_uses_g_minus_one_df(panel_df):
 def test_fe_classical_uses_t_with_panel_residual_df(panel_df):
     options = FEOptions(cov_type="classical")
     res = FE(
-        panel_df, y="y", x=["x1", "x2"], entity="entity", options=options
+        panel_df, y="y", x=["x1", "x2"], effects=["entity"], options=options
     ).fit()
     _check_t(res, res.df_resid)
     assert res.stat_df == N - N_ENTITIES - 2
@@ -134,14 +134,14 @@ def test_fe_classical_uses_t_with_panel_residual_df(panel_df):
 
 def test_fe_cluster_uses_g_minus_one_df(panel_df):
     """FEの既定`cov_type`は`"cluster"`（entity単位）で、自由度は`G-1`。"""
-    res = FE(panel_df, y="y", x=["x1", "x2"], entity="entity").fit()
+    res = FE(panel_df, y="y", x=["x1", "x2"], effects=["entity"]).fit()
     _check_t(res, N_ENTITIES - 1)
 
 
 def test_fe_dk_uses_t_minus_one_df(panel_df):
     options = FEOptions(cov_type="dk", dk_time="time")
     res = FE(
-        panel_df, y="y", x=["x1", "x2"], entity="entity", options=options
+        panel_df, y="y", x=["x1", "x2"], effects=["entity"], options=options
     ).fit()
     _check_t(res, N_PERIODS - 1)
 
@@ -149,21 +149,21 @@ def test_fe_dk_uses_t_minus_one_df(panel_df):
 def test_re_classical_uses_t_with_residual_df(panel_df):
     options = REOptions(cov_type="classical")
     res = RE(
-        panel_df, y="y", x=["x1", "x2"], entity="entity", options=options
+        panel_df, y="y", x=["x1", "x2"], effects=["entity"], options=options
     ).fit()
     _check_t(res, res.df_resid)
 
 
 def test_re_cluster_uses_g_minus_one_df(panel_df):
     """REの既定`cov_type`は`"cluster"`（entity単位）で、自由度は`G-1`。"""
-    res = RE(panel_df, y="y", x=["x1", "x2"], entity="entity").fit()
+    res = RE(panel_df, y="y", x=["x1", "x2"], effects=["entity"]).fit()
     _check_t(res, N_ENTITIES - 1)
 
 
 def test_re_dk_uses_t_minus_one_df(panel_df):
     options = REOptions(cov_type="dk", dk_time="time")
     res = RE(
-        panel_df, y="y", x=["x1", "x2"], entity="entity", options=options
+        panel_df, y="y", x=["x1", "x2"], effects=["entity"], options=options
     ).fit()
     _check_t(res, N_PERIODS - 1)
 
@@ -238,13 +238,13 @@ class TestNonEntityCluster:
     [
         pytest.param({"dk_time": "time"}, N_PERIODS, id="1way-dk_time"),
         pytest.param(
-            {"time": "time", "dk_time": "time"}, N_PERIODS, id="2way-dk_time"
+            {"two_way": True, "dk_time": "time"}, N_PERIODS, id="2way-dk_time"
         ),
         pytest.param(
             {"dk_time": "time5"}, N_PERIODS_COARSE, id="1way-dk_time-coarse"
         ),
         pytest.param(
-            {"time": "time", "dk_time": "time5"},
+            {"two_way": True, "dk_time": "time5"},
             N_PERIODS_COARSE,
             id="2way-dk_time-overrides-time",
         ),
@@ -253,7 +253,7 @@ class TestNonEntityCluster:
 def test_fe_dk_uses_t_minus_one_of_the_dk_time_column(
     panel_df, options, n_periods
 ):
-    """dkの`T`は`dk_time`列のユニーク数。2-wayでも固定効果の`time`ではなく
+    """dkの`T`は`dk_time`列のユニーク数。2-wayでも固定効果の2つ目の列ではなく
     `dk_time`が使われる。"""
     res = fit_fe(panel_df, cov_type="dk", **options)
     _check_t(res, n_periods - 1)

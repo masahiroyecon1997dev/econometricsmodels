@@ -54,7 +54,7 @@
 | non-finite value (NaN or infinite) | invalid number | |
 | design matrix | X matrix | |
 | time periods | time points, waves | |
-| entities | individuals, units, groups | `entity`引数のこと |
+| entities | individuals, units, groups | `effects`の先頭の列（個体）のこと |
 | clusters | groups | `cluster`引数のこと。パネルの個体は`entities` |
 | instruments | IVs, excluded instruments | |
 | fixed-effect parameters | dummies | |

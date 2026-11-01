@@ -22,6 +22,7 @@ from .._results_utils import (
     conf_int_by_param,
     cov_params_by_param,
     params_table_rows,
+    results_repr,
 )
 from ..diagnostics import (
     BreuschGodfreyTestResult,
@@ -104,6 +105,12 @@ class OLSResults:
     `result.params["x1"]`. Use `params_table()` for a row-oriented
     listing (a list of dicts), for example for a JSON response.
 
+    Printing a result shows a header line (the dependent variable,
+    `n_obs` and `cov_type`) and a short table of the coefficients and
+    their standard errors. Its layout may change between versions, so
+    read the fields listed below or use `params_table()` rather than
+    parsing it.
+
     Fields by purpose:
 
     - Coefficients: `params`, `std_errors`, `test_stats`, `p_values`,
@@ -129,6 +136,9 @@ class OLSResults:
 
     def __init__(self, raw: _lib.OLSResult) -> None:
         self._raw = raw
+
+    def __repr__(self) -> str:
+        return results_repr(type(self).__name__, self._raw)
 
     @property
     def param_names(self) -> list[str]:

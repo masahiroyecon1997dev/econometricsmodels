@@ -170,17 +170,22 @@ def _check_result(res, ref: dict, label: str) -> None:
         _assert_fields_close(res, ref, ("r_squared_within",), label)
 
 
+def _effects(
+    two_way: bool, *, entity: str = "entity", time: str = "time"
+) -> list[str]:
+    """`effects`引数。2-wayは`[個体列, 時間列]`、1-wayは`[個体列]`。"""
+    return [entity, time] if two_way else [entity]
+
+
 def _options(
     cov_type: str,
     *,
-    two_way: bool,
     dk_bandwidth: int | None = None,
-    time: str = "time",
     dk_time: str = "time",
 ) -> FEOptions:
-    """`time`は2-wayの時間列、`dk_time`はdkの時点列（別のオプション）。`dk`は
-    1-way・2-wayとも`dk_time`を明示する必要がある。"""
-    kwargs = {"time": time} if two_way else {}
+    """`dk_time`はdkの時点列（`effects`とは別の引数）。`dk`は1-way・2-wayとも
+    `dk_time`を明示する必要がある。"""
+    kwargs = {}
     if cov_type == "dk":
         kwargs["dk_time"] = dk_time
         kwargs["dk_bandwidth"] = dk_bandwidth
@@ -198,8 +203,8 @@ def test_matches_fixest_one_way(crosscheck, scenario, cov_type):
         df,
         y="y",
         x=x_cols,
-        entity="entity",
-        options=_options(cov_type, two_way=False),
+        effects=_effects(False),
+        options=_options(cov_type),
     ).fit()
 
     _check_result(
@@ -217,8 +222,8 @@ def test_matches_fixest_two_way(crosscheck, scenario, cov_type):
         df,
         y="y",
         x=x_cols,
-        entity="entity",
-        options=_options(cov_type, two_way=True),
+        effects=_effects(True),
+        options=_options(cov_type),
     ).fit()
 
     _check_result(
@@ -241,8 +246,10 @@ DK_BANDWIDTH_TWO_WAY_CASES = [
 def _fit_dk_bandwidth(scenario: str, bandwidth: int, *, two_way: bool):
     df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
     x_cols = x_columns(df)
-    options = _options("dk", two_way=two_way, dk_bandwidth=bandwidth)
-    return FE(df, y="y", x=x_cols, entity="entity", options=options).fit()
+    options = _options("dk", dk_bandwidth=bandwidth)
+    return FE(
+        df, y="y", x=x_cols, effects=_effects(two_way), options=options
+    ).fit()
 
 
 @pytest.mark.parametrize("scenario, bandwidth", DK_BANDWIDTH_ONE_WAY_CASES)
@@ -288,7 +295,9 @@ def test_cluster_imbalanced_matches_fixest(crosscheck):
     """
     df = cluster_imbalanced_frame()
     options = FEOptions(cov_type="cluster", cluster="cluster_group")
-    res = FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
+    res = FE(
+        df, y="y", x=["x1", "x2"], effects=["entity"], options=options
+    ).fit()
 
     _check_result(
         res,
@@ -303,7 +312,7 @@ def test_cluster_g2_matches_fixest(crosscheck):
     groups = [str(i % 2) for i in range(df.height)]
     df = df.with_columns(pl.Series("cluster_group", groups))
     options = FEOptions(cov_type="cluster", cluster="cluster_group")
-    res = FE(df, y="y", x=["x1"], entity="entity", options=options).fit()
+    res = FE(df, y="y", x=["x1"], effects=["entity"], options=options).fit()
 
     _check_result(
         res,
@@ -320,7 +329,9 @@ def test_cluster_g3_two_slopes_matches_fixest(crosscheck):
     groups = [str(i % 3) for i in range(df.height)]
     df = df.with_columns(pl.Series("cluster_group", groups))
     options = FEOptions(cov_type="cluster", cluster="cluster_group")
-    res = FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
+    res = FE(
+        df, y="y", x=["x1", "x2"], effects=["entity"], options=options
+    ).fit()
 
     assert (res.f_df_num, res.f_df_denom) == (2, 2)
     _check_result(
@@ -338,8 +349,10 @@ def test_two_way_cluster_on_non_entity_column_matches_fixest(crosscheck, case):
     `G = q+1`は自由度の境界、サイズが偏ったクラスターはサイズの偏りを加える
     （`TWO_WAY_CLUSTER_CASES`参照）。分母自由度は全ケースで`G-1`。"""
     df, cluster = two_way_cluster_frame(case)
-    options = FEOptions(cov_type="cluster", cluster=cluster, time="time")
-    res = FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
+    options = FEOptions(cov_type="cluster", cluster=cluster)
+    res = FE(
+        df, y="y", x=["x1", "x2"], effects=["entity", "time"], options=options
+    ).fit()
 
     n_clusters = df[cluster].n_unique()
     assert res.stat_df == n_clusters - 1
@@ -357,7 +370,9 @@ def test_dk_three_periods_matches_fixest(crosscheck):
     """Driscoll-Kraayの時点数`T = q+1`（q=2、分母自由度`T-1 = q`）の境界。"""
     df = dk_three_periods_frame()
     options = FEOptions(cov_type="dk", dk_time="time")
-    res = FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
+    res = FE(
+        df, y="y", x=["x1", "x2"], effects=["entity"], options=options
+    ).fit()
 
     assert (res.f_df_num, res.f_df_denom) == (2, 2)
     _check_result(
@@ -375,7 +390,7 @@ def test_boundary_df1_robust_matches_fixest(crosscheck, cov_type, two_way):
     if two_way:
         df = pl.read_csv(DATA_DIR / "fe_baseline_df1_two_way.csv")
         x = ["x1", "x2", "x3"]
-        options = FEOptions(cov_type=cov_type, time="time")
+        options = FEOptions(cov_type=cov_type)
         ref = crosscheck["synthetic"]["baseline_df1"]["two_way_robust"][
             cov_type
         ]
@@ -386,7 +401,7 @@ def test_boundary_df1_robust_matches_fixest(crosscheck, cov_type, two_way):
         ref = crosscheck["synthetic"]["baseline_df1"]["one_way_robust"][
             cov_type
         ]
-    res = FE(df, y="y", x=x, entity="entity", options=options).fit()
+    res = FE(df, y="y", x=x, effects=_effects(two_way), options=options).fit()
 
     assert res.f_df_denom == 1
     _check_result(res, ref, f"baseline_df1/{two_way}/{cov_type}")
@@ -396,7 +411,9 @@ def test_boundary_df1_one_way_matches_fixest(crosscheck):
     """df_resid=1境界（1-way）の成功パスのfixestクロスチェック。"""
     df = pl.read_csv(DATA_DIR / "fe_baseline_df1_one_way.csv")
     options = FEOptions(cov_type="classical")
-    res = FE(df, y="y", x=["x1", "x2"], entity="entity", options=options).fit()
+    res = FE(
+        df, y="y", x=["x1", "x2"], effects=["entity"], options=options
+    ).fit()
 
     _check_result(
         res,
@@ -408,9 +425,13 @@ def test_boundary_df1_one_way_matches_fixest(crosscheck):
 def test_boundary_df1_two_way_matches_fixest(crosscheck):
     """df_resid=1境界（2-way）の成功パスのfixestクロスチェック。"""
     df = pl.read_csv(DATA_DIR / "fe_baseline_df1_two_way.csv")
-    options = FEOptions(cov_type="classical", time="time")
+    options = FEOptions(cov_type="classical")
     res = FE(
-        df, y="y", x=["x1", "x2", "x3"], entity="entity", options=options
+        df,
+        y="y",
+        x=["x1", "x2", "x3"],
+        effects=["entity", "time"],
+        options=options,
     ).fit()
 
     _check_result(
@@ -426,9 +447,13 @@ def test_boundary_df1_two_way_matches_fixest(crosscheck):
 @pytest.mark.parametrize("cov_type", WAGEPAN_COV_TYPES)
 def test_wagepan_one_way_matches_fixest(crosscheck, cov_type):
     df = load_wooldridge_dataset("wagepan")
-    options = _options(cov_type, two_way=False, dk_time=WAGEPAN_TIME)
+    options = _options(cov_type, dk_time=WAGEPAN_TIME)
     res = FE(
-        df, y=WAGEPAN_Y, x=WAGEPAN_X, entity=WAGEPAN_ENTITY, options=options
+        df,
+        y=WAGEPAN_Y,
+        x=WAGEPAN_X,
+        effects=_effects(False, entity=WAGEPAN_ENTITY),
+        options=options,
     ).fit()
 
     _check_result(
@@ -441,11 +466,13 @@ def test_wagepan_one_way_matches_fixest(crosscheck, cov_type):
 @pytest.mark.parametrize("cov_type", WAGEPAN_COV_TYPES)
 def test_wagepan_two_way_matches_fixest(crosscheck, cov_type):
     df = load_wooldridge_dataset("wagepan")
-    options = _options(
-        cov_type, two_way=True, time=WAGEPAN_TIME, dk_time=WAGEPAN_TIME
-    )
+    options = _options(cov_type, dk_time=WAGEPAN_TIME)
     res = FE(
-        df, y=WAGEPAN_Y, x=WAGEPAN_X, entity=WAGEPAN_ENTITY, options=options
+        df,
+        y=WAGEPAN_Y,
+        x=WAGEPAN_X,
+        effects=_effects(True, entity=WAGEPAN_ENTITY, time=WAGEPAN_TIME),
+        options=options,
     ).fit()
 
     _check_result(

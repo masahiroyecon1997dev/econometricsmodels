@@ -1,8 +1,8 @@
-"""全手法共通の、キー列（`entity`・`cluster`・`time`・`dk_time`）のdtypeと値の検証のテスト。
+"""全手法共通の、キー列（`effects`・`cluster`・`dk_time`）のdtypeと値の検証のテスト。
 
 キー列の抽出は手法ごとに別の呼び出し箇所を持つため（OLS/WLS・Logit/Probit/Tobit・IV・
 FE・RE）、すべての手法と役割の組み合わせで確認する。許可するdtypeは役割ごとに異なる
-（同一性だけのキー: `entity`・`cluster`、時点のキー: `time`・`dk_time`）。
+（同一性だけのキー: `effects[0]`・`cluster`、時点のキー: `effects[1]`・`dk_time`）。
 """
 
 from __future__ import annotations
@@ -79,30 +79,34 @@ CLUSTER_FITS = {
         ),
     ).fit(),
     "FE": lambda d: FE(
-        d, "y", ["x1"], "entity", options=FEOptions(**CLUSTER)
+        d, "y", ["x1"], ["entity"], options=FEOptions(**CLUSTER)
     ).fit(),
     "RE": lambda d: RE(
-        d, "y", ["x1"], "entity", options=REOptions(**CLUSTER)
+        d, "y", ["x1"], ["entity"], options=REOptions(**CLUSTER)
     ).fit(),
 }
 
 ENTITY_FITS = {
-    "FE": lambda d: FE(d, "y", ["x1"], "entity").fit(),
-    "RE": lambda d: RE(d, "y", ["x1"], "entity").fit(),
+    "FE": lambda d: FE(d, "y", ["x1"], ["entity"]).fit(),
+    "RE": lambda d: RE(d, "y", ["x1"], ["entity"]).fit(),
 }
 
 TIME_FITS = {
-    "FE.time": lambda d: FE(
-        d, "y", ["x1"], "entity", options=FEOptions(time="t")
-    ).fit(),
+    "FE.effects_time": lambda d: FE(d, "y", ["x1"], ["entity", "t"]).fit(),
     "FE.dk_time": lambda d: FE(
-        d, "y", ["x1"], "entity", options=FEOptions(cov_type="dk", dk_time="t")
+        d,
+        "y",
+        ["x1"],
+        ["entity"],
+        options=FEOptions(cov_type="dk", dk_time="t"),
     ).fit(),
-    "RE.time": lambda d: RE(
-        d, "y", ["x1"], "entity", options=REOptions(time="t")
-    ).fit(),
+    "RE.effects_time": lambda d: RE(d, "y", ["x1"], ["entity", "t"]).fit(),
     "RE.dk_time": lambda d: RE(
-        d, "y", ["x1"], "entity", options=REOptions(cov_type="dk", dk_time="t")
+        d,
+        "y",
+        ["x1"],
+        ["entity"],
+        options=REOptions(cov_type="dk", dk_time="t"),
     ).fit(),
 }
 
@@ -228,13 +232,13 @@ def test_unsupported_dtype_as_entity_raises(frame, method, dtype, label):
         ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
         column="entity",
         dtype=label,
-        argument="entity",
+        argument="effects",
         data_argument="data",
     ):
         ENTITY_FITS[method](df)
 
 
-# ── 時点のキー: time・dk_time ───────────────────────────────────────
+# ── 時点のキー: effects[1]・dk_time ───────────────────────────────────────
 
 # 時点は0..5の1桁のため、文字列としての順序と時点の順序が一致する。
 TIME_OK = [
@@ -264,7 +268,7 @@ def test_supported_time_dtypes_give_the_same_result(frame, method, dtype):
     ids=[x[1] for x in UNSUPPORTED_TIME_DTYPES],
 )
 def test_unsupported_dtype_as_time_raises(frame, method, dtype, label):
-    """`time`・`dk_time`に使えないdtypeを渡すと、時点列用のメッセージで拒否する。"""
+    """`effects[1]`・`dk_time`に使えないdtypeを渡すと、時点列用のメッセージで拒否する。"""
     df = frame.with_columns(unused_column(dtype).alias("t"))
 
     with raises_error(
@@ -339,10 +343,12 @@ NULL_KEY_CASES = [
 
 
 def _key_argument(column, method):
-    """キー列`column`を渡した引数名（時点の列は、手法によって`time`か`dk_time`）。"""
+    """キー列`column`を渡した引数名（時点の列は、手法によって`effects`か`dk_time`）。"""
+    if column == "entity":
+        return "effects"
     if column != "t":
         return column
-    return "dk_time" if method.endswith("dk_time") else "time"
+    return "dk_time" if method.endswith("dk_time") else "effects"
 
 
 def _assert_missing_key_raises(fit, df, column, method, count):
@@ -439,7 +445,7 @@ def _long_panel() -> pl.DataFrame:
 def _dk_se(df: pl.DataFrame, column: str) -> float:
     options = FEOptions(cov_type="dk", dk_time=column, dk_bandwidth=3)
     return (
-        FE(df, "y", ["x1"], "entity", options=options).fit().std_errors["x1"]
+        FE(df, "y", ["x1"], ["entity"], options=options).fit().std_errors["x1"]
     )
 
 
@@ -524,7 +530,7 @@ def test_datetime_with_time_zone_is_rejected_as_entity(frame, method):
         ErrorCode.COLUMN_TIMEZONE_NOT_SUPPORTED,
         column="entity",
         time_zone="UTC",
-        argument="entity",
+        argument="effects",
         data_argument="data",
     ):
         ENTITY_FITS[method](_aware(frame, "entity"))

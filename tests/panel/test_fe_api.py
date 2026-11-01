@@ -36,8 +36,8 @@ def test_fit_succeeds_and_returns_fe_results(fe_dataset):
 
 
 def test_default_options_use_cluster_cov_type_one_way(fe_dataset):
-    """`options`省略時は`FEOptions()`の既定値（cov_type="cluster"、entity
-    単位・1-way）が使われる（panel-common.md 3.2節）。
+    """`options`省略時は`FEOptions()`の既定値（cov_type="cluster"、`effects`の
+    先頭要素の列（entity）単位）が使われる（panel-common.md 3.2節）。
     """
     res = our_fit(fe_dataset)
     assert res.cov_type == "cluster"
@@ -103,25 +103,25 @@ def test_params_std_errors_test_stats_p_values_share_keys(fe_dataset):
     assert set(res.p_values.keys()) == expected_keys
 
 
-def test_n_obs_dep_var_name_and_n_entities(fe_dataset):
+def test_n_obs_dep_var_name_and_n_groups(fe_dataset):
     res = our_fit(fe_dataset)
     assert res.n_obs == fe_dataset.height
     assert res.dep_var_name == "y"
-    assert res.n_entities == fe_dataset["entity"].n_unique()
+    assert res.n_groups["entity"] == fe_dataset["entity"].n_unique()
 
 
-def test_n_periods_is_none_for_one_way_and_unique_times_for_two_way(
-    fe_dataset,
-):
-    """1-wayは`None`、2-wayは`time`列のユニーク数。`dk_time`のみ指定した
-    1-wayでも`None`のまま。"""
-    assert our_fit(fe_dataset).n_periods is None
+def test_n_groups_has_one_key_per_effect_in_order(fe_dataset):
+    """`n_groups`は`effects`の列名→グループ数で、`effects`の順。1-wayは1要素
+    のみ。`dk_time`のみ指定した1-wayでも`time`は含まれない。"""
+    one_way = our_fit(fe_dataset)
+    assert list(one_way.n_groups) == ["entity"]
     dk_one_way = our_fit(
         fe_dataset, options=FEOptions(cov_type="dk", dk_time="time")
     )
-    assert dk_one_way.n_periods is None
-    two_way = our_fit(fe_dataset, options=FEOptions(time="time"))
-    assert two_way.n_periods == fe_dataset["time"].n_unique()
+    assert list(dk_one_way.n_groups) == ["entity"]
+    two_way = our_fit(fe_dataset, effects=["entity", "time"])
+    assert list(two_way.n_groups) == ["entity", "time"]
+    assert two_way.n_groups["time"] == fe_dataset["time"].n_unique()
 
 
 # ── オプションの反映 ──────────────────────────────────────────────────
@@ -158,8 +158,8 @@ def test_confidence_level_changes_interval_width(fe_dataset):
         assert (wide_hi - wide_lo) > (narrow_hi - narrow_lo)
 
 
-def test_time_option_switches_one_way_two_way(fe_dataset):
-    """`time`が`None`なら1-way、指定すれば2-way（`fe-spec.md`1章）。自由度の式の違い
+def test_effects_length_switches_one_way_two_way(fe_dataset):
+    """`effects`が1要素なら1-way、2要素なら2-way（`fe-spec.md`1章）。自由度の式の違い
     （`fe-spec.md`3.2節: 1-way`n-n_entities-k`、2-way`n-n_entities-n_periods+1-k`）が
     `df_model`に反映されることで区別する。
     """
@@ -167,14 +167,14 @@ def test_time_option_switches_one_way_two_way(fe_dataset):
     n_periods = fe_dataset["time"].n_unique()
 
     one_way = our_fit(fe_dataset)
-    two_way = our_fit(fe_dataset, options=FEOptions(time="time"))
+    two_way = our_fit(fe_dataset, effects=["entity", "time"])
 
     assert one_way.df_model == n_entities + 2
     assert two_way.df_model == n_entities + n_periods - 1 + 2
 
 
 def test_cluster_defaults_to_entity(fe_dataset):
-    """`cluster`省略時は`entity`引数の列を自動的にクラスターキーとして
+    """`cluster`省略時は`effects`の先頭要素の列を自動的にクラスターキーとして
     使う（3.2節）。明示的に`cluster="entity"`を渡した場合と同じ結果に
     なることで確認する。
     """
@@ -194,10 +194,8 @@ def test_dk_bandwidth_zero_succeeds(fe_dataset):
     """`dk_bandwidth=0`（ラグ項なし）も有効な範囲`[0, t)`として受理される
     （engine/src/panel/CLAUDE.md「Driscoll-Kraay型パネルHAC対応」参照）。
     """
-    options = FEOptions(
-        cov_type="dk", time="time", dk_time="time", dk_bandwidth=0
-    )
-    res = our_fit(fe_dataset, options=options)
+    options = FEOptions(cov_type="dk", dk_time="time", dk_bandwidth=0)
+    res = our_fit(fe_dataset, effects=["entity", "time"], options=options)
     assert all(se > 0.0 for se in res.std_errors.values())
 
 
@@ -205,20 +203,23 @@ def test_dk_bandwidth_zero_succeeds(fe_dataset):
 
 
 def test_fixed_effects_one_way_structure(fe_dataset):
-    """1-way（`time`未指定）は`dict[str, float]`（エンティティID→効果）。"""
+    """1-way（`effects`が1要素）も`{列名: {水準: 効果}}`の入れ子。"""
     res = our_fit(fe_dataset)
     effects = res.fixed_effects()
 
     assert isinstance(effects, dict)
-    assert set(effects.keys()) == set(fe_dataset["entity"].unique().to_list())
-    assert all(isinstance(v, float) for v in effects.values())
+    assert set(effects.keys()) == {"entity"}
+    assert set(effects["entity"].keys()) == set(
+        fe_dataset["entity"].unique().to_list()
+    )
+    assert all(isinstance(v, float) for v in effects["entity"].values())
 
 
 def test_fixed_effects_two_way_structure(fe_dataset):
-    """2-way（`time`指定）はトップレベルキー"entity"/"time"を持つ
+    """2-wayはトップレベルキーが`effects`の列名（"entity"/"time"）の
     `dict[str, dict[str, float]]`。
     """
-    res = our_fit(fe_dataset, options=FEOptions(time="time"))
+    res = our_fit(fe_dataset, effects=["entity", "time"])
     effects = res.fixed_effects()
 
     assert set(effects.keys()) == {"entity", "time"}
@@ -251,14 +252,14 @@ def test_cluster_se_exceeds_classical_under_serial_correlation():
         df,
         y="y",
         x=["x1", "x2"],
-        entity="entity",
+        effects=["entity"],
         options=FEOptions(cov_type="classical"),
     ).fit()
     clustered = FE(
         df,
         y="y",
         x=["x1", "x2"],
-        entity="entity",
+        effects=["entity"],
         options=FEOptions(cov_type="cluster"),
     ).fit()
 

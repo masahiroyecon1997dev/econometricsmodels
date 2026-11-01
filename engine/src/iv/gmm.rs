@@ -4245,8 +4245,8 @@ mod tests {
     }
 
     /// `OneStep`は`weight_type`を持たないため（`weight_cluster_codes`は
-    /// `None`）、`cov_type=Cluster`のグループは`validate_structural_cluster_count`だけで検証
-    /// され、`cov_type`から借りたコードで集計される。この経路が、点推定は`cov_type`に依らず、
+    /// `None`）、`cov_type=Cluster`のグループは`validate_iv_fit_inputs`の構造方程式のクラスター数の検証
+    /// だけで検証され、`cov_type`から借りたコードで集計される。この経路が、点推定は`cov_type`に依らず、
     /// 標準誤差はクラスター割り当てだけに依存し（ラベルの付け替えで変わらない）、
     /// 欠落・長さ不一致のコードは`Err`になることを確認する。
     #[test]

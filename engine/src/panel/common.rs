@@ -1426,6 +1426,11 @@ pub(crate) fn ensure_no_zero_variance_columns(
     transformed: &[Vec<f64>],
 ) -> Result<(), PanelError> {
     assert_eq!(
+        names.len(),
+        originals.len(),
+        "names must have one entry per original column"
+    );
+    assert_eq!(
         originals.len(),
         transformed.len(),
         "transformed must have the same number of columns as the original columns"
@@ -2616,6 +2621,14 @@ mod tests {
         let col = [1.0, 2.0, 3.0];
         let theta = theta_for(&entity, &[("a", 1.0), ("b", 1.0)]);
         let _ = quasi_demean_column(&col, &entity, &theta);
+    }
+
+    #[test]
+    #[should_panic(expected = "names must have one entry per original column")]
+    fn ensure_no_zero_variance_columns_panics_when_names_are_fewer_than_columns() {
+        let originals = vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0]];
+        let transformed = originals.clone();
+        let _ = ensure_no_zero_variance_columns(&["x1".to_string()], &originals, &transformed);
     }
 
     #[test]

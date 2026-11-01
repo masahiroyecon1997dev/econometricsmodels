@@ -16,6 +16,8 @@
 
 `cov_type`は`parse_cov_kind`（値）→ `check_cov_options`（`cluster`の未使用）→ `resolve_cov_type`（`cluster`列の抽出）の3段に分け、`solver`は`parse_solver_type`（値、DataFrameを見ない）で受ける。`build_*_input`は、DataFrameを見ない検査（`cov_type`の値 → `solver`の値 → 組合せ）→ ロール構造 → `y`/`x`の列 → `cluster`列の順に呼ぶ。`*Result.cov_type`/`solver`に載せる正規形は`CovKind::name()`/`solver_name()`から作り、呼び出し側で小文字化し直さない。この順序は`tests/cross_method/test_validation_order.py`が固定している。
 
+この順序のうち値 → 組合せ → ロール構造 →（Tobitの`"sigma"`衝突）→ `y`/`x`の列 → `cluster`列は、3手法共通の`extract_mle_columns`（`nonlinear/common.rs`）が担う。`build_*_input`はこれを呼んだ後に`*Input::from_columns`（engine側の検査）を呼ぶ。手法固有の`x`列名の検査（Tobitの`validate_no_sigma_collision`）は`extra_x_check`に関数として渡し、`validate_common_roles`の直後に呼ばれる。`SelectedData`・`Bound`・`Py`は渡さない（`fit`のGIL解放の構造を変えないため）。順序を変えるときは`extract_mle_columns`の1箇所だけを直す。
+
 ## `LogitOptions`/`ProbitOptions`/`TobitOptions`のフィールド重複は意図的
 
 `solver`/`max_iter`/`tol`/`raise_on_non_convergence`（＋`cov_type`/`include_intercept`/`confidence_level`/`cluster`）は3つのpyclassに独立してフィールド宣言・コンストラクタ・`__repr__`が重複している。これは意図的な設計判断であり、共通base struct/traitへの切り出しは行わない: PyO3の`#[pyclass]`/`#[pymethods]`コンストラクタはフラットなkwargs surfaceが前提のため、共有structを導入すると`LogitOptions(mle=MleOptions(...), cov_type=...)`のようなcomposition構造がPython公開APIに漏れ出すか、Pythonの表面積を減らさないまま間接参照が増えるだけになる。`engine_pybind/src/iv/common.rs`の`IVOptions`が`OLSOptions`と同種のフィールド群（`cov_type`/`include_intercept`/`confidence_level`/`cluster`/`hac_lags`/`hac_time`）を既に独立再定義しており、この重複は既存precedentと一貫している（`engine_pybind/src/linear/CLAUDE.md`の`WLSOptions`の節も参照）。`macro_rules!`等でRust側の記述量（フィールド宣言/コンストラクタ/`__repr__`のボイラープレート）だけを機械的に削減できるかは、Python公開APIには影響しない別軸の検討として扱う。

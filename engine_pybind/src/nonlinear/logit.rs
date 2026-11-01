@@ -27,22 +27,19 @@ use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 
 use super::common::{
-    MarginalEffectsResult, check_cov_options, mle_error_to_pyerr, parse_cov_kind,
-    parse_marginal_effects_at, parse_solver_type, resolve_cov_type, resolve_mle_tol_default,
-    solver_name,
+    MarginalEffectsResult, MleColumnSpec, extract_mle_columns, mle_error_to_pyerr,
+    parse_marginal_effects_at, resolve_mle_tol_default, solver_name,
 };
 use crate::shared::augment::append_predicted_column;
 use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
-    SelectedData, extract_f64_column, extract_f64_columns, extract_model_x_columns,
-    select_model_x_columns, x_column_names,
+    SelectedData, extract_model_x_columns, select_model_x_columns, x_column_names,
 };
 use crate::shared::mat_conversion::mat_to_rows;
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
     extract_strict_float, extract_strict_int, extract_strict_opt_column, extract_strict_text,
 };
-use crate::shared::validation::validate_common_roles;
 
 /// Estimation options for Logit.
 ///
@@ -518,15 +515,7 @@ impl LogitResult {
                 .detach(|| self.fitted.marginal_effects(at, confidence_level))
                 .map_err(mle_error_to_pyerr)?;
 
-            Ok(MarginalEffectsResult {
-                param_names: effects.param_names().to_vec(),
-                effect: effects.effect().to_vec(),
-                std_errors: effects.std_errors().to_vec(),
-                test_stats: effects.test_stats().to_vec(),
-                p_values: effects.p_values().to_vec(),
-                conf_lower: effects.conf_lower().to_vec(),
-                conf_upper: effects.conf_upper().to_vec(),
-            })
+            Ok(MarginalEffectsResult::from_engine(&effects))
         })
     }
 }
@@ -549,29 +538,27 @@ pub(crate) fn build_logit_input(
     x: Vec<String>,
     options: &LogitOptions,
 ) -> PyResult<(LogitInput, EngineCovType, String, EngineSolverType)> {
-    // DataFrameを見ない検査を先に行う。報告順は`docs/guide/validation.md`
-    // 「Order in which errors are reported」: オプションの値（`cov_type` → `solver`）→
-    // オプションの組合せ → ロール構造 → `y`/`x`の列 → オプション列 → エンジン。
-    let cov_kind = parse_cov_kind(&options.cov_type)?;
-    let solver = parse_solver_type(&options.solver)?;
-    check_cov_options(cov_kind, options.cluster.as_deref())?;
+    // 検査と列の抽出は3手法共通の`extract_mle_columns`が担う。報告順は
+    // `docs/guide/validation.md`「Order in which errors are reported」: オプションの値
+    // （`cov_type` → `solver`）→ オプションの組合せ → ロール構造 → `y`/`x`の列 →
+    // オプション列 → エンジン（この関数の`from_columns`）。
+    let cols = extract_mle_columns(
+        df,
+        &y,
+        &x,
+        MleColumnSpec {
+            cov_type: &options.cov_type,
+            solver: &options.solver,
+            cluster: options.cluster.as_deref(),
+            include_intercept: options.include_intercept,
+        },
+        None,
+    )?;
 
-    // 完全な多重共線性を早期に、分かりやすいエラーで防ぐ（`validation.rs`に集約、
-    // OLS/WLSと共通、`.claude/rules/rust-style.md`参照）。
-    validate_common_roles(&y, &x, options.include_intercept)?;
-
-    // ── y列の抽出 ──────────────────────────────────────────────────────
-    let y_slice = extract_f64_column(df, &y, ColumnSource::new("y", "data"))?;
-
-    // ── x列の抽出 ──────────────────────────────────────────────────────
-    let x_slices = extract_f64_columns(df, &x, ColumnSource::new("x", "data"))?;
-
-    let cov_type = resolve_cov_type(df, cov_kind, options.cluster.as_deref())?;
-
-    let input = LogitInput::from_columns(&y_slice, &x_slices, x, options.include_intercept, y)
+    let input = LogitInput::from_columns(&cols.y, &cols.x, x, options.include_intercept, y)
         .map_err(mle_error_to_pyerr)?;
 
-    Ok((input, cov_type, cov_kind.name().to_string(), solver))
+    Ok((input, cols.cov_type, cols.cov_name.to_string(), cols.solver))
 }
 
 /// Pythonから渡された `data` / `y` / `x` / `options` を検証し、
@@ -658,7 +645,6 @@ fn fit_frame(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use engine::shared::group_codes::GroupCodes;
     use polars::df;
 
     /// `build_logit_input`のテスト全体で使う既定の`LogitOptions`（`cov_type="classical"`・
@@ -801,84 +787,6 @@ mod tests {
     }
 
     #[test]
-    fn build_logit_input_returns_validation_error_for_empty_x() {
-        let df = well_formed_df();
-        let options = default_options();
-
-        let result = build_logit_input(&df, "y".to_string(), vec![], &options);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn build_logit_input_returns_validation_error_when_y_is_also_in_x() {
-        let df = well_formed_df();
-        let options = default_options();
-
-        let result = build_logit_input(
-            &df,
-            "y".to_string(),
-            vec!["y".to_string(), "x1".to_string()],
-            &options,
-        );
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn build_logit_input_returns_validation_error_for_duplicate_x_column() {
-        let df = well_formed_df();
-        let options = default_options();
-
-        let result = build_logit_input(
-            &df,
-            "y".to_string(),
-            vec!["x1".to_string(), "x1".to_string()],
-            &options,
-        );
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn build_logit_input_returns_validation_error_for_const_collision_when_include_intercept_is_true()
-     {
-        let df = df!(
-            "y" => [0.0, 1.0, 0.0, 1.0],
-            "const" => [1.0, 1.0, 1.0, 1.0],
-        )
-        .unwrap();
-        let options = default_options();
-
-        let result = build_logit_input(&df, "y".to_string(), vec!["const".to_string()], &options);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn build_logit_input_returns_validation_error_for_missing_column() {
-        let df = well_formed_df();
-        let options = default_options();
-
-        let result = build_logit_input(
-            &df,
-            "y".to_string(),
-            vec!["does_not_exist".to_string()],
-            &options,
-        );
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn build_logit_input_returns_validation_error_for_missing_values() {
-        let df = df!(
-            "y" => [0.0, 1.0, 0.0, 1.0],
-            "x1" => [Some(1.0), None, Some(3.0), Some(4.0)],
-        )
-        .unwrap();
-        let options = default_options();
-
-        let result = build_logit_input(&df, "y".to_string(), vec!["x1".to_string()], &options);
-        assert!(result.is_err());
-    }
-
-    #[test]
     fn build_logit_input_returns_validation_error_for_unknown_cov_type() {
         let df = well_formed_df();
         let mut options = default_options();
@@ -886,106 +794,5 @@ mod tests {
 
         let result = build_logit_input(&df, "y".to_string(), vec!["x1".to_string()], &options);
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn build_logit_input_returns_validation_error_for_unknown_method() {
-        let df = well_formed_df();
-        let mut options = default_options();
-        options.solver = "bogus".to_string();
-
-        let result = build_logit_input(&df, "y".to_string(), vec!["x1".to_string()], &options);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn build_logit_input_parses_cluster_cov_type_with_group_column() {
-        let df = df!(
-            "y" => [0.0, 1.0, 0.0, 1.0],
-            "x1" => [10.0, 20.0, 30.0, 40.0],
-            "cluster" => ["g1", "g1", "g2", "g2"],
-        )
-        .unwrap();
-        let mut options = default_options();
-        options.cov_type = "cluster".to_string();
-        options.cluster = Some("cluster".to_string());
-
-        let Ok((_, cov_type, _, _)) =
-            build_logit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
-        else {
-            panic!("expected Ok");
-        };
-
-        match cov_type {
-            EngineCovType::Cluster { groups } => {
-                assert_eq!(
-                    groups,
-                    Some(GroupCodes::from_labels_without_keys(&[
-                        "g1".to_string(),
-                        "g1".to_string(),
-                        "g2".to_string(),
-                        "g2".to_string()
-                    ]))
-                );
-            }
-            other => panic!("expected Cluster, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn build_logit_input_leaves_cluster_groups_none_when_cluster_not_specified() {
-        // クラスターキー未指定自体はここではエラーにせず、`groups=None`のまま返す
-        // （`engine`側の`CommonError::MissingClusterColumn`検証に委ねる設計、
-        // `build_logit_input`のdocコメント参照）。
-        let df = well_formed_df();
-        let mut options = default_options();
-        options.cov_type = "cluster".to_string();
-
-        let Ok((_, cov_type, _, _)) =
-            build_logit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
-        else {
-            panic!("expected Ok");
-        };
-
-        match cov_type {
-            EngineCovType::Cluster { groups } => assert!(groups.is_none()),
-            other => panic!("expected Cluster, got {other:?}"),
-        }
-    }
-
-    /// `build_logit_input`（実際にPythonから渡される文字列を受ける入口）を通した
-    /// 大文字小文字非依存性と、戻り値の正規形の文字列（`LogitResult.cov_type`に格納する値）の
-    /// 検証。`parse_cov_kind`単体の同種のテストは`nonlinear/common.rs`にある。
-    /// `.unwrap()`ではなく`let-else`を使う理由は`engine_pybind/src/linear/common.rs`の
-    /// `parse_cov_kind`テストと同じ（`PyErr`のDebug実装はGIL取得を要求するため）。
-    #[test]
-    fn build_logit_input_cov_type_is_case_insensitive() {
-        let df = well_formed_df();
-        for (input, is_expected) in [
-            (
-                "classical",
-                (|c: &EngineCovType| matches!(c, EngineCovType::Classical))
-                    as fn(&EngineCovType) -> bool,
-            ),
-            ("CLASSICAL", |c| matches!(c, EngineCovType::Classical)),
-            ("Classical", |c| matches!(c, EngineCovType::Classical)),
-            ("OPG", |c| matches!(c, EngineCovType::Opg)),
-            ("Hc0", |c| matches!(c, EngineCovType::Hc0)),
-            ("HC1", |c| matches!(c, EngineCovType::Hc1)),
-            ("CLUSTER", |c| matches!(c, EngineCovType::Cluster { .. })),
-        ] {
-            let mut options = default_options();
-            options.cov_type = input.to_string();
-            let Ok((_, cov_type, cov_type_name, _)) = build_logit_input(
-                &df,
-                "y".to_string(),
-                vec!["x1".to_string(), "x2".to_string()],
-                &options,
-            ) else {
-                panic!("expected Ok for cov_type={input}");
-            };
-            assert!(is_expected(&cov_type), "input={input}, got={cov_type:?}");
-            assert_eq!(cov_type_name, input.to_lowercase(), "input={input}");
-        }
     }
 }

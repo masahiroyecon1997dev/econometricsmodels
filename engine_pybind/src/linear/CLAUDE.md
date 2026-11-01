@@ -15,6 +15,8 @@
 
 ## `white_test()`（事後診断）の配線
 
+`OLSResult`の`#[pymethods]`は`ols/result.rs`に1ブロックだけ置く（`multiple-pymethods`を使わない）。診断3メソッドの本体は`ols/diagnostics.rs`の自由関数（`run_white_test`・`run_breusch_pagan_test`・`run_breusch_godfrey_test`）に置き、`result.rs`の各メソッドが`guard`で包んで呼ぶ（`guard`と`py.detach`の位置は変えない）。以下の「`white_test()`」等の記述は、この自由関数の中身のこと。
+
 `OLSResult`は`OlsEstimator`を保持しないため、`white_test()`は`x_column_names` → `extract_f64_columns`（`common.rs`の`predict_out_of_sample`は両者を
 束ねた`extract_model_x_columns`を使うが、`white_test()`は列名自体も`engine`に渡すため
 分けて呼ぶ）で元のデータ（`source_data`）と`param_names`から`x`の列だけを`select_columns`で取り込み、保持している`residuals`と

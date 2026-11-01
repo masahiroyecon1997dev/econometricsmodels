@@ -16,7 +16,7 @@
 //! およびPythonインタプリタ（GIL）を起動せずに`cargo test`で直接ユニットテストできるようにするため。
 //! `fit`（本ファイルの`pub(crate)`関数、`#[pyfunction] fit_logit`本体は`lib.rs`側にあり
 //! これに委譲する）は、推定に使う列だけを取り込んだ`SelectedData`を受け取り、その`frame`から
-//! `build_logit_input`を呼ぶ（`ols.rs`の`fit`関数と同じパターン）。
+//! `build_logit_input`を呼ぶ（`linear/ols/estimator.rs`の`fit`関数と同じパターン）。
 
 use crate::shared::errors::guard;
 use engine::nonlinear::common::{

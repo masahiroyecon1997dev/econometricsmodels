@@ -78,7 +78,7 @@ use crate::shared::option_values::{
 ///   `"dk"` also `dk_time` (required) and `dk_bandwidth`.
 /// - Confidence intervals: `confidence_level`.
 // 各フィールドの意味・既定値の根拠は`docs/spec/panel-common.md`。
-// module/from_py_objectの理由は`OLSOptions`と同じ（`engine_pybind/src/linear/ols.rs`参照）。
+// module/from_py_objectの理由は`OLSOptions`と同じ（`engine_pybind/src/linear/ols/options.rs`参照）。
 #[pyclass(from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
 pub struct FEOptions {

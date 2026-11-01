@@ -435,7 +435,7 @@ fn fit_frame(
     weight: String,
     options: &WLSOptions,
 ) -> PyResult<WLSResult> {
-    // DataFrameを見ない検査を先に行う（報告順は`ols.rs`の`fit`と同じ）。
+    // DataFrameを見ない検査を先に行う（報告順は`ols/estimator.rs`の`fit`と同じ）。
     let cov_kind = parse_cov_kind(&options.cov_type)?;
     check_cov_options(
         cov_kind,

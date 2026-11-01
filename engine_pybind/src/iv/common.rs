@@ -104,7 +104,7 @@ pub(crate) fn iv_error_to_pyerr(err: IvError) -> PyErr {
 /// - Model: `include_intercept`.
 // 各フィールドの意味・既定値の根拠は`docs/spec/iv-spec.md`。
 // module/from_py_objectの理由は`OLSOptions`/`LogitOptions`と同じ
-// （`engine_pybind/src/linear/ols.rs`のコメント参照）。
+// （`engine_pybind/src/linear/ols/options.rs`のコメント参照）。
 #[pyclass(from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
 pub struct IVOptions {

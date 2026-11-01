@@ -110,6 +110,7 @@ mod tests {
     use super::super::input::build_tobit_input;
     use super::super::options::default_options;
     use super::*;
+    use crate::nonlinear::common::BuiltMleInput;
     use engine::nonlinear::common::MleFitOptions;
     use engine::nonlinear::tobit::TobitEstimator;
     use polars::df;
@@ -128,9 +129,13 @@ mod tests {
         )
         .unwrap();
         let options = default_options();
-        let (input, cov_type, _, solver) =
-            build_tobit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
-                .expect("expected Ok");
+        let BuiltMleInput {
+            input,
+            cov_type,
+            solver,
+            ..
+        } = build_tobit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
+            .expect("expected Ok");
         let estimator = TobitEstimator::fit(
             input,
             MleFitOptions {

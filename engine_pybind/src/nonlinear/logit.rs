@@ -19,15 +19,13 @@
 //! `build_logit_input`を呼ぶ（`linear/ols/estimator.rs`の`fit`関数と同じパターン）。
 
 use crate::shared::errors::guard;
-use engine::nonlinear::common::{
-    CovType as EngineCovType, MleFitOptions, SolverType as EngineSolverType,
-};
+use engine::nonlinear::common::MleFitOptions;
 use engine::nonlinear::logit::{LogitEstimator, LogitFitted, LogitInput};
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 
 use super::common::{
-    MarginalEffectsResult, MleColumnSpec, extract_mle_columns, mle_error_to_pyerr,
+    BuiltMleInput, MarginalEffectsResult, MleColumnSpec, extract_mle_columns, mle_error_to_pyerr,
     parse_marginal_effects_at, predict_out_of_sample, resolve_mle_tol_default, solver_name,
 };
 use crate::shared::augment::append_predicted_column;
@@ -513,7 +511,7 @@ pub(crate) fn build_logit_input(
     y: String,
     x: Vec<String>,
     options: &LogitOptions,
-) -> PyResult<(LogitInput, EngineCovType, String, EngineSolverType)> {
+) -> PyResult<BuiltMleInput<LogitInput>> {
     // 検査と列の抽出は3手法共通の`extract_mle_columns`が担う。報告順は
     // `docs/guide/validation.md`「Order in which errors are reported」: オプションの値
     // （`cov_type` → `solver`）→ オプションの組合せ → ロール構造 → `y`/`x`の列 →
@@ -534,7 +532,12 @@ pub(crate) fn build_logit_input(
     let input = LogitInput::from_columns(&cols.y, &cols.x, x, options.include_intercept, y)
         .map_err(mle_error_to_pyerr)?;
 
-    Ok((input, cols.cov_type, cols.cov_name.to_string(), cols.solver))
+    Ok(BuiltMleInput {
+        input,
+        cov_type: cols.cov_type,
+        cov_type_name: cols.cov_name.to_string(),
+        solver: cols.solver,
+    })
 }
 
 /// Pythonから渡された `data` / `y` / `x` / `options` を検証し、
@@ -571,7 +574,12 @@ fn fit_frame(
     x: Vec<String>,
     options: &LogitOptions,
 ) -> PyResult<LogitResult> {
-    let (input, cov_type, cov_type_lower, solver) = build_logit_input(df, y, x, options)?;
+    let BuiltMleInput {
+        input,
+        cov_type,
+        cov_type_name,
+        solver,
+    } = build_logit_input(df, y, x, options)?;
 
     let estimator = LogitEstimator::fit(
         input,
@@ -611,7 +619,7 @@ fn fit_frame(
         df_resid: estimator.df_resid(),
         converged: estimator.converged(),
         n_iter: estimator.n_iter(),
-        cov_type: cov_type_lower,
+        cov_type: cov_type_name,
         solver: solver_name(solver).to_string(),
         fitted: estimator.into_fitted(),
         source_data: source,
@@ -621,6 +629,7 @@ fn fit_frame(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use engine::nonlinear::common::{CovType as EngineCovType, SolverType as EngineSolverType};
     use polars::df;
 
     /// `build_logit_input`のテスト全体で使う既定の`LogitOptions`（`cov_type="classical"`・
@@ -726,12 +735,18 @@ mod tests {
         let df = well_formed_df();
         let options = default_options();
 
-        let Ok((input, cov_type, _, solver)) = build_logit_input(
+        let Ok(BuiltMleInput {
+            input,
+            cov_type,
+            solver,
+            ..
+        }) = build_logit_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string(), "x2".to_string()],
             &options,
-        ) else {
+        )
+        else {
             panic!("expected Ok");
         };
 
@@ -752,7 +767,7 @@ mod tests {
         let mut options = default_options();
         options.include_intercept = false;
 
-        let Ok((input, _, _, _)) =
+        let Ok(BuiltMleInput { input, .. }) =
             build_logit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
         else {
             panic!("expected Ok");

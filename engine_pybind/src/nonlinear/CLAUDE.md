@@ -58,4 +58,6 @@
 
 ## テストの制約: `SelectedData`引数の関数はcargo testから直接呼べない
 
+`build_logit_input`/`build_probit_input`/`build_tobit_input`は、検証済みの入力と推定の設定を`nonlinear/common.rs`の`BuiltMleInput<I>`（`input`・`cov_type`・`cov_type_name`（`*Result.cov_type`に格納する正規形の名前）・`solver`）で返す。`I`は手法ごとのエンジンの入力型。
+
 `fit`（`build_logit_input`/`build_probit_input`の後段、`LogitEstimator::fit`/`ProbitEstimator::fit`を呼ぶ関数）は`SelectedData`を引数に取るため、GILなしの`#[cfg(test)]`では呼べない（`build_logit_input`/`build_probit_input`が`SelectedData`ではなくプレーンな`polars::DataFrame`を受け取る設計にしているのはこの制約を避けるため）。推定の純Rust部分は`fit_frame`に切り出して`py.detach`の中で走らせるが（`.claude/rules/rust-style.md`のGIL解放の規約）、`fit_frame`も結果に載せる`source`（`Py<PyAny>`）を受け取るため、GILなしの`#[cfg(test)]`からは同様に呼べない。`fit`自体の検証は`uv run maturin develop`後のPythonからの数値照合、または`tests/`のpytestで行う（OLSの前例と同じ、`engine_pybind/src/linear/CLAUDE.md`参照）。

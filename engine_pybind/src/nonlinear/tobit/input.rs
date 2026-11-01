@@ -1,8 +1,9 @@
 //! Tobitの入力構築: オプションの検査・列の抽出から`TobitInput::from_columns`の呼び出しまで。
 
-use crate::nonlinear::common::{MleColumnSpec, extract_mle_columns, mle_error_to_pyerr};
+use crate::nonlinear::common::{
+    BuiltMleInput, MleColumnSpec, extract_mle_columns, mle_error_to_pyerr,
+};
 use crate::shared::errors::user_error;
-use engine::nonlinear::common::{CovType as EngineCovType, SolverType as EngineSolverType};
 use engine::nonlinear::tobit::TobitInput;
 use engine::shared::error_catalog::ErrorCode;
 use polars::prelude::DataFrame;
@@ -51,7 +52,7 @@ pub(crate) fn build_tobit_input(
     y: String,
     x: Vec<String>,
     options: &TobitOptions,
-) -> PyResult<(TobitInput, EngineCovType, String, EngineSolverType)> {
+) -> PyResult<BuiltMleInput<TobitInput>> {
     // 検査と列の抽出は3手法共通の`extract_mle_columns`が担う。報告順は
     // `docs/guide/validation.md`「Order in which errors are reported」: オプションの値
     // （`cov_type` → `solver`）→ オプションの組合せ → ロール構造 → `"sigma"`衝突 →
@@ -80,13 +81,19 @@ pub(crate) fn build_tobit_input(
     )
     .map_err(mle_error_to_pyerr)?;
 
-    Ok((input, cols.cov_type, cols.cov_name.to_string(), cols.solver))
+    Ok(BuiltMleInput {
+        input,
+        cov_type: cols.cov_type,
+        cov_type_name: cols.cov_name.to_string(),
+        solver: cols.solver,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::options::default_options;
     use super::*;
+    use engine::nonlinear::common::{CovType as EngineCovType, SolverType as EngineSolverType};
     use polars::df;
 
     /// `y`は`lower=0.0`（既定の境界）以上の値のみで構成する（`TobitInput::from_columns`の
@@ -105,12 +112,18 @@ mod tests {
         let df = well_formed_df();
         let options = default_options();
 
-        let Ok((input, cov_type, _, solver)) = build_tobit_input(
+        let Ok(BuiltMleInput {
+            input,
+            cov_type,
+            solver,
+            ..
+        }) = build_tobit_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string(), "x2".to_string()],
             &options,
-        ) else {
+        )
+        else {
             panic!("expected Ok");
         };
 
@@ -133,7 +146,7 @@ mod tests {
         let mut options = default_options();
         options.include_intercept = false;
 
-        let Ok((input, _, _, _)) =
+        let Ok(BuiltMleInput { input, .. }) =
             build_tobit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
         else {
             panic!("expected Ok");
@@ -180,7 +193,7 @@ mod tests {
         options.lower = Some(0.0);
         options.upper = Some(6.0);
 
-        let Ok((input, _, _, _)) =
+        let Ok(BuiltMleInput { input, .. }) =
             build_tobit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
         else {
             panic!("expected Ok");
@@ -196,7 +209,7 @@ mod tests {
         options.lower = None;
         options.upper = Some(100.0);
 
-        let Ok((input, _, _, _)) =
+        let Ok(BuiltMleInput { input, .. }) =
             build_tobit_input(&df, "y".to_string(), vec!["x1".to_string()], &options)
         else {
             panic!("expected Ok");

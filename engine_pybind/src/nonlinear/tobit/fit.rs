@@ -1,6 +1,6 @@
 //! Python境界の`fit`: `build_tobit_input`の後に`TobitEstimator::fit`を呼び、`TobitResult`を組み立てる。
 
-use crate::nonlinear::common::{mle_error_to_pyerr, solver_name};
+use crate::nonlinear::common::{BuiltMleInput, mle_error_to_pyerr, solver_name};
 use crate::shared::column_extraction::SelectedData;
 use crate::shared::mat_conversion::mat_to_rows;
 use engine::nonlinear::common::MleFitOptions;
@@ -46,7 +46,12 @@ fn fit_frame(
     x: Vec<String>,
     options: &TobitOptions,
 ) -> PyResult<TobitResult> {
-    let (input, cov_type, cov_type_lower, solver) = build_tobit_input(df, y, x, options)?;
+    let BuiltMleInput {
+        input,
+        cov_type,
+        cov_type_name,
+        solver,
+    } = build_tobit_input(df, y, x, options)?;
 
     let estimator = TobitEstimator::fit(
         input,
@@ -93,7 +98,7 @@ fn fit_frame(
         wald_df: estimator.wald_df(),
         converged: estimator.converged(),
         n_iter: estimator.n_iter(),
-        cov_type: cov_type_lower,
+        cov_type: cov_type_name,
         solver: solver_name(solver).to_string(),
         lower: options.lower,
         upper: options.upper,

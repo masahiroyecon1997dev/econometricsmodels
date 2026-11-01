@@ -22,6 +22,18 @@ use crate::shared::errors::to_pyerr;
 use crate::shared::option_values::parse_choice;
 use crate::shared::validation::{reject_unused_option, validate_common_roles};
 
+/// `build_logit_input`/`build_probit_input`/`build_tobit_input`が返す、検証済みの入力と
+/// 推定の設定。`I`は手法ごとのエンジンの入力型（`LogitInput`等）。
+#[derive(Debug)]
+pub(crate) struct BuiltMleInput<I> {
+    pub(crate) input: I,
+    /// エンジンに渡す`cov_type`（`cluster`のグループを持つ）。
+    pub(crate) cov_type: CovType,
+    /// `*Result.cov_type`に格納する正規形（小文字）の名前。
+    pub(crate) cov_type_name: String,
+    pub(crate) solver: SolverType,
+}
+
 /// `engine::nonlinear::common::MleError`をPython例外に変換する。
 ///
 /// `MleError`（`engine`クレート）と`PyErr`（`pyo3`クレート）はどちらもこのクレートの

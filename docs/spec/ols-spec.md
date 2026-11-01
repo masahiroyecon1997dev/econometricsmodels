@@ -385,7 +385,7 @@ faerのグローバル並列度は`engine::shared::parallelism::ensure_serial()`
   `White test`と補助回帰であることを含め、元のモデルの共線性と取り違えないようにする）。
 - **実装**: engineの`linear::diagnostics::white_test`（`x`の列・列名・残差を受け取り、補助回帰に
   `OlsEstimator::fit`〔`CovType::Classical`〕を再利用）。`OLSResult`は`OlsEstimator`を保持しないため
-  `engine_pybind`が元のデータと`param_names`から`x`の列だけを取り込んで渡す（`predict_for`と同じ経路、
+  `engine_pybind`が元のデータと`param_names`から`x`の列だけを取り込んで渡す（`linear/common.rs`の`predict_out_of_sample`と同じ経路、
   `augment()`と同様に元のデータが無ければ`ValidationError`）。LM/Fの両方をengineが計算し、
   `statistic`の選択は`engine_pybind`。p値は`statrs`の`sf`（`1 - cdf`は裾で潰れるため使わない）。
 - **リファレンスとの関係**: statsmodels `het_white`は補助回帰の項の重複を除かないが、補助回帰を`OLS`で

@@ -165,7 +165,7 @@ polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）�
 3. **Clusterも独自計算**（**【linearmodels方式からfixest方式へ変更】**）:
    補正係数はOLSと同じ`(G/(G-1))×((n-1)/(n-K))`だが、**`K`（`(n-1)/(n-K)`の分母）は
    fixestの`ssc()`小標本補正（既定`K.fixef="nonnested"`）に合わせたFE固有ロジック**
-   （`fe_cluster_k_correction`、`engine/src/panel/fe.rs`）で決める——linearmodelsが
+   （`fe_cluster_k_correction`、`engine/src/panel/common.rs`）で決める——linearmodelsが
    使っていた単純な`extra_df`分岐（`n/(n-extra_df-k)`のみ、`G/(G-1)`補正なし）とは
    異なる。fixest 0.14.2のRソース（`fixest:::ssc_compute_K`）と実地数値実験で確定した式:
    FE次元（1-wayはentityのみ、2-wayはentity+time）それぞれについて、その次元が

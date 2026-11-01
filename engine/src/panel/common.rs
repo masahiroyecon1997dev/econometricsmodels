@@ -67,10 +67,13 @@ use faer::Mat;
 use thiserror::Error;
 
 use crate::linear::common::LeastSquaresError;
-use crate::shared::covariance::{cluster_correction, cluster_meat, default_hac_lags};
-use crate::shared::error::{CommonError, ErrorInfo, staged_report};
+use crate::shared::covariance::{cluster_correction, cluster_meat, default_hac_lags, leverages};
+use crate::shared::error::{ClusterSetting, CommonError, ErrorInfo, staged_report};
 use crate::shared::error_catalog::{ErrorCode, ErrorReport, Stage};
 use crate::shared::group_codes::GroupCodes;
+use crate::shared::validation::{
+    column_is_zero_variance, validate_cluster_count_covers_slopes, validate_cluster_groups,
+};
 
 /// パネルデータの2つの次元。エラーメッセージ・バリデーションで「どちらの次元の
 /// 問題か」を区別するために使う。
@@ -823,50 +826,43 @@ pub(crate) fn panel_classical_cov_params(
     Mat::from_fn(k, k, |i, j| sigma2 * (*xtx_inv.get(i, j)))
 }
 
-/// `panel_hc_cov_params`内部でのみ使うHCの種類（`shared::covariance::HcVariant`と同型だがHC0を含まない、
-/// FE/REともにHC0はスコープ外、`fe.rs`モジュールdoc「`cov_type`対応」参照）。
-pub(crate) enum PanelHcVariant {
+/// `panel_hc_cov_params`が使うHCの種類（`shared::covariance::HcVariant`と同型だがHC0を含まない、
+/// FE/REともにHC0はスコープ外、`fe.rs`モジュールdoc「`cov_type`対応」参照）。HC2/HC3は各行の
+/// レバレッジ`h`（FEは`leverage_full`、REは`shared::covariance::leverages`の素のレバレッジ）を
+/// バリアントに持つため、呼び出し側が`variant`と`h`の組み合わせを誤ることはない。
+pub(crate) enum PanelHcVariant<'a> {
     Hc1,
-    Hc2,
-    Hc3,
+    Hc2(&'a [f64]),
+    Hc3(&'a [f64]),
 }
 
 /// HC1〜HC3の係数分散共分散行列（k×k）。`shared::covariance::hc_cov_params`と同型の構造だが、
 /// 小標本補正がFE/RE用に異なる（`fe.rs`モジュールdoc「`cov_type`対応」参照）:
 /// - HC1: `w_i = n/df_resid`
-/// - HC2/HC3: `w_i`はレバレッジ`h`ベース（FEは`leverage_full`、REは`shared::covariance::leverages`の素のレバレッジを渡す）
-///
-/// `h`の`expect`（`Hc2`/`Hc3`分岐）は、呼び出し元の`fit()`が`variant=Hc2|Hc3`のときは
-/// 必ず`Some(&h)`を渡す構造になっており、`variant`と`h`の組み合わせに呼び出し側のバグ
-/// 以外で不整合が生じることはない（`shared::covariance::hc_cov_params`の同型の
-/// `.expect("leverage is computed for HC2")`と同じ「型で表現しきれない呼び出し規約」の防御）。
+/// - HC2/HC3: `w_i`はバリアントが持つレバレッジ`h`ベース
 pub(crate) fn panel_hc_cov_params(
     x: &Mat<f64>,
     residuals: &[f64],
     xtx_inv: &Mat<f64>,
     df_resid: usize,
-    h: Option<&[f64]>,
-    variant: PanelHcVariant,
+    variant: PanelHcVariant<'_>,
 ) -> Mat<f64> {
     let n = x.nrows();
     let k = x.ncols();
     let hc1_correction = (n as f64 / df_resid as f64).sqrt();
 
-    let x_scaled = Mat::from_fn(n, k, |i, j| {
-        let resid = residuals[i];
-        let scale = match variant {
-            PanelHcVariant::Hc1 => resid * hc1_correction,
-            PanelHcVariant::Hc2 => {
-                let h = h.expect("Hc2 requires leverage")[i];
-                resid / (1.0 - h).sqrt()
+    // 行ごとのスケールは列に依存しないため、行列の組み立て（n×kの二重ループ）の外で一度だけ求める。
+    let row_scales: Vec<f64> = (0..n)
+        .map(|i| {
+            let resid = residuals[i];
+            match &variant {
+                PanelHcVariant::Hc1 => resid * hc1_correction,
+                PanelHcVariant::Hc2(h) => resid / (1.0 - h[i]).sqrt(),
+                PanelHcVariant::Hc3(h) => resid / (1.0 - h[i]),
             }
-            PanelHcVariant::Hc3 => {
-                let h = h.expect("Hc3 requires leverage")[i];
-                resid / (1.0 - h)
-            }
-        };
-        scale * (*x.get(i, j))
-    });
+        })
+        .collect();
+    let x_scaled = Mat::from_fn(n, k, |i, j| row_scales[i] * (*x.get(i, j)));
 
     let psi_hat = x_scaled.transpose() * &x_scaled;
     xtx_inv * &psi_hat * xtx_inv
@@ -878,7 +874,7 @@ pub(crate) fn panel_hc_cov_params(
 /// 変更した。`fe.rs`モジュールdoc「`cov_type`対応」参照）。`G`はこの関数が
 /// `groups`から数える（`shared::covariance::cluster_cov_params`と同じ）。`K`（`(n-1)/(n-K)`の分母）は
 /// 呼び出し側が決める`k_correction`引数で渡す——FEは固定効果ダミーとクラスター変数の
-/// ネスト関係で決まるfixest固有のK計算（`fe.rs`の`fe_cluster_k_correction`）、REは
+/// ネスト関係で決まるfixest固有のK計算（`fe_cluster_k_correction`）、REは
 /// 単純に`df_model`（FEのような固定効果ダミーのネスト補正が不要、モジュールdoc参照）。
 pub(crate) fn panel_cluster_cov_params(
     x: &Mat<f64>,
@@ -1160,10 +1156,652 @@ pub(crate) fn quasi_demean_two_way(
         .collect()
 }
 
+/// LSDV相当のフルレバレッジ`h_ii_full`（HC2/HC3用、モジュールdoc「`cov_type`対応」の
+/// 導出参照）。分割回帰（Frisch-Waugh-Lovell）のレバレッジ分解則により、固定効果ダミーを
+/// 明示的に含めた設計行列でのレバレッジは、ダミーのみの回帰のレバレッジ（`1/T_i`、
+/// 2-wayはさらに`1/N_t - 1/n`）とwithin変換後のレバレッジ（`h_within`）の和になる
+/// （fixestの`vcov="HC2"`/`"HC3"`と数値一致を1-way・2-way双方で確認済み）。
+///
+/// グループサイズ`T_i`/`N_t`はコードの`counts()`から引く。
+fn leverage_full(
+    h_within: &[f64],
+    entity: &GroupCodes,
+    time: Option<&GroupCodes>,
+    n: usize,
+) -> Vec<f64> {
+    let entity_codes = entity.codes();
+    let entity_sizes = entity.counts();
+    match time {
+        None => (0..n)
+            .map(|i| 1.0 / (entity_sizes[entity_codes[i]] as f64) + h_within[i])
+            .collect(),
+        Some(time) => {
+            let time_codes = time.codes();
+            let time_sizes = time.counts();
+            (0..n)
+                .map(|i| {
+                    1.0 / (entity_sizes[entity_codes[i]] as f64)
+                        + 1.0 / (time_sizes[time_codes[i]] as f64)
+                        - 1.0 / (n as f64)
+                        + h_within[i]
+                })
+                .collect()
+        }
+    }
+}
+
+/// FE次元（`entity`または`time`）の各値が`cluster`上でちょうど1つの値にしか対応しないか
+/// （＝`cluster`がその次元と同じか、それを包含するより粗い分割か）を判定する
+/// （fixestの`ssc_compute_K`が言う「FEがクラスター変数にネストしている」の定義。
+/// `fe_cluster_k_correction`のdocコメント参照）。元は`entity_nested_within_cluster`
+/// という1-way専用の名前だったが、2-way FEでtime次元にも同じ判定を適用する必要が
+/// あるため汎用化した（ロジック自体は無変更）。
+fn fixef_dimension_nested_within_cluster(dim: &GroupCodes, cluster: &GroupCodes) -> bool {
+    // FE次元の各水準が最初に対応したクラスターコード（未出現は`usize::MAX`）。
+    let mut mapping = vec![usize::MAX; dim.n_groups()];
+    for (&d, &c) in dim.codes().iter().zip(cluster.codes()) {
+        if mapping[d] == usize::MAX {
+            mapping[d] = c;
+        } else if mapping[d] != c {
+            return false;
+        }
+    }
+    true
+}
+
+/// fixestの`ssc_compute_K`（既定`K.fixef="nonnested"`・`K.exact=FALSE`）を移植した、
+/// cluster小標本補正の`K`（`panel_cluster_cov_params`の`(n-1)/(n-K)`の`K`）計算。
+///
+/// fixest 0.14.2のRソース（`Rscript -e 'cat(deparse(fixest:::ssc_compute_K), sep="\n")'`）と
+/// 実地数値実験（devcontainer内のfixest 0.14.2、実装時）で確定した式:
+///
+/// FE次元（1-wayは`entity`のみ、2-wayは`entity`+`time`）それぞれについて、その次元が
+/// クラスター変数に「ネスト」している（＝各水準がクラスターの単一の値にしか対応しない、
+/// `fixef_dimension_nested_within_cluster`で判定）かを調べ、ネストした次元の生の水準数
+/// （`n_entities`/`n_periods`、`df_model`に含まれる冗長性補正前の値）の合計を
+/// `nested_size_sum`、ネストした次元の数を`count_nested`、FE次元の総数を`m`（1か2）とする:
+///
+/// - `count_nested == 0`（どの次元もネストしていない、Stataの`xtreg,fe`型）:
+///   `K = df_model`（固定効果ダミーをフルカウント）
+/// - `count_nested == m`（全次元がネスト。1-way・cluster=entityがこの既定ケース）:
+///   `K = df_model - nested_size_sum + m`
+/// - それ以外（2-way FEで一部の次元だけネスト）:
+///   `K = df_model - (nested_size_sum - count_nested)`
+///
+/// 最後にfixest自身の安全弁`K = max(K, k + 1)`（`k`は傾き係数の数。Rソースの
+/// `K = max(K, length(object$coefficients) + 1)`）を適用する——fixestのRソースを
+/// 忠実に移植する方針（1章）のため実装しているが、**このプロジェクトの`FeEstimator::fit`が
+/// 保証する前提（`n_entities>=1`・2-wayなら`n_periods>=1`、および`df_model = k + neffects`の
+/// 定義）の下では、3分岐のどのケースでもこのフロアは実質的にno-op（`raw_k`が既に
+/// `k+1`以上）であることを代数的に確認済み**（rust-reviewerの指摘を受けて検算、
+/// ）:
+/// - `count_nested == m`（全次元ネスト）: `nested_size_sum`はネストした全次元の生サイズの
+///   合計で、`df_model`の`neffects`部分もちょうど同じ次元から`Σsize - (m-1)`として
+///   構成される（`neffects`の定義、モジュールdoc「自由度調整」参照）ため、
+///   `K = df_model - nested_size_sum + m = k + (Σsize - (m-1)) - Σsize + m = k + 1`が
+///   **恒等的に**成り立つ（1-way・2-way両次元ネストのどちらでも）。フロアと厳密に一致する
+///   だけで、フロアが値を持ち上げる場面ではない。
+/// - 部分ネスト・ネストなし（2-way限定）: ネストしていない側の次元の生サイズが
+///   `df_model`にそのまま残るため、`K`はその生サイズの分だけ`k+1`を上回る
+///   （`n_entities`/`n_periods`はいずれもパネルとして成立する以上`>=1`、実務上は
+///   ほぼ常に`>=2`）。
+///
+/// 上記のため、`fit()`経由の統合テストではこのフロアの分岐（`raw_k < k+1`になる入力）を
+/// 実際には構成できない。フロア自体の検証は`fe_cluster_k_correction`を直接呼ぶ
+/// ユニットテスト（`fe_cluster_k_correction_floor_is_a_no_op_under_realistic_inputs`）で、
+/// 上記の恒等式そのものを回帰ガードする（`.claude/rules/rust-style.md`「テスト」の
+/// 「理論上到達不能な経路は`Result`化しdocで理由を明記すればカバレッジ対象外でよい」
+/// 方針と同型——ここでは`Result`ではなく`usize`の恒等式だが、同じ考え方で
+/// 「なぜ到達しないか」を明記する）。
+///
+/// 具体例（実地検証済み）: 1-way FE（`n_entities=20`）・`cluster=entity`（既定）・
+/// `k=2`なら`df_model=22`・`nested_size_sum=20`・`count_nested=m=1`で`K=22-20+1=3`
+/// （`k+1=3`と一致、フロアはno-op）。
+///
+/// `two_way_time`は2-wayの時点コード（1-wayは`None`）。FE次元は1-wayがentityのみ、
+/// 2-wayがentityとtime（水準数は`time.n_groups()`）。
+fn fe_cluster_k_correction(
+    entity: &GroupCodes,
+    two_way_time: Option<&GroupCodes>,
+    n_entities: usize,
+    df_model: usize,
+    k: usize,
+    cluster: &GroupCodes,
+) -> usize {
+    let mut dims = vec![(
+        fixef_dimension_nested_within_cluster(entity, cluster),
+        n_entities,
+    )];
+    if let Some(time) = two_way_time {
+        dims.push((
+            fixef_dimension_nested_within_cluster(time, cluster),
+            time.n_groups(),
+        ));
+    }
+    let m = dims.len();
+    let count_nested = dims.iter().filter(|(nested, _)| *nested).count();
+    let nested_size_sum: usize = dims
+        .iter()
+        .filter(|(nested, _)| *nested)
+        .map(|(_, size)| size)
+        .sum();
+
+    let raw_k: i64 = if count_nested == 0 {
+        df_model as i64
+    } else if count_nested == m {
+        df_model as i64 - nested_size_sum as i64 + m as i64
+    } else {
+        df_model as i64 - (nested_size_sum as i64 - count_nested as i64)
+    };
+    raw_k.max((k + 1) as i64) as usize
+}
+
+/// `levels`の全水準がちょうど2観測を持ち、その2観測の`groups`ラベルが異なるか
+/// （`groups`のユニーク数が2の前提で呼ぶ。このとき各水準が2グループに1観測ずつ）。
+/// 1水準でも3観測以上・同じグループに2観測・1観測があれば`false`。
+///
+/// `levels.nobs() == groups.nobs()`は呼び出し側の契約（`FeInput`のコードと、
+/// `validate_cluster_groups`済みのクラスター列のコード、または`fit()`のDkアームで
+/// 長さを検証済みのDK時点列のコード）。
+fn every_level_splits_once_across_two_groups(levels: &GroupCodes, groups: &GroupCodes) -> bool {
+    debug_assert_eq!(
+        levels.nobs(),
+        groups.nobs(),
+        "levels and groups must have the same length (caller contract)"
+    );
+    // 水準ごとの（最初の観測のグループコード、観測数）。`levels`のコードは全水準が
+    // 少なくとも1回現れるため、最後の`all`は未出現の水準を考慮しなくてよい。
+    let mut first_group = vec![usize::MAX; levels.n_groups()];
+    let mut count = vec![0_usize; levels.n_groups()];
+    for (&level, &group) in levels.codes().iter().zip(groups.codes()) {
+        match count[level] {
+            0 => {
+                first_group[level] = group;
+                count[level] = 1;
+            }
+            seen if seen >= 2 || first_group[level] == group => return false,
+            _ => count[level] += 1,
+        }
+    }
+    count.iter().all(|&c| c == 2)
+}
+
+/// ユニーク数2の`groups`（Clusterのクラスター列・Dkの時点列）について、within変換後の
+/// グループスコアが恒等的にゼロになるか（`PanelError::DegenerateDkTwoPeriods`/
+/// `DegenerateClusterTwoGroups`の判定）。
+///
+/// within変換は吸収した各FE次元の水準内で和をゼロにする（1-wayはentity、2-wayは
+/// entityとtimeの両方）。ある次元の全水準がちょうど2観測で2グループに1つずつ分かれると、
+/// 各水準の2観測で`x̃`・`ẽ`が符号反転し、両グループに同じ寄与が入ってスコアが等しくなる。
+/// 正規方程式でスコアの和はゼロのため、両方ゼロになる。entity方向（2時点のパネルを
+/// timeでクラスタリング等）だけでなく、2-wayではtime方向（エンティティ2つのパネルを
+/// entityでクラスタリング——Clusterの既定——等）も同じ構造になる。
+///
+/// `two_way_time`は2-wayの時点コード（1-wayは`None`、`two_way_time`関数参照）。
+fn two_group_split_is_degenerate(
+    entity: &GroupCodes,
+    two_way_time: Option<&GroupCodes>,
+    groups: &GroupCodes,
+) -> bool {
+    every_level_splits_once_across_two_groups(entity, groups)
+        || two_way_time.is_some_and(|time| every_level_splits_once_across_two_groups(time, groups))
+}
+
+/// within変換（entity、2-wayはさらにtimeでθ=1のquasi-demean）。列スライスに適用できるため、
+/// `FeInput`の`y`・`x`だけでなく、操作変数など他の列にも同じ変換をかけられる。
+///
+/// 2-wayは閉形式の二重デミーニングと数学的に等価な「entityでquasi-demean→その結果をtimeで
+/// quasi-demean」の2段階適用で計算する（`fe.rs`モジュールdoc参照）。バランスパネルであることの
+/// 検証はしない（呼び出し側が`validate_balanced_panel`で済ませる前提。不均衡だと二重デミーニングと
+/// 一致しない）。θ=1のベクトルは変換の構築時に一度だけ作り、列ごとに使い回す。
+pub(crate) struct WithinTransform<'a> {
+    entity: &'a GroupCodes,
+    entity_theta: Vec<f64>,
+    /// 2-wayのtimeのコードとθ=1のベクトル（1-wayは`None`）。
+    time: Option<(&'a GroupCodes, Vec<f64>)>,
+}
+
+impl<'a> WithinTransform<'a> {
+    /// entityのみのwithin変換。
+    pub(crate) fn one_way(entity: &'a GroupCodes) -> Self {
+        Self {
+            entity,
+            entity_theta: vec![1.0; entity.n_groups()],
+            time: None,
+        }
+    }
+
+    /// entity + timeのwithin変換。
+    pub(crate) fn two_way(entity: &'a GroupCodes, time: &'a GroupCodes) -> Self {
+        Self {
+            entity,
+            entity_theta: vec![1.0; entity.n_groups()],
+            time: Some((time, vec![1.0; time.n_groups()])),
+        }
+    }
+
+    /// 1列にwithin変換をかける。
+    pub(crate) fn apply(&self, col: &[f64]) -> Vec<f64> {
+        let by_entity = quasi_demean_column(col, self.entity, &self.entity_theta);
+        match &self.time {
+            None => by_entity,
+            Some((time, time_theta)) => quasi_demean_column(&by_entity, time, time_theta),
+        }
+    }
+}
+
+/// `entity`、2-wayなら`two_way_time`にも観測数1のグループがないことを検証する
+/// （`fe-spec.md`1章）。entityを先に検査し、両方に該当するsingletonがあればentity側を報告する。
+/// 列名は`names`から引く。
+///
+/// # Errors
+/// 観測数1のグループが見つかった場合は`PanelError::SingletonGroup`（該当する`dimension`を含む）。
+pub(crate) fn ensure_no_singleton_groups(
+    names: &EffectNames,
+    entity: &GroupCodes,
+    two_way_time: Option<&GroupCodes>,
+) -> Result<(), PanelError> {
+    reject_singleton_group(
+        PanelDimension::Entity,
+        names.get(PanelDimension::Entity),
+        entity,
+    )?;
+    if let Some(time) = two_way_time {
+        reject_singleton_group(PanelDimension::Time, names.get(PanelDimension::Time), time)?;
+    }
+    Ok(())
+}
+
+/// within変換後の各列に分散ゼロの列がないことを検証する（`fe-spec.md`1章）。`names`・
+/// `originals`・`transformed`は同じ列順・同じ列数で、列ごとに同じ長さを持つ（`engine`内の
+/// 内部契約であり、ユーザー入力起因ではない。リリースビルドで`zip`が黙って短い方へ切り詰める
+/// 事態を避けるため`debug_assert_eq!`ではなく`assert_eq!`で守る）。
+///
+/// # Errors
+/// 分散ゼロの列が見つかった場合は`PanelError::ZeroVarianceAfterDemeaning`（該当列名を含む）。
+/// 複数列が該当する場合は`names`の順で最初に見つかった列のみを報告する。
+pub(crate) fn ensure_no_zero_variance_columns(
+    names: &[String],
+    originals: &[Vec<f64>],
+    transformed: &[Vec<f64>],
+) -> Result<(), PanelError> {
+    assert_eq!(
+        originals.len(),
+        transformed.len(),
+        "transformed must have the same number of columns as the original columns"
+    );
+    for ((name, original), transformed) in names.iter().zip(originals).zip(transformed) {
+        assert_eq!(
+            original.len(),
+            transformed.len(),
+            "transformed column '{name}' must have the same length as the original column"
+        );
+        if column_is_zero_variance(original, transformed) {
+            return Err(PanelError::ZeroVarianceAfterDemeaning {
+                column: name.clone(),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// `ids`（`entity`または`time`の列）に観測数1のグループがあれば
+/// `PanelError::SingletonGroup`を返す。
+///
+/// 複数のsingletonグループが存在する場合は、観測順で最初に現れるグループのみを報告する
+/// （`validate_no_zero_variance_regressors`の「最初の1件を報告」方針と統一）。観測数は
+/// `FeInput`の構築時に作ったコード（`GroupCodes::counts`）をそのまま使う。
+pub(crate) fn reject_singleton_group(
+    dimension: PanelDimension,
+    column: &str,
+    ids: &GroupCodes,
+) -> Result<(), PanelError> {
+    // 観測順で最初に現れたsingletonを報告する（旧実装の`String`版と同じ選び方）。
+    for &c in ids.codes() {
+        if ids.counts()[c] == 1 {
+            return Err(PanelError::SingletonGroup {
+                dimension,
+                column: column.to_string(),
+                group_id: ids.keys()[c].clone(),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// 2-way FEがバランスパネル（`entity` × `time`の全組合せが過不足なく1回ずつ存在する）
+/// であることを検証する（`fe-spec.md`3.1節）。
+///
+/// 観測数カウントの一致（`n_obs == n_entities * n_periods`）だけでは不十分
+/// （`PanelError::UnbalancedPanelForTwoWay`のdocコメント参照: あるペアの重複と別ペアの
+/// 欠落が相殺してカウントだけ一致する入力がありうる）。代わりに、`(entity, time)`
+/// ペアが重複なく、かつ`n_obs == n_entities * n_periods`であることを検証する。
+/// ペア集合は`entity × time`の全組合せグリッド（サイズ`n_entities * n_periods`）の
+/// 部分集合であるため、重複が無く要素数がグリッドのサイズと一致すれば、部分集合が全体
+/// （＝全組合せが埋まっている）と一致することが数学的に保証される。
+///
+/// `n_obs != n_entities * n_periods`ならその時点で不均衡（ペアの重複判定は不要）。一致する
+/// ときだけ、グリッドのセル（`entity`コード×`n_periods`+`time`コード）を一度ずつ埋めて
+/// 重複を検出する（`n_obs`個の`bool`）。
+///
+/// `entity.nobs() == time.nobs()`は`FeInput::from_columns`が既に保証している契約
+/// （呼び出し側は常に同じ`FeInput`からこの2つを渡す）。
+pub(crate) fn validate_balanced_panel(
+    entity: &GroupCodes,
+    time: &GroupCodes,
+    names: &EffectNames,
+) -> Result<(), PanelError> {
+    debug_assert_eq!(
+        entity.nobs(),
+        time.nobs(),
+        "entity and time must have the same length (FeInput contract)"
+    );
+    let n_obs = entity.nobs();
+    let n_entities = entity.n_groups();
+    let n_periods = time.n_groups();
+    let expected = n_entities * n_periods;
+    let unbalanced = || PanelError::UnbalancedPanelForTwoWay {
+        n_obs,
+        entity_column: names.get(PanelDimension::Entity).to_string(),
+        n_entities,
+        time_column: names.get(PanelDimension::Time).to_string(),
+        n_periods,
+    };
+
+    if n_obs != expected {
+        return Err(unbalanced());
+    }
+    let mut filled = vec![false; expected];
+    for (&e, &t) in entity.codes().iter().zip(time.codes()) {
+        let cell = &mut filled[e * n_periods + t];
+        if *cell {
+            return Err(unbalanced());
+        }
+        *cell = true;
+    }
+    Ok(())
+}
+
+/// `x`の各列のうち、1-way within変換（`entity`でθ=1のquasi-demean）後に分散がある列
+/// （時間変化のある列）の添字を昇順で返す。分散ゼロの判定は
+/// `validate_no_zero_variance_regressors`と同じ`column_is_zero_variance`（相対閾値）を使うため、
+/// ここで時間変化ありと判定された列は、そのままFEに渡しても分散ゼロで拒否されない。
+///
+/// REが時間不変の列を許容するために使う（`re-spec.md`5章）。FEの`fit()`は分散ゼロの列を
+/// 拒否する設計のままで、この関数は拒否の代わりに「FEに渡す列を選ぶ」ために同じ判定を使う。
+pub(crate) fn time_varying_regressor_indices(x: &[Vec<f64>], entity: &GroupCodes) -> Vec<usize> {
+    let within = WithinTransform::one_way(entity);
+    x.iter()
+        .enumerate()
+        .filter(|(_, original)| !column_is_zero_variance(original, &within.apply(original)))
+        .map(|(j, _)| j)
+        .collect()
+}
+
+/// 2-way within変換後に分散がある列の添字を昇順で返す（`time_varying_regressor_indices`の
+/// 2-way版）。2-wayのwithin変換は「entityでquasi-demean→timeでquasi-demean」の2段階
+/// （`within_transform_two_way`）で、バランスパネルで閉形式の二重デミーニングと一致する。
+/// 時点間でのみ（個体間でのみ）変わる列は2-way within変換後に全ゼロ列になり、時間不変の列と
+/// 同じく「分散ゼロ」と判定される。
+///
+/// **バランスパネルであることの検証はしない**（呼び出し側が`validate_balanced_panel`で
+/// 済ませている前提。不均衡だと2段階適用は二重デミーニングと一致しない）。
+pub(crate) fn two_way_time_varying_regressor_indices(
+    x: &[Vec<f64>],
+    entity: &GroupCodes,
+    time: &GroupCodes,
+) -> Vec<usize> {
+    let within = WithinTransform::two_way(entity, time);
+    x.iter()
+        .enumerate()
+        .filter(|(_, original)| !column_is_zero_variance(original, &within.apply(original)))
+        .map(|(j, _)| j)
+        .collect()
+}
+
+/// 固定効果・変量効果の方向（1-way/2-way）を指定する。FEの`FeEffects`・REの`ReEffects`は
+/// この型の別名で、`FeEstimator::fit`・`ReEstimator::fit`が受け取る
+/// （`CovType`と同じ「小さな固定選択肢の公開enum」パターン）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PanelEffects {
+    /// entityのみ（FEは`fe-spec.md`3.1節、REは`re-spec.md`3章）。REでは`ReInput`に`time`が
+    /// あっても使わない。
+    OneWay,
+    /// entity + time（バランスパネル必須。FEは`fe-spec.md`1章、REは`re-spec.md`5章）。入力の
+    /// `time`が時間次元になる（無ければ`PanelError::TwoWayRequiresTime`）。
+    TwoWay,
+}
+
+/// パネル手法（FE・RE）が対応する`cov_type`（3.1節・3.2節）。FEの`FeCovType`・REの`ReCovType`は
+/// この型の別名。`OlsEstimator`の`CovType`をそのまま再利用しない理由は`fe.rs`モジュールdoc
+/// 「`cov_type`対応」参照——HC0を含まない、パネル専用の閉じた選択肢にすることで「無効な組み合わせを
+/// 型で表現不可能にする」設計にしている（IVの`WeightType`と同じ判断）。`Dk`はOLSの`CovType::Dk`と
+/// 異なるアルゴリズム（Driscoll-Kraay型パネルHAC、`fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」
+/// 参照）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PanelCovType {
+    /// 等分散前提（`σ̂² (X̃'X̃)⁻¹`、`σ̂² = SSR/df_resid`）。
+    Classical,
+    /// White型の不均一分散ロバスト（小標本補正係数`n/df_resid`）。
+    Hc1,
+    /// レバレッジベースの不均一分散ロバスト。FEは`h_ii_full`（`leverage_full`）、REは素の
+    /// レバレッジを使う。
+    Hc2,
+    /// Hc2よりさらに保守的なレバレッジ補正。
+    Hc3,
+    /// クラスターロバスト。`groups`が`None`なら`entity`引数の列を自動的に使う
+    /// （3.2節、`cluster`省略時のデフォルト挙動）。`Some`のコードの行数が`n`と食い違うと
+    /// `CommonError::ClusterDimensionMismatch`（`GroupCodes`のdoc参照）。
+    Cluster { groups: Option<GroupCodes> },
+    /// Driscoll-Kraay型パネルHAC（3.1節）。`bandwidth`が`None`なら
+    /// `floor(4*(t/100)^(2/9))`（`t`はユニークな時点数）で自動計算する。
+    ///
+    /// `time`: DK計算の時点ラベルと時間順のコード（必須）。2-wayの固定効果・個体効果の時間次元
+    /// （入力の`time`）とは独立で、DKカーネルを適用する時間粒度を呼び出し側が明示する
+    /// （`engine_pybind`の`dk_time`が配線される）。入力の`time`へのフォールバックはしない——
+    /// どの列が時点かを暗黙に借用すると、意図と違う列が選ばれても気づけないため。
+    Dk {
+        bandwidth: Option<i64>,
+        time: TimeKeys,
+    },
+}
+
+/// 設計行列の変換の違い（FE固有の補正を使うか）。`panel_cov_params`が`cov_type`別の補正を
+/// 切り替える。
+#[derive(Clone, Copy)]
+pub(crate) enum PanelStructure<'a> {
+    /// FE: within変換後の設計行列には吸収した固定効果ダミーが無い。HC2/HC3のレバレッジは
+    /// LSDV相当の`leverage_full`、クラスターのKはfixest流のネスト判定（`fe_cluster_k_correction`）、
+    /// 2グループ退化（`DegenerateClusterTwoGroups`・`DegenerateDkTwoPeriods`）の検査を行う。
+    FixedEffects {
+        /// 2-wayの時点コード（1-wayは`None`）。
+        two_way_time: Option<&'a GroupCodes>,
+    },
+    /// RE: 変換済み設計行列に省略された固定効果ダミーが無い。素のレバレッジ、クラスターのK
+    /// は`df_model`、退化検査は不要。
+    RandomEffects,
+}
+
+/// [`panel_cov_params`]の入力。FE（within変換後）・RE（θ変換後）・FEIV（`X̂`と構造残差）が
+/// 同じ形で渡せるよう、計算に使う材料だけを借用で持つ。
+///
+/// `x`・`xtx_inv`・`residuals`は同じ回帰のものでなければならない。FE・REは変換後の設計行列`X̃`・
+/// `(X̃'X̃)⁻¹`・その回帰の残差。2SLSに基づくFEIVは設計行列に`X̂`（変換後の外生変数と第一段階の
+/// 予測値）、`xtx_inv`に`(X̂'X̂)⁻¹`、`residuals`に構造残差`y - Xβ̂`（実際の内生変数`X`を使う。
+/// 第二段階の残差`y - X̂β̂`ではない）を渡す。操作変数も`entity`（2-wayは`time`）の同じ
+/// `WithinTransform`で変換しておくこと（`FixedEffects`の2グループ退化の検査は、変換後の列が各水準内で
+/// 和ゼロになる前提に立つ）。
+pub(crate) struct PanelCovInput<'a> {
+    /// 変換後の設計行列（n, k）。
+    pub(crate) x: &'a Mat<f64>,
+    /// `x`に対応する残差。`cov_type=Classical`の`σ̂² = Σr²/df_resid`もここから求める。
+    pub(crate) residuals: &'a [f64],
+    /// `(X'X)⁻¹`（k, k）。
+    pub(crate) xtx_inv: &'a Mat<f64>,
+    pub(crate) df_resid: usize,
+    /// モデルの自由度（FEは`k + neffects`、REは係数の数）。DKとクラスターの小標本補正のKの既定値。
+    pub(crate) df_model: usize,
+    /// ロバスト検定（F検定）の対象になる傾き係数の数`q`（FEは`k`、REは定数項を除く`k - 1`）。
+    /// クラスター数・時点数が`q`を超えるかの事前検証に使う。
+    pub(crate) n_slopes: usize,
+    /// entityのコード。`Cluster { groups: None }`のクラスター変数の既定。
+    pub(crate) entity: &'a GroupCodes,
+    pub(crate) structure: PanelStructure<'a>,
+}
+
+/// [`panel_cov_params`]の結果。
+pub(crate) struct PanelCov {
+    pub(crate) cov_params: Mat<f64>,
+    /// t検定・信頼区間・F検定の自由度。`Cluster`は`G-1`、`Dk`は`t_periods-1`
+    /// （fixestの`ssc()`既定`t.df="min"`）、それ以外は`df_resid`。標準誤差のスケールに使う
+    /// `K`とは別軸の値。
+    pub(crate) df_inference: usize,
+    /// `Dk`のとき実際に使われたバンド幅。`Dk`以外では`None`。
+    pub(crate) dk_bandwidth_used: Option<usize>,
+}
+
+/// `cov_type`に応じたパネル手法の係数分散共分散行列と推論の自由度。FE・REの`fit()`が共有する
+/// （`FeCovType`・`ReCovType`は[`PanelCovType`]の別名）。計算式そのものは
+/// `panel_{classical,hc,cluster,driscoll_kraay}_cov_params`が持ち、ここは`cov_type`ごとの
+/// 事前検証・補正の選択・自由度の切り替えだけを担う。`structure`で渡すFE固有の補正は
+/// `fe.rs`モジュールdoc「`cov_type`対応」参照。
+///
+/// # Errors
+/// - `Cluster`: 長さ不一致・`G < 2`・`G <= q`（`validate_cluster_groups`・
+///   `validate_cluster_count_covers_slopes`）、FEの`G=2`退化は`DegenerateClusterTwoGroups`
+/// - `Dk`: 時点列の長さ不一致は`IdentifierDimensionMismatch`、バンド幅・時点数の不正
+///   （`resolve_dk_bandwidth`・`validate_dk_periods_cover_tested_coefficients`）、FEの時点2つの
+///   退化は`DegenerateDkTwoPeriods`
+pub(crate) fn panel_cov_params(
+    cov_type: &PanelCovType,
+    input: &PanelCovInput<'_>,
+) -> Result<PanelCov, PanelError> {
+    let PanelCovInput {
+        x,
+        residuals,
+        xtx_inv,
+        df_resid,
+        df_model,
+        n_slopes,
+        entity,
+        structure,
+    } = *input;
+    let n = x.nrows();
+    let k = x.ncols();
+    let plain = |cov_params: Mat<f64>| PanelCov {
+        cov_params,
+        df_inference: df_resid,
+        dk_bandwidth_used: None,
+    };
+
+    match cov_type {
+        PanelCovType::Classical => {
+            let ssr: f64 = residuals.iter().map(|r| r * r).sum();
+            Ok(plain(panel_classical_cov_params(xtx_inv, ssr, df_resid, k)))
+        }
+        PanelCovType::Hc1 => Ok(plain(panel_hc_cov_params(
+            x,
+            residuals,
+            xtx_inv,
+            df_resid,
+            PanelHcVariant::Hc1,
+        ))),
+        PanelCovType::Hc2 | PanelCovType::Hc3 => {
+            let h_plain = leverages(x, xtx_inv);
+            let h = match structure {
+                PanelStructure::FixedEffects { two_way_time } => {
+                    leverage_full(&h_plain, entity, two_way_time, n)
+                }
+                PanelStructure::RandomEffects => h_plain,
+            };
+            let variant = if matches!(cov_type, PanelCovType::Hc2) {
+                PanelHcVariant::Hc2(&h)
+            } else {
+                PanelHcVariant::Hc3(&h)
+            };
+            Ok(plain(panel_hc_cov_params(
+                x, residuals, xtx_inv, df_resid, variant,
+            )))
+        }
+        PanelCovType::Cluster { groups } => {
+            // 既定（entityクラスター）は入力のコードを再利用し、明示指定の列は渡された
+            // コードをそのまま使う。
+            let group_codes = groups.as_ref().unwrap_or(entity);
+            let n_groups = validate_cluster_groups(group_codes, n, ClusterSetting::CovType)?;
+            validate_cluster_count_covers_slopes(n_groups, n_slopes)?;
+            let k_correction = match structure {
+                PanelStructure::FixedEffects { two_way_time } => {
+                    // 直前の`G > q`により、ここで`G=2`なら`q`は高々1。
+                    if n_slopes >= 1
+                        && n_groups == 2
+                        && two_group_split_is_degenerate(entity, two_way_time, group_codes)
+                    {
+                        return Err(PanelError::DegenerateClusterTwoGroups);
+                    }
+                    fe_cluster_k_correction(
+                        entity,
+                        two_way_time,
+                        entity.n_groups(),
+                        df_model,
+                        n_slopes,
+                        group_codes,
+                    )
+                }
+                // REは固定効果ダミーのネスト補正が不要なため`K=df_model`をそのまま使う
+                // （OLS自身の`cluster_cov_params`と数式的に同一になる）。
+                PanelStructure::RandomEffects => df_model,
+            };
+            let cov_params =
+                panel_cluster_cov_params(x, residuals, xtx_inv, n, k, group_codes, k_correction);
+            Ok(PanelCov {
+                cov_params,
+                df_inference: n_groups - 1,
+                dk_bandwidth_used: None,
+            })
+        }
+        PanelCovType::Dk {
+            bandwidth,
+            time: dk_time,
+        } => {
+            // 入力の検証を通らない`dk_time`（公開APIの`Dk.time`）の長さをここで検証する。
+            // 合わないと退化判定の`zip`が黙って切り詰められ、DK計算は範囲外アクセスになる。
+            if dk_time.len() != n {
+                return Err(PanelError::IdentifierDimensionMismatch {
+                    dimension: PanelDimension::Time,
+                    y_rows: n,
+                    other_rows: dk_time.len(),
+                });
+            }
+            let time_codes = dk_time.codes();
+            let t_periods = time_codes.n_groups();
+            let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
+            validate_dk_periods_cover_tested_coefficients(t_periods, n_slopes)
+                .map_err(|e| e.in_stage(Stage::OverallFTest))?;
+            if let PanelStructure::FixedEffects { two_way_time } = structure {
+                // 直前の`t_periods > q`により、ここで`t_periods=2`なら`q`は高々1。
+                if n_slopes >= 1
+                    && t_periods == 2
+                    && two_group_split_is_degenerate(entity, two_way_time, time_codes)
+                {
+                    return Err(PanelError::DegenerateDkTwoPeriods);
+                }
+            }
+            // fixestのDKは`K.fixef="full"`が既定（クラスター変数が無くネスト判定自体が発生しない、
+            // `fe_cluster_k_correction`のdocコメント参照）。`K=df_model`をそのまま使う。
+            let cov_params =
+                panel_driscoll_kraay_cov_params(x, residuals, xtx_inv, time_codes, df_model, bw);
+            Ok(PanelCov {
+                cov_params,
+                df_inference: t_periods - 1,
+                dk_bandwidth_used: Some(bw),
+            })
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::error::ClusterSetting;
 
     #[test]
     fn panel_cataloged_variants_display_the_catalog_message_and_common_delegates() {
@@ -2101,5 +2739,131 @@ mod tests {
         let full = naive_bartlett_meat(&xi, 4, false);
         let dropped = naive_bartlett_meat(&xi, 4, true);
         assert!((full - dropped).abs() > 1e-6);
+    }
+
+    fn codes(values: &[&str]) -> GroupCodes {
+        let labels: Vec<String> = values.iter().map(|s| s.to_string()).collect();
+        GroupCodes::from_labels(&labels)
+    }
+
+    #[test]
+    fn leverage_full_one_way_uses_each_rows_entity_size_for_unbalanced_unordered_rows() {
+        // 行がエンティティ順に並んでおらず、T_i（a=3・b=2・c=1）が不均衡。各行は自分の
+        // エンティティの観測数`T_i`で引かれなければならない（行番号やコード順で引くと外れる）。
+        let entity = codes(&["b", "a", "c", "a", "b", "a"]);
+        let h_within = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6];
+        let sizes = [2.0, 3.0, 1.0, 3.0, 2.0, 3.0];
+
+        let h_full = leverage_full(&h_within, &entity, None, 6);
+
+        for i in 0..6 {
+            assert!(
+                (h_full[i] - (1.0 / sizes[i] + h_within[i])).abs() < 1e-15,
+                "row {i}"
+            );
+        }
+    }
+
+    #[test]
+    fn leverage_full_two_way_uses_entity_and_time_sizes_for_unbalanced_unordered_rows() {
+        // entity（a=3・b=2・c=1）とtime（t1=4・t2=1・t3=1）で行ごとの観測数が異なる。
+        // `1/T_i + 1/N_t - 1/n + h`のentityとtimeの取り違えも検出できる。
+        let entity = codes(&["b", "a", "c", "a", "b", "a"]);
+        let time = codes(&["t1", "t1", "t2", "t3", "t1", "t1"]);
+        let h_within = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6];
+        let entity_sizes = [2.0, 3.0, 1.0, 3.0, 2.0, 3.0];
+        let time_sizes = [4.0, 4.0, 1.0, 1.0, 4.0, 4.0];
+
+        let h_full = leverage_full(&h_within, &entity, Some(&time), 6);
+
+        for i in 0..6 {
+            let expected = 1.0 / entity_sizes[i] + 1.0 / time_sizes[i] - 1.0 / 6.0 + h_within[i];
+            assert!((h_full[i] - expected).abs() < 1e-15, "row {i}");
+        }
+    }
+
+    #[test]
+    fn fixef_dimension_nested_within_cluster_true_for_default_entity_grouping() {
+        let entity = codes(&["a", "a", "b", "b"]);
+        assert!(fixef_dimension_nested_within_cluster(&entity, &entity));
+    }
+
+    #[test]
+    fn fixef_dimension_nested_within_cluster_true_for_coarser_grouping() {
+        // stateはentityより粗い分割（a,b→east、c,d→west）で、各entityは単一のstateに
+        // 属するため「nested」と判定されるべき（fixestの実測でも同じ挙動を確認済み、
+        // モジュールdoc参照）。
+        let entity = codes(&["a", "a", "b", "b", "c", "c", "d", "d"]);
+        let state = codes(&[
+            "east", "east", "east", "east", "west", "west", "west", "west",
+        ]);
+        assert!(fixef_dimension_nested_within_cluster(&entity, &state));
+    }
+
+    #[test]
+    fn fixef_dimension_nested_within_cluster_false_when_an_entity_spans_multiple_clusters() {
+        // entity "a" が異なる2つのクラスター（"1"と"2"）にまたがるため、nestedではない。
+        let entity = codes(&["a", "a", "b", "b"]);
+        let cluster = codes(&["1", "2", "1", "2"]);
+        assert!(!fixef_dimension_nested_within_cluster(&entity, &cluster));
+    }
+
+    #[test]
+    fn fe_cluster_k_correction_floor_is_a_no_op_under_realistic_inputs() {
+        // `fit()`が保証する前提（`df_model = k + neffects`）の下では、フロア
+        // `K = max(K, k+1)`は常にno-op（`fe_cluster_k_correction`関数docの代数的
+        // 導出参照、rust-reviewer指摘を受けて追加）。1-way全ネストの現実的な入力で
+        // `K`がちょうど`k+1`に一致することを確認する。
+        let entity = codes(&["a", "a", "b", "b"]);
+        let k = 1;
+        let n_entities = 2;
+        let df_model = k + n_entities; // 実際のFeEstimator::fitと同じneffects=n_entitiesの関係
+        let k_correction = fe_cluster_k_correction(&entity, None, n_entities, df_model, k, &entity);
+        assert_eq!(k_correction, k + 1);
+    }
+
+    #[test]
+    fn fe_cluster_k_correction_floor_engages_for_inconsistent_inputs() {
+        // フロア自体（`K = max(K, k+1)`）を直接検証する。`fit()`経由では`df_model`と
+        // `n_entities`が常に整合しているため到達不能な組み合わせ（`fe_cluster_k_
+        // correction`関数docの代数的導出参照）を、この関数を直接呼ぶことで意図的に
+        // 構成する: `df_model=2`・`n_entities=2`（1-way全ネスト）だと、整合していれば
+        // `df_model`は`k+n_entities=k+2`になるはずのところを`df_model=2`（`k=1`なら
+        // `k+n_entities=3`のはず）に矛盾させ、`raw_k = df_model - nested_size_sum + 1
+        // = 2 - 2 + 1 = 1`が`k+1=2`を下回る状況を作る。
+        let entity = codes(&["a", "a", "b", "b"]);
+        let k = 1;
+        let n_entities = 2;
+        let df_model = 2; // 本来のneffects=n_entities=2との整合を意図的に崩す
+        let k_correction = fe_cluster_k_correction(&entity, None, n_entities, df_model, k, &entity);
+        assert_eq!(
+            k_correction,
+            k + 1,
+            "floor should clamp raw_k=1 up to k+1=2"
+        );
+    }
+
+    #[test]
+    fn every_level_splits_once_across_two_groups_detects_pattern() {
+        let entity = codes(&["a", "a", "b", "b"]);
+        assert!(every_level_splits_once_across_two_groups(
+            &entity,
+            &codes(&["1", "2", "2", "1"])
+        ));
+        // 同じグループに2観測。
+        assert!(!every_level_splits_once_across_two_groups(
+            &entity,
+            &codes(&["1", "1", "1", "2"])
+        ));
+        // 3観測のエンティティ。
+        assert!(!every_level_splits_once_across_two_groups(
+            &codes(&["a", "a", "a", "b", "b"]),
+            &codes(&["1", "2", "1", "1", "2"])
+        ));
+        // 1観測のエンティティ（singletonは通常`fit()`が先に弾く）。
+        assert!(!every_level_splits_once_across_two_groups(
+            &codes(&["a", "a", "b"]),
+            &codes(&["1", "2", "1"])
+        ));
     }
 }

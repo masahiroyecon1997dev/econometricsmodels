@@ -4,8 +4,9 @@
 //! `conf_low`/`conf_high`を計算する処理がほぼ同型のまま独立実装されていたため、
 //! `statrs::distribution::ContinuousCDF`をジェネリックに取る形でここに集約する
 //! （`docs/spec/panel-common.md` 4.2節）。
-//! FE/RE・IVの2SLS（t分布）・GMM（z分布）でも同じ関数を使う想定。
+//! FE/RE・IVの2SLS（t分布）・GMM（z分布）は、係数の表全体を作る`inference_table`で共有する。
 
+use faer::Mat;
 use statrs::distribution::ContinuousCDF;
 
 /// 検定統計量の従う分布（`test_stats`がt統計量かz統計量か、および自由度）。
@@ -93,6 +94,58 @@ where
         p_value,
         conf_low: coef - crit * se,
         conf_high: coef + crit * se,
+    }
+}
+
+/// [`inference_table`]の戻り値（いずれも係数と同じ並びの`(k, 1)`）。
+pub(crate) struct InferenceTable {
+    pub(crate) std_errors: Mat<f64>,
+    pub(crate) test_stats: Mat<f64>,
+    pub(crate) p_values: Mat<f64>,
+    pub(crate) conf_lower: Mat<f64>,
+    pub(crate) conf_upper: Mat<f64>,
+}
+
+/// 係数と分散共分散行列から、標準誤差・検定統計量・両側p値・信頼区間を求める。検定統計量の
+/// 分布`dist`は2SLS・FE・REがt分布（自由度`df_inference`）、GMMが標準正規分布。
+/// FE・RE・2SLS・GMMが共有する。
+pub(crate) fn inference_table<D>(
+    beta: &Mat<f64>,
+    cov_params: &Mat<f64>,
+    dist: &D,
+    confidence_level: f64,
+) -> InferenceTable
+where
+    D: ContinuousCDF<f64, f64>,
+{
+    let k = beta.nrows();
+    let mut std_errors = Mat::<f64>::zeros(k, 1);
+    for j in 0..k {
+        *std_errors.get_mut(j, 0) = (*cov_params.get(j, j)).sqrt();
+    }
+
+    let crit = critical_value(dist, confidence_level);
+
+    let mut test_stats = Mat::<f64>::zeros(k, 1);
+    let mut p_values = Mat::<f64>::zeros(k, 1);
+    let mut conf_lower = Mat::<f64>::zeros(k, 1);
+    let mut conf_upper = Mat::<f64>::zeros(k, 1);
+    for j in 0..k {
+        let coef = *beta.get(j, 0);
+        let se = *std_errors.get(j, 0);
+        let stat = compute_inference_stat(dist, coef, se, crit);
+
+        *test_stats.get_mut(j, 0) = stat.stat;
+        *p_values.get_mut(j, 0) = stat.p_value;
+        *conf_lower.get_mut(j, 0) = stat.conf_low;
+        *conf_upper.get_mut(j, 0) = stat.conf_high;
+    }
+    InferenceTable {
+        std_errors,
+        test_stats,
+        p_values,
+        conf_lower,
+        conf_upper,
     }
 }
 

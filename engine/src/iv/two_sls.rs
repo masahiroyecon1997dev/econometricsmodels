@@ -63,15 +63,15 @@
 //! 一度も回らないため、この検証が範囲外エラーを検知する唯一の経路になる）。
 
 use crate::iv::common::{
-    InferenceTable, IvError, IvInput, compute_first_stage, hcat, inference_table,
-    mat_column_to_vec, mat_to_columns, validate_iv_fit_inputs, without_baked_in_intercept,
+    IvError, IvInput, compute_first_stage, hcat, mat_column_to_vec, mat_to_columns,
+    validate_iv_fit_inputs, without_baked_in_intercept,
 };
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use crate::shared::covariance::{cluster_cov_params, resolve_hac_lags, time_ordering};
 use crate::shared::error::{ClusterSetting, CommonError, MatrixKind};
 use crate::shared::goodness_of_fit::{is_perfect_fit, total_sum_of_squares};
-use crate::shared::inference;
+use crate::shared::inference::{self, InferenceTable, inference_table};
 use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 use crate::shared::validation::validate_cluster_groups;
 use faer::linalg::matmul::matmul;

@@ -204,10 +204,7 @@ use faer::prelude::Solve;
 use faer::{Accum, Mat, Par, Side};
 use statrs::distribution::{ChiSquared, ContinuousCDF, Normal};
 
-use crate::iv::common::{
-    InferenceTable, IvError, IvInput, hcat, inference_table, mat_column_to_vec,
-    validate_iv_fit_inputs,
-};
+use crate::iv::common::{IvError, IvInput, hcat, mat_column_to_vec, validate_iv_fit_inputs};
 use crate::linear::ols::CovType;
 use crate::shared::covariance::{
     cluster_correction, cluster_meat, resolve_hac_lags, time_ordering,
@@ -215,7 +212,7 @@ use crate::shared::covariance::{
 use crate::shared::error::{ClusterSetting, CommonError, MatrixKind};
 use crate::shared::goodness_of_fit::{is_perfect_fit, total_sum_of_squares};
 use crate::shared::group_codes::GroupCodes;
-use crate::shared::inference;
+use crate::shared::inference::{self, InferenceTable, inference_table};
 use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 use crate::shared::validation::validate_cluster_groups;
 use crate::shared::validation::{GMM_MAX_ITER_MIN, MAX_ITER_LIMIT};

@@ -612,7 +612,7 @@ def check_null_values_raise(estimator_cls):
 def check_non_finite_values_raise(estimator_cls):
     """`y`/`x`にNaN・無限大が含まれる場合`ValidationError`
     （OLSの`test_non_finite_values_raise`と同型。null（`check_null_values_raise`）
-    とNaN/Inf は`column_extraction.rs`内で別ロジックのため個別に確認する。
+    とNaN/Inf は`column_extraction/`内で別ロジックのため個別に確認する。
     `predict()`側は`check_predict_null_or_non_finite_values_raise`が`x1`を
     カバー済み）。
     """

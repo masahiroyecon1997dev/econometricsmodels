@@ -172,7 +172,7 @@ def test_duplicate_within_x_raises(fe_dataset):
 
 def test_x_empty_raises(fe_dataset):
     """固定効果のみのモデル（`x=[]`）は許容せず、他手法と同じ
-    `validate_x_non_empty`を適用する（`engine_pybind/src/panel/fe.rs`モジュールdoc参照）。
+    `validate_role_non_empty`を適用する（`engine_pybind/src/panel/fe.rs`モジュールdoc参照）。
     """
     with raises_error(ErrorCode.ROLE_EMPTY, argument="x"):
         FE(fe_dataset, y="y", x=[], effects=["entity"]).fit()
@@ -272,7 +272,7 @@ def test_numeric_column_null_values_raise(bad_col):
 )
 @pytest.mark.parametrize("bad_col", ["y", "x1"])
 def test_numeric_column_non_finite_values_raise(bad_col, value):
-    """NaN・無限大は`column_extraction.rs`内でnull（`test_numeric_column_
+    """NaN・無限大は`column_extraction/`内でnull（`test_numeric_column_
     null_values_raise`）とは別ロジックのため個別に確認する。
     """
     values: dict[str, list[float]] = {

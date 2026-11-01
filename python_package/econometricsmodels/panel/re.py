@@ -286,8 +286,9 @@ class REResults:
     def stat_df(self) -> int:
         """Degrees of freedom of the t distribution behind `test_stats`.
         May differ from `df_resid` (cluster-robust inference uses
-        `G - 1`, Driscoll-Kraay the number of `dk_time` periods minus
-        1), so use this to recompute p-values from `test_stats`."""
+        `G - 1`, where `G` is the number of clusters, and
+        Driscoll-Kraay the number of `dk_time` periods minus 1), so use
+        this to recompute p-values from `test_stats`."""
         return self._raw.stat_df
 
     @property
@@ -471,11 +472,12 @@ class REResults:
     @property
     def f_df_denom(self) -> int | None:
         """Denominator degrees of freedom of `f_statistic` (`None` when
-        `f_statistic` is `None`). Follows `cov_type` like the t-tests (`G - 1` for
-        `cov_type="cluster"`, the number of `dk_time` periods minus 1 for
-        `"dk"`, `df_resid` otherwise),
-        so it equals `stat_df` whenever `f_statistic` is not `None`. Use
-        this to recompute the p-value from `f_statistic`."""
+        `f_statistic` is `None`). Follows `cov_type` like the t-tests, so
+        it equals `stat_df` whenever `f_statistic` is not `None`: the
+        number of clusters minus 1 for `cov_type="cluster"`, the number
+        of `dk_time` periods minus 1 for `"dk"`, and `df_resid`
+        otherwise. Use this to recompute the p-value from
+        `f_statistic`."""
         return self._raw.f_df_denom
 
     @property

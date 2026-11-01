@@ -33,8 +33,8 @@ FE固有の内容のみを記載する。
 - **`x`は空リストを許容しない**: v1では固定効果のみのモデル（`k=0`）を許容して
   いたが、独立して吟味された設計記録が無く、説明変数ゼロは因果推論として意味を持たない
   （個体・時間固定効果によるyの分解という別の操作になる）ためユーザー指摘を受けて拒否に
-  変更した。**この検証は`engine_pybind`層のみ**（`build_fe_input`の`validate_x_non_empty`）。
-  `engine`側（`FeInput::from_columns`・`FeEstimator::fit`）はk=0を引き続き受理する設計を
+  変更した。**この検証は`engine_pybind`層のみ**（`build_fe_input`の`validate_role_non_empty`）。
+  `engine`側（`FeInput::from_group_codes`・`FeEstimator::fit`）はk=0を引き続き受理する設計を
   維持している（`FeEstimator::fit`は`OlsEstimator`を経由せず、0列も受理する
   `shared::least_squares::least_squares`を直接呼ぶ。RE自身の内部`OlsEstimator::fit`呼び出しは
   between回帰・最終回帰どちらも構造的にk=0にならないため無変更）。
@@ -165,7 +165,7 @@ polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）�
 3. **Clusterも独自計算**（**【linearmodels方式からfixest方式へ変更】**）:
    補正係数はOLSと同じ`(G/(G-1))×((n-1)/(n-K))`だが、**`K`（`(n-1)/(n-K)`の分母）は
    fixestの`ssc()`小標本補正（既定`K.fixef="nonnested"`）に合わせたFE固有ロジック**
-   （`fe_cluster_k_correction`、`engine/src/panel/fe.rs`）で決める——linearmodelsが
+   （`fe_cluster_k_correction`、`engine/src/panel/common.rs`）で決める——linearmodelsが
    使っていた単純な`extra_df`分岐（`n/(n-extra_df-k)`のみ、`G/(G-1)`補正なし）とは
    異なる。fixest 0.14.2のRソース（`fixest:::ssc_compute_K`）と実地数値実験で確定した式:
    FE次元（1-wayはentityのみ、2-wayはentity+time）それぞれについて、その次元が

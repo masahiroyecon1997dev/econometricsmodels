@@ -391,14 +391,16 @@ class IVResults:
     def weak_instrument_f_df_num(self) -> int | None:
         """Numerator degrees of freedom of the weak-instrument F
         statistics (the number of excluded instruments; the same for
-        every endogenous variable)."""
+        every endogenous variable). Never `None`, because `x_endog`
+        always has at least one variable."""
         return self._raw.weak_instrument_f_df_num
 
     @property
     def weak_instrument_f_df_denom(self) -> int | None:
         """Denominator degrees of freedom of the weak-instrument F
         statistics (residual degrees of freedom of the first-stage
-        regressions; the same for every endogenous variable)."""
+        regressions; the same for every endogenous variable). Never
+        `None`, because `x_endog` always has at least one variable."""
         return self._raw.weak_instrument_f_df_denom
 
     @property
@@ -435,15 +437,16 @@ class IVResults:
         `wooldridge_regression` formulation), jointly over all
         endogenous variables. Unlike
         `weak_instrument_f_statistics`, this is always computed under
-        the same `cov_type` passed to `fit()`.
+        the `cov_type` in `options`.
 
         `None` when the augmented regression cannot be estimated
-        (e.g. the first-stage residual has zero variance, such as
-        when an instrument perfectly predicts its endogenous
-        variable, or there are too few observations for the extra
-        residual columns) — this does not affect the validity of
-        the other results. **Always `None` for `estimator="gmm"`**
-        (not implemented for GMM).
+        (e.g. the augmented design is singular; `y` is exactly
+        explained by the second-stage regressors and the first-stage
+        residuals, so the augmented regression fits perfectly; or
+        there are too few observations or clusters for the extra
+        residual columns) — this does not affect the validity of the
+        other results. **Always `None` for
+        `estimator="gmm"`** (not implemented for GMM).
         """
         return self._raw.wu_hausman_statistic
 

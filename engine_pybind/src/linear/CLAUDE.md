@@ -15,7 +15,9 @@
 
 ## `white_test()`（事後診断）の配線
 
-`OLSResult`は`OlsEstimator`を保持しないため、`white_test()`は`x_column_names` → `extract_f64_columns`（`predict_for`は両者を
+`OLSResult`の`#[pymethods]`は`ols/result.rs`に1ブロックだけ置く（`multiple-pymethods`を使わない）。診断3メソッドの本体は`ols/diagnostics.rs`の自由関数（`run_white_test`・`run_breusch_pagan_test`・`run_breusch_godfrey_test`）に置き、`result.rs`の各メソッドが`guard`で包んで呼ぶ（`guard`と`py.detach`の位置は変えない）。以下の「`white_test()`」等の記述は、この自由関数の中身のこと。
+
+`OLSResult`は`OlsEstimator`を保持しないため、`white_test()`は`x_column_names` → `extract_f64_columns`（`common.rs`の`predict_out_of_sample`は両者を
 束ねた`extract_model_x_columns`を使うが、`white_test()`は列名自体も`engine`に渡すため
 分けて呼ぶ）で元のデータ（`source_data`）と`param_names`から`x`の列だけを`select_columns`で取り込み、保持している`residuals`と
 合わせて`engine::linear::diagnostics::white_test`に渡す。`source_data`が`None`（`IVResult.first_stage()`
@@ -31,7 +33,7 @@ engineが計算し、`statistic`引数（`StatisticVersion`、大文字小文字
 `nlags < 1`の検査と巨大値の飽和は`engine`側（`InvalidNlags`・観測数不足）。
 `breusch_pagan_test(variables, statistic)`も同じ配線で、`variables`は`Option<&Bound<PyAny>>`として
 `extract_column_list`（`list`以外・`str`以外の要素は`TypeError`）で受け、`None`なら
-`x_column_names`でモデルの`x`を使う。空リスト・重複は`validate_x_non_empty`/
+`x_column_names`でモデルの`x`を使う。空リスト・重複は`validate_role_non_empty`/
 `validate_no_duplicate_within_role`（ロール名`variables`）で`ValidationError`。モデルの`x`や`y`との
 重複は検査しない（モデル外の列・`y`列も`Z`にできる仕様）。元のデータの有無は`variables`の
 型検査より後（型の誤りは学習データが無い結果でも`TypeError`）。
@@ -39,7 +41,7 @@ engineが計算し、`statistic`引数（`StatisticVersion`、大文字小文字
 ## 使う列だけ取り込む（`select_columns`）
 
 `fit_*`と`predict()`/`augment()`の`new_data`は、`PyDataFrame`への変換（`pyo3-polars`が全列をArrow経由で取り込む）を直接行わない。
-`shared/column_extraction.rs`の`check_dataframe`で`polars.DataFrame`かを調べ（`TypeError`）、
+`shared/column_extraction/`の`check_dataframe`で`polars.DataFrame`かを調べ（`TypeError`）、
 `select_columns`で**推定に指名された列だけ**を取り込んだ`DataFrame`（`SelectedData.frame`）と、元のPythonオブジェクト（`SelectedData.source`）を得る。
 指名されない列は読まない。未使用の`UInt128`列がpolars-coreのpanicを起こす（取り込めないdtype。`UNREADABLE_DTYPES`）のを避けるため。
 指名される列は`fit_*`（`lib.rs`）が`y`・`x`等と各`*Options::data_columns()`（`cluster`・`hac_time`・`time`・`dk_time`）から組み立てる。
@@ -47,7 +49,7 @@ engineが計算し、`statistic`引数（`StatisticVersion`、大文字小文字
 存在しない列は選ばず、列を引く側（`extract_f64_column`等）が`COLUMN_NOT_FOUND`にする。取り込めないdtypeの列は、`Null`型の目印の列
 （名前に（dtype、元の列名）を符号化）に置き換え、列を引く側（`missing_column_error`）が`COLUMN_UNSUPPORTED_DTYPE`にする。
 こうして検査の順序は、列を引く位置で決まる（`tests/cross_method/test_validation_order.py`）。
-`LogitResult`等の`predict_for`は、`new_data`から`x`列だけを`select_model_x_columns`で取り込む。
+`OLSResult`/`WLSResult`の`predict()`/`augment()`の`new_data`は`common.rs`の`predict_out_of_sample`が、`LogitResult`等は`nonlinear/common.rs`の同名関数が、`new_data`から`x`列だけを`select_model_x_columns`で取り込む。`predict_out_of_sample`は予測値だけを返し、`SelectedData.source`は使わない（`augment()`が予測値を足す先は取り込み前の`new_data`自体で、呼び出し側が持つため）。
 
 ## DataFrameを構築して返す（`augment()`）
 
@@ -72,7 +74,7 @@ engineが計算し、`statistic`引数（`StatisticVersion`、大文字小文字
 - `include_intercept=true`のとき`x`に`"const"`という列名がある場合（自動追加する定数項名と衝突）
 - `x`が空リストの場合
 
-これらは元々OLS/WLS/Logitの`fit`/`build_logit_input`にメッセージ文言まで重複して実装されていたが、`engine_pybind/src/shared/validation.rs`（`shared/`配下、`column_extraction.rs`と同じ位置づけ）に集約した: `validate_x_non_empty`/`validate_no_duplicate_x`/`validate_no_const_collision`/`validate_no_duplicate_roles`（`y`/`weight`等の単一列名ロール間の重複、`roles: &[(&str, &str)]`のペアリストを受け取る汎用関数。ただし`x`のように複数列を取るロール、例えば将来のIVの`instrument`には未対応、着手時に再検討が要る）。**新しい手法を実装する際も、この4関数を呼び出す形にし、同様のチェックを独自実装しないこと。**
+これらは元々OLS/WLS/Logitの`fit`/`build_logit_input`にメッセージ文言まで重複して実装されていたが、`engine_pybind/src/shared/validation.rs`（`shared/`配下、`column_extraction/`と同じ位置づけ）に集約した: `validate_role_non_empty`（複数列ロールの空リスト拒否。`x`のほかIVの`x_endog`/`instruments`でも使う）/`validate_no_duplicate_x`/`validate_no_const_collision`/`validate_no_duplicate_roles`（`y`/`weight`等の単一列名ロール間の重複、`roles: &[(&str, &str)]`のペアリストを受け取る汎用関数。ただし`x`のように複数列を取るロール、例えば将来のIVの`instrument`には未対応、着手時に再検討が要る）。**新しい手法を実装する際も、この4関数を呼び出す形にし、同様のチェックを独自実装しないこと。**
 
 `confidence_level`の範囲チェック・`cov_type="cluster"`なのに`cluster`未指定、といった`engine`側が既に検知する項目は`engine_pybind`側で重複チェックしない（`LeastSquaresError`のバリアント一覧は`ols-spec.md`「engine/engine_pybind間のデータ受け渡し・エラー変換」の対応表を参照）。
 

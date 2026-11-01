@@ -2,7 +2,7 @@
 //!
 //! `engine`はpolars/PyO3を知らない（`.claude/rules/rust-style.md`「責務分離」）。
 //! `engine_pybind`がpolars DataFrameから`y`/`x`/`entity`/`time`を列ごとに抽出し、
-//! それらの列を本モジュールの`ReInput::from_columns`に渡す（`FeInput::from_columns`
+//! それらの列を本モジュールの`ReInput::from_group_codes`に渡す（`FeInput::from_group_codes`
 //! （`fe.rs`）と同型の設計）。
 //!
 //! `ReInput`自体は準偏差変換前の生データを保持するだけの入れ物であり、`FeInput`と
@@ -221,36 +221,22 @@ use statrs::distribution::{ChiSquared, ContinuousCDF, StudentsT};
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use crate::panel::common::{
-    BetweenMeans, EffectNames, PanelDimension, PanelError, PanelHcVariant, TimeKeys, TwoWayTheta,
-    panel_classical_cov_params, panel_cluster_cov_params, panel_driscoll_kraay_cov_params,
-    panel_hc_cov_params, quasi_demean_column, quasi_demean_two_way, resolve_dk_bandwidth,
-    validate_dk_periods_cover_tested_coefficients, validate_panel_input, xtx_inverse,
+    BetweenMeans, EffectNames, PanelCov, PanelCovInput, PanelCovType, PanelDimension, PanelEffects,
+    PanelError, PanelStructure, TimeKeys, TwoWayTheta, panel_cluster_cov_params, panel_cov_params,
+    panel_driscoll_kraay_cov_params, quasi_demean_column, quasi_demean_two_way,
+    reject_singleton_group, resolve_dk_bandwidth, time_varying_regressor_indices,
+    two_way_time_varying_regressor_indices, validate_balanced_panel, validate_panel_input,
+    xtx_inverse,
 };
-use crate::panel::fe::{
-    FeCovType, FeEffects, FeEstimator, FeInput, reject_singleton_group,
-    time_varying_regressor_indices, two_way_time_varying_regressor_indices,
-    validate_balanced_panel,
-};
-use crate::shared::covariance::leverages;
+use crate::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput};
 use crate::shared::error::{ClusterSetting, CommonError, ErrorInfo};
 use crate::shared::error_catalog::Stage;
 use crate::shared::group_codes::GroupCodes;
-use crate::shared::inference;
+use crate::shared::inference::{self, InferenceTable, inference_table};
 use crate::shared::least_squares::{least_squares, residual_sum_of_squares};
 use crate::shared::linear_algebra::{COLLINEARITY_TOLERANCE, independent_columns_in_order};
 use crate::shared::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 use crate::shared::wald::wald_f_test;
-
-/// REの個体効果の方向（1-way/2-way）を指定する。`ReEstimator::fit`が受け取る
-/// （`FeEffects`と同じ「小さな固定選択肢の公開enum」パターン）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReEffects {
-    /// entityのみ（`re-spec.md`3章）。`ReInput`に`time`があっても使わない。
-    OneWay,
-    /// entity + time（`re-spec.md`5章。バランスパネル必須）。`ReInput`の`time`が2-wayの
-    /// 時間次元になる（無ければ`PanelError::TwoWayRequiresTime`）。
-    TwoWay,
-}
 
 /// RE（GLS）の分散成分（σ_ε²・σ_u²・σ_λ²）の推定法（`re-spec.md`3.1節・3.1.2節）。
 /// `plm::ercomp`の`method`（`swar`・`walhus`・`amemiya`）に対応する。
@@ -325,7 +311,8 @@ impl ReInput {
     /// `x_names.len() != x_columns.len()`の場合は`debug_assert!`でパニックする
     /// （`FeInput::from_columns`と同じ理由: 呼び出し側`engine_pybind`の実装バグでしか
     /// 起こり得ない内部契約であり、実データに起因する`ValidationError`とは性質が異なる）。
-    pub fn from_columns(
+    #[cfg(test)]
+    pub(crate) fn from_columns(
         y: &[f64],
         x_columns: &[Vec<f64>],
         x_names: Vec<String>,
@@ -352,7 +339,8 @@ impl ReInput {
     ///
     /// # パニックについて
     /// `from_columns`と同じ。
-    pub fn from_columns_ordered(
+    #[cfg(test)]
+    pub(crate) fn from_columns_ordered(
         y: &[f64],
         x_columns: &[Vec<f64>],
         x_names: Vec<String>,
@@ -1282,36 +1270,11 @@ fn re_hausman_test(
     Ok(Some((stat, k, chi2.sf(stat))))
 }
 
-/// REの標準誤差計算方式（3.1節）。`FeCovType`と同じ「小さな固定選択肢の
-/// 公開enum」パターン（`docs/spec/panel-common.md`4.3節）だが、REは
-/// `extra_df`が常に`0`（`linearmodels.RandomEffects.fit()`のソースで確認済み）のため
-/// FEより単純。`Dk`の時点列`time`は`FeCovType::Dk`と同じく必須で、2-wayの`ReInput.time`とは
-/// 独立（借用しない）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ReCovType {
-    /// 等分散前提（`σ̂² (X̃'X̃)⁻¹`、`σ̂² = SSR/df_resid`）。
-    Classical,
-    /// White型の不均一分散ロバスト（小標本補正係数`n/df_resid`）。`linearmodels`の
-    /// `cov_type="robust"`と数値完全一致（実地検証済み）。
-    Hc1,
-    /// レバレッジベースの不均一分散ロバスト。`linearmodels`に参照実装が無いため
-    /// `plm::vcovHC(method="white1", type="HC2")`をクロスチェックに使う（`fit()`の
-    /// docコメント「`cov_type`対応」参照、ユーザー確認済み・2026-09-19）。
-    Hc2,
-    /// Hc2よりさらに保守的なレバレッジ補正。参照実装は`plm`（Hc2と同じ理由）。
-    Hc3,
-    /// クラスターロバスト。`groups`が`None`なら`entity`引数の列を自動的に使う
-    /// （3.2節、`cluster`省略時のデフォルト挙動）。`Some`のコードの行数が`n`と食い違うと
-    /// `CommonError::ClusterDimensionMismatch`（`GroupCodes`のdoc参照）。
-    Cluster { groups: Option<GroupCodes> },
-    /// Driscoll-Kraay型パネルHAC（3.1節）。`bandwidth`が`None`なら
-    /// `floor(4*(t/100)^(2/9))`（`t`はユニークな時点数）で自動計算する。時系列順序は
-    /// `time`（必須）を使う。2-wayの`time`（`ReInput`）とは独立で、借用しない。
-    Dk {
-        bandwidth: Option<i64>,
-        time: TimeKeys,
-    },
-}
+/// REの個体効果の方向。[`PanelEffects`]の別名。
+pub type ReEffects = PanelEffects;
+
+/// REの標準誤差計算方式。[`PanelCovType`]の別名。
+pub type ReCovType = PanelCovType;
 
 /// REの推定結果。Swamy-Arora分散成分推定→θ計算・準偏差変換
 /// →`OlsEstimator::fit`への委譲というパイプラインで
@@ -1422,8 +1385,8 @@ impl ReEstimator {
     /// 常に`extra_df=0`を使うことが判明した（FEのような`neffects`・
     /// `entity_nested_within_cluster`の条件分岐が一切不要）。REの変換済み設計行列
     /// （`x_all`、切片も含めて全パラメータが実際に列として含まれる）には「省略された
-    /// 固定効果ダミー」が無いため、HC2/HC3のレバレッジも`panel::fe`の`leverage_full`
-    /// （LSDV相当の欠落ダミー補正）ではなく`shared::covariance::leverages`（＝素の
+    /// 固定効果ダミー」が無いため、HC2/HC3のレバレッジも`panel::common`の`leverage_full`
+    /// （LSDV相当の欠落ダミー補正。`PanelStructure::FixedEffects`が選ぶ）ではなく`shared::covariance::leverages`（＝素の
     /// `h_ii = x_i(X'X)⁻¹x_i'`、REの実際の設計行列に対して直接計算するだけで良い）で
     /// 足りる。これにより、`panel::common`の`panel_classical_cov_params`/
     /// `panel_hc_cov_params`/`panel_cluster_cov_params`/`panel_driscoll_kraay_cov_params`
@@ -1575,7 +1538,7 @@ impl ReEstimator {
 
         // `OlsInput::from_columns`が返しうる`LeastSquaresError::Common(DimensionMismatch)`は
         // ここでは理論上到達不能: `y`/`x_all`はどちらも`quasi_demean_column`が
-        // `input.y()`/`input.x()`（`ReInput::from_columns`が既に同じ長さであることを
+        // `input.y()`/`input.x()`（`ReInput::from_group_codes`が既に同じ長さであることを
         // 検証済み）と`const_column`（`input.nobs()`で長さを揃えている）から1対1で
         // 生成した同じ長さの列であり、この関数内で長さがずれる操作をしていない
         // （`FeEstimator::fit`の同種のコメントと同じ判断）。
@@ -1603,7 +1566,6 @@ impl ReEstimator {
         let x_mat = estimator.input().x();
         let xtx_inv = xtx_inverse(x_mat)?;
         let residuals: Vec<f64> = (0..n).map(|i| *estimator.residuals().get(i, 0)).collect();
-        let ssr: f64 = residuals.iter().map(|r| r * r).sum();
 
         // `df_inference`はt検定・信頼区間に使う自由度。`cov_type=Cluster`のとき`G-1`、
         // `Dk`のとき`t_periods-1`に切り替える（fixestの`ssc()`既定`t.df="min"`、
@@ -1618,92 +1580,28 @@ impl ReEstimator {
             _ => input.entity_codes(),
         };
 
-        let mut dk_bandwidth_used = None;
-        let (cov_params, df_inference) = match &cov_type {
-            ReCovType::Classical => (
-                panel_classical_cov_params(&xtx_inv, ssr, df_resid, df_model),
+        // `cov_type`別の共分散行列と、t検定・信頼区間の自由度`df_inference`（`Cluster`は`G-1`、
+        // `Dk`は`t_periods-1`、それ以外は`df_resid`）。REの変換済み設計行列には省略された固定効果
+        // ダミーが無いため、FEのような補正（フルレバレッジ・fixest流のK）は不要
+        // （`PanelStructure::RandomEffects`、`fit()`のdocコメント「`cov_type`対応」参照）。
+        // 検定対象の傾きの数`q`は`df_model - 1`（`ols::fit`の`k - k_constant`と同じ規約）。
+        let PanelCov {
+            cov_params,
+            df_inference,
+            dk_bandwidth_used,
+        } = panel_cov_params(
+            &cov_type,
+            &PanelCovInput {
+                x: x_mat,
+                residuals: &residuals,
+                xtx_inv: &xtx_inv,
                 df_resid,
-            ),
-            ReCovType::Hc1 => (
-                panel_hc_cov_params(
-                    x_mat,
-                    &residuals,
-                    &xtx_inv,
-                    df_resid,
-                    None,
-                    PanelHcVariant::Hc1,
-                ),
-                df_resid,
-            ),
-            ReCovType::Hc2 | ReCovType::Hc3 => {
-                // REの変換済み設計行列には省略された固定効果ダミーが無いため、FEの
-                // `leverage_full`（LSDV相当の欠落ダミー補正）は不要——`shared::covariance::leverages`
-                // （素のレバレッジ）がそのままHC2/HC3のレバレッジになる（`fit()`のdoc
-                // コメント「`cov_type`対応」参照）。
-                let h = leverages(x_mat, &xtx_inv);
-                let variant = if matches!(cov_type, ReCovType::Hc2) {
-                    PanelHcVariant::Hc2
-                } else {
-                    PanelHcVariant::Hc3
-                };
-                (
-                    panel_hc_cov_params(x_mat, &residuals, &xtx_inv, df_resid, Some(&h), variant),
-                    df_resid,
-                )
-            }
-            ReCovType::Cluster { .. } => {
-                let n_groups = validate_cluster_groups(cluster_codes, n, ClusterSetting::CovType)?;
-                // `q`（傾き係数の数、切片を除く）は`df_model - 1`（`ols::fit`の
-                // `k - k_constant`と同じ規約、`estimator()`のdocコメント参照）。
-                validate_cluster_count_covers_slopes(n_groups, df_model - 1)?;
-                // REは`extra_df`が常に`0`（`fit()`のdocコメント「`cov_type`対応」参照、
-                // FEのような`fe_cluster_k_correction`のネスト判定は不要）ため、
-                // `K=df_model`をそのまま渡す（OLS自身の`cluster_cov_params`と数式的に
-                // 同一になる）。
-                let cov = panel_cluster_cov_params(
-                    x_mat,
-                    &residuals,
-                    &xtx_inv,
-                    n,
-                    df_model,
-                    cluster_codes,
-                    df_model,
-                );
-                (cov, n_groups - 1)
-            }
-            ReCovType::Dk {
-                bandwidth,
-                time: dk_time,
-            } => {
-                // `ReInput`は`dk_time`を検証しない（公開APIの`ReCovType::Dk.time`）ため、
-                // 長さをここで検証する（`FeEstimator::fit`のDkアームと同じ）。
-                if dk_time.len() != n {
-                    return Err(PanelError::IdentifierDimensionMismatch {
-                        dimension: PanelDimension::Time,
-                        y_rows: n,
-                        other_rows: dk_time.len(),
-                    });
-                }
-                let time = dk_time.codes();
-                let t_periods = time.n_groups();
-                let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
-                dk_bandwidth_used = Some(bw);
-                // F統計量（傾き`q = df_model - 1`個の同時検定、分母自由度`t_periods - 1`）は
-                // `t_periods > q`が成り立たないと共分散部分行列が特異になる（ハウスマン検定の
-                // 対象`X̃`は`q`以下なので、この条件がより厳しい）。
-                // 補助回帰・`wald_f_test`を待たずここで弾く（Clusterアームの`q`と同じ規約。
-                // `wald_f_test`が`FisherSnedecor::new`に渡す自由度が`>= q >= 1`になる前提も
-                // この事前検証に依存する）。
-                validate_dk_periods_cover_tested_coefficients(t_periods, df_model - 1)
-                    .map_err(|e| e.in_stage(Stage::OverallFTest))?;
-                // FEのDKと同じくfixestは`K.fixef="full"`が既定（クラスター変数が無く
-                // ネスト判定自体が発生しない）ため`K=df_model`をそのまま使う。
-                let cov = panel_driscoll_kraay_cov_params(
-                    x_mat, &residuals, &xtx_inv, time, df_model, bw,
-                );
-                (cov, t_periods - 1)
-            }
-        };
+                df_model,
+                n_slopes: df_model - 1,
+                entity: input.entity_codes(),
+                structure: PanelStructure::RandomEffects,
+            },
+        )?;
 
         // `StudentsT::new`は自由度が正でない場合に失敗するが、`df_inference`は
         // `df_resid >= 1`（`OlsEstimator::fit`成功時点で保証済み）・
@@ -1714,24 +1612,13 @@ impl ReEstimator {
         // 条件に対する防御的`Result`化」、`.claude/rules/rust-style.md`「テスト」参照）。
         let t_dist = StudentsT::new(0.0, 1.0, df_inference as f64)
             .map_err(|e| CommonError::internal(e.to_string()))?;
-        let t_crit = inference::critical_value(&t_dist, confidence_level);
-
-        let mut std_errors = Mat::zeros(df_model, 1);
-        let mut test_stats = Mat::zeros(df_model, 1);
-        let mut p_values = Mat::zeros(df_model, 1);
-        let mut conf_lower = Mat::zeros(df_model, 1);
-        let mut conf_upper = Mat::zeros(df_model, 1);
-        for j in 0..df_model {
-            let coef = *estimator.params().get(j, 0);
-            let se = (*cov_params.get(j, j)).sqrt();
-            let stat = inference::compute_inference_stat(&t_dist, coef, se, t_crit);
-
-            *std_errors.get_mut(j, 0) = se;
-            *test_stats.get_mut(j, 0) = stat.stat;
-            *p_values.get_mut(j, 0) = stat.p_value;
-            *conf_lower.get_mut(j, 0) = stat.conf_low;
-            *conf_upper.get_mut(j, 0) = stat.conf_high;
-        }
+        let InferenceTable {
+            std_errors,
+            test_stats,
+            p_values,
+            conf_lower,
+            conf_upper,
+        } = inference_table(estimator.params(), &cov_params, &t_dist, confidence_level);
 
         // F統計量（2.1節）: 傾き係数`df_model - 1`個（定数項を除く）が同時にゼロという
         // 帰無仮説のWald F検定（`β'V⁻¹β/q`、`plm::pwaldtest(test="F", vcov=...)`と同じ二次形式）。

@@ -1,6 +1,6 @@
 # OLS 仕様書
 
-OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols/`・`engine/src/shared/`（共分散・Wald検定・最小二乗・適合度の部品）・`engine_pybind/src/linear/ols.rs`・
+OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols/`・`engine/src/shared/`（共分散・Wald検定・最小二乗・適合度の部品）・`engine_pybind/src/linear/ols/`・
 `python_package/econometricsmodels/linear/ols.py`として実装済み。パフォーマンス比較の詳細は
 [`../performance/ols.md`](../performance/ols.md)、CI/CD・セキュリティはmethod非依存のため
 [`ci-cd-notes.md`](./ci-cd-notes.md)を参照。
@@ -281,7 +281,7 @@ classical / HC0〜HC3 / HAC / cluster の定義式、検定分布、自由度の
   `impl From<LeastSquaresError> for PyErr`は書けない（`LeastSquaresError`・`PyErr`ともこのクレート
   外定義の型でorphan ruleに抵触）。関数`least_squares_error_to_pyerr`（`to_pyerr(&err)`を呼ぶだけ）として
   実装し`.map_err(...)?`で変換する。
-- バージョン固定: `pyo3=0.29.2` / `polars=0.55.2` / `pyo3-polars=0.28.0`（すべて`=`固定）。
+- バージョン固定: `pyo3=0.29.3` / `polars=0.55.2` / `pyo3-polars=0.28.0`（すべて`=`固定）。
   `pyo3-polars=0.28.0`が`pyo3="^0.29"`・`polars="^0.55.1"`を要求するための組み合わせ。互換性は数字ではなく
   `pyo3-polars`が使う`polars_ffi::version_0`という安定版FFIプロトコルで担保される。
 
@@ -385,7 +385,7 @@ faerのグローバル並列度は`engine::shared::parallelism::ensure_serial()`
   `White test`と補助回帰であることを含め、元のモデルの共線性と取り違えないようにする）。
 - **実装**: engineの`linear::diagnostics::white_test`（`x`の列・列名・残差を受け取り、補助回帰に
   `OlsEstimator::fit`〔`CovType::Classical`〕を再利用）。`OLSResult`は`OlsEstimator`を保持しないため
-  `engine_pybind`が元のデータと`param_names`から`x`の列だけを取り込んで渡す（`predict_for`と同じ経路、
+  `engine_pybind`が元のデータと`param_names`から`x`の列だけを取り込んで渡す（`linear/common.rs`の`predict_out_of_sample`と同じ経路、
   `augment()`と同様に元のデータが無ければ`ValidationError`）。LM/Fの両方をengineが計算し、
   `statistic`の選択は`engine_pybind`。p値は`statrs`の`sf`（`1 - cdf`は裾で潰れるため使わない）。
 - **リファレンスとの関係**: statsmodels `het_white`は補助回帰の項の重複を除かないが、補助回帰を`OLS`で

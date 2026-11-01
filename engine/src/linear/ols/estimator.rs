@@ -102,7 +102,7 @@ impl OlsEstimator {
     /// - `k`（定数項を含む説明変数の数）が0（`include_intercept=false`かつ説明変数も無い）:
     ///   `CommonError::NoRegressors`（Logit/Probitと同じ早期リジェクト）。**このチェックは
     ///   `confidence_level`より先に行う**。nonlinear系統の`validate_fit_preconditions`は
-    ///   逆順（`confidence_level`→…→`k==0`）だが、Python APIの`validate_x_non_empty`により
+    ///   逆順（`confidence_level`→…→`k==0`）だが、Python APIの`validate_role_non_empty`により
     ///   どちらの入力もそもそも到達不能なため実害はなく、系統間で順序を揃えるという
     ///   明示的な方針も無い
     /// - `confidence_level`が`(0, 1)`の範囲外: `CommonError::InvalidConfidenceLevel`

@@ -40,7 +40,7 @@ RE固有の内容のみを記載する。FEとの共有範囲は[`fe-spec.md`](.
 - **`x`は空リストを許容しない**: `x=[]`は「説明変数を一切投入しない、分散成分（σ_ε²・
   σ_u²、ICC）のみを推定するnullモデル」として単独で意味を持つ標準的なユースケース
   （マルチレベルモデルの"null model"）だが、他手法（FE・OLS/WLS/Logit/Probit/IV）
-  との一貫性を優先し`validate_x_non_empty`で拒否する。nullモデル・ICC推定のサポート自体は
+  との一貫性を優先し`validate_role_non_empty`で拒否する。nullモデル・ICC推定のサポート自体は
   別途検討中（5章参照）。
 - **1-way REは不均衡パネルを無条件でサポートする**（FEの1-wayと同じ扱い）。**2-way RE
   （`effects`が2要素）はバランスパネルのみ**で、不均衡パネルは`ValidationError`（`validate_balanced_panel`を

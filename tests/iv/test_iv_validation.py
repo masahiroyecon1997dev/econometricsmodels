@@ -334,7 +334,7 @@ def test_null_values_raise(bad_col):
 )
 @pytest.mark.parametrize("bad_col", _ROLE_COLUMNS)
 def test_non_finite_values_raise(bad_col, value):
-    """NaN・無限大は`column_extraction.rs`内でnull（`test_null_values_raise`）
+    """NaN・無限大は`column_extraction/`内でnull（`test_null_values_raise`）
     とは別ロジックのため個別に確認する。`y`列だけでなく`x_exog`/`x_endog`/
     `instruments`側の列でも、リスト引数の2本目以降も含めて検証する
     （`test_null_values_raise`と同じ理由）。
@@ -1532,7 +1532,7 @@ def test_gmm_raise_on_non_convergence_true_raises_computation_error(
 ):
     """厳しすぎる`gmm_tol`で最大反復回数内に収束しない場合、既定
     （`raise_on_non_convergence=True`）では`ComputationError`（`MleError.
-    NonConvergence`と同じ分類、`engine_pybind/src/iv/common.rs`参照）。
+    NonConvergence`と同じ分類、`engine_pybind/src/iv/common/`参照）。
     """
     options = IVOptions(
         estimator="gmm",

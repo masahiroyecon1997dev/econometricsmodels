@@ -34,15 +34,15 @@
 //!
 //! ## `x`の空リストを許容しない
 //!
-//! 固定効果のみのモデル（`x=[]`）は、`validate_x_non_empty`で拒否する（他手法のOLS/WLS/Logit/
+//! 固定効果のみのモデル（`x=[]`）は、`validate_role_non_empty`で拒否する（他手法のOLS/WLS/Logit/
 //! Probit/IVと同じ）。`x`が空だと、説明変数が`y`に与える効果を推定するという営みが成立せず、
 //! 実質「個体・時間固定効果による`y`の分解」という別の操作になるため。**`engine`側
-//! （`FeInput::from_columns`・`FeEstimator::fit`）はk=0を受理したまま**で、
+//! （`FeInput::from_group_codes`・`FeEstimator::fit`）はk=0を受理したまま**で、
 //! `engine/src/panel/fe.rs`の`fe_estimator_fit_with_no_regressors_estimates_fixed_effects_only_model`が
 //! engineレベルでは固定効果のみのモデルが動作することを検証する。拒否はPython向けAPI
 //! （`engine_pybind`）の業務的なバリデーションとしてのみ行う（OLSも
 //! `engine::linear::ols::OlsEstimator::fit`自体はk=0を受理するが、Python APIの
-//! `validate_x_non_empty`が弾くのと同じ構図）。
+//! `validate_role_non_empty`が弾くのと同じ構図）。
 
 use crate::shared::errors::{guard, internal_error};
 use engine::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput, FixedEffects};
@@ -54,22 +54,18 @@ use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 use super::common::{
-    PanelCovKind, PanelModel, check_panel_cov_options, extract_effects, group_counts, groups_dict,
-    panel_error_to_pyerr, parse_panel_cov_kind, require_dk_time, validate_dk_time_role,
-    validate_effects,
+    PanelCovKind, PanelModel, check_panel_cov_options, extract_effects, extract_time_keys,
+    group_counts, groups_dict, panel_error_to_pyerr, parse_panel_cov_kind, require_dk_time,
+    validate_panel_roles,
 };
 use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
     SelectedData, extract_f64_column, extract_f64_columns, extract_optional_cluster_groups,
-    extract_time_keys,
 };
 use crate::shared::mat_conversion::{mat_to_rows, mat_to_vec};
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
     extract_strict_float, extract_strict_opt_column, extract_strict_opt_int, extract_strict_text,
-};
-use crate::shared::validation::{
-    RoleValue, validate_no_duplicate_roles, validate_no_duplicate_within_role, validate_x_non_empty,
 };
 
 /// Estimation options for FE (fixed effects panel regression).
@@ -82,7 +78,7 @@ use crate::shared::validation::{
 ///   `"dk"` also `dk_time` (required) and `dk_bandwidth`.
 /// - Confidence intervals: `confidence_level`.
 // 各フィールドの意味・既定値の根拠は`docs/spec/panel-common.md`。
-// module/from_py_objectの理由は`OLSOptions`と同じ（`engine_pybind/src/linear/ols.rs`参照）。
+// module/from_py_objectの理由は`OLSOptions`と同じ（`engine_pybind/src/linear/ols/options.rs`参照）。
 #[pyclass(from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
 pub struct FEOptions {
@@ -247,7 +243,8 @@ pub struct FEResult {
     #[pyo3(get)]
     pub stat_dist: String,
     /// Degrees of freedom of the t distribution (always `Some`). May differ from
-    /// `df_resid` (e.g. cluster-robust inference uses `G - 1`).
+    /// `df_resid`: cluster-robust inference uses `G - 1`, where `G` is the number of
+    /// clusters, and Driscoll-Kraay uses the number of `dk_time` periods minus 1.
     #[pyo3(get)]
     pub stat_df: Option<i64>,
     #[pyo3(get)]
@@ -291,9 +288,11 @@ pub struct FEResult {
     /// Numerator degrees of freedom of `f_statistic` (`None` when `f_statistic` is `None`).
     #[pyo3(get)]
     pub f_df_num: Option<usize>,
-    /// Denominator degrees of freedom of `f_statistic` (`None` when `f_statistic` is `None`). Follows
-    /// `cov_type` like the t-tests (`G - 1` for cluster, `T - 1` for Driscoll-Kraay,
-    /// `df_resid` otherwise).
+    /// Denominator degrees of freedom of `f_statistic` (`None` when `f_statistic` is `None`).
+    /// Follows `cov_type` like the t-tests, so it equals `stat_df` whenever `f_statistic` is
+    /// not `None`: the number of clusters minus 1 for `"cluster"`, the number of `dk_time`
+    /// periods minus 1 for `"dk"`, and `df_resid` otherwise. Use it to recompute the p-value
+    /// from `f_statistic`.
     #[pyo3(get)]
     pub f_df_denom: Option<usize>,
     #[pyo3(get)]
@@ -506,6 +505,17 @@ fn resolve_fe_cov_type(
     })
 }
 
+/// [`build_fe_input`]の戻り値。
+#[derive(Debug)]
+pub(crate) struct BuiltFeInput {
+    pub(crate) input: FeInput,
+    pub(crate) effects: FeEffects,
+    /// エンジンに渡す`cov_type`（`cluster`のグループや`dk`の時点を持つ）。
+    pub(crate) cov_type: FeCovType,
+    /// `FEResult.cov_type`に格納する正規形（小文字）の名前。
+    pub(crate) cov_type_name: String,
+}
+
 /// Pythonから渡された `data` / `y` / `x` / `effects` / `options` を検証し、
 /// `engine::panel::fe::FeInput::from_group_codes`を呼び出すところまでを行う。
 /// `FeEstimator::fit`の呼び出し・`FEResult`の構築は`fit`（本ファイル）が行う。
@@ -517,11 +527,11 @@ fn resolve_fe_cov_type(
 /// - 列の抽出時に発覚する問題（列が存在しない、数値/文字列型にキャストできない、
 ///   欠損値・NaN・無限大を含む等）は`column_extraction`の責務で`ValidationError`
 /// - `x`が空リストの場合は`ValidationError`（OLS/WLS/Logit/Probit/IVと同じ
-///   `validate_x_non_empty`。「固定効果のみのモデル」の許容を見直し、
+///   `validate_role_non_empty`。「固定効果のみのモデル」の許容を見直し、
 ///   他手法と揃えた——経緯はモジュールdoc「`x`の空リストを許容しない」参照）。
 ///   `y`/`effects`/`x`間の重複・`x`・`effects`内部の重複も同じく`validation.rs`の責務で
 ///   `ValidationError`
-/// - `effects`が空、または3要素以上の場合は`ValidationError`（`validate_effects`）
+/// - `effects`が空、または3要素以上の場合は`ValidationError`（`validate_panel_roles`内の`validate_effects`）
 /// - `cov_type`の文字列が不正な場合は`ValidationError`（`parse_panel_cov_kind`参照）
 /// - それ以外（`y`/`effects`間の行数不一致等）は`engine::panel::common::PanelError`
 ///   から`panel_error_to_pyerr`で変換
@@ -531,7 +541,7 @@ pub(crate) fn build_fe_input(
     x: Vec<String>,
     effects: Vec<String>,
     options: &FEOptions,
-) -> PyResult<(FeInput, FeEffects, FeCovType, String)> {
+) -> PyResult<BuiltFeInput> {
     // DataFrameを見ない検査を先に行う。報告順は`docs/guide/validation.md`
     // 「Order in which errors are reported」: オプションの値 → オプションの組合せ →
     // ロール構造 → `y`/`x`の列 → オプション列 → エンジン。
@@ -543,20 +553,8 @@ pub(crate) fn build_fe_input(
         options.dk_bandwidth,
     )?;
 
-    // `effects`の列数（空・3つ以上）を先に見る。
-    validate_effects(PanelModel::Fe, &effects)?;
-    // `x`が空リストであることを許容しない（モジュールdoc参照）。
-    // OLS/WLS/Logit/Probit/IVと同じ`validate_x_non_empty`を呼ぶ（`.claude/rules/
-    // rust-style.md`「バリデーションの責務分担」）。
-    validate_x_non_empty("x", &x)?;
-    validate_no_duplicate_roles(&[
-        ("y", RoleValue::Single(&y)),
-        ("effects", RoleValue::Multi(&effects)),
-        ("x", RoleValue::Multi(&x)),
-    ])?;
-    validate_no_duplicate_within_role("x", &x)?;
-    validate_no_duplicate_within_role("effects", &effects)?;
-    validate_dk_time_role(&y, &effects[0], options.dk_time.as_deref())?;
+    // `effects`の列数・`x`が空（モジュールdoc参照）・列の役割の重複・`dk_time`の役割を検査する。
+    validate_panel_roles(PanelModel::Fe, &y, &x, &effects, options.dk_time.as_deref())?;
 
     // ── y/x/effects列の抽出 ─────────────────────────────────────────────
     let y_slice = extract_f64_column(df, &y, ColumnSource::new("y", "data"))?;
@@ -578,7 +576,12 @@ pub(crate) fn build_fe_input(
         .map_err(panel_error_to_pyerr)?
         .with_effect_names(effects[0].clone(), effects.get(1).cloned());
 
-    Ok((input, fe_effects, cov_type, cov_kind.name().to_string()))
+    Ok(BuiltFeInput {
+        input,
+        effects: fe_effects,
+        cov_type,
+        cov_type_name: cov_kind.name().to_string(),
+    })
 }
 
 /// Pythonから渡された `data` / `y` / `x` / `effects` / `options` を検証し、
@@ -625,8 +628,12 @@ fn fit_frame(
     effects: Vec<String>,
     options: &FEOptions,
 ) -> PyResult<FEResult> {
-    let (input, fe_effects, cov_type, cov_type_lower) =
-        build_fe_input(df, y, x, effects.clone(), options)?;
+    let BuiltFeInput {
+        input,
+        effects: fe_effects,
+        cov_type,
+        cov_type_name,
+    } = build_fe_input(df, y, x, effects.clone(), options)?;
 
     let estimator = FeEstimator::fit(input, fe_effects, cov_type, options.confidence_level)
         .map_err(panel_error_to_pyerr)?;
@@ -650,7 +657,7 @@ fn fit_frame(
         df_model: estimator.df_model(),
         effects,
         group_counts,
-        cov_type: cov_type_lower,
+        cov_type: cov_type_name,
         dk_bandwidth_used: estimator.dk_bandwidth_used().map(|bw| bw as i64),
         f_statistic: estimator.f_statistic(),
         f_p_value: estimator.f_p_value(),
@@ -669,6 +676,7 @@ fn fit_frame(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::panel::common::well_formed_df;
     use engine::panel::common::TimeKeys;
     use engine::shared::group_codes::GroupCodes;
     use polars::df;
@@ -679,22 +687,17 @@ mod tests {
         FEOptions::new("cluster".to_string(), 0.95, None, None, None)
     }
 
-    fn well_formed_df() -> DataFrame {
-        df!(
-            "y" => [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-            "x1" => [2.0, 4.0, 1.0, 5.0, 3.0, 6.0],
-            "id" => ["a", "a", "b", "b", "c", "c"],
-            "t" => ["1", "2", "1", "2", "1", "2"],
-        )
-        .unwrap()
-    }
-
     #[test]
     fn build_fe_input_succeeds_for_well_formed_one_way_data() {
         let df = well_formed_df();
         let options = default_options();
 
-        let (input, effects, cov_type, cov_type_lower) = build_fe_input(
+        let BuiltFeInput {
+            input,
+            effects,
+            cov_type,
+            cov_type_name,
+        } = build_fe_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string()],
@@ -712,7 +715,7 @@ mod tests {
             FeCovType::Cluster { groups: None },
             "cluster未指定時はNone（engine側でentity列にフォールバック）"
         );
-        assert_eq!(cov_type_lower, "cluster");
+        assert_eq!(cov_type_name, "cluster");
     }
 
     #[test]
@@ -720,7 +723,7 @@ mod tests {
         let df = well_formed_df();
         let options = default_options();
 
-        let (input, effects, ..) = build_fe_input(
+        let BuiltFeInput { input, effects, .. } = build_fe_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string()],
@@ -738,9 +741,9 @@ mod tests {
     }
 
     #[test]
-    fn build_fe_input_returns_error_for_empty_x() {
-        // 固定効果のみのモデル（`x=[]`）を拒否する（モジュールdoc「`x`の
-        // 空リストを許容しない」参照。OLS/WLS/Logit/Probit/IVと同じ`validate_x_non_empty`）。
+    fn build_fe_input_rejects_empty_x() {
+        // 列の役割の検査が`validate_panel_roles`経由で配線されていることの確認
+        // （検査の中身は`panel/common.rs`のテストが持つ）。
         let df = well_formed_df();
         let options = default_options();
 
@@ -752,66 +755,6 @@ mod tests {
             &options,
         );
 
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn build_fe_input_returns_error_when_y_overlaps_entity() {
-        let df = well_formed_df();
-        let options = default_options();
-
-        let result = build_fe_input(
-            &df,
-            "y".to_string(),
-            vec!["x1".to_string()],
-            vec!["y".to_string()],
-            &options,
-        );
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn build_fe_input_returns_error_when_x_overlaps_entity() {
-        let df = well_formed_df();
-        let options = default_options();
-
-        let result = build_fe_input(
-            &df,
-            "y".to_string(),
-            vec!["x1".to_string(), "id".to_string()],
-            vec!["id".to_string()],
-            &options,
-        );
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn build_fe_input_returns_error_when_x_overlaps_second_effect() {
-        let df = well_formed_df();
-        let options = default_options();
-
-        let result = build_fe_input(
-            &df,
-            "y".to_string(),
-            vec!["x1".to_string(), "t".to_string()],
-            vec!["id".to_string(), "t".to_string()],
-            &options,
-        );
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn build_fe_input_returns_error_when_x_contains_duplicate() {
-        let df = well_formed_df();
-        let options = default_options();
-
-        let result = build_fe_input(
-            &df,
-            "y".to_string(),
-            vec!["x1".to_string(), "x1".to_string()],
-            vec!["id".to_string()],
-            &options,
-        );
         assert!(result.is_err());
     }
 
@@ -859,7 +802,7 @@ mod tests {
         let mut options = default_options();
         options.cluster = Some("state".to_string());
 
-        let (_, _, cov_type, _) = build_fe_input(
+        let BuiltFeInput { cov_type, .. } = build_fe_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string()],
@@ -890,7 +833,12 @@ mod tests {
         options.cov_type = "dk".to_string();
         options.dk_time = Some("t".to_string());
 
-        let (input, effects, cov_type, _) = build_fe_input(
+        let BuiltFeInput {
+            input,
+            effects,
+            cov_type,
+            ..
+        } = build_fe_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string()],
@@ -930,7 +878,12 @@ mod tests {
         options.cov_type = "dk".to_string();
         options.dk_time = Some("t_fine".to_string());
 
-        let (input, effects, cov_type, _) = build_fe_input(
+        let BuiltFeInput {
+            input,
+            effects,
+            cov_type,
+            ..
+        } = build_fe_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string()],
@@ -954,35 +907,6 @@ mod tests {
                 ),
             }
         );
-    }
-
-    #[test]
-    fn build_fe_input_dk_time_may_equal_second_effect_or_x_but_not_y_or_first_effect() {
-        // 固定効果と同じ時間粒度(`dk_time == effects[1]`)や、`x`との重複は正当な使い方。
-        // `y`・`effects[0]`と同じ列だけ拒否する(`validate_dk_time_role`参照)。
-        let df = well_formed_df();
-        let cases = [
-            (vec!["id", "t"], "t", vec!["x1"], true),
-            (vec!["id"], "x1", vec!["x1"], true),
-            (vec!["id"], "y", vec!["x1"], false),
-            (vec!["id"], "id", vec!["x1"], false),
-            (vec!["id", "t"], "id", vec!["x1"], false),
-        ];
-        for (effects, dk_time, x, ok) in cases {
-            let mut options = default_options();
-            options.cov_type = "dk".to_string();
-            options.dk_time = Some(dk_time.to_string());
-
-            let result = build_fe_input(
-                &df,
-                "y".to_string(),
-                x.iter().map(|c| c.to_string()).collect(),
-                effects.iter().map(|c| c.to_string()).collect(),
-                &options,
-            );
-
-            assert_eq!(result.is_ok(), ok, "effects={effects:?} dk_time={dk_time}");
-        }
     }
 
     #[test]

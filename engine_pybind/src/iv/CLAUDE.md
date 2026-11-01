@@ -14,7 +14,7 @@
 
 ## 構成
 
-`IVOptions`/`IVResult`/`build_iv_input`/`fit`は`iv/common.rs`に置き、`two_sls.rs`/`gmm.rs`のような手法ごとのファイル分割はしない。`fit_iv`という単一エントリポイントを`IVOptions.estimator`（`"2sls"`/`"gmm"`）で2SLS/GMMに振り分ける設計のため、これらは系統内で真に共有されるロジックであり、`<系統>/common.rs`に置くという既存方針にそのまま合致する。
+`IVOptions`/`IVResult`/`build_iv_input`/`fit`は`iv/common/`に責務ごとのファイル（`options.rs`・`option_values.rs`・`gmm_setup.rs`・`input.rs`・`result.rs`・`fit.rs`・`error.rs`。`mod.rs`は再エクスポートのみ）に分けて置き、`two_sls.rs`/`gmm.rs`のような手法ごとのファイル分割はしない。`fit_iv`という単一エントリポイントを`IVOptions.estimator`（`"2sls"`/`"gmm"`）で2SLS/GMMに振り分ける設計のため、これらは系統内で真に共有されるロジックであり、`<系統>/common.rs`に置くという既存方針にそのまま合致する。
 
 `build_iv_input`は`cov_type`の値を`crate::linear::common::parse_cov_kind`、列の抽出を`resolve_cov_type`で行う（OLS/WLSと型・エラーメッセージを揃えるため）。組合せの検査はIV自身の`check_iv_options`（GMM専用オプションと`gmm_weight_type`を持つため`linear::common::check_cov_options`は使えない）。
 
@@ -29,15 +29,17 @@
 
 `IVResult`の非公開フィールド`first_stage: Vec<(String, OLSResult)>`から返す。`estimator`（2sls/gmm）に依存しない表現にするため、`LogitResult`/`ProbitResult`のように推定量そのものは保持しない。`fit`が第一段階の`OlsEstimator`（設計行列を持つ）を`linear::ols::ols_estimator_to_result`で`OLSResult`へ変換して保持し（設計行列を手放せる）、`first_stage()`は`OLSResult::clone_ref`で複製して返す。pickleでは各`OLSResult`がそのまま状態に入る。第一段階回帰はそれ自体が正しい（ナイーブな）通常のOLSであり（`engine::iv::two_sls`のモジュールdocコメント参照）、OLSとの共有を避ける理由が無いため`ols_estimator_to_result`を再利用する。返る各`OLSResults.f_statistic`/`f_p_value`は通常のOLS F検定（`x_exog`の寄与を含む）であり、弱操作変数診断の部分F統計量（`weak_instrument_f_statistics`）とは別物（`IVResult`のdocコメント参照）。
 
+`IVResult`の組み立ては`fit.rs`の`build_result`が一度だけ行う。2SLSとGMMで同じ値の読み出しは`engine::iv::common::IvEstimate`（両推定量が実装するtrait）から、推定量ごとに違うフィールド（収束・反復、GMM専用の設定、Wald検定の分布、過剰識別検定、Wu-Hausman検定）は`EstimatorSpecific`（`Default`なしで全フィールド必須）から詰める。`IVResult`にフィールドを足すときは、`IvEstimate`にメソッドを足す（共通）か`EstimatorSpecific`に足す（推定量ごと）かを選ぶ。どちらもコンパイラが両分岐の書き漏れを検出する。
+
 `first_stage`/`weak_instrument_f_statistics`は`estimator`によらず`engine::iv::common::compute_first_stage`（2SLS/GMM間で共有）から構築する。**`estimator="2sls"`では第一段階回帰が二重計算になる**（`fit`が明示的に1回、`TwoSlsEstimator::fit`が内部でもう1回）。`OlsEstimator`が`Clone`未実装のため`TwoSlsEstimator::first_stage_estimators()`の借用結果を`IVResult`へ所有権ごと移せず、OLS自体が軽量という前提で許容した設計判断。恒久対応する場合は`TwoSlsEstimator`に第一段階結果を外部注入する`fit`のバリエーションを追加する案がある（着手前にユーザー確認すること）。
 
 ## `fit`の事前チェックの順序
 
 以下はいずれも`compute_first_stage`より前に`fit_frame`で行う。第一段階の回帰変数・クラスター係数の数は識別条件により構造方程式以上のため、先に第一段階を走らせると構造方程式側の検査が第一段階の`FirstStageFailed`に隠れてPythonから到達不能になるため（`compute_first_stage`自体はこれらを検証しない）。
 
-- **識別の順序条件（`k_instruments < k_endog`）**: 過小識別な入力で無駄な第一段階回帰が走るのも防ぐ。`build_iv_input`が`x_endog`/`instruments`の非空を既に検証しているため、ここでの`<`判定は「両方指定されているが数が足りない」ケースのみを扱う。
-- **観測数（`engine::iv::common::validate_observation_counts`）**: 構造方程式の`n <= k`を先に`CommonError::InsufficientObservations`（構造方程式の`k`）で、次に`n <= l`（`l = k_exog + k_instruments`、定数項込みの第一段階の回帰変数の数）を`IvError::InsufficientObservationsForFirstStage`（`ValidationError`）で弾く。`n == l`では`X̂ = X`で2SLSがOLSに縮退し（GMMの`W₀ = (Z'Z)⁻¹`も同様）、`n < l`では`Z'Z`が特異のため、第一段階を診断としてdegradeする余地はなく拒否する（`tests/iv/test_iv_validation.py`の`test_observation_count_boundaries`で固定）。
-- **`cov_type=Cluster`の構造方程式の`G <= q`**（`engine::iv::common::validate_structural_cluster_count`。`q`の式はエンジン側に集約し、pybindに複製しない）: 構造方程式で`G>q`でも第一段階の`q`が`G`以下なら、`fit`は失敗せず、その第一段階の`OLSResult`（`first_stage()`）の`f_statistic`/`f_p_value`/`f_df_num`/`f_df_denom`だけが`None`になる（`test_cluster_count_between_structural_and_first_stage_slopes_leaves_first_stage_f_undefined`/`test_cluster_count_boundaries`で固定）。`OLSResult`のF系列は全手法（OLS/WLS/FE/RE）で`Option<f64>`。
+- **識別の順序条件（`k_instruments < k_endog`）**（`engine::iv::common::validate_iv_fit_inputs`の先頭）: 過小識別な入力で無駄な第一段階回帰が走るのも防ぐ。`build_iv_input`が`x_endog`/`instruments`の非空を既に検証しているため、ここでの`<`判定は「両方指定されているが数が足りない」ケースのみを扱う。
+- **観測数（`engine::iv::common::validate_iv_fit_inputs`が呼ぶ`validate_observation_counts`）**: 構造方程式の`n <= k`を先に`CommonError::InsufficientObservations`（構造方程式の`k`）で、次に`n <= l`（`l = k_exog + k_instruments`、定数項込みの第一段階の回帰変数の数）を`IvError::InsufficientObservationsForFirstStage`（`ValidationError`）で弾く。`n == l`では`X̂ = X`で2SLSがOLSに縮退し（GMMの`W₀ = (Z'Z)⁻¹`も同様）、`n < l`では`Z'Z`が特異のため、第一段階を診断としてdegradeする余地はなく拒否する（`tests/iv/test_iv_validation.py`の`test_observation_count_boundaries`で固定）。
+- **`cov_type=Cluster`の構造方程式の`G <= q`**（`engine::iv::common::validate_iv_fit_inputs`が呼ぶ`validate_structural_cluster_count`。`q`の式はエンジン側に集約し、pybindに複製しない）: 構造方程式で`G>q`でも第一段階の`q`が`G`以下なら、`fit`は失敗せず、その第一段階の`OLSResult`（`first_stage()`）の`f_statistic`/`f_p_value`/`f_df_num`/`f_df_denom`だけが`None`になる（`test_cluster_count_between_structural_and_first_stage_slopes_leaves_first_stage_f_undefined`/`test_cluster_count_boundaries`で固定）。`OLSResult`のF系列は全手法（OLS/WLS/FE/RE）で`Option<f64>`。
 
 ## GMMのオプションと重み行列
 
@@ -46,7 +48,7 @@
 
 ## オプションの検査（値・組合せ・列）と報告順
 
-`build_iv_input`は、DataFrameを見ない検査（`parse_iv_option_values`: `estimator` → `cov_type` → `gmm_type` → `gmm_weight_type`の値。`check_iv_options`: 使われないオプション → 必須の`hac_time`の欠落）→ ロール構造 → `y`/`x_exog`/`x_endog`/`instruments`の列 → オプション列（`cov_type`側は`resolve_cov_type`、GMMの重み行列側は`resolve_gmm_setup`）の順に呼ぶ。GMMの重み行列の列も`fit`ではなく`build_iv_input`で抽出し、戻り値の`IvPlan`（`IvEstimator`と、`estimator="gmm"`のときの`GmmSetup`）で`fit`に渡す。`*Result`の`cov_type`/`estimator`/`gmm_type`/`gmm_weight_type`の正規形は`CovKind::name()`/`IvEstimator::name()`等から作り、呼び出し側で小文字化し直さない。この順序は`tests/cross_method/test_validation_order.py`が固定している。`gmm_max_iter`が負値のときの変換エラーは`resolve_gmm_setup`で起きるが、範囲（3以上・上限）と`gmm_tol`の検証はengineが行う。
+`build_iv_input`は、DataFrameを見ない検査（`parse_iv_option_values`: `estimator` → `cov_type` → `gmm_type` → `gmm_weight_type`の値。`check_iv_options`: 使われないオプション → 必須の`hac_time`の欠落）→ ロール構造 → `y`/`x_exog`/`x_endog`/`instruments`の列 → オプション列（`cov_type`側は`resolve_cov_type`、GMMの重み行列側は`resolve_gmm_setup`）の順に呼ぶ。GMMの重み行列の列も`fit`ではなく`build_iv_input`で抽出し、戻り値`BuiltIvInput`の`plan`（`IvPlan`: `IvEstimator`と、`estimator="gmm"`のときの`GmmSetup`）で`fit`に渡す。`*Result`の`cov_type`/`estimator`/`gmm_type`/`gmm_weight_type`の正規形は`CovKind::name()`/`IvEstimator::name()`等から作り、呼び出し側で小文字化し直さない。この順序は`tests/cross_method/test_validation_order.py`が固定している。`gmm_max_iter`が負値のときの変換エラーは`resolve_gmm_setup`で起きるが、範囲（3以上・上限）と`gmm_tol`の検証はengineが行う。
 
 ## `IVResult.test_stats`と`stat_dist`/`stat_df`
 

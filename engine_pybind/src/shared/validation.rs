@@ -1,7 +1,7 @@
 //! 全手法で共有する、列名レベルの入力バリデーション（`ValidationError`）。
 //!
 //! `.claude/rules/rust-style.md`「全手法で共有するロジックは系統ディレクトリの外、
-//! `shared/`に置く」の方針、`column_extraction.rs`と同じ位置づけ。
+//! `shared/`に置く」の方針、`column_extraction/`と同じ位置づけ。
 //!
 //! OLS/WLS/Logit等の`fit`/`build_*_input`冒頭で共通に行うバリデーション（xが空・
 //! yやweight等のロール間の重複・x内の重複・`include_intercept=true`時の`"const"`列衝突）
@@ -36,11 +36,11 @@ pub enum RoleValue<'a> {
 /// 複数列ロール（`x`/`x_endog`/`instruments`等）が空リストでないことを検証する。
 /// `role_name`はエラーメッセージに使う。
 ///
-/// `x`以外のロール（IVの`x_endog`/`instruments`。`x_exog`とは異なり空リストを
-/// 許容しない）にも同じ検証が必要なため、`validate_no_duplicate_within_role`と同じく
-/// ロール名を引数で受ける。OLS/WLS/Logit/Probit/Tobitは`role_name="x"`で呼ぶ。
-pub fn validate_x_non_empty(role_name: &str, x: &[String]) -> PyResult<()> {
-    if x.is_empty() {
+/// ロールごとに空を許すかが違う（IVの`x_exog`は空でもよいが、`x_endog`/`instruments`は
+/// 空を許さない）ため、`validate_no_duplicate_within_role`と同じくロール名を引数で受ける。
+/// OLS/WLS/Logit/Probit/Tobitは`role_name="x"`で呼ぶ。
+pub fn validate_role_non_empty(role_name: &str, columns: &[String]) -> PyResult<()> {
+    if columns.is_empty() {
         return Err(user_error(
             ErrorCode::RoleEmpty,
             vec![("argument", ParamValue::from(role_name))],
@@ -78,7 +78,7 @@ pub fn validate_no_duplicate_within_role(role_name: &str, columns: &[String]) ->
 /// IVでは`x_exog`だけでなく`x_endog`/`instruments`に`"const"`という列名が含まれて
 /// いても同じ衝突が起き結果がサイレントに破損する（`first_stage()`/構造方程式本体の
 /// `param_names`に`"const"`が重複し、後勝ちで真の切片係数が上書きされる）ため、
-/// `validate_x_non_empty`/`validate_no_duplicate_within_role`と同じくロール名を
+/// `validate_role_non_empty`/`validate_no_duplicate_within_role`と同じくロール名を
 /// 引数で受ける。OLS/WLS/Logit/Probit/Tobitは`role_name="x"`で呼ぶ。
 pub fn validate_no_const_collision(
     role_name: &str,
@@ -95,7 +95,7 @@ pub fn validate_no_const_collision(
 }
 
 /// `y`/`x`/`include_intercept`に関する4つの共通バリデーションを、この順序でまとめて
-/// 実行する（`validate_x_non_empty`→`validate_no_duplicate_roles`（`y`と`x`の重複）→
+/// 実行する（`validate_role_non_empty`→`validate_no_duplicate_roles`（`y`と`x`の重複）→
 /// `validate_no_duplicate_within_role`（`x`内部の重複）→`validate_no_const_collision`）。
 ///
 /// OLS/Logit/Probit/Tobitの`fit`/`build_*_input`冒頭で共通に呼ぶ。Tobitは本関数の
@@ -107,7 +107,7 @@ pub fn validate_no_const_collision(
 /// `panel::fe`/`panel::re`は`entity`/`time`という動的なロール構成を持ち`const`衝突
 /// チェックも無いため対象外（呼び出し元で個別にロールリストを組み立てる）。
 pub fn validate_common_roles(y: &str, x: &[String], include_intercept: bool) -> PyResult<()> {
-    validate_x_non_empty("x", x)?;
+    validate_role_non_empty("x", x)?;
     validate_no_duplicate_roles(&[("y", RoleValue::Single(y)), ("x", RoleValue::Multi(x))])?;
     validate_no_duplicate_within_role("x", x)?;
     validate_no_const_collision("x", x, include_intercept)?;
@@ -256,22 +256,22 @@ mod tests {
     }
 
     #[test]
-    fn validate_x_non_empty_ok_for_non_empty() {
-        assert!(validate_x_non_empty("x", &["x1".to_string()]).is_ok());
+    fn validate_role_non_empty_ok_for_non_empty() {
+        assert!(validate_role_non_empty("x", &["x1".to_string()]).is_ok());
     }
 
     #[test]
-    fn validate_x_non_empty_returns_error_for_empty() {
-        assert!(validate_x_non_empty("x", &[]).is_err());
+    fn validate_role_non_empty_returns_error_for_empty() {
+        assert!(validate_role_non_empty("x", &[]).is_err());
     }
 
     #[test]
-    fn validate_x_non_empty_returns_error_using_custom_role_name() {
+    fn validate_role_non_empty_returns_error_using_custom_role_name() {
         // `role_name`がメッセージにそのまま使われることの直接確認は`PyErr::to_string()`が
         // GILを要求するためできない（`nonlinear/CLAUDE.md`「テストの制約」参照）。ここでは
         // `role_name`が異なっても挙動そのもの
         // （空リスト検出）が変わらないことのみ確認する。
-        assert!(validate_x_non_empty("x_endog", &[]).is_err());
+        assert!(validate_role_non_empty("x_endog", &[]).is_err());
     }
 
     #[test]

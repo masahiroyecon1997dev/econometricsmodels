@@ -7,16 +7,32 @@
 //! `LeastSquaresError`と共有するエラー）も、`MleError`の`ErrorInfo::report()`が同じ`code`・
 //! `params`に変換するため、系統ごとに同じ判定ロジックを重複させない。
 
-use engine::nonlinear::common::{CovType, MarginalEffectsAt, MleError, SolverType};
+use engine::nonlinear::common::{
+    CovType, MarginalEffects, MarginalEffectsAt, MleError, SolverType,
+};
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 
 use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
-    extract_f64_column, extract_f64_columns, extract_optional_cluster_groups, select_columns,
+    extract_f64_column, extract_f64_columns, extract_model_x_columns,
+    extract_optional_cluster_groups, select_columns, select_model_x_columns,
 };
-use crate::shared::errors::{to_pyerr, unknown_option_value};
+use crate::shared::errors::to_pyerr;
+use crate::shared::option_values::parse_choice;
 use crate::shared::validation::{reject_unused_option, validate_common_roles};
+
+/// `build_logit_input`/`build_probit_input`/`build_tobit_input`が返す、検証済みの入力と
+/// 推定の設定。`I`は手法ごとのエンジンの入力型（`LogitInput`等）。
+#[derive(Debug)]
+pub(crate) struct BuiltMleInput<I> {
+    pub(crate) input: I,
+    /// エンジンに渡す`cov_type`（`cluster`のグループを持つ）。
+    pub(crate) cov_type: CovType,
+    /// `*Result.cov_type`に格納する正規形（小文字）の名前。
+    pub(crate) cov_type_name: String,
+    pub(crate) solver: SolverType,
+}
 
 /// `engine::nonlinear::common::MleError`をPython例外に変換する。
 ///
@@ -29,6 +45,39 @@ use crate::shared::validation::{reject_unused_option, validate_common_roles};
 /// 対応表は`docs/spec/nonlinear-common.md`2章「エラー型（`MleError`、共有）」参照。
 pub(crate) fn mle_error_to_pyerr(err: MleError) -> PyErr {
     to_pyerr(&err)
+}
+
+/// `LogitResult`/`ProbitResult`/`TobitResult`の`predict()`/`augment()`が`new_data`を受け取った
+/// ときに共有する、out-of-sample予測（`x`列だけの取り込み→列の抽出→`predict`の呼び出し）。
+///
+/// `predict`は抽出した`x`列を受け取り、予測値を返す。リンク関数の選択（Logitはロジスティック関数、
+/// Probitは正規分布CDF、Tobitは`target`・`sigma`・打ち切り境界）は`*Fitted`のメソッド側にあるので、
+/// 手法固有の分岐は呼び出し側のクロージャが`fitted`のメソッドを呼ぶだけになる。`param_names`は
+/// `fitted`の係数名（Tobitは`σ`を含まない）で、結果側の`param_names`ではない。pickleから復元した
+/// 状態でも両者の食い違いで列数が合わなくならない。
+///
+/// 戻り値は予測値だけで、`select_model_x_columns`が返す`SelectedData`の`source`は使わない。
+/// `augment()`が予測値を足す先は取り込み前の`new_data`自体で、呼び出し側が持っている。
+///
+/// # Errors
+/// `new_data`が`polars.DataFrame`でない場合は`TypeError`。必要な`x`列が無い、数値にキャストできない、
+/// 欠損値・NaN・無限大を含む場合は`ValidationError`（`fit()`と同じ列抽出）。`predict`が返した
+/// エラーはそのまま返す。
+pub(crate) fn predict_out_of_sample(
+    new_data: &Bound<'_, PyAny>,
+    param_names: &[String],
+    has_intercept: bool,
+    predict: impl FnOnce(&[Vec<f64>]) -> PyResult<Vec<f64>>,
+) -> PyResult<Vec<f64>> {
+    let selected = select_model_x_columns(new_data, "new_data", param_names, has_intercept)?;
+    let x_columns = extract_model_x_columns(
+        &selected.frame,
+        param_names,
+        has_intercept,
+        ColumnSource::new("x", "new_data"),
+    )?;
+
+    predict(&x_columns)
 }
 
 /// pickleの復元で、`source_data`（`fit()`に渡された`polars.DataFrame`）から`y`と`x`の列を取り出し直す。
@@ -65,6 +114,80 @@ pub(crate) fn rebuild_columns(
     (!y.is_empty()).then_some((y, x))
 }
 
+/// 手法固有の`x`の列名の検査（Tobitの`"sigma"`衝突など）。`extract_mle_columns`に渡す。
+pub(crate) type ExtraXCheck = fn(&[String]) -> PyResult<()>;
+
+/// [`extract_mle_columns`]に渡す、`*Options`のうち列の抽出と検査に使う値。
+///
+/// `LogitOptions`/`ProbitOptions`/`TobitOptions`の個別のフィールドから呼び出し側が組み立てる
+/// （3つのpyclassを共通のbase型にしないため、この小さな借用の束を間に置く）。
+pub(crate) struct MleColumnSpec<'a> {
+    pub cov_type: &'a str,
+    pub solver: &'a str,
+    pub cluster: Option<&'a str>,
+    pub include_intercept: bool,
+}
+
+/// [`extract_mle_columns`]が返す、検査と抽出が済んだ値。`*Input::from_columns`に渡す前の状態。
+pub(crate) struct MleColumns {
+    pub y: Vec<f64>,
+    pub x: Vec<Vec<f64>>,
+    pub cov_type: CovType,
+    /// `*Result.cov_type`に載せる正規形の名前（`CovKind::name()`）。
+    pub cov_name: &'static str,
+    pub solver: SolverType,
+}
+
+/// Logit/Probit/Tobitの`build_*_input`が共通で行う、オプションの検査と`y`/`x`/`cluster`列の抽出。
+///
+/// 検査と抽出は次の順に行い、最初に見つかった問題だけを返す
+/// （`docs/guide/validation.md`「Order in which errors are reported」。この順序は
+/// `tests/cross_method/test_validation_order.py`が固定している）。
+///
+/// 1. オプションの値: `cov_type` → `solver`（DataFrameを見ない）
+/// 2. オプションの組合せ: `cluster`と`cov_type`の矛盾（DataFrameを見ない）
+/// 3. ロール構造: `y`・`x`の重複、`"const"`列との衝突など（`validate_common_roles`）
+/// 4. `extra_x_check`（`Some`のとき。手法固有の`x`の列名の検査。Tobitの`"sigma"`衝突）
+/// 5. `y`、`x`の列
+/// 6. `cluster`の列
+///
+/// `*Input::from_columns`（`engine`側の検査）は呼び出し側がこの後に呼ぶ。`SelectedData`や
+/// `Bound`は受け取らない（`fit`のGIL解放の構造を変えないため。プレーンな`DataFrame`だけを見る）。
+///
+/// # Errors
+/// 上の順に最初に見つかった問題が`ValidationError`。
+pub(crate) fn extract_mle_columns(
+    df: &DataFrame,
+    y: &str,
+    x: &[String],
+    spec: MleColumnSpec<'_>,
+    extra_x_check: Option<ExtraXCheck>,
+) -> PyResult<MleColumns> {
+    let cov_kind = parse_cov_kind(spec.cov_type)?;
+    let solver = parse_solver_type(spec.solver)?;
+    check_cov_options(cov_kind, spec.cluster)?;
+
+    // 完全な多重共線性を早期に、分かりやすいエラーで防ぐ（`validation.rs`に集約、
+    // OLS/WLSと共通、`.claude/rules/rust-style.md`参照）。
+    validate_common_roles(y, x, spec.include_intercept)?;
+    if let Some(check) = extra_x_check {
+        check(x)?;
+    }
+
+    let y_values = extract_f64_column(df, y, ColumnSource::new("y", "data"))?;
+    let x_values = extract_f64_columns(df, x, ColumnSource::new("x", "data"))?;
+
+    let cov_type = resolve_cov_type(df, cov_kind, spec.cluster)?;
+
+    Ok(MleColumns {
+        y: y_values,
+        x: x_values,
+        cov_type,
+        cov_name: cov_kind.name(),
+        solver,
+    })
+}
+
 /// Result of `marginal_effects()` for Logit, Probit and Tobit. The intercept (and, for
 /// Tobit, `sigma`) is excluded. The fields line up with `param_names`.
 #[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
@@ -95,6 +218,21 @@ crate::shared::pickle::impl_pickle_state!(MarginalEffectsResult {
     conf_lower,
     conf_upper,
 });
+
+impl MarginalEffectsResult {
+    /// `engine`の`MarginalEffects`を、Python向けの結果に詰め替える（Logit/Probit/Tobit共通）。
+    pub(crate) fn from_engine(effects: &MarginalEffects) -> Self {
+        Self {
+            param_names: effects.param_names().to_vec(),
+            effect: effects.effect().to_vec(),
+            std_errors: effects.std_errors().to_vec(),
+            test_stats: effects.test_stats().to_vec(),
+            p_values: effects.p_values().to_vec(),
+            conf_lower: effects.conf_lower().to_vec(),
+            conf_upper: effects.conf_upper().to_vec(),
+        }
+    }
+}
 
 #[pymethods]
 impl MarginalEffectsResult {
@@ -144,18 +282,17 @@ impl CovKind {
 /// # Errors
 /// 既知の値のいずれでもない場合は`ValidationError`。
 pub(crate) fn parse_cov_kind(cov_type: &str) -> PyResult<CovKind> {
-    match cov_type.to_lowercase().as_str() {
-        "classical" => Ok(CovKind::Classical),
-        "opg" => Ok(CovKind::Opg),
-        "hc0" => Ok(CovKind::Hc0),
-        "hc1" => Ok(CovKind::Hc1),
-        "cluster" => Ok(CovKind::Cluster),
-        _ => Err(unknown_option_value(
-            "cov_type",
-            cov_type,
-            &["classical", "opg", "hc0", "hc1", "cluster"],
-        )),
-    }
+    parse_choice(
+        "cov_type",
+        cov_type,
+        &[
+            ("classical", CovKind::Classical),
+            ("opg", CovKind::Opg),
+            ("hc0", CovKind::Hc0),
+            ("hc1", CovKind::Hc1),
+            ("cluster", CovKind::Cluster),
+        ],
+    )
 }
 
 /// `cluster`が`kind`と矛盾しないことを検査する。DataFrameは見ない。
@@ -209,16 +346,15 @@ pub(crate) fn resolve_cov_type(
 /// # Errors
 /// `solver`が既知の値のいずれでもない: `ValidationError`
 pub(crate) fn parse_solver_type(solver: &str) -> PyResult<SolverType> {
-    match solver.to_lowercase().as_str() {
-        "newton" => Ok(SolverType::Newton),
-        "bfgs" => Ok(SolverType::Bfgs),
-        "lbfgs" => Ok(SolverType::Lbfgs),
-        _ => Err(unknown_option_value(
-            "solver",
-            solver,
-            &["newton", "bfgs", "lbfgs"],
-        )),
-    }
+    parse_choice(
+        "solver",
+        solver,
+        &[
+            ("newton", SolverType::Newton),
+            ("bfgs", SolverType::Bfgs),
+            ("lbfgs", SolverType::Lbfgs),
+        ],
+    )
 }
 
 /// `*Result.solver`に格納する、[`SolverType`]の正規形の名前。
@@ -237,16 +373,15 @@ pub(crate) fn solver_name(solver: SolverType) -> &'static str {
 /// # Errors
 /// `at`が既知の値のいずれでもない: `ValidationError`
 pub(crate) fn parse_marginal_effects_at(at: &str) -> PyResult<MarginalEffectsAt> {
-    match at.to_lowercase().as_str() {
-        "overall" => Ok(MarginalEffectsAt::Overall),
-        "mean" => Ok(MarginalEffectsAt::Mean),
-        "median" => Ok(MarginalEffectsAt::Median),
-        _ => Err(unknown_option_value(
-            "at",
-            at,
-            &["overall", "mean", "median"],
-        )),
-    }
+    parse_choice(
+        "at",
+        at,
+        &[
+            ("overall", MarginalEffectsAt::Overall),
+            ("mean", MarginalEffectsAt::Mean),
+            ("median", MarginalEffectsAt::Median),
+        ],
+    )
 }
 
 /// `LogitOptions`/`ProbitOptions`/`TobitOptions`のコンストラクタで`tol=None`のときの既定値を
@@ -257,16 +392,19 @@ pub(crate) fn parse_marginal_effects_at(at: &str) -> PyResult<MarginalEffectsAt>
 /// `tol`が明示されていればそのまま返す。`solver`は大文字小文字を区別せず、未知の値は
 /// ここでは検証せず（`fit()`時の`parse_solver_type`が`ValidationError`にする）`1e-8`側になる。
 pub(crate) fn resolve_mle_tol_default(solver: &str, tol: Option<f64>) -> f64 {
-    tol.unwrap_or(if solver.eq_ignore_ascii_case("newton") {
-        1e-6
-    } else {
-        1e-8
-    })
+    tol.unwrap_or(
+        if matches!(parse_solver_type(solver), Ok(SolverType::Newton)) {
+            1e-6
+        } else {
+            1e-8
+        },
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use engine::shared::group_codes::GroupCodes;
     use polars::df;
 
     /// 大文字小文字の綴りによらず、正規形の名前になること（`*Result.cov_type`がそのまま
@@ -340,6 +478,263 @@ mod tests {
         for alias in ["l-bfgs", "lbfgs-b", "newton-raphson"] {
             assert!(parse_solver_type(alias).is_err(), "{alias}");
         }
+    }
+
+    /// `extract_mle_columns`のテストで使う、`cov_type="classical"`・`solver="newton"`・
+    /// `cluster`なし・`include_intercept=true`の既定の`MleColumnSpec`。フィールドごとに上書きして使う。
+    fn default_spec() -> MleColumnSpec<'static> {
+        MleColumnSpec {
+            cov_type: "classical",
+            solver: "newton",
+            cluster: None,
+            include_intercept: true,
+        }
+    }
+
+    /// `y`の値は`extract_mle_columns`の検査に関係しないので何でもよい。
+    fn well_formed_df() -> DataFrame {
+        df!(
+            "y" => [0.0, 1.0, 0.0, 1.0],
+            "x1" => [10.0, 20.0, 30.0, 40.0],
+            "x2" => [-5.0, 2.0, 8.0, -1.0],
+        )
+        .unwrap()
+    }
+
+    fn names(names: &[&str]) -> Vec<String> {
+        names.iter().map(|name| (*name).to_string()).collect()
+    }
+
+    #[test]
+    fn extract_mle_columns_succeeds_for_well_formed_data() {
+        let df = well_formed_df();
+
+        let Ok(cols) = extract_mle_columns(&df, "y", &names(&["x1", "x2"]), default_spec(), None)
+        else {
+            panic!("expected Ok");
+        };
+
+        assert_eq!(cols.y, [0.0, 1.0, 0.0, 1.0]);
+        assert_eq!(
+            cols.x,
+            [vec![10.0, 20.0, 30.0, 40.0], vec![-5.0, 2.0, 8.0, -1.0]]
+        );
+        assert!(matches!(cols.cov_type, CovType::Classical));
+        assert_eq!(cols.cov_name, "classical");
+        assert!(matches!(cols.solver, SolverType::Newton));
+    }
+
+    #[test]
+    fn extract_mle_columns_returns_validation_error_for_empty_x() {
+        let df = well_formed_df();
+
+        let result = extract_mle_columns(&df, "y", &[], default_spec(), None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn extract_mle_columns_returns_validation_error_when_y_is_also_in_x() {
+        let df = well_formed_df();
+
+        let result = extract_mle_columns(&df, "y", &names(&["y", "x1"]), default_spec(), None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn extract_mle_columns_returns_validation_error_for_duplicate_x_column() {
+        let df = well_formed_df();
+
+        let result = extract_mle_columns(&df, "y", &names(&["x1", "x1"]), default_spec(), None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn extract_mle_columns_returns_validation_error_for_const_collision_when_include_intercept_is_true()
+     {
+        let df = df!(
+            "y" => [0.0, 1.0, 0.0, 1.0],
+            "const" => [1.0, 1.0, 1.0, 1.0],
+        )
+        .unwrap();
+
+        let result = extract_mle_columns(&df, "y", &names(&["const"]), default_spec(), None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn extract_mle_columns_returns_validation_error_for_missing_column() {
+        let df = well_formed_df();
+
+        let result =
+            extract_mle_columns(&df, "y", &names(&["does_not_exist"]), default_spec(), None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn extract_mle_columns_returns_validation_error_for_missing_values() {
+        let df = df!(
+            "y" => [0.0, 1.0, 0.0, 1.0],
+            "x1" => [Some(1.0), None, Some(3.0), Some(4.0)],
+        )
+        .unwrap();
+
+        let result = extract_mle_columns(&df, "y", &names(&["x1"]), default_spec(), None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn extract_mle_columns_returns_validation_error_for_unknown_cov_type() {
+        let df = well_formed_df();
+        let spec = MleColumnSpec {
+            cov_type: "bogus",
+            ..default_spec()
+        };
+
+        let result = extract_mle_columns(&df, "y", &names(&["x1"]), spec, None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn extract_mle_columns_returns_validation_error_for_unknown_solver() {
+        let df = well_formed_df();
+        let spec = MleColumnSpec {
+            solver: "bogus",
+            ..default_spec()
+        };
+
+        let result = extract_mle_columns(&df, "y", &names(&["x1"]), spec, None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn extract_mle_columns_extracts_cluster_groups_for_cluster_cov_type() {
+        let df = df!(
+            "y" => [0.0, 1.0, 0.0, 1.0],
+            "x1" => [10.0, 20.0, 30.0, 40.0],
+            "cluster" => ["g1", "g1", "g2", "g2"],
+        )
+        .unwrap();
+        let spec = MleColumnSpec {
+            cov_type: "cluster",
+            cluster: Some("cluster"),
+            ..default_spec()
+        };
+
+        let Ok(cols) = extract_mle_columns(&df, "y", &names(&["x1"]), spec, None) else {
+            panic!("expected Ok");
+        };
+
+        match cols.cov_type {
+            CovType::Cluster { groups } => {
+                assert_eq!(
+                    groups,
+                    Some(GroupCodes::from_labels_without_keys(&names(&[
+                        "g1", "g1", "g2", "g2"
+                    ])))
+                );
+            }
+            other => panic!("expected Cluster, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn extract_mle_columns_leaves_cluster_groups_none_when_cluster_not_specified() {
+        // クラスターキー未指定自体はここではエラーにせず、`groups=None`のまま返す
+        // （`engine`側の`CommonError::MissingClusterColumn`検証に委ねる設計）。
+        let df = well_formed_df();
+        let spec = MleColumnSpec {
+            cov_type: "cluster",
+            ..default_spec()
+        };
+
+        let Ok(cols) = extract_mle_columns(&df, "y", &names(&["x1"]), spec, None) else {
+            panic!("expected Ok");
+        };
+
+        match cols.cov_type {
+            CovType::Cluster { groups } => assert!(groups.is_none()),
+            other => panic!("expected Cluster, got {other:?}"),
+        }
+    }
+
+    /// 実際にPythonから渡される文字列を受ける入口を通した、大文字小文字非依存性と、
+    /// `cov_name`（`*Result.cov_type`に格納する正規形）の検証。`parse_cov_kind`単体の同種の
+    /// テストは別にある。`unwrap()`/`expect()`ではなく`let-else`を使う理由は
+    /// `parse_cov_kind_is_case_insensitive_and_has_canonical_names`と同じ。
+    #[test]
+    fn extract_mle_columns_cov_type_is_case_insensitive() {
+        let df = well_formed_df();
+        for (input, is_expected) in [
+            (
+                "classical",
+                (|c: &CovType| matches!(c, CovType::Classical)) as fn(&CovType) -> bool,
+            ),
+            ("CLASSICAL", |c| matches!(c, CovType::Classical)),
+            ("Classical", |c| matches!(c, CovType::Classical)),
+            ("OPG", |c| matches!(c, CovType::Opg)),
+            ("Hc0", |c| matches!(c, CovType::Hc0)),
+            ("HC1", |c| matches!(c, CovType::Hc1)),
+            ("CLUSTER", |c| matches!(c, CovType::Cluster { .. })),
+        ] {
+            let spec = MleColumnSpec {
+                cov_type: input,
+                ..default_spec()
+            };
+            let Ok(cols) = extract_mle_columns(&df, "y", &names(&["x1", "x2"]), spec, None) else {
+                panic!("expected Ok for cov_type={input}");
+            };
+            assert!(
+                is_expected(&cols.cov_type),
+                "input={input}, got={:?}",
+                cols.cov_type
+            );
+            assert_eq!(cols.cov_name, input.to_lowercase(), "input={input}");
+        }
+    }
+
+    thread_local! {
+        /// `record_extra_x_check`が呼ばれたか。テストごとに別のスレッドで走るので、他のテストと
+        /// 干渉しない。
+        static EXTRA_X_CHECK_CALLED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    fn reject_extra_x_check(_x: &[String]) -> PyResult<()> {
+        Err(pyo3::exceptions::PyValueError::new_err("rejected"))
+    }
+
+    fn record_extra_x_check(_x: &[String]) -> PyResult<()> {
+        EXTRA_X_CHECK_CALLED.with(|called| called.set(true));
+        Ok(())
+    }
+
+    /// `extra_x_check`は`validate_common_roles`の後に呼ばれ、そのエラーが返る。ロール構造が
+    /// 不正なら呼ばれない。
+    #[test]
+    fn extract_mle_columns_runs_extra_x_check_after_common_roles() {
+        let df = well_formed_df();
+
+        let result = extract_mle_columns(
+            &df,
+            "y",
+            &names(&["x1"]),
+            default_spec(),
+            Some(reject_extra_x_check),
+        );
+        assert!(result.is_err());
+
+        let result = extract_mle_columns(&df, "y", &[], default_spec(), Some(record_extra_x_check));
+        assert!(result.is_err());
+        assert!(!EXTRA_X_CHECK_CALLED.with(std::cell::Cell::get));
+
+        let result = extract_mle_columns(
+            &df,
+            "y",
+            &names(&["x1"]),
+            default_spec(),
+            Some(record_extra_x_check),
+        );
+        assert!(result.is_ok());
+        assert!(EXTRA_X_CHECK_CALLED.with(std::cell::Cell::get));
     }
 
     #[test]

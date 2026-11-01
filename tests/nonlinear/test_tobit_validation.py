@@ -183,7 +183,7 @@ def test_non_finite_values_raise(bad):
     """`y`/`x` に NaN・無限大が含まれる場合 `ValidationError`。
 
     null（`test_null_values_raise` / `test_null_values_in_x_raise`）と NaN/無限大は
-    `column_extraction.rs` 内で別ロジックのため個別に確認する（OLS の
+    `column_extraction/` 内で別ロジックのため個別に確認する（OLS の
     `test_non_finite_values_raise` と同じ）。
     """
     df_y = pl.DataFrame(

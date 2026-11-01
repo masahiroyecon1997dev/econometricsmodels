@@ -498,7 +498,7 @@ def test_gmm_cov_type_options_run_independently_of_weight_type(
 ):
     """`estimator="gmm"`で`cov_type`（SE計算方式）と`gmm_weight_type`（点推定に使う
     重み行列、既定`classical`のまま）が独立な軸であること
-    （`engine_pybind/src/iv/common.rs`のモジュールdocコメント参照）を、
+    （`engine_pybind/src/iv/common/mod.rs`のモジュールdocコメント参照）を、
     `gmm_weight_type`を固定したまま`cov_type`だけ変えても成功パスで動作する
     ことで確認する。
     """

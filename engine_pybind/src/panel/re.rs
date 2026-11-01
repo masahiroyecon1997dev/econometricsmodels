@@ -35,7 +35,7 @@
 //!
 //! ## `x`の空リストを許容しない
 //!
-//! FEと同じ`validate_x_non_empty`を適用し、`x=[]`を拒否する。REで`x=[]`は
+//! FEと同じ`validate_role_non_empty`を適用し、`x=[]`を拒否する。REで`x=[]`は
 //! 「分散成分（ICC）のみを推定するnullモデル」として単独で意味を持つ標準的なユースケース
 //! （パネル・混合モデル分析の"null model"）だが、`panel-common.md`にこの点の明示的な
 //! 決定が無いため、他手法（OLS/WLS/Logit/Probit/IV/FE）と一貫させて拒否する。
@@ -48,23 +48,19 @@ use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 
 use super::common::{
-    PanelCovKind, PanelModel, check_panel_cov_options, extract_effects, group_counts, groups_dict,
-    panel_error_to_pyerr, parse_panel_cov_kind, require_dk_time, validate_dk_time_role,
-    validate_effects,
+    PanelCovKind, PanelModel, check_panel_cov_options, extract_effects, extract_time_keys,
+    group_counts, groups_dict, panel_error_to_pyerr, parse_panel_cov_kind, require_dk_time,
+    validate_panel_roles,
 };
 use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
     SelectedData, extract_f64_column, extract_f64_columns, extract_optional_cluster_groups,
-    extract_time_keys,
 };
-use crate::shared::errors::unknown_option_value;
 use crate::shared::mat_conversion::{mat_to_rows, mat_to_vec};
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
     extract_strict_float, extract_strict_opt_column, extract_strict_opt_int, extract_strict_text,
-};
-use crate::shared::validation::{
-    RoleValue, validate_no_duplicate_roles, validate_no_duplicate_within_role, validate_x_non_empty,
+    parse_choice,
 };
 
 /// Estimation options for RE (random effects panel regression).
@@ -78,7 +74,7 @@ use crate::shared::validation::{
 /// - Variance components: `variance_method`.
 /// - Confidence intervals: `confidence_level`.
 // 各フィールドの意味・既定値の根拠は`docs/spec/panel-common.md`・`docs/spec/re-spec.md`。
-// module/from_py_objectの理由は`OLSOptions`と同じ（`engine_pybind/src/linear/ols.rs`参照）。
+// module/from_py_objectの理由は`OLSOptions`と同じ（`engine_pybind/src/linear/ols/options.rs`参照）。
 #[pyclass(from_py_object, module = "econometricsmodels._lib")]
 #[derive(Debug, Clone)]
 pub struct REOptions {
@@ -269,7 +265,8 @@ pub struct REResult {
     #[pyo3(get)]
     pub stat_dist: String,
     /// Degrees of freedom of the t distribution (always `Some`). May differ from
-    /// `df_resid` (e.g. cluster-robust inference uses `G - 1`).
+    /// `df_resid`: cluster-robust inference uses `G - 1`, where `G` is the number of
+    /// clusters, and Driscoll-Kraay uses the number of `dk_time` periods minus 1.
     #[pyo3(get)]
     pub stat_df: Option<i64>,
     #[pyo3(get)]
@@ -358,9 +355,11 @@ pub struct REResult {
     /// Numerator degrees of freedom of `f_statistic` (`None` when `f_statistic` is `None`).
     #[pyo3(get)]
     pub f_df_num: Option<usize>,
-    /// Denominator degrees of freedom of `f_statistic` (`None` when `f_statistic` is `None`). Follows
-    /// `cov_type` like the t-tests (`G - 1` for cluster, `T - 1` for Driscoll-Kraay,
-    /// `df_resid` otherwise).
+    /// Denominator degrees of freedom of `f_statistic` (`None` when `f_statistic` is `None`).
+    /// Follows `cov_type` like the t-tests, so it equals `stat_df` whenever `f_statistic` is
+    /// not `None`: the number of clusters minus 1 for `"cluster"`, the number of `dk_time`
+    /// periods minus 1 for `"dk"`, and `df_resid` otherwise. Use it to recompute the p-value
+    /// from `f_statistic`.
     #[pyo3(get)]
     pub f_df_denom: Option<usize>,
     #[pyo3(get)]
@@ -505,22 +504,33 @@ fn resolve_re_cov_type(
 /// # Errors
 /// 未知の値は`ValidationError`。
 fn parse_variance_method(value: &str) -> PyResult<VarianceMethod> {
-    match value.to_lowercase().as_str() {
-        "swamy_arora" => Ok(VarianceMethod::SwamyArora),
-        "wallace_hussain" => Ok(VarianceMethod::WallaceHussain),
-        "amemiya" => Ok(VarianceMethod::Amemiya),
-        _ => Err(unknown_option_value(
-            "variance_method",
-            value,
-            &["swamy_arora", "wallace_hussain", "amemiya"],
-        )),
-    }
+    parse_choice(
+        "variance_method",
+        value,
+        &[
+            ("swamy_arora", VarianceMethod::SwamyArora),
+            ("wallace_hussain", VarianceMethod::WallaceHussain),
+            ("amemiya", VarianceMethod::Amemiya),
+        ],
+    )
+}
+
+/// [`build_re_input`]の戻り値。
+#[derive(Debug)]
+pub(crate) struct BuiltReInput {
+    pub(crate) input: ReInput,
+    pub(crate) effects: ReEffects,
+    /// エンジンに渡す`cov_type`（`cluster`のグループや`dk`の時点を持つ）。
+    pub(crate) cov_type: ReCovType,
+    /// `REResult.cov_type`に格納する正規形（小文字）の名前。
+    pub(crate) cov_type_name: String,
+    pub(crate) variance_method: VarianceMethod,
 }
 
 /// Pythonから渡された `data` / `y` / `x` / `effects` / `options` を検証し、
-/// `engine::panel::re::ReInput::from_columns`を呼び出すところまでを行う。
-/// 戻り値（`ReInput`・`ReEffects`・`ReCovType`・正規形の`cov_type`・`VarianceMethod`）を
-/// `fit`関数が受け取り、`ReEstimator::fit`を呼んで`REResult`を組み立てる。
+/// `engine::panel::re::ReInput::from_group_codes`を呼び出すところまでを行う。
+/// 戻り値の[`BuiltReInput`]を`fit`関数が受け取り、`ReEstimator::fit`を呼んで
+/// `REResult`を組み立てる。
 ///
 /// `effects`の1つ目を個体、2つ目（あれば）を時間次元として`ReInput`に渡し、2要素なら
 /// `ReEffects::TwoWay`、1要素なら`OneWay`を選ぶ。`options.dk_time`は`resolve_re_cov_type`が`ReCovType::Dk`に渡す
@@ -541,7 +551,7 @@ pub(crate) fn build_re_input(
     x: Vec<String>,
     effects: Vec<String>,
     options: &REOptions,
-) -> PyResult<(ReInput, ReEffects, ReCovType, String, VarianceMethod)> {
+) -> PyResult<BuiltReInput> {
     // DataFrameを見ない検査を先に行う。報告順は`docs/guide/validation.md`
     // 「Order in which errors are reported」: オプションの値（`cov_type` →
     // `variance_method`）→ オプションの組合せ → ロール構造 → `y`/`x`の列 →
@@ -555,18 +565,8 @@ pub(crate) fn build_re_input(
         options.dk_bandwidth,
     )?;
 
-    // `effects`の列数（空・3つ以上）を先に見る。
-    validate_effects(PanelModel::Re, &effects)?;
-    validate_x_non_empty("x", &x)?;
-    validate_no_duplicate_roles(&[
-        ("y", RoleValue::Single(&y)),
-        ("effects", RoleValue::Multi(&effects)),
-        ("x", RoleValue::Multi(&x)),
-    ])?;
-    validate_no_duplicate_within_role("x", &x)?;
-    validate_no_duplicate_within_role("effects", &effects)?;
-    // `dk_time`は`y`・`effects[0]`との重複だけ拒否する（`x`との重複は許可、`validate_dk_time_role`参照）。
-    validate_dk_time_role(&y, &effects[0], options.dk_time.as_deref())?;
+    // `effects`の列数・`x`が空（モジュールdoc参照）・列の役割の重複・`dk_time`の役割を検査する。
+    validate_panel_roles(PanelModel::Re, &y, &x, &effects, options.dk_time.as_deref())?;
 
     // ── y/x/effects列の抽出 ─────────────────────────────────────────────
     let y_slice = extract_f64_column(df, &y, ColumnSource::new("y", "data"))?;
@@ -588,13 +588,13 @@ pub(crate) fn build_re_input(
         .map_err(panel_error_to_pyerr)?
         .with_effect_names(effects[0].clone(), effects.get(1).cloned());
 
-    Ok((
+    Ok(BuiltReInput {
         input,
-        re_effects,
+        effects: re_effects,
         cov_type,
-        cov_kind.name().to_string(),
+        cov_type_name: cov_kind.name().to_string(),
         variance_method,
-    ))
+    })
 }
 
 /// Pythonから渡された `data` / `y` / `x` / `effects` / `options` を検証し、
@@ -647,8 +647,13 @@ fn fit_frame(
     effects: Vec<String>,
     options: &REOptions,
 ) -> PyResult<REResult> {
-    let (input, re_effects, cov_type, cov_type_lower, variance_method) =
-        build_re_input(df, y, x, effects.clone(), options)?;
+    let BuiltReInput {
+        input,
+        effects: re_effects,
+        cov_type,
+        cov_type_name,
+        variance_method,
+    } = build_re_input(df, y, x, effects.clone(), options)?;
 
     let estimator = ReEstimator::fit_with_variance_method(
         input,
@@ -696,7 +701,7 @@ fn fit_frame(
         theta_entity: two_way_theta.map(|t| t.0),
         theta_time: two_way_theta.map(|t| t.1),
         theta_total: two_way_theta.map(|t| t.2),
-        cov_type: cov_type_lower,
+        cov_type: cov_type_name,
         dk_bandwidth_used: estimator.dk_bandwidth_used().map(|bw| bw as i64),
         f_statistic: estimator.f_statistic(),
         f_p_value: estimator.f_p_value(),
@@ -717,6 +722,7 @@ fn fit_frame(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::panel::common::well_formed_df;
     use engine::shared::group_codes::GroupCodes;
     use polars::df;
 
@@ -733,22 +739,18 @@ mod tests {
         )
     }
 
-    fn well_formed_df() -> DataFrame {
-        df!(
-            "y" => [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-            "x1" => [2.0, 4.0, 1.0, 5.0, 3.0, 6.0],
-            "id" => ["a", "a", "b", "b", "c", "c"],
-            "t" => ["1", "2", "1", "2", "1", "2"],
-        )
-        .unwrap()
-    }
-
     #[test]
     fn build_re_input_succeeds_for_well_formed_data() {
         let df = well_formed_df();
         let options = default_options();
 
-        let (input, effects, cov_type, cov_type_lower, _) = build_re_input(
+        let BuiltReInput {
+            input,
+            effects,
+            cov_type,
+            cov_type_name,
+            ..
+        } = build_re_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string()],
@@ -766,7 +768,7 @@ mod tests {
             ReCovType::Cluster { groups: None },
             "cluster未指定時はNone（engine側でentity列にフォールバック）"
         );
-        assert_eq!(cov_type_lower, "cluster");
+        assert_eq!(cov_type_name, "cluster");
     }
 
     #[test]
@@ -778,7 +780,12 @@ mod tests {
         options.cov_type = "dk".to_string();
         options.dk_time = Some("t".to_string());
 
-        let (input, effects, cov_type, _, _) = build_re_input(
+        let BuiltReInput {
+            input,
+            effects,
+            cov_type,
+            ..
+        } = build_re_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string()],
@@ -801,7 +808,7 @@ mod tests {
         let df = well_formed_df();
         let options = default_options();
 
-        let (input, effects, ..) = build_re_input(
+        let BuiltReInput { input, effects, .. } = build_re_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string()],
@@ -815,41 +822,6 @@ mod tests {
             input.time_keys().map(|t| t.periods().to_vec()),
             Some(vec!["1".to_string(), "2".to_string()])
         );
-    }
-
-    #[test]
-    fn build_re_input_rejects_second_effect_that_duplicates_another_role() {
-        let df = well_formed_df();
-        for column in ["y", "id", "x1"] {
-            let options = default_options();
-            let result = build_re_input(
-                &df,
-                "y".to_string(),
-                vec!["x1".to_string()],
-                vec!["id".to_string(), column.to_string()],
-                &options,
-            );
-            assert!(result.is_err(), "effects[1]={column}");
-        }
-    }
-
-    #[test]
-    fn build_re_input_allows_dk_time_to_equal_second_effect() {
-        // 2-wayの時間次元とDKの時点列に同じ列を使うのは自然（`FEOptions`と同じ）。
-        let df = well_formed_df();
-        let mut options = default_options();
-        options.cov_type = "dk".to_string();
-        options.dk_time = Some("t".to_string());
-
-        let result = build_re_input(
-            &df,
-            "y".to_string(),
-            vec!["x1".to_string()],
-            vec!["id".to_string(), "t".to_string()],
-            &options,
-        );
-
-        assert!(result.is_ok());
     }
 
     #[test]
@@ -873,9 +845,9 @@ mod tests {
     }
 
     #[test]
-    fn build_re_input_returns_error_for_empty_x() {
-        // `x=[]`を拒否する（モジュールdoc「`x`の空リストを許容しない」参照。
-        // FE・OLS/WLS/Logit/Probit/IVと同じ`validate_x_non_empty`）。
+    fn build_re_input_rejects_empty_x() {
+        // 列の役割の検査が`validate_panel_roles`経由で配線されていることの確認
+        // （検査の中身は`panel/common.rs`のテストが持つ）。
         let df = well_formed_df();
         let options = default_options();
 
@@ -887,89 +859,6 @@ mod tests {
             &options,
         );
 
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn build_re_input_returns_error_when_y_overlaps_entity() {
-        let df = well_formed_df();
-        let options = default_options();
-
-        let result = build_re_input(
-            &df,
-            "y".to_string(),
-            vec!["x1".to_string()],
-            vec!["y".to_string()],
-            &options,
-        );
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn build_re_input_returns_error_when_x_overlaps_entity() {
-        let df = well_formed_df();
-        let options = default_options();
-
-        let result = build_re_input(
-            &df,
-            "y".to_string(),
-            vec!["x1".to_string(), "id".to_string()],
-            vec!["id".to_string()],
-            &options,
-        );
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn build_re_input_allows_x_to_overlap_dk_time() {
-        // 年トレンドを説明変数に入れつつDKの時点にも使う、等は正当な使い方
-        // （`validate_dk_time_role`参照）。
-        let df = well_formed_df();
-        let mut options = default_options();
-        options.cov_type = "dk".to_string();
-        options.dk_time = Some("x1".to_string());
-
-        let result = build_re_input(
-            &df,
-            "y".to_string(),
-            vec!["x1".to_string()],
-            vec!["id".to_string()],
-            &options,
-        );
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn build_re_input_rejects_dk_time_that_is_y_or_entity() {
-        let df = well_formed_df();
-        for column in ["y", "id"] {
-            let mut options = default_options();
-            options.cov_type = "dk".to_string();
-            options.dk_time = Some(column.to_string());
-
-            let result = build_re_input(
-                &df,
-                "y".to_string(),
-                vec!["x1".to_string()],
-                vec!["id".to_string()],
-                &options,
-            );
-            assert!(result.is_err(), "dk_time={column}");
-        }
-    }
-
-    #[test]
-    fn build_re_input_returns_error_when_x_contains_duplicate() {
-        let df = well_formed_df();
-        let options = default_options();
-
-        let result = build_re_input(
-            &df,
-            "y".to_string(),
-            vec!["x1".to_string(), "x1".to_string()],
-            vec!["id".to_string()],
-            &options,
-        );
         assert!(result.is_err());
     }
 
@@ -1017,7 +906,7 @@ mod tests {
         let mut options = default_options();
         options.cluster = Some("state".to_string());
 
-        let (_, _, cov_type, _, _) = build_re_input(
+        let BuiltReInput { cov_type, .. } = build_re_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string()],
@@ -1059,7 +948,7 @@ mod tests {
         assert!(build(&options).is_err(), "dk_time unset must be rejected");
 
         options.dk_time = Some("t".to_string());
-        let (_, _, cov_type, _, _) = build(&options).unwrap();
+        let BuiltReInput { cov_type, .. } = build(&options).unwrap();
         let ReCovType::Dk { bandwidth, .. } = cov_type else {
             panic!("expected ReCovType::Dk");
         };

@@ -1,7 +1,7 @@
 //! `panel`系統（FE/RE）で共有するユーティリティ。
 //!
 //! `.claude/rules/rust-style.md`「ファイル・ディレクトリ構成」: 系統内で共有するロジックは
-//! `<系統>/common.rs`に置く（`engine_pybind/src/iv/common.rs`と同じ位置づけ）。
+//! `<系統>/common.rs`に置く（`engine_pybind/src/iv/common/`と同じ位置づけ）。
 //!
 //! `PanelError`は`engine::shared::error::ErrorInfo`を実装しており、`code`・`params`
 //! （`Common`バリアントの`CommonError`は`report()`が委譲する）は`engine`側が決める。
@@ -10,15 +10,20 @@
 use engine::panel::common::{PanelError, TimeKeys};
 use engine::shared::error_catalog::{ErrorCode, ParamValue};
 use engine::shared::group_codes::GroupCodes;
-use polars::prelude::DataFrame;
+use polars::prelude::{DataFrame, DataType};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use crate::shared::column_error::ColumnSource;
-use crate::shared::column_extraction::{extract_entity_groups, extract_time_keys};
-use crate::shared::errors::{to_pyerr, unknown_option_value, user_error};
+use crate::shared::column_extraction::{
+    FactorizedKey, KeyRole, checked_key_column, extract_entity_groups, factorize_checked_key,
+    physical_f64, physical_i128, with_group_labels,
+};
+use crate::shared::errors::{to_pyerr, user_error};
+use crate::shared::option_values::{allowed_names, parse_choice};
 use crate::shared::validation::{
-    RoleValue, reject_unused_option, validate_no_duplicate_roles, validate_x_non_empty,
+    RoleValue, reject_unused_option, validate_no_duplicate_roles,
+    validate_no_duplicate_within_role, validate_role_non_empty,
 };
 
 /// `cov_type`の検査でFEとREの文言を切り替えるためのモデル種別。
@@ -38,7 +43,14 @@ impl PanelModel {
 }
 
 /// FE/REが受け付ける`cov_type`の値（`hc0`は含まない）。
-const PANEL_COV_TYPES: &[&str] = &["classical", "hc1", "hc2", "hc3", "cluster", "dk"];
+const PANEL_COV_CHOICES: &[(&str, PanelCovKind)] = &[
+    ("classical", PanelCovKind::Classical),
+    ("hc1", PanelCovKind::Hc1),
+    ("hc2", PanelCovKind::Hc2),
+    ("hc3", PanelCovKind::Hc3),
+    ("cluster", PanelCovKind::Cluster),
+    ("dk", PanelCovKind::Dk),
+];
 
 /// FE/REの`cov_type`の種類。列名や`dk_bandwidth`を持たない、文字列だけから決まる値。
 ///
@@ -82,23 +94,20 @@ impl PanelCovKind {
 /// # Errors
 /// 既知の値のいずれでもない場合は`ValidationError`。
 pub(crate) fn parse_panel_cov_kind(cov_type: &str, model: PanelModel) -> PyResult<PanelCovKind> {
-    match cov_type.to_lowercase().as_str() {
-        "classical" => Ok(PanelCovKind::Classical),
-        "hc1" => Ok(PanelCovKind::Hc1),
-        "hc2" => Ok(PanelCovKind::Hc2),
-        "hc3" => Ok(PanelCovKind::Hc3),
-        "cluster" => Ok(PanelCovKind::Cluster),
-        "dk" => Ok(PanelCovKind::Dk),
-        "hc0" => Err(user_error(
+    if cov_type.to_lowercase() == "hc0" {
+        return Err(user_error(
             ErrorCode::CovTypeNotAvailableForModel,
             vec![
                 ("value", ParamValue::from(cov_type)),
                 ("model", ParamValue::from(model.name())),
-                ("allowed", ParamValue::from(PANEL_COV_TYPES.to_vec())),
+                (
+                    "allowed",
+                    ParamValue::from(allowed_names(PANEL_COV_CHOICES)),
+                ),
             ],
-        )),
-        _ => Err(unknown_option_value("cov_type", cov_type, PANEL_COV_TYPES)),
+        ));
     }
+    parse_choice("cov_type", cov_type, PANEL_COV_CHOICES)
 }
 
 /// DKの時点列`dk_time`が指定されていることを確かめ、その列名を返す。
@@ -156,11 +165,7 @@ pub(crate) fn check_panel_cov_options(
 /// 正当な使い方）。`effects`の2つ目（2-wayの時間次元）との重複も許可する（固定効果と
 /// DKで同じ時間粒度を使うのが典型）。そのため`validate_no_duplicate_roles`に渡す
 /// ロールを`y`・`effects`の先頭・`dk_time`だけに絞り、`x`・`effects`の2つ目は含めない。
-pub(crate) fn validate_dk_time_role(
-    y: &str,
-    first_effect: &str,
-    dk_time: Option<&str>,
-) -> PyResult<()> {
+fn validate_dk_time_role(y: &str, first_effect: &str, dk_time: Option<&str>) -> PyResult<()> {
     let Some(dk_time) = dk_time else {
         return Ok(());
     };
@@ -181,8 +186,8 @@ const MAX_EFFECTS: usize = 2;
 ///
 /// # Errors
 /// 空、または`MAX_EFFECTS`を超える場合は`ValidationError`。
-pub(crate) fn validate_effects(model: PanelModel, effects: &[String]) -> PyResult<()> {
-    validate_x_non_empty("effects", effects)?;
+fn validate_effects(model: PanelModel, effects: &[String]) -> PyResult<()> {
+    validate_role_non_empty("effects", effects)?;
     if effects.len() > MAX_EFFECTS {
         return Err(user_error(
             ErrorCode::EffectsTooMany,
@@ -194,6 +199,47 @@ pub(crate) fn validate_effects(model: PanelModel, effects: &[String]) -> PyResul
         ));
     }
     Ok(())
+}
+
+/// `y`・`x`・`effects`・`dk_time`の列の役割（DataFrameを見ない構造）を検査する。FE/RE共通。
+///
+/// 次の順に検査し、最初の違反で返す。
+///
+/// 1. `effects`の列数（空→`ROLE_EMPTY`、3要素以上→`EFFECTS_TOO_MANY`。[`validate_effects`]）
+/// 2. `x`が空でない
+/// 3. `y`・`effects`・`x`の間に同じ列が無い
+/// 4. `x`の内部に重複が無い
+/// 5. `effects`の内部に重複が無い
+/// 6. `dk_time`が`y`・`effects[0]`と同じ列でない（[`validate_dk_time_role`]）
+///
+/// `cov_type`・`variance_method`の値の検査と組合せの検査（[`parse_panel_cov_kind`]・
+/// [`check_panel_cov_options`]）は呼び出し側で、これより前に行うこと（報告順は
+/// `tests/cross_method/test_validation_order.py`が固定している）。手順6は手順1で空の`effects`を
+/// 弾いた後に`effects[0]`を参照するため、手順の順序を入れ替えない。
+///
+/// # Errors
+/// 上のいずれかに違反する場合は`ValidationError`。
+pub(crate) fn validate_panel_roles(
+    model: PanelModel,
+    y: &str,
+    x: &[String],
+    effects: &[String],
+    dk_time: Option<&str>,
+) -> PyResult<()> {
+    // `effects`の列数（空・3つ以上）を先に見る。
+    validate_effects(model, effects)?;
+    // `x`が空リストであることを許容しない（`x=[]`は他手法と同じく`validate_role_non_empty`で拒否）。
+    validate_role_non_empty("x", x)?;
+    validate_no_duplicate_roles(&[
+        ("y", RoleValue::Single(y)),
+        ("effects", RoleValue::Multi(effects)),
+        ("x", RoleValue::Multi(x)),
+    ])?;
+    validate_no_duplicate_within_role("x", x)?;
+    validate_no_duplicate_within_role("effects", effects)?;
+    // `dk_time`は`y`・`effects[0]`との重複だけ拒否する（`x`との重複は許可、`validate_dk_time_role`参照）。
+    // `effects`が空でないことは手順1で確かめ済み。
+    validate_dk_time_role(y, &effects[0], dk_time)
 }
 
 /// `effects`の列をDataFrameから取り出す。1つ目は個体（同一性だけが意味を持つキー）、
@@ -240,7 +286,7 @@ pub(crate) fn group_counts(n_entities: usize, n_periods: Option<usize>) -> Vec<u
 /// `PanelError`（`engine`クレート）と`PyErr`（`pyo3`クレート）はどちらもこのクレートの外で
 /// 定義された型のため、orphan ruleにより`impl From<PanelError> for PyErr`は書けない。関数
 /// として実装し、呼び出し側で`.map_err(panel_error_to_pyerr)?`する（`iv_error_to_pyerr`と
-/// 同じ理由、`engine_pybind/src/iv/common.rs`参照）。
+/// 同じ理由、`engine_pybind/src/iv/common/`参照）。
 ///
 /// `PanelError`の各バリアントは`ErrorInfo::report()`が`code`・`params`に変換する。
 /// `WithinRegressionFailed`等の回帰の包みは原因の`code`に`stage`を付け、`ValidationError`/
@@ -249,9 +295,77 @@ pub(crate) fn panel_error_to_pyerr(err: PanelError) -> PyErr {
     to_pyerr(&err)
 }
 
+/// `df`から`name`列を、時点を表すキー（FE/REの`effects`の2つ目・`dk_time`）として、ラベルと
+/// **値の順序**を持つ`TimeKeys`で取り出す。行ごとの`String`は作らない
+/// （`extract_cluster_groups`（`shared/column_extraction/`）と同じ分解）。
+///
+/// ラベルは文字列表現（同一性の判定と`fixed_effects()`のキーに使う）。時点の順序は列の
+/// dtypeの値の順序で決める。文字列表現の辞書順は`1, 10, 11, 2, ...`のように時間順と
+/// ずれるため使わない。
+///
+/// | dtype | 時点の順序 |
+/// |---|---|
+/// | 整数・`Date`・`Datetime`（タイムゾーンなし） | 値の昇順（`Date`・`Datetime`は時系列順） |
+/// | 浮動小数 | 数値の昇順 |
+/// | `Enum` | カテゴリの定義順 |
+/// | 文字列・`Categorical` | ラベルの辞書順（バイト順） |
+///
+/// # Errors
+/// `extract_group_key_column`と同じ（許可するdtypeだけが異なる）。
+pub(crate) fn extract_time_keys(
+    df: &DataFrame,
+    name: &str,
+    source: ColumnSource<'_>,
+) -> PyResult<TimeKeys> {
+    let column = checked_key_column(df, name, KeyRole::Time, source)?;
+    let FactorizedKey {
+        codes,
+        representatives,
+    } = factorize_checked_key(name, column)?;
+    let dtype = representatives.dtype().clone();
+
+    with_group_labels(name, &representatives, |labels| {
+        if dtype.is_float() {
+            let values = physical_f64(name, &representatives)?;
+            TimeKeys::by_float_factorized(codes, labels, &values).map_err(panel_error_to_pyerr)
+        } else if dtype.is_integer()
+            || matches!(
+                dtype,
+                DataType::Date | DataType::Datetime(..) | DataType::Enum(..)
+            )
+        {
+            // 整数は値そのもの、`Date`は日数、`Datetime`は時間単位ごとの経過時間、`Enum`は
+            // カテゴリの定義順の添字が内部表現の整数になっており、その大小がそのまま時間順になる。
+            let values = physical_i128(name, &representatives)?;
+            TimeKeys::by_integer_factorized(codes, labels, &values).map_err(panel_error_to_pyerr)
+        } else {
+            // 文字列・`Categorical`（順序を持たない型）はラベルの辞書順。
+            TimeKeys::lexicographic_factorized(codes, labels).map_err(panel_error_to_pyerr)
+        }
+    })
+}
+
+/// `build_fe_input`/`build_re_input`のテストで使う、6行・3エンティティ・2期間の整った`DataFrame`
+/// （`y`・`x1`・`id`・`t`）。
+#[cfg(test)]
+pub(super) fn well_formed_df() -> DataFrame {
+    polars::df!(
+        "y" => [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        "x1" => [2.0, 4.0, 1.0, 5.0, 3.0, 6.0],
+        "id" => ["a", "a", "b", "b", "c", "c"],
+        "t" => ["1", "2", "1", "2", "1", "2"],
+    )
+    .unwrap()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared::column_extraction::extract_key_column;
+    use polars::df;
+    use polars::prelude::*;
+
+    const SRC: ColumnSource<'static> = ColumnSource::new("x", "data");
 
     /// `unwrap()`/`expect()`は使わない：`PyErr`の`Debug`実装はGIL取得を要求し、GIL未初期化の
     /// この環境では二重パニックを起こす（`nonlinear/CLAUDE.md`「テストの制約」参照）。
@@ -347,9 +461,252 @@ mod tests {
         }
     }
 
+    /// `validate_panel_roles`がFE/REとも`ok`どおりの結果になることを確かめる。
+    fn assert_roles(y: &str, x: &[&str], effects: &[&str], dk_time: Option<&str>, ok: bool) {
+        for model in [PanelModel::Fe, PanelModel::Re] {
+            let result = validate_panel_roles(model, y, &names(x), &names(effects), dk_time);
+            assert_eq!(
+                result.is_ok(),
+                ok,
+                "model={model:?} y={y} x={x:?} effects={effects:?} dk_time={dk_time:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_panel_roles_rejects_empty_x() {
+        // 固定効果・ランダム効果のみのモデル（`x=[]`）は拒否する。
+        assert_roles("y", &[], &["id"], None, false);
+    }
+
+    #[test]
+    fn validate_panel_roles_rejects_y_that_overlaps_effects() {
+        assert_roles("y", &["x1"], &["y"], None, false);
+    }
+
+    #[test]
+    fn validate_panel_roles_rejects_x_that_overlaps_effects() {
+        // 個体の列、2つ目の列（2-wayの時点）のどちらとの重複も拒否する。
+        assert_roles("y", &["x1", "id"], &["id"], None, false);
+        assert_roles("y", &["x1", "t"], &["id", "t"], None, false);
+    }
+
+    #[test]
+    fn validate_panel_roles_rejects_second_effect_that_duplicates_another_role() {
+        for column in ["y", "id", "x1"] {
+            assert_roles("y", &["x1"], &["id", column], None, false);
+        }
+    }
+
+    #[test]
+    fn validate_panel_roles_rejects_duplicates_within_x() {
+        assert_roles("y", &["x1", "x1"], &["id"], None, false);
+    }
+
+    #[test]
+    fn validate_panel_roles_dk_time_may_equal_second_effect_or_x_but_not_y_or_first_effect() {
+        // 固定効果・ランダム効果と同じ時間粒度(`dk_time == effects[1]`)や、`x`との重複は
+        // 正当な使い方。`y`・`effects[0]`と同じ列だけ拒否する(`validate_dk_time_role`参照)。
+        let cases: [(&[&str], &str, bool); 5] = [
+            (&["id", "t"], "t", true),
+            (&["id"], "x1", true),
+            (&["id"], "y", false),
+            (&["id"], "id", false),
+            (&["id", "t"], "id", false),
+        ];
+        for (effects, dk_time, ok) in cases {
+            assert_roles("y", &["x1"], effects, Some(dk_time), ok);
+        }
+    }
+
     #[test]
     fn group_counts_has_one_entry_per_effect_in_order() {
         assert_eq!(group_counts(4, None), vec![4]);
         assert_eq!(group_counts(4, Some(3)), vec![4, 3]);
+    }
+
+    /// 行ごとの`String`を経由する素朴な`extract_time_keys`（比較対象の独立な参照実装）。
+    fn extract_time_keys_via_row_strings(df: &DataFrame, name: &str) -> PyResult<TimeKeys> {
+        let ids = extract_key_column(df, name, KeyRole::Time, SRC)?;
+        let series = df.column(name).unwrap();
+        let dtype = series.dtype();
+        if dtype.is_float() {
+            let as_f64 = series.cast(&DataType::Float64).unwrap();
+            let values: Vec<f64> = as_f64.f64().unwrap().iter().map(|v| v.unwrap()).collect();
+            Ok(TimeKeys::by_float(ids, &values).unwrap())
+        } else if dtype.is_integer()
+            || matches!(
+                dtype,
+                DataType::Date | DataType::Datetime(..) | DataType::Enum(..)
+            )
+        {
+            let as_i128 = series.to_physical_repr().cast(&DataType::Int128).unwrap();
+            let values: Vec<i128> = as_i128.i128().unwrap().iter().map(|v| v.unwrap()).collect();
+            Ok(TimeKeys::by_integer(ids, &values).unwrap())
+        } else {
+            Ok(TimeKeys::lexicographic(ids))
+        }
+    }
+
+    /// 時点列も、行ごとの`String`を経由する参照実装と同じ`TimeKeys`（コードと時点のラベル）になる。
+    #[test]
+    fn extract_time_keys_agrees_with_the_row_string_path_for_every_time_dtype() {
+        let ints: [i64; 8] = [10, 9, 2, 10, -3, 100, 9, 2];
+        let enum_dtype = {
+            let categories = FrozenCategories::new(["z", "10", "9", "a"]).unwrap();
+            DataType::Enum(categories.clone(), categories.mapping().clone())
+        };
+        let mut cases: Vec<(String, Series)> = vec![
+            ("Int64".into(), Series::new("k".into(), ints)),
+            (
+                "Int8".into(),
+                Series::new("k".into(), ints).cast(&DataType::Int8).unwrap(),
+            ),
+            (
+                "UInt16".into(),
+                Series::new("k".into(), ints.map(|v| v.unsigned_abs()))
+                    .cast(&DataType::UInt16)
+                    .unwrap(),
+            ),
+            (
+                "Float64".into(),
+                Series::new("k".into(), [1.5, -0.0, 0.0, 10.0, 2.5, 1.5, 9.0, 0.0]),
+            ),
+            (
+                "Float32".into(),
+                Series::new("k".into(), [1.5_f32, -0.0, 0.0, 10.0, 2.5, 1.5, 9.0, 0.1]),
+            ),
+            (
+                "String".into(),
+                Series::new("k".into(), ["b", "10", "a", "9", "b", "", "10", "é"]),
+            ),
+            (
+                "Date".into(),
+                Series::new("k".into(), ints.map(|v| v as i32))
+                    .cast(&DataType::Date)
+                    .unwrap(),
+            ),
+            (
+                "Enum".into(),
+                Series::new("k".into(), ["10", "z", "a", "10", "9", "z", "a", "9"])
+                    .cast(&enum_dtype)
+                    .unwrap(),
+            ),
+            (
+                "Categorical".into(),
+                Series::new("k".into(), ["b", "10", "a", "9", "b", "c", "10", "a"])
+                    .cast(&DataType::from_categories(Categories::global()))
+                    .unwrap(),
+            ),
+        ];
+        for unit in [
+            TimeUnit::Milliseconds,
+            TimeUnit::Microseconds,
+            TimeUnit::Nanoseconds,
+        ] {
+            cases.push((
+                format!("Datetime({unit:?})"),
+                Series::new("k".into(), ints)
+                    .cast(&DataType::Datetime(unit, None))
+                    .unwrap(),
+            ));
+        }
+        for (label, series) in cases {
+            let df = frame_of(series);
+            let Ok(expected) = extract_time_keys_via_row_strings(&df, "k") else {
+                panic!("{label}: row string path failed");
+            };
+            let Ok(actual) = extract_time_keys(&df, "k", SRC) else {
+                panic!("{label}: extract_time_keys failed");
+            };
+            assert_eq!(actual, expected, "{label}");
+            assert_eq!(actual.periods(), expected.periods(), "{label}");
+            assert_eq!(actual.len(), expected.len(), "{label}");
+        }
+    }
+
+    fn frame_of(series: Series) -> DataFrame {
+        DataFrame::new(series.len(), vec![series.into()]).unwrap()
+    }
+
+    fn periods_of(df: &DataFrame) -> Vec<String> {
+        extract_time_keys(df, "t", SRC).unwrap().periods().to_vec()
+    }
+
+    #[test]
+    fn extract_time_keys_orders_integers_numerically() {
+        let df = df!("t" => [10i64, 2, 9, -3, 2]).unwrap();
+
+        assert_eq!(periods_of(&df), ["-3", "2", "9", "10"]);
+    }
+
+    #[test]
+    fn extract_time_keys_orders_every_integer_dtype_numerically() {
+        for dtype in [
+            DataType::Int8,
+            DataType::Int16,
+            DataType::Int32,
+            DataType::Int64,
+            DataType::Int128,
+            DataType::UInt8,
+            DataType::UInt16,
+            DataType::UInt32,
+            DataType::UInt64,
+        ] {
+            let df = frame_of(
+                Series::new("t".into(), [10i64, 2, 9, 2])
+                    .cast(&dtype)
+                    .unwrap(),
+            );
+
+            assert_eq!(periods_of(&df), ["2", "9", "10"], "{dtype}");
+        }
+    }
+
+    #[test]
+    fn extract_time_keys_orders_floats_numerically() {
+        let df = df!("t" => [10.5, 2.0, -0.5, 9.25, 2.0]).unwrap();
+
+        assert_eq!(periods_of(&df), ["-0.5", "2.0", "9.25", "10.5"]);
+    }
+
+    #[test]
+    fn extract_time_keys_orders_dates_and_datetimes_chronologically() {
+        let date_df = frame_of(
+            Series::new("t".into(), [19_000i32, 18_000, 20_000])
+                .cast(&DataType::Date)
+                .unwrap(),
+        );
+        let datetime_df = frame_of(
+            Series::new("t".into(), [3_000i64, 1_000, 2_000])
+                .cast(&DataType::Datetime(TimeUnit::Milliseconds, None))
+                .unwrap(),
+        );
+
+        let dates = periods_of(&date_df);
+        let datetimes = periods_of(&datetime_df);
+
+        // 日付・日時の文字列表現は桁数が固定で、辞書順も時系列順に一致する。1つずつ小さい値が
+        // 先頭に来ていれば、内部表現の整数の順に並んでいる。
+        assert_eq!(dates.len(), 3);
+        assert!(dates.windows(2).all(|w| w[0] < w[1]), "{dates:?}");
+        assert_eq!(datetimes.len(), 3);
+        assert!(datetimes.windows(2).all(|w| w[0] < w[1]), "{datetimes:?}");
+    }
+
+    #[test]
+    fn extract_time_keys_orders_strings_lexicographically() {
+        let df = df!("t" => ["b", "10", "a", "9"]).unwrap();
+
+        assert_eq!(periods_of(&df), ["10", "9", "a", "b"]);
+    }
+
+    #[test]
+    fn extract_time_keys_rejects_unusable_columns_like_the_key_column() {
+        let df = df!("t" => [1.0, f64::NAN]).unwrap();
+        assert!(extract_time_keys(&df, "t", SRC).is_err());
+        let df = df!("t" => [true, false]).unwrap();
+        assert!(extract_time_keys(&df, "t", SRC).is_err());
+        assert!(extract_time_keys(&df, "missing", SRC).is_err());
     }
 }

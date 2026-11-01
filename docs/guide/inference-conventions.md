@@ -10,7 +10,7 @@ Notation: `n` is the number of observations, `k` the number of coefficients, `G`
 |---|---|---|---|
 | OLS | t | F (`f_statistic`) | `n - k`; `G - 1` with `cov_type="cluster"` |
 | WLS | t | F | same as OLS |
-| FE | t | F | `df_resid` (`n - N - k` for one-way) for `classical`/`hc1`-`hc3`; `G - 1` with `cov_type="cluster"`; `t_periods - 1` with `cov_type="dk"` |
+| FE | t | F | `df_resid` (`n - N - k` for one-way) for `classical`/`hc1`-`hc3`; `G - 1` with `cov_type="cluster"`; `t_periods - 1` with `cov_type="dk"`. The F statistic follows `cov_type`, so `f_df_denom` equals the degrees of freedom of the t tests |
 | RE (one-way and two-way) | t | F | `df_resid` (`n - k`, with `k` all coefficients including the constant, for `classical`/`hc1`-`hc3`); `G - 1` with `cov_type="cluster"`; `t_periods - 1` with `cov_type="dk"`. The F statistic follows `cov_type`, so `f_df_denom` equals the degrees of freedom of the t tests. See [Definitions: RE](../methods/re.md#degrees-of-freedom) |
 | IV, `estimator="2sls"` | t | F (`wald_dist="f"`) | `df_resid`; `G - 1` with `cov_type="cluster"` |
 | IV, `estimator="gmm"` | normal | chi-squared (`wald_dist="chi2"`) | none |
@@ -58,7 +58,7 @@ The defaults below were checked against the package versions listed under [Verif
 
 - **IV (`IV2SLS`, `IVGMM`)**: `fit(debiased=False)` is the default, which reports normal and chi-squared statistics. econometricsmodels 2SLS always reports t and F (equivalent to `debiased=True`, except with `cov_type="cluster"`, where the degrees of freedom are `G - 1` and linearmodels uses `n - k`); GMM always reports normal and chi-squared (equivalent to `debiased=False`).
 - **Panel (`PanelOLS`, `RandomEffects`)**: `fit(debiased=True)` is the default, which reports t and F, consistent with FE and RE here. Point estimates and the `classical`/`hc1`-`hc3` standard errors match linearmodels' `PanelOLS`/`RandomEffects`.
-    - The `cluster` and `dk` standard errors and their degrees of freedom differ from linearmodels. FE and RE use the fixest (R) and Stata small-sample corrections (`G/(G-1)·(n-1)/(n-K)`), which is what `fixest`, `xtreg` and `reghdfe` users expect, whereas linearmodels uses `n/(n-extra_df-k)`. The exact formulas are in [Definitions: FE](../methods/fe.md#covariance-of-the-coefficients-cov_type) and [Definitions: RE](../methods/re.md#covariance-of-the-coefficients-cov_type).
+    - The `cluster` and `dk` standard errors and their degrees of freedom differ from linearmodels. FE and RE use the fixest (R) and Stata small-sample corrections (`G/(G-1)·(n-1)/(n-K)`), which is what `fixest`, `xtreg` and `reghdfe` users expect, whereas linearmodels, with its default settings, uses `n/(n-extra_df-k)`. The exact formulas are in [Definitions: FE](../methods/fe.md#covariance-of-the-coefficients-cov_type) and [Definitions: RE](../methods/re.md#covariance-of-the-coefficients-cov_type).
     - The RE F statistic is the Wald quadratic form (the same as `plm::pwaldtest(test = "F", vcov = ...)` and linearmodels' `f_statistic_robust`), not linearmodels' `f_statistic`. That one is a sum-of-squares version that ignores `cov_type`; the two agree only for the classical covariance on balanced panels.
     - RE accepts a time-invariant regressor (FE rejects it). The variance component σ_ε² is then estimated from the within regression of the time-varying regressors only, with `n - N - k_tv` degrees of freedom (as in `plm`), whereas linearmodels also counts the time-invariant columns, so its σ_ε² and therefore its coefficients differ from the fourth digit.
 

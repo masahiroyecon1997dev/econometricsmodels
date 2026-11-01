@@ -54,7 +54,8 @@ use crate::linear::common::{CovKind, parse_cov_kind, require_hac_time, resolve_c
 use crate::linear::ols::{OLSResult, ols_estimator_to_result};
 use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
-    SelectedData, extract_f64_column, extract_optional_cluster_groups, extract_time_order_ranks,
+    SelectedData, extract_f64_column, extract_f64_columns, extract_optional_cluster_groups,
+    extract_time_order_ranks,
 };
 use crate::shared::errors::{guard, to_pyerr, unknown_option_value};
 use crate::shared::mat_conversion::{mat_to_rows, mat_to_vec};
@@ -1060,30 +1061,10 @@ pub(crate) fn build_iv_input(
     let y_slice = extract_f64_column(df, &y, ColumnSource::new("y", "data"))?;
 
     // ── x_exog/x_endog/instruments列の抽出 ─────────────────────────────
-    let mut x_exog_columns: Vec<Vec<f64>> = Vec::with_capacity(x_exog.len());
-    for col_name in &x_exog {
-        x_exog_columns.push(extract_f64_column(
-            df,
-            col_name,
-            ColumnSource::new("x_exog", "data"),
-        )?);
-    }
-    let mut x_endog_columns: Vec<Vec<f64>> = Vec::with_capacity(x_endog.len());
-    for col_name in &x_endog {
-        x_endog_columns.push(extract_f64_column(
-            df,
-            col_name,
-            ColumnSource::new("x_endog", "data"),
-        )?);
-    }
-    let mut instrument_columns: Vec<Vec<f64>> = Vec::with_capacity(instruments.len());
-    for col_name in &instruments {
-        instrument_columns.push(extract_f64_column(
-            df,
-            col_name,
-            ColumnSource::new("instruments", "data"),
-        )?);
-    }
+    let x_exog_columns = extract_f64_columns(df, &x_exog, ColumnSource::new("x_exog", "data"))?;
+    let x_endog_columns = extract_f64_columns(df, &x_endog, ColumnSource::new("x_endog", "data"))?;
+    let instrument_columns =
+        extract_f64_columns(df, &instruments, ColumnSource::new("instruments", "data"))?;
 
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ）─────────────
     let cov_type = resolve_cov_type(

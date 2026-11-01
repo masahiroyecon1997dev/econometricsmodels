@@ -18,6 +18,8 @@
 
 この順序のうち値 → 組合せ → ロール構造 →（Tobitの`"sigma"`衝突）→ `y`/`x`の列 → `cluster`列は、3手法共通の`extract_mle_columns`（`nonlinear/common.rs`）が担う。`build_*_input`はこれを呼んだ後に`*Input::from_columns`（engine側の検査）を呼ぶ。手法固有の`x`列名の検査（Tobitの`validate_no_sigma_collision`）は`extra_x_check`に関数として渡し、`validate_common_roles`の直後に呼ばれる。`SelectedData`・`Bound`・`Py`は渡さない（`fit`のGIL解放の構造を変えないため）。順序を変えるときは`extract_mle_columns`の1箇所だけを直す。
 
+`build_logit_input`/`build_probit_input`/`build_tobit_input`は、検証済みの入力と推定の設定を`nonlinear/common.rs`の`BuiltMleInput<I>`（`input`・`cov_type`・`cov_type_name`（`*Result.cov_type`に格納する正規形の名前）・`solver`）で返す。`I`は手法ごとのエンジンの入力型。
+
 ## `LogitOptions`/`ProbitOptions`/`TobitOptions`のフィールド重複は意図的
 
 `solver`/`max_iter`/`tol`/`raise_on_non_convergence`（＋`cov_type`/`include_intercept`/`confidence_level`/`cluster`）は3つのpyclassに独立してフィールド宣言・コンストラクタ・`__repr__`が重複している。これは意図的な設計判断であり、共通base struct/traitへの切り出しは行わない: PyO3の`#[pyclass]`/`#[pymethods]`コンストラクタはフラットなkwargs surfaceが前提のため、共有structを導入すると`LogitOptions(mle=MleOptions(...), cov_type=...)`のようなcomposition構造がPython公開APIに漏れ出すか、Pythonの表面積を減らさないまま間接参照が増えるだけになる。`engine_pybind/src/iv/common/options.rs`の`IVOptions`が`OLSOptions`と同種のフィールド群（`cov_type`/`include_intercept`/`confidence_level`/`cluster`/`hac_lags`/`hac_time`）を既に独立再定義しており、この重複は既存precedentと一貫している（`engine_pybind/src/linear/CLAUDE.md`の`WLSOptions`の節も参照）。`macro_rules!`等でRust側の記述量（フィールド宣言/コンストラクタ/`__repr__`のボイラープレート）だけを機械的に削減できるかは、Python公開APIには影響しない別軸の検討として扱う。
@@ -57,7 +59,5 @@
 `PyErr::to_string()`（`Display`実装）はPython interpreterのGIL取得を要求し、`#[cfg(test)]`（Python未初期化）で呼ぶとpanicする。エラーメッセージの文言・優先順位そのものを検証したい場合は、`ValidationError::new_err(...)`でラップする前の純粋関数（`validation.rs`の`find_role_overlap`等）を直接テストする設計にする。
 
 ## テストの制約: `SelectedData`引数の関数はcargo testから直接呼べない
-
-`build_logit_input`/`build_probit_input`/`build_tobit_input`は、検証済みの入力と推定の設定を`nonlinear/common.rs`の`BuiltMleInput<I>`（`input`・`cov_type`・`cov_type_name`（`*Result.cov_type`に格納する正規形の名前）・`solver`）で返す。`I`は手法ごとのエンジンの入力型。
 
 `fit`（`build_logit_input`/`build_probit_input`の後段、`LogitEstimator::fit`/`ProbitEstimator::fit`を呼ぶ関数）は`SelectedData`を引数に取るため、GILなしの`#[cfg(test)]`では呼べない（`build_logit_input`/`build_probit_input`が`SelectedData`ではなくプレーンな`polars::DataFrame`を受け取る設計にしているのはこの制約を避けるため）。推定の純Rust部分は`fit_frame`に切り出して`py.detach`の中で走らせるが（`.claude/rules/rust-style.md`のGIL解放の規約）、`fit_frame`も結果に載せる`source`（`Py<PyAny>`）を受け取るため、GILなしの`#[cfg(test)]`からは同様に呼べない。`fit`自体の検証は`uv run maturin develop`後のPythonからの数値照合、または`tests/`のpytestで行う（OLSの前例と同じ、`engine_pybind/src/linear/CLAUDE.md`参照）。

@@ -529,9 +529,8 @@ pub(crate) struct BuiltReInput {
 
 /// Pythonから渡された `data` / `y` / `x` / `effects` / `options` を検証し、
 /// `engine::panel::re::ReInput::from_group_codes`を呼び出すところまでを行う。
-/// 戻り値の[`BuiltReInput`]（`ReInput`・`ReEffects`・`ReCovType`・正規形の`cov_type`の名前・
-/// `VarianceMethod`）を
-/// `fit`関数が受け取り、`ReEstimator::fit`を呼んで`REResult`を組み立てる。
+/// 戻り値の[`BuiltReInput`]を`fit`関数が受け取り、`ReEstimator::fit`を呼んで
+/// `REResult`を組み立てる。
 ///
 /// `effects`の1つ目を個体、2つ目（あれば）を時間次元として`ReInput`に渡し、2要素なら
 /// `ReEffects::TwoWay`、1要素なら`OneWay`を選ぶ。`options.dk_time`は`resolve_re_cov_type`が`ReCovType::Dk`に渡す

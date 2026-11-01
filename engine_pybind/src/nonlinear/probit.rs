@@ -703,8 +703,8 @@ mod tests {
         let Ok(BuiltMleInput {
             input,
             cov_type,
+            cov_type_name,
             solver,
-            ..
         }) = build_probit_input(
             &df,
             "y".to_string(),
@@ -723,6 +723,7 @@ mod tests {
         );
         assert_eq!(input.dep_var_name(), "y");
         assert!(matches!(cov_type, EngineCovType::Classical));
+        assert_eq!(cov_type_name, "classical");
         assert!(matches!(solver, EngineSolverType::Newton));
     }
 

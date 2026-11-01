@@ -45,8 +45,7 @@ common.rs`）とカタログの`class`が決める。`report()`は`_`を使わ�
 
 ## RE: engine呼び出し・エラー変換
 
-FEの`fit`と同じ構成: `build_re_input`が返す`BuiltReInput`（`input: ReInput`・`effects: ReEffects`・
-`cov_type: ReCovType`・`cov_type_name`（正規形の文字列）・`variance_method: VarianceMethod`）を得たあと、`ReEstimator::fit`を呼び、`REResult`を組み立てて返す（`panel/re.rs`の
+FEの`fit`と同じ構成: `build_re_input`が返す`BuiltReInput`（`input: ReInput`・`effects: ReEffects`・`cov_type: ReCovType`・`cov_type_name`（正規形の文字列）・`variance_method: VarianceMethod`）を得たあと、`ReEstimator::fit`を呼び、`REResult`を組み立てて返す（`panel/re.rs`の
 `fit`関数）。`lib.rs`の`#[pyfunction] fit_re`が呼ぶ。
 
 - **件数（`n_groups`）はFEと同じ構成**（`effects`・`group_counts`を保持して`dict`にする。1つ目は`ReEstimator::input().n_entities()`、2つ目は`ReEstimator::n_periods()`）。

@@ -14,7 +14,7 @@ FE/REとも、IVの「データ抽出・pyclass定義」→「engine呼び出し
 
 ## `fit`の実装
 
-`iv::common::fit`と同じ構成: `build_fe_input`で`FeInput`/`FeEffects`/`FeCovType`/`cov_type`（小文字正規化済み文字列）を得たあと、`FeEstimator::fit`を呼び、`FEResult`を組み立てて返す。
+`iv::common::fit`と同じ構成: `build_fe_input`が返す`BuiltFeInput`（`input: FeInput`・`effects: FeEffects`・`cov_type: FeCovType`・`cov_type_name`（小文字正規化済み文字列））を得たあと、`FeEstimator::fit`を呼び、`FEResult`を組み立てて返す。
 
 - **件数は`effects`（列名）と`group_counts`（件数）の2つの非公開フィールドで持ち、`n_groups`ゲッターが`dict[str, int]`（列名→グループ数、`effects`の順）にする**。`group_counts`は`panel/common.rs`の`group_counts`が作る: 1つ目は`FeEstimator::input().n_entities()`（`FeInput`が構築時に一度だけ作ったエンティティコードのユニーク数。`fit`の前に`input`から数え直さない）、2つ目（2-wayのみ）は`FeEstimator::n_periods()`（`fit`内で計算済みの値を保持しただけで二重計算しない）。固定の`n_entities`/`n_periods`ではなく列名キーにした理由は`panel-common.md`2.1節。pickleの状態キーも`effects`・`group_counts`になっている（旧版のpickleはキー集合の検査で弾かれる）。
 - **`FeEstimator`のgetterを使い分ける**: `params`/`residuals`/`log_likelihood`はwithin変換後の最小二乗そのままの値、`param_names`/`dep_var_name`/`n_obs`は`within_input()`（within変換済みの`OlsInput`）から取得する。`std_errors`/`test_stats`/`p_values`/`conf_lower`/`conf_upper`/`df_model`/`df_resid`/`f_statistic`/`f_p_value`/`aic`/`bic`/`r_squared_*`はFEが`cov_type`・パネル自由度調整を反映して計算し直した値。`FeEstimator`は`OlsEstimator`を保持しない（`engine/src/panel/CLAUDE.md`参照）ため、cov_type非対応の内部OLSの値を取り違える余地は無い。
@@ -45,8 +45,8 @@ common.rs`）とカタログの`class`が決める。`report()`は`_`を使わ�
 
 ## RE: engine呼び出し・エラー変換
 
-FEの`fit`と同じ構成: `build_re_input`で`ReInput`/`ReEffects`/`ReCovType`/`cov_type`（正規形の
-文字列）/`VarianceMethod`を得たあと、`ReEstimator::fit`を呼び、`REResult`を組み立てて返す（`panel/re.rs`の
+FEの`fit`と同じ構成: `build_re_input`が返す`BuiltReInput`（`input: ReInput`・`effects: ReEffects`・
+`cov_type: ReCovType`・`cov_type_name`（正規形の文字列）・`variance_method: VarianceMethod`）を得たあと、`ReEstimator::fit`を呼び、`REResult`を組み立てて返す（`panel/re.rs`の
 `fit`関数）。`lib.rs`の`#[pyfunction] fit_re`が呼ぶ。
 
 - **件数（`n_groups`）はFEと同じ構成**（`effects`・`group_counts`を保持して`dict`にする。1つ目は`ReEstimator::input().n_entities()`、2つ目は`ReEstimator::n_periods()`）。

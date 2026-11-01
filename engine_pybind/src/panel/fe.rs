@@ -505,6 +505,17 @@ fn resolve_fe_cov_type(
     })
 }
 
+/// [`build_fe_input`]の戻り値。
+#[derive(Debug)]
+pub(crate) struct BuiltFeInput {
+    pub(crate) input: FeInput,
+    pub(crate) effects: FeEffects,
+    /// エンジンに渡す`cov_type`（`cluster`のグループや`dk`の時点を持つ）。
+    pub(crate) cov_type: FeCovType,
+    /// `FEResult.cov_type`に格納する正規形（小文字）の名前。
+    pub(crate) cov_type_name: String,
+}
+
 /// Pythonから渡された `data` / `y` / `x` / `effects` / `options` を検証し、
 /// `engine::panel::fe::FeInput::from_group_codes`を呼び出すところまでを行う。
 /// `FeEstimator::fit`の呼び出し・`FEResult`の構築は`fit`（本ファイル）が行う。
@@ -530,7 +541,7 @@ pub(crate) fn build_fe_input(
     x: Vec<String>,
     effects: Vec<String>,
     options: &FEOptions,
-) -> PyResult<(FeInput, FeEffects, FeCovType, String)> {
+) -> PyResult<BuiltFeInput> {
     // DataFrameを見ない検査を先に行う。報告順は`docs/guide/validation.md`
     // 「Order in which errors are reported」: オプションの値 → オプションの組合せ →
     // ロール構造 → `y`/`x`の列 → オプション列 → エンジン。
@@ -565,7 +576,12 @@ pub(crate) fn build_fe_input(
         .map_err(panel_error_to_pyerr)?
         .with_effect_names(effects[0].clone(), effects.get(1).cloned());
 
-    Ok((input, fe_effects, cov_type, cov_kind.name().to_string()))
+    Ok(BuiltFeInput {
+        input,
+        effects: fe_effects,
+        cov_type,
+        cov_type_name: cov_kind.name().to_string(),
+    })
 }
 
 /// Pythonから渡された `data` / `y` / `x` / `effects` / `options` を検証し、
@@ -612,8 +628,12 @@ fn fit_frame(
     effects: Vec<String>,
     options: &FEOptions,
 ) -> PyResult<FEResult> {
-    let (input, fe_effects, cov_type, cov_type_lower) =
-        build_fe_input(df, y, x, effects.clone(), options)?;
+    let BuiltFeInput {
+        input,
+        effects: fe_effects,
+        cov_type,
+        cov_type_name,
+    } = build_fe_input(df, y, x, effects.clone(), options)?;
 
     let estimator = FeEstimator::fit(input, fe_effects, cov_type, options.confidence_level)
         .map_err(panel_error_to_pyerr)?;
@@ -637,7 +657,7 @@ fn fit_frame(
         df_model: estimator.df_model(),
         effects,
         group_counts,
-        cov_type: cov_type_lower,
+        cov_type: cov_type_name,
         dk_bandwidth_used: estimator.dk_bandwidth_used().map(|bw| bw as i64),
         f_statistic: estimator.f_statistic(),
         f_p_value: estimator.f_p_value(),
@@ -672,7 +692,12 @@ mod tests {
         let df = well_formed_df();
         let options = default_options();
 
-        let (input, effects, cov_type, cov_type_lower) = build_fe_input(
+        let BuiltFeInput {
+            input,
+            effects,
+            cov_type,
+            cov_type_name,
+        } = build_fe_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string()],
@@ -690,7 +715,7 @@ mod tests {
             FeCovType::Cluster { groups: None },
             "cluster未指定時はNone（engine側でentity列にフォールバック）"
         );
-        assert_eq!(cov_type_lower, "cluster");
+        assert_eq!(cov_type_name, "cluster");
     }
 
     #[test]
@@ -698,7 +723,7 @@ mod tests {
         let df = well_formed_df();
         let options = default_options();
 
-        let (input, effects, ..) = build_fe_input(
+        let BuiltFeInput { input, effects, .. } = build_fe_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string()],
@@ -777,7 +802,7 @@ mod tests {
         let mut options = default_options();
         options.cluster = Some("state".to_string());
 
-        let (_, _, cov_type, _) = build_fe_input(
+        let BuiltFeInput { cov_type, .. } = build_fe_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string()],
@@ -808,7 +833,12 @@ mod tests {
         options.cov_type = "dk".to_string();
         options.dk_time = Some("t".to_string());
 
-        let (input, effects, cov_type, _) = build_fe_input(
+        let BuiltFeInput {
+            input,
+            effects,
+            cov_type,
+            ..
+        } = build_fe_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string()],
@@ -848,7 +878,12 @@ mod tests {
         options.cov_type = "dk".to_string();
         options.dk_time = Some("t_fine".to_string());
 
-        let (input, effects, cov_type, _) = build_fe_input(
+        let BuiltFeInput {
+            input,
+            effects,
+            cov_type,
+            ..
+        } = build_fe_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string()],

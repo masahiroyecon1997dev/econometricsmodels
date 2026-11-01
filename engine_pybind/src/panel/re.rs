@@ -515,9 +515,22 @@ fn parse_variance_method(value: &str) -> PyResult<VarianceMethod> {
     )
 }
 
+/// [`build_re_input`]の戻り値。
+#[derive(Debug)]
+pub(crate) struct BuiltReInput {
+    pub(crate) input: ReInput,
+    pub(crate) effects: ReEffects,
+    /// エンジンに渡す`cov_type`（`cluster`のグループや`dk`の時点を持つ）。
+    pub(crate) cov_type: ReCovType,
+    /// `REResult.cov_type`に格納する正規形（小文字）の名前。
+    pub(crate) cov_type_name: String,
+    pub(crate) variance_method: VarianceMethod,
+}
+
 /// Pythonから渡された `data` / `y` / `x` / `effects` / `options` を検証し、
 /// `engine::panel::re::ReInput::from_group_codes`を呼び出すところまでを行う。
-/// 戻り値（`ReInput`・`ReEffects`・`ReCovType`・正規形の`cov_type`・`VarianceMethod`）を
+/// 戻り値の[`BuiltReInput`]（`ReInput`・`ReEffects`・`ReCovType`・正規形の`cov_type`の名前・
+/// `VarianceMethod`）を
 /// `fit`関数が受け取り、`ReEstimator::fit`を呼んで`REResult`を組み立てる。
 ///
 /// `effects`の1つ目を個体、2つ目（あれば）を時間次元として`ReInput`に渡し、2要素なら
@@ -539,7 +552,7 @@ pub(crate) fn build_re_input(
     x: Vec<String>,
     effects: Vec<String>,
     options: &REOptions,
-) -> PyResult<(ReInput, ReEffects, ReCovType, String, VarianceMethod)> {
+) -> PyResult<BuiltReInput> {
     // DataFrameを見ない検査を先に行う。報告順は`docs/guide/validation.md`
     // 「Order in which errors are reported」: オプションの値（`cov_type` →
     // `variance_method`）→ オプションの組合せ → ロール構造 → `y`/`x`の列 →
@@ -576,13 +589,13 @@ pub(crate) fn build_re_input(
         .map_err(panel_error_to_pyerr)?
         .with_effect_names(effects[0].clone(), effects.get(1).cloned());
 
-    Ok((
+    Ok(BuiltReInput {
         input,
-        re_effects,
+        effects: re_effects,
         cov_type,
-        cov_kind.name().to_string(),
+        cov_type_name: cov_kind.name().to_string(),
         variance_method,
-    ))
+    })
 }
 
 /// Pythonから渡された `data` / `y` / `x` / `effects` / `options` を検証し、
@@ -635,8 +648,13 @@ fn fit_frame(
     effects: Vec<String>,
     options: &REOptions,
 ) -> PyResult<REResult> {
-    let (input, re_effects, cov_type, cov_type_lower, variance_method) =
-        build_re_input(df, y, x, effects.clone(), options)?;
+    let BuiltReInput {
+        input,
+        effects: re_effects,
+        cov_type,
+        cov_type_name,
+        variance_method,
+    } = build_re_input(df, y, x, effects.clone(), options)?;
 
     let estimator = ReEstimator::fit_with_variance_method(
         input,
@@ -684,7 +702,7 @@ fn fit_frame(
         theta_entity: two_way_theta.map(|t| t.0),
         theta_time: two_way_theta.map(|t| t.1),
         theta_total: two_way_theta.map(|t| t.2),
-        cov_type: cov_type_lower,
+        cov_type: cov_type_name,
         dk_bandwidth_used: estimator.dk_bandwidth_used().map(|bw| bw as i64),
         f_statistic: estimator.f_statistic(),
         f_p_value: estimator.f_p_value(),
@@ -727,7 +745,13 @@ mod tests {
         let df = well_formed_df();
         let options = default_options();
 
-        let (input, effects, cov_type, cov_type_lower, _) = build_re_input(
+        let BuiltReInput {
+            input,
+            effects,
+            cov_type,
+            cov_type_name,
+            ..
+        } = build_re_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string()],
@@ -745,7 +769,7 @@ mod tests {
             ReCovType::Cluster { groups: None },
             "cluster未指定時はNone（engine側でentity列にフォールバック）"
         );
-        assert_eq!(cov_type_lower, "cluster");
+        assert_eq!(cov_type_name, "cluster");
     }
 
     #[test]
@@ -757,7 +781,12 @@ mod tests {
         options.cov_type = "dk".to_string();
         options.dk_time = Some("t".to_string());
 
-        let (input, effects, cov_type, _, _) = build_re_input(
+        let BuiltReInput {
+            input,
+            effects,
+            cov_type,
+            ..
+        } = build_re_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string()],
@@ -780,7 +809,7 @@ mod tests {
         let df = well_formed_df();
         let options = default_options();
 
-        let (input, effects, ..) = build_re_input(
+        let BuiltReInput { input, effects, .. } = build_re_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string()],
@@ -878,7 +907,7 @@ mod tests {
         let mut options = default_options();
         options.cluster = Some("state".to_string());
 
-        let (_, _, cov_type, _, _) = build_re_input(
+        let BuiltReInput { cov_type, .. } = build_re_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string()],
@@ -920,7 +949,7 @@ mod tests {
         assert!(build(&options).is_err(), "dk_time unset must be rejected");
 
         options.dk_time = Some("t".to_string());
-        let (_, _, cov_type, _, _) = build(&options).unwrap();
+        let BuiltReInput { cov_type, .. } = build(&options).unwrap();
         let ReCovType::Dk { bandwidth, .. } = cov_type else {
             panic!("expected ReCovType::Dk");
         };

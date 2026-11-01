@@ -104,7 +104,7 @@ fn fit_frame(
 /// 非公開フィールド`fitted_values`/`has_intercept`にアクセスする都合上、`OLSResult`と
 /// 同じ`linear::ols`モジュール内に置く）。
 ///
-/// `cov_type_lower`を引数で受け取るのは、`fit`では`CovKind::name()`で作った正規形の名前、
+/// `cov_type_name`を引数で受け取るのは、`fit`では`CovKind::name()`で作った正規形の名前、
 /// `first_stage()`では`IVResult.cov_type`
 /// （呼び出し元が指定した`cov_type`、第一段階にもそのまま使われる、`iv::two_sls`の
 /// モジュールdocコメント参照）と、呼び出し元ごとに文字列の出どころが異なるため。
@@ -113,7 +113,7 @@ fn fit_frame(
 /// 呼び出し元の責任で渡す契約）。
 pub(crate) fn ols_estimator_to_result(
     estimator: &OlsEstimator,
-    cov_type_lower: String,
+    cov_type_name: String,
 ) -> OLSResult {
     OLSResult {
         params: mat_to_vec(estimator.params()),
@@ -129,7 +129,7 @@ pub(crate) fn ols_estimator_to_result(
         residuals: mat_to_vec(estimator.residuals()),
         dep_var_name: estimator.input().dep_var_name().to_string(),
         n_obs: estimator.input().nobs(),
-        cov_type: cov_type_lower,
+        cov_type: cov_type_name,
         hac_lags_used: estimator.hac_lags_used().map(|lags| lags as i64),
         r_squared: estimator.r_squared(),
         adj_r_squared: estimator.adj_r_squared(),

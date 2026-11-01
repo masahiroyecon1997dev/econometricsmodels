@@ -1,6 +1,6 @@
 # OLS 仕様書
 
-OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols/`・`engine/src/shared/`（共分散・Wald検定・最小二乗・適合度の部品）・`engine_pybind/src/linear/ols.rs`・
+OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols/`・`engine/src/shared/`（共分散・Wald検定・最小二乗・適合度の部品）・`engine_pybind/src/linear/ols/`・
 `python_package/econometricsmodels/linear/ols.py`として実装済み。パフォーマンス比較の詳細は
 [`../performance/ols.md`](../performance/ols.md)、CI/CD・セキュリティはmethod非依存のため
 [`ci-cd-notes.md`](./ci-cd-notes.md)を参照。

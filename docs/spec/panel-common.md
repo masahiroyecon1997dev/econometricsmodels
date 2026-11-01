@@ -71,7 +71,7 @@ Swamy-Arora分散成分推定の具体式、固定効果の復元等）は[`fe-s
 
 ### 2.1 共通コア項目
 
-OLS（`OLSResult`、`engine_pybind/src/linear/ols.rs:137-191`）の項目を土台にするが、以下の点で
+OLS（`OLSResult`、`engine_pybind/src/linear/ols/result.rs`）の項目を土台にするが、以下の点で
 機械的な流用ではなく調整する。
 
 | フィールド | 由来 | 備考 |
@@ -101,7 +101,7 @@ dict）と名前が衝突する。不均衡な2-way RE対応時に形が決ま�
 
 ### 2.2 OLSの`nobs`→`n_obs`リネーム
 
-既存`OLSResult.nobs`（`ols.rs:157`）とLogitの`LogitResult.n_obs`（`logit.rs:206`）で表記が
+既存`OLSResult.nobs`（`linear/ols/result.rs`）とLogitの`LogitResult.n_obs`（`logit.rs:206`）で表記が
 不一致だったため、`n_obs`へ統一した（OLS・WLS双方のResult型・Python側プロパティを
 リネーム済み）。
 

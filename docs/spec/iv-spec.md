@@ -349,8 +349,8 @@ Sargan検定（2SLS）／Hansen J検定（GMM）を`fit()`の結果本体に含�
 
 ### 3.8 engine_pybind: エラー変換
 
-`engine::iv::common::IvError` → `PyErr`対応（`iv_error_to_pyerr`、`engine_pybind/src/iv/
-common.rs`）:
+`engine::iv::common::IvError` → `PyErr`対応（`iv_error_to_pyerr`、`engine_pybind/src/iv/common/
+error.rs`）:
 
 | `IvError` | `code`（カタログ） | 例外 |
 |---|---|---|

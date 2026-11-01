@@ -121,7 +121,7 @@ pub struct OLSResult {
     ///
     /// `None` for `OLSResult`s built by `ols_estimator_to_result` without going
     /// through this file's `fit()` (currently only `IVResult.first_stage()`,
-    /// `engine_pybind/src/iv/common.rs`): those per-equation regressions have no
+    /// `engine_pybind/src/iv/common/`): those per-equation regressions have no
     /// single source DataFrame, so `augment(new_data=None)` and the diagnostic tests
     /// on such a result raise `ValidationError` instead.
     pub(super) source_data: Option<Py<PyAny>>,

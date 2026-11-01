@@ -1,7 +1,7 @@
 //! `panel`系統（FE/RE）で共有するユーティリティ。
 //!
 //! `.claude/rules/rust-style.md`「ファイル・ディレクトリ構成」: 系統内で共有するロジックは
-//! `<系統>/common.rs`に置く（`engine_pybind/src/iv/common.rs`と同じ位置づけ）。
+//! `<系統>/common.rs`に置く（`engine_pybind/src/iv/common/`と同じ位置づけ）。
 //!
 //! `PanelError`は`engine::shared::error::ErrorInfo`を実装しており、`code`・`params`
 //! （`Common`バリアントの`CommonError`は`report()`が委譲する）は`engine`側が決める。
@@ -281,7 +281,7 @@ pub(crate) fn group_counts(n_entities: usize, n_periods: Option<usize>) -> Vec<u
 /// `PanelError`（`engine`クレート）と`PyErr`（`pyo3`クレート）はどちらもこのクレートの外で
 /// 定義された型のため、orphan ruleにより`impl From<PanelError> for PyErr`は書けない。関数
 /// として実装し、呼び出し側で`.map_err(panel_error_to_pyerr)?`する（`iv_error_to_pyerr`と
-/// 同じ理由、`engine_pybind/src/iv/common.rs`参照）。
+/// 同じ理由、`engine_pybind/src/iv/common/`参照）。
 ///
 /// `PanelError`の各バリアントは`ErrorInfo::report()`が`code`・`params`に変換する。
 /// `WithinRegressionFailed`等の回帰の包みは原因の`code`に`stage`を付け、`ValidationError`/

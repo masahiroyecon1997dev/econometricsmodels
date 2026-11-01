@@ -1532,7 +1532,7 @@ def test_gmm_raise_on_non_convergence_true_raises_computation_error(
 ):
     """厳しすぎる`gmm_tol`で最大反復回数内に収束しない場合、既定
     （`raise_on_non_convergence=True`）では`ComputationError`（`MleError.
-    NonConvergence`と同じ分類、`engine_pybind/src/iv/common.rs`参照）。
+    NonConvergence`と同じ分類、`engine_pybind/src/iv/common/`参照）。
     """
     options = IVOptions(
         estimator="gmm",

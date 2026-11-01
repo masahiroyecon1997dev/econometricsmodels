@@ -14,7 +14,7 @@
 
 ## 構成
 
-`IVOptions`/`IVResult`/`build_iv_input`/`fit`は`iv/common.rs`に置き、`two_sls.rs`/`gmm.rs`のような手法ごとのファイル分割はしない。`fit_iv`という単一エントリポイントを`IVOptions.estimator`（`"2sls"`/`"gmm"`）で2SLS/GMMに振り分ける設計のため、これらは系統内で真に共有されるロジックであり、`<系統>/common.rs`に置くという既存方針にそのまま合致する。
+`IVOptions`/`IVResult`/`build_iv_input`/`fit`は`iv/common/`に責務ごとのファイル（`options.rs`・`option_values.rs`・`gmm_setup.rs`・`input.rs`・`result.rs`・`fit.rs`・`error.rs`。`mod.rs`は再エクスポートのみ）に分けて置き、`two_sls.rs`/`gmm.rs`のような手法ごとのファイル分割はしない。`fit_iv`という単一エントリポイントを`IVOptions.estimator`（`"2sls"`/`"gmm"`）で2SLS/GMMに振り分ける設計のため、これらは系統内で真に共有されるロジックであり、`<系統>/common.rs`に置くという既存方針にそのまま合致する。
 
 `build_iv_input`は`cov_type`の値を`crate::linear::common::parse_cov_kind`、列の抽出を`resolve_cov_type`で行う（OLS/WLSと型・エラーメッセージを揃えるため）。組合せの検査はIV自身の`check_iv_options`（GMM専用オプションと`gmm_weight_type`を持つため`linear::common::check_cov_options`は使えない）。
 

@@ -1,7 +1,7 @@
 # IV 仕様書
 
 IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two_sls.rs`/`gmm.rs`、共通基盤は
-`engine/src/iv/common.rs`）・`engine_pybind/src/iv/common.rs`・
+`engine/src/iv/common.rs`）・`engine_pybind/src/iv/common/`・
 `python_package/econometricsmodels/iv/iv.py`として実装済み。`estimator="2sls"`/`estimator="gmm"`を
 単一の`IV`/`IVResults`ペアで扱う設計のため、本ドキュメントは2SLS/GMM両方を扱う。
 

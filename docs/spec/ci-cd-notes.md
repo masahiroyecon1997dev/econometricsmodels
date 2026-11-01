@@ -135,11 +135,19 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
 - 全`actions/checkout`に`persist-credentials: false`を付ける（以降のステップから`.git/config`経由で
   `GITHUB_TOKEN`を読ませない。gitのpush等を行うワークフローは無い）。`run:`には`${{ }}`を
   直接埋め込まず、外部から決まりうる値（タグ名等）は`env`経由で渡す（`cd_release.yml`）。
-- ワークフローの静的解析にはzizmorが使える（ローカルでは
-  `uv run --no-project --with zizmor==<版> zizmor --offline .github/workflows`。
-  `GITHUB_TOKEN`/`GH_TOKEN`が空文字で定義されているとエラーになるため`env -u`で外す）。
-  CIには組み込んでいない。既定のpersonaで残る指摘は、
-  `benchmark_performance.yml`のキャッシュ（`cache-poisoning`、信頼度Low）のみ。
+- ワークフローの静的解析にzizmorを使う。CIは`ci_workflows.yml`（`.github/**`に触れるPRと
+  週1回の定期実行。公式の`zizmorcore/zizmor-action`をSHA固定で使い、zizmor本体の版も
+  `version`で固定。オンライン監査あり）。必須ステータスチェックには入れない（pathsフィルタが
+  あるため）。`advanced-security`（SARIFをSecurityタブへ送る方式）は、送信にsecurity-events
+  書き込みが要りDependabotのPRで失敗するため使わず、annotationsでPR上に出す。指摘があれば
+  ジョブは失敗する。zizmor本体の版はDependabotの対象外なので、上げるときは手動で上げる
+  （`zizmor-action`のSHA自体はDependabotが更新する）。
+  設定は`.github/zizmor.yml`で、除外は理由とセットで書く。除外中は
+  `benchmark_performance.yml`の`cache-poisoning`（信頼度Low）のみ: 公開物を生成せず権限も
+  `contents: read`だけで、キャッシュを切るとmatrix全ジョブがengineをフルビルドするため。
+  ローカルでは`uv run --no-project --with zizmor==<版> zizmor --offline .github`
+  （`GITHUB_TOKEN`/`GH_TOKEN`が空文字で定義されているとエラーになるため`env -u`で外す。
+  `--offline`を外し`GH_TOKEN`を渡すとCIと同じオンライン監査になる）。
 
 ## パッケージ健全性メトリクス（import時間・インストール容量）
 

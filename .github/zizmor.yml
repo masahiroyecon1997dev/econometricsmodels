@@ -1,0 +1,10 @@
+# zizmor（ci_workflows.yml・ローカル実行の両方）の設定。除外は理由とセットで書く。
+rules:
+  cache-poisoning:
+    ignore:
+      # benchmark_performance.ymlはタグpushでも動くためキャッシュ汚染の検査に掛かる
+      # が、公開物（PyPIのwheel・GitHub Release）は生成せず、権限もcontents: readのみ。
+      # setup-rust-toolchainのキャッシュを切ると、手法8個のmatrixの全ジョブがengineを
+      # 毎回フルビルドし、所要時間が大きく増える。キャッシュはRustの依存のビルド物で、
+      # 計測は常に`maturin develop --release`でビルドし直す。
+      - benchmark_performance.yml

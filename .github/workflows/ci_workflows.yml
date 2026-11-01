@@ -1,0 +1,37 @@
+name: CI (workflows)
+
+# GitHub Actionsのworkflow・Dependabot設定の静的解析（zizmor）。
+# .github/配下に触れるPRと週1回の定期実行で動かす。必須ステータスチェックには
+# 登録しない（pathsフィルタがあるため。CLAUDE.md 8章）。定期実行は、PRが無い期間に
+# zizmor側へ追加された検査・既知の脆弱なactionの情報を拾うためのもの。
+# 除外する検査は.github/zizmor.ymlに理由つきで書く。
+on:
+  pull_request:
+    paths:
+      - ".github/**"
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  zizmor:
+    name: zizmor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # advanced-security（SARIFをSecurityタブへ送る方式）は使わない。送信にsecurity-events
+      # 書き込みが要り、Dependabotや他リポジトリのforkのPRでは権限が無く失敗するため。
+      # 指摘はannotationsでPR上に出し、指摘があればジョブを失敗させる。
+      # zizmor本体の版は固定する（latestだと検査の追加で突然失敗する）。上げるときは
+      # 手動で上げる（Dependabotの対象外。docs/spec/ci-cd-notes.mdの「セキュリティ」節）。
+      - uses: zizmorcore/zizmor-action@53290badfa369cb0bf7ad16342cb62c2fa47ac7b # v0.8.0
+        with:
+          version: "1.31.1"
+          advanced-security: false
+          annotations: true

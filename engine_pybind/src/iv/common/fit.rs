@@ -11,7 +11,7 @@ use pyo3::prelude::*;
 use std::collections::HashMap;
 
 use super::error::iv_error_to_pyerr;
-use super::input::build_iv_input;
+use super::input::{BuiltIvInput, build_iv_input};
 use super::options::IVOptions;
 use super::result::IVResult;
 
@@ -69,11 +69,15 @@ fn fit_frame(
     instruments: Vec<String>,
     options: &IVOptions,
 ) -> PyResult<IVResult> {
-    let (input, cov_type, cov_type_lower, plan) =
-        build_iv_input(df, y, x_exog, x_endog, instruments, options)?;
+    let BuiltIvInput {
+        input,
+        cov_type,
+        cov_type_name,
+        plan,
+    } = build_iv_input(df, y, x_exog, x_endog, instruments, options)?;
 
     // 識別の順序条件（過小識別な入力で無駄な第一段階回帰を走らせない。この時点で
-    // `build_iv_input`の`validate_x_non_empty("x_endog"/"instruments", ...)`を通過しており
+    // `build_iv_input`の`validate_role_non_empty("x_endog"/"instruments", ...)`を通過しており
     // `k_endog`/`k_instruments`はともに1以上なので、「両方指定されているが数が足りない」
     // ケースのみを扱う）・観測数`n`（構造方程式の`n <= k`を先に、次に第一段階の`n <= l`）・`cov_type=Cluster`の
     // 構造方程式の`G <= q`・被説明変数が定数、のチェック（`TwoSlsEstimator::fit`/
@@ -96,13 +100,13 @@ fn fit_frame(
     let first_stage: Vec<(String, OLSResult)> = first_stage
         .into_iter()
         .map(|(name, estimator)| {
-            let result = ols_estimator_to_result(&estimator, cov_type_lower.clone());
+            let result = ols_estimator_to_result(&estimator, cov_type_name.clone());
             (name, result)
         })
         .collect();
 
     let shared = SharedFit {
-        cov_type: cov_type_lower,
+        cov_type: cov_type_name,
         estimator: plan.estimator.name().to_string(),
         weak_instrument_f_statistics: weak_instrument_f_statistics.into_iter().collect(),
         weak_instrument_f_df,

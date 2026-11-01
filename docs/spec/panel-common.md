@@ -175,7 +175,7 @@ FE/REのClassical/HC1-3以外の全cov_typeに広げたもの）。`df_resid`自
 
 - `CommonError`（`engine/src/shared/error.rs`）、`ensure_well_conditioned_symmetric_matrix`
   （`engine::shared::linear_algebra`）、`engine_pybind/src/shared/validation.rs`の列名検証4関数
-  （`validate_x_non_empty`等）は既に系統横断で共有済み。
+  （`validate_role_non_empty`等）は既に系統横断で共有済み。
 - **WLSはOLSを「並行輸入」ではなく「委譲」で再利用している**: 重み変換
   （`sqrt(weight)`）したデータをそのまま`OlsEstimator::fit`に渡し、その後で重み付き用に
   補正が必要な統計量（R²・調整済みR²・log_likelihood）だけ`weighted_fit_statistics`で

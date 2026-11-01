@@ -5,7 +5,7 @@ use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{extract_f64_column, extract_f64_columns};
 use crate::shared::validation::{
     RoleValue, validate_no_const_collision, validate_no_duplicate_roles,
-    validate_no_duplicate_within_role, validate_x_non_empty,
+    validate_no_duplicate_within_role, validate_role_non_empty,
 };
 use engine::iv::common::IvInput;
 use engine::linear::ols::CovType as EngineCovType;
@@ -25,15 +25,27 @@ pub(crate) struct IvPlan {
     pub(crate) gmm: Option<GmmSetup>,
 }
 
+/// [`build_iv_input`]の戻り値。
+#[derive(Debug)]
+pub(crate) struct BuiltIvInput {
+    pub(crate) input: IvInput,
+    /// エンジンに渡す`cov_type`（`cluster`のグループや`hac`の時点順位を持つ）。
+    pub(crate) cov_type: EngineCovType,
+    /// `IVResult.cov_type`に格納する正規形（小文字）の名前。
+    pub(crate) cov_type_name: String,
+    pub(crate) plan: IvPlan,
+}
+
 /// Pythonから渡された `data` / `y` / `x_exog` / `x_endog` / `instruments` / `options` を
 /// 検証し、`engine::iv::common::IvInput::from_columns`を呼び出すところまでを行う。
 /// `TwoSlsEstimator::fit`/`GmmEstimator::fit`の呼び出し・`IVResult`の構築は`fit`
 /// （本ファイル）が行う。
 ///
-/// 戻り値の3つ目は`IVResult.cov_type`に格納する正規形の名前、4つ目の[`IvPlan`]は`fit`が
-/// 2SLS/GMMのどちらを呼ぶかの分岐と、GMMの`GmmType`（重み行列の列の抽出済み）・
-/// `IVResult.gmm_type`/`gmm_weight_type`に格納する正規形の名前を運ぶ。ここでの妥当性
-/// チェックと同じ正規化ロジックを`fit`で再実装しないためである。
+/// 戻り値の[`BuiltIvInput::cov_type_name`]は`IVResult.cov_type`に格納する正規形の名前、
+/// [`BuiltIvInput::plan`]（[`IvPlan`]）は`fit`が2SLS/GMMのどちらを呼ぶかの分岐と、GMMの
+/// `GmmType`（重み行列の列の抽出済み）・`IVResult.gmm_type`/`gmm_weight_type`に格納する
+/// 正規形の名前を運ぶ。ここでの妥当性チェックと同じ正規化ロジックを`fit`で再実装しないため
+/// である。
 ///
 /// 検査の順序は`docs/guide/validation.md`「Order in which errors are reported」: DataFrameを
 /// 見ない検査（オプションの値 → 組合せ）→ ロール構造 → `y`/`x`の列 → オプションの列。
@@ -62,7 +74,7 @@ pub(crate) fn build_iv_input(
     x_endog: Vec<String>,
     instruments: Vec<String>,
     options: &IVOptions,
-) -> PyResult<(IvInput, EngineCovType, String, IvPlan)> {
+) -> PyResult<BuiltIvInput> {
     // DataFrameを見ない検査を先に行う。報告順は`docs/guide/validation.md`
     // 「Order in which errors are reported」: オプションの値（`estimator` → `cov_type` →
     // `gmm_type` → `gmm_weight_type`）→ オプションの組合せ → ロール構造 → `y`/`x`の列 →
@@ -102,8 +114,8 @@ pub(crate) fn build_iv_input(
     // 「操作変数はあるが対応する内生変数が無い」誤用も検出できる。`IvInput`自体はこの
     // 規則を持たず空リストを許容する（検証はPython API境界である本層の責務、`IvInput`の
     // 構造体docコメント参照）。
-    validate_x_non_empty("x_endog", &x_endog)?;
-    validate_x_non_empty("instruments", &instruments)?;
+    validate_role_non_empty("x_endog", &x_endog)?;
+    validate_role_non_empty("instruments", &instruments)?;
 
     // ── y列の抽出 ──────────────────────────────────────────────────────
     let y_slice = extract_f64_column(df, &y, ColumnSource::new("y", "data"))?;
@@ -146,7 +158,12 @@ pub(crate) fn build_iv_input(
         estimator: values.estimator,
         gmm,
     };
-    Ok((input, cov_type, values.cov.name().to_string(), plan))
+    Ok(BuiltIvInput {
+        input,
+        cov_type,
+        cov_type_name: values.cov.name().to_string(),
+        plan,
+    })
 }
 
 #[cfg(test)]
@@ -172,7 +189,12 @@ mod tests {
         let df = well_formed_df();
         let options = default_options();
 
-        let (input, cov_type, cov_type_lower, plan) = build_iv_input(
+        let BuiltIvInput {
+            input,
+            cov_type,
+            cov_type_name,
+            plan,
+        } = build_iv_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string()],
@@ -187,7 +209,7 @@ mod tests {
         assert_eq!(input.k_endog(), 1);
         assert_eq!(input.k_instruments(), 2);
         assert_eq!(cov_type, EngineCovType::Classical);
-        assert_eq!(cov_type_lower, "classical");
+        assert_eq!(cov_type_name, "classical");
         assert_eq!(plan.estimator.name(), "2sls");
         assert!(plan.gmm.is_none());
     }
@@ -197,7 +219,7 @@ mod tests {
         let df = well_formed_df();
         let options = default_options();
 
-        let (input, ..) = build_iv_input(
+        let BuiltIvInput { input, .. } = build_iv_input(
             &df,
             "y".to_string(),
             vec![],
@@ -285,7 +307,7 @@ mod tests {
         let mut options = default_options();
         options.estimator = "GMM".to_string(); // 大文字小文字を区別しないことも確認
 
-        let (_, _, _, plan) = build_iv_input(
+        let BuiltIvInput { plan, .. } = build_iv_input(
             &df,
             "y".to_string(),
             vec!["x1".to_string()],
@@ -499,7 +521,7 @@ mod tests {
         options.cov_type = "cluster".to_string();
         options.cluster = Some("group".to_string());
 
-        let (_, cov_type, ..) = build_iv_input(
+        let BuiltIvInput { cov_type, .. } = build_iv_input(
             &df,
             "y".to_string(),
             vec![],
@@ -556,7 +578,7 @@ mod tests {
         options.hac_time = Some("t".to_string());
         options.hac_lags = Some(1);
 
-        let (_, cov_type, ..) = build_iv_input(
+        let BuiltIvInput { cov_type, .. } = build_iv_input(
             &df,
             "y".to_string(),
             vec![],

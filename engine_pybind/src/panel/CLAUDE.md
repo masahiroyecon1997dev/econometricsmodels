@@ -71,7 +71,7 @@ FEの`fit`と同じ構成: `build_re_input`で`ReInput`/`ReEffects`/`ReCovType`/
 - **`effects`と`REOptions.dk_time`（FEと同じ規約）**: `effects`（必須の`list[str]`、1〜2要素）の要素数で`ReEffects::OneWay`/`TwoWay`を決め、2要素目が`ReInput.time`に渡る。`dk_time`はDKの時点列で`cov_type="dk"`では必須（未指定は`ValidationError`、`effects`の列は借用しない）。`dk_time`は`resolve_re_cov_type`が`ReCovType::Dk { time }`に渡し、`ReInput`には渡さない。`REOptions.time`は廃止した（`panel-common.md`1.1節）。REは`effects`の順序に意味があり（`effects[0]`が個体: `sigma2_u`・`theta_entity`、`effects[1]`が時点: `sigma2_lambda`・`theta_time`）、バランスパネルでは入れ替えても検証では検出できないので、ドキュメントとテストで保証する。`build_re_input`は`(ReInput, ReEffects, ReCovType, String, VarianceMethod)`を返す。2-wayでも`hausman_*`・`r_squared_*`は1-wayと同じ項目に入る（`docs/spec/re-spec.md`3.6・3.7節）。`cov_type`が`"dk"`以外で`dk_time`を指定すると`check_panel_cov_options`が`ValidationError`にする（`cluster`/`dk_bandwidth`と同じ規則）。詳細は`panel/re.rs`モジュールdoc参照。
 - **`x`の空リストを許容しない**: REで`x=[]`は「分散成分（ICC）のみを推定するnullモデル」として
   単独で意味を持つ標準的なユースケースだが、`panel-common.md`にこの点の明示的な決定が無いため、
-  他手法（FE・OLS/WLS/Logit/Probit/IV）と一貫させて`validate_x_non_empty`で拒否する。
+  他手法（FE・OLS/WLS/Logit/Probit/IV）と一貫させて`validate_role_non_empty`で拒否する。
   nullモデル・ICC推定のサポート自体は別途検討する。
 - **`cov_type`は`FEOptions`と同じ集合**（`classical`/`hc1`〜`hc3`/`cluster`/`dk`、`hc0`は
   非対応）。`resolve_re_cov_type`は`resolve_fe_cov_type`と同型で、`dk_time`はどちらも
@@ -95,7 +95,7 @@ FEの`fit`と同じ構成: `build_re_input`で`ReInput`/`ReEffects`/`ReCovType`/
 ## `FEOptions`のフィールド設計
 
 - **`include_intercept`は無い**: FEは`within`変換で切片が構造的に消えるため、OLS/WLS/IVと異なりこのオプション自体が意味を持たない（`engine::panel::fe::FeEstimator::fit`が常に`include_intercept=false`でOLSに委譲する設計、`engine/src/panel/fe.rs`モジュールdoc参照）。
-- **`x`は空リストを許容しない**: 固定効果のみのモデル（`k=0`）は、因果推論として意味を持たない（説明変数がゼロで「個体・時間固定効果によるyの分解」という別の操作になる）ため、他手法（OLS/WLS/Logit/Probit/IVの`x_endog`/`instruments`）と同じ`validate_x_non_empty`を`build_fe_input`（`panel/fe.rs`）で呼んで拒否する。**`engine`側（`FeInput::from_columns`・`FeEstimator::fit`）はk=0を受理する**——`engine_pybind`層のみの業務バリデーション（`engine/src/panel/fe.rs`の`fe_estimator_fit_with_no_regressors_estimates_fixed_effects_only_model`がengineレベルの動作を検証する）。
+- **`x`は空リストを許容しない**: 固定効果のみのモデル（`k=0`）は、因果推論として意味を持たない（説明変数がゼロで「個体・時間固定効果によるyの分解」という別の操作になる）ため、他手法（OLS/WLS/Logit/Probit/IVの`x_endog`/`instruments`）と同じ`validate_role_non_empty`を`build_fe_input`（`panel/fe.rs`）で呼んで拒否する。**`engine`側（`FeInput::from_columns`・`FeEstimator::fit`）はk=0を受理する**——`engine_pybind`層のみの業務バリデーション（`engine/src/panel/fe.rs`の`fe_estimator_fit_with_no_regressors_estimates_fixed_effects_only_model`がengineレベルの動作を検証する）。
 - **`cov_type`のデフォルトは`"cluster"`**（`effects`の先頭の列＝個体単位）。OLS/WLS/IVの`"classical"`から意図的に逸脱する（`panel-common.md`3.2節、fixestの前例）。
 - **`cov_type`は`hc0`を受け付けない**: `engine::panel::fe::FeCovType`enum自体が`Hc0`を持たない（スコープ外、`engine/src/panel/CLAUDE.md`参照）。`parse_panel_cov_kind`は`"hc0"`を専用のエラーメッセージで明示的に弾く（他の未知の値と区別する——`hc0`はOLS/WLS/IVでは有効な値のため、ユーザーが混同しやすいと判断した）。
 - **`effects`と`dk_time`は別の役割（重要な設計判断）**: `effects`（必須引数の`list[str]`、1〜2要素）は固定効果の構造を決める——1要素なら1-way、2要素なら2-way（`effects[0]`が個体、`effects[1]`が時点）。`dk_time`（OLSの`hac_time`と同じ「補助列」命名規則）はDriscoll-Kraay HAC（`cov_type="dk"`）専用の時系列順序で、`effects`とは独立に指定できる（`FEOptions.time`は廃止した。`panel-common.md`1.1節）。

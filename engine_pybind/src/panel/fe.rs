@@ -34,7 +34,7 @@
 //!
 //! ## `x`の空リストを許容しない
 //!
-//! 固定効果のみのモデル（`x=[]`）は、`validate_x_non_empty`で拒否する（他手法のOLS/WLS/Logit/
+//! 固定効果のみのモデル（`x=[]`）は、`validate_role_non_empty`で拒否する（他手法のOLS/WLS/Logit/
 //! Probit/IVと同じ）。`x`が空だと、説明変数が`y`に与える効果を推定するという営みが成立せず、
 //! 実質「個体・時間固定効果による`y`の分解」という別の操作になるため。**`engine`側
 //! （`FeInput::from_group_codes`・`FeEstimator::fit`）はk=0を受理したまま**で、
@@ -42,7 +42,7 @@
 //! engineレベルでは固定効果のみのモデルが動作することを検証する。拒否はPython向けAPI
 //! （`engine_pybind`）の業務的なバリデーションとしてのみ行う（OLSも
 //! `engine::linear::ols::OlsEstimator::fit`自体はk=0を受理するが、Python APIの
-//! `validate_x_non_empty`が弾くのと同じ構図）。
+//! `validate_role_non_empty`が弾くのと同じ構図）。
 
 use crate::shared::errors::{guard, internal_error};
 use engine::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput, FixedEffects};
@@ -516,7 +516,7 @@ fn resolve_fe_cov_type(
 /// - 列の抽出時に発覚する問題（列が存在しない、数値/文字列型にキャストできない、
 ///   欠損値・NaN・無限大を含む等）は`column_extraction`の責務で`ValidationError`
 /// - `x`が空リストの場合は`ValidationError`（OLS/WLS/Logit/Probit/IVと同じ
-///   `validate_x_non_empty`。「固定効果のみのモデル」の許容を見直し、
+///   `validate_role_non_empty`。「固定効果のみのモデル」の許容を見直し、
 ///   他手法と揃えた——経緯はモジュールdoc「`x`の空リストを許容しない」参照）。
 ///   `y`/`effects`/`x`間の重複・`x`・`effects`内部の重複も同じく`validation.rs`の責務で
 ///   `ValidationError`

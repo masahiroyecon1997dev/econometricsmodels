@@ -33,7 +33,7 @@ engineが計算し、`statistic`引数（`StatisticVersion`、大文字小文字
 `nlags < 1`の検査と巨大値の飽和は`engine`側（`InvalidNlags`・観測数不足）。
 `breusch_pagan_test(variables, statistic)`も同じ配線で、`variables`は`Option<&Bound<PyAny>>`として
 `extract_column_list`（`list`以外・`str`以外の要素は`TypeError`）で受け、`None`なら
-`x_column_names`でモデルの`x`を使う。空リスト・重複は`validate_x_non_empty`/
+`x_column_names`でモデルの`x`を使う。空リスト・重複は`validate_role_non_empty`/
 `validate_no_duplicate_within_role`（ロール名`variables`）で`ValidationError`。モデルの`x`や`y`との
 重複は検査しない（モデル外の列・`y`列も`Z`にできる仕様）。元のデータの有無は`variables`の
 型検査より後（型の誤りは学習データが無い結果でも`TypeError`）。
@@ -74,7 +74,7 @@ engineが計算し、`statistic`引数（`StatisticVersion`、大文字小文字
 - `include_intercept=true`のとき`x`に`"const"`という列名がある場合（自動追加する定数項名と衝突）
 - `x`が空リストの場合
 
-これらは元々OLS/WLS/Logitの`fit`/`build_logit_input`にメッセージ文言まで重複して実装されていたが、`engine_pybind/src/shared/validation.rs`（`shared/`配下、`column_extraction/`と同じ位置づけ）に集約した: `validate_x_non_empty`/`validate_no_duplicate_x`/`validate_no_const_collision`/`validate_no_duplicate_roles`（`y`/`weight`等の単一列名ロール間の重複、`roles: &[(&str, &str)]`のペアリストを受け取る汎用関数。ただし`x`のように複数列を取るロール、例えば将来のIVの`instrument`には未対応、着手時に再検討が要る）。**新しい手法を実装する際も、この4関数を呼び出す形にし、同様のチェックを独自実装しないこと。**
+これらは元々OLS/WLS/Logitの`fit`/`build_logit_input`にメッセージ文言まで重複して実装されていたが、`engine_pybind/src/shared/validation.rs`（`shared/`配下、`column_extraction/`と同じ位置づけ）に集約した: `validate_role_non_empty`/`validate_no_duplicate_x`/`validate_no_const_collision`/`validate_no_duplicate_roles`（`y`/`weight`等の単一列名ロール間の重複、`roles: &[(&str, &str)]`のペアリストを受け取る汎用関数。ただし`x`のように複数列を取るロール、例えば将来のIVの`instrument`には未対応、着手時に再検討が要る）。**新しい手法を実装する際も、この4関数を呼び出す形にし、同様のチェックを独自実装しないこと。**
 
 `confidence_level`の範囲チェック・`cov_type="cluster"`なのに`cluster`未指定、といった`engine`側が既に検知する項目は`engine_pybind`側で重複チェックしない（`LeastSquaresError`のバリアント一覧は`ols-spec.md`「engine/engine_pybind間のデータ受け渡し・エラー変換」の対応表を参照）。
 

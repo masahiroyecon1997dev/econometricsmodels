@@ -174,7 +174,7 @@ pub enum PanelError {
     #[error(transparent)]
     Common(#[from] CommonError),
 
-    /// `y`と`entity`または`time`の長さが一致しない（`FeInput::from_columns`、
+    /// `y`と`entity`または`time`の長さが一致しない（`FeInput::from_group_codes`、
     /// `docs/spec/panel-common.md`1章）。
     ///
     /// `y`と`x`列の不一致は`CommonError::DimensionMismatch`が既にカバーしている
@@ -624,7 +624,7 @@ impl Eq for TimeKeys {}
 
 impl TimeKeys {
     /// ラベルの辞書順を時間順とみなす（ISO 8601の日付・ゼロ埋めした年月等、辞書順が時間順と
-    /// 一致するラベル向け）。`FeInput::from_columns`/`ReInput::from_columns`はこの順序を使う。
+    /// 一致するラベル向け）。テスト専用の簡便版（`FeInput::from_columns`/`ReInput::from_columns`）はこの順序を使う。
     pub fn lexicographic(ids: Vec<String>) -> Self {
         Self {
             codes: GroupCodes::from_labels(&ids),
@@ -1484,7 +1484,7 @@ pub(crate) fn reject_singleton_group(
 /// ときだけ、グリッドのセル（`entity`コード×`n_periods`+`time`コード）を一度ずつ埋めて
 /// 重複を検出する（`n_obs`個の`bool`）。
 ///
-/// `entity.nobs() == time.nobs()`は`FeInput::from_columns`が既に保証している契約
+/// `entity.nobs() == time.nobs()`は`FeInput::from_group_codes`が既に保証している契約
 /// （呼び出し側は常に同じ`FeInput`からこの2つを渡す）。
 pub(crate) fn validate_balanced_panel(
     entity: &GroupCodes,

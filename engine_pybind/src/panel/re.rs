@@ -517,7 +517,7 @@ fn parse_variance_method(value: &str) -> PyResult<VarianceMethod> {
 }
 
 /// Pythonから渡された `data` / `y` / `x` / `effects` / `options` を検証し、
-/// `engine::panel::re::ReInput::from_columns`を呼び出すところまでを行う。
+/// `engine::panel::re::ReInput::from_group_codes`を呼び出すところまでを行う。
 /// 戻り値（`ReInput`・`ReEffects`・`ReCovType`・正規形の`cov_type`・`VarianceMethod`）を
 /// `fit`関数が受け取り、`ReEstimator::fit`を呼んで`REResult`を組み立てる。
 ///

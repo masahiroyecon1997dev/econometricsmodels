@@ -2,7 +2,7 @@
 //!
 //! `engine`はpolars/PyO3を知らない（`.claude/rules/rust-style.md`「責務分離」）。
 //! `engine_pybind`がpolars DataFrameから`y`/`x`/`entity`/`time`を列ごとに抽出し、
-//! それらの列を本モジュールの`ReInput::from_columns`に渡す（`FeInput::from_columns`
+//! それらの列を本モジュールの`ReInput::from_group_codes`に渡す（`FeInput::from_group_codes`
 //! （`fe.rs`）と同型の設計）。
 //!
 //! `ReInput`自体は準偏差変換前の生データを保持するだけの入れ物であり、`FeInput`と
@@ -1538,7 +1538,7 @@ impl ReEstimator {
 
         // `OlsInput::from_columns`が返しうる`LeastSquaresError::Common(DimensionMismatch)`は
         // ここでは理論上到達不能: `y`/`x_all`はどちらも`quasi_demean_column`が
-        // `input.y()`/`input.x()`（`ReInput::from_columns`が既に同じ長さであることを
+        // `input.y()`/`input.x()`（`ReInput::from_group_codes`が既に同じ長さであることを
         // 検証済み）と`const_column`（`input.nobs()`で長さを揃えている）から1対1で
         // 生成した同じ長さの列であり、この関数内で長さがずれる操作をしていない
         // （`FeEstimator::fit`の同種のコメントと同じ判断）。

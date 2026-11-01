@@ -175,15 +175,13 @@ pub(super) fn reject_missing_values(
     Ok(())
 }
 
+/// 欠損値（null）が無いと検査した列で`None`が出たときの`detail`。
+pub(super) const UNEXPECTED_NULL: &str = "unexpected null in a column checked to have none";
+
 /// 欠損値（null）が無いと検査した列の値を取り出す。`None`は検査の後に起きない想定の防御的な経路で、
 /// panicさせずに`ConversionFailed`（内部エラー）にする。
 pub(super) fn present_value<T>(name: &str, value: Option<T>) -> Result<T, ColumnExtractionError> {
-    value.ok_or_else(|| {
-        ColumnExtractionError::conversion_failed(
-            name,
-            "unexpected null in a column checked to have none",
-        )
-    })
+    value.ok_or_else(|| ColumnExtractionError::conversion_failed(name, UNEXPECTED_NULL))
 }
 
 /// `ob`がpandasの`DataFrame`（サブクラスを含む）か。pandasをimportせずに、型の継承順

@@ -5,7 +5,8 @@ use pyo3::prelude::*;
 
 use super::dtype::{NumericRole, check_numeric_dtype};
 use super::frame::{
-    SelectedData, missing_column_error, present_value, reject_missing_values, select_columns,
+    SelectedData, UNEXPECTED_NULL, missing_column_error, present_value, reject_missing_values,
+    select_columns,
 };
 use crate::shared::column_error::{ColumnExtractionError, ColumnRole, ColumnSource};
 
@@ -232,19 +233,13 @@ pub(crate) fn physical_i128(
         .i128()
         .map_err(|e| time_order_error(name, e))?
         .iter()
-        .map(|v| {
-            v.ok_or_else(|| {
-                ColumnExtractionError::ordering_failed(
-                    name,
-                    "unexpected null in a column checked to have none",
-                )
-            })
-        })
+        .map(|v| v.ok_or_else(|| ColumnExtractionError::ordering_failed(name, UNEXPECTED_NULL)))
         .collect()
 }
 
 /// 時点の順序づけに使う浮動小数の列を`f64`の`Vec`にする（[`physical_i128`]の浮動小数版）。
-/// 欠損値（null）が無いことは呼び出し側が検査済みで、変換の失敗は`OrderingFailed`にする。
+/// 欠損値（null）が無いことは呼び出し側が検査済みで、検査の後に変換が失敗したり`None`が出たりするのは
+/// 起きない想定の防御的な経路。panicさせずに`OrderingFailed`（内部エラー）にする。
 pub(crate) fn physical_f64(name: &str, series: &Series) -> Result<Vec<f64>, ColumnExtractionError> {
     let as_f64 = series
         .cast(&DataType::Float64)
@@ -253,14 +248,7 @@ pub(crate) fn physical_f64(name: &str, series: &Series) -> Result<Vec<f64>, Colu
         .f64()
         .map_err(|e| time_order_error(name, e))?
         .iter()
-        .map(|v| {
-            v.ok_or_else(|| {
-                ColumnExtractionError::ordering_failed(
-                    name,
-                    "unexpected null in a column checked to have none",
-                )
-            })
-        })
+        .map(|v| v.ok_or_else(|| ColumnExtractionError::ordering_failed(name, UNEXPECTED_NULL)))
         .collect()
 }
 
@@ -285,6 +273,18 @@ mod tests {
     fn x_column_names_drops_leading_const_when_has_intercept() {
         let param_names = names(&["const", "x1", "x2"]);
         assert_eq!(x_column_names(&param_names, true), &param_names[1..]);
+    }
+
+    #[test]
+    fn physical_f64_returns_the_values_or_an_ordering_failure_for_an_unexpected_null() {
+        let values = Series::new("t".into(), [1.5_f64, -2.0]);
+        assert!(matches!(physical_f64("t", &values), Ok(v) if v == vec![1.5, -2.0]));
+
+        let with_null = Series::new("t".into(), [Some(1.5_f64), None]);
+        assert!(matches!(
+            physical_f64("t", &with_null),
+            Err(ColumnExtractionError::OrderingFailed { .. })
+        ));
     }
 
     #[test]

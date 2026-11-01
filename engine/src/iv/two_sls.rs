@@ -63,7 +63,7 @@
 //! 一度も回らないため、この検証が範囲外エラーを検知する唯一の経路になる）。
 
 use crate::iv::common::{
-    IvError, IvFitted, IvInput, compute_first_stage, hcat, mat_column_to_vec, mat_to_columns,
+    IvError, IvEstimate, IvInput, compute_first_stage, hcat, mat_column_to_vec, mat_to_columns,
     validate_iv_fit_inputs, without_baked_in_intercept,
 };
 use crate::linear::common::LeastSquaresError;
@@ -390,7 +390,7 @@ impl TwoSlsEstimator {
     }
 }
 
-impl IvFitted for TwoSlsEstimator {
+impl IvEstimate for TwoSlsEstimator {
     /// 2SLSの点推定値（`param_names()`と対応する順序、`const`を含む）。
     fn params(&self) -> &Mat<f64> {
         self.second_stage.params()

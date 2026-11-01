@@ -205,7 +205,7 @@ use faer::{Accum, Mat, Par, Side};
 use statrs::distribution::{ChiSquared, ContinuousCDF, Normal};
 
 use crate::iv::common::{
-    IvError, IvFitted, IvInput, hcat, mat_column_to_vec, validate_iv_fit_inputs,
+    IvError, IvEstimate, IvInput, hcat, mat_column_to_vec, validate_iv_fit_inputs,
 };
 use crate::linear::ols::CovType;
 use crate::shared::covariance::{
@@ -577,7 +577,7 @@ impl GmmEstimator {
     }
 }
 
-impl IvFitted for GmmEstimator {
+impl IvEstimate for GmmEstimator {
     /// GMMの点推定値（`param_names()`と対応する順序、`const`を含む）。
     fn params(&self) -> &Mat<f64> {
         &self.params

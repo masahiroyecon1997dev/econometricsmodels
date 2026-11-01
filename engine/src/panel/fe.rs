@@ -4,7 +4,7 @@
 //! `engine_pybind`がpolars DataFrameから`y`/`x`/`entity`/`time`を列ごとに抽出し
 //! （`entity`/`time`はグループの同一性だけが意味を持つ列のため文字列で抽出する、
 //! 同「Python境界でのデータ受け渡し」）、それらの列を本モジュールの
-//! `FeInput::from_columns`に渡す。
+//! `FeInput::from_group_codes`に渡す。
 //!
 //! `FeInput`自体はwithin変換前の生データを保持するだけの入れ物であり、`OlsInput`/
 //! `IvInput`と異なり`faer::Mat`は組み立てない（within変換（`panel::common::
@@ -525,7 +525,7 @@ impl FeInput {
 
     /// REの分散成分推定（`swamy_arora_variance_components`）用のFE入力を、
     /// `ReInput`の`y`・`x`・`entity`（2-wayなら`time`も）から作る。`ReInput`が既に持つエンティティコードを
-    /// 再利用し作り直さない。`ReInput::from_columns`が同じ次元検証を済ませているため
+    /// 再利用し作り直さない。`ReInput::from_group_codes`が同じ次元検証を済ませているため
     /// 検証は不要で、`entity`とコードの対応も`ReInput`が保証する（別々の引数で受けて
     /// 食い違う余地を作らない）。
     ///
@@ -798,7 +798,7 @@ impl FeEstimator {
 
         // `OlsInput::from_columns`が返しうる`LeastSquaresError::Common(DimensionMismatch)`は
         // ここでは理論上到達不能: `y`/`x`はどちらも`within_transform_*`が`input.y()`/
-        // `input.x()`（`FeInput::from_columns`が既に同じ長さであることを検証済み）から
+        // `input.x()`（`FeInput::from_group_codes`が既に同じ長さであることを検証済み）から
         // 1対1で生成した同じ長さの列であり、この関数内で長さがずれる操作をしていない。
         // それでも`Result`を返す契約（`from_columns`のシグネチャ）をそのまま守り、
         // `unwrap`はしない（`.claude/rules/rust-style.md`「テスト」の「理論上到達不能でも

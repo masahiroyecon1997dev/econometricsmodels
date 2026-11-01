@@ -3,7 +3,7 @@
 use crate::linear::ols::{OLSResult, ols_estimator_to_result};
 use crate::shared::column_extraction::SelectedData;
 use crate::shared::mat_conversion::{mat_to_rows, mat_to_vec};
-use engine::iv::common::{IvFitted, compute_first_stage, validate_iv_fit_inputs};
+use engine::iv::common::{IvEstimate, compute_first_stage, validate_iv_fit_inputs};
 use engine::iv::gmm::GmmEstimator;
 use engine::iv::two_sls::TwoSlsEstimator;
 use polars::prelude::DataFrame;
@@ -165,7 +165,7 @@ fn fit_frame(
 }
 
 /// `estimator`によらず同じ手順で決まる`IVResult`のフィールドのうち、推定量の読み出し口
-/// （[`IvFitted`]）から読まないもの。
+/// （[`IvEstimate`]）から読まないもの。
 struct SharedFit {
     cov_type: String,
     estimator: String,
@@ -196,9 +196,9 @@ struct EstimatorSpecific {
     wu_hausman_df_denom: Option<usize>,
 }
 
-/// `IVResult`を組み立てる。推定量の読み出し口（[`IvFitted`]）から読める共通のフィールドは
+/// `IVResult`を組み立てる。推定量の読み出し口（[`IvEstimate`]）から読める共通のフィールドは
 /// ここで一度だけ詰め、2SLSとGMMで食い違わないようにする。
-fn build_result<E: IvFitted>(
+fn build_result<E: IvEstimate>(
     estimator: &E,
     shared: SharedFit,
     specific: EstimatorSpecific,

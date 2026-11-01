@@ -203,10 +203,10 @@ pub(crate) fn extract_key_column(
         .str()
         .map_err(|e| ColumnExtractionError::conversion_failed(name, e))?;
 
-    Ok(ca
-        .iter()
-        .map(|v| v.expect("null_count was checked to be zero").to_string())
-        .collect())
+    ca.iter()
+        .map(|v| present_value(name, v).map(str::to_string))
+        .collect::<Result<Vec<String>, _>>()
+        .map_err(Into::into)
 }
 
 /// 各行のキーに出現順の仮コードを振る。戻り値は（行ごとの仮コード、仮コードごとの最初の行）。
@@ -218,15 +218,14 @@ fn factorize_keys<K: std::hash::Hash + Eq>(
 ) -> Result<(Vec<usize>, Vec<usize>), ColumnExtractionError> {
     let mut seen: HashMap<K, usize> = HashMap::new();
     let mut first_rows: Vec<usize> = Vec::new();
-    let codes = keys
-        .enumerate()
-        .map(|(row, key)| {
-            Ok(*seen.entry(key?).or_insert_with(|| {
-                first_rows.push(row);
-                first_rows.len() - 1
-            }))
-        })
-        .collect::<Result<Vec<usize>, ColumnExtractionError>>()?;
+    let mut codes: Vec<usize> = Vec::with_capacity(keys.size_hint().0);
+    for (row, key) in keys.enumerate() {
+        let code = *seen.entry(key?).or_insert_with(|| {
+            first_rows.push(row);
+            first_rows.len() - 1
+        });
+        codes.push(code);
+    }
     Ok((codes, first_rows))
 }
 

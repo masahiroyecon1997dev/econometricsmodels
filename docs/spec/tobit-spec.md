@@ -1,7 +1,7 @@
 # Tobit 仕様書
 
 Tobit（打ち切り正規回帰、最尤推定）の確定済み仕様。`engine/src/nonlinear/tobit.rs`（共通基盤は
-`engine/src/nonlinear/common.rs`）・`engine_pybind/src/nonlinear/tobit.rs`・
+`engine/src/nonlinear/common.rs`）・`engine_pybind/src/nonlinear/tobit/`・
 `python_package/econometricsmodels/nonlinear/tobit.py`として実装済み。nonlinear系統共通の設計判断
 （ソルバー実行の共通化、`cov_type`共通行列演算、検定分布＝標準正規分布、標準化の基本方針等）は
 [`logit-spec.md`](./logit-spec.md)・[`nonlinear-common.md`](./nonlinear-common.md)を参照し、
@@ -335,7 +335,7 @@ Tobit固有の差分:
 - `predict()`/`marginal_effects()`の`target`引数のPython文字列は`"expected_latent"` /
   `"expected_observed"` / `"prob_uncensored"` / `"expected_uncensored"`（Rust enum名のsnake_case版。`at`のような単語1つの
   慣習が無いためenum名との対応を優先）。パース関数`parse_marginal_effects_target`はTobit専用
-  （`tobit.rs`）。
+  （`engine_pybind/src/nonlinear/tobit/result.rs`）。
 
 ### 3.8 テスト
 

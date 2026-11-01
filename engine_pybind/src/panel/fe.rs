@@ -656,6 +656,7 @@ fn fit_frame(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::panel::common::well_formed_df;
     use engine::panel::common::TimeKeys;
     use engine::shared::group_codes::GroupCodes;
     use polars::df;
@@ -664,16 +665,6 @@ mod tests {
     /// `dk_time=None`）。フィールドごとに上書きして使う。
     fn default_options() -> FEOptions {
         FEOptions::new("cluster".to_string(), 0.95, None, None, None)
-    }
-
-    fn well_formed_df() -> DataFrame {
-        df!(
-            "y" => [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-            "x1" => [2.0, 4.0, 1.0, 5.0, 3.0, 6.0],
-            "id" => ["a", "a", "b", "b", "c", "c"],
-            "t" => ["1", "2", "1", "2", "1", "2"],
-        )
-        .unwrap()
     }
 
     #[test]

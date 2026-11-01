@@ -348,6 +348,19 @@ pub(crate) fn extract_time_keys(
     })
 }
 
+/// `build_fe_input`/`build_re_input`のテストで使う、6行・3エンティティ・2期間の整った`DataFrame`
+/// （`y`・`x1`・`id`・`t`）。
+#[cfg(test)]
+pub(super) fn well_formed_df() -> DataFrame {
+    polars::df!(
+        "y" => [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        "x1" => [2.0, 4.0, 1.0, 5.0, 3.0, 6.0],
+        "id" => ["a", "a", "b", "b", "c", "c"],
+        "t" => ["1", "2", "1", "2", "1", "2"],
+    )
+    .unwrap()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

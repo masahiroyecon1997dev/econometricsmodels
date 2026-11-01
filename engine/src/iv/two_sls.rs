@@ -63,7 +63,7 @@
 //! 一度も回らないため、この検証が範囲外エラーを検知する唯一の経路になる）。
 
 use crate::iv::common::{
-    IvError, IvInput, compute_first_stage, hcat, mat_column_to_vec, mat_to_columns,
+    IvError, IvFitted, IvInput, compute_first_stage, hcat, mat_column_to_vec, mat_to_columns,
     validate_iv_fit_inputs, without_baked_in_intercept,
 };
 use crate::linear::common::LeastSquaresError;
@@ -339,116 +339,6 @@ impl TwoSlsEstimator {
         })
     }
 
-    /// 2SLSの点推定値（`param_names()`と対応する順序、`const`を含む）。
-    pub fn params(&self) -> &Mat<f64> {
-        self.second_stage.params()
-    }
-
-    /// 係数名（`x_exog_names ++ x_endog_names`、`x_exog`に定数項を含む場合は先頭が`"const"`）。
-    pub fn param_names(&self) -> &[String] {
-        self.second_stage.input().param_names()
-    }
-
-    /// 被説明変数名。
-    pub fn dep_var_name(&self) -> &str {
-        self.second_stage.input().dep_var_name()
-    }
-
-    /// 観測数 n。
-    pub fn nobs(&self) -> usize {
-        self.second_stage.input().nobs()
-    }
-
-    /// 係数の数 k（定数項を含む、`x_exog`と`x_endog`の合計）。
-    pub fn k(&self) -> usize {
-        self.second_stage.input().k()
-    }
-
-    /// 使用した標準誤差の種別（呼び出し元が指定した`cov_type`）。
-    pub fn cov_type(&self) -> &CovType {
-        &self.cov_type
-    }
-
-    /// `cov_type=Hac`のとき、実際に使われたラグ数（`hac_lags`の明示指定値、または
-    /// 未指定時に経験則で自動計算した値）。`Hac`以外は`None`。
-    pub fn hac_lags_used(&self) -> Option<usize> {
-        self.hac_lags_used
-    }
-
-    /// 構造残差 `e = y - Xβ̂`（n, 1）。モジュール冒頭のdocコメント参照
-    /// （第二段階回帰自身の残差`y - X̂β̂`ではない）。
-    pub fn residuals(&self) -> &Mat<f64> {
-        &self.residuals
-    }
-
-    /// 標準誤差 (k, 1)。
-    pub fn std_errors(&self) -> &Mat<f64> {
-        &self.std_errors
-    }
-
-    /// `cov_type`に応じた係数の分散共分散行列 (k, k)。
-    pub fn cov_params(&self) -> &Mat<f64> {
-        &self.cov_params
-    }
-
-    /// t統計量 (k, 1)。
-    pub fn test_stats(&self) -> &Mat<f64> {
-        &self.test_stats
-    }
-
-    /// `test_stats`の従う分布（t分布、自由度は`df_inference`。`cov_type=Cluster`のときだけ
-    /// `df_resid`ではなく`G-1`になる）。
-    pub fn stat_dist(&self) -> inference::StatDist {
-        inference::StatDist::T {
-            df: self.df_inference,
-        }
-    }
-
-    /// 両側p値 (k, 1)。
-    pub fn p_values(&self) -> &Mat<f64> {
-        &self.p_values
-    }
-
-    /// 信頼区間の下限 (k, 1)。
-    pub fn conf_lower(&self) -> &Mat<f64> {
-        &self.conf_lower
-    }
-
-    /// 信頼区間の上限 (k, 1)。
-    pub fn conf_upper(&self) -> &Mat<f64> {
-        &self.conf_upper
-    }
-
-    /// 残差の自由度 n - k。
-    pub fn df_resid(&self) -> usize {
-        self.df_resid
-    }
-
-    /// モデルの自由度（定数項を除く傾き係数の数）。
-    pub fn df_model(&self) -> usize {
-        self.df_model
-    }
-
-    /// 決定係数。
-    pub fn r_squared(&self) -> f64 {
-        self.r_squared
-    }
-
-    /// 自由度調整済み決定係数。
-    pub fn adj_r_squared(&self) -> f64 {
-        self.adj_r_squared
-    }
-
-    /// F統計量。
-    pub fn wald_statistic(&self) -> f64 {
-        self.wald_statistic
-    }
-
-    /// F統計量のp値。
-    pub fn wald_p_value(&self) -> f64 {
-        self.wald_p_value
-    }
-
     /// 内生変数ごとの第一段階回帰結果（`x_endog_names`と対応する順序）。
     /// タプルの`String`は内生変数名。
     pub fn first_stage_estimators(&self) -> &[(String, OlsEstimator)] {
@@ -497,6 +387,118 @@ impl TwoSlsEstimator {
     /// `wald_statistic()`の自由度`(分子, 分母)`（F）。傾き係数が無くNaNのときは`None`。
     pub fn wald_df(&self) -> Option<(usize, usize)> {
         (self.df_model > 0).then_some((self.df_model, self.df_inference))
+    }
+}
+
+impl IvFitted for TwoSlsEstimator {
+    /// 2SLSの点推定値（`param_names()`と対応する順序、`const`を含む）。
+    fn params(&self) -> &Mat<f64> {
+        self.second_stage.params()
+    }
+
+    /// 係数名（`x_exog_names ++ x_endog_names`、`x_exog`に定数項を含む場合は先頭が`"const"`）。
+    fn param_names(&self) -> &[String] {
+        self.second_stage.input().param_names()
+    }
+
+    /// 被説明変数名。
+    fn dep_var_name(&self) -> &str {
+        self.second_stage.input().dep_var_name()
+    }
+
+    /// 観測数 n。
+    fn nobs(&self) -> usize {
+        self.second_stage.input().nobs()
+    }
+
+    /// 係数の数 k（定数項を含む、`x_exog`と`x_endog`の合計）。
+    fn k(&self) -> usize {
+        self.second_stage.input().k()
+    }
+
+    /// 使用した標準誤差の種別（呼び出し元が指定した`cov_type`）。
+    fn cov_type(&self) -> &CovType {
+        &self.cov_type
+    }
+
+    /// `cov_type=Hac`のとき、実際に使われたラグ数（`hac_lags`の明示指定値、または
+    /// 未指定時に経験則で自動計算した値）。`Hac`以外は`None`。
+    fn hac_lags_used(&self) -> Option<usize> {
+        self.hac_lags_used
+    }
+
+    /// 構造残差 `e = y - Xβ̂`（n, 1）。モジュール冒頭のdocコメント参照
+    /// （第二段階回帰自身の残差`y - X̂β̂`ではない）。
+    fn residuals(&self) -> &Mat<f64> {
+        &self.residuals
+    }
+
+    /// 標準誤差 (k, 1)。
+    fn std_errors(&self) -> &Mat<f64> {
+        &self.std_errors
+    }
+
+    /// `cov_type`に応じた係数の分散共分散行列 (k, k)。
+    fn cov_params(&self) -> &Mat<f64> {
+        &self.cov_params
+    }
+
+    /// t統計量 (k, 1)。
+    fn test_stats(&self) -> &Mat<f64> {
+        &self.test_stats
+    }
+
+    /// `test_stats`の従う分布（t分布、自由度は`df_inference`。`cov_type=Cluster`のときだけ
+    /// `df_resid`ではなく`G-1`になる）。
+    fn stat_dist(&self) -> inference::StatDist {
+        inference::StatDist::T {
+            df: self.df_inference,
+        }
+    }
+
+    /// 両側p値 (k, 1)。
+    fn p_values(&self) -> &Mat<f64> {
+        &self.p_values
+    }
+
+    /// 信頼区間の下限 (k, 1)。
+    fn conf_lower(&self) -> &Mat<f64> {
+        &self.conf_lower
+    }
+
+    /// 信頼区間の上限 (k, 1)。
+    fn conf_upper(&self) -> &Mat<f64> {
+        &self.conf_upper
+    }
+
+    /// 残差の自由度 n - k。
+    fn df_resid(&self) -> usize {
+        self.df_resid
+    }
+
+    /// モデルの自由度（定数項を除く傾き係数の数）。
+    fn df_model(&self) -> usize {
+        self.df_model
+    }
+
+    /// 決定係数。
+    fn r_squared(&self) -> f64 {
+        self.r_squared
+    }
+
+    /// 自由度調整済み決定係数。
+    fn adj_r_squared(&self) -> f64 {
+        self.adj_r_squared
+    }
+
+    /// F統計量。
+    fn wald_statistic(&self) -> f64 {
+        self.wald_statistic
+    }
+
+    /// F統計量のp値。
+    fn wald_p_value(&self) -> f64 {
+        self.wald_p_value
     }
 }
 

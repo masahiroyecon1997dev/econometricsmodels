@@ -29,6 +29,8 @@
 
 `IVResult`の非公開フィールド`first_stage: Vec<(String, OLSResult)>`から返す。`estimator`（2sls/gmm）に依存しない表現にするため、`LogitResult`/`ProbitResult`のように推定量そのものは保持しない。`fit`が第一段階の`OlsEstimator`（設計行列を持つ）を`linear::ols::ols_estimator_to_result`で`OLSResult`へ変換して保持し（設計行列を手放せる）、`first_stage()`は`OLSResult::clone_ref`で複製して返す。pickleでは各`OLSResult`がそのまま状態に入る。第一段階回帰はそれ自体が正しい（ナイーブな）通常のOLSであり（`engine::iv::two_sls`のモジュールdocコメント参照）、OLSとの共有を避ける理由が無いため`ols_estimator_to_result`を再利用する。返る各`OLSResults.f_statistic`/`f_p_value`は通常のOLS F検定（`x_exog`の寄与を含む）であり、弱操作変数診断の部分F統計量（`weak_instrument_f_statistics`）とは別物（`IVResult`のdocコメント参照）。
 
+`IVResult`の組み立ては`fit.rs`の`build_result`が一度だけ行う。2SLSとGMMで同じ値の読み出しは`engine::iv::common::IvFitted`（両推定量が実装するtrait）から、推定量ごとに違うフィールド（収束・反復、GMM専用の設定、Wald検定の分布、過剰識別検定、Wu-Hausman検定）は`EstimatorSpecific`（`Default`なしで全フィールド必須）から詰める。`IVResult`にフィールドを足すときは、`IvFitted`にメソッドを足す（共通）か`EstimatorSpecific`に足す（推定量ごと）かを選ぶ。どちらもコンパイラが両分岐の書き漏れを検出する。
+
 `first_stage`/`weak_instrument_f_statistics`は`estimator`によらず`engine::iv::common::compute_first_stage`（2SLS/GMM間で共有）から構築する。**`estimator="2sls"`では第一段階回帰が二重計算になる**（`fit`が明示的に1回、`TwoSlsEstimator::fit`が内部でもう1回）。`OlsEstimator`が`Clone`未実装のため`TwoSlsEstimator::first_stage_estimators()`の借用結果を`IVResult`へ所有権ごと移せず、OLS自体が軽量という前提で許容した設計判断。恒久対応する場合は`TwoSlsEstimator`に第一段階結果を外部注入する`fit`のバリエーションを追加する案がある（着手前にユーザー確認すること）。
 
 ## `fit`の事前チェックの順序

@@ -3,11 +3,12 @@
 use crate::linear::ols::{OLSResult, ols_estimator_to_result};
 use crate::shared::column_extraction::SelectedData;
 use crate::shared::mat_conversion::{mat_to_rows, mat_to_vec};
-use engine::iv::common::{compute_first_stage, validate_iv_fit_inputs};
+use engine::iv::common::{IvFitted, compute_first_stage, validate_iv_fit_inputs};
 use engine::iv::gmm::GmmEstimator;
 use engine::iv::two_sls::TwoSlsEstimator;
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
+use std::collections::HashMap;
 
 use super::error::iv_error_to_pyerr;
 use super::input::build_iv_input;
@@ -100,6 +101,14 @@ fn fit_frame(
         })
         .collect();
 
+    let shared = SharedFit {
+        cov_type: cov_type_lower,
+        estimator: plan.estimator.name().to_string(),
+        weak_instrument_f_statistics: weak_instrument_f_statistics.into_iter().collect(),
+        weak_instrument_f_df,
+        first_stage,
+    };
+
     if let Some(gmm) = plan.gmm {
         let estimator = GmmEstimator::fit(
             input,
@@ -110,37 +119,14 @@ fn fit_frame(
         )
         .map_err(iv_error_to_pyerr)?;
 
-        return Ok(IVResult {
-            params: mat_to_vec(estimator.params()),
-            std_errors: mat_to_vec(estimator.std_errors()),
-            cov_params: mat_to_rows(estimator.cov_params()),
-            test_stats: mat_to_vec(estimator.test_stats()),
-            stat_dist: estimator.stat_dist().name().to_string(),
-            stat_df: estimator.stat_dist().df().map(|df| df as i64),
-            p_values: mat_to_vec(estimator.p_values()),
-            conf_lower: mat_to_vec(estimator.conf_lower()),
-            conf_upper: mat_to_vec(estimator.conf_upper()),
-            param_names: estimator.param_names().to_vec(),
-            residuals: mat_to_vec(estimator.residuals()),
-            dep_var_name: estimator.dep_var_name().to_string(),
-            n_obs: estimator.nobs(),
-            df_resid: estimator.df_resid(),
-            df_model: estimator.df_model(),
+        let specific = EstimatorSpecific {
             converged: estimator.converged(),
             n_iter: estimator.n_iter(),
-            cov_type: cov_type_lower,
-            hac_lags_used: estimator.hac_lags_used().map(|lags| lags as i64),
-            estimator: plan.estimator.name().to_string(),
             gmm_weight_type: gmm.weight_type_name,
             gmm_type: Some(gmm.gmm_type_name),
-            wald_statistic: estimator.wald_statistic(),
-            wald_p_value: estimator.wald_p_value(),
-            wald_dist: "chi2".to_string(),
+            wald_dist: "chi2",
             wald_df_num: estimator.wald_df(),
             wald_df_denom: None,
-            r_squared: estimator.r_squared(),
-            adj_r_squared: estimator.adj_r_squared(),
-            weak_instrument_f_statistics: weak_instrument_f_statistics.into_iter().collect(),
             overid_statistic: estimator.hansen_j_statistic(),
             overid_p_value: estimator.hansen_j_p_value(),
             overid_df: estimator.hansen_j_df(),
@@ -148,16 +134,76 @@ fn fit_frame(
             wu_hausman_p_value: None,
             wu_hausman_df_num: None,
             wu_hausman_df_denom: None,
-            weak_instrument_f_df_num: weak_instrument_f_df.map(|(num, _)| num),
-            weak_instrument_f_df_denom: weak_instrument_f_df.map(|(_, denom)| denom),
-            first_stage,
-        });
+        };
+        return Ok(build_result(&estimator, shared, specific));
     }
 
     let estimator = TwoSlsEstimator::fit(input, cov_type, options.confidence_level)
         .map_err(iv_error_to_pyerr)?;
 
-    Ok(IVResult {
+    let specific = EstimatorSpecific {
+        // 2SLSは閉形式・非反復のため常に`converged=true`・`n_iter=1`
+        // （`IVResult.converged`のdocコメント参照）。
+        converged: true,
+        n_iter: 1,
+        // `gmm_weight_type`/`gmm_type`はGMM専用の概念のため`estimator="2sls"`では常に`None`
+        // （`IVResult.gmm_weight_type`のdocコメント参照）。
+        gmm_weight_type: None,
+        gmm_type: None,
+        wald_dist: "f",
+        wald_df_num: estimator.wald_df().map(|(num, _)| num),
+        wald_df_denom: estimator.wald_df().map(|(_, denom)| denom),
+        overid_statistic: estimator.sargan_statistic(),
+        overid_p_value: estimator.sargan_p_value(),
+        overid_df: estimator.sargan_df(),
+        wu_hausman_statistic: estimator.wu_hausman_statistic(),
+        wu_hausman_p_value: estimator.wu_hausman_p_value(),
+        wu_hausman_df_num: estimator.wu_hausman_df().map(|(num, _)| num),
+        wu_hausman_df_denom: estimator.wu_hausman_df().map(|(_, denom)| denom),
+    };
+    Ok(build_result(&estimator, shared, specific))
+}
+
+/// `estimator`によらず同じ手順で決まる`IVResult`のフィールドのうち、推定量の読み出し口
+/// （[`IvFitted`]）から読まないもの。
+struct SharedFit {
+    cov_type: String,
+    estimator: String,
+    weak_instrument_f_statistics: HashMap<String, f64>,
+    weak_instrument_f_df: Option<(usize, usize)>,
+    first_stage: Vec<(String, OLSResult)>,
+}
+
+/// `IVResult`のフィールドのうち、`estimator`によって値の出どころや意味が変わるもの
+/// （収束・反復、GMM専用の設定、Wald検定の分布、過剰識別検定、Wu-Hausman検定）。
+///
+/// `Default`は実装しない。`2sls`と`gmm`の両方の分岐で全フィールドを明示することで、
+/// 新しいフィールドを足したときに片方の分岐だけ書き忘れるとビルドエラーになる。
+struct EstimatorSpecific {
+    converged: bool,
+    n_iter: i64,
+    gmm_weight_type: Option<String>,
+    gmm_type: Option<String>,
+    wald_dist: &'static str,
+    wald_df_num: Option<usize>,
+    wald_df_denom: Option<usize>,
+    overid_statistic: Option<f64>,
+    overid_p_value: Option<f64>,
+    overid_df: Option<usize>,
+    wu_hausman_statistic: Option<f64>,
+    wu_hausman_p_value: Option<f64>,
+    wu_hausman_df_num: Option<usize>,
+    wu_hausman_df_denom: Option<usize>,
+}
+
+/// `IVResult`を組み立てる。推定量の読み出し口（[`IvFitted`]）から読める共通のフィールドは
+/// ここで一度だけ詰め、2SLSとGMMで食い違わないようにする。
+fn build_result<E: IvFitted>(
+    estimator: &E,
+    shared: SharedFit,
+    specific: EstimatorSpecific,
+) -> IVResult {
+    IVResult {
         params: mat_to_vec(estimator.params()),
         std_errors: mat_to_vec(estimator.std_errors()),
         cov_params: mat_to_rows(estimator.cov_params()),
@@ -173,34 +219,30 @@ fn fit_frame(
         n_obs: estimator.nobs(),
         df_resid: estimator.df_resid(),
         df_model: estimator.df_model(),
-        // 2SLSは閉形式・非反復のため常に`converged=true`・`n_iter=1`
-        // （`IVResult.converged`のdocコメント参照）。
-        converged: true,
-        n_iter: 1,
-        cov_type: cov_type_lower,
+        converged: specific.converged,
+        n_iter: specific.n_iter,
+        cov_type: shared.cov_type,
         hac_lags_used: estimator.hac_lags_used().map(|lags| lags as i64),
-        estimator: plan.estimator.name().to_string(),
-        // `gmm_weight_type`はGMM専用の概念のため`estimator="2sls"`では常に`None`
-        // （`IVResult.gmm_weight_type`のdocコメント参照）。
-        gmm_weight_type: None,
-        gmm_type: None,
+        estimator: shared.estimator,
+        gmm_weight_type: specific.gmm_weight_type,
+        gmm_type: specific.gmm_type,
         wald_statistic: estimator.wald_statistic(),
         wald_p_value: estimator.wald_p_value(),
-        wald_dist: "f".to_string(),
-        wald_df_num: estimator.wald_df().map(|(num, _)| num),
-        wald_df_denom: estimator.wald_df().map(|(_, denom)| denom),
+        wald_dist: specific.wald_dist.to_string(),
+        wald_df_num: specific.wald_df_num,
+        wald_df_denom: specific.wald_df_denom,
         r_squared: estimator.r_squared(),
         adj_r_squared: estimator.adj_r_squared(),
-        weak_instrument_f_statistics: weak_instrument_f_statistics.into_iter().collect(),
-        overid_statistic: estimator.sargan_statistic(),
-        overid_p_value: estimator.sargan_p_value(),
-        overid_df: estimator.sargan_df(),
-        wu_hausman_statistic: estimator.wu_hausman_statistic(),
-        wu_hausman_p_value: estimator.wu_hausman_p_value(),
-        wu_hausman_df_num: estimator.wu_hausman_df().map(|(num, _)| num),
-        wu_hausman_df_denom: estimator.wu_hausman_df().map(|(_, denom)| denom),
-        weak_instrument_f_df_num: weak_instrument_f_df.map(|(num, _)| num),
-        weak_instrument_f_df_denom: weak_instrument_f_df.map(|(_, denom)| denom),
-        first_stage,
-    })
+        weak_instrument_f_statistics: shared.weak_instrument_f_statistics,
+        overid_statistic: specific.overid_statistic,
+        overid_p_value: specific.overid_p_value,
+        overid_df: specific.overid_df,
+        wu_hausman_statistic: specific.wu_hausman_statistic,
+        wu_hausman_p_value: specific.wu_hausman_p_value,
+        wu_hausman_df_num: specific.wu_hausman_df_num,
+        wu_hausman_df_denom: specific.wu_hausman_df_denom,
+        weak_instrument_f_df_num: shared.weak_instrument_f_df.map(|(num, _)| num),
+        weak_instrument_f_df_denom: shared.weak_instrument_f_df.map(|(_, denom)| denom),
+        first_stage: shared.first_stage,
+    }
 }

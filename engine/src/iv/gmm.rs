@@ -204,7 +204,9 @@ use faer::prelude::Solve;
 use faer::{Accum, Mat, Par, Side};
 use statrs::distribution::{ChiSquared, ContinuousCDF, Normal};
 
-use crate::iv::common::{IvError, IvInput, hcat, mat_column_to_vec, validate_iv_fit_inputs};
+use crate::iv::common::{
+    IvError, IvFitted, IvInput, hcat, mat_column_to_vec, validate_iv_fit_inputs,
+};
 use crate::linear::ols::CovType;
 use crate::shared::covariance::{
     cluster_correction, cluster_meat, resolve_hac_lags, time_ordering,
@@ -529,26 +531,6 @@ impl GmmEstimator {
         })
     }
 
-    /// GMMの点推定値（`param_names()`と対応する順序、`const`を含む）。
-    pub fn params(&self) -> &Mat<f64> {
-        &self.params
-    }
-
-    /// 係数名（`x_exog_names ++ x_endog_names`、`x_exog`に定数項を含む場合は先頭が`"const"`）。
-    pub fn param_names(&self) -> &[String] {
-        &self.param_names
-    }
-
-    /// 被説明変数名。
-    pub fn dep_var_name(&self) -> &str {
-        &self.dep_var_name
-    }
-
-    /// 最終推定値に基づく残差 `e = y - Xβ̂`（n, 1）。
-    pub fn residuals(&self) -> &Mat<f64> {
-        &self.residuals
-    }
-
     /// 指定された推定方式（重み行列の種別・反復設定を含む）。
     pub fn gmm_type(&self) -> &GmmType {
         &self.gmm_type
@@ -573,16 +555,6 @@ impl GmmEstimator {
         self.converged
     }
 
-    /// 観測数 n。
-    pub fn nobs(&self) -> usize {
-        self.nobs
-    }
-
-    /// 係数の数 k（定数項を含む、`x_exog`と`x_endog`の合計）。
-    pub fn k(&self) -> usize {
-        self.k
-    }
-
     /// Hansen J過剰識別検定の統計量。丁度識別（自由度0）の場合は`None`
     /// （`docs/spec/iv-spec.md`3.5節、`fit()`のdocコメント参照）。
     pub fn hansen_j_statistic(&self) -> Option<f64> {
@@ -599,87 +571,119 @@ impl GmmEstimator {
         self.hansen_j_p_value
     }
 
+    /// `wald_statistic()`の自由度（χ²）。傾き係数が無くNaNのときは`None`。分母の自由度は無い。
+    pub fn wald_df(&self) -> Option<usize> {
+        (self.df_model > 0).then_some(self.df_model)
+    }
+}
+
+impl IvFitted for GmmEstimator {
+    /// GMMの点推定値（`param_names()`と対応する順序、`const`を含む）。
+    fn params(&self) -> &Mat<f64> {
+        &self.params
+    }
+
+    /// 係数名（`x_exog_names ++ x_endog_names`、`x_exog`に定数項を含む場合は先頭が`"const"`）。
+    fn param_names(&self) -> &[String] {
+        &self.param_names
+    }
+
+    /// 被説明変数名。
+    fn dep_var_name(&self) -> &str {
+        &self.dep_var_name
+    }
+
+    /// 観測数 n。
+    fn nobs(&self) -> usize {
+        self.nobs
+    }
+
+    /// 係数の数 k（定数項を含む、`x_exog`と`x_endog`の合計）。
+    fn k(&self) -> usize {
+        self.k
+    }
+
     /// 使用した標準誤差の種別（呼び出し元が指定した`cov_type`、`weight_type`とは独立）。
-    pub fn cov_type(&self) -> &CovType {
+    fn cov_type(&self) -> &CovType {
         &self.cov_type
     }
 
     /// 実際に使われたHACラグ数。`cov_type=Hac`または`weight_type=Hac`のいずれかが該当する
     /// ときに`Some`（明示指定値、または未指定時に経験則で自動計算した値）、どちらも
     /// 該当しなければ`None`。両方がHacで`lags`が異なる場合は`cov_type`側の値。
-    pub fn hac_lags_used(&self) -> Option<usize> {
+    fn hac_lags_used(&self) -> Option<usize> {
         self.hac_lags_used
     }
 
+    /// 最終推定値に基づく残差 `e = y - Xβ̂`（n, 1）。
+    fn residuals(&self) -> &Mat<f64> {
+        &self.residuals
+    }
+
     /// 標準誤差 (k, 1)。
-    pub fn std_errors(&self) -> &Mat<f64> {
+    fn std_errors(&self) -> &Mat<f64> {
         &self.std_errors
     }
 
     /// `cov_type`に応じた係数の分散共分散行列 (k, k)。
-    pub fn cov_params(&self) -> &Mat<f64> {
+    fn cov_params(&self) -> &Mat<f64> {
         &self.cov_params
     }
 
     /// z統計量 (k, 1)。
-    pub fn test_stats(&self) -> &Mat<f64> {
+    fn test_stats(&self) -> &Mat<f64> {
         &self.test_stats
     }
 
     /// `test_stats`の従う分布（標準正規分布、自由度なし）。
-    pub fn stat_dist(&self) -> inference::StatDist {
+    fn stat_dist(&self) -> inference::StatDist {
         inference::StatDist::Normal
     }
 
     /// 両側p値 (k, 1)。
-    pub fn p_values(&self) -> &Mat<f64> {
+    fn p_values(&self) -> &Mat<f64> {
         &self.p_values
     }
 
     /// 信頼区間の下限 (k, 1)。
-    pub fn conf_lower(&self) -> &Mat<f64> {
+    fn conf_lower(&self) -> &Mat<f64> {
         &self.conf_lower
     }
 
     /// 信頼区間の上限 (k, 1)。
-    pub fn conf_upper(&self) -> &Mat<f64> {
+    fn conf_upper(&self) -> &Mat<f64> {
         &self.conf_upper
     }
 
     /// 残差の自由度 n - k。
-    pub fn df_resid(&self) -> usize {
+    fn df_resid(&self) -> usize {
         self.df_resid
     }
 
     /// モデルの自由度（定数項を除く傾き係数の数）。
-    pub fn df_model(&self) -> usize {
+    fn df_model(&self) -> usize {
         self.df_model
     }
 
     /// 決定係数。
-    pub fn r_squared(&self) -> f64 {
+    fn r_squared(&self) -> f64 {
         self.r_squared
     }
 
     /// 自由度調整済み決定係数。
-    pub fn adj_r_squared(&self) -> f64 {
+    fn adj_r_squared(&self) -> f64 {
         self.adj_r_squared
     }
 
     /// F統計量。常にロバストWald検定（χ²、`df_model`で割らない生の二次形式、
     /// モジュール冒頭のdocコメント参照）。
-    pub fn wald_statistic(&self) -> f64 {
+    fn wald_statistic(&self) -> f64 {
         self.wald_statistic
     }
 
     /// F統計量のp値。
-    pub fn wald_p_value(&self) -> f64 {
+    fn wald_p_value(&self) -> f64 {
         self.wald_p_value
-    }
-
-    /// `wald_statistic()`の自由度（χ²）。傾き係数が無くNaNのときは`None`。分母の自由度は無い。
-    pub fn wald_df(&self) -> Option<usize> {
-        (self.df_model > 0).then_some(self.df_model)
     }
 }
 

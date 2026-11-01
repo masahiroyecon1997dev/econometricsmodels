@@ -19,14 +19,14 @@ use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 
 use super::common::{
-    check_cov_options, least_squares_error_to_pyerr, parse_cov_kind, resolve_cov_type,
+    check_cov_options, least_squares_error_to_pyerr, parse_cov_kind, predict_out_of_sample,
+    resolve_cov_type,
 };
 use crate::shared::augment::append_predicted_column;
 use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
     SelectedData, extract_column_list, extract_f64_column, extract_f64_columns,
-    extract_model_x_columns, extract_time_order_ranks, select_columns, select_model_x_columns,
-    x_column_names,
+    extract_model_x_columns, extract_time_order_ranks, select_columns, x_column_names,
 };
 use crate::shared::errors::{guard, unknown_option_value, user_error};
 use crate::shared::mat_conversion::{mat_to_rows, mat_to_vec};
@@ -541,8 +541,7 @@ impl OLSResult {
 }
 
 // `#[pymethods]`ブロックの外に置く非公開実装（pyo3は`#[pymethods]`内の全メソッドを
-// Python公開シグネチャとして扱おうとするため、`&DataFrame`のような`FromPyObject`
-// 未実装の型を引数に取るヘルパーはこちらに置く必要がある）。
+// Python公開シグネチャとして扱おうとするため、Pythonへ公開しないヘルパーはこちらに置く）。
 impl OLSResult {
     /// 元のデータ（`fit()`に渡された`polars.DataFrame`）。保持していない結果（`IVResult.first_stage()`）は
     /// `TRAINING_DATA_NOT_RETAINED`。
@@ -556,24 +555,6 @@ impl OLSResult {
                     vec![("method", ParamValue::from(method))],
                 )
             })
-    }
-
-    /// `predict()`/`augment()`のSome分岐で共有する、`df`に対するout-of-sample予測
-    /// （`x`列の抽出→`predict_new_data`呼び出し）。
-    fn predict_for(&self, df: &DataFrame) -> PyResult<Vec<f64>> {
-        let has_intercept = self.has_intercept;
-        let x_columns = extract_model_x_columns(
-            df,
-            &self.param_names,
-            has_intercept,
-            ColumnSource::new("x", "new_data"),
-        )?;
-
-        Ok(engine::linear::ols::predict_new_data(
-            &self.params,
-            has_intercept,
-            &x_columns,
-        ))
     }
 }
 
@@ -603,13 +584,12 @@ impl OLSResult {
                 return Ok(self.fitted_values.clone());
             };
 
-            let selected = select_model_x_columns(
+            predict_out_of_sample(
                 new_data,
-                "new_data",
                 &self.param_names,
+                &self.params,
                 self.has_intercept,
-            )?;
-            self.predict_for(&selected.frame)
+            )
         })
     }
 
@@ -632,13 +612,12 @@ impl OLSResult {
         guard(|| {
             let (source, predicted) = match new_data {
                 Some(new_data) => {
-                    let selected = select_model_x_columns(
+                    let predicted = predict_out_of_sample(
                         new_data,
-                        "new_data",
                         &self.param_names,
+                        &self.params,
                         self.has_intercept,
                     )?;
-                    let predicted = self.predict_for(&selected.frame)?;
                     (new_data.clone(), predicted)
                 }
                 None => {

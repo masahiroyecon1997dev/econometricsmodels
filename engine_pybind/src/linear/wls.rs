@@ -21,14 +21,12 @@ use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 
 use super::common::{
-    check_cov_options, least_squares_error_to_pyerr, parse_cov_kind, resolve_cov_type,
+    check_cov_options, least_squares_error_to_pyerr, parse_cov_kind, predict_out_of_sample,
+    resolve_cov_type,
 };
 use crate::shared::augment::append_predicted_column;
 use crate::shared::column_error::ColumnSource;
-use crate::shared::column_extraction::{
-    SelectedData, extract_f64_column, extract_f64_columns, extract_model_x_columns,
-    select_model_x_columns,
-};
+use crate::shared::column_extraction::{SelectedData, extract_f64_column, extract_f64_columns};
 use crate::shared::mat_conversion::{mat_to_rows, mat_to_vec};
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
@@ -325,27 +323,6 @@ crate::shared::pickle::impl_pickle_state!(WLSResult {
     source_data,
 });
 
-// `#[pymethods]`ブロックの外に置く非公開実装（`OLSResult`と同じ理由）。
-impl WLSResult {
-    /// `predict()`/`augment()`のSome分岐で共有する、`df`に対するout-of-sample予測
-    /// （`x`列の抽出→`predict_new_data`呼び出し、`OLSResult`と同じ設計）。
-    fn predict_for(&self, df: &DataFrame) -> PyResult<Vec<f64>> {
-        let has_intercept = self.has_intercept;
-        let x_columns = extract_model_x_columns(
-            df,
-            &self.param_names,
-            has_intercept,
-            ColumnSource::new("x", "new_data"),
-        )?;
-
-        Ok(engine::linear::ols::predict_new_data(
-            &self.params,
-            has_intercept,
-            &x_columns,
-        ))
-    }
-}
-
 #[pymethods]
 impl WLSResult {
     fn __reduce__<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, pyo3::types::PyTuple>> {
@@ -376,13 +353,12 @@ impl WLSResult {
                 return Ok(self.fitted_values.clone());
             };
 
-            let selected = select_model_x_columns(
+            predict_out_of_sample(
                 new_data,
-                "new_data",
                 &self.param_names,
+                &self.params,
                 self.has_intercept,
-            )?;
-            self.predict_for(&selected.frame)
+            )
         })
     }
 
@@ -402,13 +378,12 @@ impl WLSResult {
         guard(|| {
             let (source, predicted) = match new_data {
                 Some(new_data) => {
-                    let selected = select_model_x_columns(
+                    let predicted = predict_out_of_sample(
                         new_data,
-                        "new_data",
                         &self.param_names,
+                        &self.params,
                         self.has_intercept,
                     )?;
-                    let predicted = self.predict_for(&selected.frame)?;
                     (new_data.clone(), predicted)
                 }
                 None => (

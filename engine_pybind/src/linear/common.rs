@@ -16,10 +16,13 @@ use engine::linear::common::LeastSquaresError;
 use engine::linear::ols::CovType as EngineCovType;
 use engine::shared::error_catalog::{ErrorCode, ParamValue};
 use polars::prelude::DataFrame;
-use pyo3::{PyErr, PyResult};
+use pyo3::prelude::*;
 
 use crate::shared::column_error::ColumnSource;
-use crate::shared::column_extraction::{extract_optional_cluster_groups, extract_time_order_ranks};
+use crate::shared::column_extraction::{
+    extract_model_x_columns, extract_optional_cluster_groups, extract_time_order_ranks,
+    select_model_x_columns,
+};
 use crate::shared::errors::{to_pyerr, unknown_option_value, user_error};
 use crate::shared::validation::reject_unused_option;
 
@@ -189,6 +192,37 @@ pub(crate) fn resolve_cov_type(
             )?,
         },
     })
+}
+
+/// `OLSResult`/`WLSResult`の`predict()`/`augment()`が`new_data`を受け取ったときに共有する、
+/// out-of-sample予測（`x`列だけの取り込み→列の抽出→`predict_new_data`）。
+///
+/// 戻り値は予測値だけで、`select_model_x_columns`が返す`SelectedData`の`source`は使わない。
+/// `augment()`が予測値を足す先は取り込み前の`new_data`自体（推定に使わない列を出力に残すため）で、
+/// 呼び出し側が持っている。WLSでも重みは予測に関与しない（`x_i'β̂`）。
+///
+/// # Errors
+/// `new_data`が`polars.DataFrame`でない場合は`TypeError`。必要な`x`列が無い、数値にキャスト
+/// できない、欠損値・NaN・無限大を含む場合は`ValidationError`（`fit()`と同じ列抽出）。
+pub(crate) fn predict_out_of_sample(
+    new_data: &Bound<'_, PyAny>,
+    param_names: &[String],
+    params: &[f64],
+    has_intercept: bool,
+) -> PyResult<Vec<f64>> {
+    let selected = select_model_x_columns(new_data, "new_data", param_names, has_intercept)?;
+    let x_columns = extract_model_x_columns(
+        &selected.frame,
+        param_names,
+        has_intercept,
+        ColumnSource::new("x", "new_data"),
+    )?;
+
+    Ok(engine::linear::ols::predict_new_data(
+        params,
+        has_intercept,
+        &x_columns,
+    ))
 }
 
 #[cfg(test)]

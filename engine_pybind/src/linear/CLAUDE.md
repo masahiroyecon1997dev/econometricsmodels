@@ -15,7 +15,7 @@
 
 ## `white_test()`（事後診断）の配線
 
-`OLSResult`は`OlsEstimator`を保持しないため、`white_test()`は`x_column_names` → `extract_f64_columns`（`predict_for`は両者を
+`OLSResult`は`OlsEstimator`を保持しないため、`white_test()`は`x_column_names` → `extract_f64_columns`（`common.rs`の`predict_out_of_sample`は両者を
 束ねた`extract_model_x_columns`を使うが、`white_test()`は列名自体も`engine`に渡すため
 分けて呼ぶ）で元のデータ（`source_data`）と`param_names`から`x`の列だけを`select_columns`で取り込み、保持している`residuals`と
 合わせて`engine::linear::diagnostics::white_test`に渡す。`source_data`が`None`（`IVResult.first_stage()`
@@ -47,7 +47,7 @@ engineが計算し、`statistic`引数（`StatisticVersion`、大文字小文字
 存在しない列は選ばず、列を引く側（`extract_f64_column`等）が`COLUMN_NOT_FOUND`にする。取り込めないdtypeの列は、`Null`型の目印の列
 （名前に（dtype、元の列名）を符号化）に置き換え、列を引く側（`missing_column_error`）が`COLUMN_UNSUPPORTED_DTYPE`にする。
 こうして検査の順序は、列を引く位置で決まる（`tests/cross_method/test_validation_order.py`）。
-`LogitResult`等の`predict_for`は、`new_data`から`x`列だけを`select_model_x_columns`で取り込む。
+`OLSResult`/`WLSResult`の`predict()`/`augment()`の`new_data`は`common.rs`の`predict_out_of_sample`が、`LogitResult`等の`predict_for`は各自が、`new_data`から`x`列だけを`select_model_x_columns`で取り込む。`predict_out_of_sample`は予測値だけを返し、`SelectedData.source`は使わない（`augment()`が予測値を足す先は取り込み前の`new_data`自体で、呼び出し側が持つため）。
 
 ## DataFrameを構築して返す（`augment()`）
 

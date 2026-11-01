@@ -168,13 +168,8 @@ pub fn select_model_x_columns(
     param_name: &str,
     param_names: &[String],
     has_intercept: bool,
-    exclude_trailing: usize,
 ) -> PyResult<SelectedData> {
-    select_columns(
-        ob,
-        param_name,
-        x_column_names(param_names, has_intercept, exclude_trailing),
-    )
+    select_columns(ob, param_name, x_column_names(param_names, has_intercept))
 }
 
 /// 列`name`が`df`に無いときのエラー。取り込めないdtypeのために目印の列が入っていれば
@@ -532,20 +527,13 @@ fn rank_distinct_values<T: PartialOrd>(values: &[T]) -> Result<Vec<f64>, (usize,
     Ok(ranks)
 }
 
-/// `param_names`から`x`列名部分を取り出す。`has_intercept`時は先頭の`"const"`、
-/// `exclude_trailing`個は末尾の要素を除く（末尾に合成パラメータ名を持つ手法向け。
-/// 現状の全呼び出しは`0`で、Tobitも`param_names`に`"sigma"`を含まないため`0`）。
+/// `param_names`から`x`列名部分を取り出す。`has_intercept`時は先頭の`"const"`を除く。
+/// Tobitも、`"sigma"`を含まない`k`長の係数名（`fitted.input().param_names()`）を渡す。
 ///
 /// OLS/WLS/Logit/Probit/Tobitの`predict()`/`augment()`が`param_names`から`x`列名
 /// だけを取り出す際に共通して使う規約（切片項の自動追加）。
-pub fn x_column_names(
-    param_names: &[String],
-    has_intercept: bool,
-    exclude_trailing: usize,
-) -> &[String] {
-    let start = usize::from(has_intercept);
-    let end = param_names.len() - exclude_trailing;
-    &param_names[start..end]
+pub fn x_column_names(param_names: &[String], has_intercept: bool) -> &[String] {
+    &param_names[usize::from(has_intercept)..]
 }
 
 /// `df`から`names`（複数の列名）を、`names`と同じ順序の`Vec<Vec<f64>>`としてまとめて
@@ -576,14 +564,9 @@ pub fn extract_model_x_columns(
     df: &DataFrame,
     param_names: &[String],
     has_intercept: bool,
-    exclude_trailing: usize,
     source: ColumnSource<'_>,
 ) -> PyResult<Vec<Vec<f64>>> {
-    extract_f64_columns(
-        df,
-        x_column_names(param_names, has_intercept, exclude_trailing),
-        source,
-    )
+    extract_f64_columns(df, x_column_names(param_names, has_intercept), source)
 }
 
 /// キー列（グループの同一性や時点を表す列）の使われ方。許可するdtypeが異なる。
@@ -1059,22 +1042,15 @@ mod tests {
     }
 
     #[test]
-    fn x_column_names_keeps_all_names_when_no_intercept_and_no_trailing_exclusion() {
+    fn x_column_names_keeps_all_names_when_no_intercept() {
         let param_names = names(&["x1", "x2"]);
-        assert_eq!(x_column_names(&param_names, false, 0), &param_names[..]);
+        assert_eq!(x_column_names(&param_names, false), &param_names[..]);
     }
 
     #[test]
     fn x_column_names_drops_leading_const_when_has_intercept() {
         let param_names = names(&["const", "x1", "x2"]);
-        assert_eq!(x_column_names(&param_names, true, 0), &param_names[1..]);
-    }
-
-    #[test]
-    fn x_column_names_drops_trailing_elements_for_exclude_trailing() {
-        // Tobitの`param_names`が末尾に`"sigma"`を持つケースを想定。
-        let param_names = names(&["const", "x1", "x2", "sigma"]);
-        assert_eq!(x_column_names(&param_names, true, 1), &param_names[1..3]);
+        assert_eq!(x_column_names(&param_names, true), &param_names[1..]);
     }
 
     #[test]
@@ -1922,10 +1898,10 @@ mod tests {
     }
 
     #[test]
-    fn extract_model_x_columns_skips_const_and_trailing_names() {
+    fn extract_model_x_columns_skips_const_name() {
         let df = df!("a" => [1.0, 2.0], "b" => [3.0, 4.0]).unwrap();
-        let param_names = ["const", "b", "a", "sigma"].map(String::from);
-        let columns = extract_model_x_columns(&df, &param_names, true, 1, SRC).unwrap();
+        let param_names = ["const", "b", "a"].map(String::from);
+        let columns = extract_model_x_columns(&df, &param_names, true, SRC).unwrap();
         assert_eq!(columns, vec![vec![3.0, 4.0], vec![1.0, 2.0]]);
     }
 
@@ -1933,7 +1909,7 @@ mod tests {
     fn extract_model_x_columns_keeps_all_names_without_intercept() {
         let df = df!("a" => [1.0, 2.0]).unwrap();
         let param_names = ["a".to_string()];
-        let columns = extract_model_x_columns(&df, &param_names, false, 0, SRC).unwrap();
+        let columns = extract_model_x_columns(&df, &param_names, false, SRC).unwrap();
         assert_eq!(columns, vec![vec![1.0, 2.0]]);
     }
 

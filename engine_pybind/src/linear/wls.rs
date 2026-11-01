@@ -335,7 +335,6 @@ impl WLSResult {
             df,
             &self.param_names,
             has_intercept,
-            0,
             ColumnSource::new("x", "new_data"),
         )?;
 
@@ -382,7 +381,6 @@ impl WLSResult {
                 "new_data",
                 &self.param_names,
                 self.has_intercept,
-                0,
             )?;
             self.predict_for(&selected.frame)
         })
@@ -409,7 +407,6 @@ impl WLSResult {
                         "new_data",
                         &self.param_names,
                         self.has_intercept,
-                        0,
                     )?;
                     let predicted = self.predict_for(&selected.frame)?;
                     (new_data.clone(), predicted)

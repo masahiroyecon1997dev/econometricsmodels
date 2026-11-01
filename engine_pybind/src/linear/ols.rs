@@ -566,7 +566,6 @@ impl OLSResult {
             df,
             &self.param_names,
             has_intercept,
-            0,
             ColumnSource::new("x", "new_data"),
         )?;
 
@@ -609,7 +608,6 @@ impl OLSResult {
                 "new_data",
                 &self.param_names,
                 self.has_intercept,
-                0,
             )?;
             self.predict_for(&selected.frame)
         })
@@ -639,7 +637,6 @@ impl OLSResult {
                         "new_data",
                         &self.param_names,
                         self.has_intercept,
-                        0,
                     )?;
                     let predicted = self.predict_for(&selected.frame)?;
                     (new_data.clone(), predicted)
@@ -681,7 +678,7 @@ impl OLSResult {
             let version = parse_statistic_version(statistic)?;
             let source = self.retained_source(py, "white_test")?;
 
-            let x_names = x_column_names(&self.param_names, self.has_intercept, 0);
+            let x_names = x_column_names(&self.param_names, self.has_intercept);
             let df = select_columns(&source, "data", x_names)?.frame;
             // 列の取り込み（GILが要る）の後は、Pythonオブジェクトに触れない。
             py.detach(|| {
@@ -749,7 +746,7 @@ impl OLSResult {
                     validate_no_duplicate_within_role("variables", names)?;
                     names
                 }
-                None => x_column_names(&self.param_names, self.has_intercept, 0),
+                None => x_column_names(&self.param_names, self.has_intercept),
             };
             let z_argument = if variables.is_some() {
                 "variables"
@@ -823,7 +820,7 @@ impl OLSResult {
             let source = self.retained_source(py, "breusch_godfrey_test")?;
 
             let mut needed: Vec<String> =
-                x_column_names(&self.param_names, self.has_intercept, 0).to_vec();
+                x_column_names(&self.param_names, self.has_intercept).to_vec();
             needed.push(time.clone());
             let df = select_columns(&source, "data", &needed)?.frame;
             // 列の取り込み（GILが要る）の後は、Pythonオブジェクトに触れない。
@@ -832,7 +829,6 @@ impl OLSResult {
                     &df,
                     &self.param_names,
                     self.has_intercept,
-                    0,
                     ColumnSource::new("x", "data"),
                 )?;
                 let time_order =

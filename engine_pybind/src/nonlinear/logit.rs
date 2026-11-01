@@ -342,7 +342,7 @@ impl crate::shared::pickle::PickleFieldFromSource for LogitFitted {
     fn to_py<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         use crate::shared::pickle::{PickleField, to_tuple};
         let input = self.input();
-        let x_names = x_column_names(input.param_names(), input.has_intercept(), 0).to_vec();
+        let x_names = x_column_names(input.param_names(), input.has_intercept()).to_vec();
         to_tuple(
             py,
             vec![
@@ -412,7 +412,6 @@ impl LogitResult {
             "new_data",
             self.fitted.input().param_names(),
             self.fitted.input().has_intercept(),
-            0,
         )
     }
 
@@ -424,7 +423,6 @@ impl LogitResult {
             df,
             self.fitted.input().param_names(),
             has_intercept,
-            0,
             ColumnSource::new("x", "new_data"),
         )?;
 

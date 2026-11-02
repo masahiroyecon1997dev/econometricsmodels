@@ -29,13 +29,19 @@ FEIV（固定効果IV）の入力型・API・実装方針の設計。実装途�
 
 ```text
 panel/common.rs   PanelIndex { entity: GroupCodes, time: Option<TimeKeys>, effect_names: EffectNames }
-panel/fe_iv.rs    FeIvInput { y, x_exog, x_endog, instruments (列スライス Vec<Vec<f64>>),
-                              x_exog_names, x_endog_names, instrument_names, dep_var_name, index: PanelIndex }
+                  PanelIndex::new(nobs, entity, time)  // 観測数との整合を検証して構築
+panel/fe_iv.rs    FeIvInput { y, dep_var_name, x_exog, x_endog, instruments (列スライス Vec<Vec<f64>>),
+                              各役割の列名, index: PanelIndex }
+                  RoleColumns<'a> { names: Vec<String>, columns: &'a [Vec<f64>] }
+                  FeIvInput::from_group_codes(y, dep_var_name, x_exog, x_endog, instruments, entity, time)
 ```
 
 - `PanelIndex`は`FeInput`・`ReInput`が持つ索引部分（entity・time・効果名）の切り出し。`FeIvInput`が最初に
   採用し、`FeInput`/`ReInput`は別Issue（FEIV実装後）で寄せる。`validate_panel_input`の次元検証は
-  `PanelIndex`構築と各列の長さ検証に分ける。
+  列の長さ検証（`validate_column_lengths`）と索引の検証（`validate_panel_index`、`PanelIndex::new`が使う）に分けた
+  （検査の順序は従来どおり）。
+- 構築の引数は、役割ごとの列と名前を`RoleColumns`にまとめて渡す（引数の数を抑える）。第一段階用の
+  `FeInput`への変換（`PanelIndex`の複製を伴う）は#371で足す。
 - 定数項は持たない（固定効果が吸収する）。`x_exog`は空でもよい。`x_endog`・`instruments`は非空
   （空は`ROLE_EMPTY`、`build_*`側で検証。IVと同じ）。
 - 列は`faer::Mat`ではなく列スライス（`FeInput`と同じ。`WithinTransform::apply`が列単位のため）。

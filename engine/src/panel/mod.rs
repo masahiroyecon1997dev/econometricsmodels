@@ -1,5 +1,6 @@
 pub mod common;
 pub mod fe;
+pub mod fe_iv;
 pub mod re;
 mod re_variance_method;
 
@@ -7,5 +8,6 @@ mod re_variance_method;
 // （`docs/spec/re-spec.md`3.7節）・θでパラメータ化した準偏差変換関数
 // （同3.2節）等を置く。
 // fe.rs: FEの入力データ型（`FeInput`）・within変換以降のロジック（実装済み）。
+// fe_iv.rs: FEIVの入力データ型（`FeIvInput`）。推定器は後続issueで追加する。
 // re.rs: REの入力データ型（`ReInput`）。`fit()`本体（θ計算・分散成分推定・
 // ハウスマン検定）は後続issueで追加する。

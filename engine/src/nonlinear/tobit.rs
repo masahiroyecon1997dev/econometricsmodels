@@ -12,7 +12,7 @@
 //!
 //! ## Logit/Probitとの設計上の違い: 検証の実施箇所
 //!
-//! Logit/Probitの`validate_binary_y`（`nonlinear/common.rs`）は`fit()`冒頭で呼ばれ、
+//! Logit/Probitの`validate_binary_y`（`nonlinear/common/validation.rs`）は`fit()`冒頭で呼ばれ、
 //! `from_columns`自体は次元検証のみを行う。Tobitは打ち切り境界（`lower`/`upper`）を
 //! `from_columns`の追加引数として受け取る都合上、境界自体の妥当性検証・`y`との整合性検証も
 //! `from_columns`内で完結させる。
@@ -65,7 +65,7 @@
 //! ## 数値安定化について
 //!
 //! 打ち切り観測の`λ(u)=φ(u)/Φ(u)`は、`Probit`の一般化残差と全く同じ`0.0/0.0`のNaN化
-//! リスクを持つ（`u`が極端に負のとき）。`nonlinear/common.rs`の`clamped_pdf_cdf`
+//! リスクを持つ（`u`が極端に負のとき）。`nonlinear/common/normal.rs`の`clamped_pdf_cdf`
 //! （Tobit実装時にProbit専用から共有ユーティリティへ移設）をそのまま再利用する。
 //!
 //! ## Newton法の初期値: OLS推定値を使う（ゼロベクトルではない、Logit/Probitとの違い）
@@ -96,7 +96,7 @@
 //! 手動追跡した結果、Hessianが不定符号になる領域で**生のNewtonステップが降下方向で
 //! さえない**（ステップをどれだけ小さくスケールしても`cost`が改善しない）ことを確認した）。
 //!
-//! `nonlinear/common.rs`の`FaerNewton`（Logit/Probitと共有）に、Levenberg-Marquardt型の
+//! `nonlinear/common/newton.rs`の`FaerNewton`（Logit/Probitと共有）に、Levenberg-Marquardt型の
 //! 減衰Newton法（`regularized_newton_step`）を追加して対応した。`H+λI`（`λ≥0`）で
 //! ステップを求め、`cost`が減少する候補が見つかるまで`λ`を段階的に増やす。
 //! Logit/Probitのように尤度が大域凹な問題では、収束点に向かう正常な軌道上は`λ=0`の

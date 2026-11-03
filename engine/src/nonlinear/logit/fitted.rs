@@ -84,7 +84,7 @@ impl LogitFitted {
     /// `∂g_j/∂θ_m = θ_j*s_m + [j==m]*w`という共通の式で書ける
     /// （`overall_w_and_s`/`at_point_w_and_s`が`(w,s)`を計算し、`w`・`s`の計算方法に
     /// 依らない残りの計算——ヤコビアン・デルタ法標準誤差・定数項の除外——は
-    /// `nonlinear/common.rs`の`marginal_effects_from_w_s`に共通化されている
+    /// `nonlinear/common/marginal_effects.rs`の`marginal_effects_from_w_s`に共通化されている
     /// （Probitでも同型の式になることを確認済み）。
     ///
     /// 変数`j`の分散は`Var(g_j) = jac_j · Σ · jac_jᵀ`（`jac_j`はヤコビアンの`j`行目、
@@ -157,8 +157,8 @@ impl LogitFitted {
     /// 分類の的中表（2×2、`table[actual][predicted]`のカウント。行=実測クラス、
     /// 列=予測クラス）。`predict()`が返す予測確率のみを`threshold`で二値化し、実測`y`は
     /// `threshold`に関わらず常に`0.5`で二値化する。数式・statsmodelsとの整合性の詳細は
-    /// `nonlinear/common.rs`の`pred_table`のdocコメント参照（リンク関数に依存しない計算
-    /// のため`common.rs`に共通化されている）。
+    /// `nonlinear/common/predict.rs`の`pred_table`のdocコメント参照（リンク関数に依存しない計算
+    /// のため`common/predict.rs`に共通化されている）。
     ///
     /// **新規データでの的中表（out-of-sample）は未対応**（`predict()`とは異なり
     /// スコープ外）。

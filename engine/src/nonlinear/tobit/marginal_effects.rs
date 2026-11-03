@@ -65,7 +65,7 @@ pub(super) fn at_point_target_w_and_s(
 }
 
 /// `marginal_effects_from_tobit_w_s`の呼び出しに必要な、フィット済みモデルの情報を束ねる
-/// （`clippy::too_many_arguments`を避けるため。`nonlinear/common.rs`の
+/// （`clippy::too_many_arguments`を避けるため。`nonlinear/common/marginal_effects.rs`の
 /// `FittedModelForMarginalEffects`と同じ理由・同じパターンだが、Tobitは`cov_params`が
 /// `(k+1)×(k+1)`（`σ`を含む）である点が異なるため独立の型として定義する）。
 pub(super) struct TobitMarginalEffectsInputs<'a> {
@@ -85,7 +85,7 @@ pub(super) struct TobitMarginalEffectsInputs<'a> {
 /// そのヤコビアン（`β`の`k`列+`σ`の1列、計`k+1`列）を組み立て、デルタ法による標準誤差・
 /// z値・p値・信頼区間を計算し、定数項を除いた`MarginalEffects`を返す。
 ///
-/// `nonlinear/common.rs`の`marginal_effects_from_w_s`と数式の骨格
+/// `nonlinear/common/marginal_effects.rs`の`marginal_effects_from_w_s`と数式の骨格
 /// （`∂dydx_j/∂θₘ=βⱼ*s_m+[j==m]*w`）は同じだが、パラメータ次元が`k`ではなく`k+1`
 /// （`σ`を含む）である点が異なるため独立実装とする。
 ///

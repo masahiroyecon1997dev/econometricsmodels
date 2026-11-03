@@ -15,7 +15,7 @@ fn population_std(values: impl Iterator<Item = f64> + Clone, n: usize) -> f64 {
 /// `TobitEstimator::fit`が最適化に使う、設計行列`x`・被説明変数`y`の標準化スケール。
 ///
 /// `x`側（列の平均・標準偏差、切片の逆変換、ヤコビアンの`x`部分）はLogit/Probitと共通の
-/// `nonlinear/common.rs`の`ColumnScale`（切片ありのとき平均も引く）に委ね、この構造体は
+/// `nonlinear/common/standardize.rs`の`ColumnScale`（切片ありのとき平均も引く）に委ね、この構造体は
 /// Tobit固有の`y`のスケーリング（`y_scale`）と`σ`（`logσ`）の扱いだけを持つ。
 ///
 /// **Tobit固有の処理は`y`のスケーリング**（Logit/Probitの`standardize_columns`は`y`を扱わない）:

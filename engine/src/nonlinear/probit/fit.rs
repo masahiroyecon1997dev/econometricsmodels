@@ -177,7 +177,7 @@ pub(super) fn fit_probit(
     let llf = log_likelihood(input.x(), input.y(), &params);
     // 切片のみモデルの対数尤度: `ȳ=n1/n`の閉じた形の解析解（`fit`の再帰呼び出しは
     // 経由しない）。この式はリンク関数（標準正規CDF）に依存しないため、
-    // `nonlinear/common.rs`の`log_likelihood_null`（Logitと共通）をそのまま使う。
+    // `nonlinear/common/goodness_of_fit.rs`の`log_likelihood_null`（Logitと共通）をそのまま使う。
     let llnull = log_likelihood_null(input.y());
     let gof = goodness_of_fit(llf, llnull, n, k)?;
     let GoodnessOfFit {
@@ -720,7 +720,7 @@ mod tests {
     }
 
     /// `cov_type=Opg`/`Hc0`/`Hc1`が返す`cov_params`を、`fit()`と同じ手順
-    /// （標準化→収束点でのscores/Hessian評価→`common.rs`の共通行列演算→
+    /// （標準化→収束点でのscores/Hessian評価→`common/cov.rs`の共通行列演算→
     /// `destandardize_cov_params`）をテスト側で独立に再現した値と突き合わせる。
     /// 多変量（k=3）データセットを使う理由: 切片のみモデルでは情報行列の等式
     /// （`Σᵢsᵢsᵢ' = -H`）が有限標本で厳密に成り立ってしまい、`classical`/`opg`/`hc0`
@@ -1484,7 +1484,7 @@ mod tests {
     /// `..._with_cluster`）を本1テストへ集約した。`x2`は`x1`から生成する。
     ///
     /// 旧5テストが検証していた「`fit()`の各`cov_type`分岐での`SingularHessian`/
-    /// `SingularOpgMatrix`の`?`伝播」経路のカバレッジは、`common.rs`の関数レベルテストと
+    /// `SingularOpgMatrix`の`?`伝播」経路のカバレッジは、`common/cov.rs`の関数レベルテストと
     /// `tobit/fit.rs`の`fit()`レベルテスト（`cov_params`計算は3手法で同一コード）が担う
     /// （`LogitEstimator`の対応するテストのdocコメント参照）。
     ///

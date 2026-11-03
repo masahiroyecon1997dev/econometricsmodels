@@ -4,7 +4,7 @@ use crate::nonlinear::common::{clamped_pdf_cdf, compensated_sum};
 use faer::Mat;
 use statrs::distribution::{Continuous, Normal};
 
-// `clamped_pdf_cdf`（`φ(u)`・`Φ(u)`評価前のクランプ）は`nonlinear/common.rs`へ移設した
+// `clamped_pdf_cdf`（`φ(u)`・`Φ(u)`評価前のクランプ）は`nonlinear/common/normal.rs`へ移設した
 // （Tobit実装時、打ち切り観測の尤度も同型の`λ=φ/Φ`を含むため共有。`probit.rs`のモジュールdoc
 // 「数値安定化について」参照）。
 

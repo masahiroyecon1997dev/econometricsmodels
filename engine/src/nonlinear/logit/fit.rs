@@ -568,7 +568,7 @@ mod tests {
     }
 
     /// `cov_type=Opg`/`Hc0`/`Hc1`が返す`cov_params`を、`fit()`と同じ手順
-    /// （標準化→収束点でのscores/Hessian評価→`common.rs`の共通行列演算→
+    /// （標準化→収束点でのscores/Hessian評価→`common/cov.rs`の共通行列演算→
     /// `destandardize_cov_params`）をテスト側で独立に再現した値と突き合わせる。
     /// 多変量（k=3）データセットを使う理由: 切片のみモデルでは情報行列の等式
     /// （`Σᵢsᵢsᵢ' = -H`）が有限標本で厳密に成り立ってしまい、`classical`/`opg`/`hc0`
@@ -1368,7 +1368,7 @@ mod tests {
     ///
     /// 旧5テストが検証していた「`fit()`の各`cov_type`分岐で`SingularHessian`/
     /// `SingularOpgMatrix`が`?`で伝播する」経路は、本入力では前段QRで先に弾かれるため
-    /// もう通らない。この伝播経路のカバレッジは (1) `common.rs`の関数レベルテスト
+    /// もう通らない。この伝播経路のカバレッジは (1) `common/cov.rs`の関数レベルテスト
     /// （`observed_information_cov_params_returns_singular_hessian_error_*` /
     /// `opg_cov_params_*` / `sandwich_cov_params_*` / `cluster_cov_params_*`）と、
     /// (2) 共有インフラを`fit()`レベルで踏む`tobit/fit.rs`の

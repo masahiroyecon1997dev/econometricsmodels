@@ -18,7 +18,7 @@ pub struct LogitInput {
     param_names: Vec<String>,
     /// 被説明変数名
     dep_var_name: String,
-    /// 定数項を含むか。`nonlinear/common.rs`の`standardize_columns`等で必要
+    /// 定数項を含むか。`nonlinear/common/standardize.rs`の`standardize_columns`等で必要
     has_intercept: bool,
 }
 

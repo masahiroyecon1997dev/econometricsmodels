@@ -9,7 +9,7 @@ use faer::Mat;
 use statrs::distribution::Normal;
 
 /// `0.5 * ln(2π)`。正規分布の対数密度`log φ(v) = -0.5*ln(2π) - v²/2`の定数項
-/// （コンパイル時定数としてハードコード。`ln`は非`const fn`のため`nonlinear/common.rs`の
+/// （コンパイル時定数としてハードコード。`ln`は非`const fn`のため`nonlinear/common/normal.rs`の
 /// `U_CLAMP`と同じ方式）。
 const HALF_LN_2PI: f64 = 0.918_938_533_204_672_7;
 

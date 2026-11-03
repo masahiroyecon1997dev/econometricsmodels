@@ -28,7 +28,7 @@
 //! docコメント「`Hessian`トレイトの符号規約」の通り、`Gradient`/`Hessian`トレイトは
 //! `CostFunction`と同じ符号（`-ℓ`の1階・2階微分）で実装する。`scores()`（`cov_type`
 //! 共通行列演算向け）は符号反転しない生のスコア`sᵢ=(yᵢ-pᵢ)xᵢ`を返す
-//! （`nonlinear/common.rs`の`SolverOutput.hessian`と同じく対数尤度そのものの符号）。
+//! （`nonlinear/common/solver.rs`の`SolverOutput.hessian`と同じく対数尤度そのものの符号）。
 //!
 //! # ファイル構成
 //!

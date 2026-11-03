@@ -18,7 +18,7 @@ pub struct ProbitInput {
     param_names: Vec<String>,
     /// 被説明変数名
     dep_var_name: String,
-    /// 定数項を含むか。`nonlinear/common.rs`の`standardize_columns`等で必要
+    /// 定数項を含むか。`nonlinear/common/standardize.rs`の`standardize_columns`等で必要
     has_intercept: bool,
 }
 
@@ -29,7 +29,7 @@ impl ProbitInput {
     ///
     /// `y`が{0.0, 1.0}の二値であることの検証は、この関数自体では行わない
     /// （`LogitInput::from_columns`と同じ方針）。`ProbitEstimator::fit`冒頭で
-    /// `validate_binary_y`（`nonlinear/common.rs`）により検証される。
+    /// `validate_binary_y`（`nonlinear/common/validation.rs`）により検証される。
     ///
     /// # Errors
     /// `y`といずれかの`x_columns`の長さが一致しない場合は`CommonError::DimensionMismatch`を返す。

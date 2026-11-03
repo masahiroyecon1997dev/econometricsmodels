@@ -99,7 +99,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   同じ符号、`scores()`は符号反転しない生のスコアを返す）。
 - Tobitの`(β, log σ)`尤度は**Hessianが不定符号になる領域を持つ**（Logit/Probitの大域凹な尤度とは
   異なる）。そこでは生のNewtonステップが降下方向ですらなくなるため、共有`FaerNewton`
-  （`nonlinear/common.rs`）にLevenberg-Marquardt型の減衰ステップ`regularized_newton_step`を追加した:
+  （`nonlinear/common/newton.rs`）にLevenberg-Marquardt型の減衰ステップ`regularized_newton_step`を追加した:
   `H + λI`で`cost`が減少する候補が見つかるまで`λ`を段階的に増やす。大域凹な問題では`λ=0`の生の
   ステップが最初の試行で受理される（収束点近傍で予測減少量がコストの分解能以下になった反復は、
   同じ生のステップをコスト比較なしで採る。[`nonlinear-common.md`](./nonlinear-common.md)1.2節）
@@ -113,7 +113,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   多重共線性は最適化前に`SingularDesignMatrix`（`ComputationError`）で検出される
   （`solver`をparametrizeする必要が無い）。
 - **`TobitScaling`（`tobit/scaling.rs`の標準化。`x`側は共有の`ColumnScale`、`y`のスケーリングと`logσ`の扱いがTobit固有）**: Logit/Probitが
-  使う`common.rs`の`standardize_columns`は`x`列だけを標準化し`y`をスケーリング
+  使う`common/standardize.rs`の`standardize_columns`は`x`列だけを標準化し`y`をスケーリング
   しないため、`y`のスケールが大きいデータ（例: Wooldridge mroz `hours`、`σ̂≈1122`）で健全なMLE解
   でも標準化係数のノルムが大きくなり、勾配ノルム基準の収束判定や（当時あった標準化パラメータの
   ノルムによる）分離ヒューリスティックが不安定になる。対策として`y`のスケーリングと`x`の平均センタリングを行う`TobitScaling`を新設した
@@ -145,7 +145,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
     コスト比較を省く（[`nonlinear-common.md`](./nonlinear-common.md)1.2節）ため、`n=10⁶`でも
     6反復・約1.3〜1.5秒で勾配基準により収束する。
   - **停滞収束判定（安全網）**: コスト比較でステップの良否を判定できなかったとき
-    （`RegularizedStep::NoProgress` / `BelowCostResolution`）、`common.rs`共有の`FaerNewton`は
+    （`RegularizedStep::NoProgress` / `BelowCostResolution`）、`common/newton.rs`共有の`FaerNewton`は
     次の3条件——(1) 生Newtonステップを1回進めても勾配ノルムが減らない（`≥0.9·前反復`）、
     (2) 勾配ノルムが収束目標近傍（`<10⁴·tol`）、(3) **コスト関数（負の対数尤度）のHessianが
     正定値**（`llt`成功＝内点最大の2階条件。`(β, logσ)`尤度は大域凹でなく鞍点でも可逆な
@@ -287,7 +287,7 @@ Tobit固有の差分:
 - 4対象とも`dydx_j = w(θ)·βⱼ`という同一の形（Logit/Probitと同じ骨格、`w`の中身のみ異なる）に帰着
   するため、`target_w_and_s`（`w`とその勾配`(s_beta, s_sigma)`を計算）→
   `marginal_effects_from_tobit_w_s`という2段構成で実装する。ただしパラメータ次元が`k`ではなく
-  `k+1`（`β∪{σ}`）である点が`common.rs`の`dydx_and_jacobian`と異なるため**Logit/Probitとは共有
+  `k+1`（`β∪{σ}`）である点が`common/marginal_effects.rs`の`dydx_and_jacobian`と異なるため**Logit/Probitとは共有
   せず独立実装する**（`w`/`s`の計算式そのものが共有できないため）。
 - デルタ法のヤコビアン（4対象共通）: `∂g_j/∂β_m = βⱼ·s_beta[m] + [j==m]·w`、`∂g_j/∂σ = βⱼ·s_sigma`。分散は
   `jac_j·cov_params·jac_j'`（`(k+1)`次元の二次形式）、標準誤差はその平方根、検定分布は標準正規分布。

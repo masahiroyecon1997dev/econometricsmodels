@@ -1352,7 +1352,7 @@ mod tests {
     }
 
     /// `fit()`と同じ手順（`TobitScaling`による`x`のセンタリング＋スケーリングと`y`の
-    /// スケーリング→収束点でのscores/Hessian評価→`common.rs`の`cov_type`別の共通行列
+    /// スケーリング→収束点でのscores/Hessian評価→`common/cov.rs`の`cov_type`別の共通行列
     /// 演算→`TobitScaling::destandardize_cov_params`）をテスト側で独立に再現し、
     /// `cov_params_std_fn`が計算する標準化空間の分散共分散行列から最終的な`(β,σ)`空間の
     /// `cov_params`を得る。`Logit`の対応テストと同じ技法（`fit()`本体のロジックを

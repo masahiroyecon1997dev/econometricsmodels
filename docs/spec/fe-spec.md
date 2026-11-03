@@ -12,7 +12,7 @@ FE固有の内容のみを記載する。
 
 3層構成: `FE(data, y, x, effects, options=options).fit() -> FEResults`（python_package）→
 `fit_fe(data, y, x, effects, options) -> FEResult`（engine_pybind）→ `FeEstimator::fit`
-（engine、within変換したデータを`OlsEstimator`へ委譲）。
+（engine、within変換したデータに`shared::least_squares::least_squares`をあてはめる）。
 
 - `y: str`、`x: list[str]`はOLSと同じ。`effects: list[str]`は独立の必須引数（`y`/`x`と同格、1〜2要素。1要素=1-way、
   2要素=2-way。`effects[0]`が個体、`effects[1]`が時点）。3要素以上は`EFFECTS_TOO_MANY`
@@ -28,8 +28,8 @@ FE固有の内容のみを記載する。
   | `dk_bandwidth` | `int \| None` | `None` | DK HACのバンド幅（時点数`t`ベース、OLSの`hac_lags`とは意味が異なるため別名）。省略時は`floor(4*(t/100)^(2/9))`で自動計算。`cov_type="dk"`以外で指定すると`ValidationError` |
 
 - **`include_intercept`は無い**: withinの変換で切片が構造的に消えるため、OLS/WLS/IVと異なり
-  このオプション自体が意味を持たない（`FeEstimator::fit`は常に`include_intercept=false`で
-  `OlsEstimator`に委譲する）。
+  このオプション自体が意味を持たない（`FeEstimator::fit`は`OlsInput::from_columns`を常に
+  `include_intercept=false`で作る）。
 - **`x`は空リストを許容しない**: v1では固定効果のみのモデル（`k=0`）を許容して
   いたが、独立して吟味された設計記録が無く、説明変数ゼロは因果推論として意味を持たない
   （個体・時間固定効果によるyの分解という別の操作になる）ためユーザー指摘を受けて拒否に
@@ -89,13 +89,11 @@ FE固有の内容のみを記載する。
   ため、2つ目の件数は各個体の観測数と一致する（将来2-wayの不均衡パネルに対応する場合は
   定義を再検討する）。固定の`n_entities`/`n_periods`ではなく列名キーにした理由は
   `panel-common.md`2.1節。REの`n_groups`も同じ定義（`re-spec.md`2章）。
-- **`estimator()`（内部委譲した`OlsEstimator`）とFE自身のgetterの使い分け**: `params`/
-  `param_names`/`residuals`/`dep_var_name`/`n_obs`/`log_likelihood`は`estimator()`から、
-  `std_errors`/`test_stats`/`p_values`/`conf_lower`/`conf_upper`/`df_model`/`df_resid`/
-  `f_statistic`/`f_p_value`/`aic`/`bic`/`r_squared_*`はFE自身から取得する。後者はFEが
-  `cov_type`・パネル自由度調整を反映して計算し直した値であり、`estimator()`側は常に
-  `CovType::Classical`で委譲した内部OLSの生の値のため取り違えるとcov_type非対応の値を
-  返してしまう。
+- **`FeEstimator`は`OlsEstimator`を保持しない**: 係数・残差・`(X̃'X̃)⁻¹`・適合度は
+  `shared::least_squares::least_squares`の結果から、`std_errors`/`test_stats`/`p_values`/
+  `conf_lower`/`conf_upper`/`df_model`/`df_resid`/`f_statistic`/`f_p_value`/`aic`/`bic`/
+  `r_squared_*`は`cov_type`・パネル自由度調整を反映してFE自身が計算する。素の最小二乗の
+  `df_resid = n - k`を前提にした統計量を使うと、`neffects`が反映されない。
 - **`fixed_effects()`（固定効果自体）は`fit()`の戻り値本体に含めず別メソッド**（IVの
   `first_stage()`と同じ「追加結果は別メソッド」方針）。`FEResult`は非公開フィールド
   `estimator: FeEstimator`として推定量本体を保持し、呼び出し時にオンデマンドで
@@ -117,15 +115,20 @@ polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）�
 - **2-way**: 閉形式の二重デミーニング`ỹ_it = y_it - ȳ_i. - ȳ_.t + ȳ..`を直接計算するのでは
   なく、「entityでquasi-demean（θ=1）→ その結果をtimeでquasi-demean（θ=1）」という2段階の
   `quasi_demean_column`呼び出しで実装している。バランスパネルではこの2段階が閉形式と厳密に
-  一致することを導出済み（独立検算のproptestでも検証済み）。バランスパネル検証
+  一致する（独立検算のproptestでも検証している）。バランスパネル検証
   （`validate_balanced_panel`）は時点のキー未指定なら`PanelError::TwoWayRequiresTime`。
+  - **導出**: エンティティ数`N`・時点数`T`のバランスパネル（`n=NT`）で、entity-demean後の列を
+    `e_it = y_it - ȳ_i.`とすると、`(1/N)Σ_i e_it = ȳ_.t - (1/N)Σ_i ȳ_i. = ȳ_.t - ȳ..`
+    （各エンティティの観測数がすべて`T`なので`(1/N)Σ_i ȳ_i. = ȳ..`が成り立つ）。`e_it`を
+    timeでquasi-demeanすると`e_it - (ȳ_.t - ȳ..) = y_it - ȳ_i. - ȳ_.t + ȳ..`となり閉形式と一致する。
+    不均衡パネルでは`(1/N)Σ_i ȳ_i. ≠ ȳ..`となりうるためこの等式が成り立たず、2-wayを
+    不均衡パネルに適用してはならない（バランスパネルを必須にする理由）。
 
 `FeEstimator::fit`のパイプラインは「singleton検出 → within変換（2-wayはバランスパネル検証を
-内包） → 自由度検証 → 分散ゼロ検出 → `OlsEstimator::fit`への委譲（`include_intercept=false`
-固定、Frisch-Waugh-Lovell定理によりwithin変換後のOLS点推定はFE推定量と数学的に一致） →
-`cov_type`別の共分散行列計算 → 自由度調整後の統計量再計算」の順。委譲先の`OlsEstimator::fit`
-自体は常に`cov_type=Classical`固定で呼ぶ（`β̂`・残差の取得のみが目的で、`cov_type`ごとの
-標準誤差はFE自身が独立に計算し直すため委譲先のcov_type選択は結果に影響しない）。
+内包） → 自由度検証 → 分散ゼロ検出 → `least_squares`（Frisch-Waugh-Lovell定理により
+within変換後の最小二乗点推定はFE推定量と数学的に一致） → `cov_type`別の共分散行列計算 →
+自由度調整後の統計量再計算」の順。`OlsEstimator`は経由しない（FEが使うのは`β̂`・残差・
+`(X̃'X̃)⁻¹`・適合度だけで、`cov_type`ごとの標準誤差・F検定はFE自身が計算し直すため）。
 
 ### 3.2 自由度調整
 
@@ -138,7 +141,7 @@ polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）�
 - **t値・p値・信頼区間・F検定の自由度（`df_inference`）は`cov_type=Cluster`のとき`G-1`、
   `Dk`のとき`t_periods-1`に切り替える**（fixestの`ssc()`既定`t.df="min"`。
   それ以外（Classical/HC1-3）は`df_resid`のまま）。AIC/BICは`log_likelihood`
-  自体（`SSR/n`のみに依存しdf非依存）を`OlsEstimator::log_likelihood()`からそのまま再利用し、
+  自体（`SSR/n`のみに依存しdf非依存。`gaussian_goodness_of_fit`の`log_likelihood`）をそのまま再利用し、
   ペナルティ項の乗数だけ`k`から`df_model`に差し替える（`df_resid`ベース、`df_inference`とは
   無関係）。
 - **F統計量（`f_statistic`/`f_p_value`）**: 傾き係数`k`個が同時にゼロという帰無仮説のWald
@@ -292,6 +295,12 @@ demeanしたR²」を3種とも定義すると誤る）:
   挙動は再現せず時間順の規約を優先する）。`fixed_effects()`は常に`{列名: {水準: 効果}}`の入れ子の`dict`（one-wayも1項目の入れ子。キーは
   `effects`の列名で、`effects`の順）で、時点側の`dict`は時間順に並べる。入れ替えると
   キー順と基準期間が変わる（`panel-common.md`1.1節）。
+  - **導出**: `E_i = ȳ_i. - x̄_i.'β̂`（entityの残差平均）、`E_t = ȳ_.t - x̄_.t'β̂`（timeの残差平均）、
+    `E = ȳ.. - x̄..'β̂`（全体の残差平均）とすると、バランスパネルの2-way ANOVA恒等式
+    `E_i + E_t - E = α_i + γ_t`（正規化前、定数`c`が不定）に`γ_{t_ref}=0`の制約を課すと
+    `c = E - E_{t_ref}`が定まり、`α_i = E_i - E + E_{t_ref}`、`γ_t = E_t - E_{t_ref}`となる。
+  - 代替案（`α_i`・`γ_t`をともに大域平均からの偏差にする対称正規化）は、結果の形（entity/timeの
+    2キーのみ）に大域平均を格納する場所が無いため採用しない。
 
 ### 3.6 engine_pybind: エラー変換
 

@@ -1,386 +1,149 @@
-//! FEの入力データ型（`FeInput`）とwithin変換（1-way/2-way）。
+//! FEの入力データ型（`FeInput`）・within変換・推定量（`FeEstimator`）。
 //!
 //! `engine`はpolars/PyO3を知らない（`.claude/rules/rust-style.md`「責務分離」）。
-//! `engine_pybind`がpolars DataFrameから`y`/`x`/`entity`/`time`を列ごとに抽出し
-//! （`entity`/`time`はグループの同一性だけが意味を持つ列のため文字列で抽出する、
-//! 同「Python境界でのデータ受け渡し」）、それらの列を本モジュールの
-//! `FeInput::from_group_codes`に渡す。
+//! `engine_pybind`がpolars DataFrameから`y`/`x`/`entity`/`time`を列ごとに抽出し、
+//! それらの列を`FeInput::from_group_codes`に渡す。`FeInput`はwithin変換前の生データを
+//! 保持するだけの入れ物で、`OlsInput`/`IvInput`と異なり`faer::Mat`は組み立てない
+//! （within変換（`panel::common::quasi_demean_column`）が`&[f64]`の列単位で動くため）。
 //!
-//! `FeInput`自体はwithin変換前の生データを保持するだけの入れ物であり、`OlsInput`/
-//! `IvInput`と異なり`faer::Mat`は組み立てない（within変換（`panel::common::
-//! quasi_demean_column`）が`&[f64]`の列単位で動く設計のため、`Mat`に詰め直す
-//! 変換をこの段階で行う意味が無い。`docs/spec/re-spec.md`3.2節）。
+//! 計算の定義式は`docs/methods/fe.md`、導出と実装上の判断は`docs/spec/fe-spec.md`が正本。
+//! ここには各部品の契約と、コードを読むだけでは分からない理由だけを置く。
 //!
-//! ## within変換（`within_transform_one_way`/`within_transform_two_way`）
+//! ## `FeEstimator::fit`のパイプライン
 //!
-//! - **1-way**（`docs/spec/fe-spec.md`3.1節）: `y`/各`x`列に
-//!   entityでのquasi-demean（θ=1、`col[i] - ȳ_{e(i)}.`）を適用する。不均衡パネルも
-//!   無条件でサポートする（エンティティごとの平均を引くだけで数学的に正確に成立する
-//!   ため）。
-//! - **2-way**（同3.1節。バランスパネル必須の理由は`fe-spec.md`1章）: 閉形式の二重デミーニング
-//!   `ỹ_it = y_it - ȳ_i. - ȳ_.t + ȳ..`で計算する。この閉形式は**バランスパネルでのみ
-//!   正確**なため、事前にバランスパネルであることを検証し
-//!   （`PanelError::UnbalancedPanelForTwoWay`）、`time`が指定されていなければ
-//!   `PanelError::TwoWayRequiresTime`を返す。
-//!   - **実装はentityでquasi-demeanした結果をさらにtimeでquasi-demeanする2段階適用**
-//!     （`quasi_demean_column`をentity・time双方に順に適用するだけで、専用の二重
-//!     デミーニング式を別途実装しない）。この2段階適用がバランスパネルで閉形式と
-//!     数学的に一致することの導出: エンティティ数`N`・時点数`T`のバランスパネル
-//!     （`n=NT`）で、entity-demean後の列を`e_it = y_it - ȳ_i.`とすると、
-//!     `(1/N)Σ_i e_it = ȳ_.t - (1/N)Σ_i ȳ_i. = ȳ_.t - ȳ..`（バランスパネルでは
-//!     `(1/N)Σ_i ȳ_i. = ȳ..`が成り立つ——各エンティティの観測数がすべて`T`で
-//!     等しいため）。したがって`e_it`をtimeでquasi-demeanすると
-//!     `e_it - (ȳ_.t - ȳ..) = y_it - ȳ_i. - ȳ_.t + ȳ..`となり閉形式と一致する。
-//!     不均衡パネルではこの等式が成り立たない（`(1/N)Σ_i ȳ_i. ≠ ȳ..`となりうる）ため、
-//!     2-wayを不均衡パネルに適用してはならない（`fe-spec.md`3.1節がバランスパネルを必須にする
-//!     所以）。
+//! singleton検出 → within変換（2-wayはバランスパネル検証を内包）→ 自由度検証 → 分散ゼロの
+//! 説明変数・定数の被説明変数の検出 → `confidence_level`検証 → `shared::least_squares::least_squares`
+//! → 完全フィット検出 → `cov_type`別の共分散行列 → 自由度調整後の統計量の再計算。
 //!
-//! ## 分散ゼロ説明変数の検出（`validate_no_zero_variance_regressors`）
+//! - FEはwithin変換後のデータに最小二乗をあてはめる（Frisch-Waugh-Lovell定理により点推定は
+//!   FE推定量`β̂`と一致する）。`OlsEstimator`は経由しない: FEが使うのは`β̂`・残差・`(X̃'X̃)⁻¹`・
+//!   適合度だけで、標準誤差・F検定は`cov_type`ごとにFE自身が計算し直すため。`x=[]`
+//!   （固定効果のみのモデル）でも`least_squares`は0列を受理する。
+//! - `OlsInput::from_columns`は`include_intercept=false`で作る（within変換で全体平均も差し引か
+//!   れ、変換後データに切片は不要）。within R²・対数尤度は`gaussian_goodness_of_fit`
+//!   （`has_intercept=false`、非中心化TSS）。
+//! - `confidence_level`の範囲外と設計行列の特異性は`PanelError::WithinRegressionFailed`
+//!   （`LeastSquaresError`を包む）。観測数不足（`n <= df_model`）は先に
+//!   `InsufficientDegreesOfFreedom`で弾く。
+//! - 1-way/2-wayは`FeEffects`で切り替える。
 //!
-//! within変換後の設計行列の各列の分散を確認し、ゼロの列があれば
-//! `PanelError::ZeroVarianceAfterDemeaning`を返す（`fe-spec.md`1章）。1-way/2-way共通ロジック
-//! （`within_transform_one_way`/`within_transform_two_way`のどちらの出力にも適用できる、
-//! `column_is_zero_variance`関数doc参照）。時間不変変数（1-way）だけでなく、2-wayで
-//! time FEと完全共線な「エンティティ間で変動しない列」も同じチェックで検出できる。
+//! ## within変換
 //!
-//! ## singleton検出（`validate_no_singleton_groups_one_way`/`validate_no_singleton_groups_two_way`）
+//! - **1-way**: `y`/各`x`列にentityでのquasi-demean（θ=1）を適用する。不均衡パネルも
+//!   無条件でサポートする。
+//! - **2-way**: バランスパネル必須。`time`が無ければ`PanelError::TwoWayRequiresTime`、
+//!   不均衡なら`PanelError::UnbalancedPanelForTwoWay`。閉形式の二重デミーニング
+//!   `ỹ_it = y_it - ȳ_i. - ȳ_.t + ȳ..`を別実装せず、「entityでquasi-demean → その結果を
+//!   timeでquasi-demean」の2段階適用にしている。バランスパネルでのみ閉形式と一致する
+//!   （導出は`fe-spec.md`3.1節）ため、不均衡パネルには適用しない。
 //!
-//! 観測数1のグループ（singleton）を明示的に検出し`PanelError::SingletonGroup`を返す
-//! （`fe-spec.md`1章）。自動除外はしない。**下流の特異行列エラーとして偶発的に検出される形には
-//! しない**——singletonのエンティティ/時点はwithin変換後にその行が全列ゼロになり
-//! 最小二乗側で特異行列として（間接的に、かつ原因の分かりにくいエラー
-//! メッセージで）検出されうるが、`fe-spec.md`1章はこれを避け、within変換の**前**に生の
-//! `entity`/`time`列から直接カウントして専用のバリデーションエラーにすることを要求する。
-//! - **1-way**: entityのみ検出（`validate_no_singleton_groups_one_way`）。
-//! - **2-way**: entity・time双方を対称に検出する（`validate_no_singleton_groups_two_way`。
-//!   `within_transform_two_way`と同様、`time`が`None`なら`PanelError::TwoWayRequiresTime`）。
-//! - 複数のsingletonグループが存在する場合は、観測順で最初に現れるグループのみを
-//!   報告する（`validate_no_zero_variance_regressors`の「最初の1件を報告」方針と統一）。
+//! ## 事前検証（within変換の前後で行うもの）
 //!
-//! ## within変換後の最小二乗（`FeEstimator`、4.3節）
+//! - **singleton**（`validate_no_singleton_groups_*`）: 観測数1のグループを、within変換の**前**に
+//!   生の`entity`/`time`から数えて`PanelError::SingletonGroup`にする。変換後に全列ゼロの行として
+//!   最小二乗側の特異行列エラーに現れる形にはしない。自動除外はしない。複数あれば観測順で
+//!   最初の1件を報告する。2-wayはentity・timeを対称に検出し、`time`の存在確認を最初に行う。
+//! - **分散ゼロの説明変数**（`validate_no_zero_variance_regressors`）: within変換後の列の分散が
+//!   ゼロなら`PanelError::ZeroVarianceAfterDemeaning`。時間不変の変数（1-way）と、time FEと
+//!   完全共線な列（2-way）を同じ検査で拾う（`column_is_zero_variance`）。
+//! - **定数の被説明変数・完全フィット**: `fe-spec.md`1章（`OutcomeConstantWithinEntity`・`PerfectFit`）。
 //!
-//! FEはwithin変換したデータに最小二乗をあてはめる（Frisch-Waugh-Lovell定理により、
-//! within変換後の最小二乗点推定はFE推定量`β̂`と数学的に一致する。`docs/spec/panel-common.md`
-//! 4.3節）。`FeEstimator::fit`は「singleton検出→within変換（2-wayはバランスパネル検証も内包）→
-//! 自由度検証→分散ゼロ検出→`confidence_level`検証→`shared::least_squares::least_squares`→
-//! `cov_type`別の共分散計算→自由度調整後の統計量の再計算」の順にパイプラインを実行する。
+//! ## 自由度とF統計量
 //!
-//! 当初は`OlsEstimator::fit`（`CovType::Classical`固定）に委譲していたが、FEが使うのは
-//! `β̂`・残差・`(X̃'X̃)⁻¹`・適合度だけで、標準誤差・F検定は`cov_type`ごとにFE自身が計算し直す
-//! （`OlsEstimator`の推論結果は使わない）ため、最小二乗の部品を直接呼ぶ形に置き換えた。
-//! `x=[]`（固定効果のみのモデル）だとwithin変換後の設計行列も0列（`k=0`）になるが、
-//! `least_squares`は0列も受理する。
+//! - `df_model = k + neffects`（`neffects`は1-wayなら`n_entities`、2-wayなら
+//!   `n_entities + n_periods - 1`）、`df_resid = n - df_model`。素の最小二乗の
+//!   t検定・調整済みR²・AIC/BICは`df_resid = n - k`を前提にするためFEには使えず、FE自身で
+//!   計算する。t値・p値・信頼区間は、自由度`df_inference`のt分布（`Classical`/`Hc1`〜`Hc3`は
+//!   `df_resid`、`Cluster`は`G-1`、`Dk`は`t_periods-1`）で
+//!   `shared::inference`のヘルパーを使う。AIC/BICはペナルティ項の乗数を`k`ではなく`df_model`にする。
+//! - **F統計量**（`f_statistic`/`f_p_value`）: 傾き係数`k`個が同時にゼロというWald F検定
+//!   （`linearmodels.PanelOLS`と同じ定義。固定効果ダミーは検定対象に含めない。`fixest`の
+//!   `fitstat(m, "f")`はFEダミーを含むモデル全体の検定なので定義が異なる）。`cov_type`別の
+//!   `cov_params`と`β̂`を`shared::wald::wald_f_test`（`k_constant=0`）に渡す。`k=0`は`None`。
+//!   失敗は`PanelError::FTestFailed`。入力だけで構造的な特異性が判定できる場合
+//!   （Clusterの`G <= k`、Dkの`t_periods <= k`）は共分散計算の前に
+//!   `InsufficientClustersForInference`/`InsufficientDkPeriodsForInference`で弾く。2グループ
+//!   （Clusterの`G=2`・Dkの`t_periods=2`）で全グループが各側に1観測ずつだとwithin変換で
+//!   スコアが恒等的にゼロになるため`DegenerateClusterTwoGroups`/`DegenerateDkTwoPeriods`で弾く
+//!   （`two_group_split_is_degenerate`。2-wayではtime方向の同じ構造も対象）。数値的な悪条件は
+//!   `FTestFailed`が受ける。
+//! - `linearmodels.PanelOLS`は`aic`・`bic`を提供しないため、この2つの検証は`fixest`との
+//!   比較のみで行う。
 //!
-//! `FeEstimator::fit`は`OlsInput::from_columns`を`include_intercept=false`で作る
-//! （within変換で全体平均も含めて差し引かれているため、変換後データに切片は不要）。
-//! within R²・対数尤度は`shared::goodness_of_fit::gaussian_goodness_of_fit`
-//! （`has_intercept=false`、非中心化TSS）で求める。
+//! ## パネル固有R²
 //!
-//! `confidence_level`が`(0, 1)`の範囲外、および設計行列の特異性（`least_squares`の
-//! `RankDeficient`）は`PanelError::WithinRegressionFailed { source }`（`LeastSquaresError`の
-//! `InvalidConfidenceLevel`・`SingularMatrix`）に包む（`common.rs`のdocコメント参照）。
-//! 観測数不足（`n <= df_model`）は先に`InsufficientDegreesOfFreedom`で弾くため、最小二乗側の
-//! `n <= k`検査には到達しない。
+//! `r_squared_within`/`r_squared_between`/`r_squared_overall`の3つ（bareの`adj_r_squared`は持たない）。
 //!
-//! `FeEffects`（`OneWay`/`TwoWay`）で1-way/2-wayを切り替える。将来`FEOptions`
-//! が導入されたら、その一部（またはそのままのフィールド型）として
-//! 統合する想定の暫定的なパラメータ（1-way/2-wayの区別自体は`panel-common.md`で
-//! 確定済みの設計だが、`FEOptions`自体は未着手のため）。
+//! - **within**: 実際に使ったFE構造でdemeanした残差（1-wayはentity、2-wayはentity+time）で、
+//!   `gaussian_goodness_of_fit(.., has_intercept=false)`の`r_squared`。`linearmodels`の
+//!   `rsquared_within`は2-wayでもentityのみのdemeanで固定なので、2-wayでは意図的に
+//!   食い違う（2-wayは`fixest`の`fitstat(model, "wr2")`と比較する）。
+//! - **between/overall**: `linearmodels`の`_rsquared`と一致させる。FEの`x`は定数列を含められない
+//!   ため、非中心化TSSの分岐が常に適用される。`overall`は元の`y`・`x`に`β̂`だけを当てはめた残差
+//!   （固定効果を含まない。`FeEstimator::residuals()`とは別物）、`between`はエンティティ平均への
+//!   当てはめ。**`between`に`T_i`ベースの重みを付けてはいけない**: `linearmodels`の
+//!   `_prepare_between`は不均衡パネル用の重みを計算するが、サンプルウェイト未指定なら
+//!   `_rsquared`が`1.0`に上書きし、FEは`weights`を持たない。
+//! - どちらも`TSS <= 0`なら`0.0`。
 //!
-//! ## 自由度調整（`fe-spec.md`3.2節）
+//! ## `cov_type`対応（`FeCovType`）
 //!
-//! `df_model = k + neffects`（`neffects`は1-wayなら`n_entities`、2-wayなら
-//! `n_entities + n_periods - 1`。entityダミー・timeダミー間の定数項ぶんの重複を`+1`で
-//! 補正する、`fe-spec.md`3.2節）。`df_resid = n - df_model`。`n <= df_model`なら
-//! `PanelError::InsufficientDegreesOfFreedom`。
+//! `shared::covariance`の`classical_cov_params`/`hc_cov_params`/`cluster_cov_params`は
+//! そのまま使えない。計算は`panel/common.rs`の`panel_cov_params`（`PanelStructure::FixedEffects`）が
+//! 担い、以下の点でOLSと式が異なる（導出は`fe-spec.md`3.3節）。
 //!
-//! **素の最小二乗（`OlsEstimator`）のt検定・調整済みR²・AIC/BICは`df_resid_ols = n - k`
-//! （`k`のみ、`neffects`を知らない）を前提にしているためFEには使えない**（WLSの教訓と同型）。
-//! `FeEstimator::fit`は`OlsEstimator`を経由せず、以下をFE自身で計算する:
-//! - **標準誤差・t値・p値・信頼区間**: `cov_type`ごとに`FeEstimator`自身が独自に
-//!   計算し直す（下記「cov_type対応」節参照）。t値・p値・信頼区間の計算自体は
-//!   t分布（自由度は`cov_type`によらず常に`df_resid`、3.3節）で`crate::shared::inference`の
-//!   共有ヘルパーを使う（OLS自身と同じロジック）。
-//! - **AIC/BIC**: `log_likelihood`自体は`SSR/n`のみに依存し`df_resid`非依存の式
-//!   （`gaussian_goodness_of_fit`の`log_likelihood`）のためそのまま再利用できるが、
-//!   ペナルティ項の乗数は`k`ではなく`df_model`（固定効果の実効パラメータ数を含む）を使う:
-//!   `aic = -2*log_likelihood + 2*df_model`、`bic = -2*log_likelihood + ln(n)*df_model`。
-//! - **F統計量**（`f_statistic`/`f_p_value`）: 当初は検定統計量（t検定）に限定してスコープ
-//!   外だったが、`FEOptions`/`FEResult`のフィールド設計
-//!   （`panel-common.md`2.1節がOLS同様
-//!   `f_statistic`/`f_p_value`を含める前提だった）の実装時に、engine側に対応する
-//!   panel自由度調整版が存在しないことが判明し、ユーザー確認の上で本節に前倒しで
-//!   実装した。`FeEstimator`は`OlsEstimator`を保持しないため、F統計量は
-//!   `FeEstimator`自身の`f_statistic()`/`f_p_value()`だけ（`df_resid_ols = n - k`・
-//!   `CovType::Classical`ベースの値は存在しない）。
-//!   - **定義**: 「切片を除く全傾き係数が同時にゼロ」というOLSの`f_statistic`と同じ
-//!     帰無仮説を、FEの傾き係数`k`個（FEは`within`変換で切片が消えているため
-//!     `k_constant=0`、`OlsInput::from_columns`を`include_intercept=false`で呼ぶのと
-//!     同じ理由）に対して行う。固定効果自体（entity/timeダミー）は検定対象に含めない
-//!     （`linearmodels.PanelOLS`の`f_statistic`「H0: All parameters ex. constant are
-//!     zero」と同じ定義・同じ扱い。fixestの`fitstat(m, "f")`は逆にFEダミーも含めた
-//!     モデル全体のF検定であり定義が異なるため、クロスチェックには使わない——後述
-//!     「検証」参照）。
-//!   - **実装**: `cov_type`別に計算し直した`cov_params`（`std_errors`等と同じ、この節の
-//!     直前で計算済み）と`params()`（`β̂`）を使い、`crate::shared::wald::wald_f_test`
-//!     （OLS本体の`fit()`・`wald_test_last_columns`・REと共有するWald F検定を再利用、
-//!     サンドイッチ計算を複製しない。`.claude/rules/rust-style.md`
-//!     「全手法で共有するロジック」・`engine/src/linear/CLAUDE.md`の`wald_test_last_columns`
-//!     再利用方針と同じ判断）で`(k_constant=0, df_model=k, df_inference)`を渡す。
-//!     分母自由度`df_inference`は`cov_type=Cluster`のとき`G-1`、`Dk`のとき
-//!     `t_periods-1`、それ以外は`df_resid`（**OLS自身のCluster特有の
-//!     `n_groups-1`切替と同じパターンに揃えた**、上記「`cov_type`対応」節参照）。
-//!     `k=0`（説明変数無し）はOLSと同じくNaNを返す。
-//!   - **エラー**: `wald_f_test`の失敗（共分散部分行列が数値的にほぼ特異。`CommonError`を
-//!     `LeastSquaresError`に包む）は`PanelError::FTestFailed { source }`として伝播する
-//!     （`WithinRegressionFailed`とは意味が異なる——最小二乗自体は既に成功した後の、
-//!     F検定固有の計算失敗のため別バリアントにする、`common.rs`のdocコメント参照）。
-//!     以前は委譲先の`OlsEstimator::fit`が（`Classical`で）同種のF検定を内部で無条件に
-//!     計算していたため、完全適合・極端なスケール差の入力は`WithinRegressionFailed`として
-//!     先に失敗していたが、現在はFE自身のF検定の失敗として`FTestFailed`になる。rankの上界から入力だけで
-//!     構造的な特異性が判定できる入力（Clusterの`G <= k`、Dkの`t_periods <= k`）は
-//!     共分散計算の前に`InsufficientClustersForInference`/
-//!     `PanelError::InsufficientDkPeriodsForInference`で弾く。2グループ（Clusterの`G=2`・
-//!     Dkの`t_periods=2`）で全エンティティ（2-wayでは全時点でも）が各グループに1観測ずつの
-//!     場合はwithin変換でスコアが恒等的にゼロになるため、`DegenerateClusterTwoGroups`/
-//!     `DegenerateDkTwoPeriods`で弾く（`two_group_split_is_degenerate`。2-wayではtime方向の
-//!     同じ構造——エンティティ2つのパネル等——も対象）。それ以外（スケール差等による
-//!     数値的な悪条件）は`FTestFailed`がbackstopになる。
-//!   - **検証**: 主リファレンス`linearmodels`の`PanelOLS.fit().f_statistic`
-//!     （`cov_type="unadjusted"`）と数値比較する。`k=1`（`fixest_reference_input`を使う
-//!     既存テスト）では「1自由度のF検定は両側t検定と代数的に等価」
-//!     （`OlsEstimator`の同名の性質、`ols/estimator.rs`の
-//!     `wald_test_last_columns_matches_squared_t_statistic_for_single_column`参照）が
-//!     成り立つため、既に検証済みの`test_stats`/`p_values`から`f_statistic = test_stat²`・
-//!     `f_p_value = p_value`という追加の恒等式チェックで足りる。`k=2`の真の同時検定
-//!     （`f_test_reference_input`、新規フィクスチャ）は`linearmodels`の値と直接比較する。
+//! 1. **HC0は提供しない**（小標本補正なしのサンドイッチはパネル/FEでは提供しない仕様判断。
+//!    他パッケージの有無は理由にしない）。
+//! 2. **HC1〜HC3**: HC1の補正は`n/(n-k)`ではなく`n/df_resid`（`neffects`込み）。HC2/HC3の
+//!    レバレッジはwithin変換後の設計行列のものではなく、固定効果ダミーを含むLSDV相当の
+//!    設計行列のもの（`leverage_full`）。
+//! 3. **Cluster**: 補正は`(G/(G-1))×((n-1)/(n-K))`で、`K`はfixestの`ssc()`既定
+//!    （`K.fixef="nonnested"`）に合わせたFE固有のロジック（`fe_cluster_k_correction`）。
+//!    蓄積`Σ_g S_g S_g'`は`cluster_meat`、補正式は`cluster_correction`を共有する。
 //!
-//! **検証の例外**: Python主リファレンスの`linearmodels`（`PanelOLS`）は`aic`・`bic`を
-//! 一切提供しない（`rsquared_within`/`between`/`overall`/`inclusive`・`loglik`のみ）。
-//! そのためこの2つの検証はRクロスチェック（`fixest`）のみで行う（通常の「Python主
-//! リファレンス＋Rクロスチェックの2系統検証」の例外、ハウスマン検定（5.3節）と同型の
-//! 判断）。上記の式は`fixest::feols`の`AIC()`/`BIC()`と数値的に一致することをRで実地
-//! 検証済み（ユーザー承認済み、2026-09-12）。
+//! **t値・p値・信頼区間・F検定の自由度は、`cov_type=Cluster`のとき`G-1`、`Dk`のとき
+//! `t_periods-1`**（fixestの`t.df="min"`）。`df_resid`自体（σ̂²・調整済みR²・AIC/BIC）は
+//! `cov_type`によらずパネル自由度調整済みの値のまま。`cov_type`の既定
+//! （`"cluster"`、entity単位）は`engine_pybind`の責務で、`FeEstimator::fit`は呼び出し側が
+//! 渡す`FeCovType`を使う（`Cluster { groups: None }`のときだけentityを使う）。
 //!
-//! ## パネル固有R²（2.3節）
+//! ## Driscoll-Kraay型パネルHAC（`FeCovType::Dk`）
 //!
-//! `r_squared_within`/`r_squared_between`/`r_squared_overall`の3フィールドを実装する。
-//! **bareの`adj_r_squared`は廃止**（2.3節が明示的に要求。修正済み版の3種展開もスコープ外）。
-//! 素朴に「実際に使ったFE構造でdemeanしたR²」を3種とも定義すると考えがちだが、
-//! `linearmodels`のソース確認・実地数値検証で以下が判明している
-//! （ユーザーとの相談で決定、2026-09-12。`linearmodels==7.0`で確認）。
+//! OLSの`CovType::Dk`は異なるエンティティの観測を単一の時系列カーネルに混ぜるため、パネルでは
+//! 別アルゴリズムとして実装する。
 //!
-//! **2.3節の「OLSの`r_squared`をそのまま流用しない」の解釈**: この一文は「単一の曖昧な
-//! フィールドを残さず明示的な3フィールドのみにする」というフィールド構成についての
-//! 要求であり、`r_squared_within`の**値**として最小二乗の`R²`（切片なし、非中心化TSS）をそのまま
-//! 採用すること自体は妨げない（後述の通りこの値は数学的に「within R²」の定義そのもの
-//! と一致するため、独立に再計算する意味が無い）。
-//!
-//! - **`r_squared_within`は「実際に使ったFE構造でdemeanした残差」を採用**（1-wayは
-//!   entityのみ、2-wayはentity+timeの両方）——`gaussian_goodness_of_fit(.., has_intercept=false).r_squared`で求める
-//!   （切片なしのため非中心化TSSを使う分岐を通り、within変換後の`y`の平均が厳密にゼロになる性質
-//!   （`Σ_i(y_i - ȳ_{e(i)}.) = 0`が任意の不均衡パネルで成り立つ）と合わせて、この値が
-//!   まさに「within R²」の定義と一致する）。**`linearmodels`自身の`rsquared_within`は
-//!   常にentityのみのdemeanで固定**（2-wayモデルでも時間効果を含めない）という別定義
-//!   のため、2-wayでは意図的に数値が食い違う。2-wayの検証は`linearmodels`ではなく
-//!   `fixest`の`fitstat(model, "wr2")`（"Within R2"）を使う（実地検証で`fixest`の`wr2`が
-//!   「実際に使ったFE構造でdemeanしたR²」と1-way・2-way双方で数値一致することを確認済み。
-//!   通常の「Python主リファレンス＋Rクロスチェック」の2系統検証の例外、AIC/BICと同型）。
-//! - **`r_squared_between`/`r_squared_overall`は`linearmodels`の`_rsquared`と完全一致**
-//!   させる（`panel/model.py`の`PanelOLS._rsquared`）。FEのxには定数列を含められない
-//!   （含めれば`validate_no_zero_variance_regressors`が弾く）ため、`linearmodels`の
-//!   `has_constant=False`分岐（非中心化TSS、切片による中心化を行わない）が常に適用される:
-//!   - `r_squared_overall`: 固定効果の切片項を一切含めない——**元の`y`・`x`に、推定した
-//!     傾き係数`β̂`だけを当てはめた残差**で計算する（`SSR = Σ_i(y_i - x_i'β̂)²`、
-//!     `TSS = Σ_i y_i²`）。within推定の残差（`FeEstimator::residuals()`、FWL定理により
-//!     固定効果込みの残差と一致）とは別物であることに注意（固定効果の説明力を無視した、
-//!     意図的に「弱い」R²）。
-//!   - `r_squared_between`: エンティティ平均`ȳ_i.`・`x̄_i.`に同じ`β̂`を当てはめた残差
-//!     （`SSR = Σ_i(ȳ_i. - x̄_i.'β̂)²`、`TSS = Σ_i ȳ_i.²`、**重み付けなし**）。
-//!     `linearmodels`の`_prepare_between`自体は不均衡パネル用の重み
-//!     `w_i = T_i / mean(T)`を計算するが、サンプルウェイト（`weights`引数）が
-//!     全て`1.0`（＝未指定）なら`_rsquared`がこの重みを無条件に`1.0`へ上書きする。
-//!     **FEは`weights`引数をサポートしない**（CLAUDE.md 1.3節）ためこの重み付けは
-//!     常に無効——不均衡パネルで一度`T_i`ベースの重み付き版を実装し`linearmodels`と
-//!     数値が食い違うことを実地検証で発見して修正した経緯がある（`fe_r_squared_between`
-//!     関数doc参照、2026-09-12）。
-//!   - どちらも`TSS <= 0`なら`0.0`を返す（`linearmodels`と同じガード）。
-//! - 新規ヘルパー（`fe.rs`内private）: `fe_r_squared_between`・`fe_r_squared_overall`
-//!   （entity集計は`FeInput`のエンティティコード（`GroupCodes::group_indices`）を使う）。
-//!
-//! ## `cov_type`対応（`FeCovType`、3.1節・3.2節）
-//!
-//! **`shared::covariance`の既存cov_type計算（`classical_cov_params`/`hc_cov_params`/
-//! `cluster_cov_params`）はそのまま流用できない**。以下の3点でFEに必要な計算式そのものが
-//! 異なるため
-//! （linearmodels・fixestのソースコード確認・実地数値検証済み、ユーザー承認済み、
-//! 2026-09-12）:
-//!
-//! 1. **HC0は実装しない（スコープ外）**: 小標本補正なしの素のサンドイッチは
-//!    パネル/FEでは提供しないという仕様判断。他パッケージの有無は理由にしない
-//!    （fixest 0.14.2は`vcov = "HC0"`を受け付けないが、plm 2.6.7は within・random
-//!    のどちらにも`vcovHC(type = "HC0")`を提供する。linearmodelsは未確認）。
-//! 2. **HC1〜HC3はOLS自身の値を流用できず、独自に計算し直す**:
-//!    - **HC1**: OLSのHC1は`n/(n-k)`という小標本補正係数を使うが、FEでは`n/df_resid`
-//!      （`df_resid`はパネル自由度調整後の値、`neffects`込み）を使う。この係数は
-//!      サンドイッチ行列全体に掛かる単一のスカラーなので、OLSの値を後から
-//!      `sqrt(n/df_resid ÷ n/(n-k))`倍する形でも数学的に同じ結果になる
-//!      （linearmodelsの`cov_type="robust"`と数値一致を確認済み）。
-//!    - **HC2/HC3**: レバレッジ`h_ii`が、within変換後の設計行列に対するレバレッジ
-//!      （`h_ii_within = x̃_i (X̃'X̃)⁻¹ x̃_i'`）では**なく**、固定効果ダミーを明示的に
-//!      含めたLSDV相当の設計行列に対するレバレッジ（`h_ii_full`）でなければならない。
-//!      分割回帰（Frisch-Waugh-Lovell）のレバレッジ分解則により
-//!      `h_ii_full = 1/T_{entity(i)} + h_ii_within`（1-way）、
-//!      `h_ii_full = 1/T_{entity(i)} + 1/N_{time(i)} - 1/n + h_ii_within`（2-way、
-//!      entity効果とtime効果の重複分`-1/n`を補正）で計算できる
-//!      （`leverage_full`関数doc参照。fixestの`vcov="HC2"`/`"HC3"`と数値一致を
-//!      1-way・2-way双方で確認済み）。
-//!
-//! （以下で名前だけ挙げる`leverage_full`・`fe_cluster_k_correction`・
-//! `fixef_dimension_nested_within_cluster`・`two_group_split_is_degenerate`は`panel/common.rs`にあり、
-//! `cov_type`ごとの分岐は`panel_cov_params`が`PanelStructure::FixedEffects`で選ぶ。）
-//!
-//! 3. **Clusterも独自に計算し直す**（`shared::covariance::cluster_cov_params`は使わない。
-//!    ただし蓄積`Σ_g S_g S_g'`は`cluster_meat`、補正式は`cluster_correction`を共有し、
-//!    FE固有なのは補正の`K`だけ）:
-//!    **【linearmodels方式からfixest方式へ変更】** 当初はlinearmodels
-//!    （旧FE主リファレンス）に合わせ`(G/(G-1))`補正を掛けず`n/(n-extra_df-k)`のみを
-//!    使っていたが、fixest（R）・Stata（`xtreg`/`reghdfe`）の利用者が期待する値と
-//!    一致しないと判明し、fixestの`ssc()`小標本補正（既定`K.adj=TRUE, K.fixef=
-//!    "nonnested", G.adj=TRUE, G.df="min", t.df="min"`）に合わせて置き換えた。
-//!    fixest 0.14.2のRソース（`fixest:::ssc_compute_K`）と実地数値実験（devcontainer内、
-//!    実装時）で確定した式:
-//!    - `panel_cluster_cov_params`の補正係数はOLSと同じ`(G/(G-1))×((n-1)/(n-K))`。
-//!      `G`はクラスター数（変更なし）。
-//!    - **`K`（`(n-1)/(n-K)`の分母）はFE固有のfixest型ロジック**（`fe_cluster_
-//!      k_correction`）で決める。クラスター変数がFEの各次元（1-wayはentity、2-wayは
-//!      entity+time）に「ネスト」しているか（各水準がクラスターの単一の値にしか
-//!      対応しないか、`fixef_dimension_nested_within_cluster`で判定）で場合分けする:
-//!      - 全FE次元がネスト（1-way・`cluster`省略時のデフォルトがこの既定ケース）:
-//!        `K = df_model - nested_size_sum + m`（`m`=FE次元数、`nested_size_sum`=
-//!        ネストした次元の生の水準数の合計）。具体例: 1-way・entity単位クラスター・
-//!        `n_entities=20`・`k=2`なら`K=22-20+1=3`。
-//!      - 一部の次元だけネスト（2-way FEで典型）: `K = df_model - (nested_size_sum -
-//!        count_nested)`。
-//!      - どの次元もネストしない（Stataの`xtreg,fe`型）: `K = df_model`
-//!        （固定効果ダミーをフルカウント）。
-//!      - 最後にfixest自身の安全弁`K = max(K, k+1)`を適用する。
-//!
-//!      詳細な導出・実地検証済みの具体例は`fe_cluster_k_correction`関数doc参照。
-//!
-//! **t値・p値・信頼区間・F検定の自由度（`df_inference`）は`cov_type=Cluster`のとき
-//! `G-1`、`Dk`のとき`t_periods-1`に切り替える**（fixestの`ssc()`既定`t.df="min"`、
-//! 。OLS自身が`cov_type=Cluster`のときだけ`n_groups-1`に切り替える
-//! （`ols/estimator.rs`の`df_inference`）のと同じパターンをClassical/HC1-3以外の全cov_typeに
-//! 広げたもの）。`df_resid`自体（σ̂²・調整済みR²・AIC/BIC）は`cov_type`によらず
-//! 常に元のパネル自由度調整済みの値のまま。
-//!
-//! `cov_type`のデフォルト（`"cluster"`、entity単位、3.2節）は`engine_pybind`層
-//! （`FEOptions`）の責務。`FeEstimator::fit`自体はデフォルトを
-//! 持たず、呼び出し側が`FeCovType`を明示的に渡す（`cluster`省略時のentity自動
-//! 使用——`FeCovType::Cluster { groups: None }`——のみこのモジュールの責務）。
-//!
-//! ## Driscoll-Kraay型パネルHAC対応（`FeCovType::Dk`、3.1節）
-//!
-//! OLSの`CovType::Dk`（グローバルな時系列順序に対する単純なNewey-West型）をそのまま
-//! 流用すると異なるエンティティの観測を単一の時系列カーネルに混ぜてしまい経済学的に
-//! 不正確になるため、別アルゴリズムとして実装する（3.1節）。以下は着手時に
-//! `linearmodels.panel.covariance.DriscollKraay`のソースコードを実地確認し、ユーザー
-//! 承認済みの設計（2026-09-12）:
-//!
-//! - **式**: `Cov(β̂) = (t_periods/(t_periods-1)) × ((n-1)/(n-K)) × (X̃'X̃)⁻¹ Ŝ (X̃'X̃)⁻¹`
-//!   （**fixestの`vcov="DK"`（`ssc()`に従う）へ変更、旧`n/df_resid`
-//!   （linearmodels方式）から置き換え**）。
+//! - **式**: `Cov(β̂) = (t_periods/(t_periods-1)) × ((n-1)/(n-K)) × (X̃'X̃)⁻¹ Ŝ (X̃'X̃)⁻¹`、
 //!   `Ŝ = Σ_t ξ_t ξ_t' + Σ_{l=1}^{bw} w_l (ξ_t ξ_{t-l}' + ξ_{t-l} ξ_t')`、
-//!   `ξ_t = Σ_{i: time_i=t} x̃_i ε̂_i`（時点`t`でのクロスセクション和、`k`次元ベクトル）。
-//!   `x̃`はwithin変換後の設計行列（他のcov_type同様、LSDV展開はしない）。
-//!   fixestのDKは`ssc()`の`K.fixef`既定が`"full"`（Clusterの`"nonnested"`と異なる）で、
-//!   実地数値実験（devcontainer内のfixest 0.14.2、実装時）で確認した通り
-//!   これはDKにクラスター変数という概念が無く（`ssc_compute_K`のネスト判定が発生
-//!   しない）常に`K = df_model`（フルカウント）になるためと理解できる。`t_periods`
-//!   （ユニークな時点数）を、cluster補正の`G`と同じ役割（`G/(G-1)`補正・推論の自由度
-//!   `G-1`）で使う（実地検証済み）。`t_periods < 2`は`resolve_dk_bandwidth`が
-//!   `PanelError::InsufficientDkPeriods`で拒否する（`G=1`のクラスターが拒否される
-//!   のと同じ理由、同エラーのdocコメント参照）。
-//! - **カーネル**: v1はBartlett（Newey-West）限定（`w_l = 1 - l/(bw+1)`）。OLSの
-//!   `CovType::Dk`もBartlett限定（`docs/spec/ols-spec.md`）であることと平仄を合わせる、
-//!   ユーザーとの相談で決定。Parzen・Quadratic-Spectralへの拡張は未着手。
-//! - **バンド幅**: `FeCovType::Dk { bandwidth: Option<i64>, .. }`。`Some(bw)`なら
-//!   `0 <= bw < t`（`t`=ユニークな時点数）を検証してそのまま使う
-//!   （`PanelError::InvalidDkBandwidth`）。`None`なら`floor(4*(t/100)^(2/9))`で自動計算
-//!   する（`resolve_dk_bandwidth`）——`linearmodels`の`DriscollKraay`のデフォルト
-//!   ルールと同一の式だが、**OLSの`hac_lags`が観測数`n`ベースなのに対しDKは時点数`t`
-//!   ベース**である点に注意（`linearmodels`もこのデフォルトルールでは`kernel_optimal_
-//!   bandwidth`——データ依存の自動選択——を使わず、決定的な式のみを使う）。
-//! - **時系列順序**: DKのカーネル集計はξ_tを時系列順に並べてラグを取る必要がある。
-//!   `time`は`TimeKeys`（`common.rs`）で受け取り、時点のラベル（同一性の判定と
-//!   `fixed_effects()`のキー）と**時間順のコード**を持つ。順序は文字列の辞書順ではなく
-//!   列の値の順序（整数・浮動小数は数値順、日付・日時は時系列順、`Enum`は定義順）で、
-//!   どの順序にするかは呼び出し側（`engine_pybind`が列のdtypeから決める）が
-//!   `TimeKeys`のコンストラクタで指定する。辞書順は`1, 10, 11, 2, ...`のように時間順と
-//!   ずれて標準誤差が黙って変わるため使わない。`TimeKeys::lexicographic`（と
-//!   `FeInput::from_columns`）はラベルの辞書順を時間順とみなす簡便版で、ISO 8601の日付や
-//!   ゼロ埋めした年月等、辞書順が時間順と一致するラベル向け。
-//!   `panel_driscoll_kraay_cov_params`（`common.rs`）は`time`の整数コード（`GroupCodes`）の
-//!   順に集計するため、コード順がそのまま時系列順になる。
-//! - **1-way/2-wayとも対応**（ユーザーとの相談で決定）。DKの時点列は`FeCovType::Dk.time`
-//!   として常に明示的に受け取る（必須。1-way/2-wayのどちらでも同じ）。
-//! - `Cluster`と異なり`fe_cluster_k_correction`のネスト判定は行わない——DKは常に
-//!   `K = df_model`（上記スケールの導出参照）。
-//! - **`FeCovType::Dk.time`は必須で、`FeInput.time_keys()`にはフォールバックしない**: 当初は
-//!   `Option<TimeKeys>`で、`None`なら2-way FEの`FeInput.time_keys()`を暗黙に借用していたが、
-//!   どの列がDKの時点かを呼び出し側が明示しない設計は、意図と違う列が選ばれても気づけない
-//!   ため廃止した（`engine_pybind`の`FEOptions.dk_time`が`cov_type="dk"`で必須）。
-//!   `FeInput.time_keys()`は2-way FEの固定効果の時間次元専用で、DK HACの時系列順序とは独立
-//!   （2-wayで`time`と別の時間粒度のDKを使うこともできる）。
+//!   `ξ_t = Σ_{i: time_i=t} x̃_i ε̂_i`。`x̃`はwithin変換後の設計行列。fixestの`vcov="DK"`に
+//!   合わせ、`K = df_model`（DKにはクラスター変数が無くネスト判定が起きない）、`t_periods`を
+//!   クラスターの`G`と同じ役割（`G/(G-1)`補正・自由度`G-1`）で使う。`t_periods < 2`は
+//!   `resolve_dk_bandwidth`が`InsufficientDkPeriods`で拒否する。
+//! - **カーネル**: Bartlett限定（`w_l = 1 - l/(bw+1)`）。OLSの`CovType::Dk`と揃える。
+//! - **バンド幅**: `Some(bw)`なら`0 <= bw < t`を検証（`InvalidDkBandwidth`）。`None`なら
+//!   `floor(4*(t/100)^(2/9))`（`linearmodels`の既定。OLSの`hac_lags`が観測数`n`ベースなのに
+//!   対しDKは時点数`t`ベース）。
+//! - **時系列順序**: `time`は`TimeKeys`で、時点のラベルと**時間順のコード**を持つ。順序は列の値の
+//!   順序（数値は数値順、日付・日時は時系列順、`Enum`は定義順）で、呼び出し側が
+//!   `TimeKeys`のコンストラクタで指定する。辞書順は`1, 10, 11, 2, ...`と時間順がずれて標準誤差が
+//!   黙って変わるため使わない（`TimeKeys::lexicographic`・`FeInput::from_columns`は辞書順が時間順と
+//!   一致するISO 8601日付やゼロ埋め年月向けの簡便版）。
+//! - **1-way/2-wayとも対応**。DKの時点列は`FeCovType::Dk.time`として常に明示的に受け取る
+//!   （`FeInput.time_keys()`にはフォールバックしない。どの列がDKの時点か呼び出し側が
+//!   明示しない設計は、意図と違う列が選ばれても気づけないため。`FeInput.time_keys()`は
+//!   2-wayの固定効果の時間次元専用）。
 //!
-//! ## 固定効果自体（α_i）の復元（`fixed_effects()`、`fe-spec.md`3.5節）
+//! ## 固定効果自体（α_i）の復元（`fixed_effects()`）
 //!
-//! `fe-spec.md`3.5節どおり別メソッド（`fit()`の戻り値本体には含めない、IVの`first_stage()`と同じ
-//! 「追加結果は別メソッド」方針）。`FeEstimator`は`fit()`時点で`input`（変換前の元の
-//! `y`/`x`/`entity`/`time`）と`params()`（β̂）を既に保持しているため、
-//! `fixed_effects()`は追加のフィールドを持たず呼び出し時に計算し直す（IVの`first_stage`
-//! と異なり、固定効果自体の値は主推定`β̂`の計算に必要ないため、常に計算しておく理由が無い）。
+//! `fit()`の戻り値本体には含めない別メソッド。`FeEstimator`が保持する変換前の入力と
+//! `params()`から呼び出し時に計算する。
 //!
-//! - **1-wayは一意に決まる**: `α_i = ȳ_i. - x̄_i.'β̂`（`fe-spec.md`3.5節の式そのまま）。モデル
-//!   `y_it = α_i + x_it'β + ε_it`では切片が全てentityに吸収される設計のため
-//!   （`OlsInput::from_columns`が`include_intercept=false`で呼ばれる、FEの基本設計）
-//!   正規化の任意性は無い。
-//! - **2-wayには正規化の任意性がある**（着手時に発見、ユーザー承認済み、2026-09-12）:
-//!   モデル`y_it = α_i + γ_t + x_it'β̂ + ε̂_it`は`α_i`に定数`c`を足し`γ_t`から`c`を引いても
-//!   同じ予測値になるため一意に決まらない。`fe-spec.md`3.5節の式をそのままentity/timeに当てはめる
-//!   （`α_i = ȳ_i. - x̄_i.'β̂`、`γ_t = ȳ_.t - x̄_.t'β̂`）と、大域平均`ȳ.. - x̄..'β̂`が
-//!   両方に二重計上されるバグになる（`α_i + γ_t`が正しい合成効果より大域平均ぶん
-//!   大きくなる）。**採用した正規化: 基準時点を`γ_{t_ref} = 0`に固定し、`α_i`に大域的な
-//!   水準を吸収させる方式**（`fixest::fixef()`と同型の「片方のFEダミーの参照水準を0にする」
-//!   考え方）。`t_ref`には`time`の時間順で最初の値を使う（DKの時系列順序と同じ`TimeKeys`の
-//!   順序、モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照——入力の観測順に依存しない
-//!   決定的な選び方）。`fixed_effects()`の`time`は時間順の`Vec`で返す:
-//!   - `E_i = ȳ_i. - x̄_i.'β̂`（entityの残差平均）、`E_t = ȳ_.t - x̄_.t'β̂`（timeの残差平均）、
-//!     `E = ȳ.. - x̄..'β̂`（全体の残差平均）とすると、`α_i = E_i - E + E_{t_ref}`、
-//!     `γ_t = E_t - E_{t_ref}`。導出: バランスパネルの2-way ANOVA恒等式
-//!     `E_i + E_t - E = α_i + γ_t`（正規化前、`c`不定）に`γ_{t_ref}=0`の制約を課すと
-//!     `c = E - E_{t_ref}`が定まり、`α_i = E_i - c`、`γ_t = E_t - E + c`から上式が出る。
-//!   - **`fixest::fixef()`との数値一致は`t_ref`の選び方が一致する入力でのみ成立する**
-//!     （着手時に発見、ユーザー承認済み、2026-09-12）: `fixest`自身の基準時点選択は
-//!     `time`列の時間順ではなく**観測順で最初に現れた値**に見える（実地検証: 同じ
-//!     `{entity, time}`ペア集合でも行の並び順を変えると`fixef()`が選ぶ基準時点が変わる
-//!     ことを確認）。2-wayの正規化はどの`t_ref`を選んでも数学的に等価（`α_i`・`γ_t`の
-//!     分解が変わるだけで`α_i+γ_t+x_it'β̂`自体は不変）なため、**本実装は`fixest`の
-//!     観測順依存の挙動を再現せず、`time`の時間順という決定的な規約を優先する**
-//!     （ユーザーとの相談で決定）。テストで使う`fixest_reference_input`は観測順の最初の
-//!     時点と時間順で最初の時点が一致する構成のため、その入力に限り`fixest::feols(y ~ x |
-//!     entity + time)`の`fixef()`と数値完全一致する
-//!     （`fe_estimator_fit_two_way_fixed_effects_matches_fixest_reference`）。
-//!   - 代替案（`α_i`・`γ_t`をともに大域平均からの偏差にする対称正規化）は、`fe-spec.md`3.5節のAPI
-//!     形状（entity/timeの2キーのみ）に大域平均を格納する場所が無いため不採用
-//!     （ユーザーとの相談で決定）。
-//! - 新規ヘルパー（`fe.rs`内private）: `slope_only_residual`（`fe_r_squared_overall`と共有、
-//!   「元の`y`/`x`に`β̂`だけを当てはめた残差」の定義を一箇所に集約。`fe_r_squared_between`は
-//!   エンティティ平均に集約してから当てはめるため行の単位が異なり共有しない、関数doc参照）・
-//!   `group_residual_means`（エンティティ・時点のコードでグループ化し、グループごとの
-//!   `slope_only_residual`平均を求める）・`overall_residual_mean`（全観測平均、2-way正規化の
-//!   大域平均`E`に使う）。
+//! - **1-way**: `α_i = ȳ_i. - x̄_i.'β̂`（一意）。
+//! - **2-way**: `α_i`に定数を足し`γ_t`から引いても予測値が変わらないため一意に決まらない。
+//!   `fe-spec.md`3.5節の式をentity/timeにそのまま当てはめると大域平均を二重計上するため、
+//!   **`time`の時間順で最初の値`t_ref`を基準に`γ_{t_ref}=0`とし、`α_i`に大域的な水準を
+//!   吸収させる**（導出は`fe-spec.md`3.5節）。`fixest::fixef()`は基準時点を観測順で最初に
+//!   現れた値に取るように見えるため、数値が一致するのは両者の基準時点が一致する入力に限る。
+//!   本実装は観測順に依存しない時間順の規約を優先する。
 
 use std::collections::BTreeMap;
 
@@ -417,8 +180,7 @@ pub struct FeInput {
     /// 説明変数名。`x`の列と対応する。
     x_names: Vec<String>,
     /// 各行の時点コード（時間順、長さ`n`）。2-way FE（entity + time FE）を
-    /// 指定しない場合は`None`（`panel-common.md`1.1節: `time`は`FEOptions`内の条件付き
-    /// 必須オプション）。
+    /// 指定しない場合は`None`（`panel-common.md`1.1節）。
     time: Option<TimeKeys>,
     /// 被説明変数名。
     dep_var_name: String,
@@ -442,7 +204,7 @@ impl FeInput {
     ///   `PanelError::IdentifierDimensionMismatch { dimension: PanelDimension::Time, .. }`
     ///
     /// within変換の実施・singleton検出・分散ゼロ検証・バランスパネルの検証は行わない
-    /// （いずれも別issueで`fit()`側が担う、`docs/spec/fe-spec.md`）。
+    /// （いずれも`fit()`側が担う、`docs/spec/fe-spec.md`）。
     ///
     /// # パニックについて
     /// `x_names.len() != x_columns.len()`の場合は`debug_assert!`でパニックする
@@ -616,7 +378,7 @@ impl FeInput {
     }
 }
 
-/// FEの固定効果の方向。[`PanelEffects`]の別名（モジュールdoc「within変換後の最小二乗」参照）。
+/// FEの固定効果の方向。[`PanelEffects`]の別名（モジュールdoc「`FeEstimator::fit`のパイプライン」参照）。
 pub type FeEffects = PanelEffects;
 
 /// FEが対応する`cov_type`。[`PanelCovType`]の別名（モジュールdoc「`cov_type`対応」参照）。
@@ -645,7 +407,7 @@ pub enum FixedEffects {
 
 /// FEの推定結果。`within`変換したデータに最小二乗をあてはめ、`cov_type`
 /// ・自由度調整を反映した標準誤差等を計算し直す
-/// （モジュールdoc「within変換後の最小二乗」「自由度調整」「`cov_type`対応」参照）。
+/// （モジュールdoc「`FeEstimator::fit`のパイプライン」「自由度調整」「`cov_type`対応」参照）。
 ///
 /// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」）。
 #[derive(Debug)]
@@ -697,7 +459,7 @@ pub struct FeEstimator {
     aic: f64,
     bic: f64,
     /// 傾き係数`k`個の同時Wald F検定の`(F統計量, p値)`（素の最小二乗の`f_statistic`とは
-    /// 異なりFE用にpanel自由度調整済み・`cov_type`反映済み、モジュールdoc「自由度調整」の
+    /// 異なりFE用にpanel自由度調整済み・`cov_type`反映済み、モジュールdoc「自由度とF統計量」の
     /// F統計量節参照）。`k=0`なら`None`。
     f_test: Option<(f64, f64)>,
 }
@@ -706,7 +468,7 @@ impl FeEstimator {
     /// `input`を`effects`が指定する方向でwithin変換した上で最小二乗をあてはめ
     /// （`shared::least_squares::least_squares`）、FEを推定する。パネル自由度調整（`fe-spec.md`3.2節）・`cov_type`対応
     /// （3.1節・3.2節）を反映した標準誤差・t値・p値・信頼区間・AIC/BIC、
-    /// パネル固有R²（2.3節）を計算し直す（モジュールdoc「自由度調整」
+    /// パネル固有R²（2.3節）を計算し直す（モジュールdoc「自由度とF統計量」
     /// 「`cov_type`対応」「パネル固有R²」参照）。
     ///
     /// パイプライン: 2-wayの時点コードの解決（`two_way_time`。2-wayで`time`が無ければ
@@ -906,7 +668,7 @@ impl FeEstimator {
         let aic = -2.0 * log_likelihood + 2.0 * (df_model as f64);
         let bic = -2.0 * log_likelihood + (n as f64).ln() * (df_model as f64);
 
-        // F統計量（モジュールdoc「自由度調整」のF統計量節）: 傾き係数`k`個の
+        // F統計量（モジュールdoc「自由度とF統計量」）: 傾き係数`k`個の
         // 同時Wald検定。FEの`cov_params`（`cov_type`別、上で計算済み）・`df_inference`
         // （`cov_type=Cluster`/`Dk`のときだけ`df_resid`から切り替わる、`shared::wald::wald_f_test`の
         // `df_inference`引数と同じ扱い）を使う。`k_constant=0`（FEに切片は無い、上記
@@ -1083,7 +845,7 @@ impl FeEstimator {
     }
 
     /// 傾き係数`k`個が同時にゼロという帰無仮説のWald F検定統計量
-    /// （モジュールdoc「自由度調整」のF統計量節参照）。`k=0`なら`None`。
+    /// （モジュールdoc「自由度とF統計量」参照）。`k=0`なら`None`。
     pub fn f_statistic(&self) -> Option<f64> {
         self.f_test.map(|(statistic, _)| statistic)
     }
@@ -1171,9 +933,8 @@ fn slope_only_residual(y: &[f64], x: &[Vec<f64>], params: &Mat<f64>, i: usize) -
 /// （＝ユーザーが明示的な重みを指定していない）なら`w`を無条件に全要素`1.0`へ上書きする
 /// （`if np.all(self.weights.values2d == 1.0): w = np.ones_like(w)`）。**FEは`weights`引数を
 /// サポートしない**（CLAUDE.md 1.3節「見送り」）ため、この分岐が常に成立し
-/// `T_i`ベースの重みは実質的に到達不能——不均衡パネルで一度この重み付き版を実装し
-/// `linearmodels`と数値が食い違うことを発見して修正した経緯がある（実地検証、
-/// 2026-09-12）。エンティティコード（`GroupCodes`、辞書順）で集計する（`panel_cluster_cov_params`
+/// `T_i`ベースの重みは実質的に到達不能（重み付き版は不均衡パネルで`linearmodels`と
+/// 数値が食い違う）。エンティティコード（`GroupCodes`、辞書順）で集計する（`panel_cluster_cov_params`
 /// と同じ理由でグループ間加算の順序を固定する、モジュールdoc参照）。
 ///
 /// `TSS <= 0`（全エンティティ平均がゼロ等）なら`linearmodels`と同じく`0.0`を返す。
@@ -2746,7 +2507,7 @@ mod tests {
     fn fe_estimator_fit_one_way_matches_fixest_reference() {
         // Rの`fixest::feols(y ~ x | id)`（`id`: a/b/c/d各3観測）の実測値と数値比較する
         // （5.2節・fixestがFEのRクロスチェック参照実装）。期待値はRで独立に計算・検算済み
-        // （`options(digits=15)`でフルの浮動小数点精度を取得、2026-09-12）。
+        // （`options(digits=15)`でフルの浮動小数点精度を取得）。
         let (entity, _time, x, y) = fixest_reference_input();
         let input =
             FeInput::from_columns(&y, &[x], vec!["x".to_string()], &entity, None, "y".into())
@@ -2766,12 +2527,12 @@ mod tests {
         assert!((fe.bic() - 58.037_079_177_551_7).abs() < 1e-6);
         // パネル固有R²: 1-wayではwithinは`linearmodels`の`rsquared_within`と
         // `fixest`の`fitstat(m, "wr2")`が一致する（モジュールdoc「パネル固有R²」参照）。
-        // between/overallは`linearmodels`の値（Pythonで独立に計算・検算済み、2026-09-12）。
+        // between/overallは`linearmodels`の値（Pythonで独立に計算・検算済み）。
         assert!((fe.r_squared_within() - 0.600_341_337_099_812).abs() < 1e-9);
         assert!((fe.r_squared_between() - 0.748_302_743_867_978).abs() < 1e-9);
         assert!((fe.r_squared_overall() - 0.732_444_936_421_435).abs() < 1e-9);
         // F統計量: k=1のため「1自由度のF検定は両側t検定と代数的に等価」
-        // （モジュールdoc「自由度調整」のF統計量節参照）。
+        // （モジュールdoc「自由度とF統計量」参照）。
         assert!((fe.f_statistic().unwrap() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
         assert!((fe.f_p_value().unwrap() - *fe.p_values().get(0, 0)).abs() < 1e-9);
     }
@@ -2811,7 +2572,7 @@ mod tests {
         assert!((fe.r_squared_between() - 0.513_009_039_069_012).abs() < 1e-9);
         assert!((fe.r_squared_overall() - 0.511_356_250_429_877).abs() < 1e-9);
         // F統計量: k=1のため「1自由度のF検定は両側t検定と代数的に等価」
-        // （モジュールdoc「自由度調整」のF統計量節参照）。
+        // （モジュールdoc「自由度とF統計量」参照）。
         assert!((fe.f_statistic().unwrap() - fe.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
         assert!((fe.f_p_value().unwrap() - *fe.p_values().get(0, 0)).abs() < 1e-9);
     }
@@ -2822,9 +2583,9 @@ mod tests {
     /// 単回帰では真の同時検定（複数の傾き係数）を検証できないため、2変数版として別に用意
     /// する）。`fitstat(m, "f")`はFEダミーも含めたモデル全体のF検定でありここでの定義
     /// （FEダミーを除く傾き係数のみの同時検定、`linearmodels.PanelOLS.f_statistic`と同じ、
-    /// モジュールdoc「自由度調整」のF統計量節参照）と異なるため、fixestではなく
+    /// モジュールdoc「自由度とF統計量」参照）と異なるため、fixestではなく
     /// `linearmodels`（`cov_type="unadjusted"`）の値と直接比較する（期待値はPythonで
-    /// 独立に計算・検算済み、2026-09-12）。
+    /// 独立に計算・検算済み）。
     #[allow(clippy::type_complexity)]
     fn f_test_reference_input() -> (Vec<String>, Vec<String>, Vec<f64>, Vec<f64>, Vec<f64>) {
         let entity = strings(&["a", "a", "a", "b", "b", "b", "c", "c", "c", "d", "d", "d"]);
@@ -2888,8 +2649,6 @@ mod tests {
         // （`WithinRegressionFailed`にはならない）だが、傾き係数の同時共分散部分行列の条件数が
         // スケール比の2乗（≈1e18）相当となり倍精度の限界を超えるため、FE自身のF検定
         // （`wald_f_test`の`ensure_well_conditioned_symmetric_matrix`）が`FTestFailed`を返す。
-        // 以前は委譲先の`OlsEstimator::fit`が同種のF検定を先に計算して
-        // `WithinRegressionFailed`として失敗していたため、この経路は再現できなかった。
         let n = 20;
         let entity: Vec<String> = (0..n).map(|i| format!("e{}", i % 5)).collect();
         let x1: Vec<f64> = (0..n).map(|i| 1e6 * (((i * 7) % 11) as f64)).collect();
@@ -2929,12 +2688,11 @@ mod tests {
 
     #[test]
     fn fe_estimator_fit_one_way_r_squared_between_matches_linearmodels_on_unbalanced_panel() {
-        // `fe_r_squared_between`のエンティティ観測数による重み付け（`w_i = T_i/mean(T)`）
-        // は、上の2本の`fixest_reference_input`テストがバランスパネル（全エンティティ
-        // `T_i=3`）のため`w_i=1`に退化し一度も検証されていない（rust-reviewerが
-        // 指摘した「ループ本体が複数分岐で一度も実行されない」落とし穴と同型、モジュールdoc
-        // 「パネル固有R²」参照）。T_a=2, T_b=4, T_c=3の不均衡パネルで`linearmodels`と
-        // 数値比較する（期待値はPythonで独立に計算・検算済み、2026-09-12）。
+        // `fe_r_squared_between`はエンティティ観測数による重み付け（`w_i = T_i/mean(T)`）を
+        // しない（モジュールdoc「パネル固有R²」参照）。上の2本の`fixest_reference_input`
+        // テストはバランスパネル（全エンティティ`T_i=3`）のため、重みの有無で値が変わらず
+        // 検証できない。T_a=2, T_b=4, T_c=3の不均衡パネルで、重みなしの値が`linearmodels`と
+        // 一致することを数値比較する（期待値はPythonで独立に計算・検算済み）。
         let entity = strings(&["a", "a", "b", "b", "b", "b", "c", "c", "c"]);
         let x = vec![1.0, 3.0, 2.0, 5.0, 4.0, 6.0, 1.0, 4.0, 2.0];
         let y = [2.0, 6.0, 5.0, 9.0, 8.0, 11.0, 3.0, 7.0, 4.0];
@@ -2953,10 +2711,10 @@ mod tests {
     #[test]
     fn fe_estimator_fit_one_way_r_squared_between_returns_zero_when_entity_means_are_zero() {
         // `fe_r_squared_between`の`TSS <= 0`ガード（`linearmodels`と同じく`0.0`を返す）が
-        // これまでのテストでは一度も通っていなかった（rust-reviewer指摘）。各エンティティの
+        // 他のテストでは通らない。各エンティティの
         // `y`平均がちょうどゼロ（`TSS_between = Σȳ_i.² = 0`）になるデータで検証する。
         // within/overallは退化しない（`y`自体の分散はあるため）ことも合わせて確認し、
-        // `linearmodels`の実測値と数値比較する（Pythonで独立に計算・検算済み、2026-09-12）。
+        // `linearmodels`の実測値と数値比較する（Pythonで独立に計算・検算済み）。
         let entity = strings(&["a", "a", "b", "b", "c", "c"]);
         let x = vec![1.0, 3.0, 2.0, 6.0, 1.0, 4.0];
         let y = [1.0, -1.0, 2.0, -2.0, 3.0, -3.0];
@@ -2978,7 +2736,7 @@ mod tests {
     fn fe_estimator_fit_one_way_fixed_effects_matches_fixest_reference() {
         // `fixest::feols(y ~ x | entity)`の`fixef()`と数値比較する（1-wayは正規化の任意性が
         // 無いため無条件に一致する、モジュールdoc「固定効果自体（α_i）の復元」参照）。
-        // 期待値はRで独立に計算・検算済み（`options(digits=15)`、2026-09-12）。
+        // 期待値はRで独立に計算・検算済み（`options(digits=15)`）。
         let (entity, _time, x, y) = fixest_reference_input();
         let input =
             FeInput::from_columns(&y, &[x], vec!["x".to_string()], &entity, None, "y".into())
@@ -3001,7 +2759,7 @@ mod tests {
         // `fixest_reference_input`は観測順で最初に現れる時点（"1"）と辞書順で最小の時点
         // （"1"）が一致する構成のため、この入力に限り`fixest`と数値完全一致する
         // （モジュールdoc「固定効果自体（α_i）の復元」参照。期待値はRで独立に計算・
-        // 検算済み、2026-09-12）。
+        // 検算済み）。
         let (entity, time, x, y) = fixest_reference_input();
         let input = FeInput::from_columns(
             &y,
@@ -3096,11 +2854,11 @@ mod tests {
     #[test]
     fn fe_estimator_fit_one_way_fixed_effects_on_unbalanced_panel() {
         // 1-wayの`α_i = ȳ_i. - x̄_i.'β̂`は正規化の任意性が無く、不均衡パネル
-        // （T_a=2, T_b=4, T_c=3）でも単純にそのまま成立することを確認する（`fe_r_squared_
-        // between`が一度バランスパネルのみのテストで重み付けバグを見逃した教訓——
-        // rust-reviewer指摘——を踏まえ、`fixed_effects()`も不均衡ケースを回帰ガードする）。
+        // （T_a=2, T_b=4, T_c=3）でも単純にそのまま成立することを確認する（バランスパネル
+        // のみのテストでは重み付けの誤りを見逃すため、`fixed_effects()`も不均衡ケースを
+        // 回帰ガードする）。
         // 入力は`fe_estimator_fit_one_way_r_squared_between_matches_linearmodels_on_
-        // unbalanced_panel`と同じ（期待値はPythonで独立に計算・検算済み、2026-09-12）。
+        // unbalanced_panel`と同じ（期待値はPythonで独立に計算・検算済み）。
         let entity = strings(&["a", "a", "b", "b", "b", "b", "c", "c", "c"]);
         let x = vec![1.0, 3.0, 2.0, 5.0, 4.0, 6.0, 1.0, 4.0, 2.0];
         let y = [2.0, 6.0, 5.0, 9.0, 8.0, 11.0, 3.0, 7.0, 4.0];
@@ -3122,10 +2880,9 @@ mod tests {
     fn fe_estimator_fit_two_way_fixed_effects_with_no_regressors() {
         // 2-way・k=0（回帰変数なし）の組み合わせ境界ケース。`slope_only_residual`の
         // `fitted=0`分岐と2-way正規化ロジック（`t_ref`選択・大域平均吸収）の組み合わせを
-        // 検証する（1-wayのk=0境界（上のテスト）はあるが2-wayには無かった、
-        // rust-reviewer指摘）。time="9"/"10"はDKの辞書順規約が数値順と食い違う
+        // 検証する（1-wayのk=0境界は上のテストにある）。time="9"/"10"はDKの辞書順規約が数値順と食い違う
         // ケース（辞書順では"10" < "9"）でも規約通り"10"が基準になることを合わせて
-        // 確認する（期待値はPythonで独立に計算・検算済み、2026-09-12）。
+        // 確認する（期待値はPythonで独立に計算・検算済み）。
         let entity = strings(&["e1", "e1", "e2", "e2"]);
         let time = strings(&["9", "10", "9", "10"]);
         let y = [1.0, 3.0, 5.0, 9.0];
@@ -3173,9 +2930,9 @@ mod tests {
         assert!((*hc1.test_stats().get(0, 0) - 2.997_409_076_837).abs() < 1e-6);
         assert!((*hc1.p_values().get(0, 0) - 0.020_015_356_643_180_1).abs() < 1e-6);
         // F統計量: k=1のため「1自由度のF検定は両側t検定と代数的に等価」
-        // （モジュールdoc「自由度調整」のF統計量節参照）。HC1のcov_paramsが正しく
+        // （モジュールdoc「自由度とF統計量」参照）。HC1のcov_paramsが正しく
         // wald_f_testに渡っていることの回帰ガード（classical以外のcov_typeでの唯一の
-        // F統計量検証、rust-reviewer指摘）。
+        // F統計量検証）。
         assert!((hc1.f_statistic().unwrap() - hc1.test_stats().get(0, 0).powi(2)).abs() < 1e-9);
         assert!((hc1.f_p_value().unwrap() - *hc1.p_values().get(0, 0)).abs() < 1e-9);
 
@@ -3528,7 +3285,7 @@ mod tests {
     fn fe_estimator_fit_one_way_hac_ignores_fe_input_time() {
         // `FeInput.time_keys()`にも`time`があっても、DKの時点列は`FeCovType::Dk.time`だけから
         // 決まる（`FeInput.time_keys()`は2-wayの固定効果の時間次元専用、モジュールdoc
-        // 「Driscoll-Kraay型パネルHAC対応」参照）ことを確認する。`FeInput.time_keys()`にわざと
+        // 「Driscoll-Kraay型パネルHAC」参照）ことを確認する。`FeInput.time_keys()`にわざと
         // 全観測が同一のダミー時点列を渡し、それが無視されて`FeCovType::Dk.time`の方の結果と
         // 一致することを確認する。
         let (entity, time, x, y) = fixest_reference_input();
@@ -3626,7 +3383,7 @@ mod tests {
     fn fe_estimator_fit_one_way_hac_with_bandwidth_two_scales_unchanged_kernel_by_new_correction() {
         // `bandwidth=Some(2)`（n_periods=3のため許容範囲`[0,3)`の上限）でラグ項ループ
         // （`for l in 1..=bandwidth`）が複数回（l=1,2）実行されるケースを検証する
-        // （既定・`Some(1)`のテストはl=1の1回しか通らないため、rust-reviewer指摘。
+        // （既定・`Some(1)`のテストはl=1の1回しか通らない。
         // `testing-policy.md`が警告する「ループ本体がテストで一度も複数回実行されない」
         // 落とし穴と同型）。
         //
@@ -3716,7 +3473,7 @@ mod tests {
     fn fe_estimator_fit_two_way_hac_with_bandwidth_two_scales_unchanged_kernel_by_new_correction() {
         // 1-way版（`fe_estimator_fit_one_way_hac_with_bandwidth_two_scales_unchanged_
         // kernel_by_new_correction`）と同様、2-way FEでもラグ項ループが複数回（l=1,2）
-        // 実行されるケースを検証する（rust-reviewer指摘）。同テストのコメントの通り、
+        // 実行されるケースを検証する。同テストのコメントの通り、
         // `bandwidth == t_periods - 1`（ここでは`2 == 3 - 1`）という境界値はfixestの
         // C++実装のoff-by-oneにより本実装と一致しないため（同テストのコメント参照）、
         // fixestとの数値比較はせず回帰ガードとして期待値を固定する。
@@ -3758,7 +3515,7 @@ mod tests {
         // `Σ_t (Σ_{i:time_i=t} x̃_i ε̂_i)(...)'`で、`K=df_model`（DKは常にフルカウント・
         // clusterもこのケースではどの次元もネストしないためフルカウント）・`G=t_periods`
         // （clusterの`G`も同じ`time`列のユニーク数）のスケールも一致する。モジュールdoc
-        // 「Driscoll-Kraay型パネルHAC対応」参照）。2つの独立した実装
+        // 「Driscoll-Kraay型パネルHAC」参照）。2つの独立した実装
         // （`panel_cluster_cov_params`と`panel_driscoll_kraay_cov_params`）が同じ値に
         // 収束することを確認する回帰ガード（OLSの`fit_hac_with_zero_lags_matches_hc0`と
         // 同型）。
@@ -3810,7 +3567,7 @@ mod tests {
     #[test]
     fn fe_estimator_fit_one_way_hac_with_single_time_period_is_rejected() {
         // `t_periods=1`（全観測が同一の`time`ラベル）という退化した境界ケース
-        // （rust-reviewer指摘、`resolve_dk_bandwidth`のNone分岐が`bandwidth=t_periods`を
+        // （`resolve_dk_bandwidth`のNone分岐が`bandwidth=t_periods`を
         // 返しうる唯一のケース）。
         //
         // DKの小標本補正を`(t_periods/(t_periods-1))×((n-1)/(n-K))`
@@ -3818,8 +3575,7 @@ mod tests {
         // `t_periods=1`は`t_periods/(t_periods-1)=1/0`が発散し計算が成立しなくなった
         // （クラスターの`G=1`が`validate_cluster_groups`で拒否されるのと同じ理由）。
         // `resolve_dk_bandwidth`が`PanelError::InsufficientDkPeriods`で早期に拒否する
-        // （旧実装ではこのケースは標準誤差が数学的に厳密ゼロになる退化ケースとして
-        // 成功していたが、新しい補正式の下では未定義になるため仕様変更した）。
+        // （`G/(G-1)`型の補正は`t_periods=1`で未定義になる）。
         let entity = strings(&["a", "a", "b", "b", "c", "c"]);
         let time = strings(&["1", "1", "1", "1", "1", "1"]);
         let y = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
@@ -4276,7 +4032,7 @@ mod tests {
         // k=0（回帰変数なし、固定効果のみのモデル）でも`fit()`本体がエンドツーエンドに
         // 動くことを確認する境界ケース（`from_columns_with_no_regressors_succeeds`は
         // `FeInput`構築のみの検証で、`fit()`のdf調整（`df_model=neffects`のみになる）・
-        // パネル固有R²/`aic`/`bic`計算までは通していなかった、rust-reviewer指摘）。
+        // パネル固有R²/`aic`/`bic`計算までは通さない）。
         // n=6・n_entities=3・k=0でdf_model=neffects=3・df_resid=3。
         let entity = strings(&["a", "a", "b", "b", "c", "c"]);
         let y = [1.0, 3.0, 5.0, 7.0, 2.0, 4.0];

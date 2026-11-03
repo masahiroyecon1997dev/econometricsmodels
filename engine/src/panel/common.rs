@@ -31,15 +31,15 @@
 //!   とき、within変換によりスコアが恒等的にゼロになり共分散がゼロに退化する
 //! - `WithinRegressionFailed`: within変換済みデータの最小二乗推定委譲の失敗
 //!   （`panel-common.md`4.3節）
-//! - `FTestFailed`: F統計量（`fe.rs`モジュールdoc「自由度調整」のF統計量節、REは
-//!   `re.rs`モジュールdoc「F統計量」）のWald検定（`crate::shared::wald::wald_f_test`）が
+//! - `FTestFailed`: F統計量（`fe.rs`モジュールdoc「自由度とF統計量」、REは
+//!   `re.rs`モジュールdoc「自由度・標準誤差・F統計量」）のWald検定（`crate::shared::wald::wald_f_test`）が
 //!   失敗した場合。`WithinRegressionFailed`と
-//!   意味が異なる（`OlsEstimator::fit`自体は既に成功した後の、F検定固有の共分散部分行列の
+//!   意味が異なる（最小二乗自体は既に成功した後の、F検定固有の共分散部分行列の
 //!   ほぼ特異性というbackstopのみ、`shared/wald.rs`の`wald_f_test`docコメント参照）ため別バリアントに
 //!   分離した（`IvError::FirstStageFailed`が`WithinRegressionFailed`と同じ`LeastSquaresError`
 //!   ラップでも変換箇所ごとに専用バリアントにする判断と同じ）。
 //! - `BetweenRegressionFailed`: RE（Swamy-Arora分散成分推定、`re-spec.md`3.1節）の
-//!   between回帰（エンティティ平均への`OlsEstimator::fit(include_intercept=true)`）が
+//!   between回帰（`between_ssr_and_df`。エンティティ平均への`least_squares`）が
 //!   失敗した場合（エンティティ数が説明変数の数以下等）。`WithinRegressionFailed`と同じ
 //!   `LeastSquaresError`ラップだが、対象がFEのwithin回帰ではなくREのbetween回帰のため
 //!   別バリアントにする（`FTestFailed`と同じ判断）。
@@ -49,7 +49,7 @@
 //!   こと、σ_ε²が正にならないこと。
 //! - `QuasiDemeanedRegressionFailed`: RE（`ReEstimator::fit`、`re-spec.md`3.2節）の
 //!   準偏差変換済みデータ（`quasi_demean_transform`の出力に、同じθで変換した定数列を
-//!   加えたもの）への`OlsEstimator::fit(include_intercept=false)`委譲が失敗した場合。
+//!   加えたもの）への`OlsEstimator::fit_auxiliary(include_intercept=false)`委譲が失敗した場合。
 //!   `WithinRegressionFailed`（FEのwithin変換済みデータ）・`BetweenRegressionFailed`
 //!   （REのbetween回帰）とは対象が異なるため別バリアントにする（同じ判断の3件目）。
 //! - `HausmanTestFailed`: REのハウスマン検定（`re.rs`の`re_hausman_test`、`re-spec.md`3.7節）の
@@ -57,9 +57,8 @@
 //!   クラスター数`G`が補助回帰の傾き係数の数以下、共分散部分行列のほぼ特異性等）。
 //!   計算自体が成立しないケースのため`fit()`全体を失敗させる（設計行列の多重共線性と同じ扱い）。
 //!
-//! RE固有（`re-spec.md`）で追加のバリアントが必要になった場合は、FE/RE実装issueで実際に計算
-//! コードを書く過程で随時追加する（`LeastSquaresError`・`IvError`のdocコメントと同じ
-//! 「土台を用意し、必要になった時点で足す」方針）。
+//! バリアントは、計算コードを書く過程で必要になった時点で足す（`LeastSquaresError`・
+//! `IvError`のdocコメントと同じ方針）。
 
 use std::fmt;
 
@@ -337,10 +336,8 @@ pub enum PanelError {
 
     /// 2-way FE（entity + time FE）を要求したのに`time`列が指定されていない。
     ///
-    /// `time`は`FEOptions`内の`Option`フィールドで、2-way指定時のみ実質必須になる
-    /// 「条件付き必須」パターン（`panel-common.md`1.1節。`OLSOptions.cluster`が
-    /// `cov_type="cluster"`のときだけ必須になるのと同型）。未指定時のバリデーション
-    /// エラーとしてここで担保する。
+    /// `time`は`effects`の2要素目で、2-wayのときだけ必要になる
+    /// （`panel-common.md`1.1節）。未指定時のバリデーションエラーとしてここで担保する。
     ///
     /// `engine_pybind`は`time`の有無から1-way/2-wayを決めるため、Python APIからは起こらない
     /// （起きたら実装の誤りなので`INTERNAL_ERROR`として報告する）。
@@ -351,7 +348,7 @@ pub enum PanelError {
     ///
     /// `CommonError::InvalidHacLags`と同型のバリデーションだが、上限が観測数`n`
     /// ではなく時点数`t`になる点が異なる（DKのバンド幅は「時点のラグ」であり「観測の
-    /// ラグ」ではないため、`engine/src/panel/CLAUDE.md`「Driscoll-Kraay型パネルHAC対応」
+    /// ラグ」ではないため、`fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC」
     /// 参照）。
     #[error("{}", self.catalog_message())]
     InvalidDkBandwidth { bandwidth: i64, t: usize },
@@ -406,8 +403,8 @@ pub enum PanelError {
     #[error("{}", self.catalog_message())]
     DegenerateClusterTwoGroups,
 
-    /// within変換済みデータに対する最小二乗推定（`OlsEstimator::fit`への委譲、
-    /// `panel-common.md`4.3節。WLSがOLSへ委譲するのと同型のパターン）が失敗した。
+    /// within変換済みデータに対する最小二乗推定（`shared::least_squares::least_squares`の
+    /// 直接呼び出し、`panel-common.md`4.3節）が失敗した。
     ///
     /// 委譲先が返す`LeastSquaresError`をそのまま保持する（IVの`SecondStageFailed
     /// { source }`と同型のラップ）。`#[from]`で透過させず明示的に
@@ -436,7 +433,7 @@ pub enum PanelError {
     },
 
     /// RE（Swamy-Arora分散成分推定、`re-spec.md`3.1節）のbetween回帰
-    /// （エンティティ平均への`OlsEstimator::fit(include_intercept=true)`）が失敗した。
+    /// （`between_ssr_and_df`。エンティティ平均への`least_squares`）が失敗した。
     ///
     /// `WithinRegressionFailed`と同じ`LeastSquaresError`ラップだが、対象がFEのwithin回帰
     /// ではなくREのbetween回帰のため別バリアントにする（`FTestFailed`と同じ判断、
@@ -491,7 +488,7 @@ pub enum PanelError {
     },
 
     /// RE（`ReEstimator::fit`、`re-spec.md`3.2節）の準偏差変換済みデータへの
-    /// `OlsEstimator::fit(include_intercept=false)`委譲が失敗した。
+    /// `OlsEstimator::fit_auxiliary(include_intercept=false)`委譲が失敗した。
     ///
     /// `WithinRegressionFailed`（FEのwithin変換済みデータ）・`BetweenRegressionFailed`
     /// （REのbetween回帰）とは対象が異なるため別バリアントにする（同じ判断の3件目、
@@ -993,7 +990,7 @@ pub(crate) fn panel_cluster_cov_params(
 ///
 /// `Some(bw)`の場合は`0 <= bw < t`を検証してそのまま使う（`t`はユニークな時点数）。`None`の
 /// 場合は`linearmodels`の`DriscollKraay`と同じ経験則`floor(4*(t/100)^(2/9))`で自動計算する
-/// （`fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照。式は
+/// （`fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC」参照。式は
 /// `shared::covariance::default_hac_lags`でOLS・IVのHACと共有するが、引数が観測数`n`では
 /// なく時点数`t`になる点が異なる）。
 ///
@@ -1050,7 +1047,7 @@ pub(crate) fn validate_dk_periods_cover_tested_coefficients(
 /// `ξ_t`（時点`t`でのクロスセクション和）を求める。
 ///
 /// **`bandwidth < t_periods`が呼び出し元の`resolve_dk_bandwidth`から保証される**
-/// （詳細は`fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」参照）。上限の
+/// （詳細は`fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC」参照）。上限の
 /// `bandwidth == t_periods - 1`でも最終ラグ項`l = bandwidth`を含める標準のBartlettカーネル
 /// で、この境界ではfixestと一致しない（`docs/spec/fe-spec.md`3.3節）。
 ///
@@ -1118,9 +1115,9 @@ pub(crate) fn panel_driscoll_kraay_cov_params(
 ///   （`docs/spec/re-spec.md`3.2節: FEはこの関数の`θ_i = 1`の特殊ケース）。
 /// - **RE（準偏差変換）**: `θ_i = 1 - sqrt(σ_ε² / (T_i·σ_u² + σ_ε²))`（同3.2節）を渡す。
 ///
-/// FE/REの`fit()`は`y`と`x`の各列にこの関数をループ適用し、変換後の列を
-/// `OlsEstimator::fit`へ渡す（WLSがsqrt(w)変換したデータをOLSへ委譲するのと同型の
-/// パターン、`panel-common.md`4.3節・`re-spec.md`3.2節）。列ごとに独立な変換のため、
+/// FE/REの`fit()`は`y`と`x`の各列にこの関数をループ適用し、変換後の列を最小二乗
+/// （FEは`least_squares`、REは`OlsEstimator::fit_auxiliary`）へ渡す
+/// （`panel-common.md`4.3節・`re-spec.md`3.2節）。列ごとに独立な変換のため、
 /// 列単位の関数として実装し
 /// 呼び出し側でループする（`y`/`x`をまとめて受けるより単体テストが単純）。
 ///
@@ -1162,8 +1159,7 @@ pub(crate) fn quasi_demean_column(col: &[f64], entity: &GroupCodes, theta: &[f64
     );
 
     // エンティティごとの和を観測順に積む（エンティティ「間」をまたぐ加算は無いため、
-    // コードの振り方によらずビット単位で決定的。旧実装の`String`キーの`HashMap`集約と
-    // 同じ加算順・同じ演算で、結果もビット単位で同じ）。
+    // コードの振り方によらずビット単位で決定的）。
     let mut sums = vec![0.0_f64; entity.n_groups()];
     for (value, &c) in col.iter().zip(entity.codes()) {
         sums[c] += *value;
@@ -1330,11 +1326,10 @@ fn fixef_dimension_nested_within_cluster(dim: &GroupCodes, cluster: &GroupCodes)
 /// 忠実に移植する方針（1章）のため実装しているが、**このプロジェクトの`FeEstimator::fit`が
 /// 保証する前提（`n_entities>=1`・2-wayなら`n_periods>=1`、および`df_model = k + neffects`の
 /// 定義）の下では、3分岐のどのケースでもこのフロアは実質的にno-op（`raw_k`が既に
-/// `k+1`以上）であることを代数的に確認済み**（rust-reviewerの指摘を受けて検算、
-/// ）:
+/// `k+1`以上）であることを代数的に確認済み**:
 /// - `count_nested == m`（全次元ネスト）: `nested_size_sum`はネストした全次元の生サイズの
 ///   合計で、`df_model`の`neffects`部分もちょうど同じ次元から`Σsize - (m-1)`として
-///   構成される（`neffects`の定義、モジュールdoc「自由度調整」参照）ため、
+///   構成される（`neffects`の定義、`fe.rs`モジュールdoc「自由度とF統計量」参照）ため、
 ///   `K = df_model - nested_size_sum + m = k + (Σsize - (m-1)) - Σsize + m = k + 1`が
 ///   **恒等的に**成り立つ（1-way・2-way両次元ネストのどちらでも）。フロアと厳密に一致する
 ///   だけで、フロアが値を持ち上げる場面ではない。
@@ -1558,7 +1553,7 @@ pub(crate) fn reject_singleton_group(
     column: &str,
     ids: &GroupCodes,
 ) -> Result<(), PanelError> {
-    // 観測順で最初に現れたsingletonを報告する（旧実装の`String`版と同じ選び方）。
+    // 観測順で最初に現れたsingletonを報告する。
     for &c in ids.codes() {
         if ids.counts()[c] == 1 {
             return Err(PanelError::SingletonGroup {
@@ -1678,7 +1673,7 @@ pub enum PanelEffects {
 /// この型の別名。`OlsEstimator`の`CovType`をそのまま再利用しない理由は`fe.rs`モジュールdoc
 /// 「`cov_type`対応」参照——HC0を含まない、パネル専用の閉じた選択肢にすることで「無効な組み合わせを
 /// 型で表現不可能にする」設計にしている（IVの`WeightType`と同じ判断）。`Dk`はOLSの`CovType::Dk`と
-/// 異なるアルゴリズム（Driscoll-Kraay型パネルHAC、`fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」
+/// 異なるアルゴリズム（Driscoll-Kraay型パネルHAC、`fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC」
 /// 参照）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PanelCovType {
@@ -2993,7 +2988,7 @@ mod tests {
     fn fe_cluster_k_correction_floor_is_a_no_op_under_realistic_inputs() {
         // `fit()`が保証する前提（`df_model = k + neffects`）の下では、フロア
         // `K = max(K, k+1)`は常にno-op（`fe_cluster_k_correction`関数docの代数的
-        // 導出参照、rust-reviewer指摘を受けて追加）。1-way全ネストの現実的な入力で
+        // 導出参照）。1-way全ネストの現実的な入力で
         // `K`がちょうど`k+1`に一致することを確認する。
         let entity = codes(&["a", "a", "b", "b"]);
         let k = 1;

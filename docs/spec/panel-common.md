@@ -198,19 +198,18 @@ FE/REのClassical/HC1-3以外の全cov_typeに広げたもの）。`df_resid`自
 
 ### 4.3 FEの内部実装方針
 
-FEは**まずOlsEstimatorへの委譲を試す**（within変換したデータを`OlsEstimator::fit`に渡す、
-WLSと同型のパターン）。ただし以下はFE固有の再計算・補正が必要になる見込みで、無理に
-OLSの計算をそのまま使わない（WLSがR²等を素のOLS計算のまま使わなかったのと同じ教訓）。
+FEはwithin変換したデータに`shared::least_squares::least_squares`を直接あてはめる。
+`OlsEstimator`は経由しない: FEが使うのは係数・残差・`(X̃'X̃)⁻¹`・適合度だけで、標準誤差・F検定は
+`cov_type`ごとにFE自身が計算し直すため（`OlsEstimator`の推論結果は使わない）。`OlsEstimator`の
+推論結果をそのまま使えない点は、WLSがR²等を素のOLS計算のまま使わなかったのと同じ教訓で、
+以下はFE固有の再計算・補正になる。
 
 - 自由度（`n - 個体数 - k`、単純な`n-k`ではない）→ 検定統計量・adjusted R²・
   AIC/BICすべてに波及
 - パネル固有R²（within/between/overall、2章）はOLSに存在しない新規計算
 - `cov_type`デフォルトの`effects[0]`単位cluster化、HACのDriscoll-Kraay別実装（3章）
 
-この委譲パターンが実際にうまくいくかは、within変換の実装方法（[`fe-spec.md`](./fe-spec.md)
-3.1節）次第のため、結論を固定せず「まず委譲を試して、補正が管理可能な範囲に収まるか実装時に
-判断する」という緩い方針とした（実装の結果、委譲パターンのまま実現できた。詳細は
-[`fe-spec.md`](./fe-spec.md)3章）。
+詳細は[`fe-spec.md`](./fe-spec.md)3章。
 
 ### 4.4 新規エラー型の設計
 

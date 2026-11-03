@@ -25,14 +25,11 @@
 //! 4つのロールを持つため単一の`x`ではなく3つの設計行列を個別に保持する
 //! （`docs/spec/iv-spec.md`1章）。
 //!
-//! **配置場所の判断**: 既存の`OlsInput`/`WlsEstimator`の前例は、`OlsInput`をols/input.rsに
-//! 定義したまま`WlsEstimator`（wls.rs）が`super::ols::OlsInput`をそのままimportして使う
-//! （`linear/common.rs`へは移動しない）というものだった。これはWLSがOLSに「乗る」非対称な
-//! 依存関係（`WlsEstimator::fit`が内部で`OlsEstimator::fit`を呼ぶ）だったため、依存の
-//! 向きに沿ってOLS側にInput型を残すのが自然だったという事情がある。IVは2SLS/GMMが
-//! `IvInput`に対等に依存する構造（どちらかがもう片方に乗る関係ではない）であり、
-//! かつ2SLS/GMMの手法ファイル（`two_sls.rs`/`gmm.rs`）自体がまだ存在しないため、
-//! `IvInput`を`iv/common.rs`（両方が使う共有ロジックの置き場所）に置くことにした。
+//! **配置場所**: WLSはOLSに「乗る」（`WlsEstimator::fit`が内部で`OlsEstimator::fit`を呼ぶ）
+//! 非対称な依存関係なので、`OlsInput`はOLS側（`linear/ols/input.rs`）に置いたまま
+//! `WlsEstimator`がimportして使う。IVは2SLS/GMMが`IvInput`に対等に依存し、どちらかが
+//! もう片方に乗る関係ではないため、`IvInput`は両方が使う共有ロジックの置き場所である
+//! `iv/common.rs`に置く。
 
 use faer::Mat;
 use thiserror::Error;
@@ -141,8 +138,7 @@ pub enum IvError {
     /// 文言は`MleError::NonConvergence`（"failed to converge after {n_iter} iterations.
     /// Set raise_on_non_convergence=False to receive the result anyway, or increase
     /// max_iter"）とほぼ揃えているが、`IvError`は2SLS/GMM共有の型のため先頭に"GMM "を
-    /// 付けて対象を明示している点のみ意図的な差異（rust-reviewerの指摘で文体差を確認、
-    /// この差は意図的と判断）。
+    /// 付けて対象を明示している点のみ意図的な差異。
     #[error("{}", self.catalog_message())]
     GmmNonConvergence { n_iter: usize },
 
@@ -153,7 +149,7 @@ pub enum IvError {
     /// **設計行列の特異性（`SingularMatrix`）・観測数不足（`InsufficientObservations`）・
     /// Wald検定側の数値的なほぼ特異性（`NearSingularMatrix`）は、このバリアントを経由せず
     /// `wu_hausman_statistic`/`wu_hausman_p_value`を`None`にするだけで`fit()`自体は成功
-    /// させる**（ユーザー確認済み、`two_sls.rs`の`fit()`実装参照）。このバリアントは
+    /// させる**（`two_sls.rs`の`fit()`実装参照）。このバリアントは
     /// それら以外の（`confidence_level`・`cov_type=Cluster/Hac`の妥当性は`fit()`の
     /// 第二段階側で既に検証済みのため）理論上到達不能な失敗を防御的に伝播するためだけに
     /// 存在する（`FirstStageFailed`/`SecondStageFailed`と同じ理由で`LeastSquaresError`を
@@ -243,9 +239,9 @@ impl IvError {
 /// 識別の順序条件`len(instruments) >= len(x_endog)`のいずれも）。`OlsInput::from_columns`が
 /// `n<=k`（推定可能性）を検証せず`OlsEstimator::fit`側に委ねているのと同じ層分けで、
 /// 「次元の整合性（行数一致）」はこの構造体の責務、「統計的に推定・識別可能か」は
-/// 2SLS/GMM推定器側（`TwoSlsEstimator::fit`/`GmmEstimator::fit`、実装は後続issue）の
-/// 責務とする（ユーザー確認済み）。そのため、現状は`x_endog=[]`かつ`instruments=[]`
-/// （実質IVではなくOLSと等価な退化ケース）でも`IvInput`自体は構築に成功する。
+/// 2SLS/GMM推定器側（`TwoSlsEstimator::fit`/`GmmEstimator::fit`）の責務とする。
+/// そのため`x_endog=[]`かつ`instruments=[]`（実質IVではなくOLSと等価な退化ケース）でも
+/// `IvInput`自体は構築に成功する（この非空の拒否は`engine_pybind`の`build_iv_input`が担う）。
 #[derive(Debug)]
 pub struct IvInput {
     /// 被説明変数 (n, 1)
@@ -689,9 +685,7 @@ pub fn compute_first_stage(
 /// **`cov_type`には依存しない**（呼び出し元が指定した`cov_type`によらず常に等分散前提の
 /// F検定を使う）。Stock-Yogoの臨界値表自体が等分散前提の古典的F統計量向けにキャリブレー
 /// ションされているため（v1では臨界値照合自体は行わないが、意味合いはこの統計量に
-/// 引き継がれる）、この慣行に合わせる方針をユーザーに確認済み。`OlsEstimator`が係数の
-/// 分散共分散行列全体（`cov_params`）を公開しておらず（`std_errors()`は対角成分のみ）、
-/// `cov_type`対応のロバスト部分Wald検定には既存コードの拡張が必要になる点も判断材料にした。
+/// 引き継がれる）、この慣行に合わせる。
 #[allow(clippy::too_many_arguments)]
 fn partial_f_statistic(
     unrestricted: &OlsEstimator,
@@ -1665,8 +1659,7 @@ mod tests {
     }
 
     // `IvInput::from_columns`は識別可能性（`len(instruments)`と`len(x_endog)`の大小関係）を
-    // 検証しない（構造体docコメント参照、識別の順序条件は2SLS/GMM推定器側の責務。
-    // ユーザー確認済み）。以下3テストは、丁度識別・過剰識別・識別不足のいずれの
+    // 検証しない（構造体docコメント参照、識別の順序条件は2SLS/GMM推定器側の責務）。以下3テストは、丁度識別・過剰識別・識別不足のいずれの
     // 組み合わせでも`IvInput`自体は構築に成功することを固定する。
 
     #[test]
@@ -1731,8 +1724,8 @@ mod tests {
     #[test]
     fn from_columns_succeeds_with_no_endogenous_regressors_or_instruments() {
         // `x_endog=[]`かつ`instruments=[]`（実質OLSと等価な退化ケース）でも`IvInput`
-        // 自体は構築に成功する。この非空チェックの見送りは`engine_pybind`側の
-        // 後続issueに委ねる想定（構造体docコメント参照）。
+        // 自体は構築に成功する。この非空の拒否は`engine_pybind`側の責務
+        // （構造体docコメント参照）。
         let (y, x_exog, _, _) = sample_columns();
         let result = IvInput::from_columns(
             &y,

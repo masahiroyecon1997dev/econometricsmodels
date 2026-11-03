@@ -39,8 +39,8 @@
 //! `gmm_coefficients_converged`（絶対誤差と相対誤差の併用、`tests/api_tests`のクロス
 //! チェックで使う`tol = max(rtol * |ref|, atol)`と同じ考え方——`atol`はユーザーに公開せず
 //! 内部固定値`GMM_CONVERGENCE_ATOL`とする。係数がゼロに近いときに相対誤差だけで判定すると
-//! 不安定になることを防ぐための床で、ユーザーが調整する必要は薄いと判断した、
-//! ユーザー確認済み）で収束と判定できた時点で早期終了する。`max_iter`回に
+//! 不安定になることを防ぐための床で、ユーザーが調整する必要は薄い）で収束と判定できた
+//! 時点で早期終了する。`max_iter`回に
 //! 達しても収束しなかった場合、`raise_on_non_convergence=true`（既定）なら
 //! `IvError::GmmNonConvergence`、`false`なら`converged=false`のまま結果を返す
 //! （`nonlinear::common::run_solver`の`raise_on_non_convergence`と同じ設計、
@@ -83,14 +83,14 @@
 //! 重み行列）。自由度は`len(instruments) - len(x_endog)`（丁度識別＝自由度0では`None`、
 //! `two_sls.rs`のSargan検定と同じ）。
 //!
-//! **`n`で割ってはいけない**（rust-reviewerの指摘で発覚・修正した実装当初のバグ）:
+//! **`n`で割ってはいけない**:
 //! 標準形`J = n·ḡₙ(β̂)'Ŝ⁻¹ḡₙ(β̂)`（`ḡₙ(β̂) = (1/n)Z'ê`は正規化済み平均モーメント条件、
 //! `Ŝ`は正規化済み共分散行列）で書くと、本実装の`S`（上記「`weight_type`ごとの`S`」、
 //! `n`で割らない生の和）は`S = n·Ŝ`の関係にあるため、代入すると
 //! `J = n・[(1/n)Z'ê]'・(n・S⁻¹)・[(1/n)Z'ê] = (Z'ê)'S⁻¹(Z'ê)`となり、`n`は完全に相殺する。
 //!
 //! **`weight_type=Classical`はHansen Jのためだけに`σ̂²`スケーリングが必要**（点推定は
-//! 上記の通り不要、ユーザー確認済み）: `Robust`/`Cluster`/`Hac`の`S`は各観測の
+//! 上記の通り不要）: `Robust`/`Cluster`/`Hac`の`S`は各観測の
 //! `êᵢ²`（またはクラスター和・カーネル重み付き和）で個別に分散を見積もっており、
 //! `S = n・Ŝ`の関係が最初から成り立っている。一方`Classical`の`S = Z'Z`は「共通の
 //! 分散`σ̂²`」で見積もる版であり、`Ŝ_homoskedastic = σ̂²・(1/n)Z'Z`が正しい正規化済み
@@ -106,17 +106,15 @@
 //!
 //! ## 標準誤差・検定統計量（`cov_type`対応）
 //!
-//! 「2SLS・GMMともに`classical`/`hc0`〜`hc3`/`cluster`/`hac`でSEが計算できる」
-//! ことを完了条件として先に完了扱いになっていたが、実際には2SLS側（`two_sls.rs`）のみが実装され、
-//! `GmmEstimator`は本節を追加するまで点推定とHansen J検定のみだった（後続の
-//! ベンチマーク作業中に発覚、ユーザー確認済み）。本節はそのギャップを埋める。
+//! 2SLS・GMMともに`classical`/`hc0`〜`hc3`/`cluster`/`hac`でSEを計算できる。2SLS側は
+//! `two_sls.rs`、GMM側は本節の方式による。
 //!
 //! **`weight_type`（点推定に使う重み）と`cov_type`（SE計算方法）は独立**（モジュール冒頭
 //! 「`GmmType`と点推定への影響」参照）なので、点推定に実際に使った
 //! 重み`W = S_used⁻¹`（`gmm_iterate`が返す`s_used`、`OneStep`なら`classical_s`）と、
 //! `cov_type`が指定するモーメント条件の分散`Ω̂`（`Z`ベース、l×l）は一般に一致しない。
 //! そのため、`weight_type=cov_type`相当（効率的GMM）のときに`Avar(β̂)=(X'ZΩ̂⁻¹Z'X)⁻¹`へ
-//! 潰せる特殊ケースを分岐させず、**常に一般形のサンドイッチ**を使う（ユーザー確認済み）:
+//! 潰せる特殊ケースを分岐させず、**常に一般形のサンドイッチ**を使う:
 //!
 //! `Avar(β̂) = B⁻¹ (X'ZWΩ̂WZ'X) B⁻¹`, `B = X'ZWZ'X`（`gmm_point_estimate`の`bread`と同型）
 //!
@@ -139,17 +137,16 @@
 //!   有無で結果が変わらないが、GMMの一次条件`X'ZWZ'ê=0`は`weight_type=Classical`
 //!   以外では`ē=0`を保証しない（`X'ZW`による重み付き制約であり、`ē=(1/n)Σêᵢ`という
 //!   単純平均をゼロにする制約とは一般に一致しない）ため、非中心化SSRを使うと
-//!   `weight_type≠Classical`のときのみ`σ̂²`が系統的にずれる（初版のバグ、
-//!   GMMクロスチェック実装中に発覚・修正。`linearmodels`の`HomoskedasticWeightMatrix`
-//!   が常に中心化する設計と実測突き合わせて判明）。
+//!   `weight_type≠Classical`のときのみ`σ̂²`が系統的にずれる（`linearmodels`の
+//!   `HomoskedasticWeightMatrix`が常に中心化する設計と一致させている）。
 //! - `hc0`〜`hc3`: `two_sls.rs`の`hc_cov_params`と同型（`X̂`→`Z`）。HC2/HC3のレバレッジは
 //!   `Z`から計算する自己拡張で、**GMMのHC2/HC3は外部参照実装での検証は不可能**（
 //!   `linearmodels`の`IVGMM`にも、Rクロスチェックに使う`momentfit`にも対応する共分散推定が
 //!   無い。`docs/spec/iv-spec.md`4章。2SLSのHC2/HC3はR `ivreg`+`sandwich::vcovHC`で
 //!   検証可能なことを実機確認済み——`docs/spec/iv-spec.md`4章——だが、GMMには同等の
-//!   参照が無いため対象外のまま。ユーザー確認済み）。**HC1の小標本補正
+//!   参照が無いため対象外のまま）。**HC1の小標本補正
 //!   `n/(n-k)`・クラスターの補正`(G/(G-1))((n-1)/(n-k))`はどちらも`l`（全操作変数の数）
-//!   ではなく`k`（構造方程式の係数の数）を使う**（rust-reviewerの指摘で修正）:
+//!   ではなく`k`（構造方程式の係数の数）を使う**:
 //!   補正対象の残差`êᵢ = yᵢ - xᵢ'β̂`は常に`k`個のパラメータで推定された構造残差であり、
 //!   消費した自由度は常に`k`——`l`は外積を取る操作変数の本数（過剰識別なら`l > k`）に
 //!   過ぎず、レバレッジの計算（`Z`空間での「距離」）には妥当でも、補正係数の分母にまで
@@ -430,7 +427,7 @@ impl GmmEstimator {
 
         // weight_type=ClassicalのHansen J検定専用の重み行列`σ̂²₀・Z'Z`（モジュール冒頭の
         // docコメント「Hansen J過剰識別検定」参照。`σ̂²`によるスケーリングは点推定には
-        // 不要だがHansen Jには必須、ユーザー確認済み）。`σ̂²₀`はstep-0残差から計算する
+        // 不要だがHansen Jには必須）。`σ̂²₀`はstep-0残差から計算する
         // （`OneStep`ではstep-0残差＝最終残差のため、この一箇所の計算で両方の
         // ケースをカバーできる）。
         let sigma2_0: f64 =
@@ -962,7 +959,7 @@ fn sandwich_covariance(
 /// （`tests/api_tests`の数値クロスチェックと同じ`tol = max(rtol * |ref|, atol)`の考え方、
 /// モジュール冒頭のdocコメント「収束条件」参照）。全係数がこの条件を満たして初めて
 /// 収束とする（ベクトルノルムの比ではなくelementwise maxを取る設計、いずれか1つの係数が
-/// 収束していない状態を見逃さないため、ユーザー確認済み）。
+/// 収束していない状態を見逃さないため）。
 fn gmm_coefficients_converged(prev: &Mat<f64>, next: &Mat<f64>, rtol: f64) -> bool {
     let k = prev.nrows();
     (0..k).all(|i| {
@@ -1140,7 +1137,7 @@ fn invert_spd(mat: &Mat<f64>, dim: usize, failure: CommonError) -> Result<Mat<f6
 /// 「標準誤差・検定統計量（cov_type対応）」参照。
 ///
 /// **HC1の小標本補正`n/(n-k)`は`l`（全操作変数の数）ではなく`k`（構造方程式の係数の数）を
-/// 使う**（rust-reviewerの指摘で修正）: 補正対象の残差`êᵢ = yᵢ - xᵢ'β̂`は常にk個の
+/// 使う**: 補正対象の残差`êᵢ = yᵢ - xᵢ'β̂`は常にk個の
 /// パラメータで推定された構造残差であり、消費された自由度は常に`k`——`l`は単に外積を
 /// 取る操作変数の本数（過剰識別なら`l > k`）に過ぎず、消費した自由度とは無関係
 /// （`two_sls.rs`のHC1が`X̂`の列数=k自身を使うのと同じ理由。「`X̂`→`Z`、`k`→`l`」という
@@ -1216,8 +1213,7 @@ enum HcVariant {
 /// `G>=2`であることは`validate_cluster_groups`（呼び出し元）で検証済みの前提。
 ///
 /// 小標本補正`(G/(G-1))((n-1)/(n-k))`は`gmm_hc_omega`のHC1補正と同じ理由で`l`ではなく
-/// `k`（構造方程式の係数の数）を使う（rust-reviewerの指摘で修正、`gmm_hc_omega`の
-/// docコメント参照）。
+/// `k`（構造方程式の係数の数）を使う（`gmm_hc_omega`のdocコメント参照）。
 fn gmm_cluster_omega(
     z: &Mat<f64>,
     residuals: &Mat<f64>,
@@ -2884,9 +2880,8 @@ mod tests {
         let zte1 = z.transpose() * &e1;
         let s_inv_zte1 = s.llt(Side::Lower).unwrap().solve(&zte1);
         // `J = (Z'ê)'S⁻¹(Z'ê)`（`n`で割らない、`fit()`冒頭のdocコメント
-        // 「Hansen J過剰識別検定」参照。rust-reviewerの指摘で発覚した実装当初のバグ
-        // ——本テストのオラクルも当初は本番コードと同じ`/n`を含んでいたため検出できず、
-        // 独立検証になっていなかった——の修正を反映済み）。
+        // 「Hansen J過剰識別検定」参照。オラクルが本番コードと同じ`/n`を含むと
+        // 独立検証にならないため、ここでは`n`で割らない形で組み立てる）。
         let expected_stat: f64 = (0..3)
             .map(|i| (*zte1.get(i, 0)) * (*s_inv_zte1.get(i, 0)))
             .sum();
@@ -2898,7 +2893,7 @@ mod tests {
 
     /// 1-step GMM（`OneStep`）のHansen J統計量は、`weight_type`によらず
     /// `σ̂²₀・Z'Z`（`σ̂²₀`はstep-0＝最終残差の分散）を重み行列として計算する
-    /// （`fit()`冒頭のdocコメント「Hansen J過剰識別検定」参照、ユーザー確認済み）。
+    /// （`fit()`冒頭のdocコメント「Hansen J過剰識別検定」参照）。
     #[test]
     fn fit_computes_hansen_j_statistic_matching_manual_formula_with_one_step_gmm() {
         use statrs::distribution::{ChiSquared, ContinuousCDF};
@@ -2962,7 +2957,7 @@ mod tests {
     /// Sargan統計量と数値的に一致するはず（`fit()`冒頭のdocコメント「Hansen J過剰識別検定」
     /// 参照）。点推定側の`fit_matches_two_sls_point_estimate_when_weight_type_is_classical`
     /// と対になる不変条件チェック（同じデータセットを使う）。`GmmEstimator`単体の
-    /// 手計算オラクルでは検出できなかった`σ̂²`スケーリング漏れ（rust-reviewerの指摘）を、
+    /// 手計算オラクルでは検出できない`σ̂²`スケーリング漏れを、
     /// 独立実装である`TwoSlsEstimator`との数値一致という形で検証する。
     #[test]
     fn fit_computes_hansen_j_statistic_matching_two_sls_sargan_when_weight_type_is_classical() {
@@ -3092,8 +3087,8 @@ mod tests {
 
     /// 上記テストは`rtol=1.0`という極めて緩い許容誤差のため、ループの1回目
     /// （`n_iter=2`、`β̂₀`と`β̂₁`の比較）で必ず収束してしまい、`while`ループが
-    /// 複数周する経路（2回目以降のS再構築後に収束）を検証できていなかった
-    /// （rust-reviewerの指摘）。`heteroskedastic_test_columns()`・`weight_type=Robust`の
+    /// 複数周する経路（2回目以降のS再構築後に収束）を検証できない。
+    /// `heteroskedastic_test_columns()`・`weight_type=Robust`の
     /// 実測収束系列（`β̂₀→β̂₁`の相対誤差最大値が約`3.7e-3`、`β̂₁→β̂₂`が約`5.8e-5`、
     /// `GmmEstimator::fit`とは独立に`max_iter`を変えて`params()`を
     /// 比較して確認済み）から、`rtol=1e-3`は1回目では満たされず2回目で満たされることが
@@ -4040,8 +4035,8 @@ mod tests {
         }
     }
 
-    /// `confidence_level`が`(0, 1)`の範囲外なら`InvalidConfidenceLevel`（rust-reviewerの
-    /// 指摘で追加した検証、`OlsEstimator::fit`/`TwoSlsEstimator::fit`と同じ規約）。
+    /// `confidence_level`が`(0, 1)`の範囲外なら`InvalidConfidenceLevel`
+    /// （`OlsEstimator::fit`/`TwoSlsEstimator::fit`と同じ規約）。
     #[test]
     fn fit_returns_invalid_confidence_level_error_out_of_range() {
         let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
@@ -4079,7 +4074,7 @@ mod tests {
     }
 
     /// 観測数`n`が`k`（構造方程式の係数の数）以下なら`InsufficientObservations`
-    /// （rust-reviewerの指摘で追加した検証。`n<=k`のままだと`df_resid=n-k`による除算
+    /// （`n<=k`のままだと`df_resid=n-k`による除算
     /// 等がNaN/Infinityを静かに生成しうる、`gmm_hc_omega`のdocコメント参照）。
     #[test]
     fn fit_returns_insufficient_observations_error_when_n_is_at_most_k() {
@@ -4193,8 +4188,7 @@ mod tests {
     }
 
     /// `gmm_wald_chi2_test`（F統計量、常にロバストWald検定・χ²）を、`GmmEstimator`とは
-    /// 独立に手計算したオラクルと数値照合する（rust-reviewerの指摘で追加。他の新規ロジック
-    /// と同水準の検証にする）。
+    /// 独立に手計算したオラクルと数値照合する。
     #[test]
     fn fit_computes_f_statistic_matching_manual_wald_chi2_formula() {
         let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
@@ -4309,8 +4303,7 @@ mod tests {
     /// `cov_type`（`Hc1`、非classicalで補正が効くケース）のSEが正しく計算されることを、
     /// 独立手計算オラクルと数値照合する。モジュール冒頭のdocコメント「標準誤差・検定統計量
     /// （cov_type対応）」が主張する「`s_used`の正のスカラー倍不変性によりcov_paramsは
-    /// 変わらない」という設計判断が、`TwoStep`以外の経路でも成立することを検証する
-    /// （rust-reviewerの指摘で追加）。
+    /// 変わらない」という設計判断が、`TwoStep`以外の経路でも成立することを検証する。
     #[test]
     fn fit_computes_hc1_std_errors_matching_manual_formula_with_one_step_gmm() {
         let (y, x_endog, z1, z2) = heteroskedastic_test_columns();

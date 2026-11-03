@@ -183,7 +183,7 @@ impl TwoSlsEstimator {
     /// 拡張回帰が失敗した場合のみ`IvError::HausmanRegressionFailed`。
     ///
     /// 識別可能性の検証をここで行う理由は`IvInput`の構造体docコメント参照
-    /// （`OlsEstimator::fit`が`n<=k`を検証するのと同じ層分け、ユーザー確認済み）。
+    /// （`OlsEstimator::fit`が`n<=k`を検証するのと同じ層分け）。
     pub fn fit(input: IvInput, cov_type: CovType, confidence_level: f64) -> Result<Self, IvError> {
         // faer のグローバル並列度を Par::Seq に固定する（`crate::shared::parallelism`）。
         crate::shared::parallelism::ensure_serial();
@@ -611,7 +611,7 @@ struct WuHausmanTest {
 /// `y ~ x_exog + x_endog`に第一段階残差を追加回帰し（`linearmodels`の
 /// `wooldridge_regression`相当）、追加した残差係数のジョイント有意性を
 /// `fit()`に渡された`cov_type`と同じcov_typeでのロバストWald検定（F統計量）で
-/// 調べる（弱操作変数診断とは異なり、cov_typeに追従させる設計をユーザー確認済み。
+/// 調べる（弱操作変数診断とは異なり、cov_typeに追従させる設計。
 /// `engine/src/iv/CLAUDE.md`参照）。`x_endog=[]`なら検定対象が無いため`None`。
 ///
 /// 拡張回帰は元の第二段階（k_exog+k_endog列）より内生変数の数だけ列が多い
@@ -631,7 +631,7 @@ struct WuHausmanTest {
 /// 問題なので`None`へdegradeする。
 /// これらはWu-Hausman検定固有の問題であり、`params`/`std_errors`等の主要な推定
 /// 結果とは無関係に正しく計算できるため、`fit()`全体を失敗させず`None`を返す
-/// （ユーザー確認済み。`FirstStageFailed`/`SecondStageFailed`が`fit()`全体を失敗させる
+/// （`FirstStageFailed`/`SecondStageFailed`が`fit()`全体を失敗させる
 /// all-or-nothing方針とは意図的に異なる扱い、`engine/src/iv/CLAUDE.md`参照）。それ以外の
 /// `LeastSquaresError`バリアント（`confidence_level`・`cov_type=Cluster/Hac`の
 /// 妥当性は`fit()`の第二段階側で既に検証済み、設計行列の列数は常に1以上、行数は
@@ -718,7 +718,7 @@ struct SarganTest {
 /// 1.2節・3.5節）。
 ///
 /// **常に等分散（古典的）前提で計算し、`cov_type`には依存しない**（弱操作変数診断と
-/// 同じ判断だが、こちらはユーザー確認を要さない: Sargan検定はその定義自体が
+/// 同じ判断。Sargan検定はその定義自体が
 /// 等分散前提の検定であり、不均一分散に頑健な版が欲しい場合はGMM＋Hansen J検定
 /// （`gmm.rs`）を使うのが標準的な使い分けのため、`engine/src/iv/CLAUDE.md`参照）。
 ///
@@ -2909,8 +2909,8 @@ mod tests {
 
     /// 内生変数が2個（`k_endog=2`）の場合の配線（各内生変数の第一段階残差を正しい順序で
     /// 拡張回帰の末尾に追加し、その2列に対するジョイントWald検定を行う）を確認する
-    /// （rust-reviewerの指摘: 既存テストは`k_endog=1`のみで、複数残差列の組み立て・
-    /// 2変数同時検定の数式一般化のどちらも未検証だった）。`TwoSlsEstimator::fit`とは
+    /// （`k_endog=1`のテストだけでは、複数残差列の組み立て・2変数同時検定の数式一般化の
+    /// どちらも検証できない）。`TwoSlsEstimator::fit`とは
     /// 独立に、`OlsEstimator::wald_test_last_columns`と同型の2×2 Wald検定を手計算した
     /// オラクルと数値照合する。
     #[test]
@@ -2932,7 +2932,7 @@ mod tests {
         // 部分空間には（n=12点に対して一般には）厳密には収まらない摂動で、これが無いと
         // 構造式の残差がほぼゼロになり（`endog1`/`endog2`が`z1..z3`/`x1`の完全な線形結合の
         // ため）v_hatの係数が数値誤差だけで決まる不安定な推定になってしまう
-        // （実装当初、この摂動を入れずに実際に踏んだ）。
+        // （この摂動を入れないと実際にこの不安定さが出る）。
         let y: Vec<f64> = (0..n)
             .map(|i| {
                 1.0 + 2.0 * endog1[i] - 1.5 * endog2[i]
@@ -3027,7 +3027,7 @@ mod tests {
     }
 
     /// 弱操作変数診断とは異なり、Wu-Hausman検定は`fit()`に渡された`cov_type`に
-    /// 追従する設計（ユーザー確認済み）。同じデータで`cov_type`を変えると統計量が変わる
+    /// 追従する設計。同じデータで`cov_type`を変えると統計量が変わる
     /// ことを確認し、この設計が実際に反映されていることを固定する。
     #[test]
     fn fit_wu_hausman_statistic_depends_on_cov_type() {

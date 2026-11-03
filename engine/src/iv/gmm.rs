@@ -51,11 +51,11 @@
 //! 点推定`β̂(S⁻¹)`が変わらない**（`S`をスカラー`c`倍すると`W=S⁻¹`が`1/c`倍され、
 //! `β̂(W) = (X'ZWZ'X)⁻¹X'ZWZ'y`の分子・分母両方に`1/c`が乗り相殺するため。
 //! `gmm_point_estimate_is_invariant_to_positive_scaling_of_s`で検証済み）。
-//! そのため、`two_sls.rs`のSE計算（`hc_cov_params`等）にある小標本補正・レバレッジ補正
+//! そのため、`two_sls/cov.rs`のSE計算（`hc_cov_params`等）にある小標本補正・レバレッジ補正
 //! （HC1の`n/(n-k)`補正、HC2/HC3のレバレッジ調整、クラスターの`(G/(G-1))((n-1)/(n-k))`
 //! 補正）は、それら自体が正のスカラー（対角成分ごとに異なるレバレッジ補正を除く）である
 //! 範囲では本質的に不要であり、本実装では適用しない（後述「`weight_type`ごとの`S`」の
-//! 各関数は`two_sls.rs`の対応する関数より単純な形になっている）。
+//! 各関数は`two_sls/cov.rs`の対応する関数より単純な形になっている）。
 //!
 //! ## `weight_type`ごとの`S`
 //!
@@ -65,15 +65,15 @@
 //!   `fit_matches_two_sls_point_estimate_when_weight_type_is_classical`で検証）。
 //!   **ただしHansen J検定（下記）に使う`S`はこの限りでなく、`σ̂²・Z'Z`が必要**
 //!   （後述「Hansen J過剰識別検定」参照、点推定とHansen Jで`S`の要件が異なる点に注意）。
-//! - `Robust`: `S = Σᵢ êᵢ² zᵢzᵢ'`（`two_sls.rs`の`hc_cov_params`
+//! - `Robust`: `S = Σᵢ êᵢ² zᵢzᵢ'`（`two_sls/cov.rs`の`hc_cov_params`
 //!   のHC0相当だがレバレッジ調整は無し）。
 //! - `Cluster`: `S = Σ_g (Σ_{i∈g} êᵢzᵢ)(Σ_{i∈g} êᵢzᵢ)'`（`shared::covariance::cluster_meat`
 //!   と同じ蓄積で、小標本補正は無し）。
-//! - `Hac`: Newey-West（Bartlettカーネル）による`S`。`two_sls.rs`の`hac_cov_params`と
+//! - `Hac`: Newey-West（Bartlettカーネル）による`S`。`two_sls/cov.rs`の`hac_cov_params`と
 //!   同型（時系列相関を仮定する、パネルのDriscoll-Kraayではない。
 //!   `docs/spec/iv-spec.md`1.2節・`two_sls.rs`冒頭コメント参照）。
 //!
-//! 上記4関数は、数式としては`two_sls.rs`の`hc_cov_params`/`hac_cov_params`と同型だが、
+//! 上記4関数は、数式としては`two_sls/cov.rs`の`hc_cov_params`/`hac_cov_params`と同型だが、
 //! 独立に実装している（後述「2SLSとの共通化の判断」参照）。クラスターの蓄積
 //! （`Σ_g S_g S_g'`）だけは`shared::covariance::cluster_meat`と共有する。
 //!
@@ -81,7 +81,7 @@
 //!
 //! `J = (Z'ê)'S⁻¹(Z'ê)`（`ê`は最終推定`β̂`に基づく残差、`S`は最終推定に実際に使った
 //! 重み行列）。自由度は`len(instruments) - len(x_endog)`（丁度識別＝自由度0では`None`、
-//! `two_sls.rs`のSargan検定と同じ）。
+//! `two_sls/sargan.rs`のSargan検定と同じ）。
 //!
 //! **`n`で割ってはいけない**:
 //! 標準形`J = n·ḡₙ(β̂)'Ŝ⁻¹ḡₙ(β̂)`（`ḡₙ(β̂) = (1/n)Z'ê`は正規化済み平均モーメント条件、
@@ -99,7 +99,7 @@
 //! `σ̂²₀ = ê₀'ê₀/n`で計算する（`Robust`等が`ê₀`から`S`を構築するのと同じ「初期残差」を
 //! 使う設計、`OneStep`ではstep-0残差＝最終残差なので同じ値になる）。この
 //! スケーリングにより、`weight_type=Classical`かつ`TwoStep`のHansen Jは
-//! `two_sls.rs`のSargan統計量と数値的に一致する
+//! `two_sls/sargan.rs`のSargan統計量と数値的に一致する
 //! （`fit_computes_hansen_j_statistic_matching_two_sls_sargan_when_weight_type_is_classical`
 //! で検証、点推定の`fit_matches_two_sls_point_estimate_when_weight_type_is_classical`と
 //! 対になる不変条件チェック）。
@@ -123,10 +123,10 @@
 //! `σ̂²₀・Z'Z`（Hansen J用にスケーリング済みの値）であっても、サンドイッチ全体のスケール
 //! 不変性（`B→cB`なら`B⁻¹→B⁻¹/c`、`meat→c²・meat`で相殺）により`cov_params`は変わらない。
 //!
-//! `Ω̂`は`cov_type`ごとに以下（`Z`・`l`を`two_sls.rs`の`X̂`・`k`に置き換えた同型の自己拡張。
+//! `Ω̂`は`cov_type`ごとに以下（`Z`・`l`を`two_sls/cov.rs`の`X̂`・`k`に置き換えた同型の自己拡張。
 //! **点推定用の`robust_moment_covariance`/`cluster_moment_covariance`はそのまま使い回せない**
 //! （小標本補正が無いため、モジュール冒頭「Hansen J過剰識別検定」の教訓通りSE計算には
-//! 補正が必須）。`hac_moment_covariance`のみ例外的にそのまま使い回す——`two_sls.rs`の
+//! 補正が必須）。`hac_moment_covariance`のみ例外的にそのまま使い回す——`two_sls/cov.rs`の
 //! `hac_cov_params`もNewey-Westの重み付け以外に追加の小標本補正を持たないため、補正の
 //! 有無という観点では点推定用とSE用が最初から同じ計算になる）:
 //!
@@ -139,7 +139,7 @@
 //!   単純平均をゼロにする制約とは一般に一致しない）ため、非中心化SSRを使うと
 //!   `weight_type≠Classical`のときのみ`σ̂²`が系統的にずれる（`linearmodels`の
 //!   `HomoskedasticWeightMatrix`が常に中心化する設計と一致させている）。
-//! - `hc0`〜`hc3`: `two_sls.rs`の`hc_cov_params`と同型（`X̂`→`Z`）。HC2/HC3のレバレッジは
+//! - `hc0`〜`hc3`: `two_sls/cov.rs`の`hc_cov_params`と同型（`X̂`→`Z`）。HC2/HC3のレバレッジは
 //!   `Z`から計算する自己拡張で、**GMMのHC2/HC3は外部参照実装での検証は不可能**（
 //!   `linearmodels`の`IVGMM`にも、Rクロスチェックに使う`momentfit`にも対応する共分散推定が
 //!   無い。`docs/spec/iv-spec.md`4章。2SLSのHC2/HC3はR `ivreg`+`sandwich::vcovHC`で
@@ -163,7 +163,7 @@
 //!
 //! **F統計量は常にロバストWald検定（χ²、`df_model`で割らない生の二次形式）**
 //! （`docs/spec/iv-spec.md`2章で確定済み: 「GMMは3.2節でz分布と決定済みで古典的F検定の正当化が
-//! 無いため……常にWald版にする」）。`two_sls.rs`の`wald_f_test`と異なり`FisherSnedecor`
+//! 無いため……常にWald版にする」）。`two_sls/cov.rs`の`wald_f_test`と異なり`FisherSnedecor`
 //! ではなく`ChiSquared(df_model)`を使い、`df_model`で割らない（`linearmodels`の
 //! `debiased=False`のときの`wald_statistic`と同じ規約、`run_linearmodels_benchmark.py`の
 //! モジュールdocstring参照）。
@@ -229,7 +229,7 @@ pub enum WeightType {
     /// クラスター頑健。`groups`が`None`の場合は`CommonError::MissingClusterColumn`、コードの
     /// 行数が`n`と食い違う場合は`CommonError::ClusterDimensionMismatch`。
     Cluster { groups: Option<GroupCodes> },
-    /// Newey-West（Bartlettカーネル）によるHAC型。`lags=None`なら`two_sls.rs`と同じ
+    /// Newey-West（Bartlettカーネル）によるHAC型。`lags=None`なら`two_sls/cov.rs`と同じ
     /// 経験則で自動計算する。`time_order`は`IvInput`の行と対応する長さnの配列で、この値の昇順を
     /// 時系列順とする（必須。行順を暗黙に時系列順とみなす既定は置かない）。
     Hac {
@@ -822,13 +822,13 @@ struct HansenJTest {
 /// `J = (Z'ê)'S⁻¹(Z'ê)`（`n`で割らない、モジュール冒頭のdocコメント
 /// 「Hansen J過剰識別検定」参照。`ê`は最終推定に基づく残差、`S`は最終推定`beta`に
 /// 実際に使った重み行列`s_used`）。自由度は`len(instruments) - len(x_endog)`
-/// （`two_sls.rs`のSargan検定と同じ、`docs/spec/iv-spec.md`1.1節の`instruments`＝
+/// （`two_sls/sargan.rs`のSargan検定と同じ、`docs/spec/iv-spec.md`1.1節の`instruments`＝
 /// 除外操作変数のみという定義に対応）。丁度識別（自由度0）では`None`
 /// （`docs/spec/iv-spec.md`1.2節・3.5節）。
 ///
 /// `s_used`は`beta`計算時（`gmm_point_estimate`内の`llt`、または`classical_s`
 /// 自体が正定値`Z'Z`の正のスカラー倍）で既に反転成功済み・正定値性が保証された
-/// 行列のため、ここでの特異性は理論上到達不能（`two_sls.rs`の`xtx_inverse`と
+/// 行列のため、ここでの特異性は理論上到達不能（`two_sls/cov.rs`の`xtx_inverse`と
 /// 同じ防御的`Result`化）。
 fn hansen_j_test(
     input: &IvInput,
@@ -891,7 +891,7 @@ fn sandwich_covariance(
 
     // W = S_used⁻¹（点推定に実際に使った重み）。bread = X'ZWZ'X（`gmm_point_estimate`
     // 内の`bread`と同型だが、こちらは後続のΩ̂サンドイッチでも使い回すため明示的な
-    // 逆行列として保持する（`two_sls.rs`の`xtx_inverse`と同じ考え方）。
+    // 逆行列として保持する（`two_sls/cov.rs`の`xtx_inverse`と同じ考え方）。
     let s_inv = invert_spd(
         s_used,
         l,
@@ -1014,7 +1014,7 @@ fn validate_weight_type(
 /// 重み行列`W=S⁻¹`によるGMMの点推定 `β̂(W) = (X'ZWZ'X)⁻¹X'ZWZ'y` を求める。
 ///
 /// `W`を明示的に逆行列として構築せず、`S`に対する連立方程式を`llt().solve(...)`で
-/// 解くことで数値的に安定させる（`two_sls.rs`の`xtx_inverse`と同様、明示的な逆行列は
+/// 解くことで数値的に安定させる（`two_sls/cov.rs`の`xtx_inverse`と同様、明示的な逆行列は
 /// 必要な箇所のみ`Mat::identity`を渡して求める設計だが、ここでは逆行列自体を後で
 /// 再利用しないため`solve`のみで完結させる）。
 fn gmm_point_estimate(
@@ -1046,7 +1046,7 @@ fn gmm_point_estimate(
 }
 
 /// 不均一分散頑健なモーメント分散共分散行列: `Σᵢ êᵢ² zᵢzᵢ'`（l×l）。モジュール冒頭の
-/// docコメント「`weight_type`ごとの`S`」参照（`two_sls.rs`の`hc_cov_params`のHC0相当だが
+/// docコメント「`weight_type`ごとの`S`」参照（`two_sls/cov.rs`の`hc_cov_params`のHC0相当だが
 /// レバレッジ調整は無し。`S`はスカラー倍で点推定が変わらないため小標本補正も不要）。
 fn robust_moment_covariance(z: &Mat<f64>, residuals: &Mat<f64>, n: usize, l: usize) -> Mat<f64> {
     let z_scaled = Mat::from_fn(n, l, |i, j| (*residuals.get(i, 0)) * (*z.get(i, j)));
@@ -1068,7 +1068,7 @@ fn cluster_moment_covariance(
     cluster_meat(groups, l, |i, a| (*residuals.get(i, 0)) * (*z.get(i, a))).0
 }
 
-/// Newey-West（Bartlettカーネル）によるモーメント分散共分散行列: `two_sls.rs`の
+/// Newey-West（Bartlettカーネル）によるモーメント分散共分散行列: `two_sls/cov.rs`の
 /// `hac_cov_params`と同型（`Par::Seq`を明示指定する理由も同じ、`.claude/rules/
 /// rust-style.md`「パフォーマンス」参照）。設計行列が`Z`である点、小標本補正が無い点が
 /// `two_sls.rs`との違い（モジュール冒頭のdocコメント参照）。
@@ -1120,7 +1120,7 @@ fn hac_moment_covariance(
 }
 
 /// 対称正定値行列`mat`（`dim`×`dim`）の逆行列を明示的に構築する。モジュール冒頭の
-/// docコメント「標準誤差・検定統計量（cov_type対応）」参照（`two_sls.rs`の`xtx_inverse`と
+/// docコメント「標準誤差・検定統計量（cov_type対応）」参照（`two_sls/cov.rs`の`xtx_inverse`と
 /// 同じ考え方だが、`s_used`・`bread`の2箇所で使い回すため独立したヘルパーにした）。
 fn invert_spd(mat: &Mat<f64>, dim: usize, failure: CommonError) -> Result<Mat<f64>, IvError> {
     let llt = mat.llt(Side::Lower).map_err(|_| failure)?;
@@ -1128,7 +1128,7 @@ fn invert_spd(mat: &Mat<f64>, dim: usize, failure: CommonError) -> Result<Mat<f6
 }
 
 /// HC0〜HC3ロバストなモーメント条件の分散共分散行列（cov_type用）: `Σᵢ scaleᵢ² zᵢzᵢ'`
-/// （l×l）。`two_sls.rs`の`hc_cov_params`と同型の自己拡張（`X̂`→`Z`）で、レバレッジは
+/// （l×l）。`two_sls/cov.rs`の`hc_cov_params`と同型の自己拡張（`X̂`→`Z`）で、レバレッジは
 /// `Z`（点推定用の`ztz`をそのまま流用）から計算する——**GMMのHC2/HC3は外部参照実装での
 /// 検証は不可能**（`linearmodels`の`IVGMM`にもRクロスチェックの`momentfit`にも対応する
 /// 共分散推定が無い、`docs/spec/iv-spec.md`4章）。2SLSのHC2/HC3は逆にR `ivreg`+
@@ -1140,7 +1140,7 @@ fn invert_spd(mat: &Mat<f64>, dim: usize, failure: CommonError) -> Result<Mat<f6
 /// 使う**: 補正対象の残差`êᵢ = yᵢ - xᵢ'β̂`は常にk個の
 /// パラメータで推定された構造残差であり、消費された自由度は常に`k`——`l`は単に外積を
 /// 取る操作変数の本数（過剰識別なら`l > k`）に過ぎず、消費した自由度とは無関係
-/// （`two_sls.rs`のHC1が`X̂`の列数=k自身を使うのと同じ理由。「`X̂`→`Z`、`k`→`l`」という
+/// （`two_sls/cov.rs`のHC1が`X̂`の列数=k自身を使うのと同じ理由。「`X̂`→`Z`、`k`→`l`」という
 /// 機械的な置換はレバレッジの計算には妥当だが、補正係数の分母にまで機械的に適用したのは
 /// 誤りだった）。
 fn gmm_hc_omega(
@@ -1156,7 +1156,7 @@ fn gmm_hc_omega(
         HcVariant::Hc2 | HcVariant::Hc3 => {
             // Z'Zはtheory上full column rank（点推定のW₀=(Z'Z)⁻¹が既に反転成功済み）
             // のため、ここでの特異性は理論上到達不能だが、浮動小数点演算の丸めによる
-            // 境界的な失敗に備えて`Result`のまま扱う（`two_sls.rs`の`xtx_inverse`と同じ
+            // 境界的な失敗に備えて`Result`のまま扱う（`two_sls/cov.rs`の`xtx_inverse`と同じ
             // 防御的な扱い、`.claude/rules/rust-style.md`「unwrap/expectはプロトタイプ
             // 段階を除き避ける」）。
             let ztz_inv = invert_spd(
@@ -1196,7 +1196,7 @@ fn gmm_hc_omega(
     Ok(z_scaled.transpose() * &z_scaled)
 }
 
-/// `gmm_hc_omega`専用、HCの種類（`two_sls.rs`の`HcVariant`と同じ位置づけ）。
+/// `gmm_hc_omega`専用、HCの種類（`two_sls/cov.rs`の`HcVariant`と同じ位置づけ）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HcVariant {
     Hc0,
@@ -1229,7 +1229,7 @@ fn gmm_cluster_omega(
 
 /// 傾き係数（切片を除く`df_model`個の係数）が全てゼロという帰無仮説のロバストWald検定
 /// （χ²、`df_model`で割らない生の二次形式）を行い、統計量とp値を返す。モジュール冒頭の
-/// docコメント「標準誤差・検定統計量（cov_type対応）」参照——`two_sls.rs`の`wald_f_test`と
+/// docコメント「標準誤差・検定統計量（cov_type対応）」参照——`two_sls/cov.rs`の`wald_f_test`と
 /// 数式は同型だが、F分布ではなくχ²分布を使い`df_model`で割らない点が異なる
 /// （`docs/spec/iv-spec.md`2章「GMMは常にロバストWald検定（χ²）とする」）。
 fn gmm_wald_chi2_test(
@@ -1325,7 +1325,7 @@ mod tests {
         }
     }
 
-    /// 丁度識別の小さなデータ（`two_sls.rs`の`just_identified_data`と同じ）。第一段階も構造式も
+    /// 丁度識別の小さなデータ（`two_sls/test_support.rs`の`just_identified_data`と同じ）。第一段階も構造式も
     /// 完全フィットにならない。`weight_type`によらず丁度識別ではGMMの点推定は2SLSと一致するはず
     /// （`docs/spec/iv-spec.md`1.2節）。
     fn just_identified_input() -> IvInput {
@@ -1958,7 +1958,7 @@ mod tests {
     }
 
     /// `WeightType::Robust`の点推定を、`GmmEstimator::fit`とは独立に`faer`演算で
-    /// 手計算したオラクルと数値照合する（`two_sls.rs`の
+    /// 手計算したオラクルと数値照合する（`two_sls/fit.rs`の
     /// `fit_matches_independently_recomputed_projection_formula_*`と同じ検証方針）。
     #[test]
     fn fit_computes_robust_weighted_estimate_matching_manual_formula() {
@@ -2153,7 +2153,7 @@ mod tests {
     /// bread/meat計算自体も独立検証する）。
     ///
     /// `S`（l×l、ここではl=3）はG個のランク1行列の和のため`rank(S) <= G`となる
-    /// （`.claude/rules/testing-policy.md`「テスト用データセット」3.、`two_sls.rs`の
+    /// （`.claude/rules/testing-policy.md`「テスト用データセット」3.、`two_sls/cov.rs`の
     /// クラスターロバストWald検定のG境界と同じ構造的制約）。G=2だと`S`が必然的に
     /// 特異になる（`fit_returns_computation_error_when_cluster_count_is_less_than_
     /// instrument_count`で確認済み）ため、l=3に対してG=4を使う。
@@ -2309,7 +2309,7 @@ mod tests {
     }
 
     /// `weight_type=Hac`（`lags=0`）は`Robust`と一致するはず（HAC0=HC0と同じ関係、
-    /// `two_sls.rs`の`fit_hac_with_zero_lags_matches_hc0`と同型の検証）。
+    /// `two_sls/cov.rs`の`fit_hac_with_zero_lags_matches_hc0`と同型の検証）。
     #[test]
     fn fit_hac_with_zero_lags_matches_robust() {
         let (y, x_endog, z1, z2) = heteroskedastic_test_columns();
@@ -2477,7 +2477,7 @@ mod tests {
 
     /// `lags=None`（経験則自動計算`L = floor(4*(n/100)^(2/9))`）が、`heteroskedastic_test_
     /// columns()`の`n=16`では`L=2`と一致するため、`lags=Some(2)`を明示指定した場合と
-    /// 数値的に一致するはず（`two_sls.rs`の
+    /// 数値的に一致するはず（`two_sls/cov.rs`の
     /// `fit_computes_hac_std_errors_with_auto_lags_matching_explicit_lags`と同じ検証方針）。
     #[test]
     fn fit_with_hac_weight_type_and_auto_lags_matches_explicit_lags_two() {
@@ -2622,7 +2622,7 @@ mod tests {
     }
 
     /// `time_order`を指定した場合、行順がシャッフルされていても時系列順に並べ替えてから
-    /// ラグ付きモーメント共分散を計算することを確認する（`two_sls.rs`の
+    /// ラグ付きモーメント共分散を計算することを確認する（`two_sls/cov.rs`の
     /// `fit_computes_hac_std_errors_respecting_time_order`と同じ検証方針）。
     #[test]
     fn fit_with_hac_weight_type_respects_time_order() {
@@ -2698,7 +2698,7 @@ mod tests {
     }
 
     /// `dep_var_name()`/`weight_type()`/`gmm_tol()`/`nobs()`/`k()`が、
-    /// `fit()`に渡した値・入力データと整合することを確認する（`two_sls.rs`の
+    /// `fit()`に渡した値・入力データと整合することを確認する（`two_sls/fit.rs`の
     /// `fit_succeeds_when_over_identified`と同じ「基本メタデータgetter群」の検証方針）。
     #[test]
     fn fit_exposes_basic_metadata_getters() {
@@ -2785,7 +2785,7 @@ mod tests {
     }
 
     /// 丁度識別（`len(instruments) == len(x_endog)`）ではHansen J過剰識別検定の自由度が
-    /// 0のため`None`になる（`docs/spec/iv-spec.md`1.2節・3.5節、`two_sls.rs`のSargan検定と
+    /// 0のため`None`になる（`docs/spec/iv-spec.md`1.2節・3.5節、`two_sls/sargan.rs`のSargan検定と
     /// 同じ扱い）。
     #[test]
     fn fit_sets_hansen_j_statistic_to_none_when_just_identified() {
@@ -2953,7 +2953,7 @@ mod tests {
         assert!((estimator.hansen_j_p_value().unwrap() - expected_p_value).abs() < 1e-8);
     }
 
-    /// `weight_type=Classical`かつ`TwoStep`のHansen J統計量は、`two_sls.rs`の
+    /// `weight_type=Classical`かつ`TwoStep`のHansen J統計量は、`two_sls/sargan.rs`の
     /// Sargan統計量と数値的に一致するはず（`fit()`冒頭のdocコメント「Hansen J過剰識別検定」
     /// 参照）。点推定側の`fit_matches_two_sls_point_estimate_when_weight_type_is_classical`
     /// と対になる不変条件チェック（同じデータセットを使う）。`GmmEstimator`単体の
@@ -3950,7 +3950,7 @@ mod tests {
     }
 
     /// 説明変数が定数項のみ（`x_exog=[]`・`x_endog=[]`、傾き係数`df_model=0`）のとき、
-    /// F統計量は0除算を避けてNaNになる（`two_sls.rs`の
+    /// F統計量は0除算を避けてNaNになる（`two_sls/fit.rs`の
     /// `fit_sets_f_statistic_and_f_p_value_to_nan_for_const_only_model`と同じ判断）。
     #[test]
     fn fit_sets_f_statistic_and_f_p_value_to_nan_for_const_only_model() {
@@ -4385,7 +4385,7 @@ mod tests {
             );
         }
     }
-    /// property-basedテスト。`two_sls.rs`の`mod proptests`と同じケース生成器
+    /// property-basedテスト。`two_sls/fit.rs`の`mod proptests`と同じケース生成器
     /// （`common::proptest_support`）・許容誤差（`RTOL=1e-6`）・`prop_assume!`によるフルランク
     /// 安全弁を使う。GMM固有の不変条件（`weight_type=Classical`と2SLSの一致、`S`のスカラー倍
     /// に対する点推定の不変性、丁度識別での`W`への非依存）を検証する。

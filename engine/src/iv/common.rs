@@ -67,7 +67,7 @@ pub enum IvError {
     },
 
     /// 2SLSの第一段階回帰（`x_endog[endog_name] ~ x_exog + instruments`）が
-    /// `OlsEstimator::fit`（内部委譲、`two_sls.rs`参照）で失敗した。
+    /// `OlsEstimator::fit`（内部委譲、`two_sls/fit.rs`参照）で失敗した。
     ///
     /// `LeastSquaresError`をそのまま`#[from]`で透過させず`endog_name`を付与するのは、
     /// 内生変数が複数ある場合にどの変数の第一段階回帰が失敗したかをエラーメッセージから
@@ -149,7 +149,7 @@ pub enum IvError {
     /// **設計行列の特異性（`SingularMatrix`）・観測数不足（`InsufficientObservations`）・
     /// Wald検定側の数値的なほぼ特異性（`NearSingularMatrix`）は、このバリアントを経由せず
     /// `wu_hausman_statistic`/`wu_hausman_p_value`を`None`にするだけで`fit()`自体は成功
-    /// させる**（`two_sls.rs`の`fit()`実装参照）。このバリアントは
+    /// させる**（`two_sls/fit.rs`の`fit_two_sls`参照）。このバリアントは
     /// それら以外の（`confidence_level`・`cov_type=Cluster/Hac`の妥当性は`fit()`の
     /// 第二段階側で既に検証済みのため）理論上到達不能な失敗を防御的に伝播するためだけに
     /// 存在する（`FirstStageFailed`/`SecondStageFailed`と同じ理由で`LeastSquaresError`を
@@ -428,7 +428,7 @@ impl IvInput {
 ///
 /// `IvInput`は`faer::Mat`で設計行列を保持するが、`OlsInput::from_columns`は列ごとの
 /// `Vec<f64>`を受け取るAPI（`OlsInput`に`Mat`を直接渡すコンストラクタは無い）。2SLS
-/// （`two_sls.rs`）が第一段階・第二段階の設計行列を`OlsInput`経由で組み立てる際に
+/// （`two_sls/fit.rs`）が第一段階・第二段階の設計行列を`OlsInput`経由で組み立てる際に
 /// 必要になる変換で、GMM（`gmm.rs`）でも同じ変換が必要になる見込みのため
 /// ここに置く。
 pub(crate) fn mat_column_to_vec(m: &Mat<f64>, col: usize) -> Vec<f64> {
@@ -589,7 +589,7 @@ pub type FirstStageResult = (Vec<(String, OlsEstimator)>, Vec<(String, f64)>);
 /// 内生変数ごとの第一段階回帰（`x_endog[j] ~ x_exog + instruments`）と弱操作変数診断
 /// （部分F統計量、`iv-spec.md`3.4節）を計算する。
 ///
-/// `TwoSlsEstimator::fit`（`two_sls.rs`、第二段階の予測値`x̂_endog`を得るために内部で
+/// `TwoSlsEstimator::fit`（`two_sls/fit.rs`、第二段階の予測値`x̂_endog`を得るために内部で
 /// 使う）・`engine_pybind`の`fit`（`estimator="gmm"`でも同じ診断情報を独立に提供するため、
 /// `GmmEstimator`を経由せず直接呼ぶ）の両方から使う、2SLS/GMM間で真に共有されるロジック
 /// （`iv/CLAUDE.md`「2SLSとGMMの独立実装方針」参照——GMMはモーメント条件`Z'(y-Xβ)=0`を
@@ -597,8 +597,8 @@ pub type FirstStageResult = (Vec<(String, OlsEstimator)>, Vec<(String, f64)>);
 /// 自体は`estimator`に依存しない、素の（第二段階の推定方式によらない）診断情報のため、
 /// SEサンドイッチ計算（2SLS/GMMで数式が異なるため独立実装が必要）とは性質が異なる）。
 ///
-/// `cov_type`は第一段階の推定にそのまま渡す（`two_sls.rs`の`fit()`冒頭
-/// コメント「第一段階・第二段階での`cov_type`/`confidence_level`の扱い」と同じ）。
+/// `cov_type`は第一段階の推定にそのまま渡す（`two_sls.rs`のモジュールdoc
+/// 「第一段階・第二段階での`cov_type`/`confidence_level`の扱い」と同じ）。
 /// 弱操作変数診断自体は常に等分散前提で`cov_type`に依存しない（`partial_f_statistic`の
 /// docコメント参照）。
 ///
@@ -634,7 +634,7 @@ pub fn compute_first_stage(
         let y_endog = mat_column_to_vec(input.x_endog(), j);
         // `y_endog`・`instrument_columns`はどちらも`IvInput`（同じnで構築済み）から
         // 取り出しているため、ここで`DimensionMismatch`が実際に発生することは理論上ない
-        // （`two_sls.rs`の同型の第一段階ループと同じ理由）。
+        // （`two_sls/fit.rs`の同型の第一段階ループと同じ理由）。
         let ols_input = OlsInput::from_columns(
             &y_endog,
             &instrument_columns,
@@ -759,7 +759,7 @@ fn partial_f_statistic(
     Ok(((ssr_r - ssr_u) / (q as f64)) / (ssr_u / (df_u as f64)))
 }
 
-/// `two_sls.rs`/`gmm.rs`の`mod proptests`が共有する、property-basedテスト用のケース生成器と
+/// `two_sls/fit.rs`/`gmm.rs`の`mod proptests`が共有する、property-basedテスト用のケース生成器と
 /// 補助関数。`ols/estimator.rs`の`mod proptests`は手法ごとに生成器を持つが、IVは2SLSとGMMで同一の
 /// データ構造（内生変数・操作変数・構造誤差）を要するため、ここに一本化して二重定義を避ける。
 #[cfg(test)]

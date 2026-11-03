@@ -90,7 +90,7 @@ def test_cluster_g2_boundary_succeeds_when_x_exog_is_empty():
     取り違えが原因で、真の傾き係数数`q=1`（`z1`のみ）のところ`q=2`（定数項も
     含めて誤ってカウント）になり、`G=2`クラスターの構造的特異性
     （`rank(Ŝ)≤G-1=1`）で必ず失敗していた（`without_baked_in_intercept`の
-    導入で修正、`engine/src/iv/two_sls.rs`の同名Rustテストと対）。
+    導入で修正、`engine/src/iv/two_sls/cov.rs`の同名Rustテストと対）。
     """
     df = pl.read_csv(DATA_DIR / "iv_baseline_g2.csv")
     df = df.with_columns((pl.int_range(pl.len()) % 2).alias("cluster_group"))

@@ -168,7 +168,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 
 - **2SLSの分散はサンドイッチ型**: `(X'PzX)^-1 X'Pz Ω Pz X (X'PzX)^-1`（`Ω`の推定方法が
   `cov_type`で変わる）。`hc_cov_params`/`hac_cov_params`
-  （`engine/src/iv/two_sls.rs`）は`X̂`（射影後の予測値）ベースのレバレッジ・スコアで
+  （`engine/src/iv/two_sls/cov.rs`）は`X̂`（射影後の予測値）ベースのレバレッジ・スコアで
   OLSの対応する実装と同型に計算するが、コード自体はOLS（`engine::linear::ols`）に寄せず
   **意図的に独立実装**にしている（例外: クラスターの蓄積`Σ_g S_g S_g'`と小標本補正は、
   OLS本体ではなく共有モジュール`shared::covariance`の`cluster_meat`/`cluster_correction`
@@ -288,7 +288,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 Sargan検定（2SLS）／Hansen J検定（GMM）を`fit()`の結果本体に含める（別メソッド化しない）。
 
 - 自由度は`len(instruments) - len(x_endog)`。**丁度識別（自由度0）の場合は`None`**。
-- **Sargan検定**（`two_sls.rs`）は常に古典的（`e'Z(Z'Z)⁻¹Z'e/σ̂²`、`σ̂²=e'e/n`）な計算式を
+- **Sargan検定**（`two_sls/sargan.rs`）は常に古典的（`e'Z(Z'Z)⁻¹Z'e/σ̂²`、`σ̂²=e'e/n`）な計算式を
   使い`cov_type`には依存しない（定義自体が等分散前提の検定であり、不均一分散に頑健な版が
   欲しい場合はGMM＋Hansen Jを使うのが標準的な使い分けのため）。
 - **Hansen J検定**（`gmm.rs`）は点推定に使った重み行列`S`（`gmm_weight_type`依存）をそのまま

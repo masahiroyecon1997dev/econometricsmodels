@@ -175,7 +175,7 @@ mod within;
 
 pub use fixed_effects::FixedEffects;
 pub use input::{FeCovType, FeEffects, FeInput};
-// `re.rs`のテストだけが使う。
+// `re/`のテストだけが使う。
 #[cfg(test)]
 pub(crate) use within::{within_transform_one_way, within_transform_two_way};
 

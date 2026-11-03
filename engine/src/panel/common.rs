@@ -52,7 +52,7 @@
 //!   加えたもの）への`OlsEstimator::fit_auxiliary(include_intercept=false)`委譲が失敗した場合。
 //!   `WithinRegressionFailed`（FEのwithin変換済みデータ）・`BetweenRegressionFailed`
 //!   （REのbetween回帰）とは対象が異なるため別バリアントにする（同じ判断の3件目）。
-//! - `HausmanTestFailed`: REのハウスマン検定（`re.rs`の`re_hausman_test`、`re-spec.md`3.7節）の
+//! - `HausmanTestFailed`: REのハウスマン検定（`re/hausman.rs`の`re_hausman_test`、`re-spec.md`3.7節）の
 //!   補助回帰または`cov_type`連動のWald検定が失敗した場合（補助回帰のランク落ち、
 //!   クラスター数`G`が補助回帰の傾き係数の数以下、共分散部分行列のほぼ特異性等）。
 //!   計算自体が成立しないケースのため`fit()`全体を失敗させる（設計行列の多重共線性と同じ扱い）。
@@ -996,8 +996,8 @@ pub(crate) fn panel_cluster_cov_params(
 ///
 /// `t < 2`は`bandwidth`の値によらず`PanelError::InsufficientDkPeriods`で拒否する
 /// （fixest型の`G/(G-1)`相当補正を導入したことに伴う前提条件。同エラーの
-/// docコメント参照）。この関数がDK計算の全呼び出し経路（`fe/fit.rs`/`re.rs`/
-/// `re_hausman_test`）の共通の入口になっているため、ここ一箇所で検証すれば足りる。
+/// docコメント参照）。この関数がDK計算の全呼び出し経路（`fe/fit.rs`/`re/fit.rs`/
+/// `re/hausman.rs`の`re_hausman_test`）の共通の入口になっているため、ここ一箇所で検証すれば足りる。
 pub(crate) fn resolve_dk_bandwidth(bandwidth: Option<i64>, t: usize) -> Result<usize, PanelError> {
     if t < 2 {
         return Err(PanelError::InsufficientDkPeriods { t_periods: t });

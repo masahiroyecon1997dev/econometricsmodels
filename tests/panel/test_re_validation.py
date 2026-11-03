@@ -436,7 +436,7 @@ def test_noiseless_data_is_a_perfect_fit_in_the_variance_component_regression():
     の定数列が恒等的に全ゼロ列になる。最終回帰に至る前に、σ_ε²を求める
     内部のwithin回帰が完全フィット（`PERFECT_FIT`、
     `stage="VARIANCE_COMPONENT_WITHIN_REGRESSION"`）として止まる
-    （`engine/src/panel/re.rs`の
+    （`engine/src/panel/re/fit.rs`の
     `re_estimator_fit_returns_perfect_fit_when_the_within_regression_is_exact`
     と同じデータ）。
     """

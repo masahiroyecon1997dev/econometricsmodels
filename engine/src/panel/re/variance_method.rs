@@ -1,5 +1,5 @@
 //! REの分散成分の推定法（`VarianceMethod`、`re-spec.md`3.1.2節）のうち、`plm::ercomp`の
-//! `walhus`（Wallace-Hussain）と`amemiya`の実装。Swamy-Arora（既定）は`re.rs`の
+//! `walhus`（Wallace-Hussain）と`amemiya`の実装。Swamy-Arora（既定）は`re/variance.rs`の
 //! `swamy_arora_variance_components`で、`variance_components`が3法を振り分ける。
 //!
 //! 3法は同じ枠組みで、1段目の回帰の残差`e`から2つ（2-wayは3つ）の二乗和を作り、
@@ -24,14 +24,42 @@
 
 use faer::Mat;
 
+use super::input::{ReEffects, ReInput};
+use super::variance::{
+    EntityMeans, VarianceComponents, entity_means, internal_fe, swamy_arora_variance_components,
+};
 use crate::linear::common::LeastSquaresError;
 use crate::panel::common::PanelError;
-use crate::panel::re::{
-    EntityMeans, ReEffects, ReInput, VarianceComponents, VarianceMethod, entity_means, internal_fe,
-    swamy_arora_variance_components,
-};
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::least_squares::{LeastSquaresFit, least_squares};
+
+/// RE（GLS）の分散成分（σ_ε²・σ_u²・σ_λ²）の推定法（`re-spec.md`3.1節・3.1.2節）。
+/// `plm::ercomp`の`method`（`swar`・`walhus`・`amemiya`）に対応する。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum VarianceMethod {
+    /// Swamy-Arora。1段目はwithin回帰とbetween回帰。1-wayの不均衡パネルは
+    /// `linearmodels`と同じ式（`plm`のトレース項の式とは異なる、`re-spec.md`3.1節）。
+    #[default]
+    SwamyArora,
+    /// Wallace-Hussain。1段目は切片と全説明変数へのプールドOLSの残差。参照実装は`plm`
+    /// （`random.method = "walhus"`）のみ。
+    WallaceHussain,
+    /// Amemiya。1段目はwithin推定の残差（切片は`ȳ - x̄'β̂_within`）。within変動の無い列が
+    /// あると推定できない（`PanelError::AmemiyaRequiresWithinVariation`）。参照実装は`plm`
+    /// （`random.method = "amemiya"`）のみ。
+    Amemiya,
+}
+
+impl VarianceMethod {
+    /// `variance_method`オプションの正規化した値（小文字のスネークケース）。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SwamyArora => "swamy_arora",
+            Self::WallaceHussain => "wallace_hussain",
+            Self::Amemiya => "amemiya",
+        }
+    }
+}
 
 /// `method`に応じて分散成分を推定する。`ReEstimator::fit_with_variance_method`の入り口。
 ///
@@ -43,7 +71,7 @@ use crate::shared::least_squares::{LeastSquaresFit, least_squares};
 /// - `WallaceHussain`・`Amemiya`で`σ_ε²`が0以下なら
 ///   `PanelError::NonPositiveIdiosyncraticVariance`、トレース形の連立が特異なら
 ///   `PanelError::VarianceComponentsMomentsSingular`。
-pub(crate) fn variance_components(
+pub(super) fn variance_components(
     input: &ReInput,
     effects: ReEffects,
     method: VarianceMethod,

@@ -1,6 +1,6 @@
 # RE 仕様書
 
-RE（Swamy-Arora GLSによる変量効果パネル回帰）の確定済み仕様。`engine/src/panel/re.rs`（共通基盤
+RE（Swamy-Arora GLSによる変量効果パネル回帰）の確定済み仕様。`engine/src/panel/re.rs`（ファサード）・`engine/src/panel/re/`（共通基盤
 は`engine/src/panel/common.rs`）・`engine_pybind/src/panel/re.rs`・
 `python_package/econometricsmodels/panel/re.py`として実装済み。FE/RE共通の設計判断（`effects`の
 引数設計、結果フィールドの共通コア、`cov_type`のサポート対象・デフォルト、内部実装の
@@ -564,7 +564,7 @@ FEの`WithinRegressionFailed`と同じく内側の`LeastSquaresError`の分類�
       具体的な要望が出た時点で検討する。一方、`walhus`・`amemiya`は参照実装が`plm`のみなので、
       不均衡パネルを含めて`plm`の式に従う。
     - **実装**（3.1.2節）: 「1段目の回帰」と「行列`M`の組み立て」だけを推定法ごとに分け、バランス用の閉形式と
-      不均衡の1-way用のトレース形の2系統を持つ（`engine/src/panel/re_variance_method.rs`）。`plm`は2-wayの
+      不均衡の1-way用のトレース形の2系統を持つ（`engine/src/panel/re/variance_method.rs`）。`plm`は2-wayの
       不均衡パネルにも3法のモーメント行列を持つが、数値検証はしておらず、対象外のまま。
   - **θは3つの重みが要る**。2-wayのGLS変換は`y - θ₁ȳᵢ. - θ₂ȳ.ₜ + θ₃ȳ..`の形で、`plm`の
     `ercomp`が返す`theta$total`は`theta$id × theta$time`と一致しない（3法とも別の値、確認済み）。

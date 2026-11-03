@@ -67,10 +67,10 @@ impl LogitInput {
     /// `LogitInput`を組み立てる。`include_intercept=true`の場合、設計行列の先頭列に
     /// 定数項（すべて1.0）を自動追加する。
     ///
-    /// `y`が単位区間`[0,1]`に収まることの検証は、次元検証のみがスコープの本関数では
-    /// 行わない。statsmodelsの`Logit`はコンストラクタ時点でこの検証を行っている（`endog`が
-    /// 範囲外だと`ValueError: endog must be in the unit interval.`）ため、本実装でも尤度・
-    /// スコア・Hessianを実装するIssue（B2）で同等の検証を追加する予定。
+    /// `y`の値の検証（0/1の二値であること）は、次元検証のみを担う本関数では行わない。
+    /// `fit()`が`validate_fit_preconditions`で行い、違反は`MleError::InvalidBinaryY`になる
+    /// （statsmodelsの`Logit`はコンストラクタ時点で単位区間`[0,1]`を検証する。本実装は
+    /// より厳格に`{0.0, 1.0}`のみを許容する）。
     ///
     /// # Errors
     /// `y`といずれかの`x_columns`の長さが一致しない場合は`CommonError::DimensionMismatch`を返す。
@@ -165,7 +165,7 @@ impl LogitInput {
     }
 }
 
-/// `z = log(1+exp(z))`（softplus）の数値的に安定な計算。`z`が大きい正の値でも
+/// `softplus(z) = log(1+exp(z))`の数値的に安定な計算。`z`が大きい正の値でも
 /// `exp(z)`のオーバーフローを起こさない（標準的な安定化式、`z.max(0)+log1p(exp(-|z|))`）。
 fn softplus(z: f64) -> f64 {
     z.max(0.0) + (-z.abs()).exp().ln_1p()
@@ -497,7 +497,7 @@ impl LogitFitted {
     /// のため`common.rs`に共通化されている）。
     ///
     /// **新規データでの的中表（out-of-sample）は未対応**（`predict()`とは異なり
-    /// スコープ外のまま、別issueでトラッキング。ユーザー確認済み）。
+    /// スコープ外）。
     pub fn pred_table(&self, threshold: f64) -> Mat<f64> {
         pred_table(&self.predict(), self.input.y(), threshold)
     }
@@ -532,7 +532,7 @@ pub struct LogitEstimator {
     log_likelihood: f64,
     /// 切片のみモデルの対数尤度 `ℓ(θ̂_null)`。`ȳ=n1/n`の閉じた形の解析解
     /// （`nᵢ log(ȳ) + (1-nᵢ) log(1-ȳ)`の総和）から直接計算する（ソルバーの
-    /// 再フィットは経由しない。ユーザー確認済み、`log_likelihood`のdocコメント
+    /// 再フィットは経由しない。`log_likelihood`のdocコメント
     /// 「切片のみモデルのllf」参照）。`include_intercept`の値に関わらず常にこの
     /// 「切片のみ」モデルを参照する（`docs/spec/nonlinear-common.md`5章の定義通り、
     /// statsmodelsも`k_constant`の有無に関わらず同じ挙動）。
@@ -542,8 +542,7 @@ pub struct LogitEstimator {
     /// `Logit(y, X_without_const).fit()`をした場合と同じ状況、実測でも
     /// `llr`が負値・`llr_pvalue`がほぼ1.0になる例を確認済み）。この場合
     /// `lr_statistic`が負になったり`lr_p_value`が統計的に意味の薄い値になったり
-    /// しうるが、これはstatsmodels準拠の仕様上の挙動でありバグではない
-    /// （rust-reviewerの指摘を受けて明記）。
+    /// しうるが、これはstatsmodels準拠の仕様上の挙動でありバグではない。
     log_likelihood_null: f64,
     /// 尤度比検定統計量 `2*(ℓ(θ̂)-ℓ(θ̂_null))`。`include_intercept=false`のときの
     /// 非入れ子性については`log_likelihood_null`のdocコメント参照
@@ -558,7 +557,7 @@ pub struct LogitEstimator {
     /// ベイズ情報量規準 `-2ℓ(θ̂) + ln(n)k`
     bic: f64,
     /// モデルの自由度 `k-1`（切片のみのnullモデルとのパラメータ数差。statsmodels準拠、
-    /// `include_intercept`の値に関わらず常にこの式。ユーザー確認済み）
+    /// `include_intercept`の値に関わらず常にこの式）
     df_model: usize,
     /// 残差自由度 `n-k`
     df_resid: usize,
@@ -579,7 +578,7 @@ impl LogitEstimator {
     /// `standardize_columns`後の設計行列を列ピボットQRしランク落ちを検出する
     /// （`checked_design_matrix_qr`、`solver`によらず単一経路で`SingularDesignMatrix`）。
     /// `start_params`によるユーザー指定初期値は引き続き未対応（`docs/spec/
-    /// nonlinear-common.md`7章では確定オプションだが対応Issueが無く、見送り）。
+    /// nonlinear-common.md`7章では確定オプションだが、現状は見送っている）。
     ///
     /// 設計行列は`standardize_columns`で内部的に標準化してから最適化し（勾配ノルムに
     /// 基づく収束判定`tol`が設計行列のスケールに依存しないようにするため、
@@ -682,7 +681,7 @@ impl LogitEstimator {
         // 事前にクローンしておく必要がある（`LogitProblem`は`argmin::core::Executor`
         // 向けに元々`Clone`を要求しているため、この用途のための追加のtraitではない）。
         // `Classical`はスコアを使わないため、無駄な複製（設計行列を含む）を避けるために
-        // `cov_type`に応じて条件付きで行う（rust-reviewer指摘）。
+        // `cov_type`に応じて条件付きで行う。
         let problem_for_scores = match &cov_type {
             CovType::Classical => None,
             CovType::Opg | CovType::Hc0 | CovType::Hc1 | CovType::Cluster { .. } => {
@@ -789,9 +788,8 @@ impl LogitEstimator {
 
         let llf = log_likelihood(input.x(), input.y(), &params);
         let llnull = log_likelihood_null(input.y());
-        // `k=0`（`include_intercept=false`かつ説明変数も無い病的な入力）のとき、実際には
-        // ここに到達する前（`cov_params`計算経路）で別の既知の問題により到達不能
-        // （トラッキング: 別issue、本Issueのスコープ外。ユーザー確認済み）。
+        // `k=0`（`include_intercept=false`かつ説明変数も無い病的な入力）は
+        // `validate_fit_preconditions`が`NoRegressors`として弾くため、ここには到達しない。
         let gof = goodness_of_fit(llf, llnull, n, k)?;
         let GoodnessOfFit {
             lr_statistic,
@@ -1500,7 +1498,7 @@ mod tests {
     /// モデルはフィット対象のモデルの部分集合（入れ子）にならない
     /// （`LogitEstimator`の`log_likelihood_null`フィールドdocコメント参照）。
     /// この場合`lr_statistic`が負になりうる（statsmodels準拠の仕様上の挙動、
-    /// rust-reviewer指摘・実測で確認済み）ことを回帰テストとして固定する。
+    /// 実測で確認済み）ことを回帰テストとして固定する。
     /// `df_model`/`df_resid`/`aic`/`bic`は`include_intercept`の値に関わらず
     /// 同じ式（`k-1`/`n-k`/`-2ℓ+2k`/`-2ℓ+ln(n)k`）で計算されることも確認する。
     #[test]
@@ -1948,9 +1946,9 @@ mod tests {
     }
 
     /// `solver`（`bfgs`/`lbfgs`）と`cov_type`（`Opg`/`Hc0`/`Hc1`/`Cluster`）の組み合わせが
-    /// 正しく機能することを確認する（rust-reviewer指摘: 既存テストは`solver`横断が
+    /// 正しく機能することを確認する（他のテストは`solver`横断が
     /// `CovType::Classical`のみ、`cov_type`横断が`SolverType::Newton`のみで、両方を
-    /// 同時に変える組み合わせが未検証だった）。`scores_std`の評価は収束点の
+    /// 同時に変える組み合わせはここで検証する）。`scores_std`の評価は収束点の
     /// パラメータにのみ依存し最適化アルゴリズムの種類に依存しない設計のため、
     /// `newton`で計算した`cov_params`（既に上のテストで正しさを検証済み）と
     /// `bfgs`/`lbfgs`の結果が一致するはず。
@@ -2072,7 +2070,7 @@ mod tests {
 
     /// 切片のみモデル（`intercept_only_input`）は`x`が定数列（切片）だけのため、
     /// `standardize_columns`のスケーリングが実質no-op（`stds`が全て`1.0`のまま）になり、
-    /// 標準化・逆標準化の往復ロジックを通らない（rust-reviewer指摘）。このテストは
+    /// 標準化・逆標準化の往復ロジックを通らない。このテストは
     /// 非自明なスケール（`std`が1から離れた値）を持つ説明変数を含むデータセットで
     /// `newton`/`bfgs`/`lbfgs`を実行し、3手法が同じ解へ収束することを検証する
     /// （閉じた形の解析解は存在しないため、`newton`の結果を参照値として使う
@@ -2215,8 +2213,7 @@ mod tests {
         // なることを確認する。`n<=k`（観測数不足）とは
         // 別の不正のため、`InsufficientObservations`ではなく専用の`NoRegressors`を返す
         // （`k=0`だと`n>k`は常に成立してしまい、`InsufficientObservations`のメッセージ
-        // だと「条件を満たしているのにエラーになる」という誤解を招くため。
-        // rust-reviewerの指摘を受けて分離）。
+        // だと「条件を満たしているのにエラーになる」という誤解を招くため）。
         let y = vec![0.0, 1.0, 0.0, 1.0, 1.0];
         let input = LogitInput::from_columns(&y, &[], vec![], false, "y".to_string()).unwrap();
         assert_eq!(input.k(), 0);
@@ -2260,8 +2257,7 @@ mod tests {
     fn fit_returns_invalid_binary_y_error_for_non_binary_values() {
         // 0.5（連続値）・2.0（0/1ではない2値）・statsmodelsなら許容する単位区間内の
         // 中間値も含め、{0.0, 1.0}の完全一致以外は全て弾かれることを確認する
-        // （statsmodelsより厳格な`{0.0, 1.0}`のみ許容という設計判断、
-        // ユーザー確認済み）。
+        // （statsmodelsより厳格な`{0.0, 1.0}`のみ許容という設計判断）。
         for (bad_value, bad_row) in [(0.5, 1), (2.0, 2)] {
             let mut y = vec![0.0, 1.0, 0.0, 1.0];
             y[bad_row] = bad_value;
@@ -2354,7 +2350,7 @@ mod tests {
     /// `fit_returns_singular_hessian_error_when_cov_params_computation_fails_at_
     /// truncated_point_with_hc0_and_hc1` / `..._with_cluster` が担う（`cov_params`計算は
     /// Logit/Probit/Tobitで同一コード）。`?`自体は分岐ロジックを持たないため
-    /// `testing-policy.md`のカバレッジ方針上これで足りる（レビューで確認）。
+    /// `testing-policy.md`のカバレッジ方針上これで足りる。
     ///
     /// `Cluster`は`G=3 > q=2`（`q = k - k_constant`）にして`fit()`冒頭の
     /// `InsufficientClustersForInference`（`G <= q`）より手前を通す。
@@ -2607,7 +2603,7 @@ mod tests {
 
     /// `beta1=20`（分離と誤検知してはいけない境界ケース、`tests/
     /// api_tests/fixtures/benchmarks/data/logit_near_separation.csv`と同じ設計思想）で
-    /// 3手法とも正常に収束することを固定するリグレッションテスト（rust-reviewer指摘）。
+    /// 3手法とも正常に収束することを固定するリグレッションテスト。
     /// 分離検出の変更が既存の合格ケースを誤検知させないことを保証する。
     #[test]
     fn fit_converges_normally_for_mild_near_separation_data_across_all_methods() {
@@ -3063,8 +3059,8 @@ mod tests {
     }
 
     /// `predict_new_data`が`has_intercept=false`（`LogitInput::from_columns`の
-    /// `include_intercept=false`）でも正しく動作すること（rust-reviewer指摘。
-    /// `has_intercept=true`のみを検証していた`predict_new_data_matches_
+    /// `include_intercept=false`）でも正しく動作すること
+    /// （`has_intercept=true`を検証する`predict_new_data_matches_
     /// independently_recomputed_logistic_of_linear_predictor`と対になる）。
     #[test]
     fn predict_new_data_without_intercept_matches_independently_recomputed_logistic_of_linear_predictor()
@@ -3173,7 +3169,7 @@ mod tests {
 
         // `threshold≠0.5`にする（`actual`側は`threshold`に依存せず常に0.5固定である
         // ことを検出できるようにするため。`threshold=0.5`固定のテストでは、この
-        // 区別がつかない、rust-reviewer指摘）。
+        // 区別がつかない）。
         let threshold = 0.2;
         let predicted = estimator.predict();
         let table = estimator.pred_table(threshold);
@@ -3199,9 +3195,8 @@ mod tests {
     /// `threshold`の値に関わらず不変であるべき（statsmodelsの`pred_table`が実測`y`を
     /// 常に固定の0.5分割でバケット化し、`threshold`は予測確率側にのみ適用する仕様、
     /// `pred_table`のdocコメント参照）。この不変性が保たれているかを回帰テストとして
-    /// 固定する（初版実装は`actual`も`threshold`で二値化しており、`threshold≠0.5`で
-    /// この不変性が壊れていた。rust-reviewerの指摘・statsmodelsとの数値照合で発覚し
-    /// 修正済み）。
+    /// 固定する（`actual`まで`threshold`で二値化すると、`threshold≠0.5`で
+    /// この不変性が壊れる）。
     #[test]
     fn pred_table_actual_class_counts_are_invariant_to_threshold() {
         let y = vec![0.0, 1.0, 0.0, 1.0];
@@ -3336,7 +3331,7 @@ mod tests {
         /// `SolverType::Newton`/`Bfgs`/`Lbfgs`を等確率で生成する。3手法とも収束経路・
         /// `tol`の意味論が異なるため（上記`default_options`参照）、各プロパティを
         /// solver非依存で1種類だけ検証するとBFGS/L-BFGS固有の経路がproptestの
-        /// 恩恵を受けない（rust-reviewer指摘）。
+        /// 恩恵を受けない。
         fn solver_strategy() -> impl Strategy<Value = SolverType> {
             prop_oneof![
                 Just(SolverType::Newton),

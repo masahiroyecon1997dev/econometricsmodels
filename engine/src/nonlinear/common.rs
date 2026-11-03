@@ -107,7 +107,7 @@ pub enum MleError {
     /// statsmodelsの`Logit`はコンストラクタ時点で単位区間`[0,1]`を要求する
     /// （比率データ／frequency weights的な用途も許容する設計）が、本実装は
     /// 常に真の2値アウトカムのみを想定するため、より厳格に`{0.0, 1.0}`の完全一致を
-    /// 要求する（ユーザー確認済み）。Tobit専用の境界エラー（`CensoringBoundsMissing`等）
+    /// 要求する。Tobit専用の境界エラー（`CensoringBoundsMissing`等）
     /// と対称的に、Tobit（連続な打ち切り被説明変数）の`fit()`はこのバリアントを
     /// 構築しない（`MleError`モジュールdocコメント「別のenumに分離せず同じ`MleError`に
     /// 含める」の方針通り）。
@@ -139,11 +139,11 @@ pub enum MleError {
     /// 観測が0件」はこの分離が**必ず**成立する（分離を妨げる内部観測が存在しないため）
     /// 十分条件だが、逆に「0件でなければ常に識別可能」という必要条件ではない——理論上は
     /// 非打ち切り観測が0件でも、打ち切りカテゴリが`x`で分離不能な配置（例: 同一の`x`が
-    /// 異なるカテゴリに属する）であれば有限のMLEが存在しうる（rust-reviewer指摘）。
+    /// 異なるカテゴリに属する）であれば有限のMLEが存在しうる。
     /// 連続変数`x`でこの非分離配置が実務データに現れることは考えにくいため、実装は
     /// 「0件なら一律エラー」という保守的な単純化を採用している（分離可能性を厳密に
     /// 判定するロジック——線形計画法的な実行可能性判定に相当——は複雑さに見合わないと
-    /// 判断、ユーザー確認済み）。
+    /// 判断した）。
     ///
     /// [`SeparationDetected`](Self::SeparationDetected)（Logit/Probitの準/完全分離）と
     /// 同様の「有限のMLEが存在しない」病理だが、Tobitでは係数が±∞へ発散せず`σ`が小さくなる
@@ -344,7 +344,7 @@ pub fn validate_confidence_level(confidence_level: f64) -> Result<(), MleError> 
 
 /// `k==0`（`include_intercept=false`かつ説明変数も無い病的な入力）の場合にエラーを返す。
 /// Logit/Probit専用: この経路を通すと後段の`cov_params`計算（0×0行列に対する
-/// `ensure_well_conditioned_symmetric_matrix`）で`faer`がpanicすることが判明していたため、
+/// `ensure_well_conditioned_symmetric_matrix`）で`faer`がpanicするため、
 /// 明示的に弾く。`InsufficientObservations`（[`validate_sufficient_observations`]）と
 /// 分けている理由は[`CommonError::NoRegressors`]のdocコメント参照。
 ///
@@ -437,7 +437,7 @@ pub fn validate_mle_options(
 ///
 /// 引数は検証順序に揃えている。`n`（観測数）は`y`から自明に求まる（`y.nrows()`）ため
 /// 引数に取らない。`k`と型が同じ`usize`の引数を並べると呼び出し側で取り違えても
-/// コンパイルが通ってしまうため（レビュー指摘）、傾き係数の数は`usize`ではなく
+/// コンパイルが通ってしまうため、傾き係数の数は`usize`ではなく
 /// `has_intercept: bool`で受け取り、この関数内で`k - usize::from(has_intercept)`と
 /// して算出する（`k`との取り違えを型で防ぐ）。
 pub(crate) fn validate_fit_preconditions(
@@ -469,8 +469,7 @@ pub(crate) fn validate_fit_preconditions(
 /// 明示的に0として扱う（情報理論の`0 log 0 = 0`規約）。`Result`を経由しない内部専用の
 /// 計算（適合度統計量向け、収束後に1回だけ評価する）で、退化ケースを`fit()`の反復
 /// 最適化を経由せず直接テストできるよう独立した関数として切り出している
-/// （元はLogit/Probitそれぞれに同一のコードが重複していたが、レビューで
-/// 指摘を受けてこちらへ集約した）。
+/// （Logit/Probitで同一のコードになるため、ここに集約している）。
 pub fn log_likelihood_null(y: &Mat<f64>) -> f64 {
     let n = y.nrows();
     let n1: f64 = (0..n).map(|i| *y.get(i, 0)).sum();
@@ -507,8 +506,7 @@ pub struct GoodnessOfFit {
 /// 収束点の対数尤度`llf`・切片のみモデルの対数尤度`llnull`（[`log_likelihood_null`]）・
 /// 観測数`n`・パラメータ数`k`から[`GoodnessOfFit`]一式を計算する。モデル固有の尤度計算
 /// （リンク関数）には依存しないため、Logit/Probit間で完全に共通の計算として
-/// `nonlinear/common.rs`に置く（レビュー指摘を受けて集約。元はLogit/Probit
-/// それぞれの`fit()`にほぼ同一のコードが重複していた）。
+/// `nonlinear/common.rs`に置く（Logit/Probitの`fit()`で同一のコードになるため集約している）。
 ///
 /// `df_model = k.saturating_sub(1)`: `include_intercept=false`かつ説明変数も無い
 /// （`k=0`）という病的な入力でもアンダーフローしないための防御。`df_model==0`
@@ -721,7 +719,7 @@ impl MarginalEffects {
         // 呼び出し元（`tobit.rs`の`marginal_effects_from_tobit_w_s`）の内部契約であり、
         // 実データに起因する`ValidationError`とは性質が異なるため`debug_assert_eq!`で
         // 検証する（`TobitInput::from_columns`の`x_columns.len() == x_names.len()`と
-        // 同じ方針、rust-reviewer指摘）。
+        // 同じ方針）。
         let n = param_names.len();
         debug_assert_eq!(
             effect.len(),
@@ -920,9 +918,8 @@ pub fn marginal_effects_from_w_s(
 /// 上で確認した挙動: `pred = (self.predict() > threshold)`で予測確率のみを`threshold`で
 /// 二値化した**後**、`histogram2d(actual, pred, bins=[0, 0.5, 1])`で固定の0.5分割により
 /// クロス集計する。`actual`（生の`endog`）はこの固定分割にしか通らず、`threshold`の
-/// 影響を受けない（Logit実装時、rust-reviewerの指摘・Python数値照合で発覚した実装ミスを
-/// 修正済み: 初版では`actual`も`threshold`で二値化していたため、`threshold≠0.5`のとき
-/// statsmodelsと一致しなかった）。`y`が厳密に0/1でない場合（値域検証は
+/// 影響を受けない（`actual`も`threshold`で二値化すると、`threshold≠0.5`のとき
+/// statsmodelsと一致しなくなる）。`y`が厳密に0/1でない場合（値域検証は
 /// `validate_binary_y`で行うため`fit()`を経由した`y`は常に0/1だが、この関数自体は
 /// `y`の値域を前提にしない）も、常に`0.5`分割になる点でstatsmodelsと同じ扱い。
 ///
@@ -933,7 +930,7 @@ pub fn marginal_effects_from_w_s(
 /// `predicted.len()`は`y.nrows()`と一致する契約（呼び出し側は各モデルの`predict()`と
 /// `self.input.y()`という常に同じ`n`を持つペアを渡すため）。`debug_assert_eq!`は
 /// この契約が破られた場合に`enumerate().take(n)`がサイレントに打ち切って不正確な
-/// 集計を返すのを防ぐための防御（rust-reviewer指摘）。
+/// 集計を返すのを防ぐための防御。
 pub fn pred_table(predicted: &[f64], y: &Mat<f64>, threshold: f64) -> Mat<f64> {
     let n = y.nrows();
     debug_assert_eq!(
@@ -1066,7 +1063,7 @@ pub struct SolverOutput {
 /// 数百倍のマージンを残しつつ、退化した無限ループ相当のケースを有限時間（実測で問題に
 /// なった小標本のTobitでは秒オーダー）で打ち切れる値として選んだ。既定`max_iter=35`
 /// （Logit/Probit/Tobit共通）に対する実効バジェットは`(35+1)*2000=72,000`で、上記の
-/// 実測反復回数に対して十分なマージンがあることをrust-reviewer確認済み。
+/// 実測反復回数に対して十分なマージンがある。
 const MAX_EVALUATIONS_PER_ITER: u64 = 2000;
 
 /// [`FaerLbfgs`]のtwo-loop recursion（[`two_loop_recursion`]）が保持する直近secantペア
@@ -1087,14 +1084,13 @@ const LBFGS_HISTORY_SIZE: usize = 7;
 /// `FaerLbfgs`では内側`Executor`に明示的な`max_iters`を設定した上で、`.run()`後に
 /// 収束判定（`TerminationReason::SolverConverged`）を満たしていない場合は明示的に
 /// エラー化する（`FaerBfgs`には無いチェックだが、この実装では`FaerLbfgs`のみを対象とし
-/// `FaerBfgs`側は変更しない、ユーザー確認済み）。
+/// `FaerBfgs`側は変更しない）。
 ///
 /// **値の根拠**: 正常収束するケースのline searchは数回〜数十回程度で収束する
 /// （[`MAX_EVALUATIONS_PER_ITER`]のdocコメント参照、公式ハーネスの実測でbfgsが6〜7
 /// 反復・lbfgsが17反復で収束）。`100`はこれに対して数倍〜1桁のマージンを残しつつ、
 /// [`BudgetedProblem`]の総枠（1outer反復あたり`2000`）よりずっと小さい専用の値とし、
-/// 退化したline search単体を総枠の消費を待たずに早期検出できるようにする
-/// （ユーザー確認済み）。
+/// 退化したline search単体を総枠の消費を待たずに早期検出できるようにする。
 const LINE_SEARCH_MAX_ITERS: u64 = 100;
 
 /// `FaerBfgs`/`FaerLbfgs`のline search（`MoreThuenteLineSearch`）に渡すstrong Wolfe条件の
@@ -1243,7 +1239,7 @@ impl<O> BudgetedProblem<O> {
     /// ラップした`O`を取り出す（バジェットは破棄する）。`run_solver`が収束後に1回だけ
     /// 行う最終的なHessian評価（`cov_type`共通行列演算が使う「対数尤度そのもの」の
     /// Hessian）は、line search内側ループの暴走防止という本来の目的とは無関係な呼び出し
-    /// のため、このバジェットの対象に含めない（rust-reviewer指摘: 理論上、バジェットが
+    /// のため、このバジェットの対象に含めない（含めると、バジェットが
     /// ちょうど収束と同時に枯渇した場合、正常に収束した結果に対しても
     /// `EvaluationBudgetExceeded`を誤って返しうる）。
     fn into_inner(self) -> O {
@@ -1648,7 +1644,7 @@ const NEWTON_STALL_GRAD_RATIO: f64 = 0.9;
 /// `x`を標準化する）が**設計行列を標準化した
 /// 空間で最適化する**ことに依存している。非標準化スケール（`x`が極端に大きい等）で
 /// `run_solver`を呼ぶ手法を将来追加する場合、この定数の妥当性は再検証が必要
-/// （rust-reviewer指摘。より根本的にはNewton減少量`√(gᵀH⁻¹g)`のようなスケール不変な
+/// （より根本的にはNewton減少量`√(gᵀH⁻¹g)`のようなスケール不変な
 /// 停止基準への置き換えが望ましい。`docs/spec/nonlinear-common.md`9章）。
 const NEWTON_STALL_GRAD_FACTOR: f64 = 1e4;
 /// raw Newtonステップの予測コスト減少量`½gᵀH⁻¹g`（局所2次モデルでの減少量）が
@@ -1757,7 +1753,7 @@ where
                     //       （＝内点最大の2階条件）。`newton_step`の可逆性判定だけでは
                     //       鞍点（可逆だが不定符号）を弾けないため（Tobitの`(β, logσ)`
                     //       尤度は大域凹ではない、`docs/spec/tobit-spec.md`3.1節）、
-                    //       ここで`llt`により明示的に確認する（rust-reviewer指摘）。
+                    //       ここで`llt`により明示的に確認する。
                     let raw_grad = problem.gradient(&raw_candidate)?;
                     let raw_grad_norm = l2_norm(&raw_grad);
                     let stalled = raw_grad_norm >= NEWTON_STALL_GRAD_RATIO * l2_norm(&grad)
@@ -1805,7 +1801,7 @@ where
 /// *Numerical Optimization*の"Hessian modification"に相当）。Levenberg-Marquardt原法
 /// （非線形最小二乗のGauss-Newton近似Hessianに対する信頼領域法）とは目的関数の形が
 /// 異なる一般のMLE最適化への適用であり、名称はあくまで「`H+λI`による正則化」という
-/// 手法的な類似性を指す（rust-reviewer指摘）。
+/// 手法的な類似性を指す。
 ///
 /// **導入経緯**: Logit/Probitのように尤度が大域凹（Hessianが半正定値）な
 /// 問題では、収束点に向かう正常な軌道上は`λ=0`の生のNewtonステップが最初の試行で
@@ -1830,7 +1826,7 @@ where
 /// 小さくスケールしても`cost`が改善しないケースを確認済み）。`λI`を加えて
 /// Hessianを正定値に近づけることで、十分大きな`λ`では最急降下方向（`-g/λ`、非零の
 /// 勾配に対して必ず降下方向）に漸近するため、通常は有限回の試行でコスト減少方向が
-/// 見つかる（ユーザー確認済み）。**例外はNewtonステップによる真のコスト減少量が
+/// 見つかる。**例外はNewtonステップによる真のコスト減少量が
 /// コストの評価誤差を下回る収束点近傍**で、この場合`cost`の比較は丸め誤差の符号で決まり、
 /// どの`λ`でも`cost`を狭義に減少させられないことがある（以前は誤って`SingularHessian`を
 /// 返していた）。現在は`λ=0`のHessianが可逆かどうかで
@@ -1964,7 +1960,7 @@ where
 ///
 /// 予測減少量が負なら偽: Hessianが正定値なら理論上`gᵀH⁻¹g > 0`だが、悪条件なHessianでは
 /// 求解の丸め誤差で負になりうる（＝上り方向のステップ）。その場合は検証なしに採らず、
-/// 従来どおりLMラダーで検証する（rust-reviewer指摘）。
+/// 従来どおりLMラダーで検証する。
 fn predicted_decrease_is_below_cost_resolution(grad: &[f64], step: &[f64], cost: f64) -> bool {
     if !cost.is_finite() {
         return false;
@@ -1980,7 +1976,7 @@ fn predicted_decrease_is_below_cost_resolution(grad: &[f64], step: &[f64], cost:
 /// 省く前提条件（局所2次モデルが凸で、raw Newtonステップが降下方向）にも使う。
 ///
 /// `FaerNewton::next_iter`が`RegularizedStep::NoProgress`（または`BelowCostResolution`）を
-/// `stalled_at_optimum`（収束扱い）に昇格させる前の最終確認にも使う（rust-reviewer指摘）。`newton_step`の
+/// `stalled_at_optimum`（収束扱い）に昇格させる前の最終確認にも使う。`newton_step`の
 /// 列ピボットQRは可逆性（フルランク）しか見ないため、鞍点（可逆だが不定符号）でも
 /// `NoProgress`が返りうる。Tobitの`(β, logσ)`尤度は大域凹性が保証されない
 /// （`docs/spec/tobit-spec.md`3.1節）ため、勾配ノルムの小ささだけを根拠に収束と
@@ -2357,9 +2353,8 @@ fn bfgs_rank2_update(h: &[Vec<f64>], s: &[f64], y: &[f64], rho: f64) -> Vec<Vec<
 /// secant条件`yᵀs>0`を満たさない場合はrank-2更新を行わず、`inv_hessian`をそのまま
 /// 返す（更新すると正定値性が壊れうるため。標準的なBFGSの安全策）。
 ///
-/// **閾値は絶対値`f64::EPSILON`のまま（`‖s‖‖y‖`に対する相対値は不採用、rust-reviewer
-/// 指摘を検証した結果）**: 当初はrust-style.md「線形代数」節の特異性判定の方針
-/// （データのスケールに依存しない相対閾値を使う）に倣い`yksk <= f64::EPSILON *
+/// **閾値は絶対値`f64::EPSILON`のまま（`‖s‖‖y‖`に対する相対値は不採用）**: 当初は
+/// rust-style.md「線形代数」節の特異性判定の方針（データのスケールに依存しない相対閾値を使う）に倣い`yksk <= f64::EPSILON *
 /// l2_norm(sk) * l2_norm(yk)`を試したが、`generate_binary_choice_dataset("baseline",
 /// link="logit", n=1_000_000, k=5, seed=42)`で実測したところ、絶対閾値では反復
 /// 6回目以降のrank-2更新が正常に適用され続けるのに対し、相対閾値では途中の反復で
@@ -2423,8 +2418,7 @@ fn bfgs_updated_inv_hessian(
 /// 設定し、収束判定を満たさないまま打ち切られた場合は明示的にエラー化する
 /// （[`LINE_SEARCH_MAX_ITERS`]のdocコメント参照。`max_iters`到達は
 /// `Err`にならず不正なステップを黙って採用してしまう問題への対応。`FaerBfgs`には無い
-/// チェックだが、この実装では`FaerLbfgs`のみを対象とし`FaerBfgs`側は変更しない、
-/// ユーザー確認済み）。
+/// チェックだが、この実装では`FaerLbfgs`のみを対象とし`FaerBfgs`側は変更しない）。
 ///
 /// `FaerBfgs`と異なり逆Hessian近似の全体は更新せず、直近[`LBFGS_HISTORY_SIZE`]件の
 /// secantペア`(s,y)`だけを保持する（limited-memoryの由来）。初期行列だけは`k×k`の行列`h0`を持つ。
@@ -2498,7 +2492,7 @@ where
         //
         // `n_obs`で正規化する案（`min(1, n_obs/‖g₀‖)`、`tol`の正規化と同じ発想）は、
         // Tobit退化ケース（`fit_lbfgs_converges_for_a_previously_
-        // stalling_case_from_issue_344`）が再び`LINE_SEARCH_MAX_ITERS`超過で
+        // stalling_case`）が再び`LINE_SEARCH_MAX_ITERS`超過で
         // 失敗する回帰を確認したため不採用とした（`‖g₀‖`と`n_obs`の関係は単純な
         // 比例関係ではなく、データセットごとに異なるため）。
         //
@@ -2682,7 +2676,7 @@ fn two_loop_recursion(
 
     // `yᵀs`が実質ゼロ（丸め誤差で負・ほぼゼロになりうる）なペアは、そのペアの寄与を
     // 素通り（`rho_i=alpha_i=0.0`、`q`を更新しない）させて安全に無視する
-    // （rust-reviewer指摘）。`gamma`計算の`yy > f64::EPSILON`ガードと同じ絶対閾値・
+    // `gamma`計算の`yy > f64::EPSILON`ガードと同じ絶対閾値・
     // 同じ発想だが、`gamma`が履歴の最後のペアだけを見るのに対し、こちらは
     // two-loop recursionが参照する**全ペア**に適用する必要がある——`FaerLbfgs::
     // next_iter`は（`FaerBfgs`のrank-2更新スキップとは異なり）secant条件を満たさない
@@ -3690,7 +3684,7 @@ mod tests {
     /// `dot(y,s)<=f64::EPSILON`（ゼロ除算につながる退化ペア）を履歴の**最古**の位置に
     /// 混ぜても、そのペアの寄与が黙って無視され、残りの正常なペアだけで
     /// `two_loop_recursion_matches_hand_computed_values_for_one_history_pair`と
-    /// 完全に同じ結果になるはず（rust-reviewer指摘: `FaerLbfgs`は`FaerBfgs`と異なり
+    /// 完全に同じ結果になるはず（`FaerLbfgs`は`FaerBfgs`と異なり
     /// secant条件を満たさないペアも履歴にそのまま追加する設計のため、
     /// two-loop recursion自体がこの種のペアに対して頑健である必要がある）。
     #[test]
@@ -3797,7 +3791,7 @@ mod tests {
     /// `run_solver`のdocコメント「tolの意味論はsolverにより異なる」参照）。`n_obs`と`tol`を
     /// 別々に振っても積が同じなら同じ収束点・反復回数になることを直接検証する
     /// （既存のBFGS/LBFGSテストは全て`n_obs=1`で呼んでおり、この正規化ロジック自体は
-    /// 未検証だった、rust-reviewer指摘）。
+    /// このテストで検証する）。
     #[test]
     fn run_solver_bfgs_scales_effective_tol_by_n_obs() {
         let via_n_obs = run_solver(
@@ -4642,8 +4636,8 @@ mod tests {
     }
 
     /// `FaerNewton`の収束判定が「実際に返却するパラメータでの勾配」を正しく見ているかを
-    /// 検証する回帰テスト（rust-reviewerが指摘: 修正前は「更新前のパラメータ」の勾配で
-    /// 収束判定していたバグがあった）。
+    /// 検証する回帰テスト（「更新前のパラメータ」の勾配で
+    /// 収束判定すると誤る）。
     ///
     /// `|θ|<1`の領域は勾配に比べてHessianが極端に小さく、Newtonステップが大きくジャンプする。
     /// ジャンプ先（`|θ|>=1`）では勾配が大きい。`converged=true`が返るなら、実際に返却された
@@ -4883,7 +4877,7 @@ mod tests {
     /// 満たす）コスト関数は平坦。`regularized_newton_step`は`RegularizedStep::NoProgress`を
     /// 返すが、`next_iter`のコストHessian正定値チェック（条件(3)、`cost_hessian_is_
     /// positive_definite`）が偽になるため`stalled_at_optimum`を立てない（上記の最適点停滞判定の
-    /// 2階条件ガード、rust-reviewer指摘）。結果は`NonConvergence`——鞍点を「収束」として
+    /// 2階条件ガード）。結果は`NonConvergence`——鞍点を「収束」として
     /// 黙って推定値を返さない。
     #[derive(Clone)]
     struct IndefiniteHessianStallProblem;
@@ -6291,9 +6285,7 @@ mod tests {
 
     /// `pred_table`の実測クラス（行方向の合計）は`threshold`の値に関わらず不変であるべき
     /// （`y`は常に固定の0.5分割でバケット化され、`threshold`は`predicted`側にのみ適用される
-    /// 仕様、`pred_table`のdocコメント参照）。元はLogitの単体テスト（
-    /// rust-reviewerの指摘・statsmodelsとの数値照合で発覚した実装ミスの回帰テスト）を
-    /// `common.rs`へ移設した。
+    /// 仕様、`pred_table`のdocコメント参照）。
     #[test]
     fn pred_table_actual_class_counts_are_invariant_to_threshold() {
         let predicted = vec![0.9, 0.6, 0.3, 0.1];

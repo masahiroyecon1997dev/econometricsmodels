@@ -41,9 +41,9 @@
 //! （手動で`1.0 - cdf(z)`を計算する場合に生じる桁落ちを避けられる）。
 //!
 //! `λ_i = φ(u)/Φ(u)`（`u=q_i z_i`）は、`u`が極端に負（実測`|u|≳39`）だと`φ(u)`・`Φ(u)`が
-//! ともに0にアンダーフローし`0.0/0.0`のNaNになる（実装時にrust-reviewerの
-//! レビューで判明。`Logit`の`logistic`/`softplus`が有限の`z`ではどれだけ極端でも
-//! 絶対にNaNを産まない設計だったのとは異なる、Probit固有のリスク）。既定手法の
+//! ともに0にアンダーフローし`0.0/0.0`のNaNになる（`Logit`の`logistic`/`softplus`が
+//! 有限の`z`ではどれだけ極端でも絶対にNaNを産まない設計だったのとは異なる、Probit固有の
+//! リスク）。既定手法の
 //! `SolverType::Newton`（`FaerNewton`）はline searchなしで`gradient`/`hessian`を直接
 //! 使うため、Logitで実際に問題になった「(準)完全分離データでの収束判定誤検知」
 //! （勾配ノルムのアンダーフロー、`docs/spec/logit-spec.md`3.2節参照）よりも
@@ -234,7 +234,7 @@ fn log_likelihood(x: &Mat<f64>, y: &Mat<f64>, params: &[f64]) -> f64 {
 /// なりうる）。`fit()`を通過した収束済み・有限の`θ`と、`engine_pybind`側で既に有限性が
 /// 保証された`x`から計算する`z`は実質常に有限のため到達不能だが、`logistic`/`softplus`
 /// （Logit）が「有限の`z`では絶対にNaNを生まない」設計だったのとは異なる前提であることに
-/// 注意（rust-reviewer指摘）。
+/// 注意。
 fn overall_w_and_s(x: &Mat<f64>, params: &[f64]) -> (f64, Vec<f64>) {
     let n = x.nrows();
     let k = x.ncols();
@@ -568,8 +568,7 @@ impl ProbitFitted {
     /// のため`common.rs`に共通化されている、Logitと共通）。
     ///
     /// **新規データでの的中表（out-of-sample）は未対応**（`predict()`とは異なり
-    /// スコープ外のまま、別issueでトラッキング。`LogitEstimator::pred_table`と同じ、
-    /// ユーザー確認済み）。
+    /// スコープ外。`LogitEstimator::pred_table`と同じ）。
     pub fn pred_table(&self, threshold: f64) -> Mat<f64> {
         pred_table(&self.predict(), self.input.y(), threshold)
     }
@@ -755,7 +754,7 @@ impl ProbitEstimator {
         // 事前にクローンしておく必要がある（`ProbitProblem`は`argmin::core::Executor`
         // 向けに元々`Clone`を要求しているため、この用途のための追加のtraitではない）。
         // `Classical`はスコアを使わないため、無駄な複製（設計行列を含む）を避けるために
-        // `cov_type`に応じて条件付きで行う（`LogitEstimator::fit`と同じ、rust-reviewer指摘）。
+        // `cov_type`に応じて条件付きで行う（`LogitEstimator::fit`と同じ）。
         let problem_for_scores = match &cov_type {
             CovType::Classical => None,
             CovType::Opg | CovType::Hc0 | CovType::Hc1 | CovType::Cluster { .. } => {
@@ -1371,7 +1370,7 @@ mod tests {
     /// 下のアサーションで検証する（fit()をブラックボックスのまま呼ぶだけでは、将来
     /// warm start/line searchの実装が変わり`|u|`が`U_CLAMP`を超えなくなった場合に、
     /// テスト名が主張する検証内容とテストの中身が乖離したまま気づけないリスクがある
-    /// ため、rust-reviewer指摘によりこの形にした）。
+    /// ため、この形にしている）。
     ///
     /// 実測（2026-09-13、調査時点のこのテスト自身のコード）: newton/bfgs/lbfgsいずれも
     /// `max|u|`が`U_CLAMP`（≈8.13）を大きく超える（bfgsは約36、lbfgsは約185）にもかかわらず
@@ -1508,8 +1507,8 @@ mod tests {
         let (lbfgs_params, lbfgs_max_u) = run(SolverType::Lbfgs);
 
         // このテストが検証したいのは「U_CLAMPを超える領域を実際に通過してもbfgs/lbfgsが
-        // 壊れない」ことであり、通過しなければテストの主張自体が空虚になる（rust-reviewer
-        // 指摘）。ここで実際に超えたことを固定する。
+        // 壊れない」ことであり、通過しなければテストの主張自体が空虚になる。
+        // ここで実際に超えたことを固定する。
         assert!(
             bfgs_max_u > U_CLAMP,
             "bfgs did not actually enter the U_CLAMP region (max|u|={bfgs_max_u}); \
@@ -2779,7 +2778,7 @@ mod tests {
     /// 旧5テストが検証していた「`fit()`の各`cov_type`分岐での`SingularHessian`/
     /// `SingularOpgMatrix`の`?`伝播」経路のカバレッジは、`common.rs`の関数レベルテストと
     /// `tobit.rs`の`fit()`レベルテスト（`cov_params`計算は3手法で同一コード）が担う
-    /// （`LogitEstimator`の対応するテストのdocコメント参照、レビューで確認）。
+    /// （`LogitEstimator`の対応するテストのdocコメント参照）。
     ///
     /// `Cluster`は`G=3 > q=2`にして`fit()`冒頭の`InsufficientClustersForInference`
     /// （`G <= q`）より手前を通す。
@@ -3329,7 +3328,7 @@ mod tests {
     }
 
     /// `predict_new_data`が`has_intercept=false`でも正しく動作すること
-    /// （rust-reviewer指摘、`LogitEstimator`の対応するテストのΦ版）。
+    /// （`LogitEstimator`の対応するテストのΦ版）。
     #[test]
     fn predict_new_data_without_intercept_matches_independently_recomputed_normal_cdf_of_linear_predictor()
      {
@@ -3463,7 +3462,7 @@ mod tests {
     /// 側の合成データによる一般テスト（`pred_table_actual_class_counts_are_invariant_
     /// to_threshold`）で既にカバーされているが、`ProbitEstimator`側の配線（`predict()`の
     /// 出力を正しく`pred_table`へ渡せているか）を壊す変更を検知できるようにするため、
-    /// `LogitEstimator`の対応するテストと対称に追加する（rust-reviewer指摘）。
+    /// `LogitEstimator`の対応するテストと対称に追加する。
     #[test]
     fn pred_table_actual_class_counts_are_invariant_to_threshold() {
         let y = vec![0.0, 1.0, 0.0, 1.0];

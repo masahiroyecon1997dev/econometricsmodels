@@ -451,8 +451,8 @@ mod tests {
     }
 
     /// 説明変数が定数項のみ（傾き係数が無い、`df_model=0`）の退化モデルでは、F検定の
-    /// 対象が存在しないため`wald_statistic`/`wald_p_value`は`NaN`になる（`ols/estimator.rs`の
-    /// 同名の分岐と同じ0除算回避の扱い、`two_sls.rs`のモジュールdoc参照）。
+    /// 対象が存在しないため`wald_statistic`/`wald_p_value`は`NaN`になる（`shared/wald.rs`の
+    /// `wald_f_test`と同じ0除算回避の扱い、`two_sls.rs`のモジュールdoc参照）。
     #[test]
     fn fit_sets_f_statistic_and_f_p_value_to_nan_for_const_only_model() {
         let y = vec![2.1, 3.8, 6.3, 7.9, 10.2];
@@ -1171,7 +1171,7 @@ mod tests {
         );
     }
 
-    /// property-basedテスト。`ols/estimator.rs`の`mod proptests`と同型の設計（配置・許容誤差`RTOL=1e-6`・
+    /// property-basedテスト。`ols/fit.rs`の`mod proptests`と同型の設計（配置・許容誤差`RTOL=1e-6`・
     /// `prop_assume!`によるフルランク安全弁）だが、IV固有の不変条件（操作変数の張る空間のみへの
     /// 依存・丁度識別の閉形式解）を検証する。ケース生成は`common::proptest_support`。
     mod proptests {

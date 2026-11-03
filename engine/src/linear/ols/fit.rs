@@ -1,6 +1,10 @@
+//! `OlsEstimator::fit`の本体。検証（回帰子の有無・信頼水準・観測数・クラスター数・被説明変数）→
+//! 最小二乗 → cov_type別の共分散 → t検定・信頼区間 → 適合度 → 全体F検定の順に組み立てる。
+
 use faer::Mat;
 use statrs::distribution::StudentsT;
 
+use super::OlsEstimator;
 use super::cov_params::{CovParams, compute_cov_params, validate_cluster_count};
 use super::cov_type::CovType;
 use super::input::OlsInput;
@@ -14,455 +18,139 @@ use crate::shared::least_squares::{LeastSquaresFit, least_squares, residual_sum_
 use crate::shared::validation::validate_has_regressors;
 use crate::shared::wald::wald_f_test;
 
-/// OLSの推定結果。
+/// `OlsEstimator::fit`/`fit_with_optional_f_test`/`fit_auxiliary`の共通実装。契約（エラー条件）は`fit`のdocコメント参照。
 ///
-/// フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」参照）。
-/// `fit`でのバリデーション（観測数・特異性・信頼水準）を通過した状態のみを表す。
-#[derive(Debug)]
-pub struct OlsEstimator {
+/// `allow_undefined_f_test`が真のとき、クラスター数が傾き係数の数以下でも全体F検定を`None`にして続行する。
+/// `check_outcome`が真のとき、被説明変数が定数（切片ありのみ）か完全フィットなら失敗させる。
+pub(super) fn fit_ols(
     input: OlsInput,
-    /// 使用した標準誤差の種別
     cov_type: CovType,
-    /// 係数 (k, 1)。`input.param_names()`と対応する
-    params: Mat<f64>,
-    /// 残差 (n, 1) = y - Xβ̂
-    residuals: Mat<f64>,
-    /// 標準誤差 (k, 1)
-    std_errors: Mat<f64>,
-    /// t統計量 (k, 1) = params / std_errors
-    test_stats: Mat<f64>,
-    /// 両側p値 (k, 1)。t分布（自由度`df_inference`。通常`n-k`、`cov_type=Cluster`のときだけ`G-1`）に基づく
-    p_values: Mat<f64>,
-    /// 信頼区間の下限 (k, 1)
-    conf_lower: Mat<f64>,
-    /// 信頼区間の上限 (k, 1)
-    conf_upper: Mat<f64>,
-    /// 決定係数（`include_intercept`に応じてcentered/uncentered TSSを切り替える）
-    r_squared: f64,
-    /// 自由度調整済み決定係数
-    adj_r_squared: f64,
-    /// 全体F検定の`(F統計量, p値)`。`cov_type=Classical`なら古典的F検定、それ以外
-    /// （HC0-3/HAC/Cluster）は`cov_params`を使ったロバストWald検定（`docs/spec/ols-spec.md`
-    /// 「適合度統計量」参照）。p値はF分布（自由度`(k - k_constant, df_inference)`。
-    /// `df_inference`は通常`n - k`、`cov_type=Cluster`のときだけ`G-1`）。
-    /// 検定が定義できないとき`None`: 傾き係数が無い（定数項のみ）、または
-    /// [`OlsEstimator::fit_with_optional_f_test`]で`cov_type=Cluster`のクラスター数`G`が
-    /// 傾き係数の数`q`以下（`rank(Ŝ) ≤ G-1 < q`で`q×q`部分行列が構造的に特異）
-    f_test: Option<(f64, f64)>,
-    /// 対数尤度（正規分布を仮定した最尤推定量ベース。`σ̂²`は`SSR/n`であり、
-    /// classical標準誤差の不偏推定量`SSR/(n-k)`とは異なる点に注意）
-    log_likelihood: f64,
-    aic: f64,
-    bic: f64,
-    /// 係数の分散共分散行列 (k, k)。Python側には公開しない（`docs/spec/ols-spec.md`
-    /// 「結果構造体」）。クレート内の他系統から呼ばれる[`Self::wald_test_last_columns`]
-    /// のためだけに保持している（`engine::iv::two_sls`のWu-Hausman検定が
-    /// 唯一の呼び出し元。それまでは`fit()`内のローカル変数として使い切っていた）。
-    cov_params: Mat<f64>,
-    /// t検定・F検定・信頼区間に使う自由度。通常`df_resid`と同じだが`cov_type=Cluster`の
-    /// ときだけ`G-1`になる（`fit()`のdocコメント「df_inference」参照）。`cov_params`と
-    /// 同じ理由で保持している。
-    df_inference: usize,
-    /// `cov_type=Hac`のとき、実際に使われたラグ数（`hac_lags`明示指定、または`None`なら
-    /// 経験則による自動計算の結果）。`CovType::Hac`の`lags`はユーザー指定値のまま
-    /// 変更しないため別フィールドで保持する。`Hac`以外では`None`。
-    hac_lags_used: Option<usize>,
-}
+    confidence_level: f64,
+    allow_undefined_f_test: bool,
+    check_outcome: bool,
+) -> Result<OlsEstimator, LeastSquaresError> {
+    validate_has_regressors(input.nobs(), input.k())?;
 
-impl OlsEstimator {
-    /// 正規方程式を列ピボットQR分解（`col_piv_qr`）で解き、OLS係数・標準誤差・
-    /// t統計量・p値・信頼区間を求める。
-    ///
-    /// Cholesky（`X'Xβ=X'y`をXᵀXのCholesky分解で解く）ではなく列ピボットQRを採用する理由:
-    /// `X'X`を明示的に作ると条件数が2乗になり数値的に不利な上、特異性検出
-    /// （`.claude/rules/rust-style.md`「線形代数」が要求する`col_piv_qr`）と係数計算を
-    /// 同じ分解で一度に行える。標準誤差の計算では`X'X`の逆行列が別途必要になるため
-    /// （classical: `σ̂²(X'X)⁻¹`、HC0-3: `(X'X)⁻¹Ψ̂(X'X)⁻¹`）、そちらは`X'X`自体の
-    /// Cholesky分解（対称正定値であることは上記の特異性検出で既に確認済み）で個別に求める。
-    ///
-    /// `confidence_level`は`fit`実行時に一度だけ使用し、信頼区間に固定して含める
-    /// （`docs/spec/ols-spec.md`「API引数」参照。実行時可変引数にはしない）。
-    ///
-    /// `cov_type`によらず、p値・信頼区間の算出にはt分布を使う（自由度は通常n-k、
-    /// `cov_type=Cluster`のときだけ`G-1`。上記の`df_inference`）。
-    /// 主リファレンスのstatsmodelsはHC0-3で正規分布を既定とするが（`use_t=False`）、
-    /// 本プロジェクトはt分布で統一する方針（`docs/spec/ols-spec.md`
-    /// 「標準誤差」）。ベンチマーク生成側
-    /// （`benchmark/linear/references/statsmodels_ref.py`）は`use_t=True`を明示指定して合わせている。
-    ///
-    /// F統計量も同じ方針で、`cov_type`によらず単一のWald検定の式
-    /// `F = (β_slopes' Σ⁻¹ β_slopes) / q`（`Σ`は切片以外の係数に対応する`cov_params`の
-    /// 部分行列、`q`はその次元）で計算する。`cov_type=Classical`のとき、この式は代数的に
-    /// 古典的F検定`((SST-SSR)/q) / (SSR/df_resid)`と完全に一致する（標準的な計量経済学の
-    /// 恒等式）ため、分岐を分ける必要がない。HC0-3・HACでは`cov_params`がロバストな
-    /// 分散共分散行列になるため、この式がそのままロバストWald検定になる
-    /// （`docs/spec/ols-spec.md`「適合度統計量」参照）。
-    ///
-    /// # Errors
-    /// - `k`（定数項を含む説明変数の数）が0（`include_intercept=false`かつ説明変数も無い）:
-    ///   `CommonError::NoRegressors`（Logit/Probitと同じ早期リジェクト）。**このチェックは
-    ///   `confidence_level`より先に行う**。nonlinear系統の`validate_fit_preconditions`は
-    ///   逆順（`confidence_level`→…→`k==0`）だが、Python APIの`validate_role_non_empty`により
-    ///   どちらの入力もそもそも到達不能なため実害はなく、系統間で順序を揃えるという
-    ///   明示的な方針も無い
-    /// - `confidence_level`が`(0, 1)`の範囲外: `CommonError::InvalidConfidenceLevel`
-    /// - 観測数`n`が`k`（定数項を含む説明変数の数）以下: `CommonError::InsufficientObservations`
-    /// - 設計行列が特異（完全な多重共線性等）: `LeastSquaresError::SingularMatrix`
-    /// - `cov_type=Cluster`でグループキー未指定: `CommonError::MissingClusterColumn`
-    /// - `cov_type=Cluster`でクラスター数が2未満: `CommonError::InsufficientClusters`
-    /// - `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下:
-    ///   `CommonError::InsufficientClustersForInference`（`rank(Ŝ) ≤ g - 1`のため
-    ///   ロバストWald/F検定の`q×q`部分行列が構造的に特異）
-    /// - 傾き係数間の悪条件（極端なスケール差等）でロバストWald/F検定の`q×q`部分行列が
-    ///   数値的にほぼ特異: `CommonError::NearSingularMatrix`（`g > q`でも起こりうる
-    ///   backstop、`wald_f_test`参照）
-    pub fn fit(
-        input: OlsInput,
-        cov_type: CovType,
-        confidence_level: f64,
-    ) -> Result<Self, LeastSquaresError> {
-        Self::fit_impl(input, cov_type, confidence_level, false, true)
+    // faer のグローバル並列度を Par::Seq に固定する（`crate::shared::parallelism`）。
+    crate::shared::parallelism::ensure_serial();
+
+    if !(confidence_level > 0.0 && confidence_level < 1.0) {
+        return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
     }
 
-    /// [`fit`](Self::fit)と同じだが、被説明変数が定数（`CommonError::OutcomeConstant`）か、
-    /// 完全フィット（`CommonError::PerfectFit`）かを調べない。
-    ///
-    /// モデルの結果として利用者に見せる回帰ではなく、別の統計量の部品として使う補助的な回帰
-    /// （診断検定の補助回帰、IVの第二段階、REの準偏差変換後の回帰とハウスマンの補助回帰）に使う。
-    /// 診断検定の補助回帰・REの回帰の被説明変数は元のモデルの被説明変数ではない（残差の二乗、
-    /// 変換後の値）ため、IVの第二段階は`X̂`への回帰で残差が構造残差ではないため、定数や完全フィットの
-    /// 判定の基準（元のモデルの総平方和・残差）が当てはまらない。完全フィットは元のモデルの回帰
-    /// （構造残差、内部のFE、OLS）が先に検出する。
-    ///
-    /// # Errors
-    /// 被説明変数に関する2つを除き[`fit`](Self::fit)と同じ。
-    pub(crate) fn fit_auxiliary(
-        input: OlsInput,
-        cov_type: CovType,
-        confidence_level: f64,
-    ) -> Result<Self, LeastSquaresError> {
-        Self::fit_impl(input, cov_type, confidence_level, false, false)
+    let n = input.nobs();
+    let k = input.k();
+
+    if n <= k {
+        return Err(CommonError::InsufficientObservations { n, k }.into());
     }
 
-    /// [`fit`](Self::fit)と同じだが、`cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`
-    /// （`k - k_constant`）以下のときも`InsufficientClustersForInference`で失敗させず、
-    /// 全体F検定だけを定義なし（`f_statistic()`/`f_p_value()`/`f_df()`が`None`）にして
-    /// 推定を続ける。
-    ///
-    /// `rank(Ŝ) ≤ g - 1`のため`g ≤ q`では`q×q`部分行列が構造的に特異で全体F検定だけが
-    /// 計算できなくなるが、係数・各係数の標準誤差・t検定・信頼区間・適合度は`g - 1`自由度で
-    /// そのまま計算できる。呼び出し元が全体F検定を必須の出力にしない（診断として扱う）場合に
-    /// 使う（`engine::iv::common::compute_first_stage`の第一段階回帰）。クラスター数が2未満
-    /// （`InsufficientClusters`）・`groups`未指定（`MissingClusterColumn`）は従来どおり失敗し、
-    /// `g > q`でのほぼ特異性（`NearSingularMatrix`）も`None`へ握りつぶさず失敗のまま伝播する。
-    ///
-    /// # Errors
-    /// `g ≤ q`による`InsufficientClustersForInference`を除き[`fit`](Self::fit)と同じ。
-    pub fn fit_with_optional_f_test(
-        input: OlsInput,
-        cov_type: CovType,
-        confidence_level: f64,
-    ) -> Result<Self, LeastSquaresError> {
-        Self::fit_impl(input, cov_type, confidence_level, true, true)
+    // 入力だけから判定できるクラスター数の検証は、QR分解・残差計算より前に行う
+    // （`cov_params::validate_cluster_count`参照）。
+    let f_test_defined = validate_cluster_count(
+        &cov_type,
+        n,
+        k - usize::from(input.has_intercept()),
+        allow_undefined_f_test,
+    )?;
+
+    // 入力だけから分かる被説明変数の検証は、QR分解より前に行う。
+    if check_outcome && input.has_intercept() && input.outcome_constant() {
+        return Err(CommonError::OutcomeConstant.into());
     }
 
-    /// `fit`/`fit_with_optional_f_test`/`fit_auxiliary`の共通実装。`allow_undefined_f_test`が
-    /// 真のとき、クラスター数が傾き係数の数以下でも全体F検定を`None`にして続行する。
-    /// `check_outcome`が真のとき、被説明変数が定数（切片ありのみ）か完全フィットなら失敗させる。
-    fn fit_impl(
-        input: OlsInput,
-        cov_type: CovType,
-        confidence_level: f64,
-        allow_undefined_f_test: bool,
-        check_outcome: bool,
-    ) -> Result<Self, LeastSquaresError> {
-        validate_has_regressors(input.nobs(), input.k())?;
+    let LeastSquaresFit {
+        params,
+        residuals,
+        xtx_inv,
+    } = least_squares(input.x(), input.y()).map_err(|err| {
+        LeastSquaresError::from_rank_deficient(err, input.x(), input.param_names())
+    })?;
 
-        // faer のグローバル並列度を Par::Seq に固定する（`crate::shared::parallelism`）。
-        crate::shared::parallelism::ensure_serial();
+    let df_resid = n - k;
+    let ssr = residual_sum_of_squares(&residuals);
+    // 共分散・F検定より前に止める（残差が0だと`sigma^2`が0で、後段は0割りや無意味な桁の値になる）。
+    if check_outcome && is_perfect_fit(ssr, input.outcome_sst(), k) {
+        return Err(CommonError::PerfectFit.into());
+    }
+    let sigma2 = ssr / (df_resid as f64);
 
-        if !(confidence_level > 0.0 && confidence_level < 1.0) {
-            return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
-        }
+    let CovParams {
+        cov_params,
+        df_inference,
+        hac_lags_used,
+    } = compute_cov_params(&cov_type, input.x(), &residuals, &xtx_inv, sigma2, df_resid)?;
 
-        let n = input.nobs();
-        let k = input.k();
+    let mut std_errors = Mat::zeros(k, 1);
+    for j in 0..k {
+        *std_errors.get_mut(j, 0) = (*cov_params.get(j, j)).sqrt();
+    }
 
-        if n <= k {
-            return Err(CommonError::InsufficientObservations { n, k }.into());
-        }
+    let t_dist = StudentsT::new(0.0, 1.0, df_inference as f64)
+        .map_err(|e| CommonError::internal(e.to_string()))?;
+    let t_crit = inference::critical_value(&t_dist, confidence_level);
 
-        // 入力だけから判定できるクラスター数の検証は、QR分解・残差計算より前に行う
-        // （`cov_params::validate_cluster_count`参照）。
-        let f_test_defined = validate_cluster_count(
-            &cov_type,
-            n,
-            k - usize::from(input.has_intercept()),
-            allow_undefined_f_test,
-        )?;
+    let mut test_stats = Mat::zeros(k, 1);
+    let mut p_values = Mat::zeros(k, 1);
+    let mut conf_lower = Mat::zeros(k, 1);
+    let mut conf_upper = Mat::zeros(k, 1);
 
-        // 入力だけから分かる被説明変数の検証は、QR分解より前に行う。
-        if check_outcome && input.has_intercept() && input.outcome_constant() {
-            return Err(CommonError::OutcomeConstant.into());
-        }
+    for j in 0..k {
+        let coef = *params.get(j, 0);
+        let se = *std_errors.get(j, 0);
+        let stat = inference::compute_inference_stat(&t_dist, coef, se, t_crit);
 
-        let LeastSquaresFit {
-            params,
-            residuals,
-            xtx_inv,
-        } = least_squares(input.x(), input.y()).map_err(|err| {
-            LeastSquaresError::from_rank_deficient(err, input.x(), input.param_names())
-        })?;
+        *test_stats.get_mut(j, 0) = stat.stat;
+        *p_values.get_mut(j, 0) = stat.p_value;
+        *conf_lower.get_mut(j, 0) = stat.conf_low;
+        *conf_upper.get_mut(j, 0) = stat.conf_high;
+    }
 
-        let df_resid = n - k;
-        let ssr = residual_sum_of_squares(&residuals);
-        // 共分散・F検定より前に止める（残差が0だと`sigma^2`が0で、後段は0割りや無意味な桁の値になる）。
-        if check_outcome && is_perfect_fit(ssr, input.outcome_sst(), k) {
-            return Err(CommonError::PerfectFit.into());
-        }
-        let sigma2 = ssr / (df_resid as f64);
+    let k_constant = usize::from(input.has_intercept());
+    let GaussianGoodnessOfFit {
+        r_squared,
+        adj_r_squared,
+        log_likelihood,
+        aic,
+        bic,
+    } = gaussian_goodness_of_fit(input.y(), ssr, k, input.has_intercept());
 
-        let CovParams {
-            cov_params,
+    let df_model = k - k_constant;
+    let f_test = if df_model == 0 || !f_test_defined {
+        // 説明変数が定数項のみ（傾き係数が無い）モデルは検定対象が存在しない。
+        // クラスター数が傾き係数の数以下（`fit_with_optional_f_test`のみ）では
+        // `q×q`部分行列が構造的に特異で検定できない。どちらも定義なし（`None`）。
+        None
+    } else {
+        Some(wald_f_test(
+            &params,
+            &cov_params,
+            k_constant,
+            df_model,
             df_inference,
-            hac_lags_used,
-        } = compute_cov_params(&cov_type, input.x(), &residuals, &xtx_inv, sigma2, df_resid)?;
-
-        let mut std_errors = Mat::zeros(k, 1);
-        for j in 0..k {
-            *std_errors.get_mut(j, 0) = (*cov_params.get(j, j)).sqrt();
-        }
-
-        let t_dist = StudentsT::new(0.0, 1.0, df_inference as f64)
-            .map_err(|e| CommonError::internal(e.to_string()))?;
-        let t_crit = inference::critical_value(&t_dist, confidence_level);
-
-        let mut test_stats = Mat::zeros(k, 1);
-        let mut p_values = Mat::zeros(k, 1);
-        let mut conf_lower = Mat::zeros(k, 1);
-        let mut conf_upper = Mat::zeros(k, 1);
-
-        for j in 0..k {
-            let coef = *params.get(j, 0);
-            let se = *std_errors.get(j, 0);
-            let stat = inference::compute_inference_stat(&t_dist, coef, se, t_crit);
-
-            *test_stats.get_mut(j, 0) = stat.stat;
-            *p_values.get_mut(j, 0) = stat.p_value;
-            *conf_lower.get_mut(j, 0) = stat.conf_low;
-            *conf_upper.get_mut(j, 0) = stat.conf_high;
-        }
-
-        let k_constant = usize::from(input.has_intercept());
-        let GaussianGoodnessOfFit {
-            r_squared,
-            adj_r_squared,
-            log_likelihood,
-            aic,
-            bic,
-        } = gaussian_goodness_of_fit(input.y(), ssr, k, input.has_intercept());
-
-        let df_model = k - k_constant;
-        let f_test = if df_model == 0 || !f_test_defined {
-            // 説明変数が定数項のみ（傾き係数が無い）モデルは検定対象が存在しない。
-            // クラスター数が傾き係数の数以下（`fit_with_optional_f_test`のみ）では
-            // `q×q`部分行列が構造的に特異で検定できない。どちらも定義なし（`None`）。
-            None
-        } else {
-            Some(wald_f_test(
-                &params,
-                &cov_params,
-                k_constant,
-                df_model,
-                df_inference,
-            )?)
-        };
-
-        Ok(Self {
-            input,
-            cov_type,
-            params,
-            residuals,
-            std_errors,
-            test_stats,
-            p_values,
-            conf_lower,
-            conf_upper,
-            r_squared,
-            adj_r_squared,
-            f_test,
-            log_likelihood,
-            aic,
-            bic,
-            cov_params,
-            df_inference,
-            hac_lags_used,
-        })
-    }
-
-    /// 推定に使った入力データ
-    pub fn input(&self) -> &OlsInput {
-        &self.input
-    }
-
-    /// 使用した標準誤差の種別
-    pub fn cov_type(&self) -> &CovType {
-        &self.cov_type
-    }
-
-    /// 係数 (k, 1)
-    pub fn params(&self) -> &Mat<f64> {
-        &self.params
-    }
-
-    /// 残差 (n, 1)
-    pub fn residuals(&self) -> &Mat<f64> {
-        &self.residuals
-    }
-
-    /// 標準誤差 (k, 1)
-    pub fn std_errors(&self) -> &Mat<f64> {
-        &self.std_errors
-    }
-
-    /// `cov_type`に応じた係数の分散共分散行列 (k, k)。`std_errors`はこの対角成分の平方根
-    pub fn cov_params(&self) -> &Mat<f64> {
-        &self.cov_params
-    }
-
-    /// t統計量 (k, 1)
-    pub fn test_stats(&self) -> &Mat<f64> {
-        &self.test_stats
-    }
-
-    /// `test_stats`の従う分布（t分布、自由度は`df_inference`。`cov_type=Cluster`のときだけ
-    /// `df_resid`ではなく`G-1`になる）。
-    pub fn stat_dist(&self) -> inference::StatDist {
-        inference::StatDist::T {
-            df: self.df_inference,
-        }
-    }
-
-    /// 両側p値 (k, 1)
-    pub fn p_values(&self) -> &Mat<f64> {
-        &self.p_values
-    }
-
-    /// 信頼区間の下限 (k, 1)
-    pub fn conf_lower(&self) -> &Mat<f64> {
-        &self.conf_lower
-    }
-
-    /// 信頼区間の上限 (k, 1)
-    pub fn conf_upper(&self) -> &Mat<f64> {
-        &self.conf_upper
-    }
-
-    /// 決定係数
-    pub fn r_squared(&self) -> f64 {
-        self.r_squared
-    }
-
-    /// 自由度調整済み決定係数
-    pub fn adj_r_squared(&self) -> f64 {
-        self.adj_r_squared
-    }
-
-    /// 全体F検定の統計量。検定が定義できない（傾き係数が無い、または
-    /// [`fit_with_optional_f_test`](Self::fit_with_optional_f_test)でクラスター数が傾き係数の数
-    /// 以下）ときは`None`。
-    pub fn f_statistic(&self) -> Option<f64> {
-        self.f_test.map(|(statistic, _)| statistic)
-    }
-
-    /// 全体F検定のp値。`f_statistic()`が`None`のとき`None`。
-    pub fn f_p_value(&self) -> Option<f64> {
-        self.f_test.map(|(_, p_value)| p_value)
-    }
-
-    /// 残差自由度 `n - k`。
-    pub fn df_resid(&self) -> usize {
-        self.input.nobs() - self.input.k()
-    }
-
-    /// モデルの自由度（定数項を除く傾き係数の数 `k - k_constant`）。
-    pub fn df_model(&self) -> usize {
-        self.input.k() - usize::from(self.input.has_intercept())
-    }
-
-    /// t検定・信頼区間・F検定に使った自由度（[`stat_dist`](Self::stat_dist)と同じ値）。
-    /// 通常は`df_resid()`だが`cov_type=Cluster`のときだけ`G-1`。
-    pub fn df_inference(&self) -> usize {
-        self.df_inference
-    }
-
-    /// `cov_type=Hac`のとき、実際に使われたラグ数（`hac_lags`の明示指定値、または
-    /// 未指定時に経験則で自動計算した値）。`Hac`以外は`None`。
-    pub fn hac_lags_used(&self) -> Option<usize> {
-        self.hac_lags_used
-    }
-
-    /// F統計量の自由度`(分子, 分母)`。`f_statistic()`が`None`のときは`None`。
-    pub fn f_df(&self) -> Option<(usize, usize)> {
-        self.f_test.map(|_| (self.df_model(), self.df_inference))
-    }
-
-    /// 対数尤度
-    pub fn log_likelihood(&self) -> f64 {
-        self.log_likelihood
-    }
-
-    /// 赤池情報量規準
-    pub fn aic(&self) -> f64 {
-        self.aic
-    }
-
-    /// ベイズ情報量規準
-    pub fn bic(&self) -> f64 {
-        self.bic
-    }
-
-    /// 設計行列の**末尾`q`列**に対応する係数が全てゼロという帰無仮説のロバストWald検定を行い、
-    /// F統計量とそのp値を返す（`fit()`が呼ぶ内部関数`wald_f_test`の対象列を、「切片を除く
-    /// 全傾き係数」から「任意の末尾`q`列」に一般化したもの。数式・分布・p値の向きは
-    /// `wald_f_test`のdocコメントと同じ）。
-    ///
-    /// クレート内の他系統から、この`OlsEstimator`自身が構築した設計行列の一部（末尾に
-    /// 追加した列）だけをまとめて検定したい場合に使う（`engine::iv::two_sls`の
-    /// Wu-Hausman検定——構造式に第一段階残差を追加回帰し、追加した残差係数のジョイント
-    /// 有意性を検定する——が現時点で唯一の呼び出し元）。
-    ///
-    /// # Panics
-    /// `q == 0`または`q > self.input.k()`は呼び出し元の実装バグでしか起こり得ない
-    /// （検定対象が空、または設計行列の列数を超える）内部契約違反のため、`debug_assert!`で
-    /// 検出する（`IvInput::from_columns`の引数長チェックと同じ方針、
-    /// `.claude/rules/rust-style.md`は触れていないがこのファイル内で既に使われている
-    /// パターン）。
-    ///
-    /// # Errors
-    /// `wald_f_test`と同じ（末尾`q`列に対応する`cov_params`の部分行列が数値的にほぼ特異な
-    /// 場合、`LeastSquaresError::Common(CommonError::NearSingularMatrix)`）。
-    pub fn wald_test_last_columns(&self, q: usize) -> Result<(f64, f64), LeastSquaresError> {
-        let k = self.input.k();
-        debug_assert!(
-            q > 0 && q <= k,
-            "wald_test_last_columns: q must be in (0, k], got q={q}, k={k}"
-        );
-        Ok(wald_f_test(
-            &self.params,
-            &self.cov_params,
-            k - q,
-            q,
-            self.df_inference,
         )?)
-    }
+    };
 
-    /// 学習データに対する予測値 `ŷ = Xβ̂`（`predict(new_data=None)`のPython APIが返す値、
-    /// `docs/spec/ols-spec.md`「predict()」参照）。`fit()`のReturn本体には含めず、
-    /// 必要なときに計算する別メソッドとする（Logitの`predict()`と同じ設計方針）。
-    pub fn fitted_values(&self) -> Mat<f64> {
-        self.input.x() * &self.params
-    }
+    Ok(OlsEstimator {
+        input,
+        cov_type,
+        params,
+        residuals,
+        std_errors,
+        test_stats,
+        p_values,
+        conf_lower,
+        conf_upper,
+        r_squared,
+        adj_r_squared,
+        f_test,
+        log_likelihood,
+        aic,
+        bic,
+        cov_params,
+        df_inference,
+        hac_lags_used,
+    })
 }
 
 #[cfg(test)]
@@ -739,56 +427,6 @@ mod tests {
         let _ = OlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
 
         assert!(matches!(faer::get_global_parallelism(), faer::Par::Seq));
-    }
-
-    /// `wald_test_last_columns`が「切片を除く全傾き係数」（`q = df_model`）を対象に呼ばれた
-    /// 場合、`fit()`が計算する`f_statistic()`/`f_p_value()`（同じ`wald_f_test`を
-    /// `k_constant=1`で呼ぶ）と数値的に一致するはず（対象列の一般化が既存の挙動を
-    /// 壊していないことの確認。IVのWu-Hausman検定用に追加）。
-    #[test]
-    fn wald_test_last_columns_matches_f_statistic_when_q_equals_df_model() {
-        let y = vec![2.0, 4.0, 5.0, 4.0, 5.0, 7.0, 6.0];
-        let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0];
-        let x2 = vec![2.0, 1.0, 4.0, 3.0, 6.0, 5.0, 8.0];
-        let input = OlsInput::from_columns(
-            &y,
-            &[x1, x2],
-            vec!["x1".to_string(), "x2".to_string()],
-            true,
-            "y".to_string(),
-        )
-        .unwrap();
-        let estimator = OlsEstimator::fit(input, CovType::Hc1, 0.95).unwrap();
-
-        let (stat, p_value) = estimator.wald_test_last_columns(2).unwrap();
-        assert!((stat - estimator.f_statistic().unwrap()).abs() < 1e-10);
-        assert!((p_value - estimator.f_p_value().unwrap()).abs() < 1e-10);
-    }
-
-    /// `q=1`（末尾1列だけを対象）のとき、`F = t²`という標準的な恒等式
-    /// （`wald_f_test`のdocコメント参照、1自由度のF検定は両側t検定と代数的に等価）により、
-    /// 既に個別に検証済みの`test_stats()`/`p_values()`（`fit()`本体が計算）と一致するはず。
-    #[test]
-    fn wald_test_last_columns_matches_squared_t_statistic_for_single_column() {
-        let y = vec![2.0, 4.0, 5.0, 4.0, 5.0, 7.0, 6.0];
-        let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0];
-        let x2 = vec![2.0, 1.0, 4.0, 3.0, 6.0, 5.0, 8.0];
-        let input = OlsInput::from_columns(
-            &y,
-            &[x1, x2],
-            vec!["x1".to_string(), "x2".to_string()],
-            true,
-            "y".to_string(),
-        )
-        .unwrap();
-        let estimator = OlsEstimator::fit(input, CovType::Classical, 0.95).unwrap();
-
-        let (stat, p_value) = estimator.wald_test_last_columns(1).unwrap();
-        let k = estimator.input().k();
-        let t_last = *estimator.test_stats().get(k - 1, 0);
-        let p_last = *estimator.p_values().get(k - 1, 0);
-        assert!((stat - t_last.powi(2)).abs() < 1e-10);
-        assert!((p_value - p_last).abs() < 1e-10);
     }
 
     #[test]

@@ -1,5 +1,5 @@
 //! `two_sls/fit.rs`/`gmm/fit.rs`の`mod proptests`が共有する、property-basedテスト用のケース生成器と
-//! 補助関数。`ols/estimator.rs`の`mod proptests`は手法ごとに生成器を持つが、IVは2SLSとGMMで同一の
+//! 補助関数。`ols/fit.rs`の`mod proptests`は手法ごとに生成器を持つが、IVは2SLSとGMMで同一の
 //! データ構造（内生変数・操作変数・構造誤差）を要するため、ここに一本化して二重定義を避ける。
 
 use crate::iv::common::{IvError, IvInput};
@@ -146,7 +146,7 @@ impl IvCase {
     }
 }
 
-/// 相対誤差ベース＋絶対誤差フロア（`ols/estimator.rs`の`assert_approx_eq`と同じ`RTOL=1e-6`）。
+/// 相対誤差ベース＋絶対誤差フロア（`ols/fit.rs`の`assert_approx_eq`と同じ`RTOL=1e-6`）。
 pub(crate) fn assert_approx_eq(actual: f64, expected: f64, msg: &str) {
     let tol = 1e-6 * expected.abs().max(1.0);
     let diff = (actual - expected).abs();

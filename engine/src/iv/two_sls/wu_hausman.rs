@@ -191,7 +191,7 @@ mod tests {
     /// （`y ~ const + x1 + x_endog + 第一段階残差`、`nontrivial_x_exog_columns()`を使う）の
     /// オラクルと数値一致することを確認する。`cov_type=Classical`なので、単一の追加列
     /// （`k_endog=1`）に対するWald F検定は`t²`（該当係数のt統計量の2乗）と代数的に一致する
-    /// （`ols/estimator.rs`の`wald_test_last_columns_matches_squared_t_statistic_for_single_column`と
+    /// （`ols/wald.rs`の`wald_test_last_columns_matches_squared_t_statistic_for_single_column`と
     /// 同じ恒等式）。
     #[test]
     fn fit_computes_wu_hausman_statistic_matching_manual_augmented_regression() {

@@ -44,7 +44,7 @@ pub(super) struct CovStage {
 /// `(G/(G-1))((n-1)/(n-k))`、HACのラグ数の解決は`n`・`k`（`x_hat`の形）に従う。
 ///
 /// `df_inference`は`cov_type=Cluster`のときだけ`G-1`に切り替える（OLSと同じ慣行、
-/// `ols/estimator.rs`の`fit()`docコメント参照）。クラスター数`g`が構造方程式の傾き係数の数`q`
+/// `linear/ols.rs`の`fit()`docコメント参照）。クラスター数`g`が構造方程式の傾き係数の数`q`
 /// 以下の入力は`fit()`冒頭で`InsufficientClustersForInference`として弾き済み。
 ///
 /// # Errors
@@ -126,7 +126,7 @@ enum HcVariant {
 }
 
 /// HC0〜HC3ロバストな係数分散共分散行列: `(X̂'X̂)⁻¹Ψ̂(X̂'X̂)⁻¹`（k×k）。`Ψ̂`は構造残差
-/// （`residuals`引数、`e = y - Xβ̂`）を使って計算する。数式・実装方針は`ols/estimator.rs`の
+/// （`residuals`引数、`e = y - Xβ̂`）を使って計算する。数式・実装方針は`shared/covariance.rs`の
 /// `hc_cov_params`と同型（`two_sls.rs`のモジュールdoc「独立実装」参照。設計行列に`X̂`、
 /// 残差に構造残差`e`を使う点のみがOLSとの違い）。
 fn hc_cov_params(
@@ -553,7 +553,7 @@ mod tests {
 
     /// `cov_type=Hac{lags: Some(0), ..}`は自己相関項（`l=1..=lags`のループ）が空になり、
     /// `l=0`項（HC0のΨ̂と同形）のみが残るため、HC0と数値的に一致するはず
-    /// （`ols/estimator.rs`の`fit_hac_with_zero_lags_matches_hc0`と同じ内部整合性テスト）。
+    /// （`ols/cov_params.rs`の`fit_hac_with_zero_lags_matches_hc0`と同じ内部整合性テスト）。
     #[test]
     fn fit_hac_with_zero_lags_matches_hc0() {
         let hac_estimator = TwoSlsEstimator::fit(
@@ -662,7 +662,7 @@ mod tests {
     }
 
     /// `time_order`を指定した場合、行順がシャッフルされていても時系列順に並べ替えてから
-    /// ラグ付き自己共分散を計算することを確認する（`ols/estimator.rs`の
+    /// ラグ付き自己共分散を計算することを確認する（`ols/cov_params.rs`の
     /// `fit_computes_hac_std_errors_respecting_time_order`と同じ検証方針）。データは
     /// `nontrivial_x_exog_columns()`と同一の内容を、時系列順の逆転を含む順序でシャッフル
     /// して与える。

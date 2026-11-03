@@ -277,7 +277,7 @@ mod tests {
         assert!((wls.aic() - ols.aic()).abs() < 1e-9);
         assert!((wls.bic() - ols.bic()).abs() < 1e-9);
 
-        // 残差の計算経路自体はwls.rs（手動ループ）とols/estimator.rs（faerの行列演算）で異なるため、
+        // 残差の計算経路自体はwls.rs（手動ループ）とols/fit.rs（faerの行列演算）で異なるため、
         // 丸め誤差レベルでの一致を確認する（構造的な完全一致の保証対象はestimator()側）。
         for i in 0..5 {
             assert!((wls.residuals()[i] - *ols.residuals().get(i, 0)).abs() < 1e-12);
@@ -286,7 +286,7 @@ mod tests {
 
     #[test]
     fn fitted_values_equals_y_minus_residuals() {
-        // `ols/estimator.rs`の同名テスト（`fitted_values_equals_y_minus_residuals`）と同じ不変条件
+        // `ols/fit.rs`の同名テスト（`fitted_values_equals_y_minus_residuals`）と同じ不変条件
         // （`fitted_values()`と`residuals()`が同じ`original_scale_fitted_and_residuals`
         // 呼び出しから一貫して導かれていることの確認）。
         let y = vec![2.0, 4.0, 5.0, 4.0, 5.0];
@@ -664,7 +664,7 @@ mod tests {
         }
     }
 
-    /// property-basedテスト。`ols/estimator.rs`の`mod proptests`と同型の設計
+    /// property-basedテスト。`ols/fit.rs`の`mod proptests`と同型の設計
     /// （`testing-policy.md`「property-basedテスト」参照）。
     ///
     /// プロパティの有効性検証（バグ注入→検出確認→元に戻す）は、新規プロパティ
@@ -674,7 +674,7 @@ mod tests {
     /// `coefficients_scale_linearly_with_y`（`OlsInput::from_columns_impl`の
     /// y変換に定数オフセットのバグを注入）の3件で実施済み。残り2件
     /// （`coefficients_and_se_are_invariant_to_column_order`・
-    /// `hc0_std_errors_are_at_most_hc1_std_errors`）は`ols/estimator.rs`側で検証済みの
+    /// `hc0_std_errors_are_at_most_hc1_std_errors`）は`ols/fit.rs`側で検証済みの
     /// 同一ロジック（`OlsEstimator::fit`）をWLSの重み付き変換経由で呼ぶのみのため
     /// 個別のバグ注入は省略した。
     mod proptests {
@@ -690,7 +690,7 @@ mod tests {
 
         /// `(n, k, y, x_cols, weights, keys)`を生成する共通ストラテジ。
         ///
-        /// `y`/`x_cols`の生成方針は`ols/estimator.rs`の`ols_case_strategy`と同じ
+        /// `y`/`x_cols`の生成方針は`ols/fit.rs`の`ols_case_strategy`と同じ
         /// （`n=k+10..=60`のマージン、独立な連続一様分布）。`weights`は正値
         /// （`0.1..10.0`）のみ生成する（`OlsInput::from_columns_weighted`が非正の重みを
         /// 拒否するため）。
@@ -727,7 +727,7 @@ mod tests {
 
             /// 切片ありなら重み付き残差和は常に0（`Σ w_i・residuals_i ≈ 0`）。
             ///
-            /// `ols/estimator.rs`の`residuals_sum_to_zero_when_intercept_included`の単純移植では
+            /// `ols/fit.rs`の`residuals_sum_to_zero_when_intercept_included`の単純移植では
             /// **ない**点に注意: WLSの正規方程式は変換後データ（切片列も`sqrt(w_i)`倍）の
             /// `X'e=0`から従うため、元スケールに戻すと単純な残差和ゼロではなく重み付き和が
             /// ゼロになる（`Σ sqrt(w_i)・sqrt(w_i)・residuals_i = Σ w_i・residuals_i = 0`）。
@@ -795,7 +795,7 @@ mod tests {
             }
 
             /// yをc倍すると、切片を含む全ての係数がc倍にスケールする
-            /// （WLSも重み付き最小二乗解がyに関して線形なため、`ols/estimator.rs`の
+            /// （WLSも重み付き最小二乗解がyに関して線形なため、`ols/fit.rs`の
             /// `coefficients_scale_linearly_with_y`と同じ理由で成り立つ）。
             #[test]
             fn coefficients_scale_linearly_with_y(

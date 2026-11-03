@@ -123,10 +123,10 @@ pub(super) fn compute_cov_params(
 
 #[cfg(test)]
 mod tests {
-    use super::super::estimator::OlsEstimator;
     use super::super::input::OlsInput;
     use super::*;
     use crate::linear::common::row_time_order;
+    use crate::linear::ols::OlsEstimator;
     use crate::shared::error::MatrixKind;
     use crate::shared::group_codes::GroupCodes;
 

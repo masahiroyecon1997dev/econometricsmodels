@@ -4280,7 +4280,7 @@ mod tests {
         }
 
         /// 固定効果推定の数値誤差（within変換・QR）を考慮し、固定フィクスチャ比較より緩めた
-        /// 相対誤差（`ols/estimator.rs`のproptestと同じ方針）。
+        /// 相対誤差（`ols/fit.rs`のproptestと同じ方針）。
         fn assert_approx_eq(actual: f64, expected: f64, msg: &str) {
             let tol = 1e-6 * expected.abs().max(1.0);
             assert!(

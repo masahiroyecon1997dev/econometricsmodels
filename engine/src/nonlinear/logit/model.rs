@@ -1,6 +1,6 @@
 //! Logitの数式部品: `softplus`・ロジスティック関数・対数尤度、限界効果の`w`と`s`。
 
-use crate::nonlinear::common::compensated_sum;
+use crate::nonlinear::common::{compensated_sum, linear_predictor};
 use faer::Mat;
 
 /// `softplus(z) = log(1+exp(z))`の数値的に安定な計算。`z`が大きい正の値でも
@@ -32,7 +32,7 @@ pub(super) fn logistic(z: f64) -> f64 {
 pub(super) fn log_likelihood(x: &Mat<f64>, y: &Mat<f64>, params: &[f64]) -> f64 {
     let n = x.nrows();
     compensated_sum((0..n).map(|i| {
-        let z: f64 = (0..x.ncols()).map(|j| *x.get(i, j) * params[j]).sum();
+        let z = linear_predictor(x, i, params);
         (*y.get(i, 0)) * z - softplus(z)
     }))
 }
@@ -46,7 +46,7 @@ pub(super) fn overall_w_and_s(x: &Mat<f64>, params: &[f64]) -> (f64, Vec<f64>) {
     let mut w = 0.0;
     let mut s = vec![0.0; k];
     for i in 0..n {
-        let z: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
+        let z = linear_predictor(x, i, params);
         let p = logistic(z);
         let pq = p * (1.0 - p);
         w += pq;

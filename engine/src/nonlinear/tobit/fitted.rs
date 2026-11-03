@@ -11,7 +11,8 @@ use super::target::{
     MarginalEffectsTarget, ensure_uncensored_interval_resolvable, predicted_value,
 };
 use crate::nonlinear::common::{
-    MarginalEffects, MarginalEffectsAt, MleError, column_means, column_medians, predict_new_data,
+    MarginalEffects, MarginalEffectsAt, MleError, column_means, column_medians, linear_predictor,
+    predict_new_data,
 };
 use crate::shared::error::CommonError;
 use faer::Mat;
@@ -176,7 +177,6 @@ impl TobitFitted {
     pub fn predict(&self, target: MarginalEffectsTarget) -> Result<Vec<f64>, MleError> {
         let x = self.input.x();
         let n = x.nrows();
-        let k = self.input.k();
         let lower = self.input.lower();
         let upper = self.input.upper();
         let normal = Normal::standard();
@@ -185,7 +185,7 @@ impl TobitFitted {
         }
         Ok((0..n)
             .map(|i| {
-                let mu: f64 = (0..k).map(|j| *x.get(i, j) * self.params[j]).sum();
+                let mu = linear_predictor(x, i, &self.params);
                 predicted_value(target, mu, self.sigma, lower, upper, &normal)
             })
             .collect())
@@ -253,7 +253,6 @@ impl TobitFitted {
         let x = self.input.x();
         let y = self.input.y();
         let n = x.nrows();
-        let k = self.input.k();
         let lower = self.input.lower();
         let upper = self.input.upper();
         let normal = Normal::standard();
@@ -265,7 +264,7 @@ impl TobitFitted {
         let mut model_uncensored_sum = 0.0;
 
         for i in 0..n {
-            let mu: f64 = (0..k).map(|j| *x.get(i, j) * self.params[j]).sum();
+            let mu = linear_predictor(x, i, &self.params);
             let (_, _, cdf_za) = boundary_terms(lower, mu, self.sigma, &normal, true);
             let (_, _, cdf_zb) = boundary_terms(upper, mu, self.sigma, &normal, false);
             model_lower_sum += cdf_za;

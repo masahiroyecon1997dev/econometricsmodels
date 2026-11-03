@@ -27,7 +27,7 @@
 //! - `options.rs`: `SolverType`・`CovType`・`MleFitOptions`
 //! - `goodness_of_fit.rs`: 適合度統計量
 //! - `marginal_effects.rs`: 限界効果とデルタ法
-//! - `predict.rs`: 予測確率・的中表
+//! - `predict.rs`: 線形予測子・予測確率・的中表
 //! - `normal.rs`: 標準正規分布の`φ`・`Φ`の評価（クランプ）
 //! - `numerics.rs`: 補償和・ノルム・小さな密行列演算
 //! - `solver.rs`: `run_solver`と`BudgetedProblem`
@@ -73,6 +73,7 @@ pub use marginal_effects::{
 pub use normal::{U_CLAMP, clamped_pdf_cdf};
 pub(crate) use numerics::compensated_sum;
 pub use options::{CovType, MleFitOptions, SolverType};
+pub(crate) use predict::linear_predictor;
 pub use predict::{pred_table, predict_from_link, predict_new_data};
 pub use solver::{SolverOutput, run_solver};
 pub use standardize::{

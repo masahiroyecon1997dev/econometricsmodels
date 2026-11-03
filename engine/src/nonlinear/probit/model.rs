@@ -1,6 +1,6 @@
 //! Probitの数式部品: 対数尤度、限界効果の`w`と`s`。
 
-use crate::nonlinear::common::{clamped_pdf_cdf, compensated_sum};
+use crate::nonlinear::common::{clamped_pdf_cdf, compensated_sum, linear_predictor};
 use faer::Mat;
 use statrs::distribution::{Continuous, Normal};
 
@@ -19,7 +19,7 @@ pub(super) fn log_likelihood(x: &Mat<f64>, y: &Mat<f64>, params: &[f64]) -> f64 
     let n = x.nrows();
     // 補償和（`compensated_sum`のdocコメント参照。大標本のNewtonのコスト比較のため）。
     compensated_sum((0..n).map(|i| {
-        let z: f64 = (0..x.ncols()).map(|j| *x.get(i, j) * params[j]).sum();
+        let z = linear_predictor(x, i, params);
         let q = 2.0 * (*y.get(i, 0)) - 1.0;
         let (_, big_phi) = clamped_pdf_cdf(&normal, q * z);
         big_phi.ln()
@@ -47,7 +47,7 @@ pub(super) fn overall_w_and_s(x: &Mat<f64>, params: &[f64]) -> (f64, Vec<f64>) {
     let mut w = 0.0;
     let mut s = vec![0.0; k];
     for i in 0..n {
-        let z: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
+        let z = linear_predictor(x, i, params);
         let phi = normal.pdf(z);
         w += phi;
         let coef = -z * phi;

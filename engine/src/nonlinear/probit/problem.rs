@@ -3,7 +3,7 @@
 #[cfg(test)]
 use super::input::ProbitInput;
 use super::model::log_likelihood;
-use crate::nonlinear::common::{U_CLAMP, clamped_pdf_cdf};
+use crate::nonlinear::common::{U_CLAMP, clamped_pdf_cdf, linear_predictor};
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::Mat;
 use statrs::distribution::Normal;
@@ -36,18 +36,11 @@ impl ProbitProblem {
         Self { x: x_std, y }
     }
 
-    /// 観測`i`の線形予測子 `z_i = x_i'θ`。
-    fn linear_predictor(&self, i: usize, params: &[f64]) -> f64 {
-        (0..self.x.ncols())
-            .map(|j| *self.x.get(i, j) * params[j])
-            .sum()
-    }
-
     /// 観測`i`の符号付き線形予測子 `(q_i, u_i)`（`q_i=2y_i-1`、`u_i=q_i z_i`）。
     /// 一般化残差`λ_i`・`hessian`の重みの両方がこの`u_i`から作られる。
     fn signed_index(&self, i: usize, params: &[f64]) -> (f64, f64) {
         let q = 2.0 * (*self.y.get(i, 0)) - 1.0;
-        (q, q * self.linear_predictor(i, params))
+        (q, q * linear_predictor(&self.x, i, params))
     }
 
     /// `signed_index`の`(q, u)`から一般化残差`λ = q φ(u)/Φ(u)`（`probit.rs`のモジュールdocの数式参照）を

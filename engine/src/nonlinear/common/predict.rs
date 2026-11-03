@@ -1,8 +1,17 @@
-//! 予測確率・的中表（`pred_table`・`predict_from_link`・`predict_new_data`）。
+//! 線形予測子・予測確率・的中表（`linear_predictor`・`pred_table`・`predict_from_link`・`predict_new_data`）。
 
 use faer::Mat;
 
 use crate::shared::design_matrix::design_matrix_element;
+
+/// 設計行列`x`の観測`i`の線形予測子 `x_i'θ`。Logit/Probit/Tobitの尤度・予測・
+/// 限界効果の部品が共有する（Tobitでは`params`の先頭`x.ncols()`要素だけを使い、
+/// 末尾の`s=logσ`は無視する）。総和は`j`の昇順の逐次加算（この順序を変えると出力が
+/// ビット単位でずれる）。
+#[inline]
+pub(crate) fn linear_predictor(x: &Mat<f64>, i: usize, params: &[f64]) -> f64 {
+    (0..x.ncols()).map(|j| *x.get(i, j) * params[j]).sum()
+}
 
 /// 分類の的中表（2×2、`table[actual][predicted]`のカウント。行=実測クラス、
 /// 列=予測クラス）。`predicted`（各モデルの`predict()`が返す予測確率、リンク関数依存で
@@ -50,13 +59,8 @@ pub fn pred_table(predicted: &[f64], y: &Mat<f64>, threshold: f64) -> Mat<f64> {
 /// ループ構造は完全に共通で、差分はリンク関数（Logitはロジスティック関数、Probitは
 /// 標準正規分布のCDF）のみのため、`link`をクロージャで受け取る形に共通化している。
 pub fn predict_from_link(x: &Mat<f64>, params: &[f64], link: impl Fn(f64) -> f64) -> Vec<f64> {
-    let n = x.nrows();
-    let k = x.ncols();
-    (0..n)
-        .map(|i| {
-            let z: f64 = (0..k).map(|j| *x.get(i, j) * params[j]).sum();
-            link(z)
-        })
+    (0..x.nrows())
+        .map(|i| link(linear_predictor(x, i, params)))
         .collect()
 }
 
@@ -68,8 +72,8 @@ pub fn predict_from_link(x: &Mat<f64>, params: &[f64], link: impl Fn(f64) -> f64
 /// `new_x_columns`は、fit時に`x`で渡した列（`param_names`から`has_intercept`なら
 /// `"const"`を除いたもの）と同じ本数・同じ順序である必要がある。`has_intercept`が
 /// `true`の場合、定数項の列はここで自動的に先頭に付加するため`new_x_columns`に
-/// 含めない（`LogitInput::from_columns`/`ProbitInput::from_columns`の切片列自動追加と
-/// 一致させるため、`crate::shared::design_matrix::design_matrix_element`を共有する）。
+/// 含めない（`LogitInput::from_columns`/`ProbitInput::from_columns`/
+/// `TobitInput::from_columns`の切片列自動追加と一致させるため、`crate::shared::design_matrix::design_matrix_element`を共有する）。
 ///
 /// # パニックについて
 /// `new_x_columns.len()`が`params.len() - usize::from(has_intercept)`と一致しない場合は
@@ -110,6 +114,22 @@ pub fn predict_new_data(
 mod tests {
 
     use super::*;
+
+    /// `params`が`x`の列数より長い（Tobitの末尾`s=logσ`）とき、末尾は使わず、先頭`ncols`個との
+    /// 内積を`j`の昇順で足し上げる。
+    #[test]
+    fn linear_predictor_uses_only_leading_params_in_column_order() {
+        let x = Mat::from_fn(2, 3, |i, j| (i * 3 + j + 1) as f64);
+        let params = [0.5, -1.0, 2.0, 1e6];
+        for i in 0..2 {
+            let expected = ((*x.get(i, 0) * 0.5) + (*x.get(i, 1) * -1.0)) + (*x.get(i, 2) * 2.0);
+            assert_eq!(
+                linear_predictor(&x, i, &params).to_bits(),
+                expected.to_bits(),
+                "row {i}"
+            );
+        }
+    }
 
     /// `pred_table`をLogit/Probitの`predict()`とは独立に、合成した`predicted`/`y`から
     /// 手計算した2×2カウントと突き合わせる（`threshold`が予測側のみに適用され、

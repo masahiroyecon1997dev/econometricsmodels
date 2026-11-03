@@ -1,6 +1,7 @@
 //! `ProbitInput`（Probitの被説明変数・設計行列）。
 
 use crate::nonlinear::common::MleError;
+use crate::shared::design_matrix::design_matrix_element;
 use crate::shared::error::CommonError;
 use faer::Mat;
 
@@ -69,11 +70,7 @@ impl ProbitInput {
         };
 
         let x = Mat::from_fn(n, k, |i, j| {
-            if include_intercept {
-                if j == 0 { 1.0 } else { x_columns[j - 1][i] }
-            } else {
-                x_columns[j][i]
-            }
+            design_matrix_element(include_intercept, x_columns, i, j)
         });
         let y_mat = Mat::from_fn(n, 1, |i, _| y[i]);
 

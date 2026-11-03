@@ -3,7 +3,7 @@
 
 #[cfg(test)]
 use super::input::TobitInput;
-use crate::nonlinear::common::{U_CLAMP, clamped_pdf_cdf, compensated_sum};
+use crate::nonlinear::common::{U_CLAMP, clamped_pdf_cdf, compensated_sum, linear_predictor};
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::Mat;
 use statrs::distribution::Normal;
@@ -127,12 +127,6 @@ impl TobitProblem {
         self.x.ncols()
     }
 
-    /// 観測`i`の線形予測子 `xᵢ'β`（`params`の先頭`k`要素のみ使う。`params[k]`は`s=logσ`）。
-    fn linear_predictor(&self, i: usize, params: &[f64]) -> f64 {
-        let k = self.k();
-        (0..k).map(|j| *self.x.get(i, j) * params[j]).sum()
-    }
-
     /// 観測`i`の分類（非打ち切り/左打ち切り/右打ち切り）に応じた[`Contribution`]を計算する。
     /// `TobitInput::from_columns`が`lower <= yᵢ <= upper`を保証しているため、境界値との
     /// 一致判定（`==`）で打ち切り観測を識別できる（`y*ᵢ`が境界値ちょうどになる確率は
@@ -141,7 +135,7 @@ impl TobitProblem {
         let k = self.k();
         let s = params[k];
         let sigma = s.exp();
-        let xb = self.linear_predictor(i, params);
+        let xb = linear_predictor(&self.x, i, params);
         let y_i = *self.y.get(i, 0);
 
         if let Some(l) = self.lower

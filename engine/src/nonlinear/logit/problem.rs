@@ -3,6 +3,7 @@
 #[cfg(test)]
 use super::input::LogitInput;
 use super::model::{log_likelihood, logistic};
+use crate::nonlinear::common::linear_predictor;
 use argmin::core::{CostFunction, Error as OptimizerError, Gradient, Hessian};
 use faer::Mat;
 
@@ -37,13 +38,6 @@ impl LogitProblem {
         Self { x: x_std, y }
     }
 
-    /// 観測`i`の線形予測子 `z_i = x_i'θ`。
-    fn linear_predictor(&self, i: usize, params: &[f64]) -> f64 {
-        (0..self.x.ncols())
-            .map(|j| *self.x.get(i, j) * params[j])
-            .sum()
-    }
-
     /// 観測ごとのスコア行列（n×k）。各行が`sᵢ = (yᵢ-pᵢ)xᵢ`（対数尤度の1階微分そのもの、
     /// `Gradient`トレイトとは符号が逆）。OPG/サンドイッチ/クラスターSEの計算に使う
     /// （argminの`Gradient`は合計済みの1本のベクトルしか返さないため別途必要、
@@ -54,7 +48,7 @@ impl LogitProblem {
         // 行の残差`yᵢ-pᵢ`は`j`によらないため、観測あたり1回だけ計算する
         // （セルごとに計算すると`linear_predictor`のO(k)が行あたりk回になる）。
         let residuals: Vec<f64> = (0..n)
-            .map(|i| *self.y.get(i, 0) - logistic(self.linear_predictor(i, params)))
+            .map(|i| *self.y.get(i, 0) - logistic(linear_predictor(&self.x, i, params)))
             .collect();
         Mat::from_fn(n, k, |i, j| residuals[i] * (*self.x.get(i, j)))
     }
@@ -80,7 +74,7 @@ impl Gradient for LogitProblem {
         let k = self.x.ncols();
         let mut grad = vec![0.0; k];
         for i in 0..n {
-            let p = logistic(self.linear_predictor(i, param));
+            let p = logistic(linear_predictor(&self.x, i, param));
             let diff = p - *self.y.get(i, 0);
             for (j, grad_j) in grad.iter_mut().enumerate() {
                 *grad_j += diff * (*self.x.get(i, j));
@@ -101,7 +95,7 @@ impl Hessian for LogitProblem {
         let k = self.x.ncols();
         let mut h = vec![vec![0.0; k]; k];
         for i in 0..n {
-            let p = logistic(self.linear_predictor(i, param));
+            let p = logistic(linear_predictor(&self.x, i, param));
             let w = p * (1.0 - p);
             for (a, row) in h.iter_mut().enumerate().take(k) {
                 let xa = *self.x.get(i, a);
@@ -166,7 +160,7 @@ mod tests {
             let scores = problem.scores(&params);
             for i in 0..scores.nrows() {
                 for j in 0..scores.ncols() {
-                    let p = logistic(problem.linear_predictor(i, &params));
+                    let p = logistic(linear_predictor(&problem.x, i, &params));
                     let expected = (*problem.y.get(i, 0) - p) * (*problem.x.get(i, j));
                     assert_eq!(scores.get(i, j).to_bits(), expected.to_bits(), "({i}, {j})");
                 }

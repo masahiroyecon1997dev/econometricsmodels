@@ -1,6 +1,6 @@
 # FE 仕様書
 
-FE（固定効果パネル回帰、within推定）の確定済み仕様。`engine/src/panel/fe.rs`（共通基盤は
+FE（固定効果パネル回帰、within推定）の確定済み仕様。`engine/src/panel/fe.rs`（ファサード）・`engine/src/panel/fe/`（共通基盤は
 `engine/src/panel/common.rs`）・`engine_pybind/src/panel/fe.rs`・
 `python_package/econometricsmodels/panel/fe.py`として実装済み。FE/RE共通の設計判断（`effects`の
 引数設計、結果フィールドの共通コア、`cov_type`のサポート対象・デフォルト、内部実装の

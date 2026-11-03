@@ -346,7 +346,7 @@ def test_insufficient_degrees_of_freedom_one_way_raises():
     entity 3件×2時点（n=6、singletonなし）・`x=["x1","x2","x3"]`（k=3）で
     `df_model = k + n_entities = 3 + 3 = 6 = n`（`n <= df_model`が成立）。
     この判定はwithin変換直後・設計行列の階数を問う前に行われるため
-    （`engine/src/panel/fe.rs::FeEstimator::fit`のパイプライン順序）、`x`の
+    （`engine/src/panel/fe/fit.rs`の`fit_fe`のパイプライン順序）、`x`の
     値自体は多重共線性等を気にせず自由に選べる。
     """
     df = pl.DataFrame(
@@ -564,7 +564,7 @@ def test_cluster_count_at_most_slopes_raises_validation_error():
     （`CommonError::InsufficientClustersForInference`）。デフォルトの
     entityクラスタリング・明示`cluster`のどちらでも同じ
     `validate_cluster_count_covers_slopes`が働く
-    （`engine/src/panel/fe.rs`）ため、明示`cluster`側で確認する。
+    （`engine/src/panel/fe/fit.rs`）ため、明示`cluster`側で確認する。
 
     engineユニットテスト
     `fe_estimator_fit_cluster_propagates_insufficient_clusters_for_inference_error`

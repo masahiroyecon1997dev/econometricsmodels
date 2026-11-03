@@ -996,7 +996,7 @@ pub(crate) fn panel_cluster_cov_params(
 ///
 /// `t < 2`は`bandwidth`の値によらず`PanelError::InsufficientDkPeriods`で拒否する
 /// （fixest型の`G/(G-1)`相当補正を導入したことに伴う前提条件。同エラーの
-/// docコメント参照）。この関数がDK計算の全呼び出し経路（`fe.rs`/`re.rs`/
+/// docコメント参照）。この関数がDK計算の全呼び出し経路（`fe/fit.rs`/`re.rs`/
 /// `re_hausman_test`）の共通の入口になっているため、ここ一箇所で検証すれば足りる。
 pub(crate) fn resolve_dk_bandwidth(bandwidth: Option<i64>, t: usize) -> Result<usize, PanelError> {
     if t < 2 {
@@ -1139,7 +1139,7 @@ pub(crate) fn panel_driscoll_kraay_cov_params(
 /// と同じ扱い。
 ///
 /// グループ平均（`ȳ_i.`）は返さない。`fixed_effects()`（`fe-spec.md`3.5節）の`α_i`復元は
-/// この関数を拡張せず`fe.rs`側で`FeInput`の元データから独立に再計算する形で実装済み
+/// この関数を拡張せず`fe/fixed_effects.rs`側で`FeInput`の元データから独立に再計算する形で実装済み
 /// （`engine/src/panel/CLAUDE.md`参照）。σ_ε²再利用（`re-spec.md`3.2節、RE実装）で平均の保持が
 /// 必要になった場合は、その時点で改めて検討する。
 ///
@@ -2807,7 +2807,7 @@ mod tests {
     fn quasi_demean_column_single_group_with_theta_one_is_all_zero() {
         // 全行が同一エンティティ（グループが1つだけ）＋ θ=1 → 全行がグループ平均に
         // 一致するため出力は全ゼロ（この列だけでは within 変換後に情報が残らない。
-        // `fe-spec.md`1章の分散ゼロ検証・`fe-spec.md`1章のsingleton検証は消費側 fe.rs の責務）。
+        // `fe-spec.md`1章の分散ゼロ検証・`fe-spec.md`1章のsingleton検証は消費側 fe/within.rs の責務）。
         let entity = entities(&["a", "a", "a", "a"]);
         let col = [3.0, 5.0, 7.0, 9.0]; // mean = 6.0
         let theta = theta_for(&entity, &[("a", 1.0)]);

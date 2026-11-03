@@ -38,7 +38,7 @@
 //! Probit/IVと同じ）。`x`が空だと、説明変数が`y`に与える効果を推定するという営みが成立せず、
 //! 実質「個体・時間固定効果による`y`の分解」という別の操作になるため。**`engine`側
 //! （`FeInput::from_group_codes`・`FeEstimator::fit`）はk=0を受理したまま**で、
-//! `engine/src/panel/fe.rs`の`fe_estimator_fit_with_no_regressors_estimates_fixed_effects_only_model`が
+//! `engine/src/panel/fe/fit.rs`の`fe_estimator_fit_with_no_regressors_estimates_fixed_effects_only_model`が
 //! engineレベルでは固定効果のみのモデルが動作することを検証する。拒否はPython向けAPI
 //! （`engine_pybind`）の業務的なバリデーションとしてのみ行う（OLSも
 //! `engine::linear::ols::OlsEstimator::fit`自体はk=0を受理するが、Python APIの

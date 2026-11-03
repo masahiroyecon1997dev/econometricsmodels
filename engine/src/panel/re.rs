@@ -2,7 +2,7 @@
 //!
 //! `engine`はpolars/PyO3を知らない（`.claude/rules/rust-style.md`「責務分離」）。
 //! `engine_pybind`がpolars DataFrameから`y`/`x`/`entity`/`time`を列ごとに抽出し、
-//! それらの列を`ReInput::from_group_codes`に渡す（`FeInput::from_group_codes`（`fe.rs`）と
+//! それらの列を`ReInput::from_group_codes`に渡す（`FeInput::from_group_codes`（`fe/input.rs`）と
 //! 同型）。`ReInput`は準偏差変換前の生データを保持するだけの入れ物で、`FeInput`と
 //! 同じ理由（`quasi_demean_column`が`&[f64]`の列単位で動くため）で`faer::Mat`は組み立てない。
 //!
@@ -660,7 +660,7 @@ fn two_way_variance_components(
 /// 切片と共線になるため落とし、`K_b`にも数えない（`plm`と同じ、`two_way_variance_components`のdoc参照）。
 /// 最終回帰には全列が残る。切片そのもの（全観測で一定の列）と共線な列は、ここでは落ちるが
 /// 最終回帰の特異性（`QuasiDemeanedRegressionFailed`）で検出される。一定かどうかの判定は`column_is_zero_variance`
-/// （`fe.rs`）と同じ発想の相対閾値（平均の標準偏差が`n_units·ε·max|x̄|`以下）。
+/// （`fe/within.rs`の分散ゼロ検査）と同じ発想の相対閾値（平均の標準偏差が`n_units·ε·max|x̄|`以下）。
 ///
 /// 一定の列を落とした後、残りの列の線形結合になっている列も落とす（`plm`の`lm`と同じ、
 /// `independent_columns_in_order`の規則: 列順で前の列に従属する列、許容誤差`1e-7`）。個体平均を
@@ -730,7 +730,7 @@ fn column_max_abs(x: &[Vec<f64>]) -> Vec<f64> {
 /// 単位平均の1列が単位間で一定（切片と共線）か。
 ///
 /// 平均の丸め誤差は、1つの平均に足し合わせた項数（`max_terms`、最大の単位の観測数）と元の列の
-/// スケール（`raw_scale = max|x|`）に比例する（`column_is_zero_variance`（`fe.rs`）と同じ発想の
+/// スケール（`raw_scale = max|x|`）に比例する（`column_is_zero_variance`（`fe/within.rs`の分散ゼロ検査）と同じ発想の
 /// 相対閾値）。平均の列自身のスケールや単位数を基準にすると、中心化・標準化した列（平均が
 /// 丸め誤差程度）や、単位数が多く項数が少ない時点平均の回帰で一定の列を見逃す。
 fn between_column_is_constant(column: &[f64], raw_scale: f64, max_terms: f64) -> bool {
@@ -1507,7 +1507,7 @@ impl ReEstimator {
         // `df_resid >= 1`（`OlsEstimator::fit`成功時点で保証済み）・
         // `n_groups - 1 >= 1`（`validate_cluster_count_covers_slopes`が保証）・
         // `t_periods - 1 >= 1`（`resolve_dk_bandwidth`が`PanelError::
-        // InsufficientDkPeriods`で`t_periods<2`を拒否済み、`fe.rs`と同じ保証）の
+        // InsufficientDkPeriods`で`t_periods<2`を拒否済み、`fe/fit.rs`と同じ保証）の
         // いずれかであり理論上到達不能（`FeEstimator::fit`と同じ「保証済みの不変
         // 条件に対する防御的`Result`化」、`.claude/rules/rust-style.md`「テスト」参照）。
         let t_dist = StudentsT::new(0.0, 1.0, df_inference as f64)
@@ -5748,7 +5748,7 @@ mod tests {
             ReInput::from_columns(y, x, names, entity, None, "y".to_string()).unwrap()
         }
 
-        /// 固定フィクスチャ比較より緩めた相対誤差（`ols/fit.rs`/`fe.rs`のproptestと同じ方針）。
+        /// 固定フィクスチャ比較より緩めた相対誤差（`ols/fit.rs`/`fe/fit.rs`のproptestと同じ方針）。
         fn assert_approx_eq(actual: f64, expected: f64, msg: &str) {
             let tol = 1e-6 * expected.abs().max(1.0);
             assert!(

@@ -196,7 +196,7 @@ def single_overlap_binary_dataset(overlap: float) -> pl.DataFrame:
     `x`は`±0.01〜±1.00`の0.01刻み（`x>0`なら`y=1`の完全分離）で、`y=1`の観測を1つ
     `x=-0.01-overlap`に足す。`y=0`で最も`x=0`に近い観測（`x=-0.01`）より左に`y=1`が
     1つあるため、`overlap>0`ならちょうど1観測が分離を壊し、有限のMLEが存在する。
-    Rust側（`engine/src/nonlinear/separation.rs`の`single_overlap_data`）と同じデータ。
+    Rust側（`engine/src/nonlinear/separation/lp.rs`の`single_overlap_data`）と同じデータ。
     説明変数は`x1`1列（`include_intercept=True`）。
     """
     grid = [0.01 * i for i in range(1, 101)]

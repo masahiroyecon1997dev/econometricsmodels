@@ -200,7 +200,7 @@ statsmodels（`ConvergenceWarning`を出しつつ結果は必ず返す＝常に�
   `Σ_orig = J Σ_std Jᵀ`（`J`は`θ_orig=Jθ_std`の線形変換の行列。`diag(1/std)`に、切片の行の
   傾き成分`-x̄ₘ/stdₘ`が加わる）。OPG・サンドイッチ・クラスターでも、`H⁻¹`と
   スコア`s_std=Jᵀs_orig`が同じ連鎖律に従うため同じ式で戻せる。
-- 分離検出（1.4節・`separation.rs`）は標準偏差で割るだけの行を使い続ける（切片込みの
+- 分離検出（1.4節・`separation/`）は標準偏差で割るだけの行を使い続ける（切片込みの
   再パラメータ化は分離の有無を変えず、LPの閾値の較正もその行に対するもの）。
 - Tobitは`x`側をこの`ColumnScale`に委ね、`TobitScaling`が`y`のスケーリングと`logσ`の扱いを
   加える（`tobit-spec.md`3.2節）。
@@ -235,7 +235,7 @@ Tobit固有のバリアント（打ち切り境界の検証等）も同じ`MleEr
 | `SingularDesignMatrix` | `DESIGN_MATRIX_SINGULAR`（`ComputationError`） | 最適化前の列ピボットQRランクチェックでのランク落ち（1.4節） |
 | `SingularHessian` | `MATRIX_NEAR_SINGULAR`（`matrix=HESSIAN`、`ComputationError`） | 収束点のHessianが特異で観測情報行列の逆行列が計算できない |
 | `SingularOpgMatrix` | `MATRIX_NEAR_SINGULAR`（`matrix=OPG`、`ComputationError`） | OPG行列（`Σsᵢsᵢ'`、`cov_type="opg"`）が特異。`SingularHessian`と原因が異なるため別バリアントに分離 |
-| `SeparationDetected` | `SEPARATION_DETECTED`（`ComputationError`） | 完全分離・準完全分離（有限のMLEが存在しない）を収束後に線形計画で厳密に検出（Logit/Probitのみ。`engine/src/nonlinear/separation.rs`、`logit-spec.md`3.2節） |
+| `SeparationDetected` | `SEPARATION_DETECTED`（`ComputationError`） | 完全分離・準完全分離（有限のMLEが存在しない）を収束後に線形計画で厳密に検出（Logit/Probitのみ。`engine/src/nonlinear/separation.rs`・`separation/lp.rs`、`logit-spec.md`3.2節） |
 | `SeparationCheckFailed { detail }` | `SEPARATION_CHECK_FAILED`（`ComputationError`） | 分離が無いことを線形計画が数値的に完了せず確認できなかった（`raise_on_non_convergence=true`のとき） |
 | `EvaluationBudgetExceeded { budget }`・`LineSearchFailed { max_iters }` | `LINE_SEARCH_FAILED`（`ComputationError`） | line searchの評価回数バジェット超過（1.2節）・line searchの反復上限到達（`lbfgs`） |
 | `UncensoredIntervalTooNarrow { lower, upper, sigma }`（Tobit専用） | `UNCENSORED_INTERVAL_TOO_NARROW`（`ComputationError`） | `expected_uncensored`の非打ち切り区間が`σ̂`の1%未満（`tobit-spec.md`3.5節） |

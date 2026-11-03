@@ -144,7 +144,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
     `converged=false`、係数は760〜990に達している）。境界はこのデータで`overlap`が`1e-5`〜`3e-5`
     の間にあり、標準化後の行の幾何とマージン閾値`1e-6`で決まるためデータごとに変わる。このため
     境界そのものは固定せず、明らかに両側にある値（`overlap=1e-3,1e-4`は分離とみなさない、
-    `1e-7,1e-9,1e-12`は分離とみなす）を、Rust（`separation.rs`の
+    `1e-7,1e-9,1e-12`は分離とみなす）を、Rust（`separation/lp.rs`の
     `single_overlapping_observation_is_flagged_only_when_the_overlap_is_tiny`）とPython
     （Logit/Probit × `newton`/`bfgs`/`lbfgs`）で固定している。有限のMLEが存在するのに分離と
     扱われる領域（`overlap≲1e-5`、係数が1000近くまで大きくなる）が存在するが、そこでは係数・

@@ -24,7 +24,7 @@ pub(super) struct SarganTest {
 /// **常に等分散（古典的）前提で計算し、`cov_type`には依存しない**（弱操作変数診断と
 /// 同じ判断。Sargan検定はその定義自体が
 /// 等分散前提の検定であり、不均一分散に頑健な版が欲しい場合はGMM＋Hansen J検定
-/// （`gmm.rs`）を使うのが標準的な使い分けのため、`engine/src/iv/CLAUDE.md`参照）。
+/// （`gmm/hansen_j.rs`）を使うのが標準的な使い分けのため、`engine/src/iv/CLAUDE.md`参照）。
 ///
 /// `Z = [x_exog, instruments]`は`OlsInput::from_columns`を経由せず直接行列代数
 /// （`Z'Z`等）で使うため、定数項の扱いは通常の回帰変数と同じで良く、定数項込みの

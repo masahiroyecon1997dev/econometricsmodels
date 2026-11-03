@@ -176,7 +176,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   （範囲検証と既定式）も同モジュールの`resolve_hac_lags`を共有する。レバレッジ・HACの
   カーネル計算等OLS固有の調整はここに持ち込まない）（IVのサンドイッチ型分散計算はOLS/nonlinearどちらの既存
   計算にも寄せない独立実装でよいという既存方針）。GMMのモーメント共分散行列計算
-  （`gmm.rs`）も同じ理由で2SLS側と独立に実装している（`iv/CLAUDE.md`「2SLSとGMMの独立実装
+  （`gmm/weight.rs`）も同じ理由で2SLS側と独立に実装している（`iv/CLAUDE.md`「2SLSとGMMの独立実装
   方針」参照）。
 - **GMMのSEサンドイッチは常に一般形**: `Avar(β̂) = B⁻¹(X'ZWΩ̂WZ'X)B⁻¹`
   （`B=X'ZWZ'X`、`W=S_used⁻¹`は点推定に実際に使った重み）。`gmm_weight_type`と`cov_type`は
@@ -291,7 +291,7 @@ Sargan検定（2SLS）／Hansen J検定（GMM）を`fit()`の結果本体に含�
 - **Sargan検定**（`two_sls/sargan.rs`）は常に古典的（`e'Z(Z'Z)⁻¹Z'e/σ̂²`、`σ̂²=e'e/n`）な計算式を
   使い`cov_type`には依存しない（定義自体が等分散前提の検定であり、不均一分散に頑健な版が
   欲しい場合はGMM＋Hansen Jを使うのが標準的な使い分けのため）。
-- **Hansen J検定**（`gmm.rs`）は点推定に使った重み行列`S`（`gmm_weight_type`依存）をそのまま
+- **Hansen J検定**（`gmm/hansen_j.rs`）は点推定に使った重み行列`S`（`gmm_weight_type`依存）をそのまま
   流用するのが定義そのもの（`J=(Z'ê)'S⁻¹(Z'ê)`）。`S`は`n`で正規化していない生の和のため
   `n`で割ってはならない（標準形`J=n·ḡₙ'Ŝ⁻¹ḡₙ`に代入すると`n`は完全に相殺する）。
   `one_step`・`gmm_weight_type=Classical`時の`S`は`σ̂²・Z'Z`（`σ̂²`スケーリング必須、

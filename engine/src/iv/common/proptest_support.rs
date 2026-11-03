@@ -1,4 +1,4 @@
-//! `two_sls/fit.rs`/`gmm.rs`の`mod proptests`が共有する、property-basedテスト用のケース生成器と
+//! `two_sls/fit.rs`/`gmm/fit.rs`の`mod proptests`が共有する、property-basedテスト用のケース生成器と
 //! 補助関数。`ols/estimator.rs`の`mod proptests`は手法ごとに生成器を持つが、IVは2SLSとGMMで同一の
 //! データ構造（内生変数・操作変数・構造誤差）を要するため、ここに一本化して二重定義を避ける。
 

@@ -222,7 +222,7 @@ impl IvInput {
 /// `IvInput`は`faer::Mat`で設計行列を保持するが、`OlsInput::from_columns`は列ごとの
 /// `Vec<f64>`を受け取るAPI（`OlsInput`に`Mat`を直接渡すコンストラクタは無い）。2SLS
 /// （`two_sls/fit.rs`）が第一段階・第二段階の設計行列を`OlsInput`経由で組み立てる際に
-/// 必要になる変換で、GMM（`gmm.rs`）でも同じ変換が必要になる見込みのため
+/// 必要になる変換で、GMM（`gmm/fit.rs`）でも同じ変換を使うため
 /// ここに置く。
 pub(crate) fn mat_column_to_vec(m: &Mat<f64>, col: usize) -> Vec<f64> {
     (0..m.nrows()).map(|i| *m.get(i, col)).collect()

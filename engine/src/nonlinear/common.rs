@@ -625,7 +625,7 @@ pub struct MleFitOptions {
 /// Logit/Probit/Tobitで共通の概念（`docs/spec/nonlinear-common.md`6章）のため`nonlinear/
 /// common.rs`に定義する（`SolverType`/`CovType`と同じ理由）。`w=∂p/∂z`相当のリンク関数の
 /// 微分（Logitなら`p(1-p)`、Probitなら`φ(z)`）の計算式のみモデルごとの実装
-/// （`logit.rs`等の`overall_w_and_s`/`at_point_w_and_s`）に置き、`w`・その勾配`s`から
+/// （`logit/model.rs`等の`overall_w_and_s`/`at_point_w_and_s`）に置き、`w`・その勾配`s`から
 /// `effect`（dy/dx）・デルタ法標準誤差を求める部分は`w`/`s`の意味に依存しないためこのモジュールの
 /// `marginal_effects_from_w_s`に共通化している（`dydx_and_jacobian`のdoc
 /// コメント参照）。
@@ -3156,7 +3156,7 @@ pub(crate) fn cluster_cov_params(
     }))
 }
 
-/// テスト共有の補助（`logit.rs`・`probit.rs`のテストからも使う）。
+/// テスト共有の補助（`logit/`・`probit.rs`のテストからも使う）。
 #[cfg(test)]
 pub(crate) mod test_support {
     /// 対称行列（`Vec<Vec<f64>>`）の条件数（最大固有値/最小固有値。正定値を仮定）。

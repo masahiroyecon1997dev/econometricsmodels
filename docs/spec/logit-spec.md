@@ -1,6 +1,6 @@
 # Logit 仕様書
 
-Logit（二項ロジスティック回帰、最尤推定）の確定済み仕様。`engine/src/nonlinear/logit.rs`（共通基盤は
+Logit（二項ロジスティック回帰、最尤推定）の確定済み仕様。`engine/src/nonlinear/logit.rs`（ファサード）と`logit/`（入力・数式・目的関数・`LogitFitted`・`fit`。共通基盤は
 `engine/src/nonlinear/common.rs`）・`engine_pybind/src/nonlinear/logit.rs`・
 `python_package/econometricsmodels/nonlinear/logit.py`として実装済み。nonlinear系統共通の設計判断
 （ソルバー実行の共通化、`cov_type`共通行列演算、標準化の方針等）は

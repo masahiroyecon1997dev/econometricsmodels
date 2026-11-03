@@ -3711,7 +3711,7 @@ mod tests {
 
     /// `censored_regression_input`の`x`（`1..8`）は`TobitScaling`の列標準化が実質no-opに
     /// なるほど自明なスケールではないが、`fit_bfgs_and_lbfgs_agree_with_newton_when_design_
-    /// matrix_has_nontrivial_scale`（`logit.rs`/`probit.rs`）と同じ観点で、桁が大きく離れた
+    /// matrix_has_nontrivial_scale`（`logit/fit.rs`/`probit.rs`）と同じ観点で、桁が大きく離れた
     /// スケール（`std`が1から大きく離れた値）でも標準化・逆標準化の往復が壊れないことを
     /// 明示的に検証する。`x`を100倍しつつ係数を1/100にスケールして同じ潜在変数
     /// `y*=-5+2x+noise`を再現しているため、期待される`β`・`σ`は`censored_regression_input`と
@@ -7015,7 +7015,7 @@ mod tests {
         );
     }
 
-    /// property-basedテスト。`logit.rs`/`probit.rs`の`mod proptests`と同型の設計だが、
+    /// property-basedテスト。`logit/fit.rs`/`probit.rs`の`mod proptests`と同型の設計だが、
     /// Tobitは打ち切り回帰でありLogit/Probitと異なり(a)説明変数の係数`β`に加え誤差項の
     /// 標準偏差`σ`（`s=logσ`でパラメータ化）を持つ、(b)観測ごとの尤度が非打ち切り/左
     /// 打ち切り/右打ち切りの3分岐になる、という構造上の違いがある。そのため
@@ -7069,7 +7069,7 @@ mod tests {
         use proptest::prelude::*;
 
         // 高kはbenchmarkのmany_regressorsシナリオでカバー済みのため小さく保つ
-        // （logit.rs/probit.rsと同じ理由）。
+        // （logit/fit.rs/probit.rsと同じ理由）。
         const MAX_K: usize = 3;
 
         /// `tobit_case_strategy`が生成するタプル: `(n, k, x_cols, beta, sigma, u, keys)`。
@@ -7156,7 +7156,7 @@ mod tests {
                 .collect()
         }
 
-        /// `solver`ごとの`tol`既定値の解決は`logit.rs`/`probit.rs`の`default_options`と
+        /// `solver`ごとの`tol`既定値の解決は`logit/fit.rs`/`probit.rs`の`default_options`と
         /// 同じ（`docs/spec/tobit-spec.md`、Logit/Probitと共有する`run_solver`のため
         /// 同じ意味論）。
         fn default_options(cov_type: CovType, solver: SolverType) -> MleFitOptions {
@@ -7182,7 +7182,7 @@ mod tests {
             ]
         }
 
-        /// `logit.rs`/`probit.rs`と同じ理由で`1e-6`より緩い`1e-4`を使う
+        /// `logit/fit.rs`/`probit.rs`と同じ理由で`1e-6`より緩い`1e-4`を使う
         /// （反復最適化の収束経路が列順序で変わりうるため）。
         fn assert_approx_eq(actual: f64, expected: f64, msg: &str) {
             let tol = 1e-4 * expected.abs().max(1.0);
@@ -7199,7 +7199,7 @@ mod tests {
             /// MLEの一次条件（スコア方程式）: 収束点で`Σᵢsᵢ ≈ 0`（`sᵢ`は
             /// `TobitProblem::scores()`が返す観測ごとのスコア行、`β`の`k+1`列＋
             /// `s=logσ`の1列、計`k+2`列）が全パラメータ列で成り立つ。許容誤差の根拠は
-            /// `logit.rs`の同名プロパティのdocコメント参照（`n`非依存の絶対閾値）。
+            /// `logit/fit.rs`の同名プロパティのdocコメント参照（`n`非依存の絶対閾値）。
             #[test]
             fn score_is_near_zero_at_converged_params(
                 (n, k, x_cols, beta, sigma, u, _keys) in tobit_case_strategy(),

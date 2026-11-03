@@ -27,7 +27,7 @@
 # 最大約8%の乖離として発覚した（本実装・statsmodelsはどちらも観測情報行列を使うため、
 # 一致しないのはRの`glm()`側の计算対象の違いであり、本実装側の不整合ではない。
 # `numDeriv::hessian()`による数値微分Hessianで検証済み）。このため`observed_bread()`
-# （本実装の`nonlinear/probit.rs`・`logit.rs`と同じ解析的Hessian公式、`λᵢ(λᵢ+zᵢ)`
+# （本実装の`nonlinear/probit.rs`・`logit/problem.rs`と同じ解析的Hessian公式、`λᵢ(λᵢ+zᵢ)`
 # （probit）・`pᵢ(1-pᵢ)`（logit）で明示的に計算）を`sandwich::sandwich(bread.=...)`
 # に渡すことで、リンク関数によらず観測情報行列ベースの共分散を一貫して使う。
 # Logitでは正準リンクの性質により`bread.glm()`の値と数学的に完全に一致するため、
@@ -161,7 +161,7 @@ for (i in seq_len(glm_settings$max_refit)) {
 }
 
 # 観測情報行列（真の対数尤度のHessian）の重みを、本実装（nonlinear/probit.rs・
-# logit.rs）と同じ解析式で計算する（上記docコメント参照）。
+# logit/problem.rs）と同じ解析式で計算する（上記docコメント参照）。
 observed_hessian_weights <- function(model, link) {
   X <- model.matrix(model)
   y <- model$y

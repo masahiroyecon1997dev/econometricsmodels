@@ -1436,7 +1436,7 @@ mod tests {
 
         // 決定論的な疑似乱数（LCG、`std::collections::hash_map::DefaultHasher`は
         // 実装詳細でありバージョン間の安定性が保証されないため使わない。定数は
-        // `logit.rs`の近傍分離テストの`lcg`と同じ乗数・増分に揃えている）。
+        // `logit/fit.rs`の近傍分離テストの`lcg`と同じ乗数・増分に揃えている）。
         fn lcg_uniform(state: &mut u64) -> f64 {
             *state = state
                 .wrapping_mul(6_364_136_223_846_793_005)
@@ -1538,7 +1538,7 @@ mod tests {
 
     /// `beta1`（`x1`の真の係数）を指定して、ほぼ分離したデータを生成する。
     ///
-    /// `logit.rs`の`near_separation_input_with_beta1`と同型の設計（`beta=[0,beta1,0.5]`、
+    /// `logit/fit.rs`の`near_separation_input_with_beta1`と同型の設計（`beta=[0,beta1,0.5]`、
     /// 同じLCG・同じ`n=200`・同じ`x1`/`x2`分布）だが、リンク関数のみ`Normal::cdf`に
     /// 変える。完全分離になる`beta1`はLogit（`100`）よりProbitの方が小さい値（`50`）で足りる
     /// ——Probitの方がテイルの減衰が速く、より低い`beta1`で飽和に達するため。
@@ -1683,7 +1683,7 @@ mod tests {
     }
 
     /// `beta1=20`（分離と誤検知してはいけない境界ケース）で3手法とも正常に収束することを
-    /// 固定するリグレッションテスト（`logit.rs`の同名テストと同じ位置づけ）。分離検出の
+    /// 固定するリグレッションテスト（`logit/fit.rs`の同名テストと同じ位置づけ）。分離検出の
     /// 変更が既存の合格ケースを誤検知させないことを保証する。
     #[test]
     fn fit_converges_normally_for_mild_near_separation_data_across_all_methods() {
@@ -3505,12 +3505,12 @@ mod tests {
         }
     }
 
-    /// property-basedテスト。`logit.rs`の`mod proptests`と同型の設計（ケース生成・
+    /// property-basedテスト。`logit/fit.rs`の`mod proptests`と同型の設計（ケース生成・
     /// `solver_strategy`・許容誤差較正）だが、`score_is_near_zero_at_converged_params`
     /// のスコア計算式はLogitの`Σᵢ(yᵢ-pᵢ)xᵢ`をそのまま移植せず、Probit固有の
     /// `Σᵢλᵢxᵢ`（`ProbitProblem::gradient`と同じ一般化残差、プロパティ本体のdoc
     /// コメント参照）に置き換えている。それ以外の不変条件の理論的根拠・較正方針の
-    /// 詳細は`logit.rs`側のdocコメント参照（`testing-policy.md`「property-basedテスト」
+    /// 詳細は`logit/fit.rs`側のdocコメント参照（`testing-policy.md`「property-basedテスト」
     /// 参照）。
     ///
     /// プロパティの有効性検証（バグ注入→検出確認→元に戻す）は3件とも実施済み:
@@ -3526,7 +3526,7 @@ mod tests {
         use proptest::collection;
         use proptest::prelude::*;
 
-        // logit.rsと同じ理由でMAX_Kは小さく保つ（高kはbenchmarkのmany_regressors
+        // logit/fit.rsと同じ理由でMAX_Kは小さく保つ（高kはbenchmarkのmany_regressors
         // シナリオでカバー）。
         const MAX_K: usize = 4;
 
@@ -3534,7 +3534,7 @@ mod tests {
         type ProbitCase = (usize, usize, Vec<Vec<f64>>, Vec<f64>, Vec<f64>, Vec<u64>);
 
         /// `(n, k, x_cols, beta, u, keys)`を生成する共通ストラテジ。
-        /// `logit.rs`の`logit_case_strategy`と同じ較正値（`x_cols`は`-2.0..2.0`、
+        /// `logit/fit.rs`の`logit_case_strategy`と同じ較正値（`x_cols`は`-2.0..2.0`、
         /// `beta`は`-1.0..1.0`、`n=k+20..=100`）を使う。Probitはロジスティック分布より
         /// 裾が薄い標準正規分布を使うため、同じ`beta`の大きさでもLogitより飽和
         /// （p≈0/1）しやすいが、この範囲では分離を起こさないことを実測確認済み。
@@ -3573,7 +3573,7 @@ mod tests {
                 .collect()
         }
 
-        /// `solver`ごとの`tol`既定値の解決は`logit.rs`の`default_options`と同じ
+        /// `solver`ごとの`tol`既定値の解決は`logit/fit.rs`の`default_options`と同じ
         /// （`docs/spec/probit-spec.md`3.2節、Logitと共有する`run_solver`のため
         /// 同じ意味論）。
         fn default_options(cov_type: CovType, solver: SolverType) -> MleFitOptions {
@@ -3599,7 +3599,7 @@ mod tests {
             ]
         }
 
-        /// `logit.rs`と同じ理由で`1e-6`（OLSの列順序不変性）より緩い`1e-4`を使う
+        /// `logit/fit.rs`と同じ理由で`1e-6`（OLSの列順序不変性）より緩い`1e-4`を使う
         /// （反復最適化の収束経路が列順序で変わりうるため）。
         fn assert_approx_eq(actual: f64, expected: f64, msg: &str) {
             let tol = 1e-4 * expected.abs().max(1.0);
@@ -3624,7 +3624,7 @@ mod tests {
             /// 3手法（Newton/Bfgs/Lbfgs）が同一パラメータへ収束したにもかかわらずスコアが
             /// `0.85`前後になり、一見BFGS固有の収束判定バグに見えるが実際はテスト側の
             /// スコア式の誤りだった）。
-            /// 許容誤差の根拠は`logit.rs`の同名プロパティのdocコメント参照
+            /// 許容誤差の根拠は`logit/fit.rs`の同名プロパティのdocコメント参照
             /// （`n`非依存の絶対閾値、実測でも同オーダーに収まることを確認済み）。
             #[test]
             fn score_is_near_zero_at_converged_params(

@@ -84,7 +84,7 @@ pub(super) fn fit_logit(
         initial_params,
         max_iter as u64,
         tol,
-        input.y().nrows(),
+        n,
         raise_on_non_convergence,
     )?;
 

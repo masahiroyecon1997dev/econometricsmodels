@@ -208,6 +208,8 @@ impl Gradient for TobitProblem {
         let mut grad = vec![0.0; k + 1];
         for i in 0..n {
             let contribution = self.contribution(i, param, &normal);
+            // `grad`は長さ`k+1`（末尾が`s=logσ`）。`take(k)`でβ成分だけを回す
+            // （外すと`x.get(i, k)`が範囲外になる）。
             for (j, grad_j) in grad.iter_mut().enumerate().take(k) {
                 *grad_j += -contribution.score_beta_coef * (*self.x.get(i, j)) / sigma;
             }
@@ -233,6 +235,8 @@ impl Hessian for TobitProblem {
         let mut h = vec![vec![0.0; k + 1]; k + 1];
         for i in 0..n {
             let contribution = self.contribution(i, param, &normal);
+            // `h`は`(k+1)×(k+1)`（最後の行・列が`s=logσ`）。`take(k)`でβのブロック
+            // （行`a<k`、列`b<k`）だけを回す。`take`を外すと`x.get(i, k)`が範囲外になる。
             for (a, row) in h.iter_mut().enumerate().take(k) {
                 let xa = *self.x.get(i, a);
                 for (b, cell) in row.iter_mut().enumerate().take(k) {

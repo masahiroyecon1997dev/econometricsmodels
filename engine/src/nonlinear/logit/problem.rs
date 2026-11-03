@@ -97,9 +97,9 @@ impl Hessian for LogitProblem {
         for i in 0..n {
             let p = logistic(linear_predictor(&self.x, i, param));
             let w = p * (1.0 - p);
-            for (a, row) in h.iter_mut().enumerate().take(k) {
+            for (a, row) in h.iter_mut().enumerate() {
                 let xa = *self.x.get(i, a);
-                for (b, cell) in row.iter_mut().enumerate().take(k) {
+                for (b, cell) in row.iter_mut().enumerate() {
                     *cell += w * xa * (*self.x.get(i, b));
                 }
             }

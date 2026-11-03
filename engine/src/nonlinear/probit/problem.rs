@@ -140,9 +140,9 @@ impl Hessian for ProbitProblem {
         let mut h = vec![vec![0.0; k]; k];
         for i in 0..n {
             let w = self.hessian_weight(i, param, &normal);
-            for (a, row) in h.iter_mut().enumerate().take(k) {
+            for (a, row) in h.iter_mut().enumerate() {
                 let xa = *self.x.get(i, a);
-                for (b, cell) in row.iter_mut().enumerate().take(k) {
+                for (b, cell) in row.iter_mut().enumerate() {
                     *cell += w * xa * (*self.x.get(i, b));
                 }
             }

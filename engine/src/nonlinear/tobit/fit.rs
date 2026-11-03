@@ -70,7 +70,7 @@ pub(super) fn fit_tobit(
         initial_params,
         max_iter as u64,
         tol,
-        input.y().nrows(),
+        n,
         raise_on_non_convergence,
     )?;
     // Tobitの真の分離は係数発散ではなく`σ→0`退化として現れるため、Logit/Probitの分離検出

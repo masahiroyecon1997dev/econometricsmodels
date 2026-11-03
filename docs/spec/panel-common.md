@@ -215,7 +215,7 @@ FEはwithin変換したデータに`shared::least_squares::least_squares`を直�
 
 `LeastSquaresError`（OLS/WLS共有、`engine/src/linear/common.rs`）・`MleError`（nonlinear共有、
 `engine/src/nonlinear/common.rs`）の前例に倣い、**`PanelError`をFE/REで共有する**
-（`engine/src/panel/common.rs`に定義）。個別に`FeError`/`ReError`は作らない。`CommonError`
+（`engine/src/panel/common/error.rs`に定義）。個別に`FeError`/`ReError`は作らない。`CommonError`
 （`DimensionMismatch`等）は`#[from]`でラップする既存パターンを踏襲し、FE/RE固有のバリアント
 （自由度計算失敗、singleton関連等）は`PanelError`に直接追加する。
 

@@ -163,7 +163,7 @@ mod tests {
     #[test]
     fn quasi_demean_transform_applies_computed_theta_to_y_and_x() {
         // `compute_theta_matches_reference_formula_for_unbalanced_panel`と同じデータ・
-        // σ_ε²・σ_u²。`quasi_demean_column`自体の正しさは`common.rs`側で既に検証済み
+        // σ_ε²・σ_u²。`quasi_demean_column`自体の正しさは`common/transform.rs`側で既に検証済み
         // のため、ここでは「θの計算結果が正しくy/xの各列に適用されているか」の配線を
         // 確認する。期待値はPythonで手計算した参照値。
         let entity = strings(&["a", "a", "a", "b", "b", "c"]);

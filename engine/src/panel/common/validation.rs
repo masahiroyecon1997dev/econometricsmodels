@@ -1,0 +1,350 @@
+//! パネル入力の次元検証と、within変換の前後に行う事前検証（singleton・分散ゼロ・バランス・時間変化）。
+
+use super::error::{PanelDimension, PanelError};
+use super::index::EffectNames;
+use super::time_keys::TimeKeys;
+use super::transform::WithinTransform;
+use crate::shared::error::CommonError;
+use crate::shared::group_codes::GroupCodes;
+use crate::shared::validation::column_is_zero_variance;
+
+/// `FeInput::from_group_codes`/`ReInput::from_group_codes`の入力検証（FE/REで共通）。
+/// 検査の順序は、各`x_columns`の行数（`y`との不一致は`CommonError::DimensionMismatch`）、
+/// `entity`の長さ、`time`の長さ（以上2つは`PanelError::IdentifierDimensionMismatch`）、
+/// `entity`がキーを持つか（`require_entity_keys`）。後半3つは[`validate_panel_index`]。
+///
+/// # パニックについて
+/// `x_names.len() != x_columns.len()`の場合は`debug_assert!`でパニックする（呼び出し側
+/// `engine_pybind`の実装バグでしか起こり得ない内部契約であり、実データに起因する
+/// `ValidationError`とは性質が異なる。`OlsInput::from_columns`と同じ理由）。
+pub(crate) fn validate_panel_input(
+    y: &[f64],
+    x_columns: &[Vec<f64>],
+    x_names: &[String],
+    entity: &GroupCodes,
+    time: Option<&TimeKeys>,
+) -> Result<(), PanelError> {
+    debug_assert_eq!(
+        x_columns.len(),
+        x_names.len(),
+        "x_columns and x_names must have the same length"
+    );
+
+    validate_column_lengths(y.len(), x_columns)?;
+    validate_panel_index(y.len(), entity, time)
+}
+
+/// `columns`の各列の長さが被説明変数の長さ`y_rows`と一致することを確かめる
+/// （不一致は`CommonError::DimensionMismatch`）。
+pub(crate) fn validate_column_lengths(
+    y_rows: usize,
+    columns: &[Vec<f64>],
+) -> Result<(), PanelError> {
+    for col in columns {
+        if col.len() != y_rows {
+            return Err(CommonError::DimensionMismatch {
+                y_rows,
+                x_rows: col.len(),
+            }
+            .into());
+        }
+    }
+    Ok(())
+}
+
+/// パネルの索引（`entity`・`time`）が観測数`nobs`と整合することを確かめる。検査の順序は、
+/// `entity`の長さ、`time`の長さ（いずれも`PanelError::IdentifierDimensionMismatch`）、
+/// `entity`がキーを持つか（`require_entity_keys`）。
+pub(crate) fn validate_panel_index(
+    nobs: usize,
+    entity: &GroupCodes,
+    time: Option<&TimeKeys>,
+) -> Result<(), PanelError> {
+    if entity.nobs() != nobs {
+        return Err(PanelError::IdentifierDimensionMismatch {
+            dimension: PanelDimension::Entity,
+            y_rows: nobs,
+            other_rows: entity.nobs(),
+        });
+    }
+
+    if let Some(time) = time
+        && time.len() != nobs
+    {
+        return Err(PanelError::IdentifierDimensionMismatch {
+            dimension: PanelDimension::Time,
+            y_rows: nobs,
+            other_rows: time.len(),
+        });
+    }
+    require_entity_keys(entity)
+}
+
+/// パネル入力のentityのコードがキー（`keys()`）を持つことを確かめる。固定効果のキーに使うため、
+/// キー無しのコード（`GroupCodes::from_*_without_keys`）は受け付けない。
+fn require_entity_keys(entity: &GroupCodes) -> Result<(), PanelError> {
+    if !entity.has_keys() {
+        return Err(CommonError::internal(
+            "entity codes must carry keys (build them with GroupCodes::from_labels or \
+             GroupCodes::from_factorized)",
+        )
+        .into());
+    }
+    Ok(())
+}
+
+/// `entity`、2-wayなら`two_way_time`にも観測数1のグループがないことを検証する
+/// （`fe-spec.md`1章）。entityを先に検査し、両方に該当するsingletonがあればentity側を報告する。
+/// 列名は`names`から引く。
+///
+/// # Errors
+/// 観測数1のグループが見つかった場合は`PanelError::SingletonGroup`（該当する`dimension`を含む）。
+pub(crate) fn ensure_no_singleton_groups(
+    names: &EffectNames,
+    entity: &GroupCodes,
+    two_way_time: Option<&GroupCodes>,
+) -> Result<(), PanelError> {
+    reject_singleton_group(
+        PanelDimension::Entity,
+        names.get(PanelDimension::Entity),
+        entity,
+    )?;
+    if let Some(time) = two_way_time {
+        reject_singleton_group(PanelDimension::Time, names.get(PanelDimension::Time), time)?;
+    }
+    Ok(())
+}
+
+/// within変換後の各列に分散ゼロの列がないことを検証する（`fe-spec.md`1章）。`names`・
+/// `originals`・`transformed`は同じ列順・同じ列数で、列ごとに同じ長さを持つ（`engine`内の
+/// 内部契約であり、ユーザー入力起因ではない。リリースビルドで`zip`が黙って短い方へ切り詰める
+/// 事態を避けるため`debug_assert_eq!`ではなく`assert_eq!`で守る）。
+///
+/// # Errors
+/// 分散ゼロの列が見つかった場合は`PanelError::ZeroVarianceAfterDemeaning`（該当列名を含む）。
+/// 複数列が該当する場合は`names`の順で最初に見つかった列のみを報告する。
+pub(crate) fn ensure_no_zero_variance_columns(
+    names: &[String],
+    originals: &[Vec<f64>],
+    transformed: &[Vec<f64>],
+) -> Result<(), PanelError> {
+    assert_eq!(
+        names.len(),
+        originals.len(),
+        "names must have one entry per original column"
+    );
+    assert_eq!(
+        originals.len(),
+        transformed.len(),
+        "transformed must have the same number of columns as the original columns"
+    );
+    for ((name, original), transformed) in names.iter().zip(originals).zip(transformed) {
+        assert_eq!(
+            original.len(),
+            transformed.len(),
+            "transformed column '{name}' must have the same length as the original column"
+        );
+        if column_is_zero_variance(original, transformed) {
+            return Err(PanelError::ZeroVarianceAfterDemeaning {
+                column: name.clone(),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// `ids`（`entity`または`time`の列）に観測数1のグループがあれば
+/// `PanelError::SingletonGroup`を返す。
+///
+/// 複数のsingletonグループが存在する場合は、観測順で最初に現れるグループのみを報告する
+/// （`validate_no_zero_variance_regressors`の「最初の1件を報告」方針と統一）。観測数は
+/// `FeInput`の構築時に作ったコード（`GroupCodes::counts`）をそのまま使う。
+pub(crate) fn reject_singleton_group(
+    dimension: PanelDimension,
+    column: &str,
+    ids: &GroupCodes,
+) -> Result<(), PanelError> {
+    // 観測順で最初に現れたsingletonを報告する。
+    for &c in ids.codes() {
+        if ids.counts()[c] == 1 {
+            return Err(PanelError::SingletonGroup {
+                dimension,
+                column: column.to_string(),
+                group_id: ids.keys()[c].clone(),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// 2-way FEがバランスパネル（`entity` × `time`の全組合せが過不足なく1回ずつ存在する）
+/// であることを検証する（`fe-spec.md`3.1節）。
+///
+/// 観測数カウントの一致（`n_obs == n_entities * n_periods`）だけでは不十分
+/// （`PanelError::UnbalancedPanelForTwoWay`のdocコメント参照: あるペアの重複と別ペアの
+/// 欠落が相殺してカウントだけ一致する入力がありうる）。代わりに、`(entity, time)`
+/// ペアが重複なく、かつ`n_obs == n_entities * n_periods`であることを検証する。
+/// ペア集合は`entity × time`の全組合せグリッド（サイズ`n_entities * n_periods`）の
+/// 部分集合であるため、重複が無く要素数がグリッドのサイズと一致すれば、部分集合が全体
+/// （＝全組合せが埋まっている）と一致することが数学的に保証される。
+///
+/// `n_obs != n_entities * n_periods`ならその時点で不均衡（ペアの重複判定は不要）。一致する
+/// ときだけ、グリッドのセル（`entity`コード×`n_periods`+`time`コード）を一度ずつ埋めて
+/// 重複を検出する（`n_obs`個の`bool`）。
+///
+/// `entity.nobs() == time.nobs()`は`FeInput::from_group_codes`が既に保証している契約
+/// （呼び出し側は常に同じ`FeInput`からこの2つを渡す）。
+pub(crate) fn validate_balanced_panel(
+    entity: &GroupCodes,
+    time: &GroupCodes,
+    names: &EffectNames,
+) -> Result<(), PanelError> {
+    debug_assert_eq!(
+        entity.nobs(),
+        time.nobs(),
+        "entity and time must have the same length (FeInput contract)"
+    );
+    let n_obs = entity.nobs();
+    let n_entities = entity.n_groups();
+    let n_periods = time.n_groups();
+    let expected = n_entities * n_periods;
+    let unbalanced = || PanelError::UnbalancedPanelForTwoWay {
+        n_obs,
+        entity_column: names.get(PanelDimension::Entity).to_string(),
+        n_entities,
+        time_column: names.get(PanelDimension::Time).to_string(),
+        n_periods,
+    };
+
+    if n_obs != expected {
+        return Err(unbalanced());
+    }
+    let mut filled = vec![false; expected];
+    for (&e, &t) in entity.codes().iter().zip(time.codes()) {
+        let cell = &mut filled[e * n_periods + t];
+        if *cell {
+            return Err(unbalanced());
+        }
+        *cell = true;
+    }
+    Ok(())
+}
+
+/// `x`の各列のうち、1-way within変換（`entity`でθ=1のquasi-demean）後に分散がある列
+/// （時間変化のある列）の添字を昇順で返す。分散ゼロの判定は
+/// `validate_no_zero_variance_regressors`と同じ`column_is_zero_variance`（相対閾値）を使うため、
+/// ここで時間変化ありと判定された列は、そのままFEに渡しても分散ゼロで拒否されない。
+///
+/// REが時間不変の列を許容するために使う（`re-spec.md`5章）。FEの`fit()`は分散ゼロの列を
+/// 拒否する設計のままで、この関数は拒否の代わりに「FEに渡す列を選ぶ」ために同じ判定を使う。
+pub(crate) fn time_varying_regressor_indices(x: &[Vec<f64>], entity: &GroupCodes) -> Vec<usize> {
+    let within = WithinTransform::one_way(entity);
+    x.iter()
+        .enumerate()
+        .filter(|(_, original)| !column_is_zero_variance(original, &within.apply(original)))
+        .map(|(j, _)| j)
+        .collect()
+}
+
+/// 2-way within変換後に分散がある列の添字を昇順で返す（`time_varying_regressor_indices`の
+/// 2-way版）。2-wayのwithin変換は「entityでquasi-demean→timeでquasi-demean」の2段階
+/// （`within_transform_two_way`）で、バランスパネルで閉形式の二重デミーニングと一致する。
+/// 時点間でのみ（個体間でのみ）変わる列は2-way within変換後に全ゼロ列になり、時間不変の列と
+/// 同じく「分散ゼロ」と判定される。
+///
+/// **バランスパネルであることの検証はしない**（呼び出し側が`validate_balanced_panel`で
+/// 済ませている前提。不均衡だと2段階適用は二重デミーニングと一致しない）。
+pub(crate) fn two_way_time_varying_regressor_indices(
+    x: &[Vec<f64>],
+    entity: &GroupCodes,
+    time: &GroupCodes,
+) -> Vec<usize> {
+    let within = WithinTransform::two_way(entity, time);
+    x.iter()
+        .enumerate()
+        .filter(|(_, original)| !column_is_zero_variance(original, &within.apply(original)))
+        .map(|(j, _)| j)
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::test_support::*;
+    use super::*;
+
+    #[test]
+    fn validate_panel_input_reports_the_first_failing_check_in_order() {
+        let y = [1.0, 2.0, 3.0];
+        let names = labels(&["x"]);
+        let entity = GroupCodes::from_labels(&labels(&["a", "a", "b"]));
+        let time = TimeKeys::lexicographic(labels(&["1", "2", "1"]));
+        assert_eq!(
+            validate_panel_input(&y, &[vec![1.0, 2.0, 3.0]], &names, &entity, Some(&time)),
+            Ok(())
+        );
+
+        // x列 → entityの長さ → timeの長さ → entityのキー、の順。すべて同時に崩れていれば
+        // x列の不一致が先に返る。
+        let short_entity = GroupCodes::from_labels(&labels(&["a", "b"]));
+        let short_time = TimeKeys::lexicographic(labels(&["1"]));
+        let keyless = GroupCodes::from_labels_without_keys(&labels(&["a", "a"]));
+        assert_eq!(
+            validate_panel_input(&y, &[vec![1.0]], &names, &keyless, Some(&short_time)),
+            Err(CommonError::DimensionMismatch {
+                y_rows: 3,
+                x_rows: 1
+            }
+            .into())
+        );
+        assert_eq!(
+            validate_panel_input(
+                &y,
+                &[vec![1.0; 3]],
+                &names,
+                &short_entity,
+                Some(&short_time)
+            ),
+            Err(PanelError::IdentifierDimensionMismatch {
+                dimension: PanelDimension::Entity,
+                y_rows: 3,
+                other_rows: 2
+            })
+        );
+        assert_eq!(
+            validate_panel_input(&y, &[vec![1.0; 3]], &names, &entity, Some(&short_time)),
+            Err(PanelError::IdentifierDimensionMismatch {
+                dimension: PanelDimension::Time,
+                y_rows: 3,
+                other_rows: 1
+            })
+        );
+        // キー無しのentityでtimeの長さも合っていなければ、キー検査は最後なのでtimeの不一致が先。
+        let keyless_full = GroupCodes::from_labels_without_keys(&labels(&["a", "a", "b"]));
+        assert_eq!(
+            validate_panel_input(
+                &y,
+                &[vec![1.0; 3]],
+                &names,
+                &keyless_full,
+                Some(&short_time)
+            ),
+            Err(PanelError::IdentifierDimensionMismatch {
+                dimension: PanelDimension::Time,
+                y_rows: 3,
+                other_rows: 1
+            })
+        );
+        assert!(matches!(
+            validate_panel_input(&y, &[vec![1.0; 3]], &names, &keyless_full, None),
+            Err(PanelError::Common(CommonError::Internal { .. }))
+        ));
+    }
+
+    #[test]
+    #[should_panic(expected = "names must have one entry per original column")]
+    fn ensure_no_zero_variance_columns_panics_when_names_are_fewer_than_columns() {
+        let originals = vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0]];
+        let transformed = originals.clone();
+        let _ = ensure_no_zero_variance_columns(&["x1".to_string()], &originals, &transformed);
+    }
+}

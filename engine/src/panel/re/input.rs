@@ -35,7 +35,7 @@ impl ReInput {
     /// から`ReInput`を組み立てる。`FeInput::from_columns`と同一の次元検証を行う。
     ///
     /// # Errors
-    /// 検査の順序は`validate_panel_input`（`panel/common.rs`、FE/REで共通）が正本。
+    /// 検査の順序は`validate_panel_input`（`panel/common/validation.rs`、FE/REで共通）が正本。
     /// - いずれかの`x_columns`の長さが`y`と一致しない場合は
     ///   `PanelError::Common(CommonError::DimensionMismatch)`
     /// - `entity`の長さが`y`と一致しない場合は

@@ -89,7 +89,7 @@
 //! ## `cov_type`対応（`FeCovType`）
 //!
 //! `shared::covariance`の`classical_cov_params`/`hc_cov_params`/`cluster_cov_params`は
-//! そのまま使えない。計算は`panel/common.rs`の`panel_cov_params`（`PanelStructure::FixedEffects`）が
+//! そのまま使えない。計算は`panel/common/panel_cov.rs`の`panel_cov_params`（`PanelStructure::FixedEffects`）が
 //! 担い、以下の点でOLSと式が異なる（導出は`fe-spec.md`3.3節）。
 //!
 //! 1. **HC0は提供しない**（小標本補正なしのサンドイッチはパネル/FEでは提供しない仕様判断。

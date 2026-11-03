@@ -244,7 +244,7 @@ Python `linearmodels.RandomEffects`の実装（Swamy-Arora）に準拠する。R
 `1 - θ₁ - θ₂ + θ₃`倍）に適用してから`OlsEstimator::fit(include_intercept=false)`に渡す。
 `quasi_demean_column`は1つのグルーピングしか扱えず、FEの2-wayのように「entityでquasi-demean→
 その結果をtimeでquasi-demean」の2段階適用（θ₁・θ₂のみ使う）では`θ₃ ≠ θ₁θ₂`のためGLS変換に
-ならない。そこで3つの平均を同時に引く`quasi_demean_two_way`（`panel/common.rs`、バランスパネル前提）を
+ならない。そこで3つの平均を同時に引く`quasi_demean_two_way`（`panel/common/transform.rs`、バランスパネル前提）を
 用意した。θ=(1,1,1)で2-way within変換、θ=(θ₁,0,0)・(0,θ₂,0)で1-wayのRE（entity方向・time方向）、
 θ=(0,0,0)で変換なし（pooled OLS）になる。
 
@@ -276,7 +276,7 @@ wx.shape[1]`）と自動的に一致する。この副産物として`estimator(
 だけ）で足りる。
 
 FE実装時（`panel::fe`）のcov_type計算関数（`design_matrix_from_columns`・`xtx_inverse`・
-分類/HC/cluster/DriscollKraay計算）は`common.rs`にFE/RE共有で移設済み（素のレバレッジは
+分類/HC/cluster/DriscollKraay計算）は`panel/common/cov_params.rs`にFE/RE共有で移設済み（素のレバレッジは
 `shared::covariance::leverages`）——
 数式自体はFE実装時から変更しておらず、`k_correction`・レバレッジ配列を引数で受け取る汎用実装の
 ため呼び出し側（REは常に`k_correction=df_model`・素のレバレッジ）を差し替えるだけで

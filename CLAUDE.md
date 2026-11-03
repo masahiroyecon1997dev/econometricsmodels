@@ -3,7 +3,7 @@
 このファイルは、Claude Code がこのリポジトリで作業する際に毎回参照する前提知識です。
 言語別の詳細なコーディング規約・テスト方針は `.claude/rules/`（パス指定で自動ロード）に、定型作業は `.claude/skills/` に、コードレビューは `.claude/agents/` のサブエージェントに分離している。重複記載を避けるため、このファイルには全体像・非交渉事項・各詳細ファイルへの参照のみを置く。
 
-手法固有の実装ノウハウ（設計判断の理由・既知の落とし穴等）は、対応する `engine/src/<系統>/CLAUDE.md` 等のネストCLAUDE.md（該当ディレクトリ配下のファイルを読み書きしたときだけ自動ロード）に置く。現状は `linear`（OLS/WLS）系統が`engine`/`engine_pybind`/`python_package`の3箇所、`nonlinear`（Logit/Probit）系統が`engine_pybind`/`python_package`の2箇所（`engine/src/nonlinear/`はまだ未作成）で作成済み。他系統・未作成箇所は実装着手時にその都度作成する（4章参照）。
+手法固有の実装ノウハウ（設計判断の理由・既知の落とし穴等）は、対応する `engine/src/<系統>/CLAUDE.md` 等のネストCLAUDE.md（該当ディレクトリ配下のファイルを読み書きしたときだけ自動ロード）に置く。現状は`linear`・`nonlinear`・`iv`・`panel`の各系統について、`engine`/`engine_pybind`/`python_package`のうち該当する箇所に作成済み。他系統・未作成箇所は実装着手時にその都度作成する（4章参照）。
 
 ## 1. プロジェクト概要
 
@@ -50,7 +50,7 @@ econometricsmodels/
 ├── engine/                       # 純粋Rustの計算心臓部（PyO3非依存）
 │   └── src/
 │       ├── lib.rs
-│       ├── linear/ nonlinear/ iv/ panel/           # 系統別。手法は最初1ファイル、肥大化したらディレクトリ（linear/ols/ 等）
+│       ├── linear/ nonlinear/ iv/ panel/           # 系統別。手法は`<手法>.rs`（ファサード）＋`<手法>/`（子モジュール）、系統内の共有は`common.rs`＋`common/`（linear/ols.rs＋linear/ols/ 等。詳細は.claude/rules/rust-style.md）
 │       └── shared/                                 # 複数の系統が共有するコード。error.rs・inference.rs・linear_algebra.rs・parallelism.rs・validation.rs・design_matrix.rs、計算部品（共分散・Wald検定・最小二乗・適合度・クラスターのグループ化）。各系統の common.rs とは別
 │
 ├── engine_pybind/                # PyO3の薄いバインディング層
@@ -129,7 +129,7 @@ econometricsmodels/
 
 ## 7. テスト方針
 
-詳細は `.claude/rules/testing-policy.md`（tests配下で自動ロード）を参照。要点: statsmodels/linearmodels/Rとの数値比較で検証（pyfixestはリファレンスに使わない）、許容誤差は相対誤差1e-8を基本（手法により例外あり）、engineの単体テストはソース内`mod tests`、`tests/`はpytestに分離。
+詳細は `.claude/rules/testing-policy.md`（tests配下で自動ロード）を参照。要点: statsmodels/linearmodels/Rとの数値比較で検証（pyfixestはリファレンスに使わない）、許容誤差は相対誤差1e-8を基本（手法により例外あり）、engineの単体テストはテスト対象のロジックと同じファイルの`mod tests`、`tests/`はpytestに分離。
 
 ## 8. バージョニング・CI/CD
 

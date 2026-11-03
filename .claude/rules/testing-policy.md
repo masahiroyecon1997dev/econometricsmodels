@@ -14,7 +14,7 @@ Issue番号・内部管理ドキュメント（`docs/planning/specs/`配下の�
 
 ## テストの分離
 
-- `engine`の純粋ロジックの単体テストは、対象コードと同じファイル内の`#[cfg(test)] mod tests`に置く（`cargo test -p engine`）。
+- `engine`の純粋ロジックの単体テストは、テスト対象のロジックと同じファイル内の`#[cfg(test)] mod tests`に置く（`cargo test -p engine`）。手法のファサード（`<手法>.rs`）にはロジックが無いので、テストは子モジュール（`<手法>/fit.rs`等）に置く。複数ファイルが使うフィクスチャは`<手法>/test_support.rs`（`#[cfg(test)]`）に集める（`rust-style.md`「ファイル・ディレクトリ構成」）。
 - `tests/`: リファレンス実装との答え合わせテスト（`pytest`）。系統別サブディレクトリ（`tests/linear/`・`tests/nonlinear/`・`tests/iv/`・`tests/panel/`。`benchmark/` と同じ grain）に手法別ファイル `test_<手法>*.py` を置く。全手法を横断するテスト（入力の型・オプションの型・`stat_dist`/自由度の整合等）は `tests/cross_method/` に置く。テストではないヘルパー（共有の `_assertions.py`・`_helpers.py`・`_tolerances.py`・`_errors.py`・`_error_expectations.py` 等と、系統別の `_ols_helpers.py`・`_binary_choice_checks.py` 等）は `tests/support/` 一箇所に集約する。`conftest.py` は `tests/` 直下（共有フィクスチャ）、各系統ディレクトリ（系統固有のフィクスチャ）、`tests/cross_method/`（横断テスト用のパネルデータ `panel_df` 等。60行の小さなデータは `_dtype_helpers.make_frame`）に置く。どのディレクトリからでも `from _helpers import ...` 等の裸importが通るのは `pyproject.toml` の `pythonpath = [".", "tests/support"]` による。
 
 ## リファレンス実装
@@ -147,7 +147,7 @@ Issue番号・内部管理ドキュメント（`docs/planning/specs/`配下の�
 
 `engine`クレートに`dev-dependencies`として導入済み（OLSで先行導入し、現在はWLS・Logit・Probit・Tobit・IV・パネル（FE/RE）の各系統にも展開している）。固定seed・固定シナリオでの値の一致確認（`#[cfg(test)] mod tests`の通常の単体テスト）だけでは「そのseedでは偶然問題が顕在化しないケース」を拾えない構造的な穴があるため、各手法が満たすべき不変条件を個別の値比較より高い網羅性で検証する目的で使う。
 
-- 対象ファイルの`#[cfg(test)] mod tests`内に`mod proptests`としてネストする（`engine/src/linear/ols/fit.rs`参照）。通常の固定値単体テストと同じファイル・同じ`mod tests`に置くことで、リファクタリング時の追従漏れを防ぐ既存方針（`rust-style.md`「テスト」）を踏襲する。
+- `fit`を通すプロパティは`fit.rs`の`#[cfg(test)] mod tests`内に`mod proptests`としてネストする（`engine/src/linear/ols/fit.rs`参照）。`fit`を通さない部品のプロパティ（確率・数値部品の恒等式等）は、その部品のファイルの`mod tests`内にネストする（`engine/src/nonlinear/tobit/target.rs`参照）。通常の固定値単体テストと同じファイル・同じ`mod tests`に置くことで、リファクタリング時の追従漏れを防ぐ既存方針（`rust-style.md`「テスト」）を踏襲する。
 - ランダムに生成する設計行列は、`SingularMatrix`にならない範囲（フルランク保証）に制約する。実務上は「独立な連続一様分布からのサンプリング + `n`に十分なマージンを持たせる（`n >> k`）」で事実上フルランクになるため、追加で`prop_assume!(result.is_ok())`を安全弁として使えば十分（`ols.rs`の`ols_case_strategy`参照）。
 - 許容誤差は固定フィクスチャ比較（`RTOL=1e-8`）より緩める（乱数生成でデータのスケールが揃わないため、相対誤差ベース+絶対誤差フロアで`RTOL=1e-6`程度を目安にする）。
 - **プロパティの有効性は、既存のテストでは検出できない意図的なバグをコードに一時的に注入し、プロパティが実際に失敗することを確認してから元に戻す**、という形で検証する（全4プロパティについて実施・記録済み。「プロパティを書いただけで一度も落ちたことがない」状態は、プロパティ自体が無意味な可能性を否定できないため）。

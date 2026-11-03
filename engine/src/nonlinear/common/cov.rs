@@ -4,8 +4,9 @@ use faer::prelude::Solve;
 use faer::{Mat, Side};
 
 use super::error::MleError;
+use super::options::CovType;
 use crate::shared::covariance::{cluster_correction, cluster_meat, sandwich};
-use crate::shared::error::MatrixKind;
+use crate::shared::error::{ClusterSetting, CommonError, MatrixKind};
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 
@@ -145,6 +146,51 @@ pub(crate) fn cluster_cov_params(
     Ok(Mat::from_fn(k, k, |i, j| {
         correction * (*sandwich.get(i, j))
     }))
+}
+
+/// `cov_type`が収束点の観測ごとのスコア行列を必要とするか（`Classical`以外はすべて必要）。
+/// 各モデルの`fit()`はこれが`true`のときだけ、`run_solver`に`problem`を渡す前に複製して
+/// おき、収束後にスコアを1回だけ計算して[`cov_params_for_type`]へ渡す
+/// （`Classical`は設計行列を含む複製を避ける）。
+pub(crate) fn scores_needed(cov_type: &CovType) -> bool {
+    !matches!(cov_type, CovType::Classical)
+}
+
+/// `cov_type`に応じた標準化空間の係数分散共分散行列（`k×k`、`k`は呼び出し側が持つ全パラメータ数。
+/// Tobitは`σ`を含む`k+1`を渡す）。
+/// Logit/Probit/Tobitの`fit()`で同一の振り分けになるため集約している。
+///
+/// `scores`は[`scores_needed`]が`true`のときの観測ごとのスコア行列（`n×k`）。`None`のまま
+/// `Classical`以外が渡されるのは呼び出し側の実装の誤りで、`CommonError::Internal`を返す。
+/// `Cluster`の`groups`が`None`の場合は`CommonError::MissingClusterColumn`を返す
+/// （`fit()`冒頭の検証が先に同じエラーを返すため、通常は到達しない）。
+pub(crate) fn cov_params_for_type(
+    cov_type: &CovType,
+    hessian: &Mat<f64>,
+    scores: Option<&Mat<f64>>,
+    n: usize,
+    k: usize,
+) -> Result<Mat<f64>, MleError> {
+    match (cov_type, scores) {
+        (CovType::Classical, _) => observed_information_cov_params(hessian, k),
+        (CovType::Opg, Some(scores)) => opg_cov_params(scores, k),
+        (CovType::Hc0, Some(scores)) => {
+            sandwich_cov_params(hessian, scores, n, k, SandwichVariant::Hc0)
+        }
+        (CovType::Hc1, Some(scores)) => {
+            sandwich_cov_params(hessian, scores, n, k, SandwichVariant::Hc1)
+        }
+        (CovType::Cluster { groups }, Some(scores)) => {
+            let groups = groups.as_ref().ok_or(CommonError::MissingClusterColumn {
+                setting: ClusterSetting::CovType,
+            })?;
+            cluster_cov_params(hessian, scores, n, k, groups)
+        }
+        (_, None) => Err(CommonError::internal(
+            "scores must be provided for a cov_type other than Classical",
+        )
+        .into()),
+    }
 }
 
 #[cfg(test)]
@@ -355,6 +401,116 @@ mod tests {
             matches!(result, Err(MleError::SingularHessian)),
             "{:?}",
             result
+        );
+    }
+
+    #[test]
+    fn scores_needed_is_false_only_for_classical() {
+        assert!(!scores_needed(&CovType::Classical));
+        assert!(scores_needed(&CovType::Opg));
+        assert!(scores_needed(&CovType::Hc0));
+        assert!(scores_needed(&CovType::Hc1));
+        assert!(scores_needed(&CovType::Cluster { groups: None }));
+    }
+
+    /// `cov_params_for_type`は`cov_type`ごとに対応する個別関数を呼ぶだけの振り分けなので、
+    /// 各個別関数の結果とビット単位で一致する。
+    #[test]
+    fn cov_params_for_type_dispatches_to_the_matching_function() {
+        let h = cov_test_hessian();
+        let s = cov_test_scores_correlated();
+        let groups = GroupCodes::from_labels(&["a", "b", "a", "b"].map(String::from));
+        let cluster = CovType::Cluster {
+            groups: Some(groups.clone()),
+        };
+        let cases = [
+            (
+                CovType::Classical,
+                observed_information_cov_params(&h, 2).unwrap(),
+            ),
+            (CovType::Opg, opg_cov_params(&s, 2).unwrap()),
+            (
+                CovType::Hc0,
+                sandwich_cov_params(&h, &s, 4, 2, SandwichVariant::Hc0).unwrap(),
+            ),
+            (
+                CovType::Hc1,
+                sandwich_cov_params(&h, &s, 4, 2, SandwichVariant::Hc1).unwrap(),
+            ),
+            (
+                cluster.clone(),
+                cluster_cov_params(&h, &s, 4, 2, &groups).unwrap(),
+            ),
+        ];
+        for (cov_type, expected) in cases {
+            let actual = cov_params_for_type(&cov_type, &h, Some(&s), 4, 2).unwrap();
+            for i in 0..2 {
+                for j in 0..2 {
+                    assert_eq!(
+                        actual.get(i, j).to_bits(),
+                        expected.get(i, j).to_bits(),
+                        "{cov_type:?} ({i}, {j})"
+                    );
+                }
+            }
+        }
+    }
+
+    /// `Classical`はスコアを使わないため、`scores=None`でも計算できる。
+    #[test]
+    fn cov_params_for_type_classical_does_not_need_scores() {
+        let cov =
+            cov_params_for_type(&CovType::Classical, &cov_test_hessian(), None, 4, 2).unwrap();
+        assert_diag_close(&cov, [0.5, 0.2], 1e-9);
+    }
+
+    /// `Classical`以外で`scores=None`は呼び出し側の実装の誤りで、パニックせず内部エラーを返す。
+    #[test]
+    fn cov_params_for_type_returns_internal_error_when_scores_are_missing() {
+        for cov_type in [CovType::Opg, CovType::Hc0, CovType::Hc1] {
+            let result = cov_params_for_type(&cov_type, &cov_test_hessian(), None, 4, 2);
+            assert!(
+                matches!(result, Err(MleError::Common(CommonError::Internal { .. }))),
+                "{cov_type:?}: {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn cov_params_for_type_returns_internal_error_for_cluster_when_scores_are_missing() {
+        let groups = GroupCodes::from_labels(&["a", "b", "a", "b"].map(String::from));
+        for groups in [Some(groups), None] {
+            let result = cov_params_for_type(
+                &CovType::Cluster { groups },
+                &cov_test_hessian(),
+                None,
+                4,
+                2,
+            );
+            assert!(
+                matches!(result, Err(MleError::Common(CommonError::Internal { .. }))),
+                "{result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn cov_params_for_type_returns_missing_cluster_column_when_groups_are_none() {
+        let result = cov_params_for_type(
+            &CovType::Cluster { groups: None },
+            &cov_test_hessian(),
+            Some(&cov_test_scores()),
+            4,
+            2,
+        );
+        assert!(
+            matches!(
+                result,
+                Err(MleError::Common(CommonError::MissingClusterColumn {
+                    setting: ClusterSetting::CovType
+                }))
+            ),
+            "{result:?}"
         );
     }
 }

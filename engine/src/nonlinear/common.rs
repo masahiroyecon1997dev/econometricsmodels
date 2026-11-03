@@ -37,7 +37,7 @@
 //! - `lbfgs.rs`: `FaerLbfgs`
 //! - `initial.rs`: 設計行列のランクチェックと初期値
 //! - `standardize.rs`: 列の標準化と逆変換
-//! - `cov.rs`: `cov_type`別の共分散行列
+//! - `cov.rs`: `cov_type`別の共分散行列と、`CovType`からの振り分け
 //! - `test_support.rs`: 複数ファイルのテストが共有するフィクスチャ（`#[cfg(test)]`）
 
 mod bfgs;
@@ -59,10 +59,12 @@ mod standardize;
 pub(crate) mod test_support;
 mod validation;
 
+#[cfg(test)]
 pub(crate) use cov::cluster_cov_params;
 pub use cov::{
     SandwichVariant, observed_information_cov_params, opg_cov_params, sandwich_cov_params,
 };
+pub(crate) use cov::{cov_params_for_type, scores_needed};
 pub use error::MleError;
 pub use goodness_of_fit::{GoodnessOfFit, goodness_of_fit, log_likelihood_null};
 pub use initial::{checked_design_matrix_qr, ols_based_initial_params};

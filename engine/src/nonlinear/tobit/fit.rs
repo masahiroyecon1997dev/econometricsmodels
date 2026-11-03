@@ -10,8 +10,7 @@ use super::statistics::{
     log_likelihood, ols_initial_params, validate_has_uncensored_observations, wald_chi2_test,
 };
 use crate::nonlinear::common::{
-    CovType, MleError, MleFitOptions, SandwichVariant, cluster_cov_params,
-    observed_information_cov_params, opg_cov_params, run_solver, sandwich_cov_params,
+    MleError, MleFitOptions, cov_params_for_type, run_solver, scores_needed,
     validate_cluster_cov_type, validate_mle_options, validate_sufficient_observations,
 };
 use crate::shared::inference;
@@ -54,15 +53,9 @@ pub(super) fn fit_tobit(
     let upper_std = scaling.standardize_bound(input.upper());
     let initial_params = ols_initial_params(&x_std, input.x(), &y_std, input.param_names())?;
     let problem = TobitProblem::from_standardized(x_std, y_std, lower_std, upper_std);
-    // `cov_type`がOPG/サンドイッチ型/クラスターの場合、収束点でのスコア評価に
-    // 標準化空間の`TobitProblem`が必要になる。`run_solver`は`problem`の所有権を
-    // 取り込むため、事前にクローンしておく（`LogitEstimator::fit`と同じ理由）。
-    let problem_for_scores = match &cov_type {
-        CovType::Classical => None,
-        CovType::Opg | CovType::Hc0 | CovType::Hc1 | CovType::Cluster { .. } => {
-            Some(problem.clone())
-        }
-    };
+    // `cov_type`がスコアを使う場合（`scores_needed`）、収束点でのスコア評価に標準化空間の
+    // `TobitProblem`が必要になる。`run_solver`は`problem`の所有権を取り込むため、事前に複製しておく。
+    let problem_for_scores = scores_needed(&cov_type).then(|| problem.clone());
 
     let output = run_solver(
         problem,
@@ -85,60 +78,8 @@ pub(super) fn fit_tobit(
     let params = params_full[..k].to_vec();
 
     let hessian_std = Mat::from_fn(k + 1, k + 1, |i, j| output.hessian[i][j]);
-    // `problem_for_scores.as_ref().expect(...)`は各非`Classical`分岐でのみ呼ばれ、
-    // 直前の`match cov_type`により常に`Some`であることが保証されている内部契約
-    // （`LogitEstimator::fit`と同じ防御的な扱い）。
-    let cov_params_std = match &cov_type {
-        CovType::Classical => observed_information_cov_params(&hessian_std, k + 1)?,
-        CovType::Opg => {
-            let problem = problem_for_scores
-                .as_ref()
-                .expect("problem_for_scores must be Some for CovType::Opg");
-            opg_cov_params(&problem.scores(&output.params), k + 1)?
-        }
-        CovType::Hc0 => {
-            let problem = problem_for_scores
-                .as_ref()
-                .expect("problem_for_scores must be Some for CovType::Hc0");
-            sandwich_cov_params(
-                &hessian_std,
-                &problem.scores(&output.params),
-                n,
-                k + 1,
-                SandwichVariant::Hc0,
-            )?
-        }
-        CovType::Hc1 => {
-            let problem = problem_for_scores
-                .as_ref()
-                .expect("problem_for_scores must be Some for CovType::Hc1");
-            sandwich_cov_params(
-                &hessian_std,
-                &problem.scores(&output.params),
-                n,
-                k + 1,
-                SandwichVariant::Hc1,
-            )?
-        }
-        CovType::Cluster { groups } => {
-            let problem = problem_for_scores
-                .as_ref()
-                .expect("problem_for_scores must be Some for CovType::Cluster");
-            // `groups`のNone・クラスター数不足の検証はfit()冒頭の
-            // `validate_cluster_cov_type`で完了済み。
-            // ここでの`expect`はその契約を明記する防御的な扱い（`LogitEstimator::fit`と同じ）。
-            let groups = groups
-                .as_ref()
-                .expect("groups are validated by validate_cluster_cov_type for Cluster");
-            cluster_cov_params(
-                &hessian_std,
-                &problem.scores(&output.params),
-                n,
-                k + 1,
-                groups,
-            )?
-        }
-    };
+    let scores = problem_for_scores.map(|problem| problem.scores(&output.params));
+    let cov_params_std = cov_params_for_type(&cov_type, &hessian_std, scores.as_ref(), n, k + 1)?;
     // 標準化空間`(β̃, s̃)`の分散共分散行列を、元のスケール`(β, σ)`空間へ
     // `Cov(β,σ) = J·Cov(β̃,s̃)·Jᵀ`で変換する（`J`は`TobitScaling::param_jacobian`。
     // `x`の列標準化・センタリングの解除と、`s̃→σ=c·exp(s̃)`のデルタ法`∂σ/∂s̃=σ`を

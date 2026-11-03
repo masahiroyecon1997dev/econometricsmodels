@@ -7,10 +7,9 @@ use super::input::ProbitInput;
 use super::model::log_likelihood;
 use super::problem::ProbitProblem;
 use crate::nonlinear::common::{
-    CovType, GoodnessOfFit, MleError, MleFitOptions, SandwichVariant, cluster_cov_params,
-    destandardize_cov_params, destandardize_params, goodness_of_fit, log_likelihood_null,
-    observed_information_cov_params, ols_based_initial_params, opg_cov_params, run_solver,
-    sandwich_cov_params, standardize_columns, validate_fit_preconditions,
+    GoodnessOfFit, MleError, MleFitOptions, cov_params_for_type, destandardize_cov_params,
+    destandardize_params, goodness_of_fit, log_likelihood_null, ols_based_initial_params,
+    run_solver, scores_needed, standardize_columns, validate_fit_preconditions,
 };
 use crate::nonlinear::separation::verify_no_separation;
 use crate::shared::inference;
@@ -67,19 +66,9 @@ pub(super) fn fit_probit(
         )?
     };
     let problem = ProbitProblem::from_standardized(x_std, input.y().clone());
-    // `cov_type`がOPG/サンドイッチ型/クラスターロバストの場合、収束点でのスコア評価に
-    // 元の`ProbitProblem`（標準化空間のx_std）が必要になる。`run_solver`は`problem`の
-    // 所有権を取り込む（内部で保持していたモデルを呼び出し元へ返さない設計）ため、
-    // 事前にクローンしておく必要がある（`ProbitProblem`は`argmin::core::Executor`
-    // 向けに元々`Clone`を要求しているため、この用途のための追加のtraitではない）。
-    // `Classical`はスコアを使わないため、無駄な複製（設計行列を含む）を避けるために
-    // `cov_type`に応じて条件付きで行う（`LogitEstimator::fit`と同じ）。
-    let problem_for_scores = match &cov_type {
-        CovType::Classical => None,
-        CovType::Opg | CovType::Hc0 | CovType::Hc1 | CovType::Cluster { .. } => {
-            Some(problem.clone())
-        }
-    };
+    // `cov_type`がスコアを使う場合（`scores_needed`）、収束点でのスコア評価に標準化空間の
+    // `ProbitProblem`が必要になる。`run_solver`は`problem`の所有権を取り込むため、事前に複製しておく。
+    let problem_for_scores = scores_needed(&cov_type).then(|| problem.clone());
 
     let output = run_solver(
         problem,
@@ -103,55 +92,8 @@ pub(super) fn fit_probit(
         output.converged,
         raise_on_non_convergence,
     )?;
-    // `problem_for_scores.as_ref().expect(...)`は各非`Classical`分岐でのみ呼ばれ、
-    // 直前の`match cov_type { CovType::Classical => None, _ => Some(...) }`により
-    // 常に`Some`であることが保証されている内部契約（`LogitEstimator::fit`と同じ、
-    // `expect`のメッセージで契約を明記して防御的に扱う）。
-    let cov_params_std = match &cov_type {
-        CovType::Classical => observed_information_cov_params(&hessian_std, k)?,
-        CovType::Opg => {
-            let problem = problem_for_scores
-                .as_ref()
-                .expect("problem_for_scores must be Some for CovType::Opg");
-            opg_cov_params(&problem.scores(&output.params), k)?
-        }
-        CovType::Hc0 => {
-            let problem = problem_for_scores
-                .as_ref()
-                .expect("problem_for_scores must be Some for CovType::Hc0");
-            sandwich_cov_params(
-                &hessian_std,
-                &problem.scores(&output.params),
-                n,
-                k,
-                SandwichVariant::Hc0,
-            )?
-        }
-        CovType::Hc1 => {
-            let problem = problem_for_scores
-                .as_ref()
-                .expect("problem_for_scores must be Some for CovType::Hc1");
-            sandwich_cov_params(
-                &hessian_std,
-                &problem.scores(&output.params),
-                n,
-                k,
-                SandwichVariant::Hc1,
-            )?
-        }
-        CovType::Cluster { groups } => {
-            let problem = problem_for_scores
-                .as_ref()
-                .expect("problem_for_scores must be Some for CovType::Cluster");
-            // `groups`のNone・クラスター数不足の検証はfit()冒頭で完了済み
-            // （MissingClusterColumn/InsufficientClustersを最適化前に早期に返す
-            // ため）。ここでの`expect`はその契約を明記する防御的な扱い。
-            let groups = groups
-                .as_ref()
-                .expect("groups are validated by validate_fit_preconditions for Cluster");
-            cluster_cov_params(&hessian_std, &problem.scores(&output.params), n, k, groups)?
-        }
-    };
+    let scores = problem_for_scores.map(|problem| problem.scores(&output.params));
+    let cov_params_std = cov_params_for_type(&cov_type, &hessian_std, scores.as_ref(), n, k)?;
     let cov_params = destandardize_cov_params(&cov_params_std, &scale);
 
     let normal = Normal::standard();
@@ -724,7 +666,7 @@ mod tests {
     /// `destandardize_cov_params`）をテスト側で独立に再現した値と突き合わせる。
     /// 多変量（k=3）データセットを使う理由: 切片のみモデルでは情報行列の等式
     /// （`Σᵢsᵢsᵢ' = -H`）が有限標本で厳密に成り立ってしまい、`classical`/`opg`/`hc0`
-    /// が偶然同じ値になるため、`fit()`の`match cov_type`の配線ミスを検出できない
+    /// が偶然同じ値になるため、`fit()`の`cov_type`振り分け（`cov_params_for_type`への配線）のミスを検出できない
     /// （`fit_cov_params_is_symmetric_and_stats_are_internally_consistent`と同じ
     /// データセットを再利用する。Logitの対応するテストと同じ構成）。
     #[test]

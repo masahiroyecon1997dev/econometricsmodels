@@ -47,7 +47,7 @@ pub(super) fn censored_regression_input() -> TobitInput {
 /// データセット（切片+説明変数2つ+`s`で`k+1=4`次元、実際の左打ち切りを含む）。
 /// `censored_regression_input`（説明変数1つ）を拡張したもの。情報行列の等式が
 /// 有限標本で厳密に成り立ってしまう切片のみ・単変量モデルでは`cov_type`の配線ミス
-/// （例えば`Opg`の分岐で誤って`observed_information_cov_params`を呼んでいた場合等）を
+/// （例えば`Opg`で誤って`observed_information_cov_params`を呼んでいた場合等）を
 /// 検出できないため、Logitの対応テスト（`fit_cov_type_opg_hc0_hc1_match_
 /// independently_recomputed_values`のdocコメント）と同じ理由で多変量データセットが
 /// 必須。

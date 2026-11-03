@@ -402,7 +402,7 @@ faerのグローバル並列度は`engine::shared::parallelism::ensure_serial()`
   の両方と照合する。観測数の境界（`n = k`で拒否、`n = k + 1`で成功し`df_denom = 1`）と、重複除外後の
   列数での境界判定も確認する。許容誤差は`ols_white_reference`/`ols_white_crosscheck`（`rtol=1e-8`、
   実測最大相対誤差約2e-12）。p値は絶対誤差フロアを使わず相対誤差のみで比較する（裾の1e-39級の
-  p値が`sf`ではなく`1 - cdf`で0に潰れる回帰を検出するため）。engine側は`diagnostics.rs`の`mod tests`（statsmodels値との照合、ダミー・定数・スケール・
+  p値が`sf`ではなく`1 - cdf`で0に潰れる回帰を検出するため）。engine側は`diagnostics/`配下の各ファイルの`mod tests`（statsmodels値との照合、ダミー・定数・スケール・
   NaN残差・共線等）。
 
 ### 3.10 `breusch_godfrey_test()`（事後診断）

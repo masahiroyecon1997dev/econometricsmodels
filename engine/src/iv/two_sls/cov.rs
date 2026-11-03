@@ -841,7 +841,7 @@ mod tests {
     /// from_columns`に`has_intercept=false`を渡していたため、`IvInput::x_exog()`が
     /// 焼き込み済みの定数項列まで「傾き係数」としてWald F検定の対象に含めてしまい
     /// （真のq=1のところq=2）、`rank(Ŝ)≤G-1=1`の構造的特異性で必ず失敗していた
-    /// （`without_baked_in_intercept`の導入で修正、`common.rs`参照）。
+    /// （`without_baked_in_intercept`の導入で修正、`common/input.rs`参照）。
     #[test]
     fn fit_succeeds_with_cluster_g2_boundary_when_x_exog_is_empty() {
         let y = vec![5.0, 3.0, 8.0, 6.0, 11.0, 10.0, 15.0, 13.0];

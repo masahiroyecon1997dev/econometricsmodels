@@ -3156,7 +3156,7 @@ pub(crate) fn cluster_cov_params(
     }))
 }
 
-/// テスト共有の補助（`logit/`・`probit.rs`のテストからも使う）。
+/// テスト共有の補助（`logit/`・`probit/`のテストからも使う）。
 #[cfg(test)]
 pub(crate) mod test_support {
     /// 対称行列（`Vec<Vec<f64>>`）の条件数（最大固有値/最小固有値。正定値を仮定）。

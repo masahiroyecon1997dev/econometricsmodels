@@ -2888,7 +2888,7 @@ mod tests {
         assert!((*scores.get(0, 1)).abs() < 1e-12);
     }
 
-    /// probit.rsと同型のバグ回帰ガード: `censored_contribution`の
+    /// `probit/problem.rs`と同型のバグ回帰ガード: `censored_contribution`の
     /// `A(u)=λ(u+λ)`計算で、クランプ済み`λ`と生の（非クランプの）`zeta`を混在させると、
     /// `|zeta|>U_CLAMP`の領域で`h_beta_coef`（`A(u)`）が負になりうる（`A(u)>0`という
     /// 恒等式が数値的に破れる、モジュール冒頭の数式表参照）。左打ち切り（`lower=0.0`）・
@@ -3711,7 +3711,7 @@ mod tests {
 
     /// `censored_regression_input`の`x`（`1..8`）は`TobitScaling`の列標準化が実質no-opに
     /// なるほど自明なスケールではないが、`fit_bfgs_and_lbfgs_agree_with_newton_when_design_
-    /// matrix_has_nontrivial_scale`（`logit/fit.rs`/`probit.rs`）と同じ観点で、桁が大きく離れた
+    /// matrix_has_nontrivial_scale`（`logit/fit.rs`/`probit/fit.rs`）と同じ観点で、桁が大きく離れた
     /// スケール（`std`が1から大きく離れた値）でも標準化・逆標準化の往復が壊れないことを
     /// 明示的に検証する。`x`を100倍しつつ係数を1/100にスケールして同じ潜在変数
     /// `y*=-5+2x+noise`を再現しているため、期待される`β`・`σ`は`censored_regression_input`と
@@ -7015,7 +7015,7 @@ mod tests {
         );
     }
 
-    /// property-basedテスト。`logit/fit.rs`/`probit.rs`の`mod proptests`と同型の設計だが、
+    /// property-basedテスト。`logit/fit.rs`/`probit/fit.rs`の`mod proptests`と同型の設計だが、
     /// Tobitは打ち切り回帰でありLogit/Probitと異なり(a)説明変数の係数`β`に加え誤差項の
     /// 標準偏差`σ`（`s=logσ`でパラメータ化）を持つ、(b)観測ごとの尤度が非打ち切り/左
     /// 打ち切り/右打ち切りの3分岐になる、という構造上の違いがある。そのため
@@ -7069,7 +7069,7 @@ mod tests {
         use proptest::prelude::*;
 
         // 高kはbenchmarkのmany_regressorsシナリオでカバー済みのため小さく保つ
-        // （logit/fit.rs/probit.rsと同じ理由）。
+        // （logit/fit.rs/probit/fit.rsと同じ理由）。
         const MAX_K: usize = 3;
 
         /// `tobit_case_strategy`が生成するタプル: `(n, k, x_cols, beta, sigma, u, keys)`。
@@ -7156,7 +7156,7 @@ mod tests {
                 .collect()
         }
 
-        /// `solver`ごとの`tol`既定値の解決は`logit/fit.rs`/`probit.rs`の`default_options`と
+        /// `solver`ごとの`tol`既定値の解決は`logit/fit.rs`/`probit/fit.rs`の`default_options`と
         /// 同じ（`docs/spec/tobit-spec.md`、Logit/Probitと共有する`run_solver`のため
         /// 同じ意味論）。
         fn default_options(cov_type: CovType, solver: SolverType) -> MleFitOptions {
@@ -7182,7 +7182,7 @@ mod tests {
             ]
         }
 
-        /// `logit/fit.rs`/`probit.rs`と同じ理由で`1e-6`より緩い`1e-4`を使う
+        /// `logit/fit.rs`/`probit/fit.rs`と同じ理由で`1e-6`より緩い`1e-4`を使う
         /// （反復最適化の収束経路が列順序で変わりうるため）。
         fn assert_approx_eq(actual: f64, expected: f64, msg: &str) {
             let tol = 1e-4 * expected.abs().max(1.0);

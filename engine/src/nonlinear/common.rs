@@ -120,7 +120,7 @@ pub enum MleError {
     /// 妥当だが実測`y`との整合性が取れないケース（`lower`指定時に`y < lower`の行がある、
     /// または`upper`指定時に`y > upper`の行がある）。`InvalidBinaryY`と同型の
     /// 「行番号+値」パターンで、`TobitInput::from_columns`が構築する
-    /// （`engine/src/nonlinear/tobit.rs`参照）。
+    /// （`engine/src/nonlinear/tobit.rs`と`tobit/`参照）。
     #[error("{}", self.catalog_message())]
     YOutOfCensoringBounds {
         row: usize,
@@ -429,11 +429,11 @@ pub fn validate_mle_options(
 /// - `cov_type=Cluster`（[`validate_cluster_cov_type`]）: Logit/Probitと同じく傾き係数の数
 ///   `k - usize::from(has_intercept)`を渡す（差異なし）
 /// - Tobit固有の検証として、非打ち切り観測が1件以上あること
-///   （`tobit.rs`の`validate_has_uncensored_observations`）を最後に追加で行う
+///   （`tobit/statistics.rs`の`validate_has_uncensored_observations`）を最後に追加で行う
 ///
 /// Tobit固有の打ち切り境界の検証（境界指定自体の妥当性＝`MleError::CensoringBoundsMissing`等、
 /// `y`と境界の整合性＝`MleError::YOutOfCensoringBounds`）は`fit()`ではなく
-/// `TobitInput::from_columns`で行う（`tobit.rs`冒頭のdocコメント参照）。
+/// `TobitInput::from_columns`で行う（`tobit.rs`のモジュールdocコメント参照）。
 ///
 /// 引数は検証順序に揃えている。`n`（観測数）は`y`から自明に求まる（`y.nrows()`）ため
 /// 引数に取らない。`k`と型が同じ`usize`の引数を並べると呼び出し側で取り違えても
@@ -716,7 +716,7 @@ impl MarginalEffects {
         conf_lower: Vec<f64>,
         conf_upper: Vec<f64>,
     ) -> Self {
-        // 呼び出し元（`tobit.rs`の`marginal_effects_from_tobit_w_s`）の内部契約であり、
+        // 呼び出し元（`tobit/marginal_effects.rs`の`marginal_effects_from_tobit_w_s`）の内部契約であり、
         // 実データに起因する`ValidationError`とは性質が異なるため`debug_assert_eq!`で
         // 検証する（`TobitInput::from_columns`の`x_columns.len() == x_names.len()`と
         // 同じ方針）。
@@ -1192,7 +1192,7 @@ fn line_search_step_satisfies_wolfe(
 }
 
 /// [`run_solver`]に渡す`problem`をラップし、`CostFunction`/`Gradient`/`Hessian`の呼び出し
-/// 回数に総枠（バジェット）を設ける（`nonlinear::tobit::tests::proptests`が
+/// 回数に総枠（バジェット）を設ける（`nonlinear::tobit::fit::tests::proptests`が
 /// devプロファイルで異常に長時間実行される問題の根本対応）。
 ///
 /// **背景（当時の状況）**: `SolverType::Bfgs`（自前実装`FaerBfgs`、[`FaerBfgs::next_iter`]）・

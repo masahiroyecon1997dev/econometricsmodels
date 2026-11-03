@@ -1,6 +1,6 @@
 # Tobit 仕様書
 
-Tobit（打ち切り正規回帰、最尤推定）の確定済み仕様。`engine/src/nonlinear/tobit.rs`（共通基盤は
+Tobit（打ち切り正規回帰、最尤推定）の確定済み仕様。`engine/src/nonlinear/tobit.rs`（ファサード）と`tobit/`（入力・目的関数・標準化・限界効果と予測・`TobitFitted`・`fit`。共通基盤は
 `engine/src/nonlinear/common.rs`）・`engine_pybind/src/nonlinear/tobit/`・
 `python_package/econometricsmodels/nonlinear/tobit.py`として実装済み。nonlinear系統共通の設計判断
 （ソルバー実行の共通化、`cov_type`共通行列演算、検定分布＝標準正規分布、標準化の基本方針等）は
@@ -112,7 +112,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   あったため。`ols_initial_params`のQRベースの階数検定が`solver`に関わらず最初に走るため、完全な
   多重共線性は最適化前に`SingularDesignMatrix`（`ComputationError`）で検出される
   （`solver`をparametrizeする必要が無い）。
-- **`TobitScaling`（`tobit.rs`の標準化。`x`側は共有の`ColumnScale`、`y`のスケーリングと`logσ`の扱いがTobit固有）**: Logit/Probitが
+- **`TobitScaling`（`tobit/scaling.rs`の標準化。`x`側は共有の`ColumnScale`、`y`のスケーリングと`logσ`の扱いがTobit固有）**: Logit/Probitが
   使う`common.rs`の`standardize_columns`は`x`列だけを標準化し`y`をスケーリング
   しないため、`y`のスケールが大きいデータ（例: Wooldridge mroz `hours`、`σ̂≈1122`）で健全なMLE解
   でも標準化係数のノルムが大きくなり、勾配ノルム基準の収束判定や（当時あった標準化パラメータの
@@ -166,7 +166,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
     正で最小約76）、この`SingularHessian`は`lbfgs`だけの挙動だった。今は全solverが未収束の結果を
     返す。初期点のHessianが正定値でない場合は`lbfgs`も従来の`γI`初期化に戻るので、そこでは
     凹でない領域に入る可能性が残る。
-    Rust（`tobit.rs`の`fit_returns_unconverged_result_for_every_solver_and_cov_type_at_truncated_point`）
+    Rust（`tobit/fit.rs`の`fit_returns_unconverged_result_for_every_solver_and_cov_type_at_truncated_point`）
     とPython（`test_tobit_validation.py`の`test_truncated_point_returns_unconverged_result_for_every_solver`）
     で同じ入力に対して固定している。
   - **`bfgs`/`lbfgs`は`tol`を観測数`n`で正規化した基準を使う（実装済み）**:
@@ -175,7 +175,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
     使う。statsmodelsが`n`で正規化してから最適化するのに倣ったもの。詳細・実測値・小標本での
     精度検証テストへの影響は[`logit-spec.md`](./logit-spec.md)3.2節参照。
   - **`bfgs`/`lbfgs`のline searchの評価回数バジェット（`BudgetedProblem`）**も
-    `run_solver`共通で、Tobitも同様に保護される（本件は実際に`nonlinear::tobit::tests::
+    `run_solver`共通で、Tobitも同様に保護される（本件は実際に`nonlinear::tobit::fit::tests::
     proptests`で発覚。devビルドで80分超のCPU時間を消費し続けるケースを実測で確認済み）。
     詳細は[`logit-spec.md`](./logit-spec.md)3.2節参照。
 - **Tobitの「真の」分離は`σ→0`退化として現れる**（Logit/Probitの「係数が±∞へ発散」とは異なる）。
@@ -212,7 +212,7 @@ Tobit固有の差分:
 
 - `log_likelihood`はTobit固有（打ち切り状態で分岐する`Contribution::log_lik`の総和、元のスケールで
   評価）。`aic = -2·ℓ + 2(k+1)`、`bic = -2·ℓ + log(n)·(k+1)`（`σ`を含む総パラメータ数）。
-- **モデル全体の有意性検定はWald検定**（`wald_chi2_test`、Tobit専用で`tobit.rs`内に閉じる）。
+- **モデル全体の有意性検定はWald検定**（`wald_chi2_test`、Tobit専用で`tobit/statistics.rs`内に閉じる）。
   OLSの`wald_f_test`と同型の構成（`ensure_well_conditioned_symmetric_matrix`による悪条件検出→
   Cholesky分解→二次形式）だが、`F`分布ではなく**標準正規分布に基づくカイ二乗分布**を使う
   （自由度で正規化する`F = W/df_model`の変換を行わない）。帰無仮説は「切片以外の係数が同時にゼロ」、
@@ -258,7 +258,7 @@ Tobit固有の差分:
 - 勾配: `∂ρ1/∂z_a = Pa(ρ1 - z_a)`・`∂ρ1/∂z_b = Pb(z_b - ρ1)`・`∂ρ2/∂z_a = Pa(1 - z_a² + ρ2)`・
   `∂ρ2/∂z_b = Pb(z_b² - 1 - ρ2)`から`w_a = ∂ρ2/∂z_a - 2ρ1∂ρ1/∂z_a`、`w_b`も同様に得て、
   `s_beta = -(w_a + w_b)/σ · x`、`s_sigma = -(z_a·w_a + z_b·w_b)/σ`。
-- **数値安定性**（実装は`engine/src/nonlinear/tobit.rs`の`truncation_pdf_ratios`・`uncensored_w_and_s`）:
+- **数値安定性**（実装は`engine/src/nonlinear/tobit/mills.rs`の`truncation_pdf_ratios`・`tobit/target.rs`の`uncensored_w_and_s`）:
   `W`で割るため、`μ`が境界から遠い観測（重い打ち切りの標本や外れた`x`で`z`が数十〜）で`W→0`になる。
   既存の3 targetは`W`で割らないので、この問題は新target固有。(1)`Pa`・`Pb`は`W`を作らずに直接計算する
   （片側は逆ミルズ比`λ(a)=φ(a)/Φ(-a)`、`a>=3`は連分数`a+1/(a+2/(a+3/(a+…)))`、`a<3`は`Φ(-a)`を

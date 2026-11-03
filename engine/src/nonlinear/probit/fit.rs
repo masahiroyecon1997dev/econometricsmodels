@@ -1485,7 +1485,7 @@ mod tests {
     ///
     /// 旧5テストが検証していた「`fit()`の各`cov_type`分岐での`SingularHessian`/
     /// `SingularOpgMatrix`の`?`伝播」経路のカバレッジは、`common.rs`の関数レベルテストと
-    /// `tobit.rs`の`fit()`レベルテスト（`cov_params`計算は3手法で同一コード）が担う
+    /// `tobit/fit.rs`の`fit()`レベルテスト（`cov_params`計算は3手法で同一コード）が担う
     /// （`LogitEstimator`の対応するテストのdocコメント参照）。
     ///
     /// `Cluster`は`G=3 > q=2`にして`fit()`冒頭の`InsufficientClustersForInference`

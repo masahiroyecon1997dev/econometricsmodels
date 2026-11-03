@@ -167,7 +167,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   経路でも内側`Executor`に反復上限が設定されておらず（argmin既定`u64::MAX`）、ステップ幅の上限
   （`stpmax`）も未設定（既定`f64::INFINITY`）。探索方向・勾配が退化しline search内部の収束判定が
   一度も発火しない入力に嵌ると、この内側ループは理論上終了しない（devビルドで80分超のCPU時間を
-  消費し続けるケースを実測で確認、`nonlinear::tobit::tests::proptests`で発覚）。対策として
+  消費し続けるケースを実測で確認、`nonlinear::tobit::fit::tests::proptests`で発覚）。対策として
   `run_solver`は`problem`を`BudgetedProblem`（`common.rs`）でラップし、目的関数・勾配の評価回数に
   総枠（`(max_iter + 1) * 2000`。`+1`は`Executor::init()`の初回評価分の枠を
   `max_iter=0`でも確保するため）を設ける。枠を使い切ると`MleError::EvaluationBudgetExceeded { budget }`

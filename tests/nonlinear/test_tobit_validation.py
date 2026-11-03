@@ -882,7 +882,7 @@ def test_quasi_separation_tiny_noise_converges_to_true_values():
     することを固定する（`y* = 100·x1 + 0.5·x2 + N(0, 0.001)`に対し
     `x1≈99.9999`, `x2≈0.4998`, `σ≈0.00094`）。
 
-    回帰ガード: `censored_contribution`（`engine/src/nonlinear/tobit.rs`）の
+    回帰ガード: `censored_contribution`（`engine/src/nonlinear/tobit/problem.rs`）の
     Hessian項`A(u)=λ(u+λ)`の計算でクランプ済み`λ`と生の`zeta`を混在させると、
     `|zeta|>U_CLAMP`の領域で`A(u)`が負になってHessianの正定値性が崩れ、
     Newtonが`max_iter`まで収束しない（Probitの`ProbitProblem`と同型）。

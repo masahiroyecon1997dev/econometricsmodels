@@ -1371,7 +1371,7 @@ mod tests {
     /// もう通らない。この伝播経路のカバレッジは (1) `common.rs`の関数レベルテスト
     /// （`observed_information_cov_params_returns_singular_hessian_error_*` /
     /// `opg_cov_params_*` / `sandwich_cov_params_*` / `cluster_cov_params_*`）と、
-    /// (2) 共有インフラを`fit()`レベルで踏む`tobit.rs`の
+    /// (2) 共有インフラを`fit()`レベルで踏む`tobit/fit.rs`の
     /// `fit_returns_singular_hessian_error_when_cov_params_computation_fails_at_
     /// truncated_point_with_hc0_and_hc1` / `..._with_cluster` が担う（`cov_params`計算は
     /// Logit/Probit/Tobitで同一コード）。`?`自体は分岐ロジックを持たないため

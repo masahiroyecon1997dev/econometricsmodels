@@ -418,8 +418,18 @@ C統計量は事後診断のメソッド、`first_stage()`は`Computed`変種、
     旧コードで9件すべて落ちることを確認済み。
   - `rust-reviewer`・正確性レビュー・`/code-review`の指摘は対応済み（見送り: `df_model==0`の分岐を共有側へ寄せる案
     は OLS・FE の挙動に触れるため、別の機会）。結果は#612・#628にコメント済み。
-- **B（未着手）**: 行列を受け取る関数の切り出し（2SLSの点推定、Sargan（`σ̂²`の分母を引数に）、部分F
-  （`n_absorbed`付き）、Wu-Hausmanの列の組み立て）。
+- **B（完了。コミット済み）**: `engine/src/shared/instrumental_variables.rs`に行列を受け取る関数を切り出した。
+  - `two_sls_point_estimate`（`X`・`X̂`・`y`→係数・`(X̂'X̂)⁻¹`・構造残差・SSR）、`sargan_test`（`σ̂²`の分母は引数）、
+    `partial_f_statistic`（制限なしモデルのSSRと回帰変数の数を受け取り、`n_absorbed`を自由度から引く。
+    #628の本文は両方の回帰を関数の中で行う形だったが、第一段階で求めたSSRを再利用する形にした）、
+    `wu_hausman_columns`（拡張回帰の列と名前の組み立てだけ）。
+  - 2SLSは`second_stage`（`OlsEstimator`）フィールドをやめ、`params`・`param_names`・`dep_var_name`を直接持つ。
+    `SecondStageFailed`の発生条件と順序は`validate_second_stage`＋`from_rank_deficient`で維持した
+    （回帰変数の有無→信頼水準→特異）。`second_stage`を直接見ていたテスト4か所は書き換えた。
+  - 検証: 176ケースがビット一致（弱操作変数Fの値と自由度を追加）。engineテスト・pytest全件パス。
+    n=1,000,000・k=5のIV(hc1)は1.06秒→0.92秒（第二段階の不要な標準誤差・F検定・適合度の計算が消えた）。
+    FWL不変性（ダミー入り`n_absorbed=0`＝within＋`n_absorbed`）を単体テストで固定した。
+  - 残り: Wu-Hausmanの回帰・Waldは呼び出し側の回帰エンジンのまま（FEIVでは`FeEstimator`）。
 - **GMMコアの継ぎ目（未着手）**: サンドイッチの代数を`Ω̂`を受け取る形に分ける（IVはclassical/HC/HAC/
   クラスター、FE-GMMは自前の`Ω̂`）。`hansen_j_test`は自由度のスカラーを受け取る（`IvInput`を外す）。
   `fit()`の流れは分けたまま。

@@ -1,10 +1,8 @@
 //! Sargan過剰識別検定。
 
 use crate::iv::common::{IvError, IvInput, hcat};
-use crate::shared::error::CommonError;
-use faer::prelude::Solve;
-use faer::{Mat, Side};
-use statrs::distribution::{ChiSquared, ContinuousCDF};
+use crate::shared::instrumental_variables;
+use faer::Mat;
 
 /// [`sargan_test`]の戻り値。
 pub(super) struct SarganTest {
@@ -26,7 +24,8 @@ pub(super) struct SarganTest {
 /// 等分散前提の検定であり、不均一分散に頑健な版が欲しい場合はGMM＋Hansen J検定
 /// （`gmm/hansen_j.rs`）を使うのが標準的な使い分けのため、`engine/src/iv/CLAUDE.md`参照）。
 ///
-/// `Z = [x_exog, instruments]`は`OlsInput::from_columns`を経由せず直接行列代数
+/// 計算は共有の`shared::instrumental_variables::sargan_test`で、`σ̂²`の分母（`n`）と自由度を
+/// ここで決めて渡す。`Z = [x_exog, instruments]`は`OlsInput::from_columns`を経由せず行列代数
 /// （`Z'Z`等）で使うため、定数項の扱いは通常の回帰変数と同じで良く、定数項込みの
 /// `x_exog`をそのまま使う。`Z'Z`は第一段階回帰（同じ列を設計行列とする`OlsEstimator::fit`）が
 /// `col_piv_qr`で既にfull column rankを検証済みのため、ここでの特異性は理論上到達不能
@@ -39,27 +38,13 @@ pub(super) fn sargan_test(
     if input.k_instruments() == input.k_endog() {
         return Ok(None);
     }
-    let n = input.nobs();
     let df = input.k_instruments() - input.k_endog();
     let z = hcat(input.x_exog(), input.instruments());
-    let l = z.ncols();
-    let ztz = z.transpose() * &z;
-    let zte = z.transpose() * residuals;
-    // 第一段階が同じ`Z'Z`を既に分解済みのため、ここで失敗するのは実装の誤り。
-    let llt_ztz = ztz
-        .llt(Side::Lower)
-        .map_err(|_| CommonError::internal("Z'Z could not be factorized in the Sargan test"))?;
-    let ztz_inv_zte = llt_ztz.solve(&zte);
-    let quad: f64 = (0..l)
-        .map(|i| (*zte.get(i, 0)) * (*ztz_inv_zte.get(i, 0)))
-        .sum();
-    let sigma2 = ssr / (n as f64);
-    let statistic = quad / sigma2;
-    let chi2 = ChiSquared::new(df as f64).map_err(|e| CommonError::internal(e.to_string()))?;
-    let p_value = chi2.sf(statistic);
+    let sigma2 = ssr / (input.nobs() as f64);
+    let test = instrumental_variables::sargan_test(&z, residuals, sigma2, df)?;
     Ok(Some(SarganTest {
-        statistic,
-        p_value,
+        statistic: test.statistic,
+        p_value: test.p_value,
         df,
     }))
 }
@@ -70,6 +55,8 @@ mod tests {
     use crate::iv::two_sls::TwoSlsEstimator;
     use crate::iv::two_sls::test_support::*;
     use crate::linear::ols::CovType;
+    use faer::Side;
+    use faer::prelude::Solve;
 
     /// 丁度識別（`len(instruments) == len(x_endog)`）ではSargan過剰識別検定の自由度が0の
     /// ため`None`になる（`docs/spec/iv-spec.md`1.2節・3.5節）。

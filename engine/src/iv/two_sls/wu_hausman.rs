@@ -4,6 +4,7 @@ use crate::iv::common::{IvError, IvInput, mat_column_to_vec, mat_to_columns};
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use crate::shared::error::CommonError;
+use crate::shared::instrumental_variables::wu_hausman_columns;
 
 /// [`wu_hausman_test`]の戻り値。
 pub(super) struct WuHausmanTest {
@@ -62,17 +63,16 @@ pub(super) fn wu_hausman_test(
         return Ok(None);
     }
 
-    let mut hausman_columns: Vec<Vec<f64>> = x_exog_bare.to_vec();
-    hausman_columns.extend(mat_to_columns(input.x_endog()));
-    for (_, estimator) in first_stage {
-        hausman_columns.push(mat_column_to_vec(estimator.residuals(), 0));
-    }
-    let mut hausman_names: Vec<String> = x_exog_names_bare.to_vec();
-    hausman_names.extend(input.x_endog_names().iter().cloned());
-    hausman_names.extend(
-        first_stage
-            .iter()
-            .map(|(endog_name, _)| format!("{endog_name}_first_stage_resid")),
+    let first_stage_residuals: Vec<Vec<f64>> = first_stage
+        .iter()
+        .map(|(_, estimator)| mat_column_to_vec(estimator.residuals(), 0))
+        .collect();
+    let (hausman_columns, hausman_names) = wu_hausman_columns(
+        x_exog_bare,
+        x_exog_names_bare,
+        mat_to_columns(input.x_endog()),
+        input.x_endog_names(),
+        first_stage_residuals,
     );
 
     let hausman_result: Result<WuHausmanTest, LeastSquaresError> = (|| {

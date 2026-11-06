@@ -67,7 +67,7 @@ pub enum IvError {
     #[error("{}", self.catalog_message())]
     InsufficientObservationsForFirstStage { n: usize, l: usize },
 
-    /// 2SLSの第二段階回帰（`y ~ x_exog + x̂_endog`）が`OlsEstimator::fit`で失敗した。
+    /// 2SLSの第二段階回帰（`y ~ x_exog + x̂_endog`）が失敗した（回帰変数が無い・`confidence_level`が範囲外・設計行列が特異）。
     #[error("{}", self.catalog_message())]
     SecondStageFailed {
         #[source]

@@ -128,7 +128,7 @@ fn fit_returns_outcome_constant_before_the_first_stage() {
 #[test]
 fn fit_returns_second_stage_failed_when_confidence_level_is_invalid_and_x_endog_is_empty() {
     // `x_endog=[]`だと第一段階ループが一度も回らないため、`confidence_level`の
-    // 範囲チェックは第二段階の`OlsEstimator::fit`経由でのみ働く（`two_sls.rs`の
+    // 範囲チェックは第二段階の回帰の前の検査（`validate_second_stage`）でのみ働く（`two_sls.rs`の
     // モジュールdoc参照）。
     let y = vec![2.1, 3.8, 6.3, 7.9, 10.2];
     let x_exog = vec![vec![1.0, 2.0, 3.0, 4.0, 5.0]];
@@ -146,6 +146,70 @@ fn fit_returns_second_stage_failed_when_confidence_level_is_invalid_and_x_endog_
     .unwrap();
 
     let result = TwoSlsEstimator::fit(input, CovType::Classical, 1.5);
+    assert_eq!(
+        result.unwrap_err(),
+        IvError::SecondStageFailed {
+            source: crate::linear::common::LeastSquaresError::Common(
+                CommonError::InvalidConfidenceLevel {
+                    confidence_level: 1.5
+                }
+            ),
+        }
+    );
+}
+
+#[test]
+fn fit_returns_second_stage_failed_when_there_are_no_regressors() {
+    // `x_exog=[]`・`x_endog=[]`・定数項なしだと第二段階の設計行列が0列になる。第二段階は
+    // `OlsEstimator`を経由しないので、`validate_second_stage`が`NoRegressors`で止める。
+    let y = vec![2.1, 3.8, 6.3, 7.9, 10.2];
+    let input = IvInput::from_columns(
+        &y,
+        &[],
+        vec![],
+        &[],
+        vec![],
+        &[],
+        vec![],
+        false,
+        "y".to_string(),
+    )
+    .unwrap();
+
+    let result = TwoSlsEstimator::fit(input, CovType::Classical, 0.95);
+
+    assert_eq!(
+        result.unwrap_err(),
+        IvError::SecondStageFailed {
+            source: crate::linear::common::LeastSquaresError::Common(CommonError::NoRegressors {
+                n: 5
+            }),
+        }
+    );
+}
+
+#[test]
+fn fit_reports_an_invalid_confidence_level_before_a_singular_second_stage_design() {
+    // 同じ列を2つ持つ`x_exog`（設計行列が特異）と範囲外の`confidence_level`が重なるとき、
+    // 第二段階の検査の順（回帰変数の有無→`confidence_level`→特異性）どおりに
+    // `confidence_level`のエラーが先に出る。
+    let y = vec![2.1, 3.8, 6.3, 7.9, 10.2];
+    let x = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+    let input = IvInput::from_columns(
+        &y,
+        &[x.clone(), x],
+        vec!["x1".to_string(), "x2".to_string()],
+        &[],
+        vec![],
+        &[],
+        vec![],
+        true,
+        "y".to_string(),
+    )
+    .unwrap();
+
+    let result = TwoSlsEstimator::fit(input, CovType::Classical, 1.5);
+
     assert_eq!(
         result.unwrap_err(),
         IvError::SecondStageFailed {

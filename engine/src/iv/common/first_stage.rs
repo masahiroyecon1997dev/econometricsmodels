@@ -3,6 +3,8 @@
 use super::error::IvError;
 use super::input::{IvInput, mat_column_to_vec, mat_to_columns, without_baked_in_intercept};
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
+use crate::shared::instrumental_variables;
+use crate::shared::least_squares::residual_sum_of_squares;
 
 /// [`compute_first_stage`]の戻り値: 内生変数ごとの第一段階回帰（`x_endog_names`と同じ順序）、
 /// 弱操作変数診断（部分F統計量、同じく`x_endog_names`と同じ順序）。
@@ -79,16 +81,7 @@ pub fn compute_first_stage(
 
     let mut weak_instrument_f_statistics = Vec::with_capacity(first_stage.len());
     for (j, (endog_name, unrestricted)) in first_stage.iter().enumerate() {
-        let y_endog = mat_column_to_vec(input.x_endog(), j);
-        let f_stat = partial_f_statistic(
-            unrestricted,
-            x_exog_bare,
-            x_exog_names_bare,
-            input.has_intercept(),
-            &y_endog,
-            endog_name,
-            input.k_instruments(),
-        )?;
+        let f_stat = partial_f_statistic(input, unrestricted, j)?;
         weak_instrument_f_statistics.push((endog_name.clone(), f_stat));
     }
 
@@ -102,83 +95,39 @@ pub fn compute_first_stage(
 /// （`x_endog[j] ~ x_exog + instruments`、`unrestricted`＝`compute_first_stage`が構築した
 /// `OlsEstimator`そのもの）の残差平方和、`SSR_r`は制限モデル（`x_endog[j] ~ x_exog`、
 /// `instruments`を除く）の残差平方和、`q`は除外操作変数の数（`instruments`のみ、`x_exog`は
-/// 含まない、`iv-spec.md`1.1節の定義と一致）。
+/// 含まない、`iv-spec.md`1.1節の定義と一致）。計算は共有の
+/// `shared::instrumental_variables::partial_f_statistic`で、IVは吸収したパラメータ数を`0`で渡す。
 ///
 /// **`cov_type`には依存しない**（呼び出し元が指定した`cov_type`によらず常に等分散前提の
 /// F検定を使う）。Stock-Yogoの臨界値表自体が等分散前提の古典的F統計量向けにキャリブレー
 /// ションされているため（v1では臨界値照合自体は行わないが、意味合いはこの統計量に
 /// 引き継がれる）、この慣行に合わせる。
-#[allow(clippy::too_many_arguments)]
+///
+/// 制限モデルの設計行列は`input.x_exog()`（定数項込み）で、`x_exog=[]`かつ定数項なしなら
+/// 回帰変数が0個になる。この退化ケースは共有関数が「残差が`y`そのもの」として扱う。
+/// 制限モデルの設計行列は制限なしモデル（`OlsEstimator::fit`が`col_piv_qr`で既にfull column
+/// rankを検証済み）の列の真部分集合のため、フルランクで、共有関数の`Internal`エラーは
+/// 理論上到達不能（`xtx_inverse`と同じ防御的`Result`化）。万一到達したときは、従来どおり
+/// 内生変数名つきの`FirstStageFailed`にする。
 fn partial_f_statistic(
+    input: &IvInput,
     unrestricted: &OlsEstimator,
-    x_exog_columns: &[Vec<f64>],
-    x_exog_names: &[String],
-    has_intercept: bool,
-    y_endog: &[f64],
-    endog_name: &str,
-    q: usize,
+    endog_index: usize,
 ) -> Result<f64, IvError> {
-    let ssr_u: f64 = {
-        let resid = unrestricted.residuals();
-        (0..resid.nrows()).map(|i| (*resid.get(i, 0)).powi(2)).sum()
-    };
-    let n = unrestricted.input().nobs();
-    let k_u = unrestricted.input().k();
-    let df_u = n - k_u;
-
-    // `x_exog_columns`/`x_exog_names`は`without_baked_in_intercept`で定数項列を
-    // 取り除いた「素の」x_exog（`compute_first_stage`参照）のため、退化ケース
-    // （制限モデルに回帰変数が1つも無い）は「x_exogが空」だけでなく「定数項も無い」
-    // ことを合わせて判定する必要がある（`x_exog=[]`でも`has_intercept=true`なら
-    // 「定数項のみ」の正当な制限モデルになる）。
-    let ssr_r: f64 = if x_exog_columns.is_empty() && !has_intercept {
-        // 制限モデルに回帰変数が1つも無い（x_exog=[]かつhas_intercept=false）場合、
-        // 「常に0を予測する」モデルのSSRをy_endog自体の二乗和として直接計算する
-        // （OlsEstimatorは回帰変数0個の入力を受け付けない、CommonError::NoRegressors
-        // になるため、この退化ケースだけは特別扱いする）。
-        y_endog.iter().map(|v| v.powi(2)).sum()
-    } else {
-        // `x_exog_columns`（定数項を除いた素のx_exog）に`OlsInput::from_columns`が
-        // `has_intercept`に応じて定数項列を追加したものは、`unrestricted`の設計行列
-        // （`x_exog ++ instruments`に同じ`has_intercept`で定数項を追加したもの、
-        // `OlsEstimator::fit`がcol_piv_qrで既にfull column rankを検証済み）の列の
-        // 真部分集合のため、この制限モデルの設計行列も必然的にfull column rankになる
-        // （full column rankな行列から任意の列部分集合を取っても線形独立性は保たれる）。
-        // よってここで`OlsEstimator::fit`が`SingularMatrix`等で失敗することは理論上ない。
-        // `CovType::Classical`・`confidence_level=0.95`は残差（SSR）の計算に使わない
-        // （点推定・残差はcov_type/confidence_levelに依存しないため）ので、呼び出し元が
-        // 指定した値と一致させる必要はなく、固定値で足りる。
-        //
-        // `y_endog`・`x_exog_columns`はどちらも同じ`IvInput`（同じnで構築済み）から
-        // 取り出しているため、ここで`DimensionMismatch`が実際に発生することは理論上ない
-        // （第一段階ループの`OlsInput::from_columns`呼び出しと同じ理由）。
-        //
-        // エラー変換先を専用の`IvError`バリアントに分けず`FirstStageFailed`を再利用する
-        // 理由: 上記の通りこの`OlsEstimator::fit`呼び出しは（フルランク保証・次元一致の
-        // 両方から）理論上到達不能であり、実際に到達した場合の文言の精度より
-        // バリアント数を増やさないことを優先した（`xtx_inverse`と同じ「理論上到達不能な
-        // 防御的Result化」の扱い）。
-        let restricted_input = OlsInput::from_columns(
-            y_endog,
-            x_exog_columns,
-            x_exog_names.to_vec(),
-            has_intercept,
-            endog_name.to_string(),
-        )
-        .map_err(|source| IvError::FirstStageFailed {
-            endog_name: endog_name.to_string(),
-            source,
-        })?;
-        let restricted = OlsEstimator::fit_auxiliary(restricted_input, CovType::Classical, 0.95)
-            .map_err(|source| IvError::FirstStageFailed {
-                endog_name: endog_name.to_string(),
-                source,
-            })?;
-        let resid = restricted.residuals();
-        (0..resid.nrows()).map(|i| (*resid.get(i, 0)).powi(2)).sum()
-    };
-
-    Ok(((ssr_r - ssr_u) / (q as f64)) / (ssr_u / (df_u as f64)))
+    let y_endog = input.x_endog().subcols(endog_index, 1).to_owned();
+    let ssr_u = residual_sum_of_squares(unrestricted.residuals());
+    instrumental_variables::partial_f_statistic(
+        &y_endog,
+        input.x_exog(),
+        ssr_u,
+        unrestricted.input().k(),
+        input.k_instruments(),
+        0,
+    )
+    .map_err(|source| IvError::FirstStageFailed {
+        endog_name: input.x_endog_names()[endog_index].clone(),
+        source: source.into(),
+    })
 }
 
 #[cfg(test)]

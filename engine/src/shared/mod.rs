@@ -16,6 +16,7 @@ pub(crate) mod covariance;
 pub(crate) mod design_matrix;
 pub(crate) mod goodness_of_fit;
 pub(crate) mod inference;
+pub(crate) mod instrumental_variables;
 pub(crate) mod least_squares;
 pub(crate) mod linear_algebra;
 pub(crate) mod linear_program;

@@ -11,7 +11,7 @@ use faer::Mat;
 fn fit_does_not_judge_the_second_stage_regression_for_a_perfect_fit() {
     // y = 1 + 2*x̂（x̂は第一段階の当てはめ値）は、第二段階の回帰`y ~ const + x̂`が厳密に成り立つ
     // が、構造残差`y - 1 - 2*x_endog = -2v`は0ではない。標準誤差の基準は構造残差なので、
-    // 第二段階の回帰は完全フィットの判定をしない（`fit_auxiliary`）。
+    // 第二段階の回帰は完全フィットの判定をしない。
     let base = TwoSlsEstimator::fit(just_identified_input(), CovType::Classical, 0.95).unwrap();
     let v = base.first_stage_estimators()[0].1.residuals();
     let (_, x_endog, z) = just_identified_data();
@@ -281,10 +281,7 @@ fn fit_computes_weak_instrument_f_statistic_when_x_exog_is_empty_and_no_intercep
 /// 呼び出し元が指定した`cov_type`は第一段階（`OlsEstimator`委譲）・第二段階
 /// （`TwoSlsEstimator`自身が独立に計算する正しいSE）の両方に反映される
 /// （`two_sls.rs`のモジュールdoc「第一段階・第二段階での`cov_type`/
-/// `confidence_level`の扱い」参照）。内部実装専用の`second_stage`フィールド自身の
-/// 委譲フィットだけは常に`Classical`のまま（`two_sls.rs`のモジュールdoc
-/// 「`second_stage`フィールドの位置づけ」参照）。`second_stage`は非公開フィールド
-/// だが、このテストは同一モジュールの子モジュールのため直接参照できる。
+/// `confidence_level`の扱い」参照）。
 #[test]
 fn fit_uses_caller_provided_cov_type_for_first_stage_and_second_stage_se() {
     let y = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
@@ -312,5 +309,4 @@ fn fit_uses_caller_provided_cov_type_for_first_stage_and_second_stage_se() {
         &CovType::Hc0
     );
     assert_eq!(estimator.cov_type(), &CovType::Hc0);
-    assert_eq!(estimator.second_stage.cov_type(), &CovType::Classical);
 }

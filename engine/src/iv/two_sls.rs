@@ -6,14 +6,16 @@
 //! 予測値`x̂_endog[j]`を得る（`instruments`は除外操作変数のみ、`x_exog ++ instruments`が
 //! 「全操作変数」、`docs/spec/iv-spec.md`1.1節）。
 //!
-//! 第二段階: `y ~ x_exog + x̂_endog`をOLS推定する。この係数が2SLS推定量
+//! 第二段階: `y ~ x_exog + x̂_endog`を最小二乗で推定する。この係数が2SLS推定量
 //! （`β̂_2SLS = (X'PzX)⁻¹X'Pzy`、`Pz`は全操作変数`Z`への射影行列）と数値的に一致する
-//! （教科書的な2SLSの2段階回帰による構成）。
+//! （教科書的な2SLSの2段階回帰による構成）。点推定は行列を受け取る共有関数
+//! （`shared::instrumental_variables::two_sls_point_estimate`）で求め、`OlsEstimator`は使わない
+//! （第二段階のナイーブな標準誤差・F検定・適合度は不要で、計算しない）。
 //!
 //! ## 標準誤差・適合度統計量
 //!
-//! 第二段階の設計行列に`x̂_endog`（推定値）を使う都合上、**第二段階の`OlsEstimator`が
-//! ナイーブに計算する標準誤差・t値・p値・信頼区間は2SLSとして正しくない**（教科書的に
+//! 第二段階の設計行列に`x̂_endog`（推定値）を使う都合上、**第二段階の回帰をそのままOLSとして
+//! 扱って得る標準誤差・t値・p値・信頼区間は2SLSとして正しくない**（教科書的に
 //! 有名な罠。`X = [x_exog, x_endog]`を実際の（推定値ではない）内生変数、
 //! `X̂ = Pz X = [x_exog, x̂_endog]`を第二段階の設計行列とすると、2SLSの正しい分散は
 //! `(X'PzX)⁻¹X'Pz Ω Pz X(X'PzX)⁻¹ = (X̂'X̂)⁻¹X̂'ΩX̂(X̂'X̂)⁻¹`というサンドイッチ型で、
@@ -23,8 +25,7 @@
 //! `e = y - Xβ̂`（実際のXを使う。第二段階回帰自身の残差`y - X̂β̂`ではない）を使えば、
 //! OLSのclassical/HC0-3/cluster/hacサンドイッチ公式とまったく同じ形**になる
 //! （`Pz`が射影行列＝冪等・対称であることから代数的に導出できる、Wooldridge (2010) 5章）。
-//! そのため本モジュールは、第二段階の`OlsEstimator`（`params()`のみ利用、後述）とは別に、
-//! この`(X̂, e)`で共有のサンドイッチ計算（`shared::covariance`の`classical_cov_params`/
+//! そのため本モジュールは、この`(X̂, e)`で共有のサンドイッチ計算（`shared::covariance`の`classical_cov_params`/
 //! `hc_cov_params`/`hac_cov_params`/`cluster_cov_params`）を呼ぶ（`two_sls/cov.rs`の
 //! `covariance_stage`）。OLS本体（`engine::linear::ols`）の調整には寄せず、スコアに依存する部分
 //! （HCのレバレッジと小標本補正の分母）は`X̂`と`n-k`で決め、中立な計算（外積の和・カーネル和・
@@ -35,29 +36,17 @@
 //! （弱操作変数診断等で必要になる）SE・F統計量も含めてそのまま公開してよい
 //! （`first_stage_estimators()`、`first_stage()`実装で利用済み）。
 //!
-//! ## `second_stage`フィールドの位置づけ（変わらず内部実装専用）
-//!
-//! `second_stage: OlsEstimator`は`SECOND_STAGE_COV_TYPE`（`two_sls/fit.rs`、`Classical`固定）で内部的に
-//! フィットするが、これは**係数`β̂`と設計行列`X̂`（`input().x()`）を得るためだけ**に使う
-//! （`Cluster`のようにクラスター列や十分なクラスター数を追加で要求せず、`β̂`計算に
-//! 無関係な失敗経路を作らないため）。`second_stage`自身の`std_errors()`/`test_stats()`等
-//! （ナイーブな第二段階OLSのSEで2SLSとして誤り）は`TwoSlsEstimator`の外部に公開しない。
-//! 呼び出し元が指定した`cov_type`を反映した正しいSE・F統計量等は、`TwoSlsEstimator`
-//! 自身のトップレベルフィールド（`std_errors()`/`test_stats()`/`wald_statistic()`等）として
-//! 独立に計算・保持する。
-//!
 //! ## 第一段階・第二段階での`cov_type`/`confidence_level`の扱い
 //!
 //! 点推定（`params()`）の値は`cov_type`/`confidence_level`のどちらにも依存しない
 //! （`cov_type`は分散の推定方法の選択、`confidence_level`は信頼区間の幅にのみ影響する）。
 //! **第一段階・第二段階のいずれにも**、`fit()`の呼び出し元から渡された`cov_type`/
 //! `confidence_level`をそのまま使う（第一段階は文字通り`OlsEstimator::fit`に渡す。
-//! 第二段階は上記のサンドイッチ計算に渡す。`second_stage`フィールド自身の
-//! 内部委譲フィットだけは`SECOND_STAGE_COV_TYPE`固定のまま、前節参照）。
-//! `confidence_level`の`(0, 1)`範囲チェックは、第二段階の内部委譲フィット
-//! （`OlsEstimator::fit(second_stage_input, ...)`）に一度だけ委ねる（
-//! サンドイッチ計算側では検証しない。`x_endog=[]`の退化ケースでは第一段階ループが
-//! 一度も回らないため、この検証が範囲外エラーを検知する唯一の経路になる）。
+//! 第二段階は上記のサンドイッチ計算に渡す）。
+//! `confidence_level`の`(0, 1)`範囲チェックは、第二段階の回帰の前（`two_sls/fit.rs`の
+//! `validate_second_stage`）で一度だけ行う（サンドイッチ計算側では検証しない。
+//! `x_endog=[]`の退化ケースでは第一段階ループが一度も回らないため、この検証が範囲外エラーを
+//! 検知する唯一の経路になる）。
 //!
 //! ## ファイル構成
 //!
@@ -92,10 +81,12 @@ pub struct TwoSlsEstimator {
     /// `first_stage`と同じ順序・同じ内生変数名（`Vec<(String, f64)>`にしている理由も
     /// `first_stage`と同じ、`HashMap`にすると走査順序が非決定的になるため）。
     weak_instrument_f_statistics: Vec<(String, f64)>,
-    /// 第二段階回帰（`y ~ x_exog + x̂_endog`）。`params()`/`param_names()`/`input()`（design
-    /// 行列`X̂`）を得るためだけに使う内部実装専用フィールド。モジュール冒頭のdocコメント
-    /// 「`second_stage`フィールドの位置づけ」参照。
-    second_stage: OlsEstimator,
+    /// 2SLSの点推定値（第二段階`y ~ x_exog + x̂_endog`の係数）(k, 1)。`param_names`と対応する順序。
+    params: Mat<f64>,
+    /// 係数名（`x_exog_names ++ x_endog_names`、定数項があれば先頭が`"const"`）。
+    param_names: Vec<String>,
+    /// 被説明変数名。
+    dep_var_name: String,
     /// 呼び出し元が指定した`cov_type`（第一段階・SE計算の両方に反映済み）。
     cov_type: CovType,
     /// 構造残差 `e = y - Xβ̂`（n, 1）。`X`は実際の内生変数を使う（第二段階回帰自身の残差
@@ -147,8 +138,7 @@ impl TwoSlsEstimator {
     /// `cov_type`/`confidence_level`は第一段階（`first_stage_estimators()`で公開する
     /// `OlsEstimator`）・第二段階（このメソッドが独立に計算するサンドイッチ型SE）の
     /// どちらにも反映される（モジュール冒頭のdocコメント「第一段階・第二段階での
-    /// `cov_type`/`confidence_level`の扱い」参照。`second_stage`フィールド自身の内部
-    /// 委譲フィットだけは対象外）。
+    /// `cov_type`/`confidence_level`の扱い」参照）。
     ///
     /// # Errors
     /// - 識別の順序条件`len(instruments) >= len(x_endog)`を満たさない:
@@ -159,7 +149,7 @@ impl TwoSlsEstimator {
     /// - 第一段階回帰（内生変数ごと）が失敗: `IvError::FirstStageFailed`
     ///   （`cov_type=Cluster`でグループキー未指定・信頼水準が範囲外等、`cov_type`/
     ///   `confidence_level`起因のエラーもここに含まれる）
-    /// - 第二段階回帰（`second_stage`の内部委譲フィット）が失敗: `IvError::SecondStageFailed`
+    /// - 第二段階の回帰が失敗（回帰変数が無い・`confidence_level`が範囲外・設計行列が特異）: `IvError::SecondStageFailed`
     ///   （`x_endog=[]`の退化ケースでは第一段階ループが一度も回らないため、
     ///   `confidence_level`が範囲外の場合のエラーもここ経由になる）
     /// - `cov_type=Hac`の`hac_lags`が不正: `CommonError::InvalidHacLags`
@@ -238,27 +228,27 @@ impl TwoSlsEstimator {
 impl IvEstimate for TwoSlsEstimator {
     /// 2SLSの点推定値（`param_names()`と対応する順序、`const`を含む）。
     fn params(&self) -> &Mat<f64> {
-        self.second_stage.params()
+        &self.params
     }
 
     /// 係数名（`x_exog_names ++ x_endog_names`、`x_exog`に定数項を含む場合は先頭が`"const"`）。
     fn param_names(&self) -> &[String] {
-        self.second_stage.input().param_names()
+        &self.param_names
     }
 
     /// 被説明変数名。
     fn dep_var_name(&self) -> &str {
-        self.second_stage.input().dep_var_name()
+        &self.dep_var_name
     }
 
     /// 観測数 n。
     fn nobs(&self) -> usize {
-        self.second_stage.input().nobs()
+        self.residuals.nrows()
     }
 
     /// 係数の数 k（定数項を含む、`x_exog`と`x_endog`の合計）。
     fn k(&self) -> usize {
-        self.second_stage.input().k()
+        self.params.nrows()
     }
 
     /// 使用した標準誤差の種別（呼び出し元が指定した`cov_type`）。

@@ -10,19 +10,32 @@ use crate::iv::common::{
     IvError, IvInput, compute_first_stage, hcat, mat_column_to_vec, mat_to_columns,
     validate_iv_fit_inputs, without_baked_in_intercept,
 };
-use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
-use crate::shared::covariance::xtx_inverse;
+use crate::linear::common::LeastSquaresError;
+use crate::linear::ols::CovType;
 use crate::shared::error::CommonError;
 use crate::shared::goodness_of_fit::{is_perfect_fit, total_sum_of_squares};
 use crate::shared::inference::{InferenceTable, inference_table};
+use crate::shared::instrumental_variables::{TwoSlsPointEstimate, two_sls_point_estimate};
+use crate::shared::validation::validate_has_regressors;
 use crate::shared::wald::wald_f_test;
 use faer::Mat;
 use statrs::distribution::StudentsT;
 
-/// `second_stage`（`β̂`・`X̂`を得るためだけの内部委譲フィット）にのみ使う固定`cov_type`。
-/// `two_sls.rs`のモジュールdoc「`second_stage`フィールドの位置づけ」参照。呼び出し元が指定した
-/// `cov_type`は、サンドイッチ計算（`fit()`本体）側で使う。
-const SECOND_STAGE_COV_TYPE: CovType = CovType::Classical;
+/// 第二段階の設計行列が回帰できる入力かを検査する。`OlsEstimator::fit`が回帰の前に行う検査
+/// （回帰変数の有無・`confidence_level`の範囲）と同じ条件で、失敗は`SecondStageFailed`にする。
+/// `x_endog=[]`のときは第一段階が一度も回らないので、`confidence_level`の範囲違反を検知する
+/// 唯一の経路になる。観測数は`validate_iv_fit_inputs`が`n > k`を検証済み。
+fn validate_second_stage(n: usize, k: usize, confidence_level: f64) -> Result<(), IvError> {
+    validate_has_regressors(n, k).map_err(|source| IvError::SecondStageFailed {
+        source: source.into(),
+    })?;
+    if !(confidence_level > 0.0 && confidence_level < 1.0) {
+        return Err(IvError::SecondStageFailed {
+            source: CommonError::InvalidConfidenceLevel { confidence_level }.into(),
+        });
+    }
+    Ok(())
+}
 
 /// [`TwoSlsEstimator::fit`]の本体。契約（エラー条件を含む）は`fit`のdocコメント参照。
 pub(super) fn fit_two_sls(
@@ -35,17 +48,16 @@ pub(super) fn fit_two_sls(
 
     // 識別の順序条件、観測数`n`が構造方程式の係数の数`k`・第一段階の回帰変数の数`l`以下の入力、
     // `cov_type=Cluster`でクラスター数`g`が構造方程式の傾き係数の数`q`以下の入力、
-    // 被説明変数が定数の入力を、第一段階・第二段階の`OlsEstimator::fit`
-    // （`FirstStageFailed`/`SecondStageFailed`にラップされ、`k`・`q`も構造方程式の
-    // ものと食い違う）より先に弾く（`compute_first_stage`より前）。
+    // 被説明変数が定数の入力を、第一段階の`OlsEstimator::fit`
+    // （`FirstStageFailed`にラップされ、`k`・`q`も構造方程式のものと食い違う）より先に弾く（`compute_first_stage`より前）。
     validate_iv_fit_inputs(&input, &cov_type)?;
 
-    // 第二段階・Wu-Hausman拡張回帰の`OlsInput::from_columns`が列ごとの`Vec`を受け取るため、
+    // Wu-Hausman拡張回帰の`OlsInput::from_columns`が列ごとの`Vec`を受け取るため、
     // `x_exog`の列への変換は一度だけ行い使い回す。
     let x_exog_columns = mat_to_columns(input.x_exog());
     // 定数項列を新規に`OlsInput::from_columns`へ渡す際は、焼き込み済みの定数項列を
     // 除いた「素の」x_exog列を使う（`common::without_baked_in_intercept`のdoc
-    // コメント参照。`second_stage_columns`/`hausman_columns`の構築で使う）。
+    // コメント参照。Wu-Hausman拡張回帰の列の構築で使う）。
     let (x_exog_bare, x_exog_names_bare) =
         without_baked_in_intercept(&x_exog_columns, input.x_exog_names(), input.has_intercept());
 
@@ -55,50 +67,44 @@ pub(super) fn fit_two_sls(
     // `engine_pybind`が`estimator="gmm"`でも同じ診断情報を独立に提供するために使う）。
     let (first_stage, weak_instrument_f_statistics) =
         compute_first_stage(&input, &cov_type, confidence_level)?;
-    let x_endog_hat_columns: Vec<Vec<f64>> = first_stage
-        .iter()
-        .map(|(_, estimator)| {
-            let fitted: Mat<f64> = estimator.fitted_values();
-            mat_column_to_vec(&fitted, 0)
-        })
-        .collect();
 
-    // 第二段階: y ~ x_exog + x̂_endog
-    let mut second_stage_columns: Vec<Vec<f64>> = x_exog_bare.to_vec();
-    second_stage_columns.extend(x_endog_hat_columns);
-    let mut second_stage_names: Vec<String> = x_exog_names_bare.to_vec();
-    second_stage_names.extend(input.x_endog_names().iter().cloned());
-
+    // 第二段階: y ~ x_exog + x̂_endog。係数と構造残差は行列版の点推定
+    // （`shared::instrumental_variables::two_sls_point_estimate`）で求める。
+    // `X = [x_exog, x_endog]`（実際の内生変数、推定値ではない）と`X̂ = [x_exog, x̂_endog]`は
+    // 同じ列の並び。`x_exog`は定数項込み（`IvInput::x_exog`）。
+    let n = input.nobs();
     let y = mat_column_to_vec(input.y(), 0);
-    // 第一段階と同じ理由（`y`・`second_stage_columns`いずれも`IvInput`由来かつ
-    // `x_endog_hat_columns`は`n`行の`fitted_values()`から取り出しているため）で、
-    // `DimensionMismatch`は理論上到達不能。
-    let second_stage_input = OlsInput::from_columns(
-        &y,
-        &second_stage_columns,
-        second_stage_names,
-        input.has_intercept(),
-        input.dep_var_name().to_string(),
-    )
-    .map_err(|source| IvError::SecondStageFailed { source })?;
-    let second_stage =
-        OlsEstimator::fit_auxiliary(second_stage_input, SECOND_STAGE_COV_TYPE, confidence_level)
-            .map_err(|source| IvError::SecondStageFailed { source })?;
-
-    // ── ここからサンドイッチ型SE計算（`two_sls.rs`のモジュールdoc参照）──
-    let x_hat = second_stage.input().x(); // X̂ = [x_exog, x̂_endog]
-    let beta = second_stage.params();
-    let n = x_hat.nrows();
-    let k = x_hat.ncols();
-
-    // 構造残差 e = y - Xβ̂。X = [x_exog, x_endog]（実際の内生変数、推定値ではない）。
-    // 列の並びは第二段階の設計行列（x_exog ++ x̂_endog）と揃える必要があるため、
-    // 同じ順序（x_exog ++ x_endog）で組み立てる。
+    // `fitted_values()`は呼ぶたびに`n×1`を計算するので、列ごとに1回だけ呼ぶ。
+    let fitted_columns: Vec<Mat<f64>> = first_stage
+        .iter()
+        .map(|(_, estimator)| estimator.fitted_values())
+        .collect();
     let x_structural = hcat(input.x_exog(), input.x_endog());
-    let residuals = input.y() - &x_structural * beta;
+    let k_exog = input.x_exog().ncols();
+    let x_hat = Mat::from_fn(n, k_exog + input.k_endog(), |i, j| {
+        if j < k_exog {
+            *input.x_exog().get(i, j)
+        } else {
+            *fitted_columns[j - k_exog].get(i, 0)
+        }
+    });
+    let k = x_hat.ncols();
+    let mut param_names: Vec<String> = input.x_exog_names().to_vec();
+    param_names.extend(input.x_endog_names().iter().cloned());
+
+    validate_second_stage(n, k, confidence_level)?;
+    let TwoSlsPointEstimate {
+        params: beta,
+        xtx_hat_inv: xtx_inv,
+        residuals,
+        ssr,
+    } = two_sls_point_estimate(&x_structural, &x_hat, input.y()).map_err(|err| {
+        IvError::SecondStageFailed {
+            source: LeastSquaresError::from_rank_deficient(err, &x_hat, &param_names),
+        }
+    })?;
 
     let df_resid = n - k;
-    let ssr: f64 = (0..n).map(|i| (*residuals.get(i, 0)).powi(2)).sum();
 
     // 構造残差が丸め誤差の範囲で0なら、標準誤差とそれを使う検定統計量は定義できない。
     // 第二段階回帰の残差ではなく構造残差で判定する（第二段階は`X̂`への回帰で別の量）。
@@ -107,18 +113,12 @@ pub(super) fn fit_two_sls(
         return Err(CommonError::PerfectFit.into());
     }
 
-    // `(X̂'X̂)⁻¹`。`X̂`（第二段階の設計行列）は`second_stage`の内部委譲フィット（`OlsEstimator::fit`）が
-    // 既に`col_piv_qr`で特異性を検証済みのため、理論上ここで分解は失敗しないはずだが、浮動小数点
-    // 演算の丸めにより境界的なケースで失敗しうるため、防御的に`Result`で扱う。
-    let xtx_inv = xtx_inverse(x_hat)
-        .map_err(|_| CommonError::internal("the second-stage X̂'X̂ could not be factorized"))?;
-
     // 標準誤差の種別ごとの係数共分散行列と、t検定・信頼区間・F検定の自由度。
     let CovStage {
         cov_params,
         df_inference,
         hac_lags_used,
-    } = covariance_stage(&cov_type, x_hat, &residuals, &xtx_inv, ssr, df_resid)?;
+    } = covariance_stage(&cov_type, &x_hat, &residuals, &xtx_inv, ssr, df_resid)?;
     let t_dist = StudentsT::new(0.0, 1.0, df_inference as f64)
         .map_err(|e| CommonError::internal(e.to_string()))?;
     let InferenceTable {
@@ -127,7 +127,7 @@ pub(super) fn fit_two_sls(
         p_values,
         conf_lower,
         conf_upper,
-    } = inference_table(beta, &cov_params, &t_dist, confidence_level);
+    } = inference_table(&beta, &cov_params, &t_dist, confidence_level);
 
     let k_constant = usize::from(input.has_intercept());
     let r_squared = 1.0 - ssr / sst;
@@ -139,7 +139,7 @@ pub(super) fn fit_two_sls(
         // OLSと同様NaNを返す（0除算を避ける）。
         (f64::NAN, f64::NAN)
     } else {
-        wald_f_test(beta, &cov_params, k_constant, df_model, df_inference)?
+        wald_f_test(&beta, &cov_params, k_constant, df_model, df_inference)?
     };
 
     let wu_hausman = wu_hausman_test(
@@ -156,7 +156,9 @@ pub(super) fn fit_two_sls(
     Ok(TwoSlsEstimator {
         first_stage,
         weak_instrument_f_statistics,
-        second_stage,
+        params: beta,
+        param_names,
+        dep_var_name: input.dep_var_name().to_string(),
         cov_type,
         residuals,
         std_errors,

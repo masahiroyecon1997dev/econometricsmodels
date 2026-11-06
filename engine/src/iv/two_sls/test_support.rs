@@ -77,8 +77,7 @@ pub(super) fn nontrivial_x_exog_input() -> IvInput {
 }
 
 /// SE検証テスト群が共有するオラクル: `(X̂, e)`を返す。`X̂`は第二段階の設計行列
-/// （`second_stage.input().x()`、サンドイッチ公式の「パン」に使う。`second_stage`は
-/// 非公開フィールドだが同一モジュールの子モジュールから直接参照できる）、`e`は構造残差
+/// （`second_stage_design`、サンドイッチ公式の「パン」に使う）、`e`は構造残差
 /// `y - Xβ̂`（`X`は実際の内生変数、`nontrivial_x_exog_columns()`と対応する列順
 /// `[const, x1, x_endog]`。サンドイッチ公式の「具」に使う）。`TwoSlsEstimator::fit`
 /// とは独立に（`Mat`演算のみで）計算する。
@@ -94,8 +93,19 @@ pub(super) fn nontrivial_x_exog_x_hat_and_structural_residuals(
     });
     let y_mat = Mat::from_fn(n, 1, |i, _| y[i]);
     let e = &y_mat - &x_structural * estimator.params();
-    let x_hat = estimator.second_stage.input().x().clone();
+    let x_hat = second_stage_design(estimator, &x1);
     (x_hat, e)
+}
+
+/// 第二段階の設計行列`X̂ = [const, x1, x̂_endog]`を、`TwoSlsEstimator`とは独立に組む
+/// （外生変数の列と、第一段階の予測値`x̂_endog`から。内生変数が1個のモデル用）。
+pub(super) fn second_stage_design(estimator: &TwoSlsEstimator, x1: &[f64]) -> Mat<f64> {
+    let fitted = estimator.first_stage_estimators()[0].1.fitted_values();
+    Mat::from_fn(x1.len(), 3, |i, j| match j {
+        0 => 1.0,
+        1 => x1[i],
+        _ => *fitted.get(i, 0),
+    })
 }
 
 /// `x_endog=[]`（第一段階ループが一度も回らない退化ケース）の`IvInput`を組み立てる。

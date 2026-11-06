@@ -108,7 +108,7 @@ fn manual_cluster_std_errors(
 
 /// classicalの標準誤差が構造残差（`y - Xβ̂`、第二段階回帰自身の残差`y - X̂β̂`ではない）
 /// を使って計算されていることを確認する（`two_sls.rs`のモジュールdoc「標準誤差・
-/// 適合度統計量」参照。誤って第二段階の`OlsEstimator`自身のSEを使っていないことの
+/// 適合度統計量」参照。誤って第二段階の回帰（`y ~ X̂`）をそのままOLSとして扱ったSEを使っていないことの
 /// 回帰テスト）。
 #[test]
 fn fit_computes_classical_std_errors_using_structural_residuals() {
@@ -129,11 +129,12 @@ fn fit_computes_classical_std_errors_using_structural_residuals() {
         assert!((*estimator.residuals().get(i, 0) - *e.get(i, 0)).abs() < 1e-8);
     }
 
-    // 構造残差は第二段階の`OlsEstimator`自身の残差（`y - X̂β̂`）とは異なる値になる
-    // はず（`x_endog`が操作変数に完全予測されない、内生性が残る非退化ケースのため。
-    // `second_stage`は非公開フィールドだが、同一モジュールの子モジュールから
-    // 直接参照できる）。
-    let second_stage_residuals = estimator.second_stage.residuals();
+    // 構造残差は第二段階回帰自身の残差（`y - X̂β̂`）とは異なる値になるはず
+    // （`x_endog`が操作変数に完全予測されない、内生性が残る非退化ケースのため）。
+    let (x1, _x_endog, _z1, _z2, y) = nontrivial_x_exog_columns();
+    let x_hat = second_stage_design(&estimator, &x1);
+    let y_mat = Mat::from_fn(n, 1, |i, _| y[i]);
+    let second_stage_residuals = &y_mat - &x_hat * estimator.params();
     let mut any_differs = false;
     for i in 0..n {
         if (*estimator.residuals().get(i, 0) - *second_stage_residuals.get(i, 0)).abs() > 1e-8 {
@@ -223,10 +224,10 @@ fn fit_computes_cluster_std_errors_matching_manual_formula() {
     });
     let y_mat = Mat::from_fn(n, 1, |i, _| y[i]);
     let e = &y_mat - &x_structural * estimator.params();
-    let x_hat = estimator.second_stage.input().x();
+    let x_hat = second_stage_design(&estimator, &x1);
     let k = x_hat.ncols();
 
-    let expected_se = manual_cluster_std_errors(x_hat, &e, n, k, &groups);
+    let expected_se = manual_cluster_std_errors(&x_hat, &e, n, k, &groups);
     let actual_se: Vec<f64> = (0..k).map(|j| *estimator.std_errors().get(j, 0)).collect();
     assert_slices_close(&actual_se, &expected_se);
 }

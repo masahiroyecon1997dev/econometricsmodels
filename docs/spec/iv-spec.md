@@ -50,7 +50,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   完全に予測する（第一段階の残差が0）と、その内生変数の文脈（`stage=FIRST_STAGE`）で
   `PERFECT_FIT`になる（診断ではなく`fit()`全体を拒否する。2SLSがOLSに一致する退化も含め、
   標準誤差が定義できない回帰を結果に残さない）。第二段階・部分F統計量の制限モデルは判定しない
-  （`fit_auxiliary`。第二段階は`X̂`への回帰で、判定は構造残差で行う）。Wu-Hausman拡張回帰は
+  （行列版の関数で、`OlsEstimator`を使わない。第二段階は`X̂`への回帰で、判定は構造残差で行う）。Wu-Hausman拡張回帰は
   元の`y`の回帰なので判定し、完全フィットなら3.6節のとおり検定統計量だけ`None`にする。
 - **バリデーション**（`engine_pybind::iv::common::build_iv_input`）:
   - `y`/`x_exog`/`x_endog`/`instruments`間の重複列名は`ValidationError`。
@@ -194,8 +194,8 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   部分行列が構造的に特異。`fit()`冒頭で構造方程式の`q`を使って弾く。判定は
   `engine::iv::common::validate_iv_fit_inputs`（内部の`validate_structural_cluster_count`）に集約し、`TwoSlsEstimator::fit`/
   `GmmEstimator::fit`冒頭と`engine_pybind`の`fit`（`compute_first_stage`より前）が共有する。
-  第二段階回帰の`OlsEstimator::fit`内でも同じ検証が走るが、そちらは
-  `SecondStageFailed`にラップされるため区別される。**構造方程式では
+  第二段階は行列版の点推定で、共分散の検証は走らない（第一段階の`OlsEstimator::fit`は第一段階の
+  `q`で検証し、`FirstStageFailed`にラップされるため区別される）。**構造方程式では
   `G > q`でも、第一段階の傾き係数の数`q_first = k_exog傾き + k_instruments (>= q)`が`G`以下の
   ときは、第一段階の全体F検定（`first_stage()`の`f_statistic`/`f_p_value`/`f_df_num`/
   `f_df_denom`）だけを`None`にして`fit()`は成功する**（第一段階のロバストWald/F検定が構造的に

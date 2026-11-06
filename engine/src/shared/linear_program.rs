@@ -79,7 +79,7 @@ pub trait LinearProgramSolver {
 /// （実測）。一方Dantzig規則は退化頂点で巡回しうるため、退化ピボット（右辺が0のままの
 /// ピボット）が`DEGENERATE_PIVOTS_BEFORE_BLAND`回続いたらBland規則に切り替えて巡回を断ち、
 /// 非退化ピボットが出たらDantzig規則に戻す。比の同点は絶対許容幅`RATIO_TIE_TOLERANCE`で判定する
-/// （右辺が`1e-16`級の非ゼロになると厳密比較の同点判定が崩れるため）。さらに、制約の右辺には
+/// （右辺が`1e-16`級の非ゼロになると厳密比較の同点判定が崩れるため。幅は摂動より十分小さく取る）。さらに、制約の右辺には
 /// 行ごとに異なる`1e-11`級の決定的な摂動を足して退化そのものを解く（`rhs_perturbation`）。
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DenseSimplex;
@@ -92,8 +92,12 @@ const PIVOT_TOLERANCE: f64 = 1e-11;
 const PIVOT_LIMIT_FACTOR: usize = 50;
 /// 退化を避けるため、制約の右辺に足す決定的な微小摂動の基準値（[`rhs_perturbation`]）。
 const RHS_PERTURBATION: f64 = 1e-11;
-/// 比検定で同点とみなす比の差の絶対許容幅。
-const RATIO_TIE_TOLERANCE: f64 = 1e-12;
+/// 比検定で同点とみなす比の差の絶対許容幅。**右辺の摂動（`RHS_PERTURBATION`、`1e-11`級）より
+/// 十分小さく取ること**。許容領域が原点だけの錐制約では、右辺も比も摂動と同じ桁になるため、
+/// 摂動と同じ桁の許容幅は別々の比を同点とみなして退出行を誤り、ピボット上限まで終わらなかった
+/// （`1e-12`のとき、混合スケールのデータで列の組み合わせにより起きた）。丸め誤差による比のずれは
+/// これより更に小さい（比の大きさ×`1e-16`）ので、`1e-15`で本来の同点は拾える。
+const RATIO_TIE_TOLERANCE: f64 = 1e-15;
 /// 右辺がこれ以下のピボットを退化ピボットとみなす。
 const DEGENERATE_RHS_TOLERANCE: f64 = 1e-12;
 /// 退化ピボットがこの回数続いたらBland規則（巡回しない規則）に切り替える。

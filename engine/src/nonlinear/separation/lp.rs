@@ -323,6 +323,61 @@ mod tests {
         }
     }
 
+    /// 平均が標準偏差より大きい列（年齢・金融資産のような正の量）を含む混合スケールの説明変数
+    /// `k`列で、`y`は重なりのある二値（分離しない）。標準偏差で割るだけの行は平均の大きい列に
+    /// 支配されて互いにほぼ平行になり、錐制約の許容領域が原点だけになる。
+    fn mixed_scale_overlapping_data(n: usize, k: usize, seed: u64) -> (Mat<f64>, Mat<f64>) {
+        let mut rng = Lcg(seed);
+        // 近似的に標準正規（一様4個の和を基準化）。
+        let mut normal =
+            move || (0..4).map(|_| rng.next_unit()).sum::<f64>() * 3.0_f64.sqrt() / 2.0;
+        let mut cols: Vec<Vec<f64>> = Vec::with_capacity(k);
+        let mut z: Vec<Vec<f64>> = Vec::with_capacity(k);
+        for j in 0..k {
+            let (mean, sd) = (10.0 + 7.0 * j as f64, 1.0 + 2.0 * (j % 5) as f64);
+            let zj: Vec<f64> = (0..n).map(|_| normal()).collect();
+            let xj: Vec<f64> = zj
+                .iter()
+                .map(|&v| match j % 4 {
+                    0 => mean + sd * v,
+                    1 => (0.5 * v).exp() * mean,
+                    2 => f64::from(v > 0.5),
+                    _ => (mean + sd * v).abs(),
+                })
+                .collect();
+            cols.push(xj);
+            z.push(zj);
+        }
+        let y: Vec<f64> = (0..n)
+            .map(|i| {
+                let index: f64 = z.iter().map(|zj| 0.3 * zj[i]).sum::<f64>() / (k as f64).sqrt();
+                f64::from(index + 1.5 * normal() - 0.8 > 0.0)
+            })
+            .collect();
+        let refs: Vec<&[f64]> = cols.iter().map(|c| c.as_slice()).collect();
+        (design(&refs), response(&y))
+    }
+
+    /// 分離のないデータで、列数や列の組み合わせによって単体法が終わらず`SeparationCheckFailed`に
+    /// なっていた。この種のLPは許容領域が原点だけで、右辺の摂動（`1e-11`級）が領域の大きさそのもの
+    /// になる。比検定の同点許容幅が摂動と同じ桁だと、別々の比を同点と扱って退出行を誤り、
+    /// ピボット上限に達していた（`shared/linear_program.rs`の`RATIO_TIE_TOLERANCE`）。
+    #[test]
+    fn does_not_fail_on_mixed_scale_data_without_separation() {
+        for k in [10, 14, 20, 24] {
+            for seed in 1..=4 {
+                let (x, y) = mixed_scale_overlapping_data(3000, k, seed);
+                let (_, scale) = standardize_columns(&x, true);
+                let result = detect_separation(&x, &scale, &y, &DenseSimplex);
+                assert_eq!(
+                    result.as_ref().map_err(|e| e.to_string()),
+                    Ok(&SeparationVerdict::NotSeparated),
+                    "k={k}, seed={seed}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn works_without_an_intercept() {
         let x = Mat::from_fn(6, 1, |i, _| [-2.0, -1.0, -0.5, 0.5, 1.0, 2.0][i]);

@@ -146,6 +146,42 @@ def strongly_collinear_binary_dataset(
     return pl.DataFrame({"y": y, "x1": x1, "x2": x2, "x3": x3})
 
 
+def mixed_scale_binary_dataset(
+    link: str, seed: int = 1, n: int = 20_000, k: int = 24
+) -> pl.DataFrame:
+    """平均が標準偏差より大きい列を含む混合スケールの説明変数`k`列で、分離していない2値データ。
+
+    年齢・金融資産・勤務先規模のような正の量（平均/標準偏差が大きい）、対数正規、0/1の
+    ダミーを混ぜる。`y`は重なりのある確率モデルで作るので有限のMLEが存在する。
+    標準偏差で割るだけの行は平均の大きい列に支配されて互いにほぼ平行になり、分離検出の
+    線形計画は許容領域が原点だけの退化した問題になる。かつては列の組み合わせによって単体法が
+    ピボット上限まで終わらず、分離していないデータが`SEPARATION_CHECK_FAILED`になった
+    （`k=14`以上で再現）。`link`は`"logit"`または`"probit"`。列は`x1`〜`x{k}`。
+    """
+    rng = np.random.default_rng(seed)
+    cols = {}
+    z = np.zeros(n)
+    for j in range(1, k + 1):
+        kind = j % 4
+        if kind == 0:  # 正の量（平均/標準偏差が大きい）
+            x = 40.0 + 9.0 * rng.normal(size=n)
+        elif kind == 1:  # 対数正規
+            x = np.exp(4.0 + 1.0 * rng.normal(size=n))
+        elif kind == 2:  # 0/1のダミー
+            x = (rng.random(n) < 0.3).astype(np.float64)
+        else:  # 上限のある正の量
+            x = np.minimum(rng.gamma(3.0, 12.0, size=n), 240.0)
+        cols[f"x{j}"] = x
+        z += 0.25 * (x - x.mean()) / x.std() / np.sqrt(k)
+    z = z - 0.8
+    if link == "logit":
+        p = 1.0 / (1.0 + np.exp(-1.7 * z))
+    else:
+        p = norm.cdf(z)
+    y = (rng.random(n) < p).astype(np.float64)
+    return pl.DataFrame({"y": y, **cols})
+
+
 def load_apple_adoption_dataset() -> pl.DataFrame:
     """Wooldridge `apple`に`ecolbs > 0`の2値`y`を足したDataFrameをロードする。
 

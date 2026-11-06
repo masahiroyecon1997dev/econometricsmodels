@@ -41,7 +41,9 @@ print(restored.white_test() == result.white_test())  # True
 
 ## Sending results between processes
 
-Options go to the worker, the result comes back. Results are ordinary pickleable objects, so no conversion is needed. The worker function must be importable (defined at the top level of a module), as for any pickled function; this is the usual `multiprocessing` rule, not one of this package. For the same reason the code that starts the pool must sit under an `if __name__ == "__main__":` guard when the start method imports the main module in each worker (`spawn`, the default on Windows and macOS, and `forkserver`, the default on Linux from Python 3.14).
+The data and the options go to the worker, and the result comes back. Results are ordinary pickleable objects, so no conversion is needed. Each task pickles its DataFrame on the way in and, for the results that keep their training data, again on the way out; see [What a pickle contains](#what-a-pickle-contains) for the cost, and for sending only the numbers back. In the examples below, `frames` stands in for your real groups or samples.
+
+With `ProcessPoolExecutor` (and `multiprocessing`), the worker function must be importable, that is, defined at the top level of a module (a script run with `python` counts). This is the usual rule for any pickled function, not one of this package. Keep the code that starts the pool under an `if __name__ == "__main__":` guard. With the `spawn` start method (the default on Windows and macOS) and the `forkserver` start method (the default on Linux from Python 3.14), the main script is imported again in a new process, and without the guard that import would try to start another pool and fail. With `fork` the guard is not required, but it does no harm, so use it in every script. Save the examples as scripts and run them with `python`.
 
 <!-- doc-test: subprocess -->
 ```python
@@ -64,7 +66,7 @@ if __name__ == "__main__":
             "x2": [0.5, 0.1, 0.9, 0.3, 0.8, 0.2, 0.7, 0.4],
         }
     )
-    # One DataFrame per group or sample.
+    # Stand-in for real groups or samples: three copies of `df` with `y` shifted by 0, 1 and 2.
     frames = [df.with_columns(pl.col("y") + shift) for shift in range(3)]
     options = OLSOptions(cov_type="hc1")
     with ProcessPoolExecutor() as pool:
@@ -72,7 +74,7 @@ if __name__ == "__main__":
     print(len(results))  # 3
 ```
 
-`joblib` works the same way:
+`joblib` works the same way. Its default backend sends functions defined in the main script to the workers with `cloudpickle`, so they need not be importable:
 
 <!-- doc-test: subprocess -->
 ```python
@@ -94,6 +96,7 @@ if __name__ == "__main__":
             "x2": [0.5, 0.1, 0.9, 0.3, 0.8, 0.2, 0.7, 0.4],
         }
     )
+    # Stand-in for real groups or samples: three copies of `df` with `y` shifted by 0, 1 and 2.
     frames = [df.with_columns(pl.col("y") + shift) for shift in range(3)]
     options = OLSOptions(cov_type="hc1")
     results = Parallel(n_jobs=2)(
@@ -106,9 +109,9 @@ The estimators release the Python GIL while they compute, so threads (`ThreadPoo
 
 ## What a pickle contains
 
-A pickle contains everything the result needs, **including the `polars.DataFrame` that was passed to `fit()`** (all of its columns, also the ones the model does not use). That is what lets a restored result call `augment()` and the diagnostic tests; a result without the data raises `AUGMENT_REQUIRES_NEW_DATA` in `augment()` and `TRAINING_DATA_NOT_RETAINED` in the diagnostic tests (see [Validation and errors](validation.md) and [Error codes](error-codes.md)).
+A pickle contains everything the result needs. For `OLSResults`, `WLSResults`, `LogitResults`, `ProbitResults` and `TobitResults`, which read the training data in methods such as `augment()` and the diagnostic tests, this includes **the `polars.DataFrame` that was passed to `fit()`** (all of its columns, also the ones the model does not use). That is what lets a restored result call `augment()` and the diagnostic tests; a result without the data raises `AUGMENT_REQUIRES_NEW_DATA` in `augment()` and `TRAINING_DATA_NOT_RETAINED` in the diagnostic tests (see [Validation and errors](validation.md) and [Error codes](error-codes.md)). `IVResults`, `FEResults` and `REResults` do not keep the DataFrame: their pickles hold the estimates and the residuals (and, for `IVResults`, the first-stage results).
 
-The consequence is size: **a pickle is at least as large as the DataFrame you fitted on.** For a DataFrame of three float columns with 100,000 rows (2.4 MB), the pickle of a `LogitResult` is about 2.4 MB (the DataFrame plus the coefficients), and that of an `OLSResults` about 4.0 MB, because it also holds the residuals and fitted values (two values per row). Logit, Probit and Tobit do not store their design matrix: it is rebuilt from the DataFrame when the pickle is restored, with the same column extraction as `fit()`, so restoring costs about as much as reading the columns again. The time to pickle grows in proportion to the size.
+The consequence is size: **for the results that keep the data, a pickle is at least as large as the DataFrame you fitted on.** For a DataFrame of three float columns with 100,000 rows (2.4 MB), the pickle of a `LogitResults` is about 2.4 MB (the DataFrame plus the coefficients), and that of an `OLSResults` about 4.0 MB, because it also holds the residuals and fitted values (two values per row). Logit, Probit and Tobit do not store their design matrix: it is rebuilt from the DataFrame when the pickle is restored, with the same column extraction as `fit()`, so restoring costs about as much as reading the columns again. The pickles of `IVResults`, `FEResults` and `REResults` are usually smaller than the DataFrame, because they hold no copy of it. The time to pickle grows in proportion to the size.
 
 When only the numbers are needed, take them out of the result before sending it, instead of sending the result:
 
@@ -132,7 +135,7 @@ Some results cost a little more than others:
 
 ## `copy.copy` and `copy.deepcopy`
 
-`copy.deepcopy` gives an independent object, including its own copy of the training DataFrame. `copy.copy` also makes a new result object, but the copy and the original share one training DataFrame, so it costs no extra memory for the data. A result never modifies its data, so sharing is safe. Use `deepcopy` when the copy has to be independent of the original.
+`copy.deepcopy` gives an independent object, including its own copy of the training DataFrame (for the results that keep it). `copy.copy` also makes a new result object, but the copy and the original share one training DataFrame, so it costs no extra memory for the data. A result never modifies its data, so sharing is safe. Use `deepcopy` when the copy has to be independent of the original.
 
 ## Versions and trust
 

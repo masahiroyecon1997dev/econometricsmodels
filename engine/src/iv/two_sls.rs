@@ -69,7 +69,7 @@
 //! `fit.rs`（第一段階・第二段階・共分散・検定をつなぐ`fit`の本体）・`cov.rs`（cov_type別の
 //! 共分散行列とWald F検定）・`wu_hausman.rs`・`sargan.rs`（診断検定）・`test_support.rs`
 //! （複数ファイルのテストが共有するフィクスチャ）。テストは各ロジックと同じファイルの
-//! `mod tests`に置く（`fit`を通すテストだけは`fit/tests/`にテーマ別で置く）。
+//! `mod tests`に置く（`fit`を通すテストと、テストが大きいファイルは`<ファイル名>/tests/`にテーマ別で置く）。
 
 use crate::iv::common::{IvError, IvEstimate, IvInput};
 use crate::linear::ols::{CovType, OlsEstimator};

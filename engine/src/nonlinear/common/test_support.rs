@@ -204,7 +204,7 @@ pub(super) fn quadratic_problem() -> QuadraticProblem {
 /// 大標本の尤度の収束点近傍を模した問題: 2次関数`COST_OFFSET + ½·H_DIAG·‖θ-target‖²`に、
 /// パラメータのビット列から決まる振幅`NOISE`の決定的なジッターを加える（`n`個の
 /// 対数尤度の和の丸め誤差の模擬）。勾配は各成分が`GRAD_FLOOR`で下げ止まる
-/// （`newton.rs`のテストの`FloatingPointFloorProblem`と同じ、総和勾配の丸め誤差の床の模擬）。収束点近傍では
+/// （`newton/tests/stall.rs`のテストの`FloatingPointFloorProblem`と同じ、総和勾配の丸め誤差の床の模擬）。収束点近傍では
 /// 勾配とジッターを含むコストが整合せず、line searchは十分減少条件を満たすステップを
 /// 見つけられずに異常終了する（`QUASI_NEWTON_STALL_GRAD_FACTOR`のdocコメント参照）。
 /// `evaluations`はcost・勾配の呼び出し回数の合計（`run_solver`が所有権を取るため`Rc`で共有）。

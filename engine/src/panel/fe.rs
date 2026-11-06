@@ -149,8 +149,8 @@
 //!
 //! このファイルは外から見える面（`FeEstimator`の構造体・getter・`fit`と`fixed_effects`の契約と
 //! 1行委譲・再エクスポート）だけを持つ。ロジックは子モジュールに置き、テストは各ロジックと
-//! 同じファイルの`mod tests`に置く（`fit`を通すテストだけは
-//! `fit/tests/`にテーマ別で置く）。
+//! 同じファイルの`mod tests`に置く（`fit`を通すテストと、テストが大きいファイルは
+//! `<ファイル名>/tests/`にテーマ別で置く）。
 //!
 //! - `input.rs`: `FeInput`・`FeEffects`・`FeCovType`
 //! - `within.rs`: within変換と事前検証（singleton・分散ゼロの説明変数）

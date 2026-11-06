@@ -32,7 +32,7 @@ benchmarks/data/`に固定済みのCSVを読む（`benchmark/iv/freeze.py`参照
 `h_ii`によるスケーリングは未実装）ため、本スクリプトの対象外（`iv-spec.md`
 3.1節の既存の記述通り。R `ivreg`側にも確立した参照実装が無いことは以前から判明
 済み）。`engine`側は独自のOLS拡張として実装済みで、`engine`のRust単体テスト
-（`two_sls/cov.rs`の`fit_computes_hc2_std_errors_matching_manual_sandwich_formula`等、
+（`two_sls/cov/tests/reference.rs`の`fit_computes_hc2_std_errors_matching_manual_sandwich_formula`等、
 独立な素朴ループでの手計算とのクロスチェック）による検証に留める。
 
 ## 検定分布（`iv-spec.md`3.2節）

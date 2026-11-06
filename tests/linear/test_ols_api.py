@@ -259,7 +259,7 @@ def test_hac_auto_lags_runs_and_returns_finite_std_errors(dataset):
 def test_hac_time_reorders_rows_before_computing_lags():
     """`hac_time`を指定すると、DataFrameの行順に関わらず時系列順で
 
-    ラグ付き自己共分散を計算すること。データは`engine/src/linear/ols.rs`の
+    ラグ付き自己共分散を計算すること。データは`engine/src/linear/ols/cov_params/tests/hc_hac.rs`の
     `fit_computes_hac_std_errors_respecting_time_order`と同一（時系列順で
     x=[1..5], y=[2,4,5,4,5]の行を並べ替えて入力し、時系列順の入力と同じ
     結果になること、および行順をそのまま時間順とみなした結果とは異なること

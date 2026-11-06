@@ -111,8 +111,8 @@
 //!
 //! このファイルは外から見える面（`TobitEstimator`の構造体・getter・`fit`の契約と委譲・
 //! 再エクスポート）だけを持つ。ロジックは子モジュールに置き、テストは各ロジックと同じ
-//! ファイルの`mod tests`に置く（`fit`を通すテストだけは
-//! `fit/tests/`にテーマ別で置く）。
+//! ファイルの`mod tests`に置く（`fit`を通すテストと、テストが大きいファイルは
+//! `<ファイル名>/tests/`にテーマ別で置く）。
 //!
 //! - `input.rs`: `TobitInput`
 //! - `problem.rs`: `TobitProblem`（`CostFunction`/`Gradient`/`Hessian`）と観測ごとの尤度の寄与

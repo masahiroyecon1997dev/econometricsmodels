@@ -364,7 +364,8 @@ mod tests {
     /// ピボット上限に達していた（`shared/linear_program.rs`の`RATIO_TIE_TOLERANCE`）。
     #[test]
     fn does_not_fail_on_mixed_scale_data_without_separation() {
-        for k in [10, 14, 20, 24] {
+        // `k=10`は列の組み合わせで通ることがあり判別力が弱いので、`k>=14`だけを見る。
+        for k in [14, 20, 24] {
             for seed in 1..=4 {
                 let (x, y) = mixed_scale_overlapping_data(3000, k, seed);
                 let (_, scale) = standardize_columns(&x, true);

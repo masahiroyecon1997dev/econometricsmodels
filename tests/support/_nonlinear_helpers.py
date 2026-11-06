@@ -161,7 +161,7 @@ def heavily_censored_tobit_dataset() -> pl.DataFrame:
     """打ち切りが重い（60観測中51観測＝85%が0で左打ち切り）Tobit用の合成データ。
 
     外部の乱数に依存しない線形合同法で作る。Rust側
-    （`engine/src/nonlinear/tobit/fit.rs`の`heavily_censored_input`）と同じ手順・同じ値で、
+    （`engine/src/nonlinear/tobit/fit/tests/convergence.rs`の`heavily_censored_input`）と同じ手順・同じ値で、
     `max_iter=1`の打ち切り点が全solver（newton/bfgs/lbfgs）で未収束の結果になる挙動を
     両側で同じ入力に対して固定するために使う（かつて`solver="lbfgs"`だけ`SingularHessian`だった）。潜在変数は
     `y* = -1.8 + x1 + 0.5*x2 + e`（`x1`・`x2`・`e`は12個の一様乱数の和-6で近似した

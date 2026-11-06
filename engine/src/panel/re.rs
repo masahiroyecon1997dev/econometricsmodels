@@ -124,8 +124,8 @@
 //!
 //! このファイルは外から見える面（`ReEstimator`の構造体・getter・`fit`と`fit_with_variance_method`の
 //! 契約と委譲・再エクスポート）だけを持つ。ロジックは子モジュールに置き、テストは各ロジックと
-//! 同じファイルの`mod tests`に置く（`fit`を通す統合的なテストと`fit`レベルのproperty-basedテストは
-//! `fit.rs`に集まる）。
+//! 同じファイルの`mod tests`に置く（`fit`を通すテストだけは
+//! `fit/tests/`にテーマ別で置く）。
 //!
 //! - `input.rs`: `ReInput`・`ReEffects`・`ReCovType`
 //! - `variance.rs`: Swamy-Arora分散成分、内部のFE推定、エンティティ平均、between回帰

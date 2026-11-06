@@ -24,10 +24,14 @@ paths:
 - **手法＝ファサード（`<手法>.rs`）＋子モジュール（`<手法>/`）**。手法のメインの`.rs`は外から見える面だけを持つ**ファサード**にし、ロジックは持たない（`foo/mod.rs`ではなく`foo.rs`＋`foo/`の形式。子モジュールは親のprivateなフィールドを読めるため、フィールドをprivateのまま`fit`が構造体リテラルを組み立てられる）。系統の直下には`mod.rs`（`pub mod`の宣言だけ）と各手法のファサードだけを置く。全手法に同じ形を適用し、行数の閾値は設けない（ただし分けるだけで中身が数十行になる部品は、ファイルを増やさず近い部品にまとめる）。
   - **ファサードに置くもの**: モジュールdoc、`mod`宣言、`pub use`（公開パスを保つ再エクスポート）、推定量の構造体（フィールドのdoc込み）、getter、`impl <Trait>`、`pub fn fit`（`# Errors`を含むdocコメントと、`fit::fit_<手法>(...)`への1行委譲）。式・分岐・ループ・faerの呼び出しは置かない。`Input`・`CovType`等の他の公開型は子モジュールに定義し、ファサードが`pub use`で再エクスポートする。
   - **子モジュールは変更理由（役割）ごとに分ける**（例: `input.rs`・`fit.rs`・`cov.rs`・`predict.rs`・`fitted.rs`・検定ごとのファイル）。型とその`impl`は同じファイルに置く（「型だけ」「関数だけ」で分けない）。`fit`の本体は`fit.rs`の`pub(super) fn fit_<手法>`に置く。
-  - **テストはテスト対象のロジックと同じファイルの`mod tests`に置く**（式の検証はその部品のファイル、`fit`の挙動やそれを通す統合テスト・`mod proptests`は`fit.rs`）。複数のファイルが使うフィクスチャ・参照計算だけを`test_support.rs`（`#[cfg(test)] mod test_support;`）に集める。ファサードには、専用のテストが要る場合を除いて`mod tests`を置かない。
+  - **テストはテスト対象のロジックと同じファイルの`mod tests`に置く**（式の検証はその部品のファイル）。複数のファイルが使うフィクスチャ・参照計算だけを`test_support.rs`（`#[cfg(test)] mod test_support;`）に集める。ファサードには、専用のテストが要る場合を除いて`mod tests`を置かない。
+  - **例外: `fit`を通すテスト（参照値との照合・`cov_type`別・検証順序・収束・`mod proptests`）はテーマ別のファイルに分ける**。量が多く`fit.rs`の大半を占めるため、全手法で次の形にする。
+    - **構成**: `fit.rs`には`#[cfg(test)] mod tests;`の1行だけを置き、`<手法>/fit/tests.rs`（ハブ。`mod`宣言と、複数のテーマが使う`pub(super)`のヘルパーだけ）と`<手法>/fit/tests/<テーマ>.rs`に置く。
+    - **テーマ**: `basic`（基本挙動・getter・適合度・成功する完全適合や定数のy）・`reference`（参照実装・閉形式・独立再計算との照合）・`cov_type`（`cov_type`別の共分散・統計量）・`validation`（入力検証・エラー返却。完全適合・定数のyをエラーとして返すものを含む）・`convergence`（非線形のみ。ソルバー・収束・非収束・分離）・`proptests`。テーマは主たるアサーションで決め、重なるときは「`Err`を返す→`validation`（収束・分離の失敗は`convergence`）、外部の参照値・独立再計算と照合する→`reference`（`cov_type`別でも`reference`）、それ以外の`cov_type`別→`cov_type`」の順に当てはめる。3件に満たないテーマは`basic`にまとめるので、手法によって`reference`の有無が異なる。
+    - **ヘルパー**: 1つのテーマだけが使うものはそのテーマのファイルに、複数のテーマが使うものだけハブに置く（`test_support.rs`は`fit`の外のファイルとも共有するものに限る）。実例は`engine/src/panel/fe/fit/`。
   - **可視性は最小にする**: 子同士で共有するものは`pub(super)`、他の手法から使うものはファサードの`pub(crate) use`経由、公開APIはファサードの`pub use`経由にする。フィールドを`pub(super)`にするのは、別の子が構造体リテラルを組み立てる場合に限る。
   - **公開パス（`crate::iv::two_sls::TwoSlsEstimator`等）は分割では変えない**。`engine_pybind`は無変更でビルドできること。
-  - 実例は`engine/src/iv/two_sls.rs`＋`two_sls/`、`engine/src/nonlinear/tobit.rs`＋`tobit/`。移動だけの分割は、ロジック・数値・テスト名を変えず、テスト名の一覧が前後で一致することで確かめる。
+  - 実例は`engine/src/iv/two_sls.rs`＋`two_sls/`、`engine/src/nonlinear/tobit.rs`＋`tobit/`。移動だけの分割は、ロジック・数値・テスト名を変えず、テスト名の一覧が前後で一致することで確かめる（`cargo test -p engine -- --list`の結果を、テーマのモジュール名を除いて照合する）。
 - **系統内で共有するロジック**は`<系統>/common.rs`＋`<系統>/common/`に置く。`common.rs`は手法のファサードと同じく再エクスポートだけを持ち、中身は役割別の子モジュール（`common/error.rs`・`common/options.rs`・`common/cov.rs`等）に置く。
 - **全手法で共有するロジック**（DataFrameからの列抽出等、統計手法に依存しない処理）は系統ディレクトリの外、`shared/`（例: `engine_pybind/src/shared/column_extraction/`）に置く。
 - **複数の系統が使う計算部品**（共分散行列のmeat/sandwich・Wald検定・最小二乗・適合度統計量・クラスターのグループ化）は`engine/src/shared/`に置く。各系統は他系統の内部ではなく`shared/`に依存する。`shared/`は**何をするコードか**（線形代数・共分散・推論等）で分け、どの系統が使うかでは分けない（利用側は手法の追加で変わり、利用者別にするとファイルの移動が繰り返し起きるため）。系統の`common.rs`（系統内で共有するロジック・エラー型）とは別物で、`shared/`の関数は特定系統のエラー型を返さない（`CommonError`か、`linear_algebra::RankDeficient`のような系統非依存の型を返し、呼び出し側が自系統のエラーへ`map_err`する）。`error.rs`（`CommonError`・`ErrorInfo`）・`error_catalog.rs`（エラーのカタログ）・`inference.rs`・`linear_algebra.rs`・`parallelism.rs`・`validation.rs`・`design_matrix.rs`も`shared/`に置く（engineのクレート直下に残るのは`lib.rs`と`shared/`・系統ディレクトリだけ）。`shared/mod.rs`では、`engine_pybind`から名前で参照するモジュール（`error`・`error_catalog`・`group_codes`・`parallelism`）のみ`pub mod`、それ以外は`pub(crate) mod`にする。直下への再エクスポート（`pub use shared::error;`等）は置かない。
@@ -121,7 +125,7 @@ Issue番号・内部管理ドキュメント（`docs/planning/specs/`配下の�
 
 ## テスト
 
-- 純粋ロジックの単体テストは、テスト対象のロジックを置いたソースファイル内の `#[cfg(test)] mod tests`（同じファイルの末尾。`cargo test -p engine`で実行）に置く（対象コードと同じファイルにあることでリファクタリング時の追従漏れを防げるため）。手法のファサード（`<手法>.rs`）はロジックを持たないので、テストは子モジュール（`<手法>/fit.rs`等）にある。複数のファイルが使うフィクスチャは`<手法>/test_support.rs`に集める（上の「ファイル・ディレクトリ構成」）。
+- 純粋ロジックの単体テストは、テスト対象のロジックを置いたソースファイル内の `#[cfg(test)] mod tests`（同じファイルの末尾。`cargo test -p engine`で実行）に置く（対象コードと同じファイルにあることでリファクタリング時の追従漏れを防げるため）。手法のファサード（`<手法>.rs`）はロジックを持たないので、テストは子モジュール（`<手法>/input.rs`等。`fit`を通すテストは`<手法>/fit/tests/`）にある。複数のファイルが使うフィクスチャは`<手法>/test_support.rs`に集める（上の「ファイル・ディレクトリ構成」）。
 - 許容誤差等のテスト方針の詳細は `testing-policy.md` を参照。
 - **カバレッジの現実的な目標**: `cargo llvm-cov -p engine`で計測する。100%は目指さず、既に検証済みの不変条件（特異性検出済みの行列のCholesky分解、事前検証済みの自由度によるt分布/F分布の構築等）に対する防御的な`Result`化（`unwrap`/`expect`を避けるため`Result`を返すが、実際にはその不変条件により失敗し得ない`map_err`分岐）はカバレッジ対象外として許容する。対象外にする場合は、その箇所のdocコメントに「なぜ理論上到達不能か」を明記すること（`engine::linear::ols`の`xtx_inverse`・`wald_f_test`等を参照）。
 - **`cargo llvm-cov -p engine report`（テスト実行を伴わない`report`サブコマンド）は直前に生成済みのプロファイルをそのまま再表示するだけで、その間に追加・変更したテストを反映しない**（実際に踏んだ罠: テスト追加後に`report --show-missing-lines`だけ再実行し、数値が全く変わらないことに気づかず古い欠落行リストを見続けるところだった）。テスト追加・変更後にカバレッジを再計測する際は、`report`ではなく`cargo llvm-cov -p engine`（引数無し、または`--show-missing-lines`等のオプション付き）本体を再実行し、テストの再ビルド・再実行から行うこと。

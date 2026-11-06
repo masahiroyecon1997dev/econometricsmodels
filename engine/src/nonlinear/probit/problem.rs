@@ -491,7 +491,7 @@ mod tests {
 
         // 決定論的な疑似乱数（LCG、`std::collections::hash_map::DefaultHasher`は
         // 実装詳細でありバージョン間の安定性が保証されないため使わない。定数は
-        // `logit/fit.rs`の近傍分離テストの`lcg`と同じ乗数・増分に揃えている）。
+        // `logit/fit/tests/convergence.rs`の近傍分離テストの`lcg`と同じ乗数・増分に揃えている）。
         fn lcg_uniform(state: &mut u64) -> f64 {
             *state = state
                 .wrapping_mul(6_364_136_223_846_793_005)
@@ -597,7 +597,7 @@ mod tests {
         use proptest::collection;
         use proptest::prelude::*;
 
-        // `probit/fit.rs`のproptestsと同じ理由でMAX_Kは小さく保つ。
+        // `probit/fit/tests/proptests.rs`と同じ理由でMAX_Kは小さく保つ。
         const MAX_K: usize = 4;
 
         fn x_names(k: usize) -> Vec<String> {

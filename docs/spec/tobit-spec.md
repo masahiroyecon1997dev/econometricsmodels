@@ -166,7 +166,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
     正で最小約76）、この`SingularHessian`は`lbfgs`だけの挙動だった。今は全solverが未収束の結果を
     返す。初期点のHessianが正定値でない場合は`lbfgs`も従来の`γI`初期化に戻るので、そこでは
     凹でない領域に入る可能性が残る。
-    Rust（`tobit/fit.rs`の`fit_returns_unconverged_result_for_every_solver_and_cov_type_at_truncated_point`）
+    Rust（`tobit/fit/tests/convergence.rs`の`fit_returns_unconverged_result_for_every_solver_and_cov_type_at_truncated_point`）
     とPython（`test_tobit_validation.py`の`test_truncated_point_returns_unconverged_result_for_every_solver`）
     で同じ入力に対して固定している。
   - **`bfgs`/`lbfgs`は`tol`を観測数`n`で正規化した基準を使う（実装済み）**:

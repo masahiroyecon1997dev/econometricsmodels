@@ -597,7 +597,7 @@ mod tests {
         use proptest::prelude::*;
 
         // 高kはbenchmarkのmany_regressorsシナリオでカバー済みのため小さく保つ
-        // （logit/fit.rs/probit/fit.rsと同じ理由）。
+        // （logit・probitの`fit/tests/proptests.rs`と同じ理由）。
         const MAX_K: usize = 3;
 
         /// 左打ち切りの下限（打ち切りなしのTobitの意味が薄れない程度に、真の`y*`分布の

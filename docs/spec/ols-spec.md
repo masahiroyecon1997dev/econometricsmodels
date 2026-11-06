@@ -323,7 +323,7 @@ classical / HC0〜HC3 / HAC / cluster の定義式、検定分布、自由度の
   `wage1`はさらに地域ダミー（northcen/south/west、基準northeast）から合成したregion列
   でのクラスターロバストSE（実データでのグループ列、4グループ・不均衡サイズ）も両方で検証する。
 - `engine`側は上記の固定シナリオ単体テストに加え、property-basedテスト（`proptest`、
-  `engine/src/linear/ols/fit.rs`の`mod proptests`）で不変条件を検証する（詳細な方針は
+  `engine/src/linear/ols/fit/tests/proptests.rs`）で不変条件を検証する（詳細な方針は
   `testing-policy.md`「property-basedテスト」参照）。対象プロパティ: 定数項ありなら残差和は常に0、
   yのスカラー倍で係数（切片含む）も同じ倍率でスケールする、xの列順序を入れ替えても係数名で
   対応付ければ値は変わらない、HC0の標準誤差は常にHC1以下。いずれも意図的なバグ注入により

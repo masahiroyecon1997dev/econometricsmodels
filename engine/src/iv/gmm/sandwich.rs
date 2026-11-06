@@ -879,7 +879,7 @@ mod tests {
     }
 
     /// 説明変数が定数項のみ（`x_exog=[]`・`x_endog=[]`、傾き係数`df_model=0`）のとき、
-    /// F統計量は0除算を避けてNaNになる（`two_sls/fit.rs`の
+    /// F統計量は0除算を避けてNaNになる（`two_sls/fit/tests/basic.rs`の
     /// `fit_sets_f_statistic_and_f_p_value_to_nan_for_const_only_model`と同じ判断）。
     #[test]
     fn fit_sets_f_statistic_and_f_p_value_to_nan_for_const_only_model() {

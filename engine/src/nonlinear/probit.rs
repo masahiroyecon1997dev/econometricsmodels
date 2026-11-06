@@ -68,8 +68,8 @@
 //!
 //! このファイルは外から見える面（`ProbitEstimator`の構造体・getter・`fit`の契約と委譲・
 //! 再エクスポート）だけを持つ。ロジックは子モジュールに置き、テストは各ロジックと同じ
-//! ファイルの`mod tests`に置く（`fit`を通す統合的なテストと`fit`レベルのproperty-basedテストは
-//! `fit.rs`に集まる）。
+//! ファイルの`mod tests`に置く（`fit`を通すテストだけは
+//! `fit/tests/`にテーマ別で置く）。
 //!
 //! - `input.rs`: `ProbitInput`
 //! - `model.rs`: 対数尤度、限界効果の`w`と`s`

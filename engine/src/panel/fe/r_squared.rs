@@ -96,7 +96,7 @@ mod tests {
     #[test]
     fn fe_estimator_fit_one_way_r_squared_between_matches_linearmodels_on_unbalanced_panel() {
         // `fe_r_squared_between`はエンティティ観測数による重み付け（`w_i = T_i/mean(T)`）を
-        // しない（`fe.rs`のモジュールdoc「パネル固有R²」参照）。`fit.rs`の`fixest_reference_input`を使う2本の
+        // しない（`fe.rs`のモジュールdoc「パネル固有R²」参照）。`test_support.rs`の`fixest_reference_input`を使う2本の
         // テスト（`fe_estimator_fit_{one,two}_way_matches_fixest_reference`）はバランスパネル（全エンティティ`T_i=3`）のため、重みの有無で値が変わらず
         // 検証できない。T_a=2, T_b=4, T_c=3の不均衡パネルで、重みなしの値が`linearmodels`と
         // 一致することを数値比較する（期待値はPythonで独立に計算・検算済み）。

@@ -374,7 +374,7 @@ mod tests {
     }
 
     /// `WeightType::Robust`の点推定を、`GmmEstimator::fit`とは独立に`faer`演算で
-    /// 手計算したオラクルと数値照合する（`two_sls/fit.rs`の
+    /// 手計算したオラクルと数値照合する（`two_sls/fit/tests/reference.rs`の
     /// `fit_matches_independently_recomputed_projection_formula_*`と同じ検証方針）。
     #[test]
     fn fit_computes_robust_weighted_estimate_matching_manual_formula() {

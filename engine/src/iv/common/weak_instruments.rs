@@ -1,10 +1,14 @@
 //! Cragg-Donald統計量とStock-Yogoの臨界値。2SLS/GMMが共有する。
 //!
 //! 計算は行列を受け取る共有関数(`shared::weak_instruments::cragg_donald`、臨界値は
-//! `shared::stock_yogo`)で、ここは`IvInput`から行列を取り出して呼ぶだけの層。`cov_type`には
-//! 依存しない(等分散前提の統計量。弱操作変数の部分F統計量と同じ判断、`docs/spec/iv-spec.md`3.4節)。
+//! `shared::stock_yogo`、ロバスト版は`shared::kleibergen_paap`)で、ここは`IvInput`から行列を
+//! 取り出して呼ぶだけの層。Cragg-Donaldは`cov_type`に依存しない(等分散前提の統計量。弱操作変数の
+//! 部分F統計量と同じ判断、`docs/spec/iv-spec.md`3.4節)。Kleibergen-Paapは`cov_type`ごとの共分散を使う。
 
 use super::input::IvInput;
+use crate::linear::ols::CovType;
+use crate::shared::covariance::{HcVariant, resolve_hac_lags, time_ordering};
+use crate::shared::kleibergen_paap::{RankTest, ScoreCovariance, kleibergen_paap};
 use crate::shared::stock_yogo::{
     TSLS_BIAS_LEVELS, TSLS_SIZE_LEVELS, tsls_bias_critical_values, tsls_size_critical_values,
 };
@@ -62,6 +66,63 @@ pub fn compute_cragg_donald(input: &IvInput) -> Option<CraggDonald> {
             TSLS_SIZE_LEVELS,
             tsls_size_critical_values(n_endog, n_excluded),
         ),
+    })
+}
+
+/// [`compute_kleibergen_paap`]の結果。LMとWald Fは共分散の階数の条件が違い(Wald Fのスコアは合計が0に
+/// なるので、クラスターがLMより1つ多く要る)、片方だけ定義できることがあるため、独立に`Option`にする。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct KleibergenPaap {
+    /// rk LM統計量(過小識別の検定。`χ²(n_excluded − n_endog + 1)`)。
+    pub rk_lm: Option<RankTest>,
+    /// rk Wald F統計量(Cragg-Donald Fの、`cov_type`に頑健な版。検定ではなくp値は無い)。
+    pub rk_wald_f: Option<f64>,
+    /// 内生変数の数。
+    pub n_endog: usize,
+    /// 除外操作変数の数。
+    pub n_excluded: usize,
+}
+
+/// `cov_type`に頑健なKleibergen-Paap統計量(rk LMとrk Wald F)を計算する。
+///
+/// `cov_type`のHC・クラスター・HACが、一次段階のスコアの共分散に使われる(`Classical`のWald Fは
+/// Cragg-Donaldに一致)。`Hac`の`lags`は`None`なら経験則で解決し、時間順は`time_order`による。
+/// 両方とも定義できないとき(内生変数が無い、識別不足、`Cluster`でグループが無い、HACのラグ数が
+/// 不正など)は`None`。診断なので`fit()`は失敗させない。
+#[must_use]
+pub fn compute_kleibergen_paap(input: &IvInput, cov_type: &CovType) -> Option<KleibergenPaap> {
+    // `fit()`の外から呼ばれてもfaerを逐次に固定する(`crate::shared::parallelism`)。
+    crate::shared::parallelism::ensure_serial();
+    let n = input.nobs();
+    let order;
+    let covariance = match cov_type {
+        CovType::Classical => ScoreCovariance::Classical,
+        CovType::Hc0 => ScoreCovariance::Hc(HcVariant::Hc0),
+        CovType::Hc1 => ScoreCovariance::Hc(HcVariant::Hc1),
+        CovType::Hc2 => ScoreCovariance::Hc(HcVariant::Hc2),
+        CovType::Hc3 => ScoreCovariance::Hc(HcVariant::Hc3),
+        CovType::Cluster { .. } => ScoreCovariance::Cluster(cov_type.cluster_groups()?),
+        CovType::Hac { lags, time_order } => {
+            if time_order.len() != n {
+                return None;
+            }
+            order = time_ordering(time_order, n);
+            ScoreCovariance::Hac {
+                lags: resolve_hac_lags(*lags, n).ok()?,
+                order: &order,
+            }
+        }
+    };
+    let (y, x, z) = (input.x_endog(), input.x_exog(), input.instruments());
+    let statistics = kleibergen_paap(y, x, z, 0, covariance)?;
+    if statistics.rk_lm.is_none() && statistics.rk_wald_f.is_none() {
+        return None;
+    }
+    Some(KleibergenPaap {
+        rk_lm: statistics.rk_lm,
+        rk_wald_f: statistics.rk_wald_f,
+        n_endog: input.k_endog(),
+        n_excluded: input.k_instruments(),
     })
 }
 
@@ -188,6 +249,123 @@ mod tests {
         )
         .unwrap();
         assert_eq!(compute_cragg_donald(&input), None);
+    }
+
+    fn clusters() -> CovType {
+        let labels: Vec<String> = (0..12).map(|i| format!("g{}", i / 3)).collect();
+        CovType::Cluster {
+            groups: Some(crate::shared::group_codes::GroupCodes::from_labels_without_keys(&labels)),
+        }
+    }
+
+    /// `cov_type`ごとの共分散が共有関数に渡る。期待値はlinearmodels 7.1の`kleibergen_paap`・
+    /// `kleibergen_paap_f`(HC1のFは`robust`のF)。
+    #[test]
+    fn kleibergen_paap_uses_the_covariance_of_the_cov_type() {
+        let input = input(2, true);
+        let hac = CovType::Hac {
+            lags: Some(2),
+            time_order: (0..12).map(f64::from).collect(),
+        };
+        let cases = [
+            (CovType::Classical, 8.497665557296273, 5.661334354194701),
+            (CovType::Hc0, 5.20374630742091, 11.40464437283528),
+            (CovType::Hc1, 3.035518679328865, 6.652709217487246),
+            (CovType::Hc3, 1.0460104688089573, 2.5532340821578416),
+            (clusters(), 2.9797800411423454, 19.612521171644726),
+            (hac, 2.7216722971551834, 9.501421955858229),
+        ];
+        for (cov_type, lm, f) in cases {
+            let kp = compute_kleibergen_paap(&input, &cov_type).unwrap();
+            let test = kp.rk_lm.unwrap();
+            assert_eq!(test.df, 2);
+            assert!((test.statistic - lm).abs() < 1e-9 * lm, "{cov_type:?}");
+            let wald_f = kp.rk_wald_f.unwrap();
+            assert!((wald_f - f).abs() < 1e-9 * f, "{cov_type:?}");
+            assert_eq!((kp.n_endog, kp.n_excluded), (2, 3));
+        }
+    }
+
+    #[test]
+    fn kleibergen_paap_with_classical_covariance_equals_cragg_donald() {
+        for n_endog in [1, 2] {
+            let input = input(n_endog, true);
+            let cd = compute_cragg_donald(&input).unwrap().statistic;
+            let kp = compute_kleibergen_paap(&input, &CovType::Classical).unwrap();
+            let wald_f = kp.rk_wald_f.unwrap();
+            assert!((wald_f - cd).abs() < 1e-10 * cd, "{wald_f} {cd}");
+        }
+    }
+
+    /// 時間順は`time_order`の昇順で、行の並びとは無関係: 行を時間順に並べ替えた入力に恒等の
+    /// `time_order`を渡した結果は、元の行順にシャッフルした`time_order`を渡した結果と一致する。
+    #[test]
+    fn kleibergen_paap_hac_follows_the_time_order() {
+        let time: [f64; 12] = [7.0, 2.0, 11.0, 0.0, 5.0, 9.0, 1.0, 10.0, 3.0, 6.0, 8.0, 4.0];
+        let mut by_time: Vec<usize> = (0..12).collect();
+        by_time.sort_by(|&a, &b| time[a].total_cmp(&time[b]));
+
+        let (y, x, d, z) = columns();
+        let pick = |v: &[f64]| by_time.iter().map(|&i| v[i]).collect::<Vec<f64>>();
+        let sorted_input = IvInput::from_columns(
+            &pick(&y),
+            &[pick(&x)],
+            vec!["x".to_string()],
+            &d.iter().map(|c| pick(c)).collect::<Vec<_>>(),
+            vec!["d1".to_string(), "d2".to_string()],
+            &z.iter().map(|c| pick(c)).collect::<Vec<_>>(),
+            vec!["z1".to_string(), "z2".to_string(), "z3".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+        let identity = CovType::Hac {
+            lags: Some(2),
+            time_order: (0..12).map(f64::from).collect(),
+        };
+        let shuffled = CovType::Hac {
+            lags: Some(2),
+            time_order: time.to_vec(),
+        };
+
+        let expected = compute_kleibergen_paap(&sorted_input, &identity).unwrap();
+        let actual = compute_kleibergen_paap(&input(2, true), &shuffled).unwrap();
+        let (a, e) = (actual.rk_wald_f.unwrap(), expected.rk_wald_f.unwrap());
+        assert!((a - e).abs() < 1e-10 * e, "{a} {e}");
+        // 時間順を無視して行順に使うと別の値になる。
+        let ignored = compute_kleibergen_paap(&input(2, true), &identity).unwrap();
+        assert!((ignored.rk_wald_f.unwrap() - e).abs() > 1e-6 * e);
+    }
+
+    #[test]
+    fn kleibergen_paap_is_none_for_unusable_covariance_settings() {
+        let input = input(2, true);
+        assert_eq!(
+            compute_kleibergen_paap(&input, &CovType::Cluster { groups: None }),
+            None
+        );
+        let bad_lags = CovType::Hac {
+            lags: Some(12),
+            time_order: (0..12).map(f64::from).collect(),
+        };
+        assert_eq!(compute_kleibergen_paap(&input, &bad_lags), None);
+        let short_order = CovType::Hac {
+            lags: None,
+            time_order: vec![0.0, 1.0],
+        };
+        assert_eq!(compute_kleibergen_paap(&input, &short_order), None);
+    }
+
+    /// LMとWald Fは独立に定義の可否が決まる: 2クラスターでLM(自由度2)は定義できるが、Wald Fはできない。
+    #[test]
+    fn kleibergen_paap_reports_the_two_statistics_independently() {
+        let labels: Vec<String> = (0..12).map(|i| format!("g{}", i / 6)).collect();
+        let two_clusters = CovType::Cluster {
+            groups: Some(crate::shared::group_codes::GroupCodes::from_labels_without_keys(&labels)),
+        };
+        let kp = compute_kleibergen_paap(&input(2, true), &two_clusters).unwrap();
+        assert!(kp.rk_lm.is_some());
+        assert_eq!(kp.rk_wald_f, None);
     }
 
     /// 内生変数が4個(表は3個まで)なら、統計量は出るが臨界値は無い。

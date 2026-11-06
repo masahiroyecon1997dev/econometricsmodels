@@ -301,6 +301,8 @@ FEIVの前に、FE・IVの拡張をどこまで済ませるかを整理した。
      `ivDiag`はMOPの有効F（`eff_F`）に要る。
    - 要調査: fixestの`kpr`（Kleibergen-Paap）が、同じデータで`ivf`=184・`cd`=220.7に対して9.07と桁が違う。
      rk LMかrk Wald Fか、クラスターの扱いかを#364で確認してから参照に使う。
+     **#364で確認済み**: `kpr`はiid、または内生変数と操作変数が同数のときだけ実装され、rk LM・rk Wald Fのどちらにも
+     一致しない（`iv-spec.md`3.4.2節）。KPの参照にはlinearmodels（FEIVはLSDVの2SLS）を使い、fixestの`kpr`は照合に使わない。
    - 実測（N=100・T=6のデータ）: **plmの`vcovHC(method = "white1", type = "HC0")`は、within IVで構造残差と`X̂`を
      使ったサンドイッチと完全に一致**（比1.000000）。第二段階の残差を使うと0.57〜0.59倍になり一致しない。
      fixestの`vcov = "hetero"`はその`√(n/df_resid)`倍（1.0976 = √(600/498)）で、FEのHC1（`n/df_resid`）と同じ。
@@ -446,6 +448,17 @@ C統計量は事後診断のメソッド、`first_stage()`は`Computed`変種、
   Table 1・2をPDFから転記し、`ivreg2`のソースは取得できなかったので全セルの独立な照合はしていない
   （単調性・滑らかさ・既知値で検証）。公開ドキュメント（`docs/methods/`）は#366でPythonに公開するときに書く。
 
+- **#364（Kleibergen-Paap、エンジンのみ。実装済み。未コミット→コミット後に更新）**: `shared/kleibergen_paap.rs`
+  （`kleibergen_paap_lm`・`kleibergen_paap_f`。`(Y, X_exog, Z, n_absorbed, ScoreCovariance)`）、
+  `iv/common/weak_instruments.rs`（`compute_kleibergen_paap(&IvInput, &CovType)`）。決定事項:
+  rk LMとrk Wald Fの両方、`Hc0`〜`Hc3`の4種に対応、DKはFEIV側で`ScoreCovariance`に分岐を足す。
+  **linearmodelsの`robust`のFは`Hc1`、`robust`のLMは`Hc0`に対応する**（Fの自由度補正を定義に含める）。
+  `λ`の方向に射影した`q−k+1`次元のスコアに共有のmeat関数を使う（`qk×qk`の行列は作らない）。ランク落ちの共分散は
+  一般化逆行列を使わず`None`（LMとWald Fは独立に判定。Wald Fはクラスターが1つ多く要る）。linearmodelsと相対差1e-9で一致
+  （n=12・n=240）。HC2/HC3・`Hc1`のLM・`n_absorbed`つきは参照が無く、クロネッカー積をそのまま使う独立な計算と照合。
+  fixestの`kpr`は参照にならない。`n_absorbed > 0`のHC2/HC3は今は`None`（吸収した効果のレバレッジを含まないため。FE-2SLSでKPを
+  hc2/hc3で出すなら、FEのレバレッジ（`1/T_i`込み）を`ScoreCovariance`に渡す形を足す）。
+
 ### 9.3 push済みのコミット
 
 `1bf01e91`（決定事項）、`91a76a9d`（#628 A 手順1）、`8d8d8dc8`（A 手順2）、`c1f13b84`（進捗）、`1631e728`（#628 B）、
@@ -453,7 +466,7 @@ C統計量は事後診断のメソッド、`first_stage()`は`Computed`変種、
 
 ### 9.4 この後の順序（5.3の実装順）
 
-1. #363は完了（クローズ）。次は#364（Kleibergen-Paap。linearmodels 7.1に`_kleibergen_paap`があり参照にできる）→#365（MOP）。
+1. #363は完了（クローズ）。#364（Kleibergen-Paap）は実装済み。次は#365（MOP）。
    制約（行列受け取り・`n_absorbed`・共有のクラスター/HAC meat）は各issueにコメント済み。
 2. #522 → #442（その前に5.4の`PanelIndex`のK次元化を決める。グループsingletonはエラー維持）。
 3. IV本体の残り: #366（バインディング）→#367（ivDiag照合）、#368・#369。
@@ -466,6 +479,11 @@ C統計量は事後診断のメソッド、`first_stage()`は`Computed`変種、
     事後診断メソッドならエラー（`Result`＋理由の列挙型＋カタログの`code`）にする。後者なら`compute_cragg_donald`の戻り値を
     `Option`から`Result`へ変える。臨界値が表に無い組み合わせはエラーにせず、統計量だけ返して臨界値の欄を空にする案。
   - 公開ドキュメント（`docs/methods/iv.md`の定義式、出典）はこの公開のときに書く（出典は`iv-spec.md`3.4.1に記載済み）。
+- **#366でKPについても決めること**: `compute_kleibergen_paap`は不正な設定（`Cluster`でグループ無し、HACのラグ数や時間順の長さの不正）も
+  「定義できない」と同じ`None`に潰す（`fit()`が`cov_type`を先に検証するので、`fit()`後のプロパティなら到達しない）。事後診断メソッドにするなら、
+  設定の誤りは`ValidationError`、数値的に定義できないものは別の理由で返す形（CDと同じ`Result`＋理由の列挙型）にそろえる。
+  LMとWald Fは独立に`Option`で、`KleibergenPaap`は片方だけ`Some`になりうる。`RankTest`は`iv::common`から再エクスポート済み。
+  最小の2つの特異値が重なるときのロバスト版の不安定性は検出していない（既知の限界。`iv-spec.md`3.4.2節）。
 - **Stock-Yogoの表**: 第二の独立な出典で全セルを照合していない（`ivreg2`のソースはSSLエラーで取得できなかった）。
   単調性・滑らかさ・既知値で検証。独立な出典（`ivreg2`の出力、Stataのマニュアル、他言語の実装）が手に入れば、全セル照合を足す。
 - **ルートCLAUDE.mdの3章**: `shared/`の列挙に`instrumental_variables.rs`・`gmm.rs`・`weak_instruments.rs`・`stock_yogo.rs`が載っていない

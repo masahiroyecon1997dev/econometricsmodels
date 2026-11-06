@@ -295,7 +295,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   内生変数が1個なら部分F統計量に一致する。`G`は半正定値なので、丸めで最小固有値が負になったら0に
   打ち切る。ランクの判定の前に各列をノルム1にそろえるので、列の単位に依存しない。
   `n_absorbed`は固定効果で吸収したパラメータ数（固定効果が無ければ0）。p値は無い（検定ではない）。
-- **`cov_type`に依存しない**（等分散前提。3.4節と同じ判断）。ロバスト版はKleibergen-Paapと
+- **`cov_type`に依存しない**（等分散前提。3.4節と同じ判断）。ロバスト版はKleibergen-Paap（3.4.2節）と
   Montiel Olea-Pflueger（別途）。
 - **定義できないとき`None`**（`fit()`は失敗させない診断として扱う。理由は区別しない）: 内生変数が
   無い、識別不足（`q < k`）、自由度が1未満、`X`がフルランクでない、`Z`または`Y`の列が`X`の張る空間に
@@ -331,6 +331,63 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 - Baum, C. F., Schaffer, M. E. and Stillman, S. (2007), "Enhanced routines for instrumental
   variables/generalized method of moments estimation and testing", *Stata Journal* 7(4), 465-506
   （`ivreg2`の"Cragg-Donald Wald F statistic"との対応）。
+
+#### 3.4.2 Kleibergen-Paap統計量（エンジンのみ）
+
+Cragg-Donaldを、不均一分散・クラスター・自己相関に頑健にした診断。`shared/kleibergen_paap.rs`の
+`kleibergen_paap_lm`（rk LM。過小識別の検定）と`kleibergen_paap_f`（rk Wald F）を、
+`iv/common/weak_instruments.rs`の`compute_kleibergen_paap(&IvInput, &CovType)`が`IvInput`から呼ぶ。
+
+- **定義**: 外生変数で直交化した`Ỹ`・`Z̃`（列は二乗平均1にそろえる）の`Θ̂ = Q_zz^{-1/2}'Q_zx Q_xx^{-1/2}`
+  （`Q`は`Z̃'Z̃/n`等）を特異値分解し、最小特異値に属する右特異ベクトル`B⊥`（長さ`k`）と、
+  それ以降の左特異ベクトルの基底`A⊥`（`q−k+1`本）で`λ = A⊥'Θ̂B⊥`を作る。
+  統計量は`n·λ'V̂_λ⁻¹λ`で、帰無仮説（`Θ`のランクが`k−1`）の下で`χ²(q−k+1)`に従う（Kleibergen and Paap
+  2006）。`V̂_λ`は一次段階のスコア`v_i⊗z̃_i`（`vec(Q_zx)`の標本平均の被積分）を`λ`の方向へ射影した
+  `q−k+1`次元のスコア`ψ_i = (v_i'·B⊥'Q_xx^{-1/2}')·(z̃_i'·A⊥'Q_zz^{-1/2}')`の共分散（平均を引かず、
+  自由度補正なし）。**射影するとクロネッカー積の`qk×qk`行列を作らずに済み**、meatは共有の
+  `hc_meat`・`cluster_meat`・`hac_meat`をそのまま使える。LMのスコアの`v_i`は`Ỹ`、rk Wald Fでは
+  `Ỹ`を`Z̃`に回帰した残差。
+- **`cov_type`ごとの共分散**: `Classical`（射影後は`ω·I`。LMはAndersonの`n·r²_min`、FはCragg-Donaldに
+  一致）、`Hc0`〜`Hc3`（スコア全体に行スケールを掛ける。`Hc1`は`√(n/(n−q−k_exog−n_absorbed))`、
+  `Hc2`・`Hc3`は`[X_exog, Z]`のレバレッジ`h_i`による`1/√(1−h_i)`・`1/(1−h_i)`）、`Cluster`、`Hac`（Bartlett核。
+  `lags`は共有の`hac_meat`と同じ定義）。`1−h_i ≤ 1e-10`の行があるHC2・HC3は`None`。レバレッジは`[X_exog, Z]`だけから計算し、吸収した効果の分を
+  含まないので、`n_absorbed > 0`のHC2・HC3も`None`（個体ダミーを回帰子に入れた定義と食い違うため。固定効果つき
+  2SLSで吸収した効果のレバレッジを受け取る口を足すまでの扱い）。
+- **rk Wald Fの小標本の補正**（`l = q + k_exog`）: `F = W/q`に、`Classical`・`Hac`は`(n−l−n_absorbed)/n`、
+  `Cluster`は`(n−l−n_absorbed)(G−1)/(G(n−1))`を掛ける。`Hc1`は行スケールの中に同じ補正を含むので
+  追加の係数が無く、`Hc0`・`Hc2`・`Hc3`は補正なし。これはStataの`ivreg2`・linearmodelsの定義（`robust`は
+  HC0のWald統計量`W`に`(n−l)/n`を掛ける。meatに`n/(n−l)`を掛けるHC1と同じ）と同じ値になるよう置いたもので、**linearmodelsの`robust`のFは
+  このプロジェクトの`Hc1`に、`robust`のLMは`Hc0`に対応する**。LMには自由度補正が無い
+  （`Hc1`のLMだけ行スケールで`√(n/(n−l−n_absorbed))`が入る）。
+- **参照が無い範囲**: linearmodelsとivreg2が持つのは`robust`（HC0）・クラスター（一元）・Bartlett HACだけ
+  なので、`Hc2`・`Hc3`、`Hc1`のLM、`n_absorbed`つきのロバスト版はこのプロジェクトの拡張で、
+  linearmodelsの`_rk_chi2`に行スケールを掛けたスコアを渡す独立な計算（クロネッカー積をそのまま使う形）と
+  照合した。DK（Driscoll-Kraay）は未対応で、固定効果つき2SLSで時点ごとに合計したスコアを`hac_meat`に
+  渡す分岐を足す（`ScoreCovariance`に1バリアント）。
+- **定義できないとき`None`**（LMとWald Fは独立に判定する）: 3.4.1節と同じ条件に加えて、最小の正準相関が1
+  （完全フィット）、スコアの共分散が正定値でない（クラスター・観測が少なすぎる。linearmodelsは一般化逆行列と
+  自由度の減少で警告つきの値を返すが、ここでは使わない）、クラスターが2未満、クラスターや時間順の長さが行数と
+  違う。LMの共分散は`q−k+1`次元でクラスター数が階数の上限、Wald Fのスコアは合計が0なので`q−k+2`個
+  以上のクラスターを要する。
+- **fixestの`kpr`は参照にしない**: `fitstat(m, "kpr")`はiid、または内生変数と操作変数が同数のときだけ実装
+  され、実測ではrk LM・rk Wald Fのどちらにも一致しない（n=240で内生変数1個・操作変数3個のiid:
+  `kpr`=0.904に対しLM=35.77・F=13.72。同数でiid: 1.64に対しLM=22.99・F=25.10。同数のheteroは24.51で、
+  rk Wald Fの24.82に`(n−l)/n`を掛けた値に近い）。参照はlinearmodelsを使う。
+- **検証**: linearmodels 7.1の`kleibergen_paap`・`kleibergen_paap_f`と、unadjusted・robust・clustered・
+  kernelで相対差1e-9以内に一致する（n=12の2種類と、n=240の合成データ。値を定数として埋めて回帰ガードにした）。
+  `Classical`のWald FはCragg-Donald、LMは`n·λ/(1+λ)`（`λ`はCragg-Donaldの最小固有値）に一致する。単体テストは、
+  列のスケール・操作変数の正則な線形結合への不変性、行の並べ替えと`Hac`の時間順、`n_absorbed`が入る場所、
+  個体ダミー入り（`n_absorbed=0`）とwithin変換＋`n_absorbed`の一致（Frisch-Waugh-Lovell。等分散・HC0・HC1・
+  クラスター・HAC）、`q = k`、`None`になる各条件を固定する。最小の2つの特異値が重なるとき`λ`の方向が一意でなく、
+  ロバスト版の値が不安定になりうるが、検出はしていない（既知の限界）。Pythonからの数値照合はバインディングの後（別途）。
+
+出典（3.4.1節に加えて）:
+
+- Kleibergen, F. and Paap, R. (2006), "Generalized reduced rank tests using the singular value
+  decomposition", *Journal of Econometrics* 133(1), 97-126（rkランク統計量）。
+- Kleibergen, F. and Schaffer, M. E. (2007), "ranktest: Stata module to test the rank of a matrix using
+  the Kleibergen-Paap rk statistic", Statistical Software Components S456865, Boston College
+  （`ivreg2`が使うrk LMとrk Wald Fの実装）。
 
 ### 3.5 過剰識別検定（`overid_statistic`/`overid_p_value`）
 
@@ -482,6 +539,7 @@ error.rs`）:
 ## 5. 未実装・未対応
 
 - Cragg-Donald統計量とStock-Yogo臨界値のPython公開（エンジンは実装済み、3.4.1節）
-- Kleibergen-Paap統計量・Montiel Olea-Pflueger effective F
+- Kleibergen-Paap統計量のPython公開（エンジンは実装済み、3.4.2節）
+- Montiel Olea-Pflueger effective F
 - Wu-Hausman検定のGMM対応（`estimator="gmm"`では常に`None`）
 - Wu-Hausman検定の変数ごとのサブセット検定（現状は内生変数全体のジョイント検定のみ）

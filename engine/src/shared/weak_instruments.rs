@@ -9,7 +9,10 @@ use faer::Side;
 use faer::prelude::SolveLstsq;
 
 use super::error::MatrixKind;
-use super::linear_algebra::{checked_col_piv_qr, ensure_well_conditioned_symmetric_matrix};
+use super::linear_algebra::{
+    checked_col_piv_qr, column_norm, ensure_well_conditioned_symmetric_matrix, forward_substitute,
+    unit_columns,
+};
 
 /// Cragg-Donald Wald F統計量: 内生変数`Y`の第一段階の係数行列のランク統計量の最小固有値を、除外操作変数の
 /// 数`q`で割って自由度を合わせたもの。Stock-Yogo(2005)が臨界値を表にした`g_min`統計量で、Stataの
@@ -49,27 +52,7 @@ pub(crate) fn cragg_donald(
     }
     let df = n.checked_sub(k_exog + q + n_absorbed).filter(|&d| d >= 1)?;
 
-    // [Y | Z]を外生変数で直交化する(定数列も通常の列)。外生変数の列はノルム1にそろえてからQRに
-    // かけ、列のスケールがランクの判定に効かないようにする。
-    let w = hcat(y_endog, z);
-    let w_tilde = if k_exog == 0 {
-        w.clone()
-    } else {
-        let x_unit = unit_columns(x_exog);
-        let qr_x = checked_col_piv_qr(&x_unit).ok()?;
-        &w - &x_unit * qr_x.solve_lstsq(&w)
-    };
-    // 直交化で元のノルムの`√ε`未満にまで縮む列は、`X`の張る空間にほぼ入っている。
-    let sqrt_eps = f64::EPSILON.sqrt();
-    for j in 0..w.ncols() {
-        let (remaining, original) = (column_norm(&w_tilde, j), column_norm(&w, j));
-        // NaNは比較が常に偽になるので、明示的に弾く。
-        if remaining.is_nan() || original.is_nan() || remaining <= sqrt_eps * original {
-            return None;
-        }
-    }
-    let y_tilde = unit_columns(&w_tilde.subcols(0, k).to_owned());
-    let z_tilde = unit_columns(&w_tilde.subcols(k, q).to_owned());
+    let (y_tilde, z_tilde) = orthogonalize_unit(y_endog, x_exog, z)?;
 
     // Ỹ を Z̃ に回帰する。
     let qr_z = checked_col_piv_qr(&z_tilde).ok()?;
@@ -103,6 +86,39 @@ pub(crate) fn cragg_donald(
     Some(min_eigenvalue.max(0.0) * (df as f64) / (q as f64))
 }
 
+/// `[Y | Z]`を外生変数で直交化し、`Ỹ`・`Z̃`の各列をノルム1にそろえて返す(定数列も通常の列として
+/// 落とす)。ランクの判定がスケールに依存しないよう、外生変数の列もノルム1にそろえてからQRにかける。
+///
+/// 次のとき`None`: `X`がフルランクでない、`Y`または`Z`の列が`X`の張る空間にほぼ入っている
+/// (直交化で元のノルムの`√ε`未満になる)、入力に非有限値がある。
+pub(super) fn orthogonalize_unit(
+    y_endog: &Mat<f64>,
+    x_exog: &Mat<f64>,
+    z: &Mat<f64>,
+) -> Option<(Mat<f64>, Mat<f64>)> {
+    let (k, q, k_exog) = (y_endog.ncols(), z.ncols(), x_exog.ncols());
+    let w = hcat(y_endog, z);
+    let w_tilde = if k_exog == 0 {
+        w.clone()
+    } else {
+        let x_unit = unit_columns(x_exog);
+        let qr_x = checked_col_piv_qr(&x_unit).ok()?;
+        &w - &x_unit * qr_x.solve_lstsq(&w)
+    };
+    // 直交化で元のノルムの`√ε`未満にまで縮む列は、`X`の張る空間にほぼ入っている。
+    let sqrt_eps = f64::EPSILON.sqrt();
+    for j in 0..w.ncols() {
+        let (remaining, original) = (column_norm(&w_tilde, j), column_norm(&w, j));
+        // NaNは比較が常に偽になるので、明示的に弾く。
+        if remaining.is_nan() || original.is_nan() || remaining <= sqrt_eps * original {
+            return None;
+        }
+    }
+    let y_tilde = unit_columns(&w_tilde.subcols(0, k).to_owned());
+    let z_tilde = unit_columns(&w_tilde.subcols(k, q).to_owned());
+    Some((y_tilde, z_tilde))
+}
+
 /// 列を横に並べる。
 fn hcat(left: &Mat<f64>, right: &Mat<f64>) -> Mat<f64> {
     let k = left.ncols();
@@ -113,41 +129,6 @@ fn hcat(left: &Mat<f64>, right: &Mat<f64>) -> Mat<f64> {
             *right.get(i, j - k)
         }
     })
-}
-
-fn column_norm(m: &Mat<f64>, j: usize) -> f64 {
-    (0..m.nrows())
-        .map(|i| m.get(i, j).powi(2))
-        .sum::<f64>()
-        .sqrt()
-}
-
-/// 各列をノルム1にそろえる(ノルムが0または非有限の列はそのまま。後段のランク判定が弾く)。
-fn unit_columns(m: &Mat<f64>) -> Mat<f64> {
-    let norms: Vec<f64> = (0..m.ncols()).map(|j| column_norm(m, j)).collect();
-    Mat::from_fn(m.nrows(), m.ncols(), |i, j| {
-        if norms[j] > 0.0 && norms[j].is_finite() {
-            *m.get(i, j) / norms[j]
-        } else {
-            *m.get(i, j)
-        }
-    })
-}
-
-/// 下三角行列`l`(k×k)について`L⁻¹ b`を前進代入で求める(`b`はk×m)。
-fn forward_substitute(l: faer::mat::MatRef<'_, f64>, b: &Mat<f64>) -> Mat<f64> {
-    let (k, m) = (b.nrows(), b.ncols());
-    let mut x = Mat::<f64>::zeros(k, m);
-    for col in 0..m {
-        for i in 0..k {
-            let mut value = *b.get(i, col);
-            for j in 0..i {
-                value -= *l.get(i, j) * *x.get(j, col);
-            }
-            *x.get_mut(i, col) = value / *l.get(i, i);
-        }
-    }
-    x
 }
 
 #[cfg(test)]

@@ -363,6 +363,42 @@ fn dot(a: &[f64], b: &[f64]) -> f64 {
     lanes.iter().sum::<f64>() + tail
 }
 
+/// 列`j`のユークリッドノルム。
+pub(crate) fn column_norm(m: &Mat<f64>, j: usize) -> f64 {
+    (0..m.nrows())
+        .map(|i| m.get(i, j).powi(2))
+        .sum::<f64>()
+        .sqrt()
+}
+
+/// 各列をノルム1にそろえる(ノルムが0または非有限の列はそのまま。後段のランク判定が弾く)。
+pub(crate) fn unit_columns(m: &Mat<f64>) -> Mat<f64> {
+    let norms: Vec<f64> = (0..m.ncols()).map(|j| column_norm(m, j)).collect();
+    Mat::from_fn(m.nrows(), m.ncols(), |i, j| {
+        if norms[j] > 0.0 && norms[j].is_finite() {
+            *m.get(i, j) / norms[j]
+        } else {
+            *m.get(i, j)
+        }
+    })
+}
+
+/// 下三角行列`l`(k×k)について`L⁻¹ b`を前進代入で求める(`b`はk×m)。
+pub(crate) fn forward_substitute(l: faer::mat::MatRef<'_, f64>, b: &Mat<f64>) -> Mat<f64> {
+    let (k, m) = (b.nrows(), b.ncols());
+    let mut x = Mat::<f64>::zeros(k, m);
+    for col in 0..m {
+        for i in 0..k {
+            let mut value = *b.get(i, col);
+            for j in 0..i {
+                value -= *l.get(i, j) * *x.get(j, col);
+            }
+            *x.get_mut(i, col) = value / *l.get(i, i);
+        }
+    }
+    x
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

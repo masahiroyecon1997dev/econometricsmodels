@@ -1,11 +1,9 @@
 //! Hansen J過剰識別検定。定義は`gmm.rs`のモジュールdoc「Hansen J過剰識別検定」参照。
 
-use faer::prelude::Solve;
-use faer::{Mat, Side};
-use statrs::distribution::{ChiSquared, ContinuousCDF};
+use faer::Mat;
 
 use crate::iv::common::{IvError, IvInput};
-use crate::shared::error::{CommonError, MatrixKind};
+use crate::shared::gmm;
 
 /// [`hansen_j_test`]の戻り値。
 pub(super) struct HansenJTest {
@@ -25,7 +23,8 @@ pub(super) struct HansenJTest {
 /// `s_used`は`beta`計算時（`gmm_point_estimate`内の`llt`、または`classical_s`
 /// 自体が正定値`Z'Z`の正のスカラー倍）で既に反転成功済み・正定値性が保証された
 /// 行列のため、ここでの特異性は理論上到達不能（`two_sls/cov.rs`の`xtx_inverse`と
-/// 同じ防御的`Result`化）。
+/// 同じ防御的`Result`化）。計算は共有の`shared::gmm::hansen_j_test`で、IVは自由度を
+/// ここで決めて渡す。
 pub(super) fn hansen_j_test(
     input: &IvInput,
     z: &Mat<f64>,
@@ -37,23 +36,11 @@ pub(super) fn hansen_j_test(
     if q == k_endog {
         return Ok(None);
     }
-    let l = z.ncols();
     let df = q - k_endog;
-    let zte = z.transpose() * residuals;
-    let llt_s = s_used
-        .llt(Side::Lower)
-        .map_err(|_| CommonError::NearSingularMatrix {
-            matrix: MatrixKind::GmmWeight,
-        })?;
-    let s_inv_zte = llt_s.solve(&zte);
-    let statistic: f64 = (0..l)
-        .map(|i| (*zte.get(i, 0)) * (*s_inv_zte.get(i, 0)))
-        .sum();
-    let chi2 = ChiSquared::new(df as f64).map_err(|e| CommonError::internal(e.to_string()))?;
-    let p_value = chi2.sf(statistic);
+    let test = gmm::hansen_j_test(z, residuals, s_used, df)?;
     Ok(Some(HansenJTest {
-        statistic,
-        p_value,
+        statistic: test.statistic,
+        p_value: test.p_value,
         df,
     }))
 }

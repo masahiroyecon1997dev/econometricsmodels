@@ -1,11 +1,11 @@
-//! `cov_type`別の係数分散共分散行列（サンドイッチ型）と、Wald検定（F統計量）。
+//! `cov_type`別のモーメント条件の分散共分散行列`Ω̂`の組み立てと、係数の分散共分散行列（サンドイッチ型）。
+//! サンドイッチの代数そのものは共有の`shared::gmm::gmm_sandwich_covariance`。
 //!
 //! 定義は`gmm.rs`のモジュールdoc「標準誤差・検定統計量（`cov_type`対応）」参照。
 //!
 //! テストは`sandwich/tests.rs`と`sandwich/tests/`にテーマ別で置く。
 
-use faer::prelude::Solve;
-use faer::{Mat, Side};
+use faer::Mat;
 
 use super::weight::hac_moment_covariance;
 use crate::iv::common::IvError;
@@ -14,7 +14,8 @@ use crate::shared::covariance::{
     HcScale, HcVariant, cluster_correction, cluster_meat, hc_meat, hc_scales, leverages,
     resolve_hac_lags, time_ordering,
 };
-use crate::shared::error::{ClusterSetting, CommonError, MatrixKind};
+use crate::shared::error::{ClusterSetting, CommonError};
+use crate::shared::gmm::{gmm_sandwich_covariance, invert_spd};
 use crate::shared::group_codes::GroupCodes;
 
 /// [`sandwich_covariance`]の戻り値。
@@ -43,26 +44,6 @@ pub(super) fn sandwich_covariance(
     let l = z.ncols();
     let k = x.ncols();
     let mut hac_lags_used = None;
-
-    // W = S_used⁻¹（点推定に実際に使った重み）。bread = X'ZWZ'X（`gmm_point_estimate`
-    // 内の`bread`と同型だが、こちらは後続のΩ̂サンドイッチでも使い回すため明示的な
-    // 逆行列として保持する（`two_sls/cov.rs`の`xtx_inverse`と同じ考え方）。
-    let s_inv = invert_spd(
-        s_used,
-        l,
-        CommonError::NearSingularMatrix {
-            matrix: MatrixKind::GmmWeight,
-        },
-    )?;
-    let zx = z.transpose() * x; // (l, k)
-    let bread = zx.transpose() * &s_inv * &zx; // (k, k) = X'ZWZ'X
-    let bread_inv = invert_spd(
-        &bread,
-        k,
-        CommonError::NearSingularMatrix {
-            matrix: MatrixKind::GmmBread,
-        },
-    )?;
 
     let omega_hat = match cov_type {
         CovType::Classical => {
@@ -100,21 +81,11 @@ pub(super) fn sandwich_covariance(
         }
     };
 
-    let meat_z = &s_inv * &omega_hat * &s_inv; // (l, l) = WΩ̂W
-    let meat = zx.transpose() * &meat_z * &zx; // (k, k) = X'ZWΩ̂WZ'X
-    let cov_params = &bread_inv * &meat * &bread_inv; // (k, k)
+    let cov_params = gmm_sandwich_covariance(z, x, s_used, &omega_hat)?;
     Ok(GmmCovariance {
         cov_params,
         hac_lags_used,
     })
-}
-
-/// 対称正定値行列`mat`（`dim`×`dim`）の逆行列を明示的に構築する。`gmm.rs`の
-/// モジュールdoc「標準誤差・検定統計量（cov_type対応）」参照（`two_sls/cov.rs`の`xtx_inverse`と
-/// 同じ考え方だが、`s_used`・`bread`の2箇所で使い回すため独立したヘルパーにした）。
-fn invert_spd(mat: &Mat<f64>, dim: usize, failure: CommonError) -> Result<Mat<f64>, IvError> {
-    let llt = mat.llt(Side::Lower).map_err(|_| failure)?;
-    Ok(llt.solve(Mat::<f64>::identity(dim, dim)))
 }
 
 /// HC0〜HC3ロバストなモーメント条件の分散共分散行列（cov_type用）: `Σᵢ scaleᵢ² zᵢzᵢ'`

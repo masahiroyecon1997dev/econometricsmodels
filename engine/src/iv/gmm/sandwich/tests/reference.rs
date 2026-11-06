@@ -394,7 +394,7 @@ fn fit_computes_hac_std_errors_matching_manual_sandwich_formula() {
     }
 }
 
-/// `gmm_wald_chi2_test`（F統計量、常にロバストWald検定・χ²）を、`GmmEstimator`とは
+/// 共有の`wald_chi2_test`（F統計量、常にロバストWald検定・χ²）を、`GmmEstimator`とは
 /// 独立に手計算したオラクルと数値照合する。
 #[test]
 fn fit_computes_f_statistic_matching_manual_wald_chi2_formula() {

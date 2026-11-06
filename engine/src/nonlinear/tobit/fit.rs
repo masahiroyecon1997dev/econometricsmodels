@@ -8,14 +8,13 @@ use super::fitted::TobitFitted;
 use super::input::TobitInput;
 use super::problem::TobitProblem;
 use super::scaling::TobitScaling;
-use super::statistics::{
-    log_likelihood, ols_initial_params, validate_has_uncensored_observations, wald_chi2_test,
-};
+use super::statistics::{log_likelihood, ols_initial_params, validate_has_uncensored_observations};
 use crate::nonlinear::common::{
     MleError, MleFitOptions, cov_params_for_type, run_solver, scores_needed,
     validate_cluster_cov_type, validate_mle_options, validate_sufficient_observations,
 };
 use crate::shared::inference;
+use crate::shared::wald::wald_chi2_test;
 use faer::Mat;
 use statrs::distribution::Normal;
 
@@ -133,7 +132,9 @@ pub(super) fn fit_tobit(
         // （0除算・自由度0のカイ二乗分布の構築を避ける）。
         (f64::NAN, f64::NAN)
     } else {
-        wald_chi2_test(&params, &cov_params, k_constant, df_model)?
+        // 検定対象は`β`の傾き係数（`cov_params`の`k_constant..k`）で、`σ`（`k`番目）は含まれない。
+        let beta = Mat::from_fn(k, 1, |i, _| params[i]);
+        wald_chi2_test(&beta, &cov_params, k_constant, df_model)?
     };
 
     Ok(TobitEstimator {

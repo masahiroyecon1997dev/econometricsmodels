@@ -10,12 +10,9 @@ use crate::shared::covariance::{
     HcVariant, classical_cov_params, cluster_cov_params, hac_cov_params, hc_cov_params,
     resolve_hac_lags, time_ordering,
 };
-use crate::shared::error::{ClusterSetting, CommonError, MatrixKind};
-use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
+use crate::shared::error::{ClusterSetting, CommonError};
 use crate::shared::validation::validate_cluster_groups;
-use faer::prelude::Solve;
-use faer::{Mat, Side};
-use statrs::distribution::{ContinuousCDF, FisherSnedecor};
+use faer::Mat;
 
 /// [`covariance_stage`]の戻り値。
 pub(super) struct CovStage {
@@ -98,49 +95,6 @@ pub(super) fn covariance_stage(
         df_inference,
         hac_lags_used,
     })
-}
-
-/// 傾き係数（切片を除く`df_model`個の係数）が全てゼロという帰無仮説のロバストWald検定を行い、
-/// F統計量とそのp値を返す。数式・実装方針は`shared/wald.rs`の`wald_f_test`と同型（`cov_type=
-/// Classical`のとき代数的に古典的F検定と一致することも同じ、`ensure_well_conditioned_
-/// symmetric_matrix`による事前の条件数チェックが必要な理由も同じ）。ただし`cov_params`の
-/// 対称化は行わない自前版で、共有の`wald_quadratic_form`（対称化込み）への置き換えは
-/// 数値が変わるため別の段階で行う。
-pub(super) fn wald_f_test(
-    params: &Mat<f64>,
-    cov_params: &Mat<f64>,
-    k_constant: usize,
-    df_model: usize,
-    df_inference: usize,
-) -> Result<(f64, f64), IvError> {
-    let beta_slopes = Mat::from_fn(df_model, 1, |i, _| *params.get(i + k_constant, 0));
-    let v_slopes = Mat::from_fn(df_model, df_model, |i, j| {
-        *cov_params.get(i + k_constant, j + k_constant)
-    });
-
-    ensure_well_conditioned_symmetric_matrix(
-        &v_slopes,
-        df_model,
-        MatrixKind::CoefficientCovariance,
-    )?;
-
-    let llt = v_slopes
-        .llt(Side::Lower)
-        .map_err(|_| CommonError::NearSingularMatrix {
-            matrix: MatrixKind::CoefficientCovariance,
-        })?;
-    let v_slopes_inv_beta = llt.solve(&beta_slopes);
-
-    let wald: f64 = (0..df_model)
-        .map(|i| (*beta_slopes.get(i, 0)) * (*v_slopes_inv_beta.get(i, 0)))
-        .sum();
-    let wald_statistic = wald / (df_model as f64);
-
-    let f_dist = FisherSnedecor::new(df_model as f64, df_inference as f64)
-        .map_err(|e| CommonError::internal(e.to_string()))?;
-    let wald_p_value = f_dist.sf(wald_statistic);
-
-    Ok((wald_statistic, wald_p_value))
 }
 
 #[cfg(test)]

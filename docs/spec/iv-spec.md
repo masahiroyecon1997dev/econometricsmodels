@@ -174,8 +174,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   値として渡し、中立な計算（古典の共分散、外積の和、Newey-WestのBartlettカーネル和、クラスターの
   蓄積と小標本補正、HACラグ数の解決、Wald二次形式）は`shared::covariance`・`shared::wald`に
   一本化する（加算順・`Par::Seq`の指定・対称化といった数値上の判断を1か所に固定するため）。
-  Wald二次形式は、2SLS・GMMに対称化の無い自前版が残っており、共有版への置き換えは数値が変わるため
-  別の段階で行う。
+  Wald二次形式（対称化込み）も共有版（`wald_f_test`・`wald_chi2_test`）を使う。
   OLS固有の調整はここに持ち込まない。GMMのモーメント共分散行列（`gmm/weight.rs`）と`cov_type`用の
   `Ω̂`（`gmm/sandwich.rs`）も同じ共有関数を`Z`で呼ぶ（`iv/CLAUDE.md`「共分散・検定の共有範囲」参照）。
 - **GMMのSEサンドイッチは常に一般形**: `Avar(β̂) = B⁻¹(X'ZWΩ̂WZ'X)B⁻¹`

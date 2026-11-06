@@ -6,7 +6,6 @@
 
 use faer::prelude::Solve;
 use faer::{Mat, Side};
-use statrs::distribution::{ChiSquared, ContinuousCDF};
 
 use super::weight::hac_moment_covariance;
 use crate::iv::common::IvError;
@@ -17,7 +16,6 @@ use crate::shared::covariance::{
 };
 use crate::shared::error::{ClusterSetting, CommonError, MatrixKind};
 use crate::shared::group_codes::GroupCodes;
-use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 
 /// [`sandwich_covariance`]の戻り値。
 pub(super) struct GmmCovariance {
@@ -199,48 +197,6 @@ fn gmm_cluster_omega(
     let (s_hat, n_groups) = cluster_meat(groups, l, |i, a| (*residuals.get(i, 0)) * (*z.get(i, a)));
     let correction = cluster_correction(n_groups, n, k);
     Mat::from_fn(l, l, |i, j| correction * (*s_hat.get(i, j)))
-}
-
-/// 傾き係数（切片を除く`df_model`個の係数）が全てゼロという帰無仮説のロバストWald検定
-/// （χ²、`df_model`で割らない生の二次形式）を行い、統計量とp値を返す。`gmm.rs`の
-/// モジュールdoc「標準誤差・検定統計量（cov_type対応）」参照——`two_sls/cov.rs`の`wald_f_test`と
-/// 数式は同型だが、F分布ではなくχ²分布を使い`df_model`で割らない点が異なる
-/// （`docs/spec/iv-spec.md`2章「GMMは常にロバストWald検定（χ²）とする」）。`cov_params`の対称化は
-/// 行わない自前版で、共有の`wald_quadratic_form`（対称化込み）への置き換えは数値が変わるため
-/// 別の段階で行う。
-pub(super) fn gmm_wald_chi2_test(
-    params: &Mat<f64>,
-    cov_params: &Mat<f64>,
-    k_constant: usize,
-    df_model: usize,
-) -> Result<(f64, f64), IvError> {
-    let beta_slopes = Mat::from_fn(df_model, 1, |i, _| *params.get(i + k_constant, 0));
-    let v_slopes = Mat::from_fn(df_model, df_model, |i, j| {
-        *cov_params.get(i + k_constant, j + k_constant)
-    });
-
-    ensure_well_conditioned_symmetric_matrix(
-        &v_slopes,
-        df_model,
-        MatrixKind::CoefficientCovariance,
-    )?;
-
-    let llt = v_slopes
-        .llt(Side::Lower)
-        .map_err(|_| CommonError::NearSingularMatrix {
-            matrix: MatrixKind::CoefficientCovariance,
-        })?;
-    let v_slopes_inv_beta = llt.solve(&beta_slopes);
-
-    let wald: f64 = (0..df_model)
-        .map(|i| (*beta_slopes.get(i, 0)) * (*v_slopes_inv_beta.get(i, 0)))
-        .sum();
-
-    let chi2 =
-        ChiSquared::new(df_model as f64).map_err(|e| CommonError::internal(e.to_string()))?;
-    let p_value = chi2.sf(wald);
-
-    Ok((wald, p_value))
 }
 
 #[cfg(test)]

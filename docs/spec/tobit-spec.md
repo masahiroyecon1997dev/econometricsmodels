@@ -212,9 +212,9 @@ Tobit固有の差分:
 
 - `log_likelihood`はTobit固有（打ち切り状態で分岐する`Contribution::log_lik`の総和、元のスケールで
   評価）。`aic = -2·ℓ + 2(k+1)`、`bic = -2·ℓ + log(n)·(k+1)`（`σ`を含む総パラメータ数）。
-- **モデル全体の有意性検定はWald検定**（`wald_chi2_test`、Tobit専用で`tobit/statistics.rs`内に閉じる）。
-  OLSの`wald_f_test`と同型の構成（`ensure_well_conditioned_symmetric_matrix`による悪条件検出→
-  Cholesky分解→二次形式）だが、`F`分布ではなく**標準正規分布に基づくカイ二乗分布**を使う
+- **モデル全体の有意性検定はWald検定**（共有の`shared::wald::wald_chi2_test`）。
+  OLSの`wald_f_test`と二次形式（`wald_quadratic_form`: `cov_params`の対称化→`ensure_well_conditioned_symmetric_matrix`による悪条件検出→
+  Cholesky分解）を共有するが、`F`分布ではなく**標準正規分布に基づくカイ二乗分布**を使う
   （自由度で正規化する`F = W/df_model`の変換を行わない）。帰無仮説は「切片以外の係数が同時にゼロ」、
   自由度は`df_model = k - k_constant`。`df_model == 0`のときのみスキップ。
 - **`wald_statistic`は`cov_type`依存**: `fit()`が計算済みの`cov_params`（要求した`cov_type`の
@@ -225,7 +225,7 @@ Tobit固有の差分:
   数学的に常に特異になる。`G`・`q`は入力だけから判定できるため`fit()`冒頭の
   `InsufficientClustersForInference`（`ValidationError`）で弾く（OLS/WLS/Logit/Probit/Tobit/IV
   横断で統一）。`G > q`でも傾き係数間の悪条件で`q×q`部分行列が数値的にほぼ特異になる
-  ケースは`wald_chi2_test`内の`ensure_well_conditioned_symmetric_matrix`（`CommonError::NearSingularMatrix`、
+  ケースは`wald_quadratic_form`内の`ensure_well_conditioned_symmetric_matrix`（`CommonError::NearSingularMatrix`、
   `MATRIX_NEAR_SINGULAR`）が
   backstop。
 
@@ -440,6 +440,7 @@ Tobit固有の差分:
   （`tests/nonlinear/test_tobit_validation.py`の`test_quasi_separation_tiny_noise_converges_to_true_values`
   参照）。`score_s`（勾配）は今回のスコープ外（`U_CLAMP`領域でのcost/gradientの数学的非整合は
   別の既知の課題、[`probit-spec.md`](./probit-spec.md)4章参照）のため変更していない。
-- **`wald_chi2_test`とOLSの`wald_f_test`の重複**: 部分行列抽出→悪条件検出→Cholesky→二次形式の
-  構成が同型で、異なるのは検定分布（カイ二乗 vs F）のみ。現時点ではTobit1箇所のみの利用のため
-  共通化は見送り。IV等で3箇所目の重複が生まれる場合に二次形式計算のコア部分の共通化を検討する。
+- **`wald_chi2_test`とOLSの`wald_f_test`の共有**: 部分行列抽出→対称化→悪条件検出→Cholesky→
+  二次形式は`shared::wald::wald_quadratic_form`に一本化し、検定分布（カイ二乗 vs F）だけを分ける。
+  以前はTobit・IVが対称化の無い自前版を持っていたが、傾き係数が準共線のとき非対称の丸め誤差が
+  条件数倍に増幅されるため共有版へ寄せた（`iv/CLAUDE.md`「共分散・検定の共有範囲」）。

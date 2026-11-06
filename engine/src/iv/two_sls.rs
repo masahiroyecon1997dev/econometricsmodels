@@ -29,7 +29,7 @@
 //! `covariance_stage`）。OLS本体（`engine::linear::ols`）の調整には寄せず、スコアに依存する部分
 //! （HCのレバレッジと小標本補正の分母）は`X̂`と`n-k`で決め、中立な計算（外積の和・カーネル和・
 //! クラスターの蓄積・Waldの二次形式）は共有関数を使う（`docs/spec/iv-spec.md`3.1節）。
-//! Wald F検定（`wald_f_test`）は`two_sls/cov.rs`。
+//! Wald F検定は共有の`shared::wald::wald_f_test`（`two_sls/fit.rs`が呼ぶ）。
 //!
 //! 第一段階の各`OlsEstimator`はそれ自体が正しい（ナイーブな）OLS回帰であり、
 //! （弱操作変数診断等で必要になる）SE・F統計量も含めてそのまま公開してよい

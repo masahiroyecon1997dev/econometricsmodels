@@ -562,7 +562,7 @@ def test_cluster_count_at_most_slopes_raises_validation_error(
     （engine側の`CommonError::InsufficientClustersForInference`）。
 
     `rank(Ŝ)≤G-1`のため全体Wald検定のq×q部分行列がG≤qで構造的に特異になる。
-    GもqもR行列計算なしで即座に判定できるため、`wald_chi2_test`内の
+    GもqもR行列計算なしで即座に判定できるため、`wald_quadratic_form`内の
     `ComputationError`ではなく`fit()`冒頭の`ValidationError`で弾く（mroz
     `hours`クラスターケースがこの経路。`G<q`側はOLSの同名テストで確認）。
     """
@@ -790,7 +790,7 @@ def test_scale_variance_raises_computation_error(cov_type):
     倍精度浮動小数点の限界を超えて数値的に特異になる（OLS/WLS と同じ理由・同じ
     凍結 CSV パターン、`test_ols_validation.py` 参照）。
 
-    Tobit の全体 Wald 検定が OLS の F 検定と同型でこの部分行列の反転を要求するため、
+    Tobit の全体 Wald 検定は OLS の F 検定と二次形式（`wald_quadratic_form`）を共有し、この部分行列の反転を要求するため、
     classical を含む全 cov_type で `ComputationError`
     （`MATRIX_NEAR_SINGULAR`、`matrix="COEFFICIENT_COVARIANCE"`）になる。
     `scale_variance_mild`

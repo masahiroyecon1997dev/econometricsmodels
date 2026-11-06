@@ -1,9 +1,9 @@
-//! 傾き係数（または任意の係数部分集合）に対するWald検定（F統計量）。
+//! 傾き係数（または任意の係数部分集合）に対するWald検定（F統計量・χ²統計量）。
 
 use faer::Mat;
 use faer::Side;
 use faer::prelude::Solve;
-use statrs::distribution::{ContinuousCDF, FisherSnedecor};
+use statrs::distribution::{ChiSquared, ContinuousCDF, FisherSnedecor};
 
 use crate::shared::error::{CommonError, MatrixKind};
 use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
@@ -13,6 +13,10 @@ use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 /// 部分行列）を返す。F検定（[`wald_f_test`]）も`χ²`検定も、この値から作る。`params`・
 /// `cov_params`の行/列は`k_constant`が1（切片あり）なら先頭が切片、0（切片なし）なら全パラメータが
 /// 検定対象になる。
+///
+/// `params`・`cov_params`は検定範囲（`k_constant..k_constant + df_model`）より大きくてよく、範囲外の
+/// 行・列は読まない（Tobitは`cov_params`の末尾に`σ`を持つが、検定対象に含めない）。`df_model`は
+/// 0より大きいこと（0だと空の行列を分解することになるので、呼び出し元で先に分岐する）。
 ///
 /// `cov_params`は理論上対称だが、`(X'X)⁻¹ Ŝ (X'X)⁻¹`のような行列積の丸め誤差で非対称に
 /// なりうる。下の`llt(Side::Lower)`は下三角しか読まないため、そのままだと片側の丸め誤差が
@@ -103,6 +107,28 @@ pub(crate) fn wald_f_test(
     Ok((f_statistic, f_p_value))
 }
 
+/// 傾き係数（または任意の係数部分集合）が全てゼロという帰無仮説のWald検定（χ²）を行い、
+/// 統計量（`df_model`で割らない生の二次形式）とp値を返す。
+///
+/// 検定の形は[`wald_f_test`]と同じで、検定分布だけが`χ²(df_model)`に変わる
+/// （残差自由度を持たない手法——GMM・Tobitのような漸近的な検定——が使う）。
+/// `df_model`は0より大きいこと（`ChiSquared::new`が失敗するので呼び出し元で
+/// 傾き係数が無いケースを先に分岐する）。
+pub(crate) fn wald_chi2_test(
+    params: &Mat<f64>,
+    cov_params: &Mat<f64>,
+    k_constant: usize,
+    df_model: usize,
+) -> Result<(f64, f64), CommonError> {
+    let wald = wald_quadratic_form(params, cov_params, k_constant, df_model)?;
+
+    let chi2 =
+        ChiSquared::new(df_model as f64).map_err(|e| CommonError::internal(e.to_string()))?;
+    let p_value = chi2.sf(wald);
+
+    Ok((wald, p_value))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -189,6 +215,50 @@ mod tests {
         let zero = Mat::<f64>::zeros(2, 2);
         assert!(matches!(
             wald_f_test(&params, &zero, 0, 2, 30),
+            Err(CommonError::NearSingularMatrix { .. })
+        ));
+    }
+
+    #[test]
+    fn wald_chi2_test_keeps_precision_in_the_far_tail() {
+        // `1.0 - cdf`では裾でp値が0.0に潰れる。傾き3個（`β=(10, 10, 10)`、`V=I`）で
+        // wald=300。R: `pchisq(300, 3, lower.tail = FALSE)` = 9.94875834632771e-65。
+        let params = Mat::from_fn(4, 1, |i, _| [0.0, 10.0, 10.0, 10.0][i]);
+        let cov = Mat::from_fn(4, 4, |i, j| if i == j { 1.0 } else { 0.0 });
+        let (wald, p) = wald_chi2_test(&params, &cov, 1, 3).unwrap();
+        assert!((wald - 300.0).abs() < 1e-9);
+        assert!((p / 9.948_758_346_327_71e-65 - 1.0).abs() < 1e-8);
+    }
+
+    #[test]
+    fn wald_chi2_test_is_the_f_test_statistic_times_the_slope_count() {
+        // 同じ二次形式から作るので、χ²統計量は`q × F`に（丸めの範囲で）一致する。
+        let params = Mat::from_fn(2, 1, |i, _| [1.0, 2.0][i]);
+        let cov = Mat::from_fn(2, 2, |i, j| if i == j { 4.0 } else { 3.0 });
+        let (f, _) = wald_f_test(&params, &cov, 0, 2, 30).unwrap();
+        let (wald, _) = wald_chi2_test(&params, &cov, 0, 2).unwrap();
+        assert!((wald - 2.0 * f).abs() < 1e-14);
+    }
+
+    #[test]
+    fn wald_chi2_test_symmetrizes_a_slightly_asymmetric_covariance() {
+        // `wald_f_test`と同じ入力（下三角2.8・上三角3.2）。β'Σ⁻¹β = 8/7（Σ=[[4,3],[3,4]]）。
+        let params = Mat::from_fn(2, 1, |i, _| [1.0, 2.0][i]);
+        let cov = Mat::from_fn(2, 2, |i, j| match (i, j) {
+            (0, 0) | (1, 1) => 4.0,
+            (0, 1) => 3.2,
+            _ => 2.8,
+        });
+        let (wald, _) = wald_chi2_test(&params, &cov, 0, 2).unwrap();
+        assert!((wald - 8.0 / 7.0).abs() < 1e-14);
+    }
+
+    #[test]
+    fn wald_chi2_test_rejects_a_near_singular_covariance_submatrix() {
+        let params = Mat::from_fn(2, 1, |_, _| 1.0);
+        let ill = Mat::from_fn(2, 2, |i, j| if i == j { [1e12, 1e-6][i] } else { 0.0 });
+        assert!(matches!(
+            wald_chi2_test(&params, &ill, 0, 2),
             Err(CommonError::NearSingularMatrix { .. })
         ));
     }

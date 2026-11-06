@@ -2,11 +2,9 @@
 
 use super::problem::TobitProblem;
 use crate::nonlinear::common::{MleError, checked_design_matrix_qr, compensated_sum};
-use crate::shared::error::{CommonError, MatrixKind};
-use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
-use faer::prelude::{Solve, SolveLstsq};
-use faer::{Mat, Side};
-use statrs::distribution::{ChiSquared, ContinuousCDF, Normal};
+use faer::Mat;
+use faer::prelude::SolveLstsq;
+use statrs::distribution::Normal;
 
 /// 非打ち切り観測（`y`が`lower`/`upper`いずれの境界にも一致しない観測）が1件も無い場合、
 /// Tobitモデルは典型的には識別不能になる（`MleError::NoUncensoredObservations`のdoc
@@ -123,80 +121,10 @@ pub(super) fn log_likelihood(
     compensated_sum((0..x.nrows()).map(|i| problem.contribution(i, params, &normal).log_lik))
 }
 
-/// モデル全体の有意性検定（切片以外の係数`β`が同時にゼロという帰無仮説のWald検定）。
-/// `docs/spec/nonlinear-common.md`5章「Tobitはこの共通コアから2点を意図的に
-/// 外す」の通り、Tobitは`llnull`（打ち切りがあると閉形式解を持たない）に基づく尤度比検定
-/// ではなく、`cov_params`から直接計算できるWald検定を使う（`AER::tobit`の`summary.tobit`と
-/// 同じ方式）。
-///
-/// `W = β_slopes' Σ_slopes⁻¹ β_slopes`（`β_slopes`は`params`の`k_constant`番目以降
-/// `df_model`個、`Σ_slopes`は`cov_params`（`(k+1)×(k+1)`、`β∪{σ}`空間）のうち対応する
-/// `df_model×df_model`の主小行列）。`σ`は`cov_params`の`k`番目の行・列にあるため、
-/// `df_model`個の範囲（`k_constant..k`）には含まれず、検定対象から自動的に除外される。
-/// OLSの`wald_f_test`と同型の構成（`ensure_well_conditioned_symmetric_matrix`による
-/// 悪条件検出→Cholesky分解）だが、検定分布はF分布ではなく標準正規分布に基づく
-/// カイ二乗分布（`docs/spec/nonlinear-common.md`4章「検定分布」、自由度で正規化する
-/// `F=W/df_model`の変換を行わない）。
-///
-/// `Logit`/`Probit`と異なりTobit専用（`llnull`を使わない検定方式のため`common.rs`には
-/// 置かない、`.claude/rules/rust-style.md`「系統内で共有するロジック」の対象は現時点で
-/// Tobitのみ）。
-///
-/// # Errors
-/// `Σ_slopes`が悪条件・特異な場合は`CommonError::NearSingularMatrix`
-/// （OLSの`wald_f_test`と同じ理由、理論上は正定値のはずだが浮動小数点演算の丸めによる
-/// 境界的な失敗に備えた防御的な扱い）。`ChiSquared::new`の失敗（`df_model<=0`）は
-/// 呼び出し元が`df_model>0`を事前に保証するため理論上到達不能。
-pub(super) fn wald_chi2_test(
-    params: &[f64],
-    cov_params: &Mat<f64>,
-    k_constant: usize,
-    df_model: usize,
-) -> Result<(f64, f64), MleError> {
-    let beta_slopes = Mat::from_fn(df_model, 1, |i, _| params[i + k_constant]);
-    let v_slopes = Mat::from_fn(df_model, df_model, |i, j| {
-        *cov_params.get(i + k_constant, j + k_constant)
-    });
-
-    ensure_well_conditioned_symmetric_matrix(
-        &v_slopes,
-        df_model,
-        MatrixKind::CoefficientCovariance,
-    )?;
-
-    let llt = v_slopes
-        .llt(Side::Lower)
-        .map_err(|_| CommonError::NearSingularMatrix {
-            matrix: MatrixKind::CoefficientCovariance,
-        })?;
-    let v_slopes_inv_beta = llt.solve(&beta_slopes);
-
-    let wald_statistic: f64 = (0..df_model)
-        .map(|i| (*beta_slopes.get(i, 0)) * (*v_slopes_inv_beta.get(i, 0)))
-        .sum();
-
-    let chi2 =
-        ChiSquared::new(df_model as f64).map_err(|e| CommonError::internal(e.to_string()))?;
-    let wald_p_value = chi2.sf(wald_statistic);
-
-    Ok((wald_statistic, wald_p_value))
-}
-
 #[cfg(test)]
 mod tests {
 
     use super::*;
-
-    #[test]
-    fn wald_chi2_test_keeps_precision_in_the_far_tail() {
-        // `1.0 - cdf`では裾でp値が0.0に潰れる。傾き3個（`β=(10, 10, 10)`、`V=I`）で
-        // wald=300。R: `pchisq(300, 3, lower.tail = FALSE)` = 9.94875834632771e-65。
-        let params = [0.0, 10.0, 10.0, 10.0];
-        let cov = Mat::from_fn(4, 4, |i, j| if i == j { 1.0 } else { 0.0 });
-        let (wald, p) = wald_chi2_test(&params, &cov, 1, 3).unwrap();
-        assert!((wald - 300.0).abs() < 1e-9);
-        assert!((p / 9.948_758_346_327_71e-65 - 1.0).abs() < 1e-8);
-    }
 
     #[test]
     fn ols_initial_params_falls_back_to_sigma_one_for_perfect_fit() {

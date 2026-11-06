@@ -164,8 +164,8 @@
 //!
 //! **F統計量は常にロバストWald検定（χ²、`df_model`で割らない生の二次形式）**
 //! （`docs/spec/iv-spec.md`2章で確定済み: 「GMMは3.2節でz分布と決定済みで古典的F検定の正当化が
-//! 無いため……常にWald版にする」）。`two_sls/cov.rs`の`wald_f_test`と異なり`FisherSnedecor`
-//! ではなく`ChiSquared(df_model)`を使い、`df_model`で割らない（`linearmodels`の
+//! 無いため……常にWald版にする」）。2SLSの`shared::wald::wald_f_test`と異なり共有の
+//! `wald_chi2_test`（`ChiSquared(df_model)`）を使い、`df_model`で割らない（`linearmodels`の
 //! `debiased=False`のときの`wald_statistic`と同じ規約、`run_linearmodels_benchmark.py`の
 //! モジュールdocstring参照）。
 //!

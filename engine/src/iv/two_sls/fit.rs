@@ -3,7 +3,7 @@
 //! テストは`fit/tests.rs`と`fit/tests/`にテーマ別で置く（`basic`・`reference`・`cov_type`・`validation`・`proptests`等）。
 
 use super::TwoSlsEstimator;
-use super::cov::{CovStage, covariance_stage, wald_f_test};
+use super::cov::{CovStage, covariance_stage};
 use super::sargan::sargan_test;
 use super::wu_hausman::wu_hausman_test;
 use crate::iv::common::{
@@ -15,6 +15,7 @@ use crate::shared::covariance::xtx_inverse;
 use crate::shared::error::CommonError;
 use crate::shared::goodness_of_fit::{is_perfect_fit, total_sum_of_squares};
 use crate::shared::inference::{InferenceTable, inference_table};
+use crate::shared::wald::wald_f_test;
 use faer::Mat;
 use statrs::distribution::StudentsT;
 

@@ -117,7 +117,7 @@
 //! - `input.rs`: `TobitInput`
 //! - `problem.rs`: `TobitProblem`（`CostFunction`/`Gradient`/`Hessian`）と観測ごとの尤度の寄与
 //! - `scaling.rs`: `TobitScaling`（標準化と逆変換）
-//! - `statistics.rs`: OLS初期値・対数尤度・Wald検定・非打ち切り観測の検査
+//! - `statistics.rs`: OLS初期値・対数尤度・非打ち切り観測の検査
 //! - `mills.rs`: 正規分布の裾の安定な計算（逆ミルズ比・切断正規の密度比）
 //! - `target.rs`: `MarginalEffectsTarget`・`predicted_value`・`w`/`s`
 //! - `marginal_effects.rs`: 限界効果（`overall`・`mean`・`median`）の計算
@@ -182,7 +182,7 @@ pub struct TobitEstimator {
     /// 残差自由度 `n-(k+1)`（`σ`を含む総パラメータ数を差し引く。AER::tobit/survregの
     /// `df.residual`と同じ規約、`docs/spec/tobit-spec.md`2章参照）
     df_resid: usize,
-    /// Wald検定統計量（`wald_chi2_test`のdocコメント参照）。`df_model==0`のときNaN
+    /// Wald検定統計量（`shared::wald::wald_chi2_test`のdocコメント参照）。`df_model==0`のときNaN
     wald_statistic: f64,
     /// Wald検定のp値（自由度`df_model`のカイ二乗分布、上側確率）。`df_model==0`のときNaN
     wald_p_value: f64,
@@ -251,7 +251,7 @@ impl TobitEstimator {
     /// - `cov_type=Cluster`でクラスター数が2未満: `CommonError::InsufficientClusters`
     /// - `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下:
     ///   `CommonError::InsufficientClustersForInference`（`rank(Ŝ) ≤ g - 1`のため全体
-    ///   Wald検定の`q×q`部分行列が構造的に特異。`wald_chi2_test`内の
+    ///   Wald検定の`q×q`部分行列が構造的に特異。`wald_quadratic_form`内の
     ///   `NearSingularMatrix`（`ComputationError`）に任せず`fit()`冒頭のバリデーションで弾く）
     /// - OLS初期値計算時に`x`が特異（完全な多重共線性等）: `MleError::SingularDesignMatrix`
     ///   （`ols_initial_params`参照）
@@ -260,7 +260,7 @@ impl TobitEstimator {
     ///   `MleError::SingularHessian`
     /// - `cov_type=Opg`でOPG行列（`Σᵢ sᵢsᵢ'`）が特異: `MleError::SingularOpgMatrix`
     /// - 傾き係数間の悪条件（極端なスケール差等）でWald検定用の係数分散共分散部分行列が
-    ///   数値的にほぼ特異: `CommonError::NearSingularMatrix`（`wald_chi2_test`参照。`g > q`
+    ///   数値的にほぼ特異: `CommonError::NearSingularMatrix`（`shared::wald::wald_quadratic_form`参照。`g > q`
     ///   でも起こりうるbackstop。`df_model==0`（切片以外の`β`が無い）のときはこの検定自体を
     ///   スキップし`wald_statistic`/`wald_p_value`はNaNになる）
     pub fn fit(input: TobitInput, options: MleFitOptions) -> Result<Self, MleError> {

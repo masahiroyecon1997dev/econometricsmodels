@@ -19,10 +19,10 @@ use crate::shared::group_codes::GroupCodes;
 /// 入力だけから判定できるため、`fit()`冒頭のバリデーション
 /// （`validate_cluster_cov_type` → `validate_cluster_count_covers_slopes`）が
 /// `CommonError::InsufficientClustersForInference`で弾く（
-/// 検証が無ければ`wald_chi2_test`内の`NearSingularMatrix`になる）。`wald_chi2_test`の
+/// 検証が無ければ`wald_quadratic_form`内の`NearSingularMatrix`になる）。その
 /// `ensure_well_conditioned_symmetric_matrix`側のbackstop（`g > q`だが悪条件で
-/// 数値的にほぼ特異なケース）は、`wald_f_test`と共有する純粋な線形代数
-/// ユーティリティであり`shared/linear_algebra.rs`の単体テスト・OLSの
+/// 数値的にほぼ特異なケース）は、`wald_f_test`と共有する`wald_quadratic_form`の内部
+/// （純粋な線形代数ユーティリティ）であり、`shared/linear_algebra.rs`の単体テスト・OLSの
 /// `fit_returns_computation_failed_for_extreme_scale_difference_in_f_test`で担保する
 /// （Tobitは`TobitScaling`が`x`を内部で列標準化するため、極端なスケール差による
 /// 悪条件をTobitの`fit()`経由で再現するのが困難で、Tobit固有テストは設けない）。

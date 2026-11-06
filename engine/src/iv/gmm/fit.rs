@@ -8,7 +8,7 @@ use statrs::distribution::Normal;
 use super::GmmEstimator;
 use super::hansen_j::hansen_j_test;
 use super::iterate::{GmmIteration, GmmType, gmm_iterate, gmm_point_estimate};
-use super::sandwich::{GmmCovariance, gmm_wald_chi2_test, sandwich_covariance};
+use super::sandwich::{GmmCovariance, sandwich_covariance};
 use super::weight::{WeightType, validate_weight_type};
 use crate::iv::common::{IvError, IvInput, hcat, mat_column_to_vec, validate_iv_fit_inputs};
 use crate::linear::ols::CovType;
@@ -16,6 +16,7 @@ use crate::shared::error::CommonError;
 use crate::shared::goodness_of_fit::{is_perfect_fit, total_sum_of_squares};
 use crate::shared::inference::{InferenceTable, inference_table};
 use crate::shared::validation::{GMM_MAX_ITER_MIN, MAX_ITER_LIMIT};
+use crate::shared::wald::wald_chi2_test;
 
 /// [`GmmEstimator::fit`]の本体。契約（エラー条件を含む）は`fit`のdocコメント参照。
 pub(super) fn fit_gmm(
@@ -159,7 +160,7 @@ pub(super) fn fit_gmm(
         // 2SLSと同様NaNを返す（0除算を避ける）。
         (f64::NAN, f64::NAN)
     } else {
-        gmm_wald_chi2_test(&beta, &cov_params, k_constant, df_model)?
+        wald_chi2_test(&beta, &cov_params, k_constant, df_model)?
     };
 
     Ok(GmmEstimator {

@@ -430,7 +430,7 @@ C統計量は事後診断のメソッド、`first_stage()`は`Computed`変種、
     n=1,000,000・k=5のIV(hc1)は1.06秒→0.92秒（第二段階の不要な標準誤差・F検定・適合度の計算が消えた）。
     FWL不変性（ダミー入り`n_absorbed=0`＝within＋`n_absorbed`）を単体テストで固定した。
   - 残り: Wu-Hausmanの回帰・Waldは呼び出し側の回帰エンジンのまま（FEIVでは`FeEstimator`）。
-- **GMMコアの継ぎ目（実装済み・未コミット）**: `engine/src/shared/gmm.rs`に`gmm_sandwich_covariance(z, x, s_used, omega)`
+- **GMMコアの継ぎ目（完了。コミット済み）**: `engine/src/shared/gmm.rs`に`gmm_sandwich_covariance(z, x, s_used, omega)`
   （`B⁻¹(X'ZWΩ̂WZ'X)B⁻¹`。`Ω̂`は受け取る。スケールは`n`で割らない和＋小標本補正込み）、
   `hansen_j_test(z, residuals, s_used, df)`（`IvInput`を外し自由度を受け取る。丁度識別の分岐は呼び出し側）、
   `invert_spd`を切り出した。`Ω̂`の組み立てと小標本補正の分母は`iv/gmm/sandwich.rs`に残る。数値は不変
@@ -439,13 +439,40 @@ C統計量は事後診断のメソッド、`first_stage()`は`Computed`変種、
   なお`cov_params`は丸めで厳密には非対称（従来どおり。Waldは共有版が対称化する）。使う側が対称性を要するなら
   FE-GMMで対称化する。これで#628のA・Bと継ぎ目はすべて完了。
 
-### 9.3 push済み・未pushのコミット
+- **#363（Cragg-Donald＋Stock-Yogo、エンジンのみ。完了。コミット済み）**: `shared/weak_instruments.rs`（行列版`cragg_donald(y_endog, x_exog, z, n_absorbed)`）、
+  `shared/stock_yogo.rs`（2SLSのバイアス・サイズの2表）、`iv/common/weak_instruments.rs`（`compute_cragg_donald(&IvInput)`）。
+  結果は関数を公開するだけで、estimatorにフィールドは足さない（公開は#366）。定義できない入力は`None`。
+  linearmodels 7.1の`cragg_donald_f`と相対差1e-15で一致。臨界値はNBER原稿（TWP 284、2002年10月改訂版）の
+  Table 1・2をPDFから転記し、`ivreg2`のソースは取得できなかったので全セルの独立な照合はしていない
+  （単調性・滑らかさ・既知値で検証）。公開ドキュメント（`docs/methods/`）は#366でPythonに公開するときに書く。
 
-- push済み: `1bf01e91`（本ノートの決定事項の追記）、`91a76a9d`（#628 A 手順1）、`8d8d8dc8`（#628 A 手順2）、`c1f13b84`（本ノートの進捗）、`1631e728`（#628 B）。
+### 9.3 push済みのコミット
+
+`1bf01e91`（決定事項）、`91a76a9d`（#628 A 手順1）、`8d8d8dc8`（A 手順2）、`c1f13b84`（進捗）、`1631e728`（#628 B）、
+`5075ca28`（GMMコアの継ぎ目。#628はクローズ済み）、続けて#363のコミット（`git log`で確認）。
 
 ### 9.4 この後の順序（5.3の実装順）
 
-1. #628は完了（FE-GMM完成後の検証（#388）だけが残る）。#363〜#365の実装（制約付き）は並行できる。
+1. #363は完了（クローズ）。次は#364（Kleibergen-Paap。linearmodels 7.1に`_kleibergen_paap`があり参照にできる）→#365（MOP）。
+   制約（行列受け取り・`n_absorbed`・共有のクラスター/HAC meat）は各issueにコメント済み。
 2. #522 → #442（その前に5.4の`PanelIndex`のK次元化を決める。グループsingletonはエラー維持）。
-3. IV本体の残り（#366・#367・#368・#369）。
+3. IV本体の残り: #366（バインディング）→#367（ivDiag照合）、#368・#369。
 4. FE-2SLS（#370〜#372、#374、#375 → #373 → #376〜#380）、続いてFE-GMM（#381〜#388）。
+
+### 9.5 残る論点・引き継ぎ（compact用のメモ）
+
+- **#366で決めること**（#366にコメント済み）:
+  - CD統計量の公開の形: `fit()`時のプロパティなら`None`のまま（Wu-Hausman・Sarganと同じ。`fit()`が通った入力では実質`None`にならない）、
+    事後診断メソッドならエラー（`Result`＋理由の列挙型＋カタログの`code`）にする。後者なら`compute_cragg_donald`の戻り値を
+    `Option`から`Result`へ変える。臨界値が表に無い組み合わせはエラーにせず、統計量だけ返して臨界値の欄を空にする案。
+  - 公開ドキュメント（`docs/methods/iv.md`の定義式、出典）はこの公開のときに書く（出典は`iv-spec.md`3.4.1に記載済み）。
+- **Stock-Yogoの表**: 第二の独立な出典で全セルを照合していない（`ivreg2`のソースはSSLエラーで取得できなかった）。
+  単調性・滑らかさ・既知値で検証。独立な出典（`ivreg2`の出力、Stataのマニュアル、他言語の実装）が手に入れば、全セル照合を足す。
+- **ルートCLAUDE.mdの3章**: `shared/`の列挙に`instrumental_variables.rs`・`gmm.rs`・`weak_instruments.rs`・`stock_yogo.rs`が載っていない
+  （CLAUDE.mdの編集は利用者の承認が要る）。
+- **未起票の候補**: HC2/HC3の`1 - h`のガード（#612項目2）。#628のレビューで見送った小さな重複
+  （信頼水準の範囲検査が5か所、`partial_f_statistic`の制限モデルの不要な`(X'X)⁻¹`、Sargan・Hansen Jの結果型の二重化、
+  `df_model==0`の分岐を共有関数へ寄せる案、`shared/gmm.rs`の`cov_params`の対称化）は、必要になったら起票する。
+- **一時スクリプト**（リポジトリ外、`/tmp/claude-1000/-workspaces-econometricsmodels/a59ac130-80bd-4651-8271-18b321bf492f/scratchpad/`）:
+  `snapshot.py`（IV/GMM/FE/RE/OLS/Tobit/悪条件176ケース）・`compare_snap.py`・`sy/`（Stock-Yogo表の抽出・検証）。失われたら作り直す。
+- **コミット手順**: 署名はホスト端末の確認が要る。署名に失敗したら止まって報告する（再試行・回避はしない）。

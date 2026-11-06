@@ -278,10 +278,59 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   引き継ぐ）、(2) `OlsEstimator`が係数の分散共分散行列全体を公開していないため。
   `estimator="2sls"`/`estimator="gmm"`ともに同じ計算方式（`engine::iv::common::
   compute_first_stage`を共有）。
-- **v1のスコープ**: 生の部分F統計量のみ返す。Stock-Yogo臨界値テーブルとの照合（弱操作変数の
-  合否判定）・複数内生変数の同時検定（Cragg-Donald統計量等）はv1スコープ外。
+- **v1のスコープ**: 生の部分F統計量のみ返す。Cragg-Donald統計量とStock-Yogo臨界値はエンジンに
+  実装済み（3.4.1節）だが、Pythonには未公開（バインディングは別途）。
 - `x_exog=[]`かつ`include_intercept=false`（制限モデルに回帰変数が1つも無い）の退化ケース
   はSSRを`y_endog`自体の二乗和として直接計算する特別扱いをしている。
+
+#### 3.4.1 Cragg-Donald統計量とStock-Yogo臨界値（エンジンのみ）
+
+内生変数が複数あるとき、内生変数ごとの部分Fでは見えない、操作変数群全体としての弱さを調べる診断。
+
+- **定義**: 外生変数`X`（定数列を含む。平均を引かず、他の列と同じく偏回帰で落とす）で内生変数`Y`と
+  除外操作変数`Z`を直交化し、`Ỹ`を`Z̃`に回帰した当てはめ値`Ŷ`・残差`E`から`A=Ŷ'Ŷ`、`S=E'E`、
+  `G=S^{-1/2}'AS^{-1/2}`（`S=LL'`のCholeskyで`L⁻¹AL⁻ᵀ`）を作り、
+  `CD = λ_min(G)·(n − k_exog − q − n_absorbed)/q`（`q`は除外操作変数の数）。Stataの`ivreg2`の
+  "Cragg-Donald Wald F statistic"と同じ定義で（リポジトリで数値を照合したのはlinearmodelsだけ）、
+  内生変数が1個なら部分F統計量に一致する。`G`は半正定値なので、丸めで最小固有値が負になったら0に
+  打ち切る。ランクの判定の前に各列をノルム1にそろえるので、列の単位に依存しない。
+  `n_absorbed`は固定効果で吸収したパラメータ数（固定効果が無ければ0）。p値は無い（検定ではない）。
+- **`cov_type`に依存しない**（等分散前提。3.4節と同じ判断）。ロバスト版はKleibergen-Paapと
+  Montiel Olea-Pflueger（別途）。
+- **定義できないとき`None`**（`fit()`は失敗させない診断として扱う。理由は区別しない）: 内生変数が
+  無い、識別不足（`q < k`）、自由度が1未満、`X`がフルランクでない、`Z`または`Y`の列が`X`の張る空間に
+  ほぼ入っている（直交化で元のノルムの`√ε`未満）、`Z̃`がフルランクでない、`S`が数値的に特異
+  （内生変数が共線。固有値で確かめる）、いずれかの内生変数の第一段階が完全フィット
+  （`SSR <= q·ε·SST`）、入力に非有限値がある。理由を利用者に示す必要が出たら、`None`を理由つきの
+  `Err`に変える。正本はここ（`cragg_donald`のdocと`iv/CLAUDE.md`は要点だけ）。
+- **臨界値**（`shared/stock_yogo.rs`）: 2SLSの相対バイアス（`b`=0.05/0.10/0.20/0.30。内生変数1〜3個、
+  `K2`が`n+2`〜30）と、5%のWald検定のサイズ歪み（`r`=0.10/0.15/0.20/0.25。内生変数1〜2個、
+  `K2`が`n`〜30）の2表のみ。表に無い組み合わせは`None`。統計量が臨界値を超えれば5%水準で
+  「操作変数は弱い」を棄却する。LIMLとFullerの表は、そのような推定量が無いので持たない。
+- **値の出典と検証**: 表は著者のワーキングペーパー（NBER Technical Working Paper 284、2001年8月、
+  2002年10月改訂版）のTable 1・Table 2を、PDFから機械的に取り出して転記した。第二の独立な出典
+  （`ivreg2`のソース）は取得できなかったため、全セルの独立な照合はしていない。代わりに、欠損セルの
+  位置・水準と`K2`と内生変数の数に対する単調性・隣り合う`K2`の差の滑らかさ・広く引用される値との
+  一致を単体テストで固定した（`shared/stock_yogo.rs`）。
+- **統計量の検証**: linearmodels 7.1の`cragg_donald_f`と、エンジンの単体テストと同じデータで
+  相対差1e-15（内生変数1個・2個）で一致する。その値をテストに定数として埋めて回帰ガードにした
+  （`weak_instruments.rs`）。単体テストは、閉形式（2×2の固有値）、
+  内生変数1個での部分Fとの一致、`n_absorbed`の自由度、Frisch-Waugh-Lovell（個体ダミー入りと
+  within変換+`n_absorbed`）、列のスケール不変性（単位が1e-14〜1e9違う列を含む）、操作変数が
+  無関係でも非負、`q=1`で除外操作変数が`X`の張る空間にある場合、内生変数の一方だけ完全フィット、
+  非有限値、`None`になる各条件を固定する。Pythonからの数値照合はバインディングの後（別途）。
+
+出典:
+
+- Stock, J. H. and Yogo, M. (2005), "Testing for Weak Instruments in Linear IV Regression", in
+  Andrews, D. W. K. and Stock, J. H. (eds.), *Identification and Inference for Econometric Models:
+  Essays in Honor of Thomas Rothenberg*, Cambridge University Press（臨界値表とg_min統計量の定義）。
+  ワーキングペーパー版はNBER Technical Working Paper 284。
+- Cragg, J. G. and Donald, S. G. (1993), "Testing Identifiability and Specification in Instrumental
+  Variable Models", *Econometric Theory* 9(2), 222-240（ランク統計量）。
+- Baum, C. F., Schaffer, M. E. and Stillman, S. (2007), "Enhanced routines for instrumental
+  variables/generalized method of moments estimation and testing", *Stata Journal* 7(4), 465-506
+  （`ivreg2`の"Cragg-Donald Wald F statistic"との対応）。
 
 ### 3.5 過剰識別検定（`overid_statistic`/`overid_p_value`）
 
@@ -432,7 +481,7 @@ error.rs`）:
 
 ## 5. 未実装・未対応
 
-- Stock-Yogo臨界値テーブルとの照合（弱操作変数の合否判定）
-- 複数内生変数の同時検定（Cragg-Donald統計量等）
+- Cragg-Donald統計量とStock-Yogo臨界値のPython公開（エンジンは実装済み、3.4.1節）
+- Kleibergen-Paap統計量・Montiel Olea-Pflueger effective F
 - Wu-Hausman検定のGMM対応（`estimator="gmm"`では常に`None`）
 - Wu-Hausman検定の変数ごとのサブセット検定（現状は内生変数全体のジョイント検定のみ）

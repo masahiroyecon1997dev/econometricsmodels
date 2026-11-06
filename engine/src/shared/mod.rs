@@ -21,5 +21,7 @@ pub(crate) mod instrumental_variables;
 pub(crate) mod least_squares;
 pub(crate) mod linear_algebra;
 pub(crate) mod linear_program;
+pub(crate) mod stock_yogo;
 pub(crate) mod validation;
 pub(crate) mod wald;
+pub(crate) mod weak_instruments;

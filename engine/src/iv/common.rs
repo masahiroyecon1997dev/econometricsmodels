@@ -17,6 +17,7 @@ mod input;
 #[cfg(test)]
 pub(crate) mod proptest_support;
 mod validation;
+mod weak_instruments;
 
 pub use error::IvError;
 pub use estimate::IvEstimate;
@@ -24,3 +25,4 @@ pub use first_stage::{FirstStageResult, compute_first_stage};
 pub use input::IvInput;
 pub(crate) use input::{hcat, mat_column_to_vec, mat_to_columns, without_baked_in_intercept};
 pub use validation::validate_iv_fit_inputs;
+pub use weak_instruments::{CraggDonald, StockYogoCriticalValues, compute_cragg_donald};

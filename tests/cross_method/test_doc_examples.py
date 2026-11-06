@@ -44,14 +44,18 @@ def _run_in_subprocess(page: Path, index: int, code: str, workdir: Path):
             [sys.executable, "-I", str(script)],
             cwd=workdir,
             capture_output=True,
-            text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=SUBPROCESS_TIMEOUT_SECONDS,
             check=False,
         )
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as error:
+        stderr = error.stderr or ""
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode("utf-8", errors="replace")
         pytest.fail(
             f"{page.name}: code block {index} did not finish within "
-            f"{SUBPROCESS_TIMEOUT_SECONDS}s in a subprocess"
+            f"{SUBPROCESS_TIMEOUT_SECONDS}s in a subprocess:\n{stderr[-2000:]}"
         )
     if done.returncode != 0:
         pytest.fail(
@@ -63,11 +67,12 @@ def _run_in_subprocess(page: Path, index: int, code: str, workdir: Path):
 @pytest.mark.parametrize("page", PAGES, ids=lambda p: p.name)
 def test_python_examples_run(page, capsys, tmp_path):
     namespace: dict = {}
-    for index, match in enumerate(
-        CODE_BLOCK.finditer(page.read_text(encoding="utf-8"))
-    ):
+    text = page.read_text(encoding="utf-8")
+    in_subprocess = 0
+    for index, match in enumerate(CODE_BLOCK.finditer(text)):
         block = match.group("code")
         if match.group("subprocess"):
+            in_subprocess += 1
             _run_in_subprocess(page, index, block, tmp_path)
             continue
         try:
@@ -78,4 +83,9 @@ def test_python_examples_run(page, capsys, tmp_path):
                 f"{page.name}: code block {index} failed: "
                 f"{type(error).__name__}: {error}"
             )
+    # コメントの直後に空行を入れる、綴りを間違える等で、印がどのブロックにも結び付かないと、
+    # そのブロックは黙ってこのプロセスで`exec`される。印の数と別プロセスで走らせた数を揃える。
+    assert text.count("doc-test: subprocess") == in_subprocess, (
+        f"{page.name}: a doc-test marker is not directly followed by a code block"
+    )
     capsys.readouterr()

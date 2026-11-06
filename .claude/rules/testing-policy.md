@@ -108,7 +108,7 @@ Issue番号・内部管理ドキュメント（`docs/planning/specs/`配下の�
 - **行列の葉は、すべてテストで比較する。** 読み込んだ行列が比較されないと、検証した気になるだけで何も検証しない。`assert_cov_params_close`が比較した行列を記録し、全体実行の`pytest tests --check-cov-coverage`（CIで有効）が、読み込んだのに比較されなかった葉を失敗として報告する（絞り込み実行では無効）。リファレンスの行列が本実装の定義と異なる、または手計算でも本実装と同じ計算方法になり独立なリファレンスにならない葉は、行列のフィクスチャに入れず（生成側で落とす）、`tests/support/_fixture_cov.py`の`NO_COV_LEAVES`に理由つきで登録し、`docs/guide/verification-details.md`の「Not compared against a second reference」に載せる。登録した葉に行列があると、登録されていない葉に行列が無いと、読み込み時に失敗する。
 - **フィクスチャを生成するスクリプトと、生成されたJSON自体は別の場所に置く**。生成スクリプトは`benchmark/<系統>/fixtures/generate_<手法名>_fixtures.py`（コード、`benchmark/`側で管理。系統ディレクトリ構成は`.claude/skills/reference-benchmark/SKILL.md`参照）、生成物は`tests/fixtures/benchmarks/<手法名>.json`（データ、テスト側で管理）。
 - **合成データセット自体も同様にCSVとしてtests側（`tests/fixtures/benchmarks/data/`）に固定する**（`benchmark/<系統>/freeze.py`で生成）。理由: ジェネレータ側のコードが将来変わっても、既に固定したフィクスチャJSONの期待値と無言で不整合にならないようにするため。
-  - **Wooldridgeデータセットはこの固定化の対象外**とする（`wooldridge`パッケージ自体はMITライセンスだが、同梱される実データの著作権は原典の教科書側にある可能性があり、フィルタ後の部分集合であってもMITライセンスの本リポジトリにCSVとして再配布してよいか未確認のため。ユーザー確認済み）。Wooldridgeデータは引き続き`load_wooldridge.py`経由で都度ロードする。`wooldridge`パッケージ自体はtest依存グループに含め標準CIで常にインストールする（実データはパッケージのwheel内に留まりリポジトリへ再配布するわけではないため、上記の再配布可否の制約とは無関係）。`pytest.importorskip("wooldridge")`は、test依存グループを経由しない実行環境向けの防御的フォールバックとして残す。
+  - **Wooldridgeデータセットはこの固定化の対象外**とする（`wooldridge`パッケージ自体はMITライセンスだが、同梱される実データの著作権は原典の教科書側にある可能性があり、フィルタ後の部分集合であってもMITライセンスの本リポジトリにCSVとして再配布してよいか未確認のため。ユーザー確認済み）。Wooldridgeデータは引き続き`load_wooldridge.py`経由で都度ロードする。`wooldridge`パッケージ自体はtest依存グループに含め標準CIで常にインストールする（実データはパッケージのwheel内に留まりリポジトリへ再配布するわけではないため、上記の再配布可否の制約とは無関係）。`wooldridge`はtest依存グループの必須の依存で、無い環境ではスキップせず`ImportError`で失敗する（下の「テストをスキップしない」参照）。
 - 各フィクスチャJSONには`_meta`フィールドを含め、少なくとも以下を記録する。
   - `generated_at`: 生成日時（ISO 8601）
   - リファレンス実装のバージョン（例: `statsmodels_version`）
@@ -147,12 +147,12 @@ Issue番号・内部管理ドキュメント（`docs/planning/specs/`配下の�
 
 テストは原則スキップしない。スキップは実行結果の末尾に件数が出るだけなので、重要なテストが動かなくなっても気づけない（実際に、`_lib`をreleaseビルドで入れ直しただけで、デバッグビルド専用の関数に依存する33件が黙ってスキップされ、他は全て通った）。実行できないテストは、スキップではなく失敗にして気づけるようにする。
 
-- テストコード・フィクスチャ・ヘルパーに`pytest.skip`・`pytest.mark.skip`・`pytest.mark.skipif`・`pytest.importorskip`を新しく書かない。Rustの`#[ignore]`も同様（現状は0件）。
+- テストコード・フィクスチャ・ヘルパーに`pytest.skip`・`pytest.mark.skip`・`pytest.mark.skipif`・`pytest.importorskip`・`pytest.xfail`・`pytest.mark.xfail`（`pytest.param(..., marks=...)`で付けるものを含む）を新しく書かない。xfailも、通らないテストを失敗として報告しないので、スキップと同じく黙って見えなくなる。Rustの`#[ignore]`も同様（現状は0件）。
 - 実行できない条件は、失敗にする。必須の依存（`test`グループのパッケージ）は通常のimportにして、無ければ`ImportError`で落とす。ビルドの種類などの環境の前提は、満たさないときに、直し方を示すメッセージ付きで落とす。
 - 一部のパラメータの組み合わせだけが成り立たないときは、テスト内で`skip`せず、パラメータ化の段階で成り立つ組み合わせだけを渡す（スキップになるケースを生成しない）。
 - ドキュメントのコード例には、実行しないブロックを作らない。ワーカープロセスを起動する例のように`exec`で動かせないものは、ブロックの直前の行に`<!-- doc-test: subprocess -->`を置き、そのブロックだけで完結したスクリプトとして別プロセスで実行する（`tests/cross_method/test_doc_examples.py`）。
 - 実行結果の`skipped`は0件を期待する。0件でないときは原因を調べる（全体実行で件数が変わったら、環境の違い、特に`_lib`のビルドの種類を最初に疑う）。
-- CIの`pytest`は`--check-no-skips`で、スキップ・xfailが1件でもあれば失敗にする（`tests/conftest.py`）。デバッグビルド専用の関数（`raise_error_for_test`等）が無い環境では、該当のテストはスキップではなく、入れ直し方つきの失敗になる。
+- CIの`pytest`は`--check-no-skips`で、スキップ・xfail（xpassを含む）が1件でもあれば失敗にする（`tests/conftest.py`）。デバッグビルド専用の関数（`raise_error_for_test`等）が無い環境では、該当のテストはスキップではなく、入れ直し方つきの失敗になる。
 
 ## property-basedテスト（`proptest`）
 

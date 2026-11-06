@@ -683,6 +683,14 @@ _COV_STATE_NAMES = [
 ]
 
 
+def test_results_without_cov_params_are_all_pickle_samples() -> None:
+    """`_RESULTS_WITHOUT_COV_PARAMS`の名前は、どれも`SAMPLES`の結果クラスである。
+
+    結果クラスを改名・削除したときに、古い名前が黙って残らないようにする。
+    """
+    assert _RESULTS_WITHOUT_COV_PARAMS <= set(_RESULT_NAMES)
+
+
 @pytest.mark.parametrize("name", _RESULT_NAMES)
 def test_every_result_class_is_listed_by_whether_it_keeps_cov_params(
     samples: dict[str, object], name: str

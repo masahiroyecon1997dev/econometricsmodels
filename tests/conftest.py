@@ -52,7 +52,8 @@ _TEST_HOOK_NAMES = ("raise_error_for_test", "panic_for_test")
 _NO_TEST_HOOKS = (
     "_libがデバッグビルドではない(release/最適化ビルド)ため、テスト専用関数"
     "(raise_error_for_test・panic_for_test)がない。`uv run maturin develop`で"
-    "入れ直す"
+    "入れ直し、`uv run --no-sync pytest`で実行する(`uv run`は拡張をreleaseで"
+    "再ビルドすることがある)"
 )
 
 
@@ -91,23 +92,32 @@ def _is_full_run(config: pytest.Config) -> bool:
     return all(Path(arg).resolve() == tests_dir for arg in config.args)
 
 
-def _skipped_test_ids(config: pytest.Config) -> list[str]:
-    """スキップ・xfailになったテストのnode id。"""
-    reporter = config.pluginmanager.get_plugin("terminalreporter")
-    if reporter is None:
-        return []
-    return [
-        report.nodeid
-        for key in ("skipped", "xfailed")
-        for report in reporter.stats.get(key, [])
-        if hasattr(report, "nodeid")
-    ]
+# スキップ・xfail（xpassを含む）になったテストのnode id。terminalreporter（pytest本体の
+# 内部）には頼らず、報告のhookで自前に数える（`-p no:terminal`でも、xdistのcontrollerでも動く）。
+_SKIPPED_SEEN: list[str] = []
+
+
+def pytest_sessionstart(session: pytest.Session) -> None:
+    _SKIPPED_SEEN.clear()
+
+
+def _note_skip(report: pytest.TestReport | pytest.CollectReport) -> None:
+    if report.skipped or hasattr(report, "wasxfail"):
+        _SKIPPED_SEEN.append(report.nodeid)
+
+
+def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+    _note_skip(report)
+
+
+def pytest_collectreport(report: pytest.CollectReport) -> None:
+    _note_skip(report)
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     config = session.config
     if exitstatus == 0 and config.getoption("--check-no-skips"):
-        skipped = _skipped_test_ids(config)
+        skipped = list(_SKIPPED_SEEN)
         if skipped:
             config.stash[_SKIPPED] = skipped
             session.exitstatus = pytest.ExitCode.TESTS_FAILED

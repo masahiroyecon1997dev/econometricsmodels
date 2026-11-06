@@ -183,18 +183,16 @@ def with_cluster_groups(
 def wooldridge_loader() -> Callable[[str], pl.DataFrame]:
     """`wooldridge`パッケージ（test依存グループ）を使ってロード関数を返す。
 
-    `wooldridge`はtest依存グループに含まれ標準CIで常にインストールされるため、
-    通常はskipされない。`pytest.importorskip`は、想定外の理由でインストールが
-    欠けた環境（test依存グループを経由しないpytest実行等）向けの防御的フォール
-    バックとして残している。Wooldridgeデータはデータの再配布ライセンスが未確認
-    のためCSVとして固定せず（`benchmark/linear/freeze.py`のdocstring参照）、
+    `wooldridge`はtest依存グループの必須の依存で、標準CIで常にインストールされる。
+    インストールされていない環境（test依存グループを経由しないpytest実行等）では、
+    スキップせず`ImportError`で失敗する。Wooldridgeデータはデータの再配布ライセンスが
+    未確認のためCSVとして固定せず（`benchmark/linear/freeze.py`のdocstring参照）、
     都度ロードする。
 
     複数のデータセット名を扱うテスト（`pytest.mark.parametrize`でデータセット名を
     振る等）向けにロード関数自体を返す。1件だけロードする場合は
     `load_wooldridge_dataset`を使う方が簡潔。
     """
-    pytest.importorskip("wooldridge")
     from benchmark.common.load_wooldridge import load
 
     return load

@@ -668,7 +668,32 @@ def test_restore_checks_the_type_of_every_field(
             _lib._restore_pickled(kind, version, broken)
 
 
-_COV_STATE_NAMES = sorted(name for name in SAMPLES if name.endswith("Result"))
+# 係数の分散共分散行列（`cov_params`）を状態に持たない結果クラス。推定量の結果ではなく、
+# 検定・限界効果の結果なので係数の共分散行列を持たない。
+_RESULTS_WITHOUT_COV_PARAMS = frozenset(
+    {
+        "CensoringFitCategoryResult",
+        "CensoringFitCheckResult",
+        "MarginalEffectsResult",
+    }
+)
+_RESULT_NAMES = sorted(name for name in SAMPLES if name.endswith("Result"))
+_COV_STATE_NAMES = [
+    name for name in _RESULT_NAMES if name not in _RESULTS_WITHOUT_COV_PARAMS
+]
+
+
+@pytest.mark.parametrize("name", _RESULT_NAMES)
+def test_every_result_class_is_listed_by_whether_it_keeps_cov_params(
+    samples: dict[str, object], name: str
+) -> None:
+    """結果クラスの状態に`cov_params`があるかどうかが、`_RESULTS_WITHOUT_COV_PARAMS`の記載と一致する。
+
+    結果クラスを足したときに、`cov_params`の形の検査（下のテスト）の対象から黙って漏れない
+    ようにする。
+    """
+    _, _, state = _reduce_args(samples[name])
+    assert ("cov_params" in state) == (name not in _RESULTS_WITHOUT_COV_PARAMS)
 
 
 @pytest.mark.parametrize("name", _COV_STATE_NAMES)
@@ -685,8 +710,6 @@ def test_restore_rejects_a_malformed_cov_params(
 ) -> None:
     """`cov_params`は行ごとの`bytes`のタプル。形の違う値は、別のフィールドの型違いと同じく拒否する。"""
     kind, version, state = _reduce_args(samples[name])
-    if "cov_params" not in state:
-        pytest.skip("this result class keeps no cov_params field")
     with raises_error(ErrorCode.PICKLE_FORMAT_MISMATCH, object=kind):
         _lib._restore_pickled(kind, version, {**state, "cov_params": broken})
 

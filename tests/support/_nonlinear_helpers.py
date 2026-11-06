@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import numpy as np
 import polars as pl
-import pytest
 from _assertions import assert_close
 from _constants import MARGEFF_AT
 from scipy.stats import norm
@@ -187,7 +186,6 @@ def load_apple_adoption_dataset() -> pl.DataFrame:
 
     `wooldridge_loader`と同じ理由でCSVとして固定せず都度ロードする。
     """
-    pytest.importorskip("wooldridge")
     from benchmark.common.load_wooldridge import load_apple_adoption
 
     return load_apple_adoption()

@@ -43,8 +43,8 @@ print(restored.white_test() == result.white_test())  # True
 
 Options go to the worker, the result comes back. Results are ordinary pickleable objects, so no conversion is needed. The worker function must be importable (defined at the top level of a module), as for any pickled function; this is the usual `multiprocessing` rule, not one of this package. For the same reason the code that starts the pool must sit under an `if __name__ == "__main__":` guard when the start method imports the main module in each worker (`spawn`, the default on Windows and macOS, and `forkserver`, the default on Linux from Python 3.14).
 
+<!-- doc-test: subprocess -->
 ```python
-# doc-test: skip (starts worker processes)
 from concurrent.futures import ProcessPoolExecutor
 
 import polars as pl
@@ -57,19 +57,49 @@ def fit_one(args):
 
 
 if __name__ == "__main__":
-    # `frames` is a list of polars DataFrames, one per group or sample.
+    df = pl.DataFrame(
+        {
+            "y": [1.0, 2.2, 2.9, 4.1, 5.3, 5.9, 7.2, 7.8],
+            "x1": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+            "x2": [0.5, 0.1, 0.9, 0.3, 0.8, 0.2, 0.7, 0.4],
+        }
+    )
+    # One DataFrame per group or sample.
+    frames = [df.with_columns(pl.col("y") + shift) for shift in range(3)]
     options = OLSOptions(cov_type="hc1")
     with ProcessPoolExecutor() as pool:
         results = list(pool.map(fit_one, [(frame, options) for frame in frames]))
+    print(len(results))  # 3
 ```
 
 `joblib` works the same way:
 
+<!-- doc-test: subprocess -->
 ```python
-# doc-test: skip (continues the example above: `fit_one`, `frames`, `options`)
+import polars as pl
+from econometricsmodels import OLS, OLSOptions
 from joblib import Parallel, delayed
 
-results = Parallel(n_jobs=4)(delayed(fit_one)((frame, options)) for frame in frames)
+
+def fit_one(args):
+    data, options = args
+    return OLS(data, y="y", x=["x1", "x2"], options=options).fit()
+
+
+if __name__ == "__main__":
+    df = pl.DataFrame(
+        {
+            "y": [1.0, 2.2, 2.9, 4.1, 5.3, 5.9, 7.2, 7.8],
+            "x1": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+            "x2": [0.5, 0.1, 0.9, 0.3, 0.8, 0.2, 0.7, 0.4],
+        }
+    )
+    frames = [df.with_columns(pl.col("y") + shift) for shift in range(3)]
+    options = OLSOptions(cov_type="hc1")
+    results = Parallel(n_jobs=2)(
+        delayed(fit_one)((frame, options)) for frame in frames
+    )
+    print(len(results))  # 3
 ```
 
 The estimators release the Python GIL while they compute, so threads (`ThreadPoolExecutor`, `joblib`'s threading backend) also run fits in parallel and need no pickling at all (see [Using fits from threads](performance.md#using-fits-from-threads)). Use processes when the surrounding Python work is the bottleneck, or when the results have to leave the process (a cache, a queue).

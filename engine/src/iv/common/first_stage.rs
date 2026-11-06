@@ -17,7 +17,7 @@ pub type FirstStageResult = (Vec<(String, OlsEstimator)>, Vec<(String, f64)>);
 /// （`iv/CLAUDE.md`「2SLSとGMMの独立実装方針」参照——GMMはモーメント条件`Z'(y-Xβ)=0`を
 /// 直接解くため点推定自体には第一段階回帰を必要としないが、第一段階回帰・弱操作変数診断
 /// 自体は`estimator`に依存しない、素の（第二段階の推定方式によらない）診断情報のため、
-/// SEサンドイッチ計算（2SLS/GMMで数式が異なるため独立実装が必要）とは性質が異なる）。
+/// SEサンドイッチ計算（2SLSは`X̂`、GMMは`B⁻¹(X'ZWΩ̂WZ'X)B⁻¹`で代数が異なる）とは性質が異なる）。
 ///
 /// `cov_type`は第一段階の推定にそのまま渡す（`two_sls.rs`のモジュールdoc
 /// 「第一段階・第二段階での`cov_type`/`confidence_level`の扱い」と同じ）。

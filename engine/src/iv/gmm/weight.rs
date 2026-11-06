@@ -4,11 +4,12 @@
 //!
 //! テストは`weight/tests.rs`と`weight/tests/`にテーマ別で置く。
 
-use faer::linalg::matmul::matmul;
-use faer::{Accum, Mat, Par};
+use faer::Mat;
 
 use crate::iv::common::IvError;
-use crate::shared::covariance::{cluster_meat, resolve_hac_lags};
+use crate::shared::covariance::{
+    HcScale, cluster_meat, hac_meat, hc_meat, hc_scales, resolve_hac_lags,
+};
 use crate::shared::error::{ClusterSetting, CommonError};
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::validation::validate_cluster_groups;
@@ -26,8 +27,8 @@ pub enum WeightType {
     /// クラスター頑健。`groups`が`None`の場合は`CommonError::MissingClusterColumn`、コードの
     /// 行数が`n`と食い違う場合は`CommonError::ClusterDimensionMismatch`。
     Cluster { groups: Option<GroupCodes> },
-    /// Newey-West（Bartlettカーネル）によるHAC型。`lags=None`なら`two_sls/cov.rs`と同じ
-    /// 経験則で自動計算する。`time_order`は`IvInput`の行と対応する長さnの配列で、この値の昇順を
+    /// Newey-West（Bartlettカーネル）によるHAC型。`lags=None`なら
+    /// `shared::covariance::resolve_hac_lags`の経験則で自動計算する。`time_order`は`IvInput`の行と対応する長さnの配列で、この値の昇順を
     /// 時系列順とする（必須。行順を暗黙に時系列順とみなす既定は置かない）。
     Hac {
         lags: Option<i64>,
@@ -78,16 +79,11 @@ pub(super) fn validate_weight_type(
 }
 
 /// 不均一分散頑健なモーメント分散共分散行列: `Σᵢ êᵢ² zᵢzᵢ'`（l×l）。`gmm.rs`の
-/// モジュールdoc「`weight_type`ごとの`S`」参照（`two_sls/cov.rs`の`hc_cov_params`のHC0相当だが
+/// モジュールdoc「`weight_type`ごとの`S`」参照（`shared::covariance`のHC0と同じ外積の和で、
 /// レバレッジ調整は無し。`S`はスカラー倍で点推定が変わらないため小標本補正も不要）。
-pub(super) fn robust_moment_covariance(
-    z: &Mat<f64>,
-    residuals: &Mat<f64>,
-    n: usize,
-    l: usize,
-) -> Mat<f64> {
-    let z_scaled = Mat::from_fn(n, l, |i, j| (*residuals.get(i, 0)) * (*z.get(i, j)));
-    z_scaled.transpose() * &z_scaled
+pub(super) fn robust_moment_covariance(z: &Mat<f64>, residuals: &Mat<f64>, n: usize) -> Mat<f64> {
+    let scales = hc_scales(n, |i| *residuals.get(i, 0), HcScale::Hc0);
+    hc_meat(z, &scales)
 }
 
 /// クラスター頑健なモーメント分散共分散行列: `Σ_g (Σ_{i∈g} êᵢzᵢ)(Σ_{i∈g} êᵢzᵢ)'`（l×l）。
@@ -105,10 +101,9 @@ pub(super) fn cluster_moment_covariance(
     cluster_meat(groups, l, |i, a| (*residuals.get(i, 0)) * (*z.get(i, a))).0
 }
 
-/// Newey-West（Bartlettカーネル）によるモーメント分散共分散行列: `two_sls/cov.rs`の
-/// `hac_cov_params`と同型（`Par::Seq`を明示指定する理由も同じ、`.claude/rules/
-/// rust-style.md`「パフォーマンス」参照）。設計行列が`Z`である点、小標本補正が無い点が
-/// `two_sls.rs`との違い（`gmm.rs`のモジュールdoc参照）。
+/// Newey-West（Bartlettカーネル）によるモーメント分散共分散行列: `shared::covariance::hac_meat`
+/// （`Par::Seq`を明示指定する理由もそちら）を、スコア`êᵢzᵢ`で呼ぶ。小標本補正が無い点が
+/// `two_sls/cov.rs`のHAC共分散との違い（`gmm.rs`のモジュールdoc参照）。
 pub(super) fn hac_moment_covariance(
     z: &Mat<f64>,
     residuals: &Mat<f64>,
@@ -117,43 +112,9 @@ pub(super) fn hac_moment_covariance(
     lags: usize,
     order: &[usize],
 ) -> Mat<f64> {
-    let ze = Mat::<f64>::from_fn(n, l, |t, a| {
-        let i = order[t];
+    hac_meat(n, l, lags, order, |i, a| {
         (*residuals.get(i, 0)) * (*z.get(i, a))
-    });
-
-    let mut s_hat = Mat::<f64>::zeros(l, l);
-    matmul(
-        s_hat.as_mut(),
-        Accum::Replace,
-        ze.transpose(),
-        ze.as_ref(),
-        1.0,
-        Par::Seq,
-    );
-
-    let mut s_l = Mat::<f64>::zeros(l, l);
-    for lag in 1..=lags {
-        let weight = 1.0 - (lag as f64) / ((lags + 1) as f64);
-        let ze_top = ze.as_ref().subrows(lag, n - lag);
-        let ze_bot = ze.as_ref().subrows(0, n - lag);
-        matmul(
-            s_l.as_mut(),
-            Accum::Replace,
-            ze_top.transpose(),
-            ze_bot,
-            1.0,
-            Par::Seq,
-        );
-
-        for a in 0..l {
-            for b in 0..l {
-                *s_hat.get_mut(a, b) += weight * (*s_l.get(a, b) + *s_l.get(b, a));
-            }
-        }
-    }
-
-    s_hat
+    })
 }
 
 #[cfg(test)]

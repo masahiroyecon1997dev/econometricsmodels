@@ -51,11 +51,12 @@
 //! 点推定`β̂(S⁻¹)`が変わらない**（`S`をスカラー`c`倍すると`W=S⁻¹`が`1/c`倍され、
 //! `β̂(W) = (X'ZWZ'X)⁻¹X'ZWZ'y`の分子・分母両方に`1/c`が乗り相殺するため。
 //! `gmm_point_estimate_is_invariant_to_positive_scaling_of_s`で検証済み）。
-//! そのため、`two_sls/cov.rs`のSE計算（`hc_cov_params`等）にある小標本補正・レバレッジ補正
+//! そのため、係数のSE計算（`shared::covariance`の`hc_cov_params`等。2SLSの`covariance_stage`が
+//! 呼ぶ）にある小標本補正・レバレッジ補正
 //! （HC1の`n/(n-k)`補正、HC2/HC3のレバレッジ調整、クラスターの`(G/(G-1))((n-1)/(n-k))`
 //! 補正）は、それら自体が正のスカラー（対角成分ごとに異なるレバレッジ補正を除く）である
 //! 範囲では本質的に不要であり、本実装では適用しない（後述「`weight_type`ごとの`S`」の
-//! 各関数は`two_sls/cov.rs`の対応する関数より単純な形になっている）。
+//! 各関数は係数のSE計算用の共有関数より単純な形（補正を持たない）になっている）。
 //!
 //! ## `weight_type`ごとの`S`
 //!
@@ -65,17 +66,17 @@
 //!   `fit_matches_two_sls_point_estimate_when_weight_type_is_classical`で検証）。
 //!   **ただしHansen J検定（下記）に使う`S`はこの限りでなく、`σ̂²・Z'Z`が必要**
 //!   （後述「Hansen J過剰識別検定」参照、点推定とHansen Jで`S`の要件が異なる点に注意）。
-//! - `Robust`: `S = Σᵢ êᵢ² zᵢzᵢ'`（`two_sls/cov.rs`の`hc_cov_params`
+//! - `Robust`: `S = Σᵢ êᵢ² zᵢzᵢ'`（`shared::covariance`の`hc_cov_params`
 //!   のHC0相当だがレバレッジ調整は無し）。
 //! - `Cluster`: `S = Σ_g (Σ_{i∈g} êᵢzᵢ)(Σ_{i∈g} êᵢzᵢ)'`（`shared::covariance::cluster_meat`
 //!   と同じ蓄積で、小標本補正は無し）。
-//! - `Hac`: Newey-West（Bartlettカーネル）による`S`。`two_sls/cov.rs`の`hac_cov_params`と
-//!   同型（時系列相関を仮定する、パネルのDriscoll-Kraayではない。
+//! - `Hac`: Newey-West（Bartlettカーネル）による`S`。`shared::covariance`の`hac_cov_params`と
+//!   同じカーネル和（`hac_meat`）（時系列相関を仮定する、パネルのDriscoll-Kraayではない。
 //!   `docs/spec/iv-spec.md`1.2節・`two_sls.rs`冒頭コメント参照）。
 //!
-//! 上記4関数は、数式としては`two_sls/cov.rs`の`hc_cov_params`/`hac_cov_params`と同型だが、
-//! 独立に実装している（後述「2SLSとの共通化の判断」参照）。クラスターの蓄積
-//! （`Σ_g S_g S_g'`）だけは`shared::covariance::cluster_meat`と共有する。
+//! 上記4関数は、`shared::covariance`の共有関数（外積の和`hc_scales`/`hc_meat`、カーネル和
+//! `hac_meat`、クラスターの蓄積`cluster_meat`）を設計行列の代わりに`Z`で呼ぶ。`S`はスカラー倍で
+//! 点推定が変わらないため、`two_sls/cov.rs`の係数分散共分散行列と違って小標本補正を持たない。
 //!
 //! ## Hansen J過剰識別検定（`docs/spec/iv-spec.md`3.5節）
 //!
@@ -123,10 +124,10 @@
 //! `σ̂²₀・Z'Z`（Hansen J用にスケーリング済みの値）であっても、サンドイッチ全体のスケール
 //! 不変性（`B→cB`なら`B⁻¹→B⁻¹/c`、`meat→c²・meat`で相殺）により`cov_params`は変わらない。
 //!
-//! `Ω̂`は`cov_type`ごとに以下（`Z`・`l`を`two_sls/cov.rs`の`X̂`・`k`に置き換えた同型の自己拡張。
+//! `Ω̂`は`cov_type`ごとに以下（`shared::covariance`の共有関数を、設計行列の代わりに`Z`で呼ぶ。
 //! **点推定用の`robust_moment_covariance`/`cluster_moment_covariance`はそのまま使い回せない**
 //! （小標本補正が無いため、モジュール冒頭「Hansen J過剰識別検定」の教訓通りSE計算には
-//! 補正が必須）。`hac_moment_covariance`のみ例外的にそのまま使い回す——`two_sls/cov.rs`の
+//! 補正が必須）。`hac_moment_covariance`のみ例外的にそのまま使い回す——`shared::covariance`の
 //! `hac_cov_params`もNewey-Westの重み付け以外に追加の小標本補正を持たないため、補正の
 //! 有無という観点では点推定用とSE用が最初から同じ計算になる）:
 //!
@@ -139,7 +140,7 @@
 //!   単純平均をゼロにする制約とは一般に一致しない）ため、非中心化SSRを使うと
 //!   `weight_type≠Classical`のときのみ`σ̂²`が系統的にずれる（`linearmodels`の
 //!   `HomoskedasticWeightMatrix`が常に中心化する設計と一致させている）。
-//! - `hc0`〜`hc3`: `two_sls/cov.rs`の`hc_cov_params`と同型（`X̂`→`Z`）。HC2/HC3のレバレッジは
+//! - `hc0`〜`hc3`: `shared::covariance`の`hc_cov_params`と同じ外積の和（`hc_meat`、`X̂`→`Z`）。HC2/HC3のレバレッジは
 //!   `Z`から計算する自己拡張で、**GMMのHC2/HC3は外部参照実装での検証は不可能**（
 //!   `linearmodels`の`IVGMM`にも、Rクロスチェックに使う`momentfit`にも対応する共分散推定が
 //!   無い。`docs/spec/iv-spec.md`4章。2SLSのHC2/HC3はR `ivreg`+`sandwich::vcovHC`で
@@ -191,10 +192,10 @@
 //!    弱操作変数診断等の内部で公開している。GMMは第一段階回帰を必要とせず
 //!    （モーメント条件`Z'(y-Xβ)=0`を直接使うため）、この点でも構造が異なる。
 //!
-//! 以上より、**点推定の数値的一致は確認しつつ、実装は独立のまま維持する**
-//! （`docs/spec/iv-spec.md`3.1節の既存方針「IVのサンドイッチ型分散計算は独自実装でよい」を
-//! 2SLS/GMM間の関係にも適用した判断）。ただしクラスターの蓄積（`Σ_g S_g S_g'`）と小標本補正は、
-//! 2SLS・OLS・panel・nonlinearと共有する`shared::covariance`の`cluster_meat`系を使う。
+//! 以上より、**点推定の数値的一致は確認しつつ、推定量の`fit()`とサンドイッチの代数は独立のまま
+//! 維持する**。共分散・検定の中立な計算（外積の和・カーネル和・クラスターの蓄積と小標本補正・
+//! Waldの形）は`shared::covariance`・`shared::wald`の共有関数を使い、スコアに依存する部分
+//! （レバレッジと補正係数）だけを推定量ごとに決める（`iv/CLAUDE.md`「共分散・検定の共有範囲」参照）。
 
 use crate::iv::common::{IvError, IvEstimate, IvInput};
 use crate::linear::ols::CovType;

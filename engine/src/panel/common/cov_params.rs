@@ -4,7 +4,10 @@
 use faer::Mat;
 
 use super::error::PanelError;
-use crate::shared::covariance::{cluster_correction, cluster_meat, default_hac_lags};
+use crate::shared::covariance::{
+    HcScale, classical_cov_params, cluster_correction, cluster_meat, default_hac_lags, hac_meat,
+    hc_meat, hc_scales, sandwich,
+};
 use crate::shared::error::CommonError;
 use crate::shared::group_codes::GroupCodes;
 
@@ -24,7 +27,8 @@ pub(crate) fn xtx_inverse(x: &Mat<f64>) -> Result<Mat<f64>, PanelError> {
     })
 }
 
-/// classical: `σ̂² (X̃'X̃)⁻¹`（`σ̂² = SSR/df_resid`）。
+/// classical: `σ̂² (X̃'X̃)⁻¹`（`σ̂² = SSR/df_resid`）。`df_resid`がFE（固定効果ダミーの数を引く）と
+/// REで違うので、`σ̂²`はここで求めて共有の`classical_cov_params`に渡す。
 pub(crate) fn panel_classical_cov_params(
     xtx_inv: &Mat<f64>,
     ssr: f64,
@@ -32,7 +36,7 @@ pub(crate) fn panel_classical_cov_params(
     k: usize,
 ) -> Mat<f64> {
     let sigma2 = ssr / (df_resid as f64);
-    Mat::from_fn(k, k, |i, j| sigma2 * (*xtx_inv.get(i, j)))
+    classical_cov_params(sigma2, xtx_inv, k)
 }
 
 /// `panel_hc_cov_params`が使うHCの種類（`shared::covariance::HcVariant`と同型だがHC0を含まない、
@@ -45,8 +49,8 @@ pub(crate) enum PanelHcVariant<'a> {
     Hc3(&'a [f64]),
 }
 
-/// HC1〜HC3の係数分散共分散行列（k×k）。`shared::covariance::hc_cov_params`と同型の構造だが、
-/// 小標本補正がFE/RE用に異なる（`fe.rs`モジュールdoc「`cov_type`対応」参照）:
+/// HC1〜HC3の係数分散共分散行列（k×k）。共有の`hc_scales`・`hc_meat`を使い、スコアに依存する
+/// 小標本補正とレバレッジをFE/RE用に決めて渡す（`fe.rs`モジュールdoc「`cov_type`対応」参照）:
 /// - HC1: `w_i = n/df_resid`
 /// - HC2/HC3: `w_i`はバリアントが持つレバレッジ`h`ベース
 pub(crate) fn panel_hc_cov_params(
@@ -57,24 +61,17 @@ pub(crate) fn panel_hc_cov_params(
     variant: PanelHcVariant<'_>,
 ) -> Mat<f64> {
     let n = x.nrows();
-    let k = x.ncols();
-    let hc1_correction = (n as f64 / df_resid as f64).sqrt();
-
-    // 行ごとのスケールは列に依存しないため、行列の組み立て（n×kの二重ループ）の外で一度だけ求める。
-    let row_scales: Vec<f64> = (0..n)
-        .map(|i| {
-            let resid = residuals[i];
-            match &variant {
-                PanelHcVariant::Hc1 => resid * hc1_correction,
-                PanelHcVariant::Hc2(h) => resid / (1.0 - h[i]).sqrt(),
-                PanelHcVariant::Hc3(h) => resid / (1.0 - h[i]),
-            }
-        })
-        .collect();
-    let x_scaled = Mat::from_fn(n, k, |i, j| row_scales[i] * (*x.get(i, j)));
-
-    let psi_hat = x_scaled.transpose() * &x_scaled;
-    xtx_inv * &psi_hat * xtx_inv
+    let resid = |i: usize| residuals[i];
+    let scale = match variant {
+        PanelHcVariant::Hc1 => HcScale::Hc1 {
+            factor: (n as f64 / df_resid as f64).sqrt(),
+        },
+        PanelHcVariant::Hc2(h) => HcScale::Hc2 { leverage: h },
+        PanelHcVariant::Hc3(h) => HcScale::Hc3 { leverage: h },
+    };
+    let row_scales = hc_scales(n, resid, scale);
+    let psi_hat = hc_meat(x, &row_scales);
+    sandwich(xtx_inv, &psi_hat)
 }
 
 /// クラスターロバスト係数分散共分散行列（k×k）。`shared::covariance::cluster_cov_params`と同じ
@@ -166,10 +163,8 @@ pub(crate) fn validate_dk_periods_cover_tested_coefficients(
 /// `bandwidth == t_periods - 1`でも最終ラグ項`l = bandwidth`を含める標準のBartlettカーネル
 /// で、この境界ではfixestと一致しない（`docs/spec/fe-spec.md`3.3節）。
 ///
-/// ラグごとの`k×k`行列積（`xi_top.transpose() * xi_bot`等）は呼び出し元の`fit()`冒頭の
-/// `ensure_serial()`が固定したグローバル`Par::Seq`に依存している（OLSの`hac_cov_params`が
-/// `matmul(..., Par::Seq)`を明示するのと異なり、本関数は演算子オーバーロードを使うため
-/// グローバル設定頼み。`panel_hc_cov_params`/`panel_cluster_cov_params`と同じ流儀）。
+/// ラグごとの`k×k`行列積は`hac_meat`が`Par::Seq`を明示して行う（OLS・2SLS・GMMのNewey-West
+/// HACと同じ。`.claude/rules/rust-style.md`「パフォーマンス」参照）。
 pub(crate) fn panel_driscoll_kraay_cov_params(
     x: &Mat<f64>,
     residuals: &[f64],
@@ -193,20 +188,10 @@ pub(crate) fn panel_driscoll_kraay_cov_params(
         }
     }
 
-    // l=0項: Ŝ₀ = ξ'ξ（クラスターロバストのΨ̂と同形、時点をグループとみなした版）
-    let mut s_hat = xi.transpose() * &xi;
-    // l=1..=bandwidth項: w_l * (Ŝ_l + Ŝ_l')
-    for l in 1..=bandwidth {
-        let weight = 1.0 - (l as f64) / ((bandwidth + 1) as f64);
-        let xi_top = xi.as_ref().subrows(l, t_periods - l);
-        let xi_bot = xi.as_ref().subrows(0, t_periods - l);
-        let s_l = xi_top.transpose() * xi_bot;
-        for a in 0..k {
-            for b in 0..k {
-                *s_hat.get_mut(a, b) += weight * (*s_l.get(a, b) + *s_l.get(b, a));
-            }
-        }
-    }
+    // `Ŝ = Σ_t ξ_t ξ_t' + Σ_l w_l (…)`は、時点を行とみなした`ξ`（コード順＝時系列順）への
+    // Bartlett重みのカーネル和で、OLS・2SLS・GMMのNewey-West HACと同じ`hac_meat`。
+    let time_order: Vec<usize> = (0..t_periods).collect();
+    let s_hat = hac_meat(t_periods, k, bandwidth, &time_order, |t, a| *xi.get(t, a));
 
     let scale = (t_periods as f64 / (t_periods as f64 - 1.0))
         * ((n as f64 - 1.0) / ((n - k_correction) as f64));

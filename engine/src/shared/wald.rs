@@ -8,17 +8,17 @@ use statrs::distribution::{ContinuousCDF, FisherSnedecor};
 use crate::shared::error::{CommonError, MatrixKind};
 use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 
-/// 傾き係数（切片を除く`df_model`個の係数）が全てゼロという帰無仮説のロバストWald検定を行い、
-/// F統計量とそのp値を返す。
+/// 傾き係数（切片を除く`df_model`個の係数）が全てゼロという帰無仮説のWald二次形式
+/// `β_slopes' Σ⁻¹ β_slopes`（`Σ`は`cov_params`のうち傾き係数に対応する`df_model × df_model`の
+/// 部分行列）を返す。F検定（[`wald_f_test`]）も`χ²`検定も、この値から作る。`params`・
+/// `cov_params`の行/列は`k_constant`が1（切片あり）なら先頭が切片、0（切片なし）なら全パラメータが
+/// 検定対象になる。
 ///
-/// `F = (β_slopes' Σ⁻¹ β_slopes) / q`（`Σ`は`cov_params`のうち傾き係数に対応する
-/// `df_model × df_model`の部分行列、`q = df_model`）。`params`・`cov_params`の行/列は
-/// `k_constant`が1（切片あり）なら先頭が切片（`OlsInput::from_columns`の設計行列の
-/// 先頭列が定数項という規約）、0（切片なし）なら全パラメータが検定対象になる。
-/// p値はF分布（自由度`(df_model, df_inference)`）の上側確率
-/// （`OlsEstimator::fit`のdocコメント「F統計量も同じ方針で」参照。`cov_type=Classical`のとき
-/// 古典的F検定と代数的に一致することを確認済み）。`df_inference`は通常`n-k`だが、
-/// `cov_type=Cluster`のときは`G-1`になる（呼び出し元の`fit()`を参照）。
+/// `cov_params`は理論上対称だが、`(X'X)⁻¹ Ŝ (X'X)⁻¹`のような行列積の丸め誤差で非対称に
+/// なりうる。下の`llt(Side::Lower)`は下三角しか読まないため、そのままだと片側の丸め誤差が
+/// そのまま結果になる。検定対象の係数が準共線（部分行列がほぼ特異）だと誤差が条件数倍に
+/// 増幅され、相対誤差1e-7に達する（RE相関の強い2列×Driscoll-Kraayのハウスマン検定で実測、
+/// 上三角を使うと逆符号で同じ大きさ）。両側の平均を取ると入力の丸め誤差程度（3e-9）に戻る。
 ///
 /// `Σ`の逆行列はCholesky分解（`Llt`）で求める。classical/HC0-3/HACでは`Σ`は
 /// （`cov_params`全体の）正定値行列の主小行列であり理論上必ず正定値のため、`xtx_inverse`と
@@ -38,29 +38,16 @@ use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 /// `q×q`部分行列の条件数が倍精度の限界を超える場合——の**backstop**として残る
 /// （`fit_returns_computation_failed_for_extreme_scale_difference_in_f_test`で固定）。
 /// Cholesky分解（非ピボット）は数値的にほぼ特異な行列でも失敗せず桁違いに巨大な
-/// F統計量を黙って返しうるため、`Llt`分解の**前**にこのチェックを置き
+/// 統計量を黙って返しうるため、`Llt`分解の**前**にこのチェックを置き
 /// `NearSingularMatrix`で止める。`Llt`分解自体の`map_err`は、両方のチェックを
 /// すり抜けるごく僅かな境界ケースに備えた防御的なフォールバック。
-///
-/// `pub(crate)`: `panel::fe::FeEstimator::fit`がFE独自に計算し直した
-/// `cov_params`・`df_resid`（パネル自由度調整済み）でF検定するために再利用する
-/// （`wald_test_last_columns`と同じ「サンドイッチ計算を複製しない」方針。FEは
-/// `OlsEstimator`インスタンス自身の`cov_params`/`df_inference`とは異なる値を使うため
-/// `wald_test_last_columns`メソッドは使えず、この下位の自由関数を直接呼ぶ、
-/// `engine/src/panel/CLAUDE.md`参照）。
-pub(crate) fn wald_f_test(
+pub(crate) fn wald_quadratic_form(
     params: &Mat<f64>,
     cov_params: &Mat<f64>,
     k_constant: usize,
     df_model: usize,
-    df_inference: usize,
-) -> Result<(f64, f64), CommonError> {
+) -> Result<f64, CommonError> {
     let beta_slopes = Mat::from_fn(df_model, 1, |i, _| *params.get(i + k_constant, 0));
-    // `cov_params`は理論上対称だが、`(X'X)⁻¹ Ŝ (X'X)⁻¹`のような行列積の丸め誤差で非対称に
-    // なりうる。下の`llt(Side::Lower)`は下三角しか読まないため、そのままだと片側の丸め誤差が
-    // そのまま結果になる。検定対象の係数が準共線（部分行列がほぼ特異）だと誤差が条件数倍に
-    // 増幅され、相対誤差1e-7に達する（RE相関の強い2列×Driscoll-Kraayのハウスマン検定で実測、
-    // 上三角を使うと逆符号で同じ大きさ）。両側の平均を取ると入力の丸め誤差程度（3e-9）に戻る。
     let v_slopes = Mat::from_fn(df_model, df_model, |i, j| {
         0.5 * (*cov_params.get(i + k_constant, j + k_constant)
             + *cov_params.get(j + k_constant, i + k_constant))
@@ -79,9 +66,34 @@ pub(crate) fn wald_f_test(
         })?;
     let v_slopes_inv_beta = llt.solve(&beta_slopes);
 
-    let wald: f64 = (0..df_model)
+    Ok((0..df_model)
         .map(|i| (*beta_slopes.get(i, 0)) * (*v_slopes_inv_beta.get(i, 0)))
-        .sum();
+        .sum())
+}
+
+/// 傾き係数（または任意の係数部分集合）が全てゼロという帰無仮説のロバストWald検定を行い、
+/// F統計量とそのp値を返す。
+///
+/// `F = W / q`（`W`は[`wald_quadratic_form`]の値、`q = df_model`）。p値はF分布（自由度
+/// `(df_model, df_inference)`）の上側確率（`OlsEstimator::fit`のdocコメント「F統計量も
+/// 同じ方針で」参照。`cov_type=Classical`のとき古典的F検定と代数的に一致することを確認済み）。
+/// `df_inference`は通常`n-k`だが、`cov_type=Cluster`のときは`G-1`になる（呼び出し元の
+/// `fit()`を参照）。
+///
+/// `pub(crate)`: `panel::fe::FeEstimator::fit`がFE独自に計算し直した
+/// `cov_params`・`df_resid`（パネル自由度調整済み）でF検定するために再利用する
+/// （`wald_test_last_columns`と同じ「サンドイッチ計算を複製しない」方針。FEは
+/// `OlsEstimator`インスタンス自身の`cov_params`/`df_inference`とは異なる値を使うため
+/// `wald_test_last_columns`メソッドは使えず、この下位の自由関数を直接呼ぶ、
+/// `engine/src/panel/CLAUDE.md`参照）。
+pub(crate) fn wald_f_test(
+    params: &Mat<f64>,
+    cov_params: &Mat<f64>,
+    k_constant: usize,
+    df_model: usize,
+    df_inference: usize,
+) -> Result<(f64, f64), CommonError> {
+    let wald = wald_quadratic_form(params, cov_params, k_constant, df_model)?;
     let f_statistic = wald / (df_model as f64);
 
     let f_dist = FisherSnedecor::new(df_model as f64, df_inference as f64)

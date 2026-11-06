@@ -99,7 +99,7 @@ pub(super) fn nontrivial_x_exog_x_hat_and_structural_residuals(
 }
 
 /// `x_endog=[]`（第一段階ループが一度も回らない退化ケース）の`IvInput`を組み立てる。
-/// 独立実装のサンドイッチ計算（`fit()`本体、第二段階）固有のcov_typeエラー
+/// サンドイッチ計算（`fit()`本体、第二段階）固有のcov_typeエラー
 /// （`InvalidHacLags`/`MissingClusterColumn`/`InsufficientClusters`）を検証するテストで
 /// 使う。`x_endog`が1つでもあると、同じ`cov_type`が第一段階にも渡るため
 /// （`two_sls.rs`のモジュールdoc参照）、エラーは先に`FirstStageFailed`として

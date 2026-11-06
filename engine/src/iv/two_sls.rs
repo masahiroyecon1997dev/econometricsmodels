@@ -24,15 +24,12 @@
 //! OLSのclassical/HC0-3/cluster/hacサンドイッチ公式とまったく同じ形**になる
 //! （`Pz`が射影行列＝冪等・対称であることから代数的に導出できる、Wooldridge (2010) 5章）。
 //! そのため本モジュールは、第二段階の`OlsEstimator`（`params()`のみ利用、後述）とは別に、
-//! この`(X̂, e)`に対する独立実装のサンドイッチ計算（`classical_cov_params`/`hc_cov_params`/
-//! `hac_cov_params`/`wald_f_test`、いずれも`two_sls/cov.rs`。クラスターのサンドイッチは
-//! 設計行列と残差を引数に取る`shared::covariance::cluster_cov_params`を、`X̂`・構造残差`e`で
-//! 呼ぶ）を行う。
-//! OLS（`engine::linear::ols`）の同名の同型計算とは**意図的に独立実装**にしている
-//! （`docs/spec/iv-spec.md`3.1節「IVのサンドイッチ型分散計算は独自実装でよい……OLS/nonlinear
-//! どちらの既存計算にも寄せない」）。例外はクラスターの蓄積・補正と、HACのラグ数の解決で、
-//! 共有モジュール`shared::covariance`（OLS本体ではない）の`cluster_meat`/`cluster_correction`・
-//! `resolve_hac_lags`を使う。
+//! この`(X̂, e)`で共有のサンドイッチ計算（`shared::covariance`の`classical_cov_params`/
+//! `hc_cov_params`/`hac_cov_params`/`cluster_cov_params`）を呼ぶ（`two_sls/cov.rs`の
+//! `covariance_stage`）。OLS本体（`engine::linear::ols`）の調整には寄せず、スコアに依存する部分
+//! （HCのレバレッジと小標本補正の分母）は`X̂`と`n-k`で決め、中立な計算（外積の和・カーネル和・
+//! クラスターの蓄積・Waldの二次形式）は共有関数を使う（`docs/spec/iv-spec.md`3.1節）。
+//! Wald F検定（`wald_f_test`）は`two_sls/cov.rs`。
 //!
 //! 第一段階の各`OlsEstimator`はそれ自体が正しい（ナイーブな）OLS回帰であり、
 //! （弱操作変数診断等で必要になる）SE・F統計量も含めてそのまま公開してよい
@@ -55,10 +52,10 @@
 //! （`cov_type`は分散の推定方法の選択、`confidence_level`は信頼区間の幅にのみ影響する）。
 //! **第一段階・第二段階のいずれにも**、`fit()`の呼び出し元から渡された`cov_type`/
 //! `confidence_level`をそのまま使う（第一段階は文字通り`OlsEstimator::fit`に渡す。
-//! 第二段階は上記の独立実装のサンドイッチ計算に渡す。`second_stage`フィールド自身の
+//! 第二段階は上記のサンドイッチ計算に渡す。`second_stage`フィールド自身の
 //! 内部委譲フィットだけは`SECOND_STAGE_COV_TYPE`固定のまま、前節参照）。
 //! `confidence_level`の`(0, 1)`範囲チェックは、第二段階の内部委譲フィット
-//! （`OlsEstimator::fit(second_stage_input, ...)`）に一度だけ委ねる（独立実装の
+//! （`OlsEstimator::fit(second_stage_input, ...)`）に一度だけ委ねる（
 //! サンドイッチ計算側では検証しない。`x_endog=[]`の退化ケースでは第一段階ループが
 //! 一度も回らないため、この検証が範囲外エラーを検知する唯一の経路になる）。
 //!

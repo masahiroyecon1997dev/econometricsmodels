@@ -128,7 +128,7 @@ pub(super) fn fit_gmm(
 
     let hansen_j = hansen_j_test(&input, &z, &residuals, &s_used)?;
 
-    // ── ここから独立実装のサンドイッチ型SE計算（`gmm.rs`のモジュールdoc
+    // ── ここからサンドイッチ型SE計算（`gmm.rs`のモジュールdoc
     // 「標準誤差・検定統計量（cov_type対応）」参照）──
     let k_constant = usize::from(input.has_intercept());
     let df_resid = n - k;

@@ -12,7 +12,8 @@ use super::weight::hac_moment_covariance;
 use crate::iv::common::IvError;
 use crate::linear::ols::CovType;
 use crate::shared::covariance::{
-    cluster_correction, cluster_meat, resolve_hac_lags, time_ordering,
+    HcScale, HcVariant, cluster_correction, cluster_meat, hc_meat, hc_scales, leverages,
+    resolve_hac_lags, time_ordering,
 };
 use crate::shared::error::{ClusterSetting, CommonError, MatrixKind};
 use crate::shared::group_codes::GroupCodes;
@@ -25,7 +26,7 @@ pub(super) struct GmmCovariance {
     pub(super) hac_lags_used: Option<usize>,
 }
 
-/// 独立実装のサンドイッチ型係数分散共分散行列
+/// GMMのサンドイッチ型係数分散共分散行列
 /// `Avar(β̂) = B⁻¹(X'ZWΩ̂WZ'X)B⁻¹`（`B = X'ZWZ'X`、`W = S_used⁻¹`は点推定に実際に使った
 /// 重み、k×k）。`gmm.rs`のモジュールdoc「標準誤差・検定統計量（cov_type対応）」参照。
 ///
@@ -119,21 +120,22 @@ fn invert_spd(mat: &Mat<f64>, dim: usize, failure: CommonError) -> Result<Mat<f6
 }
 
 /// HC0〜HC3ロバストなモーメント条件の分散共分散行列（cov_type用）: `Σᵢ scaleᵢ² zᵢzᵢ'`
-/// （l×l）。`two_sls/cov.rs`の`hc_cov_params`と同型の自己拡張（`X̂`→`Z`）で、レバレッジは
-/// `Z`（点推定用の`ztz`をそのまま流用）から計算する——**GMMのHC2/HC3は外部参照実装での
-/// 検証は不可能**（`linearmodels`の`IVGMM`にもRクロスチェックの`momentfit`にも対応する
-/// 共分散推定が無い、`docs/spec/iv-spec.md`4章）。2SLSのHC2/HC3は逆にR `ivreg`+
-/// `sandwich::vcovHC`で検証可能なことを実機確認済み（`docs/spec/iv-spec.md`4章）だが、
-/// GMMには同等の参照が無いため対象外のまま。`gmm.rs`のモジュールdoc
-/// 「標準誤差・検定統計量（cov_type対応）」参照。
+/// （l×l）。係数のHC（`shared::covariance::hc_cov_params`）と同じ外積の和（`hc_meat`）で、
+/// 設計行列の代わりに`Z`を使い、レバレッジは`Z`（点推定用の`ztz`をそのまま流用）から計算する
+/// ——**GMMのHC2/HC3は外部参照実装での検証は不可能**（`linearmodels`の`IVGMM`にもRクロス
+/// チェックの`momentfit`にも対応する共分散推定が無い、`docs/spec/iv-spec.md`4章）。2SLSの
+/// HC2/HC3は逆にR `ivreg`+`sandwich::vcovHC`で検証可能なことを実機確認済み
+/// （`docs/spec/iv-spec.md`4章）だが、GMMには同等の参照が無いため対象外のまま。`gmm.rs`の
+/// モジュールdoc「標準誤差・検定統計量（cov_type対応）」参照。
 ///
 /// **HC1の小標本補正`n/(n-k)`は`l`（全操作変数の数）ではなく`k`（構造方程式の係数の数）を
 /// 使う**: 補正対象の残差`êᵢ = yᵢ - xᵢ'β̂`は常にk個の
 /// パラメータで推定された構造残差であり、消費された自由度は常に`k`——`l`は単に外積を
 /// 取る操作変数の本数（過剰識別なら`l > k`）に過ぎず、消費した自由度とは無関係
-/// （`two_sls/cov.rs`のHC1が`X̂`の列数=k自身を使うのと同じ理由。「`X̂`→`Z`、`k`→`l`」という
+/// （共有の`hc_cov_params`のHC1が設計行列の列数=k自身を使うのと同じ理由。「`X̂`→`Z`、`k`→`l`」という
 /// 機械的な置換はレバレッジの計算には妥当だが、補正係数の分母にまで機械的に適用したのは
-/// 誤りだった）。
+/// 誤りだった）。このようにスコアに依存する部分（レバレッジと補正係数）をここで決めて、
+/// 共有の`hc_scales`・`hc_meat`に渡す。
 fn gmm_hc_omega(
     z: &Mat<f64>,
     residuals: &Mat<f64>,
@@ -143,57 +145,38 @@ fn gmm_hc_omega(
     l: usize,
     variant: HcVariant,
 ) -> Result<Mat<f64>, IvError> {
-    let leverage: Option<Vec<f64>> = match variant {
-        HcVariant::Hc2 | HcVariant::Hc3 => {
-            // Z'Zはtheory上full column rank（点推定のW₀=(Z'Z)⁻¹が既に反転成功済み）
-            // のため、ここでの特異性は理論上到達不能だが、浮動小数点演算の丸めによる
-            // 境界的な失敗に備えて`Result`のまま扱う（`two_sls/cov.rs`の`xtx_inverse`と同じ
-            // 防御的な扱い、`.claude/rules/rust-style.md`「unwrap/expectはプロトタイプ
-            // 段階を除き避ける」）。
-            let ztz_inv = invert_spd(
-                ztz,
-                l,
-                CommonError::internal("Z'Z could not be factorized for the HC2/HC3 leverage"),
-            )?;
-            let zh = z * &ztz_inv; // (n, l)
-            Some(
-                (0..n)
-                    .map(|i| (0..l).map(|j| (*zh.get(i, j)) * (*z.get(i, j))).sum())
-                    .collect(),
-            )
+    let resid = |i: usize| *residuals.get(i, 0);
+    let scales = match variant {
+        HcVariant::Hc0 => hc_scales(n, resid, HcScale::Hc0),
+        HcVariant::Hc1 => {
+            let factor = ((n as f64) / ((n - k) as f64)).sqrt();
+            hc_scales(n, resid, HcScale::Hc1 { factor })
         }
-        HcVariant::Hc0 | HcVariant::Hc1 => None,
+        HcVariant::Hc2 => {
+            let h = z_leverages(z, ztz, l)?;
+            hc_scales(n, resid, HcScale::Hc2 { leverage: &h })
+        }
+        HcVariant::Hc3 => {
+            let h = z_leverages(z, ztz, l)?;
+            hc_scales(n, resid, HcScale::Hc3 { leverage: &h })
+        }
     };
-
-    let hc1_correction = ((n as f64) / ((n - k) as f64)).sqrt();
-
-    let z_scaled = Mat::from_fn(n, l, |i, j| {
-        let resid = *residuals.get(i, 0);
-        let scale = match variant {
-            HcVariant::Hc0 => resid,
-            HcVariant::Hc1 => resid * hc1_correction,
-            HcVariant::Hc2 => {
-                let h = leverage.as_ref().expect("leverage is computed for HC2")[i];
-                resid / (1.0 - h).sqrt()
-            }
-            HcVariant::Hc3 => {
-                let h = leverage.as_ref().expect("leverage is computed for HC3")[i];
-                resid / (1.0 - h)
-            }
-        };
-        scale * (*z.get(i, j))
-    });
-
-    Ok(z_scaled.transpose() * &z_scaled)
+    Ok(hc_meat(z, &scales))
 }
 
-/// `gmm_hc_omega`専用、HCの種類（`two_sls/cov.rs`の`HcVariant`と同じ位置づけ）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum HcVariant {
-    Hc0,
-    Hc1,
-    Hc2,
-    Hc3,
+/// `Z`のレバレッジ`h_ii = z_i'(Z'Z)⁻¹z_i`（HC2/HC3用）。
+///
+/// `Z'Z`は理論上full column rank（点推定の`W₀=(Z'Z)⁻¹`が既に反転成功済み）のため、ここでの
+/// 特異性は理論上到達不能だが、浮動小数点演算の丸めによる境界的な失敗に備えて`Result`のまま
+/// 扱う（`two_sls/cov.rs`の`xtx_inverse`と同じ防御的な扱い、`.claude/rules/rust-style.md`
+/// 「unwrap/expectはプロトタイプ段階を除き避ける」）。
+fn z_leverages(z: &Mat<f64>, ztz: &Mat<f64>, l: usize) -> Result<Vec<f64>, IvError> {
+    let ztz_inv = invert_spd(
+        ztz,
+        l,
+        CommonError::internal("Z'Z could not be factorized for the HC2/HC3 leverage"),
+    )?;
+    Ok(leverages(z, &ztz_inv))
 }
 
 /// クラスターロバストなモーメント条件の分散共分散行列（cov_type用）:
@@ -222,7 +205,9 @@ fn gmm_cluster_omega(
 /// （χ²、`df_model`で割らない生の二次形式）を行い、統計量とp値を返す。`gmm.rs`の
 /// モジュールdoc「標準誤差・検定統計量（cov_type対応）」参照——`two_sls/cov.rs`の`wald_f_test`と
 /// 数式は同型だが、F分布ではなくχ²分布を使い`df_model`で割らない点が異なる
-/// （`docs/spec/iv-spec.md`2章「GMMは常にロバストWald検定（χ²）とする」）。
+/// （`docs/spec/iv-spec.md`2章「GMMは常にロバストWald検定（χ²）とする」）。`cov_params`の対称化は
+/// 行わない自前版で、共有の`wald_quadratic_form`（対称化込み）への置き換えは数値が変わるため
+/// 別の段階で行う。
 pub(super) fn gmm_wald_chi2_test(
     params: &Mat<f64>,
     cov_params: &Mat<f64>,

@@ -167,17 +167,17 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 `effects`のような常在するグルーピング列が無いため`"cluster"`をデフォルトにする根拠が無い）。
 
 - **2SLSの分散はサンドイッチ型**: `(X'PzX)^-1 X'Pz Ω Pz X (X'PzX)^-1`（`Ω`の推定方法が
-  `cov_type`で変わる）。`hc_cov_params`/`hac_cov_params`
-  （`engine/src/iv/two_sls/cov.rs`）は`X̂`（射影後の予測値）ベースのレバレッジ・スコアで
-  OLSの対応する実装と同型に計算するが、コード自体はOLS（`engine::linear::ols`）に寄せず
-  **意図的に独立実装**にしている（例外: クラスターの蓄積`Σ_g S_g S_g'`と小標本補正は、
-  OLS本体ではなく共有モジュール`shared::covariance`の`cluster_meat`/`cluster_correction`
-  を、設計行列`X̂`・構造残差`e`で呼ぶ。加算順を1か所に固定するため。HACのラグ数の解決
-  （範囲検証と既定式）も同モジュールの`resolve_hac_lags`を共有する。レバレッジ・HACの
-  カーネル計算等OLS固有の調整はここに持ち込まない）（IVのサンドイッチ型分散計算はOLS/nonlinearどちらの既存
-  計算にも寄せない独立実装でよいという既存方針）。GMMのモーメント共分散行列計算
-  （`gmm/weight.rs`）も同じ理由で2SLS側と独立に実装している（`iv/CLAUDE.md`「2SLSとGMMの独立実装
-  方針」参照）。
+  `cov_type`で変わる）。`X̂`（射影後の予測値）と構造残差`e`をOLSの対応する公式に当てはめた形で、
+  `covariance_stage`（`engine/src/iv/two_sls/cov.rs`）が`shared::covariance`の
+  `classical_cov_params`・`hc_cov_params`・`hac_cov_params`・`cluster_cov_params`を`X̂`・`e`で
+  呼ぶ。スコアに依存する部分（HCのレバレッジ定義、小標本補正の分母）は推定量ごとに決めて共有関数へ
+  値として渡し、中立な計算（古典の共分散、外積の和、Newey-WestのBartlettカーネル和、クラスターの
+  蓄積と小標本補正、HACラグ数の解決、Wald二次形式）は`shared::covariance`・`shared::wald`に
+  一本化する（加算順・`Par::Seq`の指定・対称化といった数値上の判断を1か所に固定するため）。
+  Wald二次形式は、2SLS・GMMに対称化の無い自前版が残っており、共有版への置き換えは数値が変わるため
+  別の段階で行う。
+  OLS固有の調整はここに持ち込まない。GMMのモーメント共分散行列（`gmm/weight.rs`）と`cov_type`用の
+  `Ω̂`（`gmm/sandwich.rs`）も同じ共有関数を`Z`で呼ぶ（`iv/CLAUDE.md`「共分散・検定の共有範囲」参照）。
 - **GMMのSEサンドイッチは常に一般形**: `Avar(β̂) = B⁻¹(X'ZWΩ̂WZ'X)B⁻¹`
   （`B=X'ZWZ'X`、`W=S_used⁻¹`は点推定に実際に使った重み）。`gmm_weight_type`と`cov_type`は
   独立な選択のため一般に一致せず、「効率的GMM」の特殊ケースでも`B⁻¹`のみへの簡略化分岐は

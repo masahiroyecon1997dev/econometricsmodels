@@ -114,7 +114,7 @@ pub(super) fn gmm_iterate(
                         (0..n).map(|i| (*residuals.get(i, 0)).powi(2)).sum::<f64>() / (n as f64);
                     Mat::from_fn(l, l, |i, j| sigma2 * (*ztz.get(i, j)))
                 }
-                WeightType::Robust => robust_moment_covariance(z, &residuals, n, l),
+                WeightType::Robust => robust_moment_covariance(z, &residuals, n),
                 WeightType::Cluster { .. } => {
                     let groups = weight_cluster_codes.ok_or(CommonError::MissingClusterColumn {
                         setting: ClusterSetting::GmmWeightType,

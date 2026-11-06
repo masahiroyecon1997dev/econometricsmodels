@@ -3,7 +3,7 @@
 //! テストは`fit/tests.rs`と`fit/tests/`にテーマ別で置く（`basic`・`reference`・`cov_type`・`validation`・`proptests`等）。
 
 use super::TwoSlsEstimator;
-use super::cov::{CovStage, covariance_stage, wald_f_test, xtx_inverse};
+use super::cov::{CovStage, covariance_stage, wald_f_test};
 use super::sargan::sargan_test;
 use super::wu_hausman::wu_hausman_test;
 use crate::iv::common::{
@@ -11,6 +11,7 @@ use crate::iv::common::{
     validate_iv_fit_inputs, without_baked_in_intercept,
 };
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
+use crate::shared::covariance::xtx_inverse;
 use crate::shared::error::CommonError;
 use crate::shared::goodness_of_fit::{is_perfect_fit, total_sum_of_squares};
 use crate::shared::inference::{InferenceTable, inference_table};
@@ -19,7 +20,7 @@ use statrs::distribution::StudentsT;
 
 /// `second_stage`（`β̂`・`X̂`を得るためだけの内部委譲フィット）にのみ使う固定`cov_type`。
 /// `two_sls.rs`のモジュールdoc「`second_stage`フィールドの位置づけ」参照。呼び出し元が指定した
-/// `cov_type`は、独立実装のサンドイッチ計算（`fit()`本体）側で使う。
+/// `cov_type`は、サンドイッチ計算（`fit()`本体）側で使う。
 const SECOND_STAGE_COV_TYPE: CovType = CovType::Classical;
 
 /// [`TwoSlsEstimator::fit`]の本体。契約（エラー条件を含む）は`fit`のdocコメント参照。
@@ -83,7 +84,7 @@ pub(super) fn fit_two_sls(
         OlsEstimator::fit_auxiliary(second_stage_input, SECOND_STAGE_COV_TYPE, confidence_level)
             .map_err(|source| IvError::SecondStageFailed { source })?;
 
-    // ── ここから独立実装のサンドイッチ型SE計算（`two_sls.rs`のモジュールdoc参照）──
+    // ── ここからサンドイッチ型SE計算（`two_sls.rs`のモジュールdoc参照）──
     let x_hat = second_stage.input().x(); // X̂ = [x_exog, x̂_endog]
     let beta = second_stage.params();
     let n = x_hat.nrows();
@@ -105,7 +106,11 @@ pub(super) fn fit_two_sls(
         return Err(CommonError::PerfectFit.into());
     }
 
-    let xtx_inv = xtx_inverse(x_hat, k)?;
+    // `(X̂'X̂)⁻¹`。`X̂`（第二段階の設計行列）は`second_stage`の内部委譲フィット（`OlsEstimator::fit`）が
+    // 既に`col_piv_qr`で特異性を検証済みのため、理論上ここで分解は失敗しないはずだが、浮動小数点
+    // 演算の丸めにより境界的なケースで失敗しうるため、防御的に`Result`で扱う。
+    let xtx_inv = xtx_inverse(x_hat)
+        .map_err(|_| CommonError::internal("the second-stage X̂'X̂ could not be factorized"))?;
 
     // 標準誤差の種別ごとの係数共分散行列と、t検定・信頼区間・F検定の自由度。
     let CovStage {

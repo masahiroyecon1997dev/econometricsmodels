@@ -28,16 +28,26 @@ def pytest_addoption(parser: pytest.Parser) -> None:
             "すべて一度は比較されたことを確認する（全体実行専用）。"
         ),
     )
+    parser.addoption(
+        "--check-no-skips",
+        action="store_true",
+        default=False,
+        help=(
+            "スキップ・想定内の失敗（xfail）になったテストが1件でもあれば、実行全体を"
+            "失敗にする。テストはスキップしない方針の守り（絞り込み実行でも有効）。"
+        ),
+    )
 
 
 _MISSING_CODES = pytest.StashKey[list[str]]()
 _UNCONSUMED_COV = pytest.StashKey[list[str]]()
+_SKIPPED = pytest.StashKey[list[str]]()
 
 # `_lib.raise_error_for_test`・`_lib.panic_for_test`はデバッグビルド
 # (`cfg(debug_assertions)`)にだけ含まれる。`maturin develop --release`や、`uv run`・`uv sync`が
 # 拡張をreleaseで再ビルドした環境にはなく、それを使うテストがAttributeErrorで落ちて
-# 原因が分かりにくいため、その場合は理由を添えてskipする。CI（常にデバッグビルド）では
-# skipされず、全体実行の`--check-error-coverage`が、skipで送出されなかった`code`を検出する。
+# 原因が分かりにくいため、その場合は直し方を添えて失敗させる。スキップはしない（スキップは
+# 件数が出るだけで、エラー`code`を送出するテストが黙って動かなくなるため）。
 _TEST_HOOK_NAMES = ("raise_error_for_test", "panic_for_test")
 _NO_TEST_HOOKS = (
     "_libがデバッグビルドではない(release/最適化ビルド)ため、テスト専用関数"
@@ -55,7 +65,7 @@ def _has_test_hooks() -> bool:
 def pytest_report_header(config: pytest.Config) -> str | None:
     if _has_test_hooks():
         return None
-    return f"WARNING: {_NO_TEST_HOOKS}。該当のテストはskipされる"
+    return f"WARNING: {_NO_TEST_HOOKS}。該当のテストは失敗する"
 
 
 @pytest.hookimpl(wrapper=True)
@@ -64,7 +74,7 @@ def pytest_runtest_call(item: pytest.Item):
         return (yield)
     except AttributeError as exc:
         if "_for_test" in str(exc) and not _has_test_hooks():
-            pytest.skip(_NO_TEST_HOOKS)
+            pytest.fail(_NO_TEST_HOOKS, pytrace=False)
         raise
 
 
@@ -81,8 +91,26 @@ def _is_full_run(config: pytest.Config) -> bool:
     return all(Path(arg).resolve() == tests_dir for arg in config.args)
 
 
+def _skipped_test_ids(config: pytest.Config) -> list[str]:
+    """スキップ・xfailになったテストのnode id。"""
+    reporter = config.pluginmanager.get_plugin("terminalreporter")
+    if reporter is None:
+        return []
+    return [
+        report.nodeid
+        for key in ("skipped", "xfailed")
+        for report in reporter.stats.get(key, [])
+        if hasattr(report, "nodeid")
+    ]
+
+
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     config = session.config
+    if exitstatus == 0 and config.getoption("--check-no-skips"):
+        skipped = _skipped_test_ids(config)
+        if skipped:
+            config.stash[_SKIPPED] = skipped
+            session.exitstatus = pytest.ExitCode.TESTS_FAILED
     if exitstatus != 0 or not _is_full_run(config):
         return
     if config.getoption("--check-error-coverage"):
@@ -108,6 +136,15 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
 def pytest_terminal_summary(
     terminalreporter: pytest.TerminalReporter, config: pytest.Config
 ) -> None:
+    skipped = config.stash.get(_SKIPPED, None)
+    if skipped:
+        shown = ", ".join(skipped[:10])
+        more = f" (and {len(skipped) - 10} more)" if len(skipped) > 10 else ""
+        terminalreporter.write_line(
+            f"{len(skipped)} tests were skipped, but tests must not be "
+            f"skipped: {shown}{more}",
+            red=True,
+        )
     missing = config.stash.get(_MISSING_CODES, None)
     if missing:
         terminalreporter.write_line(

@@ -609,3 +609,14 @@ LSDV密解とバランスの閉形式で検証）→②検証の置き換え（�
   ⑦ドキュメント（`fe-spec.md`・`panel-common.md`・`validation.md`・`verification.md`・`usage/fe.md`・`methods/fe.md`・CHANGELOG・性能比較）、
   singletonのエラーに連鎖の行数を足す件、定数列のエラーの2分類（#522のコメントの付帯項目）。
   Pythonまで終わるまでpushしない（CIが落ちる）。
+
+**進捗（Python側・ベンチマーク・ドキュメント、同日）**: engine側は`f55f4d26`でコミット済み。続けて、engine_pybindの`FEOptions`に`tol`・`max_iter`
+（pickle・repr・setter・docstring）、`error_codes.py`・`docs/guide/error-codes.md`の再生成、Pythonテスト（不均衡2-wayの受理、`DUPLICATE_ENTITY_TIME_PAIR`・
+`ABSORPTION_NOT_CONVERGED`・`LEVERAGE_DIMENSION_TOO_LARGE`・`tol`/`max_iter`の範囲）、DGPに`unbalanced_sparse`・`unbalanced_disconnected`を追加し、
+fixest（全`cov_type`）とlinearmodels（classical・HC1）の凍結フィクスチャで`unbalanced`・上記2シナリオの1-way・2-wayを照合、公開ドキュメント・仕様書・CHANGELOGまで更新。
+- **照合結果**: 係数・標準誤差はfixestと最大4.4e-13で一致（連結成分が2つのパネルを含む）。Pythonの全テスト11904件が通る。
+- **fixestの落とし穴**: 既定の`fixef.tol=1e-6`だと、疎な不均衡パネルでfixest自身の共分散が約5e-9ずれ、1e-8で比べられない。参照スクリプトで
+  `fixef.tol=1e-11`（fixestの下限は2.2e-12）にした。linearmodelsも非連結パネルで`k+N+T−1`の自由度を使うことを実測で確認。
+- **残り**: FEの性能比較への不均衡シナリオの追加（`performance/compare_fe.py`）、singletonのエラーに連鎖の行数を足す件、定数列のエラーの2分類
+  （#522のコメントの付帯項目。別Issueに分けるか要確認）、`fixed_effects()`のfixest `fixef`との比較（基準化が違うので和`α_i+γ_t`で比べる案）、
+  #522のコメントとクローズ、push。

@@ -77,7 +77,12 @@ df <- read.csv(data_path, check.names = FALSE)
 
 suppressMessages(library(fixest))
 
-model <- feols(as.formula(formula_str), data = df)
+# 固定効果を除く反復の収束許容度を厳しくする。fixestの既定（fixef.tol = 1e-6、下限は2.2e-12）のままだと、
+# 組合せが欠ける不均衡な2-wayで参照値自体の精度が1e-8程度に落ち、機械精度で比べられない
+# （バランスパネルと1-wayは閉形式で収束するので影響しない）。
+model <- feols(
+  as.formula(formula_str), data = df, fixef.tol = 1e-11, fixef.iter = 100000
+)
 
 # fixestのvcov指定（classical以外はvcov()呼び出しに使うキーワードまたは
 # 片側formula）。小標本補正は`ssc()`既定（モジュールコメント参照）。

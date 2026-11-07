@@ -58,6 +58,8 @@ Point estimates and the classical and HC1 standard errors agree with linearmodel
 
 plm's random-effects model reports z statistics, and its within model reports t statistics with `df.residual` degrees of freedom. The t statistics, p-values and confidence intervals are therefore recomputed from plm's standard errors with the degrees of freedom of this package (`G - 1` for cluster, `t_periods - 1` for Driscoll-Kraay).
 
+**Two-way FE on unbalanced panels.** `fixest` removes the effects iteratively with a default tolerance of `1e-6`, which leaves its own covariance matrix wrong by about `5e-9` on a sparse unbalanced panel and breaks agreement at `1e-8`. The reference script sets `fixef.tol = 1e-11` (the smallest `fixest` accepts is `2.2e-12`); balanced panels and one-way models are computed in closed form and do not depend on it. Both `fixest` and linearmodels keep \(k + N + T - 1\) degrees of freedom when the entities and periods form disconnected groups (the dummy matrix then has a smaller rank), and this package does the same.
+
 **Second reference for FE.** FE cluster and Driscoll-Kraay have a second, independent reference built from `plm` (`model = "within"`) and `sandwich`, for one-way FE only (plm has no covariance matrix for two-way within models and can only cluster by entity or time). It agrees with the implementation and with fixest to machine precision on balanced and unbalanced panels, for every statistic including the F statistic (`plm::pwaldtest`). It is less independent than the table suggests:
 
 - **Cluster:** plm supplies the within-transformed data and the coefficients. The standard error comes from `sandwich::vcovCL` on that data, so it is not a plm covariance estimator.

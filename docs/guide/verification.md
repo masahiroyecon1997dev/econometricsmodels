@@ -129,6 +129,7 @@ All synthetic datasets are generated once, frozen as CSV files in the repository
 - Tobit: censoring patterns (light, moderate, heavy, right-censored, interval-censored, and interval-censored with a narrow uncensored interval so that observations fall in both tails);
 - IV: weak instruments; multiple endogenous variables (over-identified, just-identified, weak instruments, heteroskedastic errors, autocorrelated errors with HAC, a 40-observation sample, and three endogenous variables); and an invalid instrument that is correlated with the structural error, so that the Sargan / Hansen J test rejects (p-values between about `1e-8` and `1e-5`, also with the GMM robust and HAC weights);
 - FE / RE: unbalanced panels and cross-sectional dependence
+- FE, two-way effects on unbalanced panels (compared with `fixest` for every `cov_type` and with linearmodels for classical and HC1): a panel with a missing 20 %, a sparse panel with 60 % of the rows missing, a panel whose entities and periods form two disconnected groups, and a panel with one row removed. The coefficients and standard errors agree with `fixest` to about `4e-13`.
 - time-invariant regressors for RE: one, or several (a continuous and a dummy), on a balanced panel and on unbalanced panels, including panel lengths from 2 to 10 observations per entity
 - regressors that vary in only one dimension for RE:
     - a regressor that varies over time only (a trend or an absolute year, which one-way RE drops from the between regression) and one that varies across entities only;

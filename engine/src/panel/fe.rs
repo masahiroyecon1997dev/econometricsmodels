@@ -11,7 +11,7 @@
 //!
 //! ## `FeEstimator::fit`のパイプライン
 //!
-//! singleton検出 → within変換（2-wayはバランスパネル検証を内包）→ 自由度検証 → 分散ゼロの
+//! 打ち切り設定の検査 → singleton検出 → within変換（2-wayは重複する組合せの検査を内包）→ 自由度検証 → 分散ゼロの
 //! 説明変数・定数の被説明変数の検出 → `confidence_level`検証 → `shared::least_squares::least_squares`
 //! → 完全フィット検出 → `cov_type`別の共分散行列 → 自由度調整後の統計量の再計算。
 //!
@@ -31,11 +31,14 @@
 //!
 //! - **1-way**: `y`/各`x`列にentityでのquasi-demean（θ=1）を適用する。不均衡パネルも
 //!   無条件でサポートする。
-//! - **2-way**: バランスパネル必須。`time`が無ければ`PanelError::TwoWayRequiresTime`、
-//!   不均衡なら`PanelError::UnbalancedPanelForTwoWay`。閉形式の二重デミーニング
-//!   `ỹ_it = y_it - ȳ_i. - ȳ_.t + ȳ..`を別実装せず、「entityでquasi-demean → その結果を
-//!   timeでquasi-demean」の2段階適用にしている。バランスパネルでのみ閉形式と一致する
-//!   （導出は`fe-spec.md`3.1節）ため、不均衡パネルには適用しない。
+//! - **2-way**: `time`が無ければ`PanelError::TwoWayRequiresTime`、同じ`(entity, time)`の組合せが
+//!   複数の行にあれば`PanelError::DuplicateEntityTimePair`。全ての組合せがそろうバランスパネルは、
+//!   閉形式の二重デミーニング`ỹ_it = y_it - ȳ_i. - ȳ_.t + ȳ..`を別実装せず、「entityで
+//!   quasi-demean → その結果をtimeでquasi-demean」の2段階適用にしている（バランスパネルでのみ
+//!   閉形式と一致する。導出は`fe-spec.md`3.1節）。組合せが欠ける不均衡パネルは、entityとtimeの
+//!   水準平均を交互に引く交互射影（`shared::alternating_projections`）で計算し、打ち切りは
+//!   `FeAbsorption`で指定する。HC2/HC3のレバレッジと`fixed_effects()`も不均衡では交互射影・密な
+//!   行列で求める。
 //!
 //! ## 事前検証（within変換の前後で行うもの）
 //!
@@ -174,7 +177,7 @@ mod test_support;
 mod within;
 
 pub use fixed_effects::FixedEffects;
-pub use input::{FeCovType, FeEffects, FeInput};
+pub use input::{FeAbsorption, FeCovType, FeEffects, FeInput};
 // `re/`のテストだけが使う。
 #[cfg(test)]
 pub(crate) use within::{within_transform_one_way, within_transform_two_way};
@@ -211,9 +214,12 @@ pub struct FeEstimator {
     /// `floor(4*(t/100)^(2/9))`で自動計算した値）。`FeCovType::Dk`の`bandwidth`はユーザー指定値の
     /// まま変更しないため別フィールドで保持する。`Dk`以外では`None`。
     dk_bandwidth_used: Option<usize>,
-    /// `time`のユニーク数。2-wayのみ`Some`、1-wayは`None`（2-wayはバランスパネル必須の
-    /// ため、各entityの観測数とも一致する）。
+    /// `time`のユニーク数。2-wayのみ`Some`、1-wayは`None`。
     n_periods: Option<usize>,
+    /// 不均衡な2-wayで、交互射影が`y`と各`x`の列から引いた個体の効果と時点の効果。`fixed_effects()`が
+    /// 傾きを引いた残差の効果を組み立てるのに使う（射影が線形なので列ごとの効果の線形結合になる）。
+    /// バランスパネルと1-wayは`None`。
+    absorbed: Option<within::AbsorbedEffects>,
     std_errors: Mat<f64>,
     /// `cov_type`別の係数の分散共分散行列 `(k, k)`。`std_errors`はこの対角成分の平方根。
     cov_params: Mat<f64>,
@@ -249,14 +255,19 @@ impl FeEstimator {
     /// `PanelError::TwoWayRequiresTime`。以降の検証より先に評価する）→ singleton検出
     /// （`validate_no_singleton_groups_one_way`/`validate_no_singleton_groups_two_way`）
     /// → within変換（`within_transform_one_way`/`within_transform_two_way`、
-    /// 2-wayはバランスパネル検証を内包）→ 自由度検証 → 分散ゼロ検出
+    /// 2-wayは重複する組合せの検査を内包）→ 自由度検証 → 分散ゼロ検出
     /// （`validate_no_zero_variance_regressors`）→ `confidence_level`検証 → 最小二乗
     /// （切片なし。理由はモジュールdoc参照）→ `cov_type`別の共分散行列の計算 → 自由度調整後の統計量の再計算。
     ///
     /// # Errors
     /// - `effects=TwoWay`で`input.time_keys()`が`None`の場合は`PanelError::TwoWayRequiresTime`
     /// - singletonグループが見つかった場合は`PanelError::SingletonGroup`
-    /// - `effects=TwoWay`でバランスパネルでない場合は`PanelError::UnbalancedPanelForTwoWay`
+    /// - `effects=TwoWay`で同じ`(entity, time)`の組合せが複数の行にある場合は
+    ///   `PanelError::DuplicateEntityTimePair`
+    /// - 打ち切り設定が範囲外なら`PanelError::InvalidTol`・`PanelError::InvalidMaxIter`、不均衡な2-wayで
+    ///   交互射影が収束しなければ`PanelError::AbsorptionNotConverged`
+    /// - 不均衡な2-wayのHC2/HC3で、水準の少ない方の効果の水準数が上限を超えれば
+    ///   `PanelError::LeverageDimensionTooLarge`
     /// - パネル自由度調整後の残差自由度（`df_resid`）が正にならない場合は
     ///   `PanelError::InsufficientDegreesOfFreedom`
     /// - within変換後に分散ゼロの説明変数がある場合は`PanelError::ZeroVarianceAfterDemeaning`
@@ -281,7 +292,30 @@ impl FeEstimator {
         cov_type: FeCovType,
         confidence_level: f64,
     ) -> Result<Self, PanelError> {
-        fit::fit_fe(input, effects, cov_type, confidence_level)
+        Self::fit_with_absorption(
+            input,
+            effects,
+            cov_type,
+            confidence_level,
+            &FeAbsorption::default(),
+        )
+    }
+
+    /// [`Self::fit`]に、不均衡な2-wayの交互射影の打ち切り設定を渡す。バランスパネルと1-wayでは
+    /// 閉形式で計算するので`absorption`は使わない（値の範囲は検査する）。
+    ///
+    /// # Errors
+    /// [`Self::fit`]のエラーに加えて、`absorption`の値が範囲外なら`PanelError::InvalidTol`・
+    /// `PanelError::InvalidMaxIter`、交互射影が上限回数までに収束しなければ
+    /// `PanelError::AbsorptionNotConverged`。
+    pub fn fit_with_absorption(
+        input: FeInput,
+        effects: FeEffects,
+        cov_type: FeCovType,
+        confidence_level: f64,
+        absorption: &FeAbsorption,
+    ) -> Result<Self, PanelError> {
+        fit::fit_fe(input, effects, cov_type, confidence_level, absorption)
     }
 
     /// within変換前の入力データ。

@@ -6,7 +6,7 @@ use super::time_keys::TimeKeys;
 use super::transform::WithinTransform;
 use crate::shared::error::CommonError;
 use crate::shared::group_codes::GroupCodes;
-use crate::shared::validation::column_is_zero_variance;
+use crate::shared::validation::{column_is_zero_variance, column_is_zero_variance_with_noise};
 
 /// `FeInput::from_group_codes`/`ReInput::from_group_codes`の入力検証（FE/REで共通）。
 /// 検査の順序は、各`x_columns`の行数（`y`との不一致は`CommonError::DimensionMismatch`）、
@@ -122,11 +122,13 @@ pub(crate) fn ensure_no_singleton_groups(
 ///
 /// # Errors
 /// 分散ゼロの列が見つかった場合は`PanelError::ZeroVarianceAfterDemeaning`（該当列名を含む）。
-/// 複数列が該当する場合は`names`の順で最初に見つかった列のみを報告する。
+/// 複数列が該当する場合は`names`の順で最初に見つかった列のみを報告する。`noise`は変換が残す誤差の相対的な大きさ
+/// （閉形式の変換は0。`column_is_zero_variance_with_noise`参照）。
 pub(crate) fn ensure_no_zero_variance_columns(
     names: &[String],
     originals: &[Vec<f64>],
     transformed: &[Vec<f64>],
+    noise: f64,
 ) -> Result<(), PanelError> {
     assert_eq!(
         names.len(),
@@ -144,7 +146,7 @@ pub(crate) fn ensure_no_zero_variance_columns(
             transformed.len(),
             "transformed column '{name}' must have the same length as the original column"
         );
-        if column_is_zero_variance(original, transformed) {
+        if column_is_zero_variance_with_noise(original, transformed, noise) {
             return Err(PanelError::ZeroVarianceAfterDemeaning {
                 column: name.clone(),
             });
@@ -228,6 +230,67 @@ pub(crate) fn validate_balanced_panel(
         *cell = true;
     }
     Ok(())
+}
+
+/// 重複する`(entity, time)`が無いことを前提に、すべての組合せがそろっているか（バランスパネルか）。
+/// 行数が`N × T`であることと同じ。重複の検査（[`ensure_no_duplicate_entity_time_pairs`]）が先に通っていること。
+pub(crate) fn covers_every_combination(entity: &GroupCodes, time: &GroupCodes) -> bool {
+    entity.nobs() == entity.n_groups().saturating_mul(time.n_groups())
+}
+
+/// グリッドの大きさが行数のこの倍数以下なら、グリッドの`bool`で重複を調べる（`O(n)`）。それより大きい
+/// （疎なパネル）ときは並べ替える（`O(n log n)`）。
+const GRID_SIZE_FACTOR: usize = 8;
+
+/// `(entity, time)`の同じ組合せが複数の行に現れないことを検証する（2-wayの固定効果）。
+///
+/// 組合せを整数キー（`entity`コード × 時点数 + `time`コード）にする。`entity × time`のグリッドが行数の
+/// 数倍以下なら、グリッドを埋めて調べる。それより大きいときは、キーを並べ替えて隣り合う一致で検出し、
+/// 疎な大きなパネルでもメモリが行数に比例するようにする。重複する組合せが複数あれば、観測順で2回目に
+/// 現れる行が最も早いものを報告する。
+///
+/// `entity.nobs() == time.nobs()`は`FeInput::from_group_codes`が保証している契約。
+///
+/// # Errors
+/// 重複する組合せがあるとき`PanelError::DuplicateEntityTimePair`。
+pub(crate) fn ensure_no_duplicate_entity_time_pairs(
+    entity: &GroupCodes,
+    time: &GroupCodes,
+    names: &EffectNames,
+) -> Result<(), PanelError> {
+    debug_assert_eq!(
+        entity.nobs(),
+        time.nobs(),
+        "entity and time must have the same length (FeInput contract)"
+    );
+    let n = entity.nobs();
+    let n_periods = time.n_groups();
+    // 個体の水準数と時点の水準数はどちらも行数以下なので、行数が2^32未満なら積はあふれない。
+    let key = |row: usize| entity.codes()[row] * n_periods + time.codes()[row];
+    let grid_size = entity.n_groups().saturating_mul(n_periods);
+
+    let second_row = if grid_size <= GRID_SIZE_FACTOR.saturating_mul(n) {
+        let mut seen = vec![false; grid_size];
+        (0..n).find(|&row| std::mem::replace(&mut seen[key(row)], true))
+    } else {
+        let mut keyed: Vec<(usize, usize)> = (0..n).map(|row| (key(row), row)).collect();
+        keyed.sort_unstable();
+        // キーが同じ間は行番号の昇順なので、同じキーの2番目の要素が、その組合せの2回目の行。
+        keyed
+            .windows(2)
+            .filter(|pair| pair[0].0 == pair[1].0)
+            .map(|pair| pair[1].1)
+            .min()
+    };
+    match second_row {
+        None => Ok(()),
+        Some(row) => Err(PanelError::DuplicateEntityTimePair {
+            entity_column: names.get(PanelDimension::Entity).to_string(),
+            entity_id: entity.keys()[entity.codes()[row]].clone(),
+            time_column: names.get(PanelDimension::Time).to_string(),
+            time_id: time.keys()[time.codes()[row]].clone(),
+        }),
+    }
 }
 
 /// `x`の各列のうち、1-way within変換（`entity`でθ=1のquasi-demean）後に分散がある列
@@ -345,6 +408,6 @@ mod tests {
     fn ensure_no_zero_variance_columns_panics_when_names_are_fewer_than_columns() {
         let originals = vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0]];
         let transformed = originals.clone();
-        let _ = ensure_no_zero_variance_columns(&["x1".to_string()], &originals, &transformed);
+        let _ = ensure_no_zero_variance_columns(&["x1".to_string()], &originals, &transformed, 0.0);
     }
 }

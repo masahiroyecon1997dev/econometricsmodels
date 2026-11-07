@@ -12,6 +12,7 @@ pub mod error_catalog;
 pub mod group_codes;
 pub mod parallelism;
 
+pub(crate) mod alternating_projections;
 pub(crate) mod covariance;
 pub(crate) mod design_matrix;
 pub(crate) mod effective_f;

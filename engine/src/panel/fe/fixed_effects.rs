@@ -8,6 +8,8 @@ use faer::Mat;
 use super::FeEstimator;
 use super::input::FeEffects;
 use super::r_squared::slope_only_residual;
+use super::within::AbsorbedEffects;
+use crate::shared::alternating_projections::GroupSystem;
 use crate::shared::group_codes::GroupCodes;
 
 /// 固定効果自体（α_i、2-wayはγ_tも）の復元結果（`FeEstimator::fixed_effects`、
@@ -80,7 +82,12 @@ pub(super) fn fixed_effects(estimator: &FeEstimator) -> FixedEffects {
             let time = estimator.input.time_codes().expect(
                 "2-way already validated `time` is present (`fit` resolves `two_way_time`)",
             );
-            let entity_means = group_residual_means(y, x, params, estimator.input.entity_codes());
+            let entity = estimator.input.entity_codes();
+            // 重複する組合せは`fit`が拒否している。
+            if let Some(absorbed) = &estimator.absorbed {
+                return unbalanced_two_way(estimator, absorbed, entity, time);
+            }
+            let entity_means = group_residual_means(y, x, params, entity);
             let time_means = group_residual_means(y, x, params, time);
             let overall_mean = overall_residual_mean(y, x, params);
             // `time_means`は時点の昇順（コード順）のため`first()`が最初の時点（DKの
@@ -101,6 +108,64 @@ pub(super) fn fixed_effects(estimator: &FeEstimator) -> FixedEffects {
                 .collect();
             FixedEffects::TwoWay { entity, time }
         }
+    }
+}
+
+/// 不均衡な2-wayの固定効果。傾きを引いた残差`y − Xβ̂`の効果を、`fit`が保存した`y`の列と各`x`の列の
+/// 効果から`effects(y) − Σ β̂_j effects(x_j)`で組み立てる（射影は線形なので、残差の列を別に射影するのと同じ）。
+///
+/// 正規化は連結成分ごとに行う: 成分に含まれる最初の時点（時間順）の効果を0にし、そのぶんを同じ成分の
+/// 個体の効果に足す（成分が1つなら、バランスパネルと同じく全体で最初の時点が基準）。
+fn unbalanced_two_way(
+    estimator: &FeEstimator,
+    absorbed: &AbsorbedEffects,
+    entity: &GroupCodes,
+    time: &GroupCodes,
+) -> FixedEffects {
+    let mut combined = absorbed.y.clone();
+    for (j, effects) in absorbed.x.iter().enumerate() {
+        let beta = *estimator.params.get(j, 0);
+        for (total, part) in combined.iter_mut().zip(effects) {
+            for (t, p) in total.iter_mut().zip(part) {
+                *t -= beta * p;
+            }
+        }
+    }
+
+    let system = GroupSystem::new(&[entity, time]);
+    let components = system.components();
+    // 成分ごとの最初の時点（コードは時間順）。
+    let mut reference = vec![usize::MAX; components.len()];
+    for level in (0..time.n_groups()).rev() {
+        reference[components.of_level(1, level)] = level;
+    }
+    let shift: Vec<f64> = reference.iter().map(|&level| combined[1][level]).collect();
+
+    let entity_effects = entity
+        .keys()
+        .iter()
+        .enumerate()
+        .map(|(g, key)| {
+            (
+                key.clone(),
+                combined[0][g] + shift[components.of_level(0, g)],
+            )
+        })
+        .collect();
+    let time_effects = time
+        .keys()
+        .iter()
+        .enumerate()
+        .map(|(g, key)| {
+            (
+                key.clone(),
+                combined[1][g] - shift[components.of_level(1, g)],
+            )
+        })
+        .collect();
+    FixedEffects::TwoWay {
+        entity: entity_effects,
+        time: time_effects,
     }
 }
 

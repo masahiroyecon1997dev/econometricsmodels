@@ -157,8 +157,8 @@ pub(crate) fn quasi_demean_two_way(
 ///
 /// 2-wayは閉形式の二重デミーニングと数学的に等価な「entityでquasi-demean→その結果をtimeで
 /// quasi-demean」の2段階適用で計算する（`fe.rs`モジュールdoc参照）。バランスパネルであることの
-/// 検証はしない（呼び出し側が`validate_balanced_panel`で済ませる前提。不均衡だと二重デミーニングと
-/// 一致しない）。θ=1のベクトルは変換の構築時に一度だけ作り、列ごとに使い回す。
+/// 検証はしない（呼び出し側が全組合せがそろうことを確かめる前提。不均衡だと二重デミーニングと
+/// 一致しない。FEの不均衡な2-wayは交互射影を使う）。θ=1のベクトルは変換の構築時に一度だけ作り、列ごとに使い回す。
 pub(crate) struct WithinTransform<'a> {
     entity: &'a GroupCodes,
     entity_theta: Vec<f64>,

@@ -4,6 +4,7 @@ use crate::panel::common::{
     EffectNames, PanelCovType, PanelEffects, PanelError, TimeKeys, validate_panel_input,
 };
 use crate::panel::re::{ReEffects, ReInput};
+use crate::shared::alternating_projections::{DEFAULT_MAX_SWEEPS, DEFAULT_TOLERANCE};
 use crate::shared::group_codes::GroupCodes;
 
 /// FEの被説明変数・説明変数・パネル識別子を保持する入力データ。
@@ -215,6 +216,47 @@ impl FeInput {
     /// 観測数 n
     pub fn nobs(&self) -> usize {
         self.y.len()
+    }
+}
+
+/// 不均衡な2-wayで固定効果を除く交互射影の打ち切りの設定。バランスパネルと1-wayは閉形式で
+/// 計算するので使わない（値の検査はどちらでも行う）。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FeAbsorption {
+    /// 収束の許容度。1回の掃引で引く水準平均の絶対値の最大が、列の絶対値の最大のこの割合以下に
+    /// なったら収束とする。正の有限値。
+    pub tol: f64,
+    /// 掃引（全グループの平均を1回ずつ引く操作）の上限回数。`1`から`10000`。
+    pub max_iter: i64,
+}
+
+impl Default for FeAbsorption {
+    fn default() -> Self {
+        Self {
+            tol: DEFAULT_TOLERANCE,
+            // 掃引の既定の上限は、`max_iter`の許す最大（`MAX_ITER_LIMIT`）と同じ。
+            max_iter: DEFAULT_MAX_SWEEPS as i64,
+        }
+    }
+}
+
+impl FeAbsorption {
+    /// 値の範囲を検査する。
+    ///
+    /// # Errors
+    /// `tol`が正の有限値でなければ`PanelError::InvalidTol`、`max_iter`が範囲外なら
+    /// `PanelError::InvalidMaxIter`。
+    pub(crate) fn validate(&self) -> Result<(), PanelError> {
+        use crate::shared::validation::{MAX_ITER_LIMIT, MAX_ITER_MIN};
+        if !(self.tol.is_finite() && self.tol > 0.0) {
+            return Err(PanelError::InvalidTol { tol: self.tol });
+        }
+        if !(MAX_ITER_MIN..=MAX_ITER_LIMIT).contains(&self.max_iter) {
+            return Err(PanelError::InvalidMaxIter {
+                max_iter: self.max_iter,
+            });
+        }
+        Ok(())
     }
 }
 

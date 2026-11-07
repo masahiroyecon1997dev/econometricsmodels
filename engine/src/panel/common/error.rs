@@ -8,6 +8,7 @@ use thiserror::Error;
 use crate::linear::common::LeastSquaresError;
 use crate::shared::error::{CommonError, ErrorInfo, staged_report};
 use crate::shared::error_catalog::{ErrorCode, ErrorReport, Stage};
+use crate::shared::validation::{MAX_ITER_LIMIT, MAX_ITER_MIN};
 
 /// パネルデータの2つの次元。エラーメッセージ・バリデーションで「どちらの次元の
 /// 問題か」を区別するために使う。
@@ -116,19 +117,17 @@ pub enum PanelError {
         group_id: String,
     },
 
-    /// 2-way FE（entity + time FE）に不均衡（unbalanced）パネルが渡された。
+    /// 2-way RE（entity + time）に不均衡（unbalanced）パネルが渡された。
     ///
-    /// 2-way FEのwithin変換は閉形式の二重デミーニング
-    /// （`ỹ_it = y_it - ȳ_i. - ȳ_.t + ȳ..`）で計算するが、この閉形式は
-    /// バランスパネルでのみ正確なため、2-wayでは常にバランスパネルを必須とする
-    /// （`docs/spec/fe-spec.md`1章）。1-way FEはエンティティ平均を引くだけで
-    /// 不均衡でも数学的に正確に成立するため、このエラーは発生しない。
+    /// 2-way REのGLS変換（`quasi_demean_two_way`）はバランスパネルを前提にした閉形式で、不均衡では
+    /// 成り立たない。2-way FEは不均衡パネルを交互射影で扱うため、このエラーは返さない
+    /// （重複ペアは[`Self::DuplicateEntityTimePair`]）。1-wayは不均衡でも成立する。
     ///
-    /// なお「バランス」の判定は観測数カウント（`n_obs == n_entities * n_periods`）
-    /// だけでは不十分で、あるペアの重複と別ペアの欠落が相殺してカウントだけ一致する
-    /// 入力もありうる。このエラーを構築する検証は、(entity, time)ペアの一意性・
-    /// 全組合せの充足まで確認する必要がある（`validate_balanced_panel`）。
-    /// `entity_column`・`time_column`は`effects`の1つ目・2つ目の列名（メッセージ用）。
+    /// 「バランス」の判定は観測数カウント（`n_obs == n_entities * n_periods`）だけでは不十分で、
+    /// あるペアの重複と別ペアの欠落が相殺してカウントだけ一致する入力もありうる。このエラーを
+    /// 構築する検証は、(entity, time)ペアの一意性・全組合せの充足まで確認する
+    /// （`validate_balanced_panel`）。`entity_column`・`time_column`は`effects`の1つ目・2つ目の
+    /// 列名（メッセージ用）。
     #[error("{}", self.catalog_message())]
     UnbalancedPanelForTwoWay {
         n_obs: usize,
@@ -137,6 +136,37 @@ pub enum PanelError {
         time_column: String,
         n_periods: usize,
     },
+
+    /// 同じ(entity, time)の組合せが複数の行に現れる。2-wayの固定効果は、組合せごとに多くても1行を前提とする
+    /// （重複を許すと、不均衡の判定とグリッドの対応が崩れる）。重複する組合せが複数あれば、観測順で最初に
+    /// 現れるものを報告する。`entity_column`・`time_column`は`effects`の1つ目・2つ目の列名。
+    #[error("{}", self.catalog_message())]
+    DuplicateEntityTimePair {
+        entity_column: String,
+        entity_id: String,
+        time_column: String,
+        time_id: String,
+    },
+
+    /// 不均衡な2-wayのHC2/HC3は、水準の少ない方の効果の水準数の2乗の密な行列を解くため、水準数に上限がある。
+    #[error("{}", self.catalog_message())]
+    LeverageDimensionTooLarge { n_levels: usize, max_levels: usize },
+
+    /// 固定効果を除く交互射影が、反復の上限までに収束しなかった。`relative_change`は最後の1回の掃引で
+    /// 引いた水準平均の最大を、列の絶対値の最大で割った値。
+    #[error("{}", self.catalog_message())]
+    AbsorptionNotConverged {
+        n_sweeps: usize,
+        relative_change: f64,
+    },
+
+    /// 交互射影の収束許容度`tol`が正の有限値でない。
+    #[error("{}", self.catalog_message())]
+    InvalidTol { tol: f64 },
+
+    /// 交互射影の反復上限`max_iter`が範囲外。
+    #[error("{}", self.catalog_message())]
+    InvalidMaxIter { max_iter: i64 },
 
     /// within変換（デミーニング）後に分散がゼロになる説明変数がある。
     ///
@@ -420,6 +450,35 @@ impl ErrorInfo for PanelError {
                 .param("n_first_groups", *n_entities)
                 .param("second_column", time_column.as_str())
                 .param("n_second_groups", *n_periods),
+            Self::DuplicateEntityTimePair {
+                entity_column,
+                entity_id,
+                time_column,
+                time_id,
+            } => ErrorReport::new(ErrorCode::DuplicateEntityTimePair)
+                .param("first_column", entity_column.as_str())
+                .param("first_group", entity_id.as_str())
+                .param("second_column", time_column.as_str())
+                .param("second_group", time_id.as_str()),
+            Self::LeverageDimensionTooLarge {
+                n_levels,
+                max_levels,
+            } => ErrorReport::new(ErrorCode::LeverageDimensionTooLarge)
+                .param("n_levels", *n_levels)
+                .param("max_levels", *max_levels),
+            Self::AbsorptionNotConverged {
+                n_sweeps,
+                relative_change,
+            } => ErrorReport::new(ErrorCode::AbsorptionNotConverged)
+                .param("n_sweeps", *n_sweeps)
+                .param("relative_change", *relative_change),
+            Self::InvalidTol { tol } => ErrorReport::new(ErrorCode::ToleranceNotPositiveFinite)
+                .param("option", "tol")
+                .param("value", *tol),
+            Self::InvalidMaxIter { max_iter } => ErrorReport::new(ErrorCode::MaxIterOutOfRange)
+                .param("value", *max_iter)
+                .param("min", MAX_ITER_MIN)
+                .param("max", MAX_ITER_LIMIT),
             Self::ZeroVarianceAfterDemeaning { column } => {
                 ErrorReport::new(ErrorCode::RegressorNoWithinVariation)
                     .param("column", column.as_str())
@@ -558,7 +617,43 @@ mod tests {
                     n_periods: 3,
                 },
                 ErrorCode::PanelNotBalancedForTwoWay,
-                "Two-way estimation requires a balanced panel: 5 observation(s) for 2 groups of 'firm' and 3 of 'year', but every combination needs exactly one.",
+                "Two-way random effects require a balanced panel: 5 observation(s) for 2 groups of 'firm' and 3 of 'year', but every combination needs exactly one.",
+            ),
+            (
+                PanelError::DuplicateEntityTimePair {
+                    entity_column: "firm".to_string(),
+                    entity_id: "a".to_string(),
+                    time_column: "year".to_string(),
+                    time_id: "2020".to_string(),
+                },
+                ErrorCode::DuplicateEntityTimePair,
+                "The combination of 'firm' = a and 'year' = 2020 appears in more than one row, but each combination may appear at most once.",
+            ),
+            (
+                PanelError::LeverageDimensionTooLarge {
+                    n_levels: 5000,
+                    max_levels: 3000,
+                },
+                ErrorCode::LeverageDimensionTooLarge,
+                "The HC2 and HC3 covariances of an unbalanced two-way model need a dense matrix over the levels of the smaller effect, which has 5000 levels, but at most 3000 are supported.",
+            ),
+            (
+                PanelError::AbsorptionNotConverged {
+                    n_sweeps: 100,
+                    relative_change: 0.5,
+                },
+                ErrorCode::AbsorptionNotConverged,
+                "Removing the fixed effects did not converge after 100 pass(es); the last pass still changed the data by 0.5 relative to its scale.",
+            ),
+            (
+                PanelError::InvalidTol { tol: 0.0 },
+                ErrorCode::ToleranceNotPositiveFinite,
+                "tol must be a positive finite number, got 0.0.",
+            ),
+            (
+                PanelError::InvalidMaxIter { max_iter: 0 },
+                ErrorCode::MaxIterOutOfRange,
+                "max_iter must be an integer from 1 to 10000, got 0.",
             ),
             (
                 PanelError::ZeroVarianceAfterDemeaning {

@@ -6,11 +6,11 @@
 use statrs::distribution::StudentsT;
 
 use super::FeEstimator;
-use super::input::{FeCovType, FeEffects, FeInput};
+use super::input::{FeAbsorption, FeCovType, FeEffects, FeInput};
 use super::r_squared::{fe_r_squared_between, fe_r_squared_overall};
 use super::within::{
     validate_no_singleton_groups_one_way, validate_no_singleton_groups_two_way,
-    validate_no_zero_variance_regressors, within_transform_one_way, within_transform_two_way,
+    validate_no_zero_variance_regressors, within_transform_one_way, within_transform_two_way_with,
 };
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::OlsInput;
@@ -20,7 +20,7 @@ use crate::shared::goodness_of_fit::{gaussian_goodness_of_fit, is_perfect_fit};
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference::{InferenceTable, inference_table};
 use crate::shared::least_squares::{LeastSquaresFit, least_squares};
-use crate::shared::validation::column_is_zero_variance;
+use crate::shared::validation::column_is_zero_variance_with_noise;
 use crate::shared::wald::wald_f_test;
 
 /// 2-wayの時点コードを返す（1-wayは`None`）。2-wayなのに`input`に`time`が無ければ
@@ -42,6 +42,7 @@ pub(super) fn fit_fe(
     effects: FeEffects,
     cov_type: FeCovType,
     confidence_level: f64,
+    absorption: &FeAbsorption,
 ) -> Result<FeEstimator, PanelError> {
     // faerのグローバル並列度をPar::Seqに固定する（`crate::shared::parallelism`。
     // `cargo test -p engine`でFeEstimator::fitを直接叩く経路でも担保するためここで呼ぶ、`engine/src/panel/CLAUDE.md`「faerの
@@ -53,14 +54,22 @@ pub(super) fn fit_fe(
     // 食い違いを後段で`expect`せずに済む）。
     let two_way_time = two_way_time(effects, &input)?;
 
-    let (y, x) = match effects {
+    absorption.validate()?;
+
+    let mut absorbed = None;
+    let (y, x, noise) = match effects {
         FeEffects::OneWay => {
             validate_no_singleton_groups_one_way(&input)?;
-            within_transform_one_way(&input)
+            let (y, x) = within_transform_one_way(&input);
+            (y, x, 0.0)
         }
         FeEffects::TwoWay => {
             validate_no_singleton_groups_two_way(&input)?;
-            within_transform_two_way(&input)?
+            // 組合せが欠ける2-wayのHC2/HC3は、水準の少ない方の効果の密な行列を解く。
+            let leverage_needed = matches!(cov_type, FeCovType::Hc2 | FeCovType::Hc3);
+            let within = within_transform_two_way_with(&input, absorption, leverage_needed)?;
+            absorbed = within.absorbed;
+            (within.y, within.x, within.noise)
         }
     };
 
@@ -85,12 +94,12 @@ pub(super) fn fit_fe(
     }
     let df_resid = n - df_model;
 
-    validate_no_zero_variance_regressors(&input, &x)?;
+    validate_no_zero_variance_regressors(&input, &x, noise)?;
 
     // 被説明変数もwithin変換後に分散が残らなければ、固定効果が説明するものが無い
     // （個体内で定数、2-wayなら個体効果と時点効果だけで説明される）。説明変数と同じ
     // 相対閾値で判定する。
-    if column_is_zero_variance(input.y(), &y) {
+    if column_is_zero_variance_with_noise(input.y(), &y, noise) {
         return Err(PanelError::OutcomeConstantWithinEntity);
     }
 
@@ -142,7 +151,9 @@ pub(super) fn fit_fe(
     // within回帰の残差が丸め誤差の範囲で0なら完全フィット。標準誤差とF検定が定義できない。
     // within変換後の`y`の平均は0なので、総平方和は非中心化（`Σỹ²`）。
     let sst_within: f64 = y.iter().map(|v| v * v).sum();
-    if is_perfect_fit(ssr, sst_within, k) {
+    // 交互射影が`y`に残す誤差（元の`y`の絶対値の最大の`noise`倍）の2乗和以下の残差も、完全適合とみなす。
+    let y_scale = input.y().iter().fold(0.0_f64, |m, v| m.max(v.abs()));
+    if is_perfect_fit(ssr, sst_within, k) || ssr <= n as f64 * (noise * y_scale).powi(2) {
         return Err(PanelError::WithinRegressionFailed {
             source: CommonError::PerfectFit.into(),
         });
@@ -236,6 +247,7 @@ pub(super) fn fit_fe(
         df_inference,
         dk_bandwidth_used,
         n_periods,
+        absorbed,
         std_errors,
         cov_params,
         test_stats,

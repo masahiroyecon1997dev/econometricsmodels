@@ -87,35 +87,35 @@ fn within_transform_two_way_requires_time() {
 }
 
 #[test]
-fn within_transform_two_way_rejects_unbalanced_panel_with_missing_combination() {
-    // entity=b, time="2"の観測が欠けている（n_obs=3 != n_entities*n_periods=4）。
-    let y = [1.0, 2.0, 3.0];
-    let entity = strings(&["a", "a", "b"]);
-    let time = strings(&["1", "2", "1"]);
+fn within_transform_two_way_removes_every_entity_mean_and_time_mean_of_an_unbalanced_panel() {
+    // (c,1)・(b,3)が欠けた不均衡パネル。変換後の列は個体ごとにも時点ごとにも平均が0になる。
+    let y = [1.0, 2.5, 4.0, 3.0, 5.5, 2.0, 7.0];
+    let entity = strings(&["a", "a", "a", "b", "b", "c", "c"]);
+    let time = strings(&["1", "2", "3", "1", "2", "2", "3"]);
     let input = FeInput::from_columns(&y, &[], vec![], &entity, Some(&time), "y".into()).unwrap();
 
-    let result = within_transform_two_way(&input);
+    let (y_out, _) = within_transform_two_way(&input).unwrap();
 
-    assert_eq!(
-        result.unwrap_err(),
-        PanelError::UnbalancedPanelForTwoWay {
-            n_obs: 3,
-            entity_column: "entity".to_string(),
-            n_entities: 2,
-            time_column: "time".to_string(),
-            n_periods: 2,
+    for group in [&entity, &time] {
+        for label in ["a", "b", "c", "1", "2", "3"] {
+            let rows: Vec<f64> = group
+                .iter()
+                .zip(&y_out)
+                .filter(|(g, _)| g.as_str() == label)
+                .map(|(_, v)| *v)
+                .collect();
+            if !rows.is_empty() {
+                assert!(rows.iter().sum::<f64>().abs() < 1e-9, "{label}");
+            }
         }
-    );
+    }
 }
 
 #[test]
-fn within_transform_two_way_rejects_duplicate_pair_that_offsets_missing_combination() {
+fn within_transform_two_way_rejects_a_repeated_pair_that_offsets_a_missing_combination() {
     // entity=[a,a,b,b], time=[1,1,2,2]: (a,1)が重複、(a,2)と(b,1)が欠落。
     // n_obs=4はn_entities(2)*n_periods(2)=4と一致してしまうが、ユニークな
-    // (entity,time)ペアは{(a,1),(b,2)}の2個のみで4に満たないため、単純な
-    // カウント一致チェックでは見逃す入力を正しく検出できることを確認する
-    // （`PanelError::UnbalancedPanelForTwoWay`のdocコメント・`validate_balanced_panel`
-    // 参照）。
+    // (entity,time)ペアは{(a,1),(b,2)}の2個のみ。件数の一致では見逃す入力を、重複として検出する。
     let y = [1.0, 2.0, 3.0, 4.0];
     let entity = strings(&["a", "a", "b", "b"]);
     let time = strings(&["1", "1", "2", "2"]);
@@ -125,12 +125,11 @@ fn within_transform_two_way_rejects_duplicate_pair_that_offsets_missing_combinat
 
     assert_eq!(
         result.unwrap_err(),
-        PanelError::UnbalancedPanelForTwoWay {
-            n_obs: 4,
+        PanelError::DuplicateEntityTimePair {
             entity_column: "entity".to_string(),
-            n_entities: 2,
+            entity_id: "a".to_string(),
             time_column: "time".to_string(),
-            n_periods: 2,
+            time_id: "1".to_string(),
         }
     );
 }

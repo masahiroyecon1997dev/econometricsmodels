@@ -472,7 +472,7 @@ C統計量は事後診断のメソッド、`first_stage()`は`Computed`変種、
 `1bf01e91`（決定事項）、`91a76a9d`（#628 A 手順1）、`8d8d8dc8`（A 手順2）、`c1f13b84`（進捗）、`1631e728`（#628 B）、
 `5075ca28`（GMMコアの継ぎ目。#628はクローズ済み）、続けて#363のコミット（`git log`で確認）。
 
-追加（2026-11-06〜07）: `9581fe26`（#364 KP）、`f725458f`（#365 単純版）、`abcf32f2`（#365 一般化版）、`28f8a375`（オラクル。実装セッションのコミット）。ここまで**push済み**。
+追加（2026-11-06〜07）: `9581fe26`（#364 KP）、`f725458f`（#365 単純版）、`abcf32f2`（#365 一般化版）、`28f8a375`（オラクル。実装セッションのコミット）。`b7684b3c`（回帰テストの固定）。ここまで**push済み**。#365はクローズ済み。
 #364はクローズ済み。#365は一般化版のコミット後も、オラクルのレビューと突き合わせが残るため**まだ開いている**。
 
 ### 9.4 この後の順序（5.3の実装順）
@@ -570,4 +570,42 @@ C統計量は事後診断のメソッド、`first_stage()`は`Computed`変種、
   コメントと説明文を実測に合わせた（桁落ちを検出するものではなく固定のしきい値）、②固有値は本番と同じ`psd_eigenvalues`の経路、
   ③1e-4のケースの許容誤差を1e-7に緩めた（`sin`/`cos`の1 ulp差の余裕）、④rust-reviewerの指摘で、オラクル照合を`reference.rs`、`None`の判定を`undefined.rs`へ移し、共有ヘルパー（`blocks`・`nearly_proportional_w`）をハブに置いた、
   ⑤固有値の定数を1つにまとめ、`ratio`は記録した値との照合にした。
-- **残り**: コミット（`test(engine): ...`） → #365へコメントしてクローズ → push。
+- **完了**: `b7684b3c`（回帰テストの固定）をコミット・push済み。#365はコメントのうえクローズ済み。次は#522。
+
+### 9.8 #522（不均衡2-way FE）の着手前の調査と決定（2026-11-07）
+
+**調査の要点**
+- 現行の2-wayは「entityでquasi-demean→timeでquasi-demean」の2段階で、バランスパネルでだけ厳密。均衡前提は3か所:
+  `validate_balanced_panel`、HC2/HC3の2-wayレバレッジ`1/T_i + 1/N_t − 1/n`（`fe_adjustment.rs`）、`fixed_effects()`の2元ANOVA恒等式。
+- REの2-wayは内部でFEを呼ぶが、`re/variance.rs`に独立の不均衡ガードがある（RE側は不均衡を拒否したまま。別Issue）。
+- 自由度は変えない: 連結成分が2つの不均衡データ（k=1、N=T=8）で、fixest 0.14.2もlinearmodelsも`df_model = k+N+T−1`（=16。真のランクは15）。
+- union-find・交互射影のコードはengineに無い（`GroupCodes`のCSR索引は使える）。fixestの2-way呼び出しは既にある（均衡のみ）。
+  linearmodelsは不均衡2-wayも扱える（クロスチェックに使う）。不均衡2-wayのDGPは無い。
+- 交互射影は有限の許容度で止まるため、分散ゼロ・完全適合・定数yの判定しきい値（`n·EPS·max|x|`など）が合わなくなる。許容度に連動させる。
+
+**利用者の決定**
+- **HC2/HC3**: 不均衡2-wayでも対応する（entity+timeダミーのレバレッジをシューア補集合で解く）。小さい方の次元（NかT）を密に解く。
+  メモリ`(小さい方の次元)²`に上限を設け、超えたらValidationError（上限は実装時に決める）。
+- **連結成分が複数のパネル**: 受け入れる。`df_model = k+N+T−1`のまま。`fixed_effects()`は成分ごとに基準化（時間順で最初の時点をγ=0）。
+- **singletonのエラー**: paramsに、連鎖を含めて何行落ちるかを足す。**polarsのフィルタ例をhintに出す案には、利用者が過剰と指摘**。
+  連鎖では1回のフィルタで済まないため、hintは機械的な対処（`error-style-guide.md`）にとどめる方向（実装時に文面を決める）。
+
+**実装計画（コミットの単位）**: ①交互射影の核（`shared/`。K個のコード配列、索引・連結成分の共有、Irons–Tuck加速、反復数と収束の有無を返す。
+LSDV密解とバランスの閉形式で検証）→②検証の置き換え（重複ペアの検査をソート/ハッシュで。不均衡の拒否をFEから外し、RE専用に文面を直す）→
+③FEのfit配線（全ペアそろい・1-wayは閉形式のまま、不均衡だけ交互射影。`FEOptions`に`tol`・`max_iter`。非収束は`ComputationError`。
+しきい値を許容度に連動）→④HC2/HC3のレバレッジ→⑤`fixed_effects()`の復元（残差に交互射影、成分ごとの基準化）→
+⑥ベンチマーク（DGP: ランダム欠測・疎・連結成分が複数・ほぼ非連結、いずれもsingletonなし。主はfixest、クロスチェックはlinearmodels。
+`r_squared_within`はfixestのみ）→⑦ドキュメント（fe-spec・panel-common・validation・verification・CHANGELOG・性能比較）。
+
+**進捗（engine側 ①〜⑤、同日）**: 交互射影の核（`shared/alternating_projections`）、重複ペアの検査、FEのfit配線（`FeAbsorption`の`tol`・`max_iter`、
+`fit_with_absorption`）、不均衡2-wayのHC2/HC3レバレッジ（`dummy_leverage`）、`fixed_effects()`の成分ごとの基準化まで実装し、ダミー変数回帰との照合
+（係数・残差・古典/HC1/HC2/HC3・`fixed_effects()`・連結成分が複数のパネル）が通っている。rust-reviewer・`/code-review`の指摘（完全適合のしきい値の単位、
+収束判定の尺度を第1掃引の後にする、射影の誤差の見積もり`error_bound`をノイズに使う、早期の水準数チェック、`fixed_effects()`は`fit`が保存した効果から組み立てる、
+重複検査のO(n)化 ほか）は反映済み。
+- **実測**: つながりが細い鎖状のパネルは掃引の回数が鎖の長さの2乗に比例して増える（長さ20で約900、50で約6000、200で約86000）。既定の上限10000で
+  `AbsorptionNotConverged`になるのは仕様（`tol`を緩めるか`max_iter`を上げる）。緩い`tol`は分散ゼロ・完全適合の検出も粗くする。
+- **残り**: ⑥engine_pybind（`FEOptions`に`tol`・`max_iter`、docstring、pickle、型検査テスト、`error_codes.py`・`docs/guide/error-codes.md`の再生成）、
+  Pythonのテスト（`test_unbalanced_two_way_raises`の反転ほか）、ベンチマーク（DGP・fixest主・linearmodelsクロスチェック、`r_squared_within`はfixestのみ）、
+  ⑦ドキュメント（`fe-spec.md`・`panel-common.md`・`validation.md`・`verification.md`・`usage/fe.md`・`methods/fe.md`・CHANGELOG・性能比較）、
+  singletonのエラーに連鎖の行数を足す件、定数列のエラーの2分類（#522のコメントの付帯項目）。
+  Pythonまで終わるまでpushしない（CIが落ちる）。

@@ -1,27 +1,37 @@
 //! FE固有の補正（フルレバレッジ・fixest流のK・2グループ退化の検査）。
 
+use super::dummy_leverage::dummy_leverage;
+use super::error::PanelError;
+use super::validation::covers_every_combination;
 use crate::shared::group_codes::GroupCodes;
 
 /// LSDV相当のフルレバレッジ`h_ii_full`（HC2/HC3用、`fe.rs`のモジュールdoc「`cov_type`対応」の
 /// 導出参照）。分割回帰（Frisch-Waugh-Lovell）のレバレッジ分解則により、固定効果ダミーを
-/// 明示的に含めた設計行列でのレバレッジは、ダミーのみの回帰のレバレッジ（`1/T_i`、
-/// 2-wayはさらに`1/N_t - 1/n`）とwithin変換後のレバレッジ（`h_within`）の和になる
-/// （fixestの`vcov="HC2"`/`"HC3"`と数値一致を1-way・2-way双方で確認済み）。
+/// 明示的に含めた設計行列でのレバレッジは、ダミーのみの回帰のレバレッジ（`h_dummy`）と
+/// within変換後のレバレッジ（`h_within`）の和になる（fixestの`vcov="HC2"`/`"HC3"`と数値一致を
+/// 1-way・2-way双方で確認済み）。
 ///
-/// グループサイズ`T_i`/`N_t`はコードの`counts()`から引く。
+/// `h_dummy`は、1-wayが`1/T_i`、全組合せがそろうバランスの2-wayが`1/T_i + 1/N_t − 1/n`（グループサイズ
+/// `T_i`/`N_t`はコードの`counts()`から引く）。組合せが欠ける不均衡の2-wayは閉形式が無く、水準の少ない
+/// 方の効果の水準数の密な行列を解く（`dummy_leverage`）。
+///
+/// # Errors
+/// 不均衡の2-wayで、水準の少ない方の効果の水準数が上限を超えるとき
+/// `PanelError::LeverageDimensionTooLarge`。
 pub(super) fn leverage_full(
     h_within: &[f64],
     entity: &GroupCodes,
     time: Option<&GroupCodes>,
     n: usize,
-) -> Vec<f64> {
+) -> Result<Vec<f64>, PanelError> {
     let entity_codes = entity.codes();
     let entity_sizes = entity.counts();
-    match time {
+    Ok(match time {
         None => (0..n)
             .map(|i| 1.0 / (entity_sizes[entity_codes[i]] as f64) + h_within[i])
             .collect(),
-        Some(time) => {
+        // 重複する組合せは`fit`が事前に拒否している（`leverage_full`は、重複が無い入力にだけ使う）。
+        Some(time) if covers_every_combination(entity, time) => {
             let time_codes = time.codes();
             let time_sizes = time.counts();
             (0..n)
@@ -33,7 +43,12 @@ pub(super) fn leverage_full(
                 })
                 .collect()
         }
-    }
+        Some(time) => dummy_leverage(entity, time)?
+            .into_iter()
+            .zip(h_within)
+            .map(|(dummy, within)| dummy + within)
+            .collect(),
+    })
 }
 
 /// FE次元（`entity`または`time`）の各値が`cluster`上でちょうど1つの値にしか対応しないか
@@ -205,7 +220,7 @@ mod tests {
         let h_within = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6];
         let sizes = [2.0, 3.0, 1.0, 3.0, 2.0, 3.0];
 
-        let h_full = leverage_full(&h_within, &entity, None, 6);
+        let h_full = leverage_full(&h_within, &entity, None, 6).unwrap();
 
         for i in 0..6 {
             assert!(
@@ -216,20 +231,35 @@ mod tests {
     }
 
     #[test]
-    fn leverage_full_two_way_uses_entity_and_time_sizes_for_unbalanced_unordered_rows() {
-        // entity（a=3・b=2・c=1）とtime（t1=4・t2=1・t3=1）で行ごとの観測数が異なる。
-        // `1/T_i + 1/N_t - 1/n + h`のentityとtimeの取り違えも検出できる。
-        let entity = codes(&["b", "a", "c", "a", "b", "a"]);
-        let time = codes(&["t1", "t1", "t2", "t3", "t1", "t1"]);
+    fn leverage_full_two_way_uses_the_closed_form_for_a_balanced_panel_with_unordered_rows() {
+        // 3個体×2時点の全組合せ（行は並べ替えてある）。`1/T_i + 1/N_t - 1/n + h`。
+        let entity = codes(&["b", "a", "c", "a", "b", "c"]);
+        let time = codes(&["t2", "t1", "t1", "t2", "t1", "t2"]);
         let h_within = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6];
-        let entity_sizes = [2.0, 3.0, 1.0, 3.0, 2.0, 3.0];
-        let time_sizes = [4.0, 4.0, 1.0, 1.0, 4.0, 4.0];
 
-        let h_full = leverage_full(&h_within, &entity, Some(&time), 6);
+        let h_full = leverage_full(&h_within, &entity, Some(&time), 6).unwrap();
 
         for i in 0..6 {
-            let expected = 1.0 / entity_sizes[i] + 1.0 / time_sizes[i] - 1.0 / 6.0 + h_within[i];
+            let expected = 1.0 / 2.0 + 1.0 / 3.0 - 1.0 / 6.0 + h_within[i];
             assert!((h_full[i] - expected).abs() < 1e-15, "row {i}");
+        }
+    }
+
+    #[test]
+    fn leverage_full_two_way_adds_the_dummy_leverage_for_an_unbalanced_panel_with_unordered_rows() {
+        // (a,t1)(a,t2)(a,t3)(b,t1)(b,t2)(c,t2)(c,t3) を並べ替えた不均衡パネル。
+        let entity = codes(&["b", "a", "c", "a", "b", "a", "c"]);
+        let time = codes(&["t1", "t1", "t2", "t3", "t2", "t2", "t3"]);
+        let h_within = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7];
+
+        let h_full = leverage_full(&h_within, &entity, Some(&time), 7).unwrap();
+        let dummy = dummy_leverage(&entity, &time).unwrap();
+
+        for i in 0..7 {
+            assert!(
+                (h_full[i] - (dummy[i] + h_within[i])).abs() < 1e-15,
+                "row {i}"
+            );
         }
     }
 

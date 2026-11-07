@@ -121,7 +121,7 @@ pub(crate) fn panel_cov_params(
             let h_plain = leverages(x, xtx_inv);
             let h = match structure {
                 PanelStructure::FixedEffects { two_way_time } => {
-                    leverage_full(&h_plain, entity, two_way_time, n)
+                    leverage_full(&h_plain, entity, two_way_time, n)?
                 }
                 PanelStructure::RandomEffects => h_plain,
             };

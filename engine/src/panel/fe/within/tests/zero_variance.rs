@@ -27,7 +27,7 @@ fn validate_no_zero_variance_regressors_detects_time_invariant_variable_in_one_w
     .unwrap();
 
     let (_, x_out) = within_transform_one_way(&input);
-    let result = validate_no_zero_variance_regressors(&input, &x_out);
+    let result = validate_no_zero_variance_regressors(&input, &x_out, 0.0);
 
     assert_eq!(
         result.unwrap_err(),
@@ -91,7 +91,7 @@ fn time_varying_regressor_indices_agrees_with_zero_variance_validation() {
     .unwrap();
     let (_, x_kept) = within_transform_one_way(&kept_input);
     assert_eq!(
-        validate_no_zero_variance_regressors(&kept_input, &x_kept),
+        validate_no_zero_variance_regressors(&kept_input, &x_kept, 0.0),
         Ok(())
     );
 
@@ -105,7 +105,7 @@ fn time_varying_regressor_indices_agrees_with_zero_variance_validation() {
     )
     .unwrap();
     let (_, x_dropped) = within_transform_one_way(&dropped_input);
-    assert!(validate_no_zero_variance_regressors(&dropped_input, &x_dropped).is_err());
+    assert!(validate_no_zero_variance_regressors(&dropped_input, &x_dropped, 0.0).is_err());
 }
 
 #[test]
@@ -139,7 +139,10 @@ fn validate_no_zero_variance_regressors_accepts_all_varying_columns() {
 
     let (_, x_out) = within_transform_one_way(&input);
 
-    assert_eq!(validate_no_zero_variance_regressors(&input, &x_out), Ok(()));
+    assert_eq!(
+        validate_no_zero_variance_regressors(&input, &x_out, 0.0),
+        Ok(())
+    );
 }
 
 #[test]
@@ -163,7 +166,7 @@ fn validate_no_zero_variance_regressors_detects_entity_invariant_variable_in_two
     .unwrap();
 
     let (_, x_out) = within_transform_two_way(&input).unwrap();
-    let result = validate_no_zero_variance_regressors(&input, &x_out);
+    let result = validate_no_zero_variance_regressors(&input, &x_out, 0.0);
 
     assert_eq!(
         result.unwrap_err(),
@@ -192,7 +195,7 @@ fn validate_no_zero_variance_regressors_reports_first_offending_column_in_name_o
     .unwrap();
 
     let (_, x_out) = within_transform_one_way(&input);
-    let result = validate_no_zero_variance_regressors(&input, &x_out);
+    let result = validate_no_zero_variance_regressors(&input, &x_out, 0.0);
 
     assert_eq!(
         result.unwrap_err(),
@@ -208,7 +211,10 @@ fn validate_no_zero_variance_regressors_with_no_regressors_succeeds() {
     let entity = strings(&["a", "b"]);
     let input = FeInput::from_columns(&y, &[], vec![], &entity, None, "y".into()).unwrap();
 
-    assert_eq!(validate_no_zero_variance_regressors(&input, &[]), Ok(()));
+    assert_eq!(
+        validate_no_zero_variance_regressors(&input, &[], 0.0),
+        Ok(())
+    );
 }
 
 #[test]
@@ -227,7 +233,7 @@ fn validate_no_zero_variance_regressors_with_zero_observations_and_a_regressor_s
     .unwrap();
 
     assert_eq!(
-        validate_no_zero_variance_regressors(&input, &[vec![]]),
+        validate_no_zero_variance_regressors(&input, &[vec![]], 0.0),
         Ok(())
     );
 }

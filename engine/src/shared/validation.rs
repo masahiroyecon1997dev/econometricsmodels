@@ -128,6 +128,17 @@ pub fn validate_has_regressors(n: usize, k: usize) -> Result<(), CommonError> {
 /// 桁数——原点`scale`比`~1e-16`——であることを想定した割り切り。将来1-wayと2-wayで
 /// 誤検出/見逃しの傾向差が実際に問題になったら、2-way用の乗数を分けることを検討する）。
 pub(crate) fn column_is_zero_variance(original: &[f64], transformed: &[f64]) -> bool {
+    column_is_zero_variance_with_noise(original, transformed, 0.0)
+}
+
+/// [`column_is_zero_variance`]に、変換自体が残す誤差を足したもの。交互射影のように、打ち切りの許容度
+/// ぶんの誤差が変換後の値に残る場合に、その誤差を分散ゼロと見分けられるようにする。`noise`は
+/// 元の値の最大絶対値に対する、変換後の値に残る誤差の相対的な大きさ（閉形式の変換なら0）。
+pub(crate) fn column_is_zero_variance_with_noise(
+    original: &[f64],
+    transformed: &[f64],
+    noise: f64,
+) -> bool {
     let n = transformed.len();
     if n == 0 {
         // n=0は`FeInput::from_columns`が許容する境界ケース（`from_columns_with_zero_
@@ -142,7 +153,7 @@ pub(crate) fn column_is_zero_variance(original: &[f64], transformed: &[f64]) -> 
     let std_dev = variance.sqrt();
 
     let scale = original.iter().fold(0.0_f64, |acc, v| acc.max(v.abs()));
-    let threshold = n as f64 * f64::EPSILON * scale;
+    let threshold = (n as f64 * f64::EPSILON + noise) * scale;
 
     std_dev <= threshold
 }

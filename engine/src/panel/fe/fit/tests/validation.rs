@@ -244,10 +244,10 @@ fn fe_estimator_fit_two_way_propagates_singleton_error() {
 }
 
 #[test]
-fn fe_estimator_fit_two_way_propagates_unbalanced_panel_error() {
-    // entity=[a,a,b,b], time=[1,1,2,2]: (a,1)が重複、(a,2)と(b,1)が欠落。
+fn fe_estimator_fit_two_way_propagates_the_repeated_pair_error() {
+    // entity=[a,a,b,b], time=[1,1,2,2]: (a,1)が重複し、(a,2)と(b,1)が欠落する。
     // singletonではない（各entity/time値とも観測数2）ため、`fit()`が
-    // `within_transform_two_way`のバランスパネル検証まで到達していることの配線確認。
+    // `within_transform_two_way_with`の重複検査まで到達していることの配線確認。
     let entity = strings(&["a", "a", "b", "b"]);
     let time = strings(&["1", "1", "2", "2"]);
     let y = [1.0, 2.0, 3.0, 4.0];
@@ -257,12 +257,11 @@ fn fe_estimator_fit_two_way_propagates_unbalanced_panel_error() {
 
     assert_eq!(
         result.unwrap_err(),
-        PanelError::UnbalancedPanelForTwoWay {
-            n_obs: 4,
+        PanelError::DuplicateEntityTimePair {
             entity_column: "entity".to_string(),
-            n_entities: 2,
+            entity_id: "a".to_string(),
             time_column: "time".to_string(),
-            n_periods: 2,
+            time_id: "1".to_string(),
         }
     );
 }

@@ -54,9 +54,9 @@
 
 ## 完全適合・定数の被説明変数
 
-- `FeEstimator::fit`は、説明変数の分散ゼロ検出の直後に、被説明変数のwithin変換後の分散を同じ相対閾値で調べ、残らなければ`PanelError::OutcomeConstantWithinEntity`（`ValidationError`）にする。2-wayの個体効果+時点効果だけで説明される`y`もこの相対判定で拾う（厳密な等値だと、`0.1`を3回足して3で割った平均が`0.1`と一致しないために見逃す）。
+- `FeEstimator::fit`は、singleton検出の直後（変換や自由度の検証より前）に、生の値が全ての行で同じ説明変数を`RegressorConstant`、同じ被説明変数を`CommonError::OutcomeConstant`（`OUTCOME_CONSTANT`）にする（固定効果を除く前に分かる事実を、除いた後の分散ゼロと分けるため）。そのうえで、説明変数の分散ゼロ検出の直後に、被説明変数のwithin変換後の分散を同じ相対閾値で調べ、残らなければ`PanelError::OutcomeConstantWithinEntity`（`ValidationError`）にする。2-wayの個体効果+時点効果だけで説明される`y`もこの相対判定で拾う（厳密な等値だと、`0.1`を3回足して3で割った平均が`0.1`と一致しないために見逃す）。
 - `least_squares`の直後、共分散より前に`is_perfect_fit(ssr, Σỹ², k)`を調べ、完全フィットなら`WithinRegressionFailed { source: PerfectFit }`（`stage=WITHIN_REGRESSION`）にする。
-- REは内部FE（分散成分の推定）がこの2つを担い、RE自身は被説明変数を調べない。`WithinRegressionFailed`は`within_for_variance_component`が`VARIANCE_COMPONENT_WITHIN_REGRESSION`を付けて包み、`OutcomeConstantWithinEntity`は`stage_allowed=false`なので包まれず素のまま返る。REの最終回帰とハウスマン補助回帰は`OlsEstimator::fit_auxiliary`（完全フィット・定数の判定なし。被説明変数が準偏差変換後の値で、判定の基準が当てはまらない）。
+- REは内部FE（分散成分の推定）がこれらを担い、RE自身は被説明変数を調べない（全ての行で同じ`y`は`OUTCOME_CONSTANT`として素のまま返る）。`WithinRegressionFailed`は`within_for_variance_component`が`VARIANCE_COMPONENT_WITHIN_REGRESSION`を付けて包み、`OutcomeConstantWithinEntity`は`stage_allowed=false`なので包まれず素のまま返る。REの最終回帰とハウスマン補助回帰は`OlsEstimator::fit_auxiliary`（完全フィット・定数の判定なし。被説明変数が準偏差変換後の値で、判定の基準が当てはまらない）。
 
 ## 踏んだ罠: エンティティ平均が全て一致する退化データ
 
@@ -68,7 +68,7 @@
 - `impl ErrorInfo for PanelError`の`report()`が全バリアントを`_`なしで列挙し、カタログの`code`・`params`に写す（`ValidationError`/`ComputationError`の別は`code`のカタログのクラスで決まる）。`code`の表は`docs/spec/fe-spec.md`3.6節。新しいバリアントを足したら`report()`に`code`を足す（足し忘れは`engine`のコンパイルエラー）。`engine_pybind`の`panel_error_to_pyerr`は`to_pyerr(&err)`を呼ぶだけで更新は要らない。到達不能な状態（`IdentifierDimensionMismatch`・`TwoWayRequiresTime`）は`INTERNAL_ERROR`に写す。
 - 回帰の失敗を包むバリアント（`WithinRegressionFailed`・`FTestFailed`・`BetweenRegressionFailed { means }`・`PooledRegressionFailed`・`QuasiDemeanedRegressionFailed`・`HausmanTestFailed`。いずれも`#[source] source: LeastSquaresError`）は`#[from]`を使わず明示的に`.map_err`で包む（`CommonError`が2経路で`PanelError`になる曖昧さを避けるため。`IvError::FirstStageFailed`と同じ判断）。包みは文面を持たず、`report()`が原因の`code`に`Stage`を付ける（`staged_report`。`stage`を付けられない`code`、例えば`confidence_level`の範囲違反は包まずそのまま返す）。対象が異なる回帰は別バリアントにする（FEのwithin回帰・REのbetween回帰・REの最終回帰・F検定）。
 - `InStage { stage, source: Box<PanelError> }`（`PanelError::in_stage`）は、別の`PanelError`を起きた計算の文脈つきで包む（REの分散成分推定に使う内部FEの自由度不足など）。`stage_allowed`な`code`にだけ使える。
-- **`SingletonGroup`は列名`column`を持つ**: `report()`は`argument`を`"effects"`に固定し、`column`と`group`を`params`に載せる。列名は`EffectNames`（`entity`・`time`の2つの`String`。`FeInput`/`ReInput`が保持）で運び、`with_effect_names`で設定する。**エラーの`column`に載せるためだけの値で、計算には使わない**。既定は`"entity"`・`"time"`。
+- **`SingletonGroup`は列名`column`を持つ**: `report()`は`argument`を`"effects"`に固定し、`column`と`group`、取り除くことを繰り返したときに落ちる行の総数`n_dropped_rows`（2-wayは連鎖を含む。`rows_dropped_by_repeated_removal`）を`params`に載せる。列名は`EffectNames`（`entity`・`time`の2つの`String`。`FeInput`/`ReInput`が保持）で運び、`with_effect_names`で設定する。**エラーの`column`に載せるためだけの値で、計算には使わない**。既定は`"entity"`・`"time"`。
 - `confidence_level`が不正な場合、REでは`QuasiDemeanedRegressionFailed`ではなく`WithinRegressionFailed`として伝播する（分散成分推定の最初の委譲が真っ先に検証するため）。
 
 ## property-basedテスト（`mod proptests`）

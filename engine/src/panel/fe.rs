@@ -49,7 +49,9 @@
 //! - **分散ゼロの説明変数**（`validate_no_zero_variance_regressors`）: within変換後の列の分散が
 //!   ゼロなら`PanelError::ZeroVarianceAfterDemeaning`。時間不変の変数（1-way）と、time FEと
 //!   完全共線な列（2-way）を同じ検査で拾う（`column_is_zero_variance`）。
-//! - **定数の被説明変数・完全フィット**: `fe-spec.md`1章（`OutcomeConstantWithinEntity`・`PerfectFit`）。
+//! - **定数の列・被説明変数・完全フィット**: `fe-spec.md`1章。生の値が全ての行で同じ説明変数は
+//!   `RegressorConstant`、同じ被説明変数は`OutcomeConstant`、固定効果を除いた後に分散がなくなる場合は
+//!   `ZeroVarianceAfterDemeaning`・`OutcomeConstantWithinEntity`、残差がゼロなら`PerfectFit`。
 //!
 //! ## 自由度とF統計量
 //!

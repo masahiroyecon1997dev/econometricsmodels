@@ -126,6 +126,7 @@ fn fe_estimator_fit_propagates_singleton_error() {
             dimension: PanelDimension::Entity,
             column: "entity".to_string(),
             group_id: "c".to_string(),
+            n_dropped_rows: 1,
         }
     );
 }
@@ -239,6 +240,7 @@ fn fe_estimator_fit_two_way_propagates_singleton_error() {
             dimension: PanelDimension::Entity,
             column: "entity".to_string(),
             group_id: "c".to_string(),
+            n_dropped_rows: 1,
         }
     );
 }
@@ -833,5 +835,52 @@ fn fe_estimator_fit_hac_rejects_negative_bandwidth() {
             bandwidth: -1,
             t: 3
         }
+    );
+}
+
+#[test]
+fn fe_estimator_fit_rejects_a_regressor_with_the_same_value_in_every_row() {
+    // 生の値が全て同じ列は、固定効果を除く前に分かるので、除いた後の分散ゼロとは別のエラーにする。
+    let (input, _) = two_period_input(1, false);
+    let constant = vec![2.5; input.nobs()];
+    let input = FeInput::from_group_codes(
+        input.y(),
+        &[constant],
+        vec!["x".to_string()],
+        input.entity_codes().clone(),
+        None,
+        "y".into(),
+    )
+    .unwrap();
+
+    let result = FeEstimator::fit(input, FeEffects::OneWay, FeCovType::Classical, 0.95);
+
+    assert_eq!(
+        result.unwrap_err(),
+        PanelError::RegressorConstant {
+            column: "x".to_string()
+        }
+    );
+}
+
+#[test]
+fn fe_estimator_fit_rejects_an_outcome_with_the_same_value_in_every_row() {
+    let (input, _) = two_period_input(1, false);
+    let y = vec![4.0; input.nobs()];
+    let input = FeInput::from_group_codes(
+        &y,
+        input.x(),
+        input.x_names().to_vec(),
+        input.entity_codes().clone(),
+        None,
+        "y".into(),
+    )
+    .unwrap();
+
+    let result = FeEstimator::fit(input, FeEffects::OneWay, FeCovType::Classical, 0.95);
+
+    assert_eq!(
+        result.unwrap_err(),
+        PanelError::Common(CommonError::OutcomeConstant)
     );
 }

@@ -106,7 +106,7 @@ pub(crate) use transform::{
 };
 pub(crate) use validation::{
     covers_every_combination, ensure_no_duplicate_entity_time_pairs, ensure_no_singleton_groups,
-    ensure_no_zero_variance_columns, reject_singleton_group, time_varying_regressor_indices,
+    ensure_no_zero_variance_columns, time_varying_regressor_indices,
     two_way_time_varying_regressor_indices, validate_balanced_panel, validate_column_lengths,
     validate_panel_input,
 };

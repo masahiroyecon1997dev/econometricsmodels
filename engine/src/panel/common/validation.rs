@@ -95,7 +95,8 @@ fn require_entity_keys(entity: &GroupCodes) -> Result<(), PanelError> {
 
 /// `entity`、2-wayなら`two_way_time`にも観測数1のグループがないことを検証する
 /// （`fe-spec.md`1章）。entityを先に検査し、両方に該当するsingletonがあればentity側を報告する。
-/// 列名は`names`から引く。
+/// 列名は`names`から引く。エラーには、観測数1のグループを取り除くことを繰り返したときに落ちる行の総数
+/// （`n_dropped_rows`）を載せる。
 ///
 /// # Errors
 /// 観測数1のグループが見つかった場合は`PanelError::SingletonGroup`（該当する`dimension`を含む）。
@@ -104,15 +105,25 @@ pub(crate) fn ensure_no_singleton_groups(
     entity: &GroupCodes,
     two_way_time: Option<&GroupCodes>,
 ) -> Result<(), PanelError> {
-    reject_singleton_group(
+    let found = first_singleton_group(
         PanelDimension::Entity,
         names.get(PanelDimension::Entity),
         entity,
-    )?;
-    if let Some(time) = two_way_time {
-        reject_singleton_group(PanelDimension::Time, names.get(PanelDimension::Time), time)?;
+    )
+    .or_else(|| {
+        two_way_time.and_then(|time| {
+            first_singleton_group(PanelDimension::Time, names.get(PanelDimension::Time), time)
+        })
+    });
+    match found {
+        None => Ok(()),
+        Some((dimension, column, group_id)) => Err(PanelError::SingletonGroup {
+            dimension,
+            column,
+            group_id,
+            n_dropped_rows: rows_dropped_by_repeated_removal(entity, two_way_time),
+        }),
     }
-    Ok(())
 }
 
 /// within変換後の各列に分散ゼロの列がないことを検証する（`fe-spec.md`1章）。`names`・
@@ -155,31 +166,81 @@ pub(crate) fn ensure_no_zero_variance_columns(
     Ok(())
 }
 
-/// `ids`（`entity`または`time`の列）に観測数1のグループがあれば
-/// `PanelError::SingletonGroup`を返す。
-///
-/// 複数のsingletonグループが存在する場合は、観測順で最初に現れるグループのみを報告する
-/// （`validate_no_zero_variance_regressors`の「最初の1件を報告」方針と統一）。観測数は
-/// `FeInput`の構築時に作ったコード（`GroupCodes::counts`）をそのまま使う。
-pub(crate) fn reject_singleton_group(
+/// `ids`（`entity`または`time`の列）で、観測順に最初に現れる観測数1のグループ
+/// （次元・列名・グループのID）。複数あれば最初の1つだけを返す（`validate_no_zero_variance_regressors`の
+/// 「最初の1件を報告」方針と統一）。観測数は`FeInput`の構築時に作ったコード
+/// （`GroupCodes::counts`）をそのまま使う。
+fn first_singleton_group(
     dimension: PanelDimension,
     column: &str,
     ids: &GroupCodes,
-) -> Result<(), PanelError> {
-    // 観測順で最初に現れたsingletonを報告する。
-    for &c in ids.codes() {
-        if ids.counts()[c] == 1 {
-            return Err(PanelError::SingletonGroup {
-                dimension,
-                column: column.to_string(),
-                group_id: ids.keys()[c].clone(),
-            });
-        }
-    }
-    Ok(())
+) -> Option<(PanelDimension, String, String)> {
+    ids.codes()
+        .iter()
+        .find(|&&c| ids.counts()[c] == 1)
+        .map(|&c| (dimension, column.to_string(), ids.keys()[c].clone()))
 }
 
-/// 2-way FEがバランスパネル（`entity` × `time`の全組合せが過不足なく1回ずつ存在する）
+/// 観測数1のグループを取り除くことを、新しいsingletonが現れなくなるまで繰り返したときに落ちる行の総数。
+///
+/// 1-way（`time`が`None`）は観測数1の個体の数。2-wayは、個体のsingletonを落とすと時点のsingletonができる
+/// （その逆も）連鎖を含む。各行を最大1回落とすので`O(n)`。
+fn rows_dropped_by_repeated_removal(entity: &GroupCodes, time: Option<&GroupCodes>) -> usize {
+    let Some(time) = time else {
+        return entity.counts().iter().filter(|&&c| c == 1).count();
+    };
+    let n = entity.nobs();
+    let entity_rows = entity.group_indices();
+    let time_rows = time.group_indices();
+    let mut alive = vec![true; n];
+    let mut entity_left = entity.counts().to_vec();
+    let mut time_left = time.counts().to_vec();
+    // (次元, グループ)。次元0が個体、1が時点。
+    let mut stack: Vec<(usize, usize)> = Vec::new();
+    for (g, &c) in entity_left.iter().enumerate() {
+        if c == 1 {
+            stack.push((0, g));
+        }
+    }
+    for (g, &c) in time_left.iter().enumerate() {
+        if c == 1 {
+            stack.push((1, g));
+        }
+    }
+    let mut dropped = 0;
+    while let Some((dim, g)) = stack.pop() {
+        let left = if dim == 0 {
+            entity_left[g]
+        } else {
+            time_left[g]
+        };
+        if left != 1 {
+            continue;
+        }
+        let rows = if dim == 0 {
+            entity_rows.rows(g)
+        } else {
+            time_rows.rows(g)
+        };
+        let Some(&row) = rows.iter().find(|&&r| alive[r]) else {
+            continue;
+        };
+        alive[row] = false;
+        dropped += 1;
+        let (e, t) = (entity.codes()[row], time.codes()[row]);
+        entity_left[e] -= 1;
+        time_left[t] -= 1;
+        if dim == 0 && time_left[t] == 1 {
+            stack.push((1, t));
+        }
+        if dim == 1 && entity_left[e] == 1 {
+            stack.push((0, e));
+        }
+    }
+    dropped
+}
+
+/// 2-way REがバランスパネル（`entity` × `time`の全組合せが過不足なく1回ずつ存在する）
 /// であることを検証する（`fe-spec.md`3.1節）。
 ///
 /// 観測数カウントの一致（`n_obs == n_entities * n_periods`）だけでは不十分

@@ -20,7 +20,7 @@ use crate::shared::goodness_of_fit::{gaussian_goodness_of_fit, is_perfect_fit};
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference::{InferenceTable, inference_table};
 use crate::shared::least_squares::{LeastSquaresFit, least_squares};
-use crate::shared::validation::column_is_zero_variance_with_noise;
+use crate::shared::validation::{column_is_zero_variance_with_noise, has_no_variation};
 use crate::shared::wald::wald_f_test;
 
 /// 2-wayの時点コードを返す（1-wayは`None`）。2-wayなのに`input`に`time`が無ければ
@@ -56,15 +56,31 @@ pub(super) fn fit_fe(
 
     absorption.validate()?;
 
+    match effects {
+        FeEffects::OneWay => validate_no_singleton_groups_one_way(&input)?,
+        FeEffects::TwoWay => validate_no_singleton_groups_two_way(&input)?,
+    }
+
+    // 生の値が全ての行で同じ列は、固定効果を除く前に分かる。固定効果を除いた後で分散がなくなる
+    // 場合（時間不変の列など）とは、エラーを分ける。重い変換や自由度の検証より先に調べる。
+    for (name, col) in input.x_names().iter().zip(input.x()) {
+        if has_no_variation(col) {
+            return Err(PanelError::RegressorConstant {
+                column: name.clone(),
+            });
+        }
+    }
+    if has_no_variation(input.y()) {
+        return Err(CommonError::OutcomeConstant.into());
+    }
+
     let mut absorbed = None;
     let (y, x, noise) = match effects {
         FeEffects::OneWay => {
-            validate_no_singleton_groups_one_way(&input)?;
             let (y, x) = within_transform_one_way(&input);
             (y, x, 0.0)
         }
         FeEffects::TwoWay => {
-            validate_no_singleton_groups_two_way(&input)?;
             // 組合せが欠ける2-wayのHC2/HC3は、水準の少ない方の効果の密な行列を解く。
             let leverage_needed = matches!(cov_type, FeCovType::Hc2 | FeCovType::Hc3);
             let within = within_transform_two_way_with(&input, absorption, leverage_needed)?;

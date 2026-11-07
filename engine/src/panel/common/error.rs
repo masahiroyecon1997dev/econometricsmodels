@@ -115,6 +115,9 @@ pub enum PanelError {
         /// そのグループを定める列の名前（`effects`の要素）。
         column: String,
         group_id: String,
+        /// 観測数1のグループを取り除くことを、新しいsingletonが現れなくなるまで繰り返したときに
+        /// 落ちる行の総数（2-wayでは、個体のsingletonを落とすと時点のsingletonができる連鎖を含む）。
+        n_dropped_rows: usize,
     },
 
     /// 2-way RE（entity + time）に不均衡（unbalanced）パネルが渡された。
@@ -167,6 +170,12 @@ pub enum PanelError {
     /// 交互射影の反復上限`max_iter`が範囲外。
     #[error("{}", self.catalog_message())]
     InvalidMaxIter { max_iter: i64 },
+
+    /// 説明変数の値が全ての行で（丸め誤差を除いて）同じ。固定効果（個体ごとの切片）と共線になる。
+    /// 固定効果を除いた後で分散がなくなる[`Self::ZeroVarianceAfterDemeaning`]とは、原因が生データの
+    /// 定数かどうかで区別する。
+    #[error("{}", self.catalog_message())]
+    RegressorConstant { column: String },
 
     /// within変換（デミーニング）後に分散がゼロになる説明変数がある。
     ///
@@ -434,10 +443,12 @@ impl ErrorInfo for PanelError {
                 dimension: _,
                 column,
                 group_id,
+                n_dropped_rows,
             } => ErrorReport::new(ErrorCode::SingletonGroup)
                 .param("argument", "effects")
                 .param("column", column.as_str())
-                .param("group", group_id.as_str()),
+                .param("group", group_id.as_str())
+                .param("n_dropped_rows", *n_dropped_rows),
             Self::UnbalancedPanelForTwoWay {
                 n_obs,
                 entity_column,
@@ -479,6 +490,9 @@ impl ErrorInfo for PanelError {
                 .param("value", *max_iter)
                 .param("min", MAX_ITER_MIN)
                 .param("max", MAX_ITER_LIMIT),
+            Self::RegressorConstant { column } => {
+                ErrorReport::new(ErrorCode::RegressorConstant).param("column", column.as_str())
+            }
             Self::ZeroVarianceAfterDemeaning { column } => {
                 ErrorReport::new(ErrorCode::RegressorNoWithinVariation)
                     .param("column", column.as_str())
@@ -595,18 +609,20 @@ mod tests {
                     dimension: PanelDimension::Entity,
                     column: "firm".to_string(),
                     group_id: "a".to_string(),
+                    n_dropped_rows: 0,
                 },
                 ErrorCode::SingletonGroup,
-                "The group 'a' of column 'firm' in effects has only one observation, and singleton groups are not dropped automatically.",
+                "The group 'a' of column 'firm' in effects has only one observation, and singleton groups are not dropped automatically; removing singleton groups repeatedly would drop 0 row(s).",
             ),
             (
                 PanelError::SingletonGroup {
                     dimension: PanelDimension::Time,
                     column: "year".to_string(),
                     group_id: "2020".to_string(),
+                    n_dropped_rows: 0,
                 },
                 ErrorCode::SingletonGroup,
-                "The group '2020' of column 'year' in effects has only one observation, and singleton groups are not dropped automatically.",
+                "The group '2020' of column 'year' in effects has only one observation, and singleton groups are not dropped automatically; removing singleton groups repeatedly would drop 0 row(s).",
             ),
             (
                 PanelError::UnbalancedPanelForTwoWay {
@@ -654,6 +670,13 @@ mod tests {
                 PanelError::InvalidMaxIter { max_iter: 0 },
                 ErrorCode::MaxIterOutOfRange,
                 "max_iter must be an integer from 1 to 10000, got 0.",
+            ),
+            (
+                PanelError::RegressorConstant {
+                    column: "x".to_string(),
+                },
+                ErrorCode::RegressorConstant,
+                "Regressor 'x' has the same value in every row up to rounding, so it is collinear with the fixed effects.",
             ),
             (
                 PanelError::ZeroVarianceAfterDemeaning {
@@ -810,11 +833,13 @@ mod tests {
                 dimension: PanelDimension::Entity,
                 column: "entity".to_string(),
                 group_id: "a".to_string(),
+                n_dropped_rows: 0,
             },
             PanelError::SingletonGroup {
                 dimension: PanelDimension::Entity,
                 column: "entity".to_string(),
                 group_id: "a".to_string(),
+                n_dropped_rows: 0,
             }
         );
         assert_ne!(
@@ -822,11 +847,13 @@ mod tests {
                 dimension: PanelDimension::Entity,
                 column: "entity".to_string(),
                 group_id: "a".to_string(),
+                n_dropped_rows: 0,
             },
             PanelError::SingletonGroup {
                 dimension: PanelDimension::Time,
                 column: "time".to_string(),
                 group_id: "a".to_string(),
+                n_dropped_rows: 0,
             }
         );
         assert_ne!(

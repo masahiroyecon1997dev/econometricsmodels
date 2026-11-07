@@ -77,6 +77,7 @@ pub enum ErrorCode {
     PanelNotBalancedForTwoWay,
     DuplicateEntityTimePair,
     LeverageDimensionTooLarge,
+    RegressorConstant,
     RegressorNoWithinVariation,
     OutcomeConstantWithinEntity,
     DkPeriodsTooFew,
@@ -154,6 +155,7 @@ impl ErrorCode {
         Self::PanelNotBalancedForTwoWay,
         Self::DuplicateEntityTimePair,
         Self::LeverageDimensionTooLarge,
+        Self::RegressorConstant,
         Self::RegressorNoWithinVariation,
         Self::OutcomeConstantWithinEntity,
         Self::DkPeriodsTooFew,
@@ -236,6 +238,7 @@ impl ErrorCode {
             Self::PanelNotBalancedForTwoWay => "PANEL_NOT_BALANCED_FOR_TWO_WAY",
             Self::DuplicateEntityTimePair => "DUPLICATE_ENTITY_TIME_PAIR",
             Self::LeverageDimensionTooLarge => "LEVERAGE_DIMENSION_TOO_LARGE",
+            Self::RegressorConstant => "REGRESSOR_CONSTANT",
             Self::RegressorNoWithinVariation => "REGRESSOR_NO_WITHIN_VARIATION",
             Self::OutcomeConstantWithinEntity => "OUTCOME_CONSTANT_WITHIN_ENTITY",
             Self::DkPeriodsTooFew => "DK_PERIODS_TOO_FEW",
@@ -1901,9 +1904,16 @@ pub static CATALOG: &[ErrorSpec] = &[
                 ty: ParamType::Str,
                 in_text: true,
             },
+            ParamSpec {
+                name: "n_dropped_rows",
+                ty: ParamType::Int,
+                in_text: true,
+            },
         ],
-        message: r#"The group '{group}' of column '{column}' in {argument} has only one observation, and singleton groups are not dropped automatically."#,
-        hint: Some(r#"Remove its rows from the input."#),
+        message: r#"The group '{group}' of column '{column}' in {argument} has only one observation, and singleton groups are not dropped automatically; removing singleton groups repeatedly would drop {n_dropped_rows} row(s)."#,
+        hint: Some(
+            r#"Remove its rows from the input, and repeat while removing rows leaves new singleton groups."#,
+        ),
         stage_allowed: false,
     },
     ErrorSpec {
@@ -2016,6 +2026,18 @@ pub static CATALOG: &[ErrorSpec] = &[
         hint: Some(
             r#"Use another cov_type, or reduce the number of levels of the smaller effect."#,
         ),
+        stage_allowed: false,
+    },
+    ErrorSpec {
+        code: ErrorCode::RegressorConstant,
+        class: ErrorClass::Validation,
+        params: &[ParamSpec {
+            name: "column",
+            ty: ParamType::Str,
+            in_text: true,
+        }],
+        message: r#"Regressor '{column}' has the same value in every row up to rounding, so it is collinear with the fixed effects."#,
+        hint: Some(r#"Remove the regressor from x."#),
         stage_allowed: false,
     },
     ErrorSpec {

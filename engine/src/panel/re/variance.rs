@@ -7,9 +7,8 @@ use faer::Mat;
 use super::input::{ReEffects, ReInput};
 use crate::linear::common::LeastSquaresError;
 use crate::panel::common::{
-    BetweenMeans, PanelDimension, PanelError, reject_singleton_group,
-    time_varying_regressor_indices, two_way_time_varying_regressor_indices,
-    validate_balanced_panel,
+    BetweenMeans, PanelError, ensure_no_singleton_groups, time_varying_regressor_indices,
+    two_way_time_varying_regressor_indices, validate_balanced_panel,
 };
 use crate::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput};
 use crate::shared::error::{CommonError, ErrorInfo};
@@ -317,12 +316,7 @@ pub(super) fn internal_fe(
             let entity = input.entity_codes();
             let time = input.time_codes().ok_or(PanelError::TwoWayRequiresTime)?;
             let names = input.effect_names();
-            reject_singleton_group(
-                PanelDimension::Entity,
-                names.get(PanelDimension::Entity),
-                entity,
-            )?;
-            reject_singleton_group(PanelDimension::Time, names.get(PanelDimension::Time), time)?;
+            ensure_no_singleton_groups(names, entity, Some(time))?;
             validate_balanced_panel(entity, time, names)?;
             let time_varying = two_way_time_varying_regressor_indices(input.x(), entity, time);
             let fe = FeEstimator::fit(

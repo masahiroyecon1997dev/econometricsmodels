@@ -405,6 +405,7 @@ fn re_estimator_fit_propagates_fe_singleton_error_from_variance_components() {
             dimension: PanelDimension::Entity,
             column: "entity".to_string(),
             group_id: "c".to_string(),
+            n_dropped_rows: 1,
         }
     );
 }

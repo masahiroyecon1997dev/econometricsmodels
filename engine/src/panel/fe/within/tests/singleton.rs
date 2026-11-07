@@ -2,7 +2,7 @@
 
 use crate::panel::common::PanelDimension;
 use crate::panel::common::PanelError;
-use crate::panel::common::reject_singleton_group;
+use crate::panel::common::{EffectNames, ensure_no_singleton_groups};
 use crate::panel::fe::input::FeInput;
 use crate::panel::fe::test_support::*;
 use crate::panel::fe::within::validate_no_singleton_groups_one_way;
@@ -24,6 +24,7 @@ fn validate_no_singleton_groups_one_way_detects_entity_singleton() {
             dimension: PanelDimension::Entity,
             column: "entity".to_string(),
             group_id: "c".to_string(),
+            n_dropped_rows: 1,
         }
     );
 }
@@ -42,6 +43,7 @@ fn validate_no_singleton_groups_reports_first_singleton_in_observation_order() {
             dimension: PanelDimension::Entity,
             column: "entity".to_string(),
             group_id: "b".to_string(),
+            n_dropped_rows: 2,
         }
     );
 }
@@ -72,6 +74,7 @@ fn validate_no_singleton_groups_two_way_detects_entity_singleton() {
             dimension: PanelDimension::Entity,
             column: "entity".to_string(),
             group_id: "c".to_string(),
+            n_dropped_rows: 1,
         }
     );
 }
@@ -93,6 +96,7 @@ fn validate_no_singleton_groups_two_way_detects_time_singleton() {
             dimension: PanelDimension::Time,
             column: "time".to_string(),
             group_id: "3".to_string(),
+            n_dropped_rows: 1,
         }
     );
 }
@@ -114,6 +118,7 @@ fn validate_no_singleton_groups_two_way_reports_entity_before_time_when_both_pre
             dimension: PanelDimension::Entity,
             column: "entity".to_string(),
             group_id: "c".to_string(),
+            n_dropped_rows: 1,
         }
     );
 }
@@ -146,16 +151,12 @@ fn validate_no_singleton_groups_two_way_reports_missing_time_even_with_entity_si
 }
 
 #[test]
-fn reject_singleton_group_with_no_observations_succeeds() {
+fn ensure_no_singleton_groups_with_no_observations_succeeds() {
     // n=0境界（`validate_no_zero_variance_regressors_with_zero_observations_and_a_
     // regressor_succeeds`と同様の境界値テストの慣習に合わせる）。空配列にはsingleton
     // となりうる要素自体が存在しないため`Ok(())`になる。
     assert_eq!(
-        reject_singleton_group(
-            PanelDimension::Entity,
-            "entity",
-            &GroupCodes::from_labels(&[])
-        ),
+        ensure_no_singleton_groups(&EffectNames::default(), &GroupCodes::from_labels(&[]), None),
         Ok(())
     );
 }
@@ -182,6 +183,7 @@ fn singleton_group_error_reports_the_column_names_set_by_with_effect_names() {
             dimension: PanelDimension::Entity,
             column: "entity".to_string(),
             group_id: "c".to_string(),
+            n_dropped_rows: 1,
         })
     );
     let input = input.with_effect_names("firm".to_string(), None);
@@ -191,6 +193,7 @@ fn singleton_group_error_reports_the_column_names_set_by_with_effect_names() {
             dimension: PanelDimension::Entity,
             column: "firm".to_string(),
             group_id: "c".to_string(),
+            n_dropped_rows: 1,
         })
     );
 
@@ -207,6 +210,43 @@ fn singleton_group_error_reports_the_column_names_set_by_with_effect_names() {
             dimension: PanelDimension::Time,
             column: "year".to_string(),
             group_id: "2".to_string(),
+            // 時点2の行(a,2)を落とすと、個体aが(a,1)だけになって、それも落ちる。
+            n_dropped_rows: 2,
         })
     );
+}
+
+#[test]
+fn the_error_counts_the_rows_that_repeated_removal_of_singleton_groups_would_drop() {
+    // (c,3)だけの個体cがsingleton。これを落とすと時点3が(b,3)だけになり、続けて個体bが(b,2)だけに、
+    // 時点2が(a,2)だけに、時点1が(a,1)だけに…と、5行すべてが連鎖して落ちる。
+    let y = [1.0, 2.0, 3.0, 4.0, 5.0];
+    let entity = strings(&["a", "a", "b", "b", "c"]);
+    let time = strings(&["1", "2", "2", "3", "3"]);
+    let input = FeInput::from_columns(&y, &[], vec![], &entity, Some(&time), "y".into()).unwrap();
+
+    assert_eq!(
+        validate_no_singleton_groups_two_way(&input),
+        Err(PanelError::SingletonGroup {
+            dimension: PanelDimension::Entity,
+            column: "entity".to_string(),
+            group_id: "c".to_string(),
+            n_dropped_rows: 5,
+        })
+    );
+}
+
+#[test]
+fn a_one_way_panel_drops_only_the_singleton_rows() {
+    let y = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+    let entity = strings(&["a", "b", "c", "c", "d", "e"]);
+    let input = FeInput::from_columns(&y, &[], vec![], &entity, None, "y".into()).unwrap();
+
+    assert!(matches!(
+        validate_no_singleton_groups_one_way(&input),
+        Err(PanelError::SingletonGroup {
+            n_dropped_rows: 4,
+            ..
+        })
+    ));
 }

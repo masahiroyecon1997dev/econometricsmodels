@@ -51,6 +51,7 @@ fn swamy_arora_variance_components_propagates_fe_singleton_error() {
             dimension: PanelDimension::Entity,
             column: "entity".to_string(),
             group_id: "c".to_string(),
+            n_dropped_rows: 1,
         }
     );
 }
@@ -130,6 +131,7 @@ fn within_for_variance_component_wraps_only_stage_capable_internal_fe_errors() {
             dimension: PanelDimension::Entity,
             column: "entity".to_string(),
             group_id: "a".to_string(),
+            n_dropped_rows: 0,
         },
         || PanelError::UnbalancedPanelForTwoWay {
             n_obs: 5,

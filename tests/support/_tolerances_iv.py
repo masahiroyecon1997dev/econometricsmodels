@@ -78,6 +78,25 @@ IV_TOLERANCES: dict[str, dict[str, float]] = {
         "atol": ATOL_CROSSCHECK_FLOOR,
         "rtol_wald_card_cluster": RTOL_WALD_CARD_CLUSTER,
     },
+    # --- MOP有効F統計量のオラクル（`benchmark/iv/references/mop_oracle.py`）の自己検証 ---
+    # `rtol_effective`: 有効F・臨界値（オラクルが保証する精度。浮動小数点の範囲で
+    # 1e-10）。linearmodelsの`cragg_donald_f`・statsmodelsの誘導形OLSの共分散・
+    # 変換に対する不変性が対象で、実測の最大相対差は一般化版臨界値の不変性の5.6e-14
+    # （`B_TSLS`の最大化が1e-15ずれた分が増幅される）、他は1e-14以下
+    # （Cragg-Donald 3.6e-15、共分散 7.1e-15、有効F・単純版臨界値の不変性 1.6e-15以下）。
+    # `rtol_b_tsls`: `B_TSLS`を2つの方法（`beta`軸・角度）で最大化した結果どうしと、
+    # 論文の式をそのまま評価した上限・下限との比較（保証は1e-8）。2つの方法の実測の
+    # 最大相対差は、D1・D2の全ケースで9.8e-16、誤差がほぼ比例するケース（`min tr(S1)/
+    # tr(W1)` が約1e-13まで）で2.1e-14。
+    # `atol_table1`: 論文Table 1は小数第2位に丸めてあるため、丸めの半分（0.005）。
+    # `rtol_published_b`: 同次分散での`B_TSLS = |1 - 2/K|`は閉じた式との比較で、
+    # 最大化の格子の打ち切り（`|beta| <= 1e8`）が効く`beta`軸の方法でも1e-8に収まる。
+    "mop_oracle": {
+        "rtol_effective": 1e-10,
+        "rtol_b_tsls": 1e-8,
+        "atol_table1": 0.005,
+        "rtol_published_b": 1e-8,
+    },
     # --- 本実装内の不変条件（リファレンス実装との比較ではない） ---
     # 同じ入力に対して計算経路が異なる出力どうしの一致の確認（`ols_api`と同じ方針、
     # 根拠は`_tolerances_linear.py`の`ols_api`のコメント参照）。

@@ -660,4 +660,4 @@ fixest（全`cov_type`）とlinearmodels（classical・HC1）の凍結フィク�
 - `docs/planning/specs/mop-oracle-spec.md`が履歴（`f725458f`）に入っていることの扱い。内容は論文の式とテストデータの定義で、weakivtest.adoの手順・定数は含まない
   （ado名に触れるのは「見ない」という指示の部分だけ）。履歴の書き換えはしない方針を提案済み（要確認。9.9末尾参照）。
 - FE性能比較への不均衡シナリオ: `PerfAdapter.build_dataframe(n, k, seed)`が`method`を知らないため、ハーネス（`performance/_perf_harness.py`）の拡張が要る。
-  #522には含めず、英語で別Issueに起票する案を提示済み（**未起票**。利用者の承認待ち）。
+  #522には含めず、英語で別Issue #634として起票済み。

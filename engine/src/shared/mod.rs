@@ -14,6 +14,7 @@ pub mod parallelism;
 
 pub(crate) mod covariance;
 pub(crate) mod design_matrix;
+pub(crate) mod effective_f;
 pub(crate) mod gmm;
 pub(crate) mod goodness_of_fit;
 pub(crate) mod inference;
@@ -22,6 +23,8 @@ pub(crate) mod kleibergen_paap;
 pub(crate) mod least_squares;
 pub(crate) mod linear_algebra;
 pub(crate) mod linear_program;
+pub(crate) mod noncentral_chi_squared;
+pub(crate) mod score_covariance;
 pub(crate) mod stock_yogo;
 pub(crate) mod validation;
 pub(crate) mod wald;

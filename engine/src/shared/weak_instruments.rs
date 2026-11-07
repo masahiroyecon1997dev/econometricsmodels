@@ -119,6 +119,24 @@ pub(super) fn orthogonalize_unit(
     Some((y_tilde, z_tilde))
 }
 
+/// [`orthogonalize_unit`]の結果を、各列の二乗平均が1になるようにそろえたもの(`Q = Z̃'Z̃/n`の対角が1)。
+/// ランク統計量(Kleibergen-Paap・有効F)は列のスケールに依らないので、Gram行列の条件が観測数に
+/// 依らないようにそろえる。`None`の条件は`orthogonalize_unit`と同じ。
+pub(super) fn rms_orthogonalized(
+    y_endog: &Mat<f64>,
+    x_exog: &Mat<f64>,
+    z: &Mat<f64>,
+) -> Option<(Mat<f64>, Mat<f64>)> {
+    let (y_unit, z_unit) = orthogonalize_unit(y_endog, x_exog, z)?;
+    let root_n = (y_endog.nrows() as f64).sqrt();
+    let scale = |m: &Mat<f64>| Mat::from_fn(m.nrows(), m.ncols(), |i, j| *m.get(i, j) * root_n);
+    Some((scale(&y_unit), scale(&z_unit)))
+}
+
+/// 完全フィット(最小の正準相関が1、または一次段階の`R²`が1)とみなす`1 − R²`の下限。
+/// Kleibergen-Paapと有効Fが共有する。
+pub(super) const EXACT_FIT_TOLERANCE: f64 = 1.4210854715202004e-14;
+
 /// 列を横に並べる。
 fn hcat(left: &Mat<f64>, right: &Mat<f64>) -> Mat<f64> {
     let k = left.ncols();

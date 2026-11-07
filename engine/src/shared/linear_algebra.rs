@@ -399,6 +399,18 @@ pub(crate) fn forward_substitute(l: faer::mat::MatRef<'_, f64>, b: &Mat<f64>) ->
     x
 }
 
+/// 対称正定値行列`q`のCholesky分解`q = CC'`の下三角因子`C`の逆行列`C⁻¹`。`C⁻¹ q C⁻ᵀ = I`なので、
+/// `q`がGram行列(二乗平均)の列を直交正規化する白色化の係数になる。
+///
+/// 非ピボットのCholeskyは共線を検出できないので、固有値でも条件を確かめる。`q`が特異に近い・
+/// 正定値でないとき`None`。
+pub(crate) fn inverse_cholesky_factor(q: &Mat<f64>) -> Option<Mat<f64>> {
+    let k = q.nrows();
+    ensure_well_conditioned_symmetric_matrix(q, k, MatrixKind::DesignGram).ok()?;
+    let llt = q.llt(Side::Lower).ok()?;
+    Some(forward_substitute(llt.L(), &Mat::<f64>::identity(k, k)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

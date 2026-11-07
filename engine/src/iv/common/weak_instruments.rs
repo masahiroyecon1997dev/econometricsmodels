@@ -8,7 +8,9 @@
 use super::input::IvInput;
 use crate::linear::ols::CovType;
 use crate::shared::covariance::{HcVariant, resolve_hac_lags, time_ordering};
-use crate::shared::kleibergen_paap::{RankTest, ScoreCovariance, kleibergen_paap};
+use crate::shared::effective_f::{EffectiveF, effective_f};
+use crate::shared::kleibergen_paap::{RankTest, kleibergen_paap};
+use crate::shared::score_covariance::ScoreCovariance;
 use crate::shared::stock_yogo::{
     TSLS_BIAS_LEVELS, TSLS_SIZE_LEVELS, tsls_bias_critical_values, tsls_size_critical_values,
 };
@@ -83,19 +85,14 @@ pub struct KleibergenPaap {
     pub n_excluded: usize,
 }
 
-/// `cov_type`に頑健なKleibergen-Paap統計量(rk LMとrk Wald F)を計算する。
-///
-/// `cov_type`のHC・クラスター・HACが、一次段階のスコアの共分散に使われる(`Classical`のWald Fは
-/// Cragg-Donaldに一致)。`Hac`の`lags`は`None`なら経験則で解決し、時間順は`time_order`による。
-/// 両方とも定義できないとき(内生変数が無い、識別不足、`Cluster`でグループが無い、HACのラグ数が
-/// 不正など)は`None`。診断なので`fit()`は失敗させない。
-#[must_use]
-pub fn compute_kleibergen_paap(input: &IvInput, cov_type: &CovType) -> Option<KleibergenPaap> {
-    // `fit()`の外から呼ばれてもfaerを逐次に固定する(`crate::shared::parallelism`)。
-    crate::shared::parallelism::ensure_serial();
-    let n = input.nobs();
-    let order;
-    let covariance = match cov_type {
+/// `CovType`を一次段階のスコアの共分散の選択に直す。`Hac`の時間順は`order`に書き込んで借用する。
+/// 不正な設定(グループの無い`Cluster`、HACのラグ数や時間順の長さの不正)は`None`。
+fn score_covariance<'a>(
+    cov_type: &'a CovType,
+    n: usize,
+    order: &'a mut Vec<usize>,
+) -> Option<ScoreCovariance<'a>> {
+    Some(match cov_type {
         CovType::Classical => ScoreCovariance::Classical,
         CovType::Hc0 => ScoreCovariance::Hc(HcVariant::Hc0),
         CovType::Hc1 => ScoreCovariance::Hc(HcVariant::Hc1),
@@ -106,13 +103,48 @@ pub fn compute_kleibergen_paap(input: &IvInput, cov_type: &CovType) -> Option<Kl
             if time_order.len() != n {
                 return None;
             }
-            order = time_ordering(time_order, n);
+            *order = time_ordering(time_order, n);
             ScoreCovariance::Hac {
                 lags: resolve_hac_lags(*lags, n).ok()?,
-                order: &order,
+                order: order.as_slice(),
             }
         }
-    };
+    })
+}
+
+/// `cov_type`に頑健なMontiel Olea-Pflueger有効F統計量と、単純版TSLSのPatnaik臨界値を計算する。
+///
+/// 内生変数が1個のときだけ定義される(2個以上は`None`)。`cov_type`の扱いと`None`の条件は
+/// [`compute_kleibergen_paap`]と同じ規約(`Classical`の有効FはCragg-Donaldに一致する)。`alpha`は
+/// 臨界値の水準(0〜1)。診断なので`fit()`は失敗させない。
+#[must_use]
+pub fn compute_effective_f(input: &IvInput, cov_type: &CovType, alpha: f64) -> Option<EffectiveF> {
+    // `fit()`の外から呼ばれてもfaerを逐次に固定する(`crate::shared::parallelism`)。
+    crate::shared::parallelism::ensure_serial();
+    let mut order = Vec::new();
+    let covariance = score_covariance(cov_type, input.nobs(), &mut order)?;
+    effective_f(
+        input.x_endog(),
+        input.x_exog(),
+        input.instruments(),
+        0,
+        covariance,
+        alpha,
+    )
+}
+
+/// `cov_type`に頑健なKleibergen-Paap統計量(rk LMとrk Wald F)を計算する。
+///
+/// `cov_type`のHC・クラスター・HACが、一次段階のスコアの共分散に使われる(`Classical`のWald Fは
+/// Cragg-Donaldに一致)。`Hac`の`lags`は`None`なら経験則で解決し、時間順は`time_order`による。
+/// 両方とも定義できないとき(内生変数が無い、識別不足、`Cluster`でグループが無い、HACのラグ数が
+/// 不正など)は`None`。診断なので`fit()`は失敗させない。
+#[must_use]
+pub fn compute_kleibergen_paap(input: &IvInput, cov_type: &CovType) -> Option<KleibergenPaap> {
+    // `fit()`の外から呼ばれてもfaerを逐次に固定する(`crate::shared::parallelism`)。
+    crate::shared::parallelism::ensure_serial();
+    let mut order = Vec::new();
+    let covariance = score_covariance(cov_type, input.nobs(), &mut order)?;
     let (y, x, z) = (input.x_endog(), input.x_exog(), input.instruments());
     let statistics = kleibergen_paap(y, x, z, 0, covariance)?;
     if statistics.rk_lm.is_none() && statistics.rk_wald_f.is_none() {
@@ -366,6 +398,83 @@ mod tests {
         let kp = compute_kleibergen_paap(&input(2, true), &two_clusters).unwrap();
         assert!(kp.rk_lm.is_some());
         assert_eq!(kp.rk_wald_f, None);
+    }
+
+    #[test]
+    fn effective_f_with_classical_covariance_equals_cragg_donald() {
+        let input = input(1, true);
+        let cd = compute_cragg_donald(&input).unwrap().statistic;
+        let eff = compute_effective_f(&input, &CovType::Classical, 0.05).unwrap();
+        assert!((eff.statistic - cd).abs() < 1e-10 * cd);
+        assert_eq!(eff.n_instruments, 3);
+        assert_eq!(eff.alpha, 0.05);
+        // Table 1 (K_eff = 3)の`x = 10`の臨界値は17.67。
+        let tau_10 = eff.simplified_tsls[1];
+        assert_eq!(tau_10.tau, 0.10);
+        assert!((tau_10.critical_value - 17.67).abs() < 0.005);
+    }
+
+    /// 操作変数が1個なら、`cov_type`ごとの有効Fはrk Wald Fに一致する(同じ`CovType`の変換を共有する
+    /// 2つの診断の配線の照合)。HACは`lags = None`の既定のラグ数も通る。
+    #[test]
+    fn effective_f_with_one_instrument_equals_the_kleibergen_paap_wald_f() {
+        let (y, x, d, z) = columns();
+        let input = IvInput::from_columns(
+            &y,
+            &[x],
+            vec!["x".to_string()],
+            &d[..1],
+            vec!["d1".to_string()],
+            &z[..1],
+            vec!["z1".to_string()],
+            true,
+            "y".to_string(),
+        )
+        .unwrap();
+        let hac = |lags| CovType::Hac {
+            lags,
+            time_order: (0..12).map(f64::from).collect(),
+        };
+        let cov_types = [
+            CovType::Classical,
+            CovType::Hc0,
+            CovType::Hc1,
+            CovType::Hc2,
+            CovType::Hc3,
+            clusters(),
+            hac(None),
+            hac(Some(3)),
+        ];
+        for cov_type in cov_types {
+            let kp = compute_kleibergen_paap(&input, &cov_type).unwrap();
+            let eff = compute_effective_f(&input, &cov_type, 0.05).unwrap();
+            let wald_f = kp.rk_wald_f.unwrap();
+            assert!(
+                (eff.statistic - wald_f).abs() < 1e-9 * wald_f,
+                "{cov_type:?}: {} vs {wald_f}",
+                eff.statistic
+            );
+            assert_eq!(eff.n_instruments, 1);
+        }
+    }
+
+    #[test]
+    fn effective_f_is_none_for_several_endogenous_variables_and_bad_settings() {
+        assert_eq!(
+            compute_effective_f(&input(2, true), &CovType::Classical, 0.05),
+            None
+        );
+        let input = input(1, true);
+        assert_eq!(
+            compute_effective_f(&input, &CovType::Cluster { groups: None }, 0.05),
+            None
+        );
+        let short_order = CovType::Hac {
+            lags: None,
+            time_order: vec![0.0, 1.0],
+        };
+        assert_eq!(compute_effective_f(&input, &short_order, 0.05), None);
+        assert_eq!(compute_effective_f(&input, &CovType::Classical, 1.5), None);
     }
 
     /// 内生変数が4個(表は3個まで)なら、統計量は出るが臨界値は無い。

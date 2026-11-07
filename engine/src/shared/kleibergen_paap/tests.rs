@@ -1,6 +1,8 @@
 //! `kleibergen_paap`のテスト。複数のテーマが使うデータと照合用のヘルパーをここに置く。
 
 use super::*;
+use crate::shared::covariance::HcVariant;
+use crate::shared::group_codes::GroupCodes;
 
 mod absorbed;
 mod invariance;

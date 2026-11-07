@@ -19,6 +19,7 @@ pub(crate) mod proptest_support;
 mod validation;
 mod weak_instruments;
 
+pub use crate::shared::effective_f::{EffectiveF, PatnaikCriticalValue};
 pub use crate::shared::kleibergen_paap::RankTest;
 pub use error::IvError;
 pub use estimate::IvEstimate;
@@ -28,5 +29,5 @@ pub(crate) use input::{hcat, mat_column_to_vec, mat_to_columns, without_baked_in
 pub use validation::validate_iv_fit_inputs;
 pub use weak_instruments::{
     CraggDonald, KleibergenPaap, StockYogoCriticalValues, compute_cragg_donald,
-    compute_kleibergen_paap,
+    compute_effective_f, compute_kleibergen_paap,
 };

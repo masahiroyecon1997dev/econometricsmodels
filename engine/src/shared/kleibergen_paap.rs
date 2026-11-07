@@ -14,31 +14,9 @@ use faer::Mat;
 use faer::Side;
 use faer::prelude::SolveLstsq;
 
-use super::covariance::{
-    HcScale, HcVariant, cluster_correction, cluster_meat, hac_meat, hc_meat, hc_scales, leverages,
-    xtx_inverse,
-};
-use super::error::MatrixKind;
-use super::group_codes::GroupCodes;
-use super::linear_algebra::{
-    checked_col_piv_qr, ensure_well_conditioned_symmetric_matrix, forward_substitute, unit_columns,
-};
-use super::weak_instruments::orthogonalize_unit;
-
-/// 一次段階のスコアの共分散の推定方法。
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum ScoreCovariance<'a> {
-    /// 等分散・無相関(スコアの共分散がクロネッカー積になる)。LMは`n·r²_min`(Andersonの正準相関の
-    /// LM統計量)、Wald FはCragg-Donaldの`F`に一致する。
-    Classical,
-    /// 観測ごとのスコアに行スケールを掛けたHC。`Hc1`は`√(n/(n−L−c−n_absorbed))`、`Hc2`・`Hc3`は
-    /// `[X_exog, Z]`のレバレッジによる(`covariance::hc_scales`)。
-    Hc(HcVariant),
-    /// クラスターロバスト。`groups`の長さは行数に等しい。
-    Cluster(&'a GroupCodes),
-    /// Bartlett核のNewey-West。`order`は`0..n`の置換(時間順)、`lags < n`。
-    Hac { lags: usize, order: &'a [usize] },
-}
+use super::linear_algebra::{checked_col_piv_qr, inverse_cholesky_factor};
+use super::score_covariance::{ScoreCovariance, covariance_multiplier, hc_row_scales, score_meat};
+use super::weak_instruments::{EXACT_FIT_TOLERANCE, rms_orthogonalized};
 
 /// カイ二乗分布に従うランク検定の統計量と自由度。
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -49,16 +27,10 @@ pub struct RankTest {
     pub df: usize,
 }
 
-/// 完全フィット(最小の正準相関が1)とみなす`1 − r²_min`の下限。
-const EXACT_FIT_TOLERANCE: f64 = 1.4210854715202004e-14;
-
 /// スコアの共分散の固有値が最大固有値のこの割合以下なら特異とみなす。Wald Fのスコアは合計が0なので、
 /// クラスター数がちょうど`d`のときの共分散は厳密にはランク落ちだが、丸め誤差の分だけ正の固有値が残りうる
 /// (機械イプシロンの数倍では拾えないことがある)。
 const SINGULAR_COVARIANCE_TOLERANCE: f64 = 1e-10;
-
-/// `1 − h_ii`がこれ以下の行があるとHC2・HC3のスケールが定義できない。
-const UNIT_LEVERAGE_TOLERANCE: f64 = 1e-10;
 
 /// [`kleibergen_paap`]の結果。LMとWald Fは共分散の階数の条件が違い(Wald Fのスコアは合計が0になるので、
 /// クラスターがLMより1つ多く要る)、片方だけ定義できることがあるので、独立に`Option`にする。
@@ -136,25 +108,15 @@ impl FirstStage {
         if k == 0 || q < k || n == 0 {
             return None;
         }
-        let (y_unit, z_unit) = orthogonalize_unit(y_endog, x_exog, z)?;
-        // 二乗平均が1になるようにそろえる(`Q = Z̃'Z̃/n`の対角が1)。
-        let root_n = (n as f64).sqrt();
-        let y = Mat::from_fn(n, k, |i, j| *y_unit.get(i, j) * root_n);
-        let z = Mat::from_fn(n, q, |i, j| *z_unit.get(i, j) * root_n);
+        let (y, z) = rms_orthogonalized(y_endog, x_exog, z)?;
 
         let n_f = n as f64;
         let scaled = |m: Mat<f64>| Mat::from_fn(m.nrows(), m.ncols(), |a, b| *m.get(a, b) / n_f);
         let q_zz = scaled(z.transpose() * &z);
         let q_xx = scaled(y.transpose() * &y);
         let q_zx = scaled(z.transpose() * &y);
-        // 非ピボットのCholeskyは共線を検出できないので、固有値でも確かめる。
-        ensure_well_conditioned_symmetric_matrix(&q_zz, q, MatrixKind::DesignGram).ok()?;
-        ensure_well_conditioned_symmetric_matrix(&q_xx, k, MatrixKind::DesignGram).ok()?;
-        let llt_z = q_zz.llt(Side::Lower).ok()?;
-        let llt_x = q_xx.llt(Side::Lower).ok()?;
-        let (c_z, c_x) = (llt_z.L(), llt_x.L());
-        let c_z_inv = forward_substitute(c_z, &Mat::<f64>::identity(q, q));
-        let c_x_inv = forward_substitute(c_x, &Mat::<f64>::identity(k, k));
+        let c_z_inv = inverse_cholesky_factor(&q_zz)?;
+        let c_x_inv = inverse_cholesky_factor(&q_xx)?;
 
         // Θ̂ = C_z⁻¹ Q_zx C_x⁻ᵀ (q×k)
         let theta = &c_z_inv * &q_zx * c_x_inv.transpose();
@@ -224,16 +186,11 @@ impl FirstStage {
         n_absorbed: usize,
         covariance: ScoreCovariance<'_>,
     ) -> Option<f64> {
-        let (n, q) = (self.n as f64, self.q);
-        let n_params = q + x_exog.ncols() + n_absorbed;
-        let df = self.n.checked_sub(n_params).filter(|&d| d >= 1)? as f64;
+        let n_params = self.q + x_exog.ncols() + n_absorbed;
         let (wald, n_groups) = self.chi2(&self.residuals, x_exog, n_absorbed, covariance)?;
-        let factor = match covariance {
-            ScoreCovariance::Classical | ScoreCovariance::Hac { .. } => df / n,
-            ScoreCovariance::Hc(_) => 1.0,
-            ScoreCovariance::Cluster(_) => 1.0 / cluster_correction(n_groups?, self.n, n_params),
-        };
-        Some(wald * factor / (q as f64))
+        // Wald統計量は共分散に反比例するので、共分散にかかる係数の逆数を掛ける。
+        let multiplier = covariance_multiplier(covariance, self.n, n_params, n_groups)?;
+        Some(wald / multiplier / (self.q as f64))
     }
 
     /// `scores_from`(n×k)と`Z̃`の積のスコアを`λ`の方向へ射影し、`covariance`で共分散`V̂_λ`を作って
@@ -262,33 +219,17 @@ impl FirstStage {
             projected_y[i] * projected_z
         });
 
-        let (meat, n_groups) = match covariance {
-            ScoreCovariance::Classical => {
-                // 共分散がクロネッカー積なら、射影後は`ω · I`(`ω = Σ_v` の方向の分散)。
+        let n_params = self.q + x_exog.ncols() + n_absorbed;
+        let (meat, n_groups) = score_meat(
+            &psi,
+            covariance,
+            |variant| hc_row_scales(variant, &self.z, x_exog, n_params, n_absorbed),
+            || {
+                // 共分散がクロネッカー積なら、射影後は`ω · I`(`ω`は射影した方向の分散)。
                 let omega = projected_y.iter().map(|p| p * p).sum::<f64>();
-                (
-                    Mat::from_fn(d, d, |a, b| if a == b { omega } else { 0.0 }),
-                    None,
-                )
-            }
-            ScoreCovariance::Hc(variant) => {
-                let scales = self.hc_row_scales(variant, x_exog, n_absorbed)?;
-                (hc_meat(&psi, &scales), None)
-            }
-            ScoreCovariance::Cluster(groups) => {
-                if groups.nobs() != n || groups.n_groups() < 2 {
-                    return None;
-                }
-                let (meat, g) = cluster_meat(groups, d, |i, a| *psi.get(i, a));
-                (meat, Some(g))
-            }
-            ScoreCovariance::Hac { lags, order } => {
-                if order.len() != n || lags >= n {
-                    return None;
-                }
-                (hac_meat(n, d, lags, order, |i, a| *psi.get(i, a)), None)
-            }
-        };
+                Mat::from_fn(d, d, |a, b| if a == b { omega } else { 0.0 })
+            },
+        )?;
 
         // V̂_λ = meat / n。対称にそろえ、固有分解で二次形式を作る。正定値でない(ランク落ち)なら
         // 一般化逆行列は使わず未定義とする。
@@ -310,59 +251,6 @@ impl FirstStage {
                 })
                 .sum::<f64>();
         statistic.is_finite().then_some((statistic, n_groups))
-    }
-
-    /// HCの行スケール(スコア全体に掛ける)。`Hc1`は`√(n/(n−q−k_exog−n_absorbed))`、`Hc2`・`Hc3`は
-    /// 一次段階の回帰子`[X_exog, Z]`のレバレッジ(`Z̃`は`X`と直交なので`h(X) + h(Z̃)`)による。
-    fn hc_row_scales(
-        &self,
-        variant: HcVariant,
-        x_exog: &Mat<f64>,
-        n_absorbed: usize,
-    ) -> Option<Vec<f64>> {
-        let n = self.n;
-        let one = |_: usize| 1.0;
-        match variant {
-            HcVariant::Hc0 => Some(hc_scales(n, one, HcScale::Hc0)),
-            HcVariant::Hc1 => {
-                let df = n
-                    .checked_sub(self.q + x_exog.ncols() + n_absorbed)
-                    .filter(|&d| d >= 1)?;
-                let factor = ((n as f64) / (df as f64)).sqrt();
-                Some(hc_scales(n, one, HcScale::Hc1 { factor }))
-            }
-            HcVariant::Hc2 | HcVariant::Hc3 => {
-                // レバレッジは吸収した効果の分を含まないので、`n_absorbed > 0`では個体ダミーを回帰子に
-                // 入れた定義と食い違う。吸収した効果のレバレッジを受け取る口ができるまでは未定義とする。
-                if n_absorbed > 0 {
-                    return None;
-                }
-                let mut leverage = leverages(&self.z, &xtx_inverse(&self.z).ok()?);
-                if x_exog.ncols() > 0 {
-                    let x_unit = unit_columns(x_exog);
-                    let x_leverage = leverages(&x_unit, &xtx_inverse(&x_unit).ok()?);
-                    for (h, h_x) in leverage.iter_mut().zip(x_leverage) {
-                        *h += h_x;
-                    }
-                }
-                if leverage
-                    .iter()
-                    .any(|h| h.is_nan() || 1.0 - h <= UNIT_LEVERAGE_TOLERANCE)
-                {
-                    return None;
-                }
-                let scale = if variant == HcVariant::Hc2 {
-                    HcScale::Hc2 {
-                        leverage: &leverage,
-                    }
-                } else {
-                    HcScale::Hc3 {
-                        leverage: &leverage,
-                    }
-                };
-                Some(hc_scales(n, one, scale))
-            }
-        }
     }
 }
 

@@ -459,6 +459,13 @@ C統計量は事後診断のメソッド、`first_stage()`は`Computed`変種、
   fixestの`kpr`は参照にならない。`n_absorbed > 0`のHC2/HC3は今は`None`（吸収した効果のレバレッジを含まないため。FE-2SLSでKPを
   hc2/hc3で出すなら、FEのレバレッジ（`1/T_i`込み）を`ScoreCovariance`に渡す形を足す）。
 
+- **#365（MOP有効F、エンジンのみ。単純版は実装済み・未コミット。一般化版は未実装）**: `shared/effective_f.rs`（`effective_f`・
+  `patnaik_critical_value`）、`shared/score_covariance.rs`（KPから共分散の選択を取り出して共有）、`shared/noncentral_chi_squared.rs`、
+  `iv/common/weak_instruments.rs`（`compute_effective_f`）。決定事項: 内生変数1個だけ（2個以上は`None`）、LIMLは実装しない、
+  臨界値は単純版TSLSを先に、一般化版（`B_TSLS`の最大化。`y`が要る）を続けて同じIssueで足す。論文のTable 1の120セルを再現済み。
+  オラクルは別セッションで`mop-oracle-spec.md`に沿って`benchmark/iv/references/`に実装中（ado由来のコードは使わない）。
+  一般化版の実装後に、オラクルの値の表と突き合わせる。`Ŵ2`が特異のときの扱い（KPは`None`、有効Fは値を返す）は#366で決める。
+
 ### 9.3 push済みのコミット
 
 `1bf01e91`（決定事項）、`91a76a9d`（#628 A 手順1）、`8d8d8dc8`（A 手順2）、`c1f13b84`（進捗）、`1631e728`（#628 B）、
@@ -484,6 +491,10 @@ C統計量は事後診断のメソッド、`first_stage()`は`Computed`変種、
   設定の誤りは`ValidationError`、数値的に定義できないものは別の理由で返す形（CDと同じ`Result`＋理由の列挙型）にそろえる。
   LMとWald Fは独立に`Option`で、`KleibergenPaap`は片方だけ`Some`になりうる。`RankTest`は`iv::common`から再エクスポート済み。
   最小の2つの特異値が重なるときのロバスト版の不安定性は検出していない（既知の限界。`iv-spec.md`3.4.2節）。
+- **#366で有効Fについても決めること**: (1) `Ŵ2`が特異のとき、有効Fは値を返す（KPは`None`）。公開時に揃えるか、警告として扱うか。
+  (2) `alpha`が不正（(0,1)の外）のときも、`compute_effective_f`は「定義できない」と同じ`None`に潰す。公開側で
+  `alpha`を検証して`ValidationError`にするか、エンジンが理由つきで返すか（KP・CDの`None`と同じ論点）。
+  (3) 内生変数が2個以上は`None`（原論文は1個。拡張の参照実装が無い）。理由を利用者に示すかどうか。
 - **Stock-Yogoの表**: 第二の独立な出典で全セルを照合していない（`ivreg2`のソースはSSLエラーで取得できなかった）。
   単調性・滑らかさ・既知値で検証。独立な出典（`ivreg2`の出力、Stataのマニュアル、他言語の実装）が手に入れば、全セル照合を足す。
 - **ルートCLAUDE.mdの3章**: `shared/`の列挙に`instrumental_variables.rs`・`gmm.rs`・`weak_instruments.rs`・`stock_yogo.rs`が載っていない

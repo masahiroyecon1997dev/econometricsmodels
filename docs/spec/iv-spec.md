@@ -296,7 +296,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   打ち切る。ランクの判定の前に各列をノルム1にそろえるので、列の単位に依存しない。
   `n_absorbed`は固定効果で吸収したパラメータ数（固定効果が無ければ0）。p値は無い（検定ではない）。
 - **`cov_type`に依存しない**（等分散前提。3.4節と同じ判断）。ロバスト版はKleibergen-Paap（3.4.2節）と
-  Montiel Olea-Pflueger（別途）。
+  Montiel Olea-Pflueger（3.4.3節）。
 - **定義できないとき`None`**（`fit()`は失敗させない診断として扱う。理由は区別しない）: 内生変数が
   無い、識別不足（`q < k`）、自由度が1未満、`X`がフルランクでない、`Z`または`Y`の列が`X`の張る空間に
   ほぼ入っている（直交化で元のノルムの`√ε`未満）、`Z̃`がフルランクでない、`S`が数値的に特異
@@ -388,6 +388,50 @@ Cragg-Donaldを、不均一分散・クラスター・自己相関に頑健に�
 - Kleibergen, F. and Schaffer, M. E. (2007), "ranktest: Stata module to test the rank of a matrix using
   the Kleibergen-Paap rk statistic", Statistical Software Components S456865, Boston College
   （`ivreg2`が使うrk LMとrk Wald Fの実装）。
+
+#### 3.4.3 Montiel Olea-Pflueger有効F統計量（エンジンのみ）
+
+内生変数が1個のときの、ロバストな弱操作変数の診断。`shared/effective_f.rs`の`effective_f`（行列版）を、
+`iv/common/weak_instruments.rs`の`compute_effective_f(&IvInput, &CovType, alpha)`が呼ぶ。
+
+- **定義**（Montiel Olea and Pflueger 2013）: 外生変数（定数列を含む。平均は引かない）で内生変数`Y`と除外操作変数`Z`を
+  直交化し、`Z̃'Z̃/n = I`となるように直交正規化する（統計量はこの変換に依らない）。`π̂ = Z̃'Y/n`、`V̂2`を`π̂`の
+  共分散の推定値（`Ŵ2 = n·V̂2`）として、
+  `F_eff = π̂'π̂/tr(V̂2)`（論文 Eq. (3)）。`Classical`なら`Ŵ2 = ω̂_22·I`でCragg-Donaldの`F`に一致し、操作変数1個なら
+  頑健な`t²`（Kleibergen-PaapのWald F）に一致する。
+- **`cov_type`と小標本の係数**: Kleibergen-Paap（3.4.2節）と同じ規約（`shared/score_covariance.rs`）。`Ŵ2 = c·meat/n`で、
+  `Classical`・`Hac`は`c = n/(n−l−n_absorbed)`、`Hc1`は行スケール`√(n/(n−l−n_absorbed))`に含み、`Hc0`・`Hc2`・`Hc3`は補正なし、
+  `Cluster`は`G/(G−1)·(n−1)/(n−l−n_absorbed)`（`l`は除外操作変数と外生変数の数）。`Hc2`・`Hc3`のレバレッジは`[X_exog, Z]`
+  だけから計算し、吸収した効果の分を含まないので、`n_absorbed > 0`では`None`。
+- **臨界値**（Patnaik近似）: 有効自由度
+  `K_eff(x) = tr(Ŵ2)²(1+2x)/[tr(Ŵ2²) + 2x·tr(Ŵ2)·λ_max(Ŵ2)]`（Eq. (4), (33)。`Ŵ2`のスケールに依らず`1 ≤ K_eff ≤ K`）、
+  臨界値は`χ²_{K_eff}(x·K_eff)`の上側`α`点を`K_eff`で割ったもの（Eq. (32)）。有効Fがこれを超えれば、水準`α`で
+  「Nagarバイアスがベンチマークの`τ`倍を超える」を棄却する。**単純版TSLS**は`x = 1/τ`（`τ`は5/10/20/30%）。
+  非心カイ二乗分布の分位点は`statrs`に無いので、ポアソン混合のCDFと二分法で自前に実装した
+  （`shared/noncentral_chi_squared.rs`）。ポアソンの重みは最頻値を1とした相対値を漸化式でたどって正規化する
+  （`ln Γ`を使わず、非心度が大きくても桁落ちが共通の係数になって消える）。非心度の上限は`ncp/2 ≤ 1e9`（超えると`None`）。
+  水準`1 − α`が1に近すぎる（`α`が1e-8より小さい）と、CDFの丸め誤差が水準に対して無視できず、分位点の精度が落ちる。
+- **未実装**: 一般化版（非単純版）TSLSの臨界値（`x = B_TSLS(Ŵ)/τ`。被説明変数の誘導形の共分散も要る）、LIML（このプロジェクトに
+  推定量が無い）、内生変数が2個以上（原論文は1個。拡張を実装した参照実装が無く、検証手段が無いので`None`）。
+- **`Ŵ2`が特異のとき**: トレースと固有値だけを使うので、半正定値なら値を返す（Kleibergen-Paapは逆行列を使うので`None`）。
+  クラスターが操作変数の数より少ないと推論が不安定になる点は同じ。公開時の扱いは別途決める。丸め誤差の範囲の負の固有値は0に
+  そろえ、最小固有値が最大固有値の`-1e-10`倍より小さい不定値は`None`。
+- **定義できないとき`None`**（診断なので`fit()`は失敗させない）: 内生変数が1個でない、操作変数が無い、`alpha`が(0,1)の外、
+  3.4.1節と同じ前処理の条件（`X`がフルランクでない、`Z`が`X`の張る空間に入る、`Z̃`が共線）、一次段階が完全フィット
+  （`1 − R² ≤ 1.4e-14`。Kleibergen-Paapと同じ基準で、Cragg-Donaldの`q·ε`に合わせて境界を確かめる）、
+  HC2・HC3でレバレッジが1・`n_absorbed > 0`、クラスターが2未満、`Hac`の`lags >= n`・時間順の長さの不一致、
+  自由度`n − l − n_absorbed`が1未満、非有限値。
+- **検証**: 論文のTable 1（`K_eff = 1..30`、`x = 3.33・5・10・20`の上側5%点）の120セルを、公表値の小数第2位まで
+  再現する（`x = 3.33`の列は`10/3`）。非心カイ二乗分布はscipy 1.18と照合した。単体テストは、`Classical`でCragg-Donald、
+  操作変数1個でKleibergen-PaapのWald Fとの一致（`Classical`・HC0〜HC3・クラスター・HAC）、固有値(3, 1)の手計算、
+  `1 ≤ K_eff ≤ K`、列のスケール・操作変数の線形結合・行の並べ替えへの不変性、個体ダミー入りとwithin変換＋`n_absorbed`の
+  一致（Frisch-Waugh-Lovell）、`None`になる各条件を固定する。第三者のソフトウェアを実行した値との照合は
+  ivDiagの`eff_F`（有効Fの統計量のみ）で行う（Pythonへの公開後）。
+
+出典（3.4.1節に加えて）:
+
+- Montiel Olea, J. L. and Pflueger, C. (2013), "A Robust Test for Weak Instruments", *Journal of Business &
+  Economic Statistics* 31(3), 358-369（有効F統計量とPatnaik臨界値）。
 
 ### 3.5 過剰識別検定（`overid_statistic`/`overid_p_value`）
 
@@ -540,6 +584,6 @@ error.rs`）:
 
 - Cragg-Donald統計量とStock-Yogo臨界値のPython公開（エンジンは実装済み、3.4.1節）
 - Kleibergen-Paap統計量のPython公開（エンジンは実装済み、3.4.2節）
-- Montiel Olea-Pflueger effective F
+- Montiel Olea-Pflueger有効FのPython公開（エンジンは実装済み、3.4.3節）、一般化版（非単純版）TSLS臨界値、複数内生変数への拡張
 - Wu-Hausman検定のGMM対応（`estimator="gmm"`では常に`None`）
 - Wu-Hausman検定の変数ごとのサブセット検定（現状は内生変数全体のジョイント検定のみ）

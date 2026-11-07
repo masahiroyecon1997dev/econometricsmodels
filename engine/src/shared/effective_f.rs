@@ -1,6 +1,7 @@
 //! Montiel Olea and Pflueger(2013)の有効F統計量とPatnaik臨界値。行列だけを受け取る。
 //!
-//! 内生変数が1個のときの、ロバスト(不均一分散・クラスター・自己相関)な弱操作変数の診断。
+//! 内生変数が1個のときの、ロバスト(不均一分散・クラスター・自己相関)な弱操作変数の診断。有効F統計量と、
+//! 単純版TSLSの臨界値(`x = 1/τ`)、被説明変数を渡したときは一般化版(非単純版)TSLSの臨界値(`x = B_TSLS/τ`)。
 //! `(Y, X_exog, Z)`と吸収したパラメータ数`n_absorbed`を受け取り、重みつきの回帰は呼び出し側が
 //! `√w`を掛けた行列(定数列を含む)を渡す。共分散は[`ScoreCovariance`]で選び、meatと小標本の係数は
 //! `shared::score_covariance`が定める(Kleibergen-Paapと同じ規約)。
@@ -14,10 +15,35 @@ use faer::{Mat, Side};
 use super::linear_algebra::inverse_cholesky_factor;
 use super::noncentral_chi_squared::noncentral_chi_squared_quantile;
 use super::score_covariance::{ScoreCovariance, covariance_multiplier, hc_row_scales, score_meat};
-use super::weak_instruments::{EXACT_FIT_TOLERANCE, rms_orthogonalized};
+use super::weak_instruments::{EXACT_FIT_TOLERANCE, orthogonalize_unit, rms_orthogonalized};
 
 /// 臨界値を出す相対バイアスの閾値`τ`(Nagarバイアスの、ベンチマークに対する割合の上限)。
 pub(crate) const BIAS_THRESHOLDS: [f64; 4] = [0.05, 0.10, 0.20, 0.30];
+
+/// `B_TSLS`の最大化で、`β`の格子の点数(`β = β₀·sinh u`、`u ∈ [−U, U]`の等間隔)。`sinh`は0の近くでは
+/// 線形、大きい`|β|`では対数間隔になり、どちらのスケールにある山も見落とさない。
+const BIAS_GRID_POINTS: usize = 3_000;
+
+/// 格子上の局所最大のうち、黄金分割で詰める個数(値の大きい順)。
+const MAX_REFINED_PEAKS: usize = 16;
+
+/// 格子の端`U`(`|β|`の上限は`β₀·sinh U ≈ 5e12·β₀`。これより先は極限の値と区別できない)。
+const BIAS_GRID_HALF_WIDTH: f64 = 30.0;
+
+/// 格子上で値が左隣よりこれだけ大きい点だけを局所最大とみなす。`|β|`が大きい平坦な区間では、丸め誤差の
+/// 細かい波が並ぶので、それらを局所最大に数えない。
+const PEAK_RIPPLE_TOLERANCE: f64 = 1e-12;
+
+/// 格子の評価点のうち、評価に失敗した点がこの割合を超えたら`B_TSLS`は未定義とする(少数の失敗は飛ばす)。
+const MAX_FAILED_GRID_FRACTION: f64 = 0.01;
+
+/// 黄金分割探索を止める区間幅(`u`の)。`u`の絶対値は最大30で、区間幅は約30 ulp。最大値の誤差は区間幅の
+/// 2乗のオーダー。
+const GOLDEN_SECTION_WIDTH: f64 = 1e-13;
+
+/// `min_β tr(S1(β)) = tr(W1) − tr(W12)²/tr(W2)`が`tr(W1)`のこの割合以下なら、被説明変数の誘導形の誤差が
+/// 内生変数の誘導形の誤差とほぼ比例しており(`v1 = βv2`)、ベンチマークが0になる`β`があるので未定義とする。
+const DEGENERATE_BENCHMARK_TOLERANCE: f64 = 1e-12;
 
 /// `Ŵ2`の最小固有値が、最大固有値のこの割合より負なら、丸め誤差ではなく不定値とみなす。
 const NEGATIVE_EIGENVALUE_TOLERANCE: f64 = 1e-10;
@@ -27,7 +53,7 @@ const NEGATIVE_EIGENVALUE_TOLERANCE: f64 = 1e-10;
 pub struct PatnaikCriticalValue {
     /// 相対バイアスの閾値`τ`。
     pub tau: f64,
-    /// 非心度の入力`x`(単純版は`1/τ`)。
+    /// 非心度の入力`x`(単純版は`1/τ`、一般化版は`B_TSLS/τ`)。
     pub x: f64,
     /// 有効自由度`K_eff`(小数)。
     pub effective_df: f64,
@@ -47,9 +73,14 @@ pub struct EffectiveF {
     pub alpha: f64,
     /// 単純版TSLSの臨界値(`x = 1/τ`)。`τ`は[`BIAS_THRESHOLDS`]の順。
     pub simplified_tsls: [PatnaikCriticalValue; 4],
+    /// 一般化版(非単純版)TSLSの臨界値(`x = B_TSLS/τ`)。被説明変数を渡し、`B_TSLS`が定義できたときだけ。
+    /// 単純版より小さいか等しい(`B_TSLS ≤ 1`)。
+    pub tsls: Option<[PatnaikCriticalValue; 4]>,
+    /// Nagarバイアスの最悪ケースに対する上限`B_TSLS`(論文 Eq. (21))。`0 ≤ B_TSLS ≤ 1`。
+    pub bias_bound: Option<f64>,
 }
 
-/// Montiel Olea-Pfluegerの有効F統計量と、単純版TSLSのPatnaik臨界値を計算する。
+/// Montiel Olea-Pfluegerの有効F統計量と、単純版・一般化版TSLSのPatnaik臨界値を計算する。
 ///
 /// 定義: 外生変数で`Y`と`Z`を直交化し、`Z̃'Z̃/n = I`となるように直交正規化する(統計量はこの変換に
 /// 依らない)。`π̂ = Z̃'Y/n`、`V̂2`を`π̂`の共分散の推定値(`covariance`による。`Ŵ2 = n·V̂2`)として
@@ -65,12 +96,19 @@ pub struct EffectiveF {
 ///
 /// - `y_endog`: 内生変数(n×1。1個だけ)、`x_exog`: 外生変数(n×k_exog。定数項を使うなら定数列を含め、
 ///   平均は引かず他の列と同じく偏回帰で落とす)、`z`: 除外操作変数(n×K)、`alpha`: 臨界値の水準(0〜1)。
+/// - `y_dep`: 被説明変数(n×1)。渡すと、被説明変数の誘導形の残差もスコアに加えた`2K×2K`の`Ŵ`から、一般化版
+///   TSLSの臨界値(`x = B_TSLS(Ŵ)/τ`、論文 Eq. (5), (21))も計算する。`None`なら単純版だけ。**`y_dep`は
+///   `y_endog`・`x_exog`・`z`と同じ変換(`√w`の重み、within変換など)を済ませた形で渡す**(変換が違うと、被説明変数の
+///   誘導形と一次段階の残差が別の変換になり、`W1`・`W12`と`B_TSLS`が誤る)。
 /// - `Ŵ2`は半正定値でよい(クラスターや観測が少なくてランク落ちでも、トレースと固有値だけを使う)。
 ///
-/// 次のとき`None`: 内生変数が1個でない、`K = 0`、`alpha`が(0,1)の外、`X`がフルランクでない、`Z`の列が
-/// `X`の張る空間にほぼ入っている、`Z̃`が共線、一次段階が完全フィット、HC2・HC3でレバレッジが1、
-/// `n_absorbed > 0`のHC2・HC3、クラスターが2未満、`Hac`の時間順の長さが行数と違う・`lags >= n`、
-/// 自由度`n − K − k_exog − n_absorbed`が1未満、入力に非有限値がある。
+/// 次のとき全体が`None`: 内生変数が1個でない、`K = 0`、`alpha`が(0,1)の外、`X`がフルランクでない、`Z`の列が
+/// `X`の張る空間にほぼ入っている、`Z̃`が共線、一次段階が完全フィット(`1 − R² ≤ 1.4e-14`)、HC2・HC3で
+/// レバレッジが1、`n_absorbed > 0`のHC2・HC3、クラスターが2未満、`Hac`の時間順の長さが行数と違う・`lags >= n`、
+/// 自由度`n − K − k_exog − n_absorbed`が1未満、`Ŵ2`が不定値(最小固有値が最大固有値の`-1e-10`倍より小さい)かゼロ、
+/// 入力に非有限値がある。一般化版(`tsls`・`bias_bound`)だけが`None`になるのは: `y_dep`の形が不正・外生変数の
+/// 張る空間にほぼ入っている・非有限値、`2K×2K`の`Ŵ`が不定値、`v1 = βv2`のほぼ比例(`B_TSLS`が未定義)、
+/// `B_TSLS`の格子の評価の失敗が1%を超える。統計量と単純版は返す。
 pub(crate) fn effective_f(
     y_endog: &Mat<f64>,
     x_exog: &Mat<f64>,
@@ -78,6 +116,7 @@ pub(crate) fn effective_f(
     n_absorbed: usize,
     covariance: ScoreCovariance<'_>,
     alpha: f64,
+    y_dep: Option<&Mat<f64>>,
 ) -> Option<EffectiveF> {
     let (n, k) = (y_endog.nrows(), z.ncols());
     debug_assert_eq!(z.nrows(), n);
@@ -89,24 +128,42 @@ pub(crate) fn effective_f(
     let n_f = n as f64;
     let n_params = k + x_exog.ncols() + n_absorbed;
 
-    // スコア`ψ_i = ũ_i e_i`(n×K)から共分散の推定値`Ŵ2 = c · meat / n`を作る。
-    let psi = Mat::from_fn(n, k, |i, a| {
-        *first_stage.u.get(i, a) * first_stage.residuals[i]
+    // スコア`ψ_i = (ũ_i e1_i, ũ_i e2_i)`(`e1`は被説明変数の誘導形の残差、`e2`は一次段階の残差)から
+    // 共分散の推定値`Ŵ = c · meat / n`を作る。被説明変数が無い(または誘導形が作れない)ときは`e2`だけ。
+    let reduced_form = y_dep.and_then(|y| first_stage.reduced_form_residuals(y, x_exog));
+    let series: Vec<&[f64]> = match &reduced_form {
+        Some(e1) => vec![e1.as_slice(), first_stage.residuals.as_slice()],
+        None => vec![first_stage.residuals.as_slice()],
+    };
+    let width = series.len() * k;
+    let psi = Mat::from_fn(n, width, |i, col| {
+        *first_stage.u.get(i, col % k) * series[col / k][i]
     });
     let (meat, n_groups) = score_meat(
         &psi,
         covariance,
         |variant| hc_row_scales(variant, &first_stage.u, x_exog, n_params, n_absorbed),
         || {
-            // 共分散がクロネッカー積なら`Ŵ2 ∝ I`。`Ũ'Ũ/n = I`なので`meat = (Σe²)·I`。
-            let sum_squares: f64 = first_stage.residuals.iter().map(|e| e * e).sum();
-            Mat::from_fn(k, k, |a, b| if a == b { sum_squares } else { 0.0 })
+            // 共分散がクロネッカー積なら`Ŵ ∝ Ω̂⊗I`。`Ũ'Ũ/n = I`なので、`meat`のブロック`(s, t)`は
+            // `(Σ e_s e_t)·I_K`。
+            Mat::from_fn(width, width, |a, b| {
+                if a % k != b % k {
+                    return 0.0;
+                }
+                series[a / k]
+                    .iter()
+                    .zip(series[b / k])
+                    .map(|(x, y)| x * y)
+                    .sum()
+            })
         },
     )?;
     let multiplier = covariance_multiplier(covariance, n, n_params, n_groups)?;
-    let w2 = Mat::from_fn(k, k, |a, b| {
+    let w = Mat::from_fn(width, width, |a, b| {
         multiplier * 0.5 * (*meat.get(a, b) + *meat.get(b, a)) / n_f
     });
+    let last = width - k;
+    let w2 = Mat::from_fn(k, k, |a, b| *w.get(last + a, last + b));
 
     let eigenvalues = psd_eigenvalues(&w2)?;
     let trace: f64 = eigenvalues.iter().sum();
@@ -116,28 +173,55 @@ pub(crate) fn effective_f(
         return None;
     }
 
-    let mut critical_values = [PatnaikCriticalValue {
-        tau: 0.0,
-        x: 0.0,
-        effective_df: 0.0,
-        critical_value: 0.0,
-    }; 4];
-    for (slot, tau) in critical_values.iter_mut().zip(BIAS_THRESHOLDS) {
-        let x = 1.0 / tau;
-        let (effective_df, critical_value) = patnaik_critical_value(&eigenvalues, x, alpha)?;
-        *slot = PatnaikCriticalValue {
-            tau,
-            x,
-            effective_df,
-            critical_value,
-        };
-    }
+    let simplified_tsls = critical_value_set(&eigenvalues, alpha, |tau| 1.0 / tau)?;
+    let generalized = reduced_form
+        .as_ref()
+        .and_then(|_| generalized_critical_values(&w, k, &eigenvalues, alpha));
     Some(EffectiveF {
         statistic,
         n_instruments: k,
         alpha,
-        simplified_tsls: critical_values,
+        simplified_tsls,
+        bias_bound: generalized.as_ref().map(|(bound, _)| *bound),
+        tsls: generalized.map(|(_, values)| values),
     })
+}
+
+/// `τ`ごとのPatnaik臨界値の組(`x`は`x_of_tau(τ)`)。分位点が求まらないとき`None`。
+fn critical_value_set(
+    eigenvalues: &[f64],
+    alpha: f64,
+    x_of_tau: impl Fn(f64) -> f64,
+) -> Option<[PatnaikCriticalValue; 4]> {
+    let mut values = Vec::with_capacity(BIAS_THRESHOLDS.len());
+    for tau in BIAS_THRESHOLDS {
+        let x = x_of_tau(tau);
+        let (effective_df, critical_value) = patnaik_critical_value(eigenvalues, x, alpha)?;
+        values.push(PatnaikCriticalValue {
+            tau,
+            x,
+            effective_df,
+            critical_value,
+        });
+    }
+    values.try_into().ok()
+}
+
+/// 一般化版TSLSの`(B_TSLS, 臨界値の組)`。`w`は`2K×2K`の`Ŵ`(前半が被説明変数、後半が一次段階)で、
+/// `w2_eigenvalues`は`Ŵ2`(`w`の右下ブロック)の固有値。`w`が不定値のとき(`B_TSLS ≤ 1`が保証されない)や、
+/// `B_TSLS`が定義できないとき`None`。
+fn generalized_critical_values(
+    w: &Mat<f64>,
+    k: usize,
+    w2_eigenvalues: &[f64],
+    alpha: f64,
+) -> Option<(f64, [PatnaikCriticalValue; 4])> {
+    psd_eigenvalues(w)?;
+    let block =
+        |row: usize, col: usize| Mat::from_fn(k, k, |a, b| *w.get(row * k + a, col * k + b));
+    let bound = tsls_bias_bound(&block(0, 0), &block(0, 1), &block(1, 1))?;
+    let values = critical_value_set(w2_eigenvalues, alpha, |tau| bound / tau)?;
+    Some((bound, values))
 }
 
 /// 半正定値の`Ŵ2`(対称)の固有値。丸め誤差の分の負の固有値は0にそろえる。最大固有値が正でない、
@@ -152,6 +236,143 @@ fn psd_eigenvalues(w2: &Mat<f64>) -> Option<Vec<f64>> {
         return None;
     }
     Some(values.into_iter().map(|v| v.max(0.0)).collect())
+}
+
+/// `B_TSLS(Ŵ)`(論文 Theorem 1, Eq. (19), (21))。`w1`・`w12`・`w2`は`Ŵ`の`K×K`ブロック(被説明変数の
+/// 誘導形・その交差・内生変数の誘導形)。
+///
+/// `β`ごとに`S1 = W1 − 2βW12 + β²W2`、`S12 = W12 − βW2`、`S2 = W2`として、`C0`(単位球面)についての
+/// 上限は`S12`の対称部分の最小・最大固有値で解析的に取れる(Remark 5):
+///
+/// ```text
+/// f(β) = max_{λ ∈ {λ_min, λ_max}} |tr(S12) − 2λ| / √(tr(S1)·tr(S2)),   B_TSLS = sup_β f(β)
+/// ```
+///
+/// `β → ±∞`の極限は`max_{λ ∈ {λ_min(W2), λ_max(W2)}} |1 − 2λ/tr(W2)|`。`β`の上限は、`β = c + s·sinh u`の
+/// `u`の等間隔の格子(`c`の近くは線形、遠くは対数間隔)で局所最大を探し、各局所最大の両隣の間を黄金分割探索で
+/// 詰める(`f`は区間内で単峰)。`(c, s)`は2通り: `(0, β₀)`(`β₀ = √(tr(W1)/tr(W2))`)と、`tr(S1(β))`の
+/// 最小点まわり`(β*, √(min tr(S1)/tr(W2)))`(誤差がほぼ比例するときの鋭い構造を拾う)。端の極限も候補に入れる。
+///
+/// 次のとき`None`: `tr(W2) <= 0`、`tr(W1) <= 0`、`min_β tr(S1(β))`が`tr(W1)`の1e-12倍以下
+/// (被説明変数と内生変数の誘導形の誤差がほぼ比例)、非有限値。
+fn tsls_bias_bound(w1: &Mat<f64>, w12: &Mat<f64>, w2: &Mat<f64>) -> Option<f64> {
+    let k = w2.nrows();
+    let trace = |m: &Mat<f64>| (0..k).map(|a| *m.get(a, a)).sum::<f64>();
+    let (tr1, tr12, tr2) = (trace(w1), trace(w12), trace(w2));
+    if !(tr1.is_finite() && tr1 > 0.0 && tr12.is_finite() && tr2.is_finite() && tr2 > 0.0) {
+        return None;
+    }
+    // `tr(S1(β)) = min_tr_s1 + tr(W2)(β − β*)²`、`β* = tr(W12)/tr(W2)`。この形なら`β*`の近くで桁落ちしない。
+    let min_tr_s1 = tr1 - tr12 * tr12 / tr2;
+    let beta_star = tr12 / tr2;
+    if min_tr_s1 <= DEGENERATE_BENCHMARK_TOLERANCE * tr1 {
+        return None;
+    }
+    let sym12 = Mat::from_fn(k, k, |a, b| 0.5 * (*w12.get(a, b) + *w12.get(b, a)));
+    let objective = |beta: f64| -> Option<f64> {
+        let s12 = Mat::from_fn(k, k, |a, b| *sym12.get(a, b) - beta * *w2.get(a, b));
+        let eigenvalues = s12.self_adjoint_eigenvalues(Side::Lower).ok()?;
+        let smallest = eigenvalues.iter().copied().fold(f64::INFINITY, f64::min);
+        let largest = eigenvalues
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max);
+        let tr_s12 = tr12 - beta * tr2;
+        let tr_s1 = min_tr_s1 + tr2 * (beta - beta_star) * (beta - beta_star);
+        // NaNは比較が偽になるので、`is_nan`も弾く。
+        if tr_s1.is_nan() || tr_s1 <= 0.0 {
+            return None;
+        }
+        let numerator = (tr_s12 - 2.0 * smallest)
+            .abs()
+            .max((tr_s12 - 2.0 * largest).abs());
+        let value = numerator / (tr_s1 * tr2).sqrt();
+        value.is_finite().then_some(value)
+    };
+
+    // `β → ±∞`の極限。
+    let w2_eigenvalues = w2.self_adjoint_eigenvalues(Side::Lower).ok()?;
+    let w2_smallest = w2_eigenvalues.iter().copied().fold(f64::INFINITY, f64::min);
+    let w2_largest = w2_eigenvalues
+        .iter()
+        .copied()
+        .fold(f64::NEG_INFINITY, f64::max);
+    let limit = (1.0 - 2.0 * w2_smallest / tr2)
+        .abs()
+        .max((1.0 - 2.0 * w2_largest / tr2).abs());
+
+    // 2通りのスケールで格子を張る。(1) `β = β₀ sinh u`(`β₀ = √(tr W1/tr W2)`): `W`全体のスケールの
+    // 構造。(2) `β = β* + δ sinh u`(`β* = tr W12/tr W2`、`δ = √(min tr S1/tr W2)`): 被説明変数と内生変数の
+    // 誘導形の誤差がほぼ比例する(`min tr S1`が小さい)と、`tr S1(β)`が最小になる`β*`の近くに幅`δ`の鋭い
+    // 構造ができ、(1)の格子の刻みでは取りこぼす。
+    let beta_scale = (tr1 / tr2).sqrt();
+    let near_minimizer_scale = (min_tr_s1 / tr2).sqrt();
+    let by_overall_scale = search_beta_grid(&|u: f64| objective(beta_scale * u.sinh()))?;
+    let by_minimizer_scale =
+        search_beta_grid(&|u: f64| objective(beta_star + near_minimizer_scale * u.sinh()))?;
+    let best = limit.max(by_overall_scale).max(by_minimizer_scale);
+    // 論文のTheorem 1.3で`B_TSLS ≤ 1`。超える値は丸め誤差の範囲のはず。
+    debug_assert!(best <= 1.0 + 1e-6, "B_TSLS exceeds 1: {best}");
+    Some(best.min(1.0))
+}
+
+/// `u ∈ [−U, U]`の等間隔の格子で`objective(u)`の局所最大を探し、上位だけを黄金分割で詰めて、最大値を返す。
+/// 格子の評価が失敗した点は飛ばす(1%を超えたら`None`)。端の極限は呼び出し側が候補に入れる。
+fn search_beta_grid(objective: &impl Fn(f64) -> Option<f64>) -> Option<f64> {
+    let at_or_lowest = |u: f64| objective(u).unwrap_or(f64::NEG_INFINITY);
+    let u_at = |j: usize| BIAS_GRID_HALF_WIDTH * (2.0 * j as f64 / BIAS_GRID_POINTS as f64 - 1.0);
+    let mut values = Vec::with_capacity(BIAS_GRID_POINTS + 1);
+    let mut failures = 0usize;
+    for j in 0..=BIAS_GRID_POINTS {
+        let value = at_or_lowest(u_at(j));
+        failures += usize::from(value == f64::NEG_INFINITY);
+        values.push(value);
+    }
+    if failures as f64 > MAX_FAILED_GRID_FRACTION * (BIAS_GRID_POINTS + 1) as f64 {
+        return None;
+    }
+
+    // 内側の局所最大(左より丸め誤差を超えて大きく、右以下)は、値の大きい順に上位だけ、両隣の間を
+    // 黄金分割で詰める(平坦な区間の丸め誤差の波は数えない)。
+    let mut best = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let mut peaks: Vec<usize> = (1..BIAS_GRID_POINTS)
+        .filter(|&j| {
+            values[j] > values[j - 1] + PEAK_RIPPLE_TOLERANCE && values[j] >= values[j + 1]
+        })
+        .collect();
+    peaks.sort_by(|&a, &b| values[b].total_cmp(&values[a]));
+    for &j in peaks.iter().take(MAX_REFINED_PEAKS) {
+        best = best.max(maximize_golden(&at_or_lowest, u_at(j - 1), u_at(j + 1)));
+    }
+    best.is_finite().then_some(best)
+}
+
+/// 区間`[lo, hi]`での`f`の最大値(黄金分割探索。`f`が区間内で単峰のとき最大値を返す)。
+/// 評価した点の最大値を返すので、単峰でなくても過大にはならない。
+fn maximize_golden(f: &impl Fn(f64) -> f64, mut lo: f64, mut hi: f64) -> f64 {
+    let ratio = 0.5 * (5.0_f64.sqrt() - 1.0);
+    let mut x1 = hi - ratio * (hi - lo);
+    let mut x2 = lo + ratio * (hi - lo);
+    let (mut f1, mut f2) = (f(x1), f(x2));
+    let mut best = f1.max(f2);
+    while hi - lo > GOLDEN_SECTION_WIDTH {
+        if f1 < f2 {
+            lo = x1;
+            x1 = x2;
+            f1 = f2;
+            x2 = lo + ratio * (hi - lo);
+            f2 = f(x2);
+            best = best.max(f2);
+        } else {
+            hi = x2;
+            x2 = x1;
+            f2 = f1;
+            x1 = hi - ratio * (hi - lo);
+            f1 = f(x1);
+            best = best.max(f1);
+        }
+    }
+    best
 }
 
 /// 有効自由度`K_eff`とPatnaik臨界値(論文 Eq. (33), (32))。`eigenvalues`は`Ŵ2`の固有値(0以上)。
@@ -217,600 +438,33 @@ impl FirstStage {
             residuals,
         })
     }
+
+    /// 被説明変数`y`の誘導形(外生変数で直交化した`ỹ`を`Ũ`に回帰)の残差`e1`。`y`が1列でない・行数が
+    /// 合わない、`y`が外生変数の張る空間にほぼ入っている、非有限値があるとき`None`。
+    fn reduced_form_residuals(&self, y_dep: &Mat<f64>, x_exog: &Mat<f64>) -> Option<Vec<f64>> {
+        let n = self.u.nrows();
+        if y_dep.ncols() != 1 || y_dep.nrows() != n {
+            return None;
+        }
+        // 操作変数の列は要らない(`y`だけを外生変数で直交化する)ので、列数0の行列を渡す。
+        let (y_unit, _) = orthogonalize_unit(y_dep, x_exog, &Mat::<f64>::zeros(n, 0))?;
+        let root_n = (n as f64).sqrt();
+        let n_f = n as f64;
+        let k = self.u.ncols();
+        let y: Vec<f64> = (0..n).map(|i| *y_unit.get(i, 0) * root_n).collect();
+        let coefficients: Vec<f64> = (0..k)
+            .map(|a| (0..n).map(|i| *self.u.get(i, a) * y[i]).sum::<f64>() / n_f)
+            .collect();
+        let residuals: Vec<f64> = (0..n)
+            .map(|i| {
+                y[i] - (0..k)
+                    .map(|a| *self.u.get(i, a) * coefficients[a])
+                    .sum::<f64>()
+            })
+            .collect();
+        residuals.iter().all(|e| e.is_finite()).then_some(residuals)
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::shared::covariance::HcVariant;
-    use crate::shared::group_codes::GroupCodes;
-    use crate::shared::kleibergen_paap::kleibergen_paap;
-    use crate::shared::weak_instruments::cragg_donald;
-
-    type Data = (Mat<f64>, Mat<f64>, Mat<f64>);
-
-    /// n=12。定数・外生`x`、除外操作変数`z1,z2,z3`、内生変数`d1`。
-    fn small() -> Data {
-        let x = [
-            0.3, -1.2, 0.8, 2.0, -0.5, 1.1, 0.7, -0.4, 1.6, 0.2, -1.0, 0.9,
-        ];
-        let z1 = [
-            1.0, 0.2, -0.7, 1.5, 0.9, -1.1, 0.3, 0.8, -0.6, 1.2, -0.3, 0.5,
-        ];
-        let z2 = [
-            0.4, -0.9, 1.3, 0.1, -0.2, 0.7, -1.4, 0.6, 0.0, -0.8, 1.1, 0.35,
-        ];
-        let z3 = [
-            -0.5, 0.7, 0.2, -1.1, 0.8, 0.4, 1.0, -0.3, 0.9, -0.6, 0.15, -0.2,
-        ];
-        let u1 = [
-            0.2, -0.5, 0.1, 0.4, -0.3, 0.6, -0.2, 0.05, -0.45, 0.3, 0.15, -0.1,
-        ];
-        let endog = Mat::from_fn(12, 1, |i, _| 0.9 * z1[i] - 0.4 * z2[i] + 0.3 * x[i] + u1[i]);
-        let exog = Mat::from_fn(12, 2, |i, j| if j == 0 { 1.0 } else { x[i] });
-        let z = Mat::from_fn(12, 3, |i, j| [z1[i], z2[i], z3[i]][j]);
-        (endog, exog, z)
-    }
-
-    /// n=240の決定的な合成データ(異分散)。操作変数は`n_instruments`個(3または4)。
-    fn large(n_instruments: usize) -> Data {
-        let n = 240;
-        let x = |i: usize| (0.7 * i as f64 + 0.3).sin() + 0.5 * (0.11 * i as f64).cos();
-        let z = |i: usize, l: usize| {
-            let (t, l) = (i as f64, l as f64);
-            (1.3 * t * (l + 1.0) + l).sin() + 0.3 * (0.37 * t * (l + 2.0)).cos()
-        };
-        let h = |i: usize| 1.0 + 0.8 * (0.05 * i as f64).sin().abs();
-        let endog = Mat::from_fn(n, 1, |i, _| {
-            let fourth = if n_instruments == 4 {
-                0.1 * z(i, 3)
-            } else {
-                0.0
-            };
-            0.5 * z(i, 0) + 0.3 * z(i, 1) - 0.2 * z(i, 2)
-                + fourth
-                + 0.4 * x(i)
-                + (2.1 * i as f64 + 1.0).sin() * h(i)
-        });
-        let exog = Mat::from_fn(n, 2, |i, j| if j == 0 { 1.0 } else { x(i) });
-        let zs = Mat::from_fn(n, n_instruments, z);
-        (endog, exog, zs)
-    }
-
-    fn clusters(n: usize, size: usize) -> GroupCodes {
-        let labels: Vec<String> = (0..n).map(|i| format!("g{:03}", i / size)).collect();
-        GroupCodes::from_labels_without_keys(&labels)
-    }
-
-    fn close(actual: f64, expected: f64, tolerance: f64) {
-        assert!(
-            (actual - expected).abs() <= tolerance * expected.abs(),
-            "actual={actual} expected={expected}"
-        );
-    }
-
-    fn column(m: &Mat<f64>, j: usize) -> Mat<f64> {
-        Mat::from_fn(m.nrows(), 1, |i, _| *m.get(i, j))
-    }
-
-    // 論文のTable 1: `K_eff = 1..30`行、`x = 1/τ`が3.33・5・10・20の列(上側5%点)。
-    // 3.33の列は`x = 10/3`の値。
-    const TABLE_1: [[f64; 4]; 30] = [
-        [12.05, 15.06, 23.11, 37.42],
-        [9.57, 12.17, 19.29, 32.32],
-        [8.53, 10.95, 17.67, 30.13],
-        [7.92, 10.23, 16.72, 28.85],
-        [7.51, 9.75, 16.08, 27.98],
-        [7.21, 9.40, 15.62, 27.35],
-        [6.98, 9.14, 15.26, 26.86],
-        [6.80, 8.92, 14.97, 26.47],
-        [6.65, 8.74, 14.73, 26.15],
-        [6.52, 8.59, 14.53, 25.87],
-        [6.41, 8.47, 14.36, 25.64],
-        [6.32, 8.36, 14.21, 25.44],
-        [6.24, 8.26, 14.08, 25.26],
-        [6.16, 8.17, 13.96, 25.10],
-        [6.10, 8.10, 13.86, 24.96],
-        [6.04, 8.03, 13.77, 24.83],
-        [5.99, 7.96, 13.68, 24.71],
-        [5.94, 7.91, 13.60, 24.60],
-        [5.89, 7.85, 13.53, 24.50],
-        [5.85, 7.80, 13.46, 24.41],
-        [5.81, 7.76, 13.40, 24.33],
-        [5.78, 7.72, 13.35, 24.25],
-        [5.74, 7.68, 13.29, 24.18],
-        [5.71, 7.64, 13.24, 24.11],
-        [5.68, 7.61, 13.20, 24.05],
-        [5.66, 7.57, 13.15, 23.98],
-        [5.63, 7.54, 13.11, 23.93],
-        [5.61, 7.51, 13.07, 23.87],
-        [5.58, 7.49, 13.04, 23.82],
-        [5.56, 7.46, 13.00, 23.77],
-    ];
-
-    /// `Ŵ2 = I_K`なら`K_eff = K`で、臨界値は論文の公表値(小数第2位)に一致する。
-    #[test]
-    fn patnaik_critical_values_reproduce_table_1_of_the_paper() {
-        let xs = [10.0 / 3.0, 5.0, 10.0, 20.0];
-        for (row, published) in TABLE_1.iter().enumerate() {
-            let k = row + 1;
-            for (x, expected) in xs.iter().zip(published) {
-                let (df, cv) = patnaik_critical_value(&vec![1.0; k], *x, 0.05).unwrap();
-                assert!((df - k as f64).abs() < 1e-12);
-                assert!(
-                    (cv - expected).abs() <= 0.0051,
-                    "K={k} x={x}: {cv} vs published {expected}"
-                );
-            }
-        }
-    }
-
-    /// 固有値(3, 1)の`Ŵ2`: `tr = 4`、`tr(Ŵ2²) = 10`、`λ_max = 3`なので、`x = 10`で
-    /// `K_eff = 16·21/(10 + 20·4·3) = 1.344`。臨界値の期待値はscipyの`ncx2.ppf`。
-    #[test]
-    fn effective_degrees_of_freedom_and_critical_value_follow_the_formula() {
-        let (df, cv) = patnaik_critical_value(&[3.0, 1.0], 10.0, 0.05).unwrap();
-        close(df, 1.344, 1e-12);
-        close(cv, 21.295336706396494, 1e-9);
-        let (df, cv) = patnaik_critical_value(&[3.0, 1.0], 3.0, 0.05).unwrap();
-        close(df, 1.3658536585365855, 1e-12);
-        close(cv, 10.219559398553013, 1e-9);
-        // 固有値のスケールには依らない。
-        let (df_scaled, cv_scaled) = patnaik_critical_value(&[300.0, 100.0], 10.0, 0.05).unwrap();
-        close(df_scaled, 1.344, 1e-12);
-        close(cv_scaled, 21.295336706396494, 1e-9);
-    }
-
-    /// 任意の半正定値の`Ŵ2`で`1 ≤ K_eff ≤ K`。
-    #[test]
-    fn effective_degrees_of_freedom_lies_between_one_and_the_number_of_instruments() {
-        let spectra: [&[f64]; 4] = [
-            &[1.0, 1.0, 1.0],
-            &[10.0, 1.0, 0.1],
-            &[5.0, 0.0, 0.0],
-            &[2.0, 1.0, 1.0, 0.5],
-        ];
-        for eigenvalues in spectra {
-            for x in [0.0, 3.0, 10.0, 20.0] {
-                let (df, _) = patnaik_critical_value(eigenvalues, x, 0.05).unwrap();
-                assert!(
-                    df >= 1.0 - 1e-12 && df <= eigenvalues.len() as f64 + 1e-12,
-                    "{df}"
-                );
-            }
-        }
-        assert!(patnaik_critical_value(&[0.0, 0.0], 10.0, 0.05).is_none());
-    }
-
-    /// 等分散なら`F_eff`はCragg-Donaldの`F`、`K_eff`は操作変数の数。
-    #[test]
-    fn classical_effective_f_equals_cragg_donald() {
-        for (endog, exog, z) in [small(), large(3), large(4)] {
-            for n_absorbed in [0, 1, 3] {
-                let cd = cragg_donald(&endog, &exog, &z, n_absorbed).unwrap();
-                let result = effective_f(
-                    &endog,
-                    &exog,
-                    &z,
-                    n_absorbed,
-                    ScoreCovariance::Classical,
-                    0.05,
-                )
-                .unwrap();
-                close(result.statistic, cd, 1e-10);
-                for cv in result.simplified_tsls {
-                    close(cv.effective_df, z.ncols() as f64, 1e-10);
-                }
-            }
-        }
-    }
-
-    /// 操作変数が1個なら`Ŵ2`はスカラーで、`F_eff`は頑健な`t²`(Kleibergen-PaapのWald F)に一致する
-    /// (独立に書いた統計量どうしの照合)。
-    #[test]
-    fn with_one_instrument_it_equals_the_kleibergen_paap_wald_f() {
-        let order: Vec<usize> = (0..240).collect();
-        let groups = clusters(240, 12);
-        let (endog, exog, z) = large(4);
-        let z1 = column(&z, 0);
-        let covariances = [
-            ScoreCovariance::Classical,
-            ScoreCovariance::Hc(HcVariant::Hc0),
-            ScoreCovariance::Hc(HcVariant::Hc1),
-            ScoreCovariance::Hc(HcVariant::Hc2),
-            ScoreCovariance::Hc(HcVariant::Hc3),
-            ScoreCovariance::Cluster(&groups),
-            ScoreCovariance::Hac {
-                lags: 4,
-                order: &order,
-            },
-        ];
-        for cov in covariances {
-            let kp = kleibergen_paap(&endog, &exog, &z1, 0, cov)
-                .unwrap()
-                .rk_wald_f
-                .unwrap();
-            let eff = effective_f(&endog, &exog, &z1, 0, cov, 0.05).unwrap();
-            close(eff.statistic, kp, 1e-9);
-            for cv in eff.simplified_tsls {
-                close(cv.effective_df, 1.0, 1e-12);
-            }
-        }
-    }
-
-    /// 異分散のデータでは、ロバスト版の`K_eff`は`K`より小さくなる。
-    #[test]
-    fn robust_effective_degrees_of_freedom_falls_below_the_number_of_instruments() {
-        let (endog, exog, z) = large(4);
-        let eff = effective_f(
-            &endog,
-            &exog,
-            &z,
-            0,
-            ScoreCovariance::Hc(HcVariant::Hc1),
-            0.05,
-        )
-        .unwrap();
-        for cv in eff.simplified_tsls {
-            assert!(
-                cv.effective_df < 4.0 - 1e-6 && cv.effective_df >= 1.0,
-                "{}",
-                cv.effective_df
-            );
-        }
-    }
-
-    /// `τ`が小さい(バイアスに厳しい)ほど臨界値は大きく、`α`が小さいほど大きい。
-    #[test]
-    fn critical_values_increase_with_stricter_thresholds_and_levels() {
-        let (endog, exog, z) = large(4);
-        let cov = ScoreCovariance::Hc(HcVariant::Hc1);
-        let at = |alpha| effective_f(&endog, &exog, &z, 0, cov, alpha).unwrap();
-        let (loose, strict) = (at(0.10), at(0.05));
-        for window in strict.simplified_tsls.windows(2) {
-            assert!(window[0].critical_value > window[1].critical_value);
-            assert!(window[0].tau < window[1].tau);
-        }
-        for (a, b) in loose.simplified_tsls.iter().zip(strict.simplified_tsls) {
-            assert!(b.critical_value > a.critical_value);
-            assert_eq!(a.x, b.x);
-        }
-        assert_eq!(strict.n_instruments, 4);
-        assert_eq!(strict.alpha, 0.05);
-        let taus: Vec<f64> = strict.simplified_tsls.iter().map(|c| c.tau).collect();
-        assert_eq!(taus, BIAS_THRESHOLDS);
-        for cv in strict.simplified_tsls {
-            close(cv.x, 1.0 / cv.tau, 1e-15);
-        }
-    }
-
-    /// 列のスケール・操作変数の正則な線形結合・行の並べ替えで、統計量も臨界値も変わらない。
-    #[test]
-    fn it_is_invariant_to_scaling_recombination_and_row_order() {
-        let (endog, exog, z) = large(4);
-        let groups = clusters(240, 12);
-        let endog_scaled = Mat::from_fn(240, 1, |i, _| *endog.get(i, 0) * 1000.0);
-        let exog_scaled = Mat::from_fn(240, 2, |i, j| *exog.get(i, j) * [3.0, 1e-3][j]);
-        let z_mixed = Mat::from_fn(240, 4, |i, j| match j {
-            0 => *z.get(i, 0) * 50.0 + *z.get(i, 1) - 2.0 * *z.get(i, 2),
-            1 => *z.get(i, 1) * 0.01,
-            2 => *z.get(i, 2) + 0.5 * *z.get(i, 0),
-            _ => *z.get(i, 3) - *z.get(i, 1),
-        });
-        for cov in [
-            ScoreCovariance::Classical,
-            ScoreCovariance::Hc(HcVariant::Hc3),
-            ScoreCovariance::Cluster(&groups),
-        ] {
-            let base = effective_f(&endog, &exog, &z, 0, cov, 0.05).unwrap();
-            let other = effective_f(&endog_scaled, &exog_scaled, &z_mixed, 0, cov, 0.05).unwrap();
-            close(other.statistic, base.statistic, 1e-8);
-            for (a, b) in other.simplified_tsls.iter().zip(base.simplified_tsls) {
-                close(a.effective_df, b.effective_df, 1e-8);
-                close(a.critical_value, b.critical_value, 1e-8);
-            }
-        }
-        // 行の並べ替え(HC・クラスターは行の並びに依らない)。
-        let rows: Vec<usize> = (0..240).map(|i| (i * 7 + 3) % 240).collect();
-        let permute = |m: &Mat<f64>| Mat::from_fn(240, m.ncols(), |i, j| *m.get(rows[i], j));
-        let labels: Vec<String> = rows.iter().map(|&r| format!("g{:03}", r / 12)).collect();
-        let permuted_groups = GroupCodes::from_labels_without_keys(&labels);
-        let a = effective_f(
-            &endog,
-            &exog,
-            &z,
-            0,
-            ScoreCovariance::Cluster(&groups),
-            0.05,
-        )
-        .unwrap();
-        let b = effective_f(
-            &permute(&endog),
-            &permute(&exog),
-            &permute(&z),
-            0,
-            ScoreCovariance::Cluster(&permuted_groups),
-            0.05,
-        )
-        .unwrap();
-        close(b.statistic, a.statistic, 1e-10);
-    }
-
-    /// 個体ダミーを外生変数に入れた計算(`n_absorbed = 0`)と、個体ごとに平均除去して吸収した個体の数を
-    /// `n_absorbed`で渡した計算は一致する(Frisch-Waugh-Lovell)。
-    #[test]
-    fn dummies_in_the_regressors_equal_the_demeaned_data_with_absorbed_parameters() {
-        let (endog, exog, z) = large(4);
-        let groups = clusters(240, 12);
-        let order: Vec<usize> = (0..240).collect();
-        let demean = |m: &Mat<f64>| {
-            Mat::from_fn(240, m.ncols(), |i, j| {
-                let start = i / 12 * 12;
-                *m.get(i, j) - (start..start + 12).map(|r| *m.get(r, j)).sum::<f64>() / 12.0
-            })
-        };
-        let x = column(&exog, 1);
-        let dummies = Mat::from_fn(240, 21, |i, j| {
-            if j < 20 {
-                f64::from(u8::from(i / 12 == j))
-            } else {
-                *x.get(i, 0)
-            }
-        });
-        let (endog_w, x_w, z_w) = (demean(&endog), demean(&x), demean(&z));
-        for cov in [
-            ScoreCovariance::Classical,
-            ScoreCovariance::Hc(HcVariant::Hc0),
-            ScoreCovariance::Hc(HcVariant::Hc1),
-            ScoreCovariance::Cluster(&groups),
-            ScoreCovariance::Hac {
-                lags: 4,
-                order: &order,
-            },
-        ] {
-            let with_dummies = effective_f(&endog, &dummies, &z, 0, cov, 0.05).unwrap();
-            let within = effective_f(&endog_w, &x_w, &z_w, 20, cov, 0.05).unwrap();
-            close(within.statistic, with_dummies.statistic, 1e-8);
-            for (a, b) in within
-                .simplified_tsls
-                .iter()
-                .zip(with_dummies.simplified_tsls)
-            {
-                close(a.effective_df, b.effective_df, 1e-8);
-                close(a.critical_value, b.critical_value, 1e-8);
-            }
-        }
-    }
-
-    #[test]
-    fn it_is_undefined_when_the_statistic_cannot_be_formed() {
-        let (endog, exog, z) = small();
-        let classical = ScoreCovariance::Classical;
-        let eff = effective_f;
-        // 内生変数が2個・0個、操作変数が0個。
-        let two = Mat::from_fn(12, 2, |i, j| {
-            *endog.get(i, 0) * [1.0, 2.0][j] + j as f64 * (i as f64)
-        });
-        assert!(eff(&two, &exog, &z, 0, classical, 0.05).is_none());
-        assert!(eff(&Mat::<f64>::zeros(12, 0), &exog, &z, 0, classical, 0.05).is_none());
-        assert!(eff(&endog, &exog, &Mat::<f64>::zeros(12, 0), 0, classical, 0.05).is_none());
-        // 水準が範囲外。
-        for alpha in [0.0, 1.0, -0.1, f64::NAN] {
-            assert!(eff(&endog, &exog, &z, 0, classical, alpha).is_none());
-        }
-        // 自由度が残らない(12 − 3 − 2 − 7 = 0)。
-        assert!(eff(&endog, &exog, &z, 7, classical, 0.05).is_none());
-        // HC2・HC3は吸収したパラメータがあると未定義。
-        for variant in [HcVariant::Hc2, HcVariant::Hc3] {
-            let cov = ScoreCovariance::Hc(variant);
-            assert!(eff(&endog, &exog, &z, 1, cov, 0.05).is_none());
-            assert!(eff(&endog, &exog, &z, 0, cov, 0.05).is_some());
-        }
-        // 操作変数が外生変数の線形結合・操作変数どうしが共線。
-        let in_span = Mat::from_fn(12, 3, |i, j| {
-            if j == 0 {
-                *exog.get(i, 1) * 2.0 + 1.0
-            } else {
-                *z.get(i, j)
-            }
-        });
-        assert!(eff(&endog, &exog, &in_span, 0, classical, 0.05).is_none());
-        let collinear = Mat::from_fn(12, 3, |i, j| {
-            if j == 2 {
-                *z.get(i, 0) * 3.0
-            } else {
-                *z.get(i, j)
-            }
-        });
-        assert!(eff(&endog, &exog, &collinear, 0, classical, 0.05).is_none());
-        // 一次段階が完全フィット。
-        let perfect = Mat::from_fn(12, 1, |i, _| {
-            2.0 * *z.get(i, 0) - *z.get(i, 1) + *exog.get(i, 1)
-        });
-        assert!(eff(&perfect, &exog, &z, 0, classical, 0.05).is_none());
-        // 非有限値。
-        let mut nan_endog = endog.clone();
-        *nan_endog.get_mut(3, 0) = f64::NAN;
-        assert!(eff(&nan_endog, &exog, &z, 0, classical, 0.05).is_none());
-        // クラスターが1つ・行数の合わないクラスター・時間順。
-        let one = GroupCodes::from_labels_without_keys(&vec!["a".to_string(); 12]);
-        assert!(eff(&endog, &exog, &z, 0, ScoreCovariance::Cluster(&one), 0.05).is_none());
-        let short = [0usize, 1, 2];
-        assert!(
-            eff(
-                &endog,
-                &exog,
-                &z,
-                0,
-                ScoreCovariance::Hac {
-                    lags: 1,
-                    order: &short
-                },
-                0.05
-            )
-            .is_none()
-        );
-    }
-
-    /// 実装と別の道筋の手計算(K=4、異分散): 外生変数の偏回帰は正規方程式、直交正規化は対称平方根
-    /// `Q^{-1/2} = V Λ^{-1/2} V'`、共分散は定義どおりの和。生のスケールのまま与える。
-    #[test]
-    fn it_matches_a_direct_computation_with_a_symmetric_square_root() {
-        use faer::prelude::Solve;
-        let (endog, exog, z) = large(4);
-        let (n, k) = (240usize, 4usize);
-        let n_f = n as f64;
-        let partial_out = |m: &Mat<f64>| {
-            let beta = (exog.transpose() * &exog)
-                .partial_piv_lu()
-                .solve(exog.transpose() * m);
-            m - &exog * beta
-        };
-        let (y, zt) = (partial_out(&endog), partial_out(&z));
-        let q = Mat::from_fn(k, k, |a, b| {
-            (0..n).map(|i| *zt.get(i, a) * *zt.get(i, b)).sum::<f64>() / n_f
-        });
-        let eigen = q.self_adjoint_eigen(Side::Lower).unwrap();
-        let (values, vectors) = (eigen.S().column_vector(), eigen.U());
-        let inv_root = Mat::<f64>::from_fn(k, k, |a, b| {
-            (0..k)
-                .map(|c| *vectors.get(a, c) * *vectors.get(b, c) / values.get(c).sqrt())
-                .sum::<f64>()
-        });
-        let u = &zt * &inv_root;
-        let pi: Vec<f64> = (0..k)
-            .map(|a| (0..n).map(|i| *u.get(i, a) * *y.get(i, 0)).sum::<f64>() / n_f)
-            .collect();
-        let e: Vec<f64> = (0..n)
-            .map(|i| *y.get(i, 0) - (0..k).map(|a| *u.get(i, a) * pi[a]).sum::<f64>())
-            .collect();
-        let pi_sq: f64 = pi.iter().map(|p| p * p).sum();
-
-        // 共分散`V2 = c/n² · meat`を定義どおりに作り、`F_eff`と`K_eff`を比べる。
-        let groups = clusters(n, 12);
-        let l = (k + 2) as f64;
-        let hc0_meat = Mat::<f64>::from_fn(k, k, |a, b| {
-            (0..n)
-                .map(|i| e[i] * e[i] * *u.get(i, a) * *u.get(i, b))
-                .sum::<f64>()
-        });
-        let cluster_meat = Mat::from_fn(k, k, |a, b| {
-            (0..20)
-                .map(|g| {
-                    let sum = |c: usize| {
-                        (12 * g..12 * g + 12)
-                            .map(|i| *u.get(i, c) * e[i])
-                            .sum::<f64>()
-                    };
-                    sum(a) * sum(b)
-                })
-                .sum()
-        });
-        let cluster_c = 20.0 / 19.0 * (n_f - 1.0) / (n_f - l);
-        for (covariance, meat, c) in [
-            (ScoreCovariance::Hc(HcVariant::Hc0), &hc0_meat, 1.0),
-            (ScoreCovariance::Cluster(&groups), &cluster_meat, cluster_c),
-        ] {
-            let w2 = Mat::from_fn(k, k, |a, b| c * *meat.get(a, b) / n_f);
-            let trace: f64 = (0..k).map(|a| *w2.get(a, a)).sum();
-            let expected_f = pi_sq / (trace / n_f);
-            let eigenvalues = w2.self_adjoint_eigenvalues(Side::Lower).unwrap();
-            let (expected_df, expected_cv) =
-                patnaik_critical_value(&eigenvalues, 10.0, 0.05).unwrap();
-
-            let result = effective_f(&endog, &exog, &z, 0, covariance, 0.05).unwrap();
-            close(result.statistic, expected_f, 1e-9);
-            close(result.simplified_tsls[1].effective_df, expected_df, 1e-9);
-            close(result.simplified_tsls[1].critical_value, expected_cv, 1e-9);
-        }
-    }
-
-    #[test]
-    fn psd_eigenvalues_clamps_rounding_noise_and_rejects_indefinite_matrices() {
-        let diagonal = |a: f64, b: f64| {
-            Mat::from_fn(2, 2, |i, j| {
-                if i != j {
-                    0.0
-                } else if i == 0 {
-                    a
-                } else {
-                    b
-                }
-            })
-        };
-        assert_eq!(
-            psd_eigenvalues(&diagonal(1.0, -1e-14)).map(|v| v[0].max(v[1])),
-            Some(1.0)
-        );
-        let clamped = psd_eigenvalues(&diagonal(1.0, -1e-14)).unwrap();
-        assert!(clamped.iter().all(|v| *v >= 0.0));
-        assert!(psd_eigenvalues(&diagonal(1.0, -0.5)).is_none());
-        assert!(psd_eigenvalues(&diagonal(0.0, 0.0)).is_none());
-        assert!(psd_eigenvalues(&diagonal(f64::NAN, 1.0)).is_none());
-    }
-
-    /// 自由度が残らないモデルは、自由度を使わないHC0でも未定義(Cragg-Donald・Kleibergen-Paapと同じ)。
-    #[test]
-    fn a_model_without_residual_degrees_of_freedom_is_undefined_for_every_covariance() {
-        let (endog, exog, z) = small();
-        // n = 12, K = 3, k_exog = 2: n_absorbed = 7 で n_params = n。
-        for cov in [
-            ScoreCovariance::Classical,
-            ScoreCovariance::Hc(HcVariant::Hc0),
-            ScoreCovariance::Hc(HcVariant::Hc1),
-        ] {
-            assert!(effective_f(&endog, &exog, &z, 7, cov, 0.05).is_none());
-            assert!(effective_f(&endog, &exog, &z, 6, cov, 0.05).is_some());
-        }
-    }
-
-    #[test]
-    fn infinite_inputs_and_unusable_lags_are_undefined() {
-        let (endog, exog, z) = small();
-        let classical = ScoreCovariance::Classical;
-        let mut infinite = endog.clone();
-        *infinite.get_mut(2, 0) = f64::INFINITY;
-        assert!(effective_f(&infinite, &exog, &z, 0, classical, 0.05).is_none());
-        let mut neg_infinite = z.clone();
-        *neg_infinite.get_mut(5, 1) = f64::NEG_INFINITY;
-        assert!(effective_f(&endog, &exog, &neg_infinite, 0, classical, 0.05).is_none());
-        let order: Vec<usize> = (0..12).collect();
-        let hac = |lags| ScoreCovariance::Hac {
-            lags,
-            order: &order,
-        };
-        assert!(effective_f(&endog, &exog, &z, 0, hac(11), 0.05).is_some());
-        assert!(effective_f(&endog, &exog, &z, 0, hac(12), 0.05).is_none());
-    }
-
-    /// 完全フィットの境界は、Cragg-Donald・Kleibergen-Paapと同じ基準(`1 − R²`が約1.4e-14)。
-    #[test]
-    fn the_perfect_fit_boundary_matches_cragg_donald() {
-        let (_, exog, z) = small();
-        let noise = [
-            0.2, -0.5, 0.1, 0.4, -0.3, 0.6, -0.2, 0.05, -0.45, 0.3, 0.15, -0.1,
-        ];
-        for (scale, expect_some) in [(1e-5, true), (1e-9, false)] {
-            let endog = Mat::from_fn(12, 1, |i, _| {
-                2.0 * *z.get(i, 0) - *z.get(i, 1) + *exog.get(i, 1) + scale * noise[i]
-            });
-            let eff = effective_f(&endog, &exog, &z, 0, ScoreCovariance::Classical, 0.05);
-            let cd = cragg_donald(&endog, &exog, &z, 0);
-            assert_eq!(eff.is_some(), expect_some, "scale={scale}");
-            assert_eq!(cd.is_some(), expect_some, "scale={scale}");
-        }
-    }
-
-    /// `Ŵ2`が特異(クラスター数が操作変数の数より少ない)でも、トレースと固有値で定義できる。
-    #[test]
-    fn a_singular_covariance_still_gives_a_value() {
-        let (endog, exog, z) = small();
-        let labels: Vec<String> = (0..12).map(|i| ["a", "b"][i / 6].to_string()).collect();
-        let two = GroupCodes::from_labels_without_keys(&labels);
-        let eff = effective_f(&endog, &exog, &z, 0, ScoreCovariance::Cluster(&two), 0.05).unwrap();
-        assert!(eff.statistic.is_finite() && eff.statistic > 0.0);
-        for cv in eff.simplified_tsls {
-            assert!(cv.effective_df >= 1.0 && cv.effective_df <= 3.0);
-        }
-    }
-}
+mod tests;

@@ -386,7 +386,7 @@ FEIVの前に、FE・IVの拡張をどこまで済ませるかを整理した。
 - #373・#374・#375・#379・#388: 参照パッケージ（plmのwithin IV、fixestの`fitstat`、`linearmodels.IVGMM`）の
   記述を直すコメントを投稿済み。
 
-## 9. 進捗（2026-11-06時点）
+## 9. 進捗（2026-11-07時点）
 
 ### 9.1 先行して決める事項は決定済み
 
@@ -459,17 +459,21 @@ C統計量は事後診断のメソッド、`first_stage()`は`Computed`変種、
   fixestの`kpr`は参照にならない。`n_absorbed > 0`のHC2/HC3は今は`None`（吸収した効果のレバレッジを含まないため。FE-2SLSでKPを
   hc2/hc3で出すなら、FEのレバレッジ（`1/T_i`込み）を`ScoreCovariance`に渡す形を足す）。
 
-- **#365（MOP有効F、エンジンのみ。単純版は実装済み・未コミット。一般化版は未実装）**: `shared/effective_f.rs`（`effective_f`・
-  `patnaik_critical_value`）、`shared/score_covariance.rs`（KPから共分散の選択を取り出して共有）、`shared/noncentral_chi_squared.rs`、
-  `iv/common/weak_instruments.rs`（`compute_effective_f`）。決定事項: 内生変数1個だけ（2個以上は`None`）、LIMLは実装しない、
-  臨界値は単純版TSLSを先に、一般化版（`B_TSLS`の最大化。`y`が要る）を続けて同じIssueで足す。論文のTable 1の120セルを再現済み。
-  オラクルは別セッションで`mop-oracle-spec.md`に沿って`benchmark/iv/references/`に実装中（ado由来のコードは使わない）。
-  一般化版の実装後に、オラクルの値の表と突き合わせる。`Ŵ2`が特異のときの扱い（KPは`None`、有効Fは値を返す）は#366で決める。
+- **#365（MOP有効F、エンジンのみ。単純版は`f725458f`でコミット済み。一般化版は実装済み・未コミット）**: `shared/effective_f.rs`
+  （`effective_f`・`tsls_bias_bound`・`patnaik_critical_value`）、`shared/score_covariance.rs`（KPから共分散の選択を取り出して共有）、
+  `shared/noncentral_chi_squared.rs`、`iv/common/weak_instruments.rs`（`compute_effective_f`）。決定事項: 内生変数1個だけ
+  （2個以上は`None`）、LIMLは実装しない、一般化版（`B_TSLS`の最大化。`y`が要る）は同じIssueで足す（実装済み）。論文のTable 1の
+  120セルと同次分散の公表値（8.53・12.27）を再現。別セッションが論文の式だけから書いたPythonオラクル
+  （`mop-oracle-spec.md`、`benchmark/iv/references/`）と26ケースで1e-14以内に一致（Rustの回帰テストは代表の17ケースを1e-9で固定）。
+  `Ŵ2`が特異のときの扱い（KPは`None`、有効Fは値を返す）は#366で決める。
 
 ### 9.3 push済みのコミット
 
 `1bf01e91`（決定事項）、`91a76a9d`（#628 A 手順1）、`8d8d8dc8`（A 手順2）、`c1f13b84`（進捗）、`1631e728`（#628 B）、
 `5075ca28`（GMMコアの継ぎ目。#628はクローズ済み）、続けて#363のコミット（`git log`で確認）。
+
+追加（2026-11-06〜07）: `9581fe26`（#364 KP。push済み）、`f725458f`（#365 単純版。**未push**）、続く一般化版のコミット（**未push**。`git log`で確認）。
+#364はクローズ済み。#365は一般化版のコミット後も、オラクルのレビューと突き合わせが残るため**まだ開いている**。
 
 ### 9.4 この後の順序（5.3の実装順）
 
@@ -505,3 +509,50 @@ C統計量は事後診断のメソッド、`first_stage()`は`Computed`変種、
 - **一時スクリプト**（リポジトリ外、`/tmp/claude-1000/-workspaces-econometricsmodels/a59ac130-80bd-4651-8271-18b321bf492f/scratchpad/`）:
   `snapshot.py`（IV/GMM/FE/RE/OLS/Tobit/悪条件176ケース）・`compare_snap.py`・`sy/`（Stock-Yogo表の抽出・検証）。失われたら作り直す。
 - **コミット手順**: 署名はホスト端末の確認が要る。署名に失敗したら止まって報告する（再試行・回避はしない）。
+
+### 9.6 #365の現状と次の作業（compact用のメモ。2026-11-07）
+
+**状態**: エンジン側は完了（単純版`f725458f`、一般化版は続くコミット）。engineテスト1266件・clippy・fmtは通っている。pytest全件は未実行
+（engineとengine_pybindへの追加のみ）。#365へのコメントとクローズ、pushは未実施（利用者の指示待ち）。
+
+**実装の要点**（詳細は`docs/spec/iv-spec.md`3.4.3、`engine/src/iv/CLAUDE.md`）:
+- `shared/effective_f.rs`: `effective_f(Y, X, Z, n_absorbed, ScoreCovariance, alpha, y_dep: Option)`。`y_dep`を渡すと一般化版TSLS
+  （`B_TSLS`の最大化）も出す。`β`の格子は`sinh`の2通り（`β₀`と、`tr S1`の最小点`β*`まわりの幅`δ`）。**`β*`まわりの格子は落とさない**
+  （誤差がほぼ比例する強い内生性で、鋭い山を取りこぼして`B_TSLS`が9%過小になった）。
+- `shared/score_covariance.rs`（KPと共有）、`shared/noncentral_chi_squared.rs`、`iv/common/weak_instruments.rs`（`compute_effective_f`）。
+- テストは`effective_f/tests.rs`（ハブ）＋`tests/{bias_bound,critical_values,invariance,reference,undefined}.rs`。`reference.rs`に、
+  独立オラクルの代表17ケースを相対差1e-9で固定。オラクルとの突き合わせは26ケースで相対差1e-14以内（実測の最大は約8e-15）。
+- 論文のTable 1の120セルと、同次分散の公表値（`τ=0.10`・`α=0.05`で`K=3`が8.53、`K=30`が12.27）を再現。
+
+**独立オラクル（別セッション）**:
+- 仕様書は`mop-oracle-spec.md`（コミット済み）。実装は`benchmark/iv/references/mop_oracle.py`・`mop_oracle_cases.py`・
+  `mop_ivdiag_compare.py`・`run_ivdiag_eff_f.R`、値の表は`docs/planning/specs/mop-oracle-values.md`、`tests/iv/test_mop_oracle.py`、
+  `tests/support/_tolerances_iv.py`、`pyproject.toml`・`uv.lock`（scipy明示）。**これらは別セッションがステージ済みで、コミットはその
+  セッションが行う**（こちらのコミットはパス指定で、これらを含めない）。
+- **クリーンルームの規則**: オラクルを書くセッションは`weakivtest.ado`（権利が留保されている。Stata原典）を一度も見ていない。
+  こちらのセッションは読んでしまったため、`ado`のコピーは削除済み。オラクルのレビューは**コード品質に限り**（規約・重複・テスト構造・
+  `benchmark/`の流儀・仕様書8章の確認項目の過不足）、**計算手順（最大化の方法など）の変更提案はしない**。指摘は、ado由来の内容
+  （手順・定数・構造）が混ざっていないかをこちらで確認してから、実装セッションへ渡す。レビュー自体はネットワークに出ない
+  サブエージェントで行い、adoを取得しない指示を明記する。
+- **オラクルのレビューで最優先に確認すること**: 誤差がほぼ比例する強い内生性のケース（`min tr S1 / tr W1`が1e-3〜1e-8）で、オラクルの
+  `B_TSLS`の最大化（`beta`軸の粗い格子＋局所探索と、`angle`の周期関数の最大化）が鋭い山を取りこぼしていないか。値の表の26ケースは
+  このケースを含まない。こちらの実装は、これで9%過小になる取りこぼしを起こしていた（修正済み）。
+- ivDiagとの比較結果（`mop_ivdiag_compare.py`・値の表の末尾）は、こちらではまだ読んでいない。
+
+**#366・#367の前に決めること**: 上の9.5の各項目。有効Fの`Ŵ2`が特異なときの扱い（利用者は「#366で方針を決め、必要ならengine側を修正する」
+で合意。レビュー後の意見は、論文が`Ŵ`の正定値を仮定しているので、KPに揃える方向を勧める）、`alpha`の検証の置き場所、
+内生変数が2個以上のときの`None`の理由の見せ方。#367ではivDiagの恒久的な導入（`Dockerfile`の`install_version`、
+`check_r_updates.yml`）を行う（ivDiagは`eff_F`の統計量だけで臨界値は返さない。lfeの自由度補正の規約が本実装の`n_absorbed`と
+合うかを実測する）。
+
+**その他の保留**:
+- **READMEの権利に関する注意書き**: 利用者が追加に賛成。文面案は会話で提示済み（"Attribution and Rights"節。連絡先は
+  private vulnerability reporting。無条件の削除の約束や「訴訟」の語は避ける）。連絡先の経路（private reportingのみか、メールも併記か）と
+  文面の承認待ち。Stock-Yogoの表とMOPのTable 1は、出典つきで転記した公表値。
+- **フィクスチャのデータのライセンス**: Wooldridgeデータセット等の外部データの出所とライセンス表記がREADME・ドキュメントに揃っているかの
+  確認を提案済み（未着手）。
+- **ルートCLAUDE.mdの3章**: `shared/`の列挙に、`instrumental_variables.rs`・`gmm.rs`・`weak_instruments.rs`・`stock_yogo.rs`に加えて
+  `kleibergen_paap.rs`・`score_covariance.rs`・`effective_f.rs`・`noncentral_chi_squared.rs`が載っていない（編集は利用者の承認が要る）。
+- **次の順序**: #365のオラクルのレビュー→（実装セッションが修正・コミット）→#365のクローズ→#522→#442→#366/#367/#368/#369→FE-2SLS→FE-GMM。
+- **一時ファイル**（リポジトリ外、scratchpad）: `mop/mop.pdf`・`mop/mop.txt`（論文のテキスト。公開資料）、`kp_ref.py`・`kp_big.py`（KPの
+  linearmodels基準値）、`pylib/`（pypdf）、`rust_dump.txt`（突き合わせ用の一時ダンプ）。失われたら作り直す。

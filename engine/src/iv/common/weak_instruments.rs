@@ -112,7 +112,7 @@ fn score_covariance<'a>(
     })
 }
 
-/// `cov_type`に頑健なMontiel Olea-Pflueger有効F統計量と、単純版TSLSのPatnaik臨界値を計算する。
+/// `cov_type`に頑健なMontiel Olea-Pflueger有効F統計量と、単純版・一般化版TSLSのPatnaik臨界値を計算する。
 ///
 /// 内生変数が1個のときだけ定義される(2個以上は`None`)。`cov_type`の扱いと`None`の条件は
 /// [`compute_kleibergen_paap`]と同じ規約(`Classical`の有効FはCragg-Donaldに一致する)。`alpha`は
@@ -130,6 +130,7 @@ pub fn compute_effective_f(input: &IvInput, cov_type: &CovType, alpha: f64) -> O
         0,
         covariance,
         alpha,
+        Some(input.y()),
     )
 }
 
@@ -456,6 +457,37 @@ mod tests {
             );
             assert_eq!(eff.n_instruments, 1);
         }
+    }
+
+    /// 一般化版は`IvInput`の被説明変数で作られる。等分散なら被説明変数に依らず`B_TSLS = |1 − 2/K|`、
+    /// 頑健な共分散では被説明変数の誘導形が入るので、被説明変数を渡さない単純版とは一般に違う値になる。
+    #[test]
+    fn effective_f_uses_the_dependent_variable_for_the_generalized_critical_values() {
+        let input = input(1, true);
+        let classical = compute_effective_f(&input, &CovType::Classical, 0.05).unwrap();
+        assert!((classical.bias_bound.unwrap() - 1.0 / 3.0).abs() < 1e-9);
+        let tsls = classical.tsls.unwrap();
+        assert!((tsls[1].critical_value - 8.53).abs() < 0.0051);
+
+        // 頑健な共分散: `input.y()`を使った直接の呼び出しと一致し、別の被説明変数では値が変わる。
+        let hc1 = compute_effective_f(&input, &CovType::Hc1, 0.05).unwrap();
+        let direct = |y: &faer::Mat<f64>| {
+            effective_f(
+                input.x_endog(),
+                input.x_exog(),
+                input.instruments(),
+                0,
+                ScoreCovariance::Hc(HcVariant::Hc1),
+                0.05,
+                Some(y),
+            )
+            .unwrap()
+        };
+        assert_eq!(hc1.bias_bound, direct(input.y()).bias_bound);
+        let other_y = faer::Mat::from_fn(12, 1, |i, _| (i as f64 * 0.8).cos());
+        let bound = hc1.bias_bound.unwrap();
+        assert!((direct(&other_y).bias_bound.unwrap() - bound).abs() > 1e-6);
+        assert!(hc1.tsls.is_some());
     }
 
     #[test]

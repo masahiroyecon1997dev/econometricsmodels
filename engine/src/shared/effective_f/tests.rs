@@ -91,6 +91,26 @@ pub(super) fn close(actual: f64, expected: f64, tolerance: f64) {
     );
 }
 
+pub(super) fn blocks(w: &Mat<f64>, k: usize) -> (Mat<f64>, Mat<f64>, Mat<f64>) {
+    let block = |r: usize, c: usize| Mat::from_fn(k, k, |a, b| *w.get(r * k + a, c * k + b));
+    (block(0, 0), block(0, 1), block(1, 1))
+}
+
+/// 式だけで決まる`Ŵ = A'A`(10行・K=3)。`A = [2.5·A_x + scale·A_e, A_x]`で、被説明変数の誘導形の誤差が
+/// 内生変数のものとほぼ比例する。オラクルと同じ式で作る。
+pub(super) fn nearly_proportional_w(scale: f64) -> Mat<f64> {
+    let a_x = |i: usize, j: usize| (1.7 * (i + 1) as f64 * (j + 1) as f64 + 0.3 * j as f64).sin();
+    let a_e = |i: usize, j: usize| (2.3 * (i + 1) as f64 + 1.1 * ((j + 1) * (j + 1)) as f64).cos();
+    let a = Mat::from_fn(10, 6, |i, col| {
+        if col < 3 {
+            2.5 * a_x(i, col) + scale * a_e(i, col)
+        } else {
+            a_x(i, col - 3)
+        }
+    });
+    a.transpose() * &a
+}
+
 pub(super) fn column(m: &Mat<f64>, j: usize) -> Mat<f64> {
     Mat::from_fn(m.nrows(), 1, |i, _| *m.get(i, j))
 }

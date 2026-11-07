@@ -262,7 +262,9 @@ fn tsls_bias_bound(w1: &Mat<f64>, w12: &Mat<f64>, w2: &Mat<f64>) -> Option<f64> 
     if !(tr1.is_finite() && tr1 > 0.0 && tr12.is_finite() && tr2.is_finite() && tr2 > 0.0) {
         return None;
     }
-    // `tr(S1(β)) = min_tr_s1 + tr(W2)(β − β*)²`、`β* = tr(W12)/tr(W2)`。この形なら`β*`の近くで桁落ちしない。
+    // `tr(S1(β)) = min_tr_s1 + tr(W2)(β − β*)²`、`β* = tr(W12)/tr(W2)`。`β`ごとに`tr(S1)`を展開して引き算すると
+    // `β*`の近くで桁落ちするので、この形で評価する。`min_tr_s1`自体は`Ŵ`の丸め誤差を`1/ratio`倍に増幅するが
+    // (`ratio = min_tr_s1/tr(W1)`)、`B_TSLS`への影響はおよそ`1e-18/ratio`で、しきい値の1e-12でも1e-6程度にとどまる。
     let min_tr_s1 = tr1 - tr12 * tr12 / tr2;
     let beta_star = tr12 / tr2;
     if min_tr_s1 <= DEGENERATE_BENCHMARK_TOLERANCE * tr1 {

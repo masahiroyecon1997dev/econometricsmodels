@@ -20,11 +20,6 @@ fn random_psd(k: usize, seed: u64) -> Mat<f64> {
     a.transpose() * &a
 }
 
-fn blocks(w: &Mat<f64>, k: usize) -> (Mat<f64>, Mat<f64>, Mat<f64>) {
-    let block = |r: usize, c: usize| Mat::from_fn(k, k, |a, b| *w.get(r * k + a, c * k + b));
-    (block(0, 0), block(0, 1), block(1, 1))
-}
-
 /// 実装と別のコードで書いた総当たり: `β`を`center`からの距離が対数間隔の細かい格子で動かし、定義どおりに
 /// `max_λ |tr(S12) − 2λ| / √(tr(S1)·tr(S2))`を評価する。
 fn brute_force_bias_bound(w: &Mat<f64>, k: usize, steps: usize, center: f64) -> f64 {

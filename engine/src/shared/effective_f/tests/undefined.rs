@@ -191,3 +191,16 @@ fn a_singular_covariance_still_gives_a_value() {
         assert!(cv.effective_df >= 1.0 && cv.effective_df <= 3.0);
     }
 }
+
+/// `min tr(S1)/tr(W1)`が1.5e-13(オラクルの`scale = 1e-6`)は、`DEGENERATE_BENCHMARK_TOLERANCE`(1e-12)の
+/// 内側なので未定義(`None`)とする(オラクルは値を返すが、この実装は仕様としてしきい値以下を未定義にする。
+/// 1.5e-9が定義されることは、オラクルとの照合のテストで確かめている)。しきい値は固定で、桁落ちを検出するものではない。
+#[test]
+fn a_reduced_form_below_the_degeneracy_threshold_has_no_bias_bound() {
+    let bound = |scale: f64| {
+        let w = nearly_proportional_w(scale);
+        let (w1, w12, w2) = blocks(&w, 3);
+        tsls_bias_bound(&w1, &w12, &w2)
+    };
+    assert!(bound(1e-6).is_none());
+}

@@ -528,3 +528,78 @@ fn small_y() -> Mat<f64> {
         endog - 0.5 * d2 + 0.1 * SMALL_X[i] + SMALL_U1[i]
     })
 }
+
+/// `Ŵ2 = A_x'A_x`は`scale`によらない。独立実装のオラクルの出力(降順)。
+const NEARLY_PROPORTIONAL_W2_EIGENVALUES: [f64; 3] =
+    [6.143221039650903, 5.788179326174888, 4.801157909289455];
+
+/// 独立実装のオラクルの出力(誤差がほぼ比例する`Ŵ`)。`ratio`は`min tr(S1)/tr(W1)`(概数。上限の確認だけに使う)、
+/// `tolerance`は照合の相対許容誤差。`Ŵ`の要素に1e-16の相対ノイズを載せたときの`B_TSLS`の変化はおよそ
+/// `1e-18 / ratio`(`scale = 1e-2`で4e-14、`1e-4`で5e-10)で、`sin`/`cos`の実装差(1 ulp)で`Ŵ`が動く分の余裕を取る。
+/// `general`の`(有効自由度, 臨界値)`はτ = 0.05, 0.10, 0.20, 0.30の一般化版(`α = 0.05`)。
+struct NearlyProportionalCase {
+    scale: f64,
+    ratio: f64,
+    tolerance: f64,
+    bound: f64,
+    general: [(f64, f64); 4],
+}
+
+const NEARLY_PROPORTIONAL_CASES: [NearlyProportionalCase; 2] = [
+    NearlyProportionalCase {
+        scale: 1e-2,
+        ratio: 1.498e-5,
+        tolerance: 1e-9,
+        bound: 0.42721529292073007,
+        general: [
+            (2.736249944464222, 16.0814675910672),
+            (2.747543879854669, 10.13347054898915),
+            (2.7671371742263857, 6.831455147291523),
+            (2.783548290032974, 5.6146532630268995),
+        ],
+    },
+    NearlyProportionalCase {
+        scale: 1e-4,
+        ratio: 1.498e-9,
+        tolerance: 1e-7,
+        bound: 0.4272152929790336,
+        general: [
+            (2.736249944462602, 16.081467592625643),
+            (2.7475438798517358, 10.133470549846376),
+            (2.7671371742215114, 6.831455147772618),
+            (2.783548290026801, 5.614653263372654),
+        ],
+    },
+];
+
+/// 誤差がほぼ比例する`Ŵ`で、`B_TSLS`と一般化版の臨界値がオラクルと一致する(許容誤差は各ケースの`tolerance`)。
+/// `β*`の近くの鋭い山を取りこぼすと`B_TSLS`が小さくなり、臨界値が下がる。固有値は本番と同じ`psd_eigenvalues`の経路。
+#[test]
+fn a_nearly_proportional_reduced_form_matches_the_independent_implementation() {
+    for case in &NEARLY_PROPORTIONAL_CASES {
+        let w = nearly_proportional_w(case.scale);
+        let (w1, w12, w2) = blocks(&w, 3);
+        let tr = |m: &Mat<f64>| (0..3).map(|a| *m.get(a, a)).sum::<f64>();
+        let ratio = (tr(&w1) - tr(&w12) * tr(&w12) / tr(&w2)) / tr(&w1);
+        assert!(
+            (ratio - case.ratio).abs() <= 1e-2 * case.ratio,
+            "scale={}: ratio {ratio} vs {}",
+            case.scale,
+            case.ratio
+        );
+
+        let eigenvalues = psd_eigenvalues(&w2).unwrap();
+        let mut descending = eigenvalues.clone();
+        descending.sort_by(|a, b| b.total_cmp(a));
+        for (actual, expected) in descending.iter().zip(NEARLY_PROPORTIONAL_W2_EIGENVALUES) {
+            close(*actual, expected, 1e-12);
+        }
+
+        let (bound, values) = generalized_critical_values(&w, 3, &eigenvalues, 0.05).unwrap();
+        close(bound, case.bound, case.tolerance);
+        for (value, (df, cv)) in values.iter().zip(case.general) {
+            close(value.effective_df, df, case.tolerance);
+            close(value.critical_value, cv, case.tolerance);
+        }
+    }
+}

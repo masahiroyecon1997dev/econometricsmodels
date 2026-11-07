@@ -464,7 +464,7 @@ C統計量は事後診断のメソッド、`first_stage()`は`Computed`変種、
   `shared/noncentral_chi_squared.rs`、`iv/common/weak_instruments.rs`（`compute_effective_f`）。決定事項: 内生変数1個だけ
   （2個以上は`None`）、LIMLは実装しない、一般化版（`B_TSLS`の最大化。`y`が要る）は同じIssueで足す（実装済み）。論文のTable 1の
   120セルと同次分散の公表値（8.53・12.27）を再現。別セッションが論文の式だけから書いたPythonオラクル
-  （`mop-oracle-spec.md`、`benchmark/iv/references/`）と26ケースで1e-14以内に一致（Rustの回帰テストは代表の17ケースを1e-9で固定）。
+  （`mop-oracle-spec.md`、`benchmark/iv/references/`）と26ケースで1e-14以内に一致（Rustの回帰テストは代表の17ケースと、誤差がほぼ比例する`Ŵ`の2ケースを1e-9で固定）。
   `Ŵ2`が特異のときの扱い（KPは`None`、有効Fは値を返す）は#366で決める。
 
 ### 9.3 push済みのコミット
@@ -472,7 +472,7 @@ C統計量は事後診断のメソッド、`first_stage()`は`Computed`変種、
 `1bf01e91`（決定事項）、`91a76a9d`（#628 A 手順1）、`8d8d8dc8`（A 手順2）、`c1f13b84`（進捗）、`1631e728`（#628 B）、
 `5075ca28`（GMMコアの継ぎ目。#628はクローズ済み）、続けて#363のコミット（`git log`で確認）。
 
-追加（2026-11-06〜07）: `9581fe26`（#364 KP。push済み）、`f725458f`（#365 単純版。**未push**）、続く一般化版のコミット（**未push**。`git log`で確認）。
+追加（2026-11-06〜07）: `9581fe26`（#364 KP）、`f725458f`（#365 単純版）、`abcf32f2`（#365 一般化版）、`28f8a375`（オラクル。実装セッションのコミット）。ここまで**push済み**。
 #364はクローズ済み。#365は一般化版のコミット後も、オラクルのレビューと突き合わせが残るため**まだ開いている**。
 
 ### 9.4 この後の順序（5.3の実装順）
@@ -520,12 +520,11 @@ C統計量は事後診断のメソッド、`first_stage()`は`Computed`変種、
   （`B_TSLS`の最大化）も出す。`β`の格子は`sinh`の2通り（`β₀`と、`tr S1`の最小点`β*`まわりの幅`δ`）。**`β*`まわりの格子は落とさない**
   （誤差がほぼ比例する強い内生性で、鋭い山を取りこぼして`B_TSLS`が9%過小になった）。
 - `shared/score_covariance.rs`（KPと共有）、`shared/noncentral_chi_squared.rs`、`iv/common/weak_instruments.rs`（`compute_effective_f`）。
-- テストは`effective_f/tests.rs`（ハブ）＋`tests/{bias_bound,critical_values,invariance,reference,undefined}.rs`。`reference.rs`に、
-  独立オラクルの代表17ケースを相対差1e-9で固定。オラクルとの突き合わせは26ケースで相対差1e-14以内（実測の最大は約8e-15）。
+- テストは`effective_f/tests.rs`（ハブ）＋`tests/{bias_bound,critical_values,invariance,reference,undefined}.rs`。`reference.rs`に独立オラクルの代表17ケースを相対差1e-9で固定し、誤差がほぼ比例する`Ŵ`の2ケース（`scale`=1e-2は1e-9、1e-4は1e-7。`Ŵ`への1e-16のノイズで`B_TSLS`が約`1e-18/ratio`動くため）を固定。`scale`=1e-6（`min trS1/trW1`≈1.5e-13）は固定のしきい値1e-12の内側で`None`になるのが仕様（`undefined.rs`で固定）で、オラクルの値は固定しない。オラクルとの突き合わせは26ケースで相対差1e-14以内（実測の最大は約8e-15）。
 - 論文のTable 1の120セルと、同次分散の公表値（`τ=0.10`・`α=0.05`で`K=3`が8.53、`K=30`が12.27）を再現。
 
 **独立オラクル（別セッション）**:
-- 仕様書は`mop-oracle-spec.md`（コミット済み）。実装は`benchmark/iv/references/mop_oracle.py`・`mop_oracle_cases.py`・
+- （9.7で更新: 値の表は`benchmark/iv/references/mop_oracle_values.md`へ移った）仕様書は`mop-oracle-spec.md`（コミット済み）。実装は`benchmark/iv/references/mop_oracle.py`・`mop_oracle_cases.py`・
   `mop_ivdiag_compare.py`・`run_ivdiag_eff_f.R`、値の表は`docs/planning/specs/mop-oracle-values.md`、`tests/iv/test_mop_oracle.py`、
   `tests/support/_tolerances_iv.py`、`pyproject.toml`・`uv.lock`（scipy明示）。**これらは別セッションがステージ済みで、コミットはその
   セッションが行う**（こちらのコミットはパス指定で、これらを含めない）。
@@ -556,3 +555,19 @@ C統計量は事後診断のメソッド、`first_stage()`は`Computed`変種、
 - **次の順序**: #365のオラクルのレビュー→（実装セッションが修正・コミット）→#365のクローズ→#522→#442→#366/#367/#368/#369→FE-2SLS→FE-GMM。
 - **一時ファイル**（リポジトリ外、scratchpad）: `mop/mop.pdf`・`mop/mop.txt`（論文のテキスト。公開資料）、`kp_ref.py`・`kp_big.py`（KPの
   linearmodels基準値）、`pylib/`（pypdf）、`rust_dump.txt`（突き合わせ用の一時ダンプ）。失われたら作り直す。
+
+### 9.7 オラクルのレビューの結果と回帰テストの固定（2026-11-07）
+
+- **オラクルのレビュー（完了）**: 最優先の「誤差がほぼ比例する」ケースは問題なし（`min trS1/trW1`が1e-9まで、`β*`中心の対数20万点の
+  総当たりと`beta`・`angle`が1e-10以内で一致。1e-11では総当たりより最大7.5e-8（`beta`）・5.8e-9（`angle`）小さい。原因は`trS1`の展開式の
+  `trS1`の展開式の桁落ち）。コード品質の指摘は、実装セッションが修正してコミット済み（`28f8a375`。回帰ケース追加・テストの高速化・値の表の移動
+  （`benchmark/iv/references/mop_oracle_values.md`）ほか）。#365のオラクル側は終わり。
+- **Rustの回帰テストの追加（未コミット）**: `effective_f/tests/reference.rs`に、誤差がほぼ比例する`Ŵ`の2ケース（`scale`=1e-2・1e-4、
+  `min trS1/trW1`は1.5e-5・1.5e-9）でオラクルと`B_TSLS`・一般化版の臨界値を照合（許容誤差は1e-9と1e-7）。`scale`=1e-6（≈1.5e-13）は
+  `DEGENERATE_BENCHMARK_TOLERANCE`（1e-12）の内側で`None`になる仕様を`undefined.rs`で固定。engineテスト1268件・clippy・fmtは通っている。
+- **`/code-review`（7件）の対応**: 実測（`Ŵ`の要素に1e-16の相対ノイズを載せる）で、`B_TSLS`の変化は約`1e-18/ratio`（`ratio`=`min trS1/trW1`。
+  1.5e-9で5e-10、1.5e-13で3e-6）。しきい値1e-12は据え置き（`Ŵ`の丸め誤差の影響は1e-6程度で、臨界値に効かない）。対応: ①しきい値の
+  コメントと説明文を実測に合わせた（桁落ちを検出するものではなく固定のしきい値）、②固有値は本番と同じ`psd_eigenvalues`の経路、
+  ③1e-4のケースの許容誤差を1e-7に緩めた（`sin`/`cos`の1 ulp差の余裕）、④rust-reviewerの指摘で、オラクル照合を`reference.rs`、`None`の判定を`undefined.rs`へ移し、共有ヘルパー（`blocks`・`nearly_proportional_w`）をハブに置いた、
+  ⑤固有値の定数を1つにまとめ、`ratio`は記録した値との照合にした。
+- **残り**: コミット（`test(engine): ...`） → #365へコメントしてクローズ → push。

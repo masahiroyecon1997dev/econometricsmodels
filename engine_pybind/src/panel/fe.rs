@@ -45,7 +45,7 @@
 //! `validate_role_non_empty`が弾くのと同じ構図）。
 
 use crate::shared::errors::{guard, internal_error};
-use engine::panel::fe::{FeCovType, FeEffects, FeEstimator, FeInput, FixedEffects};
+use engine::panel::fe::{FeAbsorption, FeCovType, FeEffects, FeEstimator, FeInput, FixedEffects};
 use polars::prelude::DataFrame;
 use pyo3::IntoPyObjectExt;
 use pyo3::prelude::*;
@@ -65,7 +65,8 @@ use crate::shared::column_extraction::{
 use crate::shared::mat_conversion::{mat_to_rows, mat_to_vec};
 use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
-    extract_strict_float, extract_strict_opt_column, extract_strict_opt_int, extract_strict_text,
+    extract_strict_float, extract_strict_int, extract_strict_opt_column, extract_strict_opt_int,
+    extract_strict_text,
 };
 
 /// Estimation options for FE (fixed effects panel regression).
@@ -77,6 +78,8 @@ use crate::shared::option_values::{
 /// - Standard errors: `cov_type`; with `"cluster"` also `cluster`; with
 ///   `"dk"` also `dk_time` (required) and `dk_bandwidth`.
 /// - Confidence intervals: `confidence_level`.
+/// - Removing the fixed effects of an unbalanced two-way model: `tol`,
+///   `max_iter`.
 // 各フィールドの意味・既定値の根拠は`docs/spec/panel-common.md`。
 // module/from_py_objectの理由は`OLSOptions`と同じ（`engine_pybind/src/linear/ols/options.rs`参照）。
 #[pyclass(from_py_object, module = "econometricsmodels._lib")]
@@ -118,6 +121,23 @@ pub struct FEOptions {
     /// Specifying it with any other `cov_type` raises `ValidationError`.
     #[pyo3(get)]
     pub dk_bandwidth: Option<i64>,
+
+    /// Convergence tolerance of the alternating projections that remove the fixed
+    /// effects of a two-way model on an **unbalanced** panel (a balanced panel and a
+    /// one-way model are computed in closed form, so they ignore it). A pass stops
+    /// when the largest group mean it subtracts is at most `tol` times the size of the
+    /// column, so the tolerance is relative to the within-group variation. Must be a
+    /// positive finite number. Defaults to 1e-12. A loose `tol` also coarsens the
+    /// detection of regressors that are collinear with the fixed effects.
+    #[pyo3(get)]
+    pub tol: f64,
+
+    /// Maximum number of passes of the alternating projections (see `tol`), from 1 to
+    /// 10000. Defaults to 10000. A panel whose entities and periods are only thinly
+    /// connected needs many passes; if the limit is reached, `ComputationError` is
+    /// raised.
+    #[pyo3(get)]
+    pub max_iter: i64,
 }
 
 crate::shared::pickle::impl_pickle_state!(FEOptions {
@@ -126,6 +146,8 @@ crate::shared::pickle::impl_pickle_state!(FEOptions {
     cluster,
     dk_time,
     dk_bandwidth,
+    tol,
+    max_iter,
 });
 
 impl FEOptions {
@@ -150,6 +172,8 @@ impl FEOptions {
         cluster = None,
         dk_time = None,
         dk_bandwidth = None,
+        tol = None,
+        max_iter = 10000,
     ))]
     fn new(
         #[pyo3(from_py_with = crate::shared::option_values::cov_type_arg)] cov_type: String,
@@ -159,13 +183,18 @@ impl FEOptions {
         #[pyo3(from_py_with = crate::shared::option_values::dk_bandwidth_arg)] dk_bandwidth: Option<
             i64,
         >,
+        #[pyo3(from_py_with = crate::shared::option_values::tol_arg)] tol: Option<f64>,
+        #[pyo3(from_py_with = crate::shared::option_values::max_iter_arg)] max_iter: i64,
     ) -> Self {
+        let defaults = FeAbsorption::default();
         Self {
             cov_type,
             confidence_level,
             cluster,
             dk_time,
             dk_bandwidth,
+            tol: tol.unwrap_or(defaults.tol),
+            max_iter,
         }
     }
 
@@ -178,6 +207,18 @@ impl FEOptions {
     #[setter]
     fn set_dk_bandwidth(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
         self.dk_bandwidth = extract_strict_opt_int(value, "dk_bandwidth")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_tol(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.tol = extract_strict_float(value, "tol")?;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_max_iter(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.max_iter = extract_strict_int(value, "max_iter")?;
         Ok(())
     }
 
@@ -202,12 +243,14 @@ impl FEOptions {
     fn __repr__(&self) -> String {
         format!(
             "FEOptions(cov_type={}, confidence_level={}, cluster={}, \
-             dk_time={}, dk_bandwidth={})",
+             dk_time={}, dk_bandwidth={}, tol={}, max_iter={})",
             self.cov_type.py_repr(),
             self.confidence_level.py_repr(),
             self.cluster.py_repr(),
             self.dk_time.py_repr(),
-            self.dk_bandwidth.py_repr()
+            self.dk_bandwidth.py_repr(),
+            self.tol.py_repr(),
+            self.max_iter.py_repr()
         )
     }
 }
@@ -635,8 +678,18 @@ fn fit_frame(
         cov_type_name,
     } = build_fe_input(df, y, x, effects.clone(), options)?;
 
-    let estimator = FeEstimator::fit(input, fe_effects, cov_type, options.confidence_level)
-        .map_err(panel_error_to_pyerr)?;
+    let absorption = FeAbsorption {
+        tol: options.tol,
+        max_iter: options.max_iter,
+    };
+    let estimator = FeEstimator::fit_with_absorption(
+        input,
+        fe_effects,
+        cov_type,
+        options.confidence_level,
+        &absorption,
+    )
+    .map_err(panel_error_to_pyerr)?;
     let group_counts = group_counts(estimator.input().n_entities(), estimator.n_periods());
 
     Ok(FEResult {
@@ -684,7 +737,7 @@ mod tests {
     /// `build_fe_input`のテスト全体で使う既定の`FEOptions`（`cov_type="cluster"`・
     /// `dk_time=None`）。フィールドごとに上書きして使う。
     fn default_options() -> FEOptions {
-        FEOptions::new("cluster".to_string(), 0.95, None, None, None)
+        FEOptions::new("cluster".to_string(), 0.95, None, None, None, None, 10000)
     }
 
     #[test]

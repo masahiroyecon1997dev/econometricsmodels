@@ -439,20 +439,93 @@ def test_singleton_time_raises():
         FE(df, y="y", x=["x1", "x2"], effects=["entity", "time"]).fit()
 
 
-def test_unbalanced_two_way_raises():
+def test_unbalanced_two_way_is_accepted():
     """`fe_unbalanced_two_way.csv`（先頭1行だけ欠落、n_obs=239 for
-    40×6=240）は2-way FE要求時に`PanelError::UnbalancedPanelForTwoWay`。
-    """
+    40×6=240）は2-way FEで推定できる（組合せが欠ける不均衡パネルは交互射影で
+    計算する）。"""
     df = pl.read_csv(DATA_DIR / "fe_unbalanced_two_way.csv")
+    res = FE(df, y="y", x=["x1", "x2"], effects=["entity", "time"]).fit()
+    assert res.n_obs == 239
+
+
+def test_repeated_entity_time_pair_raises():
+    """同じ`(entity, time)`の組合せが複数の行にあるとき、不均衡パネルでも
+    `DUPLICATE_ENTITY_TIME_PAIR`。"""
+    df = pl.read_csv(DATA_DIR / "fe_unbalanced_two_way.csv")
+    repeated = pl.concat([df, df.slice(10, 1)])
+    row = df.row(10, named=True)
     with raises_error(
-        ErrorCode.PANEL_NOT_BALANCED_FOR_TWO_WAY,
-        n_obs=239,
+        ErrorCode.DUPLICATE_ENTITY_TIME_PAIR,
         first_column="entity",
-        n_first_groups=40,
+        first_group=str(row["entity"]),
         second_column="time",
-        n_second_groups=6,
+        second_group=str(row["time"]),
     ):
-        FE(df, y="y", x=["x1", "x2"], effects=["entity", "time"]).fit()
+        FE(repeated, y="y", x=["x1", "x2"], effects=["entity", "time"]).fit()
+
+
+def test_absorption_not_converged_raises():
+    """不均衡な2-wayで交互射影が`max_iter`までに収束しないと
+    `ABSORPTION_NOT_CONVERGED`。"""
+    df = pl.read_csv(DATA_DIR / "fe_unbalanced_two_way.csv")
+    with raises_error(ErrorCode.ABSORPTION_NOT_CONVERGED, n_sweeps=1):
+        FE(
+            df,
+            y="y",
+            x=["x1", "x2"],
+            effects=["entity", "time"],
+            options=FEOptions(max_iter=1),
+        ).fit()
+
+
+@pytest.mark.parametrize("tol", [0.0, -1e-9, float("inf"), float("nan")])
+def test_absorption_tol_must_be_positive_and_finite(fe_dataset, tol):
+    with raises_error(
+        ErrorCode.TOLERANCE_NOT_POSITIVE_FINITE,
+        option="tol",
+    ):
+        our_fit(fe_dataset, options=FEOptions(tol=tol))
+
+
+@pytest.mark.parametrize("max_iter", [0, -1, 10_001])
+def test_absorption_max_iter_must_be_in_range(fe_dataset, max_iter):
+    with raises_error(
+        ErrorCode.MAX_ITER_OUT_OF_RANGE,
+        value=max_iter,
+        min=1,
+        max=10_000,
+    ):
+        our_fit(fe_dataset, options=FEOptions(max_iter=max_iter))
+
+
+def test_leverage_covariance_of_an_unbalanced_two_way_model_has_a_size_limit():
+    """組合せが欠ける2-wayのHC2/HC3は、水準の少ない方の効果の水準数の2乗の
+    密な行列を解くので、水準数に上限（3000）がある。"""
+    n = 3001
+    entity = [i for i in range(n) for _ in range(3)]
+    time = [(i + k) % n for i in range(n) for k in range(3)]
+    values = [((7 * j) % 11) / 11.0 for j in range(3 * n)]
+    df = pl.DataFrame(
+        {
+            "entity": entity,
+            "time": time,
+            "y": values,
+            "x1": values[::-1],
+            "x2": [v * v for v in values],
+        }
+    )
+    with raises_error(
+        ErrorCode.LEVERAGE_DIMENSION_TOO_LARGE,
+        n_levels=n,
+        max_levels=3000,
+    ):
+        FE(
+            df,
+            y="y",
+            x=["x1", "x2"],
+            effects=["entity", "time"],
+            options=FEOptions(cov_type="hc2"),
+        ).fit()
 
 
 def test_zero_variance_after_demeaning_raises():

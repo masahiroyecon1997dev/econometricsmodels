@@ -252,7 +252,9 @@ These are in addition to the situations above.
 **FE**
 
 - A group (a level of a column of `effects`) with a single observation: a singleton entity or, in a two-way model, a singleton time period (`SINGLETON_GROUP`).
-- A two-way model on an unbalanced panel.
+- In a two-way model, the same (entity, time) pair in more than one row (`DUPLICATE_ENTITY_TIME_PAIR`). An unbalanced two-way panel is accepted.
+- `tol` not a positive finite number, or `max_iter` outside 1 to 10,000.
+- `cov_type="hc2"` or `"hc3"` in a two-way model on an unbalanced panel when the smaller of the two effects has more than 3,000 levels (`LEVERAGE_DIMENSION_TOO_LARGE`).
 - A regressor with no within-variation (constant over time within every entity).
 - The outcome has no variation left after the fixed effects are removed (constant within every entity, or in a two-way model fully explained by the entity and time effects).
 - Too few degrees of freedom.
@@ -261,7 +263,7 @@ These are in addition to the situations above.
 
 - The outcome is constant within every entity.
 - A group with a single observation: a singleton entity or, in a two-way model (two columns in `effects`), a singleton time period (`SINGLETON_GROUP`).
-- A two-way model on an unbalanced panel.
+- A two-way model on an unbalanced panel (`PANEL_NOT_BALANCED_FOR_TWO_WAY`).
 - With `cov_type="cluster"`, too few clusters for the Hausman auxiliary regression (counting only the identified columns).
 - A time-invariant regressor is allowed, unlike in FE, and so is a regressor together with its entity or time mean (correlated random effects, Mundlak): the aliased columns of the between and Hausman auxiliary regressions are dropped and `hausman_df` counts the identified ones.
 - An unknown `variance_method`, or `variance_method="amemiya"` with a regressor that has no within variation (time-invariant; in a two-way model, varying in at most one dimension): use `"swamy_arora"` or `"wallace_hussain"`.
@@ -282,6 +284,7 @@ These are in addition to the situations above.
 | Uncensored interval too narrow | Tobit (`predict()`, `augment()`, `marginal_effects()` with `target="expected_uncensored"`) | With two-sided censoring, the interval between the bounds is narrower than 1% of the estimated `sigma`, so the model puts almost no probability on uncensored values and the expected value among them cannot be computed reliably. Use another `target`. |
 | Separation | Logit, Probit | Some combination of the regressors perfectly predicts the binary outcome, either for all observations (complete separation) or for a subset (quasi-complete separation, for example a dummy variable that equals 1 only when the outcome is 1). No finite maximum likelihood estimate exists, so the coefficients would diverge. It is detected exactly after the optimizer converges, whatever the sample size. Remove or combine the offending regressors, or add observations that break the separation. |
 | Non-convergence | IV (GMM) | The iterated GMM did not converge. |
+| Non-convergence of the alternating projections | FE (two-way model on an unbalanced panel) | The passes that remove the entity and time effects did not converge within `max_iter` (`ABSORPTION_NOT_CONVERGED`). Entities and periods that are only thinly connected (for example a chain in which each entity is seen in two neighbouring periods) need a number of passes that grows with the square of the chain length. Increase `tol`, or `max_iter` if it is below 10,000. |
 | Line search failed | Logit, Probit, Tobit | The optimizer's line search did not find an acceptable step within its limits (`LINE_SEARCH_FAILED`), typically with `solver="bfgs"` or `"lbfgs"` on a badly scaled or degenerate problem. Rescale the regressors, or try another solver. |
 | Separation check not completed | Logit, Probit | The check for separation could not be completed numerically (`SEPARATION_CHECK_FAILED`), so the absence of separation is not confirmed. Rescale the regressors or remove nearly collinear ones. With `raise_on_non_convergence=False` the result is returned with `converged=False`. |
 | Perfect fit | OLS, WLS, FE, RE, IV | The residuals are zero up to rounding, so the standard errors and the test statistics are not defined. Details are under the table. |
@@ -319,7 +322,7 @@ The absence of an error says nothing about the following. They are your responsi
 - **Instrument validity and strength.** In IV only the order condition (at least as many instruments as endogenous regressors) is checked up front. The rank condition is not, so irrelevant instruments may surface later as a singular first stage. The weak-instrument F statistic is reported without a verdict, and the over-identification test is `None` when the model is just identified.
 - **Stationarity, outliers and influential observations.**
 - **Near-separation.** Data that are close to, but not at, separation have a finite estimate, so they estimate without an error, although the standard errors can be very large. Only exact separation is an error.
-- **Panel structure beyond what the estimator needs.** A one-way FE model does not complain about unbalanced panels. Only the two-way models (FE and RE with two columns in `effects`) require a balanced panel, and they reject a repeated (entity, time) pair as an unbalanced panel.
+- **Panel structure beyond what the estimator needs.** FE accepts unbalanced panels, one-way and two-way, and a two-way FE model also accepts entities and periods that form several disconnected groups; it rejects a repeated (entity, time) pair. Only two-way RE requires a balanced panel (and also rejects a repeated pair).
 - **Numeric precision.** Numeric columns are converted to 64-bit floating point without a warning, so integers beyond 2^53 and decimals with many digits can lose precision. See [Accepted data](accepted-data.md#how-values-are-converted).
 
 ## Where to look next

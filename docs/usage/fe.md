@@ -33,7 +33,7 @@ FE has no `predict()`, `augment()`, or `summary()`. See [Options and results](..
 
 ## Two-way effects
 
-Pass two columns in `effects`, the entity first and the time period second, to add time effects as well as entity effects. The panel must be balanced: every entity observed in every period. The first column is also the default clustering column and the first key of `fixed_effects()`. The example panel below has six firms observed in six years and is used in the rest of this page.
+Pass two columns in `effects`, the entity first and the time period second, to add time effects as well as entity effects. The panel may be unbalanced (an entity need not be observed in every period); a repeated (entity, time) pair is rejected. The first column is also the default clustering column and the first key of `fixed_effects()`. The example panel below has six firms observed in six years and is used in the rest of this page.
 
 ```python
 from econometricsmodels import FEOptions

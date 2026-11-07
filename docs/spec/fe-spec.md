@@ -40,11 +40,12 @@ FE固有の内容のみを記載する。
   between回帰・最終回帰どちらも構造的にk=0にならないため無変更）。
 - 列名を受け取る引数は`effects`/`cluster`/`dk_time`のいずれも`_col`サフィックスを
   付けない（`y`/`x`と同じ規約）。`dk_time`は`cov_type="dk"`の値を接頭辞にした名前。
-- **2-wayはバランスパネルを必須とする**。`(effects[0], effects[1])`のユニークペア数が`n_obs`と一致しない
-  （重複・欠落がある）場合も含め`ValidationError`（`validate_balanced_panel`が
-  `n_obs == 個体数 * 時点数`のカウント一致だけでなくユニークペア数も検証する。ペアの
-  重複と欠落が相殺するケースを見逃さないため）。回避オプションは用意しない。1-wayは不均衡
-  パネルもv1から無条件でサポートする。
+- **2-wayは不均衡パネルも扱う**（組合せが欠けてよい）。同じ`(effects[0], effects[1])`が複数の行にある
+  場合は`ValidationError`（`DUPLICATE_ENTITY_TIME_PAIR`。`ensure_no_duplicate_entity_time_pairs`が、
+  重複と欠落が相殺して行数が`N × T`に一致する入力も見逃さない）。バランスパネルの判定は
+  重複が無い前提の`n_obs == 個体数 * 時点数`（`covers_every_combination`）。2-way REは従来どおり
+  バランスパネルを必須とし（`validate_balanced_panel`、`PANEL_NOT_BALANCED_FOR_TWO_WAY`）、これはREの
+  GLS変換が閉形式を前提にするため。1-wayは不均衡パネルもv1から無条件でサポートする。
 - **1-wayは個体と時点の組の重複を検証しない**。1-wayには時点の列が無く、組という概念自体が
   ないため（個体内の観測の並びと数だけが意味を持つ。同じ行が重複していても各行は独立な
   観測として扱う）。`cov_type="dk"`と`dk_time`を併用する場合も、重複する`(effects[0], dk_time)`は
@@ -121,11 +122,28 @@ polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）�
     `e_it = y_it - ȳ_i.`とすると、`(1/N)Σ_i e_it = ȳ_.t - (1/N)Σ_i ȳ_i. = ȳ_.t - ȳ..`
     （各エンティティの観測数がすべて`T`なので`(1/N)Σ_i ȳ_i. = ȳ..`が成り立つ）。`e_it`を
     timeでquasi-demeanすると`e_it - (ȳ_.t - ȳ..) = y_it - ȳ_i. - ȳ_.t + ȳ..`となり閉形式と一致する。
-    不均衡パネルでは`(1/N)Σ_i ȳ_i. ≠ ȳ..`となりうるためこの等式が成り立たず、2-wayを
-    不均衡パネルに適用してはならない（バランスパネルを必須にする理由）。
+    不均衡パネルでは`(1/N)Σ_i ȳ_i. ≠ ȳ..`となりうるためこの等式が成り立たない。
+- **不均衡な2-way**（全組合せがそろわない）は、entityとtimeの水準平均を交互に引く**交互射影**
+  （`shared/alternating_projections`）で、全ダミー変数への最小二乗の残差を求める。
+  - 収束判定は、1回の掃引で引く水準平均の絶対値の最大が`tol × 尺度`以下。尺度は第1掃引で水準を除いた後の
+    列の絶対値の最大で、水準の大きい列でもグループ内の変動に対する相対精度になる（下限は元の列の
+    最大値の`16ε`倍）。2掃引ごとにIrons–Tuck加速を入れる。上限は`max_iter`（1〜10000、既定10000）掃引で、
+    届かなければ`ABSORPTION_NOT_CONVERGED`（`ComputationError`）。つながりが細い鎖状のパネルは掃引回数が
+    鎖の長さの2乗に比例して増える（長さ20で約900、50で約6000、200で約86000）。
+  - 掃引で残る誤差は、隣り合う掃引の変化量の比`ρ`から`変化量 · ρ/(1−ρ)`と見積もり（`Projected::error_bound`）、
+    分散ゼロ・定数のy・完全適合の判定しきい値に足す（`column_is_zero_variance_with_noise`）。緩い`tol`はこの
+    検出も粗くする。
+  - 連結成分（水準を頂点、行を辺とするグラフ）が複数あっても傾きは識別される。自由度は成分の数によらず
+    `k + N + T − 1`（fixestとlinearmodelsの既定と同じ。ダミー行列のランクは成分の数だけ小さい）。
+  - HC2/HC3のレバレッジは、ダミーだけの回帰のレバレッジ（`dummy_leverage`）とwithin変換後のレバレッジの和。
+    ダミーのレバレッジは、水準の少ない方の効果の水準数`L`の密な行列`M + P_null`（`M = diag(N_t) − Σ_e c_e c_e'/n_e`、
+    `P_null`は連結成分の指示ベクトルの射影）を解いて求める（`O(nL + L³)`、`L ≤ 3000`、超えれば
+    `LEVERAGE_DIMENSION_TOO_LARGE`）。
+  - `fixed_effects()`は`fit`が保存した列ごとの効果から`effects(y) − Σβ̂_j effects(x_j)`を組み立て、連結成分ごとに
+    時間順で最初の時点を0にする（個体の効果にそのぶんを足す）。
 
-`FeEstimator::fit`のパイプラインは「singleton検出 → within変換（2-wayはバランスパネル検証を
-内包） → 自由度検証 → 分散ゼロ検出 → `least_squares`（Frisch-Waugh-Lovell定理により
+`FeEstimator::fit`のパイプラインは「打ち切り設定の検査 → singleton検出 → within変換（2-wayは重複する
+組合せの検査を内包） → 自由度検証 → 分散ゼロ検出 → `least_squares`（Frisch-Waugh-Lovell定理により
 within変換後の最小二乗点推定はFE推定量と数学的に一致） → `cov_type`別の共分散行列計算 →
 自由度調整後の統計量再計算」の順。`OlsEstimator`は経由しない（FEが使うのは`β̂`・残差・
 `(X̃'X̃)⁻¹`・適合度だけで、`cov_type`ごとの標準誤差・F検定はFE自身が計算し直すため）。
@@ -312,7 +330,11 @@ demeanしたR²」を3種とも定義すると誤る）:
 | `Common(CommonError)` | `CommonError`と同じ | `CommonError`と同じ |
 | `InsufficientDegreesOfFreedom` | `INSUFFICIENT_DEGREES_OF_FREEDOM`（`n_effects`は1-wayで個体数、2-wayで個体数+時点数-1） | `ValidationError` |
 | `SingletonGroup` | `SINGLETON_GROUP`（params: `argument`=`"effects"`・`column`・`group`。`column`は`effects`の該当要素の列名で、エンジンは`with_effect_names`で受け取り計算には使わない） | `ValidationError` |
-| `UnbalancedPanelForTwoWay` | `PANEL_NOT_BALANCED_FOR_TWO_WAY` | `ValidationError` |
+| `UnbalancedPanelForTwoWay` | `PANEL_NOT_BALANCED_FOR_TWO_WAY`（2-way REだけ） | `ValidationError` |
+| `DuplicateEntityTimePair` | `DUPLICATE_ENTITY_TIME_PAIR` | `ValidationError` |
+| `InvalidTol` / `InvalidMaxIter` | `TOLERANCE_NOT_POSITIVE_FINITE` / `MAX_ITER_OUT_OF_RANGE` | `ValidationError` |
+| `LeverageDimensionTooLarge` | `LEVERAGE_DIMENSION_TOO_LARGE`（不均衡な2-wayのHC2/HC3） | `ValidationError` |
+| `AbsorptionNotConverged` | `ABSORPTION_NOT_CONVERGED` | `ComputationError` |
 | `ZeroVarianceAfterDemeaning` | `REGRESSOR_NO_WITHIN_VARIATION` | `ValidationError` |
 | `OutcomeConstantWithinEntity` | `OUTCOME_CONSTANT_WITHIN_ENTITY` | `ValidationError` |
 | `WithinRegressionFailed { source: Common(PerfectFit) }` | `PERFECT_FIT`（`stage`は`WITHIN_REGRESSION`） | `ComputationError` |

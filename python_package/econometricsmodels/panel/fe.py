@@ -50,7 +50,8 @@ class FE:
         effects: List of one or two column names that define the fixed
             effects. The first is the entity (individual/panel unit)
             identifier; the optional second is the time period,
-            which makes the model two-way (balanced panels only). The
+            which makes the model two-way (an unbalanced panel is
+            estimated by alternating projections). The
             order matters: the first column is the default cluster key,
             and the first period of the second column (in time order)
             is the reference period of `fixed_effects()`. Swapping the
@@ -135,8 +136,8 @@ class FE:
                 - `cluster`, `dk_time` or `dk_bandwidth` is given with
                   a `cov_type` that does not use it, or
                   `cov_type="dk"` is requested without `dk_time`.
-                - A two-way model (two columns in `effects`) is fitted
-                  on an unbalanced panel.
+                - The same (entity, time) pair appears in more than one
+                  row of a two-way model.
                 - A group of a column in `effects` has a single
                   observation.
                 - An explanatory variable has zero variance after the
@@ -310,9 +311,7 @@ class FEResults:
     def n_groups(self) -> dict[str, int]:
         """Number of groups (unique values) of each column in
         `effects`, keyed by column name in the order given: one entry
-        for a one-way model, two for a two-way model. Two-way requires
-        a balanced panel, so the count of the second column equals the
-        number of observations per group of the first. For example
+        for a one-way model, two for a two-way model. For example
         `{"id": 3, "t": 2}`."""
         return self._raw.n_groups
 

@@ -97,6 +97,7 @@ MIGRATED_CODES: frozenset[str] = frozenset(
         ErrorCode.ABSORPTION_NOT_CONVERGED,
         ErrorCode.LEVERAGE_DIMENSION_TOO_LARGE,
         ErrorCode.EFFECTS_TOO_MANY,
+        ErrorCode.REGRESSOR_CONSTANT,
         ErrorCode.REGRESSOR_NO_WITHIN_VARIATION,
         ErrorCode.DK_PERIODS_TOO_FEW,
         ErrorCode.DK_PERIODS_NOT_ABOVE_COEFFICIENTS,

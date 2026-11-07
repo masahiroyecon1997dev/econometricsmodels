@@ -528,6 +528,34 @@ def test_leverage_covariance_of_an_unbalanced_two_way_model_has_a_size_limit():
         ).fit()
 
 
+def test_regressor_with_the_same_value_in_every_row_raises(fe_dataset):
+    """生の値が全て同じ説明変数は、固定効果を除く前に`REGRESSOR_CONSTANT`
+    （固定効果を除いた後の分散ゼロ`REGRESSOR_NO_WITHIN_VARIATION`とは別）。"""
+    df = fe_dataset.with_columns(x2=pl.lit(1.5))
+    with raises_error(ErrorCode.REGRESSOR_CONSTANT, column="x2"):
+        our_fit(df)
+
+
+def test_singleton_error_reports_how_many_rows_repeated_removal_would_drop():
+    """singletonグループを取り除くと新しいsingletonができる連鎖を含めて、落ちる行の総数を
+    `n_dropped_rows`に載せる（行は自動では落とさない）。"""
+    df = pl.DataFrame(
+        {
+            "entity": ["a", "a", "b", "b", "c"],
+            "time": [1, 2, 2, 3, 3],
+            "y": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "x1": [0.5, 1.5, 0.2, 2.2, 1.1],
+        }
+    )
+    with raises_error(
+        ErrorCode.SINGLETON_GROUP,
+        column="entity",
+        group="c",
+        n_dropped_rows=5,
+    ):
+        FE(df, y="y", x=["x1"], effects=["entity", "time"]).fit()
+
+
 def test_zero_variance_after_demeaning_raises():
     """`fe_zero_variance_regressor.csv`の`x_invariant`はエンティティ内で
     時間不変なため、within変換後に分散ゼロになり`PanelError::

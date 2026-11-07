@@ -43,7 +43,7 @@ Swamy-Arora分散成分推定の具体式、固定効果の復元等）は[`fe-s
     `effects[1]`は従来の`time`と同じ規則（時点のキー）。推定値と受け付ける入力を変えないため。
     規則の統一は3次元以上を扱うときに検討する。
   - エラーの`argument`は`"effects"`に統一し、どの列かは`column`で示す。`SINGLETON_GROUP`のparamsは
-    `{argument, column, group}`（`column`は`effects`の該当要素の列名。エンジンは`FeInput`/`ReInput`の
+    `{argument, column, group, n_dropped_rows}`（`column`は`effects`の該当要素の列名。エンジンは`FeInput`/`ReInput`の
     `with_effect_names`で列名を受け取り、計算には使わない）。
 - **命名規則**: 列名を受け取る引数は`effects`/`cluster`/`dk_time`のいずれも**`_col`サフィックスを
   付けない**（`y`/`x`/`weight`と同じ規約）。`dk_time`はDriscoll-Kraay型HACの時系列順序で、

@@ -486,8 +486,19 @@ def test_outcome_constant_within_every_entity(model, cov_type, df):
 
 
 @pytest.mark.parametrize("model", ["FE", "RE"])
-def test_a_globally_constant_outcome_is_constant_within_entity(model, df):
+def test_a_globally_constant_outcome_is_reported_as_constant(model, df):
+    """全ての行で同じ値のyは、固定効果を除く前に分かるので`OUTCOME_CONSTANT`。"""
     data = df.with_columns(y=pl.lit(4.0))
+    with raises_error(ErrorCode.OUTCOME_CONSTANT):
+        _fit(model, data)
+
+
+@pytest.mark.parametrize("model", ["FE", "RE"])
+def test_an_outcome_constant_within_every_entity_is_reported_as_such(
+    model, df
+):
+    """個体ごとには定数でも個体間で違うyは、固定効果を除くと変動が残らない。"""
+    data = df.with_columns(y=2.0 * pl.col("entity"))
     with raises_error(ErrorCode.OUTCOME_CONSTANT_WITHIN_ENTITY):
         _fit(model, data)
 
@@ -527,7 +538,7 @@ def test_the_regressor_check_comes_before_the_outcome_check_in_fe(df):
 
 def test_outcome_constant_within_entity_is_not_staged_in_re(df):
     """REの内部FEが報告するが、入力の事実なので文脈句（`stage`）は付けない。"""
-    data = df.with_columns(y=pl.lit(4.0))
+    data = df.with_columns(y=2.0 * pl.col("entity"))
     with pytest.raises(Exception) as info:
         RE(data, "y", ["x"], ["entity"]).fit()
     assert getattr(info.value, "code", None) == (

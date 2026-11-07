@@ -620,3 +620,44 @@ fixest（全`cov_type`）とlinearmodels（classical・HC1）の凍結フィク�
 - **残り**: FEの性能比較への不均衡シナリオの追加（`performance/compare_fe.py`）、singletonのエラーに連鎖の行数を足す件、定数列のエラーの2分類
   （#522のコメントの付帯項目。別Issueに分けるか要確認）、`fixed_effects()`のfixest `fixef`との比較（基準化が違うので和`α_i+γ_t`で比べる案）、
   #522のコメントとクローズ、push。
+
+**進捗（#522の付帯項目、同日）**: ①`SINGLETON_GROUP`に`n_dropped_rows`（取り除くことを繰り返したときに落ちる行の総数。2-wayは連鎖を含む。hintはpolarsのフィルタ例を
+出さず「連鎖が残るなら繰り返す」まで）、②定数列のエラーの2分類（生の値が全ての行で同じ説明変数は`REGRESSOR_CONSTANT`、同じ被説明変数は`OUTCOME_CONSTANT`、
+固定効果を除いた後に分散がなくなる場合は従来どおり`REGRESSOR_NO_WITHIN_VARIATION`・`OUTCOME_CONSTANT_WITHIN_ENTITY`。RE内部のFEも同じ）を実装。
+`fixed_effects()`の残差再現テスト（不均衡3シナリオ）も追加。engineテスト1318件・Python全11911件が通る。コミット前。
+- **完了**: #522はコミット・push・コメント・クローズ済み（9.9参照）。FE性能比較への不均衡シナリオは別Issueにした（9.9）。
+
+### 9.9 セッションclear用のメモ（2026-11-07 終了時点）
+
+**完了したこと**
+- #364（KP）・#365（MOP有効F。オラクルと26ケースで1e-14）・#522（不均衡な2-way FE）が完了・クローズ済み。いずれも`release/v0.10.0`にpush済み。
+- #522の最終形: 交互射影（`shared/alternating_projections`）、`FeAbsorption`（`FEOptions.tol`・`max_iter`）、重複ペアの検査、HC2/HC3のダミーのレバレッジ
+  （`panel/common/dummy_leverage.rs`）、`fixed_effects()`の成分ごとの基準化、`SINGLETON_GROUP`の`n_dropped_rows`、`REGRESSOR_CONSTANT`・`OUTCOME_CONSTANT`の分離。
+  fixest（全`cov_type`）とは最大4.4e-13で一致。Python全11911件・engine 1318件が通る。
+
+**次に進める内容（順序）**
+1. **#442（高次元固定効果、3次元以上）**: 着手前に5.4節の`PanelIndex`のK次元化（`Vec<GroupCodes>`＋列名、DKの時点キーは別）を決める。交互射影の核
+   （`GroupSystem`）はすでにK個のグループを受け取る。足りないのは、(a)K>2のHC2/HC3（`dummy_leverage`は2次元専用。K次元では密な行列が使えないので、
+   拒否するか別法を決める）、(b)`FEOptions`/APIの形（`effects`の列の数の上限、公開APIは別の形にする案がIssueにある）、(c)`fixed_effects()`のK次元の基準化。
+   singletonはエラーのまま（`n_dropped_rows`の連鎖計算は2次元まで。K次元に広げる）。
+2. **IV本体の残り**: #366（KP・CD・MOPのバインディング。`None`とエラーの設計、`Ŵ2`が特異なときの扱い（KPに揃える案）、`alpha`の検証の置き場所、
+   内生変数2個以上のときの理由の見せ方を先に決める）→#367（ivDiagの恒久導入＝`Dockerfile`の`install_version`と`check_r_updates.yml`、lfeの自由度の規約と
+   `n_absorbed`の対応を実測）→#368・#369（C統計量）。
+3. **FE-2SLS（#370〜#380）→FE-GMM（#381〜#388）**: #522の`GroupSystem`（列間で索引と連結成分を共有）が土台。FEIVは変換済み列を渡す内部経路を最初から設計する（5.4）。
+
+**注意書き**
+- コミットはパス指定で行う。署名はホストの端末でパスフレーズの確認が出る。Pythonを触ったら`uv run maturin develop`で入れ直してから`pytest tests`（約6〜7分）。
+  エラーコードを足したら`python tools/render_error_catalog.py`で`error_codes.py`・`docs/guide/error-codes.md`を再生成し、`tests/support/_errors.py`の`MIGRATED_CODES`に足す。
+- fixestで不均衡パネルを参照にするときは`fixef.tol`を厳しくする（既定の1e-6だと参照値が約5e-9ずれる。下限は2.2e-12）。
+- 鎖状のパネル（つながりが細い）は掃引回数が鎖の長さの2乗で増える。既定上限10000で`ABSORPTION_NOT_CONVERGED`になるのは仕様。
+- `FE`の`fixed_effects()`は`fit`が保存した列ごとの効果から作る（再射影しない）。
+- 別セッションがステージしていたファイルは無い（オラクルは`28f8a375`でコミット済み。値の表は`benchmark/iv/references/mop_oracle_values.md`）。
+
+**保留（利用者の判断待ち・未着手）**
+- READMEの「Attribution and Rights」注意書き（連絡先の経路と文面）。フィクスチャのデータ（Wooldridge等）のライセンス確認。
+- ルートCLAUDE.md 3章の`shared/`の列挙の更新（`instrumental_variables.rs`・`gmm.rs`・`weak_instruments.rs`・`stock_yogo.rs`・`kleibergen_paap.rs`・
+  `score_covariance.rs`・`effective_f.rs`・`noncentral_chi_squared.rs`・`alternating_projections`・`validation`系。編集は承認が要る）。
+- `docs/planning/specs/mop-oracle-spec.md`が履歴（`f725458f`）に入っていることの扱い。内容は論文の式とテストデータの定義で、weakivtest.adoの手順・定数は含まない
+  （ado名に触れるのは「見ない」という指示の部分だけ）。履歴の書き換えはしない方針を提案済み（要確認。9.9末尾参照）。
+- FE性能比較への不均衡シナリオ: `PerfAdapter.build_dataframe(n, k, seed)`が`method`を知らないため、ハーネス（`performance/_perf_harness.py`）の拡張が要る。
+  #522には含めず、英語で別Issueに起票する案を提示済み（**未起票**。利用者の承認待ち）。

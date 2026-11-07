@@ -158,7 +158,7 @@ Each bullet is a situation that raises a `ValidationError`.
 **Outcome**
 
 - In OLS, WLS and IV with an intercept, `y` has the same value in every row, up to rounding (`OUTCOME_CONSTANT`: there is nothing to explain; the test is the same relative one as for a regressor with no within-variation in FE). A model without an intercept may have a constant `y`.
-- FE and RE have their own check (`OUTCOME_CONSTANT_WITHIN_ENTITY`, see below). Logit and Probit report a constant `y` as complete separation (`SEPARATION_DETECTED`, a `ComputationError`), and Tobit as an optimizer that does not converge (`NOT_CONVERGED`, a `ComputationError`).
+- FE and RE report a `y` with the same value in every row as `OUTCOME_CONSTANT`, and a `y` that has no variation left after the fixed effects are removed as `OUTCOME_CONSTANT_WITHIN_ENTITY` (see below). Logit and Probit report a constant `y` as complete separation (`SEPARATION_DETECTED`, a `ComputationError`), and Tobit as an optimizer that does not converge (`NOT_CONVERGED`, a `ComputationError`).
 
 **Missing values**
 
@@ -251,18 +251,19 @@ These are in addition to the situations above.
 
 **FE**
 
-- A group (a level of a column of `effects`) with a single observation: a singleton entity or, in a two-way model, a singleton time period (`SINGLETON_GROUP`).
+- A group (a level of a column of `effects`) with a single observation: a singleton entity or, in a two-way model, a singleton time period (`SINGLETON_GROUP`). Singleton groups are never dropped automatically; the error gives `n_dropped_rows`, the number of rows that removing singleton groups repeatedly would drop (in a two-way model, dropping one can leave another group with a single row).
 - In a two-way model, the same (entity, time) pair in more than one row (`DUPLICATE_ENTITY_TIME_PAIR`). An unbalanced two-way panel is accepted.
 - `tol` not a positive finite number, or `max_iter` outside 1 to 10,000.
 - `cov_type="hc2"` or `"hc3"` in a two-way model on an unbalanced panel when the smaller of the two effects has more than 3,000 levels (`LEVERAGE_DIMENSION_TOO_LARGE`).
-- A regressor with no within-variation (constant over time within every entity).
-- The outcome has no variation left after the fixed effects are removed (constant within every entity, or in a two-way model fully explained by the entity and time effects).
+- A regressor with the same value in every row (`REGRESSOR_CONSTANT`), or with no within-variation (constant over time within every entity, `REGRESSOR_NO_WITHIN_VARIATION`).
+- The outcome has the same value in every row (`OUTCOME_CONSTANT`), or has no variation left after the fixed effects are removed (constant within every entity, or in a two-way model fully explained by the entity and time effects, `OUTCOME_CONSTANT_WITHIN_ENTITY`).
 - Too few degrees of freedom.
 
 **RE**
 
 - The outcome is constant within every entity.
-- A group with a single observation: a singleton entity or, in a two-way model (two columns in `effects`), a singleton time period (`SINGLETON_GROUP`).
+- A group with a single observation: a singleton entity or, in a two-way model (two columns in `effects`), a singleton time period (`SINGLETON_GROUP`, with `n_dropped_rows` as in FE).
+- `y` has the same value in every row (`OUTCOME_CONSTANT`).
 - A two-way model on an unbalanced panel (`PANEL_NOT_BALANCED_FOR_TWO_WAY`).
 - With `cov_type="cluster"`, too few clusters for the Hausman auxiliary regression (counting only the identified columns).
 - A time-invariant regressor is allowed, unlike in FE, and so is a regressor together with its entity or time mean (correlated random effects, Mundlak): the aliased columns of the between and Hausman auxiliary regressions are dropped and `hausman_df` counts the identified ones.

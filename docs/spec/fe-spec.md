@@ -55,7 +55,10 @@ FE固有の内容のみを記載する。
   `_two_way`。within変換の前に生の`effects`の列を直接見て検出し、下流の特異行列エラーと
   して偶発的に検出される形にはしない）。2-wayは個体・時点双方を対称に検出する（両方
   該当時は個体側を報告）。エラーの`argument`は`"effects"`で、どの列かは`column`に入る
-  （`SINGLETON_GROUP`の`group`はsingletonの値）。
+  （`SINGLETON_GROUP`の`group`はsingletonの値、`n_dropped_rows`は取り除くことを繰り返したときに落ちる行の総数で、
+  2-wayでは個体のsingletonを落とすと時点のsingletonができる連鎖を含む。行は自動では落とさず、利用者が判断する）。
+- **生の値が全ての行で同じ説明変数は`ValidationError`（`REGRESSOR_CONSTANT`）**、被説明変数が全ての行で同じなら
+  `OUTCOME_CONSTANT`（`has_no_variation`の相対閾値）。固定効果を除く前に分かる事実なので、除いた後の分散ゼロと分ける。
 - **within変換後に分散ゼロになる説明変数は`ValidationError`**（`validate_no_zero_variance_
   regressors`。時間不変変数（1-way）・2-wayでtime FEと完全共線な列を同じロジックで検出する。
   閾値は絶対値ではなく相対値: 変換前の元の列の最大絶対値×観測数×`f64::EPSILON`と比較する）。
@@ -329,13 +332,15 @@ demeanしたR²」を3種とも定義すると誤る）:
 |---|---|---|
 | `Common(CommonError)` | `CommonError`と同じ | `CommonError`と同じ |
 | `InsufficientDegreesOfFreedom` | `INSUFFICIENT_DEGREES_OF_FREEDOM`（`n_effects`は1-wayで個体数、2-wayで個体数+時点数-1） | `ValidationError` |
-| `SingletonGroup` | `SINGLETON_GROUP`（params: `argument`=`"effects"`・`column`・`group`。`column`は`effects`の該当要素の列名で、エンジンは`with_effect_names`で受け取り計算には使わない） | `ValidationError` |
+| `SingletonGroup` | `SINGLETON_GROUP`（params: `argument`=`"effects"`・`column`・`group`・`n_dropped_rows`。`column`は`effects`の該当要素の列名で、エンジンは`with_effect_names`で受け取り計算には使わない） | `ValidationError` |
 | `UnbalancedPanelForTwoWay` | `PANEL_NOT_BALANCED_FOR_TWO_WAY`（2-way REだけ） | `ValidationError` |
 | `DuplicateEntityTimePair` | `DUPLICATE_ENTITY_TIME_PAIR` | `ValidationError` |
 | `InvalidTol` / `InvalidMaxIter` | `TOLERANCE_NOT_POSITIVE_FINITE` / `MAX_ITER_OUT_OF_RANGE` | `ValidationError` |
 | `LeverageDimensionTooLarge` | `LEVERAGE_DIMENSION_TOO_LARGE`（不均衡な2-wayのHC2/HC3） | `ValidationError` |
 | `AbsorptionNotConverged` | `ABSORPTION_NOT_CONVERGED` | `ComputationError` |
+| `RegressorConstant` | `REGRESSOR_CONSTANT` | `ValidationError` |
 | `ZeroVarianceAfterDemeaning` | `REGRESSOR_NO_WITHIN_VARIATION` | `ValidationError` |
+| `Common(OutcomeConstant)` | `OUTCOME_CONSTANT` | `ValidationError` |
 | `OutcomeConstantWithinEntity` | `OUTCOME_CONSTANT_WITHIN_ENTITY` | `ValidationError` |
 | `WithinRegressionFailed { source: Common(PerfectFit) }` | `PERFECT_FIT`（`stage`は`WITHIN_REGRESSION`） | `ComputationError` |
 | `InvalidDkBandwidth` / `InsufficientDkPeriods` / `InsufficientDkPeriodsForInference` | `DK_BANDWIDTH_OUT_OF_RANGE` / `DK_PERIODS_TOO_FEW` / `DK_PERIODS_NOT_ABOVE_COEFFICIENTS` | `ValidationError` |

@@ -661,3 +661,51 @@ fixest（全`cov_type`）とlinearmodels（classical・HC1）の凍結フィク�
   （ado名に触れるのは「見ない」という指示の部分だけ）。履歴の書き換えはしない方針を提案済み（要確認。9.9末尾参照）。
 - FE性能比較への不均衡シナリオ: `PerfAdapter.build_dataframe(n, k, seed)`が`method`を知らないため、ハーネス（`performance/_perf_harness.py`）の拡張が要る。
   #522には含めず、英語で別Issue #634として起票済み。
+
+### 9.10 #442（高次元固定効果）の方針と実装順（2026-11-08）
+
+**調査の要点**
+- #595で`effects: list[str]`は導入済み。公開APIの形は変えず、`effects`の長さの上限を外す。
+- `GroupSystem`（`shared/alternating_projections`）はK個のグループを受け取れる。2次元に固定されているのは、呼び出し側（`fe/within.rs`）、`FeInput`の
+  `entity_codes`＋`time`、`PanelEffects`（`OneWay`/`TwoWay`）、`PanelDimension`（Entity/Time）、`FixedEffects`の列挙型、`dummy_leverage`、重複ペアの検査、
+  `n_dropped_rows`の連鎖計算、pybindの`MAX_EFFECTS=2`（FEとRE共通）。
+- fixestの自由度（不均衡・n=272、`firm + year + ind`）: `nparams = k + N1 + (N2−1) + (N3−1)`。`ind`が`firm`にネストして真のランク（48）が下がっても数え方は変わらない
+  （52）。2-wayの「連結成分は無視する」と同じ規約なので`df_model = k + Σn_d − (K−1)`。クラスターの小標本補正でネストした次元をKから除く規則
+  （`fe_cluster_k_correction`）は`dims`をVecで作る実装のまま広げ、fixestの`ssc(fixef.K="nested")`と数値で照合する。
+
+**利用者の決定**
+1. **K≥3のHC2/HC3は対応する。** 最大の次元を消去し、残りの次元の水準数の合計を密に解く（2-wayの`dummy_leverage`の一般化）。上限（`MAX_DENSE_LEVELS`）は流用。
+2. **重複の検査はしない（2-wayも含む）。** `effects`はentity/timeの意味を持たず、州×群のように同じ組合せの複数行が正当な使い方がある。重複検査は「全ペアそろい」判定
+   （`n == N×T`）の前提だったので、バランスの判定を「`n == N×T`かつ重複なし」に置き換え、バランスのときだけ閉形式、そうでなければ交互射影に回す。
+   REの2-wayは同じ判定で「不均衡」として拒否される。`DUPLICATE_ENTITY_TIME_PAIR`は未リリースなのでコードごと削除（`CHANGELOG`の該当記述も直す）。
+3. **`fixed_effects()`**: 連結成分ごとに、1つ目の次元は自由、2つ目以降の各次元は基準水準を0にする。基準水準は、2つ目が時間順の最初、3つ目以降は
+   水準の辞書順の最初（3つ目以降の列はentityと同じ`Identity`で扱う）。ネストなどで基準化しても分離できない効果があるため、識別されるのは和だけとdocstringに書く。
+   fixestの`fixef`との比較も和で行う。
+4. **上限**: FEの`effects`は5次元まで、REは2のまま（`MAX_EFFECTS`をモデルごとの値にする。`EFFECTS_TOO_MANY`の`max_columns`で報告）。
+5. **収束**: `ABSORPTION_NOT_CONVERGED`は仕様として扱う（既定の`tol=1e-12`・`max_iter=10000`のまま）。
+
+**方針**: K≥3は完全なバランスでも交互射影に統一する（閉形式は1-wayと2-wayのバランスのみ）。singletonは全次元でエラーのまま（`n_dropped_rows`の連鎖はK次元に広げる）。
+
+**実装順（コミットの単位）**
+1. K次元のデータモデル（挙動を変えないリファクタ）: `FeInput`/`PanelIndex`を`Vec<GroupCodes>`＋列名にし、DKの時点キーは別に持つ。`PanelDimension`・
+   `InsufficientDegreesOfFreedom`・`SingletonGroup`を次元の番号と列名に一般化。REは2次元のまま`from_re_input`で橋渡し。K≤2の既存テストを安全網にする。
+2. 検証: 重複検査をバランス判定の条件に置き換え（上記2）、`n_dropped_rows`の連鎖と縮退検査（`two_group_split_is_degenerate`）をK次元に。
+3. within変換のK≥3の配線（`GroupSystem::new`にK個。完全適合・分散ゼロのしきい値は`error_bound`に連動）。
+4. 自由度（`neffects = Σn_d − (K−1)`）とクラスター補正のK次元化。
+5. HC2/HC3のレバレッジのK次元化。
+6. `fixed_effects()`のK次元化（`FixedEffects`を`Vec<(列名, 水準と値)>`に一般化、pickleの`FORMAT_VERSION`を上げる）。
+7. engine_pybind・Python（`MAX_EFFECTS`のモデル別化、`extract_effects`・`group_counts`・`FEResult.fixed_effects()`、型検査テスト、エラーコードの再生成と`MIGRATED_CODES`）。
+8. ベンチマーク: 3次元目のDGP（バランス3-way・不均衡3-way・3つ目が1つ目にネスト・疎・連結成分が複数・同じ組合せの重複行）。主はfixest（`fixef.tol=1e-11`）、
+   小標本はLSDV（ダミー変数回帰）をオラクルにする。linearmodelsは`PanelOLS`が3次元以上を持たないため、`AbsorbingLS`の対応を先に実測し、使えなければ単一リファレンスの例外にする。
+9. ドキュメント: fe-spec（§5の「不均衡2-wayは未対応」の記述が古い）・panel-common・usage/api/methods/fe・guide（accepted-data・api-conventions・validation・verification）・
+   CHANGELOG・`panel/CLAUDE.md`（engine・engine_pybind・python_package）。
+10. 性能比較: 3-wayの追加は#634のハーネス拡張と合わせるかを確認する。
+
+Pythonまで終わるまでpushしない。
+
+**進捗（手順1、2026-11-08）**: 実装済み（コミット前）。`PanelDimension`は`effects`の添字の型（`ENTITY`=0・`TIME`=1）、`EffectNames`はVec（既定は`entity`・`time`・`effect3`…。次元の数より多い名前は捨てる）、
+`PanelIndex`は`Vec<GroupCodes>`（`new(nobs, groups)`・`effect_codes()`・`n_effects()`）、`FeInput`は`groups: Vec<GroupCodes>`（コンストラクタは当面K≤2。`time_keys()`は`time_periods()`/`time_codes()`に置き換え）、
+`InsufficientDegreesOfFreedom`は`n_groups: Vec<usize>`、`absorbed_parameters(&[usize])`（水準数の合計−(K−1)）を追加。`validate_panel_input`/`validate_panel_index`は`&[&GroupCodes]`を取り、各次元の長さ→各次元のキーの順に検査する。
+K≤2の挙動は変えていない（engine 1321件・engine_pybind 240件・pytest `tests/panel`＋`tests/cross_method` 8846件が通る）。`fit_fe`はK>2を`debug_assert`で止める（手順3で外す）。
+- **手順7で決める**: `PanelIndex::new`・`FeIvInput::from_group_codes`は2つ目が時間順のコードであることをdocでしか保証しない。`engine_pybind`が`TimeKeys`を渡すには`TimeKeys::codes()`が`pub(crate)`のため`GroupCodes`へ変換できない。
+  `TimeKeys::into_codes`（`pub`）を足すか、時点の次元専用の引数を設けるかを、`FeInput`のK次元コンストラクタと合わせて決める。`FeInput::from_group_codes`の`time.codes().clone()`（n要素のコピー）も`into_codes`で解消できる。

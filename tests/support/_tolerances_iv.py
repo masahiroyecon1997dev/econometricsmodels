@@ -97,6 +97,15 @@ IV_TOLERANCES: dict[str, dict[str, float]] = {
         "atol_table1": 0.005,
         "rtol_published_b": 1e-8,
     },
+    # --- 弱操作変数診断（`IVResults.cragg_donald()`等）。リファレンスはlinearmodelsの
+    # Cragg-Donald・Kleibergen-Paapと、MOPのオラクル（`mop_oracle.py`）。 ---
+    # `rtol`: 統計量・p値・臨界値。実測の最大相対差は機械精度（Cragg-Donald 4.4e-14、
+    # Kleibergen-Paap 8.7e-14（p値）、有効Fとその臨界値 1.3e-14）で、マージンは3桁。
+    # `rtol_b_tsls`: `B_TSLS`とそれを使う一般化版の臨界値（実測 4.2e-15）。
+    "iv_weak_diagnostics": {
+        "rtol": 1e-10,
+        "rtol_b_tsls": 1e-10,
+    },
     # --- 本実装内の不変条件（リファレンス実装との比較ではない） ---
     # 同じ入力に対して計算経路が異なる出力どうしの一致の確認（`ols_api`と同じ方針、
     # 根拠は`_tolerances_linear.py`の`ols_api`のコメント参照）。

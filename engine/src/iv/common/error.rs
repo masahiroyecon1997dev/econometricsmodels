@@ -133,6 +133,20 @@ pub enum IvError {
         #[source]
         source: LeastSquaresError,
     },
+
+    /// 有効F統計量（Montiel Olea-Pflueger）が内生変数1個のときだけ定義されるのに、内生変数の数が違う。
+    #[error("{}", self.catalog_message())]
+    EffectiveFEndogenousCount { n_endog: usize },
+
+    /// 有効F統計量の臨界値の水準`alpha`が(0, 1)の外。
+    #[error("{}", self.catalog_message())]
+    AlphaOutOfRange { alpha: f64 },
+
+    /// 弱操作変数の診断統計量（Cragg-Donald・Kleibergen-Paap・有効F）が、このデータでは定義できない
+    /// （必要な行列が特異: 操作変数が外生変数と共線、第一段階が完全フィット、スコアの共分散のランク落ち等）。
+    /// 診断なので`fit()`は失敗させず、診断のメソッドを呼んだときにだけ返す。`statistic`は文に出す名前。
+    #[error("{}", self.catalog_message())]
+    WeakInstrumentStatisticUndefined { statistic: &'static str },
 }
 
 impl ErrorInfo for IvError {
@@ -185,6 +199,16 @@ impl ErrorInfo for IvError {
             Self::GmmNonConvergence { n_iter } => ErrorReport::new(ErrorCode::NotConverged)
                 .param("n_iter", *n_iter)
                 .param("iter_option", "gmm_max_iter"),
+            Self::EffectiveFEndogenousCount { n_endog } => {
+                ErrorReport::new(ErrorCode::EffectiveFEndogenousCount).param("n_endog", *n_endog)
+            }
+            Self::AlphaOutOfRange { alpha } => {
+                ErrorReport::new(ErrorCode::AlphaOutOfRange).param("value", *alpha)
+            }
+            Self::WeakInstrumentStatisticUndefined { statistic } => {
+                ErrorReport::new(ErrorCode::WeakInstrumentStatisticUndefined)
+                    .param("statistic", *statistic)
+            }
         }
     }
 }

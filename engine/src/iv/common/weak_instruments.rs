@@ -5,6 +5,7 @@
 //! 取り出して呼ぶだけの層。Cragg-Donaldは`cov_type`に依存しない(等分散前提の統計量。弱操作変数の
 //! 部分F統計量と同じ判断、`docs/spec/iv-spec.md`3.4節)。Kleibergen-Paapは`cov_type`ごとの共分散を使う。
 
+use super::error::IvError;
 use super::input::IvInput;
 use crate::linear::ols::CovType;
 use crate::shared::covariance::{HcVariant, resolve_hac_lags, time_ordering};
@@ -26,6 +27,15 @@ pub struct StockYogoCriticalValues {
     pub values: [f64; 4],
 }
 
+/// エラーの文に出す、診断統計量の名前。
+const CRAGG_DONALD_LABEL: &str = "Cragg-Donald";
+const KLEIBERGEN_PAAP_LABEL: &str = "Kleibergen-Paap";
+const EFFECTIVE_F_LABEL: &str = "effective F";
+
+fn undefined(statistic: &'static str) -> IvError {
+    IvError::WeakInstrumentStatisticUndefined { statistic }
+}
+
 /// [`compute_cragg_donald`]の結果。
 #[derive(Debug, Clone, PartialEq)]
 pub struct CraggDonald {
@@ -44,19 +54,22 @@ pub struct CraggDonald {
 /// Cragg-Donald統計量とStock-Yogoの臨界値を計算する。
 ///
 /// 統計量が定義できないとき(内生変数が無い、識別不足、内生変数が共線、第一段階が完全フィット、
-/// 外生変数と除外操作変数の共線など)は`None`。診断なので`fit()`は失敗させない。臨界値は表にある
-/// 組み合わせだけ`Some`。外生変数の定数列は`input.x_exog()`に含まれており、平均を引かずに
-/// 偏回帰で落とす。
-#[must_use]
-pub fn compute_cragg_donald(input: &IvInput) -> Option<CraggDonald> {
+/// 外生変数と除外操作変数の共線など)は`IvError::WeakInstrumentStatisticUndefined`。`fit()`は
+/// これらの診断を呼ばないので失敗しない。臨界値は表にある組み合わせだけ`Some`。外生変数の定数列は
+/// `input.x_exog()`に含まれており、平均を引かずに偏回帰で落とす。
+///
+/// # Errors
+/// 統計量が定義できないとき`IvError::WeakInstrumentStatisticUndefined`。
+pub fn compute_cragg_donald(input: &IvInput) -> Result<CraggDonald, IvError> {
     // `fit()`の外から呼ばれてもfaerを逐次に固定する(`crate::shared::parallelism`)。
     crate::shared::parallelism::ensure_serial();
-    let statistic = cragg_donald(input.x_endog(), input.x_exog(), input.instruments(), 0)?;
+    let statistic = cragg_donald(input.x_endog(), input.x_exog(), input.instruments(), 0)
+        .ok_or_else(|| undefined(CRAGG_DONALD_LABEL))?;
     let (n_endog, n_excluded) = (input.k_endog(), input.k_instruments());
     let row = |levels: [f64; 4], values: Option<[f64; 4]>| {
         values.map(|values| StockYogoCriticalValues { levels, values })
     };
-    Some(CraggDonald {
+    Ok(CraggDonald {
         statistic,
         n_endog,
         n_excluded,
@@ -114,15 +127,32 @@ fn score_covariance<'a>(
 
 /// `cov_type`に頑健なMontiel Olea-Pflueger有効F統計量と、単純版・一般化版TSLSのPatnaik臨界値を計算する。
 ///
-/// 内生変数が1個のときだけ定義される(2個以上は`None`)。`cov_type`の扱いと`None`の条件は
-/// [`compute_kleibergen_paap`]と同じ規約(`Classical`の有効FはCragg-Donaldに一致する)。`alpha`は
-/// 臨界値の水準(0〜1)。診断なので`fit()`は失敗させない。
-#[must_use]
-pub fn compute_effective_f(input: &IvInput, cov_type: &CovType, alpha: f64) -> Option<EffectiveF> {
+/// 内生変数が1個のときだけ定義される。`cov_type`の扱いと未定義の条件は[`compute_kleibergen_paap`]と
+/// 同じ規約(`Classical`の有効FはCragg-Donaldに一致する)。`alpha`は臨界値の水準(0〜1)。`Ŵ2`のランク落ち
+/// (クラスターや観測が少ない)も未定義。`fit()`はこの診断を呼ばない。
+///
+/// # Errors
+/// - 内生変数が1個でないとき`IvError::EffectiveFEndogenousCount`、`alpha`が(0, 1)の外のとき
+///   `IvError::AlphaOutOfRange`(どちらも入力を見るだけで分かるので、計算より先に返す)
+/// - 統計量が定義できないとき`IvError::WeakInstrumentStatisticUndefined`
+pub fn compute_effective_f(
+    input: &IvInput,
+    cov_type: &CovType,
+    alpha: f64,
+) -> Result<EffectiveF, IvError> {
     // `fit()`の外から呼ばれてもfaerを逐次に固定する(`crate::shared::parallelism`)。
     crate::shared::parallelism::ensure_serial();
+    if input.k_endog() != 1 {
+        return Err(IvError::EffectiveFEndogenousCount {
+            n_endog: input.k_endog(),
+        });
+    }
+    if !(alpha > 0.0 && alpha < 1.0) {
+        return Err(IvError::AlphaOutOfRange { alpha });
+    }
     let mut order = Vec::new();
-    let covariance = score_covariance(cov_type, input.nobs(), &mut order)?;
+    let covariance = score_covariance(cov_type, input.nobs(), &mut order)
+        .ok_or_else(|| undefined(EFFECTIVE_F_LABEL))?;
     effective_f(
         input.x_endog(),
         input.x_exog(),
@@ -132,26 +162,34 @@ pub fn compute_effective_f(input: &IvInput, cov_type: &CovType, alpha: f64) -> O
         alpha,
         Some(input.y()),
     )
+    .ok_or_else(|| undefined(EFFECTIVE_F_LABEL))
 }
 
 /// `cov_type`に頑健なKleibergen-Paap統計量(rk LMとrk Wald F)を計算する。
 ///
 /// `cov_type`のHC・クラスター・HACが、一次段階のスコアの共分散に使われる(`Classical`のWald Fは
 /// Cragg-Donaldに一致)。`Hac`の`lags`は`None`なら経験則で解決し、時間順は`time_order`による。
+/// LMとWald Fは独立に定義の可否が決まり、片方だけ`Some`のことがある。
+///
+/// # Errors
 /// 両方とも定義できないとき(内生変数が無い、識別不足、`Cluster`でグループが無い、HACのラグ数が
-/// 不正など)は`None`。診断なので`fit()`は失敗させない。
-#[must_use]
-pub fn compute_kleibergen_paap(input: &IvInput, cov_type: &CovType) -> Option<KleibergenPaap> {
+/// 不正、スコアの共分散のランク落ちなど)`IvError::WeakInstrumentStatisticUndefined`。
+pub fn compute_kleibergen_paap(
+    input: &IvInput,
+    cov_type: &CovType,
+) -> Result<KleibergenPaap, IvError> {
     // `fit()`の外から呼ばれてもfaerを逐次に固定する(`crate::shared::parallelism`)。
     crate::shared::parallelism::ensure_serial();
     let mut order = Vec::new();
-    let covariance = score_covariance(cov_type, input.nobs(), &mut order)?;
+    let covariance = score_covariance(cov_type, input.nobs(), &mut order)
+        .ok_or_else(|| undefined(KLEIBERGEN_PAAP_LABEL))?;
     let (y, x, z) = (input.x_endog(), input.x_exog(), input.instruments());
-    let statistics = kleibergen_paap(y, x, z, 0, covariance)?;
+    let statistics =
+        kleibergen_paap(y, x, z, 0, covariance).ok_or_else(|| undefined(KLEIBERGEN_PAAP_LABEL))?;
     if statistics.rk_lm.is_none() && statistics.rk_wald_f.is_none() {
-        return None;
+        return Err(undefined(KLEIBERGEN_PAAP_LABEL));
     }
-    Some(KleibergenPaap {
+    Ok(KleibergenPaap {
         rk_lm: statistics.rk_lm,
         rk_wald_f: statistics.rk_wald_f,
         n_endog: input.k_endog(),
@@ -281,7 +319,10 @@ mod tests {
             "y".to_string(),
         )
         .unwrap();
-        assert_eq!(compute_cragg_donald(&input), None);
+        assert_eq!(
+            compute_cragg_donald(&input),
+            Err(undefined(CRAGG_DONALD_LABEL))
+        );
     }
 
     fn clusters() -> CovType {
@@ -375,18 +416,24 @@ mod tests {
         let input = input(2, true);
         assert_eq!(
             compute_kleibergen_paap(&input, &CovType::Cluster { groups: None }),
-            None
+            Err(undefined(KLEIBERGEN_PAAP_LABEL))
         );
         let bad_lags = CovType::Hac {
             lags: Some(12),
             time_order: (0..12).map(f64::from).collect(),
         };
-        assert_eq!(compute_kleibergen_paap(&input, &bad_lags), None);
+        assert_eq!(
+            compute_kleibergen_paap(&input, &bad_lags),
+            Err(undefined(KLEIBERGEN_PAAP_LABEL))
+        );
         let short_order = CovType::Hac {
             lags: None,
             time_order: vec![0.0, 1.0],
         };
-        assert_eq!(compute_kleibergen_paap(&input, &short_order), None);
+        assert_eq!(
+            compute_kleibergen_paap(&input, &short_order),
+            Err(undefined(KLEIBERGEN_PAAP_LABEL))
+        );
     }
 
     /// LMとWald Fは独立に定義の可否が決まる: 2クラスターでLM(自由度2)は定義できるが、Wald Fはできない。
@@ -491,22 +538,30 @@ mod tests {
     }
 
     #[test]
-    fn effective_f_is_none_for_several_endogenous_variables_and_bad_settings() {
+    fn effective_f_is_an_error_for_several_endogenous_variables_and_bad_settings() {
         assert_eq!(
             compute_effective_f(&input(2, true), &CovType::Classical, 0.05),
-            None
+            Err(IvError::EffectiveFEndogenousCount { n_endog: 2 })
         );
         let input = input(1, true);
         assert_eq!(
             compute_effective_f(&input, &CovType::Cluster { groups: None }, 0.05),
-            None
+            Err(undefined(EFFECTIVE_F_LABEL))
         );
         let short_order = CovType::Hac {
             lags: None,
             time_order: vec![0.0, 1.0],
         };
-        assert_eq!(compute_effective_f(&input, &short_order, 0.05), None);
-        assert_eq!(compute_effective_f(&input, &CovType::Classical, 1.5), None);
+        assert_eq!(
+            compute_effective_f(&input, &short_order, 0.05),
+            Err(undefined(EFFECTIVE_F_LABEL))
+        );
+        for alpha in [1.5, 0.0, 1.0, f64::NAN] {
+            assert!(matches!(
+                compute_effective_f(&input, &CovType::Classical, alpha),
+                Err(IvError::AlphaOutOfRange { .. })
+            ));
+        }
     }
 
     /// 内生変数が4個(表は3個まで)なら、統計量は出るが臨界値は無い。
@@ -585,6 +640,9 @@ mod tests {
             "y".to_string(),
         )
         .unwrap();
-        assert_eq!(compute_cragg_donald(&input), None);
+        assert_eq!(
+            compute_cragg_donald(&input),
+            Err(undefined(CRAGG_DONALD_LABEL))
+        );
     }
 }

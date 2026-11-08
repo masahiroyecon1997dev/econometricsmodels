@@ -41,6 +41,9 @@ RAISED_CODES: set[str] = set()
 # 全`code`を対象にする。
 MIGRATED_CODES: frozenset[str] = frozenset(
     {
+        ErrorCode.ALPHA_OUT_OF_RANGE,
+        ErrorCode.EFFECTIVE_F_ENDOGENOUS_COUNT,
+        ErrorCode.WEAK_INSTRUMENT_STATISTIC_UNDEFINED,
         ErrorCode.COLUMN_NOT_FOUND,
         ErrorCode.COLUMN_CONTAINS_NULL,
         ErrorCode.COLUMN_NON_FINITE,

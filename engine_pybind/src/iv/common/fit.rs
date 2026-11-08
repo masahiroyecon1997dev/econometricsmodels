@@ -53,10 +53,13 @@ pub(crate) fn fit(
     options: &IVOptions,
 ) -> PyResult<IVResult> {
     // 取り込み済みの`frame`以降はPythonオブジェクトに触れないので、GILを手放して走らせる
-    // （他のPythonスレッドを止めず、複数のfitをスレッドで並行できる）。`source`は使わず、
-    // 関数の末尾（`detach`から戻ってGILを持った状態）で`data`ごとdropされる。
-    let SelectedData { frame, .. } = data;
-    py.detach(|| fit_frame(&frame, y, x_exog, x_endog, instruments, options))
+    // （他のPythonスレッドを止めず、複数のfitをスレッドで並行できる）。`source`は結果に持たせる。
+    let SelectedData { source, frame } = data;
+    let mut result = py.detach(|| fit_frame(&frame, y, x_exog, x_endog, instruments, options))?;
+    // 診断のメソッドが`IvInput`を作り直すための元のデータとオプション（GILを持って付ける）。
+    result.source_data = Some(source);
+    result.options = Some(options.clone());
+    Ok(result)
 }
 
 /// [`fit`]の純Rust部分（GILを手放した状態で走る）。`PyErr`は遅延生成でGILを要求しない
@@ -69,6 +72,11 @@ fn fit_frame(
     instruments: Vec<String>,
     options: &IVOptions,
 ) -> PyResult<IVResult> {
+    let names = RetainedNames {
+        x_exog: x_exog.clone(),
+        x_endog: x_endog.clone(),
+        instruments: instruments.clone(),
+    };
     let BuiltIvInput {
         input,
         cov_type,
@@ -111,6 +119,7 @@ fn fit_frame(
         weak_instrument_f_statistics: weak_instrument_f_statistics.into_iter().collect(),
         weak_instrument_f_df,
         first_stage,
+        names,
     };
 
     if let Some(gmm) = plan.gmm {
@@ -176,6 +185,14 @@ struct SharedFit {
     weak_instrument_f_statistics: HashMap<String, f64>,
     weak_instrument_f_df: Option<(usize, usize)>,
     first_stage: Vec<(String, OLSResult)>,
+    names: RetainedNames,
+}
+
+/// 診断のメソッドが`IvInput`を作り直すために結果が保持する列名（`y`は`dep_var_name`）。
+struct RetainedNames {
+    x_exog: Vec<String>,
+    x_endog: Vec<String>,
+    instruments: Vec<String>,
 }
 
 /// `IVResult`のフィールドのうち、`estimator`によって値の出どころや意味が変わるもの
@@ -248,5 +265,10 @@ fn build_result<E: IvEstimate>(
         weak_instrument_f_df_num: shared.weak_instrument_f_df.map(|(num, _)| num),
         weak_instrument_f_df_denom: shared.weak_instrument_f_df.map(|(_, denom)| denom),
         first_stage: shared.first_stage,
+        source_data: None,
+        options: None,
+        x_exog: shared.names.x_exog,
+        x_endog: shared.names.x_endog,
+        instruments: shared.names.instruments,
     }
 }

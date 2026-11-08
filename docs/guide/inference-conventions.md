@@ -70,7 +70,7 @@ Because it is the classical (homoskedastic) statistic, it is not cluster-robust 
 
 With `cov_type="cluster"`, the structural equation needs more clusters than its slope coefficients. A first-stage regression returned by `first_stage()` can have more slope coefficients (the exogenous regressors plus all excluded instruments). When the number of clusters is larger than the structural slopes but not larger than the slopes of a first-stage regression, `fit()` still succeeds: that regression's overall F statistic (`f_statistic`, `f_p_value`, `f_df_num`, `f_df_denom`) is `None`, because the cluster-robust covariance of its slopes is singular. Its coefficients, standard errors and the weak-instrument F statistic are unaffected.
 
-The result is not compared with the Stock-Yogo critical values, so no weak / strong verdict is reported. A commonly quoted rule of thumb is an F statistic above about 10; whether that is adequate for your application is left to you. Joint diagnostics for several endogenous variables (Cragg-Donald statistic) are not provided.
+This statistic is not compared with critical values, so no weak / strong verdict is reported; a commonly quoted rule of thumb is an F statistic above about 10, and whether that is adequate for your application is left to you. For several endogenous variables or for critical values, use `cragg_donald()` (joint, homoskedastic, with Stock-Yogo critical values). For statistics that follow `cov_type`, use `kleibergen_paap()` and `effective_f()`. These three are methods, computed only when called; see [Definitions: IV](../methods/iv.md#weak-instruments-post-estimation-cragg_donald-kleibergen_paap-effective_f).
 
 ## Overidentification tests
 

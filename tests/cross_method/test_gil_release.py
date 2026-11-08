@@ -75,6 +75,9 @@ ROWS = {
     "Logit.marginal_effects": 40_000,
     "Probit.marginal_effects": 40_000,
     "Tobit.marginal_effects": 40_000,
+    "IV.cragg_donald": 50_000,
+    "IV.kleibergen_paap": 50_000,
+    "IV.effective_f": 50_000,
 }
 
 
@@ -108,6 +111,9 @@ CASES: dict[str, Callable[[pl.DataFrame], Callable[[], object]]] = {
     "Tobit.marginal_effects": _post_case(
         "Tobit", lambda r: r.marginal_effects()
     ),
+    "IV.cragg_donald": _post_case("IV", lambda r: r.cragg_donald()),
+    "IV.kleibergen_paap": _post_case("IV", lambda r: r.kleibergen_paap()),
+    "IV.effective_f": _post_case("IV", lambda r: r.effective_f()),
 }
 
 

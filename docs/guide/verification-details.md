@@ -127,6 +127,10 @@ Where only one reference exists, or a reference differs in a documented way, the
 - **OLS Breusch-Pagan test with constant or duplicate variables.** statsmodels counts the chi-squared degrees of freedom of `het_breuschpagan` from the number of columns, not their rank. It is therefore given the variables that remain after the constant and duplicate columns are dropped. The dropping itself is checked against R, which is given the columns as they are and counts the rank.
 - **OLS Breusch-Godfrey test without an intercept** is checked against R `lmtest::bgtest` only. statsmodels adds a constant to the auxiliary regression of a model without an intercept (R and Greene do not), so its value is a different statistic and is not used there.
 
+### IV
+
+- **Weak-instrument diagnostics have one package reference.** `cragg_donald()` and `kleibergen_paap()` are compared with linearmodels. linearmodels' `robust` rk Wald F corresponds to this package's `hc1` and its `robust` rk LM to `hc0` (the F includes a degrees-of-freedom correction, the LM does not); the comparison uses the matching pair. linearmodels has no HC2, HC3 or effective F, so those are checked only against an independent implementation written from the formulas of the paper (an HC2 or HC3 Kleibergen-Paap statistic has no reference). The Stock-Yogo critical values were transcribed from the working paper and are checked for monotonicity, smoothness and the published values for one endogenous variable; no second source was used to check every cell.
+
 ### Logit and Probit
 
 - **Probit and R's `glm`.** For a non-canonical link, R's `glm` covariance uses the expected information matrix, which differs from the observed information used here by 2–3 % (classical) and up to 8 % (HC0 / HC1). The cross-check therefore builds the observed-information covariance explicitly, checked against `numDeriv::hessian`. Logit is unaffected.

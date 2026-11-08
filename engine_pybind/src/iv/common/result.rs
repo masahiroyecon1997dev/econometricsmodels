@@ -1,10 +1,17 @@
 //! `IVResult`（IVの推定結果）と、その`#[pymethods]`（`first_stage`など）。
 
 use crate::linear::ols::OLSResult;
-use crate::shared::errors::guard;
+use crate::shared::errors::{guard, internal_error};
+use crate::shared::option_values::extract_strict_float;
 use pyo3::IntoPyObjectExt;
 use pyo3::prelude::*;
 use std::collections::HashMap;
+
+use super::diagnostics::{
+    CraggDonaldOutput, EffectiveFOutput, KleibergenPaapOutput, run_cragg_donald, run_effective_f,
+    run_kleibergen_paap,
+};
+use super::options::IVOptions;
 
 /// Estimation results for IV (2SLS/GMM).
 ///
@@ -187,6 +194,46 @@ pub struct IVResult {
     // `has_intercept`、`LogitResult`/`ProbitResult`の`estimator`と同じ位置づけ）。
     // `estimator`非依存（`engine::iv::common::compute_first_stage`から構築）。
     pub(super) first_stage: Vec<(String, OLSResult)>,
+    // 弱操作変数の診断（`cragg_donald()`・`kleibergen_paap()`・`effective_f()`）が、`fit()`と同じ
+    // `IvInput`を作り直すために保持する。`source_data`は`fit()`に渡された`polars.DataFrame`
+    // （参照を増やすだけでコピーしない）、`options`は`fit()`に渡した`IVOptions`の複製、
+    // `x_exog`・`x_endog`・`instruments`は列名（`y`の列名は`dep_var_name`）。Python側には公開しない。
+    // `source_data`と`options`は`fit`が結果を組み立てた後でGILを持って付ける（`OLSResult`と同じ）。
+    pub(super) source_data: Option<Py<PyAny>>,
+    pub(super) options: Option<IVOptions>,
+    pub(super) x_exog: Vec<String>,
+    pub(super) x_endog: Vec<String>,
+    pub(super) instruments: Vec<String>,
+}
+
+impl IVResult {
+    /// 元のデータ（`fit()`に渡された`polars.DataFrame`）。`fit`が必ず付けるので`None`にはならない
+    /// （pickleにも含まれる）。`None`なら到達不能な状態として`INTERNAL_ERROR`。
+    pub(super) fn retained_source<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        self.source_data
+            .as_ref()
+            .map(|source| source.bind(py).clone())
+            .ok_or_else(|| internal_error("an IVResult without its training data"))
+    }
+
+    /// `fit()`に渡した`IVOptions`の複製。`retained_source`と同じく`None`にはならない。
+    pub(super) fn retained_options(&self) -> PyResult<IVOptions> {
+        self.options
+            .clone()
+            .ok_or_else(|| internal_error("an IVResult without its options"))
+    }
+}
+
+// 保持するオプション（`IVOptions`）は、それ自身の`__reduce__`でpickleされるオブジェクトとして状態に入れる。
+impl crate::shared::pickle::PickleField for IVOptions {
+    fn to_py<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        Ok(Py::new(py, self.clone())?.into_bound(py).into_any())
+    }
+
+    fn from_py(obj: &Bound<'_, PyAny>) -> Option<Self> {
+        let options = obj.cast::<IVOptions>().ok()?.try_borrow().ok()?;
+        Some(options.clone())
+    }
 }
 
 // 第一段階の結果（`OLSResult`）は、それぞれの`__reduce__`でpickleされるオブジェクトとして状態に入れる。
@@ -252,6 +299,11 @@ crate::shared::pickle::impl_pickle_state!(IVResult {
     wu_hausman_df_num,
     wu_hausman_df_denom,
     first_stage,
+    source_data,
+    options,
+    x_exog,
+    x_endog,
+    instruments,
 });
 
 #[pymethods]
@@ -276,6 +328,59 @@ impl IVResult {
                 .iter()
                 .map(|(name, result)| (name.clone(), result.clone_ref(py)))
                 .collect())
+        })
+    }
+
+    /// Cragg-Donald statistic for the joint strength of the instruments, with the Stock-Yogo
+    /// critical values where they are tabulated.
+    ///
+    /// A post-estimation diagnostic: never computed by `fit()`. It re-reads the variables from
+    /// the data passed to `fit()`. Homoskedastic, so it does not depend on `cov_type`. With one
+    /// endogenous variable it equals the partial F-statistic in `weak_instrument_f_statistics`.
+    /// The same for `estimator="2sls"` and `estimator="gmm"`.
+    ///
+    /// Raises
+    /// ------
+    /// ComputationError
+    ///     The statistic is undefined for these data (collinear instruments, a perfectly
+    ///     fitted first stage, ...).
+    fn cragg_donald(&self, py: Python<'_>) -> PyResult<CraggDonaldOutput> {
+        guard(|| run_cragg_donald(self, py))
+    }
+
+    /// Kleibergen-Paap rk LM and rk Wald F statistics, robust to the `cov_type` of the fit.
+    ///
+    /// A post-estimation diagnostic: never computed by `fit()`. The covariance of the
+    /// first-stage scores follows `cov_type`, `cluster`, `hac_lags` and `hac_time` of the
+    /// options passed to `fit()`. Either statistic may be `None` when only the other is
+    /// defined.
+    ///
+    /// Raises
+    /// ------
+    /// ComputationError
+    ///     Neither statistic is defined for these data.
+    fn kleibergen_paap(&self, py: Python<'_>) -> PyResult<KleibergenPaapOutput> {
+        guard(|| run_kleibergen_paap(self, py))
+    }
+
+    /// Montiel Olea-Pflueger effective F statistic and its critical values.
+    ///
+    /// A post-estimation diagnostic: never computed by `fit()`. Defined for one endogenous
+    /// variable; the covariance follows the options passed to `fit()`.
+    ///
+    /// Raises
+    /// ------
+    /// TypeError
+    ///     `alpha` is not a real number.
+    /// ValidationError
+    ///     `alpha` is not strictly between 0 and 1, or there is not exactly one endogenous
+    ///     variable.
+    /// ComputationError
+    ///     The statistic is undefined for these data.
+    fn effective_f(&self, py: Python<'_>, alpha: &Bound<'_, PyAny>) -> PyResult<EffectiveFOutput> {
+        guard(|| {
+            let alpha = extract_strict_float(alpha, "alpha")?;
+            run_effective_f(self, py, alpha)
         })
     }
 }

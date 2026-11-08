@@ -13,6 +13,7 @@
 use faer::Mat;
 use faer::Side;
 use faer::prelude::SolveLstsq;
+use statrs::distribution::{ChiSquared, ContinuousCDF};
 
 use super::linear_algebra::{checked_col_piv_qr, inverse_cholesky_factor};
 use super::score_covariance::{ScoreCovariance, covariance_multiplier, hc_row_scales, score_meat};
@@ -25,6 +26,14 @@ pub struct RankTest {
     pub statistic: f64,
     /// `χ²`分布の自由度。
     pub df: usize,
+}
+
+impl RankTest {
+    /// 上側確率(`χ²(df)`の生存関数)。`df`は1以上なので分布は作れる(作れなければNaN)。
+    #[must_use]
+    pub fn p_value(&self) -> f64 {
+        ChiSquared::new(self.df as f64).map_or(f64::NAN, |chi2| chi2.sf(self.statistic))
+    }
 }
 
 /// スコアの共分散の固有値が最大固有値のこの割合以下なら特異とみなす。Wald Fのスコアは合計が0なので、

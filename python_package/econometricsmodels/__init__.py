@@ -12,7 +12,10 @@ from ._lib import ComputationError, ValidationError
 from .diagnostics import (
     BreuschGodfreyTestResult,
     BreuschPaganTestResult,
+    CraggDonaldResult,
     DiagnosticResult,
+    EffectiveFResult,
+    KleibergenPaapResult,
     WhiteTestResult,
 )
 from .error_codes import ErrorCode
@@ -34,12 +37,15 @@ __all__ = [
     "BreuschGodfreyTestResult",
     "BreuschPaganTestResult",
     "ComputationError",
+    "CraggDonaldResult",
     "DiagnosticResult",
+    "EffectiveFResult",
     "ErrorCode",
     "FEOptions",
     "FEResults",
     "IVOptions",
     "IVResults",
+    "KleibergenPaapResult",
     "Logit",
     "LogitOptions",
     "LogitResults",

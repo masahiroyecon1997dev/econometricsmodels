@@ -44,3 +44,11 @@ The fields of the results are listed by purpose at the top of the results class 
 ::: econometricsmodels.IVOptions
 
 ::: econometricsmodels.IVResults
+
+The weak-instrument diagnostics return these result types:
+
+::: econometricsmodels.CraggDonaldResult
+
+::: econometricsmodels.KleibergenPaapResult
+
+::: econometricsmodels.EffectiveFResult

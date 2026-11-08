@@ -133,6 +133,7 @@ _RESULT_METHODS = {
     "LogitResults": ("predict", "augment", "pred_table", "marginal_effects"),
     "ProbitResults": ("predict", "augment", "pred_table", "marginal_effects"),
     "TobitResults": ("predict", "augment", "marginal_effects"),
+    "IVResults": ("cragg_donald", "kleibergen_paap", "effective_f"),
 }
 
 
@@ -170,6 +171,13 @@ def tobit_result(frame: pl.DataFrame):
     return Tobit(frame, "yc", ["x1", "x2"]).fit()
 
 
+@pytest.fixture(scope="module")
+def iv_result(frame: pl.DataFrame):
+    return IV(
+        frame, y="y", x_exog=["x2"], x_endog=["x1"], instruments=["z", "z2"]
+    ).fit()
+
+
 def test_options_reject_positional_arguments() -> None:
     """`*Options`（`#[pyclass]`）は、位置引数を実行時にも拒否する。"""
     for call in (
@@ -191,7 +199,7 @@ def test_estimators_reject_positional_options(frame: pl.DataFrame) -> None:
 
 
 def test_result_methods_reject_positional_arguments(
-    frame: pl.DataFrame, ols_result, logit_result, tobit_result
+    frame: pl.DataFrame, ols_result, logit_result, tobit_result, iv_result
 ) -> None:
     new_data = frame.select("x1", "x2")
     for call in (
@@ -204,6 +212,7 @@ def test_result_methods_reject_positional_arguments(
         lambda: logit_result.marginal_effects("mean"),
         lambda: tobit_result.predict(new_data),
         lambda: tobit_result.marginal_effects("mean"),
+        lambda: iv_result.effective_f(0.05),
     ):
         with pytest.raises(TypeError, match="positional"):
             call()

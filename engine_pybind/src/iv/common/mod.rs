@@ -37,6 +37,7 @@
 //! `GmmEstimator::hansen_j_statistic()`/`hansen_j_p_value()`から配線する
 //! （`estimator="2sls"`のSargan検定と同じ`Option<f64>`同士の代入）。
 
+mod diagnostics;
 mod error;
 mod fit;
 mod gmm_setup;
@@ -45,6 +46,7 @@ mod option_values;
 mod options;
 mod result;
 
+pub(crate) use diagnostics::{CraggDonaldOutput, EffectiveFOutput, KleibergenPaapOutput};
 pub(crate) use fit::fit;
 pub(crate) use options::IVOptions;
 pub(crate) use result::IVResult;

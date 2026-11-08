@@ -27,6 +27,11 @@ from .._results_utils import (
     params_table_rows,
     results_repr,
 )
+from ..diagnostics import (
+    CraggDonaldResult,
+    EffectiveFResult,
+    KleibergenPaapResult,
+)
 from ..linear.ols import OLSResults
 
 __all__ = ["IV", "IVOptions", "IVResults"]
@@ -163,6 +168,8 @@ class IVResults:
     - Residuals: `residuals` (structural residuals).
     - Methods: `first_stage()` (one `OLSResults` per endogenous
       variable), `params_table()`.
+    - Weak-instrument diagnostics (methods, computed when called):
+      `cragg_donald()`, `kleibergen_paap()`, `effective_f()`.
 
     Note:
         Users normally do not construct this directly; it is returned
@@ -516,3 +523,127 @@ class IVResults:
             name: OLSResults(raw)
             for name, raw in self._raw.first_stage().items()
         }
+
+    def cragg_donald(self) -> CraggDonaldResult:
+        """Cragg-Donald statistic and Stock-Yogo critical values.
+
+        The Cragg-Donald statistic measures the joint strength of the
+        excluded instruments for all endogenous variables, assuming
+        homoskedastic errors; it does not depend on `cov_type`. With one
+        endogenous variable it equals the partial F-statistic in
+        `weak_instrument_f_statistics`. The Stock-Yogo critical values are
+        tabulated for a limited number of endogenous variables and
+        excluded instruments (see `CraggDonaldResult`).
+
+        The Stock-Yogo critical values are derived for independent,
+        homoskedastic errors; with heteroskedastic, clustered or
+        autocorrelated errors use `kleibergen_paap()` or `effective_f()`.
+
+        This is a post-estimation diagnostic: it is never computed by
+        `fit()`. It re-reads the variables from the data passed to
+        `fit()`, and works the same for `estimator="2sls"` and
+        `estimator="gmm"`.
+
+        Returns:
+            A `CraggDonaldResult` with the statistic, the numbers of
+            endogenous variables and excluded instruments, and the
+            critical values (`None` where not tabulated).
+
+        Raises:
+            ComputationError: The statistic is undefined for these data,
+                for example because the instruments are collinear with the
+                exogenous variables or a first stage fits perfectly.
+        """
+        raw = self._raw.cragg_donald()
+        return CraggDonaldResult(
+            statistic=raw.statistic,
+            n_endog=raw.n_endog,
+            n_excluded=raw.n_excluded,
+            tsls_bias_critical_values=_as_dict(raw.tsls_bias),
+            tsls_size_critical_values=_as_dict(raw.tsls_size),
+        )
+
+    def kleibergen_paap(self) -> KleibergenPaapResult:
+        """Kleibergen-Paap rk LM and rk Wald F statistics.
+
+        Robust versions of the Cragg-Donald analysis. The covariance of
+        the first-stage scores follows the `cov_type` (and `cluster`,
+        `hac_lags`, `hac_time`) of the options passed to `fit()`, so with
+        `cov_type="classical"` the rk Wald F equals the Cragg-Donald
+        statistic. The rk LM statistic tests that the first stage is
+        underidentified.
+
+        This is a post-estimation diagnostic: it is never computed by
+        `fit()`. It re-reads the variables from the data passed to
+        `fit()`, and works the same for `estimator="2sls"` and
+        `estimator="gmm"`.
+
+        Returns:
+            A `KleibergenPaapResult`. Either statistic is `None` when
+            only the other is defined (the Wald F needs one more cluster
+            than the LM).
+
+        Raises:
+            ComputationError: Neither statistic is defined for these
+                data, for example because the instruments are collinear
+                with the exogenous variables or the covariance of the
+                scores is singular.
+        """
+        raw = self._raw.kleibergen_paap()
+        return KleibergenPaapResult(
+            rk_lm_statistic=raw.rk_lm_statistic,
+            rk_lm_df=raw.rk_lm_df,
+            rk_lm_p_value=raw.rk_lm_p_value,
+            rk_wald_f=raw.rk_wald_f,
+            n_endog=raw.n_endog,
+            n_excluded=raw.n_excluded,
+        )
+
+    def effective_f(self, *, alpha: float = 0.05) -> EffectiveFResult:
+        """Montiel Olea-Pflueger effective F statistic.
+
+        A weak-instrument statistic for one endogenous variable that is
+        valid under heteroskedasticity, clustering and autocorrelation.
+        The covariance follows the `cov_type` (and `cluster`, `hac_lags`,
+        `hac_time`) of the options passed to `fit()`; with
+        `cov_type="classical"` it equals the Cragg-Donald statistic.
+
+        This is a post-estimation diagnostic: it is never computed by
+        `fit()`. It re-reads the variables from the data passed to
+        `fit()`, and works the same for `estimator="2sls"` and
+        `estimator="gmm"`.
+
+        Args:
+            alpha: Level of the critical values, strictly between 0 and
+                1. Defaults to 0.05.
+
+        Returns:
+            An `EffectiveFResult` with the statistic and the critical
+            values for the worst-case Nagar bias thresholds.
+
+        Raises:
+            TypeError: `alpha` is not a real number.
+            ValidationError: `alpha` is not strictly between 0 and 1, or
+                the model does not have exactly one endogenous variable.
+            ComputationError: The statistic is undefined for these data,
+                for example because the covariance of the scores is
+                singular (too few clusters or observations).
+        """
+        raw = self._raw.effective_f(alpha)
+        return EffectiveFResult(
+            statistic=raw.statistic,
+            n_excluded=raw.n_excluded,
+            alpha=raw.alpha,
+            simplified_critical_values=_as_dict(
+                raw.simplified_critical_values
+            ),
+            critical_values=_as_dict(raw.critical_values),
+            bias_bound=raw.bias_bound,
+        )
+
+
+def _as_dict(
+    pairs: list[tuple[float, float]] | None,
+) -> dict[float, float] | None:
+    """Turn a list of `(level, value)` pairs into a dict (`None` stays)."""
+    return None if pairs is None else dict(pairs)

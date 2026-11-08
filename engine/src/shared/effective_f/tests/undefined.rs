@@ -179,17 +179,13 @@ fn the_generalized_part_is_undefined_for_unusable_dependent_variables() {
     }
 }
 
-/// `Ŵ2`が特異(クラスター数が操作変数の数より少ない)でも、トレースと固有値で定義できる。
+/// `Ŵ2`が特異(クラスター数が操作変数の数より少ない)なら未定義(論文は`Ŵ2`の正定値を仮定する。KPと揃える)。
 #[test]
-fn a_singular_covariance_still_gives_a_value() {
+fn a_singular_covariance_is_undefined() {
     let (endog, exog, z) = small();
     let labels: Vec<String> = (0..12).map(|i| ["a", "b"][i / 6].to_string()).collect();
     let two = GroupCodes::from_labels_without_keys(&labels);
-    let eff = effective_f(&endog, &exog, &z, 0, ScoreCovariance::Cluster(&two), 0.05).unwrap();
-    assert!(eff.statistic.is_finite() && eff.statistic > 0.0);
-    for cv in eff.simplified_tsls {
-        assert!(cv.effective_df >= 1.0 && cv.effective_df <= 3.0);
-    }
+    assert!(effective_f(&endog, &exog, &z, 0, ScoreCovariance::Cluster(&two), 0.05).is_none());
 }
 
 /// `min tr(S1)/tr(W1)`が1.5e-13(オラクルの`scale = 1e-6`)は、`DEGENERATE_BENCHMARK_TOLERANCE`(1e-12)の

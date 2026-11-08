@@ -48,6 +48,9 @@ const DEGENERATE_BENCHMARK_TOLERANCE: f64 = 1e-12;
 /// `Ŵ2`の最小固有値が、最大固有値のこの割合より負なら、丸め誤差ではなく不定値とみなす。
 const NEGATIVE_EIGENVALUE_TOLERANCE: f64 = 1e-10;
 
+/// `Ŵ2`の最小固有値が最大固有値のこの倍以下ならランク落ちとして未定義にする(KPの共分散の判定と同じ値)。
+const SINGULAR_COVARIANCE_TOLERANCE: f64 = 1e-10;
+
 /// Patnaik臨界値と、その計算に使った量。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PatnaikCriticalValue {
@@ -100,12 +103,12 @@ pub struct EffectiveF {
 ///   TSLSの臨界値(`x = B_TSLS(Ŵ)/τ`、論文 Eq. (5), (21))も計算する。`None`なら単純版だけ。**`y_dep`は
 ///   `y_endog`・`x_exog`・`z`と同じ変換(`√w`の重み、within変換など)を済ませた形で渡す**(変換が違うと、被説明変数の
 ///   誘導形と一次段階の残差が別の変換になり、`W1`・`W12`と`B_TSLS`が誤る)。
-/// - `Ŵ2`は半正定値でよい(クラスターや観測が少なくてランク落ちでも、トレースと固有値だけを使う)。
+/// - `Ŵ2`は正定値を要する(論文の仮定)。ランク落ち(クラスターや観測が少ない)は未定義で`None`。
 ///
 /// 次のとき全体が`None`: 内生変数が1個でない、`K = 0`、`alpha`が(0,1)の外、`X`がフルランクでない、`Z`の列が
 /// `X`の張る空間にほぼ入っている、`Z̃`が共線、一次段階が完全フィット(`1 − R² ≤ 1.4e-14`)、HC2・HC3で
 /// レバレッジが1、`n_absorbed > 0`のHC2・HC3、クラスターが2未満、`Hac`の時間順の長さが行数と違う・`lags >= n`、
-/// 自由度`n − K − k_exog − n_absorbed`が1未満、`Ŵ2`が不定値(最小固有値が最大固有値の`-1e-10`倍より小さい)かゼロ、
+/// 自由度`n − K − k_exog − n_absorbed`が1未満、`Ŵ2`が不定値(最小固有値が最大固有値の`-1e-10`倍より小さい)・ゼロ・ランク落ち(最小固有値が最大固有値の`1e-10`倍以下)、
 /// 入力に非有限値がある。一般化版(`tsls`・`bias_bound`)だけが`None`になるのは: `y_dep`の形が不正・外生変数の
 /// 張る空間にほぼ入っている・非有限値、`2K×2K`の`Ŵ`が不定値、`v1 = βv2`のほぼ比例(`B_TSLS`が未定義)、
 /// `B_TSLS`の格子の評価の失敗が1%を超える。統計量と単純版は返す。
@@ -166,6 +169,17 @@ pub(crate) fn effective_f(
     let w2 = Mat::from_fn(k, k, |a, b| *w.get(last + a, last + b));
 
     let eigenvalues = psd_eigenvalues(&w2)?;
+    // 論文は`Ŵ2`の正定値を仮定する。ランク落ち(クラスターや観測が少ない)では未定義とし、KPと揃える。
+    let largest = eigenvalues
+        .iter()
+        .copied()
+        .fold(f64::NEG_INFINITY, f64::max);
+    if eigenvalues
+        .iter()
+        .any(|&v| v <= SINGULAR_COVARIANCE_TOLERANCE * largest)
+    {
+        return None;
+    }
     let trace: f64 = eigenvalues.iter().sum();
     // `V̂2 = Ŵ2/n`なので`tr(V̂2) = tr(Ŵ2)/n`。
     let statistic = first_stage.coefficients.iter().map(|p| p * p).sum::<f64>() / (trace / n_f);

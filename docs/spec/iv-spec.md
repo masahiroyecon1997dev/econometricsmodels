@@ -283,7 +283,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 - `x_exog=[]`かつ`include_intercept=false`（制限モデルに回帰変数が1つも無い）の退化ケース
   はSSRを`y_endog`自体の二乗和として直接計算する特別扱いをしている。
 
-#### 3.4.1 Cragg-Donald統計量とStock-Yogo臨界値（エンジンのみ）
+#### 3.4.1 Cragg-Donald統計量とStock-Yogo臨界値
 
 内生変数が複数あるとき、内生変数ごとの部分Fでは見えない、操作変数群全体としての弱さを調べる診断。
 
@@ -297,12 +297,12 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   `n_absorbed`は固定効果で吸収したパラメータ数（固定効果が無ければ0）。p値は無い（検定ではない）。
 - **`cov_type`に依存しない**（等分散前提。3.4節と同じ判断）。ロバスト版はKleibergen-Paap（3.4.2節）と
   Montiel Olea-Pflueger（3.4.3節）。
-- **定義できないとき`None`**（`fit()`は失敗させない診断として扱う。理由は区別しない）: 内生変数が
+- **定義できないとき共有関数は`None`**（`compute_cragg_donald`が`WeakInstrumentStatisticUndefined`に直す。理由は区別しない）: 内生変数が
   無い、識別不足（`q < k`）、自由度が1未満、`X`がフルランクでない、`Z`または`Y`の列が`X`の張る空間に
   ほぼ入っている（直交化で元のノルムの`√ε`未満）、`Z̃`がフルランクでない、`S`が数値的に特異
   （内生変数が共線。固有値で確かめる）、いずれかの内生変数の第一段階が完全フィット
-  （`SSR <= q·ε·SST`）、入力に非有限値がある。理由を利用者に示す必要が出たら、`None`を理由つきの
-  `Err`に変える。正本はここ（`cragg_donald`のdocと`iv/CLAUDE.md`は要点だけ）。
+  （`SSR <= q·ε·SST`）、入力に非有限値がある。Pythonへの公開（3.4.4節）では、`compute_*`が入力を見るだけで分かる理由を先に
+  `Err`にし、残りは1つの`Err`（`WeakInstrumentStatisticUndefined`）にまとめる。正本はここ（`cragg_donald`のdocと`iv/CLAUDE.md`は要点だけ）。
 - **臨界値**（`shared/stock_yogo.rs`）: 2SLSの相対バイアス（`b`=0.05/0.10/0.20/0.30。内生変数1〜3個、
   `K2`が`n+2`〜30）と、5%のWald検定のサイズ歪み（`r`=0.10/0.15/0.20/0.25。内生変数1〜2個、
   `K2`が`n`〜30）の2表のみ。表に無い組み合わせは`None`。統計量が臨界値を超えれば5%水準で
@@ -332,7 +332,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   variables/generalized method of moments estimation and testing", *Stata Journal* 7(4), 465-506
   （`ivreg2`の"Cragg-Donald Wald F statistic"との対応）。
 
-#### 3.4.2 Kleibergen-Paap統計量（エンジンのみ）
+#### 3.4.2 Kleibergen-Paap統計量
 
 Cragg-Donaldを、不均一分散・クラスター・自己相関に頑健にした診断。`shared/kleibergen_paap.rs`の
 `kleibergen_paap_lm`（rk LM。過小識別の検定）と`kleibergen_paap_f`（rk Wald F）を、
@@ -389,7 +389,7 @@ Cragg-Donaldを、不均一分散・クラスター・自己相関に頑健に�
   the Kleibergen-Paap rk statistic", Statistical Software Components S456865, Boston College
   （`ivreg2`が使うrk LMとrk Wald Fの実装）。
 
-#### 3.4.3 Montiel Olea-Pflueger有効F統計量（エンジンのみ）
+#### 3.4.3 Montiel Olea-Pflueger有効F統計量
 
 内生変数が1個のときの、ロバストな弱操作変数の診断。`shared/effective_f.rs`の`effective_f`（行列版）を、
 `iv/common/weak_instruments.rs`の`compute_effective_f(&IvInput, &CovType, alpha)`が呼ぶ。
@@ -428,10 +428,10 @@ Cragg-Donaldを、不均一分散・クラスター・自己相関に頑健に�
   （統計量と単純版は返す）。
 - **未実装**: LIML（このプロジェクトに推定量が無い）、内生変数が2個以上（原論文は1個。拡張を実装した参照実装が無く、
   検証手段が無いので`None`）。
-- **`Ŵ2`が特異のとき**: トレースと固有値だけを使うので、半正定値なら値を返す（Kleibergen-Paapは逆行列を使うので`None`）。
-  クラスターが操作変数の数より少ないと推論が不安定になる点は同じ。公開時の扱いは別途決める。丸め誤差の範囲の負の固有値は0に
-  そろえ、最小固有値が最大固有値の`-1e-10`倍より小さい不定値は`None`。
-- **定義できないとき`None`**（診断なので`fit()`は失敗させない）: 内生変数が1個でない、操作変数が無い、`alpha`が(0,1)の外、
+- **`Ŵ2`が特異のとき**: 論文は`Ŵ2`の正定値を仮定するので、Kleibergen-Paapに揃えて未定義とする（最小固有値が最大固有値の
+  `1e-10`倍以下は`None`。以前はトレースと固有値だけで値を返していた）。丸め誤差の範囲の負の固有値は0にそろえ、最小固有値が
+  最大固有値の`-1e-10`倍より小さい不定値も`None`。
+- **定義できないとき共有関数は`None`**（`compute_effective_f`が`WeakInstrumentStatisticUndefined`に直す。内生変数が1個でない・`alpha`が範囲外は先に`EffectiveFEndogenousCount`・`AlphaOutOfRange`）: 内生変数が1個でない、操作変数が無い、`alpha`が(0,1)の外、
   3.4.1節と同じ前処理の条件（`X`がフルランクでない、`Z`が`X`の張る空間に入る、`Z̃`が共線）、一次段階が完全フィット
   （`1 − R² ≤ 1.4e-14`。Kleibergen-Paapと同じ基準で、Cragg-Donaldの`q·ε`に合わせて境界を確かめる）、
   HC2・HC3でレバレッジが1・`n_absorbed > 0`、クラスターが2未満、`Hac`の`lags >= n`・時間順の長さの不一致、
@@ -597,8 +597,27 @@ error.rs`）:
 
 ## 5. 未実装・未対応
 
-- Cragg-Donald統計量とStock-Yogo臨界値のPython公開（エンジンは実装済み、3.4.1節）
-- Kleibergen-Paap統計量のPython公開（エンジンは実装済み、3.4.2節）
-- Montiel Olea-Pflueger有効FのPython公開（エンジンは実装済み、3.4.3節）、複数内生変数への拡張
+- Montiel Olea-Pflueger有効Fの複数内生変数への拡張（3.4.3節）
 - Wu-Hausman検定のGMM対応（`estimator="gmm"`では常に`None`）
 - Wu-Hausman検定の変数ごとのサブセット検定（現状は内生変数全体のジョイント検定のみ）
+
+### 3.4.4 弱操作変数診断のPython公開
+
+`IVResults.cragg_donald()`・`kleibergen_paap()`・`effective_f(*, alpha=0.05)`。`fit()`では計算しない事後診断のメソッドで、
+結果が`fit()`に渡した`DataFrame`への参照（`source_data`）・列名・`IVOptions`の複製を保持し、呼び出し時に`build_iv_input`で
+`IvInput`を作り直して`compute_*`を呼ぶ（2SLSでもGMMでも同じ）。判断:
+
+- **事後診断のメソッドにする**: `alpha`・`cov_type`の選択が利用者のものになる、`fit()`の計算量（IVの性能比較）を増やさない、
+  C統計量（`source_data`を保持して2回GMMを推定し直す）と同じ仕組みを共有できる。Sargan・Wu-Hausman・部分Fは従来どおり`fit()`のプロパティ。
+- **`cov_type`は`fit()`のものを使う**（メソッドの引数にしない）。`cluster`・`hac_lags`・`hac_time`の列も`fit()`のオプションから。
+  CDは等分散で`cov_type`に依存しない。
+- **戻り値は診断ごとの専用のfrozen dataclass**（`DiagnosticResult`を継承しない。CDと有効Fにp値が無いため）。臨界値は
+  水準をキーにした`dict`（CD: バイアス表0.05/0.10/0.20/0.30・サイズ表0.10/0.15/0.20/0.25、有効F: `tau`0.05/0.10/0.20/0.30）で、
+  表に無い組合せは`None`。KPはrk LM（統計量・自由度・p値）とrk Wald Fを独立に`Optional`で持つ（Wald Fはクラスターが1つ多く要る）。
+- **定義できないときは`None`ではなくエラー**: エンジンの`compute_*`は`Result<_, IvError>`。理由は、入力を見るだけで分かるもの
+  （`ALPHA_OUT_OF_RANGE`・`EFFECTIVE_F_ENDOGENOUS_COUNT`、`ValidationError`）と、行列の特異性（`WEAK_INSTRUMENT_STATISTIC_UNDEFINED`、
+  `ComputationError`、文面は診断名のみを変える）。後者はエンジンの下位関数の`None`をまとめたもので、原因（共線・完全フィット・共分散のランク落ち）は
+  文面の括弧内に列挙するだけで区別しない（識別不足・自由度・設定の誤りは`fit()`が先に弾くので、診断では事実上到達しない）。
+  KPはLMとWald Fの両方が未定義のときだけエラー。
+- 検証: CD・KPはlinearmodelsの`first_stage`（`cragg_donald_f`・`kleibergen_paap`・`kleibergen_paap_f`。`robust`のFは`hc1`、LMは`hc0`に対応）、
+  有効Fは`benchmark/iv/references/mop_oracle.py`（`tests/iv/test_iv_weak_diagnostics.py`）。実測の最大相対差は1e-13。ivDiagとの照合は別途。

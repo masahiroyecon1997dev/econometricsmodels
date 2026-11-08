@@ -221,6 +221,12 @@ These are in addition to the situations above.
 - The result has no retained training data (the `OLSResults` returned by `IVResults.first_stage()`).
 - `variables` that is not a `list` of `str`, or `statistic` that is not a `str`, raises `TypeError`.
 
+**IV (`effective_f()`)**
+
+- `alpha` is not strictly between 0 and 1 (`ALPHA_OUT_OF_RANGE`), including NaN.
+- The model does not have exactly one endogenous variable (`EFFECTIVE_F_ENDOGENOUS_COUNT`); use `cragg_donald()` or `kleibergen_paap()` for several.
+- `alpha` that is not a number raises `TypeError`.
+
 **OLS (`white_test()`)**
 
 - `statistic` is not `"lm"` or `"f"`.
@@ -291,6 +297,7 @@ These are in addition to the situations above.
 | Singular pooled regression, non-positive idiosyncratic variance | RE (`variance_method="wallace_hussain"` or `"amemiya"`) | The first-stage pooled regression of Wallace-Hussain is singular (for example a time-invariant regressor and a multiple of it), the estimated `σ_ε²` is not positive so the quasi-demeaning weights are undefined (plm 2.6.7 sets it to 0 and continues), or the moment equations of an unbalanced one-way panel are singular. |
 | Auxiliary matrix too large | OLS (`breusch_godfrey_test()`) | The auxiliary regression matrix (`n` rows by the number of regressors plus `nlags` columns) cannot be allocated, which happens only when `nlags` is close to `n` and `n` is large. Use a smaller `nlags`. |
 | Degenerate diagnostic variable | OLS (`white_test()`, `breusch_pagan_test()`, `breusch_godfrey_test()`) | A variable of the auxiliary regression has zero or non-finite variance after scaling (`DIAGNOSTIC_VARIABLE_DEGENERATE`). Rescale the variables. |
+| Weak-instrument statistic not defined | IV (`cragg_donald()`, `kleibergen_paap()`, `effective_f()`) | A matrix the statistic needs is singular (`WEAK_INSTRUMENT_STATISTIC_UNDEFINED`): the instruments are collinear with the exogenous regressors or with each other, a first stage fits perfectly, or the covariance of the first-stage scores is rank deficient because there are too few observations or clusters. The message names the statistic. `kleibergen_paap()` raises only when neither statistic is defined; `effective_f()` also needs the covariance of the reduced-form coefficients to be positive definite. `fit()` does not call these methods and is not affected. |
 | Singular auxiliary regression | OLS (`white_test()`, `breusch_pagan_test()`, `breusch_godfrey_test()`) | The auxiliary design stays linearly dependent after constant and duplicate terms are dropped (for example a full set of dummies in a model fitted with `include_intercept=False`), or the auxiliary R² is undefined. For `breusch_godfrey_test()` it also covers residuals that are all zero or fitted exactly by the auxiliary regression. Only columns identical to a constant or to an earlier column are dropped; a column that is a multiple of another (for example `2 * x1`) is not, and makes the auxiliary regression singular. The message names the test (`White test`, `Breusch-Pagan test` or `Breusch-Godfrey test`), so it is not confused with the model's own collinearity. |
 
 ### Perfect multicollinearity

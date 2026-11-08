@@ -1,10 +1,13 @@
-"""Result types of post-estimation diagnostic tests.
+"""Result types of post-estimation diagnostics.
 
-Post-estimation diagnostics (for example `OLSResults.white_test()`) are
-separate methods that the user calls after fitting; they are never
-computed by `fit()`. Each returns a frozen dataclass so that values are
-read as attributes (`result.p_value`), like the properties of the fit
-results. Use `to_dict()` to get a JSON-ready `dict`.
+Post-estimation diagnostics (for example `OLSResults.white_test()` or
+`IVResults.cragg_donald()`) are separate methods that the user calls after
+fitting; they are never computed by `fit()`. Each returns a frozen
+dataclass so that values are read as attributes (`result.p_value`), like
+the properties of the fit results. Use `to_dict()` to get a plain `dict`.
+The hypothesis tests of OLS share `DiagnosticResult`; the weak-instrument
+diagnostics of IV have no p-value (or two statistics) and each has its own
+result type.
 """
 
 from __future__ import annotations
@@ -15,7 +18,10 @@ from typing import Any, Literal
 __all__ = [
     "BreuschGodfreyTestResult",
     "BreuschPaganTestResult",
+    "CraggDonaldResult",
     "DiagnosticResult",
+    "EffectiveFResult",
+    "KleibergenPaapResult",
     "WhiteTestResult",
 ]
 
@@ -124,3 +130,145 @@ class BreuschGodfreyTestResult(DiagnosticResult):
     """
 
     nlags: int
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CraggDonaldResult:
+    """Result of `IVResults.cragg_donald()`.
+
+    The Cragg-Donald statistic measures the joint strength of the excluded
+    instruments for all endogenous variables. It is not a test with a
+    p-value: compare it with the Stock-Yogo critical values. A statistic
+    above the critical value for a level rejects, at the 5% significance
+    level, that the instruments are weak at that level. With one endogenous
+    variable it equals the partial F-statistic in
+    `IVResults.weak_instrument_f_statistics`.
+
+    The critical values are tabulated for a limited number of endogenous
+    variables and excluded instruments. Outside the table the statistic is
+    still valid and the corresponding field is `None`.
+
+    Attributes are read-only, but the critical values are plain dicts: do
+    not modify them in place, and note that the instance is therefore not
+    hashable. `to_dict()` returns copies. The keys of those dicts are
+    numbers, which `json.dumps` writes as strings.
+
+    Attributes:
+        statistic: Cragg-Donald Wald F statistic.
+        n_endog: Number of endogenous variables.
+        n_excluded: Number of excluded instruments.
+        tsls_bias_critical_values: Critical values for the relative bias
+            of 2SLS, keyed by the largest acceptable relative bias (0.05,
+            0.10, 0.20, 0.30), or `None` when not tabulated (1 to 3
+            endogenous variables, and at least `n_endog + 2` excluded
+            instruments up to 30).
+        tsls_size_critical_values: Critical values for the size distortion
+            of the 5% Wald test of 2SLS, keyed by the largest acceptable
+            size (0.10, 0.15, 0.20, 0.25), or `None` when not tabulated
+            (1 or 2 endogenous variables, and at least `n_endog` excluded
+            instruments up to 30).
+    """
+
+    statistic: float
+    n_endog: int
+    n_excluded: int
+    tsls_bias_critical_values: dict[float, float] | None
+    tsls_size_critical_values: dict[float, float] | None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the result as a plain `dict` (JSON-ready).
+
+        Returns:
+            A dictionary with one key per field.
+        """
+        return asdict(self)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class KleibergenPaapResult:
+    """Result of `IVResults.kleibergen_paap()`.
+
+    The Kleibergen-Paap statistics are robust versions of the
+    Cragg-Donald analysis: the covariance of the first-stage scores
+    follows the `cov_type` of the fit. The rk LM statistic tests that the
+    first stage is underidentified (the instruments do not span the
+    endogenous variables) and is chi-squared with
+    `n_excluded - n_endog + 1` degrees of freedom. The rk Wald F statistic
+    is the robust counterpart of the Cragg-Donald statistic and has no
+    p-value here. The two are defined independently, so one of them can
+    be `None`: the Wald F needs one more cluster than the LM.
+
+    Attributes are read-only and `to_dict()` returns a new `dict`.
+
+    Attributes:
+        rk_lm_statistic: rk LM statistic, or `None` when it is undefined.
+        rk_lm_df: Degrees of freedom of the rk LM statistic, or `None`
+            exactly when `rk_lm_statistic` is `None`.
+        rk_lm_p_value: P-value of the rk LM statistic, or `None` exactly
+            when `rk_lm_statistic` is `None`.
+        rk_wald_f: rk Wald F statistic, or `None` when it is undefined.
+        n_endog: Number of endogenous variables.
+        n_excluded: Number of excluded instruments.
+    """
+
+    rk_lm_statistic: float | None
+    rk_lm_df: int | None
+    rk_lm_p_value: float | None
+    rk_wald_f: float | None
+    n_endog: int
+    n_excluded: int
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the result as a plain `dict` (JSON-ready).
+
+        Returns:
+            A dictionary with one key per field.
+        """
+        return asdict(self)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class EffectiveFResult:
+    """Result of `IVResults.effective_f()`.
+
+    The effective F statistic of Montiel Olea and Pflueger (2013) is a
+    weak-instrument statistic for one endogenous variable that stays valid
+    under heteroskedasticity, clustering and autocorrelation. Compare it
+    with a critical value: if `statistic` exceeds the critical value for
+    `tau`, the null that the worst-case Nagar bias of 2SLS exceeds `tau`
+    times the benchmark is rejected at level `alpha`. The critical values
+    are keyed by `tau` (0.05, 0.10, 0.20, 0.30).
+
+    Attributes are read-only, but the critical values are plain dicts: do
+    not modify them in place, and note that the instance is therefore not
+    hashable. `to_dict()` returns copies. The keys of those dicts are
+    numbers, which `json.dumps` writes as strings.
+
+    Attributes:
+        statistic: Effective F statistic.
+        n_excluded: Number of excluded instruments.
+        alpha: Level of the critical values.
+        simplified_critical_values: Critical values of the simplified 2SLS
+            bias bound, keyed by `tau`.
+        critical_values: Critical values that use the data-dependent
+            bound `bias_bound` on the worst-case bias (equal to or smaller
+            than `simplified_critical_values`), keyed by `tau`, or `None`
+            when the bound is not defined.
+        bias_bound: The bound on the worst-case Nagar bias of 2SLS, between
+            0 and 1, or `None` when it is not defined.
+    """
+
+    statistic: float
+    n_excluded: int
+    alpha: float
+    simplified_critical_values: dict[float, float]
+    critical_values: dict[float, float] | None
+    bias_bound: float | None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the result as a plain `dict` (JSON-ready).
+
+        Returns:
+            A dictionary with one key per field.
+        """
+        return asdict(self)

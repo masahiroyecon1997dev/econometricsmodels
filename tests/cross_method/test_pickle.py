@@ -51,7 +51,14 @@ PROTOCOLS = range(pickle.HIGHEST_PROTOCOL + 1)
 
 # `fit()`の途中結果を包むだけで、利用者が保持しない内部の型（すぐ`dataclass`に包まれる）。
 TRANSIENT = frozenset(
-    {"WhiteTestOutput", "BreuschPaganTestOutput", "BreuschGodfreyTestOutput"}
+    {
+        "WhiteTestOutput",
+        "BreuschPaganTestOutput",
+        "BreuschGodfreyTestOutput",
+        "CraggDonaldOutput",
+        "KleibergenPaapOutput",
+        "EffectiveFOutput",
+    }
 )
 
 

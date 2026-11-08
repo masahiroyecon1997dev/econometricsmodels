@@ -82,11 +82,18 @@ print(gmm.overid_statistic, gmm.overid_p_value)  # Hansen J (GMM)
 
 first_stage = two_sls.first_stage()
 print(first_stage["endog1"].params)  # OLSResults for endog1 ~ x_exog + instruments
+
+cd = two_sls.cragg_donald()
+print(cd.statistic, cd.tsls_size_critical_values)  # compare with the critical values
+kp = two_sls.kleibergen_paap()
+print(kp.rk_lm_statistic, kp.rk_lm_p_value, kp.rk_wald_f)
+print(two_sls.effective_f(alpha=0.05).simplified_critical_values)
 ```
 
 How to read them:
 
 - **Weak instruments** (`weak_instrument_f_statistics`, one per endogenous variable). The F statistic tests that the excluded instruments do not explain the endogenous variable in the first stage. A small value means the instruments are weak, and the IV estimate and its standard errors are then unreliable. A common rule of thumb is a value above about 10; no verdict is reported, and the statistic assumes homoskedastic errors (see [Inference conventions](../guide/inference-conventions.md#weak-instruments)).
+- **Weak instruments, post-estimation** (`cragg_donald()`, `kleibergen_paap()`, `effective_f()`). These are methods, not fields: they are computed when you call them, not by `fit()`. `cragg_donald()` is the joint statistic for several endogenous variables and comes with Stock-Yogo critical values; it assumes homoskedastic errors. `kleibergen_paap()` and `effective_f()` follow the `cov_type` of the fit, so they stay valid under heteroskedasticity, clustering and autocorrelation; `effective_f()` is for one endogenous variable. Compare the statistic with the critical values in the result: a statistic above the critical value means the instruments are not weak at that level. If a statistic is not defined for your data, the method raises an error rather than returning a missing value.
 - **Overidentification** (`overid_statistic`, `overid_p_value`; the Sargan test for 2SLS and Hansen's J for GMM). The null hypothesis is that all instruments are valid, that is uncorrelated with the error. A small p-value says that at least one instrument is invalid or the model is misspecified; a large one is consistent with validity but does not prove it. Both are `None` when the model is just-identified (as many instruments as endogenous variables), because there is nothing to test. Only Hansen's J is robust to heteroskedasticity and clustering.
 - **Endogeneity** (`wu_hausman_statistic`, `wu_hausman_p_value`, 2SLS only). The null hypothesis is that the suspect regressors are in fact exogenous, so that OLS would be consistent. A small p-value supports treating them as endogenous and using IV; a large one means the data cannot distinguish IV from OLS, and OLS is then more precise.
 

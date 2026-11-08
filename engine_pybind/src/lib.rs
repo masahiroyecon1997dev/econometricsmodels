@@ -408,6 +408,7 @@ fn _lib(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<IVResult>()?;
     m.add_class::<iv::common::CraggDonaldOutput>()?;
     m.add_class::<iv::common::KleibergenPaapOutput>()?;
+    m.add_class::<iv::common::CStatisticOutput>()?;
     m.add_class::<iv::common::EffectiveFOutput>()?;
     m.add_function(wrap_pyfunction!(fit_fe, m)?)?;
     m.add_class::<FEOptions>()?;

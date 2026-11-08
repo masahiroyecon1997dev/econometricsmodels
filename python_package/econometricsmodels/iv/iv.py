@@ -29,6 +29,7 @@ from .._results_utils import (
 )
 from ..diagnostics import (
     CraggDonaldResult,
+    CStatisticResult,
     EffectiveFResult,
     KleibergenPaapResult,
 )
@@ -158,7 +159,8 @@ class IVResults:
     - Overidentification (Sargan or Hansen J): `overid_statistic`,
       `overid_p_value`, `overid_df`.
     - Endogeneity (2SLS only): `wu_hausman_statistic`,
-      `wu_hausman_p_value`, `wu_hausman_df_num`, `wu_hausman_df_denom`.
+      `wu_hausman_p_value`, `wu_hausman_df_num`, `wu_hausman_df_denom`;
+      for either estimator, see `c_stat()` below.
     - Fit: `r_squared`, `adj_r_squared`.
     - Estimator used: `estimator`, `gmm_type`, `gmm_weight_type`,
       `converged`, `n_iter`.
@@ -170,6 +172,8 @@ class IVResults:
       variable), `params_table()`.
     - Weak-instrument diagnostics (methods, computed when called):
       `cragg_donald()`, `kleibergen_paap()`, `effective_f()`.
+    - Exogeneity of endogenous variables and validity of instruments for
+      either estimator (method, computed when called): `c_stat()`.
 
     Note:
         Users normally do not construct this directly; it is returned
@@ -645,6 +649,75 @@ class IVResults:
             ),
             critical_values=_as_dict(raw.critical_values),
             bias_bound=raw.bias_bound,
+        )
+
+    def c_stat(
+        self,
+        *,
+        variables: list[str] | None = None,
+        instruments: list[str] | None = None,
+    ) -> CStatisticResult:
+        """C statistic (difference-in-Hansen test).
+
+        Tests whether endogenous variables in `variables` are in fact
+        exogenous, and whether excluded instruments in `instruments` are
+        uncorrelated with the error. The model is estimated by two-step GMM
+        with and without the tested moment conditions, and the statistic is
+        the difference of the two Hansen J statistics, which is chi-squared
+        distributed under the null that the tested moment conditions are
+        valid. Both J statistics use the same estimate of the covariance of
+        the moment conditions, so the statistic is never negative.
+
+        The covariance of the moment conditions follows `gmm_weight_type`
+        (with `cluster`, `hac_lags` and `hac_time`) when `estimator="gmm"`
+        with `gmm_type` `"two_step"` or `"iterated"`, and the family of
+        `cov_type` otherwise (`"classical"`; `"hc0"` to `"hc3"` as a robust
+        covariance; `"hac"`; `"cluster"`). It does not depend on `gmm_type`,
+        `gmm_max_iter` or `gmm_tol`. In particular a model fitted with
+        `gmm_type="one_step"` gets the two-step statistic. With the
+        classical covariance the statistic is a difference of Sargan
+        statistics that share one error variance.
+
+        This is a post-estimation diagnostic: it is never computed by
+        `fit()`. It re-reads the variables from the data passed to `fit()`.
+
+        Args:
+            variables: Names from `x_endog` whose exogeneity is tested.
+                Defaults to `None` (no endogenous variable is tested). The
+                names are reported in the order of `x_endog`, not the order
+                given.
+            instruments: Names from the excluded `instruments` whose
+                orthogonality is tested. Defaults to `None` (no instrument
+                is tested). At least as many instruments as endogenous
+                variables must remain. At least one of the two arguments is
+                required.
+
+        Returns:
+            A `CStatisticResult` with the statistic, p-value, degrees of
+            freedom and the two J statistics.
+
+        Raises:
+            TypeError: `variables` or `instruments` is not a list of str.
+            ValidationError: Neither argument is given, a list is empty or
+                repeats a name, a name in `variables` is not in `x_endog`,
+                a name in `instruments` is not among the excluded
+                instruments, or too many instruments are tested.
+            ComputationError: The statistic is undefined for these data, for
+                example because the instruments are collinear or there are
+                too few clusters for the covariance of the moment
+                conditions of the model with the tested moment conditions.
+        """
+        raw = self._raw.c_stat(variables, instruments)
+        return CStatisticResult(
+            statistic=raw.statistic,
+            p_value=raw.p_value,
+            df=raw.df,
+            df_denom=None,
+            distribution="chi2",
+            variables=list(raw.variables),
+            instruments=list(raw.instruments),
+            j_with_tested=raw.j_with_tested,
+            j_without_tested=raw.j_without_tested,
         )
 
 

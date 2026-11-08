@@ -8,8 +8,8 @@ use pyo3::prelude::*;
 use std::collections::HashMap;
 
 use super::diagnostics::{
-    CraggDonaldOutput, EffectiveFOutput, KleibergenPaapOutput, run_cragg_donald, run_effective_f,
-    run_kleibergen_paap,
+    CStatisticOutput, CraggDonaldOutput, EffectiveFOutput, KleibergenPaapOutput, run_c_stat,
+    run_cragg_donald, run_effective_f, run_kleibergen_paap,
 };
 use super::options::IVOptions;
 
@@ -382,5 +382,34 @@ impl IVResult {
             let alpha = extract_strict_float(alpha, "alpha")?;
             run_effective_f(self, py, alpha)
         })
+    }
+
+    /// C statistic (difference-in-Hansen test) of the exogeneity of endogenous variables
+    /// and of the orthogonality of excluded instruments.
+    ///
+    /// A post-estimation diagnostic: never computed by `fit()`. The model is estimated twice by
+    /// two-step GMM, with and without the tested moment conditions, from the same covariance of
+    /// the moment conditions; the statistic is the difference of the two Hansen J statistics.
+    /// The weight follows `gmm_weight_type` for `estimator="gmm"` (`cluster`, `hac_lags` and
+    /// `hac_time` included) and the `cov_type` family otherwise (also for
+    /// `gmm_type="one_step"`, which has no weight matrix).
+    ///
+    /// Raises
+    /// ------
+    /// TypeError
+    ///     `variables` or `instruments` is not a list of str.
+    /// ValidationError
+    ///     Nothing is tested, a list is empty or repeats a name, a name is not an endogenous
+    ///     variable (instrument) of the model, or too many instruments are tested.
+    /// ComputationError
+    ///     The statistic is undefined for these data.
+    #[pyo3(signature = (variables=None, instruments=None))]
+    fn c_stat(
+        &self,
+        py: Python<'_>,
+        variables: Option<&Bound<'_, PyAny>>,
+        instruments: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<CStatisticOutput> {
+        guard(|| run_c_stat(self, py, variables, instruments))
     }
 }

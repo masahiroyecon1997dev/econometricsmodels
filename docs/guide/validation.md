@@ -255,6 +255,14 @@ These are in addition to the situations above.
 - The model does not have exactly one endogenous variable (`EFFECTIVE_F_ENDOGENOUS_COUNT`); use `cragg_donald()` or `kleibergen_paap()` for several.
 - `alpha` that is not a number raises `TypeError`.
 
+**IV (`c_stat()`)**
+
+- Neither `variables` nor `instruments` is given (`C_STATISTIC_NOTHING_TO_TEST`).
+- A list is empty or names a column twice.
+- A name in `variables` is not one of the model's `x_endog`, or a name in `instruments` is not one of its excluded instruments (`C_STATISTIC_UNKNOWN_VARIABLE`).
+- Testing the listed instruments would leave fewer excluded instruments than endogenous variables, so the model without them is not identified (`C_STATISTIC_TOO_MANY_TESTED_INSTRUMENTS`).
+- `variables` or `instruments` that is not a `list` of `str` raises `TypeError`.
+
 **FE**
 
 - A group (a level of a column of `effects`) with a single observation: a singleton entity or, when `effects` has more columns, a singleton group in any of its columns (`SINGLETON_GROUP`). Singleton groups are never dropped automatically; the error gives `n_dropped_rows`, the number of rows that removing singleton groups repeatedly would drop (with more than one column, dropping one can leave another group with a single row).
@@ -298,6 +306,7 @@ These are in addition to the situations above.
 | Auxiliary matrix too large | OLS (`breusch_godfrey_test()`) | The auxiliary regression matrix (`n` rows by the number of regressors plus `nlags` columns) cannot be allocated, which happens only when `nlags` is close to `n` and `n` is large. Use a smaller `nlags`. |
 | Degenerate diagnostic variable | OLS (`white_test()`, `breusch_pagan_test()`, `breusch_godfrey_test()`) | A variable of the auxiliary regression has zero or non-finite variance after scaling (`DIAGNOSTIC_VARIABLE_DEGENERATE`). Rescale the variables. |
 | Weak-instrument statistic not defined | IV (`cragg_donald()`, `kleibergen_paap()`, `effective_f()`) | A matrix the statistic needs is singular (`WEAK_INSTRUMENT_STATISTIC_UNDEFINED`). Typical causes are instruments that are collinear with the exogenous regressors or with each other, a first stage that fits perfectly, and a covariance of the first-stage scores that is rank deficient because there are too few observations or clusters. The message names the statistic. `kleibergen_paap()` raises only when neither statistic is defined; `effective_f()` also needs the covariance of the reduced-form coefficients to be positive definite. `fit()` does not call these methods and is not affected. |
+| C statistic not defined | IV (`c_stat()`) | A matrix the statistic needs is singular (`C_STATISTIC_UNDEFINED`). The usual cause is a covariance of the moment conditions that is rank deficient because there are too few clusters or observations: a cluster weight needs at least as many clusters as the model with the tested moment conditions has instruments (the exogenous regressors, the tested endogenous variables and all excluded instruments), which can be more than `fit()` needed. A structural equation that fits perfectly or collinear instruments also make it undefined. `fit()` does not call this method and is not affected. |
 | Singular auxiliary regression | OLS (`white_test()`, `breusch_pagan_test()`, `breusch_godfrey_test()`) | The auxiliary design stays linearly dependent after constant and duplicate terms are dropped (for example a full set of dummies in a model fitted with `include_intercept=False`), or the auxiliary R² is undefined. For `breusch_godfrey_test()` it also covers residuals that are all zero or fitted exactly by the auxiliary regression. Only columns identical to a constant or to an earlier column are dropped; a column that is a multiple of another (for example `2 * x1`) is not, and makes the auxiliary regression singular. The message names the test (`White test`, `Breusch-Pagan test` or `Breusch-Godfrey test`), so it is not confused with the model's own collinearity. |
 
 ### Perfect multicollinearity

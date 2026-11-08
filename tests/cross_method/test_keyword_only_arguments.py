@@ -133,7 +133,12 @@ _RESULT_METHODS = {
     "LogitResults": ("predict", "augment", "pred_table", "marginal_effects"),
     "ProbitResults": ("predict", "augment", "pred_table", "marginal_effects"),
     "TobitResults": ("predict", "augment", "marginal_effects"),
-    "IVResults": ("cragg_donald", "kleibergen_paap", "effective_f"),
+    "IVResults": (
+        "cragg_donald",
+        "kleibergen_paap",
+        "effective_f",
+        "c_stat",
+    ),
 }
 
 
@@ -213,6 +218,7 @@ def test_result_methods_reject_positional_arguments(
         lambda: tobit_result.predict(new_data),
         lambda: tobit_result.marginal_effects("mean"),
         lambda: iv_result.effective_f(0.05),
+        lambda: iv_result.c_stat(["x1"]),
     ):
         with pytest.raises(TypeError, match="positional"):
             call()

@@ -113,6 +113,22 @@ IV_TOLERANCES: dict[str, dict[str, float]] = {
     "iv_weak_diagnostics_crosscheck": {
         "rtol": 1e-10,
     },
+    # --- C統計量（`IVResults.c_stat()`）。リファレンスはlinearmodelsの`c_stat`（内生変数の
+    # 外生性）と、`IVGMM`の部品を使った別計算（除外操作変数の直交性）、それらと一致を確認した
+    # numpy版のオラクル（`c_statistic_oracle.py`）。 ---
+    # `rtol`: 統計量・p値・J統計量。実測の最大相対差は合成データで約1e-12以下、実データcard
+    # （列のスケールが大きく違う）で8.2e-12で、マージンは1桁以上。
+    # `rtol_boundary_cluster`: クラスター数が検定するモーメント条件を含むモデルの操作変数の数
+    # ちょうど（`S_e`がほぼ階数落ちの境界）の実データcard（地域9グループ）。統計量の実測は
+    # 7.4e-11、p値は1.4e-10で、基本の1e-10を超える。`S_e`の条件数が大きく誤差が増幅される
+    # ためなので、このケースだけ方針の基本の1e-8にする。
+    # `atol_just_identified`: 検定しない側が丁度識別のとき、本実装のJ_cは厳密に0で、参照
+    # （`IVGMM`の部品）は丸め誤差を持つ。実測の最大は4.4e-18。
+    "iv_c_statistic": {
+        "rtol": 1e-10,
+        "rtol_boundary_cluster": 1e-8,
+        "atol_just_identified": 1e-12,
+    },
     # --- 本実装内の不変条件（リファレンス実装との比較ではない） ---
     # 同じ入力に対して計算経路が異なる出力どうしの一致の確認（`ols_api`と同じ方針、
     # 根拠は`_tolerances_linear.py`の`ols_api`のコメント参照）。

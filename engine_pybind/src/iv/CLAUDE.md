@@ -27,7 +27,9 @@
 
 ## 弱操作変数診断のメソッド（`cragg_donald()`・`kleibergen_paap()`・`effective_f()`）
 
-`fit()`では計算しない事後診断。`IVResult`が非公開フィールドで`source_data`（`fit()`に渡した`DataFrame`への参照）・`options`（`IVOptions`の複製）・`x_exog`・`x_endog`・`instruments`の列名（`y`は`dep_var_name`）を持ち、`diagnostics.rs`の`Rebuilt`が`select_columns`で列を取り込み直して（GILが要る）、`py.detach`の中で`build_iv_input`→`engine`の`compute_*`を呼ぶ。`fit()`と同じ`build_iv_input`なので列の検査と並びが一致する。`source_data`と`options`は`fit`が結果を組み立てた後でGILを持って付ける（`OLSResult`と同じ）。`options`の`PickleField`は`result.rs`にある（`IVOptions`自身の`__reduce__`に任せる）。出力は`CraggDonaldOutput`・`KleibergenPaapOutput`・`EffectiveFOutput`（臨界値は`(水準, 値)`のタプルの列で、Python側が`dict`にする）。`tests/cross_method/test_pickle.py`の`TRANSIENT`・`test_gil_release.py`・`test_keyword_only_arguments.py`に登録済み。
+`fit()`では計算しない事後診断。`IVResult`が非公開フィールドで`source_data`（`fit()`に渡した`DataFrame`への参照）・`options`（`IVOptions`の複製）・`x_exog`・`x_endog`・`instruments`の列名（`y`は`dep_var_name`）を持ち、`diagnostics.rs`の`Rebuilt`が`select_columns`で列を取り込み直して（GILが要る）、`py.detach`の中で`build_iv_input`→`engine`の`compute_*`を呼ぶ。`fit()`と同じ`build_iv_input`なので列の検査と並びが一致する。`source_data`と`options`は`fit`が結果を組み立てた後でGILを持って付ける（`OLSResult`と同じ）。`options`の`PickleField`は`result.rs`にある（`IVOptions`自身の`__reduce__`に任せる）。出力は`CraggDonaldOutput`・`KleibergenPaapOutput`・`EffectiveFOutput`（臨界値は`(水準, 値)`のタプルの列で、Python側が`dict`にする）。
+
+**`c_stat()`（C統計量）も同じ仕組み**（`run_c_stat`、出力は`CStatisticOutput`）。名前（`variables`は`x_endog`、`instruments`は除外操作変数）は、GILを持つ側で一覧の検査（空は`ROLE_EMPTY`、重複は`ROLE_DUPLICATE_COLUMN`）と位置への変換（モデルに無い名前は`C_STATISTIC_UNKNOWN_VARIABLE`。`COLUMN_NOT_FOUND`は`hint`が`data`の列を指すので使わない）を済ませ、昇順の位置をengineへ渡す。両方未指定はengineの`C_STATISTIC_NOTHING_TO_TEST`に任せる。重みは`gmm_type`が`two_step`・`iterated`なら`BuiltIvInput.plan.gmm`の`weight`、それ以外（2SLS・1段階GMM）は`weight_type_for_cov_type(&built.cov_type)`（`c_statistic_weight`）。`tests/cross_method/test_pickle.py`の`TRANSIENT`・`test_gil_release.py`・`test_keyword_only_arguments.py`に登録済み。
 
 ## `first_stage()`
 

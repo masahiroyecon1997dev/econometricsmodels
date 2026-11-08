@@ -5,9 +5,9 @@ Post-estimation diagnostics (for example `OLSResults.white_test()` or
 fitting; they are never computed by `fit()`. Each returns a frozen
 dataclass so that values are read as attributes (`result.p_value`), like
 the properties of the fit results. Use `to_dict()` to get a plain `dict`.
-The hypothesis tests of OLS share `DiagnosticResult`; the weak-instrument
-diagnostics of IV have no p-value (or two statistics) and each has its own
-result type.
+The hypothesis tests (those of OLS and the C statistic of IV) share
+`DiagnosticResult`; the weak-instrument diagnostics of IV have no p-value
+(or two statistics) and each has its own result type.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from typing import Any, Literal
 __all__ = [
     "BreuschGodfreyTestResult",
     "BreuschPaganTestResult",
+    "CStatisticResult",
     "CraggDonaldResult",
     "DiagnosticResult",
     "EffectiveFResult",
@@ -289,3 +290,42 @@ class EffectiveFResult:
             A dictionary with one key per field.
         """
         return asdict(self)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CStatisticResult(DiagnosticResult):
+    """Result of `IVResults.c_stat()`.
+
+    The C statistic (difference-in-Hansen test) is the difference of the
+    Hansen J statistics of two models that differ in the moment conditions
+    of the tested variables and instruments. It is chi-squared distributed
+    with `df` degrees of freedom, where `df` is the number of tested
+    endogenous variables plus the number of tested instruments, and the
+    null hypothesis is that all of the tested moment conditions are valid:
+    the tested endogenous variables are exogenous, and the tested
+    instruments are uncorrelated with the error. A small p-value rejects
+    it. Both J statistics use the same estimate of the covariance of the
+    moment conditions, so `statistic` is never negative and equals
+    `j_with_tested - j_without_tested`.
+
+    `distribution` is `"chi2"` and `df_denom` is `None`.
+
+    Attributes are read-only, but `variables` and `instruments` are plain
+    lists: do not modify them in place, and note that the instance is
+    therefore not hashable. `to_dict()` returns copies.
+
+    Attributes:
+        variables: Tested endogenous variables, in the order of `x_endog`.
+        instruments: Tested excluded instruments, in the order of
+            `instruments`.
+        j_with_tested: Hansen J statistic of the model that uses the tested
+            moment conditions: the tested variables are treated as
+            exogenous, and the tested instruments are used.
+        j_without_tested: Hansen J statistic of the model without them.
+            It is exactly 0 when that model is just identified.
+    """
+
+    variables: list[str]
+    instruments: list[str]
+    j_with_tested: float
+    j_without_tested: float

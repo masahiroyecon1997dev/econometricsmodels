@@ -208,7 +208,37 @@ The regression-based (control function) version: the first-stage residuals \(\ha
 
 linearmodels reports the Wald statistic of this regression with a chi-squared reference. Here that statistic is divided by the number of endogenous variables and compared with an F distribution. The degrees of freedom are the number of endogenous variables and the residual degrees of freedom of the augmented regression, \(n - k - k_{\text{endog}}\) (\(G - 1\) with `cov_type="cluster"`).
 
-It is `None` for `estimator="gmm"`, and also when the augmented regression cannot be estimated: it has \(k_{\text{endog}}\) more columns than the structural equation, so there may be too few observations or clusters, or it may fit perfectly.
+It is `None` for `estimator="gmm"` (use [`c_stat()`](#exogeneity-and-instrument-validity-post-estimation-c_stat) there), and also when the augmented regression cannot be estimated: it has \(k_{\text{endog}}\) more columns than the structural equation, so there may be too few observations or clusters, or it may fit perfectly.
+
+### Exogeneity and instrument validity, post-estimation: `c_stat()`
+
+`c_stat()` is a method, not a field: it is never computed by `fit()`. It re-reads the variables from the data passed to `fit()` and works for both estimators. It tests the validity of a set \(B\) of moment conditions with the C statistic, also called the difference-in-Hansen or GMM distance test (Eichenbaum, Hansen and Singleton, 1988). The null hypothesis is that all moment conditions in \(B\) are valid: the endogenous variables in `variables` are exogenous, and the excluded instruments in `instruments` are uncorrelated with the error. Either list may be given, or both.
+
+With \(X_1\) the exogenous regressors (the constant included), \(X_{2B}\) the tested endogenous variables and \(Z_2\) all excluded instruments, the model is estimated by two-step GMM twice, with the instruments
+
+\[
+Z_{\mathrm{full}} = [X_1,\ X_{2B},\ Z_2], \qquad
+Z_c = [X_1,\ Z_2 \setminus Z_{2B}],
+\]
+
+where \(Z_{2B}\) are the tested instruments. The structural equation is the same in both. In \(Z_{\mathrm{full}}\) the tested endogenous variables are used as their own instruments, which is valid if they are exogenous; \(Z_c\) leaves out all tested moment conditions.
+
+1. With \(Z_{\mathrm{full}}\), the first step uses the weight \((Z_{\mathrm{full}}'Z_{\mathrm{full}})^{-1}\). The residuals \(\hat u\) give the covariance of the moment conditions \(S_e\), and the second step uses \(S_e^{-1}\). The Hansen statistic of this fit is \(J_e = (Z_{\mathrm{full}}'\hat u)'S_e^{-1}(Z_{\mathrm{full}}'\hat u)\), with \(\hat u\) the final residuals. It is not divided by \(n\), because \(S_e\) is a sum over observations.
+2. With \(Z_c\), the weight is the inverse of the sub-matrix \(S_c\) of \(S_e\) that belongs to \(Z_c\) (not the sub-matrix of \(S_e^{-1}\)). The Hansen statistic of this fit is \(J_c\). It is exactly 0 when \(Z_c\) is just identified.
+3. The statistic is \(C = J_e - J_c \sim \chi^2(m)\), where \(m\) is the number of tested endogenous variables plus the number of tested instruments. Both \(J\) statistics use the same \(S_e\), so \(C\) is never negative.
+
+\(S_e\) is the sum over observations of the outer products of \(\hat u_i z_i\), without any small-sample correction: \(\sum_i \hat u_i^2 z_i z_i'\) for a robust weight, the cluster sums for a cluster weight, the Bartlett kernel sum for a HAC weight, and \(\hat\sigma^2 Z_{\mathrm{full}}'Z_{\mathrm{full}}\) with \(\hat\sigma^2 = \hat u'\hat u/n\) for a classical weight. The kind of weight comes from the fit:
+
+| Fit | Weight of \(S_e\) |
+|---|---|
+| `estimator="gmm"`, `gmm_type` `"two_step"` or `"iterated"` | `gmm_weight_type` (with `cluster`, `hac_lags`, `hac_time`) |
+| `estimator="2sls"`, or `gmm_type="one_step"` (which has no weight matrix) | the family of `cov_type`: `"classical"` for `"classical"`; robust for `"hc0"` to `"hc3"`; `"hac"`; `"cluster"` |
+
+The statistic does not depend on `gmm_type`, `gmm_max_iter` or `gmm_tol`, and for a GMM fit not on `cov_type`: a model fitted with `gmm_type="one_step"` gets the two-step statistic. With a classical weight, \(C\) is a difference of Sargan statistics that share one error variance estimate. Without a constant, the residuals are not centered to estimate \(\hat\sigma^2\) (as in the Hansen J statistic of `fit()`).
+
+The variables in \(B\) must leave the model identified: at least as many excluded instruments as endogenous variables must remain in \(Z_c\). The statistic is not defined when a matrix it needs is singular: the instruments are collinear, the structural equation fits perfectly, or \(S_e\) has too little rank, for example a cluster weight with fewer clusters than the \(k_1 + m_B + q\) columns of \(Z_{\mathrm{full}}\) (\(m_B\) tested endogenous variables, \(q\) excluded instruments), which can happen although the fit itself succeeds.
+
+References: Eichenbaum, Hansen and Singleton (1988), "A time series analysis of representative agent models of consumption and leisure choice under uncertainty", Quarterly Journal of Economics 103; Hayashi (2000), *Econometrics*, pp. 218-221 and 232-234; Baum, Schaffer and Stillman (2003), "Instrumental variables and GMM: estimation and testing", Stata Journal 3.
 
 ## First stage: `first_stage()`
 

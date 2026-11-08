@@ -46,7 +46,9 @@ mod option_values;
 mod options;
 mod result;
 
-pub(crate) use diagnostics::{CraggDonaldOutput, EffectiveFOutput, KleibergenPaapOutput};
+pub(crate) use diagnostics::{
+    CStatisticOutput, CraggDonaldOutput, EffectiveFOutput, KleibergenPaapOutput,
+};
 pub(crate) use fit::fit;
 pub(crate) use options::IVOptions;
 pub(crate) use result::IVResult;

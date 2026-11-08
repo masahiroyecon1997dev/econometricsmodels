@@ -7,18 +7,24 @@
 //! `compute_*`を呼ぶ（`fit()`と同じ`build_iv_input`なので、列の検査・並びは`fit()`と一致する）。
 
 use engine::iv::common::{
-    IvInput, PatnaikCriticalValue, StockYogoCriticalValues, compute_cragg_donald,
+    IvError, IvInput, PatnaikCriticalValue, StockYogoCriticalValues, compute_cragg_donald,
     compute_effective_f, compute_kleibergen_paap,
 };
+use engine::iv::gmm::{
+    CStatisticTarget, GmmType, WeightType, compute_c_statistic, weight_type_for_cov_type,
+};
 use engine::linear::ols::CovType;
+use engine::shared::error_catalog::{ErrorCode, ParamValue};
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 
 use super::error::iv_error_to_pyerr;
-use super::input::build_iv_input;
+use super::input::{BuiltIvInput, build_iv_input};
 use super::options::IVOptions;
 use super::result::IVResult;
-use crate::shared::column_extraction::select_columns;
+use crate::shared::column_extraction::{extract_column_list, select_columns};
+use crate::shared::errors::user_error;
+use crate::shared::validation::{validate_no_duplicate_within_role, validate_role_non_empty};
 
 /// Raw result of `IVResults.cragg_donald()`; the Python package wraps it in its
 /// `CraggDonaldResult` dataclass.
@@ -86,7 +92,32 @@ pub struct EffectiveFOutput {
     pub bias_bound: Option<f64>,
 }
 
-/// `fit()`に渡したデータから、`fit()`と同じ手順で`IvInput`と`CovType`を作り直す材料。
+/// Raw result of `IVResults.c_stat()`; the Python package wraps it in its `CStatisticResult`
+/// dataclass.
+///
+/// `variables` and `instruments` are the tested names, in the order of the model's
+/// `x_endog` and `instruments`.
+#[pyclass(skip_from_py_object, module = "econometricsmodels._lib")]
+#[derive(Debug, Clone)]
+pub struct CStatisticOutput {
+    #[pyo3(get)]
+    pub statistic: f64,
+    #[pyo3(get)]
+    pub p_value: f64,
+    #[pyo3(get)]
+    pub df: usize,
+    #[pyo3(get)]
+    pub j_with_tested: f64,
+    #[pyo3(get)]
+    pub j_without_tested: f64,
+    #[pyo3(get)]
+    pub variables: Vec<String>,
+    #[pyo3(get)]
+    pub instruments: Vec<String>,
+}
+
+/// `fit()`に渡したデータから、`fit()`と同じ手順で入力一式（`IvInput`・`CovType`・GMMの重みの設定）を
+/// 作り直す材料。
 ///
 /// 元のデータの取り込み（GILが要る）までをここで済ませ、以降はPythonオブジェクトに触れない。
 struct Rebuilt {
@@ -120,6 +151,11 @@ impl Rebuilt {
 
     /// 診断の計算（`compute`）に`IvInput`と`cov_type`を渡す。
     fn with_input<T>(self, compute: impl FnOnce(&IvInput, &CovType) -> PyResult<T>) -> PyResult<T> {
+        self.with_built(|built| compute(&built.input, &built.cov_type))
+    }
+
+    /// 診断の計算（`compute`）に、`fit()`と同じ手順で作った入力一式（GMMの重みの設定を含む）を渡す。
+    fn with_built<T>(self, compute: impl FnOnce(&BuiltIvInput) -> PyResult<T>) -> PyResult<T> {
         let built = build_iv_input(
             &self.frame,
             self.y,
@@ -128,7 +164,7 @@ impl Rebuilt {
             self.instruments,
             &self.options,
         )?;
-        compute(&built.input, &built.cov_type)
+        compute(&built)
     }
 }
 
@@ -196,6 +232,119 @@ pub(super) fn run_effective_f(
                 simplified_critical_values: patnaik(&eff.simplified_tsls),
                 critical_values: eff.tsls.as_ref().map(|values| patnaik(values)),
                 bias_bound: eff.bias_bound,
+            })
+        })
+    })
+}
+
+/// 検定する名前を`names`（モデルの列名）の位置にする（昇順）。`names`に無い名前は`ValidationError`。
+fn positions_of(
+    tested: &[String],
+    names: &[String],
+    argument: &'static str,
+    role: &'static str,
+) -> PyResult<Vec<usize>> {
+    let mut positions = tested
+        .iter()
+        .map(|name| {
+            names
+                .iter()
+                .position(|candidate| candidate == name)
+                .ok_or_else(|| {
+                    user_error(
+                        ErrorCode::CStatisticUnknownVariable,
+                        vec![
+                            ("name", ParamValue::from(name.as_str())),
+                            ("argument", ParamValue::from(argument)),
+                            ("role", ParamValue::from(role)),
+                        ],
+                    )
+                })
+        })
+        .collect::<PyResult<Vec<usize>>>()?;
+    positions.sort_unstable();
+    Ok(positions)
+}
+
+/// 引数の型の検査（`list[str]`であること）。指定されたときだけ。値の検査は[`checked_names`]。
+fn extract_names(
+    value: Option<&Bound<'_, PyAny>>,
+    argument: &'static str,
+) -> PyResult<Option<Vec<String>>> {
+    value
+        .map(|value| extract_column_list(value, argument))
+        .transpose()
+}
+
+/// 名前の一覧の値の検査（空の一覧と重複は`ValidationError`）。指定が無ければ空。
+fn checked_names(names: Option<Vec<String>>, argument: &'static str) -> PyResult<Vec<String>> {
+    let Some(names) = names else {
+        return Ok(Vec::new());
+    };
+    validate_role_non_empty(argument, &names)?;
+    validate_no_duplicate_within_role(argument, &names)?;
+    Ok(names)
+}
+
+/// C統計量の重み: GMM（`two_step`・`iterated`）は`gmm_weight_type`の重み、2SLSと1段階GMM
+/// （重み行列を持たない）は`cov_type`の系統の重み。
+fn c_statistic_weight(built: &BuiltIvInput) -> WeightType {
+    match built.plan.gmm.as_ref().map(|setup| &setup.gmm_type) {
+        Some(GmmType::TwoStep { weight } | GmmType::Iterated { weight, .. }) => weight.clone(),
+        // 重み行列を持たない（2SLSと1段階GMM）。
+        Some(GmmType::OneStep) | None => weight_type_for_cov_type(&built.cov_type),
+    }
+}
+
+pub(super) fn run_c_stat(
+    model: &IVResult,
+    py: Python<'_>,
+    variables: Option<&Bound<'_, PyAny>>,
+    instruments: Option<&Bound<'_, PyAny>>,
+) -> PyResult<CStatisticOutput> {
+    // 型の検査を両方の引数で先に済ませ、そのあとで値（空・重複・名前）を検査する
+    // （`docs/guide/validation.md`の報告順）。
+    let variables = extract_names(variables, "variables")?;
+    let instruments = extract_names(instruments, "instruments")?;
+    if variables.is_none() && instruments.is_none() {
+        return Err(iv_error_to_pyerr(IvError::CStatisticNothingToTest));
+    }
+    let variables = checked_names(variables, "variables")?;
+    let instruments = checked_names(instruments, "instruments")?;
+    let endog_positions = positions_of(&variables, &model.x_endog, "variables", "x_endog")?;
+    let instrument_positions = positions_of(
+        &instruments,
+        &model.instruments,
+        "instruments",
+        "instruments",
+    )?;
+    let target = CStatisticTarget {
+        endog: endog_positions.clone(),
+        instruments: instrument_positions.clone(),
+    };
+    let tested_endog: Vec<String> = endog_positions
+        .iter()
+        .map(|&i| model.x_endog[i].clone())
+        .collect();
+    let tested_instruments: Vec<String> = instrument_positions
+        .iter()
+        .map(|&i| model.instruments[i].clone())
+        .collect();
+
+    let rebuilt = Rebuilt::new(model, py)?;
+    py.detach(|| {
+        rebuilt.with_built(|built| {
+            let weight = c_statistic_weight(built);
+            let c =
+                compute_c_statistic(&built.input, &target, &weight).map_err(iv_error_to_pyerr)?;
+            Ok(CStatisticOutput {
+                statistic: c.statistic,
+                p_value: c.p_value,
+                df: c.df,
+                j_with_tested: c.j_with_tested,
+                j_without_tested: c.j_without_tested,
+                variables: tested_endog,
+                instruments: tested_instruments,
             })
         })
     })

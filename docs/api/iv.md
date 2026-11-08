@@ -11,7 +11,7 @@ Pass an `IVOptions` as `options=`. Options of `None` take the effective default 
 | Option | Purpose | Default | Notes |
 |---|---|---|---|
 | `estimator` | `"2sls"` or `"gmm"` | `"2sls"` | |
-| `cov_type` | Standard error type: `"classical"`, `"hc0"` to `"hc3"`, `"hac"`, `"cluster"` | `"classical"` | For GMM it is independent of `gmm_weight_type`. Also used by `kleibergen_paap()` and `effective_f()` |
+| `cov_type` | Standard error type: `"classical"`, `"hc0"` to `"hc3"`, `"hac"`, `"cluster"` | `"classical"` | For GMM it is independent of `gmm_weight_type`. Also used by `kleibergen_paap()`, `effective_f()` and, for 2SLS, `c_stat()` |
 | `cluster` | Column that defines the clusters | `None` | With `cov_type="cluster"` or `gmm_weight_type="cluster"` |
 | `hac_time` | Column that gives the time order | `None` | Required with `cov_type="hac"` or `gmm_weight_type="hac"` |
 | `hac_lags` | Number of Newey-West lags | `None` (automatic) | With `"hac"` in either |
@@ -52,3 +52,7 @@ The fields of the results are listed by purpose at the top of the results class 
 ::: econometricsmodels.KleibergenPaapResult
 
 ::: econometricsmodels.EffectiveFResult
+
+`IVResults.c_stat()` returns this result type (see [Usage](../usage/iv.md#exogeneity-and-instrument-validity-post-estimation)):
+
+::: econometricsmodels.CStatisticResult

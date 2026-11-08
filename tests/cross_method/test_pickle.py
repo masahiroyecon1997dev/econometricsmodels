@@ -58,6 +58,7 @@ TRANSIENT = frozenset(
         "CraggDonaldOutput",
         "KleibergenPaapOutput",
         "EffectiveFOutput",
+        "CStatisticOutput",
     }
 )
 

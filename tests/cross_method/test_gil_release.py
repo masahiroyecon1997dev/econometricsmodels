@@ -78,6 +78,7 @@ ROWS = {
     "IV.cragg_donald": 50_000,
     "IV.kleibergen_paap": 50_000,
     "IV.effective_f": 50_000,
+    "IV.c_stat": 50_000,
 }
 
 
@@ -114,6 +115,7 @@ CASES: dict[str, Callable[[pl.DataFrame], Callable[[], object]]] = {
     "IV.cragg_donald": _post_case("IV", lambda r: r.cragg_donald()),
     "IV.kleibergen_paap": _post_case("IV", lambda r: r.kleibergen_paap()),
     "IV.effective_f": _post_case("IV", lambda r: r.effective_f()),
+    "IV.c_stat": _post_case("IV", lambda r: r.c_stat(variables=["endog"])),
 }
 
 

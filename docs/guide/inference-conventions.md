@@ -85,6 +85,8 @@ If you need an overidentification test that is robust to heteroskedasticity or c
 
 `wu_hausman_statistic` and `wu_hausman_p_value` (IV, `estimator="2sls"` only) are the regression-based test described in [Definitions: IV](../methods/iv.md#endogeneity-wu_hausman_statistic). Unlike the weak-instrument statistic, it follows the `cov_type` passed to `fit()`; the F test has `wu_hausman_df_num` and `wu_hausman_df_denom` degrees of freedom.
 
+For GMM, which has no Wu-Hausman test, and for the validity of instruments, use `c_stat()`, the difference of two Hansen J statistics (chi-squared). Its covariance of the moment conditions follows `gmm_weight_type` (GMM) or the family of `cov_type` (2SLS), and the degrees of freedom are the number of tested variables and instruments; see [Definitions: IV](../methods/iv.md#exogeneity-and-instrument-validity-post-estimation-c_stat).
+
 ## Other diagnostics
 
 - **White test (OLS, `white_test()`)**: a post-estimation diagnostic, not computed by `fit()`. `statistic="lm"` is `n * R²` of the auxiliary regression of the squared residuals on the regressors, their squares and cross products (chi-squared with `df` degrees of freedom); `statistic="f"` is the F version (`F(df, df_denom)`). The auxiliary regression always has a constant and does not depend on `cov_type`. Constant terms and terms numerically identical to an earlier one (such as the square of a 0/1 dummy) are dropped, and `df` counts the rank (`aux_terms` and `dropped_terms` show which terms). statsmodels `het_white` and R's `lmtest::bptest(studentize = TRUE)` give the same values.

@@ -560,6 +560,20 @@ error.rs`）:
 操作変数の直交性はlinearmodelsに無いので、同じnumpy版の値（`IVGMM`の`weight_matrix`・`estimate_parameters`・`_j_statistic`を部品にした別の計算と`1e-13`で一致を確認）。
 恒等式（`C = J_e − J_c`、丁度識別で`C = J_e`、`J_e`が`GmmEstimator`のHansen Jと一致）と、操作変数・被説明変数のスケール、行の並べ替えへの不変性もテストする。
 
+#### 3.9.1 Python公開（`IVResults.c_stat`）
+
+`IVResults.c_stat(*, variables=None, instruments=None)`。弱操作変数診断（3.4.4節）と同じく、`fit()`では計算しない事後診断のメソッドで、`source_data`・`options`から`build_iv_input`で入力を作り直して
+`compute_c_statistic`を呼ぶ（2SLSでも1段階GMMでも2段階GMMでも同じ）。判断:
+
+- **戻り値は`CStatisticResult(DiagnosticResult)`**: 統計量・p値・自由度・分布を持つ検定なので、ルートCLAUDE.md 2章の「検定は`DiagnosticResult`の継承型」に沿う。継承型に、検定した変数名（`x_endog`の順）・操作変数名（`instruments`の順）・2つのJ統計量を足す。`distribution`は`"chi2"`、`df_denom`は`None`。
+- **重みの決め方**: `estimator="gmm"`で`gmm_type`が`two_step`・`iterated`なら`gmm_weight_type`（`cluster`・`hac_lags`・`hac_time`を含む）、2SLSと`gmm_type="one_step"`（重み行列を持たない）は`cov_type`の系統（`weight_type_for_cov_type`）。1段階GMMは点推定が2SLSと同じなので2SLSと同じ扱いにした。
+  `gmm_type`・`gmm_max_iter`・`gmm_tol`・（GMMの）`cov_type`には依存しない。
+- **名前はPython側で位置にする**: `variables`は`x_endog`、`instruments`は除外操作変数の名前。空の一覧は`ROLE_EMPTY`、重複は`ROLE_DUPLICATE_COLUMN`、モデルに無い名前は`C_STATISTIC_UNKNOWN_VARIABLE`（`ColumnNotFound`は`hint`が`data`の列の綴りを指し、役割の名前としては合わないので別コード）、
+  両方とも指定が無い場合・外した後の操作変数が足りない場合・`S_e`が特異な場合は、engineの`C_STATISTIC_NOTHING_TO_TEST`・`C_STATISTIC_TOO_MANY_TESTED_INSTRUMENTS`・`C_STATISTIC_UNDEFINED`。型の誤りは`TypeError`。
+- **検証**: 内生変数の外生性はlinearmodelsの`IVGMMResults.c_stat`とライブで照合（フィクスチャJSONは作らない。3.4.4節のCD・KP・有効Fと同じ）。除外操作変数の直交性と同時の検定は、linearmodelsに無いので`benchmark/iv/references/c_statistic_oracle.py`（numpyの独立実装）と照合し、
+  オラクル自体を`tests/iv/test_c_statistic_oracle.py`でlinearmodelsの`c_stat`と`IVGMM`の部品（`weight_matrix`・`estimate_parameters`・`_j_statistic`）に照合する。Rには該当する実装が無い（`momentfit`は`CDtest`・`MOPtest`等を持つがC統計量は無い）ので、ivDiagのような独立クロスチェックは無い。
+  実測の最大相対差は合成データで約1e-12以下、実データ`card`で8.2e-12（許容は1e-10）。2SLSは対応する重みの`IVGMM`で照合する。
+
 ## 4. テスト
 
 - **Python主リファレンス**: `linearmodels`（`IV2SLS`＝2SLS、`IVGMM`＝GMM）。

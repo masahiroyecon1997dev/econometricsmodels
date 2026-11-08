@@ -83,7 +83,7 @@ Quotation marks around single values (such as `'{column}'`) are part of the temp
 | `CLUSTER_REQUIRED` | `setting` (str) | {setting}="cluster" requires the cluster option, the column that identifies the clusters. | Pass the column name, for example cluster="firm_id". |
 | `CONFIDENCE_LEVEL_OUT_OF_RANGE` | `value` (float) | confidence_level must be strictly between 0 and 1, got {value}. | Use a value such as 0.95. |
 | `ALPHA_OUT_OF_RANGE` | `value` (float) | alpha must be strictly between 0 and 1, got {value}. | Use a value such as 0.05. |
-| `EFFECTIVE_F_ENDOGENOUS_COUNT` | `n_endog` (int) | The effective F statistic is defined for one endogenous regressor, but the model has {n_endog}. | Use cragg_donald() or kleibergen_paap(), which allow several endogenous regressors. |
+| `EFFECTIVE_F_ENDOGENOUS_COUNT` | `n_endog` (int) | The effective F statistic is defined for one endogenous variable, but the model has {n_endog}. | Use cragg_donald() or kleibergen_paap(), which allow several endogenous variables. |
 | `TOLERANCE_NOT_POSITIVE_FINITE` | `option` (str)<br>`value` (float) | {option} must be a positive finite number, got {value}. | Omit the option to use the default, or pass a small positive number. |
 | `MAX_ITER_OUT_OF_RANGE` | `value` (int)<br>`min` (int)<br>`max` (int) | max_iter must be an integer from {min} to {max}, got {value}. | Pass a value from {min} to {max}. |
 | `GMM_MAX_ITER_OUT_OF_RANGE` | `value` (int)<br>`min` (int)<br>`max` (int) | gmm_max_iter must be an integer from {min} to {max} (the initial estimate counts as one iteration), got {value}. | Pass a value from {min} to {max}, or use gmm_type="two_step" for a two-step estimate without iteration. |
@@ -128,7 +128,7 @@ Quotation marks around single values (such as `'{column}'`) are part of the temp
 
 | Code | Parameters | Message | Hint |
 |---|---|---|---|
-| `WEAK_INSTRUMENT_STATISTIC_UNDEFINED` | `statistic` (str) | The {statistic} statistic is undefined for these data: a matrix it needs is singular (collinear instruments, a perfect first stage fit, a leverage of one, or too few clusters). | Check the instruments for collinearity and the covariance settings (cov_type, cluster, hac_lags, hac_time). |
+| `WEAK_INSTRUMENT_STATISTIC_UNDEFINED` | `statistic` (str) | The {statistic} statistic is undefined for these data: a matrix it needs is singular (collinear instruments, a first stage that fits perfectly, an observation with leverage one, or too few clusters). | Check the instruments for collinearity and the covariance settings (cov_type, cluster, hac_lags, hac_time). |
 | `DESIGN_MATRIX_SINGULAR` | `columns` (list of str (column names))<br>`stage` (optional, see Stages) | The design matrix is singular: the columns {columns} are perfectly collinear. | Remove or combine the collinear columns, for example duplicated columns or a constant column together with the intercept. |
 | `MATRIX_NEAR_SINGULAR` | `matrix` (str, not shown in the text)<br>`stage` (optional, see Stages) | A matrix needed to compute the estimates or their covariance is numerically singular. | Rescale the variables so that they are on similar scales, or remove nearly collinear regressors. |
 | `PERFECT_FIT` | `stage` (optional, see Stages) | The model fits the data perfectly: the residuals are zero up to rounding, so standard errors and test statistics are not defined. | Check that the outcome is not an exact function of the regressors. |

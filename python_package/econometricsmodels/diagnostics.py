@@ -138,10 +138,12 @@ class CraggDonaldResult:
 
     The Cragg-Donald statistic measures the joint strength of the excluded
     instruments for all endogenous variables. It is not a test with a
-    p-value: compare it with the Stock-Yogo critical values. A statistic
-    above the critical value for a level rejects, at the 5% significance
-    level, that the instruments are weak at that level. With one endogenous
-    variable it equals the partial F-statistic in
+    p-value: compare it with the Stock-Yogo critical values. Use
+    `tsls_bias_critical_values` to limit the bias of the 2SLS estimate and
+    `tsls_size_critical_values` to limit the size distortion of its Wald
+    test. A statistic above the critical value for a level rejects, at the
+    5% significance level, that the instruments are weak at that level. With
+    one endogenous variable it equals the partial F-statistic in
     `IVResults.weak_instrument_f_statistics`.
 
     The critical values are tabulated for a limited number of endogenous
@@ -159,14 +161,14 @@ class CraggDonaldResult:
         n_excluded: Number of excluded instruments.
         tsls_bias_critical_values: Critical values for the relative bias
             of 2SLS, keyed by the largest acceptable relative bias (0.05,
-            0.10, 0.20, 0.30), or `None` when not tabulated (1 to 3
-            endogenous variables, and at least `n_endog + 2` excluded
-            instruments up to 30).
+            0.10, 0.20, 0.30), or `None` when not tabulated (tabulated for
+            1 to 3 endogenous variables, and from `n_endog + 2` to 30
+            excluded instruments).
         tsls_size_critical_values: Critical values for the size distortion
             of the 5% Wald test of 2SLS, keyed by the largest acceptable
-            size (0.10, 0.15, 0.20, 0.25), or `None` when not tabulated
-            (1 or 2 endogenous variables, and at least `n_endog` excluded
-            instruments up to 30).
+            actual size of that test (0.10, 0.15, 0.20, 0.25), or `None`
+            when not tabulated (tabulated for 1 or 2 endogenous variables,
+            and from `n_endog` to 30 excluded instruments).
     """
 
     statistic: float
@@ -176,7 +178,7 @@ class CraggDonaldResult:
     tsls_size_critical_values: dict[float, float] | None
 
     def to_dict(self) -> dict[str, Any]:
-        """Return the result as a plain `dict` (JSON-ready).
+        """Return the result as a plain `dict` (the critical-value keys are numbers; see the class note).
 
         Returns:
             A dictionary with one key per field.
@@ -194,9 +196,14 @@ class KleibergenPaapResult:
     first stage is underidentified (the instruments do not span the
     endogenous variables) and is chi-squared with
     `n_excluded - n_endog + 1` degrees of freedom. The rk Wald F statistic
-    is the robust counterpart of the Cragg-Donald statistic and has no
-    p-value here. The two are defined independently, so one of them can
-    be `None`: the Wald F needs one more cluster than the LM.
+    is the robust counterpart of the Cragg-Donald statistic. It has no
+    p-value and no critical values here, and comparing it with the
+    Stock-Yogo values (see `CraggDonaldResult`) is only a heuristic; for
+    one endogenous variable use `IVResults.effective_f()`. The rejection of
+    the LM test does not show that the instruments are strong, because its
+    null is underidentification. The two statistics are defined
+    independently, so one of them can be `None`: the Wald F needs one more
+    cluster than the LM.
 
     Attributes are read-only and `to_dict()` returns a new `dict`.
 
@@ -236,8 +243,12 @@ class EffectiveFResult:
     under heteroskedasticity, clustering and autocorrelation. Compare it
     with a critical value: if `statistic` exceeds the critical value for
     `tau`, the null that the worst-case Nagar bias of 2SLS exceeds `tau`
-    times the benchmark is rejected at level `alpha`. The critical values
-    are keyed by `tau` (0.05, 0.10, 0.20, 0.30).
+    times a worst-case benchmark (the bias when the instruments are
+    uninformative and the two errors are perfectly correlated; with
+    homoskedastic errors, the OLS bias) is rejected at level `alpha`. The
+    critical values are keyed by `tau` (0.05, 0.10, 0.20, 0.30).
+    `critical_values`, when not `None`, is the sharper set;
+    `simplified_critical_values` is always available and is conservative.
 
     Attributes are read-only, but the critical values are plain dicts: do
     not modify them in place, and note that the instance is therefore not
@@ -254,8 +265,9 @@ class EffectiveFResult:
             bound `bias_bound` on the worst-case bias (equal to or smaller
             than `simplified_critical_values`), keyed by `tau`, or `None`
             when the bound is not defined.
-        bias_bound: The bound on the worst-case Nagar bias of 2SLS, between
-            0 and 1, or `None` when it is not defined.
+        bias_bound: The bound on the worst-case Nagar bias of 2SLS relative
+            to the benchmark, greater than 0 and at most 1, or `None` when it
+            is not defined.
     """
 
     statistic: float
@@ -266,7 +278,7 @@ class EffectiveFResult:
     bias_bound: float | None
 
     def to_dict(self) -> dict[str, Any]:
-        """Return the result as a plain `dict` (JSON-ready).
+        """Return the result as a plain `dict` (the critical-value keys are numbers; see the class note).
 
         Returns:
             A dictionary with one key per field.

@@ -542,7 +542,8 @@ class IVResults:
         This is a post-estimation diagnostic: it is never computed by
         `fit()`. It re-reads the variables from the data passed to
         `fit()`, and works the same for `estimator="2sls"` and
-        `estimator="gmm"`.
+        `estimator="gmm"`; it follows neither `cov_type` nor
+        `gmm_weight_type`.
 
         Returns:
             A `CraggDonaldResult` with the statistic, the numbers of
@@ -571,12 +572,14 @@ class IVResults:
         `hac_lags`, `hac_time`) of the options passed to `fit()`, so with
         `cov_type="classical"` the rk Wald F equals the Cragg-Donald
         statistic. The rk LM statistic tests that the first stage is
-        underidentified.
+        underidentified. The result has no critical values; for one
+        endogenous variable use `effective_f()`.
 
         This is a post-estimation diagnostic: it is never computed by
         `fit()`. It re-reads the variables from the data passed to
         `fit()`, and works the same for `estimator="2sls"` and
-        `estimator="gmm"`.
+        `estimator="gmm"`. For GMM it follows `cov_type`, not
+        `gmm_weight_type`.
 
         Returns:
             A `KleibergenPaapResult`. Either statistic is `None` when
@@ -611,7 +614,8 @@ class IVResults:
         This is a post-estimation diagnostic: it is never computed by
         `fit()`. It re-reads the variables from the data passed to
         `fit()`, and works the same for `estimator="2sls"` and
-        `estimator="gmm"`.
+        `estimator="gmm"`. For GMM it follows `cov_type`, not
+        `gmm_weight_type`.
 
         Args:
             alpha: Level of the critical values, strictly between 0 and

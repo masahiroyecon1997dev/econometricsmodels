@@ -17,8 +17,8 @@ DK_TIME_REQUIRED [Validation]: cov_type="dk" requires the dk_time option, the co
 CLUSTER_REQUIRED [Validation]: abc="cluster" requires the cluster option, the column that identifies the clusters. Pass the column name, for example cluster="firm_id".
 CONFIDENCE_LEVEL_OUT_OF_RANGE [Validation]: confidence_level must be strictly between 0 and 1, got 1.5. Use a value such as 0.95.
 ALPHA_OUT_OF_RANGE [Validation]: alpha must be strictly between 0 and 1, got 1.5. Use a value such as 0.05.
-EFFECTIVE_F_ENDOGENOUS_COUNT [Validation]: The effective F statistic is defined for one endogenous regressor, but the model has 3. Use cragg_donald() or kleibergen_paap(), which allow several endogenous regressors.
-WEAK_INSTRUMENT_STATISTIC_UNDEFINED [Computation]: The abc statistic is undefined for these data: a matrix it needs is singular (collinear instruments, a perfect first stage fit, a leverage of one, or too few clusters). Check the instruments for collinearity and the covariance settings (cov_type, cluster, hac_lags, hac_time).
+EFFECTIVE_F_ENDOGENOUS_COUNT [Validation]: The effective F statistic is defined for one endogenous variable, but the model has 3. Use cragg_donald() or kleibergen_paap(), which allow several endogenous variables.
+WEAK_INSTRUMENT_STATISTIC_UNDEFINED [Computation]: The abc statistic is undefined for these data: a matrix it needs is singular (collinear instruments, a first stage that fits perfectly, an observation with leverage one, or too few clusters). Check the instruments for collinearity and the covariance settings (cov_type, cluster, hac_lags, hac_time).
 TOLERANCE_NOT_POSITIVE_FINITE [Validation]: abc must be a positive finite number, got 1.5. Omit the option to use the default, or pass a small positive number.
 MAX_ITER_OUT_OF_RANGE [Validation]: max_iter must be an integer from 3 to 3, got 3. Pass a value from 3 to 3.
 GMM_MAX_ITER_OUT_OF_RANGE [Validation]: gmm_max_iter must be an integer from 3 to 3 (the initial estimate counts as one iteration), got 3. Pass a value from 3 to 3, or use gmm_type="two_step" for a two-step estimate without iteration.

@@ -1173,9 +1173,9 @@ pub static CATALOG: &[ErrorSpec] = &[
             ty: ParamType::Int,
             in_text: true,
         }],
-        message: r#"The effective F statistic is defined for one endogenous regressor, but the model has {n_endog}."#,
+        message: r#"The effective F statistic is defined for one endogenous variable, but the model has {n_endog}."#,
         hint: Some(
-            r#"Use cragg_donald() or kleibergen_paap(), which allow several endogenous regressors."#,
+            r#"Use cragg_donald() or kleibergen_paap(), which allow several endogenous variables."#,
         ),
         stage_allowed: false,
     },
@@ -1187,7 +1187,7 @@ pub static CATALOG: &[ErrorSpec] = &[
             ty: ParamType::Str,
             in_text: true,
         }],
-        message: r#"The {statistic} statistic is undefined for these data: a matrix it needs is singular (collinear instruments, a perfect first stage fit, a leverage of one, or too few clusters)."#,
+        message: r#"The {statistic} statistic is undefined for these data: a matrix it needs is singular (collinear instruments, a first stage that fits perfectly, an observation with leverage one, or too few clusters)."#,
         hint: Some(
             r#"Check the instruments for collinearity and the covariance settings (cov_type, cluster, hac_lags, hac_time)."#,
         ),

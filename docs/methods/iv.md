@@ -125,34 +125,69 @@ For each endogenous variable \(x_{2j}\), the first-stage regression is \(x_{2j} 
 F_j = \frac{(\mathrm{SSR}_r - \mathrm{SSR}_u)/m}{\mathrm{SSR}_u/(n-l)} \sim F(m, n-l)
 \]
 
-where \(\mathrm{SSR}_r\) is the residual sum of squares of the restricted regression on \(X_1\) alone and \(\mathrm{SSR}_u\) of the first stage. It is always computed under homoskedasticity and does not depend on `cov_type`. It is not compared with critical values and no weak/strong verdict is reported; a commonly quoted rule of thumb is a value above about 10. For joint statistics and critical values, and for statistics that are robust to heteroskedasticity, clustering and autocorrelation, use the post-estimation methods below.
+where \(\mathrm{SSR}_r\) is the residual sum of squares of the restricted regression on \(X_1\) alone and \(\mathrm{SSR}_u\) of the first stage. It is always computed under homoskedasticity and does not depend on `cov_type`. Unlike the post-estimation methods below, it comes with no critical values and no weak/strong verdict; a commonly quoted rule of thumb is a value above about 10. For joint statistics and critical values, and for statistics that are robust to heteroskedasticity, clustering and autocorrelation, use the post-estimation methods below.
 
-### Weak instruments, post-estimation: `cragg_donald()`, `kleibergen_paap()`, `effective_f()`
+### Weak instruments, post-estimation
 
-These are methods, not fields: they are never computed by `fit()`. Each re-reads the variables from the data passed to `fit()`, and each works the same for both estimators. Partial out the exogenous regressors \(X_1\) from the endogenous variables \(X_2\) (\(k_2\) columns) and from the excluded instruments \(Z_2\) (\(m\) columns), giving \(\tilde X_2\) and \(\tilde Z_2\); the constant, if any, is part of \(X_1\).
+`cragg_donald()`, `kleibergen_paap()` and `effective_f()` are methods, not fields: they are never computed by `fit()`. Each re-reads the variables from the data passed to `fit()`, and each works the same for both estimators. For GMM, `kleibergen_paap()` and `effective_f()` follow `cov_type` (with `cluster`, `hac_lags` and `hac_time`), not `gmm_weight_type`, and `cragg_donald()` follows neither.
 
-**Cragg-Donald (`cragg_donald()`).** With \(A = \tilde X_2' P_{\tilde Z_2} \tilde X_2\), \(S = \tilde X_2' M_{\tilde Z_2} \tilde X_2\) and \(G = S^{-1/2\prime} A\, S^{-1/2}\),
+Partial out the exogenous regressors \(X_1\) (\(k_1\) columns, including the constant if there is one) from the endogenous variables \(X_2\) (\(k_2\) columns) and from the excluded instruments \(Z_2\) (\(m\) columns), giving \(\tilde X_2\) and \(\tilde Z_2\). Write \(l = k_1 + m\).
 
-\[
-\mathrm{CD} = \lambda_{\min}(G)\,\frac{n - k_1 - m}{m},
-\]
+#### Cragg-Donald: `cragg_donald()`
 
-where \(k_1\) is the number of columns of \(X_1\). It assumes homoskedastic errors, does not depend on `cov_type`, has no p-value, and with one endogenous variable equals the partial F statistic above. It is compared with the Stock-Yogo critical values (Stock and Yogo, 2005), which are tabulated for the 2SLS relative bias (1 to 3 endogenous variables, \(m\) from \(k_2 + 2\) to 30) and for the 2SLS size distortion of the 5% Wald test (1 or 2 endogenous variables, \(m\) from \(k_2\) to 30). A statistic above the critical value for a level rejects, at the 5% significance level, that the instruments are weak at that level. Outside the tables the statistic is valid and the critical values are `None`.
-
-**Kleibergen-Paap (`kleibergen_paap()`).** The rk LM statistic tests that the first-stage coefficient matrix has less than full column rank (underidentification); under the null it is chi-squared with \(m - k_2 + 1\) degrees of freedom. The rk Wald F statistic is the counterpart of the Cragg-Donald statistic. Both use the covariance of the first-stage scores that matches `cov_type` (and `cluster`, `hac_lags`, `hac_time`) of the fit, so with `cov_type="classical"` the rk Wald F equals the Cragg-Donald statistic. Under `"hc0"` the LM statistic is the heteroskedasticity-robust one, and `"hc1"` adds the degrees-of-freedom correction to the Wald F. The two statistics are defined independently: the Wald F needs one more cluster than the LM, so one of them can be `None`. The null of the LM test is underidentification, so rejecting it does not show that the instruments are strong. Kleibergen and Paap (2006).
-
-**Effective F (`effective_f(alpha=0.05)`).** For one endogenous variable, with the instruments normalised so that \(\tilde Z_2'\tilde Z_2/n = I\), \(\hat\pi = \tilde Z_2'\tilde x_2/n\) and \(\hat V_2\) the covariance of \(\hat\pi\) under `cov_type` (\(\hat W_2 = n \hat V_2\)),
+With \(A = \tilde X_2' P_{\tilde Z_2} \tilde X_2\), \(S = \tilde X_2' M_{\tilde Z_2} \tilde X_2\) and \(G = S^{-1/2\prime} A\, S^{-1/2}\),
 
 \[
-F_{\mathrm{eff}} = \frac{\hat\pi'\hat\pi}{\mathrm{tr}(\hat V_2)}, \qquad
-K_{\mathrm{eff}}(x) = \frac{\mathrm{tr}(\hat W_2)^2 (1 + 2x)}{\mathrm{tr}(\hat W_2^2) + 2x\, \mathrm{tr}(\hat W_2)\lambda_{\max}(\hat W_2)}.
+\mathrm{CD} = \lambda_{\min}(G)\,\frac{n - k_1 - m}{m}
 \]
 
-The critical value for a threshold \(\tau\) on the worst-case Nagar bias of 2SLS (relative to the OLS bias) is the upper \(\alpha\) point of a non-central chi-squared distribution with \(K_{\mathrm{eff}}\) degrees of freedom and non-centrality \(x K_{\mathrm{eff}}\), divided by \(K_{\mathrm{eff}}\) (the Patnaik approximation), with \(x = 1/\tau\) for `simplified_critical_values` and \(x = B/\tau\) for `critical_values`, where \(B \le 1\) is the data-dependent bound `bias_bound` on the worst-case bias. If `statistic` exceeds the critical value for \(\tau\), the null that the worst-case bias exceeds \(\tau\) is rejected at level `alpha`; the thresholds are \(\tau\) = 5%, 10%, 20% and 30%. With a classical covariance it equals the Cragg-Donald statistic. `critical_values` and `bias_bound` are `None` when the bound is not defined (Montiel Olea and Pflueger, 2013). The covariance \(\hat W_2\) must be positive definite, which needs enough observations or clusters.
+(Cragg and Donald, 1993). It assumes homoskedastic errors, does not depend on `cov_type`, has no p-value, and with one endogenous variable equals the partial F statistic above.
 
-When a statistic is not defined for the data (for example the instruments are collinear with the exogenous regressors, or the covariance of the scores is singular), the method raises a `ComputationError` instead of returning a missing value; the effective F statistic needs exactly one endogenous variable and a `alpha` strictly between 0 and 1, otherwise it raises a `ValidationError`.
+It is compared with the Stock-Yogo critical values (Stock and Yogo, 2005). They are tabulated for the 2SLS relative bias (1 to 3 endogenous variables, \(m\) from \(k_2 + 2\) to 30) and for the size distortion of the 5% Wald test of 2SLS (1 or 2 endogenous variables, \(m\) from \(k_2\) to 30). A statistic above the critical value for a level rejects, at the 5% significance level, the null that the instruments are weak at that level. Outside the tables the statistic is valid and the critical values are `None`.
 
-References: Cragg and Donald (1993); Stock and Yogo (2005), "Testing for weak instruments in linear IV regression"; Kleibergen and Paap (2006), "Generalized reduced rank tests using the singular value decomposition", Journal of Econometrics 133; Montiel Olea and Pflueger (2013), "A robust test for weak instruments", Journal of Business & Economic Statistics 31.
+#### Kleibergen-Paap: `kleibergen_paap()`
+
+Both statistics (Kleibergen and Paap, 2006) are built from the first-stage coefficient matrix after scaling the columns of \(\tilde X_2\) and \(\tilde Z_2\) to mean square one (the statistics do not depend on the scale). With \(\hat Q_{ZZ} = \tilde Z_2'\tilde Z_2/n = C_Z C_Z'\), \(\hat Q_{XX} = \tilde X_2'\tilde X_2/n = C_X C_X'\) (lower-triangular Cholesky factors) and \(\hat Q_{ZX} = \tilde Z_2'\tilde X_2/n\), let \(\hat\Theta = C_Z^{-1}\hat Q_{ZX}C_X^{-1\prime}\) (\(m \times k_2\)) have the singular value decomposition \(\hat\Theta = A S B'\). Take \(B_\perp\), the right singular vector of the smallest singular value, and \(A_\perp\), the \(m - k_2 + 1\) left singular vectors from the \(k_2\)-th on, and set \(\hat\lambda = A_\perp'\hat\Theta B_\perp\), a vector of length \(m - k_2 + 1\). The observation scores in the direction of \(\hat\lambda\) are
+
+\[
+\psi_i = \bigl(B_\perp' C_X^{-1} u_i\bigr)\,\bigl(A_\perp' C_Z^{-1}\tilde z_i\bigr),
+\]
+
+and \(\hat V_\lambda\) is their covariance, chosen by `cov_type` (with `cluster`, `hac_lags`, `hac_time`).
+
+- The **rk LM statistic** takes \(u_i = \tilde x_i\) and is \(n\,\hat\lambda'\hat V_\lambda^{-1}\hat\lambda\). It tests that the first-stage coefficient matrix has less than full column rank (underidentification); under the null it is chi-squared with \(m - k_2 + 1\) degrees of freedom. It has no further small-sample factor.
+- The **rk Wald F statistic** takes \(u_i = \hat e_i\), the residual of the first stage \(\tilde X_2 \sim \tilde Z_2\). With \(W = n\,\hat\lambda'\hat V_\lambda^{-1}\hat\lambda\) for these scores, \(F = c\,W/m\), where the factor \(c\) is the small-sample convention of `cov_type`:
+
+| `cov_type` | \(c\) |
+|---|---|
+| `"classical"`, `"hac"` | \((n - l)/n\) |
+| `"cluster"` | \((n - l)(G - 1)/(G(n - 1))\), with \(G\) clusters |
+| `"hc0"`, `"hc2"`, `"hc3"` | 1 |
+| `"hc1"` | 1 (see below) |
+
+`"hc2"` and `"hc3"` scale each score by the leverage of \([X_1, Z_2]\). `"hc1"` multiplies \(\hat V_\lambda\) by \(n/(n - l)\), in the rk LM statistic as well as in the rk Wald F, so the LM statistic under `"hc1"` is the `"hc0"` value times \((n - l)/n\). With `cov_type="classical"` the rk Wald F equals the Cragg-Donald statistic. The two statistics are defined independently: the Wald F needs one more cluster than the LM, so one of them can be `None`. Rejecting the LM test does not show that the instruments are strong, because its null is underidentification. The rk Wald F has no p-value or critical values here: it is the robust counterpart of the Cragg-Donald statistic, and comparing it with the Stock-Yogo values is only a heuristic.
+
+#### Effective F: `effective_f(alpha=0.05)`
+
+For one endogenous variable (\(k_2 = 1\), \(\tilde x_2\) is the endogenous variable after partialling out \(X_1\)), with the instruments normalised so that \(\tilde Z_2'\tilde Z_2/n = I\), \(\hat\pi = \tilde Z_2'\tilde x_2/n\) and \(\hat V_2\) the covariance of \(\hat\pi\) under `cov_type` (\(\hat W_2 = n \hat V_2\)), the statistic of Montiel Olea and Pflueger (2013) is
+
+\[
+F_{\mathrm{eff}} = \frac{\hat\pi'\hat\pi}{\mathrm{tr}(\hat V_2)}.
+\]
+
+The null hypothesis is that the instruments are weak: that the worst-case Nagar bias of 2SLS exceeds a fraction \(\tau\) of a benchmark. The benchmark is the bias when the instruments are completely uninformative and the errors of the two equations are perfectly correlated; with homoskedastic errors it is the OLS bias, as in Stock and Yogo (2005). The critical value for \(\tau\) is the upper \(\alpha\) point of a non-central chi-squared distribution with \(K_{\mathrm{eff}}\) degrees of freedom and non-centrality \(c K_{\mathrm{eff}}\), divided by \(K_{\mathrm{eff}}\) (the Patnaik approximation), where
+
+\[
+K_{\mathrm{eff}} = \frac{\mathrm{tr}(\hat W_2)^2 (1 + 2c)}{\mathrm{tr}(\hat W_2^2) + 2c\, \mathrm{tr}(\hat W_2)\lambda_{\max}(\hat W_2)},
+\]
+
+with \(c = 1/\tau\) for `simplified_critical_values` and \(c = B/\tau\) for `critical_values`. The bound \(B \le 1\) (`bias_bound`) is the supremum, over the structural coefficient and the direction of the first-stage coefficients, of the Nagar bias relative to the benchmark; it uses the joint covariance of the reduced-form coefficients of `y` and of the endogenous variable, so `critical_values` depends on `y`. If `statistic` exceeds the critical value for \(\tau\), the null is rejected at level `alpha`; the thresholds are \(\tau\) = 5%, 10%, 20% and 30%. With a classical covariance the statistic equals the Cragg-Donald statistic. `critical_values` and `bias_bound` are `None` when the bound is not defined, which includes the case where the reduced-form errors of `y` and of the endogenous variable are almost proportional. The covariance \(\hat W_2\) must be positive definite, which needs enough observations or clusters.
+
+#### When a diagnostic cannot be computed
+
+If no statistic can be computed for the data (for example the instruments are collinear with the exogenous regressors, or the covariance of the scores is singular), the method raises a `ComputationError` instead of returning a missing value. Some fields can still be `None` when the statistic itself is defined: one of the two Kleibergen-Paap statistics, the Stock-Yogo critical values outside the published tables, and the `critical_values` and `bias_bound` of `effective_f()`. In addition, `effective_f()` raises a `ValidationError` unless the model has exactly one endogenous variable and `alpha` is strictly between 0 and 1.
+
+References: Cragg and Donald (1993), "Testing identifiability and specification in instrumental variable models", Econometric Theory 9; Stock and Yogo (2005), "Testing for weak instruments in linear IV regression", in Andrews and Stock (eds.), *Identification and Inference for Econometric Models*; Kleibergen and Paap (2006), "Generalized reduced rank tests using the singular value decomposition", Journal of Econometrics 133; Montiel Olea and Pflueger (2013), "A robust test for weak instruments", Journal of Business & Economic Statistics 31.
 
 ### Overidentification: `overid_statistic`
 

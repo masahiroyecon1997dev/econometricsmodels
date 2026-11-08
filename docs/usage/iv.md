@@ -82,22 +82,43 @@ print(gmm.overid_statistic, gmm.overid_p_value)  # Hansen J (GMM)
 
 first_stage = two_sls.first_stage()
 print(first_stage["endog1"].params)  # OLSResults for endog1 ~ x_exog + instruments
-
-cd = two_sls.cragg_donald()
-print(cd.statistic, cd.tsls_size_critical_values)  # compare with the critical values
-kp = two_sls.kleibergen_paap()
-print(kp.rk_lm_statistic, kp.rk_lm_p_value, kp.rk_wald_f)
-print(two_sls.effective_f(alpha=0.05).simplified_critical_values)
 ```
 
 How to read them:
 
 - **Weak instruments** (`weak_instrument_f_statistics`, one per endogenous variable). The F statistic tests that the excluded instruments do not explain the endogenous variable in the first stage. A small value means the instruments are weak, and the IV estimate and its standard errors are then unreliable. A common rule of thumb is a value above about 10; no verdict is reported, and the statistic assumes homoskedastic errors (see [Inference conventions](../guide/inference-conventions.md#weak-instruments)).
-- **Weak instruments, post-estimation** (`cragg_donald()`, `kleibergen_paap()`, `effective_f()`). These are methods, not fields: they are computed when you call them, not by `fit()`. `cragg_donald()` is the joint statistic for several endogenous variables and comes with Stock-Yogo critical values; it assumes homoskedastic errors. `kleibergen_paap()` and `effective_f()` follow the `cov_type` of the fit, so they stay valid under heteroskedasticity, clustering and autocorrelation; `effective_f()` is for one endogenous variable. Compare the statistic with the critical values in the result: a statistic above the critical value means the instruments are not weak at that level. If a statistic is not defined for your data, the method raises an error rather than returning a missing value.
+- **Weak instruments, post-estimation** (`cragg_donald()`, `kleibergen_paap()`, `effective_f()`). These are methods, not fields, and have their own section [below](#weak-instrument-diagnostics-post-estimation).
 - **Overidentification** (`overid_statistic`, `overid_p_value`; the Sargan test for 2SLS and Hansen's J for GMM). The null hypothesis is that all instruments are valid, that is uncorrelated with the error. A small p-value says that at least one instrument is invalid or the model is misspecified; a large one is consistent with validity but does not prove it. Both are `None` when the model is just-identified (as many instruments as endogenous variables), because there is nothing to test. Only Hansen's J is robust to heteroskedasticity and clustering.
 - **Endogeneity** (`wu_hausman_statistic`, `wu_hausman_p_value`, 2SLS only). The null hypothesis is that the suspect regressors are in fact exogenous, so that OLS would be consistent. A small p-value supports treating them as endogenous and using IV; a large one means the data cannot distinguish IV from OLS, and OLS is then more precise.
 
 See [Definitions: IV](../methods/iv.md#diagnostics) for what each diagnostic tests, and the [Options and results](../api/iv.md) for when it is `None`.
+
+## Weak-instrument diagnostics, post-estimation
+
+`cragg_donald()`, `kleibergen_paap()` and `effective_f()` are methods rather than fields. They are optional, and a statistic can be undefined for data on which the fit itself succeeds, so `fit()` never computes them. Each re-reads the data passed to `fit()`, and each works the same for `estimator="2sls"` and `estimator="gmm"`.
+
+```python
+cd = two_sls.cragg_donald()
+print(cd.statistic)
+print(cd.tsls_size_critical_values[0.10])  # keys: 0.10, 0.15, 0.20, 0.25
+
+kp = two_sls.kleibergen_paap()
+print(kp.rk_lm_statistic, kp.rk_lm_p_value, kp.rk_wald_f)
+
+eff = two_sls.effective_f(alpha=0.05)
+print(eff.statistic)
+print(eff.simplified_critical_values[0.10])  # keys: 0.05, 0.10, 0.20, 0.30
+```
+
+Which one to use:
+
+- `cragg_donald()` is the joint statistic for several endogenous variables and comes with Stock-Yogo critical values. It assumes homoskedastic errors and ignores `cov_type`.
+- `kleibergen_paap()` follows the `cov_type` of the fit (for GMM, `cov_type` and not `gmm_weight_type`), so it stays valid under heteroskedasticity, clustering and autocorrelation, and it handles several endogenous variables. It returns no critical values. The rk LM test has the null of underidentification, so rejecting it does not show that the instruments are strong. The rk Wald F is the robust counterpart of the Cragg-Donald statistic; with `cov_type="classical"` the two are equal.
+- `effective_f()` follows the `cov_type` of the fit and is for one endogenous variable, with critical values for the worst-case 2SLS bias. It is the statistic designed for one endogenous variable under heteroskedastic, clustered or autocorrelated errors.
+
+The critical values are `dict`s keyed by the threshold, and a table that does not cover your model gives `None`. A statistic above the critical value for a threshold rejects the null that the instruments are weak by that criterion: a 2SLS relative bias above the threshold or a size distortion above the threshold for `cragg_donald()`, and a worst-case bias above the threshold for `effective_f()`. It does not prove that the instruments are strong.
+
+If no statistic can be computed for your data, the method raises a `ComputationError`. Two kinds of field can still be `None`: one of the two Kleibergen-Paap statistics (when only the other is defined), and critical values that the tables do not cover (`cragg_donald()`) or the bound that is not defined (`effective_f()`). `effective_f()` raises a `ValidationError` for several endogenous variables or an `alpha` outside (0, 1). The definitions are in [Definitions: IV](../methods/iv.md#weak-instruments-post-estimation).
 
 ## Covariance matrix of the coefficients
 

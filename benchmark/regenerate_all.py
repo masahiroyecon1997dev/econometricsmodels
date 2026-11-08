@@ -84,6 +84,7 @@ _FIXTURE_MODULES = [
     "benchmark.iv.fixtures.generate_iv_cov_crosscheck_fixtures",
     "benchmark.iv.fixtures.generate_iv_gmm_cov_crosscheck_fixtures",
     "benchmark.iv.fixtures.generate_iv_weak_diagnostics_crosscheck_fixtures",
+    "benchmark.iv.fixtures.generate_iv_c_statistic_crosscheck_fixtures",
     "benchmark.panel.fixtures.generate_fe_crosscheck_fixtures",
     "benchmark.panel.fixtures.generate_fe_plm_crosscheck_fixtures",
     "benchmark.panel.fixtures.generate_re_crosscheck_fixtures",

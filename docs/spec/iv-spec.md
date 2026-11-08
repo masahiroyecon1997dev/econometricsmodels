@@ -571,8 +571,13 @@ error.rs`）:
 - **名前はPython側で位置にする**: `variables`は`x_endog`、`instruments`は除外操作変数の名前。空の一覧は`ROLE_EMPTY`、重複は`ROLE_DUPLICATE_COLUMN`、モデルに無い名前は`C_STATISTIC_UNKNOWN_VARIABLE`（`ColumnNotFound`は`hint`が`data`の列の綴りを指し、役割の名前としては合わないので別コード）、
   両方とも指定が無い場合・外した後の操作変数が足りない場合・`S_e`が特異な場合は、engineの`C_STATISTIC_NOTHING_TO_TEST`・`C_STATISTIC_TOO_MANY_TESTED_INSTRUMENTS`・`C_STATISTIC_UNDEFINED`。型の誤りは`TypeError`。
 - **検証**: 内生変数の外生性はlinearmodelsの`IVGMMResults.c_stat`とライブで照合（フィクスチャJSONは作らない。3.4.4節のCD・KP・有効Fと同じ）。除外操作変数の直交性と同時の検定は、linearmodelsに無いので`benchmark/iv/references/c_statistic_oracle.py`（numpyの独立実装）と照合し、
-  オラクル自体を`tests/iv/test_c_statistic_oracle.py`でlinearmodelsの`c_stat`と`IVGMM`の部品（`weight_matrix`・`estimate_parameters`・`_j_statistic`）に照合する。Rには該当する実装が無い（`momentfit`は`CDtest`・`MOPtest`等を持つがC統計量は無い）ので、ivDiagのような独立クロスチェックは無い。
-  実測の最大相対差は合成データで約1e-12以下、実データ`card`で8.2e-12（許容は1e-10）。2SLSは対応する重みの`IVGMM`で照合する。
+  オラクル自体を`tests/iv/test_c_statistic_oracle.py`でlinearmodelsの`c_stat`と`IVGMM`の部品（`weight_matrix`・`estimate_parameters`・`_j_statistic`）に照合する。Rには該当する実装が無い（`momentfit`・`ivreg`・`AER`・`plm`にC統計量は無い）。
+  Rのクロスチェックは、`benchmark/iv/references/run_momentfit_c_stat.R`が`momentfit`の部品（モーメント共分散`S`・GMM推定・Hansen J）で出し、「`S`の部分行列を重みにする」「Jの差を取る」手順はスクリプトが組む。
+  独立性は部品の範囲（HAC・クラスターの`S`、推定、Jを本実装・numpyと別実装で確認）で、手順そのものの正しさはlinearmodelsとの照合が担保する（`gmm`パッケージは1段階目の重みが単位行列で、既存のGMMクロスチェックでも不採用）。
+  `tests/iv/test_iv_c_statistic_crosscheck.py`が`iv_c_statistic_crosscheck.json`（生成は`generate_iv_c_statistic_crosscheck_fixtures.py`、検定の定義は`benchmark/iv/constants.py`の`C_STAT_*`）と照合する。
+  対象は全`NUMERIC_SCENARIOS`（外生性・除外操作変数`z2`の直交性）、複数内生変数（`MULTI_ENDOG_SCENARIOS`、外生性・同時・直交性）、切片なし、`card`で、重みはclassical/robust/hac/cluster。
+  `momentfit`の設定は`run_momentfit.R`と同じ（HACの`bw`はラグ数+1・`adjust=FALSE`、クラスターは`cadjust=FALSE`、HAC/クラスターの重みは`vcov()`から作って明示的に渡す、classicalの`S`は非中心化の`σ̂²`を自前で組む）。
+  実測の最大相対差はlinearmodels等との照合で合成データ約1e-12以下・`card`で8.2e-12（許容は1e-10）、Rとの照合で合成データ1e-12以下・`card`で1.0e-11（許容は1e-10）。2SLSは対応する重みの`IVGMM`で照合する。
 
 ## 4. テスト
 

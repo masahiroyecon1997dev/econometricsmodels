@@ -897,3 +897,11 @@ Stock-Yogoの表は実装の値がNBER TWP 284のTable 1（バイアス）・Tab
 
 **保留（従来どおり）**: ルートCLAUDE.md 2章への診断の例外の追記、READMEの「Attribution and Rights」、フィクスチャのデータ（Wooldridge等）のライセンス確認、CLAUDE.md 3章の`shared/`の列挙の更新、`mop-oracle-spec.md`の履歴の扱い。
 **注意書き**: コミットはパス指定・署名（ホストの端末で確認が出る。失敗したら止まって報告し、リトライは1回まで）。Pythonを触ったら`uv run maturin develop`（debugビルド）で入れ直してから`pytest`。エラーコードを足したら`UPDATE_ERROR_CATALOG_GOLDEN=1 cargo test -p engine error_catalog`→`maturin develop`→`python tools/render_error_catalog.py`→`tests/support/_errors.py`。heredocでRustやドキュメントを書くときはバッククォートをシェルが解釈するので`<<'EOF'`（引用付き）にする。
+
+### 9.15 C統計量のRクロスチェックを追加（2026-11-08）
+
+**決定（ユーザー承認）**: Rにはパッケージが無いので`momentfit`の部品で組み立てる方式を採用、範囲はシナリオ全体（`NUMERIC_SCENARIOS`・複数内生変数・切片なし・card）。`gmm`パッケージは調べない（既存GMMクロスチェックで「1段階目の重みが単位行列」を理由に不採用済み、Web検索もしていない）。
+**実装**: `benchmark/iv/references/run_momentfit_c_stat.R`（`S`・推定・Hansen Jは`momentfit`、`S`の部分行列を重みにする手順とJの差はスクリプト）、`r.py::run_momentfit_c_stat_r`、`benchmark/iv/constants.py`の`C_STAT_*`（検定の定義。生成とテストで共有）、`generate_iv_c_statistic_crosscheck_fixtures.py`（`regenerate_all.py`に登録）、`tests/fixtures/benchmarks/iv_c_statistic_crosscheck.json`、`tests/iv/test_iv_c_statistic_crosscheck.py`（70件）、許容`iv_c_statistic_crosscheck`（rtol 1e-10。実測最大1.0e-11（card）。J_cの0は本実装もRも厳密に0なのでatol無し、cardのクラスターG=9境界も1.5e-12で緩和不要）。
+**わかったこと**: `momentfit`の`evalWeights(..., "optimal")`はCLで`vcov()`と一致しない（`run_momentfit.R`のヘッダ2.と同じ件）ので`vcov(model, 2SLS係数)`から重みを作る。クラスターは`cluster=data.frame(...)`か式を渡す。iidの`vcov()`は中心化・n-1の分散なのでclassicalの`S`は`mean(e0^2)*Z'Z/n`を自前で組む。
+**docs**: `verification.md`・`verification-details.md`（独立性の限界を明記）・`docs/spec/iv-spec.md` 3.9.1を更新。
+**次**: (3) #368・#369のclose（英語コメント）と`/review-docs`、(4) `n_absorbed`（lfe/fixest）と#374の設計確認 → FE-2SLS。

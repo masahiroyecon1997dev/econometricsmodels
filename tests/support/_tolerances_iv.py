@@ -129,6 +129,14 @@ IV_TOLERANCES: dict[str, dict[str, float]] = {
         "rtol_boundary_cluster": 1e-8,
         "atol_just_identified": 1e-12,
     },
+    # --- C統計量の独立クロスチェック（R momentfit）。 ---
+    # `rtol`: 統計量・p値・J統計量。実測の最大相対差は実データcard（列のスケールが大きく違う）の
+    # 1.0e-11、合成データは1e-12以下で、マージンは1桁以上。検定しない側が丁度識別のときのJ_cは
+    # 本実装もRも厳密に0なので、絶対誤差のフロアは置かない。クラスター数が検定前のモーメント条件の
+    # 数と同数のcard（地域9グループ）でも、実測は1.5e-12で基本の許容に収まる。
+    "iv_c_statistic_crosscheck": {
+        "rtol": 1e-10,
+    },
     # --- 本実装内の不変条件（リファレンス実装との比較ではない） ---
     # 同じ入力に対して計算経路が異なる出力どうしの一致の確認（`ols_api`と同じ方針、
     # 根拠は`_tolerances_linear.py`の`ols_api`のコメント参照）。

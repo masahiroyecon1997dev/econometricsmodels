@@ -816,3 +816,44 @@ cluster表の2行の統合、`accepted-data.md`の見出し分割。
   `performance-reviewer`の指摘（hc1分岐の削除、数値の修正、公開ページ手書き部分への追記、派生シード、データが良条件である旨）は反映済み。公開ページの表は`/release`の再生成まで更新しない。
 - 検証: engine 1360件、`pytest tests --check-error-coverage --check-cov-coverage` 12109件が通る。
 - 残り: Pythonまで終わったのでpush（利用者が実行）→CI確認→#442と#634のクローズ。保留事項は上記のとおり。
+
+### 9.12 compact用のメモ（#366のコミット後。2026-11-08）
+
+**状態**: `release/v0.10.0`。#442・#634はクローズ済み（PR #635、`dev`向け、CI全件green。`1689e77c`まで）。その後の**#366は`2c29a259`でコミット済み（署名`G`、未push）**。
+#366のコミットはPR #635に積まれていない（pushすればPRに載る。pushは利用者に確認してから）。
+
+**#366で決めたこと（ユーザー決定）**
+- 公開の形: `IVResults.cragg_donald()`・`kleibergen_paap()`・`effective_f(*, alpha=0.05)`の**事後診断のメソッド**（`fit()`では計算しない。`fit()`の計算量は増えない）。
+  結果が`source_data`（`fit()`に渡した`DataFrame`への参照）・`options`（`IVOptions`の複製）・`x_exog`/`x_endog`/`instruments`の列名を持ち、呼び出し時に`build_iv_input`で`IvInput`を作り直す（2SLSでもGMMでも同じ）。
+- `cov_type`は`fit()`のものを使う（メソッドの引数にしない）。CDは等分散で`cov_type`に依存しない。
+- 戻り値は診断ごとの専用frozen dataclass（`CraggDonaldResult`・`KleibergenPaapResult`・`EffectiveFResult`。`econometricsmodels.diagnostics`、トップレベルにも公開）。`DiagnosticResult`は継承しない（p値の無い診断があるため）。臨界値は水準をキーにした`dict[float, float]`（`json.dumps`でキーは文字列になる旨をdocstringに明記）。除外操作変数の数は3つとも`n_excluded`。
+- 定義できないときは`None`でなく理由つきのエラー: `ALPHA_OUT_OF_RANGE`・`EFFECTIVE_F_ENDOGENOUS_COUNT`（`ValidationError`）、`WEAK_INSTRUMENT_STATISTIC_UNDEFINED`（`ComputationError`、`statistic`に診断名）。
+  原因（共線・完全フィット・共分散のランク落ち・レバレッジ1）は1つのコードにまとめ、文面の括弧内に列挙するだけで区別しない。engineの`compute_*`は`Result<_, IvError>`、`shared`の下位関数は`Option`のまま。
+- **有効Fは`Ŵ2`のランク落ち（最小固有値が最大の1e-10倍以下）を未定義にした**（KPに揃える。以前は値を返していた）。
+- KPはLM・Wald Fを独立に`Optional`で持つ（両方未定義のときだけエラー）。rk LMのp値は`RankTest::p_value()`（`χ²(df)`）。
+- 検証: CD・KPはlinearmodelsの`first_stage`（`cragg_donald_f`・`kleibergen_paap`・`kleibergen_paap_f`。**linearmodelsの`robust`のFは本実装の`hc1`、LMは`hc0`に対応**）、有効Fは`benchmark/iv/references/mop_oracle.py`。
+  `tests/iv/test_iv_weak_diagnostics.py`（43件）。許容誤差`iv_weak_diagnostics`は1e-10（実測の最大は9e-14）。
+- 登録済み: `test_pickle.py`の`TRANSIENT`、`test_gil_release.py`の`ROWS`/`CASES`、`test_keyword_only_arguments.py`の`_RESULT_METHODS`、`tests/support/_errors.py`の`MIGRATED_CODES`。
+- ドキュメント: `docs/methods/iv.md`（定義式と出典）、`usage/iv.md`、`api/iv.md`、`guide/{inference-conventions,validation,verification,verification-details,pickling}.md`、`CHANGELOG.md`、`docs/spec/iv-spec.md`3.4.4節、`docs/spec/inference-conventions.md`6章（メソッドにした例外と専用dataclassの理由）。
+  **未実施**: `/review-docs`による公開ドキュメントの校閲（実施してよいか利用者に確認）。
+- 検証結果: engine 1360件・engine_pybind 241件、`pytest tests --check-error-coverage --check-cov-coverage` 12164件が通る。clippy・fmt・ruffはクリーン。`rust-reviewer`・`python-reviewer`の指摘は反映済み。
+- 見送り: `cragg_donald()`が未定義になる経路のPythonテスト（`fit()`が通る入力では作れない。Rustの単体テストで担保）、`alpha`検証を列取り込みより前にする最適化。
+
+**次の作業: #367（ivDiagの恒久導入と参照ベンチマーク）**
+- 現状: ivDiag 1.0.8は恒久導入していない。`benchmark/iv/references/mop_ivdiag_compare.py`（一時ディレクトリに`remotes::install_version("ivDiag","1.0.8",lib=<dir>)`して`--r-lib <dir>`で手動実行）と`run_ivdiag_eff_f.R`があり、
+  比較結果は`mop_oracle_values.md`の「ivDiag 1.0.8との比較」節。ivDiagが対応するのは`robust`（`hc1`相当）と`cluster`だけ。`eff_F`は有効Fの統計量だけで臨界値は返さない。
+- やること（#367のIssue本文）: (1) `.devcontainer/Dockerfile`に`install_version("ivDiag", version="1.0.8", ...)`を足し、`Rscript -e 'library(ivDiag)'`で実際の導入を確認（`install.packages`は失敗が見かけ上成功扱いになる。`install_version`で）。`.github/workflows/check_r_updates.yml`の対象にも足す（新版の週次確認）。
+  **devcontainerの再構築は利用者の作業**（再構築が済むまでR側の実行ができない。一時ディレクトリ導入で先に進める案もある）。
+  (2) `benchmark/iv/references/`にivDiagのアダプタ。(3) `eff_F`の定式化（FE引数、複数内生変数）の対応状況はソースで確認。(4) fixture（`iv_*`系のJSON、`generate_*`、`cov`の分離規約）とpytest（`tests/iv/`、`/test-new`）。
+- 確認すべき設計判断（14章、着手前にユーザーへ）: ivDiagを主参照にするか、独立クロスチェックにとどめるか（有効Fはオラクルが主、ivDiagは`hc1`・`cluster`のみ）。lfeの自由度補正の規約が本実装の`n_absorbed`と合うか（IV本体は`n_absorbed=0`なので今回は関係しない。FEIV #373で効く）。
+  CD・KPのR参照（`ivreg`は持たない。ivDiagは持つか、`AER`/`ivpack`/`ivmodel`等の候補）。fixtureをCD/KP/有効Fで分けるか。
+- 公開ページの`verification.md`の表（IV弱操作変数診断の行）に「Independent cross-check: none yet」と書いてあるので、#367で埋める（`verification-details.md`の「Weak-instrument diagnostics have one package reference」も更新）。
+
+**その後**: #368（C統計量のengine。同じ重み行列を使うかをここで確定。疑わしい変数を内生/外生で2回GMM推定してHansen Jの差。事後診断のメソッドで、`IVResults`が`source_data`等を保持する仕組みは#366で入った）→#369（バインディング・ラッパー・テスト、#256も参照）→FE-2SLS（#370〜#380）→FE-GMM（#381〜#388）。
+
+**注意書き**
+- コミットはパス指定。署名はホストの端末でパスフレーズの確認が出る。署名に失敗したら止まって報告（リトライしない）。Pythonを触ったら`uv run maturin develop`（debugビルド）で入れ直してから`pytest`（releaseビルドだとテスト専用関数が無く`test_error_catalog`が落ちる）。
+- 全体のpytestは約6〜8分。エラーコードを足したら`UPDATE_ERROR_CATALOG_GOLDEN=1 cargo test -p engine error_catalog`→`maturin develop`→`python tools/render_error_catalog.py`（ビルド後に実行）→`MIGRATED_CODES`。カタログのmessageは約320文字が上限。
+- ルートCLAUDE.mdは、診断を「`DiagnosticResult`で返す」と書いている（2章）。今回の例外は`docs/spec/inference-conventions.md`に書いたが、CLAUDE.mdへの追記は利用者の承認が要る（未確認）。
+- 保留（利用者の判断待ち）: READMEの「Attribution and Rights」注意書き、フィクスチャのデータ（Wooldridge等）のライセンス確認、ルートCLAUDE.md 3章の`shared/`の列挙の更新、`mop-oracle-spec.md`の履歴の扱い。
+- Web検索は利用者の許可を得てから（#367で他パッケージの挙動を確認するときも）。

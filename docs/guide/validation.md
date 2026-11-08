@@ -252,7 +252,6 @@ These are in addition to the situations above.
 **FE**
 
 - A group (a level of a column of `effects`) with a single observation: a singleton entity or, in a two-way model, a singleton time period (`SINGLETON_GROUP`). Singleton groups are never dropped automatically; the error gives `n_dropped_rows`, the number of rows that removing singleton groups repeatedly would drop (in a two-way model, dropping one can leave another group with a single row).
-- In a two-way model, the same (entity, time) pair in more than one row (`DUPLICATE_ENTITY_TIME_PAIR`). An unbalanced two-way panel is accepted.
 - `tol` not a positive finite number, or `max_iter` outside 1 to 10,000.
 - `cov_type="hc2"` or `"hc3"` in a two-way model on an unbalanced panel when the smaller of the two effects has more than 3,000 levels (`LEVERAGE_DIMENSION_TOO_LARGE`).
 - A regressor with the same value in every row (`REGRESSOR_CONSTANT`), or with no within-variation (constant over time within every entity, `REGRESSOR_NO_WITHIN_VARIATION`).
@@ -323,7 +322,7 @@ The absence of an error says nothing about the following. They are your responsi
 - **Instrument validity and strength.** In IV only the order condition (at least as many instruments as endogenous regressors) is checked up front. The rank condition is not, so irrelevant instruments may surface later as a singular first stage. The weak-instrument F statistic is reported without a verdict, and the over-identification test is `None` when the model is just identified.
 - **Stationarity, outliers and influential observations.**
 - **Near-separation.** Data that are close to, but not at, separation have a finite estimate, so they estimate without an error, although the standard errors can be very large. Only exact separation is an error.
-- **Panel structure beyond what the estimator needs.** FE accepts unbalanced panels, one-way and two-way, and a two-way FE model also accepts entities and periods that form several disconnected groups; it rejects a repeated (entity, time) pair. Only two-way RE requires a balanced panel (and also rejects a repeated pair).
+- **Panel structure beyond what the estimator needs.** FE accepts unbalanced panels, one-way and two-way, and a two-way FE model also accepts entities and periods that form several disconnected groups; a combination of `effects` values may appear in more than one row, and nothing checks for it. Only two-way RE requires a balanced panel (every combination exactly once, so a repeated combination is reported as `PANEL_NOT_BALANCED_FOR_TWO_WAY`).
 - **Numeric precision.** Numeric columns are converted to 64-bit floating point without a warning, so integers beyond 2^53 and decimals with many digits can lose precision. See [Accepted data](accepted-data.md#how-values-are-converted).
 
 ## Where to look next

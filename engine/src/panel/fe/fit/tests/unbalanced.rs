@@ -345,20 +345,91 @@ fn the_estimates_do_not_depend_on_the_row_order() {
     }
 }
 
-#[test]
-fn a_repeated_entity_time_pair_is_rejected() {
-    let mut data = panel(1, 10, 5, 0.8, 13);
-    data.y.push(0.5);
-    for column in &mut data.x {
-        column.push(0.1);
+/// 係数・古典的な共分散・残差・HC2・HC3の共分散・固定効果が、ダミー変数回帰と一致する。
+fn assert_matches_the_dummy_regression(data: &Panel) {
+    let oracle = lsdv(data);
+    let fe = data.fit(FeCovType::Classical).unwrap();
+    assert_eq!(fe.df_model(), oracle.rank);
+    for j in 0..2 {
+        close(*fe.params().get(j, 0), oracle.params[j], 1e-8, "params");
+        for k in 0..2 {
+            close(
+                *fe.cov_params().get(j, k),
+                *oracle.classical_cov.get(j, k),
+                1e-7,
+                "classical covariance",
+            );
+        }
     }
-    data.entity.push(data.entity[0].clone());
-    data.time.push(data.time[0].clone());
-    let err = data.fit(FeCovType::Classical).unwrap_err();
-    assert!(
-        matches!(err, PanelError::DuplicateEntityTimePair { .. }),
-        "{err:?}"
+    for (i, expected) in oracle.residuals.iter().enumerate() {
+        assert!(
+            (fe.residuals().get(i, 0) - expected).abs() < 1e-8,
+            "residual {i}"
+        );
+    }
+    // HC2・HC3のレバレッジは、閉形式のバランス用の式ではなくダミー回帰のハット行列で求める。
+    for (cov_type, expected) in [
+        (FeCovType::Hc2, &oracle.hc2_cov),
+        (FeCovType::Hc3, &oracle.hc3_cov),
+    ] {
+        let robust = data.fit(cov_type.clone()).unwrap();
+        for j in 0..2 {
+            for k in 0..2 {
+                close(
+                    *robust.cov_params().get(j, k),
+                    *expected.get(j, k),
+                    1e-6,
+                    &format!("{cov_type:?} covariance"),
+                );
+            }
+        }
+    }
+    assert_fixed_effects_match_the_dummy_regression(data);
+}
+
+/// 同じ(個体, 時点)の行が複数ある入力も受け付け、ダミー変数回帰と一致する（`effects`の列は州と郡の
+/// ような組合せでもよく、組合せごとに1行とは限らない）。
+#[test]
+fn repeated_entity_time_pairs_are_accepted_and_match_the_dummy_variable_regression() {
+    let mut data = panel(1, 20, 8, 0.7, 13);
+    for source in [0, 3, 17, 40] {
+        let (y, entity, time) = (
+            data.y[source] + 0.3,
+            data.entity[source].clone(),
+            data.time[source].clone(),
+        );
+        data.y.push(y);
+        for column in &mut data.x {
+            let value = column[source] - 0.2;
+            column.push(value);
+        }
+        data.entity.push(entity);
+        data.time.push(time);
+    }
+    assert_matches_the_dummy_regression(&data);
+}
+
+/// 行数が全組合せの数と同じでも、組合せが重複して別の組合せが欠けていれば、バランスパネルの閉形式
+/// （2段階の変換・バランス用のレバレッジ）ではなく不均衡として扱い、ダミー変数回帰と一致する。
+#[test]
+fn a_repeated_pair_that_offsets_a_missing_one_is_not_treated_as_balanced() {
+    let mut data = panel(1, 10, 6, 2.0, 21);
+    let (entities, periods) = (
+        data.entity
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        data.time
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
     );
+    assert_eq!(data.y.len(), entities * periods);
+    // 最後の行を、先頭の行と同じ組合せにする。
+    let last = data.y.len() - 1;
+    data.entity[last] = data.entity[0].clone();
+    data.time[last] = data.time[0].clone();
+    assert_matches_the_dummy_regression(&data);
 }
 
 #[test]

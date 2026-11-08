@@ -85,8 +85,8 @@ fn require_effect_keys(group: &GroupCodes) -> Result<(), PanelError> {
     Ok(())
 }
 
-/// `entity`、2-wayなら`two_way_time`にも観測数1のグループがないことを検証する
-/// （`fe-spec.md`1章）。entityを先に検査し、両方に該当するsingletonがあればentity側を報告する。
+/// 効果の各次元`groups`（`effects`の順）に観測数1のグループがないことを検証する（`fe-spec.md`1章）。
+/// 先頭の次元から順に検査し、複数の次元に該当するsingletonがあれば先の次元を報告する。
 /// 列名は`names`から引く。エラーには、観測数1のグループを取り除くことを繰り返したときに落ちる行の総数
 /// （`n_dropped_rows`）を載せる。
 ///
@@ -94,18 +94,11 @@ fn require_effect_keys(group: &GroupCodes) -> Result<(), PanelError> {
 /// 観測数1のグループが見つかった場合は`PanelError::SingletonGroup`（該当する`dimension`を含む）。
 pub(crate) fn ensure_no_singleton_groups(
     names: &EffectNames,
-    entity: &GroupCodes,
-    two_way_time: Option<&GroupCodes>,
+    groups: &[&GroupCodes],
 ) -> Result<(), PanelError> {
-    let found = first_singleton_group(
-        PanelDimension::ENTITY,
-        names.get(PanelDimension::ENTITY),
-        entity,
-    )
-    .or_else(|| {
-        two_way_time.and_then(|time| {
-            first_singleton_group(PanelDimension::TIME, names.get(PanelDimension::TIME), time)
-        })
+    let found = groups.iter().enumerate().find_map(|(index, group)| {
+        let dimension = PanelDimension::new(index);
+        first_singleton_group(dimension, names.get(dimension), group)
     });
     match found {
         None => Ok(()),
@@ -113,7 +106,7 @@ pub(crate) fn ensure_no_singleton_groups(
             dimension,
             column,
             group_id,
-            n_dropped_rows: rows_dropped_by_repeated_removal(entity, two_way_time),
+            n_dropped_rows: rows_dropped_by_repeated_removal(groups),
         }),
     }
 }
@@ -175,58 +168,50 @@ fn first_singleton_group(
 
 /// 観測数1のグループを取り除くことを、新しいsingletonが現れなくなるまで繰り返したときに落ちる行の総数。
 ///
-/// 1-way（`time`が`None`）は観測数1の個体の数。2-wayは、個体のsingletonを落とすと時点のsingletonができる
-/// （その逆も）連鎖を含む。各行を最大1回落とすので`O(n)`。
-fn rows_dropped_by_repeated_removal(entity: &GroupCodes, time: Option<&GroupCodes>) -> usize {
-    let Some(time) = time else {
-        return entity.counts().iter().filter(|&&c| c == 1).count();
-    };
-    let n = entity.nobs();
-    let entity_rows = entity.group_indices();
-    let time_rows = time.group_indices();
-    let mut alive = vec![true; n];
-    let mut entity_left = entity.counts().to_vec();
-    let mut time_left = time.counts().to_vec();
-    // (次元, グループ)。次元0が個体、1が時点。
-    let mut stack: Vec<(usize, usize)> = Vec::new();
-    for (g, &c) in entity_left.iter().enumerate() {
-        if c == 1 {
-            stack.push((0, g));
-        }
+/// 1つの次元だけなら観測数1のグループの数。複数の次元では、ある次元のsingletonを落とすと別の次元の
+/// グループが観測数1になる連鎖を含む。各行を最大1回落とすので`O(n·K)`（`K`は次元の数）。
+fn rows_dropped_by_repeated_removal(groups: &[&GroupCodes]) -> usize {
+    match groups {
+        [only] => only.counts().iter().filter(|&&c| c == 1).count(),
+        _ => rows_dropped_across_dimensions(groups),
     }
-    for (g, &c) in time_left.iter().enumerate() {
-        if c == 1 {
-            stack.push((1, g));
+}
+
+/// [`rows_dropped_by_repeated_removal`]の、次元が複数あるときの連鎖の計算。
+fn rows_dropped_across_dimensions(groups: &[&GroupCodes]) -> usize {
+    let Some(first) = groups.first() else {
+        return 0;
+    };
+    let rows_of: Vec<_> = groups.iter().map(|group| group.group_indices()).collect();
+    let mut alive = vec![true; first.nobs()];
+    // 次元ごとの、まだ落ちていない行の数。
+    let mut left: Vec<Vec<usize>> = groups.iter().map(|group| group.counts().to_vec()).collect();
+    // (次元, グループ)。
+    let mut stack: Vec<(usize, usize)> = Vec::new();
+    for (dim, counts) in left.iter().enumerate() {
+        for (g, &c) in counts.iter().enumerate() {
+            if c == 1 {
+                stack.push((dim, g));
+            }
         }
     }
     let mut dropped = 0;
     while let Some((dim, g)) = stack.pop() {
-        let left = if dim == 0 {
-            entity_left[g]
-        } else {
-            time_left[g]
-        };
-        if left != 1 {
+        if left[dim][g] != 1 {
             continue;
         }
-        let rows = if dim == 0 {
-            entity_rows.rows(g)
-        } else {
-            time_rows.rows(g)
-        };
-        let Some(&row) = rows.iter().find(|&&r| alive[r]) else {
+        let Some(&row) = rows_of[dim].rows(g).iter().find(|&&r| alive[r]) else {
             continue;
         };
         alive[row] = false;
         dropped += 1;
-        let (e, t) = (entity.codes()[row], time.codes()[row]);
-        entity_left[e] -= 1;
-        time_left[t] -= 1;
-        if dim == 0 && time_left[t] == 1 {
-            stack.push((1, t));
-        }
-        if dim == 1 && entity_left[e] == 1 {
-            stack.push((0, e));
+        for (other, group) in groups.iter().enumerate() {
+            let code = group.codes()[row];
+            left[other][code] -= 1;
+            // 落とした行の次元自身は0になるので積まれない。
+            if left[other][code] == 1 {
+                stack.push((other, code));
+            }
         }
     }
     dropped
@@ -237,15 +222,8 @@ fn rows_dropped_by_repeated_removal(entity: &GroupCodes, time: Option<&GroupCode
 ///
 /// 観測数カウントの一致（`n_obs == n_entities * n_periods`）だけでは不十分
 /// （`PanelError::UnbalancedPanelForTwoWay`のdocコメント参照: あるペアの重複と別ペアの
-/// 欠落が相殺してカウントだけ一致する入力がありうる）。代わりに、`(entity, time)`
-/// ペアが重複なく、かつ`n_obs == n_entities * n_periods`であることを検証する。
-/// ペア集合は`entity × time`の全組合せグリッド（サイズ`n_entities * n_periods`）の
-/// 部分集合であるため、重複が無く要素数がグリッドのサイズと一致すれば、部分集合が全体
-/// （＝全組合せが埋まっている）と一致することが数学的に保証される。
-///
-/// `n_obs != n_entities * n_periods`ならその時点で不均衡（ペアの重複判定は不要）。一致する
-/// ときだけ、グリッドのセル（`entity`コード×`n_periods`+`time`コード）を一度ずつ埋めて
-/// 重複を検出する（`n_obs`個の`bool`）。
+/// 欠落が相殺してカウントだけ一致する入力がありうる）ため、判定は[`covers_every_combination`]
+/// に任せる。
 ///
 /// `entity.nobs() == time.nobs()`は`FeInput::from_group_codes`が既に保証している契約
 /// （呼び出し側は常に同じ`FeInput`からこの2つを渡す）。
@@ -254,96 +232,43 @@ pub(crate) fn validate_balanced_panel(
     time: &GroupCodes,
     names: &EffectNames,
 ) -> Result<(), PanelError> {
-    debug_assert_eq!(
-        entity.nobs(),
-        time.nobs(),
-        "entity and time must have the same length (FeInput contract)"
-    );
-    let n_obs = entity.nobs();
-    let n_entities = entity.n_groups();
-    let n_periods = time.n_groups();
-    let expected = n_entities * n_periods;
-    let unbalanced = || PanelError::UnbalancedPanelForTwoWay {
-        n_obs,
+    if covers_every_combination(entity, time) {
+        return Ok(());
+    }
+    Err(PanelError::UnbalancedPanelForTwoWay {
+        n_obs: entity.nobs(),
         entity_column: names.get(PanelDimension::ENTITY).to_string(),
-        n_entities,
+        n_entities: entity.n_groups(),
         time_column: names.get(PanelDimension::TIME).to_string(),
-        n_periods,
-    };
-
-    if n_obs != expected {
-        return Err(unbalanced());
-    }
-    let mut filled = vec![false; expected];
-    for (&e, &t) in entity.codes().iter().zip(time.codes()) {
-        let cell = &mut filled[e * n_periods + t];
-        if *cell {
-            return Err(unbalanced());
-        }
-        *cell = true;
-    }
-    Ok(())
+        n_periods: time.n_groups(),
+    })
 }
 
-/// 重複する`(entity, time)`が無いことを前提に、すべての組合せがそろっているか（バランスパネルか）。
-/// 行数が`N × T`であることと同じ。重複の検査（[`ensure_no_duplicate_entity_time_pairs`]）が先に通っていること。
-pub(crate) fn covers_every_combination(entity: &GroupCodes, time: &GroupCodes) -> bool {
-    entity.nobs() == entity.n_groups().saturating_mul(time.n_groups())
-}
-
-/// グリッドの大きさが行数のこの倍数以下なら、グリッドの`bool`で重複を調べる（`O(n)`）。それより大きい
-/// （疎なパネル）ときは並べ替える（`O(n log n)`）。
-const GRID_SIZE_FACTOR: usize = 8;
-
-/// `(entity, time)`の同じ組合せが複数の行に現れないことを検証する（2-wayの固定効果）。
+/// `entity` × `time`の全組合せが過不足なく1回ずつ現れるか（バランスパネルか）。閉形式の2段階変換と
+/// バランス用のレバレッジ（`1/T_i + 1/N_t − 1/n`）を使ってよい条件。
 ///
-/// 組合せを整数キー（`entity`コード × 時点数 + `time`コード）にする。`entity × time`のグリッドが行数の
-/// 数倍以下なら、グリッドを埋めて調べる。それより大きいときは、キーを並べ替えて隣り合う一致で検出し、
-/// 疎な大きなパネルでもメモリが行数に比例するようにする。重複する組合せが複数あれば、観測順で2回目に
-/// 現れる行が最も早いものを報告する。
+/// 同じ組合せが複数の行に現れる入力も正当で（`effects`の列は州と郡のような組合せでもよい）、
+/// その場合は組合せが欠けるので、バランスではなく不均衡として交互射影で扱う。行数が
+/// `N × T`でなければその時点で不均衡。一致するときだけ、グリッドのセル（`entity`コード×
+/// `n_periods`+`time`コード、`n`個の`bool`）を一度ずつ埋めて、重複があれば不均衡とする。
 ///
 /// `entity.nobs() == time.nobs()`は`FeInput::from_group_codes`が保証している契約。
-///
-/// # Errors
-/// 重複する組合せがあるとき`PanelError::DuplicateEntityTimePair`。
-pub(crate) fn ensure_no_duplicate_entity_time_pairs(
-    entity: &GroupCodes,
-    time: &GroupCodes,
-    names: &EffectNames,
-) -> Result<(), PanelError> {
+pub(crate) fn covers_every_combination(entity: &GroupCodes, time: &GroupCodes) -> bool {
     debug_assert_eq!(
         entity.nobs(),
         time.nobs(),
         "entity and time must have the same length (FeInput contract)"
     );
-    let n = entity.nobs();
     let n_periods = time.n_groups();
-    // 個体の水準数と時点の水準数はどちらも行数以下なので、行数が2^32未満なら積はあふれない。
-    let key = |row: usize| entity.codes()[row] * n_periods + time.codes()[row];
-    let grid_size = entity.n_groups().saturating_mul(n_periods);
-
-    let second_row = if grid_size <= GRID_SIZE_FACTOR.saturating_mul(n) {
-        let mut seen = vec![false; grid_size];
-        (0..n).find(|&row| std::mem::replace(&mut seen[key(row)], true))
-    } else {
-        let mut keyed: Vec<(usize, usize)> = (0..n).map(|row| (key(row), row)).collect();
-        keyed.sort_unstable();
-        // キーが同じ間は行番号の昇順なので、同じキーの2番目の要素が、その組合せの2回目の行。
-        keyed
-            .windows(2)
-            .filter(|pair| pair[0].0 == pair[1].0)
-            .map(|pair| pair[1].1)
-            .min()
-    };
-    match second_row {
-        None => Ok(()),
-        Some(row) => Err(PanelError::DuplicateEntityTimePair {
-            entity_column: names.get(PanelDimension::ENTITY).to_string(),
-            entity_id: entity.keys()[entity.codes()[row]].clone(),
-            time_column: names.get(PanelDimension::TIME).to_string(),
-            time_id: time.keys()[time.codes()[row]].clone(),
-        }),
+    if entity.nobs() != entity.n_groups().saturating_mul(n_periods) {
+        return false;
     }
+    let mut filled = vec![false; entity.nobs()];
+    entity
+        .codes()
+        .iter()
+        .zip(time.codes())
+        .all(|(&e, &t)| !std::mem::replace(&mut filled[e * n_periods + t], true))
 }
 
 /// `x`の各列のうち、1-way within変換（`entity`でθ=1のquasi-demean）後に分散がある列

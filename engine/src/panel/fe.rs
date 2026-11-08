@@ -31,8 +31,9 @@
 //!
 //! - **1-way**: `y`/各`x`列にentityでのquasi-demean（θ=1）を適用する。不均衡パネルも
 //!   無条件でサポートする。
-//! - **2-way**: `time`が無ければ`PanelError::TwoWayRequiresTime`、同じ`(entity, time)`の組合せが
-//!   複数の行にあれば`PanelError::DuplicateEntityTimePair`。全ての組合せがそろうバランスパネルは、
+//! - **2-way**: `time`が無ければ`PanelError::TwoWayRequiresTime`。同じ`(entity, time)`の組合せが
+//!   複数の行にあってもよい（`effects`の列は州と郡のような組合せでもよい）。全ての組合せが過不足なく
+//!   1回ずつ現れるバランスパネルは、
 //!   閉形式の二重デミーニング`ỹ_it = y_it - ȳ_i. - ȳ_.t + ȳ..`を別実装せず、「entityで
 //!   quasi-demean → その結果をtimeでquasi-demean」の2段階適用にしている（バランスパネルでのみ
 //!   閉形式と一致する。導出は`fe-spec.md`3.1節）。組合せが欠ける不均衡パネルは、entityとtimeの
@@ -257,15 +258,13 @@ impl FeEstimator {
     /// `PanelError::TwoWayRequiresTime`。以降の検証より先に評価する）→ singleton検出
     /// （`validate_no_singleton_groups_one_way`/`validate_no_singleton_groups_two_way`）
     /// → within変換（`within_transform_one_way`/`within_transform_two_way`、
-    /// 2-wayは重複する組合せの検査を内包）→ 自由度検証 → 分散ゼロ検出
+    /// 2-wayは全組合せがそろえば閉形式、そうでなければ交互射影）→ 自由度検証 → 分散ゼロ検出
     /// （`validate_no_zero_variance_regressors`）→ `confidence_level`検証 → 最小二乗
     /// （切片なし。理由はモジュールdoc参照）→ `cov_type`別の共分散行列の計算 → 自由度調整後の統計量の再計算。
     ///
     /// # Errors
     /// - `effects=TwoWay`で`input.time_codes()`が`None`の場合は`PanelError::TwoWayRequiresTime`
     /// - singletonグループが見つかった場合は`PanelError::SingletonGroup`
-    /// - `effects=TwoWay`で同じ`(entity, time)`の組合せが複数の行にある場合は
-    ///   `PanelError::DuplicateEntityTimePair`
     /// - 打ち切り設定が範囲外なら`PanelError::InvalidTol`・`PanelError::InvalidMaxIter`、不均衡な2-wayで
     ///   交互射影が収束しなければ`PanelError::AbsorptionNotConverged`
     /// - 不均衡な2-wayのHC2/HC3で、水準の少ない方の効果の水準数が上限を超えれば

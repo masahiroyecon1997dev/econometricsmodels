@@ -41,7 +41,7 @@ pub(super) fn leverage_full(
         None => (0..n)
             .map(|i| 1.0 / (entity_sizes[entity_codes[i]] as f64) + h_within[i])
             .collect(),
-        // 重複する組合せは`fit`が事前に拒否している（`leverage_full`は、重複が無い入力にだけ使う）。
+        // 全組合せが過不足なく1回ずつ現れる（`covers_every_combination`）ときだけ閉形式を使う。
         Some(time) if covers_every_combination(entity, time) => {
             let time_codes = time.codes();
             let time_sizes = time.counts();
@@ -201,21 +201,17 @@ fn every_level_splits_once_across_two_groups(levels: &GroupCodes, groups: &Group
 /// グループスコアが恒等的にゼロになるか（`PanelError::DegenerateDkTwoPeriods`/
 /// `DegenerateClusterTwoGroups`の判定）。
 ///
-/// within変換は吸収した各FE次元の水準内で和をゼロにする（1-wayはentity、2-wayは
-/// entityとtimeの両方）。ある次元の全水準がちょうど2観測で2グループに1つずつ分かれると、
-/// 各水準の2観測で`x̃`・`ẽ`が符号反転し、両グループに同じ寄与が入ってスコアが等しくなる。
-/// 正規方程式でスコアの和はゼロのため、両方ゼロになる。entity方向（2時点のパネルを
-/// timeでクラスタリング等）だけでなく、2-wayではtime方向（エンティティ2つのパネルを
-/// entityでクラスタリング——Clusterの既定——等）も同じ構造になる。
+/// within変換は吸収した各FE次元の水準内で和をゼロにする。ある次元の全水準がちょうど2観測で
+/// 2グループに1つずつ分かれると、各水準の2観測で`x̃`・`ẽ`が符号反転し、両グループに同じ寄与が
+/// 入ってスコアが等しくなる。正規方程式でスコアの和はゼロのため、両方ゼロになる。entity方向
+/// （2時点のパネルをtimeでクラスタリング等）だけでなく、2-wayではtime方向（エンティティ2つのパネルを
+/// entityでクラスタリング——Clusterの既定——等）も、高次元ではどの次元も同じ構造になる。
 ///
-/// `two_way_time`は2-wayの時点コード（1-wayは`None`、`two_way_time`関数参照）。
-pub(super) fn two_group_split_is_degenerate(
-    entity: &GroupCodes,
-    two_way_time: Option<&GroupCodes>,
-    groups: &GroupCodes,
-) -> bool {
-    every_level_splits_once_across_two_groups(entity, groups)
-        || two_way_time.is_some_and(|time| every_level_splits_once_across_two_groups(time, groups))
+/// `levels`は吸収した全ての効果の次元（`effects`の順。1-wayは1つ）。
+pub(super) fn two_group_split_is_degenerate(levels: &[&GroupCodes], groups: &GroupCodes) -> bool {
+    levels
+        .iter()
+        .any(|level| every_level_splits_once_across_two_groups(level, groups))
 }
 
 #[cfg(test)]
@@ -367,5 +363,23 @@ mod tests {
             &codes(&["a", "a", "b"]),
             &codes(&["1", "2", "1"])
         ));
+    }
+
+    #[test]
+    fn two_group_split_is_degenerate_checks_every_absorbed_dimension() {
+        let groups = codes(&["1", "1", "2", "2"]);
+        // 1つ目の次元では各水準の2観測が同じグループに入るので、単独では退化しない。
+        let first = codes(&["a", "a", "b", "b"]);
+        // 2つ目の次元では各水準の2観測が2グループに1つずつ分かれる。
+        let second = codes(&["p", "q", "p", "q"]);
+        assert!(!two_group_split_is_degenerate(&[&first], &groups));
+        assert!(two_group_split_is_degenerate(&[&second], &groups));
+        assert!(two_group_split_is_degenerate(&[&first, &second], &groups));
+        // 3つ目の次元だけが退化させる場合も見つける。
+        assert!(two_group_split_is_degenerate(
+            &[&first, &first, &second],
+            &groups
+        ));
+        assert!(!two_group_split_is_degenerate(&[], &groups));
     }
 }

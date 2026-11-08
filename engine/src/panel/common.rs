@@ -17,7 +17,6 @@
 //! - `InsufficientDegreesOfFreedom`: パネル自由度調整（`fe-spec.md`3.2節）
 //! - `SingletonGroup`: 観測数1のグループ（`fe-spec.md`1章）
 //! - `UnbalancedPanelForTwoWay`: 2-way REのバランスパネル必須（2-way FEは不均衡パネルを扱う）
-//! - `DuplicateEntityTimePair`: 同じ`(entity, time)`の組合せが複数の行にある（2-way）
 //! - `ZeroVarianceAfterDemeaning`: within変換後に分散ゼロの説明変数（`fe-spec.md`1章）
 //! - `TwoWayRequiresTime`: 2-way FE・RE指定時の`time`必須（`panel-common.md`1.1節）
 //! - `InvalidDkBandwidth`: `FeCovType::Dk`の明示的な`bandwidth`が`[0, t)`の範囲外
@@ -106,8 +105,7 @@ pub(crate) use transform::{
     TwoWayTheta, WithinTransform, quasi_demean_column, quasi_demean_two_way,
 };
 pub(crate) use validation::{
-    covers_every_combination, ensure_no_duplicate_entity_time_pairs, ensure_no_singleton_groups,
-    ensure_no_zero_variance_columns, time_varying_regressor_indices,
-    two_way_time_varying_regressor_indices, validate_balanced_panel, validate_column_lengths,
-    validate_panel_input,
+    covers_every_combination, ensure_no_singleton_groups, ensure_no_zero_variance_columns,
+    time_varying_regressor_indices, two_way_time_varying_regressor_indices,
+    validate_balanced_panel, validate_column_lengths, validate_panel_input,
 };

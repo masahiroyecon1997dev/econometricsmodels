@@ -316,7 +316,7 @@ pub(super) fn internal_fe(
             let entity = input.entity_codes();
             let time = input.time_codes().ok_or(PanelError::TwoWayRequiresTime)?;
             let names = input.effect_names();
-            ensure_no_singleton_groups(names, entity, Some(time))?;
+            ensure_no_singleton_groups(names, &[entity, time])?;
             validate_balanced_panel(entity, time, names)?;
             let time_varying = two_way_time_varying_regressor_indices(input.x(), entity, time);
             let fe = FeEstimator::fit(

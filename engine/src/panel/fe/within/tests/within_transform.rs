@@ -112,24 +112,20 @@ fn within_transform_two_way_removes_every_entity_mean_and_time_mean_of_an_unbala
 }
 
 #[test]
-fn within_transform_two_way_rejects_a_repeated_pair_that_offsets_a_missing_combination() {
+fn within_transform_two_way_treats_a_repeated_pair_that_offsets_a_missing_combination_as_unbalanced()
+ {
     // entity=[a,a,b,b], time=[1,1,2,2]: (a,1)が重複、(a,2)と(b,1)が欠落。
-    // n_obs=4はn_entities(2)*n_periods(2)=4と一致してしまうが、ユニークな
-    // (entity,time)ペアは{(a,1),(b,2)}の2個のみ。件数の一致では見逃す入力を、重複として検出する。
+    // n_obs=4はn_entities(2)*n_periods(2)=4と一致してしまうが、全組合せはそろっていない。
+    // 閉形式の2段階変換を使うと誤るので、交互射影で計算する。連結成分は{a,1}と{b,2}の2つで、
+    // 各成分の2行は個体平均を引いた値（∓0.5）になる。
     let y = [1.0, 2.0, 3.0, 4.0];
     let entity = strings(&["a", "a", "b", "b"]);
     let time = strings(&["1", "1", "2", "2"]);
     let input = FeInput::from_columns(&y, &[], vec![], &entity, Some(&time), "y".into()).unwrap();
 
-    let result = within_transform_two_way(&input);
+    let (y_within, _) = within_transform_two_way(&input).unwrap();
 
-    assert_eq!(
-        result.unwrap_err(),
-        PanelError::DuplicateEntityTimePair {
-            entity_column: "entity".to_string(),
-            entity_id: "a".to_string(),
-            time_column: "time".to_string(),
-            time_id: "1".to_string(),
-        }
-    );
+    for (actual, expected) in y_within.iter().zip([-0.5, 0.5, -0.5, 0.5]) {
+        assert!((actual - expected).abs() < 1e-9, "{y_within:?}");
+    }
 }

@@ -75,7 +75,6 @@ pub enum ErrorCode {
     SingletonGroup,
     EffectsTooMany,
     PanelNotBalancedForTwoWay,
-    DuplicateEntityTimePair,
     LeverageDimensionTooLarge,
     RegressorConstant,
     RegressorNoWithinVariation,
@@ -153,7 +152,6 @@ impl ErrorCode {
         Self::SingletonGroup,
         Self::EffectsTooMany,
         Self::PanelNotBalancedForTwoWay,
-        Self::DuplicateEntityTimePair,
         Self::LeverageDimensionTooLarge,
         Self::RegressorConstant,
         Self::RegressorNoWithinVariation,
@@ -236,7 +234,6 @@ impl ErrorCode {
             Self::SingletonGroup => "SINGLETON_GROUP",
             Self::EffectsTooMany => "EFFECTS_TOO_MANY",
             Self::PanelNotBalancedForTwoWay => "PANEL_NOT_BALANCED_FOR_TWO_WAY",
-            Self::DuplicateEntityTimePair => "DUPLICATE_ENTITY_TIME_PAIR",
             Self::LeverageDimensionTooLarge => "LEVERAGE_DIMENSION_TOO_LARGE",
             Self::RegressorConstant => "REGRESSOR_CONSTANT",
             Self::RegressorNoWithinVariation => "REGRESSOR_NO_WITHIN_VARIATION",
@@ -1973,37 +1970,6 @@ pub static CATALOG: &[ErrorSpec] = &[
         message: r#"Two-way random effects require a balanced panel: {n_obs} observation(s) for {n_first_groups} groups of '{first_column}' and {n_second_groups} of '{second_column}', but every combination needs exactly one."#,
         hint: Some(
             r#"Make every entity observed in every period, or estimate one-way effects by passing a single column in effects."#,
-        ),
-        stage_allowed: false,
-    },
-    ErrorSpec {
-        code: ErrorCode::DuplicateEntityTimePair,
-        class: ErrorClass::Validation,
-        params: &[
-            ParamSpec {
-                name: "first_column",
-                ty: ParamType::Str,
-                in_text: true,
-            },
-            ParamSpec {
-                name: "first_group",
-                ty: ParamType::Str,
-                in_text: true,
-            },
-            ParamSpec {
-                name: "second_column",
-                ty: ParamType::Str,
-                in_text: true,
-            },
-            ParamSpec {
-                name: "second_group",
-                ty: ParamType::Str,
-                in_text: true,
-            },
-        ],
-        message: r#"The combination of '{first_column}' = {first_group} and '{second_column}' = {second_group} appears in more than one row, but each combination may appear at most once."#,
-        hint: Some(
-            r#"Remove the repeated rows so that each combination of the columns in effects appears once."#,
         ),
         stage_allowed: false,
     },

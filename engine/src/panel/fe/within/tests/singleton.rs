@@ -156,7 +156,7 @@ fn ensure_no_singleton_groups_with_no_observations_succeeds() {
     // regressor_succeeds`と同様の境界値テストの慣習に合わせる）。空配列にはsingleton
     // となりうる要素自体が存在しないため`Ok(())`になる。
     assert_eq!(
-        ensure_no_singleton_groups(&EffectNames::default(), &GroupCodes::from_labels(&[]), None),
+        ensure_no_singleton_groups(&EffectNames::default(), &[&GroupCodes::from_labels(&[])]),
         Ok(())
     );
 }
@@ -248,5 +248,44 @@ fn a_one_way_panel_drops_only_the_singleton_rows() {
             n_dropped_rows: 4,
             ..
         })
+    ));
+}
+
+fn codes(values: &[&str]) -> GroupCodes {
+    GroupCodes::from_labels(&strings(values))
+}
+
+#[test]
+fn the_chain_of_removed_singletons_runs_across_three_dimensions() {
+    // 3つ目の次元の"y"だけがsingleton。これを落とすと個体cが(c,2)だけになり、続けて落ちる。
+    let entity = codes(&["a", "a", "b", "b", "c", "c"]);
+    let time = codes(&["1", "2", "1", "2", "1", "2"]);
+    let third = codes(&["x", "x", "x", "x", "y", "x"]);
+    assert_eq!(
+        ensure_no_singleton_groups(&EffectNames::defaults(3), &[&entity, &time, &third]),
+        Err(PanelError::SingletonGroup {
+            dimension: PanelDimension::new(2),
+            column: "effect3".to_string(),
+            group_id: "y".to_string(),
+            n_dropped_rows: 2,
+        })
+    );
+}
+
+#[test]
+fn singletons_are_reported_for_the_earliest_dimension_and_none_is_accepted_without_one() {
+    let entity = codes(&["a", "a", "b", "b"]);
+    let time = codes(&["1", "2", "1", "2"]);
+    let third = codes(&["x", "y", "x", "y"]);
+    assert_eq!(
+        ensure_no_singleton_groups(&EffectNames::defaults(3), &[&entity, &time, &third]),
+        Ok(())
+    );
+    // 3つ目の次元と1つ目の次元の両方にsingletonがあれば、1つ目を報告する。
+    let entity = codes(&["a", "a", "b", "c"]);
+    let third = codes(&["x", "x", "y", "z"]);
+    assert!(matches!(
+        ensure_no_singleton_groups(&EffectNames::defaults(2), &[&entity, &third]),
+        Err(PanelError::SingletonGroup { dimension, .. }) if dimension == PanelDimension::ENTITY
     ));
 }

@@ -40,10 +40,11 @@ FE固有の内容のみを記載する。
   between回帰・最終回帰どちらも構造的にk=0にならないため無変更）。
 - 列名を受け取る引数は`effects`/`cluster`/`dk_time`のいずれも`_col`サフィックスを
   付けない（`y`/`x`と同じ規約）。`dk_time`は`cov_type="dk"`の値を接頭辞にした名前。
-- **2-wayは不均衡パネルも扱う**（組合せが欠けてよい）。同じ`(effects[0], effects[1])`が複数の行にある
-  場合は`ValidationError`（`DUPLICATE_ENTITY_TIME_PAIR`。`ensure_no_duplicate_entity_time_pairs`が、
-  重複と欠落が相殺して行数が`N × T`に一致する入力も見逃さない）。バランスパネルの判定は
-  重複が無い前提の`n_obs == 個体数 * 時点数`（`covers_every_combination`）。2-way REは従来どおり
+- **2-wayは不均衡パネルも扱う**（組合せが欠けてよい）。同じ`(effects[0], effects[1])`が複数の行にあってもよい
+  （`effects`の列は州と郡のような組合せでもよく、entity/timeの意味を持たない）。重複は検査しない。
+  バランスパネルの判定は「`n_obs == 個体数 * 時点数`かつ重複なし」（`covers_every_combination`。重複と欠落が
+  相殺して行数が`N × T`に一致する入力もバランスとは見なさない）で、バランスのときだけ閉形式、それ以外は
+  交互射影（重複する行も不均衡の一種）。2-way REは従来どおり
   バランスパネルを必須とし（`validate_balanced_panel`、`PANEL_NOT_BALANCED_FOR_TWO_WAY`）、これはREの
   GLS変換が閉形式を前提にするため。1-wayは不均衡パネルもv1から無条件でサポートする。
 - **1-wayは個体と時点の組の重複を検証しない**。1-wayには時点の列が無く、組という概念自体が
@@ -334,7 +335,6 @@ demeanしたR²」を3種とも定義すると誤る）:
 | `InsufficientDegreesOfFreedom` | `INSUFFICIENT_DEGREES_OF_FREEDOM`（`n_effects`は1-wayで個体数、2-wayで個体数+時点数-1） | `ValidationError` |
 | `SingletonGroup` | `SINGLETON_GROUP`（params: `argument`=`"effects"`・`column`・`group`・`n_dropped_rows`。`column`は`effects`の該当要素の列名で、エンジンは`with_effect_names`で受け取り計算には使わない） | `ValidationError` |
 | `UnbalancedPanelForTwoWay` | `PANEL_NOT_BALANCED_FOR_TWO_WAY`（2-way REだけ） | `ValidationError` |
-| `DuplicateEntityTimePair` | `DUPLICATE_ENTITY_TIME_PAIR` | `ValidationError` |
 | `InvalidTol` / `InvalidMaxIter` | `TOLERANCE_NOT_POSITIVE_FINITE` / `MAX_ITER_OUT_OF_RANGE` | `ValidationError` |
 | `LeverageDimensionTooLarge` | `LEVERAGE_DIMENSION_TOO_LARGE`（不均衡な2-wayのHC2/HC3） | `ValidationError` |
 | `AbsorptionNotConverged` | `ABSORPTION_NOT_CONVERGED` | `ComputationError` |

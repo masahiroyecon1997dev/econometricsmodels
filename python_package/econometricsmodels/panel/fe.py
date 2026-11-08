@@ -136,8 +136,6 @@ class FE:
                 - `cluster`, `dk_time` or `dk_bandwidth` is given with
                   a `cov_type` that does not use it, or
                   `cov_type="dk"` is requested without `dk_time`.
-                - The same (entity, time) pair appears in more than one
-                  row of a two-way model.
                 - A group of a column in `effects` has a single
                   observation.
                 - An explanatory variable has zero variance after the

@@ -5,8 +5,7 @@
 use super::input::{FeAbsorption, FeInput};
 use crate::panel::common::{
     PanelError, WithinTransform, check_leverage_dimension, covers_every_combination,
-    ensure_no_duplicate_entity_time_pairs, ensure_no_singleton_groups,
-    ensure_no_zero_variance_columns,
+    ensure_no_singleton_groups, ensure_no_zero_variance_columns,
 };
 use crate::shared::alternating_projections::{GroupSystem, ProjectionOptions};
 
@@ -45,7 +44,8 @@ pub(crate) struct AbsorbedEffects {
 /// 変化量の比から作るため、実際の誤差より小さくなりうる。
 const ABSORPTION_NOISE_SAFETY: f64 = 10.0;
 
-/// 2-way FE（entity + time FE）のwithin変換。事前に`(entity, time)`の重複がないことを検証する。
+/// 2-way FE（entity + time FE）のwithin変換。同じ`(entity, time)`の行が複数あってもよい（その入力は
+/// 組合せが欠けるので不均衡として扱う）。
 ///
 /// - 全ての組合せがそろうバランスパネルは、閉形式の二重デミーニングと数学的に等価な
 ///   「entityでquasi-demean → その結果をtimeでquasi-demean」の2段階適用で計算する
@@ -61,7 +61,6 @@ const ABSORPTION_NOISE_SAFETY: f64 = 10.0;
 ///
 /// # Errors
 /// - `input.time_codes()`が`None`の場合は`PanelError::TwoWayRequiresTime`
-/// - `(entity, time)`の重複は`PanelError::DuplicateEntityTimePair`
 /// - `leverage_needed`（HC2/HC3）で、組合せが欠け、水準の少ない方の効果の水準数が上限を超えるなら
 ///   `PanelError::LeverageDimensionTooLarge`
 /// - 交互射影が上限回数までに収束しなければ`PanelError::AbsorptionNotConverged`
@@ -72,7 +71,6 @@ pub(crate) fn within_transform_two_way_with(
 ) -> Result<TwoWayWithin, PanelError> {
     let time_codes = input.time_codes().ok_or(PanelError::TwoWayRequiresTime)?;
     let entity = input.entity_codes();
-    ensure_no_duplicate_entity_time_pairs(entity, time_codes, input.effect_names())?;
     if leverage_needed {
         // 組合せが欠けるときの密な行列の大きさは入力だけで決まるので、重い射影の前に確かめる。
         check_leverage_dimension(entity, time_codes)?;
@@ -150,7 +148,7 @@ pub(crate) fn within_transform_two_way(
 /// entityに観測数1のグループが見つかった場合は`PanelError::SingletonGroup`
 /// （`dimension: PanelDimension::ENTITY`）。
 pub(super) fn validate_no_singleton_groups_one_way(input: &FeInput) -> Result<(), PanelError> {
-    ensure_no_singleton_groups(input.effect_names(), input.entity_codes(), None)
+    ensure_no_singleton_groups(input.effect_names(), &[input.entity_codes()])
 }
 
 /// 2-way FE向けのsingleton検出（`fe-spec.md`1章）。entity・time双方を対称に検出する
@@ -172,7 +170,7 @@ pub(super) fn validate_no_singleton_groups_one_way(input: &FeInput) -> Result<()
 ///   （該当する`dimension`を含む）
 pub(super) fn validate_no_singleton_groups_two_way(input: &FeInput) -> Result<(), PanelError> {
     let time = input.time_codes().ok_or(PanelError::TwoWayRequiresTime)?;
-    ensure_no_singleton_groups(input.effect_names(), input.entity_codes(), Some(time))
+    ensure_no_singleton_groups(input.effect_names(), &[input.entity_codes(), time])
 }
 
 /// within変換後の説明変数の各列に分散ゼロの列がないことを検証する（`fe-spec.md`1章）。1-way/2-way

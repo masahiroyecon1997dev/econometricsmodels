@@ -28,14 +28,17 @@ Note:
 from __future__ import annotations
 
 import _error_expectations as msgs
+import numpy as np
 import pandas as pd
 import polars as pl
 import pytest
+from _assertions import assert_close
 from _constants import DATA_DIR
 from _error_expectations import escaped
 from _errors import raises_error
 from _fe_helpers import our_fit
 from _panel_helpers import x_columns
+from _tolerances import TOLERANCES
 from econometricsmodels import (
     FE,
     ComputationError,
@@ -448,20 +451,27 @@ def test_unbalanced_two_way_is_accepted():
     assert res.n_obs == 239
 
 
-def test_repeated_entity_time_pair_raises():
-    """同じ`(entity, time)`の組合せが複数の行にあるとき、不均衡パネルでも
-    `DUPLICATE_ENTITY_TIME_PAIR`。"""
+def test_repeated_entity_time_pair_is_accepted():
+    """同じ`(entity, time)`の組合せが複数の行にあっても、組合せが欠ける不均衡
+    パネルとして推定でき、ダミー変数回帰と一致する（`effects`の列は個体・時点に
+    限らない）。"""
     df = pl.read_csv(DATA_DIR / "fe_unbalanced_two_way.csv")
-    repeated = pl.concat([df, df.slice(10, 1)])
-    row = df.row(10, named=True)
-    with raises_error(
-        ErrorCode.DUPLICATE_ENTITY_TIME_PAIR,
-        first_column="entity",
-        first_group=str(row["entity"]),
-        second_column="time",
-        second_group=str(row["time"]),
-    ):
-        FE(repeated, y="y", x=["x1", "x2"], effects=["entity", "time"]).fit()
+    repeated = pl.concat([df, df.slice(10, 1).with_columns(pl.col("y") + 0.5)])
+    res = FE(repeated, y="y", x=["x1", "x2"], effects=["entity", "time"]).fit()
+    assert res.n_obs == df.height + 1
+
+    entity = repeated["entity"].to_numpy()
+    time = repeated["time"].to_numpy()
+    x = repeated.select("x1", "x2").to_numpy()
+    entity_dummies = (entity[:, None] == np.unique(entity)).astype(float)
+    time_dummies = (time[:, None] == np.unique(time)[1:]).astype(float)
+    design = np.hstack([x, entity_dummies, time_dummies])
+    coefficients = np.linalg.lstsq(
+        design, repeated["y"].to_numpy(), rcond=None
+    )[0]
+    tolerances = TOLERANCES["fe_reference"]
+    for j, name in enumerate(["x1", "x2"]):
+        assert_close(res.params[name], coefficients[j], name, **tolerances)
 
 
 def test_absorption_not_converged_raises():

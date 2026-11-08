@@ -83,7 +83,7 @@ pub(super) fn fixed_effects(estimator: &FeEstimator) -> FixedEffects {
                 "2-way already validated `time` is present (`fit` resolves `two_way_time`)",
             );
             let entity = estimator.input.entity_codes();
-            // 重複する組合せは`fit`が拒否している。
+            // `absorbed`があるのは、全組合せが過不足なく1回ずつ現れない（重複する行を含む）場合だけ。
             if let Some(absorbed) = &estimator.absorbed {
                 return unbalanced_two_way(estimator, absorbed, entity, time);
             }

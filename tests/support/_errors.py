@@ -93,7 +93,6 @@ MIGRATED_CODES: frozenset[str] = frozenset(
         ErrorCode.INSUFFICIENT_DEGREES_OF_FREEDOM,
         ErrorCode.SINGLETON_GROUP,
         ErrorCode.PANEL_NOT_BALANCED_FOR_TWO_WAY,
-        ErrorCode.DUPLICATE_ENTITY_TIME_PAIR,
         ErrorCode.ABSORPTION_NOT_CONVERGED,
         ErrorCode.LEVERAGE_DIMENSION_TOO_LARGE,
         ErrorCode.EFFECTS_TOO_MANY,

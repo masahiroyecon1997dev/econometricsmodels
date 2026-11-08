@@ -43,7 +43,9 @@ pub(crate) fn check_leverage_dimension(
 /// `h_ii = 1/n_e + A[t,t] − 2 (A c_e)[t] / n_e + c_e'A c_e / n_e²`。
 /// 個体と時点の役割は対称なので、水準の少ない方を密に解く。計算量は`O(n · 少ない方の水準数 + 水準数³)`。
 ///
-/// 重複する`(entity, time)`は呼び出し側が事前に拒否している（`c_e`が0/1のベクトルになる前提）。
+/// 同じ`(entity, time)`が複数の行にあってもよい（`c_e`は出現回数のベクトルで、式は回数について
+/// そのまま成り立つ）。個体ごとに時点の出現回数を先に集約するので、計算量は個体内の行数の2乗ではなく、
+/// 個体内の異なる時点の数に依存する。
 ///
 /// # Errors
 /// - 少ない方の水準数が[`MAX_DENSE_LEVELS`]を超えるとき`PanelError::LeverageDimensionTooLarge`
@@ -70,13 +72,16 @@ pub(super) fn dummy_leverage(
     for (t, &count) in dense.counts().iter().enumerate() {
         *m.get_mut(t, t) = count as f64;
     }
+    let mut tally = Tally::new(levels);
     for (group, group_rows) in rows.iter().enumerate() {
         let weight = 1.0 / sizes[group] as f64;
-        for &r in group_rows {
-            for &s in group_rows {
-                *m.get_mut(dense_codes[r], dense_codes[s]) -= weight;
+        let occurrences = tally.count(group_rows, dense_codes);
+        for &(a, count_a) in occurrences {
+            for &(b, count_b) in occurrences {
+                *m.get_mut(a, b) -= weight * (count_a * count_b) as f64;
             }
         }
+        tally.clear();
     }
     // 連結成分ごとの零空間を足す: 成分の指示ベクトルを単位ベクトルにして`u u'`。
     let components = GroupSystem::new(&[eliminated, dense]).components();
@@ -101,15 +106,16 @@ pub(super) fn dummy_leverage(
 
     // 個体ごとに v = A c_e と c_e' v / n_e² を作り、行の値を組み立てる。
     let mut leverage = vec![0.0; n];
+    let mut v = vec![0.0; levels];
     for (group, group_rows) in rows.iter().enumerate() {
         let size = sizes[group] as f64;
-        let mut v = vec![0.0; levels];
-        for &r in group_rows {
-            let column = dense_codes[r];
+        v.fill(0.0);
+        for &(column, count) in tally.count(group_rows, dense_codes) {
             for (t, value) in v.iter_mut().enumerate() {
-                *value += *a.get(t, column);
+                *value += count as f64 * *a.get(t, column);
             }
         }
+        tally.clear();
         let quadratic: f64 =
             group_rows.iter().map(|&r| v[dense_codes[r]]).sum::<f64>() / (size * size);
         for &r in group_rows {
@@ -118,6 +124,46 @@ pub(super) fn dummy_leverage(
         }
     }
     Ok(leverage)
+}
+
+/// 1つのグループの行が、もう一方の効果の水準（`dense_codes`）に何回ずつ現れるかの集計。
+/// 水準数の長さの作業領域を使い回し、グループごとに触った水準だけを数えて戻す。
+struct Tally {
+    counts: Vec<usize>,
+    touched: Vec<(usize, usize)>,
+}
+
+impl Tally {
+    fn new(levels: usize) -> Self {
+        Self {
+            counts: vec![0; levels],
+            touched: Vec::new(),
+        }
+    }
+
+    /// `group_rows`の行ごとに`dense_codes`の水準を数え、現れた水準と回数の組を初めて現れた順に返す。
+    /// 次のグループの前に[`clear`](Self::clear)を呼ぶ。
+    fn count(&mut self, group_rows: &[usize], dense_codes: &[usize]) -> &[(usize, usize)] {
+        for &r in group_rows {
+            let level = dense_codes[r];
+            if self.counts[level] == 0 {
+                self.touched.push((level, 0));
+            }
+            self.counts[level] += 1;
+        }
+        for entry in &mut self.touched {
+            entry.1 = self.counts[entry.0];
+        }
+        &self.touched
+    }
+
+    /// 触った水準の回数を0に戻す。
+    fn clear(&mut self) {
+        for &(level, _) in &self.touched {
+            self.counts[level] = 0;
+        }
+        self.touched.clear();
+    }
 }
 
 #[cfg(test)]
@@ -203,6 +249,56 @@ mod tests {
     fn it_matches_the_hat_matrix_of_the_dummy_regression_for_an_unbalanced_panel() {
         check(1, 15, 6, 0.5, 1);
         check(1, 12, 9, 0.35, 2);
+    }
+
+    /// `labels`で作ったパネルに、既存の行を複製して同じ組合せの行を足す（観測数は増える）。
+    fn check_with_repeated_rows(seed: u64) {
+        let (mut entity, mut time) = labels(1, 12, 7, 0.5, seed);
+        let n = entity.len();
+        for source in [0, 4, n / 2, n - 1, 4, 4] {
+            entity.push(entity[source].clone());
+            time.push(time[source].clone());
+        }
+        let (entity, time) = (
+            GroupCodes::from_labels(&entity),
+            GroupCodes::from_labels(&time),
+        );
+        assert!(!covers_every_combination(&entity, &time));
+        let got = dummy_leverage(&entity, &time).unwrap();
+        let expected = brute_force(&entity, &time);
+        for (i, (a, b)) in got.iter().zip(&expected).enumerate() {
+            assert!((a - b).abs() < 1e-9, "row {i}: {a} vs {b}");
+        }
+    }
+
+    #[test]
+    fn it_matches_the_hat_matrix_when_a_combination_repeats() {
+        check_with_repeated_rows(6);
+        check_with_repeated_rows(7);
+    }
+
+    #[test]
+    fn it_handles_many_repeats_of_the_same_combinations() {
+        // 個体ごとの行数が時点の数より桁違いに多い入力（行数の2乗の計算に戻っていないこと）。
+        let (mut entity, mut time) = (Vec::new(), Vec::new());
+        for e in 0..4 {
+            for t in 0..3 {
+                for _ in 0..2000 {
+                    if (e + t) % 4 != 3 {
+                        entity.push(format!("e{e}"));
+                        time.push(format!("t{t}"));
+                    }
+                }
+            }
+        }
+        let (entity, time) = (
+            GroupCodes::from_labels(&entity),
+            GroupCodes::from_labels(&time),
+        );
+        let got = dummy_leverage(&entity, &time).unwrap();
+        // 個体・時点ごとのダミーだけの回帰のハット行列の対角の和は、ランク（連結なら 個体数+時点数-1）に等しい。
+        let trace: f64 = got.iter().sum();
+        assert!((trace - (entity.n_groups() + time.n_groups() - 1) as f64).abs() < 1e-8);
     }
 
     #[test]

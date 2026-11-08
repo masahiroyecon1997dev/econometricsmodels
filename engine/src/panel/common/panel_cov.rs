@@ -71,6 +71,14 @@ pub(crate) struct PanelCov {
     pub(crate) dk_bandwidth_used: Option<usize>,
 }
 
+/// 固定効果が吸収する次元（個体、2-wayなら時点。`effects`の順）。
+fn absorbed_levels<'a>(
+    entity: &'a GroupCodes,
+    two_way_time: Option<&'a GroupCodes>,
+) -> Vec<&'a GroupCodes> {
+    std::iter::once(entity).chain(two_way_time).collect()
+}
+
 /// `cov_type`に応じたパネル手法の係数分散共分散行列と推論の自由度。FE・REの`fit()`が共有する
 /// （`FeCovType`・`ReCovType`は[`PanelCovType`]の別名）。計算式そのものは
 /// `panel_{classical,hc,cluster,driscoll_kraay}_cov_params`が持ち、ここは`cov_type`ごとの
@@ -145,7 +153,10 @@ pub(crate) fn panel_cov_params(
                     // 直前の`G > q`により、ここで`G=2`なら`q`は高々1。
                     if n_slopes >= 1
                         && n_groups == 2
-                        && two_group_split_is_degenerate(entity, two_way_time, group_codes)
+                        && two_group_split_is_degenerate(
+                            &absorbed_levels(entity, two_way_time),
+                            group_codes,
+                        )
                     {
                         return Err(PanelError::DegenerateClusterTwoGroups);
                     }
@@ -192,7 +203,10 @@ pub(crate) fn panel_cov_params(
                 // 直前の`t_periods > q`により、ここで`t_periods=2`なら`q`は高々1。
                 if n_slopes >= 1
                     && t_periods == 2
-                    && two_group_split_is_degenerate(entity, two_way_time, time_codes)
+                    && two_group_split_is_degenerate(
+                        &absorbed_levels(entity, two_way_time),
+                        time_codes,
+                    )
                 {
                     return Err(PanelError::DegenerateDkTwoPeriods);
                 }

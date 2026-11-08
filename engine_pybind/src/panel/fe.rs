@@ -452,8 +452,7 @@ impl FEResult {
 
     /// Number of groups (unique values) of each column of `effects`, as a `dict[str, int]`
     /// keyed by column name, in the order the columns were given. One entry for a one-way
-    /// model, two for a two-way model. A two-way model requires a balanced panel, so the
-    /// count of the second column equals the number of observations per group of the first.
+    /// model, two for a two-way model.
     #[getter]
     fn n_groups<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         groups_dict(py, &self.effects, &self.group_counts)

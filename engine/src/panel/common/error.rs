@@ -124,8 +124,8 @@ pub enum PanelError {
     /// 2-way RE（entity + time）に不均衡（unbalanced）パネルが渡された。
     ///
     /// 2-way REのGLS変換（`quasi_demean_two_way`）はバランスパネルを前提にした閉形式で、不均衡では
-    /// 成り立たない。2-way FEは不均衡パネルを交互射影で扱うため、このエラーは返さない
-    /// （重複ペアは[`Self::DuplicateEntityTimePair`]）。1-wayは不均衡でも成立する。
+    /// 成り立たない。2-way FEは不均衡パネル（同じ組合せの重複する行を含む）を交互射影で扱うため、
+    /// このエラーは返さない。1-wayは不均衡でも成立する。
     ///
     /// 「バランス」の判定は観測数カウント（`n_obs == n_entities * n_periods`）だけでは不十分で、
     /// あるペアの重複と別ペアの欠落が相殺してカウントだけ一致する入力もありうる。このエラーを
@@ -139,17 +139,6 @@ pub enum PanelError {
         n_entities: usize,
         time_column: String,
         n_periods: usize,
-    },
-
-    /// 同じ(entity, time)の組合せが複数の行に現れる。2-wayの固定効果は、組合せごとに多くても1行を前提とする
-    /// （重複を許すと、不均衡の判定とグリッドの対応が崩れる）。重複する組合せが複数あれば、観測順で最初に
-    /// 現れるものを報告する。`entity_column`・`time_column`は`effects`の1つ目・2つ目の列名。
-    #[error("{}", self.catalog_message())]
-    DuplicateEntityTimePair {
-        entity_column: String,
-        entity_id: String,
-        time_column: String,
-        time_id: String,
     },
 
     /// 不均衡な2-wayのHC2/HC3は、水準の少ない方の効果の水準数の2乗の密な行列を解くため、水準数に上限がある。
@@ -456,16 +445,6 @@ impl ErrorInfo for PanelError {
                 .param("n_first_groups", *n_entities)
                 .param("second_column", time_column.as_str())
                 .param("n_second_groups", *n_periods),
-            Self::DuplicateEntityTimePair {
-                entity_column,
-                entity_id,
-                time_column,
-                time_id,
-            } => ErrorReport::new(ErrorCode::DuplicateEntityTimePair)
-                .param("first_column", entity_column.as_str())
-                .param("first_group", entity_id.as_str())
-                .param("second_column", time_column.as_str())
-                .param("second_group", time_id.as_str()),
             Self::LeverageDimensionTooLarge {
                 n_levels,
                 max_levels,
@@ -627,16 +606,6 @@ mod tests {
                 },
                 ErrorCode::PanelNotBalancedForTwoWay,
                 "Two-way random effects require a balanced panel: 5 observation(s) for 2 groups of 'firm' and 3 of 'year', but every combination needs exactly one.",
-            ),
-            (
-                PanelError::DuplicateEntityTimePair {
-                    entity_column: "firm".to_string(),
-                    entity_id: "a".to_string(),
-                    time_column: "year".to_string(),
-                    time_id: "2020".to_string(),
-                },
-                ErrorCode::DuplicateEntityTimePair,
-                "The combination of 'firm' = a and 'year' = 2020 appears in more than one row, but each combination may appear at most once.",
             ),
             (
                 PanelError::LeverageDimensionTooLarge {

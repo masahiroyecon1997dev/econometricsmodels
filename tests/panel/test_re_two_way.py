@@ -835,6 +835,22 @@ def test_unbalanced_panel_raises(panel):
         _fit(df, REOptions())
 
 
+def test_repeated_pair_with_matching_row_count_is_unbalanced(panel):
+    """行数が全組合せの数と同じでも、組合せが重複して別の組合せが欠けて
+    いれば不均衡パネルとして拒否される。"""
+    df = pl.concat([panel.slice(1, panel.height - 1), panel.slice(5, 1)])
+    assert df.height == panel.height
+    with raises_error(
+        ErrorCode.PANEL_NOT_BALANCED_FOR_TWO_WAY,
+        n_obs=24,
+        first_column="entity",
+        n_first_groups=6,
+        second_column="time",
+        n_second_groups=4,
+    ):
+        _fit(df, REOptions())
+
+
 def test_unbalanced_panel_is_allowed_for_one_way(panel):
     df = panel.slice(1, panel.height - 1)
     assert (

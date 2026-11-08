@@ -773,48 +773,40 @@ Web確認（ユーザー許可済み）: `xtscc`はHoechle (2007, Stata Journal 
 **未着手**: 手順10（性能比較に3-wayを足す）。見送ったnice to have: `fe.rs`の`///`の折り返し、`verification.md`の表の行の置き換え（主リファレンスと独立クロスチェックの分離）、
 cluster表の2行の統合、`accepted-data.md`の見出し分割。
 
-### 9.11 compact用のメモ（#442、手順3のコミット後。2026-11-08）
+### 9.11 compact用のメモ（#442、手順9のコミット後。2026-11-08）
 
-**状態**: `release/v0.10.0`。手順1〜3はコミット済み（`git log`の`refactor(engine): パネルの索引と入力を効果のK次元で持つ形にする`・`feat(engine): FEの2-wayで同じ組合せの重複する行を受け付ける`・
-`feat(engine): FEで3次元以上の固定効果を推定できるようにする`と、各`docs:`）。未push（Pythonまで終わるまでpushしない。CIが落ちるため）。#442はクローズしていない。
+**状態**: `release/v0.10.0`。手順1〜9はコミット済み（署名`G`）、**未push**（Pythonまで終わるまでpushしない。CIが落ちるため）、#442はクローズしていない。
+コミット（新しい順）: `e99947ef docs: FEの3次元以上の固定効果の使い方・定義・検証を公開ドキュメントに反映する`（手順9）・`c7178a61 test: FEの3次元以上の固定効果をfixestとAbsorbingLSで照合する`（手順8）・
+`d13f75f9 feat: FEのeffectsに3〜5列を…`（手順7）・`bd0eb8db feat(engine): FEで3次元以上のHC2/HC3のレバレッジを…`（手順5）・手順3の`4379606c`・手順2の`3421f66d`・手順1。各`docs:`の進捗コミットが別にある。
+検証の最終結果: engine 1358件・engine_pybind 241件、`pytest tests --check-error-coverage --check-cov-coverage` 12107件が通る。clippy・fmt・ruffはクリーン。
 
-**engineで終わっていること（Pythonからはまだ到達不可。`MAX_EFFECTS=2`のまま）**
-- `FeEffects`はFE専用のenum（`OneWay`・`TwoWay`・`MultiWay`）。REの`ReEffects`=`PanelEffects`とは別。`FeInput::from_effect_groups(y, x, x_names, groups: Vec<GroupCodes>, dep)`がK次元の入口
-  （`from_group_codes`は個体＋時点の簡便版）。`TimeKeys::into_codes`で時点のコードを`GroupCodes`にできる。
-- `fit_fe`は`absorbed_levels(effects, &input)`で吸収する次元の`Vec<&GroupCodes>`を作り、singleton検査（`ensure_no_singleton_groups`は次元のスライス）・自由度
-  （`absorbed_parameters(&n_groups)` = 水準数の合計 − (K−1)。fixestと同じ数え方で、入れ子・連結成分を引かない）・`PanelStructure::FixedEffects { levels }`・
-  クラスターのK（`fe_cluster_k_correction(levels, ..)`）・縮退検査（`two_group_split_is_degenerate`）がこれを使う。
-- 3次元以上は常に交互射影（`within_transform_multi_way` → `project_out_effects`）。バランスの判定は`covers_every_combination`（`n == N×T`かつ重複なし。重複する行は許す）。
-  `FeEstimator::n_groups()`が次元ごとの水準数、`n_periods()`は2-wayだけ`Some`。
-- `fixed_effects()`は`FixedEffects::MultiWay(Vec<Vec<(水準, 効果)>>)`。連結成分ごとに2つ目以降の次元の基準水準（成分内でコードが最小）を0にし、そのぶんを個体に足す
-  （`absorbed_effects`。不均衡な2-wayと同じ関数）。識別されるのは行ごとの効果の和だけ（入れ子の次元など）。pybindの`fixed_effects()`のdict化とpickle（`multi_way`タグ）は入れ済み。
-- エラー: `DUPLICATE_ENTITY_TIME_PAIR`は削除済み（未リリース）。HC2/HC3は3次元以上で`CommonError::Internal`（`leverage_full`）。
-- テスト: `engine/src/panel/fe/fit/tests/multi_way.rs`（18件。LSDV照合、クラスターのLSDV独立照合、分断・重複・格子・4次元・エラー経路）。
-  engine 1345件・engine_pybind 240件・pytest `tests/panel`＋`tests/cross_method` 8847件が通る（全体は`pytest tests --check-error-coverage`で約7.5分、11912件）。
+**できあがったこと（FEは`effects`に1〜5列）**
+- engine: K次元の入力（`FeInput::from_effect_groups`）、`FeEffects::{OneWay,TwoWay,MultiWay}`、常に交互射影（3列以上）、`df_model = k + ΣG − (D−1)`、クラスターKの一般化、
+  K次元のHC2/HC3（`dummy_leverage`: 最大の次元を消去して残りを密に解く。ピボット付きQRでランク。上限3000は「最大の次元を除いた水準数の合計」）、`FixedEffects::MultiWay`（連結成分ごとに基準化）。
+- engine_pybind・Python: `max_effects(model)`（FE=5、RE=2）、`extract_effect_groups`（3列目以降は個体と同じ同一性だけのキー）、`build_fe_input`。
+- 検証: `benchmark/panel/multi_way_datasets.py`（9シナリオ）、`fe_multi_way*.json`（fixestが主、`AbsorbingLS`がclassical/hc1のクロスチェック）、`tests/panel/test_fe_multi_way{,_reference,_crosscheck}.py`。
+  fixestとの差は2つ（`nested`のHC2/HC3はfixestが失敗するため`entity + time`の式を参照、クラスター列が効果の次元そのものの場合のKは本実装が入れ子を全て数える現状維持）。
+- ドキュメント: usage/api/methods/guide/CHANGELOG/spec/docstring。`/review-docs`を実施済み。エラーカタログ2文面を3列対応に直した。
 
-**次の作業（順序を守る）**
-1. **（完了）手順5: K次元のHC2/HC3のレバレッジ**（`leverage_full`の`_ =>`腕の置き換え）。方針: 最大の次元を消去し、残りの次元の水準数の合計を密に解く
-   （2-wayの`dummy_leverage`＝「個体を消去して時点を密に解く」の一般化。`M = diag(N_d) − Σ_e c_e c_e'/n_e`をK−1次元の連結ブロックに）。上限は`MAX_DENSE_LEVELS`=3000を流用
-   （水準数の合計が上限を超えたら`LEVERAGE_DIMENSION_TOO_LARGE`）。`check_leverage_dimension`の呼び出し（`within.rs`、重い射影の前）もK次元に。
-   個体内の行数が多い重複入力で遅くならないよう、`dummy_leverage`の`Tally`（出現回数の集約）の考え方を使う。テストはLSDVのhc2/hc3（`unbalanced.rs`・`multi_way.rs`の`lsdv`に追加）と
-   `dummy_leverage`の総当たり（`brute_force`）。`the_leverage_based_covariances_are_not_available_yet`は更新する。**手順7より先に終える**（`MAX_EFFECTS`を上げると`INTERNAL_ERROR`で露出するため）。
-2. **（実装済み・コミット前）手順7: engine_pybind・Python**: `MAX_EFFECTS`をモデル別に（FE=5、RE=2。`EFFECTS_TOO_MANY`はREだけ上限2で残り、FEは5超で出る）、`extract_effects`をK列に
-   （`effects[0]`は`extract_entity_groups`、`effects[1]`は`extract_time_keys`→`into_codes`、`effects[2..]`は`extract_entity_groups`と同じ同一性だけのキー）、`build_fe_input`で`from_effect_groups`と
-   `FeEffects`（列数が1/2/3以上で`OneWay`/`TwoWay`/`MultiWay`）、`with_effect_names(effects.clone())`。`fit_frame`の`group_counts`は`estimator.n_groups().to_vec()`（済み）。
-   `FEResult.fixed_effects()`のdict化は済み。Pythonのdocstring（`fe.py`のRaisesの「more than two columns」、`n_groups`、`fixed_effects`）、型検査テスト、`tests/panel/test_fe_validation.py`の
-   「3列以上」のテストの反転、`EFFECTS_TOO_MANY`の`max_columns`、`pickle`（`tests/cross_method/test_pickle.py`）。
-3. **（実装済み・コミット前）手順8: ベンチマーク**: 3次元目のDGP（バランス3-way・不均衡・3つ目が1つ目にネスト・疎・連結成分が複数・重複行）。主はfixest（`fixef.tol=1e-11`、`| a + b + c`）。
-   小標本はLSDVをオラクル。linearmodelsの`AbsorbingLS`が複数の吸収を扱えるかを先に実測し、使えなければ単一リファレンスの例外（`verification-details.md`）。
-   fixestの`fixef`との比較は和`α+γ+δ`で。fixestで固定した係数・標準誤差の照合（`ssc(fixef.K="nested")`とクラスターKの一致を含む）。
-4. **（実装済み・コミット前）手順9: ドキュメント**: fe-spec（§5の「不均衡2-wayは未対応」の記述が古い）・panel-common（`effects`の上限、`n_groups`、`fixed_effects()`の形）・usage/api/methods/fe・
-   guide（accepted-data・api-conventions・validation・verification）・CHANGELOG・各`panel/CLAUDE.md`。公開ページを変えたら`/review-docs`。
-5. **手順10**: 性能比較の3-way追加（`performance/compare_fe.py`。#634のハーネス拡張と合わせるか要確認）。
+**次の作業: 手順10（性能比較に3-wayを足す）**
+- 対象: `performance/compare_fe.py`（FE固有アダプタ、272行）と共通ハーネス`performance/_perf_harness.py`（948行。`PerfAdapter`・`FitContext`・`CovCase`）、開発ノート`docs/performance/fe.md`（日本語。方法論・既知の限界）。
+  公開ページ`docs/guide/performance.md`・`performance-results.md`の数値はCIの計測値（`benchmark_performance.yml`）が正で、リリース準備時（`/release`）に再生成する（今は触らない）。
+- 現状: Tを6に固定してNをスイープ（`_N_PERIODS_FIXED=6`）、`build_dataframe(n, k, seed)`は`generate_fe_dataset("baseline", ...)`、`default_method="one_way"`・`extra_methods=("two_way",)`
+  （代表点1つ: classical・k=5・n=1,000,000）、リファレンスは`linearmodels.PanelOLS`（`entity_effects`・`time_effects`）。
+- **linearmodels側の3-way**: `PanelOLS`は2効果まで。`AbsorbingLS`（`absorb`にカテゴリ列を渡す）が使えることは実測済み（手順8）。3-wayの比較相手はこれにする案が自然。
+  ただし計測範囲を対称にする点に注意（`PanelResults`は遅延評価。`AbsorbingLS`の結果で何が遅延かを確認する）、`AbsorbingLS`はlsmrの打ち切りで速度が変わる（既定のatol・btol=1e-8で測るか、フィクスチャと同じ1e-14か。**要確認**）。
+- **#634（別Issue、英語、OPEN）**: 不均衡2-wayシナリオの追加。`PerfAdapter.build_dataframe(n, k, seed)`が`method`を知らないため、ハーネスの拡張（methodまたは「データの変種」を渡す形）が要る。
+  3-wayも同じ制約を受ける（3列目のデータが要る）ので、**#634のハーネス拡張と合わせるかをユーザーに確認する**（9.9・9.10の保留事項）。
+  #634の未決: データの渡し方、測る不均衡の形（無作為な間引き。疎・鎖は既定にしない）、HC2/HC3の3000水準上限、`docs/performance/fe.md`と生成ページの更新。
+- 確認すべき設計判断（14章。着手前に提示して確認する）: (a) #634と合わせるか、3-wayだけ先にやるか。(b) 3-wayのDGP（`multi_way_datasets.py`の`unbalanced`相当を大きなnで生成するか。三つ目の水準数、Tの扱い）。
+  (c) linearmodels側に`AbsorbingLS`を使うか、engine単独にするか、その打ち切り設定。(d) cov軸の対象（classical・hc1が対等、cluster・dkは補正が違う）。(e) 3-wayの代表点（method軸の流用で`three_way`を足す案）。
+- 実装後: `performance-reviewer`サブエージェント（`/review-performance`）でレビューする。計測は開発コンテナの単発で、公開ページの数値には使わない。コミットはパス指定。
 
 **注意書き**
-- コミットはパス指定で行う。署名はホストの端末でパスフレーズの確認が出る。Pythonを触ったら`uv run maturin develop`で入れ直してから`pytest`。エラーコードを足したら
-  `python tools/render_error_catalog.py`で`error_codes.py`・`docs/guide/error-codes.md`を再生成し、`tests/support/_errors.py`の`MIGRATED_CODES`に足す。
-- fixestで不均衡パネルを参照にするときは`fixef.tol`を厳しくする（既定の1e-6だと約5e-9ずれる。下限は2.2e-12）。鎖状のパネルは掃引回数が鎖の長さの2乗で増え、
-  既定上限10000で`ABSORPTION_NOT_CONVERGED`になるのは仕様。
-- 連結成分が複数のパネルは、LSDVのランクが`df_model`より小さい（自由度は成分の数によらず`k + ΣG − (K−1)`）。LSDVとの共分散の比較は`(n − rank)/df_resid`で合わせる（`multi_way.rs`の`assert_matches_the_dummy_regression`）。
-- 保留（利用者の判断待ち）: READMEの「Attribution and Rights」注意書き、フィクスチャのデータのライセンス確認、ルートCLAUDE.md 3章の`shared/`の列挙の更新（編集は承認が要る）、
-  `docs/planning/specs/mop-oracle-spec.md`の履歴の扱い。IV本体の残り（#366〜#369）とFE-2SLS/GMM（#370〜#388）は#442の後（9.9参照）。
+- コミットはパス指定。署名はホストの端末でパスフレーズの確認が出る。署名に失敗したら止まって報告（リトライしない）。Pythonを触ったら`uv run maturin develop`で入れ直してから`pytest`。
+- 全体のpytestは約6分。エラーコードを足したら`python tools/render_error_catalog.py`・`tests/support/_errors.py`の`MIGRATED_CODES`。
+- fixestで不均衡パネルを参照にするときは`fixef.tol`を厳しくする（既定の1e-6だと約5e-9ずれる）。`AbsorbingLS`は`method="lsmr"`、`absorb_options`のatol・btolを1e-14にして機械精度。
+- 保留（利用者の判断待ち）: READMEの「Attribution and Rights」注意書き、フィクスチャのデータ（Wooldridge等）のライセンス確認、ルートCLAUDE.md 3章の`shared/`の列挙の更新（編集は承認が要る）、
+  `docs/planning/specs/mop-oracle-spec.md`の履歴の扱い。見送ったレビュー指摘: 3次元の実データ、悪条件・高次元k・G=q+1の境界、`absorption_tol`の検証。
+- IV本体の残り（#366〜#369）とFE-2SLS/GMM（#370〜#388）は#442の後（9.9参照）。#442のクローズはpush・CIの確認の後。
+

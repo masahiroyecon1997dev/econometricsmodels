@@ -250,8 +250,8 @@ class EffectiveFResult:
     critical values are keyed by `tau` (0.05, 0.10, 0.20, 0.30).
     `critical_values`, when not `None`, is the sharper set;
     `simplified_critical_values` is always available and is conservative.
-    With one or two excluded instruments the 2SLS bias has no first moment
-    in general, so a bias-based critical value is a weaker guide there;
+    With one excluded instrument 2SLS has no finite mean, and with two no
+    finite variance, so a bias-based critical value is a weaker guide there;
     prefer `simplified_critical_values`. With two excluded instruments and
     `cov_type="classical"`, `bias_bound` is 0 and `critical_values` are the
     same for every `tau`.
@@ -304,7 +304,8 @@ class CStatisticResult(DiagnosticResult):
     null hypothesis is that all of the tested moment conditions are valid:
     the tested endogenous variables are exogenous, and the tested
     instruments are uncorrelated with the error. A small p-value rejects
-    it. Both J statistics use the same estimate of the covariance of the
+    it. The test is conditional: the instruments that are not tested are
+    taken as valid. Both J statistics use the same estimate of the covariance of the
     moment conditions, so `statistic` is never negative and equals
     `j_with_tested - j_without_tested`.
 
@@ -315,9 +316,10 @@ class CStatisticResult(DiagnosticResult):
     therefore not hashable. `to_dict()` returns copies.
 
     Attributes:
-        variables: Tested endogenous variables, in the order of `x_endog`.
+        variables: Tested endogenous variables, in the order of `x_endog`
+            (empty if none were tested).
         instruments: Tested excluded instruments, in the order of
-            `instruments`.
+            `instruments` (empty if none were tested).
         j_with_tested: Hansen J statistic of the model that uses the tested
             moment conditions: the tested variables are treated as
             exogenous, and the tested instruments are used.

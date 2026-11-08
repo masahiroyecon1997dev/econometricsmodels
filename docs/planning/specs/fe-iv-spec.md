@@ -905,3 +905,10 @@ Stock-Yogoの表は実装の値がNBER TWP 284のTable 1（バイアス）・Tab
 **わかったこと**: `momentfit`の`evalWeights(..., "optimal")`はCLで`vcov()`と一致しない（`run_momentfit.R`のヘッダ2.と同じ件）ので`vcov(model, 2SLS係数)`から重みを作る。クラスターは`cluster=data.frame(...)`か式を渡す。iidの`vcov()`は中心化・n-1の分散なのでclassicalの`S`は`mean(e0^2)*Z'Z/n`を自前で組む。
 **docs**: `verification.md`・`verification-details.md`（独立性の限界を明記）・`docs/spec/iv-spec.md` 3.9.1を更新。
 **次**: (3) #368・#369のclose（英語コメント）と`/review-docs`、(4) `n_absorbed`（lfe/fixest）と#374の設計確認 → FE-2SLS。
+
+### 9.16 #367〜#369の公開docsの校閲と修正（2026-11-08）
+
+**経過**: #368・#369はclose済み（英語コメント付き）。`/review-docs`（accuracy×2・prose×2）を実施し、指摘は must/should/nice to have をすべて修正（ユーザー承認）。実装との食い違いは無く、直したのはドキュメント側のみ。
+**主な修正**: `gmm_type="one_step"`は`cov_type`の系統の重み（methods/usage/api/inference-conventions/CHANGELOG/docstringを統一）、methodsの記号（`m`の衝突→`k_{2B}`・`m_B`・`\mathcal{T}`）、C検定の条件付き性、Wu-Hausmanの誘導文、`verification*.md`（直交性の参照は`IVGMM`の部品で組み直した実装・Rクロスチェックの独立性と範囲・許容誤差の行・`### IV`見出しの統合）、`inference-conventions.md`にC統計量の節を新設、validationのコード補足。
+**Web確認（ユーザー許可済み）**: Kinal(1980)の本文は有料で読めず、二次資料（Phillips & Liu-Evans）で「2SLSのモーメントは過剰識別の次数まで存在」→操作変数1本は平均なし・2本は平均あり分散なし。docsは「1本は有限の平均なし、2本は有限の分散なし」に直し、Kinal(1980)を引用に追加。MOP 2013・Stock-Yogo 2005の該当箇所（K≤2の扱い）は確認できなかったので、MOPが「Nagarバイアスで進める」という記述は削除した。Hayashi 2000は3.6節がp.217から（部分集合の検定はp.218、別の部分集合検定がp.232から）まで確認、終了ページは未確認（「pp. 217-221 と p. 232 以降」に変更）。EHS 1988・BSS 2003の書誌は確認済み（EHSの題は`time-series`とハイフン）。
+**未了**: 次は(4) `n_absorbed`の自由度（lfe/fixest、#373）と#374（FEのSargan）の設計確認 → FE-2SLS（#370〜#380）。`c372e9a7`とこのコミットは未push。

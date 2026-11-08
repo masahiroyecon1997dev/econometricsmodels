@@ -88,8 +88,9 @@ How to read them:
 
 - **Weak instruments** (`weak_instrument_f_statistics`, one per endogenous variable). The F statistic tests that the excluded instruments do not explain the endogenous variable in the first stage. A small value means the instruments are weak, and the IV estimate and its standard errors are then unreliable. A common rule of thumb is a value above about 10; no verdict is reported, and the statistic assumes homoskedastic errors (see [Inference conventions](../guide/inference-conventions.md#weak-instruments)).
 - **Weak instruments, post-estimation** (`cragg_donald()`, `kleibergen_paap()`, `effective_f()`). These are methods, not fields, and have their own section [below](#weak-instrument-diagnostics-post-estimation).
-- **Overidentification** (`overid_statistic`, `overid_p_value`; the Sargan test for 2SLS and Hansen's J for GMM). The null hypothesis is that all instruments are valid, that is uncorrelated with the error. A small p-value says that at least one instrument is invalid or the model is misspecified; a large one is consistent with validity but does not prove it. Both are `None` when the model is just-identified (as many instruments as endogenous variables), because there is nothing to test. Only Hansen's J is robust to heteroskedasticity and clustering.
-- **Endogeneity** (`wu_hausman_statistic`, `wu_hausman_p_value`, 2SLS only). The null hypothesis is that the suspect regressors are in fact exogenous, so that OLS would be consistent. A small p-value supports treating them as endogenous and using IV; a large one means the data cannot distinguish IV from OLS, and OLS is then more precise. For GMM, or for a test that is robust to heteroskedasticity or clustering, use [`c_stat()`](#exogeneity-and-instrument-validity-post-estimation).
+- **Overidentification** (`overid_statistic`, `overid_p_value`; the Sargan test for 2SLS and Hansen's J for GMM). The null hypothesis is that all instruments are valid, that is uncorrelated with the error. A small p-value says that at least one instrument is invalid or the model is misspecified; a large one is consistent with validity but does not prove it. Both are `None` when the model is just-identified (as many instruments as endogenous variables), because there is nothing to test. Only Hansen's J is robust to heteroskedasticity and clustering. To test whether particular instruments are valid, treating the others as valid, use [`c_stat(instruments=...)`](#exogeneity-and-instrument-validity-post-estimation).
+- **Exogeneity and instrument validity, post-estimation** (`c_stat()`). A method, not a field. It tests whether chosen endogenous variables are exogenous and chosen excluded instruments are valid, for both estimators, and has its own section [below](#exogeneity-and-instrument-validity-post-estimation).
+- **Endogeneity** (`wu_hausman_statistic`, `wu_hausman_p_value`, 2SLS only). The null hypothesis is that the suspect regressors are in fact exogenous, so that OLS would be consistent. A small p-value supports treating them as endogenous and using IV; a large one means the data cannot distinguish IV from OLS, and OLS is then more precise. For GMM, where these fields are `None`, use [`c_stat()`](#exogeneity-and-instrument-validity-post-estimation). For 2SLS, `c_stat()` is an alternative that can test a subset of the endogenous variables and can also test instruments.
 
 See [Definitions: IV](../methods/iv.md#diagnostics) for what each diagnostic tests, and the [Options and results](../api/iv.md) for when it is `None`.
 
@@ -114,7 +115,7 @@ Which one to use:
 
 - `cragg_donald()` is the joint statistic for several endogenous variables and comes with Stock-Yogo critical values. It assumes homoskedastic errors and ignores `cov_type`.
 - `kleibergen_paap()` follows the `cov_type` of the fit (for GMM, `cov_type` and not `gmm_weight_type`), so it stays valid under heteroskedasticity, clustering and autocorrelation, and it handles several endogenous variables. It returns no critical values. The rk LM test has the null of underidentification, so rejecting it does not show that the instruments are strong. The rk Wald F is the robust counterpart of the Cragg-Donald statistic; with `cov_type="classical"` the two are equal.
-- `effective_f()` follows the `cov_type` of the fit and is for one endogenous variable, with critical values for the worst-case 2SLS bias. It is the statistic designed for one endogenous variable under heteroskedastic, clustered or autocorrelated errors. With one or two excluded instruments, prefer its `simplified_critical_values`.
+- `effective_f()` follows the `cov_type` of the fit and is for one endogenous variable, with critical values for the worst-case 2SLS bias. It is the statistic designed for one endogenous variable under heteroskedastic, clustered or autocorrelated errors. With one or two excluded instruments, prefer its `simplified_critical_values` (the more conservative set): with one instrument 2SLS has no finite mean and with two no finite variance, so the sharper `critical_values` rest on an approximation that is a weaker guide (see [Definitions: IV](../methods/iv.md#weak-instruments-post-estimation)).
 
 The critical values are `dict`s keyed by the threshold, and a table that does not cover your model gives `None`. A statistic above the critical value for a threshold rejects the null that the instruments are weak by that criterion: a 2SLS relative bias above the threshold or a size distortion above the threshold for `cragg_donald()`, and a worst-case bias above the threshold for `effective_f()`. It does not prove that the instruments are strong.
 
@@ -122,7 +123,7 @@ If no statistic can be computed for your data, the method raises a `ComputationE
 
 ## Exogeneity and instrument validity, post-estimation
 
-`c_stat()` is the C statistic (difference-in-Hansen test). Like the weak-instrument diagnostics it is a method that `fit()` never calls, and it works for both estimators. It estimates the model twice, with and without the tested moment conditions, and compares the two Hansen J statistics.
+`c_stat()` is the C statistic (difference-in-Hansen test). Like the weak-instrument diagnostics it is a method that `fit()` never calls, and it works for both estimators. It asks whether a chosen subset of the model's assumptions holds: that some endogenous variables are in fact exogenous, or that some excluded instruments are uncorrelated with the error. It estimates the model twice, with and without those assumptions (the tested moment conditions), and compares the two Hansen J statistics.
 
 ```python
 # Are the endogenous variables in fact exogenous?
@@ -131,14 +132,17 @@ print(c.statistic, c.p_value, c.df)
 
 # Is an excluded instrument uncorrelated with the error?
 c = two_sls.c_stat(instruments=["z1"])
+# j_without_tested is 0 here: without z1 the model is just identified,
+# so the statistic equals j_with_tested.
 print(c.statistic, c.p_value, c.j_with_tested, c.j_without_tested)
 ```
 
-- `variables` lists the endogenous variables (from `x_endog`) to treat as exogenous. A small p-value rejects their exogeneity, so IV is needed; a large one means the data cannot tell, and OLS would be more precise if they were exogenous.
+- `variables` lists the endogenous variables (from `x_endog`) to treat as exogenous. A small p-value rejects their exogeneity, so IV is needed; a large one means the data cannot tell, and OLS would be more precise if they were exogenous. Like every difference-in-Hansen test, this one takes the remaining instruments as valid.
 - `instruments` lists the excluded instruments to test. A small p-value says that at least one tested instrument is not valid, or the model is misspecified; a large one is consistent with their validity but does not prove it. At least as many instruments as endogenous variables must remain, otherwise the model without the tested instruments is not identified.
 - Both lists may be given. The null hypothesis is that all tested moment conditions are valid, with one chi-squared degree of freedom for each tested variable and instrument.
-- The covariance of the moment conditions follows `gmm_weight_type` for `estimator="gmm"`, and the family of `cov_type` otherwise, so the test is valid under the same assumptions as the fit. It does not depend on `gmm_type`: a model fitted with `gmm_type="one_step"` gets the two-step statistic.
-- If no statistic can be computed for your data, the method raises a `ComputationError`; a cluster weight needs at least as many clusters as the model with the tested moment conditions has instruments, which can be more than the fit needed. Names that are not in the model, empty or repeated lists, and a test that leaves the model unidentified raise a `ValidationError`.
+- The covariance of the moment conditions follows `gmm_weight_type` for `estimator="gmm"` with `gmm_type` `"two_step"` or `"iterated"`, and the weight of the same kind as `cov_type` for 2SLS and for `gmm_type="one_step"` (which has no weight matrix). It does not depend on `gmm_type` otherwise: a model fitted with `gmm_type="one_step"` gets the two-step statistic.
+- If no statistic can be computed for your data, the method raises a `ComputationError`. A cluster weight needs at least as many clusters as there are columns in the model with the tested moment conditions (the exogenous regressors, the tested endogenous variables and all excluded instruments), which can be more than the fit needed.
+- A `ValidationError` is raised when neither list is given, when a list is empty or repeats a name, when a name is not an `x_endog` variable or an excluded instrument, or when the test would leave the model unidentified. A value that is not a list of strings raises a `TypeError`.
 
 The definition is in [Definitions: IV](../methods/iv.md#exogeneity-and-instrument-validity-post-estimation-c_stat).
 

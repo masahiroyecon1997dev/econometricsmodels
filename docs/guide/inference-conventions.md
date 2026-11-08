@@ -79,13 +79,19 @@ With `cov_type="cluster"`, the structural equation needs more clusters than its 
 - **2SLS reports the Sargan test.** It is always computed under homoskedasticity and does not depend on `cov_type`.
 - **GMM reports Hansen's J test.** It uses the weight matrix of the point estimate and therefore follows `gmm_weight_type`.
 
-If you need an overidentification test that is robust to heteroskedasticity or clustering, use `estimator="gmm"` with a robust or cluster `gmm_weight_type` and read Hansen's J.
+If you need an overidentification test that is robust to heteroskedasticity or clustering, use `estimator="gmm"` with a robust or cluster `gmm_weight_type` and read Hansen's J. To test whether a subset of the instruments is valid, use `c_stat(instruments=...)` (see [below](#exogeneity-and-instrument-validity-c-statistic)).
 
 ## Endogeneity test (Wu-Hausman)
 
 `wu_hausman_statistic` and `wu_hausman_p_value` (IV, `estimator="2sls"` only) are the regression-based test described in [Definitions: IV](../methods/iv.md#endogeneity-wu_hausman_statistic). Unlike the weak-instrument statistic, it follows the `cov_type` passed to `fit()`; the F test has `wu_hausman_df_num` and `wu_hausman_df_denom` degrees of freedom.
 
-For GMM, which has no Wu-Hausman test, and for the validity of instruments, use `c_stat()`, the difference of two Hansen J statistics (chi-squared). Its covariance of the moment conditions follows `gmm_weight_type` (GMM) or the family of `cov_type` (2SLS), and the degrees of freedom are the number of tested variables and instruments; see [Definitions: IV](../methods/iv.md#exogeneity-and-instrument-validity-post-estimation-c_stat).
+For GMM, which has no Wu-Hausman test, use [`c_stat()`](#exogeneity-and-instrument-validity-c-statistic).
+
+## Exogeneity and instrument validity (C statistic)
+
+`c_stat(variables=..., instruments=...)` is a post-estimation method, not computed by `fit()`, and works for both estimators. It tests the null that the named endogenous variables are exogenous and the named excluded instruments are valid, as the difference of two Hansen J statistics (chi-squared; `df` is the number of tested variables plus tested instruments). The remaining instruments are taken as valid. Use it for GMM, which has no Wu-Hausman test; to test a subset of the instruments, which the overall Sargan or Hansen J statistic cannot do; or for a heteroskedasticity- or cluster-robust version of the exogeneity test.
+
+The covariance of the moment conditions follows `gmm_weight_type` for two-step and iterated GMM, and the weight of the same kind as `cov_type` for 2SLS and one-step GMM. See [Definitions: IV](../methods/iv.md#exogeneity-and-instrument-validity-post-estimation-c_stat).
 
 ## Other diagnostics
 

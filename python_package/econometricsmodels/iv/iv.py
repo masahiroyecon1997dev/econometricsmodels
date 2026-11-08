@@ -159,8 +159,7 @@ class IVResults:
     - Overidentification (Sargan or Hansen J): `overid_statistic`,
       `overid_p_value`, `overid_df`.
     - Endogeneity (2SLS only): `wu_hausman_statistic`,
-      `wu_hausman_p_value`, `wu_hausman_df_num`, `wu_hausman_df_denom`;
-      for either estimator, see `c_stat()` below.
+      `wu_hausman_p_value`, `wu_hausman_df_num`, `wu_hausman_df_denom`.
     - Fit: `r_squared`, `adj_r_squared`.
     - Estimator used: `estimator`, `gmm_type`, `gmm_weight_type`,
       `converged`, `n_iter`.
@@ -172,8 +171,10 @@ class IVResults:
       variable), `params_table()`.
     - Weak-instrument diagnostics (methods, computed when called):
       `cragg_donald()`, `kleibergen_paap()`, `effective_f()`.
-    - Exogeneity of endogenous variables and validity of instruments for
-      either estimator (method, computed when called): `c_stat()`.
+    - Exogeneity of endogenous variables and orthogonality of excluded
+      instruments, for either estimator (method, computed when called):
+      `c_stat()`. For GMM, which has no Wu-Hausman test, use it for the
+      exogeneity of endogenous variables.
 
     Note:
         Users normally do not construct this directly; it is returned
@@ -665,15 +666,18 @@ class IVResults:
         with and without the tested moment conditions, and the statistic is
         the difference of the two Hansen J statistics, which is chi-squared
         distributed under the null that the tested moment conditions are
-        valid. Both J statistics use the same estimate of the covariance of
-        the moment conditions, so the statistic is never negative.
+        valid. The test is conditional: the remaining instruments are taken
+        as valid. Both J statistics use the same estimate of the covariance
+        of the moment conditions, so the statistic is never negative. Pass
+        `variables`, `instruments` or both.
 
         The covariance of the moment conditions follows `gmm_weight_type`
         (with `cluster`, `hac_lags` and `hac_time`) when `estimator="gmm"`
-        with `gmm_type` `"two_step"` or `"iterated"`, and the family of
-        `cov_type` otherwise (`"classical"`; `"hc0"` to `"hc3"` as a robust
-        covariance; `"hac"`; `"cluster"`). It does not depend on `gmm_type`,
-        `gmm_max_iter` or `gmm_tol`. In particular a model fitted with
+        with `gmm_type` `"two_step"` or `"iterated"`, and the covariance of
+        the same kind as `cov_type` otherwise, that is for 2SLS and for
+        `gmm_type="one_step"` (`"classical"`; `"hc0"` to `"hc3"` as a robust
+        covariance; `"hac"`; `"cluster"`). It does not depend on
+        `gmm_max_iter` or `gmm_tol`, and a model fitted with
         `gmm_type="one_step"` gets the two-step statistic. With the
         classical covariance the statistic is a difference of Sargan
         statistics that share one error variance.
@@ -689,8 +693,7 @@ class IVResults:
             instruments: Names from the excluded `instruments` whose
                 orthogonality is tested. Defaults to `None` (no instrument
                 is tested). At least as many instruments as endogenous
-                variables must remain. At least one of the two arguments is
-                required.
+                variables must remain.
 
         Returns:
             A `CStatisticResult` with the statistic, p-value, degrees of
@@ -701,11 +704,13 @@ class IVResults:
             ValidationError: Neither argument is given, a list is empty or
                 repeats a name, a name in `variables` is not in `x_endog`,
                 a name in `instruments` is not among the excluded
-                instruments, or too many instruments are tested.
+                instruments, or so many instruments are tested that fewer
+                excluded instruments than endogenous variables remain.
             ComputationError: The statistic is undefined for these data, for
-                example because the instruments are collinear or there are
-                too few clusters for the covariance of the moment
-                conditions of the model with the tested moment conditions.
+                example because the instruments are collinear, or because
+                there are fewer clusters than the columns of the full
+                instrument set (the exogenous regressors, the tested
+                endogenous variables and all excluded instruments).
         """
         raw = self._raw.c_stat(variables, instruments)
         return CStatisticResult(

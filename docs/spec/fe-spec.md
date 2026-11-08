@@ -205,7 +205,12 @@ within変換後の最小二乗点推定はFE推定量と数学的に一致） �
    `K = df_model - (nested_size_sum - count_nested)`、どの次元もネストしない
    （Stataの`xtreg,fe`型）なら`K = df_model`（フルカウント）。最後にfixest自身の
    安全弁`K = max(K, k+1)`を適用する。詳細な導出・具体例は`fe_cluster_k_correction`
-   関数doc参照。
+   関数doc参照。**fixestとの差（3次元以上で顕在化）**: クラスター列が固定効果の次元の1つそのものの
+   ときは、fixestは他の次元がクラスターに入れ子かを調べず（`ssc_compute_K`の近道）、クラスター列と同じ
+   次元だけを入れ子として数える。本実装は入れ子の次元を全て数える（`reghdfe`と同じ考え方、判断済み）。
+   例: `effects=[entity, time, c]`で個体が`c`に入れ子、`cluster="c"`なら、fixestは`c`だけ、
+   本実装は個体と`c`を除く。係数・残差・自由度は一致し、標準誤差・共分散行列は`K`の差による係数倍だけ違う
+   （`test_fe_multi_way_reference.py`が係数倍まで確かめる）。
    **2クラスターの退化**: `G=2`かつ吸収したFE次元（常にentity、2-wayではtimeも）のいずれかで
    全水準が2つのクラスターに1観測ずつで`k >= 1`なら、`PanelError::DegenerateClusterTwoGroups`
    として拒否する。典型例は2時点のパネルを時点の列でクラスタリング（個体方向）と、2-way FEで
@@ -391,11 +396,32 @@ demeanしたR²」を3種とも定義すると誤る）:
   F検定は両側t検定と代数的に等価」という恒等式（`f_statistic = test_stat²`）でHC1/HC2/HC3/
   Cluster/HACを横断検証する。
 
+### 3次元以上の固定効果のテスト
+
+- **主リファレンスはfixest**（`linearmodels.PanelOLS`は個体と時点の2つしか吸収できない）。
+  `tests/panel/test_fe_multi_way_reference.py`が`fe_multi_way.json`・`fe_multi_way_cov.json`
+  （`benchmark/panel/fixtures/generate_fe_multi_way_fixtures.py`）の全シナリオ×全ケースを機械精度で照合する。
+  独立なクロスチェックは`linearmodels.iv.absorbing.AbsorbingLS`の`classical`・`hc1`だけ
+  （`test_fe_multi_way_crosscheck.py`。`debiased=True`で小標本補正と自由度が本実装に一致する。固定効果をlsmrで
+  除くため、打ち切りを`atol`・`btol`=1e-14に厳しくして機械精度に揃える）。HC2/HC3・cluster・dkはfixestのみ
+  （単一リファレンスの例外、`docs/guide/verification-details.md`）。LSDVの手計算オラクルは
+  `test_fe_multi_way.py`（係数・classical/HC1/HC2/HC3）。
+- **シナリオ**（`benchmark/panel/multi_way_datasets.py`。既存のFE用データと乱数列を共有しない）: 全組合せ
+  （格子）・無作為な欠落・3つ目が個体に入れ子・疎・連結成分が2つ・重複行・4次元・小標本・不均一分散。
+  クラスター列は、効果の次元そのもの（個体・`c`・`time`）と、効果の外の列（`region`。個体の入れ子で、`nested`では
+  `c`も入れ子）。dkは既定と明示のバンド幅。
+- **照合する量**: 係数・標準誤差・`t`値・`p`値・信頼区間・共分散行列・`df_model`・`df_resid`・AIC/BIC/対数尤度・
+  Within R²・F統計量（fixest）と、行ごとの残差。個々の効果は基準化で値が変わり入れ子では識別されないので、
+  効果の和は残差の一致で行ごとに照合する。
+- **fixestとの差と回避**: (1) `nested`のHC2/HC3はfixestがダミー行列の線形従属で失敗するため、列空間が同じ
+  `entity + time`の式を参照にして自由度に依存しない量だけを比べる。(2) クラスター列が効果の次元そのもののとき、
+  fixestは他の次元の入れ子を調べず`K`が大きくなる（3.3節）。そのケース（`nested`の`cluster_c`）は標準誤差を
+  `K`の差の係数倍として検証する。
+- 再生成は`python -m benchmark.panel.freeze`（CSV）→ `generate_fe_multi_way_{,cov_,crosscheck_,cov_crosscheck_}fixtures`
+  （`benchmark/regenerate_all.py`に登録済み。fixestにはR、`AbsorbingLS`にはlinearmodelsが要る）。
+
 ## 5. 未実装・未対応
 
-- **不均衡パネルでの2-way FE**: 反復的な交互射影（fixest/lfe方式）が必要で、v1では扱わない
-  （閉形式の二重デミーニングはバランスパネルでのみ正確なため、6.4節相当の制約として
-  `ValidationError`にする）。
 - **2-way clustering（個体+時点同時）**: v1スコープ外。
 - **Driscoll-Kraay HACのカーネル拡張**: Parzen/QSカーネルへの拡張は別issue。
 - **DKの`bandwidth == t_periods - 1`（許容範囲の上限ちょうど）でfixestと数値不一致**:

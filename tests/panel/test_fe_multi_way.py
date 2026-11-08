@@ -216,3 +216,99 @@ def test_a_third_column_nested_in_the_first_keeps_the_row_effects():
     assert (df["y"] - fitted).to_list() == pytest.approx(
         nested.residuals, abs=1e-8
     )
+
+
+# ── 入力のエラー（3つ目以降の効果） ────────────────────────────────────
+
+
+def test_a_missing_value_in_the_third_column_is_rejected():
+    df = _panel().with_columns(
+        industry=pl.when(pl.int_range(pl.len()) == 3)
+        .then(None)
+        .otherwise(pl.col("industry"))
+    )
+    with raises_error("COLUMN_CONTAINS_NULL", column="industry"):
+        _fit(df, ["firm", "year", "industry"])
+
+
+def test_a_missing_third_column_is_reported():
+    with raises_error("COLUMN_NOT_FOUND", column="nowhere"):
+        _fit(_panel(), ["firm", "year", "nowhere"])
+
+
+@pytest.mark.parametrize("column", ["y", "x1"])
+def test_a_third_column_that_is_also_y_or_x_is_rejected(column):
+    with raises_error("ROLE_COLUMN_OVERLAP"):
+        _fit(_panel(), ["firm", "year", column])
+
+
+def test_too_few_observations_for_the_absorbed_effects_are_rejected():
+    # 8行・個体4×時点2×産業2: df_model = 2 + 4 + 2 + 2 - 2 = 8で残差の自由度が0。
+    df = pl.DataFrame(
+        {
+            "firm": ["a", "a", "b", "b", "c", "c", "d", "d"],
+            "year": [0, 1, 0, 1, 0, 1, 0, 1],
+            "industry": ["p", "q", "p", "q", "q", "p", "q", "p"],
+            "x1": [0.1, 0.7, 0.3, 0.2, 0.9, 0.4, 0.6, 0.5],
+            "x2": [0.5, 0.1, 0.9, 0.3, 0.2, 0.8, 0.4, 0.6],
+            "y": [1.0, 0.2, 0.7, 0.9, 0.3, 0.8, 0.5, 0.4],
+        }
+    )
+    with raises_error("INSUFFICIENT_DEGREES_OF_FREEDOM"):
+        _fit(df, ["firm", "year", "industry"])
+
+
+def test_the_sweep_limit_is_enforced_for_three_effects():
+    with raises_error("ABSORPTION_NOT_CONVERGED"):
+        FE(
+            _panel(),
+            y="y",
+            x=["x1", "x2"],
+            effects=["firm", "year", "industry"],
+            options=FEOptions(max_iter=1, tol=1e-14),
+        ).fit()
+
+
+def test_a_dense_leverage_matrix_above_the_limit_is_rejected():
+    # 最大の次元（2500水準）を除いた水準数の合計（2000 + 1500）が上限（3000）を超える。
+    rows = 5000
+    df = pl.DataFrame(
+        {
+            "a": [f"a{r % 2500:05d}" for r in range(rows)],
+            "b": [f"b{r % 2000:05d}" for r in range(rows)],
+            "c": [f"c{r % 1500:05d}" for r in range(rows)],
+            "x": [float((r * 104729) % 97) for r in range(rows)],
+            "y": [float((r * 7919) % 101) for r in range(rows)],
+        }
+    )
+    with raises_error(
+        "LEVERAGE_DIMENSION_TOO_LARGE", n_levels=3500, max_levels=3000
+    ):
+        FE(
+            df,
+            y="y",
+            x=["x"],
+            effects=["a", "b", "c"],
+            options=FEOptions(cov_type="hc3"),
+        ).fit()
+
+
+def test_the_confidence_level_applies_to_three_effects():
+    df = _panel()
+    effects = ["firm", "year", "industry"]
+
+    def fit(level):
+        return FE(
+            df,
+            y="y",
+            x=["x1", "x2"],
+            effects=effects,
+            options=FEOptions(cov_type="classical", confidence_level=level),
+        ).fit()
+
+    narrow, wide = fit(0.8), fit(0.95)
+    for name in ("x1", "x2"):
+        assert narrow.params[name] == wide.params[name]
+        assert narrow.conf_int[name][1] - narrow.conf_int[name][0] < (
+            wide.conf_int[name][1] - wide.conf_int[name][0]
+        )

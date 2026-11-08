@@ -752,6 +752,15 @@ fixestで固定した係数・標準誤差の照合は手順8（ベンチマー�
 ネストの扱い）、`docs/usage/fe.md`（「at most two columns」が古い。3〜5列の節と例）、`docs/api/fe.md`、`accepted-data.md`（3列目はIdentity扱いで`Boolean`も可）、
 `FEOptions.tol`/`max_iter`の説明の「two-way unbalanced」だけという限定。**手順8**: fixestとの照合（`test_fe_multi_way_crosscheck.py`）。
 
+**進捗（手順8、2026-11-08）**: 実装済み（コミット前）。判断（ユーザー確認済み）: シナリオは7種類＋小標本・不均一分散、第2参照は`AbsorbingLS`（classical/hc1のみ、
+`debiased=True`、lsmrの打ち切りを1e-14に厳しくして機械精度）、フィクスチャとテストは専用（`fe_multi_way*.json`・`test_fe_multi_way_{reference,crosscheck}.py`）、
+**クラスターKは現状維持**（クラスター列が効果の次元そのもののとき、fixestは他の次元の入れ子を調べず`K`が大きくなる。本実装は入れ子を全て数える。`nested`の`cluster_c`は
+`K`の差の係数倍として検証し、効果の外の列`region`でfixestと厳密に一致することを確認）。fixestがHC2/HC3で失敗する`nested`は`entity + time`の式を参照にする。
+データ: `benchmark/panel/multi_way_datasets.py`。ケース: classical/hc1/hc2/hc3/cluster/cluster_c/cluster_time/cluster_region/dk/dk_bw1。fixestと全シナリオ×全ケースが機械精度で一致
+（係数3e-15、標準誤差3e-12、残差6e-12）。バグ注入（HC2/HC3のレバレッジを1%ずらす）で14件が失敗することを確認。`pytest tests --check-error-coverage --check-cov-coverage`が12107件通る。
+ドキュメント: `verification.md`・`verification-details.md`・`inference-conventions.md`・`methods/fe.md`（Kの差）・`fe-spec.md`（テスト節）。
+**見送り（レビュー指摘）**: 3次元の実データ（`wooldridge`キーは空）、悪条件・高次元k・クラスター数の境界（G=q+1）、`absorption_tol`の検証、`fe_multi_way_true_beta.json`を使うテスト。
+
 ### 9.11 compact用のメモ（#442、手順3のコミット後。2026-11-08）
 
 **状態**: `release/v0.10.0`。手順1〜3はコミット済み（`git log`の`refactor(engine): パネルの索引と入力を効果のK次元で持つ形にする`・`feat(engine): FEの2-wayで同じ組合せの重複する行を受け付ける`・
@@ -782,7 +791,7 @@ fixestで固定した係数・標準誤差の照合は手順8（ベンチマー�
    `FeEffects`（列数が1/2/3以上で`OneWay`/`TwoWay`/`MultiWay`）、`with_effect_names(effects.clone())`。`fit_frame`の`group_counts`は`estimator.n_groups().to_vec()`（済み）。
    `FEResult.fixed_effects()`のdict化は済み。Pythonのdocstring（`fe.py`のRaisesの「more than two columns」、`n_groups`、`fixed_effects`）、型検査テスト、`tests/panel/test_fe_validation.py`の
    「3列以上」のテストの反転、`EFFECTS_TOO_MANY`の`max_columns`、`pickle`（`tests/cross_method/test_pickle.py`）。
-3. **手順8: ベンチマーク**: 3次元目のDGP（バランス3-way・不均衡・3つ目が1つ目にネスト・疎・連結成分が複数・重複行）。主はfixest（`fixef.tol=1e-11`、`| a + b + c`）。
+3. **（実装済み・コミット前）手順8: ベンチマーク**: 3次元目のDGP（バランス3-way・不均衡・3つ目が1つ目にネスト・疎・連結成分が複数・重複行）。主はfixest（`fixef.tol=1e-11`、`| a + b + c`）。
    小標本はLSDVをオラクル。linearmodelsの`AbsorbingLS`が複数の吸収を扱えるかを先に実測し、使えなければ単一リファレンスの例外（`verification-details.md`）。
    fixestの`fixef`との比較は和`α+γ+δ`で。fixestで固定した係数・標準誤差の照合（`ssc(fixef.K="nested")`とクラスターKの一致を含む）。
 4. **手順9: ドキュメント**: fe-spec（§5の「不均衡2-wayは未対応」の記述が古い）・panel-common（`effects`の上限、`n_groups`、`fixed_effects()`の形）・usage/api/methods/fe・

@@ -165,6 +165,12 @@ f_p_value_val <- pf(
   lower.tail = FALSE
 )
 
+# 自由度と行ごとの残差（3次元以上の固定効果の照合用。`fixef`の和`α+γ+δ`は、残差が一致する
+# ことで行ごとに照合される）。1-way・2-wayのフィクスチャは使わない。
+df_model_val <- degrees_freedom(model, "k")
+df_resid_val <- degrees_freedom(model, "resid")
+residuals_val <- as.numeric(resid(model))
+
 library(jsonlite)
 result <- list(
   params = as.list(coefs),
@@ -183,6 +189,9 @@ result <- list(
   log_likelihood = log_likelihood_val,
   r_squared_within = r_squared_within_val,
   f_statistic = unname(wald_res$stat),
-  f_p_value = unname(f_p_value_val)
+  f_p_value = unname(f_p_value_val),
+  df_model = df_model_val,
+  df_resid = df_resid_val,
+  residuals = residuals_val
 )
 cat(toJSON(result, auto_unbox = TRUE, digits = NA))

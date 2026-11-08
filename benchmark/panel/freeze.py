@@ -21,6 +21,10 @@ from benchmark.panel.datasets import (
     re_two_way_small_panel,
     re_zero_variance_component_panels,
 )
+from benchmark.panel.multi_way_datasets import (
+    MULTI_WAY_SCENARIOS,
+    generate_fe_multi_way_dataset,
+)
 
 # df_resid=1境界（1-way）成功パス専用。SCENARIOSには追加せず、baselineを
 # n_entities=3, n_periods=2, k=2でオーバーライドした専用データとして固定する
@@ -105,6 +109,19 @@ def freeze(output_dir: Path) -> None:
     )
     (output_dir / "fe_true_beta.json").write_text(
         json.dumps(true_betas, indent=2)
+    )
+
+    # 3次元以上の固定効果。乱数列を共有しない別の生成関数で、真の係数も別のJSONに書く。
+    multi_way_betas: dict[str, list[float]] = {}
+    freeze_scenarios(
+        output_dir,
+        generate_fe_multi_way_dataset,
+        MULTI_WAY_SCENARIOS,
+        "fe_multi_way",
+        multi_way_betas,
+    )
+    (output_dir / "fe_multi_way_true_beta.json").write_text(
+        json.dumps(multi_way_betas, indent=2)
     )
 
 

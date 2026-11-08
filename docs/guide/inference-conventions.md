@@ -10,7 +10,7 @@ Notation: `n` is the number of observations, `k` the number of coefficients, `G`
 |---|---|---|---|
 | OLS | t | F (`f_statistic`) | `n - k`; `G - 1` with `cov_type="cluster"` |
 | WLS | t | F | same as OLS |
-| FE | t | F | `df_resid` (`n - N - k` for one-way) for `classical`/`hc1`-`hc3`; `G - 1` with `cov_type="cluster"`; `t_periods - 1` with `cov_type="dk"`. The F statistic follows `cov_type`, so `f_df_denom` equals the degrees of freedom of the t tests |
+| FE | t | F | `df_resid` (`n - N - k` for one-way; in general `n - k - ΣG + (number of columns in effects - 1)`) for `classical`/`hc1`-`hc3`; `G - 1` with `cov_type="cluster"`; `t_periods - 1` with `cov_type="dk"`. The F statistic follows `cov_type`, so `f_df_denom` equals the degrees of freedom of the t tests |
 | RE (one-way and two-way) | t | F | `df_resid` (`n - k`, with `k` all coefficients including the constant, for `classical`/`hc1`-`hc3`); `G - 1` with `cov_type="cluster"`; `t_periods - 1` with `cov_type="dk"`. The F statistic follows `cov_type`, so `f_df_denom` equals the degrees of freedom of the t tests. See [Definitions: RE](../methods/re.md#degrees-of-freedom) |
 | IV, `estimator="2sls"` | t | F (`wald_dist="f"`) | `df_resid`; `G - 1` with `cov_type="cluster"` |
 | IV, `estimator="gmm"` | normal | chi-squared (`wald_dist="chi2"`) | none |

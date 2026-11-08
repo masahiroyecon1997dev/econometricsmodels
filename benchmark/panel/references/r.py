@@ -128,6 +128,7 @@ def run_fixest_r(
     cluster: str | None = None,
     dk_lag: int | None = None,
     dk_time: str = "time",
+    with_degrees_and_residuals: bool = False,
 ) -> dict:
     """`run_fixest_benchmark.R`を呼び、係数・標準誤差・AIC/BIC・Within R2を得る。
 
@@ -140,6 +141,9 @@ def run_fixest_r(
         dk_lag: `cov_type="dk"`のバンド幅（`DK(lag)`のlag。fixestの既定とは
             異なる本実装の既定値を呼び出し側が明示的に渡す）。
         dk_time: `cov_type="dk"`の時点列名。
+        with_degrees_and_residuals: `True`なら`df_model`・`df_resid`（fixestの
+            `degrees_freedom(model, "k"/"resid")`）と行ごとの`residuals`（CSVの行の順）も返す。
+            3次元以上の固定効果の照合用で、1-way・2-wayのフィクスチャには入れない。
     """
     extra: list[str] = []
     if cov_type == "cluster":
@@ -161,6 +165,10 @@ def run_fixest_r(
     result["cov_params"] = normalize_cov_params(
         raw["cov_params"], intercept_aliases=()
     )
+    if with_degrees_and_residuals:
+        result["df_model"] = int(raw["df_model"])
+        result["df_resid"] = int(raw["df_resid"])
+        result["residuals"] = [float(v) for v in raw["residuals"]]
     return result
 
 

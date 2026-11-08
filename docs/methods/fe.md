@@ -64,6 +64,8 @@ following `fixest`'s default `ssc()`. The effective number of parameters \(K\) d
 
 and \(K\) is never allowed to be below \(k+1\).
 
+Every effect nested in the clusters is removed from \(K\). When the cluster column is itself one of the effects, `fixest` does not check whether the other effects are nested in it and counts only that effect, so with three or more effects (for example a firm effect nested in an industry effect, clustered by industry) `fixest` can report a larger \(K\), and larger standard errors, than this package.
+
 **Comparison with `linearmodels`.** With its default settings (`debiased=True`, `group_debias=False`), `linearmodels` 7.1 multiplies the clustered covariance by \(n/(n-\mathrm{extra\_df}-k)\) and applies no \(G/(G-1)\) factor. Here \(\mathrm{extra\_df}\) is the number of estimated effect levels (one fewer when the model contains a constant), or 0 when `PanelOLS` finds a single effect nested in the clusters (`auto_df=True`, the default). With `group_debias=True` it also multiplies the covariance by \(\frac{G}{G-1}\cdot\frac{n-1}{n}\). The cluster standard errors therefore differ from this package's whichever of these settings is used. For example, with one-way effects clustered by entity this package uses \(K = k+1\) where `linearmodels` effectively uses \(k\), so even with `group_debias=True` the variances differ by the factor \((n-k)/(n-k-1)\).
 
 `fit()` raises an error with fewer than two clusters or when there are not more clusters than slope coefficients (the joint test is then undefined). It also rejects the degenerate case of two clusters that contain exactly one observation of each absorbed effect level, where the clustered covariance is identically zero.

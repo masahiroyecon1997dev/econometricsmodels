@@ -124,6 +124,18 @@ MIGRATED_CODES: frozenset[str] = frozenset(
 # `COEFFICIENT_COVARIANCE`だけ（`DESIGN_GRAM`・`HESSIAN`・`OPG`・`GMM_WEIGHT`は、前段の
 # 検査や分解が先に失敗するため、極端なスケール差のデータでも構成できていない）。
 UNREACHABLE_CODES: dict[str, str] = {
+    ErrorCode.C_STATISTIC_NOTHING_TO_TEST: (
+        "C統計量のengineだけを実装した段階で、Pythonの事後診断メソッドが未公開。"
+        "公開したらMIGRATED_CODESへ移す"
+    ),
+    ErrorCode.C_STATISTIC_TOO_MANY_TESTED_INSTRUMENTS: (
+        "C統計量のengineだけを実装した段階で、Pythonの事後診断メソッドが未公開。"
+        "公開したらMIGRATED_CODESへ移す"
+    ),
+    ErrorCode.C_STATISTIC_UNDEFINED: (
+        "C統計量のengineだけを実装した段階で、Pythonの事後診断メソッドが未公開。"
+        "公開したらMIGRATED_CODESへ移す"
+    ),
     ErrorCode.BREUSCH_GODFREY_MATRIX_TOO_LARGE: (
         "補助回帰の行列を確保できない大きさのときだけ。`n <= k_aux`の検査が先に"
         "働き、確保の失敗を起こせる入力はテストでは作れない"

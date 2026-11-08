@@ -5,12 +5,10 @@
 use faer::prelude::Solve;
 use faer::{Mat, Side};
 
-use super::weight::{
-    WeightType, cluster_moment_covariance, hac_moment_covariance, robust_moment_covariance,
-};
+use super::weight::{WeightType, moment_covariance};
 use crate::iv::common::IvError;
 use crate::shared::covariance::{resolve_hac_lags, time_ordering};
-use crate::shared::error::{ClusterSetting, CommonError, MatrixKind};
+use crate::shared::error::{CommonError, MatrixKind};
 use crate::shared::group_codes::GroupCodes;
 
 /// GMMの推定方式（`docs/spec/iv-spec.md`3.3節）。
@@ -72,7 +70,6 @@ pub(super) fn gmm_iterate(
     classical_s: Mat<f64>,
 ) -> Result<GmmIteration, IvError> {
     let n = z.nrows();
-    let l = z.ncols();
     let mut beta = beta0;
     let mut residuals = residuals0;
     let mut s_used = classical_s;
@@ -108,29 +105,14 @@ pub(super) fn gmm_iterate(
             // 点推定は正のスカラー倍不変のため`classical_s`相当（σ̂²・Z'Z）を使っても
             // `Z'Z`単体を使った場合と`β̂`は変わらない。Hansen Jにそのまま使い回せる
             // よう、あらかじめ正しくスケーリングされたSを使う（`iv/CLAUDE.md`参照）。
-            let s_next = match weight_type {
-                WeightType::Classical => {
-                    let sigma2: f64 =
-                        (0..n).map(|i| (*residuals.get(i, 0)).powi(2)).sum::<f64>() / (n as f64);
-                    Mat::from_fn(l, l, |i, j| sigma2 * (*ztz.get(i, j)))
-                }
-                WeightType::Robust => robust_moment_covariance(z, &residuals, n),
-                WeightType::Cluster { .. } => {
-                    let groups = weight_cluster_codes.ok_or(CommonError::MissingClusterColumn {
-                        setting: ClusterSetting::GmmWeightType,
-                    })?;
-                    cluster_moment_covariance(z, &residuals, l, groups)
-                }
-                WeightType::Hac { .. } => {
-                    // `hac_precomputed`は`weight_type=Hac`のとき（このアームに入る
-                    // ときは常に）ループ開始前にSomeとして構築済み（`weight_type`は
-                    // ループ中不変のため、上記matchと同じ分岐に必ず入る）。
-                    let (lags, order) = hac_precomputed
-                        .as_ref()
-                        .expect("hac_precomputed is Some whenever weight_type is Hac");
-                    hac_moment_covariance(z, &residuals, n, l, *lags, order)
-                }
-            };
+            let s_next = moment_covariance(
+                weight_type,
+                weight_cluster_codes,
+                hac_precomputed.as_ref(),
+                z,
+                &residuals,
+                ztz,
+            )?;
             let beta_next = gmm_point_estimate(z, x, y, &s_next)?;
             n_iter += 1;
 

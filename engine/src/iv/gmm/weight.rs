@@ -117,5 +117,41 @@ pub(super) fn hac_moment_covariance(
     })
 }
 
+/// 残差から重み行列の元になる`S`（モーメント条件の分散共分散行列、`n`で割らない生の和）を作る。
+///
+/// `weight_type`が`Cluster`なら`cluster`（検証済みのコード）、`Hac`なら`hac`（解決済みのラグ数と
+/// 時系列順の添字）が必要で、反復の外で1度だけ用意して渡す。`Classical`の`S`は`σ̂²・Z'Z`
+/// （`σ̂²=ê'ê/n`、中心化しない。Hansen Jの絶対スケールがSarganと一致するために必要）。
+pub(super) fn moment_covariance(
+    weight_type: &WeightType,
+    cluster: Option<&GroupCodes>,
+    hac: Option<&(usize, Vec<usize>)>,
+    z: &Mat<f64>,
+    residuals: &Mat<f64>,
+    ztz: &Mat<f64>,
+) -> Result<Mat<f64>, IvError> {
+    let (n, l) = (z.nrows(), z.ncols());
+    Ok(match weight_type {
+        WeightType::Classical => {
+            let sigma2: f64 =
+                (0..n).map(|i| (*residuals.get(i, 0)).powi(2)).sum::<f64>() / (n as f64);
+            Mat::from_fn(l, l, |i, j| sigma2 * (*ztz.get(i, j)))
+        }
+        WeightType::Robust => robust_moment_covariance(z, residuals, n),
+        WeightType::Cluster { .. } => {
+            let groups = cluster.ok_or(CommonError::MissingClusterColumn {
+                setting: ClusterSetting::GmmWeightType,
+            })?;
+            cluster_moment_covariance(z, residuals, l, groups)
+        }
+        WeightType::Hac { .. } => {
+            let (lags, order) = hac.ok_or_else(|| {
+                CommonError::internal("the HAC lags and time order were not resolved")
+            })?;
+            hac_moment_covariance(z, residuals, n, l, *lags, order)
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests;

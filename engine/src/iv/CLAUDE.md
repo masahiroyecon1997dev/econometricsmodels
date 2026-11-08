@@ -6,7 +6,7 @@
 
 - `two_sls.rs`は外から見える面（構造体・getter・`IvEstimate`実装・`fit`の契約）だけを持つファサード。ロジックは子モジュール`two_sls/`に置く: `fit.rs`（`fit`の本体）・`cov.rs`（cov_type別の共分散行列）・`wu_hausman.rs`・`sargan.rs`・`test_support.rs`（`#[cfg(test)]`の共有フィクスチャ）。テストは各ロジックと同じファイルの`mod tests`に置く（`fit`を通すテストと、テストが大きいファイルは`<ファイル名>/tests/`にテーマ別で置く）。子は親のprivateフィールドに触れるため、構造体のフィールドはprivateのまま`fit.rs`が組み立てる。
 - `common.rs`も同じ形で、公開パス（`crate::iv::common::*`）を保つ再エクスポートだけを持ち、中身は`common/`の子モジュールに置く: `error.rs`（`IvError`）・`input.rs`（`IvInput`・`hcat`・`mat_column_to_vec`・`mat_to_columns`・`without_baked_in_intercept`）・`validation.rs`（`validate_iv_fit_inputs`と`fit()`冒頭の入力検証）・`first_stage.rs`（`compute_first_stage`・`partial_f_statistic`）・`estimate.rs`（`IvEstimate`）・`proptest_support.rs`（`#[cfg(test)]`）。テストは各ロジックと同じファイルの`mod tests`に置く（テストが大きいファイルは`<ファイル名>/tests/`にテーマ別で置く）。
-- `gmm.rs`も同じ形のファサード（モジュールdoc・`GmmEstimator`の構造体・getter・`IvEstimate`実装・`fit`の契約と1行委譲・`WeightType`/`GmmType`の再エクスポート）。ロジックは`gmm/`の子モジュールに置く: `fit.rs`（`fit`の本体）・`iterate.rs`（`GmmType`・点推定・反復`gmm_iterate`・収束判定）・`weight.rs`（`WeightType`・重み行列`S`の計算・`validate_weight_type`）・`hansen_j.rs`・`sandwich.rs`（`cov_type`別の`Ω̂`の組み立てと共有のサンドイッチの呼び出し）・`test_support.rs`（`#[cfg(test)]`の共有フィクスチャ）。
+- `gmm.rs`も同じ形のファサード（モジュールdoc・`GmmEstimator`の構造体・getter・`IvEstimate`実装・`fit`の契約と1行委譲・`WeightType`/`GmmType`の再エクスポート）。ロジックは`gmm/`の子モジュールに置く: `fit.rs`（`fit`の本体）・`iterate.rs`（`GmmType`・点推定・反復`gmm_iterate`・収束判定）・`weight.rs`（`WeightType`・重み行列`S`の計算・`validate_weight_type`）・`hansen_j.rs`・`sandwich.rs`（`cov_type`別の`Ω̂`の組み立てと共有のサンドイッチの呼び出し）・`c_statistic.rs`（C統計量。事後診断で`fit()`は呼ばない）・`test_support.rs`（`#[cfg(test)]`の共有フィクスチャ）。
 
 ## 踏んだ罠（再発防止）
 
@@ -47,6 +47,8 @@
 - **`wu_hausman_p_value`のF分布p値は、augmented regression（第一段階残差をn_endog列追加した拡張回帰）自身の`df_resid`（＝主構造式の`df_resid - n_endog`）を使う**（`OlsEstimator::wald_test_last_columns`が内部で使う`df_inference`と同じ、`engine/src/linear/CLAUDE.md`参照）。統計量自体（`wr_stat`）は主モデルのdfに依存しないため、この分母dfを取り違えても機械精度で一致してしまい見逃しやすい——主構造式の`df_resid`を流用すると`wu_hausman_statistic`は機械精度で一致するのに`wu_hausman_p_value`だけ最大0.2%程度（small_nシナリオ、df=37と36の違い）乖離する。統計量とp値は別々に照合すること（`tests/iv/test_iv_reference.py`、`benchmark/iv/references/linearmodels_ref.py`）。
 
 - **被説明変数の定数・完全フィットの判定位置**: 構造方程式の定数（`validate_outcome_not_constant`、切片あり・`y`が全行等しい）は`TwoSlsEstimator::fit`/`GmmEstimator::fit`/`engine_pybind`の`fit`が第一段階より前に呼ぶ。完全フィットは**構造残差**$y - X\hat\beta$で判定する（2SLSは`ssr`の直後、共分散より前。GMMは初期推定の残差で、重み行列`S`が0になって逆行列が特異になる前）。第二段階は`X̂`への回帰（行列版の点推定）で別の量なので判定しない。第一段階は`fit_with_optional_f_test`（判定あり）なので、操作変数が内生変数を完全に予測すると`FirstStageFailed`で`PERFECT_FIT`（`stage=FIRST_STAGE`）になる——Wu-Hausman拡張回帰は元の`y`の回帰なので`fit`（判定あり）で行い、拡張回帰が完全フィット（`y`が第二段階の説明変数と第一段階残差で厳密に説明される。第一段階も構造残差も完全フィットではないので前段の判定をすり抜ける）なら`PerfectFit`を他の想定内の失敗と同じく`None`へdegradeする（`wu_hausman_statistic`が`8e31`・p値0のような無意味な値で成功するのを防ぐ）。第一段階残差の分散がゼロによる特異は第一段階の判定で先に止まるため通常は到達しない（`SingularMatrix`の`None`への分岐は防御として残す）。部分F統計量の制限モデルは判定しない（行列版）。テストで操作変数が内生変数を完全に予測するデータ（`x_endog = z`等）を使うと第一段階が失敗する。
+
+- **C統計量（`gmm/c_statistic.rs`の`compute_c_statistic`）は、`J_c`の重みに`S_e`の部分行列の逆行列`S_c⁻¹`を使う（`S_e⁻¹`の部分行列ではない）**: 共通の`S`から作るので`C = J_e − J_c ≥ 0`になる。`S_e⁻¹`の部分行列を重みにすると`C`が負になりうる。`J_c`の点推定も、元の`Z_c`で`S_c`を重みにして推定し直す（`J_e`の推定値を使い回さない）。`gmm_type`・`cov_type`には依存せず、重みの種類(`WeightType`)だけを引き継いで常に2段階。クラスターは`G < l_full`で構造的に特異（`validate_weight_type`は呼ばない: あちらのエラーは`gmm_weight_type`の文面で、2SLSの`cov_type`由来の重みには合わない）。初期推定の完全フィットは`S_e`が丸め誤差になり、Jが無意味な値で成功してしまうので、`GmmEstimator::fit`と同じ判定で未定義にする。重みの構築は`weight.rs`の`moment_covariance`を`gmm_iterate`と共有する。独立な検証手段: 内生性はlinearmodelsの`c_stat`、直交性は`IVGMM`の部品を使った別計算（`docs/spec/iv-spec.md`3.9節）。
 
 ## 2SLSとGMMの独立実装方針
 

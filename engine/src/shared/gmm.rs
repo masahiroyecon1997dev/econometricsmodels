@@ -84,6 +84,30 @@ pub(crate) struct HansenJ {
     pub(crate) p_value: f64,
 }
 
+/// Hansen J統計量`J = (Z'ê)'S⁻¹(Z'ê)`(`n`で割らない。理由は[`hansen_j_test`])。自由度を持たないので、
+/// 丁度識別(`J = 0`)も計算できる。
+///
+/// # Errors
+/// `S`が正定値でないとき`CommonError::NearSingularMatrix`(`MatrixKind::GmmWeight`)。
+pub(crate) fn hansen_j_statistic(
+    z: &Mat<f64>,
+    residuals: &Mat<f64>,
+    s_used: &Mat<f64>,
+) -> Result<f64, CommonError> {
+    debug_assert_eq!((residuals.nrows(), residuals.ncols()), (z.nrows(), 1));
+    debug_assert_eq!((s_used.nrows(), s_used.ncols()), (z.ncols(), z.ncols()));
+    let zte = z.transpose() * residuals;
+    let llt_s = s_used
+        .llt(Side::Lower)
+        .map_err(|_| CommonError::NearSingularMatrix {
+            matrix: MatrixKind::GmmWeight,
+        })?;
+    let s_inv_zte = llt_s.solve(&zte);
+    Ok((0..z.ncols())
+        .map(|i| (*zte.get(i, 0)) * (*s_inv_zte.get(i, 0)))
+        .sum())
+}
+
 /// Hansen J過剰識別検定: `J = (Z'ê)'S⁻¹(Z'ê)`を`χ²(df)`と比べる。
 ///
 /// **`n`で割らない**: `S`が`n`で正規化していない生の和(`S = Σᵢ êᵢ²zᵢzᵢ'`など)なら、標準形
@@ -107,18 +131,7 @@ pub(crate) fn hansen_j_test(
             "the Hansen J test needs at least one degree of freedom",
         ));
     }
-    debug_assert_eq!((residuals.nrows(), residuals.ncols()), (z.nrows(), 1));
-    debug_assert_eq!((s_used.nrows(), s_used.ncols()), (z.ncols(), z.ncols()));
-    let zte = z.transpose() * residuals;
-    let llt_s = s_used
-        .llt(Side::Lower)
-        .map_err(|_| CommonError::NearSingularMatrix {
-            matrix: MatrixKind::GmmWeight,
-        })?;
-    let s_inv_zte = llt_s.solve(&zte);
-    let statistic: f64 = (0..z.ncols())
-        .map(|i| (*zte.get(i, 0)) * (*s_inv_zte.get(i, 0)))
-        .sum();
+    let statistic = hansen_j_statistic(z, residuals, s_used)?;
     let chi2 = ChiSquared::new(df as f64).map_err(|e| CommonError::internal(e.to_string()))?;
     let p_value = chi2.sf(statistic);
     Ok(HansenJ { statistic, p_value })

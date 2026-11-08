@@ -147,6 +147,25 @@ pub enum IvError {
     /// 診断なので`fit()`は失敗させず、診断のメソッドを呼んだときにだけ返す。`statistic`は文に出す名前。
     #[error("{}", self.catalog_message())]
     WeakInstrumentStatisticUndefined { statistic: &'static str },
+
+    /// C統計量で検定する内生変数も操作変数も指定されていない。
+    #[error("{}", self.catalog_message())]
+    CStatisticNothingToTest,
+
+    /// C統計量で検定する除外操作変数が多すぎて、外した後の操作変数が内生変数の数に足りない
+    /// （順序条件を満たさず、元の構造方程式が識別できない）。
+    #[error("{}", self.catalog_message())]
+    CStatisticTooManyTestedInstruments {
+        n_tested: usize,
+        n_instruments: usize,
+        n_endog: usize,
+    },
+
+    /// C統計量が、このデータでは定義できない（必要な行列が特異: 操作変数の共線、完全フィット、
+    /// モーメント条件の共分散のランク落ち等）。診断なので`fit()`は失敗させず、診断のメソッドを
+    /// 呼んだときにだけ返す。
+    #[error("{}", self.catalog_message())]
+    CStatisticUndefined,
 }
 
 impl ErrorInfo for IvError {
@@ -209,6 +228,16 @@ impl ErrorInfo for IvError {
                 ErrorReport::new(ErrorCode::WeakInstrumentStatisticUndefined)
                     .param("statistic", *statistic)
             }
+            Self::CStatisticNothingToTest => ErrorReport::new(ErrorCode::CStatisticNothingToTest),
+            Self::CStatisticTooManyTestedInstruments {
+                n_tested,
+                n_instruments,
+                n_endog,
+            } => ErrorReport::new(ErrorCode::CStatisticTooManyTestedInstruments)
+                .param("n_tested", *n_tested)
+                .param("n_instruments", *n_instruments)
+                .param("n_endog", *n_endog),
+            Self::CStatisticUndefined => ErrorReport::new(ErrorCode::CStatisticUndefined),
         }
     }
 }

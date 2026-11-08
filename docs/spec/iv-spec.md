@@ -531,6 +531,35 @@ error.rs`）:
 より`impl From`は書けず、関数として実装し`.map_err(iv_error_to_pyerr)?`で変換する
 （`ErrorInfo::report()`の`code`・`params`から例外を作る）。
 
+### 3.9 C統計量（difference-in-Hansen、`engine::iv::gmm::compute_c_statistic`）
+
+定義: 同じ構造方程式（`X = [x_exog, x_endog]`）を、検定するモーメント条件`B`を含む操作変数`Z_full = [x_exog, B₁, instruments]`と、
+含まない`Z_c`で推定し、Hansen Jの差`C = J_e − J_c`を`χ²(|B|)`で検定する。`B₁`は外生性を検定する`x_endog`の一部（自分自身を
+操作変数に加える）、`B₂`は直交性を検定する除外操作変数の一部（`Z_c`から外す）で、同時に指定してよい（`Z_c = [x_exog, instruments \ B₂]`）。
+手順はHayashi (2000) pp. 218-221, 232-234、Baum-Schaffer-Stillman (2003) 4.4節、linearmodelsの`IVGMMResults.c_stat`と同じ:
+
+1. `Z_full`で2段階GMM。1段階目の重みは`(Z_full'Z_full)⁻¹`、2段階目は1段階目の残差から作った`S_e`の逆行列。このJが`J_e`。
+2. `S_e`のうち`Z_c`に当たる行・列の部分行列`S_c`を取り、`S_c⁻¹`を重みに`Z_c`で推定したJが`J_c`（**`S_e⁻¹`の部分行列ではない**）。
+3. 共通の`S`から作るので`C ≥ 0`（丸めで負になる分は0に丸める）。`Z_c`が丁度識別なら`J_c = 0`で`C = J_e`。
+
+判断:
+
+- **`gmm_type`・`gmm_max_iter`・`cov_type`に依存せず、重みの種類だけを引き継ぐ**（常に2段階）。`one_step`の結果でも、`gmm_weight_type`と同じ設定の2段階の統計量になる。
+  linearmodelsも元のモデルの方式に関係なく、同じ重みの種類で2段階（既定）で推定する。
+- **2SLSには`weight_type_for_cov_type`で重みを決める**: `Classical`→`Classical`（差のSargan）、`Hc0`〜`Hc3`→`Robust`（`S`にHC1・HC2・HC3の補正は無い）、`Hac`・`Cluster`は同じ。
+  2SLSの`overid_statistic`（Sargan）は等分散を仮定するままで、2SLSの推定値で評価する頑健なJは別の機能。
+- **クラスターは`G < l_full`（`Z_full`の列数）を構造的な特異として未定義**にする（`S_e`のランクは`G`以下。`Z_full`は常に過剰識別）。linearmodelsも、クラスター数が足りないと無効な統計量（`InvalidTestStatistic`）を返す（`G=6`・`l_full=7`で確認）。
+  検定する変数が増えるほど`l_full`が増えるので、`fit()`が通るクラスター数でも未定義になりうる。
+- **定義できないときはエラー**: `C_STATISTIC_UNDEFINED`（`ComputationError`。操作変数の共線・初期推定の完全フィット・`S_e`のランク落ち）と、`C_STATISTIC_NOTHING_TO_TEST`（`ValidationError`）。
+  外した後の除外操作変数が内生変数より少ないときは`C_STATISTIC_TOO_MANY_TESTED_INSTRUMENTS`（`ValidationError`。既存の`INSUFFICIENT_INSTRUMENTS`は文面と`hint`が「操作変数を足す」で、検定する操作変数を減らす案内にならない）。`target`の添字の誤りは`INTERNAL_ERROR`（呼び出し側の責務）。
+- `Z_c`が丁度識別なら`J_c`は厳密に0を返す（推定しない）。
+- **定数項なしの`Classical`はlinearmodelsと一致しない**: linearmodelsは`Classical`の`σ̂²`を残差を中心化して作るが、ここでは`fit()`のHansen Jと同じく中心化しない。定数項があれば残差の平均が0で一致する。`Robust`・`Hac`・`Cluster`は定数項なしでも一致する（`robust`・`hac`をテストで固定）。
+- `S`は`n`で割らない生の和、Jも`n`で割らない（`iv/CLAUDE.md`）。重み行列の構築は`gmm/weight.rs`の`moment_covariance`で、`gmm_iterate`と共有する。
+
+検証: 内生性の検定はlinearmodels 7.1の`c_stat`（`1e-14`台で一致するnumpy版を介して、`engine/src/iv/gmm/c_statistic/tests/reference.rs`に値を固定）、
+操作変数の直交性はlinearmodelsに無いので、同じnumpy版の値（`IVGMM`の`weight_matrix`・`estimate_parameters`・`_j_statistic`を部品にした別の計算と`1e-13`で一致を確認）。
+恒等式（`C = J_e − J_c`、丁度識別で`C = J_e`、`J_e`が`GmmEstimator`のHansen Jと一致）と、操作変数・被説明変数のスケール、行の並べ替えへの不変性もテストする。
+
 ## 4. テスト
 
 - **Python主リファレンス**: `linearmodels`（`IV2SLS`＝2SLS、`IVGMM`＝GMM）。

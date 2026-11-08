@@ -203,6 +203,7 @@ use crate::linear::ols::CovType;
 use crate::shared::inference;
 use faer::Mat;
 
+mod c_statistic;
 mod fit;
 mod hansen_j;
 mod iterate;
@@ -211,6 +212,9 @@ mod sandwich;
 mod test_support;
 mod weight;
 
+pub use c_statistic::{
+    CStatistic, CStatisticTarget, compute_c_statistic, weight_type_for_cov_type,
+};
 pub use iterate::GmmType;
 pub use weight::WeightType;
 

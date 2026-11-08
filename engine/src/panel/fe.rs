@@ -27,7 +27,7 @@
 //!   `InsufficientDegreesOfFreedom`で弾く。
 //! - 1-way/2-way/3次元以上（`MultiWay`）は`FeEffects`で切り替える。3次元以上は`FeInput::from_effect_groups`で
 //!   効果の各列のコードを渡し、バランスパネルでも閉形式は使わず交互射影で固定効果を除く（同じ組合せの
-//!   重複する行も許す）。HC2/HC3のレバレッジは3次元以上では未対応（`CommonError::Internal`）。
+//!   重複する行も許す）。HC2/HC3のレバレッジは最大の次元を消して残りの次元の密な行列を解く（`dummy_leverage`）。
 //!
 //! ## within変換
 //!
@@ -271,7 +271,8 @@ impl FeEstimator {
     /// - singletonグループが見つかった場合は`PanelError::SingletonGroup`
     /// - 打ち切り設定が範囲外なら`PanelError::InvalidTol`・`PanelError::InvalidMaxIter`、不均衡な2-wayで
     ///   交互射影が収束しなければ`PanelError::AbsorptionNotConverged`
-    /// - 不均衡な2-wayのHC2/HC3で、水準の少ない方の効果の水準数が上限を超えれば
+    /// - HC2/HC3で密な行列を解く場合（組合せが欠ける2-way、3次元以上）に、最大の次元を除いた水準数の合計が
+    ///   上限を超えれば
     ///   `PanelError::LeverageDimensionTooLarge`
     /// - パネル自由度調整後の残差自由度（`df_resid`）が正にならない場合は
     ///   `PanelError::InsufficientDegreesOfFreedom`

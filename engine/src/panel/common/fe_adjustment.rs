@@ -3,7 +3,6 @@
 use super::dummy_leverage::dummy_leverage;
 use super::error::PanelError;
 use super::validation::covers_every_combination;
-use crate::shared::error::CommonError;
 use crate::shared::group_codes::GroupCodes;
 
 /// 固定効果の実効パラメータ数`neffects`（`fe-spec.md`3.2節）。`n_groups`は`effects`の列ごとの水準数
@@ -25,13 +24,12 @@ pub(crate) fn absorbed_parameters(n_groups: &[usize]) -> usize {
 ///
 /// `levels`は吸収した効果の次元（`effects`の順。個体、2-wayなら時点）。`h_dummy`は、1-wayが`1/T_i`、
 /// 全組合せがそろうバランスの2-wayが`1/T_i + 1/N_t − 1/n`（グループサイズ`T_i`/`N_t`はコードの
-/// `counts()`から引く）。組合せが欠ける不均衡の2-wayは閉形式が無く、水準の少ない方の効果の水準数の
-/// 密な行列を解く（`dummy_leverage`）。3つ以上の次元は未対応。
+/// `counts()`から引く）。組合せが欠ける不均衡の2-wayと3つ以上の次元は閉形式が無く、最大の次元を除いた次元の水準数の合計
+/// （2-wayでは水準の少ない方の効果の水準数）の密な行列を解く（`dummy_leverage`）。
 ///
 /// # Errors
-/// - 不均衡の2-wayで、水準の少ない方の効果の水準数が上限を超えるとき
-///   `PanelError::LeverageDimensionTooLarge`
-/// - 次元が3つ以上のとき`CommonError::Internal`（未対応）
+/// - 密な行列を解く場合（組合せが欠ける2-way、3つ以上の次元）で、最大の次元を除いた次元の水準数の
+///   合計が上限を超えるとき`PanelError::LeverageDimensionTooLarge`
 pub(super) fn leverage_full(
     h_within: &[f64],
     levels: &[&GroupCodes],
@@ -58,15 +56,11 @@ pub(super) fn leverage_full(
                 })
                 .collect())
         }
-        [entity, time] => Ok(dummy_leverage(entity, time)?
+        _ => Ok(dummy_leverage(levels)?
             .into_iter()
             .zip(h_within)
             .map(|(dummy, within)| dummy + within)
             .collect()),
-        _ => Err(CommonError::internal(
-            "the HC2 and HC3 leverage is not available for three or more effects",
-        )
-        .into()),
     }
 }
 
@@ -275,7 +269,7 @@ mod tests {
         let h_within = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7];
 
         let h_full = leverage_full(&h_within, &[&entity, &time], 7).unwrap();
-        let dummy = dummy_leverage(&entity, &time).unwrap();
+        let dummy = dummy_leverage(&[&entity, &time]).unwrap();
 
         for i in 0..7 {
             assert!(

@@ -141,7 +141,8 @@ pub enum PanelError {
         n_periods: usize,
     },
 
-    /// 不均衡な2-wayのHC2/HC3は、水準の少ない方の効果の水準数の2乗の密な行列を解くため、水準数に上限がある。
+    /// HC2/HC3のダミーのレバレッジを密な行列で解く場合（組合せが欠ける2-way、3次元以上）は、最大の次元を除いた
+    /// 次元の水準数の合計の2乗の行列を解くため、その合計に上限がある。
     #[error("{}", self.catalog_message())]
     LeverageDimensionTooLarge { n_levels: usize, max_levels: usize },
 
@@ -613,7 +614,7 @@ mod tests {
                     max_levels: 3000,
                 },
                 ErrorCode::LeverageDimensionTooLarge,
-                "The HC2 and HC3 covariances of an unbalanced two-way model need a dense matrix over the levels of the smaller effect, which has 5000 levels, but at most 3000 are supported.",
+                "The HC2 and HC3 covariances need a dense matrix over the levels of all effects except the largest, which have 5000 levels in total, but at most 3000 are supported.",
             ),
             (
                 PanelError::AbsorptionNotConverged {

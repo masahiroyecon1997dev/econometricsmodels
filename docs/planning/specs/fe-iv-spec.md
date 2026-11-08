@@ -732,6 +732,14 @@ HC2/HC3は3次元以上で`CommonError::Internal`（手順5まで）。`MAX_EFFE
 fixestで固定した係数・標準誤差の照合は手順8（ベンチマーク）で入れる。
 
 
+**進捗（手順5、2026-11-08）**: 実装済み。`dummy_leverage`をK次元に一般化した（最大の次元を消去し、残りの次元の水準を1本に並べた
+`M = W'W − Σ_g c_g c_g'/n_g`を密に作る。ネスト・連結成分によるランク落ちは列ピボット付きQRで独立な列を選んで解く）。上限3000は
+「最大の次元を除いた水準数の合計」。全組合せがそろう2次元は閉形式のまま。`within_transform_multi_way`にも射影前の上限検査を入れた。
+`LEVERAGE_DIMENSION_TOO_LARGE`の文面を一般化（ゴールデン・`error-codes.md`・`validation.md`・`fe-spec`更新）。ランク判定を誤ってレバレッジが
+`[0, 1]`を外れたときは`MATRIX_NEAR_SINGULAR`にする。テスト: SVDによる総当たりとの一致（3・4次元、ネスト（消去する次元・残りの次元の間）、
+重複行、連結成分が複数、タイ・1水準の次元、行数が偏った水準）、LSDVのHC2/HC3との一致、ネストした3つ目の効果が2-wayと一致、上限超過。
+レビュー反映: `v = A c_g`を触った水準だけ計算（計算量`Σ_g d_g²`）、古い記述の更新。見送り: fixestとのHC2/HC3の3-wayクロスチェックは手順8で行う。
+
 ### 9.11 compact用のメモ（#442、手順3のコミット後。2026-11-08）
 
 **状態**: `release/v0.10.0`。手順1〜3はコミット済み（`git log`の`refactor(engine): パネルの索引と入力を効果のK次元で持つ形にする`・`feat(engine): FEの2-wayで同じ組合せの重複する行を受け付ける`・
@@ -752,7 +760,7 @@ fixestで固定した係数・標準誤差の照合は手順8（ベンチマー�
   engine 1345件・engine_pybind 240件・pytest `tests/panel`＋`tests/cross_method` 8847件が通る（全体は`pytest tests --check-error-coverage`で約7.5分、11912件）。
 
 **次の作業（順序を守る）**
-1. **手順5: K次元のHC2/HC3のレバレッジ**（`leverage_full`の`_ =>`腕の置き換え）。方針: 最大の次元を消去し、残りの次元の水準数の合計を密に解く
+1. **（完了）手順5: K次元のHC2/HC3のレバレッジ**（`leverage_full`の`_ =>`腕の置き換え）。方針: 最大の次元を消去し、残りの次元の水準数の合計を密に解く
    （2-wayの`dummy_leverage`＝「個体を消去して時点を密に解く」の一般化。`M = diag(N_d) − Σ_e c_e c_e'/n_e`をK−1次元の連結ブロックに）。上限は`MAX_DENSE_LEVELS`=3000を流用
    （水準数の合計が上限を超えたら`LEVERAGE_DIMENSION_TOO_LARGE`）。`check_leverage_dimension`の呼び出し（`within.rs`、重い射影の前）もK次元に。
    個体内の行数が多い重複入力で遅くならないよう、`dummy_leverage`の`Tally`（出現回数の集約）の考え方を使う。テストはLSDVのhc2/hc3（`unbalanced.rs`・`multi_way.rs`の`lsdv`に追加）と

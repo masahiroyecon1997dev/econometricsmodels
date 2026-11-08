@@ -150,6 +150,9 @@ struct Lsdv {
     residuals: Vec<f64>,
     classical_cov: Mat<f64>,
     hc1_cov: Mat<f64>,
+    /// ダミーを含む設計行列のレバレッジ`h_ii`で重みを付けた、HC2・HC3の共分散。
+    hc2_cov: Mat<f64>,
+    hc3_cov: Mat<f64>,
     rank: usize,
 }
 
@@ -174,12 +177,34 @@ fn lsdv(panel: &Panel3, levels: &[&GroupCodes]) -> Lsdv {
     let sandwich = &bread * &meat * &bread;
     let sigma2 = ssr / (n - rank) as f64;
     let hc1_scale = n as f64 / (n - rank) as f64;
+    let leverage: Vec<f64> = (0..n)
+        .map(|r| {
+            let row = Mat::from_fn(rank, 1, |c, _| *z.get(r, c));
+            (row.transpose() * &bread * &row)[(0, 0)]
+        })
+        .collect();
+    let weighted = |power: i32| {
+        let mut meat = Mat::<f64>::zeros(rank, rank);
+        for r in 0..n {
+            let weight = residuals[r] * residuals[r] / (1.0 - leverage[r]).powi(power);
+            for a in 0..rank {
+                for b in 0..rank {
+                    *meat.get_mut(a, b) += weight * *z.get(r, a) * *z.get(r, b);
+                }
+            }
+        }
+        let cov = &bread * &meat * &bread;
+        Mat::from_fn(k, k, |a, b| *cov.get(a, b))
+    };
+    let (hc2_cov, hc3_cov) = (weighted(1), weighted(2));
     Lsdv {
         params: (0..k).map(|j| *fit.params.get(j, 0)).collect(),
         effects: (k..rank).map(|j| *fit.params.get(j, 0)).collect(),
         residuals,
         classical_cov: Mat::from_fn(k, k, |a, b| sigma2 * *bread.get(a, b)),
         hc1_cov: Mat::from_fn(k, k, |a, b| hc1_scale * *sandwich.get(a, b)),
+        hc2_cov,
+        hc3_cov,
         rank,
     }
 }
@@ -352,14 +377,102 @@ fn singletons_in_any_effect_are_reported_with_the_chain() {
 }
 
 #[test]
-fn the_leverage_based_covariances_are_not_available_yet() {
-    let data = panel3(15, 6, 3, 0.8, 17, false);
-    for cov_type in [FeCovType::Hc2, FeCovType::Hc3] {
-        assert!(matches!(
-            data.fit(cov_type).unwrap_err(),
-            PanelError::Common(crate::shared::error::CommonError::Internal { .. })
-        ));
+fn the_leverage_based_covariances_match_the_dummy_variable_regression() {
+    // HC2・HC3は、ダミーを含む設計行列のレバレッジ（ダミーのレバレッジ + within変換後のレバレッジ）が要る。
+    for (seed, keep) in [(17, 0.8), (18, 0.45)] {
+        let data = panel3(18, 7, 3, keep, seed, false);
+        let input = data.input();
+        let oracle = lsdv(&data, &levels_of(&input));
+        for (cov_type, expected) in [
+            (FeCovType::Hc2, &oracle.hc2_cov),
+            (FeCovType::Hc3, &oracle.hc3_cov),
+        ] {
+            let fe = data.fit(cov_type.clone()).unwrap();
+            for j in 0..2 {
+                for k in 0..2 {
+                    close(
+                        *fe.cov_params().get(j, k),
+                        *expected.get(j, k),
+                        1e-6,
+                        &format!("{cov_type:?} covariance"),
+                    );
+                }
+            }
+        }
     }
+}
+
+#[test]
+fn the_leverage_based_covariances_of_a_nested_third_effect_equal_the_two_way_ones() {
+    // 第3の効果が個体に入れ子なら、列空間は個体と時点のダミーのものと同じで、HC2・HC3も変わらない。
+    let data = panel3(16, 7, 4, 0.7, 19, true);
+    let two_way = data.fit_two_way();
+    for cov_type in [FeCovType::Hc2, FeCovType::Hc3] {
+        let nested = data.fit(cov_type.clone()).unwrap();
+        let reference = {
+            let input = FeInput::from_effect_groups(
+                &data.y,
+                &data.x,
+                vec!["x1".to_string(), "x2".to_string()],
+                data.groups[..2]
+                    .iter()
+                    .map(|labels| GroupCodes::from_labels(labels))
+                    .collect(),
+                "y".into(),
+            )
+            .unwrap();
+            FeEstimator::fit(input, FeEffects::TwoWay, cov_type.clone(), 0.95).unwrap()
+        };
+        for j in 0..2 {
+            close(
+                *nested.params().get(j, 0),
+                *two_way.params().get(j, 0),
+                1e-8,
+                "params",
+            );
+            for k in 0..2 {
+                close(
+                    *nested.cov_params().get(j, k),
+                    *reference.cov_params().get(j, k),
+                    1e-7,
+                    &format!("{cov_type:?} covariance"),
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn the_leverage_based_covariances_refuse_a_dense_matrix_above_the_limit() {
+    // 最大の次元（2500）を除いた水準数の合計（2000 + 1500）が上限（3000）を超える。各水準は2行以上に現れる。
+    let rows = 5000;
+    let make = |label: &str, modulus: usize| -> Vec<String> {
+        (0..rows)
+            .map(|r| format!("{label}{:05}", r % modulus))
+            .collect()
+    };
+    let y: Vec<f64> = (0..rows).map(|r| ((r * 7919) % 101) as f64).collect();
+    let x: Vec<f64> = (0..rows).map(|r| ((r * 104729) % 97) as f64).collect();
+    let input = FeInput::from_effect_groups(
+        &y,
+        &[x],
+        vec!["x1".to_string()],
+        vec![
+            GroupCodes::from_labels(&make("a", 2500)),
+            GroupCodes::from_labels(&make("b", 2000)),
+            GroupCodes::from_labels(&make("c", 1500)),
+        ],
+        "y".into(),
+    )
+    .unwrap();
+    let err = FeEstimator::fit(input, FeEffects::MultiWay, FeCovType::Hc3, 0.95).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            PanelError::LeverageDimensionTooLarge { n_levels: 3500, .. }
+        ),
+        "{err:?}"
+    );
 }
 
 #[test]

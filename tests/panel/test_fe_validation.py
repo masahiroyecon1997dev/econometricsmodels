@@ -509,8 +509,9 @@ def test_absorption_max_iter_must_be_in_range(fe_dataset, max_iter):
 
 
 def test_leverage_covariance_of_an_unbalanced_two_way_model_has_a_size_limit():
-    """組合せが欠ける2-wayのHC2/HC3は、水準の少ない方の効果の水準数の2乗の
-    密な行列を解くので、水準数に上限（3000）がある。"""
+    """組合せが欠ける2-wayのHC2/HC3は、最大の次元を除いた水準数（2-wayでは
+    水準の少ない方の効果の水準数）の2乗の密な行列を解くので、水準数に上限
+    （3000）がある。"""
     n = 3001
     entity = [i for i in range(n) for _ in range(3)]
     time = [(i + k) % n for i in range(n) for k in range(3)]

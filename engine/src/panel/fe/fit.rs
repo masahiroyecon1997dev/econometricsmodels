@@ -83,6 +83,9 @@ pub(super) fn fit_fe(
         return Err(CommonError::OutcomeConstant.into());
     }
 
+    // HC2/HC3は固定効果ダミーのレバレッジが要る。組合せが欠ける2-wayと3次元以上は、最大の次元を除いた
+    // 次元の水準数の合計の密な行列を解く。
+    let leverage_needed = matches!(cov_type, FeCovType::Hc2 | FeCovType::Hc3);
     let mut absorbed = None;
     let (y, x, noise) = match effects {
         FeEffects::OneWay => {
@@ -90,14 +93,12 @@ pub(super) fn fit_fe(
             (y, x, 0.0)
         }
         FeEffects::TwoWay => {
-            // 組合せが欠ける2-wayのHC2/HC3は、水準の少ない方の効果の密な行列を解く。
-            let leverage_needed = matches!(cov_type, FeCovType::Hc2 | FeCovType::Hc3);
             let within = within_transform_two_way_with(&input, absorption, leverage_needed)?;
             absorbed = within.absorbed;
             (within.y, within.x, within.noise)
         }
         FeEffects::MultiWay => {
-            let within = within_transform_multi_way(&input, absorption)?;
+            let within = within_transform_multi_way(&input, absorption, leverage_needed)?;
             absorbed = within.absorbed;
             (within.y, within.x, within.noise)
         }

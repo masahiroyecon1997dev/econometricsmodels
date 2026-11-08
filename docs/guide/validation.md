@@ -253,7 +253,7 @@ These are in addition to the situations above.
 
 - A group (a level of a column of `effects`) with a single observation: a singleton entity or, in a two-way model, a singleton time period (`SINGLETON_GROUP`). Singleton groups are never dropped automatically; the error gives `n_dropped_rows`, the number of rows that removing singleton groups repeatedly would drop (in a two-way model, dropping one can leave another group with a single row).
 - `tol` not a positive finite number, or `max_iter` outside 1 to 10,000.
-- `cov_type="hc2"` or `"hc3"` in a two-way model on an unbalanced panel when the smaller of the two effects has more than 3,000 levels (`LEVERAGE_DIMENSION_TOO_LARGE`).
+- `cov_type="hc2"` or `"hc3"` when the effects do not form a balanced two-way grid (an unbalanced two-way panel, or three or more effects) and the effects other than the largest have more than 3,000 levels in total (`LEVERAGE_DIMENSION_TOO_LARGE`).
 - A regressor with the same value in every row (`REGRESSOR_CONSTANT`), or with no within-variation (constant over time within every entity, `REGRESSOR_NO_WITHIN_VARIATION`).
 - The outcome has the same value in every row (`OUTCOME_CONSTANT`), or has no variation left after the fixed effects are removed (constant within every entity, or in a two-way model fully explained by the entity and time effects, `OUTCOME_CONSTANT_WITHIN_ENTITY`).
 - Too few degrees of freedom.

@@ -140,9 +140,13 @@ polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）�
   - 連結成分（水準を頂点、行を辺とするグラフ）が複数あっても傾きは識別される。自由度は成分の数によらず
     `k + N + T − 1`（fixestとlinearmodelsの既定と同じ。ダミー行列のランクは成分の数だけ小さい）。
   - HC2/HC3のレバレッジは、ダミーだけの回帰のレバレッジ（`dummy_leverage`）とwithin変換後のレバレッジの和。
-    ダミーのレバレッジは、水準の少ない方の効果の水準数`L`の密な行列`M + P_null`（`M = diag(N_t) − Σ_e c_e c_e'/n_e`、
-    `P_null`は連結成分の指示ベクトルの射影）を解いて求める（`O(nL + L³)`、`L ≤ 3000`、超えれば
-    `LEVERAGE_DIMENSION_TOO_LARGE`）。
+    ダミーのレバレッジは、最大の次元を消去し、残りの次元の水準を並べた`L`本の列（`L`は最大の次元を除いた水準数の合計）の
+    密な行列`M = W'W − Σ_g c_g c_g'/n_g`（`g`は消去した次元のグループ、`c_g`はグループ内の水準の出現回数）を解いて求める
+    （`O(n(K−1)² + Σ_g d_g² + L³)`、`d_g`はグループ内の異なる水準の数、`L ≤ 3000`、超えれば`LEVERAGE_DIMENSION_TOO_LARGE`。2次元ではこれが水準の少ない方の効果の水準数）。
+    `M`は連結成分と次元間のネスト（3次元以上では、ある次元のダミーが別の次元のダミーの和になる）でランク落ちするため、
+    列ピボット付きQRでランクを見て独立な列だけを解く（打ち切りは`L × ε × max diag(W'W)`）。判定を誤って
+    レバレッジが`[0, 1]`を外れたときは、黙って返さず`MATRIX_NEAR_SINGULAR`にする。全組合せがそろう2次元は
+    閉形式で、この行列を作らない。
   - `fixed_effects()`は`fit`が保存した列ごとの効果から`effects(y) − Σβ̂_j effects(x_j)`を組み立て、連結成分ごとに
     時間順で最初の時点を0にする（個体の効果にそのぶんを足す）。
 
@@ -336,7 +340,7 @@ demeanしたR²」を3種とも定義すると誤る）:
 | `SingletonGroup` | `SINGLETON_GROUP`（params: `argument`=`"effects"`・`column`・`group`・`n_dropped_rows`。`column`は`effects`の該当要素の列名で、エンジンは`with_effect_names`で受け取り計算には使わない） | `ValidationError` |
 | `UnbalancedPanelForTwoWay` | `PANEL_NOT_BALANCED_FOR_TWO_WAY`（2-way REだけ） | `ValidationError` |
 | `InvalidTol` / `InvalidMaxIter` | `TOLERANCE_NOT_POSITIVE_FINITE` / `MAX_ITER_OUT_OF_RANGE` | `ValidationError` |
-| `LeverageDimensionTooLarge` | `LEVERAGE_DIMENSION_TOO_LARGE`（不均衡な2-wayのHC2/HC3） | `ValidationError` |
+| `LeverageDimensionTooLarge` | `LEVERAGE_DIMENSION_TOO_LARGE`（組合せが欠ける2-wayと3次元以上のHC2/HC3） | `ValidationError` |
 | `AbsorptionNotConverged` | `ABSORPTION_NOT_CONVERGED` | `ComputationError` |
 | `RegressorConstant` | `REGRESSOR_CONSTANT` | `ValidationError` |
 | `ZeroVarianceAfterDemeaning` | `REGRESSOR_NO_WITHIN_VARIATION` | `ValidationError` |

@@ -1988,9 +1988,9 @@ pub static CATALOG: &[ErrorSpec] = &[
                 in_text: true,
             },
         ],
-        message: r#"The HC2 and HC3 covariances of an unbalanced two-way model need a dense matrix over the levels of the smaller effect, which has {n_levels} levels, but at most {max_levels} are supported."#,
+        message: r#"The HC2 and HC3 covariances need a dense matrix over the levels of all effects except the largest, which have {n_levels} levels in total, but at most {max_levels} are supported."#,
         hint: Some(
-            r#"Use another cov_type, or reduce the number of levels of the smaller effect."#,
+            r#"Use another cov_type, or reduce the number of levels of the effects other than the largest."#,
         ),
         stage_allowed: false,
     },

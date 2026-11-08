@@ -63,7 +63,7 @@ const ABSORPTION_NOISE_SAFETY: f64 = 10.0;
 ///
 /// # Errors
 /// - `input.time_codes()`が`None`の場合は`PanelError::TwoWayRequiresTime`
-/// - `leverage_needed`（HC2/HC3）で、組合せが欠け、水準の少ない方の効果の水準数が上限を超えるなら
+/// - `leverage_needed`（HC2/HC3）で、組合せが欠け、水準の少ない方の効果の水準数（最大の次元を除いた合計）が上限を超えるなら
 ///   `PanelError::LeverageDimensionTooLarge`
 /// - 交互射影が上限回数までに収束しなければ`PanelError::AbsorptionNotConverged`
 pub(crate) fn within_transform_two_way_with(
@@ -75,7 +75,7 @@ pub(crate) fn within_transform_two_way_with(
     let entity = input.entity_codes();
     if leverage_needed {
         // 組合せが欠けるときの密な行列の大きさは入力だけで決まるので、重い射影の前に確かめる。
-        check_leverage_dimension(entity, time_codes)?;
+        check_leverage_dimension(&[entity, time_codes])?;
     }
 
     if covers_every_combination(entity, time_codes) {
@@ -165,10 +165,13 @@ pub(crate) fn within_transform_two_way(
 ///
 /// # Errors
 /// - 入力の次元が3つ未満のとき`CommonError::Internal`（呼び出し側の実装誤り）
+/// - `leverage_needed`（HC2/HC3）で、最大の次元を除いた次元の水準数の合計が上限を超えるなら
+///   `PanelError::LeverageDimensionTooLarge`
 /// - 交互射影が上限回数までに収束しなければ`PanelError::AbsorptionNotConverged`
 pub(crate) fn within_transform_multi_way(
     input: &FeInput,
     absorption: &FeAbsorption,
+    leverage_needed: bool,
 ) -> Result<WithinOutput, PanelError> {
     if input.n_effects() < 3 {
         return Err(
@@ -176,6 +179,10 @@ pub(crate) fn within_transform_multi_way(
         );
     }
     let levels: Vec<&GroupCodes> = input.effect_codes().iter().collect();
+    if leverage_needed {
+        // 密な行列の大きさは入力だけで決まるので、重い射影の前に確かめる。
+        check_leverage_dimension(&levels)?;
+    }
     project_out_effects(input, &levels, absorption)
 }
 

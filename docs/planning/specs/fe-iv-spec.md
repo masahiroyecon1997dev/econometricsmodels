@@ -84,7 +84,7 @@ fixestがIVでHC2/HC3を提供するか。fixestはIVでHC2/HC3を提供しな�
 ### 1.4 診断（後続Issueで実装、ここでは取り込み方だけ決める）
 
 - 弱操作変数（#373）: 第一段階の部分F（`SSR_u`・`SSR_r`は変換後の列、分母自由度は`n - l - neffects`）、CD/KP/MOP。
-- Sargan（#374）: 構造残差を`Z̃ = [x̃_exog, z̃]`に回帰した`n·R²`相当。`σ̂² = e'e/n`。自由度`len(instruments) - len(x_endog)`。
+- Sargan（#374）: 構造残差を`Z̃ = [x̃_exog, z̃]`に回帰した`n·R²`相当。`σ̂² = e'e/(n − n_absorbed)`（9.17で`e'e/n`から変更）。自由度`len(instruments) - len(x_endog)`。
 - Wu-Hausman（#375）: `ỹ ~ [x̃_exog, x̃_endog, v̂]`の補助FE回帰（`v̂`は第一段階の残差）、`v̂`列のWald検定。
 
 ### 1.5 エラー
@@ -129,7 +129,7 @@ FEIV(data, y, x_exog, x_endog, instruments, effects, *, options: FEIVOptions | N
 5. 変換後に分散ゼロになった`instruments`列のエラー（既存の`ZeroVarianceAfterDemeaning`で列名を示す案）。
    5.1の2分類に合わせて、役割（`x_exog`・`x_endog`・`instruments`）を問わず同じコードで返す。
 6. Sarganの`σ̂²`の分母。fixestの`fitstat(m, "sargan")`は`e'e/n`（`n`は観測数、吸収した効果の数は引かない）で、
-   手計算と完全に一致する（N=100・T=6で`e'e/(n-N)`だと5.617が4.681になる）。#374は参照と揃えて`e'e/n`にする。
+   手計算と完全に一致する（N=100・T=6で`e'e/(n-N)`だと5.617が4.681になる）。**9.17で変更**: #374は`e'e/(n − n_absorbed)`にする（`e'e/n`は小Tで過剰に棄却するため）。
    ただし within変換後の誤差は`n-N`相当の分散しか持たないため、小Tでは漸近論の上で過大になりうる。
    `docs/methods/`に注記する（実装は参照実装に合わせ、差は文書で説明する）。
 7. FE-GMMの`robust`重みと`Hansen J`。within変換した誤差は個体内で相関するため、非クラスターの
@@ -356,7 +356,7 @@ FEIVの前に、FE・IVの拡張をどこまで済ませるかを整理した。
    classical以外では一致しない。参照はRスクリプトで、fixestで`v̂`を足した補助FE回帰を同じ`vcov`で回し、
    `v̂`のWaldを取る。分母自由度は補助回帰のもの（`n - k - k_endog - neffects`、IVの`wu_hausman_p_value`の教訓）。
    classicalのときだけ`fitstat(m, "wh")`と直接比べる。
-3. **Sarganの`σ̂²`の分母（決定）**: `e'e/n`（fixestの`sargan`と一致を実測）。小Tで過大になる旨は
+3. **Sarganの`σ̂²`の分母（決定。9.17で変更）**: `e'e/(n − n_absorbed)`（fixestの`sargan`は`e'e/n`で、小Tで過剰に棄却する）。小Tで過大になる旨は
    `docs/methods/`に注記する。
 4. **弱操作変数F（部分F）**: IVと同じく、`cov_type`によらず等分散前提で、分母自由度は`n - l - n_absorbed`。
    FEの既定`cov_type`がclusterでも部分Fはclassicalであることを`docs/methods/`に書く（ロバスト版はKP/MOP）。
@@ -912,3 +912,30 @@ Stock-Yogoの表は実装の値がNBER TWP 284のTable 1（バイアス）・Tab
 **主な修正**: `gmm_type="one_step"`は`cov_type`の系統の重み（methods/usage/api/inference-conventions/CHANGELOG/docstringを統一）、methodsの記号（`m`の衝突→`k_{2B}`・`m_B`・`\mathcal{T}`）、C検定の条件付き性、Wu-Hausmanの誘導文、`verification*.md`（直交性の参照は`IVGMM`の部品で組み直した実装・Rクロスチェックの独立性と範囲・許容誤差の行・`### IV`見出しの統合）、`inference-conventions.md`にC統計量の節を新設、validationのコード補足。
 **Web確認（ユーザー許可済み）**: Kinal(1980)の本文は有料で読めず、二次資料（Phillips & Liu-Evans）で「2SLSのモーメントは過剰識別の次数まで存在」→操作変数1本は平均なし・2本は平均あり分散なし。docsは「1本は有限の平均なし、2本は有限の分散なし」に直し、Kinal(1980)を引用に追加。MOP 2013・Stock-Yogo 2005の該当箇所（K≤2の扱い）は確認できなかったので、MOPが「Nagarバイアスで進める」という記述は削除した。Hayashi 2000は3.6節がp.217から（部分集合の検定はp.218、別の部分集合検定がp.232から）まで確認、終了ページは未確認（「pp. 217-221 と p. 232 以降」に変更）。EHS 1988・BSS 2003の書誌は確認済み（EHSの題は`time-series`とハイフン）。
 **未了**: 次は(4) `n_absorbed`の自由度（lfe/fixest、#373）と#374（FEのSargan）の設計確認 → FE-2SLS（#370〜#380）。`c372e9a7`とこのコミットは未push。
+
+### 9.17 `n_absorbed`の数え方・FEのSargan・臨界値の小Tでの挙動（2026-11-08）
+
+**状態**: `release/v0.10.0`。未push: `c372e9a7`（C統計量のRクロスチェック）・`a65367d5`（公開docsの校閲の修正）とこの節のコミット。実装は変えていない（調査と実測のみ）。実測スクリプトは作業用ディレクトリのみで、リポジトリには置いていない。
+
+**決定（ユーザー承認）**
+1. **`n_absorbed`はfixest流にそろえる**: 数え方は既存の`absorbed_parameters`（水準数の合計 − (効果の数 − 1)。連結成分の数やネストによるランク落ちは引かない）。小標本補正のKは既存の`fe_adjustment`のfixest`K.fixef="nonnested"`の規則を再利用する。`n_absorbed`は`cov_type`で変わるので、共有関数のシグネチャ（単一の数）は変えず、FEIV側が診断ごとに渡す数を決める: 古典の部分F・CD・HC系は全部の効果（`neffects`）、clusterは入れ子の次元を除いたK、DKは全部の効果（fixestの`K.fixef="full"`、`fe-spec.md`の記述どおり）。ドキュメントには、連結成分が複数あるパネルでlfe・ivDiagと1ずれる（lfeは階数を正確に数え、fixestと本実装は1つ多く数える）ことと、入れ子の第3の効果では3者ともランクより多く数えることを書く。
+2. **Sargan（#374）の`σ̂²`は`e'e/(n − n_absorbed)`にする**（9.14以前の決定`e'e/n`を変更）。IV本体は`n_absorbed = 0`なので同じ規則で`e'e/n`になる。自由度は`len(instruments) − len(x_endog)`で、丁度識別は`None`（#374の本文どおり）。参照にできるRのパッケージは無い（fixestの`sargan`は`e'e/n`）。手計算の参照（行列版`sargan_test`の分母を引数にする）と、帰無仮説下のサイズを確かめるテストで固める。ドキュメントにはfixestとの差とその理由を書く。
+3. **Stock-Yogoの臨界値は、吸収自由度を統計量の自由度に反映すればそのまま使える**（下の実測）。
+
+**実測（再現に必要な条件）**
+- 第一段階の部分F（x_exog 1列・操作変数2本・内生変数1個、1-way、N=100・T=6、l=3）: fixestの`ivf1`・lfe・ivDiagの`F.standard`・手計算（`n_absorbed = N`）が84.235（df2=497）で完全一致。`n_absorbed = 0`だと101.18。fixestの`cd`は101.01（`(n − n_endo − n_inst − 1)`でFEも外生変数も引かない）で、`kpr`はFE付きでは別の値になり、どちらも参照にならない。
+- 古典の部分F（2-way）: 連結ならfixestとlfeが一致。連結成分が2つのとき、fixestは13.717（df2=112）、lfeは13.840（df2=113）。3-way（効果が入れ子）でfixestとlfeはどちらもKを69に数え、真の階数は65。
+- HC1: fixest・lfe・ivDiagが一致し、`K = l + n_absorbed`（F=81.292）。
+- cluster: 効果がクラスターに入れ子なら3者が一致し、`K = l + 1`。入れ子でない時点クラスターは`K = l + N`で一致。2-way以上ではfixestとlfeが割れる（個体クラスターで58.51と59.34、時点クラスターで103.46と124.02）。fixestは入れ子の次元を除いて数え、lfeは入れ子の効果をほぼ引かない。本実装はfixest側（FE本体と同じ）。
+- **Sargan（帰無仮説下、N=100、3000回、名目5%、df=1）**: 棄却率は`e'e/n`でT=3が10.5%、T=6が7.3%、T=20が5.2%。`e'e/(n−N)`は4.8%・5.1%・4.7%。within残差の二乗和の期待値が`σ²(n − N)`なので、`n`で割ると統計量が`T/(T − 1)`倍になる。
+- **臨界値の小T（K2 = 3、内生変数1個、Stock-Yogoのサイズ基準、ρ=0.99、2500回）**: 非心度λを臨界値で`qchisq(0.95, K, ncp = λ)/K`が一致するように置き（10%基準でλ=40.9、20%基準でλ=12.1）、同じλの横断面IV（n=600）とwithin変換（`n_eff = N(T − 1)`が約600のT=2・3・6・20、T=20はN=32）を比べた。部分F（df2 = n − l − N）が臨界値を超える確率は横断面が5.7%（10%基準）・4.9%（20%基準）、withinが5.7〜6.0%・4.7〜5.0%でT=2〜20に依存しない。Waldのサイズ（名目5%）は横断面9.4%・18.6%に対しwithinが10.0〜10.5%・18.2〜19.6%。
+  - 吸収自由度を引かない（`n_absorbed = 0`）Fを使うと、10%基準で臨界値を超える確率がT=2で77.5%、T=3で45.6%、T=6で19.2%、T=20で9.2%と膨らむ。**統計量に`n_absorbed`を反映することが条件**。
+  - 検証した範囲: 内生変数1個、等分散・正規、K2=3、`σ̂² = e'e/(n − N)`のz検定。KP（頑健）・内生変数が2個以上・小さいNは検証していない。
+
+**保留（ユーザー未決。実装時に確認）**
+- 参照の選び方（案）: 内生変数1個の古典・HC1・1-wayクラスターはivDiagとfixestの`ivf1`、2個以上のCD・KPはダミー列を入れたlinearmodels（小さいN、FWL）、入れ子のクラスターと連結成分が複数あるパネルはfixest・手計算。
+- `n_absorbed > 0`のHC2/HC3のKP・MOPは今は`None`。FE-2SLSで`hc2`/`hc3`を許すときの診断の扱い（`None`のままか、ダミー込みのレバレッジを計算するか）。
+- Sarganは等分散前提で`cov_type`に依らない。頑健な過剰識別検定（#636、2SLSのHansen J）にFE-2SLSを含めるか。
+- FE-GMMのHansen J（within変換後の誤差は個体内で相関する。3章7のとおり#381で確認）。
+
+**次**: FE-2SLSの実装（#370〜#372、#374、#375 → #373 → #376〜#380）。#374は`sargan_test`を`σ̂²`の分母つきで使い、#373は#363〜#365の後。

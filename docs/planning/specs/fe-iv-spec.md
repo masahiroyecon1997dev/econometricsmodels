@@ -761,6 +761,18 @@ fixestで固定した係数・標準誤差の照合は手順8（ベンチマー�
 ドキュメント: `verification.md`・`verification-details.md`・`inference-conventions.md`・`methods/fe.md`（Kの差）・`fe-spec.md`（テスト節）。
 **見送り（レビュー指摘）**: 3次元の実データ（`wooldridge`キーは空）、悪条件・高次元k・クラスター数の境界（G=q+1）、`absorption_tol`の検証、`fe_multi_way_true_beta.json`を使うテスト。
 
+**進捗（手順9、2026-11-08）**: 実装済み（コミット前）。公開ページ: `usage/fe.md`（新節「Three or more effects」、列順の節）・`api/fe.md`・`methods/fe.md`（一般形のモデル・`df_model = k + ΣG − (D−1)`・
+交互射影・HC2/HC3のレバレッジと3000上限・クラスターKとfixestの差・`fixed_effects()`の基準化）・`guide/{accepted-data,api-conventions,validation,verification,verification-details,inference-conventions}.md`・
+`CHANGELOG.md`・`docs/spec/fe-spec.md`・docstring（`fe.py`、`fe.rs`、`lib.rs`）。`/review-docs`を実施（校正2＋校閲2）し、must fix 3件・should fix 全件・一部のnice to haveを反映
+（拒否条件の3列対応、検証表の実測値と尺度、fixestの`fixef.tol`が参照スクリプトの設定であること、between R²が列順に依存すること、2クラスター退化は「少なくとも1列」で成立、など）。
+エラーカタログの2文面も3列対応に修正（`INSUFFICIENT_DEGREES_OF_FREEDOM`・`OUTCOME_CONSTANT_WITHIN_ENTITY`。ゴールデンと`error-codes.md`を再生成）。
+Web確認（ユーザー許可済み）: `xtscc`はHoechle (2007, Stata Journal 7(3))のDriscoll-Kraay実装（確認済み）。fixestの`ssc()`の`fixef.K="nested"`の定義と`G/(G-1)`・`(n-1)/(n-K)`が別の項であること
+（公式ページで確認）。reghdfeは「クラスターにネストした固定効果を自由度から除く」（`df_a_nested`）が公式ヘルプにあるが、補正式`G/(G-1)·(n-1)/(n-K)`は読めたページに無く、xtregの補正式は
+公式ドキュメントを取得できなかった。そのため`inference-conventions.md`の「fixest・xtreg・reghdfeの利用者が期待する」を、fixestの既定`ssc()`だけを述べる文に直した。
+`pytest tests --check-error-coverage --check-cov-coverage`が12107件、engine 1358件・engine_pybind 241件が通る。
+**未着手**: 手順10（性能比較に3-wayを足す）。見送ったnice to have: `fe.rs`の`///`の折り返し、`verification.md`の表の行の置き換え（主リファレンスと独立クロスチェックの分離）、
+cluster表の2行の統合、`accepted-data.md`の見出し分割。
+
 ### 9.11 compact用のメモ（#442、手順3のコミット後。2026-11-08）
 
 **状態**: `release/v0.10.0`。手順1〜3はコミット済み（`git log`の`refactor(engine): パネルの索引と入力を効果のK次元で持つ形にする`・`feat(engine): FEの2-wayで同じ組合せの重複する行を受け付ける`・
@@ -794,7 +806,7 @@ fixestで固定した係数・標準誤差の照合は手順8（ベンチマー�
 3. **（実装済み・コミット前）手順8: ベンチマーク**: 3次元目のDGP（バランス3-way・不均衡・3つ目が1つ目にネスト・疎・連結成分が複数・重複行）。主はfixest（`fixef.tol=1e-11`、`| a + b + c`）。
    小標本はLSDVをオラクル。linearmodelsの`AbsorbingLS`が複数の吸収を扱えるかを先に実測し、使えなければ単一リファレンスの例外（`verification-details.md`）。
    fixestの`fixef`との比較は和`α+γ+δ`で。fixestで固定した係数・標準誤差の照合（`ssc(fixef.K="nested")`とクラスターKの一致を含む）。
-4. **手順9: ドキュメント**: fe-spec（§5の「不均衡2-wayは未対応」の記述が古い）・panel-common（`effects`の上限、`n_groups`、`fixed_effects()`の形）・usage/api/methods/fe・
+4. **（実装済み・コミット前）手順9: ドキュメント**: fe-spec（§5の「不均衡2-wayは未対応」の記述が古い）・panel-common（`effects`の上限、`n_groups`、`fixed_effects()`の形）・usage/api/methods/fe・
    guide（accepted-data・api-conventions・validation・verification）・CHANGELOG・各`panel/CLAUDE.md`。公開ページを変えたら`/review-docs`。
 5. **手順10**: 性能比較の3-way追加（`performance/compare_fe.py`。#634のハーネス拡張と合わせるか要確認）。
 

@@ -78,8 +78,8 @@ use crate::shared::option_values::{
 /// - Standard errors: `cov_type`; with `"cluster"` also `cluster`; with
 ///   `"dk"` also `dk_time` (required) and `dk_bandwidth`.
 /// - Confidence intervals: `confidence_level`.
-/// - Removing the fixed effects of an unbalanced two-way model: `tol`,
-///   `max_iter`.
+/// - Removing the fixed effects of an unbalanced two-way model or of a model with
+///   three or more effects: `tol`, `max_iter`.
 // 各フィールドの意味・既定値の根拠は`docs/spec/panel-common.md`。
 // module/from_py_objectの理由は`OLSOptions`と同じ（`engine_pybind/src/linear/ols/options.rs`参照）。
 #[pyclass(from_py_object, module = "econometricsmodels._lib")]
@@ -103,7 +103,7 @@ pub struct FEOptions {
 
     /// Column name that defines the time periods of the Driscoll-Kraay HAC, independent
     /// of `effects` (`effects` defines the fixed-effects structure, `dk_time` the HAC
-    /// periods). Required when `cov_type="dk"`, in one-way and two-way models alike:
+    /// periods). Required when `cov_type="dk"`, whatever the number of columns in `effects`:
     /// leaving it unset raises `ValidationError`, and the columns of `effects` are not
     /// used instead. With two-way effects the HAC may use a different time granularity
     /// from the fixed effects. It may not be the same column as `y` or the first column
@@ -123,8 +123,9 @@ pub struct FEOptions {
     pub dk_bandwidth: Option<i64>,
 
     /// Convergence tolerance of the alternating projections that remove the fixed
-    /// effects of a two-way model on an **unbalanced** panel (a balanced panel and a
-    /// one-way model are computed in closed form, so they ignore it). A pass stops
+    /// effects of a two-way model on an **unbalanced** panel, or of a model with three or
+    /// more effects (a balanced two-way panel and a one-way model are computed in closed
+    /// form, so they ignore it). A pass stops
     /// when the largest group mean it subtracts is at most `tol` times the size of the
     /// column, so the tolerance is relative to the within-group variation. Must be a
     /// positive finite number. Defaults to 1e-12. A loose `tol` also coarsens the
@@ -133,8 +134,8 @@ pub struct FEOptions {
     pub tol: f64,
 
     /// Maximum number of passes of the alternating projections (see `tol`), from 1 to
-    /// 10000. Defaults to 10000. A panel whose entities and periods are only thinly
-    /// connected needs many passes; if the limit is reached, `ComputationError` is
+    /// 10000. Defaults to 10000. A panel whose groups are only thinly connected needs
+    /// many passes; if the limit is reached, `ComputationError` is
     /// raised.
     #[pyo3(get)]
     pub max_iter: i64,
@@ -456,19 +457,18 @@ impl FEResult {
 
     /// Number of groups (unique values) of each column of `effects`, as a `dict[str, int]`
     /// keyed by column name, in the order the columns were given. One entry for a one-way
-    /// model, two for a two-way model.
+    /// model, two for a two-way model, and so on.
     #[getter]
     fn n_groups<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         groups_dict(py, &self.effects, &self.group_counts)
     }
 
     /// The fixed effects themselves (`α_i` for the first column of `effects`, `γ_t` for the
-    /// second), recovered post-hoc from the fitted coefficients (`α_i = ȳ_i - x̄_i'β̂` for
-    /// one-way effects).
+    /// second, and one effect per group of each further column), recovered post-hoc from
+    /// the fitted coefficients (`α_i = ȳ_i - x̄_i'β̂` for one-way effects).
     ///
     /// Always a `dict[str, dict[str, float]]` keyed by the column names in `effects`, then
-    /// by group (the value of the column as a string): one entry for a one-way model, two
-    /// for a two-way model.
+    /// by group (the value of the column as a string): one entry per column of `effects`.
     ///
     /// Two-way normalization: `α_i`/`γ_t` are not individually identified (adding a
     /// constant to one and subtracting it from the other leaves `α_i + γ_t`, and
@@ -478,7 +478,12 @@ impl FEResult {
     /// float columns, chronological for `Date`/`Datetime`, the category order for
     /// `Enum`, alphabetical for strings and `Categorical`) — a deterministic convention
     /// independent of row order. The dictionary of the second column lists the periods in
-    /// the same order. `fixest::fixef()` chooses its own reference levels, so its values for the
+    /// the same order. With three or more columns, or an unbalanced panel whose groups
+    /// form several connected sets, one reference group per connected set is fixed to 0
+    /// in every column after the first (the first period in time order for the second
+    /// column, the first label in sorted order for the others), and only the sum of the
+    /// effects of a row is identified when the groups of one column lie inside those of
+    /// another. `fixest::fixef()` chooses its own reference levels, so its values for the
     /// time effects can differ from these by a constant.
     fn fixed_effects(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
         guard(|| {

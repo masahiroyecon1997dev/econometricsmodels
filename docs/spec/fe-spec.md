@@ -113,8 +113,11 @@ FE固有の内容のみを記載する。
 
 ### 3.1 within変換
 
-polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）を直接扱う。1-way/2-wayとも
-`quasi_demean_column`（θ=1固定、[`re-spec.md`](./re-spec.md)3.2節参照）を使う:
+polarsではなく`engine`側は抽出済みのコード（`GroupCodes`）を直接扱う。1-wayとバランスな2-wayは
+`quasi_demean_column`（θ=1固定、[`re-spec.md`](./re-spec.md)3.2節参照）を使う。バランスの判定は
+`covers_every_combination`（`n == N×T`かつ全組合せがちょうど1回。同じ組合せが重複する行は許すが、その入力は
+組合せが欠けるので必ず不均衡側に入る）。3次元以上は、バランスでも閉形式が無く、常に交互射影で計算する
+（`within_transform_multi_way`）:
 
 - **1-way**: `quasi_demean_column`を1回呼ぶだけ（`ỹ_i = y_i - ȳ_i.`）。
 - **2-way**: 閉形式の二重デミーニング`ỹ_it = y_it - ȳ_i. - ȳ_.t + ȳ..`を直接計算するのでは
@@ -127,7 +130,7 @@ polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）�
     （各エンティティの観測数がすべて`T`なので`(1/N)Σ_i ȳ_i. = ȳ..`が成り立つ）。`e_it`を
     timeでquasi-demeanすると`e_it - (ȳ_.t - ȳ..) = y_it - ȳ_i. - ȳ_.t + ȳ..`となり閉形式と一致する。
     不均衡パネルでは`(1/N)Σ_i ȳ_i. ≠ ȳ..`となりうるためこの等式が成り立たない。
-- **不均衡な2-way**（全組合せがそろわない）は、entityとtimeの水準平均を交互に引く**交互射影**
+- **不均衡な2-wayと3次元以上**（全組合せがそろわない、または3列以上）は、各次元（`effects`の列）の水準平均を順に引く**交互射影**
   （`shared/alternating_projections`）で、全ダミー変数への最小二乗の残差を求める。
   - 収束判定は、1回の掃引で引く水準平均の絶対値の最大が`tol × 尺度`以下。尺度は第1掃引で水準を除いた後の
     列の絶対値の最大で、水準の大きい列でもグループ内の変動に対する相対精度になる（下限は元の列の
@@ -137,8 +140,9 @@ polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）�
   - 掃引で残る誤差は、隣り合う掃引の変化量の比`ρ`から`変化量 · ρ/(1−ρ)`と見積もり（`Projected::error_bound`）、
     分散ゼロ・定数のy・完全適合の判定しきい値に足す（`column_is_zero_variance_with_noise`）。緩い`tol`はこの
     検出も粗くする。
-  - 連結成分（水準を頂点、行を辺とするグラフ）が複数あっても傾きは識別される。自由度は成分の数によらず
-    `k + N + T − 1`（fixestとlinearmodelsの既定と同じ。ダミー行列のランクは成分の数だけ小さい）。
+  - 連結成分（水準を頂点、行を辺とするグラフ。次元が3つ以上でも行が各次元の水準を結ぶ）が複数あっても傾きは
+    識別される。自由度は成分の数や入れ子の次元によらず`k + ΣG − (次元数 − 1)`（fixestとlinearmodelsの
+    既定と同じ。ダミー行列のランクは成分の数・入れ子のぶんだけ小さい）。
   - HC2/HC3のレバレッジは、ダミーだけの回帰のレバレッジ（`dummy_leverage`）とwithin変換後のレバレッジの和。
     ダミーのレバレッジは、最大の次元を消去し、残りの次元の水準を並べた`L`本の列（`L`は最大の次元を除いた水準数の合計）の
     密な行列`M = W'W − Σ_g c_g c_g'/n_g`（`g`は消去した次元のグループ、`c_g`はグループ内の水準の出現回数）を解いて求める
@@ -148,10 +152,12 @@ polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）�
     レバレッジが`[0, 1]`を外れたときは、黙って返さず`MATRIX_NEAR_SINGULAR`にする。全組合せがそろう2次元は
     閉形式で、この行列を作らない。
   - `fixed_effects()`は`fit`が保存した列ごとの効果から`effects(y) − Σβ̂_j effects(x_j)`を組み立て、連結成分ごとに
-    時間順で最初の時点を0にする（個体の効果にそのぶんを足す）。
+    2つ目以降の各次元の基準水準（成分内でコードが最小の水準。2つ目は時間順、3つ目以降は文字列にした値の辞書順）を
+    0にする（そのぶんを個体の効果に足す）。入れ子の次元など、基準化しても分離できない効果があるため、
+    識別されるのは行ごとの効果の和だけ（`FixedEffects::MultiWay`）。
 
-`FeEstimator::fit`のパイプラインは「打ち切り設定の検査 → singleton検出 → within変換（2-wayは重複する
-組合せの検査を内包） → 自由度検証 → 分散ゼロ検出 → `least_squares`（Frisch-Waugh-Lovell定理により
+`FeEstimator::fit`のパイプラインは「打ち切り設定の検査 → 吸収する次元の解決（`absorbed_levels`） →
+singleton検出（全次元） → within変換 → 自由度検証 → 分散ゼロ検出 → `least_squares`（Frisch-Waugh-Lovell定理により
 within変換後の最小二乗点推定はFE推定量と数学的に一致） → `cov_type`別の共分散行列計算 →
 自由度調整後の統計量再計算」の順。`OlsEstimator`は経由しない（FEが使うのは`β̂`・残差・
 `(X̃'X̃)⁻¹`・適合度だけで、`cov_type`ごとの標準誤差・F検定はFE自身が計算し直すため）。
@@ -161,6 +167,9 @@ within変換後の最小二乗点推定はFE推定量と数学的に一致） �
 - **1-way**: `df_model = k + N`（`N`=個体数）、`df_resid = n - df_model`。
 - **2-way**: `df_model = k + N + T - 1`（`T`=時点数。個体/時点ダミー間の定数項ぶんの
   重複を`+1`補正、LSDVでの有効パラメータ数が`N + T - 1`になることに対応）。
+- **3次元以上**: `df_model = k + ΣG_d − (D − 1)`（`D`=次元数、`G_d`=各次元の水準数。`absorbed_parameters`）。
+  fixestの`nparams`と同じ数え方で、連結成分・入れ子によるランク落ちは引かない。`InsufficientDegreesOfFreedom`の
+  `n_groups`は全次元の水準数のリスト。
 - `n <= df_model`は`PanelError::InsufficientDegreesOfFreedom`。`neffects>=1`のため
   `df_model>k`が恒常的に成り立ち、`OlsEstimator::fit`自身の`n<=k`チェックより常に厳格
   （FE経由でOLS側の`InsufficientObservations`が発生することは構造的にない）。
@@ -309,7 +318,7 @@ demeanしたR²」を3種とも定義すると誤る）:
 ### 3.5 固定効果自体（α_i）の復元
 
 `FeEstimator::fixed_effects()`（`FixedEffects::OneWay(BTreeMap<String, f64>)`/
-`TwoWay { entity, time }`）。推定済み係数から事後的に復元する（`within`変換時のグループ平均を
+`TwoWay { entity, time }`/`MultiWay(Vec<Vec<(水準, 効果)>>)`）。推定済み係数から事後的に復元する（`within`変換時のグループ平均を
 保持する形は取らず、`FeInput`が保持する変換前の元の`y`/`x`/`entity`/`time`から都度
 再計算する）。
 
@@ -326,6 +335,9 @@ demeanしたR²」を3種とも定義すると誤る）:
   挙動は再現せず時間順の規約を優先する）。`fixed_effects()`は常に`{列名: {水準: 効果}}`の入れ子の`dict`（one-wayも1項目の入れ子。キーは
   `effects`の列名で、`effects`の順）で、時点側の`dict`は時間順に並べる。入れ替えると
   キー順と基準期間が変わる（`panel-common.md`1.1節）。
+  - **不均衡な2-wayと3次元以上**は上の閉形式が使えず、`fit`が保存した交互射影の次元ごとの効果から組み立て、
+    連結成分ごとに2つ目以降の各次元の基準水準（成分内でコードが最小の水準）を0にして個体に足す
+    （`absorbed_effects`）。行ごとの効果の和は基準化で変わらず、入れ子の次元では和だけが識別される。
   - **導出**: `E_i = ȳ_i. - x̄_i.'β̂`（entityの残差平均）、`E_t = ȳ_.t - x̄_.t'β̂`（timeの残差平均）、
     `E = ȳ.. - x̄..'β̂`（全体の残差平均）とすると、バランスパネルの2-way ANOVA恒等式
     `E_i + E_t - E = α_i + γ_t`（正規化前、定数`c`が不定）に`γ_{t_ref}=0`の制約を課すと

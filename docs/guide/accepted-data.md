@@ -16,7 +16,7 @@ A column is read in one of four roles, and each role accepts different dtypes. A
 | Role | Arguments | Accepted dtypes |
 |---|---|---|
 | Numeric value | `y`, `x`, `weight`, `x_exog`, `x_endog`, `instruments` | Integers (`Int8` to `Int128`, `UInt8` to `UInt64`; `UInt128` is not accepted in any role), floats (`Float16`, `Float32`, `Float64`), `Boolean`, `Decimal` |
-| Group identity | the first column of `effects` (FE, RE), `cluster` | Integers, floats, `String`, `Categorical`, `Enum`, `Boolean`, `Date`, `Datetime` (no time zone) |
+| Group identity | the first column of `effects` (FE, RE), the third and later columns of `effects` (FE), `cluster` | Integers, floats, `String`, `Categorical`, `Enum`, `Boolean`, `Date`, `Datetime` (no time zone) |
 | Time period (panel) | the second column of `effects` (FE, RE, two-way), `dk_time` | Integers, floats, `String`, `Categorical`, `Enum`, `Date`, `Datetime` (no time zone) |
 | Time order (HAC) | `hac_time` | Integers, floats, `Decimal`, `Date`, `Datetime` (with or without a time zone). Not `Boolean`, which has at most two distinct values |
 
@@ -61,7 +61,7 @@ For `cov_type="dk"` (Driscoll-Kraay) in FE and RE, the periods of the `dk_time` 
 
 A string or a `Categorical` has no time order of its own, so its labels are sorted as text: `"9"` comes after `"10"`, and `"Q10"` comes right after `"Q1"`. If your periods are strings, use labels whose text order is the time order (ISO 8601 dates, zero-padded numbers), or use an `Enum` with the categories listed in time order. The row order of the data does not matter.
 
-The same order applies to the two-way fixed effects returned by `fixed_effects()`: the dictionary keyed by the name of the second `effects` column lists the periods in time order, and its first period is the reference with an effect of 0.
+The same order applies to the fixed effects returned by `fixed_effects()`: the dictionary keyed by the name of the second `effects` column lists the periods in time order, and its first period is the reference with an effect of 0. The third and later columns of `effects` are group identities, not time periods: their groups are listed in the order of their labels written as text (so `"10"` comes before `"2"`, even for an integer column), and the first group (of each connected set of groups, when the groups are not all connected) is the reference with an effect of 0.
 
 ## Argument types
 

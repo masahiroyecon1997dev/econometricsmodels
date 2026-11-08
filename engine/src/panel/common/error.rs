@@ -566,7 +566,7 @@ mod tests {
                     k: 5,
                 },
                 ErrorCode::InsufficientDegreesOfFreedom,
-                "Not enough observations for the panel model: 10 observation(s), but 5 coefficient(s) and 5 fixed-effect parameter(s) (entity effects, plus time effects in a two-way model) must be estimated; at least 11 are needed.",
+                "Not enough observations for the panel model: 10 observation(s), but 5 coefficient(s) and 5 fixed-effect parameter(s) (the groups of every column in effects, less one for each column after the first) must be estimated; at least 11 are needed.",
             ),
             (
                 PanelError::InsufficientDegreesOfFreedom {
@@ -575,7 +575,7 @@ mod tests {
                     k: 1,
                 },
                 ErrorCode::InsufficientDegreesOfFreedom,
-                "Not enough observations for the panel model: 10 observation(s), but 1 coefficient(s) and 6 fixed-effect parameter(s) (entity effects, plus time effects in a two-way model) must be estimated; at least 8 are needed.",
+                "Not enough observations for the panel model: 10 observation(s), but 1 coefficient(s) and 6 fixed-effect parameter(s) (the groups of every column in effects, less one for each column after the first) must be estimated; at least 8 are needed.",
             ),
             (
                 PanelError::SingletonGroup {
@@ -651,7 +651,7 @@ mod tests {
             (
                 PanelError::OutcomeConstantWithinEntity,
                 ErrorCode::OutcomeConstantWithinEntity,
-                "The outcome has no variation left after the fixed effects are removed: it is constant within every entity, or fully explained by the entity and time effects.",
+                "The outcome has no variation left after the fixed effects are removed: it is constant within every entity, or fully explained by the effects together.",
             ),
             (
                 PanelError::InsufficientDkPeriods { t_periods: 1 },

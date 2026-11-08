@@ -37,10 +37,10 @@ PANEL_TOLERANCES: dict[str, dict[str, float]] = {
     # 3次元以上の固定効果（`effects`が3〜4列）の主リファレンスはR fixest（`fe_multi_way.json`・
     # `fe_multi_way_cov.json`）。classical/hc1/hc2/hc3/cluster/dkとも、fixestの`ssc()`既定に本実装の
     # 小標本補正と自由度が合っているため機械精度で一致する。実測の最大（9シナリオ×全ケース）:
-    # 係数 3e-15（相対）、標準誤差 3e-12、行ごとの残差 6e-12（絶対）、AIC/BIC/対数尤度/Within R² 2e-15、
-    # p値 6e-12、F統計量のp値 4e-10。p値は裾が`exp(-F)`型に丸め誤差を増幅するため、他の統計量より
-    # 緩い相対誤差1e-6を、絶対誤差の下限なしで使う（`fe_crosscheck`と同じ）。fixestは
-    # `fixef.tol=1e-11`で固定効果を除く（`run_fixest_benchmark.R`参照）。
+    # 係数 3e-15（相対）、標準誤差 4e-11（相対）、信頼区間 3e-10、p値 7e-11、F統計量のp値 4e-11、
+    # AIC/BIC/対数尤度/Within R² 2e-15、行ごとの残差 6e-12（絶対）。p値は裾が`exp(-F)`型に丸め誤差を
+    # 増幅するため、他の統計量より緩い相対誤差1e-6を、絶対誤差の下限なしで使う（`fe_crosscheck`と同じ）。
+    # fixestは`fixef.tol=1e-11`で固定効果を除く（`run_fixest_benchmark.R`参照）。
     "fe_multi_way_reference": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_REFERENCE_FLOOR,
@@ -50,7 +50,7 @@ PANEL_TOLERANCES: dict[str, dict[str, float]] = {
     # 3次元以上のクロスチェックはlinearmodels.AbsorbingLS（classical/hc1、`debiased=True`）。
     # 固定効果をlsmrで反復して除くため、打ち切りを厳しく（atol・btol=1e-14）して機械精度に揃えてある
     # （既定の1e-8だと残差・標準誤差が1e-9〜1e-8ずれる）。実測の最大: 係数 8e-16（相対）、
-    # 標準誤差 6e-13、p値 2e-11、信頼区間 7e-12、行ごとの残差 6e-13（絶対）。
+    # 標準誤差 6e-13（相対）、p値 2e-11、信頼区間 7e-12、行ごとの残差 6e-13（絶対）。
     "fe_multi_way_crosscheck": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_REFERENCE_FLOOR,

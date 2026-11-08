@@ -13,7 +13,7 @@ y_{it} = x_{it}'\beta + \alpha_i + \varepsilon_{it} \quad \text{(one-way)}, \qqu
 y_{it} = x_{it}'\beta + \alpha_i + \gamma_t + \varepsilon_{it} \quad \text{(two-way)}
 \]
 
-with \(n\) observations, \(N\) entities, \(T\) periods and \(k\) slope coefficients. The entities are identified by the first column of `effects` (\(N\) is its value in `n_groups`); a second column in `effects` identifies the periods (\(T\) is its value in `n_groups`) and adds the time effects \(\gamma_t\). The effects are absorbed, so there is **no intercept** and `const` never appears.
+In general, with \(D\) columns in `effects`, \(y_{it} = x_{it}'\beta + \sum_{d=1}^{D} \alpha^{(d)}_{g_d(it)} + \varepsilon_{it}\), where \(g_d(it)\) is the group of the row in column \(d\); the one-way and two-way models are the cases \(D = 1\) and \(D = 2\), with \(\alpha^{(1)} = \alpha_i\) and \(\alpha^{(2)} = \gamma_t\). There are \(n\) observations, \(N\) entities, \(T\) periods and \(k\) slope coefficients. The entities are identified by the first column of `effects` (\(N\) is its value in `n_groups`); a second column in `effects` identifies the periods (\(T\) is its value in `n_groups`) and adds the time effects \(\gamma_t\), and each further column adds the effects of its groups (\(G_d\) is the value of column \(d\) in `n_groups`). The effects are absorbed, so there is **no intercept** and `const` never appears.
 
 \(\hat\beta\) is the OLS estimator on the within-transformed data, which equals the least-squares dummy-variable estimator:
 
@@ -23,28 +23,35 @@ with \(n\) observations, \(N\) entities, \(T\) periods and \(k\) slope coefficie
 \hat\beta = (\tilde X'\tilde X)^{-1}\tilde X'\tilde y
 \]
 
-A one-way model and a two-way model on a balanced panel (every entity observed in every period) use the closed forms above. A two-way model on an **unbalanced panel** has no closed form: the effects are removed by alternating projections, which subtract the entity means and the period means in turn until the largest mean subtracted in a pass is at most `tol` times the size of the column (`FEOptions.tol`, at most `FEOptions.max_iter` passes). The result is the same least-squares projection as including a dummy variable for every entity and period. Entities and periods may form several disconnected groups; the slope coefficients are still identified, the degrees of freedom stay \(k + N + T - 1\) (as in `fixest` and `linearmodels`), and `fixed_effects()` sets the first period (in time order) of each connected group to zero. Rows that repeat an (entity, time) combination are allowed (the columns of `effects` need not be an entity and a period); a panel with a repeated combination is unbalanced, because a combination is missing whenever another is repeated. The following are rejected rather than handled: an entity (or, for two-way, a period) with a single observation, a regressor with no within-variation (constant over time within every entity), and an outcome with no variation left after the effects are removed. See [Validation and errors](../guide/validation.md).
+A one-way model and a two-way model on a balanced panel (every combination of entity and period observed exactly once) use the closed forms above. Every other model is estimated by alternating projections: a two-way model on an unbalanced panel, and every model with three or more effects (balanced or not).
+
+- The projections subtract the means of the groups of each column in turn, until the largest mean subtracted in a pass is at most `tol` times the largest absolute value left in the column after the first pass (`FEOptions.tol`, at most `FEOptions.max_iter` passes). The result is the same least-squares projection as including a dummy variable for every group of every column.
+- The groups of the columns may form several disconnected sets (groups that no row links to the others). The slope coefficients are still identified, the degrees of freedom are not reduced for the disconnected sets (see [Degrees of freedom](#degrees-of-freedom)), and `fixed_effects()` fixes a reference group in each connected set.
+- Rows may repeat the same combination of values of the columns of `effects` (the columns need not be an entity and a period). A panel with a repeated combination is not balanced, because balance requires every combination exactly once.
+- The following are rejected rather than handled: a group with a single observation in any column of `effects`, a regressor that the effects absorb completely (for example one that is constant within every entity), and an outcome with no variation left after the effects are removed. See [Validation and errors](../guide/validation.md).
 
 ## Degrees of freedom
 
 \[
-\mathrm{df}_{\text{model}} = \begin{cases} k + N & \text{one-way} \\ k + N + T - 1 & \text{two-way} \end{cases}, \qquad
+\mathrm{df}_{\text{model}} = k + \sum_{d=1}^{D} G_d - (D-1), \qquad
 \mathrm{df}_{\text{resid}} = n - \mathrm{df}_{\text{model}}
 \]
 
-The effects count as estimated parameters. `fit()` raises an error when \(n \le \mathrm{df}_{\text{model}}\).
+which is \(k + N\) for one column in `effects` and \(k + N + T - 1\) for two. The effects count as estimated parameters, and each column after the first contributes one group fewer, because the dummy variables of every column add up to the same constant. This count does not take disconnected sets of groups or effects nested in one another into account (`fixest` 0.14.2 and `linearmodels` 7.1 count the same way), although the rank of the dummy-variable matrix is then smaller. `fit()` raises an error when \(n \le \mathrm{df}_{\text{model}}\).
 
 ## Covariance of the coefficients: `cov_type`
 
-All options are sandwich estimators \((\tilde X'\tilde X)^{-1}\hat S(\tilde X'\tilde X)^{-1}\) on the within-transformed data, scaled as below. Standard errors are the square roots of the diagonal, and the covariance matrix of the coefficients is available as `cov_params` on the results (it holds the slope coefficients only, not the fixed effects). `cov_type` defaults to `"cluster"` on the first column of `effects` (the entity), because panel data almost always have within-entity serial correlation. This is the clustering variable that `fixest` uses for `vcov = "cluster"` (its first fixed effect); the default of `fixest` itself is IID standard errors. `"hc0"` is not available.
+All options are sandwich estimators \((\tilde X'\tilde X)^{-1}\hat S(\tilde X'\tilde X)^{-1}\) on the within-transformed data, scaled as below. Standard errors are the square roots of the diagonal, and the covariance matrix of the coefficients is available as `cov_params` on the results (it holds the slope coefficients only, not the fixed effects). `cov_type` defaults to `"cluster"` on the first column of `effects` (the entity), because panel data almost always have within-entity serial correlation. This is the clustering variable that `fixest` uses for `vcov = "cluster"` (its first fixed effect); the default of `fixest` 0.14.2 itself is IID standard errors. `"hc0"` is not available.
 
 | `cov_type` | Covariance |
 |---|---|
 | `"classical"` | \(\hat\sigma^2(\tilde X'\tilde X)^{-1}\), with \(\hat\sigma^2 = \mathrm{SSR}/\mathrm{df}_{\text{resid}}\) |
 | `"hc1"` | \(\hat S = \sum_{it} \hat\varepsilon_{it}^2 \tilde x_{it}\tilde x_{it}'\) times \(n/\mathrm{df}_{\text{resid}}\) |
-| `"hc2"`, `"hc3"` | \(\hat S = \sum_{it} c_{it}\hat\varepsilon_{it}^2 \tilde x_{it}\tilde x_{it}'\) with \(c_{it} = 1/(1-h_{it})\) or \(1/(1-h_{it})^2\), where \(h_{it}\) is the leverage of the full dummy-variable regression, not of the within-transformed data |
+| `"hc2"`, `"hc3"` | \(\hat S = \sum_{it} c_{it}\hat\varepsilon_{it}^2 \tilde x_{it}\tilde x_{it}'\) with \(c_{it} = 1/(1-h_{it})\) or \(1/(1-h_{it})^2\), where \(h_{it}\) is the leverage of the full dummy-variable regression, not of the within-transformed data (see below) |
 | `"cluster"` | \(f\,(\tilde X'\tilde X)^{-1}\big(\sum_g s_g s_g'\big)(\tilde X'\tilde X)^{-1}\), \(s_g = \sum_{(i,t)\in g}\tilde x_{it}\hat\varepsilon_{it}\) |
 | `"dk"` | Driscoll-Kraay, below |
+
+The leverage of the full dummy-variable regression is \(h_{it} = h^{\text{dummy}}_{it} + \tilde h_{it}\), the leverage of the effects alone plus the leverage of the within-transformed regressors. The first part has a closed form in a one-way model (\(1/T_i\), with \(T_i\) the number of rows of entity \(i\)) and in a balanced two-way model (\(1/T_i + 1/N_t - 1/n\), with \(N_t\) the number of rows of period \(t\)). Otherwise it is computed from a dense matrix over the groups of all columns except the one with the most groups, and the total number of those groups is limited to 3,000 (an error is raised above that; use another `cov_type`, see [Validation and errors](../guide/validation.md)).
 
 ### Cluster-robust: small-sample factor
 
@@ -54,21 +61,21 @@ With \(G\) clusters (`cluster`, by default the entities), the small-sample facto
 f = \frac{G}{G-1}\cdot\frac{n-1}{n-K}
 \]
 
-following `fixest`'s default `ssc()`. The effective number of parameters \(K\) depends on whether the fixed effects are *nested* in the clusters (each level of the effect lies in a single cluster):
+following `fixest`'s default `ssc()`. The effective number of parameters \(K\) depends on whether the effects of a column are *nested* in the clusters (each group of the column lies in a single cluster):
 
 | Fixed effects | \(K\) |
 |---|---|
-| All nested in the clusters (the default: one-way, clustered by entity) | \(\mathrm{df}_{\text{model}}\) minus the number of nested effect levels, plus the number of effect dimensions |
-| Some nested (typically two-way, clustered by entity) | \(\mathrm{df}_{\text{model}}\) minus the nested effect levels, plus the number of nested dimensions |
-| None nested | \(\mathrm{df}_{\text{model}}\) |
+| All columns nested in the clusters (the default: one-way, clustered by entity) | \(\mathrm{df}_{\text{model}}\) minus the number of groups of the nested columns, plus the number of columns |
+| Some columns nested (typically two-way, clustered by entity) | \(\mathrm{df}_{\text{model}}\) minus the groups of the nested columns, plus the number of nested columns |
+| No column nested | \(\mathrm{df}_{\text{model}}\) |
 
 and \(K\) is never allowed to be below \(k+1\).
 
-Every effect nested in the clusters is removed from \(K\). When the cluster column is itself one of the effects, `fixest` does not check whether the other effects are nested in it and counts only that effect, so with three or more effects (for example a firm effect nested in an industry effect, clustered by industry) `fixest` can report a larger \(K\), and larger standard errors, than this package.
+Every column nested in the clusters is removed from \(K\). In `fixest` 0.14.2, when the cluster column is itself one of the columns of `effects`, `fixest` does not check whether the other effects are nested in it and counts only that effect, so with three or more effects (for example a firm effect nested in an industry effect, clustered by industry) `fixest` can report a larger \(K\), and larger standard errors, than this package.
 
 **Comparison with `linearmodels`.** With its default settings (`debiased=True`, `group_debias=False`), `linearmodels` 7.1 multiplies the clustered covariance by \(n/(n-\mathrm{extra\_df}-k)\) and applies no \(G/(G-1)\) factor. Here \(\mathrm{extra\_df}\) is the number of estimated effect levels (one fewer when the model contains a constant), or 0 when `PanelOLS` finds a single effect nested in the clusters (`auto_df=True`, the default). With `group_debias=True` it also multiplies the covariance by \(\frac{G}{G-1}\cdot\frac{n-1}{n}\). The cluster standard errors therefore differ from this package's whichever of these settings is used. For example, with one-way effects clustered by entity this package uses \(K = k+1\) where `linearmodels` effectively uses \(k\), so even with `group_debias=True` the variances differ by the factor \((n-k)/(n-k-1)\).
 
-`fit()` raises an error with fewer than two clusters or when there are not more clusters than slope coefficients (the joint test is then undefined). It also rejects the degenerate case of two clusters that contain exactly one observation of each absorbed effect level, where the clustered covariance is identically zero.
+`fit()` raises an error with fewer than two clusters or when there are not more clusters than slope coefficients (the joint test is then undefined). It also rejects the degenerate case of two clusters in which every group of at least one column of `effects` has exactly one observation in each cluster, where the clustered covariance is identically zero.
 
 ### Driscoll-Kraay: `"dk"`
 
@@ -85,7 +92,7 @@ and the covariance is \(\frac{T_d}{T_d-1}\cdot\frac{n-1}{n-\mathrm{df}_{\text{mo
 - The bandwidth \(L\) is `dk_bandwidth` when given (\(0 \le L < T_d\)), otherwise \(\lfloor 4\,(T_d/100)^{2/9}\rfloor\); the value used is `dk_bandwidth_used`. Note that the rule uses the number of periods \(T_d\), not \(n\).
 - The periods are ordered by the **values** of `dk_time` (numerically, chronologically, by category order for an `Enum`, alphabetically for strings), never by the order of the rows. See [Accepted data](../guide/accepted-data.md#order-of-time-periods).
 - It needs more periods than slope coefficients (\(T_d > k\)), because \(\hat S\) has rank at most \(T_d - 1\).
-- With `dk_bandwidth` equal to \(T_d - 1\), `vcov = DK(lag = T_d - 1)` in `fixest` 0.14.2 gave a standard error equal to the computation with lags 1 to \(T_d - 2\) only. This package includes the last lag of the standard Bartlett kernel, so the two differ there only; smaller bandwidths agree. The cause (definition or defect) was not determined.
+- With `dk_bandwidth` equal to \(T_d - 1\), `vcov = DK(lag = T_d - 1)` in `fixest` 0.14.2 gave a standard error equal to the computation with the weights of bandwidth \(T_d - 1\) but without the last lag \(T_d - 1\). This package includes the last lag of the standard Bartlett kernel, so the two differ there only; smaller bandwidths agree. The cause (definition or defect) was not determined.
 
 ## Test distributions and confidence intervals
 
@@ -111,11 +118,11 @@ Three R² values are reported, because "the" R² is not well defined once effect
 
 | Statistic | Definition |
 |---|---|
-| `r_squared_within` | \(1 - \sum \hat\varepsilon_{it}^2 / \sum \tilde y_{it}^2\) on the within-transformed variables, with the transformation that was used (entity only, or entity and time) |
-| `r_squared_between` | \(1 - \sum_i (\bar y_{i\cdot} - \bar x_{i\cdot}'\hat\beta)^2 / \sum_i \bar y_{i\cdot}^2\) on the entity means |
+| `r_squared_within` | \(1 - \sum \hat\varepsilon_{it}^2 / \sum \tilde y_{it}^2\) on the within-transformed variables, with the transformation that was used (all the columns of `effects` removed) |
+| `r_squared_between` | \(1 - \sum_i (\bar y_{i\cdot} - \bar x_{i\cdot}'\hat\beta)^2 / \sum_i \bar y_{i\cdot}^2\) on the means of the entities (the first column of `effects`) |
 | `r_squared_overall` | \(1 - \sum (y_{it} - x_{it}'\hat\beta)^2 / \sum y_{it}^2\) on the original variables |
 
-The between and overall values use uncentered total sums of squares, because the model has no constant, and the between value is not weighted by the number of observations per entity; both agree with `linearmodels` 7.1. The within value for a two-way model uses both effects, whereas `rsquared_within` of `linearmodels` 7.1 removes entity means only.
+The between and overall values use uncentered total sums of squares, because the model has no constant, and the between value is not weighted by the number of observations per entity; both agree with `linearmodels` 7.1. The within value for a model with two or more columns in `effects` removes all of them, whereas `rsquared_within` of `linearmodels` 7.1 removes entity means only.
 
 The log-likelihood is computed from the within residuals as for [OLS](ols.md#fit-statistics), and \(\mathrm{AIC} = -2\ell + 2\,\mathrm{df}_{\text{model}}\), \(\mathrm{BIC} = -2\ell + \mathrm{df}_{\text{model}}\ln n\).
 
@@ -124,6 +131,7 @@ The log-likelihood is computed from the within residuals as for [OLS](ols.md#fit
 The effects are recovered after estimation from the coefficients:
 
 - **One-way:** \(\hat\alpha_i = \bar y_{i\cdot} - \bar x_{i\cdot}'\hat\beta\), returned as a `dict` with the name of the `effects` column as its only key, whose value is a `dict` keyed by entity.
-- **Two-way:** the split of the overall level between \(\alpha_i\) and \(\gamma_t\) is not identified, so the first period in time order is the reference with \(\hat\gamma = 0\) and the entity effects absorb the level. The result has one key per column of `effects` (the entity column first, then the time column), and the periods are listed in time order. `fixest::fixef()` chooses its own reference levels, so its values for the time effects can differ from these by a constant.
+- **Two-way:** the split of the overall level between \(\alpha_i\) and \(\gamma_t\) is not identified, so the first period in time order is the reference with \(\hat\gamma = 0\) and the entity effects absorb the level (on an unbalanced panel whose groups form several disconnected sets, see the next item). The result has one key per column of `effects` (the entity column first, then the time column), and the periods are listed in time order. `fixest::fixef()` chooses its own reference levels, so its values for the time effects can differ from these by a constant.
+- **Disconnected sets of groups, and three or more effects:** in each connected set of groups (groups linked through the rows), the entity effects absorb the level and one reference group of every other column is fixed to 0: the first period in time order for the second column, and for the other columns the first label in sorted order (the labels are compared as text, so `"10"` comes before `"2"`). Only the sum of the effects of a row is identified when the groups of one column lie inside the groups of another, and that sum is what the fitted values use.
 
 `FE` has no `predict()`, `augment()` or `summary()`.

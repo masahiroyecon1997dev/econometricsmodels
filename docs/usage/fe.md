@@ -2,7 +2,7 @@
 
 **FE**: **Usage** · [Options and results](../api/fe.md) · [Definitions](../methods/fe.md)
 
-`FE` estimates a one-way or two-way fixed effects (within) panel regression. Pass the columns that define the effects as a list in `effects`: one column (the entity, or panel unit, identifier) gives one-way effects, and two columns (the entity, then the time period) give two-way effects. `FE` takes at most two columns in `effects`.
+`FE` estimates a fixed effects (within) panel regression with one to five columns in `effects`. Pass the columns that define the effects as a list in `effects`: one column (the entity, or panel unit, identifier) gives one-way effects, two columns (the entity, then the time period) give two-way effects, and three to five columns add further sets of effects such as an industry or a region ([three or more effects](#three-or-more-effects)). `FE` takes at most five columns in `effects` ([RE](re.md) takes at most two).
 
 ```python
 import polars as pl
@@ -62,15 +62,52 @@ print(two_way.fixed_effects())  # {"firm": {...}, "year": {...}}
 
 The number of groups in each column is in `two_way.n_groups`, a dictionary keyed by column name in the order of `effects`: here `{"firm": 6, "year": 6}`. The first period (in time order) is the reference with a time effect of 0, and the entity effects absorb the overall level.
 
-The order of the two columns matters for these results only:
+In a two-way model the order of the two columns affects only:
 
 - the default clustering column (the first column);
 - the order of the keys of `fixed_effects()`;
-- which column has the reference period (the second column).
+- which column has the reference period (the second column);
+- `r_squared_between`, which uses the means of the first column.
 
 The coefficients do not depend on the order. Neither do the standard errors, unless the default `cov_type="cluster"` is used without `cluster=`, because the default clustering column is then the first column of `effects`.
 
-A regressor that does not vary within an entity, or that does not vary across entities in a two-way model, is absorbed by the effects and is rejected.
+A regressor that the effects absorb is rejected: one that is constant within every entity, or one that is constant across entities in every period (it varies over time only).
+
+## Three or more effects
+
+Pass three to five columns in `effects` to absorb further sets of effects, for example a firm, a year and an industry. The first column is the entity and the second the time period, as before; every later column only has to identify a group, and it may be a string, an integer, a category or a date (its values are used only as labels: they are not treated as ordered, and are sorted as text just to choose the reference group of `fixed_effects()`). The example adds an industry label to the `panel` of the previous section; it is made up for the example and varies by row:
+
+```python
+three = panel.with_columns(
+    industry=(
+        (pl.col("year") * 2 + pl.col("firm").str.slice(4).cast(pl.Int64)) % 3
+    ).replace_strict({0: "tech", 1: "retail", 2: "food"})
+)
+
+multi = FE(
+    three,
+    y="y",
+    x=["x1", "x2"],
+    effects=["firm", "year", "industry"],
+).fit()
+
+print(multi.params)
+print(multi.n_groups)  # {"firm": 6, "year": 6, "industry": 3}
+print(multi.fixed_effects()["industry"])  # {"food": 0.0, ...}
+```
+
+`"food"` is the reference group of `industry` (the first in sorted order), so its effect is 0.
+
+Any combination of the columns may appear in more than one row (for example several plants of the same industry in a firm and year), and the panel need not be complete: the effects are removed by alternating projections and the result is the same as including a dummy variable for every group of every column. `n_groups` and `fixed_effects()` have one entry per column, in the order of `effects`. The other arguments and options work as with fewer columns: `cov_type` defaults to `"cluster"` on the first column, and every `cov_type` is available. The first two columns keep their roles (the entity and the time period); the later columns can be given in any order, apart from the order of the keys of `fixed_effects()`, which follows `effects`. The coefficients never depend on the order of the columns.
+
+The effects of the different columns are not separately identified, only their sum for a row is. `fixed_effects()` therefore fixes a reference: the first column absorbs the overall level, and in each of the other columns one reference group is set to 0 (the first period in time order for the second column, the first label in sorted order for the others). If the groups of a column lie inside the groups of another (every firm in a single industry, say), the two sets of effects cannot be separated and only their sum is meaningful.
+
+Things specific to three or more effects:
+
+- A group with a single observation in any column is rejected, as in a two-way model; drop such rows first. A regressor that the effects absorb completely is rejected too. See [Validation and errors](../guide/validation.md).
+- `cov_type="hc2"` and `"hc3"` cannot be used when the groups of all columns except the one with the most groups total more than 3,000; use another `cov_type`, or fewer groups.
+- With `cov_type="cluster"`, an effect nested in the clusters (for example the firm effects when clustering by firm) is treated as not estimated in the small-sample correction; see [Definitions: FE](../methods/fe.md#cluster-robust-small-sample-factor).
+- On a thinly connected panel the projections may reach `max_iter` and raise an error; raise `tol` or `max_iter` (see [Options and results](../api/fe.md)).
 
 ## Choosing the type of standard error
 

@@ -810,3 +810,9 @@ cluster表の2行の統合、`accepted-data.md`の見出し分割。
   `docs/planning/specs/mop-oracle-spec.md`の履歴の扱い。見送ったレビュー指摘: 3次元の実データ、悪条件・高次元k・G=q+1の境界、`absorption_tol`の検証。
 - IV本体の残り（#366〜#369）とFE-2SLS/GMM（#370〜#388）は#442の後（9.9参照）。#442のクローズはpush・CIの確認の後。
 
+**手順10の結果（2026-11-08）**: コミット `6784aa17 fix(engine)`・`ade41e2f feat(performance)`（署名`G`、未push）。
+- 3-wayのHC2/HC3で、個体×時点×無作為な3つ目の効果（約3,000行以上）が`NearSingularMatrix`になる不具合を計測中に発見して修正（`dummy_leverage`の`M`の引き算の丸め誤差が零固有値をランクの閾値より大きくしていた。TwoSumで補償）。Rust・Pythonの回帰テストを追加。
+- 性能比較: method軸に`two_way_unbalanced`・`three_way`（比較相手`AbsorbingLS`の既定の打ち切り、classicalのみ）、cov軸に`hc2_three_way`・`hc3_three_way`（engine単独）。ハーネスは`PerfAdapter.method_dataframes`で、#634の不均衡2-wayも同時に済み。
+  `performance-reviewer`の指摘（hc1分岐の削除、数値の修正、公開ページ手書き部分への追記、派生シード、データが良条件である旨）は反映済み。公開ページの表は`/release`の再生成まで更新しない。
+- 検証: engine 1360件、`pytest tests --check-error-coverage --check-cov-coverage` 12109件が通る。
+- 残り: Pythonまで終わったのでpush（利用者が実行）→CI確認→#442と#634のクローズ。保留事項は上記のとおり。

@@ -1,11 +1,11 @@
-//! FE/REが共有する、固定効果の方向`PanelEffects`と`cov_type`の型`PanelCovType`。
+//! REの方向`PanelEffects`と、FE/REが共有する`cov_type`の型`PanelCovType`。
 
 use super::time_keys::TimeKeys;
 use crate::shared::group_codes::GroupCodes;
 
-/// 固定効果・変量効果の方向（1-way/2-way）を指定する。FEの`FeEffects`・REの`ReEffects`は
-/// この型の別名で、`FeEstimator::fit`・`ReEstimator::fit`が受け取る
-/// （`CovType`と同じ「小さな固定選択肢の公開enum」パターン）。
+/// 変量効果の方向（1-way/2-way）を指定する。REの`ReEffects`はこの型の別名で、`ReEstimator::fit`が
+/// 受け取る（`CovType`と同じ「小さな固定選択肢の公開enum」パターン）。FEの`FeEffects`は
+/// 3次元以上の固定効果も指す別の型（`fe/input.rs`）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PanelEffects {
     /// entityのみ（FEは`fe-spec.md`3.1節、REは`re-spec.md`3章）。REでは`ReInput`に`time`が

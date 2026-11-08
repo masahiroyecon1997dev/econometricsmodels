@@ -25,8 +25,9 @@ pub(crate) enum PanelStructure<'a> {
     /// LSDV相当の`leverage_full`、クラスターのKはfixest流のネスト判定（`fe_cluster_k_correction`）、
     /// 2グループ退化（`DegenerateClusterTwoGroups`・`DegenerateDkTwoPeriods`）の検査を行う。
     FixedEffects {
-        /// 2-wayの時点コード（1-wayは`None`）。
-        two_way_time: Option<&'a GroupCodes>,
+        /// 吸収した効果の次元（`effects`の順。1つ目が`PanelCovInput::entity`と同じ個体で、1-wayは
+        /// 個体のみ、2-wayは個体と時点、高次元は全ての列）。
+        levels: &'a [&'a GroupCodes],
     },
     /// RE: 変換済み設計行列に省略された固定効果ダミーが無い。素のレバレッジ、クラスターのK
     /// は`df_model`、退化検査は不要。
@@ -69,14 +70,6 @@ pub(crate) struct PanelCov {
     pub(crate) df_inference: usize,
     /// `Dk`のとき実際に使われたバンド幅。`Dk`以外では`None`。
     pub(crate) dk_bandwidth_used: Option<usize>,
-}
-
-/// 固定効果が吸収する次元（個体、2-wayなら時点。`effects`の順）。
-fn absorbed_levels<'a>(
-    entity: &'a GroupCodes,
-    two_way_time: Option<&'a GroupCodes>,
-) -> Vec<&'a GroupCodes> {
-    std::iter::once(entity).chain(two_way_time).collect()
 }
 
 /// `cov_type`に応じたパネル手法の係数分散共分散行列と推論の自由度。FE・REの`fit()`が共有する
@@ -128,9 +121,7 @@ pub(crate) fn panel_cov_params(
         PanelCovType::Hc2 | PanelCovType::Hc3 => {
             let h_plain = leverages(x, xtx_inv);
             let h = match structure {
-                PanelStructure::FixedEffects { two_way_time } => {
-                    leverage_full(&h_plain, entity, two_way_time, n)?
-                }
+                PanelStructure::FixedEffects { levels } => leverage_full(&h_plain, levels, n)?,
                 PanelStructure::RandomEffects => h_plain,
             };
             let variant = if matches!(cov_type, PanelCovType::Hc2) {
@@ -149,25 +140,15 @@ pub(crate) fn panel_cov_params(
             let n_groups = validate_cluster_groups(group_codes, n, ClusterSetting::CovType)?;
             validate_cluster_count_covers_slopes(n_groups, n_slopes)?;
             let k_correction = match structure {
-                PanelStructure::FixedEffects { two_way_time } => {
+                PanelStructure::FixedEffects { levels } => {
                     // 直前の`G > q`により、ここで`G=2`なら`q`は高々1。
                     if n_slopes >= 1
                         && n_groups == 2
-                        && two_group_split_is_degenerate(
-                            &absorbed_levels(entity, two_way_time),
-                            group_codes,
-                        )
+                        && two_group_split_is_degenerate(levels, group_codes)
                     {
                         return Err(PanelError::DegenerateClusterTwoGroups);
                     }
-                    fe_cluster_k_correction(
-                        entity,
-                        two_way_time,
-                        entity.n_groups(),
-                        df_model,
-                        n_slopes,
-                        group_codes,
-                    )
+                    fe_cluster_k_correction(levels, df_model, n_slopes, group_codes)
                 }
                 // REは固定効果ダミーのネスト補正が不要なため`K=df_model`をそのまま使う
                 // （OLS自身の`cluster_cov_params`と数式的に同一になる）。
@@ -199,14 +180,11 @@ pub(crate) fn panel_cov_params(
             let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
             validate_dk_periods_cover_tested_coefficients(t_periods, n_slopes)
                 .map_err(|e| e.in_stage(Stage::OverallFTest))?;
-            if let PanelStructure::FixedEffects { two_way_time } = structure {
+            if let PanelStructure::FixedEffects { levels } = structure {
                 // 直前の`t_periods > q`により、ここで`t_periods=2`なら`q`は高々1。
                 if n_slopes >= 1
                     && t_periods == 2
-                    && two_group_split_is_degenerate(
-                        &absorbed_levels(entity, two_way_time),
-                        time_codes,
-                    )
+                    && two_group_split_is_degenerate(levels, time_codes)
                 {
                     return Err(PanelError::DegenerateDkTwoPeriods);
                 }

@@ -1,8 +1,6 @@
 //! `FeInput`（FEの入力データ）と、FEの固定効果方向・`cov_type`の型別名。
 
-use crate::panel::common::{
-    EffectNames, PanelCovType, PanelEffects, PanelError, TimeKeys, validate_panel_input,
-};
+use crate::panel::common::{EffectNames, PanelCovType, PanelError, TimeKeys, validate_panel_input};
 use crate::panel::re::{ReEffects, ReInput};
 use crate::shared::alternating_projections::{DEFAULT_MAX_SWEEPS, DEFAULT_TOLERANCE};
 use crate::shared::group_codes::GroupCodes;
@@ -112,9 +110,28 @@ impl FeInput {
         time: Option<TimeKeys>,
         dep_var_name: String,
     ) -> Result<Self, PanelError> {
-        let groups: Vec<GroupCodes> = std::iter::once(entity)
-            .chain(time.map(|time| time.codes().clone()))
+        let groups = std::iter::once(entity)
+            .chain(time.map(TimeKeys::into_codes))
             .collect();
+        Self::from_effect_groups(y, x_columns, x_names, groups, dep_var_name)
+    }
+
+    /// 効果の各次元のコード（`effects`の順、1つ以上）から`FeInput`を組み立てる。1つ目が個体、2つ目が
+    /// 2-wayの時点（時間順のコード。`TimeKeys::into_codes`）、3つ目以降が高次元の固定効果。
+    /// `engine_pybind`は`effects`の列ごとに行ごとの`String`を作らずに作ったコードを渡す。
+    /// 全てキー付き（`from_labels`/`from_factorized`）であること。固定効果のキーに使う。
+    ///
+    /// # Errors
+    /// `from_columns`と同じ。次元の長さの検査は`effects`の先頭から順に行い、`groups`が空、または
+    /// キー無しのコードを含む場合は`PanelError::Common`（`CommonError::Internal`、呼び出し側の
+    /// 実装誤り）。
+    pub fn from_effect_groups(
+        y: &[f64],
+        x_columns: &[Vec<f64>],
+        x_names: Vec<String>,
+        groups: Vec<GroupCodes>,
+        dep_var_name: String,
+    ) -> Result<Self, PanelError> {
         validate_panel_input(y, x_columns, &x_names, &groups.iter().collect::<Vec<_>>())?;
 
         Ok(Self {
@@ -177,6 +194,11 @@ impl FeInput {
         self.groups.len()
     }
 
+    /// 効果の各次元の整数コード（`effects`の順）。
+    pub(crate) fn effect_codes(&self) -> &[GroupCodes] {
+        &self.groups
+    }
+
     /// 1つ目の次元（`entity`）の整数コード。
     pub(crate) fn entity_codes(&self) -> &GroupCodes {
         &self.groups[0]
@@ -229,7 +251,7 @@ impl FeInput {
     }
 }
 
-/// 不均衡な2-wayで固定効果を除く交互射影の打ち切りの設定。バランスパネルと1-wayは閉形式で
+/// 交互射影（不均衡な2-wayと3次元以上）で固定効果を除くときの打ち切りの設定。バランスな2-wayと1-wayは閉形式で
 /// 計算するので使わない（値の検査はどちらでも行う）。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FeAbsorption {
@@ -270,8 +292,19 @@ impl FeAbsorption {
     }
 }
 
-/// FEの固定効果の方向。[`PanelEffects`]の別名（`fe.rs`のモジュールdoc「`FeEstimator::fit`のパイプライン」参照）。
-pub type FeEffects = PanelEffects;
+/// FEの固定効果の方向。吸収する次元は`effects`の先頭から数える（`fe.rs`のモジュールdoc
+/// 「`FeEstimator::fit`のパイプライン」参照）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FeEffects {
+    /// 個体のみ（`fe-spec.md`3.1節）。入力に2つ目以降の次元があっても使わない。
+    OneWay,
+    /// 個体 + 時点（`fe-spec.md`1章）。入力の2つ目の次元が時間次元になる（無ければ
+    /// `PanelError::TwoWayRequiresTime`）。3つ目以降の次元があっても使わない。
+    TwoWay,
+    /// 3つ以上の次元（`effects`の全ての列）。入力が3つ以上の次元を持つこと。バランスパネルでも
+    /// 閉形式は使わず、交互射影で固定効果を除く。
+    MultiWay,
+}
 
 /// FEが対応する`cov_type`。[`PanelCovType`]の別名（`fe.rs`のモジュールdoc「`cov_type`対応」参照）。
 pub type FeCovType = PanelCovType;

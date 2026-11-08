@@ -118,6 +118,12 @@ impl TimeKeys {
         &self.codes
     }
 
+    /// 時点のコード（時間順、キー付き）を`GroupCodes`として取り出す。固定効果の2つ目の次元
+    /// （`FeInput::from_effect_groups`の`groups`）に渡すときに使う。
+    pub fn into_codes(self) -> GroupCodes {
+        self.codes
+    }
+
     /// 行数`n`。
     pub fn len(&self) -> usize {
         self.codes.nobs()

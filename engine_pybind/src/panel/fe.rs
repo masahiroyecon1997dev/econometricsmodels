@@ -55,8 +55,7 @@ use std::sync::OnceLock;
 
 use super::common::{
     PanelCovKind, PanelModel, check_panel_cov_options, extract_effects, extract_time_keys,
-    group_counts, groups_dict, panel_error_to_pyerr, parse_panel_cov_kind, require_dk_time,
-    validate_panel_roles,
+    groups_dict, panel_error_to_pyerr, parse_panel_cov_kind, require_dk_time, validate_panel_roles,
 };
 use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{
@@ -387,7 +386,8 @@ impl LazyFixedEffects {
     }
 }
 
-// 状態は`("one_way", {id: α})`か`("two_way", {id: α}, [(period, γ), ...])`。時点は時間順の並びを保つ。
+// 状態は`("one_way", {id: α})`・`("two_way", {id: α}, [(period, γ), ...])`・
+// `("multi_way", [[(id, 効果), ...], ...])`（次元ごと、`effects`の順）。時点は時間順の並びを保つ。
 impl crate::shared::pickle::PickleField for LazyFixedEffects {
     fn to_py<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         match self.get() {
@@ -395,12 +395,15 @@ impl crate::shared::pickle::PickleField for LazyFixedEffects {
             FixedEffects::TwoWay { entity, time } => {
                 ("two_way", entity, time).into_bound_py_any(py)
             }
+            FixedEffects::MultiWay(dimensions) => ("multi_way", dimensions).into_bound_py_any(py),
         }
     }
 
     fn from_py(obj: &Bound<'_, PyAny>) -> Option<Self> {
         let effects = if let Ok((tag, effects)) = obj.extract::<(String, BTreeMap<String, f64>)>() {
             (tag == "one_way").then_some(FixedEffects::OneWay(effects))?
+        } else if let Ok((tag, dimensions)) = obj.extract::<(String, Vec<Vec<(String, f64)>>)>() {
+            (tag == "multi_way").then_some(FixedEffects::MultiWay(dimensions))?
         } else {
             let (tag, entity, time) = obj
                 .extract::<(String, BTreeMap<String, f64>, Vec<(String, f64)>)>()
@@ -502,6 +505,21 @@ impl FEResult {
                     }
                     outer.set_item(first, entity)?;
                     outer.set_item(second, time_effects)?;
+                }
+                FixedEffects::MultiWay(dimensions) => {
+                    if dimensions.len() != self.effects.len() {
+                        return Err(internal_error(
+                            "the fixed effects do not match the effects columns",
+                        ));
+                    }
+                    for (column, levels) in self.effects.iter().zip(dimensions) {
+                        // 水準は次元ごとの順（個体・3つ目以降は辞書順、時点は時間順）の`dict`にする。
+                        let level_effects = PyDict::new(py);
+                        for (level, effect) in levels {
+                            level_effects.set_item(level, effect)?;
+                        }
+                        outer.set_item(column, level_effects)?;
+                    }
                 }
             }
             Ok(outer.unbind())
@@ -630,8 +648,8 @@ pub(crate) fn build_fe_input(
 /// `build_fe_input`で構築した`FeInput`に対して`engine::panel::fe::FeEstimator::fit`を
 /// 呼び出し、`FEResult`として返す。
 ///
-/// `n_groups`の元になる`group_counts`は、`FeEstimator::input().n_entities()`（`FeInput`が構築時に
-/// 一度だけ作ったエンティティコードのユニーク数）と`n_periods()`（2-wayのみ）から作る。
+/// `n_groups`の元になる`group_counts`は、`FeEstimator::n_groups()`（`fit`が吸収した次元の水準数を
+/// `effects`の順に数えた値）をそのまま使う。
 ///
 /// `params`/`param_names`/`residuals`/`dep_var_name`/`n_obs`/`log_likelihood`は
 /// `FeEstimator`のgetter（`params()`・`within_input()`・`residuals()`・`log_likelihood()`）から
@@ -689,7 +707,7 @@ fn fit_frame(
         &absorption,
     )
     .map_err(panel_error_to_pyerr)?;
-    let group_counts = group_counts(estimator.input().n_entities(), estimator.n_periods());
+    let group_counts = estimator.n_groups().to_vec();
 
     Ok(FEResult {
         params: mat_to_vec(estimator.params()),

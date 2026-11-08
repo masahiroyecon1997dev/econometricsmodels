@@ -4,6 +4,7 @@
 //! - `reference.rs`: 参照実装・閉形式・独立再計算との照合
 //! - `cov_type.rs`: `cov_type`別の共分散・検定統計量
 //! - `unbalanced.rs`: 不均衡パネルの2-way FE（交互射影）。ダミー変数回帰との照合
+//! - `multi_way.rs`: 3次元以上のFE（交互射影）。ダミー変数回帰との照合
 //! - `validation.rs`: 入力検証・エラー返却（完全適合・定数のyをエラーとして返すものを含む）・検証順序
 //! - `proptests.rs`: property-basedテスト
 
@@ -14,6 +15,7 @@ use crate::panel::fe::test_support::*;
 
 mod basic;
 mod cov_type;
+mod multi_way;
 mod proptests;
 mod reference;
 mod unbalanced;

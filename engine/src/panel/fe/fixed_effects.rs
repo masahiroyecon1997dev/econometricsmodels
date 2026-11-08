@@ -31,6 +31,11 @@ pub enum FixedEffects {
         /// 時点が基準（`γ=0`）。文字列の辞書順ではないため`BTreeMap`にしない。
         time: Vec<(String, f64)>,
     },
+    /// 3つ以上の次元。`effects`の順に、次元ごとの(水準のID, 効果)を並べる（個体はコード順＝辞書順、
+    /// 2つ目の時点は時間順、3つ目以降は辞書順）。連結成分ごとに、1つ目の次元は自由、2つ目以降の各次元は
+    /// 基準の水準（成分内でコードが最小の水準）を0にする。入れ子の次元などで、基準化しても分離できない
+    /// 効果があるため、識別されるのは行ごとの効果の和だけ。
+    MultiWay(Vec<Vec<(String, f64)>>),
 }
 
 /// `ids`のコードでグループ化した`slope_only_residual`の平均（`E_i`/`E_t`）を、コード順の
@@ -80,12 +85,21 @@ pub(super) fn fixed_effects(estimator: &FeEstimator) -> FixedEffects {
         ),
         FeEffects::TwoWay => {
             let time = estimator.input.time_codes().expect(
-                "2-way already validated `time` is present (`fit` resolves `two_way_time`)",
+                "2-way already validated `time` is present (`fit` resolves the absorbed levels)",
             );
             let entity = estimator.input.entity_codes();
             // `absorbed`があるのは、全組合せが過不足なく1回ずつ現れない（重複する行を含む）場合だけ。
             if let Some(absorbed) = &estimator.absorbed {
-                return unbalanced_two_way(estimator, absorbed, entity, time);
+                let mut effects =
+                    absorbed_effects(estimator, absorbed, &[entity, time]).into_iter();
+                // `absorbed_effects`は渡した次元の数だけ(ここでは2つ)の効果の組を返す。
+                let (Some(entity), Some(time)) = (effects.next(), effects.next()) else {
+                    unreachable!("two dimensions give two sets of effects")
+                };
+                return FixedEffects::TwoWay {
+                    entity: entity.into_iter().collect(),
+                    time,
+                };
             }
             let entity_means = group_residual_means(y, x, params, entity);
             let time_means = group_residual_means(y, x, params, time);
@@ -108,20 +122,31 @@ pub(super) fn fixed_effects(estimator: &FeEstimator) -> FixedEffects {
                 .collect();
             FixedEffects::TwoWay { entity, time }
         }
+        FeEffects::MultiWay => {
+            let levels: Vec<&GroupCodes> = estimator.input.effect_codes().iter().collect();
+            // `fit_fe`は3次元以上を常に交互射影で計算し、`absorbed`を保存する。
+            let Some(absorbed) = &estimator.absorbed else {
+                unreachable!("a multi-way fit always keeps the absorbed effects")
+            };
+            FixedEffects::MultiWay(absorbed_effects(estimator, absorbed, &levels))
+        }
     }
 }
 
-/// 不均衡な2-wayの固定効果。傾きを引いた残差`y − Xβ̂`の効果を、`fit`が保存した`y`の列と各`x`の列の
-/// 効果から`effects(y) − Σ β̂_j effects(x_j)`で組み立てる（射影は線形なので、残差の列を別に射影するのと同じ）。
+/// 交互射影を使った固定効果（不均衡な2-wayと3次元以上）。傾きを引いた残差`y − Xβ̂`の効果を、`fit`が
+/// 保存した`y`の列と各`x`の列の効果から`effects(y) − Σ β̂_j effects(x_j)`で組み立てる（射影は線形なので、
+/// 残差の列を別に射影するのと同じ）。`levels`は吸収した次元（`effects`の順）で、戻り値は次元ごとの
+/// (水準のID, 効果)。
 ///
-/// 正規化は連結成分ごとに行う: 成分に含まれる最初の時点（時間順）の効果を0にし、そのぶんを同じ成分の
-/// 個体の効果に足す（成分が1つなら、バランスパネルと同じく全体で最初の時点が基準）。
-fn unbalanced_two_way(
+/// 正規化は連結成分ごとに行う: 2つ目以降の各次元で、成分に含まれる最初の水準（コード順。2つ目の時点は
+/// 時間順）の効果を0にし、そのぶんを同じ成分の1つ目の次元（個体）の効果に足す（成分が1つなら、
+/// バランスパネルと同じく全体で最初の時点が基準）。各行の水準はどれも同じ成分に属するので、行ごとの
+/// 効果の和は変わらない。
+fn absorbed_effects(
     estimator: &FeEstimator,
     absorbed: &AbsorbedEffects,
-    entity: &GroupCodes,
-    time: &GroupCodes,
-) -> FixedEffects {
+    levels: &[&GroupCodes],
+) -> Vec<Vec<(String, f64)>> {
     let mut combined = absorbed.y.clone();
     for (j, effects) in absorbed.x.iter().enumerate() {
         let beta = *estimator.params.get(j, 0);
@@ -132,41 +157,42 @@ fn unbalanced_two_way(
         }
     }
 
-    let system = GroupSystem::new(&[entity, time]);
-    let components = system.components();
-    // 成分ごとの最初の時点（コードは時間順）。
-    let mut reference = vec![usize::MAX; components.len()];
-    for level in (0..time.n_groups()).rev() {
-        reference[components.of_level(1, level)] = level;
+    let components = GroupSystem::new(levels).components();
+    // 次元ごと・成分ごとの最初の水準（コード順）。成分には全ての次元の水準が少なくとも1つ含まれる。
+    let mut shift = vec![0.0; components.len()];
+    let mut shifts_by_dimension: Vec<Vec<f64>> = Vec::with_capacity(levels.len());
+    for (dim, level) in levels.iter().enumerate().skip(1) {
+        let mut reference = vec![usize::MAX; components.len()];
+        for code in (0..level.n_groups()).rev() {
+            reference[components.of_level(dim, code)] = code;
+        }
+        let dim_shift: Vec<f64> = reference.iter().map(|&code| combined[dim][code]).collect();
+        for (total, part) in shift.iter_mut().zip(&dim_shift) {
+            *total += part;
+        }
+        shifts_by_dimension.push(dim_shift);
     }
-    let shift: Vec<f64> = reference.iter().map(|&level| combined[1][level]).collect();
 
-    let entity_effects = entity
-        .keys()
+    levels
         .iter()
         .enumerate()
-        .map(|(g, key)| {
-            (
-                key.clone(),
-                combined[0][g] + shift[components.of_level(0, g)],
-            )
+        .map(|(dim, level)| {
+            level
+                .keys()
+                .iter()
+                .enumerate()
+                .map(|(code, key)| {
+                    let component = components.of_level(dim, code);
+                    let value = if dim == 0 {
+                        combined[0][code] + shift[component]
+                    } else {
+                        combined[dim][code] - shifts_by_dimension[dim - 1][component]
+                    };
+                    (key.clone(), value)
+                })
+                .collect()
         })
-        .collect();
-    let time_effects = time
-        .keys()
-        .iter()
-        .enumerate()
-        .map(|(g, key)| {
-            (
-                key.clone(),
-                combined[1][g] - shift[components.of_level(1, g)],
-            )
-        })
-        .collect();
-    FixedEffects::TwoWay {
-        entity: entity_effects,
-        time: time_effects,
-    }
+        .collect()
 }
 
 #[cfg(test)]

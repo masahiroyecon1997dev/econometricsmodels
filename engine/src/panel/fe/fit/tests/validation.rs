@@ -178,7 +178,7 @@ fn fe_estimator_fit_two_way_requires_time() {
 fn fe_estimator_fit_two_way_without_time_reports_requires_time_before_any_other_error() {
     // 2-wayで`time`が無いことは、他のどの欠陥（entityのsingleton・不正な
     // `confidence_level`・cov_type固有の検証）よりも先に報告される。優先順位は
-    // `fit()`冒頭の`two_way_time`が守る。
+    // `fit()`冒頭の`absorbed_levels`が守る。
     let entity = strings(&["a", "a", "c"]);
     let y = [1.0, 2.0, 3.0];
     let covs = || {

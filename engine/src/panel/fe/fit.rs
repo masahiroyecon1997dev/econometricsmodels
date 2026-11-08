@@ -9,8 +9,9 @@ use super::FeEstimator;
 use super::input::{FeAbsorption, FeCovType, FeEffects, FeInput};
 use super::r_squared::{fe_r_squared_between, fe_r_squared_overall};
 use super::within::{
-    validate_no_singleton_groups_one_way, validate_no_singleton_groups_two_way,
-    validate_no_zero_variance_regressors, within_transform_one_way, within_transform_two_way_with,
+    validate_no_singleton_groups_multi_way, validate_no_singleton_groups_one_way,
+    validate_no_singleton_groups_two_way, validate_no_zero_variance_regressors,
+    within_transform_multi_way, within_transform_one_way, within_transform_two_way_with,
 };
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::OlsInput;
@@ -25,16 +26,21 @@ use crate::shared::least_squares::{LeastSquaresFit, least_squares};
 use crate::shared::validation::{column_is_zero_variance_with_noise, has_no_variation};
 use crate::shared::wald::wald_f_test;
 
-/// 2-wayの時点コードを返す（1-wayは`None`）。2-wayなのに`input`に`time`が無ければ
-/// `PanelError::TwoWayRequiresTime`。`FeEstimator::fit`が最初に呼び、以降の
-/// cov_type別の計算は`effects`ではなくこの`Option`で1-way/2-wayを区別する。
-fn two_way_time(effects: FeEffects, input: &FeInput) -> Result<Option<&GroupCodes>, PanelError> {
+/// 固定効果が吸収する次元（`effects`の順。個体、2-wayなら時点、`MultiWay`は入力の全ての次元）を返す。
+/// 2-wayなのに`input`に`time`が無ければ`PanelError::TwoWayRequiresTime`、`MultiWay`なのに入力の次元が
+/// 3つ未満なら`CommonError::Internal`（呼び出し側の実装誤り）。`FeEstimator::fit`が最初に呼び、以降の
+/// 1-way/2-way/高次元の分岐は`effects`ではなくこの`Vec`の長さで区別する。
+fn absorbed_levels(effects: FeEffects, input: &FeInput) -> Result<Vec<&GroupCodes>, PanelError> {
     match effects {
-        FeEffects::OneWay => Ok(None),
-        FeEffects::TwoWay => input
-            .time_codes()
-            .map(Some)
-            .ok_or(PanelError::TwoWayRequiresTime),
+        FeEffects::OneWay => Ok(vec![input.entity_codes()]),
+        FeEffects::TwoWay => {
+            let time = input.time_codes().ok_or(PanelError::TwoWayRequiresTime)?;
+            Ok(vec![input.entity_codes(), time])
+        }
+        FeEffects::MultiWay if input.n_effects() >= 3 => Ok(input.effect_codes().iter().collect()),
+        FeEffects::MultiWay => {
+            Err(CommonError::internal("multi-way effects need at least three dimensions").into())
+        }
     }
 }
 
@@ -51,19 +57,17 @@ pub(super) fn fit_fe(
     // グローバル並列度」参照）。
     crate::shared::parallelism::ensure_serial();
 
-    // 2-wayの時点コード（1-wayは`None`）。`time`が無いのに2-wayを指定した入力はここで
-    // 弾き、以降は`Some`かどうかだけで1-way/2-wayを分岐する（`effects`と`input.time`の
-    // 食い違いを後段で`expect`せずに済む）。
-    let two_way_time = two_way_time(effects, &input)?;
-    // 固定効果は2次元まで。3つ目以降の次元の配線（within変換・自由度・singleton検出）は未対応で、
-    // `FeInput`のコンストラクタがK>=3を作れない間はここに来ない。
-    debug_assert!(input.n_effects() <= 2, "fit supports at most two effects");
+    // 吸収する次元。`time`が無いのに2-wayを指定した入力や、次元が足りない`MultiWay`はここで弾き、
+    // 以降は`levels`の長さだけで1-way/2-way/高次元を分岐する（`effects`と入力の食い違いを後段で
+    // `expect`せずに済む）。
+    let levels = absorbed_levels(effects, &input)?;
 
     absorption.validate()?;
 
     match effects {
         FeEffects::OneWay => validate_no_singleton_groups_one_way(&input)?,
         FeEffects::TwoWay => validate_no_singleton_groups_two_way(&input)?,
+        FeEffects::MultiWay => validate_no_singleton_groups_multi_way(&input)?,
     }
 
     // 生の値が全ての行で同じ列は、固定効果を除く前に分かる。固定効果を除いた後で分散がなくなる
@@ -92,13 +96,15 @@ pub(super) fn fit_fe(
             absorbed = within.absorbed;
             (within.y, within.x, within.noise)
         }
+        FeEffects::MultiWay => {
+            let within = within_transform_multi_way(&input, absorption)?;
+            absorbed = within.absorbed;
+            (within.y, within.x, within.noise)
+        }
     };
 
     let n = input.nobs();
-    let n_periods = two_way_time.map(GroupCodes::n_groups);
-    let n_groups: Vec<usize> = std::iter::once(input.entity_codes().n_groups())
-        .chain(n_periods)
-        .collect();
+    let n_groups: Vec<usize> = levels.iter().map(|level| level.n_groups()).collect();
     let k = input.x_names().len();
     // `neffects`: 固定効果ダミーの実効パラメータ数（`fe-spec.md`3.2節）。2つ目以降の効果は
     // 定数項ぶんの重複が1つずつ生じるため、水準数の合計から引く（2-wayは`n_entities + n_periods - 1`）。
@@ -196,7 +202,7 @@ pub(super) fn fit_fe(
             df_model,
             n_slopes: k,
             entity: input.entity_codes(),
-            structure: PanelStructure::FixedEffects { two_way_time },
+            structure: PanelStructure::FixedEffects { levels: &levels },
         },
     )?;
 
@@ -265,7 +271,7 @@ pub(super) fn fit_fe(
         df_resid,
         df_inference,
         dk_bandwidth_used,
-        n_periods,
+        n_groups,
         absorbed,
         std_errors,
         cov_params,

@@ -25,7 +25,9 @@
 //! - `confidence_level`の範囲外と設計行列の特異性は`PanelError::WithinRegressionFailed`
 //!   （`LeastSquaresError`を包む）。観測数不足（`n <= df_model`）は先に
 //!   `InsufficientDegreesOfFreedom`で弾く。
-//! - 1-way/2-wayは`FeEffects`で切り替える。
+//! - 1-way/2-way/3次元以上（`MultiWay`）は`FeEffects`で切り替える。3次元以上は`FeInput::from_effect_groups`で
+//!   効果の各列のコードを渡し、バランスパネルでも閉形式は使わず交互射影で固定効果を除く（同じ組合せの
+//!   重複する行も許す）。HC2/HC3のレバレッジは3次元以上では未対応（`CommonError::Internal`）。
 //!
 //! ## within変換
 //!
@@ -217,9 +219,9 @@ pub struct FeEstimator {
     /// `floor(4*(t/100)^(2/9))`で自動計算した値）。`FeCovType::Dk`の`bandwidth`はユーザー指定値の
     /// まま変更しないため別フィールドで保持する。`Dk`以外では`None`。
     dk_bandwidth_used: Option<usize>,
-    /// `time`のユニーク数。2-wayのみ`Some`、1-wayは`None`。
-    n_periods: Option<usize>,
-    /// 不均衡な2-wayで、交互射影が`y`と各`x`の列から引いた個体の効果と時点の効果。`fixed_effects()`が
+    /// 吸収した効果の次元ごとの水準数（`effects`の順。1-wayは個体数だけ、2-wayは個体数と時点数）。
+    n_groups: Vec<usize>,
+    /// 交互射影が`y`と各`x`の列から引いた各次元の効果（不均衡な2-wayと3次元以上）。`fixed_effects()`が
     /// 傾きを引いた残差の効果を組み立てるのに使う（射影が線形なので列ごとの効果の線形結合になる）。
     /// バランスパネルと1-wayは`None`。
     absorbed: Option<within::AbsorbedEffects>,
@@ -254,16 +256,18 @@ impl FeEstimator {
     /// パネル固有R²（2.3節）を計算し直す（モジュールdoc「自由度とF統計量」
     /// 「`cov_type`対応」「パネル固有R²」参照）。
     ///
-    /// パイプライン: 2-wayの時点コードの解決（`two_way_time`。2-wayで`time`が無ければ
+    /// パイプライン: 吸収する次元の解決（`absorbed_levels`。2-wayで`time`が無ければ
     /// `PanelError::TwoWayRequiresTime`。以降の検証より先に評価する）→ singleton検出
-    /// （`validate_no_singleton_groups_one_way`/`validate_no_singleton_groups_two_way`）
-    /// → within変換（`within_transform_one_way`/`within_transform_two_way`、
-    /// 2-wayは全組合せがそろえば閉形式、そうでなければ交互射影）→ 自由度検証 → 分散ゼロ検出
+    /// （`validate_no_singleton_groups_one_way`/`_two_way`/`_multi_way`）
+    /// → within変換（`within_transform_one_way`/`within_transform_two_way_with`/
+    /// `within_transform_multi_way`。2-wayは全組合せがそろえば閉形式、そうでなければ、3次元以上は常に
+    /// 交互射影）→ 自由度検証 → 分散ゼロ検出
     /// （`validate_no_zero_variance_regressors`）→ `confidence_level`検証 → 最小二乗
     /// （切片なし。理由はモジュールdoc参照）→ `cov_type`別の共分散行列の計算 → 自由度調整後の統計量の再計算。
     ///
     /// # Errors
-    /// - `effects=TwoWay`で`input.time_codes()`が`None`の場合は`PanelError::TwoWayRequiresTime`
+    /// - `effects=TwoWay`で`input.time_codes()`が`None`の場合は`PanelError::TwoWayRequiresTime`、
+    ///   `effects=MultiWay`で入力の次元が3つ未満の場合は`CommonError::Internal`
     /// - singletonグループが見つかった場合は`PanelError::SingletonGroup`
     /// - 打ち切り設定が範囲外なら`PanelError::InvalidTol`・`PanelError::InvalidMaxIter`、不均衡な2-wayで
     ///   交互射影が収束しなければ`PanelError::AbsorptionNotConverged`
@@ -378,9 +382,19 @@ impl FeEstimator {
         self.dk_bandwidth_used
     }
 
-    /// `time`のユニーク数（2-wayのみ`Some`、1-wayは`None`）。
+    /// `time`のユニーク数（2-wayのみ`Some`。1-wayと3次元以上は`None`。3次元以上の2つ目以降の次元の
+    /// 水準数は[`n_groups`](Self::n_groups)）。
     pub fn n_periods(&self) -> Option<usize> {
-        self.n_periods
+        self.n_groups
+            .get(1)
+            .copied()
+            .filter(|_| self.effects == FeEffects::TwoWay)
+    }
+
+    /// 吸収した効果の次元ごとの水準数（`effects`の順。1-wayは個体数だけ、2-wayは個体数と時点数、
+    /// 3次元以上は全ての列）。
+    pub fn n_groups(&self) -> &[usize] {
+        &self.n_groups
     }
 
     /// `cov_type`別に計算し直した標準誤差（`(k, 1)`、`params()`と対応）。

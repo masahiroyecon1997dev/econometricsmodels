@@ -3,6 +3,7 @@
 use super::dummy_leverage::dummy_leverage;
 use super::error::PanelError;
 use super::validation::covers_every_combination;
+use crate::shared::error::CommonError;
 use crate::shared::group_codes::GroupCodes;
 
 /// 固定効果の実効パラメータ数`neffects`（`fe-spec.md`3.2節）。`n_groups`は`effects`の列ごとの水準数
@@ -22,44 +23,51 @@ pub(crate) fn absorbed_parameters(n_groups: &[usize]) -> usize {
 /// within変換後のレバレッジ（`h_within`）の和になる（fixestの`vcov="HC2"`/`"HC3"`と数値一致を
 /// 1-way・2-way双方で確認済み）。
 ///
-/// `h_dummy`は、1-wayが`1/T_i`、全組合せがそろうバランスの2-wayが`1/T_i + 1/N_t − 1/n`（グループサイズ
-/// `T_i`/`N_t`はコードの`counts()`から引く）。組合せが欠ける不均衡の2-wayは閉形式が無く、水準の少ない
-/// 方の効果の水準数の密な行列を解く（`dummy_leverage`）。
+/// `levels`は吸収した効果の次元（`effects`の順。個体、2-wayなら時点）。`h_dummy`は、1-wayが`1/T_i`、
+/// 全組合せがそろうバランスの2-wayが`1/T_i + 1/N_t − 1/n`（グループサイズ`T_i`/`N_t`はコードの
+/// `counts()`から引く）。組合せが欠ける不均衡の2-wayは閉形式が無く、水準の少ない方の効果の水準数の
+/// 密な行列を解く（`dummy_leverage`）。3つ以上の次元は未対応。
 ///
 /// # Errors
-/// 不均衡の2-wayで、水準の少ない方の効果の水準数が上限を超えるとき
-/// `PanelError::LeverageDimensionTooLarge`。
+/// - 不均衡の2-wayで、水準の少ない方の効果の水準数が上限を超えるとき
+///   `PanelError::LeverageDimensionTooLarge`
+/// - 次元が3つ以上のとき`CommonError::Internal`（未対応）
 pub(super) fn leverage_full(
     h_within: &[f64],
-    entity: &GroupCodes,
-    time: Option<&GroupCodes>,
+    levels: &[&GroupCodes],
     n: usize,
 ) -> Result<Vec<f64>, PanelError> {
-    let entity_codes = entity.codes();
-    let entity_sizes = entity.counts();
-    Ok(match time {
-        None => (0..n)
-            .map(|i| 1.0 / (entity_sizes[entity_codes[i]] as f64) + h_within[i])
-            .collect(),
+    match levels {
+        [entity] => {
+            let entity_codes = entity.codes();
+            let entity_sizes = entity.counts();
+            Ok((0..n)
+                .map(|i| 1.0 / (entity_sizes[entity_codes[i]] as f64) + h_within[i])
+                .collect())
+        }
         // 全組合せが過不足なく1回ずつ現れる（`covers_every_combination`）ときだけ閉形式を使う。
-        Some(time) if covers_every_combination(entity, time) => {
-            let time_codes = time.codes();
-            let time_sizes = time.counts();
-            (0..n)
+        [entity, time] if covers_every_combination(entity, time) => {
+            let (entity_codes, entity_sizes) = (entity.codes(), entity.counts());
+            let (time_codes, time_sizes) = (time.codes(), time.counts());
+            Ok((0..n)
                 .map(|i| {
                     1.0 / (entity_sizes[entity_codes[i]] as f64)
                         + 1.0 / (time_sizes[time_codes[i]] as f64)
                         - 1.0 / (n as f64)
                         + h_within[i]
                 })
-                .collect()
+                .collect())
         }
-        Some(time) => dummy_leverage(entity, time)?
+        [entity, time] => Ok(dummy_leverage(entity, time)?
             .into_iter()
             .zip(h_within)
             .map(|(dummy, within)| dummy + within)
-            .collect(),
-    })
+            .collect()),
+        _ => Err(CommonError::internal(
+            "the HC2 and HC3 leverage is not available for three or more effects",
+        )
+        .into()),
+    }
 }
 
 /// FE次元（`entity`または`time`）の各値が`cluster`上でちょうど1つの値にしか対応しないか
@@ -87,11 +95,11 @@ fn fixef_dimension_nested_within_cluster(dim: &GroupCodes, cluster: &GroupCodes)
 /// fixest 0.14.2のRソース（`Rscript -e 'cat(deparse(fixest:::ssc_compute_K), sep="\n")'`）と
 /// 実地数値実験（devcontainer内のfixest 0.14.2、実装時）で確定した式:
 ///
-/// FE次元（1-wayは`entity`のみ、2-wayは`entity`+`time`）それぞれについて、その次元が
+/// FE次元（`effects`の各列）それぞれについて、その次元が
 /// クラスター変数に「ネスト」している（＝各水準がクラスターの単一の値にしか対応しない、
 /// `fixef_dimension_nested_within_cluster`で判定）かを調べ、ネストした次元の生の水準数
 /// （`n_entities`/`n_periods`、`df_model`に含まれる冗長性補正前の値）の合計を
-/// `nested_size_sum`、ネストした次元の数を`count_nested`、FE次元の総数を`m`（1か2）とする:
+/// `nested_size_sum`、ネストした次元の数を`count_nested`、FE次元の総数を`m`とする:
 ///
 /// - `count_nested == 0`（どの次元もネストしていない、Stataの`xtreg,fe`型）:
 ///   `K = df_model`（固定効果ダミーをフルカウント）
@@ -129,26 +137,23 @@ fn fixef_dimension_nested_within_cluster(dim: &GroupCodes, cluster: &GroupCodes)
 /// `k=2`なら`df_model=22`・`nested_size_sum=20`・`count_nested=m=1`で`K=22-20+1=3`
 /// （`k+1=3`と一致、フロアはno-op）。
 ///
-/// `two_way_time`は2-wayの時点コード（1-wayは`None`）。FE次元は1-wayがentityのみ、
-/// 2-wayがentityとtime（水準数は`time.n_groups()`）。
+/// `levels`は吸収した効果の次元（`effects`の順。1-wayはentityのみ、2-wayはentityとtime、高次元は
+/// 全ての列）。
 pub(super) fn fe_cluster_k_correction(
-    entity: &GroupCodes,
-    two_way_time: Option<&GroupCodes>,
-    n_entities: usize,
+    levels: &[&GroupCodes],
     df_model: usize,
     k: usize,
     cluster: &GroupCodes,
 ) -> usize {
-    let mut dims = vec![(
-        fixef_dimension_nested_within_cluster(entity, cluster),
-        n_entities,
-    )];
-    if let Some(time) = two_way_time {
-        dims.push((
-            fixef_dimension_nested_within_cluster(time, cluster),
-            time.n_groups(),
-        ));
-    }
+    let dims: Vec<(bool, usize)> = levels
+        .iter()
+        .map(|level| {
+            (
+                fixef_dimension_nested_within_cluster(level, cluster),
+                level.n_groups(),
+            )
+        })
+        .collect();
     let m = dims.len();
     let count_nested = dims.iter().filter(|(nested, _)| *nested).count();
     let nested_size_sum: usize = dims
@@ -237,7 +242,7 @@ mod tests {
         let h_within = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6];
         let sizes = [2.0, 3.0, 1.0, 3.0, 2.0, 3.0];
 
-        let h_full = leverage_full(&h_within, &entity, None, 6).unwrap();
+        let h_full = leverage_full(&h_within, &[&entity], 6).unwrap();
 
         for i in 0..6 {
             assert!(
@@ -254,7 +259,7 @@ mod tests {
         let time = codes(&["t2", "t1", "t1", "t2", "t1", "t2"]);
         let h_within = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6];
 
-        let h_full = leverage_full(&h_within, &entity, Some(&time), 6).unwrap();
+        let h_full = leverage_full(&h_within, &[&entity, &time], 6).unwrap();
 
         for i in 0..6 {
             let expected = 1.0 / 2.0 + 1.0 / 3.0 - 1.0 / 6.0 + h_within[i];
@@ -269,7 +274,7 @@ mod tests {
         let time = codes(&["t1", "t1", "t2", "t3", "t2", "t2", "t3"]);
         let h_within = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7];
 
-        let h_full = leverage_full(&h_within, &entity, Some(&time), 7).unwrap();
+        let h_full = leverage_full(&h_within, &[&entity, &time], 7).unwrap();
         let dummy = dummy_leverage(&entity, &time).unwrap();
 
         for i in 0..7 {
@@ -316,7 +321,7 @@ mod tests {
         let k = 1;
         let n_entities = 2;
         let df_model = k + n_entities; // 実際のFeEstimator::fitと同じneffects=n_entitiesの関係
-        let k_correction = fe_cluster_k_correction(&entity, None, n_entities, df_model, k, &entity);
+        let k_correction = fe_cluster_k_correction(&[&entity], df_model, k, &entity);
         assert_eq!(k_correction, k + 1);
     }
 
@@ -331,9 +336,8 @@ mod tests {
         // = 2 - 2 + 1 = 1`が`k+1=2`を下回る状況を作る。
         let entity = codes(&["a", "a", "b", "b"]);
         let k = 1;
-        let n_entities = 2;
         let df_model = 2; // 本来のneffects=n_entities=2との整合を意図的に崩す
-        let k_correction = fe_cluster_k_correction(&entity, None, n_entities, df_model, k, &entity);
+        let k_correction = fe_cluster_k_correction(&[&entity], df_model, k, &entity);
         assert_eq!(
             k_correction,
             k + 1,
@@ -381,5 +385,28 @@ mod tests {
             &groups
         ));
         assert!(!two_group_split_is_degenerate(&[], &groups));
+    }
+
+    #[test]
+    fn fe_cluster_k_correction_drops_every_dimension_nested_in_the_cluster() {
+        let entity = codes(&["a", "a", "b", "b"]);
+        let time = codes(&["1", "2", "1", "2"]);
+        // 3つ目の効果は個体に入れ子（クラスターも個体）。
+        let third = codes(&["x", "x", "y", "y"]);
+        let (k, n_groups) = (1, [2, 2, 2]);
+        let df_model = k + absorbed_parameters(&n_groups);
+        assert_eq!(df_model, 5);
+        // 個体と第3の効果がネスト（水準数の合計4、ネストした次元は2つ）、時点はネストしない:
+        // K = df_model − (4 − 2) = 3。
+        assert_eq!(
+            fe_cluster_k_correction(&[&entity, &time, &third], df_model, k, &entity),
+            3
+        );
+        // どの次元もネストしないクラスター（観測ごと）は、固定効果をフルに数える。
+        let rows = codes(&["r1", "r2", "r3", "r4"]);
+        assert_eq!(
+            fe_cluster_k_correction(&[&entity, &time, &third], df_model, k, &rows),
+            df_model
+        );
     }
 }

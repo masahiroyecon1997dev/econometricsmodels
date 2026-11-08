@@ -609,7 +609,9 @@ class IVResults:
         valid under heteroskedasticity, clustering and autocorrelation.
         The covariance follows the `cov_type` (and `cluster`, `hac_lags`,
         `hac_time`) of the options passed to `fit()`; with
-        `cov_type="classical"` it equals the Cragg-Donald statistic.
+        `cov_type="classical"` it equals the Cragg-Donald statistic. With
+        one or two excluded instruments, prefer the simplified critical
+        values (see `EffectiveFResult`).
 
         This is a post-estimation diagnostic: it is never computed by
         `fit()`. It re-reads the variables from the data passed to

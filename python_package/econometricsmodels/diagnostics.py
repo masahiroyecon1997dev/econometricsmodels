@@ -249,6 +249,11 @@ class EffectiveFResult:
     critical values are keyed by `tau` (0.05, 0.10, 0.20, 0.30).
     `critical_values`, when not `None`, is the sharper set;
     `simplified_critical_values` is always available and is conservative.
+    With one or two excluded instruments the 2SLS bias has no first moment
+    in general, so a bias-based critical value is a weaker guide there;
+    prefer `simplified_critical_values`. With two excluded instruments and
+    `cov_type="classical"`, `bias_bound` is 0 and `critical_values` are the
+    same for every `tau`.
 
     Attributes are read-only, but the critical values are plain dicts: do
     not modify them in place, and note that the instance is therefore not

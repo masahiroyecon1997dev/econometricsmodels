@@ -114,7 +114,7 @@ Which one to use:
 
 - `cragg_donald()` is the joint statistic for several endogenous variables and comes with Stock-Yogo critical values. It assumes homoskedastic errors and ignores `cov_type`.
 - `kleibergen_paap()` follows the `cov_type` of the fit (for GMM, `cov_type` and not `gmm_weight_type`), so it stays valid under heteroskedasticity, clustering and autocorrelation, and it handles several endogenous variables. It returns no critical values. The rk LM test has the null of underidentification, so rejecting it does not show that the instruments are strong. The rk Wald F is the robust counterpart of the Cragg-Donald statistic; with `cov_type="classical"` the two are equal.
-- `effective_f()` follows the `cov_type` of the fit and is for one endogenous variable, with critical values for the worst-case 2SLS bias. It is the statistic designed for one endogenous variable under heteroskedastic, clustered or autocorrelated errors.
+- `effective_f()` follows the `cov_type` of the fit and is for one endogenous variable, with critical values for the worst-case 2SLS bias. It is the statistic designed for one endogenous variable under heteroskedastic, clustered or autocorrelated errors. With one or two excluded instruments, prefer its `simplified_critical_values`.
 
 The critical values are `dict`s keyed by the threshold, and a table that does not cover your model gives `None`. A statistic above the critical value for a threshold rejects the null that the instruments are weak by that criterion: a 2SLS relative bias above the threshold or a size distortion above the threshold for `cragg_donald()`, and a worst-case bias above the threshold for `effective_f()`. It does not prove that the instruments are strong.
 

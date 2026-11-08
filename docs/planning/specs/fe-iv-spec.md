@@ -857,3 +857,21 @@ cluster表の2行の統合、`accepted-data.md`の見出し分割。
 - ルートCLAUDE.mdは、診断を「`DiagnosticResult`で返す」と書いている（2章）。今回の例外は`docs/spec/inference-conventions.md`に書いたが、CLAUDE.mdへの追記は利用者の承認が要る（未確認）。
 - 保留（利用者の判断待ち）: READMEの「Attribution and Rights」注意書き、フィクスチャのデータ（Wooldridge等）のライセンス確認、ルートCLAUDE.md 3章の`shared/`の列挙の更新、`mop-oracle-spec.md`の履歴の扱い。
 - Web検索は利用者の許可を得てから（#367で他パッケージの挙動を確認するときも）。
+
+### 9.13 #367のコミット後（2026-11-08）
+
+**状態**: `release/v0.10.0`。#367は`79b293b8`（ivDiagの恒久導入・アダプタ・fixture・pytest）、公開docsの校閲対応は`2195c136`、K≤2の有効Fの注意書きは続くコミット。**`79b293b8`以降は未push**（`5a5966e2`までpush済み）。
+
+**#367で決めたこと（ユーザー決定）**
+- ivDiagは**独立クロスチェック**（主参照はCD・KPがlinearmodels、有効FがMOPオラクルのまま）。fixtureは診断専用の1ファイル`iv_weak_diagnostics_crosscheck.json`。一時導入用の`mop_ivdiag_compare.py`・`run_ivdiag_eff_f.R`は削除してアダプタ`ivdiag_ref.py`・`run_ivdiag.R`に一本化（`mop_oracle_values.md`のivDiag節はFEありの行の記録として残す）。
+- 内生変数1個・`hc1`/`cluster`の範囲だけ比べる。ivDiagの`F.standard`=CD、`F.robust`/`F.cluster`=rk Wald F、`eff_F`（`prec=14`。`ivDiag()`は4桁に丸める）=有効F。rk LM・臨界値・複数内生変数はivDiagに無い。
+- 実測の最大相対差: CD 2.1e-14、rk Wald F 2.3e-14、有効F 1.7e-12（実データcard。合成は1e-13以下）。許容は`iv_weak_diagnostics_crosscheck`の`rtol`=1e-10。
+- devcontainerの再構築は利用者の作業（Dockerfileは更新済み。再構築までは`R_LIBS=<一時ライブラリ>`でfixtureを再生成できる）。
+
+**K≤2の有効F（ユーザー決定）**: 論文確認の結果、`critical_values=None`にはしない。MOP 2013はNagarバイアスの存在だけを根拠にK≤2でも進める（Lewis-Mertens 2022の記述。MOP原文は未取得）。Stock-YogoはK≤n+1の臨界値を載せない。docs・docstringに「1〜2本のときは`simplified_critical_values`を使う」と注意書きを足した。`classical`でK=2のとき`bias_bound=0`・`critical_values`が全τで同じ値になるのは式どおり。
+Stock-Yogoの表は実装の値がNBER TWP 284のTable 1（バイアス）・Table 2（サイズ）と一致。2005年の章との一致は未確認（docsに明記済み）。
+
+**校閲（/review-docs）の結果**: 指摘は全て対応済み（`inference-conventions.md`の手法別の表に診断の行を足す案だけは、診断を扱う表ではないので見送り）。エラーカタログの文面2件も直した。
+
+**次の作業**: #368（C統計量のengine。同じ重み行列を使うかを着手前にユーザーへ確認）→#369→FE-2SLS（#370〜#380）→FE-GMM（#381〜#388）。
+**保留（利用者の判断待ち）**: ルートCLAUDE.md 2章への診断の例外の追記、READMEの「Attribution and Rights」、フィクスチャのデータのライセンス確認、CLAUDE.md 3章の`shared/`の列挙、`mop-oracle-spec.md`の履歴の扱い。

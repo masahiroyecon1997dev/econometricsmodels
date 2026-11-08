@@ -709,3 +709,13 @@ Pythonまで終わるまでpushしない。
 K≤2の挙動は変えていない（engine 1321件・engine_pybind 240件・pytest `tests/panel`＋`tests/cross_method` 8846件が通る）。`fit_fe`はK>2を`debug_assert`で止める（手順3で外す）。
 - **手順7で決める**: `PanelIndex::new`・`FeIvInput::from_group_codes`は2つ目が時間順のコードであることをdocでしか保証しない。`engine_pybind`が`TimeKeys`を渡すには`TimeKeys::codes()`が`pub(crate)`のため`GroupCodes`へ変換できない。
   `TimeKeys::into_codes`（`pub`）を足すか、時点の次元専用の引数を設けるかを、`FeInput`のK次元コンストラクタと合わせて決める。`FeInput::from_group_codes`の`time.codes().clone()`（n要素のコピー）も`into_codes`で解消できる。
+
+**進捗（手順2、2026-11-08）**: 実装済み（コミット前）。重複ペアの検査（`ensure_no_duplicate_entity_time_pairs`・`PanelError::DuplicateEntityTimePair`・`DUPLICATE_ENTITY_TIME_PAIR`）を削除し、
+`covers_every_combination`を「`n == N×T`かつ重複なし」に置き換えた（`validate_balanced_panel`も同じ判定）。重複のある入力は不均衡として交互射影に回り、ダミー変数回帰と一致する
+（engineのLSDV照合・Pythonのnumpy照合・HC2/HC3）。REの2-wayは重複＋行数一致を不均衡として拒否する（`PANEL_NOT_BALANCED_FOR_TWO_WAY`）。
+`ensure_no_singleton_groups`・`rows_dropped_by_repeated_removal`（連鎖）・`two_group_split_is_degenerate`は次元のスライスを取る形にし、3次元のテストを足した。
+`FeInput`はまだK≤2なので、K≥3の配線は手順3。docs（`validation.md`・`usage/fe.md`・`methods/fe.md`・`fe-spec.md`・CHANGELOG）とエラーコードの生成物を更新済み。
+`dummy_leverage`は、重複を許したことで個体内の行数の2乗に比例して遅くなるのを避けるため、個体ごとに時点の出現回数を先に集約してから`M`と`v`を作る
+（式は`c_e`を出現回数のベクトルとして書いたままで成り立つ。重複を含む入力でダミー回帰のハット行列と一致）。LSDV照合は、重複あり・行数が`N×T`のまま重複と欠落が相殺する入力で
+係数・古典/HC2/HC3の共分散・`fixed_effects()`を確認。Python: 全体実行（`--check-error-coverage`）11912件、再ビルド後の`tests/panel`＋`tests/cross_method` 8847件が通る。
+

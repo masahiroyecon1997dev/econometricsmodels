@@ -73,8 +73,8 @@ import statistics
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass, replace
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -303,6 +303,12 @@ class PerfAdapter:
             engine 分は git ハッシュで足りるため不要。
         build_dataframe: `(n, k, seed) -> pl.DataFrame`。cluster 列など手法側で
             必要な派生列の付与もここで行う。
+        method_dataframes: method ごとに別のデータを使う手法の
+            `{method: (n, k, seed) -> pl.DataFrame}`。ここに無い method は
+            `build_dataframe` を使うので、method でデータが変わらない手法は
+            指定不要（FE の不均衡パネル・3次元の固定効果のように、method が
+            パネルの形そのものを決める場合に使う）。キーは `default_method` か
+            `extra_methods` の値であること。
         build_pandas_df: `pl.DataFrame -> object`。`library != "engine"` のとき
             `_worker()` がこれを呼んで `FitContext.pandas_df` を作る。既定は単純な
             `df.to_pandas()`（OLS/WLS/Logit/Probit/IV/Tobitはこのまま使う）。
@@ -365,6 +371,9 @@ class PerfAdapter:
     build_pandas_df: Callable[[pl.DataFrame], object] = lambda df: (
         df.to_pandas()
     )
+    method_dataframes: Mapping[
+        str, Callable[[int, int, int], pl.DataFrame]
+    ] = field(default_factory=dict)
 
     n_sweep: Sequence[int] = (10_000, 100_000, 1_000_000)
     n_sweep_fixed_k: int = 5
@@ -390,6 +399,13 @@ class PerfAdapter:
                 f"{self.default_cov_case!r} is not in cov_cases"
             )
         methods = {self.default_method, *self.extra_methods}
+        unknown_methods = set(self.method_dataframes) - methods
+        if unknown_methods:
+            raise ValueError(
+                f"{self.method}: method_dataframes keys "
+                f"{sorted(unknown_methods)} are neither default_method nor "
+                "in extra_methods"
+            )
         for case in self.cov_cases:
             unknown = set(case.libraries or ()) - set(self.libraries)
             if unknown:
@@ -454,7 +470,10 @@ def _worker(
     method: str = "newton",
 ) -> dict:
     case = _find_case(adapter, cov_case)
-    df = adapter.build_dataframe(n, k, seed).with_columns(
+    build_dataframe = adapter.method_dataframes.get(
+        method, adapter.build_dataframe
+    )
+    df = build_dataframe(n, k, seed).with_columns(
         pl.int_range(pl.len()).alias(HAC_TIME_COL)
     )
     cluster = adapter.cluster

@@ -312,3 +312,41 @@ def test_the_confidence_level_applies_to_three_effects():
         assert narrow.conf_int[name][1] - narrow.conf_int[name][0] < (
             wide.conf_int[name][1] - wide.conf_int[name][0]
         )
+
+
+@pytest.mark.parametrize("cov_type", ["hc2", "hc3"])
+def test_hc2_and_hc3_on_a_large_panel_where_every_entity_covers_every_period(
+    cov_type,
+):
+    # 個体ごとに全時点が1行ずつで、3つ目は行ごとに無作為。時点の列の和と3つ目の列の和が
+    # 個体のダミーに吸収されてランクが2つ落ちる。行数が多いと、レバレッジの行列の
+    # 引き算の丸め誤差が零固有値をランクの閾値より大きくして、特異と誤判定していた。
+    rng = np.random.default_rng(11)
+    n_entities, n_periods = 2000, 6
+    n = n_entities * n_periods
+    entity = np.repeat(np.arange(n_entities), n_periods)
+    third = rng.integers(0, 50, n)
+    x1, x2 = rng.normal(size=(2, n))
+    y = (
+        1.5 * x1
+        - 0.7 * x2
+        + rng.normal(size=n_entities)[entity]
+        + rng.normal(size=50)[third]
+        + 0.5 * rng.normal(size=n)
+    )
+    df = pl.DataFrame(
+        {
+            "entity": entity,
+            "time": np.tile(np.arange(n_periods), n_entities),
+            "c": third,
+            "x1": x1,
+            "x2": x2,
+            "y": y,
+        }
+    )
+    effects = ["entity", "time", "c"]
+    robust = _fit(df, effects, cov_type)
+    hc1 = _fit(df, effects, "hc1")
+    for name in robust.params:
+        ratio = robust.std_errors[name] / hc1.std_errors[name]
+        assert 0.9 < ratio < 1.2

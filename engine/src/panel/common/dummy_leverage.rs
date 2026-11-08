@@ -105,16 +105,29 @@ pub(super) fn dummy_leverage(levels: &[&GroupCodes]) -> Result<Vec<f64>, PanelEr
         }
     }
     let scale = (0..dense).map(|i| *m.get(i, i)).fold(0.0_f64, f64::max);
+    // 引き算は`n`回ほど積み重なり、和の大きさに応じた丸め誤差が溜まる。零固有値のノイズがランクの閾値を
+    // 超えないよう、引き算ごとの丸め誤差を別の行列に集めて最後に足し戻す（TwoSum）。
+    let mut rounding = Mat::<f64>::zeros(dense, dense);
     let mut tally = Tally::new(dense);
     for (group, group_rows) in rows.iter().enumerate() {
-        let weight = 1.0 / sizes[group] as f64;
+        let size = sizes[group] as f64;
         let occurrences = tally.count(group_rows, &columns);
         for &(a, count_a) in occurrences {
             for &(b, count_b) in occurrences {
-                *m.get_mut(a, b) -= weight * (count_a * count_b) as f64;
+                let term = -((count_a * count_b) as f64) / size;
+                let current = *m.get(a, b);
+                let sum = current + term;
+                let virtual_term = sum - current;
+                *rounding.get_mut(a, b) += (current - (sum - virtual_term)) + (term - virtual_term);
+                *m.get_mut(a, b) = sum;
             }
         }
         tally.clear();
+    }
+    for i in 0..dense {
+        for j in 0..dense {
+            *m.get_mut(i, j) += *rounding.get(i, j);
+        }
     }
     let independent = independent_columns(&m, scale);
     let rank = independent.len();
@@ -652,5 +665,44 @@ mod tests {
                 max_levels: MAX_DENSE_LEVELS
             })
         );
+    }
+
+    /// 個体ごとに全時点が1行ずつで、3つ目の効果は行ごとに無作為。個体と時点と3つ目の合計が同じ恒等式を
+    /// 作るので、時点の列の和・3つ目の列の和が個体のダミーに吸収され、ランクが2つ落ちる。行数が多いと、
+    /// 引き算の丸め誤差が零固有値をランクの閾値より大きくして、ランクを過大に見積もる。
+    fn entity_time_random_third(n_entities: usize) -> Vec<GroupCodes> {
+        let mut state = 7u64;
+        let (mut entity, mut time, mut third) = (Vec::new(), Vec::new(), Vec::new());
+        for i in 0..n_entities {
+            for p in 0..6 {
+                entity.push(format!("e{i:06}"));
+                time.push(format!("t{p}"));
+                third.push(format!("c{:02}", (uniform(&mut state) * 50.0) as usize));
+            }
+        }
+        codes_of(&[entity, time, third])
+    }
+
+    #[test]
+    fn it_matches_the_hat_matrix_when_every_entity_covers_every_period() {
+        let levels = entity_time_random_third(120);
+        let refs: Vec<&GroupCodes> = levels.iter().collect();
+        assert_matches_brute_force(&refs);
+    }
+
+    #[test]
+    fn it_keeps_the_rank_when_rounding_error_grows_with_the_number_of_rows() {
+        for n_entities in [500, 2000, 16000] {
+            let levels = entity_time_random_third(n_entities);
+            let refs: Vec<&GroupCodes> = levels.iter().collect();
+            let leverage = dummy_leverage(&refs).unwrap();
+            // 射影行列の対角の和はランク: 個体 + 時点6 + 3つ目 − 2。
+            let trace: f64 = leverage.iter().sum();
+            let rank = (n_entities + 6 + 50 - 2) as f64;
+            assert!(
+                (trace - rank).abs() < 1e-6,
+                "{n_entities} entities: trace {trace} vs rank {rank}"
+            );
+        }
     }
 }

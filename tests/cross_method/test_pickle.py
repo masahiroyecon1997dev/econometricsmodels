@@ -535,6 +535,32 @@ def test_restored_fe_result_keeps_the_fixed_effects(
 
 
 @pytest.mark.parametrize(
+    "compute_before", [False, True], ids=["lazy", "cached"]
+)
+def test_restored_multi_way_fe_result_keeps_the_fixed_effects(
+    compute_before: bool,
+) -> None:
+    """3つ以上の効果でも、固定効果は遅延計算の前後どちらで`pickle`しても同じ値になる。"""
+
+    def fit():
+        return FE(
+            _frame(),
+            y="y",
+            x=["x1", "x2"],
+            effects=["entity", "t", "cluster"],
+        ).fit()
+
+    result, expected = fit(), fit().fixed_effects()
+    if compute_before:
+        result.fixed_effects()
+    clone = pickle.loads(pickle.dumps(result))
+    assert list(expected) == ["entity", "t", "cluster"]
+    assert clone.fixed_effects() == expected
+    assert clone.n_groups == result.n_groups
+    assert pickle.loads(pickle.dumps(clone)).fixed_effects() == expected
+
+
+@pytest.mark.parametrize(
     "options",
     [{}, {"estimator": "gmm", "cov_type": "hc1"}],
     ids=["2sls", "gmm"],

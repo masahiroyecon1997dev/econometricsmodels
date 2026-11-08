@@ -259,7 +259,8 @@ fn fit_iv(
 ///     column name.
 /// effects : list[str]
 ///     Column names that define the fixed effects: one column for one-way
-///     effects, two columns (entity, then time) for two-way effects.
+///     effects, two columns (entity, then time) for two-way effects, and
+///     three to five columns for higher-dimensional effects.
 /// options : FEOptions
 ///     Estimation options.
 #[pyfunction]

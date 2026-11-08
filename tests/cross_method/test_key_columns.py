@@ -88,6 +88,10 @@ CLUSTER_FITS = {
 
 ENTITY_FITS = {
     "FE": lambda d: FE(d, "y", ["x1"], ["entity"]).fit(),
+    # FEの3つ目以降の効果は、`effects[0]`と同じ同一性だけのキーとして抽出する。
+    "FE.effects_third": lambda d: FE(
+        d, "y", ["x1"], ["cluster", "t", "entity"]
+    ).fit(),
     "RE": lambda d: RE(d, "y", ["x1"], ["entity"]).fit(),
 }
 

@@ -132,7 +132,7 @@ A call is checked in a fixed order, the same for every method, and the **first**
 1. **Argument types.** A wrong type raises `TypeError` (see [Wrong argument types](#wrong-argument-types)), before anything else.
 2. **Option values.** An unknown string for `estimator`, `cov_type`, `gmm_type`, `gmm_weight_type`, `solver` or `variance_method`, checked in this order (a method without the option skips it). An unknown value is reported even if the option would not be used, for example `gmm_type="bogus"` with `estimator="2sls"`.
 3. **Option combinations.** An option that the chosen `cov_type` or estimator does not use (for example `cluster` with `cov_type="classical"`), and then a required option that is missing (for example `hac_time` with `cov_type="hac"`, or `dk_time` with `cov_type="dk"`).
-4. **The number of columns in `effects`** (FE and RE). An empty list or three or more columns. This comes before the check of an empty `x`.
+4. **The number of columns in `effects`** (FE and RE). An empty list, more than five columns in FE, or more than two in RE. This comes before the check of an empty `x`.
 5. **Roles.** In this order: an empty `x`; the same column used in two roles (`y`, `effects` and `x`); a column named twice in `x`; a column named twice in `effects`; and, for `dk_time`, the roles it may not share. Then, when an intercept is added, `"const"` in `x`.
 6. **The `y`, `x` and other model columns.** A column that does not exist, has an unsupported dtype or contains missing values. The order is `y`, then `x`, then `effects`.
 7. **The columns named by options.** `cluster`, `hac_time` and `dk_time`, with the same checks as in step 6.
@@ -150,7 +150,7 @@ Each bullet is a situation that raises a `ValidationError`.
 - The same column is used in two roles (for example `y` also in `x`, or the weight column as `y`).
 - For the Driscoll-Kraay `dk_time` column only `y` and the first column of `effects` are checked: it may also be one of the regressors, or the same column as the second column of `effects`.
 - `x` is empty, or names a column twice.
-- In FE and RE, `effects` is empty (`ROLE_EMPTY`) or has more than two columns (`EFFECTS_TOO_MANY`), both checked first (step 4); or it names a column twice; or a column of `effects` is also `y` or one of the regressors.
+- In FE and RE, `effects` is empty (`ROLE_EMPTY`) or has more columns than the model supports (`EFFECTS_TOO_MANY`: five in FE, two in RE), both checked first (step 4); or it names a column twice; or a column of `effects` is also `y` or one of the regressors.
 - With an intercept, `x` contains a column called `"const"`.
 - A column has a dtype that its role does not accept, such as a string, date or categorical column used as a number (see [Accepted data](accepted-data.md#column-types-by-role)).
 - The `hac_time` column has the same value in two or more rows, including a constant column, so the observations have no time order (see [Order of observations](accepted-data.md#order-of-observations-for-hac)).

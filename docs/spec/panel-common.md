@@ -12,12 +12,13 @@ Swamy-Arora分散成分推定の具体式、固定効果の復元等）は[`fe-s
 - `fit_fe(data, y, x, effects, options)` / `fit_re(data, y, x, effects, options)`
 - `y: str`、`x: list[str]`はOLSと同じ。
 - `effects: list[str]`（固定効果・変量効果の次元を指す列名）は**独立の必須引数**とする。FE/REいずれも
-  パネル構造が無ければモデルとして成立しないため、`y`/`x`と同格に扱う。1〜2要素で、1要素=one-way、
-  2要素=two-way（`effects[0]`が個体、`effects[1]`が時点。two-wayはバランスパネル必須）。
-  空は`ROLE_EMPTY`、3要素以上は`EFFECTS_TOO_MANY`（`ValidationError`、params: `model`・`n_columns`・
-  `max_columns`）。上限は当面FE/REとも2で、文面は上限だけを示す中立の形にしている（FEは将来上限を
-  上げる予定、REは交差ランダム効果が標準的な推定量でないため上限が変わらない見込みと理由は違うが、
-  同じcodeは同じhintという規則のため）。
+  パネル構造が無ければモデルとして成立しないため、`y`/`x`と同格に扱う。FEは1〜5要素、REは1〜2要素で、
+  1要素=one-way、2要素=two-way（`effects[0]`が個体、`effects[1]`が時点。REのtwo-wayはバランスパネル必須、
+  FEは不均衡も可）、FEの3要素以上=高次元の固定効果（3つ目以降は同一性だけのキー）。
+  空は`ROLE_EMPTY`、上限（FE=5、RE=2）を超えると`EFFECTS_TOO_MANY`（`ValidationError`、params: `model`・
+  `n_columns`・`max_columns`）。文面は上限だけを示す中立の形にしている（REは交差ランダム効果が標準的な
+  推定量でないため上限が2のまま、FEの5は実務で想定する次元数に余裕を持たせて極端な値を弾く上限、と
+  理由は違うが、同じcodeは同じhintという規則のため）。
 - `FEOptions.time`・`REOptions.time`は廃止した。`dk_time`（Driscoll-Kraay型HACの時点列、`str | None`）は
   `effects`とは独立のまま`Options`に置く。**`cov_type="dk"`では`dk_time`が必須で、`effects`の列を
   借用しない**（未指定は`ValidationError`、one-way・two-wayとも同じ）。どの列がDKの時点かを利用者が

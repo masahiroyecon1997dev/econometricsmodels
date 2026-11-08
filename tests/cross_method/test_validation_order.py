@@ -476,8 +476,8 @@ FAULTS = {
             code=ErrorCode.EFFECTS_TOO_MANY,
             params=lambda m: {
                 "model": m.name.upper(),
-                "n_columns": 3,
-                "max_columns": 2,
+                "n_columns": 6,
+                "max_columns": 5 if m.name.upper() == "FE" else 2,
             },
         ),
         Fault(
@@ -665,7 +665,9 @@ def changes(method: Method, fault_id: str) -> Changes:
         case "effects_empty":
             return {"effects": []}, {}
         case "effects_too_many":
-            return {"effects": ["entity", "time", "cluster"]}, {}
+            return {
+                "effects": ["entity", "time", "cluster", "a", "b", "c"]
+            }, {}
         case "effects_second_is_y":
             return {"effects": ["entity", method.base_args["y"]]}, {}
         case "dk_time_is_y":

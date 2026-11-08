@@ -1,7 +1,8 @@
 """FE/REの必須引数`effects`（個体・時点の列のリスト）の検証と意味のテスト。
 
-`effects`は1〜2要素のリストで、1要素が1-way、2要素が2-way（`effects[0]`が個体、
-`effects[1]`が時点）。先頭の列がデフォルトのクラスターキーになる。2要素の順序は
+`effects`は、REが1〜2要素、FEが1〜5要素のリストで、1要素が1-way、2要素が2-way
+（`effects[0]`が個体、`effects[1]`が時点）、FEの3要素以上が高次元の固定効果。
+先頭の列がデフォルトのクラスターキーになる。2要素の順序は
 バランスパネルではモデルが対称で検証では検出できないため、入れ替えたときの結果の
 対応をここで固定する。列の型の規則（`effects[0]`は同一性だけのキー、`effects[1]`は
 時点のキー）は`test_key_columns.py`・`test_input_dtypes.py`が見る。
@@ -81,19 +82,39 @@ def test_empty_effects_raises(name, model, panel):
         _fit(model, panel, [])
 
 
-@pytest.mark.parametrize(("name", "model"), MODELS)
-def test_three_effects_raise_effects_too_many(name, model, panel):
+def test_re_rejects_three_effects(panel):
     with raises_error(
-        "EFFECTS_TOO_MANY", model=name, n_columns=3, max_columns=2
+        "EFFECTS_TOO_MANY", model="RE", n_columns=3, max_columns=2
     ):
-        _fit(model, panel, ["firm", "year", "group"])
+        _fit(RE, panel, ["firm", "year", "group"])
 
 
-@pytest.mark.parametrize(("name", "model"), MODELS)
-def test_too_many_effects_is_reported_before_other_checks(name, model, panel):
+def test_fe_accepts_three_effects(panel):
+    results = _fit(FE, panel, ["firm", "year", "group"])
+    assert list(results.n_groups) == ["firm", "year", "group"]
+
+
+def test_fe_rejects_more_than_five_effects(panel):
+    columns = ["firm", "year", "group", "x1", "x2", "y"]
+    with raises_error(
+        "EFFECTS_TOO_MANY", model="FE", n_columns=6, max_columns=5
+    ):
+        _fit(FE, panel, columns)
+
+
+@pytest.mark.parametrize(
+    ("name", "model", "effects"),
+    [
+        ("FE", FE, ["firm", "firm", "year", "g", "h", "i"]),
+        ("RE", RE, ["firm", "firm", "year"]),
+    ],
+)
+def test_too_many_effects_is_reported_before_other_checks(
+    name, model, effects, panel
+):
     """列数の検査は列の役割の検査より先（重複があっても列数のエラー）。"""
-    with raises_error("EFFECTS_TOO_MANY"):
-        _fit(model, panel, ["firm", "firm", "year"])
+    with raises_error("EFFECTS_TOO_MANY", model=name):
+        _fit(model, panel, effects)
 
 
 @pytest.mark.parametrize(("name", "model"), MODELS)

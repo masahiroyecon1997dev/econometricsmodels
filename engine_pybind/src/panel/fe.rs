@@ -14,8 +14,9 @@
 //!
 //! ## `effects`と`FEOptions.dk_time`は別物（`panel-common.md`1.1節）
 //!
-//! 固定効果の次元は必須引数`effects`（`list[str]`、1〜2要素）で指定する。1要素が1-way、
-//! 2要素が2-way（`effects[0]`が個体、`effects[1]`が時点）。`dk_time`（`cov_type="dk"`の値を
+//! 固定効果の次元は必須引数`effects`（`list[str]`、1〜5要素）で指定する。1要素が1-way、
+//! 2要素が2-way（`effects[0]`が個体、`effects[1]`が時点）、3要素以上が高次元（3つ目以降は同一性だけの
+//! キー）。`dk_time`（`cov_type="dk"`の値を
 //! 接頭辞にした命名）はDriscoll-Kraay型HAC（`cov_type="dk"`）専用の時点列で、`effects`とは
 //! 独立に指定できる。**`cov_type="dk"`では`dk_time`が必須**で、`effects`の列を暗黙に借用しない
 //! （どの列がDKの時点かを明示させ、意図と違う列が選ばれても気づけない状況を避けるため。
@@ -54,7 +55,7 @@ use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 use super::common::{
-    PanelCovKind, PanelModel, check_panel_cov_options, extract_effects, extract_time_keys,
+    PanelCovKind, PanelModel, check_panel_cov_options, extract_effect_groups, extract_time_keys,
     groups_dict, panel_error_to_pyerr, parse_panel_cov_kind, require_dk_time, validate_panel_roles,
 };
 use crate::shared::column_error::ColumnSource;
@@ -577,11 +578,11 @@ pub(crate) struct BuiltFeInput {
 }
 
 /// Pythonから渡された `data` / `y` / `x` / `effects` / `options` を検証し、
-/// `engine::panel::fe::FeInput::from_group_codes`を呼び出すところまでを行う。
+/// `engine::panel::fe::FeInput::from_effect_groups`を呼び出すところまでを行う。
 /// `FeEstimator::fit`の呼び出し・`FEResult`の構築は`fit`（本ファイル）が行う。
 ///
-/// `effects`の要素数で1-way/2-wayを切り替える（1要素が`FeEffects::OneWay`、2要素が
-/// `FeEffects::TwoWay`。モジュールdoc参照）。
+/// `effects`の要素数で切り替える（1要素が`FeEffects::OneWay`、2要素が`FeEffects::TwoWay`、
+/// 3要素以上が`FeEffects::MultiWay`。モジュールdoc参照）。
 ///
 /// # Errors
 /// - 列の抽出時に発覚する問題（列が存在しない、数値/文字列型にキャストできない、
@@ -591,7 +592,7 @@ pub(crate) struct BuiltFeInput {
 ///   他手法と揃えた——経緯はモジュールdoc「`x`の空リストを許容しない」参照）。
 ///   `y`/`effects`/`x`間の重複・`x`・`effects`内部の重複も同じく`validation.rs`の責務で
 ///   `ValidationError`
-/// - `effects`が空、または3要素以上の場合は`ValidationError`（`validate_panel_roles`内の`validate_effects`）
+/// - `effects`が空、または6要素以上の場合は`ValidationError`（`validate_panel_roles`内の`validate_effects`）
 /// - `cov_type`の文字列が不正な場合は`ValidationError`（`parse_panel_cov_kind`参照）
 /// - それ以外（`y`/`effects`間の行数不一致等）は`engine::panel::common::PanelError`
 ///   から`panel_error_to_pyerr`で変換
@@ -621,18 +622,18 @@ pub(crate) fn build_fe_input(
 
     let x_slices = extract_f64_columns(df, &x, ColumnSource::new("x", "data"))?;
 
-    // ── `effects`の列の抽出（1つ目が個体、2つ目があれば時点）──────────────
-    let (entity_groups, time_keys) = extract_effects(df, &effects)?;
-    let fe_effects = if time_keys.is_some() {
-        FeEffects::TwoWay
-    } else {
-        FeEffects::OneWay
+    // ── `effects`の列の抽出（1つ目が個体、2つ目が時点、3つ目以降は同一性だけのキー）──
+    let groups = extract_effect_groups(df, &effects)?;
+    let fe_effects = match groups.len() {
+        1 => FeEffects::OneWay,
+        2 => FeEffects::TwoWay,
+        _ => FeEffects::MultiWay,
     };
 
     // ── cov_type固有の追加列の抽出（該当するcov_typeのときのみ）─────────────
     let cov_type = resolve_fe_cov_type(df, cov_kind, options)?;
 
-    let input = FeInput::from_group_codes(&y_slice, &x_slices, x, entity_groups, time_keys, y)
+    let input = FeInput::from_effect_groups(&y_slice, &x_slices, x, groups, y)
         .map_err(panel_error_to_pyerr)?
         .with_effect_names(effects.clone());
 

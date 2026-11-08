@@ -13,7 +13,7 @@
 ## 実装パターン
 
 - `FE`/`FEResults`・`RE`/`REResults`はいずれも`IV`/`IVResults`と同型（`data`/`y`/`x`/`effects`/`options`を保持するだけのコンストラクタ、`fit()`呼び出し時に初めて`_lib.fit_fe`/`_lib.fit_re`を呼ぶ。コンストラクタでは検証しない）。
-- **`effects`は必須の`list[str]`（1〜2要素）**: 1要素=one-way、2要素=two-way（`effects[0]`が個体、`effects[1]`が時点。two-wayはバランスパネル必須）。FE・REとも同じで、`FEOptions.time`・`REOptions.time`は廃止した。3要素以上は`EFFECTS_TOO_MANY`（`ValidationError`）。先頭要素がデフォルトのクラスターキー。`dk_time`は`effects`とは独立（`cov_type="dk"`で必須、`effects`の列を借用しない）。理由は`panel-common.md`1.1節。
+- **`effects`は必須の`list[str]`（FEは1〜5要素、REは1〜2要素）**: 1要素=one-way、2要素=two-way（`effects[0]`が個体、`effects[1]`が時点。REのtwo-wayはバランスパネル必須、FEは不均衡も可）、FEの3要素以上=高次元の固定効果（3つ目以降は同一性だけのキー）。`FEOptions.time`・`REOptions.time`は廃止した。上限を超えると`EFFECTS_TOO_MANY`（`ValidationError`）。先頭要素がデフォルトのクラスターキー。`dk_time`は`effects`とは独立（`cov_type="dk"`で必須、`effects`の列を借用しない）。理由は`panel-common.md`1.1節。
 - **件数と固定効果は列名キー**: `n_groups`（`dict[str, int]`、`effects`の列名→グループ数、`effects`の順。旧`n_entities`・`n_periods`の置き換え）、FEの`fixed_effects()`は常に`{列名: {水準: 効果}}`の入れ子（one-wayも入れ子）。一方、REの`sigma2_u`・`sigma2_lambda`・`theta`・`theta_entity`・`theta_time`・`theta_total`は意図的に現状維持（`panel-common.md`2.1節）。旧版のpickleは読めない（`FORMAT_VERSION`は上げていない）。
 - `params`/`std_errors`/`test_stats`/`p_values`は係数名→値の`dict[str, float]`（O(1)取り出し用）。行指向で欲しい場合は`params_table()`（`OLSResults.params_table()`と同じキー: `param_name`/`param`/`std_error`/`test_stat`/`p_value`/`conf_lower`/`conf_upper`。FE/REともOLS同様t検定のためIVの`stats`/`stat`のような汎用命名は不要）。
 - `fixed_effects()`（FE限定）はIVの`first_stage()`と同じ「追加結果は別メソッド」方針（`docs/spec/fe-spec.md`3.5節）。ただし`first_stage()`と異なり結果の型変換は不要（`_lib.FEResult.fixed_effects()`が返す`dict`をそのまま素通しする）。

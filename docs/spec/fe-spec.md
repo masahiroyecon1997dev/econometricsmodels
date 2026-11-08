@@ -14,8 +14,8 @@ FE固有の内容のみを記載する。
 `fit_fe(data, y, x, effects, options) -> FEResult`（engine_pybind）→ `FeEstimator::fit`
 （engine、within変換したデータに`shared::least_squares::least_squares`をあてはめる）。
 
-- `y: str`、`x: list[str]`はOLSと同じ。`effects: list[str]`は独立の必須引数（`y`/`x`と同格、1〜2要素。1要素=1-way、
-  2要素=2-way。`effects[0]`が個体、`effects[1]`が時点）。3要素以上は`EFFECTS_TOO_MANY`
+- `y: str`、`x: list[str]`はOLSと同じ。`effects: list[str]`は独立の必須引数（`y`/`x`と同格、1〜5要素。1要素=1-way、
+  2要素=2-way、3要素以上=高次元。`effects[0]`が個体、`effects[1]`が時点、3つ目以降は同一性だけのキー）。6要素以上は`EFFECTS_TOO_MANY`
   （`ValidationError`）。`FEOptions.time`は廃止した（理由は`panel-common.md`1.1節）。
 - `FEOptions`（`#[pyclass]`）:
 

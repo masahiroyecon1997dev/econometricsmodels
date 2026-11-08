@@ -740,6 +740,18 @@ fixestで固定した係数・標準誤差の照合は手順8（ベンチマー�
 重複行、連結成分が複数、タイ・1水準の次元、行数が偏った水準）、LSDVのHC2/HC3との一致、ネストした3つ目の効果が2-wayと一致、上限超過。
 レビュー反映: `v = A c_g`を触った水準だけ計算（計算量`Σ_g d_g²`）、古い記述の更新。見送り: fixestとのHC2/HC3の3-wayクロスチェックは手順8で行う。
 
+**進捗（手順7、2026-11-08）**: 実装済み（コミット前）。`MAX_EFFECTS`を`max_effects(model)`にし（FE=5、RE=2。`EFFECTS_TOO_MANY`の`max_columns`はモデル別）、
+`extract_effect_groups`（effects[0]=個体の同一性キー、effects[1]=時点キー→`into_codes`、effects[2..]=個体と同じ同一性キー）を追加。`build_fe_input`は
+`FeInput::from_effect_groups`と列数で選ぶ`FeEffects`（1/2/3+）。REは`extract_effects`のまま上限2。`fe.py`のdocstring（`effects`・`df_resid`・`df_model`・`n_groups`・
+`fixed_effects()`・Raises）を更新。テスト: `tests/panel/test_fe_multi_way.py`（LSDVのnumpyオラクルで係数・古典/HC1/HC2/HC3・重複行・4〜5列・列の順序・キー型・singleton・
+吸収される説明変数・クラスターの既定）、`test_effects_argument.py`（RE=3列は拒否、FE=3列は受理、FE=6列は拒否）、`test_validation_order.py`（6列で上限超過）、
+`test_pickle.py`（3列の`fixed_effects()`の遅延・往復）。`pytest tests --check-error-coverage`は11930件が通る。ドキュメントは上限の記述だけ直した（本格的な更新は手順9）。
+レビュー反映: 古いコメント（`lib.rs`・`fe.rs`・`common.rs`・pybindの`CLAUDE.md`）を更新、上限を`MAX_FE_EFFECTS`・`MAX_RE_EFFECTS`に、3列目の入力検査を
+`test_key_columns.py`の`ENTITY_FITS`に追加（null・NaN・非対応dtype・タイムゾーン）、`fixed_effects()`の基準水準のdocstringを実装に合わせた
+（3列目以降は文字列にした値の順で、整数列でも数値順にならない）。**手順9に持ち越し**: `docs/methods/fe.md`（`df_model`の一般形・多次元の交互射影・`fixed_effects()`の基準化・
+ネストの扱い）、`docs/usage/fe.md`（「at most two columns」が古い。3〜5列の節と例）、`docs/api/fe.md`、`accepted-data.md`（3列目はIdentity扱いで`Boolean`も可）、
+`FEOptions.tol`/`max_iter`の説明の「two-way unbalanced」だけという限定。**手順8**: fixestとの照合（`test_fe_multi_way_crosscheck.py`）。
+
 ### 9.11 compact用のメモ（#442、手順3のコミット後。2026-11-08）
 
 **状態**: `release/v0.10.0`。手順1〜3はコミット済み（`git log`の`refactor(engine): パネルの索引と入力を効果のK次元で持つ形にする`・`feat(engine): FEの2-wayで同じ組合せの重複する行を受け付ける`・
@@ -765,7 +777,7 @@ fixestで固定した係数・標準誤差の照合は手順8（ベンチマー�
    （水準数の合計が上限を超えたら`LEVERAGE_DIMENSION_TOO_LARGE`）。`check_leverage_dimension`の呼び出し（`within.rs`、重い射影の前）もK次元に。
    個体内の行数が多い重複入力で遅くならないよう、`dummy_leverage`の`Tally`（出現回数の集約）の考え方を使う。テストはLSDVのhc2/hc3（`unbalanced.rs`・`multi_way.rs`の`lsdv`に追加）と
    `dummy_leverage`の総当たり（`brute_force`）。`the_leverage_based_covariances_are_not_available_yet`は更新する。**手順7より先に終える**（`MAX_EFFECTS`を上げると`INTERNAL_ERROR`で露出するため）。
-2. **手順7: engine_pybind・Python**: `MAX_EFFECTS`をモデル別に（FE=5、RE=2。`EFFECTS_TOO_MANY`はREだけ上限2で残り、FEは5超で出る）、`extract_effects`をK列に
+2. **（実装済み・コミット前）手順7: engine_pybind・Python**: `MAX_EFFECTS`をモデル別に（FE=5、RE=2。`EFFECTS_TOO_MANY`はREだけ上限2で残り、FEは5超で出る）、`extract_effects`をK列に
    （`effects[0]`は`extract_entity_groups`、`effects[1]`は`extract_time_keys`→`into_codes`、`effects[2..]`は`extract_entity_groups`と同じ同一性だけのキー）、`build_fe_input`で`from_effect_groups`と
    `FeEffects`（列数が1/2/3以上で`OneWay`/`TwoWay`/`MultiWay`）、`with_effect_names(effects.clone())`。`fit_frame`の`group_counts`は`estimator.n_groups().to_vec()`（済み）。
    `FEResult.fixed_effects()`のdict化は済み。Pythonのdocstring（`fe.py`のRaisesの「more than two columns」、`n_groups`、`fixed_effects`）、型検査テスト、`tests/panel/test_fe_validation.py`の

@@ -34,10 +34,12 @@ __all__ = ["FE", "FEOptions", "FEResults"]
 class FE:
     """Fixed effects (within) panel regression estimator.
 
-    Supports one-way and two-way fixed effects, selected by the number
-    of columns in `effects`: one column (the entity identifier) for
-    one-way effects, two columns (the entity identifier, then the time
-    identifier) for two-way effects.
+    Supports one-way, two-way and higher-dimensional fixed effects,
+    selected by the number of columns in `effects`: one column (the
+    entity identifier) for one-way effects, two columns (the entity
+    identifier, then the time identifier) for two-way effects, and three
+    to five columns for higher-dimensional effects (for example firm,
+    year and industry).
 
     Args:
         data: A polars DataFrame containing the dependent variable,
@@ -47,11 +49,13 @@ class FE:
         y: Column name of the dependent variable.
         x: List of column names of the independent variables. Must
             contain at least one column name.
-        effects: List of one or two column names that define the fixed
+        effects: List of one to five column names that define the fixed
             effects. The first is the entity (individual/panel unit)
             identifier; the optional second is the time period,
-            which makes the model two-way (an unbalanced panel is
-            estimated by alternating projections). The
+            which makes the model two-way; the optional third to fifth
+            are further grouping columns of the same kind as the first (the
+            same combination of values may repeat in several rows). Unbalanced panels and three or more columns are
+            estimated by alternating projections. The
             order matters: the first column is the default cluster key,
             and the first period of the second column (in time order)
             is the reference period of `fixed_effects()`. Swapping the
@@ -126,7 +130,7 @@ class FE:
 
                 - `x` is empty, a column is missing, or a column
                   contains missing values, NaN or infinity.
-                - `effects` is empty or has more than two columns, or
+                - `effects` is empty or has more than five columns, or
                   `y`, `x` and `effects` overlap, or `dk_time` equals
                   `y` or the first column of `effects`.
                 - There are insufficient observations, or
@@ -288,18 +292,19 @@ class FEResults:
 
     @property
     def df_resid(self) -> int:
-        """Residual degrees of freedom (`n - G1 - k` for one-way,
-        `n - G1 - G2 + 1 - k` for two-way, where `G1` and `G2` are the
-        group counts of the first and second column of `effects`, as in
-        `n_groups`)."""
+        """Residual degrees of freedom: `n - df_model`, where `df_model`
+        is the model degrees of freedom below (`n - G1 - k` for
+        one-way, `n - G1 - G2 + 1 - k` for two-way, and in general
+        `n - k - sum(G) + (number of columns - 1)`, where the `G` are
+        the group counts in `n_groups`)."""
         return self._raw.df_resid
 
     @property
     def df_model(self) -> int:
         """Model degrees of freedom: the `k` slope coefficients plus the
         absorbed fixed effects (`k + G1` for one-way, `k + G1 + G2 - 1`
-        for two-way, where `G1` and `G2` are the group counts of the
-        first and second column of `effects`, as in `n_groups`). It is
+        for two-way, and in general `k + sum(G) - (number of columns -
+        1)`, where the `G` are the group counts in `n_groups`). It is
         used for the degrees of freedom of the inference (`df_resid = n
         - df_model`) and for the information criteria; the number of
         slope coefficients is `len(param_names)`."""
@@ -309,8 +314,8 @@ class FEResults:
     def n_groups(self) -> dict[str, int]:
         """Number of groups (unique values) of each column in
         `effects`, keyed by column name in the order given: one entry
-        for a one-way model, two for a two-way model. For example
-        `{"id": 3, "t": 2}`."""
+        for a one-way model, two for a two-way model, and so on. For
+        example `{"id": 3, "t": 2}`."""
         return self._raw.n_groups
 
     @property
@@ -405,17 +410,24 @@ class FEResults:
 
     def fixed_effects(self) -> dict[str, dict[str, float]]:
         """The fixed effects themselves (`α_i` for the first column of
-        `effects`, `γ_t` for the second), recovered post-hoc from the
-        fitted coefficients.
+        `effects`, `γ_t` for the second, and one effect per group of
+        each further column), recovered post-hoc from the fitted
+        coefficients.
 
         Always a `dict[str, dict[str, float]]` keyed by the column
         names in `effects`, then by group (the value of the column as a
-        string): one entry for a one-way model, two for a two-way
-        model. `α_i`/`γ_t` are not individually identified in the
-        two-way case, so `γ_t` of the first period in time order (the
-        order of the values of the second column) is fixed to 0 and
-        `α_i` absorbs the overall level. The dictionary of the second
-        column lists the periods in time order.
+        string): one entry per column of `effects`. The effects of the
+        different columns are not individually identified, so the
+        reference group of every column after the first is fixed to 0
+        and the first column absorbs the overall level: the first
+        period in time order (the order of the values of the second
+        column) in a balanced two-way model, and the group with the
+        smallest code (the time order for the second column, and the
+        order of the values written as strings for the others, also
+        for integer columns) in each connected set of groups
+        otherwise. The dictionary of the second column lists the
+        periods in time order. With nested columns only the sum of the
+        effects of a row is identified.
         `fixest::fixef()` chooses its own reference levels, so its
         values for the time effects can differ from these by a
         constant.

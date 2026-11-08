@@ -875,3 +875,25 @@ Stock-Yogoの表は実装の値がNBER TWP 284のTable 1（バイアス）・Tab
 
 **次の作業**: #368（C統計量のengine。同じ重み行列を使うかを着手前にユーザーへ確認）→#369→FE-2SLS（#370〜#380）→FE-GMM（#381〜#388）。
 **保留（利用者の判断待ち）**: ルートCLAUDE.md 2章への診断の例外の追記、READMEの「Attribution and Rights」、フィクスチャのデータのライセンス確認、CLAUDE.md 3章の`shared/`の列挙、`mop-oracle-spec.md`の履歴の扱い。
+
+### 9.14 #368・#369の完了時点のメモ（2026-11-09）
+
+**状態**: `release/v0.10.0`。`f8c21c58`までpush済み。未push: `e2202d58`（#368 engine）・`2bc64e1c`（#369 バインディング・ラッパー・テスト・docs）。#368・#369はコミット済みでIssueは未クローズ（利用者の確認待ち）。この節を足すコミットも未push。
+
+**決めたこと（ユーザー承認）**: 2SLSも対象（重みは`cov_type`の系統）、`gmm_type`・`cov_type`に依存せず常に2段階、除外操作変数の直交性も検定（`c_stat(*, variables=None, instruments=None)`）、戻り値は`CStatisticResult(DiagnosticResult)`。
+**私の判断（要報告）**: 1段階GMM（`gmm_type="one_step"`、重み行列なし）は2SLSと同じく`cov_type`の系統の重み。`COLUMN_NOT_FOUND`は`hint`が`data`の列を指すため、モデルに無い名前は専用の`C_STATISTIC_UNKNOWN_VARIABLE`。外した後の操作変数が足りないときも専用の`C_STATISTIC_TOO_MANY_TESTED_INSTRUMENTS`（`INSUFFICIENT_INSTRUMENTS`は`hint`が「操作変数を足す」）。
+**定数項なしの`classical`**: linearmodelsは残差を中心化して`σ̂²`を作るので一致しない（`robust`・`hac`は一致）。エンジンは`fit()`のHansen Jと同じ非中心化のまま。
+**検証**: 内生性はlinearmodelsの`c_stat`、直交性・同時・Jは`IVGMM`の部品で組み直した`benchmark/iv/references/linearmodels_c_stat.py`、numpy独立実装`c_statistic_oracle.py`はそれらと一致（`test_c_statistic_oracle.py`）。フィクスチャJSONは無し（ライブ照合）。Rにはこの検定が無い（`momentfit`は`CDtest`・`MOPtest`等はあるがC統計量は無い）。許容は`iv_c_statistic`（1e-10。クラスター数が列数ちょうどのcard地域は1e-8）。
+**起票**: #636（2SLSへの頑健な過剰識別検定）。
+**未実施**: `/review-docs`による#367・#368・#369の公開docsの校閲（#366の校閲は済み）。Rでの独立クロスチェックを足すか（`momentfit`で重みを指定してJを手組みする案。独立性は限定的）は利用者に確認。
+**次の作業**: FE-2SLS（#370〜#380）→FE-GMM（#381〜#388）。着手前に、`n_absorbed`の自由度の扱い（lfeとfixest）と、#374（FEのSargan）の設計をユーザーに確認する。
+
+**ユーザーの決定（9.14の後）**
+- 9.14の節の署名コミットと、`e2202d58`・`2bc64e1c`のpushはOK（実施済みなら下の「実施状況」を参照）。
+- **#368・#369はcloseしてOK**（英語のコメントを付ける）。**#367〜#369の公開docsを`/review-docs`にかける**（対象: `docs/{usage,api,methods}/iv.md`、`docs/guide/{verification,verification-details,validation,inference-conventions,pickling}.md`のC統計量・ivDiagの変更箇所、`diagnostics.py`の`CStatisticResult`と`iv.py`の`c_stat`のdocstring、`CHANGELOG.md`）。
+- **C統計量のRでの独立クロスチェックは足したい**（ユーザー希望）。`momentfit`以外にRで独立に見られるパッケージがあるかを先に調べる。現時点でわかっていること: `momentfit`にC統計量は無い（`CDtest`・`MOPtest`・`SWtest`・`LewMertest`・`hypothesisTest`・`specTest`のみ。`hypothesisTest`はパラメータの制約の検定で、モーメント条件を外す検定ではない）。`ivreg`・`AER`・`plm`（`pgmm`のSarganのみ）にも無い。未確認の候補: `gmm`パッケージ（モーメント関数を自作でき、重み行列を指定できるらしい。**CRAN上の機能はWeb検索で確認する。Web検索は事前に利用者の許可を得る**）。ivreg2（Stata）には`orthog()`があるがこの環境では実行できない。無ければ「`momentfit`（または`gmm`）で重みを指定してJを手組みする」案（独立性は限定的）を、独立性の限界を`verification-details.md`に書いて採用するかを、利用者に確認する。
+- **次の順序**: (1) Rのクロスチェックの調査と追加 → (3) 上記のcloseと`/review-docs` → (4) FE-2SLSの前に、`n_absorbed`の自由度の扱い（lfeとfixestの違い。#373）と#374（FEのSargan）の設計を先に実施（設計をユーザーに確認してから）→ FE-2SLS（#370〜#380）→ FE-GMM（#381〜#388）。
+- **この後はcompactを行う**（ユーザーが実施）。再開時はこの節を読んで(1)から続ける。
+
+**保留（従来どおり）**: ルートCLAUDE.md 2章への診断の例外の追記、READMEの「Attribution and Rights」、フィクスチャのデータ（Wooldridge等）のライセンス確認、CLAUDE.md 3章の`shared/`の列挙の更新、`mop-oracle-spec.md`の履歴の扱い。
+**注意書き**: コミットはパス指定・署名（ホストの端末で確認が出る。失敗したら止まって報告し、リトライは1回まで）。Pythonを触ったら`uv run maturin develop`（debugビルド）で入れ直してから`pytest`。エラーコードを足したら`UPDATE_ERROR_CATALOG_GOLDEN=1 cargo test -p engine error_catalog`→`maturin develop`→`python tools/render_error_catalog.py`→`tests/support/_errors.py`。heredocでRustやドキュメントを書くときはバッククォートをシェルが解釈するので`<<'EOF'`（引用付き）にする。

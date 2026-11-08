@@ -60,7 +60,7 @@ const ABSORPTION_NOISE_SAFETY: f64 = 10.0;
 /// `time`の存在チェックは単体利用時の防御（到達しない二重チェックだが意図的に残している）。
 ///
 /// # Errors
-/// - `input.time_keys()`が`None`の場合は`PanelError::TwoWayRequiresTime`
+/// - `input.time_codes()`が`None`の場合は`PanelError::TwoWayRequiresTime`
 /// - `(entity, time)`の重複は`PanelError::DuplicateEntityTimePair`
 /// - `leverage_needed`（HC2/HC3）で、組合せが欠け、水準の少ない方の効果の水準数が上限を超えるなら
 ///   `PanelError::LeverageDimensionTooLarge`
@@ -148,7 +148,7 @@ pub(crate) fn within_transform_two_way(
 ///
 /// # Errors
 /// entityに観測数1のグループが見つかった場合は`PanelError::SingletonGroup`
-/// （`dimension: PanelDimension::Entity`）。
+/// （`dimension: PanelDimension::ENTITY`）。
 pub(super) fn validate_no_singleton_groups_one_way(input: &FeInput) -> Result<(), PanelError> {
     ensure_no_singleton_groups(input.effect_names(), input.entity_codes(), None)
 }
@@ -167,7 +167,7 @@ pub(super) fn validate_no_singleton_groups_one_way(input: &FeInput) -> Result<()
 /// `time`の存在チェックは単体利用時の防御（到達しない二重チェックだが意図的に残している）。
 ///
 /// # Errors
-/// - `input.time_keys()`が`None`の場合は`PanelError::TwoWayRequiresTime`
+/// - `input.time_codes()`が`None`の場合は`PanelError::TwoWayRequiresTime`
 /// - entityまたはtimeに観測数1のグループが見つかった場合は`PanelError::SingletonGroup`
 ///   （該当する`dimension`を含む）
 pub(super) fn validate_no_singleton_groups_two_way(input: &FeInput) -> Result<(), PanelError> {

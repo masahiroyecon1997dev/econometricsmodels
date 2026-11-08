@@ -178,7 +178,7 @@ pub(crate) fn panel_cov_params(
             // 合わないと退化判定の`zip`が黙って切り詰められ、DK計算は範囲外アクセスになる。
             if dk_time.len() != n {
                 return Err(PanelError::IdentifierDimensionMismatch {
-                    dimension: PanelDimension::Time,
+                    dimension: PanelDimension::TIME,
                     y_rows: n,
                     other_rows: dk_time.len(),
                 });

@@ -1,12 +1,12 @@
 //! FEIV（固定効果IV）の入力データ型（`FeIvInput`）。
 //!
 //! `FeInput`と同じく`engine`はpolars/PyO3を知らず、`engine_pybind`が抽出した列
-//! （`&[f64]`/`&[Vec<f64>]`）と、コード化済みの`entity`（`GroupCodes`）・`time`（`TimeKeys`）を
+//! （`&[f64]`/`&[Vec<f64>]`）と、コード化済みの効果の各次元（`effects`の順の`GroupCodes`）を
 //! 受け取る。`faer::Mat`は組み立てない（within変換が列単位のため、`FeInput`と同じ列スライス）。
 //!
 //! 列は役割で分ける: 被説明変数`y`、外生の説明変数`x_exog`、内生の説明変数`x_endog`、
 //! 操作変数`instruments`。固定効果が定数項を吸収するため、定数項は持たない。
-//! `entity`・`time`・効果の列名は`PanelIndex`（`common.rs`）にまとめ、各列は同じ索引を共有する。
+//! 効果の各次元・効果の列名は`PanelIndex`（`common.rs`）にまとめ、各列は同じ索引を共有する。
 //!
 //! 空の役割（`x_exog`が空は正当、`x_endog`・`instruments`が空は推定できない）の検査は
 //! `IvInput`と同じ層分けで、入力型は受理する。`x_endog`・`instruments`が空であることの拒否は
@@ -14,7 +14,7 @@
 
 use crate::shared::group_codes::GroupCodes;
 
-use super::common::{PanelError, PanelIndex, TimeKeys, validate_column_lengths};
+use super::common::{PanelError, PanelIndex, validate_column_lengths};
 
 /// ある役割（`x_exog`・`x_endog`・`instruments`）の列と列名。
 ///
@@ -52,13 +52,14 @@ pub struct FeIvInput {
 impl FeIvInput {
     /// 抽出済みの列とコード化済みの索引から`FeIvInput`を組み立てる。
     ///
-    /// `entity`はキー付き（`GroupCodes::from_labels`/`from_factorized`）であること。
-    /// `time`は2-wayの時間次元で、1-wayなら`None`。
+    /// `effects`は効果の各次元のコードを`effects`の順に並べたもの（1つ以上。2つ目は2-wayの時点で
+    /// 時間順のコード、3つ目以降は高次元の固定効果）。全てキー付き
+    /// （`GroupCodes::from_labels`/`from_factorized`）であること。
     ///
     /// # Errors
     /// 検査の順序は、`x_exog`・`x_endog`・`instruments`の各列の長さ（`y`との不一致は
     /// `PanelError::Common(CommonError::DimensionMismatch)`。この順に最初の不一致を返す）、
-    /// 続いて`PanelIndex::new`の検査（`entity`の長さ、`time`の長さ、`entity`のキーの有無）。
+    /// 続いて`PanelIndex::new`の検査（`effects`の各次元の長さ、各次元のキーの有無）。
     ///
     /// within変換・singleton検出・分散ゼロ検証・バランスパネルの検証・識別の順序条件
     /// （操作変数の数）は行わない（`fit()`側が担う）。
@@ -72,8 +73,7 @@ impl FeIvInput {
         x_exog: RoleColumns<'_>,
         x_endog: RoleColumns<'_>,
         instruments: RoleColumns<'_>,
-        entity: GroupCodes,
-        time: Option<TimeKeys>,
+        effects: Vec<GroupCodes>,
     ) -> Result<Self, PanelError> {
         for role in [&x_exog, &x_endog, &instruments] {
             debug_assert_eq!(
@@ -83,7 +83,7 @@ impl FeIvInput {
             );
             validate_column_lengths(y.len(), role.columns)?;
         }
-        let index = PanelIndex::new(y.len(), entity, time)?;
+        let index = PanelIndex::new(y.len(), effects)?;
 
         Ok(Self {
             y: y.to_vec(),
@@ -98,15 +98,14 @@ impl FeIvInput {
         })
     }
 
-    /// 効果の次元の列名を設定する（`engine_pybind`が`effects`の各要素を渡す）。エラーの`column`に
-    /// 載るだけで、計算には影響しない。設定済みの名前は全て置き換わり、`time`が`None`なら
-    /// 2つ目の名前は既定（`"time"`）になる。
-    pub fn with_effect_names(mut self, entity: String, time: Option<String>) -> Self {
-        self.index = self.index.with_effect_names(entity, time);
+    /// 効果の次元の列名を、`effects`の先頭から順に設定する（`engine_pybind`が`effects`の各要素を
+    /// 渡す）。エラーの`column`に載るだけで、計算には影響しない。
+    pub fn with_effect_names(mut self, names: Vec<String>) -> Self {
+        self.index = self.index.with_effect_names(names);
         self
     }
 
-    /// 個体・時点の索引。
+    /// 効果の各次元の索引。
     pub fn index(&self) -> &PanelIndex {
         &self.index
     }
@@ -180,7 +179,7 @@ impl FeIvInput {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::panel::common::PanelDimension;
+    use crate::panel::common::{PanelDimension, TimeKeys};
     use crate::shared::error::CommonError;
 
     fn labels(values: &[&str]) -> Vec<String> {
@@ -220,8 +219,7 @@ mod tests {
             role(&["w"], &exog),
             role(&["d"], &endog),
             role(&["z1", "z2"], &inst),
-            entity(),
-            None,
+            vec![entity()],
         )
         .unwrap();
 
@@ -248,7 +246,7 @@ mod tests {
             input.index().entity_labels(),
             labels(&["a", "b"]).as_slice()
         );
-        assert!(input.index().time_keys().is_none());
+        assert_eq!(input.index().n_effects(), 1);
     }
 
     #[test]
@@ -260,12 +258,12 @@ mod tests {
             role(&[], &[]),
             role(&["d"], &endog),
             role(&["z"], &inst),
-            entity(),
-            Some(time()),
+            vec![entity(), time().codes().clone()],
         )
         .unwrap();
 
-        assert_eq!(input.index().time_keys(), Some(&time()));
+        assert_eq!(input.index().n_effects(), 2);
+        assert_eq!(input.index().effect_codes()[1].keys(), time().periods());
         assert_eq!(input.index().nobs(), 6);
     }
 
@@ -278,8 +276,7 @@ mod tests {
             role(&[], &[]),
             role(&[], &[]),
             role(&[], &[]),
-            entity(),
-            None,
+            vec![entity()],
         )
         .unwrap();
         assert_eq!(
@@ -301,8 +298,7 @@ mod tests {
             role(&[], &[]),
             role(&[], &[]),
             role(&[], &[]),
-            GroupCodes::from_labels(&[]),
-            None,
+            vec![GroupCodes::from_labels(&[])],
         )
         .unwrap();
         assert_eq!(input.nobs(), 0);
@@ -324,8 +320,7 @@ mod tests {
                 role(&vec!["c"; exog.len()], exog),
                 role(&vec!["c"; endog.len()], endog),
                 role(&vec!["c"; inst.len()], inst),
-                entity(),
-                None,
+                vec![entity()],
             )
             .map(|_| ())
         };
@@ -346,8 +341,7 @@ mod tests {
                 role(&vec!["c"; exog.len()], exog),
                 role(&vec!["c"; endog.len()], endog),
                 role(&vec!["c"; inst.len()], inst),
-                entity(),
-                None,
+                vec![entity()],
             )
             .map(|_| ())
         };
@@ -369,8 +363,7 @@ mod tests {
             role(&["w"], &short),
             role(&[], &[]),
             role(&[], &[]),
-            short_entity,
-            None,
+            vec![short_entity],
         )
         .unwrap_err();
         assert!(matches!(
@@ -389,12 +382,11 @@ mod tests {
                 role(&[], &[]),
                 role(&[], &[]),
                 role(&[], &[]),
-                short_entity,
-                None,
+                vec![short_entity],
             )
             .map(|_| ()),
             Err(PanelError::IdentifierDimensionMismatch {
-                dimension: PanelDimension::Entity,
+                dimension: PanelDimension::ENTITY,
                 y_rows: 6,
                 other_rows: 2,
             })
@@ -408,12 +400,11 @@ mod tests {
                 role(&[], &[]),
                 role(&[], &[]),
                 role(&[], &[]),
-                entity(),
-                Some(short_time),
+                vec![entity(), short_time.codes().clone()],
             )
             .map(|_| ()),
             Err(PanelError::IdentifierDimensionMismatch {
-                dimension: PanelDimension::Time,
+                dimension: PanelDimension::TIME,
                 y_rows: 6,
                 other_rows: 2,
             })
@@ -430,8 +421,7 @@ mod tests {
             role(&[], &[]),
             role(&[], &[]),
             role(&[], &[]),
-            keyless,
-            None,
+            vec![keyless],
         )
         .unwrap_err();
         assert!(matches!(
@@ -448,16 +438,15 @@ mod tests {
             role(&[], &[]),
             role(&[], &[]),
             role(&[], &[]),
-            entity(),
-            Some(time()),
+            vec![entity(), time().codes().clone()],
         )
         .unwrap();
-        assert_eq!(input.index().effect_name(PanelDimension::Entity), "entity");
-        assert_eq!(input.index().effect_name(PanelDimension::Time), "time");
+        assert_eq!(input.index().effect_name(PanelDimension::ENTITY), "entity");
+        assert_eq!(input.index().effect_name(PanelDimension::TIME), "time");
 
-        let input = input.with_effect_names("firm".to_string(), Some("year".to_string()));
-        assert_eq!(input.index().effect_name(PanelDimension::Entity), "firm");
-        assert_eq!(input.index().effect_name(PanelDimension::Time), "year");
+        let input = input.with_effect_names(labels(&["firm", "year"]));
+        assert_eq!(input.index().effect_name(PanelDimension::ENTITY), "firm");
+        assert_eq!(input.index().effect_name(PanelDimension::TIME), "year");
     }
 
     #[test]
@@ -471,8 +460,7 @@ mod tests {
             role(&[], &[]),
             role(&["d", "extra"], &endog),
             role(&[], &[]),
-            entity(),
-            None,
+            vec![entity()],
         );
     }
 }

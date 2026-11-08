@@ -2,7 +2,6 @@
 
 use super::error::{PanelDimension, PanelError};
 use super::index::EffectNames;
-use super::time_keys::TimeKeys;
 use super::transform::WithinTransform;
 use crate::shared::error::CommonError;
 use crate::shared::group_codes::GroupCodes;
@@ -10,8 +9,8 @@ use crate::shared::validation::{column_is_zero_variance, column_is_zero_variance
 
 /// `FeInput::from_group_codes`/`ReInput::from_group_codes`の入力検証（FE/REで共通）。
 /// 検査の順序は、各`x_columns`の行数（`y`との不一致は`CommonError::DimensionMismatch`）、
-/// `entity`の長さ、`time`の長さ（以上2つは`PanelError::IdentifierDimensionMismatch`）、
-/// `entity`がキーを持つか（`require_entity_keys`）。後半3つは[`validate_panel_index`]。
+/// 効果の各次元の長さ（`PanelError::IdentifierDimensionMismatch`。`effects`の先頭から）、
+/// 各次元がキーを持つか（`require_effect_keys`）。後半2つは[`validate_panel_index`]。
 ///
 /// # パニックについて
 /// `x_names.len() != x_columns.len()`の場合は`debug_assert!`でパニックする（呼び出し側
@@ -21,8 +20,7 @@ pub(crate) fn validate_panel_input(
     y: &[f64],
     x_columns: &[Vec<f64>],
     x_names: &[String],
-    entity: &GroupCodes,
-    time: Option<&TimeKeys>,
+    groups: &[&GroupCodes],
 ) -> Result<(), PanelError> {
     debug_assert_eq!(
         x_columns.len(),
@@ -31,7 +29,7 @@ pub(crate) fn validate_panel_input(
     );
 
     validate_column_lengths(y.len(), x_columns)?;
-    validate_panel_index(y.len(), entity, time)
+    validate_panel_index(y.len(), groups)
 }
 
 /// `columns`の各列の長さが被説明変数の長さ`y_rows`と一致することを確かめる
@@ -52,40 +50,34 @@ pub(crate) fn validate_column_lengths(
     Ok(())
 }
 
-/// パネルの索引（`entity`・`time`）が観測数`nobs`と整合することを確かめる。検査の順序は、
-/// `entity`の長さ、`time`の長さ（いずれも`PanelError::IdentifierDimensionMismatch`）、
-/// `entity`がキーを持つか（`require_entity_keys`）。
-pub(crate) fn validate_panel_index(
-    nobs: usize,
-    entity: &GroupCodes,
-    time: Option<&TimeKeys>,
-) -> Result<(), PanelError> {
-    if entity.nobs() != nobs {
-        return Err(PanelError::IdentifierDimensionMismatch {
-            dimension: PanelDimension::Entity,
-            y_rows: nobs,
-            other_rows: entity.nobs(),
-        });
+/// パネルの索引（効果の各次元`groups`、`effects`の順）が観測数`nobs`と整合することを確かめる。
+/// 検査の順序は、各次元の長さ（`PanelError::IdentifierDimensionMismatch`。先頭から見て最初の不一致）、
+/// 各次元がキーを持つか（`require_effect_keys`）。`groups`が空の場合は呼び出し側の実装誤り
+/// （`CommonError::Internal`）。
+pub(crate) fn validate_panel_index(nobs: usize, groups: &[&GroupCodes]) -> Result<(), PanelError> {
+    if groups.is_empty() {
+        return Err(CommonError::internal("effects must have at least one dimension").into());
     }
-
-    if let Some(time) = time
-        && time.len() != nobs
-    {
-        return Err(PanelError::IdentifierDimensionMismatch {
-            dimension: PanelDimension::Time,
-            y_rows: nobs,
-            other_rows: time.len(),
-        });
+    for (index, group) in groups.iter().enumerate() {
+        if group.nobs() != nobs {
+            return Err(PanelError::IdentifierDimensionMismatch {
+                dimension: PanelDimension::new(index),
+                y_rows: nobs,
+                other_rows: group.nobs(),
+            });
+        }
     }
-    require_entity_keys(entity)
+    groups
+        .iter()
+        .try_for_each(|group| require_effect_keys(group))
 }
 
-/// パネル入力のentityのコードがキー（`keys()`）を持つことを確かめる。固定効果のキーに使うため、
+/// 効果の次元のコードがキー（`keys()`）を持つことを確かめる。固定効果のキーに使うため、
 /// キー無しのコード（`GroupCodes::from_*_without_keys`）は受け付けない。
-fn require_entity_keys(entity: &GroupCodes) -> Result<(), PanelError> {
-    if !entity.has_keys() {
+fn require_effect_keys(group: &GroupCodes) -> Result<(), PanelError> {
+    if !group.has_keys() {
         return Err(CommonError::internal(
-            "entity codes must carry keys (build them with GroupCodes::from_labels or \
+            "effect codes must carry keys (build them with GroupCodes::from_labels or \
              GroupCodes::from_factorized)",
         )
         .into());
@@ -106,13 +98,13 @@ pub(crate) fn ensure_no_singleton_groups(
     two_way_time: Option<&GroupCodes>,
 ) -> Result<(), PanelError> {
     let found = first_singleton_group(
-        PanelDimension::Entity,
-        names.get(PanelDimension::Entity),
+        PanelDimension::ENTITY,
+        names.get(PanelDimension::ENTITY),
         entity,
     )
     .or_else(|| {
         two_way_time.and_then(|time| {
-            first_singleton_group(PanelDimension::Time, names.get(PanelDimension::Time), time)
+            first_singleton_group(PanelDimension::TIME, names.get(PanelDimension::TIME), time)
         })
     });
     match found {
@@ -273,9 +265,9 @@ pub(crate) fn validate_balanced_panel(
     let expected = n_entities * n_periods;
     let unbalanced = || PanelError::UnbalancedPanelForTwoWay {
         n_obs,
-        entity_column: names.get(PanelDimension::Entity).to_string(),
+        entity_column: names.get(PanelDimension::ENTITY).to_string(),
         n_entities,
-        time_column: names.get(PanelDimension::Time).to_string(),
+        time_column: names.get(PanelDimension::TIME).to_string(),
         n_periods,
     };
 
@@ -346,9 +338,9 @@ pub(crate) fn ensure_no_duplicate_entity_time_pairs(
     match second_row {
         None => Ok(()),
         Some(row) => Err(PanelError::DuplicateEntityTimePair {
-            entity_column: names.get(PanelDimension::Entity).to_string(),
+            entity_column: names.get(PanelDimension::ENTITY).to_string(),
             entity_id: entity.keys()[entity.codes()[row]].clone(),
-            time_column: names.get(PanelDimension::Time).to_string(),
+            time_column: names.get(PanelDimension::TIME).to_string(),
             time_id: time.keys()[time.codes()[row]].clone(),
         }),
     }
@@ -394,6 +386,7 @@ pub(crate) fn two_way_time_varying_regressor_indices(
 #[cfg(test)]
 mod tests {
     use super::super::test_support::*;
+    use super::super::time_keys::TimeKeys;
     use super::*;
 
     #[test]
@@ -403,17 +396,17 @@ mod tests {
         let entity = GroupCodes::from_labels(&labels(&["a", "a", "b"]));
         let time = TimeKeys::lexicographic(labels(&["1", "2", "1"]));
         assert_eq!(
-            validate_panel_input(&y, &[vec![1.0, 2.0, 3.0]], &names, &entity, Some(&time)),
+            validate_panel_input(&y, &[vec![1.0, 2.0, 3.0]], &names, &[&entity, time.codes()]),
             Ok(())
         );
 
-        // x列 → entityの長さ → timeの長さ → entityのキー、の順。すべて同時に崩れていれば
+        // x列 → 効果の各次元の長さ（先頭から）→ 各次元のキー、の順。すべて同時に崩れていれば
         // x列の不一致が先に返る。
         let short_entity = GroupCodes::from_labels(&labels(&["a", "b"]));
         let short_time = TimeKeys::lexicographic(labels(&["1"]));
         let keyless = GroupCodes::from_labels_without_keys(&labels(&["a", "a"]));
         assert_eq!(
-            validate_panel_input(&y, &[vec![1.0]], &names, &keyless, Some(&short_time)),
+            validate_panel_input(&y, &[vec![1.0]], &names, &[&keyless, short_time.codes()]),
             Err(CommonError::DimensionMismatch {
                 y_rows: 3,
                 x_rows: 1
@@ -425,21 +418,34 @@ mod tests {
                 &y,
                 &[vec![1.0; 3]],
                 &names,
-                &short_entity,
-                Some(&short_time)
+                &[&short_entity, short_time.codes()]
             ),
             Err(PanelError::IdentifierDimensionMismatch {
-                dimension: PanelDimension::Entity,
+                dimension: PanelDimension::ENTITY,
                 y_rows: 3,
                 other_rows: 2
             })
         );
         assert_eq!(
-            validate_panel_input(&y, &[vec![1.0; 3]], &names, &entity, Some(&short_time)),
+            validate_panel_input(&y, &[vec![1.0; 3]], &names, &[&entity, short_time.codes()]),
             Err(PanelError::IdentifierDimensionMismatch {
-                dimension: PanelDimension::Time,
+                dimension: PanelDimension::TIME,
                 y_rows: 3,
                 other_rows: 1
+            })
+        );
+        // 3つ目以降の次元も長さを検査し、次元の番号で報告する。
+        assert_eq!(
+            validate_panel_input(
+                &y,
+                &[vec![1.0; 3]],
+                &names,
+                &[&entity, time.codes(), &short_entity]
+            ),
+            Err(PanelError::IdentifierDimensionMismatch {
+                dimension: PanelDimension::new(2),
+                y_rows: 3,
+                other_rows: 2
             })
         );
         // キー無しのentityでtimeの長さも合っていなければ、キー検査は最後なのでtimeの不一致が先。
@@ -449,17 +455,26 @@ mod tests {
                 &y,
                 &[vec![1.0; 3]],
                 &names,
-                &keyless_full,
-                Some(&short_time)
+                &[&keyless_full, short_time.codes()]
             ),
             Err(PanelError::IdentifierDimensionMismatch {
-                dimension: PanelDimension::Time,
+                dimension: PanelDimension::TIME,
                 y_rows: 3,
                 other_rows: 1
             })
         );
         assert!(matches!(
-            validate_panel_input(&y, &[vec![1.0; 3]], &names, &keyless_full, None),
+            validate_panel_input(&y, &[vec![1.0; 3]], &names, &[&keyless_full]),
+            Err(PanelError::Common(CommonError::Internal { .. }))
+        ));
+        // どの次元のキー無しも拒否する。
+        assert!(matches!(
+            validate_panel_input(&y, &[vec![1.0; 3]], &names, &[&entity, &keyless_full]),
+            Err(PanelError::Common(CommonError::Internal { .. }))
+        ));
+        // 次元が1つも無い入力は呼び出し側の実装誤り。
+        assert!(matches!(
+            validate_panel_input(&y, &[vec![1.0; 3]], &names, &[]),
             Err(PanelError::Common(CommonError::Internal { .. }))
         ));
     }

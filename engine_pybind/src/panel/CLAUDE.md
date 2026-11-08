@@ -102,13 +102,13 @@ FEの`fit`と同じ構成: `build_re_input`が返す`BuiltReInput`（`input: ReI
   - **`cov_type="dk"`では`dk_time`が必須で、`effects`の列にフォールバックしない**（`require_dk_time`、未指定は`ValidationError`。1-way・2-wayとも同じ）。どの列がDKの時点かを利用者が明示しない設計は、意図と違う列が選ばれても気づけないため採らない。`dk_time`は2-wayでも常にDK計算に使われ、「2-way FEの固定効果構造に使う時点粒度」と「DK HACカーネルに使う時系列粒度」が異なるケース（例: 固定効果は四半期、HACは年次）にも対応する。
   - **`dk_time`は`FeInput.time`には一切渡らない**: `FeInput::from_group_codes`の時点引数には常に`effects[1]`由来の値のみを渡す（2-way判定・within変換用）。`dk_time`は`FeCovType::Dk { time: TimeKeys }`（下記、必須）に直接渡す、別経路。
   - **列の型の規則は位置で決まる**: `effects[0]`は`extract_entity_groups`（同一性だけのキー）、`effects[1]`は`extract_time_keys`（時点のキー）で抽出する（`panel/common.rs`の`extract_effects`）。
-  - **エラーの`argument`は`"effects"`に統一**し、どの列かは`column`で示す。`SINGLETON_GROUP`のparamsは`{argument, column, group, n_dropped_rows}`で、`column`は`effects`の該当要素の列名。エンジンは`FeInput`/`ReInput`の`with_effect_names`で列名を受け取るだけで計算には使わない（`build_{fe,re}_input`が`.with_effect_names(effects[0].clone(), effects.get(1).cloned())`を呼ぶ）。
+  - **エラーの`argument`は`"effects"`に統一**し、どの列かは`column`で示す。`SINGLETON_GROUP`のparamsは`{argument, column, group, n_dropped_rows}`で、`column`は`effects`の該当要素の列名。エンジンは`FeInput`/`ReInput`の`with_effect_names`で列名を受け取るだけで計算には使わない（`build_{fe,re}_input`が`.with_effect_names(effects.clone())`を呼ぶ）。
   - **`effects`の上限は`MAX_EFFECTS`（当面FE/REとも2）**。3要素以上は`EFFECTS_TOO_MANY`（params: `model`・`n_columns`・`max_columns`）。文面は上限だけを示す中立の形（FEは将来上限を上げる予定、REは交差ランダム効果が標準的な推定量でないため上限が変わらない見込み、で理由は違うが、同じ`code`は同じ`hint`という規則のため）。
 - **`dk_bandwidth`**（Driscoll-Kraay HACのバンド幅）: OLS/WLS/IVの`hac_lags`と同じ役割だが、DKはNewey-West（観測数`n`ベース）と計算式・意味が異なる（`engine::panel::fe::FeCovType::Dk`の`bandwidth`は時点数`t`ベース）ため、意図的に別名にした。
 
 ## engine側の変更（`FeCovType::Dk`の拡張に伴うもの）
 
-`FEOptions.dk_time`（HAC専用の時点列を`effects`とは独立に指定したい）を受けるため、`engine::panel::fe::FeCovType::Dk`は`{ bandwidth: Option<i64>, time: TimeKeys }`（`time`は必須。`input.time_keys()`への暗黙のフォールバックは持たない）。`FeInput`自体は変更していない。詳細な設計判断・導出は`engine/src/panel/fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」・`engine/src/panel/CLAUDE.md`参照。
+`FEOptions.dk_time`（HAC専用の時点列を`effects`とは独立に指定したい）を受けるため、`engine::panel::fe::FeCovType::Dk`は`{ bandwidth: Option<i64>, time: TimeKeys }`（`time`は必須。`FeInput`の2つ目の次元への暗黙のフォールバックは持たない）。詳細な設計判断・導出は`engine/src/panel/fe.rs`モジュールdoc「Driscoll-Kraay型パネルHAC対応」・`engine/src/panel/CLAUDE.md`参照。
 
 ## `FEResult`のスコープ
 

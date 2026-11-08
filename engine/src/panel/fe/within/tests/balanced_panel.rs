@@ -42,7 +42,7 @@ fn validate_balanced_panel_rejects_duplicate_pair_offsetting_a_missing_one() {
 fn validate_balanced_panel_reports_the_column_names_set_by_effect_names() {
     let entity = codes(&["a", "a", "b"]);
     let time = codes(&["1", "2", "1"]);
-    let names = EffectNames::new("firm".to_string(), Some("year".to_string()));
+    let names = EffectNames::new(vec!["firm".to_string(), "year".to_string()]);
     let err = validate_balanced_panel(&entity, &time, &names).unwrap_err();
     assert_eq!(
         err,

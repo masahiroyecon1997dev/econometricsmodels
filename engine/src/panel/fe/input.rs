@@ -20,13 +20,12 @@ pub struct FeInput {
     x: Vec<Vec<f64>>,
     /// 説明変数名。`x`の列と対応する。
     x_names: Vec<String>,
-    /// 各行の時点コード（時間順、長さ`n`）。2-way FE（entity + time FE）を
-    /// 指定しない場合は`None`（`panel-common.md`1.1節）。
-    time: Option<TimeKeys>,
     /// 被説明変数名。
     dep_var_name: String,
-    /// `entity`の整数コード（キー付き。構築時に一度だけ作る、`GroupCodes`のdocコメント参照）。
-    entity_codes: GroupCodes,
+    /// 効果の各次元の整数コード（`effects`の順、キー付き、空でない。構築時に一度だけ作る、
+    /// `GroupCodes`のdocコメント参照）。1つ目が個体、2つ目があれば2-wayの時点
+    /// （時間順のコード。`panel-common.md`1.1節）。
+    groups: Vec<GroupCodes>,
     /// 効果の次元ごとの列名（エラーの`column`用。計算には使わない）。
     effect_names: EffectNames,
 }
@@ -40,9 +39,9 @@ impl FeInput {
     /// - いずれかの`x_columns`の長さが`y`と一致しない場合は
     ///   `PanelError::Common(CommonError::DimensionMismatch)`
     /// - `entity`の長さが`y`と一致しない場合は
-    ///   `PanelError::IdentifierDimensionMismatch { dimension: PanelDimension::Entity, .. }`
+    ///   `PanelError::IdentifierDimensionMismatch { dimension: PanelDimension::ENTITY, .. }`
     /// - `time`が`Some`で、その長さが`y`と一致しない場合は
-    ///   `PanelError::IdentifierDimensionMismatch { dimension: PanelDimension::Time, .. }`
+    ///   `PanelError::IdentifierDimensionMismatch { dimension: PanelDimension::TIME, .. }`
     ///
     /// within変換の実施・singleton検出・分散ゼロ検証・バランスパネルの検証は行わない
     /// （いずれも`fit()`側が担う、`docs/spec/fe-spec.md`）。
@@ -113,16 +112,18 @@ impl FeInput {
         time: Option<TimeKeys>,
         dep_var_name: String,
     ) -> Result<Self, PanelError> {
-        validate_panel_input(y, x_columns, &x_names, &entity, time.as_ref())?;
+        let groups: Vec<GroupCodes> = std::iter::once(entity)
+            .chain(time.map(|time| time.codes().clone()))
+            .collect();
+        validate_panel_input(y, x_columns, &x_names, &groups.iter().collect::<Vec<_>>())?;
 
         Ok(Self {
             y: y.to_vec(),
             x: x_columns.to_vec(),
             x_names,
-            time,
             dep_var_name,
-            entity_codes: entity,
-            effect_names: EffectNames::default(),
+            effect_names: EffectNames::defaults(groups.len()),
+            groups,
         })
     }
 
@@ -146,20 +147,23 @@ impl FeInput {
                 .iter()
                 .map(|&j| input.x_names()[j].clone())
                 .collect(),
-            time: match effects {
-                ReEffects::OneWay => None,
-                ReEffects::TwoWay => input.time_keys().cloned(),
-            },
             dep_var_name: input.dep_var_name().to_string(),
-            entity_codes: input.entity_codes().clone(),
+            groups: std::iter::once(input.entity_codes().clone())
+                .chain(match effects {
+                    ReEffects::OneWay => None,
+                    ReEffects::TwoWay => input.time_keys().map(|time| time.codes().clone()),
+                })
+                .collect(),
             effect_names: input.effect_names().clone(),
         }
     }
 
-    /// 効果の次元の列名を設定する（`engine_pybind`が`effects`の各要素を渡す）。エラーの`column`に
-    /// 載るだけで、計算には影響しない。`time`が`None`なら2つ目の名前は既定のまま。
-    pub fn with_effect_names(mut self, entity: String, time: Option<String>) -> Self {
-        self.effect_names = EffectNames::new(entity, time);
+    /// 効果の次元の列名を、`effects`の先頭から順に設定する（`engine_pybind`が`effects`の各要素を
+    /// 渡す）。エラーの`column`に載るだけで、計算には影響しない。次元の数より多い名前は無視し、
+    /// 足りない次元は既定の名前のまま。
+    pub fn with_effect_names(mut self, names: Vec<String>) -> Self {
+        let n_effects = self.groups.len();
+        self.effect_names = EffectNames::for_effects(n_effects, names);
         self
     }
 
@@ -168,19 +172,25 @@ impl FeInput {
         &self.effect_names
     }
 
-    /// `entity`の整数コード。
+    /// 効果の次元の数（`effects`の長さ）。
+    pub fn n_effects(&self) -> usize {
+        self.groups.len()
+    }
+
+    /// 1つ目の次元（`entity`）の整数コード。
     pub(crate) fn entity_codes(&self) -> &GroupCodes {
-        &self.entity_codes
+        &self.groups[0]
     }
 
     /// ユニークなエンティティ数。
     pub fn n_entities(&self) -> usize {
-        self.entity_codes.n_groups()
+        self.entity_codes().n_groups()
     }
 
-    /// `time`の整数コード（1-way FEで`time`が無ければ`None`）。
+    /// 2つ目の次元（`time`）の整数コード（時間順。1-way FEで`time`が無ければ`None`）。
+    /// 2-wayまでの固定効果専用で、3つ目以降の次元は含まない。
     pub(crate) fn time_codes(&self) -> Option<&GroupCodes> {
-        self.time.as_ref().map(TimeKeys::codes)
+        self.groups.get(1)
     }
 
     /// 被説明変数（長さ`n`）。
@@ -200,12 +210,12 @@ impl FeInput {
 
     /// ユニークなエンティティのラベル（コード順＝辞書順）。
     pub fn entity_labels(&self) -> &[String] {
-        self.entity_codes.keys()
+        self.entity_codes().keys()
     }
 
-    /// 時点のラベルと時間順のコード。1-way FEでは`None`。
-    pub fn time_keys(&self) -> Option<&TimeKeys> {
-        self.time.as_ref()
+    /// 時点のラベル（時間順）。1-way FEでは`None`。
+    pub fn time_periods(&self) -> Option<&[String]> {
+        self.time_codes().map(GroupCodes::keys)
     }
 
     /// 被説明変数名。
@@ -297,7 +307,8 @@ mod tests {
         assert_eq!(input.x_names(), &["x1".to_string()]);
         // ユニークなラベルを辞書順（コード順）に並べたもの。
         assert_eq!(input.entity_labels(), ["a", "b"]);
-        assert_eq!(input.time_keys(), None);
+        assert_eq!(input.time_periods(), None);
+        assert_eq!(input.n_effects(), 1);
         assert_eq!(input.dep_var_name(), "y");
         assert_eq!(input.nobs(), 4);
         assert_eq!(input.n_entities(), 2);
@@ -354,7 +365,7 @@ mod tests {
                 "y".to_string()
             ),
             Err(PanelError::IdentifierDimensionMismatch {
-                dimension: PanelDimension::Entity,
+                dimension: PanelDimension::ENTITY,
                 ..
             })
         ));
@@ -379,7 +390,7 @@ mod tests {
                 "y".to_string()
             ),
             Err(PanelError::IdentifierDimensionMismatch {
-                dimension: PanelDimension::Time,
+                dimension: PanelDimension::TIME,
                 ..
             })
         ));
@@ -394,7 +405,7 @@ mod tests {
                 "y".to_string()
             ),
             Err(PanelError::IdentifierDimensionMismatch {
-                dimension: PanelDimension::Entity,
+                dimension: PanelDimension::ENTITY,
                 ..
             })
         ));
@@ -429,11 +440,12 @@ mod tests {
         .unwrap();
 
         // 時点は`lexicographic`（ラベルの辞書順）。行数と、ユニークなラベルの時間順を確認する。
-        let Some(time_keys) = input.time_keys() else {
-            panic!("time keys must be set");
+        let (Some(time_codes), Some(periods)) = (input.time_codes(), input.time_periods()) else {
+            panic!("time codes must be set");
         };
-        assert_eq!(time_keys.len(), 4);
-        assert_eq!(time_keys.periods(), ["2020", "2021"]);
+        assert_eq!(input.n_effects(), 2);
+        assert_eq!(time_codes.nobs(), 4);
+        assert_eq!(periods, ["2020", "2021"]);
     }
 
     #[test]
@@ -483,7 +495,7 @@ mod tests {
         assert_eq!(
             result.unwrap_err(),
             PanelError::IdentifierDimensionMismatch {
-                dimension: PanelDimension::Entity,
+                dimension: PanelDimension::ENTITY,
                 y_rows: 3,
                 other_rows: 2,
             }
@@ -501,7 +513,7 @@ mod tests {
         assert_eq!(
             result.unwrap_err(),
             PanelError::IdentifierDimensionMismatch {
-                dimension: PanelDimension::Time,
+                dimension: PanelDimension::TIME,
                 y_rows: 3,
                 other_rows: 2,
             }
@@ -518,7 +530,7 @@ mod tests {
             FeInput::from_columns(&[], &[], vec![], &[], Some(&[]), "y".to_string()).unwrap();
 
         assert_eq!(input.nobs(), 0);
-        assert_eq!(input.time_keys().map(TimeKeys::len), Some(0));
+        assert_eq!(input.time_codes().map(GroupCodes::nobs), Some(0));
     }
 
     #[test]

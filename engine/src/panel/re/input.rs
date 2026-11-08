@@ -39,9 +39,9 @@ impl ReInput {
     /// - いずれかの`x_columns`の長さが`y`と一致しない場合は
     ///   `PanelError::Common(CommonError::DimensionMismatch)`
     /// - `entity`の長さが`y`と一致しない場合は
-    ///   `PanelError::IdentifierDimensionMismatch { dimension: PanelDimension::Entity, .. }`
+    ///   `PanelError::IdentifierDimensionMismatch { dimension: PanelDimension::ENTITY, .. }`
     /// - `time`が`Some`で、その長さが`y`と一致しない場合は
-    ///   `PanelError::IdentifierDimensionMismatch { dimension: PanelDimension::Time, .. }`
+    ///   `PanelError::IdentifierDimensionMismatch { dimension: PanelDimension::TIME, .. }`
     ///
     /// 準偏差変換の実施・θ計算・分散成分推定・ハウスマン検定は行わない
     /// （いずれも`fit()`側が担う、`docs/spec/re-spec.md`）。
@@ -114,7 +114,9 @@ impl ReInput {
         time: Option<TimeKeys>,
         dep_var_name: String,
     ) -> Result<Self, PanelError> {
-        validate_panel_input(y, x_columns, &x_names, &entity, time.as_ref())?;
+        let mut groups = vec![&entity];
+        groups.extend(time.as_ref().map(TimeKeys::codes));
+        validate_panel_input(y, x_columns, &x_names, &groups)?;
 
         Ok(Self {
             y: y.to_vec(),
@@ -130,7 +132,7 @@ impl ReInput {
     /// 効果の次元の列名を設定する（`engine_pybind`が`effects`の各要素を渡す）。エラーの`column`に
     /// 載るだけで、計算には影響しない。`time`が`None`なら2つ目の名前は既定のまま。
     pub fn with_effect_names(mut self, entity: String, time: Option<String>) -> Self {
-        self.effect_names = EffectNames::new(entity, time);
+        self.effect_names = EffectNames::new(std::iter::once(entity).chain(time).collect());
         self
     }
 
@@ -290,7 +292,7 @@ mod tests {
                 "y".to_string()
             ),
             Err(PanelError::IdentifierDimensionMismatch {
-                dimension: PanelDimension::Entity,
+                dimension: PanelDimension::ENTITY,
                 ..
             })
         ));
@@ -315,7 +317,7 @@ mod tests {
                 "y".to_string()
             ),
             Err(PanelError::IdentifierDimensionMismatch {
-                dimension: PanelDimension::Time,
+                dimension: PanelDimension::TIME,
                 ..
             })
         ));
@@ -330,7 +332,7 @@ mod tests {
                 "y".to_string()
             ),
             Err(PanelError::IdentifierDimensionMismatch {
-                dimension: PanelDimension::Entity,
+                dimension: PanelDimension::ENTITY,
                 ..
             })
         ));
@@ -419,7 +421,7 @@ mod tests {
         assert_eq!(
             result.unwrap_err(),
             PanelError::IdentifierDimensionMismatch {
-                dimension: PanelDimension::Entity,
+                dimension: PanelDimension::ENTITY,
                 y_rows: 3,
                 other_rows: 2,
             }
@@ -437,7 +439,7 @@ mod tests {
         assert_eq!(
             result.unwrap_err(),
             PanelError::IdentifierDimensionMismatch {
-                dimension: PanelDimension::Time,
+                dimension: PanelDimension::TIME,
                 y_rows: 3,
                 other_rows: 2,
             }

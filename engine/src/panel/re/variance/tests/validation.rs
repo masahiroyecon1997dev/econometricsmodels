@@ -48,7 +48,7 @@ fn swamy_arora_variance_components_propagates_fe_singleton_error() {
     assert_eq!(
         result.unwrap_err(),
         PanelError::SingletonGroup {
-            dimension: PanelDimension::Entity,
+            dimension: PanelDimension::ENTITY,
             column: "entity".to_string(),
             group_id: "c".to_string(),
             n_dropped_rows: 1,
@@ -106,8 +106,7 @@ fn within_for_variance_component_wraps_only_stage_capable_internal_fe_errors() {
     let wrapped: [fn() -> PanelError; 3] = [
         || PanelError::InsufficientDegreesOfFreedom {
             n_obs: 6,
-            n_entities: 3,
-            n_periods: None,
+            n_groups: vec![3],
             k: 3,
         },
         || PanelError::WithinRegressionFailed {
@@ -128,7 +127,7 @@ fn within_for_variance_component_wraps_only_stage_capable_internal_fe_errors() {
     }
     let untouched: [fn() -> PanelError; 3] = [
         || PanelError::SingletonGroup {
-            dimension: PanelDimension::Entity,
+            dimension: PanelDimension::ENTITY,
             column: "entity".to_string(),
             group_id: "a".to_string(),
             n_dropped_rows: 0,

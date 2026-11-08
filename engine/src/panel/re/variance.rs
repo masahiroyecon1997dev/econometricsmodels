@@ -61,8 +61,8 @@ pub(super) fn entity_means(y: &[f64], x: &[Vec<f64>], entity: &GroupCodes) -> En
 /// 再利用の根拠が黙って壊れないようにする。
 pub(super) fn debug_assert_within_reuse_contract(fe: &FeEstimator, k_time_varying: usize) {
     match fe.effects() {
-        FeEffects::OneWay => debug_assert!(fe.input().time_keys().is_none()),
-        FeEffects::TwoWay => debug_assert!(fe.input().time_keys().is_some()),
+        FeEffects::OneWay => debug_assert!(fe.input().time_codes().is_none()),
+        FeEffects::TwoWay => debug_assert!(fe.input().time_codes().is_some()),
     }
     debug_assert!(!fe.within_input().has_intercept());
     debug_assert_eq!(fe.within_input().k(), k_time_varying);

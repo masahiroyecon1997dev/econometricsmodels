@@ -138,7 +138,7 @@ impl TimeKeys {
 fn check_key_lengths(labels: usize, values: usize) -> Result<(), PanelError> {
     if labels != values {
         return Err(PanelError::IdentifierDimensionMismatch {
-            dimension: PanelDimension::Time,
+            dimension: PanelDimension::TIME,
             y_rows: labels,
             other_rows: values,
         });
@@ -194,7 +194,7 @@ mod tests {
         assert!(matches!(
             TimeKeys::by_integer_factorized(vec![0, 1], &["a", "b"], &[1]),
             Err(PanelError::IdentifierDimensionMismatch {
-                dimension: PanelDimension::Time,
+                dimension: PanelDimension::TIME,
                 ..
             })
         ));
@@ -364,7 +364,7 @@ mod tests {
         assert_eq!(
             err,
             PanelError::IdentifierDimensionMismatch {
-                dimension: PanelDimension::Time,
+                dimension: PanelDimension::TIME,
                 y_rows: 2,
                 other_rows: 1,
             }

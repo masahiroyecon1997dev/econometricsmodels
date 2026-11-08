@@ -5,6 +5,17 @@ use super::error::PanelError;
 use super::validation::covers_every_combination;
 use crate::shared::group_codes::GroupCodes;
 
+/// 固定効果の実効パラメータ数`neffects`（`fe-spec.md`3.2節）。`n_groups`は`effects`の列ごとの水準数
+/// （`effects`の順）で、水準数の合計から、2つ目以降の効果が1つずつ重複させる定数項ぶん
+/// （`n_groups.len() - 1`）を引く。1-wayは`n_groups[0]`、2-wayは`N + T - 1`。fixestと同じ数え方で、
+/// 連結成分の数やネストによるランク落ちは引かない。
+pub(crate) fn absorbed_parameters(n_groups: &[usize]) -> usize {
+    n_groups
+        .iter()
+        .sum::<usize>()
+        .saturating_sub(n_groups.len().saturating_sub(1))
+}
+
 /// LSDV相当のフルレバレッジ`h_ii_full`（HC2/HC3用、`fe.rs`のモジュールdoc「`cov_type`対応」の
 /// 導出参照）。分割回帰（Frisch-Waugh-Lovell）のレバレッジ分解則により、固定効果ダミーを
 /// 明示的に含めた設計行列でのレバレッジは、ダミーのみの回帰のレバレッジ（`h_dummy`）と
@@ -211,6 +222,16 @@ pub(super) fn two_group_split_is_degenerate(
 mod tests {
     use super::super::test_support::*;
     use super::*;
+
+    #[test]
+    fn absorbed_parameters_subtracts_one_shared_constant_per_extra_effect() {
+        assert_eq!(absorbed_parameters(&[]), 0);
+        assert_eq!(absorbed_parameters(&[5]), 5);
+        assert_eq!(absorbed_parameters(&[5, 2]), 6);
+        assert_eq!(absorbed_parameters(&[40, 8, 5]), 51);
+        // 水準が1つずつの効果は、定数項と重複するぶんだけを残す。
+        assert_eq!(absorbed_parameters(&[1, 1, 1]), 1);
+    }
 
     #[test]
     fn leverage_full_one_way_uses_each_rows_entity_size_for_unbalanced_unordered_rows() {

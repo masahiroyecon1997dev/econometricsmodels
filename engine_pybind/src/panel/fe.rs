@@ -617,7 +617,7 @@ pub(crate) fn build_fe_input(
 
     let input = FeInput::from_group_codes(&y_slice, &x_slices, x, entity_groups, time_keys, y)
         .map_err(panel_error_to_pyerr)?
-        .with_effect_names(effects[0].clone(), effects.get(1).cloned());
+        .with_effect_names(effects.clone());
 
     Ok(BuiltFeInput {
         input,
@@ -761,7 +761,7 @@ mod tests {
 
         assert_eq!(input.nobs(), 6);
         assert_eq!(input.x_names(), &["x1".to_string()]);
-        assert_eq!(input.time_keys(), None);
+        assert_eq!(input.time_periods(), None);
         assert_eq!(effects, FeEffects::OneWay);
         assert_eq!(
             cov_type,
@@ -786,11 +786,12 @@ mod tests {
         .unwrap();
 
         assert_eq!(effects, FeEffects::TwoWay);
-        let Some(time_keys) = input.time_keys() else {
-            panic!("time keys must be set");
-        };
-        assert_eq!(time_keys.len(), 6);
-        assert_eq!(time_keys.periods(), ["1", "2"]);
+        assert_eq!(input.n_effects(), 2);
+        assert_eq!(input.nobs(), 6);
+        assert_eq!(
+            input.time_periods(),
+            Some(["1".to_string(), "2".to_string()].as_slice())
+        );
     }
 
     #[test]
@@ -901,7 +902,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(effects, FeEffects::OneWay);
-        assert_eq!(input.time_keys(), None); // dk_timeはFeInput.timeには渡らない
+        assert_eq!(input.time_periods(), None); // dk_timeはFeInputの効果の次元には渡らない
         assert_eq!(
             cov_type,
             FeCovType::Dk {
@@ -917,7 +918,7 @@ mod tests {
 
     #[test]
     fn build_fe_input_dk_uses_dk_time_independently_of_effects_when_two_way() {
-        // 2-way（`effects`が2要素）でもDKの時点列は`dk_time`だけから決まり、`FeInput.time_keys()`
+        // 2-way（`effects`が2要素）でもDKの時点列は`dk_time`だけから決まり、`FeInput`の2つ目の次元
         // （固定効果の時間次元）とは独立であることを確認する（モジュールdoc参照）。
         let df = df!(
             "y" => [1.0, 2.0, 3.0, 4.0],
@@ -946,11 +947,12 @@ mod tests {
         .unwrap();
 
         assert_eq!(effects, FeEffects::TwoWay);
-        let Some(time_keys) = input.time_keys() else {
-            panic!("time keys must be set");
-        };
-        assert_eq!(time_keys.len(), 4);
-        assert_eq!(time_keys.periods(), ["1", "2"]);
+        assert_eq!(input.n_effects(), 2);
+        assert_eq!(input.nobs(), 4);
+        assert_eq!(
+            input.time_periods(),
+            Some(["1".to_string(), "2".to_string()].as_slice())
+        );
         assert_eq!(
             cov_type,
             FeCovType::Dk {

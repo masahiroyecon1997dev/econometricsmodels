@@ -25,7 +25,7 @@ fn a_repeated_pair_is_rejected_even_when_the_counts_match_a_balanced_panel() {
     // 3×2のグリッドと同じ6行だが、(a,1)が2回現れ(a,2)が欠ける。
     let entity = codes(&["a", "a", "b", "b", "c", "c"]);
     let time = codes(&["1", "1", "1", "2", "1", "2"]);
-    let names = EffectNames::new("firm".to_string(), Some("year".to_string()));
+    let names = EffectNames::new(vec!["firm".to_string(), "year".to_string()]);
     assert_eq!(
         ensure_no_duplicate_entity_time_pairs(&entity, &time, &names),
         Err(PanelError::DuplicateEntityTimePair {

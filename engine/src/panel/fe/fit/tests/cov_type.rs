@@ -44,7 +44,7 @@ fn dk_std_error(time: TimeKeys, rows: Option<&[usize]>) -> f64 {
 
 #[test]
 fn fe_estimator_fit_one_way_hac_uses_explicit_time_override_without_fe_input_time() {
-    // `FeCovType::Dk.time`（明示指定）は`FeInput.time_keys()`を経由せずに
+    // `FeCovType::Dk.time`（明示指定）は`FeInput`の2つ目の次元（`time_codes()`）を経由せずに
     // DK HACを成立させられる（`engine_pybind`の`FEOptions.dk_time`が1-way FE + DK HAC
     // の組み合わせをこの経路で配線する想定）。`FeInput::from_columns`には`time=None`を
     // 渡し、`fe_estimator_fit_one_way_hac_matches_fixest_default_bandwidth`と
@@ -70,9 +70,9 @@ fn fe_estimator_fit_one_way_hac_uses_explicit_time_override_without_fe_input_tim
 
 #[test]
 fn fe_estimator_fit_one_way_hac_ignores_fe_input_time() {
-    // `FeInput.time_keys()`にも`time`があっても、DKの時点列は`FeCovType::Dk.time`だけから
-    // 決まる（`FeInput.time_keys()`は2-wayの固定効果の時間次元専用、`fe.rs`のモジュールdoc
-    // 「Driscoll-Kraay型パネルHAC」参照）ことを確認する。`FeInput.time_keys()`にわざと
+    // `FeInput`の2つ目の次元（`time_codes()`）にも`time`があっても、DKの時点列は`FeCovType::Dk.time`だけから
+    // 決まる（`FeInput`の2つ目の次元（`time_codes()`）は2-wayの固定効果の時間次元専用、`fe.rs`のモジュールdoc
+    // 「Driscoll-Kraay型パネルHAC」参照）ことを確認する。`FeInput`の2つ目の次元（`time_codes()`）にわざと
     // 全観測が同一のダミー時点列を渡し、それが無視されて`FeCovType::Dk.time`の方の結果と
     // 一致することを確認する。
     let (entity, time, x, y) = fixest_reference_input();

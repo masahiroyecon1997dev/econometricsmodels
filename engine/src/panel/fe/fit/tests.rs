@@ -69,12 +69,20 @@ pub(super) fn two_period_input(k: usize, break_pattern: bool) -> (FeInput, Vec<S
     (input, time)
 }
 
-/// `input`が持つ時点（ラベルの辞書順）を、DKの時点列としてそのまま渡す。
+/// `input`が持つ時点（ラベルの辞書順）を、DKの時点列としてそのまま渡す。時点のコードを辞書順の
+/// `lexicographic`で作り直すので、`input`の時点がラベルの辞書順に作られている（`from_columns`）ことが前提。
 pub(super) fn dk_time_from(input: &FeInput) -> TimeKeys {
-    let Some(time) = input.time_keys() else {
+    let Some(time) = input.time_periods() else {
         panic!("test input must have a time column");
     };
-    time.clone()
+    // 辞書順のコードは、ラベルを辞書順に並べたものから作った`lexicographic`と同じ。
+    TimeKeys::lexicographic(input.time_codes().map_or_else(Vec::new, |codes| {
+        codes
+            .codes()
+            .iter()
+            .map(|&code| time[code].clone())
+            .collect()
+    }))
 }
 
 pub(super) fn dk_bandwidth_zero(input: &FeInput) -> FeCovType {

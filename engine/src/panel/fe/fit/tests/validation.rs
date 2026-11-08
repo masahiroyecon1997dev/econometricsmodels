@@ -123,7 +123,7 @@ fn fe_estimator_fit_propagates_singleton_error() {
     assert_eq!(
         result.unwrap_err(),
         PanelError::SingletonGroup {
-            dimension: PanelDimension::Entity,
+            dimension: PanelDimension::ENTITY,
             column: "entity".to_string(),
             group_id: "c".to_string(),
             n_dropped_rows: 1,
@@ -237,7 +237,7 @@ fn fe_estimator_fit_two_way_propagates_singleton_error() {
     assert_eq!(
         result.unwrap_err(),
         PanelError::SingletonGroup {
-            dimension: PanelDimension::Entity,
+            dimension: PanelDimension::ENTITY,
             column: "entity".to_string(),
             group_id: "c".to_string(),
             n_dropped_rows: 1,
@@ -383,8 +383,7 @@ fn fe_estimator_fit_propagates_insufficient_degrees_of_freedom_error() {
         result.unwrap_err(),
         PanelError::InsufficientDegreesOfFreedom {
             n_obs: 4,
-            n_entities: 2,
-            n_periods: None,
+            n_groups: vec![2],
             k: 2,
         }
     );
@@ -766,7 +765,7 @@ fn fe_estimator_fit_hac_rejects_time_override_with_wrong_length() {
     assert_eq!(
         result.unwrap_err(),
         PanelError::IdentifierDimensionMismatch {
-            dimension: PanelDimension::Time,
+            dimension: PanelDimension::TIME,
             y_rows: n,
             other_rows: n - 1,
         }

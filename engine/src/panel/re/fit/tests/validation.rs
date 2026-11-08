@@ -199,7 +199,7 @@ fn two_way_fit_rejects_unbalanced_panel_singletons_and_missing_time() {
     assert!(matches!(
         fit(build(&|r| r >= 4 || r == 0, true)).unwrap_err(),
         PanelError::SingletonGroup {
-            dimension: PanelDimension::Entity,
+            dimension: PanelDimension::ENTITY,
             ..
         }
     ));
@@ -316,7 +316,7 @@ fn re_estimator_fit_dk_rejects_time_of_wrong_length() {
     assert_eq!(
         re.unwrap_err(),
         PanelError::IdentifierDimensionMismatch {
-            dimension: PanelDimension::Time,
+            dimension: PanelDimension::TIME,
             y_rows: 7,
             other_rows: 3,
         }
@@ -402,7 +402,7 @@ fn re_estimator_fit_propagates_fe_singleton_error_from_variance_components() {
     assert_eq!(
         result.unwrap_err(),
         PanelError::SingletonGroup {
-            dimension: PanelDimension::Entity,
+            dimension: PanelDimension::ENTITY,
             column: "entity".to_string(),
             group_id: "c".to_string(),
             n_dropped_rows: 1,

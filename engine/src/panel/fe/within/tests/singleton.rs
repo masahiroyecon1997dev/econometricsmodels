@@ -21,7 +21,7 @@ fn validate_no_singleton_groups_one_way_detects_entity_singleton() {
     assert_eq!(
         result.unwrap_err(),
         PanelError::SingletonGroup {
-            dimension: PanelDimension::Entity,
+            dimension: PanelDimension::ENTITY,
             column: "entity".to_string(),
             group_id: "c".to_string(),
             n_dropped_rows: 1,
@@ -40,7 +40,7 @@ fn validate_no_singleton_groups_reports_first_singleton_in_observation_order() {
     assert_eq!(
         validate_no_singleton_groups_one_way(&input).unwrap_err(),
         PanelError::SingletonGroup {
-            dimension: PanelDimension::Entity,
+            dimension: PanelDimension::ENTITY,
             column: "entity".to_string(),
             group_id: "b".to_string(),
             n_dropped_rows: 2,
@@ -71,7 +71,7 @@ fn validate_no_singleton_groups_two_way_detects_entity_singleton() {
     assert_eq!(
         result.unwrap_err(),
         PanelError::SingletonGroup {
-            dimension: PanelDimension::Entity,
+            dimension: PanelDimension::ENTITY,
             column: "entity".to_string(),
             group_id: "c".to_string(),
             n_dropped_rows: 1,
@@ -93,7 +93,7 @@ fn validate_no_singleton_groups_two_way_detects_time_singleton() {
     assert_eq!(
         result.unwrap_err(),
         PanelError::SingletonGroup {
-            dimension: PanelDimension::Time,
+            dimension: PanelDimension::TIME,
             column: "time".to_string(),
             group_id: "3".to_string(),
             n_dropped_rows: 1,
@@ -115,7 +115,7 @@ fn validate_no_singleton_groups_two_way_reports_entity_before_time_when_both_pre
     assert_eq!(
         result.unwrap_err(),
         PanelError::SingletonGroup {
-            dimension: PanelDimension::Entity,
+            dimension: PanelDimension::ENTITY,
             column: "entity".to_string(),
             group_id: "c".to_string(),
             n_dropped_rows: 1,
@@ -180,17 +180,17 @@ fn singleton_group_error_reports_the_column_names_set_by_with_effect_names() {
     assert_eq!(
         validate_no_singleton_groups_one_way(&input),
         Err(PanelError::SingletonGroup {
-            dimension: PanelDimension::Entity,
+            dimension: PanelDimension::ENTITY,
             column: "entity".to_string(),
             group_id: "c".to_string(),
             n_dropped_rows: 1,
         })
     );
-    let input = input.with_effect_names("firm".to_string(), None);
+    let input = input.with_effect_names(vec!["firm".to_string()]);
     assert_eq!(
         validate_no_singleton_groups_one_way(&input),
         Err(PanelError::SingletonGroup {
-            dimension: PanelDimension::Entity,
+            dimension: PanelDimension::ENTITY,
             column: "firm".to_string(),
             group_id: "c".to_string(),
             n_dropped_rows: 1,
@@ -203,11 +203,11 @@ fn singleton_group_error_reports_the_column_names_set_by_with_effect_names() {
     let time = strings(&["1", "2", "1", "1"]);
     let input = FeInput::from_columns(&y, &[], vec![], &entity, Some(&time), "y".into())
         .unwrap()
-        .with_effect_names("firm".to_string(), Some("year".to_string()));
+        .with_effect_names(vec!["firm".to_string(), "year".to_string()]);
     assert_eq!(
         validate_no_singleton_groups_two_way(&input),
         Err(PanelError::SingletonGroup {
-            dimension: PanelDimension::Time,
+            dimension: PanelDimension::TIME,
             column: "year".to_string(),
             group_id: "2".to_string(),
             // 時点2の行(a,2)を落とすと、個体aが(a,1)だけになって、それも落ちる。
@@ -228,7 +228,7 @@ fn the_error_counts_the_rows_that_repeated_removal_of_singleton_groups_would_dro
     assert_eq!(
         validate_no_singleton_groups_two_way(&input),
         Err(PanelError::SingletonGroup {
-            dimension: PanelDimension::Entity,
+            dimension: PanelDimension::ENTITY,
             column: "entity".to_string(),
             group_id: "c".to_string(),
             n_dropped_rows: 5,

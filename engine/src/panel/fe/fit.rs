@@ -14,7 +14,9 @@ use super::within::{
 };
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::OlsInput;
-use crate::panel::common::{PanelCov, PanelCovInput, PanelError, PanelStructure, panel_cov_params};
+use crate::panel::common::{
+    PanelCov, PanelCovInput, PanelError, PanelStructure, absorbed_parameters, panel_cov_params,
+};
 use crate::shared::error::CommonError;
 use crate::shared::goodness_of_fit::{gaussian_goodness_of_fit, is_perfect_fit};
 use crate::shared::group_codes::GroupCodes;
@@ -53,6 +55,9 @@ pub(super) fn fit_fe(
     // 弾き、以降は`Some`かどうかだけで1-way/2-wayを分岐する（`effects`と`input.time`の
     // 食い違いを後段で`expect`せずに済む）。
     let two_way_time = two_way_time(effects, &input)?;
+    // 固定効果は2次元まで。3つ目以降の次元の配線（within変換・自由度・singleton検出）は未対応で、
+    // `FeInput`のコンストラクタがK>=3を作れない間はここに来ない。
+    debug_assert!(input.n_effects() <= 2, "fit supports at most two effects");
 
     absorption.validate()?;
 
@@ -90,21 +95,19 @@ pub(super) fn fit_fe(
     };
 
     let n = input.nobs();
-    let n_entities = input.entity_codes().n_groups();
     let n_periods = two_way_time.map(GroupCodes::n_groups);
+    let n_groups: Vec<usize> = std::iter::once(input.entity_codes().n_groups())
+        .chain(n_periods)
+        .collect();
     let k = input.x_names().len();
-    // `neffects`: entityダミー・timeダミーの実効パラメータ数（`fe-spec.md`3.2節）。2-wayは両者の
-    // 間に定数項ぶんの重複が1つ生じるため`+1`補正（`n_entities + n_periods - 1`）。
-    let neffects = match n_periods {
-        None => n_entities,
-        Some(n_periods) => n_entities + n_periods - 1,
-    };
+    // `neffects`: 固定効果ダミーの実効パラメータ数（`fe-spec.md`3.2節）。2つ目以降の効果は
+    // 定数項ぶんの重複が1つずつ生じるため、水準数の合計から引く（2-wayは`n_entities + n_periods - 1`）。
+    let neffects = absorbed_parameters(&n_groups);
     let df_model = k + neffects;
     if n <= df_model {
         return Err(PanelError::InsufficientDegreesOfFreedom {
             n_obs: n,
-            n_entities,
-            n_periods,
+            n_groups,
             k,
         });
     }

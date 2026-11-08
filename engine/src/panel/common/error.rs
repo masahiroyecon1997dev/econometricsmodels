@@ -5,39 +5,41 @@ use std::fmt;
 
 use thiserror::Error;
 
+use super::fe_adjustment::absorbed_parameters;
 use crate::linear::common::LeastSquaresError;
 use crate::shared::error::{CommonError, ErrorInfo, staged_report};
 use crate::shared::error_catalog::{ErrorCode, ErrorReport, Stage};
 use crate::shared::validation::{MAX_ITER_LIMIT, MAX_ITER_MIN};
 
-/// パネルデータの2つの次元。エラーメッセージ・バリデーションで「どちらの次元の
+/// 固定効果の次元（`effects`の何番目の列か）。エラーメッセージ・バリデーションで「どの次元の
 /// 問題か」を区別するために使う。
 ///
-/// 2-way FEではエンティティ・時点のsingletonを対称に検出する
-/// （`docs/spec/fe-spec.md`1章）ため、`PanelError::SingletonGroup`が
-/// この型をフィールドとして持つ。FE/RE実装が進んだ段階で、singleton検出以外
-/// （`fixed_effects()`の次元指定等）でも再利用できる想定。
+/// 次元の数は`effects`の長さで決まる。個体は0番目（[`ENTITY`](Self::ENTITY)）、2-wayの時点は
+/// 1番目（[`TIME`](Self::TIME)）で、3つ目以降は添字で表す。`PanelError::SingletonGroup`等が
+/// この型をフィールドとして持つ。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PanelDimension {
-    /// エンティティ方向（個体・企業・州等、`effects`の1つ目の列）。
-    Entity,
-    /// 時点方向（`effects`の2つ目の列）。
-    Time,
-}
+pub struct PanelDimension(usize);
 
 impl PanelDimension {
-    /// エラーの`argument`に入る名前（公開される値のため、`Display`とは独立に固定する）。
-    fn argument_name(self) -> &'static str {
-        match self {
-            PanelDimension::Entity => "entity",
-            PanelDimension::Time => "time",
-        }
+    /// `effects`の1つ目（個体・企業・州等）。
+    pub const ENTITY: Self = Self(0);
+    /// `effects`の2つ目（2-wayの時点）。
+    pub const TIME: Self = Self(1);
+
+    /// `effects`の`index`番目（0始まり）の次元。
+    pub const fn new(index: usize) -> Self {
+        Self(index)
+    }
+
+    /// `effects`の何番目か（0始まり）。
+    pub const fn index(self) -> usize {
+        self.0
     }
 }
 
 impl fmt::Display for PanelDimension {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.argument_name())
+        write!(f, "effects[{}]", self.0)
     }
 }
 
@@ -87,19 +89,18 @@ pub enum PanelError {
 
     /// パネル自由度調整後の残差自由度が正にならない。
     ///
-    /// FEの`df_resid`は`n_obs`から個体ダミー相当の自由度を追加で消費するため、
-    /// - 1-way: `df_resid = n_obs - n_entities - k`
-    /// - 2-way: `df_resid = n_obs - n_entities - n_periods + 1 - k`
-    ///   （entityダミーとtimeダミーの間の定数項ぶんのランク落ちを`+1`で補正、`fe-spec.md`3.2節）
-    ///
-    /// となる。`CommonError::InsufficientObservations`（単純な`n <= k`）とは
-    /// 消費する自由度の内訳が異なるため別バリアントにする。`n_periods`は1-wayでは
-    /// `None`（エラーの`n_effects`は個体数だけになる）。
+    /// FEの`df_resid`は`n_obs`から固定効果ダミー相当の自由度を追加で消費するため、
+    /// `df_resid = n_obs - (水準数の合計 - (効果の数 - 1)) - k`となる
+    /// （2つ目以降の効果は、ダミー同士の間の定数項ぶんのランク落ちを1つずつ引く。
+    /// [`absorbed_parameters`]、`fe-spec.md`3.2節）。
+    /// `CommonError::InsufficientObservations`（単純な`n <= k`）とは
+    /// 消費する自由度の内訳が異なるため別バリアントにする。`n_groups`は`effects`の列ごとの
+    /// 水準数で、1-wayなら要素は1つ。
     #[error("{}", self.catalog_message())]
     InsufficientDegreesOfFreedom {
         n_obs: usize,
-        n_entities: usize,
-        n_periods: Option<usize>,
+        /// `effects`の列ごとの水準数（`effects`の順）。
+        n_groups: Vec<usize>,
         k: usize,
     },
 
@@ -425,14 +426,8 @@ impl ErrorInfo for PanelError {
                 "detail",
                 "two-way effects were requested without a time column",
             ),
-            Self::InsufficientDegreesOfFreedom {
-                n_obs,
-                n_entities,
-                n_periods,
-                k,
-            } => {
-                // 2-wayは個体ダミーと時点ダミーの間の定数項ぶんを1つ引く。
-                let n_effects = n_entities + n_periods.map_or(0, |t| t.saturating_sub(1));
+            Self::InsufficientDegreesOfFreedom { n_obs, n_groups, k } => {
+                let n_effects = absorbed_parameters(n_groups);
                 ErrorReport::new(ErrorCode::InsufficientDegreesOfFreedom)
                     .param("n_obs", *n_obs)
                     .param("n_params", *k)
@@ -587,8 +582,7 @@ mod tests {
             (
                 PanelError::InsufficientDegreesOfFreedom {
                     n_obs: 10,
-                    n_entities: 5,
-                    n_periods: None,
+                    n_groups: vec![5],
                     k: 5,
                 },
                 ErrorCode::InsufficientDegreesOfFreedom,
@@ -597,8 +591,7 @@ mod tests {
             (
                 PanelError::InsufficientDegreesOfFreedom {
                     n_obs: 10,
-                    n_entities: 5,
-                    n_periods: Some(2),
+                    n_groups: vec![5, 2],
                     k: 1,
                 },
                 ErrorCode::InsufficientDegreesOfFreedom,
@@ -606,7 +599,7 @@ mod tests {
             ),
             (
                 PanelError::SingletonGroup {
-                    dimension: PanelDimension::Entity,
+                    dimension: PanelDimension::ENTITY,
                     column: "firm".to_string(),
                     group_id: "a".to_string(),
                     n_dropped_rows: 0,
@@ -616,7 +609,7 @@ mod tests {
             ),
             (
                 PanelError::SingletonGroup {
-                    dimension: PanelDimension::Time,
+                    dimension: PanelDimension::TIME,
                     column: "year".to_string(),
                     group_id: "2020".to_string(),
                     n_dropped_rows: 0,
@@ -736,7 +729,7 @@ mod tests {
         for err in [
             PanelError::TwoWayRequiresTime,
             PanelError::IdentifierDimensionMismatch {
-                dimension: PanelDimension::Entity,
+                dimension: PanelDimension::ENTITY,
                 y_rows: 3,
                 other_rows: 2,
             },
@@ -748,17 +741,37 @@ mod tests {
     }
 
     #[test]
-    fn panel_dimension_displays_lowercase_name() {
-        assert_eq!(PanelDimension::Entity.to_string(), "entity");
-        assert_eq!(PanelDimension::Time.to_string(), "time");
+    fn insufficient_degrees_of_freedom_counts_effects_of_every_dimension() {
+        let report = PanelError::InsufficientDegreesOfFreedom {
+            n_obs: 10,
+            n_groups: vec![5, 2, 3],
+            k: 1,
+        }
+        .report();
+        assert_eq!(report.code(), ErrorCode::InsufficientDegreesOfFreedom);
+        assert!(report.validate().is_ok());
+        // 5 + 2 + 3 - 2 = 8個の固定効果のパラメータと係数1つで、少なくとも10が要る。
+        assert!(
+            report
+                .message()
+                .contains("1 coefficient(s) and 8 fixed-effect parameter(s)")
+        );
+        assert!(report.message().contains("at least 10 are needed"));
+    }
+
+    #[test]
+    fn panel_dimension_displays_its_position_in_effects() {
+        assert_eq!(PanelDimension::ENTITY.to_string(), "effects[0]");
+        assert_eq!(PanelDimension::TIME.to_string(), "effects[1]");
+        assert_eq!(PanelDimension::new(2).to_string(), "effects[2]");
+        assert_eq!(PanelDimension::new(2).index(), 2);
     }
 
     #[test]
     fn in_stage_adds_a_stage_to_the_wrapped_code_and_replaces_an_inner_stage() {
         let dof = PanelError::InsufficientDegreesOfFreedom {
             n_obs: 10,
-            n_entities: 5,
-            n_periods: None,
+            n_groups: vec![5],
             k: 5,
         };
         let wrapped = dof.in_stage(Stage::VarianceComponentWithinRegression);
@@ -830,13 +843,13 @@ mod tests {
     fn panel_error_implements_partial_eq() {
         assert_eq!(
             PanelError::SingletonGroup {
-                dimension: PanelDimension::Entity,
+                dimension: PanelDimension::ENTITY,
                 column: "entity".to_string(),
                 group_id: "a".to_string(),
                 n_dropped_rows: 0,
             },
             PanelError::SingletonGroup {
-                dimension: PanelDimension::Entity,
+                dimension: PanelDimension::ENTITY,
                 column: "entity".to_string(),
                 group_id: "a".to_string(),
                 n_dropped_rows: 0,
@@ -844,13 +857,13 @@ mod tests {
         );
         assert_ne!(
             PanelError::SingletonGroup {
-                dimension: PanelDimension::Entity,
+                dimension: PanelDimension::ENTITY,
                 column: "entity".to_string(),
                 group_id: "a".to_string(),
                 n_dropped_rows: 0,
             },
             PanelError::SingletonGroup {
-                dimension: PanelDimension::Time,
+                dimension: PanelDimension::TIME,
                 column: "time".to_string(),
                 group_id: "a".to_string(),
                 n_dropped_rows: 0,
@@ -859,14 +872,12 @@ mod tests {
         assert_ne!(
             PanelError::InsufficientDegreesOfFreedom {
                 n_obs: 10,
-                n_entities: 8,
-                n_periods: None,
+                n_groups: vec![8],
                 k: 2,
             },
             PanelError::InsufficientDegreesOfFreedom {
                 n_obs: 10,
-                n_entities: 8,
-                n_periods: Some(2),
+                n_groups: vec![8, 2],
                 k: 2,
             }
         );

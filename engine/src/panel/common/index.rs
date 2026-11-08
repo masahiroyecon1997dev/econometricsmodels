@@ -1,92 +1,106 @@
 //! パネル索引`PanelIndex`と、効果の次元ごとの列名`EffectNames`。
 
 use super::error::{PanelDimension, PanelError};
-use super::time_keys::TimeKeys;
 use super::validation::validate_panel_index;
 use crate::shared::group_codes::GroupCodes;
 
 /// 効果の次元ごとの列名。エラーの`column`に載せるためだけに`FeInput`/`ReInput`が保持する
 /// （`engine_pybind`が`effects`の各要素の列名を渡す）。計算には使わない。
 ///
-/// 既定は`"entity"`・`"time"`で、`engine`単体（テスト等）の構築ではこのまま使う。
+/// 既定は`"entity"`・`"time"`・`"effect3"`・…で、`engine`単体（テスト等）の構築ではこのまま使う。
+/// 次元の数以上の名前を持つ（持つ名前より後ろの次元は既定の名前になる）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct EffectNames {
-    entity: String,
-    time: String,
+    names: Vec<String>,
 }
 
 impl Default for EffectNames {
     fn default() -> Self {
-        Self {
-            entity: "entity".to_string(),
-            time: "time".to_string(),
-        }
+        Self::defaults(2)
     }
 }
 
 impl EffectNames {
-    /// 1つ目の次元（個体）と、あれば2つ目の次元（時点）の列名を設定する。
-    /// 2つ目が`None`なら既定の名前を残す（1-wayでは使われない）。
-    pub(crate) fn new(entity: String, time: Option<String>) -> Self {
-        let default = Self::default();
+    /// `n_effects`個の次元に既定の名前を付ける。1-wayでも2つ目の名前（`"time"`）は持つ
+    /// （エラーには使われない）。
+    pub(crate) fn defaults(n_effects: usize) -> Self {
         Self {
-            entity,
-            time: time.unwrap_or(default.time),
+            names: (0..n_effects.max(2)).map(default_name).collect(),
         }
+    }
+
+    /// `names`の数を次元の数として、先頭の次元から順に当てはめる。
+    pub(crate) fn new(names: Vec<String>) -> Self {
+        Self::for_effects(names.len(), names)
+    }
+
+    /// `n_effects`個の次元の名前を持つ。`names`を先頭の次元から順に当てはめ、足りない次元は既定の
+    /// 名前のまま、次元の数より多い名前は捨てる（1-wayや、名前を渡さなかった次元）。
+    pub(crate) fn for_effects(n_effects: usize, names: Vec<String>) -> Self {
+        let mut all = Self::defaults(n_effects);
+        for (slot, name) in all.names.iter_mut().zip(names.into_iter().take(n_effects)) {
+            *slot = name;
+        }
+        all
     }
 
     /// `dimension`に対応する列名。
     pub(crate) fn get(&self, dimension: PanelDimension) -> &str {
-        match dimension {
-            PanelDimension::Entity => &self.entity,
-            PanelDimension::Time => &self.time,
-        }
+        self.names
+            .get(dimension.index())
+            .map_or("effects", String::as_str)
     }
 }
 
-/// パネルの索引（個体・時点）と効果の列名。観測の行ごとにどの個体・どの時点に属するかを
+/// 名前を渡されなかった`index`番目（0始まり）の次元の既定の名前。
+fn default_name(index: usize) -> String {
+    match index {
+        0 => "entity".to_string(),
+        1 => "time".to_string(),
+        _ => format!("effect{}", index + 1),
+    }
+}
+
+/// パネルの索引（効果の各次元）と効果の列名。観測の行ごとにどの水準に属するかを
 /// 持つ入れ物で、列データ（`y`・`x`等）は持たない。`FeIvInput`が保持し、役割の異なる複数の
 /// 列を同じ索引で扱えるようにする。
 ///
-/// `entity`はキー付きの`GroupCodes`（固定効果のキーに使う）、`time`は2-wayの時間次元
-/// （`TimeKeys`、時間順のコード）。構築時に観測数との整合を検証するので、構築後は
-/// 長さの不一致が起きない。フィールドはprivate。
+/// 次元は`effects`の順に`GroupCodes`で持つ（1つ目が個体、2つ目が2-wayの時点、3つ目以降は
+/// 高次元の固定効果）。時点の次元のコードは時間順に振ってあり、順序づけは`TimeKeys`が作る
+/// （呼び出し側が決める）。Driscoll-Kraayの時点キーは効果の次元とは別なので、ここには持たない。
+/// 構築時に観測数との整合を検証するので、構築後は長さの不一致が起きない。フィールドはprivate。
 #[derive(Debug, Clone)]
 pub struct PanelIndex {
-    entity: GroupCodes,
-    time: Option<TimeKeys>,
+    /// 効果の各次元のコード（`effects`の順、キー付き、空でない）。
+    groups: Vec<GroupCodes>,
     effect_names: EffectNames,
 }
 
 impl PanelIndex {
-    /// 観測数`nobs`の索引を組み立てる。効果の列名は既定（`"entity"`・`"time"`）で、
+    /// 観測数`nobs`の索引を組み立てる。`groups`は`effects`の各列のコードで、空であってはならない。
+    /// 効果の列名は既定（`"entity"`・`"time"`・`"effect3"`…）で、
     /// [`with_effect_names`](Self::with_effect_names)で設定する。
     ///
     /// # Errors
     /// 検査の順序は`validate_panel_index`が正本。
-    /// - `entity`の長さが`nobs`と一致しない場合は
-    ///   `PanelError::IdentifierDimensionMismatch { dimension: PanelDimension::Entity, .. }`
-    /// - `time`が`Some`で、その長さが`nobs`と一致しない場合は
-    ///   `PanelError::IdentifierDimensionMismatch { dimension: PanelDimension::Time, .. }`
-    /// - `entity`がキー無しのコードの場合は`PanelError::Common`（`CommonError::Internal`、
-    ///   呼び出し側の実装誤り）
-    pub fn new(
-        nobs: usize,
-        entity: GroupCodes,
-        time: Option<TimeKeys>,
-    ) -> Result<Self, PanelError> {
-        validate_panel_index(nobs, &entity, time.as_ref())?;
+    /// - 次元の長さが`nobs`と一致しない場合は、`effects`の先頭から見て最初のものが
+    ///   `PanelError::IdentifierDimensionMismatch { dimension, .. }`
+    /// - 次元がキー無しのコードの場合は`PanelError::Common`（`CommonError::Internal`、
+    ///   呼び出し側の実装誤り）。`groups`が空の場合も同じ
+    pub fn new(nobs: usize, groups: Vec<GroupCodes>) -> Result<Self, PanelError> {
+        validate_panel_index(nobs, &groups.iter().collect::<Vec<_>>())?;
+        let effect_names = EffectNames::defaults(groups.len());
         Ok(Self {
-            entity,
-            time,
-            effect_names: EffectNames::default(),
+            groups,
+            effect_names,
         })
     }
 
-    /// 効果の次元の列名を設定する。エラーの`column`に載るだけで、計算には影響しない。
-    /// 設定済みの名前は全て置き換わり、`time`が`None`なら2つ目の名前は既定（`"time"`）になる。
-    pub fn with_effect_names(mut self, entity: String, time: Option<String>) -> Self {
-        self.effect_names = EffectNames::new(entity, time);
+    /// 効果の次元の列名を、`effects`の先頭から順に設定する。エラーの`column`に載るだけで、
+    /// 計算には影響しない。次元の数より多い名前は無視し、足りない次元は既定の名前のまま。
+    pub fn with_effect_names(mut self, names: Vec<String>) -> Self {
+        let n_effects = self.groups.len();
+        self.effect_names = EffectNames::for_effects(n_effects, names);
         self
     }
 
@@ -95,106 +109,146 @@ impl PanelIndex {
         self.effect_names.get(dimension)
     }
 
-    /// `entity`の整数コード（キー付き）。
+    /// 効果の次元の数（`effects`の長さ）。
+    pub fn n_effects(&self) -> usize {
+        self.groups.len()
+    }
+
+    /// 効果の各次元のコード（`effects`の順、キー付き）。
+    pub fn effect_codes(&self) -> &[GroupCodes] {
+        &self.groups
+    }
+
+    /// 1つ目の次元（個体）の整数コード（キー付き）。
     pub fn entity_codes(&self) -> &GroupCodes {
-        &self.entity
+        &self.groups[0]
     }
 
     /// ユニークなエンティティ数。
     pub fn n_entities(&self) -> usize {
-        self.entity.n_groups()
+        self.entity_codes().n_groups()
     }
 
     /// ユニークなエンティティのラベル（コード順＝辞書順）。
     pub fn entity_labels(&self) -> &[String] {
-        self.entity.keys()
-    }
-
-    /// 時点のラベルと時間順のコード。1-way FEで`time`が無ければ`None`。
-    pub fn time_keys(&self) -> Option<&TimeKeys> {
-        self.time.as_ref()
+        self.entity_codes().keys()
     }
 
     /// 観測数。
     pub fn nobs(&self) -> usize {
-        self.entity.nobs()
+        self.entity_codes().nobs()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::test_support::*;
+    use super::super::time_keys::TimeKeys;
     use super::*;
     use crate::shared::error::CommonError;
 
     #[test]
-    fn panel_index_new_exposes_codes_labels_and_time_keys() {
+    fn panel_index_new_exposes_codes_and_labels_of_every_dimension() {
         let entity = GroupCodes::from_labels(&labels(&["b", "b", "a"]));
         let time = TimeKeys::lexicographic(labels(&["1", "2", "1"]));
-        let index = PanelIndex::new(3, entity, Some(time.clone())).unwrap();
+        let industry = GroupCodes::from_labels(&labels(&["x", "y", "y"]));
+        let index =
+            PanelIndex::new(3, vec![entity, time.codes().clone(), industry.clone()]).unwrap();
 
         assert_eq!(index.nobs(), 3);
+        assert_eq!(index.n_effects(), 3);
         assert_eq!(index.n_entities(), 2);
         assert_eq!(index.entity_labels(), labels(&["a", "b"]).as_slice());
         assert_eq!(index.entity_codes().n_groups(), 2);
-        assert_eq!(index.time_keys(), Some(&time));
-        assert!(
-            PanelIndex::new(3, GroupCodes::from_labels(&labels(&["a", "a", "b"])), None)
+        assert_eq!(index.effect_codes()[1].keys(), time.periods());
+        assert_eq!(index.effect_codes()[2], industry);
+        assert_eq!(
+            PanelIndex::new(3, vec![GroupCodes::from_labels(&labels(&["a", "a", "b"]))])
                 .unwrap()
-                .time_keys()
-                .is_none()
+                .n_effects(),
+            1
         );
     }
 
     #[test]
     fn panel_index_new_reports_length_mismatches_then_missing_keys() {
         let entity = GroupCodes::from_labels(&labels(&["a", "a", "b"]));
-        let short_time = TimeKeys::lexicographic(labels(&["1"]));
+        let short = GroupCodes::from_labels(&labels(&["1"]));
         let keyless = GroupCodes::from_labels_without_keys(&labels(&["a", "a", "b"]));
 
         assert!(matches!(
-            PanelIndex::new(4, entity.clone(), None),
+            PanelIndex::new(4, vec![entity.clone()]),
             Err(PanelError::IdentifierDimensionMismatch {
-                dimension: PanelDimension::Entity,
+                dimension: PanelDimension::ENTITY,
                 y_rows: 4,
                 other_rows: 3
             })
         ));
         assert!(matches!(
-            PanelIndex::new(3, entity, Some(short_time.clone())),
+            PanelIndex::new(3, vec![entity.clone(), short.clone()]),
             Err(PanelError::IdentifierDimensionMismatch {
-                dimension: PanelDimension::Time,
+                dimension: PanelDimension::TIME,
                 y_rows: 3,
                 other_rows: 1
             })
         ));
-        // キーの検査は最後なので、timeの不一致が先に返る。
         assert!(matches!(
-            PanelIndex::new(3, keyless.clone(), Some(short_time)),
+            PanelIndex::new(3, vec![entity.clone(), entity.clone(), short.clone()]),
             Err(PanelError::IdentifierDimensionMismatch {
-                dimension: PanelDimension::Time,
+                dimension,
+                ..
+            }) if dimension == PanelDimension::new(2)
+        ));
+        // キーの検査は最後なので、長さの不一致が先に返る。
+        assert!(matches!(
+            PanelIndex::new(3, vec![keyless.clone(), short]),
+            Err(PanelError::IdentifierDimensionMismatch {
+                dimension: PanelDimension::TIME,
                 ..
             })
         ));
         assert!(matches!(
-            PanelIndex::new(3, keyless, None),
+            PanelIndex::new(3, vec![keyless]),
+            Err(PanelError::Common(CommonError::Internal { .. }))
+        ));
+        assert!(matches!(
+            PanelIndex::new(3, vec![]),
             Err(PanelError::Common(CommonError::Internal { .. }))
         ));
     }
 
     #[test]
-    fn panel_index_with_effect_names_keeps_default_time_name_when_none() {
+    fn panel_index_with_effect_names_keeps_default_names_for_the_rest() {
         let entity = GroupCodes::from_labels(&labels(&["a", "a", "b"]));
-        let index = PanelIndex::new(3, entity, None).unwrap();
-        assert_eq!(index.effect_name(PanelDimension::Entity), "entity");
-        assert_eq!(index.effect_name(PanelDimension::Time), "time");
+        let index = PanelIndex::new(3, vec![entity.clone()]).unwrap();
+        assert_eq!(index.effect_name(PanelDimension::ENTITY), "entity");
+        assert_eq!(index.effect_name(PanelDimension::TIME), "time");
 
-        let index = index.with_effect_names("firm".to_string(), None);
-        assert_eq!(index.effect_name(PanelDimension::Entity), "firm");
-        assert_eq!(index.effect_name(PanelDimension::Time), "time");
+        let index = index.with_effect_names(labels(&["firm"]));
+        assert_eq!(index.effect_name(PanelDimension::ENTITY), "firm");
+        assert_eq!(index.effect_name(PanelDimension::TIME), "time");
 
-        // 1-way（`time`なし）でも2つ目の名前は保持される（エラーには使われない）。
-        let index = index.with_effect_names("firm".to_string(), Some("year".to_string()));
-        assert_eq!(index.effect_name(PanelDimension::Time), "year");
+        // 1-wayでは2つ目以降の名前は無視される（エラーには使われない）。
+        let index = index.with_effect_names(labels(&["firm", "year"]));
+        assert_eq!(index.effect_name(PanelDimension::TIME), "time");
+
+        // 3次元: 渡した名前は先頭から当てはまり、残りは既定の名前になる。
+        let three = PanelIndex::new(3, vec![entity.clone(), entity.clone(), entity.clone()])
+            .unwrap()
+            .with_effect_names(labels(&["firm", "year"]));
+        assert_eq!(three.effect_name(PanelDimension::ENTITY), "firm");
+        assert_eq!(three.effect_name(PanelDimension::TIME), "year");
+        assert_eq!(three.effect_name(PanelDimension::new(2)), "effect3");
+    }
+
+    #[test]
+    fn effect_names_default_to_entity_and_time() {
+        let names = EffectNames::default();
+        assert_eq!(names.get(PanelDimension::ENTITY), "entity");
+        assert_eq!(names.get(PanelDimension::TIME), "time");
+        assert_eq!(names.get(PanelDimension::new(3)), "effects");
+        let names = EffectNames::new(labels(&["firm"]));
+        assert_eq!(names.get(PanelDimension::ENTITY), "firm");
+        assert_eq!(names.get(PanelDimension::TIME), "time");
     }
 }

@@ -133,8 +133,8 @@
 //!   黙って変わるため使わない（`TimeKeys::lexicographic`・`FeInput::from_columns`は辞書順が時間順と
 //!   一致するISO 8601日付やゼロ埋め年月向けの簡便版）。
 //! - **1-way/2-wayとも対応**。DKの時点列は`FeCovType::Dk.time`として常に明示的に受け取る
-//!   （`FeInput.time_keys()`にはフォールバックしない。どの列がDKの時点か呼び出し側が
-//!   明示しない設計は、意図と違う列が選ばれても気づけないため。`FeInput.time_keys()`は
+//!   （`FeInput`の2つ目の次元（`time_codes()`）にはフォールバックしない。どの列がDKの時点か呼び出し側が
+//!   明示しない設計は、意図と違う列が選ばれても気づけないため。`FeInput`の2つ目の次元（`time_codes()`）は
 //!   2-wayの固定効果の時間次元専用）。
 //!
 //! ## 固定効果自体（α_i）の復元（`fixed_effects()`）
@@ -262,7 +262,7 @@ impl FeEstimator {
     /// （切片なし。理由はモジュールdoc参照）→ `cov_type`別の共分散行列の計算 → 自由度調整後の統計量の再計算。
     ///
     /// # Errors
-    /// - `effects=TwoWay`で`input.time_keys()`が`None`の場合は`PanelError::TwoWayRequiresTime`
+    /// - `effects=TwoWay`で`input.time_codes()`が`None`の場合は`PanelError::TwoWayRequiresTime`
     /// - singletonグループが見つかった場合は`PanelError::SingletonGroup`
     /// - `effects=TwoWay`で同じ`(entity, time)`の組合せが複数の行にある場合は
     ///   `PanelError::DuplicateEntityTimePair`

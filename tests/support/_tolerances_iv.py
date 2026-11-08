@@ -106,6 +106,13 @@ IV_TOLERANCES: dict[str, dict[str, float]] = {
         "rtol": 1e-10,
         "rtol_b_tsls": 1e-10,
     },
+    # --- 弱操作変数診断の独立クロスチェック（R ivDiag）。 ---
+    # `rtol`: Cragg-Donaldの`F`・rk Wald `F`・有効F。実測の最大相対差はCragg-Donald
+    # 2.1e-14、rk Wald F 2.3e-14、有効F 1.7e-12（実データcard。合成データは1e-13以下）で、
+    # マージンは2桁以上。
+    "iv_weak_diagnostics_crosscheck": {
+        "rtol": 1e-10,
+    },
     # --- 本実装内の不変条件（リファレンス実装との比較ではない） ---
     # 同じ入力に対して計算経路が異なる出力どうしの一致の確認（`ols_api`と同じ方針、
     # 根拠は`_tolerances_linear.py`の`ols_api`のコメント参照）。

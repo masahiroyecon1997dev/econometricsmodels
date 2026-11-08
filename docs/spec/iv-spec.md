@@ -441,7 +441,7 @@ Cragg-Donaldを、不均一分散・クラスター・自己相関に頑健に�
   操作変数1個でKleibergen-PaapのWald Fとの一致（`Classical`・HC0〜HC3・クラスター・HAC）、固有値(3, 1)の手計算、
   `1 ≤ K_eff ≤ K`、列のスケール・操作変数の線形結合・行の並べ替えへの不変性、個体ダミー入りとwithin変換＋`n_absorbed`の
   一致（Frisch-Waugh-Lovell）、`None`になる各条件を固定する。第三者のソフトウェアを実行した値との照合は、
-  ivDiagの`eff_F`（有効Fの統計量のみ。臨界値は返さない）で行う（Pythonへの公開後。オラクル側では実行して比較した）。
+  ivDiagで行う（`tests/iv/test_iv_weak_diagnostics_crosscheck.py`、3.4.4節）。
 
 出典（3.4.1節に加えて）:
 
@@ -620,4 +620,7 @@ error.rs`）:
   文面の括弧内に列挙するだけで区別しない（識別不足・自由度・設定の誤りは`fit()`が先に弾くので、診断では事実上到達しない）。
   KPはLMとWald Fの両方が未定義のときだけエラー。
 - 検証: CD・KPはlinearmodelsの`first_stage`（`cragg_donald_f`・`kleibergen_paap`・`kleibergen_paap_f`。`robust`のFは`hc1`、LMは`hc0`に対応）、
-  有効Fは`benchmark/iv/references/mop_oracle.py`（`tests/iv/test_iv_weak_diagnostics.py`）。実測の最大相対差は1e-13。ivDiagとの照合は別途。
+  有効Fは`benchmark/iv/references/mop_oracle.py`（`tests/iv/test_iv_weak_diagnostics.py`）。実測の最大相対差は1e-13。
+- ivDiagとの照合（独立クロスチェック）: 内生変数1個・`hc1`/`cluster`の範囲で、`ivDiag()`の`F.standard`をCD、`F.robust`/`F.cluster`をKPのrk Wald F、`eff_F`（`prec=14`。`ivDiag()`は有効Fを4桁に丸める）を有効Fと比べる。
+  ivDiagはrk LM・臨界値・複数の内生変数を返さない。フィクスチャは`iv_weak_diagnostics_crosscheck.json`（`generate_iv_weak_diagnostics_crosscheck_fixtures.py`、アダプタ`ivdiag_ref.py`・`run_ivdiag.R`）。
+  実測の最大相対差はCD 2.1e-14・rk Wald F 2.3e-14・有効F 1.7e-12（実データ`card`。合成データは1e-13以下）。

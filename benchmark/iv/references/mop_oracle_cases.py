@@ -18,8 +18,7 @@ from benchmark.iv.references import mop_oracle as mop
 
 VALUES_PATH = Path(__file__).resolve().parent / "mop_oracle_values.md"
 
-# ivDiagとの比較の節の見出し。`mop_ivdiag_compare.py`が書き込み、この節は
-# `main()`が値の表を再生成しても残す。
+# ivDiagとの比較の記録の節の見出し。手で書いた節で、`main()`が値の表を再生成しても残す。
 IVDIAG_MARKER = "## ivDiag 1.0.8との比較"
 
 COV_KINDS: tuple[mop.CovKind, ...] = (

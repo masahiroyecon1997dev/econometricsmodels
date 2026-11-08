@@ -99,6 +99,9 @@ RUN apt update && apt install -y --no-install-recommends \
 # （testing-policy.md「リファレンス実装」）ために追加。
 # momentfit はIV-GMMの独立実装によるクロスチェック（ivregはGMM非対応）。sandwichに依存する
 # ため、最終ピン留めの前にupgrade="never"で導入する。
+# ivDiag はIVの弱操作変数診断（Cragg-Donald・Kleibergen-Paap・有効F）の独立クロスチェック。
+# lfe等を引き込むため、同じく最終ピン留めの前にupgrade="never"で導入し、直後に
+# library(ivDiag)で実際に読み込めること（導入の失敗が見かけ上成功扱いにならないこと）を確かめる。
 # maxLik（censRegの依存先、Tobit交差検証の最適化エンジン）は、censRegが依存として引き込む
 # バージョンが導入時期で変わる（フィクスチャ記録では1.5.2.2→1.6.10）ため、censRegより前に
 # 明示的にピン留めする。
@@ -113,6 +116,8 @@ RUN Rscript -e 'install.packages("remotes", repos = "https://cloud.r-project.org
     && Rscript -e 'remotes::install_version("AER", version = "1.2-17", upgrade = "never", repos = "https://cloud.r-project.org")' \
     && Rscript -e 'remotes::install_version("censReg", version = "0.5-40", upgrade = "never", repos = "https://cloud.r-project.org")' \
     && Rscript -e 'remotes::install_version("momentfit", version = "1.0", upgrade = "never", repos = "https://cloud.r-project.org")' \
+    && Rscript -e 'remotes::install_version("ivDiag", version = "1.0.8", upgrade = "never", repos = "https://cloud.r-project.org")' \
+    && Rscript -e 'library(ivDiag)' \
     && Rscript -e 'remotes::install_version("sandwich", version = "3.1.3", repos = "https://cloud.r-project.org")' \
     && Rscript -e 'remotes::install_version("lmtest", version = "0.9.40", repos = "https://cloud.r-project.org")' \
     && Rscript -e 'install.packages("languageserver", repos = "https://cloud.r-project.org")'

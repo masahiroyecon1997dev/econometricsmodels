@@ -531,7 +531,9 @@
 
 ## ivDiag 1.0.8との比較
 
-`benchmark/iv/references/mop_ivdiag_compare.py`が生成する。ivDiag 1.0.8の`eff_F`（`prec=14`）の有効Fを、オラクルと比べる。ivDiagは`robust`（既定）と`cluster`（`cl`）だけに対応し、classical・hc0〜hc3・hacは比べられない。`eff_F`は臨界値を返さない。
+ivDiag 1.0.8を一時導入して`eff_F`（`prec=14`）の有効Fをオラクルと比べた1回限りの記録で、再生成しない。ivDiagは`robust`（既定）と`cluster`（`cl`）だけに対応し、classical・hc0〜hc3・hacは比べられない。`eff_F`は臨界値を返さない。FEありの行（`n_absorbed`が1か20）は、固定効果を吸収するIV（`n_absorbed>0`）を実装するときの参照として残す。
+
+ivDiagはdevcontainerに導入済みで、本実装（`IVResults.effective_f()`）との比較は`tests/iv/test_iv_weak_diagnostics_crosscheck.py`が行う（`benchmark/iv/references/ivdiag_ref.py`）。
 
 | データ | ivDiag | オラクルの`cov` | FE | オラクルの`n_absorbed` | ivDiag F_eff | オラクル F_eff | 相対差 |
 |---|---|---|---|---|---|---|---|

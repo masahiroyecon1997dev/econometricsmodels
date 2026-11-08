@@ -2,9 +2,8 @@
 
 オラクルはengineのRust実装を照合する参照値を作る。ここでは論文の公表値、
 閉じた式が分かる特殊ケース、独立なパッケージ（linearmodels・statsmodels）、
-および変換に対する不変性でオラクル自体の正しさを確かめる。ivDiagとの比較は
-`benchmark/iv/references/mop_ivdiag_compare.py`（Rと一時導入のパッケージが
-必要なためpytestには含めない）。
+および変換に対する不変性でオラクル自体の正しさを確かめる。ivDiag（R）との比較は、
+`IVResults.effective_f()`に対して`test_iv_weak_diagnostics_crosscheck.py`が行う。
 
 比較する式は論文（Montiel Olea and Pflueger, 2013）の式番号で示す。
 """

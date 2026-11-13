@@ -27,6 +27,10 @@ FEIV（固定効果IV）の入力型・API・実装方針の設計。実装途�
 
 ### 1.1 入力型
 
+> **2026-11-13の注記**: 以下の1.1・1.2は#442（K次元化）の前の記述が残る。現在のコードは、`PanelIndex`が`Vec<GroupCodes>`＋効果の列名の
+> K次元、`from_group_codes(..., effects: Vec<GroupCodes>)`、効果の種類は`FeEffects`（`OneWay`/`TwoWay`/`MultiWay`）、2-wayは不均衡・重複行も
+> 交互射影で受け付けバランスパネルの検証は無い、`cov_type`は`FeCovType`（=`PanelCovType`）。実装は9.18に従う。
+
 ```text
 panel/common.rs   PanelIndex { entity: GroupCodes, time: Option<TimeKeys>, effect_names: EffectNames }
                   PanelIndex::new(nobs, entity, time)  // 観測数との整合を検証して構築
@@ -61,8 +65,8 @@ panel/fe_iv.rs    FeIvInput { y, dep_var_name, x_exog, x_endog, instruments (列
 6. 自由度検証: `n > k + neffects`（構造式）かつ`n > l + neffects`（第一段階、`l = k_exog + k_instruments`）。
    構造式を先に報告する（IVの`validate_observation_counts`と同じ層分け）。`k = k_exog + k_endog`。
    `neffects`は`FeEstimator`と同じ（1-way: `n_entities`、2-way: `n_entities + n_periods - 1`）。
-7. 第一段階: 内生変数ごとに`FeEstimator::fit`（`y=x_endog[j]`、`x=x_exog ++ instruments`、同じ`effects`・
-   `cov_type`）。失敗は`stage=FIRST_STAGE`付きで返す（`PanelError::InStage`）。`X̂ = [x̃_exog, x̂̃_endog]`
+7. 第一段階: 内生変数ごとに`FeEstimator`の後半（変換済みの列を受け取る内部経路。9.18）で回す（`y=x_endog[j]`、
+   `x=x_exog ++ instruments`、同じ`effects`・`cov_type`）。失敗は`stage=FIRST_STAGE`付きで返す（`PanelError::InStage`）。`X̂ = [x̃_exog, x̂̃_endog]`
    （内生列は第一段階の当てはめ値）。
 8. 点推定: `β̂ = (X̂'X̂)⁻¹X̂'ỹ`（`least_squares(X̂, ỹ)`の`params`・`xtx_inv`）。
 9. 構造残差`e = ỹ - X̃β̂`（`X̃ = [x̃_exog, x̃_endog]`は実際の内生変数。第二段階の残差ではない）。完全フィット
@@ -939,3 +943,24 @@ Stock-Yogoの表は実装の値がNBER TWP 284のTable 1（バイアス）・Tab
 - FE-GMMのHansen J（within変換後の誤差は個体内で相関する。3章7のとおり#381で確認）。
 
 **次**: FE-2SLSの実装（#370〜#372、#374、#375 → #373 → #376〜#380）。#374は`sargan_test`を`σ̂²`の分母つきで使い、#373は#363〜#365の後。
+
+### 9.18 FE-2SLSの#370〜#372の実装計画と決定（2026-11-13）
+
+**範囲**: engineのみ（公開面のpybind・Python・docsは#376以降）。#370（入力型・API設計）は入力型が実装済み（`fe_iv.rs`の`FeIvInput`）のため、
+ファサード＋子モジュールへの分割と1章の記述の更新で完了。#372（自由度）は`fit`に最初から入るので#371に含めて同時に完了する。診断（#373〜#375）は含めないが、
+第一段階の残差と`X̂`を保持する。
+
+**決定（ユーザー承認）**
+1. **変換は列ベースに切り出す**: 先にリファクタ（挙動を変えない）で、`fe/within.rs`の変換を「列の集合と吸収する次元」を受け取る関数にし、`FeInput`版をラッパーに残す。
+   続けて`fit_fe`を「検証＋変換」と「変換済みの列を受け取る後半（df・回帰・共分散・推論・R²）」に分ける。FEIVは全列（`y`・`x_exog`・`x_endog`・`instruments`）を
+   1回だけ変換し（`noise`も共有）、第一段階と構造式で使う。安全網は既存のFEのテスト。
+2. **第一段階の共分散はIV本体と揃える**: 標準誤差が計算できない場合はエラー（`stage=FIRST_STAGE`付き）、それ以外はFを`None`にする。IV本体も、
+   第一段階の`l`個の傾きに対してクラスター数が`l`以下でも、標準誤差は計算し第一段階のFだけ`None`にする（`docs/methods/iv.md`）。FEの`panel_cov_params`は
+   クラスター数・時点数が検定する傾きの数以下だと（Wald Fのために）弾くので、`PanelCovInput`に「Fを検定するか」を足し、第一段階では検定せず
+   （`G > q`・`T > q`の検査を省き、`f_statistic`を`None`にする）。標準誤差に関わる検査（`G >= 2`、2グループ退化、完全適合）は残す。構造式は従来どおり`G <= k`でエラー。
+3. **定数列のエラーに`role`パラメータを足す**: `REGRESSOR_CONSTANT`・`REGRESSOR_NO_WITHIN_VARIATION`に`role`（`x`（FE）・`x_exog`・`x_endog`・`instruments`）を足し、
+   文面とhintを`{role}`で書く。`y`の`OUTCOME_CONSTANT`・`OUTCOME_CONSTANT_WITHIN_ENTITY`は変えない。FEの既存の挙動・テスト・docsは`role="x"`に直す。
+4. **#371にR²（within/between/overall、構造残差ベース）と`fixed_effects()`を含める**。
+
+**実装順（コミット）**: (1)この節 → (2)列ベースの変換への切り出し → (3)`fit_fe`の後半の切り出し → (4)`fe_iv.rs`をファサード＋子モジュールに分割 →
+(5)`role`パラメータとエラーの追加 → (6)`FeIvEstimator::fit` → (7)テスト（LSDVの2SLS・fixestとplmの値・手計算のHC2/HC3・性質・cov_type別のdf）→ (8)レビュー・clippy・全テスト → (9)進捗の追記とIssueコメント。

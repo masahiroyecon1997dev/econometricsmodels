@@ -1070,10 +1070,30 @@ Stock-Yogoの表は実装の値がNBER TWP 284のTable 1（バイアス）・Tab
 **レビュー（python-reviewer）への対応**: `weak_instrument_f_statistics`の誤解を招く一文の削除、`wald_df_*`が`None`にならない旨、Sarganが`cov_type`に従わない旨、`wu_hausman_df_denom`の定義を追記。
 **見送り**: 公開ドキュメント（usage・api・methods・nav）と`docs/guide/verification.md`は#378・#379。`first_stage`の持ち方・IV本体の`G ≤ d`のLMは9.25の未決のまま。診断のラッパー関数の引数`raw`は`Any`（Protocolで型を付ける案は見送り）。
 
-### 9.27 #378（FE-2SLSの公開docs）の実装結果（2026-11-13、未コミット）
+### 9.27 #378（FE-2SLSの公開docs）の実装結果（2026-11-13）
 
 **決定（ユーザー承認）**: methodsページは差分のみ（FE・IVのDefinitionsへリンクし、FEIV固有の式だけ書く）。README・`index.md`・`verification.md`も更新する（検証表は現状を正確に書く: fixest値はテストに埋め込み、第二の参照はダミー変数2SLS。凍結フィクスチャは#379で作り、そのとき書き直す）。fixestとの差は設計ノートで実測済みのものだけ（Sargan・wr2・連結成分が複数のときの自由度）。
 **実装**: `docs/usage/fe_iv.md`（自己完結の例。8社×6年、操作変数2本）・`docs/api/fe_iv.md`・`docs/methods/fe_iv.md`、`mkdocs.yml`のnav（Panel modelsのFEとREの間）、`index.md`の表、README（手法一覧・検証表と脚注3）、`guide/inference-conventions.md`（表・Sargan・弱操作変数・Wu-Hausman）、`guide/validation.md`（順序・FEIVの検証・ComputationErrorの表）、`guide/verification.md`・`verification-details.md`（FEIVの節）。`api/fe_iv.md`は`CraggDonaldResult`等を再描画せずIVのページへリンクする（再描画するとautorefsの重複警告が出る）。
 **検証**: `mkdocs build`は警告なし（アンカー検証あり）、`tests/cross_method`全件通過、`render_error_catalog.py --check`通過。
 **校閲（`/review-docs`）と対応**: 5件のmust fixを直した: (1)DKで`T_d ≤ r`（`r = 除外操作変数の数 − 内生変数の数 + 1`）のとき、rk LMだけでなくrk Wald Fも未定義になり`kleibergen_paap()`・`effective_f()`は`ComputationError`になる（実測。文書は「Wald Fは影響を受けない」と誤っていた）、(2)Sarganは分子だけがダミー込み2SLSと同じで分母は`n − n_abs`（IVは`n`）、(3)fixestとの比較は1-way・2-wayだけ（3次元はダミー変数2SLSのみ）、(4)R²はwithinが1-way・2-way、between・overallが1-wayだけ定義式で検査（他パッケージとの比較ではない。「1を超えうる」は誤りで削除）、(5)`pickling.md`の列挙から`FEIVResults`を外した。should fixは、fixestの`wh`が内生変数複数で同時Wald F、根拠の無い「Stock-Yogoをそのまま使える」「too often」の緩和、ダミー変数2SLSがnumpyとRustの2実装であること、fixestの値は貼り付けで再生成スクリプトが無いこと、FE・REだけを並べていた箇所へのFEIVの追記、IV・FEのusageからの導線、docstring（`wald_df_*`・`weak_instrument_f_df_*`の型を`int`に、`kleibergen_paap()`・`effective_f()`・`wu_hausman_statistic`の記述）。lfeの記述は事実確認できないため削除し、ivDiagは「比較していない」に直した（Web検索はしていない）。DKの`T ≤ r`でrk Wald Fに明示ガードが無い件（ランク判定に任せている）は、ドキュメントを実測に合わせるだけにして、ガード追加は別Issue候補（承認後に起票）。
-**未実施**: `docs/guide/performance*.md`と`benchmark_performance.yml`のmatrix（#380の計測後）、（`docs/guide/accepted-data.md`はFEIVを表と本文のFE・REの併記に足した）。
+**未実施**: `docs/guide/performance*.md`と`benchmark_performance.yml`のmatrix（#380の計測後）。`docs/guide/accepted-data.md`はFEIVを表と本文のFE・REの併記に足した。
+
+### 9.28 clear用のメモ（#378のコミット後。2026-11-13。#379以降は別セッション）
+
+**状態**: `release/v0.10.0`。**未push**（pushはユーザーの指示があるまで行わない）: `645d4c68`（9.20のメモ）・`c6282534`（#374 Sargan）・`29387123`（#375 Wu-Hausman）・`8caa96aa`（#373 弱操作変数診断）・`a0b58e89`（#376 pybind）・`aff3a45c`（9.25のメモ）・`0ca0426a`（#377 Pythonラッパー）・`c10f335f`（#378 公開docs）とこのメモのコミット。pushは`58be9153`まで。#374〜#378のIssueはまだ**closeしていない**（push後、英語コメントつきでユーザー承認を得てclose）。PR #635は未マージ（内容確認後にマージ）。
+**実装の結果**: 9.21（#374）・9.22（#375）・9.23（#373）・9.24（#376）・9.26（#377）・9.27（#378。校閲の対応を含む）。
+**次の順序**: #379（参照ベンチマーク）→ #380（性能）→ FE-GMM（#381〜#388）。どれも着手前に、判断が分かれる点をユーザーに確認する（CLAUDE.md 14章）。
+
+**#379（参照ベンチマーク）の着手メモ**
+- 現状の根拠は凍結していない: `tests/panel/test_fe_iv_binding.py`にfixest 0.14.2の値（`set.seed(42)`・小数4桁に丸めたデータ、1-way・2-way × classical・hc1・cluster、Wu-Hausmanの補助回帰のt²）が貼り付けてあり、第二の参照はダミー変数を明示した2SLS（numpy。classical・hc1〜hc3・Sargan・部分F・固定効果）。Rustのエンジンテスト（`engine/src/panel/fe_iv/fit/tests/`の`lsdv.rs`・`sargan.rs`・`wu_hausman.rs`・`weak_instruments.rs`）にも別のRust版のダミー変数2SLSがある。許容誤差は`TOLERANCES["fe_iv_binding"]`（rtol 1e-8・atol 1e-10。実測は2.6e-12（fixest）・3.6e-14（ダミー版））。fixestの生成スクリプトは無い。devcontainerのRにfixest 0.14.2が入っている（lfe・ivDiagは無い）。
+- 決める点（9.17の保留）: 参照の選び方（案: 内生変数1個の古典・HC1・1-wayクラスターはivDiagとfixestの`ivf1`、2個以上のCD・KPはダミー列を入れたlinearmodels（小さいN、FWL）、入れ子のクラスターと連結成分が複数のパネルはfixest・手計算）。HC2/HC3の参照（plm・`ivreg`＋`sandwich`）。DKのKP・有効Fには独立な参照が無い（fixestの`kpr`は参照にならない）ことの扱い。fixestの`wr2`はR²の定義が違うので照合に使えない。3次元の固定効果はfixestとの比較が無い（今はダミー版のみ）。
+- 完了時に書き換える公開側（今は「凍結していない」と明記している）: `docs/guide/verification.md`（先頭の「Exception: FEIV」の項・参照の表・比較する統計量の表・許容誤差の表・テストデータ）、`docs/guide/verification-details.md`の「FEIV」の節（凍結と書き直す）、`README.md`の検証表と脚注3・「Reproducible and continuous」の例外の注記、`tests/support/_tolerances_panel.py`（`fe_iv_binding`のコメント）。フィクスチャ生成は`benchmark/panel/`に`generate_fe_iv_fixtures.py`（と`references/`のR）を足し、`benchmark/regenerate_all.py`に載せる（`.claude/skills/reference-benchmark/`、`/test-new`の完了条件に`verification.md`が含まれる）。`test_fe_iv_binding.py`の埋め込みの値はフィクスチャに置き換える。`/review-testing`で網羅性を確認する。
+- `test_validation_order.py`: `INSUFFICIENT_INSTRUMENTS`（エンジンの`fit`の中、列の抽出の後）の順位を固定していない。IV本体との整合を決めてから足す。
+
+**#380（性能）の着手メモ**: `performance/compare_fe_iv.py`を足し、`benchmark_performance.yml`のmatrixに加える。数値は`/release`でCIの計測値から`docs/guide/performance.md`・`performance-results.md`・`README.md`「Performance」に転記する。9.19の見送り（第一段階が持つメモリ・構造式用`FeInput`の複製、HC2/HC3のダミーのレバレッジの再計算、`first_stage`を`Py<FEResult>`で持つ案）を計測で判断する。`docs/performance/fe_iv.md`（日本語の開発ノート）に方法論を残す。
+
+**未決・保留（ユーザー判断）**
+- Issue起票の候補（承認後に英語で起票。関連は1つにまとめる）: DKで`T_d ≤ r`（`r = 除外操作変数の数 − 内生変数の数 + 1`）のときrk LMには明示ガード、rk Wald Fはランク判定任せ（丸め誤差で値を返す余地。公開側は実測の`ComputationError`に合わせてある）。IV本体のクラスターで`G ≤ d`のrk LMがちょうど`G`になる既存の性質。
+- `first_stage`の持ち方（`Py<FEResult>`で複製を無くす案。6.1の「固定効果を先に計算する」決定と衝突）、DKの第一段階で`T`が`l`以下のときの標準誤差の信頼性（9.19）、#636へのFE-2SLSの追加、FE-GMMのHansen J（3章7）。
+- IV側の従来からの保留（ルートCLAUDE.md 2章への診断の例外の追記、READMEの権利の注意書き、フィクスチャのデータのライセンス、3章`shared/`の列挙、`mop-oracle-spec.md`の履歴）。
+**注意書き**: コミットはパス指定・署名（ホストの端末で確認。失敗したら止まって報告、リトライは1回まで）。Pythonを触ったら`uv run maturin develop`（debug）で入れ直してから`uv run --no-sync pytest`。公開ドキュメントを変えたら`/review-docs`（他パッケージ言及のWeb確認は事前に許可を取る）と`mkdocs build -f docs/mkdocs.yml`（警告なしを確認）。heredocでバッククォートを含む文章を書くときは`<<'EOF'`。シェルで標準入力を読むコマンド（`cat >> /dev/null`等）を混ぜない（止まる）。

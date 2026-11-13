@@ -30,6 +30,8 @@ use crate::shared::validation::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PanelModel {
     Fe,
+    /// 固定効果つきの2SLS（`FEIV`）。`effects`の上限などはFEと同じ。
+    FeIv,
     Re,
 }
 
@@ -37,6 +39,7 @@ impl PanelModel {
     fn name(self) -> &'static str {
         match self {
             Self::Fe => "FE",
+            Self::FeIv => "FEIV",
             Self::Re => "RE",
         }
     }
@@ -180,7 +183,7 @@ fn validate_dk_time_role(y: &str, first_effect: &str, dk_time: Option<&str>) -> 
 /// 5列まで受け付ける。REは1-wayと2-wayだけ（交差ランダム効果は標準的な推定量でない）。
 fn max_effects(model: PanelModel) -> usize {
     match model {
-        PanelModel::Fe => MAX_FE_EFFECTS,
+        PanelModel::Fe | PanelModel::FeIv => MAX_FE_EFFECTS,
         PanelModel::Re => MAX_RE_EFFECTS,
     }
 }
@@ -252,6 +255,45 @@ pub(crate) fn validate_panel_roles(
     validate_no_duplicate_within_role("effects", effects)?;
     // `dk_time`は`y`・`effects[0]`との重複だけ拒否する（`x`との重複は許可、`validate_dk_time_role`参照）。
     // `effects`が空でないことは手順1で確かめ済み。
+    validate_dk_time_role(y, &effects[0], dk_time)
+}
+
+/// FEIVの`y`・`x_exog`・`x_endog`・`instruments`・`effects`・`dk_time`の列の役割（DataFrameを見ない構造）を
+/// 検査する。[`validate_panel_roles`]のFEIV版。
+///
+/// 次の順に検査し、最初の違反で返す。
+///
+/// 1. `effects`の列数（空→`ROLE_EMPTY`、上限超→`EFFECTS_TOO_MANY`）
+/// 2. `x_endog`・`instruments`が空でない（`x_exog`は空でよい。固定効果が切片を吸収するので、
+///    外生変数が無いモデルも成り立つ）
+/// 3. `y`・`effects`・`x_exog`・`x_endog`・`instruments`の間に同じ列が無い
+/// 4. 各役割の内部に重複が無い
+/// 5. `dk_time`が`y`・`effects[0]`と同じ列でない
+///
+/// # Errors
+/// 上のいずれかに違反する場合は`ValidationError`。
+pub(crate) fn validate_fe_iv_roles(
+    y: &str,
+    x_exog: &[String],
+    x_endog: &[String],
+    instruments: &[String],
+    effects: &[String],
+    dk_time: Option<&str>,
+) -> PyResult<()> {
+    validate_effects(PanelModel::FeIv, effects)?;
+    validate_role_non_empty("x_endog", x_endog)?;
+    validate_role_non_empty("instruments", instruments)?;
+    validate_no_duplicate_roles(&[
+        ("y", RoleValue::Single(y)),
+        ("effects", RoleValue::Multi(effects)),
+        ("x_exog", RoleValue::Multi(x_exog)),
+        ("x_endog", RoleValue::Multi(x_endog)),
+        ("instruments", RoleValue::Multi(instruments)),
+    ])?;
+    validate_no_duplicate_within_role("x_exog", x_exog)?;
+    validate_no_duplicate_within_role("x_endog", x_endog)?;
+    validate_no_duplicate_within_role("instruments", instruments)?;
+    validate_no_duplicate_within_role("effects", effects)?;
     validate_dk_time_role(y, &effects[0], dk_time)
 }
 

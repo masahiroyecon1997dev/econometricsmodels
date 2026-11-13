@@ -18,6 +18,7 @@ use nonlinear::tobit::{
     CensoringFitCategoryResult, CensoringFitCheckResult, TobitOptions, TobitResult,
 };
 use panel::fe::{FEOptions, FEResult};
+use panel::fe_iv::{FEIVOptions, FEIVResult};
 use panel::re::{REOptions, REResult};
 use shared::catalog_export::error_catalog;
 #[cfg(debug_assertions)]
@@ -287,6 +288,64 @@ fn fit_fe(
     })
 }
 
+/// Entry point for FEIV (fixed effects instrumental variables, two-stage least squares)
+/// estimation.
+///
+/// Parameters
+/// ----------
+/// data : polars.DataFrame
+///     The input data. Must contain the `y`, `x_exog`, `x_endog`, `instruments`, `effects`,
+///     and (if specified) cluster/dk_time columns.
+/// y : str
+///     Column name of the dependent variable.
+/// x_exog : list[str]
+///     Column names of the exogenous independent variables. May be empty (the fixed effects
+///     absorb the intercept).
+/// x_endog : list[str]
+///     Column names of the endogenous independent variables. Must contain at least one
+///     column name.
+/// instruments : list[str]
+///     Column names of the excluded instruments. Must contain at least as many columns as
+///     `x_endog`.
+/// effects : list[str]
+///     Column names that define the fixed effects: one column for one-way effects, two columns
+///     (entity, then time) for two-way effects, and three to five columns for
+///     higher-dimensional effects.
+/// options : FEIVOptions
+///     Estimation options.
+// Pythonの公開引数（`data`・`y`・`x_exog`・`x_endog`・`instruments`・`effects`・`options`）の数を変えられない。
+#[allow(clippy::too_many_arguments)]
+#[pyfunction]
+fn fit_fe_iv(
+    py: Python<'_>,
+    data: &Bound<'_, PyAny>,
+    y: &Bound<'_, PyAny>,
+    x_exog: &Bound<'_, PyAny>,
+    x_endog: &Bound<'_, PyAny>,
+    instruments: &Bound<'_, PyAny>,
+    effects: &Bound<'_, PyAny>,
+    options: &Bound<'_, PyAny>,
+) -> PyResult<FEIVResult> {
+    guard(|| {
+        check_dataframe(data, "data")?;
+        let y = extract_column_name(y, "y")?;
+        let x_exog = extract_column_list(x_exog, "x_exog")?;
+        let x_endog = extract_column_list(x_endog, "x_endog")?;
+        let instruments = extract_column_list(instruments, "instruments")?;
+        let effects = extract_column_list(effects, "effects")?;
+        let options: FEIVOptions = extract_options(options, "options")?;
+        let columns = panel::fe_iv::FeIvColumns {
+            y,
+            x_exog,
+            x_endog,
+            instruments,
+            effects,
+        };
+        let data = select_columns(data, "data", &columns.data_columns(&options))?;
+        panel::fe_iv::fit(py, data, columns, &options)
+    })
+}
+
 /// Entry point for RE (random effects panel regression) estimation.
 ///
 /// Parameters
@@ -369,7 +428,7 @@ fn _restore_pickled(
             kind_name.as_str(), py, state, mismatch();
             OLSOptions, OLSResult, WLSOptions, WLSResult, LogitOptions, LogitResult, MarginalEffectsResult,
             ProbitOptions, ProbitResult, TobitOptions, TobitResult, CensoringFitCategoryResult, CensoringFitCheckResult,
-            IVOptions, IVResult, FEOptions, FEResult, REOptions, REResult,
+            IVOptions, IVResult, FEOptions, FEResult, FEIVOptions, FEIVResult, REOptions, REResult,
         )
     })
 }
@@ -413,6 +472,9 @@ fn _lib(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(fit_fe, m)?)?;
     m.add_class::<FEOptions>()?;
     m.add_class::<FEResult>()?;
+    m.add_function(wrap_pyfunction!(fit_fe_iv, m)?)?;
+    m.add_class::<FEIVOptions>()?;
+    m.add_class::<FEIVResult>()?;
     m.add_function(wrap_pyfunction!(fit_re, m)?)?;
     m.add_class::<REOptions>()?;
     m.add_class::<REResult>()?;

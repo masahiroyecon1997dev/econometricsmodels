@@ -24,11 +24,21 @@ FE/REとも、IVの「データ抽出・pyclass定義」→「engine呼び出し
 
 ## `fixed_effects()`の実装
 
-`FEResult`に非公開フィールド`fixed_effects: LazyFixedEffects`（`panel/fe.rs`）を持たせている。`FeEstimator`を保持し、固定効果（`FixedEffects`）は`fit()`では計算せず、初回の`fixed_effects()`かpickle時に`FeEstimator::fixed_effects()`で計算して`OnceLock`に保持する（エンティティ数に比例する辞書を、使わない利用者に作らせない）。pickleで復元した結果は`FeEstimator`を持たず、計算済みの固定効果だけを持つ（`LazyFixedEffects::Computed`。`FeEstimator`は設計行列とグループコードを持つが、固定効果以外には使わない）。`FeEstimator`（内部の`OlsEstimator`も）は`Clone`未実装のため、`FEResult`は`Clone`を持たない（`#[derive(Debug)]`のみ）。`fit`関数の末尾で`FeEstimator::fit`が返した値を`LazyFixedEffects::new`へムーブする（それより前に`estimator.params()`等の借用で他フィールドを計算し終えておく）。
+`FEResult`に非公開フィールド`fixed_effects: LazyFixedEffects`（`panel/fe.rs`）を持たせている。`FeEstimator`を保持し、固定効果（`FixedEffects`）は`fit()`では計算せず、初回の`fixed_effects()`かpickle時に`FeEstimator::fixed_effects()`で計算して`OnceLock`に保持する（エンティティ数に比例する辞書を、使わない利用者に作らせない）。pickleで復元した結果は`FeEstimator`を持たず、計算済みの固定効果だけを持つ（`LazyFixedEffects::Computed`。`FeEstimator`は設計行列とグループコードを持つが、固定効果以外には使わない）。`FeEstimator`（内部の`OlsEstimator`も）は`Clone`未実装だが、`LazyFixedEffects`が`Arc`で共有するので`FEResult`は`Clone`を持つ（複製は推定量と計算済みの固定効果を共有する。FEIVの`first_stage()`が複製して返すため）。`fit`関数の末尾で`FeEstimator::fit`が返した値を`LazyFixedEffects::new`へムーブする（それより前に`estimator.params()`等の借用で他フィールドを計算し終えておく）。
 
 `fixed_effects()`本体は`self.fixed_effects.get()`が返す`&FixedEffects`（`OneWay(BTreeMap<String,f64>)`/`TwoWay{entity, time}`）を`match`し、**常に`{列名: {水準: 効果}}`の入れ子の`dict`**（キーは`FEResult.effects`の列名、`effects`の順。1-wayは1項目、2-wayは2項目）に変換して返す。pyo3は`BTreeMap<K,V>`に対し`IntoPyObject`（`Target = PyDict`）を標準で実装しているため、個体側は`outer.set_item(&self.effects[0], entity)?`でそのまま入れられ、時点側は時間順の`PyDict`を組み立てて`effects[1]`のキーに入れる。1-wayと2-wayで形を変えない（次元の数が変わっても同じ形で読めるよう、列名をキーにした。`panel-common.md`2.1節）。
 
 `fixed_effects()`自体は`fit`と同じ理由（`SelectedData`を経由する`fit`が構築した`FEResult`のメソッドであり、独立に`#[cfg(test)]`から呼べるテスト用コンストラクタが無い）でRustユニットテストを追加していない。検証は`maturin develop`後のPythonからの数値照合で行う（fixestリファレンスフィクスチャで1-way/2-way双方がengine単体テスト`fe_estimator_fit_one_way_fixed_effects_matches_fixest_reference`/`fe_estimator_fit_two_way_fixed_effects_matches_fixest_reference`の期待値と一致する）。
+
+## FEIV（`panel/fe_iv.rs`）
+
+`FEIVOptions`/`FEIVResult`/`build_fe_iv_input`/`fit`を`panel/fe_iv.rs`に置く（FEの`fit_fe`に対応する`_lib.fit_fe_iv(data, y, x_exog, x_endog, instruments, effects, options)`を`lib.rs`が登録する。`#[allow(clippy::too_many_arguments)]`は公開引数の数を変えられないため）。FEと共有するもの: `LazyFixedEffects`・`fe_result_fields`・`fixed_effects_dict`・`resolve_fe_cov_type`（`CovColumns`で`cluster`・`dk_time`・`dk_bandwidth`を渡す）、`PanelModel::FeIv`（エラーの`model`が`"FEIV"`。カタログの`model`は自由な文字列なので変更は要らない）。
+
+- **オプション**: `FEIVOptions`は`FEOptions`と同じ7つ（`cov_type`既定`cluster`・`confidence_level`・`cluster`・`dk_time`・`dk_bandwidth`・`tol`・`max_iter`）。`estimator`・`gmm_*`はGMMを実装するときにキーワード引数として足す（既定値つきで互換）。
+- **役割の検査**: `validate_fe_iv_roles`（`effects`の列数 → `x_endog`・`instruments`が空でない（`x_exog`は空でよい）→ 役割間の重複 → 役割内の重複 → `dk_time`の役割）。列は`FeIvColumns`にまとめて渡す。
+- **結果**: `FEIVResult`はFEの項目（`params`〜`dk_bandwidth_used`・`r_squared_*`）に、IVの命名の`wald_*`（常にF）・`weak_instrument_f_*`・`overid_*`（Sargan）・`wu_hausman_*`を足したもの。`log_likelihood`・AIC/BICは出さない。`first_stage()`は`dict[str, FEResult]`で、第一段階ごとに固定効果をその場で計算した`LazyFixedEffects::Computed`を持つ（`FeEstimator`を保持しない）。`FEResult`は`Clone`（`LazyFixedEffects`が`FeEstimator`を`Arc`で共有する）。
+- **診断・`fixed_effects()`は呼び出し時に再計算**: `fit()`に渡した`DataFrame`（`source_data`）・`FEIVOptions`・列名を結果が保持し、`with_estimator`が`fit()`と同じ`build_fe_iv_input`から`FeIvEstimator`を作り直して呼ぶ（IVの`Rebuilt`と同じ。1回呼ぶごとに推定が1回走る）。診断の出力型はIVの`CraggDonaldOutput`・`KleibergenPaapOutput`・`EffectiveFOutput`を使い回す（`from_engine`で作る）。
+- **検証**: `fit`は`#[cfg(test)]`から呼べないので、`tests/panel/test_fe_iv_binding.py`が`_lib.fit_fe_iv`を直接呼び、fixestの参照値（エンジンのテストと同じ）とダミーを明示した2SLSのnumpy実装で照合する。Pythonのラッパー（`FEIV`）は別。
 
 ## 踏んだ罠: `engine`側で`PanelError`に新バリアントを追加するとき
 

@@ -168,6 +168,14 @@ SAMPLES = {
         dk_time="t",
         dk_bandwidth=1,
     ),
+    "FEIVOptions": lambda: _lib.FEIVOptions(
+        cov_type="dk",
+        confidence_level=0.85,
+        cluster="entity",
+        dk_time="t",
+        dk_bandwidth=1,
+        max_iter=500,
+    ),
     "REOptions": lambda: REOptions(
         cov_type="cluster",
         cluster="cluster",
@@ -186,6 +194,15 @@ SAMPLES = {
             dk_time="t",
             dk_bandwidth=1,
         )._raw
+    ),
+    "FEIVResult": lambda: _lib.fit_fe_iv(
+        _frame(),
+        "y",
+        ["x2"],
+        ["x1"],
+        ["z", "z2"],
+        ["entity", "t"],
+        _lib.FEIVOptions(cov_type="dk", dk_time="t", dk_bandwidth=1),
     ),
     "LogitResult": _logit_raw,
     "TobitResult": _tobit_raw,

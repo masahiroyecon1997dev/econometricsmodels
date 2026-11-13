@@ -34,6 +34,14 @@ PANEL_TOLERANCES: dict[str, dict[str, float]] = {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_REFERENCE_FLOOR,
     },
+    # FEIV（固定効果つきの2SLS）の`_lib.fit_fe_iv`の照合（`fe_iv_binding`）。参照はfixest 0.14.2の値
+    # （小数12桁。係数・標準誤差・Wu-Hausmanの補助回帰のt²）と、ダミー変数を明示した2SLSのnumpy実装
+    # （Frisch-Waugh-Lovell。classical・hc1・hc2・hc3の共分散、Sargan、部分F、固定効果）。どちらも
+    # within変換後の閉形式・交互射影の解で、実測の最大相対誤差は1e-10未満。
+    "fe_iv_binding": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_REFERENCE_FLOOR,
+    },
     # 3次元以上の固定効果（`effects`が3〜4列）の主リファレンスはR fixest（`fe_multi_way.json`・
     # `fe_multi_way_cov.json`）。classical/hc1/hc2/hc3/cluster/dkとも、fixestの`ssc()`既定に本実装の
     # 小標本補正と自由度が合っているため機械精度で一致する。実測の最大（9シナリオ×全ケース）:

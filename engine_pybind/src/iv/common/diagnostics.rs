@@ -7,8 +7,8 @@
 //! `compute_*`を呼ぶ（`fit()`と同じ`build_iv_input`なので、列の検査・並びは`fit()`と一致する）。
 
 use engine::iv::common::{
-    IvError, IvInput, PatnaikCriticalValue, StockYogoCriticalValues, compute_cragg_donald,
-    compute_effective_f, compute_kleibergen_paap,
+    CraggDonald, EffectiveF, IvError, IvInput, KleibergenPaap, PatnaikCriticalValue,
+    StockYogoCriticalValues, compute_cragg_donald, compute_effective_f, compute_kleibergen_paap,
 };
 use engine::iv::gmm::{
     CStatisticTarget, GmmType, WeightType, compute_c_statistic, weight_type_for_cov_type,
@@ -180,18 +180,53 @@ fn patnaik(values: &[PatnaikCriticalValue]) -> Vec<(f64, f64)> {
     values.iter().map(|v| (v.tau, v.critical_value)).collect()
 }
 
+impl CraggDonaldOutput {
+    /// エンジンの結果から作る（FEIVの診断も使う）。
+    pub(crate) fn from_engine(cd: CraggDonald) -> Self {
+        Self {
+            statistic: cd.statistic,
+            n_endog: cd.n_endog,
+            n_excluded: cd.n_excluded,
+            tsls_bias: stock_yogo(cd.tsls_bias),
+            tsls_size: stock_yogo(cd.tsls_size),
+        }
+    }
+}
+
+impl KleibergenPaapOutput {
+    /// エンジンの結果から作る（FEIVの診断も使う）。
+    pub(crate) fn from_engine(kp: KleibergenPaap) -> Self {
+        Self {
+            rk_lm_statistic: kp.rk_lm.map(|lm| lm.statistic),
+            rk_lm_df: kp.rk_lm.map(|lm| lm.df),
+            rk_lm_p_value: kp.rk_lm.map(|lm| lm.p_value()),
+            rk_wald_f: kp.rk_wald_f,
+            n_endog: kp.n_endog,
+            n_excluded: kp.n_excluded,
+        }
+    }
+}
+
+impl EffectiveFOutput {
+    /// エンジンの結果から作る（FEIVの診断も使う）。
+    pub(crate) fn from_engine(eff: EffectiveF) -> Self {
+        Self {
+            statistic: eff.statistic,
+            n_excluded: eff.n_instruments,
+            alpha: eff.alpha,
+            simplified_critical_values: patnaik(&eff.simplified_tsls),
+            critical_values: eff.tsls.as_ref().map(|values| patnaik(values)),
+            bias_bound: eff.bias_bound,
+        }
+    }
+}
+
 pub(super) fn run_cragg_donald(model: &IVResult, py: Python<'_>) -> PyResult<CraggDonaldOutput> {
     let rebuilt = Rebuilt::new(model, py)?;
     py.detach(|| {
         rebuilt.with_input(|input, _| {
             let cd = compute_cragg_donald(input).map_err(iv_error_to_pyerr)?;
-            Ok(CraggDonaldOutput {
-                statistic: cd.statistic,
-                n_endog: cd.n_endog,
-                n_excluded: cd.n_excluded,
-                tsls_bias: stock_yogo(cd.tsls_bias),
-                tsls_size: stock_yogo(cd.tsls_size),
-            })
+            Ok(CraggDonaldOutput::from_engine(cd))
         })
     })
 }
@@ -204,14 +239,7 @@ pub(super) fn run_kleibergen_paap(
     py.detach(|| {
         rebuilt.with_input(|input, cov_type| {
             let kp = compute_kleibergen_paap(input, cov_type).map_err(iv_error_to_pyerr)?;
-            Ok(KleibergenPaapOutput {
-                rk_lm_statistic: kp.rk_lm.map(|lm| lm.statistic),
-                rk_lm_df: kp.rk_lm.map(|lm| lm.df),
-                rk_lm_p_value: kp.rk_lm.map(|lm| lm.p_value()),
-                rk_wald_f: kp.rk_wald_f,
-                n_endog: kp.n_endog,
-                n_excluded: kp.n_excluded,
-            })
+            Ok(KleibergenPaapOutput::from_engine(kp))
         })
     })
 }
@@ -225,14 +253,7 @@ pub(super) fn run_effective_f(
     py.detach(|| {
         rebuilt.with_input(|input, cov_type| {
             let eff = compute_effective_f(input, cov_type, alpha).map_err(iv_error_to_pyerr)?;
-            Ok(EffectiveFOutput {
-                statistic: eff.statistic,
-                n_excluded: eff.n_instruments,
-                alpha: eff.alpha,
-                simplified_critical_values: patnaik(&eff.simplified_tsls),
-                critical_values: eff.tsls.as_ref().map(|values| patnaik(values)),
-                bias_bound: eff.bias_bound,
-            })
+            Ok(EffectiveFOutput::from_engine(eff))
         })
     })
 }

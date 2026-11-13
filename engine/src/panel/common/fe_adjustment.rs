@@ -30,7 +30,7 @@ pub(crate) fn absorbed_parameters(n_groups: &[usize]) -> usize {
 /// # Errors
 /// - 密な行列を解く場合（組合せが欠ける2-way、3つ以上の次元）で、最大の次元を除いた次元の水準数の
 ///   合計が上限を超えるとき`PanelError::LeverageDimensionTooLarge`
-pub(super) fn leverage_full(
+pub(crate) fn leverage_full(
     h_within: &[f64],
     levels: &[&GroupCodes],
     n: usize,
@@ -133,7 +133,7 @@ fn fixef_dimension_nested_within_cluster(dim: &GroupCodes, cluster: &GroupCodes)
 ///
 /// `levels`は吸収した効果の次元（`effects`の順。1-wayはentityのみ、2-wayはentityとtime、高次元は
 /// 全ての列）。
-pub(super) fn fe_cluster_k_correction(
+pub(crate) fn fe_cluster_k_correction(
     levels: &[&GroupCodes],
     df_model: usize,
     k: usize,

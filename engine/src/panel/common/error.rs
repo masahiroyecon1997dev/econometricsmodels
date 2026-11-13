@@ -418,6 +418,22 @@ pub enum PanelError {
         #[source]
         source: LeastSquaresError,
     },
+
+    /// FEIVの有効F統計量が内生変数1個のときだけ定義されるのに、内生変数の数が違う。
+    /// `IvError::EffectiveFEndogenousCount`と同じ`code`。
+    #[error("{}", self.catalog_message())]
+    EffectiveFEndogenousCount { n_endog: usize },
+
+    /// FEIVの有効F統計量の臨界値の水準`alpha`が(0, 1)の外。`IvError::AlphaOutOfRange`と同じ`code`。
+    #[error("{}", self.catalog_message())]
+    AlphaOutOfRange { alpha: f64 },
+
+    /// FEIVの弱操作変数の診断統計量（Cragg-Donald・Kleibergen-Paap・有効F）が、このデータでは定義できない
+    /// （必要な行列が特異、第一段階が完全フィット、スコアの共分散のランク落ち、HC2・HC3でレバレッジが1等）。
+    /// 診断なので`fit()`は失敗させず、診断のメソッドを呼んだときにだけ返す。
+    /// `IvError::WeakInstrumentStatisticUndefined`と同じ`code`。`statistic`は文に出す名前。
+    #[error("{}", self.catalog_message())]
+    WeakInstrumentStatisticUndefined { statistic: &'static str },
 }
 
 impl ErrorInfo for PanelError {
@@ -456,6 +472,16 @@ impl ErrorInfo for PanelError {
                 staged_report(source.report(), Stage::HausmanRegression)
             }
             Self::InStage { stage, source } => staged_report(source.report(), stage.clone()),
+            Self::EffectiveFEndogenousCount { n_endog } => {
+                ErrorReport::new(ErrorCode::EffectiveFEndogenousCount).param("n_endog", *n_endog)
+            }
+            Self::AlphaOutOfRange { alpha } => {
+                ErrorReport::new(ErrorCode::AlphaOutOfRange).param("value", *alpha)
+            }
+            Self::WeakInstrumentStatisticUndefined { statistic } => {
+                ErrorReport::new(ErrorCode::WeakInstrumentStatisticUndefined)
+                    .param("statistic", *statistic)
+            }
             Self::IdentifierDimensionMismatch {
                 dimension,
                 y_rows,

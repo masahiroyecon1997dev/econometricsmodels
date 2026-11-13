@@ -28,7 +28,7 @@ fn assert_close(actual: f64, expected: f64, label: &str) {
 }
 
 /// 次元ごとのダミー列（1つ目の次元は全水準、2つ目以降は最初の水準を落とす）。
-fn dummies(dimensions: &[GroupCodes]) -> Vec<Vec<f64>> {
+pub(super) fn dummies(dimensions: &[GroupCodes]) -> Vec<Vec<f64>> {
     let mut columns = Vec::new();
     for (d, dimension) in dimensions.iter().enumerate() {
         for level in usize::from(d > 0)..dimension.n_groups() {

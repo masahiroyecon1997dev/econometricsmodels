@@ -18,10 +18,11 @@
 //!    （クラスター数・時点数が`l`以下でも標準誤差は計算する。IV本体の`first_stage()`と同じ）。
 //!    当てはめ値から`X̂ = [x̃_exog, x̂̃_endog]`を作る。
 //! 5. 点推定`β̂ = (X̂'X̂)⁻¹X̂'ỹ`、構造残差`e = ỹ − X̃β̂`（`X̃`は実際の内生変数。第二段階の残差ではない）。
-//! 6. Sargan過剰識別検定（`len(instruments) > len(x_endog)`のとき。`σ̂² = e'e/(n − neffects)`、等分散前提）。
-//! 7. `panel_cov_params`に`X̂`・`(X̂'X̂)⁻¹`・構造残差を渡して`cov_type`別の共分散を求め、t分布の推論表と
+//! 6. 弱操作変数の部分F統計量（内生変数ごと。第一段階の残差平方和から。分母の自由度は`n − l − neffects`）。
+//! 7. Sargan過剰識別検定（`len(instruments) > len(x_endog)`のとき。`σ̂² = e'e/(n − neffects)`、等分散前提）。
+//! 8. `panel_cov_params`に`X̂`・`(X̂'X̂)⁻¹`・構造残差を渡して`cov_type`別の共分散を求め、t分布の推論表と
 //!    傾き係数のWald F検定を計算する。
-//! 8. Wu-Hausman内生性検定（`ỹ ~ [x̃_exog, x̃_endog, v̂]`の補助FE回帰を`cov_type`の共分散で回し、`v̂`のWald。
+//! 9. Wu-Hausman内生性検定（`ỹ ~ [x̃_exog, x̃_endog, v̂]`の補助FE回帰を`cov_type`の共分散で回し、`v̂`のWald。
 //!    構造式の共分散・F検定が計算できた後に回す）。
 //!
 //! # 自由度
@@ -31,6 +32,9 @@
 //! ネストによるランク落ちは引かない）。クラスターの小標本補正の`K`は`fe_cluster_k_correction`
 //! （fixestの`K.fixef="nonnested"`）、推論の自由度は`Cluster`が`G − 1`、`Dk`が`T − 1`、それ以外は`df_resid`。
 //!
+//! 弱操作変数診断が吸収したパラメータ数`n_absorbed`は、診断・`cov_type`ごとに違う（`weak_instruments.rs`）:
+//! 部分F・Cragg-Donald・`Classical`・`Hc1`〜`Hc3`・`Dk`は`neffects`、`Cluster`は上の`K`から一次段階の傾きの数
+//! `l = k_exog + k_instruments`を引いた数。部分Fの分母の自由度は`n − l − neffects`。//!
 //! # 適合度
 //!
 //! R²は構造残差ベース: within = `1 − e'e / ỹ'ỹ`、between・overallは`β̂`と実際の`X`で`FeEstimator`と同じ式。
@@ -47,17 +51,20 @@
 //! - `fit.rs`: `fit_fe_iv`（上のパイプライン）
 //! - `sargan.rs`: Sargan過剰識別検定
 //! - `wu_hausman.rs`: Wu-Hausman内生性検定（補助FE回帰）
-//!
-//! 弱操作変数診断は別途追加する（第一段階の推定量・残差を保持している）。
+//! - `weak_instruments.rs`: 弱操作変数診断（部分F・Cragg-Donald・Kleibergen-Paap・有効F）
 
 use faer::Mat;
 
 use super::common::PanelError;
 use super::fe::{FeAbsorption, FeCovType, FeEffects, FeEstimator, FeInput, FixedEffects};
+use crate::shared::effective_f::EffectiveF;
+use crate::shared::kleibergen_paap::KleibergenPaap;
+use crate::shared::weak_instruments::CraggDonald;
 
 mod fit;
 mod input;
 mod sargan;
+mod weak_instruments;
 mod wu_hausman;
 
 pub use input::{FeIvInput, RoleColumns};
@@ -94,6 +101,8 @@ pub struct FeIvEstimator {
     f_test: Option<(f64, f64)>,
     /// 内生変数ごとの第一段階（`x_endog`の順）。変換済みの列・残差（`residuals()`）を持つ。
     first_stages: Vec<FeEstimator>,
+    /// 内生変数ごとの弱操作変数の部分F統計量（`x_endog`の順。名前つき）。内生変数が無ければ空。
+    weak_instrument_f: Vec<(String, f64)>,
     /// Sargan過剰識別検定。丁度識別、または内生変数が無いときは`None`。
     sargan: Option<sargan::FeSarganTest>,
     /// Wu-Hausman内生性検定。内生変数が無い、または補助回帰が診断だけの理由で失敗したときは`None`。
@@ -275,6 +284,51 @@ impl FeIvEstimator {
     /// within回帰で、`cov_type`は構造式と同じ。傾きのF検定はしないので`f_statistic()`は`None`。
     pub fn first_stages(&self) -> &[FeEstimator] {
         &self.first_stages
+    }
+
+    /// 内生変数ごとの弱操作変数の部分F統計量（`x_endog`の順）。除外操作変数`q`個の係数がゼロという制限の、
+    /// 等分散前提のネストF検定（`cov_type`に依らない）で、分母の自由度は`n − l − neffects`
+    /// （[`Self::weak_instrument_f_df`]）。内生変数が1個ならCragg-Donaldと一致する。
+    pub fn weak_instrument_f_statistics(&self) -> &[(String, f64)] {
+        &self.weak_instrument_f
+    }
+
+    /// 部分F統計量のF分布の自由度`(除外操作変数の数, n − l − neffects)`（`l = k_exog + k_instruments`）。
+    /// 内生変数が無ければ`None`。
+    pub fn weak_instrument_f_df(&self) -> Option<(usize, usize)> {
+        self.compute_weak_instrument_f_df()
+    }
+
+    /// Cragg-Donald Wald F統計量とStock-Yogoの臨界値（吸収した効果の分を自由度から引く。等分散前提で
+    /// `cov_type`に依らない）。
+    ///
+    /// # Errors
+    /// 統計量が定義できないとき（内生変数が無い、内生変数が共線、第一段階が完全フィット、外生変数と
+    /// 除外操作変数の共線など）`PanelError::WeakInstrumentStatisticUndefined`。
+    pub fn cragg_donald(&self) -> Result<CraggDonald, PanelError> {
+        self.compute_cragg_donald()
+    }
+
+    /// `fit`に渡した`cov_type`に頑健なKleibergen-Paap統計量（rk LMとrk Wald F）。LMとWald Fは独立に
+    /// 定義の可否が決まり、片方だけ`Some`のことがある。`Hc2`・`Hc3`は吸収した効果のレバレッジを含み、
+    /// `Dk`は`fit`が解決した時点とバンド幅を使う。
+    ///
+    /// # Errors
+    /// 両方とも定義できないとき（`Dk`で時点数が除外操作変数の数`− 内生変数の数 + 1`以下の場合を含む）
+    /// `PanelError::WeakInstrumentStatisticUndefined`。
+    pub fn kleibergen_paap(&self) -> Result<KleibergenPaap, PanelError> {
+        self.compute_kleibergen_paap()
+    }
+
+    /// `fit`に渡した`cov_type`に頑健なMontiel Olea-Pflueger有効F統計量と、単純版・一般化版TSLSの
+    /// Patnaik臨界値。内生変数が1個のときだけ定義される。`alpha`は臨界値の水準（0〜1）。
+    ///
+    /// # Errors
+    /// - 内生変数が1個でないとき`PanelError::EffectiveFEndogenousCount`、`alpha`が(0, 1)の外のとき
+    ///   `PanelError::AlphaOutOfRange`
+    /// - 統計量が定義できないとき`PanelError::WeakInstrumentStatisticUndefined`
+    pub fn effective_f(&self, alpha: f64) -> Result<EffectiveF, PanelError> {
+        self.compute_effective_f(alpha)
     }
 
     /// Sargan過剰識別検定の統計量。丁度識別（`len(instruments) == len(x_endog)`）では`None`。

@@ -96,7 +96,7 @@ pub(crate) use cov_params::{
 pub use cov_type::{PanelCovType, PanelEffects};
 pub(crate) use dummy_leverage::check_leverage_dimension;
 pub use error::{BetweenMeans, ColumnRole, PanelDimension, PanelError};
-pub(crate) use fe_adjustment::absorbed_parameters;
+pub(crate) use fe_adjustment::{absorbed_parameters, fe_cluster_k_correction, leverage_full};
 pub(crate) use index::EffectNames;
 pub use index::PanelIndex;
 pub(crate) use panel_cov::{PanelCov, PanelCovInput, PanelStructure, panel_cov_params};

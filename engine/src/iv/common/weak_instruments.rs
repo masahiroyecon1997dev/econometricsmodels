@@ -10,22 +10,11 @@ use super::input::IvInput;
 use crate::linear::ols::CovType;
 use crate::shared::covariance::{HcVariant, resolve_hac_lags, time_ordering};
 use crate::shared::effective_f::{EffectiveF, effective_f};
-use crate::shared::kleibergen_paap::{RankTest, kleibergen_paap};
+pub use crate::shared::kleibergen_paap::KleibergenPaap;
+use crate::shared::kleibergen_paap::kleibergen_paap;
 use crate::shared::score_covariance::ScoreCovariance;
-use crate::shared::stock_yogo::{
-    TSLS_BIAS_LEVELS, TSLS_SIZE_LEVELS, tsls_bias_critical_values, tsls_size_critical_values,
-};
 use crate::shared::weak_instruments::cragg_donald;
-
-/// Stock-Yogoの臨界値表の1行: 水準(`levels`)とその臨界値(`values`)。同じ位置が対応する。
-/// Cragg-Donald統計量が臨界値を超えれば、その水準で「操作変数は弱い」を棄却する。
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct StockYogoCriticalValues {
-    /// 水準(バイアス表は相対バイアスの上限、サイズ表は5%のWald検定のサイズの上限)。
-    pub levels: [f64; 4],
-    /// 水準ごとの臨界値(5%有意水準のテスト)。
-    pub values: [f64; 4],
-}
+pub use crate::shared::weak_instruments::{CraggDonald, StockYogoCriticalValues};
 
 /// エラーの文に出す、診断統計量の名前。
 const CRAGG_DONALD_LABEL: &str = "Cragg-Donald";
@@ -34,21 +23,6 @@ const EFFECTIVE_F_LABEL: &str = "effective F";
 
 fn undefined(statistic: &'static str) -> IvError {
     IvError::WeakInstrumentStatisticUndefined { statistic }
-}
-
-/// [`compute_cragg_donald`]の結果。
-#[derive(Debug, Clone, PartialEq)]
-pub struct CraggDonald {
-    /// Cragg-Donald Wald F統計量。内生変数が1個なら弱操作変数の部分F統計量に一致する。
-    pub statistic: f64,
-    /// 内生変数の数。
-    pub n_endog: usize,
-    /// 除外操作変数の数`K2`。
-    pub n_excluded: usize,
-    /// 2SLSの相対バイアスの臨界値(内生変数1〜3個、`K2`が`n_endog + 2`〜30のとき)。
-    pub tsls_bias: Option<StockYogoCriticalValues>,
-    /// 2SLSのサイズ歪みの臨界値(内生変数1〜2個、`K2`が`n_endog`〜30のとき)。
-    pub tsls_size: Option<StockYogoCriticalValues>,
 }
 
 /// Cragg-Donald統計量とStock-Yogoの臨界値を計算する。
@@ -65,37 +39,11 @@ pub fn compute_cragg_donald(input: &IvInput) -> Result<CraggDonald, IvError> {
     crate::shared::parallelism::ensure_serial();
     let statistic = cragg_donald(input.x_endog(), input.x_exog(), input.instruments(), 0)
         .ok_or_else(|| undefined(CRAGG_DONALD_LABEL))?;
-    let (n_endog, n_excluded) = (input.k_endog(), input.k_instruments());
-    let row = |levels: [f64; 4], values: Option<[f64; 4]>| {
-        values.map(|values| StockYogoCriticalValues { levels, values })
-    };
-    Ok(CraggDonald {
+    Ok(CraggDonald::new(
         statistic,
-        n_endog,
-        n_excluded,
-        tsls_bias: row(
-            TSLS_BIAS_LEVELS,
-            tsls_bias_critical_values(n_endog, n_excluded),
-        ),
-        tsls_size: row(
-            TSLS_SIZE_LEVELS,
-            tsls_size_critical_values(n_endog, n_excluded),
-        ),
-    })
-}
-
-/// [`compute_kleibergen_paap`]の結果。LMとWald Fは共分散の階数の条件が違い(Wald Fのスコアは合計が0に
-/// なるので、クラスターがLMより1つ多く要る)、片方だけ定義できることがあるため、独立に`Option`にする。
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct KleibergenPaap {
-    /// rk LM統計量(過小識別の検定。`χ²(n_excluded − n_endog + 1)`)。
-    pub rk_lm: Option<RankTest>,
-    /// rk Wald F統計量(Cragg-Donald Fの、`cov_type`に頑健な版。検定ではなくp値は無い)。
-    pub rk_wald_f: Option<f64>,
-    /// 内生変数の数。
-    pub n_endog: usize,
-    /// 除外操作変数の数。
-    pub n_excluded: usize,
+        input.k_endog(),
+        input.k_instruments(),
+    ))
 }
 
 /// `CovType`を一次段階のスコアの共分散の選択に直す。`Hac`の時間順は`order`に書き込んで借用する。

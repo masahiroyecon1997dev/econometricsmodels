@@ -107,7 +107,7 @@ pub struct EffectiveF {
 ///
 /// 次のとき全体が`None`: 内生変数が1個でない、`K = 0`、`alpha`が(0,1)の外、`X`がフルランクでない、`Z`の列が
 /// `X`の張る空間にほぼ入っている、`Z̃`が共線、一次段階が完全フィット(`1 − R² ≤ 1.4e-14`)、HC2・HC3で
-/// レバレッジが1、`n_absorbed > 0`のHC2・HC3、クラスターが2未満、`Hac`の時間順の長さが行数と違う・`lags >= n`、
+/// レバレッジが1、`n_absorbed > 0`の`Hc(Hc2)`・`Hc(Hc3)`、クラスターが2未満、`Hac`の時間順の長さが行数と違う・`lags >= n`、`Dk`の`bandwidth >= 時点数`、
 /// 自由度`n − K − k_exog − n_absorbed`が1未満、`Ŵ2`が不定値(最小固有値が最大固有値の`-1e-10`倍より小さい)・ゼロ・ランク落ち(最小固有値が最大固有値の`1e-10`倍以下)、
 /// 入力に非有限値がある。一般化版(`tsls`・`bias_bound`)だけが`None`になるのは: `y_dep`の形が不正・外生変数の
 /// 張る空間にほぼ入っている・非有限値、`2K×2K`の`Ŵ`が不定値、`v1 = βv2`のほぼ比例(`B_TSLS`が未定義)、
@@ -145,7 +145,16 @@ pub(crate) fn effective_f(
     let (meat, n_groups) = score_meat(
         &psi,
         covariance,
-        |variant| hc_row_scales(variant, &first_stage.u, x_exog, n_params, n_absorbed),
+        |variant, absorbed| {
+            hc_row_scales(
+                variant,
+                &first_stage.u,
+                x_exog,
+                n_params,
+                n_absorbed,
+                absorbed,
+            )
+        },
         || {
             // 共分散がクロネッカー積なら`Ŵ ∝ Ω̂⊗I`。`Ũ'Ũ/n = I`なので、`meat`のブロック`(s, t)`は
             // `(Σ e_s e_t)·I_K`。

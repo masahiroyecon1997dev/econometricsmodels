@@ -13,6 +13,56 @@ use super::linear_algebra::{
     checked_col_piv_qr, column_norm, ensure_well_conditioned_symmetric_matrix, forward_substitute,
     unit_columns,
 };
+use super::stock_yogo::{
+    TSLS_BIAS_LEVELS, TSLS_SIZE_LEVELS, tsls_bias_critical_values, tsls_size_critical_values,
+};
+
+/// Stock-Yogoの臨界値表の1行: 水準(`levels`)とその臨界値(`values`)。同じ位置が対応する。
+/// Cragg-Donald統計量が臨界値を超えれば、その水準で「操作変数は弱い」を棄却する。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StockYogoCriticalValues {
+    /// 水準(バイアス表は相対バイアスの上限、サイズ表は5%のWald検定のサイズの上限)。
+    pub levels: [f64; 4],
+    /// 水準ごとの臨界値(5%有意水準のテスト)。
+    pub values: [f64; 4],
+}
+
+/// Cragg-Donald統計量とStock-Yogoの臨界値(2SLS・固定効果つき2SLSの診断が返す)。
+#[derive(Debug, Clone, PartialEq)]
+pub struct CraggDonald {
+    /// Cragg-Donald Wald F統計量。内生変数が1個なら弱操作変数の部分F統計量に一致する。
+    pub statistic: f64,
+    /// 内生変数の数。
+    pub n_endog: usize,
+    /// 除外操作変数の数`K2`。
+    pub n_excluded: usize,
+    /// 2SLSの相対バイアスの臨界値(内生変数1〜3個、`K2`が`n_endog + 2`〜30のとき)。
+    pub tsls_bias: Option<StockYogoCriticalValues>,
+    /// 2SLSのサイズ歪みの臨界値(内生変数1〜2個、`K2`が`n_endog`〜30のとき)。
+    pub tsls_size: Option<StockYogoCriticalValues>,
+}
+
+impl CraggDonald {
+    /// 統計量に、`n_endog`・`n_excluded`で決まるStock-Yogoの臨界値(表にある組み合わせだけ)を付ける。
+    pub(crate) fn new(statistic: f64, n_endog: usize, n_excluded: usize) -> Self {
+        let row = |levels: [f64; 4], values: Option<[f64; 4]>| {
+            values.map(|values| StockYogoCriticalValues { levels, values })
+        };
+        Self {
+            statistic,
+            n_endog,
+            n_excluded,
+            tsls_bias: row(
+                TSLS_BIAS_LEVELS,
+                tsls_bias_critical_values(n_endog, n_excluded),
+            ),
+            tsls_size: row(
+                TSLS_SIZE_LEVELS,
+                tsls_size_critical_values(n_endog, n_excluded),
+            ),
+        }
+    }
+}
 
 /// Cragg-Donald Wald F統計量: 内生変数`Y`の第一段階の係数行列のランク統計量の最小固有値を、除外操作変数の
 /// 数`q`で割って自由度を合わせたもの。Stock-Yogo(2005)が臨界値を表にした`g_min`統計量で、Stataの

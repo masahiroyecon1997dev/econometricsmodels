@@ -41,6 +41,20 @@ impl RankTest {
 /// (機械イプシロンの数倍では拾えないことがある)。
 const SINGULAR_COVARIANCE_TOLERANCE: f64 = 1e-10;
 
+/// Kleibergen-Paap統計量(2SLS・固定効果つき2SLSの診断が返す)。LMとWald Fは共分散の階数の条件が違い(Wald Fのスコアは合計が0に
+/// なるので、クラスターがLMより1つ多く要る)、片方だけ定義できることがあるため、独立に`Option`にする。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct KleibergenPaap {
+    /// rk LM統計量(過小識別の検定。`χ²(n_excluded − n_endog + 1)`)。
+    pub rk_lm: Option<RankTest>,
+    /// rk Wald F統計量(Cragg-Donald Fの、`cov_type`に頑健な版。検定ではなくp値は無い)。
+    pub rk_wald_f: Option<f64>,
+    /// 内生変数の数。
+    pub n_endog: usize,
+    /// 除外操作変数の数。
+    pub n_excluded: usize,
+}
+
 /// [`kleibergen_paap`]の結果。LMとWald Fは共分散の階数の条件が違い(Wald Fのスコアは合計が0になるので、
 /// クラスターがLMより1つ多く要る)、片方だけ定義できることがあるので、独立に`Option`にする。
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -65,15 +79,15 @@ pub struct KleibergenPaapStatistics {
 ///   - `Classical`・`Hac`: `W · (n − l − n_absorbed) / n / q`(`Classical`はCragg-Donaldの`F`に一致)
 ///   - `Hc(Hc1)`: `W / q`(`W`の行スケールに`√(n/(n−l−n_absorbed))`を含む。linearmodelsの`robust`と
 ///     同じ値)。`Hc0`・`Hc2`・`Hc3`も`W / q`(行スケールだけ)
-///   - `Cluster`: `W · (n − l − n_absorbed)(G − 1) / (G (n − 1)) / q`(`G`はクラスター数)
-/// - `Classical`と`Hc0`のLMは、linearmodelsの`unadjusted`・`robust`に対応する。`Hc2`・`Hc3`の
+///   - `Cluster`・`Dk`: `W · (n − l − n_absorbed)(G − 1) / (G (n − 1)) / q`(`G`はクラスター数、`Dk`は時点数)
+/// - `Classical`と`Hc0`のLMは、linearmodelsの`unadjusted`・`robust`に対応する。`Hc(Hc2)`・`Hc(Hc3)`の
 ///   レバレッジは`[X_exog, Z]`だけから計算し、吸収した効果の分を含まないので、`n_absorbed > 0`では
-///   未定義とする。
+///   未定義とする。吸収した効果のレバレッジは`ScoreCovariance::HcAbsorbed`で渡す。
 ///
 /// 前処理で定義できないとき(内生変数が無い、`q < k`、`X`がフルランクでない、`Z`の列が`X`の張る空間に
 /// ほぼ入っている、`Z̃`または`Ỹ`が共線、最小の正準相関が1(完全フィット)、入力に非有限値がある)は
 /// 全体が`None`。それ以外は統計量ごとに`None`になりうる: HC2・HC3でレバレッジが1、`n_absorbed > 0`の
-/// HC2・HC3、クラスターが2未満、`Hac`の`lags >= n`、スコアの共分散が特異(クラスターや観測が少なすぎる)。
+/// `Hc(Hc2)`・`Hc(Hc3)`、クラスターが2未満、`Hac`の`lags >= n`、`Dk`の`bandwidth >= 時点数`、LMで`Dk`の時点数がスコアの次元`q − k + 1`以下、スコアの共分散が特異(クラスターや観測が少なすぎる)。
 /// Wald Fはさらに自由度`n − l − n_absorbed`が1未満のとき`None`。
 pub(crate) fn kleibergen_paap(
     y_endog: &Mat<f64>,
@@ -182,6 +196,14 @@ impl FirstStage {
         n_absorbed: usize,
         covariance: ScoreCovariance<'_>,
     ) -> Option<RankTest> {
+        // DKは時点数`T ≤ d`だと、時点ごとのスコアが`d`次元を張るのに足りず、LMがデータに依らない値（`T = d`の
+        // `bandwidth = 0`でちょうど`T`）になるので、`T > d`を要る。Wald Fのスコアは和が0で、`T ≤ d`ならランク落ちとして
+        // `chi2`が未定義にする。
+        if let ScoreCovariance::Dk { time, .. } = covariance
+            && time.n_groups() <= self.lam.len()
+        {
+            return None;
+        }
         let (statistic, _) = self.chi2(&self.y, x_exog, n_absorbed, covariance)?;
         Some(RankTest {
             statistic,
@@ -232,7 +254,9 @@ impl FirstStage {
         let (meat, n_groups) = score_meat(
             &psi,
             covariance,
-            |variant| hc_row_scales(variant, &self.z, x_exog, n_params, n_absorbed),
+            |variant, absorbed| {
+                hc_row_scales(variant, &self.z, x_exog, n_params, n_absorbed, absorbed)
+            },
             || {
                 // 共分散がクロネッカー積なら、射影後は`ω · I`(`ω`は射影した方向の分散)。
                 let omega = projected_y.iter().map(|p| p * p).sum::<f64>();

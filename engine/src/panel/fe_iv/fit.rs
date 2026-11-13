@@ -8,6 +8,7 @@ use statrs::distribution::StudentsT;
 use super::FeIvEstimator;
 use super::input::FeIvInput;
 use super::sargan::fe_sargan_test;
+use super::weak_instruments::first_stage_partial_f;
 use super::wu_hausman::{WuHausmanContext, abs_max, fe_wu_hausman_test};
 use crate::linear::common::LeastSquaresError;
 use crate::panel::common::{
@@ -243,6 +244,15 @@ pub(super) fn fit_fe_iv(
         first_stages.push(stage);
     }
 
+    // 弱操作変数の部分F統計量（診断。内生変数ごと）。
+    let mut weak_instrument_f = Vec::with_capacity(k_endog);
+    for (j, stage) in first_stages.iter().enumerate() {
+        let name = &input.x_endog_names()[j];
+        let f = first_stage_partial_f(stage, k_exog, k_instruments, neffects)
+            .map_err(|err| in_first_stage(err.into(), name))?;
+        weak_instrument_f.push((name.clone(), f));
+    }
+
     // 点推定。`X̃`は実際の内生変数、`X̂`は内生変数を第一段階の当てはめ値に置き換えたもの。
     let exog_columns: Vec<&[f64]> = tilde[exog_range.clone()]
         .iter()
@@ -401,6 +411,7 @@ pub(super) fn fit_fe_iv(
         r_squared_overall,
         f_test,
         first_stages,
+        weak_instrument_f,
         sargan,
         wu_hausman,
         structural,

@@ -21,6 +21,8 @@
 //! 6. Sargan過剰識別検定（`len(instruments) > len(x_endog)`のとき。`σ̂² = e'e/(n − neffects)`、等分散前提）。
 //! 7. `panel_cov_params`に`X̂`・`(X̂'X̂)⁻¹`・構造残差を渡して`cov_type`別の共分散を求め、t分布の推論表と
 //!    傾き係数のWald F検定を計算する。
+//! 8. Wu-Hausman内生性検定（`ỹ ~ [x̃_exog, x̃_endog, v̂]`の補助FE回帰を`cov_type`の共分散で回し、`v̂`のWald。
+//!    構造式の共分散・F検定が計算できた後に回す）。
 //!
 //! # 自由度
 //!
@@ -44,8 +46,9 @@
 //! - `input.rs`: `FeIvInput`・`RoleColumns`
 //! - `fit.rs`: `fit_fe_iv`（上のパイプライン）
 //! - `sargan.rs`: Sargan過剰識別検定
+//! - `wu_hausman.rs`: Wu-Hausman内生性検定（補助FE回帰）
 //!
-//! 弱操作変数診断・Wu-Hausmanは別途追加する（第一段階の推定量・残差を保持している）。
+//! 弱操作変数診断は別途追加する（第一段階の推定量・残差を保持している）。
 
 use faer::Mat;
 
@@ -55,6 +58,7 @@ use super::fe::{FeAbsorption, FeCovType, FeEffects, FeEstimator, FeInput, FixedE
 mod fit;
 mod input;
 mod sargan;
+mod wu_hausman;
 
 pub use input::{FeIvInput, RoleColumns};
 
@@ -92,6 +96,8 @@ pub struct FeIvEstimator {
     first_stages: Vec<FeEstimator>,
     /// Sargan過剰識別検定。丁度識別、または内生変数が無いときは`None`。
     sargan: Option<sargan::FeSarganTest>,
+    /// Wu-Hausman内生性検定。内生変数が無い、または補助回帰が診断だけの理由で失敗したときは`None`。
+    wu_hausman: Option<wu_hausman::FeWuHausmanTest>,
     /// 構造式の`y`・実際の`X = [x_exog, x_endog]`（変換前）。`fixed_effects()`が使う。
     structural: FeInput,
     /// 交互射影が`y`・`x_exog`・`x_endog`の列から引いた各次元の効果（`structural`の列と同じ順）。
@@ -113,6 +119,8 @@ impl FeIvEstimator {
     /// - 第一段階の推定の失敗は、原因の`code`に`stage=FIRST_STAGE`を付けて返す（クラスター数・時点数が
     ///   `l`以下でも、標準誤差が計算できれば失敗にしない）
     /// - 構造方程式の最小二乗・完全適合は`PanelError::SecondStageFailed`
+    /// - Sargan・Wu-Hausmanは診断だけの理由（Wu-Hausmanの補助回帰の自由度不足・完全適合・特異など）で計算できなければ
+    ///   `None`にして、`fit`は失敗させない。Wu-Hausmanの補助回帰のそれ以外の失敗は`stage=WU_HAUSMAN_REGRESSION`つきで返す
     /// - `cov_type`別の共分散の検証は`FeEstimator::fit`と同じ（クラスター数・時点数が傾きの数`k`以下、
     ///   2グループ退化、DKのバンド幅など）
     /// - `confidence_level`が`(0, 1)`の範囲外なら`PanelError::WithinRegressionFailed`
@@ -286,6 +294,28 @@ impl FeIvEstimator {
     /// Sargan過剰識別検定のχ²分布の自由度`len(instruments) − len(x_endog)`。丁度識別なら`None`。
     pub fn sargan_df(&self) -> Option<usize> {
         self.sargan.map(|test| test.df)
+    }
+
+    /// Wu-Hausman内生性検定の統計量（F）。内生変数が無いとき、または補助回帰が自由度不足・`v̂`の分散ゼロ・
+    /// 完全適合・特異などで検定できないときは`None`
+    /// （構造式の推定結果とは無関係なので、`fit`は失敗しない）。
+    ///
+    /// 構造式の`ỹ`を`[x̃_exog, x̃_endog, v̂]`（`v̂`は第一段階の残差）に回帰し、`v̂`の係数がすべてゼロという
+    /// 仮説を、`fit`に渡した`cov_type`の共分散でのWald検定で調べる。
+    pub fn wu_hausman_statistic(&self) -> Option<f64> {
+        self.wu_hausman.map(|test| test.statistic)
+    }
+
+    /// Wu-Hausman内生性検定のp値。`wu_hausman_statistic()`と同じ条件で`None`。
+    pub fn wu_hausman_p_value(&self) -> Option<f64> {
+        self.wu_hausman.map(|test| test.p_value)
+    }
+
+    /// Wu-Hausman内生性検定のF分布の自由度`(分子, 分母)`。分子は内生変数の数、分母は補助回帰の推論の自由度
+    /// （`Cluster`は`G − 1`、`Dk`は`T − 1`、それ以外は`n − k − k_endog − neffects`）。
+    /// `wu_hausman_statistic()`と同じ条件で`None`。
+    pub fn wu_hausman_df(&self) -> Option<(usize, usize)> {
+        self.wu_hausman.map(|test| test.df)
     }
 
     /// 固定効果自体（α_i、2-wayはγ_tも）を事後的に復元する。構造式の`y`・実際の`X`・`β̂`から

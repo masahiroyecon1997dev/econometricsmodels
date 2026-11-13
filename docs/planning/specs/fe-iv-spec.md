@@ -1009,3 +1009,12 @@ Stock-Yogoの表は実装の値がNBER TWP 284のTable 1（バイアス）・Tab
 **テスト**（`fe_iv/fit/tests/sargan.rs`）: ダミー込みの2SLSでの再計算（1-way・2-way均衡/不均衡・3次元×操作変数・内生変数の数5通り）、分母の手計算、`cov_type`不依存、丁度識別・内生変数なしの`None`、帰無仮説下の棄却率（N=100、1500回。T=3・6で3.5〜6.5%）。変異検査: 分母を`n`にするとT=3の棄却率が11.9%になり3件失敗。
 **fixestの確認**: fixest 0.14.2の`feols`のソースで、`stat = n(1 − SSR_r/SSR_null)`（`e'e/n`の尺度）。
 **見送り（reviewerのnice to have）**: `Z̃'Z̃`のCholeskyが条件数の悪い入力で`INTERNAL_ERROR`になりうる（IV本体と同じ挙動。実害が出たら`least_squares`に替える）、連結成分が複数ある不均衡2-wayと`n − neffects`が小さい境界のテスト（`/review-testing`で確認）。
+
+### 9.22 #375（FE-2SLSのWu-Hausman）の実装結果（2026-11-13）
+
+**決定**: 名前はIV本体と同じ`wu_hausman_statistic()`・`wu_hausman_p_value()`・`wu_hausman_df()`（#374と同じ方針）。F分布の自由度は`(k_endog, 補助回帰のdf_inference)`（Clusterは`G − 1`、DKは`T − 1`、それ以外は`n − k − k_endog − neffects`）。
+**実装**: `fe_iv/wu_hausman.rs`の`fe_wu_hausman_test`。補助FE回帰`ỹ ~ [x̃_exog, x̃_endog, v̂]`を`fit_from_within(.., tests_overall_f = false)`で`cov_type`と同じ共分散で回し、`v̂`の係数のWald F。`v̂`は第一段階の残差（within空間の列）をそのまま使い、`absorbed`は渡さない（固定効果の復元に使わない）。構造式の共分散・F検定の後に呼ぶ（`DegenerateClusterTwoGroups`など構造式のエラーが補助回帰のエラーに隠れないように）。`None`になる条件: 内生変数なし、補助回帰の自由度不足・`v̂`の分散ゼロ・完全適合（交互射影の誤差の見積もりは構造式と同じく`y`と係数倍した各列）・特異・Waldが数値的に特異。それ以外の失敗は`stage=WU_HAUSMAN_REGRESSION`つきで返す。クラスター数・時点数は構造式の`G > k`・`T > k`が`k_endog`以下を除くので、補助回帰で足りなくなることはない。
+**参照（fixest 0.14.2、`data.rs`のデータ）**: `fitstat(m, "wh")`は補助回帰の`v̂`のt²（iid）と一致（1-way 4.94841、2-way 3.24120。p値も一致）。hetero（HC1）とcluster（個体）は、同じ補助回帰を`vcov`を変えて回した`v̂`のt²（1-way: 6.30952・5.57364、2-way: 4.42762・3.68746）と1e-9で一致。
+**テスト**（`fe_iv/fit/tests/wu_hausman.rs`）: 上のfixest照合、ダミー込みの補助回帰を既存の`lsdv`オラクル（内生変数・操作変数なしの入力で回す）で組み直した再計算（1-way・2-way均衡/不均衡・3次元×古典・HC1〜HC3・個体クラスター×(外生, 内生, 操作変数)4通り、時点クラスター）、DK≡時点クラスター、内生変数なし・完全適合の`None`。
+**レビュー（rust-reviewer）への対応**: `fit`の`# Errors`に診断の`None`と`stage=WU_HAUSMAN_REGRESSION`を追記。完全適合の見積もりで、`v̂`列のスケールを`x_endog`の流用から第一段階の係数を使った`|x_endog[j]| + Σ|π_l|·|列_l|`に直した（`abs_max`は構造式と共有）。IV本体との違い（補助回帰は`tests_slopes=false`なので、`G`が`k+1`〜`k+k_endog`でも`v̂`の`k_endog × k_endog`部分行列で検定でき、値を持つ）をdocに明記し、ダミー込みの補助回帰との一致でテストした。補助回帰だけが自由度不足になる境界（3個体×2時点）も`None`でテストした。**限界**: 完全適合の見積もりの式は、無効にしてもテストが通る（補助回帰の`fit_from_within`の判定が先に効く。構造式の同じ式と同様に防御的な保険）。
+**見送り（nice to have）**: 補助回帰の`tilde`・残差の複製、補助回帰が捨てるR²・推論表の計算、HC2/HC3の不均衡2-way以上のダミーのレバレッジの再計算（構造式・第一段階・補助回帰で繰り返す。`levels`だけに依るのでキャッシュの余地は#380）、Waldが`NaN`のときに`None`にするかの方針（Sargan・IV本体と合わせて#373で）、`{endog}_first_stage_resid`が利用者の列名と衝突した場合、Wald部分行列が数値的に特異な経路のテスト、`docs/spec/`への集約（実装完了時）。

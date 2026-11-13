@@ -8,6 +8,7 @@ use statrs::distribution::StudentsT;
 use super::FeIvEstimator;
 use super::input::FeIvInput;
 use super::sargan::fe_sargan_test;
+use super::wu_hausman::{WuHausmanContext, abs_max, fe_wu_hausman_test};
 use crate::linear::common::LeastSquaresError;
 use crate::panel::common::{
     ColumnRole, PanelCov, PanelCovInput, PanelDimension, PanelError, PanelStructure,
@@ -270,7 +271,6 @@ pub(super) fn fit_fe_iv(
     // 構造残差が丸め誤差の範囲で0なら完全適合。標準誤差とF検定が定義できない。
     let sst_within: f64 = y_tilde.iter().map(|v| v * v).sum();
     // 交互射影が残す誤差は、構造残差`ỹ − X̃β̂`では`y`だけでなく`|β̂_j|`倍した各`x`の分にも乗る。
-    let abs_max = |column: &[f64]| column.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
     let residual_scale = abs_max(input.y())
         + input
             .x_exog()
@@ -347,6 +347,19 @@ pub(super) fn fit_fe_iv(
         )
     };
 
+    // 構造式の共分散・F検定が計算できた後に、補助回帰を回す（構造式のエラーを先に返す）。
+    let wu_hausman = fe_wu_hausman_test(&WuHausmanContext {
+        input: &input,
+        effects,
+        cov_type: &cov_type,
+        confidence_level,
+        groups,
+        effect_names: &effect_names,
+        tilde: &tilde,
+        first_stages: &first_stages,
+        noise,
+    })?;
+
     // 構造式の`y`・実際の`X`（変換前）。R²のbetween・overallと`fixed_effects()`が使う。
     let mut structural_x: Vec<Vec<f64>> = input.x_exog().to_vec();
     structural_x.extend(input.x_endog().iter().cloned());
@@ -389,6 +402,7 @@ pub(super) fn fit_fe_iv(
         f_test,
         first_stages,
         sargan,
+        wu_hausman,
         structural,
         absorbed: structural_absorbed,
     })

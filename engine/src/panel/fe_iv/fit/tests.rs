@@ -6,6 +6,7 @@
 //!   共分散が一致する）。不均衡な2-wayと3次元もここで確かめる
 //! - `sargan.rs`: Sargan過剰識別検定（ダミー変数を明示した2SLSでの再計算、`σ̂²`の分母、帰無仮説下のサイズ）
 //! - `structure.rs`: 構造残差・R²・固定効果・第一段階・不変性
+//! - `wu_hausman.rs`: Wu-Hausman（fixestの補助回帰との照合、ダミー込みの補助回帰での再計算、`None`になる条件）
 //! - `validation.rs`: 入力検証・エラー返却・検証順序
 
 use crate::panel::common::PanelError;
@@ -20,6 +21,7 @@ mod reference;
 mod sargan;
 mod structure;
 mod validation;
+mod wu_hausman;
 
 // ── 複数のテーマが使うヘルパー ──────────────────────────────────────
 

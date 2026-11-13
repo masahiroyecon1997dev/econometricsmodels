@@ -63,19 +63,19 @@ fn nested_in(level: &GroupCodes, cluster: &GroupCodes) -> bool {
         })
 }
 
-struct Lsdv {
+pub(super) struct Lsdv {
     /// 構造式の係数（`x_exog`、`x_endog`の順）。
-    params: Vec<f64>,
+    pub(super) params: Vec<f64>,
     /// 係数の共分散（k, k）。
-    cov: Mat<f64>,
+    pub(super) cov: Mat<f64>,
     /// 推論の自由度。
-    df_inference: usize,
+    pub(super) df_inference: usize,
     /// ダミーの係数（`dummies`の順）。
     dummy_params: Vec<f64>,
 }
 
 /// ダミー込みの2SLSで推定する。`cluster`は`FeCovType::Cluster`のクラスター変数（`None`は個体）。
-fn lsdv(input: &FeIvInput, cov_type: &FeCovType, cluster: Option<&GroupCodes>) -> Lsdv {
+pub(super) fn lsdv(input: &FeIvInput, cov_type: &FeCovType, cluster: Option<&GroupCodes>) -> Lsdv {
     let codes = input.index().effect_codes().to_vec();
     let n = input.nobs();
     let d = dummies(&codes);

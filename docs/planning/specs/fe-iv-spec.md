@@ -981,3 +981,22 @@ Stock-Yogoの表は実装の値がNBER TWP 284のTable 1（バイアス）・Tab
 - `fit_fe_iv`が約300行（第一段階とR²・構造式の組み立てを関数に切り出す案）、`from_group_codes`の名前と列の数の検査が`debug_assert`のみ（`FeInput`と同じ）、proptest未整備。
 - テストファイル名（`lsdv`・`structure`は標準のテーマ名に無い）。
 **次**: #374（Sargan。`σ̂² = e'e/(n − n_absorbed)`）・#375（Wu-Hausman）→ #373（弱操作変数診断。#363〜#365の後）→ #376〜#380。
+
+### 9.20 compact用のメモ（#370〜#372のclose後。2026-11-13）
+
+**状態**: `release/v0.10.0`は`58be9153`までpush済み（9.19まで）。#370・#371・#372はclose済み（英語コメント付き）。PR #635は未マージ（内容確認後にマージ）。
+**次の順序**: #374（Sargan）→ #375（Wu-Hausman）→ #373（弱操作変数診断）→ #376（pybind）→ #377（Pythonラッパー）→ #378（docs）→ #379（参照ベンチマーク）→ #380（性能）→ FE-GMM（#381〜#388）。
+どれも着手前に、判断が分かれる点をユーザーに確認する（CLAUDE.md 14章）。実装は`/implement-rust`の流れ（実装→clippy・fmt・テスト→`rust-reviewer`）。
+
+**#374（FEのSargan）の着手メモ**
+- 決定済み（9.17）: `σ̂² = e'e/(n − n_absorbed)`（`n_absorbed = neffects`）、自由度`len(instruments) − len(x_endog)`、丁度識別は`None`、`cov_type`に依らず等分散前提。
+- 部品: `shared/instrumental_variables.rs`の`sargan_test(z, residuals, sigma2, df)`（`σ̂²`は引数。`Z`は変換後の`[x̃_exog, z̃]`）。`FeIvEstimator`は構造残差（`residuals()`）と第一段階（`first_stages()`。各`within_input()`の`x()`が`[x̃_exog, z̃]`）を持つので、`Z̃`は第一段階の`within_input().x()`から作れる（内生変数が1つ以上ある前提）。
+- 公開形は`fit()`時に計算してプロパティ（CLAUDE.md 2章。IV本体のSarganと同じ）。結果の置き場は`FeIvEstimator`のフィールド（`sargan: Option<SarganTest>`）。
+- テスト: 参照はRに無い（fixestの`sargan`は`e'e/n`）。手計算（`Z̃`・構造残差・`σ̂²`）と、帰無仮説下のサイズを確かめるテスト（9.17の実測: N=100・T=3/6/20で名目5%）。ダミー込みの2SLSのSargan（`σ̂² = e'e/(n − K)`の`K`はダミー込みの係数の数）と一致するはず（FWL）。
+- 要確認: 結果の名前（`overid_*`）、`Hansen J`との関係（#636: 頑健な過剰識別検定をFE-2SLSに含めるか。未決）。
+
+**#375（Wu-Hausman）の着手メモ**: 補助FE回帰`ỹ ~ [x̃_exog, x̃_endog, v̂]`（`v̂`は第一段階の残差。`FeIvEstimator::first_stages()[j].residuals()`）を`cov_type`連動で回し、`v̂`列のWald。`shared/instrumental_variables.rs`の`wu_hausman_columns`は列の組み立てだけ。分母自由度は補助回帰のもの（`n − k − k_endog − neffects`）。参照はfixestの`wh`（古典のときだけ直接比較。それ以外はfixestで`v̂`を足した補助回帰を同じ`vcov`で回す。9.x 7章2）。
+**#373の着手メモ**: #363〜#365（IV本体の共有関数。`n_absorbed`を受け取る）の後。`n_absorbed`は診断ごとに渡す数が違う（9.17: 古典の部分F・CD・HC系は`neffects`、クラスターは入れ子を除いたK−k、DKは`neffects`）。KPのHC2/HC3は`n_absorbed > 0`で`None`のまま（FE-2SLSの`hc2`/`hc3`での診断の扱いは要判断）。臨界値はそのまま使う（9.17のMonte Carlo）。
+
+**未決・保留（ユーザー判断）**: DKの第一段階で`T`が`l`以下のときの標準誤差の信頼性（9.19）、#636へのFE-2SLSの追加、HC2/HC3の参照（#379）、FE-GMMのHansen J（3章7）。IV側の保留（ルートCLAUDE.md 2章への診断の例外の追記、READMEの権利の注意書き、フィクスチャのデータのライセンス、3章`shared/`の列挙、`mop-oracle-spec.md`の履歴）は従来どおり。
+**注意書き**: コミットはパス指定・署名（ホストの端末で確認。失敗したら止まって報告、リトライは1回まで）。Pythonを触ったら`uv run maturin develop`（debug）で入れ直してから`pytest`。エラーコードを足したら`UPDATE_ERROR_CATALOG_GOLDEN=1 cargo test -p engine error_catalog`→`maturin develop`→`python tools/render_error_catalog.py`→`tests/support/_errors.py`。heredocでバッククォートを含む文章を書くときは`<<'EOF'`。rustfmtが整形すると、あとから文字列置換が当たらなくなるので、置換は件数を`assert`する。

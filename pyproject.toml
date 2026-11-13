@@ -86,7 +86,7 @@ test = [
     "pyarrow==26.0.0",
 ]
 dev = [
-    "maturin==1.15.0",
+    "maturin==1.16.0",
 ]
 # ci_python.ymlのpip-auditジョブ専用（testグループと併用して依存の脆弱性を監査する）。
 # `uvx`/`--with`で実行のたびに最新版を解決しないよう、ここへ版固定で入れる。

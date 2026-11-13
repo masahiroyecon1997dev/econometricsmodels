@@ -1,0 +1,55 @@
+{
+  "baseline": [
+    1.2,
+    0.8
+  ],
+  "just_identified": [
+    1.2,
+    0.8
+  ],
+  "multi_endog": [
+    1.2,
+    0.8,
+    -0.5
+  ],
+  "weak_instruments": [
+    1.2,
+    0.8
+  ],
+  "invalid_instrument": [
+    1.2,
+    0.8
+  ],
+  "exogenous_endog": [
+    1.2,
+    0.8
+  ],
+  "heteroskedastic": [
+    1.2,
+    0.8
+  ],
+  "autocorrelated": [
+    1.2,
+    0.8
+  ],
+  "short_panel": [
+    1.2,
+    0.8
+  ],
+  "long_panel": [
+    1.2,
+    0.8
+  ],
+  "unbalanced": [
+    1.2,
+    0.8
+  ],
+  "three_way": [
+    1.2,
+    0.8
+  ],
+  "small_n": [
+    1.2,
+    0.8
+  ]
+}

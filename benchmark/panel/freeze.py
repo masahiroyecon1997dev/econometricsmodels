@@ -21,6 +21,12 @@ from benchmark.panel.datasets import (
     re_two_way_small_panel,
     re_zero_variance_component_panels,
 )
+from benchmark.panel.fe_iv_datasets import (
+    SCENARIOS as FE_IV_SCENARIOS,
+)
+from benchmark.panel.fe_iv_datasets import (
+    generate_fe_iv_dataset,
+)
 from benchmark.panel.multi_way_datasets import (
     MULTI_WAY_SCENARIOS,
     generate_fe_multi_way_dataset,
@@ -122,6 +128,19 @@ def freeze(output_dir: Path) -> None:
     )
     (output_dir / "fe_multi_way_true_beta.json").write_text(
         json.dumps(multi_way_betas, indent=2)
+    )
+
+    # FE-2SLS（`FEIV`）。操作変数を持つ別の生成関数で、真の係数も別のJSONに書く。
+    fe_iv_betas: dict[str, list[float]] = {}
+    freeze_scenarios(
+        output_dir,
+        generate_fe_iv_dataset,
+        FE_IV_SCENARIOS,
+        "fe_iv",
+        fe_iv_betas,
+    )
+    (output_dir / "fe_iv_true_beta.json").write_text(
+        json.dumps(fe_iv_betas, indent=2)
     )
 
 

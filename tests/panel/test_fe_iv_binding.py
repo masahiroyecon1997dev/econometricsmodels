@@ -1,17 +1,17 @@
 """FEIV（固定効果つきの2SLS）のPyO3バインディング（`_lib.fit_fe_iv`）の検証。
 
-Pythonのラッパー（`FEIV`）が無い段階のため、`_lib`を直接呼ぶ。数値は、エンジンの単体テストが使う
-fixest 0.14.2の参照値（`feols(y ~ x1 | 固定効果 | x2 ~ z1 + z2)`、10個体×4時点）と、ダミー変数を明示した
-2SLSのnumpy実装（Frisch-Waugh-Lovell）と照合する。許容誤差は`TOLERANCES["fe_iv_binding"]`。
+Pythonのラッパー（`FEIV`）を通さず、`_lib`を直接呼ぶ。数値は、ダミー変数を明示した2SLSのnumpy実装
+（Frisch-Waugh-Lovell）と照合する。許容誤差は`TOLERANCES["fe_iv_binding"]`。
 
 役割分担:
-    - 数値の照合（係数・共分散・標準誤差・検定・診断・固定効果）: このファイル
-    - `first_stage()`・`fixed_effects()`・pickle・オプション: このファイル
-    - 入力の検証（`ValidationError`）: このファイル（役割・`cov_type`・`effects`・オプション）
+    - 配線・入力の検証（`ValidationError`）・オプション・pickle・コピー: このファイル
+    - ダミー変数2SLSのオラクルとの照合（係数・共分散・標準誤差・検定・診断・固定効果）: このファイル
+    - 主リファレンス（R: fixest）・独立実装（ダミー変数を明示した2SLS・plm・ivDiag）との凍結
+      フィクスチャ照合: `test_fe_iv_reference.py`・`test_fe_iv_dummy_crosscheck.py`・
+      `test_fe_iv_plm_crosscheck.py`・`test_fe_iv_weak_diagnostics_crosscheck.py`
 
-fixestの参照値はエンジンのテスト（`engine/src/panel/fe_iv/fit/tests/`）と同じデータ・値で、生成スクリプトを
-持たない（`set.seed(42)`で作り小数4桁に丸めたもの）。凍結したフィクスチャとして整備するのは
-参照ベンチマーク（`benchmark/panel/`）の作業。
+テスト用のデータ（`Y`・`X1`・`X2`・`Z1`・`Z2`、10個体×4時点）は小数4桁に丸めた固定値で、オラクルが
+同じ入力から計算する。
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ close = partial(assert_close, rtol=_TOL["rtol"], atol=_TOL["atol"])
 N_ENTITIES = 10
 N_PERIODS = 4
 
-# fixestの参照値を作ったデータ（`set.seed(42)`、小数4桁に丸めた）。
+# テスト用の固定データ（`set.seed(42)`で作り、小数4桁に丸めた）。
 Y = [
     7.4089,
     4.4127,
@@ -247,32 +247,6 @@ Z2 = [
     1.1229,
 ]
 
-ONE_WAY_COEF = [0.451138858245, 0.618754769098]
-TWO_WAY_COEF = [0.546846763863, 0.836314975881]
-# fixestの`vcov`は iid=classical、hetero=hc1、cluster=~i（個体）。
-ONE_WAY_SE = {
-    "classical": [0.312261680415, 0.464895781385],
-    "hc1": [0.320210280559, 0.434012490890],
-    "cluster": [0.307946174543, 0.448913149769],
-}
-TWO_WAY_SE = {
-    "classical": [0.164639148226, 0.232318774091],
-    "hc1": [0.134098892425, 0.168693102370],
-    "cluster": [0.111427896277, 0.139069054410],
-}
-# `fitstat(m, "wh")`は、第一段階の残差`v`を足した補助FE回帰の`v`のt²（iid）と一致する。hc1・clusterは
-# 同じ補助回帰を`vcov`を変えて回した値。(統計量, 分母の自由度)
-ONE_WAY_WU_HAUSMAN = {
-    "classical": (4.94841207951, 27),
-    "hc1": (6.3095178634, 27),
-    "cluster": (5.57363632009, 9),
-}
-TWO_WAY_WU_HAUSMAN = {
-    "classical": (3.24120324101, 24),
-    "hc1": (4.4276231825, 24),
-    "cluster": (3.68746135799, 9),
-}
-
 
 def make_data() -> pl.DataFrame:
     rng = np.random.default_rng(7)
@@ -418,53 +392,26 @@ def check_params_and_covariance(result, oracle: dict, label: str) -> None:
             close(value, float(oracle["cov"][r, c]), f"{label} cov[{r}][{c}]")
 
 
-# ── fixest ─────────────────────────────────────────────────────────
+# ── 結果の構造 ─────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize("cov_type", ["classical", "hc1", "cluster"])
-def test_one_way_matches_fixest(cov_type: str) -> None:
-    result = fit(make_data(), effects=["entity"], cov_type=cov_type)
-    assert result.param_names == ["x1", "x2"]
-    for j in range(2):
-        close(result.params[j], ONE_WAY_COEF[j], f"coef[{j}]")
-        close(result.std_errors[j], ONE_WAY_SE[cov_type][j], f"se[{j}]")
-    assert result.stat_dist == "t"
-    assert result.cov_type == cov_type
-    assert result.n_groups == {"entity": N_ENTITIES}
-
-
-@pytest.mark.parametrize("cov_type", ["classical", "hc1", "cluster"])
-def test_two_way_matches_fixest(cov_type: str) -> None:
-    result = fit(make_data(), effects=["entity", "time"], cov_type=cov_type)
-    for j in range(2):
-        close(result.params[j], TWO_WAY_COEF[j], f"coef[{j}]")
-        close(result.std_errors[j], TWO_WAY_SE[cov_type][j], f"se[{j}]")
-    assert result.n_groups == {"entity": N_ENTITIES, "time": N_PERIODS}
-
-
 @pytest.mark.parametrize(
-    ("effects", "expected"),
+    ("effects", "n_groups"),
     [
-        (["entity"], ONE_WAY_WU_HAUSMAN),
-        (["entity", "time"], TWO_WAY_WU_HAUSMAN),
+        (["entity"], {"entity": N_ENTITIES}),
+        (["entity", "time"], {"entity": N_ENTITIES, "time": N_PERIODS}),
     ],
 )
-@pytest.mark.parametrize("cov_type", ["classical", "hc1", "cluster"])
-def test_wu_hausman_matches_fixest(
-    effects: list[str], expected: dict, cov_type: str
+def test_result_follows_the_roles_and_effects(
+    effects: list[str], n_groups: dict[str, int], cov_type: str
 ) -> None:
+    """係数の並びは`x_exog`・`x_endog`の順（数値の照合は`test_fe_iv_reference.py`）。"""
     result = fit(make_data(), effects=effects, cov_type=cov_type)
-    statistic, df_denom = expected[cov_type]
-    close(result.wu_hausman_statistic, statistic, "Wu-Hausman")
-    assert (result.wu_hausman_df_num, result.wu_hausman_df_denom) == (
-        1,
-        df_denom,
-    )
-    close(
-        result.wu_hausman_p_value,
-        float(stats.f.sf(statistic, 1, df_denom)),
-        "Wu-Hausman p-value",
-    )
+    assert result.param_names == ["x1", "x2"]
+    assert result.stat_dist == "t"
+    assert result.cov_type == cov_type
+    assert result.n_groups == n_groups
 
 
 # ── ダミー変数を明示した2SLS ───────────────────────────────────────

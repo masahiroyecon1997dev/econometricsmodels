@@ -34,13 +34,51 @@ PANEL_TOLERANCES: dict[str, dict[str, float]] = {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_REFERENCE_FLOOR,
     },
-    # FEIV（固定効果つきの2SLS）の`_lib.fit_fe_iv`の照合（`fe_iv_binding`）。参照はfixest 0.14.2の値
-    # （小数12桁。係数・標準誤差・Wu-Hausmanの補助回帰のt²）と、ダミー変数を明示した2SLSのnumpy実装
-    # （Frisch-Waugh-Lovell。classical・hc1・hc2・hc3の共分散、Sargan、部分F、固定効果）。どちらも
+    # FEIV（固定効果つきの2SLS）の`_lib.fit_fe_iv`の照合（`fe_iv_binding`）。参照は、ダミー変数を明示した
+    # 2SLSのnumpy実装（Frisch-Waugh-Lovell。classical・hc1・hc2・hc3の共分散、Sargan、部分F、固定効果）。
     # within変換後の閉形式・交互射影の解で、実測の最大相対誤差は1e-10未満。
     "fe_iv_binding": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_REFERENCE_FLOOR,
+    },
+    # FE-2SLS（`FEIV`）の主リファレンスはR fixest（`fe_iv.json`・`fe_iv_cov.json`。1-way・2-way・3-way、
+    # classical・hc1・cluster・dk）。within変換後の閉形式・交互射影の解で、fixestの`ssc()`既定に本実装の
+    # 小標本補正と自由度が合っているため機械精度で一致する。実測の最大（125ケース）: 係数 4e-15（相対）、
+    # 標準誤差 1e-12、信頼区間 3e-12、p値 6e-12、全係数のWald F・Wu-Hausman 2e-12、部分F 2e-14、
+    # Sargan（`e'e/n`の尺度を`(n-n_absorbed)/n`倍）3e-12。p値は裾が丸め誤差を増幅するため、
+    # 相対誤差1e-6を絶対誤差の下限なしで使う（`fe_multi_way_reference`と同じ）。
+    "fe_iv_reference": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_REFERENCE_FLOOR,
+        "atol_p_value": 0.0,
+        "rtol_p_value": 1e-6,
+    },
+    # FE-2SLSのダミー変数を明示した2SLS（linearmodels IV2SLS、HC2・HC3はnumpy）によるクロスチェック
+    # （`fe_iv_dummy_crosscheck.json`・`fe_iv_dummy_cov_crosscheck.json`）。Frisch-Waugh-Lovellで本実装と
+    # 同じ量を、within変換を使わずに計算する。実測の最大（84ケース）: 係数 7e-15、標準誤差 5e-14、
+    # Wu-Hausman 8e-14、Cragg-Donald・rk LM・rk Wald F 3e-14、Sargan 1e-12、R² 2e-15、有効F（MOPの
+    # 独立実装）6e-15。
+    "fe_iv_dummy_crosscheck": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_CROSSCHECK_FLOOR,
+        "atol_p_value": 0.0,
+        "rtol_p_value": 1e-6,
+    },
+    # FE-2SLSのplm（`model = "within"`）によるクロスチェック（`fe_iv_plm_crosscheck.json`・
+    # `fe_iv_plm_cov_crosscheck.json`。1-way、classical・hc1・cluster・dk）。サンドイッチの中身はplm、
+    # 小標本補正はスカラー倍の手計算。実測の最大: 係数 4e-15、標準誤差 5e-15、p値 2e-13、信頼区間 3e-12。
+    "fe_iv_plm_crosscheck": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_CROSSCHECK_FLOOR,
+        "atol_p_value": 0.0,
+        "rtol_p_value": 1e-6,
+    },
+    # FE-2SLSの弱操作変数診断のivDiagによるクロスチェック（`fe_iv_weak_diagnostics_crosscheck.json`）。
+    # 実測の最大（61ケース）: rk Wald F 1.1e-9、有効F 5.2e-10、Cragg-Donald 5e-15（相対）。
+    # 許容誤差は基本の1e-8（ivDiagの値は小数14桁で指定して取り出している。`run_ivdiag.R`参照）。
+    "fe_iv_weak_diagnostics_crosscheck": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": 0.0,
     },
     # 3次元以上の固定効果（`effects`が3〜4列）の主リファレンスはR fixest（`fe_multi_way.json`・
     # `fe_multi_way_cov.json`）。classical/hc1/hc2/hc3/cluster/dkとも、fixestの`ssc()`既定に本実装の

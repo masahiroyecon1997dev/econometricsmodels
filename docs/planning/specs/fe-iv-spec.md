@@ -1097,3 +1097,22 @@ Stock-Yogoの表は実装の値がNBER TWP 284のTable 1（バイアス）・Tab
 - `first_stage`の持ち方（`Py<FEResult>`で複製を無くす案。6.1の「固定効果を先に計算する」決定と衝突）、DKの第一段階で`T`が`l`以下のときの標準誤差の信頼性（9.19）、#636へのFE-2SLSの追加、FE-GMMのHansen J（3章7）。
 - IV側の従来からの保留（ルートCLAUDE.md 2章への診断の例外の追記、READMEの権利の注意書き、フィクスチャのデータのライセンス、3章`shared/`の列挙、`mop-oracle-spec.md`の履歴）。
 **注意書き**: コミットはパス指定・署名（ホストの端末で確認。失敗したら止まって報告、リトライは1回まで）。Pythonを触ったら`uv run maturin develop`（debug）で入れ直してから`uv run --no-sync pytest`。公開ドキュメントを変えたら`/review-docs`（他パッケージ言及のWeb確認は事前に許可を取る）と`mkdocs build -f docs/mkdocs.yml`（警告なしを確認）。heredocでバッククォートを含む文章を書くときは`<<'EOF'`。シェルで標準入力を読むコマンド（`cat >> /dev/null`等）を混ぜない（止まる）。
+
+### 9.29 #379（FE-2SLSの参照ベンチマーク）の実装結果（2026-11-13）
+
+**決定（ユーザー承認）**: 9.28の案どおり（主=fixest、独立=plm・ダミー変数を明示した2SLS・ivDiag）。ivDiagはコンテナに`install_version`で導入（Dockerfileは記載済み＝再構築すれば同じ）。HC2/HC3・DKのKP・有効F・HC2/HC3のKPは手計算の自己整合を参照にして明記する。範囲は合成データ＋`test_fe_iv_binding.py`の埋め込み値の置換（実データは含めない）。コミットはコード → CSV・JSONの順に分ける。
+**実装**: `benchmark/panel/fe_iv_datasets.py`（13シナリオ。`freeze.py`が`fe_iv_<シナリオ>.csv`と`fe_iv_true_beta.json`に凍結）、`fe_iv_cases.py`（`fixest_cases()`125・`dummy_cases()`84・`plm_cases()`59・`ivdiag_cases()`61。生成側とテスト側で共有）、`references/`の`run_fixest_iv_benchmark.R`・`dummy_2sls_ref.py`・`run_plm_fe_iv_benchmark.R`（`r.py`にアダプタ）、`fixtures/generate_fe_iv_*`（統計量7本。`*_cov*`は行列）、`regenerate_all.py`。`benchmark/iv/references/run_ivdiag.R`は固定効果を複数列（カンマ区切り）で受けられるようにした（単一列の挙動は同じ）。テストは`tests/panel/test_fe_iv_{reference,dummy_crosscheck,plm_crosscheck,weak_diagnostics_crosscheck}.py`、`tests/support/_fe_iv_helpers.py`、許容誤差は`_tolerances_panel.py`の4キー。`test_fe_iv_binding.py`からfixestの貼り付け値とそのテストを除いた（数値はフィクスチャの照合に移した）。公開側は`verification.md`・`verification-details.md`のFEIV・README・`reference-benchmark`スキルを更新。
+**一致の実測**: fixest 125ケースで係数4e-15・標準誤差1e-12・p値6e-12・信頼区間3e-12・Wald F/Wu-Hausman 2e-12・部分F 2e-14・Sargan（`e'e/n`尺度を`(n−n_abs)/n`倍）3e-12・rk Wald F 4e-11。ダミー変数2SLS 84ケースで係数7e-15・標準誤差5e-14・Sargan 1e-12・CD/KP 3e-14・R² 2e-15・有効F（MOP）6e-15。plm 59ケースで標準誤差5e-15。ivDiag 61ケースでCD 5e-15・rk Wald F 1.1e-9・有効F 5e-10。
+**分かったこと（参照の定義）**
+- fixestの係数は内生変数が先頭（`fit_endog1`）。Rで`x_exog`・`x_endog`の順に直す。
+- fixestの`cd`は本実装と一致しない（baselineで206.9対172.7。原因は追っていない）。`kpr`は9.28のとおり使えない。
+- **内生変数が1個のとき、rk Wald Fは同じ`vcov`での第一段階の頑健Wald Fに等しい**。fixestの第一段階（`wald(第一段階, keep = 操作変数, vcov = vc)`）を参照にすると、DK・2-way・3-way・不均衡を含む111ケースで4e-11以内で一致した。9.17・9.28の「DKのKPに独立な参照が無い」は、rk Wald F（内生変数1個）については解消した（rk LM・有効F・複数内生変数は従来どおり無い）。
+- plm: `vcovHC(white1, HC0)`×`n/(n−k−G)`がHC1、`vcovHC(arellano, HC0)`×`G/(G−1)·(n−1)/(n−k−1)`が個体クラスター、`vcovSCC(HC0, maxlag)`×`T/(T−1)·(n−1)/(n−k−G)`がDKに一致。plmのHC2/HC3はレバレッジに固定効果の分を含まず、本実装と定義が違う（baselineでplmのHC2はplmのHC0の1.007倍、本実装のHC2はplmのHC0の1.10倍）ため使わない。HC2/HC3はnumpyのダミー変数2SLSだけが参照（verification-detailsに記載）。
+- linearmodels `IV2SLS`にダミーを入れると、classical・hc1・Sargan（`e'e/n`尺度）・Wu-Hausman（`wooldridge_regression.stat/q`）・部分F（classicalのみ。`diagnostics`は`cov_type`に従う頑健F）・CD・rk LM/rk Wald F が一致。hc1のrk LMはlinearmodelsがHC0基準なので比べない。クラスターはダミーを全て`K`に数えるため、**1-wayの個体FE × 時点クラスター**だけが一致（個体クラスターと2-wayは`K`の数え方が違う）。
+- `PanelOLS._rsquared(params)`の返り値の順は`(overall, within, between)`。2-wayのwithinはlinearmodelsが個体のみの別定義なので、ダミー射影の手計算にした。3-wayは`PanelOLS`が扱えずR²の参照なし。
+- 有効Fは`mop_oracle.reduced_form`にダミーを外生変数として渡す（`n_absorbed=0`）と、classical・hc1・hc2・hc3・時点クラスターで一致（内生変数1個）。HC2/HC3の有効Fの外部参照はこれ。
+**要判断・未解決**
+- **ivDiagの2-wayのクラスター頑健Fが本実装と一致しない**（baselineの個体クラスターで160.9対157.5、時点クラスターで348.5対290.9）。fixestの第一段階Wald Fは本実装と一致（157.518・290.873）するので、ズレはivDiag側にある。原因は追っていない。ivDiagの比較は1-wayのclassical・hc1・クラスターと、2-wayのclassical・hc1に限った（`ivdiag_cases()`）。
+- 次の候補（未着手）: HC2/HC3のrk Wald Fを、fixestの第一段階（HC2/HC3は非IVのfeolsで提供される）で独立に確かめる。DKのrk LM・有効Fの独立な参照は引き続き無い。
+- 実データのフィクスチャは含めていない（9.28のとおり。`jtrain`等は変数の定義の確認が要る）。
+- `test_validation_order.py`の`INSUFFICIENT_INSTRUMENTS`の順位は9.28から変わらず未固定。

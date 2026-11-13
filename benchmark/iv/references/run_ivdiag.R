@@ -18,7 +18,7 @@
 #   4: 除外操作変数の列名（カンマ区切り）
 #   5: 外生変数の列名（カンマ区切り。無ければ NA）
 #   6: クラスターの列名（無ければ NA）
-#   7: 吸収する固定効果の列名（無ければ NA。IV本体では使わない）
+#   7: 吸収する固定効果の列名（カンマ区切りで複数可。無ければ NA。IV本体では使わない）
 # 標準出力: 次のキーの JSON（クラスター無しなら f_cluster は null）。
 #   f_standard, f_robust, f_cluster, f_effective
 #
@@ -38,7 +38,7 @@ optional <- function(x) if (x == "NA") NULL else strsplit(x, ",")[[1]]
 controls <- optional(args[5])
 cl <- optional(args[6])
 fe <- optional(args[7])
-if (!is.null(fe)) d[[fe]] <- factor(d[[fe]])
+for (f in fe) d[[f]] <- factor(d[[f]])
 
 # ivDiag() は AR 検定とブートストラップが既定で有効（時間がかかる）。F統計量だけを使う。
 fit <- ivDiag(

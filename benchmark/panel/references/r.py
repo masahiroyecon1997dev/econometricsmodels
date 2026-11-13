@@ -172,6 +172,53 @@ def run_fixest_r(
     return result
 
 
+_FIXEST_IV_R_SCRIPT = (
+    Path(__file__).resolve().parent / "run_fixest_iv_benchmark.R"
+)
+
+
+def run_fixest_iv_r(
+    csv_path: Path,
+    formula: str,
+    cov_type: str,
+    *,
+    cluster: str | None = None,
+    dk_lag: int | None = None,
+    dk_time: str = "time",
+    confidence_level: float = 0.95,
+) -> dict:
+    """`run_fixest_iv_benchmark.R`を呼び、FE-2SLSの係数・標準誤差・診断を得る。
+
+    Args:
+        csv_path: データCSV。
+        formula: `feols`の固定効果・操作変数構文込みの式
+            （例: "y ~ x1 | entity | endog1 ~ z1 + z2"）。
+        cov_type: classical / hc1 / cluster / dk（fixestはIVのHC2・HC3を提供しない）。
+        cluster: `cov_type="cluster"`のときのクラスター列名。
+        dk_lag: `cov_type="dk"`のバンド幅（`DK(lag)`のlag）。
+        dk_time: `cov_type="dk"`の時点列名。
+        confidence_level: 信頼水準（`confint()`の`level`）。
+
+    Returns:
+        Rスクリプトの出力そのまま（係数名は`fit_`接頭辞を外した列名）。
+    """
+    extra: list[str] = []
+    if cov_type == "cluster":
+        extra.append(cluster or "")
+    elif cov_type == "dk":
+        if dk_lag is None:
+            raise ValueError("dk_lag is required for cov_type='dk'")
+        extra.extend([str(dk_lag), dk_time])
+    return run_r(
+        _FIXEST_IV_R_SCRIPT,
+        csv_path,
+        formula,
+        cov_type,
+        extra_args=extra,
+        env={"FE_IV_LEVEL": str(confidence_level)},
+    )
+
+
 def run_fe_plm_r(
     csv_path: Path,
     formula: str,
@@ -215,6 +262,41 @@ def run_fe_plm_r(
         raw["cov_params"], intercept_aliases=()
     )
     return result
+
+
+_PLM_FE_IV_R_SCRIPT = (
+    Path(__file__).resolve().parent / "run_plm_fe_iv_benchmark.R"
+)
+
+
+def run_fe_iv_plm_r(
+    csv_path: Path,
+    formula: str,
+    cov_type: str,
+    *,
+    entity_col: str = "entity",
+    time_col: str = "time",
+    maxlag: int | None = None,
+) -> dict:
+    """`run_plm_fe_iv_benchmark.R`を呼び、FE-2SLS（1-wayの個体FE）の係数・標準誤差を
+    plm＋sandwichで計算する（fixestとは別実装の第2リファレンス）。
+
+    Args:
+        csv_path: データCSV。
+        formula: `plm`の操作変数構文の式（例: "y ~ x1 + endog1 | x1 + z1 + z2"）。
+        cov_type: classical / hc1 / cluster / dk。
+        entity_col: 個体識別子の列名。
+        time_col: 時点識別子の列名。
+        maxlag: `cov_type="dk"`のバンド幅（`vcovSCC`の`maxlag`）。
+    """
+    extra = [entity_col, time_col]
+    if cov_type == "dk":
+        if maxlag is None:
+            raise ValueError("maxlag is required for cov_type='dk'")
+        extra.append(str(maxlag))
+    return run_r(
+        _PLM_FE_IV_R_SCRIPT, csv_path, formula, cov_type, extra_args=extra
+    )
 
 
 def run_re_plm_r(

@@ -14,10 +14,12 @@ from _dtype_helpers import N, make_frame
 from _error_expectations import escaped
 from econometricsmodels import (
     FE,
+    FEIV,
     IV,
     OLS,
     RE,
     WLS,
+    FEIVOptions,
     FEOptions,
     IVOptions,
     Logit,
@@ -87,6 +89,24 @@ def _build_iv(df, y="y", x=_UNSET, x_endog=_UNSET, instruments=_UNSET):
     )
 
 
+def _build_fe_iv(
+    df,
+    y="y",
+    x=_UNSET,
+    x_endog=_UNSET,
+    instruments=_UNSET,
+    effects=_UNSET,
+):
+    return FEIV(
+        df,
+        y=y,
+        x_exog=_or(x, ["x2"]),
+        x_endog=_or(x_endog, ["x1"]),
+        instruments=_or(instruments, ["z"]),
+        effects=_or(effects, ["entity"]),
+    )
+
+
 # 手法と、エラーメッセージ上の説明変数の引数名（IVは`x_exog`）。
 X_METHODS = {
     "OLS": (_build_ols, "x"),
@@ -97,6 +117,7 @@ X_METHODS = {
     "FE": (_build_fe, "x"),
     "RE": (_build_re, "x"),
     "IV": (_build_iv, "x_exog"),
+    "FEIV": (_build_fe_iv, "x_exog"),
 }
 
 
@@ -205,7 +226,11 @@ def test_y_must_be_a_str(df, x_method, value, got):
     ],
     ids=["str", "tuple", "polars_series", "none", "set"],
 )
-@pytest.mark.parametrize("builder", [_build_fe, _build_re], ids=["FE", "RE"])
+@pytest.mark.parametrize(
+    "builder",
+    [_build_fe, _build_re, _build_fe_iv],
+    ids=["FE", "RE", "FEIV"],
+)
 def test_effects_must_be_a_list(df, builder, value, got):
     """`effects`が`list`でないと（`str`を含む）、`TypeError`になる。"""
     _assert_type_error_at_fit(
@@ -223,7 +248,11 @@ def test_effects_must_be_a_list(df, builder, value, got):
     ],
     ids=["int", "float_second", "none", "bytes"],
 )
-@pytest.mark.parametrize("builder", [_build_fe, _build_re], ids=["FE", "RE"])
+@pytest.mark.parametrize(
+    "builder",
+    [_build_fe, _build_re, _build_fe_iv],
+    ids=["FE", "RE", "FEIV"],
+)
 def test_effects_elements_must_be_str(df, builder, value, position, got):
     _assert_type_error_at_fit(
         lambda: builder(df, effects=value),
@@ -245,6 +274,9 @@ def test_weight_must_be_a_str(df, value, got):
     )
 
 
+@pytest.mark.parametrize(
+    "builder", [_build_iv, _build_fe_iv], ids=["IV", "FEIV"]
+)
 @pytest.mark.parametrize("name", ["x_endog", "instruments"])
 @pytest.mark.parametrize(
     ("value", "got"),
@@ -257,22 +289,27 @@ def test_weight_must_be_a_str(df, value, got):
     ],
     ids=["str", "tuple", "polars_series", "none", "set"],
 )
-def test_iv_column_lists_must_be_lists(df, name, value, got):
-    """IVの`x_endog`・`instruments`も`list`のみを受け付ける。"""
+def test_iv_column_lists_must_be_lists(df, builder, name, value, got):
+    """IV・FEIVの`x_endog`・`instruments`も`list`のみを受け付ける。"""
     _assert_type_error_at_fit(
-        lambda: _build_iv(df, **{name: value}), _msg_list(name, got)
+        lambda: builder(df, **{name: value}), _msg_list(name, got)
     )
 
 
+@pytest.mark.parametrize(
+    "builder", [_build_iv, _build_fe_iv], ids=["IV", "FEIV"]
+)
 @pytest.mark.parametrize("name", ["x_endog", "instruments"])
 @pytest.mark.parametrize(
     ("value", "position", "got"),
     [([1], 0, "int"), (["z", 2.5], 1, "float"), ([b"z"], 0, "bytes")],
     ids=["int", "float_second", "bytes"],
 )
-def test_iv_column_list_elements_must_be_str(df, name, value, position, got):
+def test_iv_column_list_elements_must_be_str(
+    df, builder, name, value, position, got
+):
     _assert_type_error_at_fit(
-        lambda: _build_iv(df, **{name: value}),
+        lambda: builder(df, **{name: value}),
         escaped(
             msgs.COLUMN_LIST_ELEMENT_NOT_STR,
             name=name,
@@ -323,6 +360,12 @@ OPTIONS_METHODS = {
         IVOptions,
     ),
     "FE": (lambda d, o: FE(d, "y", ["x1"], ["entity"], options=o), FEOptions),
+    "FEIV": (
+        lambda d, o: FEIV(
+            d, "y", ["x2"], ["x1"], ["z"], ["entity"], options=o
+        ),
+        FEIVOptions,
+    ),
     "RE": (lambda d, o: RE(d, "y", ["x1"], ["entity"], options=o), REOptions),
 }
 

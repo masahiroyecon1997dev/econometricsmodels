@@ -5,18 +5,28 @@ Every result class turns the parallel arrays of its `_lib` result object
 row-oriented tables. Keeping that zip in one place means a fix (such as
 guarding against duplicate coefficient names) applies to every method at
 once. Property docstrings stay on each result class, since they differ
-per method.
+per method. The same goes for wrapping the weak-instrument diagnostics of
+`IV` and `FEIV` into their `dataclass` results.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Protocol
+from typing import Any, Protocol
+
+from .diagnostics import (
+    CraggDonaldResult,
+    EffectiveFResult,
+    KleibergenPaapResult,
+)
 
 __all__ = [
     "by_param",
     "conf_int_by_param",
     "cov_params_by_param",
+    "cragg_donald_result",
+    "effective_f_result",
+    "kleibergen_paap_result",
     "marginal_effect_rows",
     "params_table_rows",
     "results_repr",
@@ -262,3 +272,45 @@ def results_repr(class_name: str, raw: _ReprColumns) -> str:
         f"{'std_error':>{se_width}}"
     )
     return "\n".join([head, column_header, *rows])
+
+
+def _as_dict(
+    pairs: list[tuple[float, float]] | None,
+) -> dict[float, float] | None:
+    """Turn a list of `(level, value)` pairs into a dict (`None` stays)."""
+    return None if pairs is None else dict(pairs)
+
+
+def cragg_donald_result(raw: Any) -> CraggDonaldResult:
+    """Wrap the `_lib` Cragg-Donald output of `IV` or `FEIV`."""
+    return CraggDonaldResult(
+        statistic=raw.statistic,
+        n_endog=raw.n_endog,
+        n_excluded=raw.n_excluded,
+        tsls_bias_critical_values=_as_dict(raw.tsls_bias),
+        tsls_size_critical_values=_as_dict(raw.tsls_size),
+    )
+
+
+def kleibergen_paap_result(raw: Any) -> KleibergenPaapResult:
+    """Wrap the `_lib` Kleibergen-Paap output of `IV` or `FEIV`."""
+    return KleibergenPaapResult(
+        rk_lm_statistic=raw.rk_lm_statistic,
+        rk_lm_df=raw.rk_lm_df,
+        rk_lm_p_value=raw.rk_lm_p_value,
+        rk_wald_f=raw.rk_wald_f,
+        n_endog=raw.n_endog,
+        n_excluded=raw.n_excluded,
+    )
+
+
+def effective_f_result(raw: Any) -> EffectiveFResult:
+    """Wrap the `_lib` effective F output of `IV` or `FEIV`."""
+    return EffectiveFResult(
+        statistic=raw.statistic,
+        n_excluded=raw.n_excluded,
+        alpha=raw.alpha,
+        simplified_critical_values=_as_dict(raw.simplified_critical_values),
+        critical_values=_as_dict(raw.critical_values),
+        bias_bound=raw.bias_bound,
+    )

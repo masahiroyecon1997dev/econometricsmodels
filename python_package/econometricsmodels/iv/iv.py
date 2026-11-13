@@ -24,6 +24,9 @@ from .._results_utils import (
     by_param,
     conf_int_by_param,
     cov_params_by_param,
+    cragg_donald_result,
+    effective_f_result,
+    kleibergen_paap_result,
     params_table_rows,
     results_repr,
 )
@@ -560,14 +563,7 @@ class IVResults:
                 for example because the instruments are collinear with the
                 exogenous variables or a first stage fits perfectly.
         """
-        raw = self._raw.cragg_donald()
-        return CraggDonaldResult(
-            statistic=raw.statistic,
-            n_endog=raw.n_endog,
-            n_excluded=raw.n_excluded,
-            tsls_bias_critical_values=_as_dict(raw.tsls_bias),
-            tsls_size_critical_values=_as_dict(raw.tsls_size),
-        )
+        return cragg_donald_result(self._raw.cragg_donald())
 
     def kleibergen_paap(self) -> KleibergenPaapResult:
         """Kleibergen-Paap rk LM and rk Wald F statistics.
@@ -597,15 +593,7 @@ class IVResults:
                 with the exogenous variables or the covariance of the
                 scores is singular.
         """
-        raw = self._raw.kleibergen_paap()
-        return KleibergenPaapResult(
-            rk_lm_statistic=raw.rk_lm_statistic,
-            rk_lm_df=raw.rk_lm_df,
-            rk_lm_p_value=raw.rk_lm_p_value,
-            rk_wald_f=raw.rk_wald_f,
-            n_endog=raw.n_endog,
-            n_excluded=raw.n_excluded,
-        )
+        return kleibergen_paap_result(self._raw.kleibergen_paap())
 
     def effective_f(self, *, alpha: float = 0.05) -> EffectiveFResult:
         """Montiel Olea-Pflueger effective F statistic.
@@ -640,17 +628,7 @@ class IVResults:
                 for example because the covariance of the scores is
                 singular (too few clusters or observations).
         """
-        raw = self._raw.effective_f(alpha)
-        return EffectiveFResult(
-            statistic=raw.statistic,
-            n_excluded=raw.n_excluded,
-            alpha=raw.alpha,
-            simplified_critical_values=_as_dict(
-                raw.simplified_critical_values
-            ),
-            critical_values=_as_dict(raw.critical_values),
-            bias_bound=raw.bias_bound,
-        )
+        return effective_f_result(self._raw.effective_f(alpha))
 
     def c_stat(
         self,
@@ -724,10 +702,3 @@ class IVResults:
             j_with_tested=raw.j_with_tested,
             j_without_tested=raw.j_without_tested,
         )
-
-
-def _as_dict(
-    pairs: list[tuple[float, float]] | None,
-) -> dict[float, float] | None:
-    """Turn a list of `(level, value)` pairs into a dict (`None` stays)."""
-    return None if pairs is None else dict(pairs)

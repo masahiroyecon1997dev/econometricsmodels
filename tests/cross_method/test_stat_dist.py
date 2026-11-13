@@ -24,10 +24,12 @@ from _cross_method_helpers import (
 )
 from econometricsmodels import (
     FE,
+    FEIV,
     IV,
     OLS,
     RE,
     WLS,
+    FEIVOptions,
     FEOptions,
     IVOptions,
     Logit,
@@ -144,6 +146,38 @@ def test_fe_dk_uses_t_minus_one_df(panel_df):
         panel_df, y="y", x=["x1", "x2"], effects=["entity"], options=options
     ).fit()
     _check_t(res, N_PERIODS - 1)
+
+
+def _fe_iv(panel_df, **options):
+    return FEIV(
+        panel_df,
+        y="y",
+        x_exog=["x1"],
+        x_endog=["endog"],
+        instruments=["z1", "z2"],
+        effects=["entity"],
+        options=FEIVOptions(**options),
+    ).fit()
+
+
+def test_fe_iv_classical_uses_t_with_panel_residual_df(panel_df):
+    res = _fe_iv(panel_df, cov_type="classical")
+    _check_t(res, res.df_resid)
+    assert res.wald_dist == "f"
+    assert res.wald_df_denom == res.stat_df
+
+
+def test_fe_iv_cluster_uses_g_minus_one_df(panel_df):
+    """FEIVの既定`cov_type`は`"cluster"`（entity単位）で、自由度は`G-1`。"""
+    res = _fe_iv(panel_df)
+    _check_t(res, N_ENTITIES - 1)
+    assert res.wald_df_denom == N_ENTITIES - 1
+
+
+def test_fe_iv_dk_uses_t_minus_one_df(panel_df):
+    res = _fe_iv(panel_df, cov_type="dk", dk_time="time")
+    _check_t(res, N_PERIODS - 1)
+    assert res.wald_df_denom == N_PERIODS - 1
 
 
 def test_re_classical_uses_t_with_residual_df(panel_df):

@@ -117,6 +117,7 @@ def test_every_estimator_is_checked() -> None:
     """検査が空振りしない（全推定クラスが対象になっている）。"""
     assert ESTIMATORS == [
         "FE",
+        "FEIV",
         "IV",
         "Logit",
         "OLS",

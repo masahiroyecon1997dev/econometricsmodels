@@ -16,11 +16,13 @@ from _dtype_helpers import make_frame, unused_column
 from _errors import raises_error
 from econometricsmodels import (
     FE,
+    FEIV,
     IV,
     OLS,
     RE,
     WLS,
     ErrorCode,
+    FEIVOptions,
     FEOptions,
     IVOptions,
     Logit,
@@ -81,6 +83,15 @@ CLUSTER_FITS = {
     "FE": lambda d: FE(
         d, "y", ["x1"], ["entity"], options=FEOptions(**CLUSTER)
     ).fit(),
+    "FEIV": lambda d: FEIV(
+        d,
+        "y",
+        ["x2"],
+        ["x1"],
+        ["z", "z2"],
+        ["entity"],
+        options=FEIVOptions(**CLUSTER),
+    ).fit(),
     "RE": lambda d: RE(
         d, "y", ["x1"], ["entity"], options=REOptions(**CLUSTER)
     ).fit(),
@@ -91,6 +102,9 @@ ENTITY_FITS = {
     # FEの3つ目以降の効果は、`effects[0]`と同じ同一性だけのキーとして抽出する。
     "FE.effects_third": lambda d: FE(
         d, "y", ["x1"], ["cluster", "t", "entity"]
+    ).fit(),
+    "FEIV": lambda d: FEIV(
+        d, "y", ["x2"], ["x1"], ["z", "z2"], ["entity"]
     ).fit(),
     "RE": lambda d: RE(d, "y", ["x1"], ["entity"]).fit(),
 }
@@ -103,6 +117,18 @@ TIME_FITS = {
         ["x1"],
         ["entity"],
         options=FEOptions(cov_type="dk", dk_time="t"),
+    ).fit(),
+    "FEIV.effects_time": lambda d: FEIV(
+        d, "y", ["x2"], ["x1"], ["z", "z2"], ["entity", "t"]
+    ).fit(),
+    "FEIV.dk_time": lambda d: FEIV(
+        d,
+        "y",
+        ["x2"],
+        ["x1"],
+        ["z", "z2"],
+        ["entity"],
+        options=FEIVOptions(cov_type="dk", dk_time="t"),
     ).fit(),
     "RE.effects_time": lambda d: RE(d, "y", ["x1"], ["entity", "t"]).fit(),
     "RE.dk_time": lambda d: RE(

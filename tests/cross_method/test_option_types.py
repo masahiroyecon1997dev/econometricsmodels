@@ -18,11 +18,13 @@ from _error_expectations import escaped
 from _errors import raises_error
 from econometricsmodels import (
     FE,
+    FEIV,
     IV,
     OLS,
     RE,
     WLS,
     ErrorCode,
+    FEIVOptions,
     FEOptions,
     IVOptions,
     Logit,
@@ -70,6 +72,8 @@ FIELDS = [
     (IVOptions, "gmm_tol", "float"),
     (FEOptions, "confidence_level", "float"),
     (FEOptions, "dk_bandwidth", "int"),
+    (FEIVOptions, "confidence_level", "float"),
+    (FEIVOptions, "dk_bandwidth", "int"),
     (REOptions, "confidence_level", "float"),
     (REOptions, "dk_bandwidth", "int"),
 ]
@@ -305,6 +309,16 @@ def _fit(options, df):
         return FE(
             df, y="y", x=["x1"], effects=["entity"], options=options
         ).fit()
+    if cls is FEIVOptions:
+        return FEIV(
+            df,
+            y="y",
+            x_exog=["x2"],
+            x_endog=["x1"],
+            instruments=["z", "z2"],
+            effects=["entity"],
+            options=options,
+        ).fit()
     return RE(df, y="y", x=["x1"], effects=["entity"], options=options).fit()
 
 
@@ -316,6 +330,7 @@ ALL_OPTION_CLASSES = [
     TobitOptions,
     IVOptions,
     FEOptions,
+    FEIVOptions,
     REOptions,
 ]
 
@@ -353,7 +368,9 @@ def test_huge_hac_lags_is_validation_error_not_overflow(df, cls, huge, how):
 
 @pytest.mark.parametrize("how", SETTERS)
 @pytest.mark.parametrize("huge", [2**70, -(2**70)], ids=["+2^70", "-2^70"])
-@pytest.mark.parametrize("cls", [FEOptions, REOptions], ids=["FE", "RE"])
+@pytest.mark.parametrize(
+    "cls", [FEOptions, FEIVOptions, REOptions], ids=["FE", "FEIV", "RE"]
+)
 def test_huge_dk_bandwidth_is_validation_error(df, cls, huge, how):
     kwargs = {"cov_type": "dk", "dk_time": "t"}
     options = _with_value(cls, "dk_bandwidth", huge, how, **kwargs)
@@ -638,6 +655,9 @@ STRING_FIELDS = [
     (FEOptions, "cov_type", "text", False),
     (FEOptions, "cluster", "column", True),
     (FEOptions, "dk_time", "column", True),
+    (FEIVOptions, "cov_type", "text", False),
+    (FEIVOptions, "cluster", "column", True),
+    (FEIVOptions, "dk_time", "column", True),
     (REOptions, "cov_type", "text", False),
     (REOptions, "dk_time", "column", True),
     (REOptions, "cluster", "column", True),

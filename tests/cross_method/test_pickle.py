@@ -29,6 +29,7 @@ from _dtype_helpers import make_frame
 from _errors import raises_error
 from econometricsmodels import (
     FE,
+    FEIV,
     IV,
     OLS,
     WLS,
@@ -779,6 +780,27 @@ def test_single_coefficient_cov_params_round_trips() -> None:
     assert list(result.cov_params) == ["x1"]
     clone = pickle.loads(pickle.dumps(result))
     assert clone.cov_params == result.cov_params
+
+
+def test_fe_iv_results_wrapper_round_trips_with_the_endogenous_order() -> None:
+    """`FEIVResults`は、`x_endog`の順を保って往復し、往復後も診断が計算できる。"""
+    data = _frame().with_columns(
+        z3=pl.col("x2") ** 2 + pl.col("z"), z4=pl.col("z2") * pl.col("x2")
+    )
+    result = FEIV(
+        data,
+        y="y",
+        x_exog=["x2"],
+        x_endog=["x1", "z2"],
+        instruments=["z", "z3", "z4"],
+        effects=["entity"],
+    ).fit()
+    for clone in (pickle.loads(pickle.dumps(result)), copy.deepcopy(result)):
+        assert clone.params == result.params
+        assert list(clone.weak_instrument_f_statistics) == ["x1", "z2"]
+        assert list(clone.first_stage()) == ["x1", "z2"]
+        assert clone.cragg_donald() == result.cragg_donald()
+        assert clone.fixed_effects() == result.fixed_effects()
 
 
 FITTED_NAMES = ["LogitResult", "ProbitResult", "TobitResult"]

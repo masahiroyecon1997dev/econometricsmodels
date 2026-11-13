@@ -36,11 +36,13 @@ from _dtype_helpers import make_frame
 from _errors import raises_error
 from econometricsmodels import (
     FE,
+    FEIV,
     IV,
     OLS,
     RE,
     WLS,
     ErrorCode,
+    FEIVOptions,
     FEOptions,
     IVOptions,
     Logit,
@@ -177,6 +179,10 @@ _IV_ARGS = {
     "instruments": ["z", "z2"],
 }
 _PANEL_ARGS = {"y": "y", "x": _X, "effects": ["entity"]}
+_FE_IV_ARGS = {**_IV_ARGS, "effects": ["entity"]}
+# FEIVの`x_endog`・`instruments`の空の検査は`effects`の列数の次。IVの`"const"`の検査
+# （`x_exog`の名前）に当たるものは無い。
+_FE_IV_FAULTS = (*_PANEL_FAULTS, "missing_instrument")
 
 METHODS = [
     Method(
@@ -246,6 +252,15 @@ METHODS = [
         time_option="dk_time",
     ),
     Method(
+        "feiv",
+        _simple(FEIV, FEIVOptions),
+        _FE_IV_ARGS,
+        _FE_IV_FAULTS,
+        time_cov_type="dk",
+        time_option="dk_time",
+        x_role="x_exog",
+    ),
+    Method(
         "re",
         _simple(RE, REOptions),
         _PANEL_ARGS,
@@ -260,7 +275,7 @@ METHODS = [
 
 def _arg_role(method: Method) -> str:
     """`empty_x`が指摘する、空のリストを渡した引数（IVは`x_endog`）。"""
-    return "x_endog" if method.name.startswith("iv") else "x"
+    return "x_endog" if "x_endog" in method.base_args else "x"
 
 
 def _dup_x(method: Method) -> dict[str, Any]:
@@ -477,7 +492,7 @@ FAULTS = {
             params=lambda m: {
                 "model": m.name.upper(),
                 "n_columns": 6,
-                "max_columns": 5 if m.name.upper() == "FE" else 2,
+                "max_columns": 2 if m.name == "re" else 5,
             },
         ),
         Fault(
@@ -655,7 +670,7 @@ def changes(method: Method, fault_id: str) -> Changes:
         case "const_in_x":
             return {x_role: ["const", *base_x]}, {}
         case "empty_x":
-            if method.name.startswith("iv"):
+            if "x_endog" in method.base_args:
                 return {"x_endog": []}, {}
             return {x_role: []}, {}
         case "weight_is_y":

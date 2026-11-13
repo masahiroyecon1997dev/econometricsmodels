@@ -38,15 +38,16 @@ The `TypeError` raised for a value of the wrong type is described in [Argument t
 | [`Tobit`](../usage/tobit.md) | `y`, `x` | `cluster` |
 | [`IV`](../usage/iv.md) | `y`, `x_exog`, `x_endog`, `instruments` | `cluster`, `hac_time` |
 | [`FE`](../usage/fe.md) | `y`, `x`, `effects` | `cluster`, `dk_time` |
+| `FEIV` | `y`, `x_exog`, `x_endog`, `instruments`, `effects` | `cluster`, `dk_time` |
 | [`RE`](../usage/re.md) | `y`, `x`, `effects` | `cluster`, `dk_time` |
 
-`effects` in `FE` and `RE` is always a list, even for one-way effects (`effects=["id"]`, not `effects="id"`). One column gives one-way effects and two columns give two-way effects. `FE` also accepts three to five columns (higher-dimensional fixed effects); `RE` accepts at most two. The order matters: the first column is the entity and the second the time period; the third and later columns of `FE` only identify groups. The first column is also the default clustering column (see [FE](../usage/fe.md#choosing-the-type-of-standard-error)).
+`effects` in `FE`, `FEIV` and `RE` is always a list, even for one-way effects (`effects=["id"]`, not `effects="id"`). One column gives one-way effects and two columns give two-way effects. `FE` and `FEIV` also accept three to five columns (higher-dimensional fixed effects); `RE` accepts at most two. The order matters: the first column is the entity and the second the time period; the third and later columns of `FE` and `FEIV` only identify groups. The first column is also the default clustering column (see [FE](../usage/fe.md#choosing-the-type-of-standard-error)).
 
 The other options (`cov_type`, `include_intercept`, `confidence_level`, and so on) are described on each model's "Options and results" page, for example [OLS](../api/ols.md).
 
 ## Why `IV` has `x_exog` and `x_endog` instead of `x`
 
-An instrumental-variables model has two kinds of regressors, and telling them apart is the point of the method: exogenous regressors are their own instruments, endogenous regressors need excluded instruments. A single `x` would hide that split and would have to be told which columns are endogenous somewhere else. The split into `x_exog`, `x_endog` and `instruments` is the one used by linearmodels (`exog`, `endog`, `instruments`), and Stata's `ivregress` writes the same three groups, as `[exogenous] (endogenous = instruments)`. The `x_` prefix keeps the names consistent with `x`. `instruments` lists only the excluded instruments; the exogenous regressors are added to the first stage automatically.
+An instrumental-variables model has two kinds of regressors, and telling them apart is the point of the method: exogenous regressors are their own instruments, endogenous regressors need excluded instruments. A single `x` would hide that split and would have to be told which columns are endogenous somewhere else. The split into `x_exog`, `x_endog` and `instruments` is the one used by linearmodels (`exog`, `endog`, `instruments`), and Stata's `ivregress` writes the same three groups, as `[exogenous] (endogenous = instruments)`. The `x_` prefix keeps the names consistent with `x`. `instruments` lists only the excluded instruments; the exogenous regressors are added to the first stage automatically. `FEIV` uses the same three arguments, followed by `effects`.
 
 ## Why `WLS` has `weight`
 
@@ -60,7 +61,7 @@ The package accepts only one spelling, so that each concept has one name.
 
 ## Why `FE` and `RE` have `effects`
 
-The effects define the structure of the model: which groups are removed or modelled, and whether the time period is part of it. Without them the model does not exist, so they are a required argument, not an option. Both the entity and the time period are dimensions of the effects, so they are passed together in one list: one column gives one-way effects, two columns give two-way effects and, in `FE`, three to five columns give higher-dimensional effects. One signature covers all of them. The columns play different roles, so the position decides which is which: the first column is the entity (it also decides the default clustering column and, in `RE`, the variance component `sigma2_u`), and the second is the time period. The package does not check the order. The Driscoll-Kraay time column `dk_time` is a different thing: it is an option, required only for `cov_type="dk"`, and it is independent of `effects`.
+The effects (in `FEIV` too) define the structure of the model: which groups are removed or modelled, and whether the time period is part of it. Without them the model does not exist, so they are a required argument, not an option. Both the entity and the time period are dimensions of the effects, so they are passed together in one list: one column gives one-way effects, two columns give two-way effects and, in `FE` and `FEIV`, three to five columns give higher-dimensional effects. One signature covers all of them. The columns play different roles, so the position decides which is which: the first column is the entity (it also decides the default clustering column and, in `RE`, the variance component `sigma2_u`), and the second is the time period. The package does not check the order. The Driscoll-Kraay time column `dk_time` is a different thing: it is an option, required only for `cov_type="dk"`, and it is independent of `effects`.
 
 ## Where to look next
 

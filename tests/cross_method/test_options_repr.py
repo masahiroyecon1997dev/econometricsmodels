@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 from econometricsmodels import (
+    FEIVOptions,
     FEOptions,
     IVOptions,
     LogitOptions,
@@ -51,6 +52,15 @@ NON_DEFAULT_KWARGS: dict[type, dict[str, Any]] = {
     ProbitOptions: _COMMON_MLE,
     TobitOptions: {**_COMMON_MLE, "lower": -1.5, "upper": 2.5},
     FEOptions: {
+        "cov_type": "dk",
+        "confidence_level": 0.9,
+        "cluster": "g",
+        "dk_time": "t",
+        "dk_bandwidth": 2,
+        "tol": 1e-8,
+        "max_iter": 500,
+    },
+    FEIVOptions: {
         "cov_type": "dk",
         "confidence_level": 0.9,
         "cluster": "g",

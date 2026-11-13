@@ -27,10 +27,12 @@ from .nonlinear.logit import Logit, LogitOptions, LogitResults
 from .nonlinear.probit import Probit, ProbitOptions, ProbitResults
 from .nonlinear.tobit import Tobit, TobitOptions, TobitResults
 from .panel.fe import FE, FEOptions, FEResults
+from .panel.fe_iv import FEIV, FEIVOptions, FEIVResults
 from .panel.re import RE, REOptions, REResults
 
 __all__ = [
     "FE",
+    "FEIV",
     "IV",
     "OLS",
     "RE",
@@ -43,6 +45,8 @@ __all__ = [
     "DiagnosticResult",
     "EffectiveFResult",
     "ErrorCode",
+    "FEIVOptions",
+    "FEIVResults",
     "FEOptions",
     "FEResults",
     "IVOptions",

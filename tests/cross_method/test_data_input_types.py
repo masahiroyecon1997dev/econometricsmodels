@@ -21,6 +21,7 @@ from _error_expectations import escaped
 from _errors import raises_error
 from econometricsmodels import (
     FE,
+    FEIV,
     IV,
     OLS,
     RE,
@@ -52,6 +53,9 @@ FITS = {
     "Tobit": lambda d: Tobit(d, "yc", ["x1"]).fit(),
     "IV": lambda d: IV(d, "y", ["x2"], ["x1"], ["z", "z2"]).fit(),
     "FE": lambda d: FE(d, "y", ["x1"], ["entity"]).fit(),
+    "FEIV": lambda d: FEIV(
+        d, "y", ["x2"], ["x1"], ["z", "z2"], ["entity"]
+    ).fit(),
     "RE": lambda d: RE(d, "y", ["x1"], ["entity"]).fit(),
 }
 

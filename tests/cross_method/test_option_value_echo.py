@@ -12,10 +12,12 @@ from _dtype_helpers import make_frame
 from _errors import raises_error
 from econometricsmodels import (
     FE,
+    FEIV,
     IV,
     OLS,
     RE,
     ErrorCode,
+    FEIVOptions,
     FEOptions,
     IVOptions,
     Logit,
@@ -48,6 +50,32 @@ def test_panel_hc0_keeps_the_case_given(frame: pl.DataFrame) -> None:
         FE(
             frame, "y", ["x1"], ["entity"], options=FEOptions(cov_type="HC0")
         ).fit()
+
+
+def test_fe_iv_hc0_and_unknown_cov_type_keep_the_case_given(
+    frame: pl.DataFrame,
+) -> None:
+    def fit(options: FEIVOptions) -> None:
+        FEIV(
+            frame,
+            "y",
+            ["x2"],
+            ["x1"],
+            ["z", "z2"],
+            ["entity"],
+            options=options,
+        ).fit()
+
+    with raises_error(
+        ErrorCode.COV_TYPE_NOT_AVAILABLE_FOR_MODEL,
+        value="HC0",
+        model="FEIV",
+    ):
+        fit(FEIVOptions(cov_type="HC0"))
+    with raises_error(
+        ErrorCode.OPTION_UNKNOWN_VALUE, option="cov_type", value="HAC"
+    ):
+        fit(FEIVOptions(cov_type="HAC"))
 
 
 def test_variance_method_keeps_the_case_given(frame: pl.DataFrame) -> None:

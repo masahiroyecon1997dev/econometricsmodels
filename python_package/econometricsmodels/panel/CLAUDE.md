@@ -1,4 +1,4 @@
-# python_package/econometricsmodels/panel/ 実装ノート（FE/RE）
+# python_package/econometricsmodels/panel/ 実装ノート（FE/FEIV/RE）
 
 このファイルは `python_package/econometricsmodels/panel/` 配下のファイルを読み書きするときだけ自動ロードされる。詳細は`docs/spec/fe-spec.md` / `docs/spec/re-spec.md`（FE/RE共通の論点は`docs/spec/panel-common.md`）が正本。
 
@@ -26,3 +26,11 @@
 ## テスト
 
 `engine_pybind`側（FE・RE）は`PyDataFrame`引数を取る関数を`cargo test`で直接検証できない制約があるため（`nonlinear/CLAUDE.md`「テストの制約」参照）、`maturin develop` + Pythonスモークテストのみで検証されている。`tests/panel/`配下のpytest（`fixest`/`linearmodels`との数値照合ベンチマーク）が、このPython側ラッパーを含めた最初の本格的なテストになる。
+
+## FEIV（`panel/fe_iv.py`）
+
+- `FEIV(data, y, x_exog, x_endog, instruments, effects, *, options=None)`・`FEIVResults`。`FEIVOptions`は`_lib`の再輸出。`fit()`で`_lib.fit_fe_iv`を呼ぶだけ（コンストラクタで検証しない）。
+- **`FEIVResults(raw, x_endog)`は`x_endog`を保持する**: `_lib`の`weak_instrument_f_statistics`・`first_stage()`は`HashMap`で順序が不定なので、ラッパーが`x_endog`の順の`dict`に直す。pickleはラッパーごと往復する（`_x_endog`も戻る）。
+- `first_stage()`は`dict[str, FEResults]`（既存の`FEResults`をそのまま使う。`f_statistic`等は`None`）。診断（`cragg_donald()`・`kleibergen_paap()`・`effective_f(*, alpha)`）の`dataclass`への包み方は`IVResults`と共通で、`_results_utils.py`の`cragg_donald_result`等に置いた。
+- テスト統計量は`IVResults`の命名（`wald_*`・`stat_dist`）。2SLSなので`stat_dist`は常に`"t"`、`wald_dist`は常に`"f"`（GMMを足すときに`Literal`を広げる）。`log_likelihood`・`aic`・`bic`は出さない。`fixed_effects()`と診断は呼ぶたびに再推定する（`source_data`を保持）。
+- 横断テストへの登録先（足し忘れ注意）: `test_call_signatures`・`test_gil_release`・`test_results_repr`・`test_keyword_only_arguments`・`test_validation_order`・`test_effects_argument`・`test_argument_types`・`test_data_input_types`・`test_numeric_column_values`・`test_key_columns`・`test_cov_params`・`test_stat_dist`・`test_pickle`。ラッパー自体のテストは`tests/panel/test_fe_iv_api.py`（数値は`test_fe_iv_binding.py`）。

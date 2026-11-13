@@ -1061,3 +1061,11 @@ Stock-Yogoの表は実装の値がNBER TWP 284のTable 1（バイアス）・Tab
 - DKの第一段階で`T`が`l`以下のときの標準誤差の信頼性（9.19）、#636へのFE-2SLSの追加、HC2/HC3・DKのKP・有効Fの外部参照（#379）、FE-GMMのHansen J（3章7）。
 - IV側の従来からの保留（ルートCLAUDE.md 2章への診断の例外の追記、READMEの権利の注意書き、フィクスチャのデータのライセンス、3章`shared/`の列挙、`mop-oracle-spec.md`の履歴）。
 **注意書き**: コミットはパス指定・署名（ホストの端末で確認。失敗したら止まって報告、リトライは1回まで）。Pythonを触ったら`uv run maturin develop`（debug）で入れ直してから`pytest`（`uv run --no-sync pytest`）。`_lib`を直接見るテストは`tests/panel/test_fe_iv_binding.py`（許容誤差は`TOLERANCES["fe_iv_binding"]`）。エラーコードを足したら`UPDATE_ERROR_CATALOG_GOLDEN=1 cargo test -p engine error_catalog`→`maturin develop`→`python tools/render_error_catalog.py`→`tests/support/_errors.py`。rustfmtが整形すると文字列置換が当たらなくなるので、置換は件数を`assert`する。heredocでバッククォートを含む文章を書くときは`<<'EOF'`。
+
+### 9.26 #377（FE-2SLSのPythonラッパー）の実装結果（2026-11-13）
+
+**実装**: `python_package/econometricsmodels/panel/fe_iv.py`に`FEIV`・`FEIVResults`（`FEIVOptions`は`_lib`の再輸出）、`__init__`・`__all__`。`FEIVResults(raw, x_endog)`は`x_endog`を保持し、`weak_instrument_f_statistics`・`first_stage()`（`dict[str, FEResults]`）を`x_endog`の順に直す（`_lib`は`HashMap`）。診断（`cragg_donald()`・`kleibergen_paap()`・`effective_f(*, alpha)`）の`dataclass`への包みは`_results_utils.py`に移してIVと共有した（IVの挙動は変えていない）。`log_likelihood`・AIC/BICは出さない。
+**登録**: 横断テスト（`test_call_signatures`・`test_gil_release`・`test_results_repr`・`test_keyword_only_arguments`・`test_validation_order`・`test_effects_argument`・`test_argument_types`・`test_data_input_types`・`test_numeric_column_values`・`test_key_columns`・`test_cov_params`・`test_stat_dist`・`test_pickle`・`test_option_types`・`test_options_repr`・`test_option_value_echo`）、`tests/panel/test_fe_iv_api.py`（ラッパーの公開面）、`docs/guide/api-conventions.md`の表、`docs/guide/pickling.md`。
+**検証順序**: `test_validation_order`では、FEIVは`effects`の列数（4,0）→ `x_endog`の空（4,1）→ 役割の重複（4,2）→ 内の重複（4,3）→ `dk_time`の役割（4,5）。IVの空`x_endog`が`"const"`の検査と同順位（4,6）なのとは違う。`INSUFFICIENT_INSTRUMENTS`（エンジンの`fit`の中、列の抽出の後）の順序は固定していない。
+**レビュー（python-reviewer）への対応**: `weak_instrument_f_statistics`の誤解を招く一文の削除、`wald_df_*`が`None`にならない旨、Sarganが`cov_type`に従わない旨、`wu_hausman_df_denom`の定義を追記。
+**見送り**: 公開ドキュメント（usage・api・methods・nav）と`docs/guide/verification.md`は#378・#379。`first_stage`の持ち方・IV本体の`G ≤ d`のLMは9.25の未決のまま。診断のラッパー関数の引数`raw`は`Any`（Protocolで型を付ける案は見送り）。

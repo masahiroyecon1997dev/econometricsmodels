@@ -400,6 +400,106 @@
         "overid_statistic": 0.2901630809067467,
         "overid_p_value": 0.5901160431600645,
         "overid_df": 1
+      },
+      "dk_bw3": {
+        "params": {
+          "x1": 1.18527710951887,
+          "endog1": 0.82256193191978
+        },
+        "std_errors": {
+          "x1": 0.0415410675427621,
+          "endog1": 0.0558178468739141
+        },
+        "test_stats": {
+          "x1": 28.532658875431,
+          "endog1": 14.7365399775783
+        },
+        "p_values": {
+          "x1": 9.90590026133602e-07,
+          "endog1": 2.60096642765917e-05
+        },
+        "conf_int": {
+          "x1": [
+            1.07849239586051,
+            1.29206182317724
+          ],
+          "endog1": [
+            0.679077588641368,
+            0.966046275198193
+          ]
+        },
+        "df_model": 42,
+        "df_resid": 198,
+        "stat_df": 5,
+        "n_obs": 240,
+        "n_absorbed": 40,
+        "wald_statistic": 420.026337851406,
+        "wald_p_value": 2.69287105257907e-06,
+        "wald_df_num": 2,
+        "wald_df_denom": 5,
+        "weak_instrument_f": {
+          "endog1": 172.721999905405
+        },
+        "weak_instrument_f_df_num": 2,
+        "weak_instrument_f_df_denom": 197,
+        "rk_wald_f": 2918.73599665146,
+        "wu_hausman_statistic": 178.17410317376,
+        "wu_hausman_p_value": 4.22109394554035e-05,
+        "wu_hausman_df_num": 1,
+        "wu_hausman_df_denom": 5,
+        "overid_statistic": 0.2901630809067467,
+        "overid_p_value": 0.5901160431600645,
+        "overid_df": 1
+      },
+      "dk_bw_max": {
+        "params": {
+          "x1": 1.18527710951887,
+          "endog1": 0.82256193191978
+        },
+        "std_errors": {
+          "x1": 0.0380361584553473,
+          "endog1": 0.0496199324430297
+        },
+        "test_stats": {
+          "x1": 31.1618511872152,
+          "endog1": 16.5772481222983
+        },
+        "p_values": {
+          "x1": 6.38862937509123e-07,
+          "endog1": 1.4586681518337e-05
+        },
+        "conf_int": {
+          "x1": [
+            1.08750205149617,
+            1.28305216754157
+          ],
+          "endog1": [
+            0.695009834896227,
+            0.950114028943334
+          ]
+        },
+        "df_model": 42,
+        "df_resid": 198,
+        "stat_df": 5,
+        "n_obs": 240,
+        "n_absorbed": 40,
+        "wald_statistic": 499.209289791629,
+        "wald_p_value": 1.75274874622501e-06,
+        "wald_df_num": 2,
+        "wald_df_denom": 5,
+        "weak_instrument_f": {
+          "endog1": 172.721999905405
+        },
+        "weak_instrument_f_df_num": 2,
+        "weak_instrument_f_df_denom": 197,
+        "rk_wald_f": 3063.68032811003,
+        "wu_hausman_statistic": 206.424436983078,
+        "wu_hausman_p_value": 2.94523260537061e-05,
+        "wu_hausman_df_num": 1,
+        "wu_hausman_df_denom": 5,
+        "overid_statistic": 0.2901630809067467,
+        "overid_p_value": 0.5901160431600645,
+        "overid_df": 1
       }
     },
     "just_identified": {
@@ -1876,29 +1976,29 @@
     "exogenous_endog": {
       "classical": {
         "params": {
-          "x1": 1.19474943063501,
-          "endog1": 0.698888479536502
+          "x1": 1.22495105223883,
+          "endog1": 0.814946757845807
         },
         "std_errors": {
-          "x1": 0.0644020886434476,
-          "endog1": 0.056607713287627
+          "x1": 0.0772600589242996,
+          "endog1": 0.0720573933689776
         },
         "test_stats": {
-          "x1": 18.5514081266768,
-          "endog1": 12.3461704942118
+          "x1": 15.8549070411538,
+          "endog1": 11.3096896757392
         },
         "p_values": {
-          "x1": 3.48461045244296e-45,
-          "endog1": 2.43013914680011e-26
+          "x1": 4.35296180373631e-37,
+          "endog1": 3.35862452550317e-23
         },
         "conf_int": {
           "x1": [
-            1.06774738622097,
-            1.32175147504905
+            1.07259286570145,
+            1.37730923877622
           ],
           "endog1": [
-            0.587257079552954,
-            0.810519879520049
+            0.672848318714857,
+            0.957045196976757
           ]
         },
         "df_model": 42,
@@ -1906,49 +2006,49 @@
         "stat_df": 198,
         "n_obs": 240,
         "n_absorbed": 40,
-        "wald_statistic": 250.77550435853,
-        "wald_p_value": 5.40423850271652e-55,
+        "wald_statistic": 159.762625032587,
+        "wald_p_value": 4.90490942151999e-42,
         "wald_df_num": 2,
         "wald_df_denom": 198,
         "weak_instrument_f": {
-          "endog1": 133.689346826848
+          "endog1": 128.205705279418
         },
         "weak_instrument_f_df_num": 2,
         "weak_instrument_f_df_denom": 197,
-        "rk_wald_f": 133.689346826848,
-        "wu_hausman_statistic": 4.08947003654034,
-        "wu_hausman_p_value": 0.0445033915513359,
+        "rk_wald_f": 128.205705279418,
+        "wu_hausman_statistic": 0.328231280198748,
+        "wu_hausman_p_value": 0.567355769856953,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 197,
-        "overid_statistic": 0.39640901150213004,
-        "overid_p_value": 0.5289496444830639,
+        "overid_statistic": 0.9855774430778751,
+        "overid_p_value": 0.32082569361602753,
         "overid_df": 1
       },
       "hc1": {
         "params": {
-          "x1": 1.19474943063501,
-          "endog1": 0.698888479536502
+          "x1": 1.22495105223883,
+          "endog1": 0.814946757845807
         },
         "std_errors": {
-          "x1": 0.064629287936085,
-          "endog1": 0.0554606477561076
+          "x1": 0.0677238620987809,
+          "endog1": 0.0682934417890372
         },
         "test_stats": {
-          "x1": 18.4861920777552,
-          "endog1": 12.6015203177921
+          "x1": 18.0874364555899,
+          "endog1": 11.9330163555562
         },
         "p_values": {
-          "x1": 5.42860640909671e-45,
-          "endog1": 4.03810653054086e-27
+          "x1": 8.23916240409346e-44,
+          "endog1": 4.39152019166777e-25
         },
         "conf_int": {
           "x1": [
-            1.06729934524494,
-            1.32219951602509
+            1.09139841251346,
+            1.35850369196421
           ],
           "endog1": [
-            0.589519112829334,
-            0.808257846243669
+            0.680270897016229,
+            0.949622618675385
           ]
         },
         "df_model": 42,
@@ -1956,49 +2056,49 @@
         "stat_df": 198,
         "n_obs": 240,
         "n_absorbed": 40,
-        "wald_statistic": 277.859207958429,
-        "wald_p_value": 3.35853820213199e-58,
+        "wald_statistic": 194.147476395868,
+        "wald_p_value": 2.12009069652987e-47,
         "wald_df_num": 2,
         "wald_df_denom": 198,
         "weak_instrument_f": {
-          "endog1": 133.689346826848
+          "endog1": 128.205705279418
         },
         "weak_instrument_f_df_num": 2,
         "weak_instrument_f_df_denom": 197,
-        "rk_wald_f": 132.886372048984,
-        "wu_hausman_statistic": 4.41184116481843,
-        "wu_hausman_p_value": 0.0369627943621573,
+        "rk_wald_f": 116.909421521368,
+        "wu_hausman_statistic": 0.404907945126012,
+        "wu_hausman_p_value": 0.525304036405696,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 197,
-        "overid_statistic": 0.39640901150213004,
-        "overid_p_value": 0.5289496444830639,
+        "overid_statistic": 0.9855774430778751,
+        "overid_p_value": 0.32082569361602753,
         "overid_df": 1
       },
       "cluster": {
         "params": {
-          "x1": 1.19474943063501,
-          "endog1": 0.698888479536502
+          "x1": 1.22495105223883,
+          "endog1": 0.814946757845807
         },
         "std_errors": {
-          "x1": 0.0581370237648307,
-          "endog1": 0.0567407112187363
+          "x1": 0.0588667120074485,
+          "endog1": 0.0662154707425867
         },
         "test_stats": {
-          "x1": 20.5505778119616,
-          "endog1": 12.3172315701556
+          "x1": 20.8088919945765,
+          "endog1": 12.3074977600616
         },
         "p_values": {
-          "x1": 1.58282080080424e-22,
-          "endog1": 5.11575603203497e-15
+          "x1": 1.01184342215329e-22,
+          "endog1": 5.243559857568e-15
         },
         "conf_int": {
           "x1": [
-            1.07715620054793,
-            1.3123426607221
+            1.10588188836895,
+            1.34402021610872
           ],
           "endog1": [
-            0.584119558157936,
-            0.813657400915068
+            0.681013326408817,
+            0.948880189282797
           ]
         },
         "df_model": 42,
@@ -2006,49 +2106,49 @@
         "stat_df": 39,
         "n_obs": 240,
         "n_absorbed": 40,
-        "wald_statistic": 339.407871072984,
-        "wald_p_value": 2.15529517781644e-25,
+        "wald_statistic": 237.182358992914,
+        "wald_p_value": 1.48748465321399e-22,
         "wald_df_num": 2,
         "wald_df_denom": 39,
         "weak_instrument_f": {
-          "endog1": 133.689346826848
+          "endog1": 128.205705279418
         },
         "weak_instrument_f_df_num": 2,
         "weak_instrument_f_df_denom": 197,
-        "rk_wald_f": 110.143517737667,
-        "wu_hausman_statistic": 4.03539789296286,
-        "wu_hausman_p_value": 0.0515139328663371,
+        "rk_wald_f": 112.485951676637,
+        "wu_hausman_statistic": 0.430407857178996,
+        "wu_hausman_p_value": 0.515641051016612,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 39,
-        "overid_statistic": 0.39640901150213004,
-        "overid_p_value": 0.5289496444830639,
+        "overid_statistic": 0.9855774430778751,
+        "overid_p_value": 0.32082569361602753,
         "overid_df": 1
       },
       "cluster_time": {
         "params": {
-          "x1": 1.19474943063501,
-          "endog1": 0.698888479536502
+          "x1": 1.22495105223883,
+          "endog1": 0.814946757845807
         },
         "std_errors": {
-          "x1": 0.0796693982839794,
-          "endog1": 0.0319187407188346
+          "x1": 0.0703689368417606,
+          "endog1": 0.062603409136464
         },
         "test_stats": {
-          "x1": 14.9963405820684,
-          "endog1": 21.895866309165
+          "x1": 17.4075537760844,
+          "endog1": 13.0176098887741
         },
         "p_values": {
-          "x1": 2.38729509495867e-05,
-          "endog1": 3.68838501151325e-06
+          "x1": 1.14651753064222e-05,
+          "endog1": 4.77060401412134e-05
         },
         "conf_int": {
           "x1": [
-            0.98995272255014,
-            1.39954613871988
+            1.04406194140037,
+            1.4058401630773
           ],
           "endog1": [
-            0.61683874442828,
-            0.780938214644723
+            0.654019571470704,
+            0.97587394422091
           ]
         },
         "df_model": 42,
@@ -2056,49 +2156,49 @@
         "stat_df": 5,
         "n_obs": 240,
         "n_absorbed": 40,
-        "wald_statistic": 555.039681407681,
-        "wald_p_value": 1.34635803096926e-06,
+        "wald_statistic": 159.758950582597,
+        "wald_p_value": 2.94664871584106e-05,
         "wald_df_num": 2,
         "wald_df_denom": 5,
         "weak_instrument_f": {
-          "endog1": 133.689346826848
+          "endog1": 128.205705279418
         },
         "weak_instrument_f_df_num": 2,
         "weak_instrument_f_df_denom": 197,
-        "rk_wald_f": 265.180842116271,
-        "wu_hausman_statistic": 8.40386589514886,
-        "wu_hausman_p_value": 0.0338323612738308,
+        "rk_wald_f": 123.328072061,
+        "wu_hausman_statistic": 0.301985356556781,
+        "wu_hausman_p_value": 0.606282748242586,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 5,
-        "overid_statistic": 0.39640901150213004,
-        "overid_p_value": 0.5289496444830639,
+        "overid_statistic": 0.9855774430778751,
+        "overid_p_value": 0.32082569361602753,
         "overid_df": 1
       },
       "cluster_region": {
         "params": {
-          "x1": 1.19474943063501,
-          "endog1": 0.698888479536502
+          "x1": 1.22495105223883,
+          "endog1": 0.814946757845807
         },
         "std_errors": {
-          "x1": 0.0326176679469652,
-          "endog1": 0.0638050554578883
+          "x1": 0.0618919710019583,
+          "endog1": 0.0605153741717778
         },
         "test_stats": {
-          "x1": 36.6289040828307,
-          "endog1": 10.9534969372101
+          "x1": 19.7917602624107,
+          "endog1": 13.4667721880479
         },
         "p_values": {
-          "x1": 2.93748945964809e-09,
-          "endog1": 1.17016014356341e-05
+          "x1": 2.10110647657231e-07,
+          "endog1": 2.9224042895498e-06
         },
         "conf_int": {
           "x1": [
-            1.11762090197722,
-            1.27187795929281
+            1.07859979662873,
+            1.37130230784894
           ],
           "endog1": [
-            0.548013498026557,
-            0.849763461046447
+            0.671850636485009,
+            0.958042879206604
           ]
         },
         "df_model": 42,
@@ -2106,49 +2206,49 @@
         "stat_df": 7,
         "n_obs": 240,
         "n_absorbed": 40,
-        "wald_statistic": 902.451471757793,
-        "wald_p_value": 3.58402378555441e-09,
+        "wald_statistic": 410.144076213731,
+        "wald_p_value": 5.57242616895129e-08,
         "wald_df_num": 2,
         "wald_df_denom": 7,
         "weak_instrument_f": {
-          "endog1": 133.689346826848
+          "endog1": 128.205705279418
         },
         "weak_instrument_f_df_num": 2,
         "weak_instrument_f_df_denom": 197,
-        "rk_wald_f": 72.9936696274464,
-        "wu_hausman_statistic": 10.8083022463664,
-        "wu_hausman_p_value": 0.0133466044476132,
+        "rk_wald_f": 90.7255172465271,
+        "wu_hausman_statistic": 0.343268444406193,
+        "wu_hausman_p_value": 0.576343238270307,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 7,
-        "overid_statistic": 0.39640901150213004,
-        "overid_p_value": 0.5289496444830639,
+        "overid_statistic": 0.9855774430778751,
+        "overid_p_value": 0.32082569361602753,
         "overid_df": 1
       },
       "dk": {
         "params": {
-          "x1": 1.19474943063501,
-          "endog1": 0.698888479536502
+          "x1": 1.22495105223883,
+          "endog1": 0.814946757845807
         },
         "std_errors": {
-          "x1": 0.0654037104960734,
-          "endog1": 0.0208664014925252
+          "x1": 0.0521341714248511,
+          "endog1": 0.0460138887741057
         },
         "test_stats": {
-          "x1": 18.2673035149396,
-          "endog1": 33.4934837608133
+          "x1": 23.4961258376292,
+          "endog1": 17.7108864205457
         },
         "p_values": {
-          "x1": 9.03831437705445e-06,
-          "endog1": 4.4602919659029e-07
+          "x1": 2.5997447545245e-06,
+          "endog1": 1.05288603641705e-05
         },
         "conf_int": {
           "x1": [
-            1.02662384045059,
-            1.36287502081943
+            1.09093589815816,
+            1.35896620631951
           ],
           "endog1": [
-            0.645249686884722,
-            0.752527272188281
+            0.696664291176101,
+            0.933229224515512
           ]
         },
         "df_model": 42,
@@ -2156,49 +2256,49 @@
         "stat_df": 5,
         "n_obs": 240,
         "n_absorbed": 40,
-        "wald_statistic": 730.523447020349,
-        "wald_p_value": 6.79290209743041e-07,
+        "wald_statistic": 282.360449048291,
+        "wald_p_value": 7.21555323641999e-06,
         "wald_df_num": 2,
         "wald_df_denom": 5,
         "weak_instrument_f": {
-          "endog1": 133.689346826848
+          "endog1": 128.205705279418
         },
         "weak_instrument_f_df_num": 2,
         "weak_instrument_f_df_denom": 197,
-        "rk_wald_f": 316.878711029526,
-        "wu_hausman_statistic": 8.79086670306193,
-        "wu_hausman_p_value": 0.0313395946492387,
+        "rk_wald_f": 299.828948289945,
+        "wu_hausman_statistic": 0.427735820649372,
+        "wu_hausman_p_value": 0.541983430854916,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 5,
-        "overid_statistic": 0.39640901150213004,
-        "overid_p_value": 0.5289496444830639,
+        "overid_statistic": 0.9855774430778751,
+        "overid_p_value": 0.32082569361602753,
         "overid_df": 1
       },
       "dk_bw1": {
         "params": {
-          "x1": 1.19474943063501,
-          "endog1": 0.698888479536502
+          "x1": 1.22495105223883,
+          "endog1": 0.814946757845807
         },
         "std_errors": {
-          "x1": 0.071720506347975,
-          "endog1": 0.028329158348883
+          "x1": 0.0605318916182715,
+          "endog1": 0.0470310826572393
         },
         "test_stats": {
-          "x1": 16.6584076364199,
-          "endog1": 24.6702874448107
+          "x1": 20.236457501835,
+          "endog1": 17.3278332498766
         },
         "p_values": {
-          "x1": 1.42400993026291e-05,
-          "endog1": 2.04088097276878e-06
+          "x1": 5.44923356596228e-06,
+          "endog1": 1.17275891562618e-05
         },
         "conf_int": {
           "x1": [
-            1.01038599977427,
-            1.37911286149576
+            1.0693488711682,
+            1.38055323330947
           ],
           "endog1": [
-            0.626066059665998,
-            0.771710899407005
+            0.694049511056797,
+            0.935844004634816
           ]
         },
         "df_model": 42,
@@ -2206,22 +2306,22 @@
         "stat_df": 5,
         "n_obs": 240,
         "n_absorbed": 40,
-        "wald_statistic": 595.706214261063,
-        "wald_p_value": 1.12907481731336e-06,
+        "wald_statistic": 220.540183231327,
+        "wald_p_value": 1.3301243338095e-05,
         "wald_df_num": 2,
         "wald_df_denom": 5,
         "weak_instrument_f": {
-          "endog1": 133.689346826848
+          "endog1": 128.205705279418
         },
         "weak_instrument_f_df_num": 2,
         "weak_instrument_f_df_denom": 197,
-        "rk_wald_f": 232.149098635085,
-        "wu_hausman_statistic": 6.99713781760058,
-        "wu_hausman_p_value": 0.0456888437417445,
+        "rk_wald_f": 144.647322496584,
+        "wu_hausman_statistic": 0.350827850616635,
+        "wu_hausman_p_value": 0.579413428571876,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 5,
-        "overid_statistic": 0.39640901150213004,
-        "overid_p_value": 0.5289496444830639,
+        "overid_statistic": 0.9855774430778751,
+        "overid_p_value": 0.32082569361602753,
         "overid_df": 1
       }
     },
@@ -3488,25 +3588,25 @@
           "endog1": 0.832223067716754
         },
         "std_errors": {
-          "x1": 0.112312018656511,
-          "endog1": 0.0508814259860932
+          "x1": 0.109374237959759,
+          "endog1": 0.050592819990449
         },
         "test_stats": {
-          "x1": 10.9617134592054,
-          "endog1": 16.3561270461291
+          "x1": 11.2561439467178,
+          "endog1": 16.4494303316926
         },
         "p_values": {
-          "x1": 1.17573492489932e-09,
-          "endog1": 1.18970278755913e-12
+          "x1": 7.57549814751964e-10,
+          "endog1": 1.07510428917373e-12
         },
         "conf_int": {
           "x1": [
-            0.996060409890377,
-            1.46620392318484
+            1.00220925555526,
+            1.46005507751996
           ],
           "endog1": [
-            0.725727019205265,
-            0.938719116228243
+            0.726331078496395,
+            0.938115056937113
           ]
         },
         "df_model": 14,
@@ -3514,8 +3614,8 @@
         "stat_df": 19,
         "n_obs": 240,
         "n_absorbed": 12,
-        "wald_statistic": 161.775300080448,
-        "wald_p_value": 1.17023813863186e-12,
+        "wald_statistic": 173.722838990313,
+        "wald_p_value": 6.16691514836371e-13,
         "wald_df_num": 2,
         "wald_df_denom": 19,
         "weak_instrument_f": {
@@ -3523,9 +3623,9 @@
         },
         "weak_instrument_f_df_num": 2,
         "weak_instrument_f_df_denom": 225,
-        "rk_wald_f": 659.967620161555,
-        "wu_hausman_statistic": 17.8718966556884,
-        "wu_hausman_p_value": 0.000455792350480845,
+        "rk_wald_f": 526.094088745796,
+        "wu_hausman_statistic": 15.8373087505273,
+        "wu_hausman_p_value": 0.000802720141829642,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 19,
         "overid_statistic": 0.5961721786024952,
@@ -3538,25 +3638,25 @@
           "endog1": 0.832223067716754
         },
         "std_errors": {
-          "x1": 0.105250103899246,
-          "endog1": 0.0504311752335405
+          "x1": 0.102158541853811,
+          "endog1": 0.0499359926746396
         },
         "test_stats": {
-          "x1": 11.6972061872371,
-          "endog1": 16.5021549440962
+          "x1": 12.0511916497337,
+          "endog1": 16.6657960148934
         },
         "p_values": {
-          "x1": 3.98449390166262e-10,
-          "endog1": 1.01552359234468e-12
+          "x1": 2.41107365269776e-10,
+          "endog1": 8.51686847134614e-13
         },
         "conf_int": {
           "x1": [
-            1.01084116734751,
-            1.4514231657277
+            1.01731188107431,
+            1.44495245200091
           ],
           "endog1": [
-            0.726669404860873,
-            0.937776730572635
+            0.727705833867976,
+            0.936740301565532
           ]
         },
         "df_model": 14,
@@ -3564,8 +3664,8 @@
         "stat_df": 19,
         "n_obs": 240,
         "n_absorbed": 12,
-        "wald_statistic": 162.59030708412,
-        "wald_p_value": 1.11863488660079e-12,
+        "wald_statistic": 172.450378884868,
+        "wald_p_value": 6.58902400264055e-13,
         "wald_df_num": 2,
         "wald_df_denom": 19,
         "weak_instrument_f": {
@@ -3573,9 +3673,109 @@
         },
         "weak_instrument_f_df_num": 2,
         "weak_instrument_f_df_denom": 225,
-        "rk_wald_f": 539.31861371616,
-        "wu_hausman_statistic": 20.1548099915745,
-        "wu_hausman_p_value": 0.000251148147616601,
+        "rk_wald_f": 471.62520371443,
+        "wu_hausman_statistic": 19.4031214291617,
+        "wu_hausman_p_value": 0.000304311078954056,
+        "wu_hausman_df_num": 1,
+        "wu_hausman_df_denom": 19,
+        "overid_statistic": 0.5961721786024952,
+        "overid_p_value": 0.4400422516304715,
+        "overid_df": 1
+      },
+      "dk_bw3": {
+        "params": {
+          "x1": 1.23113216653761,
+          "endog1": 0.832223067716754
+        },
+        "std_errors": {
+          "x1": 0.112383158398728,
+          "endog1": 0.0499987368767103
+        },
+        "test_stats": {
+          "x1": 10.9547745772514,
+          "endog1": 16.6448818450933
+        },
+        "p_values": {
+          "x1": 1.18810328323932e-09,
+          "endog1": 8.70981136382574e-13
+        },
+        "conf_int": {
+          "x1": [
+            0.995911512698692,
+            1.46635282037653
+          ],
+          "endog1": [
+            0.727574508743768,
+            0.936871626689741
+          ]
+        },
+        "df_model": 14,
+        "df_resid": 226,
+        "stat_df": 19,
+        "n_obs": 240,
+        "n_absorbed": 12,
+        "wald_statistic": 172.279223207234,
+        "wald_p_value": 6.64819791127399e-13,
+        "wald_df_num": 2,
+        "wald_df_denom": 19,
+        "weak_instrument_f": {
+          "endog1": 183.524275494404
+        },
+        "weak_instrument_f_df_num": 2,
+        "weak_instrument_f_df_denom": 225,
+        "rk_wald_f": 799.136578309161,
+        "wu_hausman_statistic": 15.0630911327915,
+        "wu_hausman_p_value": 0.00100523448032853,
+        "wu_hausman_df_num": 1,
+        "wu_hausman_df_denom": 19,
+        "overid_statistic": 0.5961721786024952,
+        "overid_p_value": 0.4400422516304715,
+        "overid_df": 1
+      },
+      "dk_bw_max": {
+        "params": {
+          "x1": 1.23113216653761,
+          "endog1": 0.832223067716754
+        },
+        "std_errors": {
+          "x1": 0.0626602381432409,
+          "endog1": 0.023063835054048
+        },
+        "test_stats": {
+          "x1": 19.6477415825208,
+          "endog1": 36.0834642533003
+        },
+        "p_values": {
+          "x1": 4.39809464321737e-14,
+          "endog1": 5.74417008946582e-19
+        },
+        "conf_int": {
+          "x1": [
+            1.09998278084885,
+            1.36228155222637
+          ],
+          "endog1": [
+            0.783949906161726,
+            0.880496229271782
+          ]
+        },
+        "df_model": 14,
+        "df_resid": 226,
+        "stat_df": 19,
+        "n_obs": 240,
+        "n_absorbed": 12,
+        "wald_statistic": 658.169322402633,
+        "wald_p_value": 2.85128573231358e-18,
+        "wald_df_num": 2,
+        "wald_df_denom": 19,
+        "weak_instrument_f": {
+          "endog1": 183.524275494404
+        },
+        "weak_instrument_f_df_num": 2,
+        "weak_instrument_f_df_denom": 225,
+        "rk_wald_f": 3788.48055667641,
+        "wu_hausman_statistic": 52.3107616472124,
+        "wu_hausman_p_value": 7.24569729946288e-07,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 19,
         "overid_statistic": 0.5961721786024952,
@@ -4185,56 +4385,6 @@
         "overid_statistic": 0.0094844583638496,
         "overid_p_value": 0.9224181280028791,
         "overid_df": 1
-      },
-      "dk_bw1": {
-        "params": {
-          "x1": 1.76191285903387,
-          "endog1": 0.626349857694713
-        },
-        "std_errors": {
-          "x1": 0.285231889103901,
-          "endog1": 0.146640052750317
-        },
-        "test_stats": {
-          "x1": 6.17712439015562,
-          "endog1": 4.27134228300638
-        },
-        "p_values": {
-          "x1": 0.00854245606301672,
-          "endog1": 0.0235555615445226
-        },
-        "conf_int": {
-          "x1": [
-            0.854177687406069,
-            2.66964803066167
-          ],
-          "endog1": [
-            0.15967576361286,
-            1.09302395177657
-          ]
-        },
-        "df_model": 10,
-        "df_resid": 22,
-        "stat_df": 3,
-        "n_obs": 32,
-        "n_absorbed": 8,
-        "wald_statistic": 76.8468404265967,
-        "wald_p_value": 0.00264913846279668,
-        "wald_df_num": 2,
-        "wald_df_denom": 3,
-        "weak_instrument_f": {
-          "endog1": 14.1718367402426
-        },
-        "weak_instrument_f_df_num": 2,
-        "weak_instrument_f_df_denom": 21,
-        "rk_wald_f": 711.833505133244,
-        "wu_hausman_statistic": 15.7308728095236,
-        "wu_hausman_p_value": 0.028636506587457,
-        "wu_hausman_df_num": 1,
-        "wu_hausman_df_denom": 3,
-        "overid_statistic": 0.0094844583638496,
-        "overid_p_value": 0.9224181280028791,
-        "overid_df": 1
       }
     },
     "two_way": {
@@ -4583,6 +4733,106 @@
           "rk_wald_f": 518.063789090272,
           "wu_hausman_statistic": 93.2616789187325,
           "wu_hausman_p_value": 0.000202024167588015,
+          "wu_hausman_df_num": 1,
+          "wu_hausman_df_denom": 5,
+          "overid_statistic": 0.135736493411324,
+          "overid_p_value": 0.712556852075905,
+          "overid_df": 1
+        },
+        "dk_bw3": {
+          "params": {
+            "x1": 1.17555883239627,
+            "endog1": 0.870222936170786
+          },
+          "std_errors": {
+            "x1": 0.0321689446749232,
+            "endog1": 0.0335879866416361
+          },
+          "test_stats": {
+            "x1": 36.5432824817736,
+            "endog1": 25.9087555754844
+          },
+          "p_values": {
+            "x1": 2.88926882493776e-07,
+            "endog1": 1.60016229794072e-06
+          },
+          "conf_int": {
+            "x1": [
+              1.09286592754332,
+              1.25825173724921
+            ],
+            "endog1": [
+              0.783882267814201,
+              0.956563604527371
+            ]
+          },
+          "df_model": 47,
+          "df_resid": 193,
+          "stat_df": 5,
+          "n_obs": 240,
+          "n_absorbed": 45,
+          "wald_statistic": 2900.91036085237,
+          "wald_p_value": 2.17559957838805e-08,
+          "wald_df_num": 2,
+          "wald_df_denom": 5,
+          "weak_instrument_f": {
+            "endog1": 167.687605538462
+          },
+          "weak_instrument_f_df_num": 2,
+          "weak_instrument_f_df_denom": 192,
+          "rk_wald_f": 1059.4685203086,
+          "wu_hausman_statistic": 258.034075265206,
+          "wu_hausman_p_value": 1.70311960611093e-05,
+          "wu_hausman_df_num": 1,
+          "wu_hausman_df_denom": 5,
+          "overid_statistic": 0.135736493411324,
+          "overid_p_value": 0.712556852075905,
+          "overid_df": 1
+        },
+        "dk_bw_max": {
+          "params": {
+            "x1": 1.17555883239627,
+            "endog1": 0.870222936170786
+          },
+          "std_errors": {
+            "x1": 0.0266195248851579,
+            "endog1": 0.0295878486923781
+          },
+          "test_stats": {
+            "x1": 44.1615257022004,
+            "endog1": 29.411497443373
+          },
+          "p_values": {
+            "x1": 1.12382977301373e-07,
+            "endog1": 8.51832154228095e-07
+          },
+          "conf_int": {
+            "x1": [
+              1.10713116525321,
+              1.24398649953932
+            ],
+            "endog1": [
+              0.794164949766603,
+              0.946280922574968
+            ]
+          },
+          "df_model": 47,
+          "df_resid": 193,
+          "stat_df": 5,
+          "n_obs": 240,
+          "n_absorbed": 45,
+          "wald_statistic": 3861.8326087516,
+          "wald_p_value": 1.06454438210508e-08,
+          "wald_df_num": 2,
+          "wald_df_denom": 5,
+          "weak_instrument_f": {
+            "endog1": 167.687605538462
+          },
+          "weak_instrument_f_df_num": 2,
+          "weak_instrument_f_df_denom": 192,
+          "rk_wald_f": 1246.31056900789,
+          "wu_hausman_statistic": 270.792228193008,
+          "wu_hausman_p_value": 1.5124521642558e-05,
           "wu_hausman_df_num": 1,
           "wu_hausman_df_denom": 5,
           "overid_statistic": 0.135736493411324,
@@ -5614,25 +5864,25 @@
             "endog1": 0.8360740405821
           },
           "std_errors": {
-            "x1": 0.108577213586898,
-            "endog1": 0.0417128811632474
+            "x1": 0.105134004302962,
+            "endog1": 0.0433065795309217
           },
           "test_stats": {
-            "x1": 11.7481587513386,
-            "endog1": 20.0435457169703
+            "x1": 12.1329188444213,
+            "endog1": 19.3059357178077
           },
           "p_values": {
-            "x1": 3.70389759098768e-10,
-            "endog1": 3.06128764321249e-14
+            "x1": 2.15055864151844e-10,
+            "endog1": 6.04641584994984e-14
           },
           "conf_int": {
             "x1": [
-              1.04832762219887,
-              1.50283706179488
+              1.05553434205451,
+              1.49563034193924
             ],
             "endog1": [
-              0.748767976928748,
-              0.923380104235452
+              0.745432327909735,
+              0.926715753254466
             ]
           },
           "df_model": 33,
@@ -5640,8 +5890,8 @@
           "stat_df": 19,
           "n_obs": 240,
           "n_absorbed": 31,
-          "wald_statistic": 217.090835537918,
-          "wald_p_value": 8.19543503813902e-14,
+          "wald_statistic": 216.624549410759,
+          "wald_p_value": 8.35739565154856e-14,
           "wald_df_num": 2,
           "wald_df_denom": 19,
           "weak_instrument_f": {
@@ -5649,9 +5899,9 @@
           },
           "weak_instrument_f_df_num": 2,
           "weak_instrument_f_df_denom": 206,
-          "rk_wald_f": 397.041513440037,
-          "wu_hausman_statistic": 30.5018949664979,
-          "wu_hausman_p_value": 2.50688937373615e-05,
+          "rk_wald_f": 388.844791360941,
+          "wu_hausman_statistic": 26.2574964971093,
+          "wu_hausman_p_value": 6.02868508292428e-05,
           "wu_hausman_df_num": 1,
           "wu_hausman_df_denom": 19,
           "overid_statistic": 0.02083144490510623,
@@ -5664,25 +5914,25 @@
             "endog1": 0.8360740405821
           },
           "std_errors": {
-            "x1": 0.102198660981858,
-            "endog1": 0.0398863678257034
+            "x1": 0.0978087668997373,
+            "endog1": 0.0397088431907574
           },
           "test_stats": {
-            "x1": 12.4813997535967,
-            "endog1": 20.9613982460273
+            "x1": 13.0415951701391,
+            "endog1": 21.0551094768911
           },
           "p_values": {
-            "x1": 1.32957289880506e-10,
-            "endog1": 1.35415214225798e-14
+            "x1": 6.2736472452116e-11,
+            "endog1": 1.24826480623501e-14
           },
           "conf_int": {
             "x1": [
-              1.06167808623353,
-              1.48948659776022
+              1.07086624014371,
+              1.48029844385004
             ],
             "endog1": [
-              0.752590913279925,
-              0.919557167884275
+              0.752962476611117,
+              0.919185604553083
             ]
           },
           "df_model": 33,
@@ -5690,8 +5940,8 @@
           "stat_df": 19,
           "n_obs": 240,
           "n_absorbed": 31,
-          "wald_statistic": 240.371128608577,
-          "wald_p_value": 3.23646940061363e-14,
+          "wald_statistic": 254.350278137066,
+          "wald_p_value": 1.92964520745265e-14,
           "wald_df_num": 2,
           "wald_df_denom": 19,
           "weak_instrument_f": {
@@ -5699,9 +5949,109 @@
           },
           "weak_instrument_f_df_num": 2,
           "weak_instrument_f_df_denom": 206,
-          "rk_wald_f": 398.133780803035,
-          "wu_hausman_statistic": 32.8096038883346,
-          "wu_hausman_p_value": 1.60697398498276e-05,
+          "rk_wald_f": 382.681320975001,
+          "wu_hausman_statistic": 30.8038010749921,
+          "wu_hausman_p_value": 2.36234044095798e-05,
+          "wu_hausman_df_num": 1,
+          "wu_hausman_df_denom": 19,
+          "overid_statistic": 0.02083144490510623,
+          "overid_p_value": 0.8852390800320551,
+          "overid_df": 1
+        },
+        "dk_bw3": {
+          "params": {
+            "x1": 1.27558234199688,
+            "endog1": 0.8360740405821
+          },
+          "std_errors": {
+            "x1": 0.106370853534487,
+            "endog1": 0.0432959758080899
+          },
+          "test_stats": {
+            "x1": 11.9918408061219,
+            "endog1": 19.3106639815213
+          },
+          "p_values": {
+            "x1": 2.6208274329065e-10,
+            "endog1": 6.01964227714813e-14
+          },
+          "conf_int": {
+            "x1": [
+              1.05294558686125,
+              1.4982190971325
+            ],
+            "endog1": [
+              0.745454521756688,
+              0.926693559407513
+            ]
+          },
+          "df_model": 33,
+          "df_resid": 207,
+          "stat_df": 19,
+          "n_obs": 240,
+          "n_absorbed": 31,
+          "wald_statistic": 204.87211521427,
+          "wald_p_value": 1.38763570214485e-13,
+          "wald_df_num": 2,
+          "wald_df_denom": 19,
+          "weak_instrument_f": {
+            "endog1": 185.266304920583
+          },
+          "weak_instrument_f_df_num": 2,
+          "weak_instrument_f_df_denom": 206,
+          "rk_wald_f": 535.732284192664,
+          "wu_hausman_statistic": 24.5627636370356,
+          "wu_hausman_p_value": 8.76981253566868e-05,
+          "wu_hausman_df_num": 1,
+          "wu_hausman_df_denom": 19,
+          "overid_statistic": 0.02083144490510623,
+          "overid_p_value": 0.8852390800320551,
+          "overid_df": 1
+        },
+        "dk_bw_max": {
+          "params": {
+            "x1": 1.27558234199688,
+            "endog1": 0.8360740405821
+          },
+          "std_errors": {
+            "x1": 0.0628719341367331,
+            "endog1": 0.024163072099839
+          },
+          "test_stats": {
+            "x1": 20.2885812169028,
+            "endog1": 34.6013138200117
+          },
+          "p_values": {
+            "x1": 2.45415546247945e-14,
+            "endog1": 1.26003276047315e-18
+          },
+          "conf_int": {
+            "x1": [
+              1.14398987150152,
+              1.40717481249223
+            ],
+            "endog1": [
+              0.785500149448735,
+              0.886647931715466
+            ]
+          },
+          "df_model": 33,
+          "df_resid": 207,
+          "stat_df": 19,
+          "n_obs": 240,
+          "n_absorbed": 31,
+          "wald_statistic": 631.701060489848,
+          "wald_p_value": 4.18725149744029e-18,
+          "wald_df_num": 2,
+          "wald_df_denom": 19,
+          "weak_instrument_f": {
+            "endog1": 185.266304920583
+          },
+          "weak_instrument_f_df_num": 2,
+          "weak_instrument_f_df_denom": 206,
+          "rk_wald_f": 3387.89524007566,
+          "wu_hausman_statistic": 52.5717345184231,
+          "wu_hausman_p_value": 6.99448956067011e-07,
           "wu_hausman_df_num": 1,
           "wu_hausman_df_denom": 19,
           "overid_statistic": 0.02083144490510623,
@@ -6060,6 +6410,56 @@
         "overid_statistic": 0.3087878200177696,
         "overid_p_value": 0.5784249816524052,
         "overid_df": 1
+      },
+      "dk_bw1": {
+        "params": {
+          "x1": 1.19139270595907,
+          "endog1": 0.863478550543584
+        },
+        "std_errors": {
+          "x1": 0.0484450921524747,
+          "endog1": 0.0469503459434083
+        },
+        "test_stats": {
+          "x1": 24.5926398944461,
+          "endog1": 18.3913139124551
+        },
+        "p_values": {
+          "x1": 2.07307493497988e-06,
+          "endog1": 8.74139278686001e-06
+        },
+        "conf_int": {
+          "x1": [
+            1.06686063204619,
+            1.31592477987194
+          ],
+          "endog1": [
+            0.742788844084618,
+            0.98416825700255
+          ]
+        },
+        "df_model": 50,
+        "df_resid": 190,
+        "stat_df": 5,
+        "n_obs": 240,
+        "n_absorbed": 48,
+        "wald_statistic": 1713.74869102945,
+        "wald_p_value": 8.098404667605e-08,
+        "wald_df_num": 2,
+        "wald_df_denom": 5,
+        "weak_instrument_f": {
+          "endog1": 163.445474229462
+        },
+        "weak_instrument_f_df_num": 2,
+        "weak_instrument_f_df_denom": 189,
+        "rk_wald_f": 541.755819301227,
+        "wu_hausman_statistic": 86.0735002016137,
+        "wu_hausman_p_value": 0.000244644007255164,
+        "wu_hausman_df_num": 1,
+        "wu_hausman_df_denom": 5,
+        "overid_statistic": 0.3087878200177696,
+        "overid_p_value": 0.5784249816524052,
+        "overid_df": 1
       }
     },
     "x_exog_empty": {
@@ -6396,10 +6796,10 @@
   "wooldridge": {},
   "_meta": {
     "method": "fe_iv",
-    "generated_at": "2026-11-13T23:38:07.601703+00:00",
+    "generated_at": "2026-11-13T23:45:29.407049+00:00",
     "reference": "fixest (R)",
     "r_version": "4.5.3",
     "fixest_version": "0.14.2",
-    "note": "feolsの固定効果・操作変数構文。fixef.tol=1e-11、ssc()は既定のまま（clusterはK.fixef=nonnested・t.df=min、hetero・DKはK.fixef=full）。dkのバンド幅は本実装の既定式floor(4*(T/100)^(2/9))、またはdk_bw1の明示値1。hc2・hc3はfixestがIVで提供しない。Wu-Hausmanは第一段階の残差を足した補助回帰を同じvcovで回したWald F（iidのときfitstat 'wh'と一致）。部分Fは内生変数ごとの第一段階（等分散）のWald F。overid_statisticはfixestのsargan（e'e/n尺度）に(n-n_absorbed)/nを掛けた本実装の尺度（生の値は保存しない）。rk_wald_fは内生変数が1個のときの第一段階のWald F（同じvcov）。Cragg-Donald（cd）・Kleibergen-Paap（kpr）・within R²（wr2）はfixestの定義が違うため含めない。"
+    "note": "feolsの固定効果・操作変数構文。fixef.tol=1e-11、ssc()は既定のまま（clusterはK.fixef=nonnested・t.df=min、hetero・DKはK.fixef=full）。dkのバンド幅は本実装の既定式floor(4*(T/100)^(2/9))、または明示値（dk_bw1=1・dk_bw3=3・dk_bw_max=T-2）。hc2・hc3はfixestがIVで提供しない。Wu-Hausmanは第一段階の残差を足した補助回帰を同じvcovで回したWald F（iidのときfitstat 'wh'と一致）。部分Fは内生変数ごとの第一段階（等分散）のWald F。overid_statisticはfixestのsargan（e'e/n尺度）に(n-n_absorbed)/nを掛けた本実装の尺度（生の値は保存しない）。rk_wald_fは内生変数が1個のときの第一段階のWald F（同じvcov）。Cragg-Donald（cd）・Kleibergen-Paap（kpr）・within R²（wr2）はfixestの定義が違うため含めない。"
   }
 }

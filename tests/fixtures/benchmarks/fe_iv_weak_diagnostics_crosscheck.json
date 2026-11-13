@@ -107,27 +107,27 @@
     },
     "exogenous_endog": {
       "classical": {
-        "cragg_donald_f": 133.689346826848
+        "cragg_donald_f": 128.205705279418
       },
       "hc1": {
-        "cragg_donald_f": 133.689346826848,
-        "rk_wald_f": 132.886372048984,
-        "effective_f": 119.363904444756
+        "cragg_donald_f": 128.205705279418,
+        "rk_wald_f": 116.909421521368,
+        "effective_f": 121.839256673131
       },
       "cluster": {
-        "cragg_donald_f": 133.689346826848,
-        "rk_wald_f": 110.143517737667,
-        "effective_f": 117.957972170329
+        "cragg_donald_f": 128.205705279418,
+        "rk_wald_f": 112.485951676637,
+        "effective_f": 120.298530041383
       },
       "cluster_time": {
-        "cragg_donald_f": 133.689346826848,
-        "rk_wald_f": 265.18084211627,
-        "effective_f": 153.77183597807
+        "cragg_donald_f": 128.205705279418,
+        "rk_wald_f": 123.328072061,
+        "effective_f": 79.8315138015052
       },
       "cluster_region": {
-        "cragg_donald_f": 133.689346826848,
-        "rk_wald_f": 72.9936696274465,
-        "effective_f": 107.179730211595
+        "cragg_donald_f": 128.205705279418,
+        "rk_wald_f": 90.725517246527,
+        "effective_f": 89.8419418632428
       }
     },
     "heteroskedastic": {
@@ -311,7 +311,7 @@
   "wooldridge": {},
   "_meta": {
     "method": "fe_iv",
-    "generated_at": "2026-11-13T22:53:48.495929+00:00",
+    "generated_at": "2026-11-13T23:49:27.913968+00:00",
     "reference": "ivDiag (R)",
     "ivdiag_version": "1.0.8",
     "note": "ivDiagのFE引数で固定効果を吸収。cragg_donald_fはF.standard（cov_typeによらない）、rk_wald_fはhc1がF.robust・クラスターがF.cluster、effective_fはeff_F（hc1はrobust、クラスターはcluster。prec=14）。classicalはCragg-Donaldだけ。内生変数が複数のシナリオ・3-way・DK・HC2・HC3は比べられない。"

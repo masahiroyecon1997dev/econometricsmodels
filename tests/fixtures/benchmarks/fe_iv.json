@@ -47,7 +47,6 @@
         "wu_hausman_p_value": 8.13695821822927e-11,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 197,
-        "sargan_fixest": 0.348195697088096,
         "overid_statistic": 0.2901630809067467,
         "overid_p_value": 0.5901160431600645,
         "overid_df": 1
@@ -98,7 +97,6 @@
         "wu_hausman_p_value": 1.89593747370148e-10,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 197,
-        "sargan_fixest": 0.348195697088096,
         "overid_statistic": 0.2901630809067467,
         "overid_p_value": 0.5901160431600645,
         "overid_df": 1
@@ -149,7 +147,6 @@
         "wu_hausman_p_value": 1.9920069083362e-06,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 39,
-        "sargan_fixest": 0.348195697088096,
         "overid_statistic": 0.2901630809067467,
         "overid_p_value": 0.5901160431600645,
         "overid_df": 1
@@ -200,7 +197,6 @@
         "wu_hausman_p_value": 0.00103255396835808,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 5,
-        "sargan_fixest": 0.348195697088096,
         "overid_statistic": 0.2901630809067467,
         "overid_p_value": 0.5901160431600645,
         "overid_df": 1
@@ -251,7 +247,6 @@
         "wu_hausman_p_value": 0.000356740910203358,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 7,
-        "sargan_fixest": 0.348195697088096,
         "overid_statistic": 0.2901630809067467,
         "overid_p_value": 0.5901160431600645,
         "overid_df": 1
@@ -302,7 +297,6 @@
         "wu_hausman_p_value": 0.00403609967050941,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 4,
-        "sargan_fixest": 0.348195697088096,
         "overid_statistic": 0.2901630809067467,
         "overid_p_value": 0.5901160431600645,
         "overid_df": 1
@@ -353,7 +347,6 @@
         "wu_hausman_p_value": 0.000239339265223226,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 5,
-        "sargan_fixest": 0.348195697088096,
         "overid_statistic": 0.2901630809067467,
         "overid_p_value": 0.5901160431600645,
         "overid_df": 1
@@ -404,7 +397,6 @@
         "wu_hausman_p_value": 0.000416922202059643,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 5,
-        "sargan_fixest": 0.348195697088096,
         "overid_statistic": 0.2901630809067467,
         "overid_p_value": 0.5901160431600645,
         "overid_df": 1
@@ -457,7 +449,6 @@
         "wu_hausman_p_value": 4.80618215740921e-06,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 197,
-        "sargan_fixest": null,
         "overid_statistic": null,
         "overid_p_value": null,
         "overid_df": null
@@ -508,7 +499,6 @@
         "wu_hausman_p_value": 2.80364769592434e-06,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 197,
-        "sargan_fixest": null,
         "overid_statistic": null,
         "overid_p_value": null,
         "overid_df": null
@@ -559,7 +549,6 @@
         "wu_hausman_p_value": 2.76015996575665e-05,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 39,
-        "sargan_fixest": null,
         "overid_statistic": null,
         "overid_p_value": null,
         "overid_df": null
@@ -610,7 +599,6 @@
         "wu_hausman_p_value": 0.0240379506142035,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 5,
-        "sargan_fixest": null,
         "overid_statistic": null,
         "overid_p_value": null,
         "overid_df": null
@@ -661,7 +649,6 @@
         "wu_hausman_p_value": 0.000125618623731998,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 7,
-        "sargan_fixest": null,
         "overid_statistic": null,
         "overid_p_value": null,
         "overid_df": null
@@ -712,7 +699,6 @@
         "wu_hausman_p_value": 0.00789731021665435,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 5,
-        "sargan_fixest": null,
         "overid_statistic": null,
         "overid_p_value": null,
         "overid_df": null
@@ -763,7 +749,6 @@
         "wu_hausman_p_value": 0.0109447438247822,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 5,
-        "sargan_fixest": null,
         "overid_statistic": null,
         "overid_p_value": null,
         "overid_df": null
@@ -825,7 +810,6 @@
         "wu_hausman_p_value": 2.18900707941342e-25,
         "wu_hausman_df_num": 2,
         "wu_hausman_df_denom": 195,
-        "sargan_fixest": 1.16785016533629,
         "overid_statistic": 0.973208471113575,
         "overid_p_value": 0.32388129694410994,
         "overid_df": 1
@@ -885,7 +869,6 @@
         "wu_hausman_p_value": 2.55588517943463e-27,
         "wu_hausman_df_num": 2,
         "wu_hausman_df_denom": 195,
-        "sargan_fixest": 1.16785016533629,
         "overid_statistic": 0.973208471113575,
         "overid_p_value": 0.32388129694410994,
         "overid_df": 1
@@ -945,7 +928,6 @@
         "wu_hausman_p_value": 4.27149163455055e-14,
         "wu_hausman_df_num": 2,
         "wu_hausman_df_denom": 39,
-        "sargan_fixest": 1.16785016533629,
         "overid_statistic": 0.973208471113575,
         "overid_p_value": 0.32388129694410994,
         "overid_df": 1
@@ -1005,7 +987,6 @@
         "wu_hausman_p_value": 0.000323456816896417,
         "wu_hausman_df_num": 2,
         "wu_hausman_df_denom": 5,
-        "sargan_fixest": 1.16785016533629,
         "overid_statistic": 0.973208471113575,
         "overid_p_value": 0.32388129694410994,
         "overid_df": 1
@@ -1065,7 +1046,6 @@
         "wu_hausman_p_value": 0.000142642995491125,
         "wu_hausman_df_num": 2,
         "wu_hausman_df_denom": 7,
-        "sargan_fixest": 1.16785016533629,
         "overid_statistic": 0.973208471113575,
         "overid_p_value": 0.32388129694410994,
         "overid_df": 1
@@ -1125,7 +1105,6 @@
         "wu_hausman_p_value": 2.60432751786362e-05,
         "wu_hausman_df_num": 2,
         "wu_hausman_df_denom": 5,
-        "sargan_fixest": 1.16785016533629,
         "overid_statistic": 0.973208471113575,
         "overid_p_value": 0.32388129694410994,
         "overid_df": 1
@@ -1185,7 +1164,6 @@
         "wu_hausman_p_value": 9.7335394180126e-05,
         "wu_hausman_df_num": 2,
         "wu_hausman_df_denom": 5,
-        "sargan_fixest": 1.16785016533629,
         "overid_statistic": 0.973208471113575,
         "overid_p_value": 0.32388129694410994,
         "overid_df": 1
@@ -1238,7 +1216,6 @@
         "wu_hausman_p_value": 0.170143285218258,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 197,
-        "sargan_fixest": 0.543233346958969,
         "overid_statistic": 0.4526944557991408,
         "overid_p_value": 0.5010581698757486,
         "overid_df": 1
@@ -1289,7 +1266,6 @@
         "wu_hausman_p_value": 0.149500081362669,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 197,
-        "sargan_fixest": 0.543233346958969,
         "overid_statistic": 0.4526944557991408,
         "overid_p_value": 0.5010581698757486,
         "overid_df": 1
@@ -1340,7 +1316,6 @@
         "wu_hausman_p_value": 0.142393446716335,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 39,
-        "sargan_fixest": 0.543233346958969,
         "overid_statistic": 0.4526944557991408,
         "overid_p_value": 0.5010581698757486,
         "overid_df": 1
@@ -1391,7 +1366,6 @@
         "wu_hausman_p_value": 0.332224343602199,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 5,
-        "sargan_fixest": 0.543233346958969,
         "overid_statistic": 0.4526944557991408,
         "overid_p_value": 0.5010581698757486,
         "overid_df": 1
@@ -1442,7 +1416,6 @@
         "wu_hausman_p_value": 0.102232389446559,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 7,
-        "sargan_fixest": 0.543233346958969,
         "overid_statistic": 0.4526944557991408,
         "overid_p_value": 0.5010581698757486,
         "overid_df": 1
@@ -1493,7 +1466,6 @@
         "wu_hausman_p_value": 0.270113962161475,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 5,
-        "sargan_fixest": 0.543233346958969,
         "overid_statistic": 0.4526944557991408,
         "overid_p_value": 0.5010581698757486,
         "overid_df": 1
@@ -1544,7 +1516,6 @@
         "wu_hausman_p_value": 0.308229943757519,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 5,
-        "sargan_fixest": 0.543233346958969,
         "overid_statistic": 0.4526944557991408,
         "overid_p_value": 0.5010581698757486,
         "overid_df": 1
@@ -1597,7 +1568,6 @@
         "wu_hausman_p_value": 9.98839696507843e-05,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 197,
-        "sargan_fixest": 33.512701536227,
         "overid_statistic": 27.927251280189168,
         "overid_p_value": 1.259631742233633e-07,
         "overid_df": 1
@@ -1648,7 +1618,6 @@
         "wu_hausman_p_value": 7.61512679899702e-05,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 197,
-        "sargan_fixest": 33.512701536227,
         "overid_statistic": 27.927251280189168,
         "overid_p_value": 1.259631742233633e-07,
         "overid_df": 1
@@ -1699,7 +1668,6 @@
         "wu_hausman_p_value": 0.00209909563351635,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 39,
-        "sargan_fixest": 33.512701536227,
         "overid_statistic": 27.927251280189168,
         "overid_p_value": 1.259631742233633e-07,
         "overid_df": 1
@@ -1750,7 +1718,6 @@
         "wu_hausman_p_value": 0.00232538037269834,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 5,
-        "sargan_fixest": 33.512701536227,
         "overid_statistic": 27.927251280189168,
         "overid_p_value": 1.259631742233633e-07,
         "overid_df": 1
@@ -1801,7 +1768,6 @@
         "wu_hausman_p_value": 0.00597572669944353,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 7,
-        "sargan_fixest": 33.512701536227,
         "overid_statistic": 27.927251280189168,
         "overid_p_value": 1.259631742233633e-07,
         "overid_df": 1
@@ -1852,7 +1818,6 @@
         "wu_hausman_p_value": 0.000782121909880396,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 5,
-        "sargan_fixest": 33.512701536227,
         "overid_statistic": 27.927251280189168,
         "overid_p_value": 1.259631742233633e-07,
         "overid_df": 1
@@ -1903,7 +1868,6 @@
         "wu_hausman_p_value": 0.00108916572190552,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 5,
-        "sargan_fixest": 33.512701536227,
         "overid_statistic": 27.927251280189168,
         "overid_p_value": 1.259631742233633e-07,
         "overid_df": 1
@@ -1956,7 +1920,6 @@
         "wu_hausman_p_value": 0.0445033915513359,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 197,
-        "sargan_fixest": 0.475690813802556,
         "overid_statistic": 0.39640901150213004,
         "overid_p_value": 0.5289496444830639,
         "overid_df": 1
@@ -2007,7 +1970,6 @@
         "wu_hausman_p_value": 0.0369627943621573,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 197,
-        "sargan_fixest": 0.475690813802556,
         "overid_statistic": 0.39640901150213004,
         "overid_p_value": 0.5289496444830639,
         "overid_df": 1
@@ -2058,7 +2020,6 @@
         "wu_hausman_p_value": 0.0515139328663371,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 39,
-        "sargan_fixest": 0.475690813802556,
         "overid_statistic": 0.39640901150213004,
         "overid_p_value": 0.5289496444830639,
         "overid_df": 1
@@ -2109,7 +2070,6 @@
         "wu_hausman_p_value": 0.0338323612738308,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 5,
-        "sargan_fixest": 0.475690813802556,
         "overid_statistic": 0.39640901150213004,
         "overid_p_value": 0.5289496444830639,
         "overid_df": 1
@@ -2160,7 +2120,6 @@
         "wu_hausman_p_value": 0.0133466044476132,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 7,
-        "sargan_fixest": 0.475690813802556,
         "overid_statistic": 0.39640901150213004,
         "overid_p_value": 0.5289496444830639,
         "overid_df": 1
@@ -2211,7 +2170,6 @@
         "wu_hausman_p_value": 0.0313395946492387,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 5,
-        "sargan_fixest": 0.475690813802556,
         "overid_statistic": 0.39640901150213004,
         "overid_p_value": 0.5289496444830639,
         "overid_df": 1
@@ -2262,7 +2220,6 @@
         "wu_hausman_p_value": 0.0456888437417445,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 5,
-        "sargan_fixest": 0.475690813802556,
         "overid_statistic": 0.39640901150213004,
         "overid_p_value": 0.5289496444830639,
         "overid_df": 1
@@ -2315,7 +2272,6 @@
         "wu_hausman_p_value": 2.99543264605044e-11,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 197,
-        "sargan_fixest": 1.01740767043296,
         "overid_statistic": 0.8478397253608,
         "overid_p_value": 0.3571641881530858,
         "overid_df": 1
@@ -2366,7 +2322,6 @@
         "wu_hausman_p_value": 4.51073050920694e-12,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 197,
-        "sargan_fixest": 1.01740767043296,
         "overid_statistic": 0.8478397253608,
         "overid_p_value": 0.3571641881530858,
         "overid_df": 1
@@ -2417,7 +2372,6 @@
         "wu_hausman_p_value": 2.4324892846367e-07,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 39,
-        "sargan_fixest": 1.01740767043296,
         "overid_statistic": 0.8478397253608,
         "overid_p_value": 0.3571641881530858,
         "overid_df": 1
@@ -2468,7 +2422,6 @@
         "wu_hausman_p_value": 0.00075264504212198,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 5,
-        "sargan_fixest": 1.01740767043296,
         "overid_statistic": 0.8478397253608,
         "overid_p_value": 0.3571641881530858,
         "overid_df": 1
@@ -2519,7 +2472,6 @@
         "wu_hausman_p_value": 0.000367685216930454,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 7,
-        "sargan_fixest": 1.01740767043296,
         "overid_statistic": 0.8478397253608,
         "overid_p_value": 0.3571641881530858,
         "overid_df": 1
@@ -2570,7 +2522,6 @@
         "wu_hausman_p_value": 0.000108604463370378,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 5,
-        "sargan_fixest": 1.01740767043296,
         "overid_statistic": 0.8478397253608,
         "overid_p_value": 0.3571641881530858,
         "overid_df": 1
@@ -2621,7 +2572,6 @@
         "wu_hausman_p_value": 0.000139333822987303,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 5,
-        "sargan_fixest": 1.01740767043296,
         "overid_statistic": 0.8478397253608,
         "overid_p_value": 0.3571641881530858,
         "overid_df": 1
@@ -2674,7 +2624,6 @@
         "wu_hausman_p_value": 1.61696246920158e-08,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 197,
-        "sargan_fixest": 0.778804995496003,
         "overid_statistic": 0.6490041629133358,
         "overid_p_value": 0.42046894241355326,
         "overid_df": 1
@@ -2725,7 +2674,6 @@
         "wu_hausman_p_value": 5.10592402965677e-09,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 197,
-        "sargan_fixest": 0.778804995496003,
         "overid_statistic": 0.6490041629133358,
         "overid_p_value": 0.42046894241355326,
         "overid_df": 1
@@ -2776,7 +2724,6 @@
         "wu_hausman_p_value": 2.51887498424858e-06,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 39,
-        "sargan_fixest": 0.778804995496003,
         "overid_statistic": 0.6490041629133358,
         "overid_p_value": 0.42046894241355326,
         "overid_df": 1
@@ -2827,7 +2774,6 @@
         "wu_hausman_p_value": 0.00408043883469282,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 5,
-        "sargan_fixest": 0.778804995496003,
         "overid_statistic": 0.6490041629133358,
         "overid_p_value": 0.42046894241355326,
         "overid_df": 1
@@ -2878,7 +2824,6 @@
         "wu_hausman_p_value": 0.000574161522544507,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 7,
-        "sargan_fixest": 0.778804995496003,
         "overid_statistic": 0.6490041629133358,
         "overid_p_value": 0.42046894241355326,
         "overid_df": 1
@@ -2929,7 +2874,6 @@
         "wu_hausman_p_value": 0.000773233181591594,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 5,
-        "sargan_fixest": 0.778804995496003,
         "overid_statistic": 0.6490041629133358,
         "overid_p_value": 0.42046894241355326,
         "overid_df": 1
@@ -2980,7 +2924,6 @@
         "wu_hausman_p_value": 0.00116475629523717,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 5,
-        "sargan_fixest": 0.778804995496003,
         "overid_statistic": 0.6490041629133358,
         "overid_p_value": 0.42046894241355326,
         "overid_df": 1
@@ -3033,7 +2976,6 @@
         "wu_hausman_p_value": 7.66959835836158e-10,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 117,
-        "sargan_fixest": 0.117319517384997,
         "overid_statistic": 0.07821301158999801,
         "overid_p_value": 0.7797338481299676,
         "overid_df": 1
@@ -3084,7 +3026,6 @@
         "wu_hausman_p_value": 1.59604557329824e-10,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 117,
-        "sargan_fixest": 0.117319517384997,
         "overid_statistic": 0.07821301158999801,
         "overid_p_value": 0.7797338481299676,
         "overid_df": 1
@@ -3135,7 +3076,6 @@
         "wu_hausman_p_value": 9.64848022173345e-10,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 59,
-        "sargan_fixest": 0.117319517384997,
         "overid_statistic": 0.07821301158999801,
         "overid_p_value": 0.7797338481299676,
         "overid_df": 1
@@ -3186,7 +3126,6 @@
         "wu_hausman_p_value": 0.0125627080040661,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 2,
-        "sargan_fixest": 0.117319517384997,
         "overid_statistic": 0.07821301158999801,
         "overid_p_value": 0.7797338481299676,
         "overid_df": 1
@@ -3237,7 +3176,6 @@
         "wu_hausman_p_value": 7.13673695708214e-07,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 11,
-        "sargan_fixest": 0.117319517384997,
         "overid_statistic": 0.07821301158999801,
         "overid_p_value": 0.7797338481299676,
         "overid_df": 1
@@ -3288,7 +3226,6 @@
         "wu_hausman_p_value": 0.0104531630077813,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 2,
-        "sargan_fixest": 0.117319517384997,
         "overid_statistic": 0.07821301158999801,
         "overid_p_value": 0.7797338481299676,
         "overid_df": 1
@@ -3341,7 +3278,6 @@
         "wu_hausman_p_value": 1.75522231915755e-07,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 225,
-        "sargan_fixest": 0.627549661686837,
         "overid_statistic": 0.5961721786024952,
         "overid_p_value": 0.4400422516304715,
         "overid_df": 1
@@ -3392,7 +3328,6 @@
         "wu_hausman_p_value": 8.51701594366344e-07,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 225,
-        "sargan_fixest": 0.627549661686837,
         "overid_statistic": 0.5961721786024952,
         "overid_p_value": 0.4400422516304715,
         "overid_df": 1
@@ -3443,7 +3378,6 @@
         "wu_hausman_p_value": 2.40354117205978e-05,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 11,
-        "sargan_fixest": 0.627549661686837,
         "overid_statistic": 0.5961721786024952,
         "overid_p_value": 0.4400422516304715,
         "overid_df": 1
@@ -3494,7 +3428,6 @@
         "wu_hausman_p_value": 7.28846424489367e-05,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 19,
-        "sargan_fixest": 0.627549661686837,
         "overid_statistic": 0.5961721786024952,
         "overid_p_value": 0.4400422516304715,
         "overid_df": 1
@@ -3545,7 +3478,6 @@
         "wu_hausman_p_value": 0.011754190178546,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 2,
-        "sargan_fixest": 0.627549661686837,
         "overid_statistic": 0.5961721786024952,
         "overid_p_value": 0.4400422516304715,
         "overid_df": 1
@@ -3596,7 +3528,6 @@
         "wu_hausman_p_value": 0.000455792350480845,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 19,
-        "sargan_fixest": 0.627549661686837,
         "overid_statistic": 0.5961721786024952,
         "overid_p_value": 0.4400422516304715,
         "overid_df": 1
@@ -3647,7 +3578,6 @@
         "wu_hausman_p_value": 0.000251148147616601,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 19,
-        "sargan_fixest": 0.627549661686837,
         "overid_statistic": 0.5961721786024952,
         "overid_p_value": 0.4400422516304715,
         "overid_df": 1
@@ -3700,7 +3630,6 @@
         "wu_hausman_p_value": 5.0544084494202e-09,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 117,
-        "sargan_fixest": 0.620591127827232,
         "overid_statistic": 0.465443345870424,
         "overid_p_value": 0.49509094551470756,
         "overid_df": 1
@@ -3751,7 +3680,6 @@
         "wu_hausman_p_value": 3.493179085098e-07,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 117,
-        "sargan_fixest": 0.620591127827232,
         "overid_statistic": 0.465443345870424,
         "overid_p_value": 0.49509094551470756,
         "overid_df": 1
@@ -3802,7 +3730,6 @@
         "wu_hausman_p_value": 6.25869205292575e-06,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 39,
-        "sargan_fixest": 0.620591127827232,
         "overid_statistic": 0.465443345870424,
         "overid_p_value": 0.49509094551470756,
         "overid_df": 1
@@ -3853,7 +3780,6 @@
         "wu_hausman_p_value": 0.0017360438641501,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 5,
-        "sargan_fixest": 0.620591127827232,
         "overid_statistic": 0.465443345870424,
         "overid_p_value": 0.49509094551470756,
         "overid_df": 1
@@ -3904,7 +3830,6 @@
         "wu_hausman_p_value": 0.000318236240789031,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 7,
-        "sargan_fixest": 0.620591127827232,
         "overid_statistic": 0.465443345870424,
         "overid_p_value": 0.49509094551470756,
         "overid_df": 1
@@ -3955,7 +3880,6 @@
         "wu_hausman_p_value": 0.000157155344565524,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 5,
-        "sargan_fixest": 0.620591127827232,
         "overid_statistic": 0.465443345870424,
         "overid_p_value": 0.49509094551470756,
         "overid_df": 1
@@ -4006,7 +3930,6 @@
         "wu_hausman_p_value": 0.000175470349896263,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 5,
-        "sargan_fixest": 0.620591127827232,
         "overid_statistic": 0.465443345870424,
         "overid_p_value": 0.49509094551470756,
         "overid_df": 1
@@ -4059,7 +3982,6 @@
         "wu_hausman_p_value": 0.010679558962405,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 21,
-        "sargan_fixest": 0.0126459444851328,
         "overid_statistic": 0.0094844583638496,
         "overid_p_value": 0.9224181280028791,
         "overid_df": 1
@@ -4110,7 +4032,6 @@
         "wu_hausman_p_value": 0.00682114052242928,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 21,
-        "sargan_fixest": 0.0126459444851328,
         "overid_statistic": 0.0094844583638496,
         "overid_p_value": 0.9224181280028791,
         "overid_df": 1
@@ -4161,7 +4082,6 @@
         "wu_hausman_p_value": 0.0154372489841398,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 7,
-        "sargan_fixest": 0.0126459444851328,
         "overid_statistic": 0.0094844583638496,
         "overid_p_value": 0.9224181280028791,
         "overid_df": 1
@@ -4212,7 +4132,6 @@
         "wu_hausman_p_value": 0.0679880776141516,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 3,
-        "sargan_fixest": 0.0126459444851328,
         "overid_statistic": 0.0094844583638496,
         "overid_p_value": 0.9224181280028791,
         "overid_df": 1
@@ -4263,7 +4182,6 @@
         "wu_hausman_p_value": 0.028636506587457,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 3,
-        "sargan_fixest": 0.0126459444851328,
         "overid_statistic": 0.0094844583638496,
         "overid_p_value": 0.9224181280028791,
         "overid_df": 1
@@ -4314,7 +4232,6 @@
         "wu_hausman_p_value": 0.028636506587457,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 3,
-        "sargan_fixest": 0.0126459444851328,
         "overid_statistic": 0.0094844583638496,
         "overid_p_value": 0.9224181280028791,
         "overid_df": 1
@@ -4368,7 +4285,6 @@
           "wu_hausman_p_value": 1.28049399574829e-12,
           "wu_hausman_df_num": 1,
           "wu_hausman_df_denom": 192,
-          "sargan_fixest": 0.167060299583168,
           "overid_statistic": 0.135736493411324,
           "overid_p_value": 0.712556852075905,
           "overid_df": 1
@@ -4419,7 +4335,6 @@
           "wu_hausman_p_value": 1.46190456032721e-10,
           "wu_hausman_df_num": 1,
           "wu_hausman_df_denom": 192,
-          "sargan_fixest": 0.167060299583168,
           "overid_statistic": 0.135736493411324,
           "overid_p_value": 0.712556852075905,
           "overid_df": 1
@@ -4470,7 +4385,6 @@
           "wu_hausman_p_value": 1.67225992827315e-06,
           "wu_hausman_df_num": 1,
           "wu_hausman_df_denom": 39,
-          "sargan_fixest": 0.167060299583168,
           "overid_statistic": 0.135736493411324,
           "overid_p_value": 0.712556852075905,
           "overid_df": 1
@@ -4521,7 +4435,6 @@
           "wu_hausman_p_value": 0.00100241699463301,
           "wu_hausman_df_num": 1,
           "wu_hausman_df_denom": 5,
-          "sargan_fixest": 0.167060299583168,
           "overid_statistic": 0.135736493411324,
           "overid_p_value": 0.712556852075905,
           "overid_df": 1
@@ -4572,7 +4485,6 @@
           "wu_hausman_p_value": 0.0010060135075642,
           "wu_hausman_df_num": 1,
           "wu_hausman_df_denom": 7,
-          "sargan_fixest": 0.167060299583168,
           "overid_statistic": 0.135736493411324,
           "overid_p_value": 0.712556852075905,
           "overid_df": 1
@@ -4623,7 +4535,6 @@
           "wu_hausman_p_value": 9.90392121425907e-05,
           "wu_hausman_df_num": 1,
           "wu_hausman_df_denom": 5,
-          "sargan_fixest": 0.167060299583168,
           "overid_statistic": 0.135736493411324,
           "overid_p_value": 0.712556852075905,
           "overid_df": 1
@@ -4674,7 +4585,6 @@
           "wu_hausman_p_value": 0.000202024167588015,
           "wu_hausman_df_num": 1,
           "wu_hausman_df_denom": 5,
-          "sargan_fixest": 0.167060299583168,
           "overid_statistic": 0.135736493411324,
           "overid_p_value": 0.712556852075905,
           "overid_df": 1
@@ -4727,7 +4637,6 @@
           "wu_hausman_p_value": 6.40911896200692e-10,
           "wu_hausman_df_num": 1,
           "wu_hausman_df_denom": 112,
-          "sargan_fixest": 0.158176202381544,
           "overid_statistic": 0.11368914546173477,
           "overid_p_value": 0.7359825622256547,
           "overid_df": 1
@@ -4778,7 +4687,6 @@
           "wu_hausman_p_value": 5.76086938032301e-07,
           "wu_hausman_df_num": 1,
           "wu_hausman_df_denom": 112,
-          "sargan_fixest": 0.158176202381544,
           "overid_statistic": 0.11368914546173477,
           "overid_p_value": 0.7359825622256547,
           "overid_df": 1
@@ -4829,7 +4737,6 @@
           "wu_hausman_p_value": 1.21940991137348e-05,
           "wu_hausman_df_num": 1,
           "wu_hausman_df_denom": 39,
-          "sargan_fixest": 0.158176202381544,
           "overid_statistic": 0.11368914546173477,
           "overid_p_value": 0.7359825622256547,
           "overid_df": 1
@@ -4880,7 +4787,6 @@
           "wu_hausman_p_value": 0.00475108713711824,
           "wu_hausman_df_num": 1,
           "wu_hausman_df_denom": 5,
-          "sargan_fixest": 0.158176202381544,
           "overid_statistic": 0.11368914546173477,
           "overid_p_value": 0.7359825622256547,
           "overid_df": 1
@@ -4931,7 +4837,6 @@
           "wu_hausman_p_value": 0.000908082319223623,
           "wu_hausman_df_num": 1,
           "wu_hausman_df_denom": 7,
-          "sargan_fixest": 0.158176202381544,
           "overid_statistic": 0.11368914546173477,
           "overid_p_value": 0.7359825622256547,
           "overid_df": 1
@@ -4982,7 +4887,6 @@
           "wu_hausman_p_value": 0.000301649278362083,
           "wu_hausman_df_num": 1,
           "wu_hausman_df_denom": 5,
-          "sargan_fixest": 0.158176202381544,
           "overid_statistic": 0.11368914546173477,
           "overid_p_value": 0.7359825622256547,
           "overid_df": 1
@@ -5033,7 +4937,6 @@
           "wu_hausman_p_value": 0.000476840904912567,
           "wu_hausman_df_num": 1,
           "wu_hausman_df_denom": 5,
-          "sargan_fixest": 0.158176202381544,
           "overid_statistic": 0.11368914546173477,
           "overid_p_value": 0.7359825622256547,
           "overid_df": 1
@@ -5095,7 +4998,6 @@
           "wu_hausman_p_value": 1.31838636036342e-39,
           "wu_hausman_df_num": 2,
           "wu_hausman_df_denom": 190,
-          "sargan_fixest": 1.12313685307402,
           "overid_statistic": 0.9125486931226412,
           "overid_p_value": 0.33943907862929873,
           "overid_df": 1
@@ -5155,7 +5057,6 @@
           "wu_hausman_p_value": 1.64847376137044e-41,
           "wu_hausman_df_num": 2,
           "wu_hausman_df_denom": 190,
-          "sargan_fixest": 1.12313685307402,
           "overid_statistic": 0.9125486931226412,
           "overid_p_value": 0.33943907862929873,
           "overid_df": 1
@@ -5215,7 +5116,6 @@
           "wu_hausman_p_value": 1.63168461400107e-19,
           "wu_hausman_df_num": 2,
           "wu_hausman_df_denom": 39,
-          "sargan_fixest": 1.12313685307402,
           "overid_statistic": 0.9125486931226412,
           "overid_p_value": 0.33943907862929873,
           "overid_df": 1
@@ -5275,7 +5175,6 @@
           "wu_hausman_p_value": 3.20322447117811e-05,
           "wu_hausman_df_num": 2,
           "wu_hausman_df_denom": 5,
-          "sargan_fixest": 1.12313685307402,
           "overid_statistic": 0.9125486931226412,
           "overid_p_value": 0.33943907862929873,
           "overid_df": 1
@@ -5335,7 +5234,6 @@
           "wu_hausman_p_value": 4.28881426616441e-06,
           "wu_hausman_df_num": 2,
           "wu_hausman_df_denom": 7,
-          "sargan_fixest": 1.12313685307402,
           "overid_statistic": 0.9125486931226412,
           "overid_p_value": 0.33943907862929873,
           "overid_df": 1
@@ -5395,7 +5293,6 @@
           "wu_hausman_p_value": 4.00335654377832e-07,
           "wu_hausman_df_num": 2,
           "wu_hausman_df_denom": 5,
-          "sargan_fixest": 1.12313685307402,
           "overid_statistic": 0.9125486931226412,
           "overid_p_value": 0.33943907862929873,
           "overid_df": 1
@@ -5455,7 +5352,6 @@
           "wu_hausman_p_value": 5.06724283020462e-06,
           "wu_hausman_df_num": 2,
           "wu_hausman_df_denom": 5,
-          "sargan_fixest": 1.12313685307402,
           "overid_statistic": 0.9125486931226412,
           "overid_p_value": 0.33943907862929873,
           "overid_df": 1
@@ -5508,7 +5404,6 @@
           "wu_hausman_p_value": 2.06306010996855e-12,
           "wu_hausman_df_num": 1,
           "wu_hausman_df_denom": 206,
-          "sargan_fixest": 0.023921276446055,
           "overid_statistic": 0.02083144490510623,
           "overid_p_value": 0.8852390800320551,
           "overid_df": 1
@@ -5559,7 +5454,6 @@
           "wu_hausman_p_value": 1.95104050736383e-10,
           "wu_hausman_df_num": 1,
           "wu_hausman_df_denom": 206,
-          "sargan_fixest": 0.023921276446055,
           "overid_statistic": 0.02083144490510623,
           "overid_p_value": 0.8852390800320551,
           "overid_df": 1
@@ -5610,7 +5504,6 @@
           "wu_hausman_p_value": 8.585387108853e-06,
           "wu_hausman_df_num": 1,
           "wu_hausman_df_denom": 11,
-          "sargan_fixest": 0.023921276446055,
           "overid_statistic": 0.02083144490510623,
           "overid_p_value": 0.8852390800320551,
           "overid_df": 1
@@ -5661,7 +5554,6 @@
           "wu_hausman_p_value": 8.90351288108265e-06,
           "wu_hausman_df_num": 1,
           "wu_hausman_df_denom": 19,
-          "sargan_fixest": 0.023921276446055,
           "overid_statistic": 0.02083144490510623,
           "overid_p_value": 0.8852390800320551,
           "overid_df": 1
@@ -5712,7 +5604,6 @@
           "wu_hausman_p_value": 0.00245176627274085,
           "wu_hausman_df_num": 1,
           "wu_hausman_df_denom": 2,
-          "sargan_fixest": 0.023921276446055,
           "overid_statistic": 0.02083144490510623,
           "overid_p_value": 0.8852390800320551,
           "overid_df": 1
@@ -5763,7 +5654,6 @@
           "wu_hausman_p_value": 2.50688937373615e-05,
           "wu_hausman_df_num": 1,
           "wu_hausman_df_denom": 19,
-          "sargan_fixest": 0.023921276446055,
           "overid_statistic": 0.02083144490510623,
           "overid_p_value": 0.8852390800320551,
           "overid_df": 1
@@ -5814,7 +5704,6 @@
           "wu_hausman_p_value": 1.60697398498276e-05,
           "wu_hausman_df_num": 1,
           "wu_hausman_df_denom": 19,
-          "sargan_fixest": 0.023921276446055,
           "overid_statistic": 0.02083144490510623,
           "overid_p_value": 0.8852390800320551,
           "overid_df": 1
@@ -5868,7 +5757,6 @@
         "wu_hausman_p_value": 1.12405250373196e-12,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 189,
-        "sargan_fixest": 0.385984775022212,
         "overid_statistic": 0.3087878200177696,
         "overid_p_value": 0.5784249816524052,
         "overid_df": 1
@@ -5919,7 +5807,6 @@
         "wu_hausman_p_value": 1.72291608267404e-10,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 189,
-        "sargan_fixest": 0.385984775022212,
         "overid_statistic": 0.3087878200177696,
         "overid_p_value": 0.5784249816524052,
         "overid_df": 1
@@ -5970,7 +5857,6 @@
         "wu_hausman_p_value": 1.82288961159666e-06,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 39,
-        "sargan_fixest": 0.385984775022212,
         "overid_statistic": 0.3087878200177696,
         "overid_p_value": 0.5784249816524052,
         "overid_df": 1
@@ -6021,7 +5907,6 @@
         "wu_hausman_p_value": 0.00080726682994414,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 5,
-        "sargan_fixest": 0.385984775022212,
         "overid_statistic": 0.3087878200177696,
         "overid_p_value": 0.5784249816524052,
         "overid_df": 1
@@ -6072,7 +5957,6 @@
         "wu_hausman_p_value": 0.00146526385031566,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 7,
-        "sargan_fixest": 0.385984775022212,
         "overid_statistic": 0.3087878200177696,
         "overid_p_value": 0.5784249816524052,
         "overid_df": 1
@@ -6123,7 +6007,6 @@
         "wu_hausman_p_value": 0.0243851885025091,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 3,
-        "sargan_fixest": 0.385984775022212,
         "overid_statistic": 0.3087878200177696,
         "overid_p_value": 0.5784249816524052,
         "overid_df": 1
@@ -6174,7 +6057,6 @@
         "wu_hausman_p_value": 0.000124191159439754,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 5,
-        "sargan_fixest": 0.385984775022212,
         "overid_statistic": 0.3087878200177696,
         "overid_p_value": 0.5784249816524052,
         "overid_df": 1
@@ -6219,7 +6101,6 @@
         "wu_hausman_p_value": 6.62828635642112e-06,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 198,
-        "sargan_fixest": 0.677445829566583,
         "overid_statistic": 0.5645381913054858,
         "overid_p_value": 0.45243749350118734,
         "overid_df": 1
@@ -6262,7 +6143,6 @@
         "wu_hausman_p_value": 4.64390735765886e-06,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 198,
-        "sargan_fixest": 0.677445829566583,
         "overid_statistic": 0.5645381913054858,
         "overid_p_value": 0.45243749350118734,
         "overid_df": 1
@@ -6305,7 +6185,6 @@
         "wu_hausman_p_value": 9.28257959113204e-05,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 39,
-        "sargan_fixest": 0.677445829566583,
         "overid_statistic": 0.5645381913054858,
         "overid_p_value": 0.45243749350118734,
         "overid_df": 1
@@ -6358,7 +6237,6 @@
         "wu_hausman_p_value": 8.13695821822927e-11,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 197,
-        "sargan_fixest": 0.348195697088096,
         "overid_statistic": 0.2901630809067467,
         "overid_p_value": 0.5901160431600645,
         "overid_df": 1
@@ -6409,7 +6287,6 @@
         "wu_hausman_p_value": 1.89593747370148e-10,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 197,
-        "sargan_fixest": 0.348195697088096,
         "overid_statistic": 0.2901630809067467,
         "overid_p_value": 0.5901160431600645,
         "overid_df": 1
@@ -6460,7 +6337,6 @@
         "wu_hausman_p_value": 1.9920069083362e-06,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 39,
-        "sargan_fixest": 0.348195697088096,
         "overid_statistic": 0.2901630809067467,
         "overid_p_value": 0.5901160431600645,
         "overid_df": 1
@@ -6511,7 +6387,6 @@
         "wu_hausman_p_value": 0.000239339265223226,
         "wu_hausman_df_num": 1,
         "wu_hausman_df_denom": 5,
-        "sargan_fixest": 0.348195697088096,
         "overid_statistic": 0.2901630809067467,
         "overid_p_value": 0.5901160431600645,
         "overid_df": 1
@@ -6521,10 +6396,10 @@
   "wooldridge": {},
   "_meta": {
     "method": "fe_iv",
-    "generated_at": "2026-11-13T23:08:09.768297+00:00",
+    "generated_at": "2026-11-13T23:38:07.601703+00:00",
     "reference": "fixest (R)",
     "r_version": "4.5.3",
     "fixest_version": "0.14.2",
-    "note": "feolsの固定効果・操作変数構文。fixef.tol=1e-11、ssc()は既定のまま（clusterはK.fixef=nonnested・t.df=min、hetero・DKはK.fixef=full）。dkのバンド幅は本実装の既定式floor(4*(T/100)^(2/9))、またはdk_bw1の明示値1。hc2・hc3はfixestがIVで提供しない。Wu-Hausmanは第一段階の残差を足した補助回帰を同じvcovで回したWald F（iidのときfitstat 'wh'と一致）。部分Fは内生変数ごとの第一段階（等分散）のWald F。overid_statisticはfixestのsargan（e'e/n尺度）に(n-n_absorbed)/nを掛けた本実装の尺度、sargan_fixestは生の値。rk_wald_fは内生変数が1個のときの第一段階のWald F（同じvcov）。Cragg-Donald（cd）・Kleibergen-Paap（kpr）・within R²（wr2）はfixestの定義が違うため含めない。"
+    "note": "feolsの固定効果・操作変数構文。fixef.tol=1e-11、ssc()は既定のまま（clusterはK.fixef=nonnested・t.df=min、hetero・DKはK.fixef=full）。dkのバンド幅は本実装の既定式floor(4*(T/100)^(2/9))、またはdk_bw1の明示値1。hc2・hc3はfixestがIVで提供しない。Wu-Hausmanは第一段階の残差を足した補助回帰を同じvcovで回したWald F（iidのときfitstat 'wh'と一致）。部分Fは内生変数ごとの第一段階（等分散）のWald F。overid_statisticはfixestのsargan（e'e/n尺度）に(n-n_absorbed)/nを掛けた本実装の尺度（生の値は保存しない）。rk_wald_fは内生変数が1個のときの第一段階のWald F（同じvcov）。Cragg-Donald（cd）・Kleibergen-Paap（kpr）・within R²（wr2）はfixestの定義が違うため含めない。"
   }
 }

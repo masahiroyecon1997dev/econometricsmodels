@@ -1,466 +1,277 @@
-//! FEIV（固定効果IV）の入力データ型（`FeIvInput`）。
+//! FEIV（固定効果IV、FE-2SLS）の推定量`FeIvEstimator`。
 //!
-//! `FeInput`と同じく`engine`はpolars/PyO3を知らず、`engine_pybind`が抽出した列
-//! （`&[f64]`/`&[Vec<f64>]`）と、コード化済みの効果の各次元（`effects`の順の`GroupCodes`）を
-//! 受け取る。`faer::Mat`は組み立てない（within変換が列単位のため、`FeInput`と同じ列スライス）。
+//! 固定効果を除いた（within変換した）データへの2SLSで、構造式
+//! `y = X_exog β_exog + X_endog β_endog + 固定効果 + ε`を推定する。定数項は持たない（固定効果が吸収する）。
+//! 入力は`FeIvInput`（役割ごとの列と効果の各次元の索引）、固定効果の方向は`FeEffects`
+//! （1-way・2-way・3次元以上）、`cov_type`は`FeCovType`（Classical・HC1〜HC3・Cluster・DK）で、FEと同じ型。
 //!
-//! 列は役割で分ける: 被説明変数`y`、外生の説明変数`x_exog`、内生の説明変数`x_endog`、
-//! 操作変数`instruments`。固定効果が定数項を吸収するため、定数項は持たない。
-//! 効果の各次元・効果の列名は`PanelIndex`（`common.rs`）にまとめ、各列は同じ索引を共有する。
+//! # `FeIvEstimator::fit`のパイプライン
 //!
-//! 空の役割（`x_exog`が空は正当、`x_endog`・`instruments`が空は推定できない）の検査は
-//! `IvInput`と同じ層分けで、入力型は受理する。`x_endog`・`instruments`が空であることの拒否は
-//! `engine_pybind`の列抽出側、`len(instruments) < len(x_endog)`は推定器側の責務。
+//! 1. 操作変数の数の検査（`len(instruments) >= len(x_endog)`）、singleton・生の値が一定の列の検出。
+//! 2. `y`・`x_exog`・`x_endog`・`instruments`の全列を**1回だけ**within変換する（`FeEstimator`と同じ
+//!    変換。バランスな1-way・2-wayは閉形式、不均衡な2-wayと3次元以上は交互射影）。変換が残す誤差
+//!    （`noise`）は全列で共有し、分散ゼロ・完全適合の判定に足す。
+//! 3. 自由度の検証（構造式`n > k + neffects`を先に、次に第一段階`n > l + neffects`。`l = k_exog + k_instruments`）、
+//!    変換後の分散ゼロの列（役割ごとに報告）。
+//! 4. 第一段階: 内生変数ごとに、変換済みの列を`FeEstimator`の後半（`fit_from_within`）で推定する
+//!    （`x̃_endog[j] ~ x̃_exog + 操作変数`）。`cov_type`は構造式と同じで、傾きのF検定はしない
+//!    （クラスター数・時点数が`l`以下でも標準誤差は計算する。IV本体の`first_stage()`と同じ）。
+//!    当てはめ値から`X̂ = [x̃_exog, x̂̃_endog]`を作る。
+//! 5. 点推定`β̂ = (X̂'X̂)⁻¹X̂'ỹ`、構造残差`e = ỹ − X̃β̂`（`X̃`は実際の内生変数。第二段階の残差ではない）。
+//! 6. `panel_cov_params`に`X̂`・`(X̂'X̂)⁻¹`・構造残差を渡して`cov_type`別の共分散を求め、t分布の推論表と
+//!    傾き係数のWald F検定を計算する。
+//!
+//! # 自由度
+//!
+//! `df_model = k + neffects`、`df_resid = n − df_model`（`k = k_exog + k_endog`）。`neffects`は
+//! `FeEstimator`と同じ`absorbed_parameters`（水準数の合計 − (効果の数 − 1)。fixestと同じ数え方で、連結成分の数や
+//! ネストによるランク落ちは引かない）。クラスターの小標本補正の`K`は`fe_cluster_k_correction`
+//! （fixestの`K.fixef="nonnested"`）、推論の自由度は`Cluster`が`G − 1`、`Dk`が`T − 1`、それ以外は`df_resid`。
+//!
+//! # 適合度
+//!
+//! R²は構造残差ベース: within = `1 − e'e / ỹ'ỹ`、between・overallは`β̂`と実際の`X`で`FeEstimator`と同じ式。
+//! 負や1を超える値もありうる（IVのR²は意味が限定的）。対数尤度・AIC・BICは出さない。
+//!
+//! # 固定効果自体
+//!
+//! `fixed_effects()`は`FeEstimator`と同じ復元（`fixed_effects_of`）に、構造式の`y`・実際の`X`・`β̂`を渡す
+//! （`α_i = ȳ_i − x̄_i'β̂`、`X`は実際の内生変数）。
+//!
+//! # ファイル構成
+//!
+//! - `input.rs`: `FeIvInput`・`RoleColumns`
+//! - `fit.rs`: `fit_fe_iv`（上のパイプライン）
+//!
+//! 弱操作変数診断・Sargan・Wu-Hausmanは別途追加する（第一段階の推定量・残差を保持している）。
 
-use crate::shared::group_codes::GroupCodes;
+use faer::Mat;
 
-use super::common::{PanelError, PanelIndex, validate_column_lengths};
+use super::common::PanelError;
+use super::fe::{FeAbsorption, FeCovType, FeEffects, FeEstimator, FeInput, FixedEffects};
 
-/// ある役割（`x_exog`・`x_endog`・`instruments`）の列と列名。
-///
-/// `names`と`columns`は同じ長さで、同じ順序に対応する。`FeIvInput::from_group_codes`の
-/// 引数をまとめるための入れ物。
-#[derive(Debug, Clone)]
-pub struct RoleColumns<'a> {
-    /// 列名。`columns`の列と対応する。
-    pub names: Vec<String>,
-    /// 列（各列は長さ`n`）。
-    pub columns: &'a [Vec<f64>],
+mod fit;
+mod input;
+
+pub use input::{FeIvInput, RoleColumns};
+
+/// FEIVの推定量。フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」）。
+#[derive(Debug)]
+pub struct FeIvEstimator {
+    input: FeIvInput,
+    effects: FeEffects,
+    cov_type: FeCovType,
+    /// 係数名（`x_exog`、`x_endog`の順）。
+    param_names: Vec<String>,
+    /// 構造式の係数`β̂`（k, 1）。
+    params: Mat<f64>,
+    /// 構造残差`ỹ − X̃β̂`（n, 1。`X̃`は実際の内生変数）。
+    residuals: Mat<f64>,
+    df_model: usize,
+    df_resid: usize,
+    /// t検定・信頼区間・F検定の自由度（`Cluster`は`G − 1`、`Dk`は`T − 1`、それ以外は`df_resid`）。
+    df_inference: usize,
+    dk_bandwidth_used: Option<usize>,
+    /// 吸収した効果の次元ごとの水準数（`effects`の順）。
+    n_groups: Vec<usize>,
+    std_errors: Mat<f64>,
+    cov_params: Mat<f64>,
+    test_stats: Mat<f64>,
+    p_values: Mat<f64>,
+    conf_lower: Mat<f64>,
+    conf_upper: Mat<f64>,
+    r_squared_within: f64,
+    r_squared_between: f64,
+    r_squared_overall: f64,
+    /// 傾き係数の同時Wald F検定の`(F統計量, p値)`。
+    f_test: Option<(f64, f64)>,
+    /// 内生変数ごとの第一段階（`x_endog`の順）。変換済みの列・残差（`residuals()`）を持つ。
+    first_stages: Vec<FeEstimator>,
+    /// 構造式の`y`・実際の`X = [x_exog, x_endog]`（変換前）。`fixed_effects()`が使う。
+    structural: FeInput,
+    /// 交互射影が`y`・`x_exog`・`x_endog`の列から引いた各次元の効果（`structural`の列と同じ順）。
+    absorbed: Option<crate::panel::fe::AbsorbedEffects>,
 }
 
-/// FEIVの入力データ。フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」）。
-/// `from_group_codes`で構築した後はgetter経由でのみアクセスする。
-#[derive(Debug, Clone)]
-pub struct FeIvInput {
-    /// 被説明変数（長さ`n`、行はパネルの観測順）。
-    y: Vec<f64>,
-    /// 被説明変数名。
-    dep_var_name: String,
-    /// 外生の説明変数（各列は長さ`n`）。within変換前の生の値。
-    x_exog: Vec<Vec<f64>>,
-    x_exog_names: Vec<String>,
-    /// 内生の説明変数（各列は長さ`n`）。within変換前の生の値。
-    x_endog: Vec<Vec<f64>>,
-    x_endog_names: Vec<String>,
-    /// 操作変数（各列は長さ`n`）。within変換前の生の値。
-    instruments: Vec<Vec<f64>>,
-    instrument_names: Vec<String>,
-    /// 個体・時点の索引と効果の列名。
-    index: PanelIndex,
-}
-
-impl FeIvInput {
-    /// 抽出済みの列とコード化済みの索引から`FeIvInput`を組み立てる。
-    ///
-    /// `effects`は効果の各次元のコードを`effects`の順に並べたもの（1つ以上。2つ目は2-wayの時点で
-    /// 時間順のコード、3つ目以降は高次元の固定効果）。全てキー付き
-    /// （`GroupCodes::from_labels`/`from_factorized`）であること。
+impl FeIvEstimator {
+    /// FEIVを推定する。契約はモジュールdocのパイプラインのとおり。
     ///
     /// # Errors
-    /// 検査の順序は、`x_exog`・`x_endog`・`instruments`の各列の長さ（`y`との不一致は
-    /// `PanelError::Common(CommonError::DimensionMismatch)`。この順に最初の不一致を返す）、
-    /// 続いて`PanelIndex::new`の検査（`effects`の各次元の長さ、各次元のキーの有無）。
-    ///
-    /// within変換・singleton検出・分散ゼロ検証・バランスパネルの検証・識別の順序条件
-    /// （操作変数の数）は行わない（`fit()`側が担う）。
-    ///
-    /// # パニックについて
-    /// 役割ごとに`names.len() != columns.len()`の場合は`debug_assert!`でパニックする
-    /// （呼び出し側`engine_pybind`の実装バグでしか起こり得ない内部契約。`FeInput`と同じ）。
-    pub fn from_group_codes(
-        y: &[f64],
-        dep_var_name: String,
-        x_exog: RoleColumns<'_>,
-        x_endog: RoleColumns<'_>,
-        instruments: RoleColumns<'_>,
-        effects: Vec<GroupCodes>,
+    /// - 操作変数が内生変数より少なければ`PanelError::InsufficientInstruments`
+    /// - 2-wayで`effects`が1つなら`PanelError::TwoWayRequiresTime`
+    /// - singleton（`PanelError::SingletonGroup`）、生の値が全ての行で同じ列
+    ///   （`PanelError::RegressorConstant`は役割つき、被説明変数は`CommonError::OutcomeConstant`）、
+    ///   within変換後に分散がなくなる列（`PanelError::ZeroVarianceAfterDemeaning`は役割つき、被説明変数は
+    ///   `PanelError::OutcomeConstantWithinEntity`）
+    /// - 自由度が足りなければ`PanelError::InsufficientDegreesOfFreedom`（構造式を先に、次に第一段階。
+    ///   第一段階は`stage=FIRST_STAGE`つき）
+    /// - 第一段階の推定の失敗は、原因の`code`に`stage=FIRST_STAGE`を付けて返す（クラスター数・時点数が
+    ///   `l`以下でも、標準誤差が計算できれば失敗にしない）
+    /// - 構造方程式の最小二乗・完全適合は`PanelError::SecondStageFailed`
+    /// - `cov_type`別の共分散の検証は`FeEstimator::fit`と同じ（クラスター数・時点数が傾きの数`k`以下、
+    ///   2グループ退化、DKのバンド幅など）
+    /// - `confidence_level`が`(0, 1)`の範囲外なら`PanelError::WithinRegressionFailed`
+    /// - 不均衡な2-wayと3次元以上で、交互射影が収束しなければ`PanelError::AbsorptionNotConverged`
+    pub fn fit(
+        input: FeIvInput,
+        effects: FeEffects,
+        cov_type: FeCovType,
+        confidence_level: f64,
     ) -> Result<Self, PanelError> {
-        for role in [&x_exog, &x_endog, &instruments] {
-            debug_assert_eq!(
-                role.columns.len(),
-                role.names.len(),
-                "columns and names must have the same length"
-            );
-            validate_column_lengths(y.len(), role.columns)?;
-        }
-        let index = PanelIndex::new(y.len(), effects)?;
-
-        Ok(Self {
-            y: y.to_vec(),
-            dep_var_name,
-            x_exog: x_exog.columns.to_vec(),
-            x_exog_names: x_exog.names,
-            x_endog: x_endog.columns.to_vec(),
-            x_endog_names: x_endog.names,
-            instruments: instruments.columns.to_vec(),
-            instrument_names: instruments.names,
-            index,
-        })
-    }
-
-    /// 効果の次元の列名を、`effects`の先頭から順に設定する（`engine_pybind`が`effects`の各要素を
-    /// 渡す）。エラーの`column`に載るだけで、計算には影響しない。
-    pub fn with_effect_names(mut self, names: Vec<String>) -> Self {
-        self.index = self.index.with_effect_names(names);
-        self
-    }
-
-    /// 効果の各次元の索引。
-    pub fn index(&self) -> &PanelIndex {
-        &self.index
-    }
-
-    /// 被説明変数（長さ`n`）。
-    pub fn y(&self) -> &[f64] {
-        &self.y
-    }
-
-    /// 被説明変数名。
-    pub fn dep_var_name(&self) -> &str {
-        &self.dep_var_name
-    }
-
-    /// 外生の説明変数（各列は長さ`n`）。
-    pub fn x_exog(&self) -> &[Vec<f64>] {
-        &self.x_exog
-    }
-
-    /// 外生の説明変数名。`x_exog()`の列と対応する。
-    pub fn x_exog_names(&self) -> &[String] {
-        &self.x_exog_names
-    }
-
-    /// 内生の説明変数（各列は長さ`n`）。
-    pub fn x_endog(&self) -> &[Vec<f64>] {
-        &self.x_endog
-    }
-
-    /// 内生の説明変数名。`x_endog()`の列と対応する。
-    pub fn x_endog_names(&self) -> &[String] {
-        &self.x_endog_names
-    }
-
-    /// 操作変数（各列は長さ`n`）。
-    pub fn instruments(&self) -> &[Vec<f64>] {
-        &self.instruments
-    }
-
-    /// 操作変数名。`instruments()`の列と対応する。
-    pub fn instrument_names(&self) -> &[String] {
-        &self.instrument_names
-    }
-
-    /// 観測数 n
-    pub fn nobs(&self) -> usize {
-        self.y.len()
-    }
-
-    /// 外生の説明変数の数。
-    pub fn k_exog(&self) -> usize {
-        self.x_exog.len()
-    }
-
-    /// 内生の説明変数の数。
-    pub fn k_endog(&self) -> usize {
-        self.x_endog.len()
-    }
-
-    /// 操作変数の数。
-    pub fn k_instruments(&self) -> usize {
-        self.instruments.len()
-    }
-
-    /// 構造方程式の係数の数 `k = k_exog + k_endog`（定数項は持たない）。
-    pub fn k(&self) -> usize {
-        self.k_exog() + self.k_endog()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::panel::common::{PanelDimension, TimeKeys};
-    use crate::shared::error::CommonError;
-
-    fn labels(values: &[&str]) -> Vec<String> {
-        values.iter().map(|v| v.to_string()).collect()
-    }
-
-    fn role<'a>(names: &[&str], columns: &'a [Vec<f64>]) -> RoleColumns<'a> {
-        RoleColumns {
-            names: labels(names),
-            columns,
-        }
-    }
-
-    /// 2個体 × 3時点（観測順は個体ごと）。
-    fn entity() -> GroupCodes {
-        GroupCodes::from_labels(&labels(&["a", "a", "a", "b", "b", "b"]))
-    }
-
-    fn time() -> TimeKeys {
-        TimeKeys::lexicographic(labels(&["1", "2", "3", "1", "2", "3"]))
-    }
-
-    fn y() -> Vec<f64> {
-        vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
-    }
-
-    fn col(offset: f64) -> Vec<f64> {
-        (0..6).map(|i| i as f64 + offset).collect()
-    }
-
-    #[test]
-    fn from_group_codes_builds_one_way_input() {
-        let (exog, endog, inst) = ([col(0.0)], [col(1.0)], [col(2.0), col(3.0)]);
-        let input = FeIvInput::from_group_codes(
-            &y(),
-            "y".to_string(),
-            role(&["w"], &exog),
-            role(&["d"], &endog),
-            role(&["z1", "z2"], &inst),
-            vec![entity()],
+        Self::fit_with_absorption(
+            input,
+            effects,
+            cov_type,
+            confidence_level,
+            &FeAbsorption::default(),
         )
-        .unwrap();
-
-        assert_eq!(input.nobs(), 6);
-        assert_eq!(input.y(), y().as_slice());
-        assert_eq!(input.dep_var_name(), "y");
-        assert_eq!(input.x_exog(), exog.as_slice());
-        assert_eq!(input.x_exog_names(), labels(&["w"]).as_slice());
-        assert_eq!(input.x_endog(), endog.as_slice());
-        assert_eq!(input.x_endog_names(), labels(&["d"]).as_slice());
-        assert_eq!(input.instruments(), inst.as_slice());
-        assert_eq!(input.instrument_names(), labels(&["z1", "z2"]).as_slice());
-        assert_eq!(
-            (
-                input.k_exog(),
-                input.k_endog(),
-                input.k_instruments(),
-                input.k()
-            ),
-            (1, 1, 2, 2)
-        );
-        assert_eq!(input.index().n_entities(), 2);
-        assert_eq!(
-            input.index().entity_labels(),
-            labels(&["a", "b"]).as_slice()
-        );
-        assert_eq!(input.index().n_effects(), 1);
     }
 
-    #[test]
-    fn from_group_codes_builds_two_way_input() {
-        let (endog, inst) = ([col(1.0)], [col(2.0)]);
-        let input = FeIvInput::from_group_codes(
-            &y(),
-            "y".to_string(),
-            role(&[], &[]),
-            role(&["d"], &endog),
-            role(&["z"], &inst),
-            vec![entity(), time().codes().clone()],
+    /// [`Self::fit`]に、交互射影の打ち切り設定を渡す。
+    ///
+    /// # Errors
+    /// [`Self::fit`]のエラーに加えて、`absorption`の値が範囲外なら`PanelError::InvalidTol`・
+    /// `PanelError::InvalidMaxIter`。
+    pub fn fit_with_absorption(
+        input: FeIvInput,
+        effects: FeEffects,
+        cov_type: FeCovType,
+        confidence_level: f64,
+        absorption: &FeAbsorption,
+    ) -> Result<Self, PanelError> {
+        fit::fit_fe_iv(input, effects, cov_type, confidence_level, absorption)
+    }
+
+    /// 入力データ（within変換前）。
+    pub fn input(&self) -> &FeIvInput {
+        &self.input
+    }
+
+    /// 推定に使った固定効果の方向。
+    pub fn effects(&self) -> FeEffects {
+        self.effects
+    }
+
+    /// 推定に使った`cov_type`。
+    pub fn cov_type(&self) -> &FeCovType {
+        &self.cov_type
+    }
+
+    /// 係数名（`x_exog`、`x_endog`の順）。
+    pub fn param_names(&self) -> &[String] {
+        &self.param_names
+    }
+
+    /// 構造式の係数`β̂` (k, 1)。
+    pub fn params(&self) -> &Mat<f64> {
+        &self.params
+    }
+
+    /// 構造残差`ỹ − X̃β̂` (n, 1)。`X̃`は実際の内生変数で、第二段階の残差ではない。
+    pub fn residuals(&self) -> &Mat<f64> {
+        &self.residuals
+    }
+
+    /// モデル自由度`k + neffects`。
+    pub fn df_model(&self) -> usize {
+        self.df_model
+    }
+
+    /// 残差自由度`n − df_model`。
+    pub fn df_resid(&self) -> usize {
+        self.df_resid
+    }
+
+    /// t検定・信頼区間・F検定の自由度。
+    pub fn df_inference(&self) -> usize {
+        self.df_inference
+    }
+
+    /// `cov_type=Dk`のとき実際に使われたバンド幅。
+    pub fn dk_bandwidth_used(&self) -> Option<usize> {
+        self.dk_bandwidth_used
+    }
+
+    /// 吸収した効果の次元ごとの水準数（`effects`の順）。
+    pub fn n_groups(&self) -> &[usize] {
+        &self.n_groups
+    }
+
+    /// 標準誤差 (k, 1)。
+    pub fn std_errors(&self) -> &Mat<f64> {
+        &self.std_errors
+    }
+
+    /// `cov_type`別の係数の分散共分散行列 (k, k)。
+    pub fn cov_params(&self) -> &Mat<f64> {
+        &self.cov_params
+    }
+
+    /// t値 (k, 1)。
+    pub fn test_stats(&self) -> &Mat<f64> {
+        &self.test_stats
+    }
+
+    /// 両側p値 (k, 1)（t分布、自由度は`df_inference`）。
+    pub fn p_values(&self) -> &Mat<f64> {
+        &self.p_values
+    }
+
+    /// 信頼区間の下限 (k, 1)。
+    pub fn conf_lower(&self) -> &Mat<f64> {
+        &self.conf_lower
+    }
+
+    /// 信頼区間の上限 (k, 1)。
+    pub fn conf_upper(&self) -> &Mat<f64> {
+        &self.conf_upper
+    }
+
+    /// within R²（構造残差ベース: `1 − e'e / ỹ'ỹ`）。負や1を超える値もありうる。
+    pub fn r_squared_within(&self) -> f64 {
+        self.r_squared_within
+    }
+
+    /// between R²（個体平均に`β̂`を当てはめた構造残差ベース）。
+    pub fn r_squared_between(&self) -> f64 {
+        self.r_squared_between
+    }
+
+    /// overall R²（元の`y`・`X`に`β̂`だけを当てはめた残差ベース）。
+    pub fn r_squared_overall(&self) -> f64 {
+        self.r_squared_overall
+    }
+
+    /// 傾き係数`k`個が同時にゼロという帰無仮説のWald F検定統計量（`cov_type`反映済み）。
+    pub fn f_statistic(&self) -> Option<f64> {
+        self.f_test.map(|(statistic, _)| statistic)
+    }
+
+    /// `f_statistic()`のp値。
+    pub fn f_p_value(&self) -> Option<f64> {
+        self.f_test.map(|(_, p_value)| p_value)
+    }
+
+    /// `f_statistic()`の自由度`(分子, 分母)` = `(k, df_inference)`。
+    pub fn f_df(&self) -> Option<(usize, usize)> {
+        self.f_test
+            .map(|_| (self.params.nrows(), self.df_inference))
+    }
+
+    /// 内生変数ごとの第一段階（`x_endog`の順）。各第一段階は`x̃_endog[j] ~ x̃_exog + 操作変数`の
+    /// within回帰で、`cov_type`は構造式と同じ。傾きのF検定はしないので`f_statistic()`は`None`。
+    pub fn first_stages(&self) -> &[FeEstimator] {
+        &self.first_stages
+    }
+
+    /// 固定効果自体（α_i、2-wayはγ_tも）を事後的に復元する。構造式の`y`・実際の`X`・`β̂`から
+    /// `FeEstimator::fixed_effects`と同じ規約で計算する（モジュールdoc「固定効果自体」参照）。
+    pub fn fixed_effects(&self) -> FixedEffects {
+        super::fe::fixed_effects_of(
+            &self.structural,
+            self.effects,
+            &self.params,
+            self.absorbed.as_ref(),
         )
-        .unwrap();
-
-        assert_eq!(input.index().n_effects(), 2);
-        assert_eq!(input.index().effect_codes()[1].keys(), time().periods());
-        assert_eq!(input.index().nobs(), 6);
-    }
-
-    #[test]
-    fn from_group_codes_accepts_empty_exogenous_endogenous_and_instrument_roles() {
-        // 空の役割の拒否は`engine_pybind`と`fit()`の責務（モジュールdoc）。
-        let input = FeIvInput::from_group_codes(
-            &y(),
-            "y".to_string(),
-            role(&[], &[]),
-            role(&[], &[]),
-            role(&[], &[]),
-            vec![entity()],
-        )
-        .unwrap();
-        assert_eq!(
-            (
-                input.k_exog(),
-                input.k_endog(),
-                input.k_instruments(),
-                input.k()
-            ),
-            (0, 0, 0, 0)
-        );
-    }
-
-    #[test]
-    fn from_group_codes_with_zero_observations_succeeds() {
-        let input = FeIvInput::from_group_codes(
-            &[],
-            "y".to_string(),
-            role(&[], &[]),
-            role(&[], &[]),
-            role(&[], &[]),
-            vec![GroupCodes::from_labels(&[])],
-        )
-        .unwrap();
-        assert_eq!(input.nobs(), 0);
-    }
-
-    #[test]
-    fn from_group_codes_returns_dimension_mismatch_for_each_role() {
-        let short = [vec![1.0, 2.0]];
-        let (full_a, full_b) = ([col(1.0)], [col(2.0)]);
-        let expected = Err(CommonError::DimensionMismatch {
-            y_rows: 6,
-            x_rows: 2,
-        }
-        .into());
-        let build = |exog: &[Vec<f64>], endog: &[Vec<f64>], inst: &[Vec<f64>]| {
-            FeIvInput::from_group_codes(
-                &y(),
-                "y".to_string(),
-                role(&vec!["c"; exog.len()], exog),
-                role(&vec!["c"; endog.len()], endog),
-                role(&vec!["c"; inst.len()], inst),
-                vec![entity()],
-            )
-            .map(|_| ())
-        };
-
-        assert_eq!(build(&short, &full_a, &full_b), expected);
-        assert_eq!(build(&[], &short, &full_b), expected);
-        assert_eq!(build(&[], &full_a, &short), expected);
-    }
-
-    #[test]
-    fn from_group_codes_checks_roles_in_order_x_exog_x_endog_instruments() {
-        // 3役割とも長さが違うとき、最初に検査される役割の長さが返る。
-        let (exog, endog, inst) = ([vec![0.0; 2]], [vec![0.0; 3]], [vec![0.0; 4]]);
-        let build = |exog: &[Vec<f64>], endog: &[Vec<f64>], inst: &[Vec<f64>]| {
-            FeIvInput::from_group_codes(
-                &y(),
-                "y".to_string(),
-                role(&vec!["c"; exog.len()], exog),
-                role(&vec!["c"; endog.len()], endog),
-                role(&vec!["c"; inst.len()], inst),
-                vec![entity()],
-            )
-            .map(|_| ())
-        };
-        let mismatch = |x_rows| Err(CommonError::DimensionMismatch { y_rows: 6, x_rows }.into());
-
-        assert_eq!(build(&exog, &endog, &inst), mismatch(2));
-        assert_eq!(build(&[], &endog, &inst), mismatch(3));
-        assert_eq!(build(&[], &[], &inst), mismatch(4));
-    }
-
-    #[test]
-    fn from_group_codes_checks_column_lengths_before_the_index() {
-        // 列の長さも索引の長さも合っていないとき、先に列の不一致が返る。
-        let short = [vec![1.0, 2.0]];
-        let short_entity = GroupCodes::from_labels(&labels(&["a", "b"]));
-        let err = FeIvInput::from_group_codes(
-            &y(),
-            "y".to_string(),
-            role(&["w"], &short),
-            role(&[], &[]),
-            role(&[], &[]),
-            vec![short_entity],
-        )
-        .unwrap_err();
-        assert!(matches!(
-            err,
-            PanelError::Common(CommonError::DimensionMismatch { .. })
-        ));
-    }
-
-    #[test]
-    fn from_group_codes_returns_identifier_dimension_mismatch_for_entity_and_time() {
-        let short_entity = GroupCodes::from_labels(&labels(&["a", "b"]));
-        assert_eq!(
-            FeIvInput::from_group_codes(
-                &y(),
-                "y".to_string(),
-                role(&[], &[]),
-                role(&[], &[]),
-                role(&[], &[]),
-                vec![short_entity],
-            )
-            .map(|_| ()),
-            Err(PanelError::IdentifierDimensionMismatch {
-                dimension: PanelDimension::ENTITY,
-                y_rows: 6,
-                other_rows: 2,
-            })
-        );
-
-        let short_time = TimeKeys::lexicographic(labels(&["1", "2"]));
-        assert_eq!(
-            FeIvInput::from_group_codes(
-                &y(),
-                "y".to_string(),
-                role(&[], &[]),
-                role(&[], &[]),
-                role(&[], &[]),
-                vec![entity(), short_time.codes().clone()],
-            )
-            .map(|_| ()),
-            Err(PanelError::IdentifierDimensionMismatch {
-                dimension: PanelDimension::TIME,
-                y_rows: 6,
-                other_rows: 2,
-            })
-        );
-    }
-
-    #[test]
-    fn from_group_codes_rejects_entity_codes_without_keys() {
-        let keyless =
-            GroupCodes::from_labels_without_keys(&labels(&["a", "a", "a", "b", "b", "b"]));
-        let err = FeIvInput::from_group_codes(
-            &y(),
-            "y".to_string(),
-            role(&[], &[]),
-            role(&[], &[]),
-            role(&[], &[]),
-            vec![keyless],
-        )
-        .unwrap_err();
-        assert!(matches!(
-            err,
-            PanelError::Common(CommonError::Internal { .. })
-        ));
-    }
-
-    #[test]
-    fn with_effect_names_sets_the_names_reported_in_errors() {
-        let input = FeIvInput::from_group_codes(
-            &y(),
-            "y".to_string(),
-            role(&[], &[]),
-            role(&[], &[]),
-            role(&[], &[]),
-            vec![entity(), time().codes().clone()],
-        )
-        .unwrap();
-        assert_eq!(input.index().effect_name(PanelDimension::ENTITY), "entity");
-        assert_eq!(input.index().effect_name(PanelDimension::TIME), "time");
-
-        let input = input.with_effect_names(labels(&["firm", "year"]));
-        assert_eq!(input.index().effect_name(PanelDimension::ENTITY), "firm");
-        assert_eq!(input.index().effect_name(PanelDimension::TIME), "year");
-    }
-
-    #[test]
-    #[cfg(debug_assertions)]
-    #[should_panic(expected = "columns and names must have the same length")]
-    fn from_group_codes_panics_on_mismatched_names_arity() {
-        let endog = [col(1.0)];
-        let _ = FeIvInput::from_group_codes(
-            &y(),
-            "y".to_string(),
-            role(&[], &[]),
-            role(&["d", "extra"], &endog),
-            role(&[], &[]),
-            vec![entity()],
-        );
     }
 }

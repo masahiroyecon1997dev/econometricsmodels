@@ -4,7 +4,7 @@
 
 use super::input::{FeAbsorption, FeInput};
 use crate::panel::common::{
-    PanelError, WithinTransform, check_leverage_dimension, covers_every_combination,
+    ColumnRole, PanelError, WithinTransform, check_leverage_dimension, covers_every_combination,
     ensure_no_singleton_groups, ensure_no_zero_variance_columns,
 };
 use crate::shared::alternating_projections::{GroupSystem, ProjectionOptions};
@@ -316,7 +316,13 @@ pub(super) fn validate_no_zero_variance_regressors(
     x_transformed: &[Vec<f64>],
     noise: f64,
 ) -> Result<(), PanelError> {
-    ensure_no_zero_variance_columns(input.x_names(), input.x(), x_transformed, noise)
+    ensure_no_zero_variance_columns(
+        ColumnRole::X,
+        input.x_names(),
+        input.x(),
+        x_transformed,
+        noise,
+    )
 }
 
 #[cfg(test)]

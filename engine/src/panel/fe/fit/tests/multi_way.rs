@@ -3,6 +3,7 @@
 use faer::Mat;
 
 use super::*;
+use crate::panel::common::ColumnRole;
 use crate::panel::common::PanelError;
 use crate::panel::fe::FeEstimator;
 use crate::panel::fe::FixedEffects;
@@ -750,6 +751,7 @@ fn a_regressor_absorbed_by_the_third_effect_is_rejected() {
     assert_eq!(
         data.fit(FeCovType::Classical).unwrap_err(),
         PanelError::ZeroVarianceAfterDemeaning {
+            role: ColumnRole::X,
             column: "x1".to_string()
         }
     );

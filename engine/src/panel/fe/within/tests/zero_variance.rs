@@ -1,5 +1,6 @@
 //! 変動のない説明変数の検出のテスト。
 
+use crate::panel::common::ColumnRole;
 use crate::panel::common::PanelError;
 use crate::panel::common::time_varying_regressor_indices;
 use crate::panel::fe::input::FeInput;
@@ -32,6 +33,7 @@ fn validate_no_zero_variance_regressors_detects_time_invariant_variable_in_one_w
     assert_eq!(
         result.unwrap_err(),
         PanelError::ZeroVarianceAfterDemeaning {
+            role: ColumnRole::X,
             column: "female".to_string(),
         }
     );
@@ -171,6 +173,7 @@ fn validate_no_zero_variance_regressors_detects_entity_invariant_variable_in_two
     assert_eq!(
         result.unwrap_err(),
         PanelError::ZeroVarianceAfterDemeaning {
+            role: ColumnRole::X,
             column: "year_dummy".to_string(),
         }
     );
@@ -200,6 +203,7 @@ fn validate_no_zero_variance_regressors_reports_first_offending_column_in_name_o
     assert_eq!(
         result.unwrap_err(),
         PanelError::ZeroVarianceAfterDemeaning {
+            role: ColumnRole::X,
             column: "const_a".to_string(),
         }
     );

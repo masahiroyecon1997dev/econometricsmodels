@@ -3,6 +3,7 @@
 //! - `basic.rs`: 基本挙動（既知の係数の復元・適合度・getter・成功する完全適合や定数のyなど）
 //! - `reference.rs`: 参照実装・閉形式・独立再計算との照合
 //! - `cov_type.rs`: `cov_type`別の共分散・検定統計量
+//! - `from_within.rs`: 変換済みの列から推定する後半（`fit_from_within`）
 //! - `unbalanced.rs`: 不均衡パネルの2-way FE（交互射影）。ダミー変数回帰との照合
 //! - `multi_way.rs`: 3次元以上のFE（交互射影）。ダミー変数回帰との照合
 //! - `validation.rs`: 入力検証・エラー返却（完全適合・定数のyをエラーとして返すものを含む）・検証順序
@@ -15,6 +16,7 @@ use crate::panel::fe::test_support::*;
 
 mod basic;
 mod cov_type;
+mod from_within;
 mod multi_way;
 mod proptests;
 mod reference;

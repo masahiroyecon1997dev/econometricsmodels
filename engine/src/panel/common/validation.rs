@@ -1,6 +1,6 @@
 //! パネル入力の次元検証と、within変換の前後に行う事前検証（singleton・分散ゼロ・バランス・時間変化）。
 
-use super::error::{PanelDimension, PanelError};
+use super::error::{ColumnRole, PanelDimension, PanelError};
 use super::index::EffectNames;
 use super::transform::WithinTransform;
 use crate::shared::error::CommonError;
@@ -121,6 +121,7 @@ pub(crate) fn ensure_no_singleton_groups(
 /// 複数列が該当する場合は`names`の順で最初に見つかった列のみを報告する。`noise`は変換が残す誤差の相対的な大きさ
 /// （閉形式の変換は0。`column_is_zero_variance_with_noise`参照）。
 pub(crate) fn ensure_no_zero_variance_columns(
+    role: ColumnRole,
     names: &[String],
     originals: &[Vec<f64>],
     transformed: &[Vec<f64>],
@@ -144,6 +145,7 @@ pub(crate) fn ensure_no_zero_variance_columns(
         );
         if column_is_zero_variance_with_noise(original, transformed, noise) {
             return Err(PanelError::ZeroVarianceAfterDemeaning {
+                role,
                 column: name.clone(),
             });
         }
@@ -409,6 +411,12 @@ mod tests {
     fn ensure_no_zero_variance_columns_panics_when_names_are_fewer_than_columns() {
         let originals = vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0]];
         let transformed = originals.clone();
-        let _ = ensure_no_zero_variance_columns(&["x1".to_string()], &originals, &transformed, 0.0);
+        let _ = ensure_no_zero_variance_columns(
+            ColumnRole::X,
+            &["x1".to_string()],
+            &originals,
+            &transformed,
+            0.0,
+        );
     }
 }

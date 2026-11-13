@@ -182,7 +182,13 @@ mod test_support;
 mod within;
 
 pub use fixed_effects::FixedEffects;
+pub(in crate::panel) use fixed_effects::fixed_effects_of;
 pub use input::{FeAbsorption, FeCovType, FeEffects, FeInput};
+pub(in crate::panel) use r_squared::{fe_r_squared_between, fe_r_squared_overall};
+// FEIVが、全列を1回だけ変換して第一段階と構造式で使い回すために使う。
+pub(in crate::panel) use within::{
+    AbsorbedEffects, WithinColumns, WithinOutput, within_transform_columns,
+};
 // `re/`のテストだけが使う。
 #[cfg(test)]
 pub(crate) use within::{within_transform_one_way, within_transform_two_way};
@@ -322,6 +328,29 @@ impl FeEstimator {
         absorption: &FeAbsorption,
     ) -> Result<Self, PanelError> {
         fit::fit_fe(input, effects, cov_type, confidence_level, absorption)
+    }
+
+    /// within変換済みの列から推定する（`fit`の後半。FEIVの第一段階が、全列を1回だけ変換した結果を
+    /// 使い回すための内部経路）。契約は`fit::fit_fe_from_within`のdoc参照。
+    ///
+    /// # Errors
+    /// `fit`の、変換の後のエラーと同じ。
+    pub(in crate::panel) fn fit_from_within(
+        input: FeInput,
+        effects: FeEffects,
+        cov_type: FeCovType,
+        confidence_level: f64,
+        within: WithinOutput,
+        tests_overall_f: bool,
+    ) -> Result<Self, PanelError> {
+        fit::fit_fe_from_within(
+            input,
+            effects,
+            cov_type,
+            confidence_level,
+            within,
+            tests_overall_f,
+        )
     }
 
     /// within変換前の入力データ。

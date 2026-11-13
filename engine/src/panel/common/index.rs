@@ -104,6 +104,11 @@ impl PanelIndex {
         self
     }
 
+    /// 効果の列名。エラーの`column`に載せるために運ぶ。
+    pub(crate) fn effect_names(&self) -> &EffectNames {
+        &self.effect_names
+    }
+
     /// `dimension`に対応する効果の列名。
     pub fn effect_name(&self, dimension: PanelDimension) -> &str {
         self.effect_names.get(dimension)

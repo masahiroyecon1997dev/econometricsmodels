@@ -543,7 +543,7 @@ def test_regressor_with_the_same_value_in_every_row_raises(fe_dataset):
     """生の値が全て同じ説明変数は、固定効果を除く前に`REGRESSOR_CONSTANT`
     （固定効果を除いた後の分散ゼロ`REGRESSOR_NO_WITHIN_VARIATION`とは別）。"""
     df = fe_dataset.with_columns(x2=pl.lit(1.5))
-    with raises_error(ErrorCode.REGRESSOR_CONSTANT, column="x2"):
+    with raises_error(ErrorCode.REGRESSOR_CONSTANT, role="x", column="x2"):
         our_fit(df)
 
 
@@ -574,7 +574,7 @@ def test_zero_variance_after_demeaning_raises():
     """
     df = pl.read_csv(DATA_DIR / "fe_zero_variance_regressor.csv")
     with raises_error(
-        ErrorCode.REGRESSOR_NO_WITHIN_VARIATION, column="x_invariant"
+        ErrorCode.REGRESSOR_NO_WITHIN_VARIATION, role="x", column="x_invariant"
     ):
         FE(df, y="y", x=["x1", "x2", "x_invariant"], effects=["entity"]).fit()
 

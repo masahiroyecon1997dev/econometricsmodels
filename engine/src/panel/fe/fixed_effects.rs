@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use faer::Mat;
 
 use super::FeEstimator;
-use super::input::FeEffects;
+use super::input::{FeEffects, FeInput};
 use super::r_squared::slope_only_residual;
 use super::within::AbsorbedEffects;
 use crate::shared::alternating_projections::GroupSystem;
@@ -73,25 +73,40 @@ fn overall_residual_mean(y: &[f64], x: &[Vec<f64>], params: &Mat<f64>) -> f64 {
 
 /// [`FeEstimator::fixed_effects`]の本体。
 pub(super) fn fixed_effects(estimator: &FeEstimator) -> FixedEffects {
-    let y = estimator.input.y();
-    let x = estimator.input.x();
-    let params = &estimator.params;
+    fixed_effects_of(
+        &estimator.input,
+        estimator.effects,
+        &estimator.params,
+        estimator.absorbed.as_ref(),
+    )
+}
 
-    match estimator.effects {
+/// 係数`params`のモデルの固定効果。`input`は変換前の`y`・`x`（`params`に対応する列）と効果の次元、
+/// `absorbed`は交互射影が各列から引いた効果（バランスな2-wayと1-wayは`None`でよい）。FEIVは、
+/// 実際の内生変数を含む構造式の`y`・`x`と構造の係数を渡す。
+pub(in crate::panel) fn fixed_effects_of(
+    input: &FeInput,
+    effects: FeEffects,
+    params: &Mat<f64>,
+    absorbed: Option<&AbsorbedEffects>,
+) -> FixedEffects {
+    let y = input.y();
+    let x = input.x();
+
+    match effects {
         FeEffects::OneWay => FixedEffects::OneWay(
-            group_residual_means(y, x, params, estimator.input.entity_codes())
+            group_residual_means(y, x, params, input.entity_codes())
                 .into_iter()
                 .collect(),
         ),
         FeEffects::TwoWay => {
-            let time = estimator.input.time_codes().expect(
+            let time = input.time_codes().expect(
                 "2-way already validated `time` is present (`fit` resolves the absorbed levels)",
             );
-            let entity = estimator.input.entity_codes();
+            let entity = input.entity_codes();
             // `absorbed`があるのは、全組合せが過不足なく1回ずつ現れない（重複する行を含む）場合だけ。
-            if let Some(absorbed) = &estimator.absorbed {
-                let mut effects =
-                    absorbed_effects(estimator, absorbed, &[entity, time]).into_iter();
+            if let Some(absorbed) = absorbed {
+                let mut effects = absorbed_effects(params, absorbed, &[entity, time]).into_iter();
                 // `absorbed_effects`は渡した次元の数だけ(ここでは2つ)の効果の組を返す。
                 let (Some(entity), Some(time)) = (effects.next(), effects.next()) else {
                     unreachable!("two dimensions give two sets of effects")
@@ -123,12 +138,12 @@ pub(super) fn fixed_effects(estimator: &FeEstimator) -> FixedEffects {
             FixedEffects::TwoWay { entity, time }
         }
         FeEffects::MultiWay => {
-            let levels: Vec<&GroupCodes> = estimator.input.effect_codes().iter().collect();
+            let levels: Vec<&GroupCodes> = input.effect_codes().iter().collect();
             // `fit_fe`は3次元以上を常に交互射影で計算し、`absorbed`を保存する。
-            let Some(absorbed) = &estimator.absorbed else {
+            let Some(absorbed) = absorbed else {
                 unreachable!("a multi-way fit always keeps the absorbed effects")
             };
-            FixedEffects::MultiWay(absorbed_effects(estimator, absorbed, &levels))
+            FixedEffects::MultiWay(absorbed_effects(params, absorbed, &levels))
         }
     }
 }
@@ -143,13 +158,13 @@ pub(super) fn fixed_effects(estimator: &FeEstimator) -> FixedEffects {
 /// バランスパネルと同じく全体で最初の時点が基準）。各行の水準はどれも同じ成分に属するので、行ごとの
 /// 効果の和は変わらない。
 fn absorbed_effects(
-    estimator: &FeEstimator,
+    params: &Mat<f64>,
     absorbed: &AbsorbedEffects,
     levels: &[&GroupCodes],
 ) -> Vec<Vec<(String, f64)>> {
     let mut combined = absorbed.y.clone();
     for (j, effects) in absorbed.x.iter().enumerate() {
-        let beta = *estimator.params.get(j, 0);
+        let beta = *params.get(j, 0);
         for (total, part) in combined.iter_mut().zip(effects) {
             for (t, p) in total.iter_mut().zip(part) {
                 *t -= beta * p;

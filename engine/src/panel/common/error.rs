@@ -11,6 +11,32 @@ use crate::shared::error::{CommonError, ErrorInfo, staged_report};
 use crate::shared::error_catalog::{ErrorCode, ErrorReport, Stage};
 use crate::shared::validation::{MAX_ITER_LIMIT, MAX_ITER_MIN};
 
+/// 固定効果を除く前後の検査が対象にする列の役割（エラーに載せる引数名）。FE・REは説明変数`x`、FEIVは
+/// 役割ごとに`x_exog`・`x_endog`・`instruments`。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColumnRole {
+    /// FE・REの説明変数`x`。
+    X,
+    /// FEIVの外生の説明変数`x_exog`。
+    XExog,
+    /// FEIVの内生の説明変数`x_endog`。
+    XEndog,
+    /// FEIVの操作変数`instruments`。
+    Instruments,
+}
+
+impl ColumnRole {
+    /// 利用者の引数名。
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::X => "x",
+            Self::XExog => "x_exog",
+            Self::XEndog => "x_endog",
+            Self::Instruments => "instruments",
+        }
+    }
+}
+
 /// 固定効果の次元（`effects`の何番目の列か）。エラーメッセージ・バリデーションで「どの次元の
 /// 問題か」を区別するために使う。
 ///
@@ -166,7 +192,7 @@ pub enum PanelError {
     /// 固定効果を除いた後で分散がなくなる[`Self::ZeroVarianceAfterDemeaning`]とは、原因が生データの
     /// 定数かどうかで区別する。
     #[error("{}", self.catalog_message())]
-    RegressorConstant { column: String },
+    RegressorConstant { role: ColumnRole, column: String },
 
     /// within変換（デミーニング）後に分散がゼロになる説明変数がある。
     ///
@@ -174,7 +200,7 @@ pub enum PanelError {
     /// 完全共線な「エンティティ間で変動しない列」も同じチェックで検出できる
     /// （`docs/spec/fe-spec.md`1章。1-way/2-wayで同一ロジックを共有する）。
     #[error("{}", self.catalog_message())]
-    ZeroVarianceAfterDemeaning { column: String },
+    ZeroVarianceAfterDemeaning { role: ColumnRole, column: String },
 
     /// 被説明変数がwithin変換後に分散ゼロ（個体内で定数、2-wayなら個体効果と時点効果だけで
     /// 説明される）。固定効果が説明するものが残らず、within回帰のR-squaredが定義できない。
@@ -375,6 +401,23 @@ pub enum PanelError {
         #[source]
         source: Box<PanelError>,
     },
+
+    /// FEIVで、操作変数の数が内生変数の数より少ない（識別の順序条件を満たさない）。
+    /// `IvError::InsufficientInstruments`と同じ`code`。
+    #[error("{}", self.catalog_message())]
+    InsufficientInstruments {
+        n_instruments: usize,
+        n_endog: usize,
+    },
+
+    /// FEIVの構造方程式（第一段階の当てはめ値`X̂`への回帰）の最小二乗推定・完全適合の判定が失敗した。
+    /// `WithinRegressionFailed`とは対象が異なる（FEIVはwithin変換済みデータの2SLS）ため別バリアントにする
+    /// （`FTestFailed`と同じ判断）。`#[from]`は使わず明示的に`.map_err`で包む。
+    #[error("{}", self.catalog_message())]
+    SecondStageFailed {
+        #[source]
+        source: LeastSquaresError,
+    },
 }
 
 impl ErrorInfo for PanelError {
@@ -387,6 +430,15 @@ impl ErrorInfo for PanelError {
                 staged_report(source.report(), Stage::WithinRegression)
             }
             Self::FTestFailed { source } => staged_report(source.report(), Stage::OverallFTest),
+            Self::SecondStageFailed { source } => {
+                staged_report(source.report(), Stage::SecondStage)
+            }
+            Self::InsufficientInstruments {
+                n_instruments,
+                n_endog,
+            } => ErrorReport::new(ErrorCode::InsufficientInstruments)
+                .param("n_instruments", *n_instruments)
+                .param("n_endog", *n_endog),
             Self::BetweenRegressionFailed { means, source } => staged_report(
                 source.report(),
                 match means {
@@ -465,11 +517,14 @@ impl ErrorInfo for PanelError {
                 .param("value", *max_iter)
                 .param("min", MAX_ITER_MIN)
                 .param("max", MAX_ITER_LIMIT),
-            Self::RegressorConstant { column } => {
-                ErrorReport::new(ErrorCode::RegressorConstant).param("column", column.as_str())
+            Self::RegressorConstant { role, column } => {
+                ErrorReport::new(ErrorCode::RegressorConstant)
+                    .param("role", role.as_str())
+                    .param("column", column.as_str())
             }
-            Self::ZeroVarianceAfterDemeaning { column } => {
+            Self::ZeroVarianceAfterDemeaning { role, column } => {
                 ErrorReport::new(ErrorCode::RegressorNoWithinVariation)
+                    .param("role", role.as_str())
                     .param("column", column.as_str())
             }
             Self::OutcomeConstantWithinEntity => {
@@ -636,17 +691,19 @@ mod tests {
             ),
             (
                 PanelError::RegressorConstant {
-                    column: "x".to_string(),
+                    role: ColumnRole::X,
+                    column: "x1".to_string(),
                 },
                 ErrorCode::RegressorConstant,
-                "Regressor 'x' has the same value in every row up to rounding, so it is collinear with the fixed effects.",
+                "Column 'x1' of x has the same value in every row up to rounding, so it is collinear with the fixed effects.",
             ),
             (
                 PanelError::ZeroVarianceAfterDemeaning {
-                    column: "x".to_string(),
+                    role: ColumnRole::Instruments,
+                    column: "z1".to_string(),
                 },
                 ErrorCode::RegressorNoWithinVariation,
-                "Regressor 'x' has no variation left after the within transformation: it is time-invariant, or collinear with the fixed effects.",
+                "Column 'z1' of instruments has no variation left after the within transformation: it is time-invariant, or collinear with the fixed effects.",
             ),
             (
                 PanelError::OutcomeConstantWithinEntity,

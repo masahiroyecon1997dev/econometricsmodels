@@ -154,6 +154,7 @@ pub(super) fn fit_re(
             df_resid,
             df_model,
             n_slopes: df_model - 1,
+            tests_slopes: true,
             entity: input.entity_codes(),
             structure: PanelStructure::RandomEffects,
         },

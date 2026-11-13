@@ -56,6 +56,11 @@ pub(crate) struct PanelCovInput<'a> {
     /// ロバスト検定（F検定）の対象になる傾き係数の数`q`（FEは`k`、REは定数項を除く`k - 1`）。
     /// クラスター数・時点数が`q`を超えるかの事前検証に使う。
     pub(crate) n_slopes: usize,
+    /// 傾き係数のF検定をするか。`false`なら、クラスター数・時点数が`n_slopes`を超えるかの事前検証
+    /// （F検定のための検査）を省き、標準誤差だけを計算する（FEIVの第一段階は、F検定をしないときに
+    /// クラスター数が少なくても標準誤差は求める。IV本体と同じ）。標準誤差そのものに関わる検査
+    /// （`G >= 2`・2グループ退化）は残す。FE・REの`fit()`は`true`。
+    pub(crate) tests_slopes: bool,
     /// entityのコード。`Cluster { groups: None }`のクラスター変数の既定。
     pub(crate) entity: &'a GroupCodes,
     pub(crate) structure: PanelStructure<'a>,
@@ -95,6 +100,7 @@ pub(crate) fn panel_cov_params(
         df_resid,
         df_model,
         n_slopes,
+        tests_slopes,
         entity,
         structure,
     } = *input;
@@ -138,10 +144,12 @@ pub(crate) fn panel_cov_params(
             // コードをそのまま使う。
             let group_codes = groups.as_ref().unwrap_or(entity);
             let n_groups = validate_cluster_groups(group_codes, n, ClusterSetting::CovType)?;
-            validate_cluster_count_covers_slopes(n_groups, n_slopes)?;
+            if tests_slopes {
+                validate_cluster_count_covers_slopes(n_groups, n_slopes)?;
+            }
             let k_correction = match structure {
                 PanelStructure::FixedEffects { levels } => {
-                    // 直前の`G > q`により、ここで`G=2`なら`q`は高々1。
+                    // F検定をするなら、直前の`G > q`により、ここで`G=2`なら`q`は高々1。
                     if n_slopes >= 1
                         && n_groups == 2
                         && two_group_split_is_degenerate(levels, group_codes)
@@ -178,10 +186,12 @@ pub(crate) fn panel_cov_params(
             let time_codes = dk_time.codes();
             let t_periods = time_codes.n_groups();
             let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
-            validate_dk_periods_cover_tested_coefficients(t_periods, n_slopes)
-                .map_err(|e| e.in_stage(Stage::OverallFTest))?;
+            if tests_slopes {
+                validate_dk_periods_cover_tested_coefficients(t_periods, n_slopes)
+                    .map_err(|e| e.in_stage(Stage::OverallFTest))?;
+            }
             if let PanelStructure::FixedEffects { levels } = structure {
-                // 直前の`t_periods > q`により、ここで`t_periods=2`なら`q`は高々1。
+                // F検定をするなら、直前の`t_periods > q`により、ここで`t_periods=2`なら`q`は高々1。
                 if n_slopes >= 1
                     && t_periods == 2
                     && two_group_split_is_degenerate(levels, time_codes)

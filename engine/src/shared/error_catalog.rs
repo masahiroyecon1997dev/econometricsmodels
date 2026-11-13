@@ -2126,25 +2126,39 @@ pub static CATALOG: &[ErrorSpec] = &[
     ErrorSpec {
         code: ErrorCode::RegressorConstant,
         class: ErrorClass::Validation,
-        params: &[ParamSpec {
-            name: "column",
-            ty: ParamType::Str,
-            in_text: true,
-        }],
-        message: r#"Regressor '{column}' has the same value in every row up to rounding, so it is collinear with the fixed effects."#,
-        hint: Some(r#"Remove the regressor from x."#),
+        params: &[
+            ParamSpec {
+                name: "role",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "column",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+        ],
+        message: r#"Column '{column}' of {role} has the same value in every row up to rounding, so it is collinear with the fixed effects."#,
+        hint: Some(r#"Remove the column from {role}."#),
         stage_allowed: false,
     },
     ErrorSpec {
         code: ErrorCode::RegressorNoWithinVariation,
         class: ErrorClass::Validation,
-        params: &[ParamSpec {
-            name: "column",
-            ty: ParamType::Str,
-            in_text: true,
-        }],
-        message: r#"Regressor '{column}' has no variation left after the within transformation: it is time-invariant, or collinear with the fixed effects."#,
-        hint: Some(r#"Remove the regressor from x."#),
+        params: &[
+            ParamSpec {
+                name: "role",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "column",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+        ],
+        message: r#"Column '{column}' of {role} has no variation left after the within transformation: it is time-invariant, or collinear with the fixed effects."#,
+        hint: Some(r#"Remove the column from {role}."#),
         stage_allowed: false,
     },
     ErrorSpec {

@@ -9,14 +9,15 @@ use super::FeEstimator;
 use super::input::{FeAbsorption, FeCovType, FeEffects, FeInput};
 use super::r_squared::{fe_r_squared_between, fe_r_squared_overall};
 use super::within::{
-    validate_no_singleton_groups_multi_way, validate_no_singleton_groups_one_way,
+    WithinOutput, validate_no_singleton_groups_multi_way, validate_no_singleton_groups_one_way,
     validate_no_singleton_groups_two_way, validate_no_zero_variance_regressors,
     within_transform_multi_way, within_transform_one_way, within_transform_two_way_with,
 };
 use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::OlsInput;
 use crate::panel::common::{
-    PanelCov, PanelCovInput, PanelError, PanelStructure, absorbed_parameters, panel_cov_params,
+    ColumnRole, PanelCov, PanelCovInput, PanelError, PanelStructure, absorbed_parameters,
+    panel_cov_params,
 };
 use crate::shared::error::CommonError;
 use crate::shared::goodness_of_fit::{gaussian_goodness_of_fit, is_perfect_fit};
@@ -26,22 +27,9 @@ use crate::shared::least_squares::{LeastSquaresFit, least_squares};
 use crate::shared::validation::{column_is_zero_variance_with_noise, has_no_variation};
 use crate::shared::wald::wald_f_test;
 
-/// 固定効果が吸収する次元（`effects`の順。個体、2-wayなら時点、`MultiWay`は入力の全ての次元）を返す。
-/// 2-wayなのに`input`に`time`が無ければ`PanelError::TwoWayRequiresTime`、`MultiWay`なのに入力の次元が
-/// 3つ未満なら`CommonError::Internal`（呼び出し側の実装誤り）。`FeEstimator::fit`が最初に呼び、以降の
-/// 1-way/2-way/高次元の分岐は`effects`ではなくこの`Vec`の長さで区別する。
+/// 固定効果が吸収する次元を返す（[`FeEffects::levels`]）。`FeEstimator::fit`が最初に呼ぶ。
 fn absorbed_levels(effects: FeEffects, input: &FeInput) -> Result<Vec<&GroupCodes>, PanelError> {
-    match effects {
-        FeEffects::OneWay => Ok(vec![input.entity_codes()]),
-        FeEffects::TwoWay => {
-            let time = input.time_codes().ok_or(PanelError::TwoWayRequiresTime)?;
-            Ok(vec![input.entity_codes(), time])
-        }
-        FeEffects::MultiWay if input.n_effects() >= 3 => Ok(input.effect_codes().iter().collect()),
-        FeEffects::MultiWay => {
-            Err(CommonError::internal("multi-way effects need at least three dimensions").into())
-        }
-    }
+    effects.levels(input.effect_codes())
 }
 
 /// [`FeEstimator::fit`]の本体。契約（エラー条件を含む）は`fit`のdocコメント参照。
@@ -57,10 +45,10 @@ pub(super) fn fit_fe(
     // グローバル並列度」参照）。
     crate::shared::parallelism::ensure_serial();
 
-    // 吸収する次元。`time`が無いのに2-wayを指定した入力や、次元が足りない`MultiWay`はここで弾き、
-    // 以降は`levels`の長さだけで1-way/2-way/高次元を分岐する（`effects`と入力の食い違いを後段で
-    // `expect`せずに済む）。
-    let levels = absorbed_levels(effects, &input)?;
+    // 吸収する次元が`effects`と入力で食い違う入力（`time`の無い2-wayや、次元が足りない`MultiWay`）を、
+    // ここで弾く。以降は後半（`fit_fe_from_within`）が同じ`levels`を作り直し、その長さだけで
+    // 1-way/2-way/高次元を分岐する。
+    absorbed_levels(effects, &input)?;
 
     absorption.validate()?;
 
@@ -75,6 +63,7 @@ pub(super) fn fit_fe(
     for (name, col) in input.x_names().iter().zip(input.x()) {
         if has_no_variation(col) {
             return Err(PanelError::RegressorConstant {
+                role: ColumnRole::X,
                 column: name.clone(),
             });
         }
@@ -86,23 +75,48 @@ pub(super) fn fit_fe(
     // HC2/HC3は固定効果ダミーのレバレッジが要る。組合せが欠ける2-wayと3次元以上は、最大の次元を除いた
     // 次元の水準数の合計の密な行列を解く。
     let leverage_needed = matches!(cov_type, FeCovType::Hc2 | FeCovType::Hc3);
-    let mut absorbed = None;
-    let (y, x, noise) = match effects {
+    let within = match effects {
         FeEffects::OneWay => {
             let (y, x) = within_transform_one_way(&input);
-            (y, x, 0.0)
+            WithinOutput {
+                y,
+                x,
+                absorbed: None,
+                noise: 0.0,
+            }
         }
-        FeEffects::TwoWay => {
-            let within = within_transform_two_way_with(&input, absorption, leverage_needed)?;
-            absorbed = within.absorbed;
-            (within.y, within.x, within.noise)
-        }
-        FeEffects::MultiWay => {
-            let within = within_transform_multi_way(&input, absorption, leverage_needed)?;
-            absorbed = within.absorbed;
-            (within.y, within.x, within.noise)
-        }
+        FeEffects::TwoWay => within_transform_two_way_with(&input, absorption, leverage_needed)?,
+        FeEffects::MultiWay => within_transform_multi_way(&input, absorption, leverage_needed)?,
     };
+
+    fit_fe_from_within(input, effects, cov_type, confidence_level, within, true)
+}
+
+/// within変換済みの列から、自由度の検証・最小二乗・`cov_type`別の共分散・統計量を求める
+/// （[`fit_fe`]の後半）。FEIVの第一段階が、全列を1回だけ変換した結果を使い回すために呼ぶ。
+///
+/// `within`は`input`の`y`・`x`を、`effects`の次元で変換したもの（列の順も同じ）。singleton・生の定数列・
+/// 変換の設定の検査は呼び出し側が済ませている前提で、ここでは行わない（変換後の分散ゼロの検出は
+/// 行う）。`tests_overall_f`が`false`なら、傾き係数のF検定をせず（`f_statistic`は`None`）、
+/// クラスター数・時点数が傾きの数以下でも標準誤差は計算する（`PanelCovInput::tests_slopes`）。
+///
+/// # Errors
+/// [`fit_fe`]の、変換の後のエラーと同じ。
+pub(in crate::panel) fn fit_fe_from_within(
+    input: FeInput,
+    effects: FeEffects,
+    cov_type: FeCovType,
+    confidence_level: f64,
+    within: WithinOutput,
+    tests_overall_f: bool,
+) -> Result<FeEstimator, PanelError> {
+    let WithinOutput {
+        y,
+        x,
+        absorbed,
+        noise,
+    } = within;
+    let levels = absorbed_levels(effects, &input)?;
 
     let n = input.nobs();
     let n_groups: Vec<usize> = levels.iter().map(|level| level.n_groups()).collect();
@@ -202,6 +216,7 @@ pub(super) fn fit_fe(
             df_resid,
             df_model,
             n_slopes: k,
+            tests_slopes: tests_overall_f,
             entity: input.entity_codes(),
             structure: PanelStructure::FixedEffects { levels: &levels },
         },
@@ -246,9 +261,9 @@ pub(super) fn fit_fe(
     // （`cov_type=Cluster`/`Dk`のときだけ`df_resid`から切り替わる、`shared::wald::wald_f_test`の
     // `df_inference`引数と同じ扱い）を使う。`k_constant=0`（FEに切片は無い、上記
     // `OlsInput::from_columns`呼び出しと同じ理由）。
-    let f_test = if k == 0 {
-        // 説明変数が無いモデル。検定対象が存在しないため`OlsEstimator::fit`同様
-        // 定義なし（`None`）。
+    let f_test = if k == 0 || !tests_overall_f {
+        // 説明変数が無いモデル、またはF検定をしない呼び出し。検定対象が存在しないため
+        // `OlsEstimator::fit`同様定義なし（`None`）。
         None
     } else {
         Some(

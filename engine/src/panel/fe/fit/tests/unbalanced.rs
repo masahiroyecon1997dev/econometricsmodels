@@ -3,6 +3,7 @@
 use faer::Mat;
 
 use super::*;
+use crate::panel::common::ColumnRole;
 use crate::panel::common::PanelError;
 use crate::panel::fe::FeEstimator;
 use crate::panel::fe::FixedEffects;
@@ -441,6 +442,7 @@ fn a_regressor_constant_within_each_entity_is_rejected_as_collinear_with_the_fix
     assert_eq!(
         data.fit(FeCovType::Classical).unwrap_err(),
         PanelError::ZeroVarianceAfterDemeaning {
+            role: ColumnRole::X,
             column: "x2".to_string()
         }
     );
@@ -617,6 +619,7 @@ fn a_regressor_constant_within_each_entity_is_rejected_even_when_the_projection_
     assert_eq!(
         data.fit(FeCovType::Classical).unwrap_err(),
         PanelError::ZeroVarianceAfterDemeaning {
+            role: ColumnRole::X,
             column: "x2".to_string()
         }
     );

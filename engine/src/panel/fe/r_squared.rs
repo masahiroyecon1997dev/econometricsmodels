@@ -33,7 +33,7 @@ pub(super) fn slope_only_residual(y: &[f64], x: &[Vec<f64>], params: &Mat<f64>, 
 /// と同じ理由でグループ間加算の順序を固定する、`fe.rs`のモジュールdoc参照）。
 ///
 /// `TSS <= 0`（全エンティティ平均がゼロ等）なら`linearmodels`と同じく`0.0`を返す。
-pub(super) fn fe_r_squared_between(
+pub(in crate::panel) fn fe_r_squared_between(
     y: &[f64],
     x: &[Vec<f64>],
     params: &Mat<f64>,
@@ -69,7 +69,7 @@ pub(super) fn fe_r_squared_between(
 /// ここでは`β̂`だけを元の`y`/`x`に当てはめた残差（固定効果の切片項を含めない）を使う。
 ///
 /// `TSS <= 0`なら`linearmodels`と同じく`0.0`を返す。
-pub(super) fn fe_r_squared_overall(y: &[f64], x: &[Vec<f64>], params: &Mat<f64>) -> f64 {
+pub(in crate::panel) fn fe_r_squared_overall(y: &[f64], x: &[Vec<f64>], params: &Mat<f64>) -> f64 {
     let n = y.len();
 
     let mut ssr = 0.0;

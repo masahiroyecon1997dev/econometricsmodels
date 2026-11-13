@@ -3,6 +3,7 @@
 use crate::panel::common::{EffectNames, PanelCovType, PanelError, TimeKeys, validate_panel_input};
 use crate::panel::re::{ReEffects, ReInput};
 use crate::shared::alternating_projections::{DEFAULT_MAX_SWEEPS, DEFAULT_TOLERANCE};
+use crate::shared::error::CommonError;
 use crate::shared::group_codes::GroupCodes;
 
 /// FEの被説明変数・説明変数・パネル識別子を保持する入力データ。
@@ -304,6 +305,28 @@ pub enum FeEffects {
     /// 3つ以上の次元（`effects`の全ての列）。入力が3つ以上の次元を持つこと。バランスパネルでも
     /// 閉形式は使わず、交互射影で固定効果を除く。
     MultiWay,
+}
+
+impl FeEffects {
+    /// この方向で固定効果が吸収する次元（`groups`は効果の各次元のコード、`effects`の順）。個体、2-wayなら
+    /// 時点、`MultiWay`は全ての次元。`FeEstimator::fit`と`FeIvEstimator::fit`が最初に呼び、以降の
+    /// 1-way/2-way/高次元の分岐は`self`ではなく戻り値の長さで区別する。
+    ///
+    /// # Errors
+    /// 2-wayなのに2つ目の次元が無ければ`PanelError::TwoWayRequiresTime`、`MultiWay`なのに次元が3つ
+    /// 未満なら`CommonError::Internal`（呼び出し側の実装誤り）。
+    pub(crate) fn levels(self, groups: &[GroupCodes]) -> Result<Vec<&GroupCodes>, PanelError> {
+        match self {
+            Self::OneWay => Ok(groups.iter().take(1).collect()),
+            Self::TwoWay if groups.len() >= 2 => Ok(groups.iter().take(2).collect()),
+            Self::TwoWay => Err(PanelError::TwoWayRequiresTime),
+            Self::MultiWay if groups.len() >= 3 => Ok(groups.iter().collect()),
+            Self::MultiWay => Err(CommonError::internal(
+                "multi-way effects need at least three dimensions",
+            )
+            .into()),
+        }
+    }
 }
 
 /// FEが対応する`cov_type`。[`PanelCovType`]の別名（`fe.rs`のモジュールdoc「`cov_type`対応」参照）。

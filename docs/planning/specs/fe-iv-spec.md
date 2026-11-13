@@ -964,3 +964,20 @@ Stock-Yogoの表は実装の値がNBER TWP 284のTable 1（バイアス）・Tab
 
 **実装順（コミット）**: (1)この節 → (2)列ベースの変換への切り出し → (3)`fit_fe`の後半の切り出し → (4)`fe_iv.rs`をファサード＋子モジュールに分割 →
 (5)`role`パラメータとエラーの追加 → (6)`FeIvEstimator::fit` → (7)テスト（LSDVの2SLS・fixestとplmの値・手計算のHC2/HC3・性質・cov_type別のdf）→ (8)レビュー・clippy・全テスト → (9)進捗の追記とIssueコメント。
+
+### 9.19 #370〜#372の実装結果（2026-11-13）
+
+**状態**: engineのみ実装済み（`FeIvEstimator::fit`。公開面のpybind・Python・docsは#376以降）。#370（入力型・API設計）・#371（点推定・`cov_type`別SE）・#372（自由度）は
+この実装で完了。診断（#373〜#375）は未実装だが、第一段階の推定量（`first_stages()`、変換済みの列・残差）を保持している。
+**実装**: 9.18の決定どおり。`fe/within.rs`の`within_transform_columns`（列ベースの変換）、`fe/fit.rs`の`fit_fe_from_within`（`fit_fe`の後半）、`fe/fixed_effects.rs`の`fixed_effects_of`、
+`FeEffects::levels`、`PanelCovInput::tests_slopes`、`ColumnRole`（`REGRESSOR_CONSTANT`・`REGRESSOR_NO_WITHIN_VARIATION`に`role`）、`PanelError::{InsufficientInstruments, SecondStageFailed}`、
+`fe_iv.rs`（ファサード）・`fe_iv/{input,fit}.rs`。
+**検証**: fixest（1-way・2-way×古典・HC1・個体クラスター・時点クラスター、1e-9）、ダミーを明示した2SLS（LSDV。1-way・バランス/不均衡な2-way・3次元×古典・HC1〜HC3・クラスター、
+内生変数2個・操作変数3個・外生変数0〜2個、入れ子でないクラスターの`K`、`fixed_effects()`とダミーの係数）。DKはラグ0が時点クラスターと一致。HC2/HC3はLSDVの自己整合のみ（外部の参照は#379でplm・
+`ivreg`＋`sandwich`）。`rust-reviewer`の指摘は、規約・テストの不足・perfect fitの誤差の見積もり（`|β̂_j|`×`x`の尺度を足す）を反映した。
+**見送り（要判断・後続）**:
+- 第一段階が保持するメモリ（内生変数ごとに生の列・変換済みの列・吸収した効果の複製）と、構造式用の`FeInput`の複製は、n=1e6で効く。性能比較（#380）で測ってから、借用・移動に直す。
+- DKの第一段階で`T`が`l`以下のとき、DKの共分散がランク落ちするため標準誤差の信頼性が下がる可能性がある（IV本体のクラスターと同じ扱い。判断が要る）。
+- `fit_fe_iv`が約300行（第一段階とR²・構造式の組み立てを関数に切り出す案）、`from_group_codes`の名前と列の数の検査が`debug_assert`のみ（`FeInput`と同じ）、proptest未整備。
+- テストファイル名（`lsdv`・`structure`は標準のテーマ名に無い）。
+**次**: #374（Sargan。`σ̂² = e'e/(n − n_absorbed)`）・#375（Wu-Hausman）→ #373（弱操作変数診断。#363〜#365の後）→ #376〜#380。

@@ -144,7 +144,7 @@ def build_fixtures() -> dict:
         "note": (
             "feolsの固定効果・操作変数構文。fixef.tol=1e-11、ssc()は既定のまま（clusterは"
             "K.fixef=nonnested・t.df=min、hetero・DKはK.fixef=full）。dkのバンド幅は本実装の既定式"
-            "floor(4*(T/100)^(2/9))、またはdk_bw1の明示値1。hc2・hc3はfixestがIVで提供しない。"
+            "floor(4*(T/100)^(2/9))、または明示値（dk_bw1=1・dk_bw3=3・dk_bw_max=T-2）。hc2・hc3はfixestがIVで提供しない。"
             "Wu-Hausmanは第一段階の残差を足した補助回帰を同じvcovで回したWald F（iidのときfitstat 'wh'と一致）。"
             "部分Fは内生変数ごとの第一段階（等分散）のWald F。overid_statisticはfixestのsargan（e'e/n尺度）に"
             "(n-n_absorbed)/nを掛けた本実装の尺度（生の値は保存しない）。"

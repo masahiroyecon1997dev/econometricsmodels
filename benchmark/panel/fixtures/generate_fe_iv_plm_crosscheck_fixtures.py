@@ -6,8 +6,8 @@ fixest（`fe_iv.json`）とは別実装のplm（`model = "within"`の操作変�
 中身（構造残差と`X̂`）で、小標本補正はfixest・本実装の規約をスカラー倍で手計算する
 （`benchmark/panel/references/run_plm_fe_iv_benchmark.R`のヘッダが正本）。
 
-対象は1-wayの個体FEの`classical`・`hc1`・`cluster`（個体）・`dk`（本実装の既定バンド幅と明示
-バンド幅1）。plmは2-wayのwithinに対するクラスター・SCC共分散行列を持たない。ケースは
+対象は1-wayの個体FEの`classical`・`hc1`・`cluster`（個体）・`dk`（本実装の既定バンド幅と、
+明示バンド幅1・3・`T-2`）。plmは2-wayのwithinに対するクラスター・SCC共分散行列を持たない。ケースは
 `benchmark/panel/fe_iv_cases.py`の`plm_cases()`。
 
 使用例（リポジトリルートから）:

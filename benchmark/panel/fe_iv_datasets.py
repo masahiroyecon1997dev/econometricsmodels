@@ -22,7 +22,7 @@ corr(u, v_j) = ρ                              （内生性。`exogenous_endog`�
 - `multi_endog`: 内生変数2個・操作変数3本。
 - `weak_instruments`: 第一段階の係数が小さい（部分Fが小さい）。
 - `invalid_instrument`: `z2`が構造誤差と相関する（Sarganが棄却）。
-- `exogenous_endog`: 内生性が無い（`ρ = 0`。Wu-Hausmanが棄却しない）。
+- `exogenous_endog`: 内生性が無い（`ρ = 0`。Wu-Hausmanが棄却しない乱数列のシードを使う）。
 - `heteroskedastic`: 構造誤差の標準偏差が`|x1|`に比例して大きい。
 - `autocorrelated`: 構造誤差が個体内でAR(1)（DKの検証用）。
 - `short_panel`: 個体60×時点3。
@@ -31,7 +31,7 @@ corr(u, v_j) = ρ                              （内生性。`exogenous_endog`�
 - `three_way`: `baseline`に3つ目の固定効果`sector`（行ごとに無作為な4水準）の効果を足す。
 - `small_n`: 個体8×時点4（自由度が小さい成功パス）。
 
-全シナリオで、水準は文字列（`e00`・`t0`・`s0`）、各水準は2行以上に現れる（singletonを作らない）。
+全シナリオで、水準は文字列（`e00`・`t0`（時点が10以上なら`t00`）・`s0`）、各水準は2行以上に現れる（singletonを作らない）。
 """
 
 from __future__ import annotations
@@ -128,14 +128,20 @@ def _drop_rows(
     return keep
 
 
+# 既定の乱数シード。`exogenous_endog`だけは別のシードを使う（既定のシードでは、内生性が無い
+# のにWu-Hausman検定が5%で棄却する乱数列になる）。
+_DEFAULT_SEED = 42
+_SCENARIO_SEEDS = {"exogenous_endog": 43}
+
+
 def generate_fe_iv_dataset(
-    scenario: str, seed: int = 42
+    scenario: str, seed: int | None = None
 ) -> tuple[pl.DataFrame, np.ndarray]:
     """指定シナリオに沿った、内生性のある合成パネルIVデータセットを生成する。
 
     Args:
         scenario: `SCENARIOS`のいずれか。
-        seed: 乱数シード。
+        seed: 乱数シード。`None`ならシナリオごとの既定（`exogenous_endog`は43、他は42）。
 
     Returns:
         (df, true_beta)のタプル。`true_beta`は`[β_x1, β_endog1, ...]`
@@ -145,6 +151,8 @@ def generate_fe_iv_dataset(
         ValueError: 未知のscenarioの場合。
     """
     validate_choice(scenario, SCENARIOS, "scenario")
+    if seed is None:
+        seed = _SCENARIO_SEEDS.get(scenario, _DEFAULT_SEED)
     rng = np.random.default_rng(seed)
 
     n_entities, n_periods = _N_ENTITIES, _N_PERIODS
@@ -210,7 +218,9 @@ def generate_fe_iv_dataset(
     y = beta[0] * x1 + endog @ beta[1:] + effects + u
 
     entity_ids = [f"e{i:02d}" for i in range(n_entities)]
-    time_ids = [f"t{t}" for t in range(n_periods)]
+    # 辞書順と時系列順を一致させる（DKの時点列は文字列をバイト順に並べるため、ゼロ埋めする）。
+    width = len(str(n_periods - 1))
+    time_ids = [f"t{t:0{width}d}" for t in range(n_periods)]
     regions = _region(n_entities)
     regions_uneven = _region_uneven(n_entities)
     data: dict[str, list | np.ndarray] = {

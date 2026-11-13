@@ -37,7 +37,12 @@ from _assertions import (
     assert_dict_close,
     assert_inference_close,
 )
-from _fe_iv_helpers import FIXTURE_DIR, fit_case, leaf
+from _fe_iv_helpers import (
+    FIXTURE_DIR,
+    expected_dk_bandwidth,
+    fit_case,
+    leaf,
+)
 from _fixture_cov import load_fixtures_with_cov
 from _tolerances import TOLERANCES
 
@@ -85,6 +90,9 @@ def test_matches_fixest(fixtures, case) -> None:
     assert res.df_model - len(res.params) == ref["n_absorbed"], label
     assert res.df_resid == ref["df_resid"], label
     assert res.stat_df == ref["stat_df"], label
+    if case.cov.cov_type == "dk":
+        # 参照に渡したバンド幅（既定式または明示値）で推定していること。
+        assert res.dk_bandwidth_used == expected_dk_bandwidth(case), label
 
     # 全係数が同時にゼロというWald F。
     assert res.wald_dist == "f"

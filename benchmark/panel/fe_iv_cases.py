@@ -14,7 +14,7 @@ JSONでは`path`（キーの並び）で指す。
 - `confidence_level/<cov>`: `baseline`で信頼水準0.90。
 
 `<cov>`は`CovCase.key`。`cluster_time`・`cluster_region`・`cluster_region_uneven`は固定効果の外の列
-（または次元そのものの列）でのクラスタリング、`dk`は本実装の既定バンド幅、`dk_bw1`は明示バンド幅1。
+（または次元そのものの列）でのクラスタリング、`dk`は本実装の既定バンド幅、`dk_bw1`・`dk_bw3`は明示バンド幅1・3、`dk_bw_max`は`T-2`（fixestが落とす最終ラグ`T-1`の手前の上限）。
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from typing import NamedTuple
 
 import polars as pl
 
-from benchmark.common import DATA_DIR
+from benchmark.common import DATA_DIR, hac_auto_lag
 from benchmark.panel.fe_iv_datasets import SCENARIOS, scenario_columns
 
 CONFIDENCE_LEVEL_NON_DEFAULT = 0.90
@@ -35,8 +35,10 @@ TWO_WAY_SCENARIOS = ["baseline", "unbalanced", "multi_endog", "long_panel"]
 # `short_panel`は時点3、`small_n`は個体8・時点4・region2つ、`long_panel`はregion3つ。
 _MIN_CLUSTERS_MARGIN = 1
 
-# DK（Driscoll-Kraay）の明示バンド幅1を作れる最小の時点数（バンド幅は`T-1`未満）。
-_DK_EXPLICIT_MIN_PERIODS = 3
+# DKのバンド幅の網羅（既定式の他に、明示した1・3・`T-2`）を行うシナリオ。`T-2`はfixestが落とす最終ラグ
+# （`T-1`）の手前の上限。時点が少ないシナリオでは、既定式が1になり`dk_bw1`と同一になる。
+_DK_BANDWIDTH_SWEEP_SCENARIOS = ("baseline", "long_panel")
+_DK_EXPLICIT_BANDWIDTH = 3
 
 
 class CovCase(NamedTuple):
@@ -60,6 +62,7 @@ CLUSTER_REGION_UNEVEN = CovCase(
 CLUSTER_SECTOR = CovCase("cluster_sector", "cluster", "sector")
 DK = CovCase("dk", "dk")
 DK_BW1 = CovCase("dk_bw1", "dk", dk_bandwidth=1)
+DK_BW3 = CovCase("dk_bw3", "dk", dk_bandwidth=_DK_EXPLICIT_BANDWIDTH)
 
 
 class Case(NamedTuple):
@@ -128,8 +131,12 @@ def cov_cases(scenario: str, n_effects: int) -> list[CovCase]:
         cases.append(CLUSTER_REGION)
         cases.append(CLUSTER_SECTOR)
     cases.append(DK)
-    if n_periods >= _DK_EXPLICIT_MIN_PERIODS + 1 and n_effects <= 2:
+    # 既定式のバンド幅が1のとき（時点が少ない）は、明示した1と同じなので足さない。
+    if hac_auto_lag(n_periods) != 1:
         cases.append(DK_BW1)
+    if scenario in _DK_BANDWIDTH_SWEEP_SCENARIOS:
+        cases.append(DK_BW3)
+        cases.append(CovCase("dk_bw_max", "dk", dk_bandwidth=n_periods - 2))
     return cases
 
 
@@ -236,12 +243,20 @@ def dummy_cases() -> list[Case]:
 
 
 def plm_cases() -> list[Case]:
-    """plm（`model = "within"`）のケース。1-wayの個体FE、classical・hc1・個体クラスター・DK。
+    """plm（`model = "within"`）のケース。1-wayの個体FE、classical・hc1・個体クラスター・DK（既定式と明示のバンド幅）。
 
     plmは2-wayのwithinに対するクラスター・SCC共分散行列を持たず、クラスター列も個体・時点
     しか指定できない。
     """
-    keep = {"classical", "hc1", "cluster", "dk", "dk_bw1"}
+    keep = {
+        "classical",
+        "hc1",
+        "cluster",
+        "dk",
+        "dk_bw1",
+        "dk_bw3",
+        "dk_bw_max",
+    }
     return [
         case
         for case in fixest_cases()

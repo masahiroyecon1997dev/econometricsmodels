@@ -11,6 +11,7 @@ from pathlib import Path
 import polars as pl
 from econometricsmodels import FEIV, FEIVOptions
 
+from benchmark.common import hac_auto_lag
 from benchmark.panel.fe_iv_cases import Case
 
 FIXTURE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "benchmarks"
@@ -43,6 +44,13 @@ def fit_case(case: Case):
         effects=list(case.effects),
         options=options_for(case),
     ).fit()
+
+
+def expected_dk_bandwidth(case: Case) -> int:
+    """ケースのDKバンド幅（明示値、`None`なら既定式`floor(4 (T/100)^(2/9))`）。"""
+    if case.cov.dk_bandwidth is not None:
+        return case.cov.dk_bandwidth
+    return hac_auto_lag(pl.read_csv(case.csv_path)["time"].n_unique())
 
 
 def leaf(fixtures: dict, case: Case) -> dict:

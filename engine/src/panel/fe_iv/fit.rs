@@ -7,6 +7,7 @@ use statrs::distribution::StudentsT;
 
 use super::FeIvEstimator;
 use super::input::FeIvInput;
+use super::sargan::fe_sargan_test;
 use crate::linear::common::LeastSquaresError;
 use crate::panel::common::{
     ColumnRole, PanelCov, PanelCovInput, PanelDimension, PanelError, PanelStructure,
@@ -286,6 +287,24 @@ pub(super) fn fit_fe_iv(
         });
     }
 
+    // Sargan過剰識別検定。`Z̃ = [x̃_exog, z̃]`は第一段階の設計行列と同じ列。内生変数が無いときは検定しない。
+    let sargan = if k_endog > 0 && k_instruments > k_endog {
+        let z_columns: Vec<&[f64]> = exog_range
+            .clone()
+            .chain(instrument_range.clone())
+            .map(|c| tilde[c].as_slice())
+            .collect();
+        Some(fe_sargan_test(
+            &mat_from_columns(n, &z_columns),
+            &estimate.residuals,
+            estimate.ssr,
+            neffects,
+            k_instruments - k_endog,
+        )?)
+    } else {
+        None
+    };
+
     let residuals: Vec<f64> = (0..n).map(|i| *estimate.residuals.get(i, 0)).collect();
     let PanelCov {
         cov_params,
@@ -369,6 +388,7 @@ pub(super) fn fit_fe_iv(
         r_squared_overall,
         f_test,
         first_stages,
+        sargan,
         structural,
         absorbed: structural_absorbed,
     })

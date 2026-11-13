@@ -18,7 +18,8 @@
 //!    （クラスター数・時点数が`l`以下でも標準誤差は計算する。IV本体の`first_stage()`と同じ）。
 //!    当てはめ値から`X̂ = [x̃_exog, x̂̃_endog]`を作る。
 //! 5. 点推定`β̂ = (X̂'X̂)⁻¹X̂'ỹ`、構造残差`e = ỹ − X̃β̂`（`X̃`は実際の内生変数。第二段階の残差ではない）。
-//! 6. `panel_cov_params`に`X̂`・`(X̂'X̂)⁻¹`・構造残差を渡して`cov_type`別の共分散を求め、t分布の推論表と
+//! 6. Sargan過剰識別検定（`len(instruments) > len(x_endog)`のとき。`σ̂² = e'e/(n − neffects)`、等分散前提）。
+//! 7. `panel_cov_params`に`X̂`・`(X̂'X̂)⁻¹`・構造残差を渡して`cov_type`別の共分散を求め、t分布の推論表と
 //!    傾き係数のWald F検定を計算する。
 //!
 //! # 自由度
@@ -42,8 +43,9 @@
 //!
 //! - `input.rs`: `FeIvInput`・`RoleColumns`
 //! - `fit.rs`: `fit_fe_iv`（上のパイプライン）
+//! - `sargan.rs`: Sargan過剰識別検定
 //!
-//! 弱操作変数診断・Sargan・Wu-Hausmanは別途追加する（第一段階の推定量・残差を保持している）。
+//! 弱操作変数診断・Wu-Hausmanは別途追加する（第一段階の推定量・残差を保持している）。
 
 use faer::Mat;
 
@@ -52,6 +54,7 @@ use super::fe::{FeAbsorption, FeCovType, FeEffects, FeEstimator, FeInput, FixedE
 
 mod fit;
 mod input;
+mod sargan;
 
 pub use input::{FeIvInput, RoleColumns};
 
@@ -87,6 +90,8 @@ pub struct FeIvEstimator {
     f_test: Option<(f64, f64)>,
     /// 内生変数ごとの第一段階（`x_endog`の順）。変換済みの列・残差（`residuals()`）を持つ。
     first_stages: Vec<FeEstimator>,
+    /// Sargan過剰識別検定。丁度識別、または内生変数が無いときは`None`。
+    sargan: Option<sargan::FeSarganTest>,
     /// 構造式の`y`・実際の`X = [x_exog, x_endog]`（変換前）。`fixed_effects()`が使う。
     structural: FeInput,
     /// 交互射影が`y`・`x_exog`・`x_endog`の列から引いた各次元の効果（`structural`の列と同じ順）。
@@ -262,6 +267,25 @@ impl FeIvEstimator {
     /// within回帰で、`cov_type`は構造式と同じ。傾きのF検定はしないので`f_statistic()`は`None`。
     pub fn first_stages(&self) -> &[FeEstimator] {
         &self.first_stages
+    }
+
+    /// Sargan過剰識別検定の統計量。丁度識別（`len(instruments) == len(x_endog)`）では`None`。
+    /// 内生変数が無いときも`None`（IV本体は内生変数が無いと`df = len(instruments)`で検定するが、
+    /// FEIVは第一段階が無い構成を過剰識別検定の対象にしない）。
+    /// within変換後のデータで`e'Z̃(Z̃'Z̃)⁻¹Z̃'e / σ̂²`、`σ̂² = e'e/(n − neffects)`（`cov_type`に依らず
+    /// 等分散前提）。
+    pub fn sargan_statistic(&self) -> Option<f64> {
+        self.sargan.map(|test| test.statistic)
+    }
+
+    /// Sargan過剰識別検定のp値。`sargan_statistic()`と同じ条件で`None`。
+    pub fn sargan_p_value(&self) -> Option<f64> {
+        self.sargan.map(|test| test.p_value)
+    }
+
+    /// Sargan過剰識別検定のχ²分布の自由度`len(instruments) − len(x_endog)`。丁度識別なら`None`。
+    pub fn sargan_df(&self) -> Option<usize> {
+        self.sargan.map(|test| test.df)
     }
 
     /// 固定効果自体（α_i、2-wayはγ_tも）を事後的に復元する。構造式の`y`・実際の`X`・`β̂`から

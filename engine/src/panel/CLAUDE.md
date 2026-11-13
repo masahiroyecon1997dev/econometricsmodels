@@ -11,7 +11,8 @@
   - **`FeIvEstimator::fit`は全列（`y`・`x_exog`・`x_endog`・`instruments`）を1回だけ`within_transform_columns`で変換し**（`noise`も全列で共有）、第一段階は`FeEstimator::fit_from_within`（`fit_fe`の後半を切り出した内部経路）に変換済みの列を渡して内生変数ごとに回す。第一段階は`tests_overall_f=false`で、クラスター数・時点数が`l = k_exog + k_instruments`以下でも標準誤差は計算し、傾きのF（`f_statistic`）だけ`None`にする（IV本体の`first_stage()`と同じ。`PanelCovInput::tests_slopes`が`G > q`・`T > q`の検査を切り替える。構造式は`true`のままで`G <= k`はエラー）。標準誤差に関わる検査（`G >= 2`・2グループ退化・完全適合）は残る。
   - **`X̂ = [x̃_exog, x̂̃_endog]`、`x̂̃_endog = x̃_endog − 第一段階の残差`**。点推定は`shared::instrumental_variables::two_sls_point_estimate`、残差は構造残差（実際の内生変数の`X̃`で作る）。`panel_cov_params`に`X̂`・`(X̂'X̂)⁻¹`・構造残差を渡す。HC2/HC3のレバレッジは`X̂`の素のレバレッジにFEのダミーのレバレッジを足したもの（ダミー込みの`X̂_full`のハット行列の対角と一致することを、LSDVの2SLSで確かめている。plmとの照合で最終確認する）。
   - **定数列のエラーは役割つき**（`ColumnRole`。`REGRESSOR_CONSTANT`・`REGRESSOR_NO_WITHIN_VARIATION`の`role`は、FEが`x`、FEIVが`x_exog`・`x_endog`・`instruments`）。第一段階の失敗は`stage=FIRST_STAGE`を、構造式の最小二乗・完全適合は`SecondStageFailed`（`stage=SECOND_STAGE`）を付ける。
-  - **テスト**: `fe_iv/fit/tests/`の`reference.rs`はfixestの`feols(y ~ x1 | FE | x2 ~ z1 + z2)`（1-way・2-way×classical・HC1・cluster。fixestの係数の順は内生変数が先）、`lsdv.rs`はダミーを明示した2SLSでFWLを確かめる（1-way・バランス/不均衡な2-way・3次元×古典・HC1〜HC3・個体クラスター）。
+  - **テスト**: `fe_iv/fit/tests/`の`reference.rs`はfixestの`feols(y ~ x1 | FE | x2 ~ z1 + z2)`（1-way・2-way×classical・HC1・cluster。fixestの係数の順は内生変数が先）、`lsdv.rs`はダミーを明示した2SLSでFWLを確かめる（1-way・バランス/不均衡な2-way・3次元×古典・HC1〜HC3・個体クラスター）。`sargan.rs`はSargan（ダミー込みの2SLSでの再計算・分母・帰無仮説下のサイズ）。
+  - **Sargan**（`fe_iv/sargan.rs`、`fit()`時に計算し`sargan_statistic/_p_value/_df`で公開）: `σ̂² = e'e/(n − neffects)`、`Z̃ = [x̃_exog, z̃]`、`cov_type`に依らず等分散前提、丁度識別・内生変数なしは`None`。`e'e/n`にするとwithin残差が`σ²(n − neffects)`の期待値なので統計量が`n/(n − neffects)`倍に膨らみ、小さい`T`で棄却に偏る（N=100・T=3で約11〜12%、`T = 6`で約7%）。ダミー込みの2SLSの`e'e/(n − ダミーの数)`と同じ分母。
 
 ## 全体に共通する決定
 

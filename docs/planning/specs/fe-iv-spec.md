@@ -1000,3 +1000,12 @@ Stock-Yogoの表は実装の値がNBER TWP 284のTable 1（バイアス）・Tab
 
 **未決・保留（ユーザー判断）**: DKの第一段階で`T`が`l`以下のときの標準誤差の信頼性（9.19）、#636へのFE-2SLSの追加、HC2/HC3の参照（#379）、FE-GMMのHansen J（3章7）。IV側の保留（ルートCLAUDE.md 2章への診断の例外の追記、READMEの権利の注意書き、フィクスチャのデータのライセンス、3章`shared/`の列挙、`mop-oracle-spec.md`の履歴）は従来どおり。
 **注意書き**: コミットはパス指定・署名（ホストの端末で確認。失敗したら止まって報告、リトライは1回まで）。Pythonを触ったら`uv run maturin develop`（debug）で入れ直してから`pytest`。エラーコードを足したら`UPDATE_ERROR_CATALOG_GOLDEN=1 cargo test -p engine error_catalog`→`maturin develop`→`python tools/render_error_catalog.py`→`tests/support/_errors.py`。heredocでバッククォートを含む文章を書くときは`<<'EOF'`。rustfmtが整形すると、あとから文字列置換が当たらなくなるので、置換は件数を`assert`する。
+
+### 9.21 #374（FE-2SLSのSargan）の実装結果（2026-11-13）
+
+**決定（ユーザー承認）**: 結果の名前はIV本体と同じ`sargan_statistic()`・`sargan_p_value()`・`sargan_df()`。FE-2SLSを#636（頑健な過剰識別検定）に含めるかは#374では決めず、#636に残す。
+
+**実装**: `fe_iv/sargan.rs`の`fe_sargan_test`が共有の`sargan_test`を`σ̂² = e'e/(n − neffects)`で呼ぶ。`fit_fe_iv`が構造残差の後に、`Z̃ = [x̃_exog, z̃]`（第一段階の設計行列と同じ列）で計算する。丁度識別と内生変数なしは`None`（IV本体は内生変数なしだと`df = len(instruments)`で検定するので、そこだけ違う。FEIVは第一段階が無い構成を対象にしない）。
+**テスト**（`fe_iv/fit/tests/sargan.rs`）: ダミー込みの2SLSでの再計算（1-way・2-way均衡/不均衡・3次元×操作変数・内生変数の数5通り）、分母の手計算、`cov_type`不依存、丁度識別・内生変数なしの`None`、帰無仮説下の棄却率（N=100、1500回。T=3・6で3.5〜6.5%）。変異検査: 分母を`n`にするとT=3の棄却率が11.9%になり3件失敗。
+**fixestの確認**: fixest 0.14.2の`feols`のソースで、`stat = n(1 − SSR_r/SSR_null)`（`e'e/n`の尺度）。
+**見送り（reviewerのnice to have）**: `Z̃'Z̃`のCholeskyが条件数の悪い入力で`INTERNAL_ERROR`になりうる（IV本体と同じ挙動。実害が出たら`least_squares`に替える）、連結成分が複数ある不均衡2-wayと`n − neffects`が小さい境界のテスト（`/review-testing`で確認）。

@@ -64,7 +64,7 @@ exclude = ["**/CLAUDE.md", "**/.gitkeep", "**/error_catalog_golden.txt"]
 # `==`で厳密固定する（.claude/rules/testing-policy.md「ベンチマーク値のフィクスチャ化」参照）。
 # バージョンを上げる場合はフィクスチャの再生成とセットで行うこと。
 test = [
-    "pytest==9.1.1",
+    "pytest==9.2.0",
     "numpy==2.5.4",
     "statsmodels==0.15.0",
     # IV（2SLS/GMM）のフィクスチャ生成に使った主リファレンス実装

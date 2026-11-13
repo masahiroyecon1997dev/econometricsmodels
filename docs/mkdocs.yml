@@ -58,6 +58,10 @@ nav:
               - Usage: usage/fe.md
               - Options and results: api/fe.md
               - Definitions: methods/fe.md
+          - FEIV:
+              - Usage: usage/fe_iv.md
+              - Options and results: api/fe_iv.md
+              - Definitions: methods/fe_iv.md
           - RE:
               - Usage: usage/re.md
               - Options and results: api/re.md

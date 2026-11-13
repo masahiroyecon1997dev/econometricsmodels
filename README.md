@@ -225,7 +225,8 @@ Currently implemented:
 - OLS, WLS
 - Logit, Probit, Tobit
 - IV (2SLS, GMM)
-- FE (fixed effects), RE (random effects)
+- FE (fixed effects), FEIV (fixed effects two-stage least squares), RE (random
+  effects)
 
 More methods are planned, including further discrete-choice models and
 causal inference designs. What is planned or in progress, and in what
@@ -255,6 +256,7 @@ model tests — for each supported covariance type.
 | IV (2SLS) | linearmodels `IV2SLS` | R `ivreg` + `sandwich`/`lmtest` | 1e-8 / 1e-8 (HAC: 1e-2) |
 | IV (GMM) | linearmodels `IVGMM` | R `momentfit` | 1e-8 / 1e-8 |
 | FE<sup>1</sup> | linearmodels `PanelOLS`, R `fixest` | R `fixest`, R `plm` | 1e-8 / 1e-8 |
+| FEIV<sup>3</sup> | R `fixest` (`feols` with instruments) | Dummy-variable 2SLS written for the tests | 1e-8 / 1e-8 |
 | RE<sup>1</sup> | linearmodels `RandomEffects`, R `plm` | R `plm`, statsmodels `OLS` | 1e-8 / 1e-8 (unbalanced panels: 5e-3 to 5e-2) |
 
 <sup>1</sup> For FE and RE, linearmodels covers only classical and HC1
@@ -268,6 +270,12 @@ R packages. They are different implementations (`survreg` and `maxLik`
 based), so the second one is a genuine cross-check, but there is no
 reference from outside R. Where no Python implementation exists, two
 different R packages are used.
+
+<sup>3</sup> The FEIV reference values are written into the tests rather than
+stored as frozen reference files. `fixest` covers coefficients, standard
+errors and the Wu-Hausman auxiliary regression for one-way and two-way
+effects; the other statistics are compared with the dummy-variable
+implementation. The verification page lists what is compared.
 
 - **Tolerance.** The target relative tolerance against the primary
   reference is 1e-8 (with a tiny absolute floor for values near zero); for
@@ -285,7 +293,8 @@ different R packages are used.
   only, because linearmodels has no equivalent. These cases are listed on the
   verification page.
 - **Reproducible and continuous.** Reference values are generated once from
-  pinned package versions and stored in the repository, and the comparisons
+  pinned package versions and stored in the repository (FEIV is the exception,
+  see note 3), and the comparisons
   run in CI on every pull request on Python 3.12, 3.13 and 3.14. The Rust
   engine also has its own unit and property-based tests.
 

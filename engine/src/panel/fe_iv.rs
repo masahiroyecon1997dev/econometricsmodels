@@ -34,7 +34,8 @@
 //!
 //! 弱操作変数診断が吸収したパラメータ数`n_absorbed`は、診断・`cov_type`ごとに違う（`weak_instruments.rs`）:
 //! 部分F・Cragg-Donald・`Classical`・`Hc1`〜`Hc3`・`Dk`は`neffects`、`Cluster`は上の`K`から一次段階の傾きの数
-//! `l = k_exog + k_instruments`を引いた数。部分Fの分母の自由度は`n − l − neffects`。//!
+//! `l = k_exog + k_instruments`を引いた数。部分Fの分母の自由度は`n − l − neffects`。
+//!
 //! # 適合度
 //!
 //! R²は構造残差ベース: within = `1 − e'e / ỹ'ỹ`、between・overallは`β̂`と実際の`X`で`FeEstimator`と同じ式。

@@ -44,8 +44,8 @@ class FEIV:
     """Fixed effects instrumental variables (FE-2SLS) estimator.
 
     Removes the fixed effects by the within transformation and then
-    applies two-stage least squares to the transformed data. Selecting
-    the effects works as in `FE`: one column in `effects` gives one-way
+    applies two-stage least squares to the transformed data. The
+    `effects` argument works as in `FE`: one column gives one-way
     effects, two columns give two-way effects, and three to five columns
     give higher-dimensional effects.
 
@@ -142,7 +142,8 @@ class FEIV:
                   `y`, `x_exog`, `x_endog`, `instruments` and `effects`
                   overlap, or `dk_time` equals `y` or the first column
                   of `effects`.
-                - There are insufficient observations, or
+                - There are too few degrees of freedom (too few
+                  observations for the fixed effects and coefficients), or
                   `confidence_level` is out of range.
                 - `cov_type` is unknown or `"hc0"` (not supported for
                   FEIV).
@@ -203,8 +204,9 @@ class FEIVResults:
     - Fit: `r_squared_within`, `r_squared_between`,
       `r_squared_overall`.
     - Panel size: `n_obs`, `n_groups`.
-    - Model size: `df_model`, `df_resid`, `dep_var_name`.
-    - Settings echoed back: `cov_type`, `dk_bandwidth_used`.
+    - Model size: `df_model`, `df_resid`.
+    - Settings echoed back: `dep_var_name`, `cov_type`,
+      `dk_bandwidth_used`.
     - Residuals: `residuals` (structural residuals of the
       within-transformed data).
     - Methods: `first_stage()` (one `FEResults` per endogenous
@@ -289,9 +291,10 @@ class FEIVResults:
 
     @property
     def residuals(self) -> list[float]:
-        """Structural residuals of the within-transformed data (in
-        observation order, `y - Xβ̂`, using the actual endogenous
-        variables rather than their first-stage fitted values)."""
+        """Structural residuals, in observation order: the
+        within-transformed `y` minus the within-transformed `X` times
+        `β̂`, with the actual endogenous variables (not their
+        first-stage fitted values)."""
         return self._raw.residuals
 
     @property
@@ -362,14 +365,14 @@ class FEIVResults:
         return self._raw.wald_dist
 
     @property
-    def wald_df_num(self) -> int | None:
+    def wald_df_num(self) -> int:
         """Numerator degrees of freedom of `wald_statistic` (the number of
         slope coefficients). Never `None`, because `x_endog` always has
         at least one variable."""
         return self._raw.wald_df_num
 
     @property
-    def wald_df_denom(self) -> int | None:
+    def wald_df_denom(self) -> int:
         """Denominator degrees of freedom of `wald_statistic`. Follows
         `cov_type` like the t-tests, so it equals `stat_df`: the number
         of clusters minus 1 for `cov_type="cluster"`, the number of
@@ -410,14 +413,14 @@ class FEIVResults:
         return {name: stats[name] for name in self._x_endog}
 
     @property
-    def weak_instrument_f_df_num(self) -> int | None:
+    def weak_instrument_f_df_num(self) -> int:
         """Numerator degrees of freedom of the weak-instrument F
         statistics (the number of excluded instruments; the same for
         every endogenous variable)."""
         return self._raw.weak_instrument_f_df_num
 
     @property
-    def weak_instrument_f_df_denom(self) -> int | None:
+    def weak_instrument_f_df_denom(self) -> int:
         """Denominator degrees of freedom of the weak-instrument F
         statistics (residual degrees of freedom of the first-stage
         regressions after the absorbed fixed effects; the same for every
@@ -464,12 +467,12 @@ class FEIVResults:
         `weak_instrument_f_statistics`, this is always computed under
         the `cov_type` in `options`.
 
-        `None` when the augmented regression cannot be estimated
-        (e.g. the augmented design is singular, `y` is exactly
-        explained by the regressors and the first-stage residuals, or
-        there are too few observations or clusters for the extra
-        residual columns) — this does not affect the validity of the
-        other results.
+        `None` when the augmented regression cannot be estimated (the
+        augmented design is singular, `y` is exactly explained by the
+        regressors and the first-stage residuals, there are too few
+        observations, or the covariance of the first-stage residuals'
+        coefficients is numerically singular) — this does not affect
+        the validity of the other results.
         """
         return self._raw.wu_hausman_statistic
 
@@ -503,8 +506,7 @@ class FEIVResults:
 
         Shaped to be usable almost as-is in a REST API response (same
         policy as `OLSResults.params_table()`). Returned as `list[dict]`
-        rather than a polars DataFrame, per the project's policy of
-        not using DataFrames for the parameter table itself.
+        rather than a polars DataFrame.
 
         Returns:
             A list of dictionaries, one per coefficient. Keys are
@@ -518,9 +520,8 @@ class FEIVResults:
 
         Each first-stage regression is `x_endog[i] ~ x_exog +
         instruments` with the same fixed effects and `cov_type` as the
-        structural equation, estimated by the within estimator. Returns
-        the existing `FEResults` type rather than a new type: the first
-        stage is a genuine fixed-effects regression in its own right.
+        structural equation, estimated by the within estimator. Each value
+        is an `FEResults`, the same type that `FE` returns.
         Its `f_statistic`, `f_p_value`, `f_df_num` and `f_df_denom` are
         `None` (the overall test is not computed for a first stage), and
         it is not the weak-instrument partial F-statistic
@@ -611,7 +612,10 @@ class FEIVResults:
             ComputationError: Neither statistic is defined for these
                 data, for example because the instruments are collinear
                 with the exogenous variables or the covariance of the
-                scores is singular.
+                scores is singular. With `cov_type="dk"` this also
+                happens when the number of `dk_time` periods is at most
+                `len(instruments) - len(x_endog) + 1`: neither statistic
+                is defined then.
         """
         return kleibergen_paap_result(self._raw.kleibergen_paap())
 
@@ -644,6 +648,8 @@ class FEIVResults:
                 the model does not have exactly one endogenous variable.
             ComputationError: The statistic is undefined for these data,
                 for example because the covariance of the scores is
-                singular (too few clusters or observations).
+                singular (too few clusters or observations, or, with
+                `cov_type="dk"`, a number of `dk_time` periods that is at
+                most `len(instruments) - len(x_endog) + 1`).
         """
         return effective_f_result(self._raw.effective_f(alpha))

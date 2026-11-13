@@ -77,7 +77,7 @@ Every method's results share these fields (except where the table says otherwise
 | `param_names` | The coefficient names, in order (`"const"` first when there is an intercept) |
 | `stat_dist`, `stat_df` | The distribution behind `test_stats` and `p_values` (`"t"` or `"normal"`) and its degrees of freedom (`None` for the normal distribution) |
 | `cov_type`, `n_obs`, `df_resid` | The standard error type used, the number of observations and the residual degrees of freedom |
-| `log_likelihood`, `aic`, `bic` | Log-likelihood and information criteria (every method except IV) |
+| `log_likelihood`, `aic`, `bic` | Log-likelihood and information criteria (every method except IV and FEIV) |
 
 The remaining fields depend on the method (for example `r_squared` for OLS, `lr_statistic` for Logit, `hausman_statistic` for RE). They are grouped by purpose at the top of each results class on the method's *Options and results* page.
 
@@ -104,7 +104,7 @@ print(logit_result.predict())  # fitted probabilities
 print(logit_result.marginal_effects())  # dy/dx with delta-method standard errors
 ```
 
-Methods with extra inputs add arguments: `IV` takes `x_exog`, `x_endog` and `instruments`, `WLS` takes `weight`, and the panel models `FE` and `RE` take `effects`, a list of one column (the entity) or two (the entity, then the time period). Columns that define the model are arguments; everything optional, including optional columns such as `cluster`, goes in the options object. [Arguments and options](guide/api-conventions.md) gives the rule and lists the arguments of every model.
+Methods with extra inputs add arguments: `IV` takes `x_exog`, `x_endog` and `instruments`, `WLS` takes `weight`, and the panel models `FE`, `FEIV` and `RE` take `effects`, a list of columns (the entity first, then the time period; `FE` and `FEIV` accept up to five, `RE` up to two); `FEIV` takes `x_exog`, `x_endog` and `instruments` as well. Columns that define the model are arguments; everything optional, including optional columns such as `cluster`, goes in the options object. [Arguments and options](guide/api-conventions.md) gives the rule and lists the arguments of every model.
 
 ## Handling errors
 

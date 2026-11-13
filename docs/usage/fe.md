@@ -140,6 +140,8 @@ The other types are described in [OLS: choosing the type of standard error](ols.
 
 ## Fixed or random effects?
 
+If a regressor is endogenous, use [FEIV](fe_iv.md), which adds excluded instruments to this model.
+
 Use FE when the entity effects (or the time effects in a two-way model) may be correlated with the regressors, which is the usual concern in observational data: it estimates the effect of changes within an entity and discards differences between entities. [RE](re.md) is more efficient when the effects are uncorrelated with the regressors, and it can estimate the effect of a regressor that does not change over time, which FE cannot. The Hausman test that `RE` computes compares the two: see [RE: reading the Hausman test](re.md#reading-the-hausman-test).
 
 ## Covariance matrix of the coefficients
@@ -148,4 +150,4 @@ Use FE when the entity effects (or the time effects in a two-way model) may be c
 
 ## See also
 
-[RE](re.md), [Accepted data](../guide/accepted-data.md), [Validation and errors](../guide/validation.md), [Inference conventions](../guide/inference-conventions.md) and [Verification](../guide/verification.md).
+[RE](re.md), [FEIV](fe_iv.md), [Accepted data](../guide/accepted-data.md), [Validation and errors](../guide/validation.md), [Inference conventions](../guide/inference-conventions.md) and [Verification](../guide/verification.md).

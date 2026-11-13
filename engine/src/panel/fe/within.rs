@@ -72,37 +72,116 @@ pub(crate) fn within_transform_two_way_with(
     leverage_needed: bool,
 ) -> Result<WithinOutput, PanelError> {
     let time_codes = input.time_codes().ok_or(PanelError::TwoWayRequiresTime)?;
-    let entity = input.entity_codes();
-    if leverage_needed {
-        // 組合せが欠けるときの密な行列の大きさは入力だけで決まるので、重い射影の前に確かめる。
-        check_leverage_dimension(&[entity, time_codes])?;
-    }
-
-    if covers_every_combination(entity, time_codes) {
-        let within = WithinTransform::two_way(entity, time_codes);
-        let y = within.apply(input.y());
-        let x = input.x().iter().map(|col| within.apply(col)).collect();
-        return Ok(WithinOutput {
-            y,
-            x,
-            absorbed: None,
-            noise: 0.0,
-        });
-    }
-
-    project_out_effects(input, &[entity, time_codes], absorption)
+    let levels = [input.entity_codes(), time_codes];
+    transform_input_columns(input, &levels, absorption, leverage_needed)
 }
 
-/// `levels`（吸収する次元、`effects`の順）の水準平均を引く交互射影で、`y`と各`x`の列から固定効果を除く。
+/// `input`の`y`と各`x`の列を[`within_transform_columns`]で変換し、`WithinOutput`に組み直す。
+fn transform_input_columns(
+    input: &FeInput,
+    levels: &[&GroupCodes],
+    absorption: &FeAbsorption,
+    leverage_needed: bool,
+) -> Result<WithinOutput, PanelError> {
+    let mut columns: Vec<&[f64]> = Vec::with_capacity(1 + input.x().len());
+    columns.push(input.y());
+    columns.extend(input.x().iter().map(Vec::as_slice));
+    let WithinColumns {
+        columns,
+        absorbed,
+        noise,
+    } = within_transform_columns(levels, &columns, absorption, leverage_needed)?;
+    let mut columns = columns.into_iter();
+    let y = columns.next().unwrap_or_default();
+    let x = columns.collect();
+    let absorbed = absorbed.map(|per_column| {
+        let mut per_column = per_column.into_iter();
+        let y = per_column.next().unwrap_or_default();
+        AbsorbedEffects {
+            y,
+            x: per_column.collect(),
+        }
+    });
+    Ok(WithinOutput {
+        y,
+        x,
+        absorbed,
+        noise,
+    })
+}
+
+/// 列の集合のwithin変換の結果。列の順は入力と同じ。
+pub(crate) struct WithinColumns {
+    pub(crate) columns: Vec<Vec<f64>>,
+    /// 交互射影が各列から引いた効果（`absorbed[列][次元][水準]`）。閉形式（1-way・バランスな2-way）は`None`。
+    pub(crate) absorbed: Option<Vec<Vec<Vec<f64>>>>,
+    /// [`WithinOutput::noise`]と同じ。全ての列の最大。
+    pub(crate) noise: f64,
+}
+
+/// `levels`（吸収する次元、`effects`の順）で`columns`の各列から固定効果を除く。FEの`y`・`x`と、
+/// FEIVの`y`・`x_exog`・`x_endog`・`instruments`が共有する、列の役割を知らない変換。
+///
+/// - 1次元は個体でのquasi-demean（θ=1）、2次元でバランス（全ての組合せがそろい重複なし）なら閉形式、
+///   それ以外（組合せが欠ける2次元、3次元以上）は交互射影。
+/// - `leverage_needed`（HC2/HC3）で射影が要るとき、密な行列の大きさを重い射影の前に確かめる。
+///
+/// `absorption`は呼び出し側が`FeAbsorption::validate`で検査済みであること。
+///
+/// # Errors
+/// - `levels`が空なら`CommonError::Internal`（呼び出し側の実装誤り）
+/// - `PanelError::LeverageDimensionTooLarge`（`leverage_needed`で、組合せが欠ける2次元または3次元以上）
+/// - `PanelError::AbsorptionNotConverged`（交互射影が上限回数までに収束しない）
+pub(crate) fn within_transform_columns(
+    levels: &[&GroupCodes],
+    columns: &[&[f64]],
+    absorption: &FeAbsorption,
+    leverage_needed: bool,
+) -> Result<WithinColumns, PanelError> {
+    match levels {
+        [] => Err(CommonError::internal("at least one effect dimension is needed").into()),
+        [entity] => {
+            let within = WithinTransform::one_way(entity);
+            Ok(WithinColumns {
+                columns: columns.iter().map(|col| within.apply(col)).collect(),
+                absorbed: None,
+                noise: 0.0,
+            })
+        }
+        [entity, time] => {
+            if leverage_needed {
+                // 組合せが欠けるときの密な行列の大きさは入力だけで決まるので、重い射影の前に確かめる。
+                check_leverage_dimension(levels)?;
+            }
+            if covers_every_combination(entity, time) {
+                let within = WithinTransform::two_way(entity, time);
+                return Ok(WithinColumns {
+                    columns: columns.iter().map(|col| within.apply(col)).collect(),
+                    absorbed: None,
+                    noise: 0.0,
+                });
+            }
+            project_out_columns(levels, columns, absorption)
+        }
+        _ => {
+            if leverage_needed {
+                check_leverage_dimension(levels)?;
+            }
+            project_out_columns(levels, columns, absorption)
+        }
+    }
+}
+
+/// `levels`（吸収する次元、`effects`の順）の水準平均を引く交互射影で、`columns`の各列から固定効果を除く。
 /// `absorption`は呼び出し側が`FeAbsorption::validate`で検査済みであること。
 ///
 /// # Errors
 /// 交互射影が上限回数までに収束しなければ`PanelError::AbsorptionNotConverged`。
-fn project_out_effects(
-    input: &FeInput,
+fn project_out_columns(
     levels: &[&GroupCodes],
+    columns: &[&[f64]],
     absorption: &FeAbsorption,
-) -> Result<WithinOutput, PanelError> {
+) -> Result<WithinColumns, PanelError> {
     let system = GroupSystem::new(levels);
     let options = ProjectionOptions {
         tol: absorption.tol,
@@ -111,7 +190,9 @@ fn project_out_effects(
     };
     // 元の列の絶対値の最大に対する、変換後の値に残る誤差の見積もりの最大。
     let mut relative_error = 0.0_f64;
-    let mut project = |col: &[f64]| -> Result<(Vec<f64>, Vec<Vec<f64>>), PanelError> {
+    let mut projected_columns = Vec::with_capacity(columns.len());
+    let mut absorbed = Vec::with_capacity(columns.len());
+    for col in columns {
         let projected = system
             .project_with_effects(col, &options)
             .map_err(|failure| PanelError::AbsorptionNotConverged {
@@ -122,23 +203,12 @@ fn project_out_effects(
         if scale > 0.0 {
             relative_error = relative_error.max(projected.error_bound / scale);
         }
-        Ok((projected.values, projected.effects))
-    };
-    let (y, y_effects) = project(input.y())?;
-    let mut x = Vec::with_capacity(input.x().len());
-    let mut x_effects = Vec::with_capacity(input.x().len());
-    for col in input.x() {
-        let (values, effects) = project(col)?;
-        x.push(values);
-        x_effects.push(effects);
+        projected_columns.push(projected.values);
+        absorbed.push(projected.effects);
     }
-    Ok(WithinOutput {
-        y,
-        x,
-        absorbed: Some(AbsorbedEffects {
-            y: y_effects,
-            x: x_effects,
-        }),
+    Ok(WithinColumns {
+        columns: projected_columns,
+        absorbed: Some(absorbed),
         noise: ABSORPTION_NOISE_SAFETY * relative_error,
     })
 }
@@ -179,11 +249,7 @@ pub(crate) fn within_transform_multi_way(
         );
     }
     let levels: Vec<&GroupCodes> = input.effect_codes().iter().collect();
-    if leverage_needed {
-        // 密な行列の大きさは入力だけで決まるので、重い射影の前に確かめる。
-        check_leverage_dimension(&levels)?;
-    }
-    project_out_effects(input, &levels, absorption)
+    transform_input_columns(input, &levels, absorption, leverage_needed)
 }
 
 /// 1-way FE向けのsingleton検出（`fe-spec.md`1章）。`entity`に観測数1のグループがあれば

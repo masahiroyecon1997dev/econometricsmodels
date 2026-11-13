@@ -129,3 +129,101 @@ fn within_transform_two_way_treats_a_repeated_pair_that_offsets_a_missing_combin
         assert!((actual - expected).abs() < 1e-9, "{y_within:?}");
     }
 }
+
+// ── 列の集合の変換（`within_transform_columns`） ──────────────────────────
+
+mod columns {
+    use crate::panel::common::PanelError;
+    use crate::panel::fe::input::FeAbsorption;
+    use crate::panel::fe::test_support::strings;
+    use crate::panel::fe::within::{WithinColumns, within_transform_columns};
+    use crate::shared::error::CommonError;
+    use crate::shared::group_codes::GroupCodes;
+
+    fn codes(values: &[&str]) -> GroupCodes {
+        GroupCodes::from_labels(&strings(values))
+    }
+
+    fn transform(levels: &[&GroupCodes], columns: &[Vec<f64>]) -> WithinColumns {
+        let slices: Vec<&[f64]> = columns.iter().map(Vec::as_slice).collect();
+        within_transform_columns(levels, &slices, &FeAbsorption::default(), false).unwrap()
+    }
+
+    /// 全ての列で、`levels`の各次元の水準平均がゼロになる。
+    fn assert_every_level_mean_is_zero(levels: &[&GroupCodes], out: &WithinColumns) {
+        for col in &out.columns {
+            for level in levels {
+                let mut sums = vec![0.0; level.n_groups()];
+                for (&code, v) in level.codes().iter().zip(col) {
+                    sums[code] += v;
+                }
+                for sum in sums {
+                    assert!(sum.abs() < 1e-9, "level sum {sum}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn one_dimension_demeans_every_column_by_the_group_and_keeps_the_column_order() {
+        let entity = codes(&["a", "a", "b", "b", "b"]);
+        let out = transform(
+            &[&entity],
+            &[
+                vec![10.0, 20.0, 3.0, 6.0, 9.0],
+                vec![100.0, 200.0, 30.0, 60.0, 90.0],
+            ],
+        );
+        assert_eq!(out.columns[0], vec![-5.0, 5.0, -3.0, 0.0, 3.0]);
+        assert_eq!(out.columns[1], vec![-50.0, 50.0, -30.0, 0.0, 30.0]);
+        assert!(out.absorbed.is_none());
+        assert_eq!(out.noise, 0.0);
+    }
+
+    #[test]
+    fn a_balanced_two_way_panel_uses_the_closed_form() {
+        // `fe.rs`のモジュールdocの導出と同じ値（`ỹ = [0.5, -0.5, -0.5, 0.5]`）。
+        let entity = codes(&["a", "a", "b", "b"]);
+        let time = codes(&["1", "2", "1", "2"]);
+        let out = transform(&[&entity, &time], &[vec![1.0, 3.0, 5.0, 9.0]]);
+        for (actual, expected) in out.columns[0].iter().zip([0.5, -0.5, -0.5, 0.5]) {
+            assert!((actual - expected).abs() < 1e-12, "{:?}", out.columns[0]);
+        }
+        assert!(out.absorbed.is_none());
+        assert_eq!(out.noise, 0.0);
+    }
+
+    #[test]
+    fn an_unbalanced_two_way_panel_and_three_dimensions_use_the_alternating_projections() {
+        let entity = codes(&["a", "a", "a", "b", "b", "c", "c", "c", "d", "d"]);
+        let time = codes(&["1", "2", "3", "1", "2", "2", "3", "4", "3", "4"]);
+        let third = codes(&["u", "v", "u", "v", "u", "v", "u", "v", "u", "v"]);
+        let columns = [
+            vec![1.0, 4.0, 2.0, 8.0, 5.0, 7.0, 3.0, 9.0, 6.0, 2.0],
+            vec![0.5, 1.5, 2.5, 1.0, 3.0, 2.0, 0.0, 4.0, 1.0, 5.0],
+        ];
+        for levels in [vec![&entity, &time], vec![&entity, &time, &third]] {
+            let out = transform(&levels, &columns);
+            assert_every_level_mean_is_zero(&levels, &out);
+            let absorbed = out.absorbed.as_ref().unwrap();
+            assert_eq!(absorbed.len(), columns.len());
+            assert!(
+                absorbed
+                    .iter()
+                    .all(|per_dimension| per_dimension.len() == levels.len())
+            );
+            assert!(out.noise > 0.0);
+        }
+    }
+
+    #[test]
+    fn no_dimension_is_an_internal_error() {
+        let err = within_transform_columns(&[], &[&[1.0, 2.0]], &FeAbsorption::default(), false)
+            .map(|_| ())
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            PanelError::Common(CommonError::Internal { .. })
+        ));
+    }
+}

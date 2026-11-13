@@ -10,6 +10,8 @@ from __future__ import annotations
 import numpy as np
 import polars as pl
 import pytest
+from _assertions import assert_option_case_insensitive
+from _helpers import CASE_SPELLINGS
 from econometricsmodels import (
     FEIV,
     CraggDonaldResult,
@@ -296,6 +298,22 @@ def test_options_are_not_read_before_fit(data):
     )
     with pytest.raises(ValueError):
         estimator.fit()
+
+
+@pytest.mark.parametrize("spelling", CASE_SPELLINGS)
+@pytest.mark.parametrize(
+    "cov_type", ["classical", "hc1", "hc2", "hc3", "cluster", "dk"]
+)
+def test_cov_type_is_case_insensitive(data, cov_type, spelling):
+    """全`cov_type`で、`res.cov_type`が正規形（小文字）で返り、どの大文字小文字の綴りでも正規形と
+    同一の推定結果になる。`hc0`はFEIVでは受け付けない（`test_fe_iv_validation.py`）。`dk`は
+    `dk_time`が無いと`ValidationError`になるため`dk_time="time"`を渡す。"""
+    kwargs = {"dk_time": "time"} if cov_type == "dk" else {}
+
+    def fit(label: str) -> FEIVResults:
+        return _fit(data, ["a", "b"], cov_type=label, **kwargs)
+
+    assert_option_case_insensitive(fit, "cov_type", cov_type, spelling)
 
 
 def test_confidence_level_changes_the_interval_width(data):

@@ -217,11 +217,13 @@ def run_dummy_2sls(df: pd.DataFrame, case: Case) -> dict:
         "n_absorbed": n_absorbed,
         "wu_hausman_statistic": float(res.wooldridge_regression.stat) / q,
         "cragg_donald_f": float(first.cragg_donald_f),
-        "rk_lm_statistic": float(first.kleibergen_paap.stat),
-        "rk_lm_p_value": float(first.kleibergen_paap.pval),
         "rk_wald_f": float(first.kleibergen_paap_f),
         **_effective_f(df, case, dummies, cov.cov_type),
     }
+    if cov.cov_type != "hc1":
+        # linearmodelsの`robust`のLMはHC0基準で、本実装にHC0は無いため、hc1には置かない。
+        result["rk_lm_statistic"] = float(first.kleibergen_paap.stat)
+        result["rk_lm_p_value"] = float(first.kleibergen_paap.pval)
     if cov.cov_type == "classical":
         # 部分Fは本実装では`cov_type`によらず等分散。linearmodelsの`diagnostics`は
         # モデルの`cov_type`に従う頑健Fを返すため、classicalのケースだけに置く。

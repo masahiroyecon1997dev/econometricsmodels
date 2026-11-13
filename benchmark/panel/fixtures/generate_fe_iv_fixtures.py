@@ -17,8 +17,8 @@ fixestがIVで提供しないHC2・HC3、定義が違うCragg-Donald（`cd`）�
 ## Sarganの尺度
 
 fixestの`sargan`は`e'e/n`の尺度（統計量の分子は同じ）。本実装は`e'e/(n − 吸収した効果数)`なので、
-`overid_statistic = fixestの値 × (n − neffects) / n`としてフィクスチャに置く（`neffects = df_model − k`、
-`sargan_fixest`に生の値を残す）。
+`overid_statistic = fixestの値 × (n − neffects) / n`としてフィクスチャに置く（`neffects = df_model − k`。
+生の値は保存しない）。
 
 ## ケース
 
@@ -107,7 +107,6 @@ def run_case(case: Case) -> dict:
         "wu_hausman_p_value": raw["wu_hausman_p_value"],
         "wu_hausman_df_num": raw["wu_hausman_df_num"],
         "wu_hausman_df_denom": raw["wu_hausman_df_denom"],
-        "sargan_fixest": raw["sargan_fixest"],
         **_scaled_sargan(raw, case),
     }
 
@@ -148,7 +147,7 @@ def build_fixtures() -> dict:
             "floor(4*(T/100)^(2/9))、またはdk_bw1の明示値1。hc2・hc3はfixestがIVで提供しない。"
             "Wu-Hausmanは第一段階の残差を足した補助回帰を同じvcovで回したWald F（iidのときfitstat 'wh'と一致）。"
             "部分Fは内生変数ごとの第一段階（等分散）のWald F。overid_statisticはfixestのsargan（e'e/n尺度）に"
-            "(n-n_absorbed)/nを掛けた本実装の尺度、sargan_fixestは生の値。"
+            "(n-n_absorbed)/nを掛けた本実装の尺度（生の値は保存しない）。"
             "rk_wald_fは内生変数が1個のときの第一段階のWald F（同じvcov）。"
             "Cragg-Donald（cd）・Kleibergen-Paap（kpr）・within R²（wr2）はfixestの定義が違うため含めない。"
         ),

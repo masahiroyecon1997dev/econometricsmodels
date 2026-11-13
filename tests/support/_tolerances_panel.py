@@ -44,9 +44,9 @@ PANEL_TOLERANCES: dict[str, dict[str, float]] = {
     # FE-2SLS（`FEIV`）の主リファレンスはR fixest（`fe_iv.json`・`fe_iv_cov.json`。1-way・2-way・3-way、
     # classical・hc1・cluster・dk）。within変換後の閉形式・交互射影の解で、fixestの`ssc()`既定に本実装の
     # 小標本補正と自由度が合っているため機械精度で一致する。実測の最大（125ケース）: 係数 4e-15（相対）、
-    # 標準誤差 1e-12、信頼区間 3e-12、p値 6e-12、全係数のWald F・Wu-Hausman 2e-12、部分F 2e-14、
-    # Sargan（`e'e/n`の尺度を`(n-n_absorbed)/n`倍）3e-12。p値は裾が丸め誤差を増幅するため、
-    # 相対誤差1e-6を絶対誤差の下限なしで使う（`fe_multi_way_reference`と同じ）。
+    # 標準誤差 1e-12、信頼区間 3e-12、係数のp値 9e-12、全係数のWald F・Wu-Hausman 2e-12（Wald Fのp値 2e-11）、
+    # 部分F 2e-14、Sargan（`e'e/n`の尺度を`(n-n_absorbed)/n`倍）3e-12、rk Wald F 4e-11。p値は裾が丸め誤差を
+    # 増幅するため、相対誤差1e-6を絶対誤差の下限なしで使う（`fe_multi_way_reference`と同じ）。
     "fe_iv_reference": {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_REFERENCE_FLOOR,
@@ -57,19 +57,21 @@ PANEL_TOLERANCES: dict[str, dict[str, float]] = {
     # （`fe_iv_dummy_crosscheck.json`・`fe_iv_dummy_cov_crosscheck.json`）。Frisch-Waugh-Lovellで本実装と
     # 同じ量を、within変換を使わずに計算する。実測の最大（84ケース）: 係数 7e-15、標準誤差 5e-14、
     # Wu-Hausman 8e-14、Cragg-Donald・rk LM・rk Wald F 3e-14、Sargan 1e-12、R² 2e-15、有効F（MOPの
-    # 独立実装）6e-15。
+    # 独立実装）6e-15。実測が機械精度に近いので、絶対誤差の下限は主リファレンスと同じ1e-10にする
+    # （標準誤差は0.03〜0.1程度で、下限が1e-8だと実効の相対許容が1e-7を超えてしまう）。
     "fe_iv_dummy_crosscheck": {
         "rtol": RTOL_MACHINE_PRECISION,
-        "atol": ATOL_CROSSCHECK_FLOOR,
+        "atol": ATOL_REFERENCE_FLOOR,
         "atol_p_value": 0.0,
         "rtol_p_value": 1e-6,
     },
     # FE-2SLSのplm（`model = "within"`）によるクロスチェック（`fe_iv_plm_crosscheck.json`・
     # `fe_iv_plm_cov_crosscheck.json`。1-way、classical・hc1・cluster・dk）。サンドイッチの中身はplm、
-    # 小標本補正はスカラー倍の手計算。実測の最大: 係数 4e-15、標準誤差 5e-15、p値 2e-13、信頼区間 3e-12。
+    # 小標本補正はスカラー倍の手計算。実測の最大: 係数 4e-15、標準誤差 5e-15、p値 2e-13、信頼区間 3e-12。絶対誤差の下限は
+    # 主リファレンスと同じ1e-10（実測が機械精度に近いため）。
     "fe_iv_plm_crosscheck": {
         "rtol": RTOL_MACHINE_PRECISION,
-        "atol": ATOL_CROSSCHECK_FLOOR,
+        "atol": ATOL_REFERENCE_FLOOR,
         "atol_p_value": 0.0,
         "rtol_p_value": 1e-6,
     },

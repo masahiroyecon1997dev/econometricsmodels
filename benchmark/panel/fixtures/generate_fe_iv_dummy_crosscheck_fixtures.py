@@ -20,7 +20,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import linearmodels
+import numpy as np
 import pandas as pd
+import scipy
 
 from benchmark.common import (
     BENCHMARKS_DIR,
@@ -45,13 +47,16 @@ def build_fixtures() -> dict:
         "generated_at": datetime.now(UTC).isoformat(),
         "reference": "linearmodels IV2SLS (dummy variables) / numpy (HC2, HC3)",
         "linearmodels_version": linearmodels.__version__,
+        "numpy_version": np.__version__,
+        "scipy_version": scipy.__version__,
+        "pandas_version": pd.__version__,
         "note": (
             "固定効果のダミー変数（1つ目は全水準、2つ目以降は最初の水準を落とす）を外生変数に入れた"
             "2SLS。classicalはunadjusted、hc1はrobust（どちらもdebiased=True）、cluster_timeは1-wayの"
             "個体FEでの時点クラスター。hc2・hc3はlinearmodelsに無くnumpyの手計算（有効FはMOPの論文の式）。"
             "overid_statisticはlinearmodelsのsargan（e'e/n尺度）に(n-n_absorbed)/nを掛けた本実装の尺度。"
             "wu_hausman_statisticはwooldridge_regression.statを内生変数の数で割ったF。"
-            "rk_lm_statisticはhc1ではlinearmodelsがHC0基準のため比べない。"
+            "rk_lm_statistic・rk_lm_p_valueはhc1ではlinearmodelsがHC0基準のため置かない。"
             "r_squared_*はPanelOLS._rsquared（構造残差ベース）、2-wayのwithinはダミー射影の手計算、"
             "3-wayは置かない。"
         ),

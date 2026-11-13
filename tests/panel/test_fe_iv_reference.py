@@ -81,6 +81,8 @@ def test_matches_fixest(fixtures, case) -> None:
     )
     assert res.n_obs == ref["n_obs"], label
     assert res.df_model == ref["df_model"], label
+    # 吸収した効果の数（`df_model − 傾き係数の数`）。Sargan・部分Fの自由度に入る。
+    assert res.df_model - len(res.params) == ref["n_absorbed"], label
     assert res.df_resid == ref["df_resid"], label
     assert res.stat_df == ref["stat_df"], label
 

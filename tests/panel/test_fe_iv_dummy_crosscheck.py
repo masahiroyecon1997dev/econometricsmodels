@@ -121,7 +121,9 @@ def test_diagnostics_match_the_dummy_variable_2sls(fixtures, case) -> None:
     # Kleibergen-Paap。hc1のrk LMは、linearmodelsがHC0基準のため比べない。
     kp = res.kleibergen_paap()
     _close(kp.rk_wald_f, ref["rk_wald_f"], f"{label}/rk_wald_f")
-    if case.cov.cov_type != "hc1":
+    if case.cov.cov_type == "hc1":
+        assert "rk_lm_statistic" not in ref
+    else:
         _close(kp.rk_lm_statistic, ref["rk_lm_statistic"], f"{label}/rk_lm")
         _p_close(kp.rk_lm_p_value, ref["rk_lm_p_value"], f"{label}/rk_lm_p")
 

@@ -4,7 +4,8 @@ Pythonのラッパー（`FEIV`）を通さず、`_lib`を直接呼ぶ。数値�
 （Frisch-Waugh-Lovell）と照合する。許容誤差は`TOLERANCES["fe_iv_binding"]`。
 
 役割分担:
-    - 配線・入力の検証（`ValidationError`）・オプション・pickle・コピー: このファイル
+    - 配線・引数の型・オプション・pickle・コピー: このファイル
+    - 入力・オプションの検証（`ValidationError`）と`ComputationError`: `test_fe_iv_validation.py`
     - ダミー変数2SLSのオラクルとの照合（係数・共分散・標準誤差・検定・診断・固定効果）: このファイル
     - 主リファレンス（R: fixest）・独立実装（ダミー変数を明示した2SLS・plm・ivDiag）との凍結
       フィクスチャ照合: `test_fe_iv_reference.py`・`test_fe_iv_dummy_crosscheck.py`・
@@ -796,88 +797,7 @@ def test_x_exog_may_be_empty() -> None:
     assert result.param_names == ["x2"]
 
 
-# ── 入力の検証 ─────────────────────────────────────────────────────
-
-
-def test_empty_endogenous_or_instruments_is_rejected() -> None:
-    with raises_error(ErrorCode.ROLE_EMPTY, argument="x_endog"):
-        fit(make_data(), effects=["entity"], x_endog=[])
-    with raises_error(ErrorCode.ROLE_EMPTY, argument="instruments"):
-        fit(make_data(), effects=["entity"], instruments=[])
-
-
-def test_hc0_is_not_available_and_names_the_model() -> None:
-    with raises_error(
-        ErrorCode.COV_TYPE_NOT_AVAILABLE_FOR_MODEL, model="FEIV"
-    ):
-        fit(make_data(), effects=["entity"], cov_type="hc0")
-
-
-def test_effects_limits_name_the_model() -> None:
-    # 水準が3つの次元を足す。パターンを変えて、次元どうしが同じ分け方にならないようにする。
-    extra = [
-        pl.Series(
-            f"e{k}",
-            [
-                (i * (k + 1) + t * (k + 2)) % 3
-                for i in range(N_ENTITIES)
-                for t in range(N_PERIODS)
-            ],
-        )
-        for k in range(4)
-    ]
-    data = make_data().with_columns(*extra)
-    five = ["entity", "time", "e0", "e1", "e2"]
-    assert fit(data, effects=five).n_groups.keys() == set(five)
-    with raises_error(ErrorCode.EFFECTS_TOO_MANY, model="FEIV", max_columns=5):
-        fit(data, effects=[*five, "e3"])
-
-
-def test_overlapping_roles_are_rejected() -> None:
-    with raises_error(ErrorCode.ROLE_COLUMN_OVERLAP):
-        fit(make_data(), effects=["entity"], instruments=["z1", "x2"])
-
-
-def test_too_few_instruments_is_rejected() -> None:
-    with raises_error(ErrorCode.INSUFFICIENT_INSTRUMENTS):
-        fit(
-            make_data(),
-            effects=["entity"],
-            x_endog=["x2", "x3"],
-            instruments=["z1"],
-        )
-
-
-def test_option_combinations_are_rejected() -> None:
-    with raises_error(ErrorCode.DK_TIME_REQUIRED):
-        fit(make_data(), effects=["entity"], cov_type="dk")
-    with raises_error(ErrorCode.OPTION_UNUSED):
-        fit(make_data(), effects=["entity"], cov_type="hc1", cluster="time")
-    with raises_error(ErrorCode.OPTION_UNUSED):
-        fit(make_data(), effects=["entity"], cov_type="hc1", dk_time="time")
-
-
-def test_option_values_are_validated() -> None:
-    with raises_error(ErrorCode.CONFIDENCE_LEVEL_OUT_OF_RANGE):
-        fit(make_data(), effects=["entity"], confidence_level=1.5)
-    with raises_error(ErrorCode.TOLERANCE_NOT_POSITIVE_FINITE):
-        fit(make_data(), effects=["entity"], tol=0.0)
-    with raises_error(ErrorCode.MAX_ITER_OUT_OF_RANGE):
-        fit(make_data(), effects=["entity"], max_iter=0)
-
-
-def test_singleton_groups_are_rejected() -> None:
-    data = make_data().with_columns(
-        pl.when(pl.col("entity") == 0)
-        .then(pl.col("time") == 0)
-        .otherwise(True)
-        .alias("keep")
-    )
-    one_row = data.filter(
-        (pl.col("entity") != 0) | (pl.col("time") == 0)
-    ).drop("keep")
-    with raises_error(ErrorCode.SINGLETON_GROUP):
-        fit(one_row, effects=["entity"])
+# ── 引数の型 ───────────────────────────────────────────────────────
 
 
 def test_argument_types_are_checked() -> None:

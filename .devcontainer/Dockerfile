@@ -137,11 +137,12 @@ RUN mkdir -p ${R_LIBS_USER}
 
 # -------------------------
 # Rust インストール
-# ツールチェーンのバージョンを固定する(CIは`setup-rust-toolchain`でstableを使うため、
-# 数バージョン先で差が出うる。上げるときはここだけ手動で上げる)。rustupのブートストラップ
+# ツールチェーンのバージョンを固定する。CIとローカルが同じ版を使うよう、リポジトリ直下の
+# `rust-toolchain.toml`の`channel`と同じ値にする(上げるときは両方を手動で上げる。食い違うと
+# コンテナ内のrustupが`rust-toolchain.toml`の版を追加で入れる)。rustupのブートストラップ
 # 自体は公式のインストーラを`curl | sh`で実行する(HTTPS・TLS1.2以上)。
 # -------------------------
-ARG RUST_VERSION=1.99.0
+ARG RUST_VERSION=1.100.0
 ENV RUSTUP_HOME=/home/${USERNAME}/.rustup
 ENV CARGO_HOME=/home/${USERNAME}/.cargo
 

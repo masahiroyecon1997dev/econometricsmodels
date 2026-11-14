@@ -54,7 +54,7 @@
 //! - `sargan.rs`: Sargan過剰識別検定
 //! - `wu_hausman.rs`: Wu-Hausman内生性検定（補助FE回帰）
 //! - `weak_instruments.rs`: 弱操作変数診断（部分F・Cragg-Donald・Kleibergen-Paap・有効F）
-//! - `gmm.rs`と`gmm/`: 固定効果つきGMM（`FeGmmEstimator`。点推定のみ。契約は`gmm.rs`のモジュールdoc）
+//! - `gmm.rs`と`gmm/`: 固定効果つきGMM（`FeGmmEstimator`。点推定・標準誤差・Hansen J。契約は`gmm.rs`のモジュールdoc）
 
 use faer::Mat;
 

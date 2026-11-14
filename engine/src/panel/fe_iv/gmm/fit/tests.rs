@@ -2,6 +2,7 @@
 //!
 //! - `basic.rs`: 基本挙動（getter・推定回数と収束・係数名・自由度）
 //! - `cov_type.rs`: `cov_type`別の標準誤差（FE-2SLSへの還元、ダミー変数を明示したGMM、手計算との照合）・推論・Wald・R²・検証
+//! - `hansen_j.rs`: Hansen J過剰識別検定（FE-2SLSのSarganへの還元、ダミー変数を明示したGMM、手計算、`None`の条件）
 //! - `reference.rs`: FE-2SLSへの還元、ダミー変数を明示したGMM（FWL）、クラスター重みの手計算との照合
 //! - `validation.rs`: 入力検証・エラー返却・検証順序・クラスター数の境界
 
@@ -12,6 +13,7 @@ use crate::shared::group_codes::GroupCodes;
 
 mod basic;
 mod cov_type;
+mod hansen_j;
 mod reference;
 mod validation;
 

@@ -2,6 +2,7 @@
 //!
 //! テストは`fit/tests.rs`と`fit/tests/`にテーマ別で置く。
 
+use super::hansen_j::fe_hansen_j;
 use super::{FeGmmEstimator, FeGmmType};
 use crate::panel::common::{PanelError, PanelMoment, PanelMomentInput, panel_moment_covariance};
 use crate::panel::fe::{
@@ -49,7 +50,7 @@ pub(super) fn fit_fe_gmm(
         absorbed: _,
         noise,
         n_groups,
-        neffects: _,
+        neffects,
         df_model,
         exog_range,
         endog_range,
@@ -130,6 +131,23 @@ pub(super) fn fit_fe_gmm(
         .into());
     }
 
+    // Hansen J過剰識別検定（内生変数が無い・丁度識別のときは検定しない）。`Classical`・`OneStep`の`S`は
+    // `σ̂²Z̃'Z̃`なので、`σ̂²`の分母を`n − neffects`に直す（`hansen_j.rs`）。
+    let (k_endog, k_instruments) = (input.k_endog(), input.k_instruments());
+    let hansen_j = if k_endog > 0 && k_instruments > k_endog {
+        let homoskedastic_weight = gmm_type.has_homoskedastic_weight();
+        Some(fe_hansen_j(
+            &z,
+            &residuals,
+            &s_used,
+            homoskedastic_weight,
+            neffects,
+            k_instruments - k_endog,
+        )?)
+    } else {
+        None
+    };
+
     // 標準誤差。`Ω̂`は`cov_type`ごとの小標本補正込み（`FeIvEstimator`と同じ`df_resid`・`K`）。
     let df_resid = n - df_model;
     let residual_values: Vec<f64> = (0..n).map(|i| *residuals.get(i, 0)).collect();
@@ -204,6 +222,7 @@ pub(super) fn fit_fe_gmm(
         r_squared_within,
         r_squared_between,
         r_squared_overall,
+        hansen_j,
     })
 }
 

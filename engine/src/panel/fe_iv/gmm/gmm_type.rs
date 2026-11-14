@@ -53,6 +53,22 @@ impl FeWeightType {
 }
 
 impl FeGmmType {
+    /// 点推定に使う重み行列が`σ̂²Z̃'Z̃`の形（等分散。`OneStep`と`Classical`の重み）か。Hansen Jが`σ̂²`の
+    /// 分母を`n − neffects`に直すかどうかを決める。
+    pub(super) fn has_homoskedastic_weight(&self) -> bool {
+        matches!(
+            self,
+            Self::OneStep
+                | Self::TwoStep {
+                    weight: FeWeightType::Classical
+                }
+                | Self::Iterated {
+                    weight: FeWeightType::Classical,
+                    ..
+                }
+        )
+    }
+
     /// 共有の反復コアが受け取る`GmmType`に直す（クラスターのコードは複製する）。
     pub(super) fn to_gmm_type(&self) -> GmmType {
         match self {

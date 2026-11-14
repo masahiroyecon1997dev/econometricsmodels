@@ -168,6 +168,27 @@ fn one_step_is_the_two_stage_least_squares_estimate() {
 
 // ── ダミー変数を明示したGMM（FWL） ──────────────────────────────────────
 
+/// ダミーを外生変数に加えた`IvInput`（ダミーは外生変数の後ろ。切片なし）。
+pub(super) fn dummy_iv_input(input: &FeIvInput) -> IvInput {
+    let d = dummies(input.index().effect_codes());
+    let mut x_exog: Vec<Vec<f64>> = input.x_exog().to_vec();
+    x_exog.extend(d.iter().cloned());
+    let mut exog_names: Vec<String> = input.x_exog_names().to_vec();
+    exog_names.extend((0..d.len()).map(|j| format!("d{j}")));
+    IvInput::from_columns(
+        input.y(),
+        &x_exog,
+        exog_names,
+        input.x_endog(),
+        input.x_endog_names().to_vec(),
+        input.instruments(),
+        input.instrument_names().to_vec(),
+        false,
+        "y".to_string(),
+    )
+    .unwrap()
+}
+
 /// ダミーを外生変数に加えた`iv::gmm::GmmEstimator`の係数（実際の外生変数・内生変数の分だけ）。
 pub(super) fn dummy_variable_gmm_params(input: &FeIvInput, gmm_type: &FeGmmType) -> Vec<f64> {
     let d = dummies(input.index().effect_codes());
@@ -302,6 +323,16 @@ fn manual_dummy_projection_gmm(
     group: &[usize],
     estimates: usize,
 ) -> (Vec<f64>, Mat<f64>) {
+    let manual = manual_dummy_projection_full(input, group, estimates);
+    (manual.params, manual.s)
+}
+
+/// [`manual_dummy_projection_gmm`]の全部入り（`X̃`・`Z̃`・最終の構造残差を含む）。
+pub(super) fn manual_dummy_projection_full(
+    input: &FeIvInput,
+    group: &[usize],
+    estimates: usize,
+) -> ManualGmm {
     let d = mat(&dummies(input.index().effect_codes()));
     let demean = |c: &Vec<f64>| -> Vec<f64> {
         let column = mat(std::slice::from_ref(c));
@@ -309,7 +340,7 @@ fn manual_dummy_projection_gmm(
         let residual = &column - &d * &fit.params;
         (0..c.len()).map(|i| *residual.get(i, 0)).collect()
     };
-    manual_gmm(input, &demean, group, estimates)
+    manual_gmm_full(input, &demean, group, estimates)
 }
 
 /// 手計算のGMMの途中の量（変換後の`X̃`・`Z̃`・最終の構造残差・最後の推定に使った`S`）。

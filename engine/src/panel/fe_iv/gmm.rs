@@ -8,7 +8,7 @@
 //! # 範囲
 //!
 //! 点推定（係数・構造残差・点推定に使った重み行列`S`・反復回数・収束）、`cov_type`別の標準誤差・
-//! z統計量・p値・信頼区間・傾き係数の同時Wald χ²検定、R²（within・between・overall）。過剰識別検定・
+//! z統計量・p値・信頼区間・傾き係数の同時Wald χ²検定、R²（within・between・overall）、Hansen J過剰識別検定。
 //! 内生性検定は持たない。
 //!
 //! # `fit`のパイプライン
@@ -28,6 +28,7 @@
 //!    `shared::gmm::gmm_sandwich_covariance`）を求める。`cov_type`と重みは独立の選択で、一般形を常に使う。
 //!    正規分布の推論表と、傾き係数の同時Wald χ²検定（自由度`k`）を計算する。
 //! 7. R²: 構造残差ベース。within = `1 − e'e/ỹ'ỹ`、between・overallは`β̂`と実際の`X`で`FeEstimator`と同じ式。
+//! 8. Hansen J過剰識別検定（`len(instruments) > len(x_endog)`のとき。`gmm/hansen_j.rs`）。
 //!
 //! # `cov_type`と自由度
 //!
@@ -43,20 +44,27 @@
 //! # `Robust`重みの限界
 //!
 //! within変換した誤差`ε̃_it`は個体内で相関し、`E[ε̃_it²]`が`σ_it²`だけでなく同じ個体の他の時点の
-//! `σ_is²`にも依存する。`Robust`の`S = Σ ẽ²z̃z̃'`はこれを無視するので、不均一分散があり`T`が小さいと
-//! 偏る。係数の一致性は保たれるが、効率性とHansen Jは影響を受けうる（`Classical`の`S`は
-//! `Σ_t z̃ε̃ = Σ_t z̃ε`なので、この問題を持たない）。固定効果つきの既定の重みが個体でのクラスター
-//! なのはこのため。`Robust`は小`T`では勧めない。
+//! `σ_is²`にも依存する（等分散でも`σ²(1 − 1/T)`に縮む）。`Robust`の`S = Σ ẽ²z̃z̃'`はこれを無視するので、
+//! 小`T`で偏る: `S`が過小になり、係数の効率性とHansen Jが影響を受ける（Hansen Jは等分散・iidの下でも
+//! 過剰に棄却する）。`Classical`の`S`は`σ̂²`の分母を`n − neffects`にして直せるが（Hansen J）、`Robust`は
+//! 不均一分散・個体内相関の下では同じ補正でも直らないので補正しない。係数の一致性は保たれる。固定効果つきの
+//! 既定の重みが個体でのクラスターなのはこのため。`Robust`は小`T`では勧めない。
 //!
-//! # `s_used`の尺度
+//! # `s_used`の尺度とHansen J
 //!
-//! `S`は`n`で割らない生の和（`iv::gmm`と同じ）。`Classical`と`OneStep`の`S`は`σ̂²・Z̃'Z̃`、`σ̂² = e'e/n`で、
-//! `n`は観測数（吸収した効果の数は引かない）。within変換後の残差は`σ²(n − neffects)`程度の大きさしか
-//! 持たないので、Hansen J（Sarganに相当）に使うときは分母を`n − neffects`に直す必要がある。
+//! `S`は`n`で割らない生の和（`iv::gmm`と同じ）で、`Classical`・`OneStep`の`S`は`σ̂²・Z̃'Z̃`、`σ̂² = e'e/n`
+//! （`n`は観測数）。`s_used()`はこの点推定に使った`S`をそのまま返す。Hansen Jは`J = (Z̃'ẽ)'S⁻¹(Z̃'ẽ)`で、
+//! `Classical`・`OneStep`のときだけ`S`を`n/(n − neffects)`倍して`σ̂² = e'e/(n − neffects)`にする
+//! （within変換後の残差は`σ²(n − neffects)`程度しか持たず、`n`で割ると`J`が膨らんで小`T`で過剰に棄却する。
+//! FE-2SLSのSarganと同じ理由で、`Classical`重みの`J`はSarganに一致する）。`Robust`・`Cluster`の`S`は補正
+//! しない（`Cluster`は、クラスターが個体を含むとき（個体自身か、個体を入れ子に含むより粗い列）`Σ_t z̃ẽ = Σ_t z̃ε`
+//! （`z̃`は個体内で和0）で補正が要らない。個体と交差するクラスター（時点など）では成り立たない。`Robust`は上の
+//! とおり小`T`で偏り、`n/(n − neffects)`では直らない）。
 //!
 //! # ファイル構成
 //!
 //! - `gmm/fit.rs`: `fit_fe_gmm`（上のパイプライン）
+//! - `gmm/hansen_j.rs`: `fe_hansen_j`（Hansen J検定）
 //! - `gmm/gmm_type.rs`: `FeGmmType`・`FeWeightType`（推定方式と重みの種類。`Hac`を持たない）
 
 use faer::Mat;
@@ -67,6 +75,7 @@ use crate::panel::fe::{FeAbsorption, FeCovType, FeEffects};
 
 mod fit;
 mod gmm_type;
+mod hansen_j;
 
 pub use gmm_type::{FeGmmType, FeWeightType};
 
@@ -103,6 +112,8 @@ pub struct FeGmmEstimator {
     r_squared_within: f64,
     r_squared_between: f64,
     r_squared_overall: f64,
+    /// Hansen J過剰識別検定。丁度識別、または内生変数が無いときは`None`。
+    hansen_j: Option<hansen_j::FeHansenJ>,
 }
 
 impl FeGmmEstimator {
@@ -129,6 +140,7 @@ impl FeGmmEstimator {
     /// - `confidence_level`が`(0, 1)`の範囲外なら`PanelError::WithinRegressionFailed`（`FeIvEstimator`と同じ）
     /// - `cov_type`の検証は`FeIvEstimator::fit`と同じ（クラスター数・時点数が`k`以下、2グループ退化、
     ///   DKのバンド幅など）。Wald χ²検定が数値的に定義できなければ`PanelError::WaldTestFailed`（`stage=OVERALL_WALD_TEST`。DKの`T <= k`も同じ段階）
+    /// - Hansen Jの`S`が数値的に特異なら`CommonError::NearSingularMatrix`（点推定で反転成功済みなので到達しない）
     /// - 構造残差が丸め誤差の範囲で0なら`CommonError::PerfectFit`（完全適合。GMMに第二段階は無いので`stage`は付けない。`iv::gmm`と同じ）
     /// - `Iterated`が収束せず`raise_on_non_convergence`なら`CommonError::GmmNonConvergence`
     /// - 不均衡な2-wayと3次元以上で、交互射影が収束しなければ`PanelError::AbsorptionNotConverged`
@@ -304,5 +316,20 @@ impl FeGmmEstimator {
     /// overall R²（`β̂`と実際の`X`で`FeEstimator`と同じ式）。
     pub fn r_squared_overall(&self) -> f64 {
         self.r_squared_overall
+    }
+
+    /// Hansen J過剰識別検定の統計量（`J = (Z̃'ẽ)'S⁻¹(Z̃'ẽ)`）。丁度識別・内生変数なしは`None`。
+    pub fn hansen_j_statistic(&self) -> Option<f64> {
+        self.hansen_j.map(|test| test.statistic)
+    }
+
+    /// Hansen J検定のp値（`χ²(df)`の上側確率）。丁度識別・内生変数なしは`None`。
+    pub fn hansen_j_p_value(&self) -> Option<f64> {
+        self.hansen_j.map(|test| test.p_value)
+    }
+
+    /// Hansen J検定の自由度（`len(instruments) − len(x_endog)`）。丁度識別・内生変数なしは`None`。
+    pub fn hansen_j_df(&self) -> Option<usize> {
+        self.hansen_j.map(|test| test.df)
     }
 }

@@ -6,7 +6,8 @@ row-oriented tables. Keeping that zip in one place means a fix (such as
 guarding against duplicate coefficient names) applies to every method at
 once. Property docstrings stay on each result class, since they differ
 per method. The same goes for wrapping the weak-instrument diagnostics of
-`IV` and `FEIV` into their `dataclass` results.
+`IV` and `FEIV`, and the C statistic of `IV` and `FEGMM`, into their
+`dataclass` results.
 """
 
 from __future__ import annotations
@@ -16,12 +17,14 @@ from typing import Any, Protocol
 
 from .diagnostics import (
     CraggDonaldResult,
+    CStatisticResult,
     EffectiveFResult,
     KleibergenPaapResult,
 )
 
 __all__ = [
     "by_param",
+    "c_statistic_result",
     "conf_int_by_param",
     "cov_params_by_param",
     "cragg_donald_result",
@@ -313,4 +316,19 @@ def effective_f_result(raw: Any) -> EffectiveFResult:
         simplified_critical_values=_as_dict(raw.simplified_critical_values),
         critical_values=_as_dict(raw.critical_values),
         bias_bound=raw.bias_bound,
+    )
+
+
+def c_statistic_result(raw: Any) -> CStatisticResult:
+    """Wrap the `_lib` C statistic output of `IV` or `FEGMM`."""
+    return CStatisticResult(
+        statistic=raw.statistic,
+        p_value=raw.p_value,
+        df=raw.df,
+        df_denom=None,
+        distribution="chi2",
+        variables=list(raw.variables),
+        instruments=list(raw.instruments),
+        j_with_tested=raw.j_with_tested,
+        j_without_tested=raw.j_without_tested,
     )

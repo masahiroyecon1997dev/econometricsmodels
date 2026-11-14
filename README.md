@@ -225,8 +225,8 @@ Currently implemented:
 - OLS, WLS
 - Logit, Probit, Tobit
 - IV (2SLS, GMM)
-- FE (fixed effects), FEIV (fixed effects two-stage least squares), RE (random
-  effects)
+- FE (fixed effects), FEIV (fixed effects two-stage least squares), FEGMM
+  (fixed effects GMM), RE (random effects)
 
 More methods are planned, including further discrete-choice models and
 causal inference designs. What is planned or in progress, and in what

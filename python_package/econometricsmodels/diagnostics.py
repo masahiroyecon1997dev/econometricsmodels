@@ -5,9 +5,9 @@ Post-estimation diagnostics (for example `OLSResults.white_test()` or
 fitting; they are never computed by `fit()`. Each returns a frozen
 dataclass so that values are read as attributes (`result.p_value`), like
 the properties of the fit results. Use `to_dict()` to get a plain `dict`.
-The hypothesis tests (those of OLS and the C statistic of IV) share
-`DiagnosticResult`; the weak-instrument diagnostics of IV have no p-value
-(or two statistics) and each has its own result type.
+The hypothesis tests (those of OLS and the C statistic of IV and FEGMM)
+share `DiagnosticResult`; the weak-instrument diagnostics of IV have no
+p-value (or two statistics) and each has its own result type.
 """
 
 from __future__ import annotations
@@ -294,7 +294,7 @@ class EffectiveFResult:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class CStatisticResult(DiagnosticResult):
-    """Result of `IVResults.c_stat()`.
+    """Result of `IVResults.c_stat()` and `FEGMMResults.c_stat()`.
 
     The C statistic (difference-in-Hansen test) is the difference of the
     Hansen J statistics of two models that differ in the moment conditions
@@ -305,9 +305,9 @@ class CStatisticResult(DiagnosticResult):
     the tested endogenous variables are exogenous, and the tested
     instruments are uncorrelated with the error. A small p-value rejects
     it. The test is conditional: the instruments that are not tested are
-    taken as valid. Both J statistics use the same estimate of the covariance of the
-    moment conditions, so `statistic` is never negative and equals
-    `j_with_tested - j_without_tested`.
+    taken as valid. Both J statistics use the same estimate of the
+    covariance of the moment conditions, so `statistic` is never negative
+    and equals `j_with_tested - j_without_tested`.
 
     `distribution` is `"chi2"` and `df_denom` is `None`.
 

@@ -21,6 +21,7 @@ from _error_expectations import escaped
 from _errors import raises_error
 from econometricsmodels import (
     FE,
+    FEGMM,
     FEIV,
     IV,
     OLS,
@@ -54,6 +55,9 @@ FITS = {
     "IV": lambda d: IV(d, "y", ["x2"], ["x1"], ["z", "z2"]).fit(),
     "FE": lambda d: FE(d, "y", ["x1"], ["entity"]).fit(),
     "FEIV": lambda d: FEIV(
+        d, "y", ["x2"], ["x1"], ["z", "z2"], ["entity"]
+    ).fit(),
+    "FEGMM": lambda d: FEGMM(
         d, "y", ["x2"], ["x1"], ["z", "z2"], ["entity"]
     ).fit(),
     "RE": lambda d: RE(d, "y", ["x1"], ["entity"]).fit(),

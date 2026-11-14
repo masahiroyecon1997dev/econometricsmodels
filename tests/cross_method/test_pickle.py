@@ -29,6 +29,7 @@ from _dtype_helpers import make_frame
 from _errors import raises_error
 from econometricsmodels import (
     FE,
+    FEGMM,
     FEIV,
     IV,
     OLS,
@@ -828,6 +829,24 @@ def test_fe_iv_results_wrapper_round_trips_with_the_endogenous_order() -> None:
         assert list(clone.first_stage()) == ["x1", "z2"]
         assert clone.cragg_donald() == result.cragg_donald()
         assert clone.fixed_effects() == result.fixed_effects()
+
+
+def test_fe_gmm_results_wrapper_round_trips_and_computes_c_stat() -> None:
+    """`FEGMMResults`は往復の後も、元のデータから`c_stat()`を計算できる。"""
+    result = FEGMM(
+        _frame(),
+        y="y",
+        x_exog=["x2"],
+        x_endog=["x1"],
+        instruments=["z", "z2"],
+        effects=["entity"],
+    ).fit()
+    expected = result.c_stat(variables=["x1"])
+    for clone in (pickle.loads(pickle.dumps(result)), copy.deepcopy(result)):
+        assert clone.params == result.params
+        assert clone.gmm_type == result.gmm_type
+        assert clone.n_groups == result.n_groups
+        assert clone.c_stat(variables=["x1"]) == expected
 
 
 FITTED_NAMES = ["LogitResult", "ProbitResult", "TobitResult"]

@@ -13,11 +13,13 @@ import math
 import pytest
 from econometricsmodels import (
     FE,
+    FEGMM,
     FEIV,
     IV,
     OLS,
     RE,
     WLS,
+    FEGMMOptions,
     FEIVOptions,
     FEOptions,
     IVOptions,
@@ -84,6 +86,16 @@ def _fe_iv(df, *, two_way=False, **options):
     ).fit()
 
 
+def _fe_gmm(df, *, two_way=False, **options):
+    effects = ["entity", "time"] if two_way else ["entity"]
+    return FEGMM(
+        df,
+        effects=effects,
+        options=FEGMMOptions(**options),
+        **IV_ARGS,
+    ).fit()
+
+
 def _re(df, *, two_way=False, **options):
     effects = ["entity", "time"] if two_way else ["entity"]
     return RE(
@@ -115,6 +127,8 @@ COV_TYPES_BY_METHOD = {
     "fe-two-way": ("classical", "hc1", "hc2", "hc3", "cluster", "dk"),
     "fe-iv": ("classical", "hc1", "hc2", "hc3", "cluster", "dk"),
     "fe-iv-two-way": ("classical", "hc1", "hc2", "hc3", "cluster", "dk"),
+    "fe-gmm": ("classical", "hc1", "hc2", "hc3", "cluster", "dk"),
+    "fe-gmm-two-way": ("classical", "hc1", "hc2", "hc3", "cluster", "dk"),
     "re": ("classical", "hc1", "hc2", "hc3", "cluster", "dk"),
     "re-two-way": ("classical", "hc1", "hc2", "hc3", "cluster", "dk"),
 }
@@ -133,6 +147,8 @@ METHOD_OPTIONS = {
     "fe-two-way": (_fe, {"two_way": True}),
     "fe-iv": (_fe_iv, {}),
     "fe-iv-two-way": (_fe_iv, {"two_way": True}),
+    "fe-gmm": (_fe_gmm, {}),
+    "fe-gmm-two-way": (_fe_gmm, {"two_way": True}),
     "re": (_re, {}),
     "re-two-way": (_re, {"two_way": True}),
 }

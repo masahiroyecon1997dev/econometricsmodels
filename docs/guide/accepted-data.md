@@ -16,11 +16,11 @@ A column is read in one of four roles, and each role accepts different dtypes. A
 | Role | Arguments | Accepted dtypes |
 |---|---|---|
 | Numeric value | `y`, `x`, `weight`, `x_exog`, `x_endog`, `instruments` | Integers (`Int8` to `Int128`, `UInt8` to `UInt64`; `UInt128` is not accepted in any role), floats (`Float16`, `Float32`, `Float64`), `Boolean`, `Decimal` |
-| Group identity | the first column of `effects` (FE, FEIV, RE), the third and later columns of `effects` (FE, FEIV), `cluster` | Integers, floats, `String`, `Categorical`, `Enum`, `Boolean`, `Date`, `Datetime` (no time zone) |
-| Time period (panel) | the second column of `effects` (FE, FEIV, RE, two-way), `dk_time` | Integers, floats, `String`, `Categorical`, `Enum`, `Date`, `Datetime` (no time zone) |
+| Group identity | the first column of `effects` (FE, FEIV, FEGMM, RE), the third and later columns of `effects` (FE, FEIV, FEGMM), `cluster` | Integers, floats, `String`, `Categorical`, `Enum`, `Boolean`, `Date`, `Datetime` (no time zone) |
+| Time period (panel) | the second column of `effects` (FE, FEIV, FEGMM, RE, two-way), `dk_time` | Integers, floats, `String`, `Categorical`, `Enum`, `Date`, `Datetime` (no time zone) |
 | Time order (HAC) | `hac_time` | Integers, floats, `Decimal`, `Date`, `Datetime` (with or without a time zone). Not `Boolean`, which has at most two distinct values |
 
-In `FE`, `FEIV` and `RE`, the role of a column in `effects` follows its position, not its content: the first column is read as a group identity (an entity) and the second as a time period, and the order is not checked. A *group* is one level of a column of `effects`, for example one entity. If you pass the time column first, it is treated as the entity, including for the default clustering column.
+In `FE`, `FEIV`, `FEGMM` and `RE`, the role of a column in `effects` follows its position, not its content: the first column is read as a group identity (an entity) and the second as a time period, and the order is not checked. A *group* is one level of a column of `effects`, for example one entity. If you pass the time column first, it is treated as the entity, including for the default clustering column.
 
 Not accepted in a numeric role: `String`, `Categorical`, `Enum`, `Date`, `Datetime`, `Time`, `Duration`, `Binary`, `List`, `Array`, `Struct`. Also not accepted as a group identity or a time period: `Time`, `Duration`, `Decimal`, `Binary`, `List`, `Array`, `Struct`; nor, as a time period, `Boolean`. A `Datetime` with a time zone is rejected as a group identity or a time period, with a message that says how to remove the zone: convert it to the zone you want to keep, then call `.dt.replace_time_zone(None)`. (`hac_time` accepts a time zone, and is compared in its own dtype rather than converted to a float; see [Order of observations for HAC](#order-of-observations-for-hac).) A column of the `Null` dtype (every value is missing) is reported as containing missing values, not as a dtype problem.
 
@@ -54,7 +54,7 @@ Tokens such as `"NA"`, `"NaN"`, `"null"` and `"None"` are not treated as missing
 
 ## Order of time periods
 
-For `cov_type="dk"` (Driscoll-Kraay) in FE, FEIV and RE, the periods of the `dk_time` column must be put in time order. The same order applies to the second column of `effects` in FE, FEIV and RE, which defines the time effects. The order comes from the values of the column, not from the text of the labels, so integers with different numbers of digits (`1, 2, ..., 12`), negative numbers and decimals are ordered correctly:
+For `cov_type="dk"` (Driscoll-Kraay) in FE, FEIV, FEGMM and RE, the periods of the `dk_time` column must be put in time order. The same order applies to the second column of `effects` in FE, FEIV, FEGMM and RE, which defines the time effects. The order comes from the values of the column, not from the text of the labels, so integers with different numbers of digits (`1, 2, ..., 12`), negative numbers and decimals are ordered correctly:
 
 | Dtype of `dk_time` or of the second `effects` column | Order of the periods |
 |---|---|

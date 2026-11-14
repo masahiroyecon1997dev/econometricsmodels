@@ -62,6 +62,10 @@ nav:
               - Usage: usage/fe_iv.md
               - Options and results: api/fe_iv.md
               - Definitions: methods/fe_iv.md
+          - FEGMM:
+              - Usage: usage/fe_gmm.md
+              - Options and results: api/fe_gmm.md
+              - Definitions: methods/fe_gmm.md
           - RE:
               - Usage: usage/re.md
               - Options and results: api/re.md

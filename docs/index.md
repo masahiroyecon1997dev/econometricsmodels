@@ -52,6 +52,7 @@ print(result.params_table())  # a list of dicts, ready for polars or json.dumps
 | IV | A regressor is endogenous and you have excluded instruments (2SLS or GMM) | [Usage](usage/iv.md) | [Options and results](api/iv.md) | [Definitions](methods/iv.md) |
 | FE | Panel data, with entity (and optionally time) effects, given as `effects`, that may be correlated with the regressors | [Usage](usage/fe.md) | [Options and results](api/fe.md) | [Definitions](methods/fe.md) |
 | FEIV | As FE, but one or more regressors are endogenous and you have excluded instruments (fixed effects two-stage least squares) | [Usage](usage/fe_iv.md) | [Options and results](api/fe_iv.md) | [Definitions](methods/fe_iv.md) |
+| FEGMM | As FEIV, estimated by the generalized method of moments, with a Hansen J test and the C statistic that are robust to correlation within clusters | [Usage](usage/fe_gmm.md) | [Options and results](api/fe_gmm.md) | [Definitions](methods/fe_gmm.md) |
 | RE | Panel data, with entity (and optionally time) effects, given as `effects`, assumed uncorrelated with the regressors; time-invariant regressors are allowed | [Usage](usage/re.md) | [Options and results](api/re.md) | [Definitions](methods/re.md) |
 
 Each method has three pages: **Usage** (examples), **Options and results** (the arguments, options and result fields) and **Definitions** (the estimator, the covariance types, the test distributions, the fit statistics and the diagnostics). [Getting Started](getting-started.md) introduces the conventions all of them share.

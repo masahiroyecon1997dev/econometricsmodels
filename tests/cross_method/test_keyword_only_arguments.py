@@ -26,9 +26,11 @@ import polars as pl
 import pytest
 from _dtype_helpers import make_frame
 from econometricsmodels import (
+    FEGMM,
     FEIV,
     IV,
     OLS,
+    FEGMMOptions,
     FEIVOptions,
     IVOptions,
     Logit,
@@ -131,6 +133,7 @@ _ESTIMATORS = (
     "Tobit",
     "FE",
     "FEIV",
+    "FEGMM",
     "RE",
 )
 _RESULT_METHODS = {
@@ -152,6 +155,7 @@ _RESULT_METHODS = {
         "c_stat",
     ),
     "FEIVResults": ("cragg_donald", "kleibergen_paap", "effective_f"),
+    "FEGMMResults": ("c_stat",),
 }
 
 
@@ -208,12 +212,25 @@ def fe_iv_result(frame: pl.DataFrame):
     ).fit()
 
 
+@pytest.fixture(scope="module")
+def fe_gmm_result(frame: pl.DataFrame):
+    return FEGMM(
+        frame,
+        y="y",
+        x_exog=["x2"],
+        x_endog=["x1"],
+        instruments=["z", "z2"],
+        effects=["entity"],
+    ).fit()
+
+
 def test_options_reject_positional_arguments() -> None:
     """`*Options`（`#[pyclass]`）は、位置引数を実行時にも拒否する。"""
     for call in (
         lambda: OLSOptions("hc1"),
         lambda: IVOptions("gmm"),
         lambda: FEIVOptions("hc1"),
+        lambda: FEGMMOptions("hc1"),
         lambda: LogitOptions("hc1", True),
         lambda: TobitOptions("hc1"),
         lambda: REOptions("cluster"),
@@ -237,6 +254,16 @@ def test_estimators_reject_positional_options(frame: pl.DataFrame) -> None:
             ["entity"],
             FEIVOptions(),  # type: ignore[misc]
         )
+    with pytest.raises(TypeError, match="positional"):
+        FEGMM(
+            frame,
+            "y",
+            ["x2"],
+            ["x1"],
+            ["z", "z2"],
+            ["entity"],
+            FEGMMOptions(),  # type: ignore[misc]
+        )
 
 
 def test_result_methods_reject_positional_arguments(
@@ -246,6 +273,7 @@ def test_result_methods_reject_positional_arguments(
     tobit_result,
     iv_result,
     fe_iv_result,
+    fe_gmm_result,
 ) -> None:
     new_data = frame.select("x1", "x2")
     for call in (
@@ -261,6 +289,7 @@ def test_result_methods_reject_positional_arguments(
         lambda: iv_result.effective_f(0.05),
         lambda: iv_result.c_stat(["x1"]),
         lambda: fe_iv_result.effective_f(0.05),
+        lambda: fe_gmm_result.c_stat(["x1"]),
     ):
         with pytest.raises(TypeError, match="positional"):
             call()

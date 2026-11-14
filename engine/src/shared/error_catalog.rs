@@ -1302,7 +1302,7 @@ pub static CATALOG: &[ErrorSpec] = &[
             },
         ],
         message: r#"'{name}' (given as {argument}) is not in {role} of this model."#,
-        hint: Some(r#"Use a name from {role}, as passed to IV."#),
+        hint: Some(r#"Use a name from {role}, as passed to the model."#),
         stage_allowed: false,
     },
     ErrorSpec {
@@ -1311,7 +1311,7 @@ pub static CATALOG: &[ErrorSpec] = &[
         params: &[],
         message: r#"The C statistic is undefined for these data: a matrix it needs is singular (collinear instruments, a perfect fit, or too few clusters or observations for the covariance of the moment conditions)."#,
         hint: Some(
-            r#"Check the instruments for collinearity and the covariance settings (cov_type, gmm_weight_type, cluster, hac_lags, hac_time)."#,
+            r#"Check the instruments for collinearity and the covariance options (cov_type, gmm_weight_type, cluster)."#,
         ),
         stage_allowed: false,
     },

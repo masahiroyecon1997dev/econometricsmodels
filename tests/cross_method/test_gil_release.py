@@ -30,6 +30,7 @@ import polars as pl
 import pytest
 from econometricsmodels import (
     FE,
+    FEGMM,
     FEIV,
     IV,
     OLS,
@@ -61,6 +62,14 @@ FITS: dict[str, Callable[[pl.DataFrame], object]] = {
         instruments=["z1", "z2"],
         effects=["entity"],
     ).fit(),
+    "FEGMM": lambda d: FEGMM(
+        d,
+        y="y",
+        x_exog=X_NAMES,
+        x_endog=["endog"],
+        instruments=["z1", "z2"],
+        effects=["entity"],
+    ).fit(),
     "RE": lambda d: RE(d, y="y", x=X_NAMES, effects=["entity"]).fit(),
 }
 
@@ -75,6 +84,7 @@ ROWS = {
     "IV": 50_000,
     "FE": 200_000,
     "FEIV": 50_000,
+    "FEGMM": 50_000,
     "RE": 50_000,
     # 推定後のメソッド。White検定は補助回帰の項数が多く、同じ行数でも遅い。
     # `marginal_effects`は`fit()`より桁違いに速いので、`fit()`（測定の外）に時間がかかり
@@ -93,6 +103,7 @@ ROWS = {
     "FEIV.kleibergen_paap": 50_000,
     "FEIV.effective_f": 50_000,
     "FEIV.fixed_effects": 50_000,
+    "FEGMM.c_stat": 50_000,
 }
 
 
@@ -134,6 +145,9 @@ CASES: dict[str, Callable[[pl.DataFrame], Callable[[], object]]] = {
     "FEIV.kleibergen_paap": _post_case("FEIV", lambda r: r.kleibergen_paap()),
     "FEIV.effective_f": _post_case("FEIV", lambda r: r.effective_f()),
     "FEIV.fixed_effects": _post_case("FEIV", lambda r: r.fixed_effects()),
+    "FEGMM.c_stat": _post_case(
+        "FEGMM", lambda r: r.c_stat(variables=["endog"])
+    ),
 }
 
 

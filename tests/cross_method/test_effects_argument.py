@@ -1,4 +1,4 @@
-"""FE/FEIV/REの必須引数`effects`（個体・時点の列のリスト）の検証と意味のテスト。
+"""FE/FEIV/FEGMM/REの必須引数`effects`（個体・時点の列のリスト）の検証と意味のテスト。
 
 `effects`は、REが1〜2要素、FEが1〜5要素のリストで、1要素が1-way、2要素が2-way
 （`effects[0]`が個体、`effects[1]`が時点）、FEの3要素以上が高次元の固定効果。
@@ -15,7 +15,16 @@ import random
 import polars as pl
 import pytest
 from _errors import raises_error
-from econometricsmodels import FE, FEIV, RE, FEIVOptions, FEOptions, REOptions
+from econometricsmodels import (
+    FE,
+    FEGMM,
+    FEIV,
+    RE,
+    FEGMMOptions,
+    FEIVOptions,
+    FEOptions,
+    REOptions,
+)
 
 N_ENTITIES = 8
 N_PERIODS = 5
@@ -282,6 +291,74 @@ def test_fe_iv_effects_order_changes_only_labels(panel_iv):
     """`effects`の順序を入れ替えても係数は同じで、`n_groups`の並びは`effects`の順。"""
     one = _fit_iv(panel_iv, ["firm", "year"])
     other = _fit_iv(panel_iv, ["year", "firm"])
+    assert list(other.n_groups) == ["year", "firm"]
+    for name in one.params:
+        assert other.params[name] == pytest.approx(one.params[name], rel=1e-9)
+
+
+# ── FEGMM ───────────────────────────────────────────────────────────────
+
+
+def _fit_gmm(df, effects, **options):
+    return FEGMM(
+        df,
+        y="y",
+        x_exog=["x2"],
+        x_endog=["x1"],
+        instruments=["z"],
+        effects=effects,
+        options=FEGMMOptions(**options),
+    ).fit()
+
+
+def test_fe_gmm_effects_must_be_a_list_of_column_names(panel_iv):
+    with pytest.raises(TypeError, match="effects must be a list"):
+        _fit_gmm(panel_iv, "firm")  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="effects"):
+        _fit_gmm(panel_iv, ["firm", 1])  # type: ignore[list-item]
+
+
+def test_fe_gmm_empty_effects_raises(panel_iv):
+    with raises_error("ROLE_EMPTY", argument="effects"):
+        _fit_gmm(panel_iv, [])
+
+
+def test_fe_gmm_accepts_up_to_five_effects(panel_iv):
+    assert list(_fit_gmm(panel_iv, ["firm", "year"]).n_groups) == [
+        "firm",
+        "year",
+    ]
+    assert list(_fit_gmm(panel_iv, ["firm", "year", "group"]).n_groups) == [
+        "firm",
+        "year",
+        "group",
+    ]
+
+
+def test_fe_gmm_rejects_more_than_five_effects(panel_iv):
+    columns = ["firm", "year", "group", "x1", "x2", "y"]
+    with raises_error(
+        "EFFECTS_TOO_MANY", model="FEGMM", n_columns=6, max_columns=5
+    ):
+        _fit_gmm(panel_iv, columns)
+
+
+def test_fe_gmm_duplicate_effects_raise(panel_iv):
+    with raises_error(
+        "ROLE_DUPLICATE_COLUMN", column="firm", argument="effects"
+    ):
+        _fit_gmm(panel_iv, ["firm", "firm"])
+
+
+def test_fe_gmm_effects_overlapping_a_role_raise(panel_iv):
+    with raises_error("ROLE_COLUMN_OVERLAP", column="x1"):
+        _fit_gmm(panel_iv, ["firm", "x1"])
+
+
+def test_fe_gmm_effects_order_changes_only_labels(panel_iv):
+    """`effects`の順序を入れ替えても係数は同じで、`n_groups`の並びは`effects`の順。"""
+    one = _fit_gmm(panel_iv, ["firm", "year"])
+    other = _fit_gmm(panel_iv, ["year", "firm"])
     assert list(other.n_groups) == ["year", "firm"]
     for name in one.params:
         assert other.params[name] == pytest.approx(one.params[name], rel=1e-9)

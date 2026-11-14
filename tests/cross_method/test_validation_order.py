@@ -36,12 +36,14 @@ from _dtype_helpers import make_frame
 from _errors import raises_error
 from econometricsmodels import (
     FE,
+    FEGMM,
     FEIV,
     IV,
     OLS,
     RE,
     WLS,
     ErrorCode,
+    FEGMMOptions,
     FEIVOptions,
     FEOptions,
     IVOptions,
@@ -183,6 +185,13 @@ _FE_IV_ARGS = {**_IV_ARGS, "effects": ["entity"]}
 # FEIVの`x_endog`・`instruments`の空の検査は`effects`の列数の次。IVの`"const"`の検査
 # （`x_exog`の名前）に当たるものは無い。
 _FE_IV_FAULTS = (*_PANEL_FAULTS, "missing_instrument")
+_FE_GMM_FAULTS = (
+    *_FE_IV_FAULTS,
+    "unknown_gmm_type",
+    "unknown_gmm_weight_type",
+    "unused_gmm_max_iter",
+    "unused_gmm_tol",
+)
 
 METHODS = [
     Method(
@@ -256,6 +265,15 @@ METHODS = [
         _simple(FEIV, FEIVOptions),
         _FE_IV_ARGS,
         _FE_IV_FAULTS,
+        time_cov_type="dk",
+        time_option="dk_time",
+        x_role="x_exog",
+    ),
+    Method(
+        "fegmm",
+        _simple(FEGMM, FEGMMOptions),
+        _FE_IV_ARGS,
+        _FE_GMM_FAULTS,
         time_cov_type="dk",
         time_option="dk_time",
         x_role="x_exog",
@@ -644,6 +662,13 @@ def changes(method: Method, fault_id: str) -> Changes:
         case "unused_cluster":
             # FE/REの既定の`cov_type`は`cluster`なので、`cluster`が使われなくなるよう
             # `classical`にする。
+            if method.name == "fegmm":
+                # FEGMMの既定の重み`cluster`も`cluster`を使うので、重みも使わない種類にする。
+                return {}, {
+                    "cov_type": "classical",
+                    "cluster": "cluster",
+                    "gmm_weight_type": "robust",
+                }
             if method.time_cov_type == "dk":
                 return {}, {"cov_type": "classical", "cluster": "cluster"}
             return {}, {"cluster": "cluster"}
@@ -755,6 +780,9 @@ def compose(
             **method.base_opts,
             **l_opts,
             "cluster": "cluster",
+            **(
+                {"gmm_weight_type": "robust"} if method.name == "fegmm" else {}
+            ),
         }
     conflicts = {k for k in e_args if k in l_args and e_args[k] != l_args[k]}
     conflicts |= {k for k in e_opts if k in l_opts and e_opts[k] != l_opts[k]}

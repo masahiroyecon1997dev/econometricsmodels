@@ -16,12 +16,14 @@ from _dtype_helpers import make_frame, unused_column
 from _errors import raises_error
 from econometricsmodels import (
     FE,
+    FEGMM,
     FEIV,
     IV,
     OLS,
     RE,
     WLS,
     ErrorCode,
+    FEGMMOptions,
     FEIVOptions,
     FEOptions,
     IVOptions,
@@ -92,6 +94,15 @@ CLUSTER_FITS = {
         ["entity"],
         options=FEIVOptions(**CLUSTER),
     ).fit(),
+    "FEGMM": lambda d: FEGMM(
+        d,
+        "y",
+        ["x2"],
+        ["x1"],
+        ["z", "z2"],
+        ["entity"],
+        options=FEGMMOptions(**CLUSTER),
+    ).fit(),
     "RE": lambda d: RE(
         d, "y", ["x1"], ["entity"], options=REOptions(**CLUSTER)
     ).fit(),
@@ -104,6 +115,9 @@ ENTITY_FITS = {
         d, "y", ["x1"], ["cluster", "t", "entity"]
     ).fit(),
     "FEIV": lambda d: FEIV(
+        d, "y", ["x2"], ["x1"], ["z", "z2"], ["entity"]
+    ).fit(),
+    "FEGMM": lambda d: FEGMM(
         d, "y", ["x2"], ["x1"], ["z", "z2"], ["entity"]
     ).fit(),
     "RE": lambda d: RE(d, "y", ["x1"], ["entity"]).fit(),
@@ -129,6 +143,18 @@ TIME_FITS = {
         ["z", "z2"],
         ["entity"],
         options=FEIVOptions(cov_type="dk", dk_time="t"),
+    ).fit(),
+    "FEGMM.effects_time": lambda d: FEGMM(
+        d, "y", ["x2"], ["x1"], ["z", "z2"], ["entity", "t"]
+    ).fit(),
+    "FEGMM.dk_time": lambda d: FEGMM(
+        d,
+        "y",
+        ["x2"],
+        ["x1"],
+        ["z", "z2"],
+        ["entity"],
+        options=FEGMMOptions(cov_type="dk", dk_time="t"),
     ).fit(),
     "RE.effects_time": lambda d: RE(d, "y", ["x1"], ["entity", "t"]).fit(),
     "RE.dk_time": lambda d: RE(

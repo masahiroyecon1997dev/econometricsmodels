@@ -22,6 +22,7 @@ from .. import _lib
 from .._lib import IVOptions
 from .._results_utils import (
     by_param,
+    c_statistic_result,
     conf_int_by_param,
     cov_params_by_param,
     cragg_donald_result,
@@ -690,15 +691,4 @@ class IVResults:
                 instrument set (the exogenous regressors, the tested
                 endogenous variables and all excluded instruments).
         """
-        raw = self._raw.c_stat(variables, instruments)
-        return CStatisticResult(
-            statistic=raw.statistic,
-            p_value=raw.p_value,
-            df=raw.df,
-            df_denom=None,
-            distribution="chi2",
-            variables=list(raw.variables),
-            instruments=list(raw.instruments),
-            j_with_tested=raw.j_with_tested,
-            j_without_tested=raw.j_without_tested,
-        )
+        return c_statistic_result(self._raw.c_stat(variables, instruments))

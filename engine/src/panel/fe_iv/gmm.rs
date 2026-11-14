@@ -128,7 +128,7 @@ impl FeGmmEstimator {
     /// - 重み行列・`X̃'Z̃W Z̃'X̃`が数値的に特異なら`CommonError::NearSingularMatrix`
     /// - `confidence_level`が`(0, 1)`の範囲外なら`PanelError::WithinRegressionFailed`（`FeIvEstimator`と同じ）
     /// - `cov_type`の検証は`FeIvEstimator::fit`と同じ（クラスター数・時点数が`k`以下、2グループ退化、
-    ///   DKのバンド幅など）。Wald χ²検定が数値的に定義できなければ`PanelError::FTestFailed`
+    ///   DKのバンド幅など）。Wald χ²検定が数値的に定義できなければ`PanelError::WaldTestFailed`（`stage=OVERALL_WALD_TEST`。DKの`T <= k`も同じ段階）
     /// - 構造残差が丸め誤差の範囲で0なら`CommonError::PerfectFit`（完全適合。GMMに第二段階は無いので`stage`は付けない。`iv::gmm`と同じ）
     /// - `Iterated`が収束せず`raise_on_non_convergence`なら`CommonError::GmmNonConvergence`
     /// - 不均衡な2-wayと3次元以上で、交互射影が収束しなければ`PanelError::AbsorptionNotConverged`

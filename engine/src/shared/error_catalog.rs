@@ -325,6 +325,7 @@ pub enum Stage {
     WithinRegression,
     VarianceComponentWithinRegression,
     OverallFTest,
+    OverallWaldTest,
     BetweenRegressionEntity,
     BetweenRegressionTime,
     PooledRegression,
@@ -344,6 +345,7 @@ impl Stage {
             Self::WithinRegression => "WITHIN_REGRESSION",
             Self::VarianceComponentWithinRegression => "VARIANCE_COMPONENT_WITHIN_REGRESSION",
             Self::OverallFTest => "OVERALL_F_TEST",
+            Self::OverallWaldTest => "OVERALL_WALD_TEST",
             Self::BetweenRegressionEntity => "BETWEEN_REGRESSION_ENTITY",
             Self::BetweenRegressionTime => "BETWEEN_REGRESSION_TIME",
             Self::PooledRegression => "POOLED_REGRESSION",
@@ -365,6 +367,7 @@ impl Stage {
                 r#"In the within regression used to estimate a variance component: "#
             }
             Self::OverallFTest => r#"In the overall F test of the slope coefficients: "#,
+            Self::OverallWaldTest => r#"In the overall Wald test of the slope coefficients: "#,
             Self::BetweenRegressionEntity => {
                 r#"In the between regression on entity means used to estimate a variance component: "#
             }
@@ -394,6 +397,7 @@ impl Stage {
             Self::WithinRegression,
             Self::VarianceComponentWithinRegression,
             Self::OverallFTest,
+            Self::OverallWaldTest,
             Self::BetweenRegressionEntity,
             Self::BetweenRegressionTime,
             Self::PooledRegression,
@@ -417,6 +421,7 @@ impl Stage {
             Self::WithinRegression => Vec::new(),
             Self::VarianceComponentWithinRegression => Vec::new(),
             Self::OverallFTest => Vec::new(),
+            Self::OverallWaldTest => Vec::new(),
             Self::BetweenRegressionEntity => Vec::new(),
             Self::BetweenRegressionTime => Vec::new(),
             Self::PooledRegression => Vec::new(),
@@ -2376,6 +2381,7 @@ mod tests {
             Stage::WithinRegression,
             Stage::VarianceComponentWithinRegression,
             Stage::OverallFTest,
+            Stage::OverallWaldTest,
             Stage::BetweenRegressionEntity,
             Stage::BetweenRegressionTime,
             Stage::PooledRegression,
@@ -2451,7 +2457,7 @@ mod tests {
                 "as_str does not match the variant name"
             );
         }
-        assert_eq!(all_stages().len(), 12, "all_stages() must list every Stage");
+        assert_eq!(all_stages().len(), 13, "all_stages() must list every Stage");
         for stage in all_stages() {
             let debug = format!("{stage:?}");
             let name = debug.split([' ', '{']).next().unwrap_or("");

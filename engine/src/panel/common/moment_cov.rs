@@ -17,6 +17,7 @@ use crate::shared::covariance::{
     HcScale, cluster_correction, cluster_meat, hc_meat, hc_scales, leverages,
 };
 use crate::shared::error::CommonError;
+use crate::shared::error_catalog::Stage;
 use crate::shared::gmm::invert_spd;
 use crate::shared::group_codes::GroupCodes;
 
@@ -137,7 +138,15 @@ pub(crate) fn panel_moment_covariance(
                 time_codes,
                 t_periods,
                 bandwidth: bw,
-            } = dk_setup(dk_time, *bandwidth, n, n_slopes, true, structure)?;
+            } = dk_setup(
+                dk_time,
+                *bandwidth,
+                n,
+                n_slopes,
+                true,
+                structure,
+                Stage::OverallWaldTest,
+            )?;
             let s_hat = panel_driscoll_kraay_meat(z, residuals, time_codes, bw);
             let scale = driscoll_kraay_scale(n, t_periods, df_model);
             Ok(PanelMoment {

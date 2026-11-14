@@ -30,7 +30,7 @@ use crate::panel::common::{PanelError, TimeKeys};
 use crate::panel::fe::{FeCovType, FeEffects};
 use crate::panel::fe_iv::{FeGmmEstimator, FeGmmType, FeIvEstimator, FeIvInput, FeWeightType};
 use crate::shared::error::{CommonError, ErrorInfo};
-use crate::shared::error_catalog::ErrorCode;
+use crate::shared::error_catalog::{ErrorCode, Stage};
 use crate::shared::group_codes::GroupCodes;
 
 const RTOL: f64 = 1e-8;
@@ -539,6 +539,13 @@ fn dk_periods_must_exceed_the_number_of_coefficients_and_bandwidth_must_fit() {
         dk(Some(1), &rows),
     ));
     assert!(matches!(err, PanelError::InStage { .. }), "{err:?}");
+    // GMMの検定はχ²なので、段階はF検定でなくWald検定。
+    assert_eq!(err.report().stage(), Some(&Stage::OverallWaldTest));
+    assert!(
+        err.report()
+            .message()
+            .starts_with("In the overall Wald test of the slope coefficients: ")
+    );
     // バンド幅は`[0, T)`。
     let err = error_of(fit_with(
         input_spec(&rows, &[entity_labels()], 1, 1, 2),

@@ -170,7 +170,15 @@ pub(crate) fn panel_cov_params(
                 time_codes,
                 t_periods,
                 bandwidth: bw,
-            } = dk_setup(dk_time, *bandwidth, n, n_slopes, tests_slopes, structure)?;
+            } = dk_setup(
+                dk_time,
+                *bandwidth,
+                n,
+                n_slopes,
+                tests_slopes,
+                structure,
+                Stage::OverallFTest,
+            )?;
             // fixestのDKは`K.fixef="full"`が既定（クラスター変数が無くネスト判定自体が発生しない、
             // `fe_cluster_k_correction`のdocコメント参照）。`K=df_model`をそのまま使う。
             let cov_params =
@@ -241,6 +249,7 @@ pub(super) struct DkSetup<'a> {
 }
 
 /// `Dk`の検証（時点列の長さ・バンド幅・`t_periods > q`・FEの時点2つの退化）とバンド幅の解決。
+/// `overall_test`は、`t_periods <= q`のエラーに付ける傾き係数の同時検定の段階（F検定かWald検定か）。
 ///
 /// # Errors
 /// [`panel_cov_params`]の`Dk`のエラーと同じ。
@@ -251,6 +260,7 @@ pub(super) fn dk_setup<'a>(
     n_slopes: usize,
     tests_slopes: bool,
     structure: PanelStructure<'_>,
+    overall_test: Stage,
 ) -> Result<DkSetup<'a>, PanelError> {
     // 入力の検証を通らない`dk_time`（公開APIの`Dk.time`）の長さをここで検証する。
     // 合わないと退化判定の`zip`が黙って切り詰められ、DK計算は範囲外アクセスになる。
@@ -266,7 +276,7 @@ pub(super) fn dk_setup<'a>(
     let bandwidth = resolve_dk_bandwidth(bandwidth, t_periods)?;
     if tests_slopes {
         validate_dk_periods_cover_tested_coefficients(t_periods, n_slopes)
-            .map_err(|e| e.in_stage(Stage::OverallFTest))?;
+            .map_err(|e| e.in_stage(overall_test))?;
     }
     if let PanelStructure::FixedEffects { levels } = structure {
         // F検定をするなら、直前の`t_periods > q`により、ここで`t_periods=2`なら`q`は高々1。

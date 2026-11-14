@@ -307,6 +307,17 @@ pub enum PanelError {
         source: LeastSquaresError,
     },
 
+    /// 固定効果つきGMMの傾き係数の同時Wald χ²検定（`crate::shared::wald::wald_chi2_test`）が
+    /// 失敗した。`FTestFailed`（F検定）とは別バリアントで、文脈句が「Wald test」になる。
+    ///
+    /// 実際に発生しうるのは`CommonError::NearSingularMatrix`のみ（傾き係数間の極端なスケール差等で
+    /// 共分散部分行列が数値的にほぼ特異な場合。構造的な特異性はクラスター数・時点数の事前検証が弾く）。
+    #[error("{}", self.catalog_message())]
+    WaldTestFailed {
+        #[source]
+        source: CommonError,
+    },
+
     /// RE（Swamy-Arora分散成分推定、`re-spec.md`3.1節）のbetween回帰
     /// （`between_ssr_and_df`。エンティティ平均への`least_squares`）が失敗した。
     ///
@@ -446,6 +457,9 @@ impl ErrorInfo for PanelError {
                 staged_report(source.report(), Stage::WithinRegression)
             }
             Self::FTestFailed { source } => staged_report(source.report(), Stage::OverallFTest),
+            Self::WaldTestFailed { source } => {
+                staged_report(source.report(), Stage::OverallWaldTest)
+            }
             Self::SecondStageFailed { source } => {
                 staged_report(source.report(), Stage::SecondStage)
             }
@@ -628,6 +642,34 @@ mod tests {
         );
         let wrapped = PanelError::Common(CommonError::InvalidHacLags { hac_lags: 3, n: 3 });
         assert_eq!(wrapped.report().code(), ErrorCode::HacLagsOutOfRange);
+    }
+
+    /// F検定とWald検定の失敗は、同じ原因の`code`に別の段階（`OVERALL_F_TEST`・`OVERALL_WALD_TEST`）と
+    /// 文脈句を付ける。
+    #[test]
+    fn overall_test_failures_carry_their_own_stage() {
+        let singular = || CommonError::NearSingularMatrix {
+            matrix: crate::shared::error::MatrixKind::CoefficientCovariance,
+        };
+        let wald = PanelError::WaldTestFailed { source: singular() }.report();
+        assert_eq!(wald.code(), ErrorCode::MatrixNearSingular);
+        assert_eq!(wald.stage(), Some(&Stage::OverallWaldTest));
+        assert!(wald.validate().is_ok());
+        assert!(
+            wald.message()
+                .starts_with("In the overall Wald test of the slope coefficients: ")
+        );
+
+        let f_test = PanelError::FTestFailed {
+            source: singular().into(),
+        }
+        .report();
+        assert_eq!(f_test.stage(), Some(&Stage::OverallFTest));
+        assert!(
+            f_test
+                .message()
+                .starts_with("In the overall F test of the slope coefficients: ")
+        );
     }
 
     #[test]

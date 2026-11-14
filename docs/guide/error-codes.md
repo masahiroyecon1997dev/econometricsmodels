@@ -161,6 +161,7 @@ When an error happens inside a nested regression, `params` also holds `stage` (o
 | `WITHIN_REGRESSION` | - | In the within-transformed regression |
 | `VARIANCE_COMPONENT_WITHIN_REGRESSION` | - | In the within regression used to estimate a variance component |
 | `OVERALL_F_TEST` | - | In the overall F test of the slope coefficients |
+| `OVERALL_WALD_TEST` | - | In the overall Wald test of the slope coefficients |
 | `BETWEEN_REGRESSION_ENTITY` | - | In the between regression on entity means used to estimate a variance component |
 | `BETWEEN_REGRESSION_TIME` | - | In the between regression on time means used to estimate a variance component |
 | `POOLED_REGRESSION` | - | In the pooled regression used to estimate a variance component |

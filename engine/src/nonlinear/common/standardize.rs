@@ -304,8 +304,8 @@ mod tests {
 
         assert!(scale.means.iter().all(|m| *m == 0.0));
         for i in 0..4 {
-            for j in 0..2 {
-                assert_eq!(*x_std.get(i, j), *x.get(i, j) / scale.stds[j]);
+            for (j, std) in scale.stds.iter().enumerate().take(2) {
+                assert_eq!(*x_std.get(i, j), *x.get(i, j) / std);
             }
         }
         let cov_std = Mat::from_fn(2, 2, |i, j| [[4.0, 6.0], [6.0, 9.0]][i][j]);

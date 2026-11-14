@@ -890,9 +890,16 @@ def _assert_hac_dependent_stats_match(result, expected) -> None:
     異なるため、存在する属性だけを比べる。
     """
     for name in _HAC_SCALAR_STATS:
-        if hasattr(expected, name):
+        if not hasattr(expected, name):
+            continue
+        expected_value = getattr(expected, name)
+        if expected_value is None:
+            # 推定量によって定義されない統計量（`float | None`）は`None`同士で
+            # 比べる。pytest 9.2から`approx(None, rel=...)`は`TypeError`になる。
+            assert getattr(result, name) is None, name
+        else:
             assert getattr(result, name) == pytest.approx(
-                getattr(expected, name), rel=1e-9
+                expected_value, rel=1e-9
             ), name
     for name in _HAC_DICT_STATS:
         if not hasattr(expected, name):

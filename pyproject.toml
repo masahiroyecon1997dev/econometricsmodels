@@ -64,7 +64,7 @@ exclude = ["**/CLAUDE.md", "**/.gitkeep", "**/error_catalog_golden.txt"]
 # `==`で厳密固定する（.claude/rules/testing-policy.md「ベンチマーク値のフィクスチャ化」参照）。
 # バージョンを上げる場合はフィクスチャの再生成とセットで行うこと。
 test = [
-    "pytest==9.1.1",
+    "pytest==9.2.0",
     "numpy==2.5.4",
     "statsmodels==0.15.0",
     # IV（2SLS/GMM）のフィクスチャ生成に使った主リファレンス実装
@@ -74,7 +74,7 @@ test = [
     # `ncx2`の分位点。statsmodels/linearmodelsの間接依存としても入るが、オラクルが
     # 直接importするため明示し、数値が変わらないよう`==`で固定する。
     "scipy==1.18.0",
-    "ruff==0.17.2",
+    "ruff==0.17.3",
     # Wooldridge実データでのクロスチェックテスト用（tests/support/_helpers.pyの
     # wooldridge_loader）。標準CIで確実に実行されるよう
     # 専用グループからここへ移した。依存はpandasのみで、statsmodels/linearmodels経由で既に
@@ -95,7 +95,7 @@ test = [
     "pyarrow==26.0.0",
 ]
 dev = [
-    "maturin==1.15.0",
+    "maturin==1.16.0",
 ]
 # ci_python.ymlのpip-auditジョブ専用（testグループと併用して依存の脆弱性を監査する）。
 # `uvx`/`--with`で実行のたびに最新版を解決しないよう、ここへ版固定で入れる。
@@ -106,7 +106,7 @@ audit = [
 # postCreateCommandでもtestグループと併せて導入する）。
 docs = [
     "mkdocs==1.6.1",
-    "mkdocs-material==9.7.7",
+    "mkdocs-material==9.8.0",
     "mkdocstrings[python]==1.0.8",
 ]
 

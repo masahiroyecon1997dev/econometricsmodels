@@ -112,6 +112,15 @@ _FIXTURE_MODULES = [
     "benchmark.panel.fixtures.generate_fe_iv_plm_crosscheck_fixtures",
     "benchmark.panel.fixtures.generate_fe_iv_plm_cov_crosscheck_fixtures",
     "benchmark.panel.fixtures.generate_fe_iv_weak_diagnostics_crosscheck_fixtures",
+    # FE-GMM（`FEGMM`）。固定効果をwithin変換で除いた列に、主リファレンスはlinearmodels IVGMM、
+    # 独立なクロスチェックはR momentfitを当てる。C統計量はnumpyのオラクルとmomentfit。`*_cov*`は
+    # 行列だけを同じツリーから書く。momentfitは`Rscript`必須。
+    "benchmark.panel.fixtures.generate_fe_gmm_fixtures",
+    "benchmark.panel.fixtures.generate_fe_gmm_cov_fixtures",
+    "benchmark.panel.fixtures.generate_fe_gmm_crosscheck_fixtures",
+    "benchmark.panel.fixtures.generate_fe_gmm_crosscheck_cov_fixtures",
+    "benchmark.panel.fixtures.generate_fe_gmm_c_statistic_fixtures",
+    "benchmark.panel.fixtures.generate_fe_gmm_c_statistic_crosscheck_fixtures",
 ]
 
 

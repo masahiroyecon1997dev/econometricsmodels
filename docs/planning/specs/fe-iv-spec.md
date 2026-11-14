@@ -1239,3 +1239,19 @@ Stock-Yogoの表は実装の値がNBER TWP 284のTable 1（バイアス）・Tab
 **テスト**: `tests/panel/test_fe_gmm_api.py`（19件）。横断テストへ登録（`engine_pybind`の`panel/CLAUDE.md`・`python_package`の`panel/CLAUDE.md`に一覧）。`test_validation_order`の`fegmm`は`unused_cluster`で既定の重み`cluster`も`cluster`を使うので`gmm_weight_type="robust"`を足す。`test_option_types`の`gmm_max_iter`・`gmm_tol`はIVとFEGMMでパラメータ化した。
 **確認**: `ruff check`・`ruff format --check`・`mkdocs build --strict`・`cargo test -p engine error_catalog`・`render_error_catalog.py --check`・pytest `tests/cross_method`（8427件）が通る。
 **未実施・保留**: コミット（パス指定・署名）、push、#373〜#386のclose、`verification.md`・`verification-details.md`の行（#387）、CHANGELOG（FEIVも未記載なのでリリース時にまとめる）、`performance.md`の行（#388）、公開docsの校閲（`/review-docs`。ユーザーの依頼があれば）。
+
+### 9.41 #388（FE-GMMの参照ベンチマーク）の実装結果（2026-11-14）
+
+**番号の整理**: GitHubのIssueは#387=ドキュメント作成（公開docsは#386と一緒に作成済み。`verification.md`の行は本節で足した）、#388=`plm`＋補助照合・還元検証（参照ベンチマーク）、#389=性能（#380に統合済みでclose）。9.39の「#387（参照ベンチマーク）・#388（性能計測）」は誤りで、本節は#388。
+**決定（ユーザー承認）**: ケースはFE-2SLSの20シナリオ（凍結CSV）を流用し、IV GMMと同じ絞り方。独立クロスチェック（momentfit）はbaseline系（1-way・不均衡・2-way・不均衡な2-way・3-way）の全重み・全`gmm_type`とC統計量。実データは含めない（FEIVと同じ）。主リファレンス=within変換後のデータに`linearmodels.IVGMM`（Issueコメントの方針）、`gmm`は未導入・plmとfixestはGMM非対応。
+**実装**: `benchmark/panel/fe_gmm_cases.py`（`GmmSpec`・`GmmCase`・`CStatCase`と`primary_cases()`271・`crosscheck_cases()`90・`reduction_cases()`362・`c_stat_cases()`60）、`references/within_gmm_ref.py`（固定効果を群の平均・ダミー変数行列への`lstsq`で除いた列に`IVGMM`。標準誤差は漸近共分散×小標本補正のスカラー（手書き。クラスターの`K`はfixestのnonnested）、HC2・HC3・DKはnumpyの手計算）・`within_gmm_r.py`（同じ列にmomentfit）・`within_c_stat_ref.py`（C統計量のnumpyオラクルとmomentfit）、`fixtures/generate_fe_gmm_*.py`（6本。`regenerate_all.py`に登録）、`benchmark/iv/references/run_momentfit.R`に7番目の引数（`onestep`・`iterated:<回数>`。省略時の挙動は不変で、IVのフィクスチャは再生成して完全一致を確認）。テストは`tests/panel/test_fe_gmm_{reference,crosscheck,c_statistic,reduction}.py`、`tests/support/_fe_gmm_helpers.py`、許容誤差4キー。
+**一致の実測**: 主リファレンスに対して係数8e-14・標準誤差9e-13・共分散2e-12・信頼区間3e-10（悪条件のHC3）・Wald 5e-13・Hansen J 2e-13・R² 7e-16・反復回数は完全一致。momentfitに対して係数7e-15・標準誤差5e-14・Wald・J 1e-13。C統計量は両参照に1e-13。還元はfixestに対して係数1e-13・標準誤差1e-12・共分散2e-12・Sargan 3e-12。
+**分かったこと**
+- **`one_step`と`two_step`の`classical`重みは、過剰識別でもFE-2SLSと同じ係数・標準誤差・共分散を返し、Hansen JはFE-2SLSのSarganになる**（重みが`(Z'Z)⁻¹`の定数倍で、サンドイッチは定数倍に依らない）。テスト網羅性レビューの指摘で、還元をFE-2SLSの全ケース（全シナリオ・2-way・3-way・全`cov_type`）に広げた。これで主リファレンスに無いDK・時点クラスター・入れ子のクラスターの小標本補正（`K`）とJの再スケールが、fixest・plmにより独立に確かめられる。残るのは、過剰識別のrobust・cluster重みとの組合せ。
+- `df1_boundary`（4個体×2時点）のHC3は、レバレッジが1に近く`1/(1−h)²`が丸め誤差を増幅して、Waldが2e-7ずれる（標準誤差は3e-11）。HC2・HC3の追加シナリオから外した。
+- momentfitの`iterated`はIVのフィクスチャでは使われていなかったが、固定回数（3）のループを手書きして一致した（`classical`重みの反復は反復で動かないので含めない）。
+- 反復の`gmm_tol`は絶対下限1e-8が残るため、classical重みの反復は早く止まる。反復のケースはrobust・cluster重み。
+- GMMに第一段階は無いので、共線な外生変数・操作変数は`MATRIX_NEAR_SINGULAR`（FE-2SLSの`DESIGN_MATRIX_SINGULAR`＋`stage`ではない）。
+**テスト網羅性レビュー（`testing-completeness-reviewer`）への対応**: should fixを反映 — 還元の拡張（上）、既定以外の重み×時点・region・DK・HC2・HC3（baselineと2-way baseline）、iterated×robust、HC2・HC3の追加シナリオ（外れ値・小標本・時点が少ない・悪条件）と`unbalanced`の全`cov_type`、C統計量の複数内生変数、docsの限定表現と実測値・R²・df・反復回数が単一参照であること・3-wayのR²なし、`test_fe_gmm_validation.py`にFEIVと同じ入力検証（列の存在・null・定数列・singleton・自由度・クラスター数・DK・信頼水準）と共線の`ComputationError`、`cov_type`の大文字小文字、`scipy_version`、見出し・シナリオ件数の書き方。見送り（nice to have）: C統計量のnumpyとmomentfitのファイル分割、`x_exog_empty`・`confidence_level`をオプション節に分ける、`test_fe_gmm_api.py`の見出し順、`test_cross_method`の`test_perfect_fit`等へのFEGMMの追加。
+**注意**: 並行作業のコミット（WLSの検証順）が入っていると`_lib`が古く、`test_validation_order`のwlsが落ちる。`uv run maturin develop`で入れ直す。
+**未実施・保留**: コミット（コード → フィクスチャ（CSVは流用なのでJSONのみ）の順に分けるか1つにするかはユーザー確認）、push、#373〜#388のclose、CHANGELOG、`/review-docs`（公開docsの校閲）、性能の`performance.md`の行（#380の`fe_iv`のmethod軸に`FEGMM`を足す件。#389は統合済み）。

@@ -92,6 +92,7 @@ def run_momentfit_r(
     *,
     cluster: str | None = None,
     hac_lag: int | None = None,
+    gmm_type: str | None = None,
 ) -> dict:
     """`run_momentfit.R` を呼び、GMMの係数・標準誤差・Hansen Jを得る。
 
@@ -106,6 +107,8 @@ def run_momentfit_r(
             （重みと共分散で共用）。未指定なら本実装の自動選択式
             （`hac_auto_lag(n)`、`n`はCSVの行数）。使ったラグは結果の`hac_lag`に
             残る。どちらもhacでないときは無視され、結果に`hac_lag`は入らない。
+        gmm_type: 推定方式。`None`（2段階）・`"onestep"`・`"iterated:<回数>"`
+            （初期推定を数えた推定の回数）。
     """
     lag = (
         resolve_hac_lag(csv_path, hac_lag)
@@ -116,6 +119,8 @@ def run_momentfit_r(
         cluster if cluster is not None else "NA",
         str(lag) if lag is not None else "NA",
     ]
+    if gmm_type is not None:
+        extra.append(gmm_type)
     raw = run_r(
         _GMM_R_SCRIPT,
         csv_path,

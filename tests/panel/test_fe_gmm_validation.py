@@ -120,6 +120,194 @@ def test_effects_limit_names_the_model(df):
         _fit(data, effects=effects)
 
 
+# ── ValidationError（入力データ: 列の存在・欠損値） ─────────────────────
+
+
+@pytest.mark.parametrize(
+    ("argument", "kwargs"),
+    [
+        ("y", {"y": "nope"}),
+        ("x_exog", {"x_exog": ["x1", "nope"]}),
+        ("x_endog", {"x_endog": ["nope"]}),
+        ("instruments", {"instruments": ["z1", "nope"]}),
+        ("effects", {"effects": ["nope"]}),
+        ("effects", {"effects": ["entity", "time", "nope"]}),
+    ],
+    ids=[
+        "y",
+        "x_exog",
+        "x_endog",
+        "instruments",
+        "effects_first",
+        "effects_third",
+    ],
+)
+def test_a_missing_column_names_its_role(df, argument, kwargs):
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND, column="nope", argument=argument
+    ):
+        _fit(df, **kwargs)
+
+
+def test_missing_cluster_and_dk_time_columns_raise(df):
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND, column="nope", argument="cluster"
+    ):
+        _fit(df, cluster="nope")
+    with raises_error(
+        ErrorCode.COLUMN_NOT_FOUND, column="nope", argument="dk_time"
+    ):
+        _fit(df, cov_type="dk", dk_time="nope")
+
+
+def test_a_null_in_a_later_effect_column_raises(df):
+    third = pl.Series("sector", ["s"] * N).scatter(0, None)
+    with raises_error(
+        ErrorCode.COLUMN_CONTAINS_NULL, column="sector", argument="effects"
+    ):
+        _fit(df.with_columns(third), effects=["entity", "time", "sector"])
+
+
+# ── ValidationError（入力データ: 定数の列・固定効果を除くと一定の列） ────
+
+# 列`extra`を足した（`x_endog`は置き換えた）ときの、ロールごとの引数。
+_WITH_EXTRA_COLUMN = {
+    "x_exog": {"x_exog": ["x1", "extra"]},
+    "x_endog": {"x_endog": ["extra"]},
+    "instruments": {"instruments": ["z1", "extra"]},
+}
+
+
+@pytest.mark.parametrize("role", list(_WITH_EXTRA_COLUMN))
+def test_a_column_with_one_value_in_every_row_raises(df, role):
+    """生の値が全て同じ列は、固定効果を除く前に`REGRESSOR_CONSTANT`（`role`付き）。"""
+    with raises_error(ErrorCode.REGRESSOR_CONSTANT, role=role, column="extra"):
+        _fit(df.with_columns(extra=pl.lit(1.5)), **_WITH_EXTRA_COLUMN[role])
+
+
+@pytest.mark.parametrize("role", list(_WITH_EXTRA_COLUMN))
+def test_a_column_constant_within_entities_raises(df, role):
+    """個体ごとに一定の列は、固定効果を除くと分散が無いため`REGRESSOR_NO_WITHIN_VARIATION`。"""
+    level = np.random.default_rng(2).normal(size=N_ENTITIES)
+    data = df.with_columns(extra=pl.Series(np.repeat(level, N_PERIODS)))
+    with raises_error(
+        ErrorCode.REGRESSOR_NO_WITHIN_VARIATION, role=role, column="extra"
+    ):
+        _fit(data, **_WITH_EXTRA_COLUMN[role])
+
+
+def test_a_time_invariant_column_is_accepted_with_a_time_only_effect(df):
+    """時点の固定効果だけなら、個体ごとに一定の列にも変動が残る（個体の効果の1-wayとは別）。"""
+    level = np.random.default_rng(2).normal(size=N_ENTITIES)
+    data = df.with_columns(extra=pl.Series(np.repeat(level, N_PERIODS)))
+    res = _fit(data, x_exog=["x1", "extra"], effects=["time"])
+    assert "extra" in res.param_names
+
+
+def test_a_constant_outcome_raises(df):
+    with raises_error(ErrorCode.OUTCOME_CONSTANT):
+        _fit(df.with_columns(y=pl.lit(2.0)))
+
+
+def test_an_outcome_constant_within_entities_raises(df):
+    level = np.random.default_rng(3).normal(size=N_ENTITIES)
+    with raises_error(ErrorCode.OUTCOME_CONSTANT_WITHIN_ENTITY):
+        _fit(df.with_columns(y=pl.Series(np.repeat(level, N_PERIODS))))
+
+
+# ── ValidationError（入力データ: singleton・自由度） ────────────────────
+
+
+def test_a_singleton_entity_raises(df):
+    data = df.filter((pl.col("entity") != 0) | (pl.col("time") == 0))
+    with raises_error(
+        ErrorCode.SINGLETON_GROUP, argument="effects", column="entity"
+    ):
+        _fit(data)
+
+
+def test_insufficient_degrees_of_freedom_has_a_boundary(df):
+    """GMMに第一段階は無い。構造式（`x1`・`a`と個体の効果）と操作変数（`x1`・`z1`・`z2`と個体の効果）の
+    うち大きい方が境界を決める。観測数が`n_params + n_effects`以下だと失敗し、1つ多いと成功する。"""
+    # 3個体×2時点（n=6）: 操作変数の設計（3列＋3個体の効果＝6）に足りない。
+    small = df.filter((pl.col("entity") < 3) & (pl.col("time") < 2))
+    with raises_error(ErrorCode.INSUFFICIENT_DEGREES_OF_FREEDOM, n_obs=6):
+        _fit(small, gmm_type="one_step")
+    # 4個体×2時点（n=8）は成功する。
+    ok = df.filter((pl.col("entity") < 4) & (pl.col("time") < 2))
+    assert _fit(ok, gmm_type="one_step").df_resid == 8 - 4 - 2
+
+
+# ── ValidationError（入力データ: クラスター） ───────────────────────────
+
+
+def test_cluster_count_at_most_slopes_raises_and_one_more_is_accepted(df):
+    """`cov_type="cluster"`のクラスター数`G`が傾き係数の数`q`（`x1`・`a`で2）以下は`ValidationError`、
+    `G = q + 1`は成功する（重みの検証は`one_step`で外す）。"""
+    two = df.filter(pl.col("entity") < 2)
+    with raises_error(
+        ErrorCode.CLUSTER_COUNT_NOT_ABOVE_SLOPES,
+        setting="cov_type",
+        n_clusters=2,
+        n_slopes=2,
+        min_clusters=3,
+    ):
+        _fit(two, gmm_type="one_step", cov_type="cluster")
+    three = df.filter(pl.col("entity") < 3)
+    assert _fit(three, gmm_type="one_step", cov_type="cluster").n_obs == 15
+
+
+def test_a_single_cluster_raises(df):
+    data = df.filter(pl.col("entity") == 0)
+    with raises_error(ErrorCode.CLUSTER_COUNT_TOO_SMALL, n_clusters=1):
+        _fit(data, gmm_type="one_step", cov_type="cluster")
+
+
+# ── ValidationError（入力データ: Driscoll-Kraay） ───────────────────────
+
+
+def test_dk_periods_at_most_slopes_raises_and_one_more_is_accepted(df):
+    """時点数`T`が傾き係数の数以下は`ValidationError`。傾き係数は`x1`・`a`・`x2`の3個で、
+    3時点は失敗し、4時点は成功する。"""
+    kwargs = {
+        "x_endog": ["a", "x2"],
+        "x_exog": ["x1"],
+        "instruments": ["z1", "z2", "z3"],
+        "gmm_type": "one_step",
+        "cov_type": "dk",
+        "dk_time": "dkt",
+        "dk_bandwidth": 0,
+    }
+    with raises_error(
+        ErrorCode.DK_PERIODS_NOT_ABOVE_COEFFICIENTS,
+        n_periods=3,
+        n_coefficients=3,
+        min_periods=4,
+    ):
+        _fit(df.filter(pl.col("time") < 3), **kwargs)
+    assert _fit(df.filter(pl.col("time") < 4), **kwargs).dk_bandwidth_used == 0
+
+
+def test_dk_bandwidth_must_be_below_the_number_of_periods(df):
+    """バンド幅は`0..T-1`（`T=5`なら4まで）。範囲外は`ValidationError`、上限ちょうどは成功する。"""
+    for value in (-1, N_PERIODS):
+        with raises_error(
+            ErrorCode.DK_BANDWIDTH_OUT_OF_RANGE,
+            value=value,
+            n_periods=N_PERIODS,
+            max=N_PERIODS - 1,
+        ):
+            _fit(df, cov_type="dk", dk_time="dkt", dk_bandwidth=value)
+    res = _fit(df, cov_type="dk", dk_time="dkt", dk_bandwidth=N_PERIODS - 1)
+    assert res.dk_bandwidth_used == N_PERIODS - 1
+
+
+def test_confidence_level_must_be_inside_zero_and_one(df):
+    for value in (0.0, 1.0, -0.1, 1.5):
+        with raises_error(ErrorCode.CONFIDENCE_LEVEL_OUT_OF_RANGE):
+            _fit(df, confidence_level=value)
+
+
 # ── ValidationError（オプション: 値） ────────────────────────────────
 
 
@@ -313,6 +501,26 @@ def test_non_convergence_raises_by_default_and_is_reported_on_request(df):
     ):
         _fit(df, **options)
     assert not _fit(df, **options, raise_on_non_convergence=False).converged
+
+
+def test_collinear_exogenous_columns_are_a_singular_matrix(df):
+    """外生変数の共線性は、完全な多重共線性として`ComputationError`（数値比較の対象外で、想定した
+    エラーの送出だけを確認する）。GMMには第一段階が無く、操作変数の設計行列`Z'Z`の特異として
+    `MATRIX_NEAR_SINGULAR`になる（列の名前は付かない）。"""
+    with raises_error(ErrorCode.MATRIX_NEAR_SINGULAR):
+        _fit(df.with_columns(x1c=pl.col("x1")), x_exog=["x1", "x1c"])
+
+
+def test_collinear_instruments_are_a_singular_matrix(df):
+    with raises_error(ErrorCode.MATRIX_NEAR_SINGULAR):
+        _fit(df.with_columns(z1c=pl.col("z1")), instruments=["z1", "z1c"])
+
+
+def test_the_cov_type_does_not_change_the_error_of_a_singular_matrix(df):
+    data = df.with_columns(z1c=pl.col("z1"))
+    for cov_type in ("classical", "hc1", "cluster"):
+        with raises_error(ErrorCode.MATRIX_NEAR_SINGULAR):
+            _fit(data, instruments=["z1", "z1c"], cov_type=cov_type)
 
 
 # ── c_stat ─────────────────────────────────────────────────────────

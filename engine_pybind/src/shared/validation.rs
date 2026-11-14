@@ -7,7 +7,8 @@
 //! yやweight等のロール間の重複・x内の重複・`include_intercept=true`時の`"const"`列衝突）
 //! をここに置く。
 //! `validate_common_roles`は、このうち`x`が空・`y`と`x`の重複・`x`内の重複・
-//! `const`衝突の4つを決まった順序でまとめて呼ぶ束ねるヘルパー。
+//! `const`衝突の4つを決まった順序でまとめて呼ぶ束ねるヘルパー。`weight`を持つWLSは、
+//! `y`と`weight`の重複を`y`と`x`の重複の次に足した`validate_weighted_roles`を使う。
 //!
 //! `cov_type`/`method`文字列のパースはここに含めない（戻り値の型が系統ごとに異なる
 //! ため。`engine::linear::ols::CovType`は`Hc2`/`Hc3`/`Hac`を持つが
@@ -126,6 +127,8 @@ pub fn validate_weighted_roles(
     validate_roles(y, x, Some(weight), include_intercept)
 }
 
+/// `validate_common_roles`と`validate_weighted_roles`の共通の本体。`weight`が`Some`のとき
+/// だけ、`y`と`weight`の重複を`y`と`x`の重複の次に検証する（`None`は`weight`を持たない手法）。
 fn validate_roles(
     y: &str,
     x: &[String],

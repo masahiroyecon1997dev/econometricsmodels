@@ -71,6 +71,17 @@ def test_weight_equals_y_raises(dataset):
         WLS(dataset, y="y", x=["x1", "x2"], weight="y").fit()
 
 
+def test_y_in_x_is_reported_before_weight_equals_y(dataset):
+    """`y`が`x`にもあり、`weight`も`y`のときは、`y`と`x`の重複が先に報告される。"""
+    with raises_error(
+        ErrorCode.ROLE_COLUMN_OVERLAP,
+        column="y",
+        argument="y",
+        other_argument="x",
+    ):
+        WLS(dataset, y="y", x=["y", "x1"], weight="y").fit()
+
+
 def test_weight_in_x_succeeds(dataset):
     """`weight`と同じ列を`x`にも含めても成功する（許容に変更）。
 

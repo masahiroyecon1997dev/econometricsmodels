@@ -133,7 +133,7 @@ A call is checked in a fixed order, the same for every method, and the **first**
 2. **Option values.** An unknown string for `estimator`, `cov_type`, `gmm_type`, `gmm_weight_type`, `solver` or `variance_method`, checked in this order (a method without the option skips it). An unknown value is reported even if the option would not be used, for example `gmm_type="bogus"` with `estimator="2sls"`.
 3. **Option combinations.** An option that the chosen `cov_type` or estimator does not use (for example `cluster` with `cov_type="classical"`), and then a required option that is missing (for example `hac_time` with `cov_type="hac"`, or `dk_time` with `cov_type="dk"`).
 4. **The number of columns in `effects`** (FE, FEIV, FEGMM and RE). An empty list, more than five columns in FE, FEIV or FEGMM, or more than two in RE. This comes before the check of an empty `x`.
-5. **Roles.** In this order: an empty `x` (in FEIV and FEGMM, the regressor roles are `x_exog`, `x_endog` and `instruments`: an empty `x_endog` or `instruments` is rejected, and `x_exog` may be empty); the same column used in two roles (`y`, `weight` in WLS, `effects` and `x`; a column used as both `weight` and a regressor is allowed); a column named twice in `x`; a column named twice in `effects`; and, for `dk_time`, the roles it may not share. Then, when an intercept is added, `"const"` in `x`.
+5. **Roles.** In this order: an empty `x` (in FEIV and FEGMM, the regressor roles are `x_exog`, `x_endog` and `instruments`: an empty `x_endog` or `instruments` is rejected, and `x_exog` may be empty); the same column used in two roles (`y`, `weight` in WLS, `effects` and `x`); a column named twice in `x`; a column named twice in `effects`; and, for `dk_time`, the roles it may not share. Then, when an intercept is added, `"const"` in `x`.
 6. **The `y`, `x` and other model columns.** A column that does not exist, has an unsupported dtype or contains missing values. The order is `y`, then `x`, then `effects`.
 7. **The columns named by options.** `cluster`, `hac_time` and `dk_time`, with the same checks as in step 6.
 8. **The estimation itself.** Checks that need the sizes of the problem, such as `confidence_level`, `max_iter`, the number of observations or clusters, and singular matrices.
@@ -147,7 +147,7 @@ Each bullet is a situation that raises a `ValidationError`.
 **Columns**
 
 - A named column does not exist.
-- The same column is used in two roles (for example `y` also in `x`, or the weight column as `y`).
+- The same column is used in two roles (for example `y` also in `x`, or the weight column as `y`). A column used as both the WLS weight and a regressor is allowed.
 - For the Driscoll-Kraay `dk_time` column only `y` and the first column of `effects` are checked: it may also be one of the regressors, or the same column as the second column of `effects`.
 - `x` is empty, or names a column twice.
 - In FE, FEIV, FEGMM and RE, `effects` is empty (`ROLE_EMPTY`) or has more columns than the model supports (`EFFECTS_TOO_MANY`: five in FE, FEIV and FEGMM, two in RE), both checked first (step 4); or it names a column twice; or a column of `effects` is also `y` or one of the regressors.

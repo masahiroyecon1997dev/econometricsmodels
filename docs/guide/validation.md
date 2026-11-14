@@ -88,9 +88,9 @@ A wrong argument *type* raises the built-in `TypeError`, following the Python co
 
 Where the data or the options cannot be used as given, the package stops with an error rather than quietly fixing the problem. It never changes the estimation sample or the model on its own:
 
-- **Missing values are never dropped.** A null, a NaN or an infinite value in any column used by the model raises an error. There is no listwise deletion.
+- **Missing values are never dropped.** A null, a NaN or an infinite value in any column used by the model raises an error. There is no listwise deletion. An empty or whitespace-only label in a group or time column (`effects`, `cluster`, `dk_time`) is rejected too, so that missing labels written as `""` are not pooled into one group.
 - **Collinear columns are never removed.** A perfectly collinear design raises an error instead of estimating on a reduced set of regressors. The one exception is RE's internal regressions that only estimate variance components or run the Hausman test (the between regression and the Hausman auxiliary regression), which drop aliased columns like R `lm` so that a correlated-random-effects specification (a regressor together with its entity mean) can be estimated; the final regression keeps every column.
-- **Small groups are never discarded.** FE and RE reject a group (a level of a column of `effects`) with a single observation with a `ValidationError` instead of dropping it.
+- **Small groups are never discarded.** FE, FEIV, FEGMM and RE reject a group (a level of a column of `effects`) with a single observation with a `ValidationError` instead of dropping it.
 - **Options that would have no effect are rejected.** For example, passing `cluster` while `cov_type` is not `"cluster"` raises an error instead of being ignored.
 
 ### Why missing values are not dropped automatically
@@ -132,8 +132,8 @@ A call is checked in a fixed order, the same for every method, and the **first**
 1. **Argument types.** A wrong type raises `TypeError` (see [Wrong argument types](#wrong-argument-types)), before anything else.
 2. **Option values.** An unknown string for `estimator`, `cov_type`, `gmm_type`, `gmm_weight_type`, `solver` or `variance_method`, checked in this order (a method without the option skips it). An unknown value is reported even if the option would not be used, for example `gmm_type="bogus"` with `estimator="2sls"`.
 3. **Option combinations.** An option that the chosen `cov_type` or estimator does not use (for example `cluster` with `cov_type="classical"`), and then a required option that is missing (for example `hac_time` with `cov_type="hac"`, or `dk_time` with `cov_type="dk"`).
-4. **The number of columns in `effects`** (FE and RE). An empty list or three or more columns. This comes before the check of an empty `x`.
-5. **Roles.** In this order: an empty `x`; the same column used in two roles (`y`, `effects` and `x`); a column named twice in `x`; a column named twice in `effects`; and, for `dk_time`, the roles it may not share. Then, when an intercept is added, `"const"` in `x`.
+4. **The number of columns in `effects`** (FE, FEIV, FEGMM and RE). An empty list, more than five columns in FE, FEIV or FEGMM, or more than two in RE. This comes before the check of an empty `x`.
+5. **Roles.** In this order: an empty `x` (in FEIV and FEGMM, the regressor roles are `x_exog`, `x_endog` and `instruments`: an empty `x_endog` or `instruments` is rejected, and `x_exog` may be empty); the same column used in two roles (`y`, `weight` in WLS, `effects` and `x`); a column named twice in `x`; a column named twice in `effects`; and, for `dk_time`, the roles it may not share. Then, when an intercept is added, `"const"` in `x`.
 6. **The `y`, `x` and other model columns.** A column that does not exist, has an unsupported dtype or contains missing values. The order is `y`, then `x`, then `effects`.
 7. **The columns named by options.** `cluster`, `hac_time` and `dk_time`, with the same checks as in step 6.
 8. **The estimation itself.** Checks that need the sizes of the problem, such as `confidence_level`, `max_iter`, the number of observations or clusters, and singular matrices.
@@ -147,10 +147,10 @@ Each bullet is a situation that raises a `ValidationError`.
 **Columns**
 
 - A named column does not exist.
-- The same column is used in two roles (for example `y` also in `x`, or the weight column as `y`).
+- The same column is used in two roles (for example `y` also in `x`, or the weight column as `y`). A column used as both the WLS weight and a regressor is allowed.
 - For the Driscoll-Kraay `dk_time` column only `y` and the first column of `effects` are checked: it may also be one of the regressors, or the same column as the second column of `effects`.
 - `x` is empty, or names a column twice.
-- In FE and RE, `effects` is empty (`ROLE_EMPTY`) or has more than two columns (`EFFECTS_TOO_MANY`), both checked first (step 4); or it names a column twice; or a column of `effects` is also `y` or one of the regressors.
+- In FE, FEIV, FEGMM and RE, `effects` is empty (`ROLE_EMPTY`) or has more columns than the model supports (`EFFECTS_TOO_MANY`: five in FE, FEIV and FEGMM, two in RE), both checked first (step 4); or it names a column twice; or a column of `effects` is also `y` or one of the regressors.
 - With an intercept, `x` contains a column called `"const"`.
 - A column has a dtype that its role does not accept, such as a string, date or categorical column used as a number (see [Accepted data](accepted-data.md#column-types-by-role)).
 - The `hac_time` column has the same value in two or more rows, including a constant column, so the observations have no time order (see [Order of observations](accepted-data.md#order-of-observations-for-hac)).
@@ -158,12 +158,13 @@ Each bullet is a situation that raises a `ValidationError`.
 **Outcome**
 
 - In OLS, WLS and IV with an intercept, `y` has the same value in every row, up to rounding (`OUTCOME_CONSTANT`: there is nothing to explain; the test is the same relative one as for a regressor with no within-variation in FE). A model without an intercept may have a constant `y`.
-- FE and RE have their own check (`OUTCOME_CONSTANT_WITHIN_ENTITY`, see below). Logit and Probit report a constant `y` as complete separation (`SEPARATION_DETECTED`, a `ComputationError`), and Tobit as an optimizer that does not converge (`NOT_CONVERGED`, a `ComputationError`).
+- FE, FEIV, FEGMM and RE report a `y` with the same value in every row as `OUTCOME_CONSTANT`, and a `y` that has no variation left after the fixed effects are removed as `OUTCOME_CONSTANT_WITHIN_ENTITY` (see below). Logit and Probit report a constant `y` as complete separation (`SEPARATION_DETECTED`, a `ComputationError`), and Tobit as an optimizer that does not converge (`NOT_CONVERGED`, a `ComputationError`).
 
 **Missing values**
 
 - A null in any used column, or a NaN or infinite value in a numeric column or in a float column of `effects`, a float cluster column or a float time column.
 - A column of the `Null` dtype counts as all missing.
+- An empty or whitespace-only label (`""`, `" "`) in a `String`, `Categorical` or `Enum` column of `effects`, `cluster` or `dk_time` (`COLUMN_BLANK_LABEL`). Labels such as `"NA"` or `"null"` and labels with whitespace around other characters are valid labels; see [Accepted data](accepted-data.md).
 
 **Sample size**
 
@@ -249,24 +250,52 @@ These are in addition to the situations above.
 - GMM options are set for an estimator that does not use them, or are out of range (`gmm_max_iter` outside 3 to 10,000, or `gmm_tol` not a positive finite number).
 - With `gmm_weight_type="cluster"`, there are too few clusters for the weight matrix.
 
-**FE**
+**IV (`effective_f()`)**
 
-- A group (a level of a column of `effects`) with a single observation: a singleton entity or, in a two-way model, a singleton time period (`SINGLETON_GROUP`).
-- A two-way model on an unbalanced panel.
-- A regressor with no within-variation (constant over time within every entity).
-- The outcome has no variation left after the fixed effects are removed (constant within every entity, or in a two-way model fully explained by the entity and time effects).
-- Too few degrees of freedom.
+- `alpha` is not strictly between 0 and 1 (`ALPHA_OUT_OF_RANGE`), including NaN.
+- The model does not have exactly one endogenous variable (`EFFECTIVE_F_ENDOGENOUS_COUNT`); use `cragg_donald()` or `kleibergen_paap()` for several.
+- `alpha` that is not a number raises `TypeError`.
+
+**IV, FEGMM (`c_stat()`)**
+
+- Neither `variables` nor `instruments` is given (`C_STATISTIC_NOTHING_TO_TEST`).
+- A list is empty (`ROLE_EMPTY`) or names a column twice (`ROLE_DUPLICATE_COLUMN`). An empty list is reported this way even when the other argument is `None`.
+- A name in `variables` is not one of the model's `x_endog`, or a name in `instruments` is not one of its excluded instruments (`C_STATISTIC_UNKNOWN_VARIABLE`).
+- Testing the listed instruments would leave fewer excluded instruments than endogenous variables, so the model without them is not identified (`C_STATISTIC_TOO_MANY_TESTED_INSTRUMENTS`).
+- A `variables` or `instruments` argument that is not a `list` of `str` raises `TypeError`.
+
+**FE, FEIV, FEGMM**
+
+- A group (a level of a column of `effects`) with a single observation: a singleton entity or, when `effects` has more columns, a singleton group in any of its columns (`SINGLETON_GROUP`). Singleton groups are never dropped automatically; the error gives `n_dropped_rows`, the number of rows that removing singleton groups repeatedly would drop (with more than one column, dropping one can leave another group with a single row).
+- `tol` not a positive finite number, or `max_iter` outside 1 to 10,000.
+- `cov_type="hc2"` or `"hc3"` when the effects do not form a balanced two-way grid (an unbalanced two-way panel, or three or more effects) and the columns of `effects` other than the one with the most groups have more than 3,000 groups in total (`LEVERAGE_DIMENSION_TOO_LARGE`).
+- A regressor with the same value in every row (`REGRESSOR_CONSTANT`), or one that has no variation left after the fixed effects are removed, for example one that is constant within every entity or within the groups of another column of `effects` (`REGRESSOR_NO_WITHIN_VARIATION`).
+- The outcome has the same value in every row (`OUTCOME_CONSTANT`), or has no variation left after the fixed effects are removed (constant within every entity, or fully explained by the effects together, `OUTCOME_CONSTANT_WITHIN_ENTITY`).
+- Too few degrees of freedom. In FEIV and FEGMM there are two conditions: more observations than the slope coefficients plus the absorbed fixed-effect parameters, and more than the exogenous variables plus instruments plus those parameters (see [Definitions: FEIV](../methods/fe_iv.md#degrees-of-freedom)).
+
+**FEIV, FEGMM**
+
+- `x_endog` or `instruments` is empty (`ROLE_EMPTY`), or there are fewer instruments than endogenous variables (`INSUFFICIENT_INSTRUMENTS`).
+- A regressor or instrument (`x_exog`, `x_endog` or `instruments`) that is constant, or that has no variation left after the fixed effects are removed, is reported with its role, for example an instrument that is constant within every entity.
+- `cov_type="hc0"` is rejected (`COV_TYPE_NOT_AVAILABLE_FOR_MODEL`, with `model="FEIV"` or `"FEGMM"`).
+
+**FEGMM**
+
+- GMM options are set for a `gmm_type` that does not use them (`gmm_weight_type` with `"one_step"`; `gmm_max_iter`, `gmm_tol` or `raise_on_non_convergence` unless `"iterated"`), are out of range (`gmm_max_iter` outside 3 to 10,000, or `gmm_tol` not a positive finite number), or name a weight that does not exist (`gmm_weight_type="hac"` is an unknown value).
+- `cluster` is set although neither `cov_type` nor `gmm_weight_type` uses it. The cluster weight is the default, so with the defaults `cluster` is used.
+- With the cluster weight, there are too few clusters for the weight matrix (`fit()` needs at least as many clusters as the columns of the exogenous regressors and instruments when overidentified, and more when just identified), and with `cov_type="cluster"` or `"dk"` more clusters or periods than slope coefficients.
 
 **RE**
 
 - The outcome is constant within every entity.
-- A group with a single observation: a singleton entity or, in a two-way model (two columns in `effects`), a singleton time period (`SINGLETON_GROUP`).
-- A two-way model on an unbalanced panel.
+- A group with a single observation: a singleton entity or, in a two-way model (two columns in `effects`), a singleton time period (`SINGLETON_GROUP`, with `n_dropped_rows` as in FE).
+- `y` has the same value in every row (`OUTCOME_CONSTANT`).
+- A two-way model on an unbalanced panel (`PANEL_NOT_BALANCED_FOR_TWO_WAY`).
 - With `cov_type="cluster"`, too few clusters for the Hausman auxiliary regression (counting only the identified columns).
 - A time-invariant regressor is allowed, unlike in FE, and so is a regressor together with its entity or time mean (correlated random effects, Mundlak): the aliased columns of the between and Hausman auxiliary regressions are dropped and `hausman_df` counts the identified ones.
 - An unknown `variance_method`, or `variance_method="amemiya"` with a regressor that has no within variation (time-invariant; in a two-way model, varying in at most one dimension): use `"swamy_arora"` or `"wallace_hussain"`.
 
-**FE, RE**
+**FE, FEIV, FEGMM, RE**
 
 - `cov_type="dk"` without `dk_time` (neither borrows a column of `effects` for it), with an invalid `dk_bandwidth`, with too few time periods for the number of coefficients tested, or with a degenerate two-period structure.
 - `cov_type="cluster"` with two clusters in which every entity (and, with two-way effects, every period) is observed exactly once in each: the covariance is identically zero (`CLUSTER_TWO_GROUPS_DEGENERATE`).
@@ -276,25 +305,28 @@ These are in addition to the situations above.
 | Cause | Where | What it means |
 |---|---|---|
 | Perfect multicollinearity | All methods | The design matrix is singular and the error names the columns that take part in one dependency (`columns`; only the first dependency is reported, see [Error codes](error-codes.md#collinear-columns)). Details by method are under the table. |
-| Near-singular matrices | All methods | A matrix needed for the covariance or a joint test is numerically singular, typically because regressors are on extremely different scales (for example `1e6` and `1e-3`) or because of an almost perfect linear dependence. Rescale the variables. |
+| Near-singular matrices | All methods | A matrix needed for the covariance or a joint test is numerically singular, typically because of an almost perfect linear dependence between regressors. The overall F or Wald statistic is judged on the correlations of the slope coefficients, so measuring one regressor in other units (for example `1e9` times larger) does not trigger it. Robust covariances (for example `"hc1"` or `"cluster"`) can stop at a weaker dependence than `"classical"`: the limit depends on the data, but in one FE test with 60 entities `"cluster"` stopped at a correlation of `1 - 5e-15` between two slopes (and worked at `1 - 5e-11`) while `"classical"` still worked. Remove or combine nearly collinear regressors. |
 | Non-convergence | Logit, Probit, Tobit | The optimizer did not converge within `max_iter`. |
 | Singular Hessian or OPG matrix | Logit, Probit, Tobit | The information matrix cannot be inverted. |
 | Uncensored interval too narrow | Tobit (`predict()`, `augment()`, `marginal_effects()` with `target="expected_uncensored"`) | With two-sided censoring, the interval between the bounds is narrower than 1% of the estimated `sigma`, so the model puts almost no probability on uncensored values and the expected value among them cannot be computed reliably. Use another `target`. |
 | Separation | Logit, Probit | Some combination of the regressors perfectly predicts the binary outcome, either for all observations (complete separation) or for a subset (quasi-complete separation, for example a dummy variable that equals 1 only when the outcome is 1). No finite maximum likelihood estimate exists, so the coefficients would diverge. It is detected exactly after the optimizer converges, whatever the sample size. Remove or combine the offending regressors, or add observations that break the separation. |
-| Non-convergence | IV (GMM) | The iterated GMM did not converge. |
+| Non-convergence | IV (GMM), FEGMM (`gmm_type="iterated"`) | The iterated GMM did not converge. |
+| Non-convergence of the alternating projections | FE, FEIV, FEGMM (two-way model on an unbalanced panel, or three or more effects) | The passes that remove the effects did not converge within `max_iter` (`ABSORPTION_NOT_CONVERGED`). Groups that are only thinly connected (for example a chain in which each entity is seen in two neighbouring periods) need a number of passes that grows with the square of the chain length. Increase `tol`, or `max_iter` if it is below 10,000. |
 | Line search failed | Logit, Probit, Tobit | The optimizer's line search did not find an acceptable step within its limits (`LINE_SEARCH_FAILED`), typically with `solver="bfgs"` or `"lbfgs"` on a badly scaled or degenerate problem. Rescale the regressors, or try another solver. |
 | Separation check not completed | Logit, Probit | The check for separation could not be completed numerically (`SEPARATION_CHECK_FAILED`), so the absence of separation is not confirmed. Rescale the regressors or remove nearly collinear ones. With `raise_on_non_convergence=False` the result is returned with `converged=False`. |
-| Perfect fit | OLS, WLS, FE, RE, IV | The residuals are zero up to rounding, so the standard errors and the test statistics are not defined. Details are under the table. |
+| Perfect fit | OLS, WLS, FE, RE, IV, FEIV, FEGMM | The residuals are zero up to rounding, so the standard errors and the test statistics are not defined. Details are under the table. |
 | Singular pooled regression, non-positive idiosyncratic variance | RE (`variance_method="wallace_hussain"` or `"amemiya"`) | The first-stage pooled regression of Wallace-Hussain is singular (for example a time-invariant regressor and a multiple of it), the estimated `σ_ε²` is not positive so the quasi-demeaning weights are undefined (plm 2.6.7 sets it to 0 and continues), or the moment equations of an unbalanced one-way panel are singular. |
 | Auxiliary matrix too large | OLS (`breusch_godfrey_test()`) | The auxiliary regression matrix (`n` rows by the number of regressors plus `nlags` columns) cannot be allocated, which happens only when `nlags` is close to `n` and `n` is large. Use a smaller `nlags`. |
 | Degenerate diagnostic variable | OLS (`white_test()`, `breusch_pagan_test()`, `breusch_godfrey_test()`) | A variable of the auxiliary regression has zero or non-finite variance after scaling (`DIAGNOSTIC_VARIABLE_DEGENERATE`). Rescale the variables. |
+| Weak-instrument statistic not defined | IV, FEIV (`cragg_donald()`, `kleibergen_paap()`, `effective_f()`) | A matrix the statistic needs is singular (`WEAK_INSTRUMENT_STATISTIC_UNDEFINED`). Typical causes are instruments that are collinear with the exogenous regressors or with each other, a first stage that fits perfectly, and a covariance of the first-stage scores that is rank deficient because there are too few observations or clusters. The message names the statistic. `kleibergen_paap()` raises only when neither statistic is defined; `effective_f()` also needs the covariance of the reduced-form coefficients to be positive definite. In FEIV with `cov_type="dk"`, both Kleibergen-Paap statistics are also undefined, and `effective_f()` raises, when the number of `dk_time` periods is at most the number of excluded instruments minus the number of endogenous variables plus one. `fit()` does not call these methods and is not affected. |
+| C statistic not defined | IV, FEGMM (`c_stat()`) | A matrix the statistic needs is singular (`C_STATISTIC_UNDEFINED`). The usual cause is a covariance of the moment conditions that is rank deficient because there are too few clusters or observations: with a cluster weight, the number of clusters must be at least the number of columns of the full instrument set: the exogenous regressors, the tested endogenous variables and all excluded instruments. That can be more than `fit()` itself needed. Collinear instruments or a structural equation that fits perfectly also make the statistic undefined. `fit()` does not call this method and is not affected. |
 | Singular auxiliary regression | OLS (`white_test()`, `breusch_pagan_test()`, `breusch_godfrey_test()`) | The auxiliary design stays linearly dependent after constant and duplicate terms are dropped (for example a full set of dummies in a model fitted with `include_intercept=False`), or the auxiliary R² is undefined. For `breusch_godfrey_test()` it also covers residuals that are all zero or fitted exactly by the auxiliary regression. Only columns identical to a constant or to an earlier column are dropped; a column that is a multiple of another (for example `2 * x1`) is not, and makes the auxiliary regression singular. The message names the test (`White test`, `Breusch-Pagan test` or `Breusch-Godfrey test`), so it is not confused with the model's own collinearity. |
 
 ### Perfect multicollinearity
 
 - **OLS, WLS:** one regressor is a multiple of another, or a constant column is combined with an intercept.
 - **IV:** the first stage fails (collinear instruments, an instrument collinear with an exogenous regressor, or a constant instrument). When the first stages succeed but the endogenous variables are collinear with each other or with an exogenous regressor, the second stage fails (2SLS) or `X'ZWZ'X` cannot be inverted (GMM).
-- **FE, RE:** the within transformation leaves a singular design. In RE, a time-invariant regressor that is constant across entities (collinear with the intercept) or collinear with another time-invariant regressor also gives a singular design.
+- **FE, FEIV, FEGMM, RE:** the within transformation leaves a singular design. In RE, a time-invariant regressor that is constant across entities (collinear with the intercept) or collinear with another time-invariant regressor also gives a singular design.
 
 ### Perfect fit
 
@@ -302,7 +334,9 @@ The residual sum of squares is at most `k · ε` times the total sum of squares 
 
 - **OLS, WLS:** the regression.
 - **FE:** the within regression.
-- **RE:** the within regression that estimates the idiosyncratic variance. Just above the threshold RE can still raise `MATRIX_NEAR_SINGULAR` (stage `QUASI_DEMEANED_REGRESSION`), because the idiosyncratic variance is then so small that the quasi-demeaned constant column is almost zero.
+- **FEIV:** the structural residuals of the within-transformed data and each first stage. `wu_hausman_statistic` is `None` instead when only its auxiliary regression is exact.
+- **FEGMM:** the structural residuals of the within-transformed data (the initial estimate, for the GMM steps).
+- **RE:** the within regression that estimates the idiosyncratic variance. Just above the threshold RE still estimates: `theta` is then almost 1, so the slopes are almost the within (FE) slopes.
 - **IV:** the structural residuals (GMM: the initial estimate) and each first stage (an instrument that predicts an endogenous regressor exactly). `wu_hausman_statistic` is `None` instead when only its augmented regression is exact.
 
 How the cause is reported can depend on the estimator and on the solver. For instance, separated data in a binary-choice model may surface as detected separation, as non-convergence or as a singular Hessian, because the optimizer can fail before the separation check runs.
@@ -315,11 +349,11 @@ The absence of an error says nothing about the following. They are your responsi
 
 - **Model specification.** Functional form, omitted variables, and the choice of regressors are not assessed.
 - **Heteroskedasticity, autocorrelation and clustering structure.** The package computes the standard errors you ask for through `cov_type`. It does not test which one is appropriate.
-- **Endogeneity.** For OLS, FE and RE nothing tests whether regressors are correlated with the error term. The Hausman test for RE and the Wu-Hausman test for IV are reported as statistics, not used to stop the estimation.
-- **Instrument validity and strength.** In IV only the order condition (at least as many instruments as endogenous regressors) is checked up front. The rank condition is not, so irrelevant instruments may surface later as a singular first stage. The weak-instrument F statistic is reported without a verdict, and the over-identification test is `None` when the model is just identified.
+- **Endogeneity.** For OLS, FE and RE nothing tests whether regressors are correlated with the error term. The Hausman test for RE and the Wu-Hausman test for IV and FEIV are reported as statistics, not used to stop the estimation (FEGMM has `c_stat(variables=...)` instead).
+- **Instrument validity and strength.** In IV, FEIV and FEGMM only the order condition (at least as many instruments as endogenous regressors) is checked up front. The rank condition is not, so irrelevant instruments may surface later as a singular first stage. The weak-instrument F statistic is reported without a verdict, and the over-identification test is `None` when the model is just identified.
 - **Stationarity, outliers and influential observations.**
 - **Near-separation.** Data that are close to, but not at, separation have a finite estimate, so they estimate without an error, although the standard errors can be very large. Only exact separation is an error.
-- **Panel structure beyond what the estimator needs.** A one-way FE model does not complain about unbalanced panels. Only the two-way models (FE and RE with two columns in `effects`) require a balanced panel, and they reject a repeated (entity, time) pair as an unbalanced panel.
+- **Panel structure beyond what the estimator needs.** FE, FEIV and FEGMM accept unbalanced panels with one to five columns in `effects`, and also accepts groups that form several disconnected sets; a combination of `effects` values may appear in more than one row, and nothing checks for it. Only two-way RE requires a balanced panel (every combination exactly once, so a repeated combination is reported as `PANEL_NOT_BALANCED_FOR_TWO_WAY`).
 - **Numeric precision.** Numeric columns are converted to 64-bit floating point without a warning, so integers beyond 2^53 and decimals with many digits can lose precision. See [Accepted data](accepted-data.md#how-values-are-converted).
 
 ## Where to look next

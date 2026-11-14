@@ -193,11 +193,13 @@ fn qr_flagged_columns(a: &Mat<f64>) -> Option<Vec<usize>> {
 /// （`SelfAdjointEigen`）による相対閾値判定で確認する。
 ///
 /// 非ピボットCholesky分解（`Llt`）のL因子対角成分は、行列の成分間のスケール差に
-/// 起因する数値的なほぼ特異性を検出できない（OLSの`wald_f_test`で実測確認済み。
+/// 起因する数値的なほぼ特異性を検出できない（列のスケール差が極端な行列で実測確認済み。
+/// `ensure_well_conditioned_symmetric_matrix_rejects_extreme_scale_difference`参照。
 /// `col_piv_qr`のR対角成分を使う`checked_col_piv_qr`とは異なり、
 /// Choleskyはピボットしないため）。分散共分散行列（傾き係数の同時共分散部分行列、
 /// 観測情報行列の逆行列、OPG行列の逆行列等）にCholesky分解を適用する前は、
-/// この関数で固有値ベースの判定を先に行う必要がある。
+/// この関数で固有値ベースの判定を先に行う必要がある。係数の共分散のWald検定は、列の単位に
+/// 依らないよう、相関スケール化した行列に対してこの関数を呼ぶ（`shared::wald`）。
 ///
 /// `matrix`はどの行列を検査しているか（エラーの`matrix`パラメータになる）。
 ///
@@ -361,6 +363,54 @@ fn dot(a: &[f64], b: &[f64]) -> f64 {
     }
     let tail: f64 = a_tail.iter().zip(b_tail).map(|(x, y)| x * y).sum();
     lanes.iter().sum::<f64>() + tail
+}
+
+/// 列`j`のユークリッドノルム。
+pub(crate) fn column_norm(m: &Mat<f64>, j: usize) -> f64 {
+    (0..m.nrows())
+        .map(|i| m.get(i, j).powi(2))
+        .sum::<f64>()
+        .sqrt()
+}
+
+/// 各列をノルム1にそろえる(ノルムが0または非有限の列はそのまま。後段のランク判定が弾く)。
+pub(crate) fn unit_columns(m: &Mat<f64>) -> Mat<f64> {
+    let norms: Vec<f64> = (0..m.ncols()).map(|j| column_norm(m, j)).collect();
+    Mat::from_fn(m.nrows(), m.ncols(), |i, j| {
+        if norms[j] > 0.0 && norms[j].is_finite() {
+            *m.get(i, j) / norms[j]
+        } else {
+            *m.get(i, j)
+        }
+    })
+}
+
+/// 下三角行列`l`(k×k)について`L⁻¹ b`を前進代入で求める(`b`はk×m)。
+pub(crate) fn forward_substitute(l: faer::mat::MatRef<'_, f64>, b: &Mat<f64>) -> Mat<f64> {
+    let (k, m) = (b.nrows(), b.ncols());
+    let mut x = Mat::<f64>::zeros(k, m);
+    for col in 0..m {
+        for i in 0..k {
+            let mut value = *b.get(i, col);
+            for j in 0..i {
+                value -= *l.get(i, j) * *x.get(j, col);
+            }
+            *x.get_mut(i, col) = value / *l.get(i, i);
+        }
+    }
+    x
+}
+
+/// 対称正定値行列`q`のCholesky分解`q = CC'`の下三角因子`C`の逆行列`C⁻¹`。`C⁻¹ q C⁻ᵀ = I`なので、
+/// `q`がGram行列(二乗平均)の列を直交正規化する白色化の係数になる。
+///
+/// 非ピボットのCholeskyは共線を検出できないので、固有値でも条件を確かめる。`q`が特異に近い・
+/// 正定値でないとき`None`。
+pub(crate) fn inverse_cholesky_factor(q: &Mat<f64>) -> Option<Mat<f64>> {
+    let k = q.nrows();
+    ensure_well_conditioned_symmetric_matrix(q, k, MatrixKind::DesignGram).ok()?;
+    let llt = q.llt(Side::Lower).ok()?;
+    Some(forward_substitute(llt.L(), &Mat::<f64>::identity(k, k)))
 }
 
 #[cfg(test)]

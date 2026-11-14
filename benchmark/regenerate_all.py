@@ -83,6 +83,8 @@ _FIXTURE_MODULES = [
     "benchmark.iv.fixtures.generate_iv_gmm_crosscheck_fixtures",
     "benchmark.iv.fixtures.generate_iv_cov_crosscheck_fixtures",
     "benchmark.iv.fixtures.generate_iv_gmm_cov_crosscheck_fixtures",
+    "benchmark.iv.fixtures.generate_iv_weak_diagnostics_crosscheck_fixtures",
+    "benchmark.iv.fixtures.generate_iv_c_statistic_crosscheck_fixtures",
     "benchmark.panel.fixtures.generate_fe_crosscheck_fixtures",
     "benchmark.panel.fixtures.generate_fe_plm_crosscheck_fixtures",
     "benchmark.panel.fixtures.generate_re_crosscheck_fixtures",
@@ -91,12 +93,25 @@ _FIXTURE_MODULES = [
     "benchmark.panel.fixtures.generate_re_variance_method_fixtures",
     "benchmark.panel.fixtures.generate_re_statsmodels_cluster_fixtures",
     "benchmark.panel.fixtures.generate_fe_cov_crosscheck_fixtures",
+    "benchmark.panel.fixtures.generate_fe_multi_way_fixtures",
+    "benchmark.panel.fixtures.generate_fe_multi_way_cov_fixtures",
+    "benchmark.panel.fixtures.generate_fe_multi_way_crosscheck_fixtures",
+    "benchmark.panel.fixtures.generate_fe_multi_way_cov_crosscheck_fixtures",
     "benchmark.panel.fixtures.generate_fe_plm_cov_crosscheck_fixtures",
     "benchmark.panel.fixtures.generate_re_cov_crosscheck_fixtures",
     "benchmark.panel.fixtures.generate_re_statsmodels_cluster_cov_fixtures",
     "benchmark.panel.fixtures.generate_re_time_invariant_cov_fixtures",
     "benchmark.panel.fixtures.generate_re_two_way_cov_fixtures",
     "benchmark.panel.fixtures.generate_re_variance_method_cov_fixtures",
+    # FE-2SLS（`FEIV`）。主リファレンスはR fixest、独立なクロスチェックはダミー変数を明示した2SLS
+    # （linearmodels）・plm・ivDiag。`*_cov*`は行列だけを同じツリーから書く。ivDiagは`Rscript`必須。
+    "benchmark.panel.fixtures.generate_fe_iv_fixtures",
+    "benchmark.panel.fixtures.generate_fe_iv_cov_fixtures",
+    "benchmark.panel.fixtures.generate_fe_iv_dummy_crosscheck_fixtures",
+    "benchmark.panel.fixtures.generate_fe_iv_dummy_cov_crosscheck_fixtures",
+    "benchmark.panel.fixtures.generate_fe_iv_plm_crosscheck_fixtures",
+    "benchmark.panel.fixtures.generate_fe_iv_plm_cov_crosscheck_fixtures",
+    "benchmark.panel.fixtures.generate_fe_iv_weak_diagnostics_crosscheck_fixtures",
 ]
 
 

@@ -5,6 +5,7 @@ use crate::shared::column_error::ColumnSource;
 use crate::shared::column_extraction::{extract_optional_cluster_groups, extract_time_order_ranks};
 use engine::iv::common::IvError;
 use engine::iv::gmm::{GmmType, WeightType};
+use engine::shared::error::CommonError;
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
 
@@ -99,8 +100,11 @@ pub(super) fn resolve_gmm_setup(
         GmmKind::Iterated => {
             let weight = resolve_weight_type(df, options, values.weight)?;
             let max_iter = match options.gmm_max_iter {
-                Some(v) => usize::try_from(v)
-                    .map_err(|_| iv_error_to_pyerr(IvError::InvalidGmmMaxIter { max_iter: v }))?,
+                Some(v) => usize::try_from(v).map_err(|_| {
+                    iv_error_to_pyerr(IvError::Common(CommonError::InvalidGmmMaxIter {
+                        max_iter: v,
+                    }))
+                })?,
                 None => DEFAULT_GMM_MAX_ITER,
             };
             let tol = options.gmm_tol.unwrap_or(DEFAULT_GMM_TOL);

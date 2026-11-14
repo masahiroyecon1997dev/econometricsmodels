@@ -20,7 +20,7 @@ classical/hc0〜hc3/cluster/HACはRとほぼ機械精度で一致する（OLSク
 Note:
     - `hc2`/`hc3`は`vcovHC(model, type="HC2"/"HC3")`（`ivreg:::hatvalues.ivreg`の
       type="stage2"、第二段階OLSのレバレッジをそのまま使う実装）で計算でき、本実装
-      （`engine/src/iv/two_sls.rs`の`hc_cov_params`）と数値一致することを実機確認済み
+      （`engine/src/iv/two_sls/cov.rs`の`hc_cov_params`）と数値一致することを実機確認済み
       のため対象に含む（`iv-spec.md`3.1節）。`linearmodels`
       （`test_iv_reference.py`）は対応していないため、hc2/hc3の主リファレンス比較は
       このファイルのみで行う。

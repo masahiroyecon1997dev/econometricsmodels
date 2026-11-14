@@ -7,7 +7,8 @@
 //! yやweight等のロール間の重複・x内の重複・`include_intercept=true`時の`"const"`列衝突）
 //! をここに置く。
 //! `validate_common_roles`は、このうち`x`が空・`y`と`x`の重複・`x`内の重複・
-//! `const`衝突の4つを決まった順序でまとめて呼ぶ束ねるヘルパー。
+//! `const`衝突の4つを決まった順序でまとめて呼ぶ束ねるヘルパー。`weight`を持つWLSは、
+//! `y`と`weight`の重複を`y`と`x`の重複の次に足した`validate_weighted_roles`を使う。
 //!
 //! `cov_type`/`method`文字列のパースはここに含めない（戻り値の型が系統ごとに異なる
 //! ため。`engine::linear::ols::CovType`は`Hc2`/`Hc3`/`Hac`を持つが
@@ -99,16 +100,49 @@ pub fn validate_no_const_collision(
 /// `validate_no_duplicate_within_role`（`x`内部の重複）→`validate_no_const_collision`）。
 ///
 /// OLS/Logit/Probit/Tobitの`fit`/`build_*_input`冒頭で共通に呼ぶ。Tobitは本関数の
-/// 呼び出し後に`validate_no_sigma_collision`を追加で呼ぶ。WLSは`weight`ロールとの
-/// 重複チェックが追加で必要なため、本関数の呼び出し後に`validate_no_duplicate_roles`で
-/// `weight`用のチェックを別途呼ぶ（このため`weight`との重複は、`"const"`列衝突を含む
-/// `y`/`x`の検証より後に報告される）。
+/// 呼び出し後に`validate_no_sigma_collision`を追加で呼ぶ。`weight`を持つWLSは
+/// [`validate_weighted_roles`]を使う。
 ///
 /// `panel::fe`/`panel::re`は`entity`/`time`という動的なロール構成を持ち`const`衝突
 /// チェックも無いため対象外（呼び出し元で個別にロールリストを組み立てる）。
 pub fn validate_common_roles(y: &str, x: &[String], include_intercept: bool) -> PyResult<()> {
+    validate_roles(y, x, None, include_intercept)
+}
+
+/// [`validate_common_roles`]に、`weight`と`y`の重複の検証を足したもの（WLS用）。
+///
+/// 順序は`validate_role_non_empty`→`validate_no_duplicate_roles`（`y`と`x`の重複、
+/// 次に`y`と`weight`の重複）→`validate_no_duplicate_within_role`（`x`内部の重複）→
+/// `validate_no_const_collision`。ロール間の重複を`x`内の重複・`"const"`の衝突より
+/// 先に報告するのは、`docs/guide/validation.md`「Order in which errors are reported」の
+/// 順序を全手法で揃えるため。`weight`と`x`の重複は許容する（重みに使った列を説明変数
+/// にも入れる利用があるため。`docs/spec/wls-spec.md`「API引数」）ので、`weight`は`y`
+/// とだけ照合する。
+pub fn validate_weighted_roles(
+    y: &str,
+    x: &[String],
+    weight: &str,
+    include_intercept: bool,
+) -> PyResult<()> {
+    validate_roles(y, x, Some(weight), include_intercept)
+}
+
+/// `validate_common_roles`と`validate_weighted_roles`の共通の本体。`weight`が`Some`のとき
+/// だけ、`y`と`weight`の重複を`y`と`x`の重複の次に検証する（`None`は`weight`を持たない手法）。
+fn validate_roles(
+    y: &str,
+    x: &[String],
+    weight: Option<&str>,
+    include_intercept: bool,
+) -> PyResult<()> {
     validate_role_non_empty("x", x)?;
     validate_no_duplicate_roles(&[("y", RoleValue::Single(y)), ("x", RoleValue::Multi(x))])?;
+    if let Some(weight) = weight {
+        validate_no_duplicate_roles(&[
+            ("y", RoleValue::Single(y)),
+            ("weight", RoleValue::Single(weight)),
+        ])?;
+    }
     validate_no_duplicate_within_role("x", x)?;
     validate_no_const_collision("x", x, include_intercept)?;
     Ok(())
@@ -357,6 +391,36 @@ mod tests {
     fn validate_common_roles_ok_for_const_column_when_include_intercept_is_false() {
         let x = ["const".to_string()];
         assert!(validate_common_roles("y", &x, false).is_ok());
+    }
+
+    #[test]
+    fn validate_weighted_roles_ok_for_well_formed_input() {
+        let x = ["x1".to_string(), "x2".to_string()];
+        assert!(validate_weighted_roles("y", &x, "w", true).is_ok());
+    }
+
+    #[test]
+    fn validate_weighted_roles_ok_when_weight_is_also_in_x() {
+        let x = ["x1".to_string(), "w".to_string()];
+        assert!(validate_weighted_roles("y", &x, "w", true).is_ok());
+    }
+
+    #[test]
+    fn validate_weighted_roles_returns_error_when_weight_is_y() {
+        let x = ["x1".to_string()];
+        assert!(validate_weighted_roles("y", &x, "y", true).is_err());
+    }
+
+    #[test]
+    fn validate_weighted_roles_keeps_the_common_checks() {
+        assert!(validate_weighted_roles("y", &[], "w", true).is_err());
+        let y_in_x = ["y".to_string()];
+        assert!(validate_weighted_roles("y", &y_in_x, "w", true).is_err());
+        let duplicate = ["x1".to_string(), "x1".to_string()];
+        assert!(validate_weighted_roles("y", &duplicate, "w", true).is_err());
+        let collision = ["const".to_string()];
+        assert!(validate_weighted_roles("y", &collision, "w", true).is_err());
+        assert!(validate_weighted_roles("y", &collision, "w", false).is_ok());
     }
 
     #[test]

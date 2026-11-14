@@ -70,10 +70,10 @@ pub(crate) fn validate_cluster_groups(
 /// `q == 0`（切片のみモデル、全体検定自体がスキップされる）のときは`g >= 2 > 0 = q`
 /// により常に`Ok`を返す（Wald検定が走らないため弾く必要がない）。
 ///
-/// `g > q`でも、傾き係数間の悪条件（極端なスケール差・準多重共線性等）で`q×q`部分
+/// `g > q`でも、傾き係数間の準多重共線性（単位を揃えても残る悪条件）で`q×q`部分
 /// 行列が数値的にほぼ特異になるケースは事前判定できないため、従来どおり各手法の
-/// Wald検定内の`ensure_well_conditioned_symmetric_matrix`（`CommonError::
-/// NearSingularMatrix`）がbackstopとして残る。
+/// Wald検定内の`ensure_well_conditioned_symmetric_matrix`（相関スケール化した行列に
+/// 適用。`CommonError::NearSingularMatrix`）がbackstopとして残る。
 pub fn validate_cluster_count_covers_slopes(g: usize, q: usize) -> Result<(), CommonError> {
     debug_assert!(
         g >= 2,
@@ -92,7 +92,8 @@ pub fn validate_cluster_count_covers_slopes(g: usize, q: usize) -> Result<(), Co
 /// エラーメッセージが同一のため共有化した（`validate_cluster_groups`と同じ理由：
 /// モデル固有の計算に一切依存しない純粋な検証ロジックのため）。
 ///
-/// `OlsEstimator::fit`から呼ぶ想定。`FeEstimator::fit`が直接呼ぶ
+/// 呼び出し元は`OlsEstimator::fit`と、`OlsEstimator`を経由しないIVの第二段階
+/// （`iv::two_sls`の`validate_second_stage`）。`FeEstimator::fit`が直接呼ぶ
 /// `shared::least_squares::least_squares`（固定効果のみモデル、`x=[]`でk=0になりうる
 /// 正当なケース）はこの関数を経由しない（`engine/src/linear/CLAUDE.md`「k=0の扱い」参照）。
 ///
@@ -127,6 +128,17 @@ pub fn validate_has_regressors(n: usize, k: usize) -> Result<(), CommonError> {
 /// 桁数——原点`scale`比`~1e-16`——であることを想定した割り切り。将来1-wayと2-wayで
 /// 誤検出/見逃しの傾向差が実際に問題になったら、2-way用の乗数を分けることを検討する）。
 pub(crate) fn column_is_zero_variance(original: &[f64], transformed: &[f64]) -> bool {
+    column_is_zero_variance_with_noise(original, transformed, 0.0)
+}
+
+/// [`column_is_zero_variance`]に、変換自体が残す誤差を足したもの。交互射影のように、打ち切りの許容度
+/// ぶんの誤差が変換後の値に残る場合に、その誤差を分散ゼロと見分けられるようにする。`noise`は
+/// 元の値の最大絶対値に対する、変換後の値に残る誤差の相対的な大きさ（閉形式の変換なら0）。
+pub(crate) fn column_is_zero_variance_with_noise(
+    original: &[f64],
+    transformed: &[f64],
+    noise: f64,
+) -> bool {
     let n = transformed.len();
     if n == 0 {
         // n=0は`FeInput::from_columns`が許容する境界ケース（`from_columns_with_zero_
@@ -141,7 +153,7 @@ pub(crate) fn column_is_zero_variance(original: &[f64], transformed: &[f64]) -> 
     let std_dev = variance.sqrt();
 
     let scale = original.iter().fold(0.0_f64, |acc, v| acc.max(v.abs()));
-    let threshold = n as f64 * f64::EPSILON * scale;
+    let threshold = (n as f64 * f64::EPSILON + noise) * scale;
 
     std_dev <= threshold
 }

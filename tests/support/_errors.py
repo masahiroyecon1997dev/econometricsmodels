@@ -41,9 +41,17 @@ RAISED_CODES: set[str] = set()
 # 全`code`を対象にする。
 MIGRATED_CODES: frozenset[str] = frozenset(
     {
+        ErrorCode.ALPHA_OUT_OF_RANGE,
+        ErrorCode.EFFECTIVE_F_ENDOGENOUS_COUNT,
+        ErrorCode.WEAK_INSTRUMENT_STATISTIC_UNDEFINED,
+        ErrorCode.C_STATISTIC_NOTHING_TO_TEST,
+        ErrorCode.C_STATISTIC_TOO_MANY_TESTED_INSTRUMENTS,
+        ErrorCode.C_STATISTIC_UNKNOWN_VARIABLE,
+        ErrorCode.C_STATISTIC_UNDEFINED,
         ErrorCode.COLUMN_NOT_FOUND,
         ErrorCode.COLUMN_CONTAINS_NULL,
         ErrorCode.COLUMN_NON_FINITE,
+        ErrorCode.COLUMN_BLANK_LABEL,
         ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
         ErrorCode.COLUMN_TIMEZONE_NOT_SUPPORTED,
         ErrorCode.COLUMN_VALUES_TIED,
@@ -93,7 +101,10 @@ MIGRATED_CODES: frozenset[str] = frozenset(
         ErrorCode.INSUFFICIENT_DEGREES_OF_FREEDOM,
         ErrorCode.SINGLETON_GROUP,
         ErrorCode.PANEL_NOT_BALANCED_FOR_TWO_WAY,
+        ErrorCode.ABSORPTION_NOT_CONVERGED,
+        ErrorCode.LEVERAGE_DIMENSION_TOO_LARGE,
         ErrorCode.EFFECTS_TOO_MANY,
+        ErrorCode.REGRESSOR_CONSTANT,
         ErrorCode.REGRESSOR_NO_WITHIN_VARIATION,
         ErrorCode.DK_PERIODS_TOO_FEW,
         ErrorCode.DK_PERIODS_NOT_ABOVE_COEFFICIENTS,

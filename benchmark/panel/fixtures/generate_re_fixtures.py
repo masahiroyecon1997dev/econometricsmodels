@@ -52,11 +52,10 @@ COV_TYPES = ["classical", "hc1"]
 # `NUMERIC_SCENARIOS`（unbalanced + baseline/small_panel/heteroskedastic/
 # autocorrelated/cross_sectionally_correlated）はFE（generate_fe_fixtures.py）
 # のものをそのまま再利用する。REは常にentity方向のみ（1-way相当、`re-spec.md`5章）
-# なのでFEのような1-way/2-wayの区別が無く、unbalancedもFEの
-# ONE_WAY_ONLY_SCENARIOS制約（2-way FEはバランスパネル必須）を受けずそのまま
-# success pathとして扱える。singleton_entity/singleton_time/
-# unbalanced_two_way/zero_variance_regressorは含めない（FE同様
-# ValidationErrorパス専用、テストコード側で対応）。
+# なのでFEのような1-way/2-wayの区別が無く、unbalancedもそのままsuccess pathとして
+# 扱える。singleton_entity/singleton_time/unbalanced_two_way/
+# unbalanced_sparse/unbalanced_disconnected/zero_variance_regressorは含めない
+# （FEのシナリオ。REの2-wayは不均衡を拒否する）。
 
 # 実データ（Wooldridge wagepan）。FEと同じ変数選定
 # （benchmark/common/constants.pyのWAGEPAN_X参照）。

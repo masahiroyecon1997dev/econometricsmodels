@@ -30,6 +30,10 @@ use crate::shared::validation::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PanelModel {
     Fe,
+    /// 固定効果つきの2SLS（`FEIV`）。`effects`の上限などはFEと同じ。
+    FeIv,
+    /// 固定効果つきのGMM（`FEGMM`）。`effects`の上限などはFEと同じ。
+    FeGmm,
     Re,
 }
 
@@ -37,6 +41,8 @@ impl PanelModel {
     fn name(self) -> &'static str {
         match self {
             Self::Fe => "FE",
+            Self::FeIv => "FEIV",
+            Self::FeGmm => "FEGMM",
             Self::Re => "RE",
         }
     }
@@ -176,25 +182,38 @@ fn validate_dk_time_role(y: &str, first_effect: &str, dk_time: Option<&str>) -> 
     ])
 }
 
-/// FE/REが受け付ける`effects`の列数の上限。1要素が1-way、2要素が2-way。
-const MAX_EFFECTS: usize = 2;
+/// `effects`の列数の上限。FEは1要素が1-way、2要素が2-way、3要素以上が高次元の固定効果で、
+/// 5列まで受け付ける。REは1-wayと2-wayだけ（交差ランダム効果は標準的な推定量でない）。
+fn max_effects(model: PanelModel) -> usize {
+    match model {
+        PanelModel::Fe | PanelModel::FeIv | PanelModel::FeGmm => MAX_FE_EFFECTS,
+        PanelModel::Re => MAX_RE_EFFECTS,
+    }
+}
+
+/// FEの`effects`の列数の上限。実務で想定する次元数に余裕を持たせ、極端な値を弾くために置く。
+const MAX_FE_EFFECTS: usize = 5;
+
+/// REの`effects`の列数の上限（1-wayと2-wayだけ）。
+const MAX_RE_EFFECTS: usize = 2;
 
 /// `effects`の列数を検査する。DataFrameは見ない。
 ///
-/// 空は`ROLE_EMPTY`、`MAX_EFFECTS`を超える場合は`EFFECTS_TOO_MANY`。重複と`y`・`x`との
+/// 空は`ROLE_EMPTY`、[`max_effects`]を超える場合は`EFFECTS_TOO_MANY`。重複と`y`・`x`との
 /// 重複は、列の役割の検査（`validate_no_duplicate_roles`等）が担う。
 ///
 /// # Errors
-/// 空、または`MAX_EFFECTS`を超える場合は`ValidationError`。
+/// 空、または[`max_effects`]を超える場合は`ValidationError`。
 fn validate_effects(model: PanelModel, effects: &[String]) -> PyResult<()> {
     validate_role_non_empty("effects", effects)?;
-    if effects.len() > MAX_EFFECTS {
+    let max_columns = max_effects(model);
+    if effects.len() > max_columns {
         return Err(user_error(
             ErrorCode::EffectsTooMany,
             vec![
                 ("model", ParamValue::from(model.name())),
                 ("n_columns", ParamValue::from(effects.len())),
-                ("max_columns", ParamValue::from(MAX_EFFECTS)),
+                ("max_columns", ParamValue::from(max_columns)),
             ],
         ));
     }
@@ -205,7 +224,7 @@ fn validate_effects(model: PanelModel, effects: &[String]) -> PyResult<()> {
 ///
 /// 次の順に検査し、最初の違反で返す。
 ///
-/// 1. `effects`の列数（空→`ROLE_EMPTY`、3要素以上→`EFFECTS_TOO_MANY`。[`validate_effects`]）
+/// 1. `effects`の列数（空→`ROLE_EMPTY`、上限（FE=5、RE=2）超→`EFFECTS_TOO_MANY`。[`validate_effects`]）
 /// 2. `x`が空でない
 /// 3. `y`・`effects`・`x`の間に同じ列が無い
 /// 4. `x`の内部に重複が無い
@@ -226,7 +245,7 @@ pub(crate) fn validate_panel_roles(
     effects: &[String],
     dk_time: Option<&str>,
 ) -> PyResult<()> {
-    // `effects`の列数（空・3つ以上）を先に見る。
+    // `effects`の列数（空・上限超過）を先に見る。
     validate_effects(model, effects)?;
     // `x`が空リストであることを許容しない（`x=[]`は他手法と同じく`validate_role_non_empty`で拒否）。
     validate_role_non_empty("x", x)?;
@@ -239,6 +258,46 @@ pub(crate) fn validate_panel_roles(
     validate_no_duplicate_within_role("effects", effects)?;
     // `dk_time`は`y`・`effects[0]`との重複だけ拒否する（`x`との重複は許可、`validate_dk_time_role`参照）。
     // `effects`が空でないことは手順1で確かめ済み。
+    validate_dk_time_role(y, &effects[0], dk_time)
+}
+
+/// FEIVの`y`・`x_exog`・`x_endog`・`instruments`・`effects`・`dk_time`の列の役割（DataFrameを見ない構造）を
+/// 検査する。[`validate_panel_roles`]のFEIV版。
+///
+/// 次の順に検査し、最初の違反で返す。
+///
+/// 1. `effects`の列数（空→`ROLE_EMPTY`、上限超→`EFFECTS_TOO_MANY`）
+/// 2. `x_endog`・`instruments`が空でない（`x_exog`は空でよい。固定効果が切片を吸収するので、
+///    外生変数が無いモデルも成り立つ）
+/// 3. `y`・`effects`・`x_exog`・`x_endog`・`instruments`の間に同じ列が無い
+/// 4. 各役割の内部に重複が無い
+/// 5. `dk_time`が`y`・`effects[0]`と同じ列でない
+///
+/// # Errors
+/// 上のいずれかに違反する場合は`ValidationError`。
+pub(crate) fn validate_fe_iv_roles(
+    model: PanelModel,
+    y: &str,
+    x_exog: &[String],
+    x_endog: &[String],
+    instruments: &[String],
+    effects: &[String],
+    dk_time: Option<&str>,
+) -> PyResult<()> {
+    validate_effects(model, effects)?;
+    validate_role_non_empty("x_endog", x_endog)?;
+    validate_role_non_empty("instruments", instruments)?;
+    validate_no_duplicate_roles(&[
+        ("y", RoleValue::Single(y)),
+        ("effects", RoleValue::Multi(effects)),
+        ("x_exog", RoleValue::Multi(x_exog)),
+        ("x_endog", RoleValue::Multi(x_endog)),
+        ("instruments", RoleValue::Multi(instruments)),
+    ])?;
+    validate_no_duplicate_within_role("x_exog", x_exog)?;
+    validate_no_duplicate_within_role("x_endog", x_endog)?;
+    validate_no_duplicate_within_role("instruments", instruments)?;
+    validate_no_duplicate_within_role("effects", effects)?;
     validate_dk_time_role(y, &effects[0], dk_time)
 }
 
@@ -260,6 +319,29 @@ pub(crate) fn extract_effects(
         .map(|column| extract_time_keys(df, column, ColumnSource::new("effects", "data")))
         .transpose()?;
     Ok((entity, time))
+}
+
+/// FEの`effects`の列を、次元ごとのコードとしてDataFrameから取り出す（`effects`の順）。1つ目は個体
+/// （同一性だけが意味を持つキー）、2つ目は時点（値の順序を使うキーを時間順のコードにしたもの）、
+/// 3つ目以降は1つ目と同じ同一性だけのキー。
+///
+/// 列の型の規則は位置で決まる。呼び出し側が`validate_effects`で列数を検査済みであること。
+///
+/// # Errors
+/// 列の抽出時に発覚する問題は`column_extraction`の責務で`ValidationError`。
+pub(crate) fn extract_effect_groups(
+    df: &DataFrame,
+    effects: &[String],
+) -> PyResult<Vec<GroupCodes>> {
+    let source = || ColumnSource::new("effects", "data");
+    effects
+        .iter()
+        .enumerate()
+        .map(|(position, column)| match position {
+            1 => Ok(extract_time_keys(df, column, source())?.into_codes()),
+            _ => Ok(extract_entity_groups(df, column, source())?),
+        })
+        .collect()
 }
 
 /// 結果の`n_groups`ゲッターが返す`dict`（列名→グループ数、`effects`の順）を組み立てる。
@@ -311,7 +393,7 @@ pub(crate) fn panel_error_to_pyerr(err: PanelError) -> PyErr {
 /// | 文字列・`Categorical` | ラベルの辞書順（バイト順） |
 ///
 /// # Errors
-/// `extract_group_key_column`と同じ（許可するdtypeだけが異なる）。
+/// `extract_cluster_groups`（`shared/column_extraction/`）と同じ（許可するdtypeだけが異なる）。
 pub(crate) fn extract_time_keys(
     df: &DataFrame,
     name: &str,
@@ -321,7 +403,7 @@ pub(crate) fn extract_time_keys(
     let FactorizedKey {
         codes,
         representatives,
-    } = factorize_checked_key(name, column)?;
+    } = factorize_checked_key(name, column, source)?;
     let dtype = representatives.dtype().clone();
 
     with_group_labels(name, &representatives, |labels| {
@@ -452,12 +534,23 @@ mod tests {
     }
 
     #[test]
+    fn validate_effects_accepts_up_to_five_columns_for_fe_only() {
+        let columns = names(&["a", "b", "c", "d", "e"]);
+        for count in 3..=5 {
+            assert!(validate_effects(PanelModel::Fe, &columns[..count]).is_ok());
+            assert!(validate_effects(PanelModel::Re, &columns[..count]).is_err());
+        }
+    }
+
+    #[test]
     fn validate_effects_rejects_empty_and_more_than_max_effects() {
-        assert_eq!(MAX_EFFECTS, 2);
+        assert_eq!(
+            (max_effects(PanelModel::Fe), max_effects(PanelModel::Re)),
+            (5, 2)
+        );
         for model in [PanelModel::Fe, PanelModel::Re] {
             assert!(validate_effects(model, &[]).is_err());
-            assert!(validate_effects(model, &names(&["a", "b", "c"])).is_err());
-            assert!(validate_effects(model, &names(&["a", "b", "c", "d"])).is_err());
+            assert!(validate_effects(model, &names(&["a", "b", "c", "d", "e", "f"])).is_err());
         }
     }
 
@@ -578,7 +671,7 @@ mod tests {
             ),
             (
                 "String".into(),
-                Series::new("k".into(), ["b", "10", "a", "9", "b", "", "10", "é"]),
+                Series::new("k".into(), ["b", "10", "a", "9", "b", "-", "10", "é"]),
             ),
             (
                 "Date".into(),

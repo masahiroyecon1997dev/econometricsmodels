@@ -1,3 +1,3 @@
-"""Panel data methods (FE, RE), one module per method."""
+"""Panel data methods (FE, FEIV, FEGMM, RE), one module per method."""
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 # WLS 仕様書
 
-WLS（Weighted Least Squares）の確定済み仕様。数式・定義の正本は公開ページ[`docs/methods/wls.md`](../methods/wls.md)（英語）で、本書は実装上の判断・内部構成・テスト方針を記す（定義式は重複させない）。`engine/src/linear/wls.rs`・
+WLS（Weighted Least Squares）の確定済み仕様。数式・定義の正本は公開ページ[`docs/methods/wls.md`](../methods/wls.md)（英語）で、本書は実装上の判断・内部構成・テスト方針を記す（定義式は重複させない）。`engine/src/linear/wls.rs`（ファサード）と`engine/src/linear/wls/`・
 `engine_pybind/src/linear/wls.rs`・`python_package/econometricsmodels/linear/wls.py`として
 実装済み。OLSに強く依存する設計のため、共通する式・理由は[`ols-spec.md`](./ols-spec.md)を参照し、
 本ドキュメントではWLS固有の差分のみを記載する。
@@ -110,8 +110,8 @@ $\tfrac12\sum_i\ln w_i$）は公開ページ[`docs/methods/wls.md`](../methods/w
 
 **実装**: `OlsEstimator`/`OlsInput`自体は重みを一切知らない設計を維持したまま、
 `WlsEstimator::fit`側（元の、変換前の`y`・重みにアクセスできる層）で上記5フィールドを計算し直す
-`weighted_fit_statistics`関数を`WlsEstimator`に持たせている（`residuals`と同じ「WLS固有の後処理を
-`WlsEstimator`層に置く」パターン）。
+`weighted_fit_statistics`関数（`wls/statistics.rs`。`fit_wls`が呼ぶ）で計算している（`residuals`と同じ
+「WLS固有の後処理を`WlsEstimator`層に置く」パターン）。
 
 ### 3.5 `predict()`
 

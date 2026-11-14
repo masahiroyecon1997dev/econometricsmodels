@@ -45,15 +45,37 @@ DKのバンド幅は時点数`T`ベース
 `hac_auto_lag(_N_PERIODS_FIXED)`をモジュール定数として別途計算し、engine・
 linearmodels双方のバンド幅指定に使う。
 
-## 2-way固定効果の計測（method軸の流用）
+## 固定効果の構造の計測（method軸の流用）
 
-2-way FE（entity+time）はIVのgmm・Logit/Probitのbfgs/lbfgsと同じ`extra_methods`
-仕組みを流用し、代表点1つ（既定の標準誤差・k=n_sweep_fixed_k・
+2-way・不均衡な2-way・3-way の FE はIVのgmm・Logit/Probitのbfgs/lbfgsと同じ
+`extra_methods`仕組みを流用し、代表点1つ（既定の標準誤差・k=n_sweep_fixed_k・
 n=n_sweep[-1]）だけ追加計測する（`default_method="one_way"`,
-`extra_methods=("two_way",)`。ユーザー確認済み・2026-09-21）。`FitContext.method`
-の意味が他手法の推定アルゴリズム選択（newton等）からFEの固定効果構造選択に
-変わる点で既存パターンからの意図的な逸脱だが、「cov_type・n・k軸を共有し代表点
-1つだけ追加計測する」という構造自体はIV/Logit/Probitと同型。
+`extra_methods=("two_way", "two_way_unbalanced", "three_way")`）。
+`FitContext.method`の意味が他手法の推定アルゴリズム選択（newton等）からFEの
+固定効果構造選択に変わる点で既存パターンからの意図的な逸脱だが、「cov_type・n・k軸を
+共有し代表点1つだけ追加計測する」という構造自体はIV/Logit/Probitと同型。
+
+| method | `effects` | データ | linearmodels |
+|---|---|---|---|
+| `one_way` | entity | 均衡（N×T=6） | `PanelOLS`（`entity_effects`） |
+| `two_way` | entity, time | 均衡 | `PanelOLS`（`time_effects`も） |
+| `two_way_unbalanced` | entity, time | 均衡の各行を確率0.7で残す（個体は最低2行） | `PanelOLS`（同上） |
+| `three_way` | entity, time, c | 均衡の各行に3つ目の効果`c`（50水準）を無作為に割り振る | `AbsorbingLS`（既定の打ち切り、`classical`のみ） |
+
+method でデータの形が変わるため、`PerfAdapter.method_dataframes`（method →
+データ生成関数。無い method は`build_dataframe`）でデータを分ける。不均衡と3-wayは
+均衡パネルを土台にして間引く・列を足すだけなので、乱数列は`seed`から決まる。不均衡パネルの
+実際の観測数は要求した`n`の約7割になる。`PanelOLS`は2つまでしか効果を吸収できないため、
+3-wayの比較相手は`AbsorbingLS`（`absorb`にカテゴリ列）にする。`AbsorbingLS`はlsmrの
+打ち切りの既定（atol・btol=1e-8）のまま測る（利用者が普通に呼ぶ設定。engineの
+`tol`は1e-12で、精度はengineの方が厳しい側）。`AbsorbingLS.fit`は`params`等を
+その場で計算するので、遅延評価の確定は`params`・`std_errors`・`tstats`・`pvalues`の
+アクセスだけにしている（engineが一括計算するパネルR²・F統計量に当たる量は
+`AbsorbingLS`に無い）。`absorb`に渡すカテゴリ列は`build_pandas_df`で作り、計測区間の外に置く。
+
+3-wayのHC2/HC3は`linearmodels`に対応が無いのでengine単独で、cov軸に
+`hc2_three_way`・`hc3_three_way`として足す（n=100,000・k=5）。3-wayの`classical`は
+method軸で測る。`hc1`・cluster・dkは3-wayでは測らない（代表点を絞る方針）。
 
 ## dk は k=5 < T=6 の境界に依存する
 
@@ -109,6 +131,7 @@ FE の `cluster` と `dk` は、engine が fixest/Stata 型の小標本補正と
 from __future__ import annotations
 
 import linearmodels
+import numpy as np
 import pandas as pd
 import polars as pl
 
@@ -123,6 +146,7 @@ from performance._perf_harness import (
 
 _ENTITY_COL = "entity"
 _TIME_COL = "time"
+_THIRD_COL = "c"
 
 # T（時点数）を固定しNをスイープする（モジュールdocstring「N×T分解」参照）。
 # `benchmark/panel/datasets.py`のbaselineシナリオの既定値と同値。
@@ -132,6 +156,32 @@ _N_PERIODS_FIXED = 6
 # 異なるため使わない、モジュールdocstring「cov_typeの範囲」参照）。
 _DK_BANDWIDTH = hac_auto_lag(_N_PERIODS_FIXED)
 
+
+# 不均衡パネルは、各行を確率`_KEEP_PROB`で残して作る（個体は最低`_MIN_ROWS`行）。
+# データ生成（`generate_fe_dataset`）の乱数列と重ならないよう、間引きと3つ目の効果には
+# `seed`から派生した別の乱数列を使う。
+_UNBALANCED_STREAM = 1
+_THIRD_STREAM = 2
+
+_KEEP_PROB = 0.7
+_MIN_ROWS = 2
+
+# 3つ目の効果`c`の水準数。個体・時点とは無関係に行へ割り振る。HC2/HC3の
+# 密な行列は最大の次元（個体）を除いた水準の合計（時点6＋`c`50）で作るため、
+# 3,000水準の上限に収まる。
+_N_THIRD_LEVELS = 50
+_THIRD_EFFECT_SD = 1.0
+
+# method（固定効果の構造）ごとの`effects`。
+_EFFECTS = {
+    "one_way": [_ENTITY_COL],
+    "two_way": [_ENTITY_COL, _TIME_COL],
+    "two_way_unbalanced": [_ENTITY_COL, _TIME_COL],
+    "three_way": [_ENTITY_COL, _TIME_COL, _THIRD_COL],
+}
+
+# `AbsorbingLS`に渡す吸収列（計測区間の外で作る）。
+_ABSORB_COLS = [f"{col}_absorb" for col in _EFFECTS["three_way"]]
 
 _ENGINE_COV_TYPES = ("classical", "hc1", "hc2", "hc3", "cluster")
 
@@ -145,6 +195,10 @@ _COV_CASES = (
     # 作らず、engine は entity 列を既定で使う。
     CovCase("cluster", "cluster"),
     CovCase("dk", "dk"),
+    # 3次元の固定効果のHC2/HC3（linearmodelsに対応が無いためengine単独。モジュール
+    # docstring「固定効果の構造の計測」参照）。
+    CovCase("hc2_three_way", "hc2", libraries=("engine",), method="three_way"),
+    CovCase("hc3_three_way", "hc3", libraries=("engine",), method="three_way"),
 )
 
 
@@ -160,6 +214,33 @@ def _build_dataframe(n: int, k: int, seed: int) -> pl.DataFrame:
     return df
 
 
+def _build_unbalanced_dataframe(n: int, k: int, seed: int) -> pl.DataFrame:
+    """均衡パネルの行を無作為に間引く（個体は最低`_MIN_ROWS`行を残す）。"""
+    df = _build_dataframe(n, k, seed)
+    rng = np.random.default_rng([seed, _UNBALANCED_STREAM])
+    return (
+        df.with_columns(pl.Series("keep", rng.random(df.height) < _KEEP_PROB))
+        .filter(
+            pl.col("keep")
+            | (pl.col("keep").sum().over(_ENTITY_COL) < _MIN_ROWS)
+            & (pl.int_range(pl.len()).over(_ENTITY_COL) < _MIN_ROWS)
+        )
+        .drop("keep")
+    )
+
+
+def _build_three_way_dataframe(n: int, k: int, seed: int) -> pl.DataFrame:
+    """均衡パネルの各行に3つ目の効果`c`を無作為に割り振り、`y`へ`c`の効果を足す。"""
+    df = _build_dataframe(n, k, seed)
+    rng = np.random.default_rng([seed, _THIRD_STREAM])
+    levels = rng.integers(0, _N_THIRD_LEVELS, df.height)
+    effects = rng.normal(0.0, _THIRD_EFFECT_SD, _N_THIRD_LEVELS)
+    return df.with_columns(
+        pl.Series(_THIRD_COL, levels),
+        (pl.col("y") + pl.Series(effects[levels])).alias("y"),
+    )
+
+
 def _build_pandas_df(df: pl.DataFrame) -> pd.DataFrame:
     """MultiIndex(entity, time)を構築する（計測区間の外、モジュールdocstring参照）。
 
@@ -171,14 +252,19 @@ def _build_pandas_df(df: pl.DataFrame) -> pd.DataFrame:
     pdf[_TIME_COL] = pd.Categorical(
         pdf[_TIME_COL], categories=time_categories, ordered=True
     ).codes
+    if _THIRD_COL in pdf.columns:
+        # `AbsorbingLS`の`absorb`はカテゴリ型の列を要求する（3次元のときだけ）。
+        for col, absorb_col in zip(
+            _EFFECTS["three_way"], _ABSORB_COLS, strict=True
+        ):
+            pdf[absorb_col] = pd.Categorical(pdf[col])
     return pdf.set_index([_ENTITY_COL, _TIME_COL])
 
 
 def _fit_once_engine(ctx: FitContext):
     from econometricsmodels import FE, FEOptions
 
-    two_way = ctx.method == "two_way"
-    effects = [_ENTITY_COL, _TIME_COL] if two_way else [_ENTITY_COL]
+    effects = _EFFECTS[ctx.method]
     kwargs: dict = {"cov_type": ctx.cov_type}
     if ctx.cov_type == "dk":
         kwargs.update(dk_time=_TIME_COL, dk_bandwidth=_DK_BANDWIDTH)
@@ -190,10 +276,31 @@ def _fit_once_engine(ctx: FitContext):
     ).fit()
 
 
+def _fit_once_absorbing_ls(ctx: FitContext):
+    """3次元の固定効果。`PanelOLS`は2つまでしか吸収できないため`AbsorbingLS`。"""
+    from linearmodels.iv.absorbing import AbsorbingLS
+
+    if ctx.cov_type != "classical":
+        raise ValueError(
+            f"three_way is measured with classical only, got {ctx.cov_type!r}"
+        )
+
+    mod = AbsorbingLS(
+        ctx.pandas_df[ctx.y_col],
+        ctx.pandas_df[ctx.x_cols],
+        absorb=ctx.pandas_df[_ABSORB_COLS],
+    )
+    res = mod.fit(cov_type="unadjusted", debiased=True)
+    _ = (res.params, res.std_errors, res.tstats, res.pvalues)
+    return res
+
+
 def _fit_once_linearmodels(ctx: FitContext):
     from linearmodels.panel import PanelOLS
 
-    two_way = ctx.method == "two_way"
+    if ctx.method == "three_way":
+        return _fit_once_absorbing_ls(ctx)
+    two_way = ctx.method in ("two_way", "two_way_unbalanced")
     mod = PanelOLS(
         ctx.pandas_df[ctx.y_col],
         ctx.pandas_df[ctx.x_cols],
@@ -258,7 +365,11 @@ FE_ADAPTER = PerfAdapter(
     build_pandas_df=_build_pandas_df,
     fit_once=_fit_once,
     default_method="one_way",
-    extra_methods=("two_way",),
+    extra_methods=("two_way", "two_way_unbalanced", "three_way"),
+    method_dataframes={
+        "two_way_unbalanced": _build_unbalanced_dataframe,
+        "three_way": _build_three_way_dataframe,
+    },
 )
 
 

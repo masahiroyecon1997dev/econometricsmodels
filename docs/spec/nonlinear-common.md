@@ -183,7 +183,7 @@ statsmodels（`ConvergenceWarning`を出しつつ結果は必ず返す＝常に�
   失敗したため不採用とした。
 
 **スケール依存への対処（標準化）**: 説明変数のスケールが異なると勾配の絶対閾値の妥当性が
-崩れるため、`nonlinear/common.rs`の`standardize_columns`/`destandardize_params`で
+崩れるため、`nonlinear/common/standardize.rs`の`standardize_columns`/`destandardize_params`で
 標準化空間で最適化する。**切片ありのときは「平均0・分散1」（`x_std = (x-x̄)/std`）、
 切片なしのときは「分散1のみ」（`x_std = x/std`）**。切片列と標準偏差が0の列（定数列）は
 無変換。
@@ -200,7 +200,7 @@ statsmodels（`ConvergenceWarning`を出しつつ結果は必ず返す＝常に�
   `Σ_orig = J Σ_std Jᵀ`（`J`は`θ_orig=Jθ_std`の線形変換の行列。`diag(1/std)`に、切片の行の
   傾き成分`-x̄ₘ/stdₘ`が加わる）。OPG・サンドイッチ・クラスターでも、`H⁻¹`と
   スコア`s_std=Jᵀs_orig`が同じ連鎖律に従うため同じ式で戻せる。
-- 分離検出（1.4節・`separation.rs`）は標準偏差で割るだけの行を使い続ける（切片込みの
+- 分離検出（1.4節・`separation/`）は標準偏差で割るだけの行を使い続ける（切片込みの
   再パラメータ化は分離の有無を変えず、LPの閾値の較正もその行に対するもの）。
 - Tobitは`x`側をこの`ColumnScale`に委ね、`TobitScaling`が`y`のスケーリングと`logσ`の扱いを
   加える（`tobit-spec.md`3.2節）。
@@ -220,7 +220,7 @@ Logit/Probitはこの列ピボットQR解（標準化空間のLPM最小二乗解
 
 ## 2. エラー型（`MleError`、共有）
 
-Logit/Probit/Tobit共有の1つのエラー型を`engine/src/nonlinear/common.rs`に定義する
+Logit/Probit/Tobit共有の1つのエラー型を`engine/src/nonlinear/common/error.rs`に定義する
 （OLSの「1手法1エラー型」パターンを横展開せず共有型にする。`raise_on_non_convergence`
 未収束・観測数不足・`confidence_level`範囲外等、3手法でほぼ共通のバリアントが多いため）。
 Tobit固有のバリアント（打ち切り境界の検証等）も同じ`MleError`にバリアントとして追加する
@@ -235,7 +235,7 @@ Tobit固有のバリアント（打ち切り境界の検証等）も同じ`MleEr
 | `SingularDesignMatrix` | `DESIGN_MATRIX_SINGULAR`（`ComputationError`） | 最適化前の列ピボットQRランクチェックでのランク落ち（1.4節） |
 | `SingularHessian` | `MATRIX_NEAR_SINGULAR`（`matrix=HESSIAN`、`ComputationError`） | 収束点のHessianが特異で観測情報行列の逆行列が計算できない |
 | `SingularOpgMatrix` | `MATRIX_NEAR_SINGULAR`（`matrix=OPG`、`ComputationError`） | OPG行列（`Σsᵢsᵢ'`、`cov_type="opg"`）が特異。`SingularHessian`と原因が異なるため別バリアントに分離 |
-| `SeparationDetected` | `SEPARATION_DETECTED`（`ComputationError`） | 完全分離・準完全分離（有限のMLEが存在しない）を収束後に線形計画で厳密に検出（Logit/Probitのみ。`engine/src/nonlinear/separation.rs`、`logit-spec.md`3.2節） |
+| `SeparationDetected` | `SEPARATION_DETECTED`（`ComputationError`） | 完全分離・準完全分離（有限のMLEが存在しない）を収束後に線形計画で厳密に検出（Logit/Probitのみ。`engine/src/nonlinear/separation.rs`・`separation/lp.rs`、`logit-spec.md`3.2節） |
 | `SeparationCheckFailed { detail }` | `SEPARATION_CHECK_FAILED`（`ComputationError`） | 分離が無いことを線形計画が数値的に完了せず確認できなかった（`raise_on_non_convergence=true`のとき） |
 | `EvaluationBudgetExceeded { budget }`・`LineSearchFailed { max_iters }` | `LINE_SEARCH_FAILED`（`ComputationError`） | line searchの評価回数バジェット超過（1.2節）・line searchの反復上限到達（`lbfgs`） |
 | `UncensoredIntervalTooNarrow { lower, upper, sigma }`（Tobit専用） | `UNCENSORED_INTERVAL_TOO_NARROW`（`ComputationError`） | `expected_uncensored`の非打ち切り区間が`σ̂`の1%未満（`tobit-spec.md`3.5節） |
@@ -342,7 +342,7 @@ MLEベースの非線形モデルは漸近理論が正規分布に基づいて�
 評価。式自体はリンク関数依存でモデルごとに異なる）。この性質を使い、`w`とその勾配
 `s_m=∂w/∂θ_m`の計算（`at`ごとに異なる、モデルファイル側に実装）と、そこから`dydx`・
 ヤコビアン`∂g_j/∂θ_m=θⱼ*s_m+[j==m]*w`を計算する部分（`at`に依らず共通、
-`dydx_and_jacobian`/`marginal_effects_from_w_s`として`nonlinear/common.rs`に実装）を
+`dydx_and_jacobian`/`marginal_effects_from_w_s`として`nonlinear/common/marginal_effects.rs`に実装）を
 分離する。分散は`Var(g_j) = jac_jの行ベクトル・cov_params・jac_jの行ベクトル'`（二次形式）。
 
 - **離散変数（0/1のダミー変数）の自動判定は行わない**: データ入力がlist渡し（列の型情報を

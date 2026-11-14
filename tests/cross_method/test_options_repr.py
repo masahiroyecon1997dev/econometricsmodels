@@ -13,6 +13,8 @@ from typing import Any
 
 import pytest
 from econometricsmodels import (
+    FEGMMOptions,
+    FEIVOptions,
     FEOptions,
     IVOptions,
     LogitOptions,
@@ -56,6 +58,31 @@ NON_DEFAULT_KWARGS: dict[type, dict[str, Any]] = {
         "cluster": "g",
         "dk_time": "t",
         "dk_bandwidth": 2,
+        "tol": 1e-8,
+        "max_iter": 500,
+    },
+    FEIVOptions: {
+        "cov_type": "dk",
+        "confidence_level": 0.9,
+        "cluster": "g",
+        "dk_time": "t",
+        "dk_bandwidth": 2,
+        "tol": 1e-8,
+        "max_iter": 500,
+    },
+    FEGMMOptions: {
+        "cov_type": "dk",
+        "confidence_level": 0.9,
+        "cluster": "g",
+        "dk_time": "t",
+        "dk_bandwidth": 2,
+        "gmm_type": "iterated",
+        "gmm_weight_type": "robust",
+        "gmm_max_iter": 7,
+        "gmm_tol": 1e-4,
+        "raise_on_non_convergence": False,
+        "tol": 1e-8,
+        "max_iter": 500,
     },
     REOptions: {
         "cov_type": "dk",
@@ -163,4 +190,6 @@ def test_re_options_field_order_matches_fe_options():
     並びは`repr`の出力順とAPIページの表示順に現れる。"""
     re_names = list(inspect.signature(REOptions).parameters)
     fe_names = list(inspect.signature(FEOptions).parameters)
-    assert re_names == [*fe_names, "variance_method"]
+    # `tol`・`max_iter`はFEの不均衡な2-wayの交互射影だけの設定（REにはない）。
+    shared = [n for n in fe_names if n not in ("tol", "max_iter")]
+    assert re_names == [*shared, "variance_method"]

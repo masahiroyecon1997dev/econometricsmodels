@@ -88,15 +88,14 @@ from benchmark.panel.cluster_cases import K1_CSV, cluster_imbalanced_frame
 from benchmark.panel.fixtures.generate_fe_crosscheck_fixtures import (
     COV_TYPES,
     DK_EXPLICIT_BANDWIDTHS,
-    ONE_WAY_ONLY_SCENARIOS,
     ROBUST_BOUNDARY_COV_TYPES,
     SCENARIO_COV_TYPES,
     TWO_WAY_CLUSTER_CASES,
-    TWO_WAY_SCENARIOS,
     WAGEPAN_COV_TYPES,
     dk_three_periods_frame,
     two_way_cluster_frame,
 )
+from benchmark.panel.fixtures.generate_fe_fixtures import FE_SCENARIOS
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parents[1]
@@ -110,8 +109,6 @@ ATOL = TOLERANCES["fe_crosscheck"]["atol"]
 ATOL_P_VALUE = TOLERANCES["fe_crosscheck"]["atol_p_value"]
 RTOL_P_VALUE = TOLERANCES["fe_crosscheck"]["rtol_p_value"]
 
-ALL_SCENARIOS = ONE_WAY_ONLY_SCENARIOS + TWO_WAY_SCENARIOS
-
 
 def _cov_types_for(scenario: str) -> list[str]:
     return SCENARIO_COV_TYPES.get(scenario, COV_TYPES)
@@ -119,12 +116,12 @@ def _cov_types_for(scenario: str) -> list[str]:
 
 ONE_WAY_CASES = [
     (scenario, cov_type)
-    for scenario in ALL_SCENARIOS
+    for scenario in FE_SCENARIOS
     for cov_type in _cov_types_for(scenario)
 ]
 TWO_WAY_CASES = [
     (scenario, cov_type)
-    for scenario in TWO_WAY_SCENARIOS
+    for scenario in FE_SCENARIOS
     for cov_type in _cov_types_for(scenario)
 ]
 
@@ -239,7 +236,7 @@ def test_matches_fixest_two_way(crosscheck, scenario, cov_type):
 # （T-1は`test_fe_plm_crosscheck.py`）。
 DK_BANDWIDTH_ONE_WAY_CASES = bandwidth_cases(DK_EXPLICIT_BANDWIDTHS)
 DK_BANDWIDTH_TWO_WAY_CASES = [
-    case for case in DK_BANDWIDTH_ONE_WAY_CASES if case[0] in TWO_WAY_SCENARIOS
+    case for case in DK_BANDWIDTH_ONE_WAY_CASES if case[0] in FE_SCENARIOS
 ]
 
 

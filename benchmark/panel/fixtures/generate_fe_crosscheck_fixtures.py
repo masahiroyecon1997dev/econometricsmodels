@@ -78,13 +78,12 @@ from benchmark.panel.cluster_cases import (
     cluster_imbalanced_frame,
 )
 from benchmark.panel.fixtures.generate_fe_fixtures import (
-    ONE_WAY_ONLY_SCENARIOS,
+    FE_SCENARIOS,
     SCENARIO_X_COLS,
-    TWO_WAY_SCENARIOS,
 )
 from benchmark.panel.references.r import default_dk_bandwidth, run_fixest_r
 
-NUMERIC_SCENARIOS = ONE_WAY_ONLY_SCENARIOS + TWO_WAY_SCENARIOS
+NUMERIC_SCENARIOS = FE_SCENARIOS
 
 # hc2/hc3はここでのみ検証する（fe.jsonのCOV_TYPESはclassical/hc1のみ）。
 # cluster/dkもモジュールdoc「cluster/dkはfixestが唯一の参照実装」の通りここ
@@ -110,7 +109,7 @@ WAGEPAN_FORMULA_RHS = " + ".join(WAGEPAN_X)
 # `T-1`未満に限る（`T-1`はplm側`generate_fe_plm_crosscheck_fixtures.py`が
 # 持つ）。T=25のcross_sectionally_correlatedだけは、T=6では動かない
 # カーネルの3ラグ超の項を通すため中間の12も加える。2-wayはバランスパネル
-# （TWO_WAY_SCENARIOS）のみ。plmの明示バンド幅も同じ辞書を使う。
+# （`FE_SCENARIOS`の2-way）。plmの明示バンド幅も同じ辞書を使う。
 DK_EXPLICIT_BANDWIDTHS: dict[str, list[int]] = {
     "baseline": [0, 1, 3],
     "autocorrelated": [0, 1, 3],
@@ -337,11 +336,10 @@ def build_fixtures() -> dict:
                 for cov_type in cov_types
             }
         }
-        if scenario in TWO_WAY_SCENARIOS:
-            fixtures[scenario]["two_way"] = {
-                cov_type: _run_effects(scenario, cov_type, two_way=True)
-                for cov_type in cov_types
-            }
+        fixtures[scenario]["two_way"] = {
+            cov_type: _run_effects(scenario, cov_type, two_way=True)
+            for cov_type in cov_types
+        }
 
     for scenario, bandwidths in DK_EXPLICIT_BANDWIDTHS.items():
         by_way = {
@@ -352,7 +350,7 @@ def build_fixtures() -> dict:
                 for bw in bandwidths
             }
         }
-        if scenario in TWO_WAY_SCENARIOS:
+        if scenario in FE_SCENARIOS:
             by_way["two_way"] = {
                 str(bw): _run_dk_explicit_bandwidth(scenario, bw, two_way=True)
                 for bw in bandwidths

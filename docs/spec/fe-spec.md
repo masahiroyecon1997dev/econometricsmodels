@@ -1,6 +1,6 @@
 # FE 仕様書
 
-FE（固定効果パネル回帰、within推定）の確定済み仕様。`engine/src/panel/fe.rs`（共通基盤は
+FE（固定効果パネル回帰、within推定）の確定済み仕様。`engine/src/panel/fe.rs`（ファサード）・`engine/src/panel/fe/`（共通基盤は
 `engine/src/panel/common.rs`）・`engine_pybind/src/panel/fe.rs`・
 `python_package/econometricsmodels/panel/fe.py`として実装済み。FE/RE共通の設計判断（`effects`の
 引数設計、結果フィールドの共通コア、`cov_type`のサポート対象・デフォルト、内部実装の
@@ -12,10 +12,10 @@ FE固有の内容のみを記載する。
 
 3層構成: `FE(data, y, x, effects, options=options).fit() -> FEResults`（python_package）→
 `fit_fe(data, y, x, effects, options) -> FEResult`（engine_pybind）→ `FeEstimator::fit`
-（engine、within変換したデータを`OlsEstimator`へ委譲）。
+（engine、within変換したデータに`shared::least_squares::least_squares`をあてはめる）。
 
-- `y: str`、`x: list[str]`はOLSと同じ。`effects: list[str]`は独立の必須引数（`y`/`x`と同格、1〜2要素。1要素=1-way、
-  2要素=2-way。`effects[0]`が個体、`effects[1]`が時点）。3要素以上は`EFFECTS_TOO_MANY`
+- `y: str`、`x: list[str]`はOLSと同じ。`effects: list[str]`は独立の必須引数（`y`/`x`と同格、1〜5要素。1要素=1-way、
+  2要素=2-way、3要素以上=高次元。`effects[0]`が個体、`effects[1]`が時点、3つ目以降は同一性だけのキー）。6要素以上は`EFFECTS_TOO_MANY`
   （`ValidationError`）。`FEOptions.time`は廃止した（理由は`panel-common.md`1.1節）。
 - `FEOptions`（`#[pyclass]`）:
 
@@ -28,8 +28,8 @@ FE固有の内容のみを記載する。
   | `dk_bandwidth` | `int \| None` | `None` | DK HACのバンド幅（時点数`t`ベース、OLSの`hac_lags`とは意味が異なるため別名）。省略時は`floor(4*(t/100)^(2/9))`で自動計算。`cov_type="dk"`以外で指定すると`ValidationError` |
 
 - **`include_intercept`は無い**: withinの変換で切片が構造的に消えるため、OLS/WLS/IVと異なり
-  このオプション自体が意味を持たない（`FeEstimator::fit`は常に`include_intercept=false`で
-  `OlsEstimator`に委譲する）。
+  このオプション自体が意味を持たない（`FeEstimator::fit`は`OlsInput::from_columns`を常に
+  `include_intercept=false`で作る）。
 - **`x`は空リストを許容しない**: v1では固定効果のみのモデル（`k=0`）を許容して
   いたが、独立して吟味された設計記録が無く、説明変数ゼロは因果推論として意味を持たない
   （個体・時間固定効果によるyの分解という別の操作になる）ためユーザー指摘を受けて拒否に
@@ -40,11 +40,13 @@ FE固有の内容のみを記載する。
   between回帰・最終回帰どちらも構造的にk=0にならないため無変更）。
 - 列名を受け取る引数は`effects`/`cluster`/`dk_time`のいずれも`_col`サフィックスを
   付けない（`y`/`x`と同じ規約）。`dk_time`は`cov_type="dk"`の値を接頭辞にした名前。
-- **2-wayはバランスパネルを必須とする**。`(effects[0], effects[1])`のユニークペア数が`n_obs`と一致しない
-  （重複・欠落がある）場合も含め`ValidationError`（`validate_balanced_panel`が
-  `n_obs == 個体数 * 時点数`のカウント一致だけでなくユニークペア数も検証する。ペアの
-  重複と欠落が相殺するケースを見逃さないため）。回避オプションは用意しない。1-wayは不均衡
-  パネルもv1から無条件でサポートする。
+- **2-wayは不均衡パネルも扱う**（組合せが欠けてよい）。同じ`(effects[0], effects[1])`が複数の行にあってもよい
+  （`effects`の列は州と郡のような組合せでもよく、entity/timeの意味を持たない）。重複は検査しない。
+  バランスパネルの判定は「`n_obs == 個体数 * 時点数`かつ重複なし」（`covers_every_combination`。重複と欠落が
+  相殺して行数が`N × T`に一致する入力もバランスとは見なさない）で、バランスのときだけ閉形式、それ以外は
+  交互射影（重複する行も不均衡の一種）。2-way REは従来どおり
+  バランスパネルを必須とし（`validate_balanced_panel`、`PANEL_NOT_BALANCED_FOR_TWO_WAY`）、これはREの
+  GLS変換が閉形式を前提にするため。1-wayは不均衡パネルもv1から無条件でサポートする。
 - **1-wayは個体と時点の組の重複を検証しない**。1-wayには時点の列が無く、組という概念自体が
   ないため（個体内の観測の並びと数だけが意味を持つ。同じ行が重複していても各行は独立な
   観測として扱う）。`cov_type="dk"`と`dk_time`を併用する場合も、重複する`(effects[0], dk_time)`は
@@ -54,7 +56,10 @@ FE固有の内容のみを記載する。
   `_two_way`。within変換の前に生の`effects`の列を直接見て検出し、下流の特異行列エラーと
   して偶発的に検出される形にはしない）。2-wayは個体・時点双方を対称に検出する（両方
   該当時は個体側を報告）。エラーの`argument`は`"effects"`で、どの列かは`column`に入る
-  （`SINGLETON_GROUP`の`group`はsingletonの値）。
+  （`SINGLETON_GROUP`の`group`はsingletonの値、`n_dropped_rows`は取り除くことを繰り返したときに落ちる行の総数で、
+  2-wayでは個体のsingletonを落とすと時点のsingletonができる連鎖を含む。行は自動では落とさず、利用者が判断する）。
+- **生の値が全ての行で同じ説明変数は`ValidationError`（`REGRESSOR_CONSTANT`）**、被説明変数が全ての行で同じなら
+  `OUTCOME_CONSTANT`（`has_no_variation`の相対閾値）。固定効果を除く前に分かる事実なので、除いた後の分散ゼロと分ける。
 - **within変換後に分散ゼロになる説明変数は`ValidationError`**（`validate_no_zero_variance_
   regressors`。時間不変変数（1-way）・2-wayでtime FEと完全共線な列を同じロジックで検出する。
   閾値は絶対値ではなく相対値: 変換前の元の列の最大絶対値×観測数×`f64::EPSILON`と比較する）。
@@ -89,13 +94,11 @@ FE固有の内容のみを記載する。
   ため、2つ目の件数は各個体の観測数と一致する（将来2-wayの不均衡パネルに対応する場合は
   定義を再検討する）。固定の`n_entities`/`n_periods`ではなく列名キーにした理由は
   `panel-common.md`2.1節。REの`n_groups`も同じ定義（`re-spec.md`2章）。
-- **`estimator()`（内部委譲した`OlsEstimator`）とFE自身のgetterの使い分け**: `params`/
-  `param_names`/`residuals`/`dep_var_name`/`n_obs`/`log_likelihood`は`estimator()`から、
-  `std_errors`/`test_stats`/`p_values`/`conf_lower`/`conf_upper`/`df_model`/`df_resid`/
-  `f_statistic`/`f_p_value`/`aic`/`bic`/`r_squared_*`はFE自身から取得する。後者はFEが
-  `cov_type`・パネル自由度調整を反映して計算し直した値であり、`estimator()`側は常に
-  `CovType::Classical`で委譲した内部OLSの生の値のため取り違えるとcov_type非対応の値を
-  返してしまう。
+- **`FeEstimator`は`OlsEstimator`を保持しない**: 係数・残差・`(X̃'X̃)⁻¹`・適合度は
+  `shared::least_squares::least_squares`の結果から、`std_errors`/`test_stats`/`p_values`/
+  `conf_lower`/`conf_upper`/`df_model`/`df_resid`/`f_statistic`/`f_p_value`/`aic`/`bic`/
+  `r_squared_*`は`cov_type`・パネル自由度調整を反映してFE自身が計算する。素の最小二乗の
+  `df_resid = n - k`を前提にした統計量を使うと、`neffects`が反映されない。
 - **`fixed_effects()`（固定効果自体）は`fit()`の戻り値本体に含めず別メソッド**（IVの
   `first_stage()`と同じ「追加結果は別メソッド」方針）。`FEResult`は非公開フィールド
   `estimator: FeEstimator`として推定量本体を保持し、呼び出し時にオンデマンドで
@@ -110,35 +113,70 @@ FE固有の内容のみを記載する。
 
 ### 3.1 within変換
 
-polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）を直接扱う。1-way/2-wayとも
-`quasi_demean_column`（θ=1固定、[`re-spec.md`](./re-spec.md)3.2節参照）を使う:
+polarsではなく`engine`側は抽出済みのコード（`GroupCodes`）を直接扱う。1-wayとバランスな2-wayは
+`quasi_demean_column`（θ=1固定、[`re-spec.md`](./re-spec.md)3.2節参照）を使う。バランスの判定は
+`covers_every_combination`（`n == N×T`かつ全組合せがちょうど1回。同じ組合せが重複する行は許すが、その入力は
+組合せが欠けるので必ず不均衡側に入る）。3次元以上は、バランスでも閉形式が無く、常に交互射影で計算する
+（`within_transform_multi_way`）:
 
 - **1-way**: `quasi_demean_column`を1回呼ぶだけ（`ỹ_i = y_i - ȳ_i.`）。
 - **2-way**: 閉形式の二重デミーニング`ỹ_it = y_it - ȳ_i. - ȳ_.t + ȳ..`を直接計算するのでは
   なく、「entityでquasi-demean（θ=1）→ その結果をtimeでquasi-demean（θ=1）」という2段階の
   `quasi_demean_column`呼び出しで実装している。バランスパネルではこの2段階が閉形式と厳密に
-  一致することを導出済み（独立検算のproptestでも検証済み）。バランスパネル検証
+  一致する（独立検算のproptestでも検証している）。バランスパネル検証
   （`validate_balanced_panel`）は時点のキー未指定なら`PanelError::TwoWayRequiresTime`。
+  - **導出**: エンティティ数`N`・時点数`T`のバランスパネル（`n=NT`）で、entity-demean後の列を
+    `e_it = y_it - ȳ_i.`とすると、`(1/N)Σ_i e_it = ȳ_.t - (1/N)Σ_i ȳ_i. = ȳ_.t - ȳ..`
+    （各エンティティの観測数がすべて`T`なので`(1/N)Σ_i ȳ_i. = ȳ..`が成り立つ）。`e_it`を
+    timeでquasi-demeanすると`e_it - (ȳ_.t - ȳ..) = y_it - ȳ_i. - ȳ_.t + ȳ..`となり閉形式と一致する。
+    不均衡パネルでは`(1/N)Σ_i ȳ_i. ≠ ȳ..`となりうるためこの等式が成り立たない。
+- **不均衡な2-wayと3次元以上**（全組合せがそろわない、または3列以上）は、各次元（`effects`の列）の水準平均を順に引く**交互射影**
+  （`shared/alternating_projections`）で、全ダミー変数への最小二乗の残差を求める。
+  - 収束判定は、1回の掃引で引く水準平均の絶対値の最大が`tol × 尺度`以下。尺度は第1掃引で水準を除いた後の
+    列の絶対値の最大で、水準の大きい列でもグループ内の変動に対する相対精度になる（下限は元の列の
+    最大値の`16ε`倍）。2掃引ごとにIrons–Tuck加速を入れる。上限は`max_iter`（1〜10000、既定10000）掃引で、
+    届かなければ`ABSORPTION_NOT_CONVERGED`（`ComputationError`）。つながりが細い鎖状のパネルは掃引回数が
+    鎖の長さの2乗に比例して増える（長さ20で約900、50で約6000、200で約86000）。
+  - 掃引で残る誤差は、隣り合う掃引の変化量の比`ρ`から`変化量 · ρ/(1−ρ)`と見積もり（`Projected::error_bound`）、
+    分散ゼロ・定数のy・完全適合の判定しきい値に足す（`column_is_zero_variance_with_noise`）。緩い`tol`はこの
+    検出も粗くする。
+  - 連結成分（水準を頂点、行を辺とするグラフ。次元が3つ以上でも行が各次元の水準を結ぶ）が複数あっても傾きは
+    識別される。自由度は成分の数や入れ子の次元によらず`k + ΣG − (次元数 − 1)`（fixestとlinearmodelsの
+    既定と同じ。ダミー行列のランクは成分の数・入れ子のぶんだけ小さい）。
+  - HC2/HC3のレバレッジは、ダミーだけの回帰のレバレッジ（`dummy_leverage`）とwithin変換後のレバレッジの和。
+    ダミーのレバレッジは、最大の次元を消去し、残りの次元の水準を並べた`L`本の列（`L`は最大の次元を除いた水準数の合計）の
+    密な行列`M = W'W − Σ_g c_g c_g'/n_g`（`g`は消去した次元のグループ、`c_g`はグループ内の水準の出現回数）を解いて求める
+    （`O(n(K−1)² + Σ_g d_g² + L³)`、`d_g`はグループ内の異なる水準の数、`L ≤ 3000`、超えれば`LEVERAGE_DIMENSION_TOO_LARGE`。2次元ではこれが水準の少ない方の効果の水準数）。
+    `M`は連結成分と次元間のネスト（3次元以上では、ある次元のダミーが別の次元のダミーの和になる）でランク落ちするため、
+    列ピボット付きQRでランクを見て独立な列だけを解く（打ち切りは`L × ε × max diag(W'W)`）。判定を誤って
+    レバレッジが`[0, 1]`を外れたときは、黙って返さず`MATRIX_NEAR_SINGULAR`にする。全組合せがそろう2次元は
+    閉形式で、この行列を作らない。
+  - `fixed_effects()`は`fit`が保存した列ごとの効果から`effects(y) − Σβ̂_j effects(x_j)`を組み立て、連結成分ごとに
+    2つ目以降の各次元の基準水準（成分内でコードが最小の水準。2つ目は時間順、3つ目以降は文字列にした値の辞書順）を
+    0にする（そのぶんを個体の効果に足す）。入れ子の次元など、基準化しても分離できない効果があるため、
+    識別されるのは行ごとの効果の和だけ（`FixedEffects::MultiWay`）。
 
-`FeEstimator::fit`のパイプラインは「singleton検出 → within変換（2-wayはバランスパネル検証を
-内包） → 自由度検証 → 分散ゼロ検出 → `OlsEstimator::fit`への委譲（`include_intercept=false`
-固定、Frisch-Waugh-Lovell定理によりwithin変換後のOLS点推定はFE推定量と数学的に一致） →
-`cov_type`別の共分散行列計算 → 自由度調整後の統計量再計算」の順。委譲先の`OlsEstimator::fit`
-自体は常に`cov_type=Classical`固定で呼ぶ（`β̂`・残差の取得のみが目的で、`cov_type`ごとの
-標準誤差はFE自身が独立に計算し直すため委譲先のcov_type選択は結果に影響しない）。
+`FeEstimator::fit`のパイプラインは「打ち切り設定の検査 → 吸収する次元の解決（`absorbed_levels`） →
+singleton検出（全次元） → within変換 → 自由度検証 → 分散ゼロ検出 → `least_squares`（Frisch-Waugh-Lovell定理により
+within変換後の最小二乗点推定はFE推定量と数学的に一致） → `cov_type`別の共分散行列計算 →
+自由度調整後の統計量再計算」の順。`OlsEstimator`は経由しない（FEが使うのは`β̂`・残差・
+`(X̃'X̃)⁻¹`・適合度だけで、`cov_type`ごとの標準誤差・F検定はFE自身が計算し直すため）。
 
 ### 3.2 自由度調整
 
 - **1-way**: `df_model = k + N`（`N`=個体数）、`df_resid = n - df_model`。
 - **2-way**: `df_model = k + N + T - 1`（`T`=時点数。個体/時点ダミー間の定数項ぶんの
   重複を`+1`補正、LSDVでの有効パラメータ数が`N + T - 1`になることに対応）。
+- **3次元以上**: `df_model = k + ΣG_d − (D − 1)`（`D`=次元数、`G_d`=各次元の水準数。`absorbed_parameters`）。
+  fixestの`nparams`と同じ数え方で、連結成分・入れ子によるランク落ちは引かない。`InsufficientDegreesOfFreedom`の
+  `n_groups`は全次元の水準数のリスト。
 - `n <= df_model`は`PanelError::InsufficientDegreesOfFreedom`。`neffects>=1`のため
   `df_model>k`が恒常的に成り立ち、`OlsEstimator::fit`自身の`n<=k`チェックより常に厳格
   （FE経由でOLS側の`InsufficientObservations`が発生することは構造的にない）。
 - **t値・p値・信頼区間・F検定の自由度（`df_inference`）は`cov_type=Cluster`のとき`G-1`、
   `Dk`のとき`t_periods-1`に切り替える**（fixestの`ssc()`既定`t.df="min"`。
   それ以外（Classical/HC1-3）は`df_resid`のまま）。AIC/BICは`log_likelihood`
-  自体（`SSR/n`のみに依存しdf非依存）を`OlsEstimator::log_likelihood()`からそのまま再利用し、
+  自体（`SSR/n`のみに依存しdf非依存。`gaussian_goodness_of_fit`の`log_likelihood`）をそのまま再利用し、
   ペナルティ項の乗数だけ`k`から`df_model`に差し替える（`df_resid`ベース、`df_inference`とは
   無関係）。
 - **F統計量（`f_statistic`/`f_p_value`）**: 傾き係数`k`個が同時にゼロという帰無仮説のWald
@@ -165,7 +203,7 @@ polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）�
 3. **Clusterも独自計算**（**【linearmodels方式からfixest方式へ変更】**）:
    補正係数はOLSと同じ`(G/(G-1))×((n-1)/(n-K))`だが、**`K`（`(n-1)/(n-K)`の分母）は
    fixestの`ssc()`小標本補正（既定`K.fixef="nonnested"`）に合わせたFE固有ロジック**
-   （`fe_cluster_k_correction`、`engine/src/panel/common.rs`）で決める——linearmodelsが
+   （`fe_cluster_k_correction`、`engine/src/panel/common/fe_adjustment.rs`）で決める——linearmodelsが
    使っていた単純な`extra_df`分岐（`n/(n-extra_df-k)`のみ、`G/(G-1)`補正なし）とは
    異なる。fixest 0.14.2のRソース（`fixest:::ssc_compute_K`）と実地数値実験で確定した式:
    FE次元（1-wayはentityのみ、2-wayはentity+time）それぞれについて、その次元が
@@ -176,7 +214,12 @@ polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）�
    `K = df_model - (nested_size_sum - count_nested)`、どの次元もネストしない
    （Stataの`xtreg,fe`型）なら`K = df_model`（フルカウント）。最後にfixest自身の
    安全弁`K = max(K, k+1)`を適用する。詳細な導出・具体例は`fe_cluster_k_correction`
-   関数doc参照。
+   関数doc参照。**fixestとの差（3次元以上で顕在化）**: クラスター列が固定効果の次元の1つそのものの
+   ときは、fixestは他の次元がクラスターに入れ子かを調べず（`ssc_compute_K`の近道）、クラスター列と同じ
+   次元だけを入れ子として数える。本実装は入れ子の次元を全て数える（`reghdfe`と同じ考え方、判断済み）。
+   例: `effects=[entity, time, c]`で個体が`c`に入れ子、`cluster="c"`なら、fixestは`c`だけ、
+   本実装は個体と`c`を除く。係数・残差・自由度は一致し、標準誤差・共分散行列は`K`の差による係数倍だけ違う
+   （`test_fe_multi_way_reference.py`が係数倍まで確かめる）。
    **2クラスターの退化**: `G=2`かつ吸収したFE次元（常にentity、2-wayではtimeも）のいずれかで
    全水準が2つのクラスターに1観測ずつで`k >= 1`なら、`PanelError::DegenerateClusterTwoGroups`
    として拒否する。典型例は2時点のパネルを時点の列でクラスタリング（個体方向）と、2-way FEで
@@ -223,9 +266,9 @@ polarsではなく`engine`側は抽出済み配列（`entity: &[String]`等）�
    （fixestの`ssc()`は時点数`t_periods`をクラスターの`G`と同じ役割で使う。`K`は
    fixestの既定`K.fixef="full"`——DKにはクラスター変数という概念が無くネスト判定
    自体が発生しないため——により常に`K=df_model`）。
-6. **`FeCovType::Dk.time`は必須で、`FeInput.time_keys()`にはフォールバックしない**: 当初は
+6. **`FeCovType::Dk.time`は必須で、`FeInput`の2つ目の次元（`time_codes()`）にはフォールバックしない**: 当初は
    `Option`で、`None`なら2-wayの時点キーを暗黙に借用していたが、どの列がDKの時点かを利用者が
-   明示しない設計は、意図と違う列が選ばれても気づけないため廃止した。`FeInput.time_keys()`は
+   明示しない設計は、意図と違う列が選ばれても気づけないため廃止した。`FeInput`の2つ目の次元は
    2-wayの固定効果の時間次元（`effects[1]`）専用で、DKの時点列とは独立。
 7. **`bandwidth == t_periods - 1`ではfixestと一致しない（fixest側の実装誤り、本実装は
    標準のBartlettカーネルを維持）**: `bandwidth`が許容範囲`[0, t_periods)`の上限ちょうど
@@ -275,7 +318,7 @@ demeanしたR²」を3種とも定義すると誤る）:
 ### 3.5 固定効果自体（α_i）の復元
 
 `FeEstimator::fixed_effects()`（`FixedEffects::OneWay(BTreeMap<String, f64>)`/
-`TwoWay { entity, time }`）。推定済み係数から事後的に復元する（`within`変換時のグループ平均を
+`TwoWay { entity, time }`/`MultiWay(Vec<Vec<(水準, 効果)>>)`）。推定済み係数から事後的に復元する（`within`変換時のグループ平均を
 保持する形は取らず、`FeInput`が保持する変換前の元の`y`/`x`/`entity`/`time`から都度
 再計算する）。
 
@@ -292,6 +335,15 @@ demeanしたR²」を3種とも定義すると誤る）:
   挙動は再現せず時間順の規約を優先する）。`fixed_effects()`は常に`{列名: {水準: 効果}}`の入れ子の`dict`（one-wayも1項目の入れ子。キーは
   `effects`の列名で、`effects`の順）で、時点側の`dict`は時間順に並べる。入れ替えると
   キー順と基準期間が変わる（`panel-common.md`1.1節）。
+  - **不均衡な2-wayと3次元以上**は上の閉形式が使えず、`fit`が保存した交互射影の次元ごとの効果から組み立て、
+    連結成分ごとに2つ目以降の各次元の基準水準（成分内でコードが最小の水準）を0にして個体に足す
+    （`absorbed_effects`）。行ごとの効果の和は基準化で変わらず、入れ子の次元では和だけが識別される。
+  - **導出**: `E_i = ȳ_i. - x̄_i.'β̂`（entityの残差平均）、`E_t = ȳ_.t - x̄_.t'β̂`（timeの残差平均）、
+    `E = ȳ.. - x̄..'β̂`（全体の残差平均）とすると、バランスパネルの2-way ANOVA恒等式
+    `E_i + E_t - E = α_i + γ_t`（正規化前、定数`c`が不定）に`γ_{t_ref}=0`の制約を課すと
+    `c = E - E_{t_ref}`が定まり、`α_i = E_i - E + E_{t_ref}`、`γ_t = E_t - E_{t_ref}`となる。
+  - 代替案（`α_i`・`γ_t`をともに大域平均からの偏差にする対称正規化）は、結果の形（entity/timeの
+    2キーのみ）に大域平均を格納する場所が無いため採用しない。
 
 ### 3.6 engine_pybind: エラー変換
 
@@ -302,9 +354,14 @@ demeanしたR²」を3種とも定義すると誤る）:
 |---|---|---|
 | `Common(CommonError)` | `CommonError`と同じ | `CommonError`と同じ |
 | `InsufficientDegreesOfFreedom` | `INSUFFICIENT_DEGREES_OF_FREEDOM`（`n_effects`は1-wayで個体数、2-wayで個体数+時点数-1） | `ValidationError` |
-| `SingletonGroup` | `SINGLETON_GROUP`（params: `argument`=`"effects"`・`column`・`group`。`column`は`effects`の該当要素の列名で、エンジンは`with_effect_names`で受け取り計算には使わない） | `ValidationError` |
-| `UnbalancedPanelForTwoWay` | `PANEL_NOT_BALANCED_FOR_TWO_WAY` | `ValidationError` |
+| `SingletonGroup` | `SINGLETON_GROUP`（params: `argument`=`"effects"`・`column`・`group`・`n_dropped_rows`。`column`は`effects`の該当要素の列名で、エンジンは`with_effect_names`で受け取り計算には使わない） | `ValidationError` |
+| `UnbalancedPanelForTwoWay` | `PANEL_NOT_BALANCED_FOR_TWO_WAY`（2-way REだけ） | `ValidationError` |
+| `InvalidTol` / `InvalidMaxIter` | `TOLERANCE_NOT_POSITIVE_FINITE` / `MAX_ITER_OUT_OF_RANGE` | `ValidationError` |
+| `LeverageDimensionTooLarge` | `LEVERAGE_DIMENSION_TOO_LARGE`（組合せが欠ける2-wayと3次元以上のHC2/HC3） | `ValidationError` |
+| `AbsorptionNotConverged` | `ABSORPTION_NOT_CONVERGED` | `ComputationError` |
+| `RegressorConstant` | `REGRESSOR_CONSTANT` | `ValidationError` |
 | `ZeroVarianceAfterDemeaning` | `REGRESSOR_NO_WITHIN_VARIATION` | `ValidationError` |
+| `Common(OutcomeConstant)` | `OUTCOME_CONSTANT` | `ValidationError` |
 | `OutcomeConstantWithinEntity` | `OUTCOME_CONSTANT_WITHIN_ENTITY` | `ValidationError` |
 | `WithinRegressionFailed { source: Common(PerfectFit) }` | `PERFECT_FIT`（`stage`は`WITHIN_REGRESSION`） | `ComputationError` |
 | `InvalidDkBandwidth` / `InsufficientDkPeriods` / `InsufficientDkPeriodsForInference` | `DK_BANDWIDTH_OUT_OF_RANGE` / `DK_PERIODS_TOO_FEW` / `DK_PERIODS_NOT_ABOVE_COEFFICIENTS` | `ValidationError` |
@@ -351,11 +408,32 @@ demeanしたR²」を3種とも定義すると誤る）:
   F検定は両側t検定と代数的に等価」という恒等式（`f_statistic = test_stat²`）でHC1/HC2/HC3/
   Cluster/HACを横断検証する。
 
+### 3次元以上の固定効果のテスト
+
+- **主リファレンスはfixest**（`linearmodels.PanelOLS`は個体と時点の2つしか吸収できない）。
+  `tests/panel/test_fe_multi_way_reference.py`が`fe_multi_way.json`・`fe_multi_way_cov.json`
+  （`benchmark/panel/fixtures/generate_fe_multi_way_fixtures.py`）の全シナリオ×全ケースを機械精度で照合する。
+  独立なクロスチェックは`linearmodels.iv.absorbing.AbsorbingLS`の`classical`・`hc1`だけ
+  （`test_fe_multi_way_crosscheck.py`。`debiased=True`で小標本補正と自由度が本実装に一致する。固定効果をlsmrで
+  除くため、打ち切りを`atol`・`btol`=1e-14に厳しくして機械精度に揃える）。HC2/HC3・cluster・dkはfixestのみ
+  （単一リファレンスの例外、`docs/guide/verification-details.md`）。LSDVの手計算オラクルは
+  `test_fe_multi_way.py`（係数・classical/HC1/HC2/HC3）。
+- **シナリオ**（`benchmark/panel/multi_way_datasets.py`。既存のFE用データと乱数列を共有しない）: 全組合せ
+  （格子）・無作為な欠落・3つ目が個体に入れ子・疎・連結成分が2つ・重複行・4次元・小標本・不均一分散。
+  クラスター列は、効果の次元そのもの（個体・`c`・`time`）と、効果の外の列（`region`。個体の入れ子で、`nested`では
+  `c`も入れ子）。dkは既定と明示のバンド幅。
+- **照合する量**: 係数・標準誤差・`t`値・`p`値・信頼区間・共分散行列・`df_model`・`df_resid`・AIC/BIC/対数尤度・
+  Within R²・F統計量（fixest）と、行ごとの残差。個々の効果は基準化で値が変わり入れ子では識別されないので、
+  効果の和は残差の一致で行ごとに照合する。
+- **fixestとの差と回避**: (1) `nested`のHC2/HC3はfixestがダミー行列の線形従属で失敗するため、列空間が同じ
+  `entity + time`の式を参照にして自由度に依存しない量だけを比べる。(2) クラスター列が効果の次元そのもののとき、
+  fixestは他の次元の入れ子を調べず`K`が大きくなる（3.3節）。そのケース（`nested`の`cluster_c`）は標準誤差を
+  `K`の差の係数倍として検証する。
+- 再生成は`python -m benchmark.panel.freeze`（CSV）→ `generate_fe_multi_way_{,cov_,crosscheck_,cov_crosscheck_}fixtures`
+  （`benchmark/regenerate_all.py`に登録済み。fixestにはR、`AbsorbingLS`にはlinearmodelsが要る）。
+
 ## 5. 未実装・未対応
 
-- **不均衡パネルでの2-way FE**: 反復的な交互射影（fixest/lfe方式）が必要で、v1では扱わない
-  （閉形式の二重デミーニングはバランスパネルでのみ正確なため、6.4節相当の制約として
-  `ValidationError`にする）。
 - **2-way clustering（個体+時点同時）**: v1スコープ外。
 - **Driscoll-Kraay HACのカーネル拡張**: Parzen/QSカーネルへの拡張は別issue。
 - **DKの`bandwidth == t_periods - 1`（許容範囲の上限ちょうど）でfixestと数値不一致**:

@@ -70,6 +70,10 @@ test = [
     # IV（2SLS/GMM）のフィクスチャ生成に使った主リファレンス実装
     # （`docs/spec/iv-spec.md`4章）。statsmodelsと同じ理由で`==`厳密固定。
     "linearmodels==7.1",
+    # MOP有効F統計量のオラクル（`benchmark/iv/references/mop_oracle.py`）が使う
+    # `ncx2`の分位点。statsmodels/linearmodelsの間接依存としても入るが、オラクルが
+    # 直接importするため明示し、数値が変わらないよう`==`で固定する。
+    "scipy==1.18.0",
     "ruff==0.17.3",
     # Wooldridge実データでのクロスチェックテスト用（tests/support/_helpers.pyの
     # wooldridge_loader）。標準CIで確実に実行されるよう
@@ -79,6 +83,11 @@ test = [
     # 下記pyarrow同様、ライセンス上の制約（実データをCSVとして
     # 固定・再配布しない方針、testing-policy.md参照）とは無関係。
     "wooldridge==0.5.0",
+    # docs/guide/pickling.mdの例(joblibでfit結果を別プロセスへ渡す)を、
+    # tests/cross_method/test_doc_examples.pyが別プロセスで実行するために使う。
+    # 実行時に`cloudpickle>=3.0`を要求するため、cloudpickleも間接的に入る
+    # (どちらもtestグループだけで、配布するwheelには入らない)。
+    "joblib==1.6.0",
     # polars.DataFrame.to_pandas()が内部で要求する。テストがリファレンス実装
     # （statsmodels/linearmodels/R）へ渡すためpandasに変換する箇所と、benchmark/・
     # performance/配下のリファレンス実装アダプタ（compare_*.py）が使う。pandas側は

@@ -16,11 +16,11 @@ A column is read in one of four roles, and each role accepts different dtypes. A
 | Role | Arguments | Accepted dtypes |
 |---|---|---|
 | Numeric value | `y`, `x`, `weight`, `x_exog`, `x_endog`, `instruments` | Integers (`Int8` to `Int128`, `UInt8` to `UInt64`; `UInt128` is not accepted in any role), floats (`Float16`, `Float32`, `Float64`), `Boolean`, `Decimal` |
-| Group identity | the first column of `effects` (FE, RE), `cluster` | Integers, floats, `String`, `Categorical`, `Enum`, `Boolean`, `Date`, `Datetime` (no time zone) |
-| Time period (panel) | the second column of `effects` (FE, RE, two-way), `dk_time` | Integers, floats, `String`, `Categorical`, `Enum`, `Date`, `Datetime` (no time zone) |
+| Group identity | the first column of `effects` (FE, FEIV, FEGMM, RE), the third and later columns of `effects` (FE, FEIV, FEGMM), `cluster` | Integers, floats, `String`, `Categorical`, `Enum`, `Boolean`, `Date`, `Datetime` (no time zone) |
+| Time period (panel) | the second column of `effects` (FE, FEIV, FEGMM, RE, two-way), `dk_time` | Integers, floats, `String`, `Categorical`, `Enum`, `Date`, `Datetime` (no time zone) |
 | Time order (HAC) | `hac_time` | Integers, floats, `Decimal`, `Date`, `Datetime` (with or without a time zone). Not `Boolean`, which has at most two distinct values |
 
-In `FE` and `RE`, the role of a column in `effects` follows its position, not its content: the first column is read as a group identity (an entity) and the second as a time period, and the order is not checked. A *group* is one level of a column of `effects`, for example one entity. If you pass the time column first, it is treated as the entity, including for the default clustering column.
+In `FE`, `FEIV`, `FEGMM` and `RE`, the role of a column in `effects` follows its position, not its content: the first column is read as a group identity (an entity) and the second as a time period, and the order is not checked. A *group* is one level of a column of `effects`, for example one entity. If you pass the time column first, it is treated as the entity, including for the default clustering column.
 
 Not accepted in a numeric role: `String`, `Categorical`, `Enum`, `Date`, `Datetime`, `Time`, `Duration`, `Binary`, `List`, `Array`, `Struct`. Also not accepted as a group identity or a time period: `Time`, `Duration`, `Decimal`, `Binary`, `List`, `Array`, `Struct`; nor, as a time period, `Boolean`. A `Datetime` with a time zone is rejected as a group identity or a time period, with a message that says how to remove the zone: convert it to the zone you want to keep, then call `.dt.replace_time_zone(None)`. (`hac_time` accepts a time zone, and is compared in its own dtype rather than converted to a float; see [Order of observations for HAC](#order-of-observations-for-hac).) A column of the `Null` dtype (every value is missing) is reported as containing missing values, not as a dtype problem.
 
@@ -48,9 +48,13 @@ The conversion is silent. If the exact value matters, check the range of your da
 
 Group identity and time period columns are compared by their text form, so only equality matters for a group identity. A time period also has an order, which comes from the values of the column rather than from the text (see the next section). Floats are accepted but must be finite: a NaN or an infinite value in a float column of any of these roles is an error, as it is for numeric values. Because the comparison is on the text form, `0.0` and `-0.0` are different groups. If such values can occur in a float key, convert the column to an integer or a string first.
 
+A label of a `String`, `Categorical` or `Enum` column that is empty or only whitespace (`""`, `" "`, a tab, a no-break space or any other character with the Unicode White_Space property) is rejected in these roles with a `ValidationError`. The message names the column, the number of such rows and the first of them. A missing value that was written as an empty string would otherwise become a group of its own, and the entities, periods or clusters that have no label would be pooled without any sign of it. Fix the labels or remove those rows before the call. Whitespace around other characters is not touched: `"A "` and `"A"` are different labels, and both are used as given. If they should be the same, strip the column yourself (`pl.col("id").str.strip_chars()`).
+
+Tokens such as `"NA"`, `"NaN"`, `"null"` and `"None"` are not treated as missing values. They can be real labels (`"NA"` is the ISO code of Namibia), and nothing is converted behind your back. If such a token stands for a missing value in your data, turn it into a null before the call, for example with `null_values=` in `pl.read_csv` or with `replace`, and then drop or fill those rows, because a null in a key column is an error as well.
+
 ## Order of time periods
 
-For `cov_type="dk"` (Driscoll-Kraay) in FE and RE, the periods of the `dk_time` column must be put in time order. The same order applies to the second column of `effects` in FE and RE, which defines the time effects. The order comes from the values of the column, not from the text of the labels, so integers with different numbers of digits (`1, 2, ..., 12`), negative numbers and decimals are ordered correctly:
+For `cov_type="dk"` (Driscoll-Kraay) in FE, FEIV, FEGMM and RE, the periods of the `dk_time` column must be put in time order. The same order applies to the second column of `effects` in FE, FEIV, FEGMM and RE, which defines the time effects. The order comes from the values of the column, not from the text of the labels, so integers with different numbers of digits (`1, 2, ..., 12`), negative numbers and decimals are ordered correctly:
 
 | Dtype of `dk_time` or of the second `effects` column | Order of the periods |
 |---|---|
@@ -61,7 +65,7 @@ For `cov_type="dk"` (Driscoll-Kraay) in FE and RE, the periods of the `dk_time` 
 
 A string or a `Categorical` has no time order of its own, so its labels are sorted as text: `"9"` comes after `"10"`, and `"Q10"` comes right after `"Q1"`. If your periods are strings, use labels whose text order is the time order (ISO 8601 dates, zero-padded numbers), or use an `Enum` with the categories listed in time order. The row order of the data does not matter.
 
-The same order applies to the two-way fixed effects returned by `fixed_effects()`: the dictionary keyed by the name of the second `effects` column lists the periods in time order, and its first period is the reference with an effect of 0.
+The same order applies to the fixed effects returned by `fixed_effects()`: the dictionary keyed by the name of the second `effects` column lists the periods in time order, and its first period is the reference with an effect of 0. The third and later columns of `effects` are group identities, not time periods: their groups are listed in the order of their labels written as text (so `"10"` comes before `"2"`, even for an integer column), and the first group (of each connected set of groups, when the groups are not all connected) is the reference with an effect of 0.
 
 ## Argument types
 

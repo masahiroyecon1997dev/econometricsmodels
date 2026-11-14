@@ -298,6 +298,17 @@ def test_strongly_collinear_regressors_are_not_rejected_as_separation(solver):
     )
 
 
+@pytest.mark.parametrize("n_regressors", [14, 24])
+@pytest.mark.parametrize("seed", [1, 2, 3])
+@pytest.mark.parametrize("solver", ["newton", "bfgs", "lbfgs"])
+def test_mixed_scale_regressors_are_not_rejected_as_separation(
+    solver, seed, n_regressors
+):
+    _checks.check_mixed_scale_regressors_are_not_rejected_as_separation(
+        Probit, ProbitOptions, "probit", solver, seed, n_regressors
+    )
+
+
 def test_non_convergence_raises_computation_error_with_tiny_max_iter(
     binary_dataset,
 ):

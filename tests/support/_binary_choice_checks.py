@@ -55,6 +55,7 @@ from _helpers import (
 from _nonlinear_helpers import (
     check_margeff,
     load_apple_adoption_dataset,
+    mixed_scale_binary_dataset,
     multi_dummy_separation_dataset,
     separated_dataset,
     single_overlap_binary_dataset,
@@ -1306,6 +1307,21 @@ def check_strongly_collinear_regressors_are_not_rejected_as_separation(
     df = strongly_collinear_binary_dataset(link)
     res = estimator_cls(
         df, y="y", x=["x1", "x2", "x3"], options=options_cls(solver=solver)
+    ).fit()
+    assert res.converged is True
+
+
+def check_mixed_scale_regressors_are_not_rejected_as_separation(
+    estimator_cls, options_cls, link, solver, seed, n_regressors
+):
+    """平均が標準偏差より大きい列を含む混合スケールの説明変数で、分離していない2値データは
+    `SEPARATION_CHECK_FAILED`にも`SEPARATION_DETECTED`にもならず収束する。かつては分離検出の
+    線形計画（許容領域が原点だけの退化した問題）で単体法が終わらず、`n_regressors=14`以上で
+    列の組み合わせによって失敗した。"""
+    df = mixed_scale_binary_dataset(link, seed)
+    x = [f"x{j}" for j in range(1, n_regressors + 1)]
+    res = estimator_cls(
+        df, y="y", x=x, options=options_cls(solver=solver)
     ).fit()
     assert res.converged is True
 

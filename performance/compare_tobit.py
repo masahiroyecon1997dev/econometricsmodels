@@ -64,7 +64,7 @@ OLS/WLS/Logit/Probit は statsmodels、IV は linearmodels をリファレンス
   - **発火はリリース単位**。`benchmark_performance.yml` はタグ push（`v*`）+
     `workflow_dispatch` のみで、per-PR では回らない。solver 回帰が
     リリースブランチにマージされても次のタグまで捕捉されない。
-- 単体テスト（`engine/src/nonlinear/common.rs` の
+- 単体テスト（`engine/src/nonlinear/common/newton/tests/stall.rs` の
   `run_solver_newton_converges_when_cost_hits_floating_point_floor_above_gradient_tol`
   ほか）は停滞判定ロジックの模擬。実 Tobit 経路を大標本で通す自動チェックはこの
   guard が唯一（上記の限界つき）。実行時間も `docs/performance/tobit.md` に記録され、

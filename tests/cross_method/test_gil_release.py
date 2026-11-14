@@ -30,6 +30,8 @@ import polars as pl
 import pytest
 from econometricsmodels import (
     FE,
+    FEGMM,
+    FEIV,
     IV,
     OLS,
     RE,
@@ -52,6 +54,22 @@ FITS: dict[str, Callable[[pl.DataFrame], object]] = {
         d, y="y", x_exog=X_NAMES, x_endog=["endog"], instruments=["z1", "z2"]
     ).fit(),
     "FE": lambda d: FE(d, y="y", x=X_NAMES, effects=["entity"]).fit(),
+    "FEIV": lambda d: FEIV(
+        d,
+        y="y",
+        x_exog=X_NAMES,
+        x_endog=["endog"],
+        instruments=["z1", "z2"],
+        effects=["entity"],
+    ).fit(),
+    "FEGMM": lambda d: FEGMM(
+        d,
+        y="y",
+        x_exog=X_NAMES,
+        x_endog=["endog"],
+        instruments=["z1", "z2"],
+        effects=["entity"],
+    ).fit(),
     "RE": lambda d: RE(d, y="y", x=X_NAMES, effects=["entity"]).fit(),
 }
 
@@ -65,6 +83,8 @@ ROWS = {
     "Tobit": 20_000,
     "IV": 50_000,
     "FE": 200_000,
+    "FEIV": 50_000,
+    "FEGMM": 50_000,
     "RE": 50_000,
     # 推定後のメソッド。White検定は補助回帰の項数が多く、同じ行数でも遅い。
     # `marginal_effects`は`fit()`より桁違いに速いので、`fit()`（測定の外）に時間がかかり
@@ -75,6 +95,15 @@ ROWS = {
     "Logit.marginal_effects": 40_000,
     "Probit.marginal_effects": 40_000,
     "Tobit.marginal_effects": 40_000,
+    "IV.cragg_donald": 50_000,
+    "IV.kleibergen_paap": 50_000,
+    "IV.effective_f": 50_000,
+    "IV.c_stat": 50_000,
+    "FEIV.cragg_donald": 50_000,
+    "FEIV.kleibergen_paap": 50_000,
+    "FEIV.effective_f": 50_000,
+    "FEIV.fixed_effects": 50_000,
+    "FEGMM.c_stat": 50_000,
 }
 
 
@@ -107,6 +136,17 @@ CASES: dict[str, Callable[[pl.DataFrame], Callable[[], object]]] = {
     ),
     "Tobit.marginal_effects": _post_case(
         "Tobit", lambda r: r.marginal_effects()
+    ),
+    "IV.cragg_donald": _post_case("IV", lambda r: r.cragg_donald()),
+    "IV.kleibergen_paap": _post_case("IV", lambda r: r.kleibergen_paap()),
+    "IV.effective_f": _post_case("IV", lambda r: r.effective_f()),
+    "IV.c_stat": _post_case("IV", lambda r: r.c_stat(variables=["endog"])),
+    "FEIV.cragg_donald": _post_case("FEIV", lambda r: r.cragg_donald()),
+    "FEIV.kleibergen_paap": _post_case("FEIV", lambda r: r.kleibergen_paap()),
+    "FEIV.effective_f": _post_case("FEIV", lambda r: r.effective_f()),
+    "FEIV.fixed_effects": _post_case("FEIV", lambda r: r.fixed_effects()),
+    "FEGMM.c_stat": _post_case(
+        "FEGMM", lambda r: r.c_stat(variables=["endog"])
     ),
 }
 

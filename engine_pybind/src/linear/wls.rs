@@ -32,7 +32,7 @@ use crate::shared::option_repr::PyRepr;
 use crate::shared::option_values::{
     extract_strict_float, extract_strict_opt_column, extract_strict_opt_int, extract_strict_text,
 };
-use crate::shared::validation::{RoleValue, validate_common_roles, validate_no_duplicate_roles};
+use crate::shared::validation::validate_weighted_roles;
 
 /// Estimation options for WLS.
 ///
@@ -448,11 +448,7 @@ fn fit_frame(
     // （`docs/spec/wls-spec.md`「API引数」参照）。`weight`と`x`の重複は禁止しない
     // （重みに使った列を説明変数としても含める実務上の利用例があるため。
     // `weight == y`は`y`を独立変数としても使うのと同型の致命的な問題のため引き続き禁止）。
-    validate_common_roles(&y, &x, options.include_intercept)?;
-    validate_no_duplicate_roles(&[
-        ("y", RoleValue::Single(&y)),
-        ("weight", RoleValue::Single(&weight)),
-    ])?;
+    validate_weighted_roles(&y, &x, &weight, options.include_intercept)?;
 
     // ── y列の抽出 ──────────────────────────────────────────────────────
     let y_slice = extract_f64_column(df, &y, ColumnSource::new("y", "data"))?;

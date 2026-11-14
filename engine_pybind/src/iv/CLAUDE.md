@@ -25,6 +25,12 @@
 - `overid_statistic`/`overid_p_value`/`overid_df`: `estimator="2sls"`は`TwoSlsEstimator::sargan_*`（Sargan）、`estimator="gmm"`は`GmmEstimator::hansen_j_*`（Hansen J）から代入する。丁度識別では`None`。
 - `converged: bool`/`n_iter: i64`: `raise_on_non_convergence=False`でもGMMが収束したかをPython側で確認できるようにするための`IVResult`のフィールド（`LogitResult`/`ProbitResult`と同じ位置づけ）。`estimator="2sls"`は閉形式・非反復なので常に`converged=true`・`n_iter=1`。
 
+## 弱操作変数診断のメソッド（`cragg_donald()`・`kleibergen_paap()`・`effective_f()`）
+
+`fit()`では計算しない事後診断。`IVResult`が非公開フィールドで`source_data`（`fit()`に渡した`DataFrame`への参照）・`options`（`IVOptions`の複製）・`x_exog`・`x_endog`・`instruments`の列名（`y`は`dep_var_name`）を持ち、`diagnostics.rs`の`Rebuilt`が`select_columns`で列を取り込み直して（GILが要る）、`py.detach`の中で`build_iv_input`→`engine`の`compute_*`を呼ぶ。`fit()`と同じ`build_iv_input`なので列の検査と並びが一致する。`source_data`と`options`は`fit`が結果を組み立てた後でGILを持って付ける（`OLSResult`と同じ）。`options`の`PickleField`は`result.rs`にある（`IVOptions`自身の`__reduce__`に任せる）。出力は`CraggDonaldOutput`・`KleibergenPaapOutput`・`EffectiveFOutput`（臨界値は`(水準, 値)`のタプルの列で、Python側が`dict`にする）。
+
+**`c_stat()`（C統計量）も同じ仕組み**（`run_c_stat`、出力は`CStatisticOutput`）。名前（`variables`は`x_endog`、`instruments`は除外操作変数）は、GILを持つ側で一覧の検査（空は`ROLE_EMPTY`、重複は`ROLE_DUPLICATE_COLUMN`）と位置への変換（モデルに無い名前は`C_STATISTIC_UNKNOWN_VARIABLE`。`COLUMN_NOT_FOUND`は`hint`が`data`の列を指すので使わない）を済ませ、昇順の位置をengineへ渡す。両方未指定はengineの`C_STATISTIC_NOTHING_TO_TEST`に任せる。重みは`gmm_type`が`two_step`・`iterated`なら`BuiltIvInput.plan.gmm`の`weight`、それ以外（2SLS・1段階GMM）は`weight_type_for_cov_type(&built.cov_type)`（`c_statistic_weight`）。`tests/cross_method/test_pickle.py`の`TRANSIENT`・`test_gil_release.py`・`test_keyword_only_arguments.py`に登録済み。
+
 ## `first_stage()`
 
 `IVResult`の非公開フィールド`first_stage: Vec<(String, OLSResult)>`から返す。`estimator`（2sls/gmm）に依存しない表現にするため、`LogitResult`/`ProbitResult`のように推定量そのものは保持しない。`fit`が第一段階の`OlsEstimator`（設計行列を持つ）を`linear::ols::ols_estimator_to_result`で`OLSResult`へ変換して保持し（設計行列を手放せる）、`first_stage()`は`OLSResult::clone_ref`で複製して返す。pickleでは各`OLSResult`がそのまま状態に入る。第一段階回帰はそれ自体が正しい（ナイーブな）通常のOLSであり（`engine::iv::two_sls`のモジュールdocコメント参照）、OLSとの共有を避ける理由が無いため`ols_estimator_to_result`を再利用する。返る各`OLSResults.f_statistic`/`f_p_value`は通常のOLS F検定（`x_exog`の寄与を含む）であり、弱操作変数診断の部分F統計量（`weak_instrument_f_statistics`）とは別物（`IVResult`のdocコメント参照）。

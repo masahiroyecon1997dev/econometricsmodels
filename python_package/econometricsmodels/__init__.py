@@ -12,7 +12,11 @@ from ._lib import ComputationError, ValidationError
 from .diagnostics import (
     BreuschGodfreyTestResult,
     BreuschPaganTestResult,
+    CraggDonaldResult,
+    CStatisticResult,
     DiagnosticResult,
+    EffectiveFResult,
+    KleibergenPaapResult,
     WhiteTestResult,
 )
 from .error_codes import ErrorCode
@@ -23,23 +27,35 @@ from .nonlinear.logit import Logit, LogitOptions, LogitResults
 from .nonlinear.probit import Probit, ProbitOptions, ProbitResults
 from .nonlinear.tobit import Tobit, TobitOptions, TobitResults
 from .panel.fe import FE, FEOptions, FEResults
+from .panel.fe_gmm import FEGMM, FEGMMOptions, FEGMMResults
+from .panel.fe_iv import FEIV, FEIVOptions, FEIVResults
 from .panel.re import RE, REOptions, REResults
 
 __all__ = [
     "FE",
+    "FEGMM",
+    "FEIV",
     "IV",
     "OLS",
     "RE",
     "WLS",
     "BreuschGodfreyTestResult",
     "BreuschPaganTestResult",
+    "CStatisticResult",
     "ComputationError",
+    "CraggDonaldResult",
     "DiagnosticResult",
+    "EffectiveFResult",
     "ErrorCode",
+    "FEGMMOptions",
+    "FEGMMResults",
+    "FEIVOptions",
+    "FEIVResults",
     "FEOptions",
     "FEResults",
     "IVOptions",
     "IVResults",
+    "KleibergenPaapResult",
     "Logit",
     "LogitOptions",
     "LogitResults",

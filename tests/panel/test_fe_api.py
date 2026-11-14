@@ -233,6 +233,31 @@ def test_fixed_effects_two_way_structure(fe_dataset):
     assert all(isinstance(v, float) for v in effects["time"].values())
 
 
+@pytest.mark.parametrize(
+    "scenario", ["unbalanced", "unbalanced_sparse", "unbalanced_disconnected"]
+)
+def test_fixed_effects_two_way_on_an_unbalanced_panel_reproduce_the_residuals(
+    scenario,
+):
+    """不均衡な2-wayでも、`y - Xβ - α_i - γ_t`が`residuals`に一致する
+    （効果の組合せ`α_i + γ_t`は基準化によらず決まる）。連結成分が複数あるパネルでは、
+    各成分の最初の時点の効果が0になる。"""
+    df = pl.read_csv(DATA_DIR / f"fe_{scenario}.csv")
+    res = our_fit(df, effects=["entity", "time"])
+    effects = res.fixed_effects()
+    fitted = (
+        sum(res.params[name] * df[name] for name in ("x1", "x2"))
+        + df["entity"].replace_strict(
+            effects["entity"], return_dtype=pl.Float64
+        )
+        + df["time"].replace_strict(effects["time"], return_dtype=pl.Float64)
+    )
+    residual = (df["y"] - fitted).to_list()
+    assert residual == pytest.approx(res.residuals, abs=1e-8)
+    # 時点の効果は時間順に並び、少なくとも先頭の時点は基準（0）。
+    assert next(iter(effects["time"].values())) == 0.0
+
+
 # ── 統計的健全性チェック（クラスターSE） ──────────────────────────────
 
 

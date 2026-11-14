@@ -2,7 +2,8 @@ name: Check cargo tool updates
 
 # Dependabotは`.devcontainer/Dockerfile`の`cargo install`行・`ARG`値や、ワークフローの
 # `tool: <crate>@<版>`を扱えないため、ピン留めしたcargo開発ツールの更新と、
-# DockerfileとCIのピンの食い違いをここで定期確認する（詳細は docs/spec/ci-cd-notes.md）。
+# DockerfileとCIのピンの食い違いに加え、`rust-toolchain.toml`で固定したRustの版（最新stableとの
+# 差、DockerfileのRUST_VERSIONとの食い違い）をここで定期確認する（詳細は docs/spec/ci-cd-notes.md）。
 # 更新があればIssueを自動起票（既存の未クローズIssueがあれば本文を更新）し、
 # すべて最新かつ一致したら自動でクローズする。
 on:
@@ -66,5 +67,5 @@ jobs:
             --jq "map(select(.title == env.ISSUE_TITLE)) | .[0].number // empty")
           if [ -n "$number" ]; then
             gh issue close "$number" \
-              --comment "All pinned cargo dev tools are up to date and the Dockerfile and CI pins agree."
+              --comment "All pinned cargo dev tools and the Rust toolchain are up to date and the Dockerfile and CI pins agree."
           fi

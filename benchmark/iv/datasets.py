@@ -81,7 +81,8 @@ SCENARIOS = [
 # 丁度識別・過剰識別を問わずx_exog=['x1'], x_endog=['endog1'], instruments=[...]の
 # 構造で数値比較できるシナリオ。perfect_multicollinearityはComputationErrorの発生
 # 確認のみ（testing-policy.md「テストの3系統」）、scale_variance（x1*1e6, x2*1e-3）は
-# 全cov_typeでComputationErrorのためここに含めない。scale_variance_mildは、より緩い
+# 単位を揃えたデータとの一致をテストコード側で確認するため、参照実装との比較には含めない。
+# scale_variance_mildは、より緩い
 # スケール差（x1*1e2, x2*1e-1）の成功パスで、faer等の数値計算ライブラリ依存部分の
 # 精度リグレッションを検知する（OLSのscale_variance_mildと同じ発想）。
 NUMERIC_SCENARIOS = [

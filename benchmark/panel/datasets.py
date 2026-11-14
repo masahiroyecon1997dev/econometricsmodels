@@ -54,6 +54,8 @@ SCENARIOS = [
     "singleton_entity",
     "singleton_time",
     "unbalanced_two_way",
+    "unbalanced_sparse",
+    "unbalanced_disconnected",
     "zero_variance_regressor",
     "time_invariant_unbalanced",
     "time_invariant_multi_unbalanced",
@@ -94,6 +96,10 @@ _TIME_EFFECT_NOISE_SD = 0.5
 # ならない範囲でのみ脱落させる。`fe-spec.md`1章のsingleton自動検出との切り分けのため、
 # このシナリオ自体はsingletonを含まない「成功パス」として設計する）。
 _UNBALANCED_DROP_PROB = 0.2
+
+# unbalanced_sparseシナリオで行を残す確率（個体にも時点にも2行以上は必ず残す）。n=240のうち
+# 4割ほどしか残らず、個体と時点のつながりが細くなる（交互射影の収束が遅い側）。
+_SPARSE_KEEP_PROB = 0.4
 
 # cross_sectionally_correlatedシナリオでの時点共通ショックの標準偏差
 # （固有誤差と同じスケール=1.0で、クロスセクション相関の寄与を無視できない
@@ -274,6 +280,36 @@ def _drop_rows_keep_min_count(
     return df.filter(pl.Series(keep_mask))
 
 
+def _drop_rows_keep_min_counts_both(
+    df: pl.DataFrame,
+    rng: np.random.Generator,
+    keep_prob: float,
+    min_count: int,
+) -> pl.DataFrame:
+    """個体にも時点にも残り観測数が`min_count`未満にならない範囲で、確率`1 - keep_prob`で行を間引く。
+
+    観測順に1行ずつ判定し、脱落させると個体または時点の残数が`min_count`を割り込む場合は
+    スキップする（決定的な処理順）。
+    """
+    remaining: dict[str, dict] = {}
+    for column in ("entity", "time"):
+        counts = df.group_by(column).len().to_dict(as_series=False)
+        remaining[column] = dict(zip(counts[column], counts["len"]))
+    keep_mask = []
+    for entity, time in zip(df["entity"], df["time"]):
+        removable = (
+            remaining["entity"][entity] > min_count
+            and remaining["time"][time] > min_count
+        )
+        if removable and rng.uniform() >= keep_prob:
+            remaining["entity"][entity] -= 1
+            remaining["time"][time] -= 1
+            keep_mask.append(False)
+        else:
+            keep_mask.append(True)
+    return df.filter(pl.Series(keep_mask))
+
+
 def generate_fe_dataset(
     scenario: str,
     n_entities: int = _DEFAULT_N_ENTITIES,
@@ -420,10 +456,21 @@ def generate_fe_dataset(
             df, rng, _UNBALANCED_DROP_PROB, min_count=2
         )
     elif scenario == "unbalanced_two_way":
-        # singletonを作らない軽微な不均衡（先頭1行だけ落とす）。
-        # 2-way FE要求時にPanelError::UnbalancedPanelForTwoWayを誘発する
-        # （エラーパス専用、数値比較の対象外）。
+        # singletonを作らない軽微な不均衡（先頭1行だけ落とす）。2-wayで推定できる
+        # 「ほぼバランス」の成功パス（交互射影が働く最小の不均衡）。
         df = df.slice(1, df.height - 1)
+    elif scenario == "unbalanced_sparse":
+        # 行を4割ほどしか残さない疎な不均衡パネル（個体にも時点にも2行以上は残す）。
+        df = _drop_rows_keep_min_counts_both(
+            df, rng, _SPARSE_KEEP_PROB, min_count=2
+        )
+    elif scenario == "unbalanced_disconnected":
+        # 個体と時点を前半・後半に分け、同じ半分どうしの行だけを残す。個体と時点のつながりが
+        # 2つの連結成分に分かれる（傾きは識別できる）。その上で疎に間引く。
+        entity_half = pl.col("entity").rank("dense") <= n_entities // 2
+        time_half = pl.col("time").rank("dense") <= n_periods // 2
+        df = df.filter(entity_half == time_half)
+        df = _drop_rows_keep_min_counts_both(df, rng, 0.8, min_count=2)
     elif scenario == "singleton_entity":
         # 先頭エンティティの観測を1件だけ残す（1-way FE要求時に
         # PanelError::SingletonGroupを誘発、エラーパス専用）。

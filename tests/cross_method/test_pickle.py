@@ -29,6 +29,8 @@ from _dtype_helpers import make_frame
 from _errors import raises_error
 from econometricsmodels import (
     FE,
+    FEGMM,
+    FEIV,
     IV,
     OLS,
     WLS,
@@ -51,7 +53,15 @@ PROTOCOLS = range(pickle.HIGHEST_PROTOCOL + 1)
 
 # `fit()`の途中結果を包むだけで、利用者が保持しない内部の型（すぐ`dataclass`に包まれる）。
 TRANSIENT = frozenset(
-    {"WhiteTestOutput", "BreuschPaganTestOutput", "BreuschGodfreyTestOutput"}
+    {
+        "WhiteTestOutput",
+        "BreuschPaganTestOutput",
+        "BreuschGodfreyTestOutput",
+        "CraggDonaldOutput",
+        "KleibergenPaapOutput",
+        "EffectiveFOutput",
+        "CStatisticOutput",
+    }
 )
 
 
@@ -160,6 +170,27 @@ SAMPLES = {
         dk_time="t",
         dk_bandwidth=1,
     ),
+    "FEIVOptions": lambda: _lib.FEIVOptions(
+        cov_type="dk",
+        confidence_level=0.85,
+        cluster="entity",
+        dk_time="t",
+        dk_bandwidth=1,
+        max_iter=500,
+    ),
+    "FEGMMOptions": lambda: _lib.FEGMMOptions(
+        cov_type="dk",
+        confidence_level=0.85,
+        cluster="entity",
+        dk_time="t",
+        dk_bandwidth=1,
+        gmm_type="iterated",
+        gmm_weight_type="cluster",
+        gmm_max_iter=9,
+        gmm_tol=1e-5,
+        raise_on_non_convergence=False,
+        max_iter=500,
+    ),
     "REOptions": lambda: REOptions(
         cov_type="cluster",
         cluster="cluster",
@@ -178,6 +209,29 @@ SAMPLES = {
             dk_time="t",
             dk_bandwidth=1,
         )._raw
+    ),
+    "FEIVResult": lambda: _lib.fit_fe_iv(
+        _frame(),
+        "y",
+        ["x2"],
+        ["x1"],
+        ["z", "z2"],
+        ["entity", "t"],
+        _lib.FEIVOptions(cov_type="dk", dk_time="t", dk_bandwidth=1),
+    ),
+    "FEGMMResult": lambda: _lib.fit_fe_gmm(
+        _frame(),
+        "y",
+        ["x2"],
+        ["x1"],
+        ["z", "z2"],
+        ["entity", "t"],
+        _lib.FEGMMOptions(
+            cov_type="dk",
+            dk_time="t",
+            dk_bandwidth=1,
+            gmm_weight_type="classical",
+        ),
     ),
     "LogitResult": _logit_raw,
     "TobitResult": _tobit_raw,
@@ -535,6 +589,32 @@ def test_restored_fe_result_keeps_the_fixed_effects(
 
 
 @pytest.mark.parametrize(
+    "compute_before", [False, True], ids=["lazy", "cached"]
+)
+def test_restored_multi_way_fe_result_keeps_the_fixed_effects(
+    compute_before: bool,
+) -> None:
+    """3つ以上の効果でも、固定効果は遅延計算の前後どちらで`pickle`しても同じ値になる。"""
+
+    def fit():
+        return FE(
+            _frame(),
+            y="y",
+            x=["x1", "x2"],
+            effects=["entity", "t", "cluster"],
+        ).fit()
+
+    result, expected = fit(), fit().fixed_effects()
+    if compute_before:
+        result.fixed_effects()
+    clone = pickle.loads(pickle.dumps(result))
+    assert list(expected) == ["entity", "t", "cluster"]
+    assert clone.fixed_effects() == expected
+    assert clone.n_groups == result.n_groups
+    assert pickle.loads(pickle.dumps(clone)).fixed_effects() == expected
+
+
+@pytest.mark.parametrize(
     "options",
     [{}, {"estimator": "gmm", "cov_type": "hc1"}],
     ids=["2sls", "gmm"],
@@ -668,7 +748,40 @@ def test_restore_checks_the_type_of_every_field(
             _lib._restore_pickled(kind, version, broken)
 
 
-_COV_STATE_NAMES = sorted(name for name in SAMPLES if name.endswith("Result"))
+# 係数の分散共分散行列（`cov_params`）を状態に持たない結果クラス。推定量の結果ではなく、
+# 検定・限界効果の結果なので係数の共分散行列を持たない。
+_RESULTS_WITHOUT_COV_PARAMS = frozenset(
+    {
+        "CensoringFitCategoryResult",
+        "CensoringFitCheckResult",
+        "MarginalEffectsResult",
+    }
+)
+_RESULT_NAMES = sorted(name for name in SAMPLES if name.endswith("Result"))
+_COV_STATE_NAMES = [
+    name for name in _RESULT_NAMES if name not in _RESULTS_WITHOUT_COV_PARAMS
+]
+
+
+def test_results_without_cov_params_are_all_pickle_samples() -> None:
+    """`_RESULTS_WITHOUT_COV_PARAMS`の名前は、どれも`SAMPLES`の結果クラスである。
+
+    結果クラスを改名・削除したときに、古い名前が黙って残らないようにする。
+    """
+    assert _RESULTS_WITHOUT_COV_PARAMS <= set(_RESULT_NAMES)
+
+
+@pytest.mark.parametrize("name", _RESULT_NAMES)
+def test_every_result_class_is_listed_by_whether_it_keeps_cov_params(
+    samples: dict[str, object], name: str
+) -> None:
+    """結果クラスの状態に`cov_params`があるかどうかが、`_RESULTS_WITHOUT_COV_PARAMS`の記載と一致する。
+
+    結果クラスを足したときに、`cov_params`の形の検査（下のテスト）の対象から黙って漏れない
+    ようにする。
+    """
+    _, _, state = _reduce_args(samples[name])
+    assert ("cov_params" in state) == (name not in _RESULTS_WITHOUT_COV_PARAMS)
 
 
 @pytest.mark.parametrize("name", _COV_STATE_NAMES)
@@ -685,8 +798,6 @@ def test_restore_rejects_a_malformed_cov_params(
 ) -> None:
     """`cov_params`は行ごとの`bytes`のタプル。形の違う値は、別のフィールドの型違いと同じく拒否する。"""
     kind, version, state = _reduce_args(samples[name])
-    if "cov_params" not in state:
-        pytest.skip("this result class keeps no cov_params field")
     with raises_error(ErrorCode.PICKLE_FORMAT_MISMATCH, object=kind):
         _lib._restore_pickled(kind, version, {**state, "cov_params": broken})
 
@@ -697,6 +808,45 @@ def test_single_coefficient_cov_params_round_trips() -> None:
     assert list(result.cov_params) == ["x1"]
     clone = pickle.loads(pickle.dumps(result))
     assert clone.cov_params == result.cov_params
+
+
+def test_fe_iv_results_wrapper_round_trips_with_the_endogenous_order() -> None:
+    """`FEIVResults`は、`x_endog`の順を保って往復し、往復後も診断が計算できる。"""
+    data = _frame().with_columns(
+        z3=pl.col("x2") ** 2 + pl.col("z"), z4=pl.col("z2") * pl.col("x2")
+    )
+    result = FEIV(
+        data,
+        y="y",
+        x_exog=["x2"],
+        x_endog=["x1", "z2"],
+        instruments=["z", "z3", "z4"],
+        effects=["entity"],
+    ).fit()
+    for clone in (pickle.loads(pickle.dumps(result)), copy.deepcopy(result)):
+        assert clone.params == result.params
+        assert list(clone.weak_instrument_f_statistics) == ["x1", "z2"]
+        assert list(clone.first_stage()) == ["x1", "z2"]
+        assert clone.cragg_donald() == result.cragg_donald()
+        assert clone.fixed_effects() == result.fixed_effects()
+
+
+def test_fe_gmm_results_wrapper_round_trips_and_computes_c_stat() -> None:
+    """`FEGMMResults`は往復の後も、元のデータから`c_stat()`を計算できる。"""
+    result = FEGMM(
+        _frame(),
+        y="y",
+        x_exog=["x2"],
+        x_endog=["x1"],
+        instruments=["z", "z2"],
+        effects=["entity"],
+    ).fit()
+    expected = result.c_stat(variables=["x1"])
+    for clone in (pickle.loads(pickle.dumps(result)), copy.deepcopy(result)):
+        assert clone.params == result.params
+        assert clone.gmm_type == result.gmm_type
+        assert clone.n_groups == result.n_groups
+        assert clone.c_stat(variables=["x1"]) == expected
 
 
 FITTED_NAMES = ["LogitResult", "ProbitResult", "TobitResult"]

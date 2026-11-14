@@ -9,7 +9,7 @@
 # （classical/hc0〜hc3/cluster/hac）ごとにvcov/sandwichで計算する。hc2/hc3は
 # `vcovHC(model, type="HC2"/"HC3")`（`ivreg:::hatvalues.ivreg`のtype="stage2"、
 # 第二段階OLSのレバレッジをそのまま使う実装）で計算でき、本実装
-# （engine/src/iv/two_sls.rsのhc_cov_params、X̂ベースのレバレッジ）と数値一致することを
+# （engine/src/iv/two_sls/cov.rsのhc_cov_params、X̂ベースのレバレッジ）と数値一致することを
 # 実機確認済み（iv-spec.md 3.1節。旧記述「ivreg側に確立した参照実装が無い」は
 # `ivreg`がdevcontainerにインストールできなかった時期（CLAUDE.md 10章）の調査に
 # 基づく誤りだった）。

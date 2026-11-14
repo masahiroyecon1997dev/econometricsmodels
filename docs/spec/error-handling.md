@@ -89,7 +89,7 @@
 - **どれを落とすかは決めない**。集合のどの列を落としても、その従属は解消する。「後ろの列を落とす」という規則は報告の選び方であって、利用者への指示ではない。
 - **従属が複数あっても最初の1組だけを報告する**（仕様）。`params`は平坦な`list[str]`までしか持てず、複数組を構造のまま表せない。1組を直して再実行すると次の組が出る。
 - 切片`const`も設計の列なので、関わる場合は含まれる（定数列と切片、ダミー変数の罠）。Logit/Probit/Tobitは最適化のために列を標準化（切片ありでは平均も引く）するが、列の特定は標準化前の設計の列で行うので、他の手法と同じ報告になる。ゼロ列、定数列が2つ、非有限値を含む列は、それぞれ1列または2列の従属になる。ゼロ列では`columns`が1列だけになる（専用の`code`は設けない。定数列が2つ以上あるかの判定など、別の検査を抱え込まないため）。
-- 列名は、その回帰の設計の列名。IVの第二段階では予測値の列が内生変数名で出る。REの内部のwithin回帰は時間変化のある列だけを持つため、その名前が出る。補助回帰（Breusch-Godfreyのラグ）は元の列名を持たず`x[j]`・`residual_lag_l`という位置名で出る。White・Breusch-Paganの補助回帰は列を標準化（中心化）してからあてはめるので、切片との共線性（ダミー変数の罠）は切片を含まない形で出る。
+- 列名は、その回帰の設計の列名。IVの第二段階では予測値の列が内生変数名で出る（設計の列名は`x_exog`と`x_endog`の名前）。REの内部のwithin回帰は時間変化のある列だけを持つため、その名前が出る。補助回帰（Breusch-Godfreyのラグ）は元の列名を持たず`x[j]`・`residual_lag_l`という位置名で出る。White・Breusch-Paganの補助回帰は列を標準化（中心化）してからあてはめるので、切片との共線性（ダミー変数の罠）は切片を含まない形で出る。
 - **探索は失敗しない**。診断が本来のエラーを隠さないよう`Result`を返さず、必ず空でない集合を返す。順序つきの探索で見つからなければ列ピボットQRが小さいと判定した列に、それも無ければ全列にフォールバックする。数値的に境界の入力では集合が近似になりうる。順序つきの探索の許容誤差（相対`1e-7`、Rの`lm`と同じ）はQRの特異判定より緩いため、完全な従属とは別に、ほぼ共線な列の組（例: 平均に比べて変動が極小の列）が先に見つかると、その組が報告されることがある。このとき、報告された列を直して再実行しても、次の従属が出る。
 - 計算は失敗経路でだけ走る。直交化は最初の従属の位置`j`で打ち切るので`O(n·j²)`で、元のQRと同じ次数。検出は`engine/src/shared/linear_algebra.rs`の`collinear_columns`で、系統に依存しない（名前を知らない）。呼び出し側が自分の設計の列名に直す。ランク落ちの判定（`RankDeficient`）は列を持たず、列名が要る呼び出し側（`LeastSquaresError::from_rank_deficient`・`checked_design_matrix_qr`）だけが`collinear_columns`を呼ぶ。エラーを捨てる経路（IVのWu-Hausman拡張回帰、Newton法のHessian）では計算しない。
 
@@ -106,7 +106,7 @@
 
 - `#[pyclass(extends=PyValueError / PyRuntimeError)]`のマクロで`ValidationError`/`ComputationError`を生成する（属性定義の重複を避けるため）。`module="econometricsmodels._lib"`。
 - 変換は`to_pyerr(&err)`の1関数。各系統の`*_error_to_pyerr`はこれを呼ぶだけ。`engine_pybind`発の入力不正（`ColumnExtractionError`・オプション検査）も同じ組み立て関数を通す。
-- `_lib.error_catalog()`でカタログをPythonへ渡す（生成スクリプトとテストが読む）。`_lib.raise_error_for_test(code, params)`で任意の`code`を送出できる（カタログ全体の描画検査用）。`raise_error_for_test`と`panic_for_test`は`cfg(debug_assertions)`で**デバッグビルドにだけ**含める。CIのテスト・`maturin develop`・`cargo test`はデバッグビルドなので使えるが、配布するwheel（`--release`）には入らない。`maturin develop --release`（性能計測用）で入れた環境では存在しないので、その後に`pytest`を走らせる前に`maturin develop`（デバッグ）で入れ直す（`uv run`・`uv sync`が拡張をreleaseで再ビルドした場合も同じ）。入れ直さずに走らせても、`tests/conftest.py`が`AttributeError`を検出して、それを使うテストを理由つきでskipし、ヘッダーに警告を出す。CIは常にデバッグビルドなのでskipされず、全体実行の`--check-error-coverage`がskipで送出されなかった`code`を検出する。
+- `_lib.error_catalog()`でカタログをPythonへ渡す（生成スクリプトとテストが読む）。`_lib.raise_error_for_test(code, params)`で任意の`code`を送出できる（カタログ全体の描画検査用）。`raise_error_for_test`と`panic_for_test`は`cfg(debug_assertions)`で**デバッグビルドにだけ**含める。CIのテスト・`maturin develop`・`cargo test`はデバッグビルドなので使えるが、配布するwheel（`--release`）には入らない。`maturin develop --release`（性能計測用）で入れた環境では存在しないので、その後に`pytest`を走らせる前に`maturin develop`（デバッグ）で入れ直す（`uv run`・`uv sync`が拡張をreleaseで再ビルドした場合も同じ）。入れ直さずに走らせると、`tests/conftest.py`が`AttributeError`を検出して、それを使うテストを入れ直し方つきの失敗にし、ヘッダーに警告を出す（スキップはしない。スキップは件数が出るだけで、エラー`code`を送出するテストが黙って動かなくなるため）。CIは常にデバッグビルドなので失敗せず、`--check-no-skips`がスキップを1件でも検出すれば実行全体を失敗にする。
 
 ### panicの境界変換（`guard`）
 

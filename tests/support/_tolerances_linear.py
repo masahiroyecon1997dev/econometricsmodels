@@ -111,7 +111,7 @@ LINEAR_TOLERANCES: dict[str, dict[str, float]] = {
     },
     # 重み=1（または定数重み）のWLSとOLSの一致（r_squared・aic/bic・対数尤度・残差・
     # 予測値）。WLSは元スケールのy・重みから統計量を計算し直す経路
-    # （`engine/src/linear/wls.rs`）、OLSはfaerの行列演算の経路を通るため加算順序に
+    # （`engine/src/linear/wls/statistics.rs`）、OLSはfaerの行列演算の経路を通るため加算順序に
     # 由来する差が出る。実測最大8.9e-16。
     "wls_api": {
         "atol_ols_invariant": 1e-12,

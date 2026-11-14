@@ -28,14 +28,18 @@ Note:
 from __future__ import annotations
 
 import _error_expectations as msgs
+import numpy as np
 import pandas as pd
 import polars as pl
 import pytest
+from _assertions import assert_close
 from _constants import DATA_DIR
 from _error_expectations import escaped
 from _errors import raises_error
 from _fe_helpers import our_fit
+from _helpers import assert_unit_change_invariant
 from _panel_helpers import x_columns
+from _tolerances import TOLERANCES
 from econometricsmodels import (
     FE,
     ComputationError,
@@ -44,7 +48,7 @@ from econometricsmodels import (
     ValidationError,
 )
 
-# `test_scale_variance_raises_computation_error`用（OLS/WLS/IVの同名テストと
+# `test_scale_variance_is_invariant_to_the_units`用（OLS/WLS/IVの同名テストと
 # 同じ全cov_type網羅、hc0はFE非対応のため除く）。
 COV_TYPES = ["classical", "hc1", "hc2", "hc3", "cluster"]
 
@@ -346,7 +350,7 @@ def test_insufficient_degrees_of_freedom_one_way_raises():
     entity 3件×2時点（n=6、singletonなし）・`x=["x1","x2","x3"]`（k=3）で
     `df_model = k + n_entities = 3 + 3 = 6 = n`（`n <= df_model`が成立）。
     この判定はwithin変換直後・設計行列の階数を問う前に行われるため
-    （`engine/src/panel/fe.rs::FeEstimator::fit`のパイプライン順序）、`x`の
+    （`engine/src/panel/fe/fit.rs`の`fit_fe`のパイプライン順序）、`x`の
     値自体は多重共線性等を気にせず自由に選べる。
     """
     df = pl.DataFrame(
@@ -439,20 +443,129 @@ def test_singleton_time_raises():
         FE(df, y="y", x=["x1", "x2"], effects=["entity", "time"]).fit()
 
 
-def test_unbalanced_two_way_raises():
+def test_unbalanced_two_way_is_accepted():
     """`fe_unbalanced_two_way.csv`（先頭1行だけ欠落、n_obs=239 for
-    40×6=240）は2-way FE要求時に`PanelError::UnbalancedPanelForTwoWay`。
-    """
+    40×6=240）は2-way FEで推定できる（組合せが欠ける不均衡パネルは交互射影で
+    計算する）。"""
     df = pl.read_csv(DATA_DIR / "fe_unbalanced_two_way.csv")
+    res = FE(df, y="y", x=["x1", "x2"], effects=["entity", "time"]).fit()
+    assert res.n_obs == 239
+
+
+def test_repeated_entity_time_pair_is_accepted():
+    """同じ`(entity, time)`の組合せが複数の行にあっても、組合せが欠ける不均衡
+    パネルとして推定でき、ダミー変数回帰と一致する（`effects`の列は個体・時点に
+    限らない）。"""
+    df = pl.read_csv(DATA_DIR / "fe_unbalanced_two_way.csv")
+    repeated = pl.concat([df, df.slice(10, 1).with_columns(pl.col("y") + 0.5)])
+    res = FE(repeated, y="y", x=["x1", "x2"], effects=["entity", "time"]).fit()
+    assert res.n_obs == df.height + 1
+
+    entity = repeated["entity"].to_numpy()
+    time = repeated["time"].to_numpy()
+    x = repeated.select("x1", "x2").to_numpy()
+    entity_dummies = (entity[:, None] == np.unique(entity)).astype(float)
+    time_dummies = (time[:, None] == np.unique(time)[1:]).astype(float)
+    design = np.hstack([x, entity_dummies, time_dummies])
+    coefficients = np.linalg.lstsq(
+        design, repeated["y"].to_numpy(), rcond=None
+    )[0]
+    tolerances = TOLERANCES["fe_reference"]
+    for j, name in enumerate(["x1", "x2"]):
+        assert_close(res.params[name], coefficients[j], name, **tolerances)
+
+
+def test_absorption_not_converged_raises():
+    """不均衡な2-wayで交互射影が`max_iter`までに収束しないと
+    `ABSORPTION_NOT_CONVERGED`。"""
+    df = pl.read_csv(DATA_DIR / "fe_unbalanced_two_way.csv")
+    with raises_error(ErrorCode.ABSORPTION_NOT_CONVERGED, n_sweeps=1):
+        FE(
+            df,
+            y="y",
+            x=["x1", "x2"],
+            effects=["entity", "time"],
+            options=FEOptions(max_iter=1),
+        ).fit()
+
+
+@pytest.mark.parametrize("tol", [0.0, -1e-9, float("inf"), float("nan")])
+def test_absorption_tol_must_be_positive_and_finite(fe_dataset, tol):
     with raises_error(
-        ErrorCode.PANEL_NOT_BALANCED_FOR_TWO_WAY,
-        n_obs=239,
-        first_column="entity",
-        n_first_groups=40,
-        second_column="time",
-        n_second_groups=6,
+        ErrorCode.TOLERANCE_NOT_POSITIVE_FINITE,
+        option="tol",
     ):
-        FE(df, y="y", x=["x1", "x2"], effects=["entity", "time"]).fit()
+        our_fit(fe_dataset, options=FEOptions(tol=tol))
+
+
+@pytest.mark.parametrize("max_iter", [0, -1, 10_001])
+def test_absorption_max_iter_must_be_in_range(fe_dataset, max_iter):
+    with raises_error(
+        ErrorCode.MAX_ITER_OUT_OF_RANGE,
+        value=max_iter,
+        min=1,
+        max=10_000,
+    ):
+        our_fit(fe_dataset, options=FEOptions(max_iter=max_iter))
+
+
+def test_leverage_covariance_of_an_unbalanced_two_way_model_has_a_size_limit():
+    """組合せが欠ける2-wayのHC2/HC3は、最大の次元を除いた水準数（2-wayでは
+    水準の少ない方の効果の水準数）の2乗の密な行列を解くので、水準数に上限
+    （3000）がある。"""
+    n = 3001
+    entity = [i for i in range(n) for _ in range(3)]
+    time = [(i + k) % n for i in range(n) for k in range(3)]
+    values = [((7 * j) % 11) / 11.0 for j in range(3 * n)]
+    df = pl.DataFrame(
+        {
+            "entity": entity,
+            "time": time,
+            "y": values,
+            "x1": values[::-1],
+            "x2": [v * v for v in values],
+        }
+    )
+    with raises_error(
+        ErrorCode.LEVERAGE_DIMENSION_TOO_LARGE,
+        n_levels=n,
+        max_levels=3000,
+    ):
+        FE(
+            df,
+            y="y",
+            x=["x1", "x2"],
+            effects=["entity", "time"],
+            options=FEOptions(cov_type="hc2"),
+        ).fit()
+
+
+def test_regressor_with_the_same_value_in_every_row_raises(fe_dataset):
+    """生の値が全て同じ説明変数は、固定効果を除く前に`REGRESSOR_CONSTANT`
+    （固定効果を除いた後の分散ゼロ`REGRESSOR_NO_WITHIN_VARIATION`とは別）。"""
+    df = fe_dataset.with_columns(x2=pl.lit(1.5))
+    with raises_error(ErrorCode.REGRESSOR_CONSTANT, role="x", column="x2"):
+        our_fit(df)
+
+
+def test_singleton_error_reports_how_many_rows_repeated_removal_would_drop():
+    """singletonグループを取り除くと新しいsingletonができる連鎖を含めて、落ちる行の総数を
+    `n_dropped_rows`に載せる（行は自動では落とさない）。"""
+    df = pl.DataFrame(
+        {
+            "entity": ["a", "a", "b", "b", "c"],
+            "time": [1, 2, 2, 3, 3],
+            "y": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "x1": [0.5, 1.5, 0.2, 2.2, 1.1],
+        }
+    )
+    with raises_error(
+        ErrorCode.SINGLETON_GROUP,
+        column="entity",
+        group="c",
+        n_dropped_rows=5,
+    ):
+        FE(df, y="y", x=["x1"], effects=["entity", "time"]).fit()
 
 
 def test_zero_variance_after_demeaning_raises():
@@ -462,7 +575,7 @@ def test_zero_variance_after_demeaning_raises():
     """
     df = pl.read_csv(DATA_DIR / "fe_zero_variance_regressor.csv")
     with raises_error(
-        ErrorCode.REGRESSOR_NO_WITHIN_VARIATION, column="x_invariant"
+        ErrorCode.REGRESSOR_NO_WITHIN_VARIATION, role="x", column="x_invariant"
     ):
         FE(df, y="y", x=["x1", "x2", "x_invariant"], effects=["entity"]).fit()
 
@@ -564,7 +677,7 @@ def test_cluster_count_at_most_slopes_raises_validation_error():
     （`CommonError::InsufficientClustersForInference`）。デフォルトの
     entityクラスタリング・明示`cluster`のどちらでも同じ
     `validate_cluster_count_covers_slopes`が働く
-    （`engine/src/panel/fe.rs`）ため、明示`cluster`側で確認する。
+    （`engine/src/panel/fe/fit.rs`）ため、明示`cluster`側で確認する。
 
     engineユニットテスト
     `fe_estimator_fit_cluster_propagates_insufficient_clusters_for_inference_error`
@@ -819,27 +932,25 @@ def test_perfect_multicollinearity_raises_computation_error(fe_dataset):
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)
-def test_scale_variance_raises_computation_error(fe_dataset, cov_type):
-    """変数間のスケールが極端に異なる設計行列（x1を`*1e6`、x2を`*1e-3`）は、
-    傾き係数の共分散部分行列がスケール比の2乗相当の条件数を持ち倍精度浮動
-    小数点の限界を超えて数値的に特異になり、全体F検定が検出して
-    `ComputationError`（`MATRIX_NEAR_SINGULAR`、`matrix="COEFFICIENT_COVARIANCE"`、
-    `stage="OVERALL_F_TEST"`、OLSの同名テストと同じ原理）。G=40>>q=2のため`test_cluster_count_at_most_slopes_raises_
-    validation_error`（G<=q、`ValidationError`）とは別の失敗経路の
-    backstop確認になる。
+def test_scale_variance_is_invariant_to_the_units(fe_dataset, cov_type):
+    """変数間のスケールが極端に異なる設計行列（x1を`*1e6`、x2を`*1e-3`）でも失敗せず、
+    単位を揃えたデータと同じ全体F統計量・p値になり、係数と標準誤差は列の倍率に従う
+    （傾き係数の分散の比は1e18を超えるが、全体F検定は相関スケール化した部分行列で
+    判定する。OLSの同名テストと同じ原理）。G=40>>q=2のため`test_cluster_count_at_most_slopes_raises_
+    validation_error`（G<=q、`ValidationError`）とは別の経路の確認になる。
     """
     df = fe_dataset.with_columns(
         (pl.col("x1") * 1e6).alias("x1"), (pl.col("x2") * 1e-3).alias("x2")
     )
     options = FEOptions(cov_type=cov_type)
-    with raises_error(
-        ErrorCode.MATRIX_NEAR_SINGULAR,
-        matrix="COEFFICIENT_COVARIANCE",
-        stage="OVERALL_F_TEST",
-    ):
-        FE(
-            df, y="y", x=["x1", "x2"], effects=["entity"], options=options
-        ).fit()
+    assert_unit_change_invariant(
+        lambda d: FE(
+            d, y="y", x=["x1", "x2"], effects=["entity"], options=options
+        ).fit(),
+        df,
+        {"x1": 1e6, "x2": 1e-3},
+        stats=("f_statistic", "f_p_value"),
+    )
 
 
 # ── 例外クラスの継承 ──────────────────────────────────────────────────

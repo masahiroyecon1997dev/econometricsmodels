@@ -1,4 +1,4 @@
-"""devcontainerでピン留めしたcargo開発ツールの更新を確認する。
+"""devcontainerでピン留めしたcargo開発ツールとRustツールチェーンの更新を確認する。
 
 Dependabotは`.devcontainer/Dockerfile`の`cargo install`行・`ARG`値や、
 ワークフローの`tool: <crate>@<版>`（taiki-e/install-action）の中身を見ない。
@@ -9,6 +9,8 @@ Dependabotは`.devcontainer/Dockerfile`の`cargo install`行・`ARG`値や、
 - 新版: ピン留め版 vs crates.ioの最新版（yankedとプレリリースを除く）。
 - 食い違い: Dockerfileの`ARG`とワークフローの`tool:`で同じcrateの版が異なる
   （例: cargo-auditはDockerfileと`ci_engine.yml`で同じ版に揃える運用）。
+- Rustツールチェーン: `rust-toolchain.toml`の`channel`（CIとローカルが読む）と、
+  公式の最新stable、DockerfileのRUST_VERSIONを比べる（新版の有無と食い違い）。
 
 標準ライブラリのみで動く（cargoのインストール不要）。標準出力には要約のみを出す。
 
@@ -22,12 +24,17 @@ import argparse
 import json
 import re
 import sys
+import tomllib
 import urllib.request
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DOCKERFILE = _REPO_ROOT / ".devcontainer" / "Dockerfile"
 _WORKFLOWS_DIR = _REPO_ROOT / ".github" / "workflows"
+_RUST_TOOLCHAIN = _REPO_ROOT / "rust-toolchain.toml"
+
+# 公式の最新stable（`[pkg.rust] version = "1.100.0 (<hash> <date>)"`）
+_RUST_STABLE_URL = "https://static.rust-lang.org/dist/channel-rust-stable.toml"
 
 _CRATES_API_URL = "https://crates.io/api/v1/crates/{name}"
 # crates.ioのAPIはUser-Agentの指定が必須（連絡先を含めるよう求められている）
@@ -52,6 +59,27 @@ def parse_dockerfile_pins(dockerfile_text: str) -> dict[str, str]:
         for m in _INSTALL_RE.finditer(dockerfile_text)
         if m["arg"] in args
     }
+
+
+def parse_dockerfile_arg(dockerfile_text: str, name: str) -> str | None:
+    """Dockerfileの`ARG <name>=<値>`の値を返す（無ければ`None`）。"""
+    for m in _ARG_RE.finditer(dockerfile_text):
+        if m["arg"] == name:
+            return m["ver"]
+    return None
+
+
+def parse_toolchain_channel(toolchain_text: str) -> str | None:
+    """`rust-toolchain.toml`の`channel`を返す（無ければ`None`）。"""
+    channel = tomllib.loads(toolchain_text).get("toolchain", {}).get("channel")
+    return channel if isinstance(channel, str) else None
+
+
+def latest_rust_stable(channel_json: dict) -> str | None:
+    """`channel-rust-stable.toml`をパースした辞書から、最新stableの版を返す。"""
+    version = channel_json.get("pkg", {}).get("rust", {}).get("version", "")
+    m = re.match(r"\d+\.\d+\.\d+", version)
+    return m.group(0) if m else None
 
 
 def parse_workflow_pins(workflow_text: str) -> dict[str, str]:
@@ -85,10 +113,17 @@ def _fetch_json(url: str) -> dict:
         return json.loads(resp.read().decode("utf-8"))
 
 
+def _fetch_toml(url: str) -> dict:
+    req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        return tomllib.loads(resp.read().decode("utf-8"))
+
+
 def render_report(
     outdated: dict[str, tuple[str, str]],
     drifted: dict[str, tuple[str, str]],
     missing: list[str],
+    rust: tuple[str, str, str] | None = None,
 ) -> str:
     """Issue本文（英語・公開リポジトリのため）のMarkdownを組み立てる。"""
     lines = [
@@ -124,6 +159,19 @@ def render_report(
             for crate, (docker, ci) in sorted(drifted.items())
         ]
         lines.append("")
+    if rust:
+        pinned, docker, latest = rust
+        lines += [
+            "## Rust toolchain",
+            "",
+            (
+                "| `rust-toolchain.toml` | `.devcontainer/Dockerfile` "
+                "`RUST_VERSION` | Latest stable |"
+            ),
+            "|---|---|---|",
+            f"| {pinned} | {docker} | {latest} |",
+            "",
+        ]
     if missing:
         names = ", ".join(f"`{c}`" for c in sorted(missing))
         lines += [
@@ -144,6 +192,13 @@ def render_report(
         (
             "3. Re-run `cargo audit` (and `cargo llvm-cov -p engine` / "
             "`cargo about` if those tools changed) and review the output."
+        ),
+        (
+            "4. For the Rust toolchain, set the same version in "
+            "`rust-toolchain.toml` (`channel`) and the `RUST_VERSION` `ARG` "
+            "of `.devcontainer/Dockerfile`, then run `cargo clippy -p engine "
+            "--all-targets -- -D warnings` and `cargo test -p engine` "
+            "(a newer clippy can report new lints)."
         ),
     ]
     return "\n".join(lines) + "\n"
@@ -178,6 +233,26 @@ def main() -> int:
     }
     pinned = {**ci_pins, **docker_pins}
 
+    toolchain = parse_toolchain_channel(
+        _RUST_TOOLCHAIN.read_text(encoding="utf-8")
+    )
+    rust_docker = parse_dockerfile_arg(
+        _DOCKERFILE.read_text(encoding="utf-8"), "RUST_VERSION"
+    )
+    if toolchain is None or not re.fullmatch(r"\d+\.\d+\.\d+", toolchain):
+        print(
+            "ERROR: rust-toolchain.toml `channel` must be a pinned version "
+            f"(got {toolchain!r})"
+        )
+        return 2
+    rust_latest = latest_rust_stable(_fetch_toml(_RUST_STABLE_URL))
+    if rust_latest is None:
+        print("ERROR: could not read the latest stable Rust version")
+        return 2
+    rust_docker_text = rust_docker or "(missing)"
+    rust_stale = _version_key(toolchain) != _version_key(rust_latest)
+    rust_drifted = rust_docker != toolchain
+
     outdated: dict[str, tuple[str, str]] = {}
     missing = []
     for crate, ver in pinned.items():
@@ -193,15 +268,25 @@ def main() -> int:
         f"pinned={len(pinned)} outdated={len(outdated)} "
         f"drifted={len(drifted)} missing={len(missing)}"
     )
+    print(
+        f"rust: toolchain {toolchain}, Dockerfile {rust_docker_text}, "
+        f"latest stable {rust_latest}"
+    )
     for crate, (ver, latest) in sorted(outdated.items()):
         print(f"  {crate}: {ver} -> {latest}")
     for crate, (docker, ci) in sorted(drifted.items()):
         print(f"  {crate}: Dockerfile {docker} != CI {ci}")
 
-    if outdated or drifted or missing:
+    if outdated or drifted or missing or rust_stale or rust_drifted:
         if args.output:
+            rust = (
+                (toolchain, rust_docker_text, rust_latest)
+                if rust_stale or rust_drifted
+                else None
+            )
             args.output.write_text(
-                render_report(outdated, drifted, missing), encoding="utf-8"
+                render_report(outdated, drifted, missing, rust),
+                encoding="utf-8",
             )
             print(f"report written: {args.output}")
         return 1

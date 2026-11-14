@@ -154,7 +154,7 @@ classical / HC0〜HC3 / HAC / cluster の定義式、検定分布、自由度の
   判定できるため、行列計算を待たず`fit()`冒頭で`InsufficientClustersForInference`
   （`ValidationError`）として弾く。「クラスタ数境界の成功パス」のテストは`G > q`（厳密不等号）を
   保つ必要がある。OLS/WLS/Tobit/Logit/Probit/IV(2SLS,GMM)横断で統一。
-  - `G > q`でも傾き係数間の悪条件（極端なスケール差・準多重共線性等）で`q×q`部分行列が数値的に
+  - `G > q`でも傾き係数間の準多重共線性（単位を揃えても残る悪条件）で`q×q`部分行列が数値的に
     ほぼ特異になるケースは事前判定できないため、`ensure_well_conditioned_symmetric_matrix`による
     `ComputationError`（次節）がbackstopとして残る。
 - `G < 2`は`InsufficientClusters`で検証（0除算によるNaN伝播・パニックを防ぐため）。
@@ -164,12 +164,22 @@ classical / HC0〜HC3 / HAC / cluster の定義式、検定分布、自由度の
 - R²・調整済みR²・対数尤度・AIC/BIC・F統計量の定義式は[`docs/methods/ols.md`](../methods/ols.md)。
   R²の総平方和は`include_intercept`で中心化/非中心化を切り替える（statsmodelsの`k_constant`分岐と一致）。
   F統計量は`cov_type`によらず単一の式で、`q=0`は`f64::NAN`（0除算回避）。
-- **`Σ`が数値的にほぼ特異な場合の検出**: 変数間のスケールが極端に異なる設計行列では、`Σ`の条件数が
+- **`Σ`が数値的にほぼ特異な場合の検出**: 傾き係数が準共線の設計行列では、`Σ`の条件数が
   倍精度の限界を超えるが非ピボットCholesky分解自体は失敗せず無意味なF統計量を返しうる
   （実測でstatsmodelsとの相対誤差5e10程度）。`ensure_well_conditioned_symmetric_matrix`
   （`crate::shared::linear_algebra`、nonlinear系統とも共有）が`SelfAdjointEigen`で実際の固有値を求め、
   最大固有値との相対比で判定しCholesky分解前に`CommonError::NearSingularMatrix`
   （`matrix=COEFFICIENT_COVARIANCE`、`code`は`MATRIX_NEAR_SINGULAR`、`ComputationError`）で止める。
+  **判定と二次形式は`Σ`ではなく、相関スケール化した`C = D^{-1/2} Σ D^{-1/2}`（`D = diag(Σ)`）で行う**
+  （`shared::wald::wald_quadratic_form`）。`β'Σ⁻¹β = z'C⁻¹z`（`z = D^{-1/2}β`）は同じ値で、列の単位を
+  変えても`C`と`z`は変わらない。`Σ`の固有値で判定していた間は、1列を`1e9`倍するだけ（傾き係数の
+  分散の比が`1/(k·ε)`≈2e15を超える）で、係数も標準誤差も計算できるデータが失敗した（OLS・WLS・FE・
+  RE・Tobit・IV・FEIV。Logit・Probitは内部で標準化し全体Wald検定を持たないため影響なし）。
+  対角が正の有限値でない（ゼロ行列・負の分散）ときは`C`を作れず、同じく`NearSingularMatrix`にする。
+  列の単位とは関係なく、`hc1`・`cluster`のサンドイッチ共分散`B M B`は傾きの相関が約`1 - 1e-11`
+  より高いと（データ依存）桁落ちで数値的に正定値でなくなり、相関スケール化しても止まる（classicalは通る）。
+  これは`wald_f_test`が`cov_params`を入力に取る限り避けられず、`Rβ`と直交座標のミートから二次形式を
+  直接求める別の計算経路が要る（`tests/cross_method/test_unit_invariance.py`で現状の境界を固定）。
 - **被説明変数が定数（`OUTCOME_CONSTANT`）**: 切片のあるモデルで`y`が（丸め誤差の範囲で）全行で
   同じ値だと、中心化した総平方和が0でR²が定義できない。入力だけから分かるので、QR分解より前に
   `ValidationError`にする。切片なしのモデルでは定数でも非中心化の総平方和が正なので対象外。
@@ -195,7 +205,7 @@ classical / HC0〜HC3 / HAC / cluster の定義式、検定分布、自由度の
     精度が落ちたデータは、完全フィットかどうかを判別できる情報自体が残っていない）。
   - `SST`は元の`y`から計算する（`OlsInput`が保持する）。WLSは変換後の`sqrt(w)y`ではなく重み付き平均で
     中心化した`Σw(y-ȳ_w)²`（切片なしは`Σwy²`）。
-  - 診断検定の補助回帰、IVの第二段階、REの準偏差変換後の回帰とハウスマンの補助回帰は判定しない
+  - 診断検定の補助回帰、REの準偏差変換後の回帰とハウスマンの補助回帰は判定しない
     （`OlsEstimator::fit_auxiliary`。被説明変数が元のモデルの`y`でない、または残差が元のモデルの
     残差でないため。完全フィットは元のモデルの回帰が先に検出する）。IVのWu-Hausman拡張回帰は
     元の`y`の回帰なので判定し、完全フィットなら検定統計量だけ`None`にする（`iv-spec.md`3.6節）。
@@ -323,7 +333,7 @@ classical / HC0〜HC3 / HAC / cluster の定義式、検定分布、自由度の
   `wage1`はさらに地域ダミー（northcen/south/west、基準northeast）から合成したregion列
   でのクラスターロバストSE（実データでのグループ列、4グループ・不均衡サイズ）も両方で検証する。
 - `engine`側は上記の固定シナリオ単体テストに加え、property-basedテスト（`proptest`、
-  `engine/src/linear/ols/estimator.rs`の`mod proptests`）で不変条件を検証する（詳細な方針は
+  `engine/src/linear/ols/fit/tests/proptests.rs`）で不変条件を検証する（詳細な方針は
   `testing-policy.md`「property-basedテスト」参照）。対象プロパティ: 定数項ありなら残差和は常に0、
   yのスカラー倍で係数（切片含む）も同じ倍率でスケールする、xの列順序を入れ替えても係数名で
   対応付ければ値は変わらない、HC0の標準誤差は常にHC1以下。いずれも意図的なバグ注入により
@@ -402,7 +412,7 @@ faerのグローバル並列度は`engine::shared::parallelism::ensure_serial()`
   の両方と照合する。観測数の境界（`n = k`で拒否、`n = k + 1`で成功し`df_denom = 1`）と、重複除外後の
   列数での境界判定も確認する。許容誤差は`ols_white_reference`/`ols_white_crosscheck`（`rtol=1e-8`、
   実測最大相対誤差約2e-12）。p値は絶対誤差フロアを使わず相対誤差のみで比較する（裾の1e-39級の
-  p値が`sf`ではなく`1 - cdf`で0に潰れる回帰を検出するため）。engine側は`diagnostics.rs`の`mod tests`（statsmodels値との照合、ダミー・定数・スケール・
+  p値が`sf`ではなく`1 - cdf`で0に潰れる回帰を検出するため）。engine側は`diagnostics/`配下の各ファイルの`mod tests`（statsmodels値との照合、ダミー・定数・スケール・
   NaN残差・共線等）。
 
 ### 3.10 `breusch_godfrey_test()`（事後診断）

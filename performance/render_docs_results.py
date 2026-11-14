@@ -38,7 +38,17 @@ from performance.render_performance_summary import (
 _REPO_URL = "https://github.com/masahiroyecon1997dev/econometricsmodels"
 
 # ページ内の表示順（nav・README・APIリファレンスの並びに合わせる）。
-_METHOD_ORDER = ("ols", "wls", "logit", "probit", "tobit", "iv", "fe", "re")
+_METHOD_ORDER = (
+    "ols",
+    "wls",
+    "logit",
+    "probit",
+    "tobit",
+    "iv",
+    "fe",
+    "fe_iv",
+    "re",
+)
 _DISPLAY_NAMES = {
     "ols": "OLS",
     "wls": "WLS",
@@ -47,6 +57,7 @@ _DISPLAY_NAMES = {
     "tobit": "Tobit",
     "iv": "IV",
     "fe": "FE",
+    "fe_iv": "FEIV",
     "re": "RE",
 }
 # 公開ページでは内部名"engine"ではなくパッケージ名で表示する。

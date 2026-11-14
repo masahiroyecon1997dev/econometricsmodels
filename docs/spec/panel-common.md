@@ -12,12 +12,13 @@ Swamy-Arora分散成分推定の具体式、固定効果の復元等）は[`fe-s
 - `fit_fe(data, y, x, effects, options)` / `fit_re(data, y, x, effects, options)`
 - `y: str`、`x: list[str]`はOLSと同じ。
 - `effects: list[str]`（固定効果・変量効果の次元を指す列名）は**独立の必須引数**とする。FE/REいずれも
-  パネル構造が無ければモデルとして成立しないため、`y`/`x`と同格に扱う。1〜2要素で、1要素=one-way、
-  2要素=two-way（`effects[0]`が個体、`effects[1]`が時点。two-wayはバランスパネル必須）。
-  空は`ROLE_EMPTY`、3要素以上は`EFFECTS_TOO_MANY`（`ValidationError`、params: `model`・`n_columns`・
-  `max_columns`）。上限は当面FE/REとも2で、文面は上限だけを示す中立の形にしている（FEは将来上限を
-  上げる予定、REは交差ランダム効果が標準的な推定量でないため上限が変わらない見込みと理由は違うが、
-  同じcodeは同じhintという規則のため）。
+  パネル構造が無ければモデルとして成立しないため、`y`/`x`と同格に扱う。FEは1〜5要素、REは1〜2要素で、
+  1要素=one-way、2要素=two-way（`effects[0]`が個体、`effects[1]`が時点。REのtwo-wayはバランスパネル必須、
+  FEは不均衡も可）、FEの3要素以上=高次元の固定効果（3つ目以降は同一性だけのキー）。
+  空は`ROLE_EMPTY`、上限（FE=5、RE=2）を超えると`EFFECTS_TOO_MANY`（`ValidationError`、params: `model`・
+  `n_columns`・`max_columns`）。文面は上限だけを示す中立の形にしている（REは交差ランダム効果が標準的な
+  推定量でないため上限が2のまま、FEの5は実務で想定する次元数に余裕を持たせて極端な値を弾く上限、と
+  理由は違うが、同じcodeは同じhintという規則のため）。
 - `FEOptions.time`・`REOptions.time`は廃止した。`dk_time`（Driscoll-Kraay型HACの時点列、`str | None`）は
   `effects`とは独立のまま`Options`に置く。**`cov_type="dk"`では`dk_time`が必須で、`effects`の列を
   借用しない**（未指定は`ValidationError`、one-way・two-wayとも同じ）。どの列がDKの時点かを利用者が
@@ -43,7 +44,7 @@ Swamy-Arora分散成分推定の具体式、固定効果の復元等）は[`fe-s
     `effects[1]`は従来の`time`と同じ規則（時点のキー）。推定値と受け付ける入力を変えないため。
     規則の統一は3次元以上を扱うときに検討する。
   - エラーの`argument`は`"effects"`に統一し、どの列かは`column`で示す。`SINGLETON_GROUP`のparamsは
-    `{argument, column, group}`（`column`は`effects`の該当要素の列名。エンジンは`FeInput`/`ReInput`の
+    `{argument, column, group, n_dropped_rows}`（`column`は`effects`の該当要素の列名。エンジンは`FeInput`/`ReInput`の
     `with_effect_names`で列名を受け取り、計算には使わない）。
 - **命名規則**: 列名を受け取る引数は`effects`/`cluster`/`dk_time`のいずれも**`_col`サフィックスを
   付けない**（`y`/`x`/`weight`と同じ規約）。`dk_time`はDriscoll-Kraay型HACの時系列順序で、
@@ -198,25 +199,24 @@ FE/REのClassical/HC1-3以外の全cov_typeに広げたもの）。`df_resid`自
 
 ### 4.3 FEの内部実装方針
 
-FEは**まずOlsEstimatorへの委譲を試す**（within変換したデータを`OlsEstimator::fit`に渡す、
-WLSと同型のパターン）。ただし以下はFE固有の再計算・補正が必要になる見込みで、無理に
-OLSの計算をそのまま使わない（WLSがR²等を素のOLS計算のまま使わなかったのと同じ教訓）。
+FEはwithin変換したデータに`shared::least_squares::least_squares`を直接あてはめる。
+`OlsEstimator`は経由しない: FEが使うのは係数・残差・`(X̃'X̃)⁻¹`・適合度だけで、標準誤差・F検定は
+`cov_type`ごとにFE自身が計算し直すため（`OlsEstimator`の推論結果は使わない）。`OlsEstimator`の
+推論結果をそのまま使えない点は、WLSがR²等を素のOLS計算のまま使わなかったのと同じ教訓で、
+以下はFE固有の再計算・補正になる。
 
 - 自由度（`n - 個体数 - k`、単純な`n-k`ではない）→ 検定統計量・adjusted R²・
   AIC/BICすべてに波及
 - パネル固有R²（within/between/overall、2章）はOLSに存在しない新規計算
 - `cov_type`デフォルトの`effects[0]`単位cluster化、HACのDriscoll-Kraay別実装（3章）
 
-この委譲パターンが実際にうまくいくかは、within変換の実装方法（[`fe-spec.md`](./fe-spec.md)
-3.1節）次第のため、結論を固定せず「まず委譲を試して、補正が管理可能な範囲に収まるか実装時に
-判断する」という緩い方針とした（実装の結果、委譲パターンのまま実現できた。詳細は
-[`fe-spec.md`](./fe-spec.md)3章）。
+詳細は[`fe-spec.md`](./fe-spec.md)3章。
 
 ### 4.4 新規エラー型の設計
 
 `LeastSquaresError`（OLS/WLS共有、`engine/src/linear/common.rs`）・`MleError`（nonlinear共有、
 `engine/src/nonlinear/common.rs`）の前例に倣い、**`PanelError`をFE/REで共有する**
-（`engine/src/panel/common.rs`に定義）。個別に`FeError`/`ReError`は作らない。`CommonError`
+（`engine/src/panel/common/error.rs`に定義）。個別に`FeError`/`ReError`は作らない。`CommonError`
 （`DimensionMismatch`等）は`#[from]`でラップする既存パターンを踏襲し、FE/RE固有のバリアント
 （自由度計算失敗、singleton関連等）は`PanelError`に直接追加する。
 

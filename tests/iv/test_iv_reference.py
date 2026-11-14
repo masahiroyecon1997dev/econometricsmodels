@@ -24,7 +24,7 @@ Note:
       実機確認済みで、`test_iv_crosscheck.py`が独立にクロスチェックする
       （`iv-spec.md`3.1節）。`engine`側の
       Rust単体テスト
-      （`two_sls.rs`の`fit_computes_hc2_std_errors_matching_manual_sandwich_formula`
+      （`two_sls/cov/tests/reference.rs`の`fit_computes_hc2_std_errors_matching_manual_sandwich_formula`
       等、独立な素朴ループでの手計算とのクロスチェック）は数式レベルの細粒度回帰確認と
       して引き続き有効。
     - `wu_hausman_statistic`は`hac`を含む全cov_typeで`res.wooldridge_regression`
@@ -466,8 +466,8 @@ def test_no_intercept_cluster_matches_linearmodels(fixtures):
     )
 
 
-# 完全な多重共線性・極端なスケール差（`ComputationError` パス）は
-# `test_iv_validation.py`で確認する。
+# 完全な多重共線性（`ComputationError` パス）と、極端なスケール差でも失敗しないこと
+# （単位を揃えたデータと一致）は`test_iv_validation.py`で確認する。
 
 
 @pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)

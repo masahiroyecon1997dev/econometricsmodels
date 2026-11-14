@@ -15,6 +15,8 @@ from _dtype_helpers import make_frame
 from _errors import raises_error
 from econometricsmodels import (
     FE,
+    FEGMM,
+    FEIV,
     IV,
     OLS,
     RE,
@@ -116,6 +118,26 @@ FIT_CASES = {
     "FE": (
         lambda d: FE(d, "y", ["x1", "x2"], ["entity"]).fit(),
         [("y", "y"), ("x1", "x"), ("x2", "x")],
+    ),
+    "FEIV": (
+        lambda d: FEIV(d, "y", ["x2"], ["x1"], ["z", "z2"], ["entity"]).fit(),
+        [
+            ("y", "y"),
+            ("x2", "x_exog"),
+            ("x1", "x_endog"),
+            ("z", "instruments"),
+            ("z2", "instruments"),
+        ],
+    ),
+    "FEGMM": (
+        lambda d: FEGMM(d, "y", ["x2"], ["x1"], ["z", "z2"], ["entity"]).fit(),
+        [
+            ("y", "y"),
+            ("x2", "x_exog"),
+            ("x1", "x_endog"),
+            ("z", "instruments"),
+            ("z2", "instruments"),
+        ],
     ),
     "RE": (
         lambda d: RE(d, "y", ["x1", "x2"], ["entity"]).fit(),

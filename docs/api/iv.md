@@ -11,12 +11,12 @@ Pass an `IVOptions` as `options=`. Options of `None` take the effective default 
 | Option | Purpose | Default | Notes |
 |---|---|---|---|
 | `estimator` | `"2sls"` or `"gmm"` | `"2sls"` | |
-| `cov_type` | Standard error type: `"classical"`, `"hc0"` to `"hc3"`, `"hac"`, `"cluster"` | `"classical"` | For GMM it is independent of `gmm_weight_type` |
+| `cov_type` | Standard error type: `"classical"`, `"hc0"` to `"hc3"`, `"hac"`, `"cluster"` | `"classical"` | For GMM it is independent of `gmm_weight_type`. Also used by `kleibergen_paap()`, `effective_f()` and, for 2SLS and `gmm_type="one_step"`, `c_stat()` |
 | `cluster` | Column that defines the clusters | `None` | With `cov_type="cluster"` or `gmm_weight_type="cluster"` |
 | `hac_time` | Column that gives the time order | `None` | Required with `cov_type="hac"` or `gmm_weight_type="hac"` |
 | `hac_lags` | Number of Newey-West lags | `None` (automatic) | With `"hac"` in either |
 | `gmm_type` | `"one_step"`, `"two_step"` or `"iterated"` | `None` (`"two_step"`) | GMM only |
-| `gmm_weight_type` | Weight matrix for the point estimate: `"classical"`, `"robust"`, `"cluster"`, `"hac"` | `None` (`"classical"`) | GMM only; not with `gmm_type="one_step"` |
+| `gmm_weight_type` | Weight matrix for the point estimate: `"classical"`, `"robust"`, `"cluster"`, `"hac"` | `None` (`"classical"`) | GMM only; not with `gmm_type="one_step"`. Also the weight used by `c_stat()` |
 | `gmm_max_iter` | Maximum number of estimations, 3 to 10,000 | `None` (100) | `gmm_type="iterated"` only |
 | `gmm_tol` | Convergence tolerance | `None` (`1e-6`) | `gmm_type="iterated"` only |
 | `raise_on_non_convergence` | Raise an error if iteration does not converge | `None` (`True`) | `gmm_type="iterated"` only |
@@ -44,3 +44,15 @@ The fields of the results are listed by purpose at the top of the results class 
 ::: econometricsmodels.IVOptions
 
 ::: econometricsmodels.IVResults
+
+`IVResults.cragg_donald()`, `kleibergen_paap()` and `effective_f()` return these result types (see [Usage](../usage/iv.md#weak-instrument-diagnostics-post-estimation)):
+
+::: econometricsmodels.CraggDonaldResult
+
+::: econometricsmodels.KleibergenPaapResult
+
+::: econometricsmodels.EffectiveFResult
+
+`IVResults.c_stat()` returns this result type (see [Usage](../usage/iv.md#exogeneity-and-instrument-validity-post-estimation)):
+
+::: econometricsmodels.CStatisticResult

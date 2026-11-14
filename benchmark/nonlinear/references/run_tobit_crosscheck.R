@@ -27,7 +27,7 @@
 # すべて `survreg` 由来。`survreg`/`censReg` はいずれも内部で `(β, log σ)` を
 # パラメータ化するため、本実装が公開する `(β, σ)` 空間へヤコビアン
 # `diag(1,…,1, σ)`（`dσ/d(log σ) = σ`）で両側から変換する
-# （`engine/src/nonlinear/tobit.rs` の `cov_params` と同じ方針、
+# （`engine/src/nonlinear/tobit/fit.rs` の `cov_params` と同じ方針、
 # `docs/spec/tobit-spec.md`3.3節）。
 #
 # ロバスト共分散は `sandwich` パッケージの `estfun.survreg`/`bread.survreg`
@@ -224,7 +224,7 @@ if (engine == "survreg" && cov_type == "classical" &&
 }
 
 # ── 限界効果 / 予測値 / 打ち切り適合度（本実装の閉形式を R で再現）──────
-# `engine/src/nonlinear/tobit.rs` の `target_w_and_s` / `predicted_value` /
+# `engine/src/nonlinear/tobit/target.rs` の `target_w_and_s` / `predicted_value` /
 # `censoring_fit_check` と同じ式（McDonald-Moffitt 1980）。Logit/Probit の
 # `marginaleffects` パッケージのように既製の実装が使えない（survreg/censReg 用の
 # Tobit E[y|x]・P(uncensored) 予測を marginaleffects は提供しない）ため手計算し、

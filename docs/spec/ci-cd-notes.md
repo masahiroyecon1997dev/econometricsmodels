@@ -35,10 +35,10 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
   `python_package/**`・`engine_pybind/**`・`pyproject.toml`・`uv.lock`・`tests/**`を
   トリガー。`engine/**`は含めない）:
   - `test`ジョブ（Python 3.12/3.13/3.14マトリクス）: `uv sync --locked --group test` →
-    `uv run maturin develop` → **import時間チェック** → `pytest tests` → `ruff check .` →
+    `uv run maturin develop` → **import時間チェック** → `pytest tests --check-error-coverage --check-cov-coverage --check-no-skips`（スキップ・xfailが1件でもあれば失敗。`.claude/rules/testing-policy.md`「テストをスキップしない」）→ `ruff check .` →
     `ruff format --check .`。Python 3.12のジョブだけ、最後に`polars==1.38.1`（`pyproject.toml`の
     `polars>=`の下限と同じ版。変えるときは両方と`docs/guide/verification.md`の表を揃える）を
-    `uv pip install`で入れ替えて`pytest tests`をもう一度回す（サポートする最古のpolarsの確認。
+    `uv pip install`で入れ替えて`pytest tests --check-no-skips`をもう一度回す（サポートする最古のpolarsの確認。
     拡張はPython側polarsの版に依存しないのでビルドは再利用する。`uv.lock`の環境を書き換える
     ため最後に置く）。下限を決めた根拠は、1.27以下は動かず、1.28〜1.31はEnum型の時点列が静かに
     別の値になり、1.32〜1.37はFloat16を読めないこと（1.38.1で全テストが通る）。
@@ -115,6 +115,13 @@ CI/CDワークフロー構成・既知の脆弱性対応方針。特定の推定
   - 更新時の手順: DockerfileのARGを上げる（`cargo-audit`は`ci_engine.yml`の`tool:`も同じ版に）
     → devcontainer再構築 → `cargo audit`再実行（`cargo-llvm-cov`/`cargo-about`が対象なら
     `cargo llvm-cov -p engine`等で動作確認）。
+  - **Rustツールチェーン**も同じワークフローで確認する。リポジトリ直下の`rust-toolchain.toml`の
+    `channel`（CIの`setup-rust-toolchain`とローカルのrustupが読む）を公式の最新stable
+    （`static.rust-lang.org`の`channel-rust-stable.toml`）と比べ、DockerfileのARG `RUST_VERSION`
+    との食い違いも報告する。`channel`は版の固定（`stable`等の名前は不可。スクリプトが異常終了する）。
+    stableは約6週ごとに更新されるので、通知のたびに上げる必要はない（上げるときは新しいclippyの
+    指摘が出うるため、`cargo clippy -p engine --all-targets -- -D warnings`と`cargo test -p engine`を
+    確認する）。更新時は`rust-toolchain.toml`とDockerfileの`RUST_VERSION`を同じ値にする。
 - **`benchmark_performance.yml`**: `performance/compare_<method>.py`（手法非依存の
   計測ハーネス `performance/_perf_harness.py`＋手法固有アダプタ）を手法ごとの
   matrixジョブ（`method: [ols, wls, ...]`、`fail-fast: false`）で定期実行

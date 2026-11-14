@@ -42,7 +42,7 @@ random / sorted）。Logit/Probit は OLS/WLS と違い HAC を持たない。
   （`compare_tobit.py`「## n 軸の大標本点」参照）で、Logit/Probit の初期値を
   ゼロベクトルから OLS ベースの warm start に統一した対応（`7ca26b2`）と、
   `FaerNewton` の停滞収束判定を追加した対応（`d797f9b`/`5b79ffe`、
-  `nonlinear/common.rs`の`run_solver`を Logit/Probit/Tobit で共有）のいずれか、
+  `nonlinear/common/solver.rs`の`run_solver`を Logit/Probit/Tobit で共有）のいずれか、
   または両方の組み合わせにより解消済みであることを実測で確認した（2026-09-12、
   `generate_binary_choice_dataset("baseline", link="probit", n=1_000_000, k=5,
   seed=42)` で engine が10反復で収束し、statsmodels と対数尤度・係数とも

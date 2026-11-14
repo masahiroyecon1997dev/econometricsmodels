@@ -1,0 +1,474 @@
+{
+  "synthetic": {
+    "baseline": {
+      "classical": {
+        "cragg_donald_f": 172.721999905405
+      },
+      "hc1": {
+        "cragg_donald_f": 172.721999905405,
+        "rk_wald_f": 176.367962139646,
+        "effective_f": 166.019703826774
+      },
+      "cluster": {
+        "cragg_donald_f": 172.721999905405,
+        "rk_wald_f": 166.25198242294,
+        "effective_f": 153.67370050035
+      },
+      "cluster_time": {
+        "cragg_donald_f": 172.721999905404,
+        "rk_wald_f": 478.466459262718,
+        "effective_f": 153.799261493559
+      },
+      "cluster_region": {
+        "cragg_donald_f": 172.721999905405,
+        "rk_wald_f": 310.592667509856,
+        "effective_f": 127.131764671786
+      },
+      "cluster_region_uneven": {
+        "cragg_donald_f": 172.721999905405,
+        "rk_wald_f": 471.241982498185,
+        "effective_f": 123.860657267429
+      }
+    },
+    "just_identified": {
+      "classical": {
+        "cragg_donald_f": 187.735521041561
+      },
+      "hc1": {
+        "cragg_donald_f": 187.735521041561,
+        "rk_wald_f": 156.644731501544,
+        "effective_f": 156.644731501544
+      },
+      "cluster": {
+        "cragg_donald_f": 187.735521041561,
+        "rk_wald_f": 137.283476441904,
+        "effective_f": 137.283476441904
+      },
+      "cluster_time": {
+        "cragg_donald_f": 187.735521041561,
+        "rk_wald_f": 65.4164577210117,
+        "effective_f": 65.4164577210117
+      },
+      "cluster_region": {
+        "cragg_donald_f": 187.735521041561,
+        "rk_wald_f": 74.933974735396,
+        "effective_f": 74.933974735396
+      }
+    },
+    "weak_instruments": {
+      "classical": {
+        "cragg_donald_f": 3.06942403897353
+      },
+      "hc1": {
+        "cragg_donald_f": 3.06942403897353,
+        "rk_wald_f": 3.0287630446011,
+        "effective_f": 2.95031825794196
+      },
+      "cluster": {
+        "cragg_donald_f": 3.06942403897353,
+        "rk_wald_f": 2.9661238158975,
+        "effective_f": 2.73091876386404
+      },
+      "cluster_time": {
+        "cragg_donald_f": 3.06942403897352,
+        "rk_wald_f": 11.635181002861,
+        "effective_f": 2.73315009473749
+      },
+      "cluster_region": {
+        "cragg_donald_f": 3.06942403897353,
+        "rk_wald_f": 5.49685903951832,
+        "effective_f": 2.25924488376941
+      }
+    },
+    "invalid_instrument": {
+      "classical": {
+        "cragg_donald_f": 243.394112756603
+      },
+      "hc1": {
+        "cragg_donald_f": 243.394112756603,
+        "rk_wald_f": 233.588161700083,
+        "effective_f": 227.258912419035
+      },
+      "cluster": {
+        "cragg_donald_f": 243.394112756603,
+        "rk_wald_f": 193.265666470091,
+        "effective_f": 185.752461630101
+      },
+      "cluster_time": {
+        "cragg_donald_f": 243.394112756602,
+        "rk_wald_f": 445.907380517775,
+        "effective_f": 348.656875959992
+      },
+      "cluster_region": {
+        "cragg_donald_f": 243.394112756603,
+        "rk_wald_f": 315.129212943874,
+        "effective_f": 141.631244302635
+      }
+    },
+    "exogenous_endog": {
+      "classical": {
+        "cragg_donald_f": 128.205705279418
+      },
+      "hc1": {
+        "cragg_donald_f": 128.205705279418,
+        "rk_wald_f": 116.909421521368,
+        "effective_f": 121.839256673131
+      },
+      "cluster": {
+        "cragg_donald_f": 128.205705279418,
+        "rk_wald_f": 112.485951676637,
+        "effective_f": 120.298530041383
+      },
+      "cluster_time": {
+        "cragg_donald_f": 128.205705279418,
+        "rk_wald_f": 123.328072061,
+        "effective_f": 79.8315138015052
+      },
+      "cluster_region": {
+        "cragg_donald_f": 128.205705279418,
+        "rk_wald_f": 90.725517246527,
+        "effective_f": 89.8419418632428
+      }
+    },
+    "heteroskedastic": {
+      "classical": {
+        "cragg_donald_f": 172.721999905405
+      },
+      "hc1": {
+        "cragg_donald_f": 172.721999905405,
+        "rk_wald_f": 176.367962139646,
+        "effective_f": 166.019703826774
+      },
+      "cluster": {
+        "cragg_donald_f": 172.721999905405,
+        "rk_wald_f": 166.25198242294,
+        "effective_f": 153.67370050035
+      },
+      "cluster_time": {
+        "cragg_donald_f": 172.721999905404,
+        "rk_wald_f": 478.466459262718,
+        "effective_f": 153.799261493559
+      },
+      "cluster_region": {
+        "cragg_donald_f": 172.721999905405,
+        "rk_wald_f": 310.592667509856,
+        "effective_f": 127.131764671786
+      }
+    },
+    "autocorrelated": {
+      "classical": {
+        "cragg_donald_f": 172.721999905405
+      },
+      "hc1": {
+        "cragg_donald_f": 172.721999905405,
+        "rk_wald_f": 176.367962139646,
+        "effective_f": 166.019703826774
+      },
+      "cluster": {
+        "cragg_donald_f": 172.721999905405,
+        "rk_wald_f": 166.25198242294,
+        "effective_f": 153.67370050035
+      },
+      "cluster_time": {
+        "cragg_donald_f": 172.721999905404,
+        "rk_wald_f": 478.466459262718,
+        "effective_f": 153.799261493559
+      },
+      "cluster_region": {
+        "cragg_donald_f": 172.721999905405,
+        "rk_wald_f": 310.592667509856,
+        "effective_f": 127.131764671786
+      }
+    },
+    "short_panel": {
+      "classical": {
+        "cragg_donald_f": 64.8278486868459
+      },
+      "hc1": {
+        "cragg_donald_f": 64.8278486868459,
+        "rk_wald_f": 82.9485091350532,
+        "effective_f": 71.4949660305496
+      },
+      "cluster": {
+        "cragg_donald_f": 64.8278486868459,
+        "rk_wald_f": 93.7070373954537,
+        "effective_f": 77.6603863590474
+      },
+      "cluster_time": {
+        "cragg_donald_f": 64.8278486868459,
+        "rk_wald_f": 14798.0358707709,
+        "effective_f": 84.5973996502174
+      },
+      "cluster_region": {
+        "cragg_donald_f": 64.8278486868458,
+        "rk_wald_f": 159.699910075799,
+        "effective_f": 102.111758792396
+      }
+    },
+    "long_panel": {
+      "classical": {
+        "cragg_donald_f": 183.524275494404
+      },
+      "hc1": {
+        "cragg_donald_f": 183.524275494404,
+        "rk_wald_f": 204.154564455786,
+        "effective_f": 169.728910993685
+      },
+      "cluster": {
+        "cragg_donald_f": 183.524275494404,
+        "rk_wald_f": 278.530373825036,
+        "effective_f": 196.846912044739
+      },
+      "cluster_time": {
+        "cragg_donald_f": 183.524275494404,
+        "rk_wald_f": 391.106080691147,
+        "effective_f": 224.290507091901
+      },
+      "cluster_region": {
+        "cragg_donald_f": 183.524275494404,
+        "rk_wald_f": 114469.681510033,
+        "effective_f": 130.095358338864
+      }
+    },
+    "unbalanced": {
+      "classical": {
+        "cragg_donald_f": 126.744931915765
+      },
+      "hc1": {
+        "cragg_donald_f": 126.744931915765,
+        "rk_wald_f": 112.229184328608,
+        "effective_f": 108.322961296279
+      },
+      "cluster": {
+        "cragg_donald_f": 126.744931915765,
+        "rk_wald_f": 123.178211434114,
+        "effective_f": 108.000897918451
+      },
+      "cluster_time": {
+        "cragg_donald_f": 126.744931915766,
+        "rk_wald_f": 520.016646089913,
+        "effective_f": 145.103021923347
+      },
+      "cluster_region": {
+        "cragg_donald_f": 126.744931915765,
+        "rk_wald_f": 230.389181136335,
+        "effective_f": 116.831272225618
+      }
+    },
+    "small_n": {
+      "classical": {
+        "cragg_donald_f": 14.1718367402426
+      },
+      "hc1": {
+        "cragg_donald_f": 14.1718367402426,
+        "rk_wald_f": 15.7925173790127,
+        "effective_f": 13.4361280600752
+      },
+      "cluster": {
+        "cragg_donald_f": 14.1718367402426,
+        "rk_wald_f": 18.2402412588786,
+        "effective_f": 15.8326003594483
+      },
+      "cluster_time": {
+        "cragg_donald_f": 14.1718367402426,
+        "rk_wald_f": 716.104787256651,
+        "effective_f": 22.1206710985165
+      }
+    },
+    "df1_boundary": {
+      "classical": {
+        "cragg_donald_f": 2.15977459604887
+      },
+      "hc1": {
+        "cragg_donald_f": 2.15977459604887,
+        "rk_wald_f": 2.63258291945571,
+        "effective_f": 4.72059786187523
+      },
+      "cluster": {
+        "cragg_donald_f": 2.15977459604887,
+        "rk_wald_f": 4.51299929049552,
+        "effective_f": 8.0924534775004
+      }
+    },
+    "high_variance": {
+      "classical": {
+        "cragg_donald_f": 172.721999905405
+      },
+      "hc1": {
+        "cragg_donald_f": 172.721999905405,
+        "rk_wald_f": 176.367962139646,
+        "effective_f": 166.019703826774
+      },
+      "cluster": {
+        "cragg_donald_f": 172.721999905405,
+        "rk_wald_f": 166.25198242294,
+        "effective_f": 153.67370050035
+      },
+      "cluster_time": {
+        "cragg_donald_f": 172.721999905404,
+        "rk_wald_f": 478.466459262718,
+        "effective_f": 153.799261493559
+      },
+      "cluster_region": {
+        "cragg_donald_f": 172.721999905405,
+        "rk_wald_f": 310.592667509856,
+        "effective_f": 127.131764671786
+      }
+    },
+    "moderate_multicollinearity": {
+      "classical": {
+        "cragg_donald_f": 278.014240582984
+      },
+      "hc1": {
+        "cragg_donald_f": 278.014240582984,
+        "rk_wald_f": 280.309406450174,
+        "effective_f": 267.764747305858
+      },
+      "cluster": {
+        "cragg_donald_f": 278.014240582984,
+        "rk_wald_f": 270.219766717451,
+        "effective_f": 247.415489021426
+      },
+      "cluster_time": {
+        "cragg_donald_f": 278.014240582984,
+        "rk_wald_f": 970.196226047114,
+        "effective_f": 243.502364106536
+      },
+      "cluster_region": {
+        "cragg_donald_f": 278.014240582984,
+        "rk_wald_f": 513.770422319334,
+        "effective_f": 205.788080170557
+      }
+    },
+    "high_condition_number": {
+      "classical": {
+        "cragg_donald_f": 171.914246949147
+      },
+      "hc1": {
+        "cragg_donald_f": 171.914246949147,
+        "rk_wald_f": 176.654468053419,
+        "effective_f": 165.576320105353
+      },
+      "cluster": {
+        "cragg_donald_f": 171.914246949147,
+        "rk_wald_f": 165.636186168209,
+        "effective_f": 152.993053123756
+      },
+      "cluster_time": {
+        "cragg_donald_f": 171.914246949146,
+        "rk_wald_f": 477.480361329077,
+        "effective_f": 150.573314042943
+      },
+      "cluster_region": {
+        "cragg_donald_f": 171.914246949147,
+        "rk_wald_f": 310.953168148242,
+        "effective_f": 127.252124781255
+      }
+    },
+    "scale_variance_mild": {
+      "classical": {
+        "cragg_donald_f": 171.914246949147
+      },
+      "hc1": {
+        "cragg_donald_f": 171.914246949147,
+        "rk_wald_f": 176.654468053419,
+        "effective_f": 165.576320105353
+      },
+      "cluster": {
+        "cragg_donald_f": 171.914246949147,
+        "rk_wald_f": 165.636186168209,
+        "effective_f": 152.993053123756
+      },
+      "cluster_time": {
+        "cragg_donald_f": 171.914246949146,
+        "rk_wald_f": 477.480361329077,
+        "effective_f": 150.573314042943
+      },
+      "cluster_region": {
+        "cragg_donald_f": 171.914246949147,
+        "rk_wald_f": 310.953168148242,
+        "effective_f": 127.252124781255
+      }
+    },
+    "many_regressors": {
+      "classical": {
+        "cragg_donald_f": 171.709662111566
+      },
+      "hc1": {
+        "cragg_donald_f": 171.709662111566,
+        "rk_wald_f": 163.243245449293,
+        "effective_f": 167.803416156309
+      },
+      "cluster": {
+        "cragg_donald_f": 171.709662111566,
+        "rk_wald_f": 154.50003614886,
+        "effective_f": 155.851097335836
+      }
+    },
+    "outlier_regressor": {
+      "classical": {
+        "cragg_donald_f": 171.917647986538
+      },
+      "hc1": {
+        "cragg_donald_f": 171.917647986538,
+        "rk_wald_f": 173.888833102674,
+        "effective_f": 165.706099300736
+      },
+      "cluster": {
+        "cragg_donald_f": 171.917647986538,
+        "rk_wald_f": 162.712507464446,
+        "effective_f": 153.444401823398
+      },
+      "cluster_time": {
+        "cragg_donald_f": 171.917647986538,
+        "rk_wald_f": 490.733642327454,
+        "effective_f": 152.866364326591
+      },
+      "cluster_region": {
+        "cragg_donald_f": 171.917647986538,
+        "rk_wald_f": 309.801581107272,
+        "effective_f": 127.681124094336
+      }
+    },
+    "two_way": {
+      "baseline": {
+        "classical": {
+          "cragg_donald_f": 167.687605538462
+        },
+        "hc1": {
+          "cragg_donald_f": 167.687605538462,
+          "rk_wald_f": 170.775594027503,
+          "effective_f": 162.235679154212
+        }
+      },
+      "unbalanced": {
+        "classical": {
+          "cragg_donald_f": 120.094690377529
+        },
+        "hc1": {
+          "cragg_donald_f": 120.094690377529,
+          "rk_wald_f": 112.375187145033,
+          "effective_f": 102.825664912965
+        }
+      },
+      "long_panel": {
+        "classical": {
+          "cragg_donald_f": 185.266304920583
+        },
+        "hc1": {
+          "cragg_donald_f": 185.266304920583,
+          "rk_wald_f": 198.479217448758,
+          "effective_f": 170.006900102659
+        }
+      }
+    }
+  },
+  "wooldridge": {},
+  "_meta": {
+    "method": "fe_iv",
+    "generated_at": "2026-11-14T00:16:51.260931+00:00",
+    "reference": "ivDiag (R)",
+    "ivdiag_version": "1.0.8",
+    "note": "ivDiagのFE引数で固定効果を吸収。cragg_donald_fはF.standard（cov_typeによらない）、rk_wald_fはhc1がF.robust・クラスターがF.cluster、effective_fはeff_F（hc1はrobust、クラスターはcluster。prec=14）。classicalはCragg-Donaldだけ。内生変数が複数のシナリオ・3-way・DK・HC2・HC3は比べられない。"
+  }
+}

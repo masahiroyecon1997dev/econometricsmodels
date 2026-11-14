@@ -21,6 +21,7 @@
 use thiserror::Error;
 
 use crate::shared::error_catalog::{ErrorCode, ErrorReport, Stage};
+use crate::shared::validation::{GMM_MAX_ITER_MIN, MAX_ITER_LIMIT};
 
 /// 利用者向けのエラー内容（`code`・`params`・文面）を返せるエラー型。
 ///
@@ -147,6 +148,66 @@ pub enum CommonError {
     #[error("{}", self.catalog_message())]
     InsufficientClustersForInference { g: usize, q: usize },
 
+    /// `gmm_type="iterated"`の`gmm_max_iter`が3未満。
+    ///
+    /// 上限を初回推定を含めて数えるため、2回以下の反復は2段階GMMに収束判定を付けただけに
+    /// なり紛らわしい。2段階が欲しい場合は`gmm_type="two_step"`を使う。
+    #[error("{}", self.catalog_message())]
+    InvalidGmmMaxIter { max_iter: i64 },
+
+    /// `gmm_type="iterated"`の`gmm_tol`が正の有限値でない（0以下・NaN・inf）。
+    ///
+    /// 収束判定の許容誤差として意味を持たないため。
+    #[error("{}", self.catalog_message())]
+    InvalidGmmTol { gmm_tol: f64 },
+
+    /// `estimator="gmm"`かつ`gmm_weight_type=Cluster`で、クラスター数`g`がモーメント条件の重み行列
+    /// `S`（l×l、`l`は全操作変数`x_exog ++ instruments`の数）を非特異にするのに足りない。
+    ///
+    /// `S = Σ_g S_g S_g'`はG個のランク1行列の和なので`rank(S) ≤ g`。丁度識別（`l == k`）の
+    /// ときは`Z'ê = 0`（`Σ_g S_g = 0`）が成り立つため`rank(S) ≤ g-1`となり、`g <= l`で
+    /// 特異になる。過剰識別（`l > k`）では`Z'ê = 0`が成り立たないため`g < l`で特異になる。
+    /// `cov_type=Cluster`の[`CommonError::InsufficientClustersForInference`]（係数共分散の
+    /// Wald部分行列、閾値は`q`）とは対象・閾値が異なる別軸のため別のバリアントとする。IV・固定効果つきGMMが共有する。
+    /// `g`・`l`は入力だけから判定できるため、行列計算を待たず`fit()`冒頭で弾く。
+    #[error("{}", self.catalog_message())]
+    InsufficientClustersForWeightMatrix {
+        g: usize,
+        l: usize,
+        /// 必要なクラスター数の下限（過剰識別は`l`、丁度識別は`l + 1`）。
+        min_clusters: usize,
+    },
+
+    /// `raise_on_non_convergence=true`（既定）かつ`gmm_type="iterated"`で、`gmm_max_iter`回
+    /// （初回推定を含む上限回数）以内に係数が収束しなかった。
+    ///
+    /// `nonlinear::common::MleError::NonConvergence`と同型のメッセージ・意味論
+    /// （`raise_on_non_convergence=false`にすると`converged=false`のまま結果を返す）。
+    /// 文言は`MleError::NonConvergence`（"failed to converge after {n_iter} iterations.
+    /// Set raise_on_non_convergence=False to receive the result anyway, or increase
+    /// max_iter"）とほぼ揃えているが、カタログの文面は`gmm_max_iter`を名指しする。
+    #[error("{}", self.catalog_message())]
+    GmmNonConvergence { n_iter: usize },
+
+    /// C統計量で検定する内生変数も操作変数も指定されていない。IV・固定効果つきGMMが共有する。
+    #[error("{}", self.catalog_message())]
+    CStatisticNothingToTest,
+
+    /// C統計量で検定する除外操作変数が多すぎて、外した後の操作変数が内生変数の数に足りない
+    /// （順序条件を満たさず、元の構造方程式が識別できない）。IV・固定効果つきGMMが共有する。
+    #[error("{}", self.catalog_message())]
+    CStatisticTooManyTestedInstruments {
+        n_tested: usize,
+        n_instruments: usize,
+        n_endog: usize,
+    },
+
+    /// C統計量が、このデータでは定義できない（必要な行列が特異: 操作変数の共線、完全フィット、
+    /// モーメント条件の共分散のランク落ち等）。診断なので`fit()`は失敗させず、診断のメソッドを
+    /// 呼んだときにだけ返す。IV・固定効果つきGMMが共有する。
+    #[error("{}", self.catalog_message())]
+    CStatisticUndefined,
+
     /// `cov_type="hac"`（GMMの`weight_type="hac"`を含む）の`hac_lags`が負、または観測数`n`以上（`[0, n)`の範囲外）。
     ///
     /// OLS/WLS・2SLS・GMMのHACが共有する検証（`shared::covariance::resolve_hac_lags`）。
@@ -156,7 +217,8 @@ pub enum CommonError {
     InvalidHacLags { hac_lags: i64, n: usize },
 
     /// `matrix`が数値的にほぼ特異で、推定量や共分散の計算を続けられない（条件数が倍精度の限界を
-    /// 超える。列のスケール差が極端な場合や、残差が0の完全な当てはまり等）。
+    /// 超える。傾き係数がほぼ共線な場合、Gram行列の列のスケール差が倍精度の限界を超える場合、
+    /// 残差が0の完全な当てはまり等）。
     #[error("{}", self.catalog_message())]
     NearSingularMatrix { matrix: MatrixKind },
 
@@ -228,6 +290,36 @@ impl ErrorInfo for CommonError {
                     .param("n_slopes", *q)
                     .param("min_clusters", q + 1)
             }
+            Self::InsufficientClustersForWeightMatrix { g, l, min_clusters } => {
+                ErrorReport::new(ErrorCode::GmmWeightClusterCountTooSmall)
+                    .param("n_clusters", *g)
+                    .param("n_instruments", *l)
+                    .param("min_clusters", *min_clusters)
+            }
+            Self::InvalidGmmMaxIter { max_iter } => {
+                ErrorReport::new(ErrorCode::GmmMaxIterOutOfRange)
+                    .param("value", *max_iter)
+                    .param("min", GMM_MAX_ITER_MIN)
+                    .param("max", MAX_ITER_LIMIT)
+            }
+            Self::InvalidGmmTol { gmm_tol } => {
+                ErrorReport::new(ErrorCode::ToleranceNotPositiveFinite)
+                    .param("option", "gmm_tol")
+                    .param("value", *gmm_tol)
+            }
+            Self::GmmNonConvergence { n_iter } => ErrorReport::new(ErrorCode::NotConverged)
+                .param("n_iter", *n_iter)
+                .param("iter_option", "gmm_max_iter"),
+            Self::CStatisticNothingToTest => ErrorReport::new(ErrorCode::CStatisticNothingToTest),
+            Self::CStatisticTooManyTestedInstruments {
+                n_tested,
+                n_instruments,
+                n_endog,
+            } => ErrorReport::new(ErrorCode::CStatisticTooManyTestedInstruments)
+                .param("n_tested", *n_tested)
+                .param("n_instruments", *n_instruments)
+                .param("n_endog", *n_endog),
+            Self::CStatisticUndefined => ErrorReport::new(ErrorCode::CStatisticUndefined),
             Self::DimensionMismatch { y_rows, x_rows } => {
                 internal(format!("y has {y_rows} rows but x has {x_rows} rows"))
             }

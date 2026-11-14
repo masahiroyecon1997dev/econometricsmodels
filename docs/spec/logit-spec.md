@@ -1,6 +1,6 @@
 # Logit 仕様書
 
-Logit（二項ロジスティック回帰、最尤推定）の確定済み仕様。`engine/src/nonlinear/logit.rs`（共通基盤は
+Logit（二項ロジスティック回帰、最尤推定）の確定済み仕様。`engine/src/nonlinear/logit.rs`（ファサード）と`logit/`（入力・数式・目的関数・`LogitFitted`・`fit`。共通基盤は
 `engine/src/nonlinear/common.rs`）・`engine_pybind/src/nonlinear/logit.rs`・
 `python_package/econometricsmodels/nonlinear/logit.py`として実装済み。nonlinear系統共通の設計判断
 （ソルバー実行の共通化、`cov_type`共通行列演算、標準化の方針等）は
@@ -121,7 +121,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   - **LPソルバーの差し替え**: LPは`shared::linear_program::LinearProgramSolver`トレイトの裏にあり、
     自前の密な単体法`DenseSimplex`を使う。変数を`x=p-q`に分け箱制約を行として足す標準形で、原点が
     許容解なのでPhase 1が要らない。右辺0の錐制約は原点で強く退化するため、(1)入る変数はDantzig規則、
-    比検定の同点は絶対値最大のピボット要素、(2)退化ピボットが30回続いたらBland規則に切り替えて
+    比検定の同点（絶対許容幅`1e-15`。摂動`1e-11`級より十分小さく取る。摂動と同じ桁の`1e-12`では、許容領域が原点だけの普通のデータで退出行を誤り、`k>=14`の混合スケールで終わらなかった。混合スケール1040ケースで許容幅を振ると失敗は`1e-13`で93件・`1e-14`で1件・`1e-15`以下で0件で、余裕は約1桁。摂動を変えるときは振り直す）は絶対値最大のピボット要素、(2)退化ピボットが30回続いたらBland規則に切り替えて
     巡回を断つ、(3)制約の右辺に行ごとに異なる`1e-11`級の決定的な摂動を足して退化そのものを解く。
     Bland規則だけの初版は`k>=10`でピボット上限に達して有効なデータを失敗させ、同じ`x`で結果が
     逆の行対のようにDantzig/Blandでも終了しない入力（`k=30`）があった。将来LPクレートに替える場合は、
@@ -144,7 +144,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
     `converged=false`、係数は760〜990に達している）。境界はこのデータで`overlap`が`1e-5`〜`3e-5`
     の間にあり、標準化後の行の幾何とマージン閾値`1e-6`で決まるためデータごとに変わる。このため
     境界そのものは固定せず、明らかに両側にある値（`overlap=1e-3,1e-4`は分離とみなさない、
-    `1e-7,1e-9,1e-12`は分離とみなす）を、Rust（`separation.rs`の
+    `1e-7,1e-9,1e-12`は分離とみなす）を、Rust（`separation/lp.rs`の
     `single_overlapping_observation_is_flagged_only_when_the_overlap_is_tiny`）とPython
     （Logit/Probit × `newton`/`bfgs`/`lbfgs`）で固定している。有限のMLEが存在するのに分離と
     扱われる領域（`overlap≲1e-5`、係数が1000近くまで大きくなる）が存在するが、そこでは係数・
@@ -167,13 +167,13 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   経路でも内側`Executor`に反復上限が設定されておらず（argmin既定`u64::MAX`）、ステップ幅の上限
   （`stpmax`）も未設定（既定`f64::INFINITY`）。探索方向・勾配が退化しline search内部の収束判定が
   一度も発火しない入力に嵌ると、この内側ループは理論上終了しない（devビルドで80分超のCPU時間を
-  消費し続けるケースを実測で確認、`nonlinear::tobit::tests::proptests`で発覚）。対策として
-  `run_solver`は`problem`を`BudgetedProblem`（`common.rs`）でラップし、目的関数・勾配の評価回数に
+  消費し続けるケースを実測で確認、`nonlinear::tobit::fit::tests::proptests`で発覚）。対策として
+  `run_solver`は`problem`を`BudgetedProblem`（`common/solver.rs`）でラップし、目的関数・勾配の評価回数に
   総枠（`(max_iter + 1) * 2000`。`+1`は`Executor::init()`の初回評価分の枠を
   `max_iter=0`でも確保するため）を設ける。枠を使い切ると`MleError::EvaluationBudgetExceeded { budget }`
   を返す。argminのソースを変更せずに`bfgs`/`lbfgs`両方を保護できるのは、
   `MoreThuenteLineSearch`が呼び出し元によらず必ず`Problem<O>`経由で`cost`/`gradient`を呼ぶため
-  （詳細は`common.rs`の`BudgetedProblem`docコメント参照）。
+  （詳細は`common/solver.rs`の`BudgetedProblem`docコメント参照）。
 - 収束判定`tol`の既定値`1e-6`は、通常データでは高精度（statsmodelsとの相対誤差最大1e-7程度）に
   一致するが、準完全分離の境界ケースではやや不足する（相対誤差最大7e-8）。`tol=1e-8`まで締めると
   改善するが、`bfgs`が`max_iter`を使い切りやすくなるリスクが上がるため、既定値は`1e-6`のまま維持し、
@@ -186,7 +186,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 - **`bfgs`/`lbfgs`は`tol`を観測数`n`で正規化した基準を使う（実装済み）**:
   `newton`は上記の通り総和勾配に対する絶対閾値のまま（既定`1e-6`）だが、`bfgs`/`lbfgs`は
   「観測あたり平均勾配」基準`‖∇ℓ(θ)‖ / n < tol`（既定`1e-8`）を使う。実装上は`run_solver`
-  （`nonlinear/common.rs`）が`tol * n_obs`を実効的な絶対閾値としてソルバーへ渡す形で、
+  （`nonlinear/common/solver.rs`）が`tol * n_obs`を実効的な絶対閾値としてソルバーへ渡す形で、
   `FaerBfgs`/`FaerLbfgs`自体は正規化を知らない。`n_obs`は各モデルの`fit()`が観測数
   （`y.nrows()`）をそのまま渡す。statsmodels（scipy）が対数尤度・スコア・Hessianを観測数`n`で
   割ってから最適化する設計（`statsmodels.base.model.LikelihoodModel.fit`の`f=-loglike/nobs`等）に
@@ -261,7 +261,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 `ℓ_null = n1・ln(ȳ) + n0・ln(1-ȳ)`（`n1`/`n0`はy=1/0の観測数、`0*ln(0)`となる項は0として扱う）で
 直接計算する（再最適化しない。切片のみモデルのMLEが`link(θ̂)=ȳ`を満たすことに由来し、Probit/Tobitでも
 同じ式を共有する）。`lr_statistic`/`lr_p_value`（カイ二乗分布）/`pseudo_r_squared`/`aic`/`bic`は
-`goodness_of_fit(llf, llnull, n, k)`（`nonlinear/common.rs`、Logit/Probit共通）が計算する。
+`goodness_of_fit(llf, llnull, n, k)`（`nonlinear/common/goodness_of_fit.rs`、Logit/Probit共通）が計算する。
 
 ### 3.5 限界効果
 
@@ -271,7 +271,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
 `w`の勾配`s`から求めるヤコビアンと`fit()`時の`cov_params`の二次形式（`jac_j・Σ・jac_j'`）で計算する。
 定数項は出力から除外する。`column_means`/`column_medians`・ヤコビアン計算・デルタ法本体
 （`dydx_and_jacobian`/`marginal_effects_from_w_s`）はリンク関数に依存しないためProbitと共有する
-（`nonlinear/common.rs`）。
+（`nonlinear/common/marginal_effects.rs`）。
 
 ### 3.6 predict() / augment() / pred_table()
 
@@ -286,7 +286,7 @@ Newton-Raphson/BFGS/L-BFGSによる対数尤度最大化）。
   predict_new_data`のLogit/Probit共有版、`link`関数を差し替えられるようにしたもの）。新規データの
   設計行列組み立て（`has_intercept`時の定数項自動付加）は、OLS/WLSと共有する`crate::shared::design_matrix::
   design_matrix_element`ヘルパーに委ねている。
-- `pred_table`の計算そのもの（`predicted`と`y`のみに依存、リンク関数を参照しない）は`common.rs`の
+- `pred_table`の計算そのもの（`predicted`と`y`のみに依存、リンク関数を参照しない）は`common/predict.rs`の
   `pred_table`関数としてProbitと共有する。`actual`側は`threshold`に関わらず常に**固定0.5**で二値化
   する（`predicted`側のみ`threshold`依存）。これはstatsmodelsの`BinaryResults.pred_table(threshold)`
   の実際の実装（`histogram2d`が常に`[0, 0.5, 1]`でクロス集計する）に合わせた仕様。

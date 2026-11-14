@@ -78,6 +78,65 @@ IV_TOLERANCES: dict[str, dict[str, float]] = {
         "atol": ATOL_CROSSCHECK_FLOOR,
         "rtol_wald_card_cluster": RTOL_WALD_CARD_CLUSTER,
     },
+    # --- MOP有効F統計量のオラクル（`benchmark/iv/references/mop_oracle.py`）の自己検証 ---
+    # `rtol_effective`: 有効F・臨界値（オラクルが保証する精度。浮動小数点の範囲で
+    # 1e-10）。linearmodelsの`cragg_donald_f`・statsmodelsの誘導形OLSの共分散・
+    # 変換に対する不変性が対象で、実測の最大相対差は一般化版臨界値の不変性の5.6e-14
+    # （`B_TSLS`の最大化が1e-15ずれた分が増幅される）、他は1e-14以下
+    # （Cragg-Donald 3.6e-15、共分散 7.1e-15、有効F・単純版臨界値の不変性 1.6e-15以下）。
+    # `rtol_b_tsls`: `B_TSLS`を2つの方法（`beta`軸・角度）で最大化した結果どうしと、
+    # 論文の式をそのまま評価した上限・下限との比較（保証は1e-8）。2つの方法の実測の
+    # 最大相対差は、D1・D2の全ケースで9.8e-16、誤差がほぼ比例するケース（`min tr(S1)/
+    # tr(W1)` が約1e-13まで）で2.1e-14。
+    # `atol_table1`: 論文Table 1は小数第2位に丸めてあるため、丸めの半分（0.005）。
+    # `rtol_published_b`: 同次分散での`B_TSLS = |1 - 2/K|`は閉じた式との比較で、
+    # 最大化の格子の打ち切り（`|beta| <= 1e8`）が効く`beta`軸の方法でも1e-8に収まる。
+    "mop_oracle": {
+        "rtol_effective": 1e-10,
+        "rtol_b_tsls": 1e-8,
+        "atol_table1": 0.005,
+        "rtol_published_b": 1e-8,
+    },
+    # --- 弱操作変数診断（`IVResults.cragg_donald()`等）。リファレンスはlinearmodelsの
+    # Cragg-Donald・Kleibergen-Paapと、MOPのオラクル（`mop_oracle.py`）。 ---
+    # `rtol`: 統計量・p値・臨界値。実測の最大相対差は機械精度（Cragg-Donald 4.4e-14、
+    # Kleibergen-Paap 8.7e-14（p値）、有効Fとその臨界値 1.3e-14）で、マージンは3桁。
+    # `rtol_b_tsls`: `B_TSLS`とそれを使う一般化版の臨界値（実測 4.2e-15）。
+    "iv_weak_diagnostics": {
+        "rtol": 1e-10,
+        "rtol_b_tsls": 1e-10,
+    },
+    # --- 弱操作変数診断の独立クロスチェック（R ivDiag）。 ---
+    # `rtol`: Cragg-Donaldの`F`・rk Wald `F`・有効F。実測の最大相対差はCragg-Donald
+    # 2.1e-14、rk Wald F 2.3e-14、有効F 1.7e-12（実データcard。合成データは1e-13以下）で、
+    # マージンは2桁以上。
+    "iv_weak_diagnostics_crosscheck": {
+        "rtol": 1e-10,
+    },
+    # --- C統計量（`IVResults.c_stat()`）。リファレンスはlinearmodelsの`c_stat`（内生変数の
+    # 外生性）と、`IVGMM`の部品を使った別計算（除外操作変数の直交性）、それらと一致を確認した
+    # numpy版のオラクル（`c_statistic_oracle.py`）。 ---
+    # `rtol`: 統計量・p値・J統計量。実測の最大相対差は合成データで約1e-12以下、実データcard
+    # （列のスケールが大きく違う）で8.2e-12で、マージンは1桁以上。
+    # `rtol_boundary_cluster`: クラスター数が検定するモーメント条件を含むモデルの操作変数の数
+    # ちょうど（`S_e`がほぼ階数落ちの境界）の実データcard（地域9グループ）。統計量の実測は
+    # 7.4e-11、p値は1.4e-10で、基本の1e-10を超える。`S_e`の条件数が大きく誤差が増幅される
+    # ためなので、このケースだけ方針の基本の1e-8にする。
+    # `atol_just_identified`: 検定しない側が丁度識別のとき、本実装のJ_cは厳密に0で、参照
+    # （`IVGMM`の部品）は丸め誤差を持つ。実測の最大は4.4e-18。
+    "iv_c_statistic": {
+        "rtol": 1e-10,
+        "rtol_boundary_cluster": 1e-8,
+        "atol_just_identified": 1e-12,
+    },
+    # --- C統計量の独立クロスチェック（R momentfit）。 ---
+    # `rtol`: 統計量・p値・J統計量。実測の最大相対差は実データcard（列のスケールが大きく違う）の
+    # 1.0e-11、合成データは1e-12以下で、マージンは1桁以上。検定しない側が丁度識別のときのJ_cは
+    # 本実装もRも厳密に0なので、絶対誤差のフロアは置かない。クラスター数が検定前のモーメント条件の
+    # 数と同数のcard（地域9グループ）でも、実測は1.5e-12で基本の許容に収まる。
+    "iv_c_statistic_crosscheck": {
+        "rtol": 1e-10,
+    },
     # --- 本実装内の不変条件（リファレンス実装との比較ではない） ---
     # 同じ入力に対して計算経路が異なる出力どうしの一致の確認（`ols_api`と同じ方針、
     # 根拠は`_tolerances_linear.py`の`ols_api`のコメント参照）。

@@ -130,3 +130,43 @@ def run_momentfit_r(
     if lag is not None:
         result["hac_lag"] = lag
     return result
+
+
+_C_STAT_R_SCRIPT = Path(__file__).resolve().parent / "run_momentfit_c_stat.R"
+
+
+def run_momentfit_c_stat_r(
+    csv_path: Path,
+    formula: str,
+    weight_type: str,
+    tested: list[str],
+    *,
+    cluster: str | None = None,
+    hac_lag: int | None = None,
+) -> dict:
+    """`run_momentfit_c_stat.R` を呼び、C統計量（difference-in-Hansen）を得る。
+
+    Args:
+        csv_path: データ CSV。
+        formula: `y ~ x_exog + x_endog | x_exog + 検定する内生変数 + instruments`
+            （`|`の右が検定前の全モーメント条件）。
+        weight_type: classical / robust / cluster / hac。
+        tested: 外すモーメント条件の列名（`|`の右の列名。検定する内生変数と
+            除外操作変数）。
+        cluster: `weight_type="cluster"` のときのグループ列名。
+        hac_lag: `weight_type="hac"` のときのラグ数。
+
+    Returns:
+        `statistic`・`p_value`・`df`・`j_with_tested`・`j_without_tested`。
+    """
+    return run_r(
+        _C_STAT_R_SCRIPT,
+        csv_path,
+        formula,
+        weight_type,
+        extra_args=[
+            ",".join(tested),
+            cluster if cluster is not None else "NA",
+            str(hac_lag) if hac_lag is not None else "NA",
+        ],
+    )

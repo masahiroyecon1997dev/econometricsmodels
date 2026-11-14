@@ -43,11 +43,15 @@ from benchmark.panel.references.linearmodels_ref import run
 # `docs/spec/fe-spec.md`4章）。
 COV_TYPES = ["classical", "hc1"]
 
-# unbalancedは1-way専用（`fe-spec.md`3.1節: 2-way FEはバランスパネル必須、2-way要求時の
-# ValidationErrorはunbalanced_two_wayシナリオで別途確認する。数値比較対象外）。
-ONE_WAY_ONLY_SCENARIOS = ["unbalanced"]
+# 組合せが欠ける不均衡パネル。1-wayも2-way（交互射影）も数値比較する。RE（2-wayは不均衡を拒否する）と
+# plm（2-wayに非対応）の数値比較の対象でもある。
+UNBALANCED_SCENARIOS = ["unbalanced"]
 
-# それ以外はバランスパネルのため1-way/2-way両方で数値比較する。
+# 不均衡パネルのうちFE（linearmodels・fixest）だけで数値比較するシナリオ。疎なパネルと、個体と時点の
+# つながりが2つの連結成分に分かれるパネル（`benchmark/panel/datasets.py`参照）。
+UNBALANCED_FE_ONLY_SCENARIOS = ["unbalanced_sparse", "unbalanced_disconnected"]
+
+# バランスパネル。1-way/2-way両方で数値比較する。
 TWO_WAY_SCENARIOS = [
     "baseline",
     "small_panel",
@@ -62,11 +66,14 @@ TWO_WAY_SCENARIOS = [
     "high_variance",
 ]
 
-NUMERIC_SCENARIOS = ONE_WAY_ONLY_SCENARIOS + TWO_WAY_SCENARIOS
+NUMERIC_SCENARIOS = UNBALANCED_SCENARIOS + TWO_WAY_SCENARIOS
 
-# singleton_entity/singleton_time/unbalanced_two_way/zero_variance_regressorは
-# ここに含まない（いずれもValidationErrorの発生確認のみ、testing-policy.md
-# 「テストの3系統」参照。テストコード側で対応）。
+# FEの数値比較（linearmodels・fixest）の対象。全て1-way・2-wayの両方で比べる。
+FE_SCENARIOS = NUMERIC_SCENARIOS + UNBALANCED_FE_ONLY_SCENARIOS
+
+# singleton_entity/singleton_time/zero_variance_regressorはここに含まない（いずれも
+# ValidationErrorの発生確認のみ、testing-policy.md「テストの3系統」参照。テストコード側で対応）。
+# unbalanced_two_way（先頭1行だけ欠ける）は数値比較ではなく、2-wayで推定できる成功パスの確認用。
 
 # 実データ（Wooldridge wagepan）。
 WAGEPAN_COV_TYPES = ["classical", "hc1"]
@@ -111,18 +118,17 @@ def _run_boundary_df1_case(*, two_way: bool) -> dict:
 def build_fixtures() -> dict:
     fixtures: dict = {}
 
-    for scenario in NUMERIC_SCENARIOS:
+    for scenario in FE_SCENARIOS:
         fixtures[scenario] = {
             "one_way": {
                 cov_type: _run_effects(scenario, cov_type, two_way=False)
                 for cov_type in COV_TYPES
-            }
-        }
-        if scenario in TWO_WAY_SCENARIOS:
-            fixtures[scenario]["two_way"] = {
+            },
+            "two_way": {
                 cov_type: _run_effects(scenario, cov_type, two_way=True)
                 for cov_type in COV_TYPES
-            }
+            },
+        }
 
     fixtures["baseline_df1"] = {
         "one_way": _run_boundary_df1_case(two_way=False),
@@ -164,11 +170,13 @@ def build_fixtures() -> dict:
         "primary_reference": "linearmodels",
         "linearmodels_version": linearmodels.__version__,
         "note": (
-            "singleton_entity/singleton_time/unbalanced_two_way/"
-            "zero_variance_regressorシナリオはここに含まない"
-            "（いずれもValidationErrorの発生確認のみ、テストコード側で対応）。"
-            "unbalancedは1-way専用（2-way FEはバランスパネル必須のため、"
-            "2-way要求時のValidationErrorはunbalanced_two_wayシナリオで確認）。"
+            "singleton_entity/singleton_time/zero_variance_regressorシナリオは"
+            "ここに含まない（いずれもValidationErrorの発生確認のみ、"
+            "テストコード側で対応）。"
+            "unbalanced/unbalanced_sparse/unbalanced_disconnectedは組合せが"
+            "欠ける不均衡パネルで、2-wayは交互射影で推定する"
+            "（unbalanced_disconnectedは個体と時点のつながりが2つの連結成分に"
+            "分かれる。自由度はlinearmodelsもk+N+T-1のまま）。"
             "hc2/hc3はlinearmodels.PanelOLSが提供しないため対象外"
             "（generate_fe_crosscheck_fixtures.pyのfixestクロスチェックのみで"
             "検証する単一参照実装の例外、panel-common.md5.4節と同型）。"

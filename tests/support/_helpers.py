@@ -35,6 +35,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from typing import Any
 
 import numpy as np
 import polars as pl
@@ -180,21 +181,54 @@ def with_cluster_groups(
     )
 
 
+def assert_unit_change_invariant(
+    fit: Callable[[pl.DataFrame], Any],
+    df: pl.DataFrame,
+    scales: dict[str, float],
+    *,
+    stats: Sequence[str],
+    rtol: float = 1e-8,
+) -> None:
+    """`df`の列を`scales`の倍率で割って単位を変えた版と、推定結果が一致することを確かめる。
+
+    `fit(df)`は結果を返す関数。`scales`は列名から倍率への辞書で、`df`の列が極端なスケール
+    （例: `x1`が`1e6`倍、`x2`が`1e-3`倍）になっているとき、その倍率で割ると単位を揃えた
+    データになる。単位を変えても、全体のWald/F統計量とそのp値（`stats`の属性名）は変わらず、
+    係数と標準誤差は列の倍率に従って変わる（単位を揃えた版の係数は`df`の版の`倍率`倍）。
+    傾き係数の分散の比が`1/(k·ε)`（約2e15）を超えても、全体のWald検定が失敗しないことの確認に使う。
+    """
+    assert scales, "scales must name at least one column"
+    rescaled = df.with_columns(
+        (pl.col(name) / scale).alias(name) for name, scale in scales.items()
+    )
+    original, unit = fit(df), fit(rescaled)
+    for stat in stats:
+        assert getattr(original, stat) == pytest.approx(
+            getattr(unit, stat), rel=rtol, abs=1e-300
+        ), stat
+    for attribute in ("params", "std_errors"):
+        got, expected = getattr(original, attribute), getattr(unit, attribute)
+        assert got.keys() == expected.keys(), attribute
+        for name, value in got.items():
+            factor = scales.get(name, 1.0)
+            assert value * factor == pytest.approx(
+                expected[name], rel=rtol, abs=0.0
+            ), (attribute, name)
+
+
 def wooldridge_loader() -> Callable[[str], pl.DataFrame]:
     """`wooldridge`パッケージ（test依存グループ）を使ってロード関数を返す。
 
-    `wooldridge`はtest依存グループに含まれ標準CIで常にインストールされるため、
-    通常はskipされない。`pytest.importorskip`は、想定外の理由でインストールが
-    欠けた環境（test依存グループを経由しないpytest実行等）向けの防御的フォール
-    バックとして残している。Wooldridgeデータはデータの再配布ライセンスが未確認
-    のためCSVとして固定せず（`benchmark/linear/freeze.py`のdocstring参照）、
+    `wooldridge`はtest依存グループの必須の依存で、標準CIで常にインストールされる。
+    インストールされていない環境（test依存グループを経由しないpytest実行等）では、
+    スキップせず`ImportError`で失敗する。Wooldridgeデータはデータの再配布ライセンスが
+    未確認のためCSVとして固定せず（`benchmark/linear/freeze.py`のdocstring参照）、
     都度ロードする。
 
     複数のデータセット名を扱うテスト（`pytest.mark.parametrize`でデータセット名を
     振る等）向けにロード関数自体を返す。1件だけロードする場合は
     `load_wooldridge_dataset`を使う方が簡潔。
     """
-    pytest.importorskip("wooldridge")
     from benchmark.common.load_wooldridge import load
 
     return load

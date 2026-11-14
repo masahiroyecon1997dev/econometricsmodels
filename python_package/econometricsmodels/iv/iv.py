@@ -22,10 +22,20 @@ from .. import _lib
 from .._lib import IVOptions
 from .._results_utils import (
     by_param,
+    c_statistic_result,
     conf_int_by_param,
     cov_params_by_param,
+    cragg_donald_result,
+    effective_f_result,
+    kleibergen_paap_result,
     params_table_rows,
     results_repr,
+)
+from ..diagnostics import (
+    CraggDonaldResult,
+    CStatisticResult,
+    EffectiveFResult,
+    KleibergenPaapResult,
 )
 from ..linear.ols import OLSResults
 
@@ -163,6 +173,12 @@ class IVResults:
     - Residuals: `residuals` (structural residuals).
     - Methods: `first_stage()` (one `OLSResults` per endogenous
       variable), `params_table()`.
+    - Weak-instrument diagnostics (methods, computed when called):
+      `cragg_donald()`, `kleibergen_paap()`, `effective_f()`.
+    - Exogeneity of endogenous variables and orthogonality of excluded
+      instruments, for either estimator (method, computed when called):
+      `c_stat()`. For GMM, which has no Wu-Hausman test, use it for the
+      exogeneity of endogenous variables.
 
     Note:
         Users normally do not construct this directly; it is returned
@@ -516,3 +532,163 @@ class IVResults:
             name: OLSResults(raw)
             for name, raw in self._raw.first_stage().items()
         }
+
+    def cragg_donald(self) -> CraggDonaldResult:
+        """Cragg-Donald statistic and Stock-Yogo critical values.
+
+        The Cragg-Donald statistic measures the joint strength of the
+        excluded instruments for all endogenous variables, assuming
+        homoskedastic errors; it does not depend on `cov_type`. With one
+        endogenous variable it equals the partial F-statistic in
+        `weak_instrument_f_statistics`. The Stock-Yogo critical values are
+        tabulated for a limited number of endogenous variables and
+        excluded instruments (see `CraggDonaldResult`).
+
+        The Stock-Yogo critical values are derived for independent,
+        homoskedastic errors; with heteroskedastic, clustered or
+        autocorrelated errors use `kleibergen_paap()` or `effective_f()`.
+
+        This is a post-estimation diagnostic: it is never computed by
+        `fit()`. It re-reads the variables from the data passed to
+        `fit()`, and works the same for `estimator="2sls"` and
+        `estimator="gmm"`; it follows neither `cov_type` nor
+        `gmm_weight_type`.
+
+        Returns:
+            A `CraggDonaldResult` with the statistic, the numbers of
+            endogenous variables and excluded instruments, and the
+            critical values (`None` where not tabulated).
+
+        Raises:
+            ComputationError: The statistic is undefined for these data,
+                for example because the instruments are collinear with the
+                exogenous variables or a first stage fits perfectly.
+        """
+        return cragg_donald_result(self._raw.cragg_donald())
+
+    def kleibergen_paap(self) -> KleibergenPaapResult:
+        """Kleibergen-Paap rk LM and rk Wald F statistics.
+
+        Robust versions of the Cragg-Donald analysis. The covariance of
+        the first-stage scores follows the `cov_type` (and `cluster`,
+        `hac_lags`, `hac_time`) of the options passed to `fit()`, so with
+        `cov_type="classical"` the rk Wald F equals the Cragg-Donald
+        statistic. The rk LM statistic tests that the first stage is
+        underidentified. The result has no critical values; for one
+        endogenous variable use `effective_f()`.
+
+        This is a post-estimation diagnostic: it is never computed by
+        `fit()`. It re-reads the variables from the data passed to
+        `fit()`, and works the same for `estimator="2sls"` and
+        `estimator="gmm"`. For GMM it follows `cov_type`, not
+        `gmm_weight_type`.
+
+        Returns:
+            A `KleibergenPaapResult`. Either statistic is `None` when
+            only the other is defined (the Wald F needs one more cluster
+            than the LM).
+
+        Raises:
+            ComputationError: Neither statistic is defined for these
+                data, for example because the instruments are collinear
+                with the exogenous variables or the covariance of the
+                scores is singular.
+        """
+        return kleibergen_paap_result(self._raw.kleibergen_paap())
+
+    def effective_f(self, *, alpha: float = 0.05) -> EffectiveFResult:
+        """Montiel Olea-Pflueger effective F statistic.
+
+        A weak-instrument statistic for one endogenous variable that is
+        valid under heteroskedasticity, clustering and autocorrelation.
+        The covariance follows the `cov_type` (and `cluster`, `hac_lags`,
+        `hac_time`) of the options passed to `fit()`; with
+        `cov_type="classical"` it equals the Cragg-Donald statistic. With
+        one or two excluded instruments, prefer the simplified critical
+        values (see `EffectiveFResult`).
+
+        This is a post-estimation diagnostic: it is never computed by
+        `fit()`. It re-reads the variables from the data passed to
+        `fit()`, and works the same for `estimator="2sls"` and
+        `estimator="gmm"`. For GMM it follows `cov_type`, not
+        `gmm_weight_type`.
+
+        Args:
+            alpha: Level of the critical values, strictly between 0 and
+                1. Defaults to 0.05.
+
+        Returns:
+            An `EffectiveFResult` with the statistic and the critical
+            values for the worst-case Nagar bias thresholds.
+
+        Raises:
+            TypeError: `alpha` is not a real number.
+            ValidationError: `alpha` is not strictly between 0 and 1, or
+                the model does not have exactly one endogenous variable.
+            ComputationError: The statistic is undefined for these data,
+                for example because the covariance of the scores is
+                singular (too few clusters or observations).
+        """
+        return effective_f_result(self._raw.effective_f(alpha))
+
+    def c_stat(
+        self,
+        *,
+        variables: list[str] | None = None,
+        instruments: list[str] | None = None,
+    ) -> CStatisticResult:
+        """C statistic (difference-in-Hansen test).
+
+        Tests whether endogenous variables in `variables` are in fact
+        exogenous, and whether excluded instruments in `instruments` are
+        uncorrelated with the error. The model is estimated by two-step GMM
+        with and without the tested moment conditions, and the statistic is
+        the difference of the two Hansen J statistics, which is chi-squared
+        distributed under the null that the tested moment conditions are
+        valid. The test is conditional: the remaining instruments are taken
+        as valid. Both J statistics use the same estimate of the covariance
+        of the moment conditions, so the statistic is never negative. Pass
+        `variables`, `instruments` or both.
+
+        The covariance of the moment conditions follows `gmm_weight_type`
+        (with `cluster`, `hac_lags` and `hac_time`) when `estimator="gmm"`
+        with `gmm_type` `"two_step"` or `"iterated"`, and the covariance of
+        the same kind as `cov_type` otherwise, that is for 2SLS and for
+        `gmm_type="one_step"` (`"classical"`; `"hc0"` to `"hc3"` as a robust
+        covariance; `"hac"`; `"cluster"`). It does not depend on
+        `gmm_max_iter` or `gmm_tol`, and a model fitted with
+        `gmm_type="one_step"` gets the two-step statistic. With the
+        classical covariance the statistic is a difference of Sargan
+        statistics that share one error variance.
+
+        This is a post-estimation diagnostic: it is never computed by
+        `fit()`. It re-reads the variables from the data passed to `fit()`.
+
+        Args:
+            variables: Names from `x_endog` whose exogeneity is tested.
+                Defaults to `None` (no endogenous variable is tested). The
+                names are reported in the order of `x_endog`, not the order
+                given.
+            instruments: Names from the excluded `instruments` whose
+                orthogonality is tested. Defaults to `None` (no instrument
+                is tested). At least as many instruments as endogenous
+                variables must remain.
+
+        Returns:
+            A `CStatisticResult` with the statistic, p-value, degrees of
+            freedom and the two J statistics.
+
+        Raises:
+            TypeError: `variables` or `instruments` is not a list of str.
+            ValidationError: Neither argument is given, a list is empty or
+                repeats a name, a name in `variables` is not in `x_endog`,
+                a name in `instruments` is not among the excluded
+                instruments, or so many instruments are tested that fewer
+                excluded instruments than endogenous variables remain.
+            ComputationError: The statistic is undefined for these data, for
+                example because the instruments are collinear, or because
+                there are fewer clusters than the columns of the full
+                instrument set (the exogenous regressors, the tested
+                endogenous variables and all excluded instruments).
+        """
+        return c_statistic_result(self._raw.c_stat(variables, instruments))

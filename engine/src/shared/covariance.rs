@@ -64,15 +64,76 @@ pub(crate) fn leverages(x: &Mat<f64>, xtx_inv: &Mat<f64>) -> Vec<f64> {
         .collect()
 }
 
+/// HCの種類ごとの行スケールの定義。どのレバレッジを使うか、何を小標本補正の分母にするかは
+/// 呼び出し側の推定量が決めるので、補正係数とレバレッジは値として受け取る
+/// （`hc_cov_params`は素の`h_ii = x_i'(X'X)⁻¹x_i`と`n/(n-k)`、パネルFEは`1/T_i`込みの
+/// レバレッジと`n/df_resid`、GMMは`Z`ベースのレバレッジと構造方程式の`k`ベースの補正を渡す）。
+///
+/// レバレッジは各行の`h_ii`（長さ`n`、`h_ii < 1`）。`h_ii = 1`だとHC2/HC3は`inf`・`NaN`になり、
+/// 呼び出し側（推定量）がそれを防ぐ。
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum HcScale<'a> {
+    /// 補正なし。
+    Hc0,
+    /// `factor`は残差にかける係数（通常`sqrt(n/(n-k))`）。
+    Hc1 { factor: f64 },
+    /// `ε̂_i / sqrt(1-h_ii)`。`leverage`の長さは`n`。
+    Hc2 { leverage: &'a [f64] },
+    /// `ε̂_i / (1-h_ii)`。`leverage`の長さは`n`。
+    Hc3 { leverage: &'a [f64] },
+}
+
 /// HCの種類ごとの行スケール `scale_i`（`Ψ̂ = Σ_i scale_i² x_i x_i'`となるように、残差
 /// `ε̂_i`に重みの平方根をかけたもの。符号は二乗で相殺されるため`ε̂_i`のままでよい）。
+/// `resid(i)`は`i`行目の残差。
 ///
 /// - HC0: `ε̂_i`
-/// - HC1: `ε̂_i sqrt(n/(n-k))`
+/// - HC1: `ε̂_i · factor`
 /// - HC2: `ε̂_i / sqrt(1-h_ii)`
 /// - HC3: `ε̂_i / (1-h_ii)`
 ///
-/// レバレッジはHC2/HC3でのみ必要なため、それ以外では計算しない。
+/// # Panics
+/// HC2/HC3で`leverage`の長さが`n`と異なるとき（呼び出し側の実装の誤り。debugビルドでは
+/// `debug_assert!`が、releaseビルドでは短い場合の添字境界外が検出する）。
+pub(crate) fn hc_scales(n: usize, resid: impl Fn(usize) -> f64, scale: HcScale<'_>) -> Vec<f64> {
+    match scale {
+        HcScale::Hc0 => (0..n).map(resid).collect(),
+        HcScale::Hc1 { factor } => (0..n).map(|i| resid(i) * factor).collect(),
+        HcScale::Hc2 { leverage } => {
+            debug_assert_eq!(leverage.len(), n, "leverage must have one value per row");
+            (0..n)
+                .map(|i| resid(i) / (1.0 - leverage[i]).sqrt())
+                .collect()
+        }
+        HcScale::Hc3 { leverage } => {
+            debug_assert_eq!(leverage.len(), n, "leverage must have one value per row");
+            (0..n).map(|i| resid(i) / (1.0 - leverage[i])).collect()
+        }
+    }
+}
+
+/// 行スケール`scale_i`をかけたスコア行列`S`（`S[i,j] = scale_i x_ij`）の`S'S = Σ_i scale_i² x_i x_i'`
+/// （`x`の列数×列数）。`x_i x_i'`の外積を行ごとに手動で積み上げるより、既存の行列積を再利用できて
+/// 簡潔なため。係数の`meat`（`x`が設計行列）にも、GMMのモーメント条件の分散共分散行列
+/// （`x`が操作変数`Z`）にも使う。
+///
+/// 行列積は演算子`*`なので、faerのグローバル並列度（各`fit()`冒頭の`ensure_serial()`が固定する
+/// `Par::Seq`）に依存する（`hac_meat`は`Par::Seq`を引数で明示する点が異なる）。
+///
+/// # Panics
+/// `row_scales.len() != x.nrows()`のとき（debugビルド。呼び出し側の実装の誤り）。
+pub(crate) fn hc_meat(x: &Mat<f64>, row_scales: &[f64]) -> Mat<f64> {
+    debug_assert_eq!(
+        row_scales.len(),
+        x.nrows(),
+        "row_scales must have one value per row"
+    );
+    let scores = Mat::from_fn(x.nrows(), x.ncols(), |i, j| row_scales[i] * (*x.get(i, j)));
+    scores.transpose() * &scores
+}
+
+/// [`hc_cov_params`]用の行スケール。素のレバレッジ`h_ii = x_i'(X'X)⁻¹x_i`と`n/(n-k)`の補正を
+/// 使う。レバレッジはHC2/HC3でのみ必要なため、それ以外では計算しない。
 fn hc_row_scales(
     x: &Mat<f64>,
     residuals: &Mat<f64>,
@@ -83,26 +144,25 @@ fn hc_row_scales(
     let k = x.ncols();
     let resid = |i: usize| *residuals.get(i, 0);
     match variant {
-        HcVariant::Hc0 => (0..n).map(resid).collect(),
+        HcVariant::Hc0 => hc_scales(n, resid, HcScale::Hc0),
         HcVariant::Hc1 => {
-            let hc1_correction = ((n as f64) / ((n - k) as f64)).sqrt();
-            (0..n).map(|i| resid(i) * hc1_correction).collect()
+            let factor = ((n as f64) / ((n - k) as f64)).sqrt();
+            hc_scales(n, resid, HcScale::Hc1 { factor })
         }
         HcVariant::Hc2 => {
             let h = leverages(x, xtx_inv);
-            (0..n).map(|i| resid(i) / (1.0 - h[i]).sqrt()).collect()
+            hc_scales(n, resid, HcScale::Hc2 { leverage: &h })
         }
         HcVariant::Hc3 => {
             let h = leverages(x, xtx_inv);
-            (0..n).map(|i| resid(i) / (1.0 - h[i])).collect()
+            hc_scales(n, resid, HcScale::Hc3 { leverage: &h })
         }
     }
 }
 
 /// HC0〜HC3ロバストな係数分散共分散行列: `(X'X)⁻¹Ψ̂(X'X)⁻¹`（k×k）。
 ///
-/// `Ψ̂`は各行を[`hc_row_scales`]でスケールしたスコア行列`S`（`S[i,j] = scale_i x_ij`）の
-/// `S'S`。`x_i x_i'`の外積を行ごとに手動で積み上げるより、既存の行列積を再利用できて簡潔なため。
+/// `Ψ̂`は各行を[`hc_row_scales`]でスケールしたスコア行列の`S'S`（[`hc_meat`]）。
 pub(crate) fn hc_cov_params(
     x: &Mat<f64>,
     residuals: &Mat<f64>,
@@ -110,8 +170,7 @@ pub(crate) fn hc_cov_params(
     variant: HcVariant,
 ) -> Mat<f64> {
     let row_scale = hc_row_scales(x, residuals, xtx_inv, variant);
-    let scores = Mat::from_fn(x.nrows(), x.ncols(), |i, j| row_scale[i] * (*x.get(i, j)));
-    let psi_hat = scores.transpose() * &scores;
+    let psi_hat = hc_meat(x, &row_scale);
     sandwich(xtx_inv, &psi_hat)
 }
 
@@ -172,6 +231,17 @@ pub(crate) fn resolve_hac_lags(lags: Option<i64>, n: usize) -> Result<usize, Com
 /// 遅くなる**ことを実測済み（n=10,000, k=2で0.13倍＝約6倍の悪化）。この関数
 /// 内だけ`Par::Seq`にスコープを切ることで、他のcov_type計算・将来手法のグローバル並列化
 /// 設定に影響を与えずにこの罠を回避している。
+///
+/// # 前提（呼び出し側が保証する）
+/// - `order`は`0..n`の置換（長さ`n`。重複や範囲外は検出されない）。時系列順に並べる必要が無い
+///   ときは恒等順序`0..n`を渡す（パネルのDriscoll-Kraayは、時点を行とみなした`n = T`のスコアに
+///   恒等順序で使う）。
+/// - `lags <= n`（`resolve_hac_lags`が保証する。`lags=None`の経験則は`n = 1`のときだけ`n`に
+///   等しくなる。DKは`resolve_dk_bandwidth`が`bandwidth < t`を保証する）。`lags > n`だと
+///   `n - l`が`usize`でアンダーフローする。
+///
+/// # Panics
+/// `order.len() != n`または`lags > n`のとき（debugビルド）。
 pub(crate) fn hac_meat(
     n: usize,
     k: usize,
@@ -179,6 +249,8 @@ pub(crate) fn hac_meat(
     order: &[usize],
     score: impl Fn(usize, usize) -> f64,
 ) -> Mat<f64> {
+    debug_assert_eq!(order.len(), n, "order must be a permutation of 0..n");
+    debug_assert!(lags <= n, "lags must not exceed the number of rows");
     let xe = Mat::<f64>::from_fn(n, k, |t, a| score(order[t], a));
 
     // l=0項: Ŝ₀ = Xe'Xe（HC0のΨ̂と同形）
@@ -400,6 +472,47 @@ mod tests {
                 *cov.get(0, 0)
             );
         }
+    }
+
+    #[test]
+    fn hc_scales_applies_the_factor_and_the_leverage_to_each_residual() {
+        let resid = |i: usize| [2.0, -1.0, 0.5][i];
+        let h = [0.0, 0.75, 0.5];
+        assert_eq!(hc_scales(3, resid, HcScale::Hc0), vec![2.0, -1.0, 0.5]);
+        assert_eq!(
+            hc_scales(3, resid, HcScale::Hc1 { factor: 1.5 }),
+            vec![3.0, -1.5, 0.75]
+        );
+        let hc2 = hc_scales(3, resid, HcScale::Hc2 { leverage: &h });
+        let hc3 = hc_scales(3, resid, HcScale::Hc3 { leverage: &h });
+        for i in 0..3 {
+            let e = resid(i);
+            assert!((hc2[i] - e / (1.0 - h[i]).sqrt()).abs() < 1e-15);
+            assert!((hc3[i] - e / (1.0 - h[i])).abs() < 1e-15);
+        }
+    }
+
+    #[test]
+    fn hc_meat_is_the_sum_of_squared_scales_times_row_outer_products() {
+        // 設計行列の代わりに2列の`Z`を渡す場合（GMMのモーメント条件の分散共分散行列）と同じ形。
+        let z = matrix(&[&[1.0, 2.0], &[0.5, -1.0], &[-2.0, 3.0]]);
+        let scales = [2.0, -1.0, 0.5];
+        let meat = hc_meat(&z, &scales);
+        for a in 0..2 {
+            for b in 0..2 {
+                let expected: f64 = (0..3)
+                    .map(|i| scales[i] * scales[i] * *z.get(i, a) * *z.get(i, b))
+                    .sum();
+                assert!((*meat.get(a, b) - expected).abs() < 1e-12);
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "one value per row")]
+    fn hc_meat_rejects_row_scales_of_the_wrong_length_in_debug_builds() {
+        let z = matrix(&[&[1.0], &[2.0], &[3.0]]);
+        hc_meat(&z, &[1.0, 1.0]);
     }
 
     #[test]

@@ -17,6 +17,7 @@ pub enum ErrorCode {
     ColumnNotFound,
     ColumnContainsNull,
     ColumnNonFinite,
+    ColumnBlankLabel,
     ColumnUnsupportedDtype,
     ColumnTimezoneNotSupported,
     ColumnValuesTied,
@@ -32,6 +33,13 @@ pub enum ErrorCode {
     DkTimeRequired,
     ClusterRequired,
     ConfidenceLevelOutOfRange,
+    AlphaOutOfRange,
+    EffectiveFEndogenousCount,
+    WeakInstrumentStatisticUndefined,
+    CStatisticNothingToTest,
+    CStatisticTooManyTestedInstruments,
+    CStatisticUnknownVariable,
+    CStatisticUndefined,
     ToleranceNotPositiveFinite,
     MaxIterOutOfRange,
     GmmMaxIterOutOfRange,
@@ -46,6 +54,7 @@ pub enum ErrorCode {
     MatrixNearSingular,
     PerfectFit,
     NotConverged,
+    AbsorptionNotConverged,
     LineSearchFailed,
     SeparationDetected,
     SeparationCheckFailed,
@@ -74,6 +83,8 @@ pub enum ErrorCode {
     SingletonGroup,
     EffectsTooMany,
     PanelNotBalancedForTwoWay,
+    LeverageDimensionTooLarge,
+    RegressorConstant,
     RegressorNoWithinVariation,
     OutcomeConstantWithinEntity,
     DkPeriodsTooFew,
@@ -91,6 +102,7 @@ impl ErrorCode {
         Self::ColumnNotFound,
         Self::ColumnContainsNull,
         Self::ColumnNonFinite,
+        Self::ColumnBlankLabel,
         Self::ColumnUnsupportedDtype,
         Self::ColumnTimezoneNotSupported,
         Self::ColumnValuesTied,
@@ -106,6 +118,13 @@ impl ErrorCode {
         Self::DkTimeRequired,
         Self::ClusterRequired,
         Self::ConfidenceLevelOutOfRange,
+        Self::AlphaOutOfRange,
+        Self::EffectiveFEndogenousCount,
+        Self::WeakInstrumentStatisticUndefined,
+        Self::CStatisticNothingToTest,
+        Self::CStatisticTooManyTestedInstruments,
+        Self::CStatisticUnknownVariable,
+        Self::CStatisticUndefined,
         Self::ToleranceNotPositiveFinite,
         Self::MaxIterOutOfRange,
         Self::GmmMaxIterOutOfRange,
@@ -120,6 +139,7 @@ impl ErrorCode {
         Self::MatrixNearSingular,
         Self::PerfectFit,
         Self::NotConverged,
+        Self::AbsorptionNotConverged,
         Self::LineSearchFailed,
         Self::SeparationDetected,
         Self::SeparationCheckFailed,
@@ -148,6 +168,8 @@ impl ErrorCode {
         Self::SingletonGroup,
         Self::EffectsTooMany,
         Self::PanelNotBalancedForTwoWay,
+        Self::LeverageDimensionTooLarge,
+        Self::RegressorConstant,
         Self::RegressorNoWithinVariation,
         Self::OutcomeConstantWithinEntity,
         Self::DkPeriodsTooFew,
@@ -166,6 +188,7 @@ impl ErrorCode {
             Self::ColumnNotFound => "COLUMN_NOT_FOUND",
             Self::ColumnContainsNull => "COLUMN_CONTAINS_NULL",
             Self::ColumnNonFinite => "COLUMN_NON_FINITE",
+            Self::ColumnBlankLabel => "COLUMN_BLANK_LABEL",
             Self::ColumnUnsupportedDtype => "COLUMN_UNSUPPORTED_DTYPE",
             Self::ColumnTimezoneNotSupported => "COLUMN_TIMEZONE_NOT_SUPPORTED",
             Self::ColumnValuesTied => "COLUMN_VALUES_TIED",
@@ -181,6 +204,13 @@ impl ErrorCode {
             Self::DkTimeRequired => "DK_TIME_REQUIRED",
             Self::ClusterRequired => "CLUSTER_REQUIRED",
             Self::ConfidenceLevelOutOfRange => "CONFIDENCE_LEVEL_OUT_OF_RANGE",
+            Self::AlphaOutOfRange => "ALPHA_OUT_OF_RANGE",
+            Self::EffectiveFEndogenousCount => "EFFECTIVE_F_ENDOGENOUS_COUNT",
+            Self::WeakInstrumentStatisticUndefined => "WEAK_INSTRUMENT_STATISTIC_UNDEFINED",
+            Self::CStatisticNothingToTest => "C_STATISTIC_NOTHING_TO_TEST",
+            Self::CStatisticTooManyTestedInstruments => "C_STATISTIC_TOO_MANY_TESTED_INSTRUMENTS",
+            Self::CStatisticUnknownVariable => "C_STATISTIC_UNKNOWN_VARIABLE",
+            Self::CStatisticUndefined => "C_STATISTIC_UNDEFINED",
             Self::ToleranceNotPositiveFinite => "TOLERANCE_NOT_POSITIVE_FINITE",
             Self::MaxIterOutOfRange => "MAX_ITER_OUT_OF_RANGE",
             Self::GmmMaxIterOutOfRange => "GMM_MAX_ITER_OUT_OF_RANGE",
@@ -195,6 +225,7 @@ impl ErrorCode {
             Self::MatrixNearSingular => "MATRIX_NEAR_SINGULAR",
             Self::PerfectFit => "PERFECT_FIT",
             Self::NotConverged => "NOT_CONVERGED",
+            Self::AbsorptionNotConverged => "ABSORPTION_NOT_CONVERGED",
             Self::LineSearchFailed => "LINE_SEARCH_FAILED",
             Self::SeparationDetected => "SEPARATION_DETECTED",
             Self::SeparationCheckFailed => "SEPARATION_CHECK_FAILED",
@@ -227,6 +258,8 @@ impl ErrorCode {
             Self::SingletonGroup => "SINGLETON_GROUP",
             Self::EffectsTooMany => "EFFECTS_TOO_MANY",
             Self::PanelNotBalancedForTwoWay => "PANEL_NOT_BALANCED_FOR_TWO_WAY",
+            Self::LeverageDimensionTooLarge => "LEVERAGE_DIMENSION_TOO_LARGE",
+            Self::RegressorConstant => "REGRESSOR_CONSTANT",
             Self::RegressorNoWithinVariation => "REGRESSOR_NO_WITHIN_VARIATION",
             Self::OutcomeConstantWithinEntity => "OUTCOME_CONSTANT_WITHIN_ENTITY",
             Self::DkPeriodsTooFew => "DK_PERIODS_TOO_FEW",
@@ -295,6 +328,7 @@ pub enum Stage {
     WithinRegression,
     VarianceComponentWithinRegression,
     OverallFTest,
+    OverallWaldTest,
     BetweenRegressionEntity,
     BetweenRegressionTime,
     PooledRegression,
@@ -314,6 +348,7 @@ impl Stage {
             Self::WithinRegression => "WITHIN_REGRESSION",
             Self::VarianceComponentWithinRegression => "VARIANCE_COMPONENT_WITHIN_REGRESSION",
             Self::OverallFTest => "OVERALL_F_TEST",
+            Self::OverallWaldTest => "OVERALL_WALD_TEST",
             Self::BetweenRegressionEntity => "BETWEEN_REGRESSION_ENTITY",
             Self::BetweenRegressionTime => "BETWEEN_REGRESSION_TIME",
             Self::PooledRegression => "POOLED_REGRESSION",
@@ -335,6 +370,7 @@ impl Stage {
                 r#"In the within regression used to estimate a variance component: "#
             }
             Self::OverallFTest => r#"In the overall F test of the slope coefficients: "#,
+            Self::OverallWaldTest => r#"In the overall Wald test of the slope coefficients: "#,
             Self::BetweenRegressionEntity => {
                 r#"In the between regression on entity means used to estimate a variance component: "#
             }
@@ -364,6 +400,7 @@ impl Stage {
             Self::WithinRegression,
             Self::VarianceComponentWithinRegression,
             Self::OverallFTest,
+            Self::OverallWaldTest,
             Self::BetweenRegressionEntity,
             Self::BetweenRegressionTime,
             Self::PooledRegression,
@@ -387,6 +424,7 @@ impl Stage {
             Self::WithinRegression => Vec::new(),
             Self::VarianceComponentWithinRegression => Vec::new(),
             Self::OverallFTest => Vec::new(),
+            Self::OverallWaldTest => Vec::new(),
             Self::BetweenRegressionEntity => Vec::new(),
             Self::BetweenRegressionTime => Vec::new(),
             Self::PooledRegression => Vec::new(),
@@ -853,6 +891,40 @@ pub static CATALOG: &[ErrorSpec] = &[
         stage_allowed: false,
     },
     ErrorSpec {
+        code: ErrorCode::ColumnBlankLabel,
+        class: ErrorClass::Validation,
+        params: &[
+            ParamSpec {
+                name: "column",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "argument",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "data_argument",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "count",
+                ty: ParamType::Int,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "row",
+                ty: ParamType::Int,
+                in_text: true,
+            },
+        ],
+        message: r#"Column '{column}' (given as {argument}) in {data_argument} contains {count} empty or whitespace-only label(s), the first at row {row} (0-based), and blank labels are never treated as missing automatically."#,
+        hint: Some(r#"Remove the rows with blank labels, or correct the labels first."#),
+        stage_allowed: false,
+    },
+    ErrorSpec {
         code: ErrorCode::ColumnUnsupportedDtype,
         class: ErrorClass::Validation,
         params: &[
@@ -1133,6 +1205,114 @@ pub static CATALOG: &[ErrorSpec] = &[
         }],
         message: r#"confidence_level must be strictly between 0 and 1, got {value}."#,
         hint: Some(r#"Use a value such as 0.95."#),
+        stage_allowed: false,
+    },
+    ErrorSpec {
+        code: ErrorCode::AlphaOutOfRange,
+        class: ErrorClass::Validation,
+        params: &[ParamSpec {
+            name: "value",
+            ty: ParamType::Float,
+            in_text: true,
+        }],
+        message: r#"alpha must be strictly between 0 and 1, got {value}."#,
+        hint: Some(r#"Use a value such as 0.05."#),
+        stage_allowed: false,
+    },
+    ErrorSpec {
+        code: ErrorCode::EffectiveFEndogenousCount,
+        class: ErrorClass::Validation,
+        params: &[ParamSpec {
+            name: "n_endog",
+            ty: ParamType::Int,
+            in_text: true,
+        }],
+        message: r#"The effective F statistic is defined for one endogenous variable, but the model has {n_endog}."#,
+        hint: Some(
+            r#"Use cragg_donald() or kleibergen_paap(), which allow several endogenous variables."#,
+        ),
+        stage_allowed: false,
+    },
+    ErrorSpec {
+        code: ErrorCode::WeakInstrumentStatisticUndefined,
+        class: ErrorClass::Computation,
+        params: &[ParamSpec {
+            name: "statistic",
+            ty: ParamType::Str,
+            in_text: true,
+        }],
+        message: r#"The {statistic} statistic is undefined for these data: a matrix it needs is singular (collinear instruments, a first stage that fits perfectly, an observation with leverage one, or too few clusters)."#,
+        hint: Some(
+            r#"Check the instruments for collinearity and the covariance settings (cov_type, cluster, hac_lags, hac_time)."#,
+        ),
+        stage_allowed: false,
+    },
+    ErrorSpec {
+        code: ErrorCode::CStatisticNothingToTest,
+        class: ErrorClass::Validation,
+        params: &[],
+        message: r#"The C statistic needs at least one endogenous variable or instrument to test, but none was given."#,
+        hint: Some(
+            r#"Pass the endogenous variables or the instruments whose exogeneity you want to test."#,
+        ),
+        stage_allowed: false,
+    },
+    ErrorSpec {
+        code: ErrorCode::CStatisticTooManyTestedInstruments,
+        class: ErrorClass::Validation,
+        params: &[
+            ParamSpec {
+                name: "n_tested",
+                ty: ParamType::Int,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "n_instruments",
+                ty: ParamType::Int,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "n_endog",
+                ty: ParamType::Int,
+                in_text: true,
+            },
+        ],
+        message: r#"Testing {n_tested} of the {n_instruments} excluded instruments leaves fewer than the {n_endog} needed to identify the {n_endog} endogenous variable(s) (order condition)."#,
+        hint: Some(r#"Remove some instruments from the test, or add instruments to the model."#),
+        stage_allowed: false,
+    },
+    ErrorSpec {
+        code: ErrorCode::CStatisticUnknownVariable,
+        class: ErrorClass::Validation,
+        params: &[
+            ParamSpec {
+                name: "name",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "argument",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "role",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+        ],
+        message: r#"'{name}' (given as {argument}) is not in {role} of this model."#,
+        hint: Some(r#"Use a name from {role}, as passed to the model."#),
+        stage_allowed: false,
+    },
+    ErrorSpec {
+        code: ErrorCode::CStatisticUndefined,
+        class: ErrorClass::Computation,
+        params: &[],
+        message: r#"The C statistic is undefined for these data: a matrix it needs is singular (collinear instruments, a perfect fit, or too few clusters or observations for the covariance of the moment conditions)."#,
+        hint: Some(
+            r#"Check the instruments for collinearity and the covariance options (cov_type, gmm_weight_type, cluster)."#,
+        ),
         stage_allowed: false,
     },
     ErrorSpec {
@@ -1424,6 +1604,25 @@ pub static CATALOG: &[ErrorSpec] = &[
         hint: Some(
             r#"Increase {iter_option}, or pass raise_on_non_convergence=False to receive the last iteration (check converged before using it)."#,
         ),
+        stage_allowed: false,
+    },
+    ErrorSpec {
+        code: ErrorCode::AbsorptionNotConverged,
+        class: ErrorClass::Computation,
+        params: &[
+            ParamSpec {
+                name: "n_sweeps",
+                ty: ParamType::Int,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "relative_change",
+                ty: ParamType::Float,
+                in_text: true,
+            },
+        ],
+        message: r#"Removing the fixed effects did not converge after {n_sweeps} pass(es); the last pass still changed the data by {relative_change} relative to its scale."#,
+        hint: Some(r#"Increase tol, or max_iter if it is below its maximum."#),
         stage_allowed: false,
     },
     ErrorSpec {
@@ -1850,7 +2049,7 @@ pub static CATALOG: &[ErrorSpec] = &[
                 in_text: true,
             },
         ],
-        message: r#"Not enough observations for the panel model: {n_obs} observation(s), but {n_params} coefficient(s) and {n_effects} fixed-effect parameter(s) (entity effects, plus time effects in a two-way model) must be estimated; at least {min_obs} are needed."#,
+        message: r#"Not enough observations for the panel model: {n_obs} observation(s), but {n_params} coefficient(s) and {n_effects} fixed-effect parameter(s) (the groups of every column in effects, less one for each column after the first) must be estimated; at least {min_obs} are needed."#,
         hint: Some(r#"Add observations, or remove regressors."#),
         stage_allowed: true,
     },
@@ -1873,9 +2072,16 @@ pub static CATALOG: &[ErrorSpec] = &[
                 ty: ParamType::Str,
                 in_text: true,
             },
+            ParamSpec {
+                name: "n_dropped_rows",
+                ty: ParamType::Int,
+                in_text: true,
+            },
         ],
-        message: r#"The group '{group}' of column '{column}' in {argument} has only one observation, and singleton groups are not dropped automatically."#,
-        hint: Some(r#"Remove its rows from the input."#),
+        message: r#"The group '{group}' of column '{column}' in {argument} has only one observation, and singleton groups are not dropped automatically; removing singleton groups repeatedly would drop {n_dropped_rows} row(s)."#,
+        hint: Some(
+            r#"Remove its rows from the input, and repeat while removing rows leaves new singleton groups."#,
+        ),
         stage_allowed: false,
     },
     ErrorSpec {
@@ -1932,29 +2138,76 @@ pub static CATALOG: &[ErrorSpec] = &[
                 in_text: true,
             },
         ],
-        message: r#"Two-way estimation requires a balanced panel: {n_obs} observation(s) for {n_first_groups} groups of '{first_column}' and {n_second_groups} of '{second_column}', but every combination needs exactly one."#,
+        message: r#"Two-way random effects require a balanced panel: {n_obs} observation(s) for {n_first_groups} groups of '{first_column}' and {n_second_groups} of '{second_column}', but every combination needs exactly one."#,
         hint: Some(
             r#"Make every entity observed in every period, or estimate one-way effects by passing a single column in effects."#,
         ),
         stage_allowed: false,
     },
     ErrorSpec {
+        code: ErrorCode::LeverageDimensionTooLarge,
+        class: ErrorClass::Validation,
+        params: &[
+            ParamSpec {
+                name: "n_levels",
+                ty: ParamType::Int,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "max_levels",
+                ty: ParamType::Int,
+                in_text: true,
+            },
+        ],
+        message: r#"The HC2 and HC3 covariances need a dense matrix over the levels of all effects except the largest, which have {n_levels} levels in total, but at most {max_levels} are supported."#,
+        hint: Some(
+            r#"Use another cov_type, or reduce the number of levels of the effects other than the largest."#,
+        ),
+        stage_allowed: false,
+    },
+    ErrorSpec {
+        code: ErrorCode::RegressorConstant,
+        class: ErrorClass::Validation,
+        params: &[
+            ParamSpec {
+                name: "role",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "column",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+        ],
+        message: r#"Column '{column}' of {role} has the same value in every row up to rounding, so it is collinear with the fixed effects."#,
+        hint: Some(r#"Remove the column from {role}."#),
+        stage_allowed: false,
+    },
+    ErrorSpec {
         code: ErrorCode::RegressorNoWithinVariation,
         class: ErrorClass::Validation,
-        params: &[ParamSpec {
-            name: "column",
-            ty: ParamType::Str,
-            in_text: true,
-        }],
-        message: r#"Regressor '{column}' has no variation left after the within transformation: it is time-invariant, or collinear with the fixed effects."#,
-        hint: Some(r#"Remove the regressor from x."#),
+        params: &[
+            ParamSpec {
+                name: "role",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+            ParamSpec {
+                name: "column",
+                ty: ParamType::Str,
+                in_text: true,
+            },
+        ],
+        message: r#"Column '{column}' of {role} has no variation left after the within transformation: it is time-invariant, or collinear with the fixed effects."#,
+        hint: Some(r#"Remove the column from {role}."#),
         stage_allowed: false,
     },
     ErrorSpec {
         code: ErrorCode::OutcomeConstantWithinEntity,
         class: ErrorClass::Validation,
         params: &[],
-        message: r#"The outcome has no variation left after the fixed effects are removed: it is constant within every entity, or fully explained by the entity and time effects."#,
+        message: r#"The outcome has no variation left after the fixed effects are removed: it is constant within every entity, or fully explained by the effects together."#,
         hint: Some(r#"Use an outcome that varies within entities."#),
         stage_allowed: false,
     },
@@ -2165,6 +2418,7 @@ mod tests {
             Stage::WithinRegression,
             Stage::VarianceComponentWithinRegression,
             Stage::OverallFTest,
+            Stage::OverallWaldTest,
             Stage::BetweenRegressionEntity,
             Stage::BetweenRegressionTime,
             Stage::PooledRegression,
@@ -2240,7 +2494,7 @@ mod tests {
                 "as_str does not match the variant name"
             );
         }
-        assert_eq!(all_stages().len(), 12, "all_stages() must list every Stage");
+        assert_eq!(all_stages().len(), 13, "all_stages() must list every Stage");
         for stage in all_stages() {
             let debug = format!("{stage:?}");
             let name = debug.split([' ', '{']).next().unwrap_or("");

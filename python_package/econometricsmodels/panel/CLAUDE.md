@@ -1,4 +1,4 @@
-# python_package/econometricsmodels/panel/ 実装ノート（FE/RE）
+# python_package/econometricsmodels/panel/ 実装ノート（FE/FEIV/FEGMM/RE）
 
 このファイルは `python_package/econometricsmodels/panel/` 配下のファイルを読み書きするときだけ自動ロードされる。詳細は`docs/spec/fe-spec.md` / `docs/spec/re-spec.md`（FE/RE共通の論点は`docs/spec/panel-common.md`）が正本。
 
@@ -13,7 +13,7 @@
 ## 実装パターン
 
 - `FE`/`FEResults`・`RE`/`REResults`はいずれも`IV`/`IVResults`と同型（`data`/`y`/`x`/`effects`/`options`を保持するだけのコンストラクタ、`fit()`呼び出し時に初めて`_lib.fit_fe`/`_lib.fit_re`を呼ぶ。コンストラクタでは検証しない）。
-- **`effects`は必須の`list[str]`（1〜2要素）**: 1要素=one-way、2要素=two-way（`effects[0]`が個体、`effects[1]`が時点。two-wayはバランスパネル必須）。FE・REとも同じで、`FEOptions.time`・`REOptions.time`は廃止した。3要素以上は`EFFECTS_TOO_MANY`（`ValidationError`）。先頭要素がデフォルトのクラスターキー。`dk_time`は`effects`とは独立（`cov_type="dk"`で必須、`effects`の列を借用しない）。理由は`panel-common.md`1.1節。
+- **`effects`は必須の`list[str]`（FEは1〜5要素、REは1〜2要素）**: 1要素=one-way、2要素=two-way（`effects[0]`が個体、`effects[1]`が時点。REのtwo-wayはバランスパネル必須、FEは不均衡も可）、FEの3要素以上=高次元の固定効果（3つ目以降は同一性だけのキー）。`FEOptions.time`・`REOptions.time`は廃止した。上限を超えると`EFFECTS_TOO_MANY`（`ValidationError`）。先頭要素がデフォルトのクラスターキー。`dk_time`は`effects`とは独立（`cov_type="dk"`で必須、`effects`の列を借用しない）。理由は`panel-common.md`1.1節。
 - **件数と固定効果は列名キー**: `n_groups`（`dict[str, int]`、`effects`の列名→グループ数、`effects`の順。旧`n_entities`・`n_periods`の置き換え）、FEの`fixed_effects()`は常に`{列名: {水準: 効果}}`の入れ子（one-wayも入れ子）。一方、REの`sigma2_u`・`sigma2_lambda`・`theta`・`theta_entity`・`theta_time`・`theta_total`は意図的に現状維持（`panel-common.md`2.1節）。旧版のpickleは読めない（`FORMAT_VERSION`は上げていない）。
 - `params`/`std_errors`/`test_stats`/`p_values`は係数名→値の`dict[str, float]`（O(1)取り出し用）。行指向で欲しい場合は`params_table()`（`OLSResults.params_table()`と同じキー: `param_name`/`param`/`std_error`/`test_stat`/`p_value`/`conf_lower`/`conf_upper`。FE/REともOLS同様t検定のためIVの`stats`/`stat`のような汎用命名は不要）。
 - `fixed_effects()`（FE限定）はIVの`first_stage()`と同じ「追加結果は別メソッド」方針（`docs/spec/fe-spec.md`3.5節）。ただし`first_stage()`と異なり結果の型変換は不要（`_lib.FEResult.fixed_effects()`が返す`dict`をそのまま素通しする）。
@@ -26,3 +26,19 @@
 ## テスト
 
 `engine_pybind`側（FE・RE）は`PyDataFrame`引数を取る関数を`cargo test`で直接検証できない制約があるため（`nonlinear/CLAUDE.md`「テストの制約」参照）、`maturin develop` + Pythonスモークテストのみで検証されている。`tests/panel/`配下のpytest（`fixest`/`linearmodels`との数値照合ベンチマーク）が、このPython側ラッパーを含めた最初の本格的なテストになる。
+
+## FEIV（`panel/fe_iv.py`）
+
+- `FEIV(data, y, x_exog, x_endog, instruments, effects, *, options=None)`・`FEIVResults`。`FEIVOptions`は`_lib`の再輸出。`fit()`で`_lib.fit_fe_iv`を呼ぶだけ（コンストラクタで検証しない）。
+- **`FEIVResults(raw, x_endog)`は`x_endog`を保持する**: `_lib`の`weak_instrument_f_statistics`・`first_stage()`は`HashMap`で順序が不定なので、ラッパーが`x_endog`の順の`dict`に直す。pickleはラッパーごと往復する（`_x_endog`も戻る）。
+- `first_stage()`は`dict[str, FEResults]`（既存の`FEResults`をそのまま使う。`f_statistic`等は`None`）。診断（`cragg_donald()`・`kleibergen_paap()`・`effective_f(*, alpha)`）の`dataclass`への包み方は`IVResults`と共通で、`_results_utils.py`の`cragg_donald_result`等に置いた。
+- テスト統計量は`IVResults`の命名（`wald_*`・`stat_dist`）。2SLSなので`stat_dist`は常に`"t"`、`wald_dist`は常に`"f"`（GMMを足すときに`Literal`を広げる）。`log_likelihood`・`aic`・`bic`は出さない。`fixed_effects()`と診断は呼ぶたびに再推定する（`source_data`を保持）。
+- 横断テストへの登録先（足し忘れ注意）: `test_call_signatures`・`test_gil_release`・`test_results_repr`・`test_keyword_only_arguments`・`test_validation_order`・`test_effects_argument`・`test_argument_types`・`test_data_input_types`・`test_numeric_column_values`・`test_key_columns`・`test_cov_params`・`test_stat_dist`・`test_pickle`。ラッパー自体のテストは`tests/panel/test_fe_iv_api.py`（数値は`test_fe_iv_binding.py`）。
+
+## FEGMM（`panel/fe_gmm.py`）
+
+- `FEGMM(data, y, x_exog, x_endog, instruments, effects, *, options=None)`・`FEGMMResults(raw)`。`FEGMMOptions`は`_lib`の再輸出。`fit()`で`_lib.fit_fe_gmm`を呼ぶだけ。FEIVとは別クラス（結果の型を半分空にしないため）。
+- **`FEGMMResults`の公開面はengineが持つものだけ**: FEIVResultsから第一段階（`first_stage()`）・弱操作変数診断（`weak_instrument_f_*`・`cragg_donald()`等）・Wu-Hausman・`fixed_effects()`を除き、`gmm_type`・`gmm_weight_type`（`one_step`は`None`）・`n_iter`・`converged`・`overid_*`（Hansen J）・`c_stat()`を足した。足すにはengineの追加が要る（後続Issue）。`x_endog`を保持しない（順序が不定な辞書を返さないため）。
+- テスト統計量は`stat_dist="normal"`（`stat_df`は`None`）、`wald_dist="chi2"`（`wald_df_denom`は`None`、`wald_df_num`は`k`）。Waldはkで割らない。
+- **`c_stat()`は`IVResults.c_stat()`と同じ`CStatisticResult`を返す**（組み立ては`_results_utils.c_statistic_result`で共有）。重みは`gmm_weight_type`（`one_step`はclassical）で、`cov_type`に依らない。クラスター数が`Z_full`の列数に足りないと`ComputationError`（`fit`の`GMM_WEIGHT_CLUSTER_COUNT_TOO_SMALL`は`ValidationError`で、クラスが違う。docstringとmethodsに書いた）。
+- 横断テストへの登録済み（足し忘れ確認用）: `test_call_signatures`・`test_gil_release`（`FITS`・`ROWS`・`CASES`の`FEGMM.c_stat`）・`test_results_repr`・`test_keyword_only_arguments`・`test_options_repr`・`test_option_types`・`test_option_value_echo`・`test_validation_order`（`fegmm`。`unused_cluster`は既定の重み`cluster`も`cluster`を使うので`gmm_weight_type="robust"`を足す）・`test_effects_argument`・`test_argument_types`・`test_data_input_types`・`test_numeric_column_values`・`test_key_columns`・`test_cov_params`・`test_stat_dist`・`test_unit_invariance`・`test_pickle`。ラッパー自体のテストは`tests/panel/test_fe_gmm_api.py`（数値は`test_fe_gmm_binding.py`・検証は`test_fe_gmm_validation.py`）。

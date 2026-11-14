@@ -74,7 +74,7 @@ mod test_support;
 mod weak_instruments;
 mod wu_hausman;
 
-pub use gmm::FeGmmEstimator;
+pub use gmm::{FeGmmEstimator, FeGmmType, FeWeightType};
 pub use input::{FeIvInput, RoleColumns};
 
 /// FEIVの推定量。フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」）。

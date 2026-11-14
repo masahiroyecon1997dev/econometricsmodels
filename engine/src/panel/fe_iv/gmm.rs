@@ -12,12 +12,13 @@
 //!
 //! # `fit`のパイプライン
 //!
-//! 1. `gmm_type`の`max_iter`・`tol`の範囲を検証する（`GmmType::validate`）。
+//! 1. `gmm_type`を共有の`GmmType`に直し、`max_iter`・`tol`の範囲を検証する（`GmmType::validate`）。
 //! 2. `FeIvEstimator`と同じ前段（`prepare_within`）: 操作変数の数・singleton・定数列の検査、全列の
 //!    within変換（1回だけ）、自由度の検証（`n > k + neffects`、`n > l + neffects`）、変換後に分散が
 //!    残らない列の検査。
 //! 3. 重み行列の検証（`weight_type`が`Cluster`のとき、クラスター数`G`と操作変数の数`l`の関係。
-//!    `iv::gmm`と同じ`shared::gmm_weight::validate_weight_type`）。`Hac`は受け付けない。
+//!    `iv::gmm`と同じ`shared::gmm_weight::validate_weight_type`）。重みは`FeWeightType`（`Classical`・`Robust`・`Cluster`）で、
+//!    行単位のNewey-Westの重み（`Hac`）は型に無い。
 //! 4. 初期推定`W₀ = (Z̃'Z̃)⁻¹`（2SLSと同じ点推定）。構造残差が丸め誤差の範囲で0なら完全適合。
 //! 5. 方式（`OneStep`・`TwoStep`・`Iterated`）に応じて「直前の残差から`S`を作り直して再推定」を繰り返す
 //!    （`shared::gmm_iteration::gmm_iterate`。`iv::gmm`と同じコア）。
@@ -39,22 +40,25 @@
 //! # ファイル構成
 //!
 //! - `gmm/fit.rs`: `fit_fe_gmm`（上のパイプライン）
+//! - `gmm/gmm_type.rs`: `FeGmmType`・`FeWeightType`（推定方式と重みの種類。`Hac`を持たない）
 
 use faer::Mat;
 
 use super::input::FeIvInput;
 use crate::panel::common::PanelError;
 use crate::panel::fe::{FeAbsorption, FeEffects};
-use crate::shared::gmm_iteration::GmmType;
 
 mod fit;
+mod gmm_type;
+
+pub use gmm_type::{FeGmmType, FeWeightType};
 
 /// 固定効果つきGMMの推定量。フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」）。
 #[derive(Debug)]
 pub struct FeGmmEstimator {
     input: FeIvInput,
     effects: FeEffects,
-    gmm_type: GmmType,
+    gmm_type: FeGmmType,
     /// 係数名（`x_exog`、`x_endog`の順）。
     param_names: Vec<String>,
     /// 構造式の係数`β̂`（k, 1）。
@@ -87,18 +91,17 @@ impl FeGmmEstimator {
     ///   within変換後に分散がなくなる列（`PanelError::ZeroVarianceAfterDemeaning`は役割つき、被説明変数は
     ///   `PanelError::OutcomeConstantWithinEntity`）
     /// - 自由度が足りなければ`PanelError::InsufficientDegreesOfFreedom`（構造式を先に、次に操作変数）
-    /// - `weight_type`が`Cluster`でクラスター列が無い・長さが違う・クラスター数が足りないとき
-    ///   `CommonError::MissingClusterColumn`・`InsufficientClusters`・
-    ///   `InsufficientClustersForWeightMatrix`（過剰識別は`G < l`、丁度識別は`G <= l`）。`Hac`は
-    ///   到達不能な状態として`INTERNAL_ERROR`（固定効果つきGMMは`Hac`の重みを持たない）
+    /// - `Cluster`の重みで、クラスター列の長さが観測数と違う・クラスター数が足りないとき
+    ///   `CommonError::ClusterDimensionMismatch`・`InsufficientClusters`・
+    ///   `InsufficientClustersForWeightMatrix`（過剰識別は`G < l`、丁度識別は`G <= l`）
     /// - 重み行列・`X̃'Z̃W Z̃'X̃`が数値的に特異なら`CommonError::NearSingularMatrix`
-    /// - 構造残差が丸め誤差の範囲で0なら`PanelError::SecondStageFailed`（完全適合）
+    /// - 構造残差が丸め誤差の範囲で0なら`CommonError::PerfectFit`（完全適合。GMMに第二段階は無いので`stage`は付けない。`iv::gmm`と同じ）
     /// - `Iterated`が収束せず`raise_on_non_convergence`なら`CommonError::GmmNonConvergence`
     /// - 不均衡な2-wayと3次元以上で、交互射影が収束しなければ`PanelError::AbsorptionNotConverged`
     pub fn fit(
         input: FeIvInput,
         effects: FeEffects,
-        gmm_type: GmmType,
+        gmm_type: FeGmmType,
         raise_on_non_convergence: bool,
     ) -> Result<Self, PanelError> {
         Self::fit_with_absorption(
@@ -118,7 +121,7 @@ impl FeGmmEstimator {
     pub fn fit_with_absorption(
         input: FeIvInput,
         effects: FeEffects,
-        gmm_type: GmmType,
+        gmm_type: FeGmmType,
         raise_on_non_convergence: bool,
         absorption: &FeAbsorption,
     ) -> Result<Self, PanelError> {
@@ -142,7 +145,7 @@ impl FeGmmEstimator {
     }
 
     /// 推定方式。
-    pub fn gmm_type(&self) -> &GmmType {
+    pub fn gmm_type(&self) -> &FeGmmType {
         &self.gmm_type
     }
 

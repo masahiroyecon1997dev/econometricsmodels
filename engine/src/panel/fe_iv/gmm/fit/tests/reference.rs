@@ -23,8 +23,7 @@ use crate::iv::gmm::GmmEstimator;
 use crate::linear::ols::CovType;
 use crate::panel::fe::{FeCovType, FeEffects};
 use crate::panel::fe_iv::{FeGmmEstimator, FeIvEstimator, FeIvInput};
-use crate::shared::gmm_iteration::GmmType;
-use crate::shared::gmm_weight::WeightType;
+use crate::panel::fe_iv::{FeGmmType, FeWeightType};
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::least_squares::least_squares;
 
@@ -122,10 +121,10 @@ fn classical_weight_reduces_to_fe_2sls() {
             let expected = fe_2sls_params(make(), effects);
             let label = format!("{name} {k_exog}/{k_endog}/{k_inst}");
             for gmm_type in [
-                GmmType::OneStep,
-                two_step(WeightType::Classical),
-                GmmType::Iterated {
-                    weight: WeightType::Classical,
+                FeGmmType::OneStep,
+                two_step(FeWeightType::Classical),
+                FeGmmType::Iterated {
+                    weight: FeWeightType::Classical,
                     max_iter: 10,
                     tol: 1e-8,
                 },
@@ -147,7 +146,7 @@ fn just_identified_equals_fe_2sls_for_any_weight() {
     let input = || input_spec(&all_rows(), &[entity_labels(), time_labels()], 1, 1, 1);
     let expected = fe_2sls_params(input(), FeEffects::TwoWay);
     for weight in [
-        WeightType::Robust,
+        FeWeightType::Robust,
         entity_cluster_weight(),
         time_cluster_weight(),
     ] {
@@ -161,7 +160,7 @@ fn just_identified_equals_fe_2sls_for_any_weight() {
 fn one_step_is_the_two_stage_least_squares_estimate() {
     let input = || input_spec(&all_rows(), &[entity_labels()], 1, 1, 3);
     let expected = fe_2sls_params(input(), FeEffects::OneWay);
-    let estimator = fit(input(), FeEffects::OneWay, GmmType::OneStep).unwrap();
+    let estimator = fit(input(), FeEffects::OneWay, FeGmmType::OneStep).unwrap();
     assert_params_close(estimator.params(), &expected, "one step");
     assert_eq!(estimator.n_iter(), 1);
     assert!(estimator.converged());
@@ -170,7 +169,7 @@ fn one_step_is_the_two_stage_least_squares_estimate() {
 // ── ダミー変数を明示したGMM（FWL） ──────────────────────────────────────
 
 /// ダミーを外生変数に加えた`iv::gmm::GmmEstimator`の係数（実際の外生変数・内生変数の分だけ）。
-fn dummy_variable_gmm_params(input: &FeIvInput, gmm_type: GmmType) -> Vec<f64> {
+fn dummy_variable_gmm_params(input: &FeIvInput, gmm_type: &FeGmmType) -> Vec<f64> {
     let d = dummies(input.index().effect_codes());
     let (ke, kn) = (input.k_exog(), input.k_endog());
     let mut x_exog: Vec<Vec<f64>> = input.x_exog().to_vec();
@@ -189,7 +188,14 @@ fn dummy_variable_gmm_params(input: &FeIvInput, gmm_type: GmmType) -> Vec<f64> {
         "y".to_string(),
     )
     .unwrap();
-    let estimator = GmmEstimator::fit(iv_input, gmm_type, true, CovType::Classical, 0.95).unwrap();
+    let estimator = GmmEstimator::fit(
+        iv_input,
+        gmm_type.to_gmm_type(),
+        true,
+        CovType::Classical,
+        0.95,
+    )
+    .unwrap();
     let params = estimator.params();
     let endog_start = ke + d.len();
     (0..ke)
@@ -211,11 +217,11 @@ fn matches_dummy_variable_gmm() {
         for (k_exog, k_endog, k_inst) in [(1, 1, 2), (1, 1, 3), (0, 2, 3)] {
             let make = || input_spec(&rows, &dimensions, k_exog, k_endog, k_inst);
             for gmm_type in [
-                GmmType::OneStep,
-                two_step(WeightType::Classical),
-                two_step(WeightType::Robust),
+                FeGmmType::OneStep,
+                two_step(FeWeightType::Classical),
+                two_step(FeWeightType::Robust),
             ] {
-                let expected = dummy_variable_gmm_params(&make(), gmm_type.clone());
+                let expected = dummy_variable_gmm_params(&make(), &gmm_type);
                 let estimator = fit(make(), effects, gmm_type.clone()).unwrap();
                 assert_params_close(
                     estimator.params(),
@@ -370,15 +376,15 @@ fn cluster_weight_matches_manual_computation_for_multi_way_effects() {
         let group: Vec<usize> = GroupCodes::from_labels(&entity_labels_of_rows)
             .codes()
             .to_vec();
-        let weight = WeightType::Cluster {
-            groups: Some(GroupCodes::from_labels_without_keys(&entity_labels_of_rows)),
+        let weight = FeWeightType::Cluster {
+            groups: GroupCodes::from_labels_without_keys(&entity_labels_of_rows),
         };
         for estimates in [2_usize, 3] {
             let (expected, s_expected) = manual_dummy_projection_gmm(&make(), &group, estimates);
             let gmm_type = if estimates == 2 {
                 two_step(weight.clone())
             } else {
-                GmmType::Iterated {
+                FeGmmType::Iterated {
                     weight: weight.clone(),
                     max_iter: estimates,
                     tol: 1e-300,
@@ -420,7 +426,7 @@ fn two_step_robust_s_used_is_built_from_the_first_step_residuals() {
     // 各行を別クラスターにしたクラスター重みはロバスト重みと同じ。
     let singleton_groups: Vec<usize> = (0..40).collect();
     let (expected, s_expected) = manual_one_way_gmm(&make(), &singleton_groups, 2);
-    let estimator = fit(make(), FeEffects::OneWay, two_step(WeightType::Robust)).unwrap();
+    let estimator = fit(make(), FeEffects::OneWay, two_step(FeWeightType::Robust)).unwrap();
     assert_params_close(estimator.params(), &expected, "robust");
     let s = estimator.s_used();
     for a in 0..s.nrows() {
@@ -445,7 +451,7 @@ fn iterated_cluster_weight_matches_manual_iteration() {
         let estimator = FeGmmEstimator::fit(
             make(),
             FeEffects::OneWay,
-            GmmType::Iterated {
+            FeGmmType::Iterated {
                 weight: entity_cluster_weight(),
                 max_iter,
                 tol: 1e-300,
@@ -481,7 +487,7 @@ fn coefficients_do_not_depend_on_the_order_of_entities() {
         .flat_map(|entity| (0..4).map(move |t| entity * 4 + t))
         .collect();
     let reversed = input_with(&reversed_rows, &[entity_labels()]);
-    let a = fit(forward, FeEffects::OneWay, two_step(WeightType::Robust)).unwrap();
-    let b = fit(reversed, FeEffects::OneWay, two_step(WeightType::Robust)).unwrap();
+    let a = fit(forward, FeEffects::OneWay, two_step(FeWeightType::Robust)).unwrap();
+    let b = fit(reversed, FeEffects::OneWay, two_step(FeWeightType::Robust)).unwrap();
     assert_params_close(a.params(), &params_of(&b), "reversed entities");
 }

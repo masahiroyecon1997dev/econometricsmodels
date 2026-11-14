@@ -6,15 +6,14 @@ use super::{
 };
 use crate::panel::fe::FeEffects;
 use crate::panel::fe_iv::FeGmmEstimator;
-use crate::shared::gmm_iteration::GmmType;
-use crate::shared::gmm_weight::WeightType;
+use crate::panel::fe_iv::{FeGmmType, FeWeightType};
 
 #[test]
 fn getters_report_the_model() {
     let estimator = fit(
         two_way_input(),
         FeEffects::TwoWay,
-        two_step(WeightType::Robust),
+        two_step(FeWeightType::Robust),
     )
     .unwrap();
     let n = N_ENTITIES * N_PERIODS;
@@ -26,7 +25,7 @@ fn getters_report_the_model() {
     assert_eq!(estimator.input().nobs(), n);
     assert_eq!(
         estimator.gmm_type(),
-        &two_step(WeightType::Robust),
+        &two_step(FeWeightType::Robust),
         "gmm_type"
     );
     // 傾き2個 + (個体10 + 時点4 − 1)。
@@ -43,7 +42,7 @@ fn one_way_degrees_of_freedom_subtract_the_entity_effects() {
     let estimator = fit(
         one_way_input(),
         FeEffects::OneWay,
-        two_step(WeightType::Classical),
+        two_step(FeWeightType::Classical),
     )
     .unwrap();
     assert_eq!(estimator.df_model(), 2 + N_ENTITIES);
@@ -57,7 +56,7 @@ fn one_way_degrees_of_freedom_subtract_the_entity_effects() {
 #[test]
 fn param_names_list_exogenous_then_endogenous() {
     let input = input_spec(&super::all_rows(), &[entity_labels()], 2, 2, 3);
-    let estimator = fit(input, FeEffects::OneWay, two_step(WeightType::Robust)).unwrap();
+    let estimator = fit(input, FeEffects::OneWay, two_step(FeWeightType::Robust)).unwrap();
     assert_eq!(estimator.param_names(), ["x1", "w", "x2", "x3"]);
 }
 
@@ -65,15 +64,15 @@ fn param_names_list_exogenous_then_endogenous() {
 #[test]
 fn iteration_counts_follow_the_gmm_type() {
     let make = || input_spec(&super::all_rows(), &[entity_labels()], 1, 1, 2);
-    let one = fit(make(), FeEffects::OneWay, GmmType::OneStep).unwrap();
+    let one = fit(make(), FeEffects::OneWay, FeGmmType::OneStep).unwrap();
     assert_eq!((one.n_iter(), one.converged()), (1, true));
-    let two = fit(make(), FeEffects::OneWay, two_step(WeightType::Robust)).unwrap();
+    let two = fit(make(), FeEffects::OneWay, two_step(FeWeightType::Robust)).unwrap();
     assert_eq!((two.n_iter(), two.converged()), (2, true));
     let iterated = fit(
         make(),
         FeEffects::OneWay,
-        GmmType::Iterated {
-            weight: WeightType::Classical,
+        FeGmmType::Iterated {
+            weight: FeWeightType::Classical,
             max_iter: 20,
             tol: 1e-8,
         },
@@ -88,8 +87,8 @@ fn iteration_counts_follow_the_gmm_type() {
 #[test]
 fn non_convergence_is_returned_when_not_raised() {
     let make = || input_spec(&super::all_rows(), &[entity_labels()], 1, 1, 2);
-    let tight = GmmType::Iterated {
-        weight: WeightType::Robust,
+    let tight = FeGmmType::Iterated {
+        weight: FeWeightType::Robust,
         max_iter: 3,
         tol: 1e-300,
     };
@@ -124,7 +123,7 @@ fn fit_pins_faer_global_parallelism_to_seq() {
     let _ = fit(
         one_way_input(),
         FeEffects::OneWay,
-        two_step(WeightType::Classical),
+        two_step(FeWeightType::Classical),
     );
     assert!(matches!(faer::get_global_parallelism(), faer::Par::Seq));
 }

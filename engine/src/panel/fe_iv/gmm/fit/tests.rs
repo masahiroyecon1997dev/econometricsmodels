@@ -6,9 +6,7 @@
 
 use crate::panel::common::PanelError;
 use crate::panel::fe::FeEffects;
-use crate::panel::fe_iv::{FeGmmEstimator, FeIvInput};
-use crate::shared::gmm_iteration::GmmType;
-use crate::shared::gmm_weight::WeightType;
+use crate::panel::fe_iv::{FeGmmEstimator, FeGmmType, FeIvInput, FeWeightType};
 use crate::shared::group_codes::GroupCodes;
 
 mod basic;
@@ -25,25 +23,25 @@ pub(super) use crate::panel::fe_iv::test_support::{
 pub(super) fn fit(
     input: FeIvInput,
     effects: FeEffects,
-    gmm_type: GmmType,
+    gmm_type: FeGmmType,
 ) -> Result<FeGmmEstimator, PanelError> {
     FeGmmEstimator::fit(input, effects, gmm_type, true)
 }
 
-pub(super) fn two_step(weight: WeightType) -> GmmType {
-    GmmType::TwoStep { weight }
+pub(super) fn two_step(weight: FeWeightType) -> FeGmmType {
+    FeGmmType::TwoStep { weight }
 }
 
 /// 個体（`entity_labels`）でクラスタリングする重み。
-pub(super) fn entity_cluster_weight() -> WeightType {
-    WeightType::Cluster {
-        groups: Some(GroupCodes::from_labels_without_keys(&entity_labels())),
+pub(super) fn entity_cluster_weight() -> FeWeightType {
+    FeWeightType::Cluster {
+        groups: GroupCodes::from_labels_without_keys(&entity_labels()),
     }
 }
 
 /// 時点（`time_labels`）でクラスタリングする重み。
-pub(super) fn time_cluster_weight() -> WeightType {
-    WeightType::Cluster {
-        groups: Some(GroupCodes::from_labels_without_keys(&time_labels())),
+pub(super) fn time_cluster_weight() -> FeWeightType {
+    FeWeightType::Cluster {
+        groups: GroupCodes::from_labels_without_keys(&time_labels()),
     }
 }

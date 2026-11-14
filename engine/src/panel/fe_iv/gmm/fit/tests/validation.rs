@@ -7,20 +7,19 @@ use super::{
 use crate::panel::common::{ColumnRole, PanelError};
 use crate::panel::fe::{FeAbsorption, FeEffects};
 use crate::panel::fe_iv::{FeGmmEstimator, FeIvInput, RoleColumns};
+use crate::panel::fe_iv::{FeGmmType, FeWeightType};
 use crate::shared::error::{CommonError, ErrorInfo};
 use crate::shared::error_catalog::ErrorCode;
-use crate::shared::gmm_iteration::GmmType;
-use crate::shared::gmm_weight::WeightType;
 use crate::shared::group_codes::GroupCodes;
 
 fn error_of(result: Result<FeGmmEstimator, PanelError>) -> PanelError {
     result.map(|_| ()).unwrap_err()
 }
 
-fn groups_of(count: usize) -> WeightType {
+fn groups_of(count: usize) -> FeWeightType {
     let labels: Vec<String> = (0..40).map(|r| format!("g{}", r % count)).collect();
-    WeightType::Cluster {
-        groups: Some(GroupCodes::from_labels_without_keys(&labels)),
+    FeWeightType::Cluster {
+        groups: GroupCodes::from_labels_without_keys(&labels),
     }
 }
 
@@ -32,8 +31,8 @@ fn invalid_max_iter_is_rejected_before_anything_else() {
         let err = error_of(fit(
             one_way_input(),
             FeEffects::OneWay,
-            GmmType::Iterated {
-                weight: WeightType::Classical,
+            FeGmmType::Iterated {
+                weight: FeWeightType::Classical,
                 max_iter: invalid,
                 tol: 1e-6,
             },
@@ -53,8 +52,8 @@ fn invalid_tol_is_rejected() {
         let err = error_of(fit(
             one_way_input(),
             FeEffects::OneWay,
-            GmmType::Iterated {
-                weight: WeightType::Classical,
+            FeGmmType::Iterated {
+                weight: FeWeightType::Classical,
                 max_iter: 10,
                 tol: invalid,
             },
@@ -73,8 +72,8 @@ fn max_iter_boundaries_are_accepted() {
         let result = fit(
             one_way_input(),
             FeEffects::OneWay,
-            GmmType::Iterated {
-                weight: WeightType::Classical,
+            FeGmmType::Iterated {
+                weight: FeWeightType::Classical,
                 max_iter,
                 tol: 1e-8,
             },
@@ -88,8 +87,8 @@ fn non_convergence_raises_by_default() {
     let err = error_of(fit(
         input_spec(&all_rows(), &[entity_labels()], 1, 1, 2),
         FeEffects::OneWay,
-        GmmType::Iterated {
-            weight: WeightType::Robust,
+        FeGmmType::Iterated {
+            weight: FeWeightType::Robust,
             max_iter: 3,
             tol: 1e-300,
         },
@@ -103,40 +102,10 @@ fn non_convergence_raises_by_default() {
 
 // ── 重み ──────────────────────────────────────────────────────────
 
-/// 固定効果つきGMMは`Hac`の重みを持たない（バインディングは作らない）。到達不能な状態として内部エラー。
-#[test]
-fn hac_weight_is_an_internal_error() {
-    let err = error_of(fit(
-        one_way_input(),
-        FeEffects::OneWay,
-        two_step(WeightType::Hac {
-            lags: Some(1),
-            time_order: (0..40).map(f64::from).collect(),
-        }),
-    ));
-    assert_eq!(err.report().code(), ErrorCode::InternalError);
-}
-
-#[test]
-fn cluster_weight_without_groups_is_rejected() {
-    let err = error_of(fit(
-        one_way_input(),
-        FeEffects::OneWay,
-        two_step(WeightType::Cluster { groups: None }),
-    ));
-    assert!(
-        matches!(
-            err,
-            PanelError::Common(CommonError::MissingClusterColumn { .. })
-        ),
-        "{err:?}"
-    );
-}
-
 /// `OneStep`は重みを持たないので、クラスター数の検証も受けない。
 #[test]
 fn one_step_does_not_validate_a_weight() {
-    assert!(fit(one_way_input(), FeEffects::OneWay, GmmType::OneStep).is_ok());
+    assert!(fit(one_way_input(), FeEffects::OneWay, FeGmmType::OneStep).is_ok());
 }
 
 /// 過剰識別（`l = 3 > k = 2`）は`G < l`で拒否、`G == l`は受理する。
@@ -182,11 +151,54 @@ fn cluster_weight_with_wrong_length_is_rejected() {
     let err = error_of(fit(
         one_way_input(),
         FeEffects::OneWay,
-        two_step(WeightType::Cluster {
-            groups: Some(GroupCodes::from_labels_without_keys(&labels)),
+        two_step(FeWeightType::Cluster {
+            groups: GroupCodes::from_labels_without_keys(&labels),
         }),
     ));
-    assert!(matches!(err, PanelError::Common(_)), "{err:?}");
+    assert_eq!(
+        err,
+        PanelError::Common(CommonError::ClusterDimensionMismatch {
+            groups_rows: 39,
+            n: 40
+        })
+    );
+}
+
+// ── 完全適合 ──────────────────────────────────────────────────────
+
+/// 構造式を完全に説明する`y`は、段階なしの`PERFECT_FIT`（GMMに第二段階は無い）。
+#[test]
+fn perfect_fit_is_reported_without_a_stage() {
+    let base = one_way_input();
+    // 外生変数・内生変数の線形結合そのものを被説明変数にする。
+    let y: Vec<f64> = (0..40)
+        .map(|r| 1.5 * base.x_exog()[0][r] - 0.7 * base.x_endog()[0][r])
+        .collect();
+    let input = FeIvInput::from_group_codes(
+        &y,
+        "y".to_string(),
+        RoleColumns {
+            names: base.x_exog_names().to_vec(),
+            columns: base.x_exog(),
+        },
+        RoleColumns {
+            names: base.x_endog_names().to_vec(),
+            columns: base.x_endog(),
+        },
+        RoleColumns {
+            names: base.instrument_names().to_vec(),
+            columns: base.instruments(),
+        },
+        vec![GroupCodes::from_labels(&entity_labels())],
+    )
+    .unwrap();
+    for gmm_type in [FeGmmType::OneStep, two_step(FeWeightType::Classical)] {
+        let err = error_of(fit(input.clone(), FeEffects::OneWay, gmm_type));
+        assert_eq!(err, PanelError::Common(CommonError::PerfectFit));
+        let report = err.report();
+        assert_eq!(report.code(), ErrorCode::PerfectFit);
+        assert_eq!(report.stage(), None);
+    }
 }
 
 // ── 識別・索引・変換（FE-2SLSと同じ前段） ─────────────────────────────────
@@ -196,7 +208,7 @@ fn fewer_instruments_than_endogenous_variables_is_rejected() {
     let err = error_of(fit(
         input_spec(&all_rows(), &[entity_labels()], 1, 2, 1),
         FeEffects::OneWay,
-        two_step(WeightType::Robust),
+        two_step(FeWeightType::Robust),
     ));
     assert_eq!(
         err,
@@ -212,7 +224,7 @@ fn two_way_without_a_time_dimension_is_rejected() {
     let err = error_of(fit(
         one_way_input(),
         FeEffects::TwoWay,
-        two_step(WeightType::Robust),
+        two_step(FeWeightType::Robust),
     ));
     assert_eq!(err, PanelError::TwoWayRequiresTime);
 }
@@ -224,7 +236,7 @@ fn singleton_groups_are_rejected() {
     let err = error_of(fit(
         input_with(&rows, &[entity_labels()]),
         FeEffects::OneWay,
-        two_step(WeightType::Robust),
+        two_step(FeWeightType::Robust),
     ));
     assert!(matches!(err, PanelError::SingletonGroup { .. }), "{err:?}");
 }
@@ -252,7 +264,11 @@ fn time_invariant_regressor_is_reported_with_its_role() {
         vec![GroupCodes::from_labels(&entity_labels())],
     )
     .unwrap();
-    let err = error_of(fit(input, FeEffects::OneWay, two_step(WeightType::Robust)));
+    let err = error_of(fit(
+        input,
+        FeEffects::OneWay,
+        two_step(FeWeightType::Robust),
+    ));
     assert!(
         matches!(
             err,
@@ -273,7 +289,7 @@ fn insufficient_degrees_of_freedom_has_no_stage() {
     let err = error_of(fit(
         input_with(&rows, &[entity_labels(), time_labels()]),
         FeEffects::TwoWay,
-        two_step(WeightType::Classical),
+        two_step(FeWeightType::Classical),
     ));
     assert!(
         matches!(err, PanelError::InsufficientDegreesOfFreedom { .. }),
@@ -287,7 +303,7 @@ fn absorption_options_are_validated() {
     let result = FeGmmEstimator::fit_with_absorption(
         one_way_input(),
         FeEffects::OneWay,
-        two_step(WeightType::Robust),
+        two_step(FeWeightType::Robust),
         true,
         &FeAbsorption {
             tol: -1.0,
@@ -306,8 +322,8 @@ fn gmm_type_is_validated_before_the_identification_check() {
     let err = error_of(fit(
         input_spec(&all_rows(), &[entity_labels()], 1, 2, 1),
         FeEffects::OneWay,
-        GmmType::Iterated {
-            weight: WeightType::Classical,
+        FeGmmType::Iterated {
+            weight: FeWeightType::Classical,
             max_iter: 1,
             tol: 1e-6,
         },

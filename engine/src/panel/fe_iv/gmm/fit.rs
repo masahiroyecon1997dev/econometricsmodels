@@ -2,7 +2,7 @@
 //!
 //! テストは`fit/tests.rs`と`fit/tests/`にテーマ別で置く。
 
-use super::FeGmmEstimator;
+use super::{FeGmmEstimator, FeGmmType};
 use crate::panel::common::PanelError;
 use crate::panel::fe::{FeAbsorption, FeEffects};
 use crate::panel::fe_iv::input::FeIvInput;
@@ -10,32 +10,24 @@ use crate::panel::fe_iv::prepare::{
     WithinPrepared, mat_from_columns, prepare_within, structural_fit_is_perfect,
 };
 use crate::shared::error::CommonError;
-use crate::shared::gmm_iteration::{
-    GmmInitialStep, GmmIteration, GmmType, gmm_initial_step, gmm_iterate,
-};
-use crate::shared::gmm_weight::{WeightType, validate_weight_type};
+use crate::shared::gmm_iteration::{GmmInitialStep, GmmIteration, gmm_initial_step, gmm_iterate};
+use crate::shared::gmm_weight::validate_weight_type;
 
 /// [`FeGmmEstimator::fit_with_absorption`]の本体。契約（エラー条件を含む）は`fit`のdocコメント参照。
 pub(super) fn fit_fe_gmm(
     input: FeIvInput,
     effects: FeEffects,
-    gmm_type: GmmType,
+    gmm_type: FeGmmType,
     raise_on_non_convergence: bool,
     absorption: &FeAbsorption,
 ) -> Result<FeGmmEstimator, PanelError> {
     // faerのグローバル並列度を`Par::Seq`に固定する（`FeEstimator::fit`と同じ理由）。
     crate::shared::parallelism::ensure_serial();
 
-    gmm_type.validate()?;
-    let weight_type = gmm_type.weight_type();
-    // 固定効果つきGMMは、行単位のNewey-Westの重みを持たない（パネルには時点の順序を行単位で渡せず、
-    // Driscoll-Kraay型の重みはミクロパネルで実用にならない）。バインディングは作らない。
-    if matches!(weight_type, Some(WeightType::Hac { .. })) {
-        return Err(CommonError::internal(
-            "fixed-effects GMM does not support the HAC weight type",
-        )
-        .into());
-    }
+    // 共有の反復コアが受け取る型に直して検証する。`FeGmmType`は`Hac`の重みを持たない。
+    let shared_type = gmm_type.to_gmm_type();
+    shared_type.validate()?;
+    let weight_type = shared_type.weight_type();
 
     let n = input.nobs();
     let (k_exog, k_instruments) = (input.k_exog(), input.k_instruments());
@@ -91,9 +83,8 @@ pub(super) fn fit_fe_gmm(
     let sst_within: f64 = tilde[0].iter().map(|v| v * v).sum();
     let ssr0: f64 = (0..n).map(|i| (*residuals0.get(i, 0)).powi(2)).sum();
     if structural_fit_is_perfect(&input, &beta0, ssr0, sst_within, noise) {
-        return Err(PanelError::SecondStageFailed {
-            source: CommonError::PerfectFit.into(),
-        });
+        // GMMに第二段階は無いので、`stage`を付けずに返す（`iv::gmm`と同じ）。
+        return Err(CommonError::PerfectFit.into());
     }
 
     // 方式（`gmm_type`）に応じた回数の再推定。
@@ -105,7 +96,7 @@ pub(super) fn fit_fe_gmm(
         converged,
         hac_lags_used: _,
     } = gmm_iterate(
-        &gmm_type,
+        &shared_type,
         weight_type,
         weight_cluster_codes,
         &z,

@@ -275,6 +275,161 @@
         "effective_f": 22.1206710985165
       }
     },
+    "df1_boundary": {
+      "classical": {
+        "cragg_donald_f": 2.15977459604887
+      },
+      "hc1": {
+        "cragg_donald_f": 2.15977459604887,
+        "rk_wald_f": 2.63258291945571,
+        "effective_f": 4.72059786187523
+      },
+      "cluster": {
+        "cragg_donald_f": 2.15977459604887,
+        "rk_wald_f": 4.51299929049552,
+        "effective_f": 8.0924534775004
+      }
+    },
+    "high_variance": {
+      "classical": {
+        "cragg_donald_f": 172.721999905405
+      },
+      "hc1": {
+        "cragg_donald_f": 172.721999905405,
+        "rk_wald_f": 176.367962139646,
+        "effective_f": 166.019703826774
+      },
+      "cluster": {
+        "cragg_donald_f": 172.721999905405,
+        "rk_wald_f": 166.25198242294,
+        "effective_f": 153.67370050035
+      },
+      "cluster_time": {
+        "cragg_donald_f": 172.721999905404,
+        "rk_wald_f": 478.466459262718,
+        "effective_f": 153.799261493559
+      },
+      "cluster_region": {
+        "cragg_donald_f": 172.721999905405,
+        "rk_wald_f": 310.592667509856,
+        "effective_f": 127.131764671786
+      }
+    },
+    "moderate_multicollinearity": {
+      "classical": {
+        "cragg_donald_f": 278.014240582984
+      },
+      "hc1": {
+        "cragg_donald_f": 278.014240582984,
+        "rk_wald_f": 280.309406450174,
+        "effective_f": 267.764747305858
+      },
+      "cluster": {
+        "cragg_donald_f": 278.014240582984,
+        "rk_wald_f": 270.219766717451,
+        "effective_f": 247.415489021426
+      },
+      "cluster_time": {
+        "cragg_donald_f": 278.014240582984,
+        "rk_wald_f": 970.196226047114,
+        "effective_f": 243.502364106536
+      },
+      "cluster_region": {
+        "cragg_donald_f": 278.014240582984,
+        "rk_wald_f": 513.770422319334,
+        "effective_f": 205.788080170557
+      }
+    },
+    "high_condition_number": {
+      "classical": {
+        "cragg_donald_f": 171.914246949147
+      },
+      "hc1": {
+        "cragg_donald_f": 171.914246949147,
+        "rk_wald_f": 176.654468053419,
+        "effective_f": 165.576320105353
+      },
+      "cluster": {
+        "cragg_donald_f": 171.914246949147,
+        "rk_wald_f": 165.636186168209,
+        "effective_f": 152.993053123756
+      },
+      "cluster_time": {
+        "cragg_donald_f": 171.914246949146,
+        "rk_wald_f": 477.480361329077,
+        "effective_f": 150.573314042943
+      },
+      "cluster_region": {
+        "cragg_donald_f": 171.914246949147,
+        "rk_wald_f": 310.953168148242,
+        "effective_f": 127.252124781255
+      }
+    },
+    "scale_variance_mild": {
+      "classical": {
+        "cragg_donald_f": 171.914246949147
+      },
+      "hc1": {
+        "cragg_donald_f": 171.914246949147,
+        "rk_wald_f": 176.654468053419,
+        "effective_f": 165.576320105353
+      },
+      "cluster": {
+        "cragg_donald_f": 171.914246949147,
+        "rk_wald_f": 165.636186168209,
+        "effective_f": 152.993053123756
+      },
+      "cluster_time": {
+        "cragg_donald_f": 171.914246949146,
+        "rk_wald_f": 477.480361329077,
+        "effective_f": 150.573314042943
+      },
+      "cluster_region": {
+        "cragg_donald_f": 171.914246949147,
+        "rk_wald_f": 310.953168148242,
+        "effective_f": 127.252124781255
+      }
+    },
+    "many_regressors": {
+      "classical": {
+        "cragg_donald_f": 171.709662111566
+      },
+      "hc1": {
+        "cragg_donald_f": 171.709662111566,
+        "rk_wald_f": 163.243245449293,
+        "effective_f": 167.803416156309
+      },
+      "cluster": {
+        "cragg_donald_f": 171.709662111566,
+        "rk_wald_f": 154.50003614886,
+        "effective_f": 155.851097335836
+      }
+    },
+    "outlier_regressor": {
+      "classical": {
+        "cragg_donald_f": 171.917647986538
+      },
+      "hc1": {
+        "cragg_donald_f": 171.917647986538,
+        "rk_wald_f": 173.888833102674,
+        "effective_f": 165.706099300736
+      },
+      "cluster": {
+        "cragg_donald_f": 171.917647986538,
+        "rk_wald_f": 162.712507464446,
+        "effective_f": 153.444401823398
+      },
+      "cluster_time": {
+        "cragg_donald_f": 171.917647986538,
+        "rk_wald_f": 490.733642327454,
+        "effective_f": 152.866364326591
+      },
+      "cluster_region": {
+        "cragg_donald_f": 171.917647986538,
+        "rk_wald_f": 309.801581107272,
+        "effective_f": 127.681124094336
+      }
+    },
     "two_way": {
       "baseline": {
         "classical": {
@@ -311,7 +466,7 @@
   "wooldridge": {},
   "_meta": {
     "method": "fe_iv",
-    "generated_at": "2026-11-13T23:49:27.913968+00:00",
+    "generated_at": "2026-11-14T00:16:51.260931+00:00",
     "reference": "ivDiag (R)",
     "ivdiag_version": "1.0.8",
     "note": "ivDiagのFE引数で固定効果を吸収。cragg_donald_fはF.standard（cov_typeによらない）、rk_wald_fはhc1がF.robust・クラスターがF.cluster、effective_fはeff_F（hc1はrobust、クラスターはcluster。prec=14）。classicalはCragg-Donaldだけ。内生変数が複数のシナリオ・3-way・DK・HC2・HC3は比べられない。"

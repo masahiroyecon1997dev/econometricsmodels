@@ -23,7 +23,6 @@ use crate::shared::error::CommonError;
 use crate::shared::goodness_of_fit::{gaussian_goodness_of_fit, is_perfect_fit};
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference::{InferenceTable, inference_table};
-use crate::shared::least_squares::{LeastSquaresFit, least_squares};
 use crate::shared::orthonormal::{OrthonormalDesign, WaldCoordinates};
 use crate::shared::validation::{column_is_zero_variance_with_noise, has_no_variation};
 use crate::shared::wald::wald_f_test;
@@ -172,15 +171,13 @@ pub(in crate::panel) fn fit_fe_from_within(
         });
     }
 
-    // `β̂`・残差・`(X̃'X̃)⁻¹`は最小二乗の部品を直接呼んで求める（`cov_type`ごとの標準誤差は
-    // 下記でFE自身が計算し直すため、`OlsEstimator`の推論は使わない。`fe.rs`のモジュールdoc
+    // `β̂`・残差は、within変換後の設計行列`X̃ = QR`の直交座標（`b̃ = Q'ỹ`、`β̂ = R⁻¹b̃`、
+    // 残差`ỹ - Qb̃`）から求める。共分散・全体F検定と同じQR 1本で済ませ、ランク落ちは`R`（k×k）の
+    // 列ピボットQRで判定する（n×kの列ピボットQRと`(X̃'X̃)⁻¹`を別に走らせない。`cov_type`ごとの
+    // 標準誤差は下記でFE自身が計算し直すため、`OlsEstimator`の推論は使わない。`fe.rs`のモジュールdoc
     // 「`cov_type`対応」参照）。`x=[]`（固定効果のみのモデル）だとwithin変換後の設計行列`x`も
-    // 0列になり`k=0`になるが、`least_squares`は0列も受理する。
-    let LeastSquaresFit {
-        params,
-        residuals: residual_mat,
-        ..
-    } = least_squares(within_input.x(), within_input.y()).map_err(|err| {
+    // 0列になり`k=0`になるが、`OrthonormalDesign`は0列も受理する。
+    let design = OrthonormalDesign::new_checked(within_input.x()).map_err(|err| {
         PanelError::WithinRegressionFailed {
             source: LeastSquaresError::from_rank_deficient(
                 err,
@@ -189,9 +186,11 @@ pub(in crate::panel) fn fit_fe_from_within(
             ),
         }
     })?;
+    let coordinates = design.coordinates(within_input.y());
+    let params = design.coefficients(&coordinates);
+    let residual_mat = design.residuals(within_input.y(), &coordinates);
 
-    // `cov_type`別の共分散行列の計算に使う共通の材料（within変換後の設計行列、残差・SSR）。
-    let x_mat = within_input.x();
+    // `cov_type`別の共分散行列の計算に使う共通の材料（残差・SSR）。
     let residuals: Vec<f64> = (0..n).map(|i| *residual_mat.get(i, 0)).collect();
     let ssr: f64 = residuals.iter().map(|r| r * r).sum();
 
@@ -208,21 +207,11 @@ pub(in crate::panel) fn fit_fe_from_within(
     // （`Cluster`は`G-1`、`Dk`は`t_periods-1`、それ以外は`df_resid`。標準誤差のスケールに使う
     // `K`（`fe_cluster_k_correction`）とは別軸の値）。FE固有の補正（フルレバレッジ・
     // fixest流のK・2グループ退化の検査）は`PanelStructure::FixedEffects`で渡す。
-    // 係数の共分散・全体F検定・FE-IVのWu-Hausman検定は、within変換後の設計行列`X̃ = QR`の
-    // 直交座標（`b̃ = Q'ỹ`、ミート`M̃`）で求める。`V = B M B`（`B = (X̃'X̃)⁻¹`）を作ってから
-    // 反転すると、傾きの相関が極端に高いときに`B`の明示的な逆行列で桁落ちする。`M̃`は
-    // `panel_cov_params`に`x = Q`・`xtx_inv = 単位行列`を渡して得て（HC2/HC3のレバレッジは
-    // `‖q_i‖²`とダミー分の和）、`V = R⁻¹ M̃ R⁻ᵀ`と統計量の両方に使う（`shared::orthonormal`）。
-    // `Q`はこの窓の中だけで使って捨てる。`k = 0`（固定効果のみ）は空の行列になる。
-    let design =
-        OrthonormalDesign::new(x_mat).map_err(|err| PanelError::WithinRegressionFailed {
-            source: LeastSquaresError::from_rank_deficient(
-                err,
-                within_input.x(),
-                within_input.param_names(),
-            ),
-        })?;
-    let coordinates = design.coordinates(within_input.y());
+    // 係数の共分散・全体F検定・FE-IVのWu-Hausman検定は、上のQRの直交座標（`b̃`、ミート`M̃`）で
+    // 求める。`V = B M B`（`B = (X̃'X̃)⁻¹`）を作ってから反転すると、傾きの相関が極端に高いときに
+    // `B`の明示的な逆行列で桁落ちする。`M̃`は`panel_cov_params`に`x = Q`・`xtx_inv = 単位行列`を
+    // 渡して得て（HC2/HC3のレバレッジは`‖q_i‖²`とダミー分の和）、`V = R⁻¹ M̃ R⁻ᵀ`と統計量の両方に
+    // 使う（`shared::orthonormal`）。`Q`は共分散の計算後に捨てる。`k = 0`（固定効果のみ）は空の行列になる。
     let PanelCov {
         cov_params: meat,
         df_inference,

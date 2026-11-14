@@ -12,7 +12,7 @@ FE固有の内容のみを記載する。
 
 3層構成: `FE(data, y, x, effects, options=options).fit() -> FEResults`（python_package）→
 `fit_fe(data, y, x, effects, options) -> FEResult`（engine_pybind）→ `FeEstimator::fit`
-（engine、within変換したデータに`shared::least_squares::least_squares`をあてはめる）。
+（engine、within変換したデータの設計行列を`OrthonormalDesign::new_checked`でQR分解し、`β̂ = R⁻¹Q'ỹ`を求める）。
 
 - `y: str`、`x: list[str]`はOLSと同じ。`effects: list[str]`は独立の必須引数（`y`/`x`と同格、1〜5要素。1要素=1-way、
   2要素=2-way、3要素以上=高次元。`effects[0]`が個体、`effects[1]`が時点、3つ目以降は同一性だけのキー）。6要素以上は`EFFECTS_TOO_MANY`
@@ -36,7 +36,7 @@ FE固有の内容のみを記載する。
   変更した。**この検証は`engine_pybind`層のみ**（`build_fe_input`の`validate_role_non_empty`）。
   `engine`側（`FeInput::from_group_codes`・`FeEstimator::fit`）はk=0を引き続き受理する設計を
   維持している（`FeEstimator::fit`は`OlsEstimator`を経由せず、0列も受理する
-  `shared::least_squares::least_squares`を直接呼ぶ。RE自身の内部`OlsEstimator::fit`呼び出しは
+  `OrthonormalDesign`（QR）を直接使う。RE自身の内部`OlsEstimator::fit`呼び出しは
   between回帰・最終回帰どちらも構造的にk=0にならないため無変更）。
 - 列名を受け取る引数は`effects`/`cluster`/`dk_time`のいずれも`_col`サフィックスを
   付けない（`y`/`x`と同じ規約）。`dk_time`は`cov_type="dk"`の値を接頭辞にした名前。
@@ -95,7 +95,7 @@ FE固有の内容のみを記載する。
   定義を再検討する）。固定の`n_entities`/`n_periods`ではなく列名キーにした理由は
   `panel-common.md`2.1節。REの`n_groups`も同じ定義（`re-spec.md`2章）。
 - **`FeEstimator`は`OlsEstimator`を保持しない**: 係数・残差・`(X̃'X̃)⁻¹`・適合度は
-  `shared::least_squares::least_squares`の結果から、`std_errors`/`test_stats`/`p_values`/
+  直交座標のQR（`β̂`・残差・`M̃`）から、`std_errors`/`test_stats`/`p_values`/
   `conf_lower`/`conf_upper`/`df_model`/`df_resid`/`f_statistic`/`f_p_value`/`aic`/`bic`/
   `r_squared_*`は`cov_type`・パネル自由度調整を反映してFE自身が計算する。素の最小二乗の
   `df_resid = n - k`を前提にした統計量を使うと、`neffects`が反映されない。
@@ -157,7 +157,7 @@ polarsではなく`engine`側は抽出済みのコード（`GroupCodes`）を直
     識別されるのは行ごとの効果の和だけ（`FixedEffects::MultiWay`）。
 
 `FeEstimator::fit`のパイプラインは「打ち切り設定の検査 → 吸収する次元の解決（`absorbed_levels`） →
-singleton検出（全次元） → within変換 → 自由度検証 → 分散ゼロ検出 → `least_squares`（Frisch-Waugh-Lovell定理により
+singleton検出（全次元） → within変換 → 自由度検証 → 分散ゼロ検出 → QR（`new_checked`。Frisch-Waugh-Lovell定理により
 within変換後の最小二乗点推定はFE推定量と数学的に一致） → `cov_type`別の共分散行列計算 →
 自由度調整後の統計量再計算」の順。`OlsEstimator`は経由しない（FEが使うのは`β̂`・残差・
 `(X̃'X̃)⁻¹`・適合度だけで、`cov_type`ごとの標準誤差・F検定はFE自身が計算し直すため）。

@@ -12,13 +12,13 @@
 //! ## `FeEstimator::fit`のパイプライン
 //!
 //! 打ち切り設定の検査 → singleton検出 → within変換（2-wayは重複する組合せの検査を内包）→ 自由度検証 → 分散ゼロの
-//! 説明変数・定数の被説明変数の検出 → `confidence_level`検証 → `shared::least_squares::least_squares`
+//! 説明変数・定数の被説明変数の検出 → `confidence_level`検証 → `OrthonormalDesign::new_checked`（QR）
 //! → 完全フィット検出 → `cov_type`別の共分散行列 → 自由度調整後の統計量の再計算。
 //!
 //! - FEはwithin変換後のデータに最小二乗をあてはめる（Frisch-Waugh-Lovell定理により点推定は
-//!   FE推定量`β̂`と一致する）。`OlsEstimator`は経由しない: FEが使うのは`β̂`・残差・`(X̃'X̃)⁻¹`・
+//!   FE推定量`β̂`と一致する）。`OlsEstimator`は経由しない: FEが使うのは`β̂`・残差・
 //!   適合度だけで、標準誤差・F検定は`cov_type`ごとにFE自身が計算し直すため。`x=[]`
-//!   （固定効果のみのモデル）でも`least_squares`は0列を受理する。
+//!   （固定効果のみのモデル）でも`OrthonormalDesign`は0列を受理する。
 //! - `OlsInput::from_columns`は`include_intercept=false`で作る（within変換で全体平均も差し引か
 //!   れ、変換後データに切片は不要）。within R²・対数尤度は`gaussian_goodness_of_fit`
 //!   （`has_intercept=false`、非中心化TSS）。
@@ -262,7 +262,7 @@ pub struct FeEstimator {
 
 impl FeEstimator {
     /// `input`を`effects`が指定する方向でwithin変換した上で最小二乗をあてはめ
-    /// （`shared::least_squares::least_squares`）、FEを推定する。パネル自由度調整（`fe-spec.md`3.2節）・`cov_type`対応
+    /// （`OrthonormalDesign::new_checked`のQR）、FEを推定する。パネル自由度調整（`fe-spec.md`3.2節）・`cov_type`対応
     /// （3.1節・3.2節）を反映した標準誤差・t値・p値・信頼区間・AIC/BIC、
     /// パネル固有R²（2.3節）を計算し直す（モジュールdoc「自由度とF統計量」
     /// 「`cov_type`対応」「パネル固有R²」参照）。

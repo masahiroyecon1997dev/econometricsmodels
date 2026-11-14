@@ -1125,3 +1125,10 @@ Stock-Yogoの表は実装の値がNBER TWP 284のTable 1（バイアス）・Tab
 **3段階目**: シナリオを13から20に増やした（`df1_boundary`・`high_variance`・`moderate_multicollinearity`・`high_condition_number`・`scale_variance_mild`・`many_regressors`・`outlier_regressor`）。外生変数を複数列にするため、追加の列・外れ値は別の乱数生成器（`default_rng([seed, 7])`）から作り、既存シナリオの凍結CSVは変わらない。DKは時点数が傾き係数の数を超えるケースだけ作る。全ケースで参照と機械精度で一致した（fixest 174・ダミー変数2SLS 117・plm 93・ivDiag 92ケース。ダミー変数2SLSの有効Fだけ5e-11と最大）。
 **分かったこと**: 自由度1の境界では、fixestの`wald()`が分母自由度を`max(df2, df1+1)`に切り上げるため、部分Fの分母自由度は第一段階の残差自由度を直接使う（統計量は同じ）。MOPオラクルは極小標本（`df1_boundary`）で臨界値計算の途中に`sqrt`の警告を出す（`f_eff`は有限）。
 **見送り**: cross_methodの`test_perfect_fit`・`test_collinear_columns`・`test_column_error_context`・`test_wald_ill_conditioned`にFEIVを足す件（新設の`test_fe_iv_validation.py`で同じ`code`と`params`を確認済み）、N2のクラスター不均衡の組み合わせ（2-way・`unbalanced`・`long_panel`）、N6のテスト名・見出し規約の細部。
+
+### 9.31 #380（FE-2SLSの性能計測）の実装結果（2026-11-14）
+
+**決定（ユーザー承認）**: Issueのコメントどおり、`performance/compare_fe_iv.py`の1本・engine単独・`benchmark_performance.yml`のmatrixに`fe_iv`（GMMは未実装のため含めない。実装時に`extra_methods`へ足す）。追加の判断は3点: (1)`k`は傾き係数の総数（`x_exog = k − 内生変数の数`。FEの`k`と揃い、T=6固定でcov軸のdkが`T > k`を満たす。IV本体の`k = x_exog`とは定義が違う）、(2)内生変数・操作変数の数と固定効果の構造は`extra_methods`（method軸）の代表点で測る（`two_way`・`two_way_unbalanced`・`three_way`・`endog3`（内生3・操作変数5）・`inst6`（内生1・操作変数6）、n=1,000,000・k=5・classical）、(3)within変換は単独の計測を置かず、列数を変える軸と交互射影が必要な構造の比から間接的に見る（変換だけを取り出す公開APIが無く、タイミング用の経路は足さない）。
+**実装**: `benchmark/panel/fe_iv_datasets.py`の`generate_fe_iv_perf_dataset`（規模を指定できる均衡パネル、numpyの一括生成。凍結しない。n=1,000,000が約0.4秒）、`performance/compare_fe_iv.py`、`render_docs_results.py`の表示順・名前、`benchmark_performance.yml`のmatrix、`docs/performance/fe_iv.md`（日本語の開発ノート。結果の表は置かない）、`docs/guide/performance.md`の手書き部分（比較対象が無いこと・`k`の定義・計測範囲）。`docs/guide/performance-results.md`と先頭のサマリーはリリース準備時にCIの計測値から再生成する（手で書かない）。
+**確認**: devcontainerのreleaseビルドで全軸（n=10,000〜1,000,000、k=5・20、cov軸8点、method軸5点）を`--repeats 1`で通した。失敗した軸は無く、n=1,000,000でも完走する。数値は公開しない（CIの計測値が正）。デバッグビルドでも配線を確認し、環境はデバッグビルドへ戻した。
+**未実施**: CIでの計測（`workflow_dispatch`かタグ push）、`performance-reviewer`によるレビュー、README「Performance」への転記（リリース時）。9.19の見送り（メモリの複製・HC2/HC3のレバレッジの再計算・`first_stage`の持ち方）の判断はCIの計測値を見てから。

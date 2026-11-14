@@ -345,3 +345,97 @@ def scenario_columns(scenario: str) -> dict[str, list[str]]:
         "x_endog": ENDOG_COLUMNS[:k_endog],
         "instruments": INSTRUMENT_COLUMNS[:k_inst],
     }
+
+
+# 性能計測用のDGP（`generate_fe_iv_perf_dataset`）の定数。
+_PERF_ENTITY_LOADING_X = 0.6
+_PERF_ENTITY_LOADING_Z = 0.3
+_PERF_ENTITY_LOADING_ENDOG = 0.5
+_PERF_PI_OWN = 0.6
+_PERF_PI_OTHER = 0.2
+_PERF_RHO = 0.6
+_PERF_TIME_EFFECT_SD = 0.7
+
+
+def generate_fe_iv_perf_dataset(
+    n_entities: int,
+    n_periods: int,
+    k_exog: int,
+    k_endog: int,
+    k_instruments: int,
+    seed: int = 42,
+) -> pl.DataFrame:
+    """性能計測用の、規模を指定できる均衡パネル（凍結しない）。
+
+    `generate_fe_iv_dataset`と同じ構造（外生変数・操作変数・内生変数が個体効果と相関し、
+    構造誤差と第一段階誤差が相関する）で、個体数・時点数・各変数の数を引数にする。全列を
+    numpyの一括生成で作る（n=1,000,000でも数秒）。操作変数`l`は内生変数`l % k_endog`に強く
+    効き（係数0.6）、他の内生変数には弱く効く（0.2）。内生変数が複数でも全て識別される。
+
+    列は`entity`・`time`（どちらも文字列）・`y`・`x1..x{k_exog}`・`endog1..endog{k_endog}`・
+    `z1..z{k_instruments}`。
+
+    Args:
+        n_entities: 個体数。
+        n_periods: 時点数。
+        k_exog: 外生変数の数（0以上）。
+        k_endog: 内生変数の数（1以上）。
+        k_instruments: 操作変数の数（`k_endog`以上）。
+        seed: 乱数シード。
+
+    Raises:
+        ValueError: `k_endog < 1`、または`k_instruments < k_endog`の場合。
+    """
+    if k_endog < 1 or k_instruments < k_endog:
+        raise ValueError(
+            "need k_endog >= 1 and k_instruments >= k_endog, got "
+            f"k_endog={k_endog}, k_instruments={k_instruments}"
+        )
+    rng = np.random.default_rng(seed)
+    n = n_entities * n_periods
+    entity_idx = np.repeat(np.arange(n_entities), n_periods)
+    time_idx = np.tile(np.arange(n_periods), n_entities)
+
+    alpha_latent = rng.normal(size=n_entities)
+    alpha = alpha_latent + rng.normal(size=n_entities)
+    gamma = rng.normal(0.0, _PERF_TIME_EFFECT_SD, size=n_periods)
+    a = alpha_latent[entity_idx]
+
+    x = _PERF_ENTITY_LOADING_X * a[:, None] + rng.normal(size=(n, k_exog))
+    z = _PERF_ENTITY_LOADING_Z * a[:, None] + rng.normal(
+        size=(n, k_instruments)
+    )
+    pi = np.full((k_endog, k_instruments), _PERF_PI_OTHER)
+    for ell in range(k_instruments):
+        pi[ell % k_endog, ell] = _PERF_PI_OWN
+
+    cov = np.eye(1 + k_endog)
+    cov[0, 1:] = _PERF_RHO
+    cov[1:, 0] = _PERF_RHO
+    uv = rng.multivariate_normal(np.zeros(1 + k_endog), cov, size=n)
+    u, v = uv[:, 0], uv[:, 1:]
+    endog = z @ pi.T + _PERF_ENTITY_LOADING_ENDOG * a[:, None] + v
+
+    # 係数は列ごとに値を変える（列の取り違えを性能計測では検出しないが、特異にならないように）。
+    beta_x = np.linspace(0.5, 1.5, k_exog) if k_exog else np.empty(0)
+    beta_endog = np.linspace(0.8, -0.5, k_endog)
+    y = (
+        x @ beta_x
+        + endog @ beta_endog
+        + alpha[entity_idx]
+        + gamma[time_idx]
+        + u
+    )
+
+    data: dict[str, pl.Series | np.ndarray] = {
+        "entity": pl.Series("entity", entity_idx).cast(pl.Utf8),
+        "time": pl.Series("time", time_idx).cast(pl.Utf8),
+        "y": y,
+    }
+    for j in range(k_exog):
+        data[f"x{j + 1}"] = x[:, j]
+    for j in range(k_endog):
+        data[f"endog{j + 1}"] = endog[:, j]
+    for ell in range(k_instruments):
+        data[f"z{ell + 1}"] = z[:, ell]
+    return pl.DataFrame(data)

@@ -49,10 +49,12 @@
 //! # ファイル構成
 //!
 //! - `input.rs`: `FeIvInput`・`RoleColumns`
+//! - `prepare.rs`: 入力検査・within変換・自由度の検証（FE-2SLSと固定効果つきGMMが共有する前段）
 //! - `fit.rs`: `fit_fe_iv`（上のパイプライン）
 //! - `sargan.rs`: Sargan過剰識別検定
 //! - `wu_hausman.rs`: Wu-Hausman内生性検定（補助FE回帰）
 //! - `weak_instruments.rs`: 弱操作変数診断（部分F・Cragg-Donald・Kleibergen-Paap・有効F）
+//! - `gmm.rs`と`gmm/`: 固定効果つきGMM（`FeGmmEstimator`。点推定のみ。契約は`gmm.rs`のモジュールdoc）
 
 use faer::Mat;
 
@@ -63,11 +65,16 @@ use crate::shared::kleibergen_paap::KleibergenPaap;
 use crate::shared::weak_instruments::CraggDonald;
 
 mod fit;
+mod gmm;
 mod input;
+mod prepare;
 mod sargan;
+#[cfg(test)]
+mod test_support;
 mod weak_instruments;
 mod wu_hausman;
 
+pub use gmm::FeGmmEstimator;
 pub use input::{FeIvInput, RoleColumns};
 
 /// FEIVの推定量。フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」）。

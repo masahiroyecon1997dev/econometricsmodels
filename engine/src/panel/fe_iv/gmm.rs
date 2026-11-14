@@ -1,0 +1,198 @@
+//! 固定効果つきGMM（FE-GMM）の推定量`FeGmmEstimator`の点推定。
+//!
+//! 固定効果を除いた（within変換した）データへのGMMで、構造式
+//! `y = X_exog β_exog + X_endog β_endog + 固定効果 + ε`を推定する。モーメント条件は
+//! `E[z̃_it ε̃_it] = 0`（`Z̃ = [x̃_exog, z̃]`、`z̃`は変換後の操作変数）。入力（`FeIvInput`）・固定効果の方向
+//! （`FeEffects`）・within変換は`FeIvEstimator`と共有する（`prepare.rs`）。定数項は持たない。
+//!
+//! # 範囲
+//!
+//! この型は点推定だけを持つ: 係数・構造残差・点推定に使った重み行列`S`・反復回数・収束。標準誤差・
+//! 検定統計量・過剰識別検定・内生性検定は持たない。
+//!
+//! # `fit`のパイプライン
+//!
+//! 1. `gmm_type`の`max_iter`・`tol`の範囲を検証する（`GmmType::validate`）。
+//! 2. `FeIvEstimator`と同じ前段（`prepare_within`）: 操作変数の数・singleton・定数列の検査、全列の
+//!    within変換（1回だけ）、自由度の検証（`n > k + neffects`、`n > l + neffects`）、変換後に分散が
+//!    残らない列の検査。
+//! 3. 重み行列の検証（`weight_type`が`Cluster`のとき、クラスター数`G`と操作変数の数`l`の関係。
+//!    `iv::gmm`と同じ`shared::gmm_weight::validate_weight_type`）。`Hac`は受け付けない。
+//! 4. 初期推定`W₀ = (Z̃'Z̃)⁻¹`（2SLSと同じ点推定）。構造残差が丸め誤差の範囲で0なら完全適合。
+//! 5. 方式（`OneStep`・`TwoStep`・`Iterated`）に応じて「直前の残差から`S`を作り直して再推定」を繰り返す
+//!    （`shared::gmm_iteration::gmm_iterate`。`iv::gmm`と同じコア）。
+//!
+//! # `Robust`重みの限界
+//!
+//! within変換した誤差`ε̃_it`は個体内で相関し、`E[ε̃_it²]`が`σ_it²`だけでなく同じ個体の他の時点の
+//! `σ_is²`にも依存する。`Robust`の`S = Σ ẽ²z̃z̃'`はこれを無視するので、不均一分散があり`T`が小さいと
+//! 偏る。係数の一致性は保たれるが、効率性とHansen Jは影響を受けうる（`Classical`の`S`は
+//! `Σ_t z̃ε̃ = Σ_t z̃ε`なので、この問題を持たない）。固定効果つきの既定の重みが個体でのクラスター
+//! なのはこのため。`Robust`は小`T`では勧めない。
+//!
+//! # `s_used`の尺度
+//!
+//! `S`は`n`で割らない生の和（`iv::gmm`と同じ）。`Classical`と`OneStep`の`S`は`σ̂²・Z̃'Z̃`、`σ̂² = e'e/n`で、
+//! `n`は観測数（吸収した効果の数は引かない）。within変換後の残差は`σ²(n − neffects)`程度の大きさしか
+//! 持たないので、Hansen J（Sarganに相当）に使うときは分母を`n − neffects`に直す必要がある。
+//!
+//! # ファイル構成
+//!
+//! - `gmm/fit.rs`: `fit_fe_gmm`（上のパイプライン）
+
+use faer::Mat;
+
+use super::input::FeIvInput;
+use crate::panel::common::PanelError;
+use crate::panel::fe::{FeAbsorption, FeEffects};
+use crate::shared::gmm_iteration::GmmType;
+
+mod fit;
+
+/// 固定効果つきGMMの推定量。フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」）。
+#[derive(Debug)]
+pub struct FeGmmEstimator {
+    input: FeIvInput,
+    effects: FeEffects,
+    gmm_type: GmmType,
+    /// 係数名（`x_exog`、`x_endog`の順）。
+    param_names: Vec<String>,
+    /// 構造式の係数`β̂`（k, 1）。
+    params: Mat<f64>,
+    /// 構造残差`ỹ − X̃β̂`（n, 1。within変換した空間）。
+    residuals: Mat<f64>,
+    /// 最終の係数に実際に使った重み行列`S`（l×l、`n`で割らない和）。
+    s_used: Mat<f64>,
+    n_iter: i64,
+    converged: bool,
+    df_model: usize,
+    df_resid: usize,
+    /// 吸収した効果の次元ごとの水準数（`effects`の順）。
+    n_groups: Vec<usize>,
+}
+
+impl FeGmmEstimator {
+    /// 固定効果つきGMMの点推定。契約はモジュールdocのパイプラインのとおり。
+    ///
+    /// `raise_on_non_convergence`が`true`で`gmm_type`が`Iterated`のとき、`max_iter`回以内に係数が収束
+    /// しなければエラーにする（`false`なら`converged() == false`のまま返す）。
+    ///
+    /// # Errors
+    /// - `Iterated`の`max_iter`・`tol`が範囲外なら`CommonError::InvalidGmmMaxIter`・`InvalidGmmTol`
+    ///   （`PanelError::Common`）
+    /// - 操作変数が内生変数より少なければ`PanelError::InsufficientInstruments`
+    /// - 2-wayで`effects`が1つなら`PanelError::TwoWayRequiresTime`
+    /// - singleton（`PanelError::SingletonGroup`）、生の値が全ての行で同じ列
+    ///   （`PanelError::RegressorConstant`は役割つき、被説明変数は`CommonError::OutcomeConstant`）、
+    ///   within変換後に分散がなくなる列（`PanelError::ZeroVarianceAfterDemeaning`は役割つき、被説明変数は
+    ///   `PanelError::OutcomeConstantWithinEntity`）
+    /// - 自由度が足りなければ`PanelError::InsufficientDegreesOfFreedom`（構造式を先に、次に操作変数）
+    /// - `weight_type`が`Cluster`でクラスター列が無い・長さが違う・クラスター数が足りないとき
+    ///   `CommonError::MissingClusterColumn`・`InsufficientClusters`・
+    ///   `InsufficientClustersForWeightMatrix`（過剰識別は`G < l`、丁度識別は`G <= l`）。`Hac`は
+    ///   到達不能な状態として`INTERNAL_ERROR`（固定効果つきGMMは`Hac`の重みを持たない）
+    /// - 重み行列・`X̃'Z̃W Z̃'X̃`が数値的に特異なら`CommonError::NearSingularMatrix`
+    /// - 構造残差が丸め誤差の範囲で0なら`PanelError::SecondStageFailed`（完全適合）
+    /// - `Iterated`が収束せず`raise_on_non_convergence`なら`CommonError::GmmNonConvergence`
+    /// - 不均衡な2-wayと3次元以上で、交互射影が収束しなければ`PanelError::AbsorptionNotConverged`
+    pub fn fit(
+        input: FeIvInput,
+        effects: FeEffects,
+        gmm_type: GmmType,
+        raise_on_non_convergence: bool,
+    ) -> Result<Self, PanelError> {
+        Self::fit_with_absorption(
+            input,
+            effects,
+            gmm_type,
+            raise_on_non_convergence,
+            &FeAbsorption::default(),
+        )
+    }
+
+    /// [`Self::fit`]に、交互射影の打ち切り設定を渡す。
+    ///
+    /// # Errors
+    /// [`Self::fit`]のエラーに加えて、`absorption`の値が範囲外なら`PanelError::InvalidTol`・
+    /// `PanelError::InvalidMaxIter`。
+    pub fn fit_with_absorption(
+        input: FeIvInput,
+        effects: FeEffects,
+        gmm_type: GmmType,
+        raise_on_non_convergence: bool,
+        absorption: &FeAbsorption,
+    ) -> Result<Self, PanelError> {
+        fit::fit_fe_gmm(
+            input,
+            effects,
+            gmm_type,
+            raise_on_non_convergence,
+            absorption,
+        )
+    }
+
+    /// 入力データ（within変換前）。
+    pub fn input(&self) -> &FeIvInput {
+        &self.input
+    }
+
+    /// 推定に使った固定効果の方向。
+    pub fn effects(&self) -> FeEffects {
+        self.effects
+    }
+
+    /// 推定方式。
+    pub fn gmm_type(&self) -> &GmmType {
+        &self.gmm_type
+    }
+
+    /// 係数名（`x_exog`、`x_endog`の順）。
+    pub fn param_names(&self) -> &[String] {
+        &self.param_names
+    }
+
+    /// 構造式の係数`β̂` (k, 1)。
+    pub fn params(&self) -> &Mat<f64> {
+        &self.params
+    }
+
+    /// 構造残差`ỹ − X̃β̂` (n, 1)。within変換した空間の値（`FeIvEstimator::residuals`と同じ）。
+    pub fn residuals(&self) -> &Mat<f64> {
+        &self.residuals
+    }
+
+    /// 最終の係数に使った重み行列`S` (l×l)。`n`で割らない和で、尺度はモジュールdoc「`s_used`の尺度」のとおり。
+    pub fn s_used(&self) -> &Mat<f64> {
+        &self.s_used
+    }
+
+    /// 推定回数（`OneStep`は1、`TwoStep`は2、`Iterated`は実際の回数）。
+    pub fn n_iter(&self) -> i64 {
+        self.n_iter
+    }
+
+    /// 収束したか（`OneStep`・`TwoStep`は常に`true`）。
+    pub fn converged(&self) -> bool {
+        self.converged
+    }
+
+    /// モデル自由度`k + neffects`。
+    pub fn df_model(&self) -> usize {
+        self.df_model
+    }
+
+    /// 残差自由度`n − df_model`。
+    pub fn df_resid(&self) -> usize {
+        self.df_resid
+    }
+
+    /// 吸収した効果の次元ごとの水準数（`effects`の順）。
+    pub fn n_groups(&self) -> &[usize] {
+        &self.n_groups
+    }
+
+    /// 観測数。
+    pub fn nobs(&self) -> usize {
+        self.input.nobs()
+    }
+}

@@ -2,43 +2,28 @@
 //! 自由度の検証、第一段階、2SLSの点推定、`cov_type`別の共分散・統計量をつなぐオーケストレーション。
 //! パイプラインの契約はモジュールdoc（`fe_iv.rs`）が正本。
 
-use faer::Mat;
 use statrs::distribution::StudentsT;
 
 use super::FeIvEstimator;
 use super::input::FeIvInput;
+use super::prepare::{
+    WithinPrepared, in_first_stage, mat_from_columns, prepare_within, structural_fit_is_perfect,
+};
 use super::sargan::fe_sargan_test;
 use super::weak_instruments::first_stage_partial_f;
-use super::wu_hausman::{WuHausmanContext, abs_max, fe_wu_hausman_test};
+use super::wu_hausman::{WuHausmanContext, fe_wu_hausman_test};
 use crate::linear::common::LeastSquaresError;
 use crate::panel::common::{
-    ColumnRole, PanelCov, PanelCovInput, PanelDimension, PanelError, PanelStructure,
-    absorbed_parameters, ensure_no_singleton_groups, ensure_no_zero_variance_columns,
-    panel_cov_params,
+    PanelCov, PanelCovInput, PanelDimension, PanelError, PanelStructure, panel_cov_params,
 };
 use crate::panel::fe::{
-    AbsorbedEffects, FeAbsorption, FeCovType, FeEffects, FeEstimator, FeInput, WithinColumns,
-    WithinOutput, fe_r_squared_between, fe_r_squared_overall, within_transform_columns,
+    AbsorbedEffects, FeAbsorption, FeCovType, FeEffects, FeEstimator, FeInput, WithinOutput,
+    fe_r_squared_between, fe_r_squared_overall,
 };
-use crate::shared::error::{CommonError, ErrorInfo};
-use crate::shared::error_catalog::Stage;
-use crate::shared::goodness_of_fit::is_perfect_fit;
+use crate::shared::error::CommonError;
 use crate::shared::inference::{InferenceTable, inference_table};
 use crate::shared::instrumental_variables::two_sls_point_estimate;
-use crate::shared::validation::{column_is_zero_variance_with_noise, has_no_variation};
 use crate::shared::wald::wald_f_test;
-
-/// 第一段階の失敗に`stage=FIRST_STAGE`を付ける。`stage`を付けられない`code`（`confidence_level`の
-/// 範囲違反など）は、そのまま返す。
-fn in_first_stage(err: PanelError, endog_name: &str) -> PanelError {
-    if err.report().code().spec().stage_allowed {
-        err.in_stage(Stage::FirstStage {
-            endog_name: endog_name.to_string(),
-        })
-    } else {
-        err
-    }
-}
 
 /// 列の位置で選んだ列の吸収した効果（`absorbed[列][次元][水準]`から、`y`の列と`x`の列を取り出す）。
 fn pick_absorbed(
@@ -50,11 +35,6 @@ fn pick_absorbed(
         y: per_column[y_column].clone(),
         x: x_columns.map(|j| per_column[j].clone()).collect(),
     })
-}
-
-/// 列`columns`（各列は長さ`n`）を並べた`(n, 列数)`の行列。
-fn mat_from_columns(n: usize, columns: &[&[f64]]) -> Mat<f64> {
-    Mat::from_fn(n, columns.len(), |i, j| columns[j][i])
 }
 
 /// [`FeIvEstimator::fit_with_absorption`]の本体。契約（エラー条件を含む）は`fit`のdocコメント参照。
@@ -69,126 +49,30 @@ pub(super) fn fit_fe_iv(
     crate::shared::parallelism::ensure_serial();
 
     let groups = input.index().effect_codes();
-    // 吸収する次元。`time`の無い2-wayや次元が足りない`MultiWay`はここで弾く。
-    let levels = effects.levels(groups)?;
-    absorption.validate()?;
-    if !(confidence_level > 0.0 && confidence_level < 1.0) {
-        return Err(PanelError::WithinRegressionFailed {
-            source: CommonError::InvalidConfidenceLevel { confidence_level }.into(),
-        });
-    }
-
     let n = input.nobs();
     let (k_exog, k_endog, k_instruments) = (input.k_exog(), input.k_endog(), input.k_instruments());
     let k = input.k();
-    let l = k_exog + k_instruments;
-
-    // 識別の順序条件（`IvInput`の検査と同じ`code`）。
-    if k_instruments < k_endog {
-        return Err(PanelError::InsufficientInstruments {
-            n_instruments: k_instruments,
-            n_endog: k_endog,
-        });
-    }
-
-    ensure_no_singleton_groups(input.index().effect_names(), &levels)?;
-
-    // 生の値が全ての行で同じ列は、固定効果を除く前に分かる。固定効果を除いた後で分散がなくなる場合
-    // （時間不変の列など）とは、エラーを分ける。重い変換より先に調べる。
-    let roles = [
-        (ColumnRole::XExog, input.x_exog_names(), input.x_exog()),
-        (ColumnRole::XEndog, input.x_endog_names(), input.x_endog()),
-        (
-            ColumnRole::Instruments,
-            input.instrument_names(),
-            input.instruments(),
-        ),
-    ];
-    for (role, names, columns) in roles {
-        for (name, column) in names.iter().zip(columns) {
-            if has_no_variation(column) {
-                return Err(PanelError::RegressorConstant {
-                    role,
-                    column: name.clone(),
-                });
-            }
-        }
-    }
-    if has_no_variation(input.y()) {
-        return Err(CommonError::OutcomeConstant.into());
-    }
-
-    // 全ての列を1回だけ変換する。列の順は`y`、`x_exog`、`x_endog`、`instruments`。
-    let leverage_needed = matches!(cov_type, FeCovType::Hc2 | FeCovType::Hc3);
-    let mut columns: Vec<&[f64]> = Vec::with_capacity(1 + k_exog + k_endog + k_instruments);
-    columns.push(input.y());
-    columns.extend(input.x_exog().iter().map(Vec::as_slice));
-    columns.extend(input.x_endog().iter().map(Vec::as_slice));
-    columns.extend(input.instruments().iter().map(Vec::as_slice));
-    let WithinColumns {
-        columns: tilde,
+    let WithinPrepared {
+        levels,
+        tilde,
         absorbed,
         noise,
-    } = within_transform_columns(&levels, &columns, absorption, leverage_needed)?;
-    let (exog_range, endog_range, instrument_range) = (
-        1..1 + k_exog,
-        1 + k_exog..1 + k,
-        1 + k..1 + k + k_instruments,
-    );
+        n_groups,
+        neffects,
+        df_model,
+        exog_range,
+        endog_range,
+        instrument_range,
+    } = prepare_within(
+        &input,
+        effects,
+        absorption,
+        Some(confidence_level),
+        matches!(cov_type, FeCovType::Hc2 | FeCovType::Hc3),
+        true,
+    )?;
     let y_tilde = &tilde[0];
-
-    // 自由度。構造式を先に、次に第一段階を検証する。
-    let n_groups: Vec<usize> = levels.iter().map(|level| level.n_groups()).collect();
-    let neffects = absorbed_parameters(&n_groups);
-    let df_model = k + neffects;
-    if n <= df_model {
-        return Err(PanelError::InsufficientDegreesOfFreedom {
-            n_obs: n,
-            n_groups,
-            k,
-        });
-    }
-    // 第一段階が無い（内生変数が無い）ときは検証しない。
-    if k_endog > 0 && n <= l + neffects {
-        let first_name = input.x_endog_names().first().map_or("", String::as_str);
-        return Err(in_first_stage(
-            PanelError::InsufficientDegreesOfFreedom {
-                n_obs: n,
-                n_groups,
-                k: l,
-            },
-            first_name,
-        ));
-    }
     let df_resid = n - df_model;
-
-    // 固定効果を除いた後に分散が残らない列（役割ごとに報告）と被説明変数。
-    let transformed_roles = [
-        (
-            ColumnRole::XExog,
-            input.x_exog_names(),
-            input.x_exog(),
-            &tilde[exog_range.clone()],
-        ),
-        (
-            ColumnRole::XEndog,
-            input.x_endog_names(),
-            input.x_endog(),
-            &tilde[endog_range.clone()],
-        ),
-        (
-            ColumnRole::Instruments,
-            input.instrument_names(),
-            input.instruments(),
-            &tilde[instrument_range.clone()],
-        ),
-    ];
-    for (role, names, raw, transformed) in transformed_roles {
-        ensure_no_zero_variance_columns(role, names, raw, transformed, noise)?;
-    }
-    if column_is_zero_variance_with_noise(input.y(), y_tilde, noise) {
-        return Err(PanelError::OutcomeConstantWithinEntity);
-    }
 
     // 第一段階: `x̃_endog[j] ~ x̃_exog + 操作変数`。変換済みの列を使い回す。
     let effect_names: Vec<String> = (0..groups.len())
@@ -280,18 +164,7 @@ pub(super) fn fit_fe_iv(
 
     // 構造残差が丸め誤差の範囲で0なら完全適合。標準誤差とF検定が定義できない。
     let sst_within: f64 = y_tilde.iter().map(|v| v * v).sum();
-    // 交互射影が残す誤差は、構造残差`ỹ − X̃β̂`では`y`だけでなく`|β̂_j|`倍した各`x`の分にも乗る。
-    let residual_scale = abs_max(input.y())
-        + input
-            .x_exog()
-            .iter()
-            .chain(input.x_endog())
-            .enumerate()
-            .map(|(j, column)| estimate.params.get(j, 0).abs() * abs_max(column))
-            .sum::<f64>();
-    if is_perfect_fit(estimate.ssr, sst_within, k)
-        || estimate.ssr <= n as f64 * (noise * residual_scale).powi(2)
-    {
+    if structural_fit_is_perfect(&input, &estimate.params, estimate.ssr, sst_within, noise) {
         return Err(PanelError::SecondStageFailed {
             source: CommonError::PerfectFit.into(),
         });

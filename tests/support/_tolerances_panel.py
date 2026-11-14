@@ -41,6 +41,16 @@ PANEL_TOLERANCES: dict[str, dict[str, float]] = {
         "rtol": RTOL_MACHINE_PRECISION,
         "atol": ATOL_REFERENCE_FLOOR,
     },
+    # FEGMM（固定効果つきのGMM）の`_lib.fit_fe_gmm`の照合（`fe_gmm_binding`）。参照は、ダミー変数への回帰の
+    # 残差で固定効果を除いた列から、点推定・重み行列（classical・robust・cluster）・サンドイッチ共分散
+    # （classical・hc1・hc2・hc3）・Hansen J・C統計量をLU分解のnumpyで組んだ実装（本実装の定義に沿った手計算
+    # で、独立な第三者実装ではない。engineの単体テストがダミー変数を明示した`iv::gmm`との照合を持つ）。
+    # within変換後の閉形式・交互射影の解で、実測の最大相対誤差は係数 1e-15、標準誤差 1e-14、共分散 4e-14、
+    # Wald 2e-14、Hansen J 4e-15、within R² 3e-16、C統計量 3e-14（`J_e`・`J_c`は1e-15）。
+    "fe_gmm_binding": {
+        "rtol": RTOL_MACHINE_PRECISION,
+        "atol": ATOL_REFERENCE_FLOOR,
+    },
     # FE-2SLS（`FEIV`）の主リファレンスはR fixest（`fe_iv.json`・`fe_iv_cov.json`。1-way・2-way・3-way、
     # classical・hc1・cluster・dk、悪条件・外れ値・多列・自由度の境界を含む）。within変換後の閉形式・
     # 交互射影の解で、fixestの`ssc()`既定に本実装の小標本補正と自由度が合っているため機械精度で一致する。

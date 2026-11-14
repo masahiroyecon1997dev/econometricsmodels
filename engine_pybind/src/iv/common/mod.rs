@@ -48,6 +48,7 @@ mod result;
 
 pub(crate) use diagnostics::{
     CStatisticOutput, CraggDonaldOutput, EffectiveFOutput, KleibergenPaapOutput,
+    ResolvedCStatTarget, resolve_c_stat_target,
 };
 pub(crate) use fit::fit;
 pub(crate) use options::IVOptions;

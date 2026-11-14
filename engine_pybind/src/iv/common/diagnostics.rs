@@ -11,7 +11,8 @@ use engine::iv::common::{
     StockYogoCriticalValues, compute_cragg_donald, compute_effective_f, compute_kleibergen_paap,
 };
 use engine::iv::gmm::{
-    CStatisticTarget, GmmType, WeightType, compute_c_statistic, weight_type_for_cov_type,
+    CStatistic, CStatisticTarget, GmmType, WeightType, compute_c_statistic,
+    weight_type_for_cov_type,
 };
 use engine::linear::ols::CovType;
 use engine::shared::error::CommonError;
@@ -115,6 +116,25 @@ pub struct CStatisticOutput {
     pub variables: Vec<String>,
     #[pyo3(get)]
     pub instruments: Vec<String>,
+}
+
+impl CStatisticOutput {
+    /// エンジンの結果と、検定した名前（モデルの列の並び）から作る。IVと`FEGMM`が共有する。
+    pub(crate) fn from_engine(
+        c: CStatistic,
+        variables: Vec<String>,
+        instruments: Vec<String>,
+    ) -> Self {
+        Self {
+            statistic: c.statistic,
+            p_value: c.p_value,
+            df: c.df,
+            j_with_tested: c.j_with_tested,
+            j_without_tested: c.j_without_tested,
+            variables,
+            instruments,
+        }
+    }
 }
 
 /// `fit()`に渡したデータから、`fit()`と同じ手順で入力一式（`IvInput`・`CovType`・GMMの重みの設定）を
@@ -318,14 +338,27 @@ fn c_statistic_weight(built: &BuiltIvInput) -> WeightType {
     }
 }
 
-pub(super) fn run_c_stat(
-    model: &IVResult,
-    py: Python<'_>,
+/// `c_stat(variables, instruments)`の引数を検査し、エンジンに渡す検定の対象にする。
+pub(crate) struct ResolvedCStatTarget {
+    pub(crate) target: CStatisticTarget,
+    /// 検定した内生変数・操作変数の名前（モデルの列の並び）。
+    pub(crate) variables: Vec<String>,
+    pub(crate) instruments: Vec<String>,
+}
+
+/// `c_stat`の引数（`variables`・`instruments`）を検査して位置に直す。IVと`FEGMM`が共有する。
+///
+/// 型の検査を両方の引数で先に済ませ、そのあとで値（空・重複・名前）を検査する
+/// （`docs/guide/validation.md`の報告順）。両方が未指定なら`CStatisticNothingToTest`。
+///
+/// # Errors
+/// 型の誤りは`TypeError`、空・重複・モデルに無い名前は`ValidationError`。
+pub(crate) fn resolve_c_stat_target(
     variables: Option<&Bound<'_, PyAny>>,
     instruments: Option<&Bound<'_, PyAny>>,
-) -> PyResult<CStatisticOutput> {
-    // 型の検査を両方の引数で先に済ませ、そのあとで値（空・重複・名前）を検査する
-    // （`docs/guide/validation.md`の報告順）。
+    x_endog: &[String],
+    model_instruments: &[String],
+) -> PyResult<ResolvedCStatTarget> {
     let variables = extract_names(variables, "variables")?;
     let instruments = extract_names(instruments, "instruments")?;
     if variables.is_none() && instruments.is_none() {
@@ -335,25 +368,40 @@ pub(super) fn run_c_stat(
     }
     let variables = checked_names(variables, "variables")?;
     let instruments = checked_names(instruments, "instruments")?;
-    let endog_positions = positions_of(&variables, &model.x_endog, "variables", "x_endog")?;
+    let endog_positions = positions_of(&variables, x_endog, "variables", "x_endog")?;
     let instrument_positions = positions_of(
         &instruments,
-        &model.instruments,
+        model_instruments,
         "instruments",
         "instruments",
     )?;
-    let target = CStatisticTarget {
-        endog: endog_positions.clone(),
-        instruments: instrument_positions.clone(),
-    };
-    let tested_endog: Vec<String> = endog_positions
-        .iter()
-        .map(|&i| model.x_endog[i].clone())
-        .collect();
-    let tested_instruments: Vec<String> = instrument_positions
-        .iter()
-        .map(|&i| model.instruments[i].clone())
-        .collect();
+    Ok(ResolvedCStatTarget {
+        variables: endog_positions
+            .iter()
+            .map(|&i| x_endog[i].clone())
+            .collect(),
+        instruments: instrument_positions
+            .iter()
+            .map(|&i| model_instruments[i].clone())
+            .collect(),
+        target: CStatisticTarget {
+            endog: endog_positions,
+            instruments: instrument_positions,
+        },
+    })
+}
+
+pub(super) fn run_c_stat(
+    model: &IVResult,
+    py: Python<'_>,
+    variables: Option<&Bound<'_, PyAny>>,
+    instruments: Option<&Bound<'_, PyAny>>,
+) -> PyResult<CStatisticOutput> {
+    let ResolvedCStatTarget {
+        target,
+        variables: tested_endog,
+        instruments: tested_instruments,
+    } = resolve_c_stat_target(variables, instruments, &model.x_endog, &model.instruments)?;
 
     let rebuilt = Rebuilt::new(model, py)?;
     py.detach(|| {
@@ -361,15 +409,11 @@ pub(super) fn run_c_stat(
             let weight = c_statistic_weight(built);
             let c =
                 compute_c_statistic(&built.input, &target, &weight).map_err(iv_error_to_pyerr)?;
-            Ok(CStatisticOutput {
-                statistic: c.statistic,
-                p_value: c.p_value,
-                df: c.df,
-                j_with_tested: c.j_with_tested,
-                j_without_tested: c.j_without_tested,
-                variables: tested_endog,
-                instruments: tested_instruments,
-            })
+            Ok(CStatisticOutput::from_engine(
+                c,
+                tested_endog,
+                tested_instruments,
+            ))
         })
     })
 }

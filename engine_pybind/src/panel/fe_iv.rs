@@ -603,13 +603,19 @@ pub(crate) struct FeIvColumns {
 }
 
 impl FeIvColumns {
-    /// データから取り込む列（`y`・`effects`・`x_exog`・`x_endog`・`instruments`、`options`が指名する列）。
-    pub(crate) fn data_columns(&self, options: &FEIVOptions) -> Vec<String> {
+    /// データから取り込む役割の列（`y`・`effects`・`x_exog`・`x_endog`・`instruments`）。FEIVと`FEGMM`が共有する。
+    pub(crate) fn role_columns(&self) -> Vec<String> {
         let mut columns = vec![self.y.clone()];
         columns.extend(self.effects.iter().cloned());
         columns.extend(self.x_exog.iter().cloned());
         columns.extend(self.x_endog.iter().cloned());
         columns.extend(self.instruments.iter().cloned());
+        columns
+    }
+
+    /// データから取り込む列（役割の列と、`options`が指名する列）。
+    pub(crate) fn data_columns(&self, options: &FEIVOptions) -> Vec<String> {
+        let mut columns = self.role_columns();
         columns.extend(options.data_columns());
         columns
     }
@@ -655,6 +661,7 @@ pub(crate) fn build_fe_iv_input(
         options.dk_bandwidth,
     )?;
     validate_fe_iv_roles(
+        PanelModel::FeIv,
         &y,
         &x_exog,
         &x_endog,

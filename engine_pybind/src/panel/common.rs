@@ -32,6 +32,8 @@ pub(crate) enum PanelModel {
     Fe,
     /// 固定効果つきの2SLS（`FEIV`）。`effects`の上限などはFEと同じ。
     FeIv,
+    /// 固定効果つきのGMM（`FEGMM`）。`effects`の上限などはFEと同じ。
+    FeGmm,
     Re,
 }
 
@@ -40,6 +42,7 @@ impl PanelModel {
         match self {
             Self::Fe => "FE",
             Self::FeIv => "FEIV",
+            Self::FeGmm => "FEGMM",
             Self::Re => "RE",
         }
     }
@@ -183,7 +186,7 @@ fn validate_dk_time_role(y: &str, first_effect: &str, dk_time: Option<&str>) -> 
 /// 5列まで受け付ける。REは1-wayと2-wayだけ（交差ランダム効果は標準的な推定量でない）。
 fn max_effects(model: PanelModel) -> usize {
     match model {
-        PanelModel::Fe | PanelModel::FeIv => MAX_FE_EFFECTS,
+        PanelModel::Fe | PanelModel::FeIv | PanelModel::FeGmm => MAX_FE_EFFECTS,
         PanelModel::Re => MAX_RE_EFFECTS,
     }
 }
@@ -273,6 +276,7 @@ pub(crate) fn validate_panel_roles(
 /// # Errors
 /// 上のいずれかに違反する場合は`ValidationError`。
 pub(crate) fn validate_fe_iv_roles(
+    model: PanelModel,
     y: &str,
     x_exog: &[String],
     x_endog: &[String],
@@ -280,7 +284,7 @@ pub(crate) fn validate_fe_iv_roles(
     effects: &[String],
     dk_time: Option<&str>,
 ) -> PyResult<()> {
-    validate_effects(PanelModel::FeIv, effects)?;
+    validate_effects(model, effects)?;
     validate_role_non_empty("x_endog", x_endog)?;
     validate_role_non_empty("instruments", instruments)?;
     validate_no_duplicate_roles(&[

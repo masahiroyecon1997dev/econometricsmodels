@@ -27,6 +27,15 @@ use faer::{Mat, MatRef};
 
 use super::linear_algebra::RankDeficient;
 
+/// 全体Wald検定に使う直交座標の組。推定量が保持し、末尾`q`列の検定にも使う。
+#[derive(Debug, Clone)]
+pub(crate) struct WaldCoordinates {
+    /// 係数の直交座標 `b̃ = Q'y`（k×1）。
+    pub(crate) coordinates: Mat<f64>,
+    /// 直交座標のミート`M̃`（k×k、小標本補正込み）。
+    pub(crate) meat: Mat<f64>,
+}
+
 /// `X = QR`（`Q`はn×k、`R`はk×kの上三角）。
 #[derive(Debug)]
 pub(crate) struct OrthonormalDesign {

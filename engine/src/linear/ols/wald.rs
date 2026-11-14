@@ -15,8 +15,8 @@ pub(super) fn wald_test_last_columns(
         "wald_test_last_columns: q must be in (0, k], got q={q}, k={k}"
     );
     Ok(wald_f_test(
-        &estimator.params,
-        &estimator.cov_params,
+        &estimator.wald.coordinates,
+        &estimator.wald.meat,
         k - q,
         q,
         estimator.df_inference,

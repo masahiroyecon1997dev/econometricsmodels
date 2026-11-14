@@ -248,38 +248,29 @@ fn fit_with_optional_f_test_does_not_hide_other_cluster_errors() {
         LeastSquaresError::Common(CommonError::ClusterDimensionMismatch { .. })
     ));
 
-    // 2列目が1列目とほぼ同じ（説明変数の相関が`1 - 1e-13`程度）。単位を揃えても、クラスター
-    // ロバストのサンドイッチ共分散`B M B`は`B = (X'X)⁻¹`の条件数（約1e12）が桁落ちを起こして
-    // 数値的に正定値でなくなり（傾き係数の相関が1を超える）、Wald検定が止める。これは
-    // サンドイッチ共分散の既知の限界に依存している: 共分散の計算経路を改善してこの入力が
-    // 通るようになったら、このテストの入力（より強い準共線）を取り直すこと。
-    let n = 40;
-    let x1: Vec<f64> = (0..n).map(|i| (((i * 7) % 13) as f64) - 6.0).collect();
-    let x2: Vec<f64> = (0..n)
-        .map(|i| x1[i] + 1e-6 * ((((i * 5) % 11) as f64) - 5.0))
-        .collect();
+    // `g = q + 1`（4クラスター・傾き3個）の境界。直交座標のミートの傾き部分行列`M̃_SS`の
+    // 最小固有値が最大の約1e-17倍（実質0）で、このデータでは実際に特異になる（桁落ちではない。
+    // numpyで確認）。`g > q`なので事前検証（`g <= q`）は通り、Wald検定が
+    // `NearSingularMatrix`で止める。
+    let n = 12;
+    let x1: Vec<f64> = (1..=n).map(|i| i as f64).collect();
+    let x2: Vec<f64> = (1..=n).map(|i| (i as f64).powi(2)).collect();
+    let x3: Vec<f64> = (0..n).map(|i| (i % 3) as f64).collect();
     let y: Vec<f64> = (0..n)
         .map(|i| {
-            let noise = if i % 2 == 0 { 0.7 } else { -0.4 } + 0.1 * ((i % 5) as f64);
-            1.0 + 2.0 * x1[i] + 3.0 * x2[i] + noise
+            let noise = if i % 2 == 0 { 1e3 } else { -1e3 };
+            1.0 + 2.0e6 * x1[i] + 3.0e-3 * x2[i] + 0.5 * x3[i] + noise
         })
         .collect();
     let ill_conditioned = OlsInput::from_columns(
         &y,
-        &[x1, x2],
-        vec!["x1".to_string(), "x2".to_string()],
+        &[x1, x2, x3],
+        vec!["x1".to_string(), "x2".to_string(), "x3".to_string()],
         true,
         "y".to_string(),
     )
     .unwrap();
-    let groups: Vec<String> = (0..n).map(|i| format!("g{}", i % 8)).collect();
-    let result = OlsEstimator::fit_with_optional_f_test(
-        ill_conditioned,
-        CovType::Cluster {
-            groups: Some(GroupCodes::from_labels_without_keys(&groups)),
-        },
-        0.95,
-    );
+    let result = OlsEstimator::fit_with_optional_f_test(ill_conditioned, cluster_cov_type(4), 0.95);
     assert!(matches!(
         result.unwrap_err(),
         LeastSquaresError::Common(CommonError::NearSingularMatrix {

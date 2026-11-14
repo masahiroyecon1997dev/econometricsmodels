@@ -14,6 +14,7 @@ import numpy as np
 import polars as pl
 import pytest
 from _errors import raises_error
+from _exact_wald import exact_slope_wald
 from _helpers import assert_unit_change_invariant
 from econometricsmodels import (
     FE,
@@ -186,13 +187,32 @@ def _near_collinear_panel(eps: float) -> pl.DataFrame:
     return pl.DataFrame({"entity": entity, "y": y, "x1": x1, "x3": x3})
 
 
-def test_truly_collinear_slopes_raise_near_singular_matrix_even_with_classical():
-    """相関が`1 - 1e-16`（`eps=1e-9`）の傾きは、`classical`の共分散`σ²(X'X)⁻¹`でも数値的に
-    ほぼ特異で、`MATRIX_NEAR_SINGULAR`で止まる。サンドイッチ共分散の限界には依らない。
-    止まる行列は`eps`が小さいほど手前の`DESIGN_GRAM`（`1e-10`以下）、
-    この範囲（`1e-8`〜`1e-9`）では`COEFFICIENT_COVARIANCE`。"""
-    with raises_error(ErrorCode.MATRIX_NEAR_SINGULAR):
-        OLS(_near_collinear_ols(1e-9), "y", ["x1", "x2"]).fit()
+def test_a_singular_cluster_meat_raises_near_singular_matrix():
+    """クラスター数が`g = q + 1`（4クラスター・傾き3個）の境界で、直交座標のミートの傾き
+    部分行列の最小固有値が最大の約`1e-17`倍（実質0）になるデータは、`g > q`で事前検証は通るが、
+    全体のWald検定が`MATRIX_NEAR_SINGULAR`（`COEFFICIENT_COVARIANCE`）で止める。桁落ちではなく、
+    共分散が実際に特異な場合に止まることの確認で、共線性の程度には依らない。"""
+    n = 12
+    i = np.arange(n)
+    x1 = (i + 1).astype(float)
+    df = pl.DataFrame(
+        {
+            "x1": x1,
+            "x2": x1**2,
+            "x3": (i % 3).astype(float),
+            "g": [f"g{k % 4}" for k in i],
+            "y": 1.0
+            + 2.0e6 * x1
+            + 3.0e-3 * x1**2
+            + 0.5 * (i % 3)
+            + np.where(i % 2 == 0, 1e3, -1e3),
+        }
+    )
+    options = OLSOptions(cov_type="cluster", cluster="g")
+    with raises_error(
+        ErrorCode.MATRIX_NEAR_SINGULAR, matrix="COEFFICIENT_COVARIANCE"
+    ):
+        OLS(df, "y", ["x1", "x2", "x3"], options=options).fit()
 
 
 def test_highly_correlated_slopes_with_the_classical_covariance_match_the_exact_value():
@@ -206,20 +226,25 @@ def test_highly_correlated_slopes_with_the_classical_covariance_match_the_exact_
     assert res.f_statistic == pytest.approx(exact, rel=1e-4)
 
 
+@pytest.mark.parametrize("eps", [1e-6, 1e-7])
 @pytest.mark.parametrize("cov_type", ["hc1", "cluster"])
-def test_ols_near_collinear_slopes_with_a_sandwich_covariance_raise(cov_type):
-    """【既知の限界の固定】相関が`1 - 5e-15`（`eps=1e-7`）のOLSは、サンドイッチ共分散が桁落ちで
-    数値的に正定値でなくなり、`MATRIX_NEAR_SINGULAR`で止まる。classicalは同じデータで通る
-    （上の説明と、限界を直したときの扱いを参照）。"""
-    df = _near_collinear_ols(1e-7)
+def test_ols_near_collinear_slopes_with_a_sandwich_covariance_match_the_exact_value(
+    cov_type, eps
+):
+    """傾きの相関が`1 - 5e-13`・`1 - 5e-15`でも、hc1・clusterの全体F統計量は、データから
+    有理数で厳密に求めた値と一致する。直交座標（QR）でミートを作るため、サンドイッチ共分散の
+    桁落ちの影響を受けない（以前は`MATRIX_NEAR_SINGULAR`で止まっていた）。"""
+    df = _near_collinear_ols(eps)
     options = OLSOptions(
         cov_type=cov_type, cluster="g" if cov_type == "cluster" else None
     )
-    with raises_error(
-        ErrorCode.MATRIX_NEAR_SINGULAR, matrix="COEFFICIENT_COVARIANCE"
-    ):
-        OLS(df, "y", ["x1", "x2"], options=options).fit()
-    assert np.isfinite(OLS(df, "y", ["x1", "x2"]).fit().f_statistic)
+    res = OLS(df, "y", ["x1", "x2"], options=options).fit()
+
+    x = [[1.0, a, b] for a, b in zip(df["x1"], df["x2"])]
+    exact = exact_slope_wald(
+        x, df["y"].to_list(), cov_type=cov_type, groups=df["g"].to_list()
+    )
+    assert res.f_statistic * 2 == pytest.approx(exact, rel=1e-6)
 
 
 @pytest.mark.parametrize("cov_type", ["hc1", "cluster"])

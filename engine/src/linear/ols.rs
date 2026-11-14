@@ -25,6 +25,7 @@ use faer::Mat;
 
 use crate::linear::common::LeastSquaresError;
 use crate::shared::inference;
+use crate::shared::orthonormal::WaldCoordinates;
 
 mod cov_params;
 mod cov_type;
@@ -82,6 +83,10 @@ pub struct OlsEstimator {
     /// のためだけに保持している（`engine::iv::two_sls`のWu-Hausman検定が
     /// 唯一の呼び出し元。それまでは`fit()`内のローカル変数として使い切っていた）。
     cov_params: Mat<f64>,
+    /// 全体Wald/F検定と[`Self::wald_test_last_columns`]が使う直交座標の`b̃`と`M̃`
+    /// （`shared::orthonormal`）。`cov_params`を作ってから反転すると、傾きの相関が極端に高い
+    /// ときに桁落ちするため、`V`を介さずこちらで統計量を求める。
+    wald: WaldCoordinates,
     /// t検定・F検定・信頼区間に使う自由度。通常`df_resid`と同じだが`cov_type=Cluster`の
     /// ときだけ`G-1`になる（`fit()`のdocコメント「df_inference」参照）。`cov_params`と
     /// 同じ理由で保持している。

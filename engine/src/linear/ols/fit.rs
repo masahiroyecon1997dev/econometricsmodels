@@ -17,6 +17,7 @@ use crate::shared::goodness_of_fit::{
 };
 use crate::shared::inference;
 use crate::shared::least_squares::{LeastSquaresFit, least_squares, residual_sum_of_squares};
+use crate::shared::orthonormal::{OrthonormalDesign, WaldCoordinates};
 use crate::shared::validation::validate_has_regressors;
 use crate::shared::wald::wald_f_test;
 
@@ -83,6 +84,28 @@ pub(super) fn fit_ols(
         hac_lags_used,
     } = compute_cov_params(&cov_type, input.x(), &residuals, &xtx_inv, sigma2, df_resid)?;
 
+    // 全体Wald/F検定は、`cov_params`（`V = B M B`）を反転せず、直交座標（`X = QR`、
+    // `b̃ = Q'y`、ミート`M̃`）で求める。`B`の明示的な逆行列で桁落ちして`V`が数値的に
+    // 正定値でなくなる、傾きの相関が極端に高い場合でも精度を保つため（`shared::orthonormal`）。
+    // `Q`はここで作って捨てる（n×kの追加確保を、この窓に収める）。
+    let wald = {
+        let design = OrthonormalDesign::new(input.x()).map_err(|err| {
+            LeastSquaresError::from_rank_deficient(err, input.x(), input.param_names())
+        })?;
+        let coordinates = design.coordinates(input.y());
+        let q_residuals = design.residuals(input.y(), &coordinates);
+        let meat = compute_cov_params(
+            &cov_type,
+            design.q(),
+            &q_residuals,
+            &design.identity(),
+            sigma2,
+            df_resid,
+        )?
+        .cov_params;
+        WaldCoordinates { coordinates, meat }
+    };
+
     let mut std_errors = Mat::zeros(k, 1);
     for j in 0..k {
         *std_errors.get_mut(j, 0) = (*cov_params.get(j, j)).sqrt();
@@ -125,8 +148,8 @@ pub(super) fn fit_ols(
         None
     } else {
         Some(wald_f_test(
-            &params,
-            &cov_params,
+            &wald.coordinates,
+            &wald.meat,
             k_constant,
             df_model,
             df_inference,
@@ -150,6 +173,7 @@ pub(super) fn fit_ols(
         aic,
         bic,
         cov_params,
+        wald,
         df_inference,
         hac_lags_used,
     })

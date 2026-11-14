@@ -294,8 +294,8 @@ fn a_panel_split_into_components_matches_the_dummy_variable_regression() {
     );
     assert_eq!(fe.df_model(), 2 + n_entities + n_periods - 1);
     assert_eq!(oracle.rank + components_in(&data) - 1, fe.df_model());
-    for j in 0..2 {
-        close(*fe.params().get(j, 0), oracle.params[j], 1e-8, "params");
+    for (j, &expected) in oracle.params.iter().take(2).enumerate() {
+        close(*fe.params().get(j, 0), expected, 1e-8, "params");
     }
     // 古典的な共分散は`SSR / df_resid`のスケールが自由度の数え方で変わるので、そのぶんを合わせて比べる。
     let n = data.y.len() as f64;
@@ -630,8 +630,8 @@ fn a_ring_panel_matches_the_dummy_variable_regression() {
     let data = ring_panel(30, 53);
     let oracle = lsdv(&data);
     let fe = data.fit(FeCovType::Classical).unwrap();
-    for j in 0..2 {
-        close(*fe.params().get(j, 0), oracle.params[j], 1e-7, "params");
+    for (j, &expected) in oracle.params.iter().take(2).enumerate() {
+        close(*fe.params().get(j, 0), expected, 1e-7, "params");
     }
 }
 

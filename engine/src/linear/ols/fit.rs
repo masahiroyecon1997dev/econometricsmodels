@@ -16,7 +16,7 @@ use crate::shared::goodness_of_fit::{
     GaussianGoodnessOfFit, gaussian_goodness_of_fit, is_perfect_fit,
 };
 use crate::shared::inference;
-use crate::shared::least_squares::{LeastSquaresFit, least_squares, residual_sum_of_squares};
+use crate::shared::least_squares::residual_sum_of_squares;
 use crate::shared::orthonormal::{OrthonormalDesign, WaldCoordinates};
 use crate::shared::validation::validate_has_regressors;
 use crate::shared::wald::wald_f_test;
@@ -62,13 +62,14 @@ pub(super) fn fit_ols(
         return Err(CommonError::OutcomeConstant.into());
     }
 
-    let LeastSquaresFit {
-        params,
-        residuals,
-        xtx_inv,
-    } = least_squares(input.x(), input.y()).map_err(|err| {
+    // 直交座標（`X = QR`、`b̃ = Q'y`）を係数・残差・共分散・F検定の全てに使う。ランク落ちは`R`の
+    // 列ピボットQRで判定する（n×kの列ピボットQRと`(X'X)⁻¹`を別に求めない）。
+    let design = OrthonormalDesign::new_checked(input.x()).map_err(|err| {
         LeastSquaresError::from_rank_deficient(err, input.x(), input.param_names())
     })?;
+    let coordinates = design.coordinates(input.y());
+    let params = design.coefficients(&coordinates);
+    let residuals = design.residuals(input.y(), &coordinates);
 
     let df_resid = n - k;
     let ssr = residual_sum_of_squares(&residuals);
@@ -78,33 +79,26 @@ pub(super) fn fit_ols(
     }
     let sigma2 = ssr / (df_resid as f64);
 
+    // 係数の共分散と全体Wald/F検定は、直交座標（`X = QR`、`b̃ = Q'y`、ミート`M̃`）で求める。
+    // `V = B M B`（`B = (X'X)⁻¹`）を作ってから反転すると、傾きの相関が極端に高いときに`B`の
+    // 明示的な逆行列で桁落ちして数値的に正定値でなくなる。`M̃`は`x = Q`・`xtx_inv = 単位行列`で
+    // 既存のmeat構築部品を呼んで得て、`V = R⁻¹ M̃ R⁻ᵀ`と統計量`b̃_S' M̃_SS⁻¹ b̃_S`の両方に使う
+    // （`shared::orthonormal`）。`Q`は共分散の計算後に捨てる。
     let CovParams {
-        cov_params,
+        cov_params: meat,
         df_inference,
         hac_lags_used,
-    } = compute_cov_params(&cov_type, input.x(), &residuals, &xtx_inv, sigma2, df_resid)?;
-
-    // 全体Wald/F検定は、`cov_params`（`V = B M B`）を反転せず、直交座標（`X = QR`、
-    // `b̃ = Q'y`、ミート`M̃`）で求める。`B`の明示的な逆行列で桁落ちして`V`が数値的に
-    // 正定値でなくなる、傾きの相関が極端に高い場合でも精度を保つため（`shared::orthonormal`）。
-    // `Q`はここで作って捨てる（n×kの追加確保を、この窓に収める）。
-    let wald = {
-        let design = OrthonormalDesign::new(input.x()).map_err(|err| {
-            LeastSquaresError::from_rank_deficient(err, input.x(), input.param_names())
-        })?;
-        let coordinates = design.coordinates(input.y());
-        let q_residuals = design.residuals(input.y(), &coordinates);
-        let meat = compute_cov_params(
-            &cov_type,
-            design.q(),
-            &q_residuals,
-            &design.identity(),
-            sigma2,
-            df_resid,
-        )?
-        .cov_params;
-        WaldCoordinates { coordinates, meat }
-    };
+    } = compute_cov_params(
+        &cov_type,
+        design.q(),
+        &residuals,
+        &design.identity(),
+        sigma2,
+        df_resid,
+    )?;
+    let cov_params = design.coefficient_covariance(&meat);
+    drop(design);
+    let wald = WaldCoordinates { coordinates, meat };
 
     let mut std_errors = Mat::zeros(k, 1);
     for j in 0..k {

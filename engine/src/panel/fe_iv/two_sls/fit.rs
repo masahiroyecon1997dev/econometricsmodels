@@ -23,6 +23,7 @@ use crate::panel::fe::{
 use crate::shared::error::CommonError;
 use crate::shared::inference::{InferenceTable, inference_table};
 use crate::shared::instrumental_variables::two_sls_point_estimate;
+use crate::shared::orthonormal::OrthonormalDesign;
 use crate::shared::wald::wald_f_test;
 
 /// 列の位置で選んだ列の吸収した効果（`absorbed[列][次元][水準]`から、`y`の列と`x`の列を取り出す）。
@@ -197,17 +198,28 @@ pub(super) fn fit_fe_two_sls(
         None
     };
 
+    // 係数の共分散と全体F検定は、`X̂ = QR`の直交座標（`b̃ = Q'ỹ`、構造残差のミート`M̃`）で求める。
+    // `V = B M B`（`B = (X̂'X̂)⁻¹`）を作ってから反転すると、傾きの相関が極端に高いときに`B`の
+    // 明示的な逆行列で桁落ちする。`M̃`は`panel_cov_params`に`x = Q`・`xtx_inv = 単位行列`を
+    // 渡して得て、`V = R⁻¹ M̃ R⁻ᵀ`と統計量の両方に使う（`shared::orthonormal`）。`β = (X̂'X̂)⁻¹X̂'ỹ`
+    // なので`Rβ = Q'ỹ`。`Q`を作った直後に`x_hat`を解放する（`x_hat`の寿命は延びず、`Q`と
+    // 入れ替わるだけでピークは増えない）。
     let residuals: Vec<f64> = (0..n).map(|i| *estimate.residuals.get(i, 0)).collect();
+    let design = OrthonormalDesign::new(&x_hat).map_err(|err| PanelError::SecondStageFailed {
+        source: LeastSquaresError::from_rank_deficient(err, &x_hat, &param_names),
+    })?;
+    drop(x_hat);
+    let coordinates = design.coordinates(&mat_from_columns(n, &[y_tilde.as_slice()]));
     let PanelCov {
-        cov_params,
+        cov_params: meat,
         df_inference,
         dk_bandwidth_used,
     } = panel_cov_params(
         &cov_type,
         &PanelCovInput {
-            x: &x_hat,
+            x: design.q(),
             residuals: &residuals,
-            xtx_inv: &estimate.xtx_hat_inv,
+            xtx_inv: &design.identity(),
             df_resid,
             df_model,
             n_slopes: k,
@@ -216,9 +228,10 @@ pub(super) fn fit_fe_two_sls(
             structure: PanelStructure::FixedEffects { levels: &levels },
         },
     )?;
-
-    drop(x_hat);
+    let cov_params = design.coefficient_covariance(&meat);
+    drop(design);
     drop(residuals);
+    let wald = (k > 0).then_some((coordinates, meat));
 
     let t_dist = StudentsT::new(0.0, 1.0, df_inference as f64)
         .map_err(|e| CommonError::internal(e.to_string()))?;
@@ -230,16 +243,15 @@ pub(super) fn fit_fe_two_sls(
         conf_upper,
     } = inference_table(&estimate.params, &cov_params, &t_dist, confidence_level);
 
-    let f_test = if k == 0 {
-        None
-    } else {
-        Some(
-            wald_f_test(&estimate.params, &cov_params, 0, k, df_inference).map_err(|source| {
+    let f_test = match &wald {
+        None => None,
+        Some((coordinates, meat)) => Some(
+            wald_f_test(coordinates, meat, 0, k, df_inference).map_err(|source| {
                 PanelError::FTestFailed {
                     source: source.into(),
                 }
             })?,
-        )
+        ),
     };
 
     // 構造式の共分散・F検定が計算できた後に、補助回帰を回す（構造式のエラーを先に返す）。

@@ -20,8 +20,6 @@ use super::linear_algebra::RankDeficient;
 pub(crate) struct TwoSlsPointEstimate {
     /// 係数 (k, 1)
     pub(crate) params: Mat<f64>,
-    /// 第二段階の設計行列`X̂`についての`(X̂'X̂)⁻¹` (k, k)。標準誤差のサンドイッチの「パン」に使う。
-    pub(crate) xtx_hat_inv: Mat<f64>,
     /// 構造残差 `e = y - Xβ̂` (n, 1)。`X`は内生変数の実測値で、第二段階の残差`y - X̂β̂`ではない。
     pub(crate) residuals: Mat<f64>,
     /// 構造残差の二乗和 `Σ eᵢ²`
@@ -47,7 +45,6 @@ pub(crate) fn two_sls_point_estimate(
     let ssr = residual_sum_of_squares(&residuals);
     Ok(TwoSlsPointEstimate {
         params: fit.params,
-        xtx_hat_inv: fit.xtx_inv,
         residuals,
         ssr,
     })
@@ -246,14 +243,6 @@ mod tests {
         // 構造残差は第二段階の残差（X̂での残差）と異なる。
         let second_stage_resid = &y - &x_hat * &expected;
         assert!((*est.residuals.get(0, 0) - *second_stage_resid.get(0, 0)).abs() > 1e-6);
-        // (X̂'X̂)⁻¹
-        let identity = &gram * &est.xtx_hat_inv;
-        for i in 0..3 {
-            for j in 0..3 {
-                let target = if i == j { 1.0 } else { 0.0 };
-                assert!((*identity.get(i, j) - target).abs() < 1e-9, "({i},{j})");
-            }
-        }
     }
 
     #[test]

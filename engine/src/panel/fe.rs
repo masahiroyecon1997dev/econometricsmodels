@@ -172,6 +172,7 @@ use faer::Mat;
 use crate::linear::ols::OlsInput;
 use crate::panel::common::PanelError;
 use crate::shared::inference;
+use crate::shared::orthonormal::WaldCoordinates;
 
 mod fit;
 mod fixed_effects;
@@ -234,6 +235,10 @@ pub struct FeEstimator {
     std_errors: Mat<f64>,
     /// `cov_type`別の係数の分散共分散行列 `(k, k)`。`std_errors`はこの対角成分の平方根。
     cov_params: Mat<f64>,
+    /// 全体F検定とFE-IVのWu-Hausman検定が使う直交座標の`b̃`と`M̃`（`shared::orthonormal`）。
+    /// `cov_params`を作ってから反転すると傾きの相関が極端に高いときに桁落ちするため、`V`を介さずに
+    /// 統計量を求める。傾き係数が無い（`k = 0`）ときは`None`。
+    wald: Option<WaldCoordinates>,
     test_stats: Mat<f64>,
     p_values: Mat<f64>,
     conf_lower: Mat<f64>,
@@ -434,6 +439,10 @@ impl FeEstimator {
 
     /// `cov_type`別に計算し直した係数の分散共分散行列（`(k, k)`、`params()`と対応）。
     /// 固定効果（entity・timeダミー）の係数は含まない。
+    pub(crate) fn wald_coordinates(&self) -> Option<&WaldCoordinates> {
+        self.wald.as_ref()
+    }
+
     pub fn cov_params(&self) -> &Mat<f64> {
         &self.cov_params
     }

@@ -16,6 +16,7 @@ use crate::shared::error::CommonError;
 use crate::shared::goodness_of_fit::{is_perfect_fit, total_sum_of_squares};
 use crate::shared::inference::{InferenceTable, inference_table};
 use crate::shared::instrumental_variables::{TwoSlsPointEstimate, two_sls_point_estimate};
+use crate::shared::orthonormal::OrthonormalDesign;
 use crate::shared::validation::validate_has_regressors;
 use crate::shared::wald::wald_f_test;
 use faer::Mat;
@@ -95,9 +96,9 @@ pub(super) fn fit_two_sls(
     validate_second_stage(n, k, confidence_level)?;
     let TwoSlsPointEstimate {
         params: beta,
-        xtx_hat_inv: xtx_inv,
         residuals,
         ssr,
+        ..
     } = two_sls_point_estimate(&x_structural, &x_hat, input.y()).map_err(|err| {
         IvError::SecondStageFailed {
             source: LeastSquaresError::from_rank_deficient(err, &x_hat, &param_names),
@@ -114,11 +115,29 @@ pub(super) fn fit_two_sls(
     }
 
     // 標準誤差の種別ごとの係数共分散行列と、t検定・信頼区間・F検定の自由度。
+    // `X̂ = QR`の直交座標（`b̃ = Q'y`、構造残差のミート`M̃`）で求める。`V = B M B`
+    // （`B = (X̂'X̂)⁻¹`）を作ってから反転すると、傾きの相関が極端に高いときに`B`の明示的な逆行列で
+    // 桁落ちする。`M̃`は`x = Q`・`xtx_inv = 単位行列`で`covariance_stage`を呼んで得て、
+    // `V = R⁻¹ M̃ R⁻ᵀ`と統計量`b̃_S' M̃_SS⁻¹ b̃_S`の両方に使う（`shared::orthonormal`）。
+    // `β = (X̂'X̂)⁻¹X̂'y`なので`Rβ = Q'y`。`Q`はここで作って捨てる。
+    let design = OrthonormalDesign::new(&x_hat).map_err(|err| IvError::SecondStageFailed {
+        source: LeastSquaresError::from_rank_deficient(err, &x_hat, &param_names),
+    })?;
+    let coordinates = design.coordinates(input.y());
     let CovStage {
-        cov_params,
+        cov_params: meat,
         df_inference,
         hac_lags_used,
-    } = covariance_stage(&cov_type, &x_hat, &residuals, &xtx_inv, ssr, df_resid)?;
+    } = covariance_stage(
+        &cov_type,
+        design.q(),
+        &residuals,
+        &design.identity(),
+        ssr,
+        df_resid,
+    )?;
+    let cov_params = design.coefficient_covariance(&meat);
+    drop(design);
     let t_dist = StudentsT::new(0.0, 1.0, df_inference as f64)
         .map_err(|e| CommonError::internal(e.to_string()))?;
     let InferenceTable {
@@ -139,7 +158,7 @@ pub(super) fn fit_two_sls(
         // OLSと同様NaNを返す（0除算を避ける）。
         (f64::NAN, f64::NAN)
     } else {
-        wald_f_test(&beta, &cov_params, k_constant, df_model, df_inference)?
+        wald_f_test(&coordinates, &meat, k_constant, df_model, df_inference)?
     };
 
     let wu_hausman = wu_hausman_test(

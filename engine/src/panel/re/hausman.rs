@@ -10,12 +10,12 @@ use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use crate::panel::common::{
     PanelError, panel_cluster_cov_params, panel_driscoll_kraay_cov_params, resolve_dk_bandwidth,
-    xtx_inverse,
 };
 use crate::panel::fe::FeEstimator;
 use crate::shared::error::{ClusterSetting, CommonError};
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::linear_algebra::{COLLINEARITY_TOLERANCE, independent_columns_in_order};
+use crate::shared::orthonormal::OrthonormalDesign;
 use crate::shared::validation::{validate_cluster_count_covers_slopes, validate_cluster_groups};
 use crate::shared::wald::wald_f_test;
 
@@ -189,21 +189,22 @@ pub(super) fn re_hausman_test(
             let aux = OlsEstimator::fit_auxiliary(aux_input, CovType::Classical, confidence_level)
                 .map_err(to_err)?;
             let k_aux = aux.input().k();
-            let x_mat = aux.input().x();
-            let xtx_inv = xtx_inverse(x_mat)?;
+            let design = aux_orthonormal_design(&aux).map_err(to_err)?;
+            let coordinates = design.coordinates(aux.input().y());
             let residuals: Vec<f64> = (0..n).map(|i| *aux.residuals().get(i, 0)).collect();
             // 小標本補正`G/(G-1)·(n-1)/(n-K)`は`K=k_aux`（`OlsEstimator`のクラスター共分散と
-            // 同式）、検定の自由度は`G-1`。
-            let cov_params = panel_cluster_cov_params(
-                x_mat,
+            // 同式）、検定の自由度は`G-1`。共分散`V`を作って反転せず、直交座標のミート`M̃`
+            // （`x = Q`・`xtx_inv = 単位行列`）で検定する（`shared::orthonormal`）。
+            let meat = panel_cluster_cov_params(
+                design.q(),
                 &residuals,
-                &xtx_inv,
+                &design.identity(),
                 n,
                 k_aux,
                 cluster_codes,
                 k_aux,
             );
-            wald_f_test(aux.params(), &cov_params, k_aux - k, k, g - 1)
+            wald_f_test(&coordinates, &meat, k_aux - k, k, g - 1)
                 .map_err(|e| to_err(e.into()))?
                 .0
         }
@@ -217,15 +218,21 @@ pub(super) fn re_hausman_test(
             let time = time.codes();
             let t_periods = time.n_groups();
             let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
-            let x_mat = aux.input().x();
-            let xtx_inv = xtx_inverse(x_mat)?;
+            let design = aux_orthonormal_design(&aux).map_err(to_err)?;
+            let coordinates = design.coordinates(aux.input().y());
             let residuals: Vec<f64> = (0..n).map(|i| *aux.residuals().get(i, 0)).collect();
             // fixestのDKは`K.fixef="full"`が既定（RE本体の`fit()`のDk分岐と同じ、
             // `k_correction=k_aux`）。Wald検定の分母自由度も`t_periods-1`に揃える
-            // （RE本体・FEのDK分岐と同じ`t.df="min"`）。
-            let cov_params =
-                panel_driscoll_kraay_cov_params(x_mat, &residuals, &xtx_inv, time, k_aux, bw);
-            wald_f_test(aux.params(), &cov_params, k_aux - k, k, t_periods - 1)
+            // （RE本体・FEのDK分岐と同じ`t.df="min"`）。直交座標のミートで検定する。
+            let meat = panel_driscoll_kraay_cov_params(
+                design.q(),
+                &residuals,
+                &design.identity(),
+                time,
+                k_aux,
+                bw,
+            );
+            wald_f_test(&coordinates, &meat, k_aux - k, k, t_periods - 1)
                 .map_err(|e| to_err(e.into()))?
                 .0
         }
@@ -245,6 +252,13 @@ pub(super) fn re_hausman_test(
         )))
     })?;
     Ok(Some((stat, k, chi2.sf(stat))))
+}
+
+/// 補助回帰の設計行列の直交分解（`shared::orthonormal`）。
+fn aux_orthonormal_design(aux: &OlsEstimator) -> Result<OrthonormalDesign, LeastSquaresError> {
+    OrthonormalDesign::new(aux.input().x()).map_err(|err| {
+        LeastSquaresError::from_rank_deficient(err, aux.input().x(), aux.input().param_names())
+    })
 }
 
 #[cfg(test)]

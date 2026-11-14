@@ -14,15 +14,17 @@ use super::transform::{
 };
 use super::variance::VarianceComponents;
 use super::variance_method::{VarianceMethod, variance_components};
+use crate::linear::common::LeastSquaresError;
 use crate::linear::ols::{CovType, OlsEstimator, OlsInput};
 use crate::panel::common::{
     PanelCov, PanelCovInput, PanelError, PanelStructure, panel_cov_params, quasi_demean_column,
-    quasi_demean_two_way, xtx_inverse,
+    quasi_demean_two_way,
 };
 use crate::panel::fe::FeEffects;
 use crate::shared::error::CommonError;
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference::{InferenceTable, inference_table};
+use crate::shared::orthonormal::OrthonormalDesign;
 use crate::shared::wald::wald_f_test;
 
 /// [`ReEstimator::fit_with_variance_method`]の本体。契約（エラー条件を含む）は`fit_with_variance_method`と
@@ -120,7 +122,6 @@ pub(super) fn fit_re(
     // （`FeEstimator::fit`と同型だが、REは`design_matrix_from_columns`で組み立て
     // 直す必要が無い——`x_all`は既に`Mat`化済み）。
     let x_mat = estimator.input().x();
-    let xtx_inv = xtx_inverse(x_mat)?;
     let residuals: Vec<f64> = (0..n).map(|i| *estimator.residuals().get(i, 0)).collect();
 
     // `df_inference`はt検定・信頼区間に使う自由度。`cov_type=Cluster`のとき`G-1`、
@@ -141,16 +142,30 @@ pub(super) fn fit_re(
     // ダミーが無いため、FEのような補正（フルレバレッジ・fixest流のK）は不要
     // （`PanelStructure::RandomEffects`、`fit()`のdocコメント「`cov_type`対応」参照）。
     // 検定対象の傾きの数`q`は`df_model - 1`（`ols::fit`の`k - k_constant`と同じ規約）。
+    //
+    // 係数の共分散と全体F検定は、変換済み設計行列`X* = QR`の直交座標（`b̃ = Q'y*`、ミート`M̃`）で
+    // 求める。`V = B M B`（`B = (X*'X*)⁻¹`）を作ってから反転すると、傾きの相関が極端に高いときに
+    // `B`の明示的な逆行列で桁落ちする。`M̃`は`x = Q`・`xtx_inv = 単位行列`で`panel_cov_params`を
+    // 呼んで得て、`V = R⁻¹ M̃ R⁻ᵀ`と統計量の両方に使う（`shared::orthonormal`）。`Q`はこの窓の中だけで使う。
+    let design =
+        OrthonormalDesign::new(x_mat).map_err(|err| PanelError::QuasiDemeanedRegressionFailed {
+            source: LeastSquaresError::from_rank_deficient(
+                err,
+                x_mat,
+                estimator.input().param_names(),
+            ),
+        })?;
+    let coordinates = design.coordinates(estimator.input().y());
     let PanelCov {
-        cov_params,
+        cov_params: meat,
         df_inference,
         dk_bandwidth_used,
     } = panel_cov_params(
         &cov_type,
         &PanelCovInput {
-            x: x_mat,
+            x: design.q(),
             residuals: &residuals,
-            xtx_inv: &xtx_inv,
+            xtx_inv: &design.identity(),
             df_resid,
             df_model,
             n_slopes: df_model - 1,
@@ -159,6 +174,8 @@ pub(super) fn fit_re(
             structure: PanelStructure::RandomEffects,
         },
     )?;
+    let cov_params = design.coefficient_covariance(&meat);
+    drop(design);
 
     // `StudentsT::new`は自由度が正でない場合に失敗するが、`df_inference`は
     // `df_resid >= 1`（`OlsEstimator::fit`成功時点で保証済み）・
@@ -194,15 +211,10 @@ pub(super) fn fit_re(
         None
     } else {
         Some(
-            wald_f_test(
-                estimator.params(),
-                &cov_params,
-                1,
-                df_model - 1,
-                df_inference,
-            )
-            .map_err(|source| PanelError::FTestFailed {
-                source: source.into(),
+            wald_f_test(&coordinates, &meat, 1, df_model - 1, df_inference).map_err(|source| {
+                PanelError::FTestFailed {
+                    source: source.into(),
+                }
             })?,
         )
     };

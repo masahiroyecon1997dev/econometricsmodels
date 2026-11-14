@@ -36,14 +36,19 @@ def exact_slope_wald(
     cov_type: str = "classical",
     groups: Sequence[object] | None = None,
     n_constants: int = 1,
+    df_resid: int | None = None,
+    cluster_k: int | None = None,
 ) -> float:
     """設計行列`x`（先頭`n_constants`列が切片）の傾きが全てゼロという仮説のWald統計量。
 
     `cov_type`は`"classical"`・`"hc1"`・`"cluster"`（`groups`が必要）。小標本補正は
-    classicalが`SSR/(n-k)`、hc1が`n/(n-k)`、clusterが`G/(G-1)·(n-1)/(n-k)`。
-    戻り値は`F`ではなく`W`（`F = W / q`）。
+    classicalが`SSR/(n-k)`、hc1が`n/(n-k)`、clusterが`G/(G-1)·(n-1)/(n-k)`。`df_resid`を
+    渡すと、classicalとhc1の`n - k`の代わりに使う（固定効果を吸収したパネルは
+    `n - k - 吸収した効果の数`）。`cluster_k`を渡すとclusterの`n - K`の`K`に使う
+    （既定は`k`。固定効果がクラスターにネストされたパネルは、fixest流で`k + 1`）。戻り値は`F`ではなく`W`（`F = W / q`）。
     """
     n, k = len(x), len(x[0])
+    dof = n - k if df_resid is None else df_resid
     xf = [[F(float(v)) for v in row] for row in x]
     yf = [F(float(v)) for v in y]
     xtx = [
@@ -60,7 +65,7 @@ def exact_slope_wald(
     )
 
     if cov_type == "classical":
-        sigma2 = sum(e * e for e in resid) / (n - k)
+        sigma2 = sum(e * e for e in resid) / dof
         cov = [[sigma2 * inverse[a][b] for b in range(k)] for a in range(k)]
     else:
         if cov_type == "hc1":
@@ -71,7 +76,7 @@ def exact_slope_wald(
                 ]
                 for a in range(k)
             ]
-            correction = F(n, n - k)
+            correction = F(n, dof)
         elif cov_type == "cluster":
             if groups is None:
                 raise ValueError("cluster needs groups")
@@ -86,7 +91,8 @@ def exact_slope_wald(
                     for b in range(k):
                         meat[a][b] += score[a] * score[b]
             g = len(labels)
-            correction = F(g, g - 1) * F(n - 1, n - k)
+            kk = k if cluster_k is None else cluster_k
+            correction = F(g, g - 1) * F(n - 1, n - kk)
         else:
             raise ValueError(f"unsupported cov_type: {cov_type}")
         bm = [

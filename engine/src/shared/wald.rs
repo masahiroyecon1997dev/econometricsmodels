@@ -55,9 +55,14 @@ use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 /// 場合——の**backstop**として残る（`wald_f_test_rejects_a_near_singular_covariance_submatrix`で
 /// 固定）。Cholesky分解（非ピボット）は数値的にほぼ特異な行列でも失敗せず桁違いに巨大な統計量を
 /// 黙って返しうるため、`Llt`分解の**前**にこのチェックを置き`NearSingularMatrix`で止める。
-/// 固有値の判定は絶対値で行うため、桁落ちで`C`が正定値でなくなった場合（`hc1`・`cluster`の
-/// サンドイッチ共分散で傾きの相関が極端に高いとき。相関が1を超える）は、この判定を通って
-/// `Llt`分解の`map_err`が止める。
+/// 固有値の判定は絶対値で行うため、桁落ちで`C`が正定値でなくなった場合（`B M B`で作ったサンドイッチ
+/// 共分散で傾きの相関が極端に高いとき。相関が1を超える）は、この判定を通って`Llt`分解の
+/// `map_err`が止める。
+///
+/// **`params`・`cov_params`には、直交座標の`(b̃, M̃)`（`shared::orthonormal`）を渡してもよい**。
+/// OLS・WLS・IV 2SLS・FE・RE・FE-IVはこちらで呼び、`B M B`を作って反転する経路の桁落ちを避ける
+/// （末尾`q`個の傾きの統計量は`b̃_S' M̃_SS⁻¹ b̃_S`と同じ値で、`k_constant`は先頭の非検定列の数）。
+/// IV GMM・FE-GMM・Tobitは従来どおり係数と共分散`V`を渡す。
 pub(crate) fn wald_quadratic_form(
     params: &Mat<f64>,
     cov_params: &Mat<f64>,

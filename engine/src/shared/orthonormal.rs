@@ -15,17 +15,14 @@
 //!
 //! **ピボットなしにする理由**: 列を並べ替えると「検定対象が末尾`q`成分」という性質が崩れる。
 //! 列を入れ替えない上三角の`R`なら、切片が先頭・検定対象が末尾という既存の列の並びで
-//! そのまま使える。ランク落ちの判定は呼び出し側の列ピボットQR（`checked_col_piv_qr`）が行う
-//! 前提で、ここでは検出しない（対角が厳密に0または非有限のときだけ防御的に弾く）。
-//!
-//! 設計は`docs/planning/specs/wald-qr-spec.md`。
-
-// 各手法の推定量へ配線するまで、テスト以外からは使われない（配線した時点でこの許可を外す）。
-#![allow(dead_code)]
+//! そのまま使える。ランク落ちの判定は、呼び出し側の列ピボットQR（`checked_col_piv_qr`）が
+//! 先に行うか（[`OrthonormalDesign::new`]。ここでは対角が厳密に0または非有限のときだけ防御的に
+//! 弾く）、`R`（k×k）の列ピボットQRで行う（[`OrthonormalDesign::new_checked`]。`X = QR`の
+//! `R`は`X`と同じ特異値を持つので、n×kの列ピボットQRを別に走らせずに済む）。
 
 use faer::{Mat, MatRef};
 
-use super::linear_algebra::RankDeficient;
+use super::linear_algebra::{RankDeficient, checked_col_piv_qr};
 
 /// 全体Wald検定に使う直交座標の組。推定量が保持し、末尾`q`列の検定にも使う。
 #[derive(Debug, Clone)]
@@ -51,6 +48,19 @@ impl OrthonormalDesign {
     /// 行数が列数に満たない、または`R`の対角が厳密に0・非有限のとき[`RankDeficient::Columns`]。
     /// 数値的なランク落ちの判定ではない（呼び出し側の列ピボットQRが先に行う）。
     pub(crate) fn new(x: &Mat<f64>) -> Result<Self, RankDeficient> {
+        Self::decompose(x, false)
+    }
+
+    /// [`Self::new`]に加えて、`R`（k×k）の列ピボットQRでランク落ちを判定する
+    /// （`checked_col_piv_qr`と同じ閾値）。`Q`を作る前に判定するので、ランク落ちでは`Q`を作らない。
+    ///
+    /// # Errors
+    /// `x`がフルカラムランクでないとき[`RankDeficient::Columns`]。
+    pub(crate) fn new_checked(x: &Mat<f64>) -> Result<Self, RankDeficient> {
+        Self::decompose(x, true)
+    }
+
+    fn decompose(x: &Mat<f64>, check_rank: bool) -> Result<Self, RankDeficient> {
         let (n, k) = (x.nrows(), x.ncols());
         if n < k {
             return Err(RankDeficient::Columns);
@@ -68,6 +78,9 @@ impl OrthonormalDesign {
             !diagonal.is_finite() || diagonal == 0.0
         }) {
             return Err(RankDeficient::Columns);
+        }
+        if check_rank {
+            checked_col_piv_qr(&r)?;
         }
         Ok(Self {
             q: qr.compute_thin_Q(),
@@ -90,21 +103,24 @@ impl OrthonormalDesign {
         self.q.transpose() * y
     }
 
+    /// 係数 `β̂ = R⁻¹ b̃`（k×1）。`b̃`は[`Self::coordinates`]の値。
+    pub(crate) fn coefficients(&self, coordinates: &Mat<f64>) -> Mat<f64> {
+        solve_upper(&self.r, coordinates.as_ref())
+    }
+
     /// 残差 `y - Q b̃`（n×1）。`y - Xβ̂`と同じ値で、`β̂`を介さない。
     pub(crate) fn residuals(&self, y: &Mat<f64>, coordinates: &Mat<f64>) -> Mat<f64> {
         y - &self.q * coordinates
     }
 
-    /// 係数 `β̂ = R⁻¹ b̃`（k×1）。
-    pub(crate) fn coefficients(&self, coordinates: &Mat<f64>) -> Mat<f64> {
-        solve_upper(&self.r, coordinates.as_ref())
-    }
-
     /// 係数の共分散 `V = R⁻¹ M̃ R⁻ᵀ`（k×k）。`m_tilde`は対称なk×kの直交座標のミート。
-    /// 結果は丸めでわずかに非対称になりうる（Wald検定側が対称化する）。
+    /// 丸めによるわずかな非対称は、上下三角の平均で取り除く。
     pub(crate) fn coefficient_covariance(&self, m_tilde: &Mat<f64>) -> Mat<f64> {
         let left = solve_upper(&self.r, m_tilde.as_ref());
-        solve_upper(&self.r, left.transpose())
+        let v = solve_upper(&self.r, left.transpose());
+        Mat::from_fn(v.nrows(), v.ncols(), |i, j| {
+            0.5 * (*v.get(i, j) + *v.get(j, i))
+        })
     }
 }
 
@@ -206,7 +222,7 @@ mod tests {
         let (x, y, _) = near_collinear(1e-3);
         let design = OrthonormalDesign::new(&x).unwrap();
         let b_tilde = design.coordinates(&y);
-        let beta = design.coefficients(&b_tilde);
+        let beta = solve_upper(&design.r, b_tilde.as_ref());
         let residuals = design.residuals(&y, &b_tilde);
 
         // 正規方程式 X'e = 0、および X β̂ + e = y。

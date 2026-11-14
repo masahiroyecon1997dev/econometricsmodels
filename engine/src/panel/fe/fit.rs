@@ -24,6 +24,7 @@ use crate::shared::goodness_of_fit::{gaussian_goodness_of_fit, is_perfect_fit};
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::inference::{InferenceTable, inference_table};
 use crate::shared::least_squares::{LeastSquaresFit, least_squares};
+use crate::shared::orthonormal::{OrthonormalDesign, WaldCoordinates};
 use crate::shared::validation::{column_is_zero_variance_with_noise, has_no_variation};
 use crate::shared::wald::wald_f_test;
 
@@ -178,7 +179,7 @@ pub(in crate::panel) fn fit_fe_from_within(
     let LeastSquaresFit {
         params,
         residuals: residual_mat,
-        xtx_inv,
+        ..
     } = least_squares(within_input.x(), within_input.y()).map_err(|err| {
         PanelError::WithinRegressionFailed {
             source: LeastSquaresError::from_rank_deficient(
@@ -207,16 +208,31 @@ pub(in crate::panel) fn fit_fe_from_within(
     // （`Cluster`は`G-1`、`Dk`は`t_periods-1`、それ以外は`df_resid`。標準誤差のスケールに使う
     // `K`（`fe_cluster_k_correction`）とは別軸の値）。FE固有の補正（フルレバレッジ・
     // fixest流のK・2グループ退化の検査）は`PanelStructure::FixedEffects`で渡す。
+    // 係数の共分散・全体F検定・FE-IVのWu-Hausman検定は、within変換後の設計行列`X̃ = QR`の
+    // 直交座標（`b̃ = Q'ỹ`、ミート`M̃`）で求める。`V = B M B`（`B = (X̃'X̃)⁻¹`）を作ってから
+    // 反転すると、傾きの相関が極端に高いときに`B`の明示的な逆行列で桁落ちする。`M̃`は
+    // `panel_cov_params`に`x = Q`・`xtx_inv = 単位行列`を渡して得て（HC2/HC3のレバレッジは
+    // `‖q_i‖²`とダミー分の和）、`V = R⁻¹ M̃ R⁻ᵀ`と統計量の両方に使う（`shared::orthonormal`）。
+    // `Q`はこの窓の中だけで使って捨てる。`k = 0`（固定効果のみ）は空の行列になる。
+    let design =
+        OrthonormalDesign::new(x_mat).map_err(|err| PanelError::WithinRegressionFailed {
+            source: LeastSquaresError::from_rank_deficient(
+                err,
+                within_input.x(),
+                within_input.param_names(),
+            ),
+        })?;
+    let coordinates = design.coordinates(within_input.y());
     let PanelCov {
-        cov_params,
+        cov_params: meat,
         df_inference,
         dk_bandwidth_used,
     } = panel_cov_params(
         &cov_type,
         &PanelCovInput {
-            x: x_mat,
+            x: design.q(),
             residuals: &residuals,
-            xtx_inv: &xtx_inv,
+            xtx_inv: &design.identity(),
             df_resid,
             df_model,
             n_slopes: k,
@@ -225,6 +241,9 @@ pub(in crate::panel) fn fit_fe_from_within(
             structure: PanelStructure::FixedEffects { levels: &levels },
         },
     )?;
+    let cov_params = design.coefficient_covariance(&meat);
+    drop(design);
+    let wald = (k > 0).then_some(WaldCoordinates { coordinates, meat });
 
     // `StudentsT::new`は自由度が正でない場合に失敗するが、`df_inference`は
     // `df_resid >= 1`（関数冒頭の`n <= df_model`検証）・`n_groups - 1 >= 1`
@@ -265,18 +284,17 @@ pub(in crate::panel) fn fit_fe_from_within(
     // （`cov_type=Cluster`/`Dk`のときだけ`df_resid`から切り替わる、`shared::wald::wald_f_test`の
     // `df_inference`引数と同じ扱い）を使う。`k_constant=0`（FEに切片は無い、上記
     // `OlsInput::from_columns`呼び出しと同じ理由）。
-    let f_test = if k == 0 || !tests_overall_f {
-        // 説明変数が無いモデル、またはF検定をしない呼び出し。検定対象が存在しないため
-        // `OlsEstimator::fit`同様定義なし（`None`）。
-        None
-    } else {
-        Some(
-            wald_f_test(&params, &cov_params, 0, k, df_inference).map_err(|source| {
+    let f_test = match &wald {
+        Some(wald) if tests_overall_f => Some(
+            wald_f_test(&wald.coordinates, &wald.meat, 0, k, df_inference).map_err(|source| {
                 PanelError::FTestFailed {
                     source: source.into(),
                 }
             })?,
-        )
+        ),
+        // 説明変数が無いモデル、またはF検定をしない呼び出し。検定対象が存在しないため
+        // `OlsEstimator::fit`同様定義なし（`None`）。
+        _ => None,
     };
 
     Ok(FeEstimator {
@@ -295,6 +313,7 @@ pub(in crate::panel) fn fit_fe_from_within(
         absorbed,
         std_errors,
         cov_params,
+        wald,
         test_stats,
         p_values,
         conf_lower,

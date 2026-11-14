@@ -85,15 +85,21 @@ OLS（最小二乗法）の確定済み仕様。`engine/src/linear/ols/`・`engi
 
 ### 3.1 設計行列・係数計算
 
-- 係数は列ピボットQR分解（`col_piv_qr().solve_lstsq()`）で求める。`X'Xβ=X'y`をCholeskyで解く方式は
+- 係数は、ピボットなしQR `X = QR`から`β̂ = R⁻¹Q'y`で求める（残差は`y - Q(Q'y)`）。共分散・全体Fと同じQR
+  1本を使い、n×kの列ピボットQRと`(X'X)⁻¹`は走らせない（時間の根拠は`engine/src/linear/CLAUDE.md`）。
+  以下の特異性判定は、この`R`（k×k）の列ピボットQRに対して行う（`X`自体の列ピボットQRと同じ特異値を持ち、
+  閾値も同じ。他の推定量は`X`の列ピボットQRで求める従来の形）。以下の説明のうち`X`の`col_piv_qr`とあるのは、
+  OLSでは`R`の`col_piv_qr`に読み替える。
+  `X'Xβ=X'y`をCholeskyで解く方式は
   不採用（`X'X`の明示計算で条件数が2乗になり不利な上、QRなら特異性検出と計算を同時に行える）。
 - 特異性判定は相対閾値: `col_piv_qr`の`R`対角成分のうち`threshold = k * f64::EPSILON * |R[0,0]|`
   未満のものがあればランク落ち（絶対閾値は不採用、データスケール依存を避けるため）。この比較は
   `diag.is_nan() || diag <= threshold`という形で、NaNも明示的に検出する（`include_intercept=false`
   かつ全説明変数列がゼロという設計行列全体が完全にゼロのケースで、`col_piv_qr`が列選択時の0除算に
   よりR対角成分にNaNを生成しうるため。単純な`<=`比較だとNaNとの比較が常にfalseになりすり抜ける）。
-- 標準誤差計算用の`(X'X)⁻¹`（`shared::covariance::xtx_inverse`）は`X'X`自体のCholesky分解で求める（QR分解の`R`因子から
-  導出する案は実測で高速化しないことを確認済み）。
+- `(X'X)⁻¹`（`shared::covariance::xtx_inverse`）は`X'X`自体のCholesky分解で求める（QR分解の`R`因子から
+  導出する案は実測で高速化しないことを確認済み）。OLSの標準誤差は`R⁻¹M̃R⁻ᵀ`で作るので使わない
+  （`least_squares`経由のFE・IV・FE-IV等は今も使う）。
 
 ### 3.2 標準誤差
 
@@ -176,10 +182,13 @@ classical / HC0〜HC3 / HAC / cluster の定義式、検定分布、自由度の
   分散の比が`1/(k·ε)`≈2e15を超える）で、係数も標準誤差も計算できるデータが失敗した（OLS・WLS・FE・
   RE・Tobit・IV・FEIV。Logit・Probitは内部で標準化し全体Wald検定を持たないため影響なし）。
   対角が正の有限値でない（ゼロ行列・負の分散）ときは`C`を作れず、同じく`NearSingularMatrix`にする。
-  列の単位とは関係なく、`hc1`・`cluster`のサンドイッチ共分散`B M B`は傾きの相関が約`1 - 1e-11`
-  より高いと（データ依存）桁落ちで数値的に正定値でなくなり、相関スケール化しても止まる（classicalは通る）。
-  これは`wald_f_test`が`cov_params`を入力に取る限り避けられず、`Rβ`と直交座標のミートから二次形式を
-  直接求める別の計算経路が要る（`tests/cross_method/test_unit_invariance.py`で現状の境界を固定）。
+  列の単位とは関係なく、`hc1`・`cluster`のサンドイッチ共分散`B M B`（`B = (X'X)⁻¹`）は傾きの相関が
+  約`1 - 1e-11`より高いと（データ依存）`B`の明示的な逆行列の桁落ちで数値的に正定値でなくなり、
+  相関スケール化しても止まっていた（classicalは通る）。**現在は直交座標（ピボットなしQR `X = QR`）で
+  求める**: 統計量は`b̃_S' M̃_SS⁻¹ b̃_S`（`b̃ = Q'y`、`M̃`は`x = Q`・`xtx_inv = 単位行列`で既存のmeat
+  構築部品を呼んで得る）、係数の共分散は`V = R⁻¹M̃R⁻ᵀ`（`shared::orthonormal`）。傾きの相関が`1 - 5e-13`でも、厳密な有理数演算との相対誤差は
+  `1e-11`（`tests/support/_exact_wald.py`）。標準誤差は旧経路との差が凍結データ79件で最大`2e-12`。
+  この経路はOLS・WLS・IV 2SLS・FE・RE・FE-IV。IV GMM・FE-GMM・Tobitは従来の`cov_params`を渡す経路。
 - **被説明変数が定数（`OUTCOME_CONSTANT`）**: 切片のあるモデルで`y`が（丸め誤差の範囲で）全行で
   同じ値だと、中心化した総平方和が0でR²が定義できない。入力だけから分かるので、QR分解より前に
   `ValidationError`にする。切片なしのモデルでは定数でも非中心化の総平方和が正なので対象外。

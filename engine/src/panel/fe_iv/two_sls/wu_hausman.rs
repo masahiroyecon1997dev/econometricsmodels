@@ -169,9 +169,16 @@ pub(super) fn fe_wu_hausman_test(
         }
 
         let df_inference = aux.df_inference();
+        // 補助回帰が直交座標で持つ`b̃`と`M̃`で、末尾`k_endog`列（残差の列）を検定する
+        // （`shared::orthonormal`）。補助回帰は`k_exog + 2 k_endog >= 1`列なので必ずある。
+        let wald = aux.wald_coordinates().ok_or_else(|| {
+            PanelError::from(CommonError::internal(
+                "the auxiliary regression of the Wu-Hausman test has no coordinates".to_string(),
+            ))
+        })?;
         match wald_f_test(
-            aux.params(),
-            aux.cov_params(),
+            &wald.coordinates,
+            &wald.meat,
             k_exog + k_endog,
             k_endog,
             df_inference,

@@ -409,9 +409,13 @@ def generate_fe_iv_perf_dataset(
     for ell in range(k_instruments):
         pi[ell % k_endog, ell] = _PERF_PI_OWN
 
+    # 構造誤差と各第一段階誤差の相関は、第一段階誤差同士を無相関にしたまま相関行列が正定値に
+    # なるよう`rho / sqrt(k_endog)`にする（固定の`rho`では`k_endog * rho² >= 1`で非正定値になる）。
+    # `k_endog = 1`では`rho`のまま。
+    rho = _PERF_RHO / np.sqrt(k_endog)
     cov = np.eye(1 + k_endog)
-    cov[0, 1:] = _PERF_RHO
-    cov[1:, 0] = _PERF_RHO
+    cov[0, 1:] = rho
+    cov[1:, 0] = rho
     uv = rng.multivariate_normal(np.zeros(1 + k_endog), cov, size=n)
     u, v = uv[:, 0], uv[:, 1:]
     endog = z @ pi.T + _PERF_ENTITY_LOADING_ENDOG * a[:, None] + v

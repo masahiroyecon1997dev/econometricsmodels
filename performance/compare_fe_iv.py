@@ -88,7 +88,7 @@ FE-GMM は未実装。実装したとき、`extra_methods` に推定量（2段�
 
 from __future__ import annotations
 
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
 import polars as pl
@@ -100,6 +100,9 @@ from performance._perf_harness import (
     PerfAdapter,
     run_cli,
 )
+
+if TYPE_CHECKING:
+    from econometricsmodels import FEIVResults
 
 _ENTITY_COL = "entity"
 _TIME_COL = "time"
@@ -211,7 +214,7 @@ def _build_inst6_dataframe(n: int, k: int, seed: int) -> pl.DataFrame:
     return _build(_STRUCTURES["inst6"], n, k, seed)
 
 
-def _fit_once_engine(ctx: FitContext):
+def _fit_once_engine(ctx: FitContext) -> FEIVResults:
     from econometricsmodels import FEIV, FEIVOptions
 
     structure = _STRUCTURES[ctx.method]
@@ -233,7 +236,7 @@ def _fit_once_engine(ctx: FitContext):
     ).fit()
 
 
-def _fit_once(ctx: FitContext):
+def _fit_once(ctx: FitContext) -> FEIVResults:
     if ctx.library == "engine":
         return _fit_once_engine(ctx)
     raise ValueError(f"unknown library: {ctx.library!r}")

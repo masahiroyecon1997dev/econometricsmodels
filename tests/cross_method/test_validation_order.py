@@ -9,7 +9,7 @@
    `solver` → `variance_method`。使われないオプションの未知の値も報告する
 3. オプションの組合せ: 使われないオプション → 必須オプションの欠落
    （`cov_type`の`hac`/`dk`が先、`gmm_weight_type`の`hac`が後）
-4. ロールの構造: `x`が空 → ロール間の重複（`y`・`effects`・`x`） → `x`内の重複 →
+4. ロールの構造: `x`が空 → ロール間の重複（`y`・`weight`・`effects`・`x`） → `x`内の重複 →
    `dk_time`のロール → `"const"`などの名前の衝突
    （FE/REの`effects`の列数の検査は、これより前に行われる）
 5. `y`・`x`などモデルの列（存在・dtype・欠損値）。順序は`y` → `x` → `effects`
@@ -487,7 +487,7 @@ FAULTS = {
         ),
         Fault(
             "weight_is_y",
-            (4, 6),
+            (4, 2),
             code=ErrorCode.ROLE_COLUMN_OVERLAP,
             params={
                 "column": "y",

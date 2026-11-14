@@ -127,7 +127,7 @@ fn matches_dummy_variable_hansen_j_after_rescaling_the_variance() {
 // ── 手計算 ────────────────────────────────────────────────────────
 
 /// `J = (Z̃'ẽ)'S⁻¹(Z̃'ẽ)`。LU分解で解く（本体のCholeskyとは別の経路）。
-fn manual_j(z: &Mat<f64>, e: &Mat<f64>, s: &Mat<f64>) -> f64 {
+pub(super) fn manual_j(z: &Mat<f64>, e: &Mat<f64>, s: &Mat<f64>) -> f64 {
     let zte = z.transpose() * e;
     let solved = s.partial_piv_lu().solve(&zte);
     (0..zte.nrows())

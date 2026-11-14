@@ -1,6 +1,7 @@
 //! `fit`のテスト。テーマ別に子モジュールへ分ける。
 //!
 //! - `basic.rs`: 基本挙動（getter・推定回数と収束・係数名・自由度）
+//! - `c_statistic.rs`: C統計量（`fe_gmm_c_statistic`。ダミー変数を明示した`iv::gmm`との照合、手計算、Hansen Jとの整合、検証）
 //! - `cov_type.rs`: `cov_type`別の標準誤差（FE-2SLSへの還元、ダミー変数を明示したGMM、手計算との照合）・推論・Wald・R²・検証
 //! - `hansen_j.rs`: Hansen J過剰識別検定（FE-2SLSのSarganへの還元、ダミー変数を明示したGMM、手計算、`None`の条件）
 //! - `reference.rs`: FE-2SLSへの還元、ダミー変数を明示したGMM（FWL）、クラスター重みの手計算との照合
@@ -12,6 +13,7 @@ use crate::panel::fe_iv::{FeGmmEstimator, FeGmmType, FeIvInput, FeWeightType};
 use crate::shared::group_codes::GroupCodes;
 
 mod basic;
+mod c_statistic;
 mod cov_type;
 mod hansen_j;
 mod reference;

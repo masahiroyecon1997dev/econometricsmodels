@@ -14,6 +14,7 @@ use engine::iv::gmm::{
     CStatisticTarget, GmmType, WeightType, compute_c_statistic, weight_type_for_cov_type,
 };
 use engine::linear::ols::CovType;
+use engine::shared::error::CommonError;
 use engine::shared::error_catalog::{ErrorCode, ParamValue};
 use polars::prelude::DataFrame;
 use pyo3::prelude::*;
@@ -328,7 +329,9 @@ pub(super) fn run_c_stat(
     let variables = extract_names(variables, "variables")?;
     let instruments = extract_names(instruments, "instruments")?;
     if variables.is_none() && instruments.is_none() {
-        return Err(iv_error_to_pyerr(IvError::CStatisticNothingToTest));
+        return Err(iv_error_to_pyerr(IvError::Common(
+            CommonError::CStatisticNothingToTest,
+        )));
     }
     let variables = checked_names(variables, "variables")?;
     let instruments = checked_names(instruments, "instruments")?;

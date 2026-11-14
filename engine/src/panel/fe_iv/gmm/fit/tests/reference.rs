@@ -333,14 +333,18 @@ pub(super) fn manual_dummy_projection_full(
     group: &[usize],
     estimates: usize,
 ) -> ManualGmm {
+    manual_gmm_full(input, &dummy_projection_demean(input), group, estimates)
+}
+
+/// 効果のダミーへの回帰の残差を返す関数（固定効果を除く。`least_squares`で、本体の変換とは別の経路）。
+pub(super) fn dummy_projection_demean(input: &FeIvInput) -> impl Fn(&Vec<f64>) -> Vec<f64> {
     let d = mat(&dummies(input.index().effect_codes()));
-    let demean = |c: &Vec<f64>| -> Vec<f64> {
+    move |c: &Vec<f64>| -> Vec<f64> {
         let column = mat(std::slice::from_ref(c));
         let fit = least_squares(&d, &column).unwrap();
         let residual = &column - &d * &fit.params;
         (0..c.len()).map(|i| *residual.get(i, 0)).collect()
-    };
-    manual_gmm_full(input, &demean, group, estimates)
+    }
 }
 
 /// 手計算のGMMの途中の量（変換後の`X̃`・`Z̃`・最終の構造残差・最後の推定に使った`S`）。

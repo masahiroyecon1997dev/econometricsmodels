@@ -189,6 +189,25 @@ pub enum CommonError {
     #[error("{}", self.catalog_message())]
     GmmNonConvergence { n_iter: usize },
 
+    /// C統計量で検定する内生変数も操作変数も指定されていない。IV・固定効果つきGMMが共有する。
+    #[error("{}", self.catalog_message())]
+    CStatisticNothingToTest,
+
+    /// C統計量で検定する除外操作変数が多すぎて、外した後の操作変数が内生変数の数に足りない
+    /// （順序条件を満たさず、元の構造方程式が識別できない）。IV・固定効果つきGMMが共有する。
+    #[error("{}", self.catalog_message())]
+    CStatisticTooManyTestedInstruments {
+        n_tested: usize,
+        n_instruments: usize,
+        n_endog: usize,
+    },
+
+    /// C統計量が、このデータでは定義できない（必要な行列が特異: 操作変数の共線、完全フィット、
+    /// モーメント条件の共分散のランク落ち等）。診断なので`fit()`は失敗させず、診断のメソッドを
+    /// 呼んだときにだけ返す。IV・固定効果つきGMMが共有する。
+    #[error("{}", self.catalog_message())]
+    CStatisticUndefined,
+
     /// `cov_type="hac"`（GMMの`weight_type="hac"`を含む）の`hac_lags`が負、または観測数`n`以上（`[0, n)`の範囲外）。
     ///
     /// OLS/WLS・2SLS・GMMのHACが共有する検証（`shared::covariance::resolve_hac_lags`）。
@@ -290,6 +309,16 @@ impl ErrorInfo for CommonError {
             Self::GmmNonConvergence { n_iter } => ErrorReport::new(ErrorCode::NotConverged)
                 .param("n_iter", *n_iter)
                 .param("iter_option", "gmm_max_iter"),
+            Self::CStatisticNothingToTest => ErrorReport::new(ErrorCode::CStatisticNothingToTest),
+            Self::CStatisticTooManyTestedInstruments {
+                n_tested,
+                n_instruments,
+                n_endog,
+            } => ErrorReport::new(ErrorCode::CStatisticTooManyTestedInstruments)
+                .param("n_tested", *n_tested)
+                .param("n_instruments", *n_instruments)
+                .param("n_endog", *n_endog),
+            Self::CStatisticUndefined => ErrorReport::new(ErrorCode::CStatisticUndefined),
             Self::DimensionMismatch { y_rows, x_rows } => {
                 internal(format!("y has {y_rows} rows but x has {x_rows} rows"))
             }

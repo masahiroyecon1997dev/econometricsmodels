@@ -54,7 +54,7 @@
 //! - `sargan.rs`: Sargan過剰識別検定
 //! - `wu_hausman.rs`: Wu-Hausman内生性検定（補助FE回帰）
 //! - `weak_instruments.rs`: 弱操作変数診断（部分F・Cragg-Donald・Kleibergen-Paap・有効F）
-//! - `gmm.rs`と`gmm/`: 固定効果つきGMM（`FeGmmEstimator`。点推定・標準誤差・Hansen J。契約は`gmm.rs`のモジュールdoc）
+//! - `gmm.rs`と`gmm/`: 固定効果つきGMM（`FeGmmEstimator`。点推定・標準誤差・Hansen J。事後診断のC統計量`fe_gmm_c_statistic`。契約は`gmm.rs`のモジュールdoc）
 
 use faer::Mat;
 
@@ -74,7 +74,8 @@ mod test_support;
 mod weak_instruments;
 mod wu_hausman;
 
-pub use gmm::{FeGmmEstimator, FeGmmType, FeWeightType};
+pub use crate::shared::gmm_c_statistic::{CStatistic, CStatisticTarget};
+pub use gmm::{FeGmmEstimator, FeGmmType, FeWeightType, fe_gmm_c_statistic};
 pub use input::{FeIvInput, RoleColumns};
 
 /// FEIVの推定量。フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」）。

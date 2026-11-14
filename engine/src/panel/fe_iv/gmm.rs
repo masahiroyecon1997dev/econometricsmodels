@@ -9,7 +9,8 @@
 //!
 //! 点推定（係数・構造残差・点推定に使った重み行列`S`・反復回数・収束）、`cov_type`別の標準誤差・
 //! z統計量・p値・信頼区間・傾き係数の同時Wald χ²検定、R²（within・between・overall）、Hansen J過剰識別検定。
-//! 内生性検定は持たない。
+//! 内生性・操作変数の直交性の検定（C統計量）は、推定量のメソッドではなく独立した事後診断の関数
+//! `fe_gmm_c_statistic`（`gmm/c_statistic.rs`）で、`fit()`では計算しない。
 //!
 //! # `fit`のパイプライン
 //!
@@ -65,6 +66,7 @@
 //!
 //! - `gmm/fit.rs`: `fit_fe_gmm`（上のパイプライン）
 //! - `gmm/hansen_j.rs`: `fe_hansen_j`（Hansen J検定）
+//! - `gmm/c_statistic.rs`: `fe_gmm_c_statistic`（C統計量。事後診断。within変換し直して`shared::gmm_c_statistic`を呼ぶ）
 //! - `gmm/gmm_type.rs`: `FeGmmType`・`FeWeightType`（推定方式と重みの種類。`Hac`を持たない）
 
 use faer::Mat;
@@ -73,10 +75,12 @@ use super::input::FeIvInput;
 use crate::panel::common::PanelError;
 use crate::panel::fe::{FeAbsorption, FeCovType, FeEffects};
 
+mod c_statistic;
 mod fit;
 mod gmm_type;
 mod hansen_j;
 
+pub use c_statistic::fe_gmm_c_statistic;
 pub use gmm_type::{FeGmmType, FeWeightType};
 
 /// 固定効果つきGMMの推定量。フィールドはprivate（`.claude/rules/rust-style.md`「推定量構造体の設計」）。

@@ -41,7 +41,8 @@ pub enum FeGmmType {
 }
 
 impl FeWeightType {
-    fn to_weight_type(&self) -> WeightType {
+    /// 共有コアが受け取る`WeightType`に直す（クラスターのコードは複製する）。
+    pub(super) fn to_weight_type(&self) -> WeightType {
         match self {
             Self::Classical => WeightType::Classical,
             Self::Robust => WeightType::Robust,

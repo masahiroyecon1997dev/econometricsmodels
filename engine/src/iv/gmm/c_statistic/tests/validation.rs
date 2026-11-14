@@ -22,7 +22,7 @@ fn error_of(input: &IvInput, target: &CStatisticTarget, weight: &WeightType) -> 
 #[test]
 fn returns_nothing_to_test_when_the_target_is_empty() {
     let err = error_of(&input(), &target(&[], &[]), &WeightType::Robust);
-    assert_eq!(err, IvError::CStatisticNothingToTest);
+    assert_eq!(err, IvError::Common(CommonError::CStatisticNothingToTest));
     assert_eq!(err.report().code(), ErrorCode::CStatisticNothingToTest);
 }
 
@@ -49,11 +49,11 @@ fn returns_too_many_tested_instruments_when_the_remaining_instruments_cannot_ide
     let err = error_of(&input(), &target(&[], &[0, 1]), &WeightType::Robust);
     assert_eq!(
         err,
-        IvError::CStatisticTooManyTestedInstruments {
+        IvError::Common(CommonError::CStatisticTooManyTestedInstruments {
             n_tested: 2,
             n_instruments: 3,
             n_endog: 2,
-        }
+        })
     );
     assert_eq!(
         err.report().code(),
@@ -125,7 +125,7 @@ fn is_undefined_when_the_clusters_are_fewer_than_the_moment_conditions_of_the_mo
     let at_boundary = compute_c_statistic(&input(), &target(&[0], &[]), &cluster_weight(6));
     assert!(at_boundary.is_ok());
     let err = error_of(&input(), &target(&[0], &[]), &cluster_weight(5));
-    assert_eq!(err, IvError::CStatisticUndefined);
+    assert_eq!(err, IvError::Common(CommonError::CStatisticUndefined));
     assert_eq!(err.report().code(), ErrorCode::CStatisticUndefined);
 }
 
@@ -133,7 +133,7 @@ fn is_undefined_when_the_clusters_are_fewer_than_the_moment_conditions_of_the_mo
 fn counts_the_tested_variables_in_the_moment_conditions_that_the_clusters_must_cover() {
     // 内生変数2個を検定すると7列になり、6クラスターでは足りない。
     let err = error_of(&input(), &target(&[0, 1], &[]), &cluster_weight(6));
-    assert_eq!(err, IvError::CStatisticUndefined);
+    assert_eq!(err, IvError::Common(CommonError::CStatisticUndefined));
 }
 
 #[test]
@@ -152,7 +152,7 @@ fn is_undefined_when_the_instruments_are_collinear() {
     )
     .unwrap();
     let err = error_of(&input, &target(&[0], &[]), &WeightType::Robust);
-    assert_eq!(err, IvError::CStatisticUndefined);
+    assert_eq!(err, IvError::Common(CommonError::CStatisticUndefined));
 }
 
 #[test]
@@ -180,6 +180,10 @@ fn is_undefined_when_the_outcome_is_fitted_perfectly() {
         cluster_weight(8),
     ] {
         let err = error_of(&input, &target(&[0], &[]), &weight);
-        assert_eq!(err, IvError::CStatisticUndefined, "{weight:?}");
+        assert_eq!(
+            err,
+            IvError::Common(CommonError::CStatisticUndefined),
+            "{weight:?}"
+        );
     }
 }

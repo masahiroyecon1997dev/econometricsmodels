@@ -88,7 +88,7 @@ A wrong argument *type* raises the built-in `TypeError`, following the Python co
 
 Where the data or the options cannot be used as given, the package stops with an error rather than quietly fixing the problem. It never changes the estimation sample or the model on its own:
 
-- **Missing values are never dropped.** A null, a NaN or an infinite value in any column used by the model raises an error. There is no listwise deletion.
+- **Missing values are never dropped.** A null, a NaN or an infinite value in any column used by the model raises an error. There is no listwise deletion. An empty or whitespace-only label in a group or time column (`effects`, `cluster`, `dk_time`) is rejected too, so that missing labels written as `""` are not pooled into one group.
 - **Collinear columns are never removed.** A perfectly collinear design raises an error instead of estimating on a reduced set of regressors. The one exception is RE's internal regressions that only estimate variance components or run the Hausman test (the between regression and the Hausman auxiliary regression), which drop aliased columns like R `lm` so that a correlated-random-effects specification (a regressor together with its entity mean) can be estimated; the final regression keeps every column.
 - **Small groups are never discarded.** FE, FEIV and RE reject a group (a level of a column of `effects`) with a single observation with a `ValidationError` instead of dropping it.
 - **Options that would have no effect are rejected.** For example, passing `cluster` while `cov_type` is not `"cluster"` raises an error instead of being ignored.
@@ -164,6 +164,7 @@ Each bullet is a situation that raises a `ValidationError`.
 
 - A null in any used column, or a NaN or infinite value in a numeric column or in a float column of `effects`, a float cluster column or a float time column.
 - A column of the `Null` dtype counts as all missing.
+- An empty or whitespace-only label (`""`, `" "`) in a `String`, `Categorical` or `Enum` column of `effects`, `cluster` or `dk_time` (`COLUMN_BLANK_LABEL`). Labels such as `"NA"` or `"null"` and labels with whitespace around other characters are valid labels; see [Accepted data](accepted-data.md).
 
 **Sample size**
 

@@ -389,7 +389,7 @@ pub(crate) fn panel_error_to_pyerr(err: PanelError) -> PyErr {
 /// | 文字列・`Categorical` | ラベルの辞書順（バイト順） |
 ///
 /// # Errors
-/// `extract_group_key_column`と同じ（許可するdtypeだけが異なる）。
+/// `extract_cluster_groups`（`shared/column_extraction/`）と同じ（許可するdtypeだけが異なる）。
 pub(crate) fn extract_time_keys(
     df: &DataFrame,
     name: &str,
@@ -399,7 +399,7 @@ pub(crate) fn extract_time_keys(
     let FactorizedKey {
         codes,
         representatives,
-    } = factorize_checked_key(name, column)?;
+    } = factorize_checked_key(name, column, source)?;
     let dtype = representatives.dtype().clone();
 
     with_group_labels(name, &representatives, |labels| {
@@ -667,7 +667,7 @@ mod tests {
             ),
             (
                 "String".into(),
-                Series::new("k".into(), ["b", "10", "a", "9", "b", "", "10", "é"]),
+                Series::new("k".into(), ["b", "10", "a", "9", "b", "-", "10", "é"]),
             ),
             (
                 "Date".into(),

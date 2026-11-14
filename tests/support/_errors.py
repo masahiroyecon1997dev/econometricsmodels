@@ -51,6 +51,7 @@ MIGRATED_CODES: frozenset[str] = frozenset(
         ErrorCode.COLUMN_NOT_FOUND,
         ErrorCode.COLUMN_CONTAINS_NULL,
         ErrorCode.COLUMN_NON_FINITE,
+        ErrorCode.COLUMN_BLANK_LABEL,
         ErrorCode.COLUMN_UNSUPPORTED_DTYPE,
         ErrorCode.COLUMN_TIMEZONE_NOT_SUPPORTED,
         ErrorCode.COLUMN_VALUES_TIED,

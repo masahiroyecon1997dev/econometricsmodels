@@ -449,6 +449,193 @@ def test_null_boolean_cluster_raises_for_every_method(frame):
         _assert_missing_key_raises(fit, df, "cluster", method, count=1)
 
 
+# ── 空・空白だけのラベル: 欠損値が`""`に書き換わったものを1グループにしない ────
+# 文字列・`Categorical`・`Enum`のラベルが空文字列・空白だけ（Unicodeの`White_Space`だけでできた文字列。Rustの`str::trim`で空になるもの）
+# のキー列は、全手法・全役割で拒否する。数値・日時のラベルは空にならないので対象外。
+# `"NA"`・`"null"`や前後に空白のあるラベルは、正当なラベルとしてそのまま使う。
+
+# `Enum`は、カテゴリに空白のラベルを含める必要があるので、列ごとに作る。
+ENUM = "enum"
+BLANK_LABELS = ["", " ", "   ", "\t", "\n", "\u3000", "\u00a0"]
+BLANK_CASES = [
+    *[(pl.String, blank) for blank in BLANK_LABELS],
+    (pl.Categorical, ""),
+    (pl.Categorical, " "),
+    (ENUM, ""),
+    (ENUM, " "),
+]
+ROLE_CASES = [
+    (column, method, fit)
+    for column, fits, _ in KEY_ROLES
+    for method, fit in fits.items()
+]
+
+
+def _labelled_key(frame, column, dtype, labels):
+    """`column`をグループ構造を保ったまま文字列ラベルにし、`labels`（行→ラベル）で上書きして
+    `dtype`（`String`・`Categorical`・`ENUM`）の列にする。
+    """
+    values = frame[column].cast(pl.String).to_list()
+    for row, label in labels.items():
+        values[row] = label
+    if dtype == ENUM:
+        dtype = pl.Enum(sorted({*values, *(str(i) for i in range(10))}))
+    series = pl.Series(column, values, dtype=pl.String).cast(dtype)
+    return frame.with_columns(series)
+
+
+def _assert_blank_key_raises(fit, df, column, method, count, row):
+    with raises_error(
+        ErrorCode.COLUMN_BLANK_LABEL,
+        column=column,
+        count=count,
+        row=row,
+        argument=_key_argument(column, method),
+        data_argument="data",
+    ):
+        fit(df)
+
+
+@pytest.mark.parametrize(
+    ("dtype", "blank"),
+    BLANK_CASES,
+    ids=[f"{dtype}-{blank!r}" for dtype, blank in BLANK_CASES],
+)
+@pytest.mark.parametrize(
+    ("column", "method", "fit"),
+    ROLE_CASES,
+    ids=[f"{column}-{method}" for column, method, _ in ROLE_CASES],
+)
+def test_blank_key_label_raises_for_every_method(
+    frame, column, method, fit, dtype, blank
+):
+    """空・空白だけのラベルは、全手法・全役割・ラベルを持つ全dtypeで、件数と最初の行つきで拒否する。"""
+    df = _labelled_key(frame, column, dtype, {2: blank, 40: blank})
+
+    _assert_blank_key_raises(fit, df, column, method, count=2, row=2)
+
+
+@pytest.mark.parametrize("row", [0, 30, 59], ids=["first", "middle", "last"])
+@pytest.mark.parametrize(
+    ("column", "method", "fit"),
+    ROLE_CASES,
+    ids=[f"{column}-{method}" for column, method, _ in ROLE_CASES],
+)
+def test_single_blank_key_label_is_found_at_any_row(
+    frame, column, method, fit, row
+):
+    df = _labelled_key(frame, column, pl.String, {row: ""})
+
+    _assert_blank_key_raises(fit, df, column, method, count=1, row=row)
+
+
+@pytest.mark.parametrize(
+    ("column", "method", "fit"),
+    ROLE_CASES,
+    ids=[f"{column}-{method}" for column, method, _ in ROLE_CASES],
+)
+def test_different_blank_labels_are_counted_together(
+    frame, column, method, fit
+):
+    """空文字列と空白だけの別のラベルは別々のグループでも、まとめて数え、最初の行を報告する。"""
+    df = _labelled_key(frame, column, pl.String, {7: " ", 3: "", 20: "\t"})
+
+    _assert_blank_key_raises(fit, df, column, method, count=3, row=3)
+
+
+@pytest.mark.parametrize("dtype", [pl.String, pl.Categorical, ENUM], ids=str)
+@pytest.mark.parametrize(
+    ("column", "method", "fit"),
+    ROLE_CASES,
+    ids=[f"{column}-{method}" for column, method, _ in ROLE_CASES],
+)
+def test_all_blank_key_column_counts_every_row(
+    frame, column, method, fit, dtype
+):
+    df = _labelled_key(
+        frame, column, dtype, {row: " " for row in range(frame.height)}
+    )
+
+    _assert_blank_key_raises(
+        fit, df, column, method, count=frame.height, row=0
+    )
+
+
+@pytest.mark.parametrize("dtype", [pl.String, pl.Categorical, ENUM], ids=str)
+@pytest.mark.parametrize(
+    ("column", "method", "fit"),
+    ROLE_CASES,
+    ids=[f"{column}-{method}" for column, method, _ in ROLE_CASES],
+)
+def test_null_key_is_reported_before_a_blank_label(
+    frame, column, method, fit, dtype
+):
+    """nullと空白ラベルが混在する列は、欠損値として報告する（欠損値の検査が先）。"""
+    df = _labelled_key(frame, column, dtype, {2: ""})
+    df = df.with_columns(df[column].scatter(5, None).alias(column))
+
+    _assert_missing_key_raises(fit, df, column, method, count=1)
+
+
+# 順序が整数の0..9と同じになるよう、ラベルは辞書順に並べる（グループの並びが変わると、
+# 標準誤差が丸めの範囲で変わりうる）。
+IDENTITY_TOKENS = sorted(
+    [" A", "-", "A", "A ", "N/A", "NA", "NaN", "None", "n/a", "null"]
+)
+TIME_TOKENS = sorted(["NA", "NaN", "None", "null", "A ", " A"])
+
+
+@pytest.mark.parametrize("dtype", [pl.String, pl.Categorical, ENUM], ids=str)
+@pytest.mark.parametrize(
+    ("column", "method", "fit"),
+    ROLE_CASES,
+    ids=[f"{column}-{method}" for column, method, _ in ROLE_CASES],
+)
+def test_missing_value_tokens_and_padded_labels_are_ordinary_labels(
+    frame, column, method, fit, dtype
+):
+    """`"NA"`・`"null"`・`"None"`・`"NaN"`や、前後に空白のあるラベル（`"A "`と`" A"`と`"A"`）は
+    別々の正当なラベルで、整数のキーと同じグループ分け・同じ結果になる。
+    """
+    tokens = TIME_TOKENS if column == "t" else IDENTITY_TOKENS
+    labels = {
+        row: tokens[value] for row, value in enumerate(frame[column].to_list())
+    }
+    df = _labelled_key(frame, column, dtype, labels)
+
+    _assert_same_result(fit(df), fit(frame))
+
+
+@pytest.mark.parametrize("char", ["\u200b", "\ufeff", "\u2060"], ids=repr)
+def test_invisible_characters_outside_white_space_are_ordinary_labels(
+    frame, char
+):
+    """空白の定義はUnicodeの`White_Space`で、ゼロ幅スペース等（`White_Space`ではない）は
+    見た目が空でも拒否しない。前後に空白のあるラベルと同じく、そのまま別のラベルとして使う。
+    """
+    fit = CLUSTER_FITS["OLS"]
+    labels = {row: f"g{value}" for row, value in enumerate(frame["cluster"])}
+    labels[2] = char
+
+    fit(_labelled_key(frame, "cluster", pl.String, labels))
+
+
+@pytest.mark.parametrize(
+    ("column", "method", "fit"),
+    ROLE_CASES,
+    ids=[f"{column}-{method}" for column, method, _ in ROLE_CASES],
+)
+def test_blank_enum_category_absent_from_the_data_is_accepted(
+    frame, column, method, fit
+):
+    """データに現れない`Enum`のカテゴリが空・空白だけでも拒否しない（行に現れるラベルだけを検査する）。"""
+    dtype = pl.Enum([str(i) for i in range(10)] + ["", " "])
+    series = frame[column].cast(pl.String).cast(dtype)
+    df = frame.with_columns(series.alias(column))
+
+    _assert_same_result(fit(df), fit(frame))
+
+
 # ── 時点の順序: 桁が上がる・月や年をまたぐ時点でも、時系列順になる ───────────
 
 

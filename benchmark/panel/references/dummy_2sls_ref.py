@@ -36,6 +36,8 @@ within変換・自由度の数え方（`n_absorbed`）・診断とは独立な�
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pandas as pd
 from linearmodels.iv import IV2SLS
@@ -145,7 +147,14 @@ def _effective_f(
         _MOP_COV[cov],
         groups=df[cluster].to_numpy() if cluster else None,
     )
-    return {"effective_f": float(mop.mop_effective_f(rf).f_eff)}
+    # 使うのは`f_eff`だけ。極小標本（`df1_boundary`）では臨界値の計算の途中で`sqrt`が警告を出すが、
+    # `f_eff`が有限であることを確かめてから使う。
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        f_eff = float(mop.mop_effective_f(rf).f_eff)
+    if not np.isfinite(f_eff):
+        raise ValueError(f"effective F is not finite: {case.label}")
+    return {"effective_f": f_eff}
 
 
 def run_dummy_2sls(df: pd.DataFrame, case: Case) -> dict:

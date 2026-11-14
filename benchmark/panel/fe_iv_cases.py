@@ -39,6 +39,7 @@ _MIN_CLUSTERS_MARGIN = 1
 # （`T-1`）の手前の上限。時点が少ないシナリオでは、既定式が1になり`dk_bw1`と同一になる。
 _DK_BANDWIDTH_SWEEP_SCENARIOS = ("baseline", "long_panel")
 _DK_EXPLICIT_BANDWIDTH = 3
+_DK_MIN_PERIODS = 3
 
 
 class CovCase(NamedTuple):
@@ -96,12 +97,14 @@ def _dimensions(scenario: str) -> tuple[int, int]:
         "short_panel": (60, 3),
         "long_panel": (12, 20),
         "small_n": (8, 4),
+        "df1_boundary": (4, 2),
     }.get(scenario, (40, 6))
 
 
 def _k(scenario: str) -> int:
-    """傾き係数の数（外生1＋内生）。"""
-    return 1 + len(scenario_columns(scenario)["x_endog"])
+    """傾き係数の数（外生＋内生）。"""
+    cols = scenario_columns(scenario)
+    return len(cols["x_exog"]) + len(cols["x_endog"])
 
 
 def _n_regions(n_entities: int) -> int:
@@ -130,11 +133,15 @@ def cov_cases(scenario: str, n_effects: int) -> list[CovCase]:
         # 3-wayでは、3つ目の効果の列でのクラスタリングも加える。
         cases.append(CLUSTER_REGION)
         cases.append(CLUSTER_SECTOR)
-    cases.append(DK)
+    # DKは2時点で退化し（時点スコアが恒等的にゼロ）、時点数が傾き係数の数以下だと検定の部分行列が
+    # 特異になる（`ValidationError`）ので、`T > max(2, k)`のときだけ作る。
+    dk_valid = n_periods > max(_DK_MIN_PERIODS - 1, k)
+    if dk_valid:
+        cases.append(DK)
     # 既定式のバンド幅が1のとき（時点が少ない）は、明示した1と同じなので足さない。
-    if hac_auto_lag(n_periods) != 1:
+    if dk_valid and hac_auto_lag(n_periods) != 1:
         cases.append(DK_BW1)
-    if scenario in _DK_BANDWIDTH_SWEEP_SCENARIOS:
+    if dk_valid and scenario in _DK_BANDWIDTH_SWEEP_SCENARIOS:
         cases.append(DK_BW3)
         cases.append(CovCase("dk_bw_max", "dk", dk_bandwidth=n_periods - 2))
     return cases

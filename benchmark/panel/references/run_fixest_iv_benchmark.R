@@ -124,7 +124,9 @@ for (e in endog_names) {
   fs <- model$iv_first_stage[[e]]
   w <- wald(fs, keep = inst_regex, vcov = "iid", print = FALSE)
   weak_f[[e]] <- unname(w$stat)
-  weak_df <- c(w$df1, w$df2)
+  # `wald()`の分母自由度は`max(df2, df1 + 1)`に切り上げられる（残差自由度が小さいと実際の値と
+  # 食い違う）ため、第一段階の残差自由度を直接使う。
+  weak_df <- c(w$df1, degrees_freedom(fs, "resid"))
 }
 
 # Kleibergen-Paapのrk Wald F: 内生変数が1個のとき、同じ`vcov`での第一段階の頑健Wald F

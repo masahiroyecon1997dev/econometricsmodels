@@ -30,6 +30,17 @@ corr(u, v_j) = ρ                              （内生性。`exogenous_endog`�
 - `unbalanced`: `baseline`から行を無作為に落とした不均衡パネル（個体・時点とも2行以上）。
 - `three_way`: `baseline`に3つ目の固定効果`sector`（行ごとに無作為な4水準）の効果を足す。
 - `small_n`: 個体8×時点4（自由度が小さい成功パス）。
+- `df1_boundary`: 個体4×時点2。第一段階（外生変数・操作変数の3列と4個体の効果）の残差自由度がちょうど1の
+  成功パス（構造式は2）。
+- `high_variance`: 構造誤差の標準偏差が10倍。
+- `moderate_multicollinearity`: 外生変数`x1`・`x2`の相関が0.9、操作変数`z1`・`z2`の相関が約0.8。
+- `high_condition_number`: `x1`・`x2`の相関が0.995（条件数が大きい）。
+- `scale_variance_mild`: 外生変数のスケールが違う（`x1`が100倍、`x2`が0.1倍）。
+- `many_regressors`: 外生変数が8列（`x1`..`x8`。スケールが0.1〜100倍で、係数の絶対値は列ごとに間隔を空ける）。
+- `outlier_regressor`: `x1`の5%が標準偏差20の外れ値（高レバレッジ行。HC2・HC3の検証用）。
+
+上の追加シナリオ（`df1_boundary`以降）は、追加の外生変数・外れ値・スケールを別の乱数生成器から作り、
+基本の乱数列を変えない（既存シナリオの凍結CSVが変わらない）。
 
 全シナリオで、水準は文字列（`e00`・`t0`（時点が10以上なら`t00`）・`s0`）、各水準は2行以上に現れる（singletonを作らない）。
 """
@@ -55,10 +66,23 @@ SCENARIOS = [
     "unbalanced",
     "three_way",
     "small_n",
+    "df1_boundary",
+    "high_variance",
+    "moderate_multicollinearity",
+    "high_condition_number",
+    "scale_variance_mild",
+    "many_regressors",
+    "outlier_regressor",
 ]
 
-# 外生変数・内生変数・操作変数の列名（シナリオごとに使う数が違う）。
-X_EXOG = ["x1"]
+# 外生変数（`x1`、`x2`..）・内生変数・操作変数の列名（シナリオごとに使う数が違う）。
+# 外生変数が`x1`だけでないシナリオ（`x1`の後ろに`x2`..を足す）。
+_N_EXOG_BY_SCENARIO = {
+    "moderate_multicollinearity": 2,
+    "high_condition_number": 2,
+    "scale_variance_mild": 2,
+    "many_regressors": 8,
+}
 ENDOG_COLUMNS = ["endog1", "endog2"]
 INSTRUMENT_COLUMNS = ["z1", "z2", "z3"]
 
@@ -84,6 +108,16 @@ _AR_RHO = 0.6
 _HETEROSKEDASTIC_SLOPE = 0.6
 _NOISE_SD = 0.8
 _UNBALANCED_KEEP_PROB = 0.7
+_HIGH_VARIANCE_SCALE = 10.0
+# `x1`と`x2`の相関、操作変数`z1`と`z2`の相関（`moderate_multicollinearity`）。
+_X_CORR = {"moderate_multicollinearity": 0.9, "high_condition_number": 0.995}
+_Z_CORR_MODERATE = 0.8
+_BETA_EXTRA = -0.7
+# `scale_variance_mild`の外生変数のスケール、`many_regressors`の列スケールの範囲（常用対数）。
+_SCALE_VARIANCE_MILD = np.array([1e2, 1e-1])
+_MANY_REGRESSORS_LOG_SCALE_RANGE = (-1.0, 2.0)
+_OUTLIER_PROB = 0.05
+_OUTLIER_SD = 20.0
 
 
 def _region(n_entities: int) -> list[str]:
@@ -162,6 +196,8 @@ def generate_fe_iv_dataset(
         n_entities, n_periods = 12, 20
     elif scenario == "small_n":
         n_entities, n_periods = 8, 4
+    elif scenario == "df1_boundary":
+        n_entities, n_periods = 4, 2
 
     k_endog = 2 if scenario == "multi_endog" else 1
     if scenario == "just_identified":
@@ -191,6 +227,30 @@ def generate_fe_iv_dataset(
     x1 = _ENTITY_LOADING_X * a + rng.normal(size=n)
     z = _ENTITY_LOADING_Z * a[:, None] + rng.normal(size=(n, k_inst))
 
+    # 追加シナリオの外生変数・外れ値は別の生成器から作る（上の乱数列は変えない）。
+    extra_rng = np.random.default_rng([seed, 7])
+    if scenario == "outlier_regressor":
+        is_outlier = extra_rng.uniform(size=n) < _OUTLIER_PROB
+        x1 = np.where(
+            is_outlier, extra_rng.normal(0.0, _OUTLIER_SD, size=n), x1
+        )
+    k_extra = _N_EXOG_BY_SCENARIO.get(scenario, 1) - 1
+    x_extra = np.empty((n, 0))
+    beta_extra = np.empty(0)
+    if k_extra:
+        x_extra = extra_rng.normal(size=(n, k_extra))
+        beta_extra = np.full(k_extra, _BETA_EXTRA)
+        if scenario in _X_CORR:
+            c = _X_CORR[scenario]
+            x_extra[:, 0] = c * x1 + np.sqrt(1.0 - c**2) * x_extra[:, 0]
+        if scenario == "many_regressors":
+            # 列取り違えを検出しやすいよう、係数の絶対値を列ごとに間隔を空けて変える。
+            signs = extra_rng.choice([-1.0, 1.0], size=k_extra)
+            beta_extra = signs * (1.5 + 0.5 * np.arange(k_extra))
+    if scenario == "moderate_multicollinearity":
+        c = _Z_CORR_MODERATE
+        z[:, 1] = c * z[:, 0] + np.sqrt(1.0 - c**2) * z[:, 1]
+
     # 構造誤差uと第一段階誤差v（相関ρ。`exogenous_endog`は独立）。
     rho = 0.0 if scenario == "exogenous_endog" else _RHO
     cov = np.eye(1 + k_endog)
@@ -205,6 +265,8 @@ def generate_fe_iv_dataset(
         u = u.reshape(n)
     if scenario == "heteroskedastic":
         u = u * (1.0 + _HETEROSKEDASTIC_SLOPE * np.abs(x1))
+    if scenario == "high_variance":
+        u = u * _HIGH_VARIANCE_SCALE
     if scenario == "invalid_instrument":
         # z2が構造誤差と相関する（除外制約が破れる）。
         z[:, 1] += _INVALID_INSTRUMENT_LOADING * u / _NOISE_SD
@@ -215,7 +277,19 @@ def generate_fe_iv_dataset(
     effects = alpha[entity_idx] + gamma[time_idx]
     if scenario == "three_way":
         effects = effects + delta[sector_idx]
-    y = beta[0] * x1 + endog @ beta[1:] + effects + u
+    y = beta[0] * x1 + x_extra @ beta_extra + endog @ beta[1:] + effects + u
+    # 外生変数の列（`x1`、`x2`..）と、その係数（出力のスケールに合わせる）。
+    x_cols = np.column_stack([x1, x_extra])
+    beta_x = np.concatenate([[beta[0]], beta_extra])
+    col_scale = np.ones(x_cols.shape[1])
+    if scenario == "scale_variance_mild":
+        col_scale = _SCALE_VARIANCE_MILD.copy()
+    elif scenario == "many_regressors":
+        col_scale = np.logspace(
+            *_MANY_REGRESSORS_LOG_SCALE_RANGE, x_cols.shape[1]
+        )
+    x_cols = x_cols * col_scale
+    beta_x = beta_x / col_scale
 
     entity_ids = [f"e{i:02d}" for i in range(n_entities)]
     # 辞書順と時系列順を一致させる（DKの時点列は文字列をバイト順に並べるため、ゼロ埋めする）。
@@ -230,7 +304,7 @@ def generate_fe_iv_dataset(
         "region": [regions[i] for i in entity_idx],
         "region_uneven": [regions_uneven[i] for i in entity_idx],
         "y": y,
-        "x1": x1,
+        **{f"x{j + 1}": x_cols[:, j] for j in range(x_cols.shape[1])},
     }
     for j in range(k_endog):
         data[ENDOG_COLUMNS[j]] = endog[:, j]
@@ -243,7 +317,7 @@ def generate_fe_iv_dataset(
         df = df.filter(pl.Series(keep))
     if scenario == "three_way":
         df = _ensure_sector_levels(df)
-    return df, beta
+    return df, np.concatenate([beta_x, beta[1:]])
 
 
 def _ensure_sector_levels(df: pl.DataFrame) -> pl.DataFrame:
@@ -265,7 +339,9 @@ def scenario_columns(scenario: str) -> dict[str, list[str]]:
     else:
         k_inst = 2
     return {
-        "x_exog": list(X_EXOG),
+        "x_exog": [
+            f"x{j + 1}" for j in range(_N_EXOG_BY_SCENARIO.get(scenario, 1))
+        ],
         "x_endog": ENDOG_COLUMNS[:k_endog],
         "instruments": INSTRUMENT_COLUMNS[:k_inst],
     }

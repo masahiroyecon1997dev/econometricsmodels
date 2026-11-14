@@ -1116,3 +1116,12 @@ Stock-Yogoの表は実装の値がNBER TWP 284のTable 1（バイアス）・Tab
 - 次の候補（未着手）: HC2/HC3のrk Wald Fを、fixestの第一段階（HC2/HC3は非IVのfeolsで提供される）で独立に確かめる。DKのrk LM・有効Fの独立な参照は引き続き無い。
 - 実データのフィクスチャは含めていない（9.28のとおり。`jtrain`等は変数の定義の確認が要る）。
 - `test_validation_order.py`の`INSUFFICIENT_INSTRUMENTS`の順位は9.28から変わらず未固定。
+
+### 9.30 #379のテスト網羅性レビューへの対応（2026-11-14）
+
+`testing-completeness-reviewer`の指摘のmust fix・should fixを、3段階（各段階でコードとフィクスチャを別コミット）で直した。nice to haveのN3・N4は#655・#656に起票（N3: HC2/HC3のrk Wald Fをfixestの第一段階で確かめる、N4: ivDiagの2-wayクラスターFの不一致の原因）。
+**1段階目**（`4580002f`・`fb36db25`）: `tests/panel/test_fe_iv_validation.py`を新設（ValidationError: ロール・列の存在・定数の列・singleton・自由度（第一段階が境界を決める）・クラスター・DK・オプション、ComputationError: 共線・完全フィット・数値的な特異・収束しない射影・弱操作変数統計量の未定義。境界は成功側と対）。`test_fe_iv_binding.py`の検証系は移した。`cov_type`の大文字小文字のテストを追加。フィクスチャから比較しないキー（hc1のrk LM、fixestのSargan生値）を外し、`n_absorbed`を比較する。独立クロスチェックの`atol`を1e-10に締めた。公開ページの誤り（fixestとの一致の桁、ivDiagの範囲、実データなしの行、単一参照の統計量）を直した。
+**2段階目**（`895c1e48`・`7cb42ed9`）: `long_panel`の時点ラベルをゼロ埋め（DKの時点列は文字列のバイト順）、DKのバンド幅3・`T-2`を足し（baseline・long_panelの1-way・2-way）、既定式が1になる規模では同一の`dk_bw1`を外して3-wayに足し、推定に使ったバンド幅も照合する。`exogenous_endog`のシードを43にした（Wu-Hausman p値 0.045 → 0.57）。
+**3段階目**: シナリオを13から20に増やした（`df1_boundary`・`high_variance`・`moderate_multicollinearity`・`high_condition_number`・`scale_variance_mild`・`many_regressors`・`outlier_regressor`）。外生変数を複数列にするため、追加の列・外れ値は別の乱数生成器（`default_rng([seed, 7])`）から作り、既存シナリオの凍結CSVは変わらない。DKは時点数が傾き係数の数を超えるケースだけ作る。全ケースで参照と機械精度で一致した（fixest 174・ダミー変数2SLS 117・plm 93・ivDiag 92ケース。ダミー変数2SLSの有効Fだけ5e-11と最大）。
+**分かったこと**: 自由度1の境界では、fixestの`wald()`が分母自由度を`max(df2, df1+1)`に切り上げるため、部分Fの分母自由度は第一段階の残差自由度を直接使う（統計量は同じ）。MOPオラクルは極小標本（`df1_boundary`）で臨界値計算の途中に`sqrt`の警告を出す（`f_eff`は有限）。
+**見送り**: cross_methodの`test_perfect_fit`・`test_collinear_columns`・`test_column_error_context`・`test_wald_ill_conditioned`にFEIVを足す件（新設の`test_fe_iv_validation.py`で同じ`code`と`params`を確認済み）、N2のクラスター不均衡の組み合わせ（2-way・`unbalanced`・`long_panel`）、N6のテスト名・見出し規約の細部。

@@ -297,8 +297,8 @@ pub enum PanelError {
     /// 失敗した。`WithinRegressionFailed`とは別バリアント（理由は`common.rs`のモジュールdoc参照）。
     ///
     /// 実際に発生しうるのは`LeastSquaresError::Common(CommonError::NearSingularMatrix)`
-    /// のみ（`wald_f_test`のdocコメント「backstop」参照。傾き係数間の極端なスケール差等で
-    /// 共分散部分行列が数値的にほぼ特異な場合）。それでも型は`WithinRegressionFailed`と
+    /// のみ（`wald_f_test`のdocコメント「backstop」参照。傾き係数間の準多重共線性等で
+    /// 共分散部分行列が単位を揃えても数値的にほぼ特異な場合）。それでも型は`WithinRegressionFailed`と
     /// 同じ`LeastSquaresError`のまま保持する（`wald_f_test`のエラー型を独自に絞り込む
     /// メリットが無いため）。
     #[error("{}", self.catalog_message())]
@@ -310,8 +310,8 @@ pub enum PanelError {
     /// 固定効果つきGMMの傾き係数の同時Wald χ²検定（`crate::shared::wald::wald_chi2_test`）が
     /// 失敗した。`FTestFailed`（F検定）とは別バリアントで、文脈句が「Wald test」になる。
     ///
-    /// 実際に発生しうるのは`CommonError::NearSingularMatrix`のみ（傾き係数間の極端なスケール差等で
-    /// 共分散部分行列が数値的にほぼ特異な場合。構造的な特異性はクラスター数・時点数の事前検証が弾く）。
+    /// 実際に発生しうるのは`CommonError::NearSingularMatrix`のみ（傾き係数間の準多重共線性等で
+    /// 共分散部分行列が単位を揃えても数値的にほぼ特異な場合。構造的な特異性はクラスター数・時点数の事前検証が弾く）。
     #[error("{}", self.catalog_message())]
     WaldTestFailed {
         #[source]

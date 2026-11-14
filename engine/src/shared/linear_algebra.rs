@@ -193,11 +193,13 @@ fn qr_flagged_columns(a: &Mat<f64>) -> Option<Vec<usize>> {
 /// （`SelfAdjointEigen`）による相対閾値判定で確認する。
 ///
 /// 非ピボットCholesky分解（`Llt`）のL因子対角成分は、行列の成分間のスケール差に
-/// 起因する数値的なほぼ特異性を検出できない（OLSの`wald_f_test`で実測確認済み。
+/// 起因する数値的なほぼ特異性を検出できない（列のスケール差が極端な行列で実測確認済み。
+/// `ensure_well_conditioned_symmetric_matrix_rejects_extreme_scale_difference`参照。
 /// `col_piv_qr`のR対角成分を使う`checked_col_piv_qr`とは異なり、
 /// Choleskyはピボットしないため）。分散共分散行列（傾き係数の同時共分散部分行列、
 /// 観測情報行列の逆行列、OPG行列の逆行列等）にCholesky分解を適用する前は、
-/// この関数で固有値ベースの判定を先に行う必要がある。
+/// この関数で固有値ベースの判定を先に行う必要がある。係数の共分散のWald検定は、列の単位に
+/// 依らないよう、相関スケール化した行列に対してこの関数を呼ぶ（`shared::wald`）。
 ///
 /// `matrix`はどの行列を検査しているか（エラーの`matrix`パラメータになる）。
 ///

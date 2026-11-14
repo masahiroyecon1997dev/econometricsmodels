@@ -20,6 +20,7 @@ from _errors import raises_error
 from _helpers import (
     ROW_TIME,
     TIED_TIME_COLUMNS,
+    assert_unit_change_invariant,
     name_collision_frame,
     with_cluster_groups,
     with_row_time,
@@ -710,46 +711,38 @@ def test_perfect_multicollinearity_raises_computation_error():
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)
-def test_scale_variance_raises_computation_error(cov_type):
-    """変数間のスケールが極端に異なる設計行列（x1を`*1e6`、x2を`*1e-3`）は、
-    傾き係数の同時共分散部分行列がスケール比の2乗（≈1e18）相当の条件数を持ち
-    倍精度浮動小数点の限界を超えて数値的に特異になり`ComputationError`
-    （`MATRIX_NEAR_SINGULAR`、`matrix="COEFFICIENT_COVARIANCE"`）になる（OLSと同じ理由、
-    `test_ols_validation.py`参照。WLSでも実測確認済み）。
-    数値比較はせずエラーパスのみ確認する。
+def test_scale_variance_is_invariant_to_the_units(cov_type):
+    """変数間のスケールが極端に異なる設計行列（x1を`*1e6`、x2を`*1e-3`）でも失敗せず、
+    単位を揃えたデータと同じ全体F統計量・p値になる（OLSと同じ理由、
+    `test_ols_validation.py`参照）。係数と標準誤差は列の倍率に従う。
     """
-    df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
+    df = with_row_time(pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv"))
     kwargs = {"hac_time": ROW_TIME} if cov_type == "hac" else {}
     options = WLSOptions(cov_type=cov_type, **kwargs)
-    with raises_error(
-        ErrorCode.MATRIX_NEAR_SINGULAR, matrix="COEFFICIENT_COVARIANCE"
-    ):
-        WLS(
-            with_row_time(df),
-            y="y",
-            x=["x1", "x2", "x3"],
-            weight="weight",
-            options=options,
-        ).fit()
+    assert_unit_change_invariant(
+        lambda d: WLS(
+            d, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+        ).fit(),
+        df,
+        {"x1": 1e6, "x2": 1e-3},
+        stats=("f_statistic", "f_p_value"),
+    )
 
 
-def test_scale_variance_cluster_raises_computation_error():
-    """`cluster`も上記`test_scale_variance_raises_computation_error`と同じ
-    backstopの対象。`cov_type="cluster"`は`cluster`列の指定が別途必要なため`COV_TYPES`
-    パラメトライズには含められず、専用テストとして確認する（OLS
-    `test_ols_validation.py`の同名テストと同じ理由）。均等な疑似グループ
-    （行番号%10、`G=10>q=3`）を使い、クラスター数不足による`ValidationError`
-    （`test_cluster_count_at_most_slopes_raises_validation_error`参照）
-    ではなく、傾き係数の共分散部分行列の条件数超過による
-    `ComputationError`（`MATRIX_NEAR_SINGULAR`、
-    `matrix="COEFFICIENT_COVARIANCE"`）が発生することを確認する。
+def test_scale_variance_cluster_is_invariant_to_the_units():
+    """`cluster`も上記と同じ。`cov_type="cluster"`は`cluster`列の指定が別途必要なため
+    専用テストとして確認する（OLS`test_ols_validation.py`の同名テストと同じ理由）。
+    均等な疑似グループ（行番号%10、`G=10>q=3`）を使う。
     """
-    df = pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv")
-    df = with_cluster_groups(df, 10)
+    df = with_cluster_groups(
+        pl.read_csv(DATA_DIR / "synthetic_scale_variance.csv"), 10
+    )
     options = WLSOptions(cov_type="cluster", cluster="cluster_group")
-    with raises_error(
-        ErrorCode.MATRIX_NEAR_SINGULAR, matrix="COEFFICIENT_COVARIANCE"
-    ):
-        WLS(
-            df, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
-        ).fit()
+    assert_unit_change_invariant(
+        lambda d: WLS(
+            d, y="y", x=["x1", "x2", "x3"], weight="weight", options=options
+        ).fit(),
+        df,
+        {"x1": 1e6, "x2": 1e-3},
+        stats=("f_statistic", "f_p_value"),
+    )

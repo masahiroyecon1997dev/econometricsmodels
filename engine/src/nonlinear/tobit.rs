@@ -259,8 +259,8 @@ impl TobitEstimator {
     /// - 収束点（または`raise_on_non_convergence=false`時の打ち切り点）のHessianが特異:
     ///   `MleError::SingularHessian`
     /// - `cov_type=Opg`でOPG行列（`Σᵢ sᵢsᵢ'`）が特異: `MleError::SingularOpgMatrix`
-    /// - 傾き係数間の悪条件（極端なスケール差等）でWald検定用の係数分散共分散部分行列が
-    ///   数値的にほぼ特異: `CommonError::NearSingularMatrix`（`shared::wald::wald_quadratic_form`参照。`g > q`
+    /// - 傾き係数間の準多重共線性（単位を揃えても残る悪条件。列の単位だけでは起きない）で
+    ///   Wald検定用の係数分散共分散部分行列（相関スケール化後）が数値的にほぼ特異: `CommonError::NearSingularMatrix`（`shared::wald::wald_quadratic_form`参照。`g > q`
     ///   でも起こりうるbackstop。`df_model==0`（切片以外の`β`が無い）のときはこの検定自体を
     ///   スキップし`wald_statistic`/`wald_p_value`はNaNになる）
     pub fn fit(input: TobitInput, options: MleFitOptions) -> Result<Self, MleError> {

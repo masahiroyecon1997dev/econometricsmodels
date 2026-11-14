@@ -19,6 +19,7 @@ import polars as pl
 import pytest
 from _constants import DATA_DIR
 from _errors import raises_error
+from _helpers import assert_unit_change_invariant
 from econometricsmodels import (
     FEIV,
     ComputationError,
@@ -557,29 +558,28 @@ def test_a_perfect_second_stage_raises_for_every_cov_type(df, cov_type):
 
 
 @pytest.mark.parametrize("cov_type", ["classical", "hc1", "cluster"])
-def test_a_scale_difference_makes_the_covariance_numerically_singular(
-    cov_type,
-):
-    """`x1`を`1e6`倍、内生変数を`1e-3`倍した設計は、傾き係数の共分散の条件数が倍精度の限界を超え、
-    全体F検定が検出して`MATRIX_NEAR_SINGULAR`（`testing-policy.md`の3系統の`ComputationError`）。"""
+def test_a_scale_difference_does_not_change_the_statistics(cov_type):
+    """`x1`を`1e6`倍、内生変数を`1e-3`倍した設計でも失敗せず、単位を揃えたデータと同じ
+    全体Wald/F統計量・p値になり、係数と標準誤差は列の倍率に従う。傾き係数の分散の比は
+    1e18を超えるが、全体F検定は相関スケール化した部分行列で判定するため単位に依らない。"""
     data = pl.read_csv(DATA_DIR / "fe_iv_unbalanced.csv").with_columns(
         (pl.col("x1") * 1e6).alias("x1"),
         (pl.col("endog1") * 1e-3).alias("endog1"),
     )
-    with raises_error(
-        ErrorCode.MATRIX_NEAR_SINGULAR,
-        matrix="COEFFICIENT_COVARIANCE",
-        stage="OVERALL_F_TEST",
-    ):
-        FEIV(
-            data,
+    assert_unit_change_invariant(
+        lambda d: FEIV(
+            d,
             y="y",
             x_exog=["x1"],
             x_endog=["endog1"],
             instruments=["z1", "z2"],
             effects=["entity"],
             options=FEIVOptions(cov_type=cov_type),
-        ).fit()
+        ).fit(),
+        data,
+        {"x1": 1e6, "endog1": 1e-3},
+        stats=("wald_statistic", "wald_p_value"),
+    )
 
 
 def test_absorption_not_converged_raises():

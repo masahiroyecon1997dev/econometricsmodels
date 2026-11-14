@@ -317,7 +317,7 @@ impl ReEstimator {
     /// - ハウスマン検定の補助回帰・Wald検定が失敗した場合は`PanelError::HausmanTestFailed`。
     /// - F統計量のWald検定が失敗した場合（傾き係数の共分散部分行列が数値的にほぼ特異）は
     ///   `PanelError::FTestFailed`（backstop。`Cluster`/`Dk`の構造的な特異性は上の事前検証で
-    ///   弾かれるため、通常は傾き係数間の極端なスケール差等でのみ起こる）。
+    ///   弾かれるため、通常は傾き係数間の準多重共線性等でのみ起こる。列の単位だけでは起きない）。
     pub fn fit(
         input: ReInput,
         effects: ReEffects,

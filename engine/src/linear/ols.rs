@@ -136,8 +136,8 @@ impl OlsEstimator {
     /// - `cov_type=Cluster`でクラスター数`g`が傾き係数の数`q`（`k - k_constant`）以下:
     ///   `CommonError::InsufficientClustersForInference`（`rank(Ŝ) ≤ g - 1`のため
     ///   ロバストWald/F検定の`q×q`部分行列が構造的に特異）
-    /// - 傾き係数間の悪条件（極端なスケール差等）でロバストWald/F検定の`q×q`部分行列が
-    ///   数値的にほぼ特異: `CommonError::NearSingularMatrix`（`g > q`でも起こりうる
+    /// - 傾き係数間の準多重共線性（単位を揃えても残る悪条件。列の単位だけでは起きない）で
+    ///   ロバストWald/F検定の相関スケール化した`q×q`部分行列が数値的にほぼ特異: `CommonError::NearSingularMatrix`（`g > q`でも起こりうる
     ///   backstop、`wald_f_test`参照）
     pub fn fit(
         input: OlsInput,

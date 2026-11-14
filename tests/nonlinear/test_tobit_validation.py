@@ -22,7 +22,11 @@ import pytest
 from _constants import DATA_DIR
 from _error_expectations import escaped
 from _errors import raises_error
-from _helpers import name_collision_frame, with_cluster_groups
+from _helpers import (
+    assert_unit_change_invariant,
+    name_collision_frame,
+    with_cluster_groups,
+)
 from _nonlinear_helpers import (
     censored_separation_dataset,
     heavily_censored_tobit_dataset,
@@ -784,27 +788,21 @@ def test_perfect_multicollinearity_raises_computation_error():
 
 
 @pytest.mark.parametrize("cov_type", NON_CLUSTER_COV_TYPES)
-def test_scale_variance_raises_computation_error(cov_type):
-    """変数間のスケールが極端に異なる設計行列（x1 を `*1e6`、x2 を `*1e-3`）は、
-    傾き係数の同時共分散部分行列がスケール比の 2 乗（≈1e18）相当の条件数を持ち
-    倍精度浮動小数点の限界を超えて数値的に特異になる（OLS/WLS と同じ理由・同じ
-    凍結 CSV パターン、`test_ols_validation.py` 参照）。
-
-    Tobit の全体 Wald 検定は OLS の F 検定と二次形式（`wald_quadratic_form`）を共有し、この部分行列の反転を要求するため、
-    classical を含む全 cov_type で `ComputationError`
-    （`MATRIX_NEAR_SINGULAR`、`matrix="COEFFICIENT_COVARIANCE"`）になる。
-    `scale_variance_mild`
-    （スケール比 1e3）が数値リグレッション検知用の成功パス
-    （`test_tobit_reference.py`）。数値比較はせずエラーパスのみ確認する
-    （`TOBIT_ERROR_PATH_SCENARIOS`）。
+def test_scale_variance_is_invariant_to_the_units(cov_type):
+    """変数間のスケールが極端に異なる設計行列（x1 を `*1e6`、x2 を `*1e-3`）でも失敗せず、
+    単位を揃えたデータと同じ全体 Wald 統計量・p 値になり、係数と標準誤差は列の倍率に従う。
+    Tobit の全体 Wald 検定は OLS の F 検定と二次形式（`wald_quadratic_form`）を共有し、
+    相関スケール化した部分行列で判定するため、classical を含む全 cov_type で単位に依らない。
     """
     df = pl.read_csv(DATA_DIR / "tobit_scale_variance.csv")
     lower, upper = _TOBIT_CENSORING_BOUNDS["scale_variance"]
     options = TobitOptions(cov_type=cov_type, lower=lower, upper=upper)
-    with raises_error(
-        ErrorCode.MATRIX_NEAR_SINGULAR, matrix="COEFFICIENT_COVARIANCE"
-    ):
-        Tobit(df, y="y", x=["x1", "x2", "x3"], options=options).fit()
+    assert_unit_change_invariant(
+        lambda d: Tobit(d, y="y", x=["x1", "x2", "x3"], options=options).fit(),
+        df,
+        {"x1": 1e6, "x2": 1e-3},
+        stats=("wald_statistic", "wald_p_value"),
+    )
 
 
 def test_non_convergence_raises_computation_error_with_tiny_max_iter(

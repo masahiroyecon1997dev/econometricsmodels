@@ -18,7 +18,6 @@ use crate::panel::fe::input::FeInput;
 use crate::panel::fe::test_support::*;
 use crate::shared::error::ClusterSetting;
 use crate::shared::error::CommonError;
-use crate::shared::error::MatrixKind;
 use crate::shared::error_catalog::Stage;
 use crate::shared::group_codes::GroupCodes;
 
@@ -427,45 +426,48 @@ fn insufficient_degrees_of_freedom_min_obs_matches_the_fit_boundary() {
 }
 
 #[test]
-fn fe_estimator_fit_returns_f_test_failed_for_extreme_scale_difference() {
-    // x1は1e6オーダー、x2は1e-3オーダーとスケールが極端に異なる（x3は通常スケール）。
-    // within変換後も3列は線形従属ではないため設計行列自体はフルランク
-    // （`WithinRegressionFailed`にはならない）だが、傾き係数の同時共分散部分行列の条件数が
-    // スケール比の2乗（≈1e18）相当となり倍精度の限界を超えるため、FE自身のF検定
-    // （`wald_f_test`の`ensure_well_conditioned_symmetric_matrix`）が`FTestFailed`を返す。
+fn fe_estimator_fit_f_test_is_invariant_to_a_change_of_units() {
+    // x1は1e6倍、x2は1e-3倍とスケールが極端に異なる（x3は通常スケール）。within変換後も3列は
+    // 線形従属ではないため設計行列自体はフルランク。傾き係数の分散の比は1e18を超えるが、FE自身の
+    // F検定（`wald_f_test`）は相関スケール化した部分行列で判定するため、F統計量・p値は
+    // 単位を揃えたときと一致する。
     let n = 20;
     let entity: Vec<String> = (0..n).map(|i| format!("e{}", i % 5)).collect();
-    let x1: Vec<f64> = (0..n).map(|i| 1e6 * (((i * 7) % 11) as f64)).collect();
-    let x2: Vec<f64> = (0..n)
-        .map(|i| 1e-3 * (((i * 5) % 13) as f64).powi(2))
-        .collect();
+    let unit_x1: Vec<f64> = (0..n).map(|i| ((i * 7) % 11) as f64).collect();
+    let unit_x2: Vec<f64> = (0..n).map(|i| (((i * 5) % 13) as f64).powi(2)).collect();
     let x3: Vec<f64> = (0..n).map(|i| ((i * 3) % 7) as f64).collect();
     let y: Vec<f64> = (0..n)
         .map(|i| {
             let noise = if i % 2 == 0 { 1e3 } else { -1e3 };
-            2.0 * x1[i] + 3.0 * x2[i] + 0.5 * x3[i] + noise
+            2.0 * 1e6 * unit_x1[i] + 3.0 * 1e-3 * unit_x2[i] + 0.5 * x3[i] + noise
         })
         .collect();
-    let input = FeInput::from_columns(
-        &y,
-        &[x1, x2, x3],
-        vec!["x1".to_string(), "x2".to_string(), "x3".to_string()],
-        &entity,
-        None,
-        "y".into(),
-    )
-    .unwrap();
+    let fit = |x1_scale: f64, x2_scale: f64| {
+        let x1: Vec<f64> = unit_x1.iter().map(|v| v * x1_scale).collect();
+        let x2: Vec<f64> = unit_x2.iter().map(|v| v * x2_scale).collect();
+        let input = FeInput::from_columns(
+            &y,
+            &[x1, x2, x3.clone()],
+            vec!["x1".to_string(), "x2".to_string(), "x3".to_string()],
+            &entity,
+            None,
+            "y".into(),
+        )
+        .unwrap();
+        FeEstimator::fit(input, FeEffects::OneWay, FeCovType::Classical, 0.95).unwrap()
+    };
 
-    let result = FeEstimator::fit(input, FeEffects::OneWay, FeCovType::Classical, 0.95);
+    let scaled = fit(1e6, 1e-3);
+    let unscaled = fit(1.0, 1.0);
 
-    assert!(matches!(
-        result.unwrap_err(),
-        PanelError::FTestFailed {
-            source: LeastSquaresError::Common(CommonError::NearSingularMatrix {
-                matrix: MatrixKind::CoefficientCovariance
-            })
-        }
-    ));
+    let (f_scaled, f_unscaled) = (
+        scaled.f_statistic().unwrap(),
+        unscaled.f_statistic().unwrap(),
+    );
+    assert!(f_scaled.is_finite() && f_scaled > 0.0);
+    assert!((f_scaled / f_unscaled - 1.0).abs() < 1e-9);
+    let (p_scaled, p_unscaled) = (scaled.f_p_value().unwrap(), unscaled.f_p_value().unwrap());
+    assert!((p_scaled - p_unscaled).abs() <= 1e-9 * p_unscaled);
 }
 
 #[test]

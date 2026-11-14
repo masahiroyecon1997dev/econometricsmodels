@@ -224,9 +224,9 @@ Tobit固有の差分:
   `rank(Ŝ) ≤ G - 1`（クラスター寄与スコアの総和がゼロ）のため、`G <= q`だと`q×q`部分行列が
   数学的に常に特異になる。`G`・`q`は入力だけから判定できるため`fit()`冒頭の
   `InsufficientClustersForInference`（`ValidationError`）で弾く（OLS/WLS/Logit/Probit/Tobit/IV
-  横断で統一）。`G > q`でも傾き係数間の悪条件で`q×q`部分行列が数値的にほぼ特異になる
-  ケースは`wald_quadratic_form`内の`ensure_well_conditioned_symmetric_matrix`（`CommonError::NearSingularMatrix`、
-  `MATRIX_NEAR_SINGULAR`）が
+  横断で統一）。`G > q`でも傾き係数間の準多重共線性で`q×q`部分行列が単位を揃えても数値的にほぼ特異になる
+  ケースは`wald_quadratic_form`内の`ensure_well_conditioned_symmetric_matrix`（相関スケール化した行列に適用。
+  `CommonError::NearSingularMatrix`、`MATRIX_NEAR_SINGULAR`）が
   backstop。
 
 ### 3.5 限界効果
@@ -387,10 +387,10 @@ Tobit固有の差分:
   `heteroskedastic`＝`σ_i = exp(0.5·x1)`の乗法的不均一分散で Tobit MLE の等分散仮定に対する誤設定
   → ロバスト共分散 opg/hc0/hc1 と classical が乖離、点推定は擬似真値に一致）、悪条件
   （`small_n`、`moderate_multicollinearity`、`high_condition_number`、`scale_variance_mild`）。
-  `scale_variance`（比 1e6）・`perfect_multicollinearity`は`ComputationError`パス専用
-  （`scale_variance`は Tobit の全体 Wald 検定が傾き部分行列の反転を要求し全 cov_type で特異になる
-  ため成功パスにできず、`scale_variance_mild`（比 1e3）を数値リグレッション検知用の成功パスとする。
-  OLS の precedent に従う）。
+  `perfect_multicollinearity`は`ComputationError`パス専用、`scale_variance`（比 1e6）は参照実装との
+  数値比較の対象外（Tobit の全体 Wald 検定は相関スケール化した部分行列で判定するため失敗せず、
+  単位を揃えたデータと統計量が一致することを`test_tobit_validation.py`で確認する。
+  `scale_variance_mild`（比 1e3）を数値リグレッション検知用の成功パスとする。OLS の precedent に従う）。
 - **実データ**: Wooldridge `mroz`の`hours`（生スケール、左打ち切り約43%、Example 17.2）。非クラスターの
   4 cov_type で数値照合する。`TOBIT_MROZ_FORMULA`は RHS 7変数で`G=2 <= q=7`のためクラスターケース
   （`city`列）は`InsufficientClustersForInference`（`ValidationError`）になり成功パスを持たない。

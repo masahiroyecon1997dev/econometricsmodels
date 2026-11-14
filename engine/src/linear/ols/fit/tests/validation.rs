@@ -6,7 +6,6 @@ use crate::linear::ols::CovType;
 use crate::linear::ols::OlsEstimator;
 use crate::linear::ols::OlsInput;
 use crate::shared::error::CommonError;
-use crate::shared::error::MatrixKind;
 
 #[test]
 fn fit_returns_perfect_fit_for_exact_fit_data() {
@@ -120,42 +119,42 @@ fn fit_returns_singular_matrix_for_perfectly_collinear_columns() {
     );
 }
 
+/// 列の単位を変えても（`x1`は1e6倍、`x2`は1e-3倍）、F統計量・p値は単位を揃えたときと
+/// 一致する（傾き係数間の分散の比は1e18を超えるが、悪条件の判定は相関スケール化した行列で
+/// 行う。`x1`・`x2`・`x3`は線形従属ではない）。
 #[test]
-fn fit_returns_computation_failed_for_extreme_scale_difference_in_f_test() {
-    // x1は1e6オーダー、x2は1e-3オーダーとスケールが極端に異なる（x3は通常
-    // スケール）。x1・x2・x3は互いに線形従属ではないため設計行列自体は
-    // フルランク（SingularMatrixにはならない）だが、傾き係数の同時共分散
-    // 部分行列（wald_f_testが使う3x3部分行列）の条件数がスケール比の2乗
-    // （≈1e18）相当となり倍精度の限界を超える
-    // （ensure_well_conditioned_symmetric_matrixで検出）。
+fn fit_f_test_is_invariant_to_a_change_of_units() {
     let n = 10;
-    let x1: Vec<f64> = (1..=n).map(|i| 1e6 * (i as f64)).collect();
-    let x2: Vec<f64> = (1..=n).map(|i| 1e-3 * (i as f64).powi(2)).collect();
+    let unit_x1: Vec<f64> = (1..=n).map(|i| i as f64).collect();
+    let unit_x2: Vec<f64> = (1..=n).map(|i| (i as f64).powi(2)).collect();
     let x3: Vec<f64> = (0..n).map(|i| (i % 3) as f64).collect();
     let y: Vec<f64> = (0..n)
         .map(|i| {
             let noise = if i % 2 == 0 { 1e3 } else { -1e3 };
-            1.0 + 2.0 * x1[i] + 3.0 * x2[i] + 0.5 * x3[i] + noise
+            1.0 + 2.0 * 1e6 * unit_x1[i] + 3.0 * 1e-3 * unit_x2[i] + 0.5 * x3[i] + noise
         })
         .collect();
+    let names = || vec!["x1".to_string(), "x2".to_string(), "x3".to_string()];
+    let fit = |x1_scale: f64, x2_scale: f64| {
+        let x1: Vec<f64> = unit_x1.iter().map(|v| v * x1_scale).collect();
+        let x2: Vec<f64> = unit_x2.iter().map(|v| v * x2_scale).collect();
+        let input =
+            OlsInput::from_columns(&y, &[x1, x2, x3.clone()], names(), true, "y".to_string())
+                .unwrap();
+        OlsEstimator::fit(input, CovType::Classical, 0.95).unwrap()
+    };
 
-    let input = OlsInput::from_columns(
-        &y,
-        &[x1, x2, x3],
-        vec!["x1".to_string(), "x2".to_string(), "x3".to_string()],
-        true,
-        "y".to_string(),
-    )
-    .unwrap();
+    let scaled = fit(1e6, 1e-3);
+    let unscaled = fit(1.0, 1.0);
 
-    let result = OlsEstimator::fit(input, CovType::Classical, 0.95);
-
-    assert!(matches!(
-        result.unwrap_err(),
-        LeastSquaresError::Common(CommonError::NearSingularMatrix {
-            matrix: MatrixKind::CoefficientCovariance
-        })
-    ));
+    let (f_scaled, f_unscaled) = (
+        scaled.f_statistic().unwrap(),
+        unscaled.f_statistic().unwrap(),
+    );
+    assert!(f_scaled.is_finite() && f_scaled > 0.0);
+    assert!((f_scaled / f_unscaled - 1.0).abs() < 1e-9);
+    let (p_scaled, p_unscaled) = (scaled.f_p_value().unwrap(), unscaled.f_p_value().unwrap());
+    assert!((p_scaled - p_unscaled).abs() <= 1e-9 * p_unscaled);
 }
 
 #[test]

@@ -15,10 +15,11 @@ from __future__ import annotations
 # 4つのフィクスチャ生成と、テストが共有する。WLSも同じ合成データセットを使う）。
 # 片方の手法だけシナリオ・cov_typeを増やすときは、この共有リストを直接編集せず
 # `[*NUMERIC_SCENARIOS, "..."]`のように別名で拡張する（全フィクスチャ・テストに波及するため）。
-# 完全な多重共線性・scale_varianceは数値比較の対象外（testing-policy.md「テストの3系統」
-# 参照）で、ComputationErrorが発生することのみをテストコード側で確認する。
-# scale_varianceは傾き係数の同時共分散部分行列がスケール比の2乗相当の条件数を持ち
-# 倍精度の限界を超えるため、wald_f_test側で全cov_typeでComputationErrorになる。
+# 完全な多重共線性・scale_varianceは参照実装との数値比較の対象外（testing-policy.md
+# 「テストの3系統」参照）。完全な多重共線性はComputationErrorが発生することのみ、
+# scale_variance（x1*1e6, x2*1e-3）は失敗せず、単位を揃えたデータと全体F統計量・p値が
+# 一致することをテストコード側で確認する（傾き係数の分散の比は倍精度の閾値を超えるが、
+# wald_f_testは相関スケール化した行列で判定するため）。
 NUMERIC_SCENARIOS = [
     "baseline",
     "small_n",

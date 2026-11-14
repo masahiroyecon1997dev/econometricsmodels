@@ -37,6 +37,7 @@ from _constants import DATA_DIR
 from _error_expectations import escaped
 from _errors import raises_error
 from _fe_helpers import our_fit
+from _helpers import assert_unit_change_invariant
 from _panel_helpers import x_columns
 from _tolerances import TOLERANCES
 from econometricsmodels import (
@@ -47,7 +48,7 @@ from econometricsmodels import (
     ValidationError,
 )
 
-# `test_scale_variance_raises_computation_error`用（OLS/WLS/IVの同名テストと
+# `test_scale_variance_is_invariant_to_the_units`用（OLS/WLS/IVの同名テストと
 # 同じ全cov_type網羅、hc0はFE非対応のため除く）。
 COV_TYPES = ["classical", "hc1", "hc2", "hc3", "cluster"]
 
@@ -931,27 +932,25 @@ def test_perfect_multicollinearity_raises_computation_error(fe_dataset):
 
 
 @pytest.mark.parametrize("cov_type", COV_TYPES)
-def test_scale_variance_raises_computation_error(fe_dataset, cov_type):
-    """変数間のスケールが極端に異なる設計行列（x1を`*1e6`、x2を`*1e-3`）は、
-    傾き係数の共分散部分行列がスケール比の2乗相当の条件数を持ち倍精度浮動
-    小数点の限界を超えて数値的に特異になり、全体F検定が検出して
-    `ComputationError`（`MATRIX_NEAR_SINGULAR`、`matrix="COEFFICIENT_COVARIANCE"`、
-    `stage="OVERALL_F_TEST"`、OLSの同名テストと同じ原理）。G=40>>q=2のため`test_cluster_count_at_most_slopes_raises_
-    validation_error`（G<=q、`ValidationError`）とは別の失敗経路の
-    backstop確認になる。
+def test_scale_variance_is_invariant_to_the_units(fe_dataset, cov_type):
+    """変数間のスケールが極端に異なる設計行列（x1を`*1e6`、x2を`*1e-3`）でも失敗せず、
+    単位を揃えたデータと同じ全体F統計量・p値になり、係数と標準誤差は列の倍率に従う
+    （傾き係数の分散の比は1e18を超えるが、全体F検定は相関スケール化した部分行列で
+    判定する。OLSの同名テストと同じ原理）。G=40>>q=2のため`test_cluster_count_at_most_slopes_raises_
+    validation_error`（G<=q、`ValidationError`）とは別の経路の確認になる。
     """
     df = fe_dataset.with_columns(
         (pl.col("x1") * 1e6).alias("x1"), (pl.col("x2") * 1e-3).alias("x2")
     )
     options = FEOptions(cov_type=cov_type)
-    with raises_error(
-        ErrorCode.MATRIX_NEAR_SINGULAR,
-        matrix="COEFFICIENT_COVARIANCE",
-        stage="OVERALL_F_TEST",
-    ):
-        FE(
-            df, y="y", x=["x1", "x2"], effects=["entity"], options=options
-        ).fit()
+    assert_unit_change_invariant(
+        lambda d: FE(
+            d, y="y", x=["x1", "x2"], effects=["entity"], options=options
+        ).fit(),
+        df,
+        {"x1": 1e6, "x2": 1e-3},
+        stats=("f_statistic", "f_p_value"),
+    )
 
 
 # ── 例外クラスの継承 ──────────────────────────────────────────────────

@@ -20,12 +20,12 @@ use crate::shared::group_codes::GroupCodes;
 /// （`validate_cluster_cov_type` → `validate_cluster_count_covers_slopes`）が
 /// `CommonError::InsufficientClustersForInference`で弾く（
 /// 検証が無ければ`wald_quadratic_form`内の`NearSingularMatrix`になる）。その
-/// `ensure_well_conditioned_symmetric_matrix`側のbackstop（`g > q`だが悪条件で
+/// `ensure_well_conditioned_symmetric_matrix`側のbackstop（`g > q`だが準多重共線性で
 /// 数値的にほぼ特異なケース）は、`wald_f_test`と共有する`wald_quadratic_form`の内部
-/// （純粋な線形代数ユーティリティ）であり、`shared/linear_algebra.rs`の単体テスト・OLSの
-/// `fit_returns_computation_failed_for_extreme_scale_difference_in_f_test`で担保する
-/// （Tobitは`TobitScaling`が`x`を内部で列標準化するため、極端なスケール差による
-/// 悪条件をTobitの`fit()`経由で再現するのが困難で、Tobit固有テストは設けない）。
+/// （相関スケール化した行列の判定）であり、`shared/wald.rs`の単体テスト
+/// （`wald_f_test_rejects_a_near_singular_covariance_submatrix`）・OLSの
+/// `fit_with_optional_f_test_does_not_hide_other_cluster_errors`で担保する。
+/// 列の単位だけでは失敗しない（`tests/cross_method/test_unit_invariance.py`）。
 #[test]
 fn fit_returns_validation_error_when_cluster_count_equals_slopes() {
     let groups = vec![

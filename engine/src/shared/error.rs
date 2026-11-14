@@ -217,7 +217,8 @@ pub enum CommonError {
     InvalidHacLags { hac_lags: i64, n: usize },
 
     /// `matrix`が数値的にほぼ特異で、推定量や共分散の計算を続けられない（条件数が倍精度の限界を
-    /// 超える。列のスケール差が極端な場合や、残差が0の完全な当てはまり等）。
+    /// 超える。傾き係数がほぼ共線な場合、Gram行列の列のスケール差が倍精度の限界を超える場合、
+    /// 残差が0の完全な当てはまり等）。
     #[error("{}", self.catalog_message())]
     NearSingularMatrix { matrix: MatrixKind },
 

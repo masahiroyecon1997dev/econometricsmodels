@@ -466,8 +466,8 @@ def test_no_intercept_cluster_matches_linearmodels(fixtures):
     )
 
 
-# 完全な多重共線性・極端なスケール差（`ComputationError` パス）は
-# `test_iv_validation.py`で確認する。
+# 完全な多重共線性（`ComputationError` パス）と、極端なスケール差でも失敗しないこと
+# （単位を揃えたデータと一致）は`test_iv_validation.py`で確認する。
 
 
 @pytest.mark.parametrize("cov_type", LINEARMODELS_COV_TYPES)

@@ -154,7 +154,7 @@ classical / HC0〜HC3 / HAC / cluster の定義式、検定分布、自由度の
   判定できるため、行列計算を待たず`fit()`冒頭で`InsufficientClustersForInference`
   （`ValidationError`）として弾く。「クラスタ数境界の成功パス」のテストは`G > q`（厳密不等号）を
   保つ必要がある。OLS/WLS/Tobit/Logit/Probit/IV(2SLS,GMM)横断で統一。
-  - `G > q`でも傾き係数間の悪条件（極端なスケール差・準多重共線性等）で`q×q`部分行列が数値的に
+  - `G > q`でも傾き係数間の準多重共線性（単位を揃えても残る悪条件）で`q×q`部分行列が数値的に
     ほぼ特異になるケースは事前判定できないため、`ensure_well_conditioned_symmetric_matrix`による
     `ComputationError`（次節）がbackstopとして残る。
 - `G < 2`は`InsufficientClusters`で検証（0除算によるNaN伝播・パニックを防ぐため）。
@@ -164,12 +164,22 @@ classical / HC0〜HC3 / HAC / cluster の定義式、検定分布、自由度の
 - R²・調整済みR²・対数尤度・AIC/BIC・F統計量の定義式は[`docs/methods/ols.md`](../methods/ols.md)。
   R²の総平方和は`include_intercept`で中心化/非中心化を切り替える（statsmodelsの`k_constant`分岐と一致）。
   F統計量は`cov_type`によらず単一の式で、`q=0`は`f64::NAN`（0除算回避）。
-- **`Σ`が数値的にほぼ特異な場合の検出**: 変数間のスケールが極端に異なる設計行列では、`Σ`の条件数が
+- **`Σ`が数値的にほぼ特異な場合の検出**: 傾き係数が準共線の設計行列では、`Σ`の条件数が
   倍精度の限界を超えるが非ピボットCholesky分解自体は失敗せず無意味なF統計量を返しうる
   （実測でstatsmodelsとの相対誤差5e10程度）。`ensure_well_conditioned_symmetric_matrix`
   （`crate::shared::linear_algebra`、nonlinear系統とも共有）が`SelfAdjointEigen`で実際の固有値を求め、
   最大固有値との相対比で判定しCholesky分解前に`CommonError::NearSingularMatrix`
   （`matrix=COEFFICIENT_COVARIANCE`、`code`は`MATRIX_NEAR_SINGULAR`、`ComputationError`）で止める。
+  **判定と二次形式は`Σ`ではなく、相関スケール化した`C = D^{-1/2} Σ D^{-1/2}`（`D = diag(Σ)`）で行う**
+  （`shared::wald::wald_quadratic_form`）。`β'Σ⁻¹β = z'C⁻¹z`（`z = D^{-1/2}β`）は同じ値で、列の単位を
+  変えても`C`と`z`は変わらない。`Σ`の固有値で判定していた間は、1列を`1e9`倍するだけ（傾き係数の
+  分散の比が`1/(k·ε)`≈2e15を超える）で、係数も標準誤差も計算できるデータが失敗した（OLS・WLS・FE・
+  RE・Tobit・IV・FEIV。Logit・Probitは内部で標準化し全体Wald検定を持たないため影響なし）。
+  対角が正の有限値でない（ゼロ行列・負の分散）ときは`C`を作れず、同じく`NearSingularMatrix`にする。
+  列の単位とは関係なく、`hc1`・`cluster`のサンドイッチ共分散`B M B`は傾きの相関が約`1 - 1e-11`
+  より高いと（データ依存）桁落ちで数値的に正定値でなくなり、相関スケール化しても止まる（classicalは通る）。
+  これは`wald_f_test`が`cov_params`を入力に取る限り避けられず、`Rβ`と直交座標のミートから二次形式を
+  直接求める別の計算経路が要る（`tests/cross_method/test_unit_invariance.py`で現状の境界を固定）。
 - **被説明変数が定数（`OUTCOME_CONSTANT`）**: 切片のあるモデルで`y`が（丸め誤差の範囲で）全行で
   同じ値だと、中心化した総平方和が0でR²が定義できない。入力だけから分かるので、QR分解より前に
   `ValidationError`にする。切片なしのモデルでは定数でも非中心化の総平方和が正なので対象外。

@@ -70,10 +70,10 @@ pub(crate) fn validate_cluster_groups(
 /// `q == 0`（切片のみモデル、全体検定自体がスキップされる）のときは`g >= 2 > 0 = q`
 /// により常に`Ok`を返す（Wald検定が走らないため弾く必要がない）。
 ///
-/// `g > q`でも、傾き係数間の悪条件（極端なスケール差・準多重共線性等）で`q×q`部分
+/// `g > q`でも、傾き係数間の準多重共線性（単位を揃えても残る悪条件）で`q×q`部分
 /// 行列が数値的にほぼ特異になるケースは事前判定できないため、従来どおり各手法の
-/// Wald検定内の`ensure_well_conditioned_symmetric_matrix`（`CommonError::
-/// NearSingularMatrix`）がbackstopとして残る。
+/// Wald検定内の`ensure_well_conditioned_symmetric_matrix`（相関スケール化した行列に
+/// 適用。`CommonError::NearSingularMatrix`）がbackstopとして残る。
 pub fn validate_cluster_count_covers_slopes(g: usize, q: usize) -> Result<(), CommonError> {
     debug_assert!(
         g >= 2,

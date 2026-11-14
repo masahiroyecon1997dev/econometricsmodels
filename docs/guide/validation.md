@@ -299,7 +299,7 @@ These are in addition to the situations above.
 | Cause | Where | What it means |
 |---|---|---|
 | Perfect multicollinearity | All methods | The design matrix is singular and the error names the columns that take part in one dependency (`columns`; only the first dependency is reported, see [Error codes](error-codes.md#collinear-columns)). Details by method are under the table. |
-| Near-singular matrices | All methods | A matrix needed for the covariance or a joint test is numerically singular, typically because regressors are on extremely different scales (for example `1e6` and `1e-3`) or because of an almost perfect linear dependence. Rescale the variables. |
+| Near-singular matrices | All methods | A matrix needed for the covariance or a joint test is numerically singular, typically because of an almost perfect linear dependence between regressors. The overall F or Wald statistic is judged on the correlations of the slope coefficients, so measuring one regressor in other units (for example `1e9` times larger) does not trigger it. Robust covariances (for example `"hc1"` or `"cluster"`) can stop at a weaker dependence than `"classical"`: the limit depends on the data, but in one FE test with 60 entities `"cluster"` stopped at a correlation of `1 - 5e-15` between two slopes (and worked at `1 - 5e-11`) while `"classical"` still worked. Remove or combine nearly collinear regressors. |
 | Non-convergence | Logit, Probit, Tobit | The optimizer did not converge within `max_iter`. |
 | Singular Hessian or OPG matrix | Logit, Probit, Tobit | The information matrix cannot be inverted. |
 | Uncensored interval too narrow | Tobit (`predict()`, `augment()`, `marginal_effects()` with `target="expected_uncensored"`) | With two-sided censoring, the interval between the bounds is narrower than 1% of the estimated `sigma`, so the model puts almost no probability on uncensored values and the expected value among them cannot be computed reliably. Use another `target`. |
@@ -329,7 +329,7 @@ The residual sum of squares is at most `k · ε` times the total sum of squares 
 - **OLS, WLS:** the regression.
 - **FE:** the within regression.
 - **FEIV:** the structural residuals of the within-transformed data and each first stage. `wu_hausman_statistic` is `None` instead when only its auxiliary regression is exact.
-- **RE:** the within regression that estimates the idiosyncratic variance. Just above the threshold RE can still raise `MATRIX_NEAR_SINGULAR` (stage `QUASI_DEMEANED_REGRESSION`), because the idiosyncratic variance is then so small that the quasi-demeaned constant column is almost zero.
+- **RE:** the within regression that estimates the idiosyncratic variance. Just above the threshold RE still estimates: `theta` is then almost 1, so the slopes are almost the within (FE) slopes.
 - **IV:** the structural residuals (GMM: the initial estimate) and each first stage (an instrument that predicts an endogenous regressor exactly). `wu_hausman_statistic` is `None` instead when only its augmented regression is exact.
 
 How the cause is reported can depend on the estimator and on the solver. For instance, separated data in a binary-choice model may surface as detected separation, as non-convergence or as a singular Hessian, because the optimizer can fail before the separation check runs.

@@ -26,8 +26,8 @@ pub(super) struct WuHausmanTest {
 /// 第二段階は成功するが拡張回帰は`InsufficientObservations`になりうる。また
 /// 構造式の`y`が第二段階の説明変数と第一段階残差で（丸め誤差の範囲で）厳密に
 /// 説明される入力は、拡張回帰が完全フィット（`PerfectFit`）になり、`sigma^2`が0で
-/// ワルド統計量が定義できない。変数間のスケール差等では`wald_test_last_columns`側が
-/// `NearSingularMatrix`になりうる。`SingularMatrix`（残差列が他の列と共線）は、第一段階が
+/// ワルド統計量が定義できない。傾き係数間の準多重共線性等では`wald_test_last_columns`側が
+/// `NearSingularMatrix`になりうる（列の単位だけでは起きない）。`SingularMatrix`（残差列が他の列と共線）は、第一段階が
 /// 完全フィットで先に止まり第二段階の列も独立なため通常は起きないが、防御として同じ扱いにする。
 /// さらに`cov_type=Cluster`では、構造式の傾き係数の数`q`が`fit()`冒頭のチェックを
 /// 通っていても、拡張回帰は残差列の分だけ`q`が増える（`q_aug = q + k_endog`）ため

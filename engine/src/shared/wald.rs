@@ -24,7 +24,20 @@ use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 /// 増幅され、相対誤差1e-7に達する（RE相関の強い2列×Driscoll-Kraayのハウスマン検定で実測、
 /// 上三角を使うと逆符号で同じ大きさ）。両側の平均を取ると入力の丸め誤差程度（3e-9）に戻る。
 ///
-/// `Σ`の逆行列はCholesky分解（`Llt`）で求める。classical/HC0-3/HACでは`Σ`は
+/// 検定対象の係数の単位（列のスケール）に依存しないよう、`Σ`ではなく相関スケール化した
+/// `C = D^{-1/2} Σ D^{-1/2}`（`D = diag(Σ)`、対角が1）で悪条件の判定も二次形式も計算する。
+/// `β'Σ⁻¹β = z'C⁻¹z`（`z = D^{-1/2}β`）は厳密な演算では同じ値で、列を定数倍して単位を
+/// 変えても`C`と`z`は変わらない。`Σ`の固有値で判定すると、単位を変えるだけで列間の分散の比が
+/// `1/(k·ε)`（約2e15）を超え、係数も標準誤差も計算できるデータが失敗した。`ε`・`k`は
+/// `ensure_well_conditioned_symmetric_matrix`の閾値（`k·ε·max|固有値|`）をそのまま使うが、
+/// 対象が`C`なので閾値は単位に依らない（`C`の固有値の和は`df_model`で、最大固有値は
+/// 1以上`df_model`以下）。
+///
+/// `Σ`の対角が正の有限値でなければ（ゼロ行列・負の分散・非有限値）`C`が作れず、
+/// そのまま`NearSingularMatrix`にする。`C`の最小固有値が閾値以下なら、スケールを揃えても
+/// ほぼ共線な係数の組があるため、同じく`NearSingularMatrix`で止める。
+///
+/// `C`の逆行列はCholesky分解（`Llt`）で求める。classical/HC0-3/HACでは`Σ`は
 /// （`cov_params`全体の）正定値行列の主小行列であり理論上必ず正定値のため、`xtx_inverse`と
 /// 同様、浮動小数点演算の丸めによる境界的な失敗に備えて`NearSingularMatrix`に変換している。
 ///
@@ -38,40 +51,64 @@ use crate::shared::linear_algebra::ensure_well_conditioned_symmetric_matrix;
 /// この関数の`ensure_well_conditioned_symmetric_matrix`（`crate::shared::linear_algebra`、
 /// 固有値分解ベースの相対閾値判定。系統をまたいで共有する純粋な線形代数ユーティリティ、
 /// `.claude/rules/rust-style.md`「全手法で共有するロジック」参照）は、事前検証をすり抜ける
-/// ケース——`g > q`だが傾き係数間の悪条件（極端なスケール差・準多重共線性等）で
-/// `q×q`部分行列の条件数が倍精度の限界を超える場合——の**backstop**として残る
-/// （`fit_returns_computation_failed_for_extreme_scale_difference_in_f_test`で固定）。
-/// Cholesky分解（非ピボット）は数値的にほぼ特異な行列でも失敗せず桁違いに巨大な
-/// 統計量を黙って返しうるため、`Llt`分解の**前**にこのチェックを置き
-/// `NearSingularMatrix`で止める。`Llt`分解自体の`map_err`は、両方のチェックを
-/// すり抜けるごく僅かな境界ケースに備えた防御的なフォールバック。
+/// ケース——`g > q`だが傾き係数間の準多重共線性で`C`が倍精度の限界を超えてほぼ特異になる
+/// 場合——の**backstop**として残る（`wald_f_test_rejects_a_near_singular_covariance_submatrix`で
+/// 固定）。Cholesky分解（非ピボット）は数値的にほぼ特異な行列でも失敗せず桁違いに巨大な統計量を
+/// 黙って返しうるため、`Llt`分解の**前**にこのチェックを置き`NearSingularMatrix`で止める。
+/// 固有値の判定は絶対値で行うため、桁落ちで`C`が正定値でなくなった場合（`hc1`・`cluster`の
+/// サンドイッチ共分散で傾きの相関が極端に高いとき。相関が1を超える）は、この判定を通って
+/// `Llt`分解の`map_err`が止める。
 pub(crate) fn wald_quadratic_form(
     params: &Mat<f64>,
     cov_params: &Mat<f64>,
     k_constant: usize,
     df_model: usize,
 ) -> Result<f64, CommonError> {
-    let beta_slopes = Mat::from_fn(df_model, 1, |i, _| *params.get(i + k_constant, 0));
-    let v_slopes = Mat::from_fn(df_model, df_model, |i, j| {
+    let near_singular = || CommonError::NearSingularMatrix {
+        matrix: MatrixKind::CoefficientCovariance,
+    };
+    let v_slopes = |i: usize, j: usize| {
         0.5 * (*cov_params.get(i + k_constant, j + k_constant)
             + *cov_params.get(j + k_constant, i + k_constant))
+    };
+
+    // 標準偏差`sd_i = √Σ_ii`。単位を変えても`β_i/sd_i`と`C`は変わらない。非対角・係数の
+    // 非有限値は対角の検査ではわからないので、`C`と`z`を作った後にも確かめる。
+    let mut sds = Vec::with_capacity(df_model);
+    for i in 0..df_model {
+        let variance = v_slopes(i, i);
+        if !(variance.is_finite() && variance > 0.0) {
+            return Err(near_singular());
+        }
+        sds.push(variance.sqrt());
+    }
+    let correlation = Mat::from_fn(df_model, df_model, |i, j| {
+        if i == j {
+            1.0
+        } else {
+            // 積`sd_i·sd_j`は分散が極端に小さいと0やサブノーマルになるので、順に割る。
+            v_slopes(i, j) / sds[i] / sds[j]
+        }
     });
+    let z = Mat::from_fn(df_model, 1, |i, _| *params.get(i + k_constant, 0) / sds[i]);
+    let is_finite = (0..df_model).all(|i| {
+        (0..df_model).all(|j| correlation.get(i, j).is_finite()) && z.get(i, 0).is_finite()
+    });
+    if !is_finite {
+        return Err(near_singular());
+    }
 
     ensure_well_conditioned_symmetric_matrix(
-        &v_slopes,
+        &correlation,
         df_model,
         MatrixKind::CoefficientCovariance,
     )?;
 
-    let llt = v_slopes
-        .llt(Side::Lower)
-        .map_err(|_| CommonError::NearSingularMatrix {
-            matrix: MatrixKind::CoefficientCovariance,
-        })?;
-    let v_slopes_inv_beta = llt.solve(&beta_slopes);
+    let llt = correlation.llt(Side::Lower).map_err(|_| near_singular())?;
+    let correlation_inv_z = llt.solve(&z);
 
     Ok((0..df_model)
-        .map(|i| (*beta_slopes.get(i, 0)) * (*v_slopes_inv_beta.get(i, 0)))
+        .map(|i| (*z.get(i, 0)) * (*correlation_inv_z.get(i, 0)))
         .sum())
 }
 
@@ -202,19 +239,121 @@ mod tests {
     }
 
     #[test]
-    fn wald_f_test_rejects_a_near_singular_covariance_submatrix() {
-        // 対角のスケール比が1e18（倍精度の限界超え）。非ピボットCholeskyでは検出できず、
-        // 固有値ベースの判定（`ensure_well_conditioned_symmetric_matrix`）で弾く。
+    fn wald_f_test_is_invariant_to_the_units_of_the_regressors() {
+        // 対角のスケール比が1e18（倍精度の閾値`1/(k·ε)`を超える）でも、相関は0なので
+        // 良条件。二次形式は`1/1e12 + 1/1e-6`ではなく、単位を揃えた値と同じになる。
+        // β=(1, 1)、Σ=diag(1e12, 1e-6) → wald = 1e-12 + 1e6、F = wald/2。
         let params = Mat::from_fn(2, 1, |_, _| 1.0);
         let ill = Mat::from_fn(2, 2, |i, j| if i == j { [1e12, 1e-6][i] } else { 0.0 });
-        assert!(matches!(
-            wald_f_test(&params, &ill, 0, 2, 30),
-            Err(CommonError::NearSingularMatrix { .. })
-        ));
+        let (f, _) = wald_f_test(&params, &ill, 0, 2, 30).unwrap();
+        assert!((f / ((1e-12 + 1e6) / 2.0) - 1.0).abs() < 1e-14);
 
+        // 相関のある共分散でも、列の単位を`c`倍するとβ・Σは`c`倍・`c²`倍になり、統計量は
+        // 変わらない。2列目だけ1e-9倍・1e9倍して比べる。
+        let base_params = Mat::from_fn(3, 1, |i, _| [0.7, 1.3, -0.4][i]);
+        let base_cov = Mat::from_fn(3, 3, |i, j| match (i, j) {
+            (0, 0) => 2.0,
+            (1, 1) => 3.0,
+            (2, 2) => 1.5,
+            (0, 1) | (1, 0) => 0.9,
+            (0, 2) | (2, 0) => -0.3,
+            _ => 0.6,
+        });
+        let (f_base, p_base) = wald_f_test(&base_params, &base_cov, 0, 3, 40).unwrap();
+        for scale in [1e-9, 1e-6, 1e6, 1e9] {
+            let unit = |i: usize| if i == 1 { scale } else { 1.0 };
+            let params = Mat::from_fn(3, 1, |i, _| *base_params.get(i, 0) / unit(i));
+            let cov = Mat::from_fn(3, 3, |i, j| *base_cov.get(i, j) / (unit(i) * unit(j)));
+            let (f, p) = wald_f_test(&params, &cov, 0, 3, 40).unwrap();
+            assert!((f / f_base - 1.0).abs() < 1e-12, "scale={scale}");
+            assert!((p / p_base - 1.0).abs() < 1e-10, "scale={scale}");
+        }
+    }
+
+    #[test]
+    fn wald_f_test_rejects_a_near_singular_covariance_submatrix() {
+        let params = Mat::from_fn(2, 1, |_, _| 1.0);
+
+        // ゼロ行列は対角が正でないため相関行列が作れない。
         let zero = Mat::<f64>::zeros(2, 2);
         assert!(matches!(
             wald_f_test(&params, &zero, 0, 2, 30),
+            Err(CommonError::NearSingularMatrix { .. })
+        ));
+
+        // 相関が1（第2列は第1列の定数倍）。スケールが極端に異なっていても、単位を揃えると
+        // 完全に共線なので弾く（対角の比1e18・相関1）。
+        let collinear = Mat::from_fn(2, 2, |i, j| match (i, j) {
+            (0, 0) => 1e12,
+            (1, 1) => 1e-6,
+            _ => 1e3,
+        });
+        assert!(matches!(
+            wald_f_test(&params, &collinear, 0, 2, 30),
+            Err(CommonError::NearSingularMatrix { .. })
+        ));
+
+        // 単位を揃えても相関が`1 - 1e-16`（倍精度の限界）なら弾く。
+        let nearly = Mat::from_fn(2, 2, |i, j| if i == j { 4.0 } else { 4.0 * (1.0 - 1e-16) });
+        assert!(matches!(
+            wald_f_test(&params, &nearly, 0, 2, 30),
+            Err(CommonError::NearSingularMatrix { .. })
+        ));
+
+        // 負・非有限の分散も相関に直せない。
+        let negative = Mat::from_fn(2, 2, |i, j| if i == j { [1.0, -1.0][i] } else { 0.0 });
+        assert!(matches!(
+            wald_f_test(&params, &negative, 0, 2, 30),
+            Err(CommonError::NearSingularMatrix { .. })
+        ));
+        let nan = Mat::from_fn(2, 2, |i, j| if i == j { [1.0, f64::NAN][i] } else { 0.0 });
+        assert!(matches!(
+            wald_f_test(&params, &nan, 0, 2, 30),
+            Err(CommonError::NearSingularMatrix { .. })
+        ));
+    }
+
+    #[test]
+    fn wald_f_test_accepts_a_highly_correlated_but_resolvable_covariance() {
+        // 相関`r = 1 - 1e-10`（条件数約1e10）は倍精度の限界（約9e-16）よりずっと内側なので通す。
+        // 2×2の相関行列`[[1, r], [r, 1]]`の二次形式は`(z1² - 2r·z1·z2 + z2²)/(1 - r²)`。
+        // 分散は単位を変えた値（1e8・1e-8）にして、相関スケール化も同時に確かめる。
+        let r = 1.0 - 1e-10;
+        let (sd1, sd2) = (1e4_f64, 1e-4_f64);
+        let cov = Mat::from_fn(2, 2, |i, j| match (i, j) {
+            (0, 0) => sd1 * sd1,
+            (1, 1) => sd2 * sd2,
+            _ => r * sd1 * sd2,
+        });
+        let params = Mat::from_fn(2, 1, |i, _| [3.0 * sd1, 1.0 * sd2][i]);
+        let (z1, z2) = (3.0, 1.0);
+        let expected = (z1 * z1 - 2.0 * r * z1 * z2 + z2 * z2) / (1.0 - r * r);
+        let (f, _) = wald_f_test(&params, &cov, 0, 2, 30).unwrap();
+        assert!((f * 2.0 / expected - 1.0).abs() < 1e-5, "{f} {expected}");
+
+        // 3個の傾きのうち1組だけがほぼ共線（`r = 1 - 1e-13`、倍精度の限界の内側）でも通る。
+        let r3 = 1.0 - 1e-13;
+        let cov3 = Mat::from_fn(3, 3, |i, j| match (i, j) {
+            (0, 1) | (1, 0) => r3,
+            (i, j) if i == j => 1.0,
+            _ => 0.0,
+        });
+        let params3 = Mat::from_fn(3, 1, |_, _| 1.0);
+        assert!(wald_f_test(&params3, &cov3, 0, 3, 30).is_ok());
+    }
+
+    #[test]
+    fn wald_f_test_rejects_non_finite_entries_outside_the_diagonal() {
+        let params = Mat::from_fn(2, 1, |_, _| 1.0);
+        let off_diagonal_nan = Mat::from_fn(2, 2, |i, j| if i == j { 1.0 } else { f64::NAN });
+        assert!(matches!(
+            wald_f_test(&params, &off_diagonal_nan, 0, 2, 30),
+            Err(CommonError::NearSingularMatrix { .. })
+        ));
+        let cov = Mat::from_fn(2, 2, |i, j| if i == j { 1.0 } else { 0.0 });
+        let nan_params = Mat::from_fn(2, 1, |i, _| [1.0, f64::NAN][i]);
+        assert!(matches!(
+            wald_f_test(&nan_params, &cov, 0, 2, 30),
             Err(CommonError::NearSingularMatrix { .. })
         ));
     }
@@ -254,11 +393,15 @@ mod tests {
     }
 
     #[test]
-    fn wald_chi2_test_rejects_a_near_singular_covariance_submatrix() {
+    fn wald_chi2_test_is_invariant_to_the_units_and_rejects_a_near_singular_submatrix() {
         let params = Mat::from_fn(2, 1, |_, _| 1.0);
         let ill = Mat::from_fn(2, 2, |i, j| if i == j { [1e12, 1e-6][i] } else { 0.0 });
+        let (wald, _) = wald_chi2_test(&params, &ill, 0, 2).unwrap();
+        assert!((wald / (1e-12 + 1e6) - 1.0).abs() < 1e-14);
+
+        let collinear = Mat::from_fn(2, 2, |_, _| 4.0);
         assert!(matches!(
-            wald_chi2_test(&params, &ill, 0, 2),
+            wald_chi2_test(&params, &collinear, 0, 2),
             Err(CommonError::NearSingularMatrix { .. })
         ));
     }

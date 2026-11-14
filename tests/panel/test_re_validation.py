@@ -25,9 +25,10 @@ Note:
     **RE固有の重要な注意（σ_ε²用の内部1-way FE呼び出し vs ハウスマン検定用の
     内部FE呼び出しの違い）**: RE自身の`swamy_arora_variance_components`
     （σ_ε²推定）は常に1-way・`x`全体を使う内部FE呼び出しに委譲するため、
-    singleton entity・within変換後の分散ゼロ・完全な多重共線性・極端な
-    スケール差はすべて**この内部FE呼び出しが真っ先に失敗し`RE.fit()`自体が
-    例外を送出する**（`REResults`クラスdocstring参照、`FeEstimator::fit`の
+    singleton entity・within変換後の分散ゼロ・完全な多重共線性は
+    すべて**この内部FE呼び出しが真っ先に失敗し`RE.fit()`自体が
+    例外を送出する**（極端なスケール差だけでは失敗しない。内部FEの全体F検定が相関スケール化した
+    行列で判定するため、単位を揃えたデータと同じ結果になる）（`REResults`クラスdocstring参照、`FeEstimator::fit`の
     失敗がそのまま伝播するため`WithinRegressionFailed`のメッセージ文言に
     なる）。ハウスマン検定はこのFE推定量を再利用するため、
     単独で失敗するケースは無い（`hausman_*`が`None`になるのは検定できる傾き係数が
@@ -43,6 +44,7 @@ import pytest
 from _constants import DATA_DIR
 from _error_expectations import escaped
 from _errors import raises_error
+from _helpers import assert_unit_change_invariant
 from _panel_helpers import x_columns
 from _re_helpers import our_fit_re
 from econometricsmodels import (
@@ -729,26 +731,24 @@ def test_perfect_multicollinearity_raises_computation_error(fe_dataset):
 @pytest.mark.parametrize(
     "cov_type", ["classical", "hc1", "hc2", "hc3", "cluster"]
 )
-def test_scale_variance_raises_computation_error(fe_dataset, cov_type):
-    """変数間のスケールが極端に異なる設計行列（x1を`*1e6`、x2を`*1e-3`）は、
-    σ_ε²推定が委譲する内部1-way FE推定自身のF検定
-    （`OlsEstimator::fit`が常に計算する）が数値的に特異になり
-    `ComputationError`（`MATRIX_NEAR_SINGULAR`、`matrix="COEFFICIENT_COVARIANCE"`、
-    `stage="VARIANCE_COMPONENT_WITHIN_REGRESSION"`、FEの同名テストと同じ原理で
-    σ_ε²側が先に失敗する）。
+def test_scale_variance_is_invariant_to_the_units(fe_dataset, cov_type):
+    """変数間のスケールが極端に異なる設計行列（x1を`*1e6`、x2を`*1e-3`）でも失敗せず、
+    単位を揃えたデータと同じ全体F統計量・p値になり、係数と標準誤差は列の倍率に従う。
+    σ_ε²推定が委譲する内部1-way FE推定自身のF検定も、相関スケール化した部分行列で
+    判定するため単位に依らない（FEの同名テストと同じ原理）。
     """
     df = fe_dataset.with_columns(
         (pl.col("x1") * 1e6).alias("x1"), (pl.col("x2") * 1e-3).alias("x2")
     )
     options = REOptions(cov_type=cov_type)
-    with raises_error(
-        ErrorCode.MATRIX_NEAR_SINGULAR,
-        matrix="COEFFICIENT_COVARIANCE",
-        stage="VARIANCE_COMPONENT_WITHIN_REGRESSION",
-    ):
-        RE(
-            df, y="y", x=["x1", "x2"], effects=["entity"], options=options
-        ).fit()
+    assert_unit_change_invariant(
+        lambda d: RE(
+            d, y="y", x=["x1", "x2"], effects=["entity"], options=options
+        ).fit(),
+        df,
+        {"x1": 1e6, "x2": 1e-3},
+        stats=("f_statistic", "f_p_value"),
+    )
 
 
 # ── 例外クラスの継承 ──────────────────────────────────────────────────

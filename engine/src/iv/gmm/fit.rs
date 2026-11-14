@@ -2,20 +2,19 @@
 //!
 //! テストは`fit/tests.rs`と`fit/tests/`にテーマ別で置く（`basic`・`reference`・`cov_type`・`validation`・`proptests`等）。
 
-use faer::Mat;
 use statrs::distribution::Normal;
 
 use super::GmmEstimator;
+use super::GmmType;
 use super::hansen_j::hansen_j_test;
-use super::iterate::{GmmIteration, GmmType, gmm_iterate, gmm_point_estimate};
 use super::sandwich::{GmmCovariance, sandwich_covariance};
-use super::weight::{WeightType, validate_weight_type};
 use crate::iv::common::{IvError, IvInput, hcat, mat_column_to_vec, validate_iv_fit_inputs};
 use crate::linear::ols::CovType;
 use crate::shared::error::CommonError;
+use crate::shared::gmm_iteration::{GmmInitialStep, GmmIteration, gmm_initial_step, gmm_iterate};
+use crate::shared::gmm_weight::validate_weight_type;
 use crate::shared::goodness_of_fit::{is_perfect_fit, total_sum_of_squares};
 use crate::shared::inference::{InferenceTable, inference_table};
-use crate::shared::validation::{GMM_MAX_ITER_MIN, MAX_ITER_LIMIT};
 use crate::shared::wald::wald_chi2_test;
 
 /// [`GmmEstimator::fit`]の本体。契約（エラー条件を含む）は`fit`のdocコメント参照。
@@ -32,16 +31,7 @@ pub(super) fn fit_gmm(
     if !(confidence_level > 0.0 && confidence_level < 1.0) {
         return Err(CommonError::InvalidConfidenceLevel { confidence_level }.into());
     }
-    if let GmmType::Iterated { max_iter, tol, .. } = &gmm_type {
-        if *max_iter < GMM_MAX_ITER_MIN as usize || *max_iter as u64 > MAX_ITER_LIMIT as u64 {
-            return Err(IvError::InvalidGmmMaxIter {
-                max_iter: *max_iter as i64,
-            });
-        }
-        if !(tol.is_finite() && *tol > 0.0) {
-            return Err(IvError::InvalidGmmTol { gmm_tol: *tol });
-        }
-    }
+    gmm_type.validate()?;
     let n = input.nobs();
     // 観測数（`n <= k`はサンドイッチSE計算のNaN/Infinity、`n <= l`は`Z'Z`の特異または
     // `W₀ = (Z'Z)⁻¹`のGMMがOLSへ縮退するのを防ぐ）・`cov_type=Cluster`のクラスター数
@@ -54,10 +44,7 @@ pub(super) fn fit_gmm(
 
     // 1段階GMMは`weight_type`を持たない（点推定・Hansen Jとも`(Z'Z)⁻¹`のみで計算する）
     // ため検証もしない。2段階・反復では点推定に使う重みの妥当性を検証する。
-    let weight_type: Option<&WeightType> = match &gmm_type {
-        GmmType::OneStep => None,
-        GmmType::TwoStep { weight } | GmmType::Iterated { weight, .. } => Some(weight),
-    };
+    let weight_type = gmm_type.weight_type();
     let l_instruments = input.k_exog() + input.instruments().ncols();
     // `weight_type=Cluster`のグループ（`validate_weight_type`が検証して返す）。`cov_type=Cluster`
     // のグループとは別の入力で、同じ列を指していても別々に渡される。
@@ -68,7 +55,6 @@ pub(super) fn fit_gmm(
 
     // Z = x_exog ++ instruments（全操作変数、docs/spec/iv-spec.md 1.1節）。
     let z = hcat(input.x_exog(), input.instruments());
-    let l = z.ncols();
 
     // X = x_exog ++ x_endog（実際の内生変数。2SLSの第二段階のようなX̂への
     // 置き換えはしない、`gmm.rs`のモジュールdoc参照）。
@@ -79,10 +65,16 @@ pub(super) fn fit_gmm(
 
     let y = input.y();
 
-    // 初期推定: W₀ = (Z'Z)⁻¹（weight_typeによらず共通、2SLSと同じ重み）。
-    let ztz = z.transpose() * &z;
-    let beta0 = gmm_point_estimate(&z, &x, y, &ztz)?;
-    let residuals0 = y - &x * &beta0;
+    // 初期推定: W₀ = (Z'Z)⁻¹（weight_typeによらず共通、2SLSと同じ重み）。`classical_s`は
+    // weight_type=ClassicalのHansen J検定専用の重み行列`σ̂²₀・Z'Z`（`gmm.rs`のモジュールdoc
+    // 「Hansen J過剰識別検定」参照。`σ̂²`によるスケーリングは点推定には不要だがHansen Jには必須。
+    // `OneStep`ではstep-0残差＝最終残差のため、この一箇所の計算で両方のケースをカバーできる）。
+    let GmmInitialStep {
+        ztz,
+        beta: beta0,
+        residuals: residuals0,
+        classical_s,
+    } = gmm_initial_step(&z, &x, y)?;
 
     // 初期推定の残差が丸め誤差の範囲で0なら完全フィット。重み行列`S`が0になって後段の逆行列が
     // 特異になる前に、原因が分かるエラーで止める（`TwoSlsEstimator::fit`と同じ判定）。
@@ -91,14 +83,6 @@ pub(super) fn fit_gmm(
     if is_perfect_fit(ssr0, sst, k) {
         return Err(CommonError::PerfectFit.into());
     }
-
-    // weight_type=ClassicalのHansen J検定専用の重み行列`σ̂²₀・Z'Z`（`gmm.rs`の
-    // モジュールdoc「Hansen J過剰識別検定」参照。`σ̂²`によるスケーリングは点推定には
-    // 不要だがHansen Jには必須）。`σ̂²₀`はstep-0残差から計算する
-    // （`OneStep`ではstep-0残差＝最終残差のため、この一箇所の計算で両方の
-    // ケースをカバーできる）。
-    let sigma2_0: f64 = (0..n).map(|i| (*residuals0.get(i, 0)).powi(2)).sum::<f64>() / (n as f64);
-    let classical_s = Mat::from_fn(l, l, |i, j| sigma2_0 * (*ztz.get(i, j)));
 
     // 方式（`gmm_type`）に応じた回数の再推定（詳細は`gmm_iterate`のdocコメント）。
     let GmmIteration {
@@ -122,9 +106,10 @@ pub(super) fn fit_gmm(
     )?;
 
     if !converged && raise_on_non_convergence {
-        return Err(IvError::GmmNonConvergence {
+        return Err(CommonError::GmmNonConvergence {
             n_iter: n_iter as usize,
-        });
+        }
+        .into());
     }
 
     let hansen_j = hansen_j_test(&input, &z, &residuals, &s_used)?;

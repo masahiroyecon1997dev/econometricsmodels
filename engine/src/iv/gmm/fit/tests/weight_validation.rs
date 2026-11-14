@@ -6,11 +6,11 @@ use crate::iv::common::IvInput;
 use crate::iv::gmm::GmmEstimator;
 use crate::iv::gmm::GmmType;
 use crate::iv::gmm::test_support::*;
-use crate::iv::gmm::weight::WeightType;
 use crate::linear::common::row_time_order;
 use crate::linear::ols::CovType;
 use crate::shared::error::ClusterSetting;
 use crate::shared::error::CommonError;
+use crate::shared::gmm_weight::WeightType;
 use crate::shared::group_codes::GroupCodes;
 
 /// 2段階GMMで`weight_type`が不正（`Cluster`で`groups`未指定）なら
@@ -96,11 +96,11 @@ fn fit_returns_insufficient_clusters_for_weight_matrix_when_overidentified_and_g
     let result = fit_cluster_weighted(2, 2);
     assert_eq!(
         result.unwrap_err(),
-        IvError::InsufficientClustersForWeightMatrix {
+        IvError::Common(CommonError::InsufficientClustersForWeightMatrix {
             g: 2,
             l: 3,
             min_clusters: 3
-        }
+        })
     );
 }
 
@@ -111,11 +111,11 @@ fn fit_returns_insufficient_clusters_for_weight_matrix_when_just_identified_and_
     let result = fit_cluster_weighted(1, 2);
     assert_eq!(
         result.unwrap_err(),
-        IvError::InsufficientClustersForWeightMatrix {
+        IvError::Common(CommonError::InsufficientClustersForWeightMatrix {
             g: 2,
             l: 2,
             min_clusters: 3
-        }
+        })
     );
 }
 

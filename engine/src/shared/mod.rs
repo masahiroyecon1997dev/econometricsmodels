@@ -17,6 +17,8 @@ pub(crate) mod covariance;
 pub(crate) mod design_matrix;
 pub(crate) mod effective_f;
 pub(crate) mod gmm;
+pub(crate) mod gmm_iteration;
+pub(crate) mod gmm_weight;
 pub(crate) mod goodness_of_fit;
 pub(crate) mod inference;
 pub(crate) mod instrumental_variables;

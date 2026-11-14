@@ -7,7 +7,6 @@
 
 use faer::Mat;
 
-use super::weight::hac_moment_covariance;
 use crate::iv::common::IvError;
 use crate::linear::ols::CovType;
 use crate::shared::covariance::{
@@ -16,6 +15,7 @@ use crate::shared::covariance::{
 };
 use crate::shared::error::{ClusterSetting, CommonError};
 use crate::shared::gmm::{gmm_sandwich_covariance, invert_spd};
+use crate::shared::gmm_weight::hac_moment_covariance;
 use crate::shared::group_codes::GroupCodes;
 
 /// [`sandwich_covariance`]の戻り値。

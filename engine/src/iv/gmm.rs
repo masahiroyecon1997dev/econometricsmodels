@@ -29,7 +29,7 @@
 //!    未指定、`Hac`の`lags`範囲外等）は`validate_weight_type`で検証する。
 //! 3. **`GmmType::Iterated { weight, max_iter, tol }`（反復GMM）**: 上記の手続きを、
 //!    係数が`tol`で収束するか、初回推定を含めて`max_iter`回に達するまで繰り返す
-//!    （`max_iter`は3以上。2回以下は`TwoStep`と紛らわしいため`IvError::InvalidGmmMaxIter`）。
+//!    （`max_iter`は3以上。2回以下は`TwoStep`と紛らわしいため`CommonError::InvalidGmmMaxIter`）。
 //!    2-stepと3-step以降でアルゴリズムを分岐させる必要はなく、各ステップで
 //!    「直前の残差からSを再構築→再推定」を繰り返すだけである（`gmm_iterate`参照）。
 //!
@@ -42,7 +42,7 @@
 //! 不安定になることを防ぐための床で、ユーザーが調整する必要は薄い）で収束と判定できた
 //! 時点で早期終了する。`max_iter`回に
 //! 達しても収束しなかった場合、`raise_on_non_convergence=true`（既定）なら
-//! `IvError::GmmNonConvergence`、`false`なら`converged=false`のまま結果を返す
+//! `CommonError::GmmNonConvergence`、`false`なら`converged=false`のまま結果を返す
 //! （`nonlinear::common::run_solver`の`raise_on_non_convergence`と同じ設計、
 //! `engine/src/iv/CLAUDE.md`参照）。`OneStep`/`TwoStep`は収束判定自体を行わないため
 //! `converged`は常に`true`、`n_iter`は実際の推定回数（1・2）。
@@ -206,17 +206,15 @@ use faer::Mat;
 mod c_statistic;
 mod fit;
 mod hansen_j;
-mod iterate;
 mod sandwich;
 #[cfg(test)]
 mod test_support;
-mod weight;
 
+pub use crate::shared::gmm_iteration::GmmType;
+pub use crate::shared::gmm_weight::WeightType;
 pub use c_statistic::{
     CStatistic, CStatisticTarget, compute_c_statistic, weight_type_for_cov_type,
 };
-pub use iterate::GmmType;
-pub use weight::WeightType;
 
 /// GMMの点推定結果・標準誤差・検定統計量（モジュール冒頭のdocコメント
 /// 「標準誤差・検定統計量（`cov_type`対応）」参照）。
@@ -288,10 +286,10 @@ impl GmmEstimator {
     ///   `IvError::Common(CommonError::InsufficientObservations)`
     /// - 観測数`n`が全操作変数の数`l`（`x_exog ++ instruments`、定数項込み）以下（`n > k`でも）:
     ///   `IvError::InsufficientObservationsForFirstStage`（`validate_iv_fit_inputs`）
-    /// - `Iterated`の`max_iter`が3未満: `IvError::InvalidGmmMaxIter`
-    /// - `Iterated`の`tol`が正の有限値でない（0以下・NaN・inf）: `IvError::InvalidGmmTol`
+    /// - `Iterated`の`max_iter`が3未満: `CommonError::InvalidGmmMaxIter`
+    /// - `Iterated`の`tol`が正の有限値でない（0以下・NaN・inf）: `CommonError::InvalidGmmTol`
     /// - `raise_on_non_convergence=true`かつ`Iterated`が`max_iter`回
-    ///   以内に収束しなかった: `IvError::GmmNonConvergence`
+    ///   以内に収束しなかった: `CommonError::GmmNonConvergence`
     /// - 識別の順序条件`len(instruments) >= len(x_endog)`を満たさない:
     ///   `IvError::InsufficientInstruments`
     /// - `TwoStep`/`Iterated`の`weight`が`Hac`で`lags`が不正: `CommonError::InvalidHacLags`
@@ -300,7 +298,7 @@ impl GmmEstimator {
     ///   `CommonError::InsufficientClusters)`
     /// - `TwoStep`/`Iterated`の`weight`が`Cluster`でクラスター数`g`が全操作変数の数`l`に対して不足
     ///   （過剰識別は`g < l`、丁度識別（`l == k`）は`g <= l`）:
-    ///   `IvError::InsufficientClustersForWeightMatrix`（重み行列`S`（l×l）が構造的に
+    ///   `CommonError::InsufficientClustersForWeightMatrix`（重み行列`S`（l×l）が構造的に
     ///   特異。`validate_weight_type`で検証する）
     /// - `Z'Z`または`X'WX`型のブレッド行列が（数値的に）特異（上記の`g`と`l`の関係で
     ///   事前に弾けない悪条件のbackstop）:

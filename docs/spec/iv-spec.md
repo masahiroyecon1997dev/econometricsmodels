@@ -175,7 +175,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
   蓄積と小標本補正、HACラグ数の解決、Wald二次形式）は`shared::covariance`・`shared::wald`に
   一本化する（加算順・`Par::Seq`の指定・対称化といった数値上の判断を1か所に固定するため）。
   Wald二次形式（対称化込み）も共有版（`wald_f_test`・`wald_chi2_test`）を使う。
-  OLS固有の調整はここに持ち込まない。GMMのモーメント共分散行列（`gmm/weight.rs`）と`cov_type`用の
+  OLS固有の調整はここに持ち込まない。GMMのモーメント共分散行列（`shared/gmm_weight.rs`）と`cov_type`用の
   `Ω̂`（`gmm/sandwich.rs`）も同じ共有関数を`Z`で呼ぶ（`iv/CLAUDE.md`「共分散・検定の共有範囲」参照）。
 - **GMMのSEサンドイッチは常に一般形**: `Avar(β̂) = B⁻¹(X'ZWΩ̂WZ'X)B⁻¹`
   （`B=X'ZWZ'X`、`W=S_used⁻¹`は点推定に実際に使った重み）。`gmm_weight_type`と`cov_type`は
@@ -210,7 +210,7 @@ IV（操作変数法: 2SLS/GMM）の確定済み仕様。`engine/src/iv/`（`two
 - **GMMの`gmm_weight_type="cluster"`の重み行列`S`（l×l、全操作変数の本数`l`）が`G<l`で
   特異になる問題は別軸**（`cov_type=Cluster`の`G<=q`とは対象・閾値が異なる）。
   過剰識別（`l>k`）は`G<l`、丁度識別（`l==k`）は`G<=l`（`Z'ê=0`により`rank(S)≤G-1`）で
-  `IvError::InsufficientClustersForWeightMatrix`＝`ValidationError`。`fit()`冒頭で
+  `CommonError::InsufficientClustersForWeightMatrix`＝`ValidationError`。`fit()`冒頭で
   `gmm_type="two_step"`/`"iterated"`のとき検証する（`"one_step"`は`gmm_weight_type`を
   使わないため検証しない）。悪条件の`ComputationError`はbackstopとして残る。
 
@@ -554,7 +554,7 @@ error.rs`）:
   外した後の除外操作変数が内生変数より少ないときは`C_STATISTIC_TOO_MANY_TESTED_INSTRUMENTS`（`ValidationError`。既存の`INSUFFICIENT_INSTRUMENTS`は文面と`hint`が「操作変数を足す」で、検定する操作変数を減らす案内にならない）。`target`の添字の誤りは`INTERNAL_ERROR`（呼び出し側の責務）。
 - `Z_c`が丁度識別なら`J_c`は厳密に0を返す（推定しない）。
 - **定数項なしの`Classical`はlinearmodelsと一致しない**: linearmodelsは`Classical`の`σ̂²`を残差を中心化して作るが、ここでは`fit()`のHansen Jと同じく中心化しない。定数項があれば残差の平均が0で一致する。`Robust`・`Hac`・`Cluster`は定数項なしでも一致する（`robust`・`hac`をテストで固定）。
-- `S`は`n`で割らない生の和、Jも`n`で割らない（`iv/CLAUDE.md`）。重み行列の構築は`gmm/weight.rs`の`moment_covariance`で、`gmm_iterate`と共有する。
+- `S`は`n`で割らない生の和、Jも`n`で割らない（`iv/CLAUDE.md`）。重み行列の構築は`shared/gmm_weight.rs`の`moment_covariance`で、`gmm_iterate`と共有する。
 
 検証: 内生性の検定はlinearmodels 7.1の`c_stat`（`1e-14`台で一致するnumpy版を介して、`engine/src/iv/gmm/c_statistic/tests/reference.rs`に値を固定）、
 操作変数の直交性はlinearmodelsに無いので、同じnumpy版の値（`IVGMM`の`weight_matrix`・`estimate_parameters`・`_j_statistic`を部品にした別の計算と`1e-13`で一致を確認）。

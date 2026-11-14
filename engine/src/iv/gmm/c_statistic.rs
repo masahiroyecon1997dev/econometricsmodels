@@ -27,13 +27,13 @@
 use faer::Mat;
 use statrs::distribution::{ChiSquared, ContinuousCDF};
 
-use super::iterate::gmm_point_estimate;
-use super::weight::{WeightType, moment_covariance};
 use crate::iv::common::{IvError, IvInput, hcat, mat_column_to_vec};
 use crate::linear::ols::CovType;
 use crate::shared::covariance::{resolve_hac_lags, time_ordering};
 use crate::shared::error::{ClusterSetting, CommonError};
 use crate::shared::gmm::hansen_j_statistic;
+use crate::shared::gmm_iteration::gmm_point_estimate;
+use crate::shared::gmm_weight::{WeightType, moment_covariance};
 use crate::shared::goodness_of_fit::{is_perfect_fit, total_sum_of_squares};
 use crate::shared::group_codes::GroupCodes;
 use crate::shared::validation::validate_cluster_groups;
@@ -248,10 +248,10 @@ fn prepare_weight(
 }
 
 /// 行列の特異性による失敗は、C統計量が定義できないことを表す。それ以外はそのまま返す。
-fn undefined_if_singular(err: IvError) -> IvError {
+fn undefined_if_singular(err: CommonError) -> IvError {
     match err {
-        IvError::Common(CommonError::NearSingularMatrix { .. }) => IvError::CStatisticUndefined,
-        other => other,
+        CommonError::NearSingularMatrix { .. } => IvError::CStatisticUndefined,
+        other => other.into(),
     }
 }
 

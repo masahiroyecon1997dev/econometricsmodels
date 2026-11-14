@@ -15,7 +15,6 @@
 use crate::linear::common::LeastSquaresError;
 use crate::shared::error::{CommonError, ErrorInfo, staged_report};
 use crate::shared::error_catalog::{ErrorCode, ErrorReport, Stage};
-use crate::shared::validation::{GMM_MAX_ITER_MIN, MAX_ITER_LIMIT};
 use thiserror::Error;
 
 /// 2SLS/GMMの計算過程で発生しうるエラー。
@@ -73,48 +72,6 @@ pub enum IvError {
         #[source]
         source: LeastSquaresError,
     },
-
-    /// `gmm_type="iterated"`の`gmm_max_iter`が3未満。
-    ///
-    /// 上限を初回推定を含めて数えるため、2回以下の反復は2段階GMMに収束判定を付けただけに
-    /// なり紛らわしい。2段階が欲しい場合は`gmm_type="two_step"`を使う。
-    #[error("{}", self.catalog_message())]
-    InvalidGmmMaxIter { max_iter: i64 },
-
-    /// `gmm_type="iterated"`の`gmm_tol`が正の有限値でない（0以下・NaN・inf）。
-    ///
-    /// 収束判定の許容誤差として意味を持たないため。
-    #[error("{}", self.catalog_message())]
-    InvalidGmmTol { gmm_tol: f64 },
-
-    /// `estimator="gmm"`かつ`gmm_weight_type=Cluster`で、クラスター数`g`がモーメント条件の重み行列
-    /// `S`（l×l、`l`は全操作変数`x_exog ++ instruments`の数）を非特異にするのに足りない。
-    ///
-    /// `S = Σ_g S_g S_g'`はG個のランク1行列の和なので`rank(S) ≤ g`。丁度識別（`l == k`）の
-    /// ときは`Z'ê = 0`（`Σ_g S_g = 0`）が成り立つため`rank(S) ≤ g-1`となり、`g <= l`で
-    /// 特異になる。過剰識別（`l > k`）では`Z'ê = 0`が成り立たないため`g < l`で特異になる。
-    /// `cov_type=Cluster`の`CommonError::InsufficientClustersForInference`（係数共分散の
-    /// Wald部分行列、閾値は`q`）とは対象・閾値が異なる別軸のためGMM固有のバリアントとする。
-    /// `g`・`l`は入力だけから判定できるため、行列計算を待たず`fit()`冒頭で弾く。
-    #[error("{}", self.catalog_message())]
-    InsufficientClustersForWeightMatrix {
-        g: usize,
-        l: usize,
-        /// 必要なクラスター数の下限（過剰識別は`l`、丁度識別は`l + 1`）。
-        min_clusters: usize,
-    },
-
-    /// `raise_on_non_convergence=true`（既定）かつ`gmm_type="iterated"`で、`gmm_max_iter`回
-    /// （初回推定を含む上限回数）以内に係数が収束しなかった。
-    ///
-    /// `nonlinear::common::MleError::NonConvergence`と同型のメッセージ・意味論
-    /// （`raise_on_non_convergence=false`にすると`converged=false`のまま結果を返す）。
-    /// 文言は`MleError::NonConvergence`（"failed to converge after {n_iter} iterations.
-    /// Set raise_on_non_convergence=False to receive the result anyway, or increase
-    /// max_iter"）とほぼ揃えているが、`IvError`は2SLS/GMM共有の型のため先頭に"GMM "を
-    /// 付けて対象を明示している点のみ意図的な差異。
-    #[error("{}", self.catalog_message())]
-    GmmNonConvergence { n_iter: usize },
 
     /// Wu-Hausman内生性検定（回帰ベース、`iv-spec.md`3.6節）のための
     /// 拡張回帰（構造式に第一段階残差を追加した`y ~ x_exog + x_endog + 第一段階残差`）が
@@ -198,26 +155,6 @@ impl ErrorInfo for IvError {
                     .param("n_params", *l)
                     .param("min_obs", l + 1)
             }
-            Self::InsufficientClustersForWeightMatrix { g, l, min_clusters } => {
-                ErrorReport::new(ErrorCode::GmmWeightClusterCountTooSmall)
-                    .param("n_clusters", *g)
-                    .param("n_instruments", *l)
-                    .param("min_clusters", *min_clusters)
-            }
-            Self::InvalidGmmMaxIter { max_iter } => {
-                ErrorReport::new(ErrorCode::GmmMaxIterOutOfRange)
-                    .param("value", *max_iter)
-                    .param("min", GMM_MAX_ITER_MIN)
-                    .param("max", MAX_ITER_LIMIT)
-            }
-            Self::InvalidGmmTol { gmm_tol } => {
-                ErrorReport::new(ErrorCode::ToleranceNotPositiveFinite)
-                    .param("option", "gmm_tol")
-                    .param("value", *gmm_tol)
-            }
-            Self::GmmNonConvergence { n_iter } => ErrorReport::new(ErrorCode::NotConverged)
-                .param("n_iter", *n_iter)
-                .param("iter_option", "gmm_max_iter"),
             Self::EffectiveFEndogenousCount { n_endog } => {
                 ErrorReport::new(ErrorCode::EffectiveFEndogenousCount).param("n_endog", *n_endog)
             }
@@ -256,7 +193,7 @@ mod tests {
 
     #[test]
     fn iv_cataloged_variants_display_the_catalog_message_and_common_delegates() {
-        let err = IvError::InvalidGmmMaxIter { max_iter: 2 };
+        let err = IvError::InsufficientObservationsForFirstStage { n: 4, l: 4 };
         assert_eq!(err.to_string(), err.report().message());
         let wrapped = IvError::Common(CommonError::InvalidConfidenceLevel {
             confidence_level: 2.0,
@@ -308,7 +245,7 @@ mod tests {
 
     #[test]
     fn gmm_non_convergence_maps_to_not_converged_with_gmm_max_iter() {
-        let err = IvError::GmmNonConvergence { n_iter: 3 };
+        let err = CommonError::GmmNonConvergence { n_iter: 3 };
         let report = err.report();
         assert_eq!(report.code(), ErrorCode::NotConverged);
         assert!(report.validate().is_ok());
@@ -322,7 +259,7 @@ mod tests {
 
     #[test]
     fn gmm_option_errors_map_to_catalog_codes_with_valid_params() {
-        let max_iter = IvError::InvalidGmmMaxIter { max_iter: 2 }.report();
+        let max_iter = CommonError::InvalidGmmMaxIter { max_iter: 2 }.report();
         assert_eq!(max_iter.code(), ErrorCode::GmmMaxIterOutOfRange);
         assert!(max_iter.validate().is_ok());
         assert!(
@@ -331,7 +268,7 @@ mod tests {
                 .starts_with("gmm_max_iter must be an integer from 3 to")
         );
 
-        let tol = IvError::InvalidGmmTol { gmm_tol: 0.0 }.report();
+        let tol = CommonError::InvalidGmmTol { gmm_tol: 0.0 }.report();
         assert_eq!(tol.code(), ErrorCode::ToleranceNotPositiveFinite);
         assert!(tol.validate().is_ok());
         assert!(tol.message().starts_with("gmm_tol must be"));
@@ -354,11 +291,11 @@ mod tests {
                 "The first stage needs more observations than its 4 coefficient(s) (instruments, exogenous regressors and the intercept): 4 observation(s), at least 5 needed.",
             ),
             (
-                IvError::InsufficientClustersForWeightMatrix {
+                IvError::Common(CommonError::InsufficientClustersForWeightMatrix {
                     g: 2,
                     l: 3,
                     min_clusters: 3,
-                },
+                }),
                 ErrorCode::GmmWeightClusterCountTooSmall,
                 "gmm_weight_type=\"cluster\" needs at least 3 clusters for 3 instrument(s) (including exogenous regressors), but the cluster column has 2.",
             ),

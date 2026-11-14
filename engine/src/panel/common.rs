@@ -83,6 +83,7 @@ mod dummy_leverage;
 mod error;
 mod fe_adjustment;
 mod index;
+mod moment_cov;
 mod panel_cov;
 #[cfg(test)]
 mod test_support;
@@ -99,6 +100,7 @@ pub use error::{BetweenMeans, ColumnRole, PanelDimension, PanelError};
 pub(crate) use fe_adjustment::{absorbed_parameters, fe_cluster_k_correction, leverage_full};
 pub(crate) use index::EffectNames;
 pub use index::PanelIndex;
+pub(crate) use moment_cov::{PanelMoment, PanelMomentInput, panel_moment_covariance};
 pub(crate) use panel_cov::{PanelCov, PanelCovInput, PanelStructure, panel_cov_params};
 pub use time_keys::TimeKeys;
 pub(crate) use transform::{

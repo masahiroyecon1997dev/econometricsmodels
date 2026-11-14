@@ -4,7 +4,7 @@ use super::{
     N_ENTITIES, N_PERIODS, entity_cluster_weight, entity_labels, fit, input_spec, one_way_input,
     two_step, two_way_input,
 };
-use crate::panel::fe::FeEffects;
+use crate::panel::fe::{FeCovType, FeEffects};
 use crate::panel::fe_iv::FeGmmEstimator;
 use crate::panel::fe_iv::{FeGmmType, FeWeightType};
 
@@ -92,7 +92,15 @@ fn non_convergence_is_returned_when_not_raised() {
         max_iter: 3,
         tol: 1e-300,
     };
-    let estimator = FeGmmEstimator::fit(make(), FeEffects::OneWay, tight, false).unwrap();
+    let estimator = FeGmmEstimator::fit(
+        make(),
+        FeEffects::OneWay,
+        tight,
+        false,
+        FeCovType::Classical,
+        0.95,
+    )
+    .unwrap();
     assert!(!estimator.converged());
     assert_eq!(estimator.n_iter(), 3);
 }

@@ -11,6 +11,7 @@ use super::cov_params::{
 use super::cov_type::PanelCovType;
 use super::error::{PanelDimension, PanelError};
 use super::fe_adjustment::{fe_cluster_k_correction, leverage_full, two_group_split_is_degenerate};
+use super::time_keys::TimeKeys;
 use crate::shared::covariance::leverages;
 use crate::shared::error::ClusterSetting;
 use crate::shared::error_catalog::Stage;
@@ -140,28 +141,19 @@ pub(crate) fn panel_cov_params(
             )))
         }
         PanelCovType::Cluster { groups } => {
-            // 既定（entityクラスター）は入力のコードを再利用し、明示指定の列は渡された
-            // コードをそのまま使う。
-            let group_codes = groups.as_ref().unwrap_or(entity);
-            let n_groups = validate_cluster_groups(group_codes, n, ClusterSetting::CovType)?;
-            if tests_slopes {
-                validate_cluster_count_covers_slopes(n_groups, n_slopes)?;
-            }
-            let k_correction = match structure {
-                PanelStructure::FixedEffects { levels } => {
-                    // F検定をするなら、直前の`G > q`により、ここで`G=2`なら`q`は高々1。
-                    if n_slopes >= 1
-                        && n_groups == 2
-                        && two_group_split_is_degenerate(levels, group_codes)
-                    {
-                        return Err(PanelError::DegenerateClusterTwoGroups);
-                    }
-                    fe_cluster_k_correction(levels, df_model, n_slopes, group_codes)
-                }
-                // REは固定効果ダミーのネスト補正が不要なため`K=df_model`をそのまま使う
-                // （OLS自身の`cluster_cov_params`と数式的に同一になる）。
-                PanelStructure::RandomEffects => df_model,
-            };
+            let ClusterSetup {
+                group_codes,
+                n_groups,
+                k_correction,
+            } = cluster_setup(
+                groups.as_ref(),
+                entity,
+                n,
+                df_model,
+                n_slopes,
+                tests_slopes,
+                structure,
+            )?;
             let cov_params =
                 panel_cluster_cov_params(x, residuals, xtx_inv, n, k, group_codes, k_correction);
             Ok(PanelCov {
@@ -174,31 +166,11 @@ pub(crate) fn panel_cov_params(
             bandwidth,
             time: dk_time,
         } => {
-            // 入力の検証を通らない`dk_time`（公開APIの`Dk.time`）の長さをここで検証する。
-            // 合わないと退化判定の`zip`が黙って切り詰められ、DK計算は範囲外アクセスになる。
-            if dk_time.len() != n {
-                return Err(PanelError::IdentifierDimensionMismatch {
-                    dimension: PanelDimension::TIME,
-                    y_rows: n,
-                    other_rows: dk_time.len(),
-                });
-            }
-            let time_codes = dk_time.codes();
-            let t_periods = time_codes.n_groups();
-            let bw = resolve_dk_bandwidth(*bandwidth, t_periods)?;
-            if tests_slopes {
-                validate_dk_periods_cover_tested_coefficients(t_periods, n_slopes)
-                    .map_err(|e| e.in_stage(Stage::OverallFTest))?;
-            }
-            if let PanelStructure::FixedEffects { levels } = structure {
-                // F検定をするなら、直前の`t_periods > q`により、ここで`t_periods=2`なら`q`は高々1。
-                if n_slopes >= 1
-                    && t_periods == 2
-                    && two_group_split_is_degenerate(levels, time_codes)
-                {
-                    return Err(PanelError::DegenerateDkTwoPeriods);
-                }
-            }
+            let DkSetup {
+                time_codes,
+                t_periods,
+                bandwidth: bw,
+            } = dk_setup(dk_time, *bandwidth, n, n_slopes, tests_slopes, structure)?;
             // fixestのDKは`K.fixef="full"`が既定（クラスター変数が無くネスト判定自体が発生しない、
             // `fe_cluster_k_correction`のdocコメント参照）。`K=df_model`をそのまま使う。
             let cov_params =
@@ -210,4 +182,101 @@ pub(crate) fn panel_cov_params(
             })
         }
     }
+}
+
+/// `Cluster`の事前検証と、小標本補正の`K`。[`panel_cov_params`]と`panel_moment_covariance`が共有する。
+pub(super) struct ClusterSetup<'a> {
+    pub(super) group_codes: &'a GroupCodes,
+    pub(super) n_groups: usize,
+    /// `(n-1)/(n-K)`の`K`。FEはfixest流のネスト判定（`fe_cluster_k_correction`）、REは`df_model`。
+    pub(super) k_correction: usize,
+}
+
+/// `Cluster`の検証（長さ・`G >= 2`・`G > q`・FEの`G=2`退化）と補正の`K`を決める。`groups`が`None`なら
+/// `entity`（既定のクラスター）。`n_slopes`は検定する傾き係数の数`q`。
+///
+/// # Errors
+/// [`panel_cov_params`]の`Cluster`のエラーと同じ。
+pub(super) fn cluster_setup<'a>(
+    groups: Option<&'a GroupCodes>,
+    entity: &'a GroupCodes,
+    n: usize,
+    df_model: usize,
+    n_slopes: usize,
+    tests_slopes: bool,
+    structure: PanelStructure<'_>,
+) -> Result<ClusterSetup<'a>, PanelError> {
+    // 既定（entityクラスター）は入力のコードを再利用し、明示指定の列は渡された
+    // コードをそのまま使う。
+    let group_codes = groups.unwrap_or(entity);
+    let n_groups = validate_cluster_groups(group_codes, n, ClusterSetting::CovType)?;
+    if tests_slopes {
+        validate_cluster_count_covers_slopes(n_groups, n_slopes)?;
+    }
+    let k_correction = match structure {
+        PanelStructure::FixedEffects { levels } => {
+            // F検定をするなら、直前の`G > q`により、ここで`G=2`なら`q`は高々1。
+            if n_slopes >= 1 && n_groups == 2 && two_group_split_is_degenerate(levels, group_codes)
+            {
+                return Err(PanelError::DegenerateClusterTwoGroups);
+            }
+            fe_cluster_k_correction(levels, df_model, n_slopes, group_codes)
+        }
+        // REは固定効果ダミーのネスト補正が不要なため`K=df_model`をそのまま使う
+        // （OLS自身の`cluster_cov_params`と数式的に同一になる）。
+        PanelStructure::RandomEffects => df_model,
+    };
+    Ok(ClusterSetup {
+        group_codes,
+        n_groups,
+        k_correction,
+    })
+}
+
+/// `Dk`の事前検証と、実際に使うバンド幅。[`panel_cov_params`]と`panel_moment_covariance`が共有する。
+pub(super) struct DkSetup<'a> {
+    pub(super) time_codes: &'a GroupCodes,
+    pub(super) t_periods: usize,
+    pub(super) bandwidth: usize,
+}
+
+/// `Dk`の検証（時点列の長さ・バンド幅・`t_periods > q`・FEの時点2つの退化）とバンド幅の解決。
+///
+/// # Errors
+/// [`panel_cov_params`]の`Dk`のエラーと同じ。
+pub(super) fn dk_setup<'a>(
+    dk_time: &'a TimeKeys,
+    bandwidth: Option<i64>,
+    n: usize,
+    n_slopes: usize,
+    tests_slopes: bool,
+    structure: PanelStructure<'_>,
+) -> Result<DkSetup<'a>, PanelError> {
+    // 入力の検証を通らない`dk_time`（公開APIの`Dk.time`）の長さをここで検証する。
+    // 合わないと退化判定の`zip`が黙って切り詰められ、DK計算は範囲外アクセスになる。
+    if dk_time.len() != n {
+        return Err(PanelError::IdentifierDimensionMismatch {
+            dimension: PanelDimension::TIME,
+            y_rows: n,
+            other_rows: dk_time.len(),
+        });
+    }
+    let time_codes = dk_time.codes();
+    let t_periods = time_codes.n_groups();
+    let bandwidth = resolve_dk_bandwidth(bandwidth, t_periods)?;
+    if tests_slopes {
+        validate_dk_periods_cover_tested_coefficients(t_periods, n_slopes)
+            .map_err(|e| e.in_stage(Stage::OverallFTest))?;
+    }
+    if let PanelStructure::FixedEffects { levels } = structure {
+        // F検定をするなら、直前の`t_periods > q`により、ここで`t_periods=2`なら`q`は高々1。
+        if n_slopes >= 1 && t_periods == 2 && two_group_split_is_degenerate(levels, time_codes) {
+            return Err(PanelError::DegenerateDkTwoPeriods);
+        }
+    }
+    Ok(DkSetup {
+        time_codes,
+        t_periods,
+        bandwidth,
+    })
 }

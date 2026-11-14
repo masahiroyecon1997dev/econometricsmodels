@@ -1,15 +1,17 @@
 //! `fit`のテスト。テーマ別に子モジュールへ分ける。
 //!
 //! - `basic.rs`: 基本挙動（getter・推定回数と収束・係数名・自由度）
+//! - `cov_type.rs`: `cov_type`別の標準誤差（FE-2SLSへの還元、ダミー変数を明示したGMM、手計算との照合）・推論・Wald・R²・検証
 //! - `reference.rs`: FE-2SLSへの還元、ダミー変数を明示したGMM（FWL）、クラスター重みの手計算との照合
 //! - `validation.rs`: 入力検証・エラー返却・検証順序・クラスター数の境界
 
 use crate::panel::common::PanelError;
-use crate::panel::fe::FeEffects;
+use crate::panel::fe::{FeCovType, FeEffects};
 use crate::panel::fe_iv::{FeGmmEstimator, FeGmmType, FeIvInput, FeWeightType};
 use crate::shared::group_codes::GroupCodes;
 
 mod basic;
+mod cov_type;
 mod reference;
 mod validation;
 
@@ -25,7 +27,17 @@ pub(super) fn fit(
     effects: FeEffects,
     gmm_type: FeGmmType,
 ) -> Result<FeGmmEstimator, PanelError> {
-    FeGmmEstimator::fit(input, effects, gmm_type, true)
+    FeGmmEstimator::fit(input, effects, gmm_type, true, FeCovType::Classical, 0.95)
+}
+
+/// `cov_type`を指定して推定する（信頼水準95%）。
+pub(super) fn fit_with(
+    input: FeIvInput,
+    effects: FeEffects,
+    gmm_type: FeGmmType,
+    cov_type: FeCovType,
+) -> Result<FeGmmEstimator, PanelError> {
+    FeGmmEstimator::fit(input, effects, gmm_type, true, cov_type, 0.95)
 }
 
 pub(super) fn two_step(weight: FeWeightType) -> FeGmmType {

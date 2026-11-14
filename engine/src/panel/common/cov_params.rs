@@ -173,7 +173,23 @@ pub(crate) fn panel_driscoll_kraay_cov_params(
     k_correction: usize,
     bandwidth: usize,
 ) -> Mat<f64> {
-    let n = x.nrows();
+    let s_hat = panel_driscoll_kraay_meat(x, residuals, time, bandwidth);
+    let scale = driscoll_kraay_scale(x.nrows(), time.n_groups(), k_correction);
+    let cov_uncorrected = xtx_inv * &s_hat * xtx_inv;
+    Mat::from_fn(x.ncols(), x.ncols(), |i, j| {
+        scale * (*cov_uncorrected.get(i, j))
+    })
+}
+
+/// DKの`Ŝ = Σ_t ξ_t ξ_t' + Σ_l w_l (…)`（`ξ_t = Σ_{i∈t} ε_i x_i`、小標本補正の前）。`x`の列数を`k`とする
+/// `k×k`行列。係数の共分散（`x`は変換後の設計行列）にも、GMMのモーメント条件の分散（`x`は変換後の
+/// 操作変数）にも使う。`bandwidth < t_periods`が前提（[`panel_driscoll_kraay_cov_params`]のdoc）。
+pub(super) fn panel_driscoll_kraay_meat(
+    x: &Mat<f64>,
+    residuals: &[f64],
+    time: &GroupCodes,
+    bandwidth: usize,
+) -> Mat<f64> {
     let k = x.ncols();
     let t_periods = time.n_groups();
     let time_indices = time.group_indices();
@@ -191,12 +207,12 @@ pub(crate) fn panel_driscoll_kraay_cov_params(
     // `Ŝ = Σ_t ξ_t ξ_t' + Σ_l w_l (…)`は、時点を行とみなした`ξ`（コード順＝時系列順）への
     // Bartlett重みのカーネル和で、OLS・2SLS・GMMのNewey-West HACと同じ`hac_meat`。
     let time_order: Vec<usize> = (0..t_periods).collect();
-    let s_hat = hac_meat(t_periods, k, bandwidth, &time_order, |t, a| *xi.get(t, a));
+    hac_meat(t_periods, k, bandwidth, &time_order, |t, a| *xi.get(t, a))
+}
 
-    let scale = (t_periods as f64 / (t_periods as f64 - 1.0))
-        * ((n as f64 - 1.0) / ((n - k_correction) as f64));
-    let cov_uncorrected = xtx_inv * &s_hat * xtx_inv;
-    Mat::from_fn(k, k, |i, j| scale * (*cov_uncorrected.get(i, j)))
+/// DKの小標本補正 `T/(T-1) × (n-1)/(n-K)`。
+pub(super) fn driscoll_kraay_scale(n: usize, t_periods: usize, k_correction: usize) -> f64 {
+    (t_periods as f64 / (t_periods as f64 - 1.0)) * ((n as f64 - 1.0) / ((n - k_correction) as f64))
 }
 
 #[cfg(test)]

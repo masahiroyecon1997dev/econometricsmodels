@@ -5,7 +5,7 @@ use super::{
     time_labels, two_step,
 };
 use crate::panel::common::{ColumnRole, PanelError};
-use crate::panel::fe::{FeAbsorption, FeEffects};
+use crate::panel::fe::{FeAbsorption, FeCovType, FeEffects};
 use crate::panel::fe_iv::{FeGmmEstimator, FeIvInput, RoleColumns};
 use crate::panel::fe_iv::{FeGmmType, FeWeightType};
 use crate::shared::error::{CommonError, ErrorInfo};
@@ -305,6 +305,8 @@ fn absorption_options_are_validated() {
         FeEffects::OneWay,
         two_step(FeWeightType::Robust),
         true,
+        FeCovType::Classical,
+        0.95,
         &FeAbsorption {
             tol: -1.0,
             ..FeAbsorption::default()

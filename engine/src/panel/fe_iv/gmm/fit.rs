@@ -3,15 +3,22 @@
 //! テストは`fit/tests.rs`と`fit/tests/`にテーマ別で置く。
 
 use super::{FeGmmEstimator, FeGmmType};
-use crate::panel::common::PanelError;
-use crate::panel::fe::{FeAbsorption, FeEffects};
+use crate::panel::common::{PanelError, PanelMoment, PanelMomentInput, panel_moment_covariance};
+use crate::panel::fe::{
+    FeAbsorption, FeCovType, FeEffects, fe_r_squared_between, fe_r_squared_overall,
+};
 use crate::panel::fe_iv::input::FeIvInput;
 use crate::panel::fe_iv::prepare::{
     WithinPrepared, mat_from_columns, prepare_within, structural_fit_is_perfect,
 };
 use crate::shared::error::CommonError;
+use crate::shared::gmm::gmm_sandwich_covariance;
 use crate::shared::gmm_iteration::{GmmInitialStep, GmmIteration, gmm_initial_step, gmm_iterate};
 use crate::shared::gmm_weight::validate_weight_type;
+use crate::shared::inference::{InferenceTable, inference_table};
+use crate::shared::wald::wald_chi2_test;
+use faer::Mat;
+use statrs::distribution::Normal;
 
 /// [`FeGmmEstimator::fit_with_absorption`]の本体。契約（エラー条件を含む）は`fit`のdocコメント参照。
 pub(super) fn fit_fe_gmm(
@@ -19,6 +26,8 @@ pub(super) fn fit_fe_gmm(
     effects: FeEffects,
     gmm_type: FeGmmType,
     raise_on_non_convergence: bool,
+    cov_type: FeCovType,
+    confidence_level: f64,
     absorption: &FeAbsorption,
 ) -> Result<FeGmmEstimator, PanelError> {
     // faerのグローバル並列度を`Par::Seq`に固定する（`FeEstimator::fit`と同じ理由）。
@@ -34,9 +43,8 @@ pub(super) fn fit_fe_gmm(
     let k = input.k();
     let l = k_exog + k_instruments;
 
-    // `HC2`・`HC3`のレバレッジは要らない（点推定は共分散を作らない）。
     let WithinPrepared {
-        levels: _,
+        levels,
         tilde,
         absorbed: _,
         noise,
@@ -46,7 +54,14 @@ pub(super) fn fit_fe_gmm(
         exog_range,
         endog_range,
         instrument_range,
-    } = prepare_within(&input, effects, absorption, None, false, false)?;
+    } = prepare_within(
+        &input,
+        effects,
+        absorption,
+        Some(confidence_level),
+        false,
+        false,
+    )?;
 
     // `weight_type=Cluster`のグループ（検証して返す）。丁度識別の閾値の違いは`validate_weight_type`が持つ。
     let weight_cluster_codes = match weight_type {
@@ -115,6 +130,55 @@ pub(super) fn fit_fe_gmm(
         .into());
     }
 
+    // 標準誤差。`Ω̂`は`cov_type`ごとの小標本補正込み（`FeIvEstimator`と同じ`df_resid`・`K`）。
+    let df_resid = n - df_model;
+    let residual_values: Vec<f64> = (0..n).map(|i| *residuals.get(i, 0)).collect();
+    let groups = input.index().effect_codes();
+    let PanelMoment {
+        omega,
+        dk_bandwidth_used,
+    } = panel_moment_covariance(
+        &cov_type,
+        &PanelMomentInput {
+            z: &z,
+            ztz: &ztz,
+            residuals: &residual_values,
+            df_resid,
+            df_model,
+            n_slopes: k,
+            entity: &groups[0],
+            levels: &levels,
+        },
+    )?;
+    let cov_params = symmetrized(gmm_sandwich_covariance(&z, &x, &s_used, &omega)?);
+
+    let normal = Normal::new(0.0, 1.0).map_err(|e| CommonError::internal(e.to_string()))?;
+    let InferenceTable {
+        std_errors,
+        test_stats,
+        p_values,
+        conf_lower,
+        conf_upper,
+    } = inference_table(&beta, &cov_params, &normal, confidence_level);
+    // `k = 0`（`x_exog`も`x_endog`も無い）はバインディングが拒否するので、通常は`Some`。
+    let wald = if k == 0 {
+        None
+    } else {
+        Some(wald_chi2_test(&beta, &cov_params, 0, k).map_err(|source| {
+            PanelError::FTestFailed {
+                source: source.into(),
+            }
+        })?)
+    };
+
+    // R²は構造残差ベース。between・overallは変換前の`y`と実際の`X`で`FeEstimator`と同じ式。
+    let ssr: f64 = residual_values.iter().map(|r| r * r).sum();
+    let mut structural_x: Vec<Vec<f64>> = input.x_exog().to_vec();
+    structural_x.extend(input.x_endog().iter().cloned());
+    let r_squared_within = 1.0 - ssr / sst_within;
+    let r_squared_between = fe_r_squared_between(input.y(), &structural_x, &beta, &groups[0]);
+    let r_squared_overall = fe_r_squared_overall(input.y(), &structural_x, &beta);
+
     Ok(FeGmmEstimator {
         input,
         effects,
@@ -126,8 +190,27 @@ pub(super) fn fit_fe_gmm(
         n_iter,
         converged,
         df_model,
-        df_resid: n - df_model,
+        df_resid,
         n_groups,
+        cov_type,
+        dk_bandwidth_used,
+        std_errors,
+        cov_params,
+        test_stats,
+        p_values,
+        conf_lower,
+        conf_upper,
+        wald,
+        r_squared_within,
+        r_squared_between,
+        r_squared_overall,
+    })
+}
+
+/// 丸めで厳密には非対称な`cov_params`を対称化する（`gmm_sandwich_covariance`は対称化しない）。
+fn symmetrized(cov: Mat<f64>) -> Mat<f64> {
+    Mat::from_fn(cov.nrows(), cov.ncols(), |i, j| {
+        0.5 * (*cov.get(i, j) + *cov.get(j, i))
     })
 }
 

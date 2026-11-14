@@ -29,7 +29,7 @@ use crate::shared::least_squares::least_squares;
 
 const RTOL: f64 = 1e-8;
 
-fn assert_params_close(actual: &Mat<f64>, expected: &[f64], label: &str) {
+pub(super) fn assert_params_close(actual: &Mat<f64>, expected: &[f64], label: &str) {
     assert_eq!(actual.nrows(), expected.len(), "{label}");
     for (j, &want) in expected.iter().enumerate() {
         let got = *actual.get(j, 0);
@@ -47,19 +47,19 @@ fn params_of(estimator: &FeGmmEstimator) -> Vec<f64> {
 }
 
 /// 不均衡にした行（観測を一部落とす。どの次元にもsingletonは出ない）。
-fn unbalanced_rows() -> Vec<usize> {
+pub(super) fn unbalanced_rows() -> Vec<usize> {
     all_rows().into_iter().filter(|r| r % 7 != 3).collect()
 }
 
 /// 固定効果の構造。`rows`は使う行、`dimensions`は全行分のラベル。
-struct Structure {
-    name: &'static str,
-    rows: Vec<usize>,
-    dimensions: Vec<Vec<String>>,
-    effects: FeEffects,
+pub(super) struct Structure {
+    pub(super) name: &'static str,
+    pub(super) rows: Vec<usize>,
+    pub(super) dimensions: Vec<Vec<String>>,
+    pub(super) effects: FeEffects,
 }
 
-fn structures() -> Vec<Structure> {
+pub(super) fn structures() -> Vec<Structure> {
     let structure = |name, rows, dimensions, effects| Structure {
         name,
         rows,
@@ -169,7 +169,7 @@ fn one_step_is_the_two_stage_least_squares_estimate() {
 // ── ダミー変数を明示したGMM（FWL） ──────────────────────────────────────
 
 /// ダミーを外生変数に加えた`iv::gmm::GmmEstimator`の係数（実際の外生変数・内生変数の分だけ）。
-fn dummy_variable_gmm_params(input: &FeIvInput, gmm_type: &FeGmmType) -> Vec<f64> {
+pub(super) fn dummy_variable_gmm_params(input: &FeIvInput, gmm_type: &FeGmmType) -> Vec<f64> {
     let d = dummies(input.index().effect_codes());
     let (ke, kn) = (input.k_exog(), input.k_endog());
     let mut x_exog: Vec<Vec<f64>> = input.x_exog().to_vec();
@@ -236,7 +236,7 @@ fn matches_dummy_variable_gmm() {
 // ── クラスター重みの手計算 ─────────────────────────────────────────────
 
 /// 個体（連続する`period`行ずつ）内の平均を引く。
-fn demean_by_blocks(column: &[f64], period: usize) -> Vec<f64> {
+pub(super) fn demean_by_blocks(column: &[f64], period: usize) -> Vec<f64> {
     column
         .chunks(period)
         .flat_map(|block| {
@@ -246,12 +246,12 @@ fn demean_by_blocks(column: &[f64], period: usize) -> Vec<f64> {
         .collect()
 }
 
-fn mat(columns: &[Vec<f64>]) -> Mat<f64> {
+pub(super) fn mat(columns: &[Vec<f64>]) -> Mat<f64> {
     Mat::from_fn(columns[0].len(), columns.len(), |i, j| columns[j][i])
 }
 
 /// `W = S⁻¹`のGMM `(X'ZWZ'X)⁻¹X'ZWZ'y`。LU分解で解く（本体のCholeskyとは別の経路）。
-fn gmm_estimate(z: &Mat<f64>, x: &Mat<f64>, y: &Mat<f64>, s: &Mat<f64>) -> Mat<f64> {
+pub(super) fn gmm_estimate(z: &Mat<f64>, x: &Mat<f64>, y: &Mat<f64>, s: &Mat<f64>) -> Mat<f64> {
     let zx = z.transpose() * x;
     let zy = z.transpose() * y;
     let s_inv_zx = s.partial_piv_lu().solve(&zx);
@@ -262,7 +262,7 @@ fn gmm_estimate(z: &Mat<f64>, x: &Mat<f64>, y: &Mat<f64>, s: &Mat<f64>) -> Mat<f
 }
 
 /// `S = Σ_g (Σ_{i∈g} ê_i z_i)(Σ_{i∈g} ê_i z_i)'`（クラスター`group`の添字は行ごと）。
-fn cluster_s(z: &Mat<f64>, e: &Mat<f64>, group: &[usize]) -> Mat<f64> {
+pub(super) fn cluster_s(z: &Mat<f64>, e: &Mat<f64>, group: &[usize]) -> Mat<f64> {
     let l = z.ncols();
     let n_groups = group.iter().max().unwrap() + 1;
     let mut s = Mat::<f64>::zeros(l, l);
@@ -312,12 +312,31 @@ fn manual_dummy_projection_gmm(
     manual_gmm(input, &demean, group, estimates)
 }
 
+/// 手計算のGMMの途中の量（変換後の`X̃`・`Z̃`・最終の構造残差・最後の推定に使った`S`）。
+pub(super) struct ManualGmm {
+    pub(super) params: Vec<f64>,
+    pub(super) s: Mat<f64>,
+    pub(super) x: Mat<f64>,
+    pub(super) z: Mat<f64>,
+    pub(super) residuals: Mat<f64>,
+}
+
 fn manual_gmm(
     input: &FeIvInput,
     demean: &dyn Fn(&Vec<f64>) -> Vec<f64>,
     group: &[usize],
     estimates: usize,
 ) -> (Vec<f64>, Mat<f64>) {
+    let manual = manual_gmm_full(input, demean, group, estimates);
+    (manual.params, manual.s)
+}
+
+pub(super) fn manual_gmm_full(
+    input: &FeIvInput,
+    demean: &dyn Fn(&Vec<f64>) -> Vec<f64>,
+    group: &[usize],
+    estimates: usize,
+) -> ManualGmm {
     let y = mat(&[demean(&input.y().to_vec())]);
     let exog: Vec<Vec<f64>> = input.x_exog().iter().map(demean).collect();
     let endog: Vec<Vec<f64>> = input.x_endog().iter().map(demean).collect();
@@ -334,7 +353,24 @@ fn manual_gmm(
         beta = gmm_estimate(&z, &x, &y, &s);
     }
     let params = (0..beta.nrows()).map(|j| *beta.get(j, 0)).collect();
-    (params, s)
+    let residuals = &y - &x * &beta;
+    ManualGmm {
+        params,
+        s,
+        x,
+        z,
+        residuals,
+    }
+}
+
+/// 1-way（個体）の手計算（`manual_one_way_gmm`の全部入り）。
+pub(super) fn manual_one_way_full(
+    input: &FeIvInput,
+    group: &[usize],
+    estimates: usize,
+) -> ManualGmm {
+    let demean = |c: &Vec<f64>| demean_by_blocks(c, 4);
+    manual_gmm_full(input, &demean, group, estimates)
 }
 
 #[test]
@@ -390,7 +426,9 @@ fn cluster_weight_matches_manual_computation_for_multi_way_effects() {
                     tol: 1e-300,
                 }
             };
-            let estimator = FeGmmEstimator::fit(make(), effects, gmm_type, false).unwrap();
+            let estimator =
+                FeGmmEstimator::fit(make(), effects, gmm_type, false, FeCovType::Classical, 0.95)
+                    .unwrap();
             let label = format!("{name} estimates={estimates}");
             assert_params_close(estimator.params(), &expected, &label);
             let s = estimator.s_used();
@@ -457,6 +495,8 @@ fn iterated_cluster_weight_matches_manual_iteration() {
                 tol: 1e-300,
             },
             false,
+            FeCovType::Classical,
+            0.95,
         )
         .unwrap();
         assert_eq!(estimator.n_iter(), max_iter as i64);

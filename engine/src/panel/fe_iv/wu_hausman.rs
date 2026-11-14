@@ -114,9 +114,9 @@ pub(super) fn fe_wu_hausman_test(
     within_x.extend(residuals);
 
     let outcome = (|| -> Result<Option<FeWuHausmanTest>, PanelError> {
-        let aux_input = FeInput::from_effect_groups(
-            input.y(),
-            &raw_columns,
+        let aux_input = FeInput::from_effect_groups_owned(
+            input.y().to_vec(),
+            raw_columns,
             names,
             groups.to_vec(),
             input.dep_var_name().to_string(),

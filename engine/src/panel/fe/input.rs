@@ -145,6 +145,30 @@ impl FeInput {
         })
     }
 
+    /// [`Self::from_effect_groups`]と同じ検査・同じ結果で、`y`と`x_columns`を複製せず受け取る。
+    /// 列が大きいとき（呼び出し側が一時的な列を作って渡すとき）に、複製の分のメモリを避ける。
+    ///
+    /// # Errors
+    /// `from_effect_groups`と同じ。
+    pub(crate) fn from_effect_groups_owned(
+        y: Vec<f64>,
+        x_columns: Vec<Vec<f64>>,
+        x_names: Vec<String>,
+        groups: Vec<GroupCodes>,
+        dep_var_name: String,
+    ) -> Result<Self, PanelError> {
+        validate_panel_input(&y, &x_columns, &x_names, &groups.iter().collect::<Vec<_>>())?;
+
+        Ok(Self {
+            y,
+            x: x_columns,
+            x_names,
+            dep_var_name,
+            effect_names: EffectNames::defaults(groups.len()),
+            groups,
+        })
+    }
+
     /// REの分散成分推定（`swamy_arora_variance_components`）用のFE入力を、
     /// `ReInput`の`y`・`x`・`entity`（2-wayなら`time`も）から作る。`ReInput`が既に持つエンティティコードを
     /// 再利用し作り直さない。`ReInput::from_group_codes`が同じ次元検証を済ませているため

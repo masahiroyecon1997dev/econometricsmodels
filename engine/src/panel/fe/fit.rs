@@ -150,6 +150,8 @@ pub(in crate::panel) fn fit_fe_from_within(
     // それでも`Result`を返す契約（`from_columns`のシグネチャ）をそのまま守り、
     // `unwrap`はしない（`.claude/rules/rust-style.md`「テスト」の「理論上到達不能でも
     // `Result`化する」方針に揃える）。
+    // `ỹ'ỹ`（within変換後の`y`の平均は0なので、総平方和は非中心化の`Σỹ²`）は、`y`を解放する前に求める。
+    let sst_within: f64 = y.iter().map(|v| v * v).sum();
     let within_input = OlsInput::from_columns(
         &y,
         &x,
@@ -158,6 +160,10 @@ pub(in crate::panel) fn fit_fe_from_within(
         input.dep_var_name().to_string(),
     )
     .map_err(|source| PanelError::WithinRegressionFailed { source })?;
+    // `OlsInput`が行列として持つので、変換済みの列は解放する（以降の最小二乗・共分散の間、同じ列を
+    // 二重に持たない）。
+    drop(x);
+    drop(y);
 
     if !(confidence_level > 0.0 && confidence_level < 1.0) {
         return Err(PanelError::WithinRegressionFailed {
@@ -189,8 +195,6 @@ pub(in crate::panel) fn fit_fe_from_within(
     let ssr: f64 = residuals.iter().map(|r| r * r).sum();
 
     // within回帰の残差が丸め誤差の範囲で0なら完全フィット。標準誤差とF検定が定義できない。
-    // within変換後の`y`の平均は0なので、総平方和は非中心化（`Σỹ²`）。
-    let sst_within: f64 = y.iter().map(|v| v * v).sum();
     // 交互射影が`y`に残す誤差（元の`y`の絶対値の最大の`noise`倍）の2乗和以下の残差も、完全適合とみなす。
     let y_scale = input.y().iter().fold(0.0_f64, |m, v| m.max(v.abs()));
     if is_perfect_fit(ssr, sst_within, k) || ssr <= n as f64 * (noise * y_scale).powi(2) {

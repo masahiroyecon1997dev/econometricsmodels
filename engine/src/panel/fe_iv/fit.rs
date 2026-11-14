@@ -85,16 +85,20 @@ pub(super) fn fit_fe_iv(
         .collect();
     let mut first_stage_names = input.x_exog_names().to_vec();
     first_stage_names.extend(input.instrument_names().iter().cloned());
-    let mut first_stage_raw: Vec<Vec<f64>> = input.x_exog().to_vec();
-    first_stage_raw.extend(input.instruments().iter().cloned());
 
     let mut first_stages = Vec::with_capacity(k_endog);
     let mut fitted_endog: Vec<Vec<f64>> = Vec::with_capacity(k_endog);
     for j in 0..k_endog {
         let endog_name = &input.x_endog_names()[j];
-        let stage_input = FeInput::from_effect_groups(
-            &input.x_endog()[j],
-            &first_stage_raw,
+        let stage_x: Vec<Vec<f64>> = input
+            .x_exog()
+            .iter()
+            .chain(input.instruments())
+            .cloned()
+            .collect();
+        let stage_input = FeInput::from_effect_groups_owned(
+            input.x_endog()[j].clone(),
+            stage_x,
             first_stage_names.clone(),
             groups.to_vec(),
             endog_name.clone(),
@@ -138,29 +142,34 @@ pub(super) fn fit_fe_iv(
     }
 
     // 点推定。`X̃`は実際の内生変数、`X̂`は内生変数を第一段階の当てはめ値に置き換えたもの。
-    let exog_columns: Vec<&[f64]> = tilde[exog_range.clone()]
-        .iter()
-        .map(Vec::as_slice)
-        .collect();
-    let endog_columns: Vec<&[f64]> = tilde[endog_range].iter().map(Vec::as_slice).collect();
-    let fitted_columns: Vec<&[f64]> = fitted_endog.iter().map(Vec::as_slice).collect();
-    let x_tilde = mat_from_columns(
-        n,
-        &[exog_columns.as_slice(), endog_columns.as_slice()].concat(),
-    );
-    let x_hat = mat_from_columns(
-        n,
-        &[exog_columns.as_slice(), fitted_columns.as_slice()].concat(),
-    );
-    let y_mat = mat_from_columns(n, &[y_tilde.as_slice()]);
+    // `X̃`・`ỹ`・当てはめ値は点推定の後に使わないので、ブロックを抜けるときに解放する
+    // （共分散・Wu-Hausmanの間も保持するとピークメモリが列数の数倍になる）。
     let mut param_names = input.x_exog_names().to_vec();
     param_names.extend(input.x_endog_names().iter().cloned());
-
-    let estimate = two_sls_point_estimate(&x_tilde, &x_hat, &y_mat).map_err(|err| {
-        PanelError::SecondStageFailed {
-            source: LeastSquaresError::from_rank_deficient(err, &x_hat, &param_names),
-        }
-    })?;
+    let (estimate, x_hat) = {
+        let exog_columns: Vec<&[f64]> = tilde[exog_range.clone()]
+            .iter()
+            .map(Vec::as_slice)
+            .collect();
+        let endog_columns: Vec<&[f64]> = tilde[endog_range].iter().map(Vec::as_slice).collect();
+        let fitted_columns: Vec<&[f64]> = fitted_endog.iter().map(Vec::as_slice).collect();
+        let x_tilde = mat_from_columns(
+            n,
+            &[exog_columns.as_slice(), endog_columns.as_slice()].concat(),
+        );
+        let x_hat = mat_from_columns(
+            n,
+            &[exog_columns.as_slice(), fitted_columns.as_slice()].concat(),
+        );
+        let y_mat = mat_from_columns(n, &[y_tilde.as_slice()]);
+        let estimate = two_sls_point_estimate(&x_tilde, &x_hat, &y_mat).map_err(|err| {
+            PanelError::SecondStageFailed {
+                source: LeastSquaresError::from_rank_deficient(err, &x_hat, &param_names),
+            }
+        })?;
+        (estimate, x_hat)
+    };
+    drop(fitted_endog);
 
     // 構造残差が丸め誤差の範囲で0なら完全適合。標準誤差とF検定が定義できない。
     let sst_within: f64 = y_tilde.iter().map(|v| v * v).sum();
@@ -208,6 +217,9 @@ pub(super) fn fit_fe_iv(
         },
     )?;
 
+    drop(x_hat);
+    drop(residuals);
+
     let t_dist = StudentsT::new(0.0, 1.0, df_inference as f64)
         .map_err(|e| CommonError::internal(e.to_string()))?;
     let InferenceTable {
@@ -244,21 +256,24 @@ pub(super) fn fit_fe_iv(
     })?;
 
     // 構造式の`y`・実際の`X`（変換前）。R²のbetween・overallと`fixed_effects()`が使う。
-    let mut structural_x: Vec<Vec<f64>> = input.x_exog().to_vec();
-    structural_x.extend(input.x_endog().iter().cloned());
-    let r_squared_within = 1.0 - estimate.ssr / sst_within;
-    let r_squared_between =
-        fe_r_squared_between(input.y(), &structural_x, &estimate.params, &groups[0]);
-    let r_squared_overall = fe_r_squared_overall(input.y(), &structural_x, &estimate.params);
-
-    let structural = FeInput::from_effect_groups(
-        input.y(),
-        &structural_x,
+    let structural_x: Vec<Vec<f64>> = input
+        .x_exog()
+        .iter()
+        .chain(input.x_endog())
+        .cloned()
+        .collect();
+    let structural = FeInput::from_effect_groups_owned(
+        input.y().to_vec(),
+        structural_x,
         param_names.clone(),
         groups.to_vec(),
         input.dep_var_name().to_string(),
     )?
     .with_effect_names(effect_names);
+    let r_squared_within = 1.0 - estimate.ssr / sst_within;
+    let r_squared_between =
+        fe_r_squared_between(structural.y(), structural.x(), &estimate.params, &groups[0]);
+    let r_squared_overall = fe_r_squared_overall(structural.y(), structural.x(), &estimate.params);
     let structural_absorbed = pick_absorbed(&absorbed, 0, 1..1 + k);
 
     Ok(FeIvEstimator {

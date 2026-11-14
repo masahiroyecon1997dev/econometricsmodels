@@ -1132,3 +1132,18 @@ Stock-Yogoの表は実装の値がNBER TWP 284のTable 1（バイアス）・Tab
 **実装**: `benchmark/panel/fe_iv_datasets.py`の`generate_fe_iv_perf_dataset`（規模を指定できる均衡パネル、numpyの一括生成。凍結しない。n=1,000,000が約0.4秒）、`performance/compare_fe_iv.py`、`render_docs_results.py`の表示順・名前、`benchmark_performance.yml`のmatrix、`docs/performance/fe_iv.md`（日本語の開発ノート。結果の表は置かない）、`docs/guide/performance.md`の手書き部分（比較対象が無いこと・`k`の定義・計測範囲）。`docs/guide/performance-results.md`と先頭のサマリーはリリース準備時にCIの計測値から再生成する（手で書かない）。
 **確認**: devcontainerのreleaseビルドで全軸（n=10,000〜1,000,000、k=5・20、cov軸8点、method軸5点）を`--repeats 1`で通した。失敗した軸は無く、n=1,000,000でも完走する。数値は公開しない（CIの計測値が正）。デバッグビルドでも配線を確認し、環境はデバッグビルドへ戻した。
 **未実施**: CIでの計測（`workflow_dispatch`かタグ push）、`performance-reviewer`によるレビュー、README「Performance」への転記（リリース時）。9.19の見送り（メモリの複製・HC2/HC3のレバレッジの再計算・`first_stage`の持ち方）の判断はCIの計測値を見てから。
+
+### 9.32 compact用のメモ（#380のコミット後。2026-11-14）
+
+**状態**: `release/v0.10.0`。**未push**（pushはユーザーの指示があるまで行わない。`origin/release/v0.10.0`との差は18コミット）。#373〜#380のIssueはまだ**closeしていない**（push後、英語コメントつきでユーザー承認を得てclose）。PR #635は未マージ（内容確認後にマージ）。#379・#380の実装・テスト・ドキュメントは完了済みで、CIでの計測（#380）が残る。
+**このセッションのコミット（古い順）**: #379 — `9bb61076`（コード・テスト・ドキュメント）・`8c6c4c19`（CSV・JSON）／レビュー対応1段階目 `4580002f`・`fb36db25`／2段階目 `895c1e48`・`7cb42ed9`／3段階目 `fbbb02f6`・`a276a53a`（設計ノート9.29・9.30）。#380 — `61800ed9`（9.31）。起票: #655（HC2/HC3のrk Wald Fをfixestの第一段階で確かめる）・#656（ivDiagの2-wayクラスターFの不一致の原因）。
+**変更・作成したファイルの要点**
+- `benchmark/panel/`: `fe_iv_datasets.py`（凍結用20シナリオ＋性能計測用`generate_fe_iv_perf_dataset`）・`fe_iv_cases.py`（`fixest_cases()`174・`dummy_cases()`117・`plm_cases()`93・`ivdiag_cases()`92）・`references/{run_fixest_iv_benchmark.R, dummy_2sls_ref.py, run_plm_fe_iv_benchmark.R}`・`fixtures/generate_fe_iv_*`（7本＋cov 3本）。`benchmark/iv/references/run_ivdiag.R`は固定効果の複数列に対応。
+- `tests/panel/test_fe_iv_{reference,dummy_crosscheck,plm_crosscheck,weak_diagnostics_crosscheck,validation}.py`・`tests/support/_fe_iv_helpers.py`・`_tolerances_panel.py`の4キー。`test_fe_iv_binding.py`・`test_fe_iv_api.py`は整理・追加。
+- `performance/compare_fe_iv.py`・`docs/performance/fe_iv.md`・`benchmark_performance.yml`のmatrix・`render_docs_results.py`。公開側は`docs/guide/verification*.md`・`performance.md`・README。
+**直前の確認**: 全体`pytest tests --check-cov-coverage --check-no-skips`は14057件通過（3段階目のコミット前）。その後の変更は性能計測だけで、`tests/panel`・`tests/cross_method`の10604件は通過、`ruff check`・`ruff format --check`は通過。`_lib`はデバッグビルドに戻してある（releaseで計測したあと`uv run maturin develop`で入れ直した）。`mkdocs build`は#380の変更後は未実行（`test_public_docs`は通過）。
+**次の作業**: (1)CIで`benchmark_performance.yml`を`workflow_dispatch`し、`fe_iv`ジョブが完走するか・n=1,000,000のピークRSS（devcontainerでは約930MB、`endog3`で約1.4GB。数値は公開しない）を見る。(2)9.19の見送り（メモリの複製・HC2/HC3のレバレッジの再計算・`first_stage`の持ち方）をCIの値で判断する。(3)`performance-reviewer`によるレビュー（未実施。ユーザーに起動を確認する）。(4)FE-GMM（#381〜#388）。着手前に判断が分かれる点をユーザーに確認する（CLAUDE.md 14章）。
+**未決・保留（ユーザー判断）**
+- #655・#656の着手。テスト網羅性レビューの見送り: cross_methodの`test_perfect_fit`等4ファイルへのFEIV追加、クラスター不均衡の組み合わせ（2-way・`unbalanced`・`long_panel`）、テスト名・見出し規約の細部（9.30）。
+- 従来の保留: `first_stage`の持ち方（`Py<FEResult>`案）、DKの第一段階で`T`が`l`以下のときの標準誤差の信頼性（9.19）、#636へのFE-2SLSの追加、FE-GMMのHansen J（3章7）、IV本体の`G ≤ d`のrk LM、実データ（`jtrain`等）のフィクスチャ、`test_validation_order.py`の`INSUFFICIENT_INSTRUMENTS`の順位。IV側の保留（ルートCLAUDE.md 2章への診断の例外の追記、READMEの権利の注意書き、フィクスチャのデータのライセンス、3章`shared/`の列挙、`mop-oracle-spec.md`の履歴）。
+**注意書き**: コミットはパス指定・署名（ホストの端末で確認。失敗したら止まって報告、リトライは1回まで。今回も1回失敗してから再実行で成功した）。Pythonを触ったら`uv run maturin develop`（debug）で入れ直してから`uv run --no-sync pytest`。性能計測はreleaseビルド（`uv run --no-sync maturin develop --release`）で行い、終わったらdebugに戻す。フィクスチャの生成は`python -m benchmark.panel.freeze`（CSV）→`python -m benchmark.panel.fixtures.generate_fe_iv_*`（JSON）。heredocでバッククォートを含む文章を書くときは`<<'EOF'`。`.venv`配下を`ls`すると権限で拒否される。長い全体テスト（約8分）は`run_in_background`で走らせ、`&`は使わない（完了通知が実体と合わなくなる）。

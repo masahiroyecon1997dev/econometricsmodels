@@ -59,7 +59,7 @@ FEIV は `y`・`x_exog`・`x_endog`・操作変数の全列に同じ within 変�
 
 計測値は公開ページの[Performance results](../guide/performance-results.md)を参照（`benchmark_performance.yml` のCI計測値から生成。リリース準備時に `/release` で更新する）。
 
-- **ピークRSS**: 構造式と第一段階が、変換済みの列・残差・吸収した効果を保持するため、n が大きいときのピークRSSは FE より大きい。CI の計測（`benchmark_performance.yml` を `workflow_dispatch` で実行）では、n=1,000,000 の `one_way` で FE の約1.7倍、`three_way` でも約1.7倍だった。n が小さい点は、FE の計測側にリファレンスの読み込み分が含まれるため、FEIV と比べられない（比較は n=1,000,000 の点に限る）。生データ（約8列×8バイト×n）に対する倍率の内訳は測っていない。
+- **ピークRSS**: 構造式と第一段階が、変換済みの列・残差・吸収した効果を保持するため、n が大きいときのピークRSSは FE より大きい。CI の計測（`benchmark_performance.yml` を `workflow_dispatch` で実行）では、n=1,000,000 の `one_way` で FE の約1.4倍、`two_way`・`three_way` で約1.5倍（`fit()` 中の複製を減らす前は、どれも約1.7倍）。複製を減らした前後の同じ点で、FEIV のピークRSSは約20〜25%下がった。n が小さい点は、FE の計測側にリファレンスの読み込み分が含まれるため、FEIV と比べられない（比較は n=1,000,000 の点に限る）。生データ（約8列×8バイト×n）に対する倍率の内訳は測っていない。
 
 ## 再現方法
 

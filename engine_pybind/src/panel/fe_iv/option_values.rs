@@ -8,7 +8,7 @@
 use pyo3::PyResult;
 
 use super::super::common::{
-    PanelCovKind, PanelModel, check_panel_cov_options, parse_panel_cov_kind, require_dk_time,
+    PanelCovKind, PanelModel, check_panel_cov_options, check_panel_dk_options, parse_panel_cov_kind,
 };
 use crate::shared::option_values::parse_choice;
 use crate::shared::validation::reject_unused_option;
@@ -20,6 +20,16 @@ use super::options::FEIVOptions;
 pub(super) enum EstimatorKind {
     TwoSls,
     Gmm,
+}
+
+impl EstimatorKind {
+    /// `FEIVResult.estimator`に格納する正規形の名前（結果と診断の検査がこの名前を使う）。
+    pub(super) fn name(self) -> &'static str {
+        match self {
+            Self::TwoSls => "2sls",
+            Self::Gmm => "gmm",
+        }
+    }
 }
 
 /// `gmm_type`の種類。
@@ -182,23 +192,7 @@ pub(super) fn check_fe_iv_options(options: &FEIVOptions, values: &OptionValues) 
             || (values.uses_weight() && values.weight == WeightKind::Cluster),
         CLUSTER_CONDITION,
     )?;
-    let is_dk = values.cov == PanelCovKind::Dk;
-    reject_unused_option(
-        "dk_time",
-        options.dk_time.is_some(),
-        is_dk,
-        "cov_type=\"dk\"",
-    )?;
-    reject_unused_option(
-        "dk_bandwidth",
-        options.dk_bandwidth.is_some(),
-        is_dk,
-        "cov_type=\"dk\"",
-    )?;
-    if is_dk {
-        require_dk_time(options.dk_time.as_deref())?;
-    }
-    Ok(())
+    check_panel_dk_options(values.cov, options.dk_time.as_deref(), options.dk_bandwidth)
 }
 
 #[cfg(test)]

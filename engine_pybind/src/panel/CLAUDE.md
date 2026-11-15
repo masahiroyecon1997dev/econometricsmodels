@@ -32,7 +32,7 @@ FE/REとも、IVの「データ抽出・pyclass定義」→「engine呼び出し
 
 ## FEIV（`panel/fe_iv.rs`と`fe_iv/`）
 
-2SLSとGMMは**1つのクラス**（`FEIVOptions.estimator`が`"2sls"`既定・`"gmm"`。IVの`IVOptions.estimator`と同じ）。別クラスに分けるとIVとのインターフェースが大きく異なり利用者が分かりにくくなるため（GMMを別クラス`FEGMM`にしていたのを統合した）。
+2SLSとGMMは**1つのクラス**（`FEIVOptions.estimator`が`"2sls"`既定・`"gmm"`。IVの`IVOptions.estimator`と同じ）。別クラスに分けるとIVとのインターフェースが大きく異なり利用者が分かりにくくなるため。
 `_lib.fit_fe_iv(data, y, x_exog, x_endog, instruments, effects, options)`を`lib.rs`が登録する（`#[allow(clippy::too_many_arguments)]`は公開引数の数を変えられないため）。構成は`iv/common/`と同じ:
 
 - `options.rs`: `FEIVOptions`（`estimator`・`cov_type`既定`cluster`・`confidence_level`・`cluster`・`dk_time`・`dk_bandwidth`・`gmm_type`・`gmm_weight_type`・`gmm_max_iter`・`gmm_tol`・`raise_on_non_convergence`・`tol`・`max_iter`）。

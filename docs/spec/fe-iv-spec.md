@@ -26,8 +26,7 @@ IV本体（2SLS・GMM・診断）は[`iv-spec.md`](./iv-spec.md)を参照し、�
 
 ### 2.1 2SLSとGMMは1つのクラスにする（IVと同じ）
 
-`FEIVOptions.estimator`（`"2sls"`既定・`"gmm"`）で切り替え、`FEIV`・`FEIVResults`は1組にする。GMMを別クラス（`FEGMM`）にしていた時期があったが、IVとの
-インターフェースが大きく異なり利用者が分かりにくくなるため、IVと同じ形に統合した（IVで推定量ごとにクラスを分けなかったのも同じ理由）。
+`FEIVOptions.estimator`（`"2sls"`既定・`"gmm"`）で切り替え、`FEIV`・`FEIVResults`は1組にする。IVとのインターフェースが大きく異なると利用者が分かりにくくなるため、IVと同じ形にする（IVで推定量ごとにクラスを分けなかったのも同じ理由）。
 `FeGmmEstimator`は第一段階・弱操作変数診断・Wu-Hausman・`fixed_effects()`を持たないので、推定量が持たないものは次のとおり扱う
 （IVの`wu_hausman_*`がGMMで`None`になるのと同じ形）:
 

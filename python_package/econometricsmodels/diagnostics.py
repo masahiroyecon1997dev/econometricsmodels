@@ -1,12 +1,12 @@
 """Result types of post-estimation diagnostics.
 
 Post-estimation diagnostics (for example `OLSResults.white_test()` or
-`IVResults.cragg_donald()`) are separate methods that the user calls after
+`IVResults.cragg_donald()` or `FEIVResults.c_stat()`) are separate methods that the user calls after
 fitting; they are never computed by `fit()`. Each returns a frozen
 dataclass so that values are read as attributes (`result.p_value`), like
 the properties of the fit results. Use `to_dict()` to get a plain `dict`.
 The hypothesis tests (those of OLS and the C statistic of IV and FEIV)
-share `DiagnosticResult`; the weak-instrument diagnostics of IV have no
+share `DiagnosticResult`; the weak-instrument diagnostics of IV and FEIV have no
 p-value (or two statistics) and each has its own result type.
 """
 
@@ -135,7 +135,7 @@ class BreuschGodfreyTestResult(DiagnosticResult):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class CraggDonaldResult:
-    """Result of `IVResults.cragg_donald()`.
+    """Result of `IVResults.cragg_donald()` and `FEIVResults.cragg_donald()`.
 
     The Cragg-Donald statistic measures the joint strength of the excluded
     instruments for all endogenous variables. It is not a test with a
@@ -189,7 +189,8 @@ class CraggDonaldResult:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class KleibergenPaapResult:
-    """Result of `IVResults.kleibergen_paap()`.
+    """Result of `IVResults.kleibergen_paap()` and
+    `FEIVResults.kleibergen_paap()`.
 
     The Kleibergen-Paap statistics are robust versions of the
     Cragg-Donald analysis: the covariance of the first-stage scores
@@ -237,7 +238,7 @@ class KleibergenPaapResult:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class EffectiveFResult:
-    """Result of `IVResults.effective_f()`.
+    """Result of `IVResults.effective_f()` and `FEIVResults.effective_f()`.
 
     The effective F statistic of Montiel Olea and Pflueger (2013) is a
     weak-instrument statistic for one endogenous variable that stays valid

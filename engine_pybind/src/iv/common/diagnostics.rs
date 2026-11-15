@@ -119,7 +119,7 @@ pub struct CStatisticOutput {
 }
 
 impl CStatisticOutput {
-    /// エンジンの結果と、検定した名前（モデルの列の並び）から作る。IVと`FEGMM`が共有する。
+    /// エンジンの結果と、検定した名前（モデルの列の並び）から作る。IVと`FEIV`（`estimator="gmm"`）が共有する。
     pub(crate) fn from_engine(
         c: CStatistic,
         variables: Vec<String>,
@@ -346,7 +346,7 @@ pub(crate) struct ResolvedCStatTarget {
     pub(crate) instruments: Vec<String>,
 }
 
-/// `c_stat`の引数（`variables`・`instruments`）を検査して位置に直す。IVと`FEGMM`が共有する。
+/// `c_stat`の引数（`variables`・`instruments`）を検査して位置に直す。IVと`FEIV`（`estimator="gmm"`）が共有する。
 ///
 /// 型の検査を両方の引数で先に済ませ、そのあとで値（空・重複・名前）を検査する
 /// （`docs/guide/validation.md`の報告順）。両方が未指定なら`CStatisticNothingToTest`。

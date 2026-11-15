@@ -213,6 +213,18 @@ def test_what_the_gmm_engine_does_not_compute_is_none_or_an_error(data):
             call()
 
 
+def test_effective_f_checks_the_estimator_before_its_argument(data):
+    """GMMの結果では、`alpha`の型によらず`METHOD_NOT_AVAILABLE_FOR_ESTIMATOR`になる。"""
+    result = _fit(data, ["a"])
+    with raises_error(
+        ErrorCode.METHOD_NOT_AVAILABLE_FOR_ESTIMATOR,
+        method="effective_f()",
+        estimator="gmm",
+        supported="2sls",
+    ):
+        result.effective_f(alpha="0.05")  # type: ignore[arg-type]
+
+
 def test_c_stat_is_not_available_for_two_stage_least_squares(data):
     result = FEIV(
         data,

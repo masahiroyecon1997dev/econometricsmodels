@@ -139,13 +139,27 @@ pub(crate) fn check_panel_cov_options(
     dk_time: Option<&str>,
     dk_bandwidth: Option<i64>,
 ) -> PyResult<()> {
-    let is_dk = kind == PanelCovKind::Dk;
     reject_unused_option(
         "cluster",
         cluster.is_some(),
         kind == PanelCovKind::Cluster,
         "cov_type=\"cluster\"",
     )?;
+    check_panel_dk_options(kind, dk_time, dk_bandwidth)
+}
+
+/// [`check_panel_cov_options`]のうち`dk_time`・`dk_bandwidth`の部分（`Dk`でなければ使われない。`Dk`では`dk_time`が
+/// 必須）。`cluster`の使われ方が`cov_type`だけで決まらない手法（`estimator="gmm"`のFEIV）が、`cluster`の検査だけを
+/// 自分で行ってこちらを呼ぶ。
+///
+/// # Errors
+/// 使われないオプションが指定されている場合、または`Dk`で`dk_time`が未指定の場合は`ValidationError`。
+pub(crate) fn check_panel_dk_options(
+    kind: PanelCovKind,
+    dk_time: Option<&str>,
+    dk_bandwidth: Option<i64>,
+) -> PyResult<()> {
+    let is_dk = kind == PanelCovKind::Dk;
     reject_unused_option("dk_time", dk_time.is_some(), is_dk, "cov_type=\"dk\"")?;
     reject_unused_option(
         "dk_bandwidth",

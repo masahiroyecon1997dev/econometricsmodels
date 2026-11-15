@@ -84,10 +84,12 @@ class FEIV:
         options: Estimation options. Defaults to `FEIVOptions()`
             (`estimator="2sls"`, `cov_type="cluster"` on the first
             column of `effects`, `confidence_level=0.95`) when omitted.
+            With `estimator="gmm"` the weight `gmm_weight_type` defaults
+            to `"cluster"`, unlike `"classical"` in `IV`.
 
     Examples:
         >>> import polars as pl
-        >>> from econometricsmodels import FEIV
+        >>> from econometricsmodels import FEIV, FEIVOptions
         >>> df = pl.DataFrame(
         ...     {
         ...         "y": [1.0, 2.1, 2.9, 1.5, 2.2, 3.8, 0.9, 2.4, 3.3]
@@ -96,6 +98,8 @@ class FEIV:
         ...         + [1.9, 2.5, 3.8],
         ...         "z": [0.9, 2.5, 2.7, 1.6, 1.8, 4.0, 1.1, 2.3, 3.0]
         ...         + [1.7, 2.9, 4.2],
+        ...         "z2": [1.2, 2.0, 3.4, 1.1, 2.6, 3.5, 1.0, 2.9, 3.1]
+        ...         + [2.2, 2.3, 3.6],
         ...         "id": ["a"] * 3 + ["b"] * 3 + ["c"] * 3 + ["d"] * 3,
         ...     }
         ... )
@@ -113,6 +117,21 @@ class FEIV:
         {'id': 4}
         >>> result.estimator
         '2sls'
+        >>> gmm = FEIV(
+        ...     df,
+        ...     y="y",
+        ...     x_exog=[],
+        ...     x_endog=["endog"],
+        ...     instruments=["z", "z2"],
+        ...     effects=["id"],
+        ...     options=FEIVOptions(estimator="gmm"),
+        ... ).fit()
+        >>> gmm.estimator, gmm.gmm_type, gmm.gmm_weight_type
+        ('gmm', 'two_step', 'cluster')
+        >>> gmm.stat_dist, gmm.wald_dist
+        ('normal', 'chi2')
+        >>> gmm.overid_df
+        1
     """
 
     def __init__(
@@ -184,7 +203,9 @@ class FEIV:
             ComputationError: A problem was detected during
                 computation (e.g. a singular within-transformed design
                 matrix, a perfect fit of the structural equation or of a
-                first stage, alternating projections that did not
+                first stage, a singular matrix in the GMM estimate or its
+                weight (collinear regressors or instruments, with
+                `estimator="gmm"`), alternating projections that did not
                 converge within `max_iter`, or `gmm_type="iterated"`
                 that did not converge within `gmm_max_iter` while
                 `raise_on_non_convergence` is true). A subclass of
@@ -456,7 +477,7 @@ class FEIVResults:
         return self._raw.wald_dist
 
     @property
-    def wald_df_num(self) -> int | None:
+    def wald_df_num(self) -> int:
         """Numerator degrees of freedom of `wald_statistic` (for the
         chi-squared distribution of `estimator="gmm"`, its degrees of
         freedom): the number of slope coefficients. Never `None`, because
@@ -697,12 +718,12 @@ class FEIVResults:
         `fit()`. It re-reads the variables from the data passed to
         `fit()` and estimates the model again on every call.
 
+        Available with `estimator="2sls"` only.
+
         Returns:
             A `CraggDonaldResult` with the statistic, the numbers of
             endogenous variables and excluded instruments, and the
             critical values (`None` where not tabulated).
-
-        Available with `estimator="2sls"` only.
 
         Raises:
             ValidationError: The model was fitted with
@@ -728,12 +749,12 @@ class FEIVResults:
         `fit()`. It re-reads the variables from the data passed to
         `fit()` and estimates the model again on every call.
 
+        Available with `estimator="2sls"` only.
+
         Returns:
             A `KleibergenPaapResult`. Either statistic is `None` when
             only the other is defined (the Wald F needs one more cluster
             than the LM).
-
-        Available with `estimator="2sls"` only.
 
         Raises:
             ValidationError: The model was fitted with

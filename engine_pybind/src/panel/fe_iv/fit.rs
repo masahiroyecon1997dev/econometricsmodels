@@ -12,7 +12,7 @@ use pyo3::prelude::*;
 
 use super::super::common::panel_error_to_pyerr;
 use super::gmm_setup::c_statistic_weight;
-use super::input::{BuiltFeIvInput, FeIvColumns, build_fe_iv_input};
+use super::input::{BuiltFeIvInput, BuiltGmm, FeIvColumns, build_fe_iv_input};
 use super::options::FEIVOptions;
 use super::result::FEIVResult;
 use crate::shared::column_extraction::SelectedData;
@@ -26,10 +26,14 @@ fn absorption(options: &FEIVOptions) -> FeAbsorption {
     }
 }
 
-/// 推定した推定量。
+/// 推定した推定量。GMMは、結果に載せる`gmm_type`と重みの正規形の名前を一緒に持つ（別に持ち回さない）。
 enum Estimated {
     TwoSls(FeTwoSlsEstimator),
-    Gmm(FeGmmEstimator),
+    Gmm {
+        estimator: FeGmmEstimator,
+        gmm_type_name: String,
+        weight_type_name: Option<String>,
+    },
 }
 
 fn estimate_built(built: BuiltFeIvInput, options: &FEIVOptions) -> PyResult<Estimated> {
@@ -52,18 +56,25 @@ fn estimate_built(built: BuiltFeIvInput, options: &FEIVOptions) -> PyResult<Esti
             )
             .map_err(panel_error_to_pyerr)?,
         ),
-        Some(gmm) => Estimated::Gmm(
-            FeGmmEstimator::fit_with_absorption(
+        Some(BuiltGmm {
+            gmm_type,
+            gmm_type_name,
+            weight_type_name,
+            raise_on_non_convergence,
+        }) => Estimated::Gmm {
+            estimator: FeGmmEstimator::fit_with_absorption(
                 input,
                 effects,
-                gmm.gmm_type,
-                gmm.raise_on_non_convergence,
+                gmm_type,
+                raise_on_non_convergence,
                 cov_type,
                 options.confidence_level,
                 &absorption,
             )
             .map_err(panel_error_to_pyerr)?,
-        ),
+            gmm_type_name,
+            weight_type_name,
+        },
     })
 }
 
@@ -76,7 +87,7 @@ pub(super) fn estimate_two_sls(
 ) -> PyResult<FeTwoSlsEstimator> {
     match estimate_built(build_fe_iv_input(df, columns, options)?, options)? {
         Estimated::TwoSls(estimator) => Ok(estimator),
-        Estimated::Gmm(_) => Err(internal_error(
+        Estimated::Gmm { .. } => Err(internal_error(
             "a two-stage least squares re-estimation returned a GMM estimator",
         )),
     }
@@ -131,24 +142,20 @@ pub(crate) fn fit(
 fn fit_frame(df: &DataFrame, columns: FeIvColumns, options: &FEIVOptions) -> PyResult<FEIVResult> {
     let built = build_fe_iv_input(df, columns.clone(), options)?;
     let cov_type_name = built.cov_type_name.clone();
-    let names = built
-        .gmm
-        .as_ref()
-        .map(|gmm| (gmm.gmm_type_name.clone(), gmm.weight_type_name.clone()));
     match estimate_built(built, options)? {
         Estimated::TwoSls(estimator) => {
             FEIVResult::from_two_sls(&estimator, columns, cov_type_name)
         }
-        Estimated::Gmm(estimator) => {
-            let (gmm_type_name, weight_type_name) = names
-                .ok_or_else(|| internal_error("a GMM fit without the names of its settings"))?;
-            FEIVResult::from_gmm(
-                &estimator,
-                columns,
-                cov_type_name,
-                gmm_type_name,
-                weight_type_name,
-            )
-        }
+        Estimated::Gmm {
+            estimator,
+            gmm_type_name,
+            weight_type_name,
+        } => FEIVResult::from_gmm(
+            &estimator,
+            columns,
+            cov_type_name,
+            gmm_type_name,
+            weight_type_name,
+        ),
     }
 }

@@ -33,6 +33,7 @@ use super::super::common::{groups_dict, panel_error_to_pyerr};
 use super::super::fe::{FEResult, LazyFixedEffects, fe_result_fields, fixed_effects_dict};
 use super::fit::{compute_c_statistic, estimate_two_sls};
 use super::input::FeIvColumns;
+use super::option_values::EstimatorKind;
 use super::options::FEIVOptions;
 use crate::shared::column_extraction::select_columns;
 use crate::shared::mat_conversion::{mat_to_rows, mat_to_vec};
@@ -173,7 +174,7 @@ pub struct FEIVResult {
     #[pyo3(get)]
     pub wald_dist: String,
     #[pyo3(get)]
-    pub wald_df_num: Option<usize>,
+    pub wald_df_num: usize,
     /// Follows `cov_type` like the t-tests, so it equals `stat_df`. `None` for `estimator="gmm"`
     /// (chi-squared).
     #[pyo3(get)]
@@ -318,7 +319,9 @@ impl FEIVResult {
             .f_statistic()
             .zip(estimator.f_p_value())
             .ok_or_else(|| internal_error("the joint test of a FEIV fit is missing"))?;
-        let (wald_df_num, wald_df_denom) = estimator.f_df().unzip();
+        let (wald_df_num, wald_df_denom) = estimator.f_df().ok_or_else(|| {
+            internal_error("the degrees of freedom of a FEIV overall F test are missing")
+        })?;
         let weak_df = estimator.weak_instrument_f_df();
         let wu_hausman_df = estimator.wu_hausman_df();
 
@@ -342,7 +345,7 @@ impl FEIVResult {
             group_counts: estimator.n_groups().to_vec(),
             cov_type: cov_type_name,
             dk_bandwidth_used: estimator.dk_bandwidth_used().map(|bw| bw as i64),
-            estimator: "2sls".to_string(),
+            estimator: EstimatorKind::TwoSls.name().to_string(),
             gmm_type: None,
             gmm_weight_type: None,
             n_iter: 1,
@@ -351,7 +354,7 @@ impl FEIVResult {
             wald_p_value: f_p_value,
             wald_dist: "f".to_string(),
             wald_df_num,
-            wald_df_denom,
+            wald_df_denom: Some(wald_df_denom),
             r_squared_within: estimator.r_squared_within(),
             r_squared_between: estimator.r_squared_between(),
             r_squared_overall: estimator.r_squared_overall(),
@@ -403,7 +406,7 @@ impl FEIVResult {
             .ok_or_else(|| internal_error("the joint test of a FEIV fit is missing"))?;
 
         Ok(Self {
-            wald_df_num: Some(params.len()),
+            wald_df_num: params.len(),
             params,
             std_errors: mat_to_vec(estimator.std_errors()),
             cov_params: mat_to_rows(estimator.cov_params()),
@@ -423,7 +426,7 @@ impl FEIVResult {
             group_counts: estimator.n_groups().to_vec(),
             cov_type: cov_type_name,
             dk_bandwidth_used: estimator.dk_bandwidth_used().map(|bw| bw as i64),
-            estimator: "gmm".to_string(),
+            estimator: EstimatorKind::Gmm.name().to_string(),
             gmm_type: Some(gmm_type_name),
             gmm_weight_type: weight_type_name,
             n_iter: estimator.n_iter(),
@@ -471,7 +474,8 @@ impl FEIVResult {
     }
 
     /// 結果の`estimator`が`supported`でなければ`METHOD_NOT_AVAILABLE_FOR_ESTIMATOR`にする。
-    fn require_estimator(&self, method: &str, supported: &str) -> PyResult<()> {
+    fn require_estimator(&self, method: &str, supported: EstimatorKind) -> PyResult<()> {
+        let supported = supported.name();
         if self.estimator == supported {
             return Ok(());
         }
@@ -503,7 +507,7 @@ impl FEIVResult {
         method: &str,
         compute: impl FnOnce(&FeTwoSlsEstimator) -> PyResult<T> + Send,
     ) -> PyResult<T> {
-        self.require_estimator(method, "2sls")?;
+        self.require_estimator(method, EstimatorKind::TwoSls)?;
         let source = self.retained_source(py)?;
         let options = self.retained_options()?;
         let columns = self.columns();
@@ -543,7 +547,7 @@ impl FEIVResult {
     ///     The model was fitted with `estimator="gmm"`.
     fn first_stage(&self) -> PyResult<HashMap<String, FEResult>> {
         guard(|| {
-            self.require_estimator("first_stage()", "2sls")?;
+            self.require_estimator("first_stage()", EstimatorKind::TwoSls)?;
             Ok(self
                 .first_stage
                 .iter()
@@ -640,6 +644,8 @@ impl FEIVResult {
     ///     The statistic is undefined for these data.
     fn effective_f(&self, py: Python<'_>, alpha: &Bound<'_, PyAny>) -> PyResult<EffectiveFOutput> {
         guard(|| {
+            // 推定量の検査を先にする（GMMの結果では、`alpha`の型によらず`METHOD_NOT_AVAILABLE_FOR_ESTIMATOR`）。
+            self.require_estimator("effective_f()", EstimatorKind::TwoSls)?;
             let alpha = extract_strict_float(alpha, "alpha")?;
             self.with_estimator(py, "effective_f()", |estimator| {
                 let eff = estimator.effective_f(alpha).map_err(panel_error_to_pyerr)?;
@@ -684,7 +690,7 @@ impl FEIVResult {
         instruments: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<CStatisticOutput> {
         guard(|| {
-            self.require_estimator("c_stat()", "gmm")?;
+            self.require_estimator("c_stat()", EstimatorKind::Gmm)?;
             // 型の検査 → 値（空・重複・名前）の検査の順は`resolve_c_stat_target`が持つ。
             let ResolvedCStatTarget {
                 target,

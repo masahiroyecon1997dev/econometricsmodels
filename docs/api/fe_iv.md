@@ -6,7 +6,7 @@
 
 ## Options at a glance
 
-Pass an `FEIVOptions` as `options=`. `effects` is an argument of `FEIV`, not an option, and there is no `include_intercept`. The options are those of [`FEOptions`](fe.md). `FEIV` is two-stage least squares only, so there is no `estimator` option (as there is in [`IVOptions`](iv.md)).
+Pass an `FEIVOptions` as `options=`. `effects` is an argument of `FEIV`, not an option, and there is no `include_intercept`. The options are those of [`FEOptions`](fe.md). `FEIV` is two-stage least squares only, so there is no `estimator` option (as there is in [`IVOptions`](iv.md)). For GMM with fixed effects see [FEGMM](fe_gmm.md).
 
 | Option | Purpose | Default | Notes |
 |---|---|---|---|

@@ -6,21 +6,21 @@
 
 ## Options at a glance
 
-Pass an `FEGMMOptions` as `options=`. `effects` is an argument of `FEGMM`, not an option, and there is no `include_intercept`. Options of `None` take the effective default in parentheses where the option is used.
+Pass an `FEGMMOptions` as `options=`. It is the options of [`FEOptions`](fe.md) (`cov_type`, `cluster`, `dk_time`, `dk_bandwidth`, `confidence_level`, `tol`, `max_iter`) with the five GMM options added (`gmm_type`, `gmm_weight_type`, `gmm_max_iter`, `gmm_tol`, `raise_on_non_convergence`), and `"hc0"` is not available. `effects` is an argument of `FEGMM`, not an option, and there is no `include_intercept`. For an option whose default is `None`, the value that is used when it is left unset is given in parentheses.
 
 | Option | Purpose | Default | Notes |
 |---|---|---|---|
-| `gmm_type` | `"one_step"`, `"two_step"` or `"iterated"` | `None` (`"two_step"`) | |
-| `gmm_weight_type` | Weight matrix of the point estimate: `"classical"`, `"robust"` or `"cluster"` | `None` (`"cluster"`) | Not with `gmm_type="one_step"`; there is no `"hac"`. Also the weight used by `c_stat()` |
-| `gmm_max_iter` | Maximum number of estimations, 3 to 10,000 | `None` (100) | `gmm_type="iterated"` only |
-| `gmm_tol` | Convergence tolerance | `None` (`1e-6`) | `gmm_type="iterated"` only |
+| `gmm_type` | `"one_step"` (the fixed weight \((\tilde Z'\tilde Z)^{-1}\), the two-stage least squares estimate), `"two_step"` or `"iterated"` (repeat the second step until the coefficients converge) | `None` (`"two_step"`) | |
+| `gmm_weight_type` | Weight matrix of the point estimate: `"classical"`, `"robust"` or `"cluster"` | `None` (`"cluster"`) | Not with `gmm_type="one_step"`, which has no weight type; there is no `"hac"`. Also the weight used by `c_stat()` |
+| `gmm_max_iter` | Maximum number of estimations, 3 to 10000 | `None` (`100`) | `gmm_type="iterated"` only |
+| `gmm_tol` | Convergence tolerance | `None` (`1e-6`) | `gmm_type="iterated"` only. The comparison with the previous coefficients also has an absolute floor of `1e-8` |
 | `raise_on_non_convergence` | Raise an error if iteration does not converge | `None` (`True`) | `gmm_type="iterated"` only |
 | `cov_type` | Standard error type: `"classical"`, `"hc1"`, `"hc2"`, `"hc3"`, `"cluster"`, `"dk"` | `"cluster"` | `"hc0"` is not available. Independent of `gmm_weight_type` |
 | `cluster` | Column that defines the clusters | `None` (the first column of `effects`) | With `cov_type="cluster"` or `gmm_weight_type="cluster"` |
 | `dk_time` | Column that defines the time periods of the Driscoll-Kraay kernel | `None` | Required with `cov_type="dk"`; never taken from `effects` |
 | `dk_bandwidth` | Kernel bandwidth | `None` (automatic) | Only with `cov_type="dk"` |
 | `confidence_level` | Level of `conf_int`, in (0, 1) | `0.95` | |
-| `tol` | Convergence tolerance of the alternating projections that remove the effects of a two-way model on an unbalanced panel, or of a model with three or more effects | `None` (1e-12) | Ignored on a balanced two-way panel and in a one-way model. Not related to `gmm_tol` |
+| `tol` | Convergence tolerance of the alternating projections that remove the effects of a two-way model on an unbalanced panel, or of a model with three or more effects | `None` (`1e-12`) | Ignored on a balanced two-way panel and in a one-way model. Not related to `gmm_tol` |
 | `max_iter` | Maximum number of passes of those projections, from 1 to 10000 | `10000` | Reaching the limit raises `ComputationError`. Not related to `gmm_max_iter` |
 
 Which options go with which setting (an option set where it is not used raises a `ValidationError`):
@@ -48,4 +48,4 @@ The fields of the results are listed by purpose at the top of the results class 
 
 ::: econometricsmodels.FEGMMResults
 
-`FEGMMResults.c_stat()` returns the same result type as `IVResults.c_stat()`, which is described on the [IV page](iv.md#econometricsmodels.CStatisticResult) (see also [Usage](../usage/fe_gmm.md#exogeneity-and-instrument-validity-post-estimation)): `CStatisticResult`.
+`FEGMMResults.c_stat()` returns a `CStatisticResult`, the same result type as `IVResults.c_stat()`, which is described on the [IV page](iv.md#econometricsmodels.CStatisticResult) (see also [Usage](../usage/fe_gmm.md#exogeneity-and-instrument-validity-post-estimation)).

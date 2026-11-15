@@ -271,7 +271,7 @@ These are in addition to the situations above.
 - `cov_type="hc2"` or `"hc3"` when the effects do not form a balanced two-way grid (an unbalanced two-way panel, or three or more effects) and the columns of `effects` other than the one with the most groups have more than 3,000 groups in total (`LEVERAGE_DIMENSION_TOO_LARGE`).
 - A regressor with the same value in every row (`REGRESSOR_CONSTANT`), or one that has no variation left after the fixed effects are removed, for example one that is constant within every entity or within the groups of another column of `effects` (`REGRESSOR_NO_WITHIN_VARIATION`).
 - The outcome has the same value in every row (`OUTCOME_CONSTANT`), or has no variation left after the fixed effects are removed (constant within every entity, or fully explained by the effects together, `OUTCOME_CONSTANT_WITHIN_ENTITY`).
-- Too few degrees of freedom. In FEIV and FEGMM there are two conditions: more observations than the slope coefficients plus the absorbed fixed-effect parameters, and more than the exogenous variables plus instruments plus those parameters (see [Definitions: FEIV](../methods/fe_iv.md#degrees-of-freedom)).
+- Too few degrees of freedom. In FEIV and FEGMM there are two conditions: more observations than the slope coefficients plus the absorbed fixed-effect parameters, and more than the exogenous variables plus instruments plus those parameters (see [Definitions: FEIV](../methods/fe_iv.md#degrees-of-freedom) and [Definitions: FEGMM](../methods/fe_gmm.md#degrees-of-freedom)).
 
 **FEIV, FEGMM**
 
@@ -281,9 +281,11 @@ These are in addition to the situations above.
 
 **FEGMM**
 
-- GMM options are set for a `gmm_type` that does not use them (`gmm_weight_type` with `"one_step"`; `gmm_max_iter`, `gmm_tol` or `raise_on_non_convergence` unless `"iterated"`), are out of range (`gmm_max_iter` outside 3 to 10,000, or `gmm_tol` not a positive finite number), or name a weight that does not exist (`gmm_weight_type="hac"` is an unknown value).
+- GMM options are set for a `gmm_type` that does not use them: `gmm_weight_type` with `"one_step"`, or `gmm_max_iter`, `gmm_tol` or `raise_on_non_convergence` unless `"iterated"`.
+- A GMM option is out of range (`gmm_max_iter` outside 3 to 10,000, or `gmm_tol` not a positive finite number), or names a weight that does not exist (`gmm_weight_type="hac"` is an unknown value).
 - `cluster` is set although neither `cov_type` nor `gmm_weight_type` uses it. The cluster weight is the default, so with the defaults `cluster` is used.
-- With the cluster weight, there are too few clusters for the weight matrix (`fit()` needs at least as many clusters as the columns of the exogenous regressors and instruments when overidentified, and more when just identified), and with `cov_type="cluster"` or `"dk"` more clusters or periods than slope coefficients.
+- With the cluster weight, there are too few clusters for the weight matrix: `fit()` needs at least as many clusters as the columns of the exogenous regressors and instruments when overidentified, and one more than that when just identified.
+- With `cov_type="cluster"` or `"dk"`, there are not more clusters or periods than slope coefficients.
 
 **RE**
 
@@ -326,7 +328,7 @@ These are in addition to the situations above.
 
 - **OLS, WLS:** one regressor is a multiple of another, or a constant column is combined with an intercept.
 - **IV:** the first stage fails (collinear instruments, an instrument collinear with an exogenous regressor, or a constant instrument). When the first stages succeed but the endogenous variables are collinear with each other or with an exogenous regressor, the second stage fails (2SLS) or `X'ZWZ'X` cannot be inverted (GMM).
-- **FE, FEIV, FEGMM, RE:** the within transformation leaves a singular design. In RE, a time-invariant regressor that is constant across entities (collinear with the intercept) or collinear with another time-invariant regressor also gives a singular design.
+- **FE, FEIV, FEGMM, RE:** the within transformation leaves a singular design. In FEGMM, which has no first stage, collinear exogenous regressors or instruments surface as `MATRIX_NEAR_SINGULAR` (the matrix `GMM_BREAD` or `GMM_WEIGHT`) instead of `DESIGN_MATRIX_SINGULAR`. In RE, a time-invariant regressor that is constant across entities (collinear with the intercept) or collinear with another time-invariant regressor also gives a singular design.
 
 ### Perfect fit
 
@@ -350,10 +352,10 @@ The absence of an error says nothing about the following. They are your responsi
 - **Model specification.** Functional form, omitted variables, and the choice of regressors are not assessed.
 - **Heteroskedasticity, autocorrelation and clustering structure.** The package computes the standard errors you ask for through `cov_type`. It does not test which one is appropriate.
 - **Endogeneity.** For OLS, FE and RE nothing tests whether regressors are correlated with the error term. The Hausman test for RE and the Wu-Hausman test for IV and FEIV are reported as statistics, not used to stop the estimation (FEGMM has `c_stat(variables=...)` instead).
-- **Instrument validity and strength.** In IV, FEIV and FEGMM only the order condition (at least as many instruments as endogenous regressors) is checked up front. The rank condition is not, so irrelevant instruments may surface later as a singular first stage. The weak-instrument F statistic is reported without a verdict, and the over-identification test is `None` when the model is just identified.
+- **Instrument validity and strength.** In IV, FEIV and FEGMM only the order condition (at least as many instruments as endogenous regressors) is checked up front. The rank condition is not, so irrelevant instruments may surface later as a singular first stage (IV and FEIV) or as a singular matrix (`MATRIX_NEAR_SINGULAR`, FEGMM, which has no first stage). The weak-instrument F statistic (IV and FEIV) is reported without a verdict, and the over-identification test is `None` when the model is just identified.
 - **Stationarity, outliers and influential observations.**
 - **Near-separation.** Data that are close to, but not at, separation have a finite estimate, so they estimate without an error, although the standard errors can be very large. Only exact separation is an error.
-- **Panel structure beyond what the estimator needs.** FE, FEIV and FEGMM accept unbalanced panels with one to five columns in `effects`, and also accepts groups that form several disconnected sets; a combination of `effects` values may appear in more than one row, and nothing checks for it. Only two-way RE requires a balanced panel (every combination exactly once, so a repeated combination is reported as `PANEL_NOT_BALANCED_FOR_TWO_WAY`).
+- **Panel structure beyond what the estimator needs.** FE, FEIV and FEGMM accept unbalanced panels with one to five columns in `effects`, and also accept groups that form several disconnected sets; a combination of `effects` values may appear in more than one row, and nothing checks for it. Only two-way RE requires a balanced panel (every combination exactly once, so a repeated combination is reported as `PANEL_NOT_BALANCED_FOR_TWO_WAY`).
 - **Numeric precision.** Numeric columns are converted to 64-bit floating point without a warning, so integers beyond 2^53 and decimals with many digits can lose precision. See [Accepted data](accepted-data.md#how-values-are-converted).
 
 ## Where to look next

@@ -84,7 +84,7 @@ pub struct FEGMMOptions {
     /// Case-insensitive. Unlike OLS/WLS/IV, "hc0" is **not** supported. It is independent
     /// of `gmm_weight_type` (the weight matrix of the point estimate): the sandwich
     /// covariance is built from the weight matrix actually used and the moment variance of
-    /// this type. There is no reference implementation for "hc2" and "hc3" with GMM.
+    /// this type. "hc2" and "hc3" with GMM have not been compared with another implementation.
     #[pyo3(get)]
     pub cov_type: String,
 
@@ -131,7 +131,8 @@ pub struct FEGMMOptions {
     /// point estimate as two-stage least squares; "robust" assumes the within-transformed
     /// errors are uncorrelated over time, which does not hold for short panels, so it is
     /// not recommended there. There is no "hac" weight. Specifying it with
-    /// `gmm_type="one_step"` (which does not use a weight matrix) raises `ValidationError`.
+    /// `gmm_type="one_step"` (which uses the fixed weight `(Z'Z)^-1` and has no weight type) raises
+    /// `ValidationError`.
     #[pyo3(get)]
     pub gmm_weight_type: Option<String>,
 
@@ -690,13 +691,16 @@ fn c_statistic_weight(gmm_type: &FeGmmType) -> FeWeightType {
 ///
 /// `test_stats` holds the z-statistics (normal distribution). `r_squared_*` are computed from the
 /// structural residuals (`y - X b` with the actual endogenous regressors `X`) and can be
-/// negative. `overid_*` is the Hansen J overidentification test, computed from the
-/// within-transformed data; for the classical weight (and `gmm_type="one_step"`) its variance is
+/// negative. `overid_*` are the Hansen J overidentification test, computed from the
+/// within-transformed data (`None` when just identified); for the classical weight (and
+/// `gmm_type="one_step"`) its variance is
 /// `e'e / (n - n_absorbed)`, where `n_absorbed` is the number of absorbed fixed-effect parameters.
-/// The "robust" and "cluster" weights are not adjusted: the "cluster" weight needs no adjustment when
-/// the clusters contain the entities (the entities themselves, or coarser groups), but does not hold
-/// for clusters that cross the entities (such as time periods), and the "robust" weight makes the
-/// statistic over-reject on a short panel.
+/// The "robust" and "cluster" weights are not adjusted. The "cluster" weight needs no adjustment
+/// when every column of `effects` is nested in the clusters (for example one-way effects clustered
+/// by the entity, or by a coarser column). With an effect that crosses the clusters, such as a time
+/// effect in a two-way model, that holds only approximately, and not at all for clusters that cross
+/// the entities (such as time periods). The "robust" weight makes the statistic over-reject on a
+/// short panel.
 ///
 /// The C statistic is not a field: it is the method `c_stat()`.
 // `Clone`を派生しない: `source_data`（`Py<PyAny>`）がGILなしでは複製できない（`FEIVResult`と同じ理由）。
@@ -753,7 +757,7 @@ pub struct FEGMMResult {
     #[pyo3(get)]
     pub gmm_type: String,
     /// Weight matrix actually used: `"classical"`, `"robust"` or `"cluster"`. `None` for
-    /// `gmm_type="one_step"`, which does not use a weight matrix.
+    /// `gmm_type="one_step"`, which has no weight type.
     #[pyo3(get)]
     pub gmm_weight_type: Option<String>,
     /// Number of GMM estimations performed (1 for `"one_step"`, 2 for `"two_step"`).
@@ -882,9 +886,11 @@ impl FEGMMResult {
     /// the same covariance of the moment conditions; the statistic is the difference of the two
     /// Hansen J statistics. The weight follows `gmm_weight_type` (`cluster` included) for
     /// `gmm_type="two_step"` and `"iterated"`, and is `"classical"` for `gmm_type="one_step"`,
-    /// which has no weight matrix. For the classical weight the variance of the moment
+    /// which has no weight type. For the classical weight the variance of the moment
     /// conditions uses `n - n_absorbed` like the Hansen J test; the other weights are not
-    /// adjusted, so the statistic over-rejects with a "robust" weight on a short panel.
+    /// adjusted. As for the Hansen J test, the cluster weight needs no adjustment when every
+    /// column of `effects` is nested in the clusters, and the statistic over-rejects with a
+    /// "robust" weight on a short panel.
     ///
     /// Raises
     /// ------

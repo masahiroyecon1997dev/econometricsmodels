@@ -69,7 +69,7 @@ print(result.n_groups)  # {"firm": 8}
 There is no intercept, since the fixed effects absorb it. Two more things differ from the other estimators:
 
 - **Standard errors.** `FEIVOptions.cov_type` defaults to `"cluster"` on the first column of `effects`, which is the usual choice when each entity is observed over several periods. Use `"dk"` for dependence across entities in the same period. The choices are explained in [FE: choosing the type of standard error](fe.md#choosing-the-type-of-standard-error); `"hc0"` is not available.
-- **Scope.** `FEIV` is two-stage least squares only. Unlike `IV`, it has no GMM estimator, no `"hac"` covariance and no `c_stat()`, and like `FE` it has no `predict()`, `augment()` or `summary()`. Use `FE` when every regressor is exogenous once the effects are removed, and `FEIV` when a regressor is still correlated with the error within the entities.
+- **Scope.** `FEIV` is two-stage least squares only. Unlike `IV`, it has no GMM estimator, no `"hac"` covariance and no `c_stat()` (use [FEGMM](fe_gmm.md) for GMM with the Hansen J test and a C statistic), and like `FE` it has no `predict()`, `augment()` or `summary()`. Use `FE` when every regressor is exogenous once the effects are removed, and `FEIV` when a regressor is still correlated with the error within the entities.
 
 See [Options and results](../api/fe_iv.md) for the full list of options.
 
@@ -142,4 +142,4 @@ If a statistic cannot be computed for your data, the method raises a `Computatio
 
 ## See also
 
-[IV](iv.md), [FE](fe.md), [Accepted data](../guide/accepted-data.md), [Validation and errors](../guide/validation.md), [Inference conventions](../guide/inference-conventions.md) and [Verification](../guide/verification.md).
+[IV](iv.md), [FE](fe.md), [FEGMM](fe_gmm.md), [Accepted data](../guide/accepted-data.md), [Validation and errors](../guide/validation.md), [Inference conventions](../guide/inference-conventions.md) and [Verification](../guide/verification.md).

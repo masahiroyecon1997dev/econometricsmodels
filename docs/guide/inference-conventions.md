@@ -4,7 +4,7 @@ This page summarizes which reference distribution each method uses for its test 
 
 ## Reference distributions by method
 
-Notation: `n` is the number of observations, `k` the number of coefficients, `G` the number of clusters, `N` the number of entities (the groups of the first column of `effects`, the first entry of `n_groups`), and `t_periods` the number of distinct periods of the `dk_time` column (the periods of the Driscoll-Kraay kernel). `n_absorbed` is the number of absorbed fixed-effect parameters in FE and FEIV: `sum(n_groups) - (number of columns in effects - 1)`.
+Notation: `n` is the number of observations, `k` the number of coefficients, `G` the number of clusters, `N` the number of entities (the groups of the first column of `effects`, the first entry of `n_groups`), and `t_periods` the number of distinct periods of the `dk_time` column (the periods of the Driscoll-Kraay kernel). `n_absorbed` is the number of absorbed fixed-effect parameters in FE, FEIV and FEGMM: `sum(n_groups) - (number of columns in effects - 1)`.
 
 | Method | Coefficient statistics (`test_stats`) | Overall test | Degrees of freedom |
 |---|---|---|---|
@@ -19,7 +19,7 @@ Notation: `n` is the number of observations, `k` the number of coefficients, `G`
 | Logit / Probit | normal | likelihood-ratio chi-squared (`lr_statistic`, `lr_df`) | none |
 | Tobit | normal | Wald chi-squared (`wald_dist="chi2"`, `wald_df`) | none |
 
-- Every results object reports the distribution actually used in `stat_dist` (`"t"` or `"normal"`) and the t degrees of freedom in `stat_df` (`None` for the normal distribution). `stat_df` is the value used for the p-values and confidence intervals, so it can differ from `df_resid` (for example with `cov_type="cluster"` in OLS, WLS, FE, FEIV, RE and 2SLS, or `cov_type="dk"` in FE, FEIV and RE; FEGMM uses the normal distribution).
+- Every results object reports the distribution actually used in `stat_dist` (`"t"` or `"normal"`) and the t degrees of freedom in `stat_df` (`None` for the normal distribution). `stat_df` is the value used for the p-values and confidence intervals, so it can differ from `df_resid` (for example with `cov_type="cluster"` in OLS, WLS, FE, FEIV, RE and 2SLS, or `cov_type="dk"` in FE, FEIV and RE). FEGMM uses the normal distribution, so `stat_df` is `None`.
 - The degrees of freedom of every test statistic are exposed so you can recompute a p-value yourself: `f_df_num` / `f_df_denom` (OLS, WLS, FE, RE), `wald_df_num` / `wald_df_denom` (IV, FEIV, FEGMM), `wu_hausman_df_num` / `wu_hausman_df_denom`, `weak_instrument_f_df_num` / `weak_instrument_f_df_denom`, `overid_df` (IV, FEIV, FEGMM), `lr_df` (Logit, Probit), `wald_df` (Tobit), `hausman_df` (RE). A degrees-of-freedom field is `None` when its statistic is not available. The overall F statistic (`f_statistic`, `f_p_value`) is also `None` when it is not defined, for example for a first-stage regression with `cov_type="cluster"` and no more clusters than slope coefficients (see [Weak instruments](#weak-instruments)).
 - `REOptions.variance_method` (`"swamy_arora"`, `"wallace_hussain"`, `"amemiya"`) selects how the RE variance components are estimated. Wallace-Hussain and Amemiya follow `plm`; Swamy-Arora on an unbalanced one-way panel is the `linearmodels` formula, not `plm`'s, so the two give different numbers there. The formulas and the cases that are rejected are in [Definitions: RE](../methods/re.md#variance-components-variance_method).
 - Two-way RE (two columns in `effects`, balanced panels) reports the number of periods as the value for the second `effects` column in `n_groups`. The second column of `effects` only defines the time effect: the Driscoll-Kraay time column is the separate `dk_time` option.
@@ -78,15 +78,14 @@ With `cov_type="cluster"`, the structural equation needs more clusters than its 
 
 ## Overidentification tests
 
-`overid_statistic` and `overid_p_value` (chi-squared with `overid_df` degrees of freedom, `None` when just-identified) are computed differently for the two estimators.
+`overid_statistic` and `overid_p_value` (chi-squared with `overid_df` degrees of freedom, `None` when just identified) are computed differently by each estimator.
 
 - **2SLS reports the Sargan test.** It is always computed under homoskedasticity and does not depend on `cov_type`.
 - **GMM reports Hansen's J test.** It uses the weight matrix of the point estimate and therefore follows `gmm_weight_type`.
 - **FEIV reports the Sargan test of the within-transformed data**, with the error variance `e'e / (n - n_absorbed)`, where `n_absorbed` is the number of absorbed fixed-effect parameters. It does not depend on `cov_type`. `fixest` divides by `n` instead, so its statistic is larger by the factor `n / (n - n_absorbed)` (see [Definitions: FEIV](../methods/fe_iv.md#differences-from-fixest)).
+- **FEGMM reports Hansen's J test of the within-transformed data.** It follows `gmm_weight_type` (cluster by default; `gmm_type="one_step"` uses the classical covariance of the moment conditions, as the classical weight does). Only the classical weight uses the error variance `e'e / (n - n_absorbed)`; the robust and cluster weights are not rescaled, so with a robust weight on a short panel the test over-rejects (see [Definitions: FEGMM](../methods/fe_gmm.md#overidentification-overid_statistic)).
 
-- **FEGMM reports Hansen's J test of the within-transformed data.** It follows `gmm_weight_type` (cluster by default). Only the classical weight uses the error variance `e'e / (n - n_absorbed)`; the robust and cluster weights are not rescaled, so with a robust weight on a short panel the test over-rejects (see [Definitions: FEGMM](../methods/fe_gmm.md#overidentification-overid_statistic)).
-
-If you need an overidentification test that is robust to heteroskedasticity or clustering, use `estimator="gmm"` with a robust or cluster `gmm_weight_type` and read Hansen's J. To test whether a subset of the instruments is valid, use `c_stat(instruments=...)` (see [below](#exogeneity-and-instrument-validity-c-statistic)).
+If you need an overidentification test that is robust to heteroskedasticity or clustering, use `estimator="gmm"` of IV, or [FEGMM](../usage/fe_gmm.md) for panel data with fixed effects, with a robust or cluster `gmm_weight_type`, and read Hansen's J. To test whether a subset of the instruments is valid, use `c_stat(instruments=...)` (see [below](#exogeneity-and-instrument-validity-c-statistic)).
 
 ## Endogeneity test (Wu-Hausman)
 
@@ -96,7 +95,7 @@ For GMM, which has no Wu-Hausman test, use [`c_stat()`](#exogeneity-and-instrume
 
 ## Exogeneity and instrument validity (C statistic)
 
-`c_stat(variables=..., instruments=...)` is a post-estimation method, not computed by `fit()`, and works for both estimators. It tests the null that the named endogenous variables are exogenous and the named excluded instruments are valid, as the difference of two Hansen J statistics (chi-squared; `df` is the number of tested variables plus tested instruments). The remaining instruments are taken as valid. Use it for GMM, which has no Wu-Hausman test; to test a subset of the instruments, which the overall Sargan or Hansen J statistic cannot do; or for a heteroskedasticity- or cluster-robust version of the exogeneity test.
+`c_stat(variables=..., instruments=...)` is a post-estimation method, not computed by `fit()`, and works for IV (both estimators) and FEGMM. It tests the null that the named endogenous variables are exogenous and the named excluded instruments are valid, as the difference of two Hansen J statistics (chi-squared; `df` is the number of tested variables plus tested instruments). The remaining instruments are taken as valid. Use it for GMM, which has no Wu-Hausman test; to test a subset of the instruments, which the overall Sargan or Hansen J statistic cannot do; or for a heteroskedasticity- or cluster-robust version of the exogeneity test.
 
 The covariance of the moment conditions follows `gmm_weight_type` for two-step and iterated GMM, and the weight of the same kind as `cov_type` for 2SLS and one-step GMM. See [Definitions: IV](../methods/iv.md#exogeneity-and-instrument-validity-post-estimation-c_stat).
 

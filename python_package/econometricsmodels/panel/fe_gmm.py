@@ -38,11 +38,15 @@ class FEGMM:
     Removes the fixed effects by the within transformation and then
     applies GMM to the transformed data, with the endogenous variables
     instrumented by `instruments`. The default is two-step GMM weighted
-    by the cluster-robust covariance of the moment conditions, which is
+    by the cluster-robust covariance of the moment conditions. With more
+    instruments than endogenous variables this is asymptotically
     efficient under arbitrary correlation within the clusters (for
-    example over time within an entity). The `effects` argument works as
-    in `FE`: one column gives one-way effects, two columns give two-way
-    effects, and three to five columns give higher-dimensional effects.
+    example over time within an entity), and with few clusters the
+    estimated weight can be unstable. With as many instruments as
+    endogenous variables the coefficients equal those of `FEIV`. There
+    is no intercept. The `effects` argument works as in `FE`: one column
+    gives one-way effects, two columns give two-way effects, and three
+    to five columns give higher-dimensional effects.
 
     Args:
         data: A polars DataFrame containing the dependent variable, the
@@ -149,16 +153,19 @@ class FEGMM:
                 - `cov_type` is unknown or `"hc0"` (not supported for
                   FEGMM), or `gmm_type` or `gmm_weight_type` is unknown
                   (there is no `"hac"` weight).
-                - `cluster`, `dk_time`, `dk_bandwidth`,
-                  `gmm_weight_type`, `gmm_max_iter`, `gmm_tol` or
-                  `raise_on_non_convergence` is given with a `cov_type`
-                  or `gmm_type` that does not use it, or
+                - An option is given where nothing uses it, for
+                  example `dk_time` without `cov_type="dk"`,
+                  `gmm_max_iter` without `gmm_type="iterated"`, or
+                  `cluster` when neither `cov_type` nor
+                  `gmm_weight_type` is `"cluster"`; or
                   `cov_type="dk"` is requested without `dk_time`.
                 - A group of a column in `effects` has a single
                   observation.
-                - The cluster weight is used with fewer clusters than the
-                  moment conditions (the columns of `x_exog` and
-                  `instruments`).
+                - The cluster weight is used with too few clusters: with
+                  `l` moment conditions (the columns of `x_exog` and
+                  `instruments`), the number of clusters must be at
+                  least `l` when the model is overidentified, and more
+                  than `l` when it is just identified.
 
             ComputationError: A problem was detected during
                 computation (e.g. a singular within-transformed design
@@ -205,7 +212,7 @@ class FEGMMResults:
     - Overall Wald test: `wald_statistic`, `wald_p_value`,
       `wald_dist`, `wald_df_num`, `wald_df_denom`.
     - Overidentification (Hansen J): `overid_statistic`,
-      `overid_p_value`, `overid_df`.
+      `overid_p_value`, `overid_df` (all `None` when just identified).
     - Estimation method actually used: `gmm_type`, `gmm_weight_type`,
       `n_iter`, `converged`.
     - Fit: `r_squared_within`, `r_squared_between`,
@@ -358,7 +365,7 @@ class FEGMMResults:
     ) -> Literal["classical", "robust", "cluster"] | None:
         """Weight matrix actually used for the point estimate (normalized
         to lowercase): `"classical"`, `"robust"` or `"cluster"`. `None`
-        for `gmm_type="one_step"`, which does not use a weight type."""
+        for `gmm_type="one_step"`, which has no weight type."""
         return self._raw.gmm_weight_type
 
     @property
@@ -435,12 +442,15 @@ class FEGMMResults:
         variance is `e'e / (n - n_absorbed)` (`n_absorbed` is the number
         of absorbed fixed-effect parameters); the robust and cluster
         weights are not adjusted. The cluster weight needs no adjustment
-        when the clusters contain the entities (the entities themselves,
-        or a coarser column), but not when they cross the entities (for
-        example the time periods), and the robust weight makes the test
-        over-reject on a short panel.
+        when every column of `effects` is nested in the clusters (for
+        example one-way effects clustered by the entity, or by a coarser
+        column). With an effect that crosses the clusters, such as a
+        time effect in a two-way model, that holds only approximately,
+        and not at all for clusters that cross the entities (for example
+        the time periods). The robust weight makes the test over-reject
+        on a short panel.
 
-        `None` when just-identified (`len(instruments) ==
+        `None` when just identified (`len(instruments) ==
         len(x_endog)`, degrees of freedom 0).
         """
         return self._raw.overid_statistic
@@ -498,14 +508,16 @@ class FEGMMResults:
         (grouped by `cluster` for the cluster weight) when `gmm_type` is
         `"two_step"` or `"iterated"`,
         and is the classical one for `gmm_type="one_step"`, which has no
-        weight matrix. It does not depend on `cov_type`, `gmm_max_iter` or
+        weight type. It does not depend on `cov_type`, `gmm_max_iter` or
         `gmm_tol`, and a model fitted with `gmm_type="one_step"` or
         `"iterated"` gets the two-step statistic. As for the Hansen J
         statistic, only the classical weight is adjusted by `n - n_absorbed`
         for the absorbed fixed effects. The cluster weight needs no
-        adjustment when the clusters contain the entities, but not when
-        they cross the entities (for example the time periods), and with a
-        robust weight on a short panel the statistic over-rejects.
+        adjustment when every column of `effects` is nested in the
+        clusters, but only approximately when an effect crosses the
+        clusters and not at all for clusters that cross the entities (for
+        example the time periods), and with a robust weight on a short
+        panel the statistic over-rejects.
 
         This is a post-estimation diagnostic: it is never computed by
         `fit()`. It re-reads the variables from the data passed to

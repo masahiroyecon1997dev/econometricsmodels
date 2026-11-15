@@ -2,12 +2,16 @@
 
 **FEGMM**: **Usage** · [Options and results](../api/fe_gmm.md) · [Definitions](../methods/fe_gmm.md)
 
-`FEGMM` estimates a panel regression with fixed effects in which some regressors are endogenous, by the generalized method of moments (fixed effects GMM). It removes the fixed effects as [FE](fe.md) does and then applies GMM to the within-transformed data, so it fits the same model as [FEIV](fe_iv.md) but weights the moment conditions by an estimate of their covariance. With more instruments than endogenous regressors that is more efficient than two-stage least squares when the errors are correlated within the clusters, and it gives the Hansen J test of the overidentifying restrictions that is robust to that correlation. The arguments are those of [FEIV](fe_iv.md):
+`FEGMM` estimates a panel regression with fixed effects in which some regressors are endogenous, by the generalized method of moments (fixed effects GMM). It removes the fixed effects as [FE](fe.md) does and then applies GMM to the within-transformed data, so it fits the same model as [FEIV](fe_iv.md) but weights the moment conditions by an estimate of their covariance.
+
+Use `FEGMM` when you have more instruments than endogenous regressors and want a Hansen J test and a C statistic that allow for correlation within the clusters. With more instruments than endogenous regressors the GMM estimate is asymptotically more efficient than two-stage least squares, under heteroskedasticity or correlation within the clusters, but with few clusters the estimated weight matrix can be unstable. When the model is just identified, `FEGMM` and [FEIV](fe_iv.md) give the same coefficients. Use `FEIV` when you want the first-stage regressions, the weak-instrument diagnostics or the recovered fixed effects, which `FEGMM` does not have.
+
+The arguments are those of [FEIV](fe_iv.md):
 
 - `x_exog`: exogenous regressors. May be empty.
 - `x_endog`: endogenous regressors. At least one.
 - `instruments`: the excluded instruments, with at least as many as `x_endog`. An instrument must vary within the groups of `effects`: one that is constant within every group of a column in `effects` has no variation left after the within transformation, and `fit()` raises a `ValidationError`.
-- `effects`: a list of one to five columns that define the fixed effects, exactly as in [FE](fe.md#two-way-effects). The first column is also the default clustering column.
+- `effects`: a list of one to five columns that define the fixed effects, exactly as in [FE](fe.md#two-way-effects). The first column is also the default cluster column.
 
 ```python
 import polars as pl
@@ -65,14 +69,17 @@ print(result.gmm_type, result.gmm_weight_type)  # two_step cluster
 print(result.overid_statistic, result.overid_p_value)  # Hansen J
 ```
 
-There is no intercept, since the fixed effects absorb it. The defaults differ from [IV](iv.md) in two ways:
+There is no intercept, since the fixed effects absorb it. `gmm_type` defaults to `"two_step"`, as for [IV](iv.md). The defaults of the weight and of the standard errors differ from `IV`:
 
-- **Estimation.** `FEGMMOptions.gmm_type` defaults to `"two_step"` and `gmm_weight_type` to `"cluster"`, with the clusters of `cluster` (by default the first column of `effects`). The cluster weight allows the errors of an entity to be correlated over time, which is the usual situation in a panel: the within transformation even makes the errors of an entity sum to zero. `"robust"` assumes they are uncorrelated and `"classical"` that they are also homoskedastic; there is no `"hac"` weight. `gmm_type="one_step"` uses no weight matrix and gives the two-stage least squares point estimate; `"iterated"` repeats the second step until the coefficients converge.
+- **Weight matrix.** `gmm_weight_type` defaults to `"cluster"`, with the clusters of `cluster` (by default the first column of `effects`). The cluster weight allows the errors of an entity to be correlated over time, which is the usual situation in a panel: the within transformation even makes the errors of an entity sum to zero. Keep it unless you have a reason not to, and prefer it when the panel is short. `"robust"` assumes the errors are uncorrelated and `"classical"` that they are also homoskedastic; there is no `"hac"` weight.
+- **`gmm_type`.** `"one_step"` uses the fixed weight \((\tilde Z'\tilde Z)^{-1}\) and has no weight type; it gives the two-stage least squares point estimate. `"two_step"` (the default) re-estimates once with the estimated weight, and `"iterated"` repeats that until the coefficients converge.
 - **Standard errors.** `cov_type` defaults to `"cluster"` as in [FEIV](fe_iv.md) and is chosen independently of the weight. `"hc0"` is not available. The tests use the normal distribution and the overall Wald test the chi-squared distribution, not the t and F distributions of [FEIV](fe_iv.md).
 
+To iterate the weight until the coefficients converge, and use heteroskedasticity-robust standard errors:
+
 ```python
-options = FEGMMOptions(gmm_weight_type="robust", cov_type="hc1")
-robust = FEGMM(
+options = FEGMMOptions(gmm_type="iterated", cov_type="hc1")
+iterated = FEGMM(
     panel,
     y="y",
     x_exog=["x1"],
@@ -81,7 +88,8 @@ robust = FEGMM(
     effects=["firm"],
     options=options,
 ).fit()
-print(robust.gmm_weight_type, robust.cov_type)  # robust hc1
+print(iterated.gmm_type, iterated.gmm_weight_type, iterated.cov_type)  # iterated cluster hc1
+print(iterated.n_iter, iterated.converged)
 ```
 
 See [Options and results](../api/fe_gmm.md) for the full list of options.
@@ -109,11 +117,13 @@ print(validity.statistic, validity.p_value)
 print(validity.j_with_tested, validity.j_without_tested)
 ```
 
+A small p-value rejects the null that the tested moment conditions are valid: for `variables` that the tested regressors are exogenous, for `instruments` that the tested instruments are uncorrelated with the error (given that the remaining instruments are valid). `df` is the number of tested variables plus the number of tested instruments.
+
 It returns a `CStatisticResult`, the same type as [`IVResults.c_stat()`](iv.md#exogeneity-and-instrument-validity-post-estimation), and is read in the same way. Two things are specific to `FEGMM`. First, the covariance of the moment conditions follows `gmm_weight_type` (the classical one for `gmm_type="one_step"`), not `cov_type`. Second, with the cluster weight the statistic needs at least as many clusters as the columns of the full instrument set (the exogenous regressors, the tested endogenous variables and all excluded instruments). `fit()` checks the clusters needed for the weight of the fit, and a shortfall raises a `ValidationError`. `c_stat()` can only find out while computing, and raises a `ComputationError`.
 
 ## What `FEGMM` does not have
 
-`FEGMM` has no first-stage regressions, no weak-instrument diagnostics (`weak_instrument_f_statistics`, `cragg_donald()`, `kleibergen_paap()`, `effective_f()`), no Wu-Hausman test and no `fixed_effects()`; use `c_stat(variables=...)` for the exogeneity of a regressor. Like `FE` it has no `predict()`, `augment()` or `summary()`. The structural R² statistics (`r_squared_within`, `r_squared_between`, `r_squared_overall`) are computed from the structural residuals, so they can be low or negative.
+`FEGMM` has no first-stage regressions, no weak-instrument diagnostics (`weak_instrument_f_statistics`, `cragg_donald()`, `kleibergen_paap()`, `effective_f()`), no Wu-Hausman test and no `fixed_effects()`; use `c_stat(variables=...)` for the exogeneity of a regressor. To see the first stage and the weak-instrument diagnostics of the same model, fit it with [FEIV](fe_iv.md) using the same `x_exog`, `x_endog`, `instruments` and `effects`: the first-stage coefficients are the same, because both estimators use the same within-transformed variables. Like `FE` it has no `predict()`, `augment()` or `summary()`. The structural R² statistics (`r_squared_within`, `r_squared_between`, `r_squared_overall`) are computed from the structural residuals, so they can be low or negative.
 
 ## Covariance matrix of the coefficients
 

@@ -77,7 +77,6 @@ FEIV（FE-2SLS）・FEGMMの実装・テスト・公開docsが一通り終わっ
   理由は`docs/spec/inference-conventions.md`6章）。ルートCLAUDE.md 3章の`shared/`の列挙の更新（`instrumental_variables.rs`・`gmm.rs`・`gmm_iteration.rs`・`gmm_weight.rs`・`gmm_c_statistic.rs`・
   `weak_instruments.rs`・`stock_yogo.rs`・`kleibergen_paap.rs`・`score_covariance.rs`・`effective_f.rs`・`noncentral_chi_squared.rs`・`alternating_projections`が載っていない）。編集は承認が要る。
 - READMEの「Attribution and Rights」注意書き（文面と連絡先の経路の承認待ち）。フィクスチャのデータ（Wooldridge等）のライセンス表記がREADME・ドキュメントに揃っているかの確認。
-- `docs/planning/specs/mop-oracle-spec.md`が履歴に入っていることの扱い（履歴の書き換えはしない方針を提案済み）。
 
 ## G. 運用メモ
 

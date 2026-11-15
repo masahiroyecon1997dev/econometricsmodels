@@ -22,9 +22,11 @@
 //!
 //! **列を揃えた`R`でのランク判定と条件数のガード**: [`OrthonormalDesign::new_checked`]は、`R`の
 //! 列を単位ノルムに揃えた行列（`R`の列ノルムは`X`の列ノルムに等しい）に対して、(1) 列ピボットQRの
-//! ランク判定（相対閾値`k·ε`）、(2) 条件数が[`MAX_EQUILIBRATED_CONDITION`]以内であることの
-//! 確認、をこの順に行う。ランク落ちは[`RankDeficient::Columns`]、条件数の超過は
-//! [`RankDeficient::GramMatrix`]で弾く。QRなら`cond(X)`が`1e8`を超える設計も推定できてしまうが、
+//! ランク判定（相対閾値`k·ε`）、(2) 条件数が[`RANK_DEFICIENT_CONDITION`]以内であることの確認
+//! （超えれば完全な共線とみなす）、(3) [`MAX_EQUILIBRATED_CONDITION`]以内であることの確認、を
+//! この順に行う。ランク落ち（(1)と(2)）は[`RankDeficient::Columns`]、(3)の超過は
+//! [`RankDeficient::GramMatrix`]で弾く。(2)があるのは、完全な共線の条件数が`1e14`〜`1e16`で
+//! (1)の閾値の近くに来て、(1)だけではどちらに転ぶか決まらないため（列名つきの報告をそろえる）。QRなら`cond(X)`が`1e8`を超える設計も推定できてしまうが、
 //! `X'X`のCholeskyで止めていた従来の受け入れ範囲（列のスケールによらず、列を揃えた`cond(X)`で
 //! 約`5e7`）を、手法によらず保つため。**生の`R`でなく列を揃えた行列に対して判定する**のは、列の
 //! 単位で合否が動かないようにするため（Choleskyの成否は列の一様な拡大縮小に依らない。生の`R`の
@@ -40,6 +42,13 @@ use super::linear_algebra::{RankDeficient, checked_col_piv_qr};
 /// 成功・9.2e7から失敗）の間に置いた暫定値で、Rの`lm`の許容`1e-7`とも同程度。この値を緩める
 /// のは、受け入れる設計が増えるだけで破壊的でない（厳しくするのは破壊的）。
 pub(crate) const MAX_EQUILIBRATED_CONDITION: f64 = 5.0e7;
+
+/// 列を単位ノルムに揃えた設計行列の条件数がこれを超えると、完全な共線（数値的なランク落ち）として
+/// [`RankDeficient::Columns`]で弾く（列名を伝えられる）。倍精度では係数に有効数字が残らず、QRが
+/// 崩れ始める範囲（`1e12`あたり）。完全な共線（ダミー変数トラップ・重複列）の条件数は
+/// `1e14`〜`1e16`で、列ピボットQRのランク判定（相対`k·ε`）はその境界でどちらにも転びうるため、
+/// この上限でランク落ちの報告をそろえる。`MAX_EQUILIBRATED_CONDITION`との間は[`RankDeficient::GramMatrix`]。
+pub(crate) const RANK_DEFICIENT_CONDITION: f64 = 1.0e12;
 
 /// 全体Wald検定に使う直交座標の組。推定量が保持し、末尾`q`列の検定にも使う。
 #[derive(Debug, Clone)]
@@ -72,12 +81,14 @@ impl OrthonormalDesign {
     }
 
     /// [`Self::new`]に加えて、列を単位ノルムに揃えた`R`（k×k）の列ピボットQRでランク落ちを判定し
-    /// （`checked_col_piv_qr`と同じ相対閾値）、その条件数が[`MAX_EQUILIBRATED_CONDITION`]以内で
-    /// あることを確かめる。`Q`を作る前に判定するので、弾く入力では`Q`を作らない。
+    /// （`checked_col_piv_qr`と同じ相対閾値）、その条件数が[`RANK_DEFICIENT_CONDITION`]・
+    /// [`MAX_EQUILIBRATED_CONDITION`]以内であることを確かめる。`Q`を作る前に判定するので、弾く入力では`Q`を作らない。
     ///
     /// # Errors
-    /// `x`がフルカラムランクでないとき[`RankDeficient::Columns`]。フルランクでも、列を揃えた
-    /// 条件数が上限を超える（または特異値分解が収束しない）とき[`RankDeficient::GramMatrix`]。
+    /// `x`がフルカラムランクでないとき、または列を揃えた条件数が[`RANK_DEFICIENT_CONDITION`]を
+    /// 超える（完全な共線とみなす）とき[`RankDeficient::Columns`]。それ以下でも
+    /// [`MAX_EQUILIBRATED_CONDITION`]を超える（または特異値分解が収束しない）とき
+    /// [`RankDeficient::GramMatrix`]。
     pub(crate) fn new_checked(x: &Mat<f64>) -> Result<Self, RankDeficient> {
         Self::decompose(x, true)
     }
@@ -95,16 +106,21 @@ impl OrthonormalDesign {
         }
         let qr = x.qr();
         let r = qr.thin_R().to_owned();
-        if (0..k).any(|i| {
-            let diagonal = *r.get(i, i);
-            !diagonal.is_finite() || diagonal == 0.0
-        }) {
+        // `R`に非有限の要素がある（入力のNaN・無限大や、オーバーフロー）か、対角が厳密に0なら、
+        // 列のランク落ちとして弾く（後段の等化・特異値分解は有限な`R`を前提にする）。
+        let degenerate =
+            (0..k).any(|j| (0..=j).any(|i| !r.get(i, j).is_finite()) || *r.get(j, j) == 0.0);
+        if degenerate {
             return Err(RankDeficient::Columns);
         }
         if check_rank {
             let equilibrated = equilibrate_columns(&r);
             checked_col_piv_qr(&equilibrated)?;
-            if condition_number(&equilibrated) > MAX_EQUILIBRATED_CONDITION {
+            let condition = condition_number(&equilibrated);
+            if condition > RANK_DEFICIENT_CONDITION {
+                return Err(RankDeficient::Columns);
+            }
+            if condition > MAX_EQUILIBRATED_CONDITION {
                 return Err(RankDeficient::GramMatrix);
             }
         }
@@ -159,22 +175,26 @@ impl OrthonormalDesign {
 
 /// 上三角`r`（k×k、`X = QR`の`R`）の列を単位ノルムに揃える。`R`の列ノルムは`X`の列ノルムに
 /// 等しいので、`X`の列を揃えた行列と同じ特異値を持つ。列のノルムは、最大の成分で割ってから
-/// 二乗和を取り、極端なスケールでのオーバーフロー・アンダーフローを避ける。前提: 各列に0でない
-/// 成分がある（`R`の対角が厳密に0・非有限の入力は呼び出し側が先に弾く）。
+/// 二乗和を取り、極端なスケールでのオーバーフロー・アンダーフローを避ける（ノルムそのもの
+/// `largest * root`は作らず、`(r / largest) / root`で割る。`largest`が`f64::MAX`の近くでも
+/// 溢れない）。前提: `R`は有限で、各列に0でない成分がある（呼び出し側が先に弾く）。
 fn equilibrate_columns(r: &Mat<f64>) -> Mat<f64> {
     let k = r.ncols();
-    let norms: Vec<f64> = (0..k)
+    let scales: Vec<(f64, f64)> = (0..k)
         .map(|j| {
             let largest = (0..=j).map(|i| r.get(i, j).abs()).fold(0.0_f64, f64::max);
             let scaled_sum: f64 = (0..=j).map(|i| (*r.get(i, j) / largest).powi(2)).sum();
-            largest * scaled_sum.sqrt()
+            (largest, scaled_sum.sqrt())
         })
         .collect();
-    Mat::from_fn(
-        k,
-        k,
-        |i, j| if i <= j { *r.get(i, j) / norms[j] } else { 0.0 },
-    )
+    Mat::from_fn(k, k, |i, j| {
+        let (largest, root) = scales[j];
+        if i <= j {
+            *r.get(i, j) / largest / root
+        } else {
+            0.0
+        }
+    })
 }
 
 /// 行列（k×k、`k ≥ 1`）の条件数（最大特異値/最小特異値）。特異値分解が失敗したとき、最小特異値が
@@ -183,10 +203,10 @@ fn condition_number(matrix: &Mat<f64>) -> f64 {
     let Ok(singular_values) = matrix.singular_values() else {
         return f64::INFINITY;
     };
-    let (largest, smallest) = (
-        singular_values[0],
-        singular_values[singular_values.len() - 1],
-    );
+    let (Some(&largest), Some(&smallest)) = (singular_values.first(), singular_values.last())
+    else {
+        return f64::INFINITY;
+    };
     let condition = largest / smallest;
     if smallest > 0.0 && condition.is_finite() {
         condition
@@ -427,11 +447,33 @@ mod tests {
     }
 
     #[test]
+    fn rejects_a_design_whose_r_is_not_finite() {
+        // 列のノルムがオーバーフローして`R`に無限大が入る（対角だけでなく上三角の要素も見る）。
+        let overflow = Mat::from_fn(4, 2, |i, j| if j == 0 { (i + 1) as f64 } else { 1e308 });
+        assert_eq!(
+            OrthonormalDesign::new(&overflow).unwrap_err(),
+            RankDeficient::Columns
+        );
+        let with_nan = Mat::from_fn(4, 2, |i, j| {
+            if i == 1 && j == 1 {
+                f64::NAN
+            } else {
+                1.0 + i as f64
+            }
+        });
+        assert_eq!(
+            OrthonormalDesign::new_checked(&with_nan).unwrap_err(),
+            RankDeficient::Columns
+        );
+    }
+
+    #[test]
     fn accepts_a_design_without_columns() {
         let design = OrthonormalDesign::new(&Mat::<f64>::zeros(5, 0)).unwrap();
         assert_eq!(design.q().ncols(), 0);
         assert_eq!(design.identity().nrows(), 0);
     }
+
     /// 切片・`x1`・`x2 = x1 + eps·ノイズ`の設計（`near_collinear`と同じ列）で、傾きの2列だけを
     /// `scale`倍する。
     fn near_collinear_design(eps: f64, scale: f64) -> Mat<f64> {
@@ -456,6 +498,35 @@ mod tests {
         // 直交する列は、列のスケールが違っても条件数1。
         let orthogonal = Mat::from_fn(2, 2, |i, j| if i == j { [1e6, 1e-6][j] } else { 0.0 });
         assert_relative(equilibrated_condition(&orthogonal), 1.0, 1e-12);
+    }
+
+    #[test]
+    fn new_checked_reports_exact_collinearity_as_columns_not_as_the_condition_guard() {
+        // ダミー変数トラップ（ダミーの和が切片）・重複列・和の列。条件数は1e14〜1e16で、列ピボットQRの
+        // ランク判定（相対`k·ε`）の境界に来るため、条件数の上限（`RANK_DEFICIENT_CONDITION`）でも
+        // 列のランク落ちとして弾く。大きなnでも同じ。
+        for n in [1_000_usize, 100_000] {
+            let group = |i: usize| (i * 7 + i / 3) % 4;
+            let wave = |i: usize| ((i * 37 % 101) as f64 - 50.0) / 7.0;
+            let trap = Mat::from_fn(n, 6, |i, j| match j {
+                0 => 1.0,
+                1 => wave(i),
+                _ => f64::from(u8::from(group(i) == j - 2)),
+            });
+            let duplicated = Mat::from_fn(n, 3, |i, j| if j == 0 { 1.0 } else { wave(i) });
+            let sum = Mat::from_fn(n, 3, |i, j| match j {
+                0 => 1.0,
+                1 => wave(i),
+                _ => wave(i) + 1.0,
+            });
+            for (label, x) in [("trap", trap), ("duplicate", duplicated), ("sum", sum)] {
+                assert_eq!(
+                    OrthonormalDesign::new_checked(&x).unwrap_err(),
+                    RankDeficient::Columns,
+                    "n={n} {label}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -502,7 +573,7 @@ mod tests {
     #[test]
     fn equilibrate_columns_survives_extreme_magnitudes() {
         // 二乗和がオーバーフロー（1e200²）・アンダーフロー（1e-200²）する大きさでも、列は単位ノルムに揃う。
-        for magnitude in [1e200, 1e-200] {
+        for magnitude in [1e200, 1e-200, f64::MAX / 2.0] {
             let r = Mat::from_fn(2, 2, |i, j| match (i, j) {
                 (0, 0) => magnitude,
                 (0, 1) => 0.5 * magnitude,

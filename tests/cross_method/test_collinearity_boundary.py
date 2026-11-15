@@ -3,9 +3,10 @@
 設計行列は、列を単位ノルムに揃えた条件数が約`5e7`を超えると`MATRIX_NEAR_SINGULAR`
 （`matrix="DESIGN_GRAM"`）で止める（QRなら推定できても、残差が非ゼロのとき係数が静かに大きく
 ずれるため。`engine/src/shared/orthonormal.rs`の`MAX_EQUILIBRATED_CONDITION`）。
-境界は手法に依らず、列の単位にも依らない。条件数が約`1e12`を超えると、QRが崩れて
-`DESIGN_MATRIX_SINGULAR`（列名つき）になることがある（どちらも誤りではなく、内部エラーに
-ならないことを固定する）。
+境界は手法に依らず、列の単位にも依らない。条件数が約`1e12`を超えると、完全な共線として
+`DESIGN_MATRIX_SINGULAR`（列名つき）で止める（重複列・ダミー変数トラップは条件数が`1e14`〜
+`1e16`で、nが大きくてもこちらになる。`1e12`付近は列の順序で境が動くので、どちらかであって
+内部エラーにならないことを固定する）。
 """
 
 from __future__ import annotations
@@ -95,7 +96,7 @@ _OUTSIDE = [1e-9, 1e-10, 1e-11]
 # 約8%、他は約30%）。条件数の計算誤差は約1e-9で、他のOSでも合否は変わらない。
 _NEAR_INSIDE = 5e-8
 _NEAR_OUTSIDE = 3e-8
-# 条件数が約1e12を超える範囲（列の順序によって、ランク落ちか悪条件かが変わる）。
+# 条件数が約1e12を超える範囲（完全な共線として扱う。1e12付近は条件数の見積もりの揺れで境が動く）。
 _FAR_BEYOND = [1e-12, 1e-13, 1e-14]
 
 
@@ -119,7 +120,7 @@ def test_a_design_outside_the_limit_raises_near_singular_in_every_method(
 def test_a_design_far_beyond_the_limit_raises_a_design_error_not_an_internal_one(
     method, eps
 ):
-    """条件数が約1e12を超えると、QRが崩れて`DESIGN_MATRIX_SINGULAR`になることがある。
+    """条件数が約1e12を超えると、完全な共線として`DESIGN_MATRIX_SINGULAR`になる（境の近くは別。
     どちらの場合も、`INTERNAL_ERROR`（弱操作変数の部分F検定の制限モデルの失敗など）には
     ならない。"""
     with raises_one_of_errors(
@@ -283,7 +284,7 @@ def test_almost_collinear_fitted_endogenous_regressors_are_estimated(
 
 
 @pytest.mark.parametrize("method", ["iv", "fe_iv"])
-@pytest.mark.parametrize("eps", [1e-8, 1e-10, 1e-11])
+@pytest.mark.parametrize("eps", [1e-8, 1e-10])
 def test_almost_collinear_fitted_endogenous_regressors_stop_in_the_second_stage(
     method, eps
 ):
@@ -295,3 +296,61 @@ def test_almost_collinear_fitted_endogenous_regressors_stop_in_the_second_stage(
         stage="SECOND_STAGE",
     ):
         _fit_iv_side(method, _instrument_data(eps, "dd"), ["d1", "d2"])
+
+
+@pytest.mark.parametrize("method", ["iv", "fe_iv"])
+def test_fitted_endogenous_regressors_far_beyond_the_limit_stop_in_the_second_stage(
+    method,
+):
+    with raises_one_of_errors(
+        {
+            ErrorCode.MATRIX_NEAR_SINGULAR: {
+                "matrix": "DESIGN_GRAM",
+                "stage": "SECOND_STAGE",
+            },
+            ErrorCode.DESIGN_MATRIX_SINGULAR: {"stage": "SECOND_STAGE"},
+        }
+    ):
+        _fit_iv_side(method, _instrument_data(1e-13, "dd"), ["d1", "d2"])
+
+
+# ── 完全な共線は、nが大きくても列名つきで報告する ─────────────────────────
+
+
+def _exactly_collinear(kind: str, n: int, seed: int) -> pl.DataFrame:
+    rng = np.random.default_rng(seed)
+    a = rng.normal(size=n) * rng.choice([1.0, 1e3, 1e-3])
+    b = rng.normal(size=n)
+    frame: dict[str, np.ndarray] = {"y": rng.normal(size=n), "a": a}
+    if kind == "duplicate":
+        frame |= {"b": b, "c": a}
+    elif kind == "sum":
+        frame |= {"b": b, "c": a + b}
+    else:
+        group = rng.integers(0, 4, size=n)
+        frame |= {f"d{j}": (group == j) * 1.0 for j in range(4)}
+    return pl.DataFrame(frame)
+
+
+_EXPECTED_COLUMNS = {
+    "duplicate": ["a", "c"],
+    "sum": ["a", "b", "c"],
+    "dummy_trap": ["const", "d0", "d1", "d2", "d3"],
+}
+
+
+@pytest.mark.parametrize("n", [1_000, 100_000, 1_000_000])
+@pytest.mark.parametrize("seed", range(3))
+@pytest.mark.parametrize("kind", list(_EXPECTED_COLUMNS))
+def test_exact_collinearity_is_reported_with_the_columns_at_any_sample_size(
+    kind, seed, n
+):
+    """重複列・和の列・ダミー変数トラップ（ダミーの和が切片）は、列を揃えた条件数が`1e14`〜
+    `1e16`でランク判定の閾値の近くに来る。条件数のガードではなく、列名つきの
+    `DESIGN_MATRIX_SINGULAR`で報告する（`DESIGN_GRAM`には名前が無く、原因が分からない）。"""
+    df = _exactly_collinear(kind, n, seed)
+    x = [c for c in df.columns if c != "y"]
+    with raises_error(
+        ErrorCode.DESIGN_MATRIX_SINGULAR, columns=_EXPECTED_COLUMNS[kind]
+    ):
+        OLS(df, "y", x).fit()

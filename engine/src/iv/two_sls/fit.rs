@@ -80,7 +80,6 @@ pub(super) fn fit_two_sls(
         .iter()
         .map(|(_, estimator)| estimator.fitted_values())
         .collect();
-    let x_structural = hcat(input.x_exog(), input.x_endog());
     let k_exog = input.x_exog().ncols();
     let x_hat = Mat::from_fn(n, k_exog + input.k_endog(), |i, j| {
         if j < k_exog {
@@ -103,6 +102,7 @@ pub(super) fn fit_two_sls(
         })?;
     // `Q`ができたので、`X̂`は共分散の計算の間も持たない（`X`も点推定の後は使わない）。
     drop(x_hat);
+    let x_structural = hcat(input.x_exog(), input.x_endog());
     let TwoSlsPointEstimate {
         params: beta,
         residuals,

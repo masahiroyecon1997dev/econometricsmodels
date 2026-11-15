@@ -136,7 +136,7 @@ REの最終回帰と、Hausmanのcluster・DK経路は、`fit_auxiliary`（QR 1�
 6. **境界テストの整理**（`test_collinearity_boundary.py`）: RE・FEは設計行列そのものでなくwithin/準偏差化後で判定されるので、境界がずれる（RE 4.51e-8。`_NEAR_INSIDE = 5e-8`の余裕がREだけ約11%、他は約35%。docstringの「全手法で1.2〜1.8倍」はREに当てはまらない）。共線な対の片方だけを1e±6・1e±12倍するケース、単位を変えても統計量が変わらないこと、WLSのhacの再パラメータ化を足す。再パラメータ化のオラクルのdocstring「丸めを増やさない」はOLS・IVだけに当てはまる（FE・RE・FE-IVは個体平均の丸めで約1e-9の摂動。許容誤差1e-7は妥当）。
 7. **`g = q+1`のクラスターのテストの置き換え**（`tests/cross_method/test_unit_invariance.py:148`・`engine/src/linear/ols/cov_params/tests/cluster.rs:251`）: 現状のデータは共分散の厳密な行列式が+7e-16で厳密には特異でなく、合否が丸め誤差で決まる（他OSで保証されない）。レビューが検証した置き換え: **OLSの残差が4クラスターのうち厳密に2つにしか乗らない設計**（`g=4 > q=3`で事前検証は通る）。`x1, x2, x3`を乱数で作り、クラスター0・1の行に制限した`X'`の零空間の2本の基底ベクトルを取り、`y = Xβ + r`とする。すると`M̃`のランクが高々1で、残りの固有値は約1e-32（閾値より10桁以上小さい）。Pythonのseed 0〜7の8件すべてで`MATRIX_NEAR_SINGULAR`（`matrix=COEFFICIENT_COVARIANCE`）が出た。Rust側は整数データと整数の`r`で`y`をf64で厳密にする。これでPythonから再現できる唯一の`COEFFICIENT_COVARIANCE`の経路が堅牢に残る（`tests/support/_errors.py`のコメント・`validation.md`が主張している）。段階単位の`overall_f_test`の単体テストは残す。
 
-### 6c: Rustの細部（nice to have）
+### 6c（実装・検証中。2026-11-15）: Rustの細部。項目10の実測で、完全な共線（ダミー変数トラップはn=1000でも全件、重複列はn=100万で6件中5件）が変更前の`DESIGN_MATRIX_SINGULAR`（列名つき）から`DESIGN_GRAM`に変わる退行を確認（等化した`R`の条件数は1e14〜1e16）。ユーザーの承認で、条件数が`RANK_DEFICIENT_CONDITION = 1e12`を超えたら`Columns`にそろえた（`orthonormal.rs`、テストはRustとPython）
 
 8. `decompose`で`R`の全要素が有限という判定を足す（NaN列の扱いが「faerの列ピボットQRがNaNの対角にNaNを残す」ことに依存しないように。k²で安価）。`equilibrate_columns`の`norm`を`(r/largest)/sqrt(sum)`の形に（`largest`が`f64::MAX`近傍でのオーバーフロー回避）。`condition_number`の`singular_values[0]`・`[len-1]`を`first()`/`last()`で`INFINITY`に落とす形に。`shared/orthonormal.rs`のテスト間の空行（434-435行付近）。
 9. IV 2SLSで`x_structural`の作成を`new_checked`の後に移す（`iv/two_sls/fit.rs:73-80`。FE-IVと同じ方針で、`new_checked`中のピークをn×k分減らす）。
